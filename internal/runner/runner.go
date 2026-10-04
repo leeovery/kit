@@ -75,6 +75,21 @@ type Runner interface {
 	Run(ctx context.Context, cmd Command) (Result, error)
 }
 
+// Finder is a runner that can say whether a program is installed, without
+// running it.
+type Finder interface {
+	Has(name string) bool
+}
+
+// Has reports whether r finds the program name, as it would to run it; a
+// runner that can't say is taken to.
+func Has(r Runner, name string) bool {
+	if f, ok := r.(Finder); ok {
+		return f.Has(name)
+	}
+	return true
+}
+
 // ExitError is the error for a command that ran and exited other than 0.
 type ExitError struct {
 	Command string
@@ -124,6 +139,10 @@ type observed struct {
 	runner  Runner
 	observe Observer
 	now     func() time.Time
+}
+
+func (o observed) Has(name string) bool {
+	return Has(o.runner, name)
 }
 
 func (o observed) Run(ctx context.Context, cmd Command) (Result, error) {

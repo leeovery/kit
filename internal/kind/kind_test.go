@@ -11,6 +11,7 @@ import (
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/kind"
+	"github.com/leeovery/kit/internal/runner"
 )
 
 // fakeKind is a kind whose installed things and other names a test gives,
@@ -48,8 +49,9 @@ func (b *blockingKind) Blocked(_ context.Context, missing map[string]string, _ [
 	return b.reasons, nil
 }
 
-func (*fakeKind) Name() string  { return "brew" }
-func (*fakeKind) Title() string { return "Formulae" }
+func (*fakeKind) Name() string    { return "brew" }
+func (*fakeKind) Title() string   { return "Formulae" }
+func (*fakeKind) Program() string { return "brew" }
 
 func (f *fakeKind) Installed(context.Context) ([]kind.Installed, error) {
 	return f.installed, f.err
@@ -188,5 +190,23 @@ func TestStepAppliesNothingWhenNothingsMissing(t *testing.T) {
 	s := kind.Step(k, declared("jq"))
 	if err := s.Apply(context.Background(), s.Check(context.Background())); err != nil || k.installs != nil {
 		t.Errorf("Apply() = %v, installing %q; want nothing done", err, k.installs)
+	}
+}
+
+// While a kind's program isn't installed, there's nothing to find: fine with
+// nothing declared, deferred with something.
+func TestCompareWithoutTheProgram(t *testing.T) {
+	k := &fakeKind{err: fmt.Errorf("brew: %w on kit's PATH", runner.ErrNotFound)}
+	got := kind.Compare(t.Context(), k, declared())
+	if got.State != check.OK || got.Summary != "none declared; brew isn't installed" {
+		t.Errorf("Compare() with nothing declared = %+v, want ok", got)
+	}
+	got = kind.Compare(t.Context(), k, declared("jq"))
+	if got.State != check.Deferred || got.Reason != "needs brew, which isn't installed" || len(got.Items) != 0 {
+		t.Errorf("Compare() with jq declared = %+v, want it deferred", got)
+	}
+	k.err = errors.New("brew list exited 1")
+	if got := kind.Compare(t.Context(), k, declared()); got.State != check.Failed {
+		t.Errorf("Compare() when listing fails = %+v, want it failed", got)
 	}
 }

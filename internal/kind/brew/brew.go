@@ -124,8 +124,9 @@ func (h *Homebrew) lines(ctx context.Context, args ...string) ([]string, error) 
 
 type formulae struct{ *Homebrew }
 
-func (formulae) Name() string  { return "brew" }
-func (formulae) Title() string { return "Formulae" }
+func (formulae) Name() string    { return "brew" }
+func (formulae) Title() string   { return "Formulae" }
+func (formulae) Program() string { return "brew" }
 
 // Installed lists the formulae installed, by full name, from three listings
 // run side by side: every formula, the leaves (needed by no other), and the
@@ -152,6 +153,11 @@ func (f formulae) Installed(ctx context.Context) ([]kind.Installed, error) {
 		installed = append(installed, kind.Installed{Name: name, Explicit: onRequest[name], Needed: !leaves[name]})
 	}
 	return installed, nil
+}
+
+// NeededBy lists the formulae installed that need name.
+func (f formulae) NeededBy(ctx context.Context, name string) ([]string, error) {
+	return f.Uses(ctx, name)
 }
 
 func (f formulae) Resolve(ctx context.Context, names []string) (map[string]string, error) {
@@ -203,8 +209,21 @@ func lastPart(name string) string {
 
 type casks struct{ *Homebrew }
 
-func (casks) Name() string  { return "cask" }
-func (casks) Title() string { return "Casks" }
+func (casks) Name() string    { return "cask" }
+func (casks) Title() string   { return "Casks" }
+func (casks) Program() string { return "brew" }
+
+// NeedsAdmin finds which of names install through a package or an
+// installer, which ask for an administrator's password.
+func (c casks) NeedsAdmin(ctx context.Context, names []string) ([]string, error) {
+	return c.Homebrew.NeedsAdmin(ctx, names)
+}
+
+// SetAdmin is how the casks find out whether an administrator's password is
+// at hand.
+func (c casks) SetAdmin(held func(ctx context.Context) bool) {
+	c.Admin = held
+}
 
 // Installed lists the casks installed, by full name, each installed for
 // itself.

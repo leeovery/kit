@@ -12,6 +12,7 @@ import (
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/gitrepo"
 	"github.com/leeovery/kit/internal/kind"
+	"github.com/leeovery/kit/internal/runner"
 )
 
 // syncStep names the step that commits and pushes the config's changes.
@@ -105,9 +106,12 @@ func (r *run) kindNamed(name string) (kind.Kind, error) {
 }
 
 // installed reports whether name, as given, is among what k finds
-// installed.
+// installed: nothing is, while k's program isn't.
 func installed(ctx context.Context, k kind.Kind, name string) (bool, error) {
 	all, err := k.Installed(ctx)
+	if errors.Is(err, runner.ErrNotFound) {
+		return false, nil
+	}
 	if err != nil {
 		return false, err
 	}

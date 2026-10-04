@@ -86,6 +86,12 @@ func (e Exec) start(ctx context.Context, program string, cmd Command) (stdout, s
 	return out.Bytes(), errOut.Bytes(), err
 }
 
+// Has reports whether the program name is on Path, or is a path to one.
+func (e Exec) Has(name string) bool {
+	_, err := e.find(name)
+	return err == nil
+}
+
 // find finds the program name on Path, or checks a path to it.
 func (e Exec) find(name string) (string, error) {
 	if strings.Contains(name, "/") {

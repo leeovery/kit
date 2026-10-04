@@ -127,7 +127,7 @@ func (a *app) reconcile(ctx context.Context, r *run, args []string, opts reconci
 // not, each with what can be done about it.
 func (a *app) driftItems(ctx context.Context, r *run) ([]driftItem, error) {
 	var items []driftItem
-	for _, name := range []string{"brew", "cask"} {
+	for _, name := range r.kinds {
 		k := r.kindsByName[name]
 		res := drift.Quieten(kind.Compare(ctx, k, r.lists[name]), r.record, r.now)
 		if res.State == check.Failed {
@@ -372,9 +372,26 @@ func (a *app) carryOut(ctx context.Context, r *run, decisions []decision, note s
 		names[i] = d.item.ID
 		what[i] = d.action + " " + d.item.ID
 	}
+	installs := make(map[string][]string)
+	for _, d := range decisions {
+		if d.action == install {
+			installs[d.item.Kind] = append(installs[d.item.Kind], d.item.Name)
+		}
+	}
+	held, stop := a.holdAdmin(ctx, r, installs)
+	defer stop()
+	waiting := make(map[string]bool)
+	for kindName, names := range installs {
+		for name := range waitingForAdmin(ctx, r, kindName, names, held) {
+			waiting[kindName+":"+name] = true
+		}
+	}
 	c := startChanges(r, names)
 	for _, d := range decisions {
 		c.step(ctx, d.item.ID, func(ctx context.Context) check.Result {
+			if waiting[d.item.ID] {
+				return check.Result{State: check.Failed, Reason: fmt.Sprintf(adminWait, "reconcile")}
+			}
 			return carryOutOne(ctx, r, c, d, note)
 		})
 	}

@@ -66,7 +66,7 @@ func TestWhy(t *testing.T) {
 
 func TestWhyOfSomethingUnknown(t *testing.T) {
 	out, errOut, code := laptopWorld(t).run(t, "why", "nosuch")
-	if out != "" || errOut != "kit: nosuch isn't declared or installed, as a formula or a cask\n" || code != 1 {
+	if out != "" || errOut != "kit: nosuch isn't declared for any Mac, nor installed here\n" || code != 1 {
 		t.Errorf("kit why nosuch printed %q, %q, exit %d", out, errOut, code)
 	}
 }
