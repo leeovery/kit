@@ -1,0 +1,6 @@
+/kit
+/dist/
+*.test
+*.out
+.claude/settings.local.json
+.claude/worktrees/
