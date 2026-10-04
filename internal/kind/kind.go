@@ -72,6 +72,15 @@ type Dependents interface {
 	NeededBy(ctx context.Context, name string) ([]string, error)
 }
 
+// Declarer is a kind declared in a file of its own, outside kit's lists,
+// which kit reads but doesn't write: tmux's plugins, in tmux's config.
+type Declarer interface {
+	// Declared is what the kind's own file declares.
+	Declared() (config.List, error)
+	// HowToDeclare says how to declare, or undeclare, name by hand.
+	HowToDeclare(name string) string
+}
+
 // Keyed is a kind whose things match by part of their names: an App Store
 // app by its id, an npm package without its version.
 type Keyed interface {

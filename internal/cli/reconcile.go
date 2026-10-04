@@ -133,27 +133,36 @@ func (a *app) driftItems(ctx context.Context, r *run) ([]driftItem, error) {
 		if res.State == check.Failed {
 			return nil, fmt.Errorf("couldn't check %s: %s", k.Title(), res.Reason)
 		}
+		_, ownFile := k.(kind.Declarer)
 		for _, it := range res.Items {
-			items = append(items, driftItem{Item: it, Kind: name, Choices: choices(it)})
+			items = append(items, driftItem{Item: it, Kind: name, Choices: choices(it, !ownFile)})
 		}
 	}
 	return items, nil
 }
 
-// choices are what can be done about it.
-func choices(it check.Item) []string {
+// choices are what can be done about it: adopting and undeclaring only
+// where kit writes the kind's declarations.
+func choices(it check.Item, writable bool) []string {
+	var all []string
 	switch it.State {
 	case kind.Extra:
-		return []string{adopt, remove, snooze}
+		all = []string{adopt, remove, snooze}
 	case kind.UnusedDependency:
-		return []string{remove, adopt, snooze}
+		all = []string{remove, adopt, snooze}
 	case kind.Missing:
 		if it.Action == kind.Install {
-			return []string{install, undeclare, snooze}
+			all = []string{install, undeclare, snooze}
+		} else {
+			all = []string{undeclare, snooze}
 		}
-		return []string{undeclare, snooze}
+	default:
+		all = []string{snooze}
 	}
-	return []string{snooze}
+	if writable {
+		return all
+	}
+	return slices.DeleteFunc(all, func(c string) bool { return c == adopt || c == undeclare })
 }
 
 // decide is what the flags say to do with the item id.

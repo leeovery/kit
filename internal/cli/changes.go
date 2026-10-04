@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/leeovery/kit/internal/check"
+	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/gitrepo"
 	"github.com/leeovery/kit/internal/kind"
@@ -103,6 +104,27 @@ func (r *run) kindNamed(name string) (kind.Kind, error) {
 		return nil, fmt.Errorf("no kind named %s: one of %s", name, strings.Join(names, ", "))
 	}
 	return k, nil
+}
+
+// where are the entries declaring name, of the kind called kindName: in its
+// lists, every Mac's; or, for a kind declared in a file of its own, there,
+// matching as the kind matches things.
+func (r *run) where(kindName, name string) ([]config.Entry, error) {
+	k := r.kindsByName[kindName]
+	if _, ok := k.(kind.Declarer); !ok {
+		return r.cfg.Where(kindName, name)
+	}
+	key := func(n string) string { return n }
+	if kd, ok := k.(kind.Keyed); ok {
+		key = kd.Key
+	}
+	var found []config.Entry
+	for _, e := range r.lists[kindName].Entries {
+		if key(e.Name) == key(name) {
+			found = append(found, e)
+		}
+	}
+	return found, nil
 }
 
 // installed reports whether name, as given, is among what k finds

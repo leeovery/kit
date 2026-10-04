@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -22,6 +23,7 @@ import (
 	"github.com/leeovery/kit/internal/kind/ghext"
 	"github.com/leeovery/kit/internal/kind/gotool"
 	"github.com/leeovery/kit/internal/kind/npm"
+	"github.com/leeovery/kit/internal/kind/tmux"
 	"github.com/leeovery/kit/internal/logs"
 	"github.com/leeovery/kit/internal/render"
 	"github.com/leeovery/kit/internal/runner"
@@ -99,10 +101,10 @@ type kindStep struct {
 }
 
 // kindSteps are every kind kit knows, in pipeline order, driven through
-// run, for the user whose home is home. The kinds whose programs are
-// formulae come after the formulae, so a new Mac has them before it needs
-// them.
-func kindSteps(hb *brew.Homebrew, run runner.Runner, home string) []kindStep {
+// run, for the user whose home is home and XDG config folder configHome.
+// The kinds whose programs are formulae come after the formulae, so a new
+// Mac has them before it needs them.
+func kindSteps(hb *brew.Homebrew, run runner.Runner, home, configHome string) []kindStep {
 	return []kindStep{
 		{kind: hb.Formulae(), needs: []string{brew.StepName}},
 		{kind: hb.Casks(), needs: []string{brew.StepName}},
@@ -111,6 +113,7 @@ func kindSteps(hb *brew.Homebrew, run runner.Runner, home string) []kindStep {
 		{kind: composer.New(run), after: []string{"brew"}},
 		{kind: gotool.New(run), after: []string{"brew"}},
 		{kind: ghext.New(run), after: []string{"brew"}},
+		{kind: tmux.New(run, home, configHome), after: []string{"brew"}},
 	}
 }
 
@@ -190,9 +193,9 @@ func (a *app) prepare(command, logName string) (*run, error) {
 		repo: gitrepo.Repo{Dir: dirs.Config, Run: observed}, record: record,
 	}
 	var kinds []engine.Step
-	for _, ks := range kindSteps(hb, observed, home) {
+	for _, ks := range kindSteps(hb, observed, home, a.configHome()) {
 		name := ks.kind.Name()
-		list, err := cfg.List(name, machine)
+		list, unread, err := declared(cfg, ks.kind, machine)
 		if err != nil {
 			_ = face.Close()
 			_ = log.Close()
@@ -200,10 +203,15 @@ func (a *app) prepare(command, logName string) (*run, error) {
 		}
 		r.allKinds = append(r.allKinds, name)
 		r.kindsByName[name], r.lists[name] = ks.kind, list
-		if len(list.Entries) == 0 && !runner.Has(observed, ks.kind.Program()) {
+		if len(list.Entries) == 0 && unread == nil && !runner.Has(observed, ks.kind.Program()) {
 			continue
 		}
 		step := kind.Step(ks.kind, list, ks.needs...)
+		if unread != nil {
+			step.Check = func(context.Context) check.Result {
+				return check.Result{State: check.Failed, Reason: unread.Error()}
+			}
+		}
 		for _, after := range ks.after {
 			if slices.Contains(r.kinds, after) {
 				step.After = append(step.After, after)
@@ -219,6 +227,28 @@ func (a *app) prepare(command, logName string) (*run, error) {
 		return nil, err
 	}
 	return r, nil
+}
+
+// declared is what k declares for the Mac named mac: its lists in cfg, or
+// for a kind declared in a file of its own, what that file says. A file of
+// its own that can't be read is unread: the kind's check fails, saying so,
+// rather than kit.
+func declared(cfg *config.Config, k kind.Kind, mac string) (list config.List, unread, err error) {
+	if d, ok := k.(kind.Declarer); ok {
+		list, unread = d.Declared()
+		return list, unread, nil
+	}
+	list, err = cfg.List(k.Name(), mac)
+	return list, nil, err
+}
+
+// configHome is XDG's config folder, when it's set to an absolute path: ""
+// for the default.
+func (a *app) configHome() string {
+	if dir := a.Getenv("XDG_CONFIG_HOME"); filepath.IsAbs(dir) {
+		return dir
+	}
+	return ""
 }
 
 // quietened is step with its items quiet while their time hasn't come, as
@@ -246,8 +276,9 @@ func (a *app) face() render.Face {
 
 // childEnv is the environment kit runs programs in, never the one it
 // inherited whole: who and where the user is, the SSH agent (git signs and
-// pushes through it), kit's own PATH, and Homebrew kept from updating
-// itself, nagging or colouring its output on its own.
+// pushes through it), kit's own PATH, Homebrew kept from updating itself,
+// nagging or colouring its output on its own, and git from asking for a
+// password mid-run.
 func childEnv(getenv func(string) string, home string, path []string) []string {
 	env := []string{"HOME=" + home, "PATH=" + strings.Join(path, ":")}
 	for _, name := range []string{"USER", "LOGNAME", "SHELL", "TMPDIR", "LANG", "LC_ALL", "SSH_AUTH_SOCK"} {
@@ -255,5 +286,5 @@ func childEnv(getenv func(string) string, home string, path []string) []string {
 			env = append(env, name+"="+v)
 		}
 	}
-	return append(env, "HOMEBREW_NO_AUTO_UPDATE=1", "HOMEBREW_NO_ANALYTICS=1", "HOMEBREW_NO_ENV_HINTS=1", "HOMEBREW_NO_COLOR=1")
+	return append(env, "HOMEBREW_NO_AUTO_UPDATE=1", "HOMEBREW_NO_ANALYTICS=1", "HOMEBREW_NO_ENV_HINTS=1", "HOMEBREW_NO_COLOR=1", "GIT_TERMINAL_PROMPT=0")
 }

@@ -150,7 +150,7 @@ func (a *app) why(ctx context.Context, r *run, name string) error {
 	var found []why
 	for _, kindName := range r.allKinds {
 		k := r.kindsByName[kindName]
-		declared, err := r.cfg.Where(kindName, name)
+		declared, err := r.where(kindName, name)
 		if err != nil {
 			return err
 		}
@@ -166,8 +166,9 @@ func (a *app) why(ctx context.Context, r *run, name string) error {
 			continue
 		}
 		w := why{Kind: kindName, Step: k.Title(), Declared: declared, Installed: isIn}
+		_, ownFile := k.(kind.Declarer)
 		w.ForThisMac = slices.ContainsFunc(declared, func(e config.Entry) bool {
-			return e.File == kindName || e.File == kindName+"."+r.machine
+			return ownFile || e.File == kindName || e.File == kindName+"."+r.machine
 		})
 		if d, ok := k.(kind.Dependents); ok && isIn {
 			if w.NeededBy, err = d.NeededBy(ctx, name); err != nil {
