@@ -27,7 +27,7 @@ read, and kept in kit's state; a replacement Mac can take an old one's name.
 **Kinds.** A kind is a list of things of one sort. Built: Homebrew formulae (`brew`) and casks
 (`cask`), App Store apps (`app`), npm and Composer global packages (`npm`, `composer`), Go tools
 (`go`), GitHub CLI extensions (`gh`), tmux plugins (`tmux`), login items (`login`) and Claude
-Code's MCP servers (`mcp`). Later: Claude Code's plugins and skills, secrets, macOS settings
+Code's MCP servers (`claude-mcp`). Later: Claude Code's plugins and skills, secrets, macOS settings
 and backup exclusions.
 Each kind supplies five parts:
 
@@ -49,7 +49,7 @@ undeclared for adopting, removing or snoozing, and report both.
 | `gh` | `owner/gh-extension` | `gh extension list` | `gh extension install`, `gh extension remove` |
 | `tmux` | `set -g @plugin` lines in tmux's config | the folders in TPM's plugin folder | cloned as TPM does; removing deletes the folder |
 | `login` | the app's bundle id, `com.example.app` | System Events' login items | System Events (JavaScript for Automation) |
-| `mcp` | in `mcp.json`, `mcp.<mac>.json`: a name and what `claude mcp add-json` takes; a folder's key holds a project's | `~/.claude.json`, read directly | `claude mcp add-json`, `claude mcp remove` (a project's in local scope, in its folder) |
+| `claude-mcp` | a name, then `claude mcp add`'s options; a project's in `[claude mcp <folder>]` | `~/.claude.json`, read directly | `claude mcp add-json`, `claude mcp remove` (a project's in local scope, in its folder) |
 
 - **Matching:** a kind may match on part of a name: an App Store app on its id (so an app the
   store renames still matches), npm and Composer packages without their versions, GitHub
@@ -61,15 +61,16 @@ undeclared for adopting, removing or snoozing, and report both.
 - **A kind declared in a file of its own** (tmux's plugins, in tmux's config, where the
   plugin manager reads them): kit reads it and never writes it, so there's no adopting or
   undeclaring; `kit add` and `kit remove` say how to declare by hand.
-- **MCP servers** are declared in JSON kit writes itself (keys sorted, two spaces' indent):
-  each a definition plus kit's own `_note` and `_enabled` (false: declared, never installed,
-  and left alone when it is). A server installed otherwise than declared is changed, and
+- **MCP servers** are a line each: the server's name, then `claude mcp add`'s options
+  (`--transport http <url> --header "…"`, or `--env K=V -- <command> <args>`), or JSON for
+  what they can't say; kit's own `--off` first declares a server off: never installed, and
+  left alone when it is. A server installed otherwise than declared is changed, and
   applying replaces it. Keys are only ever named, as `${VAR}`, which Claude Code fills from
-  its environment: a definition holding one in plain text is refused, whether declared,
-  adopted or added, and what kit reads from `~/.claude.json` is never shown. A project's
-  server waits while its folder isn't on the Mac. A server is added with Claude Code's own
-  `claude mcp add`, then declared with `kit add mcp` or reconcile's adopt; `kit mcp on|off`
-  declares one on or off and installs or removes it.
+  its environment: a line holding one in plain text is refused, whether declared, adopted or
+  added, and what kit reads from `~/.claude.json` is never shown. A project's server waits
+  while its folder isn't on the Mac. A server is added with Claude Code's own
+  `claude mcp add`, then declared with `kit add claude-mcp` or reconcile's adopt;
+  `kit claude-mcp on|off` declares one on or off and installs or removes it.
 - **Finding what's meant:** `kit add app` finds an app from its name or id (several matches
   are a choice at a terminal, listed without one); `kit add login` takes an app's name, path
   or bundle id. Declaring a login item writes the app's name as the note.
@@ -108,7 +109,7 @@ kit remove <kind> <name>...  Uninstall, and undeclare            [--shared]
 kit reconcile [<kind>...] [<id>...]  Settle drift: adopt, remove, install, undeclare or snooze
 kit list [kind]              What's declared for this Mac: file, group, note, installed or not
 kit why <name>               Where it's declared, whether it's installed, what needs it
-kit mcp on|off <name>...     Declare MCP servers on or off, and install or remove them
+kit claude-mcp on|off <name>...  Declare Claude's MCP servers on or off, and install or remove them
 kit apply [step...] [--plan] Install what's declared and missing (--plan: say what, do nothing)
 kit status [step...]         How this Mac stands against the config: what needs attention
 kit log                      What the last run did: every check, every command, with timings
@@ -175,18 +176,52 @@ A relative `XDG_CONFIG_HOME` or `XDG_STATE_HOME` is ignored, as the XDG spec say
 ### The config repository
 
 ```
-kit.toml          the format version, the oldest kit that reads it, the Macs, the primary
-brew              formulae every Mac declares
-brew.laptop       formulae only laptop declares
-cask, cask.studio casks, likewise; app, npm, composer, go, gh, login too
-paths             PATH's directories, in order, one a line (~ expands)
+kit.toml   the format, the oldest kit that reads it, the Macs, the primary
+shared     what every Mac declares (made once something's declared for every Mac)
+laptop     what the Mac named laptop declares, and so for each Mac
 ```
 
-Lists hold one name a line. A `#` at the start of a line or after a space starts a comment;
-comments on their own lines head groups, and one after a name records why it's there. Within a
-group, names sort by their last part (`oven-sh/bun/bun` sorts as `bun`). A version or a
-constraint may follow a name (`typescript@5`, `laravel/valet:^4.0`). A name may appear in
-the shared file or a Mac's, never both, and a Mac's file must name a Mac `kit.toml` knows.
+A declarations file is sections, each a header in brackets and its lines; the header's
+words are the nesting, a tool then its list, and for a kind with one, a project folder:
+
+```
+[paths]
+~/.local/bin
+/opt/homebrew/bin
+
+[homebrew formulae]
+# Shell
+jq                # for the skills' scripts
+oven-sh/bun/bun
+
+[homebrew casks]
+ghostty
+
+[claude mcp]
+docs --transport http https://docs.example.com/mcp
+mail --env MAIL_KEY=${MAIL_KEY} -- npx -y mail-mcp
+
+[claude mcp ~/Code/site]
+pages --transport http https://pages.example.com/mcp
+```
+
+The sections, in the order kit writes them: `paths` (kit's PATH, in order, `~` expands; the
+shared file's, then the Mac's), `homebrew formulae`, `homebrew casks`, `app store apps`,
+`npm packages`, `composer packages`, `go tools`, `github extensions`, `macos login items`,
+`claude mcp` (and `claude mcp <folder>`). A section kit doesn't know is refused, never
+skipped; so is a line before any section, a section twice, or a file named for a Mac
+`kit.toml` doesn't know.
+
+Each section's lines read one way. A name list's: one name a line, a version or a
+constraint allowed after it (`typescript@5`, `laravel/valet:^4.0`). A path's: the whole line,
+spaces and all. A command's: a name, then options, split into words as a shell splits them.
+A `#` at the start of a line or after a space (outside quotes, in a command) starts a
+comment: on its own line it heads a group, after an entry it's the note saying why it's
+there. Within a group, names sort by their last part (`oven-sh/bun/bun` sorts as `bun`). A
+name is declared in the shared file or a Mac's, never both. A Mac can't be called `shared`.
+
+kit edits these files in place, leaving every other line as it is; it checks the result
+reads back, and writes the file whole or not at all. A file it can't read, it doesn't edit.
 
 ```toml
 format = 1
@@ -326,11 +361,14 @@ while applying, and a check can defer its own step; the administrator's password
 any kind; App Store apps; npm and Composer packages; Go tools and GitHub CLI extensions; tmux
 plugins; login items (#21–#26).
 
-**4. Claude Code's MCP servers — built.** The `mcp` kind, user-level and per project; kinds
-declared in files of their own that kit writes; `kit mcp on|off`; reconcile by kind
-(#30–#32).
+**4. Claude Code's MCP servers — built.** The `claude-mcp` kind, user-level and per
+project; `kit claude-mcp on|off`; reconcile by kind (#30–#32).
 
-**5. Claude Code's plugins and skills — next.**
+**5. One declarations file per Mac — built.** The config repository is `kit.toml`, `shared`
+and a file per Mac, each sections of flat lines; MCP servers as `claude mcp add`'s
+options.
+
+**6. Claude Code's plugins and skills — next.**
 
 **Then:** one set of checks behind bare `kit` and an hourly run, with
 notifications and the primary reading the other Macs; steps for linked files, the shell, git,

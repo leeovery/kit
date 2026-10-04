@@ -1,7 +1,6 @@
 package cli_test
 
 import (
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -15,14 +14,12 @@ const (
 `
 )
 
-var appLaptop = filepath.Join(".config", "kit", "app.laptop")
-
 // appWorld is laptopWorld with the App Store's mas installed, Xcode
 // installed from it, and Bear declared but missing.
 func appWorld(t *testing.T) *world {
 	t.Helper()
 	w := laptopWorld(t)
-	w.write(t, appLaptop, "bear@1091189122\nxcode@497799835\n")
+	w.writeSection(t, "laptop", "app store apps", "bear@1091189122\nxcode@497799835\n")
 	w.fake.On("mas", "list", "--json").Prints(xcodeListed).Then().Prints(xcodeListed).Then().Prints(xcodeListed + bearListed)
 	return w
 }
@@ -76,7 +73,7 @@ func TestAddAnAppByName(t *testing.T) {
 	}
 	w.fake.On("sudo", "-v")
 	w.fake.On("sudo", "-n", "mas", "install", "946798523")
-	w.expectSync([]string{"app.laptop"}, "kit add app sleep-control-center@946798523 (laptop)")
+	w.expectSync([]string{"laptop"}, "kit add app sleep-control-center@946798523 (laptop)")
 
 	if _, errOut, code := w.run(t, "add", "app", "sleep"); code != 0 {
 		t.Fatalf("kit add exit %d: %s", code, errOut)
@@ -84,8 +81,8 @@ func TestAddAnAppByName(t *testing.T) {
 	if want := []string{"Amphetamine (937984704)", "Sleep Control Center (946798523)"}; !slices.Equal(offered, want) {
 		t.Errorf("offered %q, want %q", offered, want)
 	}
-	if got := w.read(t, appLaptop); got != "# To be sorted\nsleep-control-center@946798523\n" {
-		t.Errorf("app.laptop = %q", got)
+	if got := w.readSection(t, "laptop", "app store apps"); got != "# To be sorted\nsleep-control-center@946798523\n" {
+		t.Errorf("laptop = %q", got)
 	}
 }
 

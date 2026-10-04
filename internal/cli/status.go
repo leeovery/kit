@@ -103,11 +103,10 @@ type kindStep struct {
 }
 
 // kindSteps are every kind kit knows, in pipeline order, driven through
-// run, for the user whose home is home and XDG config folder configHome,
-// on the Mac named mac, as cfg declares. The kinds whose programs are
-// formulae come after the formulae, so a new Mac has them before it needs
-// them.
-func kindSteps(hb *brew.Homebrew, run runner.Runner, home, configHome string, cfg *config.Config, mac string) []kindStep {
+// run, for the user whose home is home and XDG config folder configHome.
+// The kinds whose programs are formulae come after the formulae, so a new
+// Mac has them before it needs them.
+func kindSteps(hb *brew.Homebrew, run runner.Runner, home, configHome string) []kindStep {
 	return []kindStep{
 		{kind: hb.Formulae(), needs: []string{brew.StepName}},
 		{kind: hb.Casks(), needs: []string{brew.StepName}},
@@ -118,7 +117,7 @@ func kindSteps(hb *brew.Homebrew, run runner.Runner, home, configHome string, cf
 		{kind: ghext.New(run), after: []string{"brew"}},
 		{kind: tmux.New(run, home, configHome), after: []string{"brew"}},
 		{kind: login.New(run, home), after: []string{"cask", "app"}},
-		{kind: mcp.New(run, home, cfg.Dir, mac, cfg.MacNames()), after: []string{"brew"}},
+		{kind: mcp.New(run, home), after: []string{"brew"}},
 	}
 }
 
@@ -173,7 +172,7 @@ func (a *app) prepare(command, logName string) (*run, error) {
 	if err != nil {
 		return nil, fmt.Errorf("find the home directory: %w", err)
 	}
-	path, err := cfg.SearchPath(home)
+	path, err := cfg.SearchPath(home, machine)
 	if err != nil {
 		return nil, err
 	}
@@ -198,7 +197,7 @@ func (a *app) prepare(command, logName string) (*run, error) {
 		repo: gitrepo.Repo{Dir: dirs.Config, Run: observed}, record: record,
 	}
 	var kinds []engine.Step
-	for _, ks := range kindSteps(hb, observed, home, a.configHome(), cfg, machine) {
+	for _, ks := range kindSteps(hb, observed, home, a.configHome()) {
 		name := ks.kind.Name()
 		list, unread, err := declared(cfg, ks.kind, machine)
 		if err != nil {
@@ -234,17 +233,24 @@ func (a *app) prepare(command, logName string) (*run, error) {
 	return r, nil
 }
 
-// declared is what k declares for the Mac named mac: its lists in cfg, or
-// for a kind declared in a file of its own, what that file says. A file of
-// its own that can't be read is unread: the kind's check fails, saying so,
-// rather than kit.
+// declared is what k declares for the Mac named mac: its sections in cfg,
+// their values read by a kind whose lines carry them; or, for a kind
+// declared outside the config repository, what its own file says. What
+// doesn't read is unread: the kind's check fails, saying so, rather than
+// kit.
 func declared(cfg *config.Config, k kind.Kind, mac string) (list config.List, unread, err error) {
 	if d, ok := k.(kind.Declarer); ok {
 		list, unread = d.Declared()
 		return list, unread, nil
 	}
-	list, err = cfg.List(k.Name(), mac)
-	return list, nil, err
+	if list, err = cfg.List(k.Name(), mac); err != nil {
+		return list, nil, err
+	}
+	if v, ok := k.(kind.Valued); ok {
+		read, unread := v.Values(list)
+		return read, unread, nil
+	}
+	return list, nil, nil
 }
 
 // configHome is XDG's config folder, when it's set to an absolute path: ""

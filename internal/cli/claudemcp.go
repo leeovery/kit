@@ -14,13 +14,16 @@ import (
 	"github.com/leeovery/kit/internal/kind/mcp"
 )
 
-func newMCPCommand(a *app) *cobra.Command {
+// claudeMCP names Claude Code's MCP servers' kind, and its command.
+const claudeMCP = "claude-mcp"
+
+func newClaudeMCPCommand(a *app) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "mcp",
-		Short: "Turn Claude Code's MCP servers on or off, keeping their definitions declared",
+		Use:   claudeMCP,
+		Short: "Turn Claude Code's MCP servers on or off, keeping them declared",
 	}
 	for _, on := range []bool{true, false} {
-		verb, short := "off", "Declare MCP servers off, and remove them from Claude Code: their definitions stay"
+		verb, short := "off", "Declare MCP servers off, and remove them from Claude Code: their lines stay"
 		if on {
 			verb, short = "on", "Declare MCP servers on, and install them"
 		}
@@ -31,7 +34,7 @@ func newMCPCommand(a *app) *cobra.Command {
 The change is committed and pushed to the config repository.`,
 			Args: cobra.MinimumNArgs(1),
 			RunE: func(cmd *cobra.Command, args []string) error {
-				r, err := a.prepare("mcp "+verb, "mcp-"+verb)
+				r, err := a.prepare(claudeMCP+" "+verb, claudeMCP+"-"+verb)
 				if err != nil {
 					return err
 				}
@@ -47,11 +50,11 @@ The change is committed and pushed to the config repository.`,
 }
 
 // switchMCP declares each server named on, or off, commits and pushes the
-// change, and installs or removes it.
+// change, and installs or removes it to match.
 func (a *app) switchMCP(ctx context.Context, r *run, names []string, on bool) error {
-	m, ok := r.kindsByName["mcp"].(*mcp.MCP)
+	m, ok := r.kindsByName[claudeMCP].(*mcp.MCP)
 	if !ok {
-		return errors.New("kit has no MCP servers' kind")
+		return errors.New("kit has no kind for Claude's MCP servers")
 	}
 	verb := "off"
 	if on {
@@ -60,31 +63,33 @@ func (a *app) switchMCP(ctx context.Context, r *run, names []string, on bool) er
 	c := startChanges(r, names)
 	for _, name := range names {
 		c.step(ctx, name, func(ctx context.Context) check.Result {
-			return switchOne(ctx, c, m, name, on)
+			return switchOne(ctx, r, c, m, name, on, verb)
 		})
 	}
-	c.sync(ctx, fmt.Sprintf("kit mcp %s %s (%s)", verb, strings.Join(names, ", "), r.machine))
+	c.sync(ctx, fmt.Sprintf("kit %s %s %s (%s)", claudeMCP, verb, strings.Join(names, ", "), r.machine))
 	return c.finish()
 }
 
 // switchOne declares the server name on or off, in whichever of this Mac's
 // files declares it, and installs or removes it to match.
-func switchOne(ctx context.Context, c *changes, m *mcp.MCP, name string, on bool) check.Result {
-	verb := "off"
-	if on {
-		verb = "on"
-	}
-	where, err := m.Where(name)
+func switchOne(ctx context.Context, r *run, c *changes, m *mcp.MCP, name string, on bool, verb string) check.Result {
+	where, err := r.cfg.Where(claudeMCP, name)
 	if err != nil {
 		return check.Result{State: check.Failed, Reason: err.Error()}
 	}
-	i := slices.IndexFunc(where, func(e config.Entry) bool { return e.File == m.FileFor(true) || e.File == m.FileFor(false) })
+	i := slices.IndexFunc(where, func(e config.Entry) bool { return e.File == config.Shared || e.File == r.machine })
 	if i < 0 {
-		return check.Result{State: check.Failed, Reason: "not declared for this Mac: kit add mcp declares a server installed in Claude Code"}
+		return check.Result{State: check.Failed, Reason: "not declared for this Mac: kit add " + claudeMCP + " declares a server Claude Code has"}
 	}
+	e := where[i]
 	var done []string
-	if e := where[i]; e.Off == on {
-		if err := m.SetOff(e.File, name, !on); err != nil {
+	value, err := mcp.SetOff(e.Value, !on)
+	if err != nil {
+		return check.Result{State: check.Failed, Reason: err.Error()}
+	}
+	if value != e.Value {
+		e.Value = value
+		if err := r.cfg.Replace(claudeMCP, e.File, e); err != nil {
 			return check.Result{State: check.Failed, Reason: err.Error()}
 		}
 		c.changed(e.File)
@@ -96,10 +101,14 @@ func switchOne(ctx context.Context, c *changes, m *mcp.MCP, name string, on bool
 	}
 	switch {
 	case on && !isIn:
-		if _, err := m.Declared(); err != nil {
-			return check.Result{State: check.Failed, Reason: err.Error()}
+		list, err := r.cfg.List(claudeMCP, r.machine)
+		if err == nil {
+			_, err = m.Values(list)
 		}
-		if err := m.Install(ctx, []string{name}); err != nil {
+		if err == nil {
+			err = m.Install(ctx, []string{name})
+		}
+		if err != nil {
 			return check.Result{State: check.Failed, Reason: strings.Join(append(done, "couldn't install: "+err.Error()), "; ")}
 		}
 		done = append(done, "installed")

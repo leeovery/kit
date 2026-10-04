@@ -106,15 +106,20 @@ func (r *run) kindNamed(name string) (kind.Kind, error) {
 	return k, nil
 }
 
-// where are the entries declaring name, of the kind called kindName: in its
-// lists, every Mac's; for a kind that writes its own files, in every Mac's
-// of those; or, for a kind declared in a file of its own that kit only
-// reads, there, matching as the kind matches things.
+// file is the declarations file a thing is declared in: the shared one, or
+// this Mac's.
+func (r *run) file(shared bool) string {
+	if shared {
+		return config.Shared
+	}
+	return r.machine
+}
+
+// where are the entries declaring name, of the kind called kindName: in
+// every declarations file; or, for a kind declared outside the config
+// repository, in its own file, matching as the kind matches things.
 func (r *run) where(kindName, name string) ([]config.Entry, error) {
 	k := r.kindsByName[kindName]
-	if w, ok := k.(kind.Writer); ok {
-		return w.Where(name)
-	}
 	if _, ok := k.(kind.Declarer); !ok {
 		return r.cfg.Where(kindName, name)
 	}

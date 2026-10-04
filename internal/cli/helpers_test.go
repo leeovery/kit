@@ -7,6 +7,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -122,4 +124,57 @@ func (w *world) expectSync(files []string, message string) {
 	w.fake.On("git", git("remote")...).Prints("origin\n")
 	w.fake.On("git", git("pull", "--rebase", "--autostash", "--quiet")...)
 	w.fake.On("git", git("push", "--quiet")...)
+}
+
+// writeSection sets the section headed header, in the declarations file
+// named file, to lines, keeping the file's other sections; the section is
+// added at the end when the file hasn't one.
+func (w *world) writeSection(t *testing.T, file, header, lines string) {
+	t.Helper()
+	path := filepath.Join(".config", "kit", file)
+	type section struct{ header, body string }
+	var sections []section
+	for line := range strings.Lines(w.read(t, path)) {
+		if strings.HasPrefix(line, "[") {
+			sections = append(sections, section{header: strings.TrimSpace(line)})
+		} else if len(sections) > 0 {
+			sections[len(sections)-1].body += line
+		}
+	}
+	want := "[" + header + "]"
+	i := slices.IndexFunc(sections, func(s section) bool { return s.header == want })
+	if i < 0 {
+		sections = append(sections, section{header: want})
+		i = len(sections) - 1
+	}
+	sections[i].body = lines
+	var b strings.Builder
+	for j, s := range sections {
+		if j > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(s.header + "\n" + strings.TrimRight(s.body, "\n") + "\n")
+	}
+	w.write(t, path, b.String())
+}
+
+// readSection reads the lines of the section headed header in the
+// declarations file named file: "" when there's no such section.
+func (w *world) readSection(t *testing.T, file, header string) string {
+	t.Helper()
+	var b strings.Builder
+	in := false
+	for line := range strings.Lines(w.read(t, filepath.Join(".config", "kit", file))) {
+		if strings.HasPrefix(line, "[") {
+			in = strings.TrimSpace(line) == "["+header+"]"
+			continue
+		}
+		if in {
+			b.WriteString(line)
+		}
+	}
+	if text := strings.TrimRight(b.String(), "\n"); text != "" {
+		return text + "\n"
+	}
+	return ""
 }
