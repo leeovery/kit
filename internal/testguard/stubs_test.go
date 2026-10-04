@@ -30,7 +30,7 @@ func TestStubsStandInForEveryStubbedProgram(t *testing.T) {
 		}
 		names = append(names, e.Name())
 	}
-	want := []string{"brew", "claude", "defaults", "gh", "git", "launchctl", "mas", "op", "open", "osascript", "sudo", "tmutil", "tmux"}
+	want := []string{"brew", "claude", "composer", "defaults", "gh", "git", "go", "launchctl", "mas", "npm", "op", "open", "osascript", "sudo", "tmutil", "tmux"}
 	if !slices.Equal(names, want) {
 		t.Errorf("stubs = %q, want %q", names, want)
 	}
