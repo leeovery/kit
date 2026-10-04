@@ -9,10 +9,12 @@ import (
 )
 
 // JSON is the face for --json: nothing as the run goes, and the status
-// document at its end.
+// document at its end; nothing at all when no run started, as for a command
+// that prints its own document.
 type JSON struct {
 	w       io.Writer
 	builder status.Builder
+	started bool
 }
 
 // NewJSON returns the JSON face, writing to w.
@@ -21,11 +23,17 @@ func NewJSON(w io.Writer) *JSON {
 }
 
 func (j *JSON) Emit(e event.Event) {
+	if _, ok := e.(event.RunStarted); ok {
+		j.started = true
+	}
 	j.builder.Emit(e)
 }
 
-// Close writes the document.
+// Close writes the document, when a run started.
 func (j *JSON) Close() error {
+	if !j.started {
+		return nil
+	}
 	return WriteJSON(j.w, j.builder.Document())
 }
 

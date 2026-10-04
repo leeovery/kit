@@ -234,3 +234,10 @@ func TestActionsAndWhatWasDone(t *testing.T) {
 		t.Errorf("pretty printed\n%s\nwant\n%s", pretty.String(), wantPretty)
 	}
 }
+
+func TestJSONWritesNothingWithoutARun(t *testing.T) {
+	var out bytes.Buffer
+	if err := render.NewJSON(&out).Close(); err != nil || out.Len() != 0 {
+		t.Errorf("Close() with no run = %q, %v; want nothing", out.String(), err)
+	}
+}

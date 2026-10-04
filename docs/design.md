@@ -68,6 +68,7 @@ Built:
 ```
 kit add <kind> <name>...     Install, and declare for this Mac   [--shared] [--temp] [--note] [--group]
 kit remove <kind> <name>...  Uninstall, and undeclare            [--shared]
+kit reconcile [<id>]         Settle drift: adopt, remove, install, undeclare or snooze
 kit apply [step...] [--plan] Install what's declared and missing (--plan: say what, do nothing)
 kit status [step...]         How this Mac stands against the config: what needs attention
 kit log                      What the last run did: every check, every command, with timings
@@ -90,6 +91,15 @@ without asking. `--temp` installs without declaring: quiet for 7 days, then reco
 needs `--shared`. Both handle each name on its own (one failing leaves the others), then commit
 the config's changed files, with a message saying what, for which Mac and why, and push to
 main, pulling with rebase first. A push that fails leaves the commit, and says so.
+
+`kit reconcile` settles drift. At a terminal it goes through each item that needs attention
+(`--all`: quiet ones too), asking what to do with it: declare it (for this Mac, or every Mac),
+uninstall it, install it, undeclare it, snooze it for 7 days, leave it, or stop; for one
+declared, which group. Every question comes first; then it does it all, as `kit add` and
+`kit remove` would, and commits and pushes once. Without a terminal, or with `--json`, it lists
+the items with their ids and choices, and `kit reconcile <id> --adopt` (or `--remove`,
+`--install`, `--undeclare`, `--snooze`; `--shared`, `--group`, `--note`) settles one: how an
+agent carries out a person's decision.
 
 `kit status` runs every step's check (named steps run with what they need): Homebrew, the
 formulae (`brew`), the casks (`cask`), and the config repository being private on GitHub

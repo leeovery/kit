@@ -75,10 +75,12 @@ type run struct {
 	homebrew *brew.Homebrew
 	casks    config.List
 	run      runner.Runner
-	// cfg, kindsByName and repo are what changing the config needs.
+	// cfg, kindsByName, lists and repo are what changing the config needs.
 	cfg         *config.Config
 	kindsByName map[string]kind.Kind
+	lists       map[string]config.List
 	repo        gitrepo.Repo
+	record      drift.Record
 }
 
 // remember notes, in the drift record, the drift the run's checks found:
@@ -173,7 +175,8 @@ func (a *app) prepare(command, logName string) (*run, error) {
 		command: command, machine: machine, version: a.Version, pipeline: pipeline, sink: sink, face: face, log: log,
 		stateDir: dirs.State, now: now, homebrew: hb, casks: casks, run: observed,
 		cfg: cfg, kindsByName: map[string]kind.Kind{"brew": hb.Formulae(), "cask": hb.Casks()},
-		repo: gitrepo.Repo{Dir: dirs.Config, Run: observed},
+		lists: map[string]config.List{"brew": formulae, "cask": casks},
+		repo:  gitrepo.Repo{Dir: dirs.Config, Run: observed}, record: record,
 	}
 	for _, k := range kinds {
 		r.kinds = append(r.kinds, k.Name)
