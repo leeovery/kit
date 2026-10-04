@@ -1,0 +1,180 @@
+#!/usr/bin/env bash
+#
+# Fails when the repository holds personal data, in its files or anywhere in
+# its history (every commit's message and changes): the generic patterns
+# below, and private ones from PERSONAL_PATTERNS, one extended regular
+# expression a line, matched in any case, which CI fills from a repository
+# secret so that the list of what to keep out is never public itself. It
+# names where each find is and which pattern found it, never what it found:
+# CI's logs are public.
+#
+# Each run first proves it finds what it should, in a throwaway repository;
+# --self-check does only that.
+set -euo pipefail
+
+# This script, which holds the patterns and the self-check's planted finds,
+# is left out of the scan.
+self=scripts/personal-data-scan
+
+# The generic patterns: a name for reports, the pattern, and what a match may
+# be all the same, as placeholders are. Examples in code, tests and docs use
+# op://vault/…, someone@example.com, /Users/someone, and git@github.com in
+# remotes.
+names=(
+	"a 1Password reference"
+	"an email address"
+	"a home directory"
+	"a .local host name"
+	"a tailnet host name"
+)
+patterns=(
+	'op://[^[:space:]"'"'"'`]+'
+	'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}'
+	'/Users/[A-Za-z0-9._-]+'
+	'[A-Za-z0-9-]+\.local([^A-Za-z0-9.]|$)'
+	'[A-Za-z0-9-]+\.ts\.net'
+)
+allowed=(
+	'^op://vault/'
+	'(@example\.(com|org|net)|^git@github\.com|@users\.noreply\.github\.com)$'
+	'^/Users/(someone|Shared)$'
+	''
+	''
+)
+flags=("" "-i" "" "-i" "-i")
+
+# add_private adds each pattern in PERSONAL_PATTERNS, but blank lines and
+# comments, named by its place among them.
+add_private() {
+	local line n=0
+	while IFS= read -r line; do
+		case $line in
+		'' | '#'*) continue ;;
+		esac
+		n=$((n + 1))
+		names+=("private pattern $n")
+		patterns+=("$line")
+		allowed+=("")
+		flags+=("-i")
+	done <<<"${PERSONAL_PATTERNS-}"
+}
+
+# unallowed reads matches, one a line, and succeeds when one isn't allowed by
+# the pattern given.
+unallowed() {
+	awk -v allowed="$1" 'allowed == "" || $0 !~ allowed { found = 1 } END { exit !found }'
+}
+
+# tree_finds prints a line for each find in the files of the repository at
+# the current directory: "file:line: what it is".
+tree_finds() {
+	local i hits hit file line
+	for i in "${!patterns[@]}"; do
+		# git grep -o prints file:line:match, a line a match.
+		hits=$(git grep -I -n -o ${flags[i]} -E -e "${patterns[i]}" -- . ":(exclude)$self" 2>/dev/null || true)
+		[ -n "$hits" ] || continue
+		while IFS= read -r hit; do
+			file=${hit%%:*}
+			line=${hit#*:}
+			line=${line%%:*}
+			if printf '%s\n' "${hit#*:*:}" | unallowed "${allowed[i]}"; then
+				printf '%s:%s: %s\n' "$file" "$line" "${names[i]}"
+			fi
+		done <<<"$hits"
+	done | sort -u
+}
+
+# history_finds prints a line for each find in the history of the repository
+# at the current directory, every commit reachable from any ref: "commit
+# <hash>: what it is".
+history_finds() {
+	local commit text i
+	for commit in $(git rev-list --all); do
+		text=$(git show --format=%B -p "$commit" -- . ":(exclude)$self")
+		for i in "${!patterns[@]}"; do
+			if printf '%s\n' "$text" | grep -o ${flags[i]} -E -e "${patterns[i]}" | unallowed "${allowed[i]}"; then
+				printf 'commit %s: %s\n' "${commit:0:12}" "${names[i]}"
+			fi
+		done
+	done
+}
+
+# self_check plants a find of each generic pattern, and of a private one,
+# beside placeholders that must pass, in a throwaway repository, and proves
+# both scans report exactly the planted finds.
+self_check() {
+	local dir status=0 got want
+	dir=$(mktemp -d)
+	(
+		cd "$dir"
+		export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+		git init -q
+		git config user.name tester
+		git config user.email tester@example.com
+		cat >planted.txt <<'PLANTED'
+ref = op://Personal/item/field
+fine = op://vault/item/field
+mail = jdoe@realmail.test
+fine = someone@example.com and git@github.com:owner/repo
+path = /Users/jdoe/Code
+fine = /Users/someone/Code and /Users/Shared
+host = studio.local here
+tailnet = studio.tail0000.ts.net
+word = zebracorn
+PLANTED
+		git add planted.txt
+		git commit -q -m "planted, reported by jdoe@realmail.test"
+	)
+	want="planted.txt:1: a 1Password reference
+planted.txt:3: an email address
+planted.txt:5: a home directory
+planted.txt:7: a .local host name
+planted.txt:8: a tailnet host name
+planted.txt:9: private pattern 1"
+	got=$(cd "$dir" && PERSONAL_PATTERNS='zebra.orn' scan_tree)
+	if [ "$got" = "$want" ]; then
+		echo "personal-data-scan: the scan of the files finds what it should"
+	else
+		printf 'personal-data-scan: the scan of the files found\n%s\nwant\n%s\n' "$got" "$want" >&2
+		status=1
+	fi
+	got=$(cd "$dir" && PERSONAL_PATTERNS='zebra.orn' scan_history | sed 's/^commit [0-9a-f]*:/commit:/')
+	want="commit: a 1Password reference
+commit: an email address
+commit: a home directory
+commit: a .local host name
+commit: a tailnet host name
+commit: private pattern 1"
+	if [ "$got" = "$want" ]; then
+		echo "personal-data-scan: the scan of the history finds what it should"
+	else
+		printf 'personal-data-scan: the scan of the history found\n%s\nwant\n%s\n' "$got" "$want" >&2
+		status=1
+	fi
+	rm -rf "$dir"
+	return "$status"
+}
+
+# scan_tree and scan_history run the scans with the private patterns added,
+# in a subshell so that adding them leaves the generic list as it was.
+scan_tree() ( add_private && tree_finds )
+scan_history() ( add_private && history_finds )
+
+if [ "${1-}" = --self-check ]; then
+	self_check
+	exit
+fi
+if ! self_check >/dev/null; then
+	echo "personal-data-scan: the scan doesn't find what it should, so it can't be trusted" >&2
+	exit 1
+fi
+if [ -z "${PERSONAL_PATTERNS-}" ]; then
+	echo "personal-data-scan: warning: no private patterns (PERSONAL_PATTERNS), so only the generic ones are checked" >&2
+fi
+cd "$(git rev-parse --show-toplevel)"
+finds=$(scan_tree; scan_history)
+if [ -n "$finds" ]; then
+	printf 'personal-data-scan: personal data found:\n%s\n' "$finds" >&2
+	exit 1
+fi
+echo "personal-data-scan: no personal data in the files or the history"

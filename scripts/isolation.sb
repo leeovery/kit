@@ -1,0 +1,95 @@
+;; The macOS sandbox scripts/test-isolated runs the tests in: nothing beyond
+;; this machine, no unix socket outside the temporary directory, no writes
+;; into the home directory but Go's caches, nor into kit's real config and
+;; state directories, wherever they are, nor the directories on PATH, and none
+;; of the real programs tests must never run.
+;;
+;; Parameters, each a path with its symlinks resolved, as the sandbox matches
+;; resolved paths:
+;;   HOME        the home directory
+;;   TMPDIR      the temporary directory
+;;   GOCACHE     go env GOCACHE
+;;   GOMODCACHE  go env GOMODCACHE
+;;   CONFIG_DIR  kit's config directory, the config repository
+;;   STATE_DIR   its state directory
+;;   PATH_DIRS   the directories on PATH outside the home, where a program
+;;               run by name is found, joined by colons, as PATH joins them
+
+(version 1)
+(debug deny)
+(allow default)
+
+(define (home-literal path) (literal (string-append (param "HOME") path)))
+(define (home-subpath path) (subpath (string-append (param "HOME") path)))
+
+;; Loopback alone, and unix sockets in the temporary directory alone, where
+;; the tests make theirs: not the SSH agent's, nor any other program's. The
+;; sandbox's localhost is 127.0.0.1 and ::1, and macOS gives loopback no other
+;; address.
+(deny network-outbound)
+(allow network-outbound
+  (remote ip "localhost:*")
+  (remote unix-socket (subpath (param "TMPDIR"))))
+
+(deny file-write* (subpath (param "HOME")))
+(allow file-write* (subpath (param "GOCACHE")) (subpath (param "GOMODCACHE")))
+;; The real config and state, where the environment puts them, home or not,
+;; and where a link to one leads. The logs are in the home.
+(deny file-write*
+  (subpath (param "CONFIG_DIR"))
+  (subpath (param "STATE_DIR")))
+
+;; The directories on PATH outside the home, such as /opt/homebrew/bin: those
+;; in the home are in the home's rule.
+(define (split text)
+  (let loop ((chars (string->list text)) (field '()) (fields '()))
+    (let ((done (lambda () (cons (list->string (reverse field)) fields))))
+      (cond
+        ((null? chars) (reverse (done)))
+        ((char=? (car chars) #\:) (loop (cdr chars) '() (done)))
+        (else (loop (cdr chars) (cons (car chars) field) fields))))))
+(for-each
+  (lambda (dir)
+    (if (> (string-length dir) 0)
+      (deny file-write* (subpath dir))))
+  (split (param "PATH_DIRS")))
+
+;; A rule here matches the file a symlink resolves to, not the link, so each
+;; install is denied where its real file lands. The stubs testguard puts on
+;; PATH match none of these, and still run.
+(deny process-exec
+  ;; Homebrew: Apple silicon's, and Intel's, linked into its repository.
+  (literal "/opt/homebrew/bin/brew")
+  (regex #"/Homebrew/bin/brew$")
+  ;; The App Store's, GitHub's and 1Password's command-line tools, as
+  ;; Homebrew installs them.
+  (regex #"/Cellar/mas/")
+  (regex #"/Cellar/gh/")
+  (regex #"/Caskroom/1password-cli/")
+  (literal "/usr/local/bin/op")
+  ;; git: the system's, the command-line tools', Xcode's and Homebrew's.
+  (literal "/usr/bin/git")
+  (literal "/Library/Developer/CommandLineTools/usr/bin/git")
+  (literal "/Applications/Xcode.app/Contents/Developer/usr/bin/git")
+  (regex #"/Cellar/git/")
+  ;; Claude Code, wherever its installers put it.
+  (home-literal "/.local/bin/claude")
+  (home-subpath "/.local/share/claude")
+  (home-subpath "/.claude/local")
+  (literal "/opt/homebrew/bin/claude")
+  (literal "/usr/local/bin/claude")
+  (regex #"/Caskroom/claude-code/")
+  (regex #"/node_modules/@anthropic-ai/claude-code")
+  ;; Settings, Time Machine, privileges, launchd, notifications, and opening
+  ;; files and URLs.
+  (literal "/usr/bin/defaults")
+  (literal "/usr/bin/tmutil")
+  (literal "/usr/bin/sudo")
+  (literal "/bin/launchctl")
+  (literal "/usr/bin/osascript")
+  (literal "/usr/bin/open")
+  ;; tmux: the system's, or Homebrew's, linked into its Cellar.
+  (literal "/usr/bin/tmux")
+  (literal "/usr/local/bin/tmux")
+  (literal "/opt/homebrew/bin/tmux")
+  (regex #"/Cellar/tmux/"))

@@ -1,0 +1,41 @@
+# kit
+
+Set up a Mac from a config repository, and keep it that way.
+
+kit reads a private config repository that declares what each of your Macs should have
+(Homebrew formulae and casks to start with; apps, tools, settings and secrets to come), and
+tells you where a Mac differs. It's pretty at a terminal, plain without one, and `--json`
+for scripts and agents, so an agent can drive it with the same commands you run.
+
+> **Pre-1.0.** Built for its author's Macs, public because nothing personal is in it.
+> Commands, config and output will change. See [the design](docs/design.md) for what's
+> built and what's planned.
+
+## Install
+
+Once released:
+
+```bash
+brew install leeovery/tools/kit
+```
+
+## Configuration
+
+kit reads its config repository from `~/.config/kit` (or `$KIT_CONFIG`):
+
+```
+kit.toml          your Macs and which is the primary
+brew, cask        what every Mac declares
+brew.<mac>, ...   what one Mac declares
+paths             the directories kit puts on its PATH
+```
+
+## Development
+
+Go 1.27 on macOS. Every change passes the gates in [CLAUDE.md](CLAUDE.md): `gofmt`,
+`go vet`, `scripts/test-isolated` (the tests, inside a sandbox that keeps them off the real
+system), `golangci-lint`, `go build` and `scripts/personal-data-scan`.
+
+## Licence
+
+MIT

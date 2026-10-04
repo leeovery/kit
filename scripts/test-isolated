@@ -1,0 +1,316 @@
+#!/usr/bin/env bash
+#
+# Runs every test, race detector on, inside the macOS sandbox in
+# scripts/isolation.sb: no network beyond this machine, no unix socket outside
+# the temporary directory, no writes into the home directory but Go's caches,
+# nor into kit's real config and state directories, wherever they are, nor the
+# directories on PATH, and none of the real programs tests must never run.
+# Arguments go on to go test, as in: scripts/test-isolated -run TestStatus
+#
+# The variables that can hold real tokens, or lead to kit's real config, real
+# state or a proxy, are unset before anything runs. Each run first proves the
+# sandbox denies each of those, and that the tests start without these;
+# --self-check does only that. On macOS, without the sandbox the tests don't
+# run. Off macOS there's none, and they run guarded by internal/testguard
+# alone.
+set -euo pipefail
+
+repo=$(cd "$(dirname "$0")/.." && pwd -P)
+
+# unseen reports whether the variable named is one no test may see: kit's
+# own; those of the programs it drives, which can hold real tokens or lead to
+# real state; or a proxy's.
+unseen() {
+	case $1 in
+	KIT_* | HOMEBREW_* | OP_* | GH_* | GITHUB_* | GIT_* | SSH_* | CLAUDE_* | ANTHROPIC_* | TMUX* | *_PROXY | *_proxy) return 0 ;;
+	esac
+	return 1
+}
+
+# scrub unsets every variable no test may see. testguard clears them too, but
+# only once every package's init has run, and an init could read them first.
+scrub() {
+	local name
+	for name in $(compgen -e); do
+		if unseen "$name"; then
+			unset "$name"
+		fi
+	done
+}
+
+# resolved prints path, absolute, with its symlinks resolved as far as it
+# exists and the rest as given, as the sandbox matches paths.
+resolved() {
+	local path=$1 target parent
+	if [ -L "$path" ]; then
+		target=$(readlink "$path")
+		case $target in
+		/*) ;;
+		*) target=$(dirname "$path")/$target ;;
+		esac
+		resolved "$target"
+	elif [ -d "$path" ]; then
+		(cd -P "$path" && pwd)
+	else
+		parent=$(resolved "$(dirname "$path")")
+		printf '%s/%s\n' "${parent%/}" "$(basename "$path")"
+	fi
+}
+
+# absolute prints path when it's absolute, else fallback: kit ignores a
+# relative XDG directory, and a relative KIT_CONFIG leads wherever kit runs.
+absolute() {
+	case $1 in
+	/*) printf '%s\n' "$1" ;;
+	*) printf '%s\n' "$2" ;;
+	esac
+}
+
+# kit's real config and state, where it finds them, and its logs: read before
+# scrub unsets KIT_CONFIG.
+config_dir=$(resolved "$(absolute "${KIT_CONFIG-}" "$(absolute "${XDG_CONFIG_HOME-}" "$HOME/.config")/kit")")
+state_dir=$(resolved "$(absolute "${XDG_STATE_HOME-}" "$HOME/.local/state")/kit")
+logs_dir=$(resolved "$HOME/Library/Logs/kit")
+
+scrub
+
+if [ "$(uname -s)" != Darwin ]; then
+	if [ "${1-}" = --self-check ]; then
+		echo "test-isolated: there's no sandbox off macOS to check" >&2
+		exit 1
+	fi
+	echo "test-isolated: warning: there's no sandbox off macOS, so the tests run outside one, guarded by testguard alone" >&2
+	cd "$repo"
+	exec go test -race -count=1 "$@" ./...
+fi
+sandbox_exec=/usr/bin/sandbox-exec
+if [ ! -x "$sandbox_exec" ]; then
+	echo "test-isolated: no $sandbox_exec, which macOS has, so no sandbox to run the tests in, and they don't run" >&2
+	exit 1
+fi
+
+home=$(resolved "$HOME")
+tmp=$(resolved "${TMPDIR:-/tmp}")
+gocache=$(resolved "$(go env GOCACHE)")
+gomodcache=$(resolved "$(go env GOMODCACHE)")
+
+# outside_home_on_path prints the directories on PATH outside the home,
+# where a program run by name is found, joined by colons as PATH joins them:
+# each resolved, and named once. A relative one leads wherever a program runs,
+# and one in the home is in the home's rule.
+outside_home_on_path() {
+	local entries dir found list=
+	IFS=: read -r -a entries <<<"$PATH"
+	for dir in "${entries[@]}"; do
+		case $dir in
+		/*) ;;
+		*) continue ;;
+		esac
+		found=$(resolved "$dir")
+		case $found in
+		"$home" | "$home"/*) continue ;;
+		esac
+		case ":$list:" in
+		*":$found:"*) continue ;;
+		esac
+		list=${list:+$list:}$found
+	done
+	printf '%s\n' "$list"
+}
+path_dirs=$(outside_home_on_path)
+
+sandboxed() {
+	"$sandbox_exec" -f "$repo/scripts/isolation.sb" \
+		-D HOME="$home" -D TMPDIR="$tmp" -D GOCACHE="$gocache" -D GOMODCACHE="$gomodcache" \
+		-D CONFIG_DIR="$config_dir" -D STATE_DIR="$state_dir" -D PATH_DIRS="$path_dirs" "$@"
+}
+
+# denied runs a command in the sandbox, which must fail it with the refusal
+# given: what the command tries, the refusal, then the command.
+denied() {
+	local what=$1 refusal=$2 out
+	shift 2
+	if ! out=$(sandboxed "$@" </dev/null 2>&1); then
+		case $out in
+		*"$refusal"*)
+			echo "test-isolated: the sandbox denies $what"
+			return 0
+			;;
+		esac
+	fi
+	echo "test-isolated: the sandbox doesn't deny $what; $* printed:" >&2
+	printf '%s\n' "$out" >&2
+	return 1
+}
+
+# denies_writing_in proves the sandbox denies a write into the directory dir,
+# what it is, when there is one: a file in it would be removed at once.
+denies_writing_in() {
+	local what=$1 dir=$2 scratch status=0
+	if [ ! -d "$dir" ]; then
+		echo "test-isolated: no $what at $dir, so no write there to deny"
+		return 0
+	fi
+	scratch=$dir/.kit-isolation-check.$$
+	denied "a write into the $what, $dir" "$scratch: Operation not permitted" /usr/bin/touch "$scratch" || status=1
+	# There only when the sandbox let the write through.
+	rm -f "$scratch"
+	return "$status"
+}
+
+# denies_writing_on_path proves the sandbox denies a write into each
+# directory on PATH outside the home that the user can write to: one they
+# can't has no write to deny.
+denies_writing_on_path() {
+	local entries dir status=0
+	if [ -z "$path_dirs" ]; then
+		echo "test-isolated: no directory on PATH outside the home, so no write there to deny"
+		return 0
+	fi
+	IFS=: read -r -a entries <<<"$path_dirs"
+	for dir in "${entries[@]}"; do
+		if [ -d "$dir" ] && [ ! -w "$dir" ]; then
+			echo "test-isolated: $dir, on PATH, can't be written to anyway, so no write there to deny"
+			continue
+		fi
+		denies_writing_in "directory on PATH" "$dir" || status=1
+	done
+	return "$status"
+}
+
+# denies_foreign_socket proves the sandbox denies a connect to a unix socket
+# outside the temporary directory: to one listening in the user's cache
+# directory, which the sandbox lets tests write to, but isn't the temporary
+# directory. A socket that isn't there won't do: connecting to one fails as no
+# such file, in the sandbox or out. curl says why a connect failed, where nc
+# doesn't, and -q keeps it from reading the user's .curlrc.
+denies_foreign_socket() {
+	local cache dir socket listener status=0
+	cache=$(getconf DARWIN_USER_CACHE_DIR)
+	dir=$(mktemp -d "${cache%/}/kit-check.XXXXXX") || return 1
+	socket=$dir/live.sock
+	# A job started in the background ignores the terminal's interrupt, so an
+	# interrupted run would leave the listener running, and its directory.
+	trap 'stop_listening "${listener-}" "$dir"; exit 130' INT
+	trap 'stop_listening "${listener-}" "$dir"; exit 143' TERM HUP
+	/usr/bin/nc -lkU "$socket" </dev/null >/dev/null 2>&1 &
+	listener=$!
+	if answers "$socket"; then
+		denied "a connect to a unix socket outside the temporary directory" "Operation not permitted" \
+			/usr/bin/curl -q -sv --max-time 2 --unix-socket "$socket" http://kit/ || status=1
+	else
+		echo "test-isolated: nothing answered on $socket, so the sandbox's denying it can't be told" >&2
+		status=1
+	fi
+	stop_listening "$listener" "$dir"
+	trap - INT TERM HUP
+	return "$status"
+}
+
+# stop_listening stops the listener whose pid is $1, and removes its
+# directory, $2.
+stop_listening() {
+	kill "$1" 2>/dev/null || true
+	wait "$1" 2>/dev/null || true
+	rm -rf "$2"
+}
+
+# answers waits a second at most for a connection to the unix socket at path
+# to be accepted, outside the sandbox.
+answers() {
+	local tries=50
+	until /usr/bin/nc -U "$1" </dev/null >/dev/null 2>&1; do
+		tries=$((tries - 1))
+		if [ "$tries" = 0 ]; then
+			return 1
+		fi
+		sleep 0.02
+	done
+}
+
+# denies_running proves the sandbox denies running the program name, as
+# installed here, at found: with its links resolved, as the sandbox's rules
+# match the file a link leads to. Were it to run, the arguments given would
+# have it say what it is and stop. One that isn't installed, found nowhere,
+# has no running to deny.
+denies_running() {
+	local name=$1 found=$2 program
+	shift 2
+	if [ -z "$found" ]; then
+		echo "test-isolated: no $name installed, so no running it to deny"
+		return 0
+	fi
+	program=$(resolved "$found")
+	denied "running $name, at $program" "execvp() of '$program' failed: Operation not permitted" "$program" "$@"
+}
+
+# installed prints where the program name is: the first of the places given
+# that holds it, else where PATH finds it, or nothing.
+installed() {
+	local name=$1 place
+	shift
+	for place in "$@"; do
+		if [ -f "$place" ] && [ -x "$place" ]; then
+			printf '%s\n' "$place"
+			return 0
+		fi
+	done
+	type -P "$name" || true
+}
+
+# starts_clean proves the tests start with none of the variables no test may
+# see, naming any they would, never its value.
+starts_clean() {
+	local name seen=
+	for name in $(sandboxed /bin/bash -c 'compgen -e'); do
+		if unseen "$name"; then
+			seen="$seen $name"
+		fi
+	done
+	if [ -n "$seen" ]; then
+		echo "test-isolated: the tests would start with$seen set" >&2
+		return 1
+	fi
+	echo "test-isolated: the tests start with no variable that can hold a real token or lead to kit's real config"
+}
+
+self_check() {
+	local status=0
+	denied "a dial off this machine" "connectx to 192.0.2.1 port 9 (tcp) failed: Operation not permitted" \
+		/usr/bin/nc -vz -G 2 192.0.2.1 9 || status=1
+	denies_foreign_socket || status=1
+	denies_writing_in "home directory" "$home" || status=1
+	denies_writing_in "real config directory" "$config_dir" || status=1
+	denies_writing_in "real state directory" "$state_dir" || status=1
+	denies_writing_in "real logs directory" "$logs_dir" || status=1
+	denies_writing_on_path || status=1
+	denies_running brew "$(installed brew /opt/homebrew/bin/brew /usr/local/bin/brew)" --version || status=1
+	denies_running mas "$(installed mas)" version || status=1
+	denies_running gh "$(installed gh)" --version || status=1
+	denies_running op "$(installed op)" --version || status=1
+	denies_running git "$(installed git /usr/bin/git)" --version || status=1
+	# Claude Code where its installers put it: a claude first on PATH can be
+	# another program's link, such as a router's.
+	denies_running claude "$(installed claude "$HOME/.local/bin/claude" /opt/homebrew/bin/claude /usr/local/bin/claude "$HOME/.claude/local/claude")" --version || status=1
+	denies_running defaults /usr/bin/defaults help || status=1
+	denies_running tmutil /usr/bin/tmutil version || status=1
+	denies_running sudo /usr/bin/sudo -V || status=1
+	denies_running launchctl /bin/launchctl version || status=1
+	denies_running osascript /usr/bin/osascript -e 'return 1' || status=1
+	# open with nothing to open says how it's used.
+	denies_running open /usr/bin/open || status=1
+	denies_running tmux "$(installed tmux)" -V || status=1
+	starts_clean || status=1
+	return "$status"
+}
+
+if [ "${1-}" = --self-check ]; then
+	self_check
+	exit
+fi
+if ! self_check >/dev/null; then
+	echo "test-isolated: the sandbox doesn't hold, so the tests don't run" >&2
+	exit 1
+fi
+cd "$repo"
+sandboxed go test -race -count=1 "$@" ./...
