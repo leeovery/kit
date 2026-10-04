@@ -1,7 +1,6 @@
 package cli_test
 
 import (
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -14,7 +13,7 @@ const zoomInfo = `{"formulae": [], "casks": [{"token": "zoom", "full_token": "zo
 func missingWorld(t *testing.T) *world {
 	t.Helper()
 	w := laptopWorld(t)
-	w.write(t, filepath.Join(".config", "kit", "brew.laptop"), "go\nripgrep\n")
+	w.writeSection(t, "laptop", "homebrew formulae", "go\nripgrep\n")
 	f := w.fake
 	f.On("brew", "list", "--formula", "--full-name", "-1").Prints("go\njq\noniguruma\nowner/tap/tool\nnode@20\nffmpeg\n").
 		Then().Prints("go\njq\noniguruma\nowner/tap/tool\nnode@20\nffmpeg\nripgrep\n")
@@ -71,7 +70,7 @@ func TestApplyPlanChangesNothing(t *testing.T) {
 // saying why.
 func TestApplyWithoutATerminalNeverPrompts(t *testing.T) {
 	w := laptopWorld(t)
-	w.write(t, filepath.Join(".config", "kit", "cask.laptop"), "firefox\nzoom\n")
+	w.writeSection(t, "laptop", "homebrew casks", "firefox\nzoom\n")
 	w.fake.On("brew", "info", "--json=v2", "--cask", "zoom").Prints(zoomInfo)
 	w.fake.On("sudo", "-n", "true").Exits(1).PrintsToStderr("sudo: a password is required")
 
@@ -89,7 +88,7 @@ func TestApplyWithoutATerminalNeverPrompts(t *testing.T) {
 func TestApplyAtATerminalAsksForThePasswordUpFront(t *testing.T) {
 	w := laptopWorld(t)
 	w.terminal = true
-	w.write(t, filepath.Join(".config", "kit", "cask.laptop"), "firefox\nzoom\n")
+	w.writeSection(t, "laptop", "homebrew casks", "firefox\nzoom\n")
 	w.fake.On("brew", "list", "--cask", "--full-name", "-1").Prints("ghostty\nfirefox\n").
 		Then().Prints("ghostty\nfirefox\n").
 		Then().Prints("ghostty\nfirefox\nzoom\n")

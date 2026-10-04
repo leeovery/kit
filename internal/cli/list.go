@@ -29,6 +29,8 @@ type listed struct {
 	Group     string `json:"group,omitempty"`
 	Note      string `json:"note,omitempty"`
 	Installed bool   `json:"installed"`
+	// Off is whether it's declared, but not to be installed.
+	Off bool `json:"off,omitempty"`
 }
 
 func newListCommand(a *app) *cobra.Command {
@@ -72,9 +74,16 @@ func (a *app) list(ctx context.Context, r *run, args []string) error {
 			}
 		}
 		for _, e := range r.lists[name].Entries {
-			// A kind deferred, its program not installed, has nothing installed.
+			// A kind deferred, its program not installed, has nothing installed;
+			// a thing declared off is never missing, so it's looked for.
 			isIn := !missing[e.Name] && res.State != check.Deferred
-			entries = append(entries, listed{Kind: name, Name: e.Name, File: e.File, Line: e.Line, Group: e.Group, Note: e.Note, Installed: isIn})
+			if e.Off && isIn {
+				var err error
+				if isIn, err = installed(ctx, k, e.Name); err != nil {
+					return err
+				}
+			}
+			entries = append(entries, listed{Kind: name, Name: e.Name, File: e.File, Line: e.Line, Group: e.Group, Note: e.Note, Installed: isIn, Off: e.Off})
 		}
 	}
 	if a.json {
@@ -96,14 +105,17 @@ func (a *app) list(ctx context.Context, r *run, args []string) error {
 	var b strings.Builder
 	fmt.Fprintf(&b, "kit list · %s\n", r.machine)
 	for _, e := range entries {
-		line := fmt.Sprintf("%-*s  %-*s  %-*s  %s", kindWidth, e.Kind, nameWidth, e.Name, fileWidth, e.File, e.Group)
-		if !e.Installed {
+		line := strings.TrimRight(fmt.Sprintf("%-*s  %-*s  %-*s  %s", kindWidth, e.Kind, nameWidth, e.Name, fileWidth, e.File, e.Group), " ")
+		switch {
+		case e.Off:
+			line += "  (off)"
+		case !e.Installed:
 			line += "  (missing)"
 		}
 		if e.Note != "" {
 			line += "  # " + e.Note
 		}
-		b.WriteString(strings.TrimRight(line, " ") + "\n")
+		b.WriteString(line + "\n")
 	}
 	_, err := fmt.Fprint(a.colors(a.Stdout), b.String())
 	return err
@@ -166,10 +178,9 @@ func (a *app) why(ctx context.Context, r *run, name string) error {
 			continue
 		}
 		w := why{Kind: kindName, Step: k.Title(), Declared: declared, Installed: isIn}
-		_, readOnly := k.(kind.ReadOnly)
-		d := r.decls(kindName)
+		_, outside := k.(kind.Declarer)
 		w.ForThisMac = slices.ContainsFunc(declared, func(e config.Entry) bool {
-			return readOnly || e.File == d.file(true) || e.File == d.file(false)
+			return outside || e.File == config.Shared || e.File == r.machine
 		})
 		if d, ok := k.(kind.Dependents); ok && isIn {
 			if w.NeededBy, err = d.NeededBy(ctx, name); err != nil {

@@ -57,8 +57,8 @@ type macFile struct {
 	Description string `toml:"description"`
 }
 
-// macName is what a Mac's name may be: it names the Mac's own files, as in
-// brew.laptop.
+// macName is what a Mac's name may be: it names the Mac's own declarations
+// file, as in laptop.
 var macName = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
 // Load reads the config repository in dir, checking its settings: a format
@@ -103,8 +103,11 @@ func Load(dir string) (*Config, error) {
 	}
 	cfg := &Config{Dir: dir, Format: f.Format, MinimumKit: f.MinimumKit, Primary: f.Primary, Macs: make(map[string]Mac, len(f.Macs))}
 	for name, m := range f.Macs {
-		if !macName.MatchString(name) {
+		switch {
+		case !macName.MatchString(name):
 			return nil, fmt.Errorf("%s: %q can't be a Mac's name: use lower-case letters, digits and hyphens", File, name)
+		case name == Shared:
+			return nil, fmt.Errorf("%s: a Mac can't be called %s: that's the file every Mac reads", File, Shared)
 		}
 		cfg.Macs[name] = Mac{Name: name, Description: m.Description}
 	}
@@ -113,6 +116,9 @@ func Load(dir string) (*Config, error) {
 		return nil, fmt.Errorf("%s: no primary: name the Mac that hears about every Mac's problems, one of %s", File, cfg.macList())
 	case !cfg.Knows(f.Primary):
 		return nil, fmt.Errorf("%s: the primary is %s, which isn't one of its Macs (%s)", File, f.Primary, cfg.macList())
+	}
+	if err := cfg.checkFiles(); err != nil {
+		return nil, err
 	}
 	return cfg, nil
 }

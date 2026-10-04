@@ -154,9 +154,9 @@ func (a *app) driftItems(ctx context.Context, r *run, only []string) ([]driftIte
 		if res.State == check.Failed {
 			return nil, fmt.Errorf("couldn't check %s: %s", k.Title(), res.Reason)
 		}
-		_, readOnly := k.(kind.ReadOnly)
+		_, outside := k.(kind.Declarer)
 		for _, it := range res.Items {
-			items = append(items, driftItem{Item: it, Kind: name, Choices: choices(it, !readOnly)})
+			items = append(items, driftItem{Item: it, Kind: name, Choices: choices(it, !outside)})
 		}
 	}
 	return items, nil
@@ -342,12 +342,11 @@ func (a *app) askAbout(ctx context.Context, r *run, items []driftItem, opts reco
 
 // askGroup asks which group of the file an adopted item goes in.
 func (a *app) askGroup(ctx context.Context, r *run, d decision) (string, error) {
-	decls := r.decls(d.item.Kind)
-	if !decls.grouped() {
+	if !config.Grouped(d.item.Kind) {
 		return "", nil
 	}
-	file := decls.file(d.shared)
-	headings, err := decls.groups(file)
+	file := r.file(d.shared)
+	headings, err := r.cfg.Groups(d.item.Kind, file)
 	if err != nil {
 		return "", err
 	}
@@ -357,7 +356,7 @@ func (a *app) askGroup(ctx context.Context, r *run, d decision) (string, error) 
 			options = append(options, h)
 		}
 	}
-	i, err := a.Choose(ctx, fmt.Sprintf("Which group of %s for %s?", file, d.item.Name), options)
+	i, err := a.Choose(ctx, fmt.Sprintf("Which group of [%s] in %s for %s?", config.Header(d.item.Kind), file, d.item.Name), options)
 	if errors.Is(err, ask.ErrCancelled) {
 		return "", errors.New("cancelled: nothing was changed")
 	}
@@ -438,7 +437,7 @@ func carryOutOne(ctx context.Context, r *run, c *changes, d decision, note strin
 	k := r.kindsByName[d.item.Kind]
 	switch d.action {
 	case adopt:
-		file := r.decls(d.item.Kind).file(d.shared)
+		file := r.file(d.shared)
 		group := d.group
 		if group == config.ToBeSorted {
 			group = ""

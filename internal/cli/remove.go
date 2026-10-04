@@ -57,7 +57,7 @@ func (a *app) remove(ctx context.Context, r *run, kindName string, names []strin
 // Mac's file, and the shared one with shared.
 func removeOne(ctx context.Context, r *run, c *changes, k kind.Kind, name string, shared bool) check.Result {
 	kindName := k.Name()
-	if d, ok := k.(kind.ReadOnly); ok {
+	if d, ok := k.(kind.Declarer); ok {
 		where, err := r.where(kindName, name)
 		if err != nil {
 			return check.Result{State: check.Failed, Reason: err.Error()}
@@ -66,8 +66,7 @@ func removeOne(ctx context.Context, r *run, c *changes, k kind.Kind, name string
 			return check.Result{State: check.Failed, Reason: fmt.Sprintf("declared in %s, line %d: %s", where[0].File, where[0].Line, d.HowToDeclare(where[0].Name))}
 		}
 	}
-	d := r.decls(kindName)
-	own, sharedFile := d.file(false), d.file(true)
+	own, sharedFile := r.file(false), r.file(true)
 	where, err := r.where(kindName, name)
 	if err != nil {
 		return check.Result{State: check.Failed, Reason: err.Error()}
@@ -96,7 +95,7 @@ func removeOne(ctx context.Context, r *run, c *changes, k kind.Kind, name string
 		if file == own && !inOwn || file == sharedFile && !inShared {
 			continue
 		}
-		if err := d.undeclare(file, name); err != nil {
+		if err := r.cfg.Undeclare(kindName, file, name); err != nil {
 			return check.Result{State: check.Failed, Reason: verb + ", but couldn't undeclare: " + err.Error()}
 		}
 		c.changed(file)

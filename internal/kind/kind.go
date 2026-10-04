@@ -29,7 +29,8 @@ type Installed struct {
 
 // Kind is a list of things of one sort.
 type Kind interface {
-	// Name names the kind, its list files and its step, as in brew.
+	// Name names the kind, its items and its step, as in brew; the config
+	// declares it in the section that names it, as in [homebrew formulae].
 	Name() string
 	// Title is the step's title, as in Formulae.
 	Title() string
@@ -72,31 +73,25 @@ type Dependents interface {
 	NeededBy(ctx context.Context, name string) ([]string, error)
 }
 
-// Declarer is a kind declared in files of its own, outside kit's lists:
-// tmux's plugins in tmux's config, MCP servers in the config repository's
-// JSON.
+// Declarer is a kind declared outside the config repository, in a file of
+// its own that kit reads but doesn't write: tmux's plugins, in tmux's
+// config, where the plugin manager reads them.
 type Declarer interface {
-	// Declared is what the kind's files declare for this Mac.
+	// Declared is what the kind's file declares.
 	Declared() (config.List, error)
-}
-
-// Writer is a Declarer whose files kit writes, through the kind.
-type Writer interface {
-	// FileFor is the file a thing is declared in: the one every Mac reads,
-	// or this Mac's own.
-	FileFor(shared bool) string
-	// Where are the entries declaring name, in every Mac's files.
-	Where(name string) ([]config.Entry, error)
-	// Adopt declares name, as it's installed, in file, with note.
-	Adopt(ctx context.Context, file, name, note string) error
-	// Undeclare takes name out of file.
-	Undeclare(file, name string) error
-}
-
-// ReadOnly is a Declarer whose files kit reads but doesn't write.
-type ReadOnly interface {
 	// HowToDeclare says how to declare, or undeclare, name by hand.
 	HowToDeclare(name string) string
+}
+
+// Valued is a kind whose declarations carry a value after each name: an MCP
+// server's definition, as claude mcp add's options.
+type Valued interface {
+	// Values reads what list declares, values and all: the list as it
+	// compares, the entries declared off marked so. A value that doesn't
+	// read is refused.
+	Values(list config.List) (config.List, error)
+	// Value is the value to declare name with, as it's installed.
+	Value(ctx context.Context, name string) (string, error)
 }
 
 // Describer is a kind that says what a thing is, for the note kit writes

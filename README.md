@@ -28,11 +28,13 @@ and run `kit status`.
 kit reads its config repository from `~/.config/kit` (or `$KIT_CONFIG`):
 
 ```
-kit.toml          your Macs and which is the primary
-brew, cask, ...   what every Mac declares, a file a kind (app, npm, composer, go, gh, login)
-brew.<mac>, ...   what one Mac declares
-paths             the directories kit puts on its PATH
+kit.toml   your Macs, and which is the primary
+shared     what every Mac declares
+<mac>      what one Mac declares, a file each, named after it
 ```
+
+Each declarations file is sections of flat lines, as in `[homebrew formulae]` then a name a
+line, a `# note` after any; `[paths]` is the directories kit puts on its PATH.
 
 ## Development
 

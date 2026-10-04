@@ -17,12 +17,10 @@ import (
 func laptopWorld(t *testing.T) *world {
 	t.Helper()
 	w := newWorld(t, map[string]string{
-		"kit.toml":    twoMacs,
-		"brew":        "# Shell\njq\nowner/tap/tool\n",
-		"brew.laptop": "go\n",
-		"brew.studio": "ffmpeg\n",
-		"cask":        "ghostty\n",
-		"paths":       "~/.local/bin\n/opt/homebrew/bin\n",
+		"kit.toml": twoMacs,
+		"shared":   "[paths]\n~/.local/bin\n/opt/homebrew/bin\n\n[homebrew formulae]\n# Shell\njq\nowner/tap/tool\n\n[homebrew casks]\nghostty\n",
+		"laptop":   "[homebrew formulae]\ngo\n",
+		"studio":   "[homebrew formulae]\nffmpeg\n",
 	})
 	w.write(t, filepath.Join(".local", "state", "kit", "machine"), "laptop\n")
 	// The drift was first seen two days ago, so it needs attention.
@@ -79,9 +77,9 @@ func TestStatusJSON(t *testing.T) {
 
 func TestStatusWithNothingToAttendTo(t *testing.T) {
 	w := laptopWorld(t)
-	w.write(t, filepath.Join(".config", "kit", "brew.laptop"), "go\nffmpeg\nnode@20\n")
-	w.write(t, filepath.Join(".config", "kit", "brew.studio"), "")
-	w.write(t, filepath.Join(".config", "kit", "cask.laptop"), "firefox\n")
+	w.writeSection(t, "laptop", "homebrew formulae", "go\nffmpeg\nnode@20\n")
+	w.writeSection(t, "studio", "homebrew formulae", "")
+	w.writeSection(t, "laptop", "homebrew casks", "firefox\n")
 	out, errOut, status := w.run(t, "status")
 	if !strings.HasSuffix(out, "Nothing needs attention\n") || errOut != "" || status != 0 {
 		t.Errorf("kit status printed\n%s%q, exit %d; want nothing needing attention, exit 0", out, errOut, status)
@@ -130,7 +128,7 @@ func TestStatusNeedsTheMacsNameFirst(t *testing.T) {
 		{machine: "", want: "kit: this Mac has no name yet: run kit machine <name>, one of laptop, studio\n"},
 		{machine: "mini\n", want: "kit: this Mac is named mini, which kit.toml doesn't know: run kit machine <name>, one of laptop, studio\n"},
 	} {
-		w := newWorld(t, map[string]string{"kit.toml": twoMacs, "brew.laptop": "go\n"})
+		w := newWorld(t, map[string]string{"kit.toml": twoMacs, "laptop": "[homebrew formulae]\ngo\n"})
 		if tt.machine != "" {
 			w.write(t, filepath.Join(".local", "state", "kit", "machine"), tt.machine)
 		}
@@ -224,7 +222,7 @@ func TestStatusQuietensNewDrift(t *testing.T) {
 // A kind with nothing declared for the Mac, whose program isn't installed,
 // has nothing to check, so its step isn't in the run.
 func TestStatusLeavesOutAKindWithNothingToCheck(t *testing.T) {
-	w := newWorld(t, map[string]string{"kit.toml": twoMacs, "brew.studio": "ffmpeg\n"})
+	w := newWorld(t, map[string]string{"kit.toml": twoMacs, "studio": "[homebrew formulae]\nffmpeg\n"})
 	w.write(t, filepath.Join(".local", "state", "kit", "machine"), "laptop\n")
 	w.fake.On("brew", "--prefix").Fails(errNotFound)
 	w.fake.On("git", "-C", filepath.Join(w.home, ".config", "kit"), "remote", "get-url", "origin").Prints("git@github.com:someone/kit-config.git\n")

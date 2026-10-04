@@ -15,57 +15,10 @@ import (
 	"github.com/leeovery/kit/internal/runner/runnertest"
 )
 
-// shared declares two user-level servers, one off; laptop's file declares
-// one more, and a project's two.
-const (
-	shared = `{
-  "docs": {
-    "_note": "the docs server",
-    "type": "http",
-    "url": "https://docs.example.com/mcp"
-  },
-  "tablet": {
-    "_enabled": false,
-    "args": ["-c", "tablet-mcp"],
-    "command": "zsh",
-    "type": "stdio"
-  }
-}
-`
-	laptop = `{
-  "design": {
-    "headers": {
-      "Authorization": "Bearer ${DESIGN_KEY}"
-    },
-    "type": "http",
-    "url": "https://design.example.com/mcp"
-  },
-  "~/Code/site": {
-    "mail": {
-      "args": ["-y", "mail-mcp"],
-      "command": "npx",
-      "env": {
-        "MAIL_API_KEY": "${MAIL_API_KEY_SITE}"
-      },
-      "type": "stdio"
-    },
-    "pages": {
-      "type": "http",
-      "url": "https://pages.example.com/mcp"
-    }
-  },
-  "~/Code/gone": {
-    "tracker": {
-      "type": "http",
-      "url": "https://tracker.example.com/mcp"
-    }
-  }
-}
-`
-	// claudeJSON is what Claude Code has installed: docs; design, with its
-	// key in plain text; the site's mail, with its key in plain text, and
-	// pages; an extra; and another project's server.
-	claudeJSON = `{
+// claudeJSON is what Claude Code has installed: docs; design, with its key
+// in plain text; the site's mail, with its key in plain text, and pages; an
+// extra; and another project's server.
+const claudeJSON = `{
   "numStartups": 12,
   "mcpServers": {
     "docs": {"type": "http", "url": "https://docs.example.com/mcp"},
@@ -84,67 +37,71 @@ const (
     "HOME/Code/empty": {"mcpServers": {}}
   }
 }`
-)
 
-// world is a home with Claude Code's config in it, and a config repository
-// declaring servers for laptop.
-func world(t *testing.T) (home, dir string) {
+// declared is what laptop declares: docs; tablet, off; design and the
+// site's mail, their keys named; the site's pages; and a server for a folder
+// that isn't here.
+func declared() config.List {
+	e := func(name, value string, line int) config.Entry {
+		return config.Entry{Name: name, Value: value, File: "laptop", Line: line}
+	}
+	return config.List{Kind: "claude-mcp", Entries: []config.Entry{
+		e("docs", "--transport http https://docs.example.com/mcp", 2),
+		e("tablet", "--off -- zsh -c tablet-mcp", 3),
+		e("design", `--transport http https://design.example.com/mcp --header "Authorization: Bearer ${DESIGN_KEY}"`, 4),
+		e("~/Code/site:mail", "--env MAIL_API_KEY=${MAIL_API_KEY_SITE} -- npx -y mail-mcp", 7),
+		e("~/Code/site:pages", "--transport http https://pages.example.com/mcp", 8),
+		e("~/Code/gone:tracker", "--transport http https://tracker.example.com/mcp", 11),
+	}}
+}
+
+// world is a home with Claude Code's config in it, the site's folder there.
+func world(t *testing.T) string {
 	t.Helper()
-	home, dir = t.TempDir(), t.TempDir()
-	write(t, filepath.Join(home, ".claude.json"), strings.ReplaceAll(claudeJSON, "HOME", home))
-	write(t, filepath.Join(dir, "mcp.json"), shared)
-	write(t, filepath.Join(dir, "mcp.laptop.json"), laptop)
+	home := t.TempDir()
+	if err := os.WriteFile(filepath.Join(home, ".claude.json"), []byte(strings.ReplaceAll(claudeJSON, "HOME", home)), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.MkdirAll(filepath.Join(home, "Code", "site"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	return home, dir
+	return home
 }
 
-func write(t *testing.T, path, content string) {
-	t.Helper()
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		t.Fatal(err)
-	}
-}
-
-// newMCP is the kind, with claude installed as far as the fake says.
-func newMCP(t *testing.T, fake *runnertest.Fake, home, dir string) *mcp.MCP {
+// newMCP is the kind, with claude installed as far as the fake says, and
+// laptop's servers read.
+func newMCP(t *testing.T, fake *runnertest.Fake, home string) (*mcp.MCP, config.List) {
 	t.Helper()
 	fake.On("claude", "--version")
-	return mcp.New(fake, home, dir, "laptop", []string{"laptop", "studio"})
+	m := mcp.New(fake, home)
+	list, err := m.Values(declared())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return m, list
 }
 
-func TestDeclared(t *testing.T) {
-	home, dir := world(t)
-	got, err := newMCP(t, runnertest.New(t), home, dir).Declared()
-	want := []config.Entry{
-		{Name: "docs", File: "mcp.json", Line: 2, Note: "the docs server"},
-		{Name: "tablet", File: "mcp.json", Line: 7, Off: true},
-		{Name: "design", File: "mcp.laptop.json", Line: 2},
-		{Name: "~/Code/gone:tracker", File: "mcp.laptop.json", Line: 24},
-		{Name: "~/Code/site:mail", File: "mcp.laptop.json", Line: 10},
-		{Name: "~/Code/site:pages", File: "mcp.laptop.json", Line: 18},
-	}
-	if err != nil || got.Kind != "mcp" || !slices.Equal(got.Entries, want) {
-		t.Errorf("Declared() = %+v, %v\nwant %+v", got.Entries, err, want)
+func TestValuesMarkWhatsOff(t *testing.T) {
+	_, list := newMCP(t, runnertest.New(t), world(t))
+	for _, e := range list.Entries {
+		if e.Off != (e.Name == "tablet") {
+			t.Errorf("%s: Off = %v", e.Name, e.Off)
+		}
 	}
 }
 
-func TestDeclaredRefuses(t *testing.T) {
-	for name, tt := range map[string]struct{ file, want string }{
-		"a key in plain text": {`{"design": {"type": "http", "url": "https://x.example.com", "headers": {"Authorization": "Bearer abc"}}}`, "mcp.laptop.json: design: headers.Authorization holds a key in plain text"},
-		"no command or url":   {`{"odd": {"type": "stdio"}}`, "mcp.laptop.json: odd: a definition needs a command or a url"},
-		"not JSON":            {`{"docs": `, "mcp.laptop.json: not JSON kit reads"},
-		"a server in both":    {`{"docs": {"type": "http", "url": "https://docs.example.com/mcp"}}`, "mcp.laptop.json: docs is in mcp.json too"},
-		"_enabled not a bool": {`{"x": {"_enabled": "no", "command": "x"}}`, "x: _enabled isn't true or false"},
+func TestValuesRefuse(t *testing.T) {
+	for value, want := range map[string]string{
+		`--transport http https://x.example.com --header "Authorization: Bearer abc"`: "laptop:2: x: headers.Authorization holds a key in plain text",
+		`--transport http`:      "laptop:2: x: neither a URL nor a command",
+		`--frobnicate -- x-mcp`: "kit doesn't know the option --frobnicate",
+		`{"type": `:             "its JSON doesn't read",
 	} {
-		t.Run(name, func(t *testing.T) {
-			home, dir := world(t)
-			write(t, filepath.Join(dir, "mcp.laptop.json"), tt.file)
-			if _, err := newMCP(t, runnertest.New(t), home, dir).Declared(); err == nil || !strings.Contains(err.Error(), tt.want) {
-				t.Errorf("Declared() error = %v, want %q", err, tt.want)
-			}
-		})
+		m := mcp.New(runnertest.New(t), t.TempDir())
+		_, err := m.Values(config.List{Entries: []config.Entry{{Name: "x", Value: value, File: "laptop", Line: 2}}})
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("Values(%q) error = %v, want %q", value, err, want)
+		}
 	}
 }
 
@@ -152,22 +109,18 @@ func TestDeclaredRefuses(t *testing.T) {
 // never what: the keys in plain text stay unsaid. A server declared off is
 // neither missing nor extra; a project's whose folder isn't here waits.
 func TestCompare(t *testing.T) {
-	home, dir := world(t)
-	m := newMCP(t, runnertest.New(t), home, dir)
-	list, err := m.Declared()
-	if err != nil {
-		t.Fatal(err)
-	}
+	m, list := newMCP(t, runnertest.New(t), world(t))
 	got := kind.Compare(t.Context(), m, list)
 	want := []check.Item{
-		{ID: "mcp:~/Code/gone:tracker", Name: "~/Code/gone:tracker", State: kind.Missing, Detail: "the folder isn't here yet"},
-		{ID: "mcp:design", Name: "design", State: kind.Changed, Detail: "installed differently: headers", Action: kind.Install},
-		{ID: "mcp:~/Code/site:mail", Name: "~/Code/site:mail", State: kind.Changed, Detail: "installed differently: env", Action: kind.Install},
-		{ID: "mcp:stray", Name: "stray", State: kind.Extra},
-		{ID: "mcp:~/Code/other:docs", Name: "~/Code/other:docs", State: kind.Extra},
+		{ID: "claude-mcp:~/Code/gone:tracker", Name: "~/Code/gone:tracker", State: kind.Missing, Detail: "the folder isn't here yet"},
+		{ID: "claude-mcp:design", Name: "design", State: kind.Changed, Detail: "installed differently: headers", Action: kind.Install},
+		{ID: "claude-mcp:~/Code/site:mail", Name: "~/Code/site:mail", State: kind.Changed, Detail: "installed differently: env", Action: kind.Install},
+		{ID: "claude-mcp:stray", Name: "stray", State: kind.Extra},
+		{ID: "claude-mcp:~/Code/other:docs", Name: "~/Code/other:docs", State: kind.Extra},
 	}
-	slices.SortFunc(got.Items, func(a, b check.Item) int { return strings.Compare(a.State+a.ID, b.State+b.ID) })
-	slices.SortFunc(want, func(a, b check.Item) int { return strings.Compare(a.State+a.ID, b.State+b.ID) })
+	by := func(a, b check.Item) int { return strings.Compare(a.State+a.ID, b.State+b.ID) }
+	slices.SortFunc(got.Items, by)
+	slices.SortFunc(want, by)
 	if got.Summary != "5 declared, 4 installed; 2 changed; 1 off" || !slices.Equal(got.Items, want) {
 		t.Errorf("Compare() = %+v\nwant items %+v", got, want)
 	}
@@ -178,10 +131,11 @@ func TestCompare(t *testing.T) {
 }
 
 func TestWithoutClaude(t *testing.T) {
-	home, dir := world(t)
-	fake := runnertest.New(t)
-	m := mcp.New(fake, home, dir, "laptop", []string{"laptop", "studio"})
-	list, _ := m.Declared()
+	m := mcp.New(runnertest.New(t), world(t))
+	list, err := m.Values(declared())
+	if err != nil {
+		t.Fatal(err)
+	}
 	if got := kind.Compare(t.Context(), m, list); got.State != check.Deferred || got.Reason != "needs claude, which isn't installed" {
 		t.Errorf("Compare() = %+v, want it deferred", got)
 	}
@@ -191,18 +145,14 @@ func TestWithoutClaude(t *testing.T) {
 // project's in local scope, run in its folder; the definition handed over
 // names its keys, never holds them.
 func TestInstallAndRemove(t *testing.T) {
-	home, dir := world(t)
-	site := filepath.Join(home, "Code", "site")
+	home := world(t)
 	fake := runnertest.New(t)
 	fake.On("claude", "mcp", "remove", "-s", "user", "design")
 	fake.On("claude", "mcp", "add-json", "-s", "user", "design", `{"headers":{"Authorization":"Bearer ${DESIGN_KEY}"},"type":"http","url":"https://design.example.com/mcp"}`)
 	fake.On("claude", "mcp", "remove", "-s", "local", "mail")
 	fake.On("claude", "mcp", "add-json", "-s", "local", "mail", `{"args":["-y","mail-mcp"],"command":"npx","env":{"MAIL_API_KEY":"${MAIL_API_KEY_SITE}"},"type":"stdio"}`)
 	fake.On("claude", "mcp", "remove", "-s", "user", "stray")
-	m := newMCP(t, fake, home, dir)
-	if _, err := m.Declared(); err != nil {
-		t.Fatal(err)
-	}
+	m, _ := newMCP(t, fake, home)
 	if err := m.Install(t.Context(), []string{"design", "~/Code/site:mail"}); err != nil {
 		t.Fatal(err)
 	}
@@ -210,8 +160,8 @@ func TestInstallAndRemove(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, c := range fake.Commands() {
-		if wantDir := map[string]string{"local": site, "user": ""}[c.Args[min(3, len(c.Args)-1)]]; c.Name == "claude" && len(c.Args) > 3 && c.Dir != wantDir {
-			t.Errorf("ran %s in %q, want %q", c, c.Dir, wantDir)
+		if c.Name == "claude" && slices.Contains(c.Args, "local") && c.Dir != filepath.Join(home, "Code", "site") {
+			t.Errorf("ran %s in %q, want the project's folder", c, c.Dir)
 		}
 	}
 	if err := m.Install(t.Context(), []string{"nosuch"}); err == nil {
@@ -219,40 +169,22 @@ func TestInstallAndRemove(t *testing.T) {
 	}
 }
 
-// Adopting declares a server as it's installed, its empty fields left out;
-// one holding a key in plain text isn't declared.
-func TestAdopt(t *testing.T) {
-	home, dir := world(t)
-	m := newMCP(t, runnertest.New(t), home, dir)
-	if err := m.Adopt(t.Context(), "mcp.laptop.json", "stray", "a stray server"); err != nil {
-		t.Fatal(err)
+// Declaring a server Claude Code has writes its line as claude mcp add's
+// options, its empty fields left out; one holding a key in plain text isn't
+// declared, and the key goes unsaid.
+func TestValue(t *testing.T) {
+	m, _ := newMCP(t, runnertest.New(t), world(t))
+	if got, err := m.Value(t.Context(), "stray"); err != nil || got != "-- stray-mcp" {
+		t.Errorf("Value(stray) = %q, %v", got, err)
 	}
-	where, err := m.Where("stray")
-	if err != nil || len(where) != 1 || where[0].File != "mcp.laptop.json" || where[0].Note != "a stray server" {
-		t.Errorf("Where(stray) = %+v, %v", where, err)
+	if got, err := m.Value(t.Context(), "~/Code/site:pages"); err != nil || got != "--transport http https://pages.example.com/mcp" {
+		t.Errorf("Value(pages) = %q, %v", got, err)
 	}
-	if got := read(t, filepath.Join(dir, "mcp.laptop.json")); !strings.Contains(got, "  \"stray\": {\n    \"_note\": \"a stray server\",\n    \"command\": \"stray-mcp\",\n    \"type\": \"stdio\"\n  },") {
-		t.Errorf("mcp.laptop.json =\n%s\nwant stray declared, its empty args and env left out", got)
-	}
-	err = m.Adopt(t.Context(), "mcp.laptop.json", "design", "")
+	_, err := m.Value(t.Context(), "design")
 	if err == nil || !strings.Contains(err.Error(), "design holds a key in plain text (headers.Authorization)") || strings.Contains(err.Error(), "made-up-key") {
-		t.Errorf("Adopt(design) = %v, want it refused without saying the key", err)
+		t.Errorf("Value(design) = %v, want it refused without the key", err)
 	}
-	if err := m.Adopt(t.Context(), "mcp.laptop.json", "nosuch", ""); err == nil {
-		t.Error("Adopt() of a server not installed = nil error")
-	}
-}
-
-// Where looks in every Mac's files, not this Mac's alone.
-func TestWhereLooksInEveryMacsFiles(t *testing.T) {
-	home, dir := world(t)
-	write(t, filepath.Join(dir, "mcp.studio.json"), `{"pages": {"type": "http", "url": "https://pages.example.com/mcp"}}`)
-	m := newMCP(t, runnertest.New(t), home, dir)
-	where, err := m.Where("pages")
-	if err != nil || len(where) != 1 || where[0].File != "mcp.studio.json" {
-		t.Errorf("Where(pages) = %+v, %v; want studio's", where, err)
-	}
-	if m.FileFor(true) != "mcp.json" || m.FileFor(false) != "mcp.laptop.json" {
-		t.Errorf("FileFor() = %s, %s", m.FileFor(true), m.FileFor(false))
+	if _, err := m.Value(t.Context(), "nosuch"); err == nil {
+		t.Error("Value() of a server not installed = nil error")
 	}
 }

@@ -48,29 +48,29 @@ func TestReconcileJSON(t *testing.T) {
 
 func TestReconcileAdoptsByID(t *testing.T) {
 	w := laptopWorld(t)
-	w.expectSync([]string{"brew.laptop"}, "kit reconcile (laptop): adopt brew:ffmpeg: for screen recordings")
+	w.expectSync([]string{"laptop"}, "kit reconcile (laptop): adopt brew:ffmpeg: for screen recordings")
 	out, errOut, code := w.run(t, "reconcile", "brew:ffmpeg", "--adopt", "--note", "for screen recordings")
-	if !strings.Contains(out, "brew:ffmpeg ok already installed; declared in brew.laptop (To be sorted)\n") || code != 0 {
+	if !strings.Contains(out, "brew:ffmpeg ok already installed; declared in laptop (To be sorted)\n") || code != 0 {
 		t.Errorf("kit reconcile printed\n%s%s exit %d", out, errOut, code)
 	}
-	if got := w.read(t, brewLaptop); got != "go\n\n# To be sorted\nffmpeg   # for screen recordings\n" {
-		t.Errorf("brew.laptop = %q", got)
+	if got := w.readSection(t, "laptop", "homebrew formulae"); got != "go\n\n# To be sorted\nffmpeg   # for screen recordings\n" {
+		t.Errorf("laptop = %q", got)
 	}
 }
 
 // Several items, one decision: one run, and one commit.
 func TestReconcileAdoptsSeveralInOneCommit(t *testing.T) {
 	w := laptopWorld(t)
-	w.expectSync([]string{"brew.laptop", "cask.laptop"}, "kit reconcile (laptop): adopt brew:ffmpeg, adopt cask:firefox")
+	w.expectSync([]string{"laptop"}, "kit reconcile (laptop): adopt brew:ffmpeg, adopt cask:firefox")
 	out, errOut, code := w.run(t, "reconcile", "brew:ffmpeg", "cask:firefox", "--adopt", "--group", "Media")
-	if code != 0 || !strings.Contains(out, "kit-config ok committed and pushed brew.laptop, cask.laptop\n") {
+	if code != 0 || !strings.Contains(out, "kit-config ok committed and pushed laptop\n") {
 		t.Errorf("kit reconcile printed\n%s%s exit %d", out, errOut, code)
 	}
-	if got := w.read(t, brewLaptop); got != "go\n\n# Media\nffmpeg\n" {
-		t.Errorf("brew.laptop = %q", got)
+	if got := w.readSection(t, "laptop", "homebrew formulae"); got != "go\n\n# Media\nffmpeg\n" {
+		t.Errorf("laptop = %q", got)
 	}
-	if got := w.read(t, filepath.Join(".config", "kit", "cask.laptop")); got != "# Media\nfirefox\n" {
-		t.Errorf("cask.laptop = %q", got)
+	if got := w.readSection(t, "laptop", "homebrew casks"); got != "# Media\nfirefox\n" {
+		t.Errorf("laptop = %q", got)
 	}
 	_, errOut, code = w.run(t, "reconcile", "brew:node@20", "brew:nosuch", "--remove")
 	if errOut != "kit: no item brew:nosuch: kit reconcile lists them\n" || code != 2 {
@@ -153,22 +153,22 @@ func TestReconcileAtATerminalAsksFirstThenDoesItAll(t *testing.T) {
 		"firefox (cask)": "leave it for now",
 	})
 	w.fake.On("brew", "uninstall", "--formula", "node@20")
-	w.expectSync([]string{"brew.laptop"}, "kit reconcile (laptop): adopt brew:ffmpeg, remove brew:node@20")
+	w.expectSync([]string{"laptop"}, "kit reconcile (laptop): adopt brew:ffmpeg, remove brew:node@20")
 
 	if _, errOut, code := w.run(t, "reconcile"); code != 0 {
 		t.Fatalf("kit reconcile exit %d: %s", code, errOut)
 	}
 	wantAsked := []string{
 		"ffmpeg (brew): installed, not declared, for 2 days. What now?",
-		"Which group of brew.laptop for ffmpeg?",
+		"Which group of [homebrew formulae] in laptop for ffmpeg?",
 		"node@20 (brew): installed for something since removed, needed by nothing, for 2 days. What now?",
 		"firefox (cask): installed, not declared, for 2 days. What now?",
 	}
 	if !slices.Equal(w.asked, wantAsked) {
 		t.Errorf("asked\n%s\nwant\n%s", strings.Join(w.asked, "\n"), strings.Join(wantAsked, "\n"))
 	}
-	if got := w.read(t, brewLaptop); got != "go\n\n# To be sorted\nffmpeg\n" {
-		t.Errorf("brew.laptop = %q", got)
+	if got := w.readSection(t, "laptop", "homebrew formulae"); got != "go\n\n# To be sorted\nffmpeg\n" {
+		t.Errorf("laptop = %q", got)
 	}
 }
 

@@ -1,11 +1,11 @@
 // Package mcp is the kind of Claude Code's MCP servers: the user-level ones,
 // and each project folder's own, in local scope, private to the user.
-// They're declared in the config repository's mcp.json and mcp.<mac>.json
-// (a server's name and definition, exactly what claude mcp add-json takes;
-// a key naming a project folder holds that project's servers), and found in
-// ~/.claude.json, read directly: claude mcp list starts every server to
-// check it. Keys are never declared, only named as ${VAR}, which Claude Code
-// fills from its environment.
+// They're declared in the config repository's [claude mcp] sections, each a
+// line: the server's name, then claude mcp add's options (or JSON for what
+// they can't say); a project folder's in its own section, [claude mcp
+// ~/Code/site]. They're found in ~/.claude.json, read directly: claude mcp
+// list starts every server to check it. Keys are never declared, only named
+// as ${VAR}, which Claude Code fills from its environment.
 package mcp
 
 import (
@@ -30,118 +30,97 @@ import (
 // notHere is why a project's server waits.
 const notHere = "the folder isn't here yet"
 
+// Server is an MCP server as kit declares it, or finds it installed.
+type Server struct {
+	// Folder is the project folder whose server it is, as written, as in
+	// ~/Code/site: "" for a user-level one.
+	Folder string
+	Name   string
+	// Definition is what claude mcp add-json takes.
+	Definition map[string]any
+	// Off is whether it's declared, but not to be installed.
+	Off bool
+}
+
+// ID is what kit calls the server: its name, or, for a project's, the
+// folder and the name, as in ~/Code/site:resend.
+func (s Server) ID() string {
+	if s.Folder == "" {
+		return s.Name
+	}
+	return s.Folder + ":" + s.Name
+}
+
+// splitID splits a server's id into its folder, "" for a user-level
+// server, and its name.
+func splitID(id string) (folder, name string) {
+	if strings.HasPrefix(id, "~/") || strings.HasPrefix(id, "/") {
+		if i := strings.LastIndex(id, ":"); i > 0 {
+			return id[:i], id[i+1:]
+		}
+	}
+	return "", id
+}
+
 // MCP is Claude Code's MCP servers, driven through a runner.
 type MCP struct {
 	run runner.Runner
 	// home is the user's home, where ~/.claude.json is.
 	home string
-	// dir is the config repository, mac this Mac's name, and macs every
-	// Mac's it knows.
-	dir, mac string
-	macs     []string
-	// declared are the servers declared for this Mac, by id, once Declared
+	// declared are the servers declared for this Mac, by id, once Values
 	// has read them.
 	declared map[string]Server
 }
 
 // New returns Claude Code's MCP servers, driven through run, for the user
-// whose home is home, as the config repository in dir declares them for
-// the Mac named mac, one of macs.
-func New(run runner.Runner, home, dir, mac string, macs []string) *MCP {
-	return &MCP{run: run, home: home, dir: dir, mac: mac, macs: macs, declared: map[string]Server{}}
+// whose home is home.
+func New(run runner.Runner, home string) *MCP {
+	return &MCP{run: run, home: home, declared: map[string]Server{}}
 }
 
-func (*MCP) Name() string    { return "mcp" }
-func (*MCP) Title() string   { return "MCP servers" }
+func (*MCP) Name() string    { return "claude-mcp" }
+func (*MCP) Title() string   { return "Claude MCP servers" }
 func (*MCP) Program() string { return "claude" }
 
-// Declared reads the servers declared for this Mac: the shared file's, then
-// the Mac's own. A server may be in one of them, once.
-func (m *MCP) Declared() (config.List, error) {
-	list := config.List{Kind: m.Name()}
-	m.declared = make(map[string]Server)
-	in := make(map[string]string)
-	for _, file := range []string{FileName(""), FileName(m.mac)} {
-		servers, err := readFile(filepath.Join(m.dir, file))
+// Values reads each declared server's line into its definition, marking
+// those declared off. A line that doesn't read, or holds a key in plain
+// text, is refused.
+func (m *MCP) Values(list config.List) (config.List, error) {
+	m.declared = make(map[string]Server, len(list.Entries))
+	out := list
+	out.Entries = slices.Clone(list.Entries)
+	for i, e := range out.Entries {
+		def, isOff, err := readValue(e.Value)
 		if err != nil {
-			return config.List{Kind: m.Name()}, err
+			return list, fmt.Errorf("%s:%d: %s: %w", e.File, e.Line, e.Name, err)
 		}
-		for _, s := range servers {
-			if other, ok := in[s.ID()]; ok {
-				return config.List{Kind: m.Name()}, fmt.Errorf("%s: %s is in %s too: a server goes in the shared file or a Mac's, not both", file, s.ID(), other)
-			}
-			in[s.ID()] = file
-			m.declared[s.ID()] = s
-			list.Entries = append(list.Entries, config.Entry{Name: s.ID(), File: file, Line: s.Line, Note: s.Note, Off: s.Off})
+		if plain := PlainKeys(def); len(plain) > 0 {
+			return list, fmt.Errorf("%s:%d: %s: %s holds a key in plain text: put the key in 1Password, and name it here as ${VAR}", e.File, e.Line, e.Name, strings.Join(plain, " and "))
 		}
+		folder, name := splitID(e.Name)
+		m.declared[e.Name] = Server{Folder: folder, Name: name, Definition: def, Off: isOff}
+		out.Entries[i].Off = isOff
 	}
-	return list, nil
+	return out, nil
 }
 
-// FileFor is the file a server's declared in: the one every Mac reads, or
-// this Mac's own.
-func (m *MCP) FileFor(shared bool) string {
-	if shared {
-		return FileName("")
-	}
-	return FileName(m.mac)
-}
-
-// Where are the entries declaring the server name, in every Mac's files.
-func (m *MCP) Where(name string) ([]config.Entry, error) {
-	var found []config.Entry
-	for _, file := range m.files() {
-		servers, err := readFile(filepath.Join(m.dir, file))
-		if err != nil {
-			return nil, err
-		}
-		for _, s := range servers {
-			if s.ID() == name {
-				found = append(found, config.Entry{Name: s.ID(), File: file, Line: s.Line, Note: s.Note, Off: s.Off})
-			}
-		}
-	}
-	return found, nil
-}
-
-// files are every Mac's declarations files: the shared one, then each
-// Mac's, by name.
-func (m *MCP) files() []string {
-	files := []string{FileName("")}
-	for _, mac := range m.macs {
-		files = append(files, FileName(mac))
-	}
-	return files
-}
-
-// Adopt declares the server name, as it's installed, in file, with note. A
-// server holding a key in plain text isn't declared: the key goes in
-// 1Password first, named in its definition as ${VAR}.
-func (m *MCP) Adopt(_ context.Context, file, name, note string) error {
+// Value is the line to declare the server name with, after its name, as
+// Claude Code has it, its empty fields left out. A server holding a key in
+// plain text isn't declared: the key goes in 1Password first, named in its
+// definition as ${VAR}.
+func (m *MCP) Value(_ context.Context, name string) (string, error) {
 	servers, err := m.installed()
 	if err != nil {
-		return err
+		return "", err
 	}
 	i := slices.IndexFunc(servers, func(s Server) bool { return s.ID() == name })
 	if i < 0 {
-		return fmt.Errorf("%s isn't installed in Claude Code", name)
+		return "", fmt.Errorf("%s isn't installed in Claude Code", name)
 	}
-	s := servers[i]
-	if plain := PlainKeys(s.Definition); len(plain) > 0 {
-		return fmt.Errorf("%s holds a key in plain text (%s): put the key in 1Password, name it in the server's definition as ${VAR}, then declare it", name, strings.Join(plain, " and "))
+	if plain := PlainKeys(servers[i].Definition); len(plain) > 0 {
+		return "", fmt.Errorf("%s holds a key in plain text (%s): put the key in 1Password, name it in the server's definition as ${VAR}, then declare it", name, strings.Join(plain, " and "))
 	}
-	s.Definition, s.Note = normal(s.Definition), note
-	return Declare(m.dir, file, s)
-}
-
-// Undeclare takes the server name out of file.
-func (m *MCP) Undeclare(file, name string) error {
-	return Undeclare(m.dir, file, name)
-}
-
-// SetOff declares the server name, in file, off or on.
-func (m *MCP) SetOff(file, name string, off bool) error {
-	return SetOff(m.dir, file, name, off)
+	return writeValue(normal(servers[i].Definition), false)
 }
 
 // Installed lists the servers installed, by id, each installed for itself.
@@ -378,4 +357,18 @@ func canonical(v any) (string, error) {
 		return "", err
 	}
 	return strings.TrimSuffix(b.String(), "\n"), nil
+}
+
+// decode decodes JSON data into v, numbers kept as they're written, and
+// nothing after the value.
+func decode(data []byte, v any) error {
+	d := json.NewDecoder(bytes.NewReader(data))
+	d.UseNumber()
+	if err := d.Decode(v); err != nil {
+		return fmt.Errorf("not JSON kit reads: %w", err)
+	}
+	if d.More() {
+		return errors.New("not JSON kit reads: something after the object")
+	}
+	return nil
 }
