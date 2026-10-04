@@ -94,7 +94,7 @@ Built:
 ```
 kit add <kind> <name>...     Install, and declare for this Mac   [--shared] [--temp] [--note] [--group]
 kit remove <kind> <name>...  Uninstall, and undeclare            [--shared]
-kit reconcile [<id>]         Settle drift: adopt, remove, install, undeclare or snooze
+kit reconcile [<id>...]      Settle drift: adopt, remove, install, undeclare or snooze
 kit list [kind]              What's declared for this Mac: file, group, note, installed or not
 kit why <name>               Where it's declared, whether it's installed, what needs it
 kit apply [step...] [--plan] Install what's declared and missing (--plan: say what, do nothing)
@@ -126,9 +126,10 @@ main, pulling with rebase first. A push that fails leaves the commit, and says s
 uninstall it, install it, undeclare it, snooze it for 7 days, leave it, or stop; for one
 declared, which group. Every question comes first; then it does it all, as `kit add` and
 `kit remove` would, and commits and pushes once. Without a terminal, or with `--json`, it lists
-the items with their ids and choices, and `kit reconcile <id> --adopt` (or `--remove`,
-`--install`, `--undeclare`, `--snooze`; `--shared`, `--group`, `--note`) settles one: how an
-agent carries out a person's decision.
+the items with their ids and choices, and `kit reconcile <id>... --adopt` (or `--remove`,
+`--install`, `--undeclare`, `--snooze`; `--shared`, `--group`, `--note`) settles those, every
+id checked before anything's done, in one run and one commit: how an agent carries out a
+person's decisions.
 
 `kit status` runs every step's check (named steps run with what they need): Homebrew, each
 kind, and the config repository being private on GitHub (`config-private`, asked through
