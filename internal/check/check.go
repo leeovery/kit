@@ -60,4 +60,7 @@ type Result struct {
 	Counts map[string]int `json:"counts,omitempty"`
 	// Items are the things that need attention.
 	Items []Item `json:"items,omitempty"`
+	// Done are the items applying the step dealt with, each with the action
+	// it took.
+	Done []Item `json:"done,omitempty"`
 }

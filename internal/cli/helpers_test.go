@@ -34,6 +34,8 @@ type world struct {
 	// path and childEnv are what kit last made its runner with.
 	path     []string
 	childEnv []string
+	// terminal is whether kit's output is a terminal.
+	terminal bool
 }
 
 // newWorld makes a home holding a config repository of files, by name.
@@ -81,7 +83,7 @@ func (w *world) run(t *testing.T, args ...string) (stdout, stderr string, status
 		Now:      func() time.Time { return w.now },
 		Stdout:   &out,
 		Stderr:   &errOut,
-		Terminal: func(io.Writer) bool { return false },
+		Terminal: func(io.Writer) bool { return w.terminal },
 		Width:    func(io.Writer) int { return 80 },
 		Runner: func(path, env []string) runner.Runner {
 			w.path, w.childEnv = path, env

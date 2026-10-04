@@ -326,18 +326,22 @@ func TestApply(t *testing.T) {
 			}
 			return check.Result{State: check.Attention, Summary: "1 declared, 0 installed"}
 		},
-		Apply: func(context.Context) error { applied = append(applied, "brew"); installed = true; return nil },
+		Apply: func(context.Context, check.Result) error {
+			applied = append(applied, "brew")
+			installed = true
+			return nil
+		},
 	}
 	broken := engine.Step{
 		Name: "broken", Title: "Broken",
 		Check: func(context.Context) check.Result { return check.Result{State: check.Attention} },
-		Apply: func(context.Context) error {
+		Apply: func(context.Context, check.Result) error {
 			applied = append(applied, "broken")
 			return errors.New("couldn't install jq")
 		},
 	}
-	fine := engine.Step{Name: "fine", Check: ok("already"), Apply: func(context.Context) error { applied = append(applied, "fine"); return nil }}
-	after := engine.Step{Name: "after", Needs: []string{"broken"}, Check: ok(""), Apply: func(context.Context) error { applied = append(applied, "after"); return nil }}
+	fine := engine.Step{Name: "fine", Check: ok("already"), Apply: func(context.Context, check.Result) error { applied = append(applied, "fine"); return nil }}
+	after := engine.Step{Name: "after", Needs: []string{"broken"}, Check: ok(""), Apply: func(context.Context, check.Result) error { applied = append(applied, "after"); return nil }}
 	manual := engine.Step{Name: "fda", Title: "Full Disk Access", Manual: "add Ghostty to Full Disk Access", Check: func(context.Context) check.Result {
 		return check.Result{State: check.Attention, Summary: "not granted"}
 	}}
@@ -389,7 +393,7 @@ func TestApplyActsOnQuietItems(t *testing.T) {
 			// something to install.
 			return check.Result{State: check.OK, Items: []check.Item{{ID: "brew:jq", Name: "jq", State: "missing", Quiet: "new", Action: "install"}}}
 		},
-		Apply: func(context.Context) error { applied = true; return nil },
+		Apply: func(context.Context, check.Result) error { applied = true; return nil },
 	}
 	p, err := engine.New(s)
 	if err != nil {

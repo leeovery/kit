@@ -74,11 +74,13 @@ var quietLabels = map[string]string{
 	"temporary": "temporary",
 }
 
-// itemGroup is a step's items of one state, quiet for one reason or loud.
+// itemGroup is a step's items of one state, quiet for one reason or loud,
+// and with one action or none.
 type itemGroup struct {
-	state string
-	quiet string
-	names []string
+	state  string
+	quiet  string
+	action string
+	names  []string
 }
 
 // label counts the group for people, as in "2 unused dependencies", or "1
@@ -96,6 +98,9 @@ func (g itemGroup) label() string {
 	if g.quiet != "" {
 		label += " (" + cmp.Or(quietLabels[g.quiet], g.quiet) + ")"
 	}
+	if g.action != "" {
+		label += ", to " + g.action
+	}
 	return label
 }
 
@@ -106,6 +111,11 @@ func (g itemGroup) key() string {
 		return g.state
 	}
 	return g.state + ":" + g.quiet
+}
+
+// id tells groups apart: by state, why they're quiet, and their action.
+func (g itemGroup) id() string {
+	return g.key() + "|" + g.action
 }
 
 // groupItems groups items by state, and why they're quiet, in the order each
@@ -122,17 +132,42 @@ func groupItems(items []check.Item) []itemGroup {
 			if it.Detail != "" {
 				name += " (" + it.Detail + ")"
 			}
-			g := itemGroup{state: it.State, quiet: it.Quiet}
-			i, ok := at[g.key()]
+			g := itemGroup{state: it.State, quiet: it.Quiet, action: it.Action}
+			i, ok := at[g.id()]
 			if !ok {
 				i = len(groups)
-				at[g.key()] = i
+				at[g.id()] = i
 				groups = append(groups, g)
 			}
 			groups[i].names = append(groups[i].names, name)
 		}
 	}
 	return groups
+}
+
+// doneGroups are what applying a step dealt with, by action, in the order
+// each action first comes, each named as done: installed.
+func doneGroups(items []check.Item) []itemGroup {
+	var groups []itemGroup
+	at := make(map[string]int)
+	for _, it := range items {
+		i, ok := at[it.Action]
+		if !ok {
+			i = len(groups)
+			at[it.Action] = i
+			groups = append(groups, itemGroup{action: it.Action})
+		}
+		groups[i].names = append(groups[i].names, it.Name)
+	}
+	return groups
+}
+
+// past is an action as done: install, installed.
+func past(action string) string {
+	if strings.HasSuffix(action, "e") {
+		return action + "d"
+	}
+	return action + "ed"
 }
 
 // summary is a run's last line: how its steps stood.

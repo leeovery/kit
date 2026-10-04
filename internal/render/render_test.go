@@ -206,3 +206,31 @@ func TestQuietItems(t *testing.T) {
 		t.Errorf("pretty printed\n%s\nwant\n%s", pretty.String(), wantPretty)
 	}
 }
+
+func TestActionsAndWhatWasDone(t *testing.T) {
+	events := []event.Event{
+		event.RunStarted{Command: "apply", Machine: "laptop", Steps: []event.Step{{Name: "brew", Title: "Formulae"}, {Name: "cask", Title: "Casks"}}},
+		event.StepFinished{Step: "brew", Result: check.Result{State: check.OK, Summary: "3 declared, all installed", Done: []check.Item{
+			{ID: "brew:jq", Name: "jq", State: "missing", Action: "install"},
+			{ID: "brew:ripgrep", Name: "ripgrep", State: "missing", Action: "install"},
+		}}},
+		event.StepFinished{Step: "cask", Result: check.Result{State: check.Attention, Summary: "2 declared, 0 installed", Items: []check.Item{
+			{ID: "cask:ghostty", Name: "ghostty", State: "missing", Action: "install"},
+			{ID: "cask:zoom", Name: "zoom", State: "missing", Detail: "needs an administrator's password"},
+		}}},
+		event.RunFinished{Counts: map[check.State]int{check.OK: 1, check.Attention: 1}},
+	}
+	var plain, pretty bytes.Buffer
+	show(t, render.NewPlain(&plain), events)
+	show(t, render.NewPretty(&colorprofile.Writer{Forward: &pretty, Profile: colorprofile.NoTTY}, 80, false), events)
+	wantPlain := "kit apply · laptop\nbrew ok 3 declared, all installed\nbrew installed jq, ripgrep\n" +
+		"cask attention 2 declared, 0 installed\ncask missing ghostty (to install)\ncask missing zoom (needs an administrator's password)\n1 needs attention\n"
+	if plain.String() != wantPlain {
+		t.Errorf("plain printed\n%s\nwant\n%s", plain.String(), wantPlain)
+	}
+	wantPretty := "kit apply · laptop\n\n✓ Formulae   3 declared, all installed\n             installed: jq, ripgrep\n" +
+		"! Casks      2 declared, 0 installed\n             1 missing, to install: ghostty\n             1 missing: zoom (needs an administrator's password)\n\n1 needs attention\n"
+	if pretty.String() != wantPretty {
+		t.Errorf("pretty printed\n%s\nwant\n%s", pretty.String(), wantPretty)
+	}
+}

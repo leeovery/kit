@@ -35,14 +35,21 @@ func New(t testing.TB) *Fake {
 func (f *Fake) On(name string, args ...string) *Script {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	s := &Script{argv: slices.Concat([]string{name}, args)}
+	s := &Script{argv: slices.Concat([]string{name}, args), answers: []*answer{{}}}
 	f.scripts = append(f.scripts, s)
 	return s
 }
 
-// Script is the scripted answer to a command.
+// Script is the scripted answers to a command: the first to its first run,
+// the next to its next, and the last to every run after.
 type Script struct {
-	argv     []string
+	argv    []string
+	answers []*answer
+	runs    int
+}
+
+// answer is what one run of a command does.
+type answer struct {
 	stdout   string
 	stderr   string
 	exit     int
@@ -50,34 +57,46 @@ type Script struct {
 	duration time.Duration
 }
 
+func (s *Script) last() *answer {
+	return s.answers[len(s.answers)-1]
+}
+
 // Prints has the command print text on its standard output.
 func (s *Script) Prints(text string) *Script {
-	s.stdout = text
+	s.last().stdout = text
 	return s
 }
 
 // PrintsToStderr has the command print text on its standard error.
 func (s *Script) PrintsToStderr(text string) *Script {
-	s.stderr = text
+	s.last().stderr = text
 	return s
 }
 
 // Exits has the command exit with code.
 func (s *Script) Exits(code int) *Script {
-	s.exit = code
+	s.last().exit = code
 	return s
 }
 
 // Fails has the command not run at all, Run returning err, as for a program
 // that isn't installed (runner.ErrNotFound).
 func (s *Script) Fails(err error) *Script {
-	s.err = err
+	s.last().err = err
 	return s
 }
 
 // Takes has the command report it took d.
 func (s *Script) Takes(d time.Duration) *Script {
-	s.duration = d
+	s.last().duration = d
+	return s
+}
+
+// Then scripts the command's next run, as when what it reports changes,
+// such as a listing once something's installed: by default, nothing printed
+// and exit 0.
+func (s *Script) Then() *Script {
+	s.answers = append(s.answers, &answer{})
 	return s
 }
 
@@ -86,17 +105,22 @@ func (f *Fake) Run(_ context.Context, cmd runner.Command) (runner.Result, error)
 	f.mu.Lock()
 	f.calls = append(f.calls, cmd)
 	s := f.script(cmd)
+	var a *answer
+	if s != nil {
+		a = s.answers[min(s.runs, len(s.answers)-1)]
+		s.runs++
+	}
 	f.mu.Unlock()
 	if s == nil {
 		f.t.Errorf("runnertest: unscripted command %s", cmd)
 		return runner.Result{ExitCode: -1}, fmt.Errorf("%s: %w (unscripted)", cmd.Name, runner.ErrNotFound)
 	}
-	if s.err != nil {
-		return runner.Result{ExitCode: -1}, s.err
+	if a.err != nil {
+		return runner.Result{ExitCode: -1}, a.err
 	}
-	res := runner.Result{Stdout: []byte(s.stdout), Stderr: []byte(s.stderr), ExitCode: s.exit, Duration: s.duration}
-	if s.exit != 0 {
-		return res, &runner.ExitError{Command: cmd.String(), Code: s.exit, Stderr: s.stderr}
+	res := runner.Result{Stdout: []byte(a.stdout), Stderr: []byte(a.stderr), ExitCode: a.exit, Duration: a.duration}
+	if a.exit != 0 {
+		return res, &runner.ExitError{Command: cmd.String(), Code: a.exit, Stderr: a.stderr}
 	}
 	return res, nil
 }

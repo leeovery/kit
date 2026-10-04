@@ -39,8 +39,15 @@ func (p *Plain) Emit(e event.Event) {
 				text = f.Result.Reason
 			}
 			p.printf("%s %s %s\n", f.Step, f.Result.State, text)
+			for _, g := range doneGroups(f.Result.Done) {
+				p.printf("%s %s %s\n", f.Step, past(g.action), strings.Join(g.names, ", "))
+			}
 			for _, g := range groupItems(f.Result.Items) {
-				p.printf("%s %s %s\n", f.Step, g.key(), strings.Join(g.names, ", "))
+				line := fmt.Sprintf("%s %s %s", f.Step, g.key(), strings.Join(g.names, ", "))
+				if g.action != "" {
+					line += " (to " + g.action + ")"
+				}
+				p.printf("%s\n", line)
 			}
 		}
 	case event.RunFinished:

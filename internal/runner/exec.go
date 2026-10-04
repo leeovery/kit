@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -24,6 +25,11 @@ type Exec struct {
 	Path []string
 	Env  []string
 	Now  func() time.Time
+	// Stdin, Stdout and Stderr are kit's terminal, which an interactive
+	// command runs at.
+	Stdin  io.Reader
+	Stdout io.Writer
+	Stderr io.Writer
 }
 
 func (e Exec) Run(ctx context.Context, cmd Command) (Result, error) {
@@ -55,6 +61,13 @@ func (e Exec) start(ctx context.Context, program string, cmd Command) (stdout, s
 	c := exec.CommandContext(ctx, program, cmd.Args...)
 	c.Env = e.Env
 	c.Dir = cmd.Dir
+	if cmd.Interactive {
+		// In kit's own process group, as the terminal's foreground group is
+		// the only one that may read from it.
+		c.Stdin, c.Stdout, c.Stderr = e.Stdin, e.Stdout, e.Stderr
+		c.WaitDelay = waitDelay
+		return nil, nil, c.Run()
+	}
 	if cmd.Input != "" {
 		c.Stdin = strings.NewReader(cmd.Input)
 	}

@@ -172,7 +172,7 @@ func TestStepAppliesByInstallingWhatsMissing(t *testing.T) {
 		reasons: map[string]string{"php": "held"},
 	}
 	s := kind.Step(k, declared("jq", "ripgrep", "php", "go", "typo"))
-	if err := s.Apply(context.Background()); err != nil {
+	if err := s.Apply(context.Background(), s.Check(context.Background())); err != nil {
 		t.Fatalf("Apply() error = %v", err)
 	}
 	if want := [][]string{{"go", "ripgrep"}}; !slices.EqualFunc(k.installs, want, slices.Equal) {
@@ -185,11 +185,8 @@ func TestStepAppliesByInstallingWhatsMissing(t *testing.T) {
 
 func TestStepAppliesNothingWhenNothingsMissing(t *testing.T) {
 	k := &fakeKind{installed: []kind.Installed{{Name: "jq", Explicit: true}, {Name: "ffmpeg", Explicit: true}}}
-	if err := kind.Step(k, declared("jq")).Apply(context.Background()); err != nil || k.installs != nil {
+	s := kind.Step(k, declared("jq"))
+	if err := s.Apply(context.Background(), s.Check(context.Background())); err != nil || k.installs != nil {
 		t.Errorf("Apply() = %v, installing %q; want nothing done", err, k.installs)
-	}
-	k = &fakeKind{err: errors.New("brew leaves exited 1")}
-	if err := kind.Step(k, declared("jq")).Apply(context.Background()); err == nil || err.Error() != "brew leaves exited 1" {
-		t.Errorf("Apply() of a kind that can't list = %v, want its error", err)
 	}
 }

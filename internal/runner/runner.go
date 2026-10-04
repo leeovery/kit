@@ -29,6 +29,10 @@ type Command struct {
 	Input string
 	// Timeout ends it if it runs longer: DefaultTimeout when 0.
 	Timeout time.Duration
+	// Interactive runs it at kit's own terminal, reading from it and writing
+	// to it directly, for a program that asks a person something, such as
+	// sudo its password; nothing it prints is captured.
+	Interactive bool
 }
 
 // String is the command as a shell would take it, each argument quoted
