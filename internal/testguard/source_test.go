@@ -24,7 +24,11 @@ import (
 // processStarters are the functions in production code allowed to start a
 // process, as "file:function". Each runs one program, and tests replace it,
 // so none runs the real one. A new one goes here deliberately.
-var processStarters = []string{}
+var processStarters = []string{
+	// The runner kit runs every program through: tests pass the fake in
+	// runner/runnertest instead.
+	"internal/runner/exec.go:start",
+}
 
 const (
 	guardImport = "github.com/leeovery/kit/internal/testguard"
