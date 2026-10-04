@@ -1,0 +1,28 @@
+{
+  "formulae": [],
+  "casks": [
+    {
+      "token": "ghostty",
+      "full_token": "ghostty",
+      "tap": "homebrew/cask",
+      "old_tokens": [],
+      "desc": "Terminal emulator that uses platform-native UI and GPU acceleration"
+    },
+    {
+      "token": "1password-cli",
+      "full_token": "1password/tap/1password-cli",
+      "tap": "1password/tap",
+      "old_tokens": [],
+      "desc": "Command-line interface for 1Password"
+    },
+    {
+      "token": "tailscale-app",
+      "full_token": "tailscale-app",
+      "tap": "homebrew/cask",
+      "old_tokens": [
+        "tailscale"
+      ],
+      "desc": "Mesh VPN based on WireGuard"
+    }
+  ]
+}

@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/leeovery/kit/internal/cli"
+	"github.com/leeovery/kit/internal/runner"
+	"github.com/leeovery/kit/internal/runner/runnertest"
 )
 
 // twoMacs is a kit.toml knowing two Macs.
@@ -22,18 +24,22 @@ description = "MacBook Pro"
 description = "Mac Studio"
 `
 
-// world is a home of a test's own, with kit's config repository in it, and
-// a clock.
+// world is a home of a test's own, with kit's config repository in it, a
+// clock, and a stand-in for every program kit runs.
 type world struct {
 	home string
 	env  map[string]string
 	now  time.Time
+	fake *runnertest.Fake
+	// path and childEnv are what kit last made its runner with.
+	path     []string
+	childEnv []string
 }
 
 // newWorld makes a home holding a config repository of files, by name.
 func newWorld(t *testing.T, files map[string]string) *world {
 	t.Helper()
-	w := &world{home: t.TempDir(), env: map[string]string{}, now: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)}
+	w := &world{home: t.TempDir(), env: map[string]string{}, now: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC), fake: runnertest.New(t)}
 	for name, content := range files {
 		w.write(t, filepath.Join(".config", "kit", name), content)
 	}
@@ -77,8 +83,15 @@ func (w *world) run(t *testing.T, args ...string) (stdout, stderr string, status
 		Stderr:   &errOut,
 		Terminal: func(io.Writer) bool { return false },
 		Width:    func(io.Writer) int { return 80 },
+		Runner: func(path, env []string) runner.Runner {
+			w.path, w.childEnv = path, env
+			return w.fake
+		},
 	})
 	root.SetArgs(args)
 	status = cli.Execute(t.Context(), root)
 	return out.String(), errOut.String(), status
 }
+
+// errNotFound is what the runner says of a program that isn't installed.
+var errNotFound = runner.ErrNotFound

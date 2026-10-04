@@ -66,16 +66,16 @@ A run that's stopped (an interrupt) fails the steps it hadn't started.
 Built:
 
 ```
-kit log [--json]             What the last run did: every check, every command, with timings
+kit status [step...]         How this Mac stands against the config: what needs attention
+kit log                      What the last run did: every check, every command, with timings
 kit machine [<name>]         This Mac's name: shown, or set (one of kit.toml's Macs)
 kit version                  As --version
 ```
 
-Planned for the first milestone:
-
-```
-kit status [area] [--json]   What's declared against what's on this Mac
-```
+`kit status` runs every step's check (named steps run with what they need): Homebrew, the
+formulae (`brew`), the casks (`cask`), and the config repository being private on GitHub
+(`config-private`, asked through `gh`; one with no remote, or elsewhere, isn't public
+there).
 
 Every command takes `--json` (one document), `--plain` (plain lines, as without a terminal)
 and `--verbose` (commands' output kept whole in the run's log).
@@ -157,8 +157,10 @@ couldn't do its job, as every command does.
 ## Homebrew
 
 Formulae and casks are compared by full name: `owner/tap/name` for a tap's, the plain name for
-Homebrew's own. A declared name that matches nothing is looked up once (`brew info`) to resolve
-aliases and renames before it's called missing. Four states:
+Homebrew's own, so a tap's `php` and Homebrew's own `php` are never taken for each other. A
+declared name that matches nothing is looked up (`brew info`, all at once; one at a time when
+one is unknown, as brew then answers nothing) to resolve aliases and renames before it's
+called missing, and a name Homebrew doesn't know is missing and "unknown". Four states:
 
 - **ok:** declared and installed (installed as another formula's dependency counts);
 - **missing:** declared, not installed;
@@ -167,7 +169,9 @@ aliases and renames before it's called missing. Four states:
   (what `brew autoremove` removes).
 
 What's installed comes from four listings run side by side: formulae with full names, leaves,
-leaves installed on request, and casks.
+leaves installed on request, and casks. kit runs brew in an environment of its own: the
+user's, its own PATH, and Homebrew kept from updating itself, nagging or colouring its
+output.
 
 ## Architecture
 
@@ -198,8 +202,8 @@ built:
 | # | Requirement | Test |
 |---|---|---|
 | 1 | A failed step never ends the run: it's recorded, what needs it is deferred, the rest carry on, the summary prints | `engine.TestAFailedStepNeverEndsTheRun` |
-| 2 | The Mac's name is settled before any config is read, and every reader uses it | milestone 1 |
-| 3 | kit sets its own PATH, from the same list the shell uses | milestone 1 |
+| 2 | The Mac's name is settled before any config is read, and every reader uses it | `cli.TestStatusNeedsTheMacsNameFirst` |
+| 3 | kit sets its own PATH, from the same list the shell uses | `cli.TestStatusRunsProgramsOnKitsOwnPath` |
 | 4 | Questions up front, then unattended: no step asks its own | later |
 | 5 | Full Disk Access for the terminal kit runs in, checked before anything that needs it | later |
 | 6 | 1Password signed in, with an unlocked session, before secrets | later |
