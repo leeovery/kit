@@ -51,7 +51,15 @@ undeclared for adopting, removing or snoozing, and report both.
 A kind becomes a step whose check compares declared with actual.
 
 **A failed step never ends the run.** It's recorded, the steps that need it are deferred with
-the reason, the rest carry on, and the summary always prints.
+the reason, the rest carry on, and the summary always prints. A check that panics fails its
+step alone.
+
+**The engine** orders steps so each comes after what it needs (a cycle, or a need that isn't
+a step, is refused when the pipeline is built), and starts each, in that order, once what it
+needs is done and one of its jobs (4) is free: independent checks run side by side, and with
+one job they run in order. Applying a step that doesn't stand ok runs its apply, then its
+check again. What a person must do by hand shows as an item while the step needs attention.
+A run that's stopped (an interrupt) fails the steps it hadn't started.
 
 ## Commands
 
@@ -189,7 +197,7 @@ built:
 
 | # | Requirement | Test |
 |---|---|---|
-| 1 | A failed step never ends the run: it's recorded, what needs it is deferred, the rest carry on, the summary prints | milestone 1 |
+| 1 | A failed step never ends the run: it's recorded, what needs it is deferred, the rest carry on, the summary prints | `engine.TestAFailedStepNeverEndsTheRun` |
 | 2 | The Mac's name is settled before any config is read, and every reader uses it | milestone 1 |
 | 3 | kit sets its own PATH, from the same list the shell uses | milestone 1 |
 | 4 | Questions up front, then unattended: no step asks its own | later |
