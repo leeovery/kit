@@ -3,6 +3,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -66,10 +67,10 @@ func NewRootCommand(deps Deps) *cobra.Command {
 	return root
 }
 
-// Execute runs root, prints what went wrong, if anything, and returns the
-// status to exit with: 0, attentionStatus, or failedStatus.
-func Execute(root *cobra.Command) int {
-	err := root.Execute()
+// Execute runs root in ctx, prints what went wrong, if anything, and returns
+// the status to exit with: 0, attentionStatus, or failedStatus.
+func Execute(ctx context.Context, root *cobra.Command) int {
+	err := root.ExecuteContext(ctx)
 	if err == nil {
 		return 0
 	}

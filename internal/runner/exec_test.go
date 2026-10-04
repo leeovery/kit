@@ -110,14 +110,42 @@ func TestExecGivesInputAndNothingElse(t *testing.T) {
 }
 
 func TestExecEndsACommandThatRunsTooLong(t *testing.T) {
-	r, _ := programs(t, map[string]string{"slow": "/bin/sleep 10"})
+	// sleep, started in the background, outlives a shell ended alone, holding
+	// the command's output open. A second is long enough for the shell to
+	// start it.
+	r, _ := programs(t, map[string]string{"slow": "/bin/sleep 10 & wait"})
 
 	start := time.Now()
-	res, err := r.Run(t.Context(), runner.Command{Name: "slow", Timeout: 100 * time.Millisecond})
+	res, err := r.Run(t.Context(), runner.Command{Name: "slow", Timeout: time.Second})
 	if !errors.Is(err, context.DeadlineExceeded) || res.ExitCode != -1 {
 		t.Errorf("Run() = exit %d, %v; want the deadline exceeded", res.ExitCode, err)
 	}
-	if took := time.Since(start); took > 5*time.Second {
-		t.Errorf("Run() took %v, want it ended at its timeout", took)
+	if took := time.Since(start); took > 3*time.Second {
+		t.Errorf("Run() took %v, want it ended at its timeout, with everything it started", took)
+	}
+}
+
+func TestExecEndsACommandWhenItsContextIsDone(t *testing.T) {
+	r, _ := programs(t, map[string]string{"slow": `/bin/sleep 10 & echo started > "$1"; wait`})
+	marker := filepath.Join(t.TempDir(), "started")
+	ctx, cancel := context.WithCancel(t.Context())
+	var cancelled time.Time
+	go func() {
+		for {
+			if _, err := os.Stat(marker); err == nil {
+				cancelled = time.Now()
+				cancel()
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}()
+
+	_, err := r.Run(ctx, runner.Command{Name: "slow", Args: []string{marker}})
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("Run() error = %v, want it cancelled", err)
+	}
+	if took := time.Since(cancelled); took > 2*time.Second {
+		t.Errorf("Run() returned %v after its context was done, want it ended then, with everything it started", took)
 	}
 }
