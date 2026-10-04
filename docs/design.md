@@ -273,11 +273,17 @@ and casks; `kit status`, `kit log`, `kit machine`, `kit version`; release toolin
 is ready. One pull request each, in that order (#1–#10). Nothing on the Mac changes but kit's
 own state and logs. Unreleased: the maintainer releases, with mint, once kit is ready.
 
-**2. Packages, read-write — next.** `kit apply` installs what's missing; `kit add` and
-`kit remove` (`--shared`, `--temp`, `--note`); `kit reconcile` with drift counted after 24
-hours and snoozes; `kit list`, `kit why`, `--plan`.
+**2. Packages, read-write — done.** The list writer; syncing the config repository (commit,
+pull with rebase, push); drift counted after 24 hours, with snoozes and temporary installs;
+Homebrew's installs and removes; `kit apply` with `--plan`, an administrator's password asked
+up front; `kit add` and `kit remove` (`--shared`, `--temp`, `--note`, `--group`, the group
+asked at a terminal); `kit reconcile`, at a terminal and by id; `kit list` and `kit why`
+(#12–#19).
 
-**Then:** the other kinds; one set of checks behind bare `kit` and an hourly run, with
+**3. The other kinds — next.** App Store apps, npm, Composer and Go tools, GitHub CLI
+extensions, tmux plugins, login items; then Claude Code's MCP servers, plugins and skills.
+
+**Then:** one set of checks behind bare `kit` and an hourly run, with
 notifications and the primary reading the other Macs; steps for linked files, the shell, git,
 macOS settings, backup exclusions and secrets; settings capture and restore; syncing the config
 repository; the bootstrap and its install script, tested in a virtual machine; data restore and
@@ -287,6 +293,6 @@ short plan before code.
 ## Open-source hygiene
 
 - No personal data in the repo or its history, ever (see House rules in `CLAUDE.md`);
-  `scripts/personal-data-scan` checks the files and every commit in CI.
+  `scripts/personal-data-scan` checks the files and every commit, in `scripts/gates`.
 - Public, under the MIT licence. Released by the maintainer, once kit is ready, with mint,
   GoReleaser and a Homebrew tap.
