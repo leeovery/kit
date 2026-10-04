@@ -16,6 +16,7 @@ import (
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/gitrepo"
 	"github.com/leeovery/kit/internal/kind"
+	"github.com/leeovery/kit/internal/kind/appstore"
 	"github.com/leeovery/kit/internal/kind/brew"
 	"github.com/leeovery/kit/internal/logs"
 	"github.com/leeovery/kit/internal/render"
@@ -93,11 +94,14 @@ type kindStep struct {
 	after []string
 }
 
-// kindSteps are every kind kit knows, in pipeline order.
-func kindSteps(hb *brew.Homebrew) []kindStep {
+// kindSteps are every kind kit knows, in pipeline order, driven through
+// run. The kinds whose programs are formulae come after the formulae, so a
+// new Mac has them before it needs them.
+func kindSteps(hb *brew.Homebrew, run runner.Runner) []kindStep {
 	return []kindStep{
 		{kind: hb.Formulae(), needs: []string{brew.StepName}},
 		{kind: hb.Casks(), needs: []string{brew.StepName}},
+		{kind: appstore.New(run), after: []string{"brew"}},
 	}
 }
 
@@ -177,7 +181,7 @@ func (a *app) prepare(command, logName string) (*run, error) {
 		repo: gitrepo.Repo{Dir: dirs.Config, Run: observed}, record: record,
 	}
 	var kinds []engine.Step
-	for _, ks := range kindSteps(hb) {
+	for _, ks := range kindSteps(hb, observed) {
 		name := ks.kind.Name()
 		list, err := cfg.List(name, machine)
 		if err != nil {

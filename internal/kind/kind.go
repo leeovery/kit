@@ -72,6 +72,27 @@ type Dependents interface {
 	NeededBy(ctx context.Context, name string) ([]string, error)
 }
 
+// Keyed is a kind whose things match by part of their names: an App Store
+// app by its id, an npm package without its version.
+type Keyed interface {
+	// Key is the part of name things match by.
+	Key(name string) string
+}
+
+// Finder is a kind that finds what a person means by what they type, as an
+// App Store app from its name, before it's installed and declared.
+type Finder interface {
+	// Find finds what typed means: one thing, or several to choose from.
+	Find(ctx context.Context, typed string) ([]Found, error)
+}
+
+// Found is a thing a Finder found: the name to declare it by, and a label
+// saying what it is, to choose by.
+type Found struct {
+	Name  string
+	Label string
+}
+
 // Install is the action that installs an item.
 const Install = "install"
 
@@ -122,15 +143,20 @@ func Compare(ctx context.Context, k Kind, declared config.List) check.Result {
 	case err != nil:
 		return check.Result{State: check.Failed, Reason: err.Error()}
 	}
-	byName := make(map[string]Installed, len(installed))
-	for _, it := range installed {
-		byName[it.Name] = it
+	key := func(name string) string { return name }
+	if kd, ok := k.(Keyed); ok {
+		key = kd.Key
 	}
+	byKey := make(map[string]Installed, len(installed))
+	for _, it := range installed {
+		byKey[key(it.Name)] = it
+	}
+	// matched are the installed things declared, by name.
 	matched := make(map[string]bool)
 	var unmatched []string
 	for _, e := range declared.Entries {
-		if _, ok := byName[e.Name]; ok {
-			matched[e.Name] = true
+		if it, ok := byKey[key(e.Name)]; ok {
+			matched[it.Name] = true
 		} else {
 			unmatched = append(unmatched, e.Name)
 		}
@@ -147,8 +173,8 @@ func Compare(ctx context.Context, k Kind, declared config.List) check.Result {
 			switch {
 			case !known:
 				unknown = append(unknown, name)
-			case byName[full].Name != "":
-				matched[full] = true
+			case byKey[key(full)].Name != "":
+				matched[byKey[key(full)].Name] = true
 			default:
 				missing = append(missing, name)
 				fullNames[name] = full

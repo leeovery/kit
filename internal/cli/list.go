@@ -153,9 +153,13 @@ func (a *app) why(ctx context.Context, r *run, name string) error {
 		if err != nil {
 			return err
 		}
-		isIn, err := installed(ctx, k, name)
-		if err != nil {
-			return err
+		// A kind the run doesn't check has its program not installed, so
+		// nothing of it is.
+		isIn := false
+		if slices.Contains(r.kinds, kindName) {
+			if isIn, err = installed(ctx, k, name); err != nil {
+				return err
+			}
 		}
 		if len(declared) == 0 && !isIn {
 			continue
