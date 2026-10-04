@@ -73,8 +73,8 @@ programs. Ever.
   - clears kit's variables (`KIT_`), and those of the programs it drives that can hold real
     tokens or lead to real state (`HOMEBREW_`, `OP_`, `GH_`, `GITHUB_`, `GIT_`, `SSH_`,
     `CLAUDE_`, `ANTHROPIC_`, tmux's) and proxies';
-  - puts only stubs of brew, claude, defaults, gh, git, launchctl, mas, op, open, osascript,
-    sudo, tmutil and tmux on `PATH`;
+  - puts only stubs of brew, claude, composer, defaults, gh, git, go, launchctl, mas, npm, op,
+    open, osascript, sudo, tmutil and tmux on `PATH`;
   - lets `http.DefaultTransport`, and transports cloned from it, dial loopback, and unix
     sockets in the temporary directory, alone.
 - **testguard fails the run, even when every test passed,** when:
@@ -98,8 +98,9 @@ programs. Ever.
   - writes into the home directory, but Go's caches, and into kit's real config and state
     directories, wherever the environment puts them;
   - writes into the directories on `PATH` outside the home, such as `/opt/homebrew/bin`;
-  - running the real brew, mas, gh, op, git, claude, defaults, tmutil, sudo, launchctl,
-    osascript, open and tmux.
+  - running the real brew, mas, gh, op, git, claude, composer, Node (so npm), defaults,
+    tmutil, sudo, launchctl, osascript, open and tmux (Go builds the tests, so it's stubbed,
+    not denied).
 - **It unsets the variables testguard clears** before anything starts, as testguard clears them
   only once every package's init has run.
 - **Each run first proves the sandbox holds**, and `--self-check` does only that: a dial off the

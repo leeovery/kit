@@ -3,7 +3,8 @@
 Set up a Mac from a config repository, and keep it that way.
 
 kit reads a private config repository that declares what each of your Macs should have
-(Homebrew formulae and casks to start with; apps, tools, settings and secrets to come), and
+(Homebrew formulae and casks, App Store apps, npm, Composer and Go tools, GitHub CLI
+extensions, tmux plugins and login items; settings and secrets to come), and
 tells you where a Mac differs. It's pretty at a terminal, plain without one, and `--json`
 for scripts and agents, so an agent can drive it with the same commands you run.
 
@@ -28,7 +29,7 @@ kit reads its config repository from `~/.config/kit` (or `$KIT_CONFIG`):
 
 ```
 kit.toml          your Macs and which is the primary
-brew, cask        what every Mac declares
+brew, cask, ...   what every Mac declares, a file a kind (app, npm, composer, go, gh, login)
 brew.<mac>, ...   what one Mac declares
 paths             the directories kit puts on its PATH
 ```
