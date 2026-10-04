@@ -1,0 +1,10 @@
+kit status · laptop
+homebrew ok /opt/homebrew
+brew attention 6 declared, 4 installed
+brew missing jq, owner/tap/tool
+brew extra ffmpeg
+brew unused-dependency node@20
+cask ok 3 declared, all installed
+kit-config failed gh repo view exited 1: not signed in
+mas deferred needs Homebrew
+1 needs attention, 1 couldn't be checked, 1 deferred
