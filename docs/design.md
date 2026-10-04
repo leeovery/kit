@@ -26,8 +26,9 @@ read, and kept in kit's state; a replacement Mac can take an old one's name.
 
 **Kinds.** A kind is a list of things of one sort. Built: Homebrew formulae (`brew`) and casks
 (`cask`), App Store apps (`app`), npm and Composer global packages (`npm`, `composer`), Go tools
-(`go`), GitHub CLI extensions (`gh`), tmux plugins (`tmux`) and login items (`login`). Later:
-Claude Code's MCP servers, plugins and skills, secrets, macOS settings and backup exclusions.
+(`go`), GitHub CLI extensions (`gh`), tmux plugins (`tmux`), login items (`login`) and Claude
+Code's MCP servers (`mcp`). Later: Claude Code's plugins and skills, secrets, macOS settings
+and backup exclusions.
 Each kind supplies five parts:
 
 - **declared:** what the config lists, the shared file and then this Mac's;
@@ -48,6 +49,7 @@ undeclared for adopting, removing or snoozing, and report both.
 | `gh` | `owner/gh-extension` | `gh extension list` | `gh extension install`, `gh extension remove` |
 | `tmux` | `set -g @plugin` lines in tmux's config | the folders in TPM's plugin folder | cloned as TPM does; removing deletes the folder |
 | `login` | the app's bundle id, `com.example.app` | System Events' login items | System Events (JavaScript for Automation) |
+| `mcp` | in `mcp.json`, `mcp.<mac>.json`: a name and what `claude mcp add-json` takes; a folder's key holds a project's | `~/.claude.json`, read directly | `claude mcp add-json`, `claude mcp remove` (a project's in local scope, in its folder) |
 
 - **Matching:** a kind may match on part of a name: an App Store app on its id (so an app the
   store renames still matches), npm and Composer packages without their versions, GitHub
@@ -59,6 +61,15 @@ undeclared for adopting, removing or snoozing, and report both.
 - **A kind declared in a file of its own** (tmux's plugins, in tmux's config, where the
   plugin manager reads them): kit reads it and never writes it, so there's no adopting or
   undeclaring; `kit add` and `kit remove` say how to declare by hand.
+- **MCP servers** are declared in JSON kit writes itself (keys sorted, two spaces' indent):
+  each a definition plus kit's own `_note` and `_enabled` (false: declared, never installed,
+  and left alone when it is). A server installed otherwise than declared is changed, and
+  applying replaces it. Keys are only ever named, as `${VAR}`, which Claude Code fills from
+  its environment: a definition holding one in plain text is refused, whether declared,
+  adopted or added, and what kit reads from `~/.claude.json` is never shown. A project's
+  server waits while its folder isn't on the Mac. A server is added with Claude Code's own
+  `claude mcp add`, then declared with `kit add mcp` or reconcile's adopt; `kit mcp on|off`
+  declares one on or off and installs or removes it.
 - **Finding what's meant:** `kit add app` finds an app from its name or id (several matches
   are a choice at a terminal, listed without one); `kit add login` takes an app's name, path
   or bundle id. Declaring a login item writes the app's name as the note.
@@ -97,6 +108,7 @@ kit remove <kind> <name>...  Uninstall, and undeclare            [--shared]
 kit reconcile [<kind>...] [<id>...]  Settle drift: adopt, remove, install, undeclare or snooze
 kit list [kind]              What's declared for this Mac: file, group, note, installed or not
 kit why <name>               Where it's declared, whether it's installed, what needs it
+kit mcp on|off <name>...     Declare MCP servers on or off, and install or remove them
 kit apply [step...] [--plan] Install what's declared and missing (--plan: say what, do nothing)
 kit status [step...]         How this Mac stands against the config: what needs attention
 kit log                      What the last run did: every check, every command, with timings
@@ -314,7 +326,11 @@ while applying, and a check can defer its own step; the administrator's password
 any kind; App Store apps; npm and Composer packages; Go tools and GitHub CLI extensions; tmux
 plugins; login items (#21–#26).
 
-**4. Claude Code's kinds — next.** MCP servers, plugins and skills.
+**4. Claude Code's MCP servers — built.** The `mcp` kind, user-level and per project; kinds
+declared in files of their own that kit writes; `kit mcp on|off`; reconcile by kind
+(#30–#32).
+
+**5. Claude Code's plugins and skills — next.**
 
 **Then:** one set of checks behind bare `kit` and an hourly run, with
 notifications and the primary reading the other Macs; steps for linked files, the shell, git,
