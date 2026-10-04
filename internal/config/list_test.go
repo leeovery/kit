@@ -86,3 +86,24 @@ func TestListIgnoresAnotherMacsDuplicates(t *testing.T) {
 		t.Errorf("List() error = %v, want none: each Mac declares its own", err)
 	}
 }
+
+func TestWhere(t *testing.T) {
+	cfg := loadRepo(t, map[string]string{"brew": "jq\n", "brew.laptop": "# Go\ngo   # for kit\n", "brew.studio": "go\nffmpeg\n"})
+	tests := []struct {
+		name string
+		want []config.Entry
+	}{
+		{name: "go", want: []config.Entry{{Name: "go", File: "brew.laptop", Line: 2, Group: "Go", Note: "for kit"}, {Name: "go", File: "brew.studio", Line: 1}}},
+		{name: "jq", want: []config.Entry{{Name: "jq", File: "brew", Line: 1}}},
+		{name: "ripgrep"},
+	}
+	for _, tt := range tests {
+		got, err := cfg.Where("brew", tt.name)
+		if err != nil || !slices.Equal(got, tt.want) {
+			t.Errorf("Where(%s) = %+v, %v; want %+v", tt.name, got, err, tt.want)
+		}
+	}
+	if got := cfg.ListFiles("cask"); !slices.Equal(got, []string{"cask", "cask.laptop", "cask.studio"}) {
+		t.Errorf("ListFiles() = %q", got)
+	}
+}
