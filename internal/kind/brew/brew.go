@@ -187,13 +187,15 @@ func lookUp(ctx context.Context, h Homebrew, which string, names []string) (map[
 	}
 	goesBy := make(map[string]string)
 	for _, f := range in.Formulae {
-		for _, n := range slices.Concat([]string{f.Name, f.FullName, "homebrew/core/" + f.Name}, f.Aliases, f.Oldnames) {
+		for _, n := range slices.Concat([]string{f.Name, "homebrew/core/" + f.Name}, f.Aliases, f.Oldnames) {
 			goesBy[n] = f.FullName
+			goesBy[inTap(f.FullName, n)] = f.FullName
 		}
 	}
 	for _, c := range in.Casks {
-		for _, n := range slices.Concat([]string{c.Token, c.FullToken, "homebrew/cask/" + c.Token}, c.OldTokens) {
+		for _, n := range slices.Concat([]string{c.Token, "homebrew/cask/" + c.Token}, c.OldTokens) {
 			goesBy[n] = c.FullToken
+			goesBy[inTap(c.FullToken, n)] = c.FullToken
 		}
 	}
 	resolved := make(map[string]string, len(names))
@@ -203,6 +205,16 @@ func lookUp(ctx context.Context, h Homebrew, which string, names []string) (map[
 		}
 	}
 	return resolved, nil
+}
+
+// inTap is name in the tap fullName is from, as in owner/tap/tool@2 for the
+// alias tool@2 of owner/tap/tool: a tap's other names are named with it. For
+// Homebrew's own formulae and casks, whose full names have no tap, it's name.
+func inTap(fullName, name string) string {
+	if i := strings.LastIndex(fullName, "/"); i >= 0 {
+		return fullName[:i+1] + name
+	}
+	return name
 }
 
 func set(names []string) map[string]bool {
