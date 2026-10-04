@@ -1,0 +1,64 @@
+{
+  "schema": 1,
+  "kit": "0.1.0",
+  "machine": "laptop",
+  "attention": true,
+  "steps": [
+    {
+      "id": "homebrew",
+      "title": "Homebrew",
+      "state": "ok",
+      "summary": "/opt/homebrew"
+    },
+    {
+      "id": "brew",
+      "title": "Formulae",
+      "state": "attention",
+      "summary": "6 declared, 4 installed",
+      "counts": {
+        "declared": 6,
+        "installed": 4
+      },
+      "items": [
+        {
+          "id": "brew:jq",
+          "name": "jq",
+          "state": "missing"
+        },
+        {
+          "id": "brew:owner/tap/tool",
+          "name": "owner/tap/tool",
+          "state": "missing"
+        },
+        {
+          "id": "brew:ffmpeg",
+          "name": "ffmpeg",
+          "state": "extra"
+        },
+        {
+          "id": "brew:node@20",
+          "name": "node@20",
+          "state": "unused-dependency"
+        }
+      ]
+    },
+    {
+      "id": "cask",
+      "title": "Casks",
+      "state": "ok",
+      "summary": "3 declared, all installed"
+    },
+    {
+      "id": "kit-config",
+      "title": "kit-config",
+      "state": "failed",
+      "reason": "gh repo view exited 1: not signed in"
+    },
+    {
+      "id": "mas",
+      "title": "App Store",
+      "state": "deferred",
+      "reason": "needs Homebrew"
+    }
+  ]
+}

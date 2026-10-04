@@ -2,9 +2,11 @@ package cli_test
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/leeovery/kit/internal/cli"
 )
@@ -20,16 +22,18 @@ description = "MacBook Pro"
 description = "Mac Studio"
 `
 
-// world is a home of a test's own, with kit's config repository in it.
+// world is a home of a test's own, with kit's config repository in it, and
+// a clock.
 type world struct {
 	home string
 	env  map[string]string
+	now  time.Time
 }
 
 // newWorld makes a home holding a config repository of files, by name.
 func newWorld(t *testing.T, files map[string]string) *world {
 	t.Helper()
-	w := &world{home: t.TempDir(), env: map[string]string{}}
+	w := &world{home: t.TempDir(), env: map[string]string{}, now: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)}
 	for name, content := range files {
 		w.write(t, filepath.Join(".config", "kit", name), content)
 	}
@@ -64,11 +68,15 @@ func (w *world) run(t *testing.T, args ...string) (stdout, stderr string, status
 	t.Helper()
 	var out, errOut bytes.Buffer
 	root := cli.NewRootCommand(cli.Deps{
-		Version: "0.1.0",
-		Getenv:  func(name string) string { return w.env[name] },
-		HomeDir: func() (string, error) { return w.home, nil },
-		Stdout:  &out,
-		Stderr:  &errOut,
+		Version:  "0.1.0",
+		Getenv:   func(name string) string { return w.env[name] },
+		Environ:  func() []string { return nil },
+		HomeDir:  func() (string, error) { return w.home, nil },
+		Now:      func() time.Time { return w.now },
+		Stdout:   &out,
+		Stderr:   &errOut,
+		Terminal: func(io.Writer) bool { return false },
+		Width:    func(io.Writer) int { return 80 },
 	})
 	root.SetArgs(args)
 	status = cli.Execute(t.Context(), root)

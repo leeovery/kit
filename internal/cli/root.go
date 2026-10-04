@@ -8,7 +8,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
+	"github.com/charmbracelet/colorprofile"
+	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 
 	"github.com/leeovery/kit/internal/config"
@@ -19,9 +22,19 @@ import (
 type Deps struct {
 	Version string
 	Getenv  func(key string) string
+	// Environ lists the whole environment, as os.Environ does: where the
+	// pretty face reads which colours the terminal shows.
+	Environ func() []string
 	HomeDir func() (string, error)
+	Now     func() time.Time
 	Stdout  io.Writer
 	Stderr  io.Writer
+	// Terminal reports whether out is a terminal, as IsTerminal does: the
+	// pretty face shows on one, the plain face elsewhere.
+	Terminal func(out io.Writer) bool
+	// Width is how many columns wide the terminal out is, as TerminalWidth
+	// says.
+	Width func(out io.Writer) int
 }
 
 // Exit statuses: a command that needs attention exits attentionStatus, one
@@ -41,9 +54,13 @@ func (a attention) Error() string {
 	return a.message
 }
 
-// app is what every command shares.
+// app is what every command shares: its dependencies, and the flags every
+// command takes.
 type app struct {
 	Deps
+	json    bool
+	plain   bool
+	verbose bool
 }
 
 // NewRootCommand builds the kit command tree.
@@ -63,7 +80,11 @@ func NewRootCommand(deps Deps) *cobra.Command {
 	}
 	root.SetOut(deps.Stdout)
 	root.SetErr(deps.Stderr)
-	root.AddCommand(newMachineCommand(a), newVersionCommand())
+	flags := root.PersistentFlags()
+	flags.BoolVar(&a.json, "json", false, "print one JSON document, for scripts and agents")
+	flags.BoolVar(&a.plain, "plain", false, "print plain lines, no colour or animation, as without a terminal")
+	flags.BoolVar(&a.verbose, "verbose", false, "keep commands' output whole in the run's log")
+	root.AddCommand(newLogCommand(a), newMachineCommand(a), newVersionCommand())
 	return root
 }
 
@@ -105,13 +126,49 @@ func (a *app) loadConfig(dirs config.Dirs) (*config.Config, error) {
 	return cfg, nil
 }
 
+// pretty reports whether out shows the pretty face: a terminal, and
+// neither --json nor --plain.
+func (a *app) pretty(out io.Writer) bool {
+	return !a.json && !a.plain && a.Terminal(out)
+}
+
+// colors is a writer to out that brings colour down to what out shows: none,
+// unless it's the pretty face's terminal.
+func (a *app) colors(out io.Writer) io.Writer {
+	if !a.pretty(out) {
+		return &colorprofile.Writer{Forward: out, Profile: colorprofile.NoTTY}
+	}
+	return colorprofile.NewWriter(out, a.Environ())
+}
+
 // Real returns the Deps of the running process.
 func Real(version string) Deps {
 	return Deps{
-		Version: version,
-		Getenv:  os.Getenv,
-		HomeDir: os.UserHomeDir,
-		Stdout:  os.Stdout,
-		Stderr:  os.Stderr,
+		Version:  version,
+		Getenv:   os.Getenv,
+		Environ:  os.Environ,
+		HomeDir:  os.UserHomeDir,
+		Now:      time.Now,
+		Stdout:   os.Stdout,
+		Stderr:   os.Stderr,
+		Terminal: IsTerminal,
+		Width:    TerminalWidth,
 	}
+}
+
+// IsTerminal reports whether out is a terminal.
+func IsTerminal(out io.Writer) bool {
+	f, ok := out.(*os.File)
+	return ok && term.IsTerminal(f.Fd())
+}
+
+// TerminalWidth is how many columns wide the terminal out is: 80 when it
+// can't tell.
+func TerminalWidth(out io.Writer) int {
+	if f, ok := out.(*os.File); ok {
+		if width, _, err := term.GetSize(f.Fd()); err == nil && width > 0 {
+			return width
+		}
+	}
+	return 80
 }

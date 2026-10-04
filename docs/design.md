@@ -58,6 +58,7 @@ the reason, the rest carry on, and the summary always prints.
 Built:
 
 ```
+kit log [--json]             What the last run did: every check, every command, with timings
 kit machine [<name>]         This Mac's name: shown, or set (one of kit.toml's Macs)
 kit version                  As --version
 ```
@@ -66,8 +67,10 @@ Planned for the first milestone:
 
 ```
 kit status [area] [--json]   What's declared against what's on this Mac
-kit log [--json]             What the last run did: every check, every command, with timings
 ```
+
+Every command takes `--json` (one document), `--plain` (plain lines, as without a terminal)
+and `--verbose` (commands' output kept whole in the run's log).
 
 Exit statuses: 0 when all's well, 1 when something needs attention (a Mac with no name yet,
 drift), 2 when kit couldn't do its job (no config repository, a config error, an unknown

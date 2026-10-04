@@ -1,0 +1,12 @@
+kit status · laptop
+
+✓ Homebrew     /opt/homebrew
+! Formulae     6 declared, 4 installed
+               2 missing: jq, owner/tap/tool
+               1 not declared: ffmpeg
+               1 unused dependency: node@20
+✓ Casks        3 declared, all installed
+✗ kit-config   couldn't check: gh repo view exited 1: not signed in
+· App Store    deferred: needs Homebrew
+
+1 needs attention, 1 couldn't be checked, 1 deferred
