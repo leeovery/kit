@@ -139,9 +139,9 @@ func (a *app) driftItems(ctx context.Context, r *run) ([]driftItem, error) {
 		if res.State == check.Failed {
 			return nil, fmt.Errorf("couldn't check %s: %s", k.Title(), res.Reason)
 		}
-		_, ownFile := k.(kind.Declarer)
+		_, readOnly := k.(kind.ReadOnly)
 		for _, it := range res.Items {
-			items = append(items, driftItem{Item: it, Kind: name, Choices: choices(it, !ownFile)})
+			items = append(items, driftItem{Item: it, Kind: name, Choices: choices(it, !readOnly)})
 		}
 	}
 	return items, nil

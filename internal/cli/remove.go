@@ -57,7 +57,7 @@ func (a *app) remove(ctx context.Context, r *run, kindName string, names []strin
 // Mac's file, and the shared one with shared.
 func removeOne(ctx context.Context, r *run, c *changes, k kind.Kind, name string, shared bool) check.Result {
 	kindName := k.Name()
-	if d, ok := k.(kind.Declarer); ok {
+	if d, ok := k.(kind.ReadOnly); ok {
 		where, err := r.where(kindName, name)
 		if err != nil {
 			return check.Result{State: check.Failed, Reason: err.Error()}

@@ -72,11 +72,16 @@ type Dependents interface {
 	NeededBy(ctx context.Context, name string) ([]string, error)
 }
 
-// Declarer is a kind declared in a file of its own, outside kit's lists,
-// which kit reads but doesn't write: tmux's plugins, in tmux's config.
+// Declarer is a kind declared in files of its own, outside kit's lists:
+// tmux's plugins in tmux's config, MCP servers in the config repository's
+// JSON.
 type Declarer interface {
-	// Declared is what the kind's own file declares.
+	// Declared is what the kind's files declare for this Mac.
 	Declared() (config.List, error)
+}
+
+// ReadOnly is a Declarer whose files kit reads but doesn't write.
+type ReadOnly interface {
 	// HowToDeclare says how to declare, or undeclare, name by hand.
 	HowToDeclare(name string) string
 }
@@ -86,6 +91,14 @@ type Declarer interface {
 type Describer interface {
 	// Describe says what name is: "" when it can't.
 	Describe(ctx context.Context, name string) string
+}
+
+// Differ is a kind whose things can be installed otherwise than they're
+// declared: an MCP server whose definition has changed.
+type Differ interface {
+	// Differs says, of the declared names installed, how each installed
+	// otherwise than declared differs, by declared name.
+	Differs(ctx context.Context, names []string) (map[string]string, error)
 }
 
 // Keyed is a kind whose things match by part of their names: an App Store
@@ -117,6 +130,9 @@ const (
 	Missing          = "missing"
 	Extra            = "extra"
 	UnusedDependency = "unused-dependency"
+	// Changed is a thing installed otherwise than declared: applying
+	// installs it again, as declared.
+	Changed = "changed"
 )
 
 // Step is the step that checks k, what declared lists against what's on
@@ -147,8 +163,10 @@ func Step(k Kind, declared config.List, needs ...string) engine.Step {
 // declared thing is ok installed for any reason, or missing; an undeclared
 // one installed for itself, and needed by nothing, is extra; one installed
 // only as a dependency, and needed by nothing now, is an unused dependency.
-// While k's program isn't installed, nothing declared is fine, and anything
-// declared defers the step.
+// A thing declared off is neither missing nor extra. A kind that can tell
+// finds things installed otherwise than declared. While k's program isn't
+// installed, nothing declared is fine, and anything declared defers the
+// step.
 func Compare(ctx context.Context, k Kind, declared config.List) check.Result {
 	installed, err := k.Installed(ctx)
 	switch {
@@ -167,13 +185,23 @@ func Compare(ctx context.Context, k Kind, declared config.List) check.Result {
 	for _, it := range installed {
 		byKey[key(it.Name)] = it
 	}
-	// matched are the installed things declared, by name.
+	// matched are the installed things declared, by name, and installedDeclared
+	// the declared names of those declared on.
 	matched := make(map[string]bool)
-	var unmatched []string
+	var unmatched, installedDeclared []string
+	off := 0
 	for _, e := range declared.Entries {
-		if it, ok := byKey[key(e.Name)]; ok {
+		it, ok := byKey[key(e.Name)]
+		switch {
+		case e.Off:
+			off++
+			if ok {
+				matched[it.Name] = true
+			}
+		case ok:
 			matched[it.Name] = true
-		} else {
+			installedDeclared = append(installedDeclared, e.Name)
+		default:
 			unmatched = append(unmatched, e.Name)
 		}
 	}
@@ -216,7 +244,15 @@ func Compare(ctx context.Context, k Kind, declared config.List) check.Result {
 		}
 	}
 
-	declaredCount := len(declared.Entries)
+	changed := map[string]string{}
+	if d, ok := k.(Differ); ok && len(installedDeclared) > 0 {
+		var err error
+		if changed, err = d.Differs(ctx, installedDeclared); err != nil {
+			return check.Result{State: check.Failed, Reason: err.Error()}
+		}
+	}
+
+	declaredCount := len(declared.Entries) - off
 	missingCount := len(missing) + len(unknown)
 	res := check.Result{
 		State:   check.OK,
@@ -226,11 +262,23 @@ func Compare(ctx context.Context, k Kind, declared config.List) check.Result {
 			"missing": missingCount, "extra": len(extra), "unused_dependencies": len(unused),
 		},
 	}
+	if len(changed) > 0 {
+		res.Counts["changed"] = len(changed)
+	}
+	if off > 0 {
+		res.Counts["off"] = off
+	}
 	if missingCount > 0 {
 		res.Summary = fmt.Sprintf("%d declared, %d installed", declaredCount, declaredCount-missingCount)
 	}
 	if declaredCount == 0 {
 		res.Summary = "none declared"
+	}
+	if len(changed) > 0 {
+		res.Summary += fmt.Sprintf("; %d changed", len(changed))
+	}
+	if off > 0 {
+		res.Summary += fmt.Sprintf("; %d off", off)
 	}
 	missingItems := items(k, missing, Missing, "")
 	for i, it := range missingItems {
@@ -240,9 +288,18 @@ func Compare(ctx context.Context, k Kind, declared config.List) check.Result {
 			missingItems[i].Action = Install
 		}
 	}
+	var changedNames []string
+	for name := range changed {
+		changedNames = append(changedNames, name)
+	}
+	changedItems := items(k, changedNames, Changed, "")
+	for i, it := range changedItems {
+		changedItems[i].Detail, changedItems[i].Action = changed[it.Name], Install
+	}
 	res.Items = slices.Concat(
 		missingItems,
 		items(k, unknown, Missing, "unknown"),
+		changedItems,
 		items(k, extra, Extra, ""),
 		items(k, unused, UnusedDependency, ""),
 	)

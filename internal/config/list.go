@@ -39,6 +39,9 @@ type Entry struct {
 	Group string
 	// Note is the comment after it, saying why it's there, if any.
 	Note string
+	// Off is whether it's declared, but not to be installed: never installed
+	// by kit, and left alone when it is.
+	Off bool `json:",omitempty"`
 }
 
 // entryName is what a name in a list may be: no spaces, and nothing a

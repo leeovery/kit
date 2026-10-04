@@ -210,3 +210,45 @@ func TestCompareWithoutTheProgram(t *testing.T) {
 		t.Errorf("Compare() when listing fails = %+v, want it failed", got)
 	}
 }
+
+// differingKind is a fakeKind whose things can be installed otherwise than
+// declared.
+type differingKind struct {
+	*fakeKind
+	differs map[string]string
+	asked   []string
+}
+
+func (d *differingKind) Differs(_ context.Context, names []string) (map[string]string, error) {
+	d.asked = names
+	out := map[string]string{}
+	for _, n := range names {
+		if why, ok := d.differs[n]; ok {
+			out[n] = why
+		}
+	}
+	return out, nil
+}
+
+// A thing installed otherwise than declared is changed, to install again; a
+// thing declared off is neither missing nor extra.
+func TestCompareChangedAndOff(t *testing.T) {
+	k := &differingKind{
+		fakeKind: &fakeKind{installed: []kind.Installed{{Name: "refero", Explicit: true}, {Name: "sentry", Explicit: true}, {Name: "paper", Explicit: true}}},
+		differs:  map[string]string{"refero": "its headers differ"},
+	}
+	list := declared("refero", "sentry", "paper", "remarkable")
+	list.Entries[2].Off = true
+	list.Entries[3].Off = true
+	got := kind.Compare(t.Context(), k, list)
+	want := []check.Item{{ID: "brew:refero", Name: "refero", State: kind.Changed, Detail: "its headers differ", Action: kind.Install}}
+	if got.State != check.Attention || got.Summary != "2 declared, all installed; 1 changed; 2 off" || !slices.Equal(got.Items, want) {
+		t.Errorf("Compare() = %+v\nwant items %+v", got, want)
+	}
+	if !slices.Equal(k.asked, []string{"refero", "sentry"}) {
+		t.Errorf("asked how %q differ, want the two declared on and installed", k.asked)
+	}
+	if got.Counts["changed"] != 1 || got.Counts["off"] != 2 {
+		t.Errorf("counts = %v", got.Counts)
+	}
+}
