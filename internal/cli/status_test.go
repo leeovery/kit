@@ -162,7 +162,7 @@ func TestStatusRunsProgramsOnKitsOwnPath(t *testing.T) {
 	}
 	wantEnv := []string{
 		"HOME=" + w.home, "PATH=" + strings.Join(wantPath, ":"), "USER=someone", "SSH_AUTH_SOCK=/private/tmp/agent.sock",
-		"HOMEBREW_NO_AUTO_UPDATE=1", "HOMEBREW_NO_ANALYTICS=1", "HOMEBREW_NO_ENV_HINTS=1", "HOMEBREW_NO_COLOR=1",
+		"HOMEBREW_NO_AUTO_UPDATE=1", "HOMEBREW_NO_ANALYTICS=1", "HOMEBREW_NO_ENV_HINTS=1", "HOMEBREW_NO_COLOR=1", "GIT_TERMINAL_PROMPT=0",
 	}
 	if !slices.Equal(w.childEnv, wantEnv) {
 		t.Errorf("programs' environment = %q\nwant %q", w.childEnv, wantEnv)

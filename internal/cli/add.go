@@ -62,6 +62,9 @@ func (a *app) add(ctx context.Context, r *run, kindName string, names []string, 
 	if err != nil {
 		return err
 	}
+	if d, ok := k.(kind.Declarer); ok && !opts.temp {
+		return errors.New(d.HowToDeclare(names[0]) + "; --temp installs without declaring")
+	}
 	file := kindName + "." + r.machine
 	if opts.shared {
 		file = kindName

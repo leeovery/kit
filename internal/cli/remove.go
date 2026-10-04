@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -56,6 +57,15 @@ func (a *app) remove(ctx context.Context, r *run, kindName string, names []strin
 // Mac's file, and the shared one with shared.
 func removeOne(ctx context.Context, r *run, c *changes, k kind.Kind, name string, shared bool) check.Result {
 	kindName := k.Name()
+	if d, ok := k.(kind.Declarer); ok {
+		where, err := r.where(kindName, name)
+		if err != nil {
+			return check.Result{State: check.Failed, Reason: err.Error()}
+		}
+		if len(where) > 0 {
+			return check.Result{State: check.Failed, Reason: fmt.Sprintf("declared in %s, line %d: %s", where[0].File, where[0].Line, d.HowToDeclare(where[0].Name))}
+		}
+	}
 	own := kindName + "." + r.machine
 	where, err := r.cfg.Where(kindName, name)
 	if err != nil {
