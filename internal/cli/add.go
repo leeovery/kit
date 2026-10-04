@@ -16,10 +16,12 @@ import (
 	"github.com/leeovery/kit/internal/kind"
 )
 
-// addOptions are kit add's flags.
+// addOptions are kit add's flags, and which names wait for an
+// administrator's password, as settled before anything's installed.
 type addOptions struct {
 	shared, temp bool
 	note, group  string
+	waiting      map[string]bool
 }
 
 func newAddCommand(a *app) *cobra.Command {
@@ -68,6 +70,13 @@ func (a *app) add(ctx context.Context, r *run, kindName string, names []string, 
 	if err != nil {
 		return err
 	}
+	missing, err := notInstalled(ctx, k, names)
+	if err != nil {
+		return err
+	}
+	held, stop := a.holdAdmin(ctx, r, map[string][]string{kindName: missing})
+	defer stop()
+	opts.waiting = waitingForAdmin(ctx, r, kindName, missing, held)
 	c := startChanges(r, names)
 	for _, name := range names {
 		c.step(ctx, name, func(ctx context.Context) check.Result {
@@ -141,6 +150,9 @@ func addOne(ctx context.Context, r *run, c *changes, k kind.Kind, file, name, gr
 	}
 	verb := "already installed"
 	if !isIn {
+		if opts.waiting[name] {
+			return check.Result{State: check.Failed, Reason: fmt.Sprintf(adminWait, "add")}
+		}
 		if err := k.Install(ctx, []string{name}); err != nil {
 			return check.Result{State: check.Failed, Reason: "couldn't install: " + err.Error()}
 		}
@@ -189,6 +201,21 @@ func addOne(ctx context.Context, r *run, c *changes, k kind.Kind, file, name, gr
 		}
 	}
 	return check.Result{State: check.OK, Summary: summary}
+}
+
+// notInstalled are which of names k doesn't find installed.
+func notInstalled(ctx context.Context, k kind.Kind, names []string) ([]string, error) {
+	var missing []string
+	for _, name := range names {
+		isIn, err := installed(ctx, k, name)
+		if err != nil {
+			return nil, err
+		}
+		if !isIn {
+			missing = append(missing, name)
+		}
+	}
+	return missing, nil
 }
 
 func groupOr(group string) string {

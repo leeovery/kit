@@ -30,9 +30,11 @@ func newStatusCommand(a *app) *cobra.Command {
 		Long: `Show how this Mac stands against its config: each step's check, and what needs
 attention, such as packages declared but missing, or installed but not declared.
 
-Name steps (homebrew, brew, cask, config-private) to check only those, with
-what they need. Exits 0 when nothing needs attention, 1 when something does,
-and 2 when kit couldn't check. Each run is logged: see kit log.`,
+Name steps, as kit status shows them (homebrew, brew, cask, config-private),
+to check only those, with what they need. A kind with nothing declared for
+this Mac, whose program isn't installed, has nothing to check, and isn't
+shown. Exits 0 when nothing needs attention, 1 when something does, and 2
+when kit couldn't check. Each run is logged: see kit log.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			r, err := a.prepare("status", "status")
 			if err != nil {
@@ -67,13 +69,13 @@ type run struct {
 	face     render.Face
 	log      *logs.File
 	stateDir string
-	// kinds are the kinds' steps, whose items are drift.
+	// kinds are the kinds the run checks, by name, in pipeline order: their
+	// items are drift. A kind with nothing declared for this Mac, whose
+	// program isn't installed, has nothing to check.
 	kinds []string
-	now   time.Time
-	// homebrew, casks and run are what applying needs before it starts: what
-	// to ask up front.
-	homebrew *brew.Homebrew
-	casks    config.List
+	// allKinds are every kind kit knows, by name, in pipeline order.
+	allKinds []string
+	now      time.Time
 	run      runner.Runner
 	// cfg, kindsByName, lists and repo are what changing the config needs.
 	cfg         *config.Config
@@ -81,6 +83,22 @@ type run struct {
 	lists       map[string]config.List
 	repo        gitrepo.Repo
 	record      drift.Record
+}
+
+// kindStep is a kind as a run takes it: the steps it needs, and the steps
+// it's applied after, as they install its program.
+type kindStep struct {
+	kind  kind.Kind
+	needs []string
+	after []string
+}
+
+// kindSteps are every kind kit knows, in pipeline order.
+func kindSteps(hb *brew.Homebrew) []kindStep {
+	return []kindStep{
+		{kind: hb.Formulae(), needs: []string{brew.StepName}},
+		{kind: hb.Casks(), needs: []string{brew.StepName}},
+	}
 }
 
 // remember notes, in the drift record, the drift the run's checks found:
@@ -138,15 +156,6 @@ func (a *app) prepare(command, logName string) (*run, error) {
 	if err != nil {
 		return nil, err
 	}
-	formulae, err := cfg.List("brew", machine)
-	if err != nil {
-		return nil, err
-	}
-	casks, err := cfg.List("cask", machine)
-	if err != nil {
-		return nil, err
-	}
-
 	record, err := drift.Load(dirs.State)
 	if err != nil {
 		return nil, err
@@ -161,25 +170,40 @@ func (a *app) prepare(command, logName string) (*run, error) {
 	exec := a.Runner(path, childEnv(a.Getenv, home, path))
 	observed := runner.Observed(exec, func(ctx context.Context, rep runner.Report) { sink.Emit(event.Command(ctx, rep)) }, a.Now)
 	hb := brew.New(observed)
-	kinds := []engine.Step{
-		quietened(kind.Step(hb.Formulae(), formulae, brew.StepName), record, now),
-		quietened(kind.Step(hb.Casks(), casks, brew.StepName), record, now),
+	r := &run{
+		command: command, machine: machine, version: a.Version, sink: sink, face: face, log: log,
+		stateDir: dirs.State, now: now, run: observed, cfg: cfg,
+		kindsByName: map[string]kind.Kind{}, lists: map[string]config.List{},
+		repo: gitrepo.Repo{Dir: dirs.Config, Run: observed}, record: record,
 	}
-	pipeline, err := engine.New(slices.Concat([]engine.Step{hb.Step()}, kinds, []engine.Step{steps.ConfigPrivate(observed, dirs.Config)})...)
+	var kinds []engine.Step
+	for _, ks := range kindSteps(hb) {
+		name := ks.kind.Name()
+		list, err := cfg.List(name, machine)
+		if err != nil {
+			_ = face.Close()
+			_ = log.Close()
+			return nil, err
+		}
+		r.allKinds = append(r.allKinds, name)
+		r.kindsByName[name], r.lists[name] = ks.kind, list
+		if len(list.Entries) == 0 && !runner.Has(observed, ks.kind.Program()) {
+			continue
+		}
+		step := kind.Step(ks.kind, list, ks.needs...)
+		for _, after := range ks.after {
+			if slices.Contains(r.kinds, after) {
+				step.After = append(step.After, after)
+			}
+		}
+		kinds = append(kinds, quietened(step, record, now))
+		r.kinds = append(r.kinds, name)
+	}
+	r.pipeline, err = engine.New(slices.Concat([]engine.Step{hb.Step()}, kinds, []engine.Step{steps.ConfigPrivate(observed, dirs.Config)})...)
 	if err != nil {
 		_ = face.Close()
 		_ = log.Close()
 		return nil, err
-	}
-	r := &run{
-		command: command, machine: machine, version: a.Version, pipeline: pipeline, sink: sink, face: face, log: log,
-		stateDir: dirs.State, now: now, homebrew: hb, casks: casks, run: observed,
-		cfg: cfg, kindsByName: map[string]kind.Kind{"brew": hb.Formulae(), "cask": hb.Casks()},
-		lists: map[string]config.List{"brew": formulae, "cask": casks},
-		repo:  gitrepo.Repo{Dir: dirs.Config, Run: observed}, record: record,
-	}
-	for _, k := range kinds {
-		r.kinds = append(r.kinds, k.Name)
 	}
 	return r, nil
 }

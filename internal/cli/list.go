@@ -51,7 +51,7 @@ func newListCommand(a *app) *cobra.Command {
 }
 
 func (a *app) list(ctx context.Context, r *run, args []string) error {
-	kinds := []string{"brew", "cask"}
+	kinds := r.kinds
 	if len(args) == 1 {
 		if _, err := r.kindNamed(args[0]); err != nil {
 			return err
@@ -72,7 +72,9 @@ func (a *app) list(ctx context.Context, r *run, args []string) error {
 			}
 		}
 		for _, e := range r.lists[name].Entries {
-			entries = append(entries, listed{Kind: name, Name: e.Name, File: e.File, Line: e.Line, Group: e.Group, Note: e.Note, Installed: !missing[e.Name]})
+			// A kind deferred, its program not installed, has nothing installed.
+			isIn := !missing[e.Name] && res.State != check.Deferred
+			entries = append(entries, listed{Kind: name, Name: e.Name, File: e.File, Line: e.Line, Group: e.Group, Note: e.Note, Installed: isIn})
 		}
 	}
 	if a.json {
@@ -120,6 +122,8 @@ type why struct {
 	ForThisMac bool     `json:"for_this_mac"`
 	Installed  bool     `json:"installed"`
 	NeededBy   []string `json:"needed_by,omitempty"`
+	// knowsNeeds is whether the kind says what needs a thing.
+	knowsNeeds bool
 }
 
 func newWhyCommand(a *app) *cobra.Command {
@@ -143,7 +147,7 @@ func newWhyCommand(a *app) *cobra.Command {
 
 func (a *app) why(ctx context.Context, r *run, name string) error {
 	var found []why
-	for _, kindName := range []string{"brew", "cask"} {
+	for _, kindName := range r.allKinds {
 		k := r.kindsByName[kindName]
 		declared, err := r.cfg.Where(kindName, name)
 		if err != nil {
@@ -160,10 +164,11 @@ func (a *app) why(ctx context.Context, r *run, name string) error {
 		w.ForThisMac = slices.ContainsFunc(declared, func(e config.Entry) bool {
 			return e.File == kindName || e.File == kindName+"."+r.machine
 		})
-		if isIn && kindName == "brew" {
-			if w.NeededBy, err = r.homebrew.Uses(ctx, name); err != nil {
+		if d, ok := k.(kind.Dependents); ok && isIn {
+			if w.NeededBy, err = d.NeededBy(ctx, name); err != nil {
 				return err
 			}
+			w.knowsNeeds = true
 		}
 		found = append(found, w)
 	}
@@ -179,7 +184,7 @@ func (a *app) why(ctx context.Context, r *run, name string) error {
 		}{whySchema, r.machine, name, found})
 	}
 	if len(found) == 0 {
-		return attention{message: name + " isn't declared or installed, as a formula or a cask"}
+		return attention{message: name + " isn't declared for any Mac, nor installed here"}
 	}
 	var b strings.Builder
 	for _, w := range found {
@@ -204,7 +209,7 @@ func (a *app) why(ctx context.Context, r *run, name string) error {
 		default:
 			fmt.Fprintf(&b, "  not declared for this Mac, nor installed here\n")
 		}
-		if w.Installed && w.Kind == "brew" {
+		if w.knowsNeeds {
 			needed := "nothing installed"
 			if len(w.NeededBy) > 0 {
 				needed = strings.Join(w.NeededBy, ", ")

@@ -217,3 +217,19 @@ func TestStatusQuietensNewDrift(t *testing.T) {
 		t.Errorf("kit status over a day later printed\n%s exit %d; want ffmpeg needing attention, exit 1", out, code)
 	}
 }
+
+// A kind with nothing declared for the Mac, whose program isn't installed,
+// has nothing to check, so its step isn't in the run.
+func TestStatusLeavesOutAKindWithNothingToCheck(t *testing.T) {
+	w := newWorld(t, map[string]string{"kit.toml": twoMacs, "brew.studio": "ffmpeg\n"})
+	w.write(t, filepath.Join(".local", "state", "kit", "machine"), "laptop\n")
+	w.fake.On("brew", "--prefix").Fails(errNotFound)
+	w.fake.On("git", "-C", filepath.Join(w.home, ".config", "kit"), "remote", "get-url", "origin").Prints("git@github.com:someone/kit-config.git\n")
+	w.fake.On("gh", "repo", "view", "someone/kit-config", "--json", "visibility", "--jq", ".visibility").Prints("PRIVATE\n")
+
+	out, _, _ := w.run(t, "status")
+	want := "kit status · laptop\nhomebrew attention not installed: brew isn't on kit's PATH\nconfig-private ok private on GitHub (someone/kit-config)\n1 needs attention\n"
+	if out != want {
+		t.Errorf("kit status printed\n%s\nwant\n%s", out, want)
+	}
+}

@@ -69,6 +69,8 @@ func TestListRefuses(t *testing.T) {
 		{name: "a name in the shared file and a Mac's", files: map[string]string{"brew": "jq\n", "brew.laptop": "go\njq\n"}, mac: "laptop", want: "brew.laptop:2: jq is in brew too (line 1): a name goes in the shared file or a Mac's, not both"},
 		{name: "two names on a line", files: map[string]string{"brew": "jq ripgrep\n"}, mac: "laptop", want: `brew:1: "jq ripgrep" isn't a name`},
 		{name: "a # without a space before it", files: map[string]string{"brew": "jq#fast\n"}, mac: "laptop", want: `brew:1: "jq#fast" isn't a name`},
+		{name: "a quote", files: map[string]string{"brew": "\"jq\"\n"}, mac: "laptop", want: `brew:1: "\"jq\"" isn't a name`},
+		{name: "a constraint alone", files: map[string]string{"brew": "^4.0\n"}, mac: "laptop", want: `brew:1: "^4.0" isn't a name`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -105,5 +107,22 @@ func TestWhere(t *testing.T) {
 	}
 	if got := cfg.ListFiles("cask"); !slices.Equal(got, []string{"cask", "cask.laptop", "cask.studio"}) {
 		t.Errorf("ListFiles() = %q", got)
+	}
+}
+
+// A version or a constraint may follow a name, as npm and Composer take them.
+func TestListNamesWithVersions(t *testing.T) {
+	cfg := loadRepo(t, map[string]string{
+		"composer": "laravel/valet:^4.0\nlaravel/installer:>=5.0,<6.0|~7.1\nvendor/tool:4.*\n",
+		"npm":      "typescript@5\n@scope/tool@1.2.3\n",
+	})
+	for kind, want := range map[string][]string{
+		"composer": {"laravel/valet:^4.0", "laravel/installer:>=5.0,<6.0|~7.1", "vendor/tool:4.*"},
+		"npm":      {"typescript@5", "@scope/tool@1.2.3"},
+	} {
+		got, err := cfg.List(kind, "laptop")
+		if err != nil || !slices.Equal(got.Names(), want) {
+			t.Errorf("List(%s) = %q, %v; want %q", kind, got.Names(), err, want)
+		}
 	}
 }

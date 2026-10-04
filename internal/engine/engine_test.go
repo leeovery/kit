@@ -66,6 +66,15 @@ func TestNewRefuses(t *testing.T) {
 		{name: "a step without a check", steps: []engine.Step{{Name: "brew"}}, want: "step brew has no check: every step needs one"},
 		{name: "two steps of one name", steps: []engine.Step{{Name: "brew", Check: ok("")}, {Name: "brew", Check: ok("")}}, want: "two steps named brew"},
 		{name: "a need that isn't a step", steps: []engine.Step{{Name: "brew", Needs: []string{"homebrew"}, Check: ok("")}}, want: "step brew needs homebrew, which isn't a step"},
+		{name: "after a step that isn't one", steps: []engine.Step{{Name: "app", After: []string{"brew"}, Check: ok("")}}, want: "step app comes after brew, which isn't a step"},
+		{
+			name: "a cycle through after",
+			steps: []engine.Step{
+				{Name: "a", After: []string{"b"}, Check: ok("")},
+				{Name: "b", Needs: []string{"a"}, Check: ok("")},
+			},
+			want: "steps a, b need each other in a cycle",
+		},
 		{
 			name: "a cycle",
 			steps: []engine.Step{
@@ -405,5 +414,89 @@ func TestApplyActsOnQuietItems(t *testing.T) {
 	report, err := p.Apply(t.Context(), &recorder{}, engine.Options{})
 	if err != nil || !applied || report.Results["brew"].State != check.OK || len(report.Results["brew"].Items) != 0 {
 		t.Errorf("Apply() = %+v, %v, applied %v; want the quiet item installed", report.Results["brew"], err, applied)
+	}
+}
+
+// A kind's program comes from an earlier step: applying waits for that step,
+// whatever it found, and never defers for it; checking doesn't wait at all.
+func TestApplyComesAfter(t *testing.T) {
+	var mu sync.Mutex
+	var order []string
+	note := func(what string) {
+		mu.Lock()
+		defer mu.Unlock()
+		order = append(order, what)
+	}
+	release := make(chan struct{})
+	brew := engine.Step{
+		Name: "brew",
+		Check: func(context.Context) check.Result {
+			note("brew checked")
+			return check.Result{State: check.Attention, Summary: "ffmpeg is extra"}
+		},
+		Apply: func(context.Context, check.Result) error {
+			<-release
+			note("brew applied")
+			return nil
+		},
+	}
+	app := engine.Step{
+		Name:  "app",
+		After: []string{"brew"},
+		Check: func(context.Context) check.Result {
+			note("app checked")
+			return check.Result{State: check.OK}
+		},
+	}
+	p, err := engine.New(app, brew)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := names(p.Steps()); !slices.Equal(got, []string{"brew", "app"}) {
+		t.Errorf("order = %q, want app after brew", got)
+	}
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		close(release)
+	}()
+	report, err := p.Apply(t.Context(), &recorder{}, engine.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := report.Results["app"]; got.State != check.OK {
+		t.Errorf("app = %+v, want it applied though brew needs attention", got)
+	}
+	if i, j := slices.Index(order, "brew applied"), slices.Index(order, "app checked"); i < 0 || j < i {
+		t.Errorf("order = %q, want app checked once brew's applied", order)
+	}
+
+	// Checking waits for nothing: app may run alongside brew.
+	order = nil
+	if _, err := p.Check(t.Context(), &recorder{}, engine.Options{Only: []string{"app"}}); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(order, []string{"app checked"}) {
+		t.Errorf("checking app ran %q, want app alone: after isn't a need", order)
+	}
+}
+
+// A check can defer its own step, as a kind does when its program isn't
+// installed; applying leaves it.
+func TestACheckThatDefersIsntApplied(t *testing.T) {
+	applied := false
+	s := engine.Step{
+		Name: "npm",
+		Check: func(context.Context) check.Result {
+			return check.Result{State: check.Deferred, Reason: "needs npm, which isn't installed"}
+		},
+		Apply: func(context.Context, check.Result) error { applied = true; return nil },
+	}
+	p, err := engine.New(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := p.Apply(t.Context(), &recorder{}, engine.Options{})
+	if err != nil || applied || report.Results["npm"].State != check.Deferred {
+		t.Errorf("Apply() = %+v, %v, applied %v; want it deferred, not applied", report.Results["npm"], err, applied)
 	}
 }

@@ -6,12 +6,14 @@ package kind
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/engine"
+	"github.com/leeovery/kit/internal/runner"
 )
 
 // Installed is a thing a kind finds on the Mac.
@@ -31,6 +33,9 @@ type Kind interface {
 	Name() string
 	// Title is the step's title, as in Formulae.
 	Title() string
+	// Program is the program the kind runs to find what's installed, as in
+	// brew: while it isn't installed, there's nothing of the kind to find.
+	Program() string
 	// Installed lists what's on the Mac.
 	Installed(ctx context.Context) ([]Installed, error)
 	// Resolve finds the full names of things known by other names, such as
@@ -48,6 +53,23 @@ type Blocker interface {
 	// Blocked says, of the things missing (declared names, by their full
 	// names), why each that can't be installed now can't, by declared name.
 	Blocked(ctx context.Context, missing map[string]string, installed []Installed) (map[string]string, error)
+}
+
+// Admin is a kind some of whose installs need an administrator's password,
+// which the command settles before anything is installed, so none asks
+// mid-run.
+type Admin interface {
+	// NeedsAdmin finds which of names, to install, need the password.
+	NeedsAdmin(ctx context.Context, names []string) ([]string, error)
+	// SetAdmin is how the kind finds out whether the password is at hand:
+	// while it's unset, kit isn't installing, and nothing's held up for it.
+	SetAdmin(held func(ctx context.Context) bool)
+}
+
+// Dependents is a kind that knows what installed needs a thing.
+type Dependents interface {
+	// NeededBy lists what's installed that needs name.
+	NeededBy(ctx context.Context, name string) ([]string, error)
 }
 
 // Install is the action that installs an item.
@@ -88,9 +110,16 @@ func Step(k Kind, declared config.List, needs ...string) engine.Step {
 // declared thing is ok installed for any reason, or missing; an undeclared
 // one installed for itself, and needed by nothing, is extra; one installed
 // only as a dependency, and needed by nothing now, is an unused dependency.
+// While k's program isn't installed, nothing declared is fine, and anything
+// declared defers the step.
 func Compare(ctx context.Context, k Kind, declared config.List) check.Result {
 	installed, err := k.Installed(ctx)
-	if err != nil {
+	switch {
+	case errors.Is(err, runner.ErrNotFound) && len(declared.Entries) == 0:
+		return check.Result{State: check.OK, Summary: "none declared; " + k.Program() + " isn't installed"}
+	case errors.Is(err, runner.ErrNotFound):
+		return check.Result{State: check.Deferred, Reason: "needs " + k.Program() + ", which isn't installed"}
+	case err != nil:
 		return check.Result{State: check.Failed, Reason: err.Error()}
 	}
 	byName := make(map[string]Installed, len(installed))

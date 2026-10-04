@@ -5,6 +5,7 @@ package runnertest
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"sync"
@@ -98,6 +99,20 @@ func (s *Script) Takes(d time.Duration) *Script {
 func (s *Script) Then() *Script {
 	s.answers = append(s.answers, &answer{})
 	return s
+}
+
+// Has reports whether the program name is installed, as the test has it:
+// it is when a command of it is scripted, unless that command fails as a
+// program that isn't installed.
+func (f *Fake) Has(name string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, s := range slices.Backward(f.scripts) {
+		if s.argv[0] == name {
+			return !errors.Is(s.answers[0].err, runner.ErrNotFound)
+		}
+	}
+	return false
 }
 
 // Run answers cmd as scripted, as a real runner would, noting the call.

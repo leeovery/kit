@@ -102,3 +102,14 @@ func TestFakeAnswersInTurn(t *testing.T) {
 		t.Errorf("answers = %q, want %q", got, want)
 	}
 }
+
+func TestFakeHasWhatsScripted(t *testing.T) {
+	fake := runnertest.New(t)
+	fake.On("mas", "list", "--json")
+	fake.On("npm", "ls").Fails(runner.ErrNotFound)
+	for name, want := range map[string]bool{"mas": true, "npm": false, "composer": false} {
+		if got := runner.Has(fake, name); got != want {
+			t.Errorf("Has(%s) = %v, want %v", name, got, want)
+		}
+	}
+}

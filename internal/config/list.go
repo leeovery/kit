@@ -42,8 +42,9 @@ type Entry struct {
 }
 
 // entryName is what a name in a list may be: no spaces, and nothing a
-// package's name never holds, so a typo shows as an error.
-var entryName = regexp.MustCompile(`^[A-Za-z0-9@._+/-]+$`)
+// package's name never holds, so a typo shows as an error. A version or a
+// constraint may follow the name, as in typescript@5 or laravel/valet:^4.0.
+var entryName = regexp.MustCompile(`^[A-Za-z0-9@._+/-][A-Za-z0-9@._+/:^~*<>=|,-]*$`)
 
 // List reads what kind declares for the Mac named mac: its shared file, named
 // after the kind, then the Mac's, as in brew then brew.laptop. Either may be

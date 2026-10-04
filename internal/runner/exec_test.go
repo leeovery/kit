@@ -68,6 +68,11 @@ func TestExecFindsOnlyWhatsOnItsPath(t *testing.T) {
 	if err != nil || string(res.Stdout) != "here\n" {
 		t.Errorf("Run() of a path = %q, %v; want it run", res.Stdout, err)
 	}
+	for name, want := range map[string]bool{"here": true, filepath.Join(dir, "here"): true, "elsewhere": false, "plain": false} {
+		if got := runner.Has(r, name); got != want {
+			t.Errorf("Has(%s) = %v, want %v", name, got, want)
+		}
+	}
 }
 
 func TestExecRunsInItsOwnEnvironmentAndDirectory(t *testing.T) {

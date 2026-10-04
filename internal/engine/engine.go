@@ -28,6 +28,10 @@ type Step struct {
 	Macs []string
 	// Needs are the steps that must stand ok before it's checked or applied.
 	Needs []string
+	// After are steps it's applied after, whether or not they stand ok, as
+	// a kind's program is installed by an earlier step: a check doesn't wait
+	// for them, and a step a run doesn't take is no wait at all.
+	After []string
 	// Check finds out how the step stands: cheap, and without side effects.
 	Check func(ctx context.Context) check.Result
 	// Apply does what the step is for, given what its check found: safe to
@@ -54,8 +58,9 @@ type Pipeline struct {
 }
 
 // New returns the pipeline of steps, ordered so each comes after what it
-// needs and otherwise as given. Every step must have a name of its own and a
-// check, and need only steps in the pipeline, without a cycle.
+// needs and what it's applied after, and otherwise as given. Every step must
+// have a name of its own and a check, and need or come after only steps in
+// the pipeline, without a cycle.
 func New(steps ...Step) (*Pipeline, error) {
 	byName := make(map[string]Step, len(steps))
 	for _, s := range steps {
@@ -76,13 +81,18 @@ func New(steps ...Step) (*Pipeline, error) {
 				return nil, fmt.Errorf("step %s needs %s, which isn't a step", s.Name, need)
 			}
 		}
+		for _, after := range s.After {
+			if _, ok := byName[after]; !ok {
+				return nil, fmt.Errorf("step %s comes after %s, which isn't a step", s.Name, after)
+			}
+		}
 	}
 	ordered := make([]Step, 0, len(steps))
 	placed := make(map[string]bool, len(steps))
 	for len(ordered) < len(steps) {
 		progress := false
 		for _, s := range steps {
-			if placed[s.Name] || !allOf(s.Needs, placed) {
+			if placed[s.Name] || !allOf(s.Needs, placed) || !allOf(s.After, placed) {
 				continue
 			}
 			ordered = append(ordered, s)
@@ -100,6 +110,11 @@ func New(steps ...Step) (*Pipeline, error) {
 		}
 	}
 	return &Pipeline{steps: ordered}, nil
+}
+
+// Steps are the pipeline's steps, in order.
+func (p *Pipeline) Steps() []Step {
+	return slices.Clone(p.steps)
 }
 
 func allOf(names []string, in map[string]bool) bool {
@@ -278,7 +293,7 @@ func (d *dispatch) run(ctx context.Context, steps []Step, jobs int) {
 func (d *dispatch) startReady(ctx context.Context, steps []Step, running *int, jobs int) bool {
 	progressed := false
 	for _, s := range steps {
-		if d.started[s.Name] || !d.needsDone(s) {
+		if d.started[s.Name] || !d.needsDone(s) || !d.afterDone(s) {
 			continue
 		}
 		if unmet := d.unmet(s); len(unmet) > 0 {
@@ -318,6 +333,21 @@ func (d *dispatch) needsDone(s Step) bool {
 	return true
 }
 
+// afterDone reports whether, in a run that applies, every step s comes
+// after that the run takes is done.
+func (d *dispatch) afterDone(s Step) bool {
+	if !d.apply {
+		return true
+	}
+	for _, after := range s.After {
+		_, taken := d.titles[after]
+		if _, done := d.results[after]; taken && !done {
+			return false
+		}
+	}
+	return true
+}
+
 // unmet are the titles of the steps s needs that didn't stand ok.
 func (d *dispatch) unmet(s Step) []string {
 	var unmet []string
@@ -330,11 +360,12 @@ func (d *dispatch) unmet(s Step) []string {
 }
 
 // step checks s, and applies it, when the run applies and s doesn't stand
-// ok, then checks it again.
+// ok, then checks it again. A step its own check defers, as what it needs
+// isn't there, isn't applied.
 func (d *dispatch) step(ctx context.Context, s Step) check.Result {
 	d.sink.Emit(event.StepStarted{Time: d.now(), Step: s.Name, Doing: "checking"})
 	res := checkSafely(ctx, s)
-	if d.apply && (res.State != check.OK || res.Actions()) && s.Apply != nil && ctx.Err() == nil {
+	if d.apply && res.State != check.Deferred && (res.State != check.OK || res.Actions()) && s.Apply != nil && ctx.Err() == nil {
 		d.sink.Emit(event.StepStarted{Time: d.now(), Step: s.Name, Doing: "applying"})
 		before := res
 		if err := applySafely(ctx, s, res); err != nil {

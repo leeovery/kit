@@ -193,3 +193,43 @@ func TestRemoveRefusedByHomebrewChangesNothing(t *testing.T) {
 		t.Errorf("brew.laptop = %q, want it unchanged", got)
 	}
 }
+
+// Requirement 4 for kit add: an install that needs an administrator's
+// password waits without a terminal, saying why, and declares nothing.
+func TestAddWithoutATerminalWaitsForThePassword(t *testing.T) {
+	w := laptopWorld(t)
+	w.fake.On("brew", "info", "--json=v2", "--cask", "zoom").Prints(zoomInfo)
+	w.fake.On("sudo", "-n", "true").Exits(1).PrintsToStderr("sudo: a password is required")
+
+	out, errOut, code := w.run(t, "add", "cask", "zoom")
+	if want := "zoom failed needs an administrator's password: run kit add at a terminal\n"; !strings.Contains(out, want) || code != 1 {
+		t.Errorf("kit add printed\n%s exit %d (%s); want zoom waiting, exit 1", out, code, errOut)
+	}
+	if got := w.read(t, filepath.Join(".config", "kit", "cask.laptop")); got != "" {
+		t.Errorf("cask.laptop = %q, want nothing declared", got)
+	}
+	for _, c := range w.fake.Calls() {
+		if strings.HasPrefix(c, "brew install") {
+			t.Errorf("ran %q, want nothing installed", c)
+		}
+	}
+}
+
+func TestAddAtATerminalAsksForThePasswordFirst(t *testing.T) {
+	w := laptopWorld(t)
+	w.terminal = true
+	w.choose = func(string, []string) (int, error) { return 0, nil }
+	w.fake.On("brew", "info", "--json=v2", "--cask", "zoom").Prints(zoomInfo)
+	w.fake.On("sudo", "-v")
+	w.fake.On("brew", "update", "--quiet")
+	w.fake.On("brew", "install", "--cask", "zoom")
+	w.expectSync([]string{"cask.laptop"}, "kit add cask zoom (laptop)")
+
+	if _, errOut, code := w.run(t, "add", "cask", "zoom"); code != 0 {
+		t.Fatalf("kit add exit %d: %s", code, errOut)
+	}
+	calls := w.fake.Calls()
+	if sudo, install := slices.Index(calls, "sudo -v"), slices.Index(calls, "brew install --cask zoom"); sudo < 0 || install < sudo {
+		t.Errorf("ran %q, want sudo -v asked before the install", calls)
+	}
+}
