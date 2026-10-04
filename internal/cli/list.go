@@ -87,15 +87,16 @@ func (a *app) list(ctx context.Context, r *run, args []string) error {
 			Entries []listed `json:"entries"`
 		}{listSchema, r.machine, entries})
 	}
-	nameWidth, fileWidth := 0, 0
+	kindWidth, nameWidth, fileWidth := 0, 0, 0
 	for _, e := range entries {
+		kindWidth = max(kindWidth, ansi.StringWidth(e.Kind))
 		nameWidth = max(nameWidth, ansi.StringWidth(e.Name))
 		fileWidth = max(fileWidth, ansi.StringWidth(e.File))
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "kit list · %s\n", r.machine)
 	for _, e := range entries {
-		line := fmt.Sprintf("%-4s  %-*s  %-*s  %s", e.Kind, nameWidth, e.Name, fileWidth, e.File, e.Group)
+		line := fmt.Sprintf("%-*s  %-*s  %-*s  %s", kindWidth, e.Kind, nameWidth, e.Name, fileWidth, e.File, e.Group)
 		if !e.Installed {
 			line += "  (missing)"
 		}
