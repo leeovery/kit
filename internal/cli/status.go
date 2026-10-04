@@ -148,11 +148,12 @@ func (a *app) face() render.Face {
 }
 
 // childEnv is the environment kit runs programs in, never the one it
-// inherited whole: who and where the user is, kit's own PATH, and Homebrew
-// kept from updating itself, nagging or colouring its output on its own.
+// inherited whole: who and where the user is, the SSH agent (git signs and
+// pushes through it), kit's own PATH, and Homebrew kept from updating
+// itself, nagging or colouring its output on its own.
 func childEnv(getenv func(string) string, home string, path []string) []string {
 	env := []string{"HOME=" + home, "PATH=" + strings.Join(path, ":")}
-	for _, name := range []string{"USER", "LOGNAME", "SHELL", "TMPDIR", "LANG", "LC_ALL"} {
+	for _, name := range []string{"USER", "LOGNAME", "SHELL", "TMPDIR", "LANG", "LC_ALL", "SSH_AUTH_SOCK"} {
 		if v := getenv(name); v != "" {
 			env = append(env, name+"="+v)
 		}

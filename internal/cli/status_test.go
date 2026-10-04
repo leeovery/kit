@@ -145,6 +145,7 @@ func TestStatusNeedsTheMacsNameFirst(t *testing.T) {
 func TestStatusRunsProgramsOnKitsOwnPath(t *testing.T) {
 	w := laptopWorld(t)
 	w.env["PATH"] = "/somewhere/inherited/bin"
+	w.env["SSH_AUTH_SOCK"] = "/private/tmp/agent.sock"
 	if _, _, status := w.run(t, "status"); status != 1 {
 		t.Fatalf("kit status exit %d, want 1", status)
 	}
@@ -153,7 +154,7 @@ func TestStatusRunsProgramsOnKitsOwnPath(t *testing.T) {
 		t.Errorf("kit's PATH = %q, want %q", w.path, wantPath)
 	}
 	wantEnv := []string{
-		"HOME=" + w.home, "PATH=" + strings.Join(wantPath, ":"), "USER=someone",
+		"HOME=" + w.home, "PATH=" + strings.Join(wantPath, ":"), "USER=someone", "SSH_AUTH_SOCK=/private/tmp/agent.sock",
 		"HOMEBREW_NO_AUTO_UPDATE=1", "HOMEBREW_NO_ANALYTICS=1", "HOMEBREW_NO_ENV_HINTS=1", "HOMEBREW_NO_COLOR=1",
 	}
 	if !slices.Equal(w.childEnv, wantEnv) {
