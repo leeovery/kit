@@ -2,6 +2,8 @@ package cli_test
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -36,6 +38,9 @@ type world struct {
 	childEnv []string
 	// terminal is whether kit's output is a terminal.
 	terminal bool
+	// choose answers kit's questions at a terminal; asked notes each.
+	choose func(question string, options []string) (int, error)
+	asked  []string
 }
 
 // newWorld makes a home holding a config repository of files, by name.
@@ -89,6 +94,14 @@ func (w *world) run(t *testing.T, args ...string) (stdout, stderr string, status
 			w.path, w.childEnv = path, env
 			return w.fake
 		},
+		Choose: func(_ context.Context, question string, options []string) (int, error) {
+			w.asked = append(w.asked, question)
+			if w.choose == nil {
+				t.Errorf("kit asked %q, which this test doesn't answer", question)
+				return 0, errors.New("unanswered")
+			}
+			return w.choose(question, options)
+		},
 	})
 	root.SetArgs(args)
 	status = cli.Execute(t.Context(), root)
@@ -97,3 +110,16 @@ func (w *world) run(t *testing.T, args ...string) (stdout, stderr string, status
 
 // errNotFound is what the runner says of a program that isn't installed.
 var errNotFound = runner.ErrNotFound
+
+// expectSync scripts the config repository's commit of files with message,
+// and its push.
+func (w *world) expectSync(files []string, message string) {
+	dir := filepath.Join(w.home, ".config", "kit")
+	git := func(args ...string) []string { return append([]string{"-C", dir}, args...) }
+	w.fake.On("git", git(append([]string{"status", "--porcelain", "--"}, files...)...)...).Prints(" M " + files[0] + "\n")
+	w.fake.On("git", git(append([]string{"add", "--"}, files...)...)...)
+	w.fake.On("git", git(append([]string{"commit", "--quiet", "-m", message, "--"}, files...)...)...)
+	w.fake.On("git", git("remote")...).Prints("origin\n")
+	w.fake.On("git", git("pull", "--rebase", "--autostash", "--quiet")...)
+	w.fake.On("git", git("push", "--quiet")...)
+}

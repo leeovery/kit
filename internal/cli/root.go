@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 
+	"github.com/leeovery/kit/internal/ask"
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/runner"
 )
@@ -39,6 +40,9 @@ type Deps struct {
 	// Runner returns the runner kit runs programs with, finding them on path
 	// and running them in env, as runner.Exec does.
 	Runner func(path, env []string) runner.Runner
+	// Choose asks, at the terminal, which of options to take, as ask.Choose
+	// does: the index taken, or ask.ErrCancelled.
+	Choose func(ctx context.Context, question string, options []string) (int, error)
 }
 
 // Exit statuses: a command that needs attention exits attentionStatus, one
@@ -91,7 +95,7 @@ func NewRootCommand(deps Deps) *cobra.Command {
 	flags.BoolVar(&a.json, "json", false, "print one JSON document, for scripts and agents")
 	flags.BoolVar(&a.plain, "plain", false, "print plain lines, no colour or animation, as without a terminal")
 	flags.BoolVar(&a.verbose, "verbose", false, "keep commands' output whole in the run's log")
-	root.AddCommand(newApplyCommand(a), newLogCommand(a), newMachineCommand(a), newStatusCommand(a), newVersionCommand())
+	root.AddCommand(newAddCommand(a), newApplyCommand(a), newLogCommand(a), newMachineCommand(a), newRemoveCommand(a), newStatusCommand(a), newVersionCommand())
 	return root
 }
 
@@ -165,6 +169,9 @@ func Real(version string) Deps {
 		Width:    TerminalWidth,
 		Runner: func(path, env []string) runner.Runner {
 			return runner.Exec{Path: path, Env: env, Now: time.Now, Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr}
+		},
+		Choose: func(ctx context.Context, question string, options []string) (int, error) {
+			return ask.Choose(ctx, os.Stdin, os.Stdout, question, options)
 		},
 	}
 }

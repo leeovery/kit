@@ -14,6 +14,7 @@ import (
 	"github.com/leeovery/kit/internal/drift"
 	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/event"
+	"github.com/leeovery/kit/internal/gitrepo"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/kind/brew"
 	"github.com/leeovery/kit/internal/logs"
@@ -60,6 +61,7 @@ and 2 when kit couldn't check. Each run is logged: see kit log.`,
 type run struct {
 	command  string
 	machine  string
+	version  string
 	pipeline *engine.Pipeline
 	sink     event.Sink
 	face     render.Face
@@ -73,6 +75,10 @@ type run struct {
 	homebrew *brew.Homebrew
 	casks    config.List
 	run      runner.Runner
+	// cfg, kindsByName and repo are what changing the config needs.
+	cfg         *config.Config
+	kindsByName map[string]kind.Kind
+	repo        gitrepo.Repo
 }
 
 // remember notes, in the drift record, the drift the run's checks found:
@@ -164,8 +170,10 @@ func (a *app) prepare(command, logName string) (*run, error) {
 		return nil, err
 	}
 	r := &run{
-		command: command, machine: machine, pipeline: pipeline, sink: sink, face: face, log: log,
+		command: command, machine: machine, version: a.Version, pipeline: pipeline, sink: sink, face: face, log: log,
 		stateDir: dirs.State, now: now, homebrew: hb, casks: casks, run: observed,
+		cfg: cfg, kindsByName: map[string]kind.Kind{"brew": hb.Formulae(), "cask": hb.Casks()},
+		repo: gitrepo.Repo{Dir: dirs.Config, Run: observed},
 	}
 	for _, k := range kinds {
 		r.kinds = append(r.kinds, k.Name)
