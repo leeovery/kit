@@ -56,7 +56,7 @@ type decision struct {
 func newReconcileCommand(a *app) *cobra.Command {
 	var opts reconcileOptions
 	cmd := &cobra.Command{
-		Use:   "reconcile [<id>]",
+		Use:   "reconcile [<id>...]",
 		Short: "Settle drift: adopt, remove, install, undeclare or snooze what differs from the config",
 		Long: `Settle drift: what's installed but not declared, declared but not installed,
 or left by something since removed. At a terminal, kit goes through each item
@@ -64,14 +64,16 @@ that needs attention (--all: every item, new and snoozed too), asking what to
 do with it, then does it all, committing and pushing the config's changes.
 
 Without a terminal, or with --json, it lists the items with their ids and
-choices. Name an item's id, with what to do with it, to settle that one:
+choices. Name items' ids, with what to do with them, to settle those, in one
+run and one commit:
 
   kit reconcile brew:ffmpeg --adopt [--shared] [--group "<heading>"] [--note "why"]
   kit reconcile brew:node@20 --remove
   kit reconcile cask:zoom --install
   kit reconcile brew:jq --undeclare [--shared]
-  kit reconcile cask:firefox --snooze           (quiet for 7 days)`,
-		Args: cobra.MaximumNArgs(1),
+  kit reconcile cask:firefox --snooze           (quiet for 7 days)
+  kit reconcile go:example.com/a go:example.com/b --remove`,
+		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			r, err := a.prepare("reconcile", "reconcile")
 			if err != nil {
@@ -102,12 +104,16 @@ func (a *app) reconcile(ctx context.Context, r *run, args []string, opts reconci
 	if err != nil {
 		return err
 	}
-	if len(args) == 1 {
-		d, err := decide(items, args[0], opts)
-		if err != nil {
-			return err
+	if len(args) > 0 {
+		decisions := make([]decision, 0, len(args))
+		for _, id := range args {
+			d, err := decide(items, id, opts)
+			if err != nil {
+				return err
+			}
+			decisions = append(decisions, d)
 		}
-		return a.carryOut(ctx, r, []decision{d}, opts.note)
+		return a.carryOut(ctx, r, decisions, opts.note)
 	}
 	if a.json || !a.pretty(a.Stdout) {
 		return a.listDrift(r, items)

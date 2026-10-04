@@ -58,6 +58,31 @@ func TestReconcileAdoptsByID(t *testing.T) {
 	}
 }
 
+// Several items, one decision: one run, and one commit.
+func TestReconcileAdoptsSeveralInOneCommit(t *testing.T) {
+	w := laptopWorld(t)
+	w.expectSync([]string{"brew.laptop", "cask.laptop"}, "kit reconcile (laptop): adopt brew:ffmpeg, adopt cask:firefox")
+	out, errOut, code := w.run(t, "reconcile", "brew:ffmpeg", "cask:firefox", "--adopt", "--group", "Media")
+	if code != 0 || !strings.Contains(out, "kit-config ok committed and pushed brew.laptop, cask.laptop\n") {
+		t.Errorf("kit reconcile printed\n%s%s exit %d", out, errOut, code)
+	}
+	if got := w.read(t, brewLaptop); got != "go\n\n# Media\nffmpeg\n" {
+		t.Errorf("brew.laptop = %q", got)
+	}
+	if got := w.read(t, filepath.Join(".config", "kit", "cask.laptop")); got != "# Media\nfirefox\n" {
+		t.Errorf("cask.laptop = %q", got)
+	}
+	_, errOut, code = w.run(t, "reconcile", "brew:node@20", "brew:nosuch", "--remove")
+	if errOut != "kit: no item brew:nosuch: kit reconcile lists them\n" || code != 2 {
+		t.Errorf("an unknown id among several: %q, exit %d; want nothing done", errOut, code)
+	}
+	for _, c := range w.fake.Calls() {
+		if strings.Contains(c, "uninstall") {
+			t.Errorf("ran %q, want nothing done when an id isn't an item", c)
+		}
+	}
+}
+
 func TestReconcileRemovesByID(t *testing.T) {
 	w := laptopWorld(t)
 	w.fake.On("brew", "uninstall", "--formula", "node@20")
