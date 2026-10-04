@@ -66,6 +66,8 @@ A run that's stopped (an interrupt) fails the steps it hadn't started.
 Built:
 
 ```
+kit add <kind> <name>...     Install, and declare for this Mac   [--shared] [--temp] [--note] [--group]
+kit remove <kind> <name>...  Uninstall, and undeclare            [--shared]
 kit apply [step...] [--plan] Install what's declared and missing (--plan: say what, do nothing)
 kit status [step...]         How this Mac stands against the config: what needs attention
 kit log                      What the last run did: every check, every command, with timings
@@ -79,6 +81,15 @@ or adopts: reconcile does those. At a terminal, when a missing cask installs thr
 package, kit asks for an administrator's password once, through `sudo -v`, before anything is
 applied, and keeps sudo's hold fresh while it runs; without a terminal it asks nothing, and
 those casks wait, saying why (requirement 4).
+
+`kit add` installs each name, unless it's installed, and declares it in this Mac's file, or
+for every Mac with `--shared` (taking it out of each Mac's own file); at a terminal it first
+asks which of the file's groups each goes in ("To be sorted" first), and `--group` answers
+without asking. `--temp` installs without declaring: quiet for 7 days, then reconcile asks.
+`kit remove` uninstalls and takes each name out of this Mac's file; one declared for every Mac
+needs `--shared`. Both handle each name on its own (one failing leaves the others), then commit
+the config's changed files, with a message saying what, for which Mac and why, and push to
+main, pulling with rebase first. A push that fails leaves the commit, and says so.
 
 `kit status` runs every step's check (named steps run with what they need): Homebrew, the
 formulae (`brew`), the casks (`cask`), and the config repository being private on GitHub
