@@ -81,6 +81,13 @@ type Declarer interface {
 	HowToDeclare(name string) string
 }
 
+// Describer is a kind that says what a thing is, for the note kit writes
+// beside it when it declares it: a login item's app's name.
+type Describer interface {
+	// Describe says what name is: "" when it can't.
+	Describe(ctx context.Context, name string) string
+}
+
 // Keyed is a kind whose things match by part of their names: an App Store
 // app by its id, an npm package without its version.
 type Keyed interface {

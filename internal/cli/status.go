@@ -22,6 +22,7 @@ import (
 	"github.com/leeovery/kit/internal/kind/composer"
 	"github.com/leeovery/kit/internal/kind/ghext"
 	"github.com/leeovery/kit/internal/kind/gotool"
+	"github.com/leeovery/kit/internal/kind/login"
 	"github.com/leeovery/kit/internal/kind/npm"
 	"github.com/leeovery/kit/internal/kind/tmux"
 	"github.com/leeovery/kit/internal/logs"
@@ -114,6 +115,7 @@ func kindSteps(hb *brew.Homebrew, run runner.Runner, home, configHome string) []
 		{kind: gotool.New(run), after: []string{"brew"}},
 		{kind: ghext.New(run), after: []string{"brew"}},
 		{kind: tmux.New(run, home, configHome), after: []string{"brew"}},
+		{kind: login.New(run, home), after: []string{"cask", "app"}},
 	}
 }
 
