@@ -181,3 +181,12 @@ func TestReconcileStoppedEarlyDoesNothing(t *testing.T) {
 		t.Errorf("kit reconcile printed %q, exit %d", out, code)
 	}
 }
+
+// Naming a kind narrows reconcile to that kind's items.
+func TestReconcileOneKind(t *testing.T) {
+	out, _, code := laptopWorld(t).run(t, "reconcile", "cask")
+	want := "kit reconcile · laptop\ncask:firefox extra since 31 Dec: --adopt, --remove or --snooze\n"
+	if out != want || code != 1 {
+		t.Errorf("kit reconcile cask printed\n%s exit %d\nwant\n%s", out, code, want)
+	}
+}

@@ -94,7 +94,7 @@ Built:
 ```
 kit add <kind> <name>...     Install, and declare for this Mac   [--shared] [--temp] [--note] [--group]
 kit remove <kind> <name>...  Uninstall, and undeclare            [--shared]
-kit reconcile [<id>...]      Settle drift: adopt, remove, install, undeclare or snooze
+kit reconcile [<kind>...] [<id>...]  Settle drift: adopt, remove, install, undeclare or snooze
 kit list [kind]              What's declared for this Mac: file, group, note, installed or not
 kit why <name>               Where it's declared, whether it's installed, what needs it
 kit apply [step...] [--plan] Install what's declared and missing (--plan: say what, do nothing)
@@ -122,7 +122,8 @@ the config's changed files, with a message saying what, for which Mac and why, a
 main, pulling with rebase first. A push that fails leaves the commit, and says so.
 
 `kit reconcile` settles drift. At a terminal it goes through each item that needs attention
-(`--all`: quiet ones too), asking what to do with it: declare it (for this Mac, or every Mac),
+(`--all`: quiet ones too; name kinds, as in `kit reconcile brew`, for theirs alone), asking
+what to do with it: declare it (for this Mac, or every Mac),
 uninstall it, install it, undeclare it, snooze it for 7 days, leave it, or stop; for one
 declared, which group. Every question comes first; then it does it all, as `kit add` and
 `kit remove` would, and commits and pushes once. Without a terminal, or with `--json`, it lists
