@@ -1,8 +1,10 @@
 package render
 
 import (
+	"cmp"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -47,7 +49,7 @@ type Pretty struct {
 	order   ordered
 	// column is where steps' text starts, past the widest title.
 	column  int
-	running []string
+	running []runningStep
 	// spinning is whether the spinner's line is on screen.
 	spinning bool
 	frame    int
@@ -74,10 +76,10 @@ func (p *Pretty) Emit(e event.Event) {
 		p.column += 3
 		p.write(bold.Render("kit "+e.Command) + faint.Render(" · "+e.Machine) + "\n\n")
 	case event.StepStarted:
-		p.running = append(p.running, p.order.title(e.Step))
+		p.running = append(without(p.running, e.Step), runningStep{step: e.Step, title: p.order.title(e.Step), doing: cmp.Or(e.Doing, "checking")})
 		p.spin()
 	case event.StepFinished:
-		p.running = without(p.running, p.order.title(e.Step))
+		p.running = without(p.running, e.Step)
 		ready := p.order.finish(e)
 		if len(ready) > 0 {
 			p.clearSpinner()
@@ -182,7 +184,7 @@ func (p *Pretty) drawSpinner() {
 	if len(p.running) == 0 {
 		return
 	}
-	text := spinnerFrames[p.frame%len(spinnerFrames)] + " checking " + strings.Join(p.running, ", ")
+	text := spinnerFrames[p.frame%len(spinnerFrames)] + " " + doing(p.running)
 	p.write(faint.Render(ansi.Truncate(text, p.width-1, "…")))
 	p.spinning = true
 }
@@ -228,12 +230,31 @@ func (p *Pretty) Close() error {
 	return nil
 }
 
-// without is list without its first s.
-func without(list []string, s string) []string {
-	for i, v := range list {
-		if v == s {
-			return append(list[:i:i], list[i+1:]...)
+// runningStep is a step running, and what it's doing: checking or
+// applying.
+type runningStep struct {
+	step, title, doing string
+}
+
+// without is running without step.
+func without(running []runningStep, step string) []runningStep {
+	return slices.DeleteFunc(slices.Clone(running), func(r runningStep) bool { return r.step == step })
+}
+
+// doing says what the steps running are doing, as in "applying Formulae ·
+// checking Casks, App Store".
+func doing(running []runningStep) string {
+	var groups []string
+	titles := map[string][]string{}
+	for _, r := range running {
+		if _, ok := titles[r.doing]; !ok {
+			groups = append(groups, r.doing)
 		}
+		titles[r.doing] = append(titles[r.doing], r.title)
 	}
-	return list
+	parts := make([]string, len(groups))
+	for i, g := range groups {
+		parts[i] = g + " " + strings.Join(titles[g], ", ")
+	}
+	return strings.Join(parts, " · ")
 }

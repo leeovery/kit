@@ -41,6 +41,8 @@ type Step struct {
 type StepStarted struct {
 	Time time.Time
 	Step string
+	// Doing is what's starting: checking or applying.
+	Doing string
 }
 
 // StepFinished is a step done, checked, failed or deferred: its Result says
