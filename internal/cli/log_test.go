@@ -50,7 +50,7 @@ func TestLogShowsTheLastRun(t *testing.T) {
 	out, errOut, status := w.run(t, "log")
 	want := "kit status · laptop · 2 Jan 2026 03:04:05 · 1.0s\n" + path + "\n\n" +
 		"✓ Formulae   1.0s  2 declared, all installed\n" +
-		"    brew leaves  exit 0  0.9s\n\n" +
+		"    exit 0        0.9s  brew leaves\n\n" +
 		"Nothing needs attention\n"
 	if out != want || errOut != "" || status != 0 {
 		t.Errorf("kit log printed\n%s%q, exit %d\nwant\n%s", out, errOut, status, want)

@@ -1,0 +1,33 @@
+{
+  "formulae": [
+    {
+      "name": "jq",
+      "full_name": "jq",
+      "tap": "homebrew/core",
+      "aliases": [],
+      "oldnames": [],
+      "desc": "Lightweight and flexible command-line JSON processor"
+    },
+    {
+      "name": "python@3.14",
+      "full_name": "python@3.14",
+      "tap": "homebrew/core",
+      "aliases": [
+        "python",
+        "python3",
+        "python@3"
+      ],
+      "oldnames": [],
+      "desc": "Interpreted, interactive, object-oriented programming language"
+    },
+    {
+      "name": "bun",
+      "full_name": "oven-sh/bun/bun",
+      "tap": "oven-sh/bun",
+      "aliases": [],
+      "oldnames": [],
+      "desc": "Incredibly fast JavaScript runtime, bundler, transpiler and package manager - all in one."
+    }
+  ],
+  "casks": []
+}

@@ -18,8 +18,8 @@ self=scripts/personal-data-scan
 
 # The generic patterns: a name for reports, the pattern, and what a match may
 # be all the same, as placeholders are. Examples in code, tests and docs use
-# op://vault/…, someone@example.com, /Users/someone, and git@github.com in
-# remotes.
+# op://vault/…, someone@example.com (or a subdomain of example.com, reserved
+# for examples too), /Users/someone, and git@github.com in remotes.
 names=(
 	"a 1Password reference"
 	"an email address"
@@ -36,7 +36,7 @@ patterns=(
 )
 allowed=(
 	'^op://vault/'
-	'(@example\.(com|org|net)|^git@github\.com|@users\.noreply\.github\.com)$'
+	'(@([A-Za-z0-9-]+\.)*example\.(com|org|net)|^git@github\.com|@users\.noreply\.github\.com)$'
 	'^/Users/(someone|Shared)$'
 	''
 	''
@@ -115,7 +115,7 @@ self_check() {
 ref = op://Personal/item/field
 fine = op://vault/item/field
 mail = jdoe@realmail.test
-fine = someone@example.com and git@github.com:owner/repo
+fine = someone@example.com, git@git.example.org:x and git@github.com:owner/repo
 path = /Users/jdoe/Code
 fine = /Users/someone/Code and /Users/Shared
 host = studio.local here

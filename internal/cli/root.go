@@ -15,6 +15,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/leeovery/kit/internal/config"
+	"github.com/leeovery/kit/internal/runner"
 )
 
 // Deps is what the commands take from the process around them. main passes the
@@ -35,6 +36,9 @@ type Deps struct {
 	// Width is how many columns wide the terminal out is, as TerminalWidth
 	// says.
 	Width func(out io.Writer) int
+	// Runner returns the runner kit runs programs with, finding them on path
+	// and running them in env, as runner.Exec does.
+	Runner func(path, env []string) runner.Runner
 }
 
 // Exit statuses: a command that needs attention exits attentionStatus, one
@@ -53,6 +57,9 @@ type attention struct {
 func (a attention) Error() string {
 	return a.message
 }
+
+// attention without a message needs nothing printed: the face has said what
+// needs attention.
 
 // app is what every command shares: its dependencies, and the flags every
 // command takes.
@@ -84,7 +91,7 @@ func NewRootCommand(deps Deps) *cobra.Command {
 	flags.BoolVar(&a.json, "json", false, "print one JSON document, for scripts and agents")
 	flags.BoolVar(&a.plain, "plain", false, "print plain lines, no colour or animation, as without a terminal")
 	flags.BoolVar(&a.verbose, "verbose", false, "keep commands' output whole in the run's log")
-	root.AddCommand(newLogCommand(a), newMachineCommand(a), newVersionCommand())
+	root.AddCommand(newLogCommand(a), newMachineCommand(a), newStatusCommand(a), newVersionCommand())
 	return root
 }
 
@@ -95,8 +102,11 @@ func Execute(ctx context.Context, root *cobra.Command) int {
 	if err == nil {
 		return 0
 	}
-	_, _ = fmt.Fprintf(root.ErrOrStderr(), "kit: %v\n", err)
-	if _, ok := errors.AsType[attention](err); ok {
+	a, isAttention := errors.AsType[attention](err)
+	if !isAttention || a.message != "" {
+		_, _ = fmt.Fprintf(root.ErrOrStderr(), "kit: %v\n", err)
+	}
+	if isAttention {
 		return attentionStatus
 	}
 	return failedStatus
@@ -153,6 +163,9 @@ func Real(version string) Deps {
 		Stderr:   os.Stderr,
 		Terminal: IsTerminal,
 		Width:    TerminalWidth,
+		Runner: func(path, env []string) runner.Runner {
+			return runner.Exec{Path: path, Env: env, Now: time.Now}
+		},
 	}
 }
 

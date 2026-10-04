@@ -51,15 +51,9 @@ func LogView(w io.Writer, path string, records []logs.Record) error {
 		column = max(column, ansi.StringWidth(s.Title))
 	}
 	column += 3
-	width := 0
-	for _, cmds := range commands {
-		for _, c := range cmds {
-			width = max(width, ansi.StringWidth(c.Command))
-		}
-	}
 	if cmds := commands[""]; len(cmds) > 0 {
 		v.write(faint.Render("  run") + "\n")
-		v.commands(cmds, width)
+		v.commands(cmds)
 	}
 	for _, name := range order {
 		title := titles[name]
@@ -67,7 +61,7 @@ func LogView(w io.Writer, path string, records []logs.Record) error {
 		s, ok := steps[name]
 		if !ok || s.Result == nil {
 			v.write(red.Render("✗") + " " + title + pad + red.Render("didn't finish") + "\n")
-			v.commands(commands[name], width)
+			v.commands(commands[name])
 			continue
 		}
 		took := faint.Render(duration(s.DurationMS)) + "  "
@@ -75,7 +69,7 @@ func LogView(w io.Writer, path string, records []logs.Record) error {
 			took = ""
 		}
 		v.write(stateMark[s.Result.State] + " " + title + pad + took + what(*s.Result) + "\n")
-		v.commands(commands[name], width)
+		v.commands(commands[name])
 	}
 	if finished != nil {
 		v.write("\n" + summary(finished.Counts) + "\n")
@@ -90,9 +84,10 @@ type logView struct {
 	err error
 }
 
-// commands writes a step's commands, a line each, names padded to width,
-// with what went wrong under one that failed.
-func (v *logView) commands(cmds []logs.Record, width int) {
+// commands writes a step's commands, a line each: how it ended and how long
+// it took, in columns, then the command, with what went wrong under one that
+// failed.
+func (v *logView) commands(cmds []logs.Record) {
 	for _, c := range cmds {
 		var outcome string
 		switch {
@@ -103,7 +98,7 @@ func (v *logView) commands(cmds []logs.Record, width int) {
 		default:
 			outcome = "didn't run"
 		}
-		line := "    " + c.Command + strings.Repeat(" ", width-ansi.StringWidth(c.Command)) + "  " + outcome + "  " + duration(c.DurationMS)
+		line := fmt.Sprintf("    %-10s  %6s  %s", outcome, duration(c.DurationMS), c.Command)
 		if c.Exit != nil && *c.Exit == 0 {
 			v.write(faint.Render(line) + "\n")
 			continue

@@ -2,15 +2,15 @@ kit status · laptop · 2 Jan 2026 03:04:05 · 2m01s
 /Users/someone/Library/Logs/kit/2026-01-02T030405.000-status.jsonl
 
   run
-    sw_vers -productVersion             exit 0  0.0s
+    exit 0        0.0s  sw_vers -productVersion
 ✓ Homebrew    0.1s  /opt/homebrew
-    brew --prefix                       exit 0  0.1s
+    exit 0        0.1s  brew --prefix
 ! Formulae    1.5s  6 declared, 4 installed
-    brew list --formula --full-name -1  exit 0  0.5s
-    brew info --json=v2 jq              exit 1  0.9s
+    exit 0        0.5s  brew list --formula --full-name -1
+    exit 1        0.9s  brew info --json=v2 jq
       brew info --json=v2 jq exited 1: Error: No available formula
 ✗ Casks       didn't finish
-    brew list --cask --full-name -1     ended  2m00s
+    ended        2m00s  brew list --cask --full-name -1
       brew list --cask --full-name -1: context deadline exceeded
 · App Store   deferred: needs Homebrew
 
