@@ -56,12 +56,13 @@ type decision struct {
 func newReconcileCommand(a *app) *cobra.Command {
 	var opts reconcileOptions
 	cmd := &cobra.Command{
-		Use:   "reconcile [<id>...]",
+		Use:   "reconcile [<kind>...] [<id>...]",
 		Short: "Settle drift: adopt, remove, install, undeclare or snooze what differs from the config",
 		Long: `Settle drift: what's installed but not declared, declared but not installed,
 or left by something since removed. At a terminal, kit goes through each item
 that needs attention (--all: every item, new and snoozed too), asking what to
 do with it, then does it all, committing and pushing the config's changes.
+Name kinds (kit reconcile brew cask) to go through only theirs.
 
 Without a terminal, or with --json, it lists the items with their ids and
 choices. Name items' ids, with what to do with them, to settle those, in one
@@ -100,13 +101,23 @@ run and one commit:
 }
 
 func (a *app) reconcile(ctx context.Context, r *run, args []string, opts reconcileOptions) error {
-	items, err := a.driftItems(ctx, r)
+	// A kind's name narrows the items to that kind's; anything else is an
+	// item's id, its kind before a colon.
+	var kinds, ids []string
+	for _, arg := range args {
+		if _, ok := r.kindsByName[arg]; ok {
+			kinds = append(kinds, arg)
+		} else {
+			ids = append(ids, arg)
+		}
+	}
+	items, err := a.driftItems(ctx, r, kinds)
 	if err != nil {
 		return err
 	}
-	if len(args) > 0 {
-		decisions := make([]decision, 0, len(args))
-		for _, id := range args {
+	if len(ids) > 0 {
+		decisions := make([]decision, 0, len(ids))
+		for _, id := range ids {
 			d, err := decide(items, id, opts)
 			if err != nil {
 				return err
@@ -129,11 +140,15 @@ func (a *app) reconcile(ctx context.Context, r *run, args []string, opts reconci
 	return a.carryOut(ctx, r, decisions, opts.note)
 }
 
-// driftItems are the kinds' items: what differs from the config, quiet or
-// not, each with what can be done about it.
-func (a *app) driftItems(ctx context.Context, r *run) ([]driftItem, error) {
+// driftItems are the kinds' items (only those of the kinds named in only,
+// when it names any): what differs from the config, quiet or not, each with
+// what can be done about it.
+func (a *app) driftItems(ctx context.Context, r *run, only []string) ([]driftItem, error) {
 	var items []driftItem
 	for _, name := range r.kinds {
+		if len(only) > 0 && !slices.Contains(only, name) {
+			continue
+		}
 		k := r.kindsByName[name]
 		res := drift.Quieten(kind.Compare(ctx, k, r.lists[name]), r.record, r.now)
 		if res.State == check.Failed {
