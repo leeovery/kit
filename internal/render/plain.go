@@ -40,7 +40,7 @@ func (p *Plain) Emit(e event.Event) {
 			}
 			p.printf("%s %s %s\n", f.Step, f.Result.State, text)
 			for _, g := range groupItems(f.Result.Items) {
-				p.printf("%s %s %s\n", f.Step, g.state, strings.Join(g.names, ", "))
+				p.printf("%s %s %s\n", f.Step, g.key(), strings.Join(g.names, ", "))
 			}
 		}
 	case event.RunFinished:

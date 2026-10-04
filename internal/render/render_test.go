@@ -177,3 +177,32 @@ func TestPrettySpinsWhileStepsRun(t *testing.T) {
 		t.Errorf("left on screen\n%q\nwant\n%q", strings.Join(screen, ""), want)
 	}
 }
+
+func TestQuietItems(t *testing.T) {
+	events := []event.Event{
+		event.RunStarted{Command: "status", Machine: "laptop", Steps: []event.Step{{Name: "brew", Title: "Formulae"}}},
+		event.StepFinished{Step: "brew", Result: check.Result{State: check.Attention, Summary: "3 declared, all installed", Items: []check.Item{
+			{ID: "brew:hello", Name: "hello", State: "extra", Quiet: "new"},
+			{ID: "brew:ffmpeg", Name: "ffmpeg", State: "extra"},
+			{ID: "brew:wget", Name: "wget", State: "extra", Quiet: "snoozed"},
+			{ID: "brew:cowsay", Name: "cowsay", State: "extra", Quiet: "temporary"},
+		}}},
+		event.RunFinished{Counts: map[check.State]int{check.Attention: 1}},
+	}
+	var plain, pretty bytes.Buffer
+	show(t, render.NewPlain(&plain), events)
+	show(t, render.NewPretty(&colorprofile.Writer{Forward: &pretty, Profile: colorprofile.NoTTY}, 80, false), events)
+	wantPlain := "kit status · laptop\nbrew attention 3 declared, all installed\nbrew extra ffmpeg\nbrew extra:new hello\nbrew extra:snoozed wget\nbrew extra:temporary cowsay\n1 needs attention\n"
+	if plain.String() != wantPlain {
+		t.Errorf("plain printed\n%s\nwant\n%s", plain.String(), wantPlain)
+	}
+	wantPretty := "kit status · laptop\n\n! Formulae   3 declared, all installed\n" +
+		"             1 not declared: ffmpeg\n" +
+		"             1 not declared (new, under a day): hello\n" +
+		"             1 not declared (snoozed): wget\n" +
+		"             1 not declared (temporary): cowsay\n" +
+		"\n1 needs attention\n"
+	if pretty.String() != wantPretty {
+		t.Errorf("pretty printed\n%s\nwant\n%s", pretty.String(), wantPretty)
+	}
+}

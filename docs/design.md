@@ -168,6 +168,13 @@ called missing, and a name Homebrew doesn't know is missing and "unknown". Four 
 - **unused dependency:** a formula installed as a dependency that nothing installed needs now
   (what `brew autoremove` removes).
 
+**Drift counts after a day.** An item a kind's check finds (missing, extra, an unused
+dependency) is new for its first 24 hours: shown, quiet, without needing attention, so a
+throwaway install that's soon removed never does. kit remembers when it first saw each item,
+the snoozes (7 days) and the temporary installs (quiet for 7 days) in
+`$XDG_STATE_HOME/kit/drift.json`, written whole under a lock; it forgets an item once a check
+of its kind no longer finds it.
+
 What's installed comes from four listings run side by side: formulae with full names, leaves,
 leaves installed on request, and casks. kit runs brew in an environment of its own: the
 user's, its own PATH, and Homebrew kept from updating itself, nagging or colouring its

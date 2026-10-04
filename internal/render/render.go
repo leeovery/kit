@@ -4,6 +4,7 @@
 package render
 
 import (
+	"cmp"
 	"fmt"
 	"strings"
 
@@ -66,13 +67,22 @@ var itemLabels = map[string][2]string{
 	"unused-dependency": {"unused dependency", "unused dependencies"},
 }
 
-// itemGroup is a step's items of one state.
+// quietLabels say why items don't need attention yet.
+var quietLabels = map[string]string{
+	"new":       "new, under a day",
+	"snoozed":   "snoozed",
+	"temporary": "temporary",
+}
+
+// itemGroup is a step's items of one state, quiet for one reason or loud.
 type itemGroup struct {
 	state string
+	quiet string
 	names []string
 }
 
-// label counts the group for people, as in "2 unused dependencies".
+// label counts the group for people, as in "2 unused dependencies", or "1
+// not declared (new, under a day)".
 func (g itemGroup) label() string {
 	forms, ok := itemLabels[g.state]
 	if !ok {
@@ -82,25 +92,45 @@ func (g itemGroup) label() string {
 	if len(g.names) != 1 {
 		form = forms[1]
 	}
-	return fmt.Sprintf("%d %s", len(g.names), form)
+	label := fmt.Sprintf("%d %s", len(g.names), form)
+	if g.quiet != "" {
+		label += " (" + cmp.Or(quietLabels[g.quiet], g.quiet) + ")"
+	}
+	return label
 }
 
-// groupItems groups items by state, in the order each state first comes.
+// key is the group's state, and why it's quiet, when it is, as plain lines
+// print it: extra, or extra:new.
+func (g itemGroup) key() string {
+	if g.quiet == "" {
+		return g.state
+	}
+	return g.state + ":" + g.quiet
+}
+
+// groupItems groups items by state, and why they're quiet, in the order each
+// group first comes, loud groups before quiet ones.
 func groupItems(items []check.Item) []itemGroup {
 	var groups []itemGroup
 	at := make(map[string]int)
-	for _, it := range items {
-		name := it.Name
-		if it.Detail != "" {
-			name += " (" + it.Detail + ")"
+	for _, loud := range []bool{true, false} {
+		for _, it := range items {
+			if (it.Quiet == "") != loud {
+				continue
+			}
+			name := it.Name
+			if it.Detail != "" {
+				name += " (" + it.Detail + ")"
+			}
+			g := itemGroup{state: it.State, quiet: it.Quiet}
+			i, ok := at[g.key()]
+			if !ok {
+				i = len(groups)
+				at[g.key()] = i
+				groups = append(groups, g)
+			}
+			groups[i].names = append(groups[i].names, name)
 		}
-		i, ok := at[it.State]
-		if !ok {
-			i = len(groups)
-			at[it.State] = i
-			groups = append(groups, itemGroup{state: it.State})
-		}
-		groups[i].names = append(groups[i].names, name)
 	}
 	return groups
 }
