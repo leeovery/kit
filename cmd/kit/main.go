@@ -2,7 +2,10 @@
 package main
 
 import (
+	"context"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/leeovery/kit/internal/cli"
 )
@@ -11,7 +14,13 @@ import (
 var version = "dev"
 
 func main() {
+	// An interrupt ends the commands kit is running, each with everything it
+	// started, before kit exits: each runs in a process group of its own,
+	// which the terminal's interrupt doesn't reach.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	root := cli.NewRootCommand(cli.Real(version))
 	root.SetArgs(os.Args[1:])
-	os.Exit(cli.Execute(root))
+	status := cli.Execute(ctx, root)
+	stop()
+	os.Exit(status)
 }

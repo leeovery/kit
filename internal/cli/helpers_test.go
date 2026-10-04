@@ -71,6 +71,6 @@ func (w *world) run(t *testing.T, args ...string) (stdout, stderr string, status
 		Stderr:  &errOut,
 	})
 	root.SetArgs(args)
-	status = cli.Execute(root)
+	status = cli.Execute(t.Context(), root)
 	return out.String(), errOut.String(), status
 }

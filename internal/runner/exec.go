@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -59,6 +60,14 @@ func (e Exec) start(ctx context.Context, program string, cmd Command) (stdout, s
 	}
 	var out, errOut bytes.Buffer
 	c.Stdout, c.Stderr = &out, &errOut
+	// The command runs in a process group of its own, and is ended with
+	// everything it started, as os/exec ends the command alone: a child left
+	// running would outlive it, holding its output open until waitDelay
+	// passed.
+	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	c.Cancel = func() error {
+		return syscall.Kill(-c.Process.Pid, syscall.SIGKILL)
+	}
 	c.WaitDelay = waitDelay
 	err = c.Run()
 	return out.Bytes(), errOut.Bytes(), err
