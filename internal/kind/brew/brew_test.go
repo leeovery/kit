@@ -115,6 +115,27 @@ func TestResolveAtOnce(t *testing.T) {
 	}
 }
 
+func TestResolveATapsOtherNames(t *testing.T) {
+	fake := runnertest.New(t)
+	names := []string{"owner/tap/tool@2", "owner/tap/tool", "tool@2", "owner/tap/old-tool"}
+	fake.On("brew", append([]string{"info", "--json=v2", "--formula"}, names...)...).Prints(`{"formulae": [
+		{"name": "tool", "full_name": "owner/tap/tool", "aliases": ["tool@2"], "oldnames": ["old-tool"]}
+	], "casks": []}`)
+	got, err := brew.Homebrew{Run: fake}.Formulae().Resolve(context.Background(), names)
+	want := map[string]string{"owner/tap/tool@2": "owner/tap/tool", "owner/tap/tool": "owner/tap/tool", "tool@2": "owner/tap/tool", "owner/tap/old-tool": "owner/tap/tool"}
+	if err != nil || !mapsEqual(got, want) {
+		t.Errorf("Resolve() = %v, %v; want %v", got, err, want)
+	}
+
+	fake.On("brew", "info", "--json=v2", "--cask", "owner/tap/old-app").Prints(`{"formulae": [], "casks": [
+		{"token": "app", "full_token": "owner/tap/app", "old_tokens": ["old-app"]}
+	]}`)
+	got, err = brew.Homebrew{Run: fake}.Casks().Resolve(context.Background(), []string{"owner/tap/old-app"})
+	if want := map[string]string{"owner/tap/old-app": "owner/tap/app"}; err != nil || !mapsEqual(got, want) {
+		t.Errorf("Resolve() of a tap cask's old token = %v, %v; want %v", got, err, want)
+	}
+}
+
 func TestResolveOneAtATimeWhenANameIsUnknown(t *testing.T) {
 	fake := runnertest.New(t)
 	fake.On("brew", "info", "--json=v2", "--cask", "tailscale", "no-such-cask").Exits(1).PrintsToStderr(`Error: Cask 'no-such-cask' is unavailable`)
