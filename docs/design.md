@@ -168,6 +168,17 @@ called missing, and a name Homebrew doesn't know is missing and "unknown". Four 
 - **unused dependency:** a formula installed as a dependency that nothing installed needs now
   (what `brew autoremove` removes).
 
+**Installing and removing.** Before its first install in a run kit runs `brew update`, as
+installs from stale formulae fail. Formulae install in one `brew install --formula`, a tap's
+first: a tap's formula then claims a name it shares with one of Homebrew's own before
+anything pulls that in as a dependency. Casks install in one `brew install --cask`. A missing
+item kit can't install now says why, and is left: a name another tap's formula holds (two
+formulae of one name share a keg), or a cask that installs through a package, needing an
+administrator's password kit hasn't got. Items kit would install carry the action `install`,
+and a step with one is applied even while its items are quiet, so a package declared on
+another Mac is installed the same day. Removing is `brew uninstall`; Homebrew's refusal, when
+something needs the package, is passed on.
+
 **Drift counts after a day.** An item a kind's check finds (missing, extra, an unused
 dependency) is new for its first 24 hours: shown, quiet, without needing attention, so a
 throwaway install that's soon removed never does. kit remembers when it first saw each item,

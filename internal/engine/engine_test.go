@@ -376,3 +376,30 @@ func TestApply(t *testing.T) {
 		t.Errorf("steps started %q, want %q", strings.Join(doing, ","), want)
 	}
 }
+
+func TestApplyActsOnQuietItems(t *testing.T) {
+	applied := false
+	s := engine.Step{
+		Name: "brew",
+		Check: func(context.Context) check.Result {
+			if applied {
+				return check.Result{State: check.OK}
+			}
+			// Missing, but new: nothing needs attention yet, yet there's
+			// something to install.
+			return check.Result{State: check.OK, Items: []check.Item{{ID: "brew:jq", Name: "jq", State: "missing", Quiet: "new", Action: "install"}}}
+		},
+		Apply: func(context.Context) error { applied = true; return nil },
+	}
+	p, err := engine.New(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Check(t.Context(), &recorder{}, engine.Options{}); err != nil || applied {
+		t.Fatalf("Check() applied = %v, %v; want nothing applied by a check", applied, err)
+	}
+	report, err := p.Apply(t.Context(), &recorder{}, engine.Options{})
+	if err != nil || !applied || report.Results["brew"].State != check.OK || len(report.Results["brew"].Items) != 0 {
+		t.Errorf("Apply() = %+v, %v, applied %v; want the quiet item installed", report.Results["brew"], err, applied)
+	}
+}
