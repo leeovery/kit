@@ -23,6 +23,7 @@ import (
 	"github.com/leeovery/kit/internal/kind/ghext"
 	"github.com/leeovery/kit/internal/kind/gotool"
 	"github.com/leeovery/kit/internal/kind/login"
+	"github.com/leeovery/kit/internal/kind/mcp"
 	"github.com/leeovery/kit/internal/kind/npm"
 	"github.com/leeovery/kit/internal/kind/tmux"
 	"github.com/leeovery/kit/internal/logs"
@@ -102,10 +103,11 @@ type kindStep struct {
 }
 
 // kindSteps are every kind kit knows, in pipeline order, driven through
-// run, for the user whose home is home and XDG config folder configHome.
-// The kinds whose programs are formulae come after the formulae, so a new
-// Mac has them before it needs them.
-func kindSteps(hb *brew.Homebrew, run runner.Runner, home, configHome string) []kindStep {
+// run, for the user whose home is home and XDG config folder configHome,
+// on the Mac named mac, as cfg declares. The kinds whose programs are
+// formulae come after the formulae, so a new Mac has them before it needs
+// them.
+func kindSteps(hb *brew.Homebrew, run runner.Runner, home, configHome string, cfg *config.Config, mac string) []kindStep {
 	return []kindStep{
 		{kind: hb.Formulae(), needs: []string{brew.StepName}},
 		{kind: hb.Casks(), needs: []string{brew.StepName}},
@@ -116,6 +118,7 @@ func kindSteps(hb *brew.Homebrew, run runner.Runner, home, configHome string) []
 		{kind: ghext.New(run), after: []string{"brew"}},
 		{kind: tmux.New(run, home, configHome), after: []string{"brew"}},
 		{kind: login.New(run, home), after: []string{"cask", "app"}},
+		{kind: mcp.New(run, home, cfg.Dir, mac), after: []string{"brew"}},
 	}
 }
 
@@ -195,7 +198,7 @@ func (a *app) prepare(command, logName string) (*run, error) {
 		repo: gitrepo.Repo{Dir: dirs.Config, Run: observed}, record: record,
 	}
 	var kinds []engine.Step
-	for _, ks := range kindSteps(hb, observed, home, a.configHome()) {
+	for _, ks := range kindSteps(hb, observed, home, a.configHome(), cfg, machine) {
 		name := ks.kind.Name()
 		list, unread, err := declared(cfg, ks.kind, machine)
 		if err != nil {
