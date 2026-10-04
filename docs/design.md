@@ -58,7 +58,8 @@ the reason, the rest carry on, and the summary always prints.
 Built:
 
 ```
-(none yet: see Milestones)
+kit machine [<name>]         This Mac's name: shown, or set (one of kit.toml's Macs)
+kit version                  As --version
 ```
 
 Planned for the first milestone:
@@ -66,9 +67,11 @@ Planned for the first milestone:
 ```
 kit status [area] [--json]   What's declared against what's on this Mac
 kit log [--json]             What the last run did: every check, every command, with timings
-kit machine [<name>]         This Mac's name: shown, or set (one of kit.toml's Macs)
-kit version
 ```
+
+Exit statuses: 0 when all's well, 1 when something needs attention (a Mac with no name yet,
+drift), 2 when kit couldn't do its job (no config repository, a config error, an unknown
+command).
 
 Later: `kit` (at a glance), `apply`, `reconcile`, `add`, `remove`, `share`, `list`, `why`,
 `edit`, `update`, `secrets`, `prefs`, `nightly`, `bootstrap`, `takeover`, `retire`,
@@ -138,7 +141,7 @@ step failed, with the error; the run finishing, with its summary. Faces subscrib
   stream, its full size noted; `--verbose` keeps it whole.
 
 `kit status` exits 0 when nothing needs attention, 1 when something does, and 2 when it
-couldn't do its job.
+couldn't do its job, as every command does.
 
 ## Homebrew
 
