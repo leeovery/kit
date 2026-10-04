@@ -166,9 +166,10 @@ func (a *app) why(ctx context.Context, r *run, name string) error {
 			continue
 		}
 		w := why{Kind: kindName, Step: k.Title(), Declared: declared, Installed: isIn}
-		_, ownFiles := k.(kind.Declarer)
+		_, readOnly := k.(kind.ReadOnly)
+		d := r.decls(kindName)
 		w.ForThisMac = slices.ContainsFunc(declared, func(e config.Entry) bool {
-			return ownFiles || e.File == kindName || e.File == kindName+"."+r.machine
+			return readOnly || e.File == d.file(true) || e.File == d.file(false)
 		})
 		if d, ok := k.(kind.Dependents); ok && isIn {
 			if w.NeededBy, err = d.NeededBy(ctx, name); err != nil {

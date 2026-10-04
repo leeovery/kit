@@ -35,8 +35,10 @@ type MCP struct {
 	run runner.Runner
 	// home is the user's home, where ~/.claude.json is.
 	home string
-	// dir is the config repository, and mac this Mac's name.
+	// dir is the config repository, mac this Mac's name, and macs every
+	// Mac's it knows.
 	dir, mac string
+	macs     []string
 	// declared are the servers declared for this Mac, by id, once Declared
 	// has read them.
 	declared map[string]Server
@@ -44,9 +46,9 @@ type MCP struct {
 
 // New returns Claude Code's MCP servers, driven through run, for the user
 // whose home is home, as the config repository in dir declares them for
-// the Mac named mac.
-func New(run runner.Runner, home, dir, mac string) *MCP {
-	return &MCP{run: run, home: home, dir: dir, mac: mac, declared: map[string]Server{}}
+// the Mac named mac, one of macs.
+func New(run runner.Runner, home, dir, mac string, macs []string) *MCP {
+	return &MCP{run: run, home: home, dir: dir, mac: mac, macs: macs, declared: map[string]Server{}}
 }
 
 func (*MCP) Name() string    { return "mcp" }
@@ -76,9 +78,70 @@ func (m *MCP) Declared() (config.List, error) {
 	return list, nil
 }
 
-// HowToDeclare says how to declare a server, while kit doesn't.
-func (m *MCP) HowToDeclare(string) string {
-	return "kit doesn't declare MCP servers yet: add it to " + FileName(m.mac) + " in the config repository"
+// FileFor is the file a server's declared in: the one every Mac reads, or
+// this Mac's own.
+func (m *MCP) FileFor(shared bool) string {
+	if shared {
+		return FileName("")
+	}
+	return FileName(m.mac)
+}
+
+// Where are the entries declaring the server name, in every Mac's files.
+func (m *MCP) Where(name string) ([]config.Entry, error) {
+	var found []config.Entry
+	for _, file := range m.files() {
+		servers, err := readFile(filepath.Join(m.dir, file))
+		if err != nil {
+			return nil, err
+		}
+		for _, s := range servers {
+			if s.ID() == name {
+				found = append(found, config.Entry{Name: s.ID(), File: file, Line: s.Line, Note: s.Note, Off: s.Off})
+			}
+		}
+	}
+	return found, nil
+}
+
+// files are every Mac's declarations files: the shared one, then each
+// Mac's, by name.
+func (m *MCP) files() []string {
+	files := []string{FileName("")}
+	for _, mac := range m.macs {
+		files = append(files, FileName(mac))
+	}
+	return files
+}
+
+// Adopt declares the server name, as it's installed, in file, with note. A
+// server holding a key in plain text isn't declared: the key goes in
+// 1Password first, named in its definition as ${VAR}.
+func (m *MCP) Adopt(_ context.Context, file, name, note string) error {
+	servers, err := m.installed()
+	if err != nil {
+		return err
+	}
+	i := slices.IndexFunc(servers, func(s Server) bool { return s.ID() == name })
+	if i < 0 {
+		return fmt.Errorf("%s isn't installed in Claude Code", name)
+	}
+	s := servers[i]
+	if plain := PlainKeys(s.Definition); len(plain) > 0 {
+		return fmt.Errorf("%s holds a key in plain text (%s): put the key in 1Password, name it in the server's definition as ${VAR}, then declare it", name, strings.Join(plain, " and "))
+	}
+	s.Definition, s.Note = normal(s.Definition), note
+	return Declare(m.dir, file, s)
+}
+
+// Undeclare takes the server name out of file.
+func (m *MCP) Undeclare(file, name string) error {
+	return Undeclare(m.dir, file, name)
+}
+
+// SetOff declares the server name, in file, off or on.
+func (m *MCP) SetOff(file, name string, off bool) error {
+	return SetOff(m.dir, file, name, off)
 }
 
 // Installed lists the servers installed, by id, each installed for itself.
@@ -166,7 +229,7 @@ func (m *MCP) Differs(_ context.Context, names []string) (map[string]string, err
 			continue
 		}
 		if fields := differing(normal(d.Definition), normal(i.Definition)); len(fields) > 0 {
-			differs[name] = "installed with a different " + strings.Join(fields, " and ")
+			differs[name] = "installed differently: " + strings.Join(fields, ", ")
 		}
 	}
 	return differs, nil
@@ -194,7 +257,7 @@ func (m *MCP) Install(ctx context.Context, names []string) error {
 	for _, name := range names {
 		s, ok := m.declared[name]
 		if !ok {
-			errs = append(errs, fmt.Errorf("%s isn't declared", name))
+			errs = append(errs, fmt.Errorf("%s isn't declared: add it to Claude Code with claude mcp add, and kit add mcp declares it", name))
 			continue
 		}
 		if slices.ContainsFunc(servers, func(i Server) bool { return i.ID() == name }) {

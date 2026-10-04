@@ -327,11 +327,12 @@ func (a *app) askAbout(ctx context.Context, r *run, items []driftItem, opts reco
 
 // askGroup asks which group of the file an adopted item goes in.
 func (a *app) askGroup(ctx context.Context, r *run, d decision) (string, error) {
-	file := d.item.Kind + "." + r.machine
-	if d.shared {
-		file = d.item.Kind
+	decls := r.decls(d.item.Kind)
+	if !decls.grouped() {
+		return "", nil
 	}
-	headings, err := r.cfg.Groups(file)
+	file := decls.file(d.shared)
+	headings, err := decls.groups(file)
 	if err != nil {
 		return "", err
 	}
@@ -422,10 +423,7 @@ func carryOutOne(ctx context.Context, r *run, c *changes, d decision, note strin
 	k := r.kindsByName[d.item.Kind]
 	switch d.action {
 	case adopt:
-		file := d.item.Kind + "." + r.machine
-		if d.shared {
-			file = d.item.Kind
-		}
+		file := r.decls(d.item.Kind).file(d.shared)
 		group := d.group
 		if group == config.ToBeSorted {
 			group = ""
