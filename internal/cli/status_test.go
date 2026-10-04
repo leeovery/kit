@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/leeovery/kit/internal/status"
 )
@@ -24,6 +25,9 @@ func laptopWorld(t *testing.T) *world {
 		"paths":       "~/.local/bin\n/opt/homebrew/bin\n",
 	})
 	w.write(t, filepath.Join(".local", "state", "kit", "machine"), "laptop\n")
+	// The drift was first seen two days ago, so it needs attention.
+	w.write(t, filepath.Join(".local", "state", "kit", "drift.json"),
+		`{"first_seen": {"brew:ffmpeg": "2025-12-31T00:00:00Z", "brew:node@20": "2025-12-31T00:00:00Z", "cask:firefox": "2025-12-31T00:00:00Z"}}`)
 	w.env["USER"] = "someone"
 	w.env["KIT_UNRELATED"] = "never passed on"
 	f := w.fake
@@ -181,5 +185,35 @@ func TestStatusIsLogged(t *testing.T) {
 	}
 	if status != 0 {
 		t.Errorf("kit log exit %d, want 0", status)
+	}
+}
+
+// Drift counts after a day: new drift is shown, quiet, and needs attention
+// once a day has passed since it was first seen.
+func TestStatusQuietensNewDrift(t *testing.T) {
+	w := laptopWorld(t)
+	w.write(t, filepath.Join(".local", "state", "kit", "drift.json"), "{}")
+
+	out, _, code := w.run(t, "status")
+	for _, want := range []string{"brew ok 3 declared, all installed\n", "brew extra:new ffmpeg\n", "brew unused-dependency:new node@20\n", "cask extra:new firefox\n", "Nothing needs attention\n"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("first kit status printed\n%s\nwant it to hold %q", out, want)
+		}
+	}
+	if code != 0 {
+		t.Errorf("first kit status exit %d, want 0", code)
+	}
+	if got := w.read(t, filepath.Join(".local", "state", "kit", "drift.json")); !strings.Contains(got, `"brew:ffmpeg": "2026-01-02T03:04:05Z"`) {
+		t.Errorf("drift.json holds\n%s\nwant ffmpeg first seen now", got)
+	}
+
+	w.now = w.now.Add(23 * time.Hour)
+	if _, _, code := w.run(t, "status"); code != 0 {
+		t.Errorf("kit status a day less an hour later: exit %d, want 0", code)
+	}
+	w.now = w.now.Add(2 * time.Hour)
+	out, _, code = w.run(t, "status")
+	if !strings.Contains(out, "brew extra ffmpeg\n") || code != 1 {
+		t.Errorf("kit status over a day later printed\n%s exit %d; want ffmpeg needing attention, exit 1", out, code)
 	}
 }

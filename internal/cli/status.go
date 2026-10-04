@@ -3,11 +3,15 @@ package cli
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/config"
+	"github.com/leeovery/kit/internal/drift"
 	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/kind"
@@ -34,6 +38,9 @@ and 2 when kit couldn't check. Each run is logged: see kit log.`,
 				return err
 			}
 			report, err := r.pipeline.Check(cmd.Context(), r.sink, r.options(a, args))
+			if err == nil {
+				err = r.remember(report)
+			}
 			if closeErr := r.close(); err == nil {
 				err = closeErr
 			}
@@ -48,8 +55,8 @@ and 2 when kit couldn't check. Each run is logged: see kit log.`,
 	}
 }
 
-// run is a run of the engine, ready to go: its pipeline, and where its
-// events go.
+// run is a run of the engine, ready to go: its pipeline, where its events
+// go, and what it remembers of drift.
 type run struct {
 	command  string
 	machine  string
@@ -57,6 +64,22 @@ type run struct {
 	sink     event.Sink
 	face     render.Face
 	log      *logs.File
+	stateDir string
+	// kinds are the kinds' steps, whose items are drift.
+	kinds []string
+	now   time.Time
+}
+
+// remember notes, in the drift record, the drift the run's checks found:
+// what's new, and what's gone.
+func (r *run) remember(report engine.Report) error {
+	results := make(map[string]check.Result)
+	for _, kind := range r.kinds {
+		if res, ok := report.Results[kind]; ok {
+			results[kind] = res
+		}
+	}
+	return drift.Update(r.stateDir, func(rec *drift.Record) { rec.Seen(results, r.now) })
 }
 
 func (r *run) options(a *app, only []string) engine.Options {
@@ -111,7 +134,12 @@ func (a *app) prepare(command string) (*run, error) {
 		return nil, err
 	}
 
-	log, err := logs.Open(dirs.Logs, a.Now(), command, a.verbose)
+	record, err := drift.Load(dirs.State)
+	if err != nil {
+		return nil, err
+	}
+	now := a.Now()
+	log, err := logs.Open(dirs.Logs, now, command, a.verbose)
 	if err != nil {
 		return nil, err
 	}
@@ -120,18 +148,31 @@ func (a *app) prepare(command string) (*run, error) {
 	exec := a.Runner(path, childEnv(a.Getenv, home, path))
 	observed := runner.Observed(exec, func(ctx context.Context, rep runner.Report) { sink.Emit(event.Command(ctx, rep)) }, a.Now)
 	hb := brew.Homebrew{Run: observed}
-	pipeline, err := engine.New(
-		hb.Step(),
-		kind.Step(hb.Formulae(), formulae, brew.StepName),
-		kind.Step(hb.Casks(), casks, brew.StepName),
-		steps.ConfigPrivate(observed, dirs.Config),
-	)
+	kinds := []engine.Step{
+		quietened(kind.Step(hb.Formulae(), formulae, brew.StepName), record, now),
+		quietened(kind.Step(hb.Casks(), casks, brew.StepName), record, now),
+	}
+	pipeline, err := engine.New(slices.Concat([]engine.Step{hb.Step()}, kinds, []engine.Step{steps.ConfigPrivate(observed, dirs.Config)})...)
 	if err != nil {
 		_ = face.Close()
 		_ = log.Close()
 		return nil, err
 	}
-	return &run{command: command, machine: machine, pipeline: pipeline, sink: sink, face: face, log: log}, nil
+	r := &run{command: command, machine: machine, pipeline: pipeline, sink: sink, face: face, log: log, stateDir: dirs.State, now: now}
+	for _, k := range kinds {
+		r.kinds = append(r.kinds, k.Name)
+	}
+	return r, nil
+}
+
+// quietened is step with its items quiet while their time hasn't come, as
+// the drift record says: new for a day, snoozed, or a temporary install.
+func quietened(step engine.Step, record drift.Record, now time.Time) engine.Step {
+	checks := step.Check
+	step.Check = func(ctx context.Context) check.Result {
+		return drift.Quieten(checks(ctx), record, now)
+	}
+	return step
 }
 
 // face is the face a run shows on: JSON with --json, plain with --plain or

@@ -2,6 +2,8 @@
 // things that need attention.
 package check
 
+import "time"
+
 // State is how a step stands.
 type State string
 
@@ -17,7 +19,7 @@ const (
 	Deferred State = "deferred"
 )
 
-// Item is one thing a check found that needs attention.
+// Item is one thing a check found that needs attention, or will.
 type Item struct {
 	// ID names it, the same from run to run: its kind and name, as in
 	// brew:jq.
@@ -26,6 +28,11 @@ type Item struct {
 	// State is what's wrong with it, as in missing.
 	State  string `json:"state"`
 	Detail string `json:"detail,omitempty"`
+	// Quiet says why it doesn't need attention yet, when it doesn't: new,
+	// snoozed or temporary.
+	Quiet string `json:"quiet,omitempty"`
+	// Since is when it was first seen, when that's known.
+	Since time.Time `json:"since,omitzero"`
 }
 
 // Result is what a check found.

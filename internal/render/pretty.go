@@ -115,7 +115,10 @@ func (p *Pretty) writeStep(f event.StepFinished) {
 	indent := strings.Repeat(" ", 2+p.column)
 	for _, g := range groupItems(r.Items) {
 		for i, line := range wrapList(g.label()+": ", g.names, p.width-len(indent)) {
-			if i == 0 {
+			switch {
+			case g.quiet != "":
+				line = faint.Render(line)
+			case i == 0:
 				line = yellow.Render(g.label()+":") + strings.TrimPrefix(line, g.label()+":")
 			}
 			p.write(indent + line + "\n")
