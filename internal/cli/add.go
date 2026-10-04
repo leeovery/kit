@@ -66,6 +66,9 @@ func (a *app) add(ctx context.Context, r *run, kindName string, names []string, 
 	if opts.shared {
 		file = kindName
 	}
+	if names, err = a.find(ctx, k, names); err != nil {
+		return err
+	}
 	groups, err := a.groupsFor(ctx, r, kindName, file, names, opts)
 	if err != nil {
 		return err
@@ -85,6 +88,49 @@ func (a *app) add(ctx context.Context, r *run, kindName string, names []string, 
 	}
 	c.sync(ctx, commitMessage("add", kindName, names, r.machine, opts.note))
 	return c.finish()
+}
+
+// find settles what each typed name means, for a kind that finds things
+// (an App Store app from its name), before anything's asked or installed:
+// one match is it; several are a choice at a terminal, and without one an
+// error listing them by the names that say which.
+func (a *app) find(ctx context.Context, k kind.Kind, typed []string) ([]string, error) {
+	f, ok := k.(kind.Finder)
+	if !ok {
+		return typed, nil
+	}
+	names := make([]string, 0, len(typed))
+	for _, t := range typed {
+		found, err := f.Find(ctx, t)
+		if err != nil {
+			return nil, err
+		}
+		switch {
+		case len(found) == 1:
+			names = append(names, found[0].Name)
+		case a.pretty(a.Stdout):
+			labels := make([]string, len(found))
+			for i, f := range found {
+				labels[i] = f.Label
+			}
+			i, err := a.Choose(ctx, fmt.Sprintf("%s: which is %s?", k.Title(), t), labels)
+			if errors.Is(err, ask.ErrCancelled) {
+				return nil, errors.New("cancelled: nothing was installed or declared")
+			}
+			if err != nil {
+				return nil, err
+			}
+			names = append(names, found[i].Name)
+		default:
+			var b strings.Builder
+			fmt.Fprintf(&b, "%s could be any of these: name one", t)
+			for _, f := range found {
+				fmt.Fprintf(&b, "\n  %s   %s", f.Name, f.Label)
+			}
+			return nil, errors.New(b.String())
+		}
+	}
+	return names, nil
 }
 
 // groupsFor asks, before anything is installed, which group of file each

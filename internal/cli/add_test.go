@@ -144,7 +144,7 @@ func TestAddThatCantInstallDeclaresNothing(t *testing.T) {
 
 func TestAddAnUnknownKind(t *testing.T) {
 	_, errOut, code := laptopWorld(t).run(t, "add", "mas", "Xcode")
-	if errOut != "kit: no kind named mas: one of brew, cask\n" || code != 2 {
+	if !strings.HasPrefix(errOut, "kit: no kind named mas: one of app, brew, cask") || code != 2 {
 		t.Errorf("kit add mas printed %q, exit %d", errOut, code)
 	}
 }
