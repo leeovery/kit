@@ -224,7 +224,13 @@ func addOne(ctx context.Context, r *run, c *changes, k kind.Kind, file, name, gr
 		}
 		return check.Result{State: check.OK, Summary: verb + ", for now: not declared, quiet for 7 days, then kit reconcile asks"}
 	}
-	if err := r.cfg.Declare(file, name, group, opts.note); err != nil {
+	note := opts.note
+	if d, ok := k.(kind.Describer); ok {
+		if what := d.Describe(ctx, name); what != "" {
+			note = strings.TrimSuffix(what+": "+note, ": ")
+		}
+	}
+	if err := r.cfg.Declare(file, name, group, note); err != nil {
 		return check.Result{State: check.Failed, Reason: verb + ", but couldn't declare: " + err.Error()}
 	}
 	c.changed(file)
