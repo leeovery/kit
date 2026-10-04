@@ -219,14 +219,15 @@ built:
 
 ## Milestones
 
-**1. Status, read-only.** The repository and its isolation; config and the Mac's name; the
-runner and its fake; events, the faces and the log; the engine; Homebrew's formulae and casks;
-`kit status`, `kit log`, `kit machine`, `kit version`; the first release through the tap. One
-pull request each, in that order. Nothing on the Mac changes but kit's own state and logs.
+**1. Status, read-only — done (0.1.0).** The repository and its isolation; config and the
+Mac's name; the runner and its fake; events, the faces and the log; the engine; Homebrew's
+formulae and casks; `kit status`, `kit log`, `kit machine`, `kit version`; the first release
+through the tap. One pull request each, in that order (#1–#8). Nothing on the Mac changes but
+kit's own state and logs.
 
-**2. Packages, read-write.** `kit apply` installs what's missing; `kit add` and `kit remove`
-(`--shared`, `--temp`, `--note`); `kit reconcile` with drift counted after 24 hours and
-snoozes; `kit list`, `kit why`, `--plan`.
+**2. Packages, read-write — next.** `kit apply` installs what's missing; `kit add` and
+`kit remove` (`--shared`, `--temp`, `--note`); `kit reconcile` with drift counted after 24
+hours and snoozes; `kit list`, `kit why`, `--plan`.
 
 **Then:** the other kinds; one set of checks behind bare `kit` and an hourly run, with
 notifications and the primary reading the other Macs; steps for linked files, the shell, git,
