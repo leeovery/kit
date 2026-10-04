@@ -33,7 +33,7 @@ Name steps (homebrew, brew, cask, config-private) to check only those, with
 what they need. Exits 0 when nothing needs attention, 1 when something does,
 and 2 when kit couldn't check. Each run is logged: see kit log.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			r, err := a.prepare("status")
+			r, err := a.prepare("status", "status")
 			if err != nil {
 				return err
 			}
@@ -68,6 +68,11 @@ type run struct {
 	// kinds are the kinds' steps, whose items are drift.
 	kinds []string
 	now   time.Time
+	// homebrew, casks and run are what applying needs before it starts: what
+	// to ask up front.
+	homebrew *brew.Homebrew
+	casks    config.List
+	run      runner.Runner
 }
 
 // remember notes, in the drift record, the drift the run's checks found:
@@ -95,10 +100,10 @@ func (r *run) close() error {
 	return faceErr
 }
 
-// prepare readies a run of command: the config, this Mac's name, settled
-// before anything reads a Mac's own files, kit's own PATH, the runner, the
-// faces and the log, and the pipeline.
-func (a *app) prepare(command string) (*run, error) {
+// prepare readies a run of command, logged as logName: the config, this
+// Mac's name, settled before anything reads a Mac's own files, kit's own
+// PATH, the runner, the faces and the log, and the pipeline.
+func (a *app) prepare(command, logName string) (*run, error) {
 	dirs, err := a.dirs()
 	if err != nil {
 		return nil, err
@@ -139,7 +144,7 @@ func (a *app) prepare(command string) (*run, error) {
 		return nil, err
 	}
 	now := a.Now()
-	log, err := logs.Open(dirs.Logs, now, command, a.verbose)
+	log, err := logs.Open(dirs.Logs, now, logName, a.verbose)
 	if err != nil {
 		return nil, err
 	}
@@ -158,7 +163,10 @@ func (a *app) prepare(command string) (*run, error) {
 		_ = log.Close()
 		return nil, err
 	}
-	r := &run{command: command, machine: machine, pipeline: pipeline, sink: sink, face: face, log: log, stateDir: dirs.State, now: now}
+	r := &run{
+		command: command, machine: machine, pipeline: pipeline, sink: sink, face: face, log: log,
+		stateDir: dirs.State, now: now, homebrew: hb, casks: casks, run: observed,
+	}
 	for _, k := range kinds {
 		r.kinds = append(r.kinds, k.Name)
 	}

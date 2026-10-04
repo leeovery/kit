@@ -88,3 +88,17 @@ func (r *recorder) Errorf(format string, args ...any) {
 	defer r.mu.Unlock()
 	r.errors = append(r.errors, fmt.Sprintf(format, args...))
 }
+
+func TestFakeAnswersInTurn(t *testing.T) {
+	fake := runnertest.New(t)
+	fake.On("brew", "leaves").Prints("jq\n").Then().Prints("jq\nripgrep\n").Then().Exits(1)
+	var got []string
+	for range 4 {
+		res, err := fake.Run(t.Context(), runner.Command{Name: "brew", Args: []string{"leaves"}})
+		got = append(got, fmt.Sprintf("%q %v", res.Stdout, err != nil))
+	}
+	want := []string{`"jq\n" false`, `"jq\nripgrep\n" false`, `"" true`, `"" true`}
+	if !slices.Equal(got, want) {
+		t.Errorf("answers = %q, want %q", got, want)
+	}
+}

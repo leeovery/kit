@@ -6,7 +6,6 @@ package kind
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"slices"
 
@@ -70,13 +69,9 @@ func Step(k Kind, declared config.List, needs ...string) engine.Step {
 		Title: k.Title(),
 		Needs: needs,
 		Check: func(ctx context.Context) check.Result { return Compare(ctx, k, declared) },
-		Apply: func(ctx context.Context) error {
-			res := Compare(ctx, k, declared)
-			if res.State == check.Failed {
-				return errors.New(res.Reason)
-			}
+		Apply: func(ctx context.Context, found check.Result) error {
 			var names []string
-			for _, it := range res.Items {
+			for _, it := range found.Items {
 				if it.Action == Install {
 					names = append(names, it.Name)
 				}

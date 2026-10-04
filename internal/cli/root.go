@@ -91,7 +91,7 @@ func NewRootCommand(deps Deps) *cobra.Command {
 	flags.BoolVar(&a.json, "json", false, "print one JSON document, for scripts and agents")
 	flags.BoolVar(&a.plain, "plain", false, "print plain lines, no colour or animation, as without a terminal")
 	flags.BoolVar(&a.verbose, "verbose", false, "keep commands' output whole in the run's log")
-	root.AddCommand(newLogCommand(a), newMachineCommand(a), newStatusCommand(a), newVersionCommand())
+	root.AddCommand(newApplyCommand(a), newLogCommand(a), newMachineCommand(a), newStatusCommand(a), newVersionCommand())
 	return root
 }
 
@@ -164,7 +164,7 @@ func Real(version string) Deps {
 		Terminal: IsTerminal,
 		Width:    TerminalWidth,
 		Runner: func(path, env []string) runner.Runner {
-			return runner.Exec{Path: path, Env: env, Now: time.Now}
+			return runner.Exec{Path: path, Env: env, Now: time.Now, Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr}
 		},
 	}
 }

@@ -66,11 +66,19 @@ A run that's stopped (an interrupt) fails the steps it hadn't started.
 Built:
 
 ```
+kit apply [step...] [--plan] Install what's declared and missing (--plan: say what, do nothing)
 kit status [step...]         How this Mac stands against the config: what needs attention
 kit log                      What the last run did: every check, every command, with timings
 kit machine [<name>]         This Mac's name: shown, or set (one of kit.toml's Macs)
 kit version                  As --version
 ```
+
+`kit apply` checks every step and applies each that doesn't stand ok, or has something to
+do, then checks it again: each step then says what it did ("installed: jq"). It never removes
+or adopts: reconcile does those. At a terminal, when a missing cask installs through a
+package, kit asks for an administrator's password once, through `sudo -v`, before anything is
+applied, and keeps sudo's hold fresh while it runs; without a terminal it asks nothing, and
+those casks wait, saying why (requirement 4).
 
 `kit status` runs every step's check (named steps run with what they need): Homebrew, the
 formulae (`brew`), the casks (`cask`), and the config repository being private on GitHub
@@ -222,7 +230,7 @@ built:
 | 1 | A failed step never ends the run: it's recorded, what needs it is deferred, the rest carry on, the summary prints | `engine.TestAFailedStepNeverEndsTheRun` |
 | 2 | The Mac's name is settled before any config is read, and every reader uses it | `cli.TestStatusNeedsTheMacsNameFirst` |
 | 3 | kit sets its own PATH, from the same list the shell uses | `cli.TestStatusRunsProgramsOnKitsOwnPath` |
-| 4 | Questions up front, then unattended: no step asks its own | later |
+| 4 | Questions up front, then unattended: no step asks its own | `cli.TestApplyWithoutATerminalNeverPrompts`, `cli.TestApplyAtATerminalAsksForThePasswordUpFront` |
 | 5 | Full Disk Access for the terminal kit runs in, checked before anything that needs it | later |
 | 6 | 1Password signed in, with an unlocked session, before secrets | later |
 | 7 | GitHub over SSH only once the key exists; GitHub's host keys seeded | later |

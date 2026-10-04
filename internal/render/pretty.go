@@ -113,6 +113,15 @@ func (p *Pretty) writeStep(f event.StepFinished) {
 	pad := strings.Repeat(" ", max(p.column-ansi.StringWidth(title), 1))
 	p.write(stateMark[r.State] + " " + title + pad + text + "\n")
 	indent := strings.Repeat(" ", 2+p.column)
+	for _, g := range doneGroups(r.Done) {
+		lead := past(g.action) + ": "
+		for i, line := range wrapList(lead, g.names, p.width-len(indent)) {
+			if i == 0 {
+				line = green.Render(strings.TrimSuffix(lead, " ")) + strings.TrimPrefix(line, strings.TrimSuffix(lead, " "))
+			}
+			p.write(indent + line + "\n")
+		}
+	}
 	for _, g := range groupItems(r.Items) {
 		for i, line := range wrapList(g.label()+": ", g.names, p.width-len(indent)) {
 			switch {

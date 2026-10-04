@@ -30,8 +30,9 @@ type Step struct {
 	Needs []string
 	// Check finds out how the step stands: cheap, and without side effects.
 	Check func(ctx context.Context) check.Result
-	// Apply does what the step is for, safe to repeat. Optional.
-	Apply func(ctx context.Context) error
+	// Apply does what the step is for, given what its check found: safe to
+	// repeat. Optional.
+	Apply func(ctx context.Context, found check.Result) error
 	// Manual is what a person must do when the step can't be automated,
 	// shown while its check fails. Optional.
 	Manual string
@@ -335,15 +336,33 @@ func (d *dispatch) step(ctx context.Context, s Step) check.Result {
 	res := checkSafely(ctx, s)
 	if d.apply && (res.State != check.OK || res.Actions()) && s.Apply != nil && ctx.Err() == nil {
 		d.sink.Emit(event.StepStarted{Time: d.now(), Step: s.Name, Doing: "applying"})
-		if err := applySafely(ctx, s); err != nil {
+		before := res
+		if err := applySafely(ctx, s, res); err != nil {
 			return check.Result{State: check.Failed, Reason: err.Error()}
 		}
 		res = checkSafely(ctx, s)
+		res.Done = done(before, res)
 	}
 	if res.State == check.Attention && s.Manual != "" {
 		res.Items = append(res.Items, check.Item{ID: s.Name + ":manual", Name: s.Manual, State: "manual"})
 	}
 	return res
+}
+
+// done are the items before had an action for that after no longer has:
+// what applying the step dealt with.
+func done(before, after check.Result) []check.Item {
+	still := make(map[string]bool, len(after.Items))
+	for _, it := range after.Items {
+		still[it.ID] = true
+	}
+	var dealt []check.Item
+	for _, it := range before.Items {
+		if it.Action != "" && !still[it.ID] {
+			dealt = append(dealt, it)
+		}
+	}
+	return dealt
 }
 
 // finish records s's result, and emits it.
@@ -366,13 +385,13 @@ func checkSafely(ctx context.Context, s Step) (res check.Result) {
 	return s.Check(ctx)
 }
 
-// applySafely runs s's apply, a panic in it failing the step rather than
-// the run.
-func applySafely(ctx context.Context, s Step) (err error) {
+// applySafely runs s's apply on what its check found, a panic in it
+// failing the step rather than the run.
+func applySafely(ctx context.Context, s Step, found check.Result) (err error) {
 	defer func() {
 		if p := recover(); p != nil {
 			err = fmt.Errorf("applying panicked: %v", p)
 		}
 	}()
-	return s.Apply(ctx)
+	return s.Apply(ctx, found)
 }

@@ -1,6 +1,7 @@
 package runner_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -147,5 +148,19 @@ func TestExecEndsACommandWhenItsContextIsDone(t *testing.T) {
 	}
 	if took := time.Since(cancelled); took > 2*time.Second {
 		t.Errorf("Run() returned %v after its context was done, want it ended then, with everything it started", took)
+	}
+}
+
+func TestExecRunsAnInteractiveCommandAtTheTerminal(t *testing.T) {
+	r, _ := programs(t, map[string]string{"asks": `read answer; echo "got $answer"; echo "to stderr" >&2`})
+	var out, errOut bytes.Buffer
+	r.Stdin, r.Stdout, r.Stderr = strings.NewReader("yes\n"), &out, &errOut
+
+	res, err := r.Run(t.Context(), runner.Command{Name: "asks", Interactive: true})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if out.String() != "got yes\n" || errOut.String() != "to stderr\n" || len(res.Stdout) != 0 {
+		t.Errorf("the terminal got %q and %q, the result %q; want everything at the terminal, nothing captured", out.String(), errOut.String(), res.Stdout)
 	}
 }
