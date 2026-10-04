@@ -65,10 +65,7 @@ func (a *app) add(ctx context.Context, r *run, kindName string, names []string, 
 	if d, ok := k.(kind.ReadOnly); ok && !opts.temp {
 		return errors.New(d.HowToDeclare(names[0]) + "; --temp installs without declaring")
 	}
-	file := kindName + "." + r.machine
-	if opts.shared {
-		file = kindName
-	}
+	file := r.decls(kindName).file(opts.shared)
 	if names, err = a.find(ctx, k, names); err != nil {
 		return err
 	}
@@ -141,10 +138,11 @@ func (a *app) find(ctx context.Context, k kind.Kind, typed []string) ([]string, 
 // terminal, they go in "To be sorted".
 func (a *app) groupsFor(ctx context.Context, r *run, kindName, file string, names []string, opts addOptions) (map[string]string, error) {
 	groups := make(map[string]string)
-	if opts.temp {
+	d := r.decls(kindName)
+	if opts.temp || !d.grouped() {
 		return groups, nil
 	}
-	headings, err := r.cfg.Groups(file)
+	headings, err := d.groups(file)
 	if err != nil {
 		return nil, err
 	}
@@ -180,12 +178,13 @@ func (a *app) groupsFor(ctx context.Context, r *run, kindName, file string, name
 // declaredFor are where name is declared already as adding it would: for
 // every Mac, with shared; else for this Mac, shared or its own.
 func declaredFor(r *run, kindName, name string, shared bool) ([]config.Entry, error) {
-	where, err := r.cfg.Where(kindName, name)
+	where, err := r.where(kindName, name)
 	if err != nil {
 		return nil, err
 	}
+	d := r.decls(kindName)
 	return slices.DeleteFunc(where, func(e config.Entry) bool {
-		return e.File != kindName && (shared || e.File != kindName+"."+r.machine)
+		return e.File != d.file(true) && (shared || e.File != d.file(false))
 	}), nil
 }
 
@@ -230,13 +229,14 @@ func addOne(ctx context.Context, r *run, c *changes, k kind.Kind, file, name, gr
 			note = strings.TrimSuffix(what+": "+note, ": ")
 		}
 	}
-	if err := r.cfg.Declare(file, name, group, note); err != nil {
+	d := r.decls(kindName)
+	if err := d.declare(ctx, file, name, group, note); err != nil {
 		return check.Result{State: check.Failed, Reason: verb + ", but couldn't declare: " + err.Error()}
 	}
 	c.changed(file)
 	summary := fmt.Sprintf("%s; declared in %s (%s)", verb, file, groupOr(group))
 	if opts.shared {
-		where, err := r.cfg.Where(kindName, name)
+		where, err := r.where(kindName, name)
 		if err != nil {
 			return check.Result{State: check.Failed, Reason: err.Error()}
 		}
@@ -245,7 +245,7 @@ func addOne(ctx context.Context, r *run, c *changes, k kind.Kind, file, name, gr
 			if e.File == file {
 				continue
 			}
-			if err := r.cfg.Undeclare(e.File, name); err != nil {
+			if err := d.undeclare(e.File, name); err != nil {
 				return check.Result{State: check.Failed, Reason: err.Error()}
 			}
 			c.changed(e.File)

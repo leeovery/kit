@@ -118,7 +118,7 @@ func kindSteps(hb *brew.Homebrew, run runner.Runner, home, configHome string, cf
 		{kind: ghext.New(run), after: []string{"brew"}},
 		{kind: tmux.New(run, home, configHome), after: []string{"brew"}},
 		{kind: login.New(run, home), after: []string{"cask", "app"}},
-		{kind: mcp.New(run, home, cfg.Dir, mac), after: []string{"brew"}},
+		{kind: mcp.New(run, home, cfg.Dir, mac, cfg.MacNames()), after: []string{"brew"}},
 	}
 }
 

@@ -111,7 +111,7 @@ func write(t *testing.T, path, content string) {
 func newMCP(t *testing.T, fake *runnertest.Fake, home, dir string) *mcp.MCP {
 	t.Helper()
 	fake.On("claude", "--version")
-	return mcp.New(fake, home, dir, "laptop")
+	return mcp.New(fake, home, dir, "laptop", []string{"laptop", "studio"})
 }
 
 func TestDeclared(t *testing.T) {
@@ -161,8 +161,8 @@ func TestCompare(t *testing.T) {
 	got := kind.Compare(t.Context(), m, list)
 	want := []check.Item{
 		{ID: "mcp:~/Code/gone:tracker", Name: "~/Code/gone:tracker", State: kind.Missing, Detail: "the folder isn't here yet"},
-		{ID: "mcp:design", Name: "design", State: kind.Changed, Detail: "installed with a different headers", Action: kind.Install},
-		{ID: "mcp:~/Code/site:mail", Name: "~/Code/site:mail", State: kind.Changed, Detail: "installed with a different env", Action: kind.Install},
+		{ID: "mcp:design", Name: "design", State: kind.Changed, Detail: "installed differently: headers", Action: kind.Install},
+		{ID: "mcp:~/Code/site:mail", Name: "~/Code/site:mail", State: kind.Changed, Detail: "installed differently: env", Action: kind.Install},
 		{ID: "mcp:stray", Name: "stray", State: kind.Extra},
 		{ID: "mcp:~/Code/other:docs", Name: "~/Code/other:docs", State: kind.Extra},
 	}
@@ -180,7 +180,7 @@ func TestCompare(t *testing.T) {
 func TestWithoutClaude(t *testing.T) {
 	home, dir := world(t)
 	fake := runnertest.New(t)
-	m := mcp.New(fake, home, dir, "laptop")
+	m := mcp.New(fake, home, dir, "laptop", []string{"laptop", "studio"})
 	list, _ := m.Declared()
 	if got := kind.Compare(t.Context(), m, list); got.State != check.Deferred || got.Reason != "needs claude, which isn't installed" {
 		t.Errorf("Compare() = %+v, want it deferred", got)
@@ -216,5 +216,43 @@ func TestInstallAndRemove(t *testing.T) {
 	}
 	if err := m.Install(t.Context(), []string{"nosuch"}); err == nil {
 		t.Error("Install() of a server not declared = nil error")
+	}
+}
+
+// Adopting declares a server as it's installed, its empty fields left out;
+// one holding a key in plain text isn't declared.
+func TestAdopt(t *testing.T) {
+	home, dir := world(t)
+	m := newMCP(t, runnertest.New(t), home, dir)
+	if err := m.Adopt(t.Context(), "mcp.laptop.json", "stray", "a stray server"); err != nil {
+		t.Fatal(err)
+	}
+	where, err := m.Where("stray")
+	if err != nil || len(where) != 1 || where[0].File != "mcp.laptop.json" || where[0].Note != "a stray server" {
+		t.Errorf("Where(stray) = %+v, %v", where, err)
+	}
+	if got := read(t, filepath.Join(dir, "mcp.laptop.json")); !strings.Contains(got, "  \"stray\": {\n    \"_note\": \"a stray server\",\n    \"command\": \"stray-mcp\",\n    \"type\": \"stdio\"\n  },") {
+		t.Errorf("mcp.laptop.json =\n%s\nwant stray declared, its empty args and env left out", got)
+	}
+	err = m.Adopt(t.Context(), "mcp.laptop.json", "design", "")
+	if err == nil || !strings.Contains(err.Error(), "design holds a key in plain text (headers.Authorization)") || strings.Contains(err.Error(), "made-up-key") {
+		t.Errorf("Adopt(design) = %v, want it refused without saying the key", err)
+	}
+	if err := m.Adopt(t.Context(), "mcp.laptop.json", "nosuch", ""); err == nil {
+		t.Error("Adopt() of a server not installed = nil error")
+	}
+}
+
+// Where looks in every Mac's files, not this Mac's alone.
+func TestWhereLooksInEveryMacsFiles(t *testing.T) {
+	home, dir := world(t)
+	write(t, filepath.Join(dir, "mcp.studio.json"), `{"pages": {"type": "http", "url": "https://pages.example.com/mcp"}}`)
+	m := newMCP(t, runnertest.New(t), home, dir)
+	where, err := m.Where("pages")
+	if err != nil || len(where) != 1 || where[0].File != "mcp.studio.json" {
+		t.Errorf("Where(pages) = %+v, %v; want studio's", where, err)
+	}
+	if m.FileFor(true) != "mcp.json" || m.FileFor(false) != "mcp.laptop.json" {
+		t.Errorf("FileFor() = %s, %s", m.FileFor(true), m.FileFor(false))
 	}
 }

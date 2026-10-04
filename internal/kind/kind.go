@@ -80,6 +80,19 @@ type Declarer interface {
 	Declared() (config.List, error)
 }
 
+// Writer is a Declarer whose files kit writes, through the kind.
+type Writer interface {
+	// FileFor is the file a thing is declared in: the one every Mac reads,
+	// or this Mac's own.
+	FileFor(shared bool) string
+	// Where are the entries declaring name, in every Mac's files.
+	Where(name string) ([]config.Entry, error)
+	// Adopt declares name, as it's installed, in file, with note.
+	Adopt(ctx context.Context, file, name, note string) error
+	// Undeclare takes name out of file.
+	Undeclare(file, name string) error
+}
+
 // ReadOnly is a Declarer whose files kit reads but doesn't write.
 type ReadOnly interface {
 	// HowToDeclare says how to declare, or undeclare, name by hand.

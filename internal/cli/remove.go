@@ -66,18 +66,19 @@ func removeOne(ctx context.Context, r *run, c *changes, k kind.Kind, name string
 			return check.Result{State: check.Failed, Reason: fmt.Sprintf("declared in %s, line %d: %s", where[0].File, where[0].Line, d.HowToDeclare(where[0].Name))}
 		}
 	}
-	own := kindName + "." + r.machine
-	where, err := r.cfg.Where(kindName, name)
+	d := r.decls(kindName)
+	own, sharedFile := d.file(false), d.file(true)
+	where, err := r.where(kindName, name)
 	if err != nil {
 		return check.Result{State: check.Failed, Reason: err.Error()}
 	}
 	var inShared, inOwn bool
 	for _, e := range where {
-		inShared = inShared || e.File == kindName
+		inShared = inShared || e.File == sharedFile
 		inOwn = inOwn || e.File == own
 	}
 	if inShared && !shared {
-		return check.Result{State: check.Failed, Reason: "declared for every Mac, in " + kindName + ": --shared takes it out of every Mac's list"}
+		return check.Result{State: check.Failed, Reason: "declared for every Mac, in " + sharedFile + ": --shared takes it out of every Mac's list"}
 	}
 	isIn, err := installed(ctx, k, name)
 	if err != nil {
@@ -91,11 +92,11 @@ func removeOne(ctx context.Context, r *run, c *changes, k kind.Kind, name string
 		verb = "uninstalled"
 	}
 	var from []string
-	for _, file := range []string{own, kindName} {
-		if file == own && !inOwn || file == kindName && !inShared {
+	for _, file := range []string{own, sharedFile} {
+		if file == own && !inOwn || file == sharedFile && !inShared {
 			continue
 		}
-		if err := r.cfg.Undeclare(file, name); err != nil {
+		if err := d.undeclare(file, name); err != nil {
 			return check.Result{State: check.Failed, Reason: verb + ", but couldn't undeclare: " + err.Error()}
 		}
 		c.changed(file)

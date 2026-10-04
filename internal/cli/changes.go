@@ -107,10 +107,14 @@ func (r *run) kindNamed(name string) (kind.Kind, error) {
 }
 
 // where are the entries declaring name, of the kind called kindName: in its
-// lists, every Mac's; or, for a kind declared in a file of its own, there,
-// matching as the kind matches things.
+// lists, every Mac's; for a kind that writes its own files, in every Mac's
+// of those; or, for a kind declared in a file of its own that kit only
+// reads, there, matching as the kind matches things.
 func (r *run) where(kindName, name string) ([]config.Entry, error) {
 	k := r.kindsByName[kindName]
+	if w, ok := k.(kind.Writer); ok {
+		return w.Where(name)
+	}
 	if _, ok := k.(kind.Declarer); !ok {
 		return r.cfg.Where(kindName, name)
 	}
