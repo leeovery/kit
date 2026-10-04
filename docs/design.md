@@ -69,6 +69,8 @@ Built:
 kit add <kind> <name>...     Install, and declare for this Mac   [--shared] [--temp] [--note] [--group]
 kit remove <kind> <name>...  Uninstall, and undeclare            [--shared]
 kit reconcile [<id>]         Settle drift: adopt, remove, install, undeclare or snooze
+kit list [kind]              What's declared for this Mac: file, group, note, installed or not
+kit why <name>               Where it's declared, whether it's installed, what needs it
 kit apply [step...] [--plan] Install what's declared and missing (--plan: say what, do nothing)
 kit status [step...]         How this Mac stands against the config: what needs attention
 kit log                      What the last run did: every check, every command, with timings
@@ -113,9 +115,8 @@ Exit statuses: 0 when all's well, 1 when something needs attention (a Mac with n
 drift), 2 when kit couldn't do its job (no config repository, a config error, an unknown
 command).
 
-Later: `kit` (at a glance), `apply`, `reconcile`, `add`, `remove`, `share`, `list`, `why`,
-`edit`, `update`, `secrets`, `prefs`, `nightly`, `bootstrap`, `takeover`, `retire`,
-`decisions`, `decide`, `fleet`.
+Later: `kit` (at a glance), `share`, `edit`, `update`, `secrets`, `prefs`, `nightly`,
+`bootstrap`, `takeover`, `retire`, `decisions`, `decide`, `fleet`.
 
 Every question has a flag that answers it, so everything runs without prompts. Without a
 terminal kit never prompts: a question it can't ask is an error naming the flag. `--json`

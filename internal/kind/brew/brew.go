@@ -102,6 +102,11 @@ func (h *Homebrew) uninstall(ctx context.Context, which string, names []string) 
 	return err
 }
 
+// Uses lists the formulae installed that need the formula name.
+func (h *Homebrew) Uses(ctx context.Context, name string) ([]string, error) {
+	return h.lines(ctx, "uses", "--installed", name)
+}
+
 // lines runs brew with args, and returns what it printed, a line each.
 func (h *Homebrew) lines(ctx context.Context, args ...string) ([]string, error) {
 	res, err := h.brew(ctx, args...)
