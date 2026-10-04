@@ -19,6 +19,8 @@ import (
 	"github.com/leeovery/kit/internal/kind/appstore"
 	"github.com/leeovery/kit/internal/kind/brew"
 	"github.com/leeovery/kit/internal/kind/composer"
+	"github.com/leeovery/kit/internal/kind/ghext"
+	"github.com/leeovery/kit/internal/kind/gotool"
 	"github.com/leeovery/kit/internal/kind/npm"
 	"github.com/leeovery/kit/internal/logs"
 	"github.com/leeovery/kit/internal/render"
@@ -107,6 +109,8 @@ func kindSteps(hb *brew.Homebrew, run runner.Runner, home string) []kindStep {
 		{kind: appstore.New(run), after: []string{"brew"}},
 		{kind: npm.New(run, home), after: []string{"brew"}},
 		{kind: composer.New(run), after: []string{"brew"}},
+		{kind: gotool.New(run), after: []string{"brew"}},
+		{kind: ghext.New(run), after: []string{"brew"}},
 	}
 }
 
