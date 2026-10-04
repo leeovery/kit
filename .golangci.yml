@@ -1,0 +1,11 @@
+version: "2"
+
+issues:
+  # Report every finding; the defaults silently truncate repeats.
+  max-same-issues: 0
+  max-issues-per-linter: 0
+
+linters:
+  default: standard
+  enable:
+    - modernize
