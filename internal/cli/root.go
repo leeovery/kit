@@ -95,7 +95,7 @@ func NewRootCommand(deps Deps) *cobra.Command {
 	flags.BoolVar(&a.json, "json", false, "print one JSON document, for scripts and agents")
 	flags.BoolVar(&a.plain, "plain", false, "print plain lines, no colour or animation, as without a terminal")
 	flags.BoolVar(&a.verbose, "verbose", false, "keep commands' output whole in the run's log")
-	root.AddCommand(newAddCommand(a), newApplyCommand(a), newLogCommand(a), newMachineCommand(a), newRemoveCommand(a), newStatusCommand(a), newVersionCommand())
+	root.AddCommand(newAddCommand(a), newApplyCommand(a), newLogCommand(a), newMachineCommand(a), newReconcileCommand(a), newRemoveCommand(a), newStatusCommand(a), newVersionCommand())
 	return root
 }
 
