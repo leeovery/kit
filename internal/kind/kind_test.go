@@ -3,6 +3,7 @@ package kind_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"maps"
 	"slices"
 	"testing"
@@ -12,13 +13,39 @@ import (
 	"github.com/leeovery/kit/internal/kind"
 )
 
-// fakeKind is a kind whose installed things and other names a test gives.
+// fakeKind is a kind whose installed things and other names a test gives,
+// noting what it's asked to install and remove.
 type fakeKind struct {
 	installed  []kind.Installed
 	err        error
 	aliases    map[string]string
 	resolveErr error
 	resolved   [][]string
+	installs   [][]string
+	removes    [][]string
+	installErr error
+}
+
+func (f *fakeKind) Install(_ context.Context, names []string) error {
+	f.installs = append(f.installs, names)
+	return f.installErr
+}
+
+func (f *fakeKind) Remove(_ context.Context, names []string) error {
+	f.removes = append(f.removes, names)
+	return nil
+}
+
+// blockingKind is a fakeKind that says some names can't be installed now.
+type blockingKind struct {
+	*fakeKind
+	reasons map[string]string
+	asked   map[string]string
+}
+
+func (b *blockingKind) Blocked(_ context.Context, missing map[string]string, _ []kind.Installed) (map[string]string, error) {
+	b.asked = missing
+	return b.reasons, nil
 }
 
 func (*fakeKind) Name() string  { return "brew" }
@@ -71,7 +98,7 @@ func TestCompare(t *testing.T) {
 		Summary: "5 declared, 3 installed",
 		Counts:  map[string]int{"declared": 5, "installed": 3, "missing": 2, "extra": 1, "unused_dependencies": 1},
 		Items: []check.Item{
-			{ID: "brew:ripgrep", Name: "ripgrep", State: kind.Missing},
+			{ID: "brew:ripgrep", Name: "ripgrep", State: kind.Missing, Action: kind.Install},
 			{ID: "brew:typo-name", Name: "typo-name", State: kind.Missing, Detail: "unknown"},
 			{ID: "brew:ffmpeg", Name: "ffmpeg", State: kind.Extra},
 			{ID: "brew:node@20", Name: "node@20", State: kind.UnusedDependency},
@@ -115,5 +142,54 @@ func TestStep(t *testing.T) {
 	}
 	if got := s.Check(context.Background()); got.State != check.OK {
 		t.Errorf("its check = %+v, want ok", got)
+	}
+}
+
+func TestCompareAsksABlockerWhatCantBeInstalled(t *testing.T) {
+	k := &blockingKind{
+		fakeKind: &fakeKind{aliases: map[string]string{"php": "php", "zoom": "zoom"}},
+		reasons:  map[string]string{"php": "another tap's owner/tap/php is installed under that name"},
+	}
+	got := kind.Compare(context.Background(), k, declared("php", "zoom"))
+	want := []check.Item{
+		{ID: "brew:php", Name: "php", State: kind.Missing, Detail: "another tap's owner/tap/php is installed under that name"},
+		{ID: "brew:zoom", Name: "zoom", State: kind.Missing, Action: kind.Install},
+	}
+	if !slices.Equal(got.Items, want) {
+		t.Errorf("items = %+v\nwant %+v", got.Items, want)
+	}
+	if fmt.Sprint(k.asked) != fmt.Sprint(map[string]string{"php": "php", "zoom": "zoom"}) {
+		t.Errorf("the blocker was asked of %v, want the missing names, by full name", k.asked)
+	}
+}
+
+func TestStepAppliesByInstallingWhatsMissing(t *testing.T) {
+	k := &blockingKind{
+		fakeKind: &fakeKind{
+			installed: []kind.Installed{{Name: "jq", Explicit: true}, {Name: "ffmpeg", Explicit: true}},
+			aliases:   map[string]string{"ripgrep": "ripgrep", "php": "php", "go": "go"},
+		},
+		reasons: map[string]string{"php": "held"},
+	}
+	s := kind.Step(k, declared("jq", "ripgrep", "php", "go", "typo"))
+	if err := s.Apply(context.Background()); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	if want := [][]string{{"go", "ripgrep"}}; !slices.EqualFunc(k.installs, want, slices.Equal) {
+		t.Errorf("installed %q, want what's missing and can be, leaving the blocked and the unknown", k.installs)
+	}
+	if k.removes != nil {
+		t.Errorf("removed %q, want nothing: applying never removes", k.removes)
+	}
+}
+
+func TestStepAppliesNothingWhenNothingsMissing(t *testing.T) {
+	k := &fakeKind{installed: []kind.Installed{{Name: "jq", Explicit: true}, {Name: "ffmpeg", Explicit: true}}}
+	if err := kind.Step(k, declared("jq")).Apply(context.Background()); err != nil || k.installs != nil {
+		t.Errorf("Apply() = %v, installing %q; want nothing done", err, k.installs)
+	}
+	k = &fakeKind{err: errors.New("brew leaves exited 1")}
+	if err := kind.Step(k, declared("jq")).Apply(context.Background()); err == nil || err.Error() != "brew leaves exited 1" {
+		t.Errorf("Apply() of a kind that can't list = %v, want its error", err)
 	}
 }

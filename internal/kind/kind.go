@@ -6,6 +6,7 @@ package kind
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 
@@ -37,7 +38,21 @@ type Kind interface {
 	// aliases and old names. A name the kind doesn't know at all is left
 	// out.
 	Resolve(ctx context.Context, names []string) (map[string]string, error)
+	// Install installs names.
+	Install(ctx context.Context, names []string) error
+	// Remove uninstalls names.
+	Remove(ctx context.Context, names []string) error
 }
+
+// Blocker is a kind that can say why some things can't be installed now.
+type Blocker interface {
+	// Blocked says, of the things missing (declared names, by their full
+	// names), why each that can't be installed now can't, by declared name.
+	Blocked(ctx context.Context, missing map[string]string, installed []Installed) (map[string]string, error)
+}
+
+// Install is the action that installs an item.
+const Install = "install"
 
 // The states of a kind's items.
 const (
@@ -46,14 +61,31 @@ const (
 	UnusedDependency = "unused-dependency"
 )
 
-// Step is the step that checks k: what declared lists, against what's on the
-// Mac. It needs the steps named in needs.
+// Step is the step that checks k, what declared lists against what's on
+// the Mac, and applies it: installing what's missing, as it can. It needs
+// the steps named in needs.
 func Step(k Kind, declared config.List, needs ...string) engine.Step {
 	return engine.Step{
 		Name:  k.Name(),
 		Title: k.Title(),
 		Needs: needs,
 		Check: func(ctx context.Context) check.Result { return Compare(ctx, k, declared) },
+		Apply: func(ctx context.Context) error {
+			res := Compare(ctx, k, declared)
+			if res.State == check.Failed {
+				return errors.New(res.Reason)
+			}
+			var names []string
+			for _, it := range res.Items {
+				if it.Action == Install {
+					names = append(names, it.Name)
+				}
+			}
+			if len(names) == 0 {
+				return nil
+			}
+			return k.Install(ctx, names)
+		},
 	}
 }
 
@@ -80,6 +112,7 @@ func Compare(ctx context.Context, k Kind, declared config.List) check.Result {
 		}
 	}
 	var missing, unknown []string
+	fullNames := make(map[string]string)
 	if len(unmatched) > 0 {
 		resolved, err := k.Resolve(ctx, unmatched)
 		if err != nil {
@@ -94,7 +127,15 @@ func Compare(ctx context.Context, k Kind, declared config.List) check.Result {
 				matched[full] = true
 			default:
 				missing = append(missing, name)
+				fullNames[name] = full
 			}
+		}
+	}
+	blocked := map[string]string{}
+	if b, ok := k.(Blocker); ok && len(missing) > 0 {
+		var err error
+		if blocked, err = b.Blocked(ctx, fullNames, installed); err != nil {
+			return check.Result{State: check.Failed, Reason: err.Error()}
 		}
 	}
 	var extra, unused []string
@@ -125,8 +166,16 @@ func Compare(ctx context.Context, k Kind, declared config.List) check.Result {
 	if declaredCount == 0 {
 		res.Summary = "none declared"
 	}
+	missingItems := items(k, missing, Missing, "")
+	for i, it := range missingItems {
+		if reason, ok := blocked[it.Name]; ok {
+			missingItems[i].Detail = reason
+		} else {
+			missingItems[i].Action = Install
+		}
+	}
 	res.Items = slices.Concat(
-		items(k, missing, Missing, ""),
+		missingItems,
 		items(k, unknown, Missing, "unknown"),
 		items(k, extra, Extra, ""),
 		items(k, unused, UnusedDependency, ""),

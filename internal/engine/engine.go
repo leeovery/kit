@@ -333,7 +333,7 @@ func (d *dispatch) unmet(s Step) []string {
 func (d *dispatch) step(ctx context.Context, s Step) check.Result {
 	d.sink.Emit(event.StepStarted{Time: d.now(), Step: s.Name, Doing: "checking"})
 	res := checkSafely(ctx, s)
-	if d.apply && res.State != check.OK && s.Apply != nil && ctx.Err() == nil {
+	if d.apply && (res.State != check.OK || res.Actions()) && s.Apply != nil && ctx.Err() == nil {
 		d.sink.Emit(event.StepStarted{Time: d.now(), Step: s.Name, Doing: "applying"})
 		if err := applySafely(ctx, s); err != nil {
 			return check.Result{State: check.Failed, Reason: err.Error()}

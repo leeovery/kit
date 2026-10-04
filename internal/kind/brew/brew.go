@@ -3,6 +3,7 @@
 package brew
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/engine"
@@ -22,13 +24,31 @@ import (
 // the formulae and casks need.
 const StepName = "homebrew"
 
-// Homebrew is Homebrew, driven through run.
+// installTimeout is how long an install may take: big casks, and formulae
+// built from source, can take a while.
+const installTimeout = 30 * time.Minute
+
+// Homebrew is Homebrew, driven through a runner.
 type Homebrew struct {
-	Run runner.Runner
+	run runner.Runner
+	// Admin reports whether an administrator's password is at hand, for
+	// casks that install through a package: nil when kit isn't installing,
+	// and asks nothing.
+	Admin func(ctx context.Context) bool
+
+	update struct {
+		once sync.Once
+		err  error
+	}
+}
+
+// New returns Homebrew, driven through run.
+func New(run runner.Runner) *Homebrew {
+	return &Homebrew{run: run}
 }
 
 // Step checks brew is on kit's PATH, and where Homebrew is.
-func (h Homebrew) Step() engine.Step {
+func (h *Homebrew) Step() engine.Step {
 	return engine.Step{
 		Name:  StepName,
 		Title: "Homebrew",
@@ -46,21 +66,44 @@ func (h Homebrew) Step() engine.Step {
 }
 
 // Formulae is the brew kind.
-func (h Homebrew) Formulae() kind.Kind {
+func (h *Homebrew) Formulae() kind.Kind {
 	return formulae{h}
 }
 
 // Casks is the cask kind.
-func (h Homebrew) Casks() kind.Kind {
+func (h *Homebrew) Casks() kind.Kind {
 	return casks{h}
 }
 
-func (h Homebrew) brew(ctx context.Context, args ...string) (runner.Result, error) {
-	return h.Run.Run(ctx, runner.Command{Name: "brew", Args: args})
+func (h *Homebrew) brew(ctx context.Context, args ...string) (runner.Result, error) {
+	return h.run.Run(ctx, runner.Command{Name: "brew", Args: args})
+}
+
+// updated brings Homebrew's formulae up to date, once a run, before the
+// first install: an install from stale formulae can fail.
+func (h *Homebrew) updated(ctx context.Context) error {
+	h.update.once.Do(func() { _, h.update.err = h.brew(ctx, "update", "--quiet") })
+	return h.update.err
+}
+
+// install runs brew install, after brew update, of names, with which says
+// what they are: --formula or --cask.
+func (h *Homebrew) install(ctx context.Context, which string, names []string) error {
+	if err := h.updated(ctx); err != nil {
+		return err
+	}
+	_, err := h.run.Run(ctx, runner.Command{Name: "brew", Args: slices.Concat([]string{"install", which}, names), Timeout: installTimeout})
+	return err
+}
+
+// uninstall runs brew uninstall of names, with which says what they are.
+func (h *Homebrew) uninstall(ctx context.Context, which string, names []string) error {
+	_, err := h.brew(ctx, slices.Concat([]string{"uninstall", which}, names)...)
+	return err
 }
 
 // lines runs brew with args, and returns what it printed, a line each.
-func (h Homebrew) lines(ctx context.Context, args ...string) ([]string, error) {
+func (h *Homebrew) lines(ctx context.Context, args ...string) ([]string, error) {
 	res, err := h.brew(ctx, args...)
 	if err != nil {
 		return nil, err
@@ -74,7 +117,7 @@ func (h Homebrew) lines(ctx context.Context, args ...string) ([]string, error) {
 	return lines, nil
 }
 
-type formulae struct{ Homebrew }
+type formulae struct{ *Homebrew }
 
 func (formulae) Name() string  { return "brew" }
 func (formulae) Title() string { return "Formulae" }
@@ -110,7 +153,50 @@ func (f formulae) Resolve(ctx context.Context, names []string) (map[string]strin
 	return resolve(ctx, f.Homebrew, "--formula", names)
 }
 
-type casks struct{ Homebrew }
+// Install installs names, a tap's first: a tap's formula then claims a name
+// it shares with one of Homebrew's own before anything pulls that in as a
+// dependency (a tap's php, wanted, and Homebrew's, which composer needs a
+// php of, share a keg).
+func (f formulae) Install(ctx context.Context, names []string) error {
+	ordered := slices.Clone(names)
+	slices.SortStableFunc(ordered, func(a, b string) int {
+		return cmp.Compare(boolInt(!strings.Contains(a, "/")), boolInt(!strings.Contains(b, "/")))
+	})
+	return f.install(ctx, "--formula", ordered)
+}
+
+func (f formulae) Remove(ctx context.Context, names []string) error {
+	return f.uninstall(ctx, "--formula", names)
+}
+
+// Blocked finds the missing formulae whose names another tap's formula,
+// installed, holds: two formulae of one name share a keg, so can't both be
+// installed.
+func (f formulae) Blocked(_ context.Context, missing map[string]string, installed []kind.Installed) (map[string]string, error) {
+	blocked := make(map[string]string)
+	for name, full := range missing {
+		for _, it := range installed {
+			if it.Name != full && lastPart(it.Name) == lastPart(full) {
+				blocked[name] = "another tap's " + it.Name + " is installed under that name"
+			}
+		}
+	}
+	return blocked, nil
+}
+
+func boolInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// lastPart is a name's last part: its name in its tap.
+func lastPart(name string) string {
+	return name[strings.LastIndex(name, "/")+1:]
+}
+
+type casks struct{ *Homebrew }
 
 func (casks) Name() string  { return "cask" }
 func (casks) Title() string { return "Casks" }
@@ -133,6 +219,69 @@ func (c casks) Resolve(ctx context.Context, names []string) (map[string]string, 
 	return resolve(ctx, c.Homebrew, "--cask", names)
 }
 
+func (c casks) Install(ctx context.Context, names []string) error {
+	return c.install(ctx, "--cask", names)
+}
+
+func (c casks) Remove(ctx context.Context, names []string) error {
+	return c.uninstall(ctx, "--cask", names)
+}
+
+// Blocked finds the missing casks that install through a package, which
+// needs an administrator's password, when kit is installing and hasn't got
+// one.
+func (c casks) Blocked(ctx context.Context, missing map[string]string, _ []kind.Installed) (map[string]string, error) {
+	blocked := make(map[string]string)
+	if c.Admin == nil {
+		return blocked, nil
+	}
+	var fulls []string
+	for _, full := range missing {
+		fulls = append(fulls, full)
+	}
+	slices.Sort(fulls)
+	needing, err := c.NeedsAdmin(ctx, fulls)
+	if err != nil || len(needing) == 0 || c.Admin(ctx) {
+		return blocked, err
+	}
+	for name, full := range missing {
+		if slices.Contains(needing, full) {
+			blocked[name] = "needs an administrator's password: run kit apply at a terminal"
+		}
+	}
+	return blocked, nil
+}
+
+// NeedsAdmin finds which of casks, by full name, install through a package
+// or an installer, which ask for an administrator's password.
+func (h *Homebrew) NeedsAdmin(ctx context.Context, casks []string) ([]string, error) {
+	if len(casks) == 0 {
+		return nil, nil
+	}
+	res, err := h.brew(ctx, slices.Concat([]string{"info", "--json=v2", "--cask"}, casks)...)
+	if err != nil {
+		return nil, err
+	}
+	var in info
+	if err := json.Unmarshal(res.Stdout, &in); err != nil {
+		return nil, fmt.Errorf("read brew info's answer: %w", err)
+	}
+	var needing []string
+	for _, c := range in.Casks {
+		for _, artifact := range c.Artifacts {
+			if _, pkg := artifact["pkg"]; pkg {
+				needing = append(needing, c.FullToken)
+				break
+			}
+			if _, installer := artifact["installer"]; installer {
+				needing = append(needing, c.FullToken)
+				break
+			}
+		}
+	}
+	return needing, nil
+}
+
 // info is what brew info --json=v2 says of formulae and casks, as far as
 // the names each goes by.
 type info struct {
@@ -143,16 +292,17 @@ type info struct {
 		Oldnames []string `json:"oldnames"`
 	} `json:"formulae"`
 	Casks []struct {
-		Token     string   `json:"token"`
-		FullToken string   `json:"full_token"`
-		OldTokens []string `json:"old_tokens"`
+		Token     string                       `json:"token"`
+		FullToken string                       `json:"full_token"`
+		OldTokens []string                     `json:"old_tokens"`
+		Artifacts []map[string]json.RawMessage `json:"artifacts"`
 	} `json:"casks"`
 }
 
 // resolve asks brew info for names' full names, all at once. brew info
 // says nothing at all when any name is unknown, so then it asks of each
 // alone, leaving out those it doesn't know.
-func resolve(ctx context.Context, h Homebrew, which string, names []string) (map[string]string, error) {
+func resolve(ctx context.Context, h *Homebrew, which string, names []string) (map[string]string, error) {
 	resolved, err := lookUp(ctx, h, which, names)
 	if err == nil {
 		return resolved, nil
@@ -176,7 +326,7 @@ func resolve(ctx context.Context, h Homebrew, which string, names []string) (map
 
 // lookUp asks brew info of names in one go, and maps each to its full name
 // by every name brew says it goes by.
-func lookUp(ctx context.Context, h Homebrew, which string, names []string) (map[string]string, error) {
+func lookUp(ctx context.Context, h *Homebrew, which string, names []string) (map[string]string, error) {
 	res, err := h.brew(ctx, slices.Concat([]string{"info", "--json=v2", which}, names)...)
 	if err != nil {
 		return nil, err

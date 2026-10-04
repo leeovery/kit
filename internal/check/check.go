@@ -33,6 +33,20 @@ type Item struct {
 	Quiet string `json:"quiet,omitempty"`
 	// Since is when it was first seen, when that's known.
 	Since time.Time `json:"since,omitzero"`
+	// Action is what applying the step would do about it, as in install:
+	// none when it would leave it.
+	Action string `json:"action,omitempty"`
+}
+
+// Actions reports whether any of r's items has an action: something
+// applying the step would do, though nothing needs attention yet.
+func (r Result) Actions() bool {
+	for _, it := range r.Items {
+		if it.Action != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // Result is what a check found.

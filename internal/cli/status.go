@@ -147,7 +147,7 @@ func (a *app) prepare(command string) (*run, error) {
 	sink := event.NewFanout(face, log)
 	exec := a.Runner(path, childEnv(a.Getenv, home, path))
 	observed := runner.Observed(exec, func(ctx context.Context, rep runner.Report) { sink.Emit(event.Command(ctx, rep)) }, a.Now)
-	hb := brew.Homebrew{Run: observed}
+	hb := brew.New(observed)
 	kinds := []engine.Step{
 		quietened(kind.Step(hb.Formulae(), formulae, brew.StepName), record, now),
 		quietened(kind.Step(hb.Casks(), casks, brew.StepName), record, now),
