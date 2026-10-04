@@ -13,11 +13,12 @@ for scripts and agents, so an agent can drive it with the same commands you run.
 
 ## Install
 
-Once released:
-
 ```bash
 brew install leeovery/tools/kit
 ```
+
+Then clone your config repository to `~/.config/kit`, name this Mac (`kit machine <name>`),
+and run `kit status`.
 
 ## Configuration
 

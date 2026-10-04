@@ -1,0 +1,76 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]*.[0-9]*.[0-9]*'
+      - '!v*-*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    # Jobs share no filesystem, so the checksums cross the boundary as outputs.
+    outputs:
+      version: ${{ steps.checksums.outputs.version }}
+      sha256_arm64: ${{ steps.checksums.outputs.sha256_arm64 }}
+      sha256_amd64: ${{ steps.checksums.outputs.sha256_amd64 }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract checksums
+        id: checksums
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          CHECKSUMS_FILE="dist/kit_${VERSION}_checksums.txt"
+          SHA256_ARM64=$(grep "kit_${VERSION}_darwin_arm64.tar.gz" "$CHECKSUMS_FILE" | awk '{print $1}')
+          SHA256_AMD64=$(grep "kit_${VERSION}_darwin_amd64.tar.gz" "$CHECKSUMS_FILE" | awk '{print $1}')
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "sha256_arm64=$SHA256_ARM64" >> "$GITHUB_OUTPUT"
+          echo "sha256_amd64=$SHA256_AMD64" >> "$GITHUB_OUTPUT"
+
+  # A job of its own, so a failed tap update (an expired token, a GitHub blip)
+  # can be retried without releasing again.
+  homebrew:
+    needs: release
+    runs-on: ubuntu-latest
+    env:
+      CICD_PAT: ${{ secrets.CICD_PAT }}
+    steps:
+      - name: Dispatch to homebrew-tools
+        if: env.CICD_PAT != ''
+        run: |
+          curl -fsSL -X POST \
+            -H "Accept: application/vnd.github.v3+json" \
+            -H "Authorization: token $CICD_PAT" \
+            https://api.github.com/repos/leeovery/homebrew-tools/dispatches \
+            -d '{
+              "event_type": "update-formula",
+              "client_payload": {
+                "tool": "kit",
+                "version": "${{ needs.release.outputs.version }}",
+                "sha256_arm64": "${{ needs.release.outputs.sha256_arm64 }}",
+                "sha256_amd64": "${{ needs.release.outputs.sha256_amd64 }}"
+              }
+            }'
+
+      - name: No token to update the tap with
+        if: env.CICD_PAT == ''
+        run: echo "::warning::CICD_PAT isn't set on this repository, so the tap's formula wasn't updated; update Formula/kit.rb in homebrew-tools by hand"

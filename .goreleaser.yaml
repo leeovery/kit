@@ -1,0 +1,36 @@
+version: 2
+
+project_name: kit
+
+builds:
+  - id: kit
+    main: ./cmd/kit
+    binary: kit
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin   # kit is macOS only: it sets up Macs
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - id: kit
+    formats:
+      - tar.gz
+    name_template: "kit_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - none*
+
+checksum:
+  name_template: "kit_{{ .Version }}_checksums.txt"
+
+changelog:
+  disable: true
+
+release:
+  draft: false
+  # Notes are written by hand, or by mint: the release only adds the binaries.
+  mode: keep-existing
