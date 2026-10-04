@@ -24,10 +24,11 @@ costs nothing. Pre-1.0: commands, config and output can change between releases.
 which hears about every Mac's problems. A Mac's name is settled first, before any config is
 read, and kept in kit's state; a replacement Mac can take an old one's name.
 
-**Kinds.** A kind is a list of things of one sort: Homebrew formulae (`brew`) and casks
-(`cask`) first; App Store apps, npm, Composer and Go tools, GitHub CLI extensions, Claude Code's
-MCP servers, plugins and skills, tmux plugins, login items, secrets, macOS settings and backup
-exclusions later. Each kind supplies five parts:
+**Kinds.** A kind is a list of things of one sort. Built: Homebrew formulae (`brew`) and casks
+(`cask`), App Store apps (`app`), npm and Composer global packages (`npm`, `composer`), Go tools
+(`go`), GitHub CLI extensions (`gh`), tmux plugins (`tmux`) and login items (`login`). Later:
+Claude Code's MCP servers, plugins and skills, secrets, macOS settings and backup exclusions.
+Each kind supplies five parts:
 
 - **declared:** what the config lists, the shared file and then this Mac's;
 - **actual:** what's on the Mac;
@@ -36,6 +37,31 @@ exclusions later. Each kind supplies five parts:
 
 The engine does the rest: install what's declared but missing, offer what's on the Mac but
 undeclared for adopting, removing or snoozing, and report both.
+
+| Kind | Declared as | Found by | Install, remove |
+|---|---|---|---|
+| `brew`, `cask` | `jq`, `owner/tap/tool`, `php@8.5` | `brew list`, `brew leaves` | `brew install`, `brew uninstall` |
+| `app` | `xcode@497799835`: the name, then the id | `mas list` | `mas install`, `mas uninstall`, through sudo |
+| `npm` | `typescript@5` (a version optional) | `npm ls --global` | `npm install --global`, `npm uninstall --global` |
+| `composer` | `laravel/valet:^4.0` (a constraint optional) | `composer global show --direct` | `composer global require`, `composer global remove` |
+| `go` | `golang.org/x/tools/cmd/goimports` (`@version` optional) | the programs in Go's bin folder, by the package each was built from | `go install`; removing deletes the program |
+| `gh` | `owner/gh-extension` | `gh extension list` | `gh extension install`, `gh extension remove` |
+| `tmux` | `set -g @plugin` lines in tmux's config | the folders in TPM's plugin folder | cloned as TPM does; removing deletes the folder |
+| `login` | the app's bundle id, `com.example.app` | System Events' login items | System Events (JavaScript for Automation) |
+
+- **Matching:** a kind may match on part of a name: an App Store app on its id (so an app the
+  store renames still matches), npm and Composer packages without their versions, GitHub
+  repositories and bundle ids without regard to case.
+- **A kind's program:** while it isn't installed, a kind with nothing declared for the Mac
+  isn't checked at all, and one with something declared is deferred, saying what it needs.
+  The kinds whose programs are formulae are applied after the formulae, so a new Mac has
+  them first; login items after the casks and App Store apps they open.
+- **A kind declared in a file of its own** (tmux's plugins, in tmux's config, where the
+  plugin manager reads them): kit reads it and never writes it, so there's no adopting or
+  undeclaring; `kit add` and `kit remove` say how to declare by hand.
+- **Finding what's meant:** `kit add app` finds an app from its name or id (several matches
+  are a choice at a terminal, listed without one); `kit add login` takes an app's name, path
+  or bundle id. Declaring a login item writes the app's name as the note.
 
 **Steps.** Everything kit applies is a step in one pipeline. A step has:
 
@@ -83,7 +109,8 @@ do, then checks it again: each step then says what it did ("installed: jq"). It 
 or adopts: reconcile does those. At a terminal, when a missing cask installs through a
 package, kit asks for an administrator's password once, through `sudo -v`, before anything is
 applied, and keeps sudo's hold fresh while it runs; without a terminal it asks nothing, and
-those casks wait, saying why (requirement 4).
+those casks wait, saying why (requirement 4). App Store apps need the password for every
+install, as mas runs as root; `kit add` and reconcile's installs ask up front the same way.
 
 `kit add` installs each name, unless it's installed, and declares it in this Mac's file, or
 for every Mac with `--shared` (taking it out of each Mac's own file); at a terminal it first
@@ -103,10 +130,9 @@ the items with their ids and choices, and `kit reconcile <id> --adopt` (or `--re
 `--install`, `--undeclare`, `--snooze`; `--shared`, `--group`, `--note`) settles one: how an
 agent carries out a person's decision.
 
-`kit status` runs every step's check (named steps run with what they need): Homebrew, the
-formulae (`brew`), the casks (`cask`), and the config repository being private on GitHub
-(`config-private`, asked through `gh`; one with no remote, or elsewhere, isn't public
-there).
+`kit status` runs every step's check (named steps run with what they need): Homebrew, each
+kind, and the config repository being private on GitHub (`config-private`, asked through
+`gh`; one with no remote, or elsewhere, isn't public there).
 
 Every command takes `--json` (one document), `--plain` (plain lines, as without a terminal)
 and `--verbose` (commands' output kept whole in the run's log).
@@ -138,13 +164,14 @@ A relative `XDG_CONFIG_HOME` or `XDG_STATE_HOME` is ignored, as the XDG spec say
 kit.toml          the format version, the oldest kit that reads it, the Macs, the primary
 brew              formulae every Mac declares
 brew.laptop       formulae only laptop declares
-cask, cask.studio casks, likewise
+cask, cask.studio casks, likewise; app, npm, composer, go, gh, login too
 paths             PATH's directories, in order, one a line (~ expands)
 ```
 
 Lists hold one name a line. A `#` at the start of a line or after a space starts a comment;
 comments on their own lines head groups, and one after a name records why it's there. Within a
-group, names sort by their last part (`oven-sh/bun/bun` sorts as `bun`). A name may appear in
+group, names sort by their last part (`oven-sh/bun/bun` sorts as `bun`). A version or a
+constraint may follow a name (`typescript@5`, `laravel/valet:^4.0`). A name may appear in
 the shared file or a Mac's, never both, and a Mac's file must name a Mac `kit.toml` knows.
 
 ```toml
@@ -280,8 +307,12 @@ up front; `kit add` and `kit remove` (`--shared`, `--temp`, `--note`, `--group`,
 asked at a terminal); `kit reconcile`, at a terminal and by id; `kit list` and `kit why`
 (#12–#19).
 
-**3. The other kinds — next.** App Store apps, npm, Composer and Go tools, GitHub CLI
-extensions, tmux plugins, login items; then Claude Code's MCP servers, plugins and skills.
+**3. The other kinds — built.** Every kind through one table; a step can come after another
+while applying, and a check can defer its own step; the administrator's password up front for
+any kind; App Store apps; npm and Composer packages; Go tools and GitHub CLI extensions; tmux
+plugins; login items (#21–#26).
+
+**4. Claude Code's kinds — next.** MCP servers, plugins and skills.
 
 **Then:** one set of checks behind bare `kit` and an hourly run, with
 notifications and the primary reading the other Macs; steps for linked files, the shell, git,
