@@ -13,8 +13,10 @@ for scripts and agents, so an agent can drive it with the same commands you run.
 
 ## Install
 
+Not released yet. Build it from source, with Go 1.27:
+
 ```bash
-brew install leeovery/tools/kit
+go build -o ~/.local/bin/kit ./cmd/kit
 ```
 
 Then clone your config repository to `~/.config/kit`, name this Mac (`kit machine <name>`),
@@ -33,9 +35,10 @@ paths             the directories kit puts on its PATH
 
 ## Development
 
-Go 1.27 on macOS. Every change passes the gates in [CLAUDE.md](CLAUDE.md): `gofmt`,
-`go vet`, `scripts/test-isolated` (the tests, inside a sandbox that keeps them off the real
-system), `golangci-lint`, `go build` and `scripts/personal-data-scan`.
+Go 1.27 on macOS. Every change passes the gates in [CLAUDE.md](CLAUDE.md), which
+`scripts/gates` runs in order: `gofmt`, `go vet`, `scripts/test-isolated` (the tests, inside a
+sandbox that keeps them off the real system), `golangci-lint`, `go build` and
+`scripts/personal-data-scan`. Releases are the maintainer's, with mint (`./release`).
 
 ## Licence
 

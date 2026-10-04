@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+#
+# Runs every gate CLAUDE.md lists, in order, stopping at the first that
+# fails, and saying which: CI is off until kit is ready, so these are the
+# gates. mint runs them before it tags a release.
+#
+# The personal-data scan's private patterns come from PERSONAL_PATTERNS, else
+# the file PERSONAL_PATTERNS_FILE names, else personal-patterns in the config
+# repository ($KIT_CONFIG, else ~/.config/kit), where the maintainer keeps
+# them; without any, the scan checks the generic patterns alone, and says so.
+set -euo pipefail
+
+repo=$(cd "$(dirname "$0")/.." && pwd -P)
+cd "$repo"
+
+gate() {
+	printf '==> %s\n' "$1"
+}
+
+gate gofmt
+unformatted=$(gofmt -l .)
+if [ -n "$unformatted" ]; then
+	printf '%s\n' "$unformatted" >&2
+	echo "gates: gofmt would change the files above" >&2
+	exit 1
+fi
+
+gate "go vet"
+go vet ./...
+
+gate "tests, isolated"
+scripts/test-isolated
+
+gate golangci-lint
+golangci-lint run
+
+gate "go build"
+go build ./...
+
+gate "personal data"
+if [ -z "${PERSONAL_PATTERNS-}" ]; then
+	patterns=${PERSONAL_PATTERNS_FILE:-${KIT_CONFIG:-$HOME/.config/kit}/personal-patterns}
+	if [ -f "$patterns" ]; then
+		PERSONAL_PATTERNS=$(cat "$patterns")
+		export PERSONAL_PATTERNS
+	fi
+fi
+scripts/personal-data-scan
+
+echo "gates: every gate passed"

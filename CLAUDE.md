@@ -8,8 +8,9 @@ when, is `docs/design.md`.
 
 ## Gates
 
-Run all of these before reporting work done. Each must pass clean; CI runs them on every push
-and pull request.
+Run all of these before reporting work done, and before any merge: `scripts/gates` runs them
+in order and stops at the first that fails. Each must pass clean. CI is off until kit is
+ready, so they're the only gate.
 
 ```bash
 gofmt -l .                   # must print nothing
@@ -52,6 +53,9 @@ scripts/personal-data-scan   # no personal data in the files or the history
   `someone@example.com`, `/Users/someone`, `op://vault/item/field`, addresses from
   `192.0.2.0/24`. The repo is public, and its history goes with it; `scripts/personal-data-scan`
   checks both, with private patterns CI holds as a secret.
+- **Releases are the maintainer's.** Never tag, release, or write a changelog or release
+  notes. The maintainer releases with mint (`./release`), which runs the gates first; the tag
+  then has GoReleaser add the binaries and update the Homebrew tap.
 - **Never log a secret.** Values go from 1Password to their file without passing through
   events; arguments, environment and output are redacted before they're logged.
 

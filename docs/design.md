@@ -219,11 +219,11 @@ built:
 
 ## Milestones
 
-**1. Status, read-only — done (0.1.0).** The repository and its isolation; config and the
-Mac's name; the runner and its fake; events, the faces and the log; the engine; Homebrew's
-formulae and casks; `kit status`, `kit log`, `kit machine`, `kit version`; the first release
-through the tap. One pull request each, in that order (#1–#8). Nothing on the Mac changes but
-kit's own state and logs.
+**1. Status, read-only — done.** The repository and its isolation; config and the Mac's
+name; the runner and its fake; events, the faces and the log; the engine; Homebrew's formulae
+and casks; `kit status`, `kit log`, `kit machine`, `kit version`; release tooling, for when kit
+is ready. One pull request each, in that order (#1–#10). Nothing on the Mac changes but kit's
+own state and logs. Unreleased: the maintainer releases, with mint, once kit is ready.
 
 **2. Packages, read-write — next.** `kit apply` installs what's missing; `kit add` and
 `kit remove` (`--shared`, `--temp`, `--note`); `kit reconcile` with drift counted after 24
@@ -240,4 +240,5 @@ short plan before code.
 
 - No personal data in the repo or its history, ever (see House rules in `CLAUDE.md`);
   `scripts/personal-data-scan` checks the files and every commit in CI.
-- Public, under the MIT licence, released through GoReleaser to a Homebrew tap.
+- Public, under the MIT licence. Released by the maintainer, once kit is ready, with mint,
+  GoReleaser and a Homebrew tap.
