@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -101,11 +102,15 @@ func readList(dir, name string) ([]Entry, error) {
 		return nil, fmt.Errorf("read %s: %w", name, err)
 	}
 	defer func() { _ = f.Close() }()
+	return parseList(name, f)
+}
 
+// parseList reads the list file named name from r.
+func parseList(name string, r io.Reader) ([]Entry, error) {
 	var entries []Entry
 	seen := make(map[string]int)
 	group := ""
-	scanner := bufio.NewScanner(f)
+	scanner := bufio.NewScanner(r)
 	for n := 1; scanner.Scan(); n++ {
 		text, note := splitComment(scanner.Text())
 		if text == "" {
@@ -138,4 +143,32 @@ func splitComment(line string) (text, comment string) {
 		}
 	}
 	return strings.TrimSpace(line), ""
+}
+
+// Where are the entries for name in kind's files: the shared file's, then
+// each Mac's, by the Macs' names. A name a file doesn't declare isn't in it.
+func (c *Config) Where(kind, name string) ([]Entry, error) {
+	var found []Entry
+	for _, file := range c.ListFiles(kind) {
+		entries, err := readList(c.Dir, file)
+		if err != nil {
+			return nil, err
+		}
+		for _, e := range entries {
+			if e.Name == name {
+				found = append(found, e)
+			}
+		}
+	}
+	return found, nil
+}
+
+// ListFiles are kind's list files: the shared one, then each Mac's, by the
+// Macs' names, whether or not they're there.
+func (c *Config) ListFiles(kind string) []string {
+	files := []string{kind}
+	for _, mac := range c.MacNames() {
+		files = append(files, kind+"."+mac)
+	}
+	return files
 }
