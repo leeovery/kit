@@ -14,7 +14,9 @@ const dir = "/Users/someone/.config/kit"
 
 func TestConfigPrivate(t *testing.T) {
 	remote := []string{"-C", dir, "remote", "get-url", "origin"}
-	view := func(repo string) []string { return []string{"repo", "view", repo, "--json", "visibility", "--jq", ".visibility"} }
+	view := func(repo string) []string {
+		return []string{"repo", "view", repo, "--json", "visibility", "--jq", ".visibility"}
+	}
 	tests := []struct {
 		name   string
 		script func(*runnertest.Fake)
@@ -48,14 +50,18 @@ func TestConfigPrivate(t *testing.T) {
 			}}},
 		},
 		{
-			name:   "no remote",
-			script: func(f *runnertest.Fake) { f.On("git", remote...).Exits(2).PrintsToStderr("error: No such remote 'origin'") },
-			want:   check.Result{State: check.OK, Summary: "no remote, so not public"},
+			name: "no remote",
+			script: func(f *runnertest.Fake) {
+				f.On("git", remote...).Exits(2).PrintsToStderr("error: No such remote 'origin'")
+			},
+			want: check.Result{State: check.OK, Summary: "no remote, so not public"},
 		},
 		{
-			name:   "elsewhere",
-			script: func(f *runnertest.Fake) { f.On("git", remote...).Prints("git@git.example.com:someone/kit-config.git\n") },
-			want:   check.Result{State: check.OK, Summary: "not on GitHub, so not public there"},
+			name: "elsewhere",
+			script: func(f *runnertest.Fake) {
+				f.On("git", remote...).Prints("git@git.example.com:someone/kit-config.git\n")
+			},
+			want: check.Result{State: check.OK, Summary: "not on GitHub, so not public there"},
 		},
 		{
 			name: "GitHub can't be asked",
