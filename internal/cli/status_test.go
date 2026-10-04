@@ -38,6 +38,8 @@ func laptopWorld(t *testing.T) *world {
 	f.On("brew", "list", "--cask", "--full-name", "-1").Prints("ghostty\nfirefox\n")
 	f.On("git", "-C", filepath.Join(w.home, ".config", "kit"), "remote", "get-url", "origin").Prints("git@github.com:someone/kit-config.git\n")
 	f.On("gh", "repo", "view", "someone/kit-config", "--json", "visibility", "--jq", ".visibility").Prints("PRIVATE\n")
+	// gh is installed, for the config's check, with no extensions.
+	f.On("gh", "extension", "list")
 	return w
 }
 
@@ -51,6 +53,7 @@ brew extra ffmpeg
 brew unused-dependency node@20
 cask attention 1 declared, all installed
 cask extra firefox
+gh ok none declared
 config-private ok private on GitHub (someone/kit-config)
 2 need attention
 `
@@ -65,7 +68,7 @@ func TestStatusJSON(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &doc); err != nil || code != 1 {
 		t.Fatalf("kit status --json printed %q, exit %d: %v", out, code, err)
 	}
-	if doc.Schema != 1 || doc.Kit != "0.1.0" || doc.Machine != "laptop" || !doc.Attention || len(doc.Steps) != 4 {
+	if doc.Schema != 1 || doc.Kit != "0.1.0" || doc.Machine != "laptop" || !doc.Attention || len(doc.Steps) != 5 {
 		t.Fatalf("document = %+v", doc)
 	}
 	brew := doc.Steps[1]
@@ -226,6 +229,7 @@ func TestStatusLeavesOutAKindWithNothingToCheck(t *testing.T) {
 	w.fake.On("brew", "--prefix").Fails(errNotFound)
 	w.fake.On("git", "-C", filepath.Join(w.home, ".config", "kit"), "remote", "get-url", "origin").Prints("git@github.com:someone/kit-config.git\n")
 	w.fake.On("gh", "repo", "view", "someone/kit-config", "--json", "visibility", "--jq", ".visibility").Prints("PRIVATE\n")
+	w.fake.On("gh", "extension", "list").Fails(errNotFound)
 
 	out, _, _ := w.run(t, "status")
 	want := "kit status · laptop\nhomebrew attention not installed: brew isn't on kit's PATH\nconfig-private ok private on GitHub (someone/kit-config)\n1 needs attention\n"
