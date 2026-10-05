@@ -41,7 +41,7 @@ func Own(run runner.Runner, home string, list config.List) engine.Step {
 			if len(problems) > 0 {
 				return problem(OwnName, fmt.Sprintf("%d of %d failing", len(problems), len(list.Entries)), problems...)
 			}
-			return check.Result{State: check.OK, Summary: summary}
+			return check.Result{State: check.OK, Summary: summary, Glance: summary}
 		},
 	}
 }

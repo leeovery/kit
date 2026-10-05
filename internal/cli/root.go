@@ -88,6 +88,13 @@ func NewRootCommand(deps Deps) *cobra.Command {
 		},
 		SilenceErrors:     true,
 		CompletionOptions: cobra.CompletionOptions{DisableDefaultCmd: true},
+		Long: `kit sets a Mac up from a config repository, and keeps it that way.
+
+Run alone, it shows what needs attention at a glance, a line an area (backups,
+the Mac, drift from the config, the config repository, your own checks), and
+what to run about it. kit status is the full report.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error { return a.glance(cmd) },
 	}
 	root.SetOut(deps.Stdout)
 	root.SetErr(deps.Stderr)

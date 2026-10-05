@@ -50,7 +50,7 @@ func ConfigPrivate(run runner.Runner, dir string) engine.Step {
 			}
 			visibility := strings.ToLower(strings.TrimSpace(string(res.Stdout)))
 			if visibility == "private" {
-				return check.Result{State: check.OK, Summary: "private on GitHub (" + repo + ")"}
+				return check.Result{State: check.OK, Summary: "private on GitHub (" + repo + ")", Glance: "private"}
 			}
 			return check.Result{
 				State:   check.Attention,

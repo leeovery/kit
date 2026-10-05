@@ -70,7 +70,7 @@ func ConfigSync(run runner.Runner, dir string, now func() time.Time) engine.Step
 			if len(problems) > 0 {
 				return problem("config-sync", "changes waiting", problems...)
 			}
-			return check.Result{State: check.OK, Summary: "committed and pushed"}
+			return check.Result{State: check.OK, Summary: "committed and pushed", Glance: "committed and pushed"}
 		},
 	}
 }

@@ -152,6 +152,11 @@ func (r *run) close() error {
 // Mac's name, settled before anything reads a Mac's own files, kit's own
 // PATH, the runner, the faces and the log, and the pipeline.
 func (a *app) prepare(command, logName string) (*run, error) {
+	return a.prepareWith(command, logName, a.face())
+}
+
+// prepareWith readies a run as prepare does, shown on face.
+func (a *app) prepareWith(command, logName string, face render.Face) (*run, error) {
 	dirs, err := a.dirs()
 	if err != nil {
 		return nil, err
@@ -187,7 +192,6 @@ func (a *app) prepare(command, logName string) (*run, error) {
 	if err != nil {
 		return nil, err
 	}
-	face := a.face()
 	sink := event.NewFanout(face, log)
 	exec := a.Runner(path, childEnv(a.Getenv, home, path))
 	observed := runner.Observed(exec, func(ctx context.Context, rep runner.Report) { sink.Emit(event.Command(ctx, rep)) }, a.Now)

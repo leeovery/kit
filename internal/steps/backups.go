@@ -132,7 +132,7 @@ func TimeMachine(run runner.Runner, now func() time.Time) engine.Step {
 			if len(problems) > 0 {
 				return problem(FeatureTimeMachine, summary, problems...)
 			}
-			return check.Result{State: check.OK, Summary: summary}
+			return check.Result{State: check.OK, Summary: summary, Glance: "Time Machine " + when(last, now())}
 		},
 	}
 }
@@ -164,7 +164,7 @@ func Arq(run runner.Runner, now func() time.Time) engine.Step {
 				return problem(FeatureArq, "status unreadable", [3]string{"unreadable", "couldn't read Arq's status", "open Arq: is its agent running? If it complains, restart the Mac"})
 			}
 			var problems [][3]string
-			var good []string
+			var good, times []string
 			plans := 0
 			for _, p := range stats.BackupPlans {
 				if strings.Contains(strings.ToLower(p.Name), "legacy") {
@@ -180,6 +180,7 @@ func Arq(run runner.Runner, now func() time.Time) engine.Step {
 					problems = append(problems, [3]string{"stale:" + id, p.Name + ": last backup " + ago(last, now()), "check Arq's activity, and the nightly run's log"})
 				default:
 					good = append(good, p.Name+" "+when(last, now()))
+					times = append(times, when(last, now()))
 				}
 			}
 			if plans == 0 {
@@ -193,7 +194,8 @@ func Arq(run runner.Runner, now func() time.Time) engine.Step {
 			if len(problems) > 0 {
 				return problem(FeatureArq, summary, problems...)
 			}
-			return check.Result{State: check.OK, Summary: summary}
+			slices.Sort(times)
+			return check.Result{State: check.OK, Summary: summary, Glance: "Arq " + strings.Join(times, ", ")}
 		},
 	}
 }
