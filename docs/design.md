@@ -27,8 +27,8 @@ read, and kept in kit's state; a replacement Mac can take an old one's name.
 **Kinds.** A kind is a list of things of one sort. Built: Homebrew formulae (`brew`) and casks
 (`cask`), App Store apps (`app`), npm and Composer global packages (`npm`, `composer`), Go tools
 (`go`), GitHub CLI extensions (`gh`), tmux plugins (`tmux`), login items (`login`) and Claude
-Code's MCP servers (`claude-mcp`). Later: Claude Code's plugins and skills, secrets, macOS settings
-and backup exclusions.
+Code's MCP servers (`claude-mcp`) and plugins (`claude-plugin`). Later: Claude Code's skills,
+secrets, macOS settings and backup exclusions.
 Each kind supplies five parts:
 
 - **declared:** what the config lists, the shared file and then this Mac's;
@@ -50,6 +50,7 @@ undeclared for adopting, removing or snoozing, and report both.
 | `tmux` | `set -g @plugin` lines in tmux's config | the folders in TPM's plugin folder | cloned as TPM does; removing deletes the folder |
 | `login` | the app's bundle id, `com.example.app` | System Events' login items | System Events (JavaScript for Automation) |
 | `claude-mcp` | a name, then `claude mcp add`'s options; a project's in `[claude mcp <folder>]` | `~/.claude.json`, read directly | `claude mcp add-json`, `claude mcp remove` (a project's in local scope, in its folder) |
+| `claude-plugin` | `plugin@owner/repo`: the plugin and its marketplace's repository; `@owner/repo` a marketplace alone | Claude Code's records of plugins, marketplaces and what's enabled | the marketplace added when needed, then `claude plugin install`; `uninstall`, `marketplace remove` |
 
 - **Matching:** a kind may match on part of a name: an App Store app on its id (so an app the
   store renames still matches), npm and Composer packages without their versions, GitHub
@@ -71,6 +72,11 @@ undeclared for adopting, removing or snoozing, and report both.
   while its folder isn't on the Mac. A server is added with Claude Code's own
   `claude mcp add`, then declared with `kit add claude-mcp` or reconcile's adopt;
   `kit claude-mcp on|off` declares one on or off and installs or removes it.
+- **Claude's plugins** carry their marketplace in their names, as formulae carry their taps:
+  there's no list of marketplaces. kit adds a plugin's marketplace when it installs it; a
+  marketplace no plugin comes from is an unused dependency, offered for removal, unless
+  declared alone (`@owner/repo`) to keep it for browsing. A plugin turned off is changed,
+  and applying turns it on.
 - **Finding what's meant:** `kit add app` finds an app from its name or id (several matches
   are a choice at a terminal, listed without one); `kit add login` takes an app's name, path
   or bundle id. Declaring a login item writes the app's name as the note.
@@ -208,7 +214,7 @@ pages --transport http https://pages.example.com/mcp
 The sections, in the order kit writes them: `paths` (kit's PATH, in order, `~` expands; the
 shared file's, then the Mac's), `homebrew formulae`, `homebrew casks`, `app store apps`,
 `npm packages`, `composer packages`, `go tools`, `github extensions`, `macos login items`,
-`claude mcp` (and `claude mcp <folder>`). A section kit doesn't know is refused, never
+`claude mcp` (and `claude mcp <folder>`), `claude plugins`. A section kit doesn't know is refused, never
 skipped; so is a line before any section, a section twice, or a file named for a Mac
 `kit.toml` doesn't know.
 
@@ -368,7 +374,10 @@ project; `kit claude-mcp on|off`; reconcile by kind (#30–#32).
 and a file per Mac, each sections of flat lines; MCP servers as `claude mcp add`'s
 options.
 
-**6. Claude Code's plugins and skills — next.**
+**6. Claude Code's plugins — built.** The `claude-plugin` kind, marketplaces carried in
+plugins' names.
+
+**7. Claude Code's skills — next.**
 
 **Then:** one set of checks behind bare `kit` and an hourly run, with
 notifications and the primary reading the other Macs; steps for linked files, the shell, git,

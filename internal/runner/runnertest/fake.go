@@ -56,6 +56,7 @@ type answer struct {
 	exit     int
 	err      error
 	duration time.Duration
+	does     func()
 }
 
 func (s *Script) last() *answer {
@@ -84,6 +85,13 @@ func (s *Script) Exits(code int) *Script {
 // that isn't installed (runner.ErrNotFound).
 func (s *Script) Fails(err error) *Script {
 	s.last().err = err
+	return s
+}
+
+// Does has the command do f when it runs, as a real program changes what's
+// on the Mac: a file it writes, say.
+func (s *Script) Does(f func()) *Script {
+	s.last().does = f
 	return s
 }
 
@@ -132,6 +140,9 @@ func (f *Fake) Run(_ context.Context, cmd runner.Command) (runner.Result, error)
 	}
 	if a.err != nil {
 		return runner.Result{ExitCode: -1}, a.err
+	}
+	if a.does != nil {
+		a.does()
 	}
 	res := runner.Result{Stdout: []byte(a.stdout), Stderr: []byte(a.stderr), ExitCode: a.exit, Duration: a.duration}
 	if a.exit != 0 {

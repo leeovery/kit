@@ -19,6 +19,7 @@ import (
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/kind/appstore"
 	"github.com/leeovery/kit/internal/kind/brew"
+	"github.com/leeovery/kit/internal/kind/claudeplugin"
 	"github.com/leeovery/kit/internal/kind/composer"
 	"github.com/leeovery/kit/internal/kind/ghext"
 	"github.com/leeovery/kit/internal/kind/gotool"
@@ -118,6 +119,7 @@ func kindSteps(hb *brew.Homebrew, run runner.Runner, home, configHome string) []
 		{kind: tmux.New(run, home, configHome), after: []string{"brew"}},
 		{kind: login.New(run, home), after: []string{"cask", "app"}},
 		{kind: mcp.New(run, home), after: []string{"brew"}},
+		{kind: claudeplugin.New(run, home), after: []string{"brew"}},
 	}
 }
 

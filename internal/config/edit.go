@@ -177,9 +177,13 @@ func (b *body) remove(from, to int) {
 	*b = splitBody(b.form, lines)
 }
 
-// sortKey is what a name sorts by in its group: its last part, as in bun
-// for oven-sh/bun/bun, in any case.
+// sortKey is what a name sorts by in its group: what's before a version
+// or a source after @ (php for php@8.5, revdiff for revdiff@umputun/revdiff),
+// then its last part (bun for oven-sh/bun/bun), in any case.
 func sortKey(name string) string {
+	if i := strings.Index(name, "@"); i > 0 {
+		name = name[:i]
+	}
 	return strings.ToLower(name[strings.LastIndex(name, "/")+1:])
 }
 
