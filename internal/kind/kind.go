@@ -120,6 +120,14 @@ type Diverger interface {
 	Diverges()
 }
 
+// Reverter is a kind whose things found on the Mac and not declared were
+// changed there from a value kit knows, as a watched setting is: kit
+// reconcile can put the value back.
+type Reverter interface {
+	// Revert puts name back as it was.
+	Revert(ctx context.Context, name string) error
+}
+
 // Keyed is a kind whose things match by part of their names: an App Store
 // app by its id, an npm package without its version.
 type Keyed interface {

@@ -316,7 +316,7 @@ func checkEnvironment(t *testing.T, realHome string) {
 	for _, e := range entries {
 		stubs = append(stubs, e.Name())
 	}
-	want := []string{"brew", "claude", "composer", "defaults", "gh", "git", "go", "launchctl", "mas", "npm", "op", "open", "osascript", "sudo", "tmutil", "tmux"}
+	want := []string{"brew", "claude", "composer", "defaults", "diskutil", "gh", "git", "go", "killall", "launchctl", "mas", "mdfind", "mdutil", "npm", "op", "open", "osascript", "pmset", "sudo", "systemsetup", "tmutil", "tmux"}
 	if !slices.Equal(stubs, want) {
 		t.Errorf("PATH holds %q, want the stubs %q alone", stubs, want)
 	}

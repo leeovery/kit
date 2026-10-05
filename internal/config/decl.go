@@ -55,6 +55,12 @@ const (
 	// settings: a setting's key, then its value, as a shell splits words,
 	// then an optional note, as in git config --global's form.
 	settings
+	// defaults: a macOS setting in defaults write's form, its words as a
+	// shell splits them: -currentHost for one of this Mac's host, the
+	// domain, the key, and the value (-bool, -int, -float or -string and
+	// the value; -dict-add, an entry's key and its value as XML; or a value
+	// as XML), then an optional note.
+	defaults
 )
 
 // sectionDef is a section a declarations file may hold: one kind's list, or
@@ -78,6 +84,7 @@ var sectionDefs = []sectionDef{
 	{header: "features", kind: FeaturesKind, form: names},
 	{header: "paths", kind: PathsKind, form: paths},
 	{header: "git config", kind: "git", form: settings, grouped: true},
+	{header: "macos settings", kind: "default", form: defaults, grouped: true},
 	{header: "homebrew formulae", kind: "brew", form: names, grouped: true},
 	{header: "homebrew casks", kind: "cask", form: names, grouped: true},
 	{header: "app store apps", kind: "app", form: names, grouped: true},
@@ -358,6 +365,17 @@ func (s *section) entry(line string) (Entry, error) {
 			return e, fmt.Errorf("%s has no value after it", name)
 		}
 		e.Name, e.Value, e.Note = name, value, note
+	case defaults:
+		text, note := splitNote(line)
+		words, err := Words(text)
+		if err != nil {
+			return e, err
+		}
+		setting, value, err := defaultsLine(words)
+		if err != nil {
+			return e, err
+		}
+		e.Name, e.Value, e.Note = setting.Name(), value, note
 	}
 	if s.folder != "" {
 		e.Name = s.folder + ":" + e.Name

@@ -79,6 +79,10 @@ func (d kindDrifter) choices(it check.Item) []choice {
 		adopting = []choice{{action: adopt, label: "declare it"}}
 	}
 	uninstalling := []choice{{action: remove, label: "uninstall it"}}
+	if _, reverts := d.k.(kind.Reverter); reverts {
+		// A setting changed on the Mac: put back what it was.
+		uninstalling = []choice{{action: revert, label: "put back what it was"}}
+	}
 	var all []choice
 	switch it.State {
 	case kind.Extra:
@@ -103,6 +107,9 @@ func (d kindDrifter) choices(it check.Item) []choice {
 }
 
 func (d kindDrifter) describe(it check.Item) string {
+	if _, reverts := d.k.(kind.Reverter); reverts && it.State == kind.Extra {
+		return "changed on this Mac, not declared"
+	}
 	return map[string]string{
 		kind.Extra:            "installed, not declared",
 		kind.Missing:          "declared, not installed",
@@ -115,6 +122,15 @@ func (d kindDrifter) settle(ctx context.Context, r *run, c *changes, dec decisio
 	switch {
 	case dec.action == adopt && dec.item.State == kind.Diverged:
 		return d.adoptValue(ctx, r, c, dec, note)
+	case dec.action == revert && dec.item.State == kind.Extra:
+		rv, ok := d.k.(kind.Reverter)
+		if !ok {
+			return check.Result{State: check.Failed, Reason: "kit doesn't know what it was"}
+		}
+		if err := rv.Revert(ctx, dec.item.Name); err != nil {
+			return check.Result{State: check.Failed, Reason: "couldn't put it back: " + err.Error()}
+		}
+		return check.Result{State: check.OK, Summary: "put back as it was"}
 	case dec.action == revert:
 		if err := d.k.Install(ctx, []string{dec.item.Name}); err != nil {
 			return check.Result{State: check.Failed, Reason: "couldn't put it back: " + err.Error()}

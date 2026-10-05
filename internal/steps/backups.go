@@ -12,6 +12,7 @@ import (
 
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/engine"
+	"github.com/leeovery/kit/internal/plist"
 	"github.com/leeovery/kit/internal/runner"
 )
 
@@ -81,7 +82,7 @@ func TimeMachine(run runner.Runner, now func() time.Time) engine.Step {
 			if err != nil {
 				return failed(err)
 			}
-			v, err := readPlist(out)
+			v, err := plist.Read(out)
 			prefs, _ := v.(map[string]any)
 			if err != nil || prefs == nil {
 				return failed(errors.New("couldn't read Time Machine's settings"))
@@ -91,7 +92,7 @@ func TimeMachine(run runner.Runner, now func() time.Time) engine.Step {
 				return problem(FeatureTimeMachine, "not set up", [3]string{"none", "no backup disk is set up", "System Settings › General › Time Machine › Add Backup Disk"})
 			}
 			var problems [][3]string
-			if auto := prefs["AutoBackup"]; auto != true && auto != 1.0 {
+			if !plist.Equal(prefs["AutoBackup"], true) {
 				problems = append(problems, [3]string{"off", "automatic backups are off", "System Settings › General › Time Machine › Options: back up every hour"})
 			}
 			var last time.Time

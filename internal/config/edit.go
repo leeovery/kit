@@ -54,6 +54,8 @@ func splitBody(f form, lines []string) body {
 			}
 		case f == commands || f == settings:
 			name, _, _, _ = splitCommand(line)
+		case f == defaults:
+			name = defaultsName(line)
 		default:
 			name, _ = splitComment(line)
 		}
@@ -356,6 +358,12 @@ func entryText(d sectionDef, name string, e Entry) (string, error) {
 		if err := checkDir(name); err != nil {
 			return "", err
 		}
+	case defaults:
+		text, err := defaultsText(name, e.Value)
+		if err != nil {
+			return "", err
+		}
+		line = text
 	}
 	if note := strings.TrimSpace(strings.ReplaceAll(e.Note, "\n", " ")); note != "" {
 		line += noteGap + note

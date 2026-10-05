@@ -21,6 +21,7 @@ import (
 	"github.com/leeovery/kit/internal/kind/brew"
 	"github.com/leeovery/kit/internal/kind/claudeplugin"
 	"github.com/leeovery/kit/internal/kind/composer"
+	"github.com/leeovery/kit/internal/kind/defaults"
 	"github.com/leeovery/kit/internal/kind/ghext"
 	"github.com/leeovery/kit/internal/kind/gitconfig"
 	"github.com/leeovery/kit/internal/kind/gotool"
@@ -123,7 +124,7 @@ type kindStep struct {
 // run, for the user whose home is home and XDG config folder configHome.
 // The kinds whose programs are formulae come after the formulae, so a new
 // Mac has them before it needs them.
-func kindSteps(hb *brew.Homebrew, run runner.Runner, home, configHome string) []kindStep {
+func kindSteps(hb *brew.Homebrew, run runner.Runner, home, configHome, stateDir string) []kindStep {
 	return []kindStep{
 		{kind: hb.Formulae(), needs: []string{brew.StepName}},
 		{kind: hb.Casks(), needs: []string{brew.StepName}},
@@ -137,6 +138,7 @@ func kindSteps(hb *brew.Homebrew, run runner.Runner, home, configHome string) []
 		{kind: mcp.New(run, home), after: []string{"brew"}},
 		{kind: claudeplugin.New(run, home), after: []string{"brew"}},
 		{kind: gitconfig.New(run), after: []string{"brew"}, declaredOnly: true},
+		{kind: defaults.New(run, stateDir), declaredOnly: true},
 	}
 }
 
@@ -243,7 +245,7 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 		addSetup(step, applyDrifter{step: step, label: "write it"})
 	}
 	var kinds []engine.Step
-	for _, ks := range kindSteps(hb, observed, home, a.configHome()) {
+	for _, ks := range kindSteps(hb, observed, home, a.configHome(), dirs.State) {
 		name := ks.kind.Name()
 		list, unread, err := declared(cfg, ks.kind, machine)
 		if err != nil {

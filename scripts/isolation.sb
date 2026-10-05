@@ -96,6 +96,16 @@
   (literal "/bin/launchctl")
   (literal "/usr/bin/osascript")
   (literal "/usr/bin/open")
+  ;; Restarting apps, keyboard shortcuts taken up, power, sharing, Spotlight
+  ;; and disks.
+  (literal "/usr/bin/killall")
+  (literal "/System/Library/PrivateFrameworks/SystemAdministration.framework/Resources/activateSettings")
+  (literal "/usr/bin/pmset")
+  (literal "/usr/sbin/systemsetup")
+  (literal "/usr/bin/mdutil")
+  (literal "/usr/bin/mdfind")
+  (literal "/usr/sbin/diskutil")
+  (literal "/usr/libexec/PlistBuddy")
   ;; tmux: the system's, or Homebrew's, linked into its Cellar.
   (literal "/usr/bin/tmux")
   (literal "/usr/local/bin/tmux")
