@@ -57,3 +57,12 @@ func TestOhMyZshAsAFeature(t *testing.T) {
 		t.Error("the installer didn't run, given what curl downloaded")
 	}
 }
+
+func TestApplyWritesTheShellsPath(t *testing.T) {
+	w := laptopWorld(t)
+	w.writeSection(t, "laptop", "paths", "~/tools/bin\n")
+	out, _, code := w.run(t, "apply", "path")
+	if code != 0 || !strings.Contains(out, "path wrote the shell's PATH\n") {
+		t.Errorf("kit apply path printed\n%s exit %d", out, code)
+	}
+}
