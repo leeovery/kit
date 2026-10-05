@@ -84,13 +84,13 @@ func TestDeclare(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			files := map[string]string{}
 			if tt.before != "" {
-				files["laptop"] = tt.before
+				files["laptop/declarations"] = tt.before
 			}
 			cfg := loadRepo(t, files)
 			if err := cfg.Declare(tt.kind, "laptop", tt.entry, tt.group); err != nil {
 				t.Fatal(err)
 			}
-			if got := readFile(t, cfg, "laptop"); got != tt.after {
+			if got := readFile(t, cfg, "laptop/declarations"); got != tt.after {
 				t.Errorf("laptop =\n%s\nwant\n%s", got, tt.after)
 			}
 		})
@@ -128,11 +128,11 @@ func TestUndeclare(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := loadRepo(t, map[string]string{"laptop": tt.before})
+			cfg := loadRepo(t, map[string]string{"laptop/declarations": tt.before})
 			if err := cfg.Undeclare(tt.kind, "laptop", tt.entry); err != nil {
 				t.Fatal(err)
 			}
-			if got := readFile(t, cfg, "laptop"); got != tt.after {
+			if got := readFile(t, cfg, "laptop/declarations"); got != tt.after {
 				t.Errorf("laptop =\n%s\nwant\n%s", got, tt.after)
 			}
 		})
@@ -140,17 +140,17 @@ func TestUndeclare(t *testing.T) {
 }
 
 func TestReplaceKeepsTheNotesAbove(t *testing.T) {
-	cfg := loadRepo(t, map[string]string{"laptop": "[claude mcp]\n# the tablet\ntablet -- zsh -c tablet-mcp\n"})
+	cfg := loadRepo(t, map[string]string{"laptop/declarations": "[claude mcp]\n# the tablet\ntablet -- zsh -c tablet-mcp\n"})
 	if err := cfg.Replace("claude-mcp", "laptop", config.Entry{Name: "tablet", Value: "--off -- zsh -c tablet-mcp", Note: "over USB"}); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := readFile(t, cfg, "laptop"), "[claude mcp]\n# the tablet\ntablet --off -- zsh -c tablet-mcp   # over USB\n"; got != want {
+	if got, want := readFile(t, cfg, "laptop/declarations"), "[claude mcp]\n# the tablet\ntablet --off -- zsh -c tablet-mcp   # over USB\n"; got != want {
 		t.Errorf("laptop =\n%s\nwant\n%s", got, want)
 	}
 }
 
 func TestGroups(t *testing.T) {
-	cfg := loadRepo(t, map[string]string{"laptop": "[homebrew formulae]\n# Shell\nbat\n\n# Go\ngo\n\n[homebrew casks]\n# Browsers\nfirefox\n"})
+	cfg := loadRepo(t, map[string]string{"laptop/declarations": "[homebrew formulae]\n# Shell\nbat\n\n# Go\ngo\n\n[homebrew casks]\n# Browsers\nfirefox\n"})
 	got, err := cfg.Groups("brew", "laptop")
 	if err != nil || strings.Join(got, ",") != "Shell,Go" {
 		t.Errorf("Groups() = %q, %v", got, err)
@@ -161,7 +161,7 @@ func TestGroups(t *testing.T) {
 }
 
 func TestEditingRefuses(t *testing.T) {
-	cfg := loadRepo(t, map[string]string{"laptop": "[homebrew formulae]\njq\n", "studio": "[homebrew taps]\nx\n"})
+	cfg := loadRepo(t, map[string]string{"laptop/declarations": "[homebrew formulae]\njq\n", "studio/declarations": "[homebrew taps]\nx\n"})
 	for name, err := range map[string]error{
 		"a name declared already":   cfg.Declare("brew", "laptop", config.Entry{Name: "jq"}, ""),
 		"a name that isn't one":     cfg.Declare("brew", "laptop", config.Entry{Name: "two words"}, ""),
@@ -175,7 +175,7 @@ func TestEditingRefuses(t *testing.T) {
 			t.Errorf("%s: no error", name)
 		}
 	}
-	if got := readFile(t, cfg, "laptop"); got != "[homebrew formulae]\njq\n" {
+	if got := readFile(t, cfg, "laptop/declarations"); got != "[homebrew formulae]\njq\n" {
 		t.Errorf("laptop = %q, want it untouched", got)
 	}
 }

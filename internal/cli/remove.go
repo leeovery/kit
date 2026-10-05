@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/leeovery/kit/internal/check"
+	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/kind"
 )
 
@@ -63,21 +64,21 @@ func removeOne(ctx context.Context, r *run, c *changes, k kind.Kind, name string
 			return check.Result{State: check.Failed, Reason: err.Error()}
 		}
 		if len(where) > 0 {
-			return check.Result{State: check.Failed, Reason: fmt.Sprintf("declared in %s, line %d: %s", where[0].File, where[0].Line, d.HowToDeclare(where[0].Name))}
+			return check.Result{State: check.Failed, Reason: fmt.Sprintf("declared in %s: %s", where[0].Pos(), d.HowToDeclare(where[0].Name))}
 		}
 	}
-	own, sharedFile := r.file(false), r.file(true)
+	own, sharedScope := r.scope(false), r.scope(true)
 	where, err := r.where(kindName, name)
 	if err != nil {
 		return check.Result{State: check.Failed, Reason: err.Error()}
 	}
 	var inShared, inOwn bool
 	for _, e := range where {
-		inShared = inShared || e.File == sharedFile
-		inOwn = inOwn || e.File == own
+		inShared = inShared || e.Scope == sharedScope
+		inOwn = inOwn || e.Scope == own
 	}
 	if inShared && !shared {
-		return check.Result{State: check.Failed, Reason: "declared for every Mac, in " + sharedFile + ": --shared takes it out of every Mac's list"}
+		return check.Result{State: check.Failed, Reason: "declared for every Mac, in " + sharedScope + ": --shared takes it out of every Mac's list"}
 	}
 	isIn, err := installed(ctx, k, name)
 	if err != nil {
@@ -91,15 +92,15 @@ func removeOne(ctx context.Context, r *run, c *changes, k kind.Kind, name string
 		verb = "uninstalled"
 	}
 	var from []string
-	for _, file := range []string{own, sharedFile} {
-		if file == own && !inOwn || file == sharedFile && !inShared {
+	for _, scope := range []string{own, sharedScope} {
+		if scope == own && !inOwn || scope == sharedScope && !inShared {
 			continue
 		}
-		if err := r.cfg.Undeclare(kindName, file, name); err != nil {
+		if err := r.cfg.Undeclare(kindName, scope, name); err != nil {
 			return check.Result{State: check.Failed, Reason: verb + ", but couldn't undeclare: " + err.Error()}
 		}
-		c.changed(file)
-		from = append(from, file)
+		c.changed(config.DeclFile(scope))
+		from = append(from, scope)
 	}
 	switch {
 	case len(from) > 0:

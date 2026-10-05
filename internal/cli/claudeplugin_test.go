@@ -25,7 +25,7 @@ func TestReconcileAdoptsAPluginAndRemovesAMarketplace(t *testing.T) {
 		t.Errorf("kit status printed\n%s\nwant diff extra and the leftover marketplace unused", out)
 	}
 
-	w.expectSync([]string{"laptop"}, "kit reconcile (laptop): adopt claude-plugin:diff@someone/diffs")
+	w.expectSync([]string{"laptop/declarations"}, "kit reconcile (laptop): adopt claude-plugin:diff@someone/diffs")
 	out, errOut, code := w.run(t, "reconcile", "claude-plugin:diff@someone/diffs", "--adopt", "--group", "Review")
 	if code != 0 {
 		t.Fatalf("kit reconcile --adopt printed\n%s%s exit %d", out, errOut, code)

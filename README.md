@@ -28,9 +28,9 @@ and run `kit status`.
 kit reads its config repository from `~/.config/kit` (or `$KIT_CONFIG`):
 
 ```
-kit.toml   your Macs, and which is the primary
-shared     what every Mac declares
-<mac>      what one Mac declares, a file each, named after it
+kit.toml                your Macs, and which is the primary
+shared/declarations     what every Mac declares
+<mac>/declarations      what one Mac declares, in a folder named after it
 ```
 
 Each declarations file is sections of flat lines, as in `[homebrew formulae]` then a name a

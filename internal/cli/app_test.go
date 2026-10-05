@@ -73,7 +73,7 @@ func TestAddAnAppByName(t *testing.T) {
 	}
 	w.fake.On("sudo", "-v")
 	w.fake.On("sudo", "-n", "mas", "install", "946798523")
-	w.expectSync([]string{"laptop"}, "kit add app sleep-control-center@946798523 (laptop)")
+	w.expectSync([]string{"laptop/declarations"}, "kit add app sleep-control-center@946798523 (laptop)")
 
 	if _, errOut, code := w.run(t, "add", "app", "sleep"); code != 0 {
 		t.Fatalf("kit add exit %d: %s", code, errOut)

@@ -210,7 +210,7 @@ func (a *app) jobs(r *run) (hourly, daily []nightly.Job, err error) {
 		for _, e := range list.Entries {
 			cmd, err := steps.OwnCommand(home, e.Value, jobTimeout)
 			if err != nil {
-				return nil, nil, fmt.Errorf("%s:%d: %s: %w", e.File, e.Line, e.Name, err)
+				return nil, nil, fmt.Errorf("%s: %s: %w", e.Pos(), e.Name, err)
 			}
 			job := nightly.Job{Name: section + ":" + e.Name, Title: e.Name, Run: func(ctx context.Context) error {
 				res, err := r.run.Run(ctx, cmd)

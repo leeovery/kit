@@ -22,14 +22,14 @@ func TestFeaturesBringTheirChecks(t *testing.T) {
 
 	w.writeSection(t, "laptop", "features", "time-capsule\n")
 	_, errOut, code := w.run(t, "status")
-	if !strings.Contains(errOut, "laptop:5: kit doesn't know the feature time-capsule") || code != 2 {
+	if !strings.Contains(errOut, "laptop/declarations:5: kit doesn't know the feature time-capsule") || code != 2 {
 		t.Errorf("kit status printed %q, exit %d", errOut, code)
 	}
 }
 
 func TestFeatureOnAndOff(t *testing.T) {
 	w := laptopWorld(t)
-	w.expectSync([]string{"laptop"}, "kit feature on time-machine (laptop)")
+	w.expectSync([]string{"laptop/declarations"}, "kit feature on time-machine (laptop)")
 	out, errOut, code := w.run(t, "feature", "on", "time-machine")
 	if code != 0 || !strings.Contains(out, "time-machine ok on, in laptop\n") {
 		t.Fatalf("kit feature on printed\n%s%s exit %d", out, errOut, code)
@@ -37,7 +37,7 @@ func TestFeatureOnAndOff(t *testing.T) {
 	if got := w.readSection(t, "laptop", "features"); got != "time-machine\n" {
 		t.Errorf("[features] = %q", got)
 	}
-	w.expectSync([]string{"laptop"}, "kit feature off time-machine (laptop)")
+	w.expectSync([]string{"laptop/declarations"}, "kit feature off time-machine (laptop)")
 	if _, errOut, code := w.run(t, "feature", "off", "time-machine"); code != 0 {
 		t.Fatalf("kit feature off: %s exit %d", errOut, code)
 	}
@@ -56,7 +56,7 @@ func TestOwnChecksRun(t *testing.T) {
 	w.writeSection(t, "laptop", "checks", "dns -- dig +short @127.0.0.1 example.com   # the network's lookups\n")
 	w.fake.On("dig", "+short", "@127.0.0.1", "example.com").Exits(9).Prints(";; connection timed out; no servers could be reached\n")
 	out, _, code := w.run(t, "status", "checks")
-	if !strings.Contains(out, "checks attention 1 of 1 failing\nchecks problem dns: ;; connection timed out; no servers could be reached (your check, laptop line 5)\n") || code != 1 {
+	if !strings.Contains(out, "checks attention 1 of 1 failing\nchecks problem dns: ;; connection timed out; no servers could be reached (your check, laptop/declarations:5)\n") || code != 1 {
 		t.Errorf("kit status checks printed\n%s exit %d", out, code)
 	}
 }

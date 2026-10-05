@@ -198,10 +198,10 @@ func splitName(d sectionDef, name string) (folder, line string) {
 	return "", name
 }
 
-// Groups are the headings of the groups in kind's section of the file named
-// file, in order: none when there's no section.
-func (c *Config) Groups(kind, file string) ([]string, error) {
-	d, f, err := c.editable(kind, file)
+// Groups are the headings of the groups in kind's section of scope's
+// declarations, in order: none when there's no section.
+func (c *Config) Groups(kind, scope string) ([]string, error) {
+	d, f, err := c.editable(kind, scope)
 	if err != nil {
 		return nil, err
 	}
@@ -214,16 +214,16 @@ func (c *Config) Groups(kind, file string) ([]string, error) {
 	return headings, nil
 }
 
-// Declare declares e in kind's section of the file named file, as in
-// shared or laptop, with its note after it. A name goes into the group
+// Declare declares e in kind's section of scope's declarations, shared or a
+// Mac's, as in laptop, with its note after it. A name goes into the group
 // headed group, in its sorted place, made when the section has none such;
 // or, when group is "", at the end of "To be sorted", made at the section's
 // bottom when it has none. A command's line, its name then e.Value, goes in
 // its sorted place. The section is made, in its place among the file's,
-// when there's none, and the file too. The rest of the file is kept as it
-// is.
-func (c *Config) Declare(kind, file string, e Entry, group string) error {
-	d, f, err := c.editable(kind, file)
+// when there's none, and the file and its folder too. The rest of the file
+// is kept as it is.
+func (c *Config) Declare(kind, scope string, e Entry, group string) error {
+	d, f, err := c.editable(kind, scope)
 	if err != nil {
 		return err
 	}
@@ -238,7 +238,7 @@ func (c *Config) Declare(kind, file string, e Entry, group string) error {
 	}
 	b := splitBody(d.form, s.body)
 	if slices.Contains(b.names, name) {
-		return fmt.Errorf("%s is in %s already", e.Name, file)
+		return fmt.Errorf("%s is in %s already", e.Name, DeclFile(scope))
 	}
 	switch {
 	case !d.grouped:
@@ -270,11 +270,11 @@ func (c *Config) Declare(kind, file string, e Entry, group string) error {
 	return c.writeDecl(f, e.Name, true)
 }
 
-// Undeclare takes name out of kind's sections of the file named file, with
+// Undeclare takes name out of kind's sections of scope's declarations, with
 // the notes directly above it. A group it leaves empty loses its heading,
 // and a section it leaves empty goes. The rest of the file is kept as it is.
-func (c *Config) Undeclare(kind, file, name string) error {
-	d, f, err := c.editable(kind, file)
+func (c *Config) Undeclare(kind, scope, name string) error {
+	d, f, err := c.editable(kind, scope)
 	if err != nil {
 		return err
 	}
@@ -287,7 +287,7 @@ func (c *Config) Undeclare(kind, file, name string) error {
 		i = slices.Index(b.names, line)
 	}
 	if i < 0 {
-		return fmt.Errorf("%s isn't in %s", name, file)
+		return fmt.Errorf("%s isn't in %s", name, DeclFile(scope))
 	}
 	owner, grouped := b.groupAt(i)
 	b.remove(b.notesStart(i), i+1)
@@ -307,22 +307,22 @@ func (c *Config) Undeclare(kind, file, name string) error {
 	return c.writeDecl(f, name, false)
 }
 
-// Replace rewrites the line declaring e.Name in kind's sections of the file
-// named file, with e's value and note; the notes above it are kept.
-func (c *Config) Replace(kind, file string, e Entry) error {
-	d, f, err := c.editable(kind, file)
+// Replace rewrites the line declaring e.Name in kind's sections of scope's
+// declarations, with e's value and note; the notes above it are kept.
+func (c *Config) Replace(kind, scope string, e Entry) error {
+	d, f, err := c.editable(kind, scope)
 	if err != nil {
 		return err
 	}
 	folder, name := splitName(d, e.Name)
 	s := f.find(d, folder)
 	if s == nil {
-		return fmt.Errorf("%s isn't in %s", e.Name, file)
+		return fmt.Errorf("%s isn't in %s", e.Name, DeclFile(scope))
 	}
 	b := splitBody(d.form, s.body)
 	i := slices.Index(b.names, name)
 	if i < 0 {
-		return fmt.Errorf("%s isn't in %s", e.Name, file)
+		return fmt.Errorf("%s isn't in %s", e.Name, DeclFile(scope))
 	}
 	line, err := entryText(d, name, e)
 	if err != nil {
@@ -413,19 +413,19 @@ func (f *declFile) drop(s *section) {
 	}
 }
 
-// editable reads the declarations file named file for editing kind's
-// sections: a file that doesn't read isn't edited.
-func (c *Config) editable(kind, file string) (sectionDef, *declFile, error) {
+// editable reads scope's declarations file for editing kind's sections: a
+// file that doesn't read isn't edited.
+func (c *Config) editable(kind, scope string) (sectionDef, *declFile, error) {
 	d, err := defFor(kind)
 	if err != nil {
 		return d, nil, err
 	}
-	if file != Shared && !c.Knows(file) {
-		return d, nil, fmt.Errorf("%s is neither the shared file nor a Mac's (%s)", file, c.macList())
+	if scope != Shared && !c.Knows(scope) {
+		return d, nil, fmt.Errorf("%s is neither shared nor a Mac's (%s)", scope, c.macList())
 	}
-	f, err := c.readDecl(file)
+	f, err := c.readDecl(scope)
 	if err != nil {
-		return d, nil, fmt.Errorf("%s needs fixing before kit edits it: %w", file, err)
+		return d, nil, fmt.Errorf("%s needs fixing before kit edits it: %w", DeclFile(scope), err)
 	}
 	return d, f, nil
 }
@@ -434,19 +434,24 @@ func (c *Config) editable(kind, file string) (sectionDef, *declFile, error) {
 // with name declared in it, or not, as in says.
 func (c *Config) writeDecl(f *declFile, name string, in bool) error {
 	content := f.String()
-	back, err := parseFile(f.name, content)
+	file := DeclFile(f.scope)
+	back, err := parseFile(f.scope, content)
 	if err != nil {
-		return fmt.Errorf("the edit would leave %s unreadable: %w", f.name, err)
+		return fmt.Errorf("the edit would leave %s unreadable: %w", file, err)
 	}
 	found := false
 	for _, s := range back.sections {
-		entries, _ := s.entries(f.name)
+		entries, _ := s.entries(f.scope)
 		found = found || slices.ContainsFunc(entries, func(e Entry) bool { return e.Name == name })
 	}
 	if found != in {
-		return fmt.Errorf("the edit didn't leave %s as it should in %s", name, f.name)
+		return fmt.Errorf("the edit didn't leave %s as it should in %s", name, file)
 	}
-	return writeAtomic(filepath.Join(c.Dir, f.name), []byte(content))
+	path := filepath.Join(c.Dir, file)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("make %s's folder: %w", file, err)
+	}
+	return writeAtomic(path, []byte(content))
 }
 
 // writeAtomic writes data to path whole or not at all: beside it, synced,

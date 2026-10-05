@@ -51,7 +51,7 @@ func TestTmuxPluginsAreDeclaredInTmuxsConfig(t *testing.T) {
 	}
 
 	out, _, code = w.run(t, "remove", "tmux", "tmux-plugins/tpm")
-	if !strings.Contains(out, "declared in ~/.config/tmux/tmux.conf, line 1") || code != 1 {
+	if !strings.Contains(out, "declared in ~/.config/tmux/tmux.conf:1") || code != 1 {
 		t.Errorf("kit remove tmux tpm printed\n%s exit %d; want it refused, as declared", out, code)
 	}
 	if _, err := os.Stat(filepath.Join(w.home, ".config", "tmux", "plugins", "tpm")); err != nil {

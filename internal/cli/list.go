@@ -22,8 +22,12 @@ const listSchema = 1
 // listed is a declared name, where it's declared, and whether it's
 // installed.
 type listed struct {
-	Kind      string `json:"kind"`
-	Name      string `json:"name"`
+	Kind string `json:"kind"`
+	Name string `json:"name"`
+	// Scope is whose declarations declare it, shared or a Mac's: none for a
+	// thing declared in a file of its own.
+	Scope string `json:"scope,omitempty"`
+	// File is the file declaring it, as in laptop/declarations.
 	File      string `json:"file"`
 	Line      int    `json:"line"`
 	Group     string `json:"group,omitempty"`
@@ -31,6 +35,14 @@ type listed struct {
 	Installed bool   `json:"installed"`
 	// Off is whether it's declared, but not to be installed.
 	Off bool `json:"off,omitempty"`
+}
+
+// where is whose declarations declare it, or the file of its own that does.
+func (l listed) where() string {
+	if l.Scope != "" {
+		return l.Scope
+	}
+	return l.File
 }
 
 func newListCommand(a *app) *cobra.Command {
@@ -83,7 +95,7 @@ func (a *app) list(ctx context.Context, r *run, args []string) error {
 					return err
 				}
 			}
-			entries = append(entries, listed{Kind: name, Name: e.Name, File: e.File, Line: e.Line, Group: e.Group, Note: e.Note, Installed: isIn, Off: e.Off})
+			entries = append(entries, listed{Kind: name, Name: e.Name, Scope: e.Scope, File: e.Path(), Line: e.Line, Group: e.Group, Note: e.Note, Installed: isIn, Off: e.Off})
 		}
 	}
 	if a.json {
@@ -100,12 +112,12 @@ func (a *app) list(ctx context.Context, r *run, args []string) error {
 	for _, e := range entries {
 		kindWidth = max(kindWidth, ansi.StringWidth(e.Kind))
 		nameWidth = max(nameWidth, ansi.StringWidth(e.Name))
-		fileWidth = max(fileWidth, ansi.StringWidth(e.File))
+		fileWidth = max(fileWidth, ansi.StringWidth(e.where()))
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "kit list · %s\n", r.machine)
 	for _, e := range entries {
-		line := strings.TrimRight(fmt.Sprintf("%-*s  %-*s  %-*s  %s", kindWidth, e.Kind, nameWidth, e.Name, fileWidth, e.File, e.Group), " ")
+		line := strings.TrimRight(fmt.Sprintf("%-*s  %-*s  %-*s  %s", kindWidth, e.Kind, nameWidth, e.Name, fileWidth, e.where(), e.Group), " ")
 		switch {
 		case e.Off:
 			line += "  (off)"
@@ -180,7 +192,7 @@ func (a *app) why(ctx context.Context, r *run, name string) error {
 		w := why{Kind: kindName, Step: k.Title(), Declared: declared, Installed: isIn}
 		_, outside := k.(kind.Declarer)
 		w.ForThisMac = slices.ContainsFunc(declared, func(e config.Entry) bool {
-			return outside || e.File == config.Shared || e.File == r.machine
+			return outside || e.Scope == config.Shared || e.Scope == r.machine
 		})
 		if d, ok := k.(kind.Dependents); ok && isIn {
 			if w.NeededBy, err = d.NeededBy(ctx, name); err != nil {
@@ -208,7 +220,7 @@ func (a *app) why(ctx context.Context, r *run, name string) error {
 	for _, w := range found {
 		fmt.Fprintf(&b, "%s (%s)\n", name, w.Kind)
 		for _, e := range w.Declared {
-			line := fmt.Sprintf("  declared in %s, line %d", e.File, e.Line)
+			line := fmt.Sprintf("  declared in %s, line %d", e.Path(), e.Line)
 			if e.Group != "" {
 				line += ", under " + e.Group
 			}

@@ -231,10 +231,14 @@ A relative `XDG_CONFIG_HOME` or `XDG_STATE_HOME` is ignored, as the XDG spec say
 ### The config repository
 
 ```
-kit.toml   the format, the oldest kit that reads it, the Macs, the primary
-shared     what every Mac declares (made once something's declared for every Mac)
-laptop     what the Mac named laptop declares, and so for each Mac
+kit.toml                the format, the oldest kit that reads it, the Macs, the primary
+shared/declarations     what every Mac declares (made once something's declared for every Mac)
+laptop/declarations     what the Mac named laptop declares, and so for each Mac
 ```
+
+A folder for every Mac, and one shared by all, each the same shape: its declarations file,
+and in later milestones the files it links into the home folder and its own tools. A
+folder holding a declarations file for a Mac `kit.toml` doesn't name is refused.
 
 A declarations file is sections, each a header in brackets and its lines; the header's
 words are the nesting, a tool then its list, and for a kind with one, a project folder:
@@ -274,7 +278,8 @@ spaces and all. A command's: a name, then options, split into words as a shell s
 A `#` at the start of a line or after a space (outside quotes, in a command) starts a
 comment: on its own line it heads a group, after an entry it's the note saying why it's
 there. Within a group, names sort by their last part (`oven-sh/bun/bun` sorts as `bun`). A
-name is declared in the shared file or a Mac's, never both. A Mac can't be called `shared`.
+name is declared in the shared declarations or a Mac's, never both. A Mac can't be called
+`shared`.
 
 kit edits these files in place, leaving every other line as it is; it checks the result
 reads back, and writes the file whole or not at all. A file it can't read, it doesn't edit.
@@ -437,11 +442,12 @@ record and its rule, `kit nightly`; Arq checked by its own schedules (#41); the 
 clean-up and settings capture (#42); the checks on the runs, Scratch and Full Disk Access
 (#43); `--alerts`, drift's daily digest and the report (#44).
 
-**9. Steps — next.** Linked files, the shell and PATH, git, macOS settings and backup
-exclusions as kinds, secrets, what a person must do by hand; a command adding lines to
-`[checks]`, `[hourly]` and `[nightly]`.
+**9. Steps — in progress.** A folder per Mac in the config repository; linked files; the
+config repository's own edits settled by `kit reconcile`; the shell and PATH, git, macOS
+settings and backup exclusions as kinds, secrets, what a person must do by hand; a command
+adding lines to `[checks]`, `[hourly]` and `[nightly]`.
 
-**Then:** settings capture and restore in kit; syncing the config repository as a job; the
+**Then:** settings capture and restore in kit; the
 primary reading the other Macs; the bootstrap and its install script, tested in a virtual
 machine; data restore and moving to a new Mac; an agent's daily check, with decisions queued
 for a person. Claude Code's skills wait for the installer they'll go through. Each gets a

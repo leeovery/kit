@@ -31,7 +31,7 @@ func Own(run runner.Runner, home string, list config.List) engine.Step {
 			var problems [][3]string
 			for _, e := range list.Entries {
 				if what := own(ctx, run, home, e); what != "" {
-					problems = append(problems, [3]string{e.Name, e.Name + ": " + what, fmt.Sprintf("your check, %s line %d", e.File, e.Line)})
+					problems = append(problems, [3]string{e.Name, e.Name + ": " + what, "your check, " + e.Pos()})
 				}
 			}
 			summary := fmt.Sprintf("%d checks, all passing", len(list.Entries))
