@@ -52,7 +52,7 @@ func healthyMac(w *world) {
 	f.On("top", "-l", "1", "-pid", "412", "-stats", "mem").Prints("MEM\n102M\n")
 	f.On("sysctl", "-n", "vm.loadavg", "hw.ncpu", "kern.boottime").Prints("{ 2.10 2.00 1.90 }\n10\n{ sec = 1767312245, usec = 0 } Fri Jan  2 00:04:05 2026\n")
 	dir := filepath.Join(w.home, ".config", "kit")
-	f.On("git", "-C", dir, "status", "--porcelain")
+	f.On("git", "-C", dir, "status", "--porcelain", "--untracked-files=all")
 	f.On("git", "-C", dir, "log", "@{u}..HEAD", "--format=%ct")
 }
 
@@ -67,11 +67,12 @@ brew unused-dependency node@20
 cask attention 1 declared, all installed
 cask extra firefox
 gh ok none declared
+config ok all committed
 disk ok 48% free
 memory ok 0.3 GB swap, pressure normal
 file-events ok fseventsd using 0.1 GB
 load ok load 1.9 on 10 cores
-config-sync ok committed and pushed
+config-sync ok pushed
 config-private ok private on GitHub (someone/kit-config)
 2 need attention
 `
@@ -86,7 +87,7 @@ func TestStatusJSON(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &doc); err != nil || code != 1 {
 		t.Fatalf("kit status --json printed %q, exit %d: %v", out, code, err)
 	}
-	if doc.Schema != 1 || doc.Kit != "0.1.0" || doc.Machine != "laptop" || !doc.Attention || len(doc.Steps) != 10 {
+	if doc.Schema != 1 || doc.Kit != "0.1.0" || doc.Machine != "laptop" || !doc.Attention || len(doc.Steps) != 11 {
 		t.Fatalf("document = %+v", doc)
 	}
 	brew := doc.Steps[1]

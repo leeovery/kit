@@ -23,6 +23,11 @@ var driftStates = map[string]string{
 	"missing":           "missing",
 	"unused-dependency": "unused",
 	"changed":           "changed",
+	"diverged":          "diverged",
+	"dead":              "dead link",
+	"edited":            "not committed",
+	"added":             "new, not committed",
+	"deleted":           "deleted, not committed",
 }
 
 // Glance is the face of bare kit: nothing as the run goes, and at its end a

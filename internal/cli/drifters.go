@@ -3,11 +3,16 @@ package cli
 import (
 	"context"
 	"fmt"
+	"path/filepath"
+	"strings"
 
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/config"
+	"github.com/leeovery/kit/internal/engine"
+	"github.com/leeovery/kit/internal/gitrepo"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/linked"
+	"github.com/leeovery/kit/internal/steps"
 )
 
 // drifter is a step whose items are drift, which kit reconcile settles: a
@@ -21,6 +26,12 @@ type drifter interface {
 	describe(it check.Item) string
 	// settle does what d decided about its item, snoozing aside.
 	settle(ctx context.Context, r *run, c *changes, d decision, note string) check.Result
+}
+
+// shower is a drifter with more to show of an item, below a question about
+// it: an edit's diff.
+type shower interface {
+	show(ctx context.Context, it check.Item) string
 }
 
 // choice is a thing that can be done about an item, as a terminal offers
@@ -172,6 +183,74 @@ func (d fileDrifter) settle(ctx context.Context, r *run, c *changes, dec decisio
 			return check.Result{State: check.Failed, Reason: err.Error()}
 		}
 		return check.Result{State: check.OK, Summary: map[string]string{install: "linked", remove: "removed"}[dec.action]}
+	}
+	return check.Result{State: check.Failed, Reason: "nothing to do: " + dec.action}
+}
+
+// configDrifter is the config repository's edits not committed.
+type configDrifter struct {
+	repo gitrepo.Repo
+	home string
+	step engine.Step
+}
+
+func (d configDrifter) check(ctx context.Context) check.Result {
+	return d.step.Check(ctx)
+}
+
+func (d configDrifter) choices(it check.Item) []choice {
+	undo := map[string]string{
+		steps.ConfigEdited:  "undo it: back to the last commit",
+		steps.ConfigAdded:   "undo it: the file to the Bin",
+		steps.ConfigDeleted: "undo it: the file back",
+	}[it.State]
+	return []choice{{action: adopt, label: "commit it, and push"}, {action: revert, label: undo}, snoozeChoice}
+}
+
+// diffLines is how much of a change's diff a question shows.
+const diffLines = 20
+
+func (d configDrifter) describe(it check.Item) string {
+	return map[string]string{
+		steps.ConfigEdited:  "edited, not committed",
+		steps.ConfigAdded:   "new, not committed",
+		steps.ConfigDeleted: "deleted, not committed",
+	}[it.State]
+}
+
+// show is an edit's diff, its first lines.
+func (d configDrifter) show(ctx context.Context, it check.Item) string {
+	if it.State != steps.ConfigEdited {
+		return ""
+	}
+	diff, err := d.repo.Diff(ctx, it.Name)
+	if err != nil || diff == "" {
+		return ""
+	}
+	lines := strings.Split(strings.TrimRight(diff, "\n"), "\n")
+	if len(lines) > diffLines {
+		lines = append(lines[:diffLines], "…")
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (d configDrifter) settle(ctx context.Context, _ *run, c *changes, dec decision, _ string) check.Result {
+	switch dec.action {
+	case adopt:
+		c.changed(dec.item.Name)
+		return check.Result{State: check.OK, Summary: "to commit"}
+	case revert:
+		if dec.item.State == steps.ConfigAdded {
+			binned, err := linked.ToBin(d.home, filepath.Join(d.repo.Dir, dec.item.Name))
+			if err != nil {
+				return check.Result{State: check.Failed, Reason: "couldn't move it to the Bin: " + err.Error()}
+			}
+			return check.Result{State: check.OK, Summary: "undone: the file is in the Bin (" + binned + ")"}
+		}
+		if err := d.repo.Restore(ctx, dec.item.Name); err != nil {
+			return check.Result{State: check.Failed, Reason: "couldn't undo it: " + err.Error()}
+		}
+		return check.Result{State: check.OK, Summary: "undone: back to the last commit"}
 	}
 	return check.Result{State: check.Failed, Reason: "nothing to do: " + dec.action}
 }

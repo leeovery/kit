@@ -95,7 +95,7 @@ differ.
 what's wrong and what to do: the Mac's (`disk`, `memory`, `file-events`, `load`), always;
 the backups' (`time-machine`, `arq`: each runs on its own schedule, and kit checks it did,
 only the plans Arq is scheduled to run), when switched on; the config repository's
-(`config-sync`, `config-private`); the scheduled runs' (`nightly`: the hourly run within two
+(`config-sync`: commits that won't push; `config-private`); the scheduled runs' (`nightly`: the hourly run within two
 hours, the nightly one finished within 26 and none stuck over six, each job's last outcome;
 quiet until `kit nightly` has run on a schedule); with their features, `scratch` (mounted,
 out of Spotlight and Time Machine, `tmp` writable, Claude Code's temporary files sent there)
@@ -104,6 +104,14 @@ section, a line each:
 a name, then `--` and a command, which exits 0 when all's well, or prints what's wrong on
 its first line (a minute's timeout), each failing one an item of the `checks` step. Every step has an area (Backups, Jobs, Mac, Drift,
 Config, Checks), which the status document carries.
+
+**The config repository's own edits** are drift, not a problem: linked files mean edits
+land in the repository outside kit (through a link, by hand, by an app), and kit commits only
+its own changes. The `config` step makes each file changed and not committed an item
+(`config:shared/home/.zshrc`, edited, added or deleted, with the lines it adds and removes),
+quiet for a day as drift is; `kit reconcile` shows an edit's diff and offers adopt (commit it,
+then push, `--note` the message's end), revert (back to the last commit; a new file to the
+Bin) or snooze. kit pulls with rebase before it pushes, so two Macs don't fight.
 
 **Steps.** Everything kit applies is a step in one pipeline. A step has:
 

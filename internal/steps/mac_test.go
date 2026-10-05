@@ -10,6 +10,7 @@ import (
 
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/engine"
+	"github.com/leeovery/kit/internal/gitrepo"
 	"github.com/leeovery/kit/internal/runner/runnertest"
 	"github.com/leeovery/kit/internal/steps"
 )
@@ -142,37 +143,59 @@ func itoa(n int64) string { return strconv.FormatInt(n, 10) }
 // push that failed, is a problem after an hour.
 func TestConfigSync(t *testing.T) {
 	repo := t.TempDir()
-	for name, age := range map[string]time.Duration{"personal": 2 * time.Hour, "shared": 10 * time.Minute} {
-		path := filepath.Join(repo, name)
-		if err := os.WriteFile(path, []byte("x"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Chtimes(path, now().Add(-age), now().Add(-age)); err != nil {
-			t.Fatal(err)
-		}
-	}
 	git := func(args ...string) []string { return append([]string{"-C", repo}, args...) }
 
 	fake := runnertest.New(t)
-	fake.On("git", git("status", "--porcelain")...)
 	fake.On("git", git("log", "@{u}..HEAD", "--format=%ct")...)
-	if state, text, _ := checked(t, steps.ConfigSync(fake, repo, now)); state != check.OK || text != "committed and pushed" {
-		t.Errorf("all synced = %s %q", state, text)
+	if state, text, _ := checked(t, steps.ConfigSync(fake, repo, now)); state != check.OK || text != "pushed" {
+		t.Errorf("all pushed = %s %q", state, text)
 	}
 
 	fake = runnertest.New(t)
-	fake.On("git", git("status", "--porcelain")...).Prints(" M personal\n M shared\n")
 	fake.On("git", git("log", "@{u}..HEAD", "--format=%ct")...).Prints(itoa(now().Add(-3*time.Hour).Unix()) + "\n" + itoa(now().Add(-time.Minute).Unix()) + "\n")
 	state, _, ids := checked(t, steps.ConfigSync(fake, repo, now))
-	if state != check.Attention || !slices.Equal(ids, []string{"config-sync:uncommitted", "config-sync:unpushed"}) {
-		t.Errorf("waiting = %s %q; want personal uncommitted (shared's too new) and the commits unpushed", state, ids)
+	if state != check.Attention || !slices.Equal(ids, []string{"config-sync:unpushed"}) {
+		t.Errorf("waiting = %s %q; want the commits unpushed", state, ids)
+	}
+
+	fake = runnertest.New(t)
+	fake.On("git", git("log", "@{u}..HEAD", "--format=%ct")...).Prints(itoa(now().Add(-time.Minute).Unix()) + "\n")
+	if state, _, _ := checked(t, steps.ConfigSync(fake, repo, now)); state != check.OK {
+		t.Errorf("a commit a minute old = %s, want ok: kit is pushing it", state)
 	}
 
 	// No upstream: nothing to push to.
 	fake = runnertest.New(t)
-	fake.On("git", git("status", "--porcelain")...)
 	fake.On("git", git("log", "@{u}..HEAD", "--format=%ct")...).Exits(128).PrintsToStderr("fatal: no upstream configured")
 	if state, _, _ := checked(t, steps.ConfigSync(fake, repo, now)); state != check.OK {
 		t.Errorf("no upstream = %s, want ok", state)
+	}
+}
+
+func TestConfigEdits(t *testing.T) {
+	repo := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repo, "notes"), []byte("a\nb\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	git := func(args ...string) []string { return append([]string{"-C", repo}, args...) }
+
+	fake := runnertest.New(t)
+	fake.On("git", git("status", "--porcelain", "--untracked-files=all")...)
+	step := steps.ConfigEdits(gitrepo.Repo{Dir: repo, Run: fake})
+	if res := step.Check(t.Context()); res.State != check.OK || res.Summary != "all committed" || step.Area != steps.AreaDrift {
+		t.Errorf("nothing waiting = %s %q in %s", res.State, res.Summary, step.Area)
+	}
+
+	fake = runnertest.New(t)
+	fake.On("git", git("status", "--porcelain", "--untracked-files=all")...).Prints(" M shared/home/.zshrc\n?? notes\n D personal/declarations\n")
+	fake.On("git", git("diff", "--numstat", "HEAD")...).Prints("3\t1\tshared/home/.zshrc\n0\t40\tpersonal/declarations\n")
+	res := steps.ConfigEdits(gitrepo.Repo{Dir: repo, Run: fake}).Check(t.Context())
+	var got []string
+	for _, it := range res.Items {
+		got = append(got, it.ID+" "+it.State+" "+it.Detail)
+	}
+	want := []string{"config:shared/home/.zshrc edited +3 −1 lines", "config:notes added +2 −0 lines", "config:personal/declarations deleted +0 −40 lines"}
+	if res.State != check.Attention || res.Summary != "3 files not committed" || !slices.Equal(got, want) {
+		t.Errorf("edits = %s %q %q, want %q", res.State, res.Summary, got, want)
 	}
 }

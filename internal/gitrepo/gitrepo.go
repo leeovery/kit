@@ -7,7 +7,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/leeovery/kit/internal/runner"
@@ -43,6 +46,100 @@ func (r Repo) Files(ctx context.Context, paths ...string) ([]string, error) {
 	}
 	slices.Sort(files)
 	return files, nil
+}
+
+// The states of a change not committed.
+const (
+	Edited  = "edited"
+	Added   = "added"
+	Deleted = "deleted"
+)
+
+// Change is a file in the repository changed and not committed.
+type Change struct {
+	// Path is the file, as a path in the repository.
+	Path string
+	// State is edited, added (new to the repository) or deleted.
+	State string
+	// Added and Removed count the lines the change adds and removes.
+	Added, Removed int
+}
+
+// Changes are the files changed and not committed, staged or not, new ones
+// each by name, with the lines each adds and removes.
+func (r Repo) Changes(ctx context.Context) ([]Change, error) {
+	res, err := r.git(ctx, "status", "--porcelain", "--untracked-files=all")
+	if err != nil {
+		return nil, err
+	}
+	var changes []Change
+	for line := range strings.Lines(string(res.Stdout)) {
+		line = strings.TrimRight(line, "\n")
+		if len(line) < 4 {
+			continue
+		}
+		code, name := line[:2], unquote(line[3:])
+		if _, to, ok := strings.Cut(name, " -> "); ok {
+			name = unquote(to)
+		}
+		c := Change{Path: name, State: Edited}
+		switch {
+		case code == "??" || strings.Contains(code, "A"):
+			c.State = Added
+		case strings.Contains(code, "D"):
+			c.State = Deleted
+		}
+		changes = append(changes, c)
+	}
+	if len(changes) == 0 {
+		return nil, nil
+	}
+	counts := make(map[string][2]int)
+	if res, err := r.git(ctx, "diff", "--numstat", "HEAD"); err == nil {
+		for line := range strings.Lines(string(res.Stdout)) {
+			f := strings.SplitN(strings.TrimRight(line, "\n"), "\t", 3)
+			if len(f) == 3 {
+				added, _ := strconv.Atoi(f[0])
+				removed, _ := strconv.Atoi(f[1])
+				counts[unquote(f[2])] = [2]int{added, removed}
+			}
+		}
+	}
+	for i, c := range changes {
+		n, ok := counts[c.Path]
+		if !ok && c.State == Added {
+			if data, err := os.ReadFile(filepath.Join(r.Dir, c.Path)); err == nil {
+				n[0] = strings.Count(string(data), "\n")
+			}
+		}
+		changes[i].Added, changes[i].Removed = n[0], n[1]
+	}
+	return changes, nil
+}
+
+// unquote is a path as git prints it, without the quotes it puts round one
+// with unusual characters.
+func unquote(name string) string {
+	if s, err := strconv.Unquote(name); err == nil {
+		return s
+	}
+	return name
+}
+
+// Diff is the change to path not committed, as git shows it: none for a
+// file new to the repository.
+func (r Repo) Diff(ctx context.Context, path string) (string, error) {
+	res, err := r.git(ctx, "diff", "HEAD", "--", path)
+	if err != nil {
+		return "", err
+	}
+	return string(res.Stdout), nil
+}
+
+// Restore puts path back as it was last committed, staged and not.
+func (r Repo) Restore(ctx context.Context, path string) error {
+	_, err := r.git(ctx, "restore", "--source=HEAD", "--staged", "--worktree", "--", path)
+	return err
 }
 
 // Commit commits the changes to files, paths in the repository, alone, with

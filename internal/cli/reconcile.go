@@ -273,7 +273,13 @@ func (a *app) askAbout(ctx context.Context, r *run, items []driftItem, opts reco
 			answers = append(answers, c.label)
 		}
 		answers = append(answers, "leave it for now", "stop here")
-		i, err := a.Choose(ctx, describe(it, dr, r.now), answers)
+		question := describe(it, dr, r.now)
+		if sh, ok := dr.(shower); ok {
+			if more := sh.show(ctx, it.Item); more != "" {
+				question += "\n\n" + more
+			}
+		}
+		i, err := a.Choose(ctx, question, answers)
 		if errors.Is(err, ask.ErrCancelled) {
 			return nil, errors.New("cancelled: nothing was changed")
 		}
