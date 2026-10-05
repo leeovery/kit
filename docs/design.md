@@ -27,8 +27,8 @@ read, and kept in kit's state; a replacement Mac can take an old one's name.
 **Kinds.** A kind is a list of things of one sort. Built: Homebrew formulae (`brew`) and casks
 (`cask`), App Store apps (`app`), npm and Composer global packages (`npm`, `composer`), Go tools
 (`go`), GitHub CLI extensions (`gh`), tmux plugins (`tmux`), login items (`login`) and Claude
-Code's MCP servers (`claude-mcp`) and plugins (`claude-plugin`). Later: Claude Code's skills,
-secrets, macOS settings and backup exclusions.
+Code's MCP servers (`claude-mcp`) and plugins (`claude-plugin`), and git's settings (`git`).
+Later: Claude Code's skills, secrets, macOS settings and backup exclusions.
 Each kind supplies five parts:
 
 - **declared:** what the config lists, the shared file and then this Mac's;
@@ -51,10 +51,15 @@ undeclared for adopting, removing or snoozing, and report both.
 | `login` | the app's bundle id, `com.example.app` | System Events' login items | System Events (JavaScript for Automation) |
 | `claude-mcp` | a name, then `claude mcp add`'s options; a project's in `[claude mcp <folder>]` | `~/.claude.json`, read directly | `claude mcp add-json`, `claude mcp remove` (a project's in local scope, in its folder) |
 | `claude-plugin` | `plugin@owner/repo`: the plugin and its marketplace's repository; `@owner/repo` a marketplace alone | Claude Code's records of plugins, marketplaces and what's enabled | the marketplace added when needed, then `claude plugin install`; `uninstall`, `marketplace remove` |
+| `git` | `[git config]`: a key, then its value as one word, as `git config --global` takes them (`alias.st "status -sb"`) | `git config --global --list` | `git config --global --replace-all`, `--unset-all` |
 
 - **Matching:** a kind may match on part of a name: an App Store app on its id (so an app the
   store renames still matches), npm and Composer packages without their versions, GitHub
   repositories and bundle ids without regard to case.
+- **Changed on purpose:** a setting set otherwise than declared (git's) was changed on the
+  Mac, so it's *diverged*: applying leaves it, and `kit reconcile` adopts it (the declared
+  line takes the Mac's value) or reverts it (the declared value set again). A kind of
+  settings is checked only while something of it is declared.
 - **A kind's program:** while it isn't installed, a kind with nothing declared for the Mac
   isn't checked at all, and one with something declared is deferred, saying what it needs.
   The kinds whose programs are formulae are applied after the formulae, so a new Mac has

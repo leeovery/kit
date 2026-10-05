@@ -22,6 +22,7 @@ import (
 	"github.com/leeovery/kit/internal/kind/claudeplugin"
 	"github.com/leeovery/kit/internal/kind/composer"
 	"github.com/leeovery/kit/internal/kind/ghext"
+	"github.com/leeovery/kit/internal/kind/gitconfig"
 	"github.com/leeovery/kit/internal/kind/gotool"
 	"github.com/leeovery/kit/internal/kind/login"
 	"github.com/leeovery/kit/internal/kind/mcp"
@@ -112,6 +113,10 @@ type kindStep struct {
 	kind  kind.Kind
 	needs []string
 	after []string
+	// declaredOnly is whether the kind is checked only while something of
+	// it is declared, as git's settings are: a Mac whose settings kit
+	// doesn't look after has nothing extra.
+	declaredOnly bool
 }
 
 // kindSteps are every kind kit knows, in pipeline order, driven through
@@ -131,6 +136,7 @@ func kindSteps(hb *brew.Homebrew, run runner.Runner, home, configHome string) []
 		{kind: login.New(run, home), after: []string{"cask", "app"}},
 		{kind: mcp.New(run, home), after: []string{"brew"}},
 		{kind: claudeplugin.New(run, home), after: []string{"brew"}},
+		{kind: gitconfig.New(run), after: []string{"brew"}, declaredOnly: true},
 	}
 }
 
@@ -247,7 +253,7 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 		}
 		r.allKinds = append(r.allKinds, name)
 		r.kindsByName[name], r.lists[name] = ks.kind, list
-		if len(list.Entries) == 0 && unread == nil && !runner.Has(observed, ks.kind.Program()) {
+		if len(list.Entries) == 0 && unread == nil && (ks.declaredOnly || !runner.Has(observed, ks.kind.Program())) {
 			continue
 		}
 		step := kind.Step(ks.kind, list, ks.needs...)

@@ -88,6 +88,12 @@ func (d kindDrifter) choices(it check.Item) []choice {
 			all = append(all, choice{action: install, label: "install it"})
 		}
 		all = append(all, choice{action: undeclare, label: "undeclare it"}, snoozeChoice)
+	case kind.Diverged:
+		all = []choice{
+			{action: adopt, label: "keep the Mac's: declared as it is now"},
+			{action: revert, label: "put back what's declared"},
+			snoozeChoice,
+		}
 	default:
 		all = []choice{snoozeChoice}
 	}
@@ -108,10 +114,20 @@ func (d kindDrifter) describe(it check.Item) string {
 		kind.Extra:            "installed, not declared",
 		kind.Missing:          "declared, not installed",
 		kind.UnusedDependency: "installed for something since removed, needed by nothing",
+		kind.Diverged:         "changed on this Mac from what's declared",
 	}[it.State]
 }
 
 func (d kindDrifter) settle(ctx context.Context, r *run, c *changes, dec decision, note string) check.Result {
+	switch {
+	case dec.action == adopt && dec.item.State == kind.Diverged:
+		return d.adoptValue(ctx, r, c, dec, note)
+	case dec.action == revert:
+		if err := d.k.Install(ctx, []string{dec.item.Name}); err != nil {
+			return check.Result{State: check.Failed, Reason: "couldn't put it back: " + err.Error()}
+		}
+		return check.Result{State: check.OK, Summary: "put back as declared"}
+	}
 	switch dec.action {
 	case adopt:
 		group := dec.group
@@ -128,6 +144,38 @@ func (d kindDrifter) settle(ctx context.Context, r *run, c *changes, dec decisio
 		return check.Result{State: check.OK, Summary: "installed"}
 	}
 	return check.Result{State: check.Failed, Reason: "nothing to do: " + dec.action}
+}
+
+// adoptValue declares a thing changed on the Mac as it is now, in place of
+// its declared value, in the declarations it's in for this Mac.
+func (d kindDrifter) adoptValue(ctx context.Context, r *run, c *changes, dec decision, note string) check.Result {
+	v, ok := d.k.(kind.Valued)
+	if !ok {
+		return check.Result{State: check.Failed, Reason: "kit can't read its value to declare"}
+	}
+	value, err := v.Value(ctx, dec.item.Name)
+	if err != nil {
+		return check.Result{State: check.Failed, Reason: err.Error()}
+	}
+	where, err := r.where(d.k.Name(), dec.item.Name)
+	if err != nil {
+		return check.Result{State: check.Failed, Reason: err.Error()}
+	}
+	for _, e := range where {
+		if e.Scope != config.Shared && e.Scope != r.machine {
+			continue
+		}
+		e.Value = value
+		if note != "" {
+			e.Note = note
+		}
+		if err := r.cfg.Replace(d.k.Name(), e.Scope, e); err != nil {
+			return check.Result{State: check.Failed, Reason: err.Error()}
+		}
+		c.changed(config.DeclFile(e.Scope))
+		return check.Result{State: check.OK, Summary: "declared as it is now, in " + e.Scope}
+	}
+	return check.Result{State: check.Failed, Reason: dec.item.Name + " isn't declared for this Mac"}
 }
 
 // fileDrifter is the linked files' drift: files not linked, or linked

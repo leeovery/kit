@@ -52,6 +52,9 @@ const (
 	// commands: a name, then a command's options, its words as a shell
 	// splits them, then an optional note.
 	commands
+	// settings: a setting's key, then its value, as a shell splits words,
+	// then an optional note, as in git config --global's form.
+	settings
 )
 
 // sectionDef is a section a declarations file may hold: one kind's list, or
@@ -74,6 +77,7 @@ type sectionDef struct {
 var sectionDefs = []sectionDef{
 	{header: "features", kind: FeaturesKind, form: names},
 	{header: "paths", kind: PathsKind, form: paths},
+	{header: "git config", kind: "git", form: settings, grouped: true},
 	{header: "homebrew formulae", kind: "brew", form: names, grouped: true},
 	{header: "homebrew casks", kind: "cask", form: names, grouped: true},
 	{header: "app store apps", kind: "app", form: names, grouped: true},
@@ -182,6 +186,11 @@ var lineName = regexp.MustCompile(`^[A-Za-z0-9@._+/-][A-Za-z0-9@._+/:^~*<>=|,-]*
 // commandName is what a command's name may be, as Claude Code's MCP servers'
 // names may.
 var commandName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+
+// settingKey is what a setting's key may be: no spaces, quotes, # or
+// backslashes, which a key such as credential.https://github.com.helper
+// never needs.
+var settingKey = regexp.MustCompile(`^[A-Za-z0-9][^\s"'#\\]*$`)
 
 // headerLine is a section's header: words between brackets, alone on their
 // line but for a comment.
@@ -333,16 +342,20 @@ func (s *section) entry(line string) (Entry, error) {
 		e.Name, e.Note = text, note
 	case paths:
 		e.Name, e.Note = splitComment(line)
-	case commands:
+	case commands, settings:
 		name, value, note, err := splitCommand(line)
 		if err != nil {
 			return e, err
 		}
-		if !commandName.MatchString(name) {
+		switch {
+		case s.def.form == commands && !commandName.MatchString(name):
 			return e, fmt.Errorf("%q isn't a name: letters, digits, dots, hyphens and underscores", name)
-		}
-		if value == "" {
+		case s.def.form == settings && !settingKey.MatchString(name):
+			return e, fmt.Errorf("%q isn't a setting's key", name)
+		case value == "" && s.def.form == commands:
 			return e, fmt.Errorf("%s has nothing after its name: its options follow it", name)
+		case value == "":
+			return e, fmt.Errorf("%s has no value after it", name)
 		}
 		e.Name, e.Value, e.Note = name, value, note
 	}
