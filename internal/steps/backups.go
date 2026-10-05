@@ -20,13 +20,12 @@ import (
 const (
 	FeatureTimeMachine     = "time-machine"
 	FeatureArq             = "arq"
-	FeatureAsimov          = "asimov"
 	FeatureScratch         = "scratch"
 	FeatureSettingsCapture = "settings-capture"
 )
 
 // Features are the features kit knows.
-var Features = []string{FeatureArq, FeatureAsimov, FeatureScratch, FeatureSettingsCapture, FeatureTimeMachine}
+var Features = []string{FeatureArq, FeatureScratch, FeatureSettingsCapture, FeatureTimeMachine}
 
 // The backup checks' thresholds, as bin/health had them.
 const (
@@ -142,12 +141,18 @@ type arqStats struct {
 	BackupPlans []struct {
 		Name         string `json:"name"`
 		LastBackedUp string `json:"lastBackedUp"`
+		Schedule     struct {
+			Type string `json:"type"`
+		} `json:"schedule"`
 	} `json:"backupPlans"`
 }
 
-// Arq checks Arq's backup plans: one at least, each backed up within 26
-// hours. Plans named "Legacy" are kept for their history, never run, and
-// left out.
+// arqManual is the schedule of a plan Arq never runs by itself.
+const arqManual = "manual"
+
+// Arq checks the backup plans Arq runs on its own schedules: one at least,
+// each backed up within 26 hours. A plan with no schedule ("Manual") isn't
+// expected to run, so it's left out, as a plan kept for its history is.
 func Arq(run runner.Runner, now func() time.Time) engine.Step {
 	return engine.Step{
 		Name: FeatureArq, Title: "Arq", Area: AreaBackups,
@@ -167,7 +172,7 @@ func Arq(run runner.Runner, now func() time.Time) engine.Step {
 			var good, times []string
 			plans := 0
 			for _, p := range stats.BackupPlans {
-				if strings.Contains(strings.ToLower(p.Name), "legacy") {
+				if t := strings.ToLower(p.Schedule.Type); t == "" || t == arqManual {
 					continue
 				}
 				plans++
@@ -175,16 +180,16 @@ func Arq(run runner.Runner, now func() time.Time) engine.Step {
 				last, err := time.Parse(time.RFC3339, p.LastBackedUp)
 				switch {
 				case p.LastBackedUp == "" || err != nil:
-					problems = append(problems, [3]string{"never:" + id, p.Name + ": no completed backup yet", "the nightly run starts it; check Arq's activity"})
+					problems = append(problems, [3]string{"never:" + id, p.Name + ": no completed backup yet", "check Arq's activity, and the plan's schedule"})
 				case now().Sub(last) > arqEvery:
-					problems = append(problems, [3]string{"stale:" + id, p.Name + ": last backup " + ago(last, now()), "check Arq's activity, and the nightly run's log"})
+					problems = append(problems, [3]string{"stale:" + id, p.Name + ": last backup " + ago(last, now()), "check Arq's activity, and the plan's schedule"})
 				default:
 					good = append(good, p.Name+" "+when(last, now()))
 					times = append(times, when(last, now()))
 				}
 			}
 			if plans == 0 {
-				return problem(FeatureArq, "no backup plan", [3]string{"no-plan", "no backup plan, so nothing is backed up offsite", "create the plan in Arq"})
+				return problem(FeatureArq, "no plan scheduled", [3]string{"no-plan", "no backup plan runs on a schedule, so nothing is backed up offsite by itself", "in Arq, give the plan a schedule (its Schedule tab: daily)"})
 			}
 			slices.Sort(good)
 			summary := "last backup " + strings.Join(good, ", ")

@@ -67,8 +67,11 @@
   (regex #"/Cellar/gh/")
   (regex #"/Caskroom/1password-cli/")
   (literal "/usr/local/bin/op")
-  ;; Arq's command, which starts backups.
+  ;; Arq's command, which starts backups; jobs the nightly run drives:
+  ;; Asimov, as Homebrew installs it, and the settings capture.
   (literal "/Applications/Arq.app/Contents/Resources/arqc")
+  (regex #"/Cellar/asimov/")
+  (regex #"/bin/prefsync$")
   ;; Composer, as Homebrew installs it, and Node (so npm), as mise does.
   (regex #"/Cellar/composer/")
   (home-subpath "/.local/share/mise/installs/node")

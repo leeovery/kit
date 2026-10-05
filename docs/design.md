@@ -83,15 +83,18 @@ undeclared for adopting, removing or snoozing, and report both.
 
 **Features.** Each piece of kit stands alone, and is on when it's declared: a list by having
 entries (the kinds, later the folders to restore), a piece with nothing to list by a switch
-in a Mac's `[features]` section (`time-machine`, `arq`; later `asimov`, `scratch`,
-`settings-capture`), so turning one off loses nothing that isn't its own. `kit feature
+in a Mac's `[features]` section (`time-machine`, `arq`, `scratch`, `settings-capture`), so
+turning one off loses nothing that isn't its own. Built-ins are generic and lasting; what's
+specific to a user, or to the moment, goes in their config: checks of their own in
+`[checks]`, jobs of their own in `[hourly]` and `[nightly]`. `kit feature
 on|off <name>` (`--shared` for every Mac) changes one. kit is built for its author's Macs:
 built-in support is for the tools they use, and the switches exist because those Macs
 differ.
 
 **Checks.** Steps with a check and no apply, each problem an item with a stable id saying
 what's wrong and what to do: the Mac's (`disk`, `memory`, `file-events`, `load`), always;
-the backups' (`time-machine`, `arq`), when switched on; the config repository's
+the backups' (`time-machine`, `arq`: each runs on its own schedule, and kit checks it did,
+only the plans Arq is scheduled to run), when switched on; the config repository's
 (`config-sync`, `config-private`); and the user's own, in a `[checks]` section, a line each:
 a name, then `--` and a command, which exits 0 when all's well, or prints what's wrong on
 its first line (a minute's timeout), each failing one an item of the `checks` step. Every step has an area (Backups, Mac, Drift, Config,
@@ -134,6 +137,7 @@ kit list [kind]              What's declared for this Mac: file, group, note, in
 kit why <name>               Where it's declared, whether it's installed, what needs it
 kit claude-mcp on|off <name>...  Declare Claude's MCP servers on or off, and install or remove them
 kit feature on|off <name>... Switch features on or off for this Mac   [--shared]
+kit nightly [job...]         Run the scheduled jobs due, then every check (the hourly launch)   [--plan]
 kit apply [step...] [--plan] Install what's declared and missing (--plan: say what, do nothing)
 kit status [step...]         How this Mac stands against the config: what needs attention
 kit log                      What the last run did: every check, every command, with timings
@@ -185,7 +189,14 @@ Drift, Config, Checks): the steps' short forms when all's well ("Time Machine 16
 01:05"), else what needs attention (a drift item's kind, name, what's wrong and for how long)
 and what to run (`kit reconcile`, `kit status`); `--json` is `kit status --json`'s document.
 
-Later: `share`, `edit`, `update`, `secrets`, `prefs`, `nightly`,
+`kit nightly` is what the hourly launch runs: the jobs due, in order (one failing never stops
+the others), then every check. The hourly jobs run every time; the nightly ones once a day,
+when the nightly run falls due (`nightly_at` in `kit.toml`, 03:00 unless it says), or on the
+first run after it's been missed, as by a Mac asleep then. Each job's outcome is kept in kit's
+state (`nightly.json`). It installs and removes nothing. `--plan` says what's due; naming jobs
+runs those, now.
+
+Later: `share`, `edit`, `update`, `secrets`, `prefs`,
 `bootstrap`, `takeover`, `retire`, `decisions`, `decide`, `fleet`.
 
 Every question has a flag that answers it, so everything runs without prompts. Without a
@@ -237,7 +248,8 @@ pages --transport http https://pages.example.com/mcp
 The sections, in the order kit writes them: `features` (the switches), `paths` (kit's PATH, in order, `~` expands; the
 shared file's, then the Mac's), `homebrew formulae`, `homebrew casks`, `app store apps`,
 `npm packages`, `composer packages`, `go tools`, `github extensions`, `macos login items`,
-`claude mcp` (and `claude mcp <folder>`), `claude plugins`, `checks`. A section kit doesn't know is refused, never
+`claude mcp` (and `claude mcp <folder>`), `claude plugins`, `checks`, `hourly`, `nightly`
+(jobs of the user's own: a name, then `--` and a command, `~/` expanding in any word). A section kit doesn't know is refused, never
 skipped; so is a line before any section, a section twice, or a file named for a Mac
 `kit.toml` doesn't know.
 
@@ -256,6 +268,7 @@ reads back, and writes the file whole or not at all. A file it can't read, it do
 format = 1
 minimum_kit = "0.1.0"
 primary = "laptop"
+nightly_at = "03:00"   # when the nightly run falls due: 03:00 unless set
 
 [macs.laptop]
 description = "MacBook Pro"
@@ -405,7 +418,9 @@ repository's sync (#36); `[features]`, `kit feature on|off`, Time Machine and Ar
 checks of the user's own (#38); the scan made to see untracked files (#39); bare `kit`
 (#40).
 
-**8. `kit nightly`.** Its jobs and the checks on them; drift's daily digest.
+**8. `kit nightly` — in progress.** Jobs of the user's own, the nightly record and its rule,
+`kit nightly`; Arq checked by its own schedules (#41); the Scratch clean-up and settings
+capture; the checks on the jobs; alerts and drift's daily digest.
 
 Claude Code's skills wait for the installer they'll go through (agntc).
 

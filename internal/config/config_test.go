@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/leeovery/kit/internal/config"
 )
@@ -101,5 +102,20 @@ func TestSupports(t *testing.T) {
 		if err != nil && !strings.Contains(err.Error(), "the config needs kit "+tt.minimum+" or later, and this is "+tt.version+": update kit") {
 			t.Errorf("Supports(%q) error = %v, want it to say what's needed", tt.version, err)
 		}
+	}
+}
+
+func TestNightlyAt(t *testing.T) {
+	cfg := loadRepo(t, map[string]string{})
+	if cfg.NightlyAt != 3*time.Hour {
+		t.Errorf("NightlyAt unset = %v, want 3h", cfg.NightlyAt)
+	}
+	cfg = loadRepo(t, map[string]string{config.File: "format = 1\nprimary = \"laptop\"\nnightly_at = \"02:30\"\n\n[macs.laptop]\n"})
+	if cfg.NightlyAt != 2*time.Hour+30*time.Minute {
+		t.Errorf("NightlyAt = %v, want 2h30m", cfg.NightlyAt)
+	}
+	dir := writeRepo(t, map[string]string{config.File: "format = 1\nprimary = \"laptop\"\nnightly_at = \"3am\"\n\n[macs.laptop]\n"})
+	if _, err := config.Load(dir); err == nil || !strings.Contains(err.Error(), `nightly_at "3am" isn't a time of day`) {
+		t.Errorf("Load() = %v", err)
 	}
 }

@@ -117,8 +117,8 @@ func TestTimeMachine(t *testing.T) {
 
 func TestArq(t *testing.T) {
 	stats := func(plans string) string { return `{"arqVersion": "7.0", "backupPlans": [` + plans + `]}` }
-	plan := func(name string, last time.Time) string {
-		return `{"name": "` + name + `", "lastBackedUp": "` + last.UTC().Format("2006-01-02T15:04:05.000Z") + `"}`
+	plan := func(name, schedule string, last time.Time) string {
+		return `{"name": "` + name + `", "schedule": {"type": "` + schedule + `"}, "lastBackedUp": "` + last.UTC().Format("2006-01-02T15:04:05.000Z") + `"}`
 	}
 	for _, tt := range []struct {
 		name  string
@@ -127,10 +127,10 @@ func TestArq(t *testing.T) {
 		text  string
 		ids   []string
 	}{
-		{"backed up, the legacy plan left out", stats(plan("Old Mac - legacy", now().Add(-30*24*time.Hour)) + "," + plan("User data", now().Add(-11*time.Hour))), check.OK, "last backup User data 01:00", nil},
-		{"stale", stats(plan("User data", now().Add(-50*time.Hour))), check.Attention, "no recent backup", []string{"arq:stale:user-data"}},
-		{"never", stats(`{"name": "User data"}`), check.Attention, "no recent backup", []string{"arq:never:user-data"}},
-		{"no plan", stats(plan("Old Mac - Legacy", now())), check.Attention, "no backup plan", []string{"arq:no-plan"}},
+		{"backed up, a plan with no schedule left out", stats(plan("Old Mac", "Manual", now().Add(-30*24*time.Hour)) + "," + plan("User data", "Daily", now().Add(-11*time.Hour))), check.OK, "last backup User data 01:00", nil},
+		{"stale", stats(plan("User data", "Daily", now().Add(-50*time.Hour))), check.Attention, "no recent backup", []string{"arq:stale:user-data"}},
+		{"never", stats(`{"name": "User data", "schedule": {"type": "Daily"}}`), check.Attention, "no recent backup", []string{"arq:never:user-data"}},
+		{"none scheduled", stats(plan("User data", "Manual", now())), check.Attention, "no plan scheduled", []string{"arq:no-plan"}},
 		{"unreadable", "Error: the agent isn't running", check.Attention, "status unreadable", []string{"arq:unreadable"}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
