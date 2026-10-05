@@ -26,6 +26,25 @@ func (r Repo) git(ctx context.Context, args ...string) (runner.Result, error) {
 	return r.Run.Run(ctx, runner.Command{Name: "git", Args: slices.Concat([]string{"-C", r.Dir}, args)})
 }
 
+// Files are the files git keeps, or would keep, under paths in the
+// repository: tracked, and new ones it doesn't ignore. Each is a path in the
+// repository, once; a tracked file deleted but not yet committed is still
+// among them.
+func (r Repo) Files(ctx context.Context, paths ...string) ([]string, error) {
+	res, err := r.git(ctx, slices.Concat([]string{"ls-files", "-z", "--cached", "--others", "--exclude-standard", "--"}, paths)...)
+	if err != nil {
+		return nil, err
+	}
+	var files []string
+	for name := range strings.SplitSeq(string(res.Stdout), "\x00") {
+		if name != "" && !slices.Contains(files, name) {
+			files = append(files, name)
+		}
+	}
+	slices.Sort(files)
+	return files, nil
+}
+
 // Commit commits the changes to files, paths in the repository, alone, with
 // message: anything else uncommitted is left as it is. Files with no changes
 // commit nothing, which is no error; it reports whether it committed.

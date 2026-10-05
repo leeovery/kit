@@ -14,7 +14,6 @@ import (
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/drift"
-	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/render"
 )
 
@@ -25,6 +24,9 @@ const (
 	install   = "install"
 	undeclare = "undeclare"
 	snooze    = "snooze"
+	// revert puts back what's declared, in place of what the Mac has: the
+	// declared file, or value.
+	revert = "revert"
 )
 
 // reconcileSchema is kit reconcile --json's document's version.
@@ -32,9 +34,9 @@ const reconcileSchema = 1
 
 // reconcileOptions are kit reconcile's flags.
 type reconcileOptions struct {
-	adopt, remove, install, undeclare, snooze bool
-	shared, all                               bool
-	group, note                               string
+	adopt, remove, install, undeclare, snooze, revert bool
+	shared, all                                       bool
+	group, note                                       string
 }
 
 // driftItem is an item of drift, of a kind, and what can be done about it.
@@ -73,6 +75,7 @@ run and one commit:
   kit reconcile cask:zoom --install
   kit reconcile brew:jq --undeclare [--shared]
   kit reconcile cask:firefox --snooze           (quiet for 7 days)
+  kit reconcile file:~/.zshrc --revert          (kit-config's copy back)
   kit reconcile go:example.com/a go:example.com/b --remove`,
 		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -93,6 +96,7 @@ run and one commit:
 	f.BoolVar(&opts.install, "install", false, "install it, as it's declared")
 	f.BoolVar(&opts.undeclare, "undeclare", false, "take it out of this Mac's file, or the shared one with --shared")
 	f.BoolVar(&opts.snooze, "snooze", false, "quiet it for 7 days")
+	f.BoolVar(&opts.revert, "revert", false, "put back what's declared, in place of what the Mac has")
 	f.BoolVar(&opts.shared, "shared", false, "for every Mac: adopt into, or undeclare from, the shared file")
 	f.BoolVar(&opts.all, "all", false, "at a terminal, every item, quiet ones too")
 	f.StringVar(&opts.group, "group", "", "the group an adopted item goes in")
@@ -105,7 +109,7 @@ func (a *app) reconcile(ctx context.Context, r *run, args []string, opts reconci
 	// item's id, its kind before a colon.
 	var kinds, ids []string
 	for _, arg := range args {
-		if _, ok := r.kindsByName[arg]; ok {
+		if _, ok := r.drifters[arg]; ok {
 			kinds = append(kinds, arg)
 		} else {
 			ids = append(ids, arg)
@@ -140,50 +144,25 @@ func (a *app) reconcile(ctx context.Context, r *run, args []string, opts reconci
 	return a.carryOut(ctx, r, decisions, opts.note)
 }
 
-// driftItems are the kinds' items (only those of the kinds named in only,
-// when it names any): what differs from the config, quiet or not, each with
-// what can be done about it.
+// driftItems are the drift steps' items (only those of the steps named in
+// only, when it names any): what differs from the config, quiet or not,
+// each with what can be done about it.
 func (a *app) driftItems(ctx context.Context, r *run, only []string) ([]driftItem, error) {
 	var items []driftItem
-	for _, name := range r.kinds {
+	for _, name := range r.drift {
 		if len(only) > 0 && !slices.Contains(only, name) {
 			continue
 		}
-		k := r.kindsByName[name]
-		res := drift.Quieten(kind.Compare(ctx, k, r.lists[name]), r.record, r.now)
+		d := r.drifters[name]
+		res := drift.Quieten(d.check(ctx), r.record, r.now)
 		if res.State == check.Failed {
-			return nil, fmt.Errorf("couldn't check %s: %s", k.Title(), res.Reason)
+			return nil, fmt.Errorf("couldn't check %s: %s", name, res.Reason)
 		}
-		_, outside := k.(kind.Declarer)
 		for _, it := range res.Items {
-			items = append(items, driftItem{Item: it, Kind: name, Choices: choices(it, !outside)})
+			items = append(items, driftItem{Item: it, Kind: name, Choices: choiceActions(d.choices(it))})
 		}
 	}
 	return items, nil
-}
-
-// choices are what can be done about it: adopting and undeclaring only
-// where kit writes the kind's declarations.
-func choices(it check.Item, writable bool) []string {
-	var all []string
-	switch it.State {
-	case kind.Extra:
-		all = []string{adopt, remove, snooze}
-	case kind.UnusedDependency:
-		all = []string{remove, adopt, snooze}
-	case kind.Missing:
-		if it.Action == kind.Install {
-			all = []string{install, undeclare, snooze}
-		} else {
-			all = []string{undeclare, snooze}
-		}
-	default:
-		all = []string{snooze}
-	}
-	if writable {
-		return all
-	}
-	return slices.DeleteFunc(all, func(c string) bool { return c == adopt || c == undeclare })
 }
 
 // decide is what the flags say to do with the item id.
@@ -194,7 +173,7 @@ func decide(items []driftItem, id string, opts reconcileOptions) (decision, erro
 	}
 	item := items[i]
 	var actions []string
-	for action, set := range map[string]bool{adopt: opts.adopt, remove: opts.remove, install: opts.install, undeclare: opts.undeclare, snooze: opts.snooze} {
+	for action, set := range map[string]bool{adopt: opts.adopt, remove: opts.remove, install: opts.install, undeclare: opts.undeclare, snooze: opts.snooze, revert: opts.revert} {
 		if set {
 			actions = append(actions, action)
 		}
@@ -228,7 +207,7 @@ func past(action string) string {
 	switch action {
 	case snooze, undeclare:
 		return action + "d"
-	case adopt, install:
+	case adopt, install, revert:
 		return action + "ed"
 	}
 	return action + "d"
@@ -278,18 +257,6 @@ func (a *app) listDrift(r *run, items []driftItem) error {
 	return nil
 }
 
-// The answers askAbout offers, by what they do.
-var answerFor = map[string]string{
-	"declare it, for this Mac":  adopt,
-	"declare it, for every Mac": adopt + "-shared",
-	"uninstall it":              remove,
-	"install it":                install,
-	"undeclare it":              undeclare,
-	"snooze it for 7 days":      snooze,
-	"leave it for now":          "",
-	"stop here":                 "stop",
-}
-
 // askAbout asks, of each item that needs attention (every item, with
 // --all), what to do with it, and for one adopted, which group of the file
 // it goes in: every question before anything is done.
@@ -299,37 +266,27 @@ func (a *app) askAbout(ctx context.Context, r *run, items []driftItem, opts reco
 		if it.Quiet != "" && !opts.all {
 			continue
 		}
-		var answers []string
-		for _, c := range it.Choices {
-			switch c {
-			case adopt:
-				answers = append(answers, "declare it, for this Mac", "declare it, for every Mac")
-			case remove:
-				answers = append(answers, "uninstall it")
-			case install:
-				answers = append(answers, "install it")
-			case undeclare:
-				answers = append(answers, "undeclare it")
-			case snooze:
-				answers = append(answers, "snooze it for 7 days")
-			}
+		dr := r.drifters[it.Kind]
+		offered := dr.choices(it.Item)
+		answers := make([]string, 0, len(offered)+2)
+		for _, c := range offered {
+			answers = append(answers, c.label)
 		}
 		answers = append(answers, "leave it for now", "stop here")
-		i, err := a.Choose(ctx, describe(it, r.now), answers)
+		i, err := a.Choose(ctx, describe(it, dr, r.now), answers)
 		if errors.Is(err, ask.ErrCancelled) {
 			return nil, errors.New("cancelled: nothing was changed")
 		}
 		if err != nil {
 			return nil, err
 		}
-		action := answerFor[answers[i]]
-		switch action {
-		case "":
+		switch i {
+		case len(offered):
 			continue
-		case "stop":
+		case len(offered) + 1:
 			return decisions, nil
 		}
-		d := decision{item: it, action: strings.TrimSuffix(action, "-shared"), shared: strings.HasSuffix(action, "-shared"), group: opts.group}
+		d := decision{item: it, action: offered[i].action, shared: offered[i].shared, group: opts.group}
 		if d.action == adopt && d.group == "" {
 			if d.group, err = a.askGroup(ctx, r, d); err != nil {
 				return nil, err
@@ -367,12 +324,8 @@ func (a *app) askGroup(ctx context.Context, r *run, d decision) (string, error) 
 }
 
 // describe says what an item is, for a question about it.
-func describe(it driftItem, now time.Time) string {
-	what := map[string]string{
-		kind.Extra:            "installed, not declared",
-		kind.Missing:          "declared, not installed",
-		kind.UnusedDependency: "installed for something since removed, needed by nothing",
-	}[it.State]
+func describe(it driftItem, d drifter, now time.Time) string {
+	what := d.describe(it.Item)
 	if it.Detail != "" {
 		what += " (" + it.Detail + ")"
 	}
@@ -404,7 +357,7 @@ func (a *app) carryOut(ctx context.Context, r *run, decisions []decision, note s
 	}
 	installs := make(map[string][]string)
 	for _, d := range decisions {
-		if d.action == install {
+		if _, isKind := r.drifters[d.item.Kind].(kindDrifter); isKind && d.action == install {
 			installs[d.item.Kind] = append(installs[d.item.Kind], d.item.Name)
 		}
 	}
@@ -433,28 +386,13 @@ func (a *app) carryOut(ctx context.Context, r *run, decisions []decision, note s
 	return c.finish()
 }
 
+// carryOutOne does what d decided about its item.
 func carryOutOne(ctx context.Context, r *run, c *changes, d decision, note string) check.Result {
-	k := r.kindsByName[d.item.Kind]
-	switch d.action {
-	case adopt:
-		scope := r.scope(d.shared)
-		group := d.group
-		if group == config.ToBeSorted {
-			group = ""
-		}
-		return addOne(ctx, r, c, k, scope, d.item.Name, group, addOptions{shared: d.shared, note: note})
-	case remove, undeclare:
-		return removeOne(ctx, r, c, k, d.item.Name, d.shared)
-	case install:
-		if err := k.Install(ctx, []string{d.item.Name}); err != nil {
-			return check.Result{State: check.Failed, Reason: "couldn't install: " + err.Error()}
-		}
-		return check.Result{State: check.OK, Summary: "installed"}
-	case snooze:
+	if d.action == snooze {
 		if err := drift.Update(r.stateDir, func(rec *drift.Record) { rec.Snooze(d.item.ID, r.now) }); err != nil {
 			return check.Result{State: check.Failed, Reason: err.Error()}
 		}
 		return check.Result{State: check.OK, Summary: "snoozed till " + r.now.Add(drift.SnoozeFor).Format("2 Jan")}
 	}
-	return check.Result{State: check.Failed, Reason: "nothing to do: " + d.action}
+	return r.drifters[d.item.Kind].settle(ctx, r, c, d, note)
 }
