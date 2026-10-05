@@ -18,6 +18,9 @@ const Shared = "shared"
 // PathsKind names the section of kit's own PATH, which isn't a kind's.
 const PathsKind = "paths"
 
+// ChecksKind names the section of checks of the user's own, each a command.
+const ChecksKind = "checks"
+
 // FeaturesKind names the section of the pieces switched on for a Mac, by
 // name: the parts with nothing to list, such as a backup tool.
 const FeaturesKind = "features"
@@ -65,6 +68,7 @@ var sectionDefs = []sectionDef{
 	{header: "macos login items", kind: "login", form: names, grouped: true},
 	{header: "claude mcp", kind: "claude-mcp", form: commands, folders: true},
 	{header: "claude plugins", kind: "claude-plugin", form: names, grouped: true},
+	{header: "checks", kind: ChecksKind, form: commands},
 }
 
 // defFor is the section kind's declarations go in.
