@@ -61,6 +61,10 @@ const (
 	// the value; -dict-add, an entry's key and its value as XML; or a value
 	// as XML), then an optional note.
 	defaults
+	// power: a power setting in pmset's form, its words as a shell splits
+	// them: the power source (-a every one, -b the battery, -c the charger,
+	// -u a UPS), the setting and its value, then an optional note.
+	power
 )
 
 // sectionDef is a section a declarations file may hold: one kind's list, or
@@ -85,6 +89,7 @@ var sectionDefs = []sectionDef{
 	{header: "paths", kind: PathsKind, form: paths},
 	{header: "git config", kind: "git", form: settings, grouped: true},
 	{header: "macos settings", kind: "default", form: defaults, grouped: true},
+	{header: "power settings", kind: "power", form: power, grouped: true},
 	{header: "homebrew formulae", kind: "brew", form: names, grouped: true},
 	{header: "homebrew casks", kind: "cask", form: names, grouped: true},
 	{header: "app store apps", kind: "app", form: names, grouped: true},
@@ -376,6 +381,17 @@ func (s *section) entry(line string) (Entry, error) {
 			return e, err
 		}
 		e.Name, e.Value, e.Note = setting.Name(), value, note
+	case power:
+		text, note := splitNote(line)
+		words, err := Words(text)
+		if err != nil {
+			return e, err
+		}
+		name, value, err := powerLine(words)
+		if err != nil {
+			return e, err
+		}
+		e.Name, e.Value, e.Note = name, value, note
 	}
 	if s.folder != "" {
 		e.Name = s.folder + ":" + e.Name

@@ -363,7 +363,8 @@ func (a *app) carryOut(ctx context.Context, r *run, decisions []decision, note s
 	}
 	installs := make(map[string][]string)
 	for _, d := range decisions {
-		if _, isKind := r.drifters[d.item.Kind].(kindDrifter); isKind && d.action == install {
+		_, isKind := r.drifters[d.item.Kind].(kindDrifter)
+		if (isKind || slices.Contains(r.adminSteps, d.item.Kind)) && d.action == install {
 			installs[d.item.Kind] = append(installs[d.item.Kind], d.item.Name)
 		}
 	}

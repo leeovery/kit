@@ -27,7 +27,7 @@ const (
 )
 
 // Features are the features kit knows.
-var Features = []string{FeatureArq, FeatureOhMyZsh, FeatureScratch, FeatureSettingsCapture, FeatureTimeMachine}
+var Features = []string{FeatureArq, FeatureFileSharing, FeatureOhMyZsh, FeatureRemoteLogin, FeatureScratch, FeatureSettingsCapture, FeatureTimeMachine, FeatureTouchIDSudo}
 
 // The backup checks' thresholds, as bin/health had them.
 const (

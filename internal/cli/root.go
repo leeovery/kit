@@ -17,6 +17,7 @@ import (
 	"github.com/leeovery/kit/internal/ask"
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/runner"
+	"github.com/leeovery/kit/internal/steps"
 )
 
 // Deps is what the commands take from the process around them. main passes the
@@ -46,6 +47,9 @@ type Deps struct {
 	// Scratch is the Scratch volume, which the scratch feature checks and
 	// clears: /Volumes/Scratch.
 	Scratch string
+	// SudoLocal is sudo's file of local settings, which the touch-id-sudo
+	// feature checks: /etc/pam.d/sudo_local.
+	SudoLocal string
 	// UID is the user's id, which names Claude Code's folder in Scratch.
 	UID int
 }
@@ -186,8 +190,9 @@ func Real(version string) Deps {
 		Choose: func(ctx context.Context, question string, options []string) (int, error) {
 			return ask.Choose(ctx, os.Stdin, os.Stdout, question, options)
 		},
-		Scratch: "/Volumes/Scratch",
-		UID:     os.Getuid(),
+		Scratch:   "/Volumes/Scratch",
+		SudoLocal: steps.SudoLocal,
+		UID:       os.Getuid(),
 	}
 }
 

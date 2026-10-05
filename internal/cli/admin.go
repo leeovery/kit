@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"slices"
 	"sync"
 	"time"
 
@@ -40,6 +41,7 @@ func (a *app) holdAdmin(ctx context.Context, r *run, wanted map[string][]string)
 		for _, ad := range admins {
 			ad.SetAdmin(held)
 		}
+		r.admin.Held = held
 	}
 	if !a.pretty(a.Stdout) {
 		var once sync.Once
@@ -102,6 +104,9 @@ func waitingForAdmin(ctx context.Context, r *run, kindName string, names []strin
 // administrator's password to install.
 func needsAdmin(ctx context.Context, r *run, wanted map[string][]string) bool {
 	for name, names := range wanted {
+		if slices.Contains(r.adminSteps, name) && len(names) > 0 {
+			return true
+		}
 		ad, ok := r.kindsByName[name].(kind.Admin)
 		if !ok || len(names) == 0 {
 			continue
