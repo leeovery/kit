@@ -37,6 +37,8 @@ func TestEqual(t *testing.T) {
 		{true, int64(1), true},
 		{false, int64(0), true},
 		{int64(60), 60.0, true},
+		{0.001, 0.0010000000474974513, true},
+		{0.001, 0.002, false},
 		{int64(60), int64(61), false},
 		{"60", int64(60), false},
 		{map[string]any{"a": true}, map[string]any{"a": int64(1)}, true},
