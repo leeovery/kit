@@ -65,8 +65,11 @@ undeclared for adopting, removing or snoozing, and report both.
   The kinds whose programs are formulae are applied after the formulae, so a new Mac has
   them first; login items after the casks and App Store apps they open.
 - **A kind declared in a file of its own** (tmux's plugins, in tmux's config, where the
-  plugin manager reads them): kit reads it and never writes it, so there's no adopting or
-  undeclaring; `kit add` and `kit remove` say how to declare by hand.
+  plugin manager reads them): kit reads it and edits it in place, through a link to the
+  file it leads to. `kit add` and adopting add a plugin's line after the last one (before
+  the line that starts the plugin manager, for the first); `kit remove` and undeclaring
+  take it out. When the file is in the config repository (a linked file), the change is
+  committed with the rest.
 - **MCP servers** are a line each: the server's name, then `claude mcp add`'s options
   (`--transport http <url> --header "…"`, or `--env K=V -- <command> <args>`), or JSON for
   what they can't say; kit's own `--off` first declares a server off: never installed, and

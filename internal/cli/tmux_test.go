@@ -41,29 +41,42 @@ func TestTmuxPluginsAreDeclaredInTmuxsConfig(t *testing.T) {
 	}) bool {
 		return it.ID == "tmux:tmux-plugins/tmux-yank"
 	})
-	if i < 0 || !slices.Equal(doc.Items[i].Choices, []string{"remove", "snooze"}) {
-		t.Errorf("kit reconcile --json printed %s\nwant tmux-yank to remove or snooze", out)
+	if i < 0 || !slices.Equal(doc.Items[i].Choices, []string{"adopt", "remove", "snooze"}) {
+		t.Errorf("kit reconcile --json printed %s\nwant tmux-yank to adopt, remove or snooze", out)
 	}
 
-	_, errOut, code := w.run(t, "add", "tmux", "owner/plugin")
-	if !strings.Contains(errOut, "tmux plugins are declared in tmux's config (~/.config/tmux/tmux.conf): add or remove the line set -g @plugin 'owner/plugin' there") || code != 2 {
-		t.Errorf("kit add tmux printed %q, exit %d; want how to declare it", errOut, code)
+	out, _, code := w.run(t, "reconcile", "tmux:tmux-plugins/tmux-yank", "--adopt")
+	if code != 0 || !strings.Contains(out, "already installed; declared in ~/.config/tmux/tmux.conf") {
+		t.Errorf("kit reconcile --adopt printed\n%s exit %d", out, code)
+	}
+	if got := w.read(t, ".config/tmux/tmux.conf"); got != "set -g @plugin 'tmux-plugins/tpm'\nset -g @plugin 'tmux-plugins/tmux-yank'\n" {
+		t.Errorf("tmux's config = %q", got)
 	}
 
 	out, _, code = w.run(t, "remove", "tmux", "tmux-plugins/tpm")
-	if !strings.Contains(out, "declared in ~/.config/tmux/tmux.conf:1") || code != 1 {
-		t.Errorf("kit remove tmux tpm printed\n%s exit %d; want it refused, as declared", out, code)
+	if code != 0 || !strings.Contains(out, "uninstalled; out of ~/.config/tmux/tmux.conf") {
+		t.Errorf("kit remove tmux printed\n%s exit %d", out, code)
 	}
-	if _, err := os.Stat(filepath.Join(w.home, ".config", "tmux", "plugins", "tpm")); err != nil {
-		t.Errorf("tpm's folder: %v, want it kept", err)
+	if _, err := os.Stat(filepath.Join(w.home, ".config", "tmux", "plugins", "tpm")); !os.IsNotExist(err) {
+		t.Errorf("tpm's folder: %v, want it gone", err)
 	}
+}
 
-	out, errOut, code = w.run(t, "reconcile", "tmux:tmux-plugins/tmux-yank", "--remove")
-	if code != 0 || !strings.Contains(out, "uninstalled; it wasn't declared") {
-		t.Errorf("kit reconcile --remove printed\n%s%s exit %d", out, errOut, code)
+func TestTmuxsConfigInKitConfigIsCommitted(t *testing.T) {
+	w := tmuxWorld(t)
+	repo := filepath.Join(w.home, ".config", "kit", "shared", "home", ".config", "tmux", "tmux.conf")
+	w.write(t, ".config/kit/shared/home/.config/tmux/tmux.conf", "set -g @plugin 'tmux-plugins/tpm'\n")
+	if err := os.Remove(filepath.Join(w.home, ".config", "tmux", "tmux.conf")); err != nil {
+		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(w.home, ".config", "tmux", "plugins", "tmux-yank")); !os.IsNotExist(err) {
-		t.Errorf("tmux-yank's folder: %v, want it gone", err)
+	if err := os.Symlink(repo, filepath.Join(w.home, ".config", "tmux", "tmux.conf")); err != nil {
+		t.Fatal(err)
+	}
+	w.keeps("shared/home/.config/tmux/tmux.conf")
+	w.expectSync([]string{"shared/home/.config/tmux/tmux.conf"}, "kit reconcile (laptop): adopt tmux:tmux-plugins/tmux-yank")
+	out, _, code := w.run(t, "reconcile", "tmux:tmux-plugins/tmux-yank", "--adopt")
+	if code != 0 || !strings.Contains(out, "declared in ~/.config/kit/shared/home/.config/tmux/tmux.conf") || !strings.Contains(out, "committed and pushed shared/home/.config/tmux/tmux.conf") {
+		t.Errorf("kit reconcile --adopt printed\n%s exit %d", out, code)
 	}
 }
 

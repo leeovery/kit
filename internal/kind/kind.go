@@ -73,14 +73,16 @@ type Dependents interface {
 	NeededBy(ctx context.Context, name string) ([]string, error)
 }
 
-// Declarer is a kind declared outside the config repository, in a file of
-// its own that kit reads but doesn't write: tmux's plugins, in tmux's
-// config, where the plugin manager reads them.
+// Declarer is a kind declared in a file of its own, where the program
+// that uses the declarations reads them: tmux's plugins, in tmux's config.
+// kit reads the file, and edits it in place.
 type Declarer interface {
 	// Declared is what the kind's file declares.
 	Declared() (config.List, error)
-	// HowToDeclare says how to declare, or undeclare, name by hand.
-	HowToDeclare(name string) string
+	// Declare adds name to the kind's file, and Undeclare takes it out:
+	// each says which file it changed, by its real path, links followed.
+	Declare(name string) (string, error)
+	Undeclare(name string) (string, error)
 }
 
 // Valued is a kind whose declarations carry a value after each name: an MCP
