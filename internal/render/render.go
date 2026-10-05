@@ -10,6 +10,7 @@ import (
 
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/event"
+	"github.com/leeovery/kit/internal/status"
 )
 
 // Face shows a run's events, and finishes once the run has.
@@ -210,3 +211,36 @@ func what(r check.Result) string {
 	}
 	return r.Summary
 }
+
+// Tee is a face showing on each of faces: every event to each, and each
+// closed, the first error returned.
+func Tee(faces ...Face) Face {
+	return tee(faces)
+}
+
+type tee []Face
+
+func (t tee) Emit(e event.Event) {
+	for _, f := range t {
+		f.Emit(e)
+	}
+}
+
+func (t tee) Close() error {
+	var first error
+	for _, f := range t {
+		if err := f.Close(); err != nil && first == nil {
+			first = err
+		}
+	}
+	return first
+}
+
+// Collector is a face that shows nothing, and keeps the run's status
+// document for whoever needs it once the run's done.
+type Collector struct {
+	status.Builder
+}
+
+// Close does nothing: the document is the collector's to give.
+func (*Collector) Close() error { return nil }

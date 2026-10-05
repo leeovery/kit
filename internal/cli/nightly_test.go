@@ -1,6 +1,7 @@
 package cli_test
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -102,5 +103,36 @@ func TestNightlyBuiltInJobs(t *testing.T) {
 	out, _, _ = w.run(t, "nightly", "capture-settings")
 	if !strings.Contains(out, "capture-settings ok ran\n") {
 		t.Errorf("kit nightly capture-settings printed\n%s", out)
+	}
+}
+
+// --alerts prints what to notify about, in place of the run; every run
+// leaves its report.
+func TestNightlyAlertsAndReport(t *testing.T) {
+	w := jobsWorld(t)
+	out, _, _ := w.run(t, "nightly", "--alerts")
+	var alerts []struct{ ID, Title, Body string }
+	if err := json.Unmarshal([]byte(out), &alerts); err != nil {
+		t.Fatalf("kit nightly --alerts printed %q: %v", out, err)
+	}
+	ids := map[string]string{}
+	for _, a := range alerts {
+		ids[a.ID] = a.Body
+	}
+	if ids["nightly:nightly:tidy"] != "tidy failed: the archive disk isn't connected" {
+		t.Errorf("alerts = %+v, want tidy's failure", alerts)
+	}
+	var digest string
+	for id, body := range ids {
+		if strings.HasPrefix(id, "drift-") {
+			digest = body
+		}
+	}
+	if !strings.Contains(digest, "3 things differ from the config: brew ffmpeg, brew node@20, cask firefox") {
+		t.Errorf("drift digest = %q", digest)
+	}
+	report := w.read(t, filepath.Join("Library", "Logs", "kit", "report.txt"))
+	if !strings.HasPrefix(report, "kit nightly · laptop\n") || !strings.Contains(report, "disk ok 48% free\n") {
+		t.Errorf("report.txt =\n%s", report)
 	}
 }

@@ -203,7 +203,13 @@ transcript changed) and, last, `settings-capture`'s `prefsync capture` (niced, s
 when the nightly run falls due (`nightly_at` in `kit.toml`, 03:00 unless it says), or on the
 first run after it's been missed, as by a Mac asleep then. Each job's outcome is kept in kit's
 state (`nightly.json`). It installs and removes nothing. `--plan` says what's due; naming jobs
-runs those, now.
+runs those, now. Each run leaves its report (`report.txt` in kit's logs folder, `kit status`'s
+plain lines) for a notification's click. `--alerts` prints, in place of the run, what the
+hourly launch's app should notify about, as JSON (`[{id, title, body}]`): each problem a check
+found, and each step that failed or was deferred, at once; the drift that needs attention as
+one digest, its id naming the list, changing at most once a day and gone when nothing's
+left (kept in kit's state, `alerts.json`); a job's own failure is the runs check's, not
+twice.
 
 Later: `share`, `edit`, `update`, `secrets`, `prefs`,
 `bootstrap`, `takeover`, `retire`, `decisions`, `decide`, `fleet`.
@@ -429,7 +435,8 @@ checks of the user's own (#38); the scan made to see untracked files (#39); bare
 
 **8. `kit nightly` — in progress.** Jobs of the user's own, the nightly record and its rule,
 `kit nightly`; Arq checked by its own schedules (#41); the Scratch clean-up and settings
-capture (#42); the checks on the jobs (#43); alerts and drift's daily digest.
+capture (#42); the checks on the jobs (#43); alerts, drift's daily digest and the report
+(#44).
 
 Claude Code's skills wait for the installer they'll go through (agntc).
 
