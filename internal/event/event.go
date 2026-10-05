@@ -35,6 +35,9 @@ type RunStarted struct {
 type Step struct {
 	Name  string
 	Title string
+	// Area is what the step is about, as the at-a-glance view groups steps:
+	// Backups, Mac, Drift, Config, Checks.
+	Area string
 }
 
 // StepStarted is a step's check, or its apply, starting.

@@ -213,6 +213,7 @@ func (a *app) prepare(command, logName string) (*run, error) {
 			continue
 		}
 		step := kind.Step(ks.kind, list, ks.needs...)
+		step.Area = steps.AreaDrift
 		if unread != nil {
 			step.Check = func(context.Context) check.Result {
 				return check.Result{State: check.Failed, Reason: unread.Error()}
@@ -226,7 +227,13 @@ func (a *app) prepare(command, logName string) (*run, error) {
 		kinds = append(kinds, quietened(step, record, now))
 		r.kinds = append(r.kinds, name)
 	}
-	r.pipeline, err = engine.New(slices.Concat([]engine.Step{hb.Step()}, kinds, []engine.Step{steps.ConfigPrivate(observed, dirs.Config)})...)
+	homebrew := hb.Step()
+	homebrew.Area = steps.AreaDrift
+	checks := []engine.Step{
+		steps.Disk(observed), steps.Memory(observed), steps.FileEvents(observed), steps.Load(observed, a.Now),
+		steps.ConfigSync(observed, dirs.Config, a.Now), steps.ConfigPrivate(observed, dirs.Config),
+	}
+	r.pipeline, err = engine.New(slices.Concat([]engine.Step{homebrew}, kinds, checks)...)
 	if err != nil {
 		_ = face.Close()
 		_ = log.Close()

@@ -38,7 +38,22 @@ func laptopWorld(t *testing.T) *world {
 	f.On("gh", "repo", "view", "someone/kit-config", "--json", "visibility", "--jq", ".visibility").Prints("PRIVATE\n")
 	// gh is installed, for the config's check, with no extensions.
 	f.On("gh", "extension", "list")
+	healthyMac(w)
 	return w
+}
+
+// healthyMac scripts the Mac's checks' commands as a healthy Mac answers
+// them, and the config repository as committed and pushed.
+func healthyMac(w *world) {
+	f := w.fake
+	f.On("/bin/df", "-P", "-k", "/System/Volumes/Data").Prints("Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/disk3s5 1000000000 0 480000000 52% /System/Volumes/Data\n")
+	f.On("sysctl", "-n", "kern.memorystatus_vm_pressure_level", "vm.swapusage").Prints("1\ntotal = 2048.00M  used = 307.20M  free = 1740.80M  (encrypted)\n")
+	f.On("pgrep", "-x", "fseventsd").Prints("412\n")
+	f.On("top", "-l", "1", "-pid", "412", "-stats", "mem").Prints("MEM\n102M\n")
+	f.On("sysctl", "-n", "vm.loadavg", "hw.ncpu", "kern.boottime").Prints("{ 2.10 2.00 1.90 }\n10\n{ sec = 1767312245, usec = 0 } Fri Jan  2 00:04:05 2026\n")
+	dir := filepath.Join(w.home, ".config", "kit")
+	f.On("git", "-C", dir, "status", "--porcelain")
+	f.On("git", "-C", dir, "log", "@{u}..HEAD", "--format=%ct")
 }
 
 func TestStatus(t *testing.T) {
@@ -52,6 +67,11 @@ brew unused-dependency node@20
 cask attention 1 declared, all installed
 cask extra firefox
 gh ok none declared
+disk ok 48% free
+memory ok 0.3 GB swap, pressure normal
+file-events ok fseventsd using 0.1 GB
+load ok load 1.9 on 10 cores
+config-sync ok committed and pushed
 config-private ok private on GitHub (someone/kit-config)
 2 need attention
 `
@@ -66,7 +86,7 @@ func TestStatusJSON(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &doc); err != nil || code != 1 {
 		t.Fatalf("kit status --json printed %q, exit %d: %v", out, code, err)
 	}
-	if doc.Schema != 1 || doc.Kit != "0.1.0" || doc.Machine != "laptop" || !doc.Attention || len(doc.Steps) != 5 {
+	if doc.Schema != 1 || doc.Kit != "0.1.0" || doc.Machine != "laptop" || !doc.Attention || len(doc.Steps) != 10 {
 		t.Fatalf("document = %+v", doc)
 	}
 	brew := doc.Steps[1]
@@ -228,10 +248,10 @@ func TestStatusLeavesOutAKindWithNothingToCheck(t *testing.T) {
 	w.fake.On("git", "-C", filepath.Join(w.home, ".config", "kit"), "remote", "get-url", "origin").Prints("git@github.com:someone/kit-config.git\n")
 	w.fake.On("gh", "repo", "view", "someone/kit-config", "--json", "visibility", "--jq", ".visibility").Prints("PRIVATE\n")
 	w.fake.On("gh", "extension", "list").Fails(errNotFound)
+	healthyMac(w)
 
 	out, _, _ := w.run(t, "status")
-	want := "kit status · laptop\nhomebrew attention not installed: brew isn't on kit's PATH\nconfig-private ok private on GitHub (someone/kit-config)\n1 needs attention\n"
-	if out != want {
-		t.Errorf("kit status printed\n%s\nwant\n%s", out, want)
+	if !strings.Contains(out, "homebrew attention not installed: brew isn't on kit's PATH\n") || strings.Contains(out, "\nbrew ") || strings.Contains(out, "\ncask ") || strings.Contains(out, "\ngh ") {
+		t.Errorf("kit status printed\n%s\nwant Homebrew not installed, and no kind with nothing to check", out)
 	}
 }

@@ -24,6 +24,9 @@ const DefaultJobs = 4
 type Step struct {
 	Name  string
 	Title string
+	// Area is what the step is about, as the at-a-glance view groups steps:
+	// Backups, Mac, Drift, Config, Checks.
+	Area string
 	// Macs are the Macs it runs on: every Mac when empty.
 	Macs []string
 	// Needs are the steps that must stand ok before it's checked or applied.
@@ -228,7 +231,7 @@ func (p *Pipeline) run(ctx context.Context, sink event.Sink, opts Options, apply
 	infos := make([]event.Step, len(steps))
 	titles := make(map[string]string, len(steps))
 	for i, s := range steps {
-		infos[i] = event.Step{Name: s.Name, Title: s.title()}
+		infos[i] = event.Step{Name: s.Name, Title: s.title(), Area: s.Area}
 		titles[s.Name] = s.title()
 	}
 	sink.Emit(event.RunStarted{Time: started, Command: opts.Command, Machine: opts.Machine, Version: opts.Version, Steps: infos})
