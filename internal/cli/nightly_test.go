@@ -82,3 +82,24 @@ func TestNightlyRunsAJobByName(t *testing.T) {
 		t.Errorf("kit nightly nosuch printed %q, exit %d", errOut, code)
 	}
 }
+
+// The built-in jobs follow the user's own, settings capture last.
+func TestNightlyBuiltInJobs(t *testing.T) {
+	w := jobsWorld(t)
+	w.writeSection(t, "laptop", "features", "scratch\nsettings-capture\n")
+	w.fake.On("nice", "-n", "10", "prefsync", "capture").Prints("captured 2 changed domains\n")
+	out, _, _ := w.run(t, "nightly", "--plan")
+	order := []string{"hourly:marks ok due", "nightly:tidy ok due", "clean-scratch ok due", "capture-settings ok due"}
+	last := -1
+	for _, line := range order {
+		i := strings.Index(out, line)
+		if i < last {
+			t.Errorf("kit nightly --plan printed\n%s\nwant %q after the jobs before it", out, line)
+		}
+		last = i
+	}
+	out, _, _ = w.run(t, "nightly", "capture-settings")
+	if !strings.Contains(out, "capture-settings ok ran\n") {
+		t.Errorf("kit nightly capture-settings printed\n%s", out)
+	}
+}

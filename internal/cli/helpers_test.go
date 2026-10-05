@@ -96,6 +96,8 @@ func (w *world) run(t *testing.T, args ...string) (stdout, stderr string, status
 			w.path, w.childEnv = path, env
 			return w.fake
 		},
+		Scratch: filepath.Join(w.home, "Scratch"),
+		UID:     501,
 		Choose: func(_ context.Context, question string, options []string) (int, error) {
 			w.asked = append(w.asked, question)
 			if w.choose == nil {

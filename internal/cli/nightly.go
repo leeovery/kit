@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -54,7 +55,7 @@ Name jobs to run only those, now. --plan says what's due, and runs nothing.`,
 
 // nightly runs the jobs due, or those named, then every check.
 func (a *app) nightly(ctx context.Context, r *run, names []string, plan bool) error {
-	hourly, daily, err := r.jobs()
+	hourly, daily, err := a.jobs(r)
 	if err != nil {
 		return err
 	}
@@ -140,9 +141,11 @@ func nightlyPipeline(jobs []nightly.Job, due map[string]bool, r *run, now func()
 	return engine.New(all...)
 }
 
-// jobs are the user's own jobs this Mac declares: the hourly ones, then the
-// nightly ones, each named for its section, as in hourly:asimov.
-func (r *run) jobs() (hourly, daily []nightly.Job, err error) {
+// jobs are the jobs this Mac runs: its own hourly ones, then its own
+// nightly ones, each named for its section, as in hourly:asimov; then the
+// built-in nightly ones its features switch on, the Scratch clean-up and,
+// last, so it can never hold up the rest, settings capture.
+func (a *app) jobs(r *run) (hourly, daily []nightly.Job, err error) {
 	home := r.homeDir
 	for _, section := range []string{config.HourlyKind, config.NightlyKind} {
 		list, err := r.cfg.List(section, r.machine)
@@ -167,6 +170,16 @@ func (r *run) jobs() (hourly, daily []nightly.Job, err error) {
 				daily = append(daily, job)
 			}
 		}
+	}
+	features, err := r.features()
+	if err != nil {
+		return nil, nil, err
+	}
+	if features[steps.FeatureScratch] {
+		daily = append(daily, nightly.CleanScratch(filepath.Join(a.Scratch, "tmp"), home, a.UID, a.Now))
+	}
+	if features[steps.FeatureSettingsCapture] {
+		daily = append(daily, nightly.CaptureSettings(r.run))
 	}
 	return hourly, daily, nil
 }
