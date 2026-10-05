@@ -37,7 +37,8 @@ the config repository.
 
 kit add file <path>... moves a file, or every file in a folder, into
 kit-config's home folder for this Mac (--shared: every Mac's), and links it
-back in its place.
+back in its place. kit add path <dir>... puts a directory last on the PATH,
+kit's and the shell's.
 
 At a terminal, kit asks which group of the kind's section each goes in ("To be
 sorted" first); --group answers without asking, and without a terminal they go
@@ -66,6 +67,9 @@ declaring, for a throwaway: it's quiet for 7 days, then kit reconcile asks.`,
 func (a *app) add(ctx context.Context, r *run, kindName string, names []string, opts addOptions) error {
 	if kindName == linked.StepName {
 		return a.addFiles(ctx, r, names, opts)
+	}
+	if kindName == pathsKind {
+		return a.addPaths(ctx, r, names, opts)
 	}
 	k, err := r.kindNamed(kindName)
 	if err != nil {

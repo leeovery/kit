@@ -25,7 +25,8 @@ Homebrew's reason is passed on. The change is committed and pushed to the
 config repository.
 
 kit remove file <path>... puts a copy of a linked file back in place of its
-link, and takes it out of kit-config.`,
+link, and takes it out of kit-config. kit remove path <dir>... takes a
+directory off the PATH.`,
 		Args: cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			r, err := a.prepare("remove", "remove")
@@ -46,6 +47,9 @@ link, and takes it out of kit-config.`,
 func (a *app) remove(ctx context.Context, r *run, kindName string, names []string, shared bool) error {
 	if kindName == linked.StepName {
 		return a.removeFiles(ctx, r, names, shared)
+	}
+	if kindName == pathsKind {
+		return a.removePaths(ctx, r, names, shared)
 	}
 	k, err := r.kindNamed(kindName)
 	if err != nil {

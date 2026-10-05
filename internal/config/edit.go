@@ -241,6 +241,9 @@ func (c *Config) Declare(kind, scope string, e Entry, group string) error {
 		return fmt.Errorf("%s is in %s already", e.Name, DeclFile(scope))
 	}
 	switch {
+	case d.form == paths:
+		// Paths are searched in order: a new one goes last.
+		b.insert(b.lastEntryEnd(0, len(b.lines)), line)
 	case !d.grouped:
 		b.insert(b.sortedPlace(0, len(b.lines), name), line)
 	default:
@@ -350,7 +353,9 @@ func entryText(d sectionDef, name string, e Entry) (string, error) {
 		}
 		line += " " + strings.TrimSpace(e.Value)
 	case paths:
-		return "", fmt.Errorf("kit doesn't declare paths: they're edited by hand")
+		if err := checkDir(name); err != nil {
+			return "", err
+		}
 	}
 	if note := strings.TrimSpace(strings.ReplaceAll(e.Note, "\n", " ")); note != "" {
 		line += noteGap + note

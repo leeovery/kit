@@ -23,6 +23,7 @@ func laptopWorld(t *testing.T) *world {
 		"studio/declarations": "[homebrew formulae]\nffmpeg\n",
 	})
 	w.write(t, filepath.Join(".local", "state", "kit", "machine"), "laptop\n")
+	w.write(t, filepath.Join(".local", "state", "kit", "path"), filepath.Join(w.home, ".local", "bin")+":/opt/homebrew/bin\n")
 	// The drift was first seen two days ago, so it needs attention.
 	w.write(t, filepath.Join(".local", "state", "kit", "drift.json"),
 		`{"first_seen": {"brew:ffmpeg": "2025-12-31T00:00:00Z", "brew:node@20": "2025-12-31T00:00:00Z", "cask:firefox": "2025-12-31T00:00:00Z"}}`)
@@ -61,6 +62,7 @@ func TestStatus(t *testing.T) {
 	out, errOut, status := w.run(t, "status")
 	want := `kit status · laptop
 homebrew ok /opt/homebrew
+path ok 2 directories
 brew attention 3 declared, all installed
 brew extra ffmpeg
 brew unused-dependency node@20
@@ -87,10 +89,10 @@ func TestStatusJSON(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &doc); err != nil || code != 1 {
 		t.Fatalf("kit status --json printed %q, exit %d: %v", out, code, err)
 	}
-	if doc.Schema != 1 || doc.Kit != "0.1.0" || doc.Machine != "laptop" || !doc.Attention || len(doc.Steps) != 11 {
+	if doc.Schema != 1 || doc.Kit != "0.1.0" || doc.Machine != "laptop" || !doc.Attention || len(doc.Steps) != 12 {
 		t.Fatalf("document = %+v", doc)
 	}
-	brew := doc.Steps[1]
+	brew := doc.Steps[2]
 	if brew.ID != "brew" || brew.Counts["declared"] != 3 || brew.Counts["extra"] != 1 || brew.Items[1].ID != "brew:node@20" || brew.Items[1].State != "unused-dependency" {
 		t.Errorf("brew = %+v", brew)
 	}
