@@ -246,6 +246,15 @@ func (a *app) prepare(command, logName string) (*run, error) {
 		steps.Disk(observed), steps.Memory(observed), steps.FileEvents(observed), steps.Load(observed, a.Now),
 		steps.ConfigSync(observed, dirs.Config, a.Now), steps.ConfigPrivate(observed, dirs.Config),
 	)
+	own, err := cfg.List(config.ChecksKind, machine)
+	if err != nil {
+		_ = face.Close()
+		_ = log.Close()
+		return nil, err
+	}
+	if len(own.Entries) > 0 {
+		checks = append(checks, steps.Own(observed, home, own))
+	}
 	r.pipeline, err = engine.New(slices.Concat([]engine.Step{homebrew}, kinds, checks)...)
 	if err != nil {
 		_ = face.Close()

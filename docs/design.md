@@ -92,7 +92,9 @@ differ.
 **Checks.** Steps with a check and no apply, each problem an item with a stable id saying
 what's wrong and what to do: the Mac's (`disk`, `memory`, `file-events`, `load`), always;
 the backups' (`time-machine`, `arq`), when switched on; the config repository's
-(`config-sync`, `config-private`). Every step has an area (Backups, Mac, Drift, Config,
+(`config-sync`, `config-private`); and the user's own, in a `[checks]` section, a line each:
+a name, then `--` and a command, which exits 0 when all's well, or prints what's wrong on
+its first line (a minute's timeout), each failing one an item of the `checks` step. Every step has an area (Backups, Mac, Drift, Config,
 Checks), which the status document carries.
 
 **Steps.** Everything kit applies is a step in one pipeline. A step has:
@@ -229,7 +231,7 @@ pages --transport http https://pages.example.com/mcp
 The sections, in the order kit writes them: `features` (the switches), `paths` (kit's PATH, in order, `~` expands; the
 shared file's, then the Mac's), `homebrew formulae`, `homebrew casks`, `app store apps`,
 `npm packages`, `composer packages`, `go tools`, `github extensions`, `macos login items`,
-`claude mcp` (and `claude mcp <folder>`), `claude plugins`. A section kit doesn't know is refused, never
+`claude mcp` (and `claude mcp <folder>`), `claude plugins`, `checks`. A section kit doesn't know is refused, never
 skipped; so is a line before any section, a section twice, or a file named for a Mac
 `kit.toml` doesn't know.
 
@@ -394,7 +396,7 @@ plugins' names.
 
 **7. Health checks and switches — in progress.** The Mac's checks and the config
 repository's sync (#36); `[features]`, `kit feature on|off`, Time Machine and Arq (#37);
-checks of the user's own; bare `kit`.
+checks of the user's own (#38); bare `kit`.
 
 **8. `kit nightly`.** Its jobs and the checks on them; drift's daily digest.
 

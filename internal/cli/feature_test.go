@@ -48,3 +48,15 @@ func TestFeatureOnAndOff(t *testing.T) {
 		t.Errorf("kit feature on time-capsule printed %q, exit %d", errOut, code)
 	}
 }
+
+// Checks of the user's own run as a step of their own, each failing one an
+// item.
+func TestOwnChecksRun(t *testing.T) {
+	w := laptopWorld(t)
+	w.writeSection(t, "laptop", "checks", "dns -- dig +short @127.0.0.1 example.com   # the network's lookups\n")
+	w.fake.On("dig", "+short", "@127.0.0.1", "example.com").Exits(9).Prints(";; connection timed out; no servers could be reached\n")
+	out, _, code := w.run(t, "status", "checks")
+	if !strings.Contains(out, "checks attention 1 of 1 failing\nchecks problem dns: ;; connection timed out; no servers could be reached (your check, laptop line 5)\n") || code != 1 {
+		t.Errorf("kit status checks printed\n%s exit %d", out, code)
+	}
+}
