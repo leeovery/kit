@@ -81,6 +81,20 @@ undeclared for adopting, removing or snoozing, and report both.
   are a choice at a terminal, listed without one); `kit add login` takes an app's name, path
   or bundle id. Declaring a login item writes the app's name as the note.
 
+**Features.** Each piece of kit stands alone, and is on when it's declared: a list by having
+entries (the kinds, later the folders to restore), a piece with nothing to list by a switch
+in a Mac's `[features]` section (`time-machine`, `arq`; later `asimov`, `scratch`,
+`settings-capture`), so turning one off loses nothing that isn't its own. `kit feature
+on|off <name>` (`--shared` for every Mac) changes one. kit is built for its author's Macs:
+built-in support is for the tools they use, and the switches exist because those Macs
+differ.
+
+**Checks.** Steps with a check and no apply, each problem an item with a stable id saying
+what's wrong and what to do: the Mac's (`disk`, `memory`, `file-events`, `load`), always;
+the backups' (`time-machine`, `arq`), when switched on; the config repository's
+(`config-sync`, `config-private`). Every step has an area (Backups, Mac, Drift, Config,
+Checks), which the status document carries.
+
 **Steps.** Everything kit applies is a step in one pipeline. A step has:
 
 - **check:** is it done and right? Mandatory, cheap, no side effects. Checks feed `kit status`
@@ -116,6 +130,7 @@ kit reconcile [<kind>...] [<id>...]  Settle drift: adopt, remove, install, undec
 kit list [kind]              What's declared for this Mac: file, group, note, installed or not
 kit why <name>               Where it's declared, whether it's installed, what needs it
 kit claude-mcp on|off <name>...  Declare Claude's MCP servers on or off, and install or remove them
+kit feature on|off <name>... Switch features on or off for this Mac   [--shared]
 kit apply [step...] [--plan] Install what's declared and missing (--plan: say what, do nothing)
 kit status [step...]         How this Mac stands against the config: what needs attention
 kit log                      What the last run did: every check, every command, with timings
@@ -211,7 +226,7 @@ mail --env MAIL_KEY=${MAIL_KEY} -- npx -y mail-mcp
 pages --transport http https://pages.example.com/mcp
 ```
 
-The sections, in the order kit writes them: `paths` (kit's PATH, in order, `~` expands; the
+The sections, in the order kit writes them: `features` (the switches), `paths` (kit's PATH, in order, `~` expands; the
 shared file's, then the Mac's), `homebrew formulae`, `homebrew casks`, `app store apps`,
 `npm packages`, `composer packages`, `go tools`, `github extensions`, `macos login items`,
 `claude mcp` (and `claude mcp <folder>`), `claude plugins`. A section kit doesn't know is refused, never
@@ -377,7 +392,13 @@ options.
 **6. Claude Code's plugins — built.** The `claude-plugin` kind, marketplaces carried in
 plugins' names.
 
-**7. Claude Code's skills — next.**
+**7. Health checks and switches — in progress.** The Mac's checks and the config
+repository's sync (#36); `[features]`, `kit feature on|off`, Time Machine and Arq (#37);
+checks of the user's own; bare `kit`.
+
+**8. `kit nightly`.** Its jobs and the checks on them; drift's daily digest.
+
+Claude Code's skills wait for the installer they'll go through (agntc).
 
 **Then:** one set of checks behind bare `kit` and an hourly run, with
 notifications and the primary reading the other Macs; steps for linked files, the shell, git,

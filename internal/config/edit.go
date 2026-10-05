@@ -241,7 +241,7 @@ func (c *Config) Declare(kind, file string, e Entry, group string) error {
 		return fmt.Errorf("%s is in %s already", e.Name, file)
 	}
 	switch {
-	case d.form != names:
+	case !d.grouped:
 		b.insert(b.sortedPlace(0, len(b.lines), name), line)
 	default:
 		if group == "" {

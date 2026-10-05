@@ -18,6 +18,10 @@ const Shared = "shared"
 // PathsKind names the section of kit's own PATH, which isn't a kind's.
 const PathsKind = "paths"
 
+// FeaturesKind names the section of the pieces switched on for a Mac, by
+// name: the parts with nothing to list, such as a backup tool.
+const FeaturesKind = "features"
+
 // form is how a section's lines read.
 type form int
 
@@ -41,22 +45,26 @@ type sectionDef struct {
 	// folders is whether the kind has a section for each project folder,
 	// the folder after the header, as in [claude mcp ~/Code/site].
 	folders bool
+	// grouped is whether its names are filed in groups under comment
+	// headings, a new one going under "To be sorted".
+	grouped bool
 }
 
 // sectionDefs are the sections a declarations file may hold, in the order
 // kit writes them.
 var sectionDefs = []sectionDef{
+	{header: "features", kind: FeaturesKind, form: names},
 	{header: "paths", kind: PathsKind, form: paths},
-	{header: "homebrew formulae", kind: "brew", form: names},
-	{header: "homebrew casks", kind: "cask", form: names},
-	{header: "app store apps", kind: "app", form: names},
-	{header: "npm packages", kind: "npm", form: names},
-	{header: "composer packages", kind: "composer", form: names},
-	{header: "go tools", kind: "go", form: names},
-	{header: "github extensions", kind: "gh", form: names},
-	{header: "macos login items", kind: "login", form: names},
+	{header: "homebrew formulae", kind: "brew", form: names, grouped: true},
+	{header: "homebrew casks", kind: "cask", form: names, grouped: true},
+	{header: "app store apps", kind: "app", form: names, grouped: true},
+	{header: "npm packages", kind: "npm", form: names, grouped: true},
+	{header: "composer packages", kind: "composer", form: names, grouped: true},
+	{header: "go tools", kind: "go", form: names, grouped: true},
+	{header: "github extensions", kind: "gh", form: names, grouped: true},
+	{header: "macos login items", kind: "login", form: names, grouped: true},
 	{header: "claude mcp", kind: "claude-mcp", form: commands, folders: true},
-	{header: "claude plugins", kind: "claude-plugin", form: names},
+	{header: "claude plugins", kind: "claude-plugin", form: names, grouped: true},
 }
 
 // defFor is the section kind's declarations go in.
@@ -77,11 +85,12 @@ func Header(kind string) string {
 	return d.header
 }
 
-// Grouped reports whether kind's declarations are filed in groups: a name
-// list's are; a command's or a path's aren't.
+// Grouped reports whether kind's declarations are filed in groups, under
+// comment headings: a package list's are; a command's, a path's or a
+// switch's aren't.
 func Grouped(kind string) bool {
 	d, err := defFor(kind)
-	return err == nil && d.form == names
+	return err == nil && d.grouped
 }
 
 // List is what one kind declares for one Mac: the shared file's entries, then
