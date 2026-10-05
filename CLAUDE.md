@@ -10,7 +10,9 @@ when, is `docs/design.md`.
 
 Run all of these before reporting work done, and before any merge: `scripts/gates` runs them
 in order and stops at the first that fails. Each must pass clean. CI is off until kit is
-ready, so they're the only gate.
+ready, so they're the only gate. Stage everything first (`git add -A`), and run the gates on
+their own, never piped: a pipe's status is its last command's, so `scripts/gates | tail`
+passes whatever the gates found. Merge only when `scripts/gates` itself exits 0.
 
 ```bash
 gofmt -l .                   # must print nothing
