@@ -215,12 +215,26 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 		drifters: map[string]drifter{},
 	}
 	r.files = &linked.Files{Repo: r.repo, Home: home, StateDir: dirs.State, Scopes: []string{config.Shared, machine}}
-	var files []engine.Step
+	// setup are the steps that set up the home folder: its linked files,
+	// the shell's PATH, Oh My Zsh.
+	var setup []engine.Step
+	addSetup := func(step engine.Step, d drifter) {
+		setup = append(setup, quietened(step, record, now))
+		r.drift = append(r.drift, step.Name)
+		r.drifters[step.Name] = d
+	}
 	if r.files.Present() {
-		step := engine.Step{Name: linked.StepName, Title: "Linked files", Area: steps.AreaDrift, Check: r.files.Check, Apply: r.files.Apply}
-		files = append(files, quietened(step, record, now))
-		r.drift = append(r.drift, linked.StepName)
-		r.drifters[linked.StepName] = fileDrifter{files: r.files}
+		addSetup(engine.Step{Name: linked.StepName, Title: "Linked files", Area: steps.AreaDrift, Check: r.files.Check, Apply: r.files.Apply}, fileDrifter{files: r.files})
+	}
+	shellPath, err := cfg.ShellPath(home, machine)
+	if err != nil {
+		_ = face.Close()
+		_ = log.Close()
+		return nil, err
+	}
+	if len(shellPath) > 0 {
+		step := steps.PathFile(shellPath, filepath.Join(dirs.State, steps.PathFileName))
+		addSetup(step, applyDrifter{step: step, label: "write it"})
 	}
 	var kinds []engine.Step
 	for _, ks := range kindSteps(hb, observed, home, a.configHome()) {
@@ -261,6 +275,11 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 		_ = log.Close()
 		return nil, err
 	}
+	if features[steps.FeatureOhMyZsh] {
+		step := steps.OhMyZsh(observed, home)
+		step.After = []string{brew.StepName}
+		addSetup(step, applyDrifter{step: step, label: "install it"})
+	}
 	var checks []engine.Step
 	if features[steps.FeatureTimeMachine] {
 		checks = append(checks, steps.TimeMachine(observed, a.Now))
@@ -300,7 +319,7 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 	if jobs := slices.Concat(hourly, daily); len(jobs) > 0 {
 		checks = append(checks, nightly.Check(jobs, len(hourly) > 0, len(daily) > 0, dirs.State, a.Now))
 	}
-	r.pipeline, err = engine.New(slices.Concat([]engine.Step{homebrew}, files, kinds, checks)...)
+	r.pipeline, err = engine.New(slices.Concat([]engine.Step{homebrew}, setup, kinds, checks)...)
 	if err != nil {
 		_ = face.Close()
 		_ = log.Close()

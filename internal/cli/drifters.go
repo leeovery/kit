@@ -254,3 +254,30 @@ func (d configDrifter) settle(ctx context.Context, _ *run, c *changes, dec decis
 	}
 	return check.Result{State: check.Failed, Reason: "nothing to do: " + dec.action}
 }
+
+// applyDrifter is drift the step's apply settles, with nothing to declare
+// or remove: the shell's PATH, Oh My Zsh.
+type applyDrifter struct {
+	step engine.Step
+	// label is applying, as a terminal offers it.
+	label string
+}
+
+func (d applyDrifter) check(ctx context.Context) check.Result {
+	return d.step.Check(ctx)
+}
+
+func (d applyDrifter) choices(check.Item) []choice {
+	return []choice{{action: install, label: d.label}, snoozeChoice}
+}
+
+func (d applyDrifter) describe(check.Item) string {
+	return "not as declared"
+}
+
+func (d applyDrifter) settle(ctx context.Context, _ *run, _ *changes, dec decision, _ string) check.Result {
+	if err := d.step.Apply(ctx, check.Result{Items: []check.Item{dec.item.Item}}); err != nil {
+		return check.Result{State: check.Failed, Reason: err.Error()}
+	}
+	return check.Result{State: check.OK, Summary: "done"}
+}

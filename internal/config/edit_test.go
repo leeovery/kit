@@ -169,7 +169,8 @@ func TestEditingRefuses(t *testing.T) {
 		"a file for no Mac":         cfg.Declare("brew", "mini", config.Entry{Name: "jq"}, ""),
 		"a name that isn't there":   cfg.Undeclare("brew", "laptop", "ripgrep"),
 		"a command without options": cfg.Declare("claude-mcp", "laptop", config.Entry{Name: "docs"}, ""),
-		"a path":                    cfg.Declare(config.PathsKind, "laptop", config.Entry{Name: "/opt/x"}, ""),
+		"a path with a colon":       cfg.Declare(config.PathsKind, "laptop", config.Entry{Name: "/opt/x:/opt/y"}, ""),
+		"a path the shell expands":  cfg.Declare(config.PathsKind, "laptop", config.Entry{Name: "$HOME/bin"}, ""),
 	} {
 		if err == nil {
 			t.Errorf("%s: no error", name)
@@ -177,5 +178,15 @@ func TestEditingRefuses(t *testing.T) {
 	}
 	if got := readFile(t, cfg, "laptop/declarations"); got != "[homebrew formulae]\njq\n" {
 		t.Errorf("laptop = %q, want it untouched", got)
+	}
+}
+
+func TestDeclareAPathGoesLast(t *testing.T) {
+	cfg := loadRepo(t, map[string]string{"laptop/declarations": "[paths]\n# Homebrew\n/opt/homebrew/bin\n\n[homebrew formulae]\njq\n"})
+	if err := cfg.Declare(config.PathsKind, "laptop", config.Entry{Name: "/a/b", Note: "a tool"}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := readFile(t, cfg, "laptop/declarations"), "[paths]\n# Homebrew\n/opt/homebrew/bin\n/a/b   # a tool\n\n[homebrew formulae]\njq\n"; got != want {
+		t.Errorf("laptop = %q, want %q", got, want)
 	}
 }

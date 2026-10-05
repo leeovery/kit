@@ -83,7 +83,8 @@ undeclared for adopting, removing or snoozing, and report both.
 
 **Features.** Each piece of kit stands alone, and is on when it's declared: a list by having
 entries (the kinds, later the folders to restore), a piece with nothing to list by a switch
-in a Mac's `[features]` section (`time-machine`, `arq`, `scratch`, `settings-capture`), so
+in a Mac's `[features]` section (`time-machine`, `arq`, `scratch`, `settings-capture`,
+`oh-my-zsh`), so
 turning one off loses nothing that isn't its own. Built-ins are generic and lasting; what's
 specific to a user, or to the moment, goes in their config: checks of their own in
 `[checks]`, jobs of their own in `[hourly]` and `[nightly]`. `kit feature
@@ -328,11 +329,23 @@ is refused. The step `file` finds each one:
 (`--shared`: every Mac's) and links it back; `kit remove file <path>` puts a copy back in
 place of the link and takes the file out. Both commit and push.
 
-### kit's PATH
+### kit's PATH, and the shell's
 
 At start-up kit builds its own PATH from the config's `paths` and the system's directories,
 ignoring what it inherited, so it behaves the same from a terminal, launchd or an agent, and
 finds tools installed partway through a run.
+
+The shell uses the same list, the code review's "one PATH list": the `path` step writes it
+(`~` expanded, colon-separated) to `path` in kit's state directory, and the shell's startup
+puts the file's contents ahead of the PATH it inherits, reading it without running anything,
+so a config that doesn't read never leaves a shell without its PATH. Relative entries
+(`node_modules/.bin`) are kept for the shell and left out of kit's own PATH. A `$`, a colon,
+or a `~` that doesn't start the home folder is refused. `kit add path <dir>` puts a
+directory last (`--shared`: on every Mac), `kit remove path <dir>` takes it off; both write
+the file and commit.
+
+The `oh-my-zsh` feature checks Oh My Zsh is installed, and applying runs its installer,
+unattended, keeping `.zshrc` and the login shell.
 
 ## Output
 
