@@ -29,6 +29,8 @@ type Step struct {
 	// ID is the step's name, the same from run to run.
 	ID    string `json:"id"`
 	Title string `json:"title"`
+	// Area is what the step is about: Backups, Mac, Drift, Config, Checks.
+	Area string `json:"area,omitempty"`
 	check.Result
 }
 
@@ -48,7 +50,7 @@ func (b *Builder) Emit(e event.Event) {
 		b.doc = Document{Schema: Schema, Kit: e.Version, Machine: e.Machine, Steps: make([]Step, 0, len(e.Steps))}
 		b.index = make(map[string]int, len(e.Steps))
 		for i, s := range e.Steps {
-			b.doc.Steps = append(b.doc.Steps, Step{ID: s.Name, Title: s.Title})
+			b.doc.Steps = append(b.doc.Steps, Step{ID: s.Name, Title: s.Title, Area: s.Area})
 			b.index[s.Name] = i
 		}
 	case event.StepFinished:

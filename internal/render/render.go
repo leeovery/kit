@@ -65,6 +65,7 @@ var itemLabels = map[string][2]string{
 	"missing":           {"missing", "missing"},
 	"extra":             {"not declared", "not declared"},
 	"unused-dependency": {"unused dependency", "unused dependencies"},
+	"problem":           {"problem", "problems"},
 }
 
 // quietLabels say why items don't need attention yet.

@@ -29,6 +29,7 @@ func ConfigPrivate(run runner.Runner, dir string) engine.Step {
 	return engine.Step{
 		Name:  ConfigPrivateName,
 		Title: "Config repository",
+		Area:  AreaConfig,
 		Check: func(ctx context.Context) check.Result {
 			res, err := run.Run(ctx, runner.Command{Name: "git", Args: []string{"-C", dir, "remote", "get-url", "origin"}})
 			if _, exited := errors.AsType[*runner.ExitError](err); exited {
