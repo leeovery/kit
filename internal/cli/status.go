@@ -274,7 +274,11 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 	if features[steps.FeatureSettingsCapture] {
 		checks = append(checks, steps.FullDiskAccess(home))
 	}
+	edits := steps.ConfigEdits(r.repo)
+	r.drift = append(r.drift, steps.ConfigEditsName)
+	r.drifters[steps.ConfigEditsName] = configDrifter{repo: r.repo, home: home, step: edits}
 	checks = append(checks,
+		quietened(edits, record, now),
 		steps.Disk(observed), steps.Memory(observed), steps.FileEvents(observed), steps.Load(observed, a.Now),
 		steps.ConfigSync(observed, dirs.Config, a.Now), steps.ConfigPrivate(observed, dirs.Config),
 	)

@@ -452,7 +452,7 @@ func (f *Files) Revert(ctx context.Context, name string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	binned, err := toBin(f.Home, l.Dst)
+	binned, err := ToBin(f.Home, l.Dst)
 	if err != nil {
 		return "", fmt.Errorf("couldn't move it to the Bin: %w", err)
 	}
@@ -598,9 +598,9 @@ func writeFile(path string, data []byte, mode os.FileMode) error {
 	return nil
 }
 
-// toBin moves path into the Bin, under a name of its own there: where it
+// ToBin moves path into the Bin, under a name of its own there: where it
 // went.
-func toBin(home, path string) (string, error) {
+func ToBin(home, path string) (string, error) {
 	bin := filepath.Join(home, ".Trash")
 	if err := os.MkdirAll(bin, 0o700); err != nil {
 		return "", err

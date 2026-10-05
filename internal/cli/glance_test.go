@@ -14,7 +14,7 @@ func TestBareKit(t *testing.T) {
 	want := `kit · laptop
 ok        Mac     48% free · 0.3 GB swap · load 1.9
 attention Drift   brew ffmpeg (not declared, 2 days), brew node@20 (unused, 2 days), cask firefox (not declared, 2 days)  → kit reconcile
-ok        Config  committed and pushed · private
+ok        Config  pushed · private
 `
 	if out != want || errOut != "" || code != 1 {
 		t.Errorf("kit printed\n%s%q exit %d\nwant\n%s", out, errOut, code, want)
