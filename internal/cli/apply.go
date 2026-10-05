@@ -74,9 +74,19 @@ func actions(report engine.Report) bool {
 
 // toInstall are what applying the steps only names (every step, when none)
 // would install, by kind, for the kinds whose installs can need an
-// administrator's password.
+// administrator's password; and what the steps that need one would do.
 func toInstall(ctx context.Context, r *run, only []string) map[string][]string {
 	wanted := make(map[string][]string)
+	for _, name := range r.adminSteps {
+		if len(only) > 0 && !slices.Contains(only, name) {
+			continue
+		}
+		for _, it := range r.drifters[name].check(ctx).Items {
+			if it.Action != "" {
+				wanted[name] = append(wanted[name], it.Name)
+			}
+		}
+	}
 	for _, name := range r.kinds {
 		k := r.kindsByName[name]
 		if _, ok := k.(kind.Admin); !ok || len(only) > 0 && !slices.Contains(only, name) {

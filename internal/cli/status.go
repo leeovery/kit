@@ -28,6 +28,7 @@ import (
 	"github.com/leeovery/kit/internal/kind/login"
 	"github.com/leeovery/kit/internal/kind/mcp"
 	"github.com/leeovery/kit/internal/kind/npm"
+	"github.com/leeovery/kit/internal/kind/power"
 	"github.com/leeovery/kit/internal/kind/tmux"
 	"github.com/leeovery/kit/internal/linked"
 	"github.com/leeovery/kit/internal/logs"
@@ -96,8 +97,12 @@ type run struct {
 	drifters map[string]drifter
 	// files are the config repository's linked files.
 	files *linked.Files
-	now   time.Time
-	run   runner.Runner
+	// admin is whether an administrator's password is at hand, for the
+	// steps whose apply needs one; adminSteps are those steps, by name.
+	admin      *steps.Admin
+	adminSteps []string
+	now        time.Time
+	run        runner.Runner
 	// homeDir is the user's home, and logsDir where kit's logs go.
 	homeDir, logsDir string
 	// cfg, kindsByName, lists and repo are what changing the config needs.
@@ -139,6 +144,7 @@ func kindSteps(hb *brew.Homebrew, run runner.Runner, home, configHome, stateDir 
 		{kind: claudeplugin.New(run, home), after: []string{"brew"}},
 		{kind: gitconfig.New(run), after: []string{"brew"}, declaredOnly: true},
 		{kind: defaults.New(run, stateDir), declaredOnly: true},
+		{kind: power.New(run, stateDir), declaredOnly: true},
 	}
 }
 
@@ -220,7 +226,7 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 		stateDir: dirs.State, now: now, run: observed, cfg: cfg, homeDir: home, logsDir: dirs.Logs,
 		kindsByName: map[string]kind.Kind{}, lists: map[string]config.List{},
 		repo: gitrepo.Repo{Dir: dirs.Config, Run: observed}, record: record,
-		drifters: map[string]drifter{},
+		drifters: map[string]drifter{}, admin: &steps.Admin{},
 	}
 	r.files = &linked.Files{Repo: r.repo, Home: home, StateDir: dirs.State, Scopes: []string{config.Shared, machine}}
 	// setup are the steps that set up the home folder: its linked files,
@@ -230,6 +236,9 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 		setup = append(setup, quietened(step, record, now))
 		r.drift = append(r.drift, step.Name)
 		r.drifters[step.Name] = d
+		if step.Admin {
+			r.adminSteps = append(r.adminSteps, step.Name)
+		}
 	}
 	if r.files.Present() {
 		addSetup(engine.Step{Name: linked.StepName, Title: "Linked files", Area: steps.AreaDrift, Check: r.files.Check, Apply: r.files.Apply}, fileDrifter{files: r.files})
@@ -287,6 +296,19 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 		step := steps.OhMyZsh(observed, home)
 		step.After = []string{brew.StepName}
 		addSetup(step, applyDrifter{step: step, label: "install it"})
+	}
+	for _, feature := range []struct {
+		name string
+		step func() engine.Step
+	}{
+		{steps.FeatureTouchIDSudo, func() engine.Step { return steps.TouchIDSudo(observed, r.admin, a.SudoLocal) }},
+		{steps.FeatureRemoteLogin, func() engine.Step { return steps.RemoteLogin(observed, r.admin) }},
+		{steps.FeatureFileSharing, func() engine.Step { return steps.FileSharing(observed, r.admin) }},
+	} {
+		if features[feature.name] {
+			step := feature.step()
+			addSetup(step, applyDrifter{step: step, label: "turn it on"})
+		}
 	}
 	var checks []engine.Step
 	if features[steps.FeatureTimeMachine] {

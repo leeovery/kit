@@ -28,7 +28,8 @@ read, and kept in kit's state; a replacement Mac can take an old one's name.
 (`cask`), App Store apps (`app`), npm and Composer global packages (`npm`, `composer`), Go tools
 (`go`), GitHub CLI extensions (`gh`), tmux plugins (`tmux`), login items (`login`) and Claude
 Code's MCP servers (`claude-mcp`) and plugins (`claude-plugin`), git's settings (`git`) and
-macOS settings (`default`). Later: Claude Code's skills, secrets and backup exclusions.
+macOS settings (`default`) and power settings (`power`). Later: Claude Code's skills, secrets
+and backup exclusions.
 Each kind supplies five parts:
 
 - **declared:** what the config lists, the shared file and then this Mac's;
@@ -52,6 +53,7 @@ undeclared for adopting, removing or snoozing, and report both.
 | `claude-mcp` | a name, then `claude mcp add`'s options; a project's in `[claude mcp <folder>]` | `~/.claude.json`, read directly | `claude mcp add-json`, `claude mcp remove` (a project's in local scope, in its folder) |
 | `claude-plugin` | `plugin@owner/repo`: the plugin and its marketplace's repository; `@owner/repo` a marketplace alone | Claude Code's records of plugins, marketplaces and what's enabled | the marketplace added when needed, then `claude plugin install`; `uninstall`, `marketplace remove` |
 | `git` | `[git config]`: a key, then its value as one word, as `git config --global` takes them (`alias.st "status -sb"`) | `git config --global --list` | `git config --global --replace-all`, `--unset-all` |
+| `power` | `[power settings]`: pmset's words, the source then the setting and value (`-c sleep 0`; `-a` every source, `-b` the battery, `-u` a UPS), named `charger:sleep` | `pmset -g custom`, by source | `sudo pmset`; undeclaring leaves the value |
 | `default` | `[macos settings]`: `defaults write`'s words (`com.apple.dock tilesize -int 60`; `-currentHost` first for this host's; `-dict-add` and an entry's XML; or a value as XML), named `domain:key[:entry]` | `defaults export` of each domain | `defaults write` (through sudo for a domain under `/Library`), then the app that reads it restarted or keyboard shortcuts reloaded; `defaults delete` |
 
 - **Matching:** a kind may match on part of a name: an App Store app on its id (so an app the
@@ -103,7 +105,7 @@ undeclared for adopting, removing or snoozing, and report both.
 **Features.** Each piece of kit stands alone, and is on when it's declared: a list by having
 entries (the kinds, later the folders to restore), a piece with nothing to list by a switch
 in a Mac's `[features]` section (`time-machine`, `arq`, `scratch`, `settings-capture`,
-`oh-my-zsh`), so
+`oh-my-zsh`, `touch-id-sudo`, `remote-login`, `file-sharing`), so
 turning one off loses nothing that isn't its own. Built-ins are generic and lasting; what's
 specific to a user, or to the moment, goes in their config: checks of their own in
 `[checks]`, jobs of their own in `[hourly]` and `[nightly]`. `kit feature
@@ -365,6 +367,13 @@ the file and commit.
 
 The `oh-my-zsh` feature checks Oh My Zsh is installed, and applying runs its installer,
 unattended, keeping `.zshrc` and the login shell.
+
+Three features change the system, each applied through sudo: `touch-id-sudo` (sudo takes a
+fingerprint, by a line in `/etc/pam.d/sudo_local`, which macOS updates leave alone),
+`remote-login` (SSH) and `file-sharing` (SMB), each a launchd service on unless launchd lists
+it disabled. A step whose apply needs an administrator's password says so (`Admin`), and
+`kit apply` and `kit reconcile` settle the password before anything is applied, as for the
+kinds whose installs need it: asked once at a terminal; without one, the step waits.
 
 ## Output
 

@@ -56,6 +56,8 @@ func splitBody(f form, lines []string) body {
 			name, _, _, _ = splitCommand(line)
 		case f == defaults:
 			name = defaultsName(line)
+		case f == power:
+			name = powerName(line)
 		default:
 			name, _ = splitComment(line)
 		}
@@ -360,6 +362,12 @@ func entryText(d sectionDef, name string, e Entry) (string, error) {
 		}
 	case defaults:
 		text, err := defaultsText(name, e.Value)
+		if err != nil {
+			return "", err
+		}
+		line = text
+	case power:
+		text, err := powerText(name, e.Value)
 		if err != nil {
 			return "", err
 		}

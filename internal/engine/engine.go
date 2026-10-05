@@ -43,6 +43,9 @@ type Step struct {
 	// Manual is what a person must do when the step can't be automated,
 	// shown while its check fails. Optional.
 	Manual string
+	// Admin is whether applying it needs an administrator's password, which
+	// the command settles before anything is applied.
+	Admin bool
 }
 
 // title is the step's title, or its name.
