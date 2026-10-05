@@ -428,23 +428,23 @@ options.
 **6. Claude Code's plugins — built.** The `claude-plugin` kind, marketplaces carried in
 plugins' names.
 
-**7. Health checks and switches — in progress.** The Mac's checks and the config
-repository's sync (#36); `[features]`, `kit feature on|off`, Time Machine and Arq (#37);
-checks of the user's own (#38); the scan made to see untracked files (#39); bare `kit`
-(#40).
+**7. Health checks and switches — built.** The Mac's checks and the config repository's sync
+(#36); `[features]`, `kit feature on|off`, Time Machine and Arq (#37); checks of the user's
+own (#38); the scan made to see untracked files (#39); bare `kit` (#40).
 
-**8. `kit nightly` — in progress.** Jobs of the user's own, the nightly record and its rule,
-`kit nightly`; Arq checked by its own schedules (#41); the Scratch clean-up and settings
-capture (#42); the checks on the jobs (#43); alerts, drift's daily digest and the report
-(#44).
+**8. `kit nightly` — built.** Jobs of the user's own (`[hourly]`, `[nightly]`), the nightly
+record and its rule, `kit nightly`; Arq checked by its own schedules (#41); the Scratch
+clean-up and settings capture (#42); the checks on the runs, Scratch and Full Disk Access
+(#43); `--alerts`, drift's daily digest and the report (#44).
 
-Claude Code's skills wait for the installer they'll go through (agntc).
+**9. Steps — next.** Linked files, the shell and PATH, git, macOS settings and backup
+exclusions as kinds, secrets, what a person must do by hand; a command adding lines to
+`[checks]`, `[hourly]` and `[nightly]`.
 
-**Then:** one set of checks behind bare `kit` and an hourly run, with
-notifications and the primary reading the other Macs; steps for linked files, the shell, git,
-macOS settings, backup exclusions and secrets; settings capture and restore; syncing the config
-repository; the bootstrap and its install script, tested in a virtual machine; data restore and
-moving to a new Mac; an agent's daily check, with decisions queued for a person. Each gets a
+**Then:** settings capture and restore in kit; syncing the config repository as a job; the
+primary reading the other Macs; the bootstrap and its install script, tested in a virtual
+machine; data restore and moving to a new Mac; an agent's daily check, with decisions queued
+for a person. Claude Code's skills wait for the installer they'll go through. Each gets a
 short plan before code.
 
 ## Open-source hygiene
