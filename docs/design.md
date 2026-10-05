@@ -190,7 +190,11 @@ Drift, Config, Checks): the steps' short forms when all's well ("Time Machine 16
 and what to run (`kit reconcile`, `kit status`); `--json` is `kit status --json`'s document.
 
 `kit nightly` is what the hourly launch runs: the jobs due, in order (one failing never stops
-the others), then every check. The hourly jobs run every time; the nightly ones once a day,
+the others), then every check. Besides the user's own jobs, two are built in, nightly, each
+with its feature: `scratch`'s clean-up (`/Volumes/Scratch/tmp` cleared of items untouched for a
+week; Claude Code's session folders judged one by one over 30 days, kept while their
+transcript changed) and, last, `settings-capture`'s `prefsync capture` (niced, stopped after
+15 minutes). The hourly jobs run every time; the nightly ones once a day,
 when the nightly run falls due (`nightly_at` in `kit.toml`, 03:00 unless it says), or on the
 first run after it's been missed, as by a Mac asleep then. Each job's outcome is kept in kit's
 state (`nightly.json`). It installs and removes nothing. `--plan` says what's due; naming jobs
@@ -420,7 +424,7 @@ checks of the user's own (#38); the scan made to see untracked files (#39); bare
 
 **8. `kit nightly` — in progress.** Jobs of the user's own, the nightly record and its rule,
 `kit nightly`; Arq checked by its own schedules (#41); the Scratch clean-up and settings
-capture; the checks on the jobs; alerts and drift's daily digest.
+capture (#42); the checks on the jobs; alerts and drift's daily digest.
 
 Claude Code's skills wait for the installer they'll go through (agntc).
 

@@ -43,6 +43,11 @@ type Deps struct {
 	// Choose asks, at the terminal, which of options to take, as ask.Choose
 	// does: the index taken, or ask.ErrCancelled.
 	Choose func(ctx context.Context, question string, options []string) (int, error)
+	// Scratch is the Scratch volume, which the scratch feature checks and
+	// clears: /Volumes/Scratch.
+	Scratch string
+	// UID is the user's id, which names Claude Code's folder in Scratch.
+	UID int
 }
 
 // Exit statuses: a command that needs attention exits attentionStatus, one
@@ -181,6 +186,8 @@ func Real(version string) Deps {
 		Choose: func(ctx context.Context, question string, options []string) (int, error) {
 			return ask.Choose(ctx, os.Stdin, os.Stdout, question, options)
 		},
+		Scratch: "/Volumes/Scratch",
+		UID:     os.Getuid(),
 	}
 }
 
