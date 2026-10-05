@@ -52,7 +52,7 @@ func splitBody(f form, lines []string) body {
 			if prev == entryLine || prev == noteLine {
 				kind = noteLine
 			}
-		case f == commands:
+		case f == commands || f == settings:
 			name, _, _, _ = splitCommand(line)
 		default:
 			name, _ = splitComment(line)
@@ -344,12 +344,12 @@ func entryText(d sectionDef, name string, e Entry) (string, error) {
 		if !lineName.MatchString(name) {
 			return "", fmt.Errorf("%q isn't a name", name)
 		}
-	case commands:
-		if !commandName.MatchString(name) {
+	case commands, settings:
+		if d.form == commands && !commandName.MatchString(name) || d.form == settings && !settingKey.MatchString(name) {
 			return "", fmt.Errorf("%q isn't a name", name)
 		}
 		if strings.TrimSpace(e.Value) == "" {
-			return "", fmt.Errorf("%s needs its options", name)
+			return "", fmt.Errorf("%s needs its %s", name, map[form]string{commands: "options", settings: "value"}[d.form])
 		}
 		line += " " + strings.TrimSpace(e.Value)
 	case paths:

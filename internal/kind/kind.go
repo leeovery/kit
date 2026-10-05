@@ -109,6 +109,15 @@ type Differ interface {
 	Differs(ctx context.Context, names []string) (map[string]string, error)
 }
 
+// Diverger is a Differ whose things installed otherwise than declared were
+// changed on the Mac on purpose, as a setting is: applying leaves them, and
+// kit reconcile adopts the Mac's or puts the declared back.
+type Diverger interface {
+	Differ
+	// Diverges marks the kind.
+	Diverges()
+}
+
 // Keyed is a kind whose things match by part of their names: an App Store
 // app by its id, an npm package without its version.
 type Keyed interface {
@@ -141,6 +150,9 @@ const (
 	// Changed is a thing installed otherwise than declared: applying
 	// installs it again, as declared.
 	Changed = "changed"
+	// Diverged is a Diverger's thing installed otherwise than declared:
+	// applying leaves it.
+	Diverged = "diverged"
 )
 
 // Step is the step that checks k, what declared lists against what's on
@@ -300,9 +312,14 @@ func Compare(ctx context.Context, k Kind, declared config.List) check.Result {
 	for name := range changed {
 		changedNames = append(changedNames, name)
 	}
-	changedItems := items(k, changedNames, Changed, "")
+	_, diverges := k.(Diverger)
+	changedState, changedAction := Changed, Install
+	if diverges {
+		changedState, changedAction = Diverged, ""
+	}
+	changedItems := items(k, changedNames, changedState, "")
 	for i, it := range changedItems {
-		changedItems[i].Detail, changedItems[i].Action = changed[it.Name], Install
+		changedItems[i].Detail, changedItems[i].Action = changed[it.Name], changedAction
 	}
 	res.Items = slices.Concat(
 		missingItems,
