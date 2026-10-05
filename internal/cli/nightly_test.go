@@ -88,6 +88,7 @@ func TestNightlyBuiltInJobs(t *testing.T) {
 	w := jobsWorld(t)
 	w.writeSection(t, "laptop", "features", "scratch\nsettings-capture\n")
 	w.fake.On("nice", "-n", "10", "prefsync", "capture").Prints("captured 2 changed domains\n")
+	w.fake.On("mount").Prints("/dev/disk3s1 on / (apfs, local, journaled)\n")
 	out, _, _ := w.run(t, "nightly", "--plan")
 	order := []string{"hourly:marks ok due", "nightly:tidy ok due", "clean-scratch ok due", "capture-settings ok due"}
 	last := -1

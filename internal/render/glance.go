@@ -15,7 +15,7 @@ import (
 )
 
 // areaOrder is the order the at-a-glance view shows areas in.
-var areaOrder = []string{"Backups", "Mac", "Drift", "Config", "Checks"}
+var areaOrder = []string{"Backups", "Jobs", "Mac", "Drift", "Config", "Checks"}
 
 // driftStates say what a drift item is, briefly.
 var driftStates = map[string]string{
