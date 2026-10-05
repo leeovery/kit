@@ -28,8 +28,8 @@ read, and kept in kit's state; a replacement Mac can take an old one's name.
 (`cask`), App Store apps (`app`), npm and Composer global packages (`npm`, `composer`), Go tools
 (`go`), GitHub CLI extensions (`gh`), tmux plugins (`tmux`), login items (`login`) and Claude
 Code's MCP servers (`claude-mcp`) and plugins (`claude-plugin`), git's settings (`git`) and
-macOS settings (`default`) and power settings (`power`). Later: Claude Code's skills, secrets
-and backup exclusions.
+macOS settings (`default`), power settings (`power`), and the backup and Spotlight exclusions
+(`exclusion`, `spotlight`). Later: Claude Code's skills and secrets.
 Each kind supplies five parts:
 
 - **declared:** what the config lists, the shared file and then this Mac's;
@@ -54,6 +54,8 @@ undeclared for adopting, removing or snoozing, and report both.
 | `claude-plugin` | `plugin@owner/repo`: the plugin and its marketplace's repository; `@owner/repo` a marketplace alone | Claude Code's records of plugins, marketplaces and what's enabled | the marketplace added when needed, then `claude plugin install`; `uninstall`, `marketplace remove` |
 | `git` | `[git config]`: a key, then its value as one word, as `git config --global` takes them (`alias.st "status -sb"`) | `git config --global --list` | `git config --global --replace-all`, `--unset-all` |
 | `power` | `[power settings]`: pmset's words, the source then the setting and value (`-c sleep 0`; `-a` every source, `-b` the battery, `-u` a UPS), named `charger:sleep` | `pmset -g custom`, by source | `sudo pmset`; undeclaring leaves the value |
+| `exclusion` | `[backup exclusions]`: a path a line, `~` and `*` globs, expanded on every check (a plain path stands for itself, there or not) | Time Machine's fixed-path exclusions (`SkipPaths`); Arq inherits them | `sudo tmutil addexclusion -p`, `removeexclusion -p` (Full Disk Access for the terminal) |
+| `spotlight` | `[spotlight exclusions]`: a folder a line | Spotlight asked for files in each folder (`mdfind -count`); its own list is root's alone, so nothing extra is found | added to Spotlight's privacy list through sudo, taking effect after a restart (kit remembers, and says so); removing is System Settings' |
 | `default` | `[macos settings]`: `defaults write`'s words (`com.apple.dock tilesize -int 60`; `-currentHost` first for this host's; `-dict-add` and an entry's XML; or a value as XML), named `domain:key[:entry]` | `defaults export` of each domain | `defaults write` (through sudo for a domain under `/Library`), then the app that reads it restarted or keyboard shortcuts reloaded; `defaults delete` |
 
 - **Matching:** a kind may match on part of a name: an App Store app on its id (so an app the
@@ -120,7 +122,9 @@ only the plans Arq is scheduled to run), when switched on; the config repository
 (`config-sync`: commits that won't push; `config-private`); the scheduled runs' (`nightly`: the hourly run within two
 hours, the nightly one finished within 26 and none stuck over six, each job's last outcome;
 quiet until `kit nightly` has run on a schedule); with their features, `scratch` (mounted,
-out of Spotlight and Time Machine, `tmp` writable, Claude Code's temporary files sent there)
+out of Spotlight and Time Machine, `tmp` writable, Claude Code's temporary files sent there;
+applying, through sudo, makes the volume with its change log off, turns Spotlight off,
+excludes it and makes `tmp`)
 and `full-disk-access` (what settings capture needs); and the user's own, in a `[checks]`
 section, a line each:
 a name, then `--` and a command, which exits 0 when all's well, or prints what's wrong on

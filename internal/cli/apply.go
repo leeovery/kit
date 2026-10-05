@@ -77,13 +77,13 @@ func actions(report engine.Report) bool {
 // administrator's password; and what the steps that need one would do.
 func toInstall(ctx context.Context, r *run, only []string) map[string][]string {
 	wanted := make(map[string][]string)
-	for _, name := range r.adminSteps {
-		if len(only) > 0 && !slices.Contains(only, name) {
+	for _, step := range r.adminSteps {
+		if len(only) > 0 && !slices.Contains(only, step.Name) {
 			continue
 		}
-		for _, it := range r.drifters[name].check(ctx).Items {
+		for _, it := range step.Check(ctx).Items {
 			if it.Action != "" {
-				wanted[name] = append(wanted[name], it.Name)
+				wanted[step.Name] = append(wanted[step.Name], it.Name)
 			}
 		}
 	}

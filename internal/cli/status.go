@@ -22,6 +22,7 @@ import (
 	"github.com/leeovery/kit/internal/kind/claudeplugin"
 	"github.com/leeovery/kit/internal/kind/composer"
 	"github.com/leeovery/kit/internal/kind/defaults"
+	"github.com/leeovery/kit/internal/kind/exclusion"
 	"github.com/leeovery/kit/internal/kind/ghext"
 	"github.com/leeovery/kit/internal/kind/gitconfig"
 	"github.com/leeovery/kit/internal/kind/gotool"
@@ -29,6 +30,7 @@ import (
 	"github.com/leeovery/kit/internal/kind/mcp"
 	"github.com/leeovery/kit/internal/kind/npm"
 	"github.com/leeovery/kit/internal/kind/power"
+	"github.com/leeovery/kit/internal/kind/spotlight"
 	"github.com/leeovery/kit/internal/kind/tmux"
 	"github.com/leeovery/kit/internal/linked"
 	"github.com/leeovery/kit/internal/logs"
@@ -98,9 +100,9 @@ type run struct {
 	// files are the config repository's linked files.
 	files *linked.Files
 	// admin is whether an administrator's password is at hand, for the
-	// steps whose apply needs one; adminSteps are those steps, by name.
+	// steps whose apply needs one; adminSteps are those steps.
 	admin      *steps.Admin
-	adminSteps []string
+	adminSteps []engine.Step
 	now        time.Time
 	run        runner.Runner
 	// homeDir is the user's home, and logsDir where kit's logs go.
@@ -145,6 +147,8 @@ func kindSteps(hb *brew.Homebrew, run runner.Runner, home, configHome, stateDir 
 		{kind: gitconfig.New(run), after: []string{"brew"}, declaredOnly: true},
 		{kind: defaults.New(run, stateDir), declaredOnly: true},
 		{kind: power.New(run, stateDir), declaredOnly: true},
+		{kind: exclusion.New(run, home, exclusion.TimeMachinePrefs), declaredOnly: true},
+		{kind: spotlight.New(run, home, stateDir), declaredOnly: true},
 	}
 }
 
@@ -237,7 +241,7 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 		r.drift = append(r.drift, step.Name)
 		r.drifters[step.Name] = d
 		if step.Admin {
-			r.adminSteps = append(r.adminSteps, step.Name)
+			r.adminSteps = append(r.adminSteps, step)
 		}
 	}
 	if r.files.Present() {
@@ -318,7 +322,9 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 		checks = append(checks, steps.Arq(observed, a.Now))
 	}
 	if features[steps.FeatureScratch] {
-		checks = append(checks, steps.Scratch(observed, a.Scratch, home))
+		scratch := steps.Scratch(observed, r.admin, a.Scratch, home, a.UID)
+		r.adminSteps = append(r.adminSteps, scratch)
+		checks = append(checks, scratch)
 	}
 	if features[steps.FeatureSettingsCapture] {
 		checks = append(checks, steps.FullDiskAccess(home))
@@ -358,6 +364,12 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 	return r, nil
 }
 
+// isAdminStep reports whether the step named name needs an administrator's
+// password to apply.
+func (r *run) isAdminStep(name string) bool {
+	return slices.ContainsFunc(r.adminSteps, func(s engine.Step) bool { return s.Name == name })
+}
+
 // features are the features switched on for this Mac: the shared file's,
 // then its own. One kit doesn't know is refused, saying where.
 func (r *run) features() (map[string]bool, error) {
@@ -391,6 +403,10 @@ func declared(cfg *config.Config, k kind.Kind, mac string) (list config.List, un
 	if v, ok := k.(kind.Valued); ok {
 		read, unread := v.Values(list)
 		return read, unread, nil
+	}
+	if e, ok := k.(kind.Expander); ok {
+		expanded, unread := e.Expand(list)
+		return expanded, unread, nil
 	}
 	return list, nil, nil
 }

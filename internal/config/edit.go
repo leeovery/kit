@@ -245,7 +245,7 @@ func (c *Config) Declare(kind, scope string, e Entry, group string) error {
 		return fmt.Errorf("%s is in %s already", e.Name, DeclFile(scope))
 	}
 	switch {
-	case d.form == paths:
+	case d.form == paths && !d.grouped:
 		// Paths are searched in order: a new one goes last.
 		b.insert(b.lastEntryEnd(0, len(b.lines)), line)
 	case !d.grouped:
