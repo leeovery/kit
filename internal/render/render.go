@@ -166,8 +166,8 @@ func doneGroups(items []check.Item) []itemGroup {
 
 // past is an action as done: install, installed.
 func past(action string) string {
-	if action == "run" {
-		return "ran"
+	if irregular, ok := map[string]string{"run": "ran", "write": "wrote"}[action]; ok {
+		return irregular
 	}
 	if strings.HasSuffix(action, "e") {
 		return action + "d"
