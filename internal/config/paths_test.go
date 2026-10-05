@@ -8,8 +8,8 @@ import (
 
 func TestSearchPath(t *testing.T) {
 	cfg := loadRepo(t, map[string]string{
-		"shared": "[paths]\n# switchboard first\n~/.local/share/switchboard/bin\n/opt/homebrew/bin\n/usr/bin\n",
-		"laptop": "[paths]\n~/Library/Application Support/Tool/bin   # spaces and all\n",
+		"shared/declarations": "[paths]\n# switchboard first\n~/.local/share/switchboard/bin\n/opt/homebrew/bin\n/usr/bin\n",
+		"laptop/declarations": "[paths]\n~/Library/Application Support/Tool/bin   # spaces and all\n",
 	})
 	got, err := cfg.SearchPath("/home/someone", "laptop")
 	want := []string{"/home/someone/.local/share/switchboard/bin", "/opt/homebrew/bin", "/usr/bin", "/home/someone/Library/Application Support/Tool/bin", "/bin", "/usr/sbin", "/sbin"}
@@ -22,8 +22,8 @@ func TestSearchPath(t *testing.T) {
 }
 
 func TestSearchPathRefusesARelativeDirectory(t *testing.T) {
-	cfg := loadRepo(t, map[string]string{"shared": "[paths]\nbin\n"})
-	if _, err := cfg.SearchPath("/home/someone", "laptop"); err == nil || !strings.Contains(err.Error(), `shared:2: "bin" isn't an absolute directory`) {
+	cfg := loadRepo(t, map[string]string{"shared/declarations": "[paths]\nbin\n"})
+	if _, err := cfg.SearchPath("/home/someone", "laptop"); err == nil || !strings.Contains(err.Error(), `shared/declarations:2: "bin" isn't an absolute directory`) {
 		t.Errorf("SearchPath() error = %v", err)
 	}
 }

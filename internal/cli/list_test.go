@@ -33,15 +33,15 @@ func TestListJSON(t *testing.T) {
 	var doc struct {
 		Schema  int `json:"schema"`
 		Entries []struct {
-			Kind, Name, File, Group string
-			Line                    int
-			Installed               bool
+			Kind, Name, Scope, File, Group string
+			Line                           int
+			Installed                      bool
 		} `json:"entries"`
 	}
 	if err := json.Unmarshal([]byte(out), &doc); err != nil || doc.Schema != 1 || len(doc.Entries) != 4 {
 		t.Fatalf("kit list --json printed %q: %v", out, err)
 	}
-	if e := doc.Entries[2]; e.Kind != "brew" || e.Name != "go" || e.File != "laptop" || e.Line != 2 || !e.Installed {
+	if e := doc.Entries[2]; e.Kind != "brew" || e.Name != "go" || e.Scope != "laptop" || e.File != "laptop/declarations" || e.Line != 2 || !e.Installed {
 		t.Errorf("third entry = %+v", e)
 	}
 }
@@ -53,12 +53,12 @@ func TestWhy(t *testing.T) {
 	w.fake.On("brew", "uses", "--installed", "ffmpeg")
 
 	out, _, code := w.run(t, "why", "go")
-	want := "go (brew)\n  declared in laptop, line 3, under Go: for kit\n  installed here, by kit apply's Formulae step\n  needed by golangci-lint, goreleaser\n"
+	want := "go (brew)\n  declared in laptop/declarations, line 3, under Go: for kit\n  installed here, by kit apply's Formulae step\n  needed by golangci-lint, goreleaser\n"
 	if out != want || code != 0 {
 		t.Errorf("kit why go printed\n%s exit %d\nwant\n%s", out, code, want)
 	}
 	out, _, _ = w.run(t, "why", "ffmpeg")
-	want = "ffmpeg (brew)\n  declared in studio, line 2\n  installed here, not declared for this Mac: kit reconcile brew:ffmpeg\n  needed by nothing installed\n"
+	want = "ffmpeg (brew)\n  declared in studio/declarations, line 2\n  installed here, not declared for this Mac: kit reconcile brew:ffmpeg\n  needed by nothing installed\n"
 	if out != want {
 		t.Errorf("kit why ffmpeg printed\n%s\nwant\n%s", out, want)
 	}
@@ -81,13 +81,13 @@ func TestWhyJSON(t *testing.T) {
 			Kind       string `json:"kind"`
 			ForThisMac bool   `json:"for_this_mac"`
 			Installed  bool   `json:"installed"`
-			Declared   []struct{ File string }
+			Declared   []struct{ Scope string }
 		} `json:"kinds"`
 	}
 	if err := json.Unmarshal([]byte(out), &doc); err != nil || doc.Name != "jq" || len(doc.Kinds) != 1 {
 		t.Fatalf("kit why --json printed %q: %v", out, err)
 	}
-	if k := doc.Kinds[0]; k.Kind != "brew" || !k.ForThisMac || !k.Installed || k.Declared[0].File != "shared" {
+	if k := doc.Kinds[0]; k.Kind != "brew" || !k.ForThisMac || !k.Installed || k.Declared[0].Scope != "shared" {
 		t.Errorf("kind = %+v", k)
 	}
 }

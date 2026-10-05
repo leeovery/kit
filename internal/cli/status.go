@@ -296,7 +296,7 @@ func (r *run) features() (map[string]bool, error) {
 	on := make(map[string]bool, len(list.Entries))
 	for _, e := range list.Entries {
 		if !slices.Contains(steps.Features, e.Name) {
-			return nil, fmt.Errorf("%s:%d: kit doesn't know the feature %s: one of %s", e.File, e.Line, e.Name, strings.Join(steps.Features, ", "))
+			return nil, fmt.Errorf("%s: kit doesn't know the feature %s: one of %s", e.Pos(), e.Name, strings.Join(steps.Features, ", "))
 		}
 		on[e.Name] = true
 	}

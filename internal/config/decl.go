@@ -11,9 +11,18 @@ import (
 	"strings"
 )
 
-// Shared is the declarations file every Mac reads; each Mac's own is named
-// after it, as in laptop.
+// Shared names the folder of what every Mac declares; each Mac's folder is
+// named after it, as in laptop.
 const Shared = "shared"
+
+// declName names the declarations file in each folder.
+const declName = "declarations"
+
+// DeclFile is the declarations file of scope, shared or a Mac's, by its path
+// in the config repository, as in laptop/declarations.
+func DeclFile(scope string) string {
+	return scope + "/" + declName
+}
 
 // PathsKind names the section of kit's own PATH, which isn't a kind's.
 const PathsKind = "paths"
@@ -129,8 +138,12 @@ type Entry struct {
 	Name string
 	// Value is what follows the name on a command's line: its options.
 	Value string `json:",omitempty"`
-	// File is the file that declares it: shared, or a Mac's.
-	File string
+	// Scope is whose declarations file declares it: shared, or a Mac's; ""
+	// for a thing declared in a file of its own (File).
+	Scope string `json:",omitempty"`
+	// File is the file declaring it when that isn't a declarations file, as
+	// tmux's config declares its plugins: as it's shown, ~ and all.
+	File string `json:",omitempty"`
 	// Section is its section's header, as in homebrew formulae.
 	Section string
 	// Folder is the project folder whose section it's in, if any.
@@ -144,6 +157,21 @@ type Entry struct {
 	// Off is whether it's declared, but not to be installed: never installed
 	// by kit, and left alone when it is. Kinds whose lines say so set it.
 	Off bool `json:",omitempty"`
+}
+
+// Path is the file declaring the entry: its scope's declarations file, as in
+// laptop/declarations, or a file of its own.
+func (e Entry) Path() string {
+	if e.File != "" {
+		return e.File
+	}
+	return DeclFile(e.Scope)
+}
+
+// Pos is where the entry is, for messages: its file and line, as in
+// laptop/declarations:12.
+func (e Entry) Pos() string {
+	return fmt.Sprintf("%s:%d", e.Path(), e.Line)
 }
 
 // lineName is what a name in a list may be: no spaces, and nothing a
@@ -163,7 +191,7 @@ var headerLine = regexp.MustCompile(`^\[([^\]]*)\]\s*(#.*)?$`)
 // editing in place: what's before the first section, and each section's
 // header and lines.
 type declFile struct {
-	name     string
+	scope    string
 	preamble []string
 	sections []*section
 }
@@ -206,11 +234,12 @@ func matchHeader(text string) (sectionDef, string, bool) {
 	return sectionDef{}, "", false
 }
 
-// parseFile splits the declarations file named name into its sections, and
-// checks every line reads as its section's lines do: a section kit doesn't
-// know, or one twice, is refused.
-func parseFile(name, content string) (*declFile, error) {
-	f := &declFile{name: name}
+// parseFile splits scope's declarations file into its sections, and checks
+// every line reads as its section's lines do: a section kit doesn't know, or
+// one twice, is refused.
+func parseFile(scope, content string) (*declFile, error) {
+	f := &declFile{scope: scope}
+	name := DeclFile(scope)
 	if content == "" {
 		return f, nil
 	}
@@ -239,7 +268,7 @@ func parseFile(name, content string) (*declFile, error) {
 		f.sections = append(f.sections, cur)
 	}
 	for _, s := range f.sections {
-		if _, err := s.entries(name); err != nil {
+		if _, err := s.entries(scope); err != nil {
 			return nil, err
 		}
 	}
@@ -256,8 +285,9 @@ func (f *declFile) find(d sectionDef, folder string) *section {
 	return nil
 }
 
-// entries are what the section declares, in the file named file.
-func (s *section) entries(file string) ([]Entry, error) {
+// entries are what the section declares, in scope's declarations file.
+func (s *section) entries(scope string) ([]Entry, error) {
+	file := DeclFile(scope)
 	var out []Entry
 	seen := make(map[string]int)
 	b := splitBody(s.def.form, s.body)
@@ -282,7 +312,7 @@ func (s *section) entries(file string) ([]Entry, error) {
 			return nil, fmt.Errorf("%s:%d: %s is already at line %d", file, n, e.Name, first)
 		}
 		seen[e.Name] = n
-		e.File, e.Line, e.Group = file, n, group
+		e.Scope, e.Line, e.Group = scope, n, group
 		out = append(out, e)
 	}
 	return out, nil
@@ -322,31 +352,31 @@ func (s *section) entry(line string) (Entry, error) {
 	return e, nil
 }
 
-// Files are the declarations files a Mac may read: the shared one, then each
-// Mac's, by name.
-func (c *Config) Files() []string {
+// Scopes are the folders whose declarations a Mac may read: the shared one,
+// then each Mac's, by name.
+func (c *Config) Scopes() []string {
 	return append([]string{Shared}, c.MacNames()...)
 }
 
-// readDecl reads the declarations file named name: empty, when there's none.
-func (c *Config) readDecl(name string) (*declFile, error) {
-	data, err := os.ReadFile(filepath.Join(c.Dir, name))
+// readDecl reads scope's declarations file: empty, when there's none.
+func (c *Config) readDecl(scope string) (*declFile, error) {
+	data, err := os.ReadFile(filepath.Join(c.Dir, DeclFile(scope)))
 	if errors.Is(err, fs.ErrNotExist) {
-		return &declFile{name: name}, nil
+		return &declFile{scope: scope}, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", name, err)
+		return nil, fmt.Errorf("read %s: %w", DeclFile(scope), err)
 	}
-	return parseFile(name, string(data))
+	return parseFile(scope, string(data))
 }
 
-// declared is what the file named file declares in kind's sections.
-func (c *Config) declared(kind, file string) ([]Entry, error) {
+// declared is what scope's declarations file declares in kind's sections.
+func (c *Config) declared(kind, scope string) ([]Entry, error) {
 	d, err := defFor(kind)
 	if err != nil {
 		return nil, err
 	}
-	f, err := c.readDecl(file)
+	f, err := c.readDecl(scope)
 	if err != nil {
 		return nil, err
 	}
@@ -355,7 +385,7 @@ func (c *Config) declared(kind, file string) ([]Entry, error) {
 		if s.def.kind != d.kind {
 			continue
 		}
-		entries, err := s.entries(file)
+		entries, err := s.entries(scope)
 		if err != nil {
 			return nil, err
 		}
@@ -384,7 +414,7 @@ func (c *Config) List(kind, mac string) (List, error) {
 	}
 	for _, e := range own {
 		if s, ok := where[e.Name]; ok {
-			return List{}, fmt.Errorf("%s:%d: %s is in %s too (line %d): a thing goes in the shared file or a Mac's, not both", e.File, e.Line, e.Name, s.File, s.Line)
+			return List{}, fmt.Errorf("%s: %s is in %s too (line %d): a thing goes in the shared declarations or a Mac's, not both", e.Pos(), e.Name, DeclFile(s.Scope), s.Line)
 		}
 	}
 	return List{Kind: kind, Entries: append(shared, own...)}, nil
@@ -394,8 +424,8 @@ func (c *Config) List(kind, mac string) (List, error) {
 // then each Mac's, by the Macs' names.
 func (c *Config) Where(kind, name string) ([]Entry, error) {
 	var found []Entry
-	for _, file := range c.Files() {
-		entries, err := c.declared(kind, file)
+	for _, scope := range c.Scopes() {
+		entries, err := c.declared(kind, scope)
 		if err != nil {
 			return nil, err
 		}
@@ -408,9 +438,9 @@ func (c *Config) Where(kind, name string) ([]Entry, error) {
 	return found, nil
 }
 
-// checkFiles finds a declarations file for a Mac the config doesn't know: a
-// file whose first section's header is a kit section's, named neither
-// shared nor one of the Macs, so a misnamed one is never silently ignored.
+// checkFiles finds a folder declaring for a Mac the config doesn't know: one
+// holding a declarations file, named neither shared nor one of the Macs, so
+// a misnamed one is never silently ignored.
 func (c *Config) checkFiles() error {
 	entries, err := os.ReadDir(c.Dir)
 	if err != nil {
@@ -418,24 +448,15 @@ func (c *Config) checkFiles() error {
 	}
 	for _, e := range entries {
 		name := e.Name()
-		if !e.Type().IsRegular() || strings.ContainsAny(name, ".") || name == Shared || c.Knows(name) {
+		if !e.IsDir() || strings.HasPrefix(name, ".") || name == Shared || c.Knows(name) {
 			continue
 		}
-		data, err := os.ReadFile(filepath.Join(c.Dir, name))
-		if err != nil {
-			return fmt.Errorf("read %s: %w", name, err)
-		}
-		for line := range strings.Lines(string(data)) {
-			text, _ := splitComment(line)
-			if text == "" {
-				continue
-			}
-			if m := headerLine.FindStringSubmatch(text); m != nil {
-				if _, _, ok := matchHeader(m[1]); ok {
-					return fmt.Errorf("%s declares for a Mac %s doesn't name (one of %s): rename the file, or add the Mac", name, File, c.macList())
-				}
-			}
-			break
+		_, err := os.Stat(filepath.Join(c.Dir, DeclFile(name)))
+		switch {
+		case err == nil:
+			return fmt.Errorf("%s declares for a Mac %s doesn't name (one of %s): rename the folder, or add the Mac", DeclFile(name), File, c.macList())
+		case !errors.Is(err, fs.ErrNotExist):
+			return fmt.Errorf("read %s: %w", DeclFile(name), err)
 		}
 	}
 	return nil

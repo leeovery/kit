@@ -77,7 +77,7 @@ func switchOne(ctx context.Context, r *run, c *changes, m *mcp.MCP, name string,
 	if err != nil {
 		return check.Result{State: check.Failed, Reason: err.Error()}
 	}
-	i := slices.IndexFunc(where, func(e config.Entry) bool { return e.File == config.Shared || e.File == r.machine })
+	i := slices.IndexFunc(where, func(e config.Entry) bool { return e.Scope == config.Shared || e.Scope == r.machine })
 	if i < 0 {
 		return check.Result{State: check.Failed, Reason: "not declared for this Mac: kit add " + claudeMCP + " declares a server Claude Code has"}
 	}
@@ -89,11 +89,11 @@ func switchOne(ctx context.Context, r *run, c *changes, m *mcp.MCP, name string,
 	}
 	if value != e.Value {
 		e.Value = value
-		if err := r.cfg.Replace(claudeMCP, e.File, e); err != nil {
+		if err := r.cfg.Replace(claudeMCP, e.Scope, e); err != nil {
 			return check.Result{State: check.Failed, Reason: err.Error()}
 		}
-		c.changed(e.File)
-		done = append(done, "declared "+verb+" in "+e.File)
+		c.changed(config.DeclFile(e.Scope))
+		done = append(done, "declared "+verb+" in "+e.Scope)
 	}
 	isIn, err := installed(ctx, m, name)
 	if err != nil {

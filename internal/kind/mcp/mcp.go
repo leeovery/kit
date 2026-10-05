@@ -92,10 +92,10 @@ func (m *MCP) Values(list config.List) (config.List, error) {
 	for i, e := range out.Entries {
 		def, isOff, err := readValue(e.Value)
 		if err != nil {
-			return list, fmt.Errorf("%s:%d: %s: %w", e.File, e.Line, e.Name, err)
+			return list, fmt.Errorf("%s: %s: %w", e.Pos(), e.Name, err)
 		}
 		if plain := PlainKeys(def); len(plain) > 0 {
-			return list, fmt.Errorf("%s:%d: %s: %s holds a key in plain text: put the key in 1Password, and name it here as ${VAR}", e.File, e.Line, e.Name, strings.Join(plain, " and "))
+			return list, fmt.Errorf("%s: %s: %s holds a key in plain text: put the key in 1Password, and name it here as ${VAR}", e.Pos(), e.Name, strings.Join(plain, " and "))
 		}
 		folder, name := splitID(e.Name)
 		m.declared[e.Name] = Server{Folder: folder, Name: name, Definition: def, Off: isOff}

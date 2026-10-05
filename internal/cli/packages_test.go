@@ -13,7 +13,7 @@ func TestAddAComposerPackageWithAConstraint(t *testing.T) {
 	w.fake.On("composer", show...).Prints(`{"installed": []}`).
 		Then().Prints(`{"installed": [{"name": "laravel/valet"}]}`)
 	w.fake.On("composer", "global", "require", "--no-interaction", "laravel/valet:^4.0")
-	w.expectSync([]string{"laptop"}, "kit add composer laravel/valet:^4.0 (laptop): Valet 4")
+	w.expectSync([]string{"laptop/declarations"}, "kit add composer laravel/valet:^4.0 (laptop): Valet 4")
 
 	out, errOut, code := w.run(t, "add", "composer", "laravel/valet:^4.0", "--note", "Valet 4")
 	if code != 0 || !strings.Contains(out, "laravel/valet:^4.0 ok installed; declared in laptop (To be sorted)\n") {
@@ -34,7 +34,7 @@ func TestReconcileAdoptsAnNPMPackage(t *testing.T) {
 	w := laptopWorld(t)
 	w.writeSection(t, "laptop", "npm packages", "intelephense\n")
 	w.fake.On("npm", "ls", "--global", "--depth=0", "--json").Prints(`{"dependencies": {"intelephense": {}, "docx": {}}}`)
-	w.expectSync([]string{"laptop"}, "kit reconcile (laptop): adopt npm:docx: for the docs skill")
+	w.expectSync([]string{"laptop/declarations"}, "kit reconcile (laptop): adopt npm:docx: for the docs skill")
 
 	out, errOut, code := w.run(t, "reconcile", "npm:docx", "--adopt", "--note", "for the docs skill")
 	if code != 0 {

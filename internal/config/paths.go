@@ -28,7 +28,7 @@ func (c *Config) SearchPath(home, mac string) ([]string, error) {
 				dir = home + rest
 			}
 			if !filepath.IsAbs(dir) {
-				return nil, fmt.Errorf("%s:%d: %q isn't an absolute directory (~ may start one)", e.File, e.Line, e.Name)
+				return nil, fmt.Errorf("%s: %q isn't an absolute directory (~ may start one)", e.Pos(), e.Name)
 			}
 			path = append(path, filepath.Clean(dir))
 		}

@@ -345,8 +345,8 @@ func (a *app) askGroup(ctx context.Context, r *run, d decision) (string, error) 
 	if !config.Grouped(d.item.Kind) {
 		return "", nil
 	}
-	file := r.file(d.shared)
-	headings, err := r.cfg.Groups(d.item.Kind, file)
+	scope := r.scope(d.shared)
+	headings, err := r.cfg.Groups(d.item.Kind, scope)
 	if err != nil {
 		return "", err
 	}
@@ -356,7 +356,7 @@ func (a *app) askGroup(ctx context.Context, r *run, d decision) (string, error) 
 			options = append(options, h)
 		}
 	}
-	i, err := a.Choose(ctx, fmt.Sprintf("Which group of [%s] in %s for %s?", config.Header(d.item.Kind), file, d.item.Name), options)
+	i, err := a.Choose(ctx, fmt.Sprintf("Which group of [%s] in %s for %s?", config.Header(d.item.Kind), scope, d.item.Name), options)
 	if errors.Is(err, ask.ErrCancelled) {
 		return "", errors.New("cancelled: nothing was changed")
 	}
@@ -437,12 +437,12 @@ func carryOutOne(ctx context.Context, r *run, c *changes, d decision, note strin
 	k := r.kindsByName[d.item.Kind]
 	switch d.action {
 	case adopt:
-		file := r.file(d.shared)
+		scope := r.scope(d.shared)
 		group := d.group
 		if group == config.ToBeSorted {
 			group = ""
 		}
-		return addOne(ctx, r, c, k, file, d.item.Name, group, addOptions{shared: d.shared, note: note})
+		return addOne(ctx, r, c, k, scope, d.item.Name, group, addOptions{shared: d.shared, note: note})
 	case remove, undeclare:
 		return removeOne(ctx, r, c, k, d.item.Name, d.shared)
 	case install:

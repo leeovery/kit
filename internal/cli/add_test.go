@@ -13,10 +13,10 @@ func TestAddInstallsAndDeclares(t *testing.T) {
 	w := laptopWorld(t)
 	w.fake.On("brew", "update", "--quiet")
 	w.fake.On("brew", "install", "--formula", "hello")
-	w.expectSync([]string{"laptop"}, "kit add brew hello (laptop): a test")
+	w.expectSync([]string{"laptop/declarations"}, "kit add brew hello (laptop): a test")
 
 	out, errOut, code := w.run(t, "add", "brew", "hello", "--note", "a test")
-	want := "kit add · laptop\nhello ok installed; declared in laptop (To be sorted)\nkit-config ok committed and pushed laptop\nNothing needs attention\n"
+	want := "kit add · laptop\nhello ok installed; declared in laptop (To be sorted)\nkit-config ok committed and pushed laptop/declarations\nNothing needs attention\n"
 	if out != want || errOut != "" || code != 0 {
 		t.Errorf("kit add printed\n%s%s exit %d\nwant\n%s", out, errOut, code, want)
 	}
@@ -39,7 +39,7 @@ func TestAddAsksWhichGroupFirst(t *testing.T) {
 	}
 	w.fake.On("brew", "update", "--quiet")
 	w.fake.On("brew", "install", "--formula", "golangci-lint")
-	w.expectSync([]string{"laptop"}, "kit add brew golangci-lint (laptop)")
+	w.expectSync([]string{"laptop/declarations"}, "kit add brew golangci-lint (laptop)")
 
 	if _, errOut, code := w.run(t, "add", "brew", "golangci-lint"); code != 0 {
 		t.Fatalf("kit add exit %d: %s", code, errOut)
@@ -69,7 +69,7 @@ func TestAddInAGroupWithoutAsking(t *testing.T) {
 	w := laptopWorld(t)
 	w.fake.On("brew", "update", "--quiet")
 	w.fake.On("brew", "install", "--formula", "golangci-lint")
-	w.expectSync([]string{"laptop"}, "kit add brew golangci-lint (laptop)")
+	w.expectSync([]string{"laptop/declarations"}, "kit add brew golangci-lint (laptop)")
 	if _, errOut, code := w.run(t, "add", "brew", "golangci-lint", "--group", "Go"); code != 0 {
 		t.Fatalf("kit add exit %d: %s", code, errOut)
 	}
@@ -81,7 +81,7 @@ func TestAddInAGroupWithoutAsking(t *testing.T) {
 func TestAddSharedMovesItOutOfTheMacsFiles(t *testing.T) {
 	w := laptopWorld(t)
 	w.writeSection(t, "studio", "homebrew formulae", "ffmpeg\ngo\n")
-	w.expectSync([]string{"laptop", "shared", "studio"}, "kit add brew go (laptop)")
+	w.expectSync([]string{"laptop/declarations", "shared/declarations", "studio/declarations"}, "kit add brew go (laptop)")
 
 	out, errOut, code := w.run(t, "add", "brew", "go", "--shared")
 	if !strings.Contains(out, "go ok already installed; declared in shared (To be sorted), out of laptop and studio\n") || code != 0 {
@@ -150,7 +150,7 @@ func TestAddAnUnknownKind(t *testing.T) {
 func TestRemoveUninstallsAndUndeclares(t *testing.T) {
 	w := laptopWorld(t)
 	w.fake.On("brew", "uninstall", "--formula", "go")
-	w.expectSync([]string{"laptop"}, "kit remove brew go (laptop)")
+	w.expectSync([]string{"laptop/declarations"}, "kit remove brew go (laptop)")
 	out, errOut, code := w.run(t, "remove", "brew", "go")
 	if !strings.Contains(out, "go ok uninstalled; out of laptop\n") || code != 0 {
 		t.Errorf("kit remove printed\n%s%s exit %d", out, errOut, code)
@@ -173,7 +173,7 @@ func TestRemoveFromEveryMacNeedsShared(t *testing.T) {
 	}
 
 	w.fake.On("brew", "uninstall", "--formula", "jq")
-	w.expectSync([]string{"shared"}, "kit remove brew jq (laptop)")
+	w.expectSync([]string{"shared/declarations"}, "kit remove brew jq (laptop)")
 	out, _, code = w.run(t, "remove", "brew", "jq", "--shared")
 	if !strings.Contains(out, "jq ok uninstalled; out of shared\n") || code != 0 {
 		t.Errorf("kit remove --shared printed\n%s exit %d", out, code)
@@ -221,7 +221,7 @@ func TestAddAtATerminalAsksForThePasswordFirst(t *testing.T) {
 	w.fake.On("sudo", "-v")
 	w.fake.On("brew", "update", "--quiet")
 	w.fake.On("brew", "install", "--cask", "zoom")
-	w.expectSync([]string{"laptop"}, "kit add cask zoom (laptop)")
+	w.expectSync([]string{"laptop/declarations"}, "kit add cask zoom (laptop)")
 
 	if _, errOut, code := w.run(t, "add", "cask", "zoom"); code != 0 {
 		t.Fatalf("kit add exit %d: %s", code, errOut)

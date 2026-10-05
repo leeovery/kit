@@ -106,9 +106,8 @@ func (r *run) kindNamed(name string) (kind.Kind, error) {
 	return k, nil
 }
 
-// file is the declarations file a thing is declared in: the shared one, or
-// this Mac's.
-func (r *run) file(shared bool) string {
+// scope is whose declarations a thing is declared in: shared, or this Mac's.
+func (r *run) scope(shared bool) string {
 	if shared {
 		return config.Shared
 	}

@@ -66,11 +66,11 @@ func (a *app) add(ctx context.Context, r *run, kindName string, names []string, 
 	if d, ok := k.(kind.Declarer); ok && !opts.temp {
 		return errors.New(d.HowToDeclare(names[0]) + "; --temp installs without declaring")
 	}
-	file := r.file(opts.shared)
+	scope := r.scope(opts.shared)
 	if names, err = a.find(ctx, k, names); err != nil {
 		return err
 	}
-	groups, err := a.groupsFor(ctx, r, kindName, file, names, opts)
+	groups, err := a.groupsFor(ctx, r, kindName, scope, names, opts)
 	if err != nil {
 		return err
 	}
@@ -84,7 +84,7 @@ func (a *app) add(ctx context.Context, r *run, kindName string, names []string, 
 	c := startChanges(r, names)
 	for _, name := range names {
 		c.step(ctx, name, func(ctx context.Context) check.Result {
-			return addOne(ctx, r, c, k, file, name, groups[name], opts)
+			return addOne(ctx, r, c, k, scope, name, groups[name], opts)
 		})
 	}
 	c.sync(ctx, commitMessage("add", kindName, names, r.machine, opts.note))
@@ -134,15 +134,15 @@ func (a *app) find(ctx context.Context, k kind.Kind, typed []string) ([]string, 
 	return names, nil
 }
 
-// groupsFor asks, before anything is installed, which group of file each
-// name kit will declare goes in: --group answers for all; without a
-// terminal, they go in "To be sorted".
-func (a *app) groupsFor(ctx context.Context, r *run, kindName, file string, names []string, opts addOptions) (map[string]string, error) {
+// groupsFor asks, before anything is installed, which group of scope's
+// declarations each name kit will declare goes in: --group answers for all;
+// without a terminal, they go in "To be sorted".
+func (a *app) groupsFor(ctx context.Context, r *run, kindName, scope string, names []string, opts addOptions) (map[string]string, error) {
 	groups := make(map[string]string)
 	if opts.temp || !config.Grouped(kindName) {
 		return groups, nil
 	}
-	headings, err := r.cfg.Groups(kindName, file)
+	headings, err := r.cfg.Groups(kindName, scope)
 	if err != nil {
 		return nil, err
 	}
@@ -162,7 +162,7 @@ func (a *app) groupsFor(ctx context.Context, r *run, kindName, file string, name
 		case opts.group != "":
 			groups[name] = opts.group
 		case a.pretty(a.Stdout):
-			i, err := a.Choose(ctx, fmt.Sprintf("Which group of [%s] in %s for %s?", config.Header(kindName), file, name), options)
+			i, err := a.Choose(ctx, fmt.Sprintf("Which group of [%s] in %s for %s?", config.Header(kindName), scope, name), options)
 			if errors.Is(err, ask.ErrCancelled) {
 				return nil, errors.New("cancelled: nothing was installed or declared")
 			}
@@ -183,13 +183,13 @@ func declaredFor(r *run, kindName, name string, shared bool) ([]config.Entry, er
 		return nil, err
 	}
 	return slices.DeleteFunc(where, func(e config.Entry) bool {
-		return e.File != config.Shared && (shared || e.File != r.machine)
+		return e.Scope != config.Shared && (shared || e.Scope != r.machine)
 	}), nil
 }
 
-// addOne installs name, unless it's installed, and declares it in file, in
-// group, unless it's declared already, or temporary.
-func addOne(ctx context.Context, r *run, c *changes, k kind.Kind, file, name, group string, opts addOptions) check.Result {
+// addOne installs name, unless it's installed, and declares it in scope's
+// declarations, in group, unless it's declared already, or temporary.
+func addOne(ctx context.Context, r *run, c *changes, k kind.Kind, scope, name, group string, opts addOptions) check.Result {
 	kindName := k.Name()
 	isIn, err := installed(ctx, k, name)
 	if err != nil {
@@ -210,7 +210,7 @@ func addOne(ctx context.Context, r *run, c *changes, k kind.Kind, file, name, gr
 		return check.Result{State: check.Failed, Reason: err.Error()}
 	}
 	if len(mine) > 0 {
-		return check.Result{State: check.OK, Summary: verb + "; declared already, in " + mine[0].File}
+		return check.Result{State: check.OK, Summary: verb + "; declared already, in " + mine[0].Scope}
 	}
 	if opts.temp {
 		full := name
@@ -234,11 +234,11 @@ func addOne(ctx context.Context, r *run, c *changes, k kind.Kind, file, name, gr
 			return check.Result{State: check.Failed, Reason: verb + ", but couldn't declare: " + err.Error()}
 		}
 	}
-	if err := r.cfg.Declare(kindName, file, e, group); err != nil {
+	if err := r.cfg.Declare(kindName, scope, e, group); err != nil {
 		return check.Result{State: check.Failed, Reason: verb + ", but couldn't declare: " + err.Error()}
 	}
-	c.changed(file)
-	summary := fmt.Sprintf("%s; declared in %s", verb, file)
+	c.changed(config.DeclFile(scope))
+	summary := fmt.Sprintf("%s; declared in %s", verb, scope)
 	if config.Grouped(kindName) {
 		summary += " (" + groupOr(group) + ")"
 	}
@@ -249,14 +249,14 @@ func addOne(ctx context.Context, r *run, c *changes, k kind.Kind, file, name, gr
 		}
 		var moved []string
 		for _, e := range where {
-			if e.File == file {
+			if e.Scope == scope {
 				continue
 			}
-			if err := r.cfg.Undeclare(kindName, e.File, name); err != nil {
+			if err := r.cfg.Undeclare(kindName, e.Scope, name); err != nil {
 				return check.Result{State: check.Failed, Reason: err.Error()}
 			}
-			c.changed(e.File)
-			moved = append(moved, e.File)
+			c.changed(config.DeclFile(e.Scope))
+			moved = append(moved, e.Scope)
 		}
 		if len(moved) > 0 {
 			summary += ", out of " + strings.Join(moved, " and ")

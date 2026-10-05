@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/leeovery/kit/internal/cli"
+	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/runner"
 	"github.com/leeovery/kit/internal/runner/runnertest"
 )
@@ -128,12 +129,12 @@ func (w *world) expectSync(files []string, message string) {
 	w.fake.On("git", git("push", "--quiet")...)
 }
 
-// writeSection sets the section headed header, in the declarations file
-// named file, to lines, keeping the file's other sections; the section is
-// added at the end when the file hasn't one.
-func (w *world) writeSection(t *testing.T, file, header, lines string) {
+// writeSection sets the section headed header, in scope's declarations
+// file, to lines, keeping the file's other sections; the section is added at
+// the end when the file hasn't one.
+func (w *world) writeSection(t *testing.T, scope, header, lines string) {
 	t.Helper()
-	path := filepath.Join(".config", "kit", file)
+	path := filepath.Join(".config", "kit", config.DeclFile(scope))
 	type section struct{ header, body string }
 	var sections []section
 	for line := range strings.Lines(w.read(t, path)) {
@@ -160,13 +161,13 @@ func (w *world) writeSection(t *testing.T, file, header, lines string) {
 	w.write(t, path, b.String())
 }
 
-// readSection reads the lines of the section headed header in the
-// declarations file named file: "" when there's no such section.
-func (w *world) readSection(t *testing.T, file, header string) string {
+// readSection reads the lines of the section headed header in scope's
+// declarations file: "" when there's no such section.
+func (w *world) readSection(t *testing.T, scope, header string) string {
 	t.Helper()
 	var b strings.Builder
 	in := false
-	for line := range strings.Lines(w.read(t, filepath.Join(".config", "kit", file))) {
+	for line := range strings.Lines(w.read(t, filepath.Join(".config", "kit", config.DeclFile(scope)))) {
 		if strings.HasPrefix(line, "[") {
 			in = strings.TrimSpace(line) == "["+header+"]"
 			continue

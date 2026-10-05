@@ -62,7 +62,7 @@ func (a *app) switchFeatures(ctx context.Context, r *run, names []string, on, sh
 	if on {
 		verb = "on"
 	}
-	file := r.file(shared)
+	scope := r.scope(shared)
 	c := startChanges(r, names)
 	for _, name := range names {
 		c.step(ctx, name, func(context.Context) check.Result {
@@ -70,25 +70,25 @@ func (a *app) switchFeatures(ctx context.Context, r *run, names []string, on, sh
 			if err != nil {
 				return failed(err)
 			}
-			in := slices.ContainsFunc(where, func(e config.Entry) bool { return e.File == file })
+			in := slices.ContainsFunc(where, func(e config.Entry) bool { return e.Scope == scope })
 			switch {
 			case on && in:
-				return check.Result{State: check.OK, Summary: "on already, in " + file}
+				return check.Result{State: check.OK, Summary: "on already, in " + scope}
 			case on:
-				if err := r.cfg.Declare(config.FeaturesKind, file, config.Entry{Name: name}, ""); err != nil {
+				if err := r.cfg.Declare(config.FeaturesKind, scope, config.Entry{Name: name}, ""); err != nil {
 					return failed(err)
 				}
-			case !in && slices.ContainsFunc(where, func(e config.Entry) bool { return e.File == config.Shared }):
+			case !in && slices.ContainsFunc(where, func(e config.Entry) bool { return e.Scope == config.Shared }):
 				return check.Result{State: check.Failed, Reason: "on for every Mac, in " + config.Shared + ": --shared switches it off there"}
 			case !in:
 				return check.Result{State: check.OK, Summary: "off already"}
 			default:
-				if err := r.cfg.Undeclare(config.FeaturesKind, file, name); err != nil {
+				if err := r.cfg.Undeclare(config.FeaturesKind, scope, name); err != nil {
 					return failed(err)
 				}
 			}
-			c.changed(file)
-			return check.Result{State: check.OK, Summary: verb + ", in " + file}
+			c.changed(config.DeclFile(scope))
+			return check.Result{State: check.OK, Summary: verb + ", in " + scope}
 		})
 	}
 	c.sync(ctx, fmt.Sprintf("kit feature %s %s (%s)", verb, strings.Join(names, ", "), r.machine))

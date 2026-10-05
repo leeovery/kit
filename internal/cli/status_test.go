@@ -17,10 +17,10 @@ import (
 func laptopWorld(t *testing.T) *world {
 	t.Helper()
 	w := newWorld(t, map[string]string{
-		"kit.toml": twoMacs,
-		"shared":   "[paths]\n~/.local/bin\n/opt/homebrew/bin\n\n[homebrew formulae]\n# Shell\njq\nowner/tap/tool\n\n[homebrew casks]\nghostty\n",
-		"laptop":   "[homebrew formulae]\ngo\n",
-		"studio":   "[homebrew formulae]\nffmpeg\n",
+		"kit.toml":            twoMacs,
+		"shared/declarations": "[paths]\n~/.local/bin\n/opt/homebrew/bin\n\n[homebrew formulae]\n# Shell\njq\nowner/tap/tool\n\n[homebrew casks]\nghostty\n",
+		"laptop/declarations": "[homebrew formulae]\ngo\n",
+		"studio/declarations": "[homebrew formulae]\nffmpeg\n",
 	})
 	w.write(t, filepath.Join(".local", "state", "kit", "machine"), "laptop\n")
 	// The drift was first seen two days ago, so it needs attention.
@@ -148,7 +148,7 @@ func TestStatusNeedsTheMacsNameFirst(t *testing.T) {
 		{machine: "", want: "kit: this Mac has no name yet: run kit machine <name>, one of laptop, studio\n"},
 		{machine: "mini\n", want: "kit: this Mac is named mini, which kit.toml doesn't know: run kit machine <name>, one of laptop, studio\n"},
 	} {
-		w := newWorld(t, map[string]string{"kit.toml": twoMacs, "laptop": "[homebrew formulae]\ngo\n"})
+		w := newWorld(t, map[string]string{"kit.toml": twoMacs, "laptop/declarations": "[homebrew formulae]\ngo\n"})
 		if tt.machine != "" {
 			w.write(t, filepath.Join(".local", "state", "kit", "machine"), tt.machine)
 		}
@@ -242,7 +242,7 @@ func TestStatusQuietensNewDrift(t *testing.T) {
 // A kind with nothing declared for the Mac, whose program isn't installed,
 // has nothing to check, so its step isn't in the run.
 func TestStatusLeavesOutAKindWithNothingToCheck(t *testing.T) {
-	w := newWorld(t, map[string]string{"kit.toml": twoMacs, "studio": "[homebrew formulae]\nffmpeg\n"})
+	w := newWorld(t, map[string]string{"kit.toml": twoMacs, "studio/declarations": "[homebrew formulae]\nffmpeg\n"})
 	w.write(t, filepath.Join(".local", "state", "kit", "machine"), "laptop\n")
 	w.fake.On("brew", "--prefix").Fails(errNotFound)
 	w.fake.On("git", "-C", filepath.Join(w.home, ".config", "kit"), "remote", "get-url", "origin").Prints("git@github.com:someone/kit-config.git\n")

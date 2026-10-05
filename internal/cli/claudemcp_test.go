@@ -46,7 +46,7 @@ func TestStatusRefusesAKeyInPlainText(t *testing.T) {
 	w := mcpWorld(t)
 	w.writeSection(t, "laptop", "claude mcp", "docs --transport http https://docs.example.com/mcp --header \"Authorization: Bearer abc\"\n")
 	out, _, code := w.run(t, "status", "claude-mcp")
-	if !strings.Contains(out, "claude-mcp failed laptop:5: docs: headers.Authorization holds a key in plain text") || code != 1 {
+	if !strings.Contains(out, "claude-mcp failed laptop/declarations:5: docs: headers.Authorization holds a key in plain text") || code != 1 {
 		t.Errorf("kit status printed\n%s exit %d", out, code)
 	}
 }
@@ -68,7 +68,7 @@ func TestApplyReplacesAChangedServer(t *testing.T) {
 
 func TestReconcileAdoptsAndRemovesMCPServers(t *testing.T) {
 	w := mcpWorld(t)
-	w.expectSync([]string{"laptop"}, "kit reconcile (laptop): adopt claude-mcp:stray: a helper")
+	w.expectSync([]string{"laptop/declarations"}, "kit reconcile (laptop): adopt claude-mcp:stray: a helper")
 	out, errOut, code := w.run(t, "reconcile", "claude-mcp:stray", "--adopt", "--note", "a helper")
 	if code != 0 || !strings.Contains(out, "claude-mcp:stray ok already installed; declared in laptop\n") {
 		t.Fatalf("kit reconcile --adopt printed\n%s%s exit %d", out, errOut, code)
@@ -105,9 +105,9 @@ func TestAddingAnMCPServerWithAKeyInPlainTextIsRefused(t *testing.T) {
 // on and installs it; the file ends as it began.
 func TestMCPOffAndOn(t *testing.T) {
 	w := mcpWorld(t)
-	before := w.read(t, filepath.Join(".config", "kit", "laptop"))
+	before := w.read(t, filepath.Join(".config", "kit", "laptop", "declarations"))
 	w.fake.On("claude", "mcp", "remove", "-s", "user", "docs")
-	w.expectSync([]string{"laptop"}, "kit claude-mcp off docs (laptop)")
+	w.expectSync([]string{"laptop/declarations"}, "kit claude-mcp off docs (laptop)")
 	out, errOut, code := w.run(t, "claude-mcp", "off", "docs")
 	if code != 0 || !strings.Contains(out, "docs ok declared off in laptop; removed from Claude Code\n") {
 		t.Fatalf("kit claude-mcp off printed\n%s%s exit %d", out, errOut, code)
@@ -119,12 +119,12 @@ func TestMCPOffAndOn(t *testing.T) {
 	// Claude Code no longer has docs.
 	w.write(t, ".claude.json", `{"mcpServers": {"design": {"type": "http", "url": "https://design.example.com/mcp", "headers": {"Authorization": "Bearer ${DESIGN_KEY}"}}}}`)
 	w.fake.On("claude", "mcp", "add-json", "-s", "user", "docs", `{"type":"http","url":"https://docs.example.com/mcp"}`)
-	w.expectSync([]string{"laptop"}, "kit claude-mcp on docs (laptop)")
+	w.expectSync([]string{"laptop/declarations"}, "kit claude-mcp on docs (laptop)")
 	out, errOut, code = w.run(t, "claude-mcp", "on", "docs")
 	if code != 0 || !strings.Contains(out, "docs ok declared on in laptop; installed\n") {
 		t.Fatalf("kit claude-mcp on printed\n%s%s exit %d", out, errOut, code)
 	}
-	if got := w.read(t, filepath.Join(".config", "kit", "laptop")); got != before {
+	if got := w.read(t, filepath.Join(".config", "kit", "laptop", "declarations")); got != before {
 		t.Errorf("laptop =\n%s\nwant it as it began\n%s", got, before)
 	}
 

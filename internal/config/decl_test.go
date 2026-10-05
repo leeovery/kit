@@ -41,19 +41,19 @@ mail --env MAIL_KEY=${MAIL_KEY} -- npx -y mail-mcp
 `
 
 func TestList(t *testing.T) {
-	cfg := loadRepo(t, map[string]string{"shared": sharedFile, "laptop": laptopFile, "studio": "[homebrew formulae]\nffmpeg\n"})
+	cfg := loadRepo(t, map[string]string{"shared/declarations": sharedFile, "laptop/declarations": laptopFile, "studio/declarations": "[homebrew formulae]\nffmpeg\n"})
 	got, err := cfg.List("brew", "laptop")
 	if err != nil {
 		t.Fatalf("List() error = %v", err)
 	}
 	f := "homebrew formulae"
 	want := []config.Entry{
-		{Name: "jq", File: "shared", Section: f, Line: 9, Group: "Shell"},
-		{Name: "ripgrep", File: "shared", Section: f, Line: 10, Group: "Shell", Note: "searching code"},
-		{Name: "owner/tap/tool", File: "shared", Section: f, Line: 11, Group: "Shell"},
-		{Name: "git", File: "shared", Section: f, Line: 14, Group: "Git"},
-		{Name: "go", File: "laptop", Section: f, Line: 3, Group: "Development"},
-		{Name: "node@24", File: "laptop", Section: f, Line: 4, Group: "Development", Note: "for the old projects"},
+		{Name: "jq", Scope: "shared", Section: f, Line: 9, Group: "Shell"},
+		{Name: "ripgrep", Scope: "shared", Section: f, Line: 10, Group: "Shell", Note: "searching code"},
+		{Name: "owner/tap/tool", Scope: "shared", Section: f, Line: 11, Group: "Shell"},
+		{Name: "git", Scope: "shared", Section: f, Line: 14, Group: "Git"},
+		{Name: "go", Scope: "laptop", Section: f, Line: 3, Group: "Development"},
+		{Name: "node@24", Scope: "laptop", Section: f, Line: 4, Group: "Development", Note: "for the old projects"},
 	}
 	if got.Kind != "brew" || !slices.Equal(got.Entries, want) {
 		t.Errorf("List() = %+v\nwant %+v", got.Entries, want)
@@ -66,15 +66,15 @@ func TestList(t *testing.T) {
 // A command's line is its name, its options and a note; a project folder's
 // section's names carry the folder.
 func TestListCommands(t *testing.T) {
-	cfg := loadRepo(t, map[string]string{"laptop": laptopFile})
+	cfg := loadRepo(t, map[string]string{"laptop/declarations": laptopFile})
 	got, err := cfg.List("claude-mcp", "laptop")
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := []config.Entry{
-		{Name: "docs", Value: "--transport http https://docs.example.com/mcp", File: "laptop", Section: "claude mcp", Line: 7, Note: "the docs server"},
-		{Name: "design", Value: `--transport http https://design.example.com/mcp --header "Authorization: Bearer ${DESIGN_KEY}"`, File: "laptop", Section: "claude mcp", Line: 8},
-		{Name: "~/Code/site:mail", Value: "--env MAIL_KEY=${MAIL_KEY} -- npx -y mail-mcp", File: "laptop", Section: "claude mcp ~/Code/site", Folder: "~/Code/site", Line: 11},
+		{Name: "docs", Value: "--transport http https://docs.example.com/mcp", Scope: "laptop", Section: "claude mcp", Line: 7, Note: "the docs server"},
+		{Name: "design", Value: `--transport http https://design.example.com/mcp --header "Authorization: Bearer ${DESIGN_KEY}"`, Scope: "laptop", Section: "claude mcp", Line: 8},
+		{Name: "~/Code/site:mail", Value: "--env MAIL_KEY=${MAIL_KEY} -- npx -y mail-mcp", Scope: "laptop", Section: "claude mcp ~/Code/site", Folder: "~/Code/site", Line: 11},
 	}
 	if !slices.Equal(got.Entries, want) {
 		t.Errorf("List() = %+v\nwant %+v", got.Entries, want)
@@ -95,16 +95,16 @@ func TestListRefuses(t *testing.T) {
 		want  string
 	}{
 		{name: "an unknown Mac", files: map[string]string{}, want: "no Mac named other"},
-		{name: "a line before any section", files: map[string]string{"shared": "jq\n"}, want: `shared:1: "jq" is before any section`},
-		{name: "a section kit doesn't know", files: map[string]string{"shared": "[homebrew taps]\nowner/tap\n"}, want: "shared:1: kit doesn't know the section [homebrew taps]"},
-		{name: "a section twice", files: map[string]string{"shared": "[homebrew casks]\na\n\n[homebrew casks]\nb\n"}, want: "shared:4: [homebrew casks] is at line 1 too"},
-		{name: "a name twice", files: map[string]string{"shared": "[homebrew formulae]\njq\nripgrep\njq\n"}, want: "shared:4: jq is already at line 2"},
-		{name: "two names on a line", files: map[string]string{"shared": "[homebrew formulae]\njq ripgrep\n"}, want: `shared:2: "jq ripgrep" isn't a name`},
-		{name: "a # without a space before it", files: map[string]string{"shared": "[homebrew formulae]\njq#fast\n"}, want: `"jq#fast" isn't a name`},
-		{name: "a constraint alone", files: map[string]string{"shared": "[homebrew formulae]\n^4.0\n"}, want: `"^4.0" isn't a name`},
-		{name: "a command with nothing after its name", files: map[string]string{"laptop": "[claude mcp]\ndocs\n"}, want: "laptop:2: docs has nothing after its name"},
-		{name: "a quote left open", files: map[string]string{"laptop": "[claude mcp]\ndocs --header \"X: y\n"}, want: "laptop:2: a quote isn't closed"},
-		{name: "in the shared file and a Mac's", files: map[string]string{"shared": "[homebrew formulae]\njq\n", "laptop": "[homebrew formulae]\ngo\njq\n"}, want: "laptop:3: jq is in shared too (line 2)"},
+		{name: "a line before any section", files: map[string]string{"shared/declarations": "jq\n"}, want: `shared/declarations:1: "jq" is before any section`},
+		{name: "a section kit doesn't know", files: map[string]string{"shared/declarations": "[homebrew taps]\nowner/tap\n"}, want: "shared/declarations:1: kit doesn't know the section [homebrew taps]"},
+		{name: "a section twice", files: map[string]string{"shared/declarations": "[homebrew casks]\na\n\n[homebrew casks]\nb\n"}, want: "shared/declarations:4: [homebrew casks] is at line 1 too"},
+		{name: "a name twice", files: map[string]string{"shared/declarations": "[homebrew formulae]\njq\nripgrep\njq\n"}, want: "shared/declarations:4: jq is already at line 2"},
+		{name: "two names on a line", files: map[string]string{"shared/declarations": "[homebrew formulae]\njq ripgrep\n"}, want: `shared/declarations:2: "jq ripgrep" isn't a name`},
+		{name: "a # without a space before it", files: map[string]string{"shared/declarations": "[homebrew formulae]\njq#fast\n"}, want: `"jq#fast" isn't a name`},
+		{name: "a constraint alone", files: map[string]string{"shared/declarations": "[homebrew formulae]\n^4.0\n"}, want: `"^4.0" isn't a name`},
+		{name: "a command with nothing after its name", files: map[string]string{"laptop/declarations": "[claude mcp]\ndocs\n"}, want: "laptop/declarations:2: docs has nothing after its name"},
+		{name: "a quote left open", files: map[string]string{"laptop/declarations": "[claude mcp]\ndocs --header \"X: y\n"}, want: "laptop/declarations:2: a quote isn't closed"},
+		{name: "in the shared file and a Mac's", files: map[string]string{"shared/declarations": "[homebrew formulae]\njq\n", "laptop/declarations": "[homebrew formulae]\ngo\njq\n"}, want: "laptop/declarations:3: jq is in shared/declarations too (line 2)"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -126,7 +126,7 @@ func TestListRefuses(t *testing.T) {
 
 // A # inside quotes is part of a command, not its note.
 func TestCommandsKeepAQuotedHash(t *testing.T) {
-	cfg := loadRepo(t, map[string]string{"laptop": "[claude mcp]\nx --header \"X-Tag: a #b\"   # the note\n"})
+	cfg := loadRepo(t, map[string]string{"laptop/declarations": "[claude mcp]\nx --header \"X-Tag: a #b\"   # the note\n"})
 	got, err := cfg.List("claude-mcp", "laptop")
 	if err != nil || len(got.Entries) != 1 || got.Entries[0].Value != `--header "X-Tag: a #b"` || got.Entries[0].Note != "the note" {
 		t.Errorf("List() = %+v, %v", got.Entries, err)
@@ -134,9 +134,9 @@ func TestCommandsKeepAQuotedHash(t *testing.T) {
 }
 
 func TestWhere(t *testing.T) {
-	cfg := loadRepo(t, map[string]string{"shared": sharedFile, "laptop": laptopFile, "studio": "[homebrew formulae]\n# Media\nffmpeg   # for video\n"})
+	cfg := loadRepo(t, map[string]string{"shared/declarations": sharedFile, "laptop/declarations": laptopFile, "studio/declarations": "[homebrew formulae]\n# Media\nffmpeg   # for video\n"})
 	got, err := cfg.Where("brew", "ffmpeg")
-	want := []config.Entry{{Name: "ffmpeg", File: "studio", Section: "homebrew formulae", Line: 3, Group: "Media", Note: "for video"}}
+	want := []config.Entry{{Name: "ffmpeg", Scope: "studio", Section: "homebrew formulae", Line: 3, Group: "Media", Note: "for video"}}
 	if err != nil || !slices.Equal(got, want) {
 		t.Errorf("Where(ffmpeg) = %+v, %v; want %+v", got, err, want)
 	}
@@ -146,8 +146,8 @@ func TestWhere(t *testing.T) {
 }
 
 func TestLoadRefusesFilesForUnknownMacs(t *testing.T) {
-	dir := writeRepo(t, map[string]string{config.File: twoMacs, "mini": "# The mini\n[homebrew casks]\nplex-media-server\n", "personal-patterns": "[Ss]omeone\n", "README.md": "[homebrew casks]\n"})
-	if _, err := config.Load(dir); err == nil || !strings.Contains(err.Error(), "mini declares for a Mac kit.toml doesn't name") {
+	dir := writeRepo(t, map[string]string{config.File: twoMacs, "mini/declarations": "# The mini\n[homebrew casks]\nplex-media-server\n", "personal-patterns": "[Ss]omeone\n", "README.md": "[homebrew casks]\n", "notes/todo": "[homebrew casks]\n"})
+	if _, err := config.Load(dir); err == nil || !strings.Contains(err.Error(), "mini/declarations declares for a Mac kit.toml doesn't name") {
 		t.Errorf("Load() error = %v, want mini refused", err)
 	}
 }

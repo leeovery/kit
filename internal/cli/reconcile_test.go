@@ -48,7 +48,7 @@ func TestReconcileJSON(t *testing.T) {
 
 func TestReconcileAdoptsByID(t *testing.T) {
 	w := laptopWorld(t)
-	w.expectSync([]string{"laptop"}, "kit reconcile (laptop): adopt brew:ffmpeg: for screen recordings")
+	w.expectSync([]string{"laptop/declarations"}, "kit reconcile (laptop): adopt brew:ffmpeg: for screen recordings")
 	out, errOut, code := w.run(t, "reconcile", "brew:ffmpeg", "--adopt", "--note", "for screen recordings")
 	if !strings.Contains(out, "brew:ffmpeg ok already installed; declared in laptop (To be sorted)\n") || code != 0 {
 		t.Errorf("kit reconcile printed\n%s%s exit %d", out, errOut, code)
@@ -61,9 +61,9 @@ func TestReconcileAdoptsByID(t *testing.T) {
 // Several items, one decision: one run, and one commit.
 func TestReconcileAdoptsSeveralInOneCommit(t *testing.T) {
 	w := laptopWorld(t)
-	w.expectSync([]string{"laptop"}, "kit reconcile (laptop): adopt brew:ffmpeg, adopt cask:firefox")
+	w.expectSync([]string{"laptop/declarations"}, "kit reconcile (laptop): adopt brew:ffmpeg, adopt cask:firefox")
 	out, errOut, code := w.run(t, "reconcile", "brew:ffmpeg", "cask:firefox", "--adopt", "--group", "Media")
-	if code != 0 || !strings.Contains(out, "kit-config ok committed and pushed laptop\n") {
+	if code != 0 || !strings.Contains(out, "kit-config ok committed and pushed laptop/declarations\n") {
 		t.Errorf("kit reconcile printed\n%s%s exit %d", out, errOut, code)
 	}
 	if got := w.readSection(t, "laptop", "homebrew formulae"); got != "go\n\n# Media\nffmpeg\n" {
@@ -153,7 +153,7 @@ func TestReconcileAtATerminalAsksFirstThenDoesItAll(t *testing.T) {
 		"firefox (cask)": "leave it for now",
 	})
 	w.fake.On("brew", "uninstall", "--formula", "node@20")
-	w.expectSync([]string{"laptop"}, "kit reconcile (laptop): adopt brew:ffmpeg, remove brew:node@20")
+	w.expectSync([]string{"laptop/declarations"}, "kit reconcile (laptop): adopt brew:ffmpeg, remove brew:node@20")
 
 	if _, errOut, code := w.run(t, "reconcile"); code != 0 {
 		t.Fatalf("kit reconcile exit %d: %s", code, errOut)
