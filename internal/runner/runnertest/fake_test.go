@@ -113,3 +113,12 @@ func TestFakeHasWhatsScripted(t *testing.T) {
 		}
 	}
 }
+
+func TestFakeDoesWhatItsTold(t *testing.T) {
+	fake := runnertest.New(t)
+	ran := 0
+	fake.On("claude", "plugin", "marketplace", "add", "x/y").Does(func() { ran++ })
+	if _, err := fake.Run(t.Context(), runner.Command{Name: "claude", Args: []string{"plugin", "marketplace", "add", "x/y"}}); err != nil || ran != 1 {
+		t.Errorf("Run() = %v, ran %d times; want it done once", err, ran)
+	}
+}

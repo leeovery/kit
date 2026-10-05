@@ -56,6 +56,7 @@ var sectionDefs = []sectionDef{
 	{header: "github extensions", kind: "gh", form: names},
 	{header: "macos login items", kind: "login", form: names},
 	{header: "claude mcp", kind: "claude-mcp", form: commands, folders: true},
+	{header: "claude plugins", kind: "claude-plugin", form: names},
 }
 
 // defFor is the section kind's declarations go in.
