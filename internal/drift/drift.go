@@ -5,19 +5,13 @@
 package drift
 
 import (
-	"encoding/json"
-	"errors"
-	"fmt"
-	"io/fs"
 	"maps"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/leeovery/kit/internal/check"
+	"github.com/leeovery/kit/internal/state"
 )
 
 const (
@@ -36,10 +30,8 @@ const (
 	Temporary = "temporary"
 )
 
-const (
-	file     = "drift.json"
-	lockFile = "drift.lock"
-)
+// file is the drift record, in kit's state directory.
+const file = "drift.json"
 
 // Record is what kit remembers of drift, by item id.
 type Record struct {
@@ -53,61 +45,13 @@ type Record struct {
 // Load reads the record in the state directory: an empty one when there's
 // none.
 func Load(stateDir string) (Record, error) {
-	data, err := os.ReadFile(filepath.Join(stateDir, file))
-	if errors.Is(err, fs.ErrNotExist) {
-		return Record{}, nil
-	}
-	if err != nil {
-		return Record{}, fmt.Errorf("read the drift record: %w", err)
-	}
-	var r Record
-	if err := json.Unmarshal(data, &r); err != nil {
-		return Record{}, fmt.Errorf("read the drift record: %w", err)
-	}
-	return r, nil
+	return state.Load[Record](stateDir, file)
 }
 
 // Update reads the record, changes it, and writes it back whole, holding a
 // lock throughout, so two runs at once can't lose each other's changes.
 func Update(stateDir string, change func(*Record)) error {
-	if err := os.MkdirAll(stateDir, 0o700); err != nil {
-		return fmt.Errorf("make the state directory: %w", err)
-	}
-	lock, err := os.OpenFile(filepath.Join(stateDir, lockFile), os.O_CREATE|os.O_RDWR, 0o600)
-	if err != nil {
-		return fmt.Errorf("lock the drift record: %w", err)
-	}
-	defer func() { _ = lock.Close() }()
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
-		return fmt.Errorf("lock the drift record: %w", err)
-	}
-	defer func() { _ = syscall.Flock(int(lock.Fd()), syscall.LOCK_UN) }()
-
-	r, err := Load(stateDir)
-	if err != nil {
-		return err
-	}
-	change(&r)
-	data, err := json.MarshalIndent(r, "", "  ")
-	if err != nil {
-		return fmt.Errorf("write the drift record: %w", err)
-	}
-	tmp, err := os.CreateTemp(stateDir, file+".*")
-	if err != nil {
-		return fmt.Errorf("write the drift record: %w", err)
-	}
-	defer func() { _ = os.Remove(tmp.Name()) }()
-	if _, err := tmp.Write(append(data, '\n')); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("write the drift record: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("write the drift record: %w", err)
-	}
-	if err := os.Rename(tmp.Name(), filepath.Join(stateDir, file)); err != nil {
-		return fmt.Errorf("write the drift record: %w", err)
-	}
-	return nil
+	return state.Update(stateDir, file, change)
 }
 
 // Quieten marks each of res's items quiet while its time hasn't come, saying

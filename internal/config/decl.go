@@ -21,6 +21,13 @@ const PathsKind = "paths"
 // ChecksKind names the section of checks of the user's own, each a command.
 const ChecksKind = "checks"
 
+// HourlyKind and NightlyKind name the sections of jobs of the user's own,
+// each a command: run every hour, and in the nightly run.
+const (
+	HourlyKind  = "hourly"
+	NightlyKind = "nightly"
+)
+
 // FeaturesKind names the section of the pieces switched on for a Mac, by
 // name: the parts with nothing to list, such as a backup tool.
 const FeaturesKind = "features"
@@ -69,6 +76,8 @@ var sectionDefs = []sectionDef{
 	{header: "claude mcp", kind: "claude-mcp", form: commands, folders: true},
 	{header: "claude plugins", kind: "claude-plugin", form: names, grouped: true},
 	{header: "checks", kind: ChecksKind, form: commands},
+	{header: "hourly", kind: HourlyKind, form: commands},
+	{header: "nightly", kind: NightlyKind, form: commands},
 }
 
 // defFor is the section kind's declarations go in.

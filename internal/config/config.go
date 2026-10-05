@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/BurntSushi/toml"
 )
@@ -37,7 +38,13 @@ type Config struct {
 	Primary string
 	// Macs are the Macs the repository knows, by name.
 	Macs map[string]Mac
+	// NightlyAt is when each day the nightly run is due, as hours and
+	// minutes since midnight: 03:00 unless kit.toml says.
+	NightlyAt time.Duration
 }
+
+// DefaultNightlyAt is when the nightly run is due when kit.toml doesn't say.
+const DefaultNightlyAt = 3 * time.Hour
 
 // Mac is a Mac the config repository knows.
 type Mac struct {
@@ -50,6 +57,7 @@ type file struct {
 	Format     int                `toml:"format"`
 	MinimumKit string             `toml:"minimum_kit"`
 	Primary    string             `toml:"primary"`
+	NightlyAt  string             `toml:"nightly_at"`
 	Macs       map[string]macFile `toml:"macs"`
 }
 
@@ -101,7 +109,14 @@ func Load(dir string) (*Config, error) {
 	if len(f.Macs) == 0 {
 		return nil, fmt.Errorf("%s: no Macs: add one, as in [macs.laptop]", File)
 	}
-	cfg := &Config{Dir: dir, Format: f.Format, MinimumKit: f.MinimumKit, Primary: f.Primary, Macs: make(map[string]Mac, len(f.Macs))}
+	cfg := &Config{Dir: dir, Format: f.Format, MinimumKit: f.MinimumKit, Primary: f.Primary, Macs: make(map[string]Mac, len(f.Macs)), NightlyAt: DefaultNightlyAt}
+	if f.NightlyAt != "" {
+		at, err := time.Parse("15:04", f.NightlyAt)
+		if err != nil {
+			return nil, fmt.Errorf("%s: nightly_at %q isn't a time of day, as in 03:00", File, f.NightlyAt)
+		}
+		cfg.NightlyAt = time.Duration(at.Hour())*time.Hour + time.Duration(at.Minute())*time.Minute
+	}
 	for name, m := range f.Macs {
 		switch {
 		case !macName.MatchString(name):

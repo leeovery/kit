@@ -11,7 +11,7 @@ import (
 func TestFeaturesBringTheirChecks(t *testing.T) {
 	w := laptopWorld(t)
 	w.writeSection(t, "shared", "features", "arq\n")
-	w.fake.On("/Applications/Arq.app/Contents/Resources/arqc", "stats").Prints(`{"backupPlans": [{"name": "User data", "lastBackedUp": "` + w.now.Add(-2*time.Hour).UTC().Format(time.RFC3339) + `"}]}`)
+	w.fake.On("/Applications/Arq.app/Contents/Resources/arqc", "stats").Prints(`{"backupPlans": [{"name": "User data", "schedule": {"type": "Daily"}, "lastBackedUp": "` + w.now.Add(-2*time.Hour).UTC().Format(time.RFC3339) + `"}]}`)
 	out, _, _ := w.run(t, "status", "arq")
 	if !strings.Contains(out, "arq ok last backup User data 01:04\n") {
 		t.Errorf("kit status arq printed\n%s", out)

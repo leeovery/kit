@@ -101,8 +101,8 @@ programs. Ever.
     directories, wherever the environment puts them;
   - writes into the directories on `PATH` outside the home, such as `/opt/homebrew/bin`;
   - running the real brew, mas, gh, op, git, claude, composer, Node (so npm), Arq's arqc,
-    defaults, tmutil, sudo, launchctl, osascript, open and tmux (Go builds the tests, so
-    it's stubbed, not denied).
+    asimov, prefsync, defaults, tmutil, sudo, launchctl, osascript, open and tmux (Go builds
+    the tests, so it's stubbed, not denied).
 - **It unsets the variables testguard clears** before anything starts, as testguard clears them
   only once every package's init has run.
 - **Each run first proves the sandbox holds**, and `--self-check` does only that: a dial off the

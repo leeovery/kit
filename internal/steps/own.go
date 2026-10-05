@@ -48,21 +48,40 @@ func Own(run runner.Runner, home string, list config.List) engine.Step {
 
 // own runs the check e declares, saying what's wrong: "" when all's well.
 func own(ctx context.Context, run runner.Runner, home string, e config.Entry) string {
-	words, err := config.Words(e.Value)
+	cmd, err := OwnCommand(home, e.Value, ownTimeout)
+	if err != nil {
+		return err.Error()
+	}
+	res, err := run.Run(ctx, cmd)
+	return Outcome(cmd, res, err)
+}
+
+// OwnCommand is the command a line of the user's own declares after its
+// name: -- then the command, a word starting ~/ starting at the home, as a
+// shell has it.
+func OwnCommand(home, value string, timeout time.Duration) (runner.Command, error) {
+	words, err := config.Words(value)
 	if err != nil || len(words) < 2 || words[0] != "--" {
-		return "its line isn't a name, then -- and a command"
+		return runner.Command{}, errors.New("its line isn't a name, then -- and a command")
 	}
-	name := words[1]
-	if rest, ok := strings.CutPrefix(name, "~/"); ok {
-		name = filepath.Join(home, rest)
+	words = words[1:]
+	for i, w := range words {
+		if rest, ok := strings.CutPrefix(w, "~/"); ok {
+			words[i] = filepath.Join(home, rest)
+		}
 	}
-	res, err := run.Run(ctx, runner.Command{Name: name, Args: words[2:], Timeout: ownTimeout})
+	return runner.Command{Name: words[0], Args: words[1:], Timeout: timeout}, nil
+}
+
+// Outcome says what's wrong with a command of the user's own, as it ran:
+// "" when it exited 0; else the first line it printed.
+func Outcome(cmd runner.Command, res runner.Result, err error) string {
 	_, exited := errors.AsType[*runner.ExitError](err)
 	switch {
 	case err == nil:
 		return ""
 	case errors.Is(err, runner.ErrNotFound):
-		return words[1] + " isn't there"
+		return filepath.Base(cmd.Name) + " isn't there"
 	case !exited:
 		return "it didn't finish: " + err.Error()
 	}

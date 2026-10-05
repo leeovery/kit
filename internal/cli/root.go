@@ -102,7 +102,7 @@ what to run about it. kit status is the full report.`,
 	flags.BoolVar(&a.json, "json", false, "print one JSON document, for scripts and agents")
 	flags.BoolVar(&a.plain, "plain", false, "print plain lines, no colour or animation, as without a terminal")
 	flags.BoolVar(&a.verbose, "verbose", false, "keep commands' output whole in the run's log")
-	root.AddCommand(newAddCommand(a), newApplyCommand(a), newFeatureCommand(a), newListCommand(a), newLogCommand(a), newMachineCommand(a),
+	root.AddCommand(newAddCommand(a), newApplyCommand(a), newFeatureCommand(a), newNightlyCommand(a), newListCommand(a), newLogCommand(a), newMachineCommand(a),
 		newClaudeMCPCommand(a), newReconcileCommand(a), newRemoveCommand(a), newStatusCommand(a), newVersionCommand(), newWhyCommand(a))
 	return root
 }
