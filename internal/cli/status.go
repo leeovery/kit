@@ -229,10 +229,23 @@ func (a *app) prepare(command, logName string) (*run, error) {
 	}
 	homebrew := hb.Step()
 	homebrew.Area = steps.AreaDrift
-	checks := []engine.Step{
+	features, err := r.features()
+	if err != nil {
+		_ = face.Close()
+		_ = log.Close()
+		return nil, err
+	}
+	var checks []engine.Step
+	if features[steps.FeatureTimeMachine] {
+		checks = append(checks, steps.TimeMachine(observed, a.Now))
+	}
+	if features[steps.FeatureArq] {
+		checks = append(checks, steps.Arq(observed, a.Now))
+	}
+	checks = append(checks,
 		steps.Disk(observed), steps.Memory(observed), steps.FileEvents(observed), steps.Load(observed, a.Now),
 		steps.ConfigSync(observed, dirs.Config, a.Now), steps.ConfigPrivate(observed, dirs.Config),
-	}
+	)
 	r.pipeline, err = engine.New(slices.Concat([]engine.Step{homebrew}, kinds, checks)...)
 	if err != nil {
 		_ = face.Close()
@@ -240,6 +253,23 @@ func (a *app) prepare(command, logName string) (*run, error) {
 		return nil, err
 	}
 	return r, nil
+}
+
+// features are the features switched on for this Mac: the shared file's,
+// then its own. One kit doesn't know is refused, saying where.
+func (r *run) features() (map[string]bool, error) {
+	list, err := r.cfg.List(config.FeaturesKind, r.machine)
+	if err != nil {
+		return nil, err
+	}
+	on := make(map[string]bool, len(list.Entries))
+	for _, e := range list.Entries {
+		if !slices.Contains(steps.Features, e.Name) {
+			return nil, fmt.Errorf("%s:%d: kit doesn't know the feature %s: one of %s", e.File, e.Line, e.Name, strings.Join(steps.Features, ", "))
+		}
+		on[e.Name] = true
+	}
+	return on, nil
 }
 
 // declared is what k declares for the Mac named mac: its sections in cfg,
