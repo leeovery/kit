@@ -28,6 +28,7 @@ import (
 	"github.com/leeovery/kit/internal/kind/npm"
 	"github.com/leeovery/kit/internal/kind/tmux"
 	"github.com/leeovery/kit/internal/logs"
+	"github.com/leeovery/kit/internal/nightly"
 	"github.com/leeovery/kit/internal/render"
 	"github.com/leeovery/kit/internal/runner"
 	"github.com/leeovery/kit/internal/steps"
@@ -248,6 +249,12 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 	if features[steps.FeatureArq] {
 		checks = append(checks, steps.Arq(observed, a.Now))
 	}
+	if features[steps.FeatureScratch] {
+		checks = append(checks, steps.Scratch(observed, a.Scratch, home))
+	}
+	if features[steps.FeatureSettingsCapture] {
+		checks = append(checks, steps.FullDiskAccess(home))
+	}
 	checks = append(checks,
 		steps.Disk(observed), steps.Memory(observed), steps.FileEvents(observed), steps.Load(observed, a.Now),
 		steps.ConfigSync(observed, dirs.Config, a.Now), steps.ConfigPrivate(observed, dirs.Config),
@@ -260,6 +267,15 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 	}
 	if len(own.Entries) > 0 {
 		checks = append(checks, steps.Own(observed, home, own))
+	}
+	hourly, daily, err := a.jobs(r)
+	if err != nil {
+		_ = face.Close()
+		_ = log.Close()
+		return nil, err
+	}
+	if jobs := slices.Concat(hourly, daily); len(jobs) > 0 {
+		checks = append(checks, nightly.Check(jobs, len(hourly) > 0, len(daily) > 0, dirs.State, a.Now))
 	}
 	r.pipeline, err = engine.New(slices.Concat([]engine.Step{homebrew}, kinds, checks)...)
 	if err != nil {

@@ -95,10 +95,15 @@ differ.
 what's wrong and what to do: the Mac's (`disk`, `memory`, `file-events`, `load`), always;
 the backups' (`time-machine`, `arq`: each runs on its own schedule, and kit checks it did,
 only the plans Arq is scheduled to run), when switched on; the config repository's
-(`config-sync`, `config-private`); and the user's own, in a `[checks]` section, a line each:
+(`config-sync`, `config-private`); the scheduled runs' (`nightly`: the hourly run within two
+hours, the nightly one finished within 26 and none stuck over six, each job's last outcome;
+quiet until `kit nightly` has run on a schedule); with their features, `scratch` (mounted,
+out of Spotlight and Time Machine, `tmp` writable, Claude Code's temporary files sent there)
+and `full-disk-access` (what settings capture needs); and the user's own, in a `[checks]`
+section, a line each:
 a name, then `--` and a command, which exits 0 when all's well, or prints what's wrong on
-its first line (a minute's timeout), each failing one an item of the `checks` step. Every step has an area (Backups, Mac, Drift, Config,
-Checks), which the status document carries.
+its first line (a minute's timeout), each failing one an item of the `checks` step. Every step has an area (Backups, Jobs, Mac, Drift,
+Config, Checks), which the status document carries.
 
 **Steps.** Everything kit applies is a step in one pipeline. A step has:
 
@@ -424,7 +429,7 @@ checks of the user's own (#38); the scan made to see untracked files (#39); bare
 
 **8. `kit nightly` — in progress.** Jobs of the user's own, the nightly record and its rule,
 `kit nightly`; Arq checked by its own schedules (#41); the Scratch clean-up and settings
-capture (#42); the checks on the jobs; alerts and drift's daily digest.
+capture (#42); the checks on the jobs (#43); alerts and drift's daily digest.
 
 Claude Code's skills wait for the installer they'll go through (agntc).
 
