@@ -126,6 +126,7 @@ A run that's stopped (an interrupt) fails the steps it hadn't started.
 Built:
 
 ```
+kit                          What needs attention, at a glance: a line an area, and what to run
 kit add <kind> <name>...     Install, and declare for this Mac   [--shared] [--temp] [--note] [--group]
 kit remove <kind> <name>...  Uninstall, and undeclare            [--shared]
 kit reconcile [<kind>...] [<id>...]  Settle drift: adopt, remove, install, undeclare or snooze
@@ -179,7 +180,12 @@ Exit statuses: 0 when all's well, 1 when something needs attention (a Mac with n
 drift), 2 when kit couldn't do its job (no config repository, a config error, an unknown
 command).
 
-Later: `kit` (at a glance), `share`, `edit`, `update`, `secrets`, `prefs`, `nightly`,
+Bare `kit` runs every check, as `kit status` does, and shows a line an area (Backups, Mac,
+Drift, Config, Checks): the steps' short forms when all's well ("Time Machine 16:00 · Arq
+01:05"), else what needs attention (a drift item's kind, name, what's wrong and for how long)
+and what to run (`kit reconcile`, `kit status`); `--json` is `kit status --json`'s document.
+
+Later: `share`, `edit`, `update`, `secrets`, `prefs`, `nightly`,
 `bootstrap`, `takeover`, `retire`, `decisions`, `decide`, `fleet`.
 
 Every question has a flag that answers it, so everything runs without prompts. Without a
@@ -396,7 +402,8 @@ plugins' names.
 
 **7. Health checks and switches — in progress.** The Mac's checks and the config
 repository's sync (#36); `[features]`, `kit feature on|off`, Time Machine and Arq (#37);
-checks of the user's own (#38); bare `kit`.
+checks of the user's own (#38); the scan made to see untracked files (#39); bare `kit`
+(#40).
 
 **8. `kit nightly`.** Its jobs and the checks on them; drift's daily digest.
 

@@ -54,6 +54,9 @@ type Result struct {
 	State State `json:"state"`
 	// Summary says how the step stands, as in "129 declared, all installed".
 	Summary string `json:"summary,omitempty"`
+	// Glance is the step's summary as the at-a-glance view shows it, short,
+	// as in "Arq 01:05": none when the step has nothing worth a glance.
+	Glance string `json:"glance,omitempty"`
 	// Reason says why a check failed, or the step was deferred.
 	Reason string `json:"reason,omitempty"`
 	// Counts are figures behind the summary, as in declared: 129.

@@ -86,7 +86,7 @@ func Disk(run runner.Runner) engine.Step {
 			if free < diskFreeBelow {
 				return problem("disk", summary, [3]string{"low", fmt.Sprintf("only %.0f%% free on the startup disk", free), "clear caches or old data; Time Machine's local snapshots need room too"})
 			}
-			return check.Result{State: check.OK, Summary: summary}
+			return check.Result{State: check.OK, Summary: summary, Glance: summary}
 		},
 	}
 }
@@ -125,7 +125,7 @@ func Memory(run runner.Runner) engine.Step {
 			if len(problems) > 0 {
 				return problem("memory", summary, problems...)
 			}
-			return check.Result{State: check.OK, Summary: summary}
+			return check.Result{State: check.OK, Summary: summary, Glance: fmt.Sprintf("%.1f GB swap", swap)}
 		},
 	}
 }
@@ -206,7 +206,7 @@ func Load(run runner.Runner, now func() time.Time) engine.Step {
 			default:
 				return problem("load", summary, [3]string{"high", fmt.Sprintf("load average %.0f over 15 minutes on %d cores", load, cores), "Activity Monitor › CPU: look for runaway processes or orphaned agents"})
 			}
-			return check.Result{State: check.OK, Summary: summary}
+			return check.Result{State: check.OK, Summary: summary, Glance: fmt.Sprintf("load %.1f", load)}
 		},
 	}
 }
