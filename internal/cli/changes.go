@@ -106,6 +106,14 @@ func (r *run) kindNamed(name string) (kind.Kind, error) {
 	return k, nil
 }
 
+// changedFile notes the file at path as changed, to commit, when it's in
+// the config repository: tmux's config, among the linked files.
+func (r *run) changedFile(c *changes, path string) {
+	if rel, ok := strings.CutPrefix(path, r.repo.Dir+"/"); ok {
+		c.changed(rel)
+	}
+}
+
 // scope is whose declarations a thing is declared in: shared, or this Mac's.
 func (r *run) scope(shared bool) string {
 	if shared {

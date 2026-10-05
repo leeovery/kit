@@ -75,9 +75,6 @@ func (a *app) add(ctx context.Context, r *run, kindName string, names []string, 
 	if err != nil {
 		return err
 	}
-	if d, ok := k.(kind.Declarer); ok && !opts.temp {
-		return errors.New(d.HowToDeclare(names[0]) + "; --temp installs without declaring")
-	}
 	scope := r.scope(opts.shared)
 	if names, err = a.find(ctx, k, names); err != nil {
 		return err
@@ -239,6 +236,14 @@ func addOne(ctx context.Context, r *run, c *changes, k kind.Kind, scope, name, g
 		if what := d.Describe(ctx, name); what != "" {
 			note = strings.TrimSuffix(what+": "+note, ": ")
 		}
+	}
+	if d, ok := k.(kind.Declarer); ok {
+		file, err := d.Declare(name)
+		if err != nil {
+			return check.Result{State: check.Failed, Reason: verb + ", but couldn't declare: " + err.Error()}
+		}
+		r.changedFile(c, file)
+		return check.Result{State: check.OK, Summary: verb + "; declared in " + r.files.Tilde(file)}
 	}
 	e := config.Entry{Name: name, Note: note}
 	if v, ok := k.(kind.Valued); ok {

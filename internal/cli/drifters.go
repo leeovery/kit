@@ -68,13 +68,15 @@ func (d kindDrifter) check(ctx context.Context) check.Result {
 	return kind.Compare(ctx, d.k, d.list)
 }
 
-// choices are what can be done about it: adopting and undeclaring only
-// where kit writes the kind's declarations.
+// choices are what can be done about it.
 func (d kindDrifter) choices(it check.Item) []choice {
-	_, outside := d.k.(kind.Declarer)
 	adopting := []choice{
 		{action: adopt, label: "declare it, for this Mac"},
 		{action: adopt, label: "declare it, for every Mac", shared: true},
+	}
+	if _, ownFile := d.k.(kind.Declarer); ownFile {
+		// Declared in a file of its own, which every Mac linking it shares.
+		adopting = []choice{{action: adopt, label: "declare it"}}
 	}
 	uninstalling := []choice{{action: remove, label: "uninstall it"}}
 	var all []choice
@@ -97,16 +99,7 @@ func (d kindDrifter) choices(it check.Item) []choice {
 	default:
 		all = []choice{snoozeChoice}
 	}
-	if !outside {
-		return all
-	}
-	var writable []choice
-	for _, c := range all {
-		if c.action != adopt && c.action != undeclare {
-			writable = append(writable, c)
-		}
-	}
-	return writable
+	return all
 }
 
 func (d kindDrifter) describe(it check.Item) string {

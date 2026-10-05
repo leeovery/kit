@@ -1,8 +1,8 @@
 // Package tmux is the kind of tmux's plugins, as the Tmux Plugin Manager
 // (TPM) keeps them. They're declared where TPM reads them, by set -g
-// @plugin lines in tmux's config, so there's one declaration; kit reads it
-// but doesn't write it. Installing clones a plugin into TPM's plugin folder,
-// as TPM does, and removing deletes its folder.
+// @plugin lines in tmux's config, so there's one declaration, which kit
+// reads and edits in place. Installing clones a plugin into TPM's plugin
+// folder, as TPM does, and removing deletes its folder.
 package tmux
 
 import (
@@ -121,10 +121,112 @@ func (t *Tmux) Declared() (config.List, error) {
 	return list, err
 }
 
-// HowToDeclare says how a plugin is declared or undeclared: by hand, in
-// tmux's config.
-func (t *Tmux) HowToDeclare(name string) string {
-	return fmt.Sprintf("tmux plugins are declared in tmux's config (%s): add or remove the line set -g @plugin '%s' there", t.shown(t.files()[2]), name)
+// runLine is the line that starts TPM, which plugins are declared before.
+var runLine = regexp.MustCompile(`^[ \t]*run(-shell)?[ \t]+.*tpm`)
+
+// Declare adds a set -g @plugin line for name to tmux's config: after the
+// last plugin's line, else before the line that starts TPM, else at the
+// end; in the file that declares plugins already, else tmux's own config
+// file. It writes through a link to the file it leads to.
+func (t *Tmux) Declare(name string) (string, error) {
+	file, last := t.files()[2], 0
+	err := t.read(func(path string, n int, text string) {
+		if m := pluginLine.FindStringSubmatch(text); m != nil {
+			if t.Key(unquote(m[2])) == t.Key(name) {
+				last = -1
+			}
+			if last >= 0 {
+				file, last = path, n
+			}
+		}
+	})
+	switch {
+	case err != nil:
+		return "", err
+	case last < 0:
+		return "", fmt.Errorf("%s is declared already", name)
+	}
+	real, lines, mode, err := readLines(file)
+	if err != nil {
+		return "", err
+	}
+	at := last
+	if at == 0 {
+		at = len(lines)
+		for i, l := range lines {
+			if runLine.MatchString(l) {
+				at = i
+				break
+			}
+		}
+	}
+	line := "set -g @plugin '" + name + "'"
+	lines = append(lines[:at], append([]string{line}, lines[at:]...)...)
+	return real, writeLines(real, lines, mode)
+}
+
+// Undeclare takes the line declaring name out of the tmux config file it's
+// in.
+func (t *Tmux) Undeclare(name string) (string, error) {
+	file, at := "", 0
+	err := t.read(func(path string, n int, text string) {
+		if m := pluginLine.FindStringSubmatch(text); m != nil && t.Key(unquote(m[2])) == t.Key(name) && at == 0 {
+			file, at = path, n
+		}
+	})
+	switch {
+	case err != nil:
+		return "", err
+	case at == 0:
+		return "", fmt.Errorf("%s isn't declared in tmux's config", name)
+	}
+	real, lines, mode, err := readLines(file)
+	if err != nil {
+		return "", err
+	}
+	lines = append(lines[:at-1], lines[at:]...)
+	return real, writeLines(real, lines, mode)
+}
+
+// readLines reads the file at path, links followed, as lines: its real
+// path, its lines and its mode; a file not there yet is empty.
+func readLines(path string) (string, []string, os.FileMode, error) {
+	real := path
+	if r, err := filepath.EvalSymlinks(path); err == nil {
+		real = r
+	}
+	data, err := os.ReadFile(real)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return real, nil, 0o644, nil
+	case err != nil:
+		return "", nil, 0, err
+	}
+	info, err := os.Stat(real)
+	if err != nil {
+		return "", nil, 0, err
+	}
+	text := strings.TrimSuffix(string(data), "\n")
+	if text == "" {
+		return real, nil, info.Mode().Perm(), nil
+	}
+	return real, strings.Split(text, "\n"), info.Mode().Perm(), nil
+}
+
+// writeLines writes lines to path whole or not at all, with mode.
+func writeLines(path string, lines []string, mode os.FileMode) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	tmp := path + ".kit-new"
+	if err := os.WriteFile(tmp, []byte(strings.Join(lines, "\n")+"\n"), mode); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
 }
 
 // dir is TPM's plugin folder: the config's TMUX_PLUGIN_MANAGER_PATH, else

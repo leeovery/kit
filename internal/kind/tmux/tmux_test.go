@@ -144,9 +144,53 @@ func TestRemoveDeletesThePluginsFolder(t *testing.T) {
 	}
 }
 
-func TestHowToDeclare(t *testing.T) {
-	got := newTmux(t, runnertest.New(t), t.TempDir()).HowToDeclare("owner/plugin")
-	if want := "tmux plugins are declared in tmux's config (~/.config/tmux/tmux.conf): add or remove the line set -g @plugin 'owner/plugin' there"; got != want {
-		t.Errorf("HowToDeclare() = %q, want %q", got, want)
+func TestDeclareAddsALineInItsPlace(t *testing.T) {
+	home := t.TempDir()
+	repo := filepath.Join(home, "repo", "tmux.conf")
+	write(t, home, map[string]string{
+		"repo/tmux.conf": "set -g mouse on\nset -g @plugin 'tmux-plugins/tpm'\nset -g @plugin 'tmux-plugins/tmux-yank'\n\nrun '~/.config/tmux/plugins/tpm/tpm'\n",
+	})
+	if err := os.MkdirAll(filepath.Join(home, ".config", "tmux"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(repo, filepath.Join(home, ".config", "tmux", "tmux.conf")); err != nil {
+		t.Fatal(err)
+	}
+	tm := newTmux(t, runnertest.New(t), home)
+
+	file, err := tm.Declare("owner/plugin")
+	if err != nil || file != repo {
+		t.Fatalf("Declare() = %q, %v; want the file the link leads to", file, err)
+	}
+	data, _ := os.ReadFile(repo)
+	if want := "set -g mouse on\nset -g @plugin 'tmux-plugins/tpm'\nset -g @plugin 'tmux-plugins/tmux-yank'\nset -g @plugin 'owner/plugin'\n\nrun '~/.config/tmux/plugins/tpm/tpm'\n"; string(data) != want {
+		t.Errorf("tmux's config =\n%s\nwant\n%s", data, want)
+	}
+	if target, _ := os.Readlink(filepath.Join(home, ".config", "tmux", "tmux.conf")); target != repo {
+		t.Errorf("the link leads to %q, want it kept", target)
+	}
+	if _, err := tm.Declare("someone/plugin"); err == nil || !strings.Contains(err.Error(), "declared already") {
+		t.Errorf("Declare() of a plugin by the same folder = %v", err)
+	}
+
+	file, err = tm.Undeclare("tmux-plugins/tmux-yank")
+	data, _ = os.ReadFile(repo)
+	if err != nil || file != repo || strings.Contains(string(data), "tmux-yank") {
+		t.Errorf("Undeclare() = %q, %v; tmux's config =\n%s", file, err, data)
+	}
+	if _, err := tm.Undeclare("nobody/nothing"); err == nil {
+		t.Error("Undeclare() of a plugin not declared: no error")
+	}
+}
+
+func TestDeclareTheFirstPluginGoesBeforeTPMStarts(t *testing.T) {
+	home := t.TempDir()
+	write(t, home, map[string]string{".config/tmux/tmux.conf": "set -g mouse on\nrun '~/.tmux/plugins/tpm/tpm'\n"})
+	if _, err := newTmux(t, runnertest.New(t), home).Declare("tmux-plugins/tpm"); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(filepath.Join(home, ".config", "tmux", "tmux.conf"))
+	if want := "set -g mouse on\nset -g @plugin 'tmux-plugins/tpm'\nrun '~/.tmux/plugins/tpm/tpm'\n"; string(data) != want {
+		t.Errorf("tmux's config =\n%s\nwant\n%s", data, want)
 	}
 }
