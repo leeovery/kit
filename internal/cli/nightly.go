@@ -1,9 +1,11 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -14,14 +16,19 @@ import (
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/nightly"
+	"github.com/leeovery/kit/internal/render"
 	"github.com/leeovery/kit/internal/steps"
 )
 
 // jobTimeout is how long a job of the user's own may run.
 const jobTimeout = time.Hour
 
+// reportFile is the report kit nightly leaves, in kit's logs folder, for a
+// notification's click to open.
+const reportFile = "report.txt"
+
 func newNightlyCommand(a *app) *cobra.Command {
-	var plan bool
+	var plan, alerts bool
 	cmd := &cobra.Command{
 		Use:   "nightly [job...]",
 		Short: "Run the scheduled jobs that are due, then every check: what the hourly launch runs",
@@ -32,13 +39,25 @@ it's been missed, as by a Mac asleep then. The jobs run in order, each after
 the one before, and one that fails never stops the others; the checks follow.
 Nothing is installed or removed.
 
-Name jobs to run only those, now. --plan says what's due, and runs nothing.`,
+Name jobs to run only those, now. --plan says what's due, and runs nothing.
+
+Each run leaves its report, kit status's plain lines, in kit's logs folder
+(report.txt). --alerts prints, in place of the run, what to notify about, as
+JSON, for the app that runs kit hourly: each problem at once, an alert each,
+and the drift that needs attention as one digest, changing at most once a
+day; an alert's id stays the same while it's the same problem.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			command, logName := "nightly", "nightly"
 			if plan {
 				command, logName = "nightly --plan", "nightly-plan"
 			}
-			r, err := a.prepare(command, logName)
+			var report bytes.Buffer
+			collector := &render.Collector{}
+			faces := []render.Face{render.NewPlain(&report), collector}
+			if !alerts {
+				faces = append(faces, a.face())
+			}
+			r, err := a.prepareWith(command, logName, render.Tee(faces...))
 			if err != nil {
 				return err
 			}
@@ -46,11 +65,47 @@ Name jobs to run only those, now. --plan says what's due, and runs nothing.`,
 			if closeErr := r.close(); err == nil {
 				err = closeErr
 			}
+			if writeErr := writeAtomic(filepath.Join(r.logsDir, reportFile), report.Bytes()); writeErr != nil && err == nil {
+				err = writeErr
+			}
+			if alerts {
+				list, alertsErr := nightly.Alerts(collector.Document(), r.stateDir, a.Now())
+				if alertsErr != nil {
+					return alertsErr
+				}
+				if list == nil {
+					list = []nightly.Alert{}
+				}
+				if printErr := render.WriteJSON(a.Stdout, list); printErr != nil {
+					return printErr
+				}
+			}
 			return err
 		},
 	}
 	cmd.Flags().BoolVar(&plan, "plan", false, "say what's due, and run nothing")
+	cmd.Flags().BoolVar(&alerts, "alerts", false, "print what to notify about, as JSON, for the hourly launch's app")
 	return cmd
+}
+
+// writeAtomic writes data to path, whole or not at all, making its folder.
+func writeAtomic(path string, data []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.Remove(tmp.Name()) }()
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
 }
 
 // nightly runs the jobs due, or those named, then every check.

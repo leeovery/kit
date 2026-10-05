@@ -88,8 +88,8 @@ type run struct {
 	allKinds []string
 	now      time.Time
 	run      runner.Runner
-	// homeDir is the user's home.
-	homeDir string
+	// homeDir is the user's home, and logsDir where kit's logs go.
+	homeDir, logsDir string
 	// cfg, kindsByName, lists and repo are what changing the config needs.
 	cfg         *config.Config
 	kindsByName map[string]kind.Kind
@@ -201,7 +201,7 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 	hb := brew.New(observed)
 	r := &run{
 		command: command, machine: machine, version: a.Version, sink: sink, face: face, log: log,
-		stateDir: dirs.State, now: now, run: observed, cfg: cfg, homeDir: home,
+		stateDir: dirs.State, now: now, run: observed, cfg: cfg, homeDir: home, logsDir: dirs.Logs,
 		kindsByName: map[string]kind.Kind{}, lists: map[string]config.List{},
 		repo: gitrepo.Repo{Dir: dirs.Config, Run: observed}, record: record,
 	}

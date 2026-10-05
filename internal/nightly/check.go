@@ -70,6 +70,9 @@ func Check(jobs []Job, hourly bool, nightly bool, stateDir string, now func() ti
 			if len(problems) > 0 {
 				return check.Result{State: check.Attention, Summary: summary, Items: problems}
 			}
+			if len(glance) == 0 {
+				return check.Result{State: check.OK, Summary: summary, Glance: summary}
+			}
 			return check.Result{State: check.OK, Summary: summary, Glance: strings.Join(glance, " · ")}
 		},
 	}
