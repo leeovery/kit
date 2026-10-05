@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"math"
 	"slices"
 	"strconv"
 	"strings"
@@ -136,11 +137,14 @@ type plistKey string
 
 // Equal reports whether a and b are the same value: a boolean and the
 // integer 1 or 0 count the same, as macOS reads either, and an integer and
-// a real of the same value; dicts and arrays compare by their contents.
+// a real of the same value, to single precision; dicts and arrays compare
+// by their contents.
 func Equal(a, b any) bool {
 	if x, ok := number(a); ok {
 		y, ok := number(b)
-		return ok && x == y
+		// defaults write -float stores single precision: 0.001 reads back
+		// as 0.0010000000474974513.
+		return ok && math.Abs(x-y) <= 1e-6*max(1, math.Abs(x), math.Abs(y))
 	}
 	switch x := a.(type) {
 	case string:
