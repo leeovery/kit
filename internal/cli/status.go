@@ -27,6 +27,7 @@ import (
 	"github.com/leeovery/kit/internal/kind/mcp"
 	"github.com/leeovery/kit/internal/kind/npm"
 	"github.com/leeovery/kit/internal/kind/tmux"
+	"github.com/leeovery/kit/internal/linked"
 	"github.com/leeovery/kit/internal/logs"
 	"github.com/leeovery/kit/internal/nightly"
 	"github.com/leeovery/kit/internal/render"
@@ -86,8 +87,15 @@ type run struct {
 	kinds []string
 	// allKinds are every kind kit knows, by name, in pipeline order.
 	allKinds []string
-	now      time.Time
-	run      runner.Runner
+	// drift are the steps whose items are drift, by name, in pipeline order,
+	// and drifters what checks and settles each: the kinds, and the linked
+	// files.
+	drift    []string
+	drifters map[string]drifter
+	// files are the config repository's linked files.
+	files *linked.Files
+	now   time.Time
+	run   runner.Runner
 	// homeDir is the user's home, and logsDir where kit's logs go.
 	homeDir, logsDir string
 	// cfg, kindsByName, lists and repo are what changing the config needs.
@@ -130,9 +138,9 @@ func kindSteps(hb *brew.Homebrew, run runner.Runner, home, configHome string) []
 // what's new, and what's gone.
 func (r *run) remember(report engine.Report) error {
 	results := make(map[string]check.Result)
-	for _, kind := range r.kinds {
-		if res, ok := report.Results[kind]; ok {
-			results[kind] = res
+	for _, name := range r.drift {
+		if res, ok := report.Results[name]; ok {
+			results[name] = res
 		}
 	}
 	return drift.Update(r.stateDir, func(rec *drift.Record) { rec.Seen(results, r.now) })
@@ -204,6 +212,15 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 		stateDir: dirs.State, now: now, run: observed, cfg: cfg, homeDir: home, logsDir: dirs.Logs,
 		kindsByName: map[string]kind.Kind{}, lists: map[string]config.List{},
 		repo: gitrepo.Repo{Dir: dirs.Config, Run: observed}, record: record,
+		drifters: map[string]drifter{},
+	}
+	r.files = &linked.Files{Repo: r.repo, Home: home, StateDir: dirs.State, Scopes: []string{config.Shared, machine}}
+	var files []engine.Step
+	if r.files.Present() {
+		step := engine.Step{Name: linked.StepName, Title: "Linked files", Area: steps.AreaDrift, Check: r.files.Check, Apply: r.files.Apply}
+		files = append(files, quietened(step, record, now))
+		r.drift = append(r.drift, linked.StepName)
+		r.drifters[linked.StepName] = fileDrifter{files: r.files}
 	}
 	var kinds []engine.Step
 	for _, ks := range kindSteps(hb, observed, home, a.configHome()) {
@@ -233,6 +250,8 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 		}
 		kinds = append(kinds, quietened(step, record, now))
 		r.kinds = append(r.kinds, name)
+		r.drift = append(r.drift, name)
+		r.drifters[name] = kindDrifter{k: ks.kind, list: list}
 	}
 	homebrew := hb.Step()
 	homebrew.Area = steps.AreaDrift
@@ -277,7 +296,7 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 	if jobs := slices.Concat(hourly, daily); len(jobs) > 0 {
 		checks = append(checks, nightly.Check(jobs, len(hourly) > 0, len(daily) > 0, dirs.State, a.Now))
 	}
-	r.pipeline, err = engine.New(slices.Concat([]engine.Step{homebrew}, kinds, checks)...)
+	r.pipeline, err = engine.New(slices.Concat([]engine.Step{homebrew}, files, kinds, checks)...)
 	if err != nil {
 		_ = face.Close()
 		_ = log.Close()

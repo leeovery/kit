@@ -237,8 +237,8 @@ laptop/declarations     what the Mac named laptop declares, and so for each Mac
 ```
 
 A folder for every Mac, and one shared by all, each the same shape: its declarations file,
-and in later milestones the files it links into the home folder and its own tools. A
-folder holding a declarations file for a Mac `kit.toml` doesn't name is refused.
+its `home` folder of files linked into the home folder, and in later milestones its own
+tools. A folder holding a declarations file for a Mac `kit.toml` doesn't name is refused.
 
 A declarations file is sections, each a header in brackets and its lines; the header's
 words are the nesting, a tool then its list, and for a kind with one, a project folder:
@@ -296,6 +296,29 @@ description = "MacBook Pro"
 [macs.studio]
 description = "Mac Studio"
 ```
+
+### Linked files
+
+Every file in a scope's `home` folder is linked into the home folder at the same path
+(`shared/home/.zshrc` to `~/.zshrc`), a file at a time, never a folder whole, so an app's
+other files beside one stay the app's; the folder is the declaration, with no list beside
+it. Files git ignores in the repository are never linked. A file in two scopes' home folders
+is refused. The step `file` finds each one:
+
+- **missing:** not linked; applying links it, making its folders.
+- **changed:** linked otherwise with nothing lost by linking it again (a copy the same as
+  the repository's, a link to one the same, or a file under `~/.ssh` or `~/.gnupg` others
+  can read); applying puts it right.
+- **diverged:** a different file where the link belongs, such as an app that saves by
+  replacing the file. Applying never overwrites it; `kit reconcile` offers adopt (the Mac's
+  copy into the repository, then linked), revert (the Mac's copy to the Bin, then linked) or
+  snooze.
+- **dead:** a link into the repository whose file has gone (found among the links kit made,
+  and in every folder a home folder mirrors); applying removes it.
+
+`kit add file <path>` moves a file, or every file in a folder, into this Mac's home folder
+(`--shared`: every Mac's) and links it back; `kit remove file <path>` puts a copy back in
+place of the link and takes the file out. Both commit and push.
 
 ### kit's PATH
 

@@ -10,6 +10,7 @@ import (
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/kind"
+	"github.com/leeovery/kit/internal/linked"
 )
 
 func newRemoveCommand(a *app) *cobra.Command {
@@ -21,7 +22,10 @@ func newRemoveCommand(a *app) *cobra.Command {
 every Mac needs --shared, which takes it out of the shared file: every Mac's
 list. When something installed still needs a package, nothing changes, and
 Homebrew's reason is passed on. The change is committed and pushed to the
-config repository.`,
+config repository.
+
+kit remove file <path>... puts a copy of a linked file back in place of its
+link, and takes it out of kit-config.`,
 		Args: cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			r, err := a.prepare("remove", "remove")
@@ -40,6 +44,9 @@ config repository.`,
 }
 
 func (a *app) remove(ctx context.Context, r *run, kindName string, names []string, shared bool) error {
+	if kindName == linked.StepName {
+		return a.removeFiles(ctx, r, names, shared)
+	}
 	k, err := r.kindNamed(kindName)
 	if err != nil {
 		return err

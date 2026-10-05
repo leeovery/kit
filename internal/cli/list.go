@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/kind"
+	"github.com/leeovery/kit/internal/linked"
 	"github.com/leeovery/kit/internal/render"
 )
 
@@ -172,6 +174,22 @@ func newWhyCommand(a *app) *cobra.Command {
 
 func (a *app) why(ctx context.Context, r *run, name string) error {
 	var found []why
+	if strings.HasPrefix(name, "~/") || filepath.IsAbs(name) {
+		_, shown, err := r.filePaths([]string{name})
+		if err != nil {
+			return err
+		}
+		name = shown[0]
+		links, err := r.files.Declared(ctx)
+		if err != nil {
+			return err
+		}
+		for _, l := range links {
+			if l.Name == name {
+				found = append(found, why{Kind: linked.StepName, Step: "Linked files", Declared: []config.Entry{{Name: l.Name, Scope: l.Scope, File: l.Path}}, ForThisMac: true, Installed: linked.IsLinked(l)})
+			}
+		}
+	}
 	for _, kindName := range r.allKinds {
 		k := r.kindsByName[kindName]
 		declared, err := r.where(kindName, name)
@@ -219,6 +237,15 @@ func (a *app) why(ctx context.Context, r *run, name string) error {
 	var b strings.Builder
 	for _, w := range found {
 		fmt.Fprintf(&b, "%s (%s)\n", name, w.Kind)
+		if w.Kind == linked.StepName {
+			fmt.Fprintf(&b, "  linked from %s\n", w.Declared[0].Path())
+			if w.Installed {
+				b.WriteString("  linked here\n")
+			} else {
+				fmt.Fprintf(&b, "  not linked here: kit status says why, kit apply or kit reconcile %s:%s settles it\n", w.Kind, name)
+			}
+			continue
+		}
 		for _, e := range w.Declared {
 			line := fmt.Sprintf("  declared in %s, line %d", e.Path(), e.Line)
 			if e.Group != "" {

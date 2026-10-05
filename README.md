@@ -33,7 +33,8 @@ shared/declarations     what every Mac declares
 <mac>/declarations      what one Mac declares, in a folder named after it
 ```
 
-Each declarations file is sections of flat lines, as in `[homebrew formulae]` then a name a
+Each folder's `home` holds files linked into the home folder at the same path
+(`shared/home/.zshrc` to `~/.zshrc`). Each declarations file is sections of flat lines, as in `[homebrew formulae]` then a name a
 line, a `# note` after any; `[paths]` is the directories kit puts on its PATH.
 
 ## Development
