@@ -11,8 +11,9 @@ import (
 
 // stubbed are the programs tests must never run for real: those kit drives,
 // which change the Mac or reach real accounts, and those that drive launchd,
-// open files and URLs, post notifications and reach the tmux server.
-var stubbed = []string{"brew", "claude", "composer", "defaults", "gh", "git", "go", "launchctl", "mas", "npm", "op", "open", "osascript", "sudo", "tmutil", "tmux"}
+// open files and URLs, post notifications, reach the tmux server, restart
+// apps, and change power, sharing, Spotlight and disks.
+var stubbed = []string{"brew", "claude", "composer", "defaults", "diskutil", "gh", "git", "go", "killall", "launchctl", "mas", "mdfind", "mdutil", "npm", "op", "open", "osascript", "pmset", "sudo", "systemsetup", "tmutil", "tmux"}
 
 // stubs is a directory of stand-ins for the stubbed programs. Each run of one
 // adds a line to the record, its name and arguments, and fails.

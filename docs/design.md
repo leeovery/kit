@@ -27,8 +27,8 @@ read, and kept in kit's state; a replacement Mac can take an old one's name.
 **Kinds.** A kind is a list of things of one sort. Built: Homebrew formulae (`brew`) and casks
 (`cask`), App Store apps (`app`), npm and Composer global packages (`npm`, `composer`), Go tools
 (`go`), GitHub CLI extensions (`gh`), tmux plugins (`tmux`), login items (`login`) and Claude
-Code's MCP servers (`claude-mcp`) and plugins (`claude-plugin`), and git's settings (`git`).
-Later: Claude Code's skills, secrets, macOS settings and backup exclusions.
+Code's MCP servers (`claude-mcp`) and plugins (`claude-plugin`), git's settings (`git`) and
+macOS settings (`default`). Later: Claude Code's skills, secrets and backup exclusions.
 Each kind supplies five parts:
 
 - **declared:** what the config lists, the shared file and then this Mac's;
@@ -52,6 +52,7 @@ undeclared for adopting, removing or snoozing, and report both.
 | `claude-mcp` | a name, then `claude mcp add`'s options; a project's in `[claude mcp <folder>]` | `~/.claude.json`, read directly | `claude mcp add-json`, `claude mcp remove` (a project's in local scope, in its folder) |
 | `claude-plugin` | `plugin@owner/repo`: the plugin and its marketplace's repository; `@owner/repo` a marketplace alone | Claude Code's records of plugins, marketplaces and what's enabled | the marketplace added when needed, then `claude plugin install`; `uninstall`, `marketplace remove` |
 | `git` | `[git config]`: a key, then its value as one word, as `git config --global` takes them (`alias.st "status -sb"`) | `git config --global --list` | `git config --global --replace-all`, `--unset-all` |
+| `default` | `[macos settings]`: `defaults write`'s words (`com.apple.dock tilesize -int 60`; `-currentHost` first for this host's; `-dict-add` and an entry's XML; or a value as XML), named `domain:key[:entry]` | `defaults export` of each domain | `defaults write` (through sudo for a domain under `/Library`), then the app that reads it restarted or keyboard shortcuts reloaded; `defaults delete` |
 
 - **Matching:** a kind may match on part of a name: an App Store app on its id (so an app the
   store renames still matches), npm and Composer packages without their versions, GitHub
@@ -60,6 +61,16 @@ undeclared for adopting, removing or snoozing, and report both.
   Mac, so it's *diverged*: applying leaves it, and `kit reconcile` adopts it (the declared
   line takes the Mac's value) or reverts it (the declared value set again). A kind of
   settings is checked only while something of it is declared.
+- **macOS settings** keep a record (`settings.json` in kit's state directory). A declared
+  setting is diverged only once kit has seen it as declared: one the Mac has never had as
+  declared (a new Mac, a new line) is missing, and applying writes it. Values compare as
+  macOS reads them (a boolean and 1 or 0 alike). kit also watches a set of Apple's domains
+  (the Dock, Finder, the global domain, the trackpad, the keyboard, screenshots, the menu
+  bar clock, Control Center, Stage Manager, Spaces, keyboard shortcuts) and every declared
+  setting's domain: the first look takes their values; a setting changed since, not
+  declared, and not one macOS changes by itself (a list in kit: window frames, recent
+  items, timestamps, the Dock's apps) is extra, and reconcile adopts it or puts it back as
+  it was (a dict whose entries are declared is watched entry by entry).
 - **A kind's program:** while it isn't installed, a kind with nothing declared for the Mac
   isn't checked at all, and one with something declared is deferred, saying what it needs.
   The kinds whose programs are formulae are applied after the formulae, so a new Mac has
