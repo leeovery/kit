@@ -38,7 +38,7 @@ allowed=(
 	'^op://vault/'
 	'(@([A-Za-z0-9-]+\.)*example\.(com|org|net)|^git@github\.com|@users\.noreply\.github\.com)$'
 	'^/Users/(someone|Shared)$'
-	''
+	'^Name\.Local'
 	''
 )
 flags=("" "-i" "" "-i" "-i")
@@ -66,12 +66,13 @@ unallowed() {
 }
 
 # tree_finds prints a line for each find in the files of the repository at
-# the current directory: "file:line: what it is".
+# the current directory, committed or not, tracked or not (but those git
+# ignores): "file:line: what it is".
 tree_finds() {
 	local i hits hit file line
 	for i in "${!patterns[@]}"; do
 		# git grep -o prints file:line:match, a line a match.
-		hits=$(git grep -I -n -o ${flags[i]} -E -e "${patterns[i]}" -- . ":(exclude)$self" 2>/dev/null || true)
+		hits=$(git grep --untracked --no-recurse-submodules -I -n -o ${flags[i]} -E -e "${patterns[i]}" -- . ":(exclude)$self" 2>/dev/null || true)
 		[ -n "$hits" ] || continue
 		while IFS= read -r hit; do
 			file=${hit%%:*}
@@ -121,16 +122,19 @@ fine = /Users/someone/Code and /Users/Shared
 host = studio.local here
 tailnet = studio.tail0000.ts.net
 word = zebracorn
+fine = start.Name.Local, Go's XML element's name
 PLANTED
 		git add planted.txt
 		git commit -q -m "planted, reported by jdoe@realmail.test"
+		printf 'not yet added: mini.local\n' >untracked.txt
 	)
 	want="planted.txt:1: a 1Password reference
 planted.txt:3: an email address
 planted.txt:5: a home directory
 planted.txt:7: a .local host name
 planted.txt:8: a tailnet host name
-planted.txt:9: private pattern 1"
+planted.txt:9: private pattern 1
+untracked.txt:1: a .local host name"
 	got=$(cd "$dir" && PERSONAL_PATTERNS='zebra.orn' scan_tree)
 	if [ "$got" = "$want" ]; then
 		echo "personal-data-scan: the scan of the files finds what it should"
