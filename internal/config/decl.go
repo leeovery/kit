@@ -90,6 +90,8 @@ var sectionDefs = []sectionDef{
 	{header: "git config", kind: "git", form: settings, grouped: true},
 	{header: "macos settings", kind: "default", form: defaults, grouped: true},
 	{header: "power settings", kind: "power", form: power, grouped: true},
+	{header: "backup exclusions", kind: "exclusion", form: paths, grouped: true},
+	{header: "spotlight exclusions", kind: "spotlight", form: paths, grouped: true},
 	{header: "homebrew formulae", kind: "brew", form: names, grouped: true},
 	{header: "homebrew casks", kind: "cask", form: names, grouped: true},
 	{header: "app store apps", kind: "app", form: names, grouped: true},

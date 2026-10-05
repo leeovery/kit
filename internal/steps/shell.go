@@ -19,6 +19,7 @@ import (
 const (
 	ActionWrite   = "write"
 	ActionInstall = "install"
+	ActionFix     = "fix"
 )
 
 // PathFileName names the file in kit's state directory that holds the

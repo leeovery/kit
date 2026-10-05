@@ -1,9 +1,11 @@
 package steps_test
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/leeovery/kit/internal/check"
@@ -43,7 +45,7 @@ func TestScratch(t *testing.T) {
 			fake.On("mount").Prints(tt.mount)
 			fake.On("mdutil", "-s", volume).Prints(tt.mdutil)
 			fake.On("tmutil", "isexcluded", volume).Prints(tt.excluded)
-			state, _, ids := checked(t, steps.Scratch(fake, volume, home))
+			state, _, ids := checked(t, steps.Scratch(fake, &steps.Admin{}, volume, home, 501))
 			if state != tt.state || !slices.Equal(ids, tt.ids) {
 				t.Errorf("= %s %q, want %s %q", state, ids, tt.state, tt.ids)
 			}
@@ -69,5 +71,33 @@ func TestFullDiskAccess(t *testing.T) {
 	}
 	if state, _, ids := checked(t, steps.FullDiskAccess(home)); state != check.Attention || !slices.Equal(ids, []string{"full-disk-access:denied"}) {
 		t.Errorf("denied = %s %q", state, ids)
+	}
+}
+
+func TestScratchApplyMakesWhatsMissing(t *testing.T) {
+	fake := runnertest.New(t)
+	admin := &steps.Admin{Held: func(context.Context) bool { return true }}
+	step := steps.Scratch(fake, admin, "/Volumes/Scratch", t.TempDir(), 501)
+	fake.On("mount").Prints("/dev/disk3s5 on /System/Volumes/Data (apfs)\n")
+	res := step.Check(t.Context())
+	if res.Items[0].Action != steps.ActionFix || !step.Admin {
+		t.Fatalf("not mounted = %+v", res)
+	}
+	fake.On("diskutil", "info", "-plist", "/").Prints("<plist><dict><key>APFSContainerReference</key><string>disk3</string></dict></plist>")
+	for _, args := range [][]string{
+		{"-n", "diskutil", "apfs", "addVolume", "disk3", "APFS", "Scratch"},
+		{"-n", "mkdir", "-p", "/Volumes/Scratch/.fseventsd"},
+		{"-n", "touch", "/Volumes/Scratch/.fseventsd/no_log"},
+		{"-n", "mdutil", "-i", "off", "/Volumes/Scratch"},
+		{"-n", "tmutil", "addexclusion", "-v", "/Volumes/Scratch"},
+		{"-n", "install", "-d", "-o", "501", "-g", "staff", "-m", "700", "/Volumes/Scratch/tmp"},
+	} {
+		fake.On("sudo", args...)
+	}
+	if err := step.Apply(t.Context(), res); err != nil {
+		t.Fatalf("Apply() = %v", err)
+	}
+	if n := len(fake.Calls()); n != 8 {
+		t.Errorf("ran %d commands:\n%s", n, strings.Join(fake.Calls(), "\n"))
 	}
 }

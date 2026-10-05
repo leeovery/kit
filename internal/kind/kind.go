@@ -120,6 +120,15 @@ type Diverger interface {
 	Diverges()
 }
 
+// Expander is a kind whose declarations are patterns, each standing for what
+// matches it on the Mac now, as the backup exclusions' globs do.
+type Expander interface {
+	// Expand is list with each pattern's entry replaced by an entry for
+	// each match, keeping its place, group and note; a name that isn't a
+	// pattern stands for itself.
+	Expand(list config.List) (config.List, error)
+}
+
 // Reverter is a kind whose things found on the Mac and not declared were
 // changed there from a value kit knows, as a watched setting is: kit
 // reconcile can put the value back.
