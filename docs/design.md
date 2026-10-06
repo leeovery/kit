@@ -128,7 +128,9 @@ quiet until `kit nightly` has run on a schedule); with their features, `scratch`
 out of Spotlight and Time Machine, `tmp` writable, Claude Code's temporary files sent there;
 applying, through sudo, makes the volume with its change log off, turns Spotlight off,
 excludes it and makes `tmp`)
-and `full-disk-access` (what settings capture needs); and the user's own, in a `[checks]`
+and `prefs` (apps' settings saved: capture switched on, this Mac owning its folder, a capture
+in the last day without errors, pushed within a day; read from kit's record alone) with
+`full-disk-access` (what capture needs); and the user's own, in a `[checks]`
 section, a line each:
 a name, then `--` and a command, which exits 0 when all's well, or prints what's wrong on
 its first line (a minute's timeout), each failing one an item of the `checks` step. Every step has an area (Backups, Jobs, Mac, Drift,
@@ -216,6 +218,7 @@ kit path add|remove <dir>...     Directories on the PATH
 kit secret add <name>        Keep a secret in 1Password, declare it, sync it   [--stdin] [--from] [--ref] [--field] [--item] [--mode]
 kit secret remove <name>...  Take it off the Mac, undeclare it     [--keep-value] [--delete-value]
 kit secret sync              Read every secret from 1Password, and put each in place
+kit prefs capture|restore|history|pending|start-fresh   Apps' settings, saved to a private repository and restored
 kit check|hourly add <name> -- <command>, kit nightly add <name> -- <command>   Your own checks and jobs
 kit manual add <name> "<what to do>" [-- <command>]; kit manual done <name>...  Steps by hand
 kit version                  As --version
@@ -282,8 +285,9 @@ there, cheap and safe, and removes nothing: today, a new folder matching a backu
 exclusion's glob, excluded where it is. Besides the user's own jobs, two are built in, nightly, each
 with its feature: `scratch`'s clean-up (`/Volumes/Scratch/tmp` cleared of items untouched for a
 week; Claude Code's session folders judged one by one over 30 days, kept while their
-transcript changed) and, last, `prefs`'s `prefsync capture` (niced, stopped after
-15 minutes). The hourly jobs run every time; the nightly ones once a day,
+transcript changed) and, last, `prefs`'s capture (`kit prefs capture`, stopped after 15
+minutes); and one hourly, `prefs`'s retry of the apps' settings waiting to be restored, once
+their apps are installed and closed. The hourly jobs run every time; the nightly ones once a day,
 when the nightly run falls due (`nightly_at` in `kit.toml`, 03:00 unless it says), or on the
 first run after it's been missed, as by a Mac asleep then. Each job's outcome is kept in kit's
 state (`nightly.json`). It installs and removes nothing. `--plan` says what's due; naming jobs
@@ -575,16 +579,52 @@ record and its rule, `kit nightly`; Arq checked by its own schedules (#41); the 
 clean-up and settings capture (#42); the checks on the runs, Scratch and Full Disk Access
 (#43); `--alerts`, drift's daily digest and the report (#44).
 
-**9. Steps — in progress.** A folder per Mac in the config repository; linked files; the
+**9. Steps — built.** A folder per Mac in the config repository; linked files; the
 config repository's own edits settled by `kit reconcile`; the shell and PATH, git, macOS
-settings and backup exclusions as kinds, secrets, what a person must do by hand; a command
-adding lines to `[checks]`, `[hourly]` and `[nightly]`.
+settings and backup exclusions as kinds, secrets, what a person must do by hand; commands
+adding lines to `[checks]`, `[hourly]` and `[nightly]`; commands naming the kind first.
 
-**Then:** settings capture and restore in kit; the
+**10. Apps' settings — in progress.** `kit prefs`, the dotfiles' prefsync in Go: its store in a
+repository of its own, below.
+
+**Then:** the
 primary reading the other Macs; the bootstrap and its install script, tested in a virtual
 machine; data restore and moving to a new Mac; an agent's daily check, with decisions queued
 for a person. Claude Code's skills wait for the installer they'll go through. Each gets a
 short plan before code.
+
+## Apps' settings (`kit prefs`)
+
+Every preferences domain that isn't Apple's or the system's (no dot in its name, or `com.apple.`,
+`group.com.apple.`, `systemgroup.`, `.GlobalPreferences`, `org.cups.`), through `defaults export`
+and `import` (cfprefsd's view; a plist copied behind its back half-sticks), and the settings files
+`[prefs files]` names (folders taken whole, globs with Python's rules: a wildcard never matches a
+hidden name). Each Mac saves into its own folder of one git repository, `kit.toml`'s
+`prefs_repo`, cloned in kit's data folder (`~/.local/share/kit/prefs`), in prefsync's format byte
+for byte: `<mac>/domains/<domain>.plist`, sorted XML as Python's plistlib writes it, the keys that
+change by themselves stripped (window frames, list views, file dialogs, Sparkle's check times);
+`<mac>/files/` mirroring each file's path under the home folder (`_root/` outside it); `<mac>/owner`,
+the hardware UUID of the Mac the folder belongs to.
+
+- **`kit prefs capture`** (nightly, as the `prefs` feature's job): needs capture switched on (a
+  full restore, or `kit prefs start-fresh`: a rebuilt Mac never captures defaults over a good
+  store), Full Disk Access (without it sandboxed apps export as empty), and this Mac owning its
+  folder (claimed by the first capture; another Mac, such as a replacement given the same name,
+  is refused until it takes ownership). It pulls, writes only what changed, removes what's gone
+  from the Mac (history keeps it), leaves domains waiting to be restored alone, keeps a domain
+  that fails to export, commits once in prefsync's message format, and pushes, only to a
+  repository private on GitHub (or not on GitHub). A push that fails waits for the next.
+- **`kit prefs restore [<domain>...]`** (`--from`, `--at`, `--as`, `--pending`, `--dry-run`): a
+  domain's app found from the installed apps' bundle ids (sub-domains, shared domains, group and
+  team prefixes, `[prefs apps]` for the rest); not installed or running, it waits; a sandboxed
+  app launched hidden once to make its container; the stored copy checked, the live settings
+  saved, `defaults delete` then `import`, read back and compared. A full restore puts back the
+  files that differ (each saved first), writes the pending list, records its commit, and
+  switches capture on when nothing failed. From another Mac's folder, or onto other hardware,
+  `[prefs machine-bound]` stays behind (Tailscale's identity and the like). `--at` unpacks the
+  folder as it was then from history.
+- **`kit prefs history`**, **`pending [--clear]`**, **`start-fresh`**. `[prefs deny]` leaves
+  domains out.
 
 ## Open-source hygiene
 

@@ -13,7 +13,7 @@ import (
 // which change the Mac or reach real accounts, and those that drive launchd,
 // open files and URLs, post notifications, reach the tmux server, restart
 // apps, and change power, sharing, Spotlight and disks.
-var stubbed = []string{"brew", "claude", "composer", "defaults", "diskutil", "gh", "git", "go", "killall", "launchctl", "mas", "mdfind", "mdutil", "npm", "op", "open", "osascript", "pmset", "sudo", "systemsetup", "tmutil", "tmux"}
+var stubbed = []string{"brew", "claude", "codesign", "composer", "defaults", "diskutil", "gh", "git", "go", "ioreg", "killall", "launchctl", "mas", "mdfind", "mdutil", "npm", "op", "open", "osascript", "pmset", "sudo", "sysctl", "systemsetup", "tmutil", "tmux"}
 
 // stubs is a directory of stand-ins for the stubbed programs. Each run of one
 // adds a line to the record, its name and arguments, and fails.

@@ -5,21 +5,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"regexp"
-	"strings"
 
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/engine"
+	"github.com/leeovery/kit/internal/gitrepo"
 	"github.com/leeovery/kit/internal/runner"
 )
 
 // ConfigPrivateName is the name of the step that checks the config
 // repository is private.
 const ConfigPrivateName = "config-private"
-
-// githubRemote reads a GitHub remote's owner and repository, in either of
-// git's forms.
-var githubRemote = regexp.MustCompile(`^(?:https://github\.com/|git@github\.com:|ssh://git@github\.com/)([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?/?$`)
 
 // ConfigPrivate checks the config repository in dir is private on GitHub,
 // asking GitHub through gh: the config is personal, and must never be
@@ -38,17 +33,13 @@ func ConfigPrivate(run runner.Runner, dir string) engine.Step {
 			if err != nil {
 				return check.Result{State: check.Failed, Reason: err.Error()}
 			}
-			remote := strings.TrimSpace(string(res.Stdout))
-			m := githubRemote.FindStringSubmatch(remote)
-			if m == nil {
+			repo, visibility, err := gitrepo.GitHubVisibility(ctx, run, string(res.Stdout))
+			switch {
+			case err != nil:
+				return check.Result{State: check.Failed, Reason: err.Error()}
+			case repo == "":
 				return check.Result{State: check.OK, Summary: "not on GitHub, so not public there"}
 			}
-			repo := m[1] + "/" + m[2]
-			res, err = run.Run(ctx, runner.Command{Name: "gh", Args: []string{"repo", "view", repo, "--json", "visibility", "--jq", ".visibility"}})
-			if err != nil {
-				return check.Result{State: check.Failed, Reason: "couldn't ask GitHub: " + err.Error()}
-			}
-			visibility := strings.ToLower(strings.TrimSpace(string(res.Stdout)))
 			if visibility == "private" {
 				return check.Result{State: check.OK, Summary: "private on GitHub (" + repo + ")", Glance: "private"}
 			}

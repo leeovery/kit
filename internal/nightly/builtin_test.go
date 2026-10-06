@@ -2,6 +2,7 @@ package nightly_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -10,7 +11,6 @@ import (
 	"time"
 
 	"github.com/leeovery/kit/internal/nightly"
-	"github.com/leeovery/kit/internal/runner/runnertest"
 )
 
 // made writes a file at path, its folders made, last changed age ago from
@@ -94,25 +94,20 @@ func TestCleanScratchWithoutScratch(t *testing.T) {
 }
 
 func TestCaptureSettings(t *testing.T) {
-	capture := []string{"-n", "10", "prefsync", "capture"}
-	fake := runnertest.New(t)
-	fake.On("nice", capture...).Prints("checked 214 domains\ncaptured 3 changed domains\n")
-	if err := nightly.CaptureSettings(fake).Run(t.Context()); err != nil {
+	if err := nightly.CaptureSettings(func(context.Context) error { return nil }).Run(t.Context()); err != nil {
 		t.Errorf("Run() = %v", err)
 	}
-	if c := fake.Commands()[0]; c.Timeout != 15*time.Minute {
-		t.Errorf("timeout %v, want 15 minutes", c.Timeout)
+	paused := errors.New("paused: capture isn't switched on for this Mac")
+	if err := nightly.CaptureSettings(func(context.Context) error { return paused }).Run(t.Context()); !errors.Is(err, paused) {
+		t.Errorf("Run() = %v, want capture's error", err)
 	}
-
-	fake = runnertest.New(t)
-	fake.On("nice", capture...).Exits(1).Prints("checking\npaused: capture isn't switched on for this Mac\n")
-	if err := nightly.CaptureSettings(fake).Run(t.Context()); err == nil || err.Error() != "paused: capture isn't switched on for this Mac" {
-		t.Errorf("Run() = %v, want prefsync's last line", err)
-	}
-
-	fake = runnertest.New(t)
-	fake.On("nice", capture...).Fails(context.DeadlineExceeded)
-	if err := nightly.CaptureSettings(fake).Run(t.Context()); err == nil || !strings.Contains(err.Error(), "stopped after 15 minutes") {
+	slow := nightly.CaptureSettings(func(ctx context.Context) error {
+		if deadline, ok := ctx.Deadline(); !ok || time.Until(deadline) > 15*time.Minute {
+			t.Errorf("deadline %v, want 15 minutes", deadline)
+		}
+		return context.DeadlineExceeded
+	})
+	if err := slow.Run(t.Context()); err == nil || !strings.Contains(err.Error(), "stopped after 15 minutes") {
 		t.Errorf("Run() = %v", err)
 	}
 }

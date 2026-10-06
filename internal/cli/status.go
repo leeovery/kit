@@ -106,8 +106,9 @@ type run struct {
 	adminSteps []engine.Step
 	now        time.Time
 	run        runner.Runner
-	// homeDir is the user's home, and logsDir where kit's logs go.
-	homeDir, logsDir string
+	// homeDir is the user's home, logsDir where kit's logs go, and dataDir
+	// kit's data folder.
+	homeDir, logsDir, dataDir string
 	// cfg, kindsByName, lists and repo are what changing the config needs.
 	cfg         *config.Config
 	kindsByName map[string]kind.Kind
@@ -231,7 +232,7 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 	hb := brew.New(observed)
 	r := &run{
 		command: command, machine: machine, version: a.Version, sink: sink, face: face, log: log,
-		stateDir: dirs.State, now: now, run: observed, cfg: cfg, homeDir: home, logsDir: dirs.Logs,
+		stateDir: dirs.State, now: now, run: observed, cfg: cfg, homeDir: home, logsDir: dirs.Logs, dataDir: dirs.Data,
 		kindsByName: map[string]kind.Kind{}, lists: map[string]config.List{},
 		repo: gitrepo.Repo{Dir: dirs.Config, Run: observed}, record: record,
 		drifters: map[string]drifter{}, admin: &steps.Admin{},
@@ -331,7 +332,13 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 		checks = append(checks, scratch)
 	}
 	if features[steps.FeaturePrefs] {
-		checks = append(checks, steps.FullDiskAccess(home))
+		p, err := a.prefs(r)
+		if err != nil {
+			_ = face.Close()
+			_ = log.Close()
+			return nil, err
+		}
+		checks = append(checks, steps.Prefs(p, a.Now), steps.FullDiskAccess(home))
 	}
 	edits := steps.ConfigEdits(r.repo)
 	r.drift = append(r.drift, steps.ConfigEditsName)

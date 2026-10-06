@@ -73,6 +73,7 @@ func nounCommands(a *app) []*cobra.Command {
 		newFileCommand(a),
 		newPathCommand(a),
 		newSecretCommand(a),
+		newPrefsCommand(a),
 		newLineCommand(a, "check", "Checks of your own, each a command: exit 0, all's well", newLineAdd(a, "check", "Declare a check of your own, and run it once")),
 		newLineCommand(a, config.HourlyKind, "Jobs of your own, run every hour by kit nightly", newLineAdd(a, config.HourlyKind, "Declare an hourly job")),
 		newLineCommand(a, config.ManualKind, "Steps done by hand, each saying what to do", newLineAdd(a, config.ManualKind, "Declare a step done by hand"), newDoneCommand(a)),

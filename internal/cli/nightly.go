@@ -13,10 +13,12 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/nightly"
+	"github.com/leeovery/kit/internal/prefs"
 	"github.com/leeovery/kit/internal/render"
 	"github.com/leeovery/kit/internal/steps"
 )
@@ -243,7 +245,26 @@ func (a *app) jobs(r *run) (hourly, daily []nightly.Job, err error) {
 		daily = append(daily, nightly.CleanScratch(filepath.Join(a.Scratch, "tmp"), home, a.UID, a.Now))
 	}
 	if features[steps.FeaturePrefs] {
-		daily = append(daily, nightly.CaptureSettings(r.run))
+		p, err := a.prefs(r)
+		if err != nil {
+			return nil, nil, err
+		}
+		hourly = append(hourly, nightly.RetryPending(func(ctx context.Context) error {
+			if rec, err := p.Load(); err != nil || rec.Pending == nil {
+				return err
+			}
+			report, err := p.Restore(ctx, prefs.RestoreOptions{Pending: true})
+			if err == nil && len(report.Failed) > 0 {
+				err = fmt.Errorf("%s: kit prefs pending lists them", report.Summary())
+			}
+			return err
+		}))
+		daily = append(daily, nightly.CaptureSettings(func(ctx context.Context) error {
+			if res := captureResult(p.Capture(ctx)); res.State != check.OK {
+				return errors.New(cmpOr(res.Reason, res.Summary))
+			}
+			return nil
+		}))
 	}
 	return hourly, daily, nil
 }
