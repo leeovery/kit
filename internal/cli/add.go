@@ -23,6 +23,7 @@ type addOptions struct {
 	shared, temp bool
 	note, group  string
 	waiting      map[string]bool
+	secret       secretOptions
 }
 
 func newAddCommand(a *app) *cobra.Command {
@@ -75,6 +76,13 @@ declaring, for a throwaway: it's quiet for 7 days, then kit reconcile asks.`,
 	cmd.Flags().BoolVar(&opts.temp, "temp", false, "install without declaring: quiet for 7 days, then reconcile asks")
 	cmd.Flags().StringVar(&opts.note, "note", "", "why it's declared, kept after its name")
 	cmd.Flags().StringVar(&opts.group, "group", "", "the group it goes in, without asking")
+	f := cmd.Flags()
+	f.StringVar(&opts.secret.ref, "ref", "", "a secret: where 1Password keeps it already (op://vault/item/field): nothing is stored")
+	f.StringVar(&opts.secret.from, "from", "", "a secret: the file whose contents it is, kept in 1Password as an attachment")
+	f.BoolVar(&opts.secret.stdin, "stdin", false, "a secret: its value on standard input, never on a command line")
+	f.StringVar(&opts.secret.field, "field", "", "a secret: where in 1Password its value goes, as in GitHub/token")
+	f.StringVar(&opts.secret.mode, "mode", "", "a secret's file: its permissions, as in 644 (600 otherwise)")
+	f.StringVar(&opts.secret.github, "github", "", "a secret: the GitHub repositories it's an Actions secret on, owner/repo,…")
 	return cmd
 }
 
@@ -84,6 +92,9 @@ func (a *app) add(ctx context.Context, r *run, kindName string, names []string, 
 	}
 	if kindName == pathsKind {
 		return a.addPaths(ctx, r, names, opts)
+	}
+	if kindName == secretKind {
+		return a.addSecret(ctx, r, names, opts)
 	}
 	k, err := r.kindNamed(kindName)
 	if err != nil {

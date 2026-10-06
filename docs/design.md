@@ -134,6 +134,15 @@ a name, then `--` and a command, which exits 0 when all's well, or prints what's
 its first line (a minute's timeout), each failing one an item of the `checks` step. Every step has an area (Backups, Jobs, Mac, Drift,
 Config, Checks), which the status document carries.
 
+**Adding a secret:** `kit add secret <name>` takes its value typed (unshown), on standard
+input (`--stdin`, how an agent passes one, never on a command line), from a file (`--from`,
+kept as an attachment), or as an existing reference (`--ref`, nothing stored). A value is kept
+in `kit.toml`'s item, as `--field <section>/<field>`, by editing the item with its JSON on
+op's standard input; then read back and compared, declared, and synced, never shown. `--mode`
+and `--github` as on the line. `kit remove secret <name>` takes it off the Mac or GitHub,
+undeclares it, and keeps or deletes its value in 1Password (`--keep-value`,
+`--delete-value`; asked at a terminal).
+
 **Steps by hand** go in a `[manual]` section, a line each: a name, what to do in quotes, and
 optionally `--` and a command saying whether it's done (exit 0: done), as in `tool "Install the
 tool from its site" -- test -d /Applications/Tool.app`. One with no command is done once marked
