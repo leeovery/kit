@@ -286,9 +286,18 @@ func (r Report) Summary() string {
 	return text
 }
 
-// Answers reports whether 1Password answers, within a time limit.
+// signInTimeout is how long 1Password's app may wait for a person to
+// approve kit's use of it, a fingerprint at the prompt it shows.
+const signInTimeout = time.Minute
+
+// Answers reports whether 1Password answers: a session open already (op
+// whoami, which never opens one), or one the app opens, asking for a
+// fingerprint, within a minute (listing the vaults needs one).
 func (s *Secrets) Answers(ctx context.Context) bool {
-	_, err := s.run.Run(ctx, runner.Command{Name: "op", Args: []string{"whoami"}, Timeout: opTimeout})
+	if _, err := s.run.Run(ctx, runner.Command{Name: "op", Args: []string{"whoami"}, Timeout: opTimeout}); err == nil {
+		return true
+	}
+	_, err := s.run.Run(ctx, runner.Command{Name: "op", Args: []string{"vault", "list", "--format", "json"}, Timeout: signInTimeout})
 	return err == nil
 }
 
