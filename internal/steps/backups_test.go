@@ -12,7 +12,7 @@ import (
 	"github.com/leeovery/kit/internal/steps"
 )
 
-// tmPrefs is Time Machine's settings, as plutil writes them: automatic
+// tmPrefs is Time Machine's settings, as defaults exports them: automatic
 // backups as given, and one destination whose backups are dates.
 func tmPrefs(auto string, dates ...time.Time) string {
 	var b strings.Builder
@@ -60,7 +60,7 @@ func tmStuck(since time.Time) string {
 }
 
 func TestTimeMachine(t *testing.T) {
-	plutil := []string{"-convert", "xml1", "-o", "-", "/Library/Preferences/com.apple.TimeMachine.plist"}
+	prefs := []string{"export", "/Library/Preferences/com.apple.TimeMachine", "-"}
 	recent := now().Add(-40 * time.Minute)
 	old := now().Add(-5 * time.Hour)
 	for _, tt := range []struct {
@@ -71,27 +71,27 @@ func TestTimeMachine(t *testing.T) {
 		ids    []string
 	}{
 		{"backing up", func(f *runnertest.Fake) {
-			f.On("plutil", plutil...).Prints(tmPrefs("<true/>", old, recent))
+			f.On("defaults", prefs...).Prints(tmPrefs("<true/>", old, recent))
 			f.On("tmutil", "status").Prints(tmIdle)
 		}, check.OK, "last backup 11:20", nil},
 		{"automatic backups off, as an integer", func(f *runnertest.Fake) {
-			f.On("plutil", plutil...).Prints(tmPrefs("<integer>0</integer>", recent))
+			f.On("defaults", prefs...).Prints(tmPrefs("<integer>0</integer>", recent))
 			f.On("tmutil", "status").Prints(tmIdle)
 		}, check.Attention, "last backup 11:20", []string{"time-machine:off"}},
 		{"stale, the disk away", func(f *runnertest.Fake) {
-			f.On("plutil", plutil...).Prints(tmPrefs("<integer>1</integer>", old))
+			f.On("defaults", prefs...).Prints(tmPrefs("<integer>1</integer>", old))
 			f.On("tmutil", "destinationinfo").Prints("====================================================\nName          : Backups\nKind          : Local\nID            : 0000\n")
 			f.On("tmutil", "status").Prints(tmIdle)
 		}, check.Attention, "last backup 07:00", []string{"time-machine:stale"}},
 		{"stuck", func(f *runnertest.Fake) {
-			f.On("plutil", plutil...).Prints(tmPrefs("<true/>", recent))
+			f.On("defaults", prefs...).Prints(tmPrefs("<true/>", recent))
 			f.On("tmutil", "status").Prints(tmStuck(now().Add(-4 * time.Hour)))
 		}, check.Attention, "last backup 11:20", []string{"time-machine:stuck"}},
 		{"never set up", func(f *runnertest.Fake) {
-			f.On("plutil", plutil...).Exits(1).PrintsToStderr("file does not exist")
+			f.On("defaults", prefs...).Exits(1).PrintsToStderr("file does not exist")
 		}, check.Attention, "not set up", []string{"time-machine:none"}},
 		{"no backup yet", func(f *runnertest.Fake) {
-			f.On("plutil", plutil...).Prints(tmPrefs("<true/>"))
+			f.On("defaults", prefs...).Prints(tmPrefs("<true/>"))
 			f.On("tmutil", "status").Prints(tmIdle)
 		}, check.Attention, "no backup yet", []string{"time-machine:never"}},
 	} {
@@ -106,7 +106,7 @@ func TestTimeMachine(t *testing.T) {
 	}
 	// A stale backup with the disk connected says nothing of the disk.
 	fake := runnertest.New(t)
-	fake.On("plutil", plutil...).Prints(tmPrefs("<true/>", old))
+	fake.On("defaults", prefs...).Prints(tmPrefs("<true/>", old))
 	fake.On("tmutil", "destinationinfo").Prints(tmConnected)
 	fake.On("tmutil", "status").Prints(tmIdle)
 	res := steps.TimeMachine(fake, now).Check(t.Context())

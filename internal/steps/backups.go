@@ -36,8 +36,10 @@ const (
 	arqEvery         = 26 * time.Hour
 )
 
-// timeMachinePrefs is Time Machine's settings.
-const timeMachinePrefs = "/Library/Preferences/com.apple.TimeMachine.plist"
+// timeMachinePrefs is Time Machine's settings, as defaults names the domain:
+// read through macOS's settings service, which has a change the moment it's
+// made, where the file on disk lags behind.
+const timeMachinePrefs = "/Library/Preferences/com.apple.TimeMachine"
 
 // Arqc is Arq's command, inside its app.
 const Arqc = "/Applications/Arq.app/Contents/Resources/arqc"
@@ -75,7 +77,7 @@ func TimeMachine(run runner.Runner, now func() time.Time) engine.Step {
 	return engine.Step{
 		Name: FeatureTimeMachine, Title: "Time Machine", Area: AreaBackups,
 		Check: func(ctx context.Context) check.Result {
-			out, err := output(ctx, run, "plutil", "-convert", "xml1", "-o", "-", timeMachinePrefs)
+			out, err := output(ctx, run, "defaults", "export", timeMachinePrefs, "-")
 			if _, exited := errors.AsType[*runner.ExitError](err); exited {
 				return problem(FeatureTimeMachine, "not set up", [3]string{"none", "no backup disk is set up", "System Settings › General › Time Machine › Add Backup Disk"})
 			}
