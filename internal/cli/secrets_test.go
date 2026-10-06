@@ -177,3 +177,31 @@ func TestRemoveASecretLeavesAValueElsewhere(t *testing.T) {
 		}
 	}
 }
+
+// An attachment's name with a period in it is escaped in op's assignments,
+// which would read the period as a section's end; a reference reads it as
+// it is.
+func TestASecretFilesAttachmentNamedWithAPeriod(t *testing.T) {
+	w := secretsWorld(t)
+	from := filepath.Join(t.TempDir(), "token.json")
+	if err := os.WriteFile(from, []byte(`{"token":"x"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f := w.fake
+	f.On("op", "whoami")
+	f.On("op", "item", "edit", "Item", "--vault", "vault", `token\.json[file]=`+from)
+	f.On("op", "read", "op://vault/Item/token.json").Prints(`{"token":"x"}` + "\n")
+	f.On("op", "read", "op://vault/Item/Section/token").Prints("the value\n")
+	w.expectSync([]string{"laptop/declarations"}, "kit secret add ~/.config/tool/token.json (laptop)")
+	if out, _, code := w.run(t, "secret", "add", "~/.config/tool/token.json", "--from", from); code != 0 {
+		t.Fatalf("kit secret add printed\n%s exit %d", out, code)
+	}
+	if got := w.read(t, ".config/tool/token.json"); got != `{"token":"x"}`+"\n" {
+		t.Errorf("the file holds %q", got)
+	}
+	f.On("op", "item", "edit", "Item", "--vault", "vault", `token\.json[delete]`)
+	w.expectSync([]string{"laptop/declarations"}, "kit secret remove ~/.config/tool/token.json (laptop)")
+	if out, _, code := w.run(t, "secret", "remove", "~/.config/tool/token.json", "--delete-value"); code != 0 || !strings.Contains(out, "its value deleted from 1Password") {
+		t.Errorf("kit secret remove printed\n%s exit %d", out, code)
+	}
+}
