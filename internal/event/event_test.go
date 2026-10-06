@@ -67,3 +67,13 @@ func TestTally(t *testing.T) {
 		t.Errorf("Tally() = %v, want %v", got, want)
 	}
 }
+
+func TestASecretsOutputIsNeverKept(t *testing.T) {
+	rep := runner.Report{
+		Command: runner.Command{Name: "op", Args: []string{"read", "op://vault/item/field"}, Secret: true},
+		Result:  runner.Result{Stdout: []byte("plain words no pattern would catch\n")},
+	}
+	if e := event.Command(context.Background(), rep); e.Stdout != "(a secret, 35 bytes, not kept)" {
+		t.Errorf("Stdout = %q", e.Stdout)
+	}
+}

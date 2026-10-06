@@ -36,6 +36,8 @@ type world struct {
 	env  map[string]string
 	now  time.Time
 	fake *runnertest.Fake
+	// environ is kit's environment, whole, beside env's lookups.
+	environ []string
 	// path and childEnv are what kit last made its runner with.
 	path     []string
 	childEnv []string
@@ -86,7 +88,7 @@ func (w *world) run(t *testing.T, args ...string) (stdout, stderr string, status
 	root := cli.NewRootCommand(cli.Deps{
 		Version:  "0.1.0",
 		Getenv:   func(name string) string { return w.env[name] },
-		Environ:  func() []string { return nil },
+		Environ:  func() []string { return w.environ },
 		HomeDir:  func() (string, error) { return w.home, nil },
 		Now:      func() time.Time { return w.now },
 		Stdout:   &out,

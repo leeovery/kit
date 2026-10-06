@@ -61,6 +61,10 @@ const (
 	// the value; -dict-add, an entry's key and its value as XML; or a value
 	// as XML), then an optional note.
 	defaults
+	// secrets: a secret, what it fills (an environment variable's name, or a
+	// file's path) then where 1Password keeps its value and any options,
+	// words as a shell splits them, then an optional note.
+	secrets
 	// power: a power setting in pmset's form, its words as a shell splits
 	// them: the power source (-a every one, -b the battery, -c the charger,
 	// -u a UPS), the setting and its value, then an optional note.
@@ -102,6 +106,7 @@ var sectionDefs = []sectionDef{
 	{header: "macos login items", kind: "login", form: names, grouped: true},
 	{header: "claude mcp", kind: "claude-mcp", form: commands, folders: true},
 	{header: "claude plugins", kind: "claude-plugin", form: names, grouped: true},
+	{header: "secrets", kind: "secret", form: secrets, grouped: true},
 	{header: "checks", kind: ChecksKind, form: commands},
 	{header: "hourly", kind: HourlyKind, form: commands},
 	{header: "nightly", kind: NightlyKind, form: commands},
@@ -200,6 +205,10 @@ var lineName = regexp.MustCompile(`^[A-Za-z0-9@._+/-][A-Za-z0-9@._+/:^~*<>=|,-]*
 // commandName is what a command's name may be, as Claude Code's MCP servers'
 // names may.
 var commandName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+
+// secretName is what a secret fills: an environment variable's name, or a
+// file's path, from ~ or /.
+var secretName = regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_]*|(~/|/)[^\s"'#]+)$`)
 
 // settingKey is what a setting's key may be: no spaces, quotes, # or
 // backslashes, which a key such as credential.https://github.com.helper
@@ -356,7 +365,7 @@ func (s *section) entry(line string) (Entry, error) {
 		e.Name, e.Note = text, note
 	case paths:
 		e.Name, e.Note = splitComment(line)
-	case commands, settings:
+	case commands, settings, secrets:
 		name, value, note, err := splitCommand(line)
 		if err != nil {
 			return e, err
@@ -366,6 +375,8 @@ func (s *section) entry(line string) (Entry, error) {
 			return e, fmt.Errorf("%q isn't a name: letters, digits, dots, hyphens and underscores", name)
 		case s.def.form == settings && !settingKey.MatchString(name):
 			return e, fmt.Errorf("%q isn't a setting's key", name)
+		case s.def.form == secrets && !secretName.MatchString(name):
+			return e, fmt.Errorf("%q isn't what a secret fills: an environment variable's name, or a file's path from ~ or /", name)
 		case value == "" && s.def.form == commands:
 			return e, fmt.Errorf("%s has nothing after its name: its options follow it", name)
 		case value == "":

@@ -33,6 +33,9 @@ type Command struct {
 	// to it directly, for a program that asks a person something, such as
 	// sudo its password; nothing it prints is captured.
 	Interactive bool
+	// Secret is whether what it prints is a secret, as 1Password's values
+	// are: kept from every report, the log included.
+	Secret bool
 }
 
 // String is the command as a shell would take it, each argument quoted

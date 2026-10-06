@@ -30,6 +30,7 @@ import (
 	"github.com/leeovery/kit/internal/kind/mcp"
 	"github.com/leeovery/kit/internal/kind/npm"
 	"github.com/leeovery/kit/internal/kind/power"
+	"github.com/leeovery/kit/internal/kind/secret"
 	"github.com/leeovery/kit/internal/kind/spotlight"
 	"github.com/leeovery/kit/internal/kind/tmux"
 	"github.com/leeovery/kit/internal/linked"
@@ -131,7 +132,7 @@ type kindStep struct {
 // run, for the user whose home is home and XDG config folder configHome.
 // The kinds whose programs are formulae come after the formulae, so a new
 // Mac has them before it needs them.
-func kindSteps(hb *brew.Homebrew, run runner.Runner, home, configHome, stateDir string) []kindStep {
+func kindSteps(hb *brew.Homebrew, run runner.Runner, home, configHome, stateDir, secretsItem string) []kindStep {
 	return []kindStep{
 		{kind: hb.Formulae(), needs: []string{brew.StepName}},
 		{kind: hb.Casks(), needs: []string{brew.StepName}},
@@ -144,7 +145,10 @@ func kindSteps(hb *brew.Homebrew, run runner.Runner, home, configHome, stateDir 
 		{kind: login.New(run, home), after: []string{"cask", "app"}},
 		{kind: mcp.New(run, home), after: []string{"brew"}},
 		{kind: claudeplugin.New(run, home), after: []string{"brew"}},
-		{kind: gitconfig.New(run), after: []string{"brew"}, declaredOnly: true},
+		{kind: secret.New(run, home, secretsItem), after: []string{"brew", "cask"}, declaredOnly: true},
+		// git's settings sign with, and reach GitHub by, the SSH key the
+		// secrets write.
+		{kind: gitconfig.New(run), after: []string{"brew", "secret"}, declaredOnly: true},
 		{kind: defaults.New(run, stateDir), declaredOnly: true},
 		{kind: power.New(run, stateDir), declaredOnly: true},
 		{kind: exclusion.New(run, home, exclusion.TimeMachinePrefs), declaredOnly: true},
@@ -222,7 +226,7 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 		return nil, err
 	}
 	sink := event.NewFanout(face, log)
-	exec := a.Runner(path, childEnv(a.Getenv, home, path))
+	exec := a.Runner(path, childEnv(a.Getenv, a.Environ(), home, path))
 	observed := runner.Observed(exec, func(ctx context.Context, rep runner.Report) { sink.Emit(event.Command(ctx, rep)) }, a.Now)
 	hb := brew.New(observed)
 	r := &run{
@@ -258,7 +262,7 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 		addSetup(step, applyDrifter{step: step, label: "write it"})
 	}
 	var kinds []engine.Step
-	for _, ks := range kindSteps(hb, observed, home, a.configHome(), dirs.State) {
+	for _, ks := range kindSteps(hb, observed, home, a.configHome(), dirs.State, cfg.SecretsItem) {
 		name := ks.kind.Name()
 		list, unread, err := declared(cfg, ks.kind, machine)
 		if err != nil {
@@ -448,9 +452,16 @@ func (a *app) face() render.Face {
 // pushes through it), kit's own PATH, Homebrew kept from updating itself,
 // nagging or colouring its output on its own, and git from asking for a
 // password mid-run.
-func childEnv(getenv func(string) string, home string, path []string) []string {
+func childEnv(getenv func(string) string, environ []string, home string, path []string) []string {
 	env := []string{"HOME=" + home, "PATH=" + strings.Join(path, ":")}
-	for _, name := range []string{"USER", "LOGNAME", "SHELL", "TMPDIR", "LANG", "LC_ALL", "SSH_AUTH_SOCK"} {
+	// A 1Password session signed in with a password, over a remote
+	// connection, is a variable named for the account.
+	for _, kv := range environ {
+		if strings.HasPrefix(kv, "OP_SESSION_") {
+			env = append(env, kv)
+		}
+	}
+	for _, name := range []string{"USER", "LOGNAME", "SHELL", "TMPDIR", "LANG", "LC_ALL", "SSH_AUTH_SOCK", "OP_ACCOUNT", "OP_BIOMETRIC_UNLOCK_ENABLED"} {
 		if v := getenv(name); v != "" {
 			env = append(env, name+"="+v)
 		}
