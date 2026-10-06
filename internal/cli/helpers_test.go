@@ -107,6 +107,7 @@ func (w *world) run(t *testing.T, args ...string) (stdout, stderr string, status
 		ReadSecret: func(string) (string, error) { return w.typed, nil },
 		Scratch:    filepath.Join(w.home, "Scratch"),
 		SudoLocal:  filepath.Join(w.home, "etc", "sudo_local"),
+		TCC:        filepath.Join(w.home, "TCC.db"),
 		UID:        501,
 		Choose: func(_ context.Context, question string, options []string) (int, error) {
 			w.asked = append(w.asked, question)

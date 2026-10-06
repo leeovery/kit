@@ -54,6 +54,9 @@ type Deps struct {
 	// SudoLocal is sudo's file of local settings, which the touch-id-sudo
 	// feature checks: /etc/pam.d/sudo_local.
 	SudoLocal string
+	// TCC is macOS's database of privacy grants, readable only with Full
+	// Disk Access: one of what prefs probes for it.
+	TCC string
 	// UID is the user's id, which names Claude Code's folder in Scratch.
 	UID int
 }
@@ -211,6 +214,7 @@ func Real(version string) Deps {
 		},
 		Scratch:   "/Volumes/Scratch",
 		SudoLocal: steps.SudoLocal,
+		TCC:       "/Library/Application Support/com.apple.TCC/TCC.db",
 		UID:       os.Getuid(),
 	}
 }

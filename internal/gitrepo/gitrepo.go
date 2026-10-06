@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -185,4 +186,25 @@ func (r Repo) Push(ctx context.Context) error {
 		return fmt.Errorf("couldn't push: %w", err)
 	}
 	return nil
+}
+
+// githubRemote reads a GitHub remote's owner and repository, in either of
+// git's forms.
+var githubRemote = regexp.MustCompile(`^(?:https://github\.com/|git@github\.com:|ssh://git@github\.com/)([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?/?$`)
+
+// GitHubVisibility is the visibility on GitHub (private, internal or
+// public) of the repository at remote, a URL in either of git's forms,
+// asked through gh, and its owner/name; repo is "" for a remote that isn't
+// on GitHub, so isn't public there.
+func GitHubVisibility(ctx context.Context, run runner.Runner, remote string) (repo, visibility string, err error) {
+	m := githubRemote.FindStringSubmatch(strings.TrimSpace(remote))
+	if m == nil {
+		return "", "", nil
+	}
+	repo = m[1] + "/" + m[2]
+	res, err := run.Run(ctx, runner.Command{Name: "gh", Args: []string{"repo", "view", repo, "--json", "visibility", "--jq", ".visibility"}})
+	if err != nil {
+		return repo, "", fmt.Errorf("couldn't ask GitHub: %w", err)
+	}
+	return repo, strings.ToLower(strings.TrimSpace(string(res.Stdout))), nil
 }

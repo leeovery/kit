@@ -7,10 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
-
-	"github.com/leeovery/kit/internal/runner"
 )
 
 // The clean-up's ages: an item untouched for a week goes; a Claude Code
@@ -22,7 +19,7 @@ const (
 )
 
 // captureTimeout is how long settings capture may take: seconds, usually;
-// a hang (Dropbox, no Full Disk Access) is cut off so it can't hold up the
+// a hang (a stuck defaults, a slow push) is cut off so it can't hold up the
 // next night's run.
 const captureTimeout = 15 * time.Minute
 
@@ -30,6 +27,7 @@ const captureTimeout = 15 * time.Minute
 const (
 	CleanScratchJob    = "clean-scratch"
 	CaptureSettingsJob = "capture-settings"
+	RetryPendingJob    = "retry-pending"
 )
 
 // CleanScratch is the job clearing tmp, the Scratch volume's throwaway
@@ -105,26 +103,23 @@ func touchedSince(path string, t time.Time) bool {
 	return touched
 }
 
-// CaptureSettings is the job capturing app settings: prefsync capture,
-// niced, stopped after 15 minutes. prefsync says how it went in its last
-// line.
-func CaptureSettings(run runner.Runner) Job {
+// CaptureSettings is the job capturing apps' settings, through capture,
+// stopped after 15 minutes: what went wrong, else nothing.
+func CaptureSettings(capture func(ctx context.Context) error) Job {
 	return Job{Name: CaptureSettingsJob, Title: "Settings capture", Run: func(ctx context.Context) error {
-		res, err := run.Run(ctx, runner.Command{Name: "nice", Args: []string{"-n", "10", "prefsync", "capture"}, Timeout: captureTimeout})
-		if err == nil {
-			return nil
-		}
-		if errors.Is(err, context.DeadlineExceeded) {
+		ctx, cancel := context.WithTimeout(ctx, captureTimeout)
+		defer cancel()
+		err := capture(ctx)
+		if errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil {
 			return fmt.Errorf("stopped after %d minutes without finishing", int(captureTimeout.Minutes()))
-		}
-		if _, exited := errors.AsType[*runner.ExitError](err); exited {
-			for _, out := range [][]byte{res.Stdout, res.Stderr} {
-				lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-				if last := strings.TrimSpace(lines[len(lines)-1]); last != "" {
-					return errors.New(last)
-				}
-			}
 		}
 		return err
 	}}
+}
+
+// RetryPending is the hourly job restoring the apps' settings that wait
+// for their apps to be installed and closed, through retry: what went
+// wrong, else nothing.
+func RetryPending(retry func(ctx context.Context) error) Job {
+	return Job{Name: RetryPendingJob, Title: "Pending settings", Run: retry}
 }
