@@ -339,7 +339,15 @@ func (d *Defaults) changed(l look, rec *record) []string {
 		}
 		prefix := id + ":"
 		for name, was := range rec.Baseline {
-			if strings.HasPrefix(name, prefix) && now[name] != was && !d.isDeclared(name) {
+			if !strings.HasPrefix(name, prefix) {
+				continue
+			}
+			if s, err := config.ParseSetting(name); err == nil && isNoise(s.Domain, firstKey(s.Key)) {
+				// Taken before kit knew it for noise.
+				delete(rec.Baseline, name)
+				continue
+			}
+			if now[name] != was && !d.isDeclared(name) {
 				names = append(names, name)
 			}
 		}
@@ -351,6 +359,12 @@ func (d *Defaults) changed(l look, rec *record) []string {
 	}
 	slices.Sort(names)
 	return slices.Compact(names)
+}
+
+// firstKey is a setting's key, without a dict entry's key after it.
+func firstKey(key string) string {
+	k, _, _ := strings.Cut(key, ":")
+	return k
 }
 
 // isDeclared reports whether name, a setting's, is declared.
