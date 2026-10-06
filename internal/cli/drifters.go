@@ -100,6 +100,12 @@ func (d kindDrifter) choices(it check.Item) []choice {
 			{action: revert, label: "put back what's declared"},
 			snoozeChoice,
 		}
+	case kind.Changed:
+		all = []choice{{action: install, label: "set it as declared"}}
+		if _, valued := d.k.(kind.Valued); valued {
+			all = append(all, choice{action: adopt, label: "keep the Mac's: declared as it is now"})
+		}
+		all = append(all, snoozeChoice)
 	default:
 		all = []choice{snoozeChoice}
 	}
@@ -115,12 +121,13 @@ func (d kindDrifter) describe(it check.Item) string {
 		kind.Missing:          "declared, not installed",
 		kind.UnusedDependency: "installed for something since removed, needed by nothing",
 		kind.Diverged:         "changed on this Mac from what's declared",
+		kind.Changed:          "set otherwise than declared",
 	}[it.State]
 }
 
 func (d kindDrifter) settle(ctx context.Context, r *run, c *changes, dec decision, note string) check.Result {
 	switch {
-	case dec.action == adopt && dec.item.State == kind.Diverged:
+	case dec.action == adopt && (dec.item.State == kind.Diverged || dec.item.State == kind.Changed):
 		return d.adoptValue(ctx, r, c, dec, note)
 	case dec.action == revert && dec.item.State == kind.Extra:
 		rv, ok := d.k.(kind.Reverter)

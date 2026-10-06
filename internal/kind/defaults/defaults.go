@@ -73,7 +73,11 @@ var noise = map[string][]string{
 	},
 	"NSGlobalDomain":   {"com.apple.gms.*", "NSLinguisticDataAssets*", "AKLastIDMSEnvironment", "NSPreferredWebServices", "com.apple.springing.*"},
 	"com.apple.spaces": {"SpacesDisplayConfiguration"},
-	"com.apple.dock":   {"persistent-apps", "persistent-others", "recent-apps", "mod-count", "trash-full", "lastShowIndicatorTime", "region", "loc", "workspaces-*"},
+	"/Library/Preferences/com.apple.SoftwareUpdate": {
+		"Last*", "*Date*", "*Dictionary", "*Count", "RecommendedUpdates", "DDMPersistedErrorKey",
+		"PostSuccessful*", "PrimaryLanguages", "SplatEnabled",
+	},
+	"com.apple.dock": {"persistent-apps", "persistent-others", "recent-apps", "mod-count", "trash-full", "lastShowIndicatorTime", "region", "loc", "workspaces-*"},
 	"com.apple.finder": {
 		"FXRecentFolders", "GoToField*", "FXDesktopVolumePositions", "FXConnectToBounds", "FXConnectToLastURL",
 		"TrashViewSettings", "SearchRecentsSavedViewStyle*", "ComputerViewSettings", "FK_*", "LastTrashState", "FXSidebarUpgradedTo*",
@@ -86,7 +90,10 @@ type Defaults struct {
 	stateDir string
 	// declared are the declared values, by name.
 	declared map[string]declaredValue
-	admin    func(ctx context.Context) bool
+	// seen are the declared settings kit has seen as declared, as its last
+	// look found them.
+	seen  map[string]bool
+	admin func(ctx context.Context) bool
 }
 
 // declaredValue is a setting as declared: where it is, and its value.
@@ -107,9 +114,10 @@ func (d *Defaults) Name() string    { return "default" }
 func (d *Defaults) Title() string   { return "macOS settings" }
 func (d *Defaults) Program() string { return "defaults" }
 
-// Diverges marks a setting changed from what kit saw declared as changed on
-// purpose.
-func (d *Defaults) Diverges() {}
+// Diverges reports whether a setting set otherwise was changed on purpose:
+// whether kit has seen it as declared before. One never seen so (a new Mac,
+// a newly declared line) is set as declared by applying.
+func (d *Defaults) Diverges(name string) bool { return d.seen[name] }
 
 // Values reads each setting's declared value.
 func (d *Defaults) Values(list config.List) (config.List, error) {
@@ -248,9 +256,8 @@ func (l look) actual(s config.Setting) (any, bool) {
 }
 
 // Installed lists the settings on the Mac kit compares: each declared one
-// set as declared, or seen as declared before and changed since (a
-// declared one never seen as declared is left out, so it's missing, and
-// applying writes it); and each watched one changed since kit took its
+// that's set, or that kit has seen as declared before (one unset since then
+// was unset on the Mac); and each watched one changed since kit took its
 // value and not declared.
 func (d *Defaults) Installed(ctx context.Context) ([]kind.Installed, error) {
 	if !runner.Has(d.run, d.Program()) {
@@ -274,14 +281,14 @@ func (d *Defaults) Installed(ctx context.Context) ([]kind.Installed, error) {
 		for _, name := range slices.Sorted(maps.Keys(d.declared)) {
 			dv := d.declared[name]
 			v, set := l.actual(dv.setting)
-			switch {
-			case set && plist.Equal(v, dv.value):
+			if set && plist.Equal(v, dv.value) {
 				rec.Seen[name] = true
-				out = append(out, kind.Installed{Name: name, Explicit: true})
-			case rec.Seen[name]:
+			}
+			if set || rec.Seen[name] {
 				out = append(out, kind.Installed{Name: name, Explicit: true})
 			}
 		}
+		d.seen = maps.Clone(rec.Seen)
 		for _, name := range d.changed(l, rec) {
 			out = append(out, kind.Installed{Name: name, Explicit: true})
 		}

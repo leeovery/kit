@@ -35,7 +35,9 @@ type Power struct {
 	run      runner.Runner
 	stateDir string
 	declared map[string]string
-	admin    func(ctx context.Context) bool
+	// seen are the declared settings kit has seen as declared.
+	seen  map[string]bool
+	admin func(ctx context.Context) bool
 }
 
 // New returns the power settings, run through run, with kit's records in
@@ -48,9 +50,9 @@ func (p *Power) Name() string    { return "power" }
 func (p *Power) Title() string   { return "Power settings" }
 func (p *Power) Program() string { return "pmset" }
 
-// Diverges marks a setting changed from what kit saw declared as changed on
-// purpose.
-func (p *Power) Diverges() {}
+// Diverges reports whether a setting set otherwise was changed on purpose:
+// whether kit has seen it as declared before.
+func (p *Power) Diverges(name string) bool { return p.seen[name] }
 
 // Values reads each setting's declared value.
 func (p *Power) Values(list config.List) (config.List, error) {
@@ -107,9 +109,8 @@ func actual(settings map[string]string, name string) (string, bool) {
 	return value, found
 }
 
-// Installed lists the declared settings kit compares: each as declared, or
-// seen as declared before and changed since. One never seen as declared is
-// left out, so it's missing, and applying sets it.
+// Installed lists the declared settings pmset shows, and those kit has seen
+// as declared before.
 func (p *Power) Installed(ctx context.Context) ([]kind.Installed, error) {
 	settings, err := p.settings(ctx)
 	if err != nil {
@@ -122,14 +123,14 @@ func (p *Power) Installed(ctx context.Context) ([]kind.Installed, error) {
 		}
 		for _, name := range slices.Sorted(maps.Keys(p.declared)) {
 			v, ok := actual(settings, name)
-			switch {
-			case ok && v == p.declared[name]:
+			if ok && v == p.declared[name] {
 				rec.Seen[name] = true
-				out = append(out, kind.Installed{Name: name, Explicit: true})
-			case rec.Seen[name]:
+			}
+			if ok || rec.Seen[name] {
 				out = append(out, kind.Installed{Name: name, Explicit: true})
 			}
 		}
+		p.seen = maps.Clone(rec.Seen)
 	})
 	return out, err
 }

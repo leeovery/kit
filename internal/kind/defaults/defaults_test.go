@@ -65,8 +65,8 @@ func TestANewMacGetsWhatsDeclared(t *testing.T) {
 	m := newMac(t)
 	list := m.declare("com.apple.dock:tilesize", "-int 60")
 	m.set("com.apple.dock", "<key>tilesize</key><integer>48</integer>")
-	if got := m.items(list); !slices.Equal(got, []string{"com.apple.dock:tilesize missing install"}) {
-		t.Errorf("items = %q; want it missing, never seen as declared", got)
+	if got := m.items(list); !slices.Equal(got, []string{"com.apple.dock:tilesize changed set to 48 install"}) {
+		t.Errorf("items = %q; want it changed, never seen as declared, so set by applying", got)
 	}
 	m.fake.On("defaults", "write", "com.apple.dock", "tilesize", "-int", "60")
 	m.fake.On("killall", "Dock")
@@ -126,7 +126,7 @@ func TestADictsEntries(t *testing.T) {
 		return "<key>AppleSymbolicHotKeys</key><dict><key>60</key><dict><key>enabled</key>" + sixty + "</dict><key>61</key><dict><key>enabled</key>" + sixtyOne + "</dict></dict>"
 	}
 	m.set("com.apple.symbolichotkeys", hotkeys("<true/>", "<true/>"))
-	if got := m.items(list); !slices.Equal(got, []string{"com.apple.symbolichotkeys:AppleSymbolicHotKeys:60 missing install"}) {
+	if got := m.items(list); !slices.Equal(got, []string{"com.apple.symbolichotkeys:AppleSymbolicHotKeys:60 changed set to <dict><key>enabled</key><true/></dict> install"}) {
 		t.Fatalf("items = %q", got)
 	}
 	m.set("com.apple.symbolichotkeys", hotkeys("<false/>", "<false/>"))

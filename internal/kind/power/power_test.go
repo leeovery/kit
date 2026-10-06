@@ -43,12 +43,12 @@ func TestPowerSettings(t *testing.T) {
 		t.Fatal(err)
 	}
 	fake.On("pmset", "-g", "custom").Prints(strings.Replace(laptop, "%s", "0", 1))
-	want := []string{"all:standby missing install"}
+	want := []string{"all:standby changed set differently on each power source install"}
 	if got := items(t, p, list); !slices.Equal(got, want) {
 		t.Errorf("items = %q, want %q (standby differs between the sources)", got, want)
 	}
 	fake.On("pmset", "-g", "custom").Prints(strings.Replace(laptop, "%s", "10", 1))
-	want = []string{"all:standby missing install", "charger:sleep diverged set to 10"}
+	want = []string{"all:standby changed set differently on each power source install", "charger:sleep diverged set to 10"}
 	if got := items(t, p, list); !slices.Equal(got, want) {
 		t.Errorf("after the charger's sleep changed, items = %q, want %q", got, want)
 	}
