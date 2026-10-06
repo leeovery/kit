@@ -37,6 +37,10 @@ const (
 	NightlyKind = "nightly"
 )
 
+// ManualKind names the section of the steps a person does by hand: a name,
+// what to do, and, after --, a command saying whether it's done.
+const ManualKind = "manual"
+
 // FeaturesKind names the section of the pieces switched on for a Mac, by
 // name: the parts with nothing to list, such as a backup tool.
 const FeaturesKind = "features"
@@ -107,6 +111,7 @@ var sectionDefs = []sectionDef{
 	{header: "claude mcp", kind: "claude-mcp", form: commands, folders: true},
 	{header: "claude plugins", kind: "claude-plugin", form: names, grouped: true},
 	{header: "secrets", kind: "secret", form: secrets, grouped: true},
+	{header: "manual", kind: ManualKind, form: commands},
 	{header: "checks", kind: ChecksKind, form: commands},
 	{header: "hourly", kind: HourlyKind, form: commands},
 	{header: "nightly", kind: NightlyKind, form: commands},

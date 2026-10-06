@@ -50,6 +50,9 @@ func (a *app) remove(ctx context.Context, r *run, kindName string, names []strin
 	if kindName == pathsKind {
 		return a.removePaths(ctx, r, names, shared)
 	}
+	if _, line := lineKinds[kindName]; line {
+		return a.removeLines(ctx, r, kindName, names, shared)
+	}
 	k, err := r.kindNamed(kindName)
 	if err != nil {
 		return err
