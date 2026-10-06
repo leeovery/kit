@@ -330,7 +330,7 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 		r.adminSteps = append(r.adminSteps, scratch)
 		checks = append(checks, scratch)
 	}
-	if features[steps.FeatureSettingsCapture] {
+	if features[steps.FeaturePrefs] {
 		checks = append(checks, steps.FullDiskAccess(home))
 	}
 	edits := steps.ConfigEdits(r.repo)

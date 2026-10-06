@@ -16,12 +16,16 @@ type Dirs struct {
 	State string
 	// Logs holds a log of each run.
 	Logs string
+	// Data holds what kit keeps for itself that isn't state: the clone of
+	// the repository apps' settings are saved to.
+	Data string
 }
 
 // Locate finds kit's directories, from home and the environment getenv
 // reads: the config repository at KIT_CONFIG, else XDG_CONFIG_HOME/kit, else
 // ~/.config/kit; the state at XDG_STATE_HOME/kit, else ~/.local/state/kit;
-// the logs at ~/Library/Logs/kit. A relative XDG directory is ignored, as the
+// the logs at ~/Library/Logs/kit; its data at XDG_DATA_HOME/kit, else
+// ~/.local/share/kit. A relative XDG directory is ignored, as the
 // XDG spec says; a relative KIT_CONFIG is an error, as it would lead wherever
 // kit happened to run.
 func Locate(home string, getenv func(string) string) (Dirs, error) {
@@ -42,9 +46,14 @@ func Locate(home string, getenv func(string) string) (Dirs, error) {
 	if dir := getenv("XDG_STATE_HOME"); filepath.IsAbs(dir) {
 		stateDir = filepath.Join(dir, "kit")
 	}
+	dataDir := filepath.Join(home, ".local", "share", "kit")
+	if dir := getenv("XDG_DATA_HOME"); filepath.IsAbs(dir) {
+		dataDir = filepath.Join(dir, "kit")
+	}
 	return Dirs{
 		Config: configDir,
 		State:  stateDir,
 		Logs:   filepath.Join(home, "Library", "Logs", "kit"),
+		Data:   dataDir,
 	}, nil
 }

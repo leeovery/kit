@@ -242,7 +242,7 @@ func (a *app) jobs(r *run) (hourly, daily []nightly.Job, err error) {
 	if features[steps.FeatureScratch] {
 		daily = append(daily, nightly.CleanScratch(filepath.Join(a.Scratch, "tmp"), home, a.UID, a.Now))
 	}
-	if features[steps.FeatureSettingsCapture] {
+	if features[steps.FeaturePrefs] {
 		daily = append(daily, nightly.CaptureSettings(r.run))
 	}
 	return hourly, daily, nil

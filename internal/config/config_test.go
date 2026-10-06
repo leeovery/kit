@@ -119,3 +119,13 @@ func TestNightlyAt(t *testing.T) {
 		t.Errorf("Load() = %v", err)
 	}
 }
+
+func TestPrefsRepo(t *testing.T) {
+	if cfg := loadRepo(t, map[string]string{}); cfg.PrefsRepo != "" {
+		t.Errorf("PrefsRepo unset = %q", cfg.PrefsRepo)
+	}
+	cfg := loadRepo(t, map[string]string{config.File: "format = 1\nprimary = \"laptop\"\nprefs_repo = \"git@github.com:someone/prefs.git\"\n\n[macs.laptop]\n"})
+	if cfg.PrefsRepo != "git@github.com:someone/prefs.git" {
+		t.Errorf("PrefsRepo = %q", cfg.PrefsRepo)
+	}
+}

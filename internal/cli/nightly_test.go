@@ -87,7 +87,7 @@ func TestNightlyRunsAJobByName(t *testing.T) {
 // The built-in jobs follow the user's own, settings capture last.
 func TestNightlyBuiltInJobs(t *testing.T) {
 	w := jobsWorld(t)
-	w.writeSection(t, "laptop", "features", "scratch\nsettings-capture\n")
+	w.writeSection(t, "laptop", "features", "scratch\nprefs\n")
 	w.fake.On("nice", "-n", "10", "prefsync", "capture").Prints("captured 2 changed domains\n")
 	w.fake.On("mount").Prints("/dev/disk3s1 on / (apfs, local, journaled)\n")
 	out, _, _ := w.run(t, "nightly", "--plan")

@@ -15,22 +15,22 @@ func TestLocate(t *testing.T) {
 	}{
 		{
 			name: "defaults, in the home",
-			want: config.Dirs{Config: "/Users/someone/.config/kit", State: "/Users/someone/.local/state/kit", Logs: "/Users/someone/Library/Logs/kit"},
+			want: config.Dirs{Config: "/Users/someone/.config/kit", State: "/Users/someone/.local/state/kit", Logs: "/Users/someone/Library/Logs/kit", Data: "/Users/someone/.local/share/kit"},
 		},
 		{
 			name: "XDG's directories",
-			env:  map[string]string{"XDG_CONFIG_HOME": "/elsewhere/config", "XDG_STATE_HOME": "/elsewhere/state"},
-			want: config.Dirs{Config: "/elsewhere/config/kit", State: "/elsewhere/state/kit", Logs: "/Users/someone/Library/Logs/kit"},
+			env:  map[string]string{"XDG_CONFIG_HOME": "/elsewhere/config", "XDG_STATE_HOME": "/elsewhere/state", "XDG_DATA_HOME": "/elsewhere/data"},
+			want: config.Dirs{Config: "/elsewhere/config/kit", State: "/elsewhere/state/kit", Logs: "/Users/someone/Library/Logs/kit", Data: "/elsewhere/data/kit"},
 		},
 		{
 			name: "KIT_CONFIG over XDG_CONFIG_HOME",
 			env:  map[string]string{"KIT_CONFIG": "/elsewhere/kit-config/", "XDG_CONFIG_HOME": "/elsewhere/config"},
-			want: config.Dirs{Config: "/elsewhere/kit-config", State: "/Users/someone/.local/state/kit", Logs: "/Users/someone/Library/Logs/kit"},
+			want: config.Dirs{Config: "/elsewhere/kit-config", State: "/Users/someone/.local/state/kit", Logs: "/Users/someone/Library/Logs/kit", Data: "/Users/someone/.local/share/kit"},
 		},
 		{
 			name: "relative XDG directories are ignored",
-			env:  map[string]string{"XDG_CONFIG_HOME": "config", "XDG_STATE_HOME": "state"},
-			want: config.Dirs{Config: "/Users/someone/.config/kit", State: "/Users/someone/.local/state/kit", Logs: "/Users/someone/Library/Logs/kit"},
+			env:  map[string]string{"XDG_CONFIG_HOME": "config", "XDG_STATE_HOME": "state", "XDG_DATA_HOME": "data"},
+			want: config.Dirs{Config: "/Users/someone/.config/kit", State: "/Users/someone/.local/state/kit", Logs: "/Users/someone/Library/Logs/kit", Data: "/Users/someone/.local/share/kit"},
 		},
 	}
 	for _, tt := range tests {
