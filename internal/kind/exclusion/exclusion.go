@@ -20,8 +20,10 @@ import (
 )
 
 // TimeMachinePrefs is Time Machine's settings, whose SkipPaths are its
-// fixed-path exclusions.
-const TimeMachinePrefs = "/Library/Preferences/com.apple.TimeMachine.plist"
+// fixed-path exclusions, as defaults names the domain: read through macOS's
+// settings service, which has a change the moment it's made, where the file
+// on disk lags behind.
+const TimeMachinePrefs = "/Library/Preferences/com.apple.TimeMachine"
 
 // Exclusions is the backup exclusions, driven through tmutil.
 type Exclusions struct {
@@ -83,7 +85,7 @@ func (x *Exclusions) Expand(list config.List) (config.List, error) {
 
 // Installed lists Time Machine's fixed-path exclusions.
 func (x *Exclusions) Installed(ctx context.Context) ([]kind.Installed, error) {
-	res, err := x.run.Run(ctx, runner.Command{Name: "plutil", Args: []string{"-convert", "xml1", "-o", "-", x.prefs}})
+	res, err := x.run.Run(ctx, runner.Command{Name: "defaults", Args: []string{"export", x.prefs, "-"}})
 	if err != nil {
 		return nil, err
 	}

@@ -22,7 +22,7 @@ func TestExclusions(t *testing.T) {
 		}
 	}
 	fake := runnertest.New(t)
-	x := exclusion.New(fake, home, "/prefs.plist")
+	x := exclusion.New(fake, home, "/prefs")
 	list, err := x.Expand(config.List{Entries: []config.Entry{
 		{Name: "~/Library/Application Support/*/GPUCache", Group: "Caches", Scope: "shared", Line: 3},
 		{Name: "~/.cache", Scope: "shared", Line: 4},
@@ -34,7 +34,7 @@ func TestExclusions(t *testing.T) {
 	if got := list.Names(); !slices.Equal(got, []string{"~/Library/Application Support/One/GPUCache", "~/Library/Application Support/Two/GPUCache", "~/.cache", "/Applications"}) {
 		t.Errorf("Expand() = %q", got)
 	}
-	fake.On("plutil", "-convert", "xml1", "-o", "-", "/prefs.plist").Prints("<plist><dict><key>SkipPaths</key><array><string>" + home + "/.cache</string><string>/Applications</string><string>" + home + "/Movies</string></array></dict></plist>")
+	fake.On("defaults", "export", "/prefs", "-").Prints("<plist><dict><key>SkipPaths</key><array><string>" + home + "/.cache</string><string>/Applications</string><string>" + home + "/Movies</string></array></dict></plist>")
 	var got []string
 	for _, it := range kind.Compare(t.Context(), x, list).Items {
 		got = append(got, it.Name+" "+it.State)

@@ -69,10 +69,11 @@ var noise = map[string][]string{
 	"*": {
 		"NSWindow Frame *", "NSSplitView Subview Frames *", "NSTableView *", "NSToolbar Configuration *",
 		"NSNavPanel*", "NSNavLastRootDirectory", "NSNavRecentPlaces", "*RecentDocuments*", "*LastUsed*",
-		"*Timestamp*", "*timestamp*", "*-stamp", "*Date", "*date",
+		"*Timestamp*", "*timestamp*", "*-stamp", "*Date", "*date", "*Heartbeat*",
 	},
-	"NSGlobalDomain": {"com.apple.gms.*", "NSLinguisticDataAssets*", "AKLastIDMSEnvironment", "NSPreferredWebServices", "com.apple.springing.*"},
-	"com.apple.dock": {"persistent-apps", "persistent-others", "recent-apps", "mod-count", "trash-full", "lastShowIndicatorTime", "region", "loc", "workspaces-*"},
+	"NSGlobalDomain":   {"com.apple.gms.*", "NSLinguisticDataAssets*", "AKLastIDMSEnvironment", "NSPreferredWebServices", "com.apple.springing.*"},
+	"com.apple.spaces": {"SpacesDisplayConfiguration"},
+	"com.apple.dock":   {"persistent-apps", "persistent-others", "recent-apps", "mod-count", "trash-full", "lastShowIndicatorTime", "region", "loc", "workspaces-*"},
 	"com.apple.finder": {
 		"FXRecentFolders", "GoToField*", "FXDesktopVolumePositions", "FXConnectToBounds", "FXConnectToLastURL",
 		"TrashViewSettings", "SearchRecentsSavedViewStyle*", "ComputerViewSettings", "FK_*", "LastTrashState", "FXSidebarUpgradedTo*",
