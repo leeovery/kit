@@ -134,6 +134,16 @@ a name, then `--` and a command, which exits 0 when all's well, or prints what's
 its first line (a minute's timeout), each failing one an item of the `checks` step. Every step has an area (Backups, Jobs, Mac, Drift,
 Config, Checks), which the status document carries.
 
+**Steps by hand** go in a `[manual]` section, a line each: a name, what to do in quotes, and
+optionally `--` and a command saying whether it's done (exit 0: done), as in `tool "Install the
+tool from its site" -- test -d /Applications/Tool.app`. One with no command is done once marked
+on this Mac (`kit done <name>`, `--undo` to unmark). Those not done are items of the `manual`
+step, in the Manual area, saying what to do, so bare `kit` shows them; what kit can check
+itself stays a check that says what to do. `kit add check|hourly|nightly <name> -- <command>`
+and `kit add manual <name> "<what to do>" [-- <command>]` declare checks, jobs and steps by
+hand (a check, and a step's command, run once as it's added, to say how it stands); `kit
+remove check|hourly|nightly|manual <name>` undeclares one.
+
 **The config repository's own edits** are drift, not a problem: linked files mean edits
 land in the repository outside kit (through a link, by hand, by an app), and kit commits only
 its own changes. The `config` step makes each file changed and not committed an item

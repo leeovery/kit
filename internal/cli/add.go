@@ -40,6 +40,11 @@ kit-config's home folder for this Mac (--shared: every Mac's), and links it
 back in its place. kit add path <dir>... puts a directory last on the PATH,
 kit's and the shell's.
 
+kit add check <name> -- <command> declares a check of your own (exit 0: all's
+well), and runs it once; kit add hourly and kit add nightly declare jobs the
+same way; kit add manual <name> "<what to do>" [-- <command>] a step done by
+hand, the command saying whether it's done (else kit done marks it).
+
 At a terminal, kit asks which group of the kind's section each goes in ("To be
 sorted" first); --group answers without asking, and without a terminal they go
 in "To be sorted". --note records why, after the name. --temp installs without
@@ -50,7 +55,16 @@ declaring, for a throwaway: it's quiet for 7 days, then kit reconcile asks.`,
 			if err != nil {
 				return err
 			}
-			err = a.add(cmd.Context(), r, args[0], args[1:], opts)
+			if _, line := lineKinds[args[0]]; line {
+				// Where the command starts, past the --, in what follows the kind.
+				dash := cmd.ArgsLenAtDash()
+				if dash > 0 {
+					dash--
+				}
+				err = a.addLine(cmd.Context(), r, args[0], args[1:], dash, opts)
+			} else {
+				err = a.add(cmd.Context(), r, args[0], args[1:], opts)
+			}
 			if closeErr := r.close(); err == nil {
 				err = closeErr
 			}

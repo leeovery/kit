@@ -350,6 +350,15 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 	if len(own.Entries) > 0 {
 		checks = append(checks, steps.Own(observed, home, own))
 	}
+	byHand, err := cfg.List(config.ManualKind, machine)
+	if err != nil {
+		_ = face.Close()
+		_ = log.Close()
+		return nil, err
+	}
+	if len(byHand.Entries) > 0 {
+		checks = append(checks, steps.Manual(observed, home, dirs.State, byHand))
+	}
 	hourly, daily, err := a.jobs(r)
 	if err != nil {
 		_ = face.Close()
