@@ -76,9 +76,19 @@ func (s *Secrets) Store(ctx context.Context, item, field, value string) (string,
 	return section + "/" + label, nil
 }
 
+// assigned is a field's or attachment's name as op's assignments take it:
+// each period, equals sign and backslash escaped, as op would read a period
+// as a section's end.
+func assigned(name string) string {
+	return strings.NewReplacer(`\`, `\\`, ".", `\.`, "=", `\=`).Replace(name)
+}
+
 // Attach keeps the file at path in item (op://vault/item), as an attachment
 // named name. It's the short reference.
 func (s *Secrets) Attach(ctx context.Context, item, name, path string) (string, error) {
+	if strings.Contains(name, "/") {
+		return "", fmt.Errorf("%q isn't an attachment's name: no /", name)
+	}
 	args, err := itemArgs(item)
 	if err != nil {
 		return "", err
@@ -86,7 +96,7 @@ func (s *Secrets) Attach(ctx context.Context, item, name, path string) (string, 
 	if _, err := os.Stat(path); err != nil {
 		return "", err
 	}
-	if _, err := s.run.Run(ctx, runner.Command{Name: "op", Args: slices.Concat([]string{"item", "edit"}, args, []string{name + "[file]=" + path}), Timeout: opTimeout, Secret: true}); err != nil {
+	if _, err := s.run.Run(ctx, runner.Command{Name: "op", Args: slices.Concat([]string{"item", "edit"}, args, []string{assigned(name) + "[file]=" + path}), Timeout: opTimeout, Secret: true}); err != nil {
 		return "", fmt.Errorf("attach it in 1Password: %w", err)
 	}
 	return name, nil
@@ -99,8 +109,13 @@ func (s *Secrets) Delete(ctx context.Context, item, short string) error {
 	if err != nil {
 		return err
 	}
-	field := strings.ReplaceAll(short, "/", ".")
-	if _, err := s.run.Run(ctx, runner.Command{Name: "op", Args: slices.Concat([]string{"item", "edit"}, args, []string{field + "[delete]"}), Timeout: opTimeout, Secret: true}); err != nil {
+	// A section's name, then a field's, as section.field; an attachment's
+	// alone.
+	parts := strings.Split(short, "/")
+	for i, part := range parts {
+		parts[i] = assigned(part)
+	}
+	if _, err := s.run.Run(ctx, runner.Command{Name: "op", Args: slices.Concat([]string{"item", "edit"}, args, []string{strings.Join(parts, ".") + "[delete]"}), Timeout: opTimeout, Secret: true}); err != nil {
 		return fmt.Errorf("delete it from 1Password: %w", err)
 	}
 	return nil
