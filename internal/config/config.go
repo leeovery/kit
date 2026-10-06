@@ -41,6 +41,10 @@ type Config struct {
 	// NightlyAt is when each day the nightly run is due, as hours and
 	// minutes since midnight: 03:00 unless kit.toml says.
 	NightlyAt time.Duration
+	// SecretsItem is the 1Password item that holds most secrets, as a
+	// reference (op://vault/item), so a secret's line names only its
+	// section and field, or its attachment: none unless kit.toml says.
+	SecretsItem string
 }
 
 // DefaultNightlyAt is when the nightly run is due when kit.toml doesn't say.
@@ -58,6 +62,7 @@ type file struct {
 	MinimumKit string             `toml:"minimum_kit"`
 	Primary    string             `toml:"primary"`
 	NightlyAt  string             `toml:"nightly_at"`
+	Secrets    string             `toml:"secrets_item"`
 	Macs       map[string]macFile `toml:"macs"`
 }
 
@@ -109,7 +114,10 @@ func Load(dir string) (*Config, error) {
 	if len(f.Macs) == 0 {
 		return nil, fmt.Errorf("%s: no Macs: add one, as in [macs.laptop]", File)
 	}
-	cfg := &Config{Dir: dir, Format: f.Format, MinimumKit: f.MinimumKit, Primary: f.Primary, Macs: make(map[string]Mac, len(f.Macs)), NightlyAt: DefaultNightlyAt}
+	cfg := &Config{Dir: dir, Format: f.Format, MinimumKit: f.MinimumKit, Primary: f.Primary, Macs: make(map[string]Mac, len(f.Macs)), NightlyAt: DefaultNightlyAt, SecretsItem: strings.TrimSuffix(f.Secrets, "/")}
+	if cfg.SecretsItem != "" && (!strings.HasPrefix(cfg.SecretsItem, "op://") || strings.Count(cfg.SecretsItem, "/") != 3) {
+		return nil, fmt.Errorf("%s: secrets_item %q isn't an item's reference, as in op://vault/item", File, f.Secrets)
+	}
 	if f.NightlyAt != "" {
 		at, err := time.Parse("15:04", f.NightlyAt)
 		if err != nil {

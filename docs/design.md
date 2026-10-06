@@ -28,8 +28,8 @@ read, and kept in kit's state; a replacement Mac can take an old one's name.
 (`cask`), App Store apps (`app`), npm and Composer global packages (`npm`, `composer`), Go tools
 (`go`), GitHub CLI extensions (`gh`), tmux plugins (`tmux`), login items (`login`) and Claude
 Code's MCP servers (`claude-mcp`) and plugins (`claude-plugin`), git's settings (`git`) and
-macOS settings (`default`), power settings (`power`), and the backup and Spotlight exclusions
-(`exclusion`, `spotlight`). Later: Claude Code's skills and secrets.
+macOS settings (`default`), power settings (`power`), the backup and Spotlight exclusions
+(`exclusion`, `spotlight`), and secrets (`secret`). Later: Claude Code's skills.
 Each kind supplies five parts:
 
 - **declared:** what the config lists, the shared file and then this Mac's;
@@ -56,6 +56,7 @@ undeclared for adopting, removing or snoozing, and report both.
 | `power` | `[power settings]`: pmset's words, the source then the setting and value (`-c sleep 0`; `-a` every source, `-b` the battery, `-u` a UPS), named `charger:sleep` | `pmset -g custom`, by source | `sudo pmset`; undeclaring leaves the value |
 | `exclusion` | `[backup exclusions]`: a path a line, `~` and `*` globs, expanded on every check (a plain path stands for itself, there or not) | Time Machine's fixed-path exclusions (`SkipPaths`), and each glob match excluded where it is (`tmutil isexcluded`); Arq inherits both | a plain path: `sudo tmutil addexclusion -p` (Full Disk Access for the terminal); a glob's match: `tmutil addexclusion`, no password, so `kit nightly` does it unattended; `removeexclusion -p` |
 | `spotlight` | `[spotlight exclusions]`: a folder a line | Spotlight asked for files in each folder (`mdfind -count`); its own list is root's alone, so nothing extra is found | added to Spotlight's privacy list through sudo, taking effect after a restart (kit remembers, and says so); removing is System Settings' |
+| `secret` | `[secrets]`: what it fills (a variable's name, or a file's path) then where 1Password keeps it, short (`GitHub/token`, a field of `kit.toml`'s `secrets_item`) or in full (`op://vault/item/field`); `--mode 644` for a file's, `--github owner/repo,…` for a GitHub Actions secret | `~/.secrets.zsh`'s exports, the files with their modes, `gh secret list`: never 1Password, which would ask for a fingerprint each hour | a sync: every value read from 1Password in one sitting (`op read`, its output kept from the log), `~/.secrets.zsh` written whole with each value single-quoted (one that fails to read keeps its line), files written beside and renamed in, Actions secrets set by `gh secret set` on standard input; `kit secrets sync` forces one. Removing takes a secret off the Mac or GitHub; 1Password keeps it |
 | `default` | `[macos settings]`: `defaults write`'s words (`com.apple.dock tilesize -int 60`; `-currentHost` first for this host's; `-dict-add` and an entry's XML; or a value as XML), named `domain:key[:entry]` | `defaults export` of each domain | `defaults write` (through sudo for a domain under `/Library`), then the app that reads it restarted or keyboard shortcuts reloaded; `defaults delete` |
 
 - **Matching:** a kind may match on part of a name: an App Store app on its id (so an app the

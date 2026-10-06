@@ -6,6 +6,7 @@ import (
 	"cmp"
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -127,7 +128,8 @@ func StepOf(ctx context.Context) string {
 
 // Command is what a runner reports of a command, as an event, attributed to
 // the step ctx is running, with secrets, and anything shaped like a token,
-// hidden. The command's standard input is never part of it.
+// hidden. The command's standard input is never part of it, nor the output
+// of one whose output is a secret.
 func Command(ctx context.Context, rep runner.Report, secrets ...string) CommandRan {
 	e := CommandRan{
 		Time:     rep.Started,
@@ -137,6 +139,9 @@ func Command(ctx context.Context, rep runner.Report, secrets ...string) CommandR
 		Duration: rep.Result.Duration,
 		Stdout:   redact.Text(string(rep.Result.Stdout), secrets...),
 		Stderr:   redact.Text(string(rep.Result.Stderr), secrets...),
+	}
+	if rep.Command.Secret {
+		e.Stdout = fmt.Sprintf("(a secret, %d bytes, not kept)", len(rep.Result.Stdout))
 	}
 	if rep.Err != nil {
 		e.Error = redact.Text(rep.Err.Error(), secrets...)
