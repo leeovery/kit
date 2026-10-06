@@ -176,6 +176,8 @@ func number(v any) (float64, bool) {
 		return 0, true
 	case int64:
 		return float64(x), true
+	case uint64:
+		return float64(x), true
 	case float64:
 		return x, true
 	}
