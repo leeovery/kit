@@ -131,6 +131,13 @@ type Expander interface {
 	Expand(list config.List) (config.List, error)
 }
 
+// Unattended is a kind some of whose things kit's scheduled run may install
+// by itself, with no one there: cheap, safe, never removing anything.
+type Unattended interface {
+	// Unattended finds which of names, to install, the scheduled run may.
+	Unattended(names []string) []string
+}
+
 // Verber is a kind whose things aren't installed but set, or excluded:
 // its summaries say so.
 type Verber interface {
@@ -204,6 +211,28 @@ func Step(k Kind, declared config.List, needs ...string) engine.Step {
 			}
 			return k.Install(ctx, names)
 		},
+	}
+}
+
+// UnattendedApply is k's step's apply as the scheduled run takes it:
+// installing only the things missing that k says it may, alone; nil when k
+// lets it install none.
+func UnattendedApply(k Kind) func(ctx context.Context, found check.Result) error {
+	u, ok := k.(Unattended)
+	if !ok {
+		return nil
+	}
+	return func(ctx context.Context, found check.Result) error {
+		var names []string
+		for _, it := range found.Items {
+			if it.Action == Install {
+				names = append(names, it.Name)
+			}
+		}
+		if names = u.Unattended(names); len(names) == 0 {
+			return nil
+		}
+		return k.Install(ctx, names)
 	}
 }
 

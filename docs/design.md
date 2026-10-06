@@ -54,7 +54,7 @@ undeclared for adopting, removing or snoozing, and report both.
 | `claude-plugin` | `plugin@owner/repo`: the plugin and its marketplace's repository; `@owner/repo` a marketplace alone | Claude Code's records of plugins, marketplaces and what's enabled | the marketplace added when needed, then `claude plugin install`; `uninstall`, `marketplace remove` |
 | `git` | `[git config]`: a key, then its value as one word, as `git config --global` takes them (`alias.st "status -sb"`) | `git config --global --list` | `git config --global --replace-all`, `--unset-all` |
 | `power` | `[power settings]`: pmset's words, the source then the setting and value (`-c sleep 0`; `-a` every source, `-b` the battery, `-u` a UPS), named `charger:sleep` | `pmset -g custom`, by source | `sudo pmset`; undeclaring leaves the value |
-| `exclusion` | `[backup exclusions]`: a path a line, `~` and `*` globs, expanded on every check (a plain path stands for itself, there or not) | Time Machine's fixed-path exclusions (`SkipPaths`); Arq inherits them | `sudo tmutil addexclusion -p`, `removeexclusion -p` (Full Disk Access for the terminal) |
+| `exclusion` | `[backup exclusions]`: a path a line, `~` and `*` globs, expanded on every check (a plain path stands for itself, there or not) | Time Machine's fixed-path exclusions (`SkipPaths`), and each glob match excluded where it is (`tmutil isexcluded`); Arq inherits both | a plain path: `sudo tmutil addexclusion -p` (Full Disk Access for the terminal); a glob's match: `tmutil addexclusion`, no password, so `kit nightly` does it unattended; `removeexclusion -p` |
 | `spotlight` | `[spotlight exclusions]`: a folder a line | Spotlight asked for files in each folder (`mdfind -count`); its own list is root's alone, so nothing extra is found | added to Spotlight's privacy list through sudo, taking effect after a restart (kit remembers, and says so); removing is System Settings' |
 | `default` | `[macos settings]`: `defaults write`'s words (`com.apple.dock tilesize -int 60`; `-currentHost` first for this host's; `-dict-add` and an entry's XML; or a value as XML), named `domain:key[:entry]` | `defaults export` of each domain | `defaults write` (through sudo for a domain under `/Library`), then the app that reads it restarted or keyboard shortcuts reloaded; `defaults delete` |
 
@@ -231,7 +231,9 @@ Drift, Config, Checks): the steps' short forms when all's well ("Time Machine 16
 and what to run (`kit reconcile`, `kit status`); `--json` is `kit status --json`'s document.
 
 `kit nightly` is what the hourly launch runs: the jobs due, in order (one failing never stops
-the others), then every check. Besides the user's own jobs, two are built in, nightly, each
+the others), then every check. It installs only what a kind lets it install with no one
+there, cheap and safe, and removes nothing: today, a new folder matching a backup
+exclusion's glob, excluded where it is. Besides the user's own jobs, two are built in, nightly, each
 with its feature: `scratch`'s clean-up (`/Volumes/Scratch/tmp` cleared of items untouched for a
 week; Claude Code's session folders judged one by one over 30 days, kept while their
 transcript changed) and, last, `settings-capture`'s `prefsync capture` (niced, stopped after
