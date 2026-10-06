@@ -36,8 +36,12 @@ type world struct {
 	env  map[string]string
 	now  time.Time
 	fake *runnertest.Fake
-	// environ is kit's environment, whole, beside env's lookups.
+	// environ is kit's environment, whole, beside env's lookups; stdin is
+	// what kit reads on its standard input.
 	environ []string
+	stdin   string
+	// typed is what a person types when kit asks for a value unshown.
+	typed string
 	// path and childEnv are what kit last made its runner with.
 	path     []string
 	childEnv []string
@@ -91,6 +95,7 @@ func (w *world) run(t *testing.T, args ...string) (stdout, stderr string, status
 		Environ:  func() []string { return w.environ },
 		HomeDir:  func() (string, error) { return w.home, nil },
 		Now:      func() time.Time { return w.now },
+		Stdin:    strings.NewReader(w.stdin),
 		Stdout:   &out,
 		Stderr:   &errOut,
 		Terminal: func(io.Writer) bool { return w.terminal },
@@ -99,9 +104,10 @@ func (w *world) run(t *testing.T, args ...string) (stdout, stderr string, status
 			w.path, w.childEnv = path, env
 			return w.fake
 		},
-		Scratch:   filepath.Join(w.home, "Scratch"),
-		SudoLocal: filepath.Join(w.home, "etc", "sudo_local"),
-		UID:       501,
+		ReadSecret: func(string) (string, error) { return w.typed, nil },
+		Scratch:    filepath.Join(w.home, "Scratch"),
+		SudoLocal:  filepath.Join(w.home, "etc", "sudo_local"),
+		UID:        501,
 		Choose: func(_ context.Context, question string, options []string) (int, error) {
 			w.asked = append(w.asked, question)
 			if w.choose == nil {

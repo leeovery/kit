@@ -49,3 +49,63 @@ func TestAPasswordSignInsSessionReachesOnePassword(t *testing.T) {
 		t.Errorf("programs get %q", w.childEnv)
 	}
 }
+
+func TestAddASecretKeepsItInOnePassword(t *testing.T) {
+	w := secretsWorld(t)
+	w.stdin = "new value\n"
+	f := w.fake
+	f.On("op", "whoami")
+	f.On("op", "item", "get", "Item", "--vault", "vault", "--format", "json").Prints(`{"id":"abc","title":"Item","sections":[{"id":"s1","label":"Section"}],"fields":[{"id":"f1","label":"token","type":"CONCEALED","value":"the value","section":{"id":"s1"}}]}`)
+	f.On("op", "item", "edit", "Item", "--vault", "vault")
+	f.On("op", "read", "op://vault/Item/Section/new").Prints("new value\n")
+	f.On("op", "read", "op://vault/Item/Section/token").Prints("the value\n")
+	w.expectSync([]string{"laptop/declarations"}, "kit add secret NEW_ONE (laptop): a new one")
+	out, _, code := w.run(t, "add", "secret", "NEW_ONE", "--field", "Section/new", "--stdin", "--note", "a new one")
+	if code != 0 || !strings.Contains(out, "kept in 1Password (Section/new) and read back; declared in laptop, synced") {
+		t.Errorf("kit add secret printed\n%s exit %d", out, code)
+	}
+	for _, c := range f.Commands() {
+		if strings.Contains(strings.Join(c.Args, " "), "new value") {
+			t.Errorf("%s: the value is on a command line", c)
+		}
+		if c.Name == "op" && len(c.Args) > 1 && c.Args[1] == "edit" && (!strings.Contains(c.Input, `"value":"new value"`) || !strings.Contains(c.Input, `"label":"new"`) || !c.Secret) {
+			t.Errorf("op item edit got %q (secret: %v)", c.Input, c.Secret)
+		}
+	}
+	if got := w.readSection(t, "laptop", "secrets"); !strings.Contains(got, "NEW_ONE Section/new   # a new one\n") {
+		t.Errorf("[secrets] = %q", got)
+	}
+	if got := w.read(t, ".secrets.zsh"); !strings.Contains(got, "export NEW_ONE='new value'   # a new one\n") {
+		t.Errorf("~/.secrets.zsh = %q", got)
+	}
+}
+
+func TestAddASecretSaysWhereItsValueComesFrom(t *testing.T) {
+	w := secretsWorld(t)
+	_, errOut, code := w.run(t, "add", "secret", "NEW_ONE", "--field", "Section/new")
+	if code != 2 || !strings.Contains(errOut, "say where its value comes from: --stdin") {
+		t.Errorf("printed %q, exit %d", errOut, code)
+	}
+	w.stdin = "x"
+	if _, errOut, _ := w.run(t, "add", "secret", "NEW_ONE", "--stdin"); !strings.Contains(errOut, "--field <section>/<field>") {
+		t.Errorf("printed %q", errOut)
+	}
+}
+
+func TestRemoveASecretAndItsValue(t *testing.T) {
+	w := secretsWorld(t)
+	w.write(t, ".secrets.zsh", "export TOKEN='the value'\n")
+	_, errOut, code := w.run(t, "remove", "secret", "TOKEN")
+	if code != 2 || !strings.Contains(errOut, "--keep-value or --delete-value") {
+		t.Errorf("printed %q, exit %d", errOut, code)
+	}
+	w.fake.On("op", "item", "edit", "Item", "--vault", "vault", "Section.token[delete]")
+	w.expectSync([]string{"laptop/declarations"}, "kit remove secret TOKEN (laptop)")
+	out, _, code := w.run(t, "remove", "secret", "TOKEN", "--delete-value")
+	if code != 0 || !strings.Contains(out, "its value deleted from 1Password") {
+		t.Errorf("kit remove secret printed\n%s exit %d", out, code)
+	}
+	if got := w.read(t, ".secrets.zsh"); strings.Contains(got, "TOKEN") {
+		t.Errorf("~/.secrets.zsh = %q", got)
+	}
+}

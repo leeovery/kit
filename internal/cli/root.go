@@ -30,6 +30,7 @@ type Deps struct {
 	Environ func() []string
 	HomeDir func() (string, error)
 	Now     func() time.Time
+	Stdin   io.Reader
 	Stdout  io.Writer
 	Stderr  io.Writer
 	// Terminal reports whether out is a terminal, as IsTerminal does: the
@@ -44,6 +45,9 @@ type Deps struct {
 	// Choose asks, at the terminal, which of options to take, as ask.Choose
 	// does: the index taken, or ask.ErrCancelled.
 	Choose func(ctx context.Context, question string, options []string) (int, error)
+	// ReadSecret asks, at the terminal, for a value typed without being
+	// shown, after prompt.
+	ReadSecret func(prompt string) (string, error)
 	// Scratch is the Scratch volume, which the scratch feature checks and
 	// clears: /Volumes/Scratch.
 	Scratch string
@@ -180,6 +184,7 @@ func Real(version string) Deps {
 		Environ:  os.Environ,
 		HomeDir:  os.UserHomeDir,
 		Now:      time.Now,
+		Stdin:    os.Stdin,
 		Stdout:   os.Stdout,
 		Stderr:   os.Stderr,
 		Terminal: IsTerminal,
@@ -189,6 +194,12 @@ func Real(version string) Deps {
 		},
 		Choose: func(ctx context.Context, question string, options []string) (int, error) {
 			return ask.Choose(ctx, os.Stdin, os.Stdout, question, options)
+		},
+		ReadSecret: func(prompt string) (string, error) {
+			_, _ = fmt.Fprint(os.Stderr, prompt)
+			b, err := term.ReadPassword(os.Stdin.Fd())
+			_, _ = fmt.Fprintln(os.Stderr)
+			return string(b), err
 		},
 		Scratch:   "/Volumes/Scratch",
 		SudoLocal: steps.SudoLocal,

@@ -14,6 +14,7 @@ import (
 
 func newRemoveCommand(a *app) *cobra.Command {
 	var shared bool
+	var value valueChoice
 	cmd := &cobra.Command{
 		Use:   "remove <kind> <name>...",
 		Short: "Uninstall packages, and undeclare them",
@@ -32,7 +33,11 @@ directory off the PATH.`,
 			if err != nil {
 				return err
 			}
-			err = a.remove(cmd.Context(), r, args[0], args[1:], shared)
+			if args[0] == secretKind {
+				err = a.removeSecrets(cmd.Context(), r, args[1:], shared, value)
+			} else {
+				err = a.remove(cmd.Context(), r, args[0], args[1:], shared)
+			}
 			if closeErr := r.close(); err == nil {
 				err = closeErr
 			}
@@ -40,6 +45,8 @@ directory off the PATH.`,
 		},
 	}
 	cmd.Flags().BoolVar(&shared, "shared", false, "take it out of the shared file, every Mac's list")
+	cmd.Flags().BoolVar(&value.delete, "delete-value", false, "a secret: delete its value from 1Password too")
+	cmd.Flags().BoolVar(&value.keep, "keep-value", false, "a secret: keep its value in 1Password")
 	return cmd
 }
 
