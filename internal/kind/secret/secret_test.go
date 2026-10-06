@@ -138,8 +138,21 @@ func TestSyncNeedsOnePasswordToAnswer(t *testing.T) {
 	s := secret.New(fake, t.TempDir(), item)
 	declare(t, s, [2]string{"PLAIN", "Section/plain"})
 	fake.On("op", "whoami").Exits(1)
+	fake.On("op", "vault", "list", "--format", "json").Exits(1)
 	if _, err := s.Sync(t.Context()); err == nil || err.Error() != secret.SignIn {
 		t.Errorf("Sync() = %v", err)
+	}
+}
+
+func TestSyncOpensASessionWhenNoneIsOpen(t *testing.T) {
+	fake := runnertest.New(t)
+	s := secret.New(fake, t.TempDir(), item)
+	declare(t, s, [2]string{"PLAIN", "Section/plain"})
+	fake.On("op", "whoami").Exits(1).PrintsToStderr("account is not signed in")
+	fake.On("op", "vault", "list", "--format", "json").Prints("[]")
+	fake.On("op", "read", item+"/Section/plain").Prints("v\n")
+	if report, err := s.Sync(t.Context()); err != nil || report.Synced != 1 {
+		t.Errorf("Sync() = %+v, %v; want the app asked for a session, and the sync done", report, err)
 	}
 }
 
