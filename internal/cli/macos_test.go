@@ -55,3 +55,18 @@ func TestReconcileAdoptsAndPutsBackSettings(t *testing.T) {
 		t.Errorf("kit reconcile --revert printed\n%s exit %d", out, code)
 	}
 }
+
+func TestReconcileAdoptsASettingNeverSeenAsDeclared(t *testing.T) {
+	w := macosWorld(t, "<key>tilesize</key><integer>48</integer>")
+	out, _, _ := w.run(t, "reconcile", "--json")
+	if !strings.Contains(out, `"id": "default:com.apple.dock:tilesize"`) || !strings.Contains(out, `"install",`) || !strings.Contains(out, `"adopt",`) {
+		t.Errorf("kit reconcile --json printed\n%s\nwant the size to set or adopt", out)
+	}
+	w.expectSync([]string{"shared/declarations"}, "kit reconcile (laptop): adopt default:com.apple.dock:tilesize")
+	if out, _, code := w.run(t, "reconcile", "default:com.apple.dock:tilesize", "--adopt"); code != 0 {
+		t.Errorf("kit reconcile --adopt printed\n%s exit %d", out, code)
+	}
+	if got := w.readSection(t, "shared", "macos settings"); got != "# Dock\ncom.apple.dock tilesize -int 48\n" {
+		t.Errorf("[macos settings] = %q", got)
+	}
+}

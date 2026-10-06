@@ -33,8 +33,9 @@ func (g *GitConfig) Name() string    { return "git" }
 func (g *GitConfig) Title() string   { return "git's settings" }
 func (g *GitConfig) Program() string { return "git" }
 
-// Diverges marks a setting set otherwise as changed on purpose.
-func (g *GitConfig) Diverges() {}
+// Diverges reports a setting set otherwise as changed on purpose: with git
+// config, on the Mac.
+func (g *GitConfig) Diverges(string) bool { return true }
 
 // Key is a key as git matches it: its section and last part in any case,
 // a subsection between them as written.

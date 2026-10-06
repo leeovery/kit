@@ -111,13 +111,15 @@ type Differ interface {
 	Differs(ctx context.Context, names []string) (map[string]string, error)
 }
 
-// Diverger is a Differ whose things installed otherwise than declared were
-// changed on the Mac on purpose, as a setting is: applying leaves them, and
-// kit reconcile adopts the Mac's or puts the declared back.
+// Diverger is a Differ some of whose things installed otherwise than
+// declared were changed on the Mac on purpose, as a setting kit has seen as
+// declared is: those applying leaves, and kit reconcile adopts the Mac's or
+// puts the declared back.
 type Diverger interface {
 	Differ
-	// Diverges marks the kind.
-	Diverges()
+	// Diverges reports whether name, installed otherwise than declared, was
+	// changed on the Mac on purpose.
+	Diverges(name string) bool
 }
 
 // Expander is a kind whose declarations are patterns, each standing for what
@@ -331,14 +333,12 @@ func Compare(ctx context.Context, k Kind, declared config.List) check.Result {
 	for name := range changed {
 		changedNames = append(changedNames, name)
 	}
-	_, diverges := k.(Diverger)
-	changedState, changedAction := Changed, Install
-	if diverges {
-		changedState, changedAction = Diverged, ""
-	}
-	changedItems := items(k, changedNames, changedState, "")
+	changedItems := items(k, changedNames, Changed, "")
 	for i, it := range changedItems {
-		changedItems[i].Detail, changedItems[i].Action = changed[it.Name], changedAction
+		changedItems[i].Detail, changedItems[i].Action = changed[it.Name], Install
+		if d, ok := k.(Diverger); ok && d.Diverges(it.Name) {
+			changedItems[i].State, changedItems[i].Action = Diverged, ""
+		}
 	}
 	res.Items = slices.Concat(
 		missingItems,

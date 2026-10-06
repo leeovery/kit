@@ -67,7 +67,9 @@ undeclared for adopting, removing or snoozing, and report both.
   settings is checked only while something of it is declared.
 - **macOS settings** keep a record (`settings.json` in kit's state directory). A declared
   setting is diverged only once kit has seen it as declared: one the Mac has never had as
-  declared (a new Mac, a new line) is missing, and applying writes it. Values compare as
+  declared (a new Mac, a new line) is missing when unset, or changed when set otherwise;
+  applying sets either, and reconcile can adopt a changed one instead (as for power
+  settings, and any kind whose things carry a value). Values compare as
   macOS reads them (a boolean and 1 or 0 alike). kit also watches a set of Apple's domains
   (the Dock, Finder, the global domain, the trackpad, the keyboard, screenshots, the menu
   bar clock, Control Center, Stage Manager, Spaces, keyboard shortcuts) and every declared
