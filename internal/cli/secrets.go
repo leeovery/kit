@@ -21,10 +21,10 @@ func newSecretsCommand(a *app) *cobra.Command {
 	cmd.AddCommand(&cobra.Command{
 		Use:   "sync",
 		Short: "Read every secret from 1Password, and put each in place",
-		Long: `Read every secret kit-config's [secrets] declares from 1Password, in one
-sitting, and put each in place: ~/.secrets.zsh, the files, and the GitHub
-Actions secrets. Run it after changing a value in 1Password. A value that
-fails to read keeps its previous one. Values are never printed or logged.`,
+		Long: `Read every secret kit-config's secrets sections declare from 1Password, in
+one sitting, and put each in place: ~/.secrets.zsh, and the files. Run it
+after changing a value in 1Password. A value that fails to read keeps its
+previous one. Values are never printed or logged.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			r, err := a.prepare("secrets sync", "secrets-sync")

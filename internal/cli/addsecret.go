@@ -21,11 +21,10 @@ const secretKind = "secret"
 
 // secretOptions are kit add's flags for a secret: where its value comes
 // from (an existing reference, a file, standard input, or typed), where in
-// 1Password it goes, and a file's mode or the repositories an Actions
-// secret is on.
+// 1Password it goes (the item and the field), and a file's mode.
 type secretOptions struct {
-	ref, from, field, mode, github string
-	stdin                          bool
+	ref, from, field, mode, item string
+	stdin                        bool
 }
 
 // valueChoice is kit remove's answer, given ahead, to whether a secret's
@@ -36,7 +35,10 @@ type valueChoice struct {
 
 // addSecret keeps a secret's value in 1Password (unless it's there already,
 // --ref), reads it back to compare, declares the secret, and syncs, values
-// never shown: one secret at a time.
+// never shown: one secret at a time. A new value goes in the item of the
+// file's secrets section (--item when it has none, or several), and its
+// line in that section; a reference in an item a section names goes in
+// that section, short, and any other in the plain [secrets], in full.
 func (a *app) addSecret(ctx context.Context, r *run, names []string, opts addOptions) error {
 	so := opts.secret
 	k, ok := r.kindsByName[secretKind].(*secret.Secrets)
@@ -54,8 +56,13 @@ func (a *app) addSecret(ctx context.Context, r *run, names []string, opts addOpt
 			sources++
 		}
 	}
-	if sources > 1 {
+	switch {
+	case sources > 1:
 		return errors.New("one of --ref, --from or --stdin says where its value comes from")
+	case so.ref != "" && so.item != "":
+		return errors.New("--item is where a new value goes; --ref says where one is already")
+	case so.ref != "" && (!strings.HasPrefix(so.ref, "op://") || strings.Count(so.ref, "/") < 4):
+		return fmt.Errorf("--ref %s isn't where 1Password keeps a value, as in op://vault/item/field", so.ref)
 	}
 	name := r.tildePaths(names)[0]
 	var value string
@@ -93,6 +100,14 @@ func (a *app) addSecret(ctx context.Context, r *run, names []string, opts addOpt
 		return errors.New("say where in 1Password it goes: --field <section>/<field>, as in GitHub/token")
 	}
 	scope := r.scope(opts.shared)
+	items, err := r.cfg.Items(secretKind, scope)
+	if err != nil {
+		return err
+	}
+	item, err := secretItem(so, items, config.DeclFile(scope))
+	if err != nil {
+		return err
+	}
 	c := startChanges(r, []string{name})
 	c.step(ctx, name, func(ctx context.Context) check.Result {
 		if !k.Answers(ctx) {
@@ -101,18 +116,20 @@ func (a *app) addSecret(ctx context.Context, r *run, names []string, opts addOpt
 		short := ""
 		var err error
 		switch {
+		case so.ref != "" && item != "":
+			short = strings.TrimPrefix(so.ref, item+"/")
 		case so.ref != "":
-			short = k.Short(so.ref)
+			short = so.ref
 		case so.from != "":
-			short, err = k.Attach(ctx, cmpOr(so.field, filepath.Base(so.from)), so.from)
+			short, err = k.Attach(ctx, item, cmpOr(so.field, filepath.Base(so.from)), so.from)
 		default:
-			short, err = k.Store(ctx, so.field, value)
+			short, err = k.Store(ctx, item, so.field, value)
 		}
 		if err != nil {
 			return check.Result{State: check.Failed, Reason: err.Error()}
 		}
 		if so.ref == "" {
-			if err := k.ReadBack(ctx, short, value); err != nil {
+			if err := k.ReadBack(ctx, item+"/"+short, value); err != nil {
 				return check.Result{State: check.Failed, Reason: "stored, but reading it back failed: " + err.Error()}
 			}
 		}
@@ -120,10 +137,7 @@ func (a *app) addSecret(ctx context.Context, r *run, names []string, opts addOpt
 		if so.mode != "" {
 			line += " --mode " + so.mode
 		}
-		if so.github != "" {
-			line += " --github " + so.github
-		}
-		if err := r.cfg.Declare(secretKind, scope, config.Entry{Name: name, Value: line, Note: opts.note}, ""); err != nil {
+		if err := r.cfg.Declare(secretKind, scope, config.Entry{Name: name, Value: line, Note: opts.note, Item: item}, ""); err != nil {
 			return check.Result{State: check.Failed, Reason: "kept in 1Password, but couldn't declare: " + err.Error()}
 		}
 		c.changed(config.DeclFile(scope))
@@ -143,12 +157,38 @@ func (a *app) addSecret(ctx context.Context, r *run, names []string, opts addOpt
 		}
 		summary := "declared in " + scope + ", synced"
 		if so.ref == "" {
-			summary = "kept in 1Password (" + short + ") and read back; " + summary
+			summary = "kept in 1Password (" + item + "/" + short + ") and read back; " + summary
 		}
 		return check.Result{State: check.OK, Summary: summary}
 	})
 	c.sync(ctx, commitMessage("add", secretKind, []string{name}, r.machine, opts.note))
 	return c.finish()
+}
+
+// secretItem is the item whose section a secret's line goes in: for a
+// reference, the item of the section it's in, if one is, else none (the
+// plain [secrets]); for a new value, --item, or the file's one item.
+func secretItem(so secretOptions, items []string, file string) (string, error) {
+	if so.ref != "" {
+		for _, item := range items {
+			if strings.HasPrefix(so.ref, item+"/") {
+				return item, nil
+			}
+		}
+		return "", nil
+	}
+	item := strings.TrimSuffix(so.item, "/")
+	switch {
+	case item != "" && !config.ItemRef(item):
+		return "", fmt.Errorf("--item %s isn't a 1Password item's reference, as in op://vault/item", so.item)
+	case item != "":
+		return item, nil
+	case len(items) == 1:
+		return items[0], nil
+	case len(items) == 0:
+		return "", fmt.Errorf("%s has no secrets section naming an item to keep it in: say which with --item op://vault/item (its section is made), or give where it is with --ref", file)
+	}
+	return "", fmt.Errorf("%s has secrets sections for %s: say which item it goes in with --item", file, strings.Join(items, ", "))
 }
 
 // cmpOr is a, or b when a is empty.
@@ -159,9 +199,10 @@ func cmpOr(a, b string) string {
 	return b
 }
 
-// removeSecrets takes each secret off the Mac or GitHub and undeclares it,
-// then deletes its value from 1Password too, or keeps it, as value says or
-// a terminal answers.
+// removeSecrets takes each secret off the Mac and undeclares it, then
+// deletes its value from 1Password too, or keeps it, as value says or a
+// terminal answers: a value in the item its section names; one given in
+// full, in the plain [secrets], is left where it is.
 func (a *app) removeSecrets(ctx context.Context, r *run, names []string, shared bool, value valueChoice) error {
 	k, ok := r.kindsByName[secretKind].(*secret.Secrets)
 	if !ok {
@@ -172,11 +213,12 @@ func (a *app) removeSecrets(ctx context.Context, r *run, names []string, shared 
 	if err != nil {
 		return err
 	}
-	refs := map[string]string{}
+	refs := map[string]config.Entry{}
 	for _, e := range declared.Entries {
 		if slices.Contains(names, e.Name) {
 			if words, err := config.Words(e.Value); err == nil && len(words) > 0 {
-				refs[e.Name] = words[0]
+				e.Value = words[0]
+				refs[e.Name] = e
 			}
 		}
 	}
@@ -203,15 +245,15 @@ func (a *app) removeSecrets(ctx context.Context, r *run, names []string, shared 
 			if res.State != check.OK || !del {
 				return res
 			}
-			ref, ok := refs[name]
+			e, ok := refs[name]
 			switch {
 			case !ok:
 				return res
-			case strings.HasPrefix(ref, "op://"):
-				res.Summary += fmt.Sprintf("; its value is outside kit.toml's item (%s), so kit leaves it", ref)
+			case e.Item == "":
+				res.Summary += fmt.Sprintf("; its value is outside every item a secrets section names (%s), so kit leaves it", e.Value)
 				return res
 			}
-			if err := k.Delete(ctx, ref); err != nil {
+			if err := k.Delete(ctx, e.Item, e.Value); err != nil {
 				return check.Result{State: check.Failed, Reason: res.Summary + ", but " + err.Error()}
 			}
 			res.Summary += "; its value deleted from 1Password"

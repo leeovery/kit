@@ -85,6 +85,10 @@ type sectionDef struct {
 	// folders is whether the kind has a section for each project folder,
 	// the folder after the header, as in [claude mcp ~/Code/site].
 	folders bool
+	// items is whether the kind has a section for each 1Password item, the
+	// item after the header, as in [secrets op://vault/item]: its lines'
+	// references are short for the item's fields, their names unprefixed.
+	items bool
 	// grouped is whether its names are filed in groups under comment
 	// headings, a new one going under "To be sorted".
 	grouped bool
@@ -110,7 +114,7 @@ var sectionDefs = []sectionDef{
 	{header: "macos login items", kind: "login", form: names, grouped: true},
 	{header: "claude mcp", kind: "claude-mcp", form: commands, folders: true},
 	{header: "claude plugins", kind: "claude-plugin", form: names, grouped: true},
-	{header: "secrets", kind: "secret", form: secrets, grouped: true},
+	{header: "secrets", kind: "secret", form: secrets, grouped: true, items: true},
 	{header: "manual", kind: ManualKind, form: commands},
 	{header: "checks", kind: ChecksKind, form: commands},
 	{header: "hourly", kind: HourlyKind, form: commands},
@@ -176,6 +180,9 @@ type Entry struct {
 	Section string
 	// Folder is the project folder whose section it's in, if any.
 	Folder string `json:",omitempty"`
+	// Item is the 1Password item whose section it's in, if any, as in
+	// op://vault/item.
+	Item string `json:",omitempty"`
 	// Line is its line in that file.
 	Line int
 	// Group is the comment heading the group it's in, if any.
@@ -234,10 +241,11 @@ type declFile struct {
 }
 
 // section is a section of a declarations file: its header, its definition,
-// the folder it's for, if any, and its lines, which start at line start.
+// what follows the header's name, if anything (a project folder, or a
+// 1Password item), and its lines, which start at line start.
 type section struct {
 	def    sectionDef
-	folder string
+	arg    string
 	header string
 	start  int
 	body   []string
@@ -257,18 +265,29 @@ func (f *declFile) String() string {
 }
 
 // matchHeader finds the section a header names: a kind's own, or a kind's
-// for a project folder.
+// for a project folder or a 1Password item.
 func matchHeader(text string) (sectionDef, string, bool) {
 	text = strings.Join(strings.Fields(text), " ")
 	for _, d := range sectionDefs {
 		if text == d.header {
 			return d, "", true
 		}
-		if rest, ok := strings.CutPrefix(text, d.header+" "); ok && d.folders && (strings.HasPrefix(rest, "~/") || strings.HasPrefix(rest, "/")) {
+		rest, ok := strings.CutPrefix(text, d.header+" ")
+		switch {
+		case ok && d.folders && (strings.HasPrefix(rest, "~/") || strings.HasPrefix(rest, "/")):
 			return d, rest, true
+		case ok && d.items && strings.HasPrefix(rest, "op://"):
+			return d, strings.TrimSuffix(rest, "/"), true
 		}
 	}
 	return sectionDef{}, "", false
+}
+
+// ItemRef reports whether ref is a 1Password item's reference: "op://", a
+// vault and an item, as in op://vault/item.
+func ItemRef(ref string) bool {
+	vault, item, ok := strings.Cut(strings.TrimPrefix(ref, "op://"), "/")
+	return strings.HasPrefix(ref, "op://") && ok && vault != "" && item != "" && !strings.Contains(item, "/")
 }
 
 // parseFile splits scope's declarations file into its sections, and checks
@@ -294,28 +313,42 @@ func parseFile(scope, content string) (*declFile, error) {
 			}
 			continue
 		}
-		d, folder, ok := matchHeader(m[1])
-		if !ok {
+		d, arg, ok := matchHeader(m[1])
+		switch {
+		case !ok:
 			return nil, fmt.Errorf("%s:%d: kit doesn't know the section [%s]", name, i+1, m[1])
+		case d.items && arg != "" && !ItemRef(arg):
+			return nil, fmt.Errorf("%s:%d: [%s]: %q isn't a 1Password item's reference, as in op://vault/item", name, i+1, m[1], arg)
 		}
-		if prev := f.find(d, folder); prev != nil {
+		if prev := f.find(d, arg); prev != nil {
 			return nil, fmt.Errorf("%s:%d: [%s] is at line %d too", name, i+1, m[1], prev.start)
 		}
-		cur = &section{def: d, folder: folder, header: line, start: i + 1}
+		cur = &section{def: d, arg: arg, header: line, start: i + 1}
 		f.sections = append(f.sections, cur)
 	}
+	seen := map[string]Entry{}
 	for _, s := range f.sections {
-		if _, err := s.entries(scope); err != nil {
+		entries, err := s.entries(scope)
+		if err != nil {
 			return nil, err
+		}
+		// A kind's sections for items share their names: one each.
+		for _, e := range entries {
+			key := s.def.kind + "\x00" + e.Name
+			if first, ok := seen[key]; ok {
+				return nil, fmt.Errorf("%s: %s is in [%s] at line %d too", e.Pos(), e.Name, first.Section, first.Line)
+			}
+			seen[key] = e
 		}
 	}
 	return f, nil
 }
 
-// find is the file's section of d, for folder, or nil.
-func (f *declFile) find(d sectionDef, folder string) *section {
+// find is the file's section of d, for arg (a project folder, or an item),
+// or nil.
+func (f *declFile) find(d sectionDef, arg string) *section {
 	for _, s := range f.sections {
-		if s.def.kind == d.kind && s.folder == folder {
+		if s.def.kind == d.kind && s.arg == arg {
 			return s
 		}
 	}
@@ -357,9 +390,11 @@ func (s *section) entries(scope string) ([]Entry, error) {
 
 // entry reads one of the section's entry lines.
 func (s *section) entry(line string) (Entry, error) {
-	e := Entry{Section: s.def.header, Folder: s.folder}
-	if s.folder != "" {
-		e.Section += " " + s.folder
+	e := Entry{Section: strings.TrimSpace(s.def.header + " " + s.arg)}
+	if s.def.items {
+		e.Item = s.arg
+	} else {
+		e.Folder = s.arg
 	}
 	switch s.def.form {
 	case names:
@@ -411,8 +446,8 @@ func (s *section) entry(line string) (Entry, error) {
 		}
 		e.Name, e.Value, e.Note = name, value, note
 	}
-	if s.folder != "" {
-		e.Name = s.folder + ":" + e.Name
+	if e.Folder != "" {
+		e.Name = e.Folder + ":" + e.Name
 	}
 	return e, nil
 }

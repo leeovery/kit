@@ -202,6 +202,18 @@ func splitName(d sectionDef, name string) (folder, line string) {
 	return "", name
 }
 
+// holding is the section of d declaring name, and the name as its line has
+// it: in a kind with sections for items, whichever item's section has it.
+func (f *declFile) holding(d sectionDef, name string) (*section, string) {
+	folder, line := splitName(d, name)
+	for _, s := range f.sections {
+		if s.def.kind == d.kind && (d.items || s.arg == folder) && slices.Contains(splitBody(d.form, s.body).names, line) {
+			return s, line
+		}
+	}
+	return nil, line
+}
+
 // Groups are the headings of the groups in kind's section of scope's
 // declarations, in order: none when there's no section.
 func (c *Config) Groups(kind, scope string) ([]string, error) {
@@ -218,32 +230,54 @@ func (c *Config) Groups(kind, scope string) ([]string, error) {
 	return headings, nil
 }
 
+// Items are the 1Password items kind's sections in scope's declarations are
+// for, in order, as in op://vault/item: none for its plain section.
+func (c *Config) Items(kind, scope string) ([]string, error) {
+	d, f, err := c.editable(kind, scope)
+	if err != nil {
+		return nil, err
+	}
+	var items []string
+	for _, s := range f.sections {
+		if s.def.kind == d.kind && d.items && s.arg != "" {
+			items = append(items, s.arg)
+		}
+	}
+	return items, nil
+}
+
 // Declare declares e in kind's section of scope's declarations, shared or a
 // Mac's, as in laptop, with its note after it. A name goes into the group
 // headed group, in its sorted place, made when the section has none such;
 // or, when group is "", at the end of "To be sorted", made at the section's
 // bottom when it has none. A command's line, its name then e.Value, goes in
 // its sorted place. The section is made, in its place among the file's,
-// when there's none, and the file and its folder too. The rest of the file
-// is kept as it is.
+// when there's none, and the file and its folder too; a kind with sections
+// for items declares it in e.Item's. The rest of the file is kept as it is.
 func (c *Config) Declare(kind, scope string, e Entry, group string) error {
 	d, f, err := c.editable(kind, scope)
 	if err != nil {
 		return err
 	}
-	folder, name := splitName(d, e.Name)
+	arg, name := splitName(d, e.Name)
+	if d.items {
+		arg = strings.TrimSuffix(e.Item, "/")
+		if arg != "" && !ItemRef(arg) {
+			return fmt.Errorf("%q isn't a 1Password item's reference, as in op://vault/item", e.Item)
+		}
+	}
 	line, err := entryText(d, name, e)
 	if err != nil {
 		return err
 	}
-	s := f.find(d, folder)
-	if s == nil {
-		s = f.add(d, folder)
-	}
-	b := splitBody(d.form, s.body)
-	if slices.Contains(b.names, name) {
+	if s, _ := f.holding(d, e.Name); s != nil {
 		return fmt.Errorf("%s is in %s already", e.Name, DeclFile(scope))
 	}
+	s := f.find(d, arg)
+	if s == nil {
+		s = f.add(d, arg)
+	}
+	b := splitBody(d.form, s.body)
 	switch {
 	case d.form == paths && !d.grouped:
 		// Paths are searched in order: a new one goes last.
@@ -285,8 +319,7 @@ func (c *Config) Undeclare(kind, scope, name string) error {
 	if err != nil {
 		return err
 	}
-	folder, line := splitName(d, name)
-	s := f.find(d, folder)
+	s, line := f.holding(d, name)
 	var b body
 	i := -1
 	if s != nil {
@@ -321,8 +354,7 @@ func (c *Config) Replace(kind, scope string, e Entry) error {
 	if err != nil {
 		return err
 	}
-	folder, name := splitName(d, e.Name)
-	s := f.find(d, folder)
+	s, name := f.holding(d, e.Name)
 	if s == nil {
 		return fmt.Errorf("%s isn't in %s", e.Name, DeclFile(scope))
 	}
@@ -379,14 +411,15 @@ func entryText(d sectionDef, name string, e Entry) (string, error) {
 	return line, nil
 }
 
-// add adds a section of d for folder, empty, in its place among the file's:
-// after the sections before it in the order kit writes them, and a kind's
-// folders' sections after its own, by folder.
-func (f *declFile) add(d sectionDef, folder string) *section {
+// add adds a section of d for arg (a project folder, or an item), empty, in
+// its place among the file's: after the sections before it in the order kit
+// writes them, and a kind's folders' or items' sections after its own, by
+// folder or item.
+func (f *declFile) add(d sectionDef, arg string) *section {
 	order := func(s *section) (int, string) {
-		return slices.IndexFunc(sectionDefs, func(x sectionDef) bool { return x.kind == s.def.kind }), s.folder
+		return slices.IndexFunc(sectionDefs, func(x sectionDef) bool { return x.kind == s.def.kind }), s.arg
 	}
-	s := &section{def: d, folder: folder, header: "[" + strings.TrimSpace(d.header+" "+folder) + "]"}
+	s := &section{def: d, arg: arg, header: "[" + strings.TrimSpace(d.header+" "+arg) + "]"}
 	at := len(f.sections)
 	for i, other := range f.sections {
 		oi, of := order(other)
