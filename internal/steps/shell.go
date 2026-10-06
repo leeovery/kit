@@ -32,7 +32,7 @@ const PathFileName = "path"
 func PathFile(dirs []string, file string) engine.Step {
 	want := strings.Join(dirs, ":") + "\n"
 	return engine.Step{
-		Name: "path", Title: "The shell's PATH", Area: AreaDrift,
+		Name: "path", Title: "Shell PATH", Area: AreaDrift,
 		Check: func(context.Context) check.Result {
 			data, err := os.ReadFile(file)
 			it := check.Item{ID: "path:shell", Name: "the shell's PATH", Action: ActionWrite}

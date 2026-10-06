@@ -28,7 +28,7 @@ var githubRemote = regexp.MustCompile(`^(?:https://github\.com/|git@github\.com:
 func ConfigPrivate(run runner.Runner, dir string) engine.Step {
 	return engine.Step{
 		Name:  ConfigPrivateName,
-		Title: "Config repository",
+		Title: "Privacy",
 		Area:  AreaConfig,
 		Check: func(ctx context.Context) check.Result {
 			res, err := run.Run(ctx, runner.Command{Name: "git", Args: []string{"-C", dir, "remote", "get-url", "origin"}})

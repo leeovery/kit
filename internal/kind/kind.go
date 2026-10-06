@@ -131,6 +131,13 @@ type Expander interface {
 	Expand(list config.List) (config.List, error)
 }
 
+// Verber is a kind whose things aren't installed but set, or excluded:
+// its summaries say so.
+type Verber interface {
+	// Verb is what a thing on the Mac as declared is, as in set.
+	Verb() string
+}
+
 // Reverter is a kind whose things found on the Mac and not declared were
 // changed there from a value kit knows, as a watched setting is: kit
 // reconcile can put the value back.
@@ -293,11 +300,15 @@ func Compare(ctx context.Context, k Kind, declared config.List) check.Result {
 		}
 	}
 
+	verb := "installed"
+	if v, ok := k.(Verber); ok {
+		verb = v.Verb()
+	}
 	declaredCount := len(declared.Entries) - off
 	missingCount := len(missing) + len(unknown)
 	res := check.Result{
 		State:   check.OK,
-		Summary: fmt.Sprintf("%d declared, all installed", declaredCount),
+		Summary: fmt.Sprintf("%d declared, all %s", declaredCount, verb),
 		Counts: map[string]int{
 			"declared": declaredCount, "installed": declaredCount - missingCount,
 			"missing": missingCount, "extra": len(extra), "unused_dependencies": len(unused),
@@ -310,7 +321,7 @@ func Compare(ctx context.Context, k Kind, declared config.List) check.Result {
 		res.Counts["off"] = off
 	}
 	if missingCount > 0 {
-		res.Summary = fmt.Sprintf("%d declared, %d installed", declaredCount, declaredCount-missingCount)
+		res.Summary = fmt.Sprintf("%d declared, %d %s", declaredCount, declaredCount-missingCount, verb)
 	}
 	if declaredCount == 0 {
 		res.Summary = "none declared"

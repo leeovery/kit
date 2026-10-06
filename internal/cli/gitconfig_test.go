@@ -17,7 +17,7 @@ func gitWorld(t *testing.T) *world {
 
 func TestStatusShowsGitsSettings(t *testing.T) {
 	out, _, _ := gitWorld(t).run(t, "status")
-	if !strings.Contains(out, "git ok 2 declared, all installed; 1 changed\ngit diverged:new core.editor (set to vim)\ngit extra:new delta.pager\n") {
+	if !strings.Contains(out, "git ok 2 declared, all set; 1 changed\ngit diverged:new core.editor (set to vim)\ngit extra:new delta.pager\n") {
 		t.Errorf("kit status printed\n%s", out)
 	}
 }

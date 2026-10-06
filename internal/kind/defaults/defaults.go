@@ -114,6 +114,9 @@ func (d *Defaults) Name() string    { return "default" }
 func (d *Defaults) Title() string   { return "macOS settings" }
 func (d *Defaults) Program() string { return "defaults" }
 
+// Verb says a setting as declared is set.
+func (d *Defaults) Verb() string { return "set" }
+
 // Diverges reports whether a setting set otherwise was changed on purpose:
 // whether kit has seen it as declared before. One never seen so (a new Mac,
 // a newly declared line) is set as declared by applying.

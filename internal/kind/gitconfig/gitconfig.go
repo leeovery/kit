@@ -33,6 +33,9 @@ func (g *GitConfig) Name() string    { return "git" }
 func (g *GitConfig) Title() string   { return "git's settings" }
 func (g *GitConfig) Program() string { return "git" }
 
+// Verb says a setting as declared is set.
+func (g *GitConfig) Verb() string { return "set" }
+
 // Diverges reports a setting set otherwise as changed on purpose: with git
 // config, on the Mac.
 func (g *GitConfig) Diverges(string) bool { return true }

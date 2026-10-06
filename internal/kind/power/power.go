@@ -50,6 +50,9 @@ func (p *Power) Name() string    { return "power" }
 func (p *Power) Title() string   { return "Power settings" }
 func (p *Power) Program() string { return "pmset" }
 
+// Verb says a setting as declared is set.
+func (p *Power) Verb() string { return "set" }
+
 // Diverges reports whether a setting set otherwise was changed on purpose:
 // whether kit has seen it as declared before.
 func (p *Power) Diverges(name string) bool { return p.seen[name] }
