@@ -158,7 +158,7 @@ func installed(ctx context.Context, k kind.Kind, name string) (bool, error) {
 
 // commitMessage says what a change was, for which Mac, and why.
 func commitMessage(verb, kindName string, names []string, machine, note string) string {
-	msg := fmt.Sprintf("kit %s %s %s (%s)", verb, kindName, strings.Join(names, ", "), machine)
+	msg := fmt.Sprintf("kit %s %s %s (%s)", kindName, verb, strings.Join(names, ", "), machine)
 	if note != "" {
 		msg += ": " + note
 	}

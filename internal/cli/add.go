@@ -7,17 +7,14 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/spf13/cobra"
-
 	"github.com/leeovery/kit/internal/ask"
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/drift"
 	"github.com/leeovery/kit/internal/kind"
-	"github.com/leeovery/kit/internal/linked"
 )
 
-// addOptions are kit add's flags, and which names wait for an
+// addOptions are adding's flags, and which names wait for an
 // administrator's password, as settled before anything's installed.
 type addOptions struct {
 	shared, temp bool
@@ -26,76 +23,7 @@ type addOptions struct {
 	secret       secretOptions
 }
 
-func newAddCommand(a *app) *cobra.Command {
-	var opts addOptions
-	cmd := &cobra.Command{
-		Use:   "add <kind> <name>...",
-		Short: "Install packages, and declare them for this Mac (--shared: every Mac)",
-		Long: `Install packages, and declare them: in this Mac's declarations file, named
-after it, unless --shared declares them for every Mac, in the shared file,
-which takes them out of each Mac's own. The change is committed and pushed to
-the config repository.
-
-kit add file <path>... moves a file, or every file in a folder, into
-kit-config's home folder for this Mac (--shared: every Mac's), and links it
-back in its place. kit add path <dir>... puts a directory last on the PATH,
-kit's and the shell's.
-
-kit add check <name> -- <command> declares a check of your own (exit 0: all's
-well), and runs it once; kit add hourly and kit add nightly declare jobs the
-same way; kit add manual <name> "<what to do>" [-- <command>] a step done by
-hand, the command saying whether it's done (else kit done marks it).
-
-At a terminal, kit asks which group of the kind's section each goes in ("To be
-sorted" first); --group answers without asking, and without a terminal they go
-in "To be sorted". --note records why, after the name. --temp installs without
-declaring, for a throwaway: it's quiet for 7 days, then kit reconcile asks.`,
-		Args: cobra.MinimumNArgs(2),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			r, err := a.prepare("add", "add")
-			if err != nil {
-				return err
-			}
-			if _, line := lineKinds[args[0]]; line {
-				// Where the command starts, past the --, in what follows the kind.
-				dash := cmd.ArgsLenAtDash()
-				if dash > 0 {
-					dash--
-				}
-				err = a.addLine(cmd.Context(), r, args[0], args[1:], dash, opts)
-			} else {
-				err = a.add(cmd.Context(), r, args[0], args[1:], opts)
-			}
-			if closeErr := r.close(); err == nil {
-				err = closeErr
-			}
-			return err
-		},
-	}
-	cmd.Flags().BoolVar(&opts.shared, "shared", false, "declare for every Mac, not this one alone")
-	cmd.Flags().BoolVar(&opts.temp, "temp", false, "install without declaring: quiet for 7 days, then reconcile asks")
-	cmd.Flags().StringVar(&opts.note, "note", "", "why it's declared, kept after its name")
-	cmd.Flags().StringVar(&opts.group, "group", "", "the group it goes in, without asking")
-	f := cmd.Flags()
-	f.StringVar(&opts.secret.ref, "ref", "", "a secret: where 1Password keeps it already (op://vault/item/field): nothing is stored")
-	f.StringVar(&opts.secret.from, "from", "", "a secret: the file whose contents it is, kept in 1Password as an attachment")
-	f.BoolVar(&opts.secret.stdin, "stdin", false, "a secret: its value on standard input, never on a command line")
-	f.StringVar(&opts.secret.field, "field", "", "a secret: where in 1Password its value goes, as in GitHub/token")
-	f.StringVar(&opts.secret.mode, "mode", "", "a secret's file: its permissions, as in 644 (600 otherwise)")
-	f.StringVar(&opts.secret.item, "item", "", "a secret: the 1Password item its value goes in (op://vault/item), when its file has no item's section or several")
-	return cmd
-}
-
 func (a *app) add(ctx context.Context, r *run, kindName string, names []string, opts addOptions) error {
-	if kindName == linked.StepName {
-		return a.addFiles(ctx, r, names, opts)
-	}
-	if kindName == pathsKind {
-		return a.addPaths(ctx, r, names, opts)
-	}
-	if kindName == secretKind {
-		return a.addSecret(ctx, r, names, opts)
-	}
 	k, err := r.kindNamed(kindName)
 	if err != nil {
 		return err
@@ -232,7 +160,7 @@ func addOne(ctx context.Context, r *run, c *changes, k kind.Kind, scope, name, g
 	verb := "already installed"
 	if !isIn {
 		if opts.waiting[name] {
-			return check.Result{State: check.Failed, Reason: fmt.Sprintf(adminWait, "add")}
+			return check.Result{State: check.Failed, Reason: fmt.Sprintf(adminWait, kindName+" add")}
 		}
 		if err := k.Install(ctx, []string{name}); err != nil {
 			return check.Result{State: check.Failed, Reason: "couldn't install: " + err.Error()}

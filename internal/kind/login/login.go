@@ -93,7 +93,7 @@ func New(run runner.Runner, home string) *Login {
 	return &Login{run: run, home: home}
 }
 
-func (*Login) Name() string    { return "login" }
+func (*Login) Name() string    { return "login-item" }
 func (*Login) Title() string   { return "Login items" }
 func (*Login) Program() string { return "osascript" }
 

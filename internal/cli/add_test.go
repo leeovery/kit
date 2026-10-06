@@ -13,12 +13,12 @@ func TestAddInstallsAndDeclares(t *testing.T) {
 	w := laptopWorld(t)
 	w.fake.On("brew", "update", "--quiet")
 	w.fake.On("brew", "install", "--formula", "hello")
-	w.expectSync([]string{"laptop/declarations"}, "kit add brew hello (laptop): a test")
+	w.expectSync([]string{"laptop/declarations"}, "kit brew add hello (laptop): a test")
 
-	out, errOut, code := w.run(t, "add", "brew", "hello", "--note", "a test")
-	want := "kit add · laptop\nhello ok installed; declared in laptop (To be sorted)\nkit-config ok committed and pushed laptop/declarations\nNothing needs attention\n"
+	out, errOut, code := w.run(t, "brew", "add", "hello", "--note", "a test")
+	want := "kit brew add · laptop\nhello ok installed; declared in laptop (To be sorted)\nkit-config ok committed and pushed laptop/declarations\nNothing needs attention\n"
 	if out != want || errOut != "" || code != 0 {
-		t.Errorf("kit add printed\n%s%s exit %d\nwant\n%s", out, errOut, code, want)
+		t.Errorf("kit printed add\n%s%s exit %d\nwant\n%s", out, errOut, code, want)
 	}
 	if got := w.readSection(t, "laptop", "homebrew formulae"); got != "go\n\n# To be sorted\nhello   # a test\n" {
 		t.Errorf("laptop = %q", got)
@@ -39,10 +39,10 @@ func TestAddAsksWhichGroupFirst(t *testing.T) {
 	}
 	w.fake.On("brew", "update", "--quiet")
 	w.fake.On("brew", "install", "--formula", "golangci-lint")
-	w.expectSync([]string{"laptop/declarations"}, "kit add brew golangci-lint (laptop)")
+	w.expectSync([]string{"laptop/declarations"}, "kit brew add golangci-lint (laptop)")
 
-	if _, errOut, code := w.run(t, "add", "brew", "golangci-lint"); code != 0 {
-		t.Fatalf("kit add exit %d: %s", code, errOut)
+	if _, errOut, code := w.run(t, "brew", "add", "golangci-lint"); code != 0 {
+		t.Fatalf("kit exit add %d: %s", code, errOut)
 	}
 	if want := []string{"Which group of [homebrew formulae] in laptop for golangci-lint?"}; !slices.Equal(w.asked, want) {
 		t.Errorf("asked %q, want %q", w.asked, want)
@@ -59,7 +59,7 @@ func TestAddCancelledDoesNothing(t *testing.T) {
 	w := laptopWorld(t)
 	w.terminal = true
 	w.choose = func(string, []string) (int, error) { return 0, ask.ErrCancelled }
-	_, errOut, code := w.run(t, "add", "brew", "hello")
+	_, errOut, code := w.run(t, "brew", "add", "hello")
 	if errOut != "kit: cancelled: nothing was installed or declared\n" || code != 2 || len(w.fake.Calls()) != 0 {
 		t.Errorf("kit add, cancelled: %q, exit %d, running %q; want nothing done", errOut, code, w.fake.Calls())
 	}
@@ -69,9 +69,9 @@ func TestAddInAGroupWithoutAsking(t *testing.T) {
 	w := laptopWorld(t)
 	w.fake.On("brew", "update", "--quiet")
 	w.fake.On("brew", "install", "--formula", "golangci-lint")
-	w.expectSync([]string{"laptop/declarations"}, "kit add brew golangci-lint (laptop)")
-	if _, errOut, code := w.run(t, "add", "brew", "golangci-lint", "--group", "Go"); code != 0 {
-		t.Fatalf("kit add exit %d: %s", code, errOut)
+	w.expectSync([]string{"laptop/declarations"}, "kit brew add golangci-lint (laptop)")
+	if _, errOut, code := w.run(t, "brew", "add", "golangci-lint", "--group", "Go"); code != 0 {
+		t.Fatalf("kit exit add %d: %s", code, errOut)
 	}
 	if got := w.readSection(t, "laptop", "homebrew formulae"); got != "go\n\n# Go\ngolangci-lint\n" {
 		t.Errorf("laptop = %q", got)
@@ -81,9 +81,9 @@ func TestAddInAGroupWithoutAsking(t *testing.T) {
 func TestAddSharedMovesItOutOfTheMacsFiles(t *testing.T) {
 	w := laptopWorld(t)
 	w.writeSection(t, "studio", "homebrew formulae", "ffmpeg\ngo\n")
-	w.expectSync([]string{"laptop/declarations", "shared/declarations", "studio/declarations"}, "kit add brew go (laptop)")
+	w.expectSync([]string{"laptop/declarations", "shared/declarations", "studio/declarations"}, "kit brew add go (laptop)")
 
-	out, errOut, code := w.run(t, "add", "brew", "go", "--shared")
+	out, errOut, code := w.run(t, "brew", "add", "go", "--shared")
 	if !strings.Contains(out, "go ok already installed; declared in shared (To be sorted), out of laptop and studio\n") || code != 0 {
 		t.Errorf("kit add --shared printed\n%s%s exit %d", out, errOut, code)
 	}
@@ -101,7 +101,7 @@ func TestAddTemporarily(t *testing.T) {
 	w.fake.On("brew", "install", "--formula", "hello")
 	w.fake.On("brew", "info", "--json=v2", "--formula", "hello").Prints(`{"formulae": [{"name": "hello", "full_name": "hello", "aliases": [], "oldnames": []}], "casks": []}`)
 
-	out, _, code := w.run(t, "add", "brew", "hello", "--temp")
+	out, _, code := w.run(t, "brew", "add", "hello", "--temp")
 	if !strings.Contains(out, "hello ok installed, for now: not declared, quiet for 7 days, then kit reconcile asks\n") ||
 		!strings.Contains(out, "kit-config ok nothing changed\n") || code != 0 {
 		t.Errorf("kit add --temp printed\n%s exit %d", out, code)
@@ -116,10 +116,10 @@ func TestAddTemporarily(t *testing.T) {
 
 func TestAddWhatsDeclaredAlready(t *testing.T) {
 	w := laptopWorld(t)
-	out, _, code := w.run(t, "add", "brew", "go", "jq")
+	out, _, code := w.run(t, "brew", "add", "go", "jq")
 	for _, want := range []string{"go ok already installed; declared already, in laptop\n", "jq ok already installed; declared already, in shared\n", "kit-config ok nothing changed\n"} {
 		if !strings.Contains(out, want) {
-			t.Errorf("kit add printed\n%s\nwant it to hold %q", out, want)
+			t.Errorf("kit printed add\n%s\nwant it to hold %q", out, want)
 		}
 	}
 	if code != 0 {
@@ -131,9 +131,9 @@ func TestAddThatCantInstallDeclaresNothing(t *testing.T) {
 	w := laptopWorld(t)
 	w.fake.On("brew", "update", "--quiet")
 	w.fake.On("brew", "install", "--formula", "nosuch").Exits(1).PrintsToStderr(`Error: No available formula with the name "nosuch".`)
-	out, _, code := w.run(t, "add", "brew", "nosuch")
+	out, _, code := w.run(t, "brew", "add", "nosuch")
 	if !strings.Contains(out, `nosuch failed couldn't install: brew install --formula nosuch exited 1: Error: No available formula with the name "nosuch".`) || code != 1 {
-		t.Errorf("kit add printed\n%s exit %d; want the install's failure, exit 1", out, code)
+		t.Errorf("kit printed add\n%s exit %d; want the install's failure, exit 1", out, code)
 	}
 	if got := w.readSection(t, "laptop", "homebrew formulae"); got != "go\n" {
 		t.Errorf("laptop = %q, want it unchanged", got)
@@ -141,19 +141,19 @@ func TestAddThatCantInstallDeclaresNothing(t *testing.T) {
 }
 
 func TestAddAnUnknownKind(t *testing.T) {
-	_, errOut, code := laptopWorld(t).run(t, "add", "mas", "Xcode")
-	if !strings.HasPrefix(errOut, "kit: no kind named mas: one of app, brew, cask") || code != 2 {
-		t.Errorf("kit add mas printed %q, exit %d", errOut, code)
+	_, errOut, code := laptopWorld(t).run(t, "app", "add", "Xcode")
+	if !strings.HasPrefix(errOut, `kit: unknown command "app" for "kit"`) || code != 2 {
+		t.Errorf("kit app add printed %q, exit %d", errOut, code)
 	}
 }
 
 func TestRemoveUninstallsAndUndeclares(t *testing.T) {
 	w := laptopWorld(t)
 	w.fake.On("brew", "uninstall", "--formula", "go")
-	w.expectSync([]string{"laptop/declarations"}, "kit remove brew go (laptop)")
-	out, errOut, code := w.run(t, "remove", "brew", "go")
+	w.expectSync([]string{"laptop/declarations"}, "kit brew remove go (laptop)")
+	out, errOut, code := w.run(t, "brew", "remove", "go")
 	if !strings.Contains(out, "go ok uninstalled; out of laptop\n") || code != 0 {
-		t.Errorf("kit remove printed\n%s%s exit %d", out, errOut, code)
+		t.Errorf("kit printed remove\n%s%s exit %d", out, errOut, code)
 	}
 	if got := w.readSection(t, "laptop", "homebrew formulae"); got != "" {
 		t.Errorf("laptop = %q, want go out of it", got)
@@ -162,9 +162,9 @@ func TestRemoveUninstallsAndUndeclares(t *testing.T) {
 
 func TestRemoveFromEveryMacNeedsShared(t *testing.T) {
 	w := laptopWorld(t)
-	out, _, code := w.run(t, "remove", "brew", "jq")
+	out, _, code := w.run(t, "brew", "remove", "jq")
 	if !strings.Contains(out, "jq failed declared for every Mac, in shared: --shared takes it out of every Mac's list\n") || code != 1 {
-		t.Errorf("kit remove printed\n%s exit %d", out, code)
+		t.Errorf("kit printed remove\n%s exit %d", out, code)
 	}
 	for _, c := range w.fake.Calls() {
 		if strings.Contains(c, "uninstall") {
@@ -173,8 +173,8 @@ func TestRemoveFromEveryMacNeedsShared(t *testing.T) {
 	}
 
 	w.fake.On("brew", "uninstall", "--formula", "jq")
-	w.expectSync([]string{"shared/declarations"}, "kit remove brew jq (laptop)")
-	out, _, code = w.run(t, "remove", "brew", "jq", "--shared")
+	w.expectSync([]string{"shared/declarations"}, "kit brew remove jq (laptop)")
+	out, _, code = w.run(t, "brew", "remove", "jq", "--shared")
 	if !strings.Contains(out, "jq ok uninstalled; out of shared\n") || code != 0 {
 		t.Errorf("kit remove --shared printed\n%s exit %d", out, code)
 	}
@@ -183,9 +183,9 @@ func TestRemoveFromEveryMacNeedsShared(t *testing.T) {
 func TestRemoveRefusedByHomebrewChangesNothing(t *testing.T) {
 	w := laptopWorld(t)
 	w.fake.On("brew", "uninstall", "--formula", "go").Exits(1).PrintsToStderr("Error: Refusing to uninstall go because it is required by gopls")
-	out, _, code := w.run(t, "remove", "brew", "go")
+	out, _, code := w.run(t, "brew", "remove", "go")
 	if !strings.Contains(out, "go failed couldn't uninstall: brew uninstall --formula go exited 1: Error: Refusing to uninstall go because it is required by gopls\n") || code != 1 {
-		t.Errorf("kit remove printed\n%s exit %d", out, code)
+		t.Errorf("kit printed remove\n%s exit %d", out, code)
 	}
 	if got := w.readSection(t, "laptop", "homebrew formulae"); got != "go\n" {
 		t.Errorf("laptop = %q, want it unchanged", got)
@@ -199,9 +199,9 @@ func TestAddWithoutATerminalWaitsForThePassword(t *testing.T) {
 	w.fake.On("brew", "info", "--json=v2", "--cask", "zoom").Prints(zoomInfo)
 	w.fake.On("sudo", "-n", "true").Exits(1).PrintsToStderr("sudo: a password is required")
 
-	out, errOut, code := w.run(t, "add", "cask", "zoom")
-	if want := "zoom failed needs an administrator's password: run kit add at a terminal\n"; !strings.Contains(out, want) || code != 1 {
-		t.Errorf("kit add printed\n%s exit %d (%s); want zoom waiting, exit 1", out, code, errOut)
+	out, errOut, code := w.run(t, "cask", "add", "zoom")
+	if want := "zoom failed needs an administrator's password: run kit cask add at a terminal\n"; !strings.Contains(out, want) || code != 1 {
+		t.Errorf("kit printed add\n%s exit %d (%s); want zoom waiting, exit 1", out, code, errOut)
 	}
 	if got := w.readSection(t, "laptop", "homebrew casks"); got != "" {
 		t.Errorf("laptop = %q, want nothing declared", got)
@@ -221,10 +221,10 @@ func TestAddAtATerminalAsksForThePasswordFirst(t *testing.T) {
 	w.fake.On("sudo", "-v")
 	w.fake.On("brew", "update", "--quiet")
 	w.fake.On("brew", "install", "--cask", "zoom")
-	w.expectSync([]string{"laptop/declarations"}, "kit add cask zoom (laptop)")
+	w.expectSync([]string{"laptop/declarations"}, "kit cask add zoom (laptop)")
 
-	if _, errOut, code := w.run(t, "add", "cask", "zoom"); code != 0 {
-		t.Fatalf("kit add exit %d: %s", code, errOut)
+	if _, errOut, code := w.run(t, "cask", "add", "zoom"); code != 0 {
+		t.Fatalf("kit exit add %d: %s", code, errOut)
 	}
 	calls := w.fake.Calls()
 	if sudo, install := slices.Index(calls, "sudo -v"), slices.Index(calls, "brew install --cask zoom"); sudo < 0 || install < sudo {

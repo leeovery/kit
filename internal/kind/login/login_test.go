@@ -58,10 +58,10 @@ func TestCompare(t *testing.T) {
 		Prints(`[{"id":"","name":"","path":""},{"id":"com.manytricks.Moom","name":"Moom.app","path":"/Applications/Moom.app"}]`)
 	got := kind.Compare(t.Context(), login.New(fake, "/home"), declared("Com.GetDropbox.Dropbox", "com.manytricks.moom", "com.example.notyet"))
 	want := []check.Item{
-		{ID: "login:com.example.notyet", Name: "com.example.notyet", State: kind.Missing, Detail: "not installed: install the app first"},
-		{ID: "login:com.manytricks.moom", Name: "com.manytricks.moom", State: kind.Missing, Action: kind.Install},
-		{ID: "login:Gone-Helper", Name: "Gone-Helper", State: kind.Extra},
-		{ID: "login:com.stairways.keyboardmaestro.engine", Name: "com.stairways.keyboardmaestro.engine", State: kind.Extra},
+		{ID: "login-item:com.example.notyet", Name: "com.example.notyet", State: kind.Missing, Detail: "not installed: install the app first"},
+		{ID: "login-item:com.manytricks.moom", Name: "com.manytricks.moom", State: kind.Missing, Action: kind.Install},
+		{ID: "login-item:Gone-Helper", Name: "Gone-Helper", State: kind.Extra},
+		{ID: "login-item:com.stairways.keyboardmaestro.engine", Name: "com.stairways.keyboardmaestro.engine", State: kind.Extra},
 	}
 	if got.Summary != "3 declared, 1 installed" || !slices.Equal(got.Items, want) {
 		t.Errorf("Compare() = %+v\nwant items %+v", got, want)

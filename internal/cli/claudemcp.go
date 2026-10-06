@@ -17,36 +17,29 @@ import (
 // claudeMCP names Claude Code's MCP servers' kind, and its command.
 const claudeMCP = "claude-mcp"
 
-func newClaudeMCPCommand(a *app) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   claudeMCP,
-		Short: "Turn Claude Code's MCP servers on or off, keeping them declared",
-	}
+// mcpSwitches are kit claude-mcp on and off: servers turned on or off,
+// kept declared.
+func mcpSwitches(a *app) []*cobra.Command {
+	var cmds []*cobra.Command
 	for _, on := range []bool{true, false} {
 		verb, short := "off", "Declare MCP servers off, and remove them from Claude Code: their lines stay"
 		if on {
 			verb, short = "on", "Declare MCP servers on, and install them"
 		}
-		cmd.AddCommand(&cobra.Command{
+		cmds = append(cmds, &cobra.Command{
 			Use:   verb + " <name>...",
 			Short: short,
 			Long: short + `. Name a project's server as <folder>:<name>, as kit status shows it.
 The change is committed and pushed to the config repository.`,
 			Args: cobra.MinimumNArgs(1),
 			RunE: func(cmd *cobra.Command, args []string) error {
-				r, err := a.prepare(claudeMCP+" "+verb, claudeMCP+"-"+verb)
-				if err != nil {
-					return err
-				}
-				err = a.switchMCP(cmd.Context(), r, args, on)
-				if closeErr := r.close(); err == nil {
-					err = closeErr
-				}
-				return err
+				return a.prepared(cmd, claudeMCP+" "+verb, func(ctx context.Context, r *run) error {
+					return a.switchMCP(ctx, r, args, on)
+				})
 			},
 		})
 	}
-	return cmd
+	return cmds
 }
 
 // switchMCP declares each server named on, or off, commits and pushes the
@@ -79,7 +72,7 @@ func switchOne(ctx context.Context, r *run, c *changes, m *mcp.MCP, name string,
 	}
 	i := slices.IndexFunc(where, func(e config.Entry) bool { return e.Scope == config.Shared || e.Scope == r.machine })
 	if i < 0 {
-		return check.Result{State: check.Failed, Reason: "not declared for this Mac: kit add " + claudeMCP + " declares a server Claude Code has"}
+		return check.Result{State: check.Failed, Reason: "not declared for this Mac: kit " + claudeMCP + " add declares a server Claude Code has"}
 	}
 	e := where[i]
 	var done []string

@@ -27,7 +27,7 @@ func TestManual(t *testing.T) {
 	for _, it := range res.Items {
 		got = append(got, it.ID+" | "+it.Name+" | "+it.Detail)
 	}
-	want := "manual:app | Install the app | \nmanual:sign-in | Sign in to the service | then: kit done sign-in"
+	want := "manual:app | Install the app | \nmanual:sign-in | Sign in to the service | then: kit manual done sign-in"
 	if res.State != check.Attention || res.Summary != "1 of 3 done" || strings.Join(got, "\n") != want || step.Area != steps.AreaManual {
 		t.Errorf("result = %s %q\n%s", res.State, res.Summary, strings.Join(got, "\n"))
 	}

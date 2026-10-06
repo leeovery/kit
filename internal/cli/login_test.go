@@ -14,9 +14,9 @@ func TestReconcileAdoptsALoginItemWithItsAppsName(t *testing.T) {
 	w.writeSection(t, "laptop", "macos login items", "")
 	read := `[{"name":"Dropbox","path":"/Applications/Dropbox.app","id":"com.getdropbox.dropbox"}]`
 	w.fake.On("osascript", "-l", "JavaScript", "-e", login.ReadScript).Prints(read)
-	w.expectSync([]string{"laptop/declarations"}, "kit reconcile (laptop): adopt login:com.getdropbox.dropbox: syncs the files")
+	w.expectSync([]string{"laptop/declarations"}, "kit reconcile (laptop): adopt login-item:com.getdropbox.dropbox: syncs the files")
 
-	out, errOut, code := w.run(t, "reconcile", "login:com.getdropbox.dropbox", "--adopt", "--note", "syncs the files")
+	out, errOut, code := w.run(t, "reconcile", "login-item:com.getdropbox.dropbox", "--adopt", "--note", "syncs the files")
 	if code != 0 {
 		t.Fatalf("kit reconcile printed\n%s%s exit %d", out, errOut, code)
 	}

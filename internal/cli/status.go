@@ -142,7 +142,7 @@ func kindSteps(hb *brew.Homebrew, run runner.Runner, home, configHome, stateDir 
 		{kind: gotool.New(run), after: []string{"brew"}},
 		{kind: ghext.New(run), after: []string{"brew"}},
 		{kind: tmux.New(run, home, configHome), after: []string{"brew"}},
-		{kind: login.New(run, home), after: []string{"cask", "app"}},
+		{kind: login.New(run, home), after: []string{"cask", "mas"}},
 		{kind: mcp.New(run, home), after: []string{"brew"}},
 		{kind: claudeplugin.New(run, home), after: []string{"brew"}},
 		{kind: secret.New(run, home), after: []string{"brew", "cask"}, declaredOnly: true},

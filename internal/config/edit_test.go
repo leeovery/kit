@@ -58,7 +58,7 @@ func TestDeclare(t *testing.T) {
 		{
 			name:   "a section made at the end",
 			before: "[homebrew casks]\nghostty\n",
-			kind:   "login", entry: config.Entry{Name: "com.example.app", Note: "Example"},
+			kind:   "login-item", entry: config.Entry{Name: "com.example.app", Note: "Example"},
 			after: "[homebrew casks]\nghostty\n\n[macos login items]\n# To be sorted\ncom.example.app   # Example\n",
 		},
 		{
@@ -88,7 +88,7 @@ func TestDeclare(t *testing.T) {
 		{
 			name:   "a file made",
 			before: "",
-			kind:   "app", entry: config.Entry{Name: "xcode@497799835"},
+			kind:   "mas", entry: config.Entry{Name: "xcode@497799835"},
 			after: "[app store apps]\n# To be sorted\nxcode@497799835\n",
 		},
 	}

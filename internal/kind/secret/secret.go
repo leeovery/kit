@@ -202,7 +202,7 @@ func (s *Secrets) Resolve(_ context.Context, names []string) (map[string]string,
 
 // Value can't say where 1Password keeps a secret found on the Mac.
 func (s *Secrets) Value(_ context.Context, name string) (string, error) {
-	return "", fmt.Errorf("kit can't tell where 1Password keeps %s: declare it with kit add secret %s --ref op://vault/item/field", name, name)
+	return "", fmt.Errorf("kit can't tell where 1Password keeps %s: declare it with kit secret add %s --ref op://vault/item/field", name, name)
 }
 
 // Install syncs every secret: those missing, and the rest, in one sitting.
@@ -324,7 +324,7 @@ func (s *Secrets) Sync(ctx context.Context) (Report, error) {
 			env = append(env, old[name])
 		}
 	}
-	header := "# Written by kit from 1Password: kit-config's [secrets]. kit apply secret and\n# kit secrets sync rewrite it whole; change a secret in 1Password, or with kit.\n"
+	header := "# Written by kit from 1Password: kit-config's secrets sections. kit apply\n# and kit secret sync rewrite it whole; change a secret in 1Password, or with kit.\n"
 	if err := writeFile(filepath.Join(s.home, EnvFile), header+strings.Join(env, "\n")+"\n", 0o600); err != nil {
 		return report, err
 	}

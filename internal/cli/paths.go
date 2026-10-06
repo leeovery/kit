@@ -11,7 +11,7 @@ import (
 	"github.com/leeovery/kit/internal/steps"
 )
 
-// pathsKind is how kit add and kit remove name the paths section.
+// pathsKind names the paths section, and its command.
 const pathsKind = "path"
 
 // addPaths declares each directory last in the paths section of this Mac's

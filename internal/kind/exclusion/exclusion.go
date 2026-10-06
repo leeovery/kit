@@ -45,7 +45,7 @@ func New(run runner.Runner, home, prefs string) *Exclusions {
 	return &Exclusions{run: run, home: home, prefs: prefs}
 }
 
-func (x *Exclusions) Name() string    { return "exclusion" }
+func (x *Exclusions) Name() string    { return "backup-exclusion" }
 func (x *Exclusions) Title() string   { return "Backup exclusions" }
 func (x *Exclusions) Program() string { return "tmutil" }
 

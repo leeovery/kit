@@ -64,7 +64,7 @@ func ParseManual(home string, e config.Entry) (ManualStep, error) {
 
 // Manual checks what a person must do by hand, as [manual] declares it: a
 // step with a command is done when it exits 0; one without, when it's been
-// marked done on this Mac (kit done). Each step not done is an item saying
+// marked done on this Mac (kit manual done). Each step not done is an item saying
 // what to do.
 func Manual(run runner.Runner, home, stateDir string, list config.List) engine.Step {
 	return engine.Step{
@@ -89,7 +89,7 @@ func Manual(run runner.Runner, home, stateDir string, list config.List) engine.S
 				case !rec.Done[m.Name].IsZero():
 					continue
 				default:
-					it.Detail = "then: kit done " + m.Name
+					it.Detail = "then: kit manual done " + m.Name
 				}
 				res.Items = append(res.Items, it)
 			}
