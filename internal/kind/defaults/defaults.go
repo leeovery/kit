@@ -81,6 +81,8 @@ var noise = map[string][]string{
 	"com.apple.finder": {
 		"FXRecentFolders", "GoToField*", "FXDesktopVolumePositions", "FXConnectToBounds", "FXConnectToLastURL",
 		"TrashViewSettings", "SearchRecentsSavedViewStyle*", "ComputerViewSettings", "FK_*", "LastTrashState", "FXSidebarUpgradedTo*",
+		// The toolbar buttons sync apps' Finder extensions add by themselves.
+		"FXSyncExtensionToolbarItems*",
 	},
 }
 

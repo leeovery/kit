@@ -194,3 +194,17 @@ func TestNoiseKitTookBeforeKnowingItIsForgotten(t *testing.T) {
 		t.Errorf("items = %q; want the noise forgotten, the new setting found", got)
 	}
 }
+
+// Finder's own bookkeeping of the toolbar buttons sync apps add never shows
+// as changed: only a setting a person changed does.
+func TestFindersToolbarBookkeepingIsNoise(t *testing.T) {
+	m := newMac(t)
+	list := m.declare()
+	if err := os.WriteFile(filepath.Join(m.state, "settings.json"), []byte(`{"domains": {"com.apple.finder": true}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m.set("com.apple.finder", "<key>FXSyncExtensionToolbarItemsPendingRemove</key><array/><key>FXSyncExtensionToolbarItemsPendingAdd</key><array/><key>ShowPathbar</key><true/>")
+	if got := m.items(list); !slices.Equal(got, []string{"com.apple.finder:ShowPathbar extra"}) {
+		t.Errorf("items = %q; want Finder's bookkeeping left out, the setting found", got)
+	}
+}
