@@ -81,6 +81,23 @@ func TestListCommands(t *testing.T) {
 	}
 }
 
+// A secrets section's header may name the 1Password item its lines'
+// references are short for; the plain section's are in full.
+func TestListSecretsByItem(t *testing.T) {
+	cfg := loadRepo(t, map[string]string{"laptop/declarations": "[secrets]\nKEY op://vault/Other/key\n\n[secrets  op://vault/Some Item/]\n# Tokens\nTOKEN GitHub/token   # the CLI's\n"})
+	got, err := cfg.List("secret", "laptop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []config.Entry{
+		{Name: "KEY", Value: "op://vault/Other/key", Scope: "laptop", Section: "secrets", Line: 2},
+		{Name: "TOKEN", Value: "GitHub/token", Scope: "laptop", Section: "secrets op://vault/Some Item", Item: "op://vault/Some Item", Line: 6, Group: "Tokens", Note: "the CLI's"},
+	}
+	if !slices.Equal(got.Entries, want) {
+		t.Errorf("List() = %+v\nwant %+v", got.Entries, want)
+	}
+}
+
 func TestListWithoutFiles(t *testing.T) {
 	got, err := loadRepo(t, map[string]string{}).List("brew", "laptop")
 	if err != nil || len(got.Entries) != 0 {
@@ -104,6 +121,8 @@ func TestListRefuses(t *testing.T) {
 		{name: "a constraint alone", files: map[string]string{"shared/declarations": "[homebrew formulae]\n^4.0\n"}, want: `"^4.0" isn't a name`},
 		{name: "a command with nothing after its name", files: map[string]string{"laptop/declarations": "[claude mcp]\ndocs\n"}, want: "laptop/declarations:2: docs has nothing after its name"},
 		{name: "a quote left open", files: map[string]string{"laptop/declarations": "[claude mcp]\ndocs --header \"X: y\n"}, want: "laptop/declarations:2: a quote isn't closed"},
+		{name: "a secret in two items' sections", files: map[string]string{"laptop/declarations": "[secrets op://vault/A]\nX a/b\n\n[secrets op://vault/B]\nX c/d\n"}, want: "laptop/declarations:5: X is in [secrets op://vault/A] at line 2 too"},
+		{name: "a secrets section for what isn't an item", files: map[string]string{"laptop/declarations": "[secrets op://vault/item/field]\nX a/b\n"}, want: `laptop/declarations:1: [secrets op://vault/item/field]: "op://vault/item/field" isn't a 1Password item's reference`},
 		{name: "in the shared file and a Mac's", files: map[string]string{"shared/declarations": "[homebrew formulae]\njq\n", "laptop/declarations": "[homebrew formulae]\ngo\njq\n"}, want: "laptop/declarations:3: jq is in shared/declarations too (line 2)"},
 	}
 	for _, tt := range tests {

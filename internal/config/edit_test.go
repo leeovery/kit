@@ -74,6 +74,18 @@ func TestDeclare(t *testing.T) {
 			after: "[claude mcp]\nalpha -- a\n\n[claude mcp ~/Code/site]\nmail -- mail-mcp\n\n[claude mcp ~/Code/zz]\nb -- b\n",
 		},
 		{
+			name:   "a secret, in its item's section",
+			before: "[secrets]\nKEY op://vault/i/f\n\n[secrets op://vault/A]\nB_TOKEN x/y\n",
+			kind:   "secret", entry: config.Entry{Name: "A_TOKEN", Value: "x/z", Item: "op://vault/A"},
+			after: "[secrets]\nKEY op://vault/i/f\n\n[secrets op://vault/A]\nB_TOKEN x/y\n\n# To be sorted\nA_TOKEN x/z\n",
+		},
+		{
+			name:   "a secret's item's section made, after the plain one",
+			before: "[secrets]\nKEY op://vault/i/f\n",
+			kind:   "secret", entry: config.Entry{Name: "A_TOKEN", Value: "x/z", Item: "op://vault/A/"},
+			after: "[secrets]\nKEY op://vault/i/f\n\n[secrets op://vault/A]\n# To be sorted\nA_TOKEN x/z\n",
+		},
+		{
 			name:   "a file made",
 			before: "",
 			kind:   "app", entry: config.Entry{Name: "xcode@497799835"},
@@ -118,6 +130,12 @@ func TestUndeclare(t *testing.T) {
 			before: "[homebrew formulae]\nbat\n\n[npm packages]\n# Language servers\nintelephense\n\n[macos login items]\ncom.example.app\n",
 			kind:   "npm", entry: "intelephense",
 			after: "[homebrew formulae]\nbat\n\n[macos login items]\ncom.example.app\n",
+		},
+		{
+			name:   "a secret, from whichever item's section has it",
+			before: "[secrets]\nKEY op://vault/i/f\n\n[secrets op://vault/A]\nTOKEN a/b\n",
+			kind:   "secret", entry: "TOKEN",
+			after: "[secrets]\nKEY op://vault/i/f\n",
 		},
 		{
 			name:   "the last section left empty goes, and the blank before it",
@@ -178,6 +196,27 @@ func TestEditingRefuses(t *testing.T) {
 	}
 	if got := readFile(t, cfg, "laptop/declarations"); got != "[homebrew formulae]\njq\n" {
 		t.Errorf("laptop = %q, want it untouched", got)
+	}
+}
+
+// A secret is declared once in a file, whichever item's section it's in.
+func TestDeclareASecretOnce(t *testing.T) {
+	before := "[secrets op://vault/A]\nTOKEN a/b\n"
+	cfg := loadRepo(t, map[string]string{"laptop/declarations": before})
+	for name, err := range map[string]error{
+		"in another item's section": cfg.Declare("secret", "laptop", config.Entry{Name: "TOKEN", Value: "c/d", Item: "op://vault/B"}, ""),
+		"in the plain section":      cfg.Declare("secret", "laptop", config.Entry{Name: "TOKEN", Value: "op://vault/B/c"}, ""),
+		"for what isn't an item":    cfg.Declare("secret", "laptop", config.Entry{Name: "OTHER", Value: "c/d", Item: "op://vault/item/field"}, ""),
+	} {
+		if err == nil {
+			t.Errorf("%s: no error", name)
+		}
+	}
+	if got := readFile(t, cfg, "laptop/declarations"); got != before {
+		t.Errorf("laptop = %q, want it untouched", got)
+	}
+	if items, err := cfg.Items("secret", "laptop"); err != nil || strings.Join(items, ",") != "op://vault/A" {
+		t.Errorf("Items() = %q, %v", items, err)
 	}
 }
 

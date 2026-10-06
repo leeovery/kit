@@ -56,7 +56,7 @@ undeclared for adopting, removing or snoozing, and report both.
 | `power` | `[power settings]`: pmset's words, the source then the setting and value (`-c sleep 0`; `-a` every source, `-b` the battery, `-u` a UPS), named `charger:sleep` | `pmset -g custom`, by source | `sudo pmset`; undeclaring leaves the value |
 | `exclusion` | `[backup exclusions]`: a path a line, `~` and `*` globs, expanded on every check (a plain path stands for itself, there or not) | Time Machine's fixed-path exclusions (`SkipPaths`), and each glob match excluded where it is (`tmutil isexcluded`); Arq inherits both | a plain path: `sudo tmutil addexclusion -p` (Full Disk Access for the terminal); a glob's match: `tmutil addexclusion`, no password, so `kit nightly` does it unattended; `removeexclusion -p` |
 | `spotlight` | `[spotlight exclusions]`: a folder a line | Spotlight asked for files in each folder (`mdfind -count`); its own list is root's alone, so nothing extra is found | added to Spotlight's privacy list through sudo, taking effect after a restart (kit remembers, and says so); removing is System Settings' |
-| `secret` | `[secrets]`: what it fills (a variable's name, or a file's path) then where 1Password keeps it, short (`GitHub/token`, a field of `kit.toml`'s `secrets_item`) or in full (`op://vault/item/field`); `--mode 644` for a file's, `--github owner/repo,…` for a GitHub Actions secret | `~/.secrets.zsh`'s exports, the files with their modes, `gh secret list`: never 1Password, which would ask for a fingerprint each hour | a sync: every value read from 1Password in one sitting (`op read`, its output kept from the log), `~/.secrets.zsh` written whole with each value single-quoted (one that fails to read keeps its line), files written beside and renamed in, Actions secrets set by `gh secret set` on standard input; `kit secrets sync` forces one. Removing takes a secret off the Mac or GitHub; 1Password keeps it |
+| `secret` | `[secrets op://vault/item]`, a section for each item a file keeps secrets in (the header says where they are; several spread them across items): what it fills (a variable's name, or a file's path) then the field or attachment, short (`GitHub/token`); a plain `[secrets]` for references in full (`op://vault/item/field`); a name once a file. `--mode 644` for a file's. GitHub Actions secrets aren't kit's: they're a repository's, not the Mac's | `~/.secrets.zsh`'s exports, the files with their modes: never 1Password, which would ask for a fingerprint each hour | a sync: every value read from 1Password in one sitting (`op read`, its output kept from the log), `~/.secrets.zsh` written whole with each value single-quoted (one that fails to read keeps its line), files written beside and renamed in; `kit secrets sync` forces one. Removing takes a secret off the Mac; 1Password keeps it |
 | `default` | `[macos settings]`: `defaults write`'s words (`com.apple.dock tilesize -int 60`; `-currentHost` first for this host's; `-dict-add` and an entry's XML; or a value as XML), named `domain:key[:entry]` | `defaults export` of each domain | `defaults write` (through sudo for a domain under `/Library`), then the app that reads it restarted or keyboard shortcuts reloaded; `defaults delete` |
 
 - **Matching:** a kind may match on part of a name: an App Store app on its id (so an app the
@@ -136,12 +136,14 @@ Config, Checks), which the status document carries.
 
 **Adding a secret:** `kit add secret <name>` takes its value typed (unshown), on standard
 input (`--stdin`, how an agent passes one, never on a command line), from a file (`--from`,
-kept as an attachment), or as an existing reference (`--ref`, nothing stored). A value is kept
-in `kit.toml`'s item, as `--field <section>/<field>`, by editing the item with its JSON on
-op's standard input; then read back and compared, declared, and synced, never shown. `--mode`
-and `--github` as on the line. `kit remove secret <name>` takes it off the Mac or GitHub,
-undeclares it, and keeps or deletes its value in 1Password (`--keep-value`,
-`--delete-value`; asked at a terminal).
+kept as an attachment), or as an existing reference (`--ref`, nothing stored: its line goes in
+its item's section, short, when the file has one, else in the plain `[secrets]`, in full). A
+value is kept in the item of the file's secrets section (`--item op://vault/item` when it has
+none, which makes the section, or several), as `--field <section>/<field>`, by editing the item
+with its JSON on op's standard input; then read back and compared, declared, and synced, never
+shown. `--mode` as on the line. `kit remove secret <name>` takes it off the Mac, undeclares
+it, and keeps or deletes its value in 1Password (`--keep-value`, `--delete-value`; asked at a
+terminal); a value given in full, outside the items' sections, is left where it is.
 
 **Steps by hand** go in a `[manual]` section, a line each: a name, what to do in quotes, and
 optionally `--` and a command saying whether it's done (exit 0: done), as in `tool "Install the

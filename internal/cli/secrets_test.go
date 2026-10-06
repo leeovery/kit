@@ -8,13 +8,16 @@ import (
 	"testing"
 )
 
+// itemSection is the header of the secrets section for the item the tests'
+// secrets are in.
+const itemSection = "secrets op://vault/Item"
+
 // secretsWorld is laptopWorld with a secret declared, short for a field of
-// the item kit.toml names.
+// the item its section names.
 func secretsWorld(t *testing.T) *world {
 	t.Helper()
 	w := laptopWorld(t)
-	w.write(t, ".config/kit/kit.toml", strings.Replace(twoMacs, "primary = \"laptop\"\n", "primary = \"laptop\"\nsecrets_item = \"op://vault/Item\"\n", 1))
-	w.writeSection(t, "laptop", "secrets", "TOKEN   Section/token   # a token\n")
+	w.writeSection(t, "laptop", itemSection, "TOKEN   Section/token   # a token\n")
 	return w
 }
 
@@ -61,7 +64,7 @@ func TestAddASecretKeepsItInOnePassword(t *testing.T) {
 	f.On("op", "read", "op://vault/Item/Section/token").Prints("the value\n")
 	w.expectSync([]string{"laptop/declarations"}, "kit add secret NEW_ONE (laptop): a new one")
 	out, _, code := w.run(t, "add", "secret", "NEW_ONE", "--field", "Section/new", "--stdin", "--note", "a new one")
-	if code != 0 || !strings.Contains(out, "kept in 1Password (Section/new) and read back; declared in laptop, synced") {
+	if code != 0 || !strings.Contains(out, "kept in 1Password (op://vault/Item/Section/new) and read back; declared in laptop, synced") {
 		t.Errorf("kit add secret printed\n%s exit %d", out, code)
 	}
 	for _, c := range f.Commands() {
@@ -72,11 +75,59 @@ func TestAddASecretKeepsItInOnePassword(t *testing.T) {
 			t.Errorf("op item edit got %q (secret: %v)", c.Input, c.Secret)
 		}
 	}
-	if got := w.readSection(t, "laptop", "secrets"); !strings.Contains(got, "NEW_ONE Section/new   # a new one\n") {
-		t.Errorf("[secrets] = %q", got)
+	if got := w.readSection(t, "laptop", itemSection); !strings.Contains(got, "NEW_ONE Section/new   # a new one\n") {
+		t.Errorf("[%s] = %q", itemSection, got)
 	}
 	if got := w.read(t, ".secrets.zsh"); !strings.Contains(got, "export NEW_ONE='new value'   # a new one\n") {
 		t.Errorf("~/.secrets.zsh = %q", got)
+	}
+}
+
+// A reference goes in the section of its item, short, when there's one;
+// else in the plain [secrets], in full. Nothing is stored.
+func TestAddASecretByItsReference(t *testing.T) {
+	w := secretsWorld(t)
+	f := w.fake
+	f.On("op", "whoami")
+	f.On("op", "read", "op://vault/Item/Section/token").Prints("the value\n")
+	f.On("op", "read", "op://vault/Item/Section/other").Prints("other\n")
+	f.On("op", "read", "op://vault/Elsewhere/key").Prints("key\n")
+	w.expectSync([]string{"laptop/declarations"}, "kit add secret OTHER (laptop)")
+	if out, _, code := w.run(t, "add", "secret", "OTHER", "--ref", "op://vault/Item/Section/other"); code != 0 {
+		t.Errorf("kit add secret printed\n%s exit %d", out, code)
+	}
+	w.expectSync([]string{"laptop/declarations"}, "kit add secret KEY (laptop)")
+	if out, _, code := w.run(t, "add", "secret", "KEY", "--ref", "op://vault/Elsewhere/key"); code != 0 {
+		t.Errorf("kit add secret printed\n%s exit %d", out, code)
+	}
+	if got := w.readSection(t, "laptop", itemSection); !strings.Contains(got, "OTHER Section/other\n") {
+		t.Errorf("[%s] = %q", itemSection, got)
+	}
+	if got := w.readSection(t, "laptop", "secrets"); got != "# To be sorted\nKEY op://vault/Elsewhere/key\n" {
+		t.Errorf("[secrets] = %q", got)
+	}
+	for _, c := range f.Commands() {
+		if c.Name == "op" && c.Args[0] == "item" {
+			t.Errorf("ran %s: a reference stores nothing", c)
+		}
+	}
+}
+
+// A new value goes in the item of the file's one secrets section for an
+// item; with none, or several, --item says which.
+func TestAddASecretAsksWhichItem(t *testing.T) {
+	w := laptopWorld(t)
+	w.stdin = "x"
+	if _, errOut, code := w.run(t, "add", "secret", "NEW_ONE", "--stdin", "--field", "S/f"); code != 2 || !strings.Contains(errOut, "laptop/declarations has no secrets section naming an item to keep it in: say which with --item op://vault/item") {
+		t.Errorf("printed %q, exit %d", errOut, code)
+	}
+	w.writeSection(t, "laptop", "secrets op://vault/A", "A_TOKEN S/a\n")
+	w.writeSection(t, "laptop", "secrets op://vault/B", "B_TOKEN S/b\n")
+	if _, errOut, code := w.run(t, "add", "secret", "NEW_ONE", "--stdin", "--field", "S/f"); code != 2 || !strings.Contains(errOut, "has secrets sections for op://vault/A, op://vault/B: say which item it goes in with --item") {
+		t.Errorf("printed %q, exit %d", errOut, code)
+	}
+	if _, errOut, code := w.run(t, "add", "secret", "NEW_ONE", "--ref", "op://vault/A/S/f", "--item", "op://vault/A"); code != 2 || !strings.Contains(errOut, "--item is where a new value goes") {
+		t.Errorf("printed %q, exit %d", errOut, code)
 	}
 }
 
@@ -107,5 +158,22 @@ func TestRemoveASecretAndItsValue(t *testing.T) {
 	}
 	if got := w.read(t, ".secrets.zsh"); strings.Contains(got, "TOKEN") {
 		t.Errorf("~/.secrets.zsh = %q", got)
+	}
+}
+
+// A value given in full, in the plain [secrets], isn't in an item kit keeps
+// secrets in: removing the secret leaves it in 1Password.
+func TestRemoveASecretLeavesAValueElsewhere(t *testing.T) {
+	w := laptopWorld(t)
+	w.writeSection(t, "laptop", "secrets", "KEY op://vault/Elsewhere/key\n")
+	w.expectSync([]string{"laptop/declarations"}, "kit remove secret KEY (laptop)")
+	out, _, code := w.run(t, "remove", "secret", "KEY", "--delete-value")
+	if code != 0 || !strings.Contains(out, "its value is outside every item a secrets section names (op://vault/Elsewhere/key), so kit leaves it") {
+		t.Errorf("kit remove secret printed\n%s exit %d", out, code)
+	}
+	for _, c := range w.fake.Commands() {
+		if c.Name == "op" {
+			t.Errorf("ran %s", c)
+		}
 	}
 }

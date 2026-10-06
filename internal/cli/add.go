@@ -82,7 +82,7 @@ declaring, for a throwaway: it's quiet for 7 days, then kit reconcile asks.`,
 	f.BoolVar(&opts.secret.stdin, "stdin", false, "a secret: its value on standard input, never on a command line")
 	f.StringVar(&opts.secret.field, "field", "", "a secret: where in 1Password its value goes, as in GitHub/token")
 	f.StringVar(&opts.secret.mode, "mode", "", "a secret's file: its permissions, as in 644 (600 otherwise)")
-	f.StringVar(&opts.secret.github, "github", "", "a secret: the GitHub repositories it's an Actions secret on, owner/repo,…")
+	f.StringVar(&opts.secret.item, "item", "", "a secret: the 1Password item its value goes in (op://vault/item), when its file has no item's section or several")
 	return cmd
 }
 
