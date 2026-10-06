@@ -19,15 +19,15 @@ import (
 // The features: the pieces with nothing to list, switched on for a Mac in
 // its [features] section.
 const (
-	FeatureTimeMachine     = "time-machine"
-	FeatureArq             = "arq"
-	FeatureScratch         = "scratch"
-	FeatureSettingsCapture = "settings-capture"
-	FeatureOhMyZsh         = "oh-my-zsh"
+	FeatureTimeMachine = "time-machine"
+	FeatureArq         = "arq"
+	FeatureScratch     = "scratch"
+	FeaturePrefs       = "prefs"
+	FeatureOhMyZsh     = "oh-my-zsh"
 )
 
 // Features are the features kit knows.
-var Features = []string{FeatureArq, FeatureFileSharing, FeatureOhMyZsh, FeatureRemoteLogin, FeatureScratch, FeatureSettingsCapture, FeatureTimeMachine, FeatureTouchIDSudo}
+var Features = []string{FeatureArq, FeatureFileSharing, FeatureOhMyZsh, FeaturePrefs, FeatureRemoteLogin, FeatureScratch, FeatureTimeMachine, FeatureTouchIDSudo}
 
 // The backup checks' thresholds, as bin/health had them.
 const (

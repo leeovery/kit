@@ -109,7 +109,7 @@ undeclared for adopting, removing or snoozing, and report both.
 
 **Features.** Each piece of kit stands alone, and is on when it's declared: a list by having
 entries (the kinds, later the folders to restore), a piece with nothing to list by a switch
-in a Mac's `[features]` section (`time-machine`, `arq`, `scratch`, `settings-capture`,
+in a Mac's `[features]` section (`time-machine`, `arq`, `scratch`, `prefs`,
 `oh-my-zsh`, `touch-id-sudo`, `remote-login`, `file-sharing`), so
 turning one off loses nothing that isn't its own. Built-ins are generic and lasting; what's
 specific to a user, or to the moment, goes in their config: checks of their own in
@@ -282,7 +282,7 @@ there, cheap and safe, and removes nothing: today, a new folder matching a backu
 exclusion's glob, excluded where it is. Besides the user's own jobs, two are built in, nightly, each
 with its feature: `scratch`'s clean-up (`/Volumes/Scratch/tmp` cleared of items untouched for a
 week; Claude Code's session folders judged one by one over 30 days, kept while their
-transcript changed) and, last, `settings-capture`'s `prefsync capture` (niced, stopped after
+transcript changed) and, last, `prefs`'s `prefsync capture` (niced, stopped after
 15 minutes). The hourly jobs run every time; the nightly ones once a day,
 when the nightly run falls due (`nightly_at` in `kit.toml`, 03:00 unless it says), or on the
 first run after it's been missed, as by a Mac asleep then. Each job's outcome is kept in kit's

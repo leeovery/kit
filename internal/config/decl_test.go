@@ -177,3 +177,27 @@ func TestAMacCantBeCalledShared(t *testing.T) {
 		t.Errorf("Load() error = %v", err)
 	}
 }
+
+// kit prefs's lists: paths and patterns a line, spaces and all; and a
+// domain's pattern then its app's bundle id.
+func TestListPrefsSections(t *testing.T) {
+	cfg := loadRepo(t, map[string]string{
+		"shared/declarations": "[prefs files]\n# An app's settings\n~/Library/Application Support/Some App/settings.json   # its settings\n~/Library/Application Support/Tool/*20[0-9][0-9].[0-9]/options\n\n[prefs deny]\nnet.example.Chatty*\n\n[prefs apps]\ncom.example.helper com.example.app   # its helper\njetbrains.ps.* com.jetbrains.PhpStorm\n\n[prefs machine-bound]\nio.example.*\n~/.config/tool/local.json\n",
+		"laptop/declarations": "[prefs deny]\norg.example.Other\n",
+	})
+	for kind, want := range map[string][]string{
+		config.PrefsFilesKind:        {"~/Library/Application Support/Some App/settings.json", "~/Library/Application Support/Tool/*20[0-9][0-9].[0-9]/options"},
+		config.PrefsDenyKind:         {"net.example.Chatty*", "org.example.Other"},
+		config.PrefsAppsKind:         {"com.example.helper", "jetbrains.ps.*"},
+		config.PrefsMachineBoundKind: {"io.example.*", "~/.config/tool/local.json"},
+	} {
+		list, err := cfg.List(kind, "laptop")
+		if err != nil || !slices.Equal(list.Names(), want) {
+			t.Errorf("List(%s) = %q, %v; want %q", kind, list.Names(), err, want)
+		}
+	}
+	apps, _ := cfg.List(config.PrefsAppsKind, "laptop")
+	if e := apps.Entries[0]; e.Value != "com.example.app" || e.Note != "its helper" {
+		t.Errorf("[prefs apps] entry = %+v", e)
+	}
+}

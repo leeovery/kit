@@ -41,6 +41,18 @@ const (
 // what to do, and, after --, a command saying whether it's done.
 const ManualKind = "manual"
 
+// The sections of kit prefs's lists, which aren't kinds: the settings files
+// it saves besides apps' preferences; the domains it never saves; the apps
+// that domains belong to when their names don't say, a domain's pattern then
+// the app's bundle id; and the settings that belong to one Mac, never
+// copied to another.
+const (
+	PrefsFilesKind        = "prefs-files"
+	PrefsDenyKind         = "prefs-deny"
+	PrefsAppsKind         = "prefs-apps"
+	PrefsMachineBoundKind = "prefs-machine-bound"
+)
+
 // FeaturesKind names the section of the pieces switched on for a Mac, by
 // name: the parts with nothing to list, such as a backup tool.
 const FeaturesKind = "features"
@@ -115,6 +127,10 @@ var sectionDefs = []sectionDef{
 	{header: "claude mcp", kind: "claude-mcp", form: commands, folders: true},
 	{header: "claude plugins", kind: "claude-plugin", form: names, grouped: true},
 	{header: "secrets", kind: "secret", form: secrets, grouped: true, items: true},
+	{header: "prefs files", kind: PrefsFilesKind, form: paths},
+	{header: "prefs deny", kind: PrefsDenyKind, form: paths},
+	{header: "prefs apps", kind: PrefsAppsKind, form: settings},
+	{header: "prefs machine-bound", kind: PrefsMachineBoundKind, form: paths},
 	{header: "manual", kind: ManualKind, form: commands},
 	{header: "checks", kind: ChecksKind, form: commands},
 	{header: "hourly", kind: HourlyKind, form: commands},

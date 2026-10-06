@@ -41,6 +41,9 @@ type Config struct {
 	// NightlyAt is when each day the nightly run is due, as hours and
 	// minutes since midnight: 03:00 unless kit.toml says.
 	NightlyAt time.Duration
+	// PrefsRepo is the git repository kit prefs saves apps' settings to, a
+	// folder each Mac, as git clones it: none unless kit.toml says.
+	PrefsRepo string
 }
 
 // DefaultNightlyAt is when the nightly run is due when kit.toml doesn't say.
@@ -58,6 +61,7 @@ type file struct {
 	MinimumKit string             `toml:"minimum_kit"`
 	Primary    string             `toml:"primary"`
 	NightlyAt  string             `toml:"nightly_at"`
+	PrefsRepo  string             `toml:"prefs_repo"`
 	Macs       map[string]macFile `toml:"macs"`
 }
 
@@ -109,7 +113,7 @@ func Load(dir string) (*Config, error) {
 	if len(f.Macs) == 0 {
 		return nil, fmt.Errorf("%s: no Macs: add one, as in [macs.laptop]", File)
 	}
-	cfg := &Config{Dir: dir, Format: f.Format, MinimumKit: f.MinimumKit, Primary: f.Primary, Macs: make(map[string]Mac, len(f.Macs)), NightlyAt: DefaultNightlyAt}
+	cfg := &Config{Dir: dir, Format: f.Format, MinimumKit: f.MinimumKit, Primary: f.Primary, Macs: make(map[string]Mac, len(f.Macs)), NightlyAt: DefaultNightlyAt, PrefsRepo: strings.TrimSpace(f.PrefsRepo)}
 	if f.NightlyAt != "" {
 		at, err := time.Parse("15:04", f.NightlyAt)
 		if err != nil {
