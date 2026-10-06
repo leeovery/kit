@@ -4,7 +4,6 @@
 package render
 
 import (
-	"cmp"
 	"fmt"
 	"strings"
 
@@ -50,16 +49,6 @@ func (o *ordered) finish(e event.StepFinished) []event.StepFinished {
 	return ready
 }
 
-// title is the title the run gave step, or its name.
-func (o *ordered) title(step string) string {
-	for _, s := range o.steps {
-		if s.Name == step && s.Title != "" {
-			return s.Title
-		}
-	}
-	return step
-}
-
 // itemLabels are how items of each state are counted for people, singular
 // and plural.
 var itemLabels = map[string][2]string{
@@ -83,27 +72,6 @@ type itemGroup struct {
 	quiet  string
 	action string
 	names  []string
-}
-
-// label counts the group for people, as in "2 unused dependencies", or "1
-// not declared (new, under a day)".
-func (g itemGroup) label() string {
-	forms, ok := itemLabels[g.state]
-	if !ok {
-		forms = [2]string{strings.ReplaceAll(g.state, "-", " "), strings.ReplaceAll(g.state, "-", " ")}
-	}
-	form := forms[0]
-	if len(g.names) != 1 {
-		form = forms[1]
-	}
-	label := fmt.Sprintf("%d %s", len(g.names), form)
-	if g.quiet != "" {
-		label += " (" + cmp.Or(quietLabels[g.quiet], g.quiet) + ")"
-	}
-	if g.action != "" {
-		label += ", to " + g.action
-	}
-	return label
 }
 
 // key is the group's state, and why it's quiet, when it is, as plain lines

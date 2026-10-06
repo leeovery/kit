@@ -26,7 +26,7 @@ func New(run runner.Runner) *GH {
 }
 
 func (*GH) Name() string    { return "gh" }
-func (*GH) Title() string   { return "GitHub CLI extensions" }
+func (*GH) Title() string   { return "gh extensions" }
 func (*GH) Program() string { return "gh" }
 
 // Installed lists the extensions installed from repositories, by

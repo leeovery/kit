@@ -388,9 +388,16 @@ starting; a check's result, with its items and reason; every external command, w
 arguments (redacted), exit code, duration and output; a step deferred, with the unmet need; a
 step failed, with the error; the run finishing, with its summary. Faces subscribe:
 
-- **pretty** at a terminal: colour brought down to what the terminal shows, a spinner while
-  checks run, results in pipeline order whatever order they finish in, and no glyphs that need
-  a particular font;
+- **pretty** at a terminal: colour brought down to what the terminal shows, and no glyphs
+  that need a particular font (block elements and box drawing are in every Mac's). `kit
+  status` and `kit apply` open with kit's wordmark, the command, the Mac and the time beside
+  it; shorter commands with a line and a rule. A spinner counts the steps done and names
+  those running; then the steps under their areas (Backups, Jobs, Mac, Drift, Config,
+  Checks, as bare `kit` orders them), each a mark, its title and its summary (wrapping under
+  itself), and under it what applying did and what needs attention, a thing a line, its
+  name and what's wrong in a column beside it (or under it, when there's no room), the
+  loud before the quiet, a long list cut to six and counted; then a rule and the summary,
+  marked;
 - **plain** without one, or with `--plain`: the same words, one item a line, no colour, no
   animation, never a prompt;
 - **json** with `--json`: one document at the end, `"schema": 1`;

@@ -43,6 +43,9 @@ func (x *Exclusions) Name() string    { return "exclusion" }
 func (x *Exclusions) Title() string   { return "Backup exclusions" }
 func (x *Exclusions) Program() string { return "tmutil" }
 
+// Verb says a path as declared is excluded.
+func (x *Exclusions) Verb() string { return "excluded" }
+
 // full is a path as declared, ~ expanded.
 func (x *Exclusions) full(name string) string {
 	if rest, ok := strings.CutPrefix(name, "~/"); ok {

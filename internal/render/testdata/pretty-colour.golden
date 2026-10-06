@@ -1,12 +1,21 @@
-[1mkit status[m[2m · laptop[m
 
-[32m✓[m Homebrew     /opt/homebrew
-[33m![m Formulae     6 declared, 4 installed
-               [33m2 missing:[m jq, owner/tap/tool
-               [33m1 not declared:[m ffmpeg
-               [33m1 unused dependency:[m node@20
-[32m✓[m Casks        3 declared, all installed
-[31m✗[m kit-config   [31mcouldn't check: gh repo view exited 1: not signed in[m
-[2m·[m App Store    [2mdeferred: needs Homebrew[m
+  [1;36m██╗  ██╗ ██╗ ████████╗[m
+  [1;36m██║ ██╔╝ ██║ ╚══██╔══╝[m
+  [1;36m█████╔╝  ██║    ██║[m
+  [1;36m██╔═██╗  ██║    ██║[m
+  [1;36m██║  ██╗ ██║    ██║[m
+  [1;36m╚═╝  ╚═╝ ╚═╝    ╚═╝[m   [2mstatus · laptop · 03:04[m
 
-[33m1 needs attention, 1 couldn't be checked, 1 deferred[m
+    [32m✓[m  Homebrew     /opt/homebrew
+    [33m![m  Formulae     6 declared, 4 installed
+         · jq               [33mmissing[m
+         · owner/tap/tool   [33mmissing[m
+         · ffmpeg           [33mnot declared[m
+         · node@20          [33munused dependency[m
+    [32m✓[m  Casks        3 declared, all installed
+    [31m✗[m  kit-config   [31mcouldn't check: gh repo view exited 1: not signed in[m
+    [2m·[m  App Store    [2mdeferred: needs Homebrew[m
+
+  [2m──────────────────────────────────────────────────────────────────────────[m
+    [31m✗[m  [31m1 needs attention, 1 couldn't be checked, 1 deferred[m
+

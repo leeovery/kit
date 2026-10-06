@@ -60,6 +60,9 @@ func (s *Spotlight) Name() string    { return "spotlight" }
 func (s *Spotlight) Title() string   { return "Spotlight exclusions" }
 func (s *Spotlight) Program() string { return "mdfind" }
 
+// Verb says a path as declared is excluded.
+func (s *Spotlight) Verb() string { return "excluded" }
+
 // Expand notes the declared folders, which are what Spotlight is asked
 // about: each name stands for itself.
 func (s *Spotlight) Expand(list config.List) (config.List, error) {

@@ -21,7 +21,7 @@ const syncWithin = time.Hour
 // over an hour. Edits not committed are drift (ConfigEdits), not a problem.
 func ConfigSync(run runner.Runner, dir string, now func() time.Time) engine.Step {
 	return engine.Step{
-		Name: "config-sync", Title: "Config repository's sync", Area: AreaConfig,
+		Name: "config-sync", Title: "Sync", Area: AreaConfig,
 		Check: func(ctx context.Context) check.Result {
 			// What's committed and not pushed, oldest first: none when
 			// there's no upstream to push to.
@@ -62,7 +62,7 @@ const ConfigEditsName = "config"
 // file, which kit reconcile commits or undoes.
 func ConfigEdits(repo gitrepo.Repo) engine.Step {
 	return engine.Step{
-		Name: ConfigEditsName, Title: "kit-config's edits", Area: AreaDrift,
+		Name: ConfigEditsName, Title: "kit-config edits", Area: AreaDrift,
 		Check: func(ctx context.Context) check.Result {
 			changes, err := repo.Changes(ctx)
 			if err != nil {

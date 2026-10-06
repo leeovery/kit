@@ -27,7 +27,7 @@ func macosWorld(t *testing.T, dock string) *world {
 
 func TestStatusShowsMacOSSettings(t *testing.T) {
 	w := macosWorld(t, "<key>tilesize</key><integer>60</integer>")
-	if out, _, _ := w.run(t, "status"); !strings.Contains(out, "default ok 1 declared, all installed\n") {
+	if out, _, _ := w.run(t, "status"); !strings.Contains(out, "default ok 1 declared, all set\n") {
 		t.Errorf("kit status printed\n%s", out)
 	}
 	w.exports("com.apple.dock", "<key>tilesize</key><integer>48</integer><key>autohide</key><true/>")

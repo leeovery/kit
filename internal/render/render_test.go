@@ -120,9 +120,7 @@ func TestEverythingOK(t *testing.T) {
 	if want := "kit status · studio\nbrew ok 2 declared, all installed\nNothing needs attention\n"; plain.String() != want {
 		t.Errorf("plain printed\n%s\nwant\n%s", plain.String(), want)
 	}
-	if want := "kit status · studio\n\n✓ Formulae   2 declared, all installed\n\nNothing needs attention\n"; pretty.String() != want {
-		t.Errorf("pretty printed\n%s\nwant\n%s", pretty.String(), want)
-	}
+	golden(t, "pretty-ok.golden", pretty.String())
 }
 
 func TestPrettyWrapsALongList(t *testing.T) {
@@ -160,8 +158,8 @@ func TestPrettySpinsWhileStepsRun(t *testing.T) {
 	}
 
 	got := out.String()
-	if !strings.Contains(got, "⠋ checking Formulae, Casks") || !strings.Contains(got, "⠙") {
-		t.Errorf("printed %q, want the spinner turning, naming the steps running", got)
+	if !strings.Contains(got, "⠋ 0 of 2 · checking Formulae, Casks") || !strings.Contains(got, "⠙") {
+		t.Errorf("printed %q, want the spinner turning, counting the steps and naming those running", got)
 	}
 	// What's left on screen, once each line has been drawn over, is the
 	// report alone.
@@ -172,8 +170,14 @@ func TestPrettySpinsWhileStepsRun(t *testing.T) {
 		}
 		screen = append(screen, strings.TrimPrefix(line, "\x1b[2K"))
 	}
-	want := "kit status · laptop\n\n✓ Formulae   2 declared, all installed\n✓ Casks      1 declared, all installed\n\nNothing needs attention\n"
-	if strings.Join(screen, "") != want {
+	var still bytes.Buffer
+	show(t, render.NewPretty(&colorprofile.Writer{Forward: &still, Profile: colorprofile.NoTTY}, 80, false), []event.Event{
+		event.RunStarted{Command: "status", Machine: "laptop", Steps: []event.Step{{Name: "brew", Title: "Formulae"}, {Name: "cask", Title: "Casks"}}},
+		event.StepFinished{Step: "brew", Result: check.Result{State: check.OK, Summary: "2 declared, all installed"}},
+		event.StepFinished{Step: "cask", Result: check.Result{State: check.OK, Summary: "1 declared, all installed"}},
+		event.RunFinished{Counts: map[check.State]int{check.OK: 2}},
+	})
+	if want := still.String(); strings.Join(screen, "") != want {
 		t.Errorf("left on screen\n%q\nwant\n%q", strings.Join(screen, ""), want)
 	}
 }
@@ -196,15 +200,7 @@ func TestQuietItems(t *testing.T) {
 	if plain.String() != wantPlain {
 		t.Errorf("plain printed\n%s\nwant\n%s", plain.String(), wantPlain)
 	}
-	wantPretty := "kit status · laptop\n\n! Formulae   3 declared, all installed\n" +
-		"             1 not declared: ffmpeg\n" +
-		"             1 not declared (new, under a day): hello\n" +
-		"             1 not declared (snoozed): wget\n" +
-		"             1 not declared (temporary): cowsay\n" +
-		"\n1 needs attention\n"
-	if pretty.String() != wantPretty {
-		t.Errorf("pretty printed\n%s\nwant\n%s", pretty.String(), wantPretty)
-	}
+	golden(t, "pretty-quiet.golden", pretty.String())
 }
 
 func TestActionsAndWhatWasDone(t *testing.T) {
@@ -228,11 +224,7 @@ func TestActionsAndWhatWasDone(t *testing.T) {
 	if plain.String() != wantPlain {
 		t.Errorf("plain printed\n%s\nwant\n%s", plain.String(), wantPlain)
 	}
-	wantPretty := "kit apply · laptop\n\n✓ Formulae   3 declared, all installed\n             installed: jq, ripgrep\n" +
-		"! Casks      2 declared, 0 installed\n             1 missing, to install: ghostty\n             1 missing: zoom (needs an administrator's password)\n\n1 needs attention\n"
-	if pretty.String() != wantPretty {
-		t.Errorf("pretty printed\n%s\nwant\n%s", pretty.String(), wantPretty)
-	}
+	golden(t, "pretty-done.golden", pretty.String())
 }
 
 func TestJSONWritesNothingWithoutARun(t *testing.T) {
