@@ -73,6 +73,8 @@ var noise = map[string][]string{
 	},
 	"NSGlobalDomain":   {"com.apple.gms.*", "NSLinguisticDataAssets*", "AKLastIDMSEnvironment", "NSPreferredWebServices", "com.apple.springing.*"},
 	"com.apple.spaces": {"SpacesDisplayConfiguration"},
+	// Shown in the menu bar while an app uses the microphone or camera.
+	"com.apple.controlcenter": {"NSStatusItem VisibleCC AudioVideoModule"},
 	"/Library/Preferences/com.apple.SoftwareUpdate": {
 		"Last*", "*Date*", "*Dictionary", "*Count", "RecommendedUpdates", "DDMPersistedErrorKey",
 		"PostSuccessful*", "PrimaryLanguages", "SplatEnabled",
