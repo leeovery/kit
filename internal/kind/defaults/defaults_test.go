@@ -1,6 +1,8 @@
 package defaults_test
 
 import (
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -14,14 +16,15 @@ import (
 // mac is macOS settings on a made-up Mac: each domain's settings as XML
 // dict bodies, by export, every watched domain empty unless given.
 type mac struct {
-	t    *testing.T
-	fake *runnertest.Fake
-	d    *defaults.Defaults
+	t     *testing.T
+	fake  *runnertest.Fake
+	d     *defaults.Defaults
+	state string
 }
 
 func newMac(t *testing.T) *mac {
-	m := &mac{t: t, fake: runnertest.New(t)}
-	m.d = defaults.New(m.fake, t.TempDir())
+	m := &mac{t: t, fake: runnertest.New(t), state: t.TempDir()}
+	m.d = defaults.New(m.fake, m.state)
 	for _, domain := range defaults.Watched {
 		m.set(domain, "")
 	}
@@ -175,5 +178,19 @@ func TestDeclaredValuesRead(t *testing.T) {
 		if _, err := d.Values(list); err == nil || !strings.Contains(err.Error(), "shared/declarations:2:") {
 			t.Errorf("Values(%s) error = %v", value, err)
 		}
+	}
+}
+
+func TestNoiseKitTookBeforeKnowingItIsForgotten(t *testing.T) {
+	m := newMac(t)
+	list := m.declare()
+	// kit's record from before the noise list held the heartbeat's key.
+	record := `{"domains": {"com.apple.controlcenter": true}, "baseline": {"com.apple.controlcenter:LastHeartbeatDateString.daily": "<string>yesterday</string>"}}`
+	if err := os.WriteFile(filepath.Join(m.state, "settings.json"), []byte(record), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m.set("com.apple.controlcenter", "<key>NSStatusItem Visible WiFi</key><true/>")
+	if got := m.items(list); !slices.Equal(got, []string{"com.apple.controlcenter:NSStatusItem Visible WiFi extra"}) {
+		t.Errorf("items = %q; want the noise forgotten, the new setting found", got)
 	}
 }
