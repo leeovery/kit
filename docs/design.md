@@ -25,11 +25,11 @@ which hears about every Mac's problems. A Mac's name is settled first, before an
 read, and kept in kit's state; a replacement Mac can take an old one's name.
 
 **Kinds.** A kind is a list of things of one sort. Built: Homebrew formulae (`brew`) and casks
-(`cask`), App Store apps (`app`), npm and Composer global packages (`npm`, `composer`), Go tools
-(`go`), GitHub CLI extensions (`gh`), tmux plugins (`tmux`), login items (`login`) and Claude
+(`cask`), App Store apps (`mas`), npm and Composer global packages (`npm`, `composer`), Go tools
+(`go`), GitHub CLI extensions (`gh`), tmux plugins (`tmux`), login items (`login-item`) and Claude
 Code's MCP servers (`claude-mcp`) and plugins (`claude-plugin`), git's settings (`git`) and
-macOS settings (`default`), power settings (`power`), the backup and Spotlight exclusions
-(`exclusion`, `spotlight`), and secrets (`secret`). Later: Claude Code's skills.
+macOS settings (`defaults`), power settings (`power`), the backup and Spotlight exclusions
+(`backup-exclusion`, `spotlight-exclusion`), and secrets (`secret`). Later: Claude Code's skills.
 Each kind supplies five parts:
 
 - **declared:** what the config lists, the shared file and then this Mac's;
@@ -43,21 +43,21 @@ undeclared for adopting, removing or snoozing, and report both.
 | Kind | Declared as | Found by | Install, remove |
 |---|---|---|---|
 | `brew`, `cask` | `jq`, `owner/tap/tool`, `php@8.5` | `brew list`, `brew leaves` | `brew install`, `brew uninstall` |
-| `app` | `xcode@497799835`: the name, then the id | `mas list` | `mas install`, `mas uninstall`, through sudo |
+| `mas` | `xcode@497799835`: the name, then the id | `mas list` | `mas install`, `mas uninstall`, through sudo |
 | `npm` | `typescript@5` (a version optional) | `npm ls --global` | `npm install --global`, `npm uninstall --global` |
 | `composer` | `laravel/valet:^4.0` (a constraint optional) | `composer global show --direct` | `composer global require`, `composer global remove` |
 | `go` | `golang.org/x/tools/cmd/goimports` (`@version` optional) | the programs in Go's bin folder, by the package each was built from | `go install`; removing deletes the program |
 | `gh` | `owner/gh-extension` | `gh extension list` | `gh extension install`, `gh extension remove` |
 | `tmux` | `set -g @plugin` lines in tmux's config | the folders in TPM's plugin folder | cloned as TPM does; removing deletes the folder |
-| `login` | the app's bundle id, `com.example.app` | System Events' login items | System Events (JavaScript for Automation) |
+| `login-item` | the app's bundle id, `com.example.app` | System Events' login items | System Events (JavaScript for Automation) |
 | `claude-mcp` | a name, then `claude mcp add`'s options; a project's in `[claude mcp <folder>]` | `~/.claude.json`, read directly | `claude mcp add-json`, `claude mcp remove` (a project's in local scope, in its folder) |
 | `claude-plugin` | `plugin@owner/repo`: the plugin and its marketplace's repository; `@owner/repo` a marketplace alone | Claude Code's records of plugins, marketplaces and what's enabled | the marketplace added when needed, then `claude plugin install`; `uninstall`, `marketplace remove` |
-| `git` | `[git config]`: a key, then its value as one word, as `git config --global` takes them (`alias.st "status -sb"`) | `git config --global --list` | `git config --global --replace-all`, `--unset-all` |
+| `git-config` | `[git config]`: a key, then its value as one word, as `git config --global` takes them (`alias.st "status -sb"`) | `git config --global --list` | `git config --global --replace-all`, `--unset-all` |
 | `power` | `[power settings]`: pmset's words, the source then the setting and value (`-c sleep 0`; `-a` every source, `-b` the battery, `-u` a UPS), named `charger:sleep` | `pmset -g custom`, by source | `sudo pmset`; undeclaring leaves the value |
-| `exclusion` | `[backup exclusions]`: a path a line, `~` and `*` globs, expanded on every check (a plain path stands for itself, there or not) | Time Machine's fixed-path exclusions (`SkipPaths`), and each glob match excluded where it is (`tmutil isexcluded`); Arq inherits both | a plain path: `sudo tmutil addexclusion -p` (Full Disk Access for the terminal); a glob's match: `tmutil addexclusion`, no password, so `kit nightly` does it unattended; `removeexclusion -p` |
-| `spotlight` | `[spotlight exclusions]`: a folder a line | Spotlight asked for files in each folder (`mdfind -count`); its own list is root's alone, so nothing extra is found | added to Spotlight's privacy list through sudo, taking effect after a restart (kit remembers, and says so); removing is System Settings' |
-| `secret` | `[secrets op://vault/item]`, a section for each item a file keeps secrets in (the header says where they are; several spread them across items): what it fills (a variable's name, or a file's path) then the field or attachment, short (`GitHub/token`); a plain `[secrets]` for references in full (`op://vault/item/field`); a name once a file. `--mode 644` for a file's. GitHub Actions secrets aren't kit's: they're a repository's, not the Mac's | `~/.secrets.zsh`'s exports, the files with their modes: never 1Password, which would ask for a fingerprint each hour | a sync: every value read from 1Password in one sitting (`op read`, its output kept from the log), `~/.secrets.zsh` written whole with each value single-quoted (one that fails to read keeps its line), files written beside and renamed in; `kit secrets sync` forces one. Removing takes a secret off the Mac; 1Password keeps it |
-| `default` | `[macos settings]`: `defaults write`'s words (`com.apple.dock tilesize -int 60`; `-currentHost` first for this host's; `-dict-add` and an entry's XML; or a value as XML), named `domain:key[:entry]` | `defaults export` of each domain | `defaults write` (through sudo for a domain under `/Library`), then the app that reads it restarted or keyboard shortcuts reloaded; `defaults delete` |
+| `backup-exclusion` | `[backup exclusions]`: a path a line, `~` and `*` globs, expanded on every check (a plain path stands for itself, there or not) | Time Machine's fixed-path exclusions (`SkipPaths`), and each glob match excluded where it is (`tmutil isexcluded`); Arq inherits both | a plain path: `sudo tmutil addexclusion -p` (Full Disk Access for the terminal); a glob's match: `tmutil addexclusion`, no password, so `kit nightly` does it unattended; `removeexclusion -p` |
+| `spotlight-exclusion` | `[spotlight exclusions]`: a folder a line | Spotlight asked for files in each folder (`mdfind -count`); its own list is root's alone, so nothing extra is found | added to Spotlight's privacy list through sudo, taking effect after a restart (kit remembers, and says so); removing is System Settings' |
+| `secret` | `[secrets op://vault/item]`, a section for each item a file keeps secrets in (the header says where they are; several spread them across items): what it fills (a variable's name, or a file's path) then the field or attachment, short (`GitHub/token`); a plain `[secrets]` for references in full (`op://vault/item/field`); a name once a file. `--mode 644` for a file's. GitHub Actions secrets aren't kit's: they're a repository's, not the Mac's | `~/.secrets.zsh`'s exports, the files with their modes: never 1Password, which would ask for a fingerprint each hour | a sync: every value read from 1Password in one sitting (`op read`, its output kept from the log), `~/.secrets.zsh` written whole with each value single-quoted (one that fails to read keeps its line), files written beside and renamed in; `kit secret sync` forces one. Removing takes a secret off the Mac; 1Password keeps it |
+| `defaults` | `[macos settings]`: `defaults write`'s words (`com.apple.dock tilesize -int 60`; `-currentHost` first for this host's; `-dict-add` and an entry's XML; or a value as XML), named `domain:key[:entry]` | `defaults export` of each domain | `defaults write` (through sudo for a domain under `/Library`), then the app that reads it restarted or keyboard shortcuts reloaded; `defaults delete` |
 
 - **Matching:** a kind may match on part of a name: an App Store app on its id (so an app the
   store renames still matches), npm and Composer packages without their versions, GitHub
@@ -84,8 +84,8 @@ undeclared for adopting, removing or snoozing, and report both.
   them first; login items after the casks and App Store apps they open.
 - **A kind declared in a file of its own** (tmux's plugins, in tmux's config, where the
   plugin manager reads them): kit reads it and edits it in place, through a link to the
-  file it leads to. `kit add` and adopting add a plugin's line after the last one (before
-  the line that starts the plugin manager, for the first); `kit remove` and undeclaring
+  file it leads to. `kit tmux add` and adopting add a plugin's line after the last one (before
+  the line that starts the plugin manager, for the first); `kit tmux remove` and undeclaring
   take it out. When the file is in the config repository (a linked file), the change is
   committed with the rest.
 - **MCP servers** are a line each: the server's name, then `claude mcp add`'s options
@@ -96,15 +96,15 @@ undeclared for adopting, removing or snoozing, and report both.
   its environment: a line holding one in plain text is refused, whether declared, adopted or
   added, and what kit reads from `~/.claude.json` is never shown. A project's server waits
   while its folder isn't on the Mac. A server is added with Claude Code's own
-  `claude mcp add`, then declared with `kit add claude-mcp` or reconcile's adopt;
+  `claude mcp add`, then declared with `kit claude-mcp add` or reconcile's adopt;
   `kit claude-mcp on|off` declares one on or off and installs or removes it.
 - **Claude's plugins** carry their marketplace in their names, as formulae carry their taps:
   there's no list of marketplaces. kit adds a plugin's marketplace when it installs it; a
   marketplace no plugin comes from is an unused dependency, offered for removal, unless
   declared alone (`@owner/repo`) to keep it for browsing. A plugin turned off is changed,
   and applying turns it on.
-- **Finding what's meant:** `kit add app` finds an app from its name or id (several matches
-  are a choice at a terminal, listed without one); `kit add login` takes an app's name, path
+- **Finding what's meant:** `kit mas add` finds an app from its name or id (several matches
+  are a choice at a terminal, listed without one); `kit login-item add` takes an app's name, path
   or bundle id. Declaring a login item writes the app's name as the note.
 
 **Features.** Each piece of kit stands alone, and is on when it's declared: a list by having
@@ -134,24 +134,24 @@ a name, then `--` and a command, which exits 0 when all's well, or prints what's
 its first line (a minute's timeout), each failing one an item of the `checks` step. Every step has an area (Backups, Jobs, Mac, Drift,
 Config, Checks), which the status document carries.
 
-**Adding a secret:** `kit add secret <name>` takes its value typed (unshown), on standard
+**Adding a secret:** `kit secret add <name>` takes its value typed (unshown), on standard
 input (`--stdin`, how an agent passes one, never on a command line), from a file (`--from`,
 kept as an attachment), or as an existing reference (`--ref`, nothing stored: its line goes in
 its item's section, short, when the file has one, else in the plain `[secrets]`, in full). A
 value is kept in the item of the file's secrets section (`--item op://vault/item` when it has
 none, which makes the section, or several), as `--field <section>/<field>`, by editing the item
 with its JSON on op's standard input; then read back and compared, declared, and synced, never
-shown. `--mode` as on the line. `kit remove secret <name>` takes it off the Mac, undeclares
+shown. `--mode` as on the line. `kit secret remove <name>` takes it off the Mac, undeclares
 it, and keeps or deletes its value in 1Password (`--keep-value`, `--delete-value`; asked at a
 terminal); a value given in full, outside the items' sections, is left where it is.
 
 **Steps by hand** go in a `[manual]` section, a line each: a name, what to do in quotes, and
 optionally `--` and a command saying whether it's done (exit 0: done), as in `tool "Install the
 tool from its site" -- test -d /Applications/Tool.app`. One with no command is done once marked
-on this Mac (`kit done <name>`, `--undo` to unmark). Those not done are items of the `manual`
+on this Mac (`kit manual done <name>`, `--undo` to unmark). Those not done are items of the `manual`
 step, in the Manual area, saying what to do, so bare `kit` shows them; what kit can check
-itself stays a check that says what to do. `kit add check|hourly|nightly <name> -- <command>`
-and `kit add manual <name> "<what to do>" [-- <command>]` declare checks, jobs and steps by
+itself stays a check that says what to do. `kit check|hourly|nightly add <name> -- <command>`
+and `kit manual add <name> "<what to do>" [-- <command>]` declare checks, jobs and steps by
 hand (a check, and a step's command, run once as it's added, to say how it stands); `kit
 remove check|hourly|nightly|manual <name>` undeclares one.
 
@@ -193,20 +193,44 @@ Built:
 
 ```
 kit                          What needs attention, at a glance: a line an area, and what to run
-kit add <kind> <name>...     Install, and declare for this Mac   [--shared] [--temp] [--note] [--group]
-kit remove <kind> <name>...  Uninstall, and undeclare            [--shared]
+
+This Mac:
+kit status [step...]         How this Mac stands against the config: what needs attention
+kit apply [step...] [--plan] Install what's declared and missing (--plan: say what, do nothing)
 kit reconcile [<kind>...] [<id>...]  Settle drift: adopt, remove, install, undeclare or snooze
+kit nightly [job...]         Run the scheduled jobs due, then every check (the hourly launch)   [--plan]
 kit list [kind]              What's declared for this Mac: file, group, note, installed or not
 kit why <name>               Where it's declared, whether it's installed, what needs it
-kit claude-mcp on|off <name>...  Declare Claude's MCP servers on or off, and install or remove them
-kit feature on|off <name>... Switch features on or off for this Mac   [--shared]
-kit nightly [job...]         Run the scheduled jobs due, then every check (the hourly launch)   [--plan]
-kit apply [step...] [--plan] Install what's declared and missing (--plan: say what, do nothing)
-kit status [step...]         How this Mac stands against the config: what needs attention
 kit log                      What the last run did: every check, every command, with timings
 kit machine [<name>]         This Mac's name: shown, or set (one of kit.toml's Macs)
+
+What kit manages, a command each:
+kit <kind> add <name>...     Install, and declare for this Mac   [--shared] [--temp] [--note] [--group]
+kit <kind> remove <name>...  Uninstall, and undeclare            [--shared]
+    (brew, cask, mas, npm, composer, go, gh, tmux, claude-mcp, claude-plugin, login-item,
+     defaults, power, git-config, backup-exclusion, spotlight-exclusion)
+kit claude-mcp on|off <name>...  Declare Claude's MCP servers on or off, and install or remove them
+kit feature on|off <name>... Switch features on or off for this Mac   [--shared]
+kit file add|remove <path>...    Files linked into the home folder from kit-config
+kit path add|remove <dir>...     Directories on the PATH
+kit secret add <name>        Keep a secret in 1Password, declare it, sync it   [--stdin] [--from] [--ref] [--field] [--item] [--mode]
+kit secret remove <name>...  Take it off the Mac, undeclare it     [--keep-value] [--delete-value]
+kit secret sync              Read every secret from 1Password, and put each in place
+kit check|hourly add <name> -- <command>, kit nightly add <name> -- <command>   Your own checks and jobs
+kit manual add <name> "<what to do>" [-- <command>]; kit manual done <name>...  Steps by hand
 kit version                  As --version
 ```
+
+The command shape (Lee, 6 Oct): a command about one kind of thing names it first, then what to
+do, as in `kit brew add`, `kit secret sync`, `kit manual done`; one about the whole Mac is a verb
+alone (`status`, `apply`, `reconcile`, `nightly`, `list`, `why`, `log`, `machine`), a kind named
+after it a filter. Each thing's help shows only its own flags and verbs. The help lists the
+commands in groups: This Mac, Packages, Settings, Files and secrets, Your own. `kit nightly`
+runs jobs by name, so no nightly job is named `add` or `remove`. Kinds are named as words read
+after `kit`: `git-config` (not `git`, read as git's own add), `spotlight-exclusion` and
+`backup-exclusion` (not `spotlight`, read as adding to it), `login-item`, `defaults` (the lines
+are `defaults write`'s words), `mas` (casks are apps too; package kinds are named after their
+tool).
 
 `kit apply` checks every step and applies each that doesn't stand ok, or has something to
 do, then checks it again: each step then says what it did ("installed: jq"). It never removes
@@ -214,13 +238,13 @@ or adopts: reconcile does those. At a terminal, when a missing cask installs thr
 package, kit asks for an administrator's password once, through `sudo -v`, before anything is
 applied, and keeps sudo's hold fresh while it runs; without a terminal it asks nothing, and
 those casks wait, saying why (requirement 4). App Store apps need the password for every
-install, as mas runs as root; `kit add` and reconcile's installs ask up front the same way.
+install, as mas runs as root; `kit <kind> add` and reconcile's installs ask up front the same way.
 
-`kit add` installs each name, unless it's installed, and declares it in this Mac's file, or
+`kit <kind> add` installs each name, unless it's installed, and declares it in this Mac's file, or
 for every Mac with `--shared` (taking it out of each Mac's own file); at a terminal it first
 asks which of the file's groups each goes in ("To be sorted" first), and `--group` answers
 without asking. `--temp` installs without declaring: quiet for 7 days, then reconcile asks.
-`kit remove` uninstalls and takes each name out of this Mac's file; one declared for every Mac
+`kit <kind> remove` uninstalls and takes each name out of this Mac's file; one declared for every Mac
 needs `--shared`. Both handle each name on its own (one failing leaves the others), then commit
 the config's changed files, with a message saying what, for which Mac and why, and push to
 main, pulling with rebase first. A push that fails leaves the commit, and says so.
@@ -229,8 +253,8 @@ main, pulling with rebase first. A push that fails leaves the commit, and says s
 (`--all`: quiet ones too; name kinds, as in `kit reconcile brew`, for theirs alone), asking
 what to do with it: declare it (for this Mac, or every Mac),
 uninstall it, install it, undeclare it, snooze it for 7 days, leave it, or stop; for one
-declared, which group. Every question comes first; then it does it all, as `kit add` and
-`kit remove` would, and commits and pushes once. Without a terminal, or with `--json`, it lists
+declared, which group. Every question comes first; then it does it all, as `kit <kind> add` and
+`kit <kind> remove` would, and commits and pushes once. Without a terminal, or with `--json`, it lists
 the items with their ids and choices, and `kit reconcile <id>... --adopt` (or `--remove`,
 `--install`, `--undeclare`, `--snooze`; `--shared`, `--group`, `--note`) settles those, every
 id checked before anything's done, in one run and one commit: how an agent carries out a
@@ -376,8 +400,8 @@ is refused. The step `file` finds each one:
 - **dead:** a link into the repository whose file has gone (found among the links kit made,
   and in every folder a home folder mirrors); applying removes it.
 
-`kit add file <path>` moves a file, or every file in a folder, into this Mac's home folder
-(`--shared`: every Mac's) and links it back; `kit remove file <path>` puts a copy back in
+`kit file add <path>` moves a file, or every file in a folder, into this Mac's home folder
+(`--shared`: every Mac's) and links it back; `kit file remove <path>` puts a copy back in
 place of the link and takes the file out. Both commit and push.
 
 ### kit's PATH, and the shell's
@@ -391,8 +415,8 @@ The shell uses the same list, the code review's "one PATH list": the `path` step
 puts the file's contents ahead of the PATH it inherits, reading it without running anything,
 so a config that doesn't read never leaves a shell without its PATH. Relative entries
 (`node_modules/.bin`) are kept for the shell and left out of kit's own PATH. A `$`, a colon,
-or a `~` that doesn't start the home folder is refused. `kit add path <dir>` puts a
-directory last (`--shared`: on every Mac), `kit remove path <dir>` takes it off; both write
+or a `~` that doesn't start the home folder is refused. `kit path add <dir>` puts a
+directory last (`--shared`: on every Mac), `kit path remove <dir>` takes it off; both write
 the file and commit.
 
 The `oh-my-zsh` feature checks Oh My Zsh is installed, and applying runs its installer,
@@ -523,7 +547,7 @@ own state and logs. Unreleased: the maintainer releases, with mint, once kit is 
 **2. Packages, read-write — done.** The list writer; syncing the config repository (commit,
 pull with rebase, push); drift counted after 24 hours, with snoozes and temporary installs;
 Homebrew's installs and removes; `kit apply` with `--plan`, an administrator's password asked
-up front; `kit add` and `kit remove` (`--shared`, `--temp`, `--note`, `--group`, the group
+up front; `kit <kind> add` and `kit <kind> remove` (`--shared`, `--temp`, `--note`, `--group`, the group
 asked at a terminal); `kit reconcile`, at a terminal and by id; `kit list` and `kit why`
 (#12–#19).
 

@@ -163,7 +163,7 @@ func Arq(run runner.Runner, now func() time.Time) engine.Step {
 		Check: func(ctx context.Context) check.Result {
 			out, err := output(ctx, run, Arqc, "stats")
 			if errors.Is(err, runner.ErrNotFound) {
-				return problem(FeatureArq, "not installed", [3]string{"missing", "Arq isn't installed", "install it: kit add cask arq"})
+				return problem(FeatureArq, "not installed", [3]string{"missing", "Arq isn't installed", "install it: kit cask add arq"})
 			}
 			var stats arqStats
 			if err == nil {

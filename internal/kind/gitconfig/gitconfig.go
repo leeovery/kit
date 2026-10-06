@@ -29,7 +29,7 @@ func New(run runner.Runner) *GitConfig {
 	return &GitConfig{run: run, declared: map[string]string{}}
 }
 
-func (g *GitConfig) Name() string    { return "git" }
+func (g *GitConfig) Name() string    { return "git-config" }
 func (g *GitConfig) Title() string   { return "git's settings" }
 func (g *GitConfig) Program() string { return "git" }
 

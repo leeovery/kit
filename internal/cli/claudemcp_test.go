@@ -92,9 +92,9 @@ func TestReconcileAdoptsAndRemovesMCPServers(t *testing.T) {
 func TestAddingAnMCPServerWithAKeyInPlainTextIsRefused(t *testing.T) {
 	w := mcpWorld(t)
 	w.writeSection(t, "laptop", "claude mcp", "docs --transport http https://docs.example.com/mcp\n")
-	out, _, code := w.run(t, "add", "claude-mcp", "design")
+	out, _, code := w.run(t, "claude-mcp", "add", "design")
 	if !strings.Contains(out, "design holds a key in plain text (headers.Authorization)") || code != 1 || strings.Contains(out, "made-up-key") {
-		t.Errorf("kit add claude-mcp design printed\n%s exit %d; want it refused, the key unsaid", out, code)
+		t.Errorf("kit claude-mcp add design printed\n%s exit %d; want it refused, the key unsaid", out, code)
 	}
 	if got := w.readSection(t, "laptop", "claude mcp"); got != "docs --transport http https://docs.example.com/mcp\n" {
 		t.Errorf("[claude mcp] = %q, want it unchanged", got)

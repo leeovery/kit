@@ -10,6 +10,7 @@ import (
 	"github.com/leeovery/kit/internal/steps"
 )
 
+// newDoneCommand is kit manual done: steps by hand marked done.
 func newDoneCommand(a *app) *cobra.Command {
 	var undo bool
 	cmd := &cobra.Command{
@@ -19,7 +20,7 @@ func newDoneCommand(a *app) *cobra.Command {
 itself, such as signing in somewhere. --undo marks them not done.`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, names []string) error {
-			r, err := a.prepare("done", "done")
+			r, err := a.prepare(config.ManualKind+" done", config.ManualKind+"-done")
 			if err != nil {
 				return err
 			}

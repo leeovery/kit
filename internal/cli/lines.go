@@ -11,9 +11,8 @@ import (
 	"github.com/leeovery/kit/internal/steps"
 )
 
-// lineKinds are the sections of lines kit add and kit remove write that
-// aren't kinds, by the name the commands take: checks, jobs, and steps by
-// hand.
+// lineKinds are the sections of lines of your own, which aren't kinds, by
+// their commands' names: checks, jobs, and steps by hand.
 var lineKinds = map[string]string{
 	"check":   config.ChecksKind,
 	"hourly":  config.HourlyKind,
@@ -27,16 +26,11 @@ var lineKinds = map[string]string{
 // too, to say how it stands.
 func (a *app) addLine(ctx context.Context, r *run, name string, args []string, dash int, opts addOptions) error {
 	kind := lineKinds[name]
-	usage := map[string]string{
-		config.ManualKind: `kit add manual <name> "<what to do>" [-- <command saying whether it's done>]`,
-	}[kind]
-	if usage == "" {
-		usage = "kit add " + name + " <name> -- <command>"
-	}
+	usage := "kit " + name + " " + lineUsage(name)
 	var value string
 	switch {
-	case opts.temp || opts.group != "":
-		return errors.New("--temp and --group are for packages")
+	case kind == config.NightlyKind && len(args) > 0 && (args[0] == "add" || args[0] == "remove"):
+		return fmt.Errorf("a nightly job can't be named %s: kit nightly %s is the command", args[0], args[0])
 	case kind == config.ManualKind && (len(args) < 2 || dash >= 0 && (dash != 2 || len(args) == 2) || dash < 0 && len(args) != 2):
 		return errors.New("say it as " + usage)
 	case kind == config.ManualKind:

@@ -13,11 +13,11 @@ func TestAddAComposerPackageWithAConstraint(t *testing.T) {
 	w.fake.On("composer", show...).Prints(`{"installed": []}`).
 		Then().Prints(`{"installed": [{"name": "laravel/valet"}]}`)
 	w.fake.On("composer", "global", "require", "--no-interaction", "laravel/valet:^4.0")
-	w.expectSync([]string{"laptop/declarations"}, "kit add composer laravel/valet:^4.0 (laptop): Valet 4")
+	w.expectSync([]string{"laptop/declarations"}, "kit composer add laravel/valet:^4.0 (laptop): Valet 4")
 
-	out, errOut, code := w.run(t, "add", "composer", "laravel/valet:^4.0", "--note", "Valet 4")
+	out, errOut, code := w.run(t, "composer", "add", "laravel/valet:^4.0", "--note", "Valet 4")
 	if code != 0 || !strings.Contains(out, "laravel/valet:^4.0 ok installed; declared in laptop (To be sorted)\n") {
-		t.Fatalf("kit add printed\n%s%s exit %d", out, errOut, code)
+		t.Fatalf("kit printed add\n%s%s exit %d", out, errOut, code)
 	}
 	if got := w.readSection(t, "laptop", "composer packages"); got != "# To be sorted\nlaravel/valet:^4.0   # Valet 4\n" {
 		t.Errorf("laptop = %q", got)

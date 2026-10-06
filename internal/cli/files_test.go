@@ -103,10 +103,10 @@ func TestReconcileOffersWhatSuitsAFile(t *testing.T) {
 func TestAddFileMovesItIntoKitConfig(t *testing.T) {
 	w := filesWorld(t)
 	w.write(t, ".config/new/conf", "new\n")
-	w.expectSync([]string{"laptop/home/.config/new/conf"}, "kit add file ~/.config/new/conf (laptop)")
-	out, _, code := w.run(t, "add", "file", filepath.Join(w.home, ".config/new/conf"))
+	w.expectSync([]string{"laptop/home/.config/new/conf"}, "kit file add ~/.config/new/conf (laptop)")
+	out, _, code := w.run(t, "file", "add", filepath.Join(w.home, ".config/new/conf"))
 	if code != 0 || !strings.Contains(out, "in kit-config, linked: laptop/home/.config/new/conf") {
-		t.Errorf("kit add file printed\n%s exit %d", out, code)
+		t.Errorf("kit file add printed\n%s exit %d", out, code)
 	}
 	if w.read(t, ".config/kit/laptop/home/.config/new/conf") != "new\n" || w.linksTo(".config/new/conf") == "" {
 		t.Error("the file isn't in kit-config, linked back")
@@ -116,14 +116,14 @@ func TestAddFileMovesItIntoKitConfig(t *testing.T) {
 func TestRemoveAFileEveryMacLinksNeedsShared(t *testing.T) {
 	w := filesWorld(t)
 	w.run(t, "apply", "file")
-	out, _, code := w.run(t, "remove", "file", "~/.zshrc")
+	out, _, code := w.run(t, "file", "remove", "~/.zshrc")
 	if code == 0 || !strings.Contains(out, "linked on every Mac, from shared/home/.zshrc: --shared takes it out of every Mac's") {
-		t.Errorf("kit remove file printed\n%s exit %d", out, code)
+		t.Errorf("kit file remove printed\n%s exit %d", out, code)
 	}
-	w.expectSync([]string{"shared/home/.zshrc"}, "kit remove file ~/.zshrc (laptop)")
-	out, _, code = w.run(t, "remove", "file", "~/.zshrc", "--shared")
+	w.expectSync([]string{"shared/home/.zshrc"}, "kit file remove ~/.zshrc (laptop)")
+	out, _, code = w.run(t, "file", "remove", "~/.zshrc", "--shared")
 	if code != 0 || w.linksTo(".zshrc") != "" || w.read(t, ".zshrc") != "zsh\n" {
-		t.Errorf("kit remove file --shared printed\n%s exit %d; want a copy back in place of the link", out, code)
+		t.Errorf("kit file remove --shared printed\n%s exit %d; want a copy back in place of the link", out, code)
 	}
 }
 

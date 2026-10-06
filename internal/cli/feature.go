@@ -15,8 +15,9 @@ import (
 
 func newFeatureCommand(a *app) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "feature",
-		Short: "Switch features on or off for this Mac: the pieces with nothing to list",
+		Use:     "feature",
+		Short:   "Features: the pieces with nothing to list, switched on or off",
+		GroupID: groupSettings,
 		Long: `Switch features on or off: the pieces kit has that come with nothing to list,
 such as a backup tool, its checks and its jobs. A feature is on for this Mac
 when its file or the shared one lists it in [features]; one of ` + strings.Join(steps.Features, ", ") + `.

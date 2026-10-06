@@ -56,7 +56,7 @@ func New(run runner.Runner, home, stateDir string) *Spotlight {
 	return &Spotlight{run: run, home: home, stateDir: stateDir}
 }
 
-func (s *Spotlight) Name() string    { return "spotlight" }
+func (s *Spotlight) Name() string    { return "spotlight-exclusion" }
 func (s *Spotlight) Title() string   { return "Spotlight exclusions" }
 func (s *Spotlight) Program() string { return "mdfind" }
 

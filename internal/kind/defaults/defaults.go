@@ -110,7 +110,7 @@ func New(run runner.Runner, stateDir string) *Defaults {
 	return &Defaults{run: run, stateDir: stateDir, declared: map[string]declaredValue{}}
 }
 
-func (d *Defaults) Name() string    { return "default" }
+func (d *Defaults) Name() string    { return "defaults" }
 func (d *Defaults) Title() string   { return "macOS settings" }
 func (d *Defaults) Program() string { return "defaults" }
 

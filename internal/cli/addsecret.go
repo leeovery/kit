@@ -16,10 +16,10 @@ import (
 	"github.com/leeovery/kit/internal/kind/secret"
 )
 
-// secretKind names the secrets' kind, as kit add and kit remove take it.
+// secretKind names the secrets' kind, and its command.
 const secretKind = "secret"
 
-// secretOptions are kit add's flags for a secret: where its value comes
+// secretOptions are kit secret add's flags: where its value comes
 // from (an existing reference, a file, standard input, or typed), where in
 // 1Password it goes (the item and the field), and a file's mode.
 type secretOptions struct {
@@ -27,7 +27,7 @@ type secretOptions struct {
 	stdin                        bool
 }
 
-// valueChoice is kit remove's answer, given ahead, to whether a secret's
+// valueChoice is kit secret remove's answer, given ahead, to whether a secret's
 // value goes from 1Password too.
 type valueChoice struct {
 	delete, keep bool
@@ -42,13 +42,8 @@ type valueChoice struct {
 func (a *app) addSecret(ctx context.Context, r *run, names []string, opts addOptions) error {
 	so := opts.secret
 	k, ok := r.kindsByName[secretKind].(*secret.Secrets)
-	switch {
-	case !ok:
+	if !ok {
 		return errors.New("kit has no secrets")
-	case len(names) != 1:
-		return errors.New("one secret at a time: kit add secret <name>")
-	case opts.temp || opts.group != "":
-		return errors.New("--temp and --group are for packages")
 	}
 	sources := 0
 	for _, set := range []bool{so.ref != "", so.from != "", so.stdin} {

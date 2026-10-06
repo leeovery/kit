@@ -53,9 +53,9 @@ func TestTmuxPluginsAreDeclaredInTmuxsConfig(t *testing.T) {
 		t.Errorf("tmux's config = %q", got)
 	}
 
-	out, _, code = w.run(t, "remove", "tmux", "tmux-plugins/tpm")
+	out, _, code = w.run(t, "tmux", "remove", "tmux-plugins/tpm")
 	if code != 0 || !strings.Contains(out, "uninstalled; out of ~/.config/tmux/tmux.conf") {
-		t.Errorf("kit remove tmux printed\n%s exit %d", out, code)
+		t.Errorf("kit tmux remove printed\n%s exit %d", out, code)
 	}
 	if _, err := os.Stat(filepath.Join(w.home, ".config", "tmux", "plugins", "tpm")); !os.IsNotExist(err) {
 		t.Errorf("tpm's folder: %v, want it gone", err)

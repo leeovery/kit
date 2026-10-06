@@ -45,7 +45,7 @@ func TestApplyWithoutATerminalLeavesAppsWaiting(t *testing.T) {
 	w.fake.On("sudo", "-n", "true").Exits(1).PrintsToStderr("sudo: a password is required")
 
 	out, _, code := w.run(t, "apply")
-	if want := "app missing:new bear@1091189122 (needs an administrator's password: run kit apply at a terminal)\n"; !strings.Contains(out, want) || code != 1 {
+	if want := "mas missing:new bear@1091189122 (needs an administrator's password: run kit apply at a terminal)\n"; !strings.Contains(out, want) || code != 1 {
 		t.Errorf("kit apply printed\n%s exit %d; want Bear waiting", out, code)
 	}
 	for _, c := range w.fake.Calls() {
@@ -55,7 +55,7 @@ func TestApplyWithoutATerminalLeavesAppsWaiting(t *testing.T) {
 	}
 }
 
-// kit add app finds the app from its name: several matches are a choice at
+// kit mas add finds the app from its name: several matches are a choice at
 // a terminal, asked before anything else; the declaration names the app and
 // its id.
 func TestAddAnAppByName(t *testing.T) {
@@ -73,10 +73,10 @@ func TestAddAnAppByName(t *testing.T) {
 	}
 	w.fake.On("sudo", "-v")
 	w.fake.On("sudo", "-n", "mas", "install", "946798523")
-	w.expectSync([]string{"laptop/declarations"}, "kit add app sleep-control-center@946798523 (laptop)")
+	w.expectSync([]string{"laptop/declarations"}, "kit mas add sleep-control-center@946798523 (laptop)")
 
-	if _, errOut, code := w.run(t, "add", "app", "sleep"); code != 0 {
-		t.Fatalf("kit add exit %d: %s", code, errOut)
+	if _, errOut, code := w.run(t, "mas", "add", "sleep"); code != 0 {
+		t.Fatalf("kit exit add %d: %s", code, errOut)
 	}
 	if want := []string{"Amphetamine (937984704)", "Sleep Control Center (946798523)"}; !slices.Equal(offered, want) {
 		t.Errorf("offered %q, want %q", offered, want)
@@ -89,9 +89,9 @@ func TestAddAnAppByName(t *testing.T) {
 func TestAddAnAppByNameWithoutATerminalSaysWhich(t *testing.T) {
 	w := laptopWorld(t)
 	w.fake.On("mas", "search", "--json", "sleep").Prints(sleepSearch)
-	_, errOut, code := w.run(t, "add", "app", "sleep")
+	_, errOut, code := w.run(t, "mas", "add", "sleep")
 	want := "kit: sleep could be any of these: name one\n  amphetamine@937984704   Amphetamine (937984704)\n  sleep-control-center@946798523   Sleep Control Center (946798523)\n"
 	if errOut != want || code != 2 {
-		t.Errorf("kit add app sleep printed %q, exit %d\nwant %q", errOut, code, want)
+		t.Errorf("kit mas add sleep printed %q, exit %d\nwant %q", errOut, code, want)
 	}
 }

@@ -41,6 +41,8 @@ the one before, and one that fails never stops the others; the checks follow.
 Nothing is installed or removed.
 
 Name jobs to run only those, now. --plan says what's due, and runs nothing.
+kit nightly add and kit nightly remove declare and undeclare nightly jobs (so
+no job is named add or remove).
 
 Each run leaves its report, kit status's plain lines, in kit's logs folder
 (report.txt). --alerts prints, in place of the run, what to notify about, as
@@ -86,6 +88,8 @@ day; an alert's id stays the same while it's the same problem.`,
 	}
 	cmd.Flags().BoolVar(&plan, "plan", false, "say what's due, and run nothing")
 	cmd.Flags().BoolVar(&alerts, "alerts", false, "print what to notify about, as JSON, for the hourly launch's app")
+	// Nightly jobs are declared here too: add and remove, never a job's name.
+	cmd.AddCommand(newLineAdd(a, config.NightlyKind, "Declare a nightly job"), newLineRemove(a, config.NightlyKind))
 	return cmd
 }
 

@@ -236,7 +236,7 @@ func (m *MCP) Install(ctx context.Context, names []string) error {
 	for _, name := range names {
 		s, ok := m.declared[name]
 		if !ok {
-			errs = append(errs, fmt.Errorf("%s isn't declared: add it to Claude Code with claude mcp add, and kit add mcp declares it", name))
+			errs = append(errs, fmt.Errorf("%s isn't declared: add it to Claude Code with claude mcp add, and kit claude-mcp add declares it", name))
 			continue
 		}
 		if slices.ContainsFunc(servers, func(i Server) bool { return i.ID() == name }) {

@@ -67,9 +67,9 @@ func TestCompare(t *testing.T) {
 	fake.On("mas", "list", "--json").Prints(fixture(t, "list.jsonl"))
 	got := kind.Compare(t.Context(), appstore.New(fake), declared("xcode@497799835", "apple-numbers@409203825", "bear@1091189122", "bear"))
 	want := []check.Item{
-		{ID: "app:bear@1091189122", Name: "bear@1091189122", State: kind.Missing, Action: kind.Install},
-		{ID: "app:bear", Name: "bear", State: kind.Missing, Detail: "unknown"},
-		{ID: "app:heic-converter@1294126402", Name: "heic-converter@1294126402", State: kind.Extra},
+		{ID: "mas:bear@1091189122", Name: "bear@1091189122", State: kind.Missing, Action: kind.Install},
+		{ID: "mas:bear", Name: "bear", State: kind.Missing, Detail: "unknown"},
+		{ID: "mas:heic-converter@1294126402", Name: "heic-converter@1294126402", State: kind.Extra},
 	}
 	if got.State != check.Attention || got.Summary != "4 declared, 2 installed" || !slices.Equal(got.Items, want) {
 		t.Errorf("Compare() = %+v\nwant items %+v", got, want)

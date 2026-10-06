@@ -4,59 +4,12 @@ import (
 	"context"
 	"strings"
 
-	"github.com/spf13/cobra"
-
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/kind"
-	"github.com/leeovery/kit/internal/linked"
 )
 
-func newRemoveCommand(a *app) *cobra.Command {
-	var shared bool
-	var value valueChoice
-	cmd := &cobra.Command{
-		Use:   "remove <kind> <name>...",
-		Short: "Uninstall packages, and undeclare them",
-		Long: `Uninstall packages, and take them out of this Mac's file. One declared for
-every Mac needs --shared, which takes it out of the shared file: every Mac's
-list. When something installed still needs a package, nothing changes, and
-Homebrew's reason is passed on. The change is committed and pushed to the
-config repository.
-
-kit remove file <path>... puts a copy of a linked file back in place of its
-link, and takes it out of kit-config. kit remove path <dir>... takes a
-directory off the PATH.`,
-		Args: cobra.MinimumNArgs(2),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			r, err := a.prepare("remove", "remove")
-			if err != nil {
-				return err
-			}
-			if args[0] == secretKind {
-				err = a.removeSecrets(cmd.Context(), r, args[1:], shared, value)
-			} else {
-				err = a.remove(cmd.Context(), r, args[0], args[1:], shared)
-			}
-			if closeErr := r.close(); err == nil {
-				err = closeErr
-			}
-			return err
-		},
-	}
-	cmd.Flags().BoolVar(&shared, "shared", false, "take it out of the shared file, every Mac's list")
-	cmd.Flags().BoolVar(&value.delete, "delete-value", false, "a secret: delete its value from 1Password too")
-	cmd.Flags().BoolVar(&value.keep, "keep-value", false, "a secret: keep its value in 1Password")
-	return cmd
-}
-
 func (a *app) remove(ctx context.Context, r *run, kindName string, names []string, shared bool) error {
-	if kindName == linked.StepName {
-		return a.removeFiles(ctx, r, names, shared)
-	}
-	if kindName == pathsKind {
-		return a.removePaths(ctx, r, names, shared)
-	}
 	if _, line := lineKinds[kindName]; line {
 		return a.removeLines(ctx, r, kindName, names, shared)
 	}

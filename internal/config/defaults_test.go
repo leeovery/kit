@@ -18,7 +18,7 @@ com.apple.dock persistent-others '<array/>'
 
 func TestSettingsRead(t *testing.T) {
 	cfg := loadRepo(t, map[string]string{"shared/declarations": settings})
-	list, err := cfg.List("default", "laptop")
+	list, err := cfg.List("defaults", "laptop")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +47,7 @@ func TestSettingsRefuseWhatDoesntRead(t *testing.T) {
 		"com.apple.symbolichotkeys AppleSymbolicHotKeys -dict-add 60",
 	} {
 		cfg := loadRepo(t, map[string]string{"shared/declarations": "[macos settings]\n" + line + "\n"})
-		if _, err := cfg.List("default", "laptop"); err == nil || !strings.Contains(err.Error(), "shared/declarations:2:") {
+		if _, err := cfg.List("defaults", "laptop"); err == nil || !strings.Contains(err.Error(), "shared/declarations:2:") {
 			t.Errorf("%q: error = %v", line, err)
 		}
 	}
@@ -61,7 +61,7 @@ func TestDeclareASetting(t *testing.T) {
 		{Name: "com.apple.symbolichotkeys:AppleSymbolicHotKeys:61", Value: `-dict-add "<dict><key>enabled</key><true/></dict>"`},
 		{Name: "com.apple.controlcenter:NSStatusItem Visible WiFi", Value: "-bool true"},
 	} {
-		if err := cfg.Declare("default", "laptop", e, "Dock"); err != nil {
+		if err := cfg.Declare("defaults", "laptop", e, "Dock"); err != nil {
 			t.Fatalf("Declare(%s) = %v", e.Name, err)
 		}
 	}
@@ -76,7 +76,7 @@ func TestDeclareASetting(t *testing.T) {
 			t.Errorf("laptop =\n%s\nwant a line %q", got, want)
 		}
 	}
-	if _, err := cfg.List("default", "laptop"); err != nil {
+	if _, err := cfg.List("defaults", "laptop"); err != nil {
 		t.Errorf("the file doesn't read back: %v", err)
 	}
 }

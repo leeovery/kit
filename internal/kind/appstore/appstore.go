@@ -39,7 +39,7 @@ func New(run runner.Runner) *AppStore {
 	return &AppStore{run: run}
 }
 
-func (*AppStore) Name() string    { return "app" }
+func (*AppStore) Name() string    { return "mas" }
 func (*AppStore) Title() string   { return "App Store" }
 func (*AppStore) Program() string { return "mas" }
 
