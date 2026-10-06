@@ -208,3 +208,18 @@ func TestFindersToolbarBookkeepingIsNoise(t *testing.T) {
 		t.Errorf("items = %q; want Finder's bookkeeping left out, the setting found", got)
 	}
 }
+
+// Control Center's microphone and camera item, which macOS shows while an
+// app uses them, never shows as changed; the menu bar items a person chose
+// do.
+func TestTheMicrophoneAndCameraItemIsNoise(t *testing.T) {
+	m := newMac(t)
+	list := m.declare()
+	if err := os.WriteFile(filepath.Join(m.state, "settings.json"), []byte(`{"domains": {"com.apple.controlcenter": true}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m.set("com.apple.controlcenter", "<key>NSStatusItem VisibleCC AudioVideoModule</key><true/><key>NSStatusItem Visible Bluetooth</key><true/>")
+	if got := m.items(list); !slices.Equal(got, []string{"com.apple.controlcenter:NSStatusItem Visible Bluetooth extra"}) {
+		t.Errorf("items = %q; want the microphone's item left out, Bluetooth's found", got)
+	}
+}
