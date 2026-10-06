@@ -15,6 +15,7 @@ import (
 
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/engine"
+	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/nightly"
 	"github.com/leeovery/kit/internal/render"
 	"github.com/leeovery/kit/internal/steps"
@@ -183,11 +184,15 @@ func (a *app) nightly(ctx context.Context, r *run, names []string, plan bool) er
 }
 
 // nightlyPipeline is the jobs, in order, then the run's other steps,
-// checked only: kit nightly installs and removes nothing.
+// checked, and applied only as far as a kind lets the scheduled run install
+// things by itself (new backup exclusions); it removes nothing.
 func nightlyPipeline(jobs []nightly.Job, due map[string]bool, r *run, now func() time.Time) (*engine.Pipeline, error) {
 	all := nightly.Steps(jobs, due, r.stateDir, r.now, now)
 	for _, s := range r.pipeline.Steps() {
 		s.Apply = nil
+		if k, ok := r.kindsByName[s.Name]; ok && slices.Contains(r.kinds, s.Name) {
+			s.Apply = kind.UnattendedApply(k)
+		}
 		if len(jobs) > 0 {
 			s.After = append(slices.Clone(s.After), jobs[len(jobs)-1].Name)
 		}

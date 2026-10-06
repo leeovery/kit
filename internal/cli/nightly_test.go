@@ -136,3 +136,24 @@ func TestNightlyAlertsAndReport(t *testing.T) {
 		t.Errorf("report.txt =\n%s", report)
 	}
 }
+
+// The scheduled run excludes a new folder matching a backup exclusion's
+// glob where it is, needing no password; a plain path it leaves to kit
+// apply, and it installs nothing else.
+func TestNightlyExcludesNewMatchesByItself(t *testing.T) {
+	w := jobsWorld(t)
+	w.write(t, "Library/Caches/one/.keep", "")
+	w.writeSection(t, "shared", "backup exclusions", "~/Library/Caches/*\n/Applications\n")
+	w.fake.On("defaults", "export", "/Library/Preferences/com.apple.TimeMachine", "-").Prints("<plist><dict><key>SkipPaths</key><array/></dict></plist>")
+	match := filepath.Join(w.home, "Library/Caches/one")
+	w.fake.On("tmutil", "isexcluded", match).Prints("[Included]  " + match + "\n")
+	w.fake.On("tmutil", "addexclusion", match)
+	w.run(t, "nightly")
+	calls := strings.Join(w.fake.Calls(), "\n")
+	if !strings.Contains(calls, "tmutil addexclusion "+match) {
+		t.Errorf("ran\n%s\nwant the new match excluded", calls)
+	}
+	if strings.Contains(calls, "sudo") || strings.Contains(calls, "brew install") {
+		t.Errorf("ran\n%s\nwant nothing that needs the password, and nothing else installed", calls)
+	}
+}
