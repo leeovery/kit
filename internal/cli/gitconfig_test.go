@@ -49,7 +49,7 @@ func TestReconcileAdoptsAnUndeclaredSetting(t *testing.T) {
 	if out, _, code := w.run(t, "reconcile", "git-config:delta.pager", "--adopt"); code != 0 {
 		t.Errorf("kit reconcile printed\n%s exit %d", out, code)
 	}
-	if got := w.readSection(t, "laptop", "git config"); got != "# To be sorted\ndelta.pager less\n" {
+	if got := w.readSection(t, "laptop", "git config"); got != "delta.pager less\n" {
 		t.Errorf("[git config] = %q", got)
 	}
 }

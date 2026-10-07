@@ -122,11 +122,9 @@ func newKindCommand(a *app, n noun, extra ...*cobra.Command) *cobra.Command {
 		Short: n.add + " for this Mac (--shared: every Mac)",
 		Long: n.add + "." + declaredWhere + `
 
-At a terminal, kit asks which group of the section each goes in ("To be
-sorted" first); --group answers without asking, and without a terminal they
-go in "To be sorted". --note records why, after the name. --temp installs
-without declaring, for a throwaway: it's quiet for 7 days, then kit reconcile
-asks.`,
+Each goes in its sorted place. --note records why, after the name. --temp
+installs without declaring, for a throwaway: it's quiet for 7 days, then kit
+reconcile asks.`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return a.prepared(cmd, n.name+" add", func(ctx context.Context, r *run) error {
@@ -137,7 +135,6 @@ asks.`,
 	add.Flags().BoolVar(&opts.shared, "shared", false, "declare for every Mac, not this one alone")
 	add.Flags().BoolVar(&opts.temp, "temp", false, "install without declaring: quiet for 7 days, then reconcile asks")
 	add.Flags().StringVar(&opts.note, "note", "", "why it's declared, kept after its name")
-	add.Flags().StringVar(&opts.group, "group", "", "the group it goes in, without asking")
 	var shared bool
 	remove := &cobra.Command{
 		Use:   "remove <name>...",

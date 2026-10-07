@@ -81,7 +81,7 @@ func TestAddAnAppByName(t *testing.T) {
 	if want := []string{"Amphetamine (937984704)", "Sleep Control Center (946798523)"}; !slices.Equal(offered, want) {
 		t.Errorf("offered %q, want %q", offered, want)
 	}
-	if got := w.readSection(t, "laptop", "app store apps"); got != "# To be sorted\nsleep-control-center@946798523\n" {
+	if got := w.readSection(t, "laptop", "app store apps"); got != "sleep-control-center@946798523\n" {
 		t.Errorf("laptop = %q", got)
 	}
 }

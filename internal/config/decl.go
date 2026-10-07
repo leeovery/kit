@@ -113,9 +113,11 @@ type sectionDef struct {
 	// item after the header, as in [secrets op://vault/item]: its lines'
 	// references are short for the item's fields, their names unprefixed.
 	items bool
-	// grouped is whether its names are filed in groups under comment
-	// headings, a new one going under "To be sorted".
-	grouped bool
+	// sorted is whether kit keeps the section sorted, each line with its
+	// notes: a list of things or settings. Others keep their order: a
+	// PATH's is the order it's searched in; commands' are as written, a new
+	// one in its place by name.
+	sorted bool
 }
 
 // sectionDefs are the sections a declarations file may hold, in the order
@@ -123,21 +125,21 @@ type sectionDef struct {
 var sectionDefs = []sectionDef{
 	{header: "features", kind: FeaturesKind, form: names},
 	{header: "paths", kind: PathsKind, form: paths},
-	{header: "git config", kind: "git-config", form: settings, grouped: true},
-	{header: "macos settings", kind: "defaults", form: defaults, grouped: true},
-	{header: "power settings", kind: "power", form: power, grouped: true},
-	{header: "backup exclusions", kind: "backup-exclusion", form: paths, grouped: true},
-	{header: "spotlight exclusions", kind: "spotlight-exclusion", form: paths, grouped: true},
-	{header: "homebrew formulae", kind: "brew", form: names, grouped: true},
-	{header: "homebrew casks", kind: "cask", form: names, grouped: true},
-	{header: "app store apps", kind: "mas", form: names, grouped: true},
-	{header: "npm packages", kind: "npm", form: names, grouped: true},
-	{header: "composer packages", kind: "composer", form: names, grouped: true},
-	{header: "go tools", kind: "go", form: names, grouped: true},
-	{header: "github extensions", kind: "gh", form: names, grouped: true},
-	{header: "macos login items", kind: "login-item", form: names, grouped: true},
+	{header: "git config", kind: "git-config", form: settings, sorted: true},
+	{header: "macos settings", kind: "defaults", form: defaults, sorted: true},
+	{header: "power settings", kind: "power", form: power, sorted: true},
+	{header: "backup exclusions", kind: "backup-exclusion", form: paths, sorted: true},
+	{header: "spotlight exclusions", kind: "spotlight-exclusion", form: paths, sorted: true},
+	{header: "homebrew formulae", kind: "brew", form: names, sorted: true},
+	{header: "homebrew casks", kind: "cask", form: names, sorted: true},
+	{header: "app store apps", kind: "mas", form: names, sorted: true},
+	{header: "npm packages", kind: "npm", form: names, sorted: true},
+	{header: "composer packages", kind: "composer", form: names, sorted: true},
+	{header: "go tools", kind: "go", form: names, sorted: true},
+	{header: "github extensions", kind: "gh", form: names, sorted: true},
+	{header: "macos login items", kind: "login-item", form: names, sorted: true},
 	{header: "claude mcp", kind: "claude-mcp", form: commands, folders: true},
-	{header: "secrets", kind: "secret", form: secrets, grouped: true, items: true},
+	{header: "secrets", kind: "secret", form: secrets, sorted: true, items: true},
 	{header: "prefs files", kind: PrefsFilesKind, form: paths},
 	{header: "prefs deny", kind: PrefsDenyKind, form: paths},
 	{header: "prefs apps", kind: PrefsAppsKind, form: settings},
@@ -165,14 +167,6 @@ func Header(kind string) string {
 		return kind
 	}
 	return d.header
-}
-
-// Grouped reports whether kind's declarations are filed in groups, under
-// comment headings: a package list's are; a command's, a path's or a
-// switch's aren't.
-func Grouped(kind string) bool {
-	d, err := defFor(kind)
-	return err == nil && d.grouped
 }
 
 // List is what one kind declares for one Mac: the shared file's entries, then
@@ -213,8 +207,6 @@ type Entry struct {
 	Item string `json:",omitempty"`
 	// Line is its line in that file.
 	Line int
-	// Group is the comment heading the group it's in, if any.
-	Group string
 	// Note is the comment after it, saying why it's there, if any.
 	Note string
 	// Off is whether it's declared, but not to be installed: never installed
@@ -389,19 +381,11 @@ func (s *section) entries(scope string) ([]Entry, error) {
 	var out []Entry
 	seen := make(map[string]int)
 	b := splitBody(s.def.form, s.body)
-	group := ""
 	for i, line := range s.body {
-		n := s.start + 1 + i
-		switch b.kinds[i] {
-		case headingLine:
-			if i == 0 || b.kinds[i-1] == blankLine {
-				group = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "#"))
-			}
-			continue
-		case entryLine:
-		default:
+		if b.kinds[i] != entryLine {
 			continue
 		}
+		n := s.start + 1 + i
 		e, err := s.entry(line)
 		if err != nil {
 			return nil, fmt.Errorf("%s:%d: %w", file, n, err)
@@ -410,7 +394,7 @@ func (s *section) entries(scope string) ([]Entry, error) {
 			return nil, fmt.Errorf("%s:%d: %s is already at line %d", file, n, e.Name, first)
 		}
 		seen[e.Name] = n
-		e.Scope, e.Line, e.Group = scope, n, group
+		e.Scope, e.Line = scope, n
 		out = append(out, e)
 	}
 	return out, nil

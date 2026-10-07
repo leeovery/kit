@@ -158,7 +158,7 @@ func (a *app) addStep(ctx context.Context, r *run, name, does string, opts stepO
 		if _, err := os.Stat(s.Dir); !errors.Is(err, fs.ErrNotExist) {
 			return fail(fmt.Errorf("%s is there already: remove it, or name the step otherwise", s.Folder))
 		}
-		if err := r.cfg.Declare(config.StepsKind, scope, entry, ""); err != nil {
+		if err := r.cfg.Declare(config.StepsKind, scope, entry); err != nil {
 			return fail(err)
 		}
 		c.changed(config.DeclFile(scope))

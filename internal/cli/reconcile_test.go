@@ -50,10 +50,10 @@ func TestReconcileAdoptsByID(t *testing.T) {
 	w := laptopWorld(t)
 	w.expectSync([]string{"laptop/declarations"}, "kit reconcile (laptop): adopt brew:ffmpeg: for screen recordings")
 	out, errOut, code := w.run(t, "reconcile", "brew:ffmpeg", "--adopt", "--note", "for screen recordings")
-	if !strings.Contains(out, "brew:ffmpeg ok already installed; declared in laptop (To be sorted)\n") || code != 0 {
+	if !strings.Contains(out, "brew:ffmpeg ok already installed; declared in laptop\n") || code != 0 {
 		t.Errorf("kit reconcile printed\n%s%s exit %d", out, errOut, code)
 	}
-	if got := w.readSection(t, "laptop", "homebrew formulae"); got != "go\n\n# To be sorted\nffmpeg   # for screen recordings\n" {
+	if got := w.readSection(t, "laptop", "homebrew formulae"); got != "ffmpeg   # for screen recordings\ngo\n" {
 		t.Errorf("laptop = %q", got)
 	}
 }
@@ -62,14 +62,14 @@ func TestReconcileAdoptsByID(t *testing.T) {
 func TestReconcileAdoptsSeveralInOneCommit(t *testing.T) {
 	w := laptopWorld(t)
 	w.expectSync([]string{"laptop/declarations"}, "kit reconcile (laptop): adopt brew:ffmpeg, adopt cask:firefox")
-	out, errOut, code := w.run(t, "reconcile", "brew:ffmpeg", "cask:firefox", "--adopt", "--group", "Media")
+	out, errOut, code := w.run(t, "reconcile", "brew:ffmpeg", "cask:firefox", "--adopt")
 	if code != 0 || !strings.Contains(out, "kit-config ok committed and pushed laptop/declarations\n") {
 		t.Errorf("kit reconcile printed\n%s%s exit %d", out, errOut, code)
 	}
-	if got := w.readSection(t, "laptop", "homebrew formulae"); got != "go\n\n# Media\nffmpeg\n" {
+	if got := w.readSection(t, "laptop", "homebrew formulae"); got != "ffmpeg\ngo\n" {
 		t.Errorf("laptop = %q", got)
 	}
-	if got := w.readSection(t, "laptop", "homebrew casks"); got != "# Media\nfirefox\n" {
+	if got := w.readSection(t, "laptop", "homebrew casks"); got != "firefox\n" {
 		t.Errorf("laptop = %q", got)
 	}
 	_, errOut, code = w.run(t, "reconcile", "brew:node@20", "brew:nosuch", "--remove")
@@ -104,6 +104,13 @@ func TestReconcileSnoozesByID(t *testing.T) {
 	out, _, _ = w.run(t, "status")
 	if !strings.Contains(out, "cask ok 1 declared, all installed\n") || !strings.Contains(out, "cask extra:snoozed firefox\n") {
 		t.Errorf("kit status after the snooze printed\n%s\nwant firefox quiet", out)
+	}
+}
+
+func TestReconcileHasNoGroups(t *testing.T) {
+	w := laptopWorld(t)
+	if _, errOut, code := w.run(t, "reconcile", "brew:ffmpeg", "--adopt", "--group", "Media"); errOut != "kit: unknown flag: --group\n" || code != 2 {
+		t.Errorf("kit reconcile --group: %q, exit %d; want the flag unknown", errOut, code)
 	}
 }
 
@@ -148,7 +155,6 @@ func TestReconcileAtATerminalAsksFirstThenDoesItAll(t *testing.T) {
 	w.terminal = true
 	w.choose = answers(t, map[string]string{
 		"ffmpeg (brew)":  "declare it, for this Mac",
-		"for ffmpeg?":    "To be sorted",
 		"node@20 (brew)": "uninstall it",
 		"firefox (cask)": "leave it for now",
 	})
@@ -160,14 +166,13 @@ func TestReconcileAtATerminalAsksFirstThenDoesItAll(t *testing.T) {
 	}
 	wantAsked := []string{
 		"ffmpeg (brew): installed, not declared, for 2 days. What now?",
-		"Which group of [homebrew formulae] in laptop for ffmpeg?",
 		"node@20 (brew): installed for something since removed, needed by nothing, for 2 days. What now?",
 		"firefox (cask): installed, not declared, for 2 days. What now?",
 	}
 	if !slices.Equal(w.asked, wantAsked) {
 		t.Errorf("asked\n%s\nwant\n%s", strings.Join(w.asked, "\n"), strings.Join(wantAsked, "\n"))
 	}
-	if got := w.readSection(t, "laptop", "homebrew formulae"); got != "go\n\n# To be sorted\nffmpeg\n" {
+	if got := w.readSection(t, "laptop", "homebrew formulae"); got != "ffmpeg\ngo\n" {
 		t.Errorf("laptop = %q", got)
 	}
 }

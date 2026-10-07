@@ -16,8 +16,8 @@ import (
 // kit-config's home folder for this Mac (every Mac's, with --shared),
 // links each back in its place, then commits and pushes.
 func (a *app) addFiles(ctx context.Context, r *run, paths []string, opts addOptions) error {
-	if opts.temp || opts.group != "" {
-		return errors.New("--temp and --group are for packages: a file is linked, or it isn't")
+	if opts.temp {
+		return errors.New("--temp is for packages: a file is linked, or it isn't")
 	}
 	scope := r.scope(opts.shared)
 	full, names, err := r.filePaths(paths)

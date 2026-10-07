@@ -103,7 +103,7 @@ func TestAddASecretByItsReference(t *testing.T) {
 	if got := w.readSection(t, "laptop", itemSection); !strings.Contains(got, "OTHER Section/other\n") {
 		t.Errorf("[%s] = %q", itemSection, got)
 	}
-	if got := w.readSection(t, "laptop", "secrets"); got != "# To be sorted\nKEY op://vault/Elsewhere/key\n" {
+	if got := w.readSection(t, "laptop", "secrets"); got != "KEY op://vault/Elsewhere/key\n" {
 		t.Errorf("[secrets] = %q", got)
 	}
 	for _, c := range f.Commands() {
