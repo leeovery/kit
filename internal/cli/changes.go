@@ -37,7 +37,7 @@ func startChanges(r *run, names []string) *changes {
 	for _, name := range names {
 		steps = append(steps, event.Step{Name: name, Title: name})
 	}
-	steps = append(steps, event.Step{Name: syncStep, Title: "Config repository"})
+	steps = append(steps, event.Step{Name: syncStep, Title: syncStep})
 	c := &changes{run: r, started: r.now}
 	r.sink.Emit(event.RunStarted{Time: r.now, Command: r.command, Machine: r.machine, Version: r.version, Steps: steps})
 	return c

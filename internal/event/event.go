@@ -30,6 +30,9 @@ type RunStarted struct {
 	Version string
 	// Steps are the steps the run will take, in order.
 	Steps []Step
+	// Only are the steps named, as in kit apply remote-session: none when the
+	// run takes every step.
+	Only []string
 }
 
 // Step names a step, and titles it for people.
@@ -39,6 +42,9 @@ type Step struct {
 	// Area is what the step is about, as the at-a-glance view groups steps:
 	// Backups, Mac, Drift, Config, Checks.
 	Area string
+	// Part is what the step counts towards in a view rolling its area up:
+	// Packages, Settings, Files, Secrets, or the config repository.
+	Part string `json:",omitempty"`
 }
 
 // StepStarted is a step's check, or its apply, starting.
