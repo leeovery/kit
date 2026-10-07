@@ -19,6 +19,7 @@ gofmt -l .                   # must print nothing
 go vet ./...
 scripts/test-isolated        # every test, race detector on, isolated: see Test isolation
 golangci-lint run            # standard linters plus modernize (.golangci.yml)
+shellcheck internal/steps/template.sh   # the script steps of the user's own start from
 go build ./...
 scripts/personal-data-scan   # no personal data in the files or the history
 ```

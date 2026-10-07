@@ -77,6 +77,7 @@ func nounCommands(a *app) []*cobra.Command {
 		newLineCommand(a, "check", "Checks of your own, each a command: exit 0, all's well", newLineAdd(a, "check", "Declare a check of your own, and run it once")),
 		newLineCommand(a, config.HourlyKind, "Jobs of your own, run every hour by kit nightly", newLineAdd(a, config.HourlyKind, "Declare an hourly job")),
 		newLineCommand(a, config.ManualKind, "Steps done by hand, each saying what to do", newLineAdd(a, config.ManualKind, "Declare a step done by hand"), newDoneCommand(a)),
+		newStepCommand(a),
 	)
 }
 
@@ -284,7 +285,7 @@ func newLineAdd(a *app, name, short string) *cobra.Command {
 
 // lineThings are what each section of lines of your own holds, by its
 // command's name.
-var lineThings = map[string]string{"check": "checks", config.HourlyKind: "hourly jobs", config.NightlyKind: "nightly jobs", config.ManualKind: "steps by hand"}
+var lineThings = map[string]string{"check": "checks", config.HourlyKind: "hourly jobs", config.NightlyKind: "nightly jobs", config.ManualKind: "steps by hand", stepCommand: "steps of your own, and their folders"}
 
 // newLineRemove is kit <name> remove, for a section of lines of your own.
 func newLineRemove(a *app, name string) *cobra.Command {

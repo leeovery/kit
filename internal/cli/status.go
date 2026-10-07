@@ -375,7 +375,11 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 	if jobs := slices.Concat(hourly, daily); len(jobs) > 0 {
 		checks = append(checks, nightly.Check(jobs, len(hourly) > 0, len(daily) > 0, dirs.State, a.Now))
 	}
-	r.pipeline, err = engine.New(slices.Concat([]engine.Step{homebrew}, setup, kinds, checks)...)
+	base := slices.Concat([]engine.Step{homebrew}, setup, kinds, checks)
+	scripts, err := r.scriptSteps(base)
+	if err == nil {
+		r.pipeline, err = engine.New(slices.Concat(base, scripts)...)
+	}
 	if err != nil {
 		_ = face.Close()
 		_ = log.Close()

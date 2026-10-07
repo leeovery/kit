@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/leeovery/kit/internal/check"
@@ -12,12 +14,13 @@ import (
 )
 
 // lineKinds are the sections of lines of your own, which aren't kinds, by
-// their commands' names: checks, jobs, and steps by hand.
+// their commands' names: checks, jobs, steps by hand, and steps of your own.
 var lineKinds = map[string]string{
-	"check":   config.ChecksKind,
-	"hourly":  config.HourlyKind,
-	"nightly": config.NightlyKind,
-	"manual":  config.ManualKind,
+	"check":     config.ChecksKind,
+	"hourly":    config.HourlyKind,
+	"nightly":   config.NightlyKind,
+	"manual":    config.ManualKind,
+	stepCommand: config.StepsKind,
 }
 
 // addLine declares a check, a job or a step by hand: args are its name, for
@@ -93,8 +96,9 @@ func quoteAll(words []string) string {
 	return strings.Join(quoted, " ")
 }
 
-// removeLines takes checks, jobs or steps by hand out of this Mac's
-// declarations, and the shared ones with shared.
+// removeLines takes checks, jobs, steps by hand or steps of your own out of
+// this Mac's declarations, and the shared ones with shared: a step of your
+// own's folder with it.
 func (a *app) removeLines(ctx context.Context, r *run, name string, names []string, shared bool) error {
 	kind := lineKinds[name]
 	c := startChanges(r, names)
@@ -116,6 +120,13 @@ func (a *app) removeLines(ctx context.Context, r *run, name string, names []stri
 					return check.Result{State: check.Failed, Reason: err.Error()}
 				}
 				c.changed(config.DeclFile(e.Scope))
+				if kind == config.StepsKind {
+					folder := config.StepFolder(e.Scope, n)
+					if err := os.RemoveAll(filepath.Join(r.cfg.Dir, folder)); err != nil {
+						return check.Result{State: check.Failed, Reason: err.Error()}
+					}
+					c.changed(folder)
+				}
 				from = append(from, e.Scope)
 			}
 			if len(from) == 0 {

@@ -41,6 +41,18 @@ const (
 // what to do, and, after --, a command saying whether it's done.
 const ManualKind = "manual"
 
+// StepsKind names the section of steps of the user's own: a name, what the
+// step does, and its options; its script and data are in its folder
+// (StepFolder).
+const StepsKind = "steps"
+
+// StepFolder is the folder of scope's step called name, by its path in the
+// config repository, as in laptop/steps/fonts: its run script, and its
+// data.
+func StepFolder(scope, name string) string {
+	return scope + "/steps/" + name
+}
+
 // The sections of kit prefs's lists, which aren't kinds: the settings files
 // it saves besides apps' preferences; the domains it never saves; the apps
 // that domains belong to when their names don't say, a domain's pattern then
@@ -131,6 +143,7 @@ var sectionDefs = []sectionDef{
 	{header: "prefs deny", kind: PrefsDenyKind, form: paths},
 	{header: "prefs apps", kind: PrefsAppsKind, form: settings},
 	{header: "prefs machine-bound", kind: PrefsMachineBoundKind, form: paths},
+	{header: "steps", kind: StepsKind, form: commands},
 	{header: "manual", kind: ManualKind, form: commands},
 	{header: "checks", kind: ChecksKind, form: commands},
 	{header: "hourly", kind: HourlyKind, form: commands},
