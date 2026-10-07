@@ -49,7 +49,6 @@ var kindNouns = []noun{
 	{"gh", groupPackages, "The GitHub CLI's extensions", "Install GitHub CLI extensions, as owner/repo, and declare them", "Uninstall GitHub CLI extensions, and undeclare them"},
 	{"tmux", groupPackages, "tmux's plugins, declared in tmux's config", "Install tmux plugins, and declare them in tmux's config", "Uninstall tmux plugins, and take them out of tmux's config"},
 	{"claude-mcp", groupPackages, "Claude Code's MCP servers", "Declare MCP servers Claude Code has, as it has them", "Remove MCP servers from Claude Code, and undeclare them"},
-	{"claude-plugin", groupPackages, "Claude Code's plugins", "Install Claude Code plugins, and declare them", "Uninstall Claude Code plugins, and undeclare them"},
 	{"login-item", groupPackages, "macOS login items", "Add login items, by app, and declare them", "Remove login items, and undeclare them"},
 	{"defaults", groupSettings, "macOS settings, in defaults write's form", "Declare macOS settings as this Mac has them", "Unset macOS settings, macOS's default coming back, and undeclare them"},
 	{"power", groupSettings, "Power settings, in pmset's form", "Declare power settings as this Mac has them", "Undeclare power settings, leaving their values"},

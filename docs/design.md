@@ -26,10 +26,13 @@ read, and kept in kit's state; a replacement Mac can take an old one's name.
 
 **Kinds.** A kind is a list of things of one sort. Built: Homebrew formulae (`brew`) and casks
 (`cask`), App Store apps (`mas`), npm and Composer global packages (`npm`, `composer`), Go tools
-(`go`), GitHub CLI extensions (`gh`), tmux plugins (`tmux`), login items (`login-item`) and Claude
-Code's MCP servers (`claude-mcp`) and plugins (`claude-plugin`), git's settings (`git`) and
+(`go`), GitHub CLI extensions (`gh`), tmux plugins (`tmux`), login items (`login-item`), Claude
+Code's MCP servers (`claude-mcp`), git's settings (`git`) and
 macOS settings (`defaults`), power settings (`power`), the backup and Spotlight exclusions
 (`backup-exclusion`, `spotlight-exclusion`), and secrets (`secret`). Later: Claude Code's skills.
+Not Claude Code's plugins: its user settings (`~/.claude/settings.json`) declare them, and
+it fetches the plugins they enable itself, so a list of kit's would be a second copy (a
+`claude-plugin` kind was built, then retired).
 Each kind supplies five parts:
 
 - **declared:** what the config lists, the shared file and then this Mac's;
@@ -51,7 +54,6 @@ undeclared for adopting, removing or snoozing, and report both.
 | `tmux` | `set -g @plugin` lines in tmux's config | the folders in TPM's plugin folder | cloned as TPM does; removing deletes the folder |
 | `login-item` | the app's bundle id, `com.example.app` | System Events' login items | System Events (JavaScript for Automation) |
 | `claude-mcp` | a name, then `claude mcp add`'s options; a project's in `[claude mcp <folder>]` | `~/.claude.json`, read directly | `claude mcp add-json`, `claude mcp remove` (a project's in local scope, in its folder) |
-| `claude-plugin` | `plugin@owner/repo`: the plugin and its marketplace's repository; `@owner/repo` a marketplace alone | Claude Code's records of plugins, marketplaces and what's enabled | the marketplace added when needed, then `claude plugin install`; `uninstall`, `marketplace remove` |
 | `git-config` | `[git config]`: a key, then its value as one word, as `git config --global` takes them (`alias.st "status -sb"`) | `git config --global --list` | `git config --global --replace-all`, `--unset-all` |
 | `power` | `[power settings]`: pmset's words, the source then the setting and value (`-c sleep 0`; `-a` every source, `-b` the battery, `-u` a UPS), named `charger:sleep` | `pmset -g custom`, by source | `sudo pmset`; undeclaring leaves the value |
 | `backup-exclusion` | `[backup exclusions]`: a path a line, `~` and `*` globs, expanded on every check (a plain path stands for itself, there or not) | Time Machine's fixed-path exclusions (`SkipPaths`), and each glob match excluded where it is (`tmutil isexcluded`); Arq inherits both | a plain path: `sudo tmutil addexclusion -p` (Full Disk Access for the terminal); a glob's match: `tmutil addexclusion`, no password, so `kit nightly` does it unattended; `removeexclusion -p` |
@@ -98,11 +100,6 @@ undeclared for adopting, removing or snoozing, and report both.
   while its folder isn't on the Mac. A server is added with Claude Code's own
   `claude mcp add`, then declared with `kit claude-mcp add` or reconcile's adopt;
   `kit claude-mcp on|off` declares one on or off and installs or removes it.
-- **Claude's plugins** carry their marketplace in their names, as formulae carry their taps:
-  there's no list of marketplaces. kit adds a plugin's marketplace when it installs it; a
-  marketplace no plugin comes from is an unused dependency, offered for removal, unless
-  declared alone (`@owner/repo`) to keep it for browsing. A plugin turned off is changed,
-  and applying turns it on.
 - **Finding what's meant:** `kit mas add` finds an app from its name or id (several matches
   are a choice at a terminal, listed without one); `kit login-item add` takes an app's name, path
   or bundle id. Declaring a login item writes the app's name as the note.
@@ -230,7 +227,7 @@ kit machine [<name>]         This Mac's name: shown, or set (one of kit.toml's M
 What kit manages, a command each:
 kit <kind> add <name>...     Install, and declare for this Mac   [--shared] [--temp] [--note] [--group]
 kit <kind> remove <name>...  Uninstall, and undeclare            [--shared]
-    (brew, cask, mas, npm, composer, go, gh, tmux, claude-mcp, claude-plugin, login-item,
+    (brew, cask, mas, npm, composer, go, gh, tmux, claude-mcp, login-item,
      defaults, power, git-config, backup-exclusion, spotlight-exclusion)
 kit claude-mcp on|off <name>...  Declare Claude's MCP servers on or off, and install or remove them
 kit feature on|off <name>... Switch features on or off for this Mac   [--shared]
@@ -377,7 +374,7 @@ pages --transport http https://pages.example.com/mcp
 The sections, in the order kit writes them: `features` (the switches), `paths` (kit's PATH, in order, `~` expands; the
 shared file's, then the Mac's), `homebrew formulae`, `homebrew casks`, `app store apps`,
 `npm packages`, `composer packages`, `go tools`, `github extensions`, `macos login items`,
-`claude mcp` (and `claude mcp <folder>`), `claude plugins`, `steps` (the steps of the user's own), `manual`, `checks`, `hourly`, `nightly`
+`claude mcp` (and `claude mcp <folder>`), `steps` (the steps of the user's own), `manual`, `checks`, `hourly`, `nightly`
 (jobs of the user's own: a name, then `--` and a command, `~/` expanding in any word). A section kit doesn't know is refused, never
 skipped; so is a line before any section, a section twice, or a file named for a Mac
 `kit.toml` doesn't know.
@@ -589,8 +586,9 @@ project; `kit claude-mcp on|off`; reconcile by kind (#30–#32).
 and a file per Mac, each sections of flat lines; MCP servers as `claude mcp add`'s
 options.
 
-**6. Claude Code's plugins — built.** The `claude-plugin` kind, marketplaces carried in
-plugins' names.
+**6. Claude Code's plugins — built, then retired.** The `claude-plugin` kind, marketplaces
+carried in plugins' names; retired once Claude Code's own settings, saved by `kit prefs`,
+proved to declare plugins, Claude Code fetching what they enable.
 
 **7. Health checks and switches — built.** The Mac's checks and the config repository's sync
 (#36); `[features]`, `kit feature on|off`, Time Machine and Arq (#37); checks of the user's

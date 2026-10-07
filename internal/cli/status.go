@@ -19,7 +19,6 @@ import (
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/kind/appstore"
 	"github.com/leeovery/kit/internal/kind/brew"
-	"github.com/leeovery/kit/internal/kind/claudeplugin"
 	"github.com/leeovery/kit/internal/kind/composer"
 	"github.com/leeovery/kit/internal/kind/defaults"
 	"github.com/leeovery/kit/internal/kind/exclusion"
@@ -145,7 +144,6 @@ func kindSteps(hb *brew.Homebrew, run runner.Runner, home, configHome, stateDir 
 		{kind: tmux.New(run, home, configHome), after: []string{"brew"}},
 		{kind: login.New(run, home), after: []string{"cask", "mas"}},
 		{kind: mcp.New(run, home), after: []string{"brew"}},
-		{kind: claudeplugin.New(run, home), after: []string{"brew"}},
 		{kind: secret.New(run, home), after: []string{"brew", "cask"}, declaredOnly: true},
 		// git's settings sign with, and reach GitHub by, the SSH key the
 		// secrets write.
