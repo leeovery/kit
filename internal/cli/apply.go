@@ -13,8 +13,9 @@ import (
 func newApplyCommand(a *app) *cobra.Command {
 	var plan bool
 	cmd := &cobra.Command{
-		Use:   "apply [step...]",
-		Short: "Make this Mac match the config: install what's declared and missing",
+		Use:         "apply [step...]",
+		Short:       "Make this Mac match the config: install what's declared and missing",
+		Annotations: map[string]string{brief: "install what's declared and missing"},
 		Long: `Make this Mac match its config: install what's declared and missing. Applying
 never removes and never adopts anything: kit reconcile does those, as you
 decide. --plan says what applying would do, and does nothing.

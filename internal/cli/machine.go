@@ -11,8 +11,9 @@ import (
 
 func newMachineCommand(a *app) *cobra.Command {
 	return &cobra.Command{
-		Use:   "machine [<name>]",
-		Short: "Show this Mac's name, or set it to one of the config's Macs",
+		Use:         "machine [<name>]",
+		Short:       "Show this Mac's name, or set it to one of the config's Macs",
+		Annotations: map[string]string{brief: "this Mac's name"},
 		Long: `Show this Mac's name, or set it to one of the Macs kit.toml knows.
 
 kit reads a Mac's own files (brew.<name> and the rest) by this name, so it's

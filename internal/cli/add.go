@@ -74,7 +74,7 @@ func (a *app) find(ctx context.Context, k kind.Kind, typed []string) ([]string, 
 			}
 			i, err := a.Choose(ctx, fmt.Sprintf("%s: which is %s?", k.Title(), t), labels)
 			if errors.Is(err, ask.ErrCancelled) {
-				return nil, errors.New("cancelled: nothing was installed or declared")
+				return nil, fmt.Errorf("%w: nothing was installed or declared", ask.ErrCancelled)
 			}
 			if err != nil {
 				return nil, err

@@ -53,7 +53,7 @@ func TestAddCancelledDoesNothing(t *testing.T) {
 	w.fake.On("mas", "search", "--json", "sleep").Prints(sleepSearch)
 	w.choose = func(string, []string) (int, error) { return 0, ask.ErrCancelled }
 	_, errOut, code := w.run(t, "mas", "add", "sleep")
-	if errOut != "kit: cancelled: nothing was installed or declared\n" || code != 2 || !slices.Equal(w.fake.Calls(), []string{"mas search --json sleep"}) {
+	if errOut != "\n  – kit mas add  cancelled: nothing was installed or declared\n" || code != 2 || !slices.Equal(w.fake.Calls(), []string{"mas search --json sleep"}) {
 		t.Errorf("kit mas add, cancelled: %q, exit %d, running %q; want nothing done", errOut, code, w.fake.Calls())
 	}
 }

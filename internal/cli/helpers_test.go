@@ -118,8 +118,7 @@ func (w *world) run(t *testing.T, args ...string) (stdout, stderr string, status
 			return w.choose(question, options)
 		},
 	})
-	root.SetArgs(args)
-	status = cli.Execute(t.Context(), root)
+	status = cli.Execute(t.Context(), root, args)
 	return out.String(), errOut.String(), status
 }
 

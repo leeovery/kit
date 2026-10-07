@@ -48,9 +48,10 @@ func (l listed) where() string {
 
 func newListCommand(a *app) *cobra.Command {
 	return &cobra.Command{
-		Use:   "list [kind]",
-		Short: "List what's declared for this Mac: each name, its file and note, and whether it's installed",
-		Args:  cobra.MaximumNArgs(1),
+		Use:         "list [kind]",
+		Short:       "List what's declared for this Mac: each name, its file and note, and whether it's installed",
+		Annotations: map[string]string{brief: "what's declared for this Mac"},
+		Args:        cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			r, err := a.prepare("list", "list")
 			if err != nil {
@@ -153,9 +154,10 @@ type why struct {
 
 func newWhyCommand(a *app) *cobra.Command {
 	return &cobra.Command{
-		Use:   "why <name>",
-		Short: "Say where a package is declared, whether it's installed, and what needs it",
-		Args:  cobra.ExactArgs(1),
+		Use:         "why <name>",
+		Short:       "Say where a package is declared, whether it's installed, and what needs it",
+		Annotations: map[string]string{brief: "where a package is declared, and what needs it"},
+		Args:        cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			r, err := a.prepare("why", "why")
 			if err != nil {

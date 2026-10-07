@@ -33,8 +33,9 @@ const reportFile = "report.txt"
 func newNightlyCommand(a *app) *cobra.Command {
 	var plan, alerts bool
 	cmd := &cobra.Command{
-		Use:   "nightly [job...]",
-		Short: "Run the scheduled jobs that are due, then every check: what the hourly launch runs",
+		Use:         "nightly [job...]",
+		Short:       "Run the scheduled jobs that are due, then every check: what the hourly launch runs",
+		Annotations: map[string]string{brief: "run the jobs that are due, then every check"},
 		Long: `Run the jobs that are due, then every check, as kit status does. The hourly
 jobs run every time; the nightly ones once a day, when the nightly run falls
 due (nightly_at in kit.toml, 03:00 unless it says), or on the first run after

@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/colorprofile"
@@ -112,8 +114,11 @@ what to run about it. kit status is the full report.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error { return a.glance(cmd) },
 	}
+	root.SuggestionsMinimumDistance = 2
+	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return usageError{err} })
 	root.SetOut(deps.Stdout)
-	root.SetErr(deps.Stderr)
+	root.SetErr(&errOut{Writer: deps.Stderr, a: a})
+	root.SetHelpFunc(a.help(root.HelpFunc()))
 	flags := root.PersistentFlags()
 	flags.BoolVar(&a.json, "json", false, "print one JSON document, for scripts and agents")
 	flags.BoolVar(&a.plain, "plain", false, "print plain lines, no colour or animation, as without a terminal")
@@ -131,16 +136,27 @@ what to run about it. kit status is the full report.`,
 	return root
 }
 
-// Execute runs root in ctx, prints what went wrong, if anything, and returns
-// the status to exit with: 0, attentionStatus, or failedStatus.
-func Execute(ctx context.Context, root *cobra.Command) int {
-	err := root.ExecuteContext(ctx)
+// Execute runs root with args in ctx, shows what went wrong, if anything,
+// and returns the status to exit with: 0, attentionStatus, or failedStatus.
+func Execute(ctx context.Context, root *cobra.Command, args []string) int {
+	root.SetArgs(args)
+	// In kit's look, what went wrong says what to run instead of a usage.
+	if e, ok := root.ErrOrStderr().(*errOut); ok && e.a.Terminal(e.Writer) && !slices.ContainsFunc(args, func(arg string) bool {
+		return arg == "--plain" || strings.HasPrefix(arg, "--json")
+	}) {
+		root.SilenceUsage = true
+	}
+	cmd, err := root.ExecuteContextC(ctx)
 	if err == nil {
 		return 0
 	}
 	a, isAttention := errors.AsType[attention](err)
 	if !isAttention || a.message != "" {
-		_, _ = fmt.Fprintf(root.ErrOrStderr(), "kit: %v\n", err)
+		if e, ok := root.ErrOrStderr().(*errOut); ok {
+			e.show(cmd, args, err, isAttention)
+		} else {
+			_, _ = fmt.Fprintf(root.ErrOrStderr(), "kit: %v\n", err)
+		}
 	}
 	if isAttention {
 		return attentionStatus

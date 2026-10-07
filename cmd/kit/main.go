@@ -19,8 +19,7 @@ func main() {
 	// which the terminal's interrupt doesn't reach.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	root := cli.NewRootCommand(cli.Real(version))
-	root.SetArgs(os.Args[1:])
-	status := cli.Execute(ctx, root)
+	status := cli.Execute(ctx, root, os.Args[1:])
 	stop()
 	os.Exit(status)
 }

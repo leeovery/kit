@@ -297,6 +297,8 @@ Bare `kit` runs every check, as `kit status` does, and shows a line an area (Bac
 Drift, Config, Checks): the steps' short forms when all's well ("Time Machine 16:00 · Arq
 01:05"), else what needs attention (a drift item's kind, name, what's wrong and for how long)
 and what to run (`kit reconcile`, `kit status`); `--json` is `kit status --json`'s document.
+At a terminal, in kit's look: the wordmark with the Mac and the time beside it, then a row an
+area, the drift and the config repository one area, Config.
 
 `kit nightly` is what the hourly launch runs: the jobs due, in order (one failing never stops
 the others), then every check. It installs only what a kind lets it install with no one
@@ -467,16 +469,22 @@ starting; a check's result, with its items and reason; every external command, w
 arguments (redacted), exit code, duration and output; a step deferred, with the unmet need; a
 step failed, with the error; the run finishing, with its summary. Faces subscribe:
 
-- **pretty** at a terminal: colour brought down to what the terminal shows, and no glyphs
-  that need a particular font (block elements and box drawing are in every Mac's). `kit
-  status` and `kit apply` open with kit's wordmark, the command, the Mac and the time beside
-  it; shorter commands with a line and a rule. A spinner counts the steps done and names
-  those running; then the steps under their areas (Backups, Jobs, Mac, Drift, Config,
-  Checks, as bare `kit` orders them), each a mark, its title and its summary (wrapping under
-  itself), and under it what applying did and what needs attention, a thing a line, its
-  name and what's wrong in a column beside it (or under it, when there's no room), the
-  loud before the quiet, a long list cut to six and counted; then a rule and the summary,
-  marked;
+- **pretty** at a terminal, in kit's look (`internal/look`, the components every screen is
+  drawn from; the rules signed off in the look's design, round 4): colour brought down to
+  what the terminal shows, no glyphs that need a particular font, and no line past 80
+  columns. Commands looking at the whole Mac (`status`, `apply`, `nightly`, `reconcile`) open
+  with the wordmark, what ran, the Mac and when stacked beside it; their steps show a block
+  an area (Backups, Jobs, Mac, Config, Steps, Manual, Checks), a row a step: its mark, its
+  title, then what it says, the parts after dots, what to do on the line under it. Config
+  takes the drift and the config repository: what needs attention, a row a thing (what's
+  wrong, for how long, what to run), then Packages, Settings, Files and Secrets counted (each
+  step's part says which it counts towards) and the config repository's row. Applying leads
+  with the lights, an area each, shows only what it did and what needs attention, and ends
+  with the bar. Commands aimed at one thing (`add`, `remove`, a step named) are a timeline, a
+  row a step as its turn comes, no wordmark. A summary ends a whole-Mac command: what failed,
+  needs you or wasn't checked, what's fine, and how long it took. `kit log` shows a run as a
+  timeline; kit's help and its errors take the look too (an error is a row, what to run about
+  it under it: `→ did you mean kit brew add jq`);
 - **plain** without one, or with `--plain`: the same words, one item a line, no colour, no
   animation, never a prompt;
 - **json** with `--json`: one document at the end, `"schema": 1`;
@@ -535,6 +543,7 @@ output.
 | `internal/check` | What a check finds: its state, summary and items |
 | `internal/event` | The events the core emits, and the sinks they go to |
 | `internal/render` | The pretty, plain and json faces |
+| `internal/look` | kit's look: the components the pretty face, the help and the errors are drawn from |
 | `internal/logs` | The run log, its retention, and reading it back for `kit log` |
 | `internal/redact` | Hiding secrets in what's logged |
 | `internal/runner` | The one place a process starts: kit's PATH, a clean environment, timeouts, output captured, each command reported as an event. `runner/runnertest` is the fake |

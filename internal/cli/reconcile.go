@@ -56,8 +56,9 @@ type decision struct {
 func newReconcileCommand(a *app) *cobra.Command {
 	var opts reconcileOptions
 	cmd := &cobra.Command{
-		Use:   "reconcile [<kind>...] [<id>...]",
-		Short: "Settle drift: adopt, remove, install, undeclare or snooze what differs from the config",
+		Use:         "reconcile [<kind>...] [<id>...]",
+		Short:       "Settle drift: adopt, remove, install, undeclare or snooze what differs from the config",
+		Annotations: map[string]string{brief: "settle what differs from the config"},
 		Long: `Settle drift: what's installed but not declared, declared but not installed,
 or left by something since removed. At a terminal, kit goes through each item
 that needs attention (--all: every item, new and snoozed too), asking what to
@@ -277,7 +278,7 @@ func (a *app) askAbout(ctx context.Context, r *run, items []driftItem, opts reco
 		}
 		i, err := a.Choose(ctx, question, answers)
 		if errors.Is(err, ask.ErrCancelled) {
-			return nil, errors.New("cancelled: nothing was changed")
+			return nil, fmt.Errorf("%w: nothing was changed", ask.ErrCancelled)
 		}
 		if err != nil {
 			return nil, err

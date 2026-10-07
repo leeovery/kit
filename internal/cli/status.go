@@ -42,8 +42,9 @@ import (
 
 func newStatusCommand(a *app) *cobra.Command {
 	return &cobra.Command{
-		Use:   "status [step...]",
-		Short: "Show how this Mac stands against the config: what needs attention",
+		Use:         "status [step...]",
+		Short:       "Show how this Mac stands against the config: what needs attention",
+		Annotations: map[string]string{brief: "how this Mac stands against its config"},
 		Long: `Show how this Mac stands against its config: each step's check, and what needs
 attention, such as packages declared but missing, or installed but not declared.
 

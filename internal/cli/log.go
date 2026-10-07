@@ -14,8 +14,9 @@ const logSchema = 1
 
 func newLogCommand(a *app) *cobra.Command {
 	return &cobra.Command{
-		Use:   "log",
-		Short: "Show what the last run did: every check and command, with timings",
+		Use:         "log",
+		Short:       "Show what the last run did: every check and command, with timings",
+		Annotations: map[string]string{brief: "the last run, every check and command"},
 		Long: `Show what the last run did: each step's check, with how it stood, and every
 command it ran, with its exit code and how long it took.
 

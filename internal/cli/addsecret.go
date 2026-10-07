@@ -79,7 +79,7 @@ func (a *app) addSecret(ctx context.Context, r *run, names []string, opts addOpt
 	case a.pretty(a.Stdout):
 		typed, err := a.ReadSecret(name + ", typed (it isn't shown): ")
 		if errors.Is(err, ask.ErrCancelled) {
-			return errors.New("cancelled: nothing was stored or declared")
+			return fmt.Errorf("%w: nothing was stored or declared", ask.ErrCancelled)
 		}
 		if err != nil {
 			return err
@@ -224,7 +224,7 @@ func (a *app) removeSecrets(ctx context.Context, r *run, names []string, shared 
 	case !value.delete && !value.keep && a.pretty(a.Stdout):
 		i, err := a.Choose(ctx, "Delete their values from 1Password too?", []string{"keep them in 1Password", "delete them from 1Password"})
 		if errors.Is(err, ask.ErrCancelled) {
-			return errors.New("cancelled: nothing was changed")
+			return fmt.Errorf("%w: nothing was changed", ask.ErrCancelled)
 		}
 		if err != nil {
 			return err
