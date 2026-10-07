@@ -138,8 +138,11 @@ func TestLights(t *testing.T) {
 // The bar: a segment a step, the last one in the colour the run ended in.
 func TestBar(t *testing.T) {
 	running := look.Bar(2, 1, 5, look.Done)
-	if ansi.Strip(running) != "  ▮▮▮▮▮" || !strings.Contains(running, ansi.Strip(look.Cyan("▮"))) {
+	if ansi.Strip(running) != "▮▮▮▮▮" || !strings.Contains(running, look.Cyan("▮")) {
 		t.Errorf("Bar(2, 1, 5) = %q", running)
+	}
+	if long := look.Bar(40, 0, 80, look.Done); ansi.StringWidth(long) != 32 || strings.Count(long, look.Dim("▮")) != 16 {
+		t.Errorf("Bar(40, 0, 80) = %q, want 32 segments, half done", ansi.Strip(long))
 	}
 	ended := look.Bar(5, 0, 5, look.Failed)
 	if !strings.HasSuffix(ended, look.Red("▮")) {

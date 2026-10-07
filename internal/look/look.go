@@ -318,10 +318,19 @@ func Lights(ls ...Lamp) string {
 	return "  " + strings.Join(parts, "  ")
 }
 
-// Bar is a run's progress, a segment a step: those done along kit's
-// gradient, those running cyan, the rest dim. When the run has ended needing
-// you or failed, the last segment takes that state's colour.
+// barWidth is the most segments a bar has: past it, each stands for a
+// share of the steps.
+const barWidth = 32
+
+// Bar is a run's progress, a segment a step, scaled down to barWidth
+// segments when there are more: those done along kit's gradient, those
+// running cyan, the rest dim. When the run has ended needing you or failed,
+// the last segment takes that state's colour.
 func Bar(done, running, of int, ended State) string {
+	if of > barWidth {
+		done, running = done*barWidth/of, (done+running)*barWidth/of-done*barWidth/of
+		of = barWidth
+	}
 	var b strings.Builder
 	for i := range of {
 		switch {
@@ -335,7 +344,7 @@ func Bar(done, running, of int, ended State) string {
 			b.WriteString(Dim("▮"))
 		}
 	}
-	return "  " + b.String()
+	return b.String()
 }
 
 // Rule is a line across, along kit's gradient, w wide with the margin.

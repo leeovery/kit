@@ -42,13 +42,20 @@ type Glance struct {
 	builder status.Builder
 	start   event.RunStarted
 	started bool
+	// live is what shows while the checks run, at a terminal: the wordmark
+	// at once, then the loader.
+	live *Pretty
 }
 
 // NewGlance returns the at-a-glance face, writing to w, which is width
 // columns wide: kit's look when pretty, words otherwise, as the plain face
 // has them.
 func NewGlance(w io.Writer, width int, pretty bool, now func() time.Time) *Glance {
-	return &Glance{w: w, width: min(max(width, 40), look.Width), pretty: pretty, now: now}
+	g := &Glance{w: w, width: min(max(width, 40), look.Width), pretty: pretty, now: now}
+	if pretty {
+		g.live = homeLoader(w, width, true)
+	}
+	return g
 }
 
 func (g *Glance) Emit(e event.Event) {
@@ -56,6 +63,9 @@ func (g *Glance) Emit(e event.Event) {
 		g.started, g.start = true, s
 	}
 	g.builder.Emit(e)
+	if g.live != nil {
+		g.live.Emit(e)
+	}
 }
 
 // area is one line of the view: what stands worst in it, and what to say.
@@ -72,6 +82,9 @@ func (g *Glance) Close() error {
 	}
 	doc := g.builder.Document()
 	if g.pretty {
+		if err := g.live.Close(); err != nil {
+			return err
+		}
 		return g.home(doc)
 	}
 	byArea := make(map[string][]status.Step)
@@ -182,9 +195,9 @@ func since(d time.Duration) string {
 	return "under a day"
 }
 
-// home is the view in kit's look: the wordmark, with the Mac and the time
-// beside it; then a row an area, the config's drift and its repository one
-// area, Config: what needs attention in it, or how it stands.
+// home is the view in kit's look, under the wordmark the loader showed: a
+// row an area, the config's drift and its repository one area, Config: what
+// needs attention in it, or how it stands.
 func (g *Glance) home(doc status.Document) error {
 	parts := make(map[string]string, len(g.start.Steps))
 	for _, s := range g.start.Steps {
@@ -195,16 +208,13 @@ func (g *Glance) home(doc status.Document) error {
 		a := viewArea(s.Area)
 		byArea[a] = append(byArea[a], s)
 	}
-	out := append([]string{""}, look.Head(look.Meta("", g.start.Machine, when(g.now()))...)...)
-	out = append(out, "")
 	var rows []look.Row
 	for _, name := range viewOrder {
 		if steps := byArea[name]; len(steps) > 0 {
 			rows = append(rows, g.homeRow(name, steps, parts))
 		}
 	}
-	out = append(out, look.Rows("  ", g.width, rows...)...)
-	_, err := io.WriteString(g.w, strings.Join(out, "\n")+"\n")
+	_, err := io.WriteString(g.w, strings.Join(look.Rows("  ", g.width, rows...), "\n")+"\n")
 	return err
 }
 

@@ -2,6 +2,7 @@ package render_test
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 	"time"
 
@@ -113,5 +114,28 @@ func TestHome(t *testing.T) {
 func TestGlanceSilentWithoutARun(t *testing.T) {
 	if got := glance(t, false, nil); got != "" {
 		t.Errorf("glance without a run = %q", got)
+	}
+}
+
+// At a terminal, bare kit shows the wordmark at once, before any check is
+// done, then the loader while they run.
+func TestHomeShowsAtOnce(t *testing.T) {
+	var out bytes.Buffer
+	g := render.NewGlance(&colorprofile.Writer{Forward: &out, Profile: colorprofile.NoTTY}, 80, true, func() time.Time { return time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC) })
+	g.Emit(event.RunStarted{Time: time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC), Machine: "laptop", Steps: []event.Step{{Name: "disk", Title: "Disk space", Area: "Mac"}}})
+	if got := out.String(); !strings.Contains(got, "│  laptop\n") || !strings.Contains(got, "│  Mon 5 Oct · 12:00\n") {
+		t.Errorf("once the run started, printed %q; want the wordmark", got)
+	}
+	g.Emit(event.StepStarted{Step: "disk"})
+	if got := out.String(); !strings.Contains(got, "◐ ▮  0 of 1 · checking Disk space") {
+		t.Errorf("while a check ran, printed %q; want the loader", got)
+	}
+	g.Emit(event.StepFinished{Step: "disk", Result: check.Result{State: check.OK, Glance: "48% free"}})
+	g.Emit(event.RunFinished{})
+	if err := g.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if got := out.String(); !strings.HasSuffix(got, "\r  ● Mac  48% free\n") {
+		t.Errorf("printed %q; want the loader's line taken down, then the rows", got)
 	}
 }

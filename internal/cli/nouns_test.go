@@ -78,7 +78,8 @@ func TestErrorsAtATerminal(t *testing.T) {
 		{[]string{"why", "nosuch"}, "\n  ▲ kit why  nosuch isn't declared for any Mac, nor installed here\n"},
 	} {
 		out, errOut, _ := w.run(t, tt.args...)
-		if errOut != tt.want || out != "" {
+		// A loader may have shown on the way, drawn over itself and taken down.
+		if out = out[strings.LastIndex(out, "\r")+1:]; errOut != tt.want || out != "" {
 			t.Errorf("kit %s printed %q, %q; want %q", strings.Join(tt.args, " "), out, errOut, tt.want)
 		}
 	}
