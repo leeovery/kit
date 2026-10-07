@@ -9,7 +9,7 @@ import (
 // glance runs every check, as kit status does, and shows what needs
 // attention a line an area: --json prints the same document as kit status.
 func (a *app) glance(cmd *cobra.Command) error {
-	var face render.Face = render.NewGlance(a.colors(a.Stdout), a.pretty(a.Stdout), a.Now)
+	var face render.Face = render.NewGlance(a.colors(a.Stdout), a.Width(a.Stdout), a.pretty(a.Stdout), a.Now)
 	if a.json {
 		face = render.NewJSON(a.Stdout)
 	}

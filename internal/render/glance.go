@@ -11,6 +11,7 @@ import (
 
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/event"
+	"github.com/leeovery/kit/internal/look"
 	"github.com/leeovery/kit/internal/status"
 )
 
@@ -35,22 +36,24 @@ var driftStates = map[string]string{
 // it, or that all's well.
 type Glance struct {
 	w       io.Writer
+	width   int
 	pretty  bool
 	now     func() time.Time
 	builder status.Builder
-	machine string
+	start   event.RunStarted
 	started bool
 }
 
-// NewGlance returns the at-a-glance face, writing to w: marks and colour
-// when pretty, words otherwise, as the plain face has them.
-func NewGlance(w io.Writer, pretty bool, now func() time.Time) *Glance {
-	return &Glance{w: w, pretty: pretty, now: now}
+// NewGlance returns the at-a-glance face, writing to w, which is width
+// columns wide: kit's look when pretty, words otherwise, as the plain face
+// has them.
+func NewGlance(w io.Writer, width int, pretty bool, now func() time.Time) *Glance {
+	return &Glance{w: w, width: min(max(width, 40), look.Width), pretty: pretty, now: now}
 }
 
 func (g *Glance) Emit(e event.Event) {
 	if s, ok := e.(event.RunStarted); ok {
-		g.started, g.machine = true, s.Machine
+		g.started, g.start = true, s
 	}
 	g.builder.Emit(e)
 }
@@ -68,6 +71,9 @@ func (g *Glance) Close() error {
 		return nil
 	}
 	doc := g.builder.Document()
+	if g.pretty {
+		return g.home(doc)
+	}
 	byArea := make(map[string][]status.Step)
 	for _, s := range doc.Steps {
 		name := cmp.Or(s.Area, "Checks")
@@ -84,15 +90,9 @@ func (g *Glance) Close() error {
 		}
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "kit · %s\n", g.machine)
+	fmt.Fprintf(&b, "kit · %s\n", g.start.Machine)
 	for _, a := range areas {
-		mark := fmt.Sprintf("%-*s", markWidth, a.state)
-		name := fmt.Sprintf("%-*s", width, a.name)
-		if g.pretty {
-			mark = cmp.Or(stateMark[a.state], stateMark[check.Attention])
-			name = bold.Render(name)
-		}
-		fmt.Fprintf(&b, "%s %s  %s\n", mark, name, a.text)
+		fmt.Fprintf(&b, "%-*s %-*s  %s\n", markWidth, a.state, width, a.name, a.text)
 	}
 	_, err := io.WriteString(g.w, b.String())
 	return err
@@ -180,4 +180,93 @@ func since(d time.Duration) string {
 		return "a day"
 	}
 	return "under a day"
+}
+
+// home is the view in kit's look: the wordmark, with the Mac and the time
+// beside it; then a row an area, the config's drift and its repository one
+// area, Config: what needs attention in it, or how it stands.
+func (g *Glance) home(doc status.Document) error {
+	parts := make(map[string]string, len(g.start.Steps))
+	for _, s := range g.start.Steps {
+		parts[s.Name] = s.Part
+	}
+	byArea := make(map[string][]status.Step)
+	for _, s := range doc.Steps {
+		a := viewArea(s.Area)
+		byArea[a] = append(byArea[a], s)
+	}
+	out := append([]string{""}, look.Head(look.Meta("", g.start.Machine, when(g.now()))...)...)
+	out = append(out, "")
+	var rows []look.Row
+	for _, name := range viewOrder {
+		if steps := byArea[name]; len(steps) > 0 {
+			rows = append(rows, g.homeRow(name, steps, parts))
+		}
+	}
+	out = append(out, look.Rows("  ", g.width, rows...)...)
+	_, err := io.WriteString(g.w, strings.Join(out, "\n")+"\n")
+	return err
+}
+
+// homeRow is an area's row: what needs attention in it, the first named
+// and the rest counted; else what its steps say at a glance.
+func (g *Glance) homeRow(name string, steps []status.Step, parts map[string]string) look.Row {
+	row := look.Row{State: look.Done, Name: name}
+	var needs []string
+	var glances []string
+	for _, s := range steps {
+		if st := state(s.State); worse(st, row.State) {
+			row.State = st
+		}
+		switch s.State {
+		case check.Failed, check.Deferred:
+			needs = append(needs, look.Says(look.Words(state(s.State), s.Title), look.Muted(s.Reason)))
+			continue
+		}
+		for _, it := range s.Items {
+			if it.Quiet != "" {
+				continue
+			}
+			if row.State == look.Done {
+				row.State = look.NeedsYou
+			}
+			needs = append(needs, g.homeThing(s, it, parts[s.ID]))
+		}
+		if s.Glance != "" {
+			glances = append(glances, look.Muted(s.Glance))
+		}
+	}
+	switch {
+	case len(needs) > 1:
+		row.Says = look.Says(needs[0], look.Muted(fmt.Sprintf("%d more", len(needs)-1)))
+	case len(needs) == 1:
+		row.Says = needs[0]
+	case name == "Config":
+		row.Says = look.Says(append([]string{look.Muted("nothing to reconcile")}, glances...)...)
+	case name == "Steps":
+		row.Says = look.Muted(fmt.Sprintf("%d done", len(steps)))
+	case len(glances) > 0:
+		row.Says = look.Says(glances...)
+	default:
+		row.Says = look.Muted("all well")
+	}
+	return row
+}
+
+// homeThing says what needs attention, briefly: a thing's name and what's
+// wrong, for how long; a step of the user's own, and what its check says;
+// a check's problem as it says it.
+func (g *Glance) homeThing(s status.Step, it check.Item, part string) string {
+	_, isDrift := driftStates[it.State]
+	switch {
+	case s.Area == "Steps":
+		return look.Says(look.Orange(s.Title), look.Muted(s.Summary))
+	case !isDrift:
+		return look.Orange(it.Name)
+	}
+	text := look.Orange(it.Name + " " + wrong(part, it))
+	if !it.Since.IsZero() {
+		text = look.Says(text, look.Muted(since(g.now().Sub(it.Since))))
+	}
+	return text
 }

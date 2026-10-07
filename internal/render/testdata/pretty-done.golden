@@ -1,18 +1,18 @@
 
-  ██╗  ██╗ ██╗ ████████╗
-  ██║ ██╔╝ ██║ ╚══██╔══╝
-  █████╔╝  ██║    ██║
-  ██╔═██╗  ██║    ██║
-  ██║  ██╗ ██║    ██║
-  ╚═╝  ╚═╝ ╚═╝    ╚═╝   apply · laptop
+  █  ▄▀  ▀█▀  ▀▀█▀▀  │  apply
+  █▀▀▄    █     █    │  laptop
+  █   █  ▄█▄    █    │  Fri 2 Jan · 03:04
 
-    ✓  Formulae   3 declared, all installed
-         · jq        installed
-         · ripgrep   installed
-    !  Casks      2 declared, 0 installed
-         · ghostty   missing · to install
-         · zoom      missing · needs an administrator's password
+  ● MAC 1   ▲ CONFIG   ● STEPS 1
 
-  ──────────────────────────────────────────────────────────────────────────
-    !  1 needs attention
+  CONFIG
+  ● jq  installed
+  ● ripgrep  installed
+  ▲ ghostty  declared, not installed · → kit apply
+  ▲ zoom  declared, not installed · needs an administrator's password
+    → kit apply
 
+  STEPS
+  ● fonts  applied · 16 installed
+
+  ▮▮▮▮  1 needs you · 3 done · 4.2s

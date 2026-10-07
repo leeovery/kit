@@ -34,7 +34,7 @@ type glanceStep = struct {
 func glance(t *testing.T, pretty bool, events []event.Event) string {
 	t.Helper()
 	var out bytes.Buffer
-	g := render.NewGlance(&colorprofile.Writer{Forward: &out, Profile: colorprofile.NoTTY}, pretty, func() time.Time { return time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC) })
+	g := render.NewGlance(&colorprofile.Writer{Forward: &out, Profile: colorprofile.NoTTY}, 80, pretty, func() time.Time { return time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC) })
 	for _, e := range events {
 		g.Emit(e)
 	}
@@ -90,11 +90,24 @@ attention Drift    brew graphviz (not declared, 3 days), claude-mcp docs (change
 	}
 }
 
-func TestGlancePrettyMarks(t *testing.T) {
-	got := glance(t, true, glanceRun(glanceStep{"disk", "Disk space", "Mac", check.Result{State: check.OK, Glance: "48% free"}}))
-	if want := "kit · laptop\n✓ Mac  48% free\n"; got != want {
-		t.Errorf("glance = %q, want %q (no colour in a test's buffer)", got, want)
-	}
+// At a terminal, the view is kit's look: the wordmark with the Mac and the
+// time; a row an area, Config taking the config's drift and its repository,
+// what needs attention named first and the rest counted.
+func TestHome(t *testing.T) {
+	since := time.Date(2026, 10, 2, 9, 0, 0, 0, time.UTC)
+	got := glance(t, true, glanceRun(
+		glanceStep{"brew", "Formulae", "Drift", check.Result{State: check.Attention, Items: []check.Item{
+			{ID: "brew:graphviz", Name: "graphviz", State: "extra", Since: since},
+			{ID: "brew:jq", Name: "jq", State: "missing", Quiet: "snoozed"},
+		}}},
+		glanceStep{"claude-mcp", "Claude MCP servers", "Drift", check.Result{State: check.Attention, Items: []check.Item{{ID: "claude-mcp:docs", Name: "docs", State: "changed"}}}},
+		glanceStep{"config-sync", "Sync", "Config", check.Result{State: check.OK, Glance: "pushed"}},
+		glanceStep{"time-machine", "Time Machine", "Backups", check.Result{State: check.OK, Glance: "Time Machine 11:20"}},
+		glanceStep{"arq", "Arq", "Backups", check.Result{State: check.OK, Glance: "Arq 01:05"}},
+		glanceStep{"disk", "Disk space", "Mac", check.Result{State: check.Attention, Items: []check.Item{{ID: "disk:low", Name: "only 8% free on the startup disk", State: "problem"}}}},
+		glanceStep{"fonts", "fonts", "Steps", check.Result{State: check.OK}},
+	))
+	golden(t, "home.golden", got)
 }
 
 func TestGlanceSilentWithoutARun(t *testing.T) {
