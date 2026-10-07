@@ -34,6 +34,10 @@ scripts/test-isolated
 gate golangci-lint
 golangci-lint run
 
+gate shellcheck
+# The script kit step add writes, which steps of the user's own start from.
+shellcheck internal/steps/template.sh
+
 gate "go build"
 go build ./...
 

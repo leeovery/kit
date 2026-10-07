@@ -157,6 +157,27 @@ and `kit manual add <name> "<what to do>" [-- <command>]` declare checks, jobs a
 hand (a check, and a step's command, run once as it's added, to say how it stands); `kit
 remove check|hourly|nightly|manual <name>` undeclares one.
 
+**Steps of the user's own** are set-up that's done or not, too particular to be kit's (a tool
+installed by its maker's script, a certificate authority trusted, a key imported). Each is a
+line in a `[steps]` section, in the form of the command that adds it: a name, what it does in
+quotes, then `--after <step>` (applied after that step, if it's there), `--needs <step>` (not
+checked or applied until that step stands ok), each as often as wanted, and `--admin` (applying
+needs an administrator's password, settled before anything is applied), as in `tool "Installs
+the tool, from its maker" --after brew`. Its folder, `<scope>/steps/<name>/` beside its
+declarations file, holds `run`, an executable, and whatever data it uses; which Macs it's for
+is the folder it's in. kit runs `run check` and `run apply` in that folder, in its own
+environment, with nothing on their input. check: exit 0 says it's done, its first line what
+kit shows; 1 that it isn't, so it's an item to run; anything else, or a minute passing, that
+the check couldn't tell. apply, given 15 minutes, runs only when the check says not done, and
+is believed only when the check then passes; when it fails, the last line it printed (standard
+error first) says why. Everything both print is in the run's log. Each is a step of its own in
+the Steps area, its name its title; bare `kit` says how many are done, or which aren't and
+`kit apply`. A line that doesn't read, a `--needs` naming no step here, or an `--after` naming
+neither a step nor a kind, makes its step fail, saying where; a name one of kit's steps has is
+refused. `kit step add <name> "<what it does>"` declares one and writes its `run` from a
+template that follows the contract (its check says "not written yet" until it's written);
+`kit step remove <name>` takes out the line and the folder. kit never undoes what a step did.
+
 **The config repository's own edits** are drift, not a problem: linked files mean edits
 land in the repository outside kit (through a link, by hand, by an app), and kit commits only
 its own changes. The `config` step makes each file changed and not committed an item
@@ -221,6 +242,7 @@ kit secret sync              Read every secret from 1Password, and put each in p
 kit prefs capture|restore|history|pending|start-fresh   Apps' settings, saved to a private repository and restored
 kit check|hourly add <name> -- <command>, kit nightly add <name> -- <command>   Your own checks and jobs
 kit manual add <name> "<what to do>" [-- <command>]; kit manual done <name>...  Steps by hand
+kit step add <name> "<what it does>"; kit step remove <name>...  Steps of your own   [--after] [--needs] [--admin] [--shared]
 kit version                  As --version
 ```
 
@@ -355,7 +377,7 @@ pages --transport http https://pages.example.com/mcp
 The sections, in the order kit writes them: `features` (the switches), `paths` (kit's PATH, in order, `~` expands; the
 shared file's, then the Mac's), `homebrew formulae`, `homebrew casks`, `app store apps`,
 `npm packages`, `composer packages`, `go tools`, `github extensions`, `macos login items`,
-`claude mcp` (and `claude mcp <folder>`), `claude plugins`, `checks`, `hourly`, `nightly`
+`claude mcp` (and `claude mcp <folder>`), `claude plugins`, `steps` (the steps of the user's own), `manual`, `checks`, `hourly`, `nightly`
 (jobs of the user's own: a name, then `--` and a command, `~/` expanding in any word). A section kit doesn't know is refused, never
 skipped; so is a line before any section, a section twice, or a file named for a Mac
 `kit.toml` doesn't know.

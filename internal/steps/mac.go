@@ -20,6 +20,7 @@ const (
 	AreaMac     = "Mac"
 	AreaDrift   = "Drift"
 	AreaConfig  = "Config"
+	AreaSteps   = "Steps"
 	AreaManual  = "Manual"
 	AreaChecks  = "Checks"
 )

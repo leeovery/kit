@@ -15,7 +15,7 @@ import (
 )
 
 // areaOrder is the order the at-a-glance view shows areas in.
-var areaOrder = []string{"Backups", "Jobs", "Mac", "Drift", "Config", "Manual", "Checks"}
+var areaOrder = []string{"Backups", "Jobs", "Mac", "Drift", "Config", "Steps", "Manual", "Checks"}
 
 // driftStates say what a drift item is, briefly.
 var driftStates = map[string]string{
@@ -132,11 +132,8 @@ func (g *Glance) areaOf(name string, steps []status.Step) area {
 	}
 	switch {
 	case len(wrong) > 0:
-		hint := "kit status"
-		if name == "Drift" {
-			hint = "kit reconcile"
-		}
-		a.text = strings.Join(wrong, ", ") + "  → " + hint
+		hint := map[string]string{"Drift": "kit reconcile", "Steps": "kit apply"}[name]
+		a.text = strings.Join(wrong, ", ") + "  → " + cmp.Or(hint, "kit status")
 	case name == "Drift":
 		a.text = "nothing to reconcile"
 		var notes []string
@@ -146,6 +143,8 @@ func (g *Glance) areaOf(name string, steps []status.Step) area {
 		if len(notes) > 0 {
 			a.text += " · " + strings.Join(notes, ", ")
 		}
+	case name == "Steps":
+		a.text = fmt.Sprintf("%d done", len(steps))
 	case len(glances) > 0:
 		a.text = strings.Join(glances, " · ")
 	default:
@@ -155,11 +154,14 @@ func (g *Glance) areaOf(name string, steps []status.Step) area {
 }
 
 // describe says what an item that needs attention is, briefly: a drift
-// item's kind, name, what's wrong and for how long; a check's problem as it
-// says it.
+// item's kind, name, what's wrong and for how long; a step of the user's
+// own, and what its check says; a check's problem as it says it.
 func (g *Glance) describe(s status.Step, it check.Item) string {
 	what, isDrift := driftStates[it.State]
-	if !isDrift {
+	switch {
+	case s.Area == "Steps":
+		return s.Title + ": " + s.Summary
+	case !isDrift:
 		return it.Name
 	}
 	text := s.ID + " " + it.Name + " (" + what
