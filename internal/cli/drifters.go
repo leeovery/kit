@@ -146,11 +146,7 @@ func (d kindDrifter) settle(ctx context.Context, r *run, c *changes, dec decisio
 	}
 	switch dec.action {
 	case adopt:
-		group := dec.group
-		if group == config.ToBeSorted {
-			group = ""
-		}
-		return addOne(ctx, r, c, d.k, r.scope(dec.shared), dec.item.Name, group, addOptions{shared: dec.shared, note: note})
+		return addOne(ctx, r, c, d.k, r.scope(dec.shared), dec.item.Name, addOptions{shared: dec.shared, note: note})
 	case remove, undeclare:
 		return removeOne(ctx, r, c, d.k, dec.item.Name, dec.shared)
 	case install:

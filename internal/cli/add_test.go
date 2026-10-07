@@ -16,27 +16,21 @@ func TestAddInstallsAndDeclares(t *testing.T) {
 	w.expectSync([]string{"laptop/declarations"}, "kit brew add hello (laptop): a test")
 
 	out, errOut, code := w.run(t, "brew", "add", "hello", "--note", "a test")
-	want := "kit brew add · laptop\nhello ok installed; declared in laptop (To be sorted)\nkit-config ok committed and pushed laptop/declarations\nNothing needs attention\n"
+	want := "kit brew add · laptop\nhello ok installed; declared in laptop\nkit-config ok committed and pushed laptop/declarations\nNothing needs attention\n"
 	if out != want || errOut != "" || code != 0 {
 		t.Errorf("kit printed add\n%s%s exit %d\nwant\n%s", out, errOut, code, want)
 	}
-	if got := w.readSection(t, "laptop", "homebrew formulae"); got != "go\n\n# To be sorted\nhello   # a test\n" {
+	if got := w.readSection(t, "laptop", "homebrew formulae"); got != "go\nhello   # a test\n" {
 		t.Errorf("laptop = %q", got)
 	}
 }
 
-func TestAddAsksWhichGroupFirst(t *testing.T) {
+// At a terminal, adding asks nothing: the name goes in its sorted place,
+// and the section stays sorted, an old file's headings read as notes.
+func TestAddAsksNothing(t *testing.T) {
 	w := laptopWorld(t)
 	w.terminal = true
 	w.writeSection(t, "laptop", "homebrew formulae", "# Shell\nbat\n\n# Go\ngo\n")
-	callsWhenAsked := -1
-	w.choose = func(question string, options []string) (int, error) {
-		callsWhenAsked = len(w.fake.Calls())
-		if want := []string{"To be sorted", "Shell", "Go"}; !slices.Equal(options, want) {
-			t.Errorf("offered %q, want %q", options, want)
-		}
-		return 2, nil
-	}
 	w.fake.On("brew", "update", "--quiet")
 	w.fake.On("brew", "install", "--formula", "golangci-lint")
 	w.expectSync([]string{"laptop/declarations"}, "kit brew add golangci-lint (laptop)")
@@ -44,37 +38,30 @@ func TestAddAsksWhichGroupFirst(t *testing.T) {
 	if _, errOut, code := w.run(t, "brew", "add", "golangci-lint"); code != 0 {
 		t.Fatalf("kit exit add %d: %s", code, errOut)
 	}
-	if want := []string{"Which group of [homebrew formulae] in laptop for golangci-lint?"}; !slices.Equal(w.asked, want) {
-		t.Errorf("asked %q, want %q", w.asked, want)
+	if len(w.asked) != 0 {
+		t.Errorf("asked %q, want nothing", w.asked)
 	}
-	if callsWhenAsked != 0 {
-		t.Errorf("%d commands ran before kit asked, want none: questions come first", callsWhenAsked)
-	}
-	if got := w.readSection(t, "laptop", "homebrew formulae"); got != "# Shell\nbat\n\n# Go\ngo\ngolangci-lint\n" {
+	if got := w.readSection(t, "laptop", "homebrew formulae"); got != "# Shell\nbat\n# Go\ngo\ngolangci-lint\n" {
 		t.Errorf("laptop = %q", got)
 	}
 }
 
+// A question cancelled leaves everything as it was.
 func TestAddCancelledDoesNothing(t *testing.T) {
 	w := laptopWorld(t)
 	w.terminal = true
+	w.fake.On("mas", "search", "--json", "sleep").Prints(sleepSearch)
 	w.choose = func(string, []string) (int, error) { return 0, ask.ErrCancelled }
-	_, errOut, code := w.run(t, "brew", "add", "hello")
-	if errOut != "kit: cancelled: nothing was installed or declared\n" || code != 2 || len(w.fake.Calls()) != 0 {
-		t.Errorf("kit add, cancelled: %q, exit %d, running %q; want nothing done", errOut, code, w.fake.Calls())
+	_, errOut, code := w.run(t, "mas", "add", "sleep")
+	if errOut != "kit: cancelled: nothing was installed or declared\n" || code != 2 || !slices.Equal(w.fake.Calls(), []string{"mas search --json sleep"}) {
+		t.Errorf("kit mas add, cancelled: %q, exit %d, running %q; want nothing done", errOut, code, w.fake.Calls())
 	}
 }
 
-func TestAddInAGroupWithoutAsking(t *testing.T) {
+func TestAddHasNoGroups(t *testing.T) {
 	w := laptopWorld(t)
-	w.fake.On("brew", "update", "--quiet")
-	w.fake.On("brew", "install", "--formula", "golangci-lint")
-	w.expectSync([]string{"laptop/declarations"}, "kit brew add golangci-lint (laptop)")
-	if _, errOut, code := w.run(t, "brew", "add", "golangci-lint", "--group", "Go"); code != 0 {
-		t.Fatalf("kit exit add %d: %s", code, errOut)
-	}
-	if got := w.readSection(t, "laptop", "homebrew formulae"); got != "go\n\n# Go\ngolangci-lint\n" {
-		t.Errorf("laptop = %q", got)
+	if _, errOut, code := w.run(t, "brew", "add", "golangci-lint", "--group", "Go"); errOut != "kit: unknown flag: --group\n" || code != 2 {
+		t.Errorf("kit brew add --group: %q, exit %d; want the flag unknown", errOut, code)
 	}
 }
 
@@ -84,10 +71,10 @@ func TestAddSharedMovesItOutOfTheMacsFiles(t *testing.T) {
 	w.expectSync([]string{"laptop/declarations", "shared/declarations", "studio/declarations"}, "kit brew add go (laptop)")
 
 	out, errOut, code := w.run(t, "brew", "add", "go", "--shared")
-	if !strings.Contains(out, "go ok already installed; declared in shared (To be sorted), out of laptop and studio\n") || code != 0 {
+	if !strings.Contains(out, "go ok already installed; declared in shared, out of laptop and studio\n") || code != 0 {
 		t.Errorf("kit add --shared printed\n%s%s exit %d", out, errOut, code)
 	}
-	if got := w.readSection(t, "shared", "homebrew formulae"); got != "# Shell\njq\nowner/tap/tool\n\n# To be sorted\ngo\n" {
+	if got := w.readSection(t, "shared", "homebrew formulae"); got != "go\n# Shell\njq\nowner/tap/tool\n" {
 		t.Errorf("shared = %q", got)
 	}
 	if got := w.readSection(t, "laptop", "homebrew formulae"); got != "" {

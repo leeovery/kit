@@ -1,16 +1,13 @@
 package config
 
 import (
+	"cmp"
 	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 )
-
-// ToBeSorted heads the group a name goes in when no group is named, to be
-// filed by hand later.
-const ToBeSorted = "To be sorted"
 
 // noteGap is what separates an entry from the note after it.
 const noteGap = "   # "
@@ -20,12 +17,9 @@ type lineKind int
 
 const (
 	blankLine lineKind = iota
-	// headingLine is a comment that starts a group, after a blank line or at
-	// the section's start, or carries on its heading.
-	headingLine
-	// noteLine is a comment directly after an entry or another note: a note
-	// on the entry after it.
-	noteLine
+	// commentLine is a comment: those directly above an entry are its
+	// notes, moving with it.
+	commentLine
 	entryLine
 )
 
@@ -41,17 +35,13 @@ type body struct {
 
 func splitBody(f form, lines []string) body {
 	b := body{form: f}
-	prev := blankLine
 	for _, line := range lines {
 		kind, name := entryLine, ""
 		switch trimmed := strings.TrimSpace(line); {
 		case trimmed == "":
 			kind = blankLine
 		case strings.HasPrefix(trimmed, "#"):
-			kind = headingLine
-			if prev == entryLine || prev == noteLine {
-				kind = noteLine
-			}
+			kind = commentLine
 		case f == commands || f == settings || f == secrets:
 			name, _, _, _ = splitCommand(line)
 		case f == defaults:
@@ -64,41 +54,8 @@ func splitBody(f form, lines []string) body {
 		b.lines = append(b.lines, line)
 		b.kinds = append(b.kinds, kind)
 		b.names = append(b.names, name)
-		prev = kind
 	}
 	return b
-}
-
-// group is a group's span of lines: from its heading to the next heading,
-// or the section's end.
-type group struct {
-	heading    string
-	start, end int
-}
-
-// groups are the section's groups, in order.
-func (b body) groups() []group {
-	var gs []group
-	for i, kind := range b.kinds {
-		if kind != headingLine || (i > 0 && b.kinds[i-1] != blankLine) {
-			continue
-		}
-		if len(gs) > 0 {
-			gs[len(gs)-1].end = i
-		}
-		heading := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(b.lines[i]), "#"))
-		gs = append(gs, group{heading: heading, start: i, end: len(b.lines)})
-	}
-	return gs
-}
-
-func (b body) find(heading string) (group, bool) {
-	for _, g := range b.groups() {
-		if g.heading == heading {
-			return g, true
-		}
-	}
-	return group{}, false
 }
 
 // entries are the indexes of the entry lines in [from, to).
@@ -112,20 +69,11 @@ func (b body) entries(from, to int) []int {
 	return es
 }
 
-// notesStart is where entry i's block starts: the first of the notes
+// notesStart is where entry i's block starts: the first of the comments
 // directly above it, or i.
 func (b body) notesStart(i int) int {
-	for i > 0 && b.kinds[i-1] == noteLine {
+	for i > 0 && b.kinds[i-1] == commentLine {
 		i--
-	}
-	return i
-}
-
-// headingEnd is the first line after g's heading.
-func (b body) headingEnd(g group) int {
-	i := g.start
-	for i < g.end && b.kinds[i] == headingLine {
-		i++
 	}
 	return i
 }
@@ -142,24 +90,12 @@ func (b body) lastEntryEnd(from, to int) int {
 // sortedPlace is where name goes among the entries in [from, to): before
 // the first, with its notes, that sorts after it, else after the last.
 func (b body) sortedPlace(from, to int, name string) int {
-	key := sortKey(name)
 	for _, i := range b.entries(from, to) {
-		if sortKey(b.names[i]) > key {
+		if compareNames(b.form, b.names[i], name) > 0 {
 			return b.notesStart(i)
 		}
 	}
 	return b.lastEntryEnd(from, to)
-}
-
-// groupAt is the group line i is in, if any: lines before the first heading
-// are in none.
-func (b body) groupAt(i int) (group, bool) {
-	for _, g := range b.groups() {
-		if g.start <= i && i < g.end {
-			return g, true
-		}
-	}
-	return group{}, false
 }
 
 func (b *body) insert(at int, lines ...string) {
@@ -181,14 +117,117 @@ func (b *body) remove(from, to int) {
 	*b = splitBody(b.form, lines)
 }
 
-// sortKey is what a name sorts by in its group: what's before a version
-// or a source after @ (php for php@8.5, revdiff for revdiff@umputun/revdiff),
-// then its last part (bun for oven-sh/bun/bun), in any case.
-func sortKey(name string) string {
+// sortedLines are a sorted section's lines as kit keeps them, with added,
+// entry lines, among them: the comments opening the section, before a blank
+// line; each entry in order, the comments above it with it; any comments
+// after the last; then the blank lines ending the section, as they were. A
+// comment apart from any entry is a note on the entry after it, and the
+// blank lines between entries go.
+func sortedLines(f form, lines []string, added ...string) []string {
+	end := len(lines)
+	for end > 0 && strings.TrimSpace(lines[end-1]) == "" {
+		end--
+	}
+	b := splitBody(f, lines[:end])
+	es := b.entries(0, end)
+	start := end
+	if len(es) > 0 {
+		start = b.notesStart(es[0])
+	}
+	type block struct {
+		name  string
+		lines []string
+	}
+	var blocks []block
+	var notes []string
+	for i := start; i < end; i++ {
+		switch b.kinds[i] {
+		case commentLine:
+			notes = append(notes, b.lines[i])
+		case entryLine:
+			blocks = append(blocks, block{b.names[i], append(notes, b.lines[i])})
+			notes = nil
+		}
+	}
+	for _, line := range added {
+		blocks = append(blocks, block{splitBody(f, []string{line}).names[0], []string{line}})
+	}
+	slices.SortStableFunc(blocks, func(x, y block) int { return compareNames(f, x.name, y.name) })
+	var out []string
+	if lead := trimBlank(lines[:start]); len(lead) > 0 {
+		out = append(slices.Clone(lead), "")
+	}
+	for _, bl := range blocks {
+		out = append(out, bl.lines...)
+	}
+	out = append(out, notes...)
+	return append(out, lines[end:]...)
+}
+
+// trimBlank is lines without the blank lines at their start and end.
+func trimBlank(lines []string) []string {
+	for len(lines) > 0 && strings.TrimSpace(lines[0]) == "" {
+		lines = lines[1:]
+	}
+	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return lines
+}
+
+// compareNames orders two names of a section as kit places them: a package
+// by its name (packageName), a macOS setting kept for this Mac's host among
+// its domain's, anything else as written; case aside and numbers by their
+// value (28 before 184); then as written.
+func compareNames(f form, a, b string) int {
+	ka, kb := a, b
+	switch f {
+	case names:
+		ka, kb = packageName(a), packageName(b)
+	case defaults:
+		ka, kb = strings.TrimPrefix(a, currentHostName), strings.TrimPrefix(b, currentHostName)
+	}
+	return cmp.Or(natural(ka, kb), natural(a, b), strings.Compare(a, b))
+}
+
+// natural compares a and b case aside, a run of digits by its value.
+func natural(a, b string) int {
+	a, b = strings.ToLower(a), strings.ToLower(b)
+	for a != "" && b != "" {
+		da, db := digits(a), digits(b)
+		if da > 0 && db > 0 {
+			na, nb := strings.TrimLeft(a[:da], "0"), strings.TrimLeft(b[:db], "0")
+			if c := cmp.Or(cmp.Compare(len(na), len(nb)), strings.Compare(na, nb)); c != 0 {
+				return c
+			}
+			a, b = a[da:], b[db:]
+			continue
+		}
+		if a[0] != b[0] {
+			return cmp.Compare(a[0], b[0])
+		}
+		a, b = a[1:], b[1:]
+	}
+	return cmp.Compare(len(a), len(b))
+}
+
+// digits is how many digits s starts with.
+func digits(s string) int {
+	n := 0
+	for n < len(s) && '0' <= s[n] && s[n] <= '9' {
+		n++
+	}
+	return n
+}
+
+// packageName is what a package sorts by: what's before a version or a
+// source after @ (php for php@8.5, revdiff for revdiff@umputun/revdiff),
+// then its last part (bun for oven-sh/bun/bun).
+func packageName(name string) string {
 	if i := strings.Index(name, "@"); i > 0 {
 		name = name[:i]
 	}
-	return strings.ToLower(name[strings.LastIndex(name, "/")+1:])
+	return name[strings.LastIndex(name, "/")+1:]
 }
 
 // splitName splits name into the project folder whose section declares it,
@@ -214,22 +253,6 @@ func (f *declFile) holding(d sectionDef, name string) (*section, string) {
 	return nil, line
 }
 
-// Groups are the headings of the groups in kind's section of scope's
-// declarations, in order: none when there's no section.
-func (c *Config) Groups(kind, scope string) ([]string, error) {
-	d, f, err := c.editable(kind, scope)
-	if err != nil {
-		return nil, err
-	}
-	var headings []string
-	if s := f.find(d, ""); s != nil {
-		for _, g := range splitBody(d.form, s.body).groups() {
-			headings = append(headings, g.heading)
-		}
-	}
-	return headings, nil
-}
-
 // Items are the 1Password items kind's sections in scope's declarations are
 // for, in order, as in op://vault/item: none for its plain section.
 func (c *Config) Items(kind, scope string) ([]string, error) {
@@ -247,14 +270,13 @@ func (c *Config) Items(kind, scope string) ([]string, error) {
 }
 
 // Declare declares e in kind's section of scope's declarations, shared or a
-// Mac's, as in laptop, with its note after it. A name goes into the group
-// headed group, in its sorted place, made when the section has none such;
-// or, when group is "", at the end of "To be sorted", made at the section's
-// bottom when it has none. A command's line, its name then e.Value, goes in
-// its sorted place. The section is made, in its place among the file's,
-// when there's none, and the file and its folder too; a kind with sections
-// for items declares it in e.Item's. The rest of the file is kept as it is.
-func (c *Config) Declare(kind, scope string, e Entry, group string) error {
+// Mac's, as in laptop, with its note after it: in a sorted section, which
+// stays sorted (sortedLines); in another, a name in its sorted place, and a
+// path last, as paths are searched in order. The section is made, in its
+// place among the file's, when there's none, and the file and its folder
+// too; a kind with sections for items declares it in e.Item's. The rest of
+// the file is kept as it is.
+func (c *Config) Declare(kind, scope string, e Entry) error {
 	d, f, err := c.editable(kind, scope)
 	if err != nil {
 		return err
@@ -277,43 +299,22 @@ func (c *Config) Declare(kind, scope string, e Entry, group string) error {
 	if s == nil {
 		s = f.add(d, arg)
 	}
-	b := splitBody(d.form, s.body)
-	switch {
-	case d.form == paths && !d.grouped:
-		// Paths are searched in order: a new one goes last.
+	switch b := splitBody(d.form, s.body); {
+	case d.sorted:
+		s.body = sortedLines(d.form, s.body, line)
+	case d.form == paths:
 		b.insert(b.lastEntryEnd(0, len(b.lines)), line)
-	case !d.grouped:
-		b.insert(b.sortedPlace(0, len(b.lines), name), line)
+		s.body = b.lines
 	default:
-		if group == "" {
-			group = ToBeSorted
-		}
-		g, ok := b.find(group)
-		switch {
-		case ok && group == ToBeSorted:
-			b.insert(max(b.lastEntryEnd(g.start, g.end), b.headingEnd(g)), line)
-		case ok:
-			b.insert(max(b.sortedPlace(g.start, g.end, name), b.headingEnd(g)), line)
-		default:
-			at := b.lastEntryEnd(0, len(b.lines))
-			if tbs, ok := b.find(ToBeSorted); ok && group != ToBeSorted {
-				b.insert(tbs.start, "# "+group, line, "")
-			} else {
-				block := []string{"# " + group, line}
-				if at > 0 {
-					block = append([]string{""}, block...)
-				}
-				b.insert(at, block...)
-			}
-		}
+		b.insert(b.sortedPlace(0, len(b.lines), name), line)
+		s.body = b.lines
 	}
-	s.body = b.lines
 	return c.writeDecl(f, e.Name, true)
 }
 
 // Undeclare takes name out of kind's sections of scope's declarations, with
-// the notes directly above it. A group it leaves empty loses its heading,
-// and a section it leaves empty goes. The rest of the file is kept as it is.
+// the notes directly above it, keeping a sorted section sorted; a section it
+// leaves empty goes. The rest of the file is kept as it is.
 func (c *Config) Undeclare(kind, scope, name string) error {
 	d, f, err := c.editable(kind, scope)
 	if err != nil {
@@ -323,23 +324,16 @@ func (c *Config) Undeclare(kind, scope, name string) error {
 	var b body
 	i := -1
 	if s != nil {
+		if d.sorted {
+			s.body = sortedLines(d.form, s.body)
+		}
 		b = splitBody(d.form, s.body)
 		i = slices.Index(b.names, line)
 	}
 	if i < 0 {
 		return fmt.Errorf("%s isn't in %s", name, DeclFile(scope))
 	}
-	owner, grouped := b.groupAt(i)
 	b.remove(b.notesStart(i), i+1)
-	if grouped {
-		// The group starts where it did: only lines after its heading went.
-		for _, g := range b.groups() {
-			if g.start == owner.start && len(b.entries(g.start, g.end)) == 0 {
-				b.remove(g.start, g.end)
-				break
-			}
-		}
-	}
 	s.body = b.lines
 	if len(b.entries(0, len(b.lines))) == 0 {
 		f.drop(s)
@@ -348,7 +342,8 @@ func (c *Config) Undeclare(kind, scope, name string) error {
 }
 
 // Replace rewrites the line declaring e.Name in kind's sections of scope's
-// declarations, with e's value and note; the notes above it are kept.
+// declarations, with e's value and note; the notes above it are kept, and a
+// sorted section sorted.
 func (c *Config) Replace(kind, scope string, e Entry) error {
 	d, f, err := c.editable(kind, scope)
 	if err != nil {
@@ -368,6 +363,9 @@ func (c *Config) Replace(kind, scope string, e Entry) error {
 		return err
 	}
 	s.body[i] = line
+	if d.sorted {
+		s.body = sortedLines(d.form, s.body)
+	}
 	return c.writeDecl(f, e.Name, true)
 }
 

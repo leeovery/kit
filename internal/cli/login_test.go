@@ -20,7 +20,7 @@ func TestReconcileAdoptsALoginItemWithItsAppsName(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("kit reconcile printed\n%s%s exit %d", out, errOut, code)
 	}
-	if got := w.readSection(t, "laptop", "macos login items"); got != "# To be sorted\ncom.getdropbox.dropbox   # Dropbox: syncs the files\n" {
+	if got := w.readSection(t, "laptop", "macos login items"); got != "com.getdropbox.dropbox   # Dropbox: syncs the files\n" {
 		t.Errorf("laptop = %q", got)
 	}
 	if !strings.Contains(out, "declared in laptop") {

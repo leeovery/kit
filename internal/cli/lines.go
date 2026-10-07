@@ -50,7 +50,7 @@ func (a *app) addLine(ctx context.Context, r *run, name string, args []string, d
 	entry := config.Entry{Name: args[0], Value: value, Note: opts.note}
 	c := startChanges(r, args[:1])
 	c.step(ctx, args[0], func(ctx context.Context) check.Result {
-		if err := r.cfg.Declare(kind, scope, entry, ""); err != nil {
+		if err := r.cfg.Declare(kind, scope, entry); err != nil {
 			return check.Result{State: check.Failed, Reason: err.Error()}
 		}
 		c.changed(config.DeclFile(scope))

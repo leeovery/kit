@@ -19,7 +19,7 @@ import (
 )
 
 // listSchema is kit list --json's document's version.
-const listSchema = 1
+const listSchema = 2
 
 // listed is a declared name, where it's declared, and whether it's
 // installed.
@@ -32,7 +32,6 @@ type listed struct {
 	// File is the file declaring it, as in laptop/declarations.
 	File      string `json:"file"`
 	Line      int    `json:"line"`
-	Group     string `json:"group,omitempty"`
 	Note      string `json:"note,omitempty"`
 	Installed bool   `json:"installed"`
 	// Off is whether it's declared, but not to be installed.
@@ -50,7 +49,7 @@ func (l listed) where() string {
 func newListCommand(a *app) *cobra.Command {
 	return &cobra.Command{
 		Use:   "list [kind]",
-		Short: "List what's declared for this Mac: each name, its file, group and note, and whether it's installed",
+		Short: "List what's declared for this Mac: each name, its file and note, and whether it's installed",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			r, err := a.prepare("list", "list")
@@ -97,7 +96,7 @@ func (a *app) list(ctx context.Context, r *run, args []string) error {
 					return err
 				}
 			}
-			entries = append(entries, listed{Kind: name, Name: e.Name, Scope: e.Scope, File: e.Path(), Line: e.Line, Group: e.Group, Note: e.Note, Installed: isIn, Off: e.Off})
+			entries = append(entries, listed{Kind: name, Name: e.Name, Scope: e.Scope, File: e.Path(), Line: e.Line, Note: e.Note, Installed: isIn, Off: e.Off})
 		}
 	}
 	if a.json {
@@ -110,16 +109,15 @@ func (a *app) list(ctx context.Context, r *run, args []string) error {
 			Entries []listed `json:"entries"`
 		}{listSchema, r.machine, entries})
 	}
-	kindWidth, nameWidth, fileWidth := 0, 0, 0
+	kindWidth, nameWidth := 0, 0
 	for _, e := range entries {
 		kindWidth = max(kindWidth, ansi.StringWidth(e.Kind))
 		nameWidth = max(nameWidth, ansi.StringWidth(e.Name))
-		fileWidth = max(fileWidth, ansi.StringWidth(e.where()))
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "kit list · %s\n", r.machine)
 	for _, e := range entries {
-		line := strings.TrimRight(fmt.Sprintf("%-*s  %-*s  %-*s  %s", kindWidth, e.Kind, nameWidth, e.Name, fileWidth, e.where(), e.Group), " ")
+		line := strings.TrimRight(fmt.Sprintf("%-*s  %-*s  %s", kindWidth, e.Kind, nameWidth, e.Name, e.where()), " ")
 		switch {
 		case e.Off:
 			line += "  (off)"
@@ -136,7 +134,7 @@ func (a *app) list(ctx context.Context, r *run, args []string) error {
 }
 
 // whySchema is kit why --json's document's version.
-const whySchema = 1
+const whySchema = 2
 
 // why is what kit knows of a name, as one kind.
 type why struct {
@@ -248,9 +246,6 @@ func (a *app) why(ctx context.Context, r *run, name string) error {
 		}
 		for _, e := range w.Declared {
 			line := fmt.Sprintf("  declared in %s, line %d", e.Path(), e.Line)
-			if e.Group != "" {
-				line += ", under " + e.Group
-			}
 			if e.Note != "" {
 				line += ": " + e.Note
 			}

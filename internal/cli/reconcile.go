@@ -12,7 +12,6 @@ import (
 
 	"github.com/leeovery/kit/internal/ask"
 	"github.com/leeovery/kit/internal/check"
-	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/drift"
 	"github.com/leeovery/kit/internal/render"
 )
@@ -36,7 +35,7 @@ const reconcileSchema = 1
 type reconcileOptions struct {
 	adopt, remove, install, undeclare, snooze, revert bool
 	shared, all                                       bool
-	group, note                                       string
+	note                                              string
 }
 
 // driftItem is an item of drift, of a kind, and what can be done about it.
@@ -52,7 +51,6 @@ type decision struct {
 	item   driftItem
 	action string
 	shared bool
-	group  string
 }
 
 func newReconcileCommand(a *app) *cobra.Command {
@@ -70,7 +68,7 @@ Without a terminal, or with --json, it lists the items with their ids and
 choices. Name items' ids, with what to do with them, to settle those, in one
 run and one commit:
 
-  kit reconcile brew:ffmpeg --adopt [--shared] [--group "<heading>"] [--note "why"]
+  kit reconcile brew:ffmpeg --adopt [--shared] [--note "why"]
   kit reconcile brew:node@20 --remove
   kit reconcile cask:zoom --install
   kit reconcile brew:jq --undeclare [--shared]
@@ -99,7 +97,6 @@ run and one commit:
 	f.BoolVar(&opts.revert, "revert", false, "put back what's declared, in place of what the Mac has")
 	f.BoolVar(&opts.shared, "shared", false, "for every Mac: adopt into, or undeclare from, the shared file")
 	f.BoolVar(&opts.all, "all", false, "at a terminal, every item, quiet ones too")
-	f.StringVar(&opts.group, "group", "", "the group an adopted item goes in")
 	f.StringVar(&opts.note, "note", "", "why it's adopted, kept after its name")
 	return cmd
 }
@@ -187,7 +184,7 @@ func decide(items []driftItem, id string, opts reconcileOptions) (decision, erro
 	case !slices.Contains(item.Choices, actions[0]):
 		return decision{}, fmt.Errorf("%s can't be %s: %s", id, past(actions[0]), flagList(item.Choices))
 	}
-	return decision{item: item, action: actions[0], shared: opts.shared, group: opts.group}, nil
+	return decision{item: item, action: actions[0], shared: opts.shared}, nil
 }
 
 // flagList is choices as their flags, as in --adopt, --remove or --snooze.
@@ -258,8 +255,7 @@ func (a *app) listDrift(r *run, items []driftItem) error {
 }
 
 // askAbout asks, of each item that needs attention (every item, with
-// --all), what to do with it, and for one adopted, which group of the file
-// it goes in: every question before anything is done.
+// --all), what to do with it: every question before anything is done.
 func (a *app) askAbout(ctx context.Context, r *run, items []driftItem, opts reconcileOptions) ([]decision, error) {
 	var decisions []decision
 	for _, it := range items {
@@ -292,41 +288,9 @@ func (a *app) askAbout(ctx context.Context, r *run, items []driftItem, opts reco
 		case len(offered) + 1:
 			return decisions, nil
 		}
-		d := decision{item: it, action: offered[i].action, shared: offered[i].shared, group: opts.group}
-		if d.action == adopt && d.group == "" {
-			if d.group, err = a.askGroup(ctx, r, d); err != nil {
-				return nil, err
-			}
-		}
-		decisions = append(decisions, d)
+		decisions = append(decisions, decision{item: it, action: offered[i].action, shared: offered[i].shared})
 	}
 	return decisions, nil
-}
-
-// askGroup asks which group of the file an adopted item goes in.
-func (a *app) askGroup(ctx context.Context, r *run, d decision) (string, error) {
-	if !config.Grouped(d.item.Kind) {
-		return "", nil
-	}
-	scope := r.scope(d.shared)
-	headings, err := r.cfg.Groups(d.item.Kind, scope)
-	if err != nil {
-		return "", err
-	}
-	options := []string{config.ToBeSorted}
-	for _, h := range headings {
-		if h != config.ToBeSorted {
-			options = append(options, h)
-		}
-	}
-	i, err := a.Choose(ctx, fmt.Sprintf("Which group of [%s] in %s for %s?", config.Header(d.item.Kind), scope, d.item.Name), options)
-	if errors.Is(err, ask.ErrCancelled) {
-		return "", errors.New("cancelled: nothing was changed")
-	}
-	if err != nil {
-		return "", err
-	}
-	return options[i], nil
 }
 
 // describe says what an item is, for a question about it.

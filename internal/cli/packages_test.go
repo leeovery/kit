@@ -16,10 +16,10 @@ func TestAddAComposerPackageWithAConstraint(t *testing.T) {
 	w.expectSync([]string{"laptop/declarations"}, "kit composer add laravel/valet:^4.0 (laptop): Valet 4")
 
 	out, errOut, code := w.run(t, "composer", "add", "laravel/valet:^4.0", "--note", "Valet 4")
-	if code != 0 || !strings.Contains(out, "laravel/valet:^4.0 ok installed; declared in laptop (To be sorted)\n") {
+	if code != 0 || !strings.Contains(out, "laravel/valet:^4.0 ok installed; declared in laptop\n") {
 		t.Fatalf("kit printed add\n%s%s exit %d", out, errOut, code)
 	}
-	if got := w.readSection(t, "laptop", "composer packages"); got != "# To be sorted\nlaravel/valet:^4.0   # Valet 4\n" {
+	if got := w.readSection(t, "laptop", "composer packages"); got != "laravel/valet:^4.0   # Valet 4\n" {
 		t.Errorf("laptop = %q", got)
 	}
 	out, _, _ = w.run(t, "status", "composer")
@@ -40,7 +40,7 @@ func TestReconcileAdoptsAnNPMPackage(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("kit reconcile printed\n%s%s exit %d", out, errOut, code)
 	}
-	if got := w.readSection(t, "laptop", "npm packages"); got != "intelephense\n\n# To be sorted\ndocx   # for the docs skill\n" {
+	if got := w.readSection(t, "laptop", "npm packages"); got != "docx   # for the docs skill\nintelephense\n" {
 		t.Errorf("laptop = %q", got)
 	}
 }

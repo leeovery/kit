@@ -48,12 +48,12 @@ func TestList(t *testing.T) {
 	}
 	f := "homebrew formulae"
 	want := []config.Entry{
-		{Name: "jq", Scope: "shared", Section: f, Line: 9, Group: "Shell"},
-		{Name: "ripgrep", Scope: "shared", Section: f, Line: 10, Group: "Shell", Note: "searching code"},
-		{Name: "owner/tap/tool", Scope: "shared", Section: f, Line: 11, Group: "Shell"},
-		{Name: "git", Scope: "shared", Section: f, Line: 14, Group: "Git"},
-		{Name: "go", Scope: "laptop", Section: f, Line: 3, Group: "Development"},
-		{Name: "node@24", Scope: "laptop", Section: f, Line: 4, Group: "Development", Note: "for the old projects"},
+		{Name: "jq", Scope: "shared", Section: f, Line: 9},
+		{Name: "ripgrep", Scope: "shared", Section: f, Line: 10, Note: "searching code"},
+		{Name: "owner/tap/tool", Scope: "shared", Section: f, Line: 11},
+		{Name: "git", Scope: "shared", Section: f, Line: 14},
+		{Name: "go", Scope: "laptop", Section: f, Line: 3},
+		{Name: "node@24", Scope: "laptop", Section: f, Line: 4, Note: "for the old projects"},
 	}
 	if got.Kind != "brew" || !slices.Equal(got.Entries, want) {
 		t.Errorf("List() = %+v\nwant %+v", got.Entries, want)
@@ -91,7 +91,7 @@ func TestListSecretsByItem(t *testing.T) {
 	}
 	want := []config.Entry{
 		{Name: "KEY", Value: "op://vault/Other/key", Scope: "laptop", Section: "secrets", Line: 2},
-		{Name: "TOKEN", Value: "GitHub/token", Scope: "laptop", Section: "secrets op://vault/Some Item", Item: "op://vault/Some Item", Line: 6, Group: "Tokens", Note: "the CLI's"},
+		{Name: "TOKEN", Value: "GitHub/token", Scope: "laptop", Section: "secrets op://vault/Some Item", Item: "op://vault/Some Item", Line: 6, Note: "the CLI's"},
 	}
 	if !slices.Equal(got.Entries, want) {
 		t.Errorf("List() = %+v\nwant %+v", got.Entries, want)
@@ -155,7 +155,7 @@ func TestCommandsKeepAQuotedHash(t *testing.T) {
 func TestWhere(t *testing.T) {
 	cfg := loadRepo(t, map[string]string{"shared/declarations": sharedFile, "laptop/declarations": laptopFile, "studio/declarations": "[homebrew formulae]\n# Media\nffmpeg   # for video\n"})
 	got, err := cfg.Where("brew", "ffmpeg")
-	want := []config.Entry{{Name: "ffmpeg", Scope: "studio", Section: "homebrew formulae", Line: 3, Group: "Media", Note: "for video"}}
+	want := []config.Entry{{Name: "ffmpeg", Scope: "studio", Section: "homebrew formulae", Line: 3, Note: "for video"}}
 	if err != nil || !slices.Equal(got, want) {
 		t.Errorf("Where(ffmpeg) = %+v, %v; want %+v", got, err, want)
 	}

@@ -24,7 +24,7 @@ func TestExclusions(t *testing.T) {
 	fake := runnertest.New(t)
 	x := exclusion.New(fake, home, "/prefs")
 	list, err := x.Expand(config.List{Entries: []config.Entry{
-		{Name: "~/Library/Application Support/*/GPUCache", Group: "Caches", Scope: "shared", Line: 3},
+		{Name: "~/Library/Application Support/*/GPUCache", Scope: "shared", Line: 3},
 		{Name: "~/.cache", Scope: "shared", Line: 4},
 		{Name: "/Applications", Scope: "shared", Line: 5},
 	}})

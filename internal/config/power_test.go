@@ -13,11 +13,11 @@ func TestPowerSettingsRead(t *testing.T) {
 	if err != nil || len(list.Entries) != 2 || list.Entries[0].Name != "charger:sleep" || list.Entries[0].Value != "0" || list.Entries[0].Note != "never sleep" || list.Entries[1].Name != "all:womp" {
 		t.Errorf("List() = %+v, %v", list.Entries, err)
 	}
-	if err := cfg.Declare("power", "laptop", config.Entry{Name: "battery:displaysleep", Value: "2"}, "On the charger"); err != nil {
+	if err := cfg.Declare("power", "laptop", config.Entry{Name: "battery:displaysleep", Value: "2"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := readFile(t, cfg, "laptop/declarations"); !strings.Contains(got, "-b displaysleep 2\n") {
-		t.Errorf("laptop = %q", got)
+	if got, want := readFile(t, cfg, "laptop/declarations"), "[power settings]\n-a womp 1\n-b displaysleep 2\n# On the charger\n-c sleep 0   # never sleep\n"; got != want {
+		t.Errorf("laptop = %q, want %q", got, want)
 	}
 	for _, line := range []string{"-x sleep 0", "-c sleep", "sleep 0"} {
 		bad := loadRepo(t, map[string]string{"laptop/declarations": "[power settings]\n" + line + "\n"})

@@ -54,27 +54,26 @@ func TestSettingsRefuseWhatDoesntRead(t *testing.T) {
 }
 
 func TestDeclareASetting(t *testing.T) {
-	cfg := loadRepo(t, map[string]string{"laptop/declarations": "[macos settings]\n# Dock\ncom.apple.dock tilesize -int 60\n"})
+	cfg := loadRepo(t, map[string]string{"laptop/declarations": "[macos settings]\n# the icons' size\ncom.apple.dock tilesize -int 60\ncom.apple.symbolichotkeys AppleSymbolicHotKeys -dict-add 184 \"<dict><key>enabled</key><false/></dict>\"\n"})
 	for _, e := range []config.Entry{
 		{Name: "com.apple.dock:autohide", Value: "-bool true"},
 		{Name: "currentHost:NSGlobalDomain:com.apple.mouse.tapBehavior", Value: "-int 1", Note: "tap to click"},
 		{Name: "com.apple.symbolichotkeys:AppleSymbolicHotKeys:61", Value: `-dict-add "<dict><key>enabled</key><true/></dict>"`},
 		{Name: "com.apple.controlcenter:NSStatusItem Visible WiFi", Value: "-bool true"},
 	} {
-		if err := cfg.Declare("defaults", "laptop", e, "Dock"); err != nil {
+		if err := cfg.Declare("defaults", "laptop", e); err != nil {
 			t.Fatalf("Declare(%s) = %v", e.Name, err)
 		}
 	}
-	got := readFile(t, cfg, "laptop/declarations")
-	for _, want := range []string{
-		"com.apple.dock autohide -bool true\n",
-		"-currentHost NSGlobalDomain com.apple.mouse.tapBehavior -int 1   # tap to click\n",
-		`com.apple.symbolichotkeys AppleSymbolicHotKeys -dict-add 61 "<dict><key>enabled</key><true/></dict>"` + "\n",
-		`com.apple.controlcenter "NSStatusItem Visible WiFi" -bool true` + "\n",
-	} {
-		if !strings.Contains(got, want) {
-			t.Errorf("laptop =\n%s\nwant a line %q", got, want)
-		}
+	want := "[macos settings]\n" +
+		`com.apple.controlcenter "NSStatusItem Visible WiFi" -bool true` + "\n" +
+		"com.apple.dock autohide -bool true\n" +
+		"# the icons' size\ncom.apple.dock tilesize -int 60\n" +
+		`com.apple.symbolichotkeys AppleSymbolicHotKeys -dict-add 61 "<dict><key>enabled</key><true/></dict>"` + "\n" +
+		`com.apple.symbolichotkeys AppleSymbolicHotKeys -dict-add 184 "<dict><key>enabled</key><false/></dict>"` + "\n" +
+		"-currentHost NSGlobalDomain com.apple.mouse.tapBehavior -int 1   # tap to click\n"
+	if got := readFile(t, cfg, "laptop/declarations"); got != want {
+		t.Errorf("laptop =\n%s\nwant\n%s", got, want)
 	}
 	if _, err := cfg.List("defaults", "laptop"); err != nil {
 		t.Errorf("the file doesn't read back: %v", err)

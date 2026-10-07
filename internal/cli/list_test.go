@@ -9,8 +9,8 @@ import (
 func TestList(t *testing.T) {
 	out, _, code := laptopWorld(t).run(t, "list")
 	want := `kit list · laptop
-brew  jq              shared  Shell
-brew  owner/tap/tool  shared  Shell
+brew  jq              shared
+brew  owner/tap/tool  shared
 brew  go              laptop
 cask  ghostty         shared
 `
@@ -23,7 +23,7 @@ func TestListSaysWhatsMissing(t *testing.T) {
 	w := missingWorld(t)
 	w.writeSection(t, "laptop", "homebrew formulae", "# Search\nripgrep   # fast grep\ngo\n")
 	out, _, _ := w.run(t, "list", "brew")
-	if !strings.Contains(out, "brew  ripgrep         laptop  Search  (missing)  # fast grep\n") || strings.Contains(out, "cask") {
+	if !strings.Contains(out, "brew  ripgrep         laptop  (missing)  # fast grep\n") || strings.Contains(out, "cask") {
 		t.Errorf("kit list brew printed\n%s\nwant ripgrep missing, with its note, and no casks", out)
 	}
 }
@@ -33,12 +33,12 @@ func TestListJSON(t *testing.T) {
 	var doc struct {
 		Schema  int `json:"schema"`
 		Entries []struct {
-			Kind, Name, Scope, File, Group string
-			Line                           int
-			Installed                      bool
+			Kind, Name, Scope, File string
+			Line                    int
+			Installed               bool
 		} `json:"entries"`
 	}
-	if err := json.Unmarshal([]byte(out), &doc); err != nil || doc.Schema != 1 || len(doc.Entries) != 4 {
+	if err := json.Unmarshal([]byte(out), &doc); err != nil || doc.Schema != 2 || len(doc.Entries) != 4 || strings.Contains(out, `"group"`) {
 		t.Fatalf("kit list --json printed %q: %v", out, err)
 	}
 	if e := doc.Entries[2]; e.Kind != "brew" || e.Name != "go" || e.Scope != "laptop" || e.File != "laptop/declarations" || e.Line != 2 || !e.Installed {
@@ -53,7 +53,7 @@ func TestWhy(t *testing.T) {
 	w.fake.On("brew", "uses", "--installed", "ffmpeg")
 
 	out, _, code := w.run(t, "why", "go")
-	want := "go (brew)\n  declared in laptop/declarations, line 3, under Go: for kit\n  installed here, by kit apply's Formulae step\n  needed by golangci-lint, goreleaser\n"
+	want := "go (brew)\n  declared in laptop/declarations, line 3: for kit\n  installed here, by kit apply's Formulae step\n  needed by golangci-lint, goreleaser\n"
 	if out != want || code != 0 {
 		t.Errorf("kit why go printed\n%s exit %d\nwant\n%s", out, code, want)
 	}
@@ -76,15 +76,16 @@ func TestWhyJSON(t *testing.T) {
 	w.fake.On("brew", "uses", "--installed", "jq")
 	out, _, _ := w.run(t, "why", "jq", "--json")
 	var doc struct {
-		Name  string `json:"name"`
-		Kinds []struct {
+		Schema int    `json:"schema"`
+		Name   string `json:"name"`
+		Kinds  []struct {
 			Kind       string `json:"kind"`
 			ForThisMac bool   `json:"for_this_mac"`
 			Installed  bool   `json:"installed"`
 			Declared   []struct{ Scope string }
 		} `json:"kinds"`
 	}
-	if err := json.Unmarshal([]byte(out), &doc); err != nil || doc.Name != "jq" || len(doc.Kinds) != 1 {
+	if err := json.Unmarshal([]byte(out), &doc); err != nil || doc.Schema != 2 || doc.Name != "jq" || len(doc.Kinds) != 1 || strings.Contains(out, `"Group"`) {
 		t.Fatalf("kit why --json printed %q: %v", out, err)
 	}
 	if k := doc.Kinds[0]; k.Kind != "brew" || !k.ForThisMac || !k.Installed || k.Declared[0].Scope != "shared" {

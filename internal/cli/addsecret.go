@@ -132,7 +132,7 @@ func (a *app) addSecret(ctx context.Context, r *run, names []string, opts addOpt
 		if so.mode != "" {
 			line += " --mode " + so.mode
 		}
-		if err := r.cfg.Declare(secretKind, scope, config.Entry{Name: name, Value: line, Note: opts.note, Item: item}, ""); err != nil {
+		if err := r.cfg.Declare(secretKind, scope, config.Entry{Name: name, Value: line, Note: opts.note, Item: item}); err != nil {
 			return check.Result{State: check.Failed, Reason: "kept in 1Password, but couldn't declare: " + err.Error()}
 		}
 		c.changed(config.DeclFile(scope))

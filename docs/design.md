@@ -219,13 +219,13 @@ kit status [step...]         How this Mac stands against the config: what needs 
 kit apply [step...] [--plan] Install what's declared and missing (--plan: say what, do nothing)
 kit reconcile [<kind>...] [<id>...]  Settle drift: adopt, remove, install, undeclare or snooze
 kit nightly [job...]         Run the scheduled jobs due, then every check (the hourly launch)   [--plan]
-kit list [kind]              What's declared for this Mac: file, group, note, installed or not
+kit list [kind]              What's declared for this Mac: file, note, installed or not
 kit why <name>               Where it's declared, whether it's installed, what needs it
 kit log                      What the last run did: every check, every command, with timings
 kit machine [<name>]         This Mac's name: shown, or set (one of kit.toml's Macs)
 
 What kit manages, a command each:
-kit <kind> add <name>...     Install, and declare for this Mac   [--shared] [--temp] [--note] [--group]
+kit <kind> add <name>...     Install, and declare for this Mac   [--shared] [--temp] [--note]
 kit <kind> remove <name>...  Uninstall, and undeclare            [--shared]
     (brew, cask, mas, npm, composer, go, gh, tmux, claude-mcp, login-item,
      defaults, power, git-config, backup-exclusion, spotlight-exclusion)
@@ -262,10 +262,10 @@ applied, and keeps sudo's hold fresh while it runs; without a terminal it asks n
 those casks wait, saying why (requirement 4). App Store apps need the password for every
 install, as mas runs as root; `kit <kind> add` and reconcile's installs ask up front the same way.
 
-`kit <kind> add` installs each name, unless it's installed, and declares it in this Mac's file, or
-for every Mac with `--shared` (taking it out of each Mac's own file); at a terminal it first
-asks which of the file's groups each goes in ("To be sorted" first), and `--group` answers
-without asking. `--temp` installs without declaring: quiet for 7 days, then reconcile asks.
+`kit <kind> add` installs each name, unless it's installed, and declares it in this Mac's file, in
+its sorted place, or for every Mac with `--shared` (taking it out of each Mac's own file); it
+asks nothing about where. `--temp` installs without declaring: quiet for 7 days, then reconcile
+asks.
 `kit <kind> remove` uninstalls and takes each name out of this Mac's file; one declared for every Mac
 needs `--shared`. Both handle each name on its own (one failing leaves the others), then commit
 the config's changed files, with a message saying what, for which Mac and why, and push to
@@ -274,11 +274,11 @@ main, pulling with rebase first. A push that fails leaves the commit, and says s
 `kit reconcile` settles drift. At a terminal it goes through each item that needs attention
 (`--all`: quiet ones too; name kinds, as in `kit reconcile brew`, for theirs alone), asking
 what to do with it: declare it (for this Mac, or every Mac),
-uninstall it, install it, undeclare it, snooze it for 7 days, leave it, or stop; for one
-declared, which group. Every question comes first; then it does it all, as `kit <kind> add` and
+uninstall it, install it, undeclare it, snooze it for 7 days, leave it, or stop. Every question
+comes first; then it does it all, as `kit <kind> add` and
 `kit <kind> remove` would, and commits and pushes once. Without a terminal, or with `--json`, it lists
 the items with their ids and choices, and `kit reconcile <id>... --adopt` (or `--remove`,
-`--install`, `--undeclare`, `--snooze`; `--shared`, `--group`, `--note`) settles those, every
+`--install`, `--undeclare`, `--snooze`; `--shared`, `--note`) settles those, every
 id checked before anything's done, in one run and one commit: how an agent carries out a
 person's decisions.
 
@@ -383,13 +383,21 @@ Each section's lines read one way. A name list's: one name a line, a version or 
 constraint allowed after it (`typescript@5`, `laravel/valet:^4.0`). A path's: the whole line,
 spaces and all. A command's: a name, then options, split into words as a shell splits them.
 A `#` at the start of a line or after a space (outside quotes, in a command) starts a
-comment: on its own line it heads a group, after an entry it's the note saying why it's
-there. Within a group, names sort by their last part (`oven-sh/bun/bun` sorts as `bun`). A
-name is declared in the shared declarations or a Mac's, never both. A Mac can't be called
-`shared`.
+comment: the comments directly above an entry, and the one after it on its line, are its
+notes, saying why it's there. A name is declared in the shared declarations or a Mac's, never
+both. A Mac can't be called `shared`.
 
-kit edits these files in place, leaving every other line as it is; it checks the result
-reads back, and writes the file whole or not at all. A file it can't read, it doesn't edit.
+The lists of things and settings (every section but the PATH, the commands, the jobs and kit
+prefs's lists) are kept sorted, with no groups: packages by their names' last part
+(`oven-sh/bun/bun` sorts as `bun`, `php@8.5` as `php`), the rest as written, so settings sort
+by their keys (a domain's or `alias.`'s together); case aside, numbers by value. Each entry's
+notes move with it; comments opening a section, before a blank line, stay at its top. The PATH
+keeps its order, the order it's searched in; commands and jobs keep theirs, a new one going in
+its place by name.
+
+kit edits these files in place: a sorted section it touches is written sorted, and every other
+line is left as it is; it checks the result reads back, and writes the file whole or not at
+all. A file it can't read, it doesn't edit.
 
 ```toml
 format = 1
@@ -570,9 +578,9 @@ own state and logs. Unreleased: the maintainer releases, with mint, once kit is 
 **2. Packages, read-write — done.** The list writer; syncing the config repository (commit,
 pull with rebase, push); drift counted after 24 hours, with snoozes and temporary installs;
 Homebrew's installs and removes; `kit apply` with `--plan`, an administrator's password asked
-up front; `kit <kind> add` and `kit <kind> remove` (`--shared`, `--temp`, `--note`, `--group`, the group
-asked at a terminal); `kit reconcile`, at a terminal and by id; `kit list` and `kit why`
-(#12–#19).
+up front; `kit <kind> add` and `kit <kind> remove` (`--shared`, `--temp`, `--note`; and `--group`,
+with the group asked at a terminal, both gone with the groups in slice 12); `kit reconcile`, at
+a terminal and by id; `kit list` and `kit why` (#12–#19).
 
 **3. The other kinds — built.** Every kind through one table; a step can come after another
 while applying, and a check can defer its own step; the administrator's password up front for

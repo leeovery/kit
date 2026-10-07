@@ -3,6 +3,7 @@ package config_test
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -22,47 +23,53 @@ func TestDeclare(t *testing.T) {
 	tests := []struct {
 		name, before string
 		entry        config.Entry
-		kind, group  string
+		kind         string
 		after        string
 	}{
 		{
-			name:   "into a group, in its sorted place",
-			before: "[homebrew formulae]\n# Shell\nbat\nripgrep\n\n# Git\ngit\n",
-			kind:   "brew", entry: config.Entry{Name: "jq", Note: "for scripts"}, group: "Shell",
-			after: "[homebrew formulae]\n# Shell\nbat\njq   # for scripts\nripgrep\n\n# Git\ngit\n",
+			name:   "a package, in its sorted place by its name, before another's notes",
+			before: "[homebrew formulae]\nbat\nowner/tap/tool\n# a note on zoxide\nzoxide\n",
+			kind:   "brew", entry: config.Entry{Name: "jq", Note: "for scripts"},
+			after: "[homebrew formulae]\nbat\njq   # for scripts\nowner/tap/tool\n# a note on zoxide\nzoxide\n",
 		},
 		{
-			name:   "sorted by the last part of the name, before another's notes",
-			before: "[homebrew formulae]\n# Shell\nbat\n# a note on zoxide\nzoxide\n",
-			kind:   "brew", entry: config.Entry{Name: "owner/tap/tool"}, group: "Shell",
-			after: "[homebrew formulae]\n# Shell\nbat\nowner/tap/tool\n# a note on zoxide\nzoxide\n",
-		},
-		{
-			name:   "into To be sorted, made at the section's bottom",
-			before: "[homebrew formulae]\n# Shell\nbat\n\n[homebrew casks]\nghostty\n",
+			name:   "an old file's headings, notes on the entries under them, the section sorted",
+			before: "[homebrew formulae]\n# Shell\nripgrep\nbat\n\n# Git\ngit\n\n[homebrew casks]\nghostty\n",
 			kind:   "brew", entry: config.Entry{Name: "jq"},
-			after: "[homebrew formulae]\n# Shell\nbat\n\n# To be sorted\njq\n\n[homebrew casks]\nghostty\n",
+			after: "[homebrew formulae]\nbat\n# Git\ngit\njq\n# Shell\nripgrep\n\n[homebrew casks]\nghostty\n",
 		},
 		{
-			name:   "a new group before To be sorted",
-			before: "[homebrew formulae]\nbat\n\n# To be sorted\nzz\n",
-			kind:   "brew", entry: config.Entry{Name: "go"}, group: "Go",
-			after: "[homebrew formulae]\nbat\n\n# Go\ngo\n\n# To be sorted\nzz\n",
+			name:   "the comments opening a section kept at its top",
+			before: "[backup exclusions]\n# Why these\n# are excluded\n\n~/b\n# why a\n~/a\n",
+			kind:   "backup-exclusion", entry: config.Entry{Name: "~/c"},
+			after: "[backup exclusions]\n# Why these\n# are excluded\n\n# why a\n~/a\n~/b\n~/c\n",
+		},
+		{
+			name:   "a setting, by its key",
+			before: "[git config]\nuser.name Someone\ncore.editor micro\n",
+			kind:   "git-config", entry: config.Entry{Name: "alias.co", Value: "checkout"},
+			after: "[git config]\nalias.co checkout\ncore.editor micro\nuser.name Someone\n",
+		},
+		{
+			name:   "numbers by their value",
+			before: "[secrets op://vault/A]\nTOKEN_10 x/10\nTOKEN_9 x/9\n",
+			kind:   "secret", entry: config.Entry{Name: "TOKEN_100", Value: "x/100", Item: "op://vault/A"},
+			after: "[secrets op://vault/A]\nTOKEN_9 x/9\nTOKEN_10 x/10\nTOKEN_100 x/100\n",
 		},
 		{
 			name:   "a section made in its place among the file's",
 			before: "[paths]\n/opt/homebrew/bin\n\n[macos login items]\ncom.example.app\n",
-			kind:   "npm", entry: config.Entry{Name: "intelephense"}, group: "Language servers",
-			after: "[paths]\n/opt/homebrew/bin\n\n[npm packages]\n# Language servers\nintelephense\n\n[macos login items]\ncom.example.app\n",
+			kind:   "npm", entry: config.Entry{Name: "intelephense"},
+			after: "[paths]\n/opt/homebrew/bin\n\n[npm packages]\nintelephense\n\n[macos login items]\ncom.example.app\n",
 		},
 		{
 			name:   "a section made at the end",
 			before: "[homebrew casks]\nghostty\n",
 			kind:   "login-item", entry: config.Entry{Name: "com.example.app", Note: "Example"},
-			after: "[homebrew casks]\nghostty\n\n[macos login items]\n# To be sorted\ncom.example.app   # Example\n",
+			after: "[homebrew casks]\nghostty\n\n[macos login items]\ncom.example.app   # Example\n",
 		},
 		{
-			name:   "a command, in its sorted place, no groups",
+			name:   "a command, in its sorted place",
 			before: "[claude mcp]\nalpha --transport http https://a.example.com\nzeta -- zeta-mcp\n",
 			kind:   "claude-mcp", entry: config.Entry{Name: "mail", Value: "--env K=${K} -- npx mail-mcp", Note: "mail"},
 			after: "[claude mcp]\nalpha --transport http https://a.example.com\nmail --env K=${K} -- npx mail-mcp   # mail\nzeta -- zeta-mcp\n",
@@ -77,19 +84,19 @@ func TestDeclare(t *testing.T) {
 			name:   "a secret, in its item's section",
 			before: "[secrets]\nKEY op://vault/i/f\n\n[secrets op://vault/A]\nB_TOKEN x/y\n",
 			kind:   "secret", entry: config.Entry{Name: "A_TOKEN", Value: "x/z", Item: "op://vault/A"},
-			after: "[secrets]\nKEY op://vault/i/f\n\n[secrets op://vault/A]\nB_TOKEN x/y\n\n# To be sorted\nA_TOKEN x/z\n",
+			after: "[secrets]\nKEY op://vault/i/f\n\n[secrets op://vault/A]\nA_TOKEN x/z\nB_TOKEN x/y\n",
 		},
 		{
 			name:   "a secret's item's section made, after the plain one",
 			before: "[secrets]\nKEY op://vault/i/f\n",
 			kind:   "secret", entry: config.Entry{Name: "A_TOKEN", Value: "x/z", Item: "op://vault/A/"},
-			after: "[secrets]\nKEY op://vault/i/f\n\n[secrets op://vault/A]\n# To be sorted\nA_TOKEN x/z\n",
+			after: "[secrets]\nKEY op://vault/i/f\n\n[secrets op://vault/A]\nA_TOKEN x/z\n",
 		},
 		{
 			name:   "a file made",
 			before: "",
 			kind:   "mas", entry: config.Entry{Name: "xcode@497799835"},
-			after: "[app store apps]\n# To be sorted\nxcode@497799835\n",
+			after: "[app store apps]\nxcode@497799835\n",
 		},
 	}
 	for _, tt := range tests {
@@ -99,7 +106,7 @@ func TestDeclare(t *testing.T) {
 				files["laptop/declarations"] = tt.before
 			}
 			cfg := loadRepo(t, files)
-			if err := cfg.Declare(tt.kind, "laptop", tt.entry, tt.group); err != nil {
+			if err := cfg.Declare(tt.kind, "laptop", tt.entry); err != nil {
 				t.Fatal(err)
 			}
 			if got := readFile(t, cfg, "laptop/declarations"); got != tt.after {
@@ -115,19 +122,25 @@ func TestUndeclare(t *testing.T) {
 	}{
 		{
 			name:   "with its notes",
-			before: "[homebrew formulae]\n# Shell\nbat\n# why jq\njq\nripgrep\n",
+			before: "[homebrew formulae]\nbat\n# why jq\njq\nripgrep\n",
 			kind:   "brew", entry: "jq",
-			after: "[homebrew formulae]\n# Shell\nbat\nripgrep\n",
+			after: "[homebrew formulae]\nbat\nripgrep\n",
 		},
 		{
-			name:   "a group left empty loses its heading",
-			before: "[homebrew formulae]\n# Shell\nbat\n\n# Go\ngo\n\n# Git\ngit\n",
+			name:   "an old file's heading, with the entry under it, the rest sorted",
+			before: "[homebrew formulae]\n# Shell\nripgrep\nbat\n\n# Go\ngo\n\n# Git\ngit\n",
 			kind:   "brew", entry: "go",
-			after: "[homebrew formulae]\n# Shell\nbat\n\n# Git\ngit\n",
+			after: "[homebrew formulae]\nbat\n# Git\ngit\n# Shell\nripgrep\n",
+		},
+		{
+			name:   "the comments opening a section kept",
+			before: "[backup exclusions]\n# Why these\n\n~/a\n~/b\n",
+			kind:   "backup-exclusion", entry: "~/a",
+			after: "[backup exclusions]\n# Why these\n\n~/b\n",
 		},
 		{
 			name:   "a section left empty goes",
-			before: "[homebrew formulae]\nbat\n\n[npm packages]\n# Language servers\nintelephense\n\n[macos login items]\ncom.example.app\n",
+			before: "[homebrew formulae]\nbat\n\n[npm packages]\n# for the PHP files\nintelephense\n\n[macos login items]\ncom.example.app\n",
 			kind:   "npm", entry: "intelephense",
 			after: "[homebrew formulae]\nbat\n\n[macos login items]\ncom.example.app\n",
 		},
@@ -136,6 +149,12 @@ func TestUndeclare(t *testing.T) {
 			before: "[secrets]\nKEY op://vault/i/f\n\n[secrets op://vault/A]\nTOKEN a/b\n",
 			kind:   "secret", entry: "TOKEN",
 			after: "[secrets]\nKEY op://vault/i/f\n",
+		},
+		{
+			name:   "a path, with the comment directly above it",
+			before: "[paths]\n# the PATH\n\n# Homebrew\n/opt/homebrew/bin\n\n# mine\n~/bin\n",
+			kind:   config.PathsKind, entry: "/opt/homebrew/bin",
+			after: "[paths]\n# the PATH\n\n# mine\n~/bin\n",
 		},
 		{
 			name:   "the last section left empty goes, and the blank before it",
@@ -167,28 +186,52 @@ func TestReplaceKeepsTheNotesAbove(t *testing.T) {
 	}
 }
 
-func TestGroups(t *testing.T) {
-	cfg := loadRepo(t, map[string]string{"laptop/declarations": "[homebrew formulae]\n# Shell\nbat\n\n# Go\ngo\n\n[homebrew casks]\n# Browsers\nfirefox\n"})
-	got, err := cfg.Groups("brew", "laptop")
-	if err != nil || strings.Join(got, ",") != "Shell,Go" {
-		t.Errorf("Groups() = %q, %v", got, err)
+// A sorted section is written in kit's form whichever way it's touched,
+// keeping every entry and note, and a section in that form is left as it is.
+func TestSortedSectionsKeepTheirForm(t *testing.T) {
+	before := "[macos settings]\n# Settings\n\n# the dock\ncom.apple.dock tilesize -int 60\n\n# Keyboard\ncom.apple.symbolichotkeys AppleSymbolicHotKeys -dict-add 184 \"<dict/>\"   # screenshots\ncom.apple.symbolichotkeys AppleSymbolicHotKeys -dict-add 28 \"<dict/>\"\n-currentHost com.apple.dock autohide -bool true\n# trailing\n\n[homebrew casks]\nghostty\n"
+	sorted := "[macos settings]\n# Settings\n\n-currentHost com.apple.dock autohide -bool true\n# the dock\ncom.apple.dock tilesize -int 60\ncom.apple.symbolichotkeys AppleSymbolicHotKeys -dict-add 28 \"<dict/>\"\n# Keyboard\ncom.apple.symbolichotkeys AppleSymbolicHotKeys -dict-add 184 \"<dict/>\"   # screenshots\n# trailing\n\n[homebrew casks]\nghostty\n"
+	cfg := loadRepo(t, map[string]string{"laptop/declarations": before})
+	names := func() []string {
+		t.Helper()
+		list, err := cfg.List("defaults", "laptop")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return slices.Sorted(slices.Values(list.Names()))
 	}
-	if !config.Grouped("brew") || config.Grouped("claude-mcp") {
-		t.Error("Grouped(): want name lists grouped, commands not")
+	was := names()
+	if err := cfg.Replace("defaults", "laptop", config.Entry{Name: "com.apple.dock:tilesize", Value: "-int 60"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, cfg, "laptop/declarations"); got != sorted {
+		t.Fatalf("laptop =\n%s\nwant\n%s", got, sorted)
+	}
+	if now := names(); !slices.Equal(now, was) {
+		t.Errorf("names = %q, want %q", now, was)
+	}
+	if err := cfg.Declare("defaults", "laptop", config.Entry{Name: "com.apple.finder:ShowPathbar", Value: "-bool true"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.Undeclare("defaults", "laptop", "com.apple.finder:ShowPathbar"); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, cfg, "laptop/declarations"); got != sorted {
+		t.Errorf("after adding and removing a setting, laptop =\n%s\nwant it unchanged:\n%s", got, sorted)
 	}
 }
 
 func TestEditingRefuses(t *testing.T) {
 	cfg := loadRepo(t, map[string]string{"laptop/declarations": "[homebrew formulae]\njq\n", "studio/declarations": "[homebrew taps]\nx\n"})
 	for name, err := range map[string]error{
-		"a name declared already":   cfg.Declare("brew", "laptop", config.Entry{Name: "jq"}, ""),
-		"a name that isn't one":     cfg.Declare("brew", "laptop", config.Entry{Name: "two words"}, ""),
-		"a file that doesn't read":  cfg.Declare("brew", "studio", config.Entry{Name: "jq"}, ""),
-		"a file for no Mac":         cfg.Declare("brew", "mini", config.Entry{Name: "jq"}, ""),
+		"a name declared already":   cfg.Declare("brew", "laptop", config.Entry{Name: "jq"}),
+		"a name that isn't one":     cfg.Declare("brew", "laptop", config.Entry{Name: "two words"}),
+		"a file that doesn't read":  cfg.Declare("brew", "studio", config.Entry{Name: "jq"}),
+		"a file for no Mac":         cfg.Declare("brew", "mini", config.Entry{Name: "jq"}),
 		"a name that isn't there":   cfg.Undeclare("brew", "laptop", "ripgrep"),
-		"a command without options": cfg.Declare("claude-mcp", "laptop", config.Entry{Name: "docs"}, ""),
-		"a path with a colon":       cfg.Declare(config.PathsKind, "laptop", config.Entry{Name: "/opt/x:/opt/y"}, ""),
-		"a path the shell expands":  cfg.Declare(config.PathsKind, "laptop", config.Entry{Name: "$HOME/bin"}, ""),
+		"a command without options": cfg.Declare("claude-mcp", "laptop", config.Entry{Name: "docs"}),
+		"a path with a colon":       cfg.Declare(config.PathsKind, "laptop", config.Entry{Name: "/opt/x:/opt/y"}),
+		"a path the shell expands":  cfg.Declare(config.PathsKind, "laptop", config.Entry{Name: "$HOME/bin"}),
 	} {
 		if err == nil {
 			t.Errorf("%s: no error", name)
@@ -204,9 +247,9 @@ func TestDeclareASecretOnce(t *testing.T) {
 	before := "[secrets op://vault/A]\nTOKEN a/b\n"
 	cfg := loadRepo(t, map[string]string{"laptop/declarations": before})
 	for name, err := range map[string]error{
-		"in another item's section": cfg.Declare("secret", "laptop", config.Entry{Name: "TOKEN", Value: "c/d", Item: "op://vault/B"}, ""),
-		"in the plain section":      cfg.Declare("secret", "laptop", config.Entry{Name: "TOKEN", Value: "op://vault/B/c"}, ""),
-		"for what isn't an item":    cfg.Declare("secret", "laptop", config.Entry{Name: "OTHER", Value: "c/d", Item: "op://vault/item/field"}, ""),
+		"in another item's section": cfg.Declare("secret", "laptop", config.Entry{Name: "TOKEN", Value: "c/d", Item: "op://vault/B"}),
+		"in the plain section":      cfg.Declare("secret", "laptop", config.Entry{Name: "TOKEN", Value: "op://vault/B/c"}),
+		"for what isn't an item":    cfg.Declare("secret", "laptop", config.Entry{Name: "OTHER", Value: "c/d", Item: "op://vault/item/field"}),
 	} {
 		if err == nil {
 			t.Errorf("%s: no error", name)
@@ -222,7 +265,7 @@ func TestDeclareASecretOnce(t *testing.T) {
 
 func TestDeclareAPathGoesLast(t *testing.T) {
 	cfg := loadRepo(t, map[string]string{"laptop/declarations": "[paths]\n# Homebrew\n/opt/homebrew/bin\n\n[homebrew formulae]\njq\n"})
-	if err := cfg.Declare(config.PathsKind, "laptop", config.Entry{Name: "/a/b", Note: "a tool"}, ""); err != nil {
+	if err := cfg.Declare(config.PathsKind, "laptop", config.Entry{Name: "/a/b", Note: "a tool"}); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := readFile(t, cfg, "laptop/declarations"), "[paths]\n# Homebrew\n/opt/homebrew/bin\n/a/b   # a tool\n\n[homebrew formulae]\njq\n"; got != want {

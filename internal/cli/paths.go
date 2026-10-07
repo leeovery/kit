@@ -18,15 +18,15 @@ const pathsKind = "path"
 // declarations (every Mac's, with --shared), writes the shell's PATH, then
 // commits and pushes. A directory in the home folder is declared with ~.
 func (a *app) addPaths(ctx context.Context, r *run, dirs []string, opts addOptions) error {
-	if opts.temp || opts.group != "" {
-		return errors.New("--temp and --group are for packages: a directory is on the PATH, or it isn't")
+	if opts.temp {
+		return errors.New("--temp is for packages: a directory is on the PATH, or it isn't")
 	}
 	scope := r.scope(opts.shared)
 	dirs = r.tildePaths(dirs)
 	c := startChanges(r, dirs)
 	for _, dir := range dirs {
 		c.step(ctx, dir, func(context.Context) check.Result {
-			if err := r.cfg.Declare(config.PathsKind, scope, config.Entry{Name: dir, Note: opts.note}, ""); err != nil {
+			if err := r.cfg.Declare(config.PathsKind, scope, config.Entry{Name: dir, Note: opts.note}); err != nil {
 				return check.Result{State: check.Failed, Reason: err.Error()}
 			}
 			c.changed(config.DeclFile(scope))
