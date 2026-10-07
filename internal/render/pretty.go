@@ -75,6 +75,10 @@ type Pretty struct {
 	animate bool
 	start   event.RunStarted
 	whole   bool
+	// home is whether the face is bare kit's while its checks run: the
+	// wordmark with the Mac and the time, then the loader, and nothing more,
+	// as bare kit's view follows.
+	home    bool
 	results map[string]event.StepFinished
 	order   ordered
 	running []runningStep
@@ -93,6 +97,14 @@ func NewPretty(w io.Writer, width int, animate bool) *Pretty {
 	return &Pretty{w: w, width: min(max(width, 40), look.Width), animate: animate}
 }
 
+// homeLoader is bare kit's face while its checks run: the wordmark at once,
+// then the loader, which its view replaces.
+func homeLoader(w io.Writer, width int, animate bool) *Pretty {
+	p := NewPretty(w, width, animate)
+	p.home = true
+	return p
+}
+
 func (p *Pretty) Emit(e event.Event) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -100,7 +112,7 @@ func (p *Pretty) Emit(e event.Event) {
 	case event.RunStarted:
 		p.start, p.results = e, make(map[string]event.StepFinished, len(e.Steps))
 		p.order.start(e.Steps)
-		p.whole = slices.Contains(wholeMac, e.Command) && len(e.Only) == 0
+		p.whole = p.home || slices.Contains(wholeMac, e.Command) && len(e.Only) == 0
 		p.write("\n")
 		if p.whole {
 			p.lines(look.Head(look.Meta(e.Command, e.Machine, when(e.Time))...)...)
@@ -124,6 +136,7 @@ func (p *Pretty) Emit(e event.Event) {
 	case event.RunFinished:
 		p.stopSpinner()
 		switch {
+		case p.home:
 		case p.byArea():
 			p.lines(p.report()...)
 			p.lines(p.foot(e)...)
@@ -431,7 +444,7 @@ func (p *Pretty) foot(e event.RunFinished) []string {
 		ended = look.NeedsYou
 	}
 	n := len(p.start.Steps)
-	return []string{look.Cut(look.Bar(n, 0, n, ended)+"  "+look.Says(parts...), p.width)}
+	return []string{look.Cut("  "+look.Bar(n, 0, n, ended)+"  "+look.Says(parts...), p.width)}
 }
 
 // tally is what went wrong in a run, counted: what failed, what needs
@@ -479,9 +492,9 @@ func (p *Pretty) spin() {
 	p.drawSpinner()
 }
 
-// drawSpinner draws the spinner's line over the last one: on a timeline,
-// the running step's row; otherwise which steps are running, and how many
-// are done. None when nothing runs, or the face doesn't animate.
+// drawSpinner draws the loader's line over the last one: on a timeline, the
+// running step's row; otherwise the bar, how many steps are done, and which
+// are running. None when nothing runs, or the face doesn't animate.
 func (p *Pretty) drawSpinner() {
 	if !p.animate {
 		return
@@ -491,7 +504,8 @@ func (p *Pretty) drawSpinner() {
 		return
 	}
 	mark := look.Cyan(spinning[p.frame%len(spinning)])
-	text := "  " + mark + " " + look.Says(look.Muted(doing(p.running)), look.Dim(fmt.Sprintf("%d of %d", len(p.results), len(p.start.Steps))))
+	done, total := len(p.results), len(p.start.Steps)
+	text := "  " + mark + " " + look.Bar(done, len(p.running), total, look.Done) + "  " + look.Says(look.White(fmt.Sprintf("%d of %d", done, total)), look.Muted(doing(p.running)))
 	if !p.byArea() {
 		r := p.running[0]
 		text = "  " + mark + " " + look.Strong(r.title) + "  " + look.Cyan(r.doing)

@@ -207,8 +207,8 @@ func TestPrettySpinsWhileStepsRun(t *testing.T) {
 	}
 
 	got := out.String()
-	if !strings.Contains(got, "◐ checking Formulae, Casks · 0 of 2") || !strings.Contains(got, "◓") {
-		t.Errorf("printed %q, want the spinner turning, counting the steps and naming those running", got)
+	if !strings.Contains(got, "◐ ▮▮  0 of 2 · checking Formulae, Casks") || !strings.Contains(got, "◓ ▮▮  1 of 2 · checking Casks") {
+		t.Errorf("printed %q, want the loader turning: the bar, the steps counted and those running named", got)
 	}
 	// What's left on screen, once each line has been drawn over, is the
 	// report alone.

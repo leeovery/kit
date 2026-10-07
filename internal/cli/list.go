@@ -75,6 +75,8 @@ func (a *app) list(ctx context.Context, r *run, args []string) error {
 		kinds = args
 	}
 	var entries []listed
+	stop := a.loading(a.Stdout, "checking what's installed")
+	defer stop()
 	for _, name := range kinds {
 		k := r.kindsByName[name]
 		res := kind.Compare(ctx, k, r.lists[name])
@@ -100,6 +102,7 @@ func (a *app) list(ctx context.Context, r *run, args []string) error {
 			entries = append(entries, listed{Kind: name, Name: e.Name, Scope: e.Scope, File: e.Path(), Line: e.Line, Note: e.Note, Installed: isIn, Off: e.Off})
 		}
 	}
+	stop()
 	if a.json {
 		if entries == nil {
 			entries = []listed{}
@@ -173,6 +176,8 @@ func newWhyCommand(a *app) *cobra.Command {
 }
 
 func (a *app) why(ctx context.Context, r *run, name string) error {
+	stop := a.loading(a.Stdout, "looking for "+name)
+	defer stop()
 	var found []why
 	if strings.HasPrefix(name, "~/") || filepath.IsAbs(name) {
 		_, shown, err := r.filePaths([]string{name})
@@ -220,6 +225,7 @@ func (a *app) why(ctx context.Context, r *run, name string) error {
 		}
 		found = append(found, w)
 	}
+	stop()
 	if a.json {
 		if found == nil {
 			found = []why{}
