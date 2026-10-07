@@ -46,6 +46,9 @@ Each run's log is a JSON-lines file in ~/Library/Logs/kit, kept 30 days;
 					Records []logs.Record `json:"records"`
 				}{logSchema, path, records})
 			}
+			if a.pretty(out) {
+				return render.LogRun(a.colors(out), a.Width(out), records)
+			}
 			return render.LogView(a.colors(out), path, records)
 		},
 	}

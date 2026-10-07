@@ -41,7 +41,9 @@ type Record struct {
 	Machine string       `json:"machine,omitempty"`
 	Version string       `json:"version,omitempty"`
 	Steps   []event.Step `json:"steps,omitempty"`
-	Step    string       `json:"step,omitempty"`
+	// Only are the steps a run was of, when it was of steps named.
+	Only []string `json:"only,omitempty"`
+	Step string   `json:"step,omitempty"`
 	// Result is a finished step's.
 	Result *check.Result `json:"result,omitempty"`
 	// Exit is a command's exit code: -1 when it didn't run, or was ended.
@@ -131,7 +133,7 @@ func (l *File) record(e event.Event) Record {
 	r := Record{Time: e.At()}
 	switch e := e.(type) {
 	case event.RunStarted:
-		r.Event, r.Command, r.Machine, r.Version, r.Steps = "run_started", e.Command, e.Machine, e.Version, e.Steps
+		r.Event, r.Command, r.Machine, r.Version, r.Steps, r.Only = "run_started", e.Command, e.Machine, e.Version, e.Steps, e.Only
 	case event.StepStarted:
 		r.Event, r.Step = "step_started", e.Step
 	case event.StepFinished:

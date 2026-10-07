@@ -1,6 +1,8 @@
 package render_test
 
 import (
+	"time"
+
 	"bytes"
 	"testing"
 
@@ -51,4 +53,28 @@ func TestLogViewOfARunThatDidntFinish(t *testing.T) {
 	if out.String() != want {
 		t.Errorf("printed\n%q\nwant\n%q", out.String(), want)
 	}
+}
+
+// At a terminal, a run's log is a timeline: the run as a row, then each
+// step after the time it started, what it ran on the line under it.
+func TestLogRun(t *testing.T) {
+	ok := check.Result{State: check.OK, Summary: "/opt/homebrew"}
+	failed := check.Result{State: check.Failed, Reason: "couldn't apply: run apply exited 1"}
+	records := []logs.Record{
+		{Time: at, Event: "run_started", Command: "apply", Machine: "laptop", Steps: []event.Step{
+			{Name: "homebrew", Title: "Homebrew"}, {Name: "remote-session", Title: "remote-session"}, {Name: "fonts", Title: "fonts"},
+		}},
+		{Time: at, Event: "step_started", Step: "homebrew"},
+		{Time: at, Event: "command", Step: "homebrew", Command: "brew --prefix", Exit: new(0), DurationMS: 110},
+		{Time: at, Event: "step_finished", Step: "homebrew", Result: &ok, DurationMS: 120},
+		{Time: at.Add(time.Second), Event: "step_started", Step: "remote-session"},
+		{Time: at, Event: "command", Step: "remote-session", Command: "/Users/someone/.config/kit/shared/steps/remote-session/run apply", Exit: new(1), DurationMS: 300, Error: "sudo: a password is required"},
+		{Time: at, Event: "step_finished", Step: "remote-session", Result: &failed, DurationMS: 310},
+		{Time: at, Event: "run_finished", DurationMS: 4000, Counts: map[check.State]int{check.OK: 1, check.Failed: 1}},
+	}
+	var out bytes.Buffer
+	if err := render.LogRun(&colorprofile.Writer{Forward: &out, Profile: colorprofile.NoTTY}, 80, records); err != nil {
+		t.Fatal(err)
+	}
+	golden(t, "log-run.golden", out.String())
 }

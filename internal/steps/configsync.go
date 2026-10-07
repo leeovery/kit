@@ -17,11 +17,15 @@ import (
 // commits at once, so one left over is a push that failed.
 const syncWithin = time.Hour
 
+// ConfigSyncName is the name of the step that checks the config repository
+// is pushed.
+const ConfigSyncName = "config-sync"
+
 // ConfigSync checks the config repository in dir has no commit unpushed for
 // over an hour. Edits not committed are drift (ConfigEdits), not a problem.
 func ConfigSync(run runner.Runner, dir string, now func() time.Time) engine.Step {
 	return engine.Step{
-		Name: "config-sync", Title: "Sync", Area: AreaConfig,
+		Name: ConfigSyncName, Title: "Sync", Area: AreaConfig,
 		Check: func(ctx context.Context) check.Result {
 			// What's committed and not pushed, oldest first: none when
 			// there's no upstream to push to.

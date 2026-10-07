@@ -1,21 +1,25 @@
 
-  ██╗  ██╗ ██╗ ████████╗
-  ██║ ██╔╝ ██║ ╚══██╔══╝
-  █████╔╝  ██║    ██║
-  ██╔═██╗  ██║    ██║
-  ██║  ██╗ ██║    ██║
-  ╚═╝  ╚═╝ ╚═╝    ╚═╝   status · laptop · 03:04
+  █  ▄▀  ▀█▀  ▀▀█▀▀  │  status
+  █▀▀▄    █     █    │  laptop
+  █   █  ▄█▄    █    │  Fri 2 Jan · 03:04
 
-    ✓  Homebrew     /opt/homebrew
-    !  Formulae     6 declared, 4 installed
-         · jq               missing
-         · owner/tap/tool   missing
-         · ffmpeg           not declared
-         · node@20          unused dependency
-    ✓  Casks        3 declared, all installed
-    ✗  kit-config   couldn't check: gh repo view exited 1: not signed in
-    ·  App Store    deferred: needs Homebrew
+  BACKUPS
+  ● Time Machine  last backup 02:35
 
-  ──────────────────────────────────────────────────────────────────────────
-    ✗  1 needs attention, 1 couldn't be checked, 1 deferred
+  MAC
+  ▲ Disk space  8% free
+    → free some space: kit status says where it went
 
+  CONFIG
+  ▲ jq  declared, not installed · → kit apply
+  ▲ ffmpeg  installed, not declared · 2 days · → kit reconcile
+  ✗ Sync  couldn't check · git status exited 128: not a git repository
+  – App Store  not checked · needs Homebrew
+  ● Packages  7 installed · 1 new
+  ● Settings  9 set
+  ● kit-config  private
+
+  STEPS
+  ● fonts  16 installed
+
+  1 failed · 2 need you · 1 not checked · 6 fine · 1.8s

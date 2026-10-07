@@ -49,15 +49,6 @@ func (o *ordered) finish(e event.StepFinished) []event.StepFinished {
 	return ready
 }
 
-// itemLabels are how items of each state are counted for people, singular
-// and plural.
-var itemLabels = map[string][2]string{
-	"missing":           {"missing", "missing"},
-	"extra":             {"not declared", "not declared"},
-	"unused-dependency": {"unused dependency", "unused dependencies"},
-	"problem":           {"problem", "problems"},
-}
-
 // quietLabels say why items don't need attention yet.
 var quietLabels = map[string]string{
 	"new":       "new, under a day",

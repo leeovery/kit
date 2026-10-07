@@ -1,17 +1,10 @@
 
-  ██╗  ██╗ ██╗ ████████╗
-  ██║ ██╔╝ ██║ ╚══██╔══╝
-  █████╔╝  ██║    ██║
-  ██╔═██╗  ██║    ██║
-  ██║  ██╗ ██║    ██║
-  ╚═╝  ╚═╝ ╚═╝    ╚═╝   status · laptop
+  █  ▄▀  ▀█▀  ▀▀█▀▀  │  status
+  █▀▀▄    █     █    │  laptop
+  █   █  ▄█▄    █    │  Mon 1 Jan · 00:00
 
-    !  Formulae   3 declared, all installed
-         · ffmpeg   not declared
-         · hello    not declared · new
-         · wget     not declared · snoozed
-         · cowsay   not declared · temporary
+  CONFIG
+  ▲ ffmpeg  installed, not declared · → kit reconcile
+  ● Packages  0 installed · 1 new · 1 snoozed · 1 for now
 
-  ──────────────────────────────────────────────────────────────────────────
-    !  1 needs attention
-
+  1 needs you · 0 fine · 0.0s

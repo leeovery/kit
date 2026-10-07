@@ -9,81 +9,75 @@ import (
 	"sync"
 	"time"
 
-	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/event"
+	"github.com/leeovery/kit/internal/look"
 )
 
-// spinnerFrames turn while steps run. Braille is in every Mac's fonts, as
-// Terminal.app shows them before any other font is installed.
-var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
-
-const spinnerEvery = 80 * time.Millisecond
-
-// The face's styles, in the terminal's own basic colours, so they follow
-// its theme, light or dark.
-var (
-	bold      = lipgloss.NewStyle().Bold(true)
-	faint     = lipgloss.NewStyle().Faint(true)
-	accent    = lipgloss.NewStyle().Foreground(lipgloss.Cyan).Bold(true)
-	green     = lipgloss.NewStyle().Foreground(lipgloss.Green)
-	yellow    = lipgloss.NewStyle().Foreground(lipgloss.Yellow)
-	red       = lipgloss.NewStyle().Foreground(lipgloss.Red)
-	stateMark = map[check.State]string{
-		check.OK:        green.Render("✓"),
-		check.Attention: yellow.Render("!"),
-		check.Failed:    red.Render("✗"),
-		check.Deferred:  faint.Render("·"),
-	}
+// The parts of Config a step counts towards, as its Part says: Packages,
+// Settings, Files and Secrets are rolled up into a row each, the config
+// repository's steps into its own.
+const (
+	PartPackages = "Packages"
+	PartSettings = "Settings"
+	PartFiles    = "Files"
+	PartSecrets  = "Secrets"
+	PartConfig   = "kit-config"
 )
 
-// banner is kit's wordmark, which status and apply open with. Block
-// elements and box drawing are in every Mac's fonts, as Terminal.app shows
-// them before any other font is installed.
-var banner = []string{
-	"██╗  ██╗ ██╗ ████████╗",
-	"██║ ██╔╝ ██║ ╚══██╔══╝",
-	"█████╔╝  ██║    ██║",
-	"██╔═██╗  ██║    ██║",
-	"██║  ██╗ ██║    ██║",
-	"╚═╝  ╚═╝ ╚═╝    ╚═╝",
+// rollups are Config's rows of counts, in order: what each says its count
+// is, and which of its steps' counts it adds up.
+var rollups = []struct{ part, verb, count string }{
+	{PartPackages, "installed", "installed"},
+	{PartSettings, "set", "installed"},
+	{PartFiles, "linked", "linked"},
+	{PartSecrets, "in place", "installed"},
 }
 
-// bannerCommands are the commands that open with the banner: the long
-// reports. The others open with a line.
-var bannerCommands = []string{"status", "apply", "apply --plan"}
+// configStep is the step a run of changes ends with, committing and
+// pushing them, named as the config repository is.
+const configStep = PartConfig
 
-// Layout: a step's mark is indented markIndent; its title follows two
-// columns on; its items' bullets are two columns in from the title.
-const (
-	markIndent = 4
-	titleAt    = markIndent + 3
-	itemAt     = titleAt + 2
-	// maxItems is how many of a step's items are shown before the rest are
-	// counted.
-	maxItems = 8
-	// ruleWidth is the widest a rule goes.
-	ruleWidth = 76
-)
+// wholeMac are the commands that look at the whole Mac: they open with the
+// wordmark and end with a summary. Run for steps named, they're aimed at
+// those, as other commands are: a timeline, without the wordmark.
+var wholeMac = []string{"status", "apply", "apply --plan", "nightly", "reconcile"}
 
-// Pretty is the face at a terminal: kit's banner or a heading line, a
-// spinner while steps run, then the steps under their areas, each with what
-// needs attention under it, one thing a line, and a summary. Its writer
-// brings the colour down to what the terminal shows.
+// viewOrder is the order the views show areas in: the config's drift and
+// its repository are one, Config.
+var viewOrder = []string{"Backups", "Jobs", "Mac", "Config", "Steps", "Manual", "Checks"}
+
+// viewArea is the area a step of area shows in.
+func viewArea(area string) string {
+	if area == "Drift" {
+		return "Config"
+	}
+	return cmp.Or(area, "Checks")
+}
+
+// spinning are the running mark's frames, turning.
+var spinning = []string{"◐", "◓", "◑", "◒"}
+
+const spinEvery = 120 * time.Millisecond
+
+// Pretty is the face at a terminal, in kit's look. A command looking at the
+// whole Mac opens with the wordmark, what ran, the Mac and when beside it;
+// its steps show by area, Config rolled up, and a summary ends it. A
+// command aimed at one thing is a timeline: a row a step, each as its turn
+// comes. While steps run, a line says which. Its writer brings the colour
+// down to what the terminal shows.
 type Pretty struct {
 	mu      sync.Mutex
 	w       io.Writer
 	width   int
 	animate bool
-	steps   []event.Step
+	start   event.RunStarted
+	whole   bool
 	results map[string]event.StepFinished
-	// column is where steps' text starts, past the widest title, and
-	// nameWidth where a step's things' tags start, past their names.
-	column    int
-	nameWidth int
-	running   []runningStep
+	order   ordered
+	running []runningStep
 	// spinning is whether the spinner's line is on screen.
 	spinning bool
 	frame    int
@@ -93,9 +87,10 @@ type Pretty struct {
 }
 
 // NewPretty returns the pretty face, writing to w, which is width columns
-// wide. It animates a spinner while steps run when animate is true.
+// wide: its lines go no wider than kit's look allows. It animates while
+// steps run when animate is true.
 func NewPretty(w io.Writer, width int, animate bool) *Pretty {
-	return &Pretty{w: w, width: max(width, 40), animate: animate}
+	return &Pretty{w: w, width: min(max(width, 40), look.Width), animate: animate}
 }
 
 func (p *Pretty) Emit(e event.Event) {
@@ -103,234 +98,360 @@ func (p *Pretty) Emit(e event.Event) {
 	defer p.mu.Unlock()
 	switch e := e.(type) {
 	case event.RunStarted:
-		p.steps, p.results = e.Steps, make(map[string]event.StepFinished, len(e.Steps))
-		for _, s := range e.Steps {
-			p.column = max(p.column, ansi.StringWidth(p.title(s.Name)))
+		p.start, p.results = e, make(map[string]event.StepFinished, len(e.Steps))
+		p.order.start(e.Steps)
+		p.whole = slices.Contains(wholeMac, e.Command) && len(e.Only) == 0
+		p.write("\n")
+		if p.whole {
+			p.lines(look.Head(look.Meta(e.Command, e.Machine, when(e.Time))...)...)
+			p.write("\n")
 		}
-		p.column += titleAt + 3
-		p.writeHeading(e)
 	case event.StepStarted:
 		p.running = append(without(p.running, e.Step), runningStep{step: e.Step, title: p.title(e.Step), doing: cmp.Or(e.Doing, "checking")})
 		p.spin()
 	case event.StepFinished:
 		p.running = without(p.running, e.Step)
 		p.results[e.Step] = e
+		if !p.byArea() {
+			if ready := p.order.finish(e); len(ready) > 0 {
+				p.clearSpinner()
+				for _, f := range ready {
+					p.lines(look.Timeline("  ", p.width, p.row(f))...)
+				}
+			}
+		}
 		p.drawSpinner()
 	case event.RunFinished:
 		p.stopSpinner()
-		p.writeSteps()
-		p.writeSummary(e.Counts)
+		switch {
+		case p.byArea():
+			p.lines(p.report()...)
+			p.lines(p.foot(e)...)
+		case p.whole:
+			p.write("\n")
+			p.lines(p.foot(e)...)
+		}
 	}
 }
 
-// title is a step's title, or its name when it has none.
+// byArea is whether the run shows its steps by area: one looking at the
+// whole Mac, whose steps have areas. Reconciling's are things, not steps,
+// and show as a timeline.
+func (p *Pretty) byArea() bool {
+	return p.whole && slices.ContainsFunc(p.start.Steps, func(s event.Step) bool { return s.Area != "" })
+}
+
+// applying is whether the run applies, so its report shows what changed and
+// what needs attention, not every step.
+func (p *Pretty) applying() bool { return p.start.Command == "apply" }
+
+func (p *Pretty) step(name string) event.Step {
+	for _, s := range p.start.Steps {
+		if s.Name == name {
+			return s
+		}
+	}
+	return event.Step{Name: name}
+}
+
 func (p *Pretty) title(step string) string {
-	for _, s := range p.steps {
-		if s.Name == step && s.Title != "" {
-			return s.Title
+	s := p.step(step)
+	return cmp.Or(s.Title, s.Name)
+}
+
+// when is a run's time, as the wordmark's line says it.
+func when(t time.Time) string { return t.Format("Mon 2 Jan · 15:04") }
+
+// report is the run's steps by area, a block an area, in the views' order;
+// when applying, the lights lead, and only what changed or needs attention
+// shows.
+func (p *Pretty) report() []string {
+	areas := map[string][]event.StepFinished{}
+	for _, s := range p.start.Steps {
+		if f, ok := p.results[s.Name]; ok {
+			a := viewArea(s.Area)
+			areas[a] = append(areas[a], f)
 		}
 	}
-	return step
-}
-
-// writeHeading writes the run's heading: the banner, with the command, the
-// Mac and the time beside its last line, or under it on a narrow terminal;
-// or, for a short command, a line and a rule.
-func (p *Pretty) writeHeading(e event.RunStarted) {
-	about := e.Command + " · " + e.Machine
-	if !e.Time.IsZero() {
-		about += " · " + e.Time.Format("15:04")
-	}
-	if !slices.Contains(bannerCommands, e.Command) {
-		p.write("\n  " + accent.Render("kit") + " " + bold.Render(e.Command) + faint.Render(" · "+strings.TrimPrefix(about, e.Command+" · ")) + "\n")
-		p.write("  " + faint.Render(p.rule()) + "\n\n")
-		return
-	}
-	p.write("\n")
-	last := len(banner) - 1
-	for i, line := range banner {
-		text := "  " + accent.Render(line)
-		if i == last && 2+ansi.StringWidth(line)+3+ansi.StringWidth(about) <= p.width {
-			text += "   " + faint.Render(about)
-		}
-		p.write(text + "\n")
-	}
-	if 2+ansi.StringWidth(banner[last])+3+ansi.StringWidth(about) > p.width {
-		p.write("  " + faint.Render(about) + "\n")
-	}
-	p.write("\n")
-}
-
-// rule is a horizontal line as wide as the terminal allows.
-func (p *Pretty) rule() string {
-	return strings.Repeat("─", min(p.width, ruleWidth)-2)
-}
-
-// writeSteps writes every step's result, under its area, the areas in bare
-// kit's order; a run whose steps have no areas (adding, removing,
-// reconciling) has no headings.
-func (p *Pretty) writeSteps() {
-	byArea := map[string][]event.Step{}
-	areas := false
-	for _, s := range p.steps {
-		area := cmp.Or(s.Area, "Checks")
-		areas = areas || s.Area != ""
-		byArea[area] = append(byArea[area], s)
-	}
-	for _, area := range areaOrder {
-		steps := byArea[area]
-		if len(steps) == 0 {
+	var out []string
+	var lamps []look.Lamp
+	for _, area := range viewOrder {
+		fs := areas[area]
+		if len(fs) == 0 {
 			continue
 		}
-		if areas {
-			head := "  " + bold.Render(area) + " "
-			p.write(head + faint.Render(strings.Repeat("─", max(min(p.width, ruleWidth)-ansi.StringWidth(head), 4))) + "\n")
-		}
-		for _, s := range steps {
-			if f, ok := p.results[s.Name]; ok {
-				p.writeStep(f)
+		lamps = append(lamps, lamp(area, fs))
+		var rows []look.Row
+		if area == "Config" {
+			rows = p.configRows(fs)
+		} else {
+			for _, f := range fs {
+				if !p.applying() || changed(f) {
+					rows = append(rows, p.row(f))
+				}
 			}
 		}
-		p.write("\n")
+		if len(rows) > 0 {
+			out = append(append(out, look.Block(area, p.width, rows...)...), "")
+		}
 	}
+	if p.applying() {
+		out = append([]string{look.Cut(look.Lights(lamps...), p.width), ""}, out...)
+	}
+	return out
 }
 
-// writeStep writes a step's line, then what applying it did and what needs
-// attention, a thing a line.
-func (p *Pretty) writeStep(f event.StepFinished) {
-	r := f.Result
-	title := p.title(f.Step)
-	text := what(r)
-	switch r.State {
+// changed is whether applying f's step did something, or left it needing
+// attention.
+func changed(f event.StepFinished) bool {
+	return len(f.Result.Done) > 0 || f.Result.State != check.OK
+}
+
+// lamp is an area's light: how its steps stand at worst, and how many there
+// are, when they're all well.
+func lamp(area string, fs []event.StepFinished) look.Lamp {
+	l := look.Lamp{Name: area, State: look.Done}
+	for _, f := range fs {
+		if s := state(f.Result.State); worse(s, l.State) {
+			l.State = s
+		}
+	}
+	if l.State == look.Done {
+		l.Count = fmt.Sprint(len(fs))
+	}
+	return l
+}
+
+// state is how a step's result shows: a deferred step wasn't checked, so is
+// skipped.
+func state(s check.State) look.State {
+	switch s {
+	case check.Attention:
+		return look.NeedsYou
 	case check.Failed:
-		text = red.Render(text)
+		return look.Failed
 	case check.Deferred:
-		text = faint.Render(text)
+		return look.Skipped
 	}
-	pad := strings.Repeat(" ", max(p.column-titleAt-ansi.StringWidth(title), 1))
-	// A long summary wraps under itself, never past the terminal's edge.
-	lines := strings.Split(ansi.Wordwrap(text, max(p.width-p.column-1, 20), " ,"), "\n")
-	p.write(strings.Repeat(" ", markIndent) + stateMark[r.State] + "  " + title + pad + lines[0] + "\n")
-	for _, line := range lines[1:] {
-		p.write(strings.Repeat(" ", p.column) + strings.TrimLeft(line, " ") + "\n")
+	return look.Done
+}
+
+// worse is whether a is worse than b: failed, then needs you, then skipped.
+func worse(a, b look.State) bool {
+	rank := map[look.State]int{look.Done: 0, look.Skipped: 1, look.NeedsYou: 2, look.Failed: 3}
+	return rank[a] > rank[b]
+}
+
+// row is a step's row, as resultRow has it: a run of changes with nothing
+// to commit skips that step; a step that applying did something about says
+// it was applied.
+func (p *Pretty) row(f event.StepFinished) look.Row {
+	r := f.Result
+	row := resultRow(p.title(f.Step), r)
+	if f.Step == configStep && r.State == check.OK && r.Summary == "nothing changed" {
+		row.State, row.Says = look.Skipped, look.Muted("nothing to commit")
 	}
-	items := slices.Concat(
-		slices.DeleteFunc(slices.Clone(r.Items), func(it check.Item) bool { return it.Quiet != "" }),
-		slices.DeleteFunc(slices.Clone(r.Items), func(it check.Item) bool { return it.Quiet == "" }),
-	)
-	// Tags line up a column past the longest name shown, while that leaves
-	// them room.
-	p.nameWidth = 0
-	for _, it := range slices.Concat(r.Done, items) {
-		p.nameWidth = max(p.nameWidth, ansi.StringWidth(it.Name))
+	if len(r.Done) > 0 && p.byArea() {
+		row.Says = look.Says(look.Muted("applied"), row.Says)
 	}
-	p.nameWidth = min(p.nameWidth, (p.width-itemAt-2)*2/3)
-	for i, it := range r.Done {
-		if i == maxItems-2 && len(r.Done) > maxItems {
-			p.writeMore(len(r.Done)-i, past(it.Action))
-			break
+	return row
+}
+
+// saying is a result's words as a row says them: the parts of a summary
+// after dots, the first in the state's colour.
+func saying(s look.State, text string) string {
+	parts := strings.Split(text, "; ")
+	for i, part := range parts {
+		if i == 0 {
+			parts[i] = look.Words(s, part)
+		} else {
+			parts[i] = look.Muted(part)
 		}
-		p.writeItem(it.Name, green.Render(past(it.Action)), false)
 	}
-	for i, it := range items {
-		if i == maxItems-2 && len(items) > maxItems {
-			p.writeMore(len(items)-i, "")
-			break
+	return look.Says(parts...)
+}
+
+// todo is what to do about something: one of kit's commands in white, other
+// words muted.
+func todo(detail string) string {
+	if strings.HasPrefix(detail, "kit ") {
+		return look.Todo(look.Cmd(detail))
+	}
+	return look.Todo(look.Muted(detail))
+}
+
+// configRows are Config's rows: what needs attention, a row a thing, saying
+// what's wrong, for how long and what to run; when applying, what it did;
+// then, unless applying, a row a part counting what's well, and the config
+// repository's row.
+func (p *Pretty) configRows(fs []event.StepFinished) []look.Row {
+	var rows []look.Row
+	counts := map[string]int{}
+	quiet := map[string]map[string]int{}
+	present := map[string]bool{}
+	var repo []string
+	for _, f := range fs {
+		r, part := f.Result, p.step(f.Step).Part
+		if r.State == check.Failed || r.State == check.Deferred {
+			rows = append(rows, p.row(f))
 		}
-		p.writeThing(it)
-	}
-}
-
-// writeThing writes an item that needs attention: a problem with what to do
-// under it; anything else with what's wrong beside it, or under it when
-// there's no room.
-func (p *Pretty) writeThing(it check.Item) {
-	if it.State == "problem" || it.State == "manual" {
-		p.writeItem(yellow.Render(it.Name), "", false)
-		if it.Detail != "" {
-			p.writeUnder(faint.Render("→ " + it.Detail))
+		for _, it := range r.Done {
+			rows = append(rows, look.Row{State: look.Done, Name: it.Name, Says: look.Muted(past(it.Action))})
 		}
-		return
+		for _, it := range r.Items {
+			if it.Quiet == "" {
+				rows = append(rows, p.thing(part, it))
+				continue
+			}
+			if quiet[part] == nil {
+				quiet[part] = map[string]int{}
+			}
+			quiet[part][it.Quiet]++
+		}
+		if r.State == check.Failed || r.State == check.Deferred {
+			continue
+		}
+		switch part {
+		case PartConfig:
+			repo = append(repo, look.Muted(cmp.Or(r.Glance, strings.TrimPrefix(r.Summary, "all "))))
+		case PartPackages, PartSettings, PartFiles, PartSecrets:
+			present[part] = true
+			for _, ru := range rollups {
+				if ru.part == part {
+					counts[part] += r.Counts[ru.count]
+				}
+			}
+		default:
+			if !p.applying() && len(r.Items) == 0 {
+				rows = append(rows, p.row(f))
+			}
+		}
 	}
-	tags := []string{label(it.State)}
-	if it.Quiet != "" {
-		tags = append(tags, cmp.Or(quietTags[it.Quiet], it.Quiet))
+	if p.applying() {
+		return rows
 	}
-	if it.Action != "" {
-		tags = append(tags, "to "+it.Action)
+	for _, ru := range rollups {
+		if !present[ru.part] {
+			continue
+		}
+		says := []string{look.Muted(fmt.Sprintf("%d %s", counts[ru.part], ru.verb))}
+		for _, reason := range []string{"new", "snoozed", "temporary"} {
+			if n := quiet[ru.part][reason]; n > 0 {
+				says = append(says, look.Dim(fmt.Sprintf("%d %s", n, quietWords[reason])))
+			}
+		}
+		rows = append(rows, look.Row{State: look.Done, Name: ru.part, Says: look.Says(says...)})
 	}
-	if it.Detail != "" {
-		tags = append(tags, it.Detail)
+	if len(repo) > 0 {
+		rows = append(rows, look.Row{State: look.Done, Name: PartConfig, Says: look.Says(repo...)})
 	}
-	tag := strings.Join(tags, " · ")
-	if it.Quiet != "" {
-		p.writeItem(faint.Render(it.Name), faint.Render(tag), true)
-		return
-	}
-	p.writeItem(it.Name, yellow.Render(tag), false)
+	return rows
 }
 
-// quietTags say briefly why an item doesn't need attention yet.
-var quietTags = map[string]string{"new": "new", "snoozed": "snoozed", "temporary": "temporary"}
+// quietWords say why things don't need attention yet, after their count.
+var quietWords = map[string]string{"new": "new", "snoozed": "snoozed", "temporary": "for now"}
 
-// label is an item's state as people read it: not declared, for extra.
-func label(state string) string {
-	if forms, ok := itemLabels[state]; ok {
-		return forms[0]
+// thing is a row for something that needs attention, of a part: its name,
+// what's wrong, for how long, and what to run about it.
+func (p *Pretty) thing(part string, it check.Item) look.Row {
+	says := []string{look.Orange(wrong(part, it))}
+	if _, drift := driftStates[it.State]; drift && it.Detail != "" {
+		says = append(says, look.Muted(it.Detail))
 	}
-	return strings.ReplaceAll(state, "-", " ")
+	if !it.Since.IsZero() {
+		says = append(says, look.Muted(since(p.start.Time.Sub(it.Since))))
+	}
+	hint := "kit reconcile"
+	if it.Action != "" || it.State == "missing" {
+		hint = "kit apply"
+	}
+	row := look.Row{State: look.NeedsYou, Name: it.Name, Says: look.Says(append(says, look.Todo(look.Cmd(hint)))...)}
+	// What to run is never cut off: when the row is too long for it, it
+	// goes on the line under it.
+	if ansi.StringWidth(look.Rows("  ", 1<<16, row)[0]) > p.width {
+		row.Says, row.Under = look.Says(says...), []string{look.Todo(look.Cmd(hint))}
+	}
+	return row
 }
 
-// writeItem writes a thing's line, its bullet under the step's title, and
-// tag beside it when both fit, else under it; a name too long for a line is
-// cut short.
-func (p *Pretty) writeItem(name, tag string, quiet bool) {
-	room := p.width - itemAt - 2
-	bullet := "·"
-	if quiet {
-		bullet = faint.Render(bullet)
+// wrong says what's wrong with a thing of a part, in words: installed, not
+// declared; or, of a setting, set, not declared.
+func wrong(part string, it check.Item) string {
+	verb := cmp.Or(map[string]string{PartSettings: "set", PartSecrets: "synced"}[part], "installed")
+	switch it.State {
+	case "extra":
+		return verb + ", not declared"
+	case "missing":
+		return "declared, not " + verb
+	case "unused-dependency":
+		return "installed for something since removed"
+	case "changed", "diverged":
+		return "changed from what's declared"
+	case "dead":
+		return "a dead link"
+	case "edited":
+		return "edited, not committed"
+	case "added":
+		return "new, not committed"
+	case "deleted":
+		return "deleted, not committed"
 	}
-	lead := strings.Repeat(" ", itemAt) + bullet + " "
-	if tag == "" {
-		p.write(lead + ansi.Truncate(name, room, "…") + "\n")
-		return
-	}
-	if w := max(p.nameWidth, ansi.StringWidth(name)); w+3+ansi.StringWidth(tag) <= room {
-		p.write(lead + name + strings.Repeat(" ", w-ansi.StringWidth(name)+3) + tag + "\n")
-		return
-	}
-	p.write(lead + ansi.Truncate(name, room, "…") + "\n")
-	p.writeUnder(tag)
+	return cmp.Or(it.Detail, strings.ReplaceAll(it.State, "-", " "))
 }
 
-// writeUnder writes text on a line of its own, under a thing's name.
-func (p *Pretty) writeUnder(text string) {
-	p.write(strings.Repeat(" ", itemAt+2) + ansi.Truncate(text, p.width-itemAt-2, "…") + "\n")
-}
-
-// writeMore counts the things left unshown, done as verb when it's given.
-func (p *Pretty) writeMore(n int, verb string) {
-	text := fmt.Sprintf("… and %d more", n)
-	if verb != "" {
-		text += " " + verb
+// foot is how the run ended: the counts and how long it took; when
+// applying, after the bar.
+func (p *Pretty) foot(e event.RunFinished) []string {
+	parts := tally(e.Counts)
+	done := 0
+	for _, f := range p.results {
+		done += len(f.Result.Done)
 	}
-	p.write(strings.Repeat(" ", itemAt) + faint.Render(text) + "\n")
-}
-
-// writeSummary writes the run's last lines: a rule, then how its steps
-// stood, marked.
-func (p *Pretty) writeSummary(counts map[check.State]int) {
-	mark := stateMark[check.OK]
-	style := green
+	settled := e.Counts[check.OK]
+	if f, ok := p.results[configStep]; ok && f.Result.State == check.OK {
+		settled--
+	}
 	switch {
-	case counts[check.Failed] > 0:
-		mark, style = stateMark[check.Failed], red
-	case counts[check.Attention]+counts[check.Deferred] > 0:
-		mark, style = stateMark[check.Attention], yellow
+	case p.applying() && done > 0:
+		parts = append(parts, look.White(fmt.Sprintf("%d done", done)))
+	case !p.byArea():
+		parts = append(parts, look.White(fmt.Sprintf("%d settled", settled)))
+	default:
+		parts = append(parts, look.White(fmt.Sprintf("%d fine", e.Counts[check.OK])))
 	}
-	p.write("  " + faint.Render(p.rule()) + "\n")
-	p.write(strings.Repeat(" ", markIndent) + mark + "  " + style.Render(summary(counts)) + "\n\n")
+	parts = append(parts, look.Muted(seconds(e.Duration)))
+	if !p.applying() {
+		return []string{look.Summary(parts...)}
+	}
+	ended := look.Done
+	switch {
+	case e.Counts[check.Failed] > 0:
+		ended = look.Failed
+	case e.Counts[check.Attention] > 0:
+		ended = look.NeedsYou
+	}
+	n := len(p.start.Steps)
+	return []string{look.Cut(look.Bar(n, 0, n, ended)+"  "+look.Says(parts...), p.width)}
 }
+
+// tally is what went wrong in a run, counted: what failed, what needs
+// attention, and what wasn't checked.
+func tally(counts map[check.State]int) []string {
+	var parts []string
+	if n := counts[check.Failed]; n > 0 {
+		parts = append(parts, look.Red(fmt.Sprintf("%d failed", n)))
+	}
+	if n := counts[check.Attention]; n > 0 {
+		parts = append(parts, look.Orange(fmt.Sprintf("%d %s you", n, plural(n, "needs", "need"))))
+	}
+	if n := counts[check.Deferred]; n > 0 {
+		parts = append(parts, look.Muted(fmt.Sprintf("%d not checked", n)))
+	}
+	return parts
+}
+
+// seconds is how long a run took, to a tenth of a second.
+func seconds(d time.Duration) string { return fmt.Sprintf("%.1fs", d.Seconds()) }
 
 // spin starts the spinner, when the face animates and it isn't turning.
 func (p *Pretty) spin() {
@@ -341,7 +462,7 @@ func (p *Pretty) spin() {
 	p.stop, p.stopped = make(chan struct{}), make(chan struct{})
 	go func(stop, stopped chan struct{}) {
 		defer close(stopped)
-		tick := time.NewTicker(spinnerEvery)
+		tick := time.NewTicker(spinEvery)
 		defer tick.Stop()
 		for {
 			select {
@@ -358,8 +479,9 @@ func (p *Pretty) spin() {
 	p.drawSpinner()
 }
 
-// drawSpinner draws the spinner's line, naming the steps running, over the
-// last one: none when nothing runs or the face doesn't animate.
+// drawSpinner draws the spinner's line over the last one: on a timeline,
+// the running step's row; otherwise which steps are running, and how many
+// are done. None when nothing runs, or the face doesn't animate.
 func (p *Pretty) drawSpinner() {
 	if !p.animate {
 		return
@@ -368,15 +490,20 @@ func (p *Pretty) drawSpinner() {
 	if len(p.running) == 0 {
 		return
 	}
-	text := fmt.Sprintf("%s %d of %d · %s", spinnerFrames[p.frame%len(spinnerFrames)], len(p.results), len(p.steps), doing(p.running))
-	p.write(strings.Repeat(" ", markIndent) + faint.Render(ansi.Truncate(text, p.width-markIndent-1, "…")))
+	mark := look.Cyan(spinning[p.frame%len(spinning)])
+	text := "  " + mark + " " + look.Says(look.Muted(doing(p.running)), look.Dim(fmt.Sprintf("%d of %d", len(p.results), len(p.start.Steps))))
+	if !p.byArea() {
+		r := p.running[0]
+		text = "  " + mark + " " + look.Strong(r.title) + "  " + look.Cyan(r.doing)
+	}
+	p.write(look.Cut(text, p.width))
 	p.spinning = true
 }
 
 // clearSpinner takes the spinner's line down.
 func (p *Pretty) clearSpinner() {
 	if p.spinning {
-		p.write("\r" + ansi.EraseEntireLine)
+		p.write("\r\x1b[2K")
 		p.spinning = false
 	}
 }
@@ -393,6 +520,12 @@ func (p *Pretty) stopSpinner() {
 		p.mu.Lock()
 	}
 	p.clearSpinner()
+}
+
+func (p *Pretty) lines(ls ...string) {
+	for _, l := range ls {
+		p.write(l + "\n")
+	}
 }
 
 func (p *Pretty) write(s string) {
@@ -428,17 +561,17 @@ func without(running []runningStep, step string) []runningStep {
 // doing says what the steps running are doing, as in "applying Formulae ·
 // checking Casks, App Store".
 func doing(running []runningStep) string {
-	var groups []string
+	var kinds []string
 	titles := map[string][]string{}
 	for _, r := range running {
 		if _, ok := titles[r.doing]; !ok {
-			groups = append(groups, r.doing)
+			kinds = append(kinds, r.doing)
 		}
 		titles[r.doing] = append(titles[r.doing], r.title)
 	}
-	parts := make([]string, len(groups))
-	for i, g := range groups {
-		parts[i] = g + " " + strings.Join(titles[g], ", ")
+	parts := make([]string, len(kinds))
+	for i, k := range kinds {
+		parts[i] = k + " " + strings.Join(titles[k], ", ")
 	}
 	return strings.Join(parts, " · ")
 }

@@ -1,0 +1,11 @@
+
+  ✗ kit apply  Fri 2 Jan 03:04
+
+  03:04:05  ● Homebrew  /opt/homebrew
+            │ brew --prefix · exit 0 · 0.1s
+  03:04:06  ✗ remote-session  couldn't apply: run apply exited 1
+            │ /Users/someone/.conf…teps/remote-session/run apply · exit 1 · 0.3s
+            │ sudo: a password is required
+            ✗ fonts  didn't finish
+
+  1 failed · 1 fine · 4.0s

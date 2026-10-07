@@ -374,6 +374,9 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 		checks = append(checks, nightly.Check(jobs, len(hourly) > 0, len(daily) > 0, dirs.State, a.Now))
 	}
 	base := slices.Concat([]engine.Step{homebrew}, setup, kinds, checks)
+	for i := range base {
+		base[i].Part = partOf(base[i].Name)
+	}
 	scripts, err := r.scriptSteps(base)
 	if err == nil {
 		r.pipeline, err = engine.New(slices.Concat(base, scripts)...)
@@ -485,4 +488,29 @@ func childEnv(getenv func(string) string, environ []string, home string, path []
 		}
 	}
 	return append(env, "HOMEBREW_NO_AUTO_UPDATE=1", "HOMEBREW_NO_ANALYTICS=1", "HOMEBREW_NO_ENV_HINTS=1", "HOMEBREW_NO_COLOR=1", "GIT_TERMINAL_PROMPT=0")
+}
+
+// partOf is what the step called name counts towards in a view rolling its
+// area up: a kind's things are packages or settings, as kit's help groups
+// them; the home folder's set-up and the Mac's switches are packages or
+// settings too; the config repository's steps are its own.
+func partOf(name string) string {
+	for _, n := range kindNouns {
+		if n.name == name {
+			return map[string]string{groupPackages: render.PartPackages, groupSettings: render.PartSettings}[n.group]
+		}
+	}
+	switch name {
+	case brew.StepName, steps.FeatureOhMyZsh:
+		return render.PartPackages
+	case steps.PathName, steps.FeatureTouchIDSudo, steps.FeatureRemoteLogin, steps.FeatureFileSharing:
+		return render.PartSettings
+	case linked.StepName:
+		return render.PartFiles
+	case secretKind:
+		return render.PartSecrets
+	case steps.ConfigEditsName, steps.ConfigSyncName, steps.ConfigPrivateName:
+		return render.PartConfig
+	}
+	return ""
 }

@@ -26,13 +26,16 @@ const (
 // shell's PATH, which the shell reads as it starts, running nothing.
 const PathFileName = "path"
 
+// PathName is the name of the step that writes the shell's PATH.
+const PathName = "path"
+
 // PathFile checks the file at file holds dirs, the PATH the shell puts
 // ahead of the one it inherits, colon-separated; applying writes it. While
 // it can't be written, new shells keep the last good list.
 func PathFile(dirs []string, file string) engine.Step {
 	want := strings.Join(dirs, ":") + "\n"
 	return engine.Step{
-		Name: "path", Title: "Shell PATH", Area: AreaDrift,
+		Name: PathName, Title: "Shell PATH", Area: AreaDrift,
 		Check: func(context.Context) check.Result {
 			data, err := os.ReadFile(file)
 			it := check.Item{ID: "path:shell", Name: "the shell's PATH", Action: ActionWrite}
