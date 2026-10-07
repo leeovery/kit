@@ -169,3 +169,50 @@ func TestExecRunsAnInteractiveCommandAtTheTerminal(t *testing.T) {
 		t.Errorf("the terminal got %q and %q, the result %q; want everything at the terminal, nothing captured", out.String(), errOut.String(), res.Stdout)
 	}
 }
+
+// A command's lines are given as it prints them, its output and its errors,
+// a line a carriage return starts again given as it ends; all it printed is
+// still kept.
+func TestExecGivesLinesAsTheyCome(t *testing.T) {
+	r, _ := programs(t, map[string]string{"install": `echo "==> Fetching"; printf '10%%\r50%%\r100%%\n'; echo careful >&2; printf 'no newline'`})
+	var got []string
+	res, err := r.Run(t.Context(), runner.Command{Name: "install", Lines: func(line string) { got = append(got, line) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	slices.Sort(got)
+	if want := []string{"100%", "==> Fetching", "careful", "no newline"}; !slices.Equal(got, want) {
+		t.Errorf("lines = %q, want %q", got, want)
+	}
+	if string(res.Stdout) != "==> Fetching\n10%\r50%\r100%\nno newline" || string(res.Stderr) != "careful\n" {
+		t.Errorf("Run() = %q, %q; want all it printed kept", res.Stdout, res.Stderr)
+	}
+}
+
+// What's streamed is only what's wanted: never a secret's lines, nor an
+// interactive command's.
+func TestStreamedGivesWhatsWanted(t *testing.T) {
+	r, _ := programs(t, map[string]string{"say": "echo said"})
+	var got []string
+	streamed := runner.Streamed(r, func(ctx context.Context) bool { return ctx.Value(wanted{}) != nil }, func(_ context.Context, cmd runner.Command, line string) {
+		got = append(got, cmd.Name+": "+line)
+	})
+	ctx := context.WithValue(t.Context(), wanted{}, true)
+	for _, c := range []struct {
+		ctx context.Context
+		cmd runner.Command
+	}{
+		{ctx, runner.Command{Name: "say"}},
+		{t.Context(), runner.Command{Name: "say", Args: []string{"unwanted"}}},
+		{ctx, runner.Command{Name: "say", Secret: true}},
+	} {
+		if _, err := streamed.Run(c.ctx, c.cmd); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !slices.Equal(got, []string{"say: said"}) {
+		t.Errorf("lines = %q, want the wanted command's alone", got)
+	}
+}
+
+type wanted struct{}

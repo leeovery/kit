@@ -3,9 +3,11 @@ package render_test
 import (
 	"bytes"
 	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -342,5 +344,133 @@ func TestPrettyWholeOrNamed(t *testing.T) {
 	})
 	if want := "\n  ● fonts  16 installed\n"; out.String() != want {
 		t.Errorf("kit apply fonts printed %q, want %q", out.String(), want)
+	}
+}
+
+// syncBuffer is a buffer a face animating in the background writes to while
+// a test reads it.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// screen is what's left on a terminal once raw is written to it: lines
+// drawn over at a carriage return, the cursor moved up, the screen cleared
+// below it.
+func screen(raw string) string {
+	lines, row := []string{""}, 0
+	for len(raw) > 0 {
+		switch {
+		case strings.HasPrefix(raw, "\n"):
+			row++
+			if row == len(lines) {
+				lines = append(lines, "")
+			}
+			raw = raw[1:]
+		case strings.HasPrefix(raw, "\r"):
+			raw = raw[1:]
+		case strings.HasPrefix(raw, "\x1b[J"):
+			lines, raw = append(lines[:row], ""), raw[3:]
+		case strings.HasPrefix(raw, "\x1b["):
+			end := strings.IndexAny(raw[2:], "ABCDJKm") + 2
+			if raw[end] == 'A' {
+				n := 0
+				_, _ = fmt.Sscanf(raw[2:end], "%d", &n)
+				row -= n
+			}
+			raw = raw[end+1:]
+		default:
+			i := strings.IndexAny(raw, "\n\r\x1b")
+			if i < 0 {
+				i = len(raw)
+			}
+			lines[row] += raw[:i]
+			raw = raw[i:]
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// turned is a screen with the running mark as it starts, whichever way it
+// has turned since.
+func turned(screen string) string {
+	return strings.NewReplacer("◓", "◐", "◑", "◐", "◒", "◐").Replace(screen)
+}
+
+// While a step changes things, its row says what it's running, and the last
+// lines its command printed show on the line under it; done, they fold
+// away; failed, they stay.
+func TestPrettyShowsWhatACommandPrints(t *testing.T) {
+	var out syncBuffer
+	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true)
+	face.Emit(event.RunStarted{Command: "brew add", Machine: "laptop", Steps: []event.Step{{Name: "jq", Title: "jq"}, {Name: "ripgrap", Title: "ripgrap"}}})
+	face.Emit(event.StepStarted{Step: "jq", Doing: "changing"})
+	for i := range 7 {
+		face.Emit(event.Output{Step: "jq", Command: "brew install --formula jq", Line: fmt.Sprintf("==> line %d", i+1)})
+	}
+	// What a command prints is drawn at the spinner's next turn, at most.
+	time.Sleep(300 * time.Millisecond)
+	want := "\n  ◐ jq  changing · brew install --formula jq\n  │ ==> line 3\n  │ ==> line 4\n  │ ==> line 5\n  │ ==> line 6\n  │ ==> line 7"
+	if got := turned(screen(out.String())); got != want {
+		t.Errorf("while jq installs, the screen is\n%s\nwant\n%s", got, want)
+	}
+	face.Emit(event.StepFinished{Step: "jq", Result: check.Result{State: check.OK, Summary: "installed; declared in laptop"}})
+	face.Emit(event.StepStarted{Step: "ripgrap", Doing: "changing"})
+	face.Emit(event.Output{Step: "ripgrap", Command: "brew install --formula ripgrap", Line: "\x1b[31mWarning:\x1b[0m No available formula with the name \"ripgrap\"."})
+	face.Emit(event.StepFinished{Step: "ripgrap", Result: check.Result{State: check.Failed, Reason: "couldn't install: brew install --formula ripgrap exited 1"}})
+	face.Emit(event.RunFinished{Counts: map[check.State]int{check.OK: 1, check.Failed: 1}})
+	if err := face.Close(); err != nil {
+		t.Fatal(err)
+	}
+	want = "\n  ● jq  installed · declared in laptop\n  ✗ ripgrap  couldn't install · brew install --formula ripgrap\n  │ Warning: No available formula with the name \"ripgrap\".\n"
+	if got := screen(out.String()); got != want {
+		t.Errorf("once done, the screen is\n%s\nwant\n%s", got, want)
+	}
+}
+
+// While applying, the live part is the lights, the steps running by area,
+// each saying what it's doing, and the bar with the counts; at the end, the
+// report takes its place.
+func TestPrettyApplyingNow(t *testing.T) {
+	var out syncBuffer
+	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true)
+	face.Emit(event.RunStarted{Time: at, Command: "apply", Machine: "laptop", Steps: []event.Step{
+		{Name: "time-machine", Title: "Time Machine", Area: "Backups"},
+		{Name: "brew", Title: "Formulae", Area: "Drift", Part: render.PartPackages},
+		{Name: "cask", Title: "Casks", Area: "Drift", Part: render.PartPackages},
+		{Name: "fonts", Title: "fonts", Area: "Steps"},
+	}})
+	face.Emit(event.StepFinished{Step: "time-machine", Result: check.Result{State: check.OK, Summary: "last backup 02:35"}})
+	face.Emit(event.StepStarted{Step: "brew", Doing: "applying"})
+	face.Emit(event.Output{Step: "brew", Command: "brew install --formula jq", Line: "==> Pouring jq"})
+	time.Sleep(300 * time.Millisecond)
+	got := turned(screen(out.String()))
+	for _, want := range []string{"  ● BACKUPS 1  ◐ CONFIG  ○ STEPS\n", "  CONFIG\n  ◐ Formulae  applying · brew install --formula jq\n", "  ▮▮▮▮  1 of 4 · 1 running · "} {
+		if !strings.Contains(got, want) {
+			t.Errorf("while applying, the screen is\n%s\nwant it to hold\n%s", got, want)
+		}
+	}
+	face.Emit(event.StepFinished{Step: "brew", Result: check.Result{State: check.OK, Summary: "1 declared, all installed", Done: []check.Item{{ID: "brew:jq", Name: "jq", Action: "install"}}}})
+	face.Emit(event.StepFinished{Step: "cask", Result: check.Result{State: check.OK, Summary: "none declared"}})
+	face.Emit(event.StepFinished{Step: "fonts", Result: check.Result{State: check.OK, Summary: "16 installed"}})
+	face.Emit(event.RunFinished{Duration: 4200 * time.Millisecond, Counts: map[check.State]int{check.OK: 4}})
+	if err := face.Close(); err != nil {
+		t.Fatal(err)
+	}
+	got = screen(out.String())
+	if strings.Contains(got, "running") || !strings.Contains(got, "  CONFIG\n  ● jq  installed\n\n  ▮▮▮▮  1 done · 4.2s\n") {
+		t.Errorf("once applied, the screen is\n%s", got)
 	}
 }

@@ -179,3 +179,25 @@ func TestReadRefusesALineThatIsntARecord(t *testing.T) {
 		t.Errorf("Read() error = %v, want one naming line 2", err)
 	}
 }
+
+// A command's lines as they come aren't logged: its command's line has
+// its output whole.
+func TestFileLeavesOutLinesAsTheyCome(t *testing.T) {
+	dir := t.TempDir()
+	f, err := logs.Open(dir, time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC), "status", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Emit(event.Output{Step: "brew", Line: "==> Pouring jq"})
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	path, err := logs.Latest(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	records, err := logs.Read(path)
+	if err != nil || len(records) != 0 {
+		t.Errorf("logged %+v, %v; want nothing", records, err)
+	}
+}

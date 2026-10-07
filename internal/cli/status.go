@@ -35,6 +35,7 @@ import (
 	"github.com/leeovery/kit/internal/linked"
 	"github.com/leeovery/kit/internal/logs"
 	"github.com/leeovery/kit/internal/nightly"
+	"github.com/leeovery/kit/internal/redact"
 	"github.com/leeovery/kit/internal/render"
 	"github.com/leeovery/kit/internal/runner"
 	"github.com/leeovery/kit/internal/steps"
@@ -228,6 +229,9 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 	sink := event.NewFanout(face, log)
 	exec := a.Runner(path, childEnv(a.Getenv, a.Environ(), home, path))
 	observed := runner.Observed(exec, func(ctx context.Context, rep runner.Report) { sink.Emit(event.Command(ctx, rep)) }, a.Now)
+	observed = runner.Streamed(observed, event.Changing, func(ctx context.Context, cmd runner.Command, line string) {
+		sink.Emit(event.Output{Time: a.Now(), Step: event.StepOf(ctx), Command: redact.Text(cmd.String()), Line: redact.Text(line)})
+	})
 	hb := brew.New(observed)
 	r := &run{
 		command: command, machine: machine, version: a.Version, sink: sink, face: face, log: log,
@@ -466,7 +470,11 @@ func (a *app) face() render.Face {
 	case !a.pretty(out):
 		return render.NewPlain(out)
 	}
-	return render.NewPretty(a.colors(out), a.Width(out), true)
+	face := render.NewPretty(a.colors(out), a.Width(out), true)
+	if a.Getenv("TERM_PROGRAM") == "ghostty" {
+		face.ShowTabProgress()
+	}
+	return face
 }
 
 // childEnv is the environment kit runs programs in, never the one it

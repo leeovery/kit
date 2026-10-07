@@ -120,7 +120,7 @@ func TestGlanceSilentWithoutARun(t *testing.T) {
 // At a terminal, bare kit shows the wordmark at once, before any check is
 // done, then the loader while they run.
 func TestHomeShowsAtOnce(t *testing.T) {
-	var out bytes.Buffer
+	var out syncBuffer
 	g := render.NewGlance(&colorprofile.Writer{Forward: &out, Profile: colorprofile.NoTTY}, 80, true, func() time.Time { return time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC) })
 	g.Emit(event.RunStarted{Time: time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC), Machine: "laptop", Steps: []event.Step{{Name: "disk", Title: "Disk space", Area: "Mac"}}})
 	if got := out.String(); !strings.Contains(got, "│  laptop\n") || !strings.Contains(got, "│  Mon 5 Oct · 12:00\n") {
