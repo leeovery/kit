@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -73,6 +74,15 @@ func (e Exec) start(ctx context.Context, program string, cmd Command) (stdout, s
 	}
 	var out, errOut bytes.Buffer
 	c.Stdout, c.Stderr = &out, &errOut
+	if cmd.Lines != nil {
+		l := &lines{each: cmd.Lines}
+		stdout, stderr := l.stream(), l.stream()
+		c.Stdout, c.Stderr = io.MultiWriter(&out, stdout), io.MultiWriter(&errOut, stderr)
+		defer func() {
+			stdout.end()
+			stderr.end()
+		}()
+	}
 	// The command runs in a process group of its own, and is ended with
 	// everything it started, as os/exec ends the command alone: a child left
 	// running would outlive it, holding its output open until waitDelay
@@ -112,4 +122,50 @@ func (e Exec) find(name string) (string, error) {
 func executable(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.Mode().IsRegular() && info.Mode().Perm()&0o111 != 0
+}
+
+// lines splits what a command prints into lines as they come, giving each
+// to each, one at a time: its output's and its errors' apart.
+type lines struct {
+	mu   sync.Mutex
+	each func(string)
+}
+
+func (l *lines) stream() *lineStream { return &lineStream{lines: l} }
+
+// lineStream is one of a command's streams, split into lines: a carriage
+// return starts the line again, as a progress bar redraws it.
+type lineStream struct {
+	lines *lines
+	line  []byte
+}
+
+func (s *lineStream) Write(p []byte) (int, error) {
+	s.lines.mu.Lock()
+	defer s.lines.mu.Unlock()
+	for _, b := range p {
+		switch b {
+		case '\n':
+			s.give()
+		case '\r':
+			s.line = s.line[:0]
+		default:
+			s.line = append(s.line, b)
+		}
+	}
+	return len(p), nil
+}
+
+// end gives what's left of the line, once the command is done.
+func (s *lineStream) end() {
+	s.lines.mu.Lock()
+	defer s.lines.mu.Unlock()
+	s.give()
+}
+
+func (s *lineStream) give() {
+	if line := strings.TrimSpace(string(s.line)); line != "" {
+		s.lines.each(string(s.line))
+	}
+	s.line = s.line[:0]
 }

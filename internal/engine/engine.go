@@ -377,7 +377,7 @@ func (d *dispatch) step(ctx context.Context, s Step) check.Result {
 	if d.apply && res.State != check.Deferred && (res.State != check.OK || res.Actions()) && s.Apply != nil && ctx.Err() == nil {
 		d.sink.Emit(event.StepStarted{Time: d.now(), Step: s.Name, Doing: "applying"})
 		before := res
-		if err := applySafely(ctx, s, res); err != nil {
+		if err := applySafely(event.WithChanging(ctx), s, res); err != nil {
 			return check.Result{State: check.Failed, Reason: err.Error()}
 		}
 		res = checkSafely(ctx, s)

@@ -62,6 +62,10 @@ var spinning = []string{"◐", "◓", "◑", "◒"}
 
 const spinEvery = 120 * time.Millisecond
 
+// drawEvery is the least time between drawings of the live part for what a
+// command prints.
+const drawEvery = 50 * time.Millisecond
+
 // Pretty is the face at a terminal, in kit's look. A command looking at the
 // whole Mac opens with the wordmark, what ran, the Mac and when beside it;
 // its steps show by area, Config rolled up, and a summary ends it. A
@@ -82,12 +86,23 @@ type Pretty struct {
 	results map[string]event.StepFinished
 	order   ordered
 	running []runningStep
-	// spinning is whether the spinner's line is on screen.
-	spinning bool
-	frame    int
-	stop     chan struct{}
-	stopped  chan struct{}
-	err      error
+	// live is how many lines the live part, redrawn in place, takes on
+	// screen: the loader, or a running step's row and what it printed.
+	live int
+	// output are the last lines each step's commands printed while it
+	// changed things, and command the command printing them.
+	output  map[string][]string
+	command map[string]string
+	frame   int
+	// began is when the run began, by the clock, for how long it's taken;
+	// drawn when the live part was last drawn.
+	began, drawn time.Time
+	// tab is whether the terminal shows a run's progress on its tab, as
+	// Ghostty does.
+	tab     bool
+	stop    chan struct{}
+	stopped chan struct{}
+	err     error
 }
 
 // NewPretty returns the pretty face, writing to w, which is width columns
@@ -95,6 +110,13 @@ type Pretty struct {
 // steps run when animate is true.
 func NewPretty(w io.Writer, width int, animate bool) *Pretty {
 	return &Pretty{w: w, width: min(max(width, 40), look.Width), animate: animate}
+}
+
+// ShowTabProgress has the face show a run's progress on the terminal's tab
+// too, for a terminal that does: Ghostty.
+func (p *Pretty) ShowTabProgress() *Pretty {
+	p.tab = true
+	return p
 }
 
 // homeLoader is bare kit's face while its checks run: the wordmark at once,
@@ -111,6 +133,7 @@ func (p *Pretty) Emit(e event.Event) {
 	switch e := e.(type) {
 	case event.RunStarted:
 		p.start, p.results = e, make(map[string]event.StepFinished, len(e.Steps))
+		p.output, p.command, p.began = map[string][]string{}, map[string]string{}, time.Now()
 		p.order.start(e.Steps)
 		p.whole = p.home || slices.Contains(wholeMac, e.Command) && len(e.Only) == 0
 		p.write("\n")
@@ -126,13 +149,22 @@ func (p *Pretty) Emit(e event.Event) {
 		p.results[e.Step] = e
 		if !p.byArea() {
 			if ready := p.order.finish(e); len(ready) > 0 {
-				p.clearSpinner()
+				p.clearLive()
 				for _, f := range ready {
 					p.lines(look.Timeline("  ", p.width, p.row(f))...)
 				}
 			}
 		}
 		p.drawSpinner()
+	case event.Output:
+		line := strings.TrimRight(strings.ReplaceAll(ansi.Strip(e.Line), "\t", "    "), " ")
+		p.output[e.Step] = append(lastOf(p.output[e.Step], keptFailing-1), line)
+		p.command[e.Step] = e.Command
+		// A command can print faster than a terminal is worth redrawing:
+		// the spinner's turn draws what came since.
+		if time.Since(p.drawn) >= drawEvery {
+			p.drawSpinner()
+		}
 	case event.RunFinished:
 		p.stopSpinner()
 		switch {
@@ -261,6 +293,11 @@ func worse(a, b look.State) bool {
 func (p *Pretty) row(f event.StepFinished) look.Row {
 	r := f.Result
 	row := resultRow(p.title(f.Step), r)
+	if out := p.output[f.Step]; r.State == check.Failed && len(out) > 0 {
+		what, _, _ := strings.Cut(r.Reason, ":")
+		row.Says = look.Says(look.Red(what), look.Dim(p.command[f.Step]))
+		row.Under = append(look.Output(out...), row.Under...)
+	}
 	if f.Step == configStep && r.State == check.OK && r.Summary == "nothing changed" {
 		row.State, row.Says = look.Skipped, look.Muted("nothing to commit")
 	}
@@ -492,34 +529,126 @@ func (p *Pretty) spin() {
 	p.drawSpinner()
 }
 
-// drawSpinner draws the loader's line over the last one: on a timeline, the
-// running step's row; otherwise the bar, how many steps are done, and which
-// are running. None when nothing runs, or the face doesn't animate.
+// drawSpinner draws the live part over the last: on a timeline, the running
+// step's row, and the last lines its commands printed on the line under it;
+// otherwise the loader, the bar, how many steps are done, and which are
+// running. None when nothing runs, or the face doesn't animate.
 func (p *Pretty) drawSpinner() {
 	if !p.animate {
 		return
 	}
-	p.clearSpinner()
+	p.clearLive()
 	if len(p.running) == 0 {
 		return
 	}
 	mark := look.Cyan(spinning[p.frame%len(spinning)])
 	done, total := len(p.results), len(p.start.Steps)
 	text := "  " + mark + " " + look.Bar(done, len(p.running), total, look.Done) + "  " + look.Says(look.White(fmt.Sprintf("%d of %d", done, total)), look.Muted(doing(p.running)))
+	lines := []string{text}
+	if p.applying() {
+		lines = p.applyingNow()
+	}
+	if p.tab && total > 0 {
+		p.write(fmt.Sprintf("\x1b]9;4;1;%d\x07", done*100/total))
+	}
 	if !p.byArea() {
 		r := p.running[0]
-		text = "  " + mark + " " + look.Strong(r.title) + "  " + look.Cyan(r.doing)
+		says := []string{look.Cyan(r.doing)}
+		if c := p.command[r.step]; c != "" {
+			says = append(says, look.Dim(c))
+		}
+		lines = []string{"  " + mark + " " + look.Strong(r.title) + "  " + look.Says(says...)}
+		for _, l := range lastOf(p.output[r.step], keptRunning) {
+			lines = append(lines, "  "+look.Dim("│")+" "+look.Muted(l))
+		}
 	}
-	p.write(look.Cut(text, p.width))
-	p.spinning = true
+	for i, l := range lines {
+		lines[i] = look.Cut(l, p.width)
+	}
+	p.write(strings.Join(lines, "\n"))
+	p.live, p.drawn = len(lines), time.Now()
 }
 
-// clearSpinner takes the spinner's line down.
-func (p *Pretty) clearSpinner() {
-	if p.spinning {
-		p.write("\r\x1b[2K")
-		p.spinning = false
+// applyingNow is applying's live part: the lights, an area each, how it
+// stands so far; the steps running, by area, each saying what it's doing;
+// then the bar, how many steps of how many are done, how many are running,
+// and how long it's taken.
+func (p *Pretty) applyingNow() []string {
+	byArea := map[string][]event.Step{}
+	for _, s := range p.start.Steps {
+		a := viewArea(s.Area)
+		byArea[a] = append(byArea[a], s)
 	}
+	running := map[string]runningStep{}
+	for _, r := range p.running {
+		running[r.step] = r
+	}
+	var lamps []look.Lamp
+	var rows []string
+	for _, area := range viewOrder {
+		steps := byArea[area]
+		if len(steps) == 0 {
+			continue
+		}
+		l := look.Lamp{Name: area, State: look.Queued}
+		var finished []event.StepFinished
+		var now []look.Row
+		for _, s := range steps {
+			if f, ok := p.results[s.Name]; ok {
+				finished = append(finished, f)
+			}
+			if r, ok := running[s.Name]; ok {
+				says := []string{look.Cyan(r.doing)}
+				if c := p.command[s.Name]; c != "" {
+					says = append(says, look.Dim(c))
+				}
+				now = append(now, look.Row{State: look.Running, Name: r.title, Says: look.Says(says...)})
+			}
+		}
+		switch {
+		case len(now) > 0:
+			l.State = look.Running
+		case len(finished) == len(steps):
+			l = lamp(area, finished)
+		}
+		lamps = append(lamps, l)
+		if len(now) > 0 {
+			rows = append(append(rows, look.Header(area, "")), look.Rows("  ", p.width, now...)...)
+		}
+	}
+	done, total := len(p.results), len(p.start.Steps)
+	foot := "  " + look.Bar(done, len(p.running), total, look.Done) + "  " + look.Says(look.White(fmt.Sprintf("%d of %d", done, total)), look.Cyan(fmt.Sprintf("%d running", len(p.running))), look.Muted(seconds(time.Since(p.began))))
+	out := []string{look.Lights(lamps...), ""}
+	if len(rows) > 0 {
+		out = append(append(out, rows...), "")
+	}
+	return append(out, foot)
+}
+
+// How many of what a step's commands printed show: while it runs, and once
+// it's failed.
+const (
+	keptRunning = 5
+	keptFailing = 8
+)
+
+// lastOf is the last n of lines.
+func lastOf(lines []string, n int) []string {
+	return lines[max(len(lines)-n, 0):]
+}
+
+// clearLive takes the live part down: back to its first line, and clear
+// from there.
+func (p *Pretty) clearLive() {
+	if p.live == 0 {
+		return
+	}
+	p.write("\r")
+	if p.live > 1 {
+		p.write(fmt.Sprintf("\x1b[%dA", p.live-1))
+	}
+	p.write("\x1b[J")
+	p.live = 0
 }
 
 // stopSpinner stops the spinner turning, and takes its line down. It
@@ -533,7 +662,10 @@ func (p *Pretty) stopSpinner() {
 		<-stopped
 		p.mu.Lock()
 	}
-	p.clearSpinner()
+	p.clearLive()
+	if p.tab {
+		p.write("\x1b]9;4;0\x07")
+	}
 }
 
 func (p *Pretty) lines(ls ...string) {

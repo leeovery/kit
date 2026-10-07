@@ -36,6 +36,10 @@ type Command struct {
 	// Secret is whether what it prints is a secret, as 1Password's values
 	// are: kept from every report, the log included.
 	Secret bool
+	// Lines, when set, is given each line the command prints, its output and
+	// its errors, as it prints them: a line a carriage return starts again
+	// is given as it ends. Never for an interactive command.
+	Lines func(line string)
 }
 
 // String is the command as a shell would take it, each argument quoted
@@ -153,4 +157,35 @@ func (o observed) Run(ctx context.Context, cmd Command) (Result, error) {
 	res, err := o.runner.Run(ctx, cmd)
 	o.observe(ctx, Report{Command: cmd, Started: started, Result: res, Err: err})
 	return res, err
+}
+
+// Streamed returns r with each line printed by a command run in a context
+// want wants given to lines as it comes, with that context: never a
+// secret's, or an interactive command's, which prints to the terminal
+// itself.
+func Streamed(r Runner, want func(ctx context.Context) bool, lines func(ctx context.Context, cmd Command, line string)) Runner {
+	return streamed{runner: r, want: want, lines: lines}
+}
+
+type streamed struct {
+	runner Runner
+	want   func(ctx context.Context) bool
+	lines  func(ctx context.Context, cmd Command, line string)
+}
+
+func (s streamed) Has(name string) bool {
+	return Has(s.runner, name)
+}
+
+func (s streamed) Run(ctx context.Context, cmd Command) (Result, error) {
+	if !cmd.Secret && !cmd.Interactive && s.want(ctx) {
+		given := cmd.Lines
+		cmd.Lines = func(line string) {
+			if given != nil {
+				given(line)
+			}
+			s.lines(ctx, cmd, line)
+		}
+	}
+	return s.runner.Run(ctx, cmd)
 }

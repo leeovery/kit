@@ -126,6 +126,33 @@ func WithStep(ctx context.Context, step string) context.Context {
 	return context.WithValue(ctx, stepKey{}, step)
 }
 
+// WithChanging returns ctx for a step changing things, applying or adding:
+// what its commands print may be shown as it comes.
+func WithChanging(ctx context.Context) context.Context {
+	return context.WithValue(ctx, changingKey{}, true)
+}
+
+// Changing reports whether ctx is a step changing things.
+func Changing(ctx context.Context) bool {
+	changing, _ := ctx.Value(changingKey{}).(bool)
+	return changing
+}
+
+type changingKey struct{}
+
+// Output is a line a command printed, as it printed it, while its step
+// changed things: never a secret's, and with anything shaped like a token
+// hidden.
+type Output struct {
+	Time time.Time
+	Step string
+	// Command is the command that printed it.
+	Command string
+	Line    string
+}
+
+func (e Output) At() time.Time { return e.Time }
+
 // StepOf is the step ctx is running, or "".
 func StepOf(ctx context.Context) string {
 	step, _ := ctx.Value(stepKey{}).(string)

@@ -9,6 +9,7 @@ import (
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/engine"
+	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/gitrepo"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/linked"
@@ -134,12 +135,12 @@ func (d kindDrifter) settle(ctx context.Context, r *run, c *changes, dec decisio
 		if !ok {
 			return check.Result{State: check.Failed, Reason: "kit doesn't know what it was"}
 		}
-		if err := rv.Revert(ctx, dec.item.Name); err != nil {
+		if err := rv.Revert(event.WithChanging(ctx), dec.item.Name); err != nil {
 			return check.Result{State: check.Failed, Reason: "couldn't put it back: " + err.Error()}
 		}
 		return check.Result{State: check.OK, Summary: "put back as it was"}
 	case dec.action == revert:
-		if err := d.k.Install(ctx, []string{dec.item.Name}); err != nil {
+		if err := d.k.Install(event.WithChanging(ctx), []string{dec.item.Name}); err != nil {
 			return check.Result{State: check.Failed, Reason: "couldn't put it back: " + err.Error()}
 		}
 		return check.Result{State: check.OK, Summary: "put back as declared"}
@@ -150,7 +151,7 @@ func (d kindDrifter) settle(ctx context.Context, r *run, c *changes, dec decisio
 	case remove, undeclare:
 		return removeOne(ctx, r, c, d.k, dec.item.Name, dec.shared)
 	case install:
-		if err := d.k.Install(ctx, []string{dec.item.Name}); err != nil {
+		if err := d.k.Install(event.WithChanging(ctx), []string{dec.item.Name}); err != nil {
 			return check.Result{State: check.Failed, Reason: "couldn't install: " + err.Error()}
 		}
 		return check.Result{State: check.OK, Summary: "installed"}

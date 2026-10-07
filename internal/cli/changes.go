@@ -46,11 +46,27 @@ func startChanges(r *run, names []string) *changes {
 // step runs do as the step named name, emitting its start and its result.
 func (c *changes) step(ctx context.Context, name string, do func(ctx context.Context) check.Result) check.Result {
 	started := time.Now()
-	c.run.sink.Emit(event.StepStarted{Time: started, Step: name, Doing: "changing"})
+	c.run.sink.Emit(event.StepStarted{Time: started, Step: name, Doing: c.doing(name)})
 	res := do(event.WithStep(ctx, name))
 	c.results = append(c.results, res)
 	c.run.sink.Emit(event.StepFinished{Time: time.Now(), Step: name, Result: res, Duration: time.Since(started)})
 	return res
+}
+
+// doing is what the step called name does, as its row says while it runs:
+// adding or removing, as the command does, committing the config's
+// changes; else changing.
+func (c *changes) doing(name string) string {
+	if name == syncStep {
+		return "committing"
+	}
+	switch c.run.command[strings.LastIndex(c.run.command, " ")+1:] {
+	case "add":
+		return "adding"
+	case "remove":
+		return "removing"
+	}
+	return "changing"
 }
 
 // changed notes file as changed, to commit.

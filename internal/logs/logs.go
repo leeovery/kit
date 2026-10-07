@@ -122,7 +122,8 @@ func (l *File) Path() string {
 func (l *File) Emit(e event.Event) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if l.err != nil {
+	// A command's output, as it comes, is in its command's line whole.
+	if _, ok := e.(event.Output); l.err != nil || ok {
 		return
 	}
 	l.err = l.enc.Encode(l.record(e))

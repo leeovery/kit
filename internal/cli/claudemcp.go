@@ -11,6 +11,7 @@ import (
 
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/config"
+	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/kind/mcp"
 )
 
@@ -99,14 +100,14 @@ func switchOne(ctx context.Context, r *run, c *changes, m *mcp.MCP, name string,
 			_, err = m.Values(list)
 		}
 		if err == nil {
-			err = m.Install(ctx, []string{name})
+			err = m.Install(event.WithChanging(ctx), []string{name})
 		}
 		if err != nil {
 			return check.Result{State: check.Failed, Reason: strings.Join(append(done, "couldn't install: "+err.Error()), "; ")}
 		}
 		done = append(done, "installed")
 	case !on && isIn:
-		if err := m.Remove(ctx, []string{name}); err != nil {
+		if err := m.Remove(event.WithChanging(ctx), []string{name}); err != nil {
 			return check.Result{State: check.Failed, Reason: strings.Join(append(done, "couldn't remove it from Claude Code: "+err.Error()), "; ")}
 		}
 		done = append(done, "removed from Claude Code")

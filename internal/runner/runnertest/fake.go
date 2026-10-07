@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -143,6 +144,15 @@ func (f *Fake) Run(_ context.Context, cmd runner.Command) (runner.Result, error)
 	}
 	if a.does != nil {
 		a.does()
+	}
+	if cmd.Lines != nil && !cmd.Interactive {
+		for _, text := range []string{a.stdout, a.stderr} {
+			for line := range strings.Lines(text) {
+				if line = strings.TrimRight(line, "\n"); strings.TrimSpace(line) != "" {
+					cmd.Lines(line)
+				}
+			}
+		}
 	}
 	res := runner.Result{Stdout: []byte(a.stdout), Stderr: []byte(a.stderr), ExitCode: a.exit, Duration: a.duration}
 	if a.exit != 0 {
