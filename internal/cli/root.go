@@ -179,7 +179,9 @@ func Execute(ctx context.Context, root *cobra.Command, args []string) int {
 			_, _ = fmt.Fprintf(root.ErrOrStderr(), "kit: %v\n", err)
 		}
 	}
-	if isAttention {
+	// A question cancelled isn't kit failing: nothing was done, so what
+	// needed attention still does.
+	if isAttention || errors.Is(err, ask.ErrCancelled) {
 		return attentionStatus
 	}
 	return failedStatus

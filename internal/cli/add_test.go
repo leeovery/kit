@@ -47,14 +47,15 @@ func TestAddAsksNothing(t *testing.T) {
 	}
 }
 
-// A question cancelled leaves everything as it was.
+// A question cancelled leaves everything as it was, and exits 1: nothing was
+// done, so what needed attention still does; kit didn't fail.
 func TestAddCancelledDoesNothing(t *testing.T) {
 	w := laptopWorld(t)
 	w.terminal = true
 	w.fake.On("mas", "search", "--json", "sleep").Prints(sleepSearch)
 	w.choose = func(string, []string) (int, error) { return 0, ask.ErrCancelled }
 	_, errOut, code := w.run(t, "mas", "add", "sleep")
-	if errOut != "\n  – kit mas add  cancelled: nothing was installed or declared\n" || code != 2 || !slices.Equal(w.fake.Calls(), []string{"mas search --json sleep"}) {
+	if errOut != "\n  – kit mas add  cancelled: nothing was installed or declared\n" || code != 1 || !slices.Equal(w.fake.Calls(), []string{"mas search --json sleep"}) {
 		t.Errorf("kit mas add, cancelled: %q, exit %d, running %q; want nothing done", errOut, code, w.fake.Calls())
 	}
 }
