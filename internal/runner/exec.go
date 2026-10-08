@@ -96,6 +96,13 @@ func (e Exec) start(ctx context.Context, program string, cmd Command) (stdout, s
 	return out.Bytes(), errOut.Bytes(), err
 }
 
+// Become replaces kit with the program at path, run with args in env, at
+// kit's own terminal, as if it had been run there: it returns only when it
+// can't.
+func Become(path string, args, env []string) error {
+	return syscall.Exec(path, append([]string{filepath.Base(path)}, args...), env)
+}
+
 // Has reports whether the program name is on Path, or is a path to one.
 func (e Exec) Has(name string) bool {
 	_, err := e.find(name)

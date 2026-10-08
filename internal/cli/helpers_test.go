@@ -57,6 +57,8 @@ type world struct {
 	// pick picks from a list kit shows at a terminal, as its lines read,
 	// plain: the value of the line picked.
 	pick func(lines []ask.Line) (string, error)
+	// became is each command kit became, as its arguments.
+	became [][]string
 }
 
 // newWorld makes a home holding a config repository of files, by name.
@@ -136,6 +138,10 @@ func (w *world) run(t *testing.T, args ...string) (stdout, stderr string, status
 				t.Fatal("kit showed a list to pick from")
 			}
 			return w.pick(lines)
+		},
+		Become: func(args []string) error {
+			w.became = append(w.became, args)
+			return nil
 		},
 	})
 	status = cli.Execute(t.Context(), root, args)

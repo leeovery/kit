@@ -28,6 +28,9 @@ var processStarters = []string{
 	// The runner kit runs every program through: tests pass the fake in
 	// runner/runnertest instead.
 	"internal/runner/exec.go:start",
+	// kit becoming the command chosen from its home's menu: tests pass
+	// Deps.Become a function that notes it instead.
+	"internal/runner/exec.go:Become",
 }
 
 const (

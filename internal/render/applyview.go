@@ -219,7 +219,7 @@ func (p *Pretty) workRow(f event.StepFinished, part string) look.Row {
 	for _, it := range f.Result.Items {
 		switch {
 		case it.Quiet != "":
-		case isDrift(it):
+		case IsDrift(it):
 			says := []string{look.Orange(it.Name), look.Muted(wrong(part, it))}
 			if it.Detail != "" {
 				says = append(says, look.Muted(it.Detail))
@@ -245,9 +245,9 @@ func (p *Pretty) workRow(f event.StepFinished, part string) look.Row {
 	return row
 }
 
-// isDrift is whether it is drift: something installed, declared, linked or
+// IsDrift is whether it is drift: something installed, declared, linked or
 // set otherwise than the config says.
-func isDrift(it check.Item) bool {
+func IsDrift(it check.Item) bool {
 	_, ok := driftStates[it.State]
 	return ok
 }

@@ -61,6 +61,10 @@ type Deps struct {
 	// Pick shows a list at the terminal, after lead, to pick a line from, as
 	// ask.Pick does: the line's value, or ask.ErrCancelled.
 	Pick func(ctx context.Context, lead []string, lines []ask.Line, keys []look.Key) (string, error)
+	// Become has kit become kit run with args, as if it had been run so at
+	// the terminal: it replaces this process, and returns only when it
+	// can't.
+	Become func(args []string) error
 	// Scratch is the Scratch volume, which the scratch feature checks and
 	// clears: /Volumes/Scratch.
 	Scratch string
@@ -242,6 +246,13 @@ func Real(version string) Deps {
 		},
 		Pick: func(ctx context.Context, lead []string, lines []ask.Line, keys []look.Key) (string, error) {
 			return ask.Pick(ctx, os.Stdin, os.Stdout, lead, lines, keys)
+		},
+		Become: func(args []string) error {
+			self, err := os.Executable()
+			if err != nil {
+				return fmt.Errorf("find kit: %w", err)
+			}
+			return runner.Become(self, args, os.Environ())
 		},
 		Scratch:   "/Volumes/Scratch",
 		SudoLocal: steps.SudoLocal,

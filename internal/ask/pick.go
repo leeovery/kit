@@ -16,23 +16,28 @@ import (
 // Line is a line of a list to pick from: Text, as it shows. One that can
 // be picked has Chosen, as it shows with the cursor on it, and Value, what
 // picking it gives; one that folds others has them, Folds, which picking it
-// shows in its place.
+// shows in its place. The cursor starts on the line that says Start, else
+// on the first that can be picked.
 type Line struct {
 	Text, Chosen, Value string
 	Folds               []Line
+	Start               bool
 }
 
 // picks is whether the line can be picked.
 func (l Line) picks() bool { return l.Chosen != "" }
 
-// Pick shows lines, after lead, on a screen of their own, which goes when
-// it's done, and returns the Value of the line picked: the arrow keys (or j
-// and k) move among those that can be picked, enter picks (a fold, it opens
-// in place), and escape or q cancels. keys say so, under the list, which
-// scrolls to keep the cursor in view.
+// Pick shows lines, right after lead, on a screen of their own, which goes
+// when it's done, and returns the Value of the line picked: the arrow keys
+// (or j and k) move among those that can be picked, enter picks (a fold, it
+// opens in place), and escape or q cancels. keys say so, under the list,
+// which scrolls to keep the cursor in view.
 func Pick(ctx context.Context, in io.Reader, out io.Writer, lead []string, lines []Line, keys []look.Key) (string, error) {
 	l := list{lead: lead, lines: lines, keys: keys, width: look.Width, height: 40}
-	l.cursor = l.next(-1, 1)
+	l.cursor = slices.IndexFunc(lines, func(l Line) bool { return l.Start && l.picks() })
+	if l.cursor < 0 {
+		l.cursor = l.next(-1, 1)
+	}
 	if l.cursor < 0 {
 		return "", errors.New("nothing to pick from")
 	}
@@ -102,9 +107,6 @@ func (l list) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (l list) View() tea.View {
 	lines := append([]string{""}, l.lead...)
-	if len(l.lead) > 0 {
-		lines = append(lines, "")
-	}
 	if !l.picked && !l.cancelled {
 		room := max(l.height-len(lines)-3, 3)
 		from, to := 0, len(l.lines)

@@ -45,6 +45,8 @@ type Glance struct {
 	// live is what shows while the checks run, at a terminal: the wordmark
 	// at once, then the loader.
 	live *Pretty
+	// rows are the home's rows, as shown.
+	rows []string
 }
 
 // NewGlance returns the at-a-glance face, writing to w, which is width
@@ -214,8 +216,16 @@ func (g *Glance) home(doc status.Document) error {
 			rows = append(rows, g.homeRow(name, steps, parts))
 		}
 	}
-	_, err := io.WriteString(g.w, strings.Join(look.Rows("  ", g.width, rows...), "\n")+"\n")
+	g.rows = look.Rows("  ", g.width, rows...)
+	_, err := io.WriteString(g.w, strings.Join(g.rows, "\n")+"\n")
 	return err
+}
+
+// Home is the home as the pretty face showed it: the wordmark, with the Mac
+// and when beside it, then a row an area.
+func (g *Glance) Home() []string {
+	head := look.Head(look.Meta(g.start.Command, g.start.Machine, when(g.start.Time))...)
+	return append(append(head, ""), g.rows...)
 }
 
 // homeRow is an area's row: what needs attention in it, the first named
