@@ -58,6 +58,9 @@ type Deps struct {
 	// ReadSecret asks, at the terminal, for a value typed without being
 	// shown, for the thing about is, as ask.Secret does.
 	ReadSecret func(ctx context.Context, about look.Row) (string, error)
+	// Pick shows a list at the terminal, after lead, to pick a line from, as
+	// ask.Pick does: the line's value, or ask.ErrCancelled.
+	Pick func(ctx context.Context, lead []string, lines []ask.Line, keys []look.Key) (string, error)
 	// Scratch is the Scratch volume, which the scratch feature checks and
 	// clears: /Volumes/Scratch.
 	Scratch string
@@ -236,6 +239,9 @@ func Real(version string) Deps {
 		},
 		ReadSecret: func(ctx context.Context, about look.Row) (string, error) {
 			return ask.Secret(ctx, os.Stdin, os.Stdout, about)
+		},
+		Pick: func(ctx context.Context, lead []string, lines []ask.Line, keys []look.Key) (string, error) {
+			return ask.Pick(ctx, os.Stdin, os.Stdout, lead, lines, keys)
 		},
 		Scratch:   "/Volumes/Scratch",
 		SudoLocal: steps.SudoLocal,

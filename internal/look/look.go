@@ -228,6 +228,10 @@ func Answers(cs []Choice, chosen int) []string {
 	return out
 }
 
+// Chosen is something chosen from a list: the cursor in the marks'
+// column, and the thing a pill, its words where the others' are.
+func Chosen(text string) string { return cursor() + Pill(text, Done) }
+
 // Key is a key and what it does, as Keys lists them.
 type Key struct{ Key, Does string }
 

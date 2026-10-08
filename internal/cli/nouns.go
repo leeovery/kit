@@ -8,6 +8,7 @@ import (
 
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/linked"
+	"github.com/leeovery/kit/internal/redact"
 )
 
 // kit's help lists its commands in groups: those about the whole Mac, then
@@ -81,9 +82,10 @@ func nounCommands(a *app) []*cobra.Command {
 }
 
 // prepared runs do in a run prepared for command, as in brew add, then
-// closes the run.
+// closes the run. The run is of the command and what it was given, as in
+// brew add jq, which its log keeps.
 func (a *app) prepared(cmd *cobra.Command, command string, do func(ctx context.Context, r *run) error) error {
-	r, err := a.prepare(command, strings.ReplaceAll(command, " ", "-"))
+	r, err := a.prepare(redact.Text(strings.Join(append([]string{command}, cmd.Flags().Args()...), " ")), strings.ReplaceAll(command, " ", "-"))
 	if err != nil {
 		return err
 	}

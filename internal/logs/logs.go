@@ -3,12 +3,17 @@
 package logs
 
 import (
+	"bufio"
+	"bytes"
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -216,4 +221,107 @@ func Read(path string) ([]Record, error) {
 		records = append(records, r)
 	}
 	return records, nil
+}
+
+// Run is a logged run, as its log begins and ends: where its log is, how it
+// started, and how it finished, when it did.
+type Run struct {
+	Path    string
+	Started Record
+	// Finished is the run's last record: run_finished when it finished.
+	Finished Record
+}
+
+// Done is whether the run finished.
+func (r Run) Done() bool { return r.Finished.Event == "run_finished" }
+
+// Of is what the run was of: its command, after kit, with the steps it was
+// of, if it was of steps named, as in status brew; kit alone, kit's home.
+func (r Run) Of() string {
+	return strings.Join(append([]string{cmp.Or(r.Started.Command, "kit")}, r.Started.Only...), " ")
+}
+
+// Runs are the runs logged in dir, newest first: each from its start, read
+// line by line from the log's beginning (a run can run commands before it
+// starts), and its last line, read from its end, so a long log is quick to
+// list. A log with no start, as kit list's, isn't a run.
+func Runs(dir string) ([]Run, error) {
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read the logs directory: %w", err)
+	}
+	var runs []Run
+	for _, e := range slices.Backward(entries) {
+		if !e.Type().IsRegular() || !strings.HasSuffix(e.Name(), ext) {
+			continue
+		}
+		path := filepath.Join(dir, e.Name())
+		if run, ok := readRun(path); ok {
+			runs = append(runs, run)
+		}
+	}
+	return runs, nil
+}
+
+// readRun is the run logged at path, when it started.
+func readRun(path string) (Run, bool) {
+	f, err := os.Open(path)
+	if err != nil {
+		return Run{}, false
+	}
+	defer func() { _ = f.Close() }()
+	start, ok := started(bufio.NewReaderSize(f, 64<<10))
+	if !ok {
+		return Run{}, false
+	}
+	return Run{Path: path, Started: start, Finished: last(f)}, true
+}
+
+// startLine is how a run's start begins, after its time: a record's event
+// follows its time, so it's in a line's first hundred bytes.
+var startLine = []byte(`"event":"run_started"`)
+
+// started is the run's start, the first run_started line in what r reads:
+// of other lines, only as much is read as says what they are.
+func started(r *bufio.Reader) (Record, bool) {
+	for {
+		line, err := r.ReadSlice('\n')
+		if bytes.Contains(line[:min(len(line), 100)], startLine) {
+			whole := bytes.Clone(line)
+			for errors.Is(err, bufio.ErrBufferFull) {
+				line, err = r.ReadSlice('\n')
+				whole = append(whole, line...)
+			}
+			var start Record
+			return start, json.Unmarshal(whole, &start) == nil
+		}
+		for errors.Is(err, bufio.ErrBufferFull) {
+			_, err = r.ReadSlice('\n')
+		}
+		if err != nil {
+			return Record{}, false
+		}
+	}
+}
+
+// last is the last record in f, read from its end: none when it's longer
+// than a run's end ever is, as a command's whole output, when the run didn't
+// finish.
+func last(f *os.File) Record {
+	var end Record
+	info, err := f.Stat()
+	if err != nil {
+		return end
+	}
+	from := max(info.Size()-8<<10, 0)
+	tail := make([]byte, info.Size()-from)
+	if _, err := f.ReadAt(tail, from); err != nil && !errors.Is(err, io.EOF) {
+		return end
+	}
+	tail = bytes.TrimRight(tail, "\n")
+	_ = json.Unmarshal(tail[bytes.LastIndexByte(tail, '\n')+1:], &end)
+	return end
 }

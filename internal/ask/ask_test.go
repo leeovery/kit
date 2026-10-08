@@ -2,6 +2,7 @@ package ask
 
 import (
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -95,5 +96,50 @@ func TestSecretField(t *testing.T) {
 	m, _ = press(m, enter)
 	if f := m.(field); string(f.typed) != "abc" || !f.done || view(m) != "\n" {
 		t.Errorf("entered: %q, done %v, view %q", string(f.typed), f.done, view(m))
+	}
+}
+
+// A list: the cursor on the first line that can be picked, moving among
+// those, past the rest; a fold opens in place, the cursor on its first; enter
+// picks; nothing stays on screen.
+func TestPick(t *testing.T) {
+	keys := []look.Key{{Key: "enter", Does: "open"}}
+	l := list{lines: []Line{
+		{Text: "  MON"},
+		{Text: "  a", Chosen: "  ❯ a", Value: "A"},
+		{Text: "  + 2 more", Chosen: "  ❯ 2 more", Folds: []Line{{Text: "  b", Chosen: "  ❯ b", Value: "B"}, {Text: "  c", Chosen: "  ❯ c", Value: "C"}}},
+		{},
+		{Text: "  SUN"},
+		{Text: "  d", Chosen: "  ❯ d", Value: "D"},
+	}, keys: keys, width: 80, height: 40}
+	l.cursor = l.next(-1, 1)
+	m, _ := press(l, down)
+	if got, want := view(m), "\n  MON\n  a\n  ❯ 2 more\n\n  SUN\n  d\n\n  enter open"; got != want {
+		t.Errorf("on the fold, view =\n%s\nwant\n%s", got, want)
+	}
+	m, _ = press(m, enter)
+	if got, want := view(m), "\n  MON\n  a\n  ❯ b\n  c\n\n  SUN\n  d\n\n  enter open"; got != want {
+		t.Errorf("the fold opened, view =\n%s\nwant\n%s", got, want)
+	}
+	m, cmd := press(m, down, down, down, enter)
+	if l := m.(list); !l.picked || l.lines[l.cursor].Value != "D" || cmd == nil || view(m) != "" {
+		t.Errorf("picked %q, quitting %v, view %q; want D picked and the screen gone", l.lines[l.cursor].Value, cmd != nil, view(m))
+	}
+	m, cmd = press(l, q)
+	if !m.(list).cancelled || cmd == nil {
+		t.Error("q: want the list cancelled")
+	}
+}
+
+// A list longer than the screen scrolls, keeping the cursor in view.
+func TestPickScrolls(t *testing.T) {
+	l := list{width: 80, height: 10}
+	for i := range 20 {
+		s := strconv.Itoa(i)
+		l.lines = append(l.lines, Line{Text: "  " + s, Chosen: "  ❯ " + s, Value: s})
+	}
+	m, _ := press(l, slices.Repeat([]tea.Msg{j}, 12)...)
+	if got, want := view(m), "\n  9\n  10\n  11\n  ❯ 12\n  13\n  14\n\n  "; got != want {
+		t.Errorf("view =\n%s\nwant\n%s", got, want)
 	}
 }

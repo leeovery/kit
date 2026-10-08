@@ -201,3 +201,45 @@ func TestFileLeavesOutLinesAsTheyCome(t *testing.T) {
 		t.Errorf("logged %+v, %v; want nothing", records, err)
 	}
 }
+
+// Runs lists the runs logged, newest first, each as it started and ended,
+// a run that didn't finish said so.
+// Runs lists the runs newest first, each from its start, after commands run
+// before it, long ones among them, and its end, when it finished; logs that
+// aren't a run's, as kit list's or an empty one, aren't listed.
+func TestRuns(t *testing.T) {
+	dir := t.TempDir()
+	long := strings.Repeat("a line of output\n", 10000)
+	for i, command := range []string{"status", "list", "apply", "empty"} {
+		f, err := logs.Open(dir, time.Date(2026, 1, 2, 3, 4, 5+i, 0, time.UTC), command, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		switch command {
+		case "status":
+			f.Emit(event.CommandRan{Command: "git ls-files", Stdout: long})
+			f.Emit(event.RunStarted{Command: command, Machine: "laptop", Only: []string{"brew"}})
+			f.Emit(event.RunFinished{Duration: 2 * time.Second, Counts: map[check.State]int{check.OK: 3}})
+		case "list":
+			f.Emit(event.CommandRan{Command: "brew list", Stdout: "jq\n"})
+		case "apply":
+			f.Emit(event.RunStarted{Command: command, Machine: "laptop"})
+			f.Emit(event.CommandRan{Command: "brew install jq", Stdout: long})
+		}
+		if err := f.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runs, err := logs.Runs(dir)
+	if err != nil || len(runs) != 2 {
+		t.Fatalf("Runs() = %+v, %v; want apply's and status's", runs, err)
+	}
+	apply, status := runs[0], runs[1]
+	if apply.Started.Command != "apply" || apply.Done() || !strings.HasSuffix(apply.Path, "-apply.jsonl") {
+		t.Errorf("apply = %+v; want it unfinished", apply)
+	}
+	if status.Started.Command != "status" || !slices.Equal(status.Started.Only, []string{"brew"}) || !status.Done() ||
+		status.Finished.Counts[check.OK] != 3 || status.Finished.DurationMS != 2000 {
+		t.Errorf("status = %+v", status)
+	}
+}

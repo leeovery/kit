@@ -160,8 +160,11 @@ func LogRun(w io.Writer, width int, records []logs.Record) error {
 			worst = state(r.Result.State)
 		}
 	}
-	if finished == nil {
+	switch {
+	case finished == nil:
 		worst = look.Failed
+	case worse(counted(finished.Counts), worst):
+		worst = counted(finished.Counts)
 	}
 	head := look.Row{State: worst, Name: strings.Join(append([]string{"kit", run.Command}, run.Only...), " "), Says: look.Muted(run.Time.Format("Mon 2 Jan 15:04"))}
 	for _, c := range commands[""] {

@@ -16,7 +16,7 @@ func TestAddInstallsAndDeclares(t *testing.T) {
 	w.expectSync([]string{"laptop/declarations"}, "kit brew add hello (laptop): a test")
 
 	out, errOut, code := w.run(t, "brew", "add", "hello", "--note", "a test")
-	want := "kit brew add · laptop\nhello ok installed; declared in laptop\nkit-config ok committed and pushed laptop/declarations\nNothing needs attention\n"
+	want := "kit brew add hello · laptop\nhello ok installed; declared in laptop\nkit-config ok committed and pushed laptop/declarations\nNothing needs attention\n"
 	if out != want || errOut != "" || code != 0 {
 		t.Errorf("kit printed add\n%s%s exit %d\nwant\n%s", out, errOut, code, want)
 	}
