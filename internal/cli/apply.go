@@ -44,16 +44,14 @@ and 2 when kit couldn't apply.`,
 			if plan {
 				report, err = r.pipeline.Check(cmd.Context(), r.sink, r.options(a, args))
 			} else {
-				// The heading shows at once, and what kit's doing while it works
-				// out what will need an administrator's password; taken down
-				// before sudo asks for it.
+				// The heading shows at once, with the run's lights, and what kit's
+				// doing while it works out what will need an administrator's
+				// password; taken down only if sudo asks for it.
 				if len(args) == 0 {
-					r.sink.Emit(event.Preparing{Time: r.now, Command: command, Machine: r.machine, Doing: "checking what will need an administrator's password"})
+					steps, _ := r.pipeline.Planned(r.options(a, args))
+					r.sink.Emit(event.Preparing{Time: r.now, Command: command, Machine: r.machine, Doing: "checking what will need an administrator's password", Steps: steps})
 				}
 				wanted := toInstall(cmd.Context(), r, args)
-				if len(args) == 0 {
-					r.sink.Emit(event.Preparing{Time: r.now, Command: command, Machine: r.machine})
-				}
 				_, stop := a.holdAdmin(cmd.Context(), r, wanted)
 				report, err = r.pipeline.Apply(cmd.Context(), r.sink, r.options(a, args))
 				stop()

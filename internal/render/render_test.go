@@ -507,22 +507,27 @@ func TestPrettyShowsWhatACommandPrints(t *testing.T) {
 func TestPrettyApplyingNow(t *testing.T) {
 	var out syncBuffer
 	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).Sized(func() (int, int) { return 80, 40 })
-	face.Emit(event.Preparing{Time: at, Command: "apply", Machine: "laptop", Doing: "checking what will need an administrator's password"})
-	if got := screen(out.String()); !strings.Contains(got, "│  apply\n") || !strings.Contains(got, "◐ checking what will need an administrator's password") {
-		t.Errorf("while preparing, the screen is\n%s\nwant the heading and what kit's doing", got)
-	}
-	face.Emit(event.RunStarted{Time: at, Command: "apply", Machine: "laptop", Steps: []event.Step{
+	steps := []event.Step{
 		{Name: "time-machine", Title: "Time Machine", Area: "Backups"},
 		{Name: "brew", Title: "Formulae", Area: "Drift", Part: render.PartPackages},
 		{Name: "cask", Title: "Casks", Area: "Drift", Part: render.PartPackages},
 		{Name: "fonts", Title: "fonts", Area: "Steps"},
-	}})
+	}
+	face.Emit(event.Preparing{Time: at, Command: "apply", Machine: "laptop", Doing: "checking what will need an administrator's password", Steps: steps})
+	if got := screen(out.String()); !strings.Contains(got, "│  apply\n") || !strings.Contains(got, "  ○ BACKUPS  ○ CONFIG  ○ STEPS\n\n  ◐ checking what will need an administrator's password") {
+		t.Errorf("while preparing, the screen is\n%s\nwant the heading, the lights, and what kit's doing where the bar will be", got)
+	}
+	before := out.String()
+	face.Emit(event.RunStarted{Time: at, Command: "apply", Machine: "laptop", Steps: steps})
+	if started := strings.TrimPrefix(out.String(), before); !strings.Contains(started, "▮") {
+		t.Errorf("as the run started, it drew %q; want the bar drawn over what kit was doing, in place", started)
+	}
 	face.Emit(event.StepFinished{Step: "time-machine", Result: check.Result{State: check.OK, Summary: "last backup 02:35"}})
 	face.Emit(event.StepStarted{Step: "brew", Doing: "applying"})
 	face.Emit(event.Output{Step: "brew", Command: "brew install --formula jq", Line: "==> Pouring jq"})
 	time.Sleep(300 * time.Millisecond)
 	got := turned(screen(out.String()))
-	for _, want := range []string{"  ● BACKUPS 1  ◐ CONFIG  ○ STEPS\n  ▮▮▮▮  1 of 4 · 1 running · ",
+	for _, want := range []string{"  ● BACKUPS 1  ◐ CONFIG  ○ STEPS\n\n  ▮▮▮▮  1 of 4 · 1 running · ",
 		"  BACKUPS  1 of 1\n  ● Time Machine  last backup 02:35\n\n  CONFIG  0 of 2\n  ◐ Formulae  applying · brew install --formula jq\n  │ ==> Pouring jq\n  ○ Casks  waiting\n\n  STEPS  0 of 1\n  ○ fonts  waiting"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("while applying, the screen is\n%s\nwant it to hold\n%s", got, want)
@@ -540,7 +545,7 @@ func TestPrettyApplyingNow(t *testing.T) {
 	}
 	got = screen(out.String())
 	want := "\n  █  ▄▀  ▀█▀  ▀▀█▀▀  │  apply\n  █▀▀▄    █     █    │  laptop\n  █   █  ▄█▄    █    │  Fri 2 Jan · 03:04\n\n" +
-		"  ● BACKUPS 1  ● CONFIG 2  ● STEPS 1\n  ▮▮▮▮  1 done · 4.2s\n\n" +
+		"  ● BACKUPS 1  ● CONFIG 2  ● STEPS 1\n\n  ▮▮▮▮  1 done · 4.2s\n\n" +
 		"  BACKUPS\n  ● Time Machine  last backup 02:35\n\n" +
 		"  CONFIG\n  ● Formulae  installed jq · 1 declared, all installed\n  ● Casks  none declared\n\n" +
 		"  STEPS\n  ● fonts  16 installed\n"

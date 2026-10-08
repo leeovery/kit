@@ -36,7 +36,7 @@ func (p *Pretty) height() int {
 // terminal.
 func (p *Pretty) applyLive() []string {
 	done, total := len(p.results), len(p.start.Steps)
-	top := []string{look.Lights(p.lamps()...),
+	top := []string{look.Lights(p.lamps()...), "",
 		"  " + look.Bar(done, len(p.running), total, look.Done) + "  " + look.Says(look.White(fmt.Sprintf("%d of %d", done, total)), look.Cyan(fmt.Sprintf("%d running", len(p.running))), look.Muted(seconds(time.Since(p.began)))),
 		""}
 	list, focus := p.workList(false)
@@ -51,19 +51,23 @@ func (p *Pretty) applyLive() []string {
 	return append(top, list...)
 }
 
-// lamps are the run's lights as it stands: an area running, waiting, or
-// done and how it stood.
+// lamps are the run's lights as it stands, or the steps it will run while
+// it's getting ready: an area running, waiting, or done and how it stood.
 func (p *Pretty) lamps() []look.Lamp {
 	running := map[string]bool{}
 	for _, r := range p.running {
 		running[r.step] = true
+	}
+	planned := p.start.Steps
+	if planned == nil {
+		planned = p.planned
 	}
 	var lamps []look.Lamp
 	for _, area := range viewOrder {
 		var steps []event.Step
 		var finished []event.StepFinished
 		now := false
-		for _, s := range p.start.Steps {
+		for _, s := range planned {
 			if viewArea(s.Area) != area {
 				continue
 			}
@@ -226,7 +230,7 @@ func IsDrift(it check.Item) bool {
 // applied is applying's last word, under its heading: the lights, the bar
 // with how the run ended, then the whole work list as it finished.
 func (p *Pretty) applied(e event.RunFinished) []string {
-	out := []string{look.Cut(look.Lights(p.lamps()...), p.width)}
+	out := []string{look.Cut(look.Lights(p.lamps()...), p.width), ""}
 	out = append(out, p.foot(e)...)
 	list, _ := p.workList(true)
 	out = append(append(out, ""), list...)

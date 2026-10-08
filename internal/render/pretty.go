@@ -78,6 +78,8 @@ type Pretty struct {
 	width   int
 	animate bool
 	start   event.RunStarted
+	// planned are the steps a run getting ready will run, when known.
+	planned []event.Step
 	whole   bool
 	results map[string]event.StepFinished
 	order   ordered
@@ -147,14 +149,23 @@ func (p *Pretty) Emit(e event.Event) {
 	case event.Preparing:
 		p.open(e.Command, e.Machine, e.Time, nil)
 		p.preparing = e.Doing
+		if e.Steps != nil {
+			p.planned = e.Steps
+		}
 		p.spin()
 	case event.RunStarted:
 		p.start, p.results = e, make(map[string]event.StepFinished, len(e.Steps))
 		p.output, p.command, p.began = map[string][]string{}, map[string]string{}, time.Now()
 		p.order.start(e.Steps)
 		p.preparing = ""
-		p.clearLive()
 		p.open(e.Command, e.Machine, e.Time, e.Only)
+		// Applying's live part takes the place of what showed while it was
+		// getting ready, drawn over it; anything else starts afresh.
+		if p.whole && p.applying() {
+			p.drawSpinner()
+		} else {
+			p.clearLive()
+		}
 	case event.StepStarted:
 		p.running = append(without(p.running, e.Step), runningStep{step: e.Step, title: p.title(e.Step), doing: cmp.Or(e.Doing, "checking")})
 		p.spin()
@@ -554,10 +565,15 @@ func (p *Pretty) drawSpinner() {
 	}
 	mark := look.Cyan(spinning[p.frame%len(spinning)])
 	if len(p.running) == 0 {
-		if p.preparing != "" && p.start.Command == "" {
-			p.drawLive([]string{"  " + mark + " " + look.Muted(p.preparing)})
-		} else {
+		switch loader := "  " + mark + " " + look.Muted(p.preparing); {
+		case p.preparing == "" || p.start.Command != "":
 			p.clearLive()
+		case len(p.planned) > 0:
+			// Getting a run ready whose steps are known: its lights, and what
+			// kit's doing where the bar will be.
+			p.drawLive([]string{look.Lights(p.lamps()...), "", loader})
+		default:
+			p.drawLive([]string{loader})
 		}
 		return
 	}

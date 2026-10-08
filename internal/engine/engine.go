@@ -232,6 +232,20 @@ func (p *Pipeline) selected(opts Options) ([]Step, error) {
 	return steps, nil
 }
 
+// Planned are the steps a run with opts would run, as its start lists
+// them: for a face to show before it starts.
+func (p *Pipeline) Planned(opts Options) ([]event.Step, error) {
+	steps, err := p.selected(opts)
+	if err != nil {
+		return nil, err
+	}
+	infos := make([]event.Step, len(steps))
+	for i, s := range steps {
+		infos[i] = event.Step{Name: s.Name, Title: s.title(), Area: s.Area, Part: s.Part}
+	}
+	return infos, nil
+}
+
 func (p *Pipeline) run(ctx context.Context, sink event.Sink, opts Options, apply bool) (Report, error) {
 	steps, err := p.selected(opts)
 	if err != nil {

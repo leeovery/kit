@@ -16,6 +16,9 @@ func (a *app) loading(out io.Writer, what string) (stop func()) {
 		return func() {}
 	}
 	w := a.colors(out)
+	// A blank line sets the loader apart from what's above it; what follows
+	// takes the loader's place, after it.
+	_, _ = io.WriteString(w, "\n")
 	done, finished := make(chan struct{}), make(chan struct{})
 	go func() {
 		defer close(finished)

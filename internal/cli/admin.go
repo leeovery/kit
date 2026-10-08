@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/look"
 	"github.com/leeovery/kit/internal/runner"
@@ -96,6 +97,8 @@ const sudoAsks = "[kit: sudo wants the password]"
 // naming what needs it, and gives sudo what's typed, on its input, never on
 // a command line or in the log. Whether sudo took it.
 func (a *app) askAdmin(ctx context.Context, r *run, wanted map[string][]string) bool {
+	// What kit was doing is taken down for the question.
+	r.sink.Emit(event.Preparing{Time: r.now, Command: r.command, Machine: r.machine})
 	var names []string
 	for _, kindName := range slices.Sorted(maps.Keys(wanted)) {
 		names = append(names, wanted[kindName]...)

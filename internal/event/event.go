@@ -56,6 +56,9 @@ type Preparing struct {
 	Command string
 	Machine string
 	Doing   string
+	// Steps are the steps the run will run, when they're known before it
+	// starts: a face can show the run's lights meanwhile.
+	Steps []Step
 }
 
 func (e Preparing) At() time.Time { return e.Time }
