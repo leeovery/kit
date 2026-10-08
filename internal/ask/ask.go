@@ -117,9 +117,9 @@ func (w *walk) update(k key) bool {
 	q := w.qs[len(w.answers)]
 	switch {
 	case k.is("up", "k"):
-		w.cursor = max(w.cursor-1, 0)
+		w.cursor = (w.cursor - 1 + len(q.Answers)) % len(q.Answers)
 	case k.is("down", "j"):
-		w.cursor = min(w.cursor+1, len(q.Answers)-1)
+		w.cursor = (w.cursor + 1) % len(q.Answers)
 	case k.is("enter"):
 		w.answers, w.cursor = append(w.answers, w.cursor), 0
 		return w.done()

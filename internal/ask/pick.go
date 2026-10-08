@@ -55,15 +55,18 @@ type list struct {
 	cancelled bool
 }
 
-// next is the next line that can be picked after at, going by step: -1 when
-// there's none, going down from -1, and at otherwise.
+// next is the next line that can be picked after at, going by step, round
+// from the end to the start, or the start to the end: -1 when there's none,
+// going down from -1.
 func (l *list) next(at, step int) int {
-	for i := at + step; i >= 0 && i < len(l.lines); i += step {
+	n := len(l.lines)
+	for k := 1; k <= n; k++ {
+		i := ((at+step*k)%n + n) % n
 		if l.lines[i].picks() {
 			return i
 		}
 	}
-	return at
+	return -1
 }
 
 func (l *list) update(k key) bool {
@@ -78,7 +81,9 @@ func (l *list) update(k key) bool {
 			return true
 		}
 		l.lines = slices.Concat(l.lines[:l.cursor], folds, l.lines[l.cursor+1:])
-		l.cursor = l.next(l.cursor-1, 1)
+		if !l.lines[l.cursor].picks() {
+			l.cursor = l.next(l.cursor, 1)
+		}
 	case k.is("esc", "q", "ctrl+c"):
 		l.cancelled = true
 		return true

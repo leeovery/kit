@@ -76,10 +76,17 @@ func TestParse(t *testing.T) {
 }
 
 // One question: a blank line, its row, its answers under it, the cursor
-// moving among them; taken, it leaves its row with the answer.
+// moving among them, round from the last to the first and back; taken, it
+// leaves its row with the answer.
 func TestChooseMovesAndTakes(t *testing.T) {
 	w := newWalk("", []Question{question("zoom")})
-	if press(w, down, j, down, up) {
+	if press(w, down, j); w.cursor != 2 {
+		t.Fatalf("down, j: cursor %d, want the last", w.cursor)
+	}
+	if press(w, down); w.cursor != 0 {
+		t.Errorf("down on the last: cursor %d, want the first", w.cursor)
+	}
+	if press(w, up, up) {
 		t.Fatal("moving ended it")
 	}
 	equal(t, "view", plain(w.view(80, 40)), []string{
@@ -155,8 +162,12 @@ func TestPick(t *testing.T) {
 		t.Fatal("opening the fold ended it")
 	}
 	equal(t, "opened", plain(l.view(80, 40))[2:6], []string{"  MON", "  a", "  ❯ b", "  c"})
-	if !press(l, down, down, down, enter) || l.lines[l.cursor].Value != "D" {
-		t.Errorf("picked %q; want D", l.lines[l.cursor].Value)
+	press(l, down, down)
+	if press(l, down); l.lines[l.cursor].Value != "A" {
+		t.Errorf("down on the last: on %q, want round to A", l.lines[l.cursor].Value)
+	}
+	if !press(l, up, enter) || l.lines[l.cursor].Value != "D" {
+		t.Errorf("up on the first, then enter: picked %q; want round to D", l.lines[l.cursor].Value)
 	}
 	if l := (&list{lines: []Line{{Text: "a", Chosen: "❯ a"}}}); !press(l, q) || !l.cancelled {
 		t.Error("q: want the list cancelled")
