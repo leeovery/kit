@@ -122,8 +122,13 @@ func (l *File) Path() string {
 func (l *File) Emit(e event.Event) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	// A command's output, as it comes, is in its command's line whole.
-	if _, ok := e.(event.Output); l.err != nil || ok {
+	// A command's output, as it comes, is in its command's line whole; a run
+	// getting ready is in its start.
+	switch e.(type) {
+	case event.Output, event.Preparing:
+		return
+	}
+	if l.err != nil {
 		return
 	}
 	l.err = l.enc.Encode(l.record(e))

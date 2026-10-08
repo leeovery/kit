@@ -4,15 +4,17 @@
   █   █  ▄█▄    █    │  Fri 2 Jan · 03:04
 
   ● MAC 1   ▲ CONFIG   ● STEPS 1
+  ▮▮▮▮  1 needs you · 3 done · 4.2s
+
+  MAC
+  ● Disk space  48% free
 
   CONFIG
-  ● jq  installed
-  ● ripgrep  installed
-  ▲ ghostty  declared, not installed · → kit apply
-  ▲ zoom  declared, not installed · needs an administrator's password
+  ● Formulae  installed jq, ripgrep · 3 declared, all installed
+  ▲ Casks  2 declared, 0 installed
+    ghostty · declared, not installed
+    zoom · declared, not installed · needs an administrator's password
     → kit apply
 
   STEPS
   ● fonts  applied · 16 installed
-
-  ▮▮▮▮  1 needs you · 3 done · 4.2s

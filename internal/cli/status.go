@@ -470,7 +470,7 @@ func (a *app) face() render.Face {
 	case !a.pretty(out):
 		return render.NewPlain(out)
 	}
-	face := render.NewPretty(a.colors(out), a.Width(out), true)
+	face := render.NewPretty(a.colors(out), a.Width(out), true).Sized(func() (int, int) { return a.Width(out), a.Height(out) })
 	if a.Getenv("TERM_PROGRAM") == "ghostty" {
 		face.ShowTabProgress()
 	}

@@ -41,6 +41,9 @@ type Deps struct {
 	// Width is how many columns wide the terminal out is, as TerminalWidth
 	// says.
 	Width func(out io.Writer) int
+	// Height is how many lines high the terminal out is, as TerminalHeight
+	// finds it.
+	Height func(out io.Writer) int
 	// Runner returns the runner kit runs programs with, finding them on path
 	// and running them in env, as runner.Exec does.
 	Runner func(path, env []string) runner.Runner
@@ -216,6 +219,7 @@ func Real(version string) Deps {
 		Stderr:   os.Stderr,
 		Terminal: IsTerminal,
 		Width:    TerminalWidth,
+		Height:   TerminalHeight,
 		Runner: func(path, env []string) runner.Runner {
 			return runner.Exec{Path: path, Env: env, Now: time.Now, Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr}
 		},
@@ -239,6 +243,17 @@ func Real(version string) Deps {
 func IsTerminal(out io.Writer) bool {
 	f, ok := out.(*os.File)
 	return ok && term.IsTerminal(f.Fd())
+}
+
+// TerminalHeight is how many lines high the terminal out is: 24 when it
+// isn't a terminal, or doesn't say.
+func TerminalHeight(out io.Writer) int {
+	if f, ok := out.(*os.File); ok {
+		if _, height, err := term.GetSize(f.Fd()); err == nil && height > 0 {
+			return height
+		}
+	}
+	return 24
 }
 
 // TerminalWidth is how many columns wide the terminal out is: 80 when it

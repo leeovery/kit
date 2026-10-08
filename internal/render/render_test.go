@@ -366,41 +366,101 @@ func (b *syncBuffer) String() string {
 	return b.buf.String()
 }
 
-// screen is what's left on a terminal once raw is written to it: lines
-// drawn over at a carriage return, the cursor moved up, the screen cleared
-// below it.
+// screen is what's left on a terminal once raw is written to it: text
+// written over what's there, a carriage return, a new line, the cursor
+// moved up or put in place, a line cleared to its end, the screen cleared
+// below; other controls change nothing on it. The alternate screen is a
+// screen of its own, the main one kept beneath it: what's left is the one
+// showing.
 func screen(raw string) string {
-	lines, row := []string{""}, 0
+	main := &term{lines: []string{""}}
+	t := main
 	for len(raw) > 0 {
 		switch {
-		case strings.HasPrefix(raw, "\n"):
-			row++
-			if row == len(lines) {
-				lines = append(lines, "")
+		case raw[0] == '\n':
+			t.row++
+			t.col = 0
+			for t.row >= len(t.lines) {
+				t.lines = append(t.lines, "")
 			}
 			raw = raw[1:]
-		case strings.HasPrefix(raw, "\r"):
+		case raw[0] == '\r':
+			t.col = 0
 			raw = raw[1:]
-		case strings.HasPrefix(raw, "\x1b[J"):
-			lines, raw = append(lines[:row], ""), raw[3:]
+		case strings.HasPrefix(raw, "\x1b]"):
+			raw = raw[strings.IndexByte(raw, '\a')+1:]
 		case strings.HasPrefix(raw, "\x1b["):
-			end := strings.IndexAny(raw[2:], "ABCDJKm") + 2
-			if raw[end] == 'A' {
-				n := 0
-				_, _ = fmt.Sscanf(raw[2:end], "%d", &n)
-				row -= n
+			end := 2
+			for end < len(raw) && (raw[end] < 0x40 || raw[end] > 0x7e) {
+				end++
 			}
+			params, final := raw[2:end], raw[end]
 			raw = raw[end+1:]
+			n := 1
+			if _, err := fmt.Sscanf(params, "%d", &n); err != nil {
+				n = 1
+			}
+			switch {
+			case params == "?1049" && final == 'h':
+				t = &term{lines: []string{""}}
+			case params == "?1049" && final == 'l':
+				t = main
+			case final == 'A':
+				t.row = max(t.row-n, 0)
+			case final == 'H':
+				row, col := 1, 1
+				_, _ = fmt.Sscanf(params, "%d;%d", &row, &col)
+				t.row, t.col = row-1, col-1
+				for t.row >= len(t.lines) {
+					t.lines = append(t.lines, "")
+				}
+			case final == 'K':
+				t.lines[t.row] = cells(t.lines[t.row], t.col)
+			case final == 'J' && params == "2":
+				t.lines, t.row, t.col = []string{""}, 0, 0
+			case final == 'J':
+				t.lines[t.row] = cells(t.lines[t.row], t.col)
+				t.lines = t.lines[:t.row+1]
+			}
 		default:
 			i := strings.IndexAny(raw, "\n\r\x1b")
 			if i < 0 {
 				i = len(raw)
 			}
-			lines[row] += raw[:i]
+			t.put(raw[:i])
 			raw = raw[i:]
 		}
 	}
-	return strings.Join(lines, "\n")
+	return strings.Join(t.lines, "\n")
+}
+
+// term is a screen's lines, and where the cursor is.
+type term struct {
+	lines    []string
+	row, col int
+}
+
+// put writes text at the cursor, over what's there.
+func (t *term) put(text string) {
+	line := []rune(t.lines[t.row])
+	for len(line) < t.col {
+		line = append(line, ' ')
+	}
+	for _, r := range text {
+		if t.col < len(line) {
+			line[t.col] = r
+		} else {
+			line = append(line, r)
+		}
+		t.col++
+	}
+	t.lines[t.row] = string(line)
+}
+
+// cells is line's first n cells.
+func cells(line string, n int) string {
+	r := []rune(line)
+	return string(r[:min(n, len(r))])
 }
 
 // turned is a screen with the running mark as it starts, whichever way it
@@ -440,12 +500,17 @@ func TestPrettyShowsWhatACommandPrints(t *testing.T) {
 	}
 }
 
-// While applying, the live part is the lights, the steps running by area,
-// each saying what it's doing, and the bar with the counts; at the end, the
-// report takes its place.
+// While applying, the whole screen is its live view: the wordmark, the
+// lights, the bar, and the work list, a block an area, each step's row as it
+// stands; at the end, the screen as it was, and the report under the
+// heading: the lights, the bar, the whole list as it finished.
 func TestPrettyApplyingNow(t *testing.T) {
 	var out syncBuffer
-	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true)
+	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).Sized(func() (int, int) { return 80, 40 })
+	face.Emit(event.Preparing{Time: at, Command: "apply", Machine: "laptop", Doing: "checking what will need an administrator's password"})
+	if got := screen(out.String()); !strings.Contains(got, "│  apply\n") || !strings.Contains(got, "◐ checking what will need an administrator's password") {
+		t.Errorf("while preparing, the screen is\n%s\nwant the heading and what kit's doing", got)
+	}
 	face.Emit(event.RunStarted{Time: at, Command: "apply", Machine: "laptop", Steps: []event.Step{
 		{Name: "time-machine", Title: "Time Machine", Area: "Backups"},
 		{Name: "brew", Title: "Formulae", Area: "Drift", Part: render.PartPackages},
@@ -457,7 +522,8 @@ func TestPrettyApplyingNow(t *testing.T) {
 	face.Emit(event.Output{Step: "brew", Command: "brew install --formula jq", Line: "==> Pouring jq"})
 	time.Sleep(300 * time.Millisecond)
 	got := turned(screen(out.String()))
-	for _, want := range []string{"  ● BACKUPS 1  ◐ CONFIG  ○ STEPS\n", "  CONFIG\n  ◐ Formulae  applying · brew install --formula jq\n", "  ▮▮▮▮  1 of 4 · 1 running · "} {
+	for _, want := range []string{"  ● BACKUPS 1  ◐ CONFIG  ○ STEPS\n  ▮▮▮▮  1 of 4 · 1 running · ",
+		"  BACKUPS  1 of 1\n  ● Time Machine  last backup 02:35\n\n  CONFIG  0 of 2\n  ◐ Formulae  applying · brew install --formula jq\n  ○ Casks  waiting\n\n  STEPS  0 of 1\n  ○ fonts  waiting"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("while applying, the screen is\n%s\nwant it to hold\n%s", got, want)
 		}
@@ -470,7 +536,12 @@ func TestPrettyApplyingNow(t *testing.T) {
 		t.Fatal(err)
 	}
 	got = screen(out.String())
-	if strings.Contains(got, "running") || !strings.Contains(got, "  CONFIG\n  ● jq  installed\n\n  ▮▮▮▮  1 done · 4.2s\n") {
-		t.Errorf("once applied, the screen is\n%s", got)
+	want := "\n  █  ▄▀  ▀█▀  ▀▀█▀▀  │  apply\n  █▀▀▄    █     █    │  laptop\n  █   █  ▄█▄    █    │  Fri 2 Jan · 03:04\n\n" +
+		"  ● BACKUPS 1  ● CONFIG 2  ● STEPS 1\n  ▮▮▮▮  1 done · 4.2s\n\n" +
+		"  BACKUPS\n  ● Time Machine  last backup 02:35\n\n" +
+		"  CONFIG\n  ● Formulae  installed jq · 1 declared, all installed\n  ● Casks  none declared\n\n" +
+		"  STEPS\n  ● fonts  16 installed\n"
+	if got != want {
+		t.Errorf("once applied, the screen is\n%s\nwant\n%s", got, want)
 	}
 }

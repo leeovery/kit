@@ -99,7 +99,22 @@ type Pretty struct {
 	began, drawn time.Time
 	// tab is whether the terminal shows a run's progress on its tab, as
 	// Ghostty does.
-	tab     bool
+	tab bool
+	// opened is whether the run's heading is on screen: shown as kit
+	// prepares the run, or as it starts; preparing is what kit's doing
+	// before it starts.
+	opened    bool
+	preparing string
+	// hidden is whether the cursor is hidden, while something is live.
+	hidden bool
+	// full is whether applying's live view has the whole screen, shown what
+	// it shows, and size how big the terminal is.
+	full  bool
+	shown []string
+	size  func() (int, int)
+	// out is what's being written, sent to the terminal whole at the end of
+	// an event or a turn of the spinner, for the terminal to show at once.
+	out     strings.Builder
 	stop    chan struct{}
 	stopped chan struct{}
 	err     error
@@ -130,16 +145,21 @@ func homeLoader(w io.Writer, width int, animate bool) *Pretty {
 func (p *Pretty) Emit(e event.Event) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	defer p.flush()
 	switch e := e.(type) {
+	case event.Preparing:
+		p.open(e.Command, e.Machine, e.Time, nil)
+		p.preparing = e.Doing
+		p.spin()
 	case event.RunStarted:
 		p.start, p.results = e, make(map[string]event.StepFinished, len(e.Steps))
 		p.output, p.command, p.began = map[string][]string{}, map[string]string{}, time.Now()
 		p.order.start(e.Steps)
-		p.whole = p.home || slices.Contains(wholeMac, e.Command) && len(e.Only) == 0
-		p.write("\n")
-		if p.whole {
-			p.lines(look.Head(look.Meta(e.Command, e.Machine, when(e.Time))...)...)
-			p.write("\n")
+		p.preparing = ""
+		p.clearLive()
+		p.open(e.Command, e.Machine, e.Time, e.Only)
+		if p.animate && p.whole && p.applying() {
+			p.enterFullScreen()
 		}
 	case event.StepStarted:
 		p.running = append(without(p.running, e.Step), runningStep{step: e.Step, title: p.title(e.Step), doing: cmp.Or(e.Doing, "checking")})
@@ -169,6 +189,8 @@ func (p *Pretty) Emit(e event.Event) {
 		p.stopSpinner()
 		switch {
 		case p.home:
+		case p.byArea() && p.applying():
+			p.lines(p.applied(e)...)
 		case p.byArea():
 			p.lines(p.report()...)
 			p.lines(p.foot(e)...)
@@ -176,6 +198,21 @@ func (p *Pretty) Emit(e event.Event) {
 			p.write("\n")
 			p.lines(p.foot(e)...)
 		}
+	}
+}
+
+// open shows the run's heading, once: a blank line, then, for a command
+// looking at the whole Mac, the wordmark with what ran, the Mac and when.
+func (p *Pretty) open(command, machine string, at time.Time, only []string) {
+	if p.opened {
+		return
+	}
+	p.opened = true
+	p.whole = p.home || slices.Contains(wholeMac, command) && len(only) == 0
+	p.write("\n")
+	if p.whole {
+		p.lines(look.Head(look.Meta(command, machine, when(at))...)...)
+		p.write("\n")
 	}
 }
 
@@ -207,9 +244,8 @@ func (p *Pretty) title(step string) string {
 // when is a run's time, as the wordmark's line says it.
 func when(t time.Time) string { return t.Format("Mon 2 Jan · 15:04") }
 
-// report is the run's steps by area, a block an area, in the views' order;
-// when applying, the lights lead, and only what changed or needs attention
-// shows.
+// report is the run's steps by area, a block an area, in the views'
+// order.
 func (p *Pretty) report() []string {
 	areas := map[string][]event.StepFinished{}
 	for _, s := range p.start.Steps {
@@ -219,37 +255,22 @@ func (p *Pretty) report() []string {
 		}
 	}
 	var out []string
-	var lamps []look.Lamp
 	for _, area := range viewOrder {
 		fs := areas[area]
 		if len(fs) == 0 {
 			continue
 		}
-		lamps = append(lamps, lamp(area, fs))
 		var rows []look.Row
 		if area == "Config" {
 			rows = p.configRows(fs)
 		} else {
 			for _, f := range fs {
-				if !p.applying() || changed(f) {
-					rows = append(rows, p.row(f))
-				}
+				rows = append(rows, p.row(f))
 			}
 		}
-		if len(rows) > 0 {
-			out = append(append(out, look.Block(area, p.width, rows...)...), "")
-		}
-	}
-	if p.applying() {
-		out = append([]string{look.Cut(look.Lights(lamps...), p.width), ""}, out...)
+		out = append(append(out, look.Block(area, p.width, rows...)...), "")
 	}
 	return out
-}
-
-// changed is whether applying f's step did something, or left it needing
-// attention.
-func changed(f event.StepFinished) bool {
-	return len(f.Result.Done) > 0 || f.Result.State != check.OK
 }
 
 // lamp is an area's light: how its steps stand at worst, and how many there
@@ -331,9 +352,8 @@ func todo(detail string) string {
 }
 
 // configRows are Config's rows: what needs attention, a row a thing, saying
-// what's wrong, for how long and what to run; when applying, what it did;
-// then, unless applying, a row a part counting what's well, and the config
-// repository's row.
+// what's wrong, for how long and what to run; then a row a part counting
+// what's well, and the config repository's row.
 func (p *Pretty) configRows(fs []event.StepFinished) []look.Row {
 	var rows []look.Row
 	counts := map[string]int{}
@@ -344,9 +364,6 @@ func (p *Pretty) configRows(fs []event.StepFinished) []look.Row {
 		r, part := f.Result, p.step(f.Step).Part
 		if r.State == check.Failed || r.State == check.Deferred {
 			rows = append(rows, p.row(f))
-		}
-		for _, it := range r.Done {
-			rows = append(rows, look.Row{State: look.Done, Name: it.Name, Says: look.Muted(past(it.Action))})
 		}
 		for _, it := range r.Items {
 			if it.Quiet == "" {
@@ -372,13 +389,10 @@ func (p *Pretty) configRows(fs []event.StepFinished) []look.Row {
 				}
 			}
 		default:
-			if !p.applying() && len(r.Items) == 0 {
+			if len(r.Items) == 0 {
 				rows = append(rows, p.row(f))
 			}
 		}
-	}
-	if p.applying() {
-		return rows
 	}
 	for _, ru := range rollups {
 		if !present[ru.part] {
@@ -522,6 +536,7 @@ func (p *Pretty) spin() {
 				p.mu.Lock()
 				p.frame++
 				p.drawSpinner()
+				p.flush()
 				p.mu.Unlock()
 			}
 		}
@@ -537,20 +552,25 @@ func (p *Pretty) drawSpinner() {
 	if !p.animate {
 		return
 	}
-	p.clearLive()
-	if len(p.running) == 0 {
+	if p.tab && len(p.start.Steps) > 0 && len(p.running) > 0 {
+		p.write(fmt.Sprintf("\x1b]9;4;1;%d\x07", len(p.results)*100/len(p.start.Steps)))
+	}
+	if p.full {
+		p.drawFull()
 		return
 	}
 	mark := look.Cyan(spinning[p.frame%len(spinning)])
+	if len(p.running) == 0 {
+		if p.preparing != "" && p.start.Command == "" {
+			p.drawLive([]string{"  " + mark + " " + look.Muted(p.preparing)})
+		} else {
+			p.clearLive()
+		}
+		return
+	}
 	done, total := len(p.results), len(p.start.Steps)
 	text := "  " + mark + " " + look.Bar(done, len(p.running), total, look.Done) + "  " + look.Says(look.White(fmt.Sprintf("%d of %d", done, total)), look.Muted(doing(p.running)))
 	lines := []string{text}
-	if p.applying() {
-		lines = p.applyingNow()
-	}
-	if p.tab && total > 0 {
-		p.write(fmt.Sprintf("\x1b]9;4;1;%d\x07", done*100/total))
-	}
 	if !p.byArea() {
 		r := p.running[0]
 		says := []string{look.Cyan(r.doing)}
@@ -562,67 +582,40 @@ func (p *Pretty) drawSpinner() {
 			lines = append(lines, "  "+look.Dim("│")+" "+look.Muted(l))
 		}
 	}
-	for i, l := range lines {
-		lines[i] = look.Cut(l, p.width)
-	}
-	p.write(strings.Join(lines, "\n"))
-	p.live, p.drawn = len(lines), time.Now()
+	p.drawLive(lines)
 }
 
-// applyingNow is applying's live part: the lights, an area each, how it
-// stands so far; the steps running, by area, each saying what it's doing;
-// then the bar, how many steps of how many are done, how many are running,
-// and how long it's taken.
-func (p *Pretty) applyingNow() []string {
-	byArea := map[string][]event.Step{}
-	for _, s := range p.start.Steps {
-		a := viewArea(s.Area)
-		byArea[a] = append(byArea[a], s)
+// The terminal's controls the live part uses: the cursor hidden and shown,
+// and an update shown at once, where the terminal can.
+const (
+	hideCursor = "\x1b[?25l"
+	showCursor = "\x1b[?25h"
+	syncStart  = "\x1b[?2026h"
+	syncEnd    = "\x1b[?2026l"
+)
+
+// drawLive draws lines as the live part, over the last: back to its first
+// line, each line written over in place, and what's left of the last
+// cleared; the cursor hidden while it's live.
+func (p *Pretty) drawLive(lines []string) {
+	if !p.hidden {
+		p.write(hideCursor)
+		p.hidden = true
 	}
-	running := map[string]runningStep{}
-	for _, r := range p.running {
-		running[r.step] = r
+	p.write("\r")
+	if p.live > 1 {
+		p.write(fmt.Sprintf("\x1b[%dA", p.live-1))
 	}
-	var lamps []look.Lamp
-	var rows []string
-	for _, area := range viewOrder {
-		steps := byArea[area]
-		if len(steps) == 0 {
-			continue
+	for i, l := range lines {
+		if i > 0 {
+			p.write("\n")
 		}
-		l := look.Lamp{Name: area, State: look.Queued}
-		var finished []event.StepFinished
-		var now []look.Row
-		for _, s := range steps {
-			if f, ok := p.results[s.Name]; ok {
-				finished = append(finished, f)
-			}
-			if r, ok := running[s.Name]; ok {
-				says := []string{look.Cyan(r.doing)}
-				if c := p.command[s.Name]; c != "" {
-					says = append(says, look.Dim(c))
-				}
-				now = append(now, look.Row{State: look.Running, Name: r.title, Says: look.Says(says...)})
-			}
-		}
-		switch {
-		case len(now) > 0:
-			l.State = look.Running
-		case len(finished) == len(steps):
-			l = lamp(area, finished)
-		}
-		lamps = append(lamps, l)
-		if len(now) > 0 {
-			rows = append(append(rows, look.Header(area, "")), look.Rows("  ", p.width, now...)...)
-		}
+		p.write(look.Cut(l, p.width) + "\x1b[K")
 	}
-	done, total := len(p.results), len(p.start.Steps)
-	foot := "  " + look.Bar(done, len(p.running), total, look.Done) + "  " + look.Says(look.White(fmt.Sprintf("%d of %d", done, total)), look.Cyan(fmt.Sprintf("%d running", len(p.running))), look.Muted(seconds(time.Since(p.began))))
-	out := []string{look.Lights(lamps...), ""}
-	if len(rows) > 0 {
-		out = append(append(out, rows...), "")
+	if len(lines) < p.live {
+		p.write("\x1b[J")
 	}
-	return append(out, foot)
+	p.live, p.drawn = len(lines), time.Now()
 }
 
 // How many of what a step's commands printed show: while it runs, and once
@@ -662,7 +655,12 @@ func (p *Pretty) stopSpinner() {
 		<-stopped
 		p.mu.Lock()
 	}
+	p.leaveFullScreen()
 	p.clearLive()
+	if p.hidden {
+		p.write(showCursor)
+		p.hidden = false
+	}
 	if p.tab {
 		p.write("\x1b]9;4;0\x07")
 	}
@@ -675,10 +673,22 @@ func (p *Pretty) lines(ls ...string) {
 }
 
 func (p *Pretty) write(s string) {
-	if p.err != nil {
+	p.out.WriteString(s)
+}
+
+// flush sends what's been written to the terminal, whole, for it to show at
+// once where it can.
+func (p *Pretty) flush() {
+	if p.out.Len() == 0 || p.err != nil {
+		p.out.Reset()
 		return
 	}
-	_, p.err = io.WriteString(p.w, s)
+	text := p.out.String()
+	p.out.Reset()
+	if p.animate {
+		text = syncStart + text + syncEnd
+	}
+	_, p.err = io.WriteString(p.w, text)
 }
 
 // Close stops the spinner, if it's turning, and returns the first error
@@ -687,6 +697,7 @@ func (p *Pretty) Close() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.stopSpinner()
+	p.flush()
 	if p.err != nil {
 		return fmt.Errorf("write to the terminal: %w", p.err)
 	}

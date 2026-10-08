@@ -47,6 +47,19 @@ type Step struct {
 	Part string `json:",omitempty"`
 }
 
+// Preparing is kit getting a run ready, before it starts, as applying works
+// out what will need an administrator's password: a face shows the run's
+// heading at once, and what kit's doing. Doing "" says it's done, as before
+// a question at the terminal.
+type Preparing struct {
+	Time    time.Time
+	Command string
+	Machine string
+	Doing   string
+}
+
+func (e Preparing) At() time.Time { return e.Time }
+
 // StepStarted is a step's check, or its apply, starting.
 type StepStarted struct {
 	Time time.Time

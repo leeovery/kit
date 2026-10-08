@@ -100,6 +100,7 @@ func (w *world) run(t *testing.T, args ...string) (stdout, stderr string, status
 		Stderr:   &errOut,
 		Terminal: func(io.Writer) bool { return w.terminal },
 		Width:    func(io.Writer) int { return 80 },
+		Height:   func(io.Writer) int { return 40 },
 		Runner: func(path, env []string) runner.Runner {
 			w.path, w.childEnv = path, env
 			return w.fake

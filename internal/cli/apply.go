@@ -7,6 +7,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/leeovery/kit/internal/engine"
+	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/kind"
 )
 
@@ -39,7 +40,17 @@ and 2 when kit couldn't apply.`,
 			if plan {
 				report, err = r.pipeline.Check(cmd.Context(), r.sink, r.options(a, args))
 			} else {
-				_, stop := a.holdAdmin(cmd.Context(), r, toInstall(cmd.Context(), r, args))
+				// The heading shows at once, and what kit's doing while it works
+				// out what will need an administrator's password; taken down
+				// before sudo asks for it.
+				if len(args) == 0 {
+					r.sink.Emit(event.Preparing{Time: r.now, Command: command, Machine: r.machine, Doing: "checking what will need an administrator's password"})
+				}
+				wanted := toInstall(cmd.Context(), r, args)
+				if len(args) == 0 {
+					r.sink.Emit(event.Preparing{Time: r.now, Command: command, Machine: r.machine})
+				}
+				_, stop := a.holdAdmin(cmd.Context(), r, wanted)
 				report, err = r.pipeline.Apply(cmd.Context(), r.sink, r.options(a, args))
 				stop()
 			}
