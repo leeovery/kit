@@ -148,6 +148,41 @@ func TestRemoveUninstallsAndUndeclares(t *testing.T) {
 	}
 }
 
+// rm is remove.
+func TestRemoveAsRm(t *testing.T) {
+	w := laptopWorld(t)
+	w.fake.On("brew", "uninstall", "--formula", "go")
+	w.expectSync([]string{"laptop/declarations"}, "kit brew remove go (laptop)")
+	if out, errOut, code := w.run(t, "brew", "rm", "go"); !strings.Contains(out, "go ok uninstalled; out of laptop\n") || code != 0 {
+		t.Errorf("kit brew rm go printed\n%s%s exit %d", out, errOut, code)
+	}
+}
+
+// Removing a cask that installed through a package asks for the password
+// first, as adding one does, and Homebrew keeps it for the uninstall.
+func TestRemoveAtATerminalAsksForThePasswordFirst(t *testing.T) {
+	w := laptopWorld(t)
+	w.terminal = true
+	w.writeSection(t, "laptop", "homebrew casks", "zoom\n")
+	w.fake.On("brew", "list", "--cask", "--full-name", "-1").Prints("ghostty\nfirefox\nzoom\n")
+	w.fake.On("brew", "info", "--json=v2", "--cask", "zoom").Prints(zoomInfo)
+	w.expectPassword()
+	w.fake.On("brew", "uninstall", "--cask", "zoom")
+	w.expectSync([]string{"laptop/declarations"}, "kit cask remove zoom (laptop)")
+	if _, errOut, code := w.run(t, "cask", "rm", "zoom"); code != 0 {
+		t.Fatalf("kit cask rm zoom: exit %d, %s", code, errOut)
+	}
+	calls := w.fake.Calls()
+	if asked, uninstall := slices.Index(calls, askedFor), slices.Index(calls, "brew uninstall --cask zoom"); asked < 0 || uninstall < asked {
+		t.Errorf("ran %q; want the password asked for before the uninstall", calls)
+	}
+	for _, cmd := range w.fake.Commands() {
+		if cmd.String() == "brew uninstall --cask zoom" && !slices.Contains(cmd.Env, "HOMEBREW_SUDO_CHECKED=1") {
+			t.Errorf("brew uninstall ran with %q; want Homebrew to keep the password given", cmd.Env)
+		}
+	}
+}
+
 func TestRemoveFromEveryMacNeedsShared(t *testing.T) {
 	w := laptopWorld(t)
 	out, _, code := w.run(t, "brew", "remove", "jq")

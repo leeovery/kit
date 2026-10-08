@@ -139,8 +139,9 @@ reconcile asks.`,
 	add.Flags().StringVar(&opts.note, "note", "", "why it's declared, kept after its name")
 	var shared bool
 	remove := &cobra.Command{
-		Use:   "remove <name>...",
-		Short: n.remove,
+		Use:     "remove <name>...",
+		Aliases: []string{"rm"},
+		Short:   n.remove,
 		Long: n.remove + "." + undeclaredWhere + `
 
 When something installed still needs it, nothing changes, and why is passed
@@ -184,8 +185,9 @@ pushed to the config repository.`,
 	add.Flags().StringVar(&opts.note, "note", "", "why, in the commit")
 	var shared bool
 	remove := &cobra.Command{
-		Use:   "remove <path>...",
-		Short: "Put a copy of linked files back in place of their links, out of kit-config",
+		Use:     "remove <path>...",
+		Aliases: []string{"rm"},
+		Short:   "Put a copy of linked files back in place of their links, out of kit-config",
 		Long: `Put a copy of a linked file back in place of its link, and take it out of
 kit-config. One of every Mac's needs --shared. The change is committed and
 pushed to the config repository.`,
@@ -225,10 +227,11 @@ func newPathCommand(a *app) *cobra.Command {
 	add.Flags().StringVar(&opts.note, "note", "", "why it's declared, kept after it")
 	var shared bool
 	remove := &cobra.Command{
-		Use:   "remove <dir>...",
-		Short: "Take directories off the PATH",
-		Long:  "Take directories off the PATH, kit's and the shell's." + undeclaredWhere,
-		Args:  cobra.MinimumNArgs(1),
+		Use:     "remove <dir>...",
+		Aliases: []string{"rm"},
+		Short:   "Take directories off the PATH",
+		Long:    "Take directories off the PATH, kit's and the shell's." + undeclaredWhere,
+		Args:    cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return a.prepared(cmd, pathsKind+" remove", func(ctx context.Context, r *run) error {
 				return a.removePaths(ctx, r, args, shared)
@@ -289,10 +292,11 @@ var lineThings = map[string]string{"check": "checks", config.HourlyKind: "hourly
 func newLineRemove(a *app, name string) *cobra.Command {
 	var shared bool
 	cmd := &cobra.Command{
-		Use:   "remove <name>...",
-		Short: "Undeclare " + lineThings[name],
-		Long:  "Undeclare " + lineThings[name] + "." + undeclaredWhere,
-		Args:  cobra.MinimumNArgs(1),
+		Use:     "remove <name>...",
+		Aliases: []string{"rm"},
+		Short:   "Undeclare " + lineThings[name],
+		Long:    "Undeclare " + lineThings[name] + "." + undeclaredWhere,
+		Args:    cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return a.prepared(cmd, name+" remove", func(ctx context.Context, r *run) error {
 				return a.remove(ctx, r, name, args, shared)

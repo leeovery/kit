@@ -355,14 +355,20 @@ func (a *app) carryOut(ctx context.Context, r *run, decisions []decision, note s
 		names[i] = d.item.ID
 		what[i] = d.action + " " + d.item.ID
 	}
-	installs := make(map[string][]string)
+	// What will need an administrator's password, installing or
+	// uninstalling, it's asked for first.
+	installs, wanted := make(map[string][]string), make(map[string][]string)
 	for _, d := range decisions {
 		_, isKind := r.drifters[d.item.Kind].(kindDrifter)
 		if (isKind || r.isAdminStep(d.item.Kind)) && d.action == install {
 			installs[d.item.Kind] = append(installs[d.item.Kind], d.item.Name)
+			wanted[d.item.Kind] = append(wanted[d.item.Kind], d.item.Name)
+		}
+		if isKind && d.action == remove {
+			wanted[d.item.Kind] = append(wanted[d.item.Kind], d.item.Name)
 		}
 	}
-	held, stop := a.holdAdmin(ctx, r, installs)
+	held, stop := a.holdAdmin(ctx, r, wanted)
 	defer stop()
 	waiting := make(map[string]bool)
 	for kindName, names := range installs {

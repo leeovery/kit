@@ -9,9 +9,9 @@ import (
 )
 
 // Secret asks at t for a value typed or pasted without being shown: about
-// is the row it's for, after a blank line, the field on the line under it,
-// a dot a character. Enter takes it; escape cancels. Nothing stays on
-// screen.
+// is the row it's for, under what's on screen (a run's heading, its blank
+// line), the field on the line under it, a dot a character. Enter takes it;
+// escape cancels. Nothing stays on screen.
 func Secret(ctx context.Context, t Terminal, about look.Row) (string, error) {
 	f := &field{about: about}
 	if err := show(ctx, t, f); err != nil {
@@ -50,8 +50,7 @@ func (f *field) update(k key) bool {
 func (f *field) view(width, _ int) []string {
 	row := f.about
 	row.Under = []string{look.Field(len(f.typed))}
-	lines := append([]string{""}, look.Timeline("  ", width, row)...)
-	return append(lines, "", look.Keys(look.Key{Key: "enter", Does: "done"}, look.Key{Key: "esc", Does: "cancel"}))
+	return append(look.Timeline("  ", width, row), "", look.Keys(look.Key{Key: "enter", Does: "done"}, look.Key{Key: "esc", Does: "cancel"}))
 }
 
 func (f *field) leaves(int) []string { return nil }

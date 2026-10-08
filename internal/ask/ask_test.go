@@ -190,7 +190,7 @@ func TestSecretField(t *testing.T) {
 	f := &field{about: look.Row{State: look.NeedsYou, Name: "NPM_TOKEN", Says: look.Orange("needs its value")}}
 	press(f, key{text: "a"}, key{text: "q"}, key{text: "bcd\n", paste: true}, key{name: "backspace"})
 	got := plain(f.view(80, 40))
-	equal(t, "view", got, []string{"", "  ▲ NPM_TOKEN  needs its value", "  │ ❯ •••• ", "", "  enter done · esc cancel"})
+	equal(t, "view", got, []string{"  ▲ NPM_TOKEN  needs its value", "  │ ❯ •••• ", "", "  enter done · esc cancel"})
 	if !press(f, enter) || string(f.typed) != "aqbc" || strings.Contains(strings.Join(got, ""), "aqbc") {
 		t.Errorf("entered %q", string(f.typed))
 	}

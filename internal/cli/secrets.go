@@ -62,8 +62,9 @@ for every Mac. The change is committed and pushed to the config repository.`,
 	var shared bool
 	var value valueChoice
 	remove := &cobra.Command{
-		Use:   "remove <name>...",
-		Short: "Take secrets off this Mac, and undeclare them; their values kept or deleted",
+		Use:     "remove <name>...",
+		Aliases: []string{"rm"},
+		Short:   "Take secrets off this Mac, and undeclare them; their values kept or deleted",
 		Long: `Take secrets off this Mac (a variable out of ~/.secrets.zsh, a file deleted),
 and undeclare them. Their values stay in 1Password (--keep-value) or go
 (--delete-value), asked at a terminal; a value given in full, outside the

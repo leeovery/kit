@@ -13,6 +13,7 @@ import (
 	"github.com/leeovery/kit/internal/ask"
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/config"
+	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/kind/secret"
 	"github.com/leeovery/kit/internal/look"
 )
@@ -78,6 +79,8 @@ func (a *app) addSecret(ctx context.Context, r *run, names []string, opts addOpt
 		// As a value typed has no newline, nor does one passed in.
 		value = strings.TrimRight(string(data), "\r\n")
 	case a.pretty(a.Stdout):
+		// The run's heading first, then the field under it.
+		r.sink.Emit(event.Preparing{Time: r.now, Command: r.command, Machine: r.machine})
 		typed, err := a.ReadSecret(ctx, look.Row{State: look.NeedsYou, Name: name, Says: look.Orange("needs its value")})
 		if errors.Is(err, ask.ErrCancelled) {
 			return fmt.Errorf("%w: nothing was stored or declared", ask.ErrCancelled)

@@ -18,6 +18,16 @@ func (a *app) remove(ctx context.Context, r *run, kindName string, names []strin
 	if err != nil {
 		return err
 	}
+	// What uninstalling will need an administrator's password for, it's
+	// asked for first, Touch ID where sudo has it, as adding does.
+	var removing []string
+	for _, name := range names {
+		if isIn, err := installed(ctx, k, name); err == nil && isIn {
+			removing = append(removing, name)
+		}
+	}
+	_, stop := a.holdAdmin(ctx, r, map[string][]string{kindName: removing})
+	defer stop()
 	c := startChanges(r, names)
 	for _, name := range names {
 		c.step(ctx, name, func(ctx context.Context) check.Result {
