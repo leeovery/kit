@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/leeovery/kit/internal/askpass"
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/drift"
@@ -34,6 +36,7 @@ import (
 	"github.com/leeovery/kit/internal/kind/tmux"
 	"github.com/leeovery/kit/internal/linked"
 	"github.com/leeovery/kit/internal/logs"
+	"github.com/leeovery/kit/internal/look"
 	"github.com/leeovery/kit/internal/nightly"
 	"github.com/leeovery/kit/internal/redact"
 	"github.com/leeovery/kit/internal/render"
@@ -105,8 +108,11 @@ type run struct {
 	// steps whose apply needs one; adminSteps are those steps.
 	admin      *steps.Admin
 	adminSteps []engine.Step
-	now        time.Time
-	run        runner.Runner
+	// askpass answers, at a terminal, what the programs the run starts ask
+	// for an administrator's password: nil when nothing will.
+	askpass *askpass.Server
+	now     time.Time
+	run     runner.Runner
 	// homeDir is the user's home, logsDir where kit's logs go, and dataDir
 	// kit's data folder.
 	homeDir, logsDir, dataDir string
@@ -173,8 +179,12 @@ func (r *run) options(a *app, only []string) engine.Options {
 	return engine.Options{Command: r.command, Machine: r.machine, Version: a.Version, Only: only, Now: a.Now}
 }
 
-// close finishes the run's face and log, returning the first error.
+// close finishes the run's face and log, returning the first error, and
+// stops answering for a password.
 func (r *run) close() error {
+	if r.askpass != nil {
+		_ = r.askpass.Close()
+	}
 	faceErr := r.face.Close()
 	if err := r.log.Close(); faceErr == nil {
 		return err
@@ -227,7 +237,15 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 		return nil, err
 	}
 	sink := event.NewFanout(face, log)
-	exec := a.Runner(path, childEnv(a.Getenv, a.Environ(), home, path))
+	// Everything the run starts can ask it for an administrator's password,
+	// at a terminal, once the run is ready (askpass).
+	var asks *askpass.Server
+	exec := runner.WithEnv(a.Runner(path, childEnv(a.Getenv, a.Environ(), home, path)), func() []string {
+		if asks == nil {
+			return nil
+		}
+		return []string{"SUDO_ASKPASS=" + asks.Helper()}
+	})
 	observed := runner.Observed(exec, func(ctx context.Context, rep runner.Report) { sink.Emit(event.Command(ctx, rep)) }, a.Now)
 	observed = runner.Streamed(observed, event.Changing, func(ctx context.Context, cmd runner.Command, line string) {
 		sink.Emit(event.Output{Time: a.Now(), Step: event.StepOf(ctx), Command: redact.Text(cmd.String()), Line: redact.Text(line)})
@@ -391,7 +409,46 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 		_ = log.Close()
 		return nil, err
 	}
+	if a.pretty(a.Stdout) && !slices.Contains(readOnly, command) {
+		asks = a.askpass(face)
+		r.askpass = asks
+	}
 	return r, nil
+}
+
+// readOnly are the runs that change nothing, so that nothing they run asks
+// for an administrator's password.
+var readOnly = []string{"", "status", "list", "why", "apply --plan", "nightly --plan"}
+
+// askpass starts answering what the programs a run starts ask for an
+// administrator's password, through sudo: from the password the person
+// gave earlier in the run, or by asking them in kit's field, the live part
+// of the run stepping aside meanwhile. Nil when it can't start: sudo asks
+// then as it would.
+func (a *app) askpass(face render.Face) *askpass.Server {
+	self, err := os.Executable()
+	if err != nil {
+		return nil
+	}
+	s, err := askpass.Start("", self, func(ctx context.Context, asked int) (string, error) {
+		about := look.Row{State: look.NeedsYou, Name: "sudo", Says: look.Orange("needs an administrator's password")}
+		if f, ok := face.(interface{ Running() []string }); ok {
+			if running := f.Running(); len(running) > 0 {
+				about.Name = strings.Join(running, ", ")
+			}
+		}
+		if asked > 0 {
+			about.Says = look.Orange("that wasn't it: try again")
+		}
+		if f, ok := face.(interface{ StepAside() func() }); ok {
+			defer f.StepAside()()
+		}
+		return a.ReadSecret(ctx, nil, about)
+	})
+	if err != nil {
+		return nil
+	}
+	return s
 }
 
 // isAdminStep reports whether the step named name needs an administrator's

@@ -82,6 +82,9 @@ func TestApplyWithoutATerminalNeverPrompts(t *testing.T) {
 		if cmd.Interactive || slices.Equal(cmd.Args, []string{"-v"}) || slices.Contains(cmd.Args, "--cask") && cmd.Args[0] == "install" {
 			t.Errorf("ran %s, want nothing asked and nothing installed for zoom", cmd)
 		}
+		if len(cmd.Env) > 0 {
+			t.Errorf("ran %s with %q; want nothing that asks kit, without a terminal", cmd, cmd.Env)
+		}
 	}
 }
 
@@ -118,6 +121,20 @@ func TestApplyAtATerminalAsksForThePasswordUpFront(t *testing.T) {
 	}
 	if strings.Contains(strings.Join(calls, "\n"), "hunter2") {
 		t.Errorf("the password was on a command line: %q", calls)
+	}
+	// What it installs can ask kit for the password (sudo -A, through kit's
+	// helper), and Homebrew keeps the one given (its check of sudo, which
+	// would have sudo forget it, is done).
+	for _, cmd := range w.fake.Commands() {
+		if cmd.String() != "brew install --cask zoom" {
+			continue
+		}
+		askpass := slices.IndexFunc(cmd.Env, func(kv string) bool {
+			return strings.HasPrefix(kv, "SUDO_ASKPASS=") && strings.HasSuffix(kv, "/kit-askpass")
+		})
+		if askpass < 0 || !slices.Contains(cmd.Env, "HOMEBREW_SUDO_CHECKED=1") {
+			t.Errorf("brew install --cask zoom ran with %q; want kit's helper and Homebrew's check done", cmd.Env)
+		}
 	}
 	for _, c := range calls[:asked] {
 		if strings.HasPrefix(c, "brew install") || strings.HasPrefix(c, "brew update") {

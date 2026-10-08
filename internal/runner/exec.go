@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -60,7 +61,7 @@ func (e Exec) Run(ctx context.Context, cmd Command) (Result, error) {
 // start runs program as cmd says, returning what it printed.
 func (e Exec) start(ctx context.Context, program string, cmd Command) (stdout, stderr []byte, err error) {
 	c := exec.CommandContext(ctx, program, cmd.Args...)
-	c.Env = e.Env
+	c.Env = append(slices.Clone(e.Env), cmd.Env...)
 	c.Dir = cmd.Dir
 	if cmd.Answer != nil {
 		return converse(ctx, c, cmd)

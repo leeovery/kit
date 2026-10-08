@@ -3,10 +3,13 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
+	"github.com/leeovery/kit/internal/askpass"
 	"github.com/leeovery/kit/internal/cli"
 )
 
@@ -14,6 +17,19 @@ import (
 var version = "dev"
 
 func main() {
+	// Run through the link a run makes for sudo, kit is the helper that asks
+	// the run for an administrator's password.
+	if filepath.Base(os.Args[0]) == askpass.Name {
+		prompt := ""
+		if len(os.Args) > 1 {
+			prompt = os.Args[1]
+		}
+		if err := askpass.Ask(os.Args[0], prompt, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, "kit:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	// An interrupt ends the commands kit is running, each with everything it
 	// started, before kit exits: each runs in a process group of its own,
 	// which the terminal's interrupt doesn't reach.

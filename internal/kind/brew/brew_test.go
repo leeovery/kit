@@ -259,6 +259,34 @@ func TestCasksBlockedWithoutAnAdministrator(t *testing.T) {
 	}
 }
 
+// With an administrator's password at hand for the run, brew is told its
+// check of sudo is done, which would have sudo forget it; without, brew
+// checks as it would.
+func TestInstallsKeepSudosPassword(t *testing.T) {
+	for _, held := range []bool{true, false} {
+		fake := runnertest.New(t)
+		fake.On("brew", "update", "--quiet")
+		fake.On("brew", "install", "--cask", "zoom")
+		fake.On("brew", "uninstall", "--cask", "zoom")
+		h := brew.New(fake)
+		h.Admin = func(context.Context) bool { return held }
+		if err := h.Casks().Install(t.Context(), []string{"zoom"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := h.Casks().Remove(t.Context(), []string{"zoom"}); err != nil {
+			t.Fatal(err)
+		}
+		for _, cmd := range fake.Commands() {
+			if cmd.Args[0] == "update" {
+				continue
+			}
+			if told := slices.Contains(cmd.Env, "HOMEBREW_SUDO_CHECKED=1"); told != held {
+				t.Errorf("held %v: %s ran with %q", held, cmd, cmd.Env)
+			}
+		}
+	}
+}
+
 func TestNeedsAdmin(t *testing.T) {
 	fake := runnertest.New(t)
 	fake.On("brew", "info", "--json=v2", "--cask", "zoom", "ghostty", "owner/tap/tool").Prints(`{"formulae": [], "casks": [

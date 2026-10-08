@@ -124,9 +124,17 @@ func (a *app) askAdmin(ctx context.Context, r *run, wanted map[string][]string) 
 			if asked > 0 {
 				row.Says = look.Orange("that wasn't it: try again")
 			}
-			return a.ReadSecret(ctx, lead, row)
+			typed, err := a.ReadSecret(ctx, lead, row)
+			// What's typed is kept for the run, for what asks later.
+			if err == nil && r.askpass != nil {
+				r.askpass.Keep(typed)
+			}
+			return typed, err
 		},
 	})
+	if err != nil && r.askpass != nil {
+		r.askpass.Keep("")
+	}
 	return err == nil
 }
 

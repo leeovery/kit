@@ -107,6 +107,9 @@ type Pretty struct {
 	preparing string
 	// hidden is whether the cursor is hidden, while something is live.
 	hidden bool
+	// aside is whether the face has stepped aside for a question asked
+	// mid-run: it draws nothing, and holds what it writes, till it's back.
+	aside bool
 	// full is whether applying's live view has the whole screen, shown what
 	// it shows, and size how big the terminal is.
 	full  bool
@@ -562,7 +565,7 @@ func (p *Pretty) spin() {
 // otherwise the loader, the bar, how many steps are done, and which are
 // running. None when nothing runs, or the face doesn't animate.
 func (p *Pretty) drawSpinner() {
-	if !p.animate {
+	if !p.animate || p.aside {
 		return
 	}
 	if p.tab && len(p.start.Steps) > 0 && len(p.running) > 0 {
@@ -692,6 +695,9 @@ func (p *Pretty) write(s string) {
 // flush sends what's been written to the terminal, whole, for it to show at
 // once where it can.
 func (p *Pretty) flush() {
+	if p.aside {
+		return
+	}
 	if p.out.Len() == 0 || p.err != nil {
 		p.out.Reset()
 		return
@@ -715,6 +721,41 @@ func (p *Pretty) Close() error {
 		return fmt.Errorf("write to the terminal: %w", p.err)
 	}
 	return nil
+}
+
+// StepAside takes the live part down and keeps it down, for a question kit
+// asks mid-run in its place, and returns what puts it back: the live part
+// as it then stands, and what the face held meanwhile.
+func (p *Pretty) StepAside() (back func()) {
+	p.mu.Lock()
+	full := p.full
+	p.stopSpinner()
+	p.flush()
+	p.aside = true
+	p.mu.Unlock()
+	return func() {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		p.aside = false
+		if full {
+			p.enterFullScreen()
+		}
+		if len(p.running) > 0 {
+			p.spin()
+		}
+		p.flush()
+	}
+}
+
+// Running are the titles of the steps running.
+func (p *Pretty) Running() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	titles := make([]string, len(p.running))
+	for i, r := range p.running {
+		titles[i] = r.title
+	}
+	return titles
 }
 
 // runningStep is a step running, and what it's doing: checking or

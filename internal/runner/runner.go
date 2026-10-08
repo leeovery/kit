@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 )
@@ -36,6 +37,9 @@ type Command struct {
 	// Secret is whether what it prints is a secret, as 1Password's values
 	// are: kept from every report, the log included.
 	Secret bool
+	// Env is added to the environment the command runs in, its own values
+	// winning over the runner's.
+	Env []string
 	// Asks, with Answer, is what the command prints on its standard error
 	// when it asks for something, as sudo -S -p's prompt: each time it
 	// prints it, Answer is called with how many times it asked before, and
@@ -165,6 +169,28 @@ func (o observed) Run(ctx context.Context, cmd Command) (Result, error) {
 	res, err := o.runner.Run(ctx, cmd)
 	o.observe(ctx, Report{Command: cmd, Started: started, Result: res, Err: err})
 	return res, err
+}
+
+// WithEnv returns r with env's variables, as they stand when a command
+// runs, added to each command's environment.
+func WithEnv(r Runner, env func() []string) Runner {
+	return withEnv{runner: r, env: env}
+}
+
+type withEnv struct {
+	runner Runner
+	env    func() []string
+}
+
+func (w withEnv) Has(name string) bool {
+	return Has(w.runner, name)
+}
+
+func (w withEnv) Run(ctx context.Context, cmd Command) (Result, error) {
+	if env := w.env(); len(env) > 0 {
+		cmd.Env = append(slices.Clone(env), cmd.Env...)
+	}
+	return w.runner.Run(ctx, cmd)
 }
 
 // Streamed returns r with each line printed by a command run in a context

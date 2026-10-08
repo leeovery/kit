@@ -98,7 +98,7 @@ func (h *Homebrew) install(ctx context.Context, which string, names []string) er
 	}
 	h.changing.Lock()
 	defer h.changing.Unlock()
-	_, err := h.run.Run(ctx, runner.Command{Name: "brew", Args: slices.Concat([]string{"install", which}, names), Timeout: installTimeout})
+	_, err := h.run.Run(ctx, runner.Command{Name: "brew", Args: slices.Concat([]string{"install", which}, names), Timeout: installTimeout, Env: h.sudoEnv(ctx, which)})
 	return err
 }
 
@@ -106,8 +106,20 @@ func (h *Homebrew) install(ctx context.Context, which string, names []string) er
 func (h *Homebrew) uninstall(ctx context.Context, which string, names []string) error {
 	h.changing.Lock()
 	defer h.changing.Unlock()
-	_, err := h.brew(ctx, slices.Concat([]string{"uninstall", which}, names)...)
+	_, err := h.run.Run(ctx, runner.Command{Name: "brew", Args: slices.Concat([]string{"uninstall", which}, names), Env: h.sudoEnv(ctx, which)})
 	return err
+}
+
+// sudoEnv is what brew is told, installing or uninstalling casks (which),
+// when an administrator's password is at hand for the run: that its check
+// of sudo is done. That check makes sudo forget the password it was given,
+// so a cask that installs through a package would have sudo ask for it
+// again, mid-run. Formulae never use sudo.
+func (h *Homebrew) sudoEnv(ctx context.Context, which string) []string {
+	if which != "--cask" || h.Admin == nil || !h.Admin(ctx) {
+		return nil
+	}
+	return []string{"HOMEBREW_SUDO_CHECKED=1"}
 }
 
 // Uses lists the formulae installed that need the formula name.
