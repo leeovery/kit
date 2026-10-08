@@ -40,6 +40,10 @@ type Homebrew struct {
 		once sync.Once
 		err  error
 	}
+	// changing is held while brew installs or uninstalls: formulae's and
+	// casks' steps run side by side, and two of Homebrew changing things at
+	// once can clash over its locks.
+	changing sync.Mutex
 }
 
 // New returns Homebrew, driven through run.
@@ -92,12 +96,16 @@ func (h *Homebrew) install(ctx context.Context, which string, names []string) er
 	if err := h.updated(ctx); err != nil {
 		return err
 	}
+	h.changing.Lock()
+	defer h.changing.Unlock()
 	_, err := h.run.Run(ctx, runner.Command{Name: "brew", Args: slices.Concat([]string{"install", which}, names), Timeout: installTimeout})
 	return err
 }
 
 // uninstall runs brew uninstall of names, with which says what they are.
 func (h *Homebrew) uninstall(ctx context.Context, which string, names []string) error {
+	h.changing.Lock()
+	defer h.changing.Unlock()
 	_, err := h.brew(ctx, slices.Concat([]string{"uninstall", which}, names)...)
 	return err
 }

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -271,5 +272,42 @@ func TestNeedsAdmin(t *testing.T) {
 	}
 	if got, err := brew.New(runnertest.New(t)).NeedsAdmin(context.Background(), nil); err != nil || got != nil {
 		t.Errorf("NeedsAdmin() of none = %q, %v; want none, asking nothing", got, err)
+	}
+}
+
+// Formulae's and casks' installs take turns, though their steps run side by
+// side: two of Homebrew installing at once can clash.
+func TestInstallsTakeTurns(t *testing.T) {
+	fake := runnertest.New(t)
+	var mu sync.Mutex
+	running, most := 0, 0
+	busy := func() {
+		mu.Lock()
+		running++
+		most = max(most, running)
+		mu.Unlock()
+		time.Sleep(50 * time.Millisecond)
+		mu.Lock()
+		running--
+		mu.Unlock()
+	}
+	fake.On("brew", "update", "--quiet")
+	fake.On("brew", "install", "--formula", "jq").Does(busy)
+	fake.On("brew", "install", "--cask", "ghostty").Does(busy)
+	h := brew.New(fake)
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		if err := h.Formulae().Install(t.Context(), []string{"jq"}); err != nil {
+			t.Error(err)
+		}
+	})
+	wg.Go(func() {
+		if err := h.Casks().Install(t.Context(), []string{"ghostty"}); err != nil {
+			t.Error(err)
+		}
+	})
+	wg.Wait()
+	if most != 1 {
+		t.Errorf("%d installs ran at once, want one at a time", most)
 	}
 }
