@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"time"
 
@@ -166,7 +167,7 @@ func LogRun(w io.Writer, width int, records []logs.Record) error {
 	case worse(counted(finished.Counts), worst):
 		worst = counted(finished.Counts)
 	}
-	head := look.Row{State: worst, Name: strings.Join(append([]string{"kit", run.Command}, run.Only...), " "), Says: look.Muted(run.Time.Format("Mon 2 Jan 15:04"))}
+	head := look.Row{State: worst, Name: strings.Join(slices.Concat([]string{"kit"}, strings.Fields(run.Command), run.Only), " "), Says: look.Muted(run.Time.Format("Mon 2 Jan 15:04"))}
 	for _, c := range commands[""] {
 		head.Under = append(head.Under, ran(c, width-4)...)
 	}

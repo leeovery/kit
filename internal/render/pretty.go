@@ -107,17 +107,13 @@ type Pretty struct {
 	preparing string
 	// hidden is whether the cursor is hidden, while something is live.
 	hidden bool
+	// underHome is whether the run started from kit's home, under its
+	// wordmark.
+	underHome bool
 	// aside is whether the face has stepped aside for a question asked
 	// mid-run: it draws nothing, and holds what it writes, till it's back.
 	aside bool
-	// full is whether applying's live view has the whole screen, shown what
-	// it shows, and size how big the terminal is.
-	full  bool
-	shown []string
-	// shownAll is what's left on screen of the run: its heading, and its
-	// last word.
-	shownAll []string
-	size     func() (int, int)
+	size  func() (int, int)
 	// out is what's being written, sent to the terminal whole at the end of
 	// an event or a turn of the spinner, for the terminal to show at once.
 	out     strings.Builder
@@ -131,6 +127,13 @@ type Pretty struct {
 // steps run when animate is true.
 func NewPretty(w io.Writer, width int, animate bool) *Pretty {
 	return &Pretty{w: w, width: min(max(width, 40), look.Width), animate: animate}
+}
+
+// UnderHome has the face show a run started from kit's home, under the
+// home's wordmark: its heading leaves the wordmark out.
+func (p *Pretty) UnderHome() *Pretty {
+	p.underHome = true
+	return p
 }
 
 // ShowTabProgress has the face show a run's progress on the terminal's tab
@@ -164,9 +167,6 @@ func (p *Pretty) Emit(e event.Event) {
 		p.preparing = ""
 		p.clearLive()
 		p.open(e.Command, e.Machine, e.Time, e.Only)
-		if p.animate && p.whole && p.applying() {
-			p.enterFullScreen()
-		}
 	case event.StepStarted:
 		p.running = append(without(p.running, e.Step), runningStep{step: e.Step, title: p.title(e.Step), doing: cmp.Or(e.Doing, "checking")})
 		p.spin()
@@ -204,16 +204,7 @@ func (p *Pretty) Emit(e event.Event) {
 			last = append([]string{""}, p.foot(e)...)
 		}
 		p.lines(last...)
-		p.shownAll = append(p.shownAll, last...)
 	}
-}
-
-// Shown is what the face has left on screen of the run, a line a line: its
-// heading, and its last word.
-func (p *Pretty) Shown() []string {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return slices.Clone(p.shownAll)
 }
 
 // open shows the run's heading, once: a blank line, then, for a command
@@ -225,11 +216,10 @@ func (p *Pretty) open(command, machine string, at time.Time, only []string) {
 	p.opened = true
 	p.whole = p.home || slices.Contains(wholeMac, command) && len(only) == 0
 	heading := []string{""}
-	if p.whole {
+	if p.whole && !p.underHome {
 		heading = append(append(heading, look.Head(look.Meta(command, machine, when(at))...)...), "")
 	}
 	p.lines(heading...)
-	p.shownAll = heading
 }
 
 // byArea is whether the run shows its steps by area: one looking at the
@@ -571,8 +561,8 @@ func (p *Pretty) drawSpinner() {
 	if p.tab && len(p.start.Steps) > 0 && len(p.running) > 0 {
 		p.write(fmt.Sprintf("\x1b]9;4;1;%d\x07", len(p.results)*100/len(p.start.Steps)))
 	}
-	if p.full {
-		p.drawFull()
+	if p.whole && p.applying() {
+		p.drawLive(p.applyLive())
 		return
 	}
 	mark := look.Cyan(spinning[p.frame%len(spinning)])
@@ -671,7 +661,6 @@ func (p *Pretty) stopSpinner() {
 		<-stopped
 		p.mu.Lock()
 	}
-	p.leaveFullScreen()
 	p.clearLive()
 	if p.hidden {
 		p.write(showCursor)
@@ -728,7 +717,6 @@ func (p *Pretty) Close() error {
 // as it then stands, and what the face held meanwhile.
 func (p *Pretty) StepAside() (back func()) {
 	p.mu.Lock()
-	full := p.full
 	p.stopSpinner()
 	p.flush()
 	p.aside = true
@@ -737,9 +725,6 @@ func (p *Pretty) StepAside() (back func()) {
 		p.mu.Lock()
 		defer p.mu.Unlock()
 		p.aside = false
-		if full {
-			p.enterFullScreen()
-		}
 		if len(p.running) > 0 {
 			p.spin()
 		}

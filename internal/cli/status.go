@@ -443,7 +443,7 @@ func (a *app) askpass(face render.Face) *askpass.Server {
 		if f, ok := face.(interface{ StepAside() func() }); ok {
 			defer f.StepAside()()
 		}
-		return a.ReadSecret(ctx, nil, about)
+		return a.ReadSecret(ctx, about)
 	})
 	if err != nil {
 		return nil
@@ -528,6 +528,9 @@ func (a *app) face() render.Face {
 		return render.NewPlain(out)
 	}
 	face := render.NewPretty(a.colors(out), a.Width(out), true).Sized(func() (int, int) { return a.Width(out), a.Height(out) })
+	if a.underHome {
+		face.UnderHome()
+	}
 	if a.Getenv("TERM_PROGRAM") == "ghostty" {
 		face.ShowTabProgress()
 	}

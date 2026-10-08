@@ -13,13 +13,6 @@ import (
 	"github.com/leeovery/kit/internal/look"
 )
 
-// The terminal's controls the full screen uses: the alternate screen, which
-// keeps what was on screen beneath it, and the cursor put in place.
-const (
-	enterFull = "\x1b[?1049h\x1b[2J"
-	leaveFull = "\x1b[?1049l"
-)
-
 // Sized has the face ask size how big the terminal is, as it draws: its
 // columns and its lines.
 func (p *Pretty) Sized(size func() (int, int)) *Pretty {
@@ -33,61 +26,29 @@ func (p *Pretty) height() int {
 		return 40
 	}
 	_, h := p.size()
-	return max(h, 16)
+	return max(h, 12)
 }
 
-// enterFullScreen has applying's live view take the whole screen while it
-// runs: what was on screen stays beneath it, for the report to follow.
-func (p *Pretty) enterFullScreen() {
-	p.full, p.shown = true, nil
-	p.write(enterFull)
-	if !p.hidden {
-		p.write(hideCursor)
-		p.hidden = true
-	}
-}
-
-// leaveFullScreen gives the screen back as it was, the run's heading on it.
-func (p *Pretty) leaveFullScreen() {
-	if p.full {
-		p.write(leaveFull)
-		p.full, p.shown = false, nil
-	}
-}
-
-// drawFull draws applying's live view, writing only the lines that changed
-// since the last time: the wordmark, the lights, the bar with how many
-// steps are done, running and how long it's taken, then the work list, a
-// block an area, each step's row as it stands, scrolled to keep what's
-// running in view.
-func (p *Pretty) drawFull() {
+// applyLive is applying's live part, in place under its heading: the
+// lights, the bar with how many steps are done, running and how long it's
+// taken, then the work list, a block an area, each step's row as it stands,
+// a window on it around what's running, so it's never taller than the
+// terminal.
+func (p *Pretty) applyLive() []string {
 	done, total := len(p.results), len(p.start.Steps)
-	top := append([]string{""}, look.Head(look.Meta(p.start.Command, p.start.Machine, when(p.start.Time))...)...)
-	top = append(top, "", look.Lights(p.lamps()...),
-		"  "+look.Bar(done, len(p.running), total, look.Done)+"  "+look.Says(look.White(fmt.Sprintf("%d of %d", done, total)), look.Cyan(fmt.Sprintf("%d running", len(p.running))), look.Muted(seconds(time.Since(p.began)))),
-		"")
+	top := []string{look.Lights(p.lamps()...),
+		"  " + look.Bar(done, len(p.running), total, look.Done) + "  " + look.Says(look.White(fmt.Sprintf("%d of %d", done, total)), look.Cyan(fmt.Sprintf("%d running", len(p.running))), look.Muted(seconds(time.Since(p.began)))),
+		""}
 	list, focus := p.workList(false)
-	room := p.height() - len(top) - 1
-	if len(list) > room {
+	if room := max(p.height()-1-len(top), 3); len(list) > room {
 		from := min(max(focus-room/3, 0), len(list)-room)
-		list = list[from : from+room]
-	}
-	frame := append(top, list...)
-	for i, l := range frame {
-		l = look.Cut(l, p.width)
-		if i < len(p.shown) && p.shown[i] == l {
-			continue
+		// A window starting between two areas starts with the next.
+		if list[from] == "" {
+			from++
 		}
-		p.write(fmt.Sprintf("\x1b[%d;1H", i+1) + l + "\x1b[K")
+		list = list[from:min(from+room, len(list))]
 	}
-	if len(frame) < len(p.shown) {
-		p.write(fmt.Sprintf("\x1b[%d;1H\x1b[J", len(frame)+1))
-	}
-	p.shown = make([]string, len(frame))
-	for i, l := range frame {
-		p.shown[i] = look.Cut(l, p.width)
-	}
-	p.drawn = time.Now()
+	return append(top, list...)
 }
 
 // lamps are the run's lights as it stands: an area running, waiting, or
@@ -167,7 +128,9 @@ func (p *Pretty) workList(final bool) (lines []string, focus int) {
 				if c := p.command[s.Name]; c != "" {
 					says = append(says, look.Dim(c))
 				}
-				row = look.Row{State: look.Running, Name: r.title, Says: look.Says(says...)}
+				// What the command running prints shows under its row, its
+				// last lines, on a line from its mark.
+				row = look.Row{State: look.Running, Name: r.title, Says: look.Says(says...), Under: look.Output(lastOf(p.output[s.Name], keptRunning)...)}
 				if focus < 0 {
 					focus = len(lines)
 				}
@@ -177,7 +140,11 @@ func (p *Pretty) workList(final bool) (lines []string, focus int) {
 			default:
 				row = look.Row{State: look.Queued, Name: p.title(s.Name), Says: look.Muted("waiting")}
 			}
-			lines = append(lines, look.Rows("  ", p.width, row)...)
+			if isRunning || p.output[s.Name] != nil && isDone && f.Result.State == check.Failed {
+				lines = append(lines, look.Timeline("  ", p.width, row)...)
+			} else {
+				lines = append(lines, look.Rows("  ", p.width, row)...)
+			}
 		}
 		lines = append(lines, "")
 	}
@@ -196,7 +163,7 @@ func (p *Pretty) workRow(f event.StepFinished, part string) look.Row {
 	if out := p.output[f.Step]; f.Result.State == check.Failed && len(out) > 0 {
 		what, _, _ := strings.Cut(f.Result.Reason, ":")
 		row.Says = look.Says(look.Red(what), look.Dim(p.command[f.Step]))
-		row.Under = look.Output(out...)
+		row.Under = look.Output(lastOf(out, keptFailing)...)
 	}
 	if done := doneGroups(f.Result.Done); len(done) > 0 {
 		var did []string

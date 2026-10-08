@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -17,7 +18,7 @@ import (
 // glance runs every check, as kit status does, and shows what needs
 // attention a line an area: --json prints the same document as kit status.
 // At a terminal, it's kit's home: a menu under the lines offers what to run
-// next, and kit becomes the command chosen.
+// next, and kit becomes the command chosen, under the home.
 func (a *app) glance(cmd *cobra.Command) error {
 	pretty := a.pretty(a.Stdout)
 	glance := render.NewGlance(a.colors(a.Stdout), a.Width(a.Stdout), pretty, a.Now)
@@ -40,7 +41,7 @@ func (a *app) glance(cmd *cobra.Command) error {
 		return err
 	}
 	if pretty {
-		if err := a.menu(cmd.Context(), glance.Home(), report); err != nil {
+		if err := a.menu(cmd.Context(), report); err != nil {
 			return err
 		}
 	}
@@ -50,18 +51,19 @@ func (a *app) glance(cmd *cobra.Command) error {
 	return nil
 }
 
-// menuKeys are the keys the home's menus take.
+// menuKeys are the keys the home's menu takes.
 var menuKeys = []look.Key{{Key: "↑↓", Does: "choose"}, {Key: "enter", Does: "run"}, {Key: "q", Does: "quit"}}
 
-// more is the home's menu's choice of its second menu.
-const more = "more"
+// underHome is the hidden flag kit runs a command from its home's menu with:
+// under the home's wordmark, its heading leaves the wordmark out.
+const underHome = "under-home"
 
 // menu offers, under the home, what to run next, each with what it does and
-// its command: Reconcile, Apply, Status, Log, and More, the rest; the cursor
-// on what's needed first. kit becomes the command chosen; q leaves the home
-// as it is.
-func (a *app) menu(ctx context.Context, home []string, report engine.Report) error {
-	lead := append(home, "", look.Rule(min(max(a.Width(a.Stdout), 40), look.Width)))
+// its command, the cursor on what's needed first. q folds the menu away,
+// leaving the home; enter folds it to the line chosen, and kit becomes that
+// command, under the home's wordmark.
+func (a *app) menu(ctx context.Context, report engine.Report) error {
+	width := min(max(a.Width(a.Stdout), 40), look.Width)
 	decide, missing := needs(report)
 	reconcile, start := "settle what differs from the config", "status"
 	switch {
@@ -73,40 +75,20 @@ func (a *app) menu(ctx context.Context, home []string, report engine.Report) err
 	if len(missing) > 0 && len(missing) == len(decide) {
 		start = "apply"
 	}
-	chosen, err := a.Pick(ctx, lead, menuLines(start,
-		look.Choice{Label: "Reconcile", Does: reconcile, Cmd: "kit reconcile"},
-		look.Choice{Label: "Apply", Does: "install what's missing", Cmd: "kit apply"},
-		look.Choice{Label: "Status", Does: "every check", Cmd: "kit status"},
-		look.Choice{Label: "Log", Does: "past runs", Cmd: "kit log"},
-		look.Choice{Label: "More", Does: "jobs, app settings, secrets, what's declared, help"},
-	), menuKeys)
-	if chosen == more {
-		chosen, err = a.Pick(ctx, lead, menuLines("",
-			look.Choice{Label: "Nightly", Does: "run the jobs that are due, then every check", Cmd: "kit nightly"},
-			look.Choice{Label: "App settings", Does: "save apps' settings now", Cmd: "kit prefs capture"},
-			look.Choice{Label: "Secrets", Does: "fetch them from 1Password again", Cmd: "kit secret sync"},
-			look.Choice{Label: "Declared", Does: "what's declared for this Mac", Cmd: "kit list"},
-			look.Choice{Label: "Help", Does: "every command", Cmd: "kit --help"},
-		), menuKeys)
+	choices := []look.Choice{
+		{Label: "Reconcile", Does: reconcile, Cmd: "kit reconcile"},
+		{Label: "Apply", Does: "install what's missing", Cmd: "kit apply"},
+		{Label: "Status", Does: "every check", Cmd: "kit status"},
+		{Label: "Log", Does: "past runs", Cmd: "kit log"},
+		{Label: "Nightly", Does: "run the jobs that are due, then every check", Cmd: "kit nightly"},
+		{Label: "App settings", Does: "save apps' settings now", Cmd: "kit prefs capture"},
+		{Label: "Secrets", Does: "fetch them from 1Password again", Cmd: "kit secret sync"},
+		{Label: "Declared", Does: "what's declared for this Mac", Cmd: "kit list"},
+		{Label: "Help", Does: "every command", Cmd: "kit --help"},
 	}
-	switch {
-	case errors.Is(err, ask.ErrCancelled):
-		return nil
-	case err != nil:
-		return err
-	}
-	return a.Become(strings.Fields(chosen))
-}
-
-// menuLines are a menu's choices as lines to pick from, at the left, each
-// giving its command, after kit; the cursor starting on start's.
-func menuLines(start string, choices ...look.Choice) []ask.Line {
 	lines := make([]ask.Line, len(choices))
 	for i, c := range choices {
 		value := strings.TrimPrefix(c.Cmd, "kit ")
-		if c.Cmd == "" {
-			value = strings.ToLower(c.Label)
-		}
 		lines[i] = ask.Line{
 			Text:   "  " + look.Answers(choices, -1)[i],
 			Chosen: "  " + look.Answers(choices, i)[i],
@@ -114,7 +96,19 @@ func menuLines(start string, choices ...look.Choice) []ask.Line {
 			Start:  value == start,
 		}
 	}
-	return lines
+	chosen, err := a.Pick(ctx, []string{"", look.Rule(width)}, lines, menuKeys)
+	switch {
+	case errors.Is(err, ask.ErrCancelled):
+		return nil
+	case err != nil:
+		return err
+	}
+	for _, l := range lines {
+		if l.Value == chosen {
+			_, _ = io.WriteString(a.colors(a.Stdout), "\n"+look.Cut(l.Chosen, width)+"\n")
+		}
+	}
+	return a.Become(append([]string{"--" + underHome}, strings.Fields(chosen)...))
 }
 
 // needs is what the home found differing from the config: the things kit

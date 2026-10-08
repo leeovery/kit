@@ -47,9 +47,9 @@ func TestKitRefusesAnUnknownCommand(t *testing.T) {
 	}
 }
 
-// At a terminal, kit's home offers what to run next, the cursor on what's
-// needed first; kit becomes the command chosen, from the menu or from More's;
-// q leaves the home as it is.
+// At a terminal, kit's home offers what to run next, one list under it, the
+// cursor on what's needed first; kit becomes the command chosen, under the
+// home, the line chosen left on screen; q leaves the home as it is.
 func TestBareKitMenu(t *testing.T) {
 	w := laptopWorld(t)
 	w.terminal = true
@@ -80,23 +80,43 @@ func TestBareKitMenu(t *testing.T) {
 		"    Apply  install what's missing · kit apply",
 		"    Status  every check · kit status",
 		"    Log  past runs · kit log",
-		"    More  jobs, app settings, secrets, what's declared, help",
+		"    Nightly  run the jobs that are due, then every check · kit nightly",
+		"    App settings  save apps' settings now · kit prefs capture",
+		"    Secrets  fetch them from 1Password again · kit secret sync",
+		"    Declared  what's declared for this Mac · kit list",
+		"    Help  every command · kit --help",
 	}
 	if len(menus) != 1 || !slices.Equal(menus[0], want) {
 		t.Errorf("the menu =\n%s\nwant\n%s", strings.Join(slices.Concat(menus...), "\n"), strings.Join(want, "\n"))
 	}
-	if len(w.became) != 1 || !slices.Equal(w.became[0], []string{"reconcile"}) || !strings.Contains(ansi.Strip(out), "▲ Config  ffmpeg installed, not declared") || code != 1 {
-		t.Errorf("kit became %q, exit %d, printed\n%s", w.became, code, out)
+	if len(w.became) != 1 || !slices.Equal(w.became[0], []string{"--under-home", "reconcile"}) || code != 1 {
+		t.Errorf("kit became %q, exit %d; want kit --under-home reconcile", w.became, code)
+	}
+	if out = ansi.Strip(out); !strings.HasSuffix(out, "▲ Config  ffmpeg installed, not declared · 2 days · 2 more\n\n  ❯ Reconcile  decide on 3 things · kit reconcile\n") {
+		t.Errorf("kit printed\n%s\nwant the home, then the line chosen", out)
 	}
 
-	menus, w.became, picks = nil, nil, []string{"more", "prefs capture"}
+	menus, w.became, picks = nil, nil, []string{"prefs capture"}
 	w.run(t)
-	if len(menus) != 2 || menus[1][0] != "    Nightly  run the jobs that are due, then every check · kit nightly" || len(w.became) != 1 || !slices.Equal(w.became[0], []string{"prefs", "capture"}) {
-		t.Errorf("from More, kit became %q; menus %q", w.became, menus)
+	if len(w.became) != 1 || !slices.Equal(w.became[0], []string{"--under-home", "prefs", "capture"}) {
+		t.Errorf("kit became %q; want kit --under-home prefs capture", w.became)
 	}
 
 	menus, w.became, picks = nil, nil, nil
-	if _, _, code := w.run(t); len(menus) != 1 || w.became != nil || code != 1 {
-		t.Errorf("q: kit became %q, exit %d; want the home left as it is", w.became, code)
+	if out, _, code := w.run(t); len(menus) != 1 || w.became != nil || code != 1 || strings.Contains(ansi.Strip(out), "❯") {
+		t.Errorf("q: kit became %q, exit %d, printed\n%s\nwant the home left as it is", w.became, code, ansi.Strip(out))
+	}
+}
+
+// Run from the home's menu, a command's heading leaves the wordmark out: the
+// home's is above it.
+func TestUnderTheHomeNoSecondWordmark(t *testing.T) {
+	w := laptopWorld(t)
+	w.terminal = true
+	if out, _, _ := w.run(t, "--under-home", "status"); strings.Contains(out, "▀█▀") || !strings.Contains(ansi.Strip(out), "CONFIG") {
+		t.Errorf("kit --under-home status printed\n%s\nwant the report without the wordmark", ansi.Strip(out))
+	}
+	if out, _, _ := w.run(t, "status"); !strings.Contains(out, "▀█▀") {
+		t.Error("kit status, from the shell: want the wordmark")
 	}
 }

@@ -296,8 +296,7 @@ func (a *app) askAbout(ctx context.Context, r *run, items []driftItem, opts reco
 		}
 		asked, offered, qs = append(asked, it), append(offered, cs), append(qs, q)
 	}
-	lead := look.Head(look.Meta(r.command, r.machine, r.now.Format("Mon 2 Jan · 15:04"))...)
-	picked, err := a.Walk(ctx, lead, "Reconcile", qs)
+	picked, err := a.Walk(ctx, "Reconcile", qs)
 	switch {
 	case errors.Is(err, ask.ErrCancelled):
 		return nil, fmt.Errorf("%w: nothing was changed", ask.ErrCancelled)

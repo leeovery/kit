@@ -92,17 +92,10 @@ const sudoAsks = "[kit: sudo wants the password]"
 
 // askAdmin has sudo take an administrator's password for the installs
 // wanted, by kind: Touch ID first, where sudo has it; else, each time sudo
-// asks, kit asks in its own field, under what the run has shown, a row
+// asks, kit asks in its own field, under the run's heading, a row
 // naming what needs it, and gives sudo what's typed, on its input, never on
 // a command line or in the log. Whether sudo took it.
 func (a *app) askAdmin(ctx context.Context, r *run, wanted map[string][]string) bool {
-	var lead []string
-	if f, ok := r.face.(interface{ Shown() []string }); ok {
-		lead = f.Shown()
-	}
-	if len(lead) > 0 && lead[0] == "" {
-		lead = lead[1:]
-	}
 	var names []string
 	for _, kindName := range slices.Sorted(maps.Keys(wanted)) {
 		names = append(names, wanted[kindName]...)
@@ -124,7 +117,7 @@ func (a *app) askAdmin(ctx context.Context, r *run, wanted map[string][]string) 
 			if asked > 0 {
 				row.Says = look.Orange("that wasn't it: try again")
 			}
-			typed, err := a.ReadSecret(ctx, lead, row)
+			typed, err := a.ReadSecret(ctx, row)
 			// What's typed is kept for the run, for what asks later.
 			if err == nil && r.askpass != nil {
 				r.askpass.Keep(typed)

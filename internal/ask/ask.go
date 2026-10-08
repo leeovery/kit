@@ -1,16 +1,17 @@
-// Package ask asks a person things at a terminal, in kit's look. Only a
-// command at a terminal asks: without one, a question is a flag's to
-// answer.
+// Package ask asks a person things at a terminal, in kit's look, in place:
+// a question in the row it's about, a list to pick from, a field to type in,
+// drawn under what's on screen and drawn over as keys come, never taller
+// than the terminal, folding back when it's answered, so what's left is
+// the record. Only a command at a terminal asks: without one, a question is
+// a flag's to answer.
 package ask
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"strings"
 
-	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/leeovery/kit/internal/look"
@@ -47,31 +48,14 @@ func (q Question) Labels() []string {
 	return labels
 }
 
-// Choose asks q at the terminal in and out are, under lead, what's on
-// screen above it, if anything, and returns the answer taken, by its place:
-// the arrow keys (or j and k) move, enter takes, and escape or q cancels.
-// What was taken stays on screen, a row: the thing, and the answer.
-func Choose(ctx context.Context, in io.Reader, out io.Writer, lead []string, q Question) (int, error) {
-	answers, err := Walk(ctx, in, out, lead, "", []Question{q})
+// Choose asks q at t and returns the answer taken, by its place: the arrow
+// keys (or j and k) move, enter takes, and escape or q cancels. What was
+// taken stays on screen, a row after a blank line: the thing, and the
+// answer.
+func Choose(ctx context.Context, t Terminal, q Question) (int, error) {
+	answers, err := ask(ctx, t, "", []Question{q})
 	if errors.Is(err, ErrStopped) {
 		err = ErrCancelled
-	}
-	row := q.About
-	row.Under = nil
-	switch {
-	case errors.Is(err, ErrCancelled):
-		row.State, row.Says = look.Skipped, look.Muted("cancelled")
-	case err != nil:
-		return 0, err
-	default:
-		row.State, row.Says = look.Done, look.Pink(strings.ToLower(q.Answers[answers[0]].Label))
-	}
-	answered := strings.Join(look.Rows("  ", look.Width, row), "\n") + "\n"
-	if len(lead) > 0 {
-		answered = "\n" + answered
-	}
-	if _, werr := io.WriteString(out, answered); werr != nil && err == nil {
-		err = werr
 	}
 	if err != nil {
 		return 0, err
@@ -80,14 +64,17 @@ func Choose(ctx context.Context, in io.Reader, out io.Writer, lead []string, q Q
 }
 
 // Walk asks qs one after another, each in its row on a timeline: those
-// answered above it, with their answer, those to come below it; header, if
-// any, heads them, with how far through they are, and lead, any lines
-// leading them, as a command's heading. It asks on a screen of its own,
-// which goes when it's done, leaving the terminal as it was; when there's
-// more than fits, what shows keeps the question asked in view. It returns
-// the answers taken, by their places: all of them, or, with ErrStopped,
-// those taken before the person stopped (q); escape cancels.
-func Walk(ctx context.Context, in io.Reader, out io.Writer, lead []string, header string, qs []Question) ([]int, error) {
+// answered above it, with their answer, those to come below it; header heads
+// them, with how far through they are. When there are more than fit, what
+// shows keeps the question asked in view. It returns the answers taken, by
+// their places: all of them, or, with ErrStopped, those taken before the
+// person stopped (q); escape cancels. Nothing stays on screen.
+func Walk(ctx context.Context, t Terminal, header string, qs []Question) ([]int, error) {
+	return ask(ctx, t, header, qs)
+}
+
+// ask asks qs, under header, if any.
+func ask(ctx context.Context, t Terminal, header string, qs []Question) ([]int, error) {
 	if len(qs) == 0 {
 		return nil, nil
 	}
@@ -97,13 +84,9 @@ func Walk(ctx context.Context, in io.Reader, out io.Writer, lead []string, heade
 		}
 	}
 	w := newWalk(header, qs)
-	w.lead = lead
-	program := tea.NewProgram(w, tea.WithContext(ctx), tea.WithInput(in), tea.WithOutput(out))
-	final, err := program.Run()
-	if err != nil {
+	if err := show(ctx, t, w); err != nil {
 		return nil, fmt.Errorf("ask %s: %w", qs[0].Text(), err)
 	}
-	w = final.(walk)
 	switch {
 	case w.cancelled:
 		return nil, ErrCancelled
@@ -115,96 +98,74 @@ func Walk(ctx context.Context, in io.Reader, out io.Writer, lead []string, heade
 
 // walk is the questions Walk asks.
 type walk struct {
-	lead      []string
 	header    string
 	qs        []Question
 	answers   []int
 	cursor    int
-	width     int
-	height    int
 	cancelled bool
 	stopped   bool
 }
 
-func newWalk(header string, qs []Question) walk {
-	return walk{header: header, qs: qs, width: look.Width}
-}
-
-func (w walk) Init() tea.Cmd {
-	return nil
+func newWalk(header string, qs []Question) *walk {
+	return &walk{header: header, qs: qs}
 }
 
 // done is whether every question is answered.
-func (w walk) done() bool { return len(w.answers) == len(w.qs) }
+func (w *walk) done() bool { return len(w.answers) == len(w.qs) }
 
-func (w walk) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.WindowSizeMsg:
-		w.width, w.height = min(max(msg.Width, 40), look.Width), msg.Height
-	case tea.KeyPressMsg:
-		q := w.qs[len(w.answers)]
-		switch msg.String() {
-		case "up", "k":
-			w.cursor = max(w.cursor-1, 0)
-		case "down", "j":
-			w.cursor = min(w.cursor+1, len(q.Answers)-1)
-		case "enter":
-			w.answers, w.cursor = append(w.answers, w.cursor), 0
-			if w.done() {
-				return w, tea.Quit
-			}
-		case "q":
-			if len(w.qs) == 1 {
-				w.cancelled = true
-			} else {
-				w.stopped = true
-			}
-			return w, tea.Quit
-		case "esc", "ctrl+c":
+func (w *walk) update(k key) bool {
+	q := w.qs[len(w.answers)]
+	switch {
+	case k.is("up", "k"):
+		w.cursor = max(w.cursor-1, 0)
+	case k.is("down", "j"):
+		w.cursor = min(w.cursor+1, len(q.Answers)-1)
+	case k.is("enter"):
+		w.answers, w.cursor = append(w.answers, w.cursor), 0
+		return w.done()
+	case k.is("q"):
+		if len(w.qs) == 1 {
 			w.cancelled = true
-			return w, tea.Quit
+		} else {
+			w.stopped = true
 		}
+		return true
+	case k.is("esc", "ctrl+c"):
+		w.cancelled = true
+		return true
 	}
-	return w, nil
+	return false
 }
 
-func (w walk) View() tea.View {
-	v := tea.NewView(strings.Join(w.lines(), "\n") + "\n")
-	v.AltScreen = true
-	return v
-}
-
-// lines are what the walk shows: the lines leading it, then the questions,
-// a row each, the one asked with its answers under it, and the keys; when
-// that's more than the screen holds, those around the question asked, as
-// low as they go, the keys under them.
-func (w walk) lines() []string {
-	lines := append([]string{""}, w.lead...)
-	if len(w.lead) > 0 {
+// view is what the walk shows: a blank line, when it has no header, then
+// the header, the questions, a row each, the one asked with its answers
+// under it, and the keys; when that's more than the terminal holds, those
+// around the question asked, as low as they go, the keys under them.
+func (w *walk) view(width, height int) []string {
+	var lines []string
+	if w.header == "" {
 		lines = append(lines, "")
+	} else {
+		lines = append(lines, look.Header(w.header, fmt.Sprintf("%d of %d", len(w.answers)+1, len(w.qs))))
 	}
-	if w.done() || w.cancelled || w.stopped {
-		return lines
-	}
-	lines, asked := w.questions(lines)
+	rows, asked := w.rows(width)
+	lines = append(lines, rows...)
+	asked += len(lines) - len(rows)
 	keys := []look.Key{{Key: "↑↓", Does: "choose"}, {Key: "enter", Does: "decide"}}
 	if len(w.qs) > 1 {
 		keys = append(keys, look.Key{Key: "q", Does: "stop"})
 	}
 	foot := []string{"", look.Keys(append(keys, look.Key{Key: "esc", Does: "cancel"})...)}
-	if room := w.height - 1 - len(foot); w.height > 0 && len(lines) > room {
+	if room := height - 1 - len(foot); len(lines) > room {
 		from := min(max(asked-room, 0), len(lines)-room)
 		lines = lines[from : from+room]
 	}
 	return append(lines, foot...)
 }
 
-// questions are lines, then the header and the questions' rows, and where
-// the question asked ends among them.
-func (w walk) questions(lines []string) ([]string, int) {
-	if w.header != "" {
-		lines = append(lines, look.Header(w.header, fmt.Sprintf("%d of %d", len(w.answers)+1, len(w.qs))))
-	}
+// rows are the questions' rows on their timeline, and where the question
+// asked ends among them.
+func (w *walk) rows(width int) ([]string, int) {
 	rows := make([]look.Row, 0, len(w.qs))
 	asked := 0
 	for i, q := range w.qs {
@@ -220,8 +181,27 @@ func (w walk) questions(lines []string) ([]string, int) {
 		}
 		rows = append(rows, row)
 		if i == len(w.answers) {
-			asked = len(lines) + len(look.Timeline("  ", w.width, rows...))
+			asked = len(look.Timeline("  ", width, rows...))
 		}
 	}
-	return append(lines, look.Timeline("  ", w.width, rows...)...), asked
+	return look.Timeline("  ", width, rows...), asked
+}
+
+// leaves is what a question asked alone leaves: a blank line, then its row
+// with the answer taken, or cancelled. A walk leaves nothing: what's done
+// about its questions follows.
+func (w *walk) leaves(width int) []string {
+	if w.header != "" {
+		return nil
+	}
+	q := w.qs[0]
+	row := q.About
+	row.Under = nil
+	switch {
+	case w.cancelled:
+		row.State, row.Says = look.Skipped, look.Muted("cancelled")
+	default:
+		row.State, row.Says = look.Done, look.Pink(strings.ToLower(q.Answers[w.answers[0]].Label))
+	}
+	return append([]string{""}, look.Rows("  ", width, row)...)
 }

@@ -523,7 +523,7 @@ func TestPrettyApplyingNow(t *testing.T) {
 	time.Sleep(300 * time.Millisecond)
 	got := turned(screen(out.String()))
 	for _, want := range []string{"  ● BACKUPS 1  ◐ CONFIG  ○ STEPS\n  ▮▮▮▮  1 of 4 · 1 running · ",
-		"  BACKUPS  1 of 1\n  ● Time Machine  last backup 02:35\n\n  CONFIG  0 of 2\n  ◐ Formulae  applying · brew install --formula jq\n  ○ Casks  waiting\n\n  STEPS  0 of 1\n  ○ fonts  waiting"} {
+		"  BACKUPS  1 of 1\n  ● Time Machine  last backup 02:35\n\n  CONFIG  0 of 2\n  ◐ Formulae  applying · brew install --formula jq\n  │ ==> Pouring jq\n  ○ Casks  waiting\n\n  STEPS  0 of 1\n  ○ fonts  waiting"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("while applying, the screen is\n%s\nwant it to hold\n%s", got, want)
 		}
@@ -535,6 +535,9 @@ func TestPrettyApplyingNow(t *testing.T) {
 	if err := face.Close(); err != nil {
 		t.Fatal(err)
 	}
+	if strings.Contains(out.String(), "\x1b[?1049") {
+		t.Error("applying took a screen of its own: want it in place, under its heading")
+	}
 	got = screen(out.String())
 	want := "\n  █  ▄▀  ▀█▀  ▀▀█▀▀  │  apply\n  █▀▀▄    █     █    │  laptop\n  █   █  ▄█▄    █    │  Fri 2 Jan · 03:04\n\n" +
 		"  ● BACKUPS 1  ● CONFIG 2  ● STEPS 1\n  ▮▮▮▮  1 done · 4.2s\n\n" +
@@ -543,5 +546,39 @@ func TestPrettyApplyingNow(t *testing.T) {
 		"  STEPS\n  ● fonts  16 installed\n"
 	if got != want {
 		t.Errorf("once applied, the screen is\n%s\nwant\n%s", got, want)
+	}
+}
+
+// On a short terminal, applying's live part is a window on its list, never
+// taller than the terminal, kept around what's running; once applied, the
+// whole list stays.
+func TestPrettyApplyingFitsTheTerminal(t *testing.T) {
+	var out syncBuffer
+	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).Sized(func() (int, int) { return 80, 12 })
+	var steps []event.Step
+	for i := range 20 {
+		steps = append(steps, event.Step{Name: fmt.Sprintf("s%02d", i), Title: fmt.Sprintf("Step %02d", i), Area: "Drift"})
+	}
+	face.Emit(event.RunStarted{Time: at, Command: "apply", Machine: "laptop", Steps: steps})
+	for i := range 14 {
+		face.Emit(event.StepFinished{Step: fmt.Sprintf("s%02d", i), Result: check.Result{State: check.OK, Summary: "fine"}})
+	}
+	face.Emit(event.StepStarted{Step: "s14", Doing: "applying"})
+	time.Sleep(300 * time.Millisecond)
+	got := screen(out.String())
+	// The heading is a blank line, the wordmark's three and a blank line.
+	live := strings.Split(strings.TrimRight(got, "\n"), "\n")[5:]
+	if len(live) > 11 || !strings.Contains(got, "◐ Step 14  applying") {
+		t.Errorf("at 12 lines, the live part is %d lines:\n%s\nwant at most 11, Step 14 in it", len(live), got)
+	}
+	for i := 14; i < 20; i++ {
+		face.Emit(event.StepFinished{Step: fmt.Sprintf("s%02d", i), Result: check.Result{State: check.OK, Summary: "fine"}})
+	}
+	face.Emit(event.RunFinished{Duration: time.Second, Counts: map[check.State]int{check.OK: 20}})
+	if err := face.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if got := screen(out.String()); !strings.Contains(got, "● Step 00  fine") || !strings.Contains(got, "● Step 19  fine") {
+		t.Errorf("once applied, the screen is\n%s\nwant every step", got)
 	}
 }

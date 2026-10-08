@@ -48,21 +48,19 @@ type Deps struct {
 	// Runner returns the runner kit runs programs with, finding them on path
 	// and running them in env, as runner.Exec does.
 	Runner func(path, env []string) runner.Runner
-	// Choose asks a question at the terminal, under lead, what's on screen
-	// above it, as ask.Choose does: the answer taken, by its place, or
-	// ask.ErrCancelled.
-	Choose func(ctx context.Context, lead []string, q ask.Question) (int, error)
-	// Walk asks questions one after another at the terminal, as ask.Walk
-	// does: the answers taken, all of them, or those before ask.ErrStopped;
-	// or ask.ErrCancelled.
-	Walk func(ctx context.Context, lead []string, header string, qs []ask.Question) ([]int, error)
-	// ReadSecret asks, at the terminal, for a value typed without being
-	// shown, for the thing about is, under lead, what's on screen above it,
-	// as ask.Secret does.
-	ReadSecret func(ctx context.Context, lead []string, about look.Row) (string, error)
-	// Pick shows a list at the terminal, after lead, to pick a line from, as
-	// ask.Pick does: the line's value, or ask.ErrCancelled.
-	Pick func(ctx context.Context, lead []string, lines []ask.Line, keys []look.Key) (string, error)
+	// Choose asks a question at the terminal, in place, as ask.Choose does:
+	// the answer taken, by its place, or ask.ErrCancelled.
+	Choose func(ctx context.Context, q ask.Question) (int, error)
+	// Walk asks questions one after another at the terminal, in place, as
+	// ask.Walk does: the answers taken, all of them, or those before
+	// ask.ErrStopped; or ask.ErrCancelled.
+	Walk func(ctx context.Context, header string, qs []ask.Question) ([]int, error)
+	// ReadSecret asks, at the terminal, in place, for a value typed without
+	// being shown, for the thing about is, as ask.Secret does.
+	ReadSecret func(ctx context.Context, about look.Row) (string, error)
+	// Pick shows a list at the terminal, in place, under head, to pick a line
+	// from, as ask.Pick does: the line's value, or ask.ErrCancelled.
+	Pick func(ctx context.Context, head []string, lines []ask.Line, keys []look.Key) (string, error)
 	// Become has kit become kit run with args, as if it had been run so at
 	// the terminal: it replaces this process, and returns only when it
 	// can't.
@@ -107,6 +105,9 @@ type app struct {
 	json    bool
 	plain   bool
 	verbose bool
+	// underHome is whether kit runs from its home's menu, under the home's
+	// wordmark: its own heading leaves the wordmark out.
+	underHome bool
 }
 
 // NewRootCommand builds the kit command tree.
@@ -140,6 +141,8 @@ what to run about it. kit status is the full report.`,
 	flags.BoolVar(&a.json, "json", false, "print one JSON document, for scripts and agents")
 	flags.BoolVar(&a.plain, "plain", false, "print plain lines, no colour or animation, as without a terminal")
 	flags.BoolVar(&a.verbose, "verbose", false, "keep commands' output whole in the run's log")
+	flags.BoolVar(&a.underHome, underHome, false, "run from kit's home, under its wordmark")
+	_ = flags.MarkHidden(underHome)
 	// Commands show in the order they're added: the whole Mac's by use,
 	// then what kit manages, by group.
 	cobra.EnableCommandSorting = false
@@ -237,17 +240,17 @@ func Real(version string) Deps {
 		Runner: func(path, env []string) runner.Runner {
 			return runner.Exec{Path: path, Env: env, Now: time.Now, Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr}
 		},
-		Choose: func(ctx context.Context, lead []string, q ask.Question) (int, error) {
-			return ask.Choose(ctx, os.Stdin, os.Stdout, lead, q)
+		Choose: func(ctx context.Context, q ask.Question) (int, error) {
+			return ask.Choose(ctx, terminal(), q)
 		},
-		Walk: func(ctx context.Context, lead []string, header string, qs []ask.Question) ([]int, error) {
-			return ask.Walk(ctx, os.Stdin, os.Stdout, lead, header, qs)
+		Walk: func(ctx context.Context, header string, qs []ask.Question) ([]int, error) {
+			return ask.Walk(ctx, terminal(), header, qs)
 		},
-		ReadSecret: func(ctx context.Context, lead []string, about look.Row) (string, error) {
-			return ask.Secret(ctx, os.Stdin, os.Stdout, lead, about)
+		ReadSecret: func(ctx context.Context, about look.Row) (string, error) {
+			return ask.Secret(ctx, terminal(), about)
 		},
-		Pick: func(ctx context.Context, lead []string, lines []ask.Line, keys []look.Key) (string, error) {
-			return ask.Pick(ctx, os.Stdin, os.Stdout, lead, lines, keys)
+		Pick: func(ctx context.Context, head []string, lines []ask.Line, keys []look.Key) (string, error) {
+			return ask.Pick(ctx, terminal(), head, lines, keys)
 		},
 		Become: func(args []string) error {
 			self, err := os.Executable()
@@ -267,6 +270,18 @@ func Real(version string) Deps {
 func IsTerminal(out io.Writer) bool {
 	f, ok := out.(*os.File)
 	return ok && term.IsTerminal(f.Fd())
+}
+
+// terminal is the process's terminal, where kit asks: its standard input,
+// and its standard output, in the colours it shows.
+func terminal() ask.Terminal {
+	return ask.Terminal{
+		In:  os.Stdin,
+		Out: colorprofile.NewWriter(os.Stdout, os.Environ()),
+		Size: func() (int, int) {
+			return TerminalWidth(os.Stdout), TerminalHeight(os.Stdout)
+		},
+	}
 }
 
 // TerminalHeight is how many lines high the terminal out is: 24 when it

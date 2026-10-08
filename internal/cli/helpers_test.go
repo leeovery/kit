@@ -122,10 +122,10 @@ func (w *world) run(t *testing.T, args ...string) (stdout, stderr string, status
 		SudoLocal: filepath.Join(w.home, "etc", "sudo_local"),
 		TCC:       filepath.Join(w.home, "TCC.db"),
 		UID:       501,
-		Choose: func(_ context.Context, _ []string, q ask.Question) (int, error) {
+		Choose: func(_ context.Context, q ask.Question) (int, error) {
 			return w.answer(t, q)
 		},
-		Walk: func(_ context.Context, _ []string, _ string, qs []ask.Question) ([]int, error) {
+		Walk: func(_ context.Context, _ string, qs []ask.Question) ([]int, error) {
 			var answers []int
 			for _, q := range qs {
 				i, err := w.answer(t, q)
@@ -136,7 +136,7 @@ func (w *world) run(t *testing.T, args ...string) (stdout, stderr string, status
 			}
 			return answers, nil
 		},
-		ReadSecret: func(_ context.Context, _ []string, about look.Row) (string, error) {
+		ReadSecret: func(_ context.Context, about look.Row) (string, error) {
 			w.typedFor = append(w.typedFor, ansi.Strip(about.Name+"  "+about.Says))
 			if w.notTyped != nil {
 				return "", w.notTyped

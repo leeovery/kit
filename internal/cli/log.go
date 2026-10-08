@@ -56,7 +56,7 @@ Each run's log is a JSON-lines file in ~/Library/Logs/kit, kept 30 days;
 				if len(runs) == 0 {
 					return attention{message: "no runs logged yet"}
 				}
-				path, err = a.Pick(cmd.Context(), nil, render.RunList(runs), []look.Key{{Key: "↑↓", Does: "choose"}, {Key: "enter", Does: "open"}, {Key: "q", Does: "quit"}})
+				path, err = a.Pick(cmd.Context(), []string{""}, render.RunList(runs), []look.Key{{Key: "↑↓", Does: "choose"}, {Key: "enter", Does: "open"}, {Key: "q", Does: "quit"}})
 				if errors.Is(err, ask.ErrCancelled) {
 					return nil
 				}

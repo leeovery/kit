@@ -44,8 +44,11 @@ func (a *app) help(plain func(*cobra.Command, []string)) func(*cobra.Command, []
 // a group, and the flags.
 func (a *app) kitHelp(root *cobra.Command) []string {
 	width := min(max(a.Width(root.OutOrStdout()), 40), look.Width)
-	out := append([]string{""}, look.Head(look.Meta("help", a.machineName(), a.Now().Format("Mon 2 Jan · 15:04"))...)...)
-	out = append(out, "", "  "+look.White("kit sets a Mac up from a config repository, and keeps it that way."), "")
+	out := []string{""}
+	if !a.underHome {
+		out = append(append(out, look.Head(look.Meta("help", a.machineName(), a.Now().Format("Mon 2 Jan · 15:04"))...)...), "")
+	}
+	out = append(out, "  "+look.White("kit sets a Mac up from a config repository, and keeps it that way."), "")
 	for _, g := range root.Groups() {
 		var cmds []*cobra.Command
 		for _, c := range root.Commands() {
