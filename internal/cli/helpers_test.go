@@ -118,7 +118,7 @@ func (w *world) run(t *testing.T, args ...string) (stdout, stderr string, status
 		SudoLocal: filepath.Join(w.home, "etc", "sudo_local"),
 		TCC:       filepath.Join(w.home, "TCC.db"),
 		UID:       501,
-		Choose: func(_ context.Context, q ask.Question) (int, error) {
+		Choose: func(_ context.Context, _ []string, q ask.Question) (int, error) {
 			return w.answer(t, q)
 		},
 		Walk: func(_ context.Context, _ []string, _ string, qs []ask.Question) ([]int, error) {

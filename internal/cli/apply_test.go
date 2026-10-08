@@ -97,8 +97,14 @@ func TestApplyAtATerminalAsksForThePasswordUpFront(t *testing.T) {
 	w.fake.On("brew", "update", "--quiet")
 	w.fake.On("brew", "install", "--cask", "zoom")
 
+	w.choose = func(string, []string) (int, error) { return 0, nil }
+
 	if _, errOut, code := w.run(t, "apply"); code != 1 {
 		t.Errorf("kit apply exit %d (%s), want 1: ffmpeg still needs reconciling", code, errOut)
+	}
+	// What applying leaves differing from the config, it offers to settle.
+	if !slices.Equal(w.asked, []string{"Reconcile now?"}) || len(w.became) != 1 || !slices.Equal(w.became[0], []string{"reconcile"}) {
+		t.Errorf("kit asked %q and became %q; want Reconcile now?, answered yes, kit reconcile", w.asked, w.became)
 	}
 	calls := w.fake.Calls()
 	sudo, install := slices.Index(calls, "sudo -v"), slices.Index(calls, "brew install --cask zoom")

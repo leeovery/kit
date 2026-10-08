@@ -143,3 +143,17 @@ func TestPickScrolls(t *testing.T) {
 		t.Errorf("view =\n%s\nwant\n%s", got, want)
 	}
 }
+
+// Under more than the screen holds, the question stays in view, the lines
+// above it cut from the top.
+func TestWalkKeepsTheQuestionInView(t *testing.T) {
+	w := newWalk("", []Question{question("zoom")})
+	for i := range 30 {
+		w.lead = append(w.lead, "  line "+strconv.Itoa(i))
+	}
+	m, _ := press(w, tea.WindowSizeMsg{Width: 80, Height: 12})
+	want := "  line 26\n  line 27\n  line 28\n  line 29\n\n  ▲ zoom  cask · installed, not declared\n  │ ❯ Adopt  declare it\n  │   Remove  uninstall it\n  │   Skip  not now\n\n  ↑↓ choose · enter decide · esc cancel\n"
+	if got := view(m); got != want {
+		t.Errorf("view =\n%s\nwant\n%s", got, want)
+	}
+}

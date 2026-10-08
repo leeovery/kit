@@ -48,9 +48,10 @@ type Deps struct {
 	// Runner returns the runner kit runs programs with, finding them on path
 	// and running them in env, as runner.Exec does.
 	Runner func(path, env []string) runner.Runner
-	// Choose asks a question at the terminal, as ask.Choose does: the
-	// answer taken, by its place, or ask.ErrCancelled.
-	Choose func(ctx context.Context, q ask.Question) (int, error)
+	// Choose asks a question at the terminal, under lead, what's on screen
+	// above it, as ask.Choose does: the answer taken, by its place, or
+	// ask.ErrCancelled.
+	Choose func(ctx context.Context, lead []string, q ask.Question) (int, error)
 	// Walk asks questions one after another at the terminal, as ask.Walk
 	// does: the answers taken, all of them, or those before ask.ErrStopped;
 	// or ask.ErrCancelled.
@@ -235,8 +236,8 @@ func Real(version string) Deps {
 		Runner: func(path, env []string) runner.Runner {
 			return runner.Exec{Path: path, Env: env, Now: time.Now, Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr}
 		},
-		Choose: func(ctx context.Context, q ask.Question) (int, error) {
-			return ask.Choose(ctx, os.Stdin, os.Stdout, q)
+		Choose: func(ctx context.Context, lead []string, q ask.Question) (int, error) {
+			return ask.Choose(ctx, os.Stdin, os.Stdout, lead, q)
 		},
 		Walk: func(ctx context.Context, lead []string, header string, qs []ask.Question) ([]int, error) {
 			return ask.Walk(ctx, os.Stdin, os.Stdout, lead, header, qs)

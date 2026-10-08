@@ -2,13 +2,17 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"slices"
 
 	"github.com/spf13/cobra"
 
+	"github.com/leeovery/kit/internal/ask"
 	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/kind"
+	"github.com/leeovery/kit/internal/look"
+	"github.com/leeovery/kit/internal/render"
 )
 
 func newApplyCommand(a *app) *cobra.Command {
@@ -63,6 +67,11 @@ and 2 when kit couldn't apply.`,
 			if err != nil {
 				return err
 			}
+			if decide, missing := needs(report); !plan && a.pretty(a.Stdout) && len(decide) > len(missing) {
+				if err := a.reconcileNow(cmd.Context(), r.face); err != nil {
+					return err
+				}
+			}
 			if report.Attention() || (plan && actions(report)) {
 				return attention{}
 			}
@@ -111,4 +120,30 @@ func toInstall(ctx context.Context, r *run, only []string) map[string][]string {
 		}
 	}
 	return wanted
+}
+
+// reconcileNow asks, under what applying showed, whether to settle what it
+// left differing from the config, which applying never does: yes, and kit
+// becomes kit reconcile.
+func (a *app) reconcileNow(ctx context.Context, face render.Face) error {
+	var shown []string
+	if f, ok := face.(interface{ Shown() []string }); ok {
+		shown = f.Shown()
+	}
+	if len(shown) > 0 && shown[0] == "" {
+		shown = shown[1:]
+	}
+	i, err := a.Choose(ctx, shown, ask.Question{
+		About:   look.Row{State: look.NeedsYou, Name: "Reconcile now?"},
+		Answers: []look.Choice{{Label: "Yes"}, {Label: "No"}},
+	})
+	switch {
+	case errors.Is(err, ask.ErrCancelled):
+		return nil
+	case err != nil:
+		return err
+	case i == 0:
+		return a.Become([]string{"reconcile"})
+	}
+	return nil
 }

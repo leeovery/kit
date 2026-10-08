@@ -223,7 +223,7 @@ func (a *app) removeSecrets(ctx context.Context, r *run, names []string, shared 
 	case value.delete && value.keep:
 		return errors.New("--delete-value or --keep-value, not both")
 	case !value.delete && !value.keep && a.pretty(a.Stdout):
-		i, err := a.Choose(ctx, ask.Question{
+		i, err := a.Choose(ctx, nil, ask.Question{
 			About:   look.Row{State: look.NeedsYou, Name: strings.Join(names, ", "), Says: look.Orange("delete their values from 1Password too?")},
 			Answers: []look.Choice{{Label: "Keep", Does: "keep them in 1Password"}, {Label: "Delete", Does: "delete them from 1Password"}},
 		})

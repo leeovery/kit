@@ -111,7 +111,10 @@ type Pretty struct {
 	// it shows, and size how big the terminal is.
 	full  bool
 	shown []string
-	size  func() (int, int)
+	// shownAll is what's left on screen of the run: its heading, and its
+	// last word.
+	shownAll []string
+	size     func() (int, int)
 	// out is what's being written, sent to the terminal whole at the end of
 	// an event or a turn of the spinner, for the terminal to show at once.
 	out     strings.Builder
@@ -187,18 +190,27 @@ func (p *Pretty) Emit(e event.Event) {
 		}
 	case event.RunFinished:
 		p.stopSpinner()
+		var last []string
 		switch {
 		case p.home:
 		case p.byArea() && p.applying():
-			p.lines(p.applied(e)...)
+			last = p.applied(e)
 		case p.byArea():
-			p.lines(p.report()...)
-			p.lines(p.foot(e)...)
+			last = append(p.report(), p.foot(e)...)
 		case p.whole:
-			p.write("\n")
-			p.lines(p.foot(e)...)
+			last = append([]string{""}, p.foot(e)...)
 		}
+		p.lines(last...)
+		p.shownAll = append(p.shownAll, last...)
 	}
+}
+
+// Shown is what the face has left on screen of the run, a line a line: its
+// heading, and its last word.
+func (p *Pretty) Shown() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return slices.Clone(p.shownAll)
 }
 
 // open shows the run's heading, once: a blank line, then, for a command
@@ -209,11 +221,12 @@ func (p *Pretty) open(command, machine string, at time.Time, only []string) {
 	}
 	p.opened = true
 	p.whole = p.home || slices.Contains(wholeMac, command) && len(only) == 0
-	p.write("\n")
+	heading := []string{""}
 	if p.whole {
-		p.lines(look.Head(look.Meta(command, machine, when(at))...)...)
-		p.write("\n")
+		heading = append(append(heading, look.Head(look.Meta(command, machine, when(at))...)...), "")
 	}
+	p.lines(heading...)
+	p.shownAll = heading
 }
 
 // byArea is whether the run shows its steps by area: one looking at the

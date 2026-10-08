@@ -27,6 +27,7 @@ func appWorld(t *testing.T) *world {
 func TestApplyInstallsAppsWithThePasswordAskedFirst(t *testing.T) {
 	w := appWorld(t)
 	w.terminal = true
+	w.choose = func(string, []string) (int, error) { return 1, nil }
 	w.fake.On("sudo", "-v")
 	w.fake.On("sudo", "-n", "mas", "install", "1091189122")
 
