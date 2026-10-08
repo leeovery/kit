@@ -65,3 +65,32 @@ func TestRunList(t *testing.T) {
 		t.Errorf("the fold opens to %+v", fold)
 	}
 }
+
+// Runs of a command that each ended needing you the same way fold too,
+// saying how; a run that ended otherwise isn't folded with them.
+func TestRunListFoldsRunsThatEndedAlike(t *testing.T) {
+	day := time.Date(2026, 10, 7, 0, 0, 0, 0, time.UTC)
+	needsYou := map[check.State]int{check.OK: 42, check.Attention: 1}
+	runs := []logs.Run{
+		loggedRun("status", day.Add(14*time.Hour+20*time.Minute), needsYou),
+		loggedRun("status", day.Add(13*time.Hour+20*time.Minute), map[check.State]int{check.OK: 41, check.Attention: 1}),
+		loggedRun("status", day.Add(12*time.Hour+20*time.Minute), needsYou),
+		loggedRun("status", day.Add(11*time.Hour+20*time.Minute), map[check.State]int{check.OK: 41, check.Attention: 2}),
+	}
+	lines := render.RunList(runs)
+	var got []string
+	for _, l := range lines {
+		got = append(got, ansi.Strip(l.Text))
+	}
+	want := []string{
+		"  WED 7 OCT",
+		"  + 3 runs of status, each 1 needs you · 12:20 to 14:20",
+		"  ▲ 11:20 status  2 need you · 41 fine · 1.5s",
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("RunList =\n%q\nwant\n%q", got, want)
+	}
+	if chosen := ansi.Strip(lines[1].Chosen); chosen != "  ❯ 3 runs of status  each 1 needs you · 12:20 to 14:20" || len(lines[1].Folds) != 3 {
+		t.Errorf("the fold, chosen: %q, opening to %d runs", chosen, len(lines[1].Folds))
+	}
+}
