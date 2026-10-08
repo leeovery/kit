@@ -48,6 +48,8 @@ type Script struct {
 	argv    []string
 	answers []*answer
 	runs    int
+	// answered are what the command was given when it asked.
+	answered []string
 }
 
 // answer is what one run of a command does.
@@ -58,6 +60,7 @@ type answer struct {
 	err      error
 	duration time.Duration
 	does     func()
+	asks     int
 }
 
 func (s *Script) last() *answer {
@@ -102,6 +105,19 @@ func (s *Script) Takes(d time.Duration) *Script {
 	return s
 }
 
+// Asks has the command ask times for what its Answer gives, as sudo -S
+// asks for a password, before it does as scripted: one not given ends it,
+// exit 1. Answered says what it was given.
+func (s *Script) Asks(times int) *Script {
+	s.last().asks = times
+	return s
+}
+
+// Answered are what the command was given when it asked, in order.
+func (s *Script) Answered() []string {
+	return slices.Clone(s.answered)
+}
+
 // Then scripts the command's next run, as when what it reports changes,
 // such as a listing once something's installed: by default, nothing printed
 // and exit 0.
@@ -125,7 +141,7 @@ func (f *Fake) Has(name string) bool {
 }
 
 // Run answers cmd as scripted, as a real runner would, noting the call.
-func (f *Fake) Run(_ context.Context, cmd runner.Command) (runner.Result, error) {
+func (f *Fake) Run(ctx context.Context, cmd runner.Command) (runner.Result, error) {
 	f.mu.Lock()
 	f.calls = append(f.calls, cmd)
 	s := f.script(cmd)
@@ -141,6 +157,19 @@ func (f *Fake) Run(_ context.Context, cmd runner.Command) (runner.Result, error)
 	}
 	if a.err != nil {
 		return runner.Result{ExitCode: -1}, a.err
+	}
+	for asked := range a.asks {
+		if cmd.Answer == nil {
+			f.t.Errorf("runnertest: %s asks, and nothing answers it", cmd)
+			break
+		}
+		answer, err := cmd.Answer(ctx, asked)
+		if err != nil {
+			return runner.Result{ExitCode: 1}, &runner.ExitError{Command: cmd.String(), Code: 1, Stderr: "no answer given"}
+		}
+		f.mu.Lock()
+		s.answered = append(s.answered, answer)
+		f.mu.Unlock()
 	}
 	if a.does != nil {
 		a.does()

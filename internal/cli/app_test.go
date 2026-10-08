@@ -4,6 +4,10 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/charmbracelet/x/ansi"
+
+	"github.com/leeovery/kit/internal/ask"
 )
 
 const (
@@ -28,7 +32,7 @@ func TestApplyInstallsAppsWithThePasswordAskedFirst(t *testing.T) {
 	w := appWorld(t)
 	w.terminal = true
 	w.choose = func(string, []string) (int, error) { return 1, nil }
-	w.fake.On("sudo", "-v")
+	w.expectPassword()
 	w.fake.On("sudo", "-n", "mas", "install", "1091189122")
 
 	out, errOut, _ := w.run(t, "apply")
@@ -36,8 +40,38 @@ func TestApplyInstallsAppsWithThePasswordAskedFirst(t *testing.T) {
 		t.Errorf("kit apply printed\n%s%s\nwant Bear installed", out, errOut)
 	}
 	calls := w.fake.Calls()
-	if sudo, install := slices.Index(calls, "sudo -v"), slices.Index(calls, "sudo -n mas install 1091189122"); sudo < 0 || install < sudo {
+	if sudo, install := slices.Index(calls, askedFor), slices.Index(calls, "sudo -n mas install 1091189122"); sudo < 0 || install < sudo {
 		t.Errorf("ran %q, want the password asked before the install", calls)
+	}
+}
+
+// A password sudo doesn't take is asked for again, saying so; one not
+// given leaves what needs it waiting.
+func TestApplyAsksAgainForAPasswordSudoDidntTake(t *testing.T) {
+	w := appWorld(t)
+	w.terminal = true
+	w.choose = func(string, []string) (int, error) { return 1, nil }
+	w.expectPassword().Asks(2)
+	w.fake.On("sudo", "-n", "-v")
+	w.fake.On("sudo", "-n", "mas", "install", "1091189122")
+	w.run(t, "apply")
+	if want := []string{"bear@1091189122  needs an administrator's password", "bear@1091189122  that wasn't it: try again"}; !slices.Equal(w.typedFor, want) {
+		t.Errorf("asked for %q, want %q", w.typedFor, want)
+	}
+
+	w = appWorld(t)
+	w.terminal = true
+	w.choose = func(string, []string) (int, error) { return 1, nil }
+	w.notTyped = ask.ErrCancelled
+	w.expectPassword()
+	out, _, _ := w.run(t, "apply")
+	if !strings.Contains(ansi.Strip(out), "bear@1091189122 · needs an administrator's password") {
+		t.Errorf("kit apply, no password given, printed\n%s\nwant Bear waiting", ansi.Strip(out))
+	}
+	for _, c := range w.fake.Calls() {
+		if strings.Contains(c, "mas install") {
+			t.Errorf("ran %q, want nothing installed", c)
+		}
 	}
 }
 
@@ -72,7 +106,7 @@ func TestAddAnAppByName(t *testing.T) {
 		}
 		return 0, nil
 	}
-	w.fake.On("sudo", "-v")
+	w.expectPassword()
 	w.fake.On("sudo", "-n", "mas", "install", "946798523")
 	w.expectSync([]string{"laptop/declarations"}, "kit mas add sleep-control-center@946798523 (laptop)")
 

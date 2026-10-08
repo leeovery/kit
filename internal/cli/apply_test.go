@@ -93,7 +93,7 @@ func TestApplyAtATerminalAsksForThePasswordUpFront(t *testing.T) {
 		Then().Prints("ghostty\nfirefox\n").
 		Then().Prints("ghostty\nfirefox\nzoom\n")
 	w.fake.On("brew", "info", "--json=v2", "--cask", "zoom").Prints(zoomInfo)
-	w.fake.On("sudo", "-v")
+	sudo := w.expectPassword()
 	w.fake.On("brew", "update", "--quiet")
 	w.fake.On("brew", "install", "--cask", "zoom")
 
@@ -107,16 +107,19 @@ func TestApplyAtATerminalAsksForThePasswordUpFront(t *testing.T) {
 		t.Errorf("kit asked %q and became %q; want Reconcile now?, answered yes, kit reconcile", w.asked, w.became)
 	}
 	calls := w.fake.Calls()
-	sudo, install := slices.Index(calls, "sudo -v"), slices.Index(calls, "brew install --cask zoom")
-	if sudo < 0 || install < sudo {
-		t.Fatalf("ran %q, want sudo -v asked before anything's installed", calls)
+	asked, install := slices.Index(calls, askedFor), slices.Index(calls, "brew install --cask zoom")
+	if asked < 0 || install < asked {
+		t.Fatalf("ran %q, want the password asked for before anything's installed", calls)
 	}
-	for _, cmd := range w.fake.Commands() {
-		if slices.Equal(cmd.Args, []string{"-v"}) && !cmd.Interactive {
-			t.Errorf("sudo -v ran without the terminal, want it to ask there")
-		}
+	// Asked in kit's own field, a row naming what needs it, and given to
+	// sudo on its input, never on a command line.
+	if !slices.Equal(w.typedFor, []string{"zoom  needs an administrator's password"}) || !slices.Equal(sudo.Answered(), []string{"hunter2"}) {
+		t.Errorf("asked for %q, sudo given %q", w.typedFor, sudo.Answered())
 	}
-	for _, c := range calls[:sudo] {
+	if strings.Contains(strings.Join(calls, "\n"), "hunter2") {
+		t.Errorf("the password was on a command line: %q", calls)
+	}
+	for _, c := range calls[:asked] {
 		if strings.HasPrefix(c, "brew install") || strings.HasPrefix(c, "brew update") {
 			t.Errorf("ran %q before asking for the password, want nothing applied first", c)
 		}

@@ -13,10 +13,11 @@ import (
 
 // Secret asks, at the terminal in and out are, for a value typed or pasted
 // without being shown: about is the row it's for, the field on the line
-// under it, a dot a character. Enter takes it; escape cancels. It asks on a
-// screen of its own, which goes when it's done.
-func Secret(ctx context.Context, in io.Reader, out io.Writer, about look.Row) (string, error) {
-	program := tea.NewProgram(field{about: about, width: look.Width}, tea.WithContext(ctx), tea.WithInput(in), tea.WithOutput(out))
+// under it, a dot a character, under lead, what's on screen above it, if
+// anything. Enter takes it; escape cancels. It asks on a screen of its own,
+// which goes when it's done.
+func Secret(ctx context.Context, in io.Reader, out io.Writer, lead []string, about look.Row) (string, error) {
+	program := tea.NewProgram(field{lead: lead, about: about, width: look.Width}, tea.WithContext(ctx), tea.WithInput(in), tea.WithOutput(out))
 	final, err := program.Run()
 	if err != nil {
 		return "", fmt.Errorf("ask for %s: %w", about.Name, err)
@@ -30,6 +31,7 @@ func Secret(ctx context.Context, in io.Reader, out io.Writer, about look.Row) (s
 
 // field is the question Secret asks.
 type field struct {
+	lead      []string
 	about     look.Row
 	typed     []rune
 	width     int
@@ -69,7 +71,10 @@ func (f field) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (f field) View() tea.View {
-	lines := []string{""}
+	lines := append([]string{""}, f.lead...)
+	if len(f.lead) > 0 {
+		lines = append(lines, "")
+	}
 	if !f.done && !f.cancelled {
 		row := f.about
 		row.Under = []string{look.Field(len(f.typed))}

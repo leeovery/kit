@@ -78,7 +78,7 @@ func (a *app) addSecret(ctx context.Context, r *run, names []string, opts addOpt
 		// As a value typed has no newline, nor does one passed in.
 		value = strings.TrimRight(string(data), "\r\n")
 	case a.pretty(a.Stdout):
-		typed, err := a.ReadSecret(ctx, look.Row{State: look.NeedsYou, Name: name, Says: look.Orange("needs its value")})
+		typed, err := a.ReadSecret(ctx, nil, look.Row{State: look.NeedsYou, Name: name, Says: look.Orange("needs its value")})
 		if errors.Is(err, ask.ErrCancelled) {
 			return fmt.Errorf("%w: nothing was stored or declared", ask.ErrCancelled)
 		}

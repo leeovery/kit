@@ -216,3 +216,32 @@ func TestStreamedGivesWhatsWanted(t *testing.T) {
 }
 
 type wanted struct{}
+
+// A command that asks on its standard error is answered on its standard
+// input, each time it asks, a prompt split across its writes included; what
+// it printed comes back without the prompts.
+func TestExecAnswersWhatACommandAsks(t *testing.T) {
+	e, _ := programs(t, map[string]string{
+		"asks": `printf 'ASK' >&2; /bin/sleep 0.1; printf '>' >&2; read a; printf 'Sorry, try again.\nASK>' >&2; read b; echo "$a $b"`,
+	})
+	var asked []int
+	res, err := e.Run(t.Context(), runner.Command{Name: "asks", Asks: "ASK>", Answer: func(_ context.Context, n int) (string, error) {
+		asked = append(asked, n)
+		return []string{"first", "second"}[n], nil
+	}})
+	if err != nil || string(res.Stdout) != "first second\n" || string(res.Stderr) != "Sorry, try again.\n" || !slices.Equal(asked, []int{0, 1}) {
+		t.Errorf("Run = %q, %q, %v; asked %v", res.Stdout, res.Stderr, err, asked)
+	}
+}
+
+// An answer not given ends the command's input.
+func TestExecEndsTheInputOfACommandNotAnswered(t *testing.T) {
+	e, _ := programs(t, map[string]string{"asks": `printf 'ASK>' >&2; read a || exit 3; echo "$a"`})
+	notGiven := errors.New("cancelled")
+	res, err := e.Run(t.Context(), runner.Command{Name: "asks", Asks: "ASK>", Answer: func(context.Context, int) (string, error) {
+		return "", notGiven
+	}})
+	if exit, ok := errors.AsType[*runner.ExitError](err); !ok || exit.Code != 3 || len(res.Stdout) != 0 {
+		t.Errorf("Run = %q, %v; want it ended, exit 3", res.Stdout, err)
+	}
+}

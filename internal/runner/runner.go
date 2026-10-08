@@ -36,6 +36,14 @@ type Command struct {
 	// Secret is whether what it prints is a secret, as 1Password's values
 	// are: kept from every report, the log included.
 	Secret bool
+	// Asks, with Answer, is what the command prints on its standard error
+	// when it asks for something, as sudo -S -p's prompt: each time it
+	// prints it, Answer is called with how many times it asked before, and
+	// what Answer returns is written to the command's standard input, a
+	// line, kept nowhere; an error from Answer ends the command's input.
+	// What it printed is reported without the prompts.
+	Asks   string
+	Answer func(ctx context.Context, asked int) (string, error)
 	// Lines, when set, is given each line the command prints, its output and
 	// its errors, as it prints them: a line a carriage return starts again
 	// is given as it ends. Never for an interactive command.

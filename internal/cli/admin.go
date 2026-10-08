@@ -2,10 +2,15 @@ package cli
 
 import (
 	"context"
+	"fmt"
+	"maps"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/leeovery/kit/internal/kind"
+	"github.com/leeovery/kit/internal/look"
 	"github.com/leeovery/kit/internal/runner"
 )
 
@@ -55,7 +60,7 @@ func (a *app) holdAdmin(ctx context.Context, r *run, wanted map[string][]string)
 	if !needsAdmin(ctx, r, wanted) {
 		return nil, stop
 	}
-	has := sudo(ctx, true, "-v")
+	has := a.askAdmin(ctx, r, wanted)
 	held = func(context.Context) bool { return has }
 	tell(held)
 	if !has {
@@ -79,6 +84,50 @@ func (a *app) holdAdmin(ctx context.Context, r *run, wanted map[string][]string)
 		cancel()
 		wg.Wait()
 	}
+}
+
+// sudoAsks is the prompt kit has sudo give on its standard error when it
+// wants the password, for kit to ask for it in its own field.
+const sudoAsks = "[kit: sudo wants the password]"
+
+// askAdmin has sudo take an administrator's password for the installs
+// wanted, by kind: Touch ID first, where sudo has it; else, each time sudo
+// asks, kit asks in its own field, under what the run has shown, a row
+// naming what needs it, and gives sudo what's typed, on its input, never on
+// a command line or in the log. Whether sudo took it.
+func (a *app) askAdmin(ctx context.Context, r *run, wanted map[string][]string) bool {
+	var lead []string
+	if f, ok := r.face.(interface{ Shown() []string }); ok {
+		lead = f.Shown()
+	}
+	if len(lead) > 0 && lead[0] == "" {
+		lead = lead[1:]
+	}
+	var names []string
+	for _, kindName := range slices.Sorted(maps.Keys(wanted)) {
+		names = append(names, wanted[kindName]...)
+	}
+	about := look.Row{State: look.NeedsYou, Name: strings.Join(names, ", "), Says: look.Orange("needs an administrator's password")}
+	switch {
+	case len(names) > 3:
+		about.Name, about.Says = fmt.Sprintf("%d installs", len(names)), look.Orange("need an administrator's password")
+	case len(names) > 1:
+		about.Says = look.Orange("need an administrator's password")
+	}
+	_, err := r.run.Run(ctx, runner.Command{
+		Name:    "sudo",
+		Args:    []string{"-S", "-p", sudoAsks, "-v"},
+		Timeout: 5 * time.Minute,
+		Asks:    sudoAsks,
+		Answer: func(ctx context.Context, asked int) (string, error) {
+			row := about
+			if asked > 0 {
+				row.Says = look.Orange("that wasn't it: try again")
+			}
+			return a.ReadSecret(ctx, lead, row)
+		},
+	})
+	return err == nil
 }
 
 // waitingForAdmin are which of names, of the kind called kindName, to

@@ -57,8 +57,9 @@ type Deps struct {
 	// or ask.ErrCancelled.
 	Walk func(ctx context.Context, lead []string, header string, qs []ask.Question) ([]int, error)
 	// ReadSecret asks, at the terminal, for a value typed without being
-	// shown, for the thing about is, as ask.Secret does.
-	ReadSecret func(ctx context.Context, about look.Row) (string, error)
+	// shown, for the thing about is, under lead, what's on screen above it,
+	// as ask.Secret does.
+	ReadSecret func(ctx context.Context, lead []string, about look.Row) (string, error)
 	// Pick shows a list at the terminal, after lead, to pick a line from, as
 	// ask.Pick does: the line's value, or ask.ErrCancelled.
 	Pick func(ctx context.Context, lead []string, lines []ask.Line, keys []look.Key) (string, error)
@@ -242,8 +243,8 @@ func Real(version string) Deps {
 		Walk: func(ctx context.Context, lead []string, header string, qs []ask.Question) ([]int, error) {
 			return ask.Walk(ctx, os.Stdin, os.Stdout, lead, header, qs)
 		},
-		ReadSecret: func(ctx context.Context, about look.Row) (string, error) {
-			return ask.Secret(ctx, os.Stdin, os.Stdout, about)
+		ReadSecret: func(ctx context.Context, lead []string, about look.Row) (string, error) {
+			return ask.Secret(ctx, os.Stdin, os.Stdout, lead, about)
 		},
 		Pick: func(ctx context.Context, lead []string, lines []ask.Line, keys []look.Key) (string, error) {
 			return ask.Pick(ctx, os.Stdin, os.Stdout, lead, lines, keys)

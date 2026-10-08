@@ -44,8 +44,12 @@ type world struct {
 	// what kit reads on its standard input.
 	environ []string
 	stdin   string
-	// typed is what a person types when kit asks for a value unshown.
-	typed string
+	// typed is what a person types when kit asks for a value unshown;
+	// typedFor, what each time it was asked for, as its row reads.
+	typed    string
+	typedFor []string
+	// notTyped, when set, is how asking for a value unshown ends instead.
+	notTyped error
 	// path and childEnv are what kit last made its runner with.
 	path     []string
 	childEnv []string
@@ -132,7 +136,13 @@ func (w *world) run(t *testing.T, args ...string) (stdout, stderr string, status
 			}
 			return answers, nil
 		},
-		ReadSecret: func(context.Context, look.Row) (string, error) { return w.typed, nil },
+		ReadSecret: func(_ context.Context, _ []string, about look.Row) (string, error) {
+			w.typedFor = append(w.typedFor, ansi.Strip(about.Name+"  "+about.Says))
+			if w.notTyped != nil {
+				return "", w.notTyped
+			}
+			return w.typed, nil
+		},
 		Pick: func(_ context.Context, _ []string, lines []ask.Line, _ []look.Key) (string, error) {
 			if w.pick == nil {
 				t.Fatal("kit showed a list to pick from")
@@ -231,4 +241,20 @@ func (w *world) answer(t *testing.T, q ask.Question) (int, error) {
 		return 0, errors.New("unanswered")
 	}
 	return w.choose(text, q.Labels())
+}
+
+// sudoAsks is sudo -S's prompt, as kit has sudo give it, and askedFor, the
+// call that asks for the password through it, as calls read.
+const (
+	sudoAsks = "[kit: sudo wants the password]"
+	askedFor = "sudo -S -p '" + sudoAsks + "' -v"
+)
+
+// expectPassword scripts sudo taking the password kit asks for in its field,
+// typed as the world's typed, once.
+func (w *world) expectPassword() *runnertest.Script {
+	if w.typed == "" {
+		w.typed = "hunter2"
+	}
+	return w.fake.On("sudo", "-S", "-p", sudoAsks, "-v").Asks(1)
 }

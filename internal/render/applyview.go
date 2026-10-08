@@ -218,6 +218,10 @@ func (p *Pretty) workRow(f event.StepFinished, part string) look.Row {
 	var hints []string
 	for _, it := range f.Result.Items {
 		switch {
+		case it.Quiet != "" && it.Detail != "":
+			// Too new to count as drift, but applying says why it's not done:
+			// waiting for a password, say.
+			row.Under = append(row.Under, look.Says(look.White(it.Name), look.Muted(it.Detail)))
 		case it.Quiet != "":
 		case IsDrift(it):
 			says := []string{look.Orange(it.Name), look.Muted(wrong(part, it))}

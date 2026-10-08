@@ -21,12 +21,12 @@ func TestTouchIDForSudoAsksForThePasswordFirst(t *testing.T) {
 	}
 
 	w.terminal = true
-	w.fake.On("sudo", "-v")
+	w.expectPassword()
 	w.fake.On("sudo", "-n", "-v")
 	w.fake.On("sudo", "-n", "tee", w.home+"/etc/sudo_local")
 	w.run(t, "apply", "touch-id-sudo")
 	calls := strings.Join(w.fake.Calls(), "\n")
-	if i, j := strings.Index(calls, "sudo -v"), strings.Index(calls, "sudo -n tee"); i < 0 || j < i {
+	if i, j := strings.Index(calls, askedFor), strings.Index(calls, "sudo -n tee"); i < 0 || j < i {
 		t.Errorf("ran\n%s\nwant the password asked for, then the line written", calls)
 	}
 }

@@ -62,6 +62,9 @@ func (e Exec) start(ctx context.Context, program string, cmd Command) (stdout, s
 	c := exec.CommandContext(ctx, program, cmd.Args...)
 	c.Env = e.Env
 	c.Dir = cmd.Dir
+	if cmd.Answer != nil {
+		return converse(ctx, c, cmd)
+	}
 	if cmd.Interactive {
 		// In kit's own process group, as the terminal's foreground group is
 		// the only one that may read from it.
@@ -94,6 +97,66 @@ func (e Exec) start(ctx context.Context, program string, cmd Command) (stdout, s
 	c.WaitDelay = waitDelay
 	err = c.Run()
 	return out.Bytes(), errOut.Bytes(), err
+}
+
+// converse runs c, the command cmd, in a process group of its own, answering
+// what it asks on its standard error, as cmd says, on its standard input;
+// what it printed, its prompts taken out.
+func converse(ctx context.Context, c *exec.Cmd, cmd Command) (stdout, stderr []byte, err error) {
+	in, err := c.StdinPipe()
+	if err != nil {
+		return nil, nil, err
+	}
+	errs, err := c.StderrPipe()
+	if err != nil {
+		return nil, nil, err
+	}
+	var out bytes.Buffer
+	c.Stdout = &out
+	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	c.Cancel = func() error {
+		return syscall.Kill(-c.Process.Pid, syscall.SIGKILL)
+	}
+	c.WaitDelay = waitDelay
+	if err := c.Start(); err != nil {
+		return nil, nil, err
+	}
+	prompt := []byte(cmd.Asks)
+	var said, pending []byte
+	var answerErr error
+	buf := make([]byte, 4096)
+	for asked := 0; ; {
+		n, readErr := errs.Read(buf)
+		pending = append(pending, buf[:n]...)
+		for answerErr == nil {
+			i := bytes.Index(pending, prompt)
+			if i < 0 {
+				break
+			}
+			said, pending = append(said, pending[:i]...), pending[i+len(prompt):]
+			answer, err := cmd.Answer(ctx, asked)
+			asked++
+			if err != nil {
+				answerErr = err
+				_ = in.Close()
+				break
+			}
+			_, _ = io.WriteString(in, answer+"\n")
+		}
+		// What could begin a prompt waits for what follows it.
+		keep := min(len(pending), len(prompt)-1)
+		said, pending = append(said, pending[:len(pending)-keep]...), pending[len(pending)-keep:]
+		if readErr != nil {
+			break
+		}
+	}
+	said = append(said, pending...)
+	_ = in.Close()
+	err = c.Wait()
+	if answerErr != nil && err == nil {
+		err = answerErr
+	}
+	return out.Bytes(), said, err
 }
 
 // Become replaces kit with the program at path, run with args in env, at

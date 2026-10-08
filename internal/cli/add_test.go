@@ -205,7 +205,7 @@ func TestAddAtATerminalAsksForThePasswordFirst(t *testing.T) {
 	w.terminal = true
 	w.choose = func(string, []string) (int, error) { return 0, nil }
 	w.fake.On("brew", "info", "--json=v2", "--cask", "zoom").Prints(zoomInfo)
-	w.fake.On("sudo", "-v")
+	w.expectPassword()
 	w.fake.On("brew", "update", "--quiet")
 	w.fake.On("brew", "install", "--cask", "zoom")
 	w.expectSync([]string{"laptop/declarations"}, "kit cask add zoom (laptop)")
@@ -214,7 +214,7 @@ func TestAddAtATerminalAsksForThePasswordFirst(t *testing.T) {
 		t.Fatalf("kit exit add %d: %s", code, errOut)
 	}
 	calls := w.fake.Calls()
-	if sudo, install := slices.Index(calls, "sudo -v"), slices.Index(calls, "brew install --cask zoom"); sudo < 0 || install < sudo {
+	if sudo, install := slices.Index(calls, askedFor), slices.Index(calls, "brew install --cask zoom"); sudo < 0 || install < sudo {
 		t.Errorf("ran %q, want sudo -v asked before the install", calls)
 	}
 }
