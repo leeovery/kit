@@ -20,7 +20,7 @@ func TestPrefs(t *testing.T) {
 		state        check.State
 		text, id     string
 	}{
-		{"captured", `{"on": "started fresh", "captured": "` + recent + `", "summary": "57 domains, 2 changed; 1056 files, 0 changed"}`, check.OK, "captured 10:00: 57 domains, 2 changed; 1056 files, 0 changed", ""},
+		{"captured", `{"on": "started fresh", "captured": "` + recent + `", "summary": "57 domains, 2 changed; 1056 files, 0 changed"}`, check.OK, "saved 10:00", ""},
 		{"never switched on", `{}`, check.Attention, "paused: capture isn't switched on for this Mac", "prefs:paused"},
 		{"not captured yet", `{"on": "started fresh"}`, check.Attention, "not captured yet", "prefs:never"},
 		{"stale", `{"on": "started fresh", "captured": "` + old + `"}`, check.Attention, "last capture", "prefs:stale"},

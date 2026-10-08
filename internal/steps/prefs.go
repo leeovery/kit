@@ -23,7 +23,7 @@ const prefsEvery = 26 * time.Hour
 // alone: no git, no GitHub.
 func Prefs(p *prefs.Prefs, now func() time.Time) engine.Step {
 	return engine.Step{
-		Name: PrefsName, Title: "Settings", Area: AreaBackups,
+		Name: PrefsName, Title: "App settings", Area: AreaBackups,
 		Check: func(context.Context) check.Result {
 			rec, err := p.Load()
 			if err != nil {
@@ -44,7 +44,7 @@ func Prefs(p *prefs.Prefs, now func() time.Time) engine.Step {
 				return problem(PrefsName, "not pushed since "+ago(rec.Unpushed, now()), [3]string{"unpushed", rec.PushError, "the next capture pushes again; kit prefs capture shows it"})
 			}
 			at := when(rec.Captured, now())
-			return check.Result{State: check.OK, Summary: "captured " + at + ": " + rec.Summary, Glance: "Settings " + at}
+			return check.Result{State: check.OK, Summary: "saved " + at, Glance: "app settings " + at}
 		},
 	}
 }

@@ -127,7 +127,7 @@ func TestArq(t *testing.T) {
 		text  string
 		ids   []string
 	}{
-		{"backed up, a plan with no schedule left out", stats(plan("Old Mac", "Manual", now().Add(-30*24*time.Hour)) + "," + plan("User data", "Daily", now().Add(-11*time.Hour))), check.OK, "last backup User data 01:00", nil},
+		{"backed up, a plan with no schedule left out", stats(plan("Old Mac", "Manual", now().Add(-30*24*time.Hour)) + "," + plan("User data", "Daily", now().Add(-11*time.Hour))), check.OK, "last backup 01:00", nil},
 		{"stale", stats(plan("User data", "Daily", now().Add(-50*time.Hour))), check.Attention, "no recent backup", []string{"arq:stale:user-data"}},
 		{"never", stats(`{"name": "User data", "schedule": {"type": "Daily"}}`), check.Attention, "no recent backup", []string{"arq:never:user-data"}},
 		{"none scheduled", stats(plan("User data", "Manual", now())), check.Attention, "no plan scheduled", []string{"arq:no-plan"}},

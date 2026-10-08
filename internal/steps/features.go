@@ -64,7 +64,7 @@ func Scratch(run runner.Runner, admin *Admin, volume, home string, uid int) engi
 				}
 				return res
 			}
-			return check.Result{State: check.OK, Summary: "mounted, not indexed, not backed up; Claude's temporary files there"}
+			return check.Result{State: check.OK, Summary: "mounted; not indexed; not backed up"}
 		},
 		Apply: func(ctx context.Context, found check.Result) error {
 			if !admin.ok(ctx) {

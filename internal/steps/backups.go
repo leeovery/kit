@@ -196,14 +196,19 @@ func Arq(run runner.Runner, now func() time.Time) engine.Step {
 				return problem(FeatureArq, "no plan scheduled", [3]string{"no-plan", "no backup plan runs on a schedule, so nothing is backed up offsite by itself", "in Arq, give the plan a schedule (its Schedule tab: daily)"})
 			}
 			slices.Sort(good)
+			slices.Sort(times)
+			// One plan is the step's alone, so needs no name; several are
+			// named.
 			summary := "last backup " + strings.Join(good, ", ")
-			if len(good) == 0 {
+			switch {
+			case len(good) == 0:
 				summary = "no recent backup"
+			case plans == 1:
+				summary = "last backup " + times[0]
 			}
 			if len(problems) > 0 {
 				return problem(FeatureArq, summary, problems...)
 			}
-			slices.Sort(times)
 			return check.Result{State: check.OK, Summary: summary, Glance: "Arq " + strings.Join(times, ", ")}
 		},
 	}

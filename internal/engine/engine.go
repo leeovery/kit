@@ -20,6 +20,11 @@ import (
 // DefaultJobs is how many steps run side by side, unless Options say.
 const DefaultJobs = 4
 
+// DefaultCheckWithin is how long a check may take, by default, before it's
+// taken as not answering: a check is quick, and one that hangs mustn't hold
+// up the rest of the run.
+const DefaultCheckWithin = 30 * time.Second
+
 // Step is one thing kit checks, and applies.
 type Step struct {
 	Name  string
@@ -146,7 +151,10 @@ type Options struct {
 	Only []string
 	// Jobs is how many steps run side by side: DefaultJobs when 0.
 	Jobs int
-	Now  func() time.Time
+	// CheckWithin is how long a check may take before it's taken as not
+	// answering: DefaultCheckWithin when 0.
+	CheckWithin time.Duration
+	Now         func() time.Time
 }
 
 // Report is how a run's steps stood, in pipeline order.
@@ -245,6 +253,7 @@ func (p *Pipeline) run(ctx context.Context, sink event.Sink, opts Options, apply
 	d := dispatch{
 		sink:     sink,
 		now:      now,
+		within:   cmp.Or(opts.CheckWithin, DefaultCheckWithin),
 		apply:    apply,
 		titles:   titles,
 		results:  make(map[string]check.Result, len(steps)),
@@ -267,6 +276,7 @@ func (p *Pipeline) run(ctx context.Context, sink event.Sink, opts Options, apply
 type dispatch struct {
 	sink     event.Sink
 	now      func() time.Time
+	within   time.Duration
 	apply    bool
 	titles   map[string]string
 	results  map[string]check.Result
@@ -373,14 +383,14 @@ func (d *dispatch) unmet(s Step) []string {
 // isn't there, isn't applied.
 func (d *dispatch) step(ctx context.Context, s Step) check.Result {
 	d.sink.Emit(event.StepStarted{Time: d.now(), Step: s.Name, Doing: "checking"})
-	res := checkSafely(ctx, s)
+	res := d.check(ctx, s)
 	if d.apply && res.State != check.Deferred && (res.State != check.OK || res.Actions()) && s.Apply != nil && ctx.Err() == nil {
 		d.sink.Emit(event.StepStarted{Time: d.now(), Step: s.Name, Doing: "applying"})
 		before := res
 		if err := applySafely(event.WithChanging(ctx), s, res); err != nil {
 			return check.Result{State: check.Failed, Reason: err.Error()}
 		}
-		res = checkSafely(ctx, s)
+		res = d.check(ctx, s)
 		res.Done = done(before, res)
 	}
 	if res.State == check.Attention && s.Manual != "" {
@@ -423,6 +433,24 @@ func checkSafely(ctx context.Context, s Step) (res check.Result) {
 		}
 	}()
 	return s.Check(ctx)
+}
+
+// check runs s's check, giving it d.within to answer: one that doesn't is
+// tried once more, then fails, saying so, while the rest of the run goes
+// on.
+func (d *dispatch) check(ctx context.Context, s Step) check.Result {
+	for try := 0; ; try++ {
+		within, cancel := context.WithTimeout(ctx, d.within)
+		res := checkSafely(within, s)
+		late := errors.Is(within.Err(), context.DeadlineExceeded) && ctx.Err() == nil
+		cancel()
+		switch {
+		case !late:
+			return res
+		case try == 1:
+			return check.Result{State: check.Failed, Reason: fmt.Sprintf("didn't answer in %s, tried twice", d.within)}
+		}
+	}
 }
 
 // applySafely runs s's apply on what its check found, a panic in it

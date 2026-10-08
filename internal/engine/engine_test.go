@@ -500,3 +500,28 @@ func TestACheckThatDefersIsntApplied(t *testing.T) {
 		t.Errorf("Apply() = %+v, %v, applied %v; want it deferred, not applied", report.Results["npm"], err, applied)
 	}
 }
+
+// A check that doesn't answer in time is tried once more, then fails,
+// saying so, while the rest of the run goes on.
+func TestACheckThatHangsFails(t *testing.T) {
+	var tries atomic.Int32
+	p, err := engine.New(
+		engine.Step{Name: "stuck", Check: func(ctx context.Context) check.Result {
+			tries.Add(1)
+			<-ctx.Done()
+			return check.Result{State: check.Failed, Reason: ctx.Err().Error()}
+		}},
+		engine.Step{Name: "quick", Check: func(context.Context) check.Result { return check.Result{State: check.OK} }},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := p.Check(t.Context(), &recorder{}, engine.Options{Machine: "laptop", CheckWithin: 50 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stuck, quick := report.Results["stuck"], report.Results["quick"]
+	if stuck.State != check.Failed || stuck.Reason != "didn't answer in 50ms, tried twice" || tries.Load() != 2 || quick.State != check.OK {
+		t.Errorf("stuck = %+v after %d tries, quick = %+v", stuck, tries.Load(), quick)
+	}
+}
