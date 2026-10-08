@@ -18,6 +18,7 @@ import (
 
 	"github.com/leeovery/kit/internal/ask"
 	"github.com/leeovery/kit/internal/config"
+	"github.com/leeovery/kit/internal/look"
 	"github.com/leeovery/kit/internal/runner"
 	"github.com/leeovery/kit/internal/steps"
 )
@@ -47,12 +48,16 @@ type Deps struct {
 	// Runner returns the runner kit runs programs with, finding them on path
 	// and running them in env, as runner.Exec does.
 	Runner func(path, env []string) runner.Runner
-	// Choose asks, at the terminal, which of options to take, as ask.Choose
-	// does: the index taken, or ask.ErrCancelled.
-	Choose func(ctx context.Context, question string, options []string) (int, error)
+	// Choose asks a question at the terminal, as ask.Choose does: the
+	// answer taken, by its place, or ask.ErrCancelled.
+	Choose func(ctx context.Context, q ask.Question) (int, error)
+	// Walk asks questions one after another at the terminal, as ask.Walk
+	// does: the answers taken, all of them, or those before ask.ErrStopped;
+	// or ask.ErrCancelled.
+	Walk func(ctx context.Context, lead []string, header string, qs []ask.Question) ([]int, error)
 	// ReadSecret asks, at the terminal, for a value typed without being
-	// shown, after prompt.
-	ReadSecret func(prompt string) (string, error)
+	// shown, for the thing about is, as ask.Secret does.
+	ReadSecret func(ctx context.Context, about look.Row) (string, error)
 	// Scratch is the Scratch volume, which the scratch feature checks and
 	// clears: /Volumes/Scratch.
 	Scratch string
@@ -223,14 +228,14 @@ func Real(version string) Deps {
 		Runner: func(path, env []string) runner.Runner {
 			return runner.Exec{Path: path, Env: env, Now: time.Now, Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr}
 		},
-		Choose: func(ctx context.Context, question string, options []string) (int, error) {
-			return ask.Choose(ctx, os.Stdin, os.Stdout, question, options)
+		Choose: func(ctx context.Context, q ask.Question) (int, error) {
+			return ask.Choose(ctx, os.Stdin, os.Stdout, q)
 		},
-		ReadSecret: func(prompt string) (string, error) {
-			_, _ = fmt.Fprint(os.Stderr, prompt)
-			b, err := term.ReadPassword(os.Stdin.Fd())
-			_, _ = fmt.Fprintln(os.Stderr)
-			return string(b), err
+		Walk: func(ctx context.Context, lead []string, header string, qs []ask.Question) ([]int, error) {
+			return ask.Walk(ctx, os.Stdin, os.Stdout, lead, header, qs)
+		},
+		ReadSecret: func(ctx context.Context, about look.Row) (string, error) {
+			return ask.Secret(ctx, os.Stdin, os.Stdout, about)
 		},
 		Scratch:   "/Volumes/Scratch",
 		SudoLocal: steps.SudoLocal,

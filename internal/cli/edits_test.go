@@ -58,16 +58,16 @@ func TestReconcileAtATerminalShowsAnEditsDiff(t *testing.T) {
 	var asked string
 	var offered []string
 	w.choose = func(question string, options []string) (int, error) {
-		if strings.HasPrefix(question, "shared/home/.zshrc (config)") {
+		if strings.HasPrefix(question, "shared/home/.zshrc  config") {
 			asked, offered = question, options
 		}
-		return len(options) - 2, nil
+		return len(options) - 1, nil
 	}
 	w.run(t, "reconcile", "--all", "config")
-	if want := "shared/home/.zshrc (config): edited, not committed (+3 −1 lines). What now?\n\n@@ -1 +1 @@\n-alias a=b\n+alias a=c"; asked != want {
+	if want := "shared/home/.zshrc  config · edited, not committed · +3 −1 lines\n\n@@ -1 +1 @@\n-alias a=b\n+alias a=c"; asked != want {
 		t.Errorf("asked %q, want %q", asked, want)
 	}
-	if want := "commit it, and push|undo it: back to the last commit|snooze it for 7 days|leave it for now|stop here"; strings.Join(offered, "|") != want {
+	if want := "Adopt|Revert|Snooze|Skip"; strings.Join(offered, "|") != want {
 		t.Errorf("offered %q", offered)
 	}
 }

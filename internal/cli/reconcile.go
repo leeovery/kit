@@ -13,6 +13,8 @@ import (
 	"github.com/leeovery/kit/internal/ask"
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/drift"
+	"github.com/leeovery/kit/internal/event"
+	"github.com/leeovery/kit/internal/look"
 	"github.com/leeovery/kit/internal/render"
 )
 
@@ -113,7 +115,16 @@ func (a *app) reconcile(ctx context.Context, r *run, args []string, opts reconci
 			ids = append(ids, arg)
 		}
 	}
+	// At a terminal, asking, the heading shows at once, and what kit's doing
+	// while it looks.
+	asking := len(ids) == 0 && !a.json && a.pretty(a.Stdout)
+	if asking {
+		r.sink.Emit(event.Preparing{Time: r.now, Command: r.command, Machine: r.machine, Doing: "looking for what differs from the config"})
+	}
 	items, err := a.driftItems(ctx, r, kinds)
+	if asking {
+		r.sink.Emit(event.Preparing{Time: r.now, Command: r.command, Machine: r.machine})
+	}
 	if err != nil {
 		return err
 	}
@@ -136,7 +147,11 @@ func (a *app) reconcile(ctx context.Context, r *run, args []string, opts reconci
 		return err
 	}
 	if len(decisions) == 0 {
-		_, err := fmt.Fprintln(a.Stdout, "Nothing to reconcile")
+		said := "Nothing to reconcile"
+		if slices.ContainsFunc(items, func(it driftItem) bool { return it.Quiet == "" || opts.all }) {
+			said = "Nothing decided"
+		}
+		_, err := fmt.Fprint(a.colors(a.Stdout), look.Rows("  ", look.Width, look.Row{State: look.Done, Name: said})[0]+"\n")
 		return err
 	}
 	return a.carryOut(ctx, r, decisions, opts.note)
@@ -256,54 +271,69 @@ func (a *app) listDrift(r *run, items []driftItem) error {
 }
 
 // askAbout asks, of each item that needs attention (every item, with
-// --all), what to do with it: every question before anything is done.
+// --all), what to do with it, one after another: every question before
+// anything is done. Stopping keeps what's decided so far.
 func (a *app) askAbout(ctx context.Context, r *run, items []driftItem, opts reconcileOptions) ([]decision, error) {
-	var decisions []decision
+	var asked []driftItem
+	var offered [][]choice
+	var qs []ask.Question
 	for _, it := range items {
 		if it.Quiet != "" && !opts.all {
 			continue
 		}
 		dr := r.drifters[it.Kind]
-		offered := dr.choices(it.Item)
-		answers := make([]string, 0, len(offered)+2)
-		for _, c := range offered {
-			answers = append(answers, c.label)
+		cs := dr.choices(it.Item)
+		answers := make([]look.Choice, 0, len(cs)+1)
+		for _, c := range cs {
+			answers = append(answers, look.Choice{Label: actionLabel(c), Does: c.label})
 		}
-		answers = append(answers, "leave it for now", "stop here")
-		question := describe(it, dr, r.now)
+		answers = append(answers, look.Choice{Label: "Skip", Does: "not now"})
+		q := ask.Question{About: look.Row{State: look.NeedsYou, Name: it.Name, Says: describe(it, dr, r.now)}, Answers: answers}
 		if sh, ok := dr.(shower); ok {
 			if more := sh.show(ctx, it.Item); more != "" {
-				question += "\n\n" + more
+				q.More = look.Output(strings.Split(more, "\n")...)
 			}
 		}
-		i, err := a.Choose(ctx, question, answers)
-		if errors.Is(err, ask.ErrCancelled) {
-			return nil, fmt.Errorf("%w: nothing was changed", ask.ErrCancelled)
+		asked, offered, qs = append(asked, it), append(offered, cs), append(qs, q)
+	}
+	lead := look.Head(look.Meta(r.command, r.machine, r.now.Format("Mon 2 Jan · 15:04"))...)
+	picked, err := a.Walk(ctx, lead, "Reconcile", qs)
+	switch {
+	case errors.Is(err, ask.ErrCancelled):
+		return nil, fmt.Errorf("%w: nothing was changed", ask.ErrCancelled)
+	case err != nil && !errors.Is(err, ask.ErrStopped):
+		return nil, err
+	}
+	var decisions []decision
+	for i, p := range picked {
+		if p < len(offered[i]) {
+			decisions = append(decisions, decision{item: asked[i], action: offered[i][p].action, shared: offered[i][p].shared})
 		}
-		if err != nil {
-			return nil, err
-		}
-		switch i {
-		case len(offered):
-			continue
-		case len(offered) + 1:
-			return decisions, nil
-		}
-		decisions = append(decisions, decision{item: it, action: offered[i].action, shared: offered[i].shared})
 	}
 	return decisions, nil
 }
 
-// describe says what an item is, for a question about it.
+// actionLabel is a choice's label: what it does, in a word; adopting for
+// every Mac said apart from adopting for this one.
+func actionLabel(c choice) string {
+	label := strings.ToUpper(c.action[:1]) + c.action[1:]
+	if c.action == adopt && c.shared {
+		label += " everywhere"
+	}
+	return label
+}
+
+// describe says what an item is, as its question's row says it: its kind,
+// what's wrong, and for how long.
 func describe(it driftItem, d drifter, now time.Time) string {
-	what := d.describe(it.Item)
+	says := []string{look.Muted(it.Kind), look.Orange(d.describe(it.Item))}
 	if it.Detail != "" {
-		what += " (" + it.Detail + ")"
+		says = append(says, look.Muted(it.Detail))
 	}
 	if !it.Since.IsZero() {
-		what += fmt.Sprintf(", for %s", age(now.Sub(it.Since)))
+		says = append(says, look.Muted(age(now.Sub(it.Since))))
 	}
-	return fmt.Sprintf("%s (%s): %s. What now?", it.Name, it.Kind, what)
+	return look.Says(says...)
 }
 
 // age says how long d is, roughly.
@@ -341,7 +371,13 @@ func (a *app) carryOut(ctx context.Context, r *run, decisions []decision, note s
 			waiting[kindName+":"+name] = true
 		}
 	}
-	c := startChanges(r, names)
+	steps := make([]event.Step, len(decisions))
+	doings := make(map[string]string, len(decisions))
+	for i, d := range decisions {
+		steps[i] = event.Step{Name: d.item.ID, Title: d.item.Name}
+		doings[d.item.ID] = map[string]string{adopt: "adopting", remove: "removing", install: "installing", undeclare: "undeclaring", snooze: "snoozing", revert: "putting back"}[d.action]
+	}
+	c := startChangesOf(r, steps, doings)
 	for _, d := range decisions {
 		c.step(ctx, d.item.ID, func(ctx context.Context) check.Result {
 			if waiting[d.item.ID] {

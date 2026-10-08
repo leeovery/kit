@@ -1,63 +1,99 @@
 package ask
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
+
+	"github.com/leeovery/kit/internal/look"
 )
 
-func press(c chooser, keys ...tea.KeyPressMsg) (chooser, tea.Cmd) {
+func press(m tea.Model, keys ...tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
-	var m tea.Model = c
 	for _, k := range keys {
 		m, cmd = m.Update(k)
 	}
-	return m.(chooser), cmd
+	return m, cmd
 }
+
+func view(m tea.Model) string { return ansi.Strip(m.View().Content) }
 
 var (
 	down  = tea.KeyPressMsg{Code: tea.KeyDown}
 	up    = tea.KeyPressMsg{Code: tea.KeyUp}
 	j     = tea.KeyPressMsg{Code: 'j', Text: "j"}
+	q     = tea.KeyPressMsg{Code: 'q', Text: "q"}
 	enter = tea.KeyPressMsg{Code: tea.KeyEnter}
 	esc   = tea.KeyPressMsg{Code: tea.KeyEscape}
 )
 
-func TestChooserMovesAndTakes(t *testing.T) {
-	c := newChooser("ffmpeg: what now?", []string{"declare it", "uninstall it", "leave it for now"})
-	c, cmd := press(c, down, j, down, up)
-	if c.cursor != 1 || cmd != nil {
-		t.Fatalf("after down, j, down (at the end), up: cursor %d, want 1", c.cursor)
-	}
-	c, _ = press(c, up, up)
-	if c.cursor != 0 {
-		t.Errorf("up past the top: cursor %d, want 0", c.cursor)
-	}
-	c, cmd = press(c, down, enter)
-	if !c.chosen || c.cursor != 1 || cmd == nil {
-		t.Errorf("enter: chosen %v, cursor %d, quitting %v; want the second taken", c.chosen, c.cursor, cmd != nil)
-	}
-	if got := c.View().Content; !strings.Contains(got, "ffmpeg: what now?") || !strings.Contains(got, "uninstall it") || strings.Contains(got, "leave it for now") {
-		t.Errorf("once taken, the view is %q, want the question and the answer alone", got)
+func question(name string) Question {
+	return Question{
+		About:   look.Row{State: look.NeedsYou, Name: name, Says: look.Says(look.Muted("cask"), look.Orange("installed, not declared"))},
+		Answers: []look.Choice{{Label: "Adopt", Does: "declare it"}, {Label: "Remove", Does: "uninstall it"}, {Label: "Skip", Does: "not now"}},
 	}
 }
 
-func TestChooserCancels(t *testing.T) {
-	for _, k := range []tea.KeyPressMsg{esc, {Code: 'q', Text: "q"}} {
-		c, cmd := press(newChooser("What now?", []string{"declare it"}), k)
-		if !c.cancelled || cmd == nil || !strings.Contains(c.View().Content, "cancelled") {
-			t.Errorf("%s: cancelled %v, quitting %v, view %q; want it cancelled", k, c.cancelled, cmd != nil, c.View().Content)
+// One question: its row, its answers under it, the cursor moving among them;
+// once answered, its screen empty, to go (Choose then writes the row with
+// the answer taken).
+func TestChooseMovesAndTakes(t *testing.T) {
+	m, cmd := press(newWalk("", []Question{question("zoom")}), down, j, down, up)
+	if w := m.(walk); w.cursor != 1 || cmd != nil {
+		t.Fatalf("after down, j, down (at the end), up: cursor %d, want 1", w.cursor)
+	}
+	want := "\n  ▲ zoom  cask · installed, not declared\n  │   Adopt  declare it\n  │ ❯ Remove  uninstall it\n  │   Skip  not now\n\n  ↑↓ choose · enter decide · esc cancel\n"
+	if got := view(m); got != want {
+		t.Errorf("view =\n%s\nwant\n%s", got, want)
+	}
+	m, cmd = press(m, enter)
+	if w := m.(walk); !slices.Equal(w.answers, []int{1}) || cmd == nil {
+		t.Errorf("enter: answers %v, quitting %v; want Remove taken", w.answers, cmd != nil)
+	}
+	if got := view(m); got != "\n" {
+		t.Errorf("once taken, the view is %q, want it empty: its screen goes", got)
+	}
+}
+
+func TestChooseCancels(t *testing.T) {
+	for _, k := range []tea.Msg{esc, q} {
+		m, cmd := press(newWalk("", []Question{question("zoom")}), k)
+		if !m.(walk).cancelled || cmd == nil || view(m) != "\n" {
+			t.Errorf("%v: view %q; want it cancelled", k, view(m))
 		}
 	}
 }
 
-func TestChooserShowsTheOptions(t *testing.T) {
-	c, _ := press(newChooser("ffmpeg: what now?", []string{"declare it", "uninstall it"}), down)
-	got := c.View().Content
-	for _, want := range []string{"ffmpeg: what now?", "  declare it", "› uninstall it", "enter to take"} {
-		if !strings.Contains(got, want) {
-			t.Errorf("view %q lacks %q", got, want)
-		}
+// Several questions: the header counting them, those answered with their
+// answer, the one asked with its answers, those to come waiting; q stops,
+// keeping what's answered; nothing stays on screen.
+func TestWalk(t *testing.T) {
+	w := newWalk("Reconcile", []Question{question("ffmpeg"), question("zoom"), question("wget")})
+	w.lead = []string{"  the heading"}
+	m, _ := press(w, enter)
+	want := "\n  the heading\n\n  RECONCILE  2 of 3\n  ● ffmpeg  adopt\n  ▲ zoom  cask · installed, not declared\n  │ ❯ Adopt  declare it\n  │   Remove  uninstall it\n  │   Skip  not now\n  ○ wget  cask · installed, not declared\n\n  ↑↓ choose · enter decide · q stop · esc cancel\n"
+	if got := view(m); got != want {
+		t.Errorf("view =\n%s\nwant\n%s", got, want)
+	}
+	m, cmd := press(m, down, enter, q)
+	if w := m.(walk); !w.stopped || !slices.Equal(w.answers, []int{0, 1}) || cmd == nil || view(m) != "\n  the heading\n\n" {
+		t.Errorf("stopped: %+v, view %q", w, view(m))
+	}
+}
+
+// A secret is typed or pasted, a dot a character, never shown.
+func TestSecretField(t *testing.T) {
+	m, _ := press(field{about: look.Row{State: look.NeedsYou, Name: "NPM_TOKEN", Says: look.Orange("needs its value")}, width: 80},
+		tea.KeyPressMsg{Code: 'a', Text: "a"}, tea.PasteMsg{Content: "bcd\n"}, tea.KeyPressMsg{Code: tea.KeyBackspace})
+	got := view(m)
+	if want := "\n  ▲ NPM_TOKEN  needs its value\n  │ ❯ ••• \n\n  enter done · esc cancel\n"; got != want || strings.Contains(got, "abc") {
+		t.Errorf("view =\n%q\nwant\n%q", got, want)
+	}
+	m, _ = press(m, enter)
+	if f := m.(field); string(f.typed) != "abc" || !f.done || view(m) != "\n" {
+		t.Errorf("entered: %q, done %v, view %q", string(f.typed), f.done, view(m))
 	}
 }

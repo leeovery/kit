@@ -14,6 +14,7 @@ import (
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/kind/secret"
+	"github.com/leeovery/kit/internal/look"
 )
 
 // secretKind names the secrets' kind, and its command.
@@ -77,7 +78,7 @@ func (a *app) addSecret(ctx context.Context, r *run, names []string, opts addOpt
 		// As a value typed has no newline, nor does one passed in.
 		value = strings.TrimRight(string(data), "\r\n")
 	case a.pretty(a.Stdout):
-		typed, err := a.ReadSecret(name + ", typed (it isn't shown): ")
+		typed, err := a.ReadSecret(ctx, look.Row{State: look.NeedsYou, Name: name, Says: look.Orange("needs its value")})
 		if errors.Is(err, ask.ErrCancelled) {
 			return fmt.Errorf("%w: nothing was stored or declared", ask.ErrCancelled)
 		}
@@ -222,7 +223,10 @@ func (a *app) removeSecrets(ctx context.Context, r *run, names []string, shared 
 	case value.delete && value.keep:
 		return errors.New("--delete-value or --keep-value, not both")
 	case !value.delete && !value.keep && a.pretty(a.Stdout):
-		i, err := a.Choose(ctx, "Delete their values from 1Password too?", []string{"keep them in 1Password", "delete them from 1Password"})
+		i, err := a.Choose(ctx, ask.Question{
+			About:   look.Row{State: look.NeedsYou, Name: strings.Join(names, ", "), Says: look.Orange("delete their values from 1Password too?")},
+			Answers: []look.Choice{{Label: "Keep", Does: "keep them in 1Password"}, {Label: "Delete", Does: "delete them from 1Password"}},
+		})
 		if errors.Is(err, ask.ErrCancelled) {
 			return fmt.Errorf("%w: nothing was changed", ask.ErrCancelled)
 		}

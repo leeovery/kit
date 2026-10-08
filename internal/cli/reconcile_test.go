@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/leeovery/kit/internal/ask"
 )
 
 var driftFile = filepath.Join(".local", "state", "kit", "drift.json")
@@ -139,6 +141,9 @@ func answers(t *testing.T, answers map[string]string) func(string, []string) (in
 	return func(question string, options []string) (int, error) {
 		for key, answer := range answers {
 			if strings.Contains(question, key) {
+				if answer == "stop" {
+					return 0, ask.ErrStopped
+				}
 				if i := slices.Index(options, answer); i >= 0 {
 					return i, nil
 				}
@@ -154,9 +159,9 @@ func TestReconcileAtATerminalAsksFirstThenDoesItAll(t *testing.T) {
 	w := laptopWorld(t)
 	w.terminal = true
 	w.choose = answers(t, map[string]string{
-		"ffmpeg (brew)":  "declare it, for this Mac",
-		"node@20 (brew)": "uninstall it",
-		"firefox (cask)": "leave it for now",
+		"ffmpeg  brew":  "Adopt",
+		"node@20  brew": "Remove",
+		"firefox  cask": "Skip",
 	})
 	w.fake.On("brew", "uninstall", "--formula", "node@20")
 	w.expectSync([]string{"laptop/declarations"}, "kit reconcile (laptop): adopt brew:ffmpeg, remove brew:node@20")
@@ -165,9 +170,9 @@ func TestReconcileAtATerminalAsksFirstThenDoesItAll(t *testing.T) {
 		t.Fatalf("kit reconcile exit %d: %s", code, errOut)
 	}
 	wantAsked := []string{
-		"ffmpeg (brew): installed, not declared, for 2 days. What now?",
-		"node@20 (brew): installed for something since removed, needed by nothing, for 2 days. What now?",
-		"firefox (cask): installed, not declared, for 2 days. What now?",
+		"ffmpeg  brew · installed, not declared · 2 days",
+		"node@20  brew · installed for something since removed, needed by nothing · 2 days",
+		"firefox  cask · installed, not declared · 2 days",
 	}
 	if !slices.Equal(w.asked, wantAsked) {
 		t.Errorf("asked\n%s\nwant\n%s", strings.Join(w.asked, "\n"), strings.Join(wantAsked, "\n"))
@@ -180,9 +185,9 @@ func TestReconcileAtATerminalAsksFirstThenDoesItAll(t *testing.T) {
 func TestReconcileStoppedEarlyDoesNothing(t *testing.T) {
 	w := laptopWorld(t)
 	w.terminal = true
-	w.choose = answers(t, map[string]string{"ffmpeg (brew)": "stop here"})
+	w.choose = answers(t, map[string]string{"ffmpeg  brew": "stop"})
 	out, _, code := w.run(t, "reconcile")
-	if out != "Nothing to reconcile\n" || code != 0 {
+	if !strings.HasSuffix(out, "  ● Nothing decided\n") || code != 0 {
 		t.Errorf("kit reconcile printed %q, exit %d", out, code)
 	}
 }

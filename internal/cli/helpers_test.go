@@ -12,8 +12,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
+
+	"github.com/leeovery/kit/internal/ask"
 	"github.com/leeovery/kit/internal/cli"
 	"github.com/leeovery/kit/internal/config"
+	"github.com/leeovery/kit/internal/look"
 	"github.com/leeovery/kit/internal/runner"
 	"github.com/leeovery/kit/internal/runner/runnertest"
 )
@@ -105,19 +109,25 @@ func (w *world) run(t *testing.T, args ...string) (stdout, stderr string, status
 			w.path, w.childEnv = path, env
 			return w.fake
 		},
-		ReadSecret: func(string) (string, error) { return w.typed, nil },
-		Scratch:    filepath.Join(w.home, "Scratch"),
-		SudoLocal:  filepath.Join(w.home, "etc", "sudo_local"),
-		TCC:        filepath.Join(w.home, "TCC.db"),
-		UID:        501,
-		Choose: func(_ context.Context, question string, options []string) (int, error) {
-			w.asked = append(w.asked, question)
-			if w.choose == nil {
-				t.Errorf("kit asked %q, which this test doesn't answer", question)
-				return 0, errors.New("unanswered")
-			}
-			return w.choose(question, options)
+		Scratch:   filepath.Join(w.home, "Scratch"),
+		SudoLocal: filepath.Join(w.home, "etc", "sudo_local"),
+		TCC:       filepath.Join(w.home, "TCC.db"),
+		UID:       501,
+		Choose: func(_ context.Context, q ask.Question) (int, error) {
+			return w.answer(t, q)
 		},
+		Walk: func(_ context.Context, _ []string, _ string, qs []ask.Question) ([]int, error) {
+			var answers []int
+			for _, q := range qs {
+				i, err := w.answer(t, q)
+				if err != nil {
+					return answers, err
+				}
+				answers = append(answers, i)
+			}
+			return answers, nil
+		},
+		ReadSecret: func(context.Context, look.Row) (string, error) { return w.typed, nil },
 	})
 	status = cli.Execute(t.Context(), root, args)
 	return out.String(), errOut.String(), status
@@ -190,4 +200,20 @@ func (w *world) readSection(t *testing.T, scope, header string) string {
 		return text + "\n"
 	}
 	return ""
+}
+
+// answer answers a question kit asks, as the test's choose says, by its
+// plain words and its answers' labels.
+func (w *world) answer(t *testing.T, q ask.Question) (int, error) {
+	t.Helper()
+	text := q.Text()
+	if len(q.More) > 0 {
+		text += "\n\n" + ansi.Strip(strings.Join(q.More, "\n"))
+	}
+	w.asked = append(w.asked, text)
+	if w.choose == nil {
+		t.Errorf("kit asked %q, which this test doesn't answer", text)
+		return 0, errors.New("unanswered")
+	}
+	return w.choose(text, q.Labels())
 }

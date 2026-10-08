@@ -132,23 +132,23 @@ func TestReconcileAtATerminalOffersAFilesChoices(t *testing.T) {
 	w.terminal = true
 	var offered []string
 	w.choose = func(question string, options []string) (int, error) {
-		if strings.HasPrefix(question, "~/.differs (file): a different file where its link belongs") {
+		if strings.HasPrefix(question, "~/.differs  file · a different file where its link belongs") {
 			offered = options
 			for i, o := range options {
-				if o == "put kit-config's back: the Mac's copy to the Bin" {
+				if o == "Revert" {
 					return i, nil
 				}
 			}
 		}
 		for i, o := range options {
-			if o == "leave it for now" {
+			if o == "Skip" {
 				return i, nil
 			}
 		}
 		return 0, nil
 	}
 	w.run(t, "reconcile", "--all", "file")
-	want := []string{"keep the Mac's copy: into kit-config, then linked", "put kit-config's back: the Mac's copy to the Bin", "snooze it for 7 days", "leave it for now", "stop here"}
+	want := []string{"Adopt", "Revert", "Snooze", "Skip"}
 	if strings.Join(offered, "|") != strings.Join(want, "|") {
 		t.Errorf("offered %q, want %q", offered, want)
 	}

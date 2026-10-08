@@ -28,17 +28,25 @@ type changes struct {
 	results []check.Result
 	// files are the config's files changed, to commit.
 	files []string
+	// doings say what each step does as it runs, when the command doesn't.
+	doings map[string]string
 }
 
 // startChanges starts a run of r's command over names, and the step that
 // syncs the config.
 func startChanges(r *run, names []string) *changes {
-	steps := make([]event.Step, 0, len(names)+1)
+	steps := make([]event.Step, 0, len(names))
 	for _, name := range names {
 		steps = append(steps, event.Step{Name: name, Title: name})
 	}
-	steps = append(steps, event.Step{Name: syncStep, Title: syncStep})
-	c := &changes{run: r, started: r.now}
+	return startChangesOf(r, steps, nil)
+}
+
+// startChangesOf starts a run of r's command over steps, each doing what
+// doings says as it runs, and the step that syncs the config.
+func startChangesOf(r *run, steps []event.Step, doings map[string]string) *changes {
+	steps = append(slices.Clone(steps), event.Step{Name: syncStep, Title: syncStep})
+	c := &changes{run: r, started: time.Now(), doings: doings}
 	r.sink.Emit(event.RunStarted{Time: r.now, Command: r.command, Machine: r.machine, Version: r.version, Steps: steps})
 	return c
 }
@@ -57,6 +65,9 @@ func (c *changes) step(ctx context.Context, name string, do func(ctx context.Con
 // adding or removing, as the command does, committing the config's
 // changes; else changing.
 func (c *changes) doing(name string) string {
+	if doing, ok := c.doings[name]; ok {
+		return doing
+	}
 	if name == syncStep {
 		return "committing"
 	}
