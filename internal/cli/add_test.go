@@ -1,6 +1,7 @@
 package cli_test
 
 import (
+	"github.com/charmbracelet/x/ansi"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -210,11 +211,16 @@ func TestAddAtATerminalAsksForThePasswordFirst(t *testing.T) {
 	w.fake.On("brew", "install", "--cask", "zoom")
 	w.expectSync([]string{"laptop/declarations"}, "kit cask add zoom (laptop)")
 
-	if _, errOut, code := w.run(t, "cask", "add", "zoom"); code != 0 {
+	out, errOut, code := w.run(t, "cask", "add", "zoom")
+	if code != 0 {
 		t.Fatalf("kit exit add %d: %s", code, errOut)
 	}
 	calls := w.fake.Calls()
 	if sudo, install := slices.Index(calls, askedFor), slices.Index(calls, "brew install --cask zoom"); sudo < 0 || install < sudo {
 		t.Errorf("ran %q, want sudo -v asked before the install", calls)
+	}
+	// While it runs, its row says what it's doing: the command's verb.
+	if !strings.Contains(ansi.Strip(out), "◐ zoom  adding") {
+		t.Errorf("kit cask add zoom printed\n%s\nwant zoom's row adding as it runs", ansi.Strip(out))
 	}
 }
