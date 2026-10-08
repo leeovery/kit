@@ -49,13 +49,6 @@ func (o *ordered) finish(e event.StepFinished) []event.StepFinished {
 	return ready
 }
 
-// quietLabels say why items don't need attention yet.
-var quietLabels = map[string]string{
-	"new":       "new, under a day",
-	"snoozed":   "snoozed",
-	"temporary": "temporary",
-}
-
 // itemGroup is a step's items of one state, quiet for one reason or loud,
 // and with one action or none.
 type itemGroup struct {

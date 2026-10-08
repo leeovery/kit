@@ -79,10 +79,6 @@ type Pretty struct {
 	animate bool
 	start   event.RunStarted
 	whole   bool
-	// home is whether the face is bare kit's while its checks run: the
-	// wordmark with the Mac and the time, then the loader, and nothing more,
-	// as bare kit's view follows.
-	home    bool
 	results map[string]event.StepFinished
 	order   ordered
 	running []runningStep
@@ -143,14 +139,6 @@ func (p *Pretty) ShowTabProgress() *Pretty {
 	return p
 }
 
-// homeLoader is bare kit's face while its checks run: the wordmark at once,
-// then the loader, which its view replaces.
-func homeLoader(w io.Writer, width int, animate bool) *Pretty {
-	p := NewPretty(w, width, animate)
-	p.home = true
-	return p
-}
-
 func (p *Pretty) Emit(e event.Event) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -195,7 +183,6 @@ func (p *Pretty) Emit(e event.Event) {
 		p.stopSpinner()
 		var last []string
 		switch {
-		case p.home:
 		case p.byArea() && p.applying():
 			last = p.applied(e)
 		case p.byArea():
@@ -214,7 +201,7 @@ func (p *Pretty) open(command, machine string, at time.Time, only []string) {
 		return
 	}
 	p.opened = true
-	p.whole = p.home || slices.Contains(wholeMac, command) && len(only) == 0
+	p.whole = slices.Contains(wholeMac, command) && len(only) == 0
 	heading := []string{""}
 	if p.whole && !p.underHome {
 		heading = append(append(heading, look.Head(look.Meta(command, machine, when(at))...)...), "")
@@ -770,4 +757,28 @@ func doing(running []runningStep) string {
 		parts[i] = k + " " + strings.Join(titles[k], ", ")
 	}
 	return strings.Join(parts, " · ")
+}
+
+// driftStates say what a drift item is, briefly.
+var driftStates = map[string]string{
+	"extra":             "not declared",
+	"missing":           "missing",
+	"unused-dependency": "unused",
+	"changed":           "changed",
+	"diverged":          "diverged",
+	"dead":              "dead link",
+	"edited":            "not committed",
+	"added":             "new, not committed",
+	"deleted":           "deleted, not committed",
+}
+
+// since says how long d is, roughly, in days.
+func since(d time.Duration) string {
+	switch days := int(d.Hours() / 24); {
+	case days >= 2:
+		return fmt.Sprintf("%d days", days)
+	case days == 1:
+		return "a day"
+	}
+	return "under a day"
 }

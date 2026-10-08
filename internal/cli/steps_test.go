@@ -32,16 +32,16 @@ func TestAStepOfYourOwn(t *testing.T) {
 	if code != 1 || !strings.Contains(out, "tool attention not installed\n") || !strings.Contains(out, "Installs the tool") || !strings.Contains(out, "kit apply tool") {
 		t.Errorf("kit status tool printed\n%s exit %d", out, code)
 	}
-	if out, _, _ := w.run(t); !strings.Contains(out, "Steps   tool: not installed  → kit apply") {
-		t.Errorf("bare kit printed\n%s", out)
+	if out, _, _ := w.run(t, "status"); !strings.Contains(out, "tool attention not installed\n") {
+		t.Errorf("kit status printed\n%s", out)
 	}
 	w.fake.On(run, "apply").Prints("Downloading\nInstalled\n")
 	out, _, code = w.run(t, "apply", "tool")
 	if code != 0 || !strings.Contains(out, "tool ok installed, 2.1\n") {
 		t.Errorf("kit apply tool printed\n%s exit %d", out, code)
 	}
-	if out, _, _ := w.run(t); !strings.Contains(out, "Steps   1 done") {
-		t.Errorf("after applying, bare kit printed\n%s", out)
+	if out, _, _ := w.run(t, "status"); !strings.Contains(out, "tool ok installed, 2.1\n") {
+		t.Errorf("after applying, kit status printed\n%s", out)
 	}
 	if out, _, _ := w.run(t, "apply", "tool"); strings.Count(strings.Join(w.fake.Calls(), "\n"), run+" apply") != 1 {
 		t.Errorf("a step that's done was applied again:\n%s", out)

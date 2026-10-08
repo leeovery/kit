@@ -148,7 +148,7 @@ terminal); a value given in full, outside the items' sections, is left where it 
 optionally `--` and a command saying whether it's done (exit 0: done), as in `tool "Install the
 tool from its site" -- test -d /Applications/Tool.app`. One with no command is done once marked
 on this Mac (`kit manual done <name>`, `--undo` to unmark). Those not done are items of the `manual`
-step, in the Manual area, saying what to do, so bare `kit` shows them; what kit can check
+step, in the Manual area, saying what to do, so `kit status` shows them; what kit can check
 itself stays a check that says what to do. `kit check|hourly|nightly add <name> -- <command>`
 and `kit manual add <name> "<what to do>" [-- <command>]` declare checks, jobs and steps by
 hand (a check, and a step's command, run once as it's added, to say how it stands); `kit
@@ -168,7 +168,7 @@ kit shows; 1 that it isn't, so it's an item to run; anything else, or a minute p
 the check couldn't tell. apply, given 15 minutes, runs only when the check says not done, and
 is believed only when the check then passes; when it fails, the last line it printed (standard
 error first) says why. Everything both print is in the run's log. Each is a step of its own in
-the Steps area, its name its title; bare `kit` says how many are done, or which aren't and
+the Steps area, its name its title; `kit status` says how each stands, and what isn't done says
 `kit apply`. A line that doesn't read, a `--needs` naming no step here, or an `--after` naming
 neither a step nor a kind, makes its step fail, saying where; a name one of kit's steps has is
 refused. `kit step add <name> "<what it does>"` declares one and writes its `run` from a
@@ -212,7 +212,7 @@ A run that's stopped (an interrupt) fails the steps it hadn't started.
 Built:
 
 ```
-kit                          What needs attention, at a glance: a line an area, and what to run
+kit                          At a terminal, kit's menu, at once: what to run next (else help)
 
 This Mac:
 kit status [step...]         How this Mac stands against the config: what needs attention

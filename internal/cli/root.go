@@ -128,11 +128,10 @@ func NewRootCommand(deps Deps) *cobra.Command {
 		CompletionOptions: cobra.CompletionOptions{DisableDefaultCmd: true},
 		Long: `kit sets a Mac up from a config repository, and keeps it that way.
 
-Run alone, it shows what needs attention at a glance, a line an area (backups,
-the Mac, drift from the config, the config repository, your own checks), and
-what to run about it. kit status is the full report.`,
+Run alone at a terminal, it's kit's menu: what to run next, at once. kit
+status is the report, every check.`,
 		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error { return a.glance(cmd) },
+		RunE: func(cmd *cobra.Command, _ []string) error { return a.home(cmd) },
 	}
 	root.SuggestionsMinimumDistance = 2
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return usageError{err} })

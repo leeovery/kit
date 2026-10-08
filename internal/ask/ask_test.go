@@ -195,12 +195,12 @@ func TestShow(t *testing.T) {
 		t.Fatalf("Choose = %d, %v; want Remove", i, err)
 	}
 	s := out.String()
-	for _, want := range []string{hideCursor, "\x1b[6A", "\x1b[J", "  ● zoom  remove\r\n", showCursor} {
+	for _, want := range []string{hideCursor, "\x1b[6A", "\x1b[2K", "  ● zoom  remove\r\n", showCursor} {
 		if !strings.Contains(ansi.Strip(s), ansi.Strip(want)) && !strings.Contains(s, want) {
 			t.Errorf("drew %q; want it to hold %q", s, want)
 		}
 	}
-	if strings.LastIndex(s, "remove") < strings.LastIndex(s, "\x1b[J") {
+	if strings.LastIndex(s, "remove") < strings.LastIndex(s, "\x1b[2K") {
 		t.Error("the answer was written before the question was cleared")
 	}
 }

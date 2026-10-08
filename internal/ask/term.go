@@ -252,16 +252,28 @@ func (d *drawer) draw(lines []string) {
 	d.write(b.String())
 }
 
-// clear takes the lines drawn down, leaving the cursor where the first was.
+// clear takes the lines drawn down, a line at a time, leaving the cursor
+// where the first was: a terminal can take erasing from the top of the
+// screen down for clearing it, and keep what was there (tmux does).
 func (d *drawer) clear() {
 	if d.lines == 0 {
 		return
 	}
-	s := "\r"
+	var b strings.Builder
+	b.WriteString("\r")
 	if d.lines > 1 {
-		s += fmt.Sprintf("\x1b[%dA", d.lines-1)
+		fmt.Fprintf(&b, "\x1b[%dA", d.lines-1)
 	}
-	d.write(s + "\x1b[J")
+	for i := range d.lines {
+		if i > 0 {
+			b.WriteString("\x1b[B")
+		}
+		b.WriteString("\x1b[2K")
+	}
+	if d.lines > 1 {
+		fmt.Fprintf(&b, "\x1b[%dA", d.lines-1)
+	}
+	d.write(b.String())
 	d.lines = 0
 }
 

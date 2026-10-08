@@ -12,6 +12,7 @@ import (
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/look"
+	"github.com/leeovery/kit/internal/render"
 )
 
 func newApplyCommand(a *app) *cobra.Command {
@@ -138,4 +139,21 @@ func (a *app) reconcileNow(ctx context.Context) error {
 		return a.Become([]string{"reconcile"})
 	}
 	return nil
+}
+
+// needs is what a run found differing from the config: the things kit
+// reconcile decides on, by name, and those of them kit apply sees to.
+func needs(report engine.Report) (decide, missing []string) {
+	for _, s := range report.Steps {
+		for _, it := range report.Results[s.Name].Items {
+			if it.Quiet != "" || !render.IsDrift(it) {
+				continue
+			}
+			decide = append(decide, it.Name)
+			if it.Action != "" || it.State == "missing" {
+				missing = append(missing, it.Name)
+			}
+		}
+	}
+	return decide, missing
 }

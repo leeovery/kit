@@ -69,8 +69,8 @@ func TestAStepByHandKitChecksItself(t *testing.T) {
 	if code != 0 || !strings.Contains(out, "tool ok declared in laptop; not done yet") {
 		t.Errorf("kit manual add printed\n%s exit %d", out, code)
 	}
-	out, _, _ = w.run(t)
-	if !strings.Contains(out, "Manual  Install the tool from its site  → kit status") {
-		t.Errorf("bare kit printed\n%s", out)
+	out, _, _ = w.run(t, "status")
+	if !strings.Contains(out, "manual attention 0 of 1 done\nmanual manual Install the tool from its site\n") {
+		t.Errorf("kit status printed\n%s", out)
 	}
 }
