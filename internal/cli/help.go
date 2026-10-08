@@ -183,11 +183,41 @@ func (e usageError) Unwrap() error { return e.error }
 // unknownCommand is cobra's error for a command it doesn't know.
 var unknownCommand = regexp.MustCompile(`^unknown command "([^"]+)" for "([^"]+)"`)
 
+// startingWith are the commands under parent, the path to it in kit's
+// command line, whose names start with typed, by name.
+func startingWith(root *cobra.Command, parent, typed string) []string {
+	under, _, err := root.Find(strings.Fields(parent)[1:])
+	if err != nil {
+		return nil
+	}
+	var names []string
+	for _, c := range under.Commands() {
+		if c.IsAvailableCommand() && strings.HasPrefix(c.Name(), typed) {
+			names = append(names, c.Name())
+		}
+	}
+	slices.Sort(names)
+	return names
+}
+
 // show shows err, from cmd run with args: at a terminal, a row of its own,
 // what to do about it on the line under it; else "kit:" and the error. An
-// error that only needs attention shows as such.
+// error that only needs attention shows as such. A command line naming a
+// command by a start of its name that others' names start with too lists
+// them.
 func (e *errOut) show(cmd *cobra.Command, args []string, err error, needsYou bool) {
+	m := unknownCommand.FindStringSubmatch(err.Error())
+	var could []string
+	if m != nil {
+		for _, name := range startingWith(cmd.Root(), m[2], m[1]) {
+			could = append(could, m[2]+" "+name)
+		}
+	}
 	if !e.a.pretty(e.Writer) {
+		if len(could) > 1 {
+			_, _ = fmt.Fprintf(e.Writer, "kit: %s %s could be %s\n", m[2], m[1], strings.Join(could, ", "))
+			return
+		}
 		_, _ = fmt.Fprintf(e.Writer, "kit: %v\n", err)
 		return
 	}
@@ -201,7 +231,14 @@ func (e *errOut) show(cmd *cobra.Command, args []string, err error, needsYou boo
 	}
 	text := err.Error()
 	row := look.Row{State: state, Name: cmd.CommandPath()}
-	if m := unknownCommand.FindStringSubmatch(text); m != nil {
+	if len(could) > 1 {
+		row.Name, row.Says = m[2]+" "+m[1], says("more than one command starts so")
+		parts := make([]string, len(could))
+		for i, c := range could {
+			parts[i] = look.Cmd(c)
+		}
+		row.Under = []string{look.Todo(parts...)}
+	} else if m != nil {
 		row.Name, row.Says = m[2]+" "+m[1], says("no such command")
 		if s := cmd.Root().SuggestionsFor(m[1]); len(s) > 0 {
 			fixed := slices.Clone(args)

@@ -110,8 +110,10 @@ type app struct {
 	underHome bool
 }
 
-// NewRootCommand builds the kit command tree.
+// NewRootCommand builds the kit command tree. A command is known by the
+// start of its name, when no other starts so: kit rec is kit reconcile.
 func NewRootCommand(deps Deps) *cobra.Command {
+	cobra.EnablePrefixMatching = true
 	a := &app{Deps: deps}
 	root := &cobra.Command{
 		Use:     "kit",

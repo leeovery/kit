@@ -120,3 +120,27 @@ func TestUnderTheHomeNoSecondWordmark(t *testing.T) {
 		t.Error("kit status, from the shell: want the wordmark")
 	}
 }
+
+// A command is known by the start of its name when no other's starts so, at
+// every level; when others' do, kit says which, and runs none.
+func TestCommandsByTheStartOfTheirName(t *testing.T) {
+	w := laptopWorld(t)
+	full, fullErr, fullCode := w.run(t, "reconcile")
+	short, shortErr, shortCode := w.run(t, "rec")
+	if short != full || shortErr != fullErr || shortCode != fullCode {
+		t.Errorf("kit rec printed %q, %q, exit %d; want what kit reconcile does: %q, %q, exit %d", short, shortErr, shortCode, full, fullErr, fullCode)
+	}
+	if _, errOut, code := w.run(t, "s"); errOut != "kit: kit s could be kit secret, kit spotlight-exclusion, kit status, kit step\n" || code != 2 {
+		t.Errorf("kit s printed %q, exit %d", errOut, code)
+	}
+	// Under a command, one that's not known shows that command's help, its
+	// own commands listed.
+	if out, errOut, _ := w.run(t, "claude-mcp", "o"); errOut != "" || !strings.Contains(out, "\n  off ") || !strings.Contains(out, "\n  on ") {
+		t.Errorf("kit claude-mcp o printed %q, %q; want claude-mcp's help", out, errOut)
+	}
+	w.terminal = true
+	_, errOut, code := w.run(t, "s")
+	if got := ansi.Strip(errOut); got != "\n  ✗ kit s  more than one command starts so\n  │ → kit secret · kit spotlight-exclusion · kit status · kit step\n" || code != 2 {
+		t.Errorf("at a terminal, kit s printed\n%s", got)
+	}
+}

@@ -129,9 +129,9 @@ func TestAddThatCantInstallDeclaresNothing(t *testing.T) {
 }
 
 func TestAddAnUnknownKind(t *testing.T) {
-	_, errOut, code := laptopWorld(t).run(t, "app", "add", "Xcode")
-	if !strings.HasPrefix(errOut, `kit: unknown command "app" for "kit"`) || code != 2 {
-		t.Errorf("kit app add printed %q, exit %d", errOut, code)
+	_, errOut, code := laptopWorld(t).run(t, "appstore", "add", "Xcode")
+	if !strings.HasPrefix(errOut, `kit: unknown command "appstore" for "kit"`) || code != 2 {
+		t.Errorf("kit appstore add printed %q, exit %d", errOut, code)
 	}
 }
 
