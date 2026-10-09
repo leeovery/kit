@@ -50,7 +50,8 @@ func TestBootFace(t *testing.T) {
 	at := time.Date(2026, 10, 8, 18, 2, 0, 0, time.UTC)
 	now := at
 	f := render.NewBootFace(ask.Terminal{Out: &bytes.Buffer{}}, true, func() time.Time { return now }, nil)
-	f.Show(bootSteps)
+	// Signing in runs alone, before the boot order's planned.
+	f.Show(bootSteps[:1])
 	var screens strings.Builder
 	picked := make(chan string, 1)
 	go func() {
@@ -66,6 +67,7 @@ func TestBootFace(t *testing.T) {
 		t.Fatalf("picked %q", key)
 	}
 	f.Emit(event.StepFinished{Time: now, Step: "github", Result: check.Result{State: check.OK, Summary: "someone · kit-config has laptop and studio"}})
+	f.Show(bootSteps)
 	chosen := make(chan int)
 	go func() {
 		i, _ := f.Choose(context.Background(), "mac", "which of your Macs is this?", []look.Choice{{Label: "laptop", Does: "MacBook, the primary"}, {Label: "studio"}})

@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/leeovery/kit/internal/ask"
+	"github.com/leeovery/kit/internal/boot"
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/look"
@@ -345,7 +346,7 @@ func (f *BootFace) Close() error {
 type area struct {
 	name  string
 	steps []event.Step
-	// order is whether it's the boot order: the last area, a row a step.
+	// order is whether it's the boot order, a row a step.
 	order bool
 }
 
@@ -355,12 +356,9 @@ func (f *BootFace) areas() []area {
 	var out []area
 	for _, s := range f.steps {
 		if len(out) == 0 || out[len(out)-1].name != s.Area {
-			out = append(out, area{name: s.Area})
+			out = append(out, area{name: s.Area, order: s.Area == boot.AreaBoot})
 		}
 		out[len(out)-1].steps = append(out[len(out)-1].steps, s)
-	}
-	if len(out) > 0 {
-		out[len(out)-1].order = true
 	}
 	for i, a := range out {
 		for _, s := range a.steps {
@@ -459,7 +457,7 @@ func (f *BootFace) blocks(width int, live bool) []block {
 	b := f.look.At(f.frame)
 	var out []block
 	for i, a := range f.areas() {
-		heading := []string{b.Header(cmp.Or(a.name, "Boot order"))}
+		heading := []string{b.Header(a.name)}
 		if i > 0 {
 			heading = append([]string{""}, heading...)
 		}
@@ -699,10 +697,9 @@ func (f *BootFace) foot(width int, live bool) []string {
 	b := f.look
 	var out []string
 	if f.working && len(f.steps) > 0 {
-		last := f.steps[len(f.steps)-1].Area
 		total, done := 0, 0
 		for _, s := range f.steps {
-			if s.Area != last {
+			if s.Area != boot.AreaBoot {
 				continue
 			}
 			total++
@@ -710,8 +707,10 @@ func (f *BootFace) foot(width int, live bool) []string {
 				done++
 			}
 		}
-		line := "  " + b.Bar(done, total) + "  " + b.Says(b.Full(fmt.Sprintf("%d of %d", done, total)), b.Mid(clock(f.now().Sub(f.began))))
-		out = append(out, "", look.Cut(line, width))
+		if total > 0 {
+			line := "  " + b.Bar(done, total) + "  " + b.Says(b.Full(fmt.Sprintf("%d of %d", done, total)), b.Mid(clock(f.now().Sub(f.began))))
+			out = append(out, "", look.Cut(line, width))
+		}
 	}
 	if f.note != "" {
 		out = append(out, "", "  "+b.Todo(f.note))
