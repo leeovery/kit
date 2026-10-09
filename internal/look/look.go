@@ -382,6 +382,17 @@ func Squeeze(s string, n int) string {
 // Cut cuts a line to w cells, an ellipsis ending it when it's cut.
 func Cut(s string, w int) string { return ansi.Truncate(s, w, "…") }
 
+// Colours are kit's colours, as the boot's arrival in the terminal turns
+// its noise from amber into them: pink, a purple, a blue, cyan and orange.
+var Colours = []color.Color{pink, lipgloss.Color("#B57BFF"), lipgloss.Color("#5B8CFF"), cyan, orange}
+
+// Gradient is the colour t along kit's gradient, from pink (0) to orange
+// (1).
+func Gradient(t float64) color.Color { return gradient(t) }
+
+// Paint is text in the colour c.
+func Paint(c color.Color, text string) string { return fg(c).Render(text) }
+
 // gradient is the colour t along kit's gradient, from pink (0) to orange
 // (1).
 func gradient(t float64) color.Color {

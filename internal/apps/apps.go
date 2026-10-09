@@ -52,11 +52,33 @@ type PasswordManager struct {
 	// Cask is the Homebrew cask that installs it, and Bundle the app it
 	// puts in the Applications folder.
 	Cask, Bundle string
+	// CLI is the cask that installs its command-line tool, from whichever
+	// tap the config declares it, and Program the tool, which kit reads
+	// secrets through.
+	CLI, Program string
+	// SignIn is what to do on a new Mac for the tool to answer; after a line
+	// break, the setting to turn on.
+	SignIn string
 }
 
 // PasswordManagers are the password managers kit knows, by name.
 var PasswordManagers = map[string]PasswordManager{
-	"1password": {Name: "1password", Title: "1Password", Cask: "1password", Bundle: "1Password.app"},
+	"1password": {
+		Name: "1password", Title: "1Password", Cask: "1password", Bundle: "1Password.app", CLI: "1password-cli", Program: "op",
+		SignIn: "sign in with your phone's 1Password, then turn on\nSettings › Developer › Integrate with 1Password CLI",
+	},
+}
+
+// CLICask is the cask that installs the password manager's tool: as the
+// casks declared name it, from a tap or not, so the config's own install
+// is the one there; its own name, when they don't.
+func (pm PasswordManager) CLICask(declared []string) string {
+	for _, cask := range declared {
+		if cask == pm.CLI || strings.HasSuffix(cask, "/"+pm.CLI) {
+			return cask
+		}
+	}
+	return pm.CLI
 }
 
 // Names lists the names in known, in order, for a message.

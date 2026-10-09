@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -55,7 +56,7 @@ func TestALogRecordsEveryEvent(t *testing.T) {
 	if want := []string{"run_started", "step_started", "command", "command", "step_finished", "run_finished"}; !slices.Equal(kinds, want) {
 		t.Fatalf("records = %q, want %q", kinds, want)
 	}
-	if r := records[0]; r.Command != "status" || r.Machine != "laptop" || r.Version != "0.1.0" || !slices.Equal(r.Steps, steps) {
+	if r := records[0]; r.Command != "status" || r.Machine != "laptop" || r.Version != "0.1.0" || !reflect.DeepEqual(r.Steps, steps) {
 		t.Errorf("run_started = %+v", r)
 	}
 	if r := records[2]; r.Step != "brew" || r.Command != "brew leaves" || r.Exit == nil || *r.Exit != 0 || r.DurationMS != 1500 || r.Stdout != "ripgrep\n" {

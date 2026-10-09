@@ -59,10 +59,13 @@ type Key struct {
 }
 
 // The areas the boot's steps are in: signing in, which fetches the config
-// the boot needs, then the boot itself.
+// the boot needs, then the boot itself; and, in the terminal handed over
+// to, every one of them, checked again, as a light of their own beside
+// apply's.
 const (
 	AreaSignIn = "Sign in"
 	AreaBoot   = "Boot order"
+	AreaBooted = "Boot"
 )
 
 // signInKeys are the ways to sign in to GitHub: with the phone, a QR code

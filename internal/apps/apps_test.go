@@ -26,11 +26,30 @@ func TestKnown(t *testing.T) {
 		}
 	}
 	for name, pm := range apps.PasswordManagers {
-		if pm.Name != name || pm.Title == "" || pm.Cask == "" || pm.Bundle == "" {
+		if pm.Name != name || pm.Title == "" || pm.Cask == "" || pm.Bundle == "" || pm.CLI == "" || pm.Program == "" || pm.SignIn == "" {
 			t.Errorf("password manager %s: %+v", name, pm)
 		}
 	}
 	if got := apps.Names(apps.Terminals); got != "ghostty" {
 		t.Errorf("Names() = %q", got)
+	}
+}
+
+// A password manager's tool is installed as the config declares it, from
+// its tap, or else by its own name.
+func TestCLICask(t *testing.T) {
+	pm := apps.PasswordManagers["1password"]
+	for _, c := range []struct {
+		declared []string
+		want     string
+	}{
+		{[]string{"ghostty", "1password/tap/1password-cli"}, "1password/tap/1password-cli"},
+		{[]string{"1password-cli"}, "1password-cli"},
+		{[]string{"not-1password-cli"}, "1password-cli"},
+		{nil, "1password-cli"},
+	} {
+		if got := pm.CLICask(c.declared); got != c.want {
+			t.Errorf("CLICask(%q) = %q, want %q", c.declared, got, c.want)
+		}
 	}
 }

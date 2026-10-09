@@ -3,6 +3,7 @@ package engine_test
 import (
 	"context"
 	"errors"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -174,7 +175,7 @@ func TestARunsEvents(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []event.Event{
-		event.RunStarted{Time: clock, Command: "status", Machine: "laptop", Version: "0.1.0", Steps: []event.Step{{Name: "homebrew", Title: "Homebrew"}, {Name: "brew", Title: "brew"}}},
+		event.RunStarted{Time: clock, Command: "status", Machine: "laptop", Version: "0.1.0", Steps: []event.Step{{Name: "homebrew", Title: "Homebrew"}, {Name: "brew", Title: "brew", Needs: []string{"homebrew"}}}},
 		event.StepStarted{Time: clock, Step: "homebrew", Doing: "checking"},
 		event.StepFinished{Time: clock, Step: "homebrew", Result: check.Result{State: check.OK, Summary: "/opt/homebrew"}},
 		event.StepStarted{Time: clock, Step: "brew", Doing: "checking"},
@@ -188,7 +189,7 @@ func TestARunsEvents(t *testing.T) {
 		got, w := rec.events[i], want[i]
 		if gs, ok := got.(event.RunStarted); ok {
 			ws := w.(event.RunStarted)
-			if gs.Command != ws.Command || gs.Machine != ws.Machine || gs.Version != ws.Version || !slices.Equal(gs.Steps, ws.Steps) || !gs.Time.Equal(ws.Time) {
+			if gs.Command != ws.Command || gs.Machine != ws.Machine || gs.Version != ws.Version || !reflect.DeepEqual(gs.Steps, ws.Steps) || !gs.Time.Equal(ws.Time) {
 				t.Errorf("event %d = %+v, want %+v", i, got, w)
 			}
 			continue

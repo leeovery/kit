@@ -48,6 +48,8 @@ type Step struct {
 	// Waiting is what the step says while it waits its turn, when that's
 	// more than that it's waiting: what it'll need of you, or do.
 	Waiting string `json:",omitempty"`
+	// Needs are the steps it needs, by name: what it waits for.
+	Needs []string `json:",omitempty"`
 }
 
 // Preparing is kit getting a run ready, before it starts, as applying works

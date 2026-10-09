@@ -123,8 +123,9 @@ func (b *Boot) passwordStep() engine.Step {
 		Name: PasswordStep, Title: "Password", Waiting: "once",
 		Check: func(ctx context.Context) check.Result {
 			wanted, on := touchID(ctx)
+			// Handed over to, the boot tried Touch ID before it handed over.
 			b.mu.Lock()
-			held, tried := b.held, b.triedTouchID
+			held, tried := b.held, b.triedTouchID || b.HandedOver
 			b.mu.Unlock()
 			switch {
 			case wanted && !on && !tried, !held && !runner.Has(b.Run, "brew"):
@@ -253,24 +254,44 @@ func (b *Boot) xcodeTools(ctx context.Context) string {
 	return ""
 }
 
-// app is an app kit.toml names, for the boot to install.
+// app is an app kit.toml names, for the boot to install: an app bundle, or
+// a command-line tool, a program.
 type app struct {
-	title, cask, bundle string
+	title, cask, bundle, program string
 }
 
 // apps are the apps kit.toml names: the terminal, then the password
-// manager.
+// manager, with its tool, which kit reads secrets through, as the config
+// declares it.
 func (b *Boot) apps(cfg *config.Config) []app {
 	var wanted []app
 	if t, ok := b.terminal(cfg); ok {
-		wanted = append(wanted, app{t.Title, t.Cask, t.Bundle})
+		wanted = append(wanted, app{title: t.Title, cask: t.Cask, bundle: t.Bundle})
 	}
 	if cfg != nil {
 		if pm, ok := apps.PasswordManagers[cfg.PasswordManager]; ok {
-			wanted = append(wanted, app{pm.Title, pm.Cask, pm.Bundle})
+			wanted = append(wanted, app{title: pm.Title, cask: pm.Cask, bundle: pm.Bundle},
+				app{title: pm.Title + " CLI", cask: pm.CLICask(b.declaredCasks(cfg)), program: pm.Program})
 		}
 	}
 	return wanted
+}
+
+// declaredCasks are the casks the config declares for this Mac: every
+// Mac's, then its own, once kit.toml knows it.
+func (b *Boot) declaredCasks(cfg *config.Config) []string {
+	scopes := []string{config.Shared}
+	if mac, err := config.ReadMachine(b.State); err == nil && cfg.Knows(mac) {
+		scopes = append(scopes, mac)
+	}
+	var names []string
+	for _, scope := range scopes {
+		entries, _ := cfg.Declared("cask", scope)
+		for _, e := range entries {
+			names = append(names, e.Name)
+		}
+	}
+	return names
 }
 
 // appsStep installs the apps kit.toml names, before the rest of the Mac:
@@ -278,11 +299,14 @@ func (b *Boot) apps(cfg *config.Config) []app {
 func (b *Boot) appsStep(wanted []app) engine.Step {
 	return engine.Step{
 		Name: AppsStep, Title: "Apps",
-		Check: func(context.Context) check.Result {
+		Check: func(ctx context.Context) check.Result {
 			var have, missing []string
 			var items []check.Item
 			for _, a := range wanted {
 				version, ok := b.version(a.bundle)
+				if a.program != "" {
+					version, ok = b.toolVersion(ctx, a.program)
+				}
 				if !ok {
 					missing = append(missing, a.title)
 					items = append(items, check.Item{ID: "cask:" + a.cask, Name: a.cask, State: "missing", Action: kind.Install})
@@ -305,6 +329,20 @@ func (b *Boot) appsStep(wanted []app) engine.Step {
 			return err
 		},
 	}
+}
+
+// toolVersion is the version of a command-line tool, as it says, and
+// whether it's there.
+func (b *Boot) toolVersion(ctx context.Context, program string) (string, bool) {
+	if !runner.Has(b.Run, program) {
+		return "", false
+	}
+	res, err := b.Run.Run(ctx, runner.Command{Name: program, Args: []string{"--version"}})
+	if err != nil {
+		return "", true
+	}
+	first, _, _ := strings.Cut(strings.TrimSpace(string(res.Stdout)), "\n")
+	return first, true
 }
 
 // version is the version of the app bundle in the Applications folder, as

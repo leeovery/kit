@@ -11,6 +11,7 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/leeovery/kit/internal/boot"
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/look"
@@ -43,11 +44,16 @@ const configStep = PartConfig
 // wholeMac are the commands that look at the whole Mac: they open with the
 // wordmark and end with a summary. Run for steps named, they're aimed at
 // those, as other commands are: a timeline, without the wordmark.
-var wholeMac = []string{"status", "apply", "apply --plan", "nightly", "reconcile"}
+var wholeMac = []string{"status", "apply", "apply --plan", "nightly", "reconcile", "bootstrap"}
+
+// applyingCommands are the commands that apply the whole config: the
+// bootstrap, once it's in the terminal, ends as kit apply.
+var applyingCommands = []string{"apply", "bootstrap"}
 
 // viewOrder is the order the views show areas in: the config's drift and
-// its repository are one, Config.
-var viewOrder = []string{"Backups", "Jobs", "Mac", "Config", "Steps", "Manual", "Checks"}
+// its repository are one, Config. The boot's steps, checked again once
+// it's in the terminal, lead.
+var viewOrder = []string{boot.AreaBooted, "Backups", "Jobs", "Mac", "Config", "Steps", "Manual", "Checks"}
 
 // viewArea is the area a step of area shows in.
 func viewArea(area string) string {
@@ -169,6 +175,15 @@ func (p *Pretty) Emit(e event.Event) {
 	case event.StepStarted:
 		p.running = append(without(p.running, e.Step), runningStep{step: e.Step, title: p.title(e.Step), doing: cmp.Or(e.Doing, "checking")})
 		p.spin()
+	case event.Doing:
+		// A step at work says what it's doing; one waiting on you, what you're
+		// to do.
+		for i, r := range p.running {
+			if r.step == e.Step {
+				p.running[i].doing, p.running[i].todo = cmp.Or(e.Says, r.doing), e.Todo
+			}
+		}
+		p.drawSpinner()
 	case event.StepFinished:
 		p.running = without(p.running, e.Step)
 		p.results[e.Step] = e
@@ -229,7 +244,7 @@ func (p *Pretty) byArea() bool {
 
 // applying is whether the run applies, so its report shows what changed and
 // what needs attention, not every step.
-func (p *Pretty) applying() bool { return p.start.Command == "apply" }
+func (p *Pretty) applying() bool { return slices.Contains(applyingCommands, p.start.Command) }
 
 func (p *Pretty) step(name string) event.Step {
 	for _, s := range p.start.Steps {
@@ -747,9 +762,9 @@ func (p *Pretty) Running() []string {
 }
 
 // runningStep is a step running, and what it's doing: checking or
-// applying.
+// applying, or what it says; and, while it waits on you, what you're to do.
 type runningStep struct {
-	step, title, doing string
+	step, title, doing, todo string
 }
 
 // without is running without step.

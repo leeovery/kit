@@ -87,6 +87,8 @@ type run struct {
 	machine  string
 	version  string
 	pipeline *engine.Pipeline
+	// steps are the pipeline's steps, as given it.
+	steps    []engine.Step
 	sink     event.Sink
 	face     render.Face
 	log      *logs.File
@@ -404,7 +406,8 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 	}
 	scripts, err := r.scriptSteps(base)
 	if err == nil {
-		r.pipeline, err = engine.New(slices.Concat(base, scripts)...)
+		r.steps = slices.Concat(base, scripts)
+		r.pipeline, err = engine.New(r.steps...)
 	}
 	if err != nil {
 		_ = face.Close()
@@ -416,6 +419,22 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 		r.askpass = asks
 	}
 	return r, nil
+}
+
+// lead puts steps at the head of the run, and has each of the run's steps
+// named in needs need those steps too: the bootstrap's own steps lead kit
+// apply's, and what reads secrets waits for the password manager.
+func (r *run) lead(steps []engine.Step, needs map[string][]string) error {
+	all := slices.Concat(steps, r.steps)
+	for i := range all {
+		all[i].Needs = slices.Concat(all[i].Needs, needs[all[i].Name])
+	}
+	p, err := engine.New(all...)
+	if err != nil {
+		return err
+	}
+	r.pipeline, r.steps = p, all
+	return nil
 }
 
 // readOnly are the runs that change nothing, so that nothing they run asks

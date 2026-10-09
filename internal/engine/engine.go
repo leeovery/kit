@@ -244,9 +244,14 @@ func (p *Pipeline) Planned(opts Options) ([]event.Step, error) {
 	}
 	infos := make([]event.Step, len(steps))
 	for i, s := range steps {
-		infos[i] = event.Step{Name: s.Name, Title: s.title(), Area: s.Area, Part: s.Part, Waiting: s.Waiting}
+		infos[i] = s.info()
 	}
 	return infos, nil
+}
+
+// info is the step as a run's start lists it.
+func (s Step) info() event.Step {
+	return event.Step{Name: s.Name, Title: s.title(), Area: s.Area, Part: s.Part, Waiting: s.Waiting, Needs: s.Needs}
 }
 
 func (p *Pipeline) run(ctx context.Context, sink event.Sink, opts Options, apply bool) (Report, error) {
@@ -262,7 +267,7 @@ func (p *Pipeline) run(ctx context.Context, sink event.Sink, opts Options, apply
 	infos := make([]event.Step, len(steps))
 	titles := make(map[string]string, len(steps))
 	for i, s := range steps {
-		infos[i] = event.Step{Name: s.Name, Title: s.title(), Area: s.Area, Part: s.Part, Waiting: s.Waiting}
+		infos[i] = s.info()
 		titles[s.Name] = s.title()
 	}
 	sink.Emit(event.RunStarted{Time: started, Command: opts.Command, Machine: opts.Machine, Version: opts.Version, Steps: infos, Only: opts.Only})

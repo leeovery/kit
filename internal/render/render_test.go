@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/colorprofile"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/leeovery/kit/internal/boot"
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/render"
@@ -585,5 +586,72 @@ func TestPrettyApplyingFitsTheTerminal(t *testing.T) {
 	}
 	if got := screen(out.String()); !strings.Contains(got, "● Step 00  fine") || !strings.Contains(got, "● Step 19  fine") {
 		t.Errorf("once applied, the screen is\n%s\nwant every step", got)
+	}
+}
+
+// Once the boot's in the terminal, it's kit apply: the boot's steps a light
+// of their own, with a row only once one isn't well; a step waiting on you
+// says what for and what to do, its area's light asking; what waits for it
+// says so.
+func TestPrettyBootstrapInTheTerminal(t *testing.T) {
+	var out syncBuffer
+	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).Sized(func() (int, int) { return 80, 40 })
+	steps := []event.Step{
+		{Name: "boot-github", Title: "GitHub", Area: boot.AreaBooted},
+		{Name: "boot-access", Title: "Full Disk Access", Area: boot.AreaBooted, Needs: []string{"boot-github"}},
+		{Name: "1password", Title: "1Password", Area: "Drift"},
+		{Name: "cask", Title: "Casks", Area: "Drift"},
+		{Name: "secret", Title: "Secrets", Area: "Drift", Needs: []string{"1password"}},
+		{Name: "gpg-key", Title: "gpg-key", Area: "Steps", Needs: []string{"secret"}},
+	}
+	face.Emit(event.RunStarted{Time: at, Command: "bootstrap", Machine: "laptop", Steps: steps})
+	face.Emit(event.StepFinished{Step: "boot-github", Result: check.Result{State: check.OK, Summary: "lee · kit-config has laptop"}})
+	face.Emit(event.StepFinished{Step: "boot-access", Result: check.Result{State: check.OK, Summary: "granted to Ghostty"}})
+	face.Emit(event.StepStarted{Step: "1password", Doing: "applying"})
+	face.Emit(event.Doing{Step: "1password", Says: "not signed in", Todo: "sign in with your phone's 1Password, then turn on\nSettings › Developer › Integrate with 1Password CLI"})
+	face.Emit(event.StepStarted{Step: "cask", Doing: "applying"})
+	time.Sleep(300 * time.Millisecond)
+	got := turned(screen(out.String()))
+	for _, want := range []string{"│  bootstrap\n", "  ● BOOT 2   ▲ CONFIG   ○ STEPS\n\n  ▮▮▮▮▮▮  2 of 6 · 2 running",
+		"\n  CONFIG  0 of 3\n  ▲ 1Password  not signed in\n  │ → sign in with your phone's 1Password, then turn on\n  │   Settings › Developer › Integrate with 1Password CLI\n  ◐ Casks  applying\n  ○ Secrets  waiting for 1Password\n\n  STEPS  0 of 1\n  ○ gpg-key  waiting for Secrets"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("waiting on you, the screen is\n%s\nwant it to hold\n%s", got, want)
+		}
+	}
+	if strings.Contains(got, "BOOT ") && strings.Contains(got, "GitHub") {
+		t.Errorf("the boot's steps are all well, yet listed:\n%s", got)
+	}
+	face.Emit(event.StepFinished{Step: "1password", Result: check.Result{State: check.OK, Summary: "signed in"}})
+	face.Emit(event.StepFinished{Step: "cask", Result: check.Result{State: check.OK, Summary: "1 declared, all installed"}})
+	face.Emit(event.StepFinished{Step: "secret", Result: check.Result{State: check.OK, Summary: "2 synced"}})
+	face.Emit(event.StepFinished{Step: "gpg-key", Result: check.Result{State: check.OK, Summary: "imported"}})
+	face.Emit(event.RunFinished{Duration: 4200 * time.Millisecond, Counts: map[check.State]int{check.OK: 6}})
+	if err := face.Close(); err != nil {
+		t.Fatal(err)
+	}
+	got = screen(out.String())
+	if want := "  ● BOOT 2  ● CONFIG 3  ● STEPS 1\n\n  ▮▮▮▮▮▮  6 fine · 4.2s\n\n  CONFIG\n  ● 1Password  signed in\n"; !strings.Contains(got, want) {
+		t.Errorf("once done, the screen is\n%s\nwant it to hold\n%s", got, want)
+	}
+}
+
+// A boot step that isn't well once the boot's in the terminal has its row,
+// under its light.
+func TestPrettyBootstrapShowsABootStepNotWell(t *testing.T) {
+	var out syncBuffer
+	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).Sized(func() (int, int) { return 80, 40 })
+	face.Emit(event.RunStarted{Time: at, Command: "bootstrap", Machine: "laptop", Steps: []event.Step{
+		{Name: "boot-github", Title: "GitHub", Area: boot.AreaBooted},
+		{Name: "boot-access", Title: "Full Disk Access", Area: boot.AreaBooted},
+	}})
+	face.Emit(event.StepFinished{Step: "boot-github", Result: check.Result{State: check.OK, Summary: "lee"}})
+	face.Emit(event.StepFinished{Step: "boot-access", Result: check.Result{State: check.Attention, Summary: "not granted to Ghostty"}})
+	face.Emit(event.RunFinished{Duration: time.Second, Counts: map[check.State]int{check.OK: 1, check.Attention: 1}})
+	if err := face.Close(); err != nil {
+		t.Fatal(err)
+	}
+	got := screen(out.String())
+	if want := "\n  BOOT\n  ▲ Full Disk Access  not granted to Ghostty\n"; !strings.Contains(got, want) || strings.Contains(got, "GitHub") {
+		t.Errorf("the screen is\n%s\nwant the boot's step not well, alone, as\n%s", got, want)
 	}
 }

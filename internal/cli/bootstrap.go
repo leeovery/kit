@@ -17,6 +17,7 @@ import (
 	"github.com/leeovery/kit/internal/askpass"
 	"github.com/leeovery/kit/internal/boot"
 	"github.com/leeovery/kit/internal/check"
+	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/logs"
@@ -43,7 +44,8 @@ It signs in to GitHub on your phone, asks which of your Macs this is and for
 the password once, then installs the rest without you: Homebrew, the terminal
 and password manager kit.toml names, kit-config, its files linked. With a
 terminal named, you give it Full Disk Access, then kit opens it and carries
-on there.`,
+on there: the whole of kit apply, the password manager signed in for the
+secrets, then a fresh shell.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			err := a.bootstrap(cmd.Context(), mac, repo, handedOver)
@@ -51,10 +53,12 @@ on there.`,
 				return err
 			}
 			// Handed over, kit is the terminal's own command: it becomes the
-			// login shell, so the window stays, whatever the boot came to.
+			// login shell, so the window stays, whatever the boot came to, a
+			// blank line under its last word.
 			if _, isAttention := errors.AsType[attention](err); err != nil && !isAttention && !errors.Is(err, ask.ErrCancelled) {
 				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "kit: %v\n", err)
 			}
+			_, _ = fmt.Fprintln(a.Stdout)
 			return a.Shell()
 		},
 	}
@@ -77,6 +81,18 @@ func (a *app) bootstrap(ctx context.Context, mac, repo string, handedOver bool) 
 	home, err := a.HomeDir()
 	if err != nil {
 		return fmt.Errorf("find the home directory: %w", err)
+	}
+	if handedOver {
+		b := &boot.Boot{
+			GitHub: boot.NewGitHub(&http.Client{Timeout: time.Minute}), Now: a.Now, Ask: &plainAsker{},
+			State: dirs.State, Data: dirs.Data, Config: dirs.Config, Repo: repo, Mac: mac, Getenv: a.Getenv,
+			Home: home, Applications: "/Applications", SudoLocal: a.SudoLocal, HandedOver: true,
+		}
+		// Handed over, kit says so at once: the boot in Terminal is waiting.
+		if err := b.Arrive(); err != nil {
+			return err
+		}
+		return a.inTerminal(ctx, b, true)
 	}
 	now := a.Now()
 	log, err := logs.Open(dirs.Logs, now, "bootstrap", a.verbose)
@@ -142,11 +158,6 @@ func (a *app) bootstrap(ctx context.Context, mac, repo string, handedOver bool) 
 	if asks != nil {
 		b.Keep = asks.Keep
 	}
-	// Handed over, kit says so at once: the boot in Terminal is waiting.
-	if err := b.Arrive(); err != nil {
-		_ = face.Close()
-		return err
-	}
 
 	// The splash plays while the self-test runs; enter at its end starts the
 	// boot, and the boot log takes its place.
@@ -197,12 +208,83 @@ func (a *app) bootstrap(ctx context.Context, mac, repo string, handedOver bool) 
 	if err == nil && ctx.Err() == nil && !report.Attention() {
 		report, err = a.bootOrder(ctx, b, boots, sink, opts, planned)
 	}
-	if err == nil && ctx.Err() == nil && !report.Attention() && boots != nil && !handedOver {
+	booted := err == nil && ctx.Err() == nil && !report.Attention()
+	if booted && boots != nil && !b.InTerminal() {
 		if res, ok := report.Results[boot.TerminalStep]; ok && res.State == check.OK {
 			boots.Finish("this window can be closed")
 		}
 	}
 	if closeErr := face.Close(); err == nil {
+		err = closeErr
+	}
+	switch {
+	case err != nil:
+		return err
+	case ctx.Err() != nil:
+		return ask.ErrCancelled
+	case report.Attention():
+		return attention{}
+	case b.InTerminal():
+		// Run in the terminal kit.toml names, the boot carries on in it, as
+		// it would have, handed over to.
+		return a.inTerminal(ctx, b, false)
+	}
+	return nil
+}
+
+// secretStep is the secrets' step, which the password manager leads.
+const secretStep = "secret"
+
+// inTerminal is the boot in the terminal kit.toml names, carrying on there:
+// the arrival, then the boot's steps, checked again, as a light of their
+// own, and the whole of kit apply, the password manager signed in for what
+// reads secrets, which waits for it. fresh is whether the window is kit's
+// own, opened for it, its screen blank.
+func (a *app) inTerminal(ctx context.Context, b *boot.Boot, fresh bool) error {
+	mac, err := config.ReadMachine(b.State)
+	if err != nil {
+		return err
+	}
+	if a.pretty(a.Stdout) {
+		if !fresh {
+			// What's on screen goes up into the scrollback, for the arrival
+			// to land at the top of the window.
+			_, _ = fmt.Fprint(a.Stdout, strings.Repeat("\n", a.Height(a.Stdout))+"\x1b[H")
+		}
+		arrival := render.NewArrival(lipgloss.HasDarkBackground(os.Stdin, os.Stdout), "bootstrap", mac, a.Now()).KeepHeader()
+		if err := arrival.Play(ctx, terminal()); err != nil {
+			return err
+		}
+		if arrival.Stopped() {
+			return ask.ErrCancelled
+		}
+		// Landed, its header stays in the window: the run carries on under it.
+		a.underHome = arrival.Landed()
+	}
+	r, err := a.prepare("bootstrap", "bootstrap")
+	if err != nil {
+		return err
+	}
+	b.Run, b.Sink, b.Ask = r.run, r.sink, &plainAsker{}
+	lead, needs := b.Booted(), map[string][]string{}
+	if pm, ok := b.PasswordManagerStep(); ok {
+		lead = append(lead, pm)
+		needs[secretStep] = []string{pm.Name}
+	}
+	if err := r.lead(lead, needs); err != nil {
+		_ = r.close()
+		return err
+	}
+	// The heading shows at once, with the run's lights, as kit apply's does.
+	planned, _ := r.pipeline.Planned(r.options(a, nil))
+	r.sink.Emit(event.Preparing{Time: r.now, Command: r.command, Machine: r.machine, Doing: "checking what will need an administrator's password", Steps: planned})
+	_, stopAdmin := a.holdAdmin(ctx, r, toInstall(ctx, r, nil))
+	report, err := r.pipeline.Apply(ctx, r.sink, r.options(a, nil))
+	stopAdmin()
+	if err == nil {
+		err = r.remember(report)
+	}
+	if closeErr := r.close(); err == nil {
 		err = closeErr
 	}
 	switch {

@@ -206,18 +206,23 @@ func TestHomebrew(t *testing.T) {
 func TestApps(t *testing.T) {
 	run := runnertest.New(t)
 	b, _ := newBoot(t, run, GitHub{}, &asker{})
-	read(t, b, map[string]string{config.File: appsToml}, "laptop")
+	read(t, b, map[string]string{config.File: appsToml, "shared/declarations": "[homebrew casks]\n1password/tap/1password-cli\nghostty\n"}, "laptop")
 	bundle(t, b, "1Password.app", "8.12.40")
-	run.On("brew", "install", "--cask", "ghostty").Does(func() { bundle(t, b, "Ghostty.app", "1.3.1") })
+	// The password manager's tool is installed as the config declares it,
+	// from its tap.
+	run.On("brew", "install", "--cask", "ghostty", "1password/tap/1password-cli").Does(func() {
+		bundle(t, b, "Ghostty.app", "1.3.1")
+		run.On("op", "--version").Prints("2.32.0\n")
+	})
 	step := b.appsStep(b.apps(b.config()))
 	found := step.Check(context.Background())
-	if found.State != check.Attention || found.Summary != "to install: Ghostty" {
+	if found.State != check.Attention || found.Summary != "to install: Ghostty and 1Password CLI" {
 		t.Fatalf("check before = %+v", found)
 	}
 	if err := step.Apply(context.Background(), found); err != nil {
 		t.Fatalf("apply = %v", err)
 	}
-	if res := step.Check(context.Background()); res.State != check.OK || res.Summary != "Ghostty 1.3.1 · 1Password 8.12.40" {
+	if res := step.Check(context.Background()); res.State != check.OK || res.Summary != "Ghostty 1.3.1 · 1Password 8.12.40 · 1Password CLI 2.32.0" {
 		t.Errorf("check after = %+v", res)
 	}
 }
