@@ -148,7 +148,7 @@ status is the report, every check.`,
 	// then what kit manages, by group.
 	cobra.EnableCommandSorting = false
 	root.AddGroup(groups...)
-	for _, cmd := range []*cobra.Command{newStatusCommand(a), newApplyCommand(a), newReconcileCommand(a), newNightlyCommand(a), newListCommand(a), newWhyCommand(a), newLogCommand(a), newMachineCommand(a)} {
+	for _, cmd := range []*cobra.Command{newStatusCommand(a), newApplyCommand(a), newReconcileCommand(a), newNightlyCommand(a), newListCommand(a), newWhyCommand(a), newLogCommand(a), newMachineCommand(a), newBootstrapCommand(a)} {
 		cmd.GroupID = groupMac
 		root.AddCommand(cmd)
 	}

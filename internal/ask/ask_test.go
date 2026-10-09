@@ -3,9 +3,11 @@ package ask
 import (
 	"bytes"
 	"context"
+	"io"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/charmbracelet/x/ansi"
@@ -213,5 +215,57 @@ func TestShow(t *testing.T) {
 	}
 	if strings.LastIndex(s, "remove") < strings.LastIndex(s, "\x1b[2K") {
 		t.Error("the answer was written before the question was cleared")
+	}
+}
+
+// screen is a Screen a test changes from outside: a count drawn.
+type screen struct {
+	mu      sync.Mutex
+	count   int
+	changed chan struct{}
+}
+
+func (s *screen) add() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.count++
+}
+
+func (s *screen) line(what string) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return []string{"  " + what + " " + strconv.Itoa(s.count)}
+}
+
+func (s *screen) View(int, int) []string   { return s.line("count") }
+func (s *screen) Key(k Key) bool           { return k.Is("q") }
+func (s *screen) Leaves(int) []string      { return s.line("ended at") }
+func (s *screen) Changes() <-chan struct{} { return s.changed }
+
+// A live screen is drawn over as it changes, and as keys come; closing its
+// changes ends it, what it leaves written where it was.
+func TestLive(t *testing.T) {
+	in, keys := io.Pipe()
+	defer func() { _ = keys.Close() }()
+	var out bytes.Buffer
+	s := &screen{changed: make(chan struct{})}
+	done := make(chan error)
+	go func() {
+		done <- Live(context.Background(), Terminal{In: in, Out: &out, Size: func() (int, int) { return 80, 24 }}, s)
+	}()
+	_, _ = keys.Write([]byte("x"))
+	for range 2 {
+		s.add()
+		s.changed <- struct{}{}
+	}
+	close(s.changed)
+	if err := <-done; err != nil {
+		t.Fatalf("Live = %v", err)
+	}
+	got := ansi.Strip(out.String())
+	for _, want := range []string{"count 2", "ended at 2\r\n"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("drew %q; want it to hold %q", got, want)
+		}
 	}
 }

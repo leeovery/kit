@@ -52,6 +52,12 @@ func (p *Plain) Emit(e event.Event) {
 		}
 	case event.RunFinished:
 		p.printf("%s\n", summary(e.Counts))
+	case event.SelfTest:
+		for _, t := range e.Tests {
+			p.printf("self-test %s %s %s\n", t.State, t.Name, strings.Join(t.Says, " · "))
+		}
+	case event.DeviceCode:
+		p.printf("%s enter %s at %s, by %s\n", e.Step, e.Code, e.URI, e.Expires.Format("15:04"))
 	}
 }
 

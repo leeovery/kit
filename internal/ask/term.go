@@ -42,10 +42,30 @@ type model interface {
 	leaves(width int) []string
 }
 
+// changer is a model changed from outside as well as by keys: drawn over
+// each time its changes signal, and done when they close.
+type changer interface {
+	changes() <-chan struct{}
+}
+
+// fuller is a model that takes the whole screen for a while: its lines then,
+// or nil while it's drawn in place. The screen's own, while it's taken, is
+// put back as it was.
+type fuller interface {
+	full(width, height int) []string
+}
+
+// The alternate screen, which a model takes the whole of, and gives back.
+const (
+	altOn  = "\x1b[?1049h"
+	altOff = "\x1b[?1049l"
+)
+
 // show asks m at t, under what's on screen: drawn, then drawn over after
-// each key and when the terminal's resized, till it's done, when its lines
-// are cleared and what it leaves is written in their place. It reads keys
-// one at a time, in the terminal's raw mode, which it puts back after.
+// each key, each change and when the terminal's resized, till it's done,
+// when its lines are cleared and what it leaves is written in their place.
+// It reads keys one at a time, in the terminal's raw mode, which it puts
+// back after.
 func show(ctx context.Context, t Terminal, m model) error {
 	restore := t.raw()
 	defer restore()
@@ -57,9 +77,43 @@ func show(ctx context.Context, t Terminal, m model) error {
 	d := &drawer{out: t.Out}
 	d.write(hideCursor + pasteOn)
 	defer d.write(pasteOff + showCursor)
+	full, _ := m.(fuller)
+	alt := false
 	draw := func() {
 		w, h := t.size()
+		if _, isLive := m.(live); isLive {
+			w, h = t.whole()
+		}
+		if full != nil {
+			if lines := full.full(t.whole()); lines != nil {
+				if !alt {
+					d.write(altOn)
+					alt = true
+				}
+				d.write(syncStart + "\x1b[H" + strings.Join(lines, "\x1b[K\r\n") + "\x1b[K\x1b[J" + syncEnd)
+				return
+			}
+			if alt {
+				d.write(altOff)
+				alt = false
+			}
+		}
 		d.draw(m.view(w, h))
+	}
+	end := func() {
+		if alt {
+			d.write(altOff)
+		}
+		d.clear()
+		w, _ := t.size()
+		if _, isLive := m.(live); isLive {
+			w, _ = t.whole()
+		}
+		d.print(m.leaves(w))
+	}
+	var changed <-chan struct{}
+	if c, ok := m.(changer); ok {
+		changed = c.changes()
 	}
 	draw()
 	for {
@@ -68,6 +122,12 @@ func show(ctx context.Context, t Terminal, m model) error {
 			d.clear()
 			return ctx.Err()
 		case <-resized:
+			draw()
+		case _, ok := <-changed:
+			if !ok {
+				end()
+				return nil
+			}
 			draw()
 		case k, ok := <-keys:
 			if !ok {
@@ -78,9 +138,7 @@ func show(ctx context.Context, t Terminal, m model) error {
 				draw()
 				continue
 			}
-			d.clear()
-			w, _ := t.size()
-			d.print(m.leaves(w))
+			end()
 			return nil
 		}
 	}
@@ -93,6 +151,16 @@ func (t Terminal) size() (width, height int) {
 		width, height = t.Size()
 	}
 	return min(max(width, 40), 80), max(height, 8)
+}
+
+// whole is the terminal's columns and lines, all of them, as a model taking
+// the whole screen has them.
+func (t Terminal) whole() (width, height int) {
+	width, height = 80, 24
+	if t.Size != nil {
+		width, height = t.Size()
+	}
+	return max(width, 40), max(height, 8)
 }
 
 // raw puts the terminal in raw mode, when In is one, and returns what puts

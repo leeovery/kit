@@ -167,3 +167,90 @@ func TestRule(t *testing.T) {
 		t.Errorf("Rule(10) = %q", got)
 	}
 }
+
+// The boot's log: a state's bracket in the mark's place, the name, then what
+// it says; what belongs to a line under its name; the wordmark plain, with
+// what's running, the Mac and when beside it.
+func TestBootRows(t *testing.T) {
+	b := look.NewBoot(true)
+	same(t, b.Rows(look.Width,
+		look.Row{State: look.Done, Name: "GitHub", Says: b.Says(b.Mid("someone"), b.Mid("kit-config has laptop and studio"))},
+		look.Row{State: look.NeedsYou, Name: "This Mac", Says: b.Words(look.NeedsYou, "which of your Macs is this?"), Under: b.Answers([]look.Choice{{Label: "laptop"}, {Label: "studio"}, {Label: "new", Does: "a Mac kit-config doesn't have yet"}}, 0)},
+		look.Row{State: look.Running, Name: "Homebrew", Says: b.Says(b.Words(look.Running, "installing"), b.Mid("2m14s")), Under: b.Output("==> Installing Command Line Tools")},
+		look.Row{State: look.Queued, Name: "Password", Says: b.Says(b.Mid("once"), b.Mid("Touch ID after"))},
+		look.Row{State: look.Skipped, Name: "Not here", Says: b.Says(b.Mid("Homebrew"), b.Mid("1Password"))},
+		look.Row{State: look.Failed, Name: "kit-config", Says: b.Words(look.Failed, "couldn't clone")},
+	),
+		"  [ OK ] GitHub  someone · kit-config has laptop and studio",
+		"  [ !! ] This Mac  which of your Macs is this?",
+		"         ❯ laptop ",
+		"           studio",
+		"           new  a Mac kit-config doesn't have yet",
+		"  [ ** ] Homebrew  installing · 2m14s",
+		"         ==> Installing Command Line Tools",
+		"  [    ] Password  once · Touch ID after",
+		"  [ -- ] Not here  Homebrew · 1Password",
+		"  [FAIL] kit-config  couldn't clone",
+	)
+	same(t, b.Head(b.Meta("bootstrap", "Some-MacBook", "Thu 8 Oct · 18:02")...),
+		"  █  ▄▀  ▀█▀  ▀▀█▀▀  │  bootstrap",
+		"  █▀▀▄    █     █    │  Some-MacBook",
+		"  █   █  ▄█▄    █    │  Thu 8 Oct · 18:02",
+	)
+	same(t, []string{b.Bar(3, 8), b.Keys(look.Key{Key: "enter", Does: "boot"}, look.Key{Key: "esc", Does: "stop"}), b.Field(3)},
+		strings.Repeat("█", 15)+strings.Repeat("░", 25), "  enter boot · esc stop", "❯ ••• ")
+}
+
+// GitHub's QR code: square, a quiet zone round it, and drawn the other way
+// round on a light background, so it's dark on light either way.
+func TestBootQR(t *testing.T) {
+	dark, err := look.NewBoot(true).QR("https://github.com/login/device")
+	if err != nil {
+		t.Fatal(err)
+	}
+	light, err := look.NewBoot(false).QR("https://github.com/login/device")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, l := text(dark...), text(light...)
+	// 29 modules and a quiet zone of two each side, two modules a line.
+	if len(d) != 17 || len([]rune(d[0])) != 33 {
+		t.Fatalf("the code is %d lines of %d cells; want 17 of 33", len(d), len([]rune(d[0])))
+	}
+	if d[0] != strings.Repeat("█", 33) || strings.TrimSpace(l[0]) != "" {
+		t.Errorf("first lines: dark %q, light %q; want the quiet zone lit on dark, blank on light", d[0], l[0])
+	}
+	swap := strings.NewReplacer("█", " ", " ", "█", "▀", "▄", "▄", "▀")
+	for i := 1; i < len(d)-1; i++ {
+		if got, want := []rune(swap.Replace(l[i])), []rune(d[i]); string(got[2:len(got)-2]) != string(want[2:len(want)-2]) {
+			t.Errorf("line %d: light isn't dark the other way round:\n%s\n%s", i, d[i], l[i])
+		}
+	}
+}
+
+// The wordmark's pixels, as what draws it a cell at a time reads them.
+func TestWordmarkPixel(t *testing.T) {
+	var rows []string
+	for y := range 6 {
+		var row strings.Builder
+		for x := range 17 {
+			if look.WordmarkPixel(x, y) {
+				row.WriteString("#")
+			} else {
+				row.WriteString(".")
+			}
+		}
+		rows = append(rows, row.String())
+	}
+	want := []string{
+		"#...#..###..#####",
+		"#..#....#.....#..",
+		"###.....#.....#..",
+		"#..#....#.....#..",
+		"#...#...#.....#..",
+		"#...#..###....#..",
+	}
+	if !slices.Equal(rows, want) {
+		t.Errorf("pixels:\n%s\nwant\n%s", strings.Join(rows, "\n"), strings.Join(want, "\n"))
+	}
+}

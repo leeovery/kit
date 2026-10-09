@@ -128,9 +128,9 @@ func (l *File) Emit(e event.Event) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	// A command's output, as it comes, is in its command's line whole; a run
-	// getting ready is in its start.
+	// getting ready is in its start; what a step's doing, in how it ended.
 	switch e.(type) {
-	case event.Output, event.Preparing:
+	case event.Output, event.Preparing, event.Doing, event.DeviceCode, event.SelfTest:
 		return
 	}
 	if l.err != nil {

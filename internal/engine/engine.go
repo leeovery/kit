@@ -29,6 +29,9 @@ const DefaultCheckWithin = 30 * time.Second
 type Step struct {
 	Name  string
 	Title string
+	// Waiting is what the step says while it waits its turn, when that's
+	// more than that it's waiting: what it'll need of you, or do.
+	Waiting string
 	// Area is what the step is about, as the at-a-glance view groups steps:
 	// Backups, Mac, Drift, Config, Checks.
 	Area string
@@ -241,7 +244,7 @@ func (p *Pipeline) Planned(opts Options) ([]event.Step, error) {
 	}
 	infos := make([]event.Step, len(steps))
 	for i, s := range steps {
-		infos[i] = event.Step{Name: s.Name, Title: s.title(), Area: s.Area, Part: s.Part}
+		infos[i] = event.Step{Name: s.Name, Title: s.title(), Area: s.Area, Part: s.Part, Waiting: s.Waiting}
 	}
 	return infos, nil
 }
@@ -259,7 +262,7 @@ func (p *Pipeline) run(ctx context.Context, sink event.Sink, opts Options, apply
 	infos := make([]event.Step, len(steps))
 	titles := make(map[string]string, len(steps))
 	for i, s := range steps {
-		infos[i] = event.Step{Name: s.Name, Title: s.title(), Area: s.Area, Part: s.Part}
+		infos[i] = event.Step{Name: s.Name, Title: s.title(), Area: s.Area, Part: s.Part, Waiting: s.Waiting}
 		titles[s.Name] = s.title()
 	}
 	sink.Emit(event.RunStarted{Time: started, Command: opts.Command, Machine: opts.Machine, Version: opts.Version, Steps: infos, Only: opts.Only})

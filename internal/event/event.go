@@ -45,6 +45,9 @@ type Step struct {
 	// Part is what the step counts towards in a view rolling its area up:
 	// Packages, Settings, Files, Secrets, or the config repository.
 	Part string `json:",omitempty"`
+	// Waiting is what the step says while it waits its turn, when that's
+	// more than that it's waiting: what it'll need of you, or do.
+	Waiting string `json:",omitempty"`
 }
 
 // Preparing is kit getting a run ready, before it starts, as applying works
@@ -94,6 +97,44 @@ type CommandRan struct {
 	// Error is what went wrong, when it didn't run or exited other than 0.
 	Error string
 }
+
+// SelfTest is what a new Mac's boot found as it started: the Mac's name on
+// the network, and its tests, in order.
+type SelfTest struct {
+	Time  time.Time
+	Mac   string
+	Tests []Test
+}
+
+// Test is something the self-test found: ok when it's there, attention when
+// kit needs it and it isn't there yet, failed when the boot can't go on
+// without it. Says is what it says, a part each.
+type Test struct {
+	Name  string
+	State check.State
+	Says  []string
+}
+
+// Doing is a step saying what it's doing, as it goes.
+type Doing struct {
+	Time time.Time
+	Step string
+	Says string
+}
+
+// DeviceCode is a sign-in waiting for its code to be entered: where, the
+// code, and when it expires.
+type DeviceCode struct {
+	Time    time.Time
+	Step    string
+	URI     string
+	Code    string
+	Expires time.Time
+}
+
+func (e SelfTest) At() time.Time   { return e.Time }
+func (e Doing) At() time.Time      { return e.Time }
+func (e DeviceCode) At() time.Time { return e.Time }
 
 // RunFinished is a run done.
 type RunFinished struct {

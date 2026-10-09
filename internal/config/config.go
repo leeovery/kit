@@ -73,6 +73,9 @@ type macFile struct {
 // file, as in laptop.
 var macName = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
+// ValidName reports whether name can name a Mac.
+func ValidName(name string) bool { return macName.MatchString(name) }
+
 // Load reads the config repository in dir, checking its settings: a format
 // this kit reads, at least one Mac, every Mac's name, and a primary among
 // them.
