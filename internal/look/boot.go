@@ -21,7 +21,20 @@ type Boot struct {
 	on color.Color
 	// dark is whether the terminal's background is dark.
 	dark bool
+	// frame turns what's at work: a light bouncing in its brackets.
+	frame int
 }
+
+// At is the look at frame of an animation: what's at work drawn as it is
+// then.
+func (b Boot) At(frame int) Boot {
+	b.frame = frame
+	return b
+}
+
+// scanner is where the light in a working bracket is, frame by frame: back
+// and forth, as KITT's.
+var scanner = []int{0, 1, 2, 3, 2, 1}
 
 // NewBoot is the boot's look for a terminal with a dark background, or a
 // light one: amber bright on dark, deep on light, so each strength reads
@@ -62,7 +75,8 @@ func (b Boot) Tag(s State) string {
 	case Done:
 		in = b.Strong(" OK ")
 	case Running:
-		in = b.Full(" ** ")
+		at := scanner[b.frame%len(scanner)]
+		in = strings.Repeat(" ", at) + b.Strong("*") + strings.Repeat(" ", 3-at)
 	case NeedsYou:
 		in = b.Rev(" !! ")
 	case Failed:

@@ -1,31 +1,14 @@
-  █  ▄▀  ▀█▀  ▀▀█▀▀  │  bootstrap
-  █▀▀▄    █     █    │  Some-MacBook
-  █   █  ▄█▄    █    │  Thu 8 Oct · 18:02
+--- signing in
+  SIGN IN
+  This Mac is set up from your kit-config, a private repository on GitHub.
+  Sign in to GitHub, and kit fetches it.
 
-  POWER-ON SELF-TEST
-  [ OK ] Apple M1 Max  10 cores
-  [ OK ] Network  github.com · 41 ms
-
---- waiting
-  BOOT ORDER
-  [    ] GitHub  on your phone
-  [    ] This Mac
-  [    ] Password  once
-  [    ] Homebrew
-
-  esc stop
---- the code
-  BOOT ORDER
-  [ ** ] GitHub  waiting for your phone
-         enter  WDJB-MJHT  at github.com/login/device · 14:21 left
-  [    ] This Mac
-  [    ] Password  once
-  [    ] Homebrew
-
-  enter QR code · esc stop
---- a question
-  BOOT ORDER
+  enter with your phone · s here, in Safari · esc stop
+--- signed in, a question
+  SIGN IN
   [ OK ] GitHub  someone · kit-config has laptop and studio
+
+  BOOT ORDER
   [ !! ] This Mac  which of your Macs is this?
            laptop  MacBook, the primary
          ❯ studio
@@ -34,12 +17,14 @@
 
   ↑↓ choose · enter decide · esc stop
 --- at work
-  BOOT ORDER
+  SIGN IN
   [ OK ] GitHub  someone · kit-config has laptop and studio
+
+  BOOT ORDER
   [ OK ] This Mac  studio
   [FAIL] Password  sudo refused the password
          → run kit bootstrap again
-  [ ** ] Homebrew  installing · 2m14s
+  [*   ] Homebrew  installing · 2m14s
          ==> Installing Command Line Tools
 
   esc stop

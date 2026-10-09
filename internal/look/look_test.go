@@ -186,7 +186,7 @@ func TestBootRows(t *testing.T) {
 		"         ❯ laptop ",
 		"           studio",
 		"           new  a Mac kit-config doesn't have yet",
-		"  [ ** ] Homebrew  installing · 2m14s",
+		"  [*   ] Homebrew  installing · 2m14s",
 		"         ==> Installing Command Line Tools",
 		"  [    ] Password  once · Touch ID after",
 		"  [ -- ] Not here  Homebrew · 1Password",
@@ -252,5 +252,17 @@ func TestWordmarkPixel(t *testing.T) {
 	}
 	if !slices.Equal(rows, want) {
 		t.Errorf("pixels:\n%s\nwant\n%s", strings.Join(rows, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// What's at work: a light bouncing back and forth in its brackets.
+func TestBootScanner(t *testing.T) {
+	var got []string
+	for f := range 7 {
+		got = append(got, ansi.Strip(look.NewBoot(true).At(f).Tag(look.Running)))
+	}
+	want := []string{"[*   ]", "[ *  ]", "[  * ]", "[   *]", "[  * ]", "[ *  ]", "[*   ]"}
+	if !slices.Equal(got, want) {
+		t.Errorf("scanner %q; want %q", got, want)
 	}
 }

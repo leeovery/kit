@@ -35,8 +35,11 @@ gate golangci-lint
 golangci-lint run
 
 gate shellcheck
-# The script kit step add writes, which steps of the user's own start from.
+# The script kit step add writes, which steps of the user's own start from;
+# and the install script, which runs on a Mac with nothing but its own
+# shell: POSIX alone.
 shellcheck internal/steps/template.sh
+shellcheck --shell=sh install.sh
 
 gate "go build"
 go build ./...

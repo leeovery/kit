@@ -36,15 +36,31 @@ type Asker interface {
 	Choose(ctx context.Context, step, question string, answers []Answer) (int, error)
 	// Name asks for a name, typed.
 	Name(ctx context.Context, step, question string) (string, error)
-	// Press waits for key, the keys at the foot saying what it does, till
-	// ctx is done.
-	Press(ctx context.Context, step, key, does string) error
+	// Pick waits for one of keys, the keys at the foot saying what each
+	// does, till ctx is done: the key pressed.
+	Pick(ctx context.Context, step string, keys []Key) (string, error)
 }
 
 // Answer is one answer to a question: its label, and what it means.
 type Answer struct {
 	Label, Does string
 }
+
+// Key is a key a step waits for, and what pressing it does.
+type Key struct {
+	Key, Does string
+}
+
+// The areas the boot's steps are in: signing in, which fetches the config
+// the boot needs, then the boot itself.
+const (
+	AreaSignIn = "Sign in"
+	AreaBoot   = "Boot order"
+)
+
+// signInKeys are the ways to sign in to GitHub: with the phone, a QR code
+// to scan; or here, in the browser.
+var signInKeys = []Key{{Key: "enter", Does: "with your phone"}, {Key: "s", Does: "here, in Safari"}}
 
 // Boot is a new Mac's boot, and what it runs with.
 type Boot struct {
@@ -74,6 +90,7 @@ func (b *Boot) Steps() []engine.Step {
 	steps := []engine.Step{b.gitHubStep(), b.macStep()}
 	for i := 1; i < len(steps); i++ {
 		steps[i].Needs = []string{steps[i-1].Name}
+		steps[i].Area = AreaBoot
 	}
 	return steps
 }
@@ -123,7 +140,8 @@ func (b *Boot) repo(login string) string {
 // repository is there to read.
 func (b *Boot) gitHubStep() engine.Step {
 	return engine.Step{
-		Name: GitHubStep, Title: "GitHub", Waiting: "on your phone",
+		Name: GitHubStep, Title: "GitHub", Area: AreaSignIn,
+		Waiting: "This Mac is set up from your kit-config, a private repository on GitHub. Sign in to GitHub, and kit fetches it.",
 		Check: func(ctx context.Context) check.Result {
 			token := b.known(ctx)
 			if token == "" {
@@ -175,23 +193,34 @@ func (b *Boot) gitHubStep() engine.Step {
 	}
 }
 
-// signIn signs in to GitHub through its device flow: a code shown, to enter
-// on the phone or here, a new one if it expires before it's entered. s
-// opens GitHub's page in the browser, for signing in on this Mac instead.
+// signIn signs in to GitHub through its device flow, the way chosen first:
+// with the phone, scanning a QR code; or here, in the browser, which kit
+// opens. The code comes only then, a new one if it expires before it's
+// entered; either way can be chosen again while it waits.
 func (b *Boot) signIn(ctx context.Context) (string, error) {
+	how, err := b.Ask.Pick(ctx, GitHubStep, signInKeys)
+	if err != nil {
+		return "", err
+	}
 	for {
 		code, err := b.GitHub.code(ctx)
 		if err != nil {
 			return "", err
 		}
 		b.Sink.Emit(event.DeviceCode{Time: b.Now(), Step: GitHubStep, URI: code.URI, Code: code.UserCode, Expires: b.Now().Add(time.Duration(code.ExpiresIn) * time.Second)})
-		b.doing(GitHubStep, "waiting for your phone")
+		b.doing(GitHubStep, "waiting for you to sign in")
 		waiting, stop := context.WithCancel(ctx)
-		go func() {
-			if b.Ask.Press(waiting, GitHubStep, "s", "sign in on this Mac") == nil {
-				_, _ = b.Run.Run(waiting, runner.Command{Name: "open", Args: []string{code.URI}})
+		go func(how string) {
+			for {
+				if how == "s" {
+					_, _ = b.Run.Run(waiting, runner.Command{Name: "open", Args: []string{code.URI}})
+				}
+				var err error
+				if how, err = b.Ask.Pick(waiting, GitHubStep, signInKeys); err != nil {
+					return
+				}
 			}
-		}()
+		}(how)
 		token, err := b.GitHub.token(ctx, code)
 		stop()
 		if errors.Is(err, errExpired) {

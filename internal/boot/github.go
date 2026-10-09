@@ -20,9 +20,10 @@ import (
 // device flow app, public by design, with no secret.
 const ClientID = "Ov23lidFySbOfyWe7ukf"
 
-// scopes are what the sign-in asks for: what GitHub's CLI asks for, as kit
-// hands the sign-in to it.
-const scopes = "repo read:org gist"
+// scopes are what the sign-in asks for: what GitHub's CLI needs at least,
+// as kit hands the sign-in to it; private repositories, as kit-config is
+// one.
+const scopes = "repo read:org"
 
 // GitHub is GitHub, as the boot talks to it: its site, where a device signs
 // in, and its API.

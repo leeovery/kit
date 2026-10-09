@@ -71,7 +71,7 @@ func (a *app) bootstrap(ctx context.Context, mac, repo string) error {
 	var (
 		face  render.Face
 		boots *render.BootFace
-		asker boot.Asker = plainAsker{}
+		asker boot.Asker = &plainAsker{}
 		dark  bool
 	)
 	if pretty {
@@ -109,6 +109,11 @@ func (a *app) bootstrap(ctx context.Context, mac, repo string) error {
 	}
 	test := <-tested
 	sink.Emit(test)
+	if boots != nil {
+		if err := boots.PlaySelfTest(ctx, test); err != nil {
+			return err
+		}
+	}
 	for _, t := range test.Tests {
 		if t.State == check.Failed {
 			_ = face.Close()
@@ -160,8 +165,12 @@ func (a bootAsker) Name(ctx context.Context, step, question string) (string, err
 	return a.face.Name(ctx, step, question)
 }
 
-func (a bootAsker) Press(ctx context.Context, step, key, does string) error {
-	return a.face.Press(ctx, step, key, does)
+func (a bootAsker) Pick(ctx context.Context, step string, keys []boot.Key) (string, error) {
+	ks := make([]look.Key, len(keys))
+	for i, k := range keys {
+		ks[i] = look.Key{Key: k.Key, Does: k.Does}
+	}
+	return a.face.Pick(ctx, step, ks)
 }
 
 // errNoTerminal is a question asked without a terminal to ask it at.
@@ -169,17 +178,24 @@ var errNoTerminal = errors.New("no terminal to ask at")
 
 // plainAsker is the boot without a terminal: what it would ask fails,
 // naming the flag that answers it, and no key is ever pressed.
-type plainAsker struct{}
+type plainAsker struct{ picked bool }
 
-func (plainAsker) Choose(_ context.Context, step, _ string, _ []boot.Answer) (int, error) {
+func (*plainAsker) Choose(_ context.Context, step, _ string, _ []boot.Answer) (int, error) {
 	return 0, fmt.Errorf("%w: give this Mac's name with --mac (the %s step)", errNoTerminal, step)
 }
 
-func (plainAsker) Name(_ context.Context, step, _ string) (string, error) {
+func (*plainAsker) Name(_ context.Context, step, _ string) (string, error) {
 	return "", fmt.Errorf("%w: give this Mac's name with --mac (the %s step)", errNoTerminal, step)
 }
 
-func (plainAsker) Press(ctx context.Context, _, _, _ string) error {
+// Pick takes the first of keys, the first time a step asks: without a
+// terminal, signing in shows its code in plain lines, to enter on any
+// device; asked again, it waits, as no key will come.
+func (a *plainAsker) Pick(ctx context.Context, _ string, keys []boot.Key) (string, error) {
+	if !a.picked && len(keys) > 0 {
+		a.picked = true
+		return keys[0].Key, nil
+	}
 	<-ctx.Done()
-	return ctx.Err()
+	return "", ctx.Err()
 }

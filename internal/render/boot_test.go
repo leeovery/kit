@@ -3,6 +3,7 @@ package render_test
 import (
 	"bytes"
 	"context"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -17,11 +18,13 @@ import (
 )
 
 var bootSteps = []event.Step{
-	{Name: "github", Title: "GitHub", Waiting: "on your phone"},
-	{Name: "mac", Title: "This Mac"},
-	{Name: "password", Title: "Password", Waiting: "once"},
-	{Name: "homebrew", Title: "Homebrew"},
+	{Name: "github", Title: "GitHub", Area: "Sign in", Waiting: "This Mac is set up from your kit-config, a private repository on GitHub. Sign in to GitHub, and kit fetches it."},
+	{Name: "mac", Title: "This Mac", Area: "Boot order"},
+	{Name: "password", Title: "Password", Area: "Boot order", Waiting: "once"},
+	{Name: "homebrew", Title: "Homebrew", Area: "Boot order"},
 }
+
+var signInKeys = []look.Key{{Key: "enter", Does: "with your phone"}, {Key: "s", Does: "here, in Safari"}}
 
 func plainView(f *render.BootFace, height int) string {
 	lines := f.View(80, height)
@@ -31,31 +34,37 @@ func plainView(f *render.BootFace, height int) string {
 	return strings.Join(lines, "\n") + "\n"
 }
 
-// The boot's face: the self-test written once; the boot order waiting, the
-// rows that will need you saying so; GitHub's code under its row while it
-// waits; a question in its row; a step at work with its last lines, and the
-// bar once it's gone a while; one done, one failed, saying what to do.
+func plainFull(f *render.BootFace) string {
+	var out []string
+	for _, l := range f.Full(120, 30) {
+		out = append(out, strings.TrimRight(ansi.Strip(l), " "))
+	}
+	return strings.Join(out, "\n")
+}
+
+// The boot's face, one thing at a time: signing in says what it's for and
+// how, the code coming only once a way's chosen; signed in, it's a line,
+// and the boot order shows, a question in its row, a step at work with its
+// last lines.
 func TestBootFace(t *testing.T) {
-	var out bytes.Buffer
 	at := time.Date(2026, 10, 8, 18, 2, 0, 0, time.UTC)
 	now := at
-	f := render.NewBootFace(ask.Terminal{Out: &out}, true, func() time.Time { return now }, nil)
-	f.Emit(event.SelfTest{Time: at, Mac: "Some-MacBook", Tests: []event.Test{
-		{Name: "Apple M1 Max", State: check.OK, Says: []string{"10 cores"}},
-		{Name: "Network", State: check.OK, Says: []string{"github.com", "41 ms"}},
-	}})
-	var screens strings.Builder
-	screens.WriteString(strings.ReplaceAll(ansi.Strip(out.String()), "\r\n", "\n"))
-	// Drawn without its terminal's loop, the steps given as Start gives them.
+	f := render.NewBootFace(ask.Terminal{Out: &bytes.Buffer{}}, true, func() time.Time { return now }, nil)
 	f.Show(bootSteps)
-	screens.WriteString("--- waiting\n" + plainView(f, 40))
+	var screens strings.Builder
+	picked := make(chan string, 1)
+	go func() {
+		key, _ := f.Pick(context.Background(), "github", signInKeys)
+		picked <- key
+	}()
+	waitFor(t, func() bool { return strings.Contains(plainView(f, 40), "with your phone") })
+	screens.WriteString("--- signing in\n" + plainView(f, 40))
 
 	f.Emit(event.StepStarted{Time: at, Step: "github"})
-	f.Emit(event.DeviceCode{Time: at, Step: "github", URI: "https://github.com/login/device", Code: "WDJB-MJHT", Expires: at.Add(15 * time.Minute)})
-	f.Emit(event.Doing{Time: at, Step: "github", Says: "waiting for your phone"})
-	now = at.Add(39 * time.Second)
-	screens.WriteString("--- the code\n" + plainView(f, 40))
-
+	f.Key(ask.Key{Name: "enter"})
+	if key := <-picked; key != "enter" {
+		t.Fatalf("picked %q", key)
+	}
 	f.Emit(event.StepFinished{Time: now, Step: "github", Result: check.Result{State: check.OK, Summary: "someone · kit-config has laptop and studio"}})
 	chosen := make(chan int)
 	go func() {
@@ -64,7 +73,7 @@ func TestBootFace(t *testing.T) {
 	}()
 	waitFor(t, func() bool { return strings.Contains(plainView(f, 40), "which of your Macs") })
 	f.Key(ask.Key{Name: "down"})
-	screens.WriteString("--- a question\n" + plainView(f, 40))
+	screens.WriteString("--- signed in, a question\n" + plainView(f, 40))
 	f.Key(ask.Key{Name: "enter"})
 	if i := <-chosen; i != 1 {
 		t.Errorf("chose %d; want studio", i)
@@ -79,65 +88,100 @@ func TestBootFace(t *testing.T) {
 	golden(t, "boot.golden", screens.String())
 }
 
+// Signing in takes the whole window, the way chosen: with the phone, the QR
+// code and the code; esc goes back, and the other way can be chosen; here,
+// the code to enter in Safari. Signed in, the window's given back.
+func TestBootFaceSignIn(t *testing.T) {
+	at := time.Date(2026, 10, 8, 18, 2, 0, 0, time.UTC)
+	f := render.NewBootFace(ask.Terminal{Out: &bytes.Buffer{}}, true, func() time.Time { return at }, nil)
+	f.Emit(event.SelfTest{Time: at, Mac: "Some-MacBook"})
+	f.Show(bootSteps)
+	pick := func(key string) {
+		t.Helper()
+		got := make(chan string, 1)
+		go func() {
+			k, _ := f.Pick(context.Background(), "github", signInKeys)
+			got <- k
+		}()
+		waitFor(t, func() bool { return strings.Contains(plainView(f, 40), "with your phone") })
+		f.Key(ask.Key{Name: key, Text: key})
+		if k := <-got; k != key {
+			t.Fatalf("picked %q; want %q", k, key)
+		}
+	}
+	if f.Full(120, 30) != nil {
+		t.Fatal("full screen before a way was chosen")
+	}
+	pick("enter")
+	if full := plainFull(f); !strings.Contains(full, "getting a code") {
+		t.Errorf("before the code:\n%s", full)
+	}
+	f.Emit(event.StepStarted{Time: at, Step: "github"})
+	f.Emit(event.DeviceCode{Time: at, Step: "github", URI: "https://github.com/login/device", Code: "WDJB-MJHT", Expires: at.Add(15 * time.Minute)})
+	phone := plainFull(f)
+	for _, want := range []string{"Some-MacBook", "█████", "Scan it with your phone's camera", "WDJB-MJHT", "s here, in Safari, instead · esc back"} {
+		if !strings.Contains(phone, want) {
+			t.Errorf("with the phone, want %q:\n%s", want, phone)
+		}
+	}
+	f.Key(ask.Key{Name: "esc"})
+	if f.Full(120, 30) != nil {
+		t.Fatal("esc didn't go back")
+	}
+	pick("s")
+	here := plainFull(f)
+	for _, want := range []string{"Safari is open at github.com/login/device.", "Enter this code there:", "WDJB-MJHT", "enter with your phone instead · esc back"} {
+		if !strings.Contains(here, want) {
+			t.Errorf("here, want %q:\n%s", want, here)
+		}
+	}
+	if strings.Contains(here, "█████") {
+		t.Error("the QR code shows when signing in here")
+	}
+	f.Emit(event.StepFinished{Time: at, Step: "github", Result: check.Result{State: check.OK, Summary: "someone"}})
+	if f.Full(120, 30) != nil {
+		t.Error("signed in, the full screen stayed")
+	}
+}
+
 // Never taller than the terminal: rows done, then those waiting, give way,
 // so what's at work stays whole.
 func TestBootFaceFits(t *testing.T) {
 	at := time.Date(2026, 10, 8, 18, 2, 0, 0, time.UTC)
 	f := render.NewBootFace(ask.Terminal{Out: &bytes.Buffer{}}, true, func() time.Time { return at }, nil)
 	f.Show(bootSteps)
-	f.Emit(event.StepStarted{Time: at, Step: "github"})
-	f.Emit(event.DeviceCode{Time: at, Step: "github", URI: "https://github.com/login/device", Code: "WDJB-MJHT", Expires: at.Add(15 * time.Minute)})
-	got := f.View(80, 6)
-	if len(got) > 6 {
+	f.Emit(event.StepFinished{Time: at, Step: "github", Result: check.Result{State: check.OK, Summary: "someone"}})
+	f.Emit(event.StepFinished{Time: at, Step: "mac", Result: check.Result{State: check.OK, Summary: "studio"}})
+	f.Emit(event.StepStarted{Time: at, Step: "password"})
+	f.Emit(event.Doing{Time: at, Step: "password", Says: "asking"})
+	if got := f.View(80, 6); len(got) > 6 {
 		t.Fatalf("%d lines at 6", len(got))
 	}
 	text := plainView(f, 6)
-	if !strings.Contains(text, "WDJB-MJHT") || strings.Contains(text, "Homebrew") {
-		t.Errorf("at 6 lines:\n%s\nwant the code, rows waiting given way", text)
+	if !strings.Contains(text, "Password") || strings.Contains(text, "This Mac") {
+		t.Errorf("at 6 lines:\n%s\nwant the step at work, rows done given way", text)
 	}
 }
 
-// Enter while GitHub's code shows gives its QR code the whole screen, and
-// enter again gives it back; approved, the code's gone, and the screen.
-func TestBootFaceQRCode(t *testing.T) {
-	at := time.Date(2026, 10, 8, 18, 2, 0, 0, time.UTC)
-	f := render.NewBootFace(ask.Terminal{Out: &bytes.Buffer{}}, true, func() time.Time { return at }, nil)
-	f.Emit(event.SelfTest{Time: at, Mac: "Some-MacBook"})
-	f.Show(bootSteps)
-	f.Emit(event.StepStarted{Time: at, Step: "github"})
-	f.Emit(event.DeviceCode{Time: at, Step: "github", URI: "https://github.com/login/device", Code: "WDJB-MJHT", Expires: at.Add(15 * time.Minute)})
-	if f.Full(120, 30) != nil {
-		t.Fatal("the QR code took the screen before enter")
+// The self-test plays out a line at a time, then stays, each line saying
+// what it found.
+func TestPlaySelfTest(t *testing.T) {
+	in, keys := io.Pipe()
+	defer func() { _ = keys.Close() }()
+	var out bytes.Buffer
+	f := render.NewBootFace(ask.Terminal{In: in, Out: &out, Size: func() (int, int) { return 80, 24 }}, true, time.Now, nil)
+	err := f.PlaySelfTest(context.Background(), event.SelfTest{Time: time.Date(2026, 10, 8, 18, 2, 0, 0, time.UTC), Mac: "Some-MacBook", Tests: []event.Test{
+		{Name: "Apple M1 Max", State: check.OK, Says: []string{"10 cores"}},
+		{Name: "Network", State: check.OK, Says: []string{"github.com", "41 ms"}},
+	}})
+	if err != nil {
+		t.Fatal(err)
 	}
-	f.Key(ask.Key{Name: "enter"})
-	full := f.Full(120, 30)
-	var lines []string
-	for _, l := range full {
-		lines = append(lines, strings.TrimSpace(ansi.Strip(l)))
-	}
-	text := strings.Join(lines, "\n")
-	if len(full) != 30 || !strings.Contains(text, "WDJB-MJHT") || !strings.Contains(text, "Some-MacBook") || lines[len(lines)-1] != "enter back · esc stop" {
-		t.Errorf("full screen:\n%s", text)
-	}
-	f.Key(ask.Key{Name: "enter"})
-	if f.Full(120, 30) != nil {
-		t.Error("enter again didn't give the screen back")
-	}
-	f.Key(ask.Key{Name: "enter"})
-	f.Emit(event.StepFinished{Time: at, Step: "github", Result: check.Result{State: check.OK, Summary: "someone"}})
-	if f.Full(120, 30) != nil {
-		t.Error("approved, the QR code kept the screen")
-	}
-}
-
-func waitFor(t *testing.T, ok func() bool) {
-	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for !ok() {
-		if time.Now().After(deadline) {
-			t.Fatal("waited too long")
+	got := ansi.Strip(out.String())
+	for _, want := range []string{"bootstrap", "Some-MacBook", "Apple M1 Max", "[ OK ] Apple M1 Max  10 cores\r\n", "[ OK ] Network  github.com · 41 ms\r\n"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("played %q; want it to hold %q", got, want)
 		}
-		time.Sleep(5 * time.Millisecond)
 	}
 }
 
@@ -170,5 +214,16 @@ func TestSplash(t *testing.T) {
 	}
 	if s.Leaves(120) != nil || s.View(120, 30) != nil {
 		t.Error("it drew something in place")
+	}
+}
+
+func waitFor(t *testing.T, ok func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for !ok() {
+		if time.Now().After(deadline) {
+			t.Fatal("waited too long")
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }

@@ -124,14 +124,15 @@ func archive(t *testing.T, files map[string]string) []byte {
 
 const kitToml = "format = 1\nprimary = \"laptop\"\n[macs.laptop]\ndescription = \"MacBook, the primary\"\n[macs.studio]\n"
 
-// asker answers the boot's questions as a test scripts them, noting each.
+// asker answers the boot's questions as a test scripts them, noting each:
+// the keys picked, in turn, then none, as a person who's stopped pressing.
 type asker struct {
-	mu      sync.Mutex
-	asked   []string
-	choose  int
-	name    string
-	err     error
-	entered chan struct{}
+	mu     sync.Mutex
+	asked  []string
+	choose int
+	name   string
+	err    error
+	picks  []string
 }
 
 func (a *asker) note(s string) {
@@ -157,14 +158,18 @@ func (a *asker) Name(_ context.Context, step, question string) (string, error) {
 	return a.name, a.err
 }
 
-func (a *asker) Press(ctx context.Context, step, key, does string) error {
-	a.note(step + ": " + key + " " + does)
-	if a.entered != nil {
-		close(a.entered)
-		return nil
+func (a *asker) Pick(ctx context.Context, step string, keys []Key) (string, error) {
+	a.mu.Lock()
+	var key string
+	if len(a.picks) > 0 {
+		key, a.picks = a.picks[0], a.picks[1:]
+	}
+	a.mu.Unlock()
+	if key != "" {
+		return key, nil
 	}
 	<-ctx.Done()
-	return ctx.Err()
+	return "", ctx.Err()
 }
 
 // sink keeps the events the boot emits.
@@ -202,7 +207,7 @@ func TestGitHubSignsInAndReads(t *testing.T) {
 	run := runnertest.New(t)
 	find := run.On("security", "find-generic-password", "-s", keychainItem, "-w").Exits(44)
 	run.On("security", "-i")
-	b, s := newBoot(t, run, api, &asker{})
+	b, s := newBoot(t, run, api, &asker{picks: []string{"enter"}})
 	step := b.gitHubStep()
 
 	if res := step.Check(context.Background()); res.State != check.Attention || res.Summary != "not signed in" {
@@ -253,36 +258,38 @@ func TestGitHubSignsInAndReads(t *testing.T) {
 // sign-in declined on GitHub stops the boot, saying so.
 func TestGitHubCodeExpiresOrIsDeclined(t *testing.T) {
 	gh := &gitHub{answers: []string{"expired_token", "token"}, token: "gho_secret", repo: "someone/kit-config", archive: archive(t, map[string]string{config.File: kitToml})}
-	b, _ := newBoot(t, nil, gh.serve(t), &asker{})
+	b, _ := newBoot(t, nil, gh.serve(t), &asker{picks: []string{"enter", "", "enter"}})
 	b.Run = runnertest.New(t)
 	if _, err := b.signIn(context.Background()); err != nil || gh.codes != 2 {
 		t.Errorf("signIn = %v after %d codes; want a sign-in from the second", err, gh.codes)
 	}
 	gh.answers = []string{"access_denied"}
+	b.Ask = &asker{picks: []string{"enter"}}
 	if _, err := b.signIn(context.Background()); !errors.Is(err, errDenied) {
 		t.Errorf("signIn = %v; want it declined", err)
 	}
 }
 
-// s while the code waits opens GitHub's page, to sign in on this Mac.
-func TestGitHubSignInOnThisMac(t *testing.T) {
+// Signing in here, in the browser: kit opens GitHub's page there, the code
+// shown to enter.
+func TestGitHubSignInHere(t *testing.T) {
 	gh := &gitHub{answers: []string{"authorization_pending", "token"}, token: "gho_secret"}
 	run := runnertest.New(t)
-	run.On("open", "https://github.com/login/device")
-	ask := &asker{entered: make(chan struct{})}
-	b, _ := newBoot(t, run, gh.serve(t), ask)
+	opened := make(chan struct{})
+	run.On("open", "https://github.com/login/device").Does(func() { close(opened) })
+	b, _ := newBoot(t, run, gh.serve(t), &asker{picks: []string{"s"}})
 	api := b.GitHub
 	api.Wait = func(ctx context.Context, _ time.Duration) error {
-		<-ask.entered
-		return nil
+		select {
+		case <-opened:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 	b.GitHub = api
 	if _, err := b.signIn(context.Background()); err != nil {
 		t.Fatal(err)
-	}
-	deadline := time.Now().Add(5 * time.Second)
-	for len(run.Calls()) == 0 && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
 	}
 	if !slices.Contains(run.Calls(), "open https://github.com/login/device") {
 		t.Errorf("ran %v; want GitHub's page opened", run.Calls())
