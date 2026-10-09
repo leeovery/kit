@@ -72,6 +72,21 @@ func (b *Boot) in(t apps.Terminal) bool {
 	return b.Getenv("TERM_PROGRAM") == t.Program
 }
 
+// runningIn is the app kit's running in, by its name, as macOS names it
+// asking for what it may do.
+func (b *Boot) runningIn() string {
+	program := b.Getenv("TERM_PROGRAM")
+	if program == "Apple_Terminal" {
+		return "Terminal"
+	}
+	for _, t := range apps.Terminals {
+		if t.Program == program {
+			return t.Title
+		}
+	}
+	return "your terminal"
+}
+
 // Held reports whether sudo has the password, given this run.
 func (b *Boot) Held() bool {
 	b.mu.Lock()
@@ -95,7 +110,9 @@ const sudoAsks = "[kit: sudo wants the password]"
 // passwordStep has sudo take the password, once, for what the boot
 // installs, and turns Touch ID on for sudo where it's declared, so sudo is
 // a fingerprint after: done when nothing ahead needs the password, or sudo
-// has it, and Touch ID is as declared.
+// has it, and Touch ID is as declared or was tried. macOS asks before the
+// terminal kit runs in changes sudo's settings; refused, Touch ID stays off,
+// for kit apply, and the boot goes on.
 func (b *Boot) passwordStep() engine.Step {
 	touchID := func(ctx context.Context) (wanted, on bool) {
 		wanted = b.declares(steps.FeatureTouchIDSudo)
@@ -106,12 +123,16 @@ func (b *Boot) passwordStep() engine.Step {
 		Name: PasswordStep, Title: "Password", Waiting: "once",
 		Check: func(ctx context.Context) check.Result {
 			wanted, on := touchID(ctx)
-			held := b.Held()
+			b.mu.Lock()
+			held, tried := b.held, b.triedTouchID
+			b.mu.Unlock()
 			switch {
-			case wanted && !on, !held && !runner.Has(b.Run, "brew"):
+			case wanted && !on && !tried, !held && !runner.Has(b.Run, "brew"):
 				return check.Result{State: check.Attention, Summary: "not given yet"}
 			case on:
 				return check.Result{State: check.OK, Summary: "Touch ID on for sudo"}
+			case wanted:
+				return check.Result{State: check.OK, Summary: "given · Touch ID off: kit apply asks again"}
 			case held:
 				return check.Result{State: check.OK, Summary: "given"}
 			}
@@ -126,10 +147,14 @@ func (b *Boot) passwordStep() engine.Step {
 			if wanted, on := touchID(ctx); !wanted || on {
 				return nil
 			}
+			b.mu.Lock()
+			b.triedTouchID = true
+			b.mu.Unlock()
+			b.Sink.Emit(event.Doing{Time: b.Now(), Step: PasswordStep, Says: "turning Touch ID on for sudo",
+				Todo: fmt.Sprintf("macOS asks whether %s may administer your computer: choose Allow", b.runningIn())})
 			step := steps.TouchIDSudo(b.Run, &steps.Admin{Held: func(context.Context) bool { return b.Held() }}, b.SudoLocal)
-			if err := step.Apply(ctx, step.Check(ctx)); err != nil {
-				return fmt.Errorf("turn Touch ID on for sudo: %w", err)
-			}
+			// Refused, it's left off: kit apply asks again.
+			_ = step.Apply(ctx, step.Check(ctx))
 			return nil
 		},
 	}

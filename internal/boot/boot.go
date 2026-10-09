@@ -101,8 +101,10 @@ type Boot struct {
 	mu    sync.Mutex
 	token string
 	login string
-	// held is whether sudo has the password, given this run.
-	held bool
+	// held is whether sudo has the password, given this run, and
+	// triedTouchID whether turning Touch ID on was tried, which macOS can
+	// refuse.
+	held, triedTouchID bool
 }
 
 // SignIn is signing in, the boot's first steps, which read the config

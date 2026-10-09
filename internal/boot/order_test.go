@@ -96,7 +96,8 @@ func TestPasswordOnceThenTouchID(t *testing.T) {
 	run.On("brew", "--version").Fails(runner.ErrNotFound)
 	sudo := run.On("sudo", "-S", "-p", sudoAsks, "-v").Asks(2)
 	ask := &asker{secrets: []string{"wrong", "right"}}
-	b, _ := newBoot(t, run, GitHub{}, ask)
+	b, s := newBoot(t, run, GitHub{}, ask)
+	b.Getenv = func(name string) string { return map[string]string{"TERM_PROGRAM": "Apple_Terminal"}[name] }
 	read(t, b, map[string]string{config.File: kitToml, "shared/declarations": "[features]\ntouch-id-sudo\n"}, "laptop")
 	var kept string
 	b.Keep = func(p string) { kept = p }
@@ -122,6 +123,33 @@ func TestPasswordOnceThenTouchID(t *testing.T) {
 		}
 	}
 	if res := step.Check(context.Background()); res.State != check.OK || res.Summary != "Touch ID on for sudo" {
+		t.Errorf("check after = %+v", res)
+	}
+	var todo string
+	for _, e := range s.events {
+		if d, ok := e.(event.Doing); ok && d.Step == PasswordStep {
+			todo = d.Todo
+		}
+	}
+	if todo != "macOS asks whether Terminal may administer your computer: choose Allow" {
+		t.Errorf("said %q before changing sudo's settings", todo)
+	}
+}
+
+// macOS refusing the terminal leave to change sudo's settings leaves Touch
+// ID off, for kit apply, and the boot goes on.
+func TestTouchIDRefused(t *testing.T) {
+	run := runnertest.New(t)
+	run.On("brew", "--version").Fails(runner.ErrNotFound)
+	run.On("sudo", "-S", "-p", sudoAsks, "-v").Asks(1)
+	b, _ := newBoot(t, run, GitHub{}, &asker{secrets: []string{"right"}})
+	read(t, b, map[string]string{config.File: kitToml, "shared/declarations": "[features]\ntouch-id-sudo\n"}, "laptop")
+	run.On("sudo", "-n", "tee", b.SudoLocal).Exits(1).PrintsToStderr("tee: /etc/pam.d/sudo_local: Operation not permitted")
+	step := b.passwordStep()
+	if err := step.Apply(context.Background(), check.Result{}); err != nil {
+		t.Fatalf("apply = %v; want the boot to go on", err)
+	}
+	if res := step.Check(context.Background()); res.State != check.OK || res.Summary != "given · Touch ID off: kit apply asks again" {
 		t.Errorf("check after = %+v", res)
 	}
 }
