@@ -15,6 +15,7 @@ import (
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/engine"
+	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/steps"
 )
 
@@ -45,14 +46,16 @@ func (r *run) scriptSteps(base []engine.Step) ([]engine.Step, error) {
 	var out []engine.Step
 	for _, e := range list.Entries {
 		s, err := steps.ParseScript(r.cfg.Dir, e)
+		var waits []engine.Wait
 		if err == nil {
-			err = r.placeScript(&s, names)
+			waits, err = r.placeScript(&s, names)
 		}
 		if err != nil {
 			out = append(out, steps.BrokenScript(e, err))
 			continue
 		}
 		step := steps.ScriptStep(r.run, r.admin, s)
+		step.Waits = waits
 		if step.Admin {
 			r.adminSteps = append(r.adminSteps, step)
 		}
@@ -61,35 +64,94 @@ func (r *run) scriptSteps(base []engine.Step) ([]engine.Step, error) {
 	return out, nil
 }
 
-// placeScript checks s needs only steps among names, and comes after steps
-// among them, or kinds this Mac doesn't use, which it's then applied
-// without: an error says which aren't.
-func (r *run) placeScript(s *steps.Script, names map[string]bool) error {
+// manualSteps are the steps by hand that say what they come after or
+// before, each a step of its own among others, the run's other steps: one
+// placed after or before what isn't a step fails, saying so; one named as
+// another step is can't be told apart from it, and is refused.
+func (r *run) manualSteps(ordered []steps.ManualStep, others []engine.Step, raise *steps.Raise) ([]engine.Step, error) {
+	names := make(map[string]bool, len(others)+len(ordered))
+	for _, s := range others {
+		names[s.Name] = true
+	}
+	for _, m := range ordered {
+		if names[m.Name] {
+			return nil, fmt.Errorf("%s: a step by hand can't be called %s, as another step is: rename it", m.Pos, m.Name)
+		}
+		names[m.Name] = true
+	}
+	var out []engine.Step
+	for _, m := range ordered {
+		step := steps.OwnManual(r.run, r.stateDir, m, raise)
+		var err error
+		if step.After, step.Waits, step.Before, err = r.place(m.After, m.Before, names); err != nil {
+			reason := err.Error()
+			step.After, step.Waits, step.Before, step.Apply = nil, nil, nil, nil
+			step.Check = func(context.Context) check.Result { return check.Result{State: check.Failed, Reason: reason} }
+		}
+		out = append(out, step)
+	}
+	return out, nil
+}
+
+// placeScript places s among names, the run's steps, as place does, and
+// returns the waits for the things it's applied after.
+func (r *run) placeScript(s *steps.Script, names map[string]bool) ([]engine.Wait, error) {
+	after, waits, before, err := r.place(s.After, s.Before, names)
+	s.After, s.Before = after, before
+	return waits, err
+}
+
+// place checks what a line's step comes after and before are among names,
+// the run's steps, or kinds this Mac doesn't use, which it's then placed
+// without; it returns the steps it comes after, a wait for each of a
+// kind's things it comes after, as in cask:1password, and the steps it
+// comes before. An error says what isn't a step or a kind.
+func (r *run) place(after, before []string, names map[string]bool) (steps []string, waits []engine.Wait, ahead []string, err error) {
 	var wrong []string
-	for _, need := range s.Needs {
-		if !names[need] {
-			wrong = append(wrong, "it needs "+need+", which isn't a step here")
+	for _, a := range after {
+		kindName, thing, isThing := strings.Cut(a, ":")
+		switch {
+		case isThing && names[kindName]:
+			waits = append(waits, engine.Wait{Step: kindName, Thing: thing, Ready: r.installed(kindName, thing)})
+		case names[a]:
+			steps = append(steps, a)
+		case !slices.Contains(r.allKinds, kindName):
+			wrong = append(wrong, "it comes after "+a+", which isn't a step")
 		}
 	}
-	s.After = slices.DeleteFunc(s.After, func(after string) bool {
-		if names[after] {
+	for _, b := range before {
+		switch {
+		case names[b]:
+			ahead = append(ahead, b)
+		case !slices.Contains(r.allKinds, b):
+			wrong = append(wrong, "it comes before "+b+", which isn't a step")
+		}
+	}
+	if len(wrong) > 0 {
+		return steps, waits, ahead, errors.New(strings.Join(wrong, "; "))
+	}
+	return steps, waits, ahead, nil
+}
+
+// installed reports whether the kind named kind has thing installed, by its
+// full name, or a tap's thing by its own, as Homebrew lists a tap's cask.
+func (r *run) installed(kindName, thing string) func(context.Context) bool {
+	short := thing[strings.LastIndex(thing, "/")+1:]
+	return func(ctx context.Context) bool {
+		have, err := r.kindsByName[kindName].Installed(ctx)
+		if err != nil {
 			return false
 		}
-		if !slices.Contains(r.allKinds, after) {
-			wrong = append(wrong, "it comes after "+after+", which isn't a step")
-		}
-		return true
-	})
-	if len(wrong) > 0 {
-		return errors.New(strings.Join(wrong, "; "))
+		return slices.ContainsFunc(have, func(in kind.Installed) bool {
+			return in.Name == thing || in.Name[strings.LastIndex(in.Name, "/")+1:] == short
+		})
 	}
-	return nil
 }
 
 // stepOptions are kit step add's options.
 type stepOptions struct {
-	after, needs []string
-	admin        bool
+	after, before []string
+	sudo          bool
 	addOptions
 }
 
@@ -101,10 +163,11 @@ func newStepCommand(a *app) *cobra.Command {
 		Short: "Declare a step of your own, its script a template to fill in (--shared: every Mac)",
 		Long: `Declare a step of your own: set-up that's done or not, as a script in
 kit-config, its folder's other files its data. kit runs the script as run
-check (exit 0: done; 1: not done; its first line saying how it stands) and,
-when it isn't done, as run apply, then checks again. --after names a step it's
-applied after, --needs one that must stand ok first, each as often as wanted;
---admin says applying needs an administrator's password.
+check (exit 0: done; 1: not done; 3: can't be done yet; its first line saying
+how it stands) and, when it isn't done, as run apply, then checks again.
+--after names a step it's applied after, or one of a step's things, as in
+cask:1password; --before a step applied after it; each as often as wanted.
+--sudo says applying needs an administrator's password.
 
 The script starts as a template following that contract: write its check and
 apply.` + declaredWhere,
@@ -115,9 +178,9 @@ apply.` + declaredWhere,
 			})
 		},
 	}
-	add.Flags().StringArrayVar(&opts.after, "after", nil, "a step it's applied after")
-	add.Flags().StringArrayVar(&opts.needs, "needs", nil, "a step that must stand ok first")
-	add.Flags().BoolVar(&opts.admin, "admin", false, "applying it needs an administrator's password")
+	add.Flags().StringArrayVar(&opts.after, "after", nil, "a step it's applied after, or one of a step's things, as in cask:1password")
+	add.Flags().StringArrayVar(&opts.before, "before", nil, "a step applied after it")
+	add.Flags().BoolVar(&opts.sudo, "sudo", false, "applying it needs an administrator's password")
 	add.Flags().BoolVar(&opts.shared, "shared", false, "declare for every Mac, not this one alone")
 	add.Flags().StringVar(&opts.note, "note", "", "why it's declared, kept after it")
 	return newLineCommand(a, stepCommand, "Steps of your own, each a script in kit-config that sets something up", add)
@@ -131,11 +194,11 @@ func (a *app) addStep(ctx context.Context, r *run, name, does string, opts stepO
 	for _, after := range opts.after {
 		words = append(words, "--after", config.Quote(after))
 	}
-	for _, need := range opts.needs {
-		words = append(words, "--needs", config.Quote(need))
+	for _, before := range opts.before {
+		words = append(words, "--before", config.Quote(before))
 	}
-	if opts.admin {
-		words = append(words, "--admin")
+	if opts.sudo {
+		words = append(words, "--sudo")
 	}
 	entry := config.Entry{Name: name, Value: strings.Join(words, " "), Note: opts.note, Scope: scope}
 	c := startChanges(r, []string{name})
@@ -152,7 +215,7 @@ func (a *app) addStep(ctx context.Context, r *run, name, does string, opts stepO
 		if names[name] {
 			return fail(fmt.Errorf("a step called %s is there already", name))
 		}
-		if err := r.placeScript(&s, names); err != nil {
+		if _, err := r.placeScript(&s, names); err != nil {
 			return fail(err)
 		}
 		if _, err := os.Stat(s.Dir); !errors.Is(err, fs.ErrNotExist) {

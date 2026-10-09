@@ -4,10 +4,12 @@
 # A step of your own. kit runs this as `run check` or `run apply`, in this
 # folder, with nothing on its input:
 # - check says how it stands, and changes nothing: exit 0 when it's done, 1
-#   when it isn't, the first line it prints saying how it stands.
+#   when it isn't, 3 when it can't be done yet as what it needs isn't there
+#   (kit doesn't apply it then), the first line it prints saying how it
+#   stands.
 # - apply does it, safe to run again; kit checks again afterwards. When it
 #   fails, the last line it prints says why.
-# The folder's other files are the step's own data. A step declared --admin
+# The folder's other files are the step's own data. A step declared --sudo
 # may use sudo -n: kit has asked for the password before applying.
 set -euo pipefail
 

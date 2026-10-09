@@ -67,7 +67,7 @@ func TestStepsThatDontRead(t *testing.T) {
 	w := laptopWorld(t)
 	w.writeSection(t, "laptop", "steps", strings.Join([]string{
 		`odd "Does something" --sideways`,
-		`lost "Needs what isn't here" --needs nothing --after brw`,
+		`lost "Comes before what isn't here" --before nothing --after brw`,
 		`later "Comes after a kind this Mac doesn't use" --after mas`,
 		`gone "Has no script"`,
 	}, "\n")+"\n")
@@ -76,9 +76,9 @@ func TestStepsThatDontRead(t *testing.T) {
 	out, _, code := w.run(t, "status")
 	for _, want := range []string{
 		`odd failed laptop/declarations:`,
-		`"--sideways" isn't one of a step's options: --after, --needs and --admin`,
+		`"--sideways" isn't one of a step's options: --after, --before and --sudo`,
 		"lost failed laptop/declarations:",
-		"it needs nothing, which isn't a step here; it comes after brw, which isn't a step",
+		"it comes after brw, which isn't a step; it comes before nothing, which isn't a step",
 		"later ok done",
 		"gone failed laptop/steps/gone/run isn't there",
 	} {
@@ -94,7 +94,7 @@ func TestStepsThatDontRead(t *testing.T) {
 
 func TestAStepWaitsForThePassword(t *testing.T) {
 	w := laptopWorld(t)
-	w.writeSection(t, "laptop", "steps", `trust "Trusts the authority" --admin`+"\n")
+	w.writeSection(t, "laptop", "steps", `trust "Trusts the authority" --sudo`+"\n")
 	run := w.stepScript(t, "laptop", "trust")
 	w.fake.On(run, "check").Exits(1).Prints("not trusted\n")
 	w.fake.On("sudo", "-n", "true").Exits(1)
@@ -106,11 +106,11 @@ func TestAStepWaitsForThePassword(t *testing.T) {
 func TestAddAndRemoveAStep(t *testing.T) {
 	w := laptopWorld(t)
 	w.expectSync([]string{"laptop/declarations", "laptop/steps/tool"}, "kit step add tool (laptop): from its maker")
-	out, _, code := w.run(t, "step", "add", "tool", "Installs the tool, from its maker", "--after", "brew", "--admin", "--note", "from its maker")
+	out, _, code := w.run(t, "step", "add", "tool", "Installs the tool, from its maker", "--after", "brew", "--sudo", "--note", "from its maker")
 	if code != 0 || !strings.Contains(out, "tool ok declared in laptop; its script, laptop/steps/tool/run, is a template: write its check and apply") {
 		t.Errorf("kit step add printed\n%s exit %d", out, code)
 	}
-	if got := w.readSection(t, "laptop", "steps"); got != `tool "Installs the tool, from its maker" --after brew --admin   # from its maker`+"\n" {
+	if got := w.readSection(t, "laptop", "steps"); got != `tool "Installs the tool, from its maker" --after brew --sudo   # from its maker`+"\n" {
 		t.Errorf("[steps] = %q", got)
 	}
 	script := filepath.Join(w.home, ".config", "kit", "laptop", "steps", "tool", "run")
@@ -124,7 +124,8 @@ func TestAddAndRemoveAStep(t *testing.T) {
 	}{
 		{[]string{"tool", "Again"}, "a step called tool is there already"},
 		{[]string{"brew", "Shadows kit's own"}, "a step called brew is there already"},
-		{[]string{"other", "Needs what isn't here", "--needs", "nothing"}, "it needs nothing, which isn't a step here"},
+		{[]string{"other", "Comes after what isn't here", "--after", "nothing"}, "it comes after nothing, which isn't a step"},
+		{[]string{"other", "Comes before what isn't here", "--before", "nothing"}, "it comes before nothing, which isn't a step"},
 	} {
 		out, _, code := w.run(t, append([]string{"step", "add"}, tc.args...)...)
 		if code != 1 || !strings.Contains(out, tc.want) {

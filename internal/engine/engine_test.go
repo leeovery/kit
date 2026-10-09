@@ -175,7 +175,7 @@ func TestARunsEvents(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []event.Event{
-		event.RunStarted{Time: clock, Command: "status", Machine: "laptop", Version: "0.1.0", Steps: []event.Step{{Name: "homebrew", Title: "Homebrew"}, {Name: "brew", Title: "brew", Needs: []string{"homebrew"}}}},
+		event.RunStarted{Time: clock, Command: "status", Machine: "laptop", Version: "0.1.0", Steps: []event.Step{{Name: "homebrew", Title: "Homebrew"}, {Name: "brew", Title: "brew", Waits: []string{"homebrew"}}}},
 		event.StepStarted{Time: clock, Step: "homebrew", Doing: "checking"},
 		event.StepFinished{Time: clock, Step: "homebrew", Result: check.Result{State: check.OK, Summary: "/opt/homebrew"}},
 		event.StepStarted{Time: clock, Step: "brew", Doing: "checking"},
@@ -524,5 +524,122 @@ func TestACheckThatHangsFails(t *testing.T) {
 	stuck, quick := report.Results["stuck"], report.Results["quick"]
 	if stuck.State != check.Failed || stuck.Reason != "didn't answer in 50ms, tried twice" || tries.Load() != 2 || quick.State != check.OK {
 		t.Errorf("stuck = %+v after %d tries, quick = %+v", stuck, tries.Load(), quick)
+	}
+}
+
+// A step before another is applied first, as though the other named it in
+// its After; one before a step that isn't there is refused.
+func TestBefore(t *testing.T) {
+	var mu sync.Mutex
+	var order []string
+	applied := func(name string) func(context.Context, check.Result) error {
+		return func(context.Context, check.Result) error {
+			mu.Lock()
+			defer mu.Unlock()
+			order = append(order, name)
+			return nil
+		}
+	}
+	notYet := func(context.Context) check.Result { return check.Result{State: check.Attention} }
+	p, err := engine.New(
+		engine.Step{Name: "secret", Check: notYet, Apply: applied("secret")},
+		engine.Step{Name: "sign-in", Before: []string{"secret"}, Check: notYet, Apply: applied("sign-in")},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Apply(t.Context(), &recorder{}, engine.Options{Jobs: 4}); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(order, []string{"sign-in", "secret"}) {
+		t.Errorf("applied in the order %q, want sign-in, then secret", order)
+	}
+	if _, err := engine.New(engine.Step{Name: "a", Before: []string{"nowhere"}, Check: ok("")}); err == nil {
+		t.Error("a step before one that isn't there was taken")
+	}
+}
+
+// A step waiting for one thing is applied once that thing is in place,
+// while the step putting it there still runs; or, when it never is, once
+// that step has finished. A check alone waits for nothing.
+func TestWaits(t *testing.T) {
+	defer engine.SetWaitPoll(time.Millisecond)()
+	var ready atomic.Bool
+	release := make(chan struct{})
+	var sawCaskRunning atomic.Bool
+	casksDone := make(chan struct{})
+	p, err := engine.New(
+		engine.Step{Name: "cask", Check: func(context.Context) check.Result { return check.Result{State: check.Attention} },
+			Apply: func(context.Context, check.Result) error {
+				ready.Store(true)
+				<-release
+				close(casksDone)
+				return nil
+			}},
+		engine.Step{Name: "sign-in", Waits: []engine.Wait{{Step: "cask", Thing: "1password", Ready: func(context.Context) bool { return ready.Load() }}},
+			Check: func(context.Context) check.Result {
+				select {
+				case <-casksDone:
+				default:
+					sawCaskRunning.Store(true)
+				}
+				close(release)
+				return check.Result{State: check.OK}
+			}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := &recorder{}
+	if _, err := p.Apply(t.Context(), rec, engine.Options{Jobs: 4}); err != nil {
+		t.Fatal(err)
+	}
+	if !sawCaskRunning.Load() {
+		t.Error("the step waiting for 1password waited for every cask: want it applied once 1password was in")
+	}
+	var said bool
+	for _, e := range rec.events {
+		if s, ok := e.(event.StepStarted); ok && s.Step == "sign-in" && s.Doing == "waiting for 1password" {
+			said = true
+		}
+	}
+	if !said {
+		t.Error("it didn't say what it was waiting for")
+	}
+
+	never, err := engine.New(
+		engine.Step{Name: "cask", Check: ok("")},
+		engine.Step{Name: "sign-in", Waits: []engine.Wait{{Step: "cask", Thing: "1password", Ready: func(context.Context) bool { return false }}}, Check: ok("")},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() {
+		_, _ = never.Apply(t.Context(), &recorder{}, engine.Options{Jobs: 4})
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("a step waiting for a thing never put in place waited on after its step finished")
+	}
+}
+
+// A step whose apply says it can't be applied yet isn't failed: it says
+// why, and doesn't stand ok.
+func TestNotYet(t *testing.T) {
+	p, err := engine.New(engine.Step{Name: "secret", Check: func(context.Context) check.Result { return check.Result{State: check.Attention} },
+		Apply: func(context.Context, check.Result) error { return engine.NotYet("1Password isn't signed in") }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := &recorder{}
+	report, err := p.Apply(t.Context(), rec, engine.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res := report.Results["secret"]; res.State != check.Deferred || res.Reason != "1Password isn't signed in" {
+		t.Errorf("secret = %+v, want deferred, saying why", res)
 	}
 }

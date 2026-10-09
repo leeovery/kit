@@ -14,6 +14,7 @@ package secret
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -26,6 +27,7 @@ import (
 	"time"
 
 	"github.com/leeovery/kit/internal/config"
+	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/runner"
 )
@@ -38,8 +40,12 @@ const EnvFile = ".secrets.zsh"
 // it has hung after a restart and over remote connections.
 const opTimeout = 15 * time.Second
 
-// SignIn says how to have 1Password answer.
+// SignIn says how to have 1Password answer, once it's signed in.
 const SignIn = "1Password doesn't answer: unlock its app, with Settings › Developer › Integrate with 1Password CLI on; over a remote connection, sign in with a password in the shell kit runs from: eval $(OP_BIOMETRIC_UNLOCK_ENABLED=false op signin)"
+
+// SignedOut says what's wanting when 1Password's CLI lists no account: its
+// app isn't signed in, or the CLI isn't turned on in it.
+const SignedOut = "1Password isn't signed in, or its CLI isn't turned on: sign in to its app, then turn on Settings › Developer › Integrate with 1Password CLI"
 
 // Secret is a declared secret.
 type Secret struct {
@@ -245,16 +251,28 @@ func (r Report) Summary() string {
 // approve kit's use of it, a fingerprint at the prompt it shows.
 const signInTimeout = time.Minute
 
-// Answers reports whether 1Password answers: a session open already (op
+// Ready says whether 1Password answers: nil for a session open already (op
 // whoami, which never opens one), or one the app opens, asking for a
-// fingerprint, within a minute (listing the vaults needs one).
-func (s *Secrets) Answers(ctx context.Context) bool {
+// fingerprint, within a minute (listing the vaults needs one). Listing no
+// account, it isn't signed in, or its CLI isn't on, and it's not ready yet,
+// said at once, with nothing asked of anyone.
+func (s *Secrets) Ready(ctx context.Context) error {
 	if _, err := s.run.Run(ctx, runner.Command{Name: "op", Args: []string{"whoami"}, Timeout: opTimeout}); err == nil {
-		return true
+		return nil
 	}
-	_, err := s.run.Run(ctx, runner.Command{Name: "op", Args: []string{"vault", "list", "--format", "json"}, Timeout: signInTimeout})
-	return err == nil
+	res, err := s.run.Run(ctx, runner.Command{Name: "op", Args: []string{"account", "list", "--format", "json"}, Timeout: opTimeout})
+	var accounts []json.RawMessage
+	if err != nil || json.Unmarshal(res.Stdout, &accounts) != nil || len(accounts) == 0 {
+		return engine.NotYet(SignedOut)
+	}
+	if _, err := s.run.Run(ctx, runner.Command{Name: "op", Args: []string{"vault", "list", "--format", "json"}, Timeout: signInTimeout}); err != nil {
+		return errors.New(SignIn)
+	}
+	return nil
 }
+
+// Answers reports whether 1Password answers, as Ready says.
+func (s *Secrets) Answers(ctx context.Context) bool { return s.Ready(ctx) == nil }
 
 // read reads a value from 1Password, its output kept from every report,
 // without the newline op ends it with.
@@ -273,8 +291,8 @@ func (s *Secrets) read(ctx context.Context, ref string) (string, error) {
 // answer.
 func (s *Secrets) Sync(ctx context.Context) (Report, error) {
 	report := Report{Failed: map[string]string{}}
-	if !s.Answers(ctx) {
-		return report, errors.New(SignIn)
+	if err := s.Ready(ctx); err != nil {
+		return report, err
 	}
 	old, oldOrder, err := s.envLines()
 	if err != nil {

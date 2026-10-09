@@ -506,10 +506,6 @@ func (c *Config) declared(kind, scope string) ([]Entry, error) {
 	return out, nil
 }
 
-// Declared reads what kind declares in scope's declarations alone: the
-// shared folder's, or a Mac's.
-func (c *Config) Declared(kind, scope string) ([]Entry, error) { return c.declared(kind, scope) }
-
 // List reads what kind declares for the Mac named mac: the shared file's,
 // then the Mac's own. A thing may be declared in one of them, once.
 func (c *Config) List(kind, mac string) (List, error) {

@@ -21,11 +21,15 @@ func TestParseScript(t *testing.T) {
 		want         steps.Script
 	}{
 		{value: `"Installs the tool"`, want: steps.Script{Does: "Installs the tool"}},
-		{value: `"Trusts the authority" --after brew --needs secret --needs fonts --admin`, want: steps.Script{Does: "Trusts the authority", After: []string{"brew"}, Needs: []string{"secret", "fonts"}, Admin: true}},
-		{value: "--admin", wrong: "what the step does comes after its name, in quotes"},
-		{value: `"Does" --sideways`, wrong: `"--sideways" isn't one of a step's options: --after, --needs and --admin`},
+		{value: `"Trusts the authority" --after brew --after cask:1password --before fonts --sudo`, want: steps.Script{Does: "Trusts the authority", After: []string{"brew", "cask:1password"}, Before: []string{"fonts"}, Admin: true}},
+		{value: "--sudo", wrong: "what the step does comes after its name, in quotes"},
+		{value: `"Does" --sideways`, wrong: `"--sideways" isn't one of a step's options: --after, --before and --sudo`},
 		{value: `"Does" --after`, wrong: "--after needs a step's name after it"},
-		{value: `"Does" --needs --admin`, wrong: "--needs needs a step's name after it"},
+		{value: `"Does" --before --sudo`, wrong: "--before needs a step's name after it"},
+		{value: `"Does" --before cask:1password`, wrong: "--before a step"},
+		{value: `"Does" --after cask:`, wrong: "one of its things as in cask:1password"},
+		{value: `"Does" --needs secret`, wrong: "--needs is --after now"},
+		{value: `"Does" --admin`, wrong: "--admin is --sudo now"},
 		{value: `"Does`, wrong: "a quote isn't closed"},
 	} {
 		got, err := steps.ParseScript("/config", config.Entry{Name: "tool", Value: tc.value, Scope: "laptop"})
@@ -42,7 +46,7 @@ func TestParseScript(t *testing.T) {
 		if got.Name != "tool" || got.Folder != "laptop/steps/tool" || got.Dir != filepath.Join("/config", "laptop", "steps", "tool") {
 			t.Errorf("%s: placed %+v", tc.value, got)
 		}
-		if got.Does != tc.want.Does || !slices.Equal(got.After, tc.want.After) || !slices.Equal(got.Needs, tc.want.Needs) || got.Admin != tc.want.Admin {
+		if got.Does != tc.want.Does || !slices.Equal(got.After, tc.want.After) || !slices.Equal(got.Before, tc.want.Before) || got.Admin != tc.want.Admin {
 			t.Errorf("%s: = %+v, want %+v", tc.value, got, tc.want)
 		}
 	}
@@ -75,7 +79,7 @@ func script(t *testing.T, s steps.Script) steps.Script {
 }
 
 func TestScriptStepChecks(t *testing.T) {
-	s := script(t, steps.Script{Does: "Installs the tool", After: []string{"brew"}, Needs: []string{"secret"}, Admin: true})
+	s := script(t, steps.Script{Does: "Installs the tool", After: []string{"brew"}, Before: []string{"fonts"}, Admin: true})
 	run := filepath.Join(s.Dir, "run")
 	for _, tc := range []struct {
 		name   string
@@ -87,6 +91,7 @@ func TestScriptStepChecks(t *testing.T) {
 		{"not done", func(sc *runnertest.Script) { sc.Exits(1).Prints("not installed\n") }, check.Result{State: check.Attention, Summary: "not installed"}},
 		{"not done quietly", func(sc *runnertest.Script) { sc.Exits(1) }, check.Result{State: check.Attention, Summary: "not done"}},
 		{"can't tell", func(sc *runnertest.Script) { sc.Exits(2).Prints("can't read the keychain\n") }, check.Result{State: check.Failed, Reason: "can't read the keychain"}},
+		{"not yet", func(sc *runnertest.Script) { sc.Exits(3).Prints("no key file: kit secret sync writes it\n") }, check.Result{State: check.Deferred, Reason: "no key file: kit secret sync writes it"}},
 		{"crashed", func(sc *runnertest.Script) {
 			sc.Exits(127).Prints("checking\n").PrintsToStderr("run: line 4: tool: command not found\n")
 		}, check.Result{State: check.Failed, Reason: "run: line 4: tool: command not found"}},
@@ -112,7 +117,7 @@ func TestScriptStepChecks(t *testing.T) {
 		}
 	}
 	step := steps.ScriptStep(runnertest.New(t), &steps.Admin{}, s)
-	if step.Name != "tool" || step.Title != "tool" || step.Area != steps.AreaSteps || !step.Admin || !slices.Equal(step.After, []string{"brew"}) || !slices.Equal(step.Needs, []string{"secret"}) {
+	if step.Name != "tool" || step.Title != "tool" || step.Area != steps.AreaSteps || !step.Admin || !slices.Equal(step.After, []string{"brew"}) || !slices.Equal(step.Before, []string{"fonts"}) {
 		t.Errorf("step = %+v", step)
 	}
 }

@@ -18,7 +18,7 @@ import (
 	kitstate "github.com/leeovery/kit/internal/state"
 )
 
-const appsToml = "format = 1\nprimary = \"laptop\"\nterminal = \"ghostty\"\npassword_manager = \"1password\"\n[macs.laptop]\n[macs.studio]\n"
+const appsToml = "format = 1\nprimary = \"laptop\"\nterminal = \"ghostty\"\n[macs.laptop]\n[macs.studio]\n"
 
 // read leaves the config repository's files where signing in does, and
 // names this Mac, as the boot order finds them.
@@ -60,8 +60,7 @@ func TestOrder(t *testing.T) {
 		name, toml string
 		want       []string
 	}{
-		{"a terminal and a password manager", appsToml, []string{"mac", "password", "homebrew", "apps", "kit-config", "full-disk-access", "terminal"}},
-		{"a password manager", "format = 1\nprimary = \"laptop\"\npassword_manager = \"1password\"\n[macs.laptop]\n", []string{"mac", "password", "homebrew", "apps", "kit-config"}},
+		{"a terminal", appsToml, []string{"mac", "password", "homebrew", "apps", "kit-config", "full-disk-access", "terminal"}},
 		{"neither", kitToml, []string{"mac", "password", "homebrew", "kit-config"}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -206,23 +205,17 @@ func TestHomebrew(t *testing.T) {
 func TestApps(t *testing.T) {
 	run := runnertest.New(t)
 	b, _ := newBoot(t, run, GitHub{}, &asker{})
-	read(t, b, map[string]string{config.File: appsToml, "shared/declarations": "[homebrew casks]\n1password/tap/1password-cli\nghostty\n"}, "laptop")
-	bundle(t, b, "1Password.app", "8.12.40")
-	// The password manager's tool is installed as the config declares it,
-	// from its tap.
-	run.On("brew", "install", "--cask", "ghostty", "1password/tap/1password-cli").Does(func() {
-		bundle(t, b, "Ghostty.app", "1.3.1")
-		run.On("op", "--version").Prints("2.32.0\n")
-	})
+	read(t, b, map[string]string{config.File: appsToml}, "laptop")
+	run.On("brew", "install", "--cask", "ghostty").Does(func() { bundle(t, b, "Ghostty.app", "1.3.1") })
 	step := b.appsStep(b.apps(b.config()))
 	found := step.Check(context.Background())
-	if found.State != check.Attention || found.Summary != "to install: Ghostty and 1Password CLI" {
+	if found.State != check.Attention || found.Summary != "to install: Ghostty" {
 		t.Fatalf("check before = %+v", found)
 	}
 	if err := step.Apply(context.Background(), found); err != nil {
 		t.Fatalf("apply = %v", err)
 	}
-	if res := step.Check(context.Background()); res.State != check.OK || res.Summary != "Ghostty 1.3.1 · 1Password 8.12.40 · 1Password CLI 2.32.0" {
+	if res := step.Check(context.Background()); res.State != check.OK || res.Summary != "Ghostty 1.3.1" {
 		t.Errorf("check after = %+v", res)
 	}
 }

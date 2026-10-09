@@ -109,8 +109,8 @@ func (a *app) addSecret(ctx context.Context, r *run, names []string, opts addOpt
 	}
 	c := startChanges(r, []string{name})
 	c.step(ctx, name, func(ctx context.Context) check.Result {
-		if !k.Answers(ctx) {
-			return check.Result{State: check.Failed, Reason: secret.SignIn}
+		if err := k.Ready(ctx); err != nil {
+			return check.Result{State: check.Failed, Reason: err.Error()}
 		}
 		short := ""
 		var err error

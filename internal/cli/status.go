@@ -388,8 +388,9 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 		_ = log.Close()
 		return nil, err
 	}
-	if len(byHand.Entries) > 0 {
-		checks = append(checks, steps.Manual(observed, home, dirs.State, byHand))
+	plain, ordered := steps.SplitManual(home, byHand)
+	if len(plain.Entries) > 0 {
+		checks = append(checks, steps.Manual(observed, home, dirs.State, plain))
 	}
 	hourly, daily, err := a.jobs(r)
 	if err != nil {
@@ -404,9 +405,19 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 	for i := range base {
 		base[i].Part = partOf(base[i].Name)
 	}
+	// A step by hand that comes due while kit applies at a terminal is
+	// raised there, and waited on.
+	var raise *steps.Raise
+	if slices.Contains(applies, command) && a.pretty(a.Stdout) {
+		raise = &steps.Raise{Sink: sink, Now: a.Now, Notify: steps.Notify(observed)}
+	}
 	scripts, err := r.scriptSteps(base)
+	var byHandOwn []engine.Step
 	if err == nil {
-		r.steps = slices.Concat(base, scripts)
+		byHandOwn, err = r.manualSteps(ordered, slices.Concat(base, scripts), raise)
+	}
+	if err == nil {
+		r.steps = slices.Concat(base, scripts, byHandOwn)
 		r.pipeline, err = engine.New(r.steps...)
 	}
 	if err != nil {
@@ -421,14 +432,10 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 	return r, nil
 }
 
-// lead puts steps at the head of the run, and has each of the run's steps
-// named in needs need those steps too: the bootstrap's own steps lead kit
-// apply's, and what reads secrets waits for the password manager.
-func (r *run) lead(steps []engine.Step, needs map[string][]string) error {
+// lead puts steps at the head of the run: the bootstrap's own steps lead
+// kit apply's.
+func (r *run) lead(steps []engine.Step) error {
 	all := slices.Concat(steps, r.steps)
-	for i := range all {
-		all[i].Needs = slices.Concat(all[i].Needs, needs[all[i].Name])
-	}
 	p, err := engine.New(all...)
 	if err != nil {
 		return err
@@ -436,6 +443,9 @@ func (r *run) lead(steps []engine.Step, needs map[string][]string) error {
 	r.pipeline, r.steps = p, all
 	return nil
 }
+
+// applies are the runs that apply the whole config.
+var applies = []string{"apply", "bootstrap"}
 
 // readOnly are the runs that change nothing, so that nothing they run asks
 // for an administrator's password.

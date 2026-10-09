@@ -44,8 +44,14 @@ type Step struct {
 	Needs []string
 	// After are steps it's applied after, whether or not they stand ok, as
 	// a kind's program is installed by an earlier step: a check doesn't wait
-	// for them, and a step a run doesn't take is no wait at all.
-	After []string
+	// for them, and a step a run doesn't take is no wait at all. Before are
+	// the steps applied after it, each as though it named it in its After.
+	After, Before []string
+	// Waits are things it's applied after, one at a time: each one of
+	// another step's things, waited for until it's in place, or until that
+	// step has finished, whichever comes first, as a step waits for the one
+	// cask it's about while the rest still install.
+	Waits []Wait
 	// Check finds out how the step stands: cheap, and without side effects.
 	Check func(ctx context.Context) check.Result
 	// Apply does what the step is for, given what its check found: safe to
@@ -58,6 +64,26 @@ type Step struct {
 	// the command settles before anything is applied.
 	Admin bool
 }
+
+// Wait is a thing a step is applied after: one of the things another step
+// puts in place, by its step's name and its own, as in cask:1password, and
+// whether it's in place yet.
+type Wait struct {
+	Step, Thing string
+	Ready       func(ctx context.Context) bool
+}
+
+// waitPoll is how often a step waiting for a thing looks again.
+var waitPoll = 3 * time.Second
+
+// NotYet is what applying a step returns when the step can't be applied
+// yet, as what it needs isn't there: the step doesn't stand ok, isn't
+// failed, and says why.
+func NotYet(reason string) error { return &notYet{reason} }
+
+type notYet struct{ reason string }
+
+func (n *notYet) Error() string { return n.reason }
 
 // title is the step's title, or its name.
 func (s Step) title() string {
@@ -92,6 +118,23 @@ func New(steps ...Step) (*Pipeline, error) {
 		}
 		byName[s.Name] = s
 	}
+	steps = slices.Clone(steps)
+	at := make(map[string]int, len(steps))
+	for i, s := range steps {
+		at[s.Name] = i
+	}
+	for _, s := range steps {
+		for _, before := range s.Before {
+			i, ok := at[before]
+			if !ok {
+				return nil, fmt.Errorf("step %s comes before %s, which isn't a step", s.Name, before)
+			}
+			steps[i].After = append(slices.Clone(steps[i].After), s.Name)
+		}
+	}
+	for _, s := range steps {
+		byName[s.Name] = s
+	}
 	for _, s := range steps {
 		for _, need := range s.Needs {
 			if _, ok := byName[need]; !ok {
@@ -101,6 +144,11 @@ func New(steps ...Step) (*Pipeline, error) {
 		for _, after := range s.After {
 			if _, ok := byName[after]; !ok {
 				return nil, fmt.Errorf("step %s comes after %s, which isn't a step", s.Name, after)
+			}
+		}
+		for _, w := range s.Waits {
+			if _, ok := byName[w.Step]; !ok || w.Ready == nil {
+				return nil, fmt.Errorf("step %s comes after %s:%s, and %s isn't a step", s.Name, w.Step, w.Thing, w.Step)
 			}
 		}
 	}
@@ -251,7 +299,11 @@ func (p *Pipeline) Planned(opts Options) ([]event.Step, error) {
 
 // info is the step as a run's start lists it.
 func (s Step) info() event.Step {
-	return event.Step{Name: s.Name, Title: s.title(), Area: s.Area, Part: s.Part, Waiting: s.Waiting, Needs: s.Needs}
+	waits := slices.Concat(s.Needs, s.After)
+	for _, w := range s.Waits {
+		waits = append(waits, w.Step)
+	}
+	return event.Step{Name: s.Name, Title: s.title(), Area: s.Area, Part: s.Part, Waiting: s.Waiting, Waits: waits}
 }
 
 func (p *Pipeline) run(ctx context.Context, sink event.Sink, opts Options, apply bool) (Report, error) {
@@ -281,6 +333,10 @@ func (p *Pipeline) run(ctx context.Context, sink event.Sink, opts Options, apply
 		results:  make(map[string]check.Result, len(steps)),
 		started:  make(map[string]bool, len(steps)),
 		finished: make(chan outcome),
+		over:     make(map[string]chan struct{}, len(steps)),
+	}
+	for _, s := range steps {
+		d.over[s.Name] = make(chan struct{})
 	}
 	d.run(ctx, steps, cmp.Or(opts.Jobs, DefaultJobs))
 
@@ -304,6 +360,9 @@ type dispatch struct {
 	results  map[string]check.Result
 	started  map[string]bool
 	finished chan outcome
+	// over are closed as each step finishes, for a step waiting on one of
+	// its things.
+	over map[string]chan struct{}
 }
 
 // outcome is a step done, as its goroutine tells the dispatcher.
@@ -404,12 +463,18 @@ func (d *dispatch) unmet(s Step) []string {
 // ok, then checks it again. A step its own check defers, as what it needs
 // isn't there, isn't applied.
 func (d *dispatch) step(ctx context.Context, s Step) check.Result {
+	if d.apply {
+		d.waitFor(ctx, s)
+	}
 	d.sink.Emit(event.StepStarted{Time: d.now(), Step: s.Name, Doing: "checking"})
 	res := d.check(ctx, s)
 	if d.apply && res.State != check.Deferred && (res.State != check.OK || res.Actions()) && s.Apply != nil && ctx.Err() == nil {
 		d.sink.Emit(event.StepStarted{Time: d.now(), Step: s.Name, Doing: "applying"})
 		before := res
 		if err := applySafely(event.WithChanging(ctx), s, res); err != nil {
+			if _, ok := errors.AsType[*notYet](err); ok {
+				return check.Result{State: check.Deferred, Reason: err.Error()}
+			}
 			return check.Result{State: check.Failed, Reason: err.Error()}
 		}
 		res = d.check(ctx, s)
@@ -419,6 +484,30 @@ func (d *dispatch) step(ctx context.Context, s Step) check.Result {
 		res.Items = append(res.Items, check.Item{ID: s.Name + ":manual", Name: s.Manual, State: "manual"})
 	}
 	return res
+}
+
+// waitFor waits for each of the things s is applied after: till it's in
+// place, its step has finished, or the run's stopped; saying, meanwhile,
+// what it's waiting for.
+func (d *dispatch) waitFor(ctx context.Context, s Step) {
+	for _, w := range s.Waits {
+		if w.Ready(ctx) {
+			continue
+		}
+		d.sink.Emit(event.StepStarted{Time: d.now(), Step: s.Name, Doing: "waiting for " + w.Thing})
+		tick := time.NewTicker(waitPoll)
+		for waiting := true; waiting; {
+			select {
+			case <-ctx.Done():
+				waiting = false
+			case <-d.over[w.Step]:
+				waiting = false
+			case <-tick.C:
+				waiting = !w.Ready(ctx)
+			}
+		}
+		tick.Stop()
+	}
 }
 
 // done are the items before had an action for that after no longer has:
@@ -444,6 +533,7 @@ func (d *dispatch) finish(s Step, res check.Result, took time.Duration) {
 	}
 	d.results[s.Name] = res
 	d.sink.Emit(event.StepFinished{Time: d.now(), Step: s.Name, Result: res, Duration: took})
+	close(d.over[s.Name])
 }
 
 // checkSafely runs s's check, a panic in it failing the step rather than

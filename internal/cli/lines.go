@@ -39,7 +39,7 @@ func (a *app) addLine(ctx context.Context, r *run, name string, args []string, d
 	case kind == config.ManualKind:
 		value = config.Quote(args[1])
 		if dash >= 0 {
-			value += " -- " + quoteAll(args[2:])
+			value += " --test " + quoteAll(args[2:])
 		}
 	case len(args) < 2 || dash != 1:
 		return errors.New("say it as " + usage)

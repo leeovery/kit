@@ -50,9 +50,6 @@ type Config struct {
 	// by its name in apps.Terminals: none when "", and the boot carries on
 	// in Terminal.
 	Terminal string
-	// PasswordManager is the password manager a new Mac's boot installs, by
-	// its name in apps.PasswordManagers: none when "".
-	PasswordManager string
 }
 
 // DefaultNightlyAt is when the nightly run is due when kit.toml doesn't say.
@@ -66,14 +63,13 @@ type Mac struct {
 
 // file is kit.toml as written.
 type file struct {
-	Format          int                `toml:"format"`
-	MinimumKit      string             `toml:"minimum_kit"`
-	Primary         string             `toml:"primary"`
-	NightlyAt       string             `toml:"nightly_at"`
-	PrefsRepo       string             `toml:"prefs_repo"`
-	Terminal        string             `toml:"terminal"`
-	PasswordManager string             `toml:"password_manager"`
-	Macs            map[string]macFile `toml:"macs"`
+	Format     int                `toml:"format"`
+	MinimumKit string             `toml:"minimum_kit"`
+	Primary    string             `toml:"primary"`
+	NightlyAt  string             `toml:"nightly_at"`
+	PrefsRepo  string             `toml:"prefs_repo"`
+	Terminal   string             `toml:"terminal"`
+	Macs       map[string]macFile `toml:"macs"`
 }
 
 type macFile struct {
@@ -130,12 +126,9 @@ func Load(dir string) (*Config, error) {
 	if _, ok := apps.Terminals[f.Terminal]; f.Terminal != "" && !ok {
 		return nil, fmt.Errorf("%s: kit doesn't know the terminal %q: one of %s", File, f.Terminal, apps.Names(apps.Terminals))
 	}
-	if _, ok := apps.PasswordManagers[f.PasswordManager]; f.PasswordManager != "" && !ok {
-		return nil, fmt.Errorf("%s: kit doesn't know the password manager %q: one of %s", File, f.PasswordManager, apps.Names(apps.PasswordManagers))
-	}
 	cfg := &Config{
 		Dir: dir, Format: f.Format, MinimumKit: f.MinimumKit, Primary: f.Primary, Macs: make(map[string]Mac, len(f.Macs)),
-		NightlyAt: DefaultNightlyAt, PrefsRepo: strings.TrimSpace(f.PrefsRepo), Terminal: f.Terminal, PasswordManager: f.PasswordManager,
+		NightlyAt: DefaultNightlyAt, PrefsRepo: strings.TrimSpace(f.PrefsRepo), Terminal: f.Terminal,
 	}
 	if f.NightlyAt != "" {
 		at, err := time.Parse("15:04", f.NightlyAt)

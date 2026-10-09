@@ -127,6 +127,12 @@ func TestUndeclare(t *testing.T) {
 			after: "[homebrew formulae]\nbat\nripgrep\n",
 		},
 		{
+			name:   "a formula sharing its name with a step and a step by hand, which stay",
+			before: "[homebrew formulae]\nbat\nmkcert\n\n[steps]\nmkcert \"its authority, trusted\"\n\n[manual]\nmkcert \"Reissue certificates\"\n",
+			kind:   "brew", entry: "mkcert",
+			after: "[homebrew formulae]\nbat\n\n[steps]\nmkcert \"its authority, trusted\"\n\n[manual]\nmkcert \"Reissue certificates\"\n",
+		},
+		{
 			name:   "an old file's heading, with the entry under it, the rest sorted",
 			before: "[homebrew formulae]\n# Shell\nripgrep\nbat\n\n# Go\ngo\n\n# Git\ngit\n",
 			kind:   "brew", entry: "go",

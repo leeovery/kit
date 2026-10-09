@@ -26,6 +26,9 @@ const ScriptName = "run"
 // done: runs it.
 const ActionRun = "run"
 
+// notYet is the exit a step's check says it can't be done yet with.
+const notYet = 3
+
 // How long a step's script may take: its check is cheap; applying may
 // install something.
 const (
@@ -50,21 +53,23 @@ func Template(name, does string) string {
 }
 
 // Script is a step of the user's own, as a [steps] line declares it: what it
-// does, the steps it's applied after and those it needs, whether applying it
+// does, what it's applied after (a step, or one of a step's things, as in
+// cask:1password) and the steps it's applied before, whether applying it
 // needs an administrator's password; and its folder, holding its script and
 // its data.
 type Script struct {
-	Name, Does   string
-	After, Needs []string
-	Admin        bool
+	Name, Does    string
+	After, Before []string
+	Admin         bool
 	// Folder is its folder in the config repository, as in
 	// laptop/steps/fonts; Dir is the same, a full path.
 	Folder, Dir string
 }
 
 // ParseScript reads a [steps] line of the config repository at configDir:
-// what the step does, in quotes, then --after and --needs, each with a
-// step's name and as often as wanted, and --admin.
+// what the step does, in quotes, then --after and --before, each with a
+// step's name (--after one of a step's things too, as in cask:1password) and
+// as often as wanted, and --sudo.
 func ParseScript(configDir string, e config.Entry) (Script, error) {
 	folder := config.StepFolder(e.Scope, e.Name)
 	s := Script{Name: e.Name, Folder: folder, Dir: filepath.Join(configDir, folder)}
@@ -78,31 +83,50 @@ func ParseScript(configDir string, e config.Entry) (Script, error) {
 	s.Does = words[0]
 	for i := 1; i < len(words); i++ {
 		switch w := words[i]; w {
-		case "--admin":
+		case "--sudo":
 			s.Admin = true
-		case "--after", "--needs":
-			if i+1 == len(words) || strings.HasPrefix(words[i+1], "--") {
-				return s, fmt.Errorf("%s needs a step's name after it", w)
+		case "--after", "--before":
+			name, err := orderedBy(w, words, i)
+			if err != nil {
+				return s, err
 			}
 			i++
 			if w == "--after" {
-				s.After = append(s.After, words[i])
+				s.After = append(s.After, name)
 			} else {
-				s.Needs = append(s.Needs, words[i])
+				s.Before = append(s.Before, name)
 			}
+		case "--needs", "--admin":
+			return s, fmt.Errorf("%s is %s now", w, map[string]string{"--needs": "--after", "--admin": "--sudo"}[w])
 		default:
-			return s, fmt.Errorf("%q isn't one of a step's options: --after, --needs and --admin", w)
+			return s, fmt.Errorf("%q isn't one of a step's options: --after, --before and --sudo", w)
 		}
 	}
 	return s, nil
 }
 
+// orderedBy is what the --after or --before at words[i] names: a step, or,
+// after --after, one of a step's things, as in cask:1password.
+func orderedBy(flag string, words []string, i int) (string, error) {
+	if i+1 == len(words) || strings.HasPrefix(words[i+1], "--") {
+		return "", fmt.Errorf("%s needs a step's name after it", flag)
+	}
+	name := words[i+1]
+	if step, thing, ok := strings.Cut(name, ":"); ok && (flag == "--before" || step == "" || thing == "") {
+		return "", fmt.Errorf("%s %s: --after names a step, or one of its things as in cask:1password; --before a step", flag, name)
+	}
+	return name, nil
+}
+
 // ScriptStep is the step s declares. Its check runs s's script with check,
 // in s's folder: exit 0 says it's done, the first line printed saying how it
 // stands; exit 1 that it isn't, so applying runs the script with apply;
-// anything else that the check couldn't tell. Applying is believed only
-// when the check then passes. One that needs an administrator's password
-// waits for admin to hold one.
+// exit 3 that it can't be done yet, as what it needs isn't there, so it's
+// not applied; anything else that the check couldn't tell. Applying is
+// believed only when the check then passes. One that needs an
+// administrator's password waits for admin to hold one. What s is applied
+// after are steps here: one of a step's things is the caller's to make a
+// wait of.
 func ScriptStep(run runner.Runner, admin *Admin, s Script) engine.Step {
 	script := filepath.Join(s.Dir, ScriptName)
 	command := func(verb string, timeout time.Duration) runner.Command {
@@ -121,11 +145,13 @@ func ScriptStep(run runner.Runner, admin *Admin, s Script) engine.Step {
 			return check.Result{State: check.Attention, Summary: cmp.Or(firstLine(res.Stdout), "not done"), Items: []check.Item{{
 				ID: s.Name + ":" + s.Name, Name: s.Does, State: Problem, Detail: "kit apply " + s.Name, Action: ActionRun,
 			}}}
+		case exited && exit.Code == notYet:
+			return check.Result{State: check.Deferred, Reason: cmp.Or(firstLine(res.Stdout), "can't be done yet")}
 		}
 		return check.Result{State: check.Failed, Reason: why(res, err, firstLine(res.Stdout))}
 	}
 	return engine.Step{
-		Name: s.Name, Title: s.Name, Area: AreaSteps, Needs: s.Needs, After: s.After, Admin: s.Admin,
+		Name: s.Name, Title: s.Name, Area: AreaSteps, After: s.After, Before: s.Before, Admin: s.Admin,
 		Check: checks,
 		Apply: func(ctx context.Context, _ check.Result) error {
 			if s.Admin && !admin.ok(ctx) {

@@ -598,11 +598,11 @@ func TestPrettyBootstrapInTheTerminal(t *testing.T) {
 	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).Sized(func() (int, int) { return 80, 40 })
 	steps := []event.Step{
 		{Name: "boot-github", Title: "GitHub", Area: boot.AreaBooted},
-		{Name: "boot-access", Title: "Full Disk Access", Area: boot.AreaBooted, Needs: []string{"boot-github"}},
+		{Name: "boot-access", Title: "Full Disk Access", Area: boot.AreaBooted, Waits: []string{"boot-github"}},
 		{Name: "1password", Title: "1Password", Area: "Drift"},
 		{Name: "cask", Title: "Casks", Area: "Drift"},
-		{Name: "secret", Title: "Secrets", Area: "Drift", Needs: []string{"1password"}},
-		{Name: "gpg-key", Title: "gpg-key", Area: "Steps", Needs: []string{"secret"}},
+		{Name: "secret", Title: "Secrets", Area: "Drift", Waits: []string{"1password"}},
+		{Name: "gpg-key", Title: "gpg-key", Area: "Steps", Waits: []string{"secret"}},
 	}
 	face.Emit(event.RunStarted{Time: at, Command: "bootstrap", Machine: "laptop", Steps: steps})
 	face.Emit(event.StepFinished{Step: "boot-github", Result: check.Result{State: check.OK, Summary: "lee · kit-config has laptop"}})

@@ -178,11 +178,11 @@ func (p *Pretty) workList(final bool) (lines []string, focus int) {
 }
 
 // waiting is what a step says while it waits its turn: what for, when it's
-// a step it needs, not yet done.
+// a step it waits for, not yet done.
 func (p *Pretty) waiting(s event.Step) string {
-	for _, need := range s.Needs {
-		if _, done := p.results[need]; !done {
-			return "waiting for " + p.title(need)
+	for _, step := range s.Waits {
+		if _, done := p.results[step]; !done {
+			return "waiting for " + p.title(step)
 		}
 	}
 	return "waiting"

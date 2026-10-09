@@ -309,7 +309,7 @@ func (c *Config) Declare(kind, scope string, e Entry) error {
 		b.insert(b.sortedPlace(0, len(b.lines), name), line)
 		s.body = b.lines
 	}
-	return c.writeDecl(f, e.Name, true)
+	return c.writeDecl(f, d, e.Name, true)
 }
 
 // Undeclare takes name out of kind's sections of scope's declarations, with
@@ -338,7 +338,7 @@ func (c *Config) Undeclare(kind, scope, name string) error {
 	if len(b.entries(0, len(b.lines))) == 0 {
 		f.drop(s)
 	}
-	return c.writeDecl(f, name, false)
+	return c.writeDecl(f, d, name, false)
 }
 
 // Replace rewrites the line declaring e.Name in kind's sections of scope's
@@ -366,7 +366,7 @@ func (c *Config) Replace(kind, scope string, e Entry) error {
 	if d.sorted {
 		s.body = sortedLines(d.form, s.body)
 	}
-	return c.writeDecl(f, e.Name, true)
+	return c.writeDecl(f, d, e.Name, true)
 }
 
 // entryText is the line declaring name, as d's lines read: the name, a
@@ -483,8 +483,9 @@ func (c *Config) editable(kind, scope string) (sectionDef, *declFile, error) {
 }
 
 // writeDecl writes f, whole or not at all, having checked it reads back,
-// with name declared in it, or not, as in says.
-func (c *Config) writeDecl(f *declFile, name string, in bool) error {
+// with name declared in d's sections, or not, as in says: a name another
+// kind's section has too, as a step can share a formula's, is that kind's.
+func (c *Config) writeDecl(f *declFile, d sectionDef, name string, in bool) error {
 	content := f.String()
 	file := DeclFile(f.scope)
 	back, err := parseFile(f.scope, content)
@@ -493,6 +494,9 @@ func (c *Config) writeDecl(f *declFile, name string, in bool) error {
 	}
 	found := false
 	for _, s := range back.sections {
+		if s.def.kind != d.kind {
+			continue
+		}
 		entries, _ := s.entries(f.scope)
 		found = found || slices.ContainsFunc(entries, func(e Entry) bool { return e.Name == name })
 	}

@@ -42,10 +42,9 @@ again carries on where it stopped.
 
 It signs in to GitHub on your phone, asks which of your Macs this is and for
 the password once, then installs the rest without you: Homebrew, the terminal
-and password manager kit.toml names, kit-config, its files linked. With a
+kit.toml names, kit-config, its files linked. With a
 terminal named, you give it Full Disk Access, then kit opens it and carries
-on there: the whole of kit apply, the password manager signed in for the
-secrets, then a fresh shell.`,
+on there: the whole of kit apply, then a fresh shell.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			err := a.bootstrap(cmd.Context(), mac, repo, handedOver)
@@ -232,13 +231,9 @@ func (a *app) bootstrap(ctx context.Context, mac, repo string, handedOver bool) 
 	return nil
 }
 
-// secretStep is the secrets' step, which the password manager leads.
-const secretStep = "secret"
-
 // inTerminal is the boot in the terminal kit.toml names, carrying on there:
 // the arrival, then the boot's steps, checked again, as a light of their
-// own, and the whole of kit apply, the password manager signed in for what
-// reads secrets, which waits for it. fresh is whether the window is kit's
+// own, and the whole of kit apply. fresh is whether the window is kit's
 // own, opened for it, its screen blank.
 func (a *app) inTerminal(ctx context.Context, b *boot.Boot, fresh bool) error {
 	mac, err := config.ReadMachine(b.State)
@@ -266,12 +261,7 @@ func (a *app) inTerminal(ctx context.Context, b *boot.Boot, fresh bool) error {
 		return err
 	}
 	b.Run, b.Sink, b.Ask = r.run, r.sink, &plainAsker{}
-	lead, needs := b.Booted(), map[string][]string{}
-	if pm, ok := b.PasswordManagerStep(); ok {
-		lead = append(lead, pm)
-		needs[secretStep] = []string{pm.Name}
-	}
-	if err := r.lead(lead, needs); err != nil {
+	if err := r.lead(b.Booted()); err != nil {
 		_ = r.close()
 		return err
 	}

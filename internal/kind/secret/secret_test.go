@@ -139,9 +139,30 @@ func TestSyncNeedsOnePasswordToAnswer(t *testing.T) {
 	s := secret.New(fake, t.TempDir())
 	declare(t, s, [2]string{"PLAIN", "Section/plain"})
 	fake.On("op", "whoami").Exits(1)
+	fake.On("op", "account", "list", "--format", "json").Prints(`[{"url": "my.1password.com"}]`)
 	fake.On("op", "vault", "list", "--format", "json").Exits(1)
 	if _, err := s.Sync(t.Context()); err == nil || err.Error() != secret.SignIn {
 		t.Errorf("Sync() = %v", err)
+	}
+}
+
+// Listing no account, 1Password isn't signed in on this Mac, or its CLI
+// isn't on: the sync says so at once, not yet rather than failed, and
+// asks the app for nothing.
+func TestSyncWhenOnePasswordIsntSignedIn(t *testing.T) {
+	fake := runnertest.New(t)
+	s := secret.New(fake, t.TempDir())
+	declare(t, s, [2]string{"PLAIN", "Section/plain"})
+	fake.On("op", "whoami").Exits(1)
+	fake.On("op", "account", "list", "--format", "json").Prints("[]")
+	_, err := s.Sync(t.Context())
+	if err == nil || err.Error() != secret.SignedOut {
+		t.Errorf("Sync() = %v", err)
+	}
+	for _, c := range fake.Commands() {
+		if slices.Contains(c.Args, "vault") {
+			t.Error("it asked the app for a session: want nothing asked of anyone")
+		}
 	}
 }
 
@@ -150,6 +171,7 @@ func TestSyncOpensASessionWhenNoneIsOpen(t *testing.T) {
 	s := secret.New(fake, t.TempDir())
 	declare(t, s, [2]string{"PLAIN", "Section/plain"})
 	fake.On("op", "whoami").Exits(1).PrintsToStderr("account is not signed in")
+	fake.On("op", "account", "list", "--format", "json").Prints(`[{"url": "my.1password.com"}]`)
 	fake.On("op", "vault", "list", "--format", "json").Prints("[]")
 	fake.On("op", "read", item+"/Section/plain").Prints("v\n")
 	if report, err := s.Sync(t.Context()); err != nil || report.Synced != 1 {
