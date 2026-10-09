@@ -9,6 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -32,8 +34,8 @@ const installTimeout = 30 * time.Minute
 type Homebrew struct {
 	run runner.Runner
 	// Admin reports whether an administrator's password is at hand, for
-	// casks that install through a package: nil when kit isn't installing,
-	// and asks nothing.
+	// installing Homebrew and casks that install through a package: nil
+	// when kit isn't installing, and asks nothing.
 	Admin func(ctx context.Context) bool
 
 	update struct {
@@ -51,22 +53,62 @@ func New(run runner.Runner) *Homebrew {
 	return &Homebrew{run: run}
 }
 
-// Step checks brew is on kit's PATH, and where Homebrew is.
+// Step checks brew is on kit's PATH, and where Homebrew is; applying
+// installs Homebrew, which needs an administrator's password.
 func (h *Homebrew) Step() engine.Step {
 	return engine.Step{
 		Name:  StepName,
 		Title: "Homebrew",
+		Admin: true,
 		Check: func(ctx context.Context) check.Result {
 			res, err := h.brew(ctx, "--prefix")
 			if errors.Is(err, runner.ErrNotFound) {
-				return check.Result{State: check.Attention, Summary: "not installed: brew isn't on kit's PATH"}
+				return check.Result{State: check.Attention, Summary: "not installed: brew isn't on kit's PATH", Items: []check.Item{{
+					ID: StepName + ":" + StepName, Name: "Homebrew", State: "missing", Detail: "brew isn't on kit's PATH", Action: kind.Install,
+				}}}
 			}
 			if err != nil {
 				return check.Result{State: check.Failed, Reason: err.Error()}
 			}
 			return check.Result{State: check.OK, Summary: strings.TrimSpace(string(res.Stdout))}
 		},
+		Apply: func(ctx context.Context, _ check.Result) error {
+			if h.Admin == nil || !h.Admin(ctx) {
+				return errors.New("waiting for an administrator's password: kit apply at a terminal asks for it")
+			}
+			return Install(ctx, h.run)
+		},
 	}
+}
+
+// installer is Homebrew's own install script.
+const installer = "https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh"
+
+// installerTimeout is how long installing Homebrew may take: the Xcode
+// Command Line Tools come with it, downloaded and installed by
+// softwareupdate (11 minutes in all in a virtual machine, 9 Oct).
+const installerTimeout = 45 * time.Minute
+
+// Install installs Homebrew with its own install script, unattended
+// (NONINTERACTIVE), the Xcode Command Line Tools with it if they're not
+// there: the script asks sudo for an administrator's password, which asks
+// kit through SUDO_ASKPASS, so the run must hold one.
+func Install(ctx context.Context, run runner.Runner) error {
+	script := InstallerFile()
+	defer func() { _ = os.Remove(script) }()
+	if _, err := run.Run(ctx, runner.Command{Name: "curl", Args: []string{"-fsSL", "--retry", "2", "-o", script, installer}}); err != nil {
+		return fmt.Errorf("download Homebrew's installer: %w", err)
+	}
+	if _, err := run.Run(ctx, runner.Command{Name: "/bin/bash", Args: []string{script}, Env: []string{"NONINTERACTIVE=1"}, Timeout: installerTimeout}); err != nil {
+		return fmt.Errorf("install Homebrew: %w", err)
+	}
+	return nil
+}
+
+// InstallerFile is where Install keeps Homebrew's install script while it
+// runs it: in the user's own temporary folder.
+func InstallerFile() string {
+	return filepath.Join(os.TempDir(), "kit-homebrew-install.sh")
 }
 
 // Formulae is the brew kind.

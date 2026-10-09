@@ -1,0 +1,46 @@
+--- the password
+  SIGN IN
+  [ OK ] GitHub  someone · kit-config has laptop and studio
+
+  BOOT ORDER
+  [ OK ] This Mac  laptop
+  [ !! ] Password  this Mac's password, once
+         ❯ ••••
+  [    ] Homebrew
+  [    ] Apps
+  [    ] kit-config
+  [    ] Full Disk Access  for Ghostty
+  [    ] Ghostty
+
+  enter done · esc stop
+--- Full Disk Access
+  SIGN IN
+  [ OK ] GitHub  someone · kit-config has laptop and studio
+
+  BOOT ORDER
+  [ OK ] This Mac  laptop
+  [ OK ] Password  Touch ID on for sudo
+  [ OK ] Homebrew  7.0.9 · Xcode tools 27.0 · 6m02s
+  [ OK ] Apps  Ghostty 1.3.1 · 1Password 8.12.40 · 1m38s
+  [ OK ] kit-config  cloned · 61 files linked
+  [ !! ] Full Disk Access  for Ghostty, before it first opens
+         → System Settings is open at Full Disk Access, and Finder at
+           Applications: drag Ghostty into the list, then press enter
+  [    ] Ghostty
+
+  enter done · esc stop
+--- the hand-off
+  SIGN IN
+  [ OK ] GitHub  someone · kit-config has laptop and studio
+
+  BOOT ORDER
+  [ OK ] This Mac  laptop
+  [ OK ] Password  Touch ID on for sudo
+  [ OK ] Homebrew  7.0.9 · Xcode tools 27.0 · 6m02s
+  [ OK ] Apps  Ghostty 1.3.1 · 1Password 8.12.40 · 1m38s
+  [ OK ] kit-config  cloned · 61 files linked
+  [ OK ] Full Disk Access  granted to Ghostty
+  [*   ] Ghostty  opening
+         → macOS asks before Ghostty first opens: choose Open
+
+  esc stop

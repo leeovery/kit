@@ -3,6 +3,7 @@
 package cli
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -65,6 +66,9 @@ type Deps struct {
 	// the terminal: it replaces this process, and returns only when it
 	// can't.
 	Become func(args []string) error
+	// Shell has kit become the person's login shell, as a terminal starts
+	// it: it replaces this process, and returns only when it can't.
+	Shell func() error
 	// Scratch is the Scratch volume, which the scratch feature checks and
 	// clears: /Volumes/Scratch.
 	Scratch string
@@ -261,6 +265,10 @@ func Real(version string) Deps {
 				return fmt.Errorf("find kit: %w", err)
 			}
 			return runner.Become(self, args, os.Environ())
+		},
+		Shell: func() error {
+			env := slices.DeleteFunc(os.Environ(), func(v string) bool { return strings.HasPrefix(v, "SUDO_ASKPASS=") })
+			return runner.BecomeLoginShell(cmp.Or(os.Getenv("SHELL"), "/bin/zsh"), env)
 		},
 		Scratch:   "/Volumes/Scratch",
 		SudoLocal: steps.SudoLocal,

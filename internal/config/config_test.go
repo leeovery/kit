@@ -67,6 +67,8 @@ func TestLoadRefuses(t *testing.T) {
 		{name: "a Mac's name with a dot", toml: "format = 1\nprimary = \"lap.top\"\n[macs.\"lap.top\"]\n", want: `"lap.top" can't be a Mac's name`},
 		{name: "no primary", toml: "format = 1\n" + macs, want: "no primary: name the Mac that hears about every Mac's problems, one of laptop, studio"},
 		{name: "an unknown primary", toml: "format = 1\nprimary = \"other\"\n" + macs, want: "the primary is other, which isn't one of its Macs (laptop, studio)"},
+		{name: "a terminal kit doesn't know", toml: "format = 1\nprimary = \"laptop\"\nterminal = \"teletype\"\n" + macs, want: `kit doesn't know the terminal "teletype": one of ghostty`},
+		{name: "a password manager kit doesn't know", toml: "format = 1\nprimary = \"laptop\"\npassword_manager = \"notebook\"\n" + macs, want: `kit doesn't know the password manager "notebook": one of 1password`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -117,6 +119,18 @@ func TestNightlyAt(t *testing.T) {
 	dir := writeRepo(t, map[string]string{config.File: "format = 1\nprimary = \"laptop\"\nnightly_at = \"3am\"\n\n[macs.laptop]\n"})
 	if _, err := config.Load(dir); err == nil || !strings.Contains(err.Error(), `nightly_at "3am" isn't a time of day`) {
 		t.Errorf("Load() = %v", err)
+	}
+}
+
+// The terminal a new Mac's boot hands over to, and the password manager it
+// installs: settings of the person's, none unless kit.toml says.
+func TestApps(t *testing.T) {
+	if cfg := loadRepo(t, map[string]string{}); cfg.Terminal != "" || cfg.PasswordManager != "" {
+		t.Errorf("unset: terminal %q, password manager %q", cfg.Terminal, cfg.PasswordManager)
+	}
+	cfg := loadRepo(t, map[string]string{config.File: "format = 1\nprimary = \"laptop\"\nterminal = \"ghostty\"\npassword_manager = \"1password\"\n\n[macs.laptop]\n"})
+	if cfg.Terminal != "ghostty" || cfg.PasswordManager != "1password" {
+		t.Errorf("terminal %q, password manager %q", cfg.Terminal, cfg.PasswordManager)
 	}
 }
 

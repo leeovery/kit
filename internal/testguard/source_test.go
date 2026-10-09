@@ -31,6 +31,9 @@ var processStarters = []string{
 	// kit becoming the command chosen from its home's menu: tests pass
 	// Deps.Become a function that notes it instead.
 	"internal/runner/exec.go:Become",
+	// kit, handed a new Mac's boot in its terminal, becoming the login shell
+	// at the end: tests leave the app's Shell unset, or note it.
+	"internal/runner/exec.go:BecomeLoginShell",
 }
 
 const (

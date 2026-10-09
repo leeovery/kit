@@ -125,14 +125,16 @@ func archive(t *testing.T, files map[string]string) []byte {
 const kitToml = "format = 1\nprimary = \"laptop\"\n[macs.laptop]\ndescription = \"MacBook, the primary\"\n[macs.studio]\n"
 
 // asker answers the boot's questions as a test scripts them, noting each:
-// the keys picked, in turn, then none, as a person who's stopped pressing.
+// the keys picked, in turn, then none, as a person who's stopped pressing;
+// the passwords typed, in turn.
 type asker struct {
-	mu     sync.Mutex
-	asked  []string
-	choose int
-	name   string
-	err    error
-	picks  []string
+	mu      sync.Mutex
+	asked   []string
+	choose  int
+	name    string
+	err     error
+	picks   []string
+	secrets []string
 }
 
 func (a *asker) note(s string) {
@@ -172,6 +174,23 @@ func (a *asker) Pick(ctx context.Context, step string, keys []Key) (string, erro
 	return "", ctx.Err()
 }
 
+func (a *asker) Secret(_ context.Context, step, question string) (string, error) {
+	a.note(step + ": " + question)
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if len(a.secrets) == 0 {
+		return "", errors.New("no password typed")
+	}
+	typed := a.secrets[0]
+	a.secrets = a.secrets[1:]
+	return typed, nil
+}
+
+func (a *asker) Wait(ctx context.Context, step, says, todo string, keys []Key) (string, error) {
+	a.note(step + ": " + says + ": " + todo)
+	return a.Pick(ctx, step, keys)
+}
+
 // sink keeps the events the boot emits.
 type sink struct {
 	mu     sync.Mutex
@@ -191,6 +210,8 @@ func newBoot(t *testing.T, run runner.Runner, gh GitHub, ask Asker) (*Boot, *sin
 		Run: run, Sink: s, Ask: ask, GitHub: gh, Now: time.Now,
 		State: filepath.Join(home, "state"), Data: filepath.Join(home, "data"), Config: filepath.Join(home, "config"),
 		Getenv: func(string) string { return "" },
+		Home:   filepath.Join(home, "home"), Applications: filepath.Join(home, "Applications"), SudoLocal: filepath.Join(home, "sudo_local"),
+		Self: "/Users/someone/.local/bin/kit",
 	}, s
 }
 

@@ -120,6 +120,9 @@ type Doing struct {
 	Time time.Time
 	Step string
 	Says string
+	// Todo is what the person's to do meanwhile, when there's something:
+	// what the step waits on, as macOS asking before an app first opens.
+	Todo string
 }
 
 // DeviceCode is a sign-in waiting for its code to be entered: where, the

@@ -316,6 +316,8 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 	}
 	homebrew := hb.Step()
 	homebrew.Area = steps.AreaDrift
+	// Installing Homebrew needs the password, asked with the rest.
+	r.adminSteps = append(r.adminSteps, homebrew)
 	features, err := r.features()
 	if err != nil {
 		_ = face.Close()

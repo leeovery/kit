@@ -1,8 +1,10 @@
 // Package boot is a new Mac's bootstrap: a self-test, then the boot's steps,
 // one after another, from GitHub's sign-in on the phone to the hand-off to
-// the terminal kit-config names. A step done is found so by its check, so a
-// boot stopped anywhere picks up where it was. It asks what it must through
-// an Asker, in the row it's about, and says what it's doing through events.
+// the terminal kit.toml names. Signing in comes first, as it reads the
+// config repository the rest of the boot is planned from. A step done is
+// found so by its check, so a boot stopped anywhere picks up where it was.
+// It asks what it must through an Asker, in the row it's about, and says
+// what it's doing through events.
 package boot
 
 import (
@@ -39,6 +41,11 @@ type Asker interface {
 	// Pick waits for one of keys, the keys at the foot saying what each
 	// does, till ctx is done: the key pressed.
 	Pick(ctx context.Context, step string, keys []Key) (string, error)
+	// Secret asks for a password, typed without being shown.
+	Secret(ctx context.Context, step, question string) (string, error)
+	// Wait shows what the person's to do, says in step's row and todo
+	// under it, till they press one of keys: the key pressed.
+	Wait(ctx context.Context, step, says, todo string, keys []Key) (string, error)
 }
 
 // Answer is one answer to a question: its label, and what it means.
@@ -79,20 +86,29 @@ type Boot struct {
 	Mac string
 	// Getenv reads the environment kit runs in.
 	Getenv func(string) string
+	// Home is the home folder, Applications where apps are installed, and
+	// SudoLocal sudo's file of local settings, where Touch ID is turned on.
+	Home, Applications, SudoLocal string
+	// Self is kit, as the terminal handed over to runs it.
+	Self string
+	// Keep keeps the password given, for the rest of the run, for sudo
+	// when the programs the boot runs ask for it (askpass).
+	Keep func(password string)
+	// HandedOver is whether this is the boot handed over to the terminal,
+	// started by the boot before it.
+	HandedOver bool
 
 	mu    sync.Mutex
 	token string
 	login string
+	// held is whether sudo has the password, given this run.
+	held bool
 }
 
-// Steps are the boot's steps, in order, each needing the one before.
-func (b *Boot) Steps() []engine.Step {
-	steps := []engine.Step{b.gitHubStep(), b.macStep()}
-	for i := 1; i < len(steps); i++ {
-		steps[i].Needs = []string{steps[i-1].Name}
-		steps[i].Area = AreaBoot
-	}
-	return steps
+// SignIn is signing in, the boot's first steps, which read the config
+// repository the boot order is planned from.
+func (b *Boot) SignIn() []engine.Step {
+	return []engine.Step{b.gitHubStep()}
 }
 
 func (b *Boot) doing(step, says string) {
@@ -343,10 +359,14 @@ func and(names []string) string {
 }
 
 // state is what a boot keeps between its runs, beside the checks: the
-// config repository it read, and a new Mac's name till kit-config has it.
+// config repository it read; a new Mac's name till kit-config has it; the
+// terminal given Full Disk Access, as the person said, before its first
+// launch; and when kit, handed over to, took the boot on there.
 type state struct {
-	Repo   string `json:"repo,omitempty"`
-	NewMac string `json:"new_mac,omitempty"`
+	Repo    string    `json:"repo,omitempty"`
+	NewMac  string    `json:"new_mac,omitempty"`
+	Access  string    `json:"access,omitempty"`
+	Arrived time.Time `json:"arrived,omitzero"`
 }
 
 const stateName = "bootstrap.json"

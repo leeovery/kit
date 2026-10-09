@@ -339,3 +339,39 @@ func TestInstallsTakeTurns(t *testing.T) {
 		t.Errorf("%d installs ran at once, want one at a time", most)
 	}
 }
+
+// Homebrew missing is to install, through its own install script, run
+// unattended: with an administrator's password at hand, and refused
+// without one.
+func TestTheHomebrewStepInstalls(t *testing.T) {
+	fake := runnertest.New(t)
+	fake.On("brew", "--prefix").Fails(runner.ErrNotFound)
+	h := brew.New(fake)
+	s := h.Step()
+	found := s.Check(context.Background())
+	if !s.Admin || len(found.Items) != 1 || found.Items[0].Action != kind.Install {
+		t.Fatalf("Step() admin %v, found %+v; want an admin step with Homebrew to install", s.Admin, found)
+	}
+	if err := s.Apply(context.Background(), found); err == nil || !strings.Contains(err.Error(), "administrator's password") {
+		t.Errorf("Apply() without a password = %v; want it waiting for one", err)
+	}
+	h.Admin = func(context.Context) bool { return true }
+	script := brew.InstallerFile()
+	fake.On("curl", "-fsSL", "--retry", "2", "-o", script, "https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh")
+	fake.On("/bin/bash", script)
+	if err := s.Apply(context.Background(), found); err != nil {
+		t.Fatalf("Apply() = %v", err)
+	}
+	run := fake.Commands()[len(fake.Commands())-1]
+	if !slices.Contains(run.Env, "NONINTERACTIVE=1") || run.Timeout < 30*time.Minute {
+		t.Errorf("the installer ran with %q, timeout %s; want it unattended, with time for the Xcode tools", run.Env, run.Timeout)
+	}
+}
+
+func TestInstallSaysWhatFailed(t *testing.T) {
+	fake := runnertest.New(t)
+	fake.On("curl", "-fsSL", "--retry", "2", "-o", brew.InstallerFile(), "https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh").Exits(6)
+	if err := brew.Install(context.Background(), fake); err == nil || !strings.HasPrefix(err.Error(), "download Homebrew's installer") {
+		t.Errorf("Install() = %v", err)
+	}
+}

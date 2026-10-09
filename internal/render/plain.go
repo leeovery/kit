@@ -58,6 +58,10 @@ func (p *Plain) Emit(e event.Event) {
 		}
 	case event.DeviceCode:
 		p.printf("%s enter %s at %s, by %s\n", e.Step, e.Code, e.URI, e.Expires.Format("15:04"))
+	case event.Doing:
+		if e.Todo != "" {
+			p.printf("%s %s\n", e.Step, e.Todo)
+		}
 	}
 }
 

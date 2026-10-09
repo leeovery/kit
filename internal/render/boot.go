@@ -59,30 +59,40 @@ type BootFace struct {
 	quit    chan struct{}
 }
 
-// bootRow is how a step of the boot stands, as its row shows it.
+// bootRow is how a step of the boot stands, as its row shows it: todo is
+// what the person's to do meanwhile; took is how long it took, and asked
+// whether it asked anything, so waited on someone.
 type bootRow struct {
 	running  bool
 	began    time.Time
 	doing    string
+	todo     string
 	output   []string
 	code     *event.DeviceCode
 	finished *check.Result
+	took     time.Duration
+	asked    bool
 }
 
-// questionKind is what a question takes: a choice, typed words, or keys.
+// questionKind is what a question takes: a choice, typed words, keys, a
+// password, or a key once something's done.
 type questionKind int
 
 const (
 	choosing questionKind = iota
 	naming
 	picking
+	secret
+	waiting
 )
 
 // question is what the face is asking, in a step's row.
 type question struct {
-	step    string
-	kind    questionKind
-	text    string
+	step string
+	kind questionKind
+	text string
+	// todo is what to do before a key, for a question that waits.
+	todo    string
 	choices []look.Choice
 	cursor  int
 	typed   []rune
@@ -265,10 +275,12 @@ func (f *BootFace) Emit(e event.Event) {
 			}
 		}
 	case event.Doing:
-		f.row(e.Step).doing = e.Says
+		r := f.row(e.Step)
+		r.doing, r.todo = e.Says, e.Todo
 	case event.DeviceCode:
 		code := e
-		f.row(e.Step).code = &code
+		r := f.row(e.Step)
+		r.code, r.asked = &code, true
 	case event.Output:
 		r := f.row(e.Step)
 		r.output = lastOf(append(r.output, e.Line), keptOutput)
@@ -278,11 +290,24 @@ func (f *BootFace) Emit(e event.Event) {
 		if e.Step == f.signing {
 			f.mode, f.signing = "", ""
 		}
-		r.running, r.code, r.finished = false, nil, &result
+		r.running, r.code, r.finished, r.took = false, nil, &result, e.Duration
 	default:
 		return
 	}
 	f.signal()
+}
+
+// Running is the step at work, for a question that comes from what it
+// runs: "" when there's none.
+func (f *BootFace) Running() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, s := range f.steps {
+		if r := f.rows[s.Name]; r != nil && r.running {
+			return s.Name
+		}
+	}
+	return ""
 }
 
 func (f *BootFace) row(step string) *bootRow {
@@ -494,7 +519,12 @@ func (f *BootFace) stepRow(s event.Step, b look.Boot, live bool) look.Row {
 	case f.q != nil && f.q.step == s.Name && f.q.kind != picking:
 		return look.Row{State: look.NeedsYou, Name: s.Title, Says: b.Words(look.NeedsYou, f.q.text), Under: f.asked()}
 	case r != nil && r.finished != nil:
-		return f.finishedRow(s.Title, *r.finished)
+		row := f.finishedRow(s.Title, *r.finished)
+		// How long a step took shows when it was work, not waiting on you.
+		if row.State == look.Done && r.took >= 10*time.Second && !r.asked {
+			row.Says = b.Says(row.Says, b.Mid(clock(r.took)))
+		}
+		return row
 	case r != nil && r.running:
 		says := []string{b.Words(look.Running, cmp.Or(r.doing, "working"))}
 		if took := f.now().Sub(r.began); took >= 10*time.Second {
@@ -502,7 +532,10 @@ func (f *BootFace) stepRow(s event.Step, b look.Boot, live bool) look.Row {
 		}
 		row := look.Row{State: look.Running, Name: s.Title, Says: b.Says(says...)}
 		if live {
-			row.Under = b.Output(r.output...)
+			if r.todo != "" {
+				row.Under = f.todo(r.todo)
+			}
+			row.Under = append(row.Under, b.Output(r.output...)...)
 		}
 		return row
 	}
@@ -636,8 +669,28 @@ func (f *BootFace) asked() []string {
 		return b.Answers(f.q.choices, f.q.cursor)
 	case naming:
 		return []string{b.Full("❯") + " " + b.Full(string(f.q.typed)) + b.Rev(" ")}
+	case secret:
+		return []string{b.Field(len(f.q.typed))}
+	case waiting:
+		return f.todo(f.q.todo)
 	}
 	return nil
+}
+
+// todo is what the person's to do, under a row: after an arrow, cut at
+// spaces to fit beside it.
+func (f *BootFace) todo(text string) []string {
+	b := f.look
+	lines := wrap(text, look.Width-len(look.BootUnder)-4)
+	out := make([]string, len(lines))
+	for i, l := range lines {
+		if i == 0 {
+			out[i] = b.Todo(l)
+			continue
+		}
+		out[i] = "  " + b.Full(l)
+	}
+	return out
 }
 
 // foot is what's under the boot: the bar once it's at work, counting the
@@ -671,9 +724,9 @@ func (f *BootFace) foot(width int, live bool) []string {
 		switch f.q.kind {
 		case choosing:
 			keys = []look.Key{{Key: "↑↓", Does: "choose"}, {Key: "enter", Does: "decide"}, keys[0]}
-		case naming:
+		case naming, secret:
 			keys = []look.Key{{Key: "enter", Does: "done"}, keys[0]}
-		case picking:
+		case picking, waiting:
 			keys = append(slices.Clone(f.q.keys), keys[0])
 		}
 	}
@@ -728,10 +781,23 @@ func (f *BootFace) Key(k ask.Key) bool {
 		case k.Name == "" && !k.Paste && utf8.RuneCountInString(k.Text) == 1:
 			q.typed = append(q.typed, []rune(k.Text)...)
 		}
-	case picking:
+	case secret:
+		switch {
+		case k.Is("enter"):
+			f.answered(answer{text: string(q.typed)})
+		case k.Is("backspace"):
+			if len(q.typed) > 0 {
+				q.typed = q.typed[:len(q.typed)-1]
+			}
+		case k.Name == "":
+			q.typed = append(q.typed, []rune(strings.TrimRight(k.Text, "\r\n"))...)
+		}
+	case picking, waiting:
 		for _, key := range q.keys {
 			if k.Is(key.Key) {
-				f.mode, f.signing = key.Key, q.step
+				if q.kind == picking {
+					f.mode, f.signing = key.Key, q.step
+				}
 				f.answered(answer{text: key.Key})
 				break
 			}
@@ -755,6 +821,7 @@ func (f *BootFace) ask(ctx context.Context, q *question) (answer, error) {
 		return answer{}, ask.ErrCancelled
 	}
 	f.q = q
+	f.row(q.step).asked = true
 	f.signal()
 	f.mu.Unlock()
 	select {
@@ -791,6 +858,20 @@ func (f *BootFace) Name(ctx context.Context, step, text string) (string, error) 
 // the key pressed.
 func (f *BootFace) Pick(ctx context.Context, step string, keys []look.Key) (string, error) {
 	a, err := f.ask(ctx, &question{step: step, kind: picking, keys: keys})
+	return a.text, err
+}
+
+// Secret asks for a password in step's row, typed without being shown, a
+// dot a character.
+func (f *BootFace) Secret(ctx context.Context, step, text string) (string, error) {
+	a, err := f.ask(ctx, &question{step: step, kind: secret, text: text})
+	return a.text, err
+}
+
+// Wait shows what the person's to do in step's row, says beside its name
+// and todo under it, till they press one of keys: the key pressed.
+func (f *BootFace) Wait(ctx context.Context, step, says, todo string, keys []look.Key) (string, error) {
+	a, err := f.ask(ctx, &question{step: step, kind: waiting, text: says, todo: todo, keys: keys})
 	return a.text, err
 }
 

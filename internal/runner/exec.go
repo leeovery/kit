@@ -167,6 +167,13 @@ func Become(path string, args, env []string) error {
 	return syscall.Exec(path, append([]string{filepath.Base(path)}, args...), env)
 }
 
+// BecomeLoginShell replaces this process with shell, as a login shell, the
+// way a terminal starts one: its name led by a dash. It returns only when
+// it can't.
+func BecomeLoginShell(shell string, env []string) error {
+	return syscall.Exec(shell, []string{"-" + filepath.Base(shell)}, env)
+}
+
 // Has reports whether the program name is on Path, or is a path to one.
 func (e Exec) Has(name string) bool {
 	_, err := e.find(name)

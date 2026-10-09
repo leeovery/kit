@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/leeovery/kit/internal/ask"
+	"github.com/leeovery/kit/internal/askpass"
 	"github.com/leeovery/kit/internal/boot"
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/engine"
@@ -30,6 +32,7 @@ var bootPath = []string{"/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/local/b
 
 func newBootstrapCommand(a *app) *cobra.Command {
 	var mac, repo string
+	var handedOver bool
 	cmd := &cobra.Command{
 		Use:   "bootstrap",
 		Short: "Set up a new Mac, from nothing: the install script runs it",
@@ -38,18 +41,35 @@ again carries on where it stopped.
 
 It signs in to GitHub on your phone, asks which of your Macs this is and for
 the password once, then installs the rest without you: Homebrew, the terminal
-and password manager kit.toml names, kit-config.`,
+and password manager kit.toml names, kit-config, its files linked. With a
+terminal named, you give it Full Disk Access, then kit opens it and carries
+on there.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return a.bootstrap(cmd.Context(), mac, repo)
+			err := a.bootstrap(cmd.Context(), mac, repo, handedOver)
+			if !handedOver || a.Shell == nil {
+				return err
+			}
+			// Handed over, kit is the terminal's own command: it becomes the
+			// login shell, so the window stays, whatever the boot came to.
+			if _, isAttention := errors.AsType[attention](err); err != nil && !isAttention && !errors.Is(err, ask.ErrCancelled) {
+				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "kit: %v\n", err)
+			}
+			return a.Shell()
 		},
 	}
 	cmd.Flags().StringVar(&mac, "mac", "", "this Mac's name: one of kit-config's, or a new one's, rather than asked")
 	cmd.Flags().StringVar(&repo, "config", "", "your config repository on GitHub, as owner/name: yours named kit-config, unless given")
+	cmd.Flags().BoolVar(&handedOver, "handed-over", false, "started by the boot in Terminal, in the terminal it hands over to")
+	_ = cmd.Flags().MarkHidden("handed-over")
 	return cmd
 }
 
-func (a *app) bootstrap(ctx context.Context, mac, repo string) error {
+// bootSudoRefresh is how often the boot renews sudo's hold on the password
+// while it installs, well inside sudo's own five minutes.
+const bootSudoRefresh = time.Minute
+
+func (a *app) bootstrap(ctx context.Context, mac, repo string, handedOver bool) error {
 	dirs, err := a.dirs()
 	if err != nil {
 		return err
@@ -82,7 +102,34 @@ func (a *app) bootstrap(ctx context.Context, mac, repo string) error {
 		face = a.face()
 	}
 	sink := event.NewFanout(face, log)
-	exec := a.Runner(bootPath, childEnv(a.Getenv, a.Environ(), home, bootPath))
+	// What the boot runs asks it for the password through sudo (askpass):
+	// given once, in the password's row, it's kept for the run, and asked
+	// again only if sudo wants it again.
+	self, err := os.Executable()
+	if err != nil {
+		_ = face.Close()
+		return fmt.Errorf("find kit: %w", err)
+	}
+	asks, err := askpass.Start("", self, func(ctx context.Context, asked int) (string, error) {
+		question := "sudo wants the password"
+		if asked > 0 {
+			question = "that wasn't it: try again"
+		}
+		step := boot.PasswordStep
+		if boots != nil && boots.Running() != "" {
+			step = boots.Running()
+		}
+		return asker.Secret(ctx, step, question)
+	})
+	if err == nil {
+		defer func() { _ = asks.Close() }()
+	}
+	exec := runner.WithEnv(a.Runner(bootPath, childEnv(a.Getenv, a.Environ(), home, bootPath)), func() []string {
+		if asks == nil {
+			return nil
+		}
+		return []string{"SUDO_ASKPASS=" + asks.Helper()}
+	})
 	observed := runner.Observed(exec, func(ctx context.Context, rep runner.Report) { sink.Emit(event.Command(ctx, rep)) }, a.Now)
 	observed = runner.Streamed(observed, event.Changing, func(ctx context.Context, cmd runner.Command, line string) {
 		sink.Emit(event.Output{Time: a.Now(), Step: event.StepOf(ctx), Command: redact.Text(cmd.String()), Line: redact.Text(line)})
@@ -90,6 +137,15 @@ func (a *app) bootstrap(ctx context.Context, mac, repo string) error {
 	b := &boot.Boot{
 		Run: observed, Sink: sink, Ask: asker, GitHub: boot.NewGitHub(&http.Client{Timeout: time.Minute}), Now: a.Now,
 		State: dirs.State, Data: dirs.Data, Config: dirs.Config, Repo: repo, Mac: mac, Getenv: a.Getenv,
+		Home: home, Applications: "/Applications", SudoLocal: a.SudoLocal, Self: self, HandedOver: handedOver,
+	}
+	if asks != nil {
+		b.Keep = asks.Keep
+	}
+	// Handed over, kit says so at once: the boot in Terminal is waiting.
+	if err := b.Arrive(); err != nil {
+		_ = face.Close()
+		return err
 	}
 
 	// The splash plays while the self-test runs; enter at its end starts the
@@ -121,13 +177,15 @@ func (a *app) bootstrap(ctx context.Context, mac, repo string) error {
 		}
 	}
 
-	pipeline, err := engine.New(b.Steps()...)
+	// Signing in first: it reads kit-config, which the boot order is
+	// planned from.
+	opts := engine.Options{Command: "bootstrap", Version: a.Version, Jobs: 1, Now: a.Now}
+	signIn, err := engine.New(b.SignIn()...)
 	if err != nil {
 		_ = face.Close()
 		return err
 	}
-	opts := engine.Options{Command: "bootstrap", Version: a.Version, Jobs: 1, Now: a.Now}
-	planned, err := pipeline.Planned(opts)
+	planned, err := signIn.Planned(opts)
 	if err != nil {
 		_ = face.Close()
 		return err
@@ -135,7 +193,15 @@ func (a *app) bootstrap(ctx context.Context, mac, repo string) error {
 	if boots != nil {
 		boots.Start(planned)
 	}
-	report, err := pipeline.Apply(ctx, sink, opts)
+	report, err := signIn.Apply(ctx, sink, opts)
+	if err == nil && ctx.Err() == nil && !report.Attention() {
+		report, err = a.bootOrder(ctx, b, boots, sink, opts, planned)
+	}
+	if err == nil && ctx.Err() == nil && !report.Attention() && boots != nil && !handedOver {
+		if res, ok := report.Results[boot.TerminalStep]; ok && res.State == check.OK {
+			boots.Finish("this window can be closed")
+		}
+	}
 	if closeErr := face.Close(); err == nil {
 		err = closeErr
 	}
@@ -148,6 +214,40 @@ func (a *app) bootstrap(ctx context.Context, mac, repo string) error {
 		return attention{}
 	}
 	return nil
+}
+
+// bootOrder runs the boot order, planned from the kit-config signing in
+// read, its rows under signing in's (planned), with sudo's hold on the
+// password kept fresh once it's given.
+func (a *app) bootOrder(ctx context.Context, b *boot.Boot, boots *render.BootFace, sink event.Sink, opts engine.Options, planned []event.Step) (engine.Report, error) {
+	order, err := engine.New(b.Order()...)
+	if err != nil {
+		return engine.Report{}, err
+	}
+	more, err := order.Planned(opts)
+	if err != nil {
+		return engine.Report{}, err
+	}
+	if boots != nil {
+		boots.Show(slices.Concat(planned, more))
+	}
+	ctx, stop := context.WithCancel(ctx)
+	defer stop()
+	go func() {
+		tick := time.NewTicker(bootSudoRefresh)
+		defer tick.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-tick.C:
+				if b.Held() {
+					_, _ = b.Run.Run(ctx, runner.Command{Name: "sudo", Args: []string{"-n", "-v"}})
+				}
+			}
+		}
+	}()
+	return order.Apply(ctx, sink, opts)
 }
 
 // bootAsker asks the boot's questions in the boot's face, in their rows.
@@ -166,11 +266,24 @@ func (a bootAsker) Name(ctx context.Context, step, question string) (string, err
 }
 
 func (a bootAsker) Pick(ctx context.Context, step string, keys []boot.Key) (string, error) {
+	return a.face.Pick(ctx, step, lookKeys(keys))
+}
+
+func (a bootAsker) Secret(ctx context.Context, step, question string) (string, error) {
+	return a.face.Secret(ctx, step, question)
+}
+
+func (a bootAsker) Wait(ctx context.Context, step, says, todo string, keys []boot.Key) (string, error) {
+	return a.face.Wait(ctx, step, says, todo, lookKeys(keys))
+}
+
+// lookKeys are the boot's keys, as the face shows them.
+func lookKeys(keys []boot.Key) []look.Key {
 	ks := make([]look.Key, len(keys))
 	for i, k := range keys {
 		ks[i] = look.Key{Key: k.Key, Does: k.Does}
 	}
-	return a.face.Pick(ctx, step, ks)
+	return ks
 }
 
 // errNoTerminal is a question asked without a terminal to ask it at.
@@ -186,6 +299,16 @@ func (*plainAsker) Choose(_ context.Context, step, _ string, _ []boot.Answer) (i
 
 func (*plainAsker) Name(_ context.Context, step, _ string) (string, error) {
 	return "", fmt.Errorf("%w: give this Mac's name with --mac (the %s step)", errNoTerminal, step)
+}
+
+// Secret fails: a password is typed at a terminal.
+func (*plainAsker) Secret(_ context.Context, step, _ string) (string, error) {
+	return "", fmt.Errorf("%w: the password is asked at a terminal (the %s step): run kit bootstrap in Terminal", errNoTerminal, step)
+}
+
+// Wait fails, saying what there's to do.
+func (*plainAsker) Wait(_ context.Context, step, _, todo string, _ []boot.Key) (string, error) {
+	return "", fmt.Errorf("%w: %s, then run kit bootstrap again (the %s step)", errNoTerminal, strings.TrimSuffix(todo, ", then press enter"), step)
 }
 
 // Pick takes the first of keys, the first time a step asks: without a

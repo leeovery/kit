@@ -88,6 +88,71 @@ func TestBootFace(t *testing.T) {
 	golden(t, "boot.golden", screens.String())
 }
 
+var orderSteps = []event.Step{
+	{Name: "github", Title: "GitHub", Area: "Sign in", Waiting: "This Mac is set up from your kit-config, a private repository on GitHub. Sign in to GitHub, and kit fetches it."},
+	{Name: "mac", Title: "This Mac", Area: "Boot order"},
+	{Name: "password", Title: "Password", Area: "Boot order", Waiting: "once"},
+	{Name: "homebrew", Title: "Homebrew", Area: "Boot order"},
+	{Name: "apps", Title: "Apps", Area: "Boot order"},
+	{Name: "kit-config", Title: "kit-config", Area: "Boot order"},
+	{Name: "full-disk-access", Title: "Full Disk Access", Area: "Boot order", Waiting: "for Ghostty"},
+	{Name: "terminal", Title: "Ghostty", Area: "Boot order"},
+}
+
+// What the boot needs of you, in its row: the password, a dot a character;
+// Full Disk Access, what to do, then enter; and while Ghostty opens, what
+// macOS asks. A step that took a while, without asking, says how long.
+func TestBootFaceNeedsYou(t *testing.T) {
+	at := time.Date(2026, 10, 9, 15, 2, 0, 0, time.UTC)
+	f := render.NewBootFace(ask.Terminal{Out: &bytes.Buffer{}}, true, func() time.Time { return at }, nil)
+	f.Show(orderSteps)
+	ok := func(step, summary string, took time.Duration) {
+		f.Emit(event.StepStarted{Time: at, Step: step})
+		f.Emit(event.StepFinished{Time: at, Step: step, Result: check.Result{State: check.OK, Summary: summary}, Duration: took})
+	}
+	var screens strings.Builder
+	ok("github", "someone · kit-config has laptop and studio", 3*time.Second)
+	ok("mac", "laptop", 0)
+	f.Emit(event.StepStarted{Time: at, Step: "password"})
+	typed := make(chan string, 1)
+	go func() {
+		pw, _ := f.Secret(context.Background(), "password", "this Mac's password, once")
+		typed <- pw
+	}()
+	waitFor(t, func() bool { return strings.Contains(plainView(f, 40), "this Mac's password") })
+	for _, k := range []string{"s", "e", "c", "r", "e"} {
+		f.Key(ask.Key{Text: k})
+	}
+	f.Key(ask.Key{Name: "backspace"})
+	screens.WriteString("--- the password\n" + plainView(f, 40))
+	f.Key(ask.Key{Name: "enter"})
+	if pw := <-typed; pw != "secr" {
+		t.Errorf("typed %q", pw)
+	}
+	f.Emit(event.StepFinished{Time: at, Step: "password", Result: check.Result{State: check.OK, Summary: "Touch ID on for sudo"}, Duration: 12 * time.Second})
+	ok("homebrew", "7.0.9 · Xcode tools 27.0", 6*time.Minute+2*time.Second)
+	ok("apps", "Ghostty 1.3.1 · 1Password 8.12.40", 98*time.Second)
+	ok("kit-config", "cloned · 61 files linked", 6*time.Second)
+	f.Emit(event.StepStarted{Time: at, Step: "full-disk-access"})
+	done := make(chan string, 1)
+	go func() {
+		key, _ := f.Wait(context.Background(), "full-disk-access", "for Ghostty, before it first opens",
+			"System Settings is open at Full Disk Access, and Finder at Applications: drag Ghostty into the list, then press enter", []look.Key{{Key: "enter", Does: "done"}})
+		done <- key
+	}()
+	waitFor(t, func() bool { return strings.Contains(plainView(f, 40), "drag Ghostty") })
+	screens.WriteString("--- Full Disk Access\n" + plainView(f, 40))
+	f.Key(ask.Key{Name: "enter"})
+	if key := <-done; key != "enter" || f.Full(120, 30) != nil {
+		t.Errorf("pressed %q; want enter, and no full screen", key)
+	}
+	f.Emit(event.StepFinished{Time: at, Step: "full-disk-access", Result: check.Result{State: check.OK, Summary: "granted to Ghostty"}, Duration: 40 * time.Second})
+	f.Emit(event.StepStarted{Time: at, Step: "terminal"})
+	f.Emit(event.Doing{Time: at, Step: "terminal", Says: "opening", Todo: "macOS asks before Ghostty first opens: choose Open"})
+	screens.WriteString("--- the hand-off\n" + plainView(f, 40))
+	golden(t, "boot-needs-you.golden", screens.String())
+}
+
 // Signing in takes the whole window, the way chosen: with the phone, the QR
 // code and the code; esc goes back, and the other way can be chosen; here,
 // the code to enter in Safari. Signed in, the window's given back.
