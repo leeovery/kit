@@ -33,7 +33,6 @@ func New(run runner.Runner) *Go {
 }
 
 func (*Go) Name() string    { return "go" }
-func (*Go) Title() string   { return "Go tools" }
 func (*Go) Program() string { return "go" }
 
 // program is a program in Go's bin folder, and the package it was built

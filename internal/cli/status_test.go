@@ -198,7 +198,7 @@ func TestStatusIsLogged(t *testing.T) {
 	out, _, status := w.run(t, "log")
 	for _, want := range []string{
 		"kit status · laptop · 2 Jan 2026 03:04:05",
-		"! Formulae",
+		"! Homebrew formulae",
 		"exit 0        0.0s  brew leaves --installed-on-request\n",
 		"exit 0        0.0s  gh repo view someone/kit-config --json visibility --jq .visibility\n",
 		"2 need attention",

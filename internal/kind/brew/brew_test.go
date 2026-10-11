@@ -81,7 +81,7 @@ func TestFormulaeInstalled(t *testing.T) {
 		{Name: "oven-sh/bun/bun", Explicit: true},
 		{Name: "node@20"},
 	}
-	if !slices.Equal(got, want) || k.Name() != "brew" || k.Title() != "Formulae" {
+	if !slices.Equal(got, want) || k.Name() != "brew" {
 		t.Errorf("Installed() = %+v\nwant %+v", got, want)
 	}
 }
@@ -102,7 +102,7 @@ func TestCasksInstalled(t *testing.T) {
 	k := brew.New(fake).Casks()
 	got, err := k.Installed(context.Background())
 	want := []kind.Installed{{Name: "ghostty", Explicit: true}, {Name: "1password/tap/1password-cli", Explicit: true}}
-	if err != nil || !slices.Equal(got, want) || k.Name() != "cask" || k.Title() != "Casks" {
+	if err != nil || !slices.Equal(got, want) || k.Name() != "cask" {
 		t.Errorf("Installed() = %+v, %v\nwant %+v", got, err, want)
 	}
 }

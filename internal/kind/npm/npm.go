@@ -33,7 +33,6 @@ func New(run runner.Runner, home string) *NPM {
 }
 
 func (*NPM) Name() string    { return "npm" }
-func (*NPM) Title() string   { return "npm" }
 func (*NPM) Program() string { return "npm" }
 
 func (n *NPM) npm(ctx context.Context, timeout time.Duration, args ...string) (runner.Result, error) {

@@ -190,7 +190,6 @@ func (h *Homebrew) lines(ctx context.Context, args ...string) ([]string, error) 
 type formulae struct{ *Homebrew }
 
 func (formulae) Name() string    { return "brew" }
-func (formulae) Title() string   { return "Formulae" }
 func (formulae) Program() string { return "brew" }
 
 // Installed lists the formulae installed, by full name, from three listings
@@ -275,7 +274,6 @@ func lastPart(name string) string {
 type casks struct{ *Homebrew }
 
 func (casks) Name() string    { return "cask" }
-func (casks) Title() string   { return "Casks" }
 func (casks) Program() string { return "brew" }
 
 // NeedsAdmin finds which of names install through a package or an

@@ -10,6 +10,7 @@ import (
 
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/event"
+	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/kind/secret"
 )
 
@@ -102,7 +103,7 @@ func (a *app) secretsSync(ctx context.Context, r *run) error {
 	if !ok || !slices.Contains(r.kinds, "secret") {
 		return errors.New("no secrets are declared: kit-config's [secrets] declares them")
 	}
-	r.sink.Emit(event.RunStarted{Time: r.now, Command: r.command, Machine: r.machine, Version: r.version, Steps: []event.Step{{Name: "secret", Title: k.Title(), Area: "Drift"}}})
+	r.sink.Emit(event.RunStarted{Time: r.now, Command: r.command, Machine: r.machine, Version: r.version, Steps: []event.Step{{Name: "secret", Title: kind.Label(k.Name()), Area: "Drift"}}})
 	started := time.Now()
 	r.sink.Emit(event.StepStarted{Time: started, Step: "secret", Doing: "syncing"})
 	report, err := k.Sync(event.WithStep(ctx, "secret"))

@@ -57,7 +57,6 @@ func New(run runner.Runner, home, stateDir string) *Spotlight {
 }
 
 func (s *Spotlight) Name() string    { return "spotlight-exclusion" }
-func (s *Spotlight) Title() string   { return "Spotlight exclusions" }
 func (s *Spotlight) Program() string { return "mdfind" }
 
 // Verb says a path as declared is excluded.

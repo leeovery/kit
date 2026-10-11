@@ -100,7 +100,7 @@ func TestAddAnAppByName(t *testing.T) {
 	w.fake.On("mas", "search", "--json", "sleep").Prints(sleepSearch)
 	var offered []string
 	w.choose = func(question string, options []string) (int, error) {
-		if strings.HasPrefix(question, "sleep  App Store · which is it?") {
+		if strings.HasPrefix(question, "sleep  App Store apps · which is it?") {
 			offered = options
 			return 1, nil
 		}

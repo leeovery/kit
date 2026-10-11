@@ -79,7 +79,6 @@ func New(run runner.Runner, home string) *MCP {
 }
 
 func (*MCP) Name() string    { return "claude-mcp" }
-func (*MCP) Title() string   { return "Claude MCP servers" }
 func (*MCP) Program() string { return "claude" }
 
 // Values reads each declared server's line into its definition, marking

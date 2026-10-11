@@ -77,7 +77,6 @@ func New(run runner.Runner, home string) *Secrets {
 }
 
 func (s *Secrets) Name() string    { return "secret" }
-func (s *Secrets) Title() string   { return "Secrets" }
 func (s *Secrets) Program() string { return "op" }
 
 // Verb says a secret on the Mac as declared is synced.

@@ -81,7 +81,7 @@ func (a *app) list(ctx context.Context, r *run, args []string) error {
 		k := r.kindsByName[name]
 		res := kind.Compare(ctx, k, r.lists[name])
 		if res.State == check.Failed {
-			return fmt.Errorf("couldn't check %s: %s", k.Title(), res.Reason)
+			return fmt.Errorf("couldn't check %s: %s", kind.Label(k.Name()), res.Reason)
 		}
 		missing := make(map[string]bool)
 		for _, it := range res.Items {
@@ -212,7 +212,7 @@ func (a *app) why(ctx context.Context, r *run, name string) error {
 		if len(declared) == 0 && !isIn {
 			continue
 		}
-		w := why{Kind: kindName, Step: k.Title(), Declared: declared, Installed: isIn}
+		w := why{Kind: kindName, Step: kind.Label(k.Name()), Declared: declared, Installed: isIn}
 		_, outside := k.(kind.Declarer)
 		w.ForThisMac = slices.ContainsFunc(declared, func(e config.Entry) bool {
 			return outside || e.Scope == config.Shared || e.Scope == r.machine

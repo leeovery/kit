@@ -40,7 +40,6 @@ func New(run runner.Runner) *AppStore {
 }
 
 func (*AppStore) Name() string    { return "mas" }
-func (*AppStore) Title() string   { return "App Store" }
 func (*AppStore) Program() string { return "mas" }
 
 // app is what mas says of an app, as far as kit needs.

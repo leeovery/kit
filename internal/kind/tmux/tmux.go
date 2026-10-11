@@ -45,7 +45,6 @@ func New(run runner.Runner, home, configHome string) *Tmux {
 }
 
 func (*Tmux) Name() string    { return "tmux" }
-func (*Tmux) Title() string   { return "tmux plugins" }
 func (*Tmux) Program() string { return "tmux" }
 
 // files are tmux's config files TPM reads, in its order.

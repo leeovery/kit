@@ -94,7 +94,6 @@ func New(run runner.Runner, home string) *Login {
 }
 
 func (*Login) Name() string    { return "login-item" }
-func (*Login) Title() string   { return "Login items" }
 func (*Login) Program() string { return "osascript" }
 
 // item is a login item, or an app, as the scripts tell of it.

@@ -53,7 +53,7 @@ func TestWhy(t *testing.T) {
 	w.fake.On("brew", "uses", "--installed", "ffmpeg")
 
 	out, _, code := w.run(t, "why", "go")
-	want := "go (brew)\n  declared in laptop/declarations, line 3: for kit\n  installed here, by kit apply's Formulae step\n  needed by golangci-lint, goreleaser\n"
+	want := "go (brew)\n  declared in laptop/declarations, line 3: for kit\n  installed here, by kit apply's Homebrew formulae step\n  needed by golangci-lint, goreleaser\n"
 	if out != want || code != 0 {
 		t.Errorf("kit why go printed\n%s exit %d\nwant\n%s", out, code, want)
 	}

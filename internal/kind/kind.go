@@ -5,6 +5,7 @@
 package kind
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -32,8 +33,6 @@ type Kind interface {
 	// Name names the kind, its items and its step, as in brew; the config
 	// declares it in the section that names it, as in [homebrew formulae].
 	Name() string
-	// Title is the step's title, as in Formulae.
-	Title() string
 	// Program is the program the kind runs to find what's installed, as in
 	// brew: while it isn't installed, there's nothing of the kind to find.
 	Program() string
@@ -48,6 +47,32 @@ type Kind interface {
 	// Remove uninstalls names.
 	Remove(ctx context.Context, names []string) error
 }
+
+// labels name the kinds' rows, each as the config's section declaring it is
+// named, cased: [homebrew formulae]'s row is Homebrew formulae. tmux's
+// plugins are declared in tmux's own config.
+var labels = map[string]string{
+	"brew":                "Homebrew formulae",
+	"cask":                "Homebrew casks",
+	"mas":                 "App Store apps",
+	"npm":                 "npm packages",
+	"composer":            "Composer packages",
+	"go":                  "Go tools",
+	"gh":                  "GitHub extensions",
+	"tmux":                "tmux plugins",
+	"claude-mcp":          "Claude MCP",
+	"login-item":          "macOS login items",
+	"defaults":            "macOS settings",
+	"power":               "Power settings",
+	"git-config":          "git config",
+	"backup-exclusion":    "Backup exclusions",
+	"spotlight-exclusion": "Spotlight exclusions",
+	"secret":              "Secrets",
+}
+
+// Label is the name of the row of the kind named name, as in Homebrew
+// formulae for brew.
+func Label(name string) string { return cmp.Or(labels[name], name) }
 
 // Blocker is a kind that can say why some things can't be installed now.
 type Blocker interface {
@@ -196,7 +221,7 @@ const (
 func Step(k Kind, declared config.List, needs ...string) engine.Step {
 	return engine.Step{
 		Name:  k.Name(),
-		Title: k.Title(),
+		Title: Label(k.Name()),
 		Needs: needs,
 		Check: func(ctx context.Context) check.Result { return Compare(ctx, k, declared) },
 		Apply: func(ctx context.Context, found check.Result) error {

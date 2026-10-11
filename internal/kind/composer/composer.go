@@ -30,7 +30,6 @@ func New(run runner.Runner) *Composer {
 }
 
 func (*Composer) Name() string    { return "composer" }
-func (*Composer) Title() string   { return "Composer" }
 func (*Composer) Program() string { return "composer" }
 
 func (c *Composer) global(ctx context.Context, timeout time.Duration, args ...string) (runner.Result, error) {

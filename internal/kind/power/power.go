@@ -47,7 +47,6 @@ func New(run runner.Runner, stateDir string) *Power {
 }
 
 func (p *Power) Name() string    { return "power" }
-func (p *Power) Title() string   { return "Power settings" }
 func (p *Power) Program() string { return "pmset" }
 
 // Verb says a setting as declared is set.

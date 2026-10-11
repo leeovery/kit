@@ -46,7 +46,6 @@ func New(run runner.Runner, home, prefs string) *Exclusions {
 }
 
 func (x *Exclusions) Name() string    { return "backup-exclusion" }
-func (x *Exclusions) Title() string   { return "Backup exclusions" }
 func (x *Exclusions) Program() string { return "tmutil" }
 
 // Verb says a path as declared is excluded.

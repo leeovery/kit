@@ -30,7 +30,6 @@ func New(run runner.Runner) *GitConfig {
 }
 
 func (g *GitConfig) Name() string    { return "git-config" }
-func (g *GitConfig) Title() string   { return "git's settings" }
 func (g *GitConfig) Program() string { return "git" }
 
 // Verb says a setting as declared is set.

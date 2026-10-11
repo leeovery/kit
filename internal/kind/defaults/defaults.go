@@ -115,7 +115,6 @@ func New(run runner.Runner, stateDir string) *Defaults {
 }
 
 func (d *Defaults) Name() string    { return "defaults" }
-func (d *Defaults) Title() string   { return "macOS settings" }
 func (d *Defaults) Program() string { return "defaults" }
 
 // Verb says a setting as declared is set.

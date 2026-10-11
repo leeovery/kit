@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/leeovery/kit/internal/check"
@@ -50,7 +51,6 @@ func (b *blockingKind) Blocked(_ context.Context, missing map[string]string, _ [
 }
 
 func (*fakeKind) Name() string    { return "brew" }
-func (*fakeKind) Title() string   { return "Formulae" }
 func (*fakeKind) Program() string { return "brew" }
 
 func (f *fakeKind) Installed(context.Context) ([]kind.Installed, error) {
@@ -139,11 +139,26 @@ func TestCompareFails(t *testing.T) {
 
 func TestStep(t *testing.T) {
 	s := kind.Step(&fakeKind{installed: []kind.Installed{{Name: "jq", Explicit: true}}}, declared("jq"), "homebrew")
-	if s.Name != "brew" || s.Title != "Formulae" || !slices.Equal(s.Needs, []string{"homebrew"}) {
-		t.Errorf("Step() = %+v, want the kind's name and title, needing homebrew", s)
+	if s.Name != "brew" || s.Title != "Homebrew formulae" || !slices.Equal(s.Needs, []string{"homebrew"}) {
+		t.Errorf("Step() = %+v, want the kind's name and label, needing homebrew", s)
 	}
 	if got := s.Check(context.Background()); got.State != check.OK {
 		t.Errorf("its check = %+v, want ok", got)
+	}
+}
+
+func TestLabels(t *testing.T) {
+	for name, label := range kind.Labels {
+		// A kind declared in a section of kit-config's is named as it is.
+		if header := config.Header(name); header != name && !strings.EqualFold(label, header) {
+			t.Errorf("%s's row is %q, want its section's words, %q", name, label, header)
+		}
+	}
+	if got := kind.Label("brew"); got != "Homebrew formulae" {
+		t.Errorf("Label(brew) = %q, want Homebrew formulae", got)
+	}
+	if got := kind.Label("unknown"); got != "unknown" {
+		t.Errorf("Label(unknown) = %q, want its name", got)
 	}
 }
 
