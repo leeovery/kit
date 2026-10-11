@@ -39,6 +39,12 @@ func TestInstalled(t *testing.T) {
 	if got, err := composer.New(fake).Installed(t.Context()); err != nil || len(got) != 0 {
 		t.Errorf("Installed() of none = %+v, %v", got, err)
 	}
+	// A new Mac has no global composer.json yet: nothing installed.
+	fresh := runnertest.New(t)
+	fresh.On("composer", "global", "show", "--direct", "--format=json").Exits(1).PrintsToStderr("To initialize a project, please create a composer.json file. See https://getcomposer.org/basic-usage\n")
+	if got, err := composer.New(fresh).Installed(t.Context()); err != nil || len(got) != 0 {
+		t.Errorf("Installed() before a global composer.json = %+v, %v; want nothing installed", got, err)
+	}
 }
 
 // A package declared with a constraint matches on its name.
