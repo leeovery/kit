@@ -32,24 +32,87 @@ func (p *Pretty) height() int {
 
 // applyLive is applying's live part, in place under its heading: the
 // lights, the bar with how many steps are done, running and how long it's
-// taken, then the work list, a block an area, each step's row as it stands,
-// a window on it around what's running, so it's never taller than the
-// terminal.
+// taken, then what's happening and what's wrong, in the views' order: each
+// step running, with the last lines its commands printed; each waiting on
+// you, with what to do; each finished unwell, a line each. What finished
+// well, and what's still to start, the bar and the lights count: the whole
+// list is applying's last word. It's never taller than the terminal: when
+// what finished unwell won't all fit, the last are counted.
 func (p *Pretty) applyLive() []string {
 	done, total := len(p.results), len(p.start.Steps)
 	top := []string{look.Lights(p.lamps()...), "",
 		"  " + look.Bar(done, len(p.running), total, look.Done) + "  " + look.Says(look.White(fmt.Sprintf("%d of %d", done, total)), look.Cyan(fmt.Sprintf("%d running", len(p.running))), look.Muted(seconds(time.Since(p.began)))),
 		""}
-	list, focus := p.workList(false)
-	if room := max(p.height()-1-len(top), 3); len(list) > room {
-		from := min(max(focus-room/3, 0), len(list)-room)
-		// A window starting between two areas starts with the next.
-		if list[from] == "" {
-			from++
-		}
-		list = list[from:min(from+room, len(list))]
+	running := map[string]runningStep{}
+	for _, r := range p.running {
+		running[r.step] = r
 	}
-	return append(top, list...)
+	type block struct {
+		lines  []string
+		unwell bool
+	}
+	var blocks []block
+	kept, unwell := 0, 0
+	for _, area := range viewOrder {
+		for _, s := range p.start.Steps {
+			if viewArea(s.Area) != area {
+				continue
+			}
+			if r, ok := running[s.Name]; ok {
+				lines := p.runningLines(r)
+				blocks = append(blocks, block{lines: lines})
+				kept += len(lines)
+				continue
+			}
+			if f, ok := p.results[s.Name]; ok && state(f.Result.State) != look.Done && f.Result.State != check.Deferred {
+				row := p.workRow(f, s.Part)
+				row.Under = nil
+				blocks = append(blocks, block{lines: look.Rows("  ", p.width, row), unwell: true})
+				unwell++
+			}
+		}
+	}
+	room := max(p.height()-1-len(top), 3)
+	// What finished unwell has the room what's running leaves, a line kept
+	// to count the rest, when they won't all fit.
+	fits := room - kept
+	if kept+unwell > room {
+		fits--
+	}
+	var list []string
+	left, at := 0, 0
+	for _, b := range blocks {
+		switch {
+		case !b.unwell:
+			list = append(list, b.lines...)
+		case fits > 0:
+			list = append(list, b.lines...)
+			fits--
+		default:
+			if left == 0 {
+				at = len(list)
+			}
+			left++
+		}
+	}
+	if left > 0 {
+		list = slices.Insert(list, at, "  "+look.Muted(fmt.Sprintf("and %d more", left)))
+	}
+	return append(top, list[:min(len(list), room)]...)
+}
+
+// runningLines are a running step's lines: waiting on you, what for, then
+// what to do, under it; at work, what it's doing and the command running,
+// with the last lines it printed, on a line from its mark.
+func (p *Pretty) runningLines(r runningStep) []string {
+	if r.todo != "" {
+		return look.Timeline("  ", p.width, look.Row{State: look.NeedsYou, Name: r.title, Says: look.Orange(r.doing), Under: todoLines(r.todo, p.width-6)})
+	}
+	says := []string{look.Cyan(r.doing)}
+	if c := p.command[r.step]; c != "" {
+		says = append(says, look.Dim(c))
+	}
+	return look.Timeline("  ", p.width, look.Row{State: look.Running, Name: r.title, Says: look.Says(says...), Under: look.Output(lastOf(p.output[r.step], keptRunning)...)})
 }
 
 // lamps are the run's lights as it stands, or the steps it will run while
@@ -97,84 +160,46 @@ func (p *Pretty) lamps() []look.Lamp {
 	return lamps
 }
 
-// workList is applying's list of steps, a block an area in the views'
-// order, its header counting how many are done, each step a row: running,
-// waiting on you, waiting, or as it finished; done says the list is the
-// run's last word, its headers without the count. The boot's steps, shown
-// as it ran, have their light, and a row here only once one isn't well.
-// focus is the line of the first step running, or the last finished, for a
-// window on the list to keep in view.
-func (p *Pretty) workList(final bool) (lines []string, focus int) {
+// workList is applying's list of steps, the run's last word: a block an
+// area in the views' order, each step a row, as it finished, or, when the
+// run was stopped, running or waiting. The boot's steps, shown as it ran,
+// have their light, and a row here only once one isn't well.
+func (p *Pretty) workList() (lines []string) {
 	running := map[string]runningStep{}
 	for _, r := range p.running {
 		running[r.step] = r
 	}
-	focus = -1
-	last := 0
 	for _, area := range viewOrder {
-		var steps, shown []event.Step
-		finished := 0
+		var shown []event.Step
 		for _, s := range p.start.Steps {
 			if viewArea(s.Area) != area {
 				continue
 			}
-			steps = append(steps, s)
-			f, ok := p.results[s.Name]
-			if ok {
-				finished++
-			}
-			if area != boot.AreaBooted || ok && f.Result.State != check.OK {
+			if f, ok := p.results[s.Name]; area != boot.AreaBooted || ok && f.Result.State != check.OK {
 				shown = append(shown, s)
 			}
 		}
 		if len(shown) == 0 {
 			continue
 		}
-		note := fmt.Sprintf("%d of %d", finished, len(steps))
-		if final {
-			note = ""
-		}
-		lines = append(lines, look.Header(area, note))
+		lines = append(lines, look.Header(area, ""))
 		for _, s := range shown {
-			var row look.Row
 			r, isRunning := running[s.Name]
 			f, isDone := p.results[s.Name]
 			switch {
-			case isRunning && r.todo != "":
-				// Waiting on you: what for, then what to do, under it.
-				row = look.Row{State: look.NeedsYou, Name: r.title, Says: look.Orange(r.doing), Under: todoLines(r.todo, p.width-6)}
-				if focus < 0 {
-					focus = len(lines)
-				}
 			case isRunning:
-				says := []string{look.Cyan(r.doing)}
-				if c := p.command[s.Name]; c != "" {
-					says = append(says, look.Dim(c))
-				}
-				// What the command running prints shows under its row, its
-				// last lines, on a line from its mark.
-				row = look.Row{State: look.Running, Name: r.title, Says: look.Says(says...), Under: look.Output(lastOf(p.output[s.Name], keptRunning)...)}
-				if focus < 0 {
-					focus = len(lines)
-				}
+				lines = append(lines, p.runningLines(r)...)
+			case isDone && p.output[s.Name] != nil && f.Result.State == check.Failed:
+				lines = append(lines, look.Timeline("  ", p.width, p.workRow(f, s.Part))...)
 			case isDone:
-				row = p.workRow(f, s.Part)
-				last = len(lines)
+				lines = append(lines, look.Rows("  ", p.width, p.workRow(f, s.Part))...)
 			default:
-				row = look.Row{State: look.Queued, Name: p.title(s.Name), Says: look.Muted(p.waiting(s))}
-			}
-			if isRunning || p.output[s.Name] != nil && isDone && f.Result.State == check.Failed {
-				lines = append(lines, look.Timeline("  ", p.width, row)...)
-			} else {
-				lines = append(lines, look.Rows("  ", p.width, row)...)
+				lines = append(lines, look.Rows("  ", p.width, look.Row{State: look.Queued, Name: p.title(s.Name), Says: look.Muted(p.waiting(s))})...)
 			}
 		}
 		lines = append(lines, "")
 	}
-	if focus < 0 {
-		focus = last
-	}
-	return lines[:max(len(lines)-1, 0)], focus
+	return lines[:max(len(lines)-1, 0)]
 }
 
 // waiting is what a step says while it waits its turn: what for, when it's
@@ -282,7 +307,7 @@ func IsDrift(it check.Item) bool {
 func (p *Pretty) applied(e event.RunFinished) []string {
 	out := []string{look.Cut(look.Lights(p.lamps()...), p.width), ""}
 	out = append(out, p.foot(e)...)
-	list, _ := p.workList(true)
+	list := p.workList()
 	out = append(append(out, ""), list...)
 	for i, l := range out {
 		out[i] = ansi.Truncate(l, p.width, "…")

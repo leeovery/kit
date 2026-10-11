@@ -620,12 +620,11 @@ const (
 
 // drawLive draws lines as the live part, over the last: back to its first
 // line, each line written over in place, and what's left of the last
-// cleared; the cursor hidden while it's live.
+// cleared; the cursor hidden while it's live, at each draw, as a question
+// asked meanwhile shows it as it ends.
 func (p *Pretty) drawLive(lines []string) {
-	if !p.hidden {
-		p.write(hideCursor)
-		p.hidden = true
-	}
+	p.write(hideCursor)
+	p.hidden = true
 	p.write("\r")
 	if p.live > 1 {
 		p.write(fmt.Sprintf("\x1b[%dA", p.live-1))

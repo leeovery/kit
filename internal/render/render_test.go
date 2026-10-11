@@ -501,10 +501,10 @@ func TestPrettyShowsWhatACommandPrints(t *testing.T) {
 	}
 }
 
-// While applying, the whole screen is its live view: the wordmark, the
-// lights, the bar, and the work list, a block an area, each step's row as it
-// stands; at the end, the screen as it was, and the report under the
-// heading: the lights, the bar, the whole list as it finished.
+// While applying, its live part is under the wordmark: the lights, the bar,
+// and what's happening and what's wrong, not what finished well or hasn't
+// started; at the end, the report under the heading: the lights, the bar,
+// the whole list as it finished.
 func TestPrettyApplyingNow(t *testing.T) {
 	var out syncBuffer
 	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).Sized(func() (int, int) { return 80, 40 })
@@ -528,10 +528,15 @@ func TestPrettyApplyingNow(t *testing.T) {
 	face.Emit(event.Output{Step: "brew", Command: "brew install --formula jq", Line: "==> Pouring jq"})
 	time.Sleep(300 * time.Millisecond)
 	got := turned(screen(out.String()))
-	for _, want := range []string{"  ● BACKUPS 1  ◐ CONFIG  ○ STEPS\n\n  ▮▮▮▮  1 of 4 · 1 running · ",
-		"  BACKUPS  1 of 1\n  ● Time Machine  last backup 02:35\n\n  CONFIG  0 of 2\n  ◐ Formulae  applying · brew install --formula jq\n  │ ==> Pouring jq\n  ○ Casks  waiting\n\n  STEPS  0 of 1\n  ○ fonts  waiting"} {
-		if !strings.Contains(got, want) {
-			t.Errorf("while applying, the screen is\n%s\nwant it to hold\n%s", got, want)
+	if want := "  ● BACKUPS 1  ◐ CONFIG  ○ STEPS\n\n  ▮▮▮▮  1 of 4 · 1 running · "; !strings.Contains(got, want) {
+		t.Errorf("while applying, the screen is\n%s\nwant it to hold\n%s", got, want)
+	}
+	if want := "s\n\n  ◐ Formulae  applying · brew install --formula jq\n  │ ==> Pouring jq"; !strings.HasSuffix(got, want) {
+		t.Errorf("while applying, the screen is\n%s\nwant it to end with what's running\n%s", got, want)
+	}
+	for _, gone := range []string{"Time Machine", "Casks", "fonts"} {
+		if strings.Contains(got, gone) {
+			t.Errorf("while applying, the screen is\n%s\nwant no row for %s, done well or not started", got, gone)
 		}
 	}
 	face.Emit(event.StepFinished{Step: "brew", Result: check.Result{State: check.OK, Summary: "1 declared, all installed", Done: []check.Item{{ID: "brew:jq", Name: "jq", Action: "install"}}}})
@@ -555,9 +560,9 @@ func TestPrettyApplyingNow(t *testing.T) {
 	}
 }
 
-// On a short terminal, applying's live part is a window on its list, never
-// taller than the terminal, kept around what's running; once applied, the
-// whole list stays.
+// Applying's live part is never taller than the terminal: on a short one,
+// what finished unwell that won't fit is counted, where it would have been,
+// and what's running stays; once applied, the whole list stays.
 func TestPrettyApplyingFitsTheTerminal(t *testing.T) {
 	var out syncBuffer
 	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).Sized(func() (int, int) { return 80, 12 })
@@ -567,32 +572,56 @@ func TestPrettyApplyingFitsTheTerminal(t *testing.T) {
 	}
 	face.Emit(event.RunStarted{Time: at, Command: "apply", Machine: "laptop", Steps: steps})
 	for i := range 14 {
-		face.Emit(event.StepFinished{Step: fmt.Sprintf("s%02d", i), Result: check.Result{State: check.OK, Summary: "fine"}})
+		face.Emit(event.StepFinished{Step: fmt.Sprintf("s%02d", i), Result: check.Result{State: check.Failed, Reason: "couldn't apply: it broke"}})
 	}
 	face.Emit(event.StepStarted{Step: "s14", Doing: "applying"})
 	time.Sleep(300 * time.Millisecond)
 	got := screen(out.String())
 	// The heading is a blank line, the wordmark's three and a blank line.
 	live := strings.Split(strings.TrimRight(got, "\n"), "\n")[5:]
-	if len(live) > 11 || !strings.Contains(got, "◐ Step 14  applying") {
-		t.Errorf("at 12 lines, the live part is %d lines:\n%s\nwant at most 11, Step 14 in it", len(live), got)
+	if len(live) > 11 || !strings.Contains(got, "✗ Step 04  couldn't apply: it broke\n  and 9 more\n  ◐ Step 14  applying") || strings.Contains(got, "Step 05") {
+		t.Errorf("at 12 lines, the live part is %d lines:\n%s\nwant at most 11: five that failed, the other nine counted, then Step 14", len(live), got)
 	}
 	for i := 14; i < 20; i++ {
 		face.Emit(event.StepFinished{Step: fmt.Sprintf("s%02d", i), Result: check.Result{State: check.OK, Summary: "fine"}})
 	}
-	face.Emit(event.RunFinished{Duration: time.Second, Counts: map[check.State]int{check.OK: 20}})
+	face.Emit(event.RunFinished{Duration: time.Second, Counts: map[check.State]int{check.OK: 6, check.Failed: 14}})
 	if err := face.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if got := screen(out.String()); !strings.Contains(got, "● Step 00  fine") || !strings.Contains(got, "● Step 19  fine") {
+	if got := screen(out.String()); !strings.Contains(got, "✗ Step 00  couldn't apply") || !strings.Contains(got, "● Step 19  fine") {
 		t.Errorf("once applied, the screen is\n%s\nwant every step", got)
+	}
+}
+
+// A question asked as the run gets ready, sudo's password, shows the cursor
+// as it ends: the live part hides it again.
+func TestPrettyHidesTheCursorAfterAQuestion(t *testing.T) {
+	var out syncBuffer
+	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).Sized(func() (int, int) { return 80, 40 })
+	steps := []event.Step{{Name: "brew", Title: "Homebrew formulae", Area: "Drift"}}
+	face.Emit(event.Preparing{Time: at, Command: "apply", Machine: "laptop", Doing: "checking what will need an administrator's password", Steps: steps})
+	face.Emit(event.Preparing{Time: at, Command: "apply", Machine: "laptop"})
+	_, _ = out.Write([]byte("\x1b[?25h"))
+	face.Emit(event.RunStarted{Time: at, Command: "apply", Machine: "laptop", Steps: steps})
+	face.Emit(event.StepStarted{Step: "brew", Doing: "applying"})
+	got := out.String()
+	if after := got[strings.LastIndex(got, "\x1b[?25h"):]; !strings.Contains(after, "\x1b[?25l") {
+		t.Errorf("after the question, the face wrote %q; want the cursor hidden again", after)
+	}
+	face.Emit(event.StepFinished{Step: "brew", Result: check.Result{State: check.OK, Summary: "fine"}})
+	face.Emit(event.RunFinished{Duration: time.Second, Counts: map[check.State]int{check.OK: 1}})
+	if err := face.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if got := out.String(); !strings.Contains(got[strings.LastIndex(got, "\x1b[?25l"):], "\x1b[?25h") {
+		t.Errorf("once applied, the cursor isn't shown again: %q", got)
 	}
 }
 
 // Once the boot's in the terminal, it's kit apply: the boot's steps a light
 // of their own, with a row only once one isn't well; a step waiting on you
-// says what for and what to do, its area's light asking; what waits for it
-// says so.
+// says what for and what to do, its area's light asking.
 func TestPrettyBootstrapInTheTerminal(t *testing.T) {
 	var out syncBuffer
 	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).Sized(func() (int, int) { return 80, 40 })
@@ -613,7 +642,7 @@ func TestPrettyBootstrapInTheTerminal(t *testing.T) {
 	time.Sleep(300 * time.Millisecond)
 	got := turned(screen(out.String()))
 	for _, want := range []string{"│  bootstrap\n", "  ● BOOT 2   ▲ CONFIG   ○ STEPS\n\n  ▮▮▮▮▮▮  2 of 6 · 2 running",
-		"\n  CONFIG  0 of 3\n  ▲ 1Password  not signed in\n  │ → sign in with your phone's 1Password, then turn on\n  │   Settings › Developer › Integrate with 1Password CLI\n  ◐ Casks  applying\n  ○ Secrets  waiting for 1Password\n\n  STEPS  0 of 1\n  ○ gpg-key  waiting for Secrets"} {
+		"s\n\n  ▲ 1Password  not signed in\n  │ → sign in with your phone's 1Password, then turn on\n  │   Settings › Developer › Integrate with 1Password CLI\n  ◐ Casks  applying"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("waiting on you, the screen is\n%s\nwant it to hold\n%s", got, want)
 		}
