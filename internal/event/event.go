@@ -128,6 +128,16 @@ type Doing struct {
 	Todo string
 }
 
+// Asking is macOS asking the person at the Mac something, in a window of
+// its own, as "asking for a permission": the run's time limits wait on the
+// answer. Nothing once it's been answered.
+type Asking struct {
+	Time time.Time
+	Says string
+}
+
+func (e Asking) At() time.Time { return e.Time }
+
 // DeviceCode is a sign-in waiting for its code to be entered: where, the
 // code, and when it expires.
 type DeviceCode struct {

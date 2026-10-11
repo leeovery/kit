@@ -32,9 +32,10 @@ func (p *Pretty) height() int {
 
 // applyLive is applying's live part, in place under its heading: the
 // lights, the bar with how many steps are done, running and how long it's
-// taken, then what's happening and what's wrong, in the views' order: each
-// step running, with the last lines its commands printed; each waiting on
-// you, with what to do; each finished unwell, a line each. What finished
+// taken, then what's happening and what's wrong: macOS asking something
+// first, then, in the views' order, each step running, with the last lines
+// its commands printed; each waiting on you, with what to do; each finished
+// unwell, a line each. What finished
 // well, and what's still to start, the bar and the lights count: the whole
 // list is applying's last word. It's never taller than the terminal: when
 // what finished unwell won't all fit, the last are counted.
@@ -51,8 +52,9 @@ func (p *Pretty) applyLive() []string {
 		lines  []string
 		unwell bool
 	}
-	var blocks []block
-	kept, unwell := 0, 0
+	// macOS asking something comes first: the run waits on it.
+	blocks := []block{{lines: p.askingLines()}}
+	kept, unwell := len(blocks[0].lines), 0
 	for _, area := range viewOrder {
 		for _, s := range p.start.Steps {
 			if viewArea(s.Area) != area {

@@ -15,6 +15,7 @@ import (
 
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/event"
+	"github.com/leeovery/kit/internal/hold"
 )
 
 // DefaultJobs is how many steps run side by side, unless Options say.
@@ -206,6 +207,10 @@ type Options struct {
 	// answering: DefaultCheckWithin when 0.
 	CheckWithin time.Duration
 	Now         func() time.Time
+	// Held is whether the run's time limits wait, a check's and each
+	// command's: while macOS is asking the person at the Mac something,
+	// which holds up the command that brought it. Never, when nil.
+	Held func() bool
 }
 
 // Report is how a run's steps stood, in pipeline order.
@@ -315,6 +320,7 @@ func (p *Pipeline) run(ctx context.Context, sink event.Sink, opts Options, apply
 	if now == nil {
 		now = time.Now
 	}
+	ctx = hold.With(ctx, opts.Held)
 	started := now()
 	infos := make([]event.Step, len(steps))
 	titles := make(map[string]string, len(steps))
@@ -552,7 +558,7 @@ func checkSafely(ctx context.Context, s Step) (res check.Result) {
 // on.
 func (d *dispatch) check(ctx context.Context, s Step) check.Result {
 	for try := 0; ; try++ {
-		within, cancel := context.WithTimeout(ctx, d.within)
+		within, cancel := hold.WithTimeout(ctx, d.within)
 		res := checkSafely(within, s)
 		late := errors.Is(within.Err(), context.DeadlineExceeded) && ctx.Err() == nil
 		cancel()

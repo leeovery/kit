@@ -14,6 +14,7 @@ import (
 	"github.com/leeovery/kit/internal/askpass"
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/config"
+	"github.com/leeovery/kit/internal/dialog"
 	"github.com/leeovery/kit/internal/drift"
 	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/event"
@@ -113,6 +114,10 @@ type run struct {
 	// askpass answers, at a terminal, what the programs the run starts ask
 	// for an administrator's password: nil when nothing will.
 	askpass *askpass.Server
+	// held is whether macOS is asking the person at the Mac something, which
+	// the run's time limits wait on, at a terminal; unwatch stops watching.
+	held    func() bool
+	unwatch func()
 	now     time.Time
 	run     runner.Runner
 	// homeDir is the user's home, logsDir where kit's logs go, and dataDir
@@ -178,12 +183,15 @@ func (r *run) remember(report engine.Report) error {
 }
 
 func (r *run) options(a *app, only []string) engine.Options {
-	return engine.Options{Command: r.command, Machine: r.machine, Version: a.Version, Only: only, Now: a.Now}
+	return engine.Options{Command: r.command, Machine: r.machine, Version: a.Version, Only: only, Now: a.Now, Held: r.held}
 }
 
 // close finishes the run's face and log, returning the first error, and
 // stops answering for a password.
 func (r *run) close() error {
+	if r.unwatch != nil {
+		r.unwatch()
+	}
 	if r.askpass != nil {
 		_ = r.askpass.Close()
 	}
@@ -192,6 +200,31 @@ func (r *run) close() error {
 		return err
 	}
 	return faceErr
+}
+
+// watchDialogs watches, till unwatch, for macOS asking the person at the
+// Mac something in a window of its own, through run, a runner whose commands
+// aren't logged: the run says so as it starts and as it's answered, and a
+// notification's sent, in case the window's out of sight. held is whether
+// it's asking.
+func watchDialogs(run runner.Runner, sink event.Sink, now func() time.Time) (held func() bool, unwatch func()) {
+	var watch dialog.Watch
+	ctx, stop := context.WithCancel(context.Background())
+	notify := steps.Notify(run)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		watch.Run(ctx, run, func(what string) {
+			sink.Emit(event.Asking{Time: now(), Says: what})
+			if what != "" {
+				notify(ctx, "macOS is "+what, "Answer it in the window macOS shows")
+			}
+		})
+	}()
+	return watch.Up, func() {
+		stop()
+		<-done
+	}
 }
 
 // prepare readies a run of command, logged as logName: the config, this
@@ -242,7 +275,8 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 	// Everything the run starts can ask it for an administrator's password,
 	// at a terminal, once the run is ready (askpass).
 	var asks *askpass.Server
-	exec := runner.WithEnv(a.Runner(path, childEnv(a.Getenv, a.Environ(), home, path)), func() []string {
+	env := childEnv(a.Getenv, a.Environ(), home, path)
+	exec := runner.WithEnv(a.Runner(path, env), func() []string {
 		if asks == nil {
 			return nil
 		}
@@ -428,6 +462,9 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 	if a.pretty(a.Stdout) && !slices.Contains(readOnly, command) {
 		asks = a.askpass(face)
 		r.askpass = asks
+	}
+	if a.WatchDialogs && a.pretty(a.Stdout) {
+		r.held, r.unwatch = watchDialogs(a.Runner(path, env), sink, a.Now)
 	}
 	return r, nil
 }

@@ -594,6 +594,32 @@ func TestPrettyApplyingFitsTheTerminal(t *testing.T) {
 	}
 }
 
+// macOS asking something while applying is a row of its own, first, saying
+// what it's asking and what to do; answered, it goes.
+func TestPrettyApplyingWhileMacOSAsks(t *testing.T) {
+	var out syncBuffer
+	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).Sized(func() (int, int) { return 80, 40 })
+	steps := []event.Step{{Name: "1password", Title: "1password", Area: "Manual"}, {Name: "cask", Title: "Homebrew casks", Area: "Drift"}}
+	face.Emit(event.RunStarted{Time: at, Command: "apply", Machine: "laptop", Steps: steps})
+	face.Emit(event.StepStarted{Step: "cask", Doing: "applying"})
+	face.Emit(event.StepStarted{Step: "1password", Doing: "checking"})
+	face.Emit(event.Asking{Time: at, Says: "asking whether to open a program from the internet"})
+	got := turned(screen(out.String()))
+	if want := "s\n\n  ▲ macOS  asking whether to open a program from the internet\n  │ → answer it in the window macOS shows\n  ◐ Homebrew casks  applying\n"; !strings.Contains(got, want) {
+		t.Errorf("while macOS asks, the screen is\n%s\nwant it to hold\n%s", got, want)
+	}
+	face.Emit(event.Asking{Time: at})
+	if got := turned(screen(out.String())); strings.Contains(got, "macOS") {
+		t.Errorf("once answered, the screen is\n%s\nwant macOS's row gone", got)
+	}
+	face.Emit(event.StepFinished{Step: "cask", Result: check.Result{State: check.OK, Summary: "fine"}})
+	face.Emit(event.StepFinished{Step: "1password", Result: check.Result{State: check.OK, Summary: "fine"}})
+	face.Emit(event.RunFinished{Duration: time.Second, Counts: map[check.State]int{check.OK: 2}})
+	if err := face.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // A question asked as the run gets ready, sudo's password, shows the cursor
 // as it ends: the live part hides it again.
 func TestPrettyHidesTheCursorAfterAQuestion(t *testing.T) {

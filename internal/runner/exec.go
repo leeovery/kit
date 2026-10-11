@@ -15,6 +15,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/leeovery/kit/internal/hold"
 )
 
 // waitDelay is how long a command's output is waited for once it has exited
@@ -39,7 +41,7 @@ func (e Exec) Run(ctx context.Context, cmd Command) (Result, error) {
 	if err != nil {
 		return Result{ExitCode: -1}, err
 	}
-	ctx, cancel := context.WithTimeout(ctx, cmp.Or(cmd.Timeout, DefaultTimeout))
+	ctx, cancel := hold.WithTimeout(ctx, cmp.Or(cmd.Timeout, DefaultTimeout))
 	defer cancel()
 	started := e.Now()
 	stdout, stderr, err := e.start(ctx, program, cmd)

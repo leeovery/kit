@@ -117,7 +117,10 @@ type Pretty struct {
 	// aside is whether the face has stepped aside for a question asked
 	// mid-run: it draws nothing, and holds what it writes, till it's back.
 	aside bool
-	size  func() (int, int)
+	// asking is what macOS is asking the person at the Mac, in a window of
+	// its own, as the run goes: nothing, mostly.
+	asking string
+	size   func() (int, int)
 	// out is what's being written, sent to the terminal whole at the end of
 	// an event or a turn of the spinner, for the terminal to show at once.
 	out     strings.Builder
@@ -183,6 +186,9 @@ func (p *Pretty) Emit(e event.Event) {
 				p.running[i].doing, p.running[i].todo = cmp.Or(e.Says, r.doing), e.Todo
 			}
 		}
+		p.drawSpinner()
+	case event.Asking:
+		p.asking = e.Says
 		p.drawSpinner()
 	case event.StepFinished:
 		p.running = without(p.running, e.Step)
@@ -606,7 +612,16 @@ func (p *Pretty) drawSpinner() {
 			lines = append(lines, "  "+look.Dim("│")+" "+look.Muted(l))
 		}
 	}
-	p.drawLive(lines)
+	p.drawLive(append(lines, p.askingLines()...))
+}
+
+// askingLines are macOS asking something, a row of its own, and what to do:
+// none while it isn't.
+func (p *Pretty) askingLines() []string {
+	if p.asking == "" {
+		return nil
+	}
+	return look.Timeline("  ", p.width, look.Row{State: look.NeedsYou, Name: "macOS", Says: look.Orange(p.asking), Under: todoLines("answer it in the window macOS shows", p.width-6)})
 }
 
 // The terminal's controls the live part uses: the cursor hidden and shown,

@@ -629,6 +629,29 @@ func TestWaits(t *testing.T) {
 	}
 }
 
+// A check waiting on macOS asking the person at the Mac something isn't
+// late while it's asking: its time limit waits.
+func TestCheckWaitsWhileHeld(t *testing.T) {
+	p, err := engine.New(engine.Step{Name: "1password", Check: func(ctx context.Context) check.Result {
+		select {
+		case <-ctx.Done():
+			return check.Result{State: check.Failed, Reason: ctx.Err().Error()}
+		case <-time.After(150 * time.Millisecond):
+			return check.Result{State: check.OK, Summary: "signed in"}
+		}
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := p.Check(t.Context(), &recorder{}, engine.Options{CheckWithin: 30 * time.Millisecond, Held: func() bool { return true }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res := report.Results["1password"]; res.State != check.OK {
+		t.Errorf("1password = %+v, want ok: its limit waits while held", res)
+	}
+}
+
 // A step whose apply says it can't be applied yet isn't failed: it says
 // why, and doesn't stand ok.
 func TestNotYet(t *testing.T) {

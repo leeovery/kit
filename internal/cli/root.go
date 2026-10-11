@@ -80,6 +80,9 @@ type Deps struct {
 	TCC string
 	// UID is the user's id, which names Claude Code's folder in Scratch.
 	UID int
+	// WatchDialogs is whether a run at a terminal watches for macOS asking
+	// the person at the Mac something, its time limits waiting meanwhile.
+	WatchDialogs bool
 }
 
 // Exit statuses: a command that needs attention exits attentionStatus, one
@@ -270,10 +273,11 @@ func Real(version string) Deps {
 			env := slices.DeleteFunc(os.Environ(), func(v string) bool { return strings.HasPrefix(v, "SUDO_ASKPASS=") })
 			return runner.BecomeLoginShell(cmp.Or(os.Getenv("SHELL"), "/bin/zsh"), env)
 		},
-		Scratch:   "/Volumes/Scratch",
-		SudoLocal: steps.SudoLocal,
-		TCC:       "/Library/Application Support/com.apple.TCC/TCC.db",
-		UID:       os.Getuid(),
+		WatchDialogs: true,
+		Scratch:      "/Volumes/Scratch",
+		SudoLocal:    steps.SudoLocal,
+		TCC:          "/Library/Application Support/com.apple.TCC/TCC.db",
+		UID:          os.Getuid(),
 	}
 }
 
