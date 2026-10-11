@@ -147,6 +147,54 @@ func TestStep(t *testing.T) {
 	}
 }
 
+// linkingKind is a fakeKind whose install fails having installed some of
+// what it was given: the rest stay missing.
+type linkingKind struct {
+	*fakeKind
+	takes []string
+}
+
+// knowing is a fakeKind that knows names, each by itself.
+func knowing(names ...string) *fakeKind {
+	f := &fakeKind{aliases: map[string]string{}}
+	for _, n := range names {
+		f.aliases[n] = n
+	}
+	return f
+}
+
+func (l *linkingKind) Install(ctx context.Context, names []string) error {
+	for _, name := range names {
+		if slices.Contains(l.takes, name) {
+			l.installed = append(l.installed, kind.Installed{Name: name, Explicit: true})
+		}
+	}
+	return errors.Join(l.fakeKind.Install(ctx, names), errors.New("brew install exited 1"))
+}
+
+func TestStepFailingInstallThatInstalledAll(t *testing.T) {
+	// As Homebrew does for a formula it installs but can't link.
+	k := &linkingKind{fakeKind: knowing("php"), takes: []string{"php"}}
+	s := kind.Step(k, declared("php"))
+	if err := s.Apply(context.Background(), s.Check(context.Background())); err != nil || len(k.installs) != 1 {
+		t.Errorf("Apply() = %v, installs %q; want php installed, and nil", err, k.installs)
+	}
+}
+
+func TestStepFailingInstallSaysWhatsLeft(t *testing.T) {
+	k := &linkingKind{fakeKind: knowing("jq", "xpdf"), takes: []string{"jq"}}
+	s := kind.Step(k, declared("jq", "xpdf"))
+	err := s.Apply(context.Background(), s.Check(context.Background()))
+	if err == nil || !strings.HasPrefix(err.Error(), "couldn't install xpdf: ") {
+		t.Errorf("Apply() = %v, want it to name xpdf alone", err)
+	}
+	k = &linkingKind{fakeKind: knowing("a", "b", "c", "d")}
+	s = kind.Step(k, declared("a", "b", "c", "d"))
+	if err := s.Apply(context.Background(), s.Check(context.Background())); err == nil || !strings.HasPrefix(err.Error(), "couldn't install 4 of 4: ") {
+		t.Errorf("Apply() = %v, want them counted", err)
+	}
+}
+
 func TestLabels(t *testing.T) {
 	for name, label := range kind.Labels {
 		// A kind declared in a section of kit-config's is named as it is.

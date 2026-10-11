@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/config"
@@ -217,7 +218,8 @@ const (
 
 // Step is the step that checks k, what declared lists against what's on
 // the Mac, and applies it: installing what's missing, as it can. It needs
-// the steps named in needs.
+// the steps named in needs. An install that fails has failed for what's
+// still missing after it, named.
 func Step(k Kind, declared config.List, needs ...string) engine.Step {
 	return engine.Step{
 		Name:  k.Name(),
@@ -225,18 +227,41 @@ func Step(k Kind, declared config.List, needs ...string) engine.Step {
 		Needs: needs,
 		Check: func(ctx context.Context) check.Result { return Compare(ctx, k, declared) },
 		Apply: func(ctx context.Context, found check.Result) error {
-			var names []string
-			for _, it := range found.Items {
-				if it.Action == Install {
-					names = append(names, it.Name)
-				}
-			}
+			names := toInstall(found)
 			if len(names) == 0 {
 				return nil
 			}
-			return k.Install(ctx, names)
+			err := k.Install(ctx, names)
+			if err == nil {
+				return nil
+			}
+			// An install can fail having installed all it was given: a
+			// formula Homebrew installs but can't link, as another's linked
+			// in its place, is installed. What's still missing is what failed.
+			left := names
+			if again := Compare(ctx, k, declared); again.State != check.Failed && again.State != check.Deferred {
+				left = slices.DeleteFunc(toInstall(again), func(name string) bool { return !slices.Contains(names, name) })
+			}
+			switch {
+			case len(left) == 0:
+				return nil
+			case len(left) > 3:
+				return fmt.Errorf("couldn't install %d of %d: %w", len(left), len(names), err)
+			}
+			return fmt.Errorf("couldn't install %s: %w", strings.Join(left, ", "), err)
 		},
 	}
+}
+
+// toInstall are the things found that applying installs.
+func toInstall(found check.Result) []string {
+	var names []string
+	for _, it := range found.Items {
+		if it.Action == Install {
+			names = append(names, it.Name)
+		}
+	}
+	return names
 }
 
 // UnattendedApply is k's step's apply as the scheduled run takes it:
