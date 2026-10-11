@@ -76,8 +76,10 @@ func (g *GitConfig) Values(list config.List) (config.List, error) {
 func (g *GitConfig) settings(ctx context.Context) (map[string][]string, []string, error) {
 	res, err := g.run.Run(ctx, runner.Command{Name: "git", Args: []string{"config", "--global", "--list", "-z"}})
 	switch {
-	case err != nil && res.ExitCode == 1 && len(res.Stdout) == 0:
-		// No global config file yet: nothing set.
+	case err != nil && len(res.Stdout) == 0 && (res.ExitCode == 1 || res.ExitCode == 128 && strings.Contains(string(res.Stderr), "No such file or directory")):
+		// No global config file yet, as on a new Mac: nothing set. Older
+		// gits exit 1 saying nothing; newer ones 128, that the file isn't
+		// there.
 		return map[string][]string{}, nil, nil
 	case err != nil:
 		return nil, nil, err

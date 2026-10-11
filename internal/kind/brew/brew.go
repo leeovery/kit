@@ -27,9 +27,11 @@ import (
 // the formulae and casks need.
 const StepName = "homebrew"
 
-// installTimeout is how long an install may take: big casks, and formulae
-// built from source, can take a while.
-const installTimeout = 30 * time.Minute
+// installTimeout is how long an install of n things may take: half an hour,
+// and three minutes more for each, as a new Mac installs every cask in one
+// go, big downloads and all, where one at a time a big cask, or formulae
+// building from source, can take a while.
+func installTimeout(n int) time.Duration { return 30*time.Minute + time.Duration(n)*3*time.Minute }
 
 // Homebrew is Homebrew, driven through a runner.
 type Homebrew struct {
@@ -141,7 +143,7 @@ func (h *Homebrew) install(ctx context.Context, which string, names []string) er
 	}
 	h.changing.Lock()
 	defer h.changing.Unlock()
-	_, err := h.run.Run(ctx, runner.Command{Name: "brew", Args: slices.Concat([]string{"install", which}, names), Timeout: installTimeout, Env: h.sudoEnv(ctx, which)})
+	_, err := h.run.Run(ctx, runner.Command{Name: "brew", Args: slices.Concat([]string{"install", which}, names), Timeout: installTimeout(len(names)), Env: h.sudoEnv(ctx, which)})
 	return err
 }
 

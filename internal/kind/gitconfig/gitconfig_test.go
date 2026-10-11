@@ -99,4 +99,17 @@ func TestNoGlobalConfigYet(t *testing.T) {
 	if err != nil || len(installed) != 0 {
 		t.Errorf("Installed() = %v, %v; want nothing set", installed, err)
 	}
+	// A newer git, as a new Mac's Xcode tools bring, says the file isn't
+	// there, exit 128.
+	newer := runnertest.New(t)
+	newer.On("git", "config", "--global", "--list", "-z").Exits(128).PrintsToStderr("fatal: unable to read config file '/Users/someone/.gitconfig': No such file or directory\n")
+	if installed, err := gitconfig.New(newer).Installed(t.Context()); err != nil || len(installed) != 0 {
+		t.Errorf("Installed() with a newer git = %v, %v; want nothing set", installed, err)
+	}
+	// Any other failure stays one.
+	broken := runnertest.New(t)
+	broken.On("git", "config", "--global", "--list", "-z").Exits(128).PrintsToStderr("fatal: bad config line 3 in file /Users/someone/.gitconfig\n")
+	if _, err := gitconfig.New(broken).Installed(t.Context()); err == nil {
+		t.Error("a config git can't read said nothing set")
+	}
 }

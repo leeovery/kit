@@ -225,6 +225,10 @@ func TestInstallUpdatesOnceThenInstallsATapsFirst(t *testing.T) {
 			t.Errorf("%s has a timeout of %v, want one long enough for an install", cmd, cmd.Timeout)
 		}
 	}
+	// More to install has longer: a new Mac's every cask in one go.
+	if three, one := fake.Commands()[1].Timeout, fake.Commands()[2].Timeout; three <= one {
+		t.Errorf("three formulae may take %v, one cask %v: want longer for more", three, one)
+	}
 }
 
 func TestInstallFailsWhenUpdateDoes(t *testing.T) {
