@@ -109,6 +109,7 @@ func TestCasksInstalled(t *testing.T) {
 
 func TestResolveAtOnce(t *testing.T) {
 	fake := runnertest.New(t)
+	fake.On("brew", "tap").Prints("oven-sh/bun\n")
 	fake.On("brew", "info", "--json=v2", "--formula", "python", "homebrew/core/jq", "oven-sh/bun/bun").Prints(fixture(t, "info-formulae.json"))
 	got, err := brew.New(fake).Formulae().Resolve(context.Background(), []string{"python", "homebrew/core/jq", "oven-sh/bun/bun"})
 	want := map[string]string{"python": "python@3.14", "homebrew/core/jq": "jq", "oven-sh/bun/bun": "oven-sh/bun/bun"}
@@ -120,6 +121,7 @@ func TestResolveAtOnce(t *testing.T) {
 func TestResolveATapsOtherNames(t *testing.T) {
 	fake := runnertest.New(t)
 	names := []string{"owner/tap/tool@2", "owner/tap/tool", "tool@2", "owner/tap/old-tool"}
+	fake.On("brew", "tap").Prints("owner/tap\n")
 	fake.On("brew", append([]string{"info", "--json=v2", "--formula"}, names...)...).Prints(`{"formulae": [
 		{"name": "tool", "full_name": "owner/tap/tool", "aliases": ["tool@2"], "oldnames": ["old-tool"]}
 	], "casks": []}`)
@@ -135,6 +137,33 @@ func TestResolveATapsOtherNames(t *testing.T) {
 	got, err = brew.New(fake).Casks().Resolve(context.Background(), []string{"owner/tap/old-app"})
 	if want := map[string]string{"owner/tap/old-app": "owner/tap/app"}; err != nil || !mapsEqual(got, want) {
 		t.Errorf("Resolve() of a tap cask's old token = %v, %v; want %v", got, err, want)
+	}
+}
+
+// On a new Mac no tap is added: a formula or cask in one is its own full
+// name, missing, as installing it adds its tap; only the rest are looked up,
+// in one go. A name brew info doesn't know is left out, and the rest asked
+// again together, not one at a time.
+func TestResolveBeforeTapsAreAdded(t *testing.T) {
+	fake := runnertest.New(t)
+	fake.On("brew", "tap")
+	fake.On("brew", "info", "--json=v2", "--formula", "jq", "mistyped").Exits(1).PrintsToStderr(`Error: No available formula with the name "mistyped".`)
+	fake.On("brew", "info", "--json=v2", "--formula", "jq").Prints(`{"formulae": [{"name": "jq", "full_name": "jq"}], "casks": []}`)
+	got, err := brew.New(fake).Formulae().Resolve(context.Background(), []string{"leeovery/tools/portal", "jq", "shivammathur/php/php@8.4", "mistyped"})
+	want := map[string]string{"leeovery/tools/portal": "leeovery/tools/portal", "shivammathur/php/php@8.4": "shivammathur/php/php@8.4", "jq": "jq"}
+	if err != nil || !mapsEqual(got, want) {
+		t.Errorf("Resolve() = %v, %v; want %v", got, err, want)
+	}
+	if n := len(fake.Commands()); n != 3 {
+		t.Errorf("ran %d commands: want the taps, then brew info twice, not once a name", n)
+	}
+
+	casks := runnertest.New(t)
+	casks.On("brew", "tap").Prints("homebrew/cask\n")
+	casks.On("brew", "info", "--json=v2", "--cask", "1password").Prints(`{"formulae": [], "casks": [{"token": "1password", "full_token": "1password"}]}`)
+	got, err = brew.New(casks).Casks().Resolve(context.Background(), []string{"1password", "1password/tap/1password-cli"})
+	if want := map[string]string{"1password": "1password", "1password/tap/1password-cli": "1password/tap/1password-cli"}; err != nil || !mapsEqual(got, want) {
+		t.Errorf("Resolve() of a tap's cask before its tap's added = %v, %v; want %v", got, err, want)
 	}
 }
 

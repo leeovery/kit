@@ -11,6 +11,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -385,19 +386,50 @@ type info struct {
 	} `json:"casks"`
 }
 
-// resolve asks brew info for names' full names, all at once. brew info
-// says nothing at all when any name is unknown, so then it asks of each
-// alone, leaving out those it doesn't know.
+// resolve asks brew info for names' full names, all at once. A name in a
+// tap not added yet, which brew info can't look up, is its own full name:
+// installing it adds its tap, as on a new Mac. brew info says nothing at all
+// when any name is unknown, so then it asks again without the names it says
+// it doesn't know; failing that, of each alone, leaving out those it
+// doesn't know.
 func resolve(ctx context.Context, h *Homebrew, which string, names []string) (map[string]string, error) {
-	resolved, err := lookUp(ctx, h, which, names)
-	if err == nil {
+	resolved := make(map[string]string, len(names))
+	var ask []string
+	if slices.ContainsFunc(names, func(name string) bool { _, ok := tapOf(name); return ok }) {
+		taps, err := h.lines(ctx, "tap")
+		if err != nil {
+			return nil, err
+		}
+		tapped := set(taps)
+		for _, name := range names {
+			if tap, ok := tapOf(name); ok && !tapped[tap] {
+				resolved[name] = name
+				continue
+			}
+			ask = append(ask, name)
+		}
+	} else {
+		ask = names
+	}
+	if len(ask) == 0 {
 		return resolved, nil
 	}
-	if _, exited := errors.AsType[*runner.ExitError](err); !exited {
+	found, err := lookUp(ctx, h, which, ask)
+	exit, exited := errors.AsType[*runner.ExitError](err)
+	if exited {
+		if known := withoutUnknown(ask, exit.Stderr); len(known) < len(ask) && len(known) > 0 {
+			found, err = lookUp(ctx, h, which, known)
+			_, exited = errors.AsType[*runner.ExitError](err)
+		}
+	}
+	switch {
+	case err == nil:
+		maps.Copy(resolved, found)
+		return resolved, nil
+	case !exited:
 		return nil, err
 	}
-	resolved = make(map[string]string, len(names))
-	for _, name := range names {
+	for _, name := range ask {
 		one, err := lookUp(ctx, h, which, []string{name})
 		if _, exited := errors.AsType[*runner.ExitError](err); exited {
 			continue
@@ -408,6 +440,30 @@ func resolve(ctx context.Context, h *Homebrew, which string, names []string) (ma
 		maps.Copy(resolved, one)
 	}
 	return resolved, nil
+}
+
+// tapOf is the tap a name is in, as in owner/tap for owner/tap/tool, by
+// Homebrew's lower-case name for it; none for Homebrew's own, which brew
+// info looks up whether they're added or not.
+func tapOf(name string) (string, bool) {
+	parts := strings.Split(strings.ToLower(name), "/")
+	if len(parts) != 3 || parts[0] == "homebrew" && (parts[1] == "core" || parts[1] == "cask") {
+		return "", false
+	}
+	return parts[0] + "/" + parts[1], true
+}
+
+// unknownName finds the names brew info says it has no formula or cask of.
+var unknownName = regexp.MustCompile(`No available (?:formula|cask) with the name "([^"]+)"`)
+
+// withoutUnknown is names without those brew info's errors say it doesn't
+// know.
+func withoutUnknown(names []string, stderr string) []string {
+	unknown := map[string]bool{}
+	for _, m := range unknownName.FindAllStringSubmatch(stderr, -1) {
+		unknown[m[1]] = true
+	}
+	return slices.DeleteFunc(slices.Clone(names), func(name string) bool { return unknown[name] })
 }
 
 // lookUp asks brew info of names in one go, and maps each to its full name

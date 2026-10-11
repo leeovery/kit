@@ -565,6 +565,7 @@ func TestBefore(t *testing.T) {
 func TestWaits(t *testing.T) {
 	defer engine.SetWaitPoll(time.Millisecond)()
 	var ready atomic.Bool
+	var asked atomic.Int32
 	release := make(chan struct{})
 	var sawCaskRunning atomic.Bool
 	casksDone := make(chan struct{})
@@ -576,7 +577,9 @@ func TestWaits(t *testing.T) {
 				close(casksDone)
 				return nil
 			}},
-		engine.Step{Name: "sign-in", Waits: []engine.Wait{{Step: "cask", Thing: "1password", Ready: func(context.Context) bool { return ready.Load() }}},
+		// Not ready the first time it's asked, however the steps are
+		// scheduled, so it waits, and says so.
+		engine.Step{Name: "sign-in", Waits: []engine.Wait{{Step: "cask", Thing: "1password", Ready: func(context.Context) bool { return asked.Add(1) > 1 && ready.Load() }}},
 			Check: func(context.Context) check.Result {
 				select {
 				case <-casksDone:
