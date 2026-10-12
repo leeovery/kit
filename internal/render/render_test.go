@@ -620,6 +620,33 @@ func TestPrettyApplyingWhileMacOSAsks(t *testing.T) {
 	}
 }
 
+// The face draws to the terminal's width as it is when it draws, not as it
+// was when kit started: Ghostty starts kit before it's sized its window.
+func TestPrettyFollowsTheTerminalsWidth(t *testing.T) {
+	var out syncBuffer
+	width := 45
+	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, width, true).Sized(func() (int, int) { return 80, 40 })
+	steps := []event.Step{
+		{Name: "time-machine", Title: "Time Machine", Area: "Backups"},
+		{Name: "brew", Title: "Homebrew formulae", Area: "Drift"},
+		{Name: "fonts", Title: "fonts", Area: "Steps"},
+		{Name: "by-hand", Title: "By hand", Area: "Manual"},
+	}
+	face.Emit(event.RunStarted{Time: at, Command: "apply", Machine: "laptop", Steps: steps})
+	face.Emit(event.StepStarted{Step: "brew", Doing: "applying"})
+	got := turned(screen(out.String()))
+	if want := "  ○ BACKUPS  ◐ CONFIG  ○ STEPS  ○ MANUAL\n"; !strings.Contains(got, want) {
+		t.Errorf("at 80 columns, started at 45, the screen is\n%s\nwant the lights whole\n%s", got, want)
+	}
+	for _, s := range steps {
+		face.Emit(event.StepFinished{Step: s.Name, Result: check.Result{State: check.OK, Summary: "fine"}})
+	}
+	face.Emit(event.RunFinished{Duration: time.Second, Counts: map[check.State]int{check.OK: 4}})
+	if err := face.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // A question asked as the run gets ready, sudo's password, shows the cursor
 // as it ends: the live part hides it again.
 func TestPrettyHidesTheCursorAfterAQuestion(t *testing.T) {

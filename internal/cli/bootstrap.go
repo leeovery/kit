@@ -4,10 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
+	"os/signal"
 	"slices"
 	"strings"
+	"syscall"
 	"time"
 
 	"charm.land/lipgloss/v2"
@@ -241,6 +244,9 @@ func (a *app) inTerminal(ctx context.Context, b *boot.Boot, fresh bool) error {
 		return err
 	}
 	if a.pretty(a.Stdout) {
+		if fresh {
+			a.settled(a.Stdout)
+		}
 		if !fresh {
 			// What's on screen goes up into the scrollback, for the arrival
 			// to land at the top of the window.
@@ -287,6 +293,38 @@ func (a *app) inTerminal(ctx context.Context, b *boot.Boot, fresh bool) error {
 	}
 	return nil
 }
+
+// settled waits, in the window kit's just been opened in, for the window to
+// take its size: Ghostty starts kit before it's sized its window, so the
+// size first read can be a passing one, too small for the arrival and
+// narrowing what's drawn. Unless the window's already as big as kit draws,
+// it waits for word it's been resized, then for it to settle, a moment at
+// most.
+func (a *app) settled(out io.Writer) {
+	if a.Width(out) >= look.Width && a.Height(out) >= settledHeight {
+		return
+	}
+	resized := make(chan os.Signal, 1)
+	signal.Notify(resized, syscall.SIGWINCH)
+	defer signal.Stop(resized)
+	wait := time.After(settleWithin)
+	for {
+		select {
+		case <-resized:
+			wait = time.After(settleQuiet)
+		case <-wait:
+			return
+		}
+	}
+}
+
+// A new window's size: as tall as kit wants it, at least, and how long kit
+// waits for it, and for it to go quiet once it's resized.
+const (
+	settledHeight = 24
+	settleWithin  = 1500 * time.Millisecond
+	settleQuiet   = 200 * time.Millisecond
+)
 
 // bootOrder runs the boot order, planned from the kit-config signing in
 // read, its rows under signing in's (planned), with sudo's hold on the

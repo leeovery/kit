@@ -136,6 +136,16 @@ func NewPretty(w io.Writer, width int, animate bool) *Pretty {
 	return &Pretty{w: w, width: min(max(width, 40), look.Width), animate: animate}
 }
 
+// fit takes the terminal's width as it is now, for what's drawn next: a
+// window resized, or one still taking its size as kit started.
+func (p *Pretty) fit() {
+	if p.size == nil {
+		return
+	}
+	w, _ := p.size()
+	p.width = min(max(w, 40), look.Width)
+}
+
 // UnderHome has the face show a run started from kit's home, under the
 // home's wordmark: its heading leaves the wordmark out.
 func (p *Pretty) UnderHome() *Pretty {
@@ -154,6 +164,7 @@ func (p *Pretty) Emit(e event.Event) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	defer p.flush()
+	p.fit()
 	switch e := e.(type) {
 	case event.Preparing:
 		p.open(e.Command, e.Machine, e.Time, nil)
@@ -577,6 +588,7 @@ func (p *Pretty) drawSpinner() {
 	if !p.animate || p.aside {
 		return
 	}
+	p.fit()
 	if p.tab && len(p.start.Steps) > 0 && len(p.running) > 0 {
 		p.write(fmt.Sprintf("\x1b]9;4;1;%d\x07", len(p.results)*100/len(p.start.Steps)))
 	}
