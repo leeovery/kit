@@ -189,6 +189,20 @@ func TestExecGivesLinesAsTheyCome(t *testing.T) {
 	}
 }
 
+// A carriage return then a new line ends the line, as it does at a
+// terminal; one before anything else starts it again, text drawn before it
+// replaced, even when what comes next is printed a while later.
+func TestExecGivesLinesAsATerminalShowsThem(t *testing.T) {
+	r, _ := programs(t, map[string]string{"install": `printf 'ended\r\n'; printf '10%%\r'; /bin/sleep 0.2; printf '50%%\r'; /bin/sleep 0.2; printf '\n'; printf 'drawn\r'; /bin/sleep 0.2; printf 'redrawn\n'`})
+	var got []string
+	if _, err := r.Run(t.Context(), runner.Command{Name: "install", Lines: func(line string) { got = append(got, line) }}); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"ended", "50%", "redrawn"}; !slices.Equal(got, want) {
+		t.Errorf("lines = %q, want %q", got, want)
+	}
+}
+
 // What's streamed is only what's wanted: never a secret's lines, nor an
 // interactive command's.
 func TestStreamedGivesWhatsWanted(t *testing.T) {

@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/colorprofile"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/leeovery/kit/internal/ask"
 	"github.com/leeovery/kit/internal/boot"
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/event"
@@ -328,6 +329,51 @@ func TestApplyingLogsSlots(t *testing.T) {
 	}
 	if !strings.Contains(got, "  ● d  done\n  │ d at work\n") {
 		t.Errorf("d's slot, once it's done, is\n%s\nwant its lines kept", got)
+	}
+}
+
+// scratchLeft is a run in which the Scratch volume's step made the volume,
+// printing as it did, but found one thing still left once it checked again,
+// while Claude Code installs.
+func scratchLeft() []event.Event {
+	var steps []event.Step
+	for _, a := range []struct{ area, title string }{{"Mac", "Scratch volume"}, {"Mac", "Disk space"}, {"Steps", "claude-code"}} {
+		steps = append(steps, event.Step{Name: stepName(a.area, a.title), Title: a.title, Area: a.area})
+	}
+	events := []event.Event{event.RunStarted{Time: at, Command: "apply", Machine: "laptop", Steps: steps}}
+	events = append(events, applyingStep("Mac", "Scratch volume", "mdutil -i off /Volumes/Scratch", append(numbered("Adding volume", 12),
+		"mdutil disabling Spotlight", "/System/Volumes/Data/Volumes/Scratch:", "    Indexing disabled.")...)...)
+	events = append(events, finished("Mac", "Scratch volume", check.Result{
+		State: check.Attention, Summary: "not set up as it should be",
+		Items: []check.Item{{ID: "scratch:tmpdir", Name: "Claude Code's settings don't send TMPDIR to it", State: "problem", Detail: "set it in Claude Code's settings"}},
+		Done:  []check.Item{{ID: "scratch:mounted", Name: "/Volumes/Scratch", Action: "create"}},
+	}))
+	events = append(events, fine("Mac", "Disk space", "71% free"))
+	return append(events, applyingStep("Steps", "claude-code", "run apply", "Setting up Claude Code...", "Verifying checksum")...)
+}
+
+// A step that finished not well says in its slot what's left of it, as the
+// record does, under the last lines it printed, which give way to it when
+// the slot hasn't the room for both.
+func TestApplyingSlotSaysWhatsLeft(t *testing.T) {
+	events := scratchLeft()
+	face, out, kb := applyAt(100, 30, time.Minute, events)
+	got := screen(out.String())
+	golden(t, "apply-screen-left.golden", got+"\n")
+	const left = "  │ → set it in Claude Code's settings\n"
+	if !strings.Contains(got, "  │     Indexing disabled.\n"+left) {
+		t.Errorf("the Scratch volume's slot is\n%s\nwant its last line printed, then what's left: %q", got, left)
+	}
+	kb.press(t, slices.Repeat([]ask.Key{keyUp}, 20)...)
+	if got := screen(out.String()); !strings.Contains(got, "  │ ==> Adding volume 1\n") || !strings.Contains(got, "  │ ==> Adding volume 7\n"+left) {
+		t.Errorf("scrolled back as far as it goes, the Scratch volume's slot is\n%s\nwant its first lines printed, then what's left", got)
+	}
+	face.Emit(event.RunFinished{Time: at, Duration: time.Minute, Counts: map[check.State]int{check.OK: 2, check.Attention: 1}})
+	if err := face.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if record := screen(out.String()); !strings.Contains(record, "  ▲ Scratch volume  created /Volumes/Scratch · not set up as it should be\n"+left) {
+		t.Errorf("the record is\n%s\nwant the Scratch volume's row, what's left under it, as its slot had them", record)
 	}
 }
 

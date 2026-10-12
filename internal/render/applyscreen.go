@@ -203,8 +203,9 @@ func (p *Pretty) standing(step string) look.State {
 }
 
 // logSlots are the log, n lines, blank where nothing's taken them: each
-// slot taken, in order, its step's row, then the lines it printed on a line
-// from its mark, the last of them or as far back as the log's scrolled, a
+// slot taken, in order, its step's row, then on a line from its mark the
+// lines it printed, the last of them or as far back as the log's scrolled,
+// and, once it's finished, what's left of it, which they give way to; a
 // blank line between slots.
 func (p *Pretty) logSlots(w, n int) []string {
 	steps, rooms := p.logRooms(n)
@@ -214,11 +215,24 @@ func (p *Pretty) logSlots(w, n int) []string {
 			out = append(out, "")
 		}
 		row := p.listRow(p.step(step))
-		row.Under = look.Output(scrolled(p.output[step], rooms[i]-1, p.keys.back)...)
+		left := p.slotLeft(step, rooms[i]-1)
+		row.Under = append(look.Output(scrolled(p.output[step], rooms[i]-1-len(left), p.keys.back)...), left...)
 		block := look.Timeline("  ", w, row)
 		out = append(append(out, block...), make([]string, rooms[i]-len(block))...)
 	}
 	return append(out, make([]string, max(n-len(out), 0))...)[:max(n, 0)]
+}
+
+// slotLeft is what's left of step once it's finished, as applying's list
+// has it, in at most room lines: none while it runs, or when the run
+// stopping cut it off.
+func (p *Pretty) slotLeft(step string, room int) []string {
+	f, ok := p.results[step]
+	if !ok || wasStopped(f) {
+		return nil
+	}
+	left := p.left(f, p.step(step).Part)
+	return left[:min(len(left), room)]
 }
 
 // logRooms are the steps in the log's slots, in order, and how many lines

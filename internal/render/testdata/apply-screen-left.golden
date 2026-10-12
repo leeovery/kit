@@ -1,0 +1,30 @@
+
+  █  ▄▀  ▀█▀  ▀▀█▀▀  │  apply · laptop · Fri 2 Jan · 03:04
+  █▀▀▄    █     █    │  ▮▮▮
+  █   █  ▄█▄    █    │  2 of 3 · 1 running · 1m00s
+
+  MAC    ▲ Scratch volume        ● Disk space
+  STEPS  ◐ claude-code
+
+  ▲ Scratch volume  created /Volumes/Scratch · not set up as it should be
+  │ ==> Adding volume 9
+  │ ==> Adding volume 10
+  │ ==> Adding volume 11
+  │ ==> Adding volume 12
+  │ mdutil disabling Spotlight
+  │ /System/Volumes/Data/Volumes/Scratch:
+  │     Indexing disabled.
+  │ → set it in Claude Code's settings
+
+  ◐ claude-code  applying · run apply
+  │ Setting up Claude Code...
+  │ Verifying checksum
+
+
+
+
+
+
+
+
+  ↑↓ scroll · q stop

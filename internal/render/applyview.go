@@ -317,13 +317,21 @@ func (p *Pretty) workRow(f event.StepFinished, part string) look.Row {
 		}
 		row.Says = look.Says(append(did, row.Says)...)
 	}
-	var hints []string
+	row.Under = append(row.Under, p.left(f, part)...)
+	return row
+}
+
+// left is what's left to do about a finished step, a line each, as its row
+// in applying's list has it under it: each thing that needs attention, or
+// why it's not done yet, and what to run.
+func (p *Pretty) left(f event.StepFinished, part string) []string {
+	var lines, hints []string
 	for _, it := range f.Result.Items {
 		switch {
 		case it.Quiet != "" && it.Detail != "":
 			// Too new to count as drift, but applying says why it's not done:
 			// waiting for a password, say.
-			row.Under = append(row.Under, look.Says(look.White(it.Name), look.Muted(it.Detail)))
+			lines = append(lines, look.Says(look.White(it.Name), look.Muted(it.Detail)))
 		case it.Quiet != "":
 		case IsDrift(it):
 			says := []string{look.Orange(it.Name), look.Muted(wrong(part, it))}
@@ -333,7 +341,7 @@ func (p *Pretty) workRow(f event.StepFinished, part string) look.Row {
 			if !it.Since.IsZero() {
 				says = append(says, look.Muted(since(p.start.Time.Sub(it.Since))))
 			}
-			row.Under = append(row.Under, look.Says(says...))
+			lines = append(lines, look.Says(says...))
 			hint := "kit reconcile"
 			if it.Action != "" || it.State == "missing" {
 				hint = "kit apply"
@@ -342,13 +350,13 @@ func (p *Pretty) workRow(f event.StepFinished, part string) look.Row {
 				hints = append(hints, hint)
 			}
 		case it.Detail != "":
-			row.Under = append(row.Under, todo(it.Detail))
+			lines = append(lines, todo(it.Detail))
 		}
 	}
 	for _, hint := range hints {
-		row.Under = append(row.Under, look.Todo(look.Cmd(hint)))
+		lines = append(lines, look.Todo(look.Cmd(hint)))
 	}
-	return row
+	return lines
 }
 
 // IsDrift is whether it is drift: something installed, declared, linked or

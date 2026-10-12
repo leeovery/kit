@@ -140,7 +140,7 @@ func (p *Pretty) scrollable() int {
 	steps, rooms := p.logRooms(h - len(p.screenHead(w)) - len(p.screenFoot(w)))
 	most := 0
 	for i, step := range steps {
-		most = max(most, len(p.output[step])-(rooms[i]-1))
+		most = max(most, len(p.output[step])-(rooms[i]-1-len(p.slotLeft(step, rooms[i]-1))))
 	}
 	return most
 }

@@ -214,21 +214,28 @@ type lines struct {
 func (l *lines) stream() *lineStream { return &lineStream{lines: l} }
 
 // lineStream is one of a command's streams, split into lines: a carriage
-// return starts the line again, as a progress bar redraws it.
+// return starts the line again, as a progress bar redraws it, but before a
+// new line only ends it, as a terminal has it. returned is whether the last
+// byte written was a carriage return: what comes next, in this write or the
+// next, says which.
 type lineStream struct {
-	lines *lines
-	line  []byte
+	lines    *lines
+	line     []byte
+	returned bool
 }
 
 func (s *lineStream) Write(p []byte) (int, error) {
 	s.lines.mu.Lock()
 	defer s.lines.mu.Unlock()
 	for _, b := range p {
+		if s.returned && b != '\n' && b != '\r' {
+			s.line = s.line[:0]
+		}
+		s.returned = b == '\r'
 		switch b {
 		case '\n':
 			s.give()
 		case '\r':
-			s.line = s.line[:0]
 		default:
 			s.line = append(s.line, b)
 		}
