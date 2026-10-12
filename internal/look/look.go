@@ -300,7 +300,8 @@ type Lamp struct {
 }
 
 // Lights are a run's areas, each led by its mark, two spaces between: an
-// area that needs you or failed a pill.
+// area that needs you or failed a pill; one that didn't finish, as a run
+// stopped leaves it, grey.
 func Lights(ls ...Lamp) string {
 	parts := make([]string, len(ls))
 	for i, l := range ls {
@@ -312,6 +313,8 @@ func Lights(ls ...Lamp) string {
 			parts[i] = Mark(Running) + " " + White(n)
 		case Queued:
 			parts[i] = Mark(Queued) + " " + Muted(n)
+		case Skipped:
+			parts[i] = Muted(marks[Skipped] + " " + n)
 		default:
 			parts[i] = Mark(Done) + " " + Muted(n)
 			if l.Count != "" {
@@ -321,6 +324,78 @@ func Lights(ls ...Lamp) string {
 	}
 	return "  " + strings.Join(parts, "  ")
 }
+
+// GridCell is how wide a grid's cell is: a mark, a space and a name, and
+// the room to the next.
+const GridCell = 24
+
+// Cell is a step in a grid: how it stands, and its name.
+type Cell struct {
+	State State
+	Name  string
+}
+
+// Area is a grid's area: its name, and its steps.
+type Area struct {
+	Name  string
+	Cells []Cell
+}
+
+// Grid draws areas w wide, every step a cell GridCell wide, so the marks
+// line up in columns (a grid of marks is its own component: rule 3's "no
+// columns" is for rows): an area's name in pink capitals at the left of its
+// first line, padded to the longest, then as many of its cells as fit, the
+// next line under the first cell.
+func Grid(w int, areas ...Area) []string {
+	label := 0
+	for _, a := range areas {
+		label = max(label, ansi.StringWidth(a.Name))
+	}
+	across := max((w-4-label)/GridCell, 1)
+	var out []string
+	for _, a := range areas {
+		for i := 0; i < len(a.Cells); i += across {
+			lead := strings.Repeat(" ", label)
+			if i == 0 {
+				lead = fg(pink).Bold(true).Render(pad(strings.ToUpper(a.Name), label))
+			}
+			var line strings.Builder
+			line.WriteString("  " + lead + "  ")
+			row := a.Cells[i:min(i+across, len(a.Cells))]
+			for j, c := range row {
+				it := Cut(cell(c), GridCell-2)
+				if j < len(row)-1 {
+					it = pad(it, GridCell)
+				}
+				line.WriteString(it)
+			}
+			out = append(out, Cut(line.String(), w))
+		}
+	}
+	return out
+}
+
+// cell is a step in a grid, its mark and its name: muted once done, bold
+// while it runs, dim while it waits, in its state's colour when it's wrong,
+// grey when it didn't run.
+func cell(c Cell) string {
+	switch c.State {
+	case Running:
+		return Mark(Running) + " " + Strong(c.Name)
+	case Queued:
+		return Mark(Queued) + " " + Dim(c.Name)
+	case NeedsYou:
+		return Mark(NeedsYou) + " " + Orange(c.Name)
+	case Failed:
+		return Mark(Failed) + " " + Red(c.Name)
+	case Skipped:
+		return Muted(marks[Skipped] + " " + c.Name)
+	}
+	return Mark(Done) + " " + Muted(c.Name)
+}
+
+// pad is s with spaces after it, n cells wide.
+func pad(s string, n int) string { return s + strings.Repeat(" ", max(n-ansi.StringWidth(s), 0)) }
 
 // barWidth is the most segments a bar has: past it, each stands for a
 // share of the steps.

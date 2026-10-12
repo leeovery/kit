@@ -13,6 +13,7 @@ import (
 
 	"github.com/leeovery/kit/internal/boot"
 	"github.com/leeovery/kit/internal/check"
+	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/look"
 )
@@ -121,6 +122,18 @@ type Pretty struct {
 	// its own, as the run goes: nothing, mostly.
 	asking string
 	size   func() (int, int)
+	// now tells the time, for how long a run has taken.
+	now func() time.Time
+	// slots are the places in applying's log, a step each; finished is the
+	// order steps finished in, for which slot gives way first; cut are the
+	// steps the run was stopped in the middle of.
+	slots    [engine.DefaultJobs]slot
+	finished map[string]int
+	cut      map[string]bool
+	// onScreen is whether applying has the terminal's alternate screen, and
+	// drawnSize the size it was last drawn at.
+	onScreen  bool
+	drawnSize [2]int
 	// out is what's being written, sent to the terminal whole at the end of
 	// an event or a turn of the spinner, for the terminal to show at once.
 	out     strings.Builder
@@ -133,7 +146,7 @@ type Pretty struct {
 // wide: its lines go no wider than kit's look allows. It animates while
 // steps run when animate is true.
 func NewPretty(w io.Writer, width int, animate bool) *Pretty {
-	return &Pretty{w: w, width: min(max(width, 40), look.Width), animate: animate}
+	return &Pretty{w: w, width: min(max(width, 40), look.Width), animate: animate, now: time.Now}
 }
 
 // fit takes the terminal's width as it is now, for what's drawn next: a
@@ -175,7 +188,8 @@ func (p *Pretty) Emit(e event.Event) {
 		p.spin()
 	case event.RunStarted:
 		p.start, p.results = e, make(map[string]event.StepFinished, len(e.Steps))
-		p.output, p.command, p.began = map[string][]string{}, map[string]string{}, time.Now()
+		p.output, p.command, p.began = map[string][]string{}, map[string]string{}, p.now()
+		p.finished, p.cut, p.slots = map[string]int{}, map[string]bool{}, [engine.DefaultJobs]slot{}
 		p.order.start(e.Steps)
 		p.preparing = ""
 		p.open(e.Command, e.Machine, e.Time, e.Only)
@@ -188,6 +202,9 @@ func (p *Pretty) Emit(e event.Event) {
 		}
 	case event.StepStarted:
 		p.running = append(without(p.running, e.Step), runningStep{step: e.Step, title: p.title(e.Step), doing: cmp.Or(e.Doing, "checking")})
+		if e.Doing == "applying" {
+			p.takeSlot(e.Step)
+		}
 		p.spin()
 	case event.Doing:
 		// A step at work says what it's doing; one waiting on you, what you're
@@ -197,13 +214,20 @@ func (p *Pretty) Emit(e event.Event) {
 				p.running[i].doing, p.running[i].todo = cmp.Or(e.Says, r.doing), e.Todo
 			}
 		}
+		if e.Todo != "" {
+			p.giveSlotBack(e.Step)
+		}
 		p.drawSpinner()
 	case event.Asking:
 		p.asking = e.Says
 		p.drawSpinner()
 	case event.StepFinished:
+		if r, ok := p.runningOf(e.Step); ok && r.atWork() && wasStopped(e) {
+			p.cut[e.Step] = true
+		}
 		p.running = without(p.running, e.Step)
 		p.results[e.Step] = e
+		p.finished[e.Step] = len(p.results)
 		if !p.byArea() {
 			if ready := p.order.finish(e); len(ready) > 0 {
 				p.clearLive()
@@ -215,8 +239,11 @@ func (p *Pretty) Emit(e event.Event) {
 		p.drawSpinner()
 	case event.Output:
 		line := strings.TrimRight(strings.ReplaceAll(ansi.Strip(e.Line), "\t", "    "), " ")
-		p.output[e.Step] = append(lastOf(p.output[e.Step], keptFailing-1), line)
+		p.output[e.Step] = append(lastOf(p.output[e.Step], keptSlot-1), line)
 		p.command[e.Step] = e.Command
+		if r, ok := p.runningOf(e.Step); ok && r.atWork() {
+			p.takeSlot(e.Step)
+		}
 		// A command can print faster than a terminal is worth redrawing:
 		// the spinner's turn draws what came since.
 		if time.Since(p.drawn) >= drawEvery {
@@ -310,15 +337,18 @@ func (p *Pretty) report() []string {
 }
 
 // lamp is an area's light: how its steps stand at worst, and how many there
-// are, when they're all well.
+// are, when they're all well. A step not checked leaves it uncounted, not
+// grey, which is for an area a stopped run didn't finish.
 func lamp(area string, fs []event.StepFinished) look.Lamp {
-	l := look.Lamp{Name: area, State: look.Done}
+	l, counted := look.Lamp{Name: area, State: look.Done}, true
 	for _, f := range fs {
-		if s := state(f.Result.State); worse(s, l.State) {
+		s := state(f.Result.State)
+		counted = counted && s != look.Skipped
+		if s != look.Skipped && worse(s, l.State) {
 			l.State = s
 		}
 	}
-	if l.State == look.Done {
+	if l.State == look.Done && counted {
 		l.Count = fmt.Sprint(len(fs))
 	}
 	return l
@@ -519,7 +549,7 @@ func (p *Pretty) foot(e event.RunFinished) []string {
 	default:
 		parts = append(parts, look.White(fmt.Sprintf("%d fine", e.Counts[check.OK])))
 	}
-	parts = append(parts, look.Muted(seconds(e.Duration)))
+	parts = append(parts, look.Muted(took(e.Duration)))
 	if !p.applying() {
 		return []string{look.Summary(parts...)}
 	}
@@ -550,8 +580,14 @@ func tally(counts map[check.State]int) []string {
 	return parts
 }
 
-// seconds is how long a run took, to a tenth of a second.
-func seconds(d time.Duration) string { return fmt.Sprintf("%.1fs", d.Seconds()) }
+// took says how long d is, in kit's one format: to a tenth of a second
+// under a minute, as 4.2s, then minutes and seconds, as 12m40s.
+func took(d time.Duration) string {
+	if d < time.Minute {
+		return fmt.Sprintf("%.1fs", d.Seconds())
+	}
+	return fmt.Sprintf("%dm%02ds", int(d.Minutes()), int(d.Seconds())%60)
+}
 
 // spin starts the spinner, when the face animates and it isn't turning.
 func (p *Pretty) spin() {
@@ -593,7 +629,7 @@ func (p *Pretty) drawSpinner() {
 		p.write(fmt.Sprintf("\x1b]9;4;1;%d\x07", len(p.results)*100/len(p.start.Steps)))
 	}
 	if p.whole && p.applying() {
-		p.drawLive(p.applyLive())
+		p.drawApplying()
 		return
 	}
 	mark := look.Cyan(spinning[p.frame%len(spinning)])
@@ -624,16 +660,16 @@ func (p *Pretty) drawSpinner() {
 			lines = append(lines, "  "+look.Dim("│")+" "+look.Muted(l))
 		}
 	}
-	p.drawLive(append(lines, p.askingLines()...))
+	p.drawLive(append(lines, p.askingLines(p.width)...))
 }
 
-// askingLines are macOS asking something, a row of its own, and what to do:
-// none while it isn't.
-func (p *Pretty) askingLines() []string {
+// askingLines are macOS asking something, a row of its own, and what to do,
+// w wide: none while it isn't.
+func (p *Pretty) askingLines(w int) []string {
 	if p.asking == "" {
 		return nil
 	}
-	return look.Timeline("  ", p.width, look.Row{State: look.NeedsYou, Name: "macOS", Says: look.Orange(p.asking), Under: todoLines("answer it in the window macOS shows", p.width-6)})
+	return look.Timeline("  ", w, look.Row{State: look.NeedsYou, Name: "macOS", Says: look.Orange(p.asking), Under: todoLines("answer it in the window macOS shows", w-6)})
 }
 
 // The terminal's controls the live part uses: the cursor hidden and shown,
@@ -669,10 +705,12 @@ func (p *Pretty) drawLive(lines []string) {
 }
 
 // How many of what a step's commands printed show: while it runs, and once
-// it's failed.
+// it's failed; and how many are kept, as many as a slot of applying's
+// screen shows at most.
 const (
 	keptRunning = 5
 	keptFailing = 8
+	keptSlot    = 50
 )
 
 // lastOf is the last n of lines.
@@ -694,8 +732,9 @@ func (p *Pretty) clearLive() {
 	p.live = 0
 }
 
-// stopSpinner stops the spinner turning, and takes its line down. It
-// releases the lock while the spinner's goroutine finishes, which takes it.
+// stopSpinner stops the spinner turning, and takes the live part down: its
+// lines, or applying's screen, the cursor shown again. It releases the lock
+// while the spinner's goroutine finishes, which takes it.
 func (p *Pretty) stopSpinner() {
 	if p.stop != nil {
 		close(p.stop)
@@ -706,6 +745,7 @@ func (p *Pretty) stopSpinner() {
 		p.mu.Lock()
 	}
 	p.clearLive()
+	p.leaveScreen()
 	if p.hidden {
 		p.write(showCursor)
 		p.hidden = false
@@ -791,6 +831,28 @@ func (p *Pretty) Running() []string {
 // applying, or what it says; and, while it waits on you, what you're to do.
 type runningStep struct {
 	step, title, doing, todo string
+}
+
+// atWork is whether the step's at work: not waiting on you, nor its turn,
+// for a thing another step puts in place.
+func (r runningStep) atWork() bool {
+	return r.todo == "" && !strings.HasPrefix(r.doing, "waiting for ")
+}
+
+// runningOf is the step named step, when it's running.
+func (p *Pretty) runningOf(step string) (runningStep, bool) {
+	for _, r := range p.running {
+		if r.step == step {
+			return r, true
+		}
+	}
+	return runningStep{}, false
+}
+
+// wasStopped is whether f is a step the run was stopped before, or in the
+// middle of.
+func wasStopped(f event.StepFinished) bool {
+	return f.Result.State == check.Failed && f.Result.Reason == event.ErrStopped.Error()
 }
 
 // without is running without step.

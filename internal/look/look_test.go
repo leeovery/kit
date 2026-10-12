@@ -129,9 +129,47 @@ func TestLights(t *testing.T) {
 		look.Lamp{Name: "Config", State: look.NeedsYou},
 		look.Lamp{Name: "Steps", State: look.Running},
 		look.Lamp{Name: "Mac", State: look.Queued},
+		look.Lamp{Name: "Jobs", State: look.Skipped},
 	)
-	if want := "  ● BACKUPS 5   ▲ CONFIG   ◐ STEPS  ○ MAC"; ansi.Strip(got) != want {
+	if want := "  ● BACKUPS 5   ▲ CONFIG   ◐ STEPS  ○ MAC  – JOBS"; ansi.Strip(got) != want {
 		t.Errorf("Lights() = %q, want %q", ansi.Strip(got), want)
+	}
+	if !strings.HasSuffix(got, look.Muted("– JOBS")) {
+		t.Errorf("Lights() = %q, want an area a stopped run didn't finish grey, mark and all", got)
+	}
+}
+
+// A grid: every step a cell of one width, so the marks line up in columns;
+// an area's name at the left of its first line, padded to the longest; as
+// many cells across as fit, the rest under the first; a name too long for
+// its cell cut.
+func TestGrid(t *testing.T) {
+	got := look.Grid(60,
+		look.Area{Name: "Mac", Cells: []look.Cell{{State: look.Done, Name: "Disk space"}, {State: look.Running, Name: "Memory"}, {State: look.Queued, Name: "Load"}}},
+		look.Area{Name: "Backups", Cells: []look.Cell{{State: look.NeedsYou, Name: "Time Machine"}, {State: look.Failed, Name: "Arq"}, {State: look.Skipped, Name: "A name far too long for its cell"}}},
+	)
+	same(t, got,
+		"  MAC      ● Disk space            ◐ Memory",
+		"           ○ Load",
+		"  BACKUPS  ▲ Time Machine          ✗ Arq",
+		"           – A name far too long…",
+	)
+	for _, want := range []struct {
+		line int
+		cell string
+	}{
+		{0, look.Pink("●") + " " + look.Muted("Disk space")},
+		{0, look.Cyan("◐") + " " + look.Strong("Memory")},
+		{1, look.Cyan("○") + " " + look.Dim("Load")},
+		{2, look.Orange("▲") + " " + look.Orange("Time Machine")},
+		{2, look.Red("✗") + " " + look.Red("Arq")},
+	} {
+		if !strings.Contains(got[want.line], want.cell) {
+			t.Errorf("line %d is %q; want the cell %q", want.line, got[want.line], want.cell)
+		}
+	}
+	if skipped := look.Grid(80, look.Area{Name: "Jobs", Cells: []look.Cell{{State: look.Skipped, Name: "Scheduled runs"}}}); !strings.HasSuffix(skipped[0], look.Muted("– Scheduled runs")) {
+		t.Errorf("a step that didn't run is %q; want it grey, mark and all", skipped[0])
 	}
 }
 

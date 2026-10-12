@@ -410,7 +410,7 @@ func (d *dispatch) startReady(ctx context.Context, steps []Step, running *int, j
 		}
 		if ctx.Err() != nil {
 			d.started[s.Name] = true
-			d.finish(s, check.Result{State: check.Failed, Reason: event.ErrStopped.Error()}, 0)
+			d.finish(s, stopped(), 0)
 			progressed = true
 			continue
 		}
@@ -423,10 +423,20 @@ func (d *dispatch) startReady(ctx context.Context, steps []Step, running *int, j
 		go func() {
 			began := d.now()
 			res := d.step(event.WithStep(ctx, s.Name), s)
+			// A step the run was stopped in the middle of failed for that,
+			// whatever stopping it broke on the way.
+			if ctx.Err() != nil && res.State == check.Failed {
+				res = stopped()
+			}
 			d.finished <- outcome{step: s, result: res, took: d.now().Sub(began)}
 		}()
 	}
 	return progressed
+}
+
+// stopped is the result of a step the run was stopped before, or during.
+func stopped() check.Result {
+	return check.Result{State: check.Failed, Reason: event.ErrStopped.Error()}
 }
 
 // needsDone reports whether every step s needs is done.

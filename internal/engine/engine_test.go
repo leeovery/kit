@@ -307,6 +307,33 @@ func TestAStoppedRunFailsTheStepsNotStarted(t *testing.T) {
 	}
 }
 
+// A step the run is stopped in the middle of fails as stopped, not for what
+// stopping it broke; one that failed before the stop keeps its reason.
+func TestAStoppedRunFailsTheStepsCutOff(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	p, err := engine.New(
+		engine.Step{Name: "broken", Check: failing("couldn't check: it broke")},
+		engine.Step{Name: "cut", Check: func(ctx context.Context) check.Result {
+			cancel()
+			<-ctx.Done()
+			return check.Result{State: check.Failed, Reason: "brew list: " + ctx.Err().Error()}
+		}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := p.Check(ctx, &recorder{}, engine.Options{Jobs: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := report.Results["cut"]; got.State != check.Failed || got.Reason != event.ErrStopped.Error() {
+		t.Errorf("cut = %+v, want it failed: the run was stopped", got)
+	}
+	if got := report.Results["broken"]; got.Reason != "couldn't check: it broke" {
+		t.Errorf("broken = %+v, want its own reason kept", got)
+	}
+}
+
 func TestEachStepsContextNamesIt(t *testing.T) {
 	var got []string
 	var mu sync.Mutex

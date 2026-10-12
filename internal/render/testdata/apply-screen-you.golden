@@ -1,0 +1,64 @@
+
+  █  ▄▀  ▀█▀  ▀▀█▀▀  │  bootstrap · laptop · Fri 2 Jan · 03:04
+  █▀▀▄    █     █    │  ▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮
+  █   █  ▄█▄    █    │  35 of 51 · 1 failed · 2 running · 1 needs you · 12m40s
+
+  BOOT     ● GitHub                ● This Mac              ● Password              ● Homebrew              ● Apps                  ● kit-config
+           ● Full Disk Access      ● Ghostty
+  BACKUPS  ▲ Time Machine          ▲ Arq                   ◐ App settings          ● Full Disk Access
+  JOBS     ○ Scheduled runs
+  MAC      ● Scratch volume        ● Disk space            ● Memory                ● File events           ● Load
+  CONFIG   ● Homebrew              ● Linked files          ● Shell PATH            ● Touch ID for sudo     ● Remote Login          ● File Sharing
+           ◐ Homebrew formulae     ✗ Homebrew casks        ○ App Store apps        ○ npm packages          ○ Composer packages     ● Go tools
+           ○ GitHub extensions     ○ tmux plugins          ● macOS login items     ○ Claude MCP            ● macOS settings        ● Power settings
+           ● Backup exclusions     ● Spotlight exclusions  ● kit-config edits      ○ Secrets               ○ git config            ● Sync
+           ● Privacy
+  STEPS    ● claude-code           ● fonts                 ○ mise                  ● remote-session        ○ valet                 ○ gpg-key
+  MANUAL   ○ By hand               ▲ 1password
+
+  ◐ Homebrew formulae  applying · brew install --formula ffmpeg
+  │ ==> Pouring formula 9
+  │ ==> Pouring formula 10
+  │ ==> Pouring formula 11
+  │ ==> Pouring formula 12
+  │ ==> Pouring formula 13
+  │ ==> Pouring formula 14
+  │ ==> Pouring formula 15
+  │ ==> Pouring formula 16
+
+  ✗ Homebrew casks  couldn't install tailscale-app · brew install --cask tailscale-app
+  │ ==> Installing Cask 6
+  │ ==> Installing Cask 7
+  │ ==> Installing Cask 8
+  │ ==> Installing Cask 9
+  │ ==> Installing Cask 10
+  │ ==> Installing Cask tailscale-app
+  │ installer: Package name is Tailscale
+  │ installer: The install failed. (The Installer encountered an error that caused the installation to fail.)
+
+  ● claude-code  installed 2.1.296
+  │ Setting up Claude Code...
+  │ Checking installation status...
+  │ Downloading 2.1.296 for darwin-arm64
+  │ Verifying checksum
+
+
+
+
+
+  ◐ App settings  applying · kit prefs restore
+  │ com.example.editor restored
+  │ com.example.terminal restored
+
+
+
+
+
+
+
+  ▲ macOS  asking for an administrator's password
+  │ → answer it in the window macOS shows
+  ▲ 1password  waiting on you
+  │ → Sign in to 1Password with your phone, then turn on Settings › Developer › Integrate with 1Password CLI
+
+  ctrl+c stop

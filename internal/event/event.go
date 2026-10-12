@@ -264,5 +264,6 @@ func Tally(results ...check.Result) map[check.State]int {
 	return counts
 }
 
-// ErrStopped is the reason a step gives when the run was stopped before it.
+// ErrStopped is the reason a step gives when the run was stopped before it,
+// or while it ran.
 var ErrStopped = errors.New("the run was stopped")

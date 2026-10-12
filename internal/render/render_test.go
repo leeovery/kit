@@ -551,7 +551,7 @@ func TestPrettyApplyingNow(t *testing.T) {
 	}
 	got = screen(out.String())
 	want := "\n  █  ▄▀  ▀█▀  ▀▀█▀▀  │  apply\n  █▀▀▄    █     █    │  laptop\n  █   █  ▄█▄    █    │  Fri 2 Jan · 03:04\n\n" +
-		"  ● BACKUPS 1  ● CONFIG 2  ● STEPS 1\n\n  ▮▮▮▮  1 done · 4.2s\n\n" +
+		"  ● BACKUPS 1  ● CONFIG 2  ● STEPS 1\n  ▮▮▮▮  1 done · 4.2s\n\n" +
 		"  BACKUPS\n  ● Time Machine  last backup 02:35\n\n" +
 		"  CONFIG\n  ● Formulae  installed jq · 1 declared, all installed\n  ● Casks  none declared\n\n" +
 		"  STEPS\n  ● fonts  16 installed\n"
@@ -615,6 +615,35 @@ func TestPrettyApplyingWhileMacOSAsks(t *testing.T) {
 	face.Emit(event.StepFinished{Step: "cask", Result: check.Result{State: check.OK, Summary: "fine"}})
 	face.Emit(event.StepFinished{Step: "1password", Result: check.Result{State: check.OK, Summary: "fine"}})
 	face.Emit(event.RunFinished{Duration: time.Second, Counts: map[check.State]int{check.OK: 2}})
+	if err := face.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// An area's light says at once when a step in it fails, not only once the
+// area's done, and the counts say what failed; a step waiting its turn for
+// another's thing isn't counted running, nor lights its area.
+func TestPrettyLightsSayAtOnce(t *testing.T) {
+	var out syncBuffer
+	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).Sized(func() (int, int) { return 80, 40 })
+	steps := []event.Step{
+		{Name: "arq", Title: "Arq", Area: "Backups"},
+		{Name: "brew", Title: "Homebrew formulae", Area: "Drift"},
+		{Name: "cask", Title: "Homebrew casks", Area: "Drift"},
+		{Name: "fonts", Title: "fonts", Area: "Steps"},
+	}
+	face.Emit(event.RunStarted{Time: at, Command: "apply", Machine: "laptop", Steps: steps})
+	face.Emit(event.StepStarted{Step: "arq", Doing: "waiting for arq"})
+	face.Emit(event.StepStarted{Step: "brew", Doing: "applying"})
+	face.Emit(event.StepFinished{Step: "cask", Result: check.Result{State: check.Failed, Reason: "couldn't install: it broke"}})
+	got := turned(screen(out.String()))
+	if want := "  ○ BACKUPS   ✗ CONFIG   ○ STEPS\n\n  ▮▮▮▮  1 of 4 · 1 failed · 1 running · "; !strings.Contains(got, want) {
+		t.Errorf("with Homebrew casks failed and formulae running, the screen is\n%s\nwant it to hold\n%s", got, want)
+	}
+	for _, s := range []string{"arq", "brew", "fonts"} {
+		face.Emit(event.StepFinished{Step: s, Result: check.Result{State: check.OK, Summary: "fine"}})
+	}
+	face.Emit(event.RunFinished{Duration: time.Second, Counts: map[check.State]int{check.OK: 3, check.Failed: 1}})
 	if err := face.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -694,7 +723,7 @@ func TestPrettyBootstrapInTheTerminal(t *testing.T) {
 	face.Emit(event.StepStarted{Step: "cask", Doing: "applying"})
 	time.Sleep(300 * time.Millisecond)
 	got := turned(screen(out.String()))
-	for _, want := range []string{"│  bootstrap\n", "  ● BOOT 2   ▲ CONFIG   ○ STEPS\n\n  ▮▮▮▮▮▮  2 of 6 · 2 running",
+	for _, want := range []string{"│  bootstrap\n", "  ● BOOT 2   ▲ CONFIG   ○ STEPS\n\n  ▮▮▮▮▮▮  2 of 6 · 1 running · 1 needs you",
 		"s\n\n  ▲ 1Password  not signed in\n  │ → sign in with your phone's 1Password, then turn on\n  │   Settings › Developer › Integrate with 1Password CLI\n  ◐ Casks  applying"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("waiting on you, the screen is\n%s\nwant it to hold\n%s", got, want)
@@ -712,7 +741,7 @@ func TestPrettyBootstrapInTheTerminal(t *testing.T) {
 		t.Fatal(err)
 	}
 	got = screen(out.String())
-	if want := "  ● BOOT 2  ● CONFIG 3  ● STEPS 1\n\n  ▮▮▮▮▮▮  6 fine · 4.2s\n\n  CONFIG\n  ● 1Password  signed in\n"; !strings.Contains(got, want) {
+	if want := "  ● BOOT 2  ● CONFIG 3  ● STEPS 1\n  ▮▮▮▮▮▮  6 fine · 4.2s\n\n  CONFIG\n  ● 1Password  signed in\n"; !strings.Contains(got, want) {
 		t.Errorf("once done, the screen is\n%s\nwant it to hold\n%s", got, want)
 	}
 }

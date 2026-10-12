@@ -1,0 +1,74 @@
+
+  █  ▄▀  ▀█▀  ▀▀█▀▀  │  bootstrap
+  █▀▀▄    █     █    │  laptop
+  █   █  ▄█▄    █    │  Fri 2 Jan · 03:04
+
+  ● BOOT 8   ▲ BACKUPS   ● JOBS 1  ● MAC 5   ✗ CONFIG   ● STEPS 6   ▲ MANUAL 
+  ▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮  1 failed · 3 need you · 47 fine · 24m31s
+
+  BACKUPS
+  ▲ Time Machine  no backup disk
+  │ → System Settings › General › Time Machine › Add Backup Disk
+  ▲ Arq  no backup plan
+  │ → open Arq and choose its backup plan
+  ● App settings  fine
+  ● Full Disk Access  granted
+
+  JOBS
+  ● Scheduled runs  fine
+
+  MAC
+  ● Scratch volume  mounted · not indexed
+  ● Disk space  71% free
+  ● Memory  0.0 GB swap
+  ● File events  fseventsd 0.0 GB
+  ● Load  load 3.1 on 8 cores
+
+  CONFIG
+  ● Homebrew  /opt/homebrew
+  ● Linked files  54 linked
+  ● Shell PATH  15 directories
+  ● Touch ID for sudo  turned on
+  ● Remote Login  turned on
+  ● File Sharing  turned on
+  ● Homebrew formulae  fine
+  ✗ Homebrew casks  couldn't install tailscale-app · brew install --cask tailsc…
+  │ ==> Installing Cask 6
+  │ ==> Installing Cask 7
+  │ ==> Installing Cask 8
+  │ ==> Installing Cask 9
+  │ ==> Installing Cask 10
+  │ ==> Installing Cask tailscale-app
+  │ installer: Package name is Tailscale
+  │ installer: The install failed. (The Installer encountered an error that cau…
+  ● App Store apps  fine
+  ● npm packages  fine
+  ● Composer packages  fine
+  ● Go tools  none declared
+  ● GitHub extensions  fine
+  ● tmux plugins  fine
+  ● macOS login items  14 added
+  ● Claude MCP  fine
+  ● macOS settings  99 set
+  ● Power settings  6 set
+  ● Backup exclusions  89 excluded
+  ● Spotlight exclusions  1 excluded
+  ● kit-config edits  all committed
+  ● Secrets  fine
+  ● git config  fine
+  ● Sync  pushed
+  ● Privacy  private on GitHub
+
+  STEPS
+  ● claude-code  installed 2.1.296
+  ● fonts  16 installed
+  ● mise  fine
+  ● remote-session  applied
+  ● valet  fine
+  ● gpg-key  fine
+
+  MANUAL
+  ▲ By hand  1 to do
+  │ → System Settings › General › Sharing › Remote Login
+  ● 1password  fine
+

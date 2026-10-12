@@ -119,14 +119,8 @@ func (v *logView) write(s string) {
 	_, v.err = io.WriteString(v.w, s)
 }
 
-// duration says how long ms milliseconds is, to a tenth of a second.
-func duration(ms int64) string {
-	d := time.Duration(ms) * time.Millisecond
-	if d < time.Minute {
-		return fmt.Sprintf("%.1fs", d.Seconds())
-	}
-	return fmt.Sprintf("%dm%02ds", int(d.Minutes()), int(d.Seconds())%60)
-}
+// duration says how long ms milliseconds is, as took does.
+func duration(ms int64) string { return took(time.Duration(ms) * time.Millisecond) }
 
 // LogRun shows a run's log in kit's look, width columns wide: the run as a
 // row, how it stood and when; then its steps on a timeline, each after the
