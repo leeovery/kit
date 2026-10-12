@@ -274,8 +274,9 @@ func (c *Config) Items(kind, scope string) ([]string, error) {
 // stays sorted (sortedLines); in another, a name in its sorted place, and a
 // path last, as paths are searched in order. The section is made, in its
 // place among the file's, when there's none, and the file and its folder
-// too; a kind with sections for items declares it in e.Item's. The rest of
-// the file is kept as it is.
+// too; a kind with sections for items declares it in e.Item's, and a list
+// in the section holding its lines back for e.Hold, when it says. The rest
+// of the file is kept as it is.
 func (c *Config) Declare(kind, scope string, e Entry) error {
 	d, f, err := c.editable(kind, scope)
 	if err != nil {
@@ -288,6 +289,13 @@ func (c *Config) Declare(kind, scope string, e Entry) error {
 			return fmt.Errorf("%q isn't a 1Password item's reference, as in op://vault/item", e.Item)
 		}
 	}
+	hold, err := readHold(e.Hold)
+	switch {
+	case err != nil:
+		return err
+	case hold != "" && !d.holds:
+		return fmt.Errorf("[%s] holds no lines back: only a list's sections do", d.header)
+	}
 	line, err := entryText(d, name, e)
 	if err != nil {
 		return err
@@ -295,9 +303,9 @@ func (c *Config) Declare(kind, scope string, e Entry) error {
 	if s, _ := f.holding(d, e.Name); s != nil {
 		return fmt.Errorf("%s is in %s already", e.Name, DeclFile(scope))
 	}
-	s := f.find(d, arg)
+	s := f.find(d, arg, hold)
 	if s == nil {
-		s = f.add(d, arg)
+		s = f.add(d, arg, hold)
 	}
 	switch b := splitBody(d.form, s.body); {
 	case d.sorted:
@@ -409,15 +417,16 @@ func entryText(d sectionDef, name string, e Entry) (string, error) {
 	return line, nil
 }
 
-// add adds a section of d for arg (a project folder, or an item), empty, in
-// its place among the file's: after the sections before it in the order kit
-// writes them, and a kind's folders' or items' sections after its own, by
-// folder or item.
-func (f *declFile) add(d sectionDef, arg string) *section {
+// add adds a section of d for arg (a project folder, or an item) and hold,
+// empty, in its place among the file's: after the sections before it in the
+// order kit writes them, and a kind's folders', items' or held lines'
+// sections after its own, by folder, item or hold.
+func (f *declFile) add(d sectionDef, arg, hold string) *section {
 	order := func(s *section) (int, string) {
-		return slices.IndexFunc(sectionDefs, func(x sectionDef) bool { return x.kind == s.def.kind }), s.arg
+		return slices.IndexFunc(sectionDefs, func(x sectionDef) bool { return x.kind == s.def.kind }), s.arg + s.hold
 	}
-	s := &section{def: d, arg: arg, header: "[" + strings.TrimSpace(d.header+" "+arg) + "]"}
+	s := &section{def: d, arg: arg, hold: hold}
+	s.header = "[" + s.name() + "]"
 	at := len(f.sections)
 	for i, other := range f.sections {
 		oi, of := order(other)

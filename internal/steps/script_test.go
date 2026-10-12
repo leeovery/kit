@@ -11,6 +11,7 @@ import (
 
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/config"
+	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/runner/runnertest"
 	"github.com/leeovery/kit/internal/steps"
 )
@@ -22,8 +23,10 @@ func TestParseScript(t *testing.T) {
 	}{
 		{value: `"Installs the tool"`, want: steps.Script{Does: "Installs the tool"}},
 		{value: `"Trusts the authority" --after brew --after cask:1password --before fonts --sudo`, want: steps.Script{Does: "Trusts the authority", After: []string{"brew", "cask:1password"}, Before: []string{"fonts"}, Admin: true}},
+		{value: `"Fetches releases" --secret TOKEN --secret ~/.config/tool/key`, want: steps.Script{Does: "Fetches releases", Secrets: []string{"TOKEN", "~/.config/tool/key"}}},
 		{value: "--sudo", wrong: "what the step does comes after its name, in quotes"},
-		{value: `"Does" --sideways`, wrong: `"--sideways" isn't one of a step's options: --after, --before and --sudo`},
+		{value: `"Does" --sideways`, wrong: `"--sideways" isn't one of a step's options: --after, --before, --secret and --sudo`},
+		{value: `"Does" --secret --sudo`, wrong: "--secret needs a secret's name after it"},
 		{value: `"Does" --after`, wrong: "--after needs a step's name after it"},
 		{value: `"Does" --before --sudo`, wrong: "--before needs a step's name after it"},
 		{value: `"Does" --before cask:1password`, wrong: "--before a step"},
@@ -46,7 +49,7 @@ func TestParseScript(t *testing.T) {
 		if got.Name != "tool" || got.Folder != "laptop/steps/tool" || got.Dir != filepath.Join("/config", "laptop", "steps", "tool") {
 			t.Errorf("%s: placed %+v", tc.value, got)
 		}
-		if got.Does != tc.want.Does || !slices.Equal(got.After, tc.want.After) || !slices.Equal(got.Before, tc.want.Before) || got.Admin != tc.want.Admin {
+		if got.Does != tc.want.Does || !slices.Equal(got.After, tc.want.After) || !slices.Equal(got.Before, tc.want.Before) || !slices.Equal(got.Secrets, tc.want.Secrets) || got.Admin != tc.want.Admin {
 			t.Errorf("%s: = %+v, want %+v", tc.value, got, tc.want)
 		}
 	}
@@ -205,6 +208,52 @@ func TestScriptStepWaitsForThePassword(t *testing.T) {
 	admin.Held = func(context.Context) bool { return true }
 	if err := steps.ScriptStep(fake, admin, s).Apply(t.Context(), notDone()); err != nil {
 		t.Errorf("with the password, Apply() = %v", err)
+	}
+}
+
+// needing is s needing TOKEN, which ready says is in place, its value as
+// kit's secrets hold it.
+func needing(s steps.Script, ready bool) steps.Script {
+	s.Secrets = []string{"TOKEN"}
+	s.Needed = []engine.Wait{{Step: "secret", Thing: "TOKEN", Ready: func(context.Context) bool { return ready }}}
+	s.Env = func() ([]string, error) { return []string{"TOKEN=plain-words-value"}, nil }
+	return s
+}
+
+// A step needing a secret runs its script with the secret set, check and
+// apply alike, its value hidden in what the script says; it's applied once
+// the secret's in place, and not before, saying what isn't there.
+func TestScriptStepNeedingASecret(t *testing.T) {
+	s := needing(script(t, steps.Script{Does: "Fetches releases"}), true)
+	run := filepath.Join(s.Dir, "run")
+	fake := runnertest.New(t)
+	fake.On(run, "check").Exits(1).Prints("not fetched with plain-words-value\n").Then().Prints("fetched\n")
+	fake.On(run, "apply").Exits(1).PrintsToStderr("denied: plain-words-value\n").Then()
+	step := steps.ScriptStep(fake, nil, s)
+	if step.Later == nil || step.Later[0].Thing != "TOKEN" {
+		t.Errorf("Later = %+v, want the wait for TOKEN", step.Later)
+	}
+	found := step.Check(t.Context())
+	if found.Summary != "not fetched with [redacted]" {
+		t.Errorf("Check() = %+v, want what it said, its secret hidden", found)
+	}
+	if err := step.Apply(t.Context(), found); err == nil || err.Error() != "denied: [redacted]" {
+		t.Errorf("Apply() = %v, want its failure, its secret hidden", err)
+	}
+	if err := step.Apply(t.Context(), found); err != nil {
+		t.Errorf("Apply() = %v", err)
+	}
+	for _, c := range fake.Commands() {
+		if !slices.Equal(c.Env, []string{"TOKEN=plain-words-value"}) {
+			t.Errorf("%s ran without TOKEN set, alone", c)
+		}
+	}
+
+	s = needing(s, false)
+	fake = runnertest.New(t)
+	err := steps.ScriptStep(fake, nil, s).Apply(t.Context(), notDone())
+	if err == nil || err.Error() != "needs TOKEN, which isn't there yet" || len(fake.Calls()) != 0 {
+		t.Errorf("without TOKEN, Apply() = %v, running %q; want it not applied, saying why", err, fake.Calls())
 	}
 }
 

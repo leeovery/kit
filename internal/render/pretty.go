@@ -210,14 +210,15 @@ func (p *Pretty) Emit(e event.Event) {
 		p.spin()
 	case event.Doing:
 		// A step at work says what it's doing; one waiting on you, what you're
-		// to do.
+		// to do; one waiting for a thing, what for. Only a step at work keeps
+		// its place in the log.
 		for i, r := range p.running {
 			if r.step == e.Step {
 				p.running[i].doing, p.running[i].todo = cmp.Or(e.Says, r.doing), e.Todo
 				p.running[i].done, p.running[i].of = e.Done, e.Of
 			}
 		}
-		if e.Todo != "" {
+		if r, ok := p.runningOf(e.Step); ok && !r.atWork() {
 			p.giveSlotBack(e.Step)
 		}
 		p.drawSpinner()

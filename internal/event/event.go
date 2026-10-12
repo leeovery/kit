@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
@@ -259,10 +260,12 @@ func StepOf(ctx context.Context) string {
 }
 
 // Command is what a runner reports of a command, as an event, attributed to
-// the step ctx is running, with secrets, and anything shaped like a token,
-// hidden. The command's standard input is never part of it, nor the output
-// of one whose output is a secret.
+// the step ctx is running, with secrets (those given, and the values of the
+// variables ctx sets for it), and anything shaped like a token, hidden. The
+// command's standard input and environment are never part of it, nor the
+// output of one whose output is a secret.
 func Command(ctx context.Context, rep runner.Report, secrets ...string) CommandRan {
+	secrets = append(slices.Clone(secrets), runner.SecretValues(ctx)...)
 	e := CommandRan{
 		Time:     rep.Started,
 		Step:     StepOf(ctx),

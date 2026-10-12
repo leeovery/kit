@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/leeovery/kit/internal/check"
@@ -54,6 +55,13 @@ type Step struct {
 	// cask it's about while the rest still install. One its step finished
 	// without leaves the step unapplied: deferred, unless it stands ok.
 	Waits []Wait
+	// Later are what it waits for partway through applying, once it has
+	// applied what it can without them, as a kind installs a section of its
+	// lines needing a secret once the secret's synced: its Apply waits for
+	// each with Await. Each is one of another step's things, or, without
+	// Ready, another step, done once it's finished. They don't order it:
+	// the step it waits for can come after it.
+	Later []Wait
 	// Check finds out how the step stands: cheap, and without side effects.
 	Check func(ctx context.Context) check.Result
 	// Apply does what the step is for, given what its check found: safe to
@@ -69,7 +77,8 @@ type Step struct {
 
 // Wait is a thing a step is applied after: one of the things another step
 // puts in place, by its step's name and its own, as in cask:1password, and
-// whether it's in place yet.
+// whether it's in place yet; or, among a step's Later, without a thing or
+// Ready, that step itself.
 type Wait struct {
 	Step, Thing string
 	Ready       func(ctx context.Context) bool
@@ -86,6 +95,15 @@ func NotYet(reason string) error { return &notYet{reason} }
 type notYet struct{ reason string }
 
 func (n *notYet) Error() string { return n.reason }
+
+// NotThere is why what a step's applying needs can't be done without
+// things, by name, that haven't come: needs TOKEN, which isn't there yet.
+func NotThere(things []string) string {
+	if len(things) == 1 {
+		return "needs " + things[0] + ", which isn't there yet"
+	}
+	return "needs " + strings.Join(things, " and ") + ", which aren't there yet"
+}
 
 // title is the step's title, or its name.
 func (s Step) title() string {
@@ -153,6 +171,14 @@ func New(steps ...Step) (*Pipeline, error) {
 				return nil, fmt.Errorf("step %s comes after %s:%s, and %s isn't a step", s.Name, w.Step, w.Thing, w.Step)
 			}
 		}
+		for _, w := range s.Later {
+			if _, ok := byName[w.Step]; !ok {
+				return nil, fmt.Errorf("step %s waits for %s, which isn't a step", s.Name, w.Step)
+			}
+		}
+	}
+	if err := waitsOnEachOther(steps, byName); err != nil {
+		return nil, err
 	}
 	ordered := make([]Step, 0, len(steps))
 	placed := make(map[string]bool, len(steps))
@@ -177,6 +203,50 @@ func New(steps ...Step) (*Pipeline, error) {
 		}
 	}
 	return &Pipeline{steps: ordered}, nil
+}
+
+// waitsOnEachOther finds a step waiting for another's thing, or for
+// another, that can't finish till it has: one in that step's lead-up needs
+// it to stand ok. Waiting frees the rest of the lead-up from it (dispatch's
+// free), so only a need would hold the run up for good.
+func waitsOnEachOther(steps []Step, byName map[string]Step) error {
+	for _, s := range steps {
+		for _, w := range slices.Concat(s.Waits, s.Later) {
+			if w.Step == s.Name {
+				continue
+			}
+			lead := leadUp(w.Step, byName)
+			for _, x := range steps {
+				if lead[x.Name] && slices.Contains(x.Needs, s.Name) {
+					return fmt.Errorf("step %s waits for %s, which waits on %s: %s needs it", s.Name, w.Step, s.Name, x.Name)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// leadUp is the step named name and what must be done, or waiting, before
+// it can finish: the steps it needs, comes after and waits for, and theirs
+// in turn, by name.
+func leadUp(name string, byName map[string]Step) map[string]bool {
+	lead := map[string]bool{}
+	var visit func(name string)
+	visit = func(name string) {
+		if lead[name] {
+			return
+		}
+		lead[name] = true
+		s := byName[name]
+		for _, next := range slices.Concat(s.Needs, s.After) {
+			visit(next)
+		}
+		for _, w := range slices.Concat(s.Waits, s.Later) {
+			visit(w.Step)
+		}
+	}
+	visit(name)
+	return lead
 }
 
 // Steps are the pipeline's steps, in order.
@@ -325,9 +395,11 @@ func (p *Pipeline) run(ctx context.Context, sink event.Sink, opts Options, apply
 	started := now()
 	infos := make([]event.Step, len(steps))
 	titles := make(map[string]string, len(steps))
+	byName := make(map[string]Step, len(steps))
 	for i, s := range steps {
 		infos[i] = s.info()
 		titles[s.Name] = s.title()
+		byName[s.Name] = s
 	}
 	sink.Emit(event.RunStarted{Time: started, Command: opts.Command, Machine: opts.Machine, Version: opts.Version, Steps: infos, Only: opts.Only})
 
@@ -337,10 +409,14 @@ func (p *Pipeline) run(ctx context.Context, sink event.Sink, opts Options, apply
 		within:   cmp.Or(opts.CheckWithin, DefaultCheckWithin),
 		apply:    apply,
 		titles:   titles,
+		byName:   byName,
 		results:  make(map[string]check.Result, len(steps)),
 		started:  make(map[string]bool, len(steps)),
 		finished: make(chan outcome),
+		parked:   make(chan parking),
+		resumed:  make(chan chan struct{}),
 		over:     make(map[string]chan struct{}, len(steps)),
+		freed:    make(map[string]map[string]bool),
 	}
 	for _, s := range steps {
 		d.over[s.Name] = make(chan struct{})
@@ -357,19 +433,37 @@ func (p *Pipeline) run(ctx context.Context, sink event.Sink, opts Options, apply
 
 // dispatch runs a run's steps: it starts each, in pipeline order, once what
 // it needs is done and a job is free, and defers each whose needs didn't
-// stand ok. Only its own goroutine touches its maps.
+// stand ok. Only its own goroutine touches its maps, but freed, which mu
+// guards, and titles and over, which steps' goroutines read, as they never
+// change once it's started.
 type dispatch struct {
 	sink     event.Sink
 	now      func() time.Time
 	within   time.Duration
 	apply    bool
 	titles   map[string]string
+	byName   map[string]Step
 	results  map[string]check.Result
 	started  map[string]bool
 	finished chan outcome
+	// parked are steps giving their jobs up while they wait for a thing;
+	// resumed, steps done waiting, each asking for a job back, given it as
+	// its channel's closed; queued, those still asking, first come first.
+	parked  chan parking
+	resumed chan chan struct{}
+	queued  []chan struct{}
 	// over are closed as each step finishes, for a step waiting on one of
 	// its things.
 	over map[string]chan struct{}
+	// freed are, for each step, the steps it takes as done before they've
+	// finished, as each waits for what that step leads up to (free).
+	mu    sync.Mutex
+	freed map[string]map[string]bool
+}
+
+// parking is a step waiting for a thing of the step on, or for on itself.
+type parking struct {
+	step, on string
 }
 
 // outcome is a step done, as its goroutine tells the dispatcher.
@@ -379,18 +473,53 @@ type outcome struct {
 	took   time.Duration
 }
 
+// run runs steps, jobs at a time: a step waiting for a thing gives its job
+// up meanwhile, and gets one back, before any step not yet started, once
+// it's done waiting.
 func (d *dispatch) run(ctx context.Context, steps []Step, jobs int) {
 	running := 0
 	for len(d.results) < len(steps) {
+		for ; len(d.queued) > 0 && running < jobs; running++ {
+			close(d.queued[0])
+			d.queued = d.queued[1:]
+		}
 		for d.startReady(ctx, steps, &running, jobs) {
 		}
 		if len(d.results) == len(steps) {
 			return
 		}
-		o := <-d.finished
-		running--
-		d.finish(o.step, o.result, o.took)
+		select {
+		case o := <-d.finished:
+			running--
+			d.finish(o.step, o.result, o.took)
+		case p := <-d.parked:
+			running--
+			d.free(p)
+		case granted := <-d.resumed:
+			d.queued = append(d.queued, granted)
+		}
 	}
+}
+
+// free has the steps p.on leads up to take p.step as done, as p.step waits
+// on p.on: none of them, then, waits for p.step, which waits for them.
+func (d *dispatch) free(p parking) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for name := range leadUp(p.on, d.byName) {
+		if d.freed[name] == nil {
+			d.freed[name] = map[string]bool{}
+		}
+		d.freed[name][p.step] = true
+	}
+}
+
+// isFreed reports whether step takes the step from as done, as from waits
+// for what step leads up to.
+func (d *dispatch) isFreed(step, from string) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.freed[step][from]
 }
 
 // startReady goes through the steps not yet started, in order, and starts
@@ -435,13 +564,31 @@ func (d *dispatch) startReady(ctx context.Context, steps []Step, running *int, j
 	return progressed
 }
 
-// stepContext is ctx for running s: what runs in it is s's, and what s says
-// it's doing as it goes is emitted.
+// stepContext is ctx for running s: what runs in it is s's, what s says
+// it's doing as it goes is emitted, and what it waits for partway through
+// applying is waited for as its Later are.
 func (d *dispatch) stepContext(ctx context.Context, s Step) context.Context {
-	return event.WithSaying(event.WithStep(ctx, s.Name), func(e event.Doing) {
+	ctx = event.WithSaying(event.WithStep(ctx, s.Name), func(e event.Doing) {
 		e.Time, e.Step = d.now(), s.Name
 		d.sink.Emit(e)
 	})
+	return context.WithValue(ctx, awaitKey{}, func(ctx context.Context, w Wait, says string) bool {
+		return d.await(ctx, s, w, func() { event.Say(ctx, event.Doing{Says: says}) })
+	})
+}
+
+type awaitKey struct{}
+
+// Await waits, partway through applying the step ctx is running, for w, one
+// of its Later, the step saying says meanwhile: till w's thing is in place,
+// w's step has finished, or the run's stopped. It reports whether w came: a
+// step waited for itself comes once it's finished. Outside a run, it waits
+// for nothing.
+func Await(ctx context.Context, w Wait, says string) bool {
+	if await, ok := ctx.Value(awaitKey{}).(func(context.Context, Wait, string) bool); ok {
+		return await(ctx, w, says)
+	}
+	return w.Ready == nil || w.Ready(ctx)
 }
 
 // stopped is the result of a step the run was stopped before, or during.
@@ -467,7 +614,7 @@ func (d *dispatch) afterDone(s Step) bool {
 	}
 	for _, after := range s.After {
 		_, taken := d.titles[after]
-		if _, done := d.results[after]; taken && !done {
+		if _, done := d.results[after]; taken && !done && !d.isFreed(s.Name, after) {
 			return false
 		}
 	}
@@ -520,33 +667,78 @@ func (d *dispatch) step(ctx context.Context, s Step) check.Result {
 	return res
 }
 
-// waitFor waits for each of the things s is applied after: till it's in
-// place, its step has finished, or the run's stopped; saying, meanwhile,
-// what it's waiting for. It returns those whose step finished without them.
+// waitFor waits for each of the things s is applied after, as await does,
+// saying, meanwhile, what it's waiting for. It returns those that didn't
+// come, unless the run was stopped.
 func (d *dispatch) waitFor(ctx context.Context, s Step) []string {
 	var missing []string
 	for _, w := range s.Waits {
-		if w.Ready(ctx) {
-			continue
-		}
-		d.sink.Emit(event.StepStarted{Time: d.now(), Step: s.Name, Doing: "waiting for " + w.Thing})
-		tick := time.NewTicker(waitPoll)
-		for waiting := true; waiting; {
-			select {
-			case <-ctx.Done():
-				waiting = false
-			case <-d.over[w.Step]:
-				waiting = false
-			case <-tick.C:
-				waiting = !w.Ready(ctx)
-			}
-		}
-		tick.Stop()
-		if ctx.Err() == nil && !w.Ready(ctx) {
+		came := d.await(ctx, s, w, func() {
+			d.sink.Emit(event.StepStarted{Time: d.now(), Step: s.Name, Doing: "waiting for " + w.Thing})
+		})
+		if !came && ctx.Err() == nil {
 			missing = append(missing, w.Thing)
 		}
 	}
 	return missing
+}
+
+// await waits, for s, for w: till its thing's in place, its step has
+// finished, or has taken s as done (free), or the run's stopped; saying
+// so, as waiting does, once it starts. Meanwhile s's job is another's, and
+// the steps w's step leads up to take s as done. It reports whether w came:
+// a step waited for itself, once it's finished, or has taken s as done. A
+// thing of s's own, or of a step the run doesn't take, isn't waited for.
+func (d *dispatch) await(ctx context.Context, s Step, w Wait, waiting func()) bool {
+	if _, taken := d.titles[w.Step]; w.Step == s.Name || !taken {
+		return w.Ready == nil || w.Ready(ctx)
+	}
+	if came, settled := d.settled(ctx, s, w); settled {
+		return came
+	}
+	waiting()
+	d.parked <- parking{step: s.Name, on: w.Step}
+	defer d.resume()
+	tick := time.NewTicker(waitPoll)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return false
+		case <-d.over[w.Step]:
+		case <-tick.C:
+		}
+		if came, settled := d.settled(ctx, s, w); settled {
+			return came
+		}
+	}
+}
+
+// settled reports whether s's wait for w is over, and whether w came: once
+// w's step has finished, w came if its thing's in place, or it's the step
+// itself; before, once its thing's in place, or once its step takes s as
+// done, as it waits for what s leads up to, when only the step itself has
+// come.
+func (d *dispatch) settled(ctx context.Context, s Step, w Wait) (came, over bool) {
+	select {
+	case <-d.over[w.Step]:
+		return w.Ready == nil || w.Ready(ctx), true
+	default:
+	}
+	switch {
+	case w.Ready != nil && w.Ready(ctx):
+		return true, true
+	case d.isFreed(s.Name, w.Step):
+		return w.Ready == nil, true
+	}
+	return false, false
+}
+
+// resume waits for a job to go on with, once a step's done waiting.
+func (d *dispatch) resume() {
+	granted := make(chan struct{})
+	d.resumed <- granted
+	<-granted
 }
 
 // done are the items before had an action for that after no longer has:

@@ -332,6 +332,39 @@ func TestApplyingLogsSlots(t *testing.T) {
 	}
 }
 
+// A step waiting partway through applying, for a thing another step puts
+// in place, gives its place in the log up to a step at work, and takes one
+// again once it's back at work.
+func TestApplyingSlotsAreForStepsAtWork(t *testing.T) {
+	var steps []event.Step
+	for _, n := range []string{"a", "b", "c", "d", "e"} {
+		steps = append(steps, event.Step{Name: n, Title: n, Area: "Steps"})
+	}
+	events := []event.Event{event.RunStarted{Time: at, Command: "apply", Machine: "laptop", Steps: steps}}
+	for _, n := range []string{"a", "b", "c", "d"} {
+		events = append(events, event.StepStarted{Step: n, Doing: "applying"}, event.Output{Step: n, Command: "run apply", Line: n + " at work"})
+	}
+	events = append(events,
+		event.Doing{Step: "a", Says: "waiting for TOKEN: 2 to install"},
+		event.StepStarted{Step: "e", Doing: "applying"}, event.Output{Step: "e", Command: "run apply", Line: "e at work"},
+		event.StepFinished{Step: "b", Result: check.Result{State: check.OK, Summary: "done"}},
+		event.Doing{Step: "a", Says: "installing owner/private/fetcher", Of: 2},
+		event.Output{Step: "a", Command: "brew install", Line: "a at work again"},
+	)
+	face, out, _ := applyAt(160, 64, time.Second, events)
+	got := screen(out.String())
+	if err := face.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var rows []string
+	for _, m := range slotRow.FindAllStringSubmatch(got, -1) {
+		rows = append(rows, m[1])
+	}
+	if want := []string{"e", "a", "c", "d"}; !slices.Equal(rows, want) {
+		t.Errorf("the log's slots hold %q; want %q: a's place e's while a waited, then b's, done, a's\n%s", rows, want, got)
+	}
+}
+
 // scratchLeft is a run in which the Scratch volume's step made the volume,
 // printing as it did, but found one thing still left once it checked again,
 // while Claude Code installs.

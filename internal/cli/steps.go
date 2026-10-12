@@ -16,6 +16,7 @@ import (
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/kind"
+	"github.com/leeovery/kit/internal/kind/secret"
 	"github.com/leeovery/kit/internal/steps"
 )
 
@@ -49,6 +50,9 @@ func (r *run) scriptSteps(base []engine.Step) ([]engine.Step, error) {
 		var waits []engine.Wait
 		if err == nil {
 			waits, err = r.placeScript(&s, names)
+		}
+		if err == nil {
+			s.Needed, s.Env, err = r.needing(s.Secrets)
 		}
 		if err != nil {
 			out = append(out, steps.BrokenScript(e, err))
@@ -133,6 +137,110 @@ func (r *run) place(after, before []string, names map[string]bool) (steps []stri
 	return steps, waits, ahead, nil
 }
 
+// placeHeld places the sections of each kind's lines held back among all,
+// the run's steps: what each waits for, a step or one of a step's things,
+// and the secrets it needs, each waited for partway through applying, and,
+// a variable, set for its install. A section placed after what isn't a
+// step, or needing a secret not declared, fails its kind's step, saying so.
+func (r *run) placeHeld(all []engine.Step) {
+	names := make(map[string]bool, len(all))
+	for _, s := range all {
+		names[s.Name] = true
+	}
+	for i, s := range all {
+		if !slices.Contains(r.kinds, s.Name) {
+			continue
+		}
+		held, err := r.heldSections(r.lists[s.Name], names)
+		if err != nil {
+			reason := err.Error()
+			all[i].Apply = nil
+			all[i].Check = func(context.Context) check.Result { return check.Result{State: check.Failed, Reason: reason} }
+			continue
+		}
+		r.holding[s.Name] = held
+		for _, h := range held {
+			all[i].Later = append(all[i].Later, h.Waits...)
+		}
+	}
+}
+
+// heldSections are list's sections holding their lines back, in order, each
+// placed among names, the run's steps: a step it comes after is waited for
+// till it's finished, one of a step's things till it's in, then each secret
+// it needs.
+func (r *run) heldSections(list config.List, names map[string]bool) ([]kind.Held, error) {
+	var held []kind.Held
+	for _, e := range list.Entries {
+		if e.Hold == "" || slices.ContainsFunc(held, func(h kind.Held) bool { return h.Hold == e.Hold }) {
+			continue
+		}
+		after, things, _, err := r.place(e.After(), nil, names)
+		var secrets []engine.Wait
+		var env func() ([]string, error)
+		if err == nil {
+			secrets, env, err = r.needing(e.Secrets())
+		}
+		if err != nil {
+			return nil, fmt.Errorf("%s: [%s]: %w", e.Path(), e.Section, err)
+		}
+		var waits []engine.Wait
+		for _, step := range after {
+			waits = append(waits, engine.Wait{Step: step})
+		}
+		held = append(held, kind.Held{Hold: e.Hold, Waits: slices.Concat(waits, things, secrets), Env: env})
+	}
+	return held, nil
+}
+
+// needing is what needing the secrets named takes: a wait for each, till
+// it's in place, and the environment of the commands that need them, read
+// as each starts, each that's a variable set to its value as kit's secrets
+// hold it (~/.secrets.zsh, as kit wrote it, syncing, in this run or
+// before), never the environment kit inherited. Each must be declared.
+func (r *run) needing(names []string) ([]engine.Wait, func() ([]string, error), error) {
+	if len(names) == 0 {
+		return nil, nil, nil
+	}
+	secrets, ok := r.kindsByName[secretKind].(*secret.Secrets)
+	if !ok {
+		return nil, nil, errors.New("kit has no secrets")
+	}
+	declared := r.lists[secretKind].Names()
+	var waits []engine.Wait
+	var variables, undeclared []string
+	for _, name := range names {
+		if !slices.Contains(declared, name) {
+			undeclared = append(undeclared, name)
+			continue
+		}
+		waits = append(waits, engine.Wait{Step: secretKind, Thing: name, Ready: func(ctx context.Context) bool { return secrets.Has(ctx, name) }})
+		if !(secret.Secret{Name: name}).IsFile() {
+			variables = append(variables, name)
+		}
+	}
+	switch {
+	case len(undeclared) == 1:
+		return nil, nil, fmt.Errorf("it needs %s, which no [secrets] section declares", undeclared[0])
+	case len(undeclared) > 1:
+		return nil, nil, fmt.Errorf("it needs %s, which no [secrets] section declares", strings.Join(undeclared, " and "))
+	}
+	env := func() ([]string, error) {
+		var env []string
+		for _, name := range variables {
+			value, ok, err := secrets.Variable(name)
+			if err != nil {
+				return nil, err
+			}
+			if ok {
+				env = append(env, name+"="+value)
+			}
+		}
+		return env, nil
+	}
+	return waits, env, nil
+}
+
 // installed reports whether the kind named kind has thing installed, by its
 // full name, or a tap's thing by its own, as Homebrew lists a tap's cask.
 func (r *run) installed(kindName, thing string) func(context.Context) bool {
@@ -150,8 +258,8 @@ func (r *run) installed(kindName, thing string) func(context.Context) bool {
 
 // stepOptions are kit step add's options.
 type stepOptions struct {
-	after, before []string
-	sudo          bool
+	after, before, secrets []string
+	sudo                   bool
 	addOptions
 }
 
@@ -166,8 +274,10 @@ kit-config, its folder's other files its data. kit runs the script as run
 check (exit 0: done; 1: not done; 3: can't be done yet; its first line saying
 how it stands) and, when it isn't done, as run apply, then checks again.
 --after names a step it's applied after, or one of a step's things, as in
-cask:1password; --before a step applied after it; each as often as wanted.
---sudo says applying needs an administrator's password.
+cask:1password; --before a step applied after it; --secret a secret it needs,
+declared in a secrets section, which it's applied once it's in place, its
+script run with it set when it's a variable; each as often as wanted. --sudo
+says applying needs an administrator's password.
 
 The script starts as a template following that contract: write its check and
 apply.` + declaredWhere,
@@ -180,6 +290,7 @@ apply.` + declaredWhere,
 	}
 	add.Flags().StringArrayVar(&opts.after, "after", nil, "a step it's applied after, or one of a step's things, as in cask:1password")
 	add.Flags().StringArrayVar(&opts.before, "before", nil, "a step applied after it")
+	add.Flags().StringArrayVar(&opts.secrets, "secret", nil, "a secret it needs, by what it fills, as its secrets section declares it")
 	add.Flags().BoolVar(&opts.sudo, "sudo", false, "applying it needs an administrator's password")
 	add.Flags().BoolVar(&opts.shared, "shared", false, "declare for every Mac, not this one alone")
 	add.Flags().StringVar(&opts.note, "note", "", "why it's declared, kept after it")
@@ -196,6 +307,9 @@ func (a *app) addStep(ctx context.Context, r *run, name, does string, opts stepO
 	}
 	for _, before := range opts.before {
 		words = append(words, "--before", config.Quote(before))
+	}
+	for _, name := range opts.secrets {
+		words = append(words, "--secret", config.Quote(name))
 	}
 	if opts.sudo {
 		words = append(words, "--sudo")
@@ -216,6 +330,9 @@ func (a *app) addStep(ctx context.Context, r *run, name, does string, opts stepO
 			return fail(fmt.Errorf("a step called %s is there already", name))
 		}
 		if _, err := r.placeScript(&s, names); err != nil {
+			return fail(err)
+		}
+		if _, _, err := r.needing(s.Secrets); err != nil {
 			return fail(err)
 		}
 		if _, err := os.Stat(s.Dir); !errors.Is(err, fs.ErrNotExist) {

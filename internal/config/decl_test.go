@@ -98,6 +98,29 @@ func TestListSecretsByItem(t *testing.T) {
 	}
 }
 
+// A list's section can hold its lines back, what for after its header:
+// its entries are the list's like any other, saying what they wait for and
+// need, as kit writes it, however the header has it.
+func TestListHeldLines(t *testing.T) {
+	cfg := loadRepo(t, map[string]string{"laptop/declarations": "[homebrew formulae]\njq\n\n[homebrew formulae --secret TOKEN  --after cask:app --secret TOKEN]   # private\n# Their releases are private.\nowner/private/fetcher   # a note\n"})
+	got, err := cfg.List("brew", "laptop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hold := "--after cask:app --secret TOKEN"
+	want := []config.Entry{
+		{Name: "jq", Scope: "laptop", Section: "homebrew formulae", Line: 2},
+		{Name: "owner/private/fetcher", Scope: "laptop", Section: "homebrew formulae " + hold, Hold: hold, Line: 6, Note: "a note"},
+	}
+	if !slices.Equal(got.Entries, want) {
+		t.Fatalf("List() = %+v\nwant %+v", got.Entries, want)
+	}
+	held := got.Entries[1]
+	if !slices.Equal(held.After(), []string{"cask:app"}) || !slices.Equal(held.Secrets(), []string{"TOKEN"}) || got.Entries[0].After() != nil || got.Entries[0].Secrets() != nil {
+		t.Errorf("After() = %q, Secrets() = %q; want what its section holds its lines back for, and nothing for the plain section's", held.After(), held.Secrets())
+	}
+}
+
 func TestListWithoutFiles(t *testing.T) {
 	got, err := loadRepo(t, map[string]string{}).List("brew", "laptop")
 	if err != nil || len(got.Entries) != 0 {
@@ -123,6 +146,13 @@ func TestListRefuses(t *testing.T) {
 		{name: "a quote left open", files: map[string]string{"laptop/declarations": "[claude mcp]\ndocs --header \"X: y\n"}, want: "laptop/declarations:2: a quote isn't closed"},
 		{name: "a secret in two items' sections", files: map[string]string{"laptop/declarations": "[secrets op://vault/A]\nX a/b\n\n[secrets op://vault/B]\nX c/d\n"}, want: "laptop/declarations:5: X is in [secrets op://vault/A] at line 2 too"},
 		{name: "a secrets section for what isn't an item", files: map[string]string{"laptop/declarations": "[secrets op://vault/item/field]\nX a/b\n"}, want: `laptop/declarations:1: [secrets op://vault/item/field]: "op://vault/item/field" isn't a 1Password item's reference`},
+		{name: "a list section's option kit doesn't know", files: map[string]string{"shared/declarations": "[homebrew formulae --needs secret]\njq\n"}, want: `shared/declarations:1: [homebrew formulae --needs secret]: "--needs" isn't one of a list section's options: --after and --secret`},
+		{name: "a list section's option without its value", files: map[string]string{"shared/declarations": "[homebrew formulae --after cask:app --secret]\njq\n"}, want: "shared/declarations:1: [homebrew formulae --after cask:app --secret]: --secret needs a secret's name after it"},
+		{name: "a list section waiting for half a thing", files: map[string]string{"shared/declarations": "[homebrew formulae --after cask:]\njq\n"}, want: "--after cask:: --after names a step, or one of its things as in cask:1password"},
+		{name: "a list section needing what no secret fills", files: map[string]string{"shared/declarations": "[homebrew formulae --secret 9LIVES]\njq\n"}, want: "--secret 9LIVES: a secret is named by what it fills"},
+		{name: "options on a section that isn't a list's", files: map[string]string{"shared/declarations": "[git config --after brew]\nuser.name Someone\n"}, want: "shared/declarations:1: [git config --after brew]: only a list's sections take options"},
+		{name: "two sections holding lines back for the same", files: map[string]string{"shared/declarations": "[homebrew formulae --secret A --after b]\njq\n\n[homebrew formulae --after b --secret A]\ngo\n"}, want: "shared/declarations:4: [homebrew formulae --after b --secret A] is at line 1 too"},
+		{name: "a name in a list's section and one holding lines back", files: map[string]string{"shared/declarations": "[homebrew formulae]\njq\n\n[homebrew formulae --secret A]\njq\n"}, want: "shared/declarations:5: jq is in [homebrew formulae] at line 2 too"},
 		{name: "in the shared file and a Mac's", files: map[string]string{"shared/declarations": "[homebrew formulae]\njq\n", "laptop/declarations": "[homebrew formulae]\ngo\njq\n"}, want: "laptop/declarations:3: jq is in shared/declarations too (line 2)"},
 	}
 	for _, tt := range tests {

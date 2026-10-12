@@ -63,6 +63,9 @@ func choiceActions(choices []choice) []string {
 type kindDrifter struct {
 	k    kind.Kind
 	list config.List
+	// held are its sections holding their lines back, as the run placed
+	// them.
+	held func() []kind.Held
 }
 
 func (d kindDrifter) check(ctx context.Context) check.Result {
@@ -151,7 +154,7 @@ func (d kindDrifter) settle(ctx context.Context, r *run, c *changes, dec decisio
 	case remove, undeclare:
 		return removeOne(ctx, r, c, d.k, dec.item.Name, dec.shared)
 	case install:
-		if err := d.k.Install(event.WithChanging(ctx), []string{dec.item.Name}); err != nil {
+		if err := kind.InstallDeclared(event.WithChanging(ctx), d.k, d.list, d.held(), []string{dec.item.Name}); err != nil {
 			return check.Result{State: check.Failed, Reason: "couldn't install: " + err.Error()}
 		}
 		return check.Result{State: check.OK, Summary: "installed"}

@@ -196,6 +196,31 @@ func (s *Secrets) Installed(context.Context) ([]kind.Installed, error) {
 	return out, nil
 }
 
+// Has reports whether the secret that fills name is in place, as Installed
+// finds it.
+func (s *Secrets) Has(ctx context.Context, name string) bool {
+	have, err := s.Installed(ctx)
+	return err == nil && slices.ContainsFunc(have, func(in kind.Installed) bool { return in.Name == name })
+}
+
+// Variable is the value ~/.secrets.zsh holds for the variable name, as kit
+// wrote it, syncing: ok is false when it holds none. It asks 1Password
+// nothing, and reads no environment.
+func (s *Secrets) Variable(name string) (value string, ok bool, err error) {
+	lines, _, err := s.envLines()
+	if err != nil {
+		return "", false, err
+	}
+	line, ok := lines[name]
+	if !ok {
+		return "", false, nil
+	}
+	if value, ok = unquote(strings.TrimPrefix(line, "export "+name+"=")); !ok {
+		return "", false, fmt.Errorf("~/%s holds %s otherwise than kit writes it: run kit secret sync", EnvFile, name)
+	}
+	return value, true, nil
+}
+
 // Resolve knows every secret.
 func (s *Secrets) Resolve(_ context.Context, names []string) (map[string]string, error) {
 	out := make(map[string]string, len(names))
@@ -411,6 +436,29 @@ func (s *Secrets) dropEnv(drop map[string]bool) error {
 // ($, a backtick, a backslash) is expanded or run.
 func quote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
+}
+
+// unquote reads a value as quote wrote it, and what may follow it on its
+// line, a note: false when that's not what text is.
+func unquote(text string) (string, bool) {
+	var value strings.Builder
+	for {
+		rest, ok := strings.CutPrefix(text, "'")
+		end := strings.IndexByte(rest, '\'')
+		if !ok || end < 0 {
+			return "", false
+		}
+		value.WriteString(rest[:end])
+		if text, ok = strings.CutPrefix(rest[end+1:], `\'`); !ok {
+			text = rest[end+1:]
+			break
+		}
+		value.WriteByte('\'')
+	}
+	if note := strings.TrimSpace(text); note != "" && !strings.HasPrefix(note, "#") {
+		return "", false
+	}
+	return value.String(), true
 }
 
 // writeFile writes data to path whole or not at all, with mode: beside it,

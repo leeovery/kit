@@ -71,6 +71,25 @@ func TestCommand(t *testing.T) {
 	}
 }
 
+// A command run with a secret in its environment is reported without its
+// value, wherever the command printed it, and without its environment.
+func TestCommandHidesTheSecretsItsContextSets(t *testing.T) {
+	ctx := runner.WithSecretEnv(event.WithStep(context.Background(), "brew"), "TOKEN=plain-words-value")
+	rep := runner.Report{
+		Command: runner.Command{Name: "brew", Args: []string{"install", "owner/tap/tool"}, Env: runner.SecretEnv(ctx)},
+		Result:  runner.Result{Stdout: []byte("fetching with plain-words-value\n"), Stderr: []byte("denied: plain-words-value\n"), ExitCode: 1},
+		Err:     errors.New("brew install owner/tap/tool exited 1: denied: plain-words-value"),
+	}
+	e := event.Command(ctx, rep)
+	want := event.CommandRan{
+		Step: "brew", Command: "brew install owner/tap/tool", Exit: 1,
+		Stdout: "fetching with [redacted]\n", Stderr: "denied: [redacted]\n", Error: "brew install owner/tap/tool exited 1: denied: [redacted]",
+	}
+	if e != want {
+		t.Errorf("Command() = %+v\nwant %+v", e, want)
+	}
+}
+
 func TestTally(t *testing.T) {
 	got := event.Tally(check.Result{State: check.OK}, check.Result{State: check.OK}, check.Result{State: check.Attention}, check.Result{})
 	want := map[check.State]int{check.OK: 2, check.Attention: 1, check.Failed: 1}

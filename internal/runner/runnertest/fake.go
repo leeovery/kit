@@ -140,8 +140,12 @@ func (f *Fake) Has(name string) bool {
 	return false
 }
 
-// Run answers cmd as scripted, as a real runner would, noting the call.
+// Run answers cmd as scripted, as a real runner would, noting the call: its
+// environment with the variables ctx sets, as a real runner sets them.
 func (f *Fake) Run(ctx context.Context, cmd runner.Command) (runner.Result, error) {
+	if env := runner.SecretEnv(ctx); len(env) > 0 {
+		cmd.Env = slices.Concat(cmd.Env, env)
+	}
 	f.mu.Lock()
 	f.calls = append(f.calls, cmd)
 	s := f.script(cmd)

@@ -171,6 +171,39 @@ func (o observed) Run(ctx context.Context, cmd Command) (Result, error) {
 	return res, err
 }
 
+type secretEnvKey struct{}
+
+// WithSecretEnv returns ctx for running commands that need secrets in their
+// environment: env's variables, as in NAME=value, set for each command run
+// in it, over any other value of theirs, and for no other command. Their
+// values are secrets, to hide in anything said of those commands
+// (SecretValues).
+func WithSecretEnv(ctx context.Context, env ...string) context.Context {
+	if len(env) == 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, secretEnvKey{}, slices.Concat(SecretEnv(ctx), env))
+}
+
+// SecretEnv are the variables ctx sets for each command run in it, as
+// WithSecretEnv gave them.
+func SecretEnv(ctx context.Context) []string {
+	env, _ := ctx.Value(secretEnvKey{}).([]string)
+	return env
+}
+
+// SecretValues are the values of the variables ctx sets for each command run
+// in it: what to hide in anything said of those commands.
+func SecretValues(ctx context.Context) []string {
+	var values []string
+	for _, kv := range SecretEnv(ctx) {
+		if _, v, _ := strings.Cut(kv, "="); v != "" {
+			values = append(values, v)
+		}
+	}
+	return values
+}
+
 // WithEnv returns r with env's variables, as they stand when a command
 // runs, added to each command's environment.
 func WithEnv(r Runner, env func() []string) Runner {

@@ -76,7 +76,7 @@ func TestStepsThatDontRead(t *testing.T) {
 	out, _, code := w.run(t, "status")
 	for _, want := range []string{
 		`odd failed laptop/declarations:`,
-		`"--sideways" isn't one of a step's options: --after, --before and --sudo`,
+		`"--sideways" isn't one of a step's options: --after, --before, --secret and --sudo`,
 		"lost failed laptop/declarations:",
 		"it comes after brw, which isn't a step; it comes before nothing, which isn't a step",
 		"later ok done",

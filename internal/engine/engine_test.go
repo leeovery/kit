@@ -737,3 +737,215 @@ func TestNotYet(t *testing.T) {
 		t.Errorf("secret = %+v, want deferred, saying why", res)
 	}
 }
+
+// applyWithin applies p as opts say, failing the test should the run not
+// finish in a few seconds, as when steps wait on each other for good.
+func applyWithin(t *testing.T, p *engine.Pipeline, rec *recorder, opts engine.Options) engine.Report {
+	t.Helper()
+	done := make(chan engine.Report)
+	go func() {
+		report, _ := p.Apply(t.Context(), rec, opts)
+		done <- report
+	}()
+	select {
+	case report := <-done:
+		return report
+	case <-time.After(5 * time.Second):
+		t.Fatal("the run never finished: its steps wait on each other")
+		return engine.Report{}
+	}
+}
+
+// A step can wait partway through applying, once it has applied what it
+// can, for a thing of a step that comes after it: that step, and what it
+// comes after, go ahead meanwhile, even with one job, while a step after it
+// that the thing's step doesn't lead up to waits for it to finish.
+func TestAStepWaitsPartwayThroughApplying(t *testing.T) {
+	defer engine.SetWaitPoll(time.Millisecond)()
+	var mu sync.Mutex
+	var order []string
+	note := func(what string) {
+		mu.Lock()
+		defer mu.Unlock()
+		order = append(order, what)
+	}
+	var synced atomic.Bool
+	token := engine.Wait{Step: "secret", Thing: "TOKEN", Ready: func(context.Context) bool { return synced.Load() }}
+	notDone := func(context.Context) check.Result { return check.Result{State: check.Attention} }
+	p, err := engine.New(
+		engine.Step{Name: "brew", Later: []engine.Wait{token}, Check: notDone,
+			Apply: func(ctx context.Context, _ check.Result) error {
+				note("brew's plain lines")
+				if !engine.Await(ctx, token, "waiting for TOKEN") {
+					return errors.New("TOKEN never came")
+				}
+				note("brew's lines needing TOKEN")
+				return nil
+			}},
+		engine.Step{Name: "cask", Check: notDone, Apply: func(context.Context, check.Result) error { note("cask"); return nil }},
+		engine.Step{Name: "sign-in", Before: []string{"secret"}, Check: notDone, Apply: func(context.Context, check.Result) error { note("sign-in"); return nil }},
+		engine.Step{Name: "secret", After: []string{"brew", "cask"}, Check: notDone,
+			Apply: func(context.Context, check.Result) error { note("secret"); synced.Store(true); return nil }},
+		engine.Step{Name: "mise", After: []string{"brew"}, Check: notDone, Apply: func(context.Context, check.Result) error { note("mise"); return nil }},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := &recorder{}
+	report := applyWithin(t, p, rec, engine.Options{Jobs: 1})
+	if got := report.Results["brew"]; got.State == check.Failed {
+		t.Errorf("brew = %+v, want it applied whole", got)
+	}
+	before := func(a, b string) bool {
+		i, j := slices.Index(order, a), slices.Index(order, b)
+		return i >= 0 && i < j
+	}
+	inOrder := before("brew's plain lines", "secret") && before("cask", "secret") && before("sign-in", "secret") &&
+		before("secret", "brew's lines needing TOKEN") && before("brew's lines needing TOKEN", "mise")
+	if !inOrder {
+		t.Errorf("applied in the order %q: want brew's plain lines, then what TOKEN's step comes after and it, then brew's lines needing TOKEN, then what comes after brew alone", order)
+	}
+	var said bool
+	for _, e := range rec.events {
+		if d, ok := e.(event.Doing); ok && d.Step == "brew" && d.Says == "waiting for TOKEN" {
+			said = true
+		}
+	}
+	if !said {
+		t.Error("brew didn't say what it waited for")
+	}
+}
+
+// A wait partway through applying ends when its thing's step finishes
+// without it, and says it didn't come; a wait for a step itself comes once
+// that step has finished, however it stands. Outside a run, nothing's
+// waited for.
+func TestAwait(t *testing.T) {
+	defer engine.SetWaitPoll(time.Millisecond)()
+	never := engine.Wait{Step: "secret", Thing: "TOKEN", Ready: func(context.Context) bool { return false }}
+	theStep := engine.Wait{Step: "secret"}
+	var came []bool
+	p, err := engine.New(
+		engine.Step{Name: "brew", Later: []engine.Wait{never, theStep}, Check: func(context.Context) check.Result { return check.Result{State: check.Attention} },
+			Apply: func(ctx context.Context, _ check.Result) error {
+				came = append(came, engine.Await(ctx, never, "waiting for TOKEN"), engine.Await(ctx, theStep, "waiting for secret"))
+				return nil
+			}},
+		engine.Step{Name: "secret", After: []string{"brew"}, Check: failing("1Password doesn't answer")},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	applyWithin(t, p, &recorder{}, engine.Options{Jobs: 4})
+	if !slices.Equal(came, []bool{false, true}) {
+		t.Errorf("came = %v, want TOKEN not, the step itself once it finished", came)
+	}
+	if engine.Await(t.Context(), never, "") || !engine.Await(t.Context(), theStep, "") {
+		t.Error("outside a run, Await waited, or didn't say what's in place")
+	}
+}
+
+// A step waiting for a thing gives its job up: one job runs the step
+// putting the thing in place, wherever the waiting step is in the order,
+// and a wait for a thing of a step the run doesn't take ends at once.
+func TestAWaitingStepGivesItsJobUp(t *testing.T) {
+	defer engine.SetWaitPoll(time.Millisecond)()
+	var installed atomic.Bool
+	app := engine.Wait{Step: "cask", Thing: "app", Ready: func(context.Context) bool { return installed.Load() }}
+	signIn := func(name string) engine.Step {
+		return engine.Step{Name: name, Waits: []engine.Wait{app}, Check: func(context.Context) check.Result { return check.Result{State: check.Attention} }}
+	}
+	p, err := engine.New(
+		signIn("first"), signIn("second"),
+		engine.Step{Name: "cask", Check: func(context.Context) check.Result { return check.Result{State: check.Attention} },
+			Apply: func(context.Context, check.Result) error { installed.Store(true); return nil }},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := applyWithin(t, p, &recorder{}, engine.Options{Jobs: 1})
+	for _, name := range []string{"first", "second"} {
+		if got := report.Results[name]; got.State != check.Attention {
+			t.Errorf("%s = %+v, want it checked once the app was in", name, got)
+		}
+	}
+	installed.Store(false)
+	report = applyWithin(t, p, &recorder{}, engine.Options{Jobs: 1, Only: []string{"first"}})
+	if got := report.Results["first"]; got.State != check.Deferred || got.Reason != "needs app, which isn't installed" {
+		t.Errorf("first, alone = %+v, want it deferred at once: cask isn't run", got)
+	}
+}
+
+// A step waiting for another that can't finish till it has, as that one,
+// or one it comes after, needs it, is refused: the run would wait for good.
+func TestNewRefusesStepsWaitingOnEachOther(t *testing.T) {
+	thing := engine.Wait{Step: "secret", Thing: "TOKEN", Ready: func(context.Context) bool { return false }}
+	tests := []struct {
+		name  string
+		steps []engine.Step
+		want  string
+	}{
+		{
+			name: "it needs the step waiting",
+			steps: []engine.Step{
+				{Name: "brew", Later: []engine.Wait{thing}, Check: ok("")},
+				{Name: "secret", Needs: []string{"brew"}, Check: ok("")},
+			},
+			want: "step brew waits for secret, which waits on brew: secret needs it",
+		},
+		{
+			name: "what it comes after needs the step waiting",
+			steps: []engine.Step{
+				{Name: "brew", Later: []engine.Wait{{Step: "secret"}}, Check: ok("")},
+				{Name: "sign-in", Needs: []string{"brew"}, Check: ok("")},
+				{Name: "secret", After: []string{"sign-in"}, Check: ok("")},
+			},
+			want: "step brew waits for secret, which waits on brew: sign-in needs it",
+		},
+		{
+			name:  "a step that isn't one",
+			steps: []engine.Step{{Name: "brew", Later: []engine.Wait{thing}, Check: ok("")}},
+			want:  "step brew waits for secret, which isn't a step",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := engine.New(tt.steps...); err == nil || err.Error() != tt.want {
+				t.Errorf("New() error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+	if _, err := engine.New(
+		engine.Step{Name: "brew", Later: []engine.Wait{thing}, Check: ok("")},
+		engine.Step{Name: "secret", After: []string{"brew"}, Check: ok("")},
+	); err != nil {
+		t.Errorf("a step waiting for one that comes after it was refused: %v", err)
+	}
+}
+
+// A thing in place already is no wait: the step says nothing of waiting.
+func TestAwaitingWhatsInPlace(t *testing.T) {
+	synced := engine.Wait{Step: "secret", Thing: "TOKEN", Ready: func(context.Context) bool { return true }}
+	var came bool
+	p, err := engine.New(
+		engine.Step{Name: "brew", Later: []engine.Wait{synced}, Check: func(context.Context) check.Result { return check.Result{State: check.Attention} },
+			Apply: func(ctx context.Context, _ check.Result) error {
+				came = engine.Await(ctx, synced, "waiting for TOKEN")
+				return nil
+			}},
+		engine.Step{Name: "secret", After: []string{"brew"}, Check: ok("")},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := &recorder{}
+	applyWithin(t, p, rec, engine.Options{Jobs: 4})
+	if !came {
+		t.Error("Await() = false, want TOKEN come")
+	}
+	for _, e := range rec.events {
+		if d, ok := e.(event.Doing); ok {
+			t.Errorf("brew said %q: want nothing said of waiting", d.Says)
+		}
+	}
+}

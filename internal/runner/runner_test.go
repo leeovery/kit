@@ -3,6 +3,7 @@ package runner_test
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -63,5 +64,19 @@ func TestExitErrorWithoutStderr(t *testing.T) {
 	}
 	if _, ok := errors.AsType[*runner.ExitError](error(err)); !ok {
 		t.Error("errors.AsType should find the ExitError")
+	}
+}
+
+func TestSecretValues(t *testing.T) {
+	ctx := runner.WithSecretEnv(t.Context(), "A=one", "EMPTY=")
+	ctx = runner.WithSecretEnv(ctx, "B=two=three")
+	if got := runner.SecretEnv(ctx); !slices.Equal(got, []string{"A=one", "EMPTY=", "B=two=three"}) {
+		t.Errorf("SecretEnv() = %q, want each variable given, in order", got)
+	}
+	if got := runner.SecretValues(ctx); !slices.Equal(got, []string{"one", "two=three"}) {
+		t.Errorf("SecretValues() = %q, want each value that's something", got)
+	}
+	if runner.WithSecretEnv(t.Context()) != t.Context() || runner.SecretEnv(t.Context()) != nil {
+		t.Error("no variables changed the context, or a context without them set some")
 	}
 }

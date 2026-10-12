@@ -98,6 +98,24 @@ func TestDeclare(t *testing.T) {
 			kind:   "mas", entry: config.Entry{Name: "xcode@497799835"},
 			after: "[app store apps]\nxcode@497799835\n",
 		},
+		{
+			name:   "a package in the plain section, the one holding lines back kept as written",
+			before: "[homebrew formulae]\njq\n\n[homebrew formulae  --secret TOKEN]   # private releases\n# Their releases are private.\nowner/private/fetcher\n",
+			kind:   "brew", entry: config.Entry{Name: "bat"},
+			after: "[homebrew formulae]\nbat\njq\n\n[homebrew formulae  --secret TOKEN]   # private releases\n# Their releases are private.\nowner/private/fetcher\n",
+		},
+		{
+			name:   "a package in the section holding lines back for the same, sorted",
+			before: "[homebrew formulae]\njq\n\n[homebrew formulae --secret TOKEN --after secret]\nowner/private/fetcher\n",
+			kind:   "brew", entry: config.Entry{Name: "owner/private/archiver", Hold: "--secret TOKEN --after secret"},
+			after: "[homebrew formulae]\njq\n\n[homebrew formulae --secret TOKEN --after secret]\nowner/private/archiver\nowner/private/fetcher\n",
+		},
+		{
+			name:   "a section holding lines back made, after its kind's own",
+			before: "[homebrew formulae]\njq\n\n[homebrew casks]\nghostty\n",
+			kind:   "brew", entry: config.Entry{Name: "owner/private/fetcher", Hold: "--secret TOKEN"},
+			after: "[homebrew formulae]\njq\n\n[homebrew formulae --secret TOKEN]\nowner/private/fetcher\n\n[homebrew casks]\nghostty\n",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -120,6 +138,12 @@ func TestUndeclare(t *testing.T) {
 	tests := []struct {
 		name, before, kind, entry, after string
 	}{
+		{
+			name:   "from whichever of its kind's sections holds it, which goes once empty",
+			before: "[homebrew formulae]\njq\n\n[homebrew formulae --secret TOKEN]\n# private\nowner/private/fetcher\n\n[homebrew casks]\nghostty\n",
+			kind:   "brew", entry: "owner/private/fetcher",
+			after: "[homebrew formulae]\njq\n\n[homebrew casks]\nghostty\n",
+		},
 		{
 			name:   "with its notes",
 			before: "[homebrew formulae]\nbat\n# why jq\njq\nripgrep\n",

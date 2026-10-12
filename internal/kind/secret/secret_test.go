@@ -134,6 +134,48 @@ func TestSyncPutsEachInPlace(t *testing.T) {
 	}
 }
 
+// A variable's value is read back from ~/.secrets.zsh as a sync wrote it,
+// whatever's in it, and without asking 1Password; one written otherwise
+// isn't guessed at.
+func TestVariableReadsWhatASyncWrote(t *testing.T) {
+	home := t.TempDir()
+	fake := runnertest.New(t)
+	s := secret.New(fake, home)
+	declare(t, s,
+		[2]string{"PLAIN", "Section/plain   # a note"},
+		[2]string{"AWKWARD", "Section/awkward"},
+		[2]string{"~/.config/tool/token", "Section/plain"},
+	)
+	awkward := `it's $HOME, ''a ` + "`date`" + `, a \ and "quotes" # not a note'`
+	fake.On("op", "whoami")
+	fake.On("op", "read", item+"/Section/plain").Prints("plain value\n")
+	fake.On("op", "read", item+"/Section/awkward").Prints(awkward + "\n")
+	if _, err := s.Sync(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	calls := len(fake.Calls())
+	for name, want := range map[string]string{"PLAIN": "plain value", "AWKWARD": awkward} {
+		if got, ok, err := s.Variable(name); err != nil || !ok || got != want {
+			t.Errorf("Variable(%s) = %v, %v: want what the sync wrote", name, ok, err)
+		}
+	}
+	if _, ok, err := s.Variable("MISSING"); ok || err != nil {
+		t.Errorf("Variable(MISSING) = %v, %v; want none", ok, err)
+	}
+	if !s.Has(t.Context(), "AWKWARD") || !s.Has(t.Context(), "~/.config/tool/token") || s.Has(t.Context(), "MISSING") {
+		t.Error("Has() didn't say what's in place")
+	}
+	if len(fake.Calls()) != calls {
+		t.Errorf("reading back ran %q: it never asks 1Password", fake.Calls()[calls:])
+	}
+	if err := os.WriteFile(filepath.Join(home, ".secrets.zsh"), []byte("export PLAIN=unquoted\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.Variable("PLAIN"); err == nil || err.Error() != "~/.secrets.zsh holds PLAIN otherwise than kit writes it: run kit secret sync" {
+		t.Errorf("Variable() of a line kit didn't write = %v", err)
+	}
+}
+
 func TestSyncNeedsOnePasswordToAnswer(t *testing.T) {
 	fake := runnertest.New(t)
 	s := secret.New(fake, t.TempDir())

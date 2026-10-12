@@ -102,6 +102,32 @@ func TestExecRunsInItsOwnEnvironmentAndDirectory(t *testing.T) {
 	}
 }
 
+// A variable a command's context sets is set for that command alone, over
+// the runner's value and the command's own.
+func TestExecSetsTheVariablesItsContextSets(t *testing.T) {
+	r, _ := programs(t, map[string]string{"show": "/usr/bin/env"})
+	r.Env = append(r.Env, "TOKEN=the runner's")
+	ctx := runner.WithSecretEnv(t.Context(), "TOKEN=the context's")
+
+	res, err := r.Run(ctx, runner.Command{Name: "show", Env: []string{"TOKEN=the command's"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tokens []string
+	for line := range strings.Lines(string(res.Stdout)) {
+		if v, ok := strings.CutPrefix(strings.TrimSpace(line), "TOKEN="); ok {
+			tokens = append(tokens, v)
+		}
+	}
+	if !slices.Equal(tokens, []string{"the context's"}) {
+		t.Errorf("TOKEN = %q, want the context's alone", tokens)
+	}
+	res, err = r.Run(t.Context(), runner.Command{Name: "show"})
+	if err != nil || strings.Contains(string(res.Stdout), "the context's") {
+		t.Errorf("a command run outside that context got its variable, or failed: %v", err)
+	}
+}
+
 func TestExecGivesInputAndNothingElse(t *testing.T) {
 	r, _ := programs(t, map[string]string{"echoes": "/bin/cat"})
 

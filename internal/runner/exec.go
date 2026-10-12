@@ -24,7 +24,8 @@ import (
 const waitDelay = 5 * time.Second
 
 // Exec is the runner that runs real programs: each found on Path, kit's own,
-// and run in Env alone, never the environment kit inherited.
+// and run in Env alone, never the environment kit inherited, the command's
+// own variables over it, then those its context sets (WithSecretEnv).
 type Exec struct {
 	Path []string
 	Env  []string
@@ -63,7 +64,7 @@ func (e Exec) Run(ctx context.Context, cmd Command) (Result, error) {
 // start runs program as cmd says, returning what it printed.
 func (e Exec) start(ctx context.Context, program string, cmd Command) (stdout, stderr []byte, err error) {
 	c := exec.CommandContext(ctx, program, cmd.Args...)
-	c.Env = append(slices.Clone(e.Env), cmd.Env...)
+	c.Env = slices.Concat(e.Env, cmd.Env, SecretEnv(ctx))
 	c.Dir = cmd.Dir
 	if cmd.Answer != nil {
 		return converse(ctx, c, cmd)

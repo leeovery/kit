@@ -113,6 +113,11 @@ type sectionDef struct {
 	// item after the header, as in [secrets op://vault/item]: its lines'
 	// references are short for the item's fields, their names unprefixed.
 	items bool
+	// holds is whether the kind, a list, has sections holding their lines
+	// back, what for after the header (its hold): --after a step, or one of
+	// a step's things; --secret a secret they need, as in [homebrew formulae
+	// --secret NAME]. Their names are unprefixed.
+	holds bool
 	// sorted is whether kit keeps the section sorted, each line with its
 	// notes: a list of things or settings. Others keep their order: a
 	// PATH's is the order it's searched in; commands' are as written, a new
@@ -130,14 +135,14 @@ var sectionDefs = []sectionDef{
 	{header: "power settings", kind: "power", form: power, sorted: true},
 	{header: "backup exclusions", kind: "backup-exclusion", form: paths, sorted: true},
 	{header: "spotlight exclusions", kind: "spotlight-exclusion", form: paths, sorted: true},
-	{header: "homebrew formulae", kind: "brew", form: names, sorted: true},
-	{header: "homebrew casks", kind: "cask", form: names, sorted: true},
-	{header: "app store apps", kind: "mas", form: names, sorted: true},
-	{header: "npm packages", kind: "npm", form: names, sorted: true},
-	{header: "composer packages", kind: "composer", form: names, sorted: true},
-	{header: "go tools", kind: "go", form: names, sorted: true},
-	{header: "github extensions", kind: "gh", form: names, sorted: true},
-	{header: "macos login items", kind: "login-item", form: names, sorted: true},
+	{header: "homebrew formulae", kind: "brew", form: names, sorted: true, holds: true},
+	{header: "homebrew casks", kind: "cask", form: names, sorted: true, holds: true},
+	{header: "app store apps", kind: "mas", form: names, sorted: true, holds: true},
+	{header: "npm packages", kind: "npm", form: names, sorted: true, holds: true},
+	{header: "composer packages", kind: "composer", form: names, sorted: true, holds: true},
+	{header: "go tools", kind: "go", form: names, sorted: true, holds: true},
+	{header: "github extensions", kind: "gh", form: names, sorted: true, holds: true},
+	{header: "macos login items", kind: "login-item", form: names, sorted: true, holds: true},
 	{header: "claude mcp", kind: "claude-mcp", form: commands, folders: true},
 	{header: "secrets", kind: "secret", form: secrets, sorted: true, items: true},
 	{header: "prefs files", kind: PrefsFilesKind, form: paths},
@@ -205,6 +210,10 @@ type Entry struct {
 	// Item is the 1Password item whose section it's in, if any, as in
 	// op://vault/item.
 	Item string `json:",omitempty"`
+	// Hold is what its section holds its lines back for, as its header says
+	// after its name, if it does, as kit writes it: --after a step or one of
+	// a step's things, --secret a secret they need (After, Secrets).
+	Hold string `json:",omitempty"`
 	// Line is its line in that file.
 	Line int
 	// Note is the comment after it, saying why it's there, if any.
@@ -227,6 +236,65 @@ func (e Entry) Path() string {
 // laptop/declarations:12.
 func (e Entry) Pos() string {
 	return fmt.Sprintf("%s:%d", e.Path(), e.Line)
+}
+
+// After are what the entry's section has its lines installed after, as its
+// Hold says: steps, or steps' things, as in cask:1password.
+func (e Entry) After() []string { return holdOption(e.Hold, afterOption) }
+
+// Secrets are the secrets the entry's section's lines need, as its Hold
+// says, each by what it fills.
+func (e Entry) Secrets() []string { return holdOption(e.Hold, secretOption) }
+
+// The options of a section holding its lines back.
+const (
+	afterOption  = "--after"
+	secretOption = "--secret"
+)
+
+// holdOption are the values of hold's option flag, in order.
+func holdOption(hold, flag string) []string {
+	words, _ := Words(hold)
+	var values []string
+	for i := 0; i+1 < len(words); i += 2 {
+		if words[i] == flag {
+			values = append(values, words[i+1])
+		}
+	}
+	return values
+}
+
+// readHold reads what a list's section holds its lines back for, its
+// header's options: --after a step, or one of a step's things, as in
+// cask:1password; --secret a secret, by what it fills; each as often as
+// wanted. It returns them as kit writes them, sorted, so sections holding
+// their lines for the same are one.
+func readHold(text string) (string, error) {
+	words, err := Words(text)
+	if err != nil {
+		return "", err
+	}
+	var opts []string
+	for i := 0; i < len(words); i += 2 {
+		flag := words[i]
+		if flag != afterOption && flag != secretOption {
+			return "", fmt.Errorf("%q isn't one of a list section's options: --after and --secret", flag)
+		}
+		if i+1 == len(words) || strings.HasPrefix(words[i+1], "--") {
+			return "", fmt.Errorf("%s needs %s after it", flag, map[string]string{afterOption: "a step's name", secretOption: "a secret's name"}[flag])
+		}
+		value := words[i+1]
+		step, thing, isThing := strings.Cut(value, ":")
+		switch {
+		case flag == afterOption && (step == "" || isThing && thing == ""):
+			return "", fmt.Errorf("--after %s: --after names a step, or one of its things as in cask:1password", value)
+		case flag == secretOption && !secretName.MatchString(value):
+			return "", fmt.Errorf("--secret %s: a secret is named by what it fills: an environment variable's name, or a file's path from ~ or /", value)
+		}
+		opts = append(opts, flag+" "+Quote(value))
+	}
+	slices.Sort(opts)
+	return strings.Join(slices.Compact(opts), " "), nil
 }
 
 // lineName is what a name in a list may be: no spaces, and nothing a
@@ -262,13 +330,22 @@ type declFile struct {
 
 // section is a section of a declarations file: its header, its definition,
 // what follows the header's name, if anything (a project folder, or a
-// 1Password item), and its lines, which start at line start.
+// 1Password item, its arg; or what a list's section holds its lines back
+// for, its hold, as kit writes it), and its lines, which start at line
+// start.
 type section struct {
 	def    sectionDef
 	arg    string
+	hold   string
 	header string
 	start  int
 	body   []string
+}
+
+// name is the section's name, as its lines' entries have it: its header's,
+// then its folder, item or hold.
+func (s *section) name() string {
+	return strings.TrimSpace(s.def.header + " " + s.arg + s.hold)
 }
 
 // String is the file's text.
@@ -285,22 +362,25 @@ func (f *declFile) String() string {
 }
 
 // matchHeader finds the section a header names: a kind's own, or a kind's
-// for a project folder or a 1Password item.
-func matchHeader(text string) (sectionDef, string, bool) {
+// for a project folder or a 1Password item (arg), or with options after its
+// name (opts), as a list's holding its lines back.
+func matchHeader(text string) (d sectionDef, arg, opts string, ok bool) {
 	text = strings.Join(strings.Fields(text), " ")
 	for _, d := range sectionDefs {
 		if text == d.header {
-			return d, "", true
+			return d, "", "", true
 		}
 		rest, ok := strings.CutPrefix(text, d.header+" ")
 		switch {
 		case ok && d.folders && (strings.HasPrefix(rest, "~/") || strings.HasPrefix(rest, "/")):
-			return d, rest, true
+			return d, rest, "", true
 		case ok && d.items && strings.HasPrefix(rest, "op://"):
-			return d, strings.TrimSuffix(rest, "/"), true
+			return d, strings.TrimSuffix(rest, "/"), "", true
+		case ok && strings.HasPrefix(rest, "--"):
+			return d, "", rest, true
 		}
 	}
-	return sectionDef{}, "", false
+	return sectionDef{}, "", "", false
 }
 
 // ItemRef reports whether ref is a 1Password item's reference: "op://", a
@@ -333,17 +413,23 @@ func parseFile(scope, content string) (*declFile, error) {
 			}
 			continue
 		}
-		d, arg, ok := matchHeader(m[1])
+		d, arg, opts, ok := matchHeader(m[1])
 		switch {
 		case !ok:
 			return nil, fmt.Errorf("%s:%d: kit doesn't know the section [%s]", name, i+1, m[1])
 		case d.items && arg != "" && !ItemRef(arg):
 			return nil, fmt.Errorf("%s:%d: [%s]: %q isn't a 1Password item's reference, as in op://vault/item", name, i+1, m[1], arg)
+		case opts != "" && !d.holds:
+			return nil, fmt.Errorf("%s:%d: [%s]: only a list's sections take options, as in [homebrew formulae --after cask:1password]", name, i+1, m[1])
 		}
-		if prev := f.find(d, arg); prev != nil {
+		hold, err := readHold(opts)
+		if err != nil {
+			return nil, fmt.Errorf("%s:%d: [%s]: %w", name, i+1, m[1], err)
+		}
+		if prev := f.find(d, arg, hold); prev != nil {
 			return nil, fmt.Errorf("%s:%d: [%s] is at line %d too", name, i+1, m[1], prev.start)
 		}
-		cur = &section{def: d, arg: arg, header: line, start: i + 1}
+		cur = &section{def: d, arg: arg, hold: hold, header: line, start: i + 1}
 		f.sections = append(f.sections, cur)
 	}
 	seen := map[string]Entry{}
@@ -352,7 +438,8 @@ func parseFile(scope, content string) (*declFile, error) {
 		if err != nil {
 			return nil, err
 		}
-		// A kind's sections for items share their names: one each.
+		// A kind's sections share their names, its items' and those holding
+		// their lines back: one each.
 		for _, e := range entries {
 			key := s.def.kind + "\x00" + e.Name
 			if first, ok := seen[key]; ok {
@@ -364,11 +451,11 @@ func parseFile(scope, content string) (*declFile, error) {
 	return f, nil
 }
 
-// find is the file's section of d, for arg (a project folder, or an item),
-// or nil.
-func (f *declFile) find(d sectionDef, arg string) *section {
+// find is the file's section of d, for arg (a project folder, or an item)
+// and hold, or nil.
+func (f *declFile) find(d sectionDef, arg, hold string) *section {
 	for _, s := range f.sections {
-		if s.def.kind == d.kind && s.arg == arg {
+		if s.def.kind == d.kind && s.arg == arg && s.hold == hold {
 			return s
 		}
 	}
@@ -402,7 +489,7 @@ func (s *section) entries(scope string) ([]Entry, error) {
 
 // entry reads one of the section's entry lines.
 func (s *section) entry(line string) (Entry, error) {
-	e := Entry{Section: strings.TrimSpace(s.def.header + " " + s.arg)}
+	e := Entry{Section: s.name(), Hold: s.hold}
 	if s.def.items {
 		e.Item = s.arg
 	} else {

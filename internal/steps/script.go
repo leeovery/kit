@@ -16,6 +16,7 @@ import (
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/engine"
+	"github.com/leeovery/kit/internal/redact"
 	"github.com/leeovery/kit/internal/runner"
 )
 
@@ -54,22 +55,30 @@ func Template(name, does string) string {
 
 // Script is a step of the user's own, as a [steps] line declares it: what it
 // does, what it's applied after (a step, or one of a step's things, as in
-// cask:1password) and the steps it's applied before, whether applying it
-// needs an administrator's password; and its folder, holding its script and
-// its data.
+// cask:1password) and the steps it's applied before, the secrets it needs,
+// whether applying it needs an administrator's password; and its folder,
+// holding its script and its data.
 type Script struct {
 	Name, Does    string
 	After, Before []string
-	Admin         bool
+	// Secrets are the secrets it needs, each by what it fills.
+	Secrets []string
+	Admin   bool
 	// Folder is its folder in the config repository, as in
 	// laptop/steps/fonts; Dir is the same, a full path.
 	Folder, Dir string
+	// Needed are, once the caller's placed its secrets, a wait for each,
+	// which applying waits for; and Env the environment its script runs in,
+	// read as each command starts: each secret it needs that's a variable,
+	// as in NAME=value.
+	Needed []engine.Wait
+	Env    func() ([]string, error)
 }
 
 // ParseScript reads a [steps] line of the config repository at configDir:
 // what the step does, in quotes, then --after and --before, each with a
 // step's name (--after one of a step's things too, as in cask:1password) and
-// as often as wanted, and --sudo.
+// as often as wanted, --secret with a secret's name as often, and --sudo.
 func ParseScript(configDir string, e config.Entry) (Script, error) {
 	folder := config.StepFolder(e.Scope, e.Name)
 	s := Script{Name: e.Name, Folder: folder, Dir: filepath.Join(configDir, folder)}
@@ -96,10 +105,16 @@ func ParseScript(configDir string, e config.Entry) (Script, error) {
 			} else {
 				s.Before = append(s.Before, name)
 			}
+		case "--secret":
+			if i+1 == len(words) || strings.HasPrefix(words[i+1], "--") {
+				return s, errors.New("--secret needs a secret's name after it")
+			}
+			i++
+			s.Secrets = append(s.Secrets, words[i])
 		case "--needs", "--admin":
 			return s, fmt.Errorf("%s is %s now", w, map[string]string{"--needs": "--after", "--admin": "--sudo"}[w])
 		default:
-			return s, fmt.Errorf("%q isn't one of a step's options: --after, --before and --sudo", w)
+			return s, fmt.Errorf("%q isn't one of a step's options: --after, --before, --secret and --sudo", w)
 		}
 	}
 	return s, nil
@@ -124,9 +139,10 @@ func orderedBy(flag string, words []string, i int) (string, error) {
 // exit 3 that it can't be done yet, as what it needs isn't there, so it's
 // not applied; anything else that the check couldn't tell. Applying is
 // believed only when the check then passes. One that needs an
-// administrator's password waits for admin to hold one. What s is applied
-// after are steps here: one of a step's things is the caller's to make a
-// wait of.
+// administrator's password waits for admin to hold one; one that needs
+// secrets waits for each to be in place, and runs its script with them, a
+// secret's value hidden in whatever it says. What s is applied after are
+// steps here: one of a step's things is the caller's to make a wait of.
 func ScriptStep(run runner.Runner, admin *Admin, s Script) engine.Step {
 	script := filepath.Join(s.Dir, ScriptName)
 	command := func(verb string, timeout time.Duration) runner.Command {
@@ -136,30 +152,51 @@ func ScriptStep(run runner.Runner, admin *Admin, s Script) engine.Step {
 		if err := runnable(script, s.Folder+"/"+ScriptName); err != nil {
 			return failed(err)
 		}
+		ctx, hide, err := s.inEnv(ctx)
+		if err != nil {
+			return failed(err)
+		}
 		res, err := run.Run(ctx, command("check", scriptCheckTimeout))
 		exit, exited := errors.AsType[*runner.ExitError](err)
+		said := hide(firstLine(res.Stdout))
 		switch {
 		case err == nil:
-			return check.Result{State: check.OK, Summary: cmp.Or(firstLine(res.Stdout), "done")}
+			return check.Result{State: check.OK, Summary: cmp.Or(said, "done")}
 		case exited && exit.Code == 1:
-			return check.Result{State: check.Attention, Summary: cmp.Or(firstLine(res.Stdout), "not done"), Items: []check.Item{{
+			return check.Result{State: check.Attention, Summary: cmp.Or(said, "not done"), Items: []check.Item{{
 				ID: s.Name + ":" + s.Name, Name: s.Does, State: Problem, Detail: "kit apply " + s.Name, Action: ActionRun,
 			}}}
 		case exited && exit.Code == notYet:
-			return check.Result{State: check.Deferred, Reason: cmp.Or(firstLine(res.Stdout), "can't be done yet")}
+			return check.Result{State: check.Deferred, Reason: cmp.Or(said, "can't be done yet")}
 		}
-		return check.Result{State: check.Failed, Reason: why(res, err, firstLine(res.Stdout))}
+		return check.Result{State: check.Failed, Reason: hide(why(res, err, firstLine(res.Stdout)))}
 	}
 	return engine.Step{
-		Name: s.Name, Title: s.Name, Area: AreaSteps, After: s.After, Before: s.Before, Admin: s.Admin,
+		Name: s.Name, Title: s.Name, Area: AreaSteps, After: s.After, Before: s.Before, Later: s.Needed, Admin: s.Admin,
 		Check: checks,
 		Apply: func(ctx context.Context, _ check.Result) error {
 			if s.Admin && !admin.ok(ctx) {
 				return errors.New(AdminWait)
 			}
-			res, err := run.Run(ctx, command("apply", scriptApplyTimeout))
+			var missing []string
+			for _, w := range s.Needed {
+				if !engine.Await(ctx, w, "waiting for "+w.Thing) {
+					missing = append(missing, w.Thing)
+				}
+			}
+			switch {
+			case ctx.Err() != nil:
+				return ctx.Err()
+			case len(missing) > 0:
+				return engine.NotYet(engine.NotThere(missing))
+			}
+			applying, hide, err := s.inEnv(ctx)
 			if err != nil {
-				return errors.New(why(res, err, lastLine(res.Stdout)))
+				return err
+			}
+			res, err := run.Run(applying, command("apply", scriptApplyTimeout))
+			if err != nil {
+				return errors.New(hide(why(res, err, lastLine(res.Stdout))))
 			}
 			if after := checks(ctx); after.State != check.OK {
 				return fmt.Errorf("applied, but its check still says: %s", cmp.Or(after.Summary, after.Reason))
@@ -167,6 +204,21 @@ func ScriptStep(run runner.Runner, admin *Admin, s Script) engine.Step {
 			return nil
 		},
 	}
+}
+
+// inEnv is ctx for running s's script with the secrets it needs that are
+// variables set, and what hides their values in what's said of it.
+func (s Script) inEnv(ctx context.Context) (context.Context, func(string) string, error) {
+	if s.Env == nil {
+		return ctx, func(text string) string { return text }, nil
+	}
+	env, err := s.Env()
+	if err != nil {
+		return ctx, nil, err
+	}
+	ctx = runner.WithSecretEnv(ctx, env...)
+	values := runner.SecretValues(ctx)
+	return ctx, func(text string) string { return redact.Text(text, values...) }, nil
 }
 
 // BrokenScript is the step of a [steps] line that doesn't read, as wrong

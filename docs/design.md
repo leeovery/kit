@@ -84,6 +84,18 @@ undeclared for adopting, removing or snoozing, and report both.
   isn't checked at all, and one with something declared is deferred, saying what it needs.
   The kinds whose programs are formulae are applied after the formulae, so a new Mac has
   them first; login items after the casks and App Store apps they open.
+- **A list's lines held back:** a list's section can say, after its header, what its lines
+  wait for, each as often as wanted: `--after` a step, or one of a step's things
+  (`cask:1password`), order alone; `--secret` a secret a secrets section declares (one it
+  doesn't is a config error, failing the kind's step), which they need, and so wait for, as
+  in `[homebrew formulae --secret NAME]`. Applying installs the kind's other lines at once,
+  then each such section's as one command once what it waits for is in, the step saying
+  meanwhile what it's waiting for; a secret that's a variable is set for that command alone,
+  from `~/.secrets.zsh` as kit wrote it, never the environment kit inherited, and its value
+  is hidden in whatever's said of it. A wait ends when the thing's in, when its step has
+  finished without it, or when the run's stopped: without it, the section's lines stay
+  missing, saying what isn't there. Otherwise they're the list's like any other: checked,
+  listed, sorted, removed from whichever section holds them, a section going once empty.
 - **A kind declared in a file of its own** (tmux's plugins, in tmux's config, where the
   plugin manager reads them): kit reads it and edits it in place, through a link to the
   file it leads to. `kit tmux add` and adopting add a plugin's line after the last one (before
@@ -157,23 +169,26 @@ remove check|hourly|nightly|manual <name>` undeclares one.
 **Steps of the user's own** are set-up that's done or not, too particular to be kit's (a tool
 installed by its maker's script, a certificate authority trusted, a key imported). Each is a
 line in a `[steps]` section, in the form of the command that adds it: a name, what it does in
-quotes, then `--after <step>` (applied after that step, if it's there), `--needs <step>` (not
-checked or applied until that step stands ok), each as often as wanted, and `--admin` (applying
-needs an administrator's password, settled before anything is applied), as in `tool "Installs
-the tool, from its maker" --after brew`. Its folder, `<scope>/steps/<name>/` beside its
-declarations file, holds `run`, an executable, and whatever data it uses; which Macs it's for
-is the folder it's in. kit runs `run check` and `run apply` in that folder, in its own
-environment, with nothing on their input. check: exit 0 says it's done, its first line what
-kit shows; 1 that it isn't, so it's an item to run; anything else, or a minute passing, that
-the check couldn't tell. apply, given 15 minutes, runs only when the check says not done, and
-is believed only when the check then passes; when it fails, the last line it printed (standard
-error first) says why. Everything both print is in the run's log. Each is a step of its own in
-the Steps area, its name its title; `kit status` says how each stands, and what isn't done says
-`kit apply`. A line that doesn't read, a `--needs` naming no step here, or an `--after` naming
-neither a step nor a kind, makes its step fail, saying where; a name one of kit's steps has is
-refused. `kit step add <name> "<what it does>"` declares one and writes its `run` from a
-template that follows the contract (its check says "not written yet" until it's written);
-`kit step remove <name>` takes out the line and the folder. kit never undoes what a step did.
+quotes, then `--after <step>` (applied after that step, if it's there, or after one of a step's
+things, as in `cask:1password`), `--before <step>`, `--secret <name>` (a secret a secrets
+section declares: applied once it's in place, its script run with it set when it's a variable,
+its value hidden in what the script says), each as often as wanted, and `--sudo` (applying needs
+an administrator's password, settled before anything is applied), as in `tool "Installs the
+tool, from its maker" --after brew`. Its folder, `<scope>/steps/<name>/` beside its declarations
+file, holds `run`, an executable, and whatever data it uses; which Macs it's for is the folder
+it's in. kit runs `run check` and `run apply` in that folder, in its own environment, with
+nothing on their input. check: exit 0 says it's done, its first line what kit shows; 1 that it
+isn't, so it's an item to run; anything else, or a minute passing, that the check couldn't tell.
+apply, given 15 minutes, runs only when the check says not done, and is believed only when the
+check then passes; when it fails, the last line it printed (standard error first) says why.
+Everything both print is in the run's log. Each is a step of its own in the Steps area, its name
+its title; `kit status` says how each stands, and what isn't done says `kit apply`. A line that
+doesn't read, a `--before` naming no step here, an `--after` naming neither a step nor a kind,
+or a `--secret` no secrets section declares, makes its step fail, saying where; a name one of
+kit's steps has is refused. `kit step add <name> "<what it does>"` declares one and writes its
+`run` from a template that follows the contract (its check says "not written yet" until it's
+written); `kit step remove <name>` takes out the line and the folder. kit never undoes what a
+step did.
 
 **The config repository's own edits** are drift, not a problem: linked files mean edits
 land in the repository outside kit (through a link, by hand, by an app), and kit commits only
@@ -200,11 +215,14 @@ A kind becomes a step whose check compares declared with actual.
 the reason, the rest carry on, and the summary always prints. A check that panics fails its
 step alone.
 
-**The engine** orders steps so each comes after what it needs (a cycle, or a need that isn't
-a step, is refused when the pipeline is built), and starts each, in that order, once what it
-needs is done and one of its jobs (4) is free: independent checks run side by side, and with
-one job they run in order. Applying a step that doesn't stand ok runs its apply, then its
-check again. What a person must do by hand shows as an item while the step needs attention.
+**The engine** orders steps so each comes after what it needs (a cycle, or a need that isn't a
+step, is refused when the pipeline is built), and starts each, in that order, once what it needs
+is done and one of its jobs (4) is free: independent checks run side by side, and with one job
+they run in order. A step waiting for one of another's things, before it's checked or partway
+through applying, gives its job up meanwhile, and the steps that thing's step comes after or
+waits for take it as done, so none waits on it while it waits on them; one of them needing it is
+refused when the pipeline is built. Applying a step that doesn't stand ok runs its apply, then
+its check again. What a person must do by hand shows as an item while the step needs attention.
 A run that's stopped (an interrupt) fails the steps it hadn't started.
 
 ## Commands
@@ -239,7 +257,7 @@ kit secret sync              Read every secret from 1Password, and put each in p
 kit prefs capture|restore|history|pending|start-fresh   Apps' settings, saved to a private repository and restored
 kit check|hourly add <name> -- <command>, kit nightly add <name> -- <command>   Your own checks and jobs
 kit manual add <name> "<what to do>" [-- <command>]; kit manual done <name>...  Steps by hand
-kit step add <name> "<what it does>"; kit step remove <name>...  Steps of your own   [--after] [--needs] [--admin] [--shared]
+kit step add <name> "<what it does>"; kit step remove <name>...  Steps of your own   [--after] [--before] [--secret] [--sudo] [--shared]
 kit version                  As --version
 ```
 

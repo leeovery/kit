@@ -11,6 +11,7 @@ import (
 
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/config"
+	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/runner"
@@ -25,12 +26,16 @@ type fakeKind struct {
 	resolveErr error
 	resolved   [][]string
 	installs   [][]string
+	// envs are the variables set for each install, as its context sets
+	// them.
+	envs       [][]string
 	removes    [][]string
 	installErr error
 }
 
-func (f *fakeKind) Install(_ context.Context, names []string) error {
+func (f *fakeKind) Install(ctx context.Context, names []string) error {
 	f.installs = append(f.installs, names)
+	f.envs = append(f.envs, runner.SecretEnv(ctx))
 	return f.installErr
 }
 
@@ -413,5 +418,85 @@ func TestCompareChangedAndOff(t *testing.T) {
 	}
 	if got.Counts["changed"] != 1 || got.Counts["off"] != 2 {
 		t.Errorf("counts = %v", got.Counts)
+	}
+}
+
+// heldWorld is a kind knowing jq, fetcher and helper, none installed, the
+// last two declared in a section holding them back for TOKEN, which ready
+// says is in place or not; and that section, its variable's value as kit's
+// secrets hold it.
+func heldWorld(ready bool) (*fakeKind, config.List, []kind.Held) {
+	k := knowing("jq", "owner/private/fetcher", "owner/private/helper")
+	list := declared("jq")
+	for _, name := range []string{"owner/private/fetcher", "owner/private/helper"} {
+		list.Entries = append(list.Entries, config.Entry{Name: name, File: "brew", Hold: "--secret TOKEN"})
+	}
+	token := engine.Wait{Step: "secret", Thing: "TOKEN", Ready: func(context.Context) bool { return ready }}
+	held := []kind.Held{{Hold: "--secret TOKEN", Waits: []engine.Wait{token}, Env: func() ([]string, error) { return []string{"TOKEN=plain-words-value"}, nil }}}
+	return k, list, held
+}
+
+// A section of lines held back is installed apart, after the rest, as one
+// install with its variable set, which the rest's isn't.
+func TestHeldLinesInstallApart(t *testing.T) {
+	k, list, held := heldWorld(true)
+	s := kind.Holding(k, list, func() []kind.Held { return held })
+	if err := s.Apply(t.Context(), s.Check(t.Context())); err != nil {
+		t.Fatal(err)
+	}
+	if want := [][]string{{"jq"}, {"owner/private/fetcher", "owner/private/helper"}}; !slices.EqualFunc(k.installs, want, slices.Equal) {
+		t.Errorf("installed %q, want jq, then the section held back, in one go", k.installs)
+	}
+	if len(k.envs) != 2 || k.envs[0] != nil || !slices.Equal(k.envs[1], []string{"TOKEN=plain-words-value"}) {
+		t.Error("the variable wasn't set for the held section's install alone")
+	}
+}
+
+// Lines held back for what never comes aren't installed: they stay
+// missing, saying what isn't there, with nothing to do about them, once
+// applying's tried; the rest install.
+func TestHeldLinesWaitingForWhatNeverComes(t *testing.T) {
+	k, list, held := heldWorld(false)
+	s := kind.Holding(k, list, func() []kind.Held { return held })
+	found := s.Check(t.Context())
+	if got := found.Items; len(got) != 3 || got[0].Action != kind.Install || got[2].Action != kind.Install {
+		t.Fatalf("before applying, items = %+v: want each to install", got)
+	}
+	if err := s.Apply(t.Context(), found); err != nil {
+		t.Fatal(err)
+	}
+	if want := [][]string{{"jq"}}; !slices.EqualFunc(k.installs, want, slices.Equal) {
+		t.Errorf("installed %q, want jq alone", k.installs)
+	}
+	k.installed = []kind.Installed{{Name: "jq", Explicit: true}}
+	got := s.Check(t.Context())
+	want := []check.Item{
+		{ID: "brew:owner/private/fetcher", Name: "owner/private/fetcher", State: kind.Missing, Detail: "needs TOKEN, which isn't there yet"},
+		{ID: "brew:owner/private/helper", Name: "owner/private/helper", State: kind.Missing, Detail: "needs TOKEN, which isn't there yet"},
+	}
+	if !slices.Equal(got.Items, want) {
+		t.Errorf("after applying, items = %+v\nwant %+v", got.Items, want)
+	}
+}
+
+// echoingKind is a fakeKind whose install with a secret set fails, saying
+// the secret's value, as a program might.
+type echoingKind struct{ *fakeKind }
+
+func (e echoingKind) Install(ctx context.Context, names []string) error {
+	_ = e.fakeKind.Install(ctx, names)
+	if values := runner.SecretValues(ctx); len(values) > 0 {
+		return errors.New("fetch failed with " + values[0])
+	}
+	return nil
+}
+
+// An install with a secret set that fails says so without its value.
+func TestAHeldInstallFailingHidesItsSecret(t *testing.T) {
+	k, list, held := heldWorld(true)
+	s := kind.Holding(echoingKind{k}, list, func() []kind.Held { return held })
+	err := s.Apply(t.Context(), s.Check(t.Context()))
+	if err == nil || err.Error() != "couldn't install owner/private/fetcher, owner/private/helper: fetch failed with [redacted]" {
+		t.Errorf("Apply() = %v, want the held install's failure, its secret hidden", err)
 	}
 }

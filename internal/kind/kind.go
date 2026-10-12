@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -17,6 +18,7 @@ import (
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/event"
+	"github.com/leeovery/kit/internal/redact"
 	"github.com/leeovery/kit/internal/runner"
 )
 
@@ -234,36 +236,216 @@ const (
 // the steps named in needs. An install that fails has failed for what's
 // still missing after it, named.
 func Step(k Kind, declared config.List, needs ...string) engine.Step {
+	return Holding(k, declared, nil, needs...)
+}
+
+// Held is a section of a kind's lines held back, as [homebrew formulae
+// --secret NAME] declares them: installed apart from the rest, as one
+// command, once what they wait for has come, in an environment of their
+// own.
+type Held struct {
+	// Hold is what the section holds its lines back for, as its entries
+	// say (config.Entry's Hold).
+	Hold string
+	// Waits are what its lines wait for, one at a time, each among the
+	// step's Later.
+	Waits []engine.Wait
+	// Env is the environment their install runs in, read as it starts: a
+	// variable for each secret they need, as in NAME=value.
+	Env func() ([]string, error)
+}
+
+// Holding is the step Step is, k's lines in the sections held, as the run
+// places them once its steps are known, installed apart (InstallDeclared). A
+// section whose wait ends without what it waited for isn't installed: its
+// lines stay missing, saying what isn't there, as a Blocker's do.
+func Holding(k Kind, declared config.List, held func() []Held, needs ...string) engine.Step {
+	var unmet deferred
 	return engine.Step{
 		Name:  k.Name(),
 		Title: Label(k.Name()),
 		Needs: needs,
-		Check: func(ctx context.Context) check.Result { return Compare(ctx, k, declared) },
+		Check: func(ctx context.Context) check.Result { return unmet.mark(Compare(ctx, k, declared), declared) },
 		Apply: func(ctx context.Context, found check.Result) error {
-			names := toInstall(found)
-			if len(names) == 0 {
-				return nil
+			var sections []Held
+			if held != nil {
+				sections = held()
 			}
-			err := k.Install(counting(ctx, k, names), names)
-			if err == nil {
-				return nil
-			}
-			// An install can fail having installed all it was given: a
-			// formula Homebrew installs but can't link, as another's linked
-			// in its place, is installed. What's still missing is what failed.
-			left := names
-			if again := Compare(event.WithChecking(ctx), k, declared); again.State != check.Failed && again.State != check.Deferred {
-				left = slices.DeleteFunc(toInstall(again), func(name string) bool { return !slices.Contains(names, name) })
-			}
-			switch {
-			case len(left) == 0:
-				return nil
-			case len(left) > 3:
-				return fmt.Errorf("couldn't install %d of %d: %w", len(left), len(names), err)
-			}
-			return fmt.Errorf("couldn't install %s: %w", strings.Join(left, ", "), err)
+			why, err := installApart(ctx, k, declared, sections, toInstall(found))
+			unmet.add(why)
+			return err
 		},
 	}
+}
+
+// InstallDeclared installs names, k's things as declared lists them: those
+// in no section held at once, then each section held's, once what it waits
+// for has come (engine.Await: outside a run, once it's in place), as one
+// command in its own environment. A section whose wait ended without what
+// it waited for isn't installed, saying what isn't there.
+func InstallDeclared(ctx context.Context, k Kind, declared config.List, held []Held, names []string) error {
+	why, err := installApart(ctx, k, declared, held, names)
+	var errs []string
+	if err != nil {
+		errs = append(errs, err.Error())
+	}
+	for _, h := range held {
+		if reason, ok := why[h.Hold]; ok {
+			errs = append(errs, reason)
+		}
+	}
+	if len(errs) > 0 {
+		return errors.New(strings.Join(errs, "; "))
+	}
+	return nil
+}
+
+// installApart installs names as InstallDeclared does, returning why each
+// section held whose wait ended without what it waited for was left, by
+// hold.
+func installApart(ctx context.Context, k Kind, declared config.List, held []Held, names []string) (map[string]string, error) {
+	plain, apart := heldApart(names, declared, held)
+	var errs []string
+	if err := install(ctx, k, declared, plain, nil); err != nil {
+		errs = append(errs, err.Error())
+	}
+	unmet := map[string]string{}
+	for _, h := range held {
+		why, err := installHeld(ctx, k, declared, h, apart[h.Hold])
+		switch {
+		case ctx.Err() != nil:
+			return unmet, ctx.Err()
+		case err != nil:
+			errs = append(errs, err.Error())
+		case why != "":
+			unmet[h.Hold] = why
+		}
+	}
+	if len(errs) > 0 {
+		return unmet, errors.New(strings.Join(errs, "; "))
+	}
+	return unmet, nil
+}
+
+// heldApart splits names, to install, into those in no section held, and
+// those in each section held, by its hold.
+func heldApart(names []string, declared config.List, held []Held) ([]string, map[string][]string) {
+	holds := make(map[string]bool, len(held))
+	for _, h := range held {
+		holds[h.Hold] = true
+	}
+	holdOf := make(map[string]string, len(declared.Entries))
+	for _, e := range declared.Entries {
+		if holds[e.Hold] {
+			holdOf[e.Name] = e.Hold
+		}
+	}
+	var plain []string
+	apart := map[string][]string{}
+	for _, name := range names {
+		if hold := holdOf[name]; hold != "" {
+			apart[hold] = append(apart[hold], name)
+		} else {
+			plain = append(plain, name)
+		}
+	}
+	return plain, apart
+}
+
+// installHeld installs names, the lines of section h, once what it waits
+// for has come, in its environment: when a wait ends without it, they're
+// left, and why says what isn't there.
+func installHeld(ctx context.Context, k Kind, declared config.List, h Held, names []string) (why string, err error) {
+	if len(names) == 0 {
+		return "", nil
+	}
+	var missing []string
+	for _, w := range h.Waits {
+		what := cmp.Or(w.Thing, Label(w.Step))
+		if !engine.Await(ctx, w, fmt.Sprintf("waiting for %s: %d to install", what, len(names))) {
+			missing = append(missing, what)
+		}
+	}
+	if len(missing) > 0 {
+		return engine.NotThere(missing), nil
+	}
+	var env []string
+	if h.Env != nil {
+		if env, err = h.Env(); err != nil {
+			return "", fmt.Errorf("couldn't install %s: %w", strings.Join(names, ", "), err)
+		}
+	}
+	return "", install(ctx, k, declared, names, env)
+}
+
+// install installs names of k, with env set for the install alone: one
+// that fails has failed for what's still missing after it, named, the
+// values env sets hidden.
+func install(ctx context.Context, k Kind, declared config.List, names, env []string) error {
+	if len(names) == 0 {
+		return nil
+	}
+	installing := runner.WithSecretEnv(ctx, env...)
+	err := k.Install(counting(installing, k, names), names)
+	if err == nil {
+		return nil
+	}
+	// An install can fail having installed all it was given: a formula
+	// Homebrew installs but can't link, as another's linked in its place, is
+	// installed. What's still missing is what failed.
+	left := names
+	if again := Compare(event.WithChecking(ctx), k, declared); again.State != check.Failed && again.State != check.Deferred {
+		left = slices.DeleteFunc(toInstall(again), func(name string) bool { return !slices.Contains(names, name) })
+	}
+	switch {
+	case len(left) == 0:
+		return nil
+	case len(left) > 3:
+		err = fmt.Errorf("couldn't install %d of %d: %w", len(left), len(names), err)
+	default:
+		err = fmt.Errorf("couldn't install %s: %w", strings.Join(left, ", "), err)
+	}
+	if values := runner.SecretValues(installing); len(values) > 0 {
+		return errors.New(redact.Text(err.Error(), values...))
+	}
+	return err
+}
+
+// deferred are the sections of a step's lines held back whose waits ended
+// without what they waited for, by hold, each with why.
+type deferred struct {
+	mu  sync.Mutex
+	why map[string]string
+}
+
+// add notes why each section held, by hold, was left.
+func (d *deferred) add(why map[string]string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.why == nil {
+		d.why = map[string]string{}
+	}
+	maps.Copy(d.why, why)
+}
+
+// mark has res's missing items in sections deferred say why, as a kind's
+// Blocked does, with nothing to do about them.
+func (d *deferred) mark(res check.Result, declared config.List) check.Result {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if len(d.why) == 0 {
+		return res
+	}
+	holdOf := make(map[string]string, len(declared.Entries))
+	for _, e := range declared.Entries {
+		holdOf[e.Name] = e.Hold
+	}
+	for i, it := range res.Items {
+		if why, ok := d.why[holdOf[it.Name]]; ok && it.Action == Install && it.State == Missing {
+			res.Items[i].Detail, res.Items[i].Action = why, ""
+		}
+	}
+	return res
 }
 
 // toInstall are the things found that applying installs.
