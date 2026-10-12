@@ -12,7 +12,7 @@ func TestAddAComposerPackageWithAConstraint(t *testing.T) {
 	show := []string{"global", "show", "--direct", "--format=json"}
 	w.fake.On("composer", show...).Prints(`{"installed": []}`).
 		Then().Prints(`{"installed": [{"name": "laravel/valet"}]}`)
-	w.fake.On("composer", "global", "require", "--no-interaction", "laravel/valet:^4.0")
+	w.fake.On("composer", "global", "require", "--no-interaction", "--no-progress", "laravel/valet:^4.0")
 	w.expectSync([]string{"laptop/declarations"}, "kit composer add laravel/valet:^4.0 (laptop): Valet 4")
 
 	out, errOut, code := w.run(t, "composer", "add", "laravel/valet:^4.0", "--note", "Valet 4")

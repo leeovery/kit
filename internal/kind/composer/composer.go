@@ -78,9 +78,10 @@ func (*Composer) Resolve(_ context.Context, names []string) (map[string]string, 
 }
 
 // Install requires names globally, each with the constraint it's declared
-// with.
+// with; without a progress bar, which Composer prints a line a step when
+// it's not at a terminal.
 func (c *Composer) Install(ctx context.Context, names []string) error {
-	_, err := c.global(ctx, installTimeout, slices.Concat([]string{"require", "--no-interaction"}, names)...)
+	_, err := c.global(ctx, installTimeout, slices.Concat([]string{"require", "--no-interaction", "--no-progress"}, names)...)
 	return err
 }
 
@@ -91,6 +92,6 @@ func (c *Composer) Remove(ctx context.Context, names []string) error {
 	for i, name := range names {
 		keys[i] = c.Key(name)
 	}
-	_, err := c.global(ctx, installTimeout, slices.Concat([]string{"remove", "--no-interaction"}, keys)...)
+	_, err := c.global(ctx, installTimeout, slices.Concat([]string{"remove", "--no-interaction", "--no-progress"}, keys)...)
 	return err
 }

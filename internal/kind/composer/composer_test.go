@@ -63,8 +63,8 @@ func TestCompare(t *testing.T) {
 
 func TestInstallAndRemove(t *testing.T) {
 	fake := runnertest.New(t)
-	fake.On("composer", "global", "require", "--no-interaction", "laravel/valet:^4.0", "tightenco/takeout")
-	fake.On("composer", "global", "remove", "--no-interaction", "laravel/valet")
+	fake.On("composer", "global", "require", "--no-interaction", "--no-progress", "laravel/valet:^4.0", "tightenco/takeout")
+	fake.On("composer", "global", "remove", "--no-interaction", "--no-progress", "laravel/valet")
 	c := composer.New(fake)
 	if err := c.Install(t.Context(), []string{"laravel/valet:^4.0", "tightenco/takeout"}); err != nil {
 		t.Fatal(err)
