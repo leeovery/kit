@@ -3,7 +3,10 @@ package cli_test
 import (
 	"slices"
 	"strings"
+	"sync"
 	"testing"
+
+	"github.com/leeovery/kit/internal/ask"
 )
 
 const zoomInfo = `{"formulae": [], "casks": [{"token": "zoom", "full_token": "zoom", "old_tokens": [], "artifacts": [{"pkg": ["zoomusInstallerFull.pkg"]}]}]}`
@@ -140,5 +143,87 @@ func TestApplyAtATerminalAsksForThePasswordUpFront(t *testing.T) {
 		if strings.HasPrefix(c, "brew install") || strings.HasPrefix(c, "brew update") {
 			t.Errorf("ran %q before asking for the password, want nothing applied first", c)
 		}
+	}
+}
+
+// keyboard is a terminal's keys as a test presses them, read while kit
+// listens, the terminal in its raw mode meanwhile.
+type keyboard struct {
+	mu      sync.Mutex
+	keys    chan ask.Key
+	raw     bool
+	started int
+}
+
+func (k *keyboard) listen() (<-chan ask.Key, func()) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	keys := make(chan ask.Key)
+	k.keys, k.raw = keys, true
+	k.started++
+	return keys, sync.OnceFunc(func() {
+		k.mu.Lock()
+		defer k.mu.Unlock()
+		k.raw = false
+		close(keys)
+	})
+}
+
+// state is whether keys are read, the terminal in its raw mode, and how
+// many times they were.
+func (k *keyboard) state() (raw bool, started int) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	return k.raw, k.started
+}
+
+// press presses keys, one at a time: each taken, and what it does done,
+// before the next is, as a key that does nothing follows the last.
+func (k *keyboard) press(t *testing.T, keys ...ask.Key) {
+	k.mu.Lock()
+	ch, raw := k.keys, k.raw
+	k.mu.Unlock()
+	if !raw {
+		t.Error("keys pressed while kit isn't reading them")
+		return
+	}
+	for _, key := range append(keys, ask.Key{Name: "nothing"}) {
+		ch <- key
+	}
+}
+
+// At a terminal big enough for applying's screen, kit reads keys while
+// it's up, in the terminal's raw mode, where ctrl+c is a key, not an
+// interrupt: ctrl+c, or q's Stop, stops the run as the interrupt does, what
+// was still to start not run, and nothing offered after. The terminal's
+// left out of its raw mode.
+func TestApplyStopsFromItsScreen(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		press []ask.Key
+	}{
+		{"ctrl+c", []ask.Key{{Name: "ctrl+c"}}},
+		{"q, Stop", []ask.Key{{Text: "q"}, {Name: "down"}, {Name: "enter"}}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			w := missingWorld(t)
+			w.terminal, w.size = true, [2]int{160, 64}
+			kb := &keyboard{}
+			w.listen = kb.listen
+			w.fake.On("brew", "update", "--quiet")
+			w.fake.On("brew", "install", "--formula", "ripgrep").Does(func() { kb.press(t, tt.press...) }).Exits(1)
+
+			out, errOut, code := w.run(t, "apply")
+			record := out[strings.LastIndex(out, "\n\n  MAC\n")+1:]
+			if code != 1 || !strings.Contains(out, "  stopped · ") || !strings.Contains(record, "  – GitHub extensions  not run\n") || !strings.Contains(record, "→ kit apply carries on from here") {
+				t.Errorf("kit apply, stopped from its screen, exit %d (%s), printed\n%s\nwant the run stopped, GitHub extensions, after the formulae, not run, exit 1", code, errOut, record)
+			}
+			if len(w.asked) > 0 {
+				t.Errorf("kit asked %q after the run was stopped; want nothing offered", w.asked)
+			}
+			if raw, started := kb.state(); raw || started != 1 {
+				t.Errorf("kit read keys %d times, raw at the end: %v; want once, while its screen was up", started, raw)
+			}
+		})
 	}
 }

@@ -20,14 +20,15 @@ import (
 // as if it knew you, as by then it does, till a key. Then the decode again,
 // its noise turning from amber into kit's colours, the wordmark locking in
 // kit's gradient with a white flash; then the wordmark shrinking into the
-// header's place, the header's lines typing in beside it; then the window
-// gives way to the real screen, its header in just that place. A key while
-// it plays skips to the header; ctrl+c stops.
+// header's place, the header's line typing in beside it, as applying's
+// screen has it; then the window gives way to the real screen, its header
+// in just that place. A key while it plays skips to the header; ctrl+c
+// stops.
 type Arrival struct {
-	boot            look.Boot
-	what, mac, when string
-	every           time.Duration
-	keep            bool
+	boot  look.Boot
+	head  headline
+	every time.Duration
+	keep  bool
 
 	mu                        sync.Mutex
 	phase                     arrivalPhase
@@ -51,7 +52,7 @@ const (
 
 // The arrival's timing: the greeting's cursor blinking; the decode, as many
 // frames as the splash's, then held a moment; the wordmark shrinking in
-// steps; the header's lines typing in, a character a beat; then held before
+// steps; the header's line typing in, a character a beat; then held before
 // the real screen.
 const (
 	blinkEvery  = 450 * time.Millisecond
@@ -69,7 +70,7 @@ var flash = lipgloss.Color("#FFFFFF")
 // landing on the header of what runs, on the Mac named mac, at at.
 func NewArrival(dark bool, what, mac string, at time.Time) *Arrival {
 	return &Arrival{
-		boot: look.NewBoot(dark), what: what, mac: mac, when: when(at), every: 38 * time.Millisecond,
+		boot: look.NewBoot(dark), head: headline{what, mac, when(at)}, every: 38 * time.Millisecond,
 		keyed: make(chan struct{}), skip: make(chan struct{}), changed: make(chan struct{}, 1),
 	}
 }
@@ -156,7 +157,7 @@ func (a *Arrival) animate(quit <-chan struct{}) {
 		set(func() { a.phase, a.step = shrinking, s })
 		on = beat(shrinkEvery)
 	}
-	typing := a.typing()
+	typing := a.head.length()
 	for n := 0; on && n <= typing; n++ {
 		set(func() { a.phase, a.typed = landing, n })
 		on = beat(typeEvery)
@@ -171,20 +172,6 @@ func (a *Arrival) animate(quit <-chan struct{}) {
 	}
 	set(func() { a.phase, a.typed, a.landed = landing, typing, true })
 	close(a.changed)
-}
-
-// meta are the header's lines beside the wordmark: what runs, the Mac and
-// when.
-func (a *Arrival) meta() []string { return []string{a.what, a.mac, a.when} }
-
-// typing is how many beats the header's lines take to type in, each a few
-// beats behind the line above.
-func (a *Arrival) typing() int {
-	n := 0
-	for r, m := range a.meta() {
-		n = max(n, r*3+len([]rune(m)))
-	}
-	return n
 }
 
 // Full is the arrival as it stands: the greeting, the decode, the shrink or
@@ -275,19 +262,10 @@ func (a *Arrival) shrink(width, height, step int) []string {
 }
 
 // header is the header the arrival lands on, as the real screen has it: a
-// blank line, then the wordmark, its lines typed in beside it up to typed
-// beats, each a few beats behind the line above.
+// blank line, then the wordmark, its line typed in beside it up to typed
+// characters.
 func (a *Arrival) header(typed int) []string {
-	beside := make([]string, 3)
-	for r, m := range a.meta() {
-		text := []rune(m)
-		text = text[:min(len(text), max(typed-r*3, 0))]
-		beside[r] = look.Muted(string(text))
-		if r == 0 {
-			beside[r] = look.Strong(string(text))
-		}
-	}
-	return append([]string{""}, look.Head(beside...)...)
+	return append([]string{""}, look.Head(a.head.typed(typed))...)
 }
 
 // View is nothing in place: the arrival has the whole window.
@@ -319,7 +297,7 @@ func (a *Arrival) Leaves(int) []string {
 	if !a.keep || !a.landed {
 		return nil
 	}
-	return a.header(a.typing())
+	return a.header(a.head.length())
 }
 
 func (a *Arrival) Changes() <-chan struct{} { return a.changed }

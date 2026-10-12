@@ -596,6 +596,7 @@ func (a *app) face() render.Face {
 		return render.NewPlain(out)
 	}
 	face := render.NewPretty(a.colors(out), a.Width(out), true).Sized(func() (int, int) { return a.Width(out), a.Height(out) })
+	a.unwinds = append(a.unwinds, face.Unwind)
 	if a.underHome {
 		face.UnderHome()
 	}
@@ -603,6 +604,17 @@ func (a *app) face() render.Face {
 		face.ShowTabProgress()
 	}
 	return face
+}
+
+// stoppable is ctx for a run shown on face, stopped too by what applying's
+// screen reads at a terminal, as the terminal's raw mode sends kit ctrl+c as
+// a key, not an interrupt: ctrl+c, and q's Stop.
+func (a *app) stoppable(ctx context.Context, face render.Face) (context.Context, context.CancelFunc) {
+	ctx, stop := context.WithCancel(ctx)
+	if f, ok := face.(*render.Pretty); ok && a.Listen != nil {
+		f.Keys(a.Listen, stop)
+	}
+	return ctx, stop
 }
 
 // childEnv is the environment kit runs programs in, never the one it

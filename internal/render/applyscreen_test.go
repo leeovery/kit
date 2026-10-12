@@ -169,20 +169,22 @@ func (c *clock) set(t time.Time) {
 	c.t = t
 }
 
-// applyAt shows events on a face at a terminal w by h, the run started at
-// at and the clock then at took, and returns the face and what it wrote,
-// once it's had a turn of its spinner to draw them.
-func applyAt(w, h int, took time.Duration, events []event.Event) (*render.Pretty, *syncBuffer) {
+// applyAt shows events on a face at a terminal w by h, reading keys from a
+// keyboard, the run started at at and the clock then at took, and returns
+// the face, what it wrote, once it's had a turn of its spinner to draw
+// them, and the keyboard.
+func applyAt(w, h int, took time.Duration, events []event.Event) (*render.Pretty, *syncBuffer, *keyboard) {
 	var out syncBuffer
 	c := &clock{t: at}
+	kb := &keyboard{}
 	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).
-		Sized(func() (int, int) { return w, h }).Clocked(c.now)
+		Sized(func() (int, int) { return w, h }).Clocked(c.now).Keys(kb.listen, kb.halt)
 	for _, e := range events {
 		face.Emit(e)
 	}
 	c.set(at.Add(took))
 	time.Sleep(300 * time.Millisecond)
-	return face, &out
+	return face, &out, kb
 }
 
 // theRest are events finished, then each step they didn't finish, as end
@@ -244,13 +246,13 @@ func TestApplyingHasAScreenOfItsOwn(t *testing.T) {
 		{"apply-screen-you.golden", "35 of 51 · 1 failed · 2 running · 1 needs you · 12m40s", 12*time.Minute + 40*time.Second, waitingOnYou},
 	} {
 		t.Run(tt.golden, func(t *testing.T) {
-			face, out := applyAt(160, 64, tt.took, tt.events())
+			face, out, _ := applyAt(160, 64, tt.took, tt.events())
 			got := screen(out.String())
 			if err := face.Close(); err != nil {
 				t.Fatal(err)
 			}
 			golden(t, tt.golden, got+"\n")
-			if ls := lines(got); len(ls) != 64 || !strings.HasSuffix(ls[3], "│  "+tt.counts) || ls[63] != "  ctrl+c stop" {
+			if ls := lines(got); len(ls) != 64 || !strings.HasSuffix(ls[3], "│  "+tt.counts) || ls[63] != "  ↑↓ scroll · q stop" {
 				t.Errorf("the screen is %d lines, its counts and keys\n%s\n%s\nwant 64 lines, the counts %q, the keys at the foot", len(ls), ls[3], ls[len(ls)-1], tt.counts)
 			}
 			if !strings.Contains(out.String(), "\x1b[?1049h\x1b[?25l") {
@@ -260,30 +262,27 @@ func TestApplyingHasAScreenOfItsOwn(t *testing.T) {
 	}
 }
 
-// The screen's header is where the arrival leaves its own: a blank line,
-// then the wordmark two cells in, so the hand-over doesn't move it. As the
-// run starts, nothing in the log yet, the keys are at the foot all the same.
+// The screen's header is the one the arrival lands on: a blank line, then
+// the wordmark two cells in, what runs, the Mac and when beside it, so the
+// hand-over moves nothing; the bar and the counts fill in under that line.
+// As the run starts, nothing in the log yet, the keys are at the foot all
+// the same.
 func TestApplyingScreenTakesOverFromTheArrival(t *testing.T) {
-	face, out := applyAt(160, 64, time.Second, sixMinutesIn()[:9])
+	face, out, _ := applyAt(160, 64, time.Second, sixMinutesIn()[:9])
 	got := lines(screen(out.String()))
 	if err := face.Close(); err != nil {
 		t.Fatal(err)
 	}
-	// The wordmark and its rule: two cells in, seventeen, two more and one.
-	wordmark := func(line string) string {
-		r := []rune(line)
-		return string(r[:min(len(r), 22)])
-	}
-	header := lines(stripped(append([]string{""}, look.Head(look.Meta("bootstrap", "laptop", "Fri 2 Jan · 03:04")...)...)))
-	for i, want := range header {
-		if wordmark(got[i]) != wordmark(want) {
-			t.Errorf("line %d of the screen is %q; want the wordmark where the arrival left it, %q", i, got[i], wordmark(want))
+	landed := lines(stripped(render.NewArrival(true, "bootstrap", "laptop", at).HeaderAt(1 << 10)))
+	for i, want := range landed {
+		if !strings.HasPrefix(got[i], want) {
+			t.Errorf("line %d of the screen is %q; want it to start as the arrival left it, %q", i, got[i], want)
 		}
 	}
-	if !strings.HasSuffix(got[1], "│  bootstrap · laptop · Fri 2 Jan · 03:04") {
-		t.Errorf("the screen's first line is %q; want what runs, the Mac and when beside the wordmark", got[1])
+	if got[1] != landed[1] {
+		t.Errorf("the screen's first line is %q; want the arrival's, %q", got[1], landed[1])
 	}
-	if len(got) != 64 || got[63] != "  ctrl+c stop" {
+	if len(got) != 64 || got[63] != "  ↑↓ scroll · q stop" {
 		t.Errorf("as the run starts, the screen is %d lines, the last %q; want 64, the keys at the foot", len(got), got[len(got)-1])
 	}
 }
@@ -313,7 +312,7 @@ func TestApplyingLogsSlots(t *testing.T) {
 	start("e", "f", "g")
 	events = append(events, event.StepStarted{Step: "h", Doing: "applying"})
 	finish("d", check.OK)
-	face, out := applyAt(160, 64, time.Second, events)
+	face, out, _ := applyAt(160, 64, time.Second, events)
 	got := screen(out.String())
 	if err := face.Close(); err != nil {
 		t.Fatal(err)
@@ -350,7 +349,7 @@ func TestApplyingScreenNeedsTheRoom(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	face, out := applyAt(99, 40, 6*time.Minute+12*time.Second, sixMinutesIn())
+	face, out, _ := applyAt(99, 40, 6*time.Minute+12*time.Second, sixMinutesIn())
 	got := screen(out.String())
 	if err := face.Close(); err != nil {
 		t.Fatal(err)
@@ -369,13 +368,14 @@ func TestApplyingLeavesItsRecord(t *testing.T) {
 		events func() []event.Event
 	}{{"apply-record.golden", appliedRun}, {"apply-record-stopped.golden", stoppedRun}} {
 		t.Run(tt.golden, func(t *testing.T) {
-			face, out := applyAt(160, 64, time.Minute, tt.events())
+			face, out, kb := applyAt(160, 64, time.Minute, tt.events())
+			ended := kb.isRaw()
 			if err := face.Close(); err != nil {
 				t.Fatal(err)
 			}
 			raw := out.String()
-			if after := raw[strings.LastIndex(raw, "\x1b[?1049h"):]; !strings.Contains(after, "\x1b[?1049l") || !strings.Contains(after, "\x1b[?25h") {
-				t.Errorf("after the screen, the face wrote %q; want the terminal's own screen back, the cursor shown", after)
+			if after := raw[strings.LastIndex(raw, "\x1b[?1049h"):]; !strings.Contains(after, "\x1b[?1049l") || !strings.Contains(after, "\x1b[?25h") || ended || kb.listens() != 1 {
+				t.Errorf("after the screen, the face wrote %q, raw: %v; want the terminal's own screen back, the cursor shown, and the keys it read while it was up no longer read", after, ended)
 			}
 			got := screen(raw)
 			golden(t, tt.golden, got+"\n")
@@ -389,19 +389,21 @@ func TestApplyingLeavesItsRecord(t *testing.T) {
 }
 
 // However applying's screen is left, the terminal's own screen comes back,
-// the cursor shown: for a question asked mid-run, and back after it; when
-// the window's made too small for it, the run drawn in place, and taken
-// again when it's big enough; when the face closes without the run
-// finishing.
+// the cursor shown, and its keys stop being read, the terminal out of its
+// raw mode, as the question needs it: for a question asked mid-run, and
+// back after it; when the window's made too small for it, the run drawn in
+// place, and taken again when it's big enough; when the face closes
+// without the run finishing.
 func TestApplyingGivesTheScreenBack(t *testing.T) {
 	var out syncBuffer
 	var mu sync.Mutex
 	width := 160
+	kb := &keyboard{}
 	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).Sized(func() (int, int) {
 		mu.Lock()
 		defer mu.Unlock()
 		return width, 64
-	})
+	}).Keys(kb.listen, kb.halt)
 	resize := func(w int) {
 		mu.Lock()
 		width = w
@@ -411,31 +413,38 @@ func TestApplyingGivesTheScreenBack(t *testing.T) {
 	for _, e := range sixMinutesIn() {
 		face.Emit(e)
 	}
+	time.Sleep(300 * time.Millisecond)
 	onScreen := func() bool { return strings.Contains(screen(out.String()), "BOOT     ● GitHub") }
+	if !onScreen() || !kb.isRaw() {
+		t.Error("with its screen up, applying isn't reading keys, the terminal in its raw mode")
+	}
 	cursorShown := func() bool {
 		raw := out.String()
 		return strings.LastIndex(raw, "\x1b[?25h") > strings.LastIndex(raw, "\x1b[?25l")
 	}
 	back := face.StepAside()
-	if onScreen() || !cursorShown() {
-		t.Errorf("stepping aside for a question, the face left\n%s\nwant the terminal's own screen, the cursor shown", screen(out.String()))
+	if onScreen() || !cursorShown() || kb.isRaw() {
+		t.Errorf("stepping aside for a question, the face left\n%s\nraw: %v; want the terminal's own screen, the cursor shown, not raw", screen(out.String()), kb.isRaw())
 	}
 	back()
-	if !onScreen() {
-		t.Error("back from the question, the face didn't take its screen again")
+	if !onScreen() || !kb.isRaw() {
+		t.Error("back from the question, the face didn't take its screen and its keys again")
 	}
 	resize(99)
-	if got := screen(out.String()); onScreen() || !strings.Contains(got, "◐ Homebrew formulae  applying") {
-		t.Errorf("made too small, the window shows\n%s\nwant the run in place on the terminal's own screen", got)
+	if got := screen(out.String()); onScreen() || kb.isRaw() || !strings.Contains(got, "◐ Homebrew formulae  applying") {
+		t.Errorf("made too small, the window shows\n%s\nraw: %v; want the run in place on the terminal's own screen, not raw", got, kb.isRaw())
 	}
 	resize(160)
-	if !onScreen() {
-		t.Errorf("made big enough again, the window shows\n%s\nwant the screen taken again", screen(out.String()))
+	if !onScreen() || !kb.isRaw() {
+		t.Errorf("made big enough again, the window shows\n%s\nwant the screen and its keys taken again", screen(out.String()))
 	}
 	if err := face.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if onScreen() || !cursorShown() {
-		t.Errorf("closed mid-run, the face left\n%s\nwant the terminal's own screen, the cursor shown", screen(out.String()))
+	if onScreen() || !cursorShown() || kb.isRaw() {
+		t.Errorf("closed mid-run, the face left\n%s\nraw: %v; want the terminal's own screen, the cursor shown, not raw", screen(out.String()), kb.isRaw())
+	}
+	if n := kb.listens(); n != 3 {
+		t.Errorf("the face read keys %d times; want once each time its screen went up, 3", n)
 	}
 }

@@ -79,6 +79,15 @@ func show(ctx context.Context, t Terminal, m model) error {
 	defer d.write(pasteOff + showCursor)
 	full, _ := m.(fuller)
 	alt := false
+	// The whole screen, taken, is given back however showing ends, a panic
+	// included.
+	leave := func() {
+		if alt {
+			d.write(altOff)
+			alt = false
+		}
+	}
+	defer leave()
 	draw := func() {
 		w, h := t.size()
 		if _, isLive := m.(live); isLive {
@@ -93,17 +102,12 @@ func show(ctx context.Context, t Terminal, m model) error {
 				d.write(syncStart + "\x1b[H" + strings.Join(lines, "\x1b[K\r\n") + "\x1b[K\x1b[J" + syncEnd)
 				return
 			}
-			if alt {
-				d.write(altOff)
-				alt = false
-			}
+			leave()
 		}
 		d.draw(m.view(w, h))
 	}
 	end := func() {
-		if alt {
-			d.write(altOff)
-		}
+		leave()
 		d.clear()
 		w, _ := t.size()
 		if _, isLive := m.(live); isLive {
@@ -119,6 +123,7 @@ func show(ctx context.Context, t Terminal, m model) error {
 	for {
 		select {
 		case <-ctx.Done():
+			leave()
 			d.clear()
 			return ctx.Err()
 		case <-resized:
@@ -131,6 +136,7 @@ func show(ctx context.Context, t Terminal, m model) error {
 			draw()
 		case k, ok := <-keys:
 			if !ok {
+				leave()
 				d.clear()
 				return io.ErrUnexpectedEOF
 			}

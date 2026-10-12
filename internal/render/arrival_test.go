@@ -86,7 +86,8 @@ func TestArrivalShrinksIntoTheHeader(t *testing.T) {
 }
 
 // Played through, a key skipping to the end, the arrival lands on the
-// header, as the real screen has it, and leaves it in the window when it
+// header, as applying's screen has it, one line beside the wordmark: what
+// runs bold, the Mac and when muted; and leaves it in the window when it
 // keeps it.
 func TestArrivalLands(t *testing.T) {
 	in, keys := io.Pipe()
@@ -108,12 +109,12 @@ func TestArrivalLands(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("it didn't land")
 	}
-	header := append([]string{""}, look.Head(look.Meta("bootstrap", "laptop", "Fri 2 Jan · 03:04")...)...)
-	if !a.Landed() || stripped(a.Leaves(120)) != stripped(header) {
+	header := append([]string{""}, look.Head(look.Says(look.Strong("bootstrap"), look.Muted("laptop"), look.Muted("Fri 2 Jan · 03:04")))...)
+	if !a.Landed() || strings.Join(a.Leaves(120), "\n") != strings.Join(header, "\n") {
 		t.Errorf("it leaves\n%s\nwant the header\n%s", stripped(a.Leaves(120)), stripped(header))
 	}
 	_, after, ok := strings.Cut(out.String(), "\x1b[?1049l")
-	if !ok || !strings.Contains(ansi.Strip(after), "│  bootstrap\r\n") {
+	if !ok || !strings.Contains(ansi.Strip(after), "│  bootstrap · laptop · Fri 2 Jan · 03:04\r\n") {
 		t.Errorf("after the window's own screen came back, it wrote %q: want the header", after)
 	}
 	if !render.NewArrival(true, "bootstrap", "laptop", at).Landed() {
@@ -127,5 +128,20 @@ func TestArrivalLeavesNothingUnlessKept(t *testing.T) {
 	a := render.NewArrival(true, "splash", "laptop", at)
 	if a.Leaves(120) != nil || a.View(120, 30) != nil {
 		t.Error("it drew something in place")
+	}
+}
+
+// The header's line types in a character at a time, from what runs to
+// when, on the wordmark's first line alone.
+func TestArrivalTypesTheHeadersLine(t *testing.T) {
+	a := render.NewArrival(true, "bootstrap", "laptop", at)
+	for _, tt := range []struct {
+		typed int
+		want  string
+	}{{0, "│"}, {4, "│  boot"}, {14, "│  bootstrap · la"}, {99, "│  bootstrap · laptop · Fri 2 Jan · 03:04"}} {
+		got := strings.Split(stripped(a.HeaderAt(tt.typed)), "\n")
+		if !strings.HasSuffix(got[1], tt.want) || !strings.HasSuffix(got[2], "│") || !strings.HasSuffix(got[3], "│") {
+			t.Errorf("typed %d, the header is\n%s\nwant its first line to end %q, nothing beside the rest", tt.typed, strings.Join(got, "\n"), tt.want)
+		}
 	}
 }

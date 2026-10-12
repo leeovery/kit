@@ -62,6 +62,10 @@ type Deps struct {
 	// Pick shows a list at the terminal, in place, under head, to pick a line
 	// from, as ask.Pick does: the line's value, or ask.ErrCancelled.
 	Pick func(ctx context.Context, head []string, lines []ask.Line, keys []look.Key) (string, error)
+	// Listen reads keys at the terminal as they're pressed, in its raw mode,
+	// for applying's screen, as ask.Listen does: they come till stop puts
+	// the terminal back. Without it, applying's screen reads none.
+	Listen func() (keys <-chan ask.Key, stop func())
 	// Become has kit become kit run with args, as if it had been run so at
 	// the terminal: it replaces this process, and returns only when it
 	// can't.
@@ -115,6 +119,9 @@ type app struct {
 	// underHome is whether kit runs from its home's menu, under the home's
 	// wordmark: its own heading leaves the wordmark out.
 	underHome bool
+	// unwinds put back what the faces kit shows have taken of the
+	// terminal, should kit panic.
+	unwinds []func()
 }
 
 // NewRootCommand builds the kit command tree. A command is known by the
@@ -166,10 +173,15 @@ status is the report, every check.`,
 
 // Execute runs root with args in ctx, shows what went wrong, if anything,
 // and returns the status to exit with: 0, attentionStatus, or failedStatus.
+// Should kit panic, the terminal is put back before the panic shows.
 func Execute(ctx context.Context, root *cobra.Command, args []string) int {
 	root.SetArgs(args)
+	e, ok := root.ErrOrStderr().(*errOut)
+	if ok {
+		defer e.a.unwind()
+	}
 	// In kit's look, what went wrong says what to run instead of a usage.
-	if e, ok := root.ErrOrStderr().(*errOut); ok && e.a.Terminal(e.Writer) && !slices.ContainsFunc(args, func(arg string) bool {
+	if ok && e.a.Terminal(e.Writer) && !slices.ContainsFunc(args, func(arg string) bool {
 		return arg == "--plain" || strings.HasPrefix(arg, "--json")
 	}) {
 		root.SilenceUsage = true
@@ -180,7 +192,7 @@ func Execute(ctx context.Context, root *cobra.Command, args []string) int {
 	}
 	a, isAttention := errors.AsType[attention](err)
 	if !isAttention || a.message != "" {
-		if e, ok := root.ErrOrStderr().(*errOut); ok {
+		if ok {
 			e.show(cmd, args, err, isAttention)
 		} else {
 			_, _ = fmt.Fprintf(root.ErrOrStderr(), "kit: %v\n", err)
@@ -192,6 +204,21 @@ func Execute(ctx context.Context, root *cobra.Command, args []string) int {
 		return attentionStatus
 	}
 	return failedStatus
+}
+
+// unwind, deferred at kit's top, has a panic put the terminal back as the
+// faces kit showed found it (applying's screen takes the terminal's
+// alternate screen, its raw mode and the cursor), then panic on, for the
+// panic to show as it would have.
+func (a *app) unwind() {
+	p := recover()
+	if p == nil {
+		return
+	}
+	for _, unwind := range a.unwinds {
+		unwind()
+	}
+	panic(p)
 }
 
 // dirs locates kit's directories.
@@ -261,6 +288,9 @@ func Real(version string) Deps {
 		},
 		Pick: func(ctx context.Context, head []string, lines []ask.Line, keys []look.Key) (string, error) {
 			return ask.Pick(ctx, terminal(), head, lines, keys)
+		},
+		Listen: func() (<-chan ask.Key, func()) {
+			return ask.Listen(terminal())
 		},
 		Become: func(args []string) error {
 			self, err := os.Executable()

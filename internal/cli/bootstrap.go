@@ -266,6 +266,8 @@ func (a *app) inTerminal(ctx context.Context, b *boot.Boot, fresh bool) error {
 	if err != nil {
 		return err
 	}
+	ctx, halt := a.stoppable(ctx, r.face)
+	defer halt()
 	b.Run, b.Sink, b.Ask = r.run, r.sink, &plainAsker{}
 	if err := r.lead(b.Booted()); err != nil {
 		_ = r.close()

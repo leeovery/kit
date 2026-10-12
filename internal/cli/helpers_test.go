@@ -2,6 +2,7 @@ package cli_test
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"io"
@@ -53,8 +54,12 @@ type world struct {
 	// path and childEnv are what kit last made its runner with.
 	path     []string
 	childEnv []string
-	// terminal is whether kit's output is a terminal.
+	// terminal is whether kit's output is a terminal, size its columns and
+	// lines (80 by 40 unless set), and listen reads its keys, for
+	// applying's screen.
 	terminal bool
+	size     [2]int
+	listen   func() (<-chan ask.Key, func())
 	// choose answers kit's questions at a terminal; asked notes each.
 	choose func(question string, options []string) (int, error)
 	asked  []string
@@ -112,8 +117,9 @@ func (w *world) run(t *testing.T, args ...string) (stdout, stderr string, status
 		Stdout:   &out,
 		Stderr:   &errOut,
 		Terminal: func(io.Writer) bool { return w.terminal },
-		Width:    func(io.Writer) int { return 80 },
-		Height:   func(io.Writer) int { return 40 },
+		Width:    func(io.Writer) int { return cmp.Or(w.size[0], 80) },
+		Height:   func(io.Writer) int { return cmp.Or(w.size[1], 40) },
+		Listen:   w.listen,
 		Runner: func(path, env []string) runner.Runner {
 			w.path, w.childEnv = path, env
 			return w.fake

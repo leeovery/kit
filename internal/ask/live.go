@@ -1,6 +1,9 @@
 package ask
 
-import "context"
+import (
+	"context"
+	"sync"
+)
 
 // Screen is something shown in place while work goes on, as the boot is:
 // its lines at the terminal's whole size, never more than its lines, and
@@ -40,6 +43,44 @@ func (k Key) Is(names ...string) bool {
 // what it leaves is written in their place.
 func Live(ctx context.Context, t Terminal, s Screen) error {
 	return show(ctx, t, live{s})
+}
+
+// Listen reads keys at t as they're pressed, for what's drawn by something
+// else meanwhile, as applying's screen is: in the terminal's raw mode, when
+// In is one, so they aren't echoed, come one at a time, and ctrl+c comes as
+// a key, not an interrupt. They come on keys till stop, which stops
+// reading, a read waiting for a key cancelled, and puts the terminal back
+// as it was.
+func Listen(t Terminal) (keys <-chan Key, stop func()) {
+	restore := t.raw()
+	read, stopReading := t.keys()
+	out, done := make(chan Key), make(chan struct{})
+	go func() {
+		defer close(out)
+		for {
+			select {
+			case <-done:
+				return
+			case k, ok := <-read:
+				if !ok {
+					return
+				}
+				select {
+				case out <- Key{Name: k.name, Text: k.text, Paste: k.paste}:
+				case <-done:
+					return
+				}
+			}
+		}
+	}()
+	var once sync.Once
+	return out, func() {
+		once.Do(func() {
+			close(done)
+			stopReading()
+			restore()
+		})
+	}
 }
 
 // live is a screen, as show takes a model.

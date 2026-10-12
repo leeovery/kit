@@ -40,9 +40,11 @@ and 2 when kit couldn't apply.`,
 			if err != nil {
 				return err
 			}
+			ctx, halt := a.stoppable(cmd.Context(), r.face)
+			defer halt()
 			var report engine.Report
 			if plan {
-				report, err = r.pipeline.Check(cmd.Context(), r.sink, r.options(a, args))
+				report, err = r.pipeline.Check(ctx, r.sink, r.options(a, args))
 			} else {
 				// The heading shows at once, with the run's lights, and what kit's
 				// doing while it works out what will need an administrator's
@@ -51,9 +53,9 @@ and 2 when kit couldn't apply.`,
 					steps, _ := r.pipeline.Planned(r.options(a, args))
 					r.sink.Emit(event.Preparing{Time: r.now, Command: command, Machine: r.machine, Doing: "checking what will need an administrator's password", Steps: steps})
 				}
-				wanted := toInstall(cmd.Context(), r, args)
-				_, stop := a.holdAdmin(cmd.Context(), r, wanted)
-				report, err = r.pipeline.Apply(cmd.Context(), r.sink, r.options(a, args))
+				wanted := toInstall(ctx, r, args)
+				_, stop := a.holdAdmin(ctx, r, wanted)
+				report, err = r.pipeline.Apply(ctx, r.sink, r.options(a, args))
 				stop()
 			}
 			if err == nil {
@@ -65,8 +67,9 @@ and 2 when kit couldn't apply.`,
 			if err != nil {
 				return err
 			}
-			if decide, missing := needs(report); !plan && a.pretty(a.Stdout) && len(decide) > len(missing) {
-				if err := a.reconcileNow(cmd.Context()); err != nil {
+			// A run stopped offers nothing more.
+			if decide, missing := needs(report); !plan && ctx.Err() == nil && a.pretty(a.Stdout) && len(decide) > len(missing) {
+				if err := a.reconcileNow(ctx); err != nil {
 					return err
 				}
 			}

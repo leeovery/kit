@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/x/ansi"
 
@@ -268,4 +269,72 @@ func TestLive(t *testing.T) {
 			t.Errorf("drew %q; want it to hold %q", got, want)
 		}
 	}
+}
+
+// Keys read for something drawn by another, as they're pressed: what the
+// terminal sends, as keys, ctrl+c among them, till stop, which ends them
+// and can be called again.
+func TestListen(t *testing.T) {
+	in, typing := io.Pipe()
+	defer func() { _ = typing.Close() }()
+	keys, stop := Listen(Terminal{In: in})
+	go func() { _, _ = typing.Write([]byte("q\x03\x1b[A")) }()
+	var got []Key
+	for range 3 {
+		got = append(got, <-keys)
+	}
+	if want := []Key{{Text: "q"}, {Name: "ctrl+c"}, {Name: "up"}}; !slices.Equal(got, want) {
+		t.Errorf("Listen gave %+v, want %+v", got, want)
+	}
+	stop()
+	stop()
+	if k, ok := <-keys; ok {
+		t.Errorf("after stop, Listen gave %+v; want its keys ended", k)
+	}
+}
+
+// fullScreen is a screen that takes the whole of the terminal.
+type fullScreen struct{ screen }
+
+func (s *fullScreen) Full(int, int) []string { return s.line("whole") }
+
+// A screen that took the whole of the terminal gives it back however it
+// ends: stopped, as well as ended.
+func TestLiveGivesTheWholeScreenBack(t *testing.T) {
+	in, keys := io.Pipe()
+	defer func() { _ = keys.Close() }()
+	var out syncBuffer
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error)
+	go func() {
+		done <- Live(ctx, Terminal{In: in, Out: &out, Size: func() (int, int) { return 80, 24 }}, &fullScreen{screen{changed: make(chan struct{})}})
+	}()
+	for !strings.Contains(out.String(), altOn) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	if err := <-done; err == nil {
+		t.Error("stopped, Live returned no error")
+	}
+	if s := out.String(); strings.LastIndex(s, altOff) < strings.LastIndex(s, altOn) {
+		t.Errorf("stopped, Live left %q; want the terminal's own screen back", s)
+	}
+}
+
+// syncBuffer is a buffer written by one goroutine as another reads it.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }

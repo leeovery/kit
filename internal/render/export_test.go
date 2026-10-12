@@ -6,6 +6,10 @@ import "time"
 // without waiting for it.
 func (a *Arrival) DecodeAt(width, height, frame int) []string { return a.decode(width, height, frame) }
 
+// HeaderAt is the header the arrival lands on, its line typed to typed
+// characters.
+func (a *Arrival) HeaderAt(typed int) []string { return a.header(typed) }
+
 // ShrinkAt is the arrival's shrink at step.
 func (a *Arrival) ShrinkAt(width, height, step int) []string { return a.shrink(width, height, step) }
 

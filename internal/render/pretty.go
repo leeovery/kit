@@ -131,9 +131,11 @@ type Pretty struct {
 	finished map[string]int
 	cut      map[string]bool
 	// onScreen is whether applying has the terminal's alternate screen, and
-	// drawnSize the size it was last drawn at.
+	// drawnSize the size it was last drawn at; keys are the keys it reads
+	// while it has it, and what they've done.
 	onScreen  bool
 	drawnSize [2]int
+	keys      screenKeys
 	// out is what's being written, sent to the terminal whole at the end of
 	// an event or a turn of the spinner, for the terminal to show at once.
 	out     strings.Builder
@@ -801,10 +803,10 @@ func (p *Pretty) Close() error {
 // as it then stands, and what the face held meanwhile.
 func (p *Pretty) StepAside() (back func()) {
 	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.stopSpinner()
 	p.flush()
 	p.aside = true
-	p.mu.Unlock()
 	return func() {
 		p.mu.Lock()
 		defer p.mu.Unlock()
