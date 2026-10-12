@@ -11,10 +11,12 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/engine"
+	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/runner"
 )
 
@@ -200,6 +202,17 @@ type Found struct {
 	Label string
 }
 
+// Counter is a kind that can tell, in a line its install command printed,
+// that one of the things it was asked to install is installed: the step
+// counts them as they're done, saying which it's installing next and how
+// far it's got. Its Install gives its install command's lines to
+// Lines(ctx).
+type Counter interface {
+	// Done is which of names line says is installed: none when it says
+	// nothing of them, as of a dependency pulled in.
+	Done(line string, names []string) (string, bool)
+}
+
 // Install is the action that installs an item.
 const Install = "install"
 
@@ -231,7 +244,7 @@ func Step(k Kind, declared config.List, needs ...string) engine.Step {
 			if len(names) == 0 {
 				return nil
 			}
-			err := k.Install(ctx, names)
+			err := k.Install(counting(ctx, k, names), names)
 			if err == nil {
 				return nil
 			}
@@ -262,6 +275,45 @@ func toInstall(found check.Result) []string {
 		}
 	}
 	return names
+}
+
+type linesKey struct{}
+
+// Lines is what an install command's lines go to, as runner.Command's Lines,
+// in ctx: nil when nothing counts them.
+func Lines(ctx context.Context) func(line string) {
+	lines, _ := ctx.Value(linesKey{}).(func(string))
+	return lines
+}
+
+// counting is ctx for installing names, when k is a Counter: as each is
+// done, by the lines its install prints, the step says it's installing the
+// next, and how many of names are done.
+func counting(ctx context.Context, k Kind, names []string) context.Context {
+	c, ok := k.(Counter)
+	if !ok {
+		return ctx
+	}
+	var mu sync.Mutex
+	done := make(map[string]bool, len(names))
+	say := func() {
+		next := ""
+		if i := slices.IndexFunc(names, func(name string) bool { return !done[name] }); i >= 0 {
+			next = " " + names[i]
+		}
+		event.Say(ctx, event.Doing{Says: "installing" + next, Done: len(done), Of: len(names)})
+	}
+	say()
+	return context.WithValue(ctx, linesKey{}, func(line string) {
+		name, ok := c.Done(line, names)
+		mu.Lock()
+		defer mu.Unlock()
+		if !ok || done[name] || !slices.Contains(names, name) {
+			return
+		}
+		done[name] = true
+		say()
+	})
 }
 
 // UnattendedApply is k's step's apply as the scheduled run takes it:

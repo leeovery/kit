@@ -87,7 +87,9 @@ func sixMinutesIn() []event.Event {
 		events = append(events, fine(boot.AreaBooted, title, "fine"))
 	}
 	events = append(events, applyingStep("Drift", "Homebrew formulae", "brew install --formula ffmpeg", numbered("Pouring formula", 16)...)...)
+	events = append(events, event.Doing{Step: stepName("Drift", "Homebrew formulae"), Says: "installing ffmpeg", Done: 38, Of: 129})
 	events = append(events, applyingStep("Drift", "Homebrew casks", "brew install --cask 1password", numbered("Installing Cask", 10)...)...)
+	events = append(events, event.Doing{Step: stepName("Drift", "Homebrew casks"), Says: "installing 1password", Done: 4, Of: 42})
 	events = append(events, applyingStep("Steps", "claude-code", "run apply", "Setting up Claude Code...", "Checking installation status...", "Downloading 2.1.296 for darwin-arm64", "Verifying checksum")...)
 	events = append(events, applyingStep("Steps", "fonts", "run apply", numbered("copied font", 9)...)...)
 	return append(events,
@@ -357,6 +359,36 @@ func TestApplyingScreenNeedsTheRoom(t *testing.T) {
 	golden(t, "apply-small.golden", got+"\n")
 }
 
+// A step that counts what it's doing says how far it's got after what it's
+// doing, in its slot's row, and, cut off by the run stopping, in its row in
+// the record; a step that doesn't count says what it did before.
+func TestApplyingSaysHowFarAStepHasGot(t *testing.T) {
+	for _, tt := range []struct {
+		events func() []event.Event
+		want   []string
+	}{
+		{sixMinutesIn, []string{
+			"  ◐ Homebrew formulae  installing ffmpeg · 38 of 129 · brew install --formula ffmpeg\n",
+			"  ◐ claude-code  applying · run apply\n",
+		}},
+		{stoppedRun, []string{
+			"  – Homebrew formulae  stopped · 38 of 129\n",
+			"  – App settings  stopped\n",
+		}},
+	} {
+		face, out, _ := applyAt(160, 64, time.Minute, tt.events())
+		got := screen(out.String())
+		if err := face.Close(); err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range tt.want {
+			if !strings.Contains(got, want) {
+				t.Errorf("the face shows\n%s\nwant a row %q", got, want)
+			}
+		}
+	}
+}
+
 // When the run ends, the screen goes and the record is left under the
 // run's heading, kept to column 80: the lights, the bar with how the run
 // ended, then every step, what needs you with what to do under it. A run
@@ -431,7 +463,7 @@ func TestApplyingGivesTheScreenBack(t *testing.T) {
 		t.Error("back from the question, the face didn't take its screen and its keys again")
 	}
 	resize(99)
-	if got := screen(out.String()); onScreen() || kb.isRaw() || !strings.Contains(got, "◐ Homebrew formulae  applying") {
+	if got := screen(out.String()); onScreen() || kb.isRaw() || !strings.Contains(got, "◐ Homebrew formulae  installing ffmpeg") {
 		t.Errorf("made too small, the window shows\n%s\nraw: %v; want the run in place on the terminal's own screen, not raw", got, kb.isRaw())
 	}
 	resize(160)

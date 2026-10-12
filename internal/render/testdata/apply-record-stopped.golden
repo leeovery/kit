@@ -31,7 +31,7 @@
   ● Touch ID for sudo  turned on
   ● Remote Login  turned on
   ● File Sharing  turned on
-  – Homebrew formulae  stopped
+  – Homebrew formulae  stopped · 38 of 129
   ✗ Homebrew casks  couldn't install tailscale-app · brew install --cask tailsc…
   │ ==> Installing Cask 6
   │ ==> Installing Cask 7

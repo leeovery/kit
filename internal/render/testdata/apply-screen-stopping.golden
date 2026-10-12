@@ -16,7 +16,7 @@
   STEPS    ● claude-code           ● fonts                 ○ mise                  ● remote-session        ○ valet                 ○ gpg-key
   MANUAL   ○ By hand               ▲ 1password
 
-  ◐ Homebrew formulae  applying · brew install --formula ffmpeg
+  ◐ Homebrew formulae  installing ffmpeg · 38 of 129 · brew install --formula ffmpeg
   │ ==> Pouring formula 9
   │ ==> Pouring formula 10
   │ ==> Pouring formula 11

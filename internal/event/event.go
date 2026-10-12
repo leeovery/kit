@@ -126,6 +126,9 @@ type Doing struct {
 	// Todo is what the person's to do meanwhile, when there's something:
 	// what the step waits on, as macOS asking before an app first opens.
 	Todo string
+	// Done and Of are how far it's got, when it counts what it's doing:
+	// Done of Of things, as in 38 of 129 installed.
+	Done, Of int
 }
 
 // Asking is macOS asking the person at the Mac something, in a window of
@@ -204,6 +207,22 @@ func WithStep(ctx context.Context, step string) context.Context {
 func WithChanging(ctx context.Context) context.Context {
 	return context.WithValue(ctx, changingKey{}, true)
 }
+
+// WithSaying returns ctx for running a step that says what it's doing as it
+// goes: each thing it says is given to say.
+func WithSaying(ctx context.Context, say func(Doing)) context.Context {
+	return context.WithValue(ctx, sayingKey{}, say)
+}
+
+// Say has the step ctx is running say what it's doing: nothing when ctx
+// isn't a step's.
+func Say(ctx context.Context, d Doing) {
+	if say, ok := ctx.Value(sayingKey{}).(func(Doing)); ok {
+		say(d)
+	}
+}
+
+type sayingKey struct{}
 
 // Changing reports whether ctx is a step changing things.
 func Changing(ctx context.Context) bool {

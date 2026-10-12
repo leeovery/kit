@@ -11,6 +11,7 @@ import (
 
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/config"
+	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/runner"
 )
@@ -246,6 +247,80 @@ func TestStepAppliesByInstallingWhatsMissing(t *testing.T) {
 	if k.removes != nil {
 		t.Errorf("removed %q, want nothing: applying never removes", k.removes)
 	}
+}
+
+// countingKind is a fakeKind whose install prints lines, each "done" line
+// saying a thing is installed.
+type countingKind struct {
+	*fakeKind
+	prints []string
+}
+
+func (c *countingKind) Install(ctx context.Context, names []string) error {
+	if lines := kind.Lines(ctx); lines != nil {
+		for _, l := range c.prints {
+			lines(l)
+		}
+	}
+	return c.fakeKind.Install(ctx, names)
+}
+
+func (*countingKind) Done(line string, _ []string) (string, bool) {
+	return strings.CutPrefix(line, "done ")
+}
+
+// saying is a context that keeps what a step says it's doing.
+func saying(said *[]event.Doing) context.Context {
+	return event.WithSaying(context.Background(), func(d event.Doing) { *said = append(*said, d) })
+}
+
+// A kind that tells, in its install's lines, which thing is installed has
+// its step count them: from the start, and as each is done, it says it's
+// installing the next not yet done, and how many of those it's installing
+// are. A line saying nothing, a thing it wasn't asked to install, as a
+// dependency, and a thing said twice, count nothing.
+func TestStepCountsWhatsInstalled(t *testing.T) {
+	k := &countingKind{
+		fakeKind: knowing("a", "b", "c"),
+		prints:   []string{"==> Fetching downloads", "done b", "done libdep", "done a", "done a", "done c"},
+	}
+	var said []event.Doing
+	s := kind.Step(k, declared("a", "b", "c"))
+	if err := s.Apply(saying(&said), s.Check(context.Background())); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	want := []event.Doing{
+		{Says: "installing a", Done: 0, Of: 3},
+		{Says: "installing a", Done: 1, Of: 3},
+		{Says: "installing c", Done: 2, Of: 3},
+		{Says: "installing", Done: 3, Of: 3},
+	}
+	if !slices.Equal(said, want) {
+		t.Errorf("the step said %+v, want %+v", said, want)
+	}
+}
+
+// A kind that can't tell has its step say nothing as it installs, and its
+// install has no lines to give.
+func TestStepWithoutCountingSaysNothing(t *testing.T) {
+	var lines func(string)
+	k := &linesKind{fakeKind: knowing("a"), lines: &lines}
+	var said []event.Doing
+	s := kind.Step(k, declared("a"))
+	if err := s.Apply(saying(&said), s.Check(context.Background())); err != nil || said != nil || lines != nil {
+		t.Errorf("Apply() = %v, said %+v, lines given: %v; want nothing said, no lines", err, said, lines != nil)
+	}
+}
+
+// linesKind is a fakeKind that keeps where its install's lines would go.
+type linesKind struct {
+	*fakeKind
+	lines *func(string)
+}
+
+func (l *linesKind) Install(ctx context.Context, names []string) error {
+	*l.lines = kind.Lines(ctx)
+	return l.fakeKind.Install(ctx, names)
 }
 
 func TestStepAppliesNothingWhenNothingsMissing(t *testing.T) {

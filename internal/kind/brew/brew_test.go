@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/leeovery/kit/internal/check"
+	"github.com/leeovery/kit/internal/config"
+	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/kind/brew"
 	"github.com/leeovery/kit/internal/runner"
@@ -236,6 +238,84 @@ func TestInstallFailsWhenUpdateDoes(t *testing.T) {
 	fake.On("brew", "update", "--quiet").Exits(1).PrintsToStderr("Error: no network")
 	if err := brew.New(fake).Formulae().Install(context.Background(), []string{"jq"}); err == nil || !strings.Contains(err.Error(), "brew update --quiet exited 1") {
 		t.Errorf("Install() error = %v, want update's", err)
+	}
+}
+
+// Homebrew's formulae and casks tell, in a line brew install prints, which
+// of the things asked for is installed: a formula by its keg's summary, the
+// badge or not, a cask by its own; a tap's by its name in its tap. A
+// dependency pulled in isn't one of them, and a formula's bottle poured is
+// its install starting, not done.
+func TestDoneRecognisesWhatsInstalled(t *testing.T) {
+	formulae, casks := brew.New(nil).Formulae().(kind.Counter), brew.New(nil).Casks().(kind.Counter)
+	for _, tt := range []struct {
+		name  string
+		kind  kind.Counter
+		line  string
+		names []string
+		want  string
+	}{
+		{"keg", formulae, "🍺  /opt/homebrew/Cellar/hello/2.12.3: 12 files, 193.3KB", []string{"jq", "hello"}, "hello"},
+		{"keg, no badge", formulae, "/opt/homebrew/Cellar/hello/2.12.3: 12 files, 193.3KB", []string{"hello"}, "hello"},
+		{"keg of a file", formulae, "🍺  /opt/homebrew/Cellar/tiny/1.0_1: 512B", []string{"tiny"}, "tiny"},
+		{"keg built", formulae, "🍺  /opt/homebrew/Cellar/hello/2.12.3: 12 files, 193.3KB, built in 1 minute 3 seconds", []string{"hello"}, "hello"},
+		{"a tap's keg", formulae, "🍺  /opt/homebrew/Cellar/php@8.5/8.5.0: 1,520 files, 80.1MB", []string{"jq", "owner/tap/php@8.5"}, "owner/tap/php@8.5"},
+		{"a dependency's keg", formulae, "🍺  /opt/homebrew/Cellar/aom/3.13.1: 24 files, 9.8MB", []string{"ffmpeg"}, ""},
+		{"bottle poured", formulae, "==> Pouring hello--2.12.3.arm64_tahoe.bottle.1.tar.gz", []string{"hello"}, ""},
+		{"bottle fetched", formulae, "✔︎ Bottle hello (2.12.3)", []string{"hello"}, ""},
+		{"a cask's line", formulae, "🍺  hello was successfully installed!", []string{"hello"}, ""},
+		{"cask", casks, "🍺  font-sf-mono was successfully installed!", []string{"font-sf-mono"}, "font-sf-mono"},
+		{"cask, no badge", casks, "ghostty was successfully installed!", []string{"zoom", "ghostty"}, "ghostty"},
+		{"a tap's cask", casks, "🍺  1password-cli was successfully installed!", []string{"1password/tap/1password-cli"}, "1password/tap/1password-cli"},
+		{"a dependency's cask", casks, "🍺  ghostty was successfully installed!", []string{"zoom"}, ""},
+		{"cask installing", casks, "==> Installing Cask ghostty", []string{"ghostty"}, ""},
+		{"a formula's line", casks, "🍺  /opt/homebrew/Cellar/ghostty/1.0: 12 files, 1MB", []string{"ghostty"}, ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := tt.kind.Done(tt.line, tt.names)
+			if got != tt.want || ok != (tt.want != "") {
+				t.Errorf("Done(%q, %q) = %q, %v; want %q", tt.line, tt.names, got, ok, tt.want)
+			}
+		})
+	}
+}
+
+// installing is what brew install --formula ffmpeg hello prints: ffmpeg
+// with a dependency, then hello.
+const installing = `==> Fetching downloads for: ffmpeg and hello
+✔︎ Bottle aom (3.13.1)
+✔︎ Bottle ffmpeg (8.0)
+✔︎ Bottle hello (2.12.3)
+==> Installing dependencies for ffmpeg: aom
+==> Installing ffmpeg dependency: aom
+==> Pouring aom--3.13.1.arm64_tahoe.bottle.tar.gz
+🍺  /opt/homebrew/Cellar/aom/3.13.1: 24 files, 9.8MB
+==> Installing ffmpeg
+==> Pouring ffmpeg--8.0.arm64_tahoe.bottle.tar.gz
+🍺  /opt/homebrew/Cellar/ffmpeg/8.0: 285 files, 55.3MB
+==> Pouring hello--2.12.3.arm64_tahoe.bottle.1.tar.gz
+🍺  /opt/homebrew/Cellar/hello/2.12.3: 12 files, 193.3KB
+`
+
+// Applying the formulae counts them by what brew install prints, in one
+// install of them all.
+func TestApplyingCountsTheFormulae(t *testing.T) {
+	fake := runnertest.New(t)
+	fake.On("brew", "list", "--formula", "--full-name", "-1").Prints("jq\n")
+	fake.On("brew", "leaves").Prints("jq\n")
+	fake.On("brew", "leaves", "--installed-on-request").Prints("jq\n")
+	fake.On("brew", "info", "--json=v2", "--formula", "ffmpeg", "hello").Prints(`{"formulae": [{"name": "ffmpeg", "full_name": "ffmpeg"}, {"name": "hello", "full_name": "hello"}], "casks": []}`)
+	fake.On("brew", "update", "--quiet")
+	fake.On("brew", "install", "--formula", "ffmpeg", "hello").Prints(installing)
+	var said []event.Doing
+	ctx := event.WithSaying(t.Context(), func(d event.Doing) { said = append(said, d) })
+	s := kind.Step(brew.New(fake).Formulae(), config.List{Kind: "brew", Entries: []config.Entry{{Name: "jq"}, {Name: "ffmpeg"}, {Name: "hello"}}})
+	if err := s.Apply(ctx, s.Check(ctx)); err != nil {
+		t.Fatal(err)
+	}
+	want := []event.Doing{{Says: "installing ffmpeg", Of: 2}, {Says: "installing hello", Done: 1, Of: 2}, {Says: "installing", Done: 2, Of: 2}}
+	if !slices.Equal(said, want) {
+		t.Errorf("applying said %+v, want %+v", said, want)
 	}
 }
 

@@ -126,10 +126,10 @@ type Pretty struct {
 	now func() time.Time
 	// slots are the places in applying's log, a step each; finished is the
 	// order steps finished in, for which slot gives way first; cut are the
-	// steps the run was stopped in the middle of.
+	// steps the run was stopped in the middle of, as they stood.
 	slots    [engine.DefaultJobs]slot
 	finished map[string]int
-	cut      map[string]bool
+	cut      map[string]runningStep
 	// onScreen is whether applying has the terminal's alternate screen, and
 	// drawnSize the size it was last drawn at; keys are the keys it reads
 	// while it has it, and what they've done.
@@ -191,7 +191,7 @@ func (p *Pretty) Emit(e event.Event) {
 	case event.RunStarted:
 		p.start, p.results = e, make(map[string]event.StepFinished, len(e.Steps))
 		p.output, p.command, p.began = map[string][]string{}, map[string]string{}, p.now()
-		p.finished, p.cut, p.slots = map[string]int{}, map[string]bool{}, [engine.DefaultJobs]slot{}
+		p.finished, p.cut, p.slots = map[string]int{}, map[string]runningStep{}, [engine.DefaultJobs]slot{}
 		p.order.start(e.Steps)
 		p.preparing = ""
 		p.open(e.Command, e.Machine, e.Time, e.Only)
@@ -214,6 +214,7 @@ func (p *Pretty) Emit(e event.Event) {
 		for i, r := range p.running {
 			if r.step == e.Step {
 				p.running[i].doing, p.running[i].todo = cmp.Or(e.Says, r.doing), e.Todo
+				p.running[i].done, p.running[i].of = e.Done, e.Of
 			}
 		}
 		if e.Todo != "" {
@@ -225,7 +226,7 @@ func (p *Pretty) Emit(e event.Event) {
 		p.drawSpinner()
 	case event.StepFinished:
 		if r, ok := p.runningOf(e.Step); ok && r.atWork() && wasStopped(e) {
-			p.cut[e.Step] = true
+			p.cut[e.Step] = r
 		}
 		p.running = without(p.running, e.Step)
 		p.results[e.Step] = e
@@ -653,11 +654,7 @@ func (p *Pretty) drawSpinner() {
 	lines := []string{text}
 	if !p.byArea() {
 		r := p.running[0]
-		says := []string{look.Cyan(r.doing)}
-		if c := p.command[r.step]; c != "" {
-			says = append(says, look.Dim(c))
-		}
-		lines = []string{"  " + mark + " " + look.Strong(r.title) + "  " + look.Says(says...)}
+		lines = []string{"  " + mark + " " + look.Strong(r.title) + "  " + p.workSays(r)}
 		for _, l := range lastOf(p.output[r.step], keptRunning) {
 			lines = append(lines, "  "+look.Dim("│")+" "+look.Muted(l))
 		}
@@ -833,6 +830,16 @@ func (p *Pretty) Running() []string {
 // applying, or what it says; and, while it waits on you, what you're to do.
 type runningStep struct {
 	step, title, doing, todo string
+	// done and of are how far it's got, when it counts: done of of things.
+	done, of int
+}
+
+// counted is says, then how far the step had got, muted, when it counts.
+func (r runningStep) counted(says string) []string {
+	if r.of == 0 {
+		return []string{says}
+	}
+	return []string{says, look.Muted(fmt.Sprintf("%d of %d", r.done, r.of))}
 }
 
 // atWork is whether the step's at work: not waiting on you, nor its turn,

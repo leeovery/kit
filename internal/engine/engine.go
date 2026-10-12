@@ -422,7 +422,7 @@ func (d *dispatch) startReady(ctx context.Context, steps []Step, running *int, j
 		progressed = true
 		go func() {
 			began := d.now()
-			res := d.step(event.WithStep(ctx, s.Name), s)
+			res := d.step(d.stepContext(ctx, s), s)
 			// A step the run was stopped in the middle of failed for that,
 			// whatever stopping it broke on the way.
 			if ctx.Err() != nil && res.State == check.Failed {
@@ -432,6 +432,15 @@ func (d *dispatch) startReady(ctx context.Context, steps []Step, running *int, j
 		}()
 	}
 	return progressed
+}
+
+// stepContext is ctx for running s: what runs in it is s's, and what s says
+// it's doing as it goes is emitted.
+func (d *dispatch) stepContext(ctx context.Context, s Step) context.Context {
+	return event.WithSaying(event.WithStep(ctx, s.Name), func(e event.Doing) {
+		e.Time, e.Step = d.now(), s.Name
+		d.sink.Emit(e)
+	})
 }
 
 // stopped is the result of a step the run was stopped before, or during.

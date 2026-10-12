@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"maps"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -38,6 +39,16 @@ func TestStepOf(t *testing.T) {
 	}
 	if got := event.StepOf(event.WithStep(t.Context(), "cask")); got != "cask" {
 		t.Errorf("StepOf() = %q, want cask", got)
+	}
+}
+
+func TestSay(t *testing.T) {
+	event.Say(t.Context(), event.Doing{Says: "outside a step, said to no one"})
+	var said []event.Doing
+	ctx := event.WithSaying(t.Context(), func(d event.Doing) { said = append(said, d) })
+	event.Say(ctx, event.Doing{Says: "installing jq", Done: 1, Of: 2})
+	if want := []event.Doing{{Says: "installing jq", Done: 1, Of: 2}}; !slices.Equal(said, want) {
+		t.Errorf("said %+v, want %+v", said, want)
 	}
 }
 

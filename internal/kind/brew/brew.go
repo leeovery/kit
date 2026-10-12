@@ -143,8 +143,35 @@ func (h *Homebrew) install(ctx context.Context, which string, names []string) er
 	}
 	h.changing.Lock()
 	defer h.changing.Unlock()
-	_, err := h.run.Run(ctx, runner.Command{Name: "brew", Args: slices.Concat([]string{"install", which}, names), Timeout: installTimeout(len(names)), Env: h.sudoEnv(ctx, which)})
+	_, err := h.run.Run(ctx, runner.Command{
+		Name: "brew", Args: slices.Concat([]string{"install", which}, names),
+		Timeout: installTimeout(len(names)), Env: h.sudoEnv(ctx, which), Lines: kind.Lines(ctx),
+	})
 	return err
+}
+
+// The lines brew install prints as each formula, and each cask, is
+// installed, a dependency's as well as those asked for, after the badge
+// (🍺, unless HOMEBREW_NO_EMOJI drops it, or HOMEBREW_INSTALL_BADGE
+// changes it): a formula's keg, by its name and version, and its size; a
+// cask by its name.
+var (
+	formulaInstalled = regexp.MustCompile(`(?:^|\s)/\S*/([^/\s]+)/[^/\s]+: (?:[\d,]+ files, )?[\d.]+[KMGT]?B\b`)
+	caskInstalled    = regexp.MustCompile(`(?:^|\s)(\S+) was successfully installed!$`)
+)
+
+// installed is which of names, by their names in their taps, line says is
+// installed, as installedLine finds the name it says.
+func installed(installedLine *regexp.Regexp, line string, names []string) (string, bool) {
+	m := installedLine.FindStringSubmatch(strings.TrimSpace(line))
+	if m == nil {
+		return "", false
+	}
+	i := slices.IndexFunc(names, func(name string) bool { return strings.EqualFold(lastPart(name), m[1]) })
+	if i < 0 {
+		return "", false
+	}
+	return names[i], true
 }
 
 // uninstall runs brew uninstall of names, with which says what they are.
@@ -240,6 +267,11 @@ func (f formulae) Install(ctx context.Context, names []string) error {
 	return f.install(ctx, "--formula", ordered)
 }
 
+// Done is which of names line, from brew install, says is installed.
+func (formulae) Done(line string, names []string) (string, bool) {
+	return installed(formulaInstalled, line, names)
+}
+
 func (f formulae) Remove(ctx context.Context, names []string) error {
 	return f.uninstall(ctx, "--formula", names)
 }
@@ -308,6 +340,11 @@ func (c casks) Resolve(ctx context.Context, names []string) (map[string]string, 
 
 func (c casks) Install(ctx context.Context, names []string) error {
 	return c.install(ctx, "--cask", names)
+}
+
+// Done is which of names line, from brew install, says is installed.
+func (casks) Done(line string, names []string) (string, bool) {
+	return installed(caskInstalled, line, names)
 }
 
 func (c casks) Remove(ctx context.Context, names []string) error {

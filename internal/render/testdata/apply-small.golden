@@ -8,13 +8,13 @@
   ▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮  31 of 51 · 3 running · 6m12s
 
   ▲ Time Machine  no backup disk
-  ◐ Homebrew formulae  applying · brew install --formula ffmpeg
+  ◐ Homebrew formulae  installing ffmpeg · 38 of 129 · brew install --formula f…
   │ ==> Pouring formula 12
   │ ==> Pouring formula 13
   │ ==> Pouring formula 14
   │ ==> Pouring formula 15
   │ ==> Pouring formula 16
-  ◐ Homebrew casks  applying · brew install --cask 1password
+  ◐ Homebrew casks  installing 1password · 4 of 42 · brew install --cask 1passw…
   │ ==> Installing Cask 6
   │ ==> Installing Cask 7
   │ ==> Installing Cask 8

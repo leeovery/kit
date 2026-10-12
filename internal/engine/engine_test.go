@@ -352,6 +352,24 @@ func TestEachStepsContextNamesIt(t *testing.T) {
 	}
 }
 
+// What a step says it's doing, as it goes, is emitted as its, at the time
+// it says it.
+func TestAStepSaysWhatItsDoing(t *testing.T) {
+	clock := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	p, _ := engine.New(engine.Step{Name: "brew", Check: func(ctx context.Context) check.Result {
+		event.Say(ctx, event.Doing{Says: "installing jq", Done: 1, Of: 2})
+		return check.Result{State: check.OK}
+	}})
+	rec := &recorder{}
+	if _, err := p.Check(t.Context(), rec, engine.Options{Jobs: 1, Now: func() time.Time { return clock }}); err != nil {
+		t.Fatal(err)
+	}
+	want := event.Doing{Time: clock, Step: "brew", Says: "installing jq", Done: 1, Of: 2}
+	if !slices.Contains(rec.events, event.Event(want)) {
+		t.Errorf("events = %+v, want %+v among them", rec.events, want)
+	}
+}
+
 func TestApply(t *testing.T) {
 	installed := false
 	var applied []string

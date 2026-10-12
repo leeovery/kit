@@ -107,11 +107,17 @@ func (p *Pretty) runningRow(r runningStep, w int) look.Row {
 	if r.todo != "" {
 		return look.Row{State: look.NeedsYou, Name: r.title, Says: look.Orange(r.doing), Under: todoLines(r.todo, w-6)}
 	}
-	says := []string{look.Cyan(r.doing)}
+	return look.Row{State: look.Running, Name: r.title, Says: p.workSays(r), Under: look.Output(lastOf(p.output[r.step], keptRunning)...)}
+}
+
+// workSays is what a step at work says: what it's doing, in cyan, how far
+// it's got, when it counts, and the command running.
+func (p *Pretty) workSays(r runningStep) string {
+	says := r.counted(look.Cyan(r.doing))
 	if c := p.command[r.step]; c != "" {
 		says = append(says, look.Dim(c))
 	}
-	return look.Row{State: look.Running, Name: r.title, Says: look.Says(says...), Under: look.Output(lastOf(p.output[r.step], keptRunning)...)}
+	return look.Says(says...)
 }
 
 // busy is how many steps are at work, and how many wait on you.
@@ -238,11 +244,12 @@ func (p *Pretty) workList() (lines []string) {
 func (p *Pretty) listRow(s event.Step) look.Row {
 	f, isDone := p.results[s.Name]
 	r, isRunning := p.runningOf(s.Name)
+	cut, isCut := p.cut[s.Name]
 	switch {
 	case isRunning:
 		return p.runningRow(r, p.width)
-	case isDone && wasStopped(f) && p.cut[s.Name]:
-		return look.Row{State: look.Skipped, Name: p.title(s.Name), Says: look.Muted("stopped")}
+	case isDone && wasStopped(f) && isCut:
+		return look.Row{State: look.Skipped, Name: p.title(s.Name), Says: look.Says(cut.counted(look.Muted("stopped"))...)}
 	case isDone && wasStopped(f):
 		return look.Row{State: look.Skipped, Name: p.title(s.Name), Says: look.Muted("not run")}
 	case isDone:
