@@ -12,7 +12,8 @@ import (
 
 // Ghostty opens a window as a new instance, by its path, running the
 // command with -e; maximized, with the option on its command line, before
-// -e, for that instance alone; given the window's environment.
+// -e, for that instance alone, written twice to stay a pair; given the
+// window's environment.
 func TestGhosttyOpens(t *testing.T) {
 	for _, tt := range []struct {
 		name      string
@@ -20,7 +21,7 @@ func TestGhosttyOpens(t *testing.T) {
 		want      []string
 	}{
 		{"its own size", false, []string{"-na", "/Applications/Ghostty.app", "--args", "-e", "/Users/someone/.local/bin/kit", "bootstrap"}},
-		{"maximized", true, []string{"-na", "/Applications/Ghostty.app", "--args", "--maximize=true", "-e", "/Users/someone/.local/bin/kit", "bootstrap"}},
+		{"maximized", true, []string{"-na", "/Applications/Ghostty.app", "--args", "--maximize=true", "--maximize=true", "-e", "/Users/someone/.local/bin/kit", "bootstrap"}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			run := runnertest.New(t)

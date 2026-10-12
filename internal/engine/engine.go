@@ -51,7 +51,8 @@ type Step struct {
 	// Waits are things it's applied after, one at a time: each one of
 	// another step's things, waited for until it's in place, or until that
 	// step has finished, whichever comes first, as a step waits for the one
-	// cask it's about while the rest still install.
+	// cask it's about while the rest still install. One its step finished
+	// without leaves the step unapplied: deferred, unless it stands ok.
 	Waits []Wait
 	// Check finds out how the step stands: cheap, and without side effects.
 	Check func(ctx context.Context) check.Result
@@ -488,11 +489,19 @@ func (d *dispatch) unmet(s Step) []string {
 // ok, then checks it again. A step its own check defers, as what it needs
 // isn't there, isn't applied.
 func (d *dispatch) step(ctx context.Context, s Step) check.Result {
+	var missing []string
 	if d.apply {
-		d.waitFor(ctx, s)
+		missing = d.waitFor(ctx, s)
 	}
 	d.sink.Emit(event.StepStarted{Time: d.now(), Step: s.Name, Doing: "checking"})
 	res := d.check(ctx, s)
+	if len(missing) > 0 && res.State != check.OK {
+		which := ", which isn't installed"
+		if len(missing) > 1 {
+			which = ", which aren't installed"
+		}
+		return check.Result{State: check.Deferred, Reason: "needs " + strings.Join(missing, " and ") + which}
+	}
 	if d.apply && res.State != check.Deferred && (res.State != check.OK || res.Actions()) && s.Apply != nil && ctx.Err() == nil {
 		d.sink.Emit(event.StepStarted{Time: d.now(), Step: s.Name, Doing: "applying"})
 		before := res
@@ -513,8 +522,9 @@ func (d *dispatch) step(ctx context.Context, s Step) check.Result {
 
 // waitFor waits for each of the things s is applied after: till it's in
 // place, its step has finished, or the run's stopped; saying, meanwhile,
-// what it's waiting for.
-func (d *dispatch) waitFor(ctx context.Context, s Step) {
+// what it's waiting for. It returns those whose step finished without them.
+func (d *dispatch) waitFor(ctx context.Context, s Step) []string {
+	var missing []string
 	for _, w := range s.Waits {
 		if w.Ready(ctx) {
 			continue
@@ -532,7 +542,11 @@ func (d *dispatch) waitFor(ctx context.Context, s Step) {
 			}
 		}
 		tick.Stop()
+		if ctx.Err() == nil && !w.Ready(ctx) {
+			missing = append(missing, w.Thing)
+		}
 	}
+	return missing
 }
 
 // done are the items before had an action for that after no longer has:

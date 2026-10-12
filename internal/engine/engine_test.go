@@ -605,8 +605,10 @@ func TestBefore(t *testing.T) {
 }
 
 // A step waiting for one thing is applied once that thing is in place,
-// while the step putting it there still runs; or, when it never is, once
-// that step has finished. A check alone waits for nothing.
+// while the step putting it there still runs; when it never is, it stops
+// waiting once that step has finished, and isn't applied: deferred, saying
+// what isn't in, unless it stands ok anyway. A check alone waits for
+// nothing.
 func TestWaits(t *testing.T) {
 	defer engine.SetWaitPoll(time.Millisecond)()
 	var ready atomic.Bool
@@ -655,22 +657,43 @@ func TestWaits(t *testing.T) {
 		t.Error("it didn't say what it was waiting for")
 	}
 
-	never, err := engine.New(
-		engine.Step{Name: "cask", Check: ok("")},
-		engine.Step{Name: "sign-in", Waits: []engine.Wait{{Step: "cask", Thing: "1password", Ready: func(context.Context) bool { return false }}}, Check: ok("")},
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	done := make(chan struct{})
-	go func() {
-		_, _ = never.Apply(t.Context(), &recorder{}, engine.Options{Jobs: 4})
-		close(done)
-	}()
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("a step waiting for a thing never put in place waited on after its step finished")
+	for _, tt := range []struct {
+		name  string
+		check check.State
+		want  check.Result
+	}{
+		{"not done", check.Attention, check.Result{State: check.Deferred, Reason: "needs 1password and 1password-cli, which aren't installed"}},
+		{"done anyway", check.OK, check.Result{State: check.OK}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var applied atomic.Bool
+			never := func(context.Context) bool { return false }
+			p, err := engine.New(
+				engine.Step{Name: "cask", Check: func(context.Context) check.Result { return check.Result{State: check.Failed, Reason: "couldn't check"} }},
+				engine.Step{Name: "sign-in", Waits: []engine.Wait{{Step: "cask", Thing: "1password", Ready: never}, {Step: "cask", Thing: "1password-cli", Ready: never}},
+					Check: func(context.Context) check.Result { return check.Result{State: tt.check} },
+					Apply: func(context.Context, check.Result) error { applied.Store(true); return nil }},
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			done := make(chan engine.Report)
+			go func() {
+				report, _ := p.Apply(t.Context(), &recorder{}, engine.Options{Jobs: 4})
+				done <- report
+			}()
+			select {
+			case report := <-done:
+				if got := report.Results["sign-in"]; got.State != tt.want.State || got.Reason != tt.want.Reason {
+					t.Errorf("sign-in = %+v, want %+v", got, tt.want)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("a step waiting for a thing never put in place waited on after its step finished")
+			}
+			if applied.Load() {
+				t.Error("a step was applied though what it waited for never came")
+			}
+		})
 	}
 }
 

@@ -58,13 +58,17 @@ func (t Terminal) Open(ctx context.Context, run runner.Runner, dir string, w Win
 // Launch Services may not know a newly installed app by name yet) with -e,
 // runs the command once, with its arguments, and asks nothing of its own:
 // proven in a virtual machine (9 Oct). Its options go on its command line,
-// before -e, for that instance alone, over its settings.
+// before -e, for that instance alone, over its settings: each written twice,
+// as macOS reads a launched app's arguments in pairs (-key value) and opens
+// any left over as files, so one option alone would take -e as its value
+// and leave the command's path, which Ghostty asks to run, then runs in a
+// tab of its own (proven in a virtual machine, 12 Oct).
 type ghostty struct{}
 
 func (ghostty) Open(ctx context.Context, run runner.Runner, app string, w Window) error {
 	args := []string{"-na", app, "--args"}
 	if w.Maximized {
-		args = append(args, "--maximize=true")
+		args = append(args, "--maximize=true", "--maximize=true")
 	}
 	args = slices.Concat(args, []string{"-e"}, w.Command)
 	_, err := run.Run(ctx, runner.Command{Name: "open", Args: args, Env: w.Env})
