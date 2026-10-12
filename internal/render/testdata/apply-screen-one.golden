@@ -1,0 +1,64 @@
+
+  █  ▄▀  ▀█▀  ▀▀█▀▀  │  bootstrap · laptop · Fri 2 Jan · 03:04
+  █▀▀▄    █     █    │  ▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮
+  █   █  ▄█▄    █    │  31 of 51 · 3 running · 6m12s
+
+  BOOT     ● GitHub                ● This Mac              ● Password              ● Homebrew              ● Apps                  ● kit-config
+           ● Full Disk Access      ● Ghostty
+  BACKUPS  ▲ Time Machine          ○ Arq                   ○ App settings          ● Full Disk Access
+  JOBS     ○ Scheduled runs
+  MAC      ● Scratch volume        ● Disk space            ● Memory                ● File events           ● Load
+  CONFIG   ● Homebrew              ● Linked files          ● Shell PATH            ● Touch ID for sudo     ● Remote Login          ● File Sharing
+           ◐ Homebrew formulae     ◐ Homebrew casks        ○ App Store apps        ○ npm packages          ○ Composer packages     ● Go tools
+           ○ GitHub extensions     ○ tmux plugins          ○ macOS login items     ○ Claude MCP            ● macOS settings        ● Power settings
+           ● Backup exclusions     ● Spotlight exclusions  ● kit-config edits      ○ Secrets               ○ git config            ● Sync
+           ● Privacy
+  STEPS    ◐ claude-code           ● fonts                 ○ mise                  ● remote-session        ○ valet                 ○ gpg-key
+  MANUAL   ○ By hand               ○ 1password
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ── ◐ Homebrew formulae  installing ffmpeg · 38 of 129 · brew install --formula ffmpeg ──────────────────────────────────────────────────────────────────────
+       ==> Pouring formula 6
+       ==> Pouring formula 7
+       ==> Pouring formula 8
+       ==> Pouring formula 9
+       ==> Pouring formula 10
+       ==> Pouring formula 11
+       ==> Pouring formula 12
+       ==> Pouring formula 13
+       ==> Pouring formula 14
+       ==> Pouring formula 15
+       ==> Pouring formula 16
+       ==> Pouring formula 17
+       ==> Pouring formula 18
+       ==> Pouring formula 19
+       ==> Pouring formula 20
+       ==> Pouring formula 21
+       ==> Pouring formula 22
+       ==> Pouring formula 23
+       ==> Pouring formula 24
+       ==> Pouring formula 25
+       ==> Pouring formula 26
+       ==> Pouring formula 27
+       ==> Pouring formula 28
+       ==> Pouring formula 29
+       ==> Pouring formula 30
+       ==> Pouring formula 31
+       ==> Pouring formula 32
+       ==> Pouring formula 33
+       ==> Pouring formula 34
+       ==> Pouring formula 35
+       ==> Pouring formula 36
+       ==> Pouring formula 37
+       ==> Pouring formula 38
+       ==> Pouring formula 39
+       ==> Pouring formula 40
+       ==> Pouring formula 41
+       ==> Pouring formula 42
+       ==> Pouring formula 43
+       ==> Pouring formula 44
+       ==> Pouring formula 45
+       ==> Pouring formula 46
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+  tab panel · ↑↓ scroll · click a step to pin or unpin · q stop · shift+drag selects

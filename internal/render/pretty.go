@@ -705,12 +705,12 @@ func (p *Pretty) drawLive(lines []string) {
 }
 
 // How many of what a step's commands printed show: while it runs, and once
-// it's failed; and how many are kept, as many as a slot of applying's
-// screen shows at most.
+// it's failed; and how many are kept, for its panel on applying's screen,
+// pinned to fill the log in a tall window, to scroll back through.
 const (
 	keptRunning = 5
 	keptFailing = 8
-	keptSlot    = 50
+	keptSlot    = 100
 )
 
 // lastOf is the last n of lines.

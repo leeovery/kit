@@ -329,10 +329,12 @@ func Lights(ls ...Lamp) string {
 // the room to the next.
 const GridCell = 24
 
-// Cell is a step in a grid: how it stands, and its name.
+// Cell is a step in a grid: how it stands, its name, and whether it's
+// pinned.
 type Cell struct {
-	State State
-	Name  string
+	State  State
+	Name   string
+	Pinned bool
 }
 
 // Area is a grid's area: its name, and its steps.
@@ -341,57 +343,93 @@ type Area struct {
 	Cells []Cell
 }
 
+// gridLine is a line of a grid: the area it's in, by its place, and the
+// first of that area's cells on it and how many.
+type gridLine struct{ area, from, n int }
+
+// gridLayout is how a grid w wide lays areas out: how wide the column of
+// their names is, then its lines, as many of an area's cells on each as
+// fit.
+func gridLayout(w int, areas []Area) (label int, lines []gridLine) {
+	for _, a := range areas {
+		label = max(label, ansi.StringWidth(a.Name))
+	}
+	across := max((w-4-label)/GridCell, 1)
+	for i, a := range areas {
+		for from := 0; from < len(a.Cells); from += across {
+			lines = append(lines, gridLine{area: i, from: from, n: min(across, len(a.Cells)-from)})
+		}
+	}
+	return label, lines
+}
+
 // Grid draws areas w wide, every step a cell GridCell wide, so the marks
 // line up in columns (a grid of marks is its own component: rule 3's "no
 // columns" is for rows): an area's name in pink capitals at the left of its
 // first line, padded to the longest, then as many of its cells as fit, the
 // next line under the first cell.
 func Grid(w int, areas ...Area) []string {
-	label := 0
-	for _, a := range areas {
-		label = max(label, ansi.StringWidth(a.Name))
-	}
-	across := max((w-4-label)/GridCell, 1)
-	var out []string
-	for _, a := range areas {
-		for i := 0; i < len(a.Cells); i += across {
-			lead := strings.Repeat(" ", label)
-			if i == 0 {
-				lead = fg(pink).Bold(true).Render(pad(strings.ToUpper(a.Name), label))
-			}
-			var line strings.Builder
-			line.WriteString("  " + lead + "  ")
-			row := a.Cells[i:min(i+across, len(a.Cells))]
-			for j, c := range row {
-				it := Cut(cell(c), GridCell-2)
-				if j < len(row)-1 {
-					it = pad(it, GridCell)
-				}
-				line.WriteString(it)
-			}
-			out = append(out, Cut(line.String(), w))
+	label, lines := gridLayout(w, areas)
+	out := make([]string, len(lines))
+	for i, l := range lines {
+		a := areas[l.area]
+		lead := strings.Repeat(" ", label)
+		if l.from == 0 {
+			lead = fg(pink).Bold(true).Render(pad(strings.ToUpper(a.Name), label))
 		}
+		var line strings.Builder
+		line.WriteString("  " + lead + "  ")
+		for j, c := range a.Cells[l.from : l.from+l.n] {
+			it := cell(c)
+			if j < l.n-1 {
+				it = pad(it, GridCell)
+			}
+			line.WriteString(it)
+		}
+		out[i] = Cut(line.String(), w)
 	}
 	return out
 }
 
-// cell is a step in a grid, its mark and its name: muted once done, bold
-// while it runs, dim while it waits, in its state's colour when it's wrong,
-// grey when it didn't run.
-func cell(c Cell) string {
-	switch c.State {
-	case Running:
-		return Mark(Running) + " " + Strong(c.Name)
-	case Queued:
-		return Mark(Queued) + " " + Dim(c.Name)
-	case NeedsYou:
-		return Mark(NeedsYou) + " " + Orange(c.Name)
-	case Failed:
-		return Mark(Failed) + " " + Red(c.Name)
-	case Skipped:
-		return Muted(marks[Skipped] + " " + c.Name)
+// GridHit is the cell a grid w wide of areas has at column x of its line y,
+// both counted from 0: its area's place, and its own among the area's
+// cells. A cell runs from its mark to the next cell's. ok is false off
+// every cell: in the column of the areas' names, past a line's last cell,
+// or off the grid.
+func GridHit(w int, areas []Area, x, y int) (area, cell int, ok bool) {
+	label, lines := gridLayout(w, areas)
+	start := 2 + label + 2
+	if y < 0 || y >= len(lines) || x < start {
+		return 0, 0, false
 	}
-	return Mark(Done) + " " + Muted(c.Name)
+	l, j := lines[y], (x-start)/GridCell
+	if j >= l.n {
+		return 0, 0, false
+	}
+	return l.area, l.from + j, true
+}
+
+// cell is a step in a grid, its mark and its name, cut to fit: muted once
+// done, bold while it runs, dim while it waits, in its state's colour when
+// it's wrong, grey when it didn't run; a pinned step's name a pink pill,
+// its mark as it stands.
+func cell(c Cell) string {
+	name := Cut(c.Name, GridCell-4)
+	switch {
+	case c.Pinned:
+		return Mark(c.State) + Pill(name, Done)
+	case c.State == Running:
+		return Mark(Running) + " " + Strong(name)
+	case c.State == Queued:
+		return Mark(Queued) + " " + Dim(name)
+	case c.State == NeedsYou:
+		return Mark(NeedsYou) + " " + Orange(name)
+	case c.State == Failed:
+		return Mark(Failed) + " " + Red(name)
+	case c.State == Skipped:
+		return Muted(marks[Skipped] + " " + name)
+	}
+	return Mark(Done) + " " + Muted(name)
 }
 
 // pad is s with spaces after it, n cells wide.
@@ -424,6 +462,43 @@ func Bar(done, running, of int, ended State) string {
 		}
 	}
 	return b.String()
+}
+
+// Edge is a dim line across the whole window, w wide: it parts a screen's
+// regions.
+func Edge(w int) string { return Dim(strings.Repeat("─", w)) }
+
+// A panel's rule before its row, after the margin; and how much of the
+// rule a row cut to fit it leaves after it.
+const (
+	panelLead  = "── "
+	panelLeast = 3
+)
+
+// Panel is a part of a screen given to a row: a rule across, w wide with
+// the margins, carrying the row, pink when the panel has the focus and dim
+// when it hasn't, then what belongs to the row under its name, without a
+// line. A panel scrolled back says how many lines are below what it shows
+// at its rule's end. A row too long for its rule is cut, some rule kept
+// after it.
+func Panel(w int, focused bool, below int, r Row) []string {
+	rule := Dim
+	if focused {
+		rule = Pink
+	}
+	lead, tail := "  "+rule(panelLead), ""
+	if below > 0 {
+		tail = " " + Muted(fmt.Sprintf("↑ %d more", below)) + " " + rule("──")
+	}
+	end := w - 2
+	row := Cut(line("", r), end-ansi.StringWidth(lead+tail)-1-panelLeast)
+	fill := end - ansi.StringWidth(lead+row+tail) - 1
+	out := []string{lead + row + " " + rule(strings.Repeat("─", max(fill, 0))) + tail}
+	under := strings.Repeat(" ", ansi.StringWidth(lead)+2)
+	for _, u := range r.Under {
+		out = append(out, Cut(under+u, end))
+	}
+	return out
 }
 
 // Rule is a line across, along kit's gradient, w wide with the margin.

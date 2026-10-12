@@ -9,22 +9,28 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/leeovery/kit/internal/check"
+	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/look"
 )
 
 // Applying at a terminal big enough takes a screen of its own while it runs
-// (kit-look, round 6): the terminal's alternate screen, drawn whole each
-// time, at the window's full size. Its header is the wordmark, as the
+// (kit-look, rounds 6 and 7): the terminal's alternate screen, drawn whole
+// each time, at the window's full size. Its header is the wordmark, as the
 // arrival leaves it, with what runs, the bar and the counts beside it; then
-// every step in a grid, by area; then the log, a slot a step at work; then
-// what needs you, and the keys, which it reads while it's up, the terminal
-// in its raw mode (applykeys.go). When the run ends the screen goes, and
-// its record is printed under the run's heading.
+// every step in a grid, by area; then, between two rules, the log, a panel
+// a step at work, or a step pinned; then what needs you, and the keys,
+// which it reads while it's up, the terminal in its raw mode, with the
+// mouse's clicks and wheel (applykeys.go). When the run ends the screen
+// goes, and its record is printed under the run's heading.
 
-// The alternate screen, which applying takes while it runs, and gives back.
+// The alternate screen, which applying takes while it runs, and gives back;
+// and the mouse's buttons and wheel, reported in SGR's form while it reads
+// keys.
 const (
-	altOn  = "\x1b[?1049h"
-	altOff = "\x1b[?1049l"
+	altOn    = "\x1b[?1049h"
+	altOff   = "\x1b[?1049l"
+	mouseOn  = "\x1b[?1000h\x1b[?1006h"
+	mouseOff = "\x1b[?1006l\x1b[?1000l"
 )
 
 // The least window applying takes a screen of its own in: below it, the run
@@ -87,24 +93,29 @@ func (p *Pretty) window() (int, int) {
 }
 
 // screenFits is whether a window w by h is big enough for applying's
-// screen: its header, its grid, the keys, and logLeast lines of log.
+// screen: its header, its grid, the rules, the keys, and logLeast lines of
+// log.
 func (p *Pretty) screenFits(w, h int) bool {
 	if w < screenWidth || h < screenHeight {
 		return false
 	}
-	return h-len(p.screenHead(w))-2 >= logLeast
+	return h-len(p.screenHead(w))-4 >= logLeast
 }
 
 // drawScreen draws applying's screen, w by h, over the last: from the
 // window's top, each line cleared past its end, in one write; no more
 // often than drawEvery. It takes the alternate screen first, the live part
-// drawn in place taken down, and reads keys while it has it.
+// drawn in place taken down, and reads keys while it has it, the mouse's
+// among them.
 func (p *Pretty) drawScreen(w, h int) {
 	switch {
 	case !p.onScreen:
 		p.clearLive()
 		p.listen()
 		p.write(altOn + hideCursor)
+		if p.keys.reading != nil {
+			p.write(mouseOn)
+		}
 		p.onScreen, p.hidden, p.drawnSize = true, true, [2]int{}
 	case time.Since(p.drawn) < drawEvery:
 		return
@@ -130,21 +141,61 @@ func (p *Pretty) drawScreen(w, h int) {
 }
 
 // leaveScreen gives the alternate screen back, when applying has it: the
-// terminal's own screen shows again, as it was, and keys aren't read.
+// terminal's own screen shows again, as it was, and keys aren't read. The
+// mouse stops being reported before the terminal leaves its raw mode,
+// which would show what it reported as typed.
 func (p *Pretty) leaveScreen() {
-	if p.onScreen {
-		p.unlisten()
-		p.write(altOff)
-		p.onScreen = false
+	if !p.onScreen {
+		return
 	}
+	if p.keys.reading != nil {
+		p.write(mouseOff)
+		p.flush()
+	}
+	p.unlisten()
+	p.write(altOff)
+	p.onScreen = false
+}
+
+// screenLayout is applying's screen, w by h, as it's laid out: the header
+// and the grid, a rule under them; the foot, a rule over it; and the log
+// between, its lines, its panels' steps, in order, and how many lines each
+// has.
+type screenLayout struct {
+	head, foot []string
+	log        int
+	steps      []string
+	rooms      []int
+}
+
+// layout lays applying's screen out, w by h.
+func (p *Pretty) layout(w, h int) screenLayout {
+	head := append(p.screenHead(w), look.Edge(w))
+	foot := append([]string{look.Edge(w)}, p.screenFoot(w)...)
+	log := max(h-len(head)-len(foot), 0)
+	steps, rooms := p.panelRooms(log)
+	return screenLayout{head: head, foot: foot, log: log, steps: steps, rooms: rooms}
+}
+
+// panelAt is the panel at line y of the screen, by its place in the log:
+// ok is false off the log's panels.
+func (l screenLayout) panelAt(y int) (int, bool) {
+	top := len(l.head)
+	for i, room := range l.rooms {
+		if y >= top && y < top+room {
+			return i, true
+		}
+		top += room
+	}
+	return 0, false
 }
 
 // screenFrame is applying's screen as it stands, w by h, a line a row: the
 // header and the grid, the log in the room they and the foot leave, then
 // the foot.
 func (p *Pretty) screenFrame(w, h int) []string {
-	head, foot := p.screenHead(w), p.screenFoot(w)
-	lines := append(append(head, p.logSlots(w, h-len(head)-len(foot))...), foot...)
+	l := p.layout(w, h)
+	lines := append(append(l.head, p.logPanels(w, l)...), l.foot...)
 	frame := make([]string, h)
 	for i := range min(h, len(lines)) {
 		frame[i] = look.Cut(lines[i], w)
@@ -153,33 +204,62 @@ func (p *Pretty) screenFrame(w, h int) []string {
 }
 
 // screenHead is the screen's header, then its grid, a blank line under
-// each: a blank line, then the wordmark, as the arrival leaves it, with
-// what runs, the Mac and when beside its first line, the bar its second,
-// and the counts its third.
+// it.
 func (p *Pretty) screenHead(w int) []string {
+	return append(append(p.header(), look.Grid(w, p.areas()...)...), "")
+}
+
+// header is the screen's header, a blank line under it: a blank line,
+// then the wordmark, as the arrival leaves it, with what runs, the Mac and
+// when beside its first line, the bar its second, and the counts its
+// third.
+func (p *Pretty) header() []string {
 	bar, counts := p.progress()
 	line := headline{p.start.Command, p.start.Machine, when(p.start.Time)}
 	head := append([]string{""}, look.Head(line.typed(line.length()), bar, counts)...)
-	head = append(append(head, ""), look.Grid(w, p.areas()...)...)
 	return append(head, "")
 }
 
-// areas are the run's steps as the grid has them: by area, in the views'
-// order, the boot's first, each as it stands.
-func (p *Pretty) areas() []look.Area {
-	var areas []look.Area
+// gridSteps are the run's steps as the grid has them: by area, in the
+// views' order, the boot's first.
+func (p *Pretty) gridSteps() [][]event.Step {
+	var areas [][]event.Step
 	for _, area := range viewOrder {
-		a := look.Area{Name: area}
+		var steps []event.Step
 		for _, s := range p.start.Steps {
 			if viewArea(s.Area) == area {
-				a.Cells = append(a.Cells, look.Cell{State: p.standing(s.Name), Name: p.title(s.Name)})
+				steps = append(steps, s)
 			}
 		}
-		if len(a.Cells) > 0 {
-			areas = append(areas, a)
+		if len(steps) > 0 {
+			areas = append(areas, steps)
 		}
 	}
 	return areas
+}
+
+// areas are the grid's areas, each step as it stands, and whether it's
+// pinned.
+func (p *Pretty) areas() []look.Area {
+	var areas []look.Area
+	for _, steps := range p.gridSteps() {
+		a := look.Area{Name: viewArea(steps[0].Area)}
+		for _, s := range steps {
+			a.Cells = append(a.Cells, look.Cell{State: p.standing(s.Name), Name: p.title(s.Name), Pinned: slices.Contains(p.keys.pinned, s.Name)})
+		}
+		areas = append(areas, a)
+	}
+	return areas
+}
+
+// stepAt is the step whose cell in the grid is at column x of the screen's
+// line y, w wide: ok is false off every cell.
+func (p *Pretty) stepAt(w, x, y int) (string, bool) {
+	area, cell, ok := look.GridHit(w, p.areas(), x, y-len(p.header()))
+	if !ok {
+		return "", false
+	}
+	return p.gridSteps()[area][cell].Name, true
 }
 
 // standing is how the step named step stands as the run goes: finished,
@@ -202,25 +282,34 @@ func (p *Pretty) standing(step string) look.State {
 	return look.Queued
 }
 
-// logSlots are the log, n lines, blank where nothing's taken them: each
-// slot taken, in order, its step's row, then on a line from its mark the
-// lines it printed, the last of them or as far back as the log's scrolled,
-// and, once it's finished, what's left of it, which they give way to; a
-// blank line between slots.
-func (p *Pretty) logSlots(w, n int) []string {
-	steps, rooms := p.logRooms(n)
+// logPanels are the log, as l lays it out: a panel each of its steps,
+// its rule carrying the step's row, pink when it has the focus, then the
+// lines it printed, the last of them or as far back as it's scrolled, and,
+// once it's finished, what's left of it, which they give way to; blank
+// where nothing's taken them.
+func (p *Pretty) logPanels(w int, l screenLayout) []string {
 	var out []string
-	for i, step := range steps {
-		if i > 0 {
-			out = append(out, "")
-		}
+	focus := p.focused(len(l.steps))
+	for i, step := range l.steps {
 		row := p.listRow(p.step(step))
-		left := p.slotLeft(step, rooms[i]-1)
-		row.Under = append(look.Output(scrolled(p.output[step], rooms[i]-1-len(left), p.keys.back)...), left...)
-		block := look.Timeline("  ", w, row)
-		out = append(append(out, block...), make([]string, rooms[i]-len(block))...)
+		var below int
+		row.Under, below = p.panelLines(step, l.rooms[i]-1)
+		panel := look.Panel(w, i == focus, below, row)
+		out = append(append(out, panel...), make([]string, l.rooms[i]-len(panel))...)
 	}
-	return append(out, make([]string, max(n-len(out), 0))...)[:max(n, 0)]
+	return append(out, make([]string, l.log-len(out))...)
+}
+
+// panelLines are what step's panel shows under its row, in room lines: the
+// lines it printed, ending as many before its newest as its panel's
+// scrolled back, or its first lines, when it has no more; then, once it's
+// finished, what's left of it. below is how many of its lines are after
+// those shown.
+func (p *Pretty) panelLines(step string, room int) (lines []string, below int) {
+	left := p.slotLeft(step, room)
+	out := p.output[step]
+	start, end := scrolled(len(out), room-len(left), p.keys.back[step])
+	return append(look.Output(out[start:end]...), left...), len(out) - end
 }
 
 // slotLeft is what's left of step once it's finished, as applying's list
@@ -235,36 +324,36 @@ func (p *Pretty) slotLeft(step string, room int) []string {
 	return left[:min(len(left), room)]
 }
 
-// logRooms are the steps in the log's slots, in order, and how many lines
-// each has of n: shared evenly, a blank line between, the last taking
-// what's left; those there's no room for left out.
-func (p *Pretty) logRooms(n int) (steps []string, rooms []int) {
+// panelSteps are the steps the log's panels show: those pinned, in the
+// order pinned; else those in its slots, which follow what's running.
+func (p *Pretty) panelSteps() []string {
+	if len(p.keys.pinned) > 0 {
+		return p.keys.pinned
+	}
 	var taken []string
 	for _, s := range p.slots {
 		if s.step != "" {
 			taken = append(taken, s.step)
 		}
 	}
-	k := len(taken)
-	if k == 0 || n <= 0 {
+	return taken
+}
+
+// panelRooms are the steps in the log's panels, in order, and how many
+// lines each has of n: shared evenly, the last taking what's left; those
+// there's no room for left out.
+func (p *Pretty) panelRooms(n int) (steps []string, rooms []int) {
+	steps = p.panelSteps()
+	k := min(len(steps), n)
+	if k == 0 {
 		return nil, nil
 	}
-	per, used := max((n-(k-1))/k, 1), 0
-	for i := range taken {
-		if i > 0 {
-			used++
-		}
-		room := per
-		if i == k-1 {
-			room = n - used
-		}
-		if room <= 0 {
-			break
-		}
-		rooms = append(rooms, room)
-		used += room
+	rooms = make([]int, k)
+	for i := range rooms {
+		rooms[i] = n / k
 	}
-	return taken[:len(rooms)], rooms
+	rooms[k-1] = n - (k-1)*(n/k)
+	return steps[:k], rooms
 }
 
 // screenFoot is what's at the screen's foot: what needs you, when anything

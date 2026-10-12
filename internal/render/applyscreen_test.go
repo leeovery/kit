@@ -82,14 +82,18 @@ func numbered(what string, n int) []string {
 // sixMinutesIn is the run six minutes in: the boot done, what's quick done
 // too, Homebrew's formulae and casks installing, Claude Code setting itself
 // up, the fonts done.
-func sixMinutesIn() []event.Event {
+func sixMinutesIn() []event.Event { return sixMinutesInWith(16, 10) }
+
+// sixMinutesInWith is sixMinutesIn, Homebrew's formulae having printed
+// formulae lines, and its casks casks.
+func sixMinutesInWith(formulae, casks int) []event.Event {
 	events := []event.Event{event.RunStarted{Time: at, Command: "bootstrap", Machine: "laptop", Steps: newMacSteps()}}
 	for _, title := range newMac[0].titles {
 		events = append(events, fine(boot.AreaBooted, title, "fine"))
 	}
-	events = append(events, applyingStep("Drift", "Homebrew formulae", "brew install --formula ffmpeg", numbered("Pouring formula", 16)...)...)
+	events = append(events, applyingStep("Drift", "Homebrew formulae", "brew install --formula ffmpeg", numbered("Pouring formula", formulae)...)...)
 	events = append(events, event.Doing{Step: stepName("Drift", "Homebrew formulae"), Says: "installing ffmpeg", Done: 38, Of: 129})
-	events = append(events, applyingStep("Drift", "Homebrew casks", "brew install --cask 1password", numbered("Installing Cask", 10)...)...)
+	events = append(events, applyingStep("Drift", "Homebrew casks", "brew install --cask 1password", numbered("Installing Cask", casks)...)...)
 	events = append(events, event.Doing{Step: stepName("Drift", "Homebrew casks"), Says: "installing 1password", Done: 4, Of: 42})
 	events = append(events, applyingStep("Steps", "claude-code", "run apply", "Setting up Claude Code...", "Checking installation status...", "Downloading 2.1.296 for darwin-arm64", "Verifying checksum")...)
 	events = append(events, applyingStep("Steps", "fonts", "run apply", numbered("copied font", 9)...)...)
@@ -177,10 +181,15 @@ func (c *clock) set(t time.Time) {
 // the face, what it wrote, once it's had a turn of its spinner to draw
 // them, and the keyboard.
 func applyAt(w, h int, took time.Duration, events []event.Event) (*render.Pretty, *syncBuffer, *keyboard) {
+	return applyIn(colorprofile.Ascii, w, h, took, events)
+}
+
+// applyIn is applyAt at a terminal showing colour as profile does.
+func applyIn(profile colorprofile.Profile, w, h int, took time.Duration, events []event.Event) (*render.Pretty, *syncBuffer, *keyboard) {
 	var out syncBuffer
 	c := &clock{t: at}
-	kb := &keyboard{}
-	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).
+	kb := &keyboard{out: &out}
+	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: profile}, 80, true).
 		Sized(func() (int, int) { return w, h }).Clocked(c.now).Keys(kb.listen, kb.halt)
 	for _, e := range events {
 		face.Emit(e)
@@ -229,15 +238,77 @@ func stoppedRun() []event.Event {
 	return append(events, event.RunFinished{Time: at, Duration: 13*time.Minute + 2*time.Second, Counts: map[check.State]int{check.OK: 32, check.Attention: 2, check.Failed: 17}})
 }
 
-// slotRow is a row in the log: a mark two cells in, then a step's name.
-var slotRow = regexp.MustCompile(`(?m)^  [●◐✗▲–] (\S+)`)
+// panelRow is a row in the log, in its panel's rule: a mark, then a step's
+// name.
+var panelRow = regexp.MustCompile(`(?m)^  ── [●◐✗▲–○] (\S+)`)
+
+// The keys at the screen's foot while it reads them, before anything's
+// pinned.
+const runningFoot = "  tab panel · ↑↓ scroll · click a step to pin · q stop · shift+drag selects"
 
 // lines are a screen's lines.
 func lines(screen string) []string { return strings.Split(screen, "\n") }
 
+// edges are where a screen's lines are rules across the whole window.
+func edges(ls []string) []int {
+	var at []int
+	for i, l := range ls {
+		if l != "" && strings.Trim(l, "─") == "" {
+			at = append(at, i)
+		}
+	}
+	return at
+}
+
+// panelTitle is the title of the step whose row a panel's rule, line,
+// carries: ok is false for any other line.
+func panelTitle(line string) (string, bool) {
+	rest, ok := strings.CutPrefix(line, "  ── ")
+	if !ok {
+		return "", false
+	}
+	_, rest, _ = strings.Cut(rest, " ")
+	name, _, _ := strings.Cut(rest, "  ")
+	name, _, _ = strings.Cut(name, " ─")
+	return name, true
+}
+
+// panelOf is the panel on screen carrying title's row: its rule, then the
+// lines under it, without their indent.
+func panelOf(screen, title string) (rule string, under []string) {
+	ls := lines(screen)
+	for i, l := range ls {
+		if name, ok := panelTitle(l); !ok || name != title {
+			continue
+		}
+		for _, u := range ls[i+1:] {
+			text, ok := strings.CutPrefix(u, "       ")
+			if !ok {
+				break
+			}
+			under = append(under, text)
+		}
+		return l, under
+	}
+	return "", nil
+}
+
+// panelTitles are the titles of the steps in a screen's panels, in order.
+func panelTitles(screen string) []string {
+	var titles []string
+	for _, l := range lines(screen) {
+		if name, ok := panelTitle(l); ok {
+			titles = append(titles, name)
+		}
+	}
+	return titles
+}
+
 // While applying, at a terminal big enough, kit has a screen of its own,
 // the window's whole size: the header with the bar and the counts, every
-// step in a grid, the log's slots, what needs you, the keys.
+// step in a grid, a rule, the log's panels, a rule, what needs you, the
+// keys; a blank line over the first rule and under the second, none
+// between the panels.
 func TestApplyingHasAScreenOfItsOwn(t *testing.T) {
 	for _, tt := range []struct {
 		golden, counts string
@@ -255,11 +326,16 @@ func TestApplyingHasAScreenOfItsOwn(t *testing.T) {
 				t.Fatal(err)
 			}
 			golden(t, tt.golden, got+"\n")
-			if ls := lines(got); len(ls) != 64 || !strings.HasSuffix(ls[3], "│  "+tt.counts) || ls[63] != "  ↑↓ scroll · q stop" {
+			ls := lines(got)
+			if len(ls) != 64 || !strings.HasSuffix(ls[3], "│  "+tt.counts) || ls[63] != runningFoot {
 				t.Errorf("the screen is %d lines, its counts and keys\n%s\n%s\nwant 64 lines, the counts %q, the keys at the foot", len(ls), ls[3], ls[len(ls)-1], tt.counts)
 			}
 			if !strings.Contains(out.String(), "\x1b[?1049h\x1b[?25l") {
 				t.Error("applying didn't take the alternate screen, its cursor hidden")
+			}
+			rules := edges(ls)
+			if len(rules) != 2 || ls[rules[0]-1] != "" || ls[rules[1]+1] != "" || ls[rules[0]+1] == "" || !panelRow.MatchString(ls[rules[0]+1]) {
+				t.Errorf("the screen's rules are at lines %v; want two, a blank line over the first and under the second, the first panel straight under the first", rules)
 			}
 		})
 	}
@@ -285,15 +361,16 @@ func TestApplyingScreenTakesOverFromTheArrival(t *testing.T) {
 	if got[1] != landed[1] {
 		t.Errorf("the screen's first line is %q; want the arrival's, %q", got[1], landed[1])
 	}
-	if len(got) != 64 || got[63] != "  ↑↓ scroll · q stop" {
+	if len(got) != 64 || got[63] != runningFoot {
 		t.Errorf("as the run starts, the screen is %d lines, the last %q; want 64, the keys at the foot", len(got), got[len(got)-1])
 	}
 }
 
-// The log's slots: a step takes one as it starts applying, an empty one
-// first, and keeps it while it runs; once it's done, its lines stay till
-// another needs the place, the one done longest ago giving way first, one
-// that failed last. While every slot's step runs, a step starting has none.
+// The log's panels, with nothing pinned, follow its slots: a step takes
+// one as it starts applying, an empty one first, and keeps it while it
+// runs; once it's done, its lines stay till another needs the place, the
+// one done longest ago giving way first, one that failed last. While every
+// slot's step runs, a step starting has none.
 func TestApplyingLogsSlots(t *testing.T) {
 	var steps []event.Step
 	for _, n := range []string{"a", "b", "c", "d", "e", "f", "g", "h"} {
@@ -321,14 +398,14 @@ func TestApplyingLogsSlots(t *testing.T) {
 		t.Fatal(err)
 	}
 	var rows []string
-	for _, m := range slotRow.FindAllStringSubmatch(got, -1) {
+	for _, m := range panelRow.FindAllStringSubmatch(got, -1) {
 		rows = append(rows, m[1])
 	}
 	if want := []string{"e", "g", "f", "d"}; !slices.Equal(rows, want) {
-		t.Errorf("the log's slots hold %q; want %q: a's place, done first, then the failed b's, then c's; h, starting with every slot's step running, none\n%s", rows, want, got)
+		t.Errorf("the log's panels hold %q; want %q: a's place, done first, then the failed b's, then c's; h, starting with every slot's step running, none\n%s", rows, want, got)
 	}
-	if !strings.Contains(got, "  ● d  done\n  │ d at work\n") {
-		t.Errorf("d's slot, once it's done, is\n%s\nwant its lines kept", got)
+	if rule, under := panelOf(got, "d"); !strings.HasPrefix(rule, "  ── ● d  done ─") || !slices.Equal(under, []string{"d at work"}) {
+		t.Errorf("d's panel, once it's done, is %q, then %q; want its row in the rule, its lines kept", rule, under)
 	}
 }
 
@@ -357,11 +434,11 @@ func TestApplyingSlotsAreForStepsAtWork(t *testing.T) {
 		t.Fatal(err)
 	}
 	var rows []string
-	for _, m := range slotRow.FindAllStringSubmatch(got, -1) {
+	for _, m := range panelRow.FindAllStringSubmatch(got, -1) {
 		rows = append(rows, m[1])
 	}
 	if want := []string{"e", "a", "c", "d"}; !slices.Equal(rows, want) {
-		t.Errorf("the log's slots hold %q; want %q: a's place e's while a waited, then b's, done, a's\n%s", rows, want, got)
+		t.Errorf("the log's panels hold %q; want %q: a's place e's while a waited, then b's, done, a's\n%s", rows, want, got)
 	}
 }
 
@@ -385,39 +462,39 @@ func scratchLeft() []event.Event {
 	return append(events, applyingStep("Steps", "claude-code", "run apply", "Setting up Claude Code...", "Verifying checksum")...)
 }
 
-// A step that finished not well says in its slot what's left of it, as the
-// record does, under the last lines it printed, which give way to it when
-// the slot hasn't the room for both.
-func TestApplyingSlotSaysWhatsLeft(t *testing.T) {
+// A step that finished not well says in its panel what's left of it, as
+// the record does, under the last lines it printed, which give way to it
+// when the panel hasn't the room for both.
+func TestApplyingPanelSaysWhatsLeft(t *testing.T) {
 	events := scratchLeft()
 	face, out, kb := applyAt(100, 30, time.Minute, events)
 	got := screen(out.String())
 	golden(t, "apply-screen-left.golden", got+"\n")
-	const left = "  │ → set it in Claude Code's settings\n"
-	if !strings.Contains(got, "  │     Indexing disabled.\n"+left) {
-		t.Errorf("the Scratch volume's slot is\n%s\nwant its last line printed, then what's left: %q", got, left)
+	const left = "→ set it in Claude Code's settings"
+	if _, under := panelOf(got, "Scratch volume"); len(under) < 2 || !slices.Equal(under[len(under)-2:], []string{"    Indexing disabled.", left}) {
+		t.Errorf("the Scratch volume's panel shows\n%s\nwant its last line printed, then what's left: %q", strings.Join(under, "\n"), left)
 	}
 	kb.press(t, slices.Repeat([]ask.Key{keyUp}, 20)...)
-	if got := screen(out.String()); !strings.Contains(got, "  │ ==> Adding volume 1\n") || !strings.Contains(got, "  │ ==> Adding volume 7\n"+left) {
-		t.Errorf("scrolled back as far as it goes, the Scratch volume's slot is\n%s\nwant its first lines printed, then what's left", got)
+	if _, under := panelOf(screen(out.String()), "Scratch volume"); len(under) < 2 || under[0] != "==> Adding volume 1" || under[len(under)-1] != left {
+		t.Errorf("scrolled back as far as it goes, the Scratch volume's panel shows\n%s\nwant its first lines printed, then what's left", strings.Join(under, "\n"))
 	}
 	face.Emit(event.RunFinished{Time: at, Duration: time.Minute, Counts: map[check.State]int{check.OK: 2, check.Attention: 1}})
 	if err := face.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if record := screen(out.String()); !strings.Contains(record, "  ▲ Scratch volume  created /Volumes/Scratch · not set up as it should be\n"+left) {
+	if record := screen(out.String()); !strings.Contains(record, "  ▲ Scratch volume  created /Volumes/Scratch · not set up as it should be\n  │ "+left+"\n") {
 		t.Errorf("the record is\n%s\nwant the Scratch volume's row, what's left under it, as its slot had them", record)
 	}
 }
 
 // A window too small for the screen keeps the run in place under its
 // heading, as before; the screen takes a window wide and tall enough for
-// its grid and the log.
+// its grid, its rules and the log.
 func TestApplyingScreenNeedsTheRoom(t *testing.T) {
 	for _, tt := range []struct {
 		w, h   int
 		screen bool
-	}{{99, 64, false}, {100, 64, true}, {160, 29, false}, {160, 30, true}, {100, 35, false}, {100, 36, true}} {
+	}{{99, 64, false}, {100, 64, true}, {160, 29, false}, {160, 30, true}, {100, 37, false}, {100, 38, true}} {
 		var out syncBuffer
 		face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).Sized(func() (int, int) { return tt.w, tt.h })
 		for _, e := range sixMinutesIn()[:12] {
@@ -439,7 +516,7 @@ func TestApplyingScreenNeedsTheRoom(t *testing.T) {
 }
 
 // A step that counts what it's doing says how far it's got after what it's
-// doing, in its slot's row, and, cut off by the run stopping, in its row in
+// doing, in its panel's row, and, cut off by the run stopping, in its row in
 // the record; a step that doesn't count says what it did before.
 func TestApplyingSaysHowFarAStepHasGot(t *testing.T) {
 	for _, tt := range []struct {
@@ -447,8 +524,8 @@ func TestApplyingSaysHowFarAStepHasGot(t *testing.T) {
 		want   []string
 	}{
 		{sixMinutesIn, []string{
-			"  ◐ Homebrew formulae  installing ffmpeg · 38 of 129 · brew install --formula ffmpeg\n",
-			"  ◐ claude-code  applying · run apply\n",
+			"  ── ◐ Homebrew formulae  installing ffmpeg · 38 of 129 · brew install --formula ffmpeg ─",
+			"  ── ◐ claude-code  applying · run apply ─",
 		}},
 		{stoppedRun, []string{
 			"  – Homebrew formulae  stopped · 38 of 129\n",
@@ -485,8 +562,11 @@ func TestApplyingLeavesItsRecord(t *testing.T) {
 				t.Fatal(err)
 			}
 			raw := out.String()
-			if after := raw[strings.LastIndex(raw, "\x1b[?1049h"):]; !strings.Contains(after, "\x1b[?1049l") || !strings.Contains(after, "\x1b[?25h") || ended || kb.listens() != 1 {
-				t.Errorf("after the screen, the face wrote %q, raw: %v; want the terminal's own screen back, the cursor shown, and the keys it read while it was up no longer read", after, ended)
+			if after := raw[strings.LastIndex(raw, "\x1b[?1049h"):]; !inOrder(after, mouseOff, "\x1b[?1049l") || !strings.Contains(after, "\x1b[?25h") || ended || kb.listens() != 1 {
+				t.Errorf("after the screen, the face wrote %q, raw: %v; want the mouse no longer reported, the terminal's own screen back, the cursor shown, and the keys it read while it was up no longer read", after, ended)
+			}
+			if !mouseOffFirst(kb) {
+				t.Error("the keys stopped being read, the terminal out of its raw mode, before the mouse stopped being reported")
 			}
 			got := screen(raw)
 			golden(t, tt.golden, got+"\n")
@@ -500,8 +580,8 @@ func TestApplyingLeavesItsRecord(t *testing.T) {
 }
 
 // However applying's screen is left, the terminal's own screen comes back,
-// the cursor shown, and its keys stop being read, the terminal out of its
-// raw mode, as the question needs it: for a question asked mid-run, and
+// the cursor shown, the mouse no longer reported, and its keys stop being
+// read, the terminal out of its raw mode, as the question needs it: for a question asked mid-run, and
 // back after it; when the window's made too small for it, the run drawn in
 // place, and taken again when it's big enough; when the face closes
 // without the run finishing.
@@ -509,7 +589,7 @@ func TestApplyingGivesTheScreenBack(t *testing.T) {
 	var out syncBuffer
 	var mu sync.Mutex
 	width := 160
-	kb := &keyboard{}
+	kb := &keyboard{out: &out}
 	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).Sized(func() (int, int) {
 		mu.Lock()
 		defer mu.Unlock()
@@ -526,34 +606,35 @@ func TestApplyingGivesTheScreenBack(t *testing.T) {
 	}
 	time.Sleep(300 * time.Millisecond)
 	onScreen := func() bool { return strings.Contains(screen(out.String()), "BOOT     ● GitHub") }
-	if !onScreen() || !kb.isRaw() {
-		t.Error("with its screen up, applying isn't reading keys, the terminal in its raw mode")
+	mouse := func() bool { return mouseReported(out.String()) }
+	if !onScreen() || !mouse() || !kb.isRaw() {
+		t.Error("with its screen up, applying isn't reading keys, the terminal in its raw mode, and the mouse")
 	}
 	cursorShown := func() bool {
 		raw := out.String()
 		return strings.LastIndex(raw, "\x1b[?25h") > strings.LastIndex(raw, "\x1b[?25l")
 	}
 	back := face.StepAside()
-	if onScreen() || !cursorShown() || kb.isRaw() {
-		t.Errorf("stepping aside for a question, the face left\n%s\nraw: %v; want the terminal's own screen, the cursor shown, not raw", screen(out.String()), kb.isRaw())
+	if onScreen() || mouse() || !mouseOffFirst(kb) || !cursorShown() || kb.isRaw() {
+		t.Errorf("stepping aside for a question, the face left\n%s\nraw: %v; want the terminal's own screen, the cursor shown, the mouse no longer reported, then not raw", screen(out.String()), kb.isRaw())
 	}
 	back()
-	if !onScreen() || !kb.isRaw() {
-		t.Error("back from the question, the face didn't take its screen and its keys again")
+	if !onScreen() || !mouse() || !kb.isRaw() {
+		t.Error("back from the question, the face didn't take its screen, its keys and the mouse again")
 	}
 	resize(99)
-	if got := screen(out.String()); onScreen() || kb.isRaw() || !strings.Contains(got, "◐ Homebrew formulae  installing ffmpeg") {
-		t.Errorf("made too small, the window shows\n%s\nraw: %v; want the run in place on the terminal's own screen, not raw", got, kb.isRaw())
+	if got := screen(out.String()); onScreen() || mouse() || !mouseOffFirst(kb) || kb.isRaw() || !strings.Contains(got, "◐ Homebrew formulae  installing ffmpeg") {
+		t.Errorf("made too small, the window shows\n%s\nraw: %v; want the run in place on the terminal's own screen, the mouse no longer reported, then not raw", got, kb.isRaw())
 	}
 	resize(160)
-	if !onScreen() || !kb.isRaw() {
-		t.Errorf("made big enough again, the window shows\n%s\nwant the screen and its keys taken again", screen(out.String()))
+	if !onScreen() || !mouse() || !kb.isRaw() {
+		t.Errorf("made big enough again, the window shows\n%s\nwant the screen, its keys and the mouse taken again", screen(out.String()))
 	}
 	if err := face.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if onScreen() || !cursorShown() || kb.isRaw() {
-		t.Errorf("closed mid-run, the face left\n%s\nraw: %v; want the terminal's own screen, the cursor shown, not raw", screen(out.String()), kb.isRaw())
+	if onScreen() || mouse() || !mouseOffFirst(kb) || !cursorShown() || kb.isRaw() {
+		t.Errorf("closed mid-run, the face left\n%s\nraw: %v; want the terminal's own screen, the cursor shown, the mouse no longer reported, then not raw", screen(out.String()), kb.isRaw())
 	}
 	if n := kb.listens(); n != 3 {
 		t.Errorf("the face read keys %d times; want once each time its screen went up, 3", n)

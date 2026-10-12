@@ -57,9 +57,10 @@ func equal(t *testing.T, what string, got, want []string) {
 	}
 }
 
-// What the terminal sends, as keys: the arrows in either form, enter,
-// escape alone, Ctrl+C, backspace, text, a paste whole even when it comes
-// in parts; other sequences dropped, and one cut short kept for the rest.
+// What the terminal sends, as keys: the arrows in either form, enter, tab
+// and shift+tab, escape alone, Ctrl+C, backspace, text, a paste whole even
+// when it comes in parts; other sequences dropped, and one cut short kept
+// for the rest.
 func TestParse(t *testing.T) {
 	keys, rest := parse([]byte("\x1b[A\x1bOB\rjé\x03\x7f\x1b[I\x1b[200~ab\ncd\x1b[201~\x1b"))
 	want := []key{{name: "up"}, {name: "down"}, {name: "enter"}, {text: "j"}, {text: "é"}, {name: "ctrl+c"}, {name: "backspace"}, {text: "ab\ncd", paste: true}, {name: "esc"}}
@@ -75,6 +76,45 @@ func TestParse(t *testing.T) {
 	}
 	if keys, rest = parse([]byte("\x1b[1;5")); len(keys) != 0 || string(rest) != "\x1b[1;5" {
 		t.Errorf("a sequence cut short: %+v, rest %q; want it kept", keys, rest)
+	}
+	keys, rest = parse([]byte("\t\x1b[Zq"))
+	if want := []key{{name: "tab"}, {name: "shift+tab"}, {text: "q"}}; !slices.Equal(keys, want) || len(rest) != 0 {
+		t.Errorf("tab, shift+tab, q: %+v, rest %q; want %+v", keys, rest, want)
+	}
+}
+
+// What the mouse reports, in SGR's form, as keys: the left button pressed
+// a click, the wheel turned up or down, with or without shift, alt or ctrl
+// held, each at its cell counted from 0; the button let go, the other
+// buttons, a drag and the old form of report are none, and none leaks its
+// numbers or letters as text typed; a report cut short is kept for the
+// rest.
+func TestParseMouse(t *testing.T) {
+	for _, tt := range []struct {
+		name, sent string
+		want       []key
+	}{
+		{"a click", "\x1b[<0;12;5M", []key{{name: "click", x: 11, y: 4}}},
+		{"a click let go", "\x1b[<0;12;5m", nil},
+		{"the wheel up", "\x1b[<64;80;30M", []key{{name: "wheel up", x: 79, y: 29}}},
+		{"the wheel down", "\x1b[<65;1;1M", []key{{name: "wheel down"}}},
+		{"the wheel with ctrl held", "\x1b[<81;3;4M", []key{{name: "wheel down", x: 2, y: 3}}},
+		{"a click with shift held", "\x1b[<4;3;4M", []key{{name: "click", x: 2, y: 3}}},
+		{"the middle button", "\x1b[<1;3;4M", nil},
+		{"the right button", "\x1b[<2;3;4M", nil},
+		{"a drag", "\x1b[<32;3;4M", nil},
+		{"the wheel sideways", "\x1b[<66;3;4M", nil},
+		{"the old form", "\x1b[M q!", nil},
+		{"a report then keys", "\x1b[<0;113;5Mq\x1b[A", []key{{name: "click", x: 112, y: 4}, {text: "q"}, {name: "up"}}},
+	} {
+		if keys, rest := parse([]byte(tt.sent)); !slices.Equal(keys, tt.want) || len(rest) != 0 {
+			t.Errorf("%s: parse(%q) = %+v, rest %q; want %+v", tt.name, tt.sent, keys, rest, tt.want)
+		}
+	}
+	for _, cut := range []string{"\x1b[<0;12", "\x1b[M q"} {
+		if keys, rest := parse([]byte(cut)); len(keys) != 0 || string(rest) != cut {
+			t.Errorf("a report cut short, %q: %+v, rest %q; want it kept", cut, keys, rest)
+		}
 	}
 }
 
@@ -272,18 +312,18 @@ func TestLive(t *testing.T) {
 }
 
 // Keys read for something drawn by another, as they're pressed: what the
-// terminal sends, as keys, ctrl+c among them, till stop, which ends them
-// and can be called again.
+// terminal sends, as keys, ctrl+c among them, and the mouse's clicks, with
+// where, till stop, which ends them and can be called again.
 func TestListen(t *testing.T) {
 	in, typing := io.Pipe()
 	defer func() { _ = typing.Close() }()
 	keys, stop := Listen(Terminal{In: in})
-	go func() { _, _ = typing.Write([]byte("q\x03\x1b[A")) }()
+	go func() { _, _ = typing.Write([]byte("q\x03\x1b[A\x1b[<0;5;6M")) }()
 	var got []Key
-	for range 3 {
+	for range 4 {
 		got = append(got, <-keys)
 	}
-	if want := []Key{{Text: "q"}, {Name: "ctrl+c"}, {Name: "up"}}; !slices.Equal(got, want) {
+	if want := []Key{{Text: "q"}, {Name: "ctrl+c"}, {Name: "up"}, {Name: "click", X: 4, Y: 5}}; !slices.Equal(got, want) {
 		t.Errorf("Listen gave %+v, want %+v", got, want)
 	}
 	stop()

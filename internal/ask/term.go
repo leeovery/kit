@@ -223,18 +223,26 @@ func (t Terminal) keys() (<-chan key, func()) {
 	}
 }
 
-// key is a key pressed: its name, as up, down, enter, esc, ctrl+c or
-// backspace; or text typed, or pasted.
+// key is a key pressed: its name, as up, down, enter, tab, esc, ctrl+c or
+// backspace; or text typed, or pasted; or what the mouse did, as click,
+// and the cell it did it at.
 type key struct {
 	name  string
 	text  string
 	paste bool
+	x, y  int
+}
+
+// exported is k as a screen is given it.
+func (k key) exported() Key {
+	return Key{Name: k.name, Text: k.text, Paste: k.paste, X: k.x, Y: k.y}
 }
 
 // parse turns what the terminal sent into keys, and returns what's left of
-// a paste still coming: the arrows, as either form sends them, enter,
-// escape alone, Ctrl+C, backspace, a paste whole, and text; other controls
-// and sequences are dropped.
+// a paste or a sequence still coming: the arrows, as either form sends
+// them, enter, tab and shift+tab, escape alone, Ctrl+C, backspace, a paste
+// whole, text, and the mouse's clicks and wheel; other controls and
+// sequences, the mouse's other reports among them, are dropped.
 func parse(b []byte) (keys []key, rest []byte) {
 	for len(b) > 0 {
 		switch {
@@ -245,6 +253,14 @@ func parse(b []byte) (keys []key, rest []byte) {
 			}
 			keys = append(keys, key{text: string(b[6:end]), paste: true})
 			b = b[end+6:]
+		case strings.HasPrefix(string(b), "\x1b[M"):
+			// The mouse's report in its old form, from a terminal without
+			// SGR's: three bytes after it, its button and where, any of
+			// which would otherwise be taken for text typed.
+			if len(b) < 6 {
+				return keys, b
+			}
+			b = b[6:]
 		case b[0] == 0x1b && len(b) == 1:
 			keys, b = append(keys, key{name: "esc"}), nil
 		case b[0] == 0x1b && (b[1] == '[' || b[1] == 'O'):
@@ -255,17 +271,16 @@ func parse(b []byte) (keys []key, rest []byte) {
 			if i == len(b) {
 				return keys, b
 			}
-			switch b[i] {
-			case 'A':
-				keys = append(keys, key{name: "up"})
-			case 'B':
-				keys = append(keys, key{name: "down"})
+			if k, ok := sequence(b[1], string(b[2:i]), b[i]); ok {
+				keys = append(keys, k)
 			}
 			b = b[i+1:]
 		case b[0] == 0x1b:
 			keys, b = append(keys, key{name: "esc"}), b[1:]
 		case b[0] == '\r' || b[0] == '\n':
 			keys, b = append(keys, key{name: "enter"}), b[1:]
+		case b[0] == '\t':
+			keys, b = append(keys, key{name: "tab"}), b[1:]
 		case b[0] == 0x03:
 			keys, b = append(keys, key{name: "ctrl+c"}), b[1:]
 		case b[0] == 0x7f || b[0] == 0x08:
@@ -281,6 +296,40 @@ func parse(b []byte) (keys []key, rest []byte) {
 		}
 	}
 	return keys, nil
+}
+
+// sequence is the key a control sequence is, intro its [ or O, params
+// what comes between and final its last byte: the arrows, shift+tab, and
+// the mouse's report in SGR's form, when it's a key; ok is false for any
+// other.
+func sequence(intro byte, params string, final byte) (key, bool) {
+	switch {
+	case final == 'A':
+		return key{name: "up"}, true
+	case final == 'B':
+		return key{name: "down"}, true
+	case intro == '[' && final == 'Z':
+		return key{name: "shift+tab"}, true
+	case intro == '[' && (final == 'M' || final == 'm') && strings.HasPrefix(params, "<"):
+		return mouse(params, final)
+	}
+	return key{}, false
+}
+
+// mouse is the key the mouse's report in SGR's form is, params its button,
+// column and line after a <, final M as a button's pressed or the wheel
+// turns, and m as a button's let go: the left button pressed is a click,
+// the wheel turned wheel up or wheel down, whether shift, alt or ctrl were
+// held or not, at the cell it was over, counted from 0. Nothing else the
+// mouse does is a key.
+func mouse(params string, final byte) (key, bool) {
+	var button, x, y int
+	if _, err := fmt.Sscanf(params, "<%d;%d;%d", &button, &x, &y); err != nil || final != 'M' {
+		return key{}, false
+	}
+	const held = 4 | 8 | 16
+	name, ok := map[int]string{0: "click", 64: "wheel up", 65: "wheel down"}[button&^held]
+	return key{name: name, x: x - 1, y: y - 1}, ok
 }
 
 // is is whether k is any of names, by name or, for a letter, as typed.

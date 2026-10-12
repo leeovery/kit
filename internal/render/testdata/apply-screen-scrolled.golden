@@ -1,0 +1,64 @@
+
+  █  ▄▀  ▀█▀  ▀▀█▀▀  │  bootstrap · laptop · Fri 2 Jan · 03:04
+  █▀▀▄    █     █    │  ▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮
+  █   █  ▄█▄    █    │  31 of 51 · 3 running · 6m12s
+
+  BOOT     ● GitHub                ● This Mac              ● Password              ● Homebrew              ● Apps                  ● kit-config
+           ● Full Disk Access      ● Ghostty
+  BACKUPS  ▲ Time Machine          ○ Arq                   ○ App settings          ● Full Disk Access
+  JOBS     ○ Scheduled runs
+  MAC      ● Scratch volume        ● Disk space            ● Memory                ● File events           ● Load
+  CONFIG   ● Homebrew              ● Linked files          ● Shell PATH            ● Touch ID for sudo     ● Remote Login          ● File Sharing
+           ◐ Homebrew formulae     ◐ Homebrew casks        ○ App Store apps        ○ npm packages          ○ Composer packages     ● Go tools
+           ○ GitHub extensions     ○ tmux plugins          ○ macOS login items     ○ Claude MCP            ● macOS settings        ● Power settings
+           ● Backup exclusions     ● Spotlight exclusions  ● kit-config edits      ○ Secrets               ○ git config            ● Sync
+           ● Privacy
+  STEPS    ◐ claude-code           ● fonts                 ○ mise                  ● remote-session        ○ valet                 ○ gpg-key
+  MANUAL   ○ By hand               ○ 1password
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ── ◐ Homebrew formulae  installing ffmpeg · 38 of 129 · brew install --formula ffmpeg ──────────────────────────────────────────────────────────────────────
+       ==> Pouring formula 38
+       ==> Pouring formula 39
+       ==> Pouring formula 40
+       ==> Pouring formula 41
+       ==> Pouring formula 42
+       ==> Pouring formula 43
+       ==> Pouring formula 44
+       ==> Pouring formula 45
+       ==> Pouring formula 46
+  ── ◐ Homebrew casks  installing 1password · 4 of 42 · brew install --cask 1password ─────────────────────────────────────────────────────────── ↑ 12 more ──
+       ==> Installing Cask 10
+       ==> Installing Cask 11
+       ==> Installing Cask 12
+       ==> Installing Cask 13
+       ==> Installing Cask 14
+       ==> Installing Cask 15
+       ==> Installing Cask 16
+       ==> Installing Cask 17
+       ==> Installing Cask 18
+  ── ◐ claude-code  applying · run apply ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+       Setting up Claude Code...
+       Checking installation status...
+       Downloading 2.1.296 for darwin-arm64
+       Verifying checksum
+
+
+
+
+
+  ── ● fonts  16 installed ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+       ==> copied font 1
+       ==> copied font 2
+       ==> copied font 3
+       ==> copied font 4
+       ==> copied font 5
+       ==> copied font 6
+       ==> copied font 7
+       ==> copied font 8
+       ==> copied font 9
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+  tab panel · ↑↓ scroll · click a step to pin · q stop · shift+drag selects

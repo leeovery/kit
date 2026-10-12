@@ -26,10 +26,14 @@ type FullScreen interface {
 }
 
 // Key is a key pressed, as a screen is given it: its name, as up, down,
-// enter, esc, ctrl+c or backspace; or text typed, or pasted.
+// enter, tab, shift+tab, esc, ctrl+c or backspace; or text typed, or
+// pasted; or, while the mouse is reported, what it did, as click, wheel up
+// or wheel down, and the cell it did it at, its column X and line Y counted
+// from 0 at the window's top left.
 type Key struct {
 	Name, Text string
 	Paste      bool
+	X, Y       int
 }
 
 // Is is whether k is any of names, by name or, for a letter, as typed.
@@ -48,9 +52,10 @@ func Live(ctx context.Context, t Terminal, s Screen) error {
 // Listen reads keys at t as they're pressed, for what's drawn by something
 // else meanwhile, as applying's screen is: in the terminal's raw mode, when
 // In is one, so they aren't echoed, come one at a time, and ctrl+c comes as
-// a key, not an interrupt. They come on keys till stop, which stops
-// reading, a read waiting for a key cancelled, and puts the terminal back
-// as it was.
+// a key, not an interrupt; the mouse's clicks and wheel too, while what's
+// drawn has the terminal report them. They come on keys till stop, which
+// stops reading, a read waiting for a key cancelled, and puts the terminal
+// back as it was.
 func Listen(t Terminal) (keys <-chan Key, stop func()) {
 	restore := t.raw()
 	read, stopReading := t.keys()
@@ -66,7 +71,7 @@ func Listen(t Terminal) (keys <-chan Key, stop func()) {
 					return
 				}
 				select {
-				case out <- Key{Name: k.name, Text: k.text, Paste: k.paste}:
+				case out <- k.exported():
 				case <-done:
 					return
 				}
@@ -89,7 +94,7 @@ type live struct{ s Screen }
 func (l live) view(width, height int) []string { return l.s.View(width, height) }
 
 func (l live) update(k key) bool {
-	return l.s.Key(Key{Name: k.name, Text: k.text, Paste: k.paste})
+	return l.s.Key(k.exported())
 }
 
 func (l live) leaves(width int) []string { return l.s.Leaves(width) }

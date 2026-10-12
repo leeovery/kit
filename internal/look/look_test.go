@@ -173,6 +173,111 @@ func TestGrid(t *testing.T) {
 	}
 }
 
+// A pinned step's name in the grid is a pink pill, its mark as it stands,
+// a failed step's red ✗ included; its name cut where it would be unpinned,
+// and the next cell's mark where it would be.
+func TestGridPinned(t *testing.T) {
+	got := look.Grid(60,
+		look.Area{Name: "Config", Cells: []look.Cell{{State: look.Running, Name: "Homebrew formulae", Pinned: true}, {State: look.Failed, Name: "Homebrew casks", Pinned: true}}},
+		look.Area{Name: "Steps", Cells: []look.Cell{{State: look.Done, Name: "A name far too long for its cell", Pinned: true}, {State: look.Queued, Name: "mise"}}},
+	)
+	same(t, got,
+		"  CONFIG  ◐ Homebrew formulae     ✗ Homebrew casks ",
+		"  STEPS   ● A name far too long…  ○ mise",
+	)
+	for _, want := range []struct {
+		line int
+		cell string
+	}{
+		{0, look.Cyan("◐") + look.Pill("Homebrew formulae", look.Done)},
+		{0, look.Red("✗") + look.Pill("Homebrew casks", look.Done)},
+		{1, look.Pink("●") + look.Pill("A name far too long…", look.Done)},
+	} {
+		if !strings.Contains(got[want.line], want.cell) {
+			t.Errorf("line %d is %q; want the pinned cell %q", want.line, got[want.line], want.cell)
+		}
+	}
+}
+
+// Which cell is where comes from the grid as it's drawn: every mark's
+// column, on its line, and the cells' room to the next mark, is that
+// cell; the areas' names, and the room past a line's last cell, are none.
+func TestGridHit(t *testing.T) {
+	areas := []look.Area{
+		{Name: "Mac", Cells: []look.Cell{{State: look.Done, Name: "Disk space"}, {State: look.Running, Name: "Memory", Pinned: true}, {State: look.Queued, Name: "Load"}}},
+		{Name: "Backups", Cells: []look.Cell{{State: look.NeedsYou, Name: "Time Machine"}, {State: look.Failed, Name: "Arq"}, {State: look.Skipped, Name: "App settings"}}},
+	}
+	const w = 60
+	type hit struct{ area, cell int }
+	var drawn []hit
+	for y, l := range text(look.Grid(w, areas...)...) {
+		for x, r := range []rune(l) {
+			if !strings.ContainsRune("●◐○▲✗–", r) {
+				continue
+			}
+			a, c, ok := look.GridHit(w, areas, x, y)
+			name := strings.TrimSpace(strings.SplitN(string([]rune(l)[x+1:]), "  ", 2)[0])
+			if !ok || areas[a].Cells[c].Name != name {
+				t.Errorf("the mark at column %d of line %d, %s's, hits %d, %d, %v", x, y, name, a, c, ok)
+			}
+			if a2, c2, ok := look.GridHit(w, areas, x+look.GridCell-1, y); !ok || a2 != a || c2 != c {
+				t.Errorf("the room after %s's mark, to the next, hits %d, %d, %v; want %s", name, a2, c2, ok, name)
+			}
+			drawn = append(drawn, hit{a, c})
+		}
+	}
+	if len(drawn) != 6 {
+		t.Errorf("the grid drew %d marks, want 6", len(drawn))
+	}
+	for _, off := range []struct{ x, y int }{{2, 0}, {10, 2}, {59, 0}, {35, 1}, {11, 4}, {11, -1}} {
+		if a, c, ok := look.GridHit(w, areas, off.x, off.y); ok {
+			t.Errorf("column %d of line %d hits %d, %d; want no cell there", off.x, off.y, a, c)
+		}
+	}
+}
+
+// A panel: a rule across, the margins kept, carrying a row as it stands;
+// what belongs to the row under its name, without a line; the rule pink
+// with the focus, dim without it; scrolled back, how many lines are below,
+// at the rule's end; a row too long cut, some rule kept after it.
+func TestPanel(t *testing.T) {
+	row := look.Row{State: look.Running, Name: "Homebrew casks", Says: look.Says(look.Cyan("installing arq"), look.Dim("brew install --cask arq")), Under: look.Output("==> Installing Cask arq", "arq was successfully installed!")}
+	same(t, look.Panel(80, false, 0, row),
+		"  ── ◐ Homebrew casks  installing arq · brew install --cask arq ──────────────",
+		"       ==> Installing Cask arq",
+		"       arq was successfully installed!",
+	)
+	same(t, look.Panel(80, true, 12, look.Row{State: look.Done, Name: "fonts", Says: look.Muted("16 installed")}),
+		"  ── ● fonts  16 installed ────────────────────────────────────── ↑ 12 more ──",
+	)
+	same(t, look.Panel(50, false, 3, row),
+		"  ── ◐ Homebrew casks  installi… ─── ↑ 3 more ──",
+		"       ==> Installing Cask arq",
+		"       arq was successfully installed!",
+	)
+	if dim, pink := look.Panel(80, false, 0, row)[0], look.Panel(80, true, 0, row)[0]; !strings.HasPrefix(dim, "  "+look.Dim("── ")) || !strings.HasSuffix(dim, look.Dim("──────────────")) ||
+		!strings.HasPrefix(pink, "  "+look.Pink("── ")) || !strings.HasSuffix(pink, look.Pink("──────────────")) {
+		t.Errorf("the rule without the focus is %q, with it %q; want it dim, then pink", dim, pink)
+	}
+	if scrolled := look.Panel(80, true, 12, row)[0]; !strings.HasSuffix(scrolled, " "+look.Muted("↑ 12 more")+" "+look.Pink("──")) {
+		t.Errorf("scrolled back, the rule ends %q; want how many are below, muted, then the rule", scrolled)
+	}
+	for _, w := range []int{50, 80, 160} {
+		for _, below := range []int{0, 7} {
+			if got := ansi.StringWidth(look.Panel(w, false, below, row)[0]); got != w-2 {
+				t.Errorf("at %d wide, %d below, the rule is %d wide; want it to end two cells from the edge, %d", w, below, got, w-2)
+			}
+		}
+	}
+}
+
+// The line parting a screen's regions: dim, across the whole window.
+func TestEdge(t *testing.T) {
+	if got := look.Edge(6); got != look.Dim("──────") {
+		t.Errorf("Edge(6) = %q", got)
+	}
+}
+
 // The bar: a segment a step, the last one in the colour the run ended in.
 func TestBar(t *testing.T) {
 	running := look.Bar(2, 1, 5, look.Done)
