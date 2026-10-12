@@ -377,10 +377,16 @@ func (c casks) Blocked(ctx context.Context, missing map[string]string, _ []kind.
 }
 
 // NeedsAdmin finds which of casks, by full name, install through a package
-// or an installer, which ask for an administrator's password.
+// or an installer, which ask for an administrator's password. A cask in a
+// tap not added yet isn't one: brew info won't describe it till brew install
+// adds its tap, so there's no knowing before.
 func (h *Homebrew) NeedsAdmin(ctx context.Context, casks []string) ([]string, error) {
 	if len(casks) == 0 {
 		return nil, nil
+	}
+	casks, _, err := askable(ctx, h, casks)
+	if err != nil || len(casks) == 0 {
+		return nil, err
 	}
 	res, err := h.brew(ctx, slices.Concat([]string{"info", "--json=v2", "--cask"}, casks)...)
 	if err != nil {
@@ -430,23 +436,13 @@ type info struct {
 // it doesn't know; failing that, of each alone, leaving out those it
 // doesn't know.
 func resolve(ctx context.Context, h *Homebrew, which string, names []string) (map[string]string, error) {
+	ask, untapped, err := askable(ctx, h, names)
+	if err != nil {
+		return nil, err
+	}
 	resolved := make(map[string]string, len(names))
-	var ask []string
-	if slices.ContainsFunc(names, func(name string) bool { _, ok := tapOf(name); return ok }) {
-		taps, err := h.lines(ctx, "tap")
-		if err != nil {
-			return nil, err
-		}
-		tapped := set(taps)
-		for _, name := range names {
-			if tap, ok := tapOf(name); ok && !tapped[tap] {
-				resolved[name] = name
-				continue
-			}
-			ask = append(ask, name)
-		}
-	} else {
-		ask = names
+	for _, name := range untapped {
+		resolved[name] = name
 	}
 	if len(ask) == 0 {
 		return resolved, nil
@@ -477,6 +473,28 @@ func resolve(ctx context.Context, h *Homebrew, which string, names []string) (ma
 		maps.Copy(resolved, one)
 	}
 	return resolved, nil
+}
+
+// askable splits names into those brew info can be asked of and those in a
+// tap not added yet, which it refuses to describe; it asks brew which taps
+// are added only when a name is in one.
+func askable(ctx context.Context, h *Homebrew, names []string) (ask, untapped []string, err error) {
+	if !slices.ContainsFunc(names, func(name string) bool { _, ok := tapOf(name); return ok }) {
+		return names, nil, nil
+	}
+	taps, err := h.lines(ctx, "tap")
+	if err != nil {
+		return nil, nil, err
+	}
+	tapped := set(taps)
+	for _, name := range names {
+		if tap, ok := tapOf(name); ok && !tapped[tap] {
+			untapped = append(untapped, name)
+			continue
+		}
+		ask = append(ask, name)
+	}
+	return ask, untapped, nil
 }
 
 // tapOf is the tap a name is in, as in owner/tap for owner/tap/tool, by

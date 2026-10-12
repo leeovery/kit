@@ -208,6 +208,13 @@ func WithChanging(ctx context.Context) context.Context {
 	return context.WithValue(ctx, changingKey{}, true)
 }
 
+// WithChecking returns ctx for a step looking at how things stand while it
+// changes them, as after an install that failed: what its commands print
+// isn't shown, as a check's never is.
+func WithChecking(ctx context.Context) context.Context {
+	return context.WithValue(ctx, changingKey{}, false)
+}
+
 // WithSaying returns ctx for running a step that says what it's doing as it
 // goes: each thing it says is given to say.
 func WithSaying(ctx context.Context, say func(Doing)) context.Context {

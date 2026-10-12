@@ -402,6 +402,7 @@ func TestInstallsKeepSudosPassword(t *testing.T) {
 
 func TestNeedsAdmin(t *testing.T) {
 	fake := runnertest.New(t)
+	fake.On("brew", "tap").Prints("owner/tap\n")
 	fake.On("brew", "info", "--json=v2", "--cask", "zoom", "ghostty", "owner/tap/tool").Prints(`{"formulae": [], "casks": [
 		{"token": "zoom", "full_token": "zoom", "artifacts": [{"pkg": ["x.pkg"]}]},
 		{"token": "ghostty", "full_token": "ghostty", "artifacts": [{"app": ["Ghostty.app"]}]},
@@ -413,6 +414,86 @@ func TestNeedsAdmin(t *testing.T) {
 	}
 	if got, err := brew.New(runnertest.New(t)).NeedsAdmin(context.Background(), nil); err != nil || got != nil {
 		t.Errorf("NeedsAdmin() of none = %q, %v; want none, asking nothing", got, err)
+	}
+}
+
+// A cask in a tap not added yet, which brew info refuses to describe, isn't
+// known to need an administrator's password: brew install adds its tap.
+func TestNeedsAdminBeforeATapsAdded(t *testing.T) {
+	fake := runnertest.New(t)
+	fake.On("brew", "tap").Prints("homebrew/cask\n")
+	fake.On("brew", "info", "--json=v2", "--cask", "zoom").Prints(`{"formulae": [], "casks": [{"token": "zoom", "full_token": "zoom", "artifacts": [{"pkg": ["x.pkg"]}]}]}`)
+	got, err := brew.New(fake).NeedsAdmin(context.Background(), []string{"zoom", "owner/tap/tool"})
+	if want := []string{"zoom"}; err != nil || !slices.Equal(got, want) {
+		t.Errorf("NeedsAdmin() = %q, %v; want %q", got, err, want)
+	}
+	untapped := runnertest.New(t)
+	untapped.On("brew", "tap").Prints("homebrew/cask\n")
+	if got, err := brew.New(untapped).NeedsAdmin(context.Background(), []string{"owner/tap/tool"}); err != nil || got != nil {
+		t.Errorf("NeedsAdmin() of a cask whose tap isn't added = %q, %v; want none, asking brew info nothing", got, err)
+	}
+}
+
+// On a new Mac, casks' check finds a tap's cask missing, to install, before
+// its tap's added, without asking brew info of it, which fails.
+func TestCasksCheckBeforeATapsAdded(t *testing.T) {
+	fake := runnertest.New(t)
+	fake.On("brew", "list", "--cask", "--full-name", "-1")
+	fake.On("brew", "tap").Prints("homebrew/cask\n")
+	fake.On("brew", "info", "--json=v2", "--cask", "zoom").Prints(`{"formulae": [], "casks": [{"token": "zoom", "full_token": "zoom", "artifacts": [{"pkg": ["x.pkg"]}]}]}`)
+	fake.On("brew", "info", "--json=v2", "--cask", "owner/tap/tool", "zoom").Exits(1).PrintsToStderr("Error: Cask 'owner/tap/tool' is unavailable.\nThis command requires the tap owner/tap.\n")
+	h := brew.New(fake)
+	h.Admin = func(context.Context) bool { return false }
+	got := kind.Compare(context.Background(), h.Casks(), config.List{Kind: "cask", Entries: []config.Entry{{Name: "zoom"}, {Name: "owner/tap/tool"}}})
+	want := []check.Item{
+		{ID: "cask:owner/tap/tool", Name: "owner/tap/tool", State: kind.Missing, Action: kind.Install},
+		{ID: "cask:zoom", Name: "zoom", State: kind.Missing, Detail: "needs an administrator's password: run kit apply at a terminal"},
+	}
+	if got.State == check.Failed || !slices.Equal(got.Items, want) {
+		t.Errorf("check = %s %s, items %+v\nwant items %+v", got.State, got.Reason, got.Items, want)
+	}
+}
+
+// After an install fails, looking at what's left prints nothing on the
+// step's row: it keeps the install's own command and brew's error.
+func TestAFailedInstallKeepsItsOwnOutput(t *testing.T) {
+	fake := runnertest.New(t)
+	fake.On("brew", "list", "--formula", "--full-name", "-1")
+	fake.On("brew", "leaves")
+	fake.On("brew", "leaves", "--installed-on-request")
+	fake.On("brew", "info", "--json=v2", "--formula", "jq", "hello").Prints(`{
+  "formulae": [
+    {"name": "jq", "full_name": "jq"},
+    {"name": "hello", "full_name": "hello"}
+  ],
+  "casks": []
+}
+`)
+	fake.On("brew", "update", "--quiet")
+	fake.On("brew", "install", "--formula", "hello", "jq").Exits(1).Prints("==> Fetching downloads for: hello and jq\n").PrintsToStderr(`Error: Failed to download resource "hello (2.12.3)"
+Download failed: https://example.com/hello-2.12.3.tar.gz
+curl: (56) The requested URL returned error: 404
+`)
+	type printed struct{ command, line string }
+	var mu sync.Mutex
+	var shown []printed
+	run := runner.Streamed(fake, event.Changing, func(_ context.Context, cmd runner.Command, line string) {
+		mu.Lock()
+		defer mu.Unlock()
+		shown = append(shown, printed{cmd.String(), line})
+	})
+	s := kind.Step(brew.New(run).Formulae(), config.List{Kind: "brew", Entries: []config.Entry{{Name: "jq"}, {Name: "hello"}}})
+	if err := s.Apply(event.WithChanging(t.Context()), s.Check(t.Context())); err == nil || !strings.HasPrefix(err.Error(), "couldn't install hello, jq: ") {
+		t.Fatalf("Apply() = %v, want it to name what's left", err)
+	}
+	want := []printed{
+		{"brew install --formula hello jq", "==> Fetching downloads for: hello and jq"},
+		{"brew install --formula hello jq", `Error: Failed to download resource "hello (2.12.3)"`},
+		{"brew install --formula hello jq", "Download failed: https://example.com/hello-2.12.3.tar.gz"},
+		{"brew install --formula hello jq", "curl: (56) The requested URL returned error: 404"},
+	}
+	if !slices.Equal(shown, want) {
+		t.Errorf("shown %q\nwant %q", shown, want)
 	}
 }
 

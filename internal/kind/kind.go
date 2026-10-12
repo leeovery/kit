@@ -252,7 +252,7 @@ func Step(k Kind, declared config.List, needs ...string) engine.Step {
 			// formula Homebrew installs but can't link, as another's linked
 			// in its place, is installed. What's still missing is what failed.
 			left := names
-			if again := Compare(ctx, k, declared); again.State != check.Failed && again.State != check.Deferred {
+			if again := Compare(event.WithChecking(ctx), k, declared); again.State != check.Failed && again.State != check.Deferred {
 				left = slices.DeleteFunc(toInstall(again), func(name string) bool { return !slices.Contains(names, name) })
 			}
 			switch {

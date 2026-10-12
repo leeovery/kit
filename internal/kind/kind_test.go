@@ -182,6 +182,31 @@ func TestStepFailingInstallThatInstalledAll(t *testing.T) {
 	}
 }
 
+// lookingKind is a linkingKind noting, each time it's asked what's
+// installed, whether its commands' output would be shown.
+type lookingKind struct {
+	*linkingKind
+	shown []bool
+}
+
+func (l *lookingKind) Installed(ctx context.Context) ([]kind.Installed, error) {
+	l.shown = append(l.shown, event.Changing(ctx))
+	return l.linkingKind.Installed(ctx)
+}
+
+// Looking at what's left after an install fails is a check: what it runs
+// isn't shown as the install's output.
+func TestStepFailingInstallLooksAgainUnseen(t *testing.T) {
+	k := &lookingKind{linkingKind: &linkingKind{fakeKind: knowing("jq")}}
+	s := kind.Step(k, declared("jq"))
+	if err := s.Apply(event.WithChanging(t.Context()), s.Check(t.Context())); err == nil {
+		t.Fatal("Apply() = nil, want the install's failure")
+	}
+	if want := []bool{false, false}; !slices.Equal(k.shown, want) {
+		t.Errorf("asked what's installed with output shown %v, want %v: the check, then the look after the failure, neither shown", k.shown, want)
+	}
+}
+
 func TestStepFailingInstallSaysWhatsLeft(t *testing.T) {
 	k := &linkingKind{fakeKind: knowing("jq", "xpdf"), takes: []string{"jq"}}
 	s := kind.Step(k, declared("jq", "xpdf"))
