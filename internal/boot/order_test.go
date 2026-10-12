@@ -2,13 +2,16 @@ package boot
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/leeovery/kit/internal/apps"
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/event"
@@ -321,14 +324,32 @@ func TestFullDiskAccess(t *testing.T) {
 	}
 }
 
-// The hand-off: the terminal opened running kit bootstrap, handed over;
-// done once that kit arrives, saying what macOS asks meanwhile.
+// opener is a terminal's driver for a test: it notes the windows it's
+// asked to open, failing as told, else doing what it's told.
+type opener struct {
+	app     string
+	windows []apps.Window
+	fails   error
+	does    func()
+}
+
+func (o *opener) Open(_ context.Context, _ runner.Runner, app string, w apps.Window) error {
+	o.app = app
+	o.windows = append(o.windows, w)
+	if o.fails != nil {
+		return o.fails
+	}
+	o.does()
+	return nil
+}
+
+// The hand-off, through the terminal's driver, whichever it is: a window
+// opened running kit bootstrap, handed over, maximized, without this run's
+// askpass; done once that kit arrives, saying what macOS asks meanwhile.
 func TestHandOver(t *testing.T) {
-	run := runnertest.New(t)
-	b, s := newBoot(t, run, GitHub{}, &asker{})
+	b, s := newBoot(t, runnertest.New(t), GitHub{}, &asker{})
 	read(t, b, map[string]string{config.File: appsToml}, "laptop")
-	launch := []string{"-na", filepath.Join(b.Applications, "Ghostty.app"), "--args", "-e", b.Self, "bootstrap", "--handed-over"}
-	run.On("open", launch...).Does(func() {
+	driver := &opener{does: func() {
 		go func() {
 			time.Sleep(50 * time.Millisecond)
 			arrived := &Boot{State: b.State, Now: time.Now, HandedOver: true}
@@ -336,8 +357,9 @@ func TestHandOver(t *testing.T) {
 				t.Error(err)
 			}
 		}()
-	})
+	}}
 	t2, _ := b.terminal(b.config())
+	t2.Driver = driver
 	step := b.handOverStep(t2)
 	if res := step.Check(context.Background()); res.State != check.Attention {
 		t.Fatalf("check before = %+v", res)
@@ -345,10 +367,9 @@ func TestHandOver(t *testing.T) {
 	if err := step.Apply(context.Background(), check.Result{}); err != nil {
 		t.Fatalf("apply = %v", err)
 	}
-	for _, c := range run.Commands() {
-		if c.Name == "open" && !slices.Contains(c.Env, "SUDO_ASKPASS=") {
-			t.Errorf("opened Ghostty with %q; want this run's askpass kept from it", c.Env)
-		}
+	want := apps.Window{Command: []string{b.Self, "bootstrap", "--handed-over"}, Env: []string{"SUDO_ASKPASS="}, Maximized: true}
+	if len(driver.windows) != 1 || !reflect.DeepEqual(driver.windows[0], want) || driver.app != filepath.Join(b.Applications, "Ghostty.app") {
+		t.Errorf("opened %q with %+v; want %+v", driver.app, driver.windows, want)
 	}
 	var todo string
 	for _, e := range s.events {
@@ -365,5 +386,17 @@ func TestHandOver(t *testing.T) {
 	b.Getenv = func(name string) string { return map[string]string{"TERM_PROGRAM": "ghostty"}[name] }
 	if res := step.Check(context.Background()); res.State != check.OK || res.Summary != "opened" {
 		t.Errorf("check in Ghostty = %+v", res)
+	}
+}
+
+// A terminal that fails to open fails the hand-off, naming it.
+func TestHandOverFails(t *testing.T) {
+	b, _ := newBoot(t, runnertest.New(t), GitHub{}, &asker{})
+	read(t, b, map[string]string{config.File: appsToml}, "laptop")
+	failed := errors.New("no such app")
+	t2, _ := b.terminal(b.config())
+	t2.Driver = &opener{fails: failed}
+	if err := b.handOverStep(t2).Apply(context.Background(), check.Result{}); !errors.Is(err, failed) || !strings.HasPrefix(err.Error(), "open Ghostty: ") {
+		t.Errorf("apply = %v", err)
 	}
 }

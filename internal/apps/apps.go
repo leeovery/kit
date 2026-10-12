@@ -1,14 +1,17 @@
 // Package apps is what kit knows of the apps kit.toml names: the terminal a
 // new Mac's boot hands over to, which the boot installs before anything
-// else, so kit knows it by name: its cask, its bundle, how to open it
-// running a command and how to tell kit is running in it.
+// else, so kit knows it by name: its cask, its bundle, how to tell kit is
+// running in it, and its driver, which opens its windows.
 package apps
 
 import (
+	"context"
 	"maps"
 	"path/filepath"
 	"slices"
 	"strings"
+
+	"github.com/leeovery/kit/internal/runner"
 )
 
 // Terminal is a terminal a new Mac's boot can hand over to.
@@ -23,23 +26,49 @@ type Terminal struct {
 	// Program is what it sets TERM_PROGRAM to for what it runs: how kit
 	// knows it's running in it.
 	Program string
-	// runs are the app's arguments, before a command, that have it run the
-	// command.
-	runs []string
+	// Driver opens its windows.
+	Driver Driver
 }
 
-// Terminals are the terminals kit knows, by name. Ghostty's way of running
-// a command was proven in a virtual machine (9 Oct): opened so, it runs the
-// command once, with its arguments, and asks nothing of its own.
+// Window is a terminal window to open: running Command, given Env, and,
+// Maximized, as big as the screen allows, for that window alone; else as
+// big as the terminal's own settings make it.
+type Window struct {
+	Command, Env []string
+	Maximized    bool
+}
+
+// Driver opens windows of one terminal, the app at app, as only it knows
+// how: one that can't size a window opens it at the terminal's own size.
+type Driver interface {
+	Open(ctx context.Context, run runner.Runner, app string, w Window) error
+}
+
+// Terminals are the terminals kit knows, by name.
 var Terminals = map[string]Terminal{
-	"ghostty": {Name: "ghostty", Title: "Ghostty", Cask: "ghostty", Bundle: "Ghostty.app", Program: "ghostty", runs: []string{"-e"}},
+	"ghostty": {Name: "ghostty", Title: "Ghostty", Cask: "ghostty", Bundle: "Ghostty.app", Program: "ghostty", Driver: ghostty{}},
 }
 
-// Launch is open's arguments that start a new instance of the terminal,
-// from the Applications folder at dir, running command: by the app's path,
-// as Launch Services may not know a newly installed app by name yet.
-func (t Terminal) Launch(dir string, command ...string) []string {
-	return slices.Concat([]string{"-na", filepath.Join(dir, t.Bundle), "--args"}, t.runs, command)
+// Open opens a window of the terminal, from the Applications folder at dir.
+func (t Terminal) Open(ctx context.Context, run runner.Runner, dir string, w Window) error {
+	return t.Driver.Open(ctx, run, filepath.Join(dir, t.Bundle), w)
+}
+
+// ghostty is Ghostty's driver. A new instance, opened by the app's path (as
+// Launch Services may not know a newly installed app by name yet) with -e,
+// runs the command once, with its arguments, and asks nothing of its own:
+// proven in a virtual machine (9 Oct). Its options go on its command line,
+// before -e, for that instance alone, over its settings.
+type ghostty struct{}
+
+func (ghostty) Open(ctx context.Context, run runner.Runner, app string, w Window) error {
+	args := []string{"-na", app, "--args"}
+	if w.Maximized {
+		args = append(args, "--maximize=true")
+	}
+	args = slices.Concat(args, []string{"-e"}, w.Command)
+	_, err := run.Run(ctx, runner.Command{Name: "open", Args: args, Env: w.Env})
+	return err
 }
 
 // Names lists the names in known, in order, for a message.

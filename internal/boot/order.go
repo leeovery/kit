@@ -506,8 +506,8 @@ func (b *Boot) accessStep(t apps.Terminal) engine.Step {
 }
 
 // handOverStep opens the terminal running kit bootstrap again, which
-// carries the boot on there: done once that kit has arrived, or when this
-// is it.
+// carries the boot on there, its window maximized for kit apply's screen:
+// done once that kit has arrived, or when this is it.
 func (b *Boot) handOverStep(t apps.Terminal) engine.Step {
 	return engine.Step{
 		Name: TerminalStep, Title: t.Title,
@@ -521,9 +521,10 @@ func (b *Boot) handOverStep(t apps.Terminal) engine.Step {
 			return check.Result{State: check.Attention, Summary: "not opened yet"}
 		},
 		Apply: func(ctx context.Context, _ check.Result) error {
-			// The terminal takes on open's environment: not this run's askpass,
-			// which ends with it.
-			if _, err := b.Run.Run(ctx, runner.Command{Name: "open", Args: t.Launch(b.Applications, b.Self, "bootstrap", "--handed-over"), Env: []string{"SUDO_ASKPASS="}}); err != nil {
+			// The terminal takes on the environment it's opened with: not this
+			// run's askpass, which ends with it.
+			w := apps.Window{Command: []string{b.Self, "bootstrap", "--handed-over"}, Env: []string{"SUDO_ASKPASS="}, Maximized: true}
+			if err := t.Open(ctx, b.Run, b.Applications, w); err != nil {
 				return fmt.Errorf("open %s: %w", t.Title, err)
 			}
 			b.Sink.Emit(event.Doing{Time: b.Now(), Step: TerminalStep, Says: "opening", Todo: fmt.Sprintf("macOS asks before %s first opens: choose Open", t.Title)})
