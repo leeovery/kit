@@ -96,6 +96,11 @@ undeclared for adopting, removing or snoozing, and report both.
   finished without it, or when the run's stopped: without it, the section's lines stay
   missing, saying what isn't there. Otherwise they're the list's like any other: checked,
   listed, sorted, removed from whichever section holds them, a section going once empty.
+- **What's waited for goes first:** a thing a step names (`--after cask:1password`) is
+  installed ahead of the rest of its list, as one command, then the rest as one; where kinds
+  share a tool's lock (Homebrew's formulae and casks), neither's rest begins till the other's
+  waited-for things are in, or their step has finished. A wait looks again whenever an
+  install ends or counts a thing done, and otherwise every 30 seconds.
 - **A kind declared in a file of its own** (tmux's plugins, in tmux's config, where the
   plugin manager reads them): kit reads it and edits it in place, through a link to the
   file it leads to. `kit tmux add` and adopting add a plugin's line after the last one (before
