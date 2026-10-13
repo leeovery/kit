@@ -289,12 +289,12 @@ func (c *Config) Declare(kind, scope string, e Entry) error {
 			return fmt.Errorf("%q isn't a 1Password item's reference, as in op://vault/item", e.Item)
 		}
 	}
-	hold, err := readHold(e.Hold)
-	switch {
-	case err != nil:
+	if e.Hold != "" && len(d.holds) == 0 {
+		return fmt.Errorf("[%s] holds no lines back: only a list's sections, and [features], do", d.header)
+	}
+	hold, err := readHold(d, e.Hold)
+	if err != nil {
 		return err
-	case hold != "" && !d.holds:
-		return fmt.Errorf("[%s] holds no lines back: only a list's sections do", d.header)
 	}
 	line, err := entryText(d, name, e)
 	if err != nil {

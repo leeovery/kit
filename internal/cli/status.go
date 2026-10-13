@@ -364,12 +364,19 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 		_ = log.Close()
 		return nil, err
 	}
-	if features[steps.FeatureOhMyZsh] {
-		step := steps.OhMyZsh(observed, home)
+	// featured is the feature each of the features' steps is for, by the
+	// step's name, to place them as the feature's section says.
+	featured := map[string]string{}
+	feature := func(name string, step engine.Step) engine.Step {
+		featured[step.Name] = name
+		return step
+	}
+	if features.on(steps.FeatureOhMyZsh) {
+		step := feature(steps.FeatureOhMyZsh, steps.OhMyZsh(observed, home))
 		step.After = []string{brew.StepName}
 		addSetup(step, applyDrifter{step: step, label: "install it"})
 	}
-	for _, feature := range []struct {
+	for _, system := range []struct {
 		name string
 		step func() engine.Step
 	}{
@@ -377,31 +384,31 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 		{steps.FeatureRemoteLogin, func() engine.Step { return steps.RemoteLogin(observed, r.admin) }},
 		{steps.FeatureFileSharing, func() engine.Step { return steps.FileSharing(observed, r.admin) }},
 	} {
-		if features[feature.name] {
-			step := feature.step()
+		if features.on(system.name) {
+			step := feature(system.name, system.step())
 			addSetup(step, applyDrifter{step: step, label: "turn it on"})
 		}
 	}
 	var checks []engine.Step
-	if features[steps.FeatureTimeMachine] {
-		checks = append(checks, steps.TimeMachine(observed, a.Now))
+	if features.on(steps.FeatureTimeMachine) {
+		checks = append(checks, feature(steps.FeatureTimeMachine, steps.TimeMachine(observed, a.Now)))
 	}
-	if features[steps.FeatureArq] {
-		checks = append(checks, steps.Arq(observed, a.Now))
+	if features.on(steps.FeatureArq) {
+		checks = append(checks, feature(steps.FeatureArq, steps.Arq(observed, a.Now)))
 	}
-	if features[steps.FeatureScratch] {
-		scratch := steps.Scratch(observed, r.admin, a.Scratch, home, a.UID)
+	if features.on(steps.FeatureScratch) {
+		scratch := feature(steps.FeatureScratch, steps.Scratch(observed, r.admin, a.Scratch, home, a.UID))
 		r.adminSteps = append(r.adminSteps, scratch)
 		checks = append(checks, scratch)
 	}
-	if features[steps.FeaturePrefs] {
+	if features.on(steps.FeaturePrefs) {
 		p, err := a.prefs(r)
 		if err != nil {
 			_ = face.Close()
 			_ = log.Close()
 			return nil, err
 		}
-		checks = append(checks, steps.Prefs(p, a.Now), steps.FullDiskAccess(home))
+		checks = append(checks, feature(steps.FeaturePrefs, steps.Prefs(p, a.Now)), feature(steps.FeaturePrefs, steps.FullDiskAccess(home)))
 	}
 	edits := steps.ConfigEdits(r.repo)
 	r.drift = append(r.drift, steps.ConfigEditsName)
@@ -456,6 +463,7 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 	}
 	if err == nil {
 		r.steps = slices.Concat(base, scripts, byHandOwn)
+		r.placeFeatures(r.steps, features, featured)
 		r.placeLines(r.steps)
 		r.pipeline, err = engine.New(r.steps...)
 	}
@@ -532,19 +540,29 @@ func (r *run) isAdminStep(name string) bool {
 
 // features are the features switched on for this Mac: the shared file's,
 // then its own. One kit doesn't know is refused, saying where.
-func (r *run) features() (map[string]bool, error) {
+func (r *run) features() (featuresOn, error) {
 	list, err := r.cfg.List(config.FeaturesKind, r.machine)
 	if err != nil {
 		return nil, err
 	}
-	on := make(map[string]bool, len(list.Entries))
+	on := make(featuresOn, len(list.Entries))
 	for _, e := range list.Entries {
 		if !slices.Contains(steps.Features, e.Name) {
 			return nil, fmt.Errorf("%s: kit doesn't know the feature %s: one of %s", e.Pos(), e.Name, strings.Join(steps.Features, ", "))
 		}
-		on[e.Name] = true
+		on[e.Name] = e
 	}
 	return on, nil
+}
+
+// featuresOn are the features switched on for a Mac, each by the line
+// switching it on.
+type featuresOn map[string]config.Entry
+
+// on reports whether the feature named name is on.
+func (f featuresOn) on(name string) bool {
+	_, ok := f[name]
+	return ok
 }
 
 // declared is what k declares for the Mac named mac: its sections in cfg,

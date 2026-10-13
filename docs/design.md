@@ -123,9 +123,13 @@ in a Mac's `[features]` section (`time-machine`, `arq`, `scratch`, `prefs`,
 turning one off loses nothing that isn't its own. Built-ins are generic and lasting; what's
 specific to a user, or to the moment, goes in their config: checks of their own in
 `[checks]`, jobs of their own in `[hourly]` and `[nightly]`. `kit feature
-on|off <name>` (`--shared` for every Mac) changes one. kit is built for its author's Macs:
-built-in support is for the tools they use, and the switches exist because those Macs
-differ.
+on|off <name>` (`--shared` for every Mac) changes one. A features section can say what its
+features wait for, `--after` alone, as a list's can: under `[features --after cask:arq]`, as
+kit applies, Arq's check waits till Arq's cask is in (installed first, as anything a step
+names is) or the casks' step has finished, rather than reading "not installed" while the cask
+waits its turn; a section placed after what isn't a step fails its features' steps, saying
+so. kit is built for its author's Macs: built-in support is for the tools they use, and the
+switches exist because those Macs differ.
 
 **Checks.** Steps with a check and no apply, each problem an item with a stable id saying
 what's wrong and what to do: the Mac's (`disk`, `memory`, `file-events`, `load`), always;

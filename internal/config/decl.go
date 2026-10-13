@@ -113,11 +113,12 @@ type sectionDef struct {
 	// item after the header, as in [secrets op://vault/item]: its lines'
 	// references are short for the item's fields, their names unprefixed.
 	items bool
-	// holds is whether the kind, a list, has sections holding their lines
-	// back, what for after the header (its hold): --after a step, or one of
-	// a step's things; --secret a secret they need, as in [homebrew formulae
-	// --secret NAME]. Their names are unprefixed.
-	holds bool
+	// holds are the options the kind's sections take after the header,
+	// holding their lines back, what for (its hold): --after a step, or one
+	// of a step's things; --secret a secret they need, as in [homebrew
+	// formulae --secret NAME]. A list's take both, [features] --after alone,
+	// others none. Their names are unprefixed.
+	holds []string
 	// sorted is whether kit keeps the section sorted, each line with its
 	// notes: a list of things or settings. Others keep their order: a
 	// PATH's is the order it's searched in; commands' are as written, a new
@@ -128,21 +129,21 @@ type sectionDef struct {
 // sectionDefs are the sections a declarations file may hold, in the order
 // kit writes them.
 var sectionDefs = []sectionDef{
-	{header: "features", kind: FeaturesKind, form: names},
+	{header: "features", kind: FeaturesKind, form: names, holds: []string{afterOption}},
 	{header: "paths", kind: PathsKind, form: paths},
 	{header: "git config", kind: "git-config", form: settings, sorted: true},
 	{header: "macos settings", kind: "defaults", form: defaults, sorted: true},
 	{header: "power settings", kind: "power", form: power, sorted: true},
 	{header: "backup exclusions", kind: "backup-exclusion", form: paths, sorted: true},
 	{header: "spotlight exclusions", kind: "spotlight-exclusion", form: paths, sorted: true},
-	{header: "homebrew formulae", kind: "brew", form: names, sorted: true, holds: true},
-	{header: "homebrew casks", kind: "cask", form: names, sorted: true, holds: true},
-	{header: "app store apps", kind: "mas", form: names, sorted: true, holds: true},
-	{header: "npm packages", kind: "npm", form: names, sorted: true, holds: true},
-	{header: "composer packages", kind: "composer", form: names, sorted: true, holds: true},
-	{header: "go tools", kind: "go", form: names, sorted: true, holds: true},
-	{header: "github extensions", kind: "gh", form: names, sorted: true, holds: true},
-	{header: "macos login items", kind: "login-item", form: names, sorted: true, holds: true},
+	{header: "homebrew formulae", kind: "brew", form: names, sorted: true, holds: listOptions},
+	{header: "homebrew casks", kind: "cask", form: names, sorted: true, holds: listOptions},
+	{header: "app store apps", kind: "mas", form: names, sorted: true, holds: listOptions},
+	{header: "npm packages", kind: "npm", form: names, sorted: true, holds: listOptions},
+	{header: "composer packages", kind: "composer", form: names, sorted: true, holds: listOptions},
+	{header: "go tools", kind: "go", form: names, sorted: true, holds: listOptions},
+	{header: "github extensions", kind: "gh", form: names, sorted: true, holds: listOptions},
+	{header: "macos login items", kind: "login-item", form: names, sorted: true, holds: listOptions},
 	{header: "claude mcp", kind: "claude-mcp", form: commands, folders: true},
 	{header: "secrets", kind: "secret", form: secrets, sorted: true, items: true},
 	{header: "prefs files", kind: PrefsFilesKind, form: paths},
@@ -252,6 +253,9 @@ const (
 	secretOption = "--secret"
 )
 
+// listOptions are the options a list's sections take.
+var listOptions = []string{afterOption, secretOption}
+
 // holdOption are the values of hold's option flag, in order.
 func holdOption(hold, flag string) []string {
 	words, _ := Words(hold)
@@ -264,12 +268,12 @@ func holdOption(hold, flag string) []string {
 	return values
 }
 
-// readHold reads what a list's section holds its lines back for, its
-// header's options: --after a step, or one of a step's things, as in
-// cask:1password; --secret a secret, by what it fills; each as often as
-// wanted. It returns them as kit writes them, sorted, so sections holding
-// their lines for the same are one.
-func readHold(text string) (string, error) {
+// readHold reads what a section of d holds its lines back for, its
+// header's options, those d's take: --after a step, or one of a step's
+// things, as in cask:1password; --secret a secret, by what it fills; each as
+// often as wanted. It returns them as kit writes them, sorted, so sections
+// holding their lines for the same are one.
+func readHold(d sectionDef, text string) (string, error) {
 	words, err := Words(text)
 	if err != nil {
 		return "", err
@@ -277,8 +281,8 @@ func readHold(text string) (string, error) {
 	var opts []string
 	for i := 0; i < len(words); i += 2 {
 		flag := words[i]
-		if flag != afterOption && flag != secretOption {
-			return "", fmt.Errorf("%q isn't one of a list section's options: --after and --secret", flag)
+		if !slices.Contains(d.holds, flag) {
+			return "", fmt.Errorf("%q isn't one of [%s]'s options: %s", flag, d.header, strings.Join(d.holds, " and "))
 		}
 		if i+1 == len(words) || strings.HasPrefix(words[i+1], "--") {
 			return "", fmt.Errorf("%s needs %s after it", flag, map[string]string{afterOption: "a step's name", secretOption: "a secret's name"}[flag])
@@ -419,10 +423,10 @@ func parseFile(scope, content string) (*declFile, error) {
 			return nil, fmt.Errorf("%s:%d: kit doesn't know the section [%s]", name, i+1, m[1])
 		case d.items && arg != "" && !ItemRef(arg):
 			return nil, fmt.Errorf("%s:%d: [%s]: %q isn't a 1Password item's reference, as in op://vault/item", name, i+1, m[1], arg)
-		case opts != "" && !d.holds:
-			return nil, fmt.Errorf("%s:%d: [%s]: only a list's sections take options, as in [homebrew formulae --after cask:1password]", name, i+1, m[1])
+		case opts != "" && len(d.holds) == 0:
+			return nil, fmt.Errorf("%s:%d: [%s]: only a list's sections, and [features], take options, as in [homebrew formulae --after cask:1password]", name, i+1, m[1])
 		}
-		hold, err := readHold(opts)
+		hold, err := readHold(d, opts)
 		if err != nil {
 			return nil, fmt.Errorf("%s:%d: [%s]: %w", name, i+1, m[1], err)
 		}

@@ -115,7 +115,7 @@ func (r *run) place(after, before []string, names map[string]bool) (steps []stri
 	for _, a := range after {
 		kindName, thing, isThing := strings.Cut(a, ":")
 		switch {
-		case isThing && names[kindName]:
+		case isThing && names[kindName] && r.kindsByName[kindName] != nil:
 			waits = append(waits, engine.Wait{Step: kindName, Thing: thing, Ready: r.installed(kindName, thing)})
 		case names[a]:
 			steps = append(steps, a)
@@ -135,6 +135,38 @@ func (r *run) place(after, before []string, names map[string]bool) (steps []stri
 		return steps, waits, ahead, errors.New(strings.Join(wrong, "; "))
 	}
 	return steps, waits, ahead, nil
+}
+
+// placeFeatures places the steps of each feature whose section says what it
+// waits for, as [features --after cask:arq] does, among all, the run's
+// steps, featured saying which feature each step is for: each comes after
+// the steps named, and waits for the things, checking once they're in, as a
+// step of your own does. One placed after what isn't a step fails, saying
+// so.
+func (r *run) placeFeatures(all []engine.Step, on featuresOn, featured map[string]string) {
+	names := make(map[string]bool, len(all))
+	for _, s := range all {
+		names[s.Name] = true
+	}
+	for i, s := range all {
+		e, ok := on[featured[s.Name]]
+		if !ok || e.Hold == "" {
+			continue
+		}
+		after, waits, _, err := r.place(e.After(), nil, names)
+		if err != nil {
+			broken(&all[i], fmt.Sprintf("%s: [%s]: %s", e.Path(), e.Section, err))
+			continue
+		}
+		all[i].After = append(all[i].After, after...)
+		all[i].Waits = append(all[i].Waits, waits...)
+	}
+}
+
+// broken has step fail, saying reason, as its check, applying nothing.
+func broken(step *engine.Step, reason string) {
+	step.Apply = nil
+	step.Check = func(context.Context) check.Result { return check.Result{State: check.Failed, Reason: reason} }
 }
 
 // placeLines places each kind's lines among all, the run's steps: its
@@ -159,9 +191,7 @@ func (r *run) placeLines(all []engine.Step) {
 		}
 		held, things, err := r.heldSections(r.lists[s.Name], names)
 		if err != nil {
-			reason := err.Error()
-			all[i].Apply = nil
-			all[i].Check = func(context.Context) check.Result { return check.Result{State: check.Failed, Reason: reason} }
+			broken(&all[i], err.Error())
 			continue
 		}
 		r.placing[s.Name] = kind.Placing{Held: held}
