@@ -116,7 +116,7 @@ func statusRun() []event.Event {
 		event.StepFinished{Time: at, Step: "mas", Result: check.Result{State: check.Deferred, Reason: "needs Homebrew"}},
 		event.StepFinished{Time: at, Step: "time-machine", Result: ok("last backup 02:35", nil)},
 		event.StepFinished{Time: at, Step: "disk", Result: check.Result{State: check.Attention, Summary: "8% free", Items: []check.Item{
-			{ID: "disk:disk", Name: "disk", State: "problem", Detail: "free some space: kit status says where it went"},
+			{ID: "disk:low", Name: "only 8% free on the startup disk", State: "problem", Detail: "free some space: kit status says where it went"},
 		}}},
 		event.StepFinished{Time: at, Step: "fonts", Result: ok("16 installed", nil)},
 		event.RunFinished{Time: at, Duration: 1800 * time.Millisecond, Counts: map[check.State]int{check.OK: 6, check.Attention: 2, check.Failed: 1, check.Deferred: 1}},

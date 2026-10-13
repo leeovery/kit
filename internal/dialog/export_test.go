@@ -11,3 +11,11 @@ func SetEvery(d time.Duration) (restore func()) {
 	every = d
 	return func() { every = was }
 }
+
+// SetStays sets how long a window must stay before a watch tells of it, for
+// a test, putting it back after.
+func SetStays(d time.Duration) (restore func()) {
+	was := stays
+	stays = d
+	return func() { stays = was }
+}

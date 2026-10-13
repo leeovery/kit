@@ -207,9 +207,10 @@ func (r *run) close() error {
 
 // watchDialogs watches, till unwatch, for macOS asking the person at the
 // Mac something in a window of its own, through run, a runner whose commands
-// aren't logged: the run says so as it starts and as it's answered, and a
-// notification's sent, in case the window's out of sight. held is whether
-// it's asking.
+// aren't logged: the run says so once the window's stayed, and as it's
+// answered, and a notification's sent, in case the window's out of sight.
+// held is whether such a window is on screen, from the first look that saw
+// it.
 func watchDialogs(run runner.Runner, sink event.Sink, now func() time.Time) (held func() bool, unwatch func()) {
 	var watch dialog.Watch
 	ctx, stop := context.WithCancel(context.Background())

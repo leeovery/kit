@@ -99,7 +99,7 @@ func sixMinutesInWith(formulae, casks int) []event.Event {
 	events = append(events, applyingStep("Steps", "fonts", "run apply", numbered("copied font", 9)...)...)
 	return append(events,
 		finished("Backups", "Time Machine", check.Result{State: check.Attention, Summary: "no backup disk", Items: []check.Item{
-			{ID: "time-machine:disk", Name: "Time Machine", State: "problem", Detail: "System Settings › General › Time Machine › Add Backup Disk"}}}),
+			{ID: "time-machine:disk", Name: "no backup disk is set up", State: "problem", Detail: "System Settings › General › Time Machine › Add Backup Disk"}}}),
 		fine("Backups", "Full Disk Access", "granted"),
 		fine("Mac", "Scratch volume", "mounted; not indexed"),
 		fine("Mac", "Disk space", "71% free"),
@@ -141,7 +141,7 @@ func casksFailed() []event.Event {
 	events = append(events,
 		finished("Drift", "Homebrew casks", check.Result{State: check.Failed, Reason: "couldn't install tailscale-app: brew install --cask tailscale-app exited 1"}),
 		finished("Backups", "Arq", check.Result{State: check.Attention, Summary: "no backup plan", Items: []check.Item{
-			{ID: "arq:plan", Name: "Arq", State: "problem", Detail: "open Arq and choose its backup plan"}}}),
+			{ID: "arq:plan", Name: "no backup plan is chosen", State: "problem", Detail: "open Arq and choose its backup plan"}}}),
 		fine("Drift", "macOS login items", "14 added"),
 	)
 	return append(events, applyingStep("Backups", "App settings", "kit prefs restore", "com.example.editor restored", "com.example.terminal restored")...)
@@ -216,13 +216,15 @@ func theRest(events []event.Event, end func(event.Step) check.Result) []event.Ev
 	return events
 }
 
-// appliedRun is casksFailed to its end: the rest done, but a step by hand
-// left to do.
+// appliedRun is casksFailed to its end: the rest done, but two steps by
+// hand left to do, one saying what to run once it's done, one saying
+// nothing more.
 func appliedRun() []event.Event {
 	events := theRest(casksFailed(), func(s event.Step) check.Result {
 		if s.Title == "By hand" {
-			return check.Result{State: check.Attention, Summary: "1 to do", Items: []check.Item{
-				{ID: "manual:sharing", Name: "Allow remote users Full Disk Access", State: "manual", Detail: "System Settings › General › Sharing › Remote Login"}}}
+			return check.Result{State: check.Attention, Summary: "2 to do", Items: []check.Item{
+				{ID: "manual:sharing", Name: "Allow remote users Full Disk Access: System Settings › General › Sharing", State: "manual", Detail: "then: kit manual done sharing"},
+				{ID: "manual:editor", Name: "Install the editor from its site (no Homebrew cask)", State: "manual"}}}
 		}
 		return check.Result{State: check.OK, Summary: "fine"}
 	})
@@ -443,8 +445,8 @@ func TestApplyingSlotsAreForStepsAtWork(t *testing.T) {
 }
 
 // scratchLeft is a run in which the Scratch volume's step made the volume,
-// printing as it did, but found one thing still left once it checked again,
-// while Claude Code installs.
+// printing as it did, but found two things still left once it checked
+// again, one saying what to do, while Claude Code installs.
 func scratchLeft() []event.Event {
 	var steps []event.Step
 	for _, a := range []struct{ area, title string }{{"Mac", "Scratch volume"}, {"Mac", "Disk space"}, {"Steps", "claude-code"}} {
@@ -455,8 +457,11 @@ func scratchLeft() []event.Event {
 		"mdutil disabling Spotlight", "/System/Volumes/Data/Volumes/Scratch:", "    Indexing disabled.")...)...)
 	events = append(events, finished("Mac", "Scratch volume", check.Result{
 		State: check.Attention, Summary: "not set up as it should be",
-		Items: []check.Item{{ID: "scratch:tmpdir", Name: "Claude Code's settings don't send TMPDIR to it", State: "problem", Detail: "set it in Claude Code's settings"}},
-		Done:  []check.Item{{ID: "scratch:mounted", Name: "/Volumes/Scratch", Action: "create"}},
+		Items: []check.Item{
+			{ID: "scratch:tmpdir", Name: "Claude Code's settings don't send TMPDIR to it", State: "problem", Detail: "set it in Claude Code's settings"},
+			{ID: "scratch:backups", Name: "Time Machine still backs it up", State: "problem"},
+		},
+		Done: []check.Item{{ID: "scratch:mounted", Name: "/Volumes/Scratch", Action: "create"}},
 	}))
 	events = append(events, fine("Mac", "Disk space", "71% free"))
 	return append(events, applyingStep("Steps", "claude-code", "run apply", "Setting up Claude Code...", "Verifying checksum")...)
@@ -464,25 +469,29 @@ func scratchLeft() []event.Event {
 
 // A step that finished not well says in its panel what's left of it, as
 // the record does, under the last lines it printed, which give way to it
-// when the panel hasn't the room for both.
+// when the panel hasn't the room for both: each thing by name, what to do
+// about it under it when it says, in orange, as it needs you.
 func TestApplyingPanelSaysWhatsLeft(t *testing.T) {
 	events := scratchLeft()
-	face, out, kb := applyAt(100, 30, time.Minute, events)
-	got := screen(out.String())
+	face, out, kb := applyIn(colorprofile.TrueColor, 100, 30, time.Minute, events)
+	got := screen(uncoloured(out.String()))
 	golden(t, "apply-screen-left.golden", got+"\n")
-	const left = "→ set it in Claude Code's settings"
-	if _, under := panelOf(got, "Scratch volume"); len(under) < 2 || !slices.Equal(under[len(under)-2:], []string{"    Indexing disabled.", left}) {
+	left := []string{"Claude Code's settings don't send TMPDIR to it", "→ set it in Claude Code's settings", "Time Machine still backs it up"}
+	if _, under := panelOf(got, "Scratch volume"); len(under) < 4 || !slices.Equal(under[len(under)-4:], append([]string{"    Indexing disabled."}, left...)) {
 		t.Errorf("the Scratch volume's panel shows\n%s\nwant its last line printed, then what's left: %q", strings.Join(under, "\n"), left)
 	}
+	if frame := strings.Join(lastFrame(out.String()), "\n"); !strings.Contains(frame, look.Orange(left[0])) || !strings.Contains(frame, look.Orange(left[2])) {
+		t.Errorf("the things left aren't named in orange in\n%s", frame)
+	}
 	kb.press(t, slices.Repeat([]ask.Key{keyUp}, 20)...)
-	if _, under := panelOf(screen(out.String()), "Scratch volume"); len(under) < 2 || under[0] != "==> Adding volume 1" || under[len(under)-1] != left {
+	if _, under := panelOf(screen(uncoloured(out.String())), "Scratch volume"); len(under) < 4 || under[0] != "==> Adding volume 1" || !slices.Equal(under[len(under)-3:], left) {
 		t.Errorf("scrolled back as far as it goes, the Scratch volume's panel shows\n%s\nwant its first lines printed, then what's left", strings.Join(under, "\n"))
 	}
 	face.Emit(event.RunFinished{Time: at, Duration: time.Minute, Counts: map[check.State]int{check.OK: 2, check.Attention: 1}})
 	if err := face.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if record := screen(out.String()); !strings.Contains(record, "  ▲ Scratch volume  created /Volumes/Scratch · not set up as it should be\n  │ "+left+"\n") {
+	if record := screen(uncoloured(out.String())); !strings.Contains(record, "  ▲ Scratch volume  created /Volumes/Scratch · not set up as it should be\n  │ "+strings.Join(left, "\n  │ ")+"\n") {
 		t.Errorf("the record is\n%s\nwant the Scratch volume's row, what's left under it, as its slot had them", record)
 	}
 }
@@ -576,6 +585,26 @@ func TestApplyingLeavesItsRecord(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// The record names each thing a step left to do, as its panel does, what
+// to do about it under it when it says: a step by hand with nothing more to
+// say shows its name alone.
+func TestApplyingRecordNamesWhatsLeft(t *testing.T) {
+	face, out, _ := applyAt(160, 64, time.Minute, appliedRun())
+	if err := face.Close(); err != nil {
+		t.Fatal(err)
+	}
+	want := strings.Join([]string{
+		"  ▲ By hand  2 to do",
+		"  │ Allow remote users Full Disk Access: System Settings › General › Sharing",
+		"  │ → then: kit manual done sharing",
+		"  │ Install the editor from its site (no Homebrew cask)",
+		"  ● 1password  fine",
+	}, "\n")
+	if record := screen(out.String()); !strings.Contains(record, want) {
+		t.Errorf("the record is\n%s\nwant By hand's row, each thing to do by name under it\n%s", record, want)
 	}
 }
 

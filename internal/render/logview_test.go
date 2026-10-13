@@ -4,13 +4,16 @@ import (
 	"time"
 
 	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/charmbracelet/colorprofile"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/logs"
+	"github.com/leeovery/kit/internal/look"
 	"github.com/leeovery/kit/internal/render"
 )
 
@@ -77,4 +80,38 @@ func TestLogRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	golden(t, "log-run.golden", out.String())
+}
+
+// A run's log names each thing a step left to do, as applying's record and
+// its panels do: its name in orange, what to do about it under it when it
+// says, a step by hand with nothing more to say its name alone.
+func TestLogRunNamesWhatsLeft(t *testing.T) {
+	manual := check.Result{State: check.Attention, Summary: "2 to do", Items: []check.Item{
+		{ID: "manual:sharing", Name: "Allow remote users Full Disk Access", State: "manual", Detail: "then: kit manual done sharing"},
+		{ID: "manual:editor", Name: "Install the editor from its site (no Homebrew cask)", State: "manual"},
+	}}
+	records := []logs.Record{
+		{Time: at, Event: "run_started", Command: "apply", Machine: "laptop", Steps: []event.Step{{Name: "manual", Title: "By hand"}}},
+		{Time: at, Event: "step_started", Step: "manual"},
+		{Time: at, Event: "step_finished", Step: "manual", Result: &manual, DurationMS: 20},
+		{Time: at, Event: "run_finished", DurationMS: 100, Counts: map[check.State]int{check.Attention: 1}},
+	}
+	var out bytes.Buffer
+	if err := render.LogRun(&colorprofile.Writer{Forward: &out, Profile: colorprofile.TrueColor}, 80, records); err != nil {
+		t.Fatal(err)
+	}
+	want := strings.Join([]string{
+		"  03:04:05  ▲ By hand  2 to do",
+		"            │ Allow remote users Full Disk Access",
+		"            │ → then: kit manual done sharing",
+		"            │ Install the editor from its site (no Homebrew cask)",
+	}, "\n")
+	if got := ansi.Strip(out.String()); !strings.Contains(got, want) {
+		t.Errorf("the log is\n%s\nwant By hand's row, each thing to do by name under it\n%s", got, want)
+	}
+	for _, name := range []string{"Allow remote users Full Disk Access", "Install the editor from its site (no Homebrew cask)"} {
+		if !strings.Contains(out.String(), look.Orange(name)) {
+			t.Errorf("%q isn't named in orange in\n%s", name, out.String())
+		}
+	}
 }

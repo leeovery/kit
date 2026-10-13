@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/x/ansi"
 
@@ -290,15 +291,14 @@ func todoLines(text string, width int) []string {
 }
 
 // workRow is a finished step's row in applying's list: what applying did
-// first, a few things named, or counted, then what the step says; what
-// needs attention in it, and what to run, under it.
+// first, a few things named, or counted, then what the step says; the last
+// lines a failed step printed, then what's left of it, under it.
 func (p *Pretty) workRow(f event.StepFinished, part string) look.Row {
-	row := resultRow(p.title(f.Step), f.Result)
-	row.Under = nil
+	row := resultRow(p.title(f.Step), f.Result, part, p.start.Time)
 	if out := p.output[f.Step]; f.Result.State == check.Failed && len(out) > 0 {
 		what, _, _ := strings.Cut(f.Result.Reason, ":")
 		row.Says = look.Says(look.Red(what), look.Dim(p.command[f.Step]))
-		row.Under = look.Output(lastOf(out, keptFailing)...)
+		row.Under = append(look.Output(lastOf(out, keptFailing)...), row.Under...)
 	}
 	if done := doneGroups(f.Result.Done); len(done) > 0 {
 		var did []string
@@ -317,16 +317,17 @@ func (p *Pretty) workRow(f event.StepFinished, part string) look.Row {
 		}
 		row.Says = look.Says(append(did, row.Says)...)
 	}
-	row.Under = append(row.Under, p.left(f, part)...)
 	return row
 }
 
-// left is what's left to do about a finished step, a line each, as its row
-// in applying's list has it under it: each thing that needs attention, or
-// why it's not done yet, and what to run.
-func (p *Pretty) left(f event.StepFinished, part string) []string {
+// whatsLeft is what's left to do about a step's result r, of part, in a run
+// started at start, as every row of the step has it under it (status, the
+// log, applying's list and its panels): each thing that needs attention, by
+// name, with what to do about it under it when there's something to say, or
+// why it's not done yet; then what to run.
+func whatsLeft(r check.Result, part string, start time.Time) []string {
 	var lines, hints []string
-	for _, it := range f.Result.Items {
+	for _, it := range r.Items {
 		switch {
 		case it.Quiet != "" && it.Detail != "":
 			// Too new to count as drift, but applying says why it's not done:
@@ -339,7 +340,7 @@ func (p *Pretty) left(f event.StepFinished, part string) []string {
 				says = append(says, look.Muted(it.Detail))
 			}
 			if !it.Since.IsZero() {
-				says = append(says, look.Muted(since(p.start.Time.Sub(it.Since))))
+				says = append(says, look.Muted(since(start.Sub(it.Since))))
 			}
 			lines = append(lines, look.Says(says...))
 			hint := "kit reconcile"
@@ -349,8 +350,11 @@ func (p *Pretty) left(f event.StepFinished, part string) []string {
 			if !slices.Contains(hints, hint) {
 				hints = append(hints, hint)
 			}
-		case it.Detail != "":
-			lines = append(lines, todo(it.Detail))
+		default:
+			lines = append(lines, look.Orange(it.Name))
+			if it.Detail != "" {
+				lines = append(lines, todo(it.Detail))
+			}
 		}
 	}
 	for _, hint := range hints {

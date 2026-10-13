@@ -42,14 +42,14 @@ var (
 	signalKeys   = []look.Key{{Key: "ctrl+c", Does: "stop"}}
 )
 
-// runningKeys are the keys while the screen reads them: clicking a step
-// pins or unpins it once one's pinned.
+// runningKeys are the keys while the screen reads them: once a step's
+// pinned, clicking a step pins or unpins it, and a unpins them all.
 func runningKeys(pinned bool) []look.Key {
-	click := "a step to pin"
+	click, auto := "a step to pin", []look.Key(nil)
 	if pinned {
-		click = "a step to pin or unpin"
+		click, auto = "a step to pin or unpin", []look.Key{{Key: "a", Does: "auto"}}
 	}
-	return []look.Key{{Key: "tab", Does: "panel"}, {Key: "↑↓", Does: "scroll"}, {Key: "click", Does: click}, {Key: "q", Does: "stop"}}
+	return slices.Concat([]look.Key{{Key: "tab", Does: "panel"}, {Key: "↑↓", Does: "scroll"}, {Key: "click", Does: click}}, auto, []look.Key{{Key: "q", Does: "stop"}})
 }
 
 // wheelLines are how many lines a turn of the mouse's wheel scrolls a
@@ -68,7 +68,8 @@ const stopIt = 1
 // stops the run. q asks at the foot whether to stop, and Stop stops the
 // run, as ctrl+c does at once; tab moves the focus between the log's
 // panels, and ↑ and ↓ scroll the one with it, as the wheel scrolls the one
-// under the mouse; a click on a step in the grid pins it, or unpins it.
+// under the mouse; a click on a step in the grid pins it, or unpins it,
+// and a unpins every step, the panels following the steps at work again.
 func (p *Pretty) Keys(listen func() (<-chan ask.Key, func()), halt func()) *Pretty {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -125,7 +126,7 @@ func (p *Pretty) read(r *reading, keys <-chan ask.Key) {
 // run: ctrl+c at once; q asks first, at the foot; tab and shift+tab move
 // the focus between the log's panels; ↑ and ↓ scroll the one with it a
 // line, and the wheel the one under the mouse; a click on a step in the
-// grid pins it, or unpins it.
+// grid pins it, or unpins it, and a unpins every step.
 func (p *Pretty) press(k ask.Key) (halt bool) {
 	switch {
 	case k.Is("ctrl+c"):
@@ -148,6 +149,8 @@ func (p *Pretty) press(k ask.Key) (halt bool) {
 		p.scrollAt(k.Y, -wheelLines)
 	case k.Is("click"):
 		p.click(k.X, k.Y)
+	case k.Is("a"):
+		p.keys.pinned = nil
 	}
 	return false
 }

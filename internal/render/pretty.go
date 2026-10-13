@@ -383,7 +383,7 @@ func worse(a, b look.State) bool {
 // it was applied.
 func (p *Pretty) row(f event.StepFinished) look.Row {
 	r := f.Result
-	row := resultRow(p.title(f.Step), r)
+	row := resultRow(p.title(f.Step), r, p.step(f.Step).Part, p.start.Time)
 	if out := p.output[f.Step]; r.State == check.Failed && len(out) > 0 {
 		what, _, _ := strings.Cut(r.Reason, ":")
 		row.Says = look.Says(look.Red(what), look.Dim(p.command[f.Step]))

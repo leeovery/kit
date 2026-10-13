@@ -173,29 +173,32 @@ func TestGrid(t *testing.T) {
 	}
 }
 
-// A pinned step's name in the grid is a pink pill, its mark as it stands,
-// a failed step's red ✗ included; its name cut where it would be unpinned,
-// and the next cell's mark where it would be.
+// A pinned step's name in the grid is pink, without a background, a space
+// after its mark as it stands, a failed step's red ✗ included; its name cut
+// where it would be unpinned, and the next cell's mark where it would be.
 func TestGridPinned(t *testing.T) {
 	got := look.Grid(60,
 		look.Area{Name: "Config", Cells: []look.Cell{{State: look.Running, Name: "Homebrew formulae", Pinned: true}, {State: look.Failed, Name: "Homebrew casks", Pinned: true}}},
 		look.Area{Name: "Steps", Cells: []look.Cell{{State: look.Done, Name: "A name far too long for its cell", Pinned: true}, {State: look.Queued, Name: "mise"}}},
 	)
 	same(t, got,
-		"  CONFIG  ◐ Homebrew formulae     ✗ Homebrew casks ",
+		"  CONFIG  ◐ Homebrew formulae     ✗ Homebrew casks",
 		"  STEPS   ● A name far too long…  ○ mise",
 	)
 	for _, want := range []struct {
 		line int
 		cell string
 	}{
-		{0, look.Cyan("◐") + look.Pill("Homebrew formulae", look.Done)},
-		{0, look.Red("✗") + look.Pill("Homebrew casks", look.Done)},
-		{1, look.Pink("●") + look.Pill("A name far too long…", look.Done)},
+		{0, look.Cyan("◐") + " " + look.Pink("Homebrew formulae")},
+		{0, look.Red("✗") + " " + look.Pink("Homebrew casks")},
+		{1, look.Pink("●") + " " + look.Pink("A name far too long…")},
 	} {
 		if !strings.Contains(got[want.line], want.cell) {
 			t.Errorf("line %d is %q; want the pinned cell %q", want.line, got[want.line], want.cell)
 		}
+	}
+	if pill := look.Pill("Homebrew casks", look.Done); strings.Contains(strings.Join(got, "\n"), pill) {
+		t.Errorf("a pinned cell is a pill %q; want its name pink text", pill)
 	}
 }
 

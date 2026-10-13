@@ -8,8 +8,10 @@
 
   BACKUPS
   ▲ Time Machine  no backup disk
+  │ no backup disk is set up
   │ → System Settings › General › Time Machine › Add Backup Disk
   ▲ Arq  no backup plan
+  │ no backup plan is chosen
   │ → open Arq and choose its backup plan
   – App settings  stopped
   ● Full Disk Access  granted

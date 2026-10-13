@@ -171,7 +171,7 @@ func LogRun(w io.Writer, width int, records []logs.Record) error {
 		r, ok := results[s.Name]
 		row := look.Row{State: look.Failed, Name: cmp.Or(s.Title, s.Name), Says: look.Red("didn't finish")}
 		if ok && r.Result != nil {
-			row = resultRow(row.Name, *r.Result)
+			row = resultRow(row.Name, *r.Result, s.Part, run.Time)
 		}
 		var under []string
 		for _, c := range commands[s.Name] {
@@ -237,10 +237,10 @@ func ran(c logs.Record, w int) []string {
 	return out
 }
 
-// resultRow is a step's row from its result: its title, and what the
-// result says, its parts after dots; what to do about what needs attention
-// in it, on the lines under it.
-func resultRow(title string, r check.Result) look.Row {
+// resultRow is a step's row from its result r, of part, in a run started
+// at start: its title, and what the result says, its parts after dots;
+// what's left of it, as whatsLeft has it, on the lines under it.
+func resultRow(title string, r check.Result, part string, start time.Time) look.Row {
 	row := look.Row{State: state(r.State), Name: title}
 	switch {
 	case r.State == check.Failed && strings.HasPrefix(r.Reason, "couldn't"):
@@ -252,10 +252,6 @@ func resultRow(title string, r check.Result) look.Row {
 	default:
 		row.Says = saying(row.State, r.Summary)
 	}
-	for _, it := range r.Items {
-		if it.Quiet == "" && it.Detail != "" {
-			row.Under = append(row.Under, todo(it.Detail))
-		}
-	}
+	row.Under = whatsLeft(r, part, start)
 	return row
 }

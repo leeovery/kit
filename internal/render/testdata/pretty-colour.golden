@@ -8,6 +8,7 @@
 
   [1;38;2;255;79;154mMAC[m
   [38;2;255;162;76m▲[m [1;38;2;244;244;246mDisk space[m  [38;2;255;162;76m8% free[m
+    [38;2;255;162;76monly 8% free on the startup disk[m
     [38;2;156;163;180m→ [m[38;2;156;163;180mfree some space: kit status says where it went[m
 
   [1;38;2;255;79;154mCONFIG[m

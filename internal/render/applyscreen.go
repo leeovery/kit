@@ -320,7 +320,7 @@ func (p *Pretty) slotLeft(step string, room int) []string {
 	if !ok || wasStopped(f) {
 		return nil
 	}
-	left := p.left(f, p.step(step).Part)
+	left := whatsLeft(f.Result, p.step(step).Part, p.start.Time)
 	return left[:min(len(left), room)]
 }
 

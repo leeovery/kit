@@ -8,14 +8,14 @@
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────
   ── ▲ Scratch volume  created /Volumes/Scratch · not set up as it should be ─────────────────────
-       ==> Adding volume 9
-       ==> Adding volume 10
        ==> Adding volume 11
        ==> Adding volume 12
        mdutil disabling Spotlight
        /System/Volumes/Data/Volumes/Scratch:
            Indexing disabled.
+       Claude Code's settings don't send TMPDIR to it
        → set it in Claude Code's settings
+       Time Machine still backs it up
   ── ◐ claude-code  applying · run apply ─────────────────────────────────────────────────────────
        Setting up Claude Code...
        Verifying checksum

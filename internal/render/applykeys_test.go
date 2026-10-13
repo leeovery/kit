@@ -102,6 +102,7 @@ var (
 	keyCtrlC    = ask.Key{Name: "ctrl+c"}
 	keyTab      = ask.Key{Name: "tab"}
 	keyShiftTab = ask.Key{Name: "shift+tab"}
+	keyA        = ask.Key{Text: "a"}
 )
 
 // click is the mouse's left button pressed at column x of line y; wheel the
@@ -373,11 +374,11 @@ func pin(t *testing.T, out *syncBuffer, kb *keyboard, titles ...string) {
 }
 
 // A click on a step's cell in the grid pins it: pinned steps take the
-// log's panels in the order pinned, their names pills, each newly pinned
-// panel taking the focus; a click on a pinned step unpins it; with four
-// pinned, a fifth takes the place of the one pinned first. With none
-// pinned, the panels follow what's running again. The keys say a click
-// unpins once something's pinned.
+// log's panels in the order pinned, their names in the grid pink, each
+// newly pinned panel taking the focus; a click on a pinned step unpins it;
+// with four pinned, a fifth takes the place of the one pinned first. With
+// none pinned, the panels follow what's running again. The keys say a click
+// unpins, and a unpins them all, once something's pinned.
 func TestApplyingPinsSteps(t *testing.T) {
 	face, out, kb := applyIn(colorprofile.TrueColor, 160, 64, time.Minute, casksFailed())
 	defer func() { _ = face.Close() }()
@@ -401,22 +402,54 @@ func TestApplyingPinsSteps(t *testing.T) {
 		if got := focused(out.String()); tt.name != "one unpinned" && !slices.Equal(got, tt.want[len(tt.want)-1:]) {
 			t.Errorf("%s: the panel with the focus is %q, want the one just pinned, %s", tt.name, got, tt.want[len(tt.want)-1])
 		}
-		if f := foot(plain(), 1)[0]; f != "  tab panel · ↑↓ scroll · click a step to pin or unpin · q stop · shift+drag selects" {
-			t.Errorf("%s: the keys are %q, want a click to pin or unpin", tt.name, f)
+		if f := foot(plain(), 1)[0]; f != pinnedFoot {
+			t.Errorf("%s: the keys are %q, want %q", tt.name, f, pinnedFoot)
 		}
 	}
 	frame := strings.Join(lastFrame(out.String()), "\n")
-	for _, cell := range []string{look.Red("✗") + look.Pill("Homebrew casks", look.Done), look.Pink("●") + look.Pill("fonts", look.Done)} {
+	for _, cell := range []string{look.Red("✗") + " " + look.Pink("Homebrew casks"), look.Pink("●") + " " + look.Pink("fonts")} {
 		if !strings.Contains(frame, cell) {
 			t.Errorf("the grid has no pinned cell %q", cell)
 		}
 	}
-	if strings.Contains(frame, look.Pill("Load", look.Done)) || strings.Contains(frame, look.Pill("mise", look.Done)) {
-		t.Error("a step no longer pinned is still a pill")
+	if strings.Contains(frame, " "+look.Pink("Load")) || strings.Contains(frame, " "+look.Pink("mise")) {
+		t.Error("a step no longer pinned is still pink")
+	}
+	if strings.Contains(frame, look.Pill("fonts", look.Done)) {
+		t.Error("a pinned step's name is a pill; want it pink text")
 	}
 	pin(t, out, kb, "Homebrew casks", "claude-code", "fonts")
 	if got := panelTitles(plain()); !slices.Equal(got, following) || foot(plain(), 1)[0] != runningFoot {
 		t.Errorf("all unpinned, the panels are %q, the keys %q; want them following what's running again, %q", got, foot(plain(), 1)[0], following)
+	}
+}
+
+// The keys at the screen's foot while it reads them, once something's
+// pinned: a click unpins too, and a unpins every step.
+const pinnedFoot = "  tab panel · ↑↓ scroll · click a step to pin or unpin · a auto · q stop · shift+drag selects"
+
+// a unpins every step at once: the panels follow what's running again, the
+// grid's names their own colours, and the keys lose a. With nothing
+// pinned, a does nothing.
+func TestApplyingAutoUnpinsEverything(t *testing.T) {
+	face, out, kb := applyIn(colorprofile.TrueColor, 160, 64, time.Minute, casksFailed())
+	defer func() { _ = face.Close() }()
+	plain := func() string { return screen(uncoloured(out.String())) }
+	following := plain()
+	kb.press(t, keyA)
+	if got := plain(); got != following {
+		t.Errorf("a with nothing pinned changed the screen to\n%s", got)
+	}
+	pin(t, out, kb, "mise", "Homebrew casks", "fonts")
+	if got := panelTitles(plain()); !slices.Equal(got, []string{"mise", "Homebrew casks", "fonts"}) {
+		t.Fatalf("pinned three, the panels are %q", got)
+	}
+	kb.press(t, keyA)
+	if got := plain(); got != following {
+		t.Errorf("a with three pinned left the screen\n%s\nwant it following what's running again\n%s", got, following)
+	}
+	if frame := strings.Join(lastFrame(out.String()), "\n"); strings.Contains(frame, " "+look.Pink("Homebrew casks")) || strings.Contains(frame, " "+look.Pink("mise")) {
+		t.Error("a step unpinned by a is still pink in the grid")
 	}
 }
 

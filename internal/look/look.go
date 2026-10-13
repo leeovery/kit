@@ -411,13 +411,13 @@ func GridHit(w int, areas []Area, x, y int) (area, cell int, ok bool) {
 
 // cell is a step in a grid, its mark and its name, cut to fit: muted once
 // done, bold while it runs, dim while it waits, in its state's colour when
-// it's wrong, grey when it didn't run; a pinned step's name a pink pill,
-// its mark as it stands.
+// it's wrong, grey when it didn't run; a pinned step's name pink, its mark
+// as it stands.
 func cell(c Cell) string {
 	name := Cut(c.Name, GridCell-4)
 	switch {
 	case c.Pinned:
-		return Mark(c.State) + Pill(name, Done)
+		return Mark(c.State) + " " + Pink(name)
 	case c.State == Running:
 		return Mark(Running) + " " + Strong(name)
 	case c.State == Queued:

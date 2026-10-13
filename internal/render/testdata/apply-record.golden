@@ -8,8 +8,10 @@
 
   BACKUPS
   ▲ Time Machine  no backup disk
+  │ no backup disk is set up
   │ → System Settings › General › Time Machine › Add Backup Disk
   ▲ Arq  no backup plan
+  │ no backup plan is chosen
   │ → open Arq and choose its backup plan
   ● App settings  fine
   ● Full Disk Access  granted
@@ -68,7 +70,9 @@
   ● gpg-key  fine
 
   MANUAL
-  ▲ By hand  1 to do
-  │ → System Settings › General › Sharing › Remote Login
+  ▲ By hand  2 to do
+  │ Allow remote users Full Disk Access: System Settings › General › Sharing
+  │ → then: kit manual done sharing
+  │ Install the editor from its site (no Homebrew cask)
   ● 1password  fine
 

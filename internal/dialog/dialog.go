@@ -45,24 +45,34 @@ func Asking(ctx context.Context, run runner.Runner) string {
 // every is how often a watch looks.
 var every = 2 * time.Second
 
+// stays is how long a window must stay on screen, seen on every look, before
+// a watch tells of it: CoreServicesUIAgent also shows a "Verifying…" window
+// as a new program first opens, which closes by itself.
+var stays = 5 * time.Second
+
 // Watch is what macOS is asking, looked at every few seconds.
 type Watch struct {
 	mu   sync.Mutex
-	what string
+	seen string
 }
 
-// Up is whether macOS is asking something.
+// Up is whether a window of macOS's asking was on screen at the last look:
+// from the first look that saw it, before it's stayed long enough to be
+// told of, so the time limits it holds up wait from the start.
 func (w *Watch) Up() bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return w.what != ""
+	return w.seen != ""
 }
 
 // Run looks till ctx is done, telling changed what macOS is asking each time
-// that changes: nothing, once it's been answered.
+// that changes: once its window has stayed on screen, seen on every look,
+// for stays; nothing, once it's gone, when it was told of.
 func (w *Watch) Run(ctx context.Context, run runner.Runner, changed func(what string)) {
 	tick := time.NewTicker(every)
 	defer tick.Stop()
+	need := int((stays + every - 1) / every)
+	told, looks := "", 0
 	for {
 		select {
 		case <-ctx.Done():
@@ -71,10 +81,17 @@ func (w *Watch) Run(ctx context.Context, run runner.Runner, changed func(what st
 		}
 		what := Asking(ctx, run)
 		w.mu.Lock()
-		was := w.what
-		w.what = what
+		if what == w.seen {
+			looks++
+		} else {
+			w.seen, looks = what, 0
+		}
 		w.mu.Unlock()
-		if what != was && ctx.Err() == nil {
+		if looks < need {
+			what = ""
+		}
+		if what != told && ctx.Err() == nil {
+			told = what
 			changed(what)
 		}
 	}
