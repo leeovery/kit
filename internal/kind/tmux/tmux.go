@@ -47,6 +47,10 @@ func New(run runner.Runner, home, configHome string) *Tmux {
 func (*Tmux) Name() string    { return "tmux" }
 func (*Tmux) Program() string { return "tmux" }
 
+// Command is none: the plugins are read from tmux's config and cloned with
+// git, which macOS has, without running tmux.
+func (*Tmux) Command() string { return "" }
+
 // files are tmux's config files TPM reads, in its order.
 func (t *Tmux) files() []string {
 	return []string{t.System, filepath.Join(t.home, ".tmux.conf"), filepath.Join(t.configHome, "tmux", "tmux.conf")}

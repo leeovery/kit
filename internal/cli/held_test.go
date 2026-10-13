@@ -79,9 +79,8 @@ func noSecretKept(t *testing.T, w *world, printed string) {
 }
 
 // A section held back for a secret: the rest of its kind installs at once,
-// the secret's synced meanwhile, though its step comes after the formulae's,
-// then the section installs as one command, the secret set for it alone,
-// its value kept from the screen and the log.
+// the secret's synced meanwhile, then the section installs as one command,
+// the secret set for it alone, its value kept from the screen and the log.
 func TestALinesSectionWaitsForItsSecret(t *testing.T) {
 	w := heldWorld(t)
 	w.fake.On("op", "whoami")
@@ -90,8 +89,8 @@ func TestALinesSectionWaitsForItsSecret(t *testing.T) {
 	out, errOut, _ := w.run(t, "apply")
 	calls := w.fake.Calls()
 	plain, synced, held := slices.Index(calls, "brew install --formula ripgrep"), slices.Index(calls, "op read op://vault/Item/Section/token"), slices.Index(calls, "brew install --formula owner/private/fetcher")
-	if plain < 0 || synced < plain || held < synced {
-		t.Fatalf("ran %q: want ripgrep installed, then TOKEN synced, then fetcher installed", calls)
+	if plain < 0 || synced < 0 || held < plain || held < synced {
+		t.Fatalf("ran %q: want ripgrep installed, and TOKEN synced, then fetcher installed", calls)
 	}
 	if got := tokens(installed(t, w, "ripgrep").Env); got != nil {
 		t.Error("the formulae not held back were installed with TOKEN set")

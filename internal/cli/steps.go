@@ -163,9 +163,10 @@ func (r *run) placeFeatures(all []engine.Step, on featuresOn, featured map[strin
 	}
 }
 
-// broken has step fail, saying reason, as its check, applying nothing.
+// broken has step fail at once, saying reason, as its check, waiting for
+// and applying nothing.
 func broken(step *engine.Step, reason string) {
-	step.Apply = nil
+	step.Waits, step.Apply = nil, nil
 	step.Check = func(context.Context) check.Result { return check.Result{State: check.Failed, Reason: reason} }
 }
 

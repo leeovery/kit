@@ -80,6 +80,14 @@ func TestDeclared(t *testing.T) {
 	}
 }
 
+// The plugins are read from tmux's config and cloned with git: no command
+// of tmux's is waited for.
+func TestCommandIsNone(t *testing.T) {
+	if got := kind.Command(newTmux(t, runnertest.New(t), t.TempDir())); got != "" {
+		t.Errorf("Command() = %q, want none", got)
+	}
+}
+
 // Plugins are named by where they were cloned from, and found in TPM's
 // folder: XDG's, as tmux's config is there.
 func TestCompare(t *testing.T) {

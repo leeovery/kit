@@ -48,7 +48,8 @@ func TestWhatsWaitedForInstallsFirst(t *testing.T) {
 
 // A line held back that a step waits for keeps to its section, and isn't
 // the other kind's to wait for: the casks install, though the formulae
-// check slower, while the formulae's section waits for its secret.
+// check slower, then the formulae not held back, while the formulae's
+// section waits for its secret, which never comes.
 func TestAHeldLineWaitedForKeepsToItsSection(t *testing.T) {
 	w := heldWorld(t)
 	w.writeSection(t, "laptop", "homebrew casks", "zoom\n")
@@ -64,8 +65,8 @@ func TestAHeldLineWaitedForKeepsToItsSection(t *testing.T) {
 
 	w.run(t, "apply")
 	calls := w.fake.Calls()
-	if !before(calls, "brew install --cask zoom", "brew install --formula ripgrep") || !before(calls, "brew install --formula ripgrep", "op whoami") {
-		t.Errorf("ran %q: want the casks installed, then the formulae not held back, then the secret looked for", calls)
+	if !before(calls, "brew install --cask zoom", "brew install --formula ripgrep") {
+		t.Errorf("ran %q: want the casks installed, then the formulae not held back", calls)
 	}
 	if slices.Contains(calls, "brew install --formula owner/private/fetcher") {
 		t.Error("the fetcher was installed, though its secret never came")

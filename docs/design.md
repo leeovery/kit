@@ -82,8 +82,15 @@ undeclared for adopting, removing or snoozing, and report both.
   it was (a dict whose entries are declared is watched entry by entry).
 - **A kind's program:** while it isn't installed, a kind with nothing declared for the Mac
   isn't checked at all, and one with something declared is deferred, saying what it needs.
-  The kinds whose programs are formulae are applied after the formulae, so a new Mac has
-  them first; login items after the casks and App Store apps they open.
+  Where a kind's command comes from isn't kit's to know: while kit applies (not `kit
+  status`, not the nightly run), a kind whose command isn't on kit's PATH yet (npm's `npm`,
+  the secrets' `op`, MCP's `claude`; none for tmux's plugins, read from its config and
+  cloned with git) waits for it before its check, saying so, looking again as installs end,
+  till it's there or nothing still at work in the run could bring it, then stands deferred,
+  saying it isn't there yet. The config's waits order the rest (the secrets after the
+  sign-in, `--before secret`; npm after mise, `--before npm`). Two orders stay, being kit's
+  own data: git's settings after the secrets they sign with, login items after the casks
+  and App Store apps they open.
 - **A list's lines held back:** a list's section can say, after its header, what its lines
   wait for, each as often as wanted: `--after` a step, or one of a step's things
   (`cask:1password`), order alone; `--secret` a secret a secrets section declares (one it
@@ -230,9 +237,12 @@ is done and one of its jobs (4) is free: independent checks run side by side, an
 they run in order. A step waiting for one of another's things, before it's checked or partway
 through applying, gives its job up meanwhile, and the steps that thing's step comes after or
 waits for take it as done, so none waits on it while it waits on them; one of them needing it is
-refused when the pipeline is built. Applying a step that doesn't stand ok runs its apply, then
-its check again. What a person must do by hand shows as an item while the step needs attention.
-A run that's stopped (an interrupt) fails the steps it hadn't started.
+refused when the pipeline is built. A step waiting for a thing no step in particular puts in
+place (a command) waits till it's there, or till the run's quiet: no step at work, none able
+to start, none about to look again at what it waits for; then each such wait ends together.
+Applying a step that doesn't stand ok runs its apply, then its check again. What a person must
+do by hand shows as an item while the step needs attention. A run that's stopped (an interrupt)
+fails the steps it hadn't started.
 
 ## Commands
 

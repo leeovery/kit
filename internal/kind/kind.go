@@ -79,6 +79,24 @@ var labels = map[string]string{
 // formulae for brew.
 func Label(name string) string { return cmp.Or(labels[name], name) }
 
+// Commanded is a kind whose check and install run a command other than its
+// Program, or none, as tmux's plugins, read from tmux's config and cloned
+// with git, which macOS has, need no tmux.
+type Commanded interface {
+	// Command is the command its check and install run: "" for none.
+	Command() string
+}
+
+// Command is the command k's check and install run, which, as kit applies,
+// its step waits for while it isn't on kit's PATH, as another step may put
+// it there: its Program, unless it says otherwise (Commanded); "" for none.
+func Command(k Kind) string {
+	if c, ok := k.(Commanded); ok {
+		return c.Command()
+	}
+	return k.Program()
+}
+
 // Blocker is a kind that can say why some things can't be installed now.
 type Blocker interface {
 	// Blocked says, of the things missing (declared names, by their full

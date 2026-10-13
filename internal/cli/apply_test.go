@@ -207,6 +207,7 @@ func TestApplyStopsFromItsScreen(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			w := missingWorld(t)
+			w.writeSection(t, "laptop", "manual", `search "Search with ripgrep" --after brew --test test -f /searched`+"\n")
 			w.terminal, w.size = true, [2]int{160, 64}
 			kb := &keyboard{}
 			w.listen = kb.listen
@@ -215,8 +216,8 @@ func TestApplyStopsFromItsScreen(t *testing.T) {
 
 			out, errOut, code := w.run(t, "apply")
 			record := out[strings.LastIndex(out, "\n\n  MAC\n")+1:]
-			if code != 1 || !strings.Contains(out, "  stopped · ") || !strings.Contains(record, "  – GitHub extensions  not run\n") || !strings.Contains(record, "→ kit apply carries on from here") {
-				t.Errorf("kit apply, stopped from its screen, exit %d (%s), printed\n%s\nwant the run stopped, GitHub extensions, after the formulae, not run, exit 1", code, errOut, record)
+			if code != 1 || !strings.Contains(out, "  stopped · ") || !strings.Contains(record, "  – search  not run\n") || !strings.Contains(record, "→ kit apply carries on from here") {
+				t.Errorf("kit apply, stopped from its screen, exit %d (%s), printed\n%s\nwant the run stopped, the step after the formulae not run, exit 1", code, errOut, record)
 			}
 			if len(w.asked) > 0 {
 				t.Errorf("kit asked %q after the run was stopped; want nothing offered", w.asked)

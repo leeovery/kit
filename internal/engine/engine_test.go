@@ -34,8 +34,13 @@ func (r *recorder) said(step, says string) bool {
 	for deadline := time.Now().Add(3 * time.Second); time.Now().Before(deadline); time.Sleep(time.Millisecond) {
 		r.mu.Lock()
 		heard := slices.ContainsFunc(r.events, func(e event.Event) bool {
-			d, ok := e.(event.Doing)
-			return ok && d.Step == step && d.Says == says
+			switch e := e.(type) {
+			case event.Doing:
+				return e.Step == step && e.Says == says
+			case event.StepStarted:
+				return e.Step == step && e.Doing == says
+			}
+			return false
 		})
 		r.mu.Unlock()
 		if heard {
@@ -85,6 +90,7 @@ func TestNewRefuses(t *testing.T) {
 		{name: "two steps of one name", steps: []engine.Step{{Name: "brew", Check: ok("")}, {Name: "brew", Check: ok("")}}, want: "two steps named brew"},
 		{name: "a need that isn't a step", steps: []engine.Step{{Name: "brew", Needs: []string{"homebrew"}, Check: ok("")}}, want: "step brew needs homebrew, which isn't a step"},
 		{name: "after a step that isn't one", steps: []engine.Step{{Name: "app", After: []string{"brew"}, Check: ok("")}}, want: "step app comes after brew, which isn't a step"},
+		{name: "a thing of no step, never there", steps: []engine.Step{{Name: "npm", Waits: []engine.Wait{{Thing: "npm"}}, Check: ok("")}}, want: "step npm comes after npm, and nothing says when it's there"},
 		{
 			name: "a cycle through after",
 			steps: []engine.Step{
@@ -1083,5 +1089,171 @@ func TestAWaitEndsAsSoonAsItsFreed(t *testing.T) {
 	report := applyWithin(t, p, rec, engine.Options{Jobs: 4})
 	if came.Load() || report.Results["secret"].State != check.OK || report.Results["cask"].State == check.Failed {
 		t.Errorf("brew's wait came %v, secret = %+v: want brew done waiting without 1password, then secret checked", came.Load(), report.Results["secret"])
+	}
+}
+
+// installedWith is a check that stands ok once there, as a command its
+// step runs is.
+func installedWith(there *atomic.Bool) func(context.Context) check.Result {
+	return func(context.Context) check.Result {
+		if there.Load() {
+			return check.Result{State: check.OK}
+		}
+		return check.Result{State: check.Attention}
+	}
+}
+
+// A step waiting for a thing no step in particular puts in place, as a
+// command it runs, gives its job up, and waits while another step is at
+// work: it's checked once the thing's there, as soon as that step says it
+// may be, or finishes, not at its next look.
+func TestAStepWaitsForAThingOfNoStepWhileOthersWork(t *testing.T) {
+	defer engine.SetWaitPoll(time.Hour)()
+	for _, tt := range []struct {
+		name string
+		says bool
+		jobs int
+	}{
+		{"said by the step at work", true, 2},
+		{"as that step finishes, with one job", false, 1},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var there atomic.Bool
+			checked := make(chan struct{})
+			var sawChecked atomic.Bool
+			rec := &recorder{}
+			p, err := engine.New(
+				engine.Step{Name: "npm", Waits: []engine.Wait{{Thing: "npm", Ready: func(context.Context) bool { return there.Load() }}},
+					Check: func(context.Context) check.Result {
+						close(checked)
+						return installedWith(&there)(context.Background())
+					}},
+				engine.Step{Name: "mise", Check: func(context.Context) check.Result { return check.Result{State: check.Attention} },
+					Apply: func(ctx context.Context, _ check.Result) error {
+						if !rec.said("npm", "waiting for npm") {
+							return errors.New("npm never waited")
+						}
+						// Long enough for a run taken as quiet to have ended
+						// npm's wait.
+						time.Sleep(50 * time.Millisecond)
+						there.Store(true)
+						if tt.says {
+							engine.Changed(ctx)
+							select {
+							case <-checked:
+								sawChecked.Store(true)
+							case <-time.After(3 * time.Second):
+							}
+						}
+						return nil
+					}},
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			report := applyWithin(t, p, rec, engine.Options{Jobs: tt.jobs})
+			if got := report.Results["npm"]; got.State != check.OK || tt.says && !sawChecked.Load() {
+				t.Errorf("npm = %+v, checked while mise went on: %v; want it checked once npm was there", got, sawChecked.Load())
+			}
+			if got := report.Results["mise"]; got.State == check.Failed {
+				t.Errorf("mise = %+v", got)
+			}
+		})
+	}
+}
+
+// A wait for a thing no step in particular puts in place ends once nothing
+// at work in the run could put it there: the step isn't applied, deferred,
+// saying what isn't there, unless it stands ok. Steps each waiting so both
+// end.
+func TestAWaitForAThingOfNoStepEndsOnceTheRunsQuiet(t *testing.T) {
+	defer engine.SetWaitPoll(time.Hour)()
+	never := func(context.Context) bool { return false }
+	for _, tt := range []struct {
+		name  string
+		check check.Result
+		want  check.Result
+	}{
+		{"not done", check.Result{State: check.Attention}, check.Result{State: check.Deferred, Reason: "needs npm, which isn't there yet"}},
+		{"done anyway", check.Result{State: check.OK, Items: []check.Item{{ID: "npm:quiet", Action: "remove"}}}, check.Result{State: check.OK}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var applied atomic.Bool
+			p, err := engine.New(
+				engine.Step{Name: "npm", Waits: []engine.Wait{{Thing: "npm", Ready: never}},
+					Check: func(context.Context) check.Result { return tt.check },
+					Apply: func(context.Context, check.Result) error { applied.Store(true); return nil }},
+				engine.Step{Name: "mcp", Waits: []engine.Wait{{Thing: "claude", Ready: never}},
+					Check: func(context.Context) check.Result { return check.Result{State: check.Attention} }},
+				engine.Step{Name: "mise", Check: ok("")},
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			report := applyWithin(t, p, &recorder{}, engine.Options{Jobs: 1})
+			if got := report.Results["npm"]; got.State != tt.want.State || got.Reason != tt.want.Reason {
+				t.Errorf("npm = %+v, want %+v", got, tt.want)
+			}
+			if got := report.Results["mcp"]; got.State != check.Deferred || got.Reason != "needs claude, which isn't there yet" {
+				t.Errorf("mcp = %+v, want it deferred too", got)
+			}
+			if applied.Load() {
+				t.Error("npm was applied, though npm never came")
+			}
+		})
+	}
+}
+
+// A check waits for nothing: a step whose thing isn't there is checked as
+// it stands.
+func TestACheckWaitsForNoThingOfNoStep(t *testing.T) {
+	defer engine.SetWaitPoll(time.Hour)()
+	var asked atomic.Bool
+	p, err := engine.New(engine.Step{Name: "npm", Waits: []engine.Wait{{Thing: "npm", Ready: func(context.Context) bool { asked.Store(true); return false }}},
+		Check: func(context.Context) check.Result { return check.Result{State: check.Attention} }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := p.Check(t.Context(), &recorder{}, engine.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := report.Results["npm"]; got.State != check.Attention || asked.Load() {
+		t.Errorf("npm = %+v, npm looked for: %v; want it checked as it stands", got, asked.Load())
+	}
+}
+
+// A step waiting to go on, partway through applying, once what it waits for
+// has come, keeps the run from going quiet: a step waiting for a thing of
+// no step that it then puts in place gets it.
+func TestAStepGoingOnKeepsTheRunFromGoingQuiet(t *testing.T) {
+	defer engine.SetWaitPoll(time.Hour)()
+	var synced, there atomic.Bool
+	token := engine.Wait{Step: "secret", Thing: "TOKEN", Ready: func(context.Context) bool { return synced.Load() }}
+	notDone := func(context.Context) check.Result { return check.Result{State: check.Attention} }
+	rec := &recorder{}
+	p, err := engine.New(
+		engine.Step{Name: "brew", Later: []engine.Wait{token}, Check: notDone, Apply: func(ctx context.Context, _ check.Result) error {
+			if !engine.Await(ctx, token, "waiting for TOKEN") {
+				return errors.New("TOKEN never came")
+			}
+			there.Store(true)
+			return nil
+		}},
+		engine.Step{Name: "npm", Waits: []engine.Wait{{Thing: "npm", Ready: func(context.Context) bool { return there.Load() }}}, Check: installedWith(&there)},
+		engine.Step{Name: "secret", After: []string{"brew"}, Check: notDone, Apply: func(context.Context, check.Result) error {
+			if !rec.said("npm", "waiting for npm") {
+				return errors.New("npm never waited")
+			}
+			synced.Store(true)
+			return nil
+		}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := applyWithin(t, p, rec, engine.Options{Jobs: 1})
+	if got := report.Results["npm"]; got.State != check.OK {
+		t.Errorf("npm = %+v, want it checked once brew, going on, put npm there", got)
 	}
 }

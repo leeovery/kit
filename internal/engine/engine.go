@@ -45,15 +45,18 @@ type Step struct {
 	// Needs are the steps that must stand ok before it's checked or applied.
 	Needs []string
 	// After are steps it's applied after, whether or not they stand ok, as
-	// a kind's program is installed by an earlier step: a check doesn't wait
-	// for them, and a step a run doesn't take is no wait at all. Before are
+	// git's settings are after the secrets they sign with: a check doesn't
+	// wait for them, and a step a run doesn't take is no wait at all. Before are
 	// the steps applied after it, each as though it named it in its After.
 	After, Before []string
 	// Waits are things it's applied after, one at a time: each one of
 	// another step's things, waited for until it's in place, or until that
 	// step has finished, whichever comes first, as a step waits for the one
-	// cask it's about while the rest still install. One its step finished
-	// without leaves the step unapplied: deferred, unless it stands ok.
+	// cask it's about while the rest still install; or, without a Step, a
+	// thing no step in particular puts in place, as a command it runs,
+	// waited for until it's in place, or until nothing at work in the run
+	// could put it there (quiet). One that doesn't come leaves the step
+	// unapplied: deferred, unless it stands ok.
 	Waits []Wait
 	// Later are what it waits for partway through applying, once it has
 	// applied what it can without them, as a kind installs a section of its
@@ -77,8 +80,9 @@ type Step struct {
 
 // Wait is a thing a step is applied after: one of the things another step
 // puts in place, by its step's name and its own, as in cask:1password, and
-// whether it's in place yet; or, among a step's Later, without a thing or
-// Ready, that step itself.
+// whether it's in place yet; among a step's Waits, without a step, a thing
+// no step in particular puts in place; or, among a step's Later, without a
+// thing or Ready, that step itself.
 type Wait struct {
 	Step, Thing string
 	Ready       func(ctx context.Context) bool
@@ -169,7 +173,10 @@ func New(steps ...Step) (*Pipeline, error) {
 			}
 		}
 		for _, w := range s.Waits {
-			if _, ok := byName[w.Step]; !ok || w.Ready == nil {
+			switch _, ok := byName[w.Step]; {
+			case w.Step == "" && w.Ready == nil:
+				return nil, fmt.Errorf("step %s comes after %s, and nothing says when it's there", s.Name, w.Thing)
+			case w.Step != "" && (!ok || w.Ready == nil):
 				return nil, fmt.Errorf("step %s comes after %s:%s, and %s isn't a step", s.Name, w.Step, w.Thing, w.Step)
 			}
 		}
@@ -214,7 +221,7 @@ func New(steps ...Step) (*Pipeline, error) {
 func waitsOnEachOther(steps []Step, byName map[string]Step) error {
 	for _, s := range steps {
 		for _, w := range slices.Concat(s.Waits, s.Later) {
-			if w.Step == s.Name {
+			if w.Step == s.Name || w.Step == "" {
 				continue
 			}
 			lead := leadUp(w.Step, byName)
@@ -244,7 +251,9 @@ func leadUp(name string, byName map[string]Step) map[string]bool {
 			visit(next)
 		}
 		for _, w := range slices.Concat(s.Waits, s.Later) {
-			visit(w.Step)
+			if w.Step != "" {
+				visit(w.Step)
+			}
 		}
 	}
 	visit(name)
@@ -379,7 +388,9 @@ func (p *Pipeline) Planned(opts Options) ([]event.Step, error) {
 func (s Step) info() event.Step {
 	waits := slices.Concat(s.Needs, s.After)
 	for _, w := range s.Waits {
-		waits = append(waits, w.Step)
+		if w.Step != "" {
+			waits = append(waits, w.Step)
+		}
 	}
 	return event.Step{Name: s.Name, Title: s.title(), Area: s.Area, Part: s.Part, Waiting: s.Waiting, Waits: waits}
 }
@@ -417,9 +428,10 @@ func (p *Pipeline) run(ctx context.Context, sink event.Sink, opts Options, apply
 		finished: make(chan outcome),
 		parked:   make(chan parking),
 		resumed:  make(chan chan struct{}),
+		looked:   make(chan struct{}),
 		over:     make(map[string]chan struct{}, len(steps)),
 		freed:    make(map[string]map[string]bool),
-		pokes:    make(map[string]chan struct{}),
+		looks:    make(map[*look]bool),
 	}
 	for _, s := range steps {
 		d.over[s.Name] = make(chan struct{})
@@ -436,7 +448,7 @@ func (p *Pipeline) run(ctx context.Context, sink event.Sink, opts Options, apply
 
 // dispatch runs a run's steps: it starts each, in pipeline order, once what
 // it needs is done and a job is free, and defers each whose needs didn't
-// stand ok. Only its own goroutine touches its maps, but freed and pokes,
+// stand ok. Only its own goroutine touches its maps, but freed and looks,
 // which mu guards, and titles and over, which steps' goroutines read, as
 // they never change once it's started.
 type dispatch struct {
@@ -451,20 +463,33 @@ type dispatch struct {
 	finished chan outcome
 	// parked are steps giving their jobs up while they wait for a thing;
 	// resumed, steps done waiting, each asking for a job back, given it as
-	// its channel's closed; queued, those still asking, first come first.
+	// its channel's closed; queued, those still asking, first come first;
+	// looked, steps waiting on, having looked again.
 	parked  chan parking
 	resumed chan chan struct{}
 	queued  []chan struct{}
+	looked  chan struct{}
 	// over are closed as each step finishes, for a step waiting on one of
 	// its things.
 	over map[string]chan struct{}
 	// freed are, for each step, the steps it takes as done before they've
-	// finished, as each waits for what that step leads up to (free); pokes,
-	// for each step, what's closed the next time it says one of its things
-	// may be in place (Changed).
+	// finished, as each waits for what that step leads up to (free); looks,
+	// the waits of the steps waiting.
 	mu    sync.Mutex
 	freed map[string]map[string]bool
-	pokes map[string]chan struct{}
+	looks map[*look]bool
+}
+
+// look is a step's wait for a thing of the step on, or, on none, for one no
+// step in particular puts in place: wake is closed to have it look again,
+// as on's things may have come; woken is whether it's been woken, or is
+// looking, and hasn't gone back to waiting; quiet, whether the run went
+// quiet while it waited.
+type look struct {
+	on            string
+	wake          chan struct{}
+	closed, woken bool
+	quiet         bool
 }
 
 // parking is a step waiting for a thing of the step on, or for on itself.
@@ -494,6 +519,9 @@ func (d *dispatch) run(ctx context.Context, steps []Step, jobs int) {
 		if len(d.results) == len(steps) {
 			return
 		}
+		if running == 0 && len(d.queued) == 0 {
+			d.hush()
+		}
 		select {
 		case o := <-d.finished:
 			running--
@@ -503,6 +531,27 @@ func (d *dispatch) run(ctx context.Context, steps []Step, jobs int) {
 			d.free(p)
 		case granted := <-d.resumed:
 			d.queued = append(d.queued, granted)
+		case <-d.looked:
+		}
+	}
+}
+
+// hush has the waits for things no step in particular puts in place end,
+// as the run's gone quiet: no step's at work, or can start, or is to look
+// again at what it waits for, so none could put them there. Each looks once
+// more, then ends without what it waited for.
+func (d *dispatch) hush() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for lk := range d.looks {
+		if lk.woken {
+			return
+		}
+	}
+	for lk := range d.looks {
+		if lk.on == "" && !lk.quiet {
+			lk.quiet = true
+			lk.rouse()
 		}
 	}
 }
@@ -511,6 +560,9 @@ func (d *dispatch) run(ctx context.Context, steps []Step, jobs int) {
 // on p.on: none of them, then, waits for p.step, which waits for them. Those
 // waiting for p.step's things look again, to see it.
 func (d *dispatch) free(p parking) {
+	if p.on == "" {
+		return
+	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	for name := range leadUp(p.on, d.byName) {
@@ -530,20 +582,24 @@ func (d *dispatch) isFreed(step, from string) bool {
 	return d.freed[step][from]
 }
 
-// poked is what's closed the next time step says one of its things may be
-// in place.
-func (d *dispatch) poked(step string) <-chan struct{} {
+// watch notes a wait for a thing of the step on, or of none, as on "".
+func (d *dispatch) watch(on string) *look {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	c, ok := d.pokes[step]
-	if !ok {
-		c = make(chan struct{})
-		d.pokes[step] = c
-	}
-	return c
+	lk := &look{on: on, wake: make(chan struct{})}
+	d.looks[lk] = true
+	return lk
 }
 
-// poke wakes the steps waiting for step's things, to look again.
+// unwatch forgets lk, done waiting.
+func (d *dispatch) unwatch(lk *look) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	delete(d.looks, lk)
+}
+
+// poke wakes the steps waiting for step's things, and for things no step in
+// particular puts in place, to look again.
 func (d *dispatch) poke(step string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -552,10 +608,45 @@ func (d *dispatch) poke(step string) {
 
 // wake is poke, mu held.
 func (d *dispatch) wake(step string) {
-	if c, ok := d.pokes[step]; ok {
-		close(c)
-		delete(d.pokes, step)
+	for lk := range d.looks {
+		if lk.on == step || lk.on == "" {
+			lk.rouse()
+		}
 	}
+}
+
+// rouse has the step waiting look again: mu is held.
+func (lk *look) rouse() {
+	lk.woken = true
+	if !lk.closed {
+		lk.closed = true
+		close(lk.wake)
+	}
+}
+
+// looking notes lk's step looking again, woken or of its own accord, and
+// has what wakes it next start afresh.
+func (d *dispatch) looking(lk *look) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	lk.woken, lk.wake, lk.closed = true, make(chan struct{}), false
+}
+
+// idle notes lk's step waiting on, having looked: still woken, should it
+// have been woken again meanwhile, to look once more. The dispatcher hears,
+// as the run may have gone quiet.
+func (d *dispatch) idle(lk *look) {
+	d.mu.Lock()
+	lk.woken = lk.closed
+	d.mu.Unlock()
+	d.looked <- struct{}{}
+}
+
+// isQuiet reports whether the run went quiet while lk's step waited.
+func (d *dispatch) isQuiet(lk *look) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return lk.quiet
 }
 
 // startReady goes through the steps not yet started, in order, and starts
@@ -635,8 +726,9 @@ type changedKey struct{}
 
 // Changed tells the run the step ctx is running may have put one of its
 // things in place, as an install does as it counts one done, and as it
-// ends: the steps waiting for its things look again at once, rather than
-// at their next look. Outside a run, it does nothing.
+// ends: the steps waiting for its things, and for things no step in
+// particular puts in place, look again at once, rather than at their next
+// look. Outside a run, it does nothing.
 func Changed(ctx context.Context) {
 	if changed, ok := ctx.Value(changedKey{}).(func()); ok {
 		changed()
@@ -688,20 +780,16 @@ func (d *dispatch) unmet(s Step) []string {
 // ok, then checks it again. A step its own check defers, as what it needs
 // isn't there, isn't applied.
 func (d *dispatch) step(ctx context.Context, s Step) check.Result {
-	var missing []string
+	var missing string
 	if d.apply {
 		missing = d.waitFor(ctx, s)
 	}
 	d.sink.Emit(event.StepStarted{Time: d.now(), Step: s.Name, Doing: "checking"})
 	res := d.check(ctx, s)
-	if len(missing) > 0 && res.State != check.OK {
-		which := ", which isn't installed"
-		if len(missing) > 1 {
-			which = ", which aren't installed"
-		}
-		return check.Result{State: check.Deferred, Reason: "needs " + strings.Join(missing, " and ") + which}
+	if missing != "" && res.State != check.OK {
+		return check.Result{State: check.Deferred, Reason: missing}
 	}
-	if d.apply && res.State != check.Deferred && (res.State != check.OK || res.Actions()) && s.Apply != nil && ctx.Err() == nil {
+	if d.apply && missing == "" && res.State != check.Deferred && (res.State != check.OK || res.Actions()) && s.Apply != nil && ctx.Err() == nil {
 		d.sink.Emit(event.StepStarted{Time: d.now(), Step: s.Name, Doing: "applying"})
 		before := res
 		if err := applySafely(event.WithChanging(ctx), s, res); err != nil {
@@ -720,37 +808,54 @@ func (d *dispatch) step(ctx context.Context, s Step) check.Result {
 }
 
 // waitFor waits for each of the things s is applied after, as await does,
-// saying, meanwhile, what it's waiting for. It returns those that didn't
-// come, unless the run was stopped.
-func (d *dispatch) waitFor(ctx context.Context, s Step) []string {
-	var missing []string
+// saying, meanwhile, what it's waiting for. It returns what s needs of
+// those that didn't come, unless the run was stopped: "" when all came.
+func (d *dispatch) waitFor(ctx context.Context, s Step) string {
+	var installed, there []string
 	for _, w := range s.Waits {
 		came := d.await(ctx, s, w, func() {
 			d.sink.Emit(event.StepStarted{Time: d.now(), Step: s.Name, Doing: "waiting for " + w.Thing})
 		})
-		if !came && ctx.Err() == nil {
-			missing = append(missing, w.Thing)
+		switch {
+		case came || ctx.Err() != nil:
+		case w.Step == "":
+			there = append(there, w.Thing)
+		default:
+			installed = append(installed, w.Thing)
 		}
 	}
-	return missing
+	var needs []string
+	if len(installed) > 0 {
+		which := ", which isn't installed"
+		if len(installed) > 1 {
+			which = ", which aren't installed"
+		}
+		needs = append(needs, "needs "+strings.Join(installed, " and ")+which)
+	}
+	if len(there) > 0 {
+		needs = append(needs, NotThere(there))
+	}
+	return strings.Join(needs, "; ")
 }
 
 // await waits, for s, for w: till its thing's in place, its step has
-// finished, or has taken s as done (free), or the run's stopped; saying
-// so, as waiting does, once it starts. It looks again each time w's step
-// says one of its things may be in place, and every waitPoll. Meanwhile s's
-// job is another's, and the steps w's step leads up to take s as done. It
-// reports whether w came: a step waited for itself, once it's finished, or
-// has taken s as done. A thing of s's own, or of a step the run doesn't
-// take, isn't waited for.
+// finished, or has taken s as done (free), or, a thing of no step, till the
+// run's gone quiet (hush); or till the run's stopped; saying so, as waiting
+// does, once it starts. It looks again each time a step that could put the
+// thing in place says it may have (w's step, or any, for a thing of none),
+// or finishes, and every waitPoll. Meanwhile s's job is another's, and the
+// steps w's step leads up to take s as done. It reports whether w came: a
+// step waited for itself, once it's finished, or has taken s as done. A
+// thing of s's own, or of a step the run doesn't take, isn't waited for.
 func (d *dispatch) await(ctx context.Context, s Step, w Wait, waiting func()) bool {
-	if _, taken := d.titles[w.Step]; w.Step == s.Name || !taken {
+	if _, taken := d.titles[w.Step]; w.Step == s.Name || w.Step != "" && !taken {
 		return w.Ready == nil || w.Ready(ctx)
 	}
-	// Each look follows taking what's closed at the next poke, so none
-	// between a look and the wait after it is missed.
-	poked := d.poked(w.Step)
-	if came, settled := d.settled(ctx, s, w); settled {
+	// Watched before the first look, so nothing that comes between a look
+	// and the wait after it is missed.
+	lk := d.watch(w.Step)
+	defer d.unwatch(lk)
+	if came, settled := d.settled(ctx, s, w, lk); settled {
 		return came
 	}
 	waiting()
@@ -762,23 +867,28 @@ func (d *dispatch) await(ctx context.Context, s Step, w Wait, waiting func()) bo
 		select {
 		case <-ctx.Done():
 			return false
-		case <-d.over[w.Step]:
-		case <-poked:
+		case <-lk.wake:
 		case <-tick.C:
 		}
-		poked = d.poked(w.Step)
-		if came, settled := d.settled(ctx, s, w); settled {
+		d.looking(lk)
+		if came, settled := d.settled(ctx, s, w, lk); settled {
 			return came
 		}
+		d.idle(lk)
 	}
 }
 
-// settled reports whether s's wait for w is over, and whether w came: once
-// w's step has finished, w came if its thing's in place, or it's the step
-// itself; before, once its thing's in place, or once its step takes s as
-// done, as it waits for what s leads up to, when only the step itself has
-// come.
-func (d *dispatch) settled(ctx context.Context, s Step, w Wait) (came, over bool) {
+// settled reports whether s's wait for w, watched by lk, is over, and
+// whether w came: once w's step has finished, w came if its thing's in
+// place, or it's the step itself; before, once its thing's in place, or
+// once its step takes s as done, as it waits for what s leads up to, when
+// only the step itself has come. A wait for a thing of no step is over once
+// it's in place, or the run's gone quiet without it.
+func (d *dispatch) settled(ctx context.Context, s Step, w Wait, lk *look) (came, over bool) {
+	if w.Step == "" {
+		ready := w.Ready(ctx)
+		return ready, ready || d.isQuiet(lk)
+	}
 	select {
 	case <-d.over[w.Step]:
 		return w.Ready == nil || w.Ready(ctx), true
@@ -824,6 +934,7 @@ func (d *dispatch) finish(s Step, res check.Result, took time.Duration) {
 	d.results[s.Name] = res
 	d.sink.Emit(event.StepFinished{Time: d.now(), Step: s.Name, Result: res, Duration: took})
 	close(d.over[s.Name])
+	d.poke(s.Name)
 }
 
 // checkSafely runs s's check, a panic in it failing the step rather than

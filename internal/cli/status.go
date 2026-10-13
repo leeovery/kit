@@ -135,7 +135,7 @@ type run struct {
 }
 
 // kindStep is a kind as a run takes it: the steps it needs, and the steps
-// it's applied after, as they install its program.
+// it's applied after, as what they put in place is its own data.
 type kindStep struct {
 	kind  kind.Kind
 	needs []string
@@ -148,24 +148,25 @@ type kindStep struct {
 
 // kindSteps are every kind kit knows, in pipeline order, driven through
 // run, for the user whose home is home and XDG config folder configHome.
-// The kinds whose programs are formulae come after the formulae, so a new
-// Mac has them before it needs them.
+// Where a kind's command comes from isn't kit's to know: while kit applies,
+// each waits for its own (kind.Command).
 func kindSteps(hb *brew.Homebrew, run runner.Runner, home, configHome, stateDir string) []kindStep {
 	return []kindStep{
 		{kind: hb.Formulae(), needs: []string{brew.StepName}},
 		{kind: hb.Casks(), needs: []string{brew.StepName}},
-		{kind: appstore.New(run), after: []string{"brew"}},
-		{kind: npm.New(run, home), after: []string{"brew"}},
-		{kind: composer.New(run), after: []string{"brew"}},
-		{kind: gotool.New(run), after: []string{"brew"}},
-		{kind: ghext.New(run), after: []string{"brew"}},
-		{kind: tmux.New(run, home, configHome), after: []string{"brew"}},
+		{kind: appstore.New(run)},
+		{kind: npm.New(run, home)},
+		{kind: composer.New(run)},
+		{kind: gotool.New(run)},
+		{kind: ghext.New(run)},
+		{kind: tmux.New(run, home, configHome)},
+		// Login items open the apps the casks and the App Store install.
 		{kind: login.New(run, home), after: []string{"cask", "mas"}},
-		{kind: mcp.New(run, home), after: []string{"brew"}},
-		{kind: secret.New(run, home), after: []string{"brew", "cask"}, declaredOnly: true},
+		{kind: mcp.New(run, home)},
+		{kind: secret.New(run, home), declaredOnly: true},
 		// git's settings sign with, and reach GitHub by, the SSH key the
 		// secrets write.
-		{kind: gitconfig.New(run), after: []string{"brew", "secret"}, declaredOnly: true},
+		{kind: gitconfig.New(run), after: []string{"secret"}, declaredOnly: true},
 		{kind: defaults.New(run, stateDir), declaredOnly: true},
 		{kind: power.New(run, stateDir), declaredOnly: true},
 		{kind: exclusion.New(run, home, exclusion.TimeMachinePrefs), declaredOnly: true},
@@ -343,6 +344,8 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 			step.Check = func(context.Context) check.Result {
 				return check.Result{State: check.Failed, Reason: unread.Error()}
 			}
+		} else if program := kind.Command(ks.kind); program != "" && slices.Contains(applies, command) {
+			step.Waits = append(step.Waits, engine.Wait{Thing: program, Ready: func(context.Context) bool { return runner.Has(observed, program) }})
 		}
 		for _, after := range ks.after {
 			if slices.Contains(r.kinds, after) {
