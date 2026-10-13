@@ -120,19 +120,22 @@ func TestStateAppearingIsATests(t *testing.T) {
 	}
 }
 
-func TestOutsideGit(t *testing.T) {
+func TestOutsideAgents(t *testing.T) {
 	tests := map[string]bool{
-		"~/.config/kit":                true,
-		"~/.config/kit/brew":           true,
-		"~/.config/kit/.gitignore":     true,
-		"~/.config/kit/.git":           false,
-		"~/.config/kit/.git/HEAD":      false,
-		"/elsewhere/kit/.git/refs/x":   false,
-		"/elsewhere/kit/docs/.git-tip": true,
+		"~/.config/kit":                                   true,
+		"~/.config/kit/brew":                              true,
+		"~/.config/kit/.gitignore":                        true,
+		"~/.config/kit/.git":                              false,
+		"~/.config/kit/.git/HEAD":                         false,
+		"/elsewhere/kit/.git/refs/x":                      false,
+		"/elsewhere/kit/docs/.git-tip":                    true,
+		"~/.config/kit/.claude":                           false,
+		"~/.config/kit/.claude/worktrees/x/shared/run.ts": false,
+		"~/.config/kit/shared/.claude-notes":              true,
 	}
 	for name, want := range tests {
-		if got := outsideGit(name); got != want {
-			t.Errorf("outsideGit(%q) = %v, want %v", name, got, want)
+		if got := outsideAgents(name); got != want {
+			t.Errorf("outsideAgents(%q) = %v, want %v", name, got, want)
 		}
 	}
 }

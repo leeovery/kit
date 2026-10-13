@@ -50,14 +50,15 @@ func (ws watchers) changes() []string {
 //
 // The config is a repository the user edits, and kit edits only when told
 // to, so any change to it is a test's, but for its .git directory, which a
-// pull or a commit made alongside the tests changes. A live kit writes its
+// pull or a commit made alongside the tests changes, and its .claude
+// directory, where agents at work alongside keep their worktrees. A live kit writes its
 // state and logs as it runs, so of those only a directory appearing is a
 // test's, and a change to the Mac's name, which only kit machine writes; the
 // OS sandbox denies a test any write there anyway.
 func watchReal(home string, getenv func(string) string) watchers {
 	var ws watchers
 	for _, p := range configPlaces(home, getenv) {
-		ws = append(ws, watchContents(p, outsideGit, followed))
+		ws = append(ws, watchContents(p, outsideAgents, followed))
 	}
 	for _, p := range statePlaces(home, getenv) {
 		if !exists(p.path) {
@@ -168,9 +169,11 @@ func (c contents) take() snapshot {
 	return s
 }
 
-// outsideGit reports whether name is outside any .git directory.
-func outsideGit(name string) bool {
-	return !slices.Contains(strings.Split(name, "/"), ".git")
+// outsideAgents reports whether name is outside any .git or .claude
+// directory.
+func outsideAgents(name string) bool {
+	parts := strings.Split(name, "/")
+	return !slices.Contains(parts, ".git") && !slices.Contains(parts, ".claude")
 }
 
 // followed notes what's at path, links followed: a config kept elsewhere and

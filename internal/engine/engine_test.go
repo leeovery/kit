@@ -28,6 +28,23 @@ func (r *recorder) Emit(e event.Event) {
 	r.events = append(r.events, e)
 }
 
+// said waits till step has said says, as it does once it waits, and
+// reports whether it did, in a few seconds.
+func (r *recorder) said(step, says string) bool {
+	for deadline := time.Now().Add(3 * time.Second); time.Now().Before(deadline); time.Sleep(time.Millisecond) {
+		r.mu.Lock()
+		heard := slices.ContainsFunc(r.events, func(e event.Event) bool {
+			d, ok := e.(event.Doing)
+			return ok && d.Step == step && d.Says == says
+		})
+		r.mu.Unlock()
+		if heard {
+			return true
+		}
+	}
+	return false
+}
+
 // finished is each step's result, by name, as the run's events said.
 func (r *recorder) finished() map[string]check.Result {
 	r.mu.Lock()
@@ -947,5 +964,124 @@ func TestAwaitingWhatsInPlace(t *testing.T) {
 		if d, ok := e.(event.Doing); ok {
 			t.Errorf("brew said %q: want nothing said of waiting", d.Says)
 		}
+	}
+}
+
+// A step waiting for a thing looks again as soon as the step putting it in
+// place says it may be, while that step goes on: not at its next look,
+// which may be long after. Outside a run, saying so does nothing.
+func TestAWaitWakesWhenToldOfAChange(t *testing.T) {
+	defer engine.SetWaitPoll(time.Hour)()
+	var in atomic.Bool
+	signed := make(chan struct{})
+	var sawSigned atomic.Bool
+	p, err := engine.New(
+		engine.Step{Name: "cask", Check: func(context.Context) check.Result { return check.Result{State: check.Attention} },
+			Apply: func(ctx context.Context, _ check.Result) error {
+				in.Store(true)
+				engine.Changed(ctx)
+				select {
+				case <-signed:
+					sawSigned.Store(true)
+				case <-time.After(3 * time.Second):
+				}
+				return nil
+			}},
+		engine.Step{Name: "sign-in", Waits: []engine.Wait{{Step: "cask", Thing: "1password", Ready: func(context.Context) bool { return in.Load() }}},
+			Check: func(context.Context) check.Result {
+				close(signed)
+				return check.Result{State: check.OK}
+			}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := applyWithin(t, p, &recorder{}, engine.Options{Jobs: 4})
+	if got := report.Results["sign-in"]; got.State != check.OK || !sawSigned.Load() {
+		t.Errorf("sign-in = %+v, checked while cask went on: %v; want it checked once cask said 1password may be in", got, sawSigned.Load())
+	}
+	engine.Changed(t.Context())
+}
+
+// Steps each waiting, partway through applying, for a thing of the other's
+// that isn't among their Later, never wait for good, whichever waits first,
+// and though one of the things never comes: the one waited on first takes
+// the other as done.
+func TestStepsAwaitingEachOthersThingsNeverWaitForGood(t *testing.T) {
+	defer engine.SetWaitPoll(time.Hour)()
+	for _, first := range []string{"brew", "cask"} {
+		t.Run(first+" first", func(t *testing.T) {
+			var mise atomic.Bool
+			var mu sync.Mutex
+			var came []string
+			note := func(what string) {
+				mu.Lock()
+				defer mu.Unlock()
+				came = append(came, what)
+			}
+			notDone := func(context.Context) check.Result { return check.Result{State: check.Attention} }
+			brew := engine.Step{Name: "brew", Check: notDone, Apply: func(ctx context.Context, _ check.Result) error {
+				mise.Store(true)
+				engine.Changed(ctx)
+				if !engine.Await(ctx, engine.Wait{Step: "cask", Thing: "1password", Ready: func(context.Context) bool { return false }}, "waiting for Homebrew casks") {
+					note("brew without 1password")
+				}
+				return nil
+			}}
+			cask := engine.Step{Name: "cask", Check: notDone, Apply: func(ctx context.Context, _ check.Result) error {
+				// 1password's install failed.
+				engine.Changed(ctx)
+				if engine.Await(ctx, engine.Wait{Step: "brew", Thing: "mise", Ready: func(context.Context) bool { return mise.Load() }}, "waiting for Homebrew formulae") {
+					note("cask with mise")
+				}
+				return nil
+			}}
+			steps := []engine.Step{brew, cask}
+			if first == "cask" {
+				steps = []engine.Step{cask, brew}
+			}
+			p, err := engine.New(steps...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			applyWithin(t, p, &recorder{}, engine.Options{Jobs: 1})
+			slices.Sort(came)
+			if want := []string{"brew without 1password", "cask with mise"}; !slices.Equal(came, want) {
+				t.Errorf("came %q, want %q", came, want)
+			}
+		})
+	}
+}
+
+// A step waiting for a thing of another's, which comes to wait for a
+// thing of a step that comes after the first, is taken as done by the
+// other: it stops waiting at once, rather than at its next look, and what
+// comes after it goes on.
+func TestAWaitEndsAsSoonAsItsFreed(t *testing.T) {
+	defer engine.SetWaitPoll(time.Hour)()
+	notDone := func(context.Context) check.Result { return check.Result{State: check.Attention} }
+	never := func(context.Context) bool { return false }
+	var came atomic.Bool
+	rec := &recorder{}
+	p, err := engine.New(
+		engine.Step{Name: "brew", Check: notDone, Apply: func(ctx context.Context, _ check.Result) error {
+			came.Store(engine.Await(ctx, engine.Wait{Step: "cask", Thing: "1password", Ready: never}, "waiting for Homebrew casks"))
+			return nil
+		}},
+		engine.Step{Name: "cask", Check: notDone, Apply: func(ctx context.Context, _ check.Result) error {
+			if !rec.said("brew", "waiting for Homebrew casks") {
+				return errors.New("brew never waited")
+			}
+			engine.Await(ctx, engine.Wait{Step: "secret", Thing: "TOKEN", Ready: never}, "waiting for TOKEN")
+			return nil
+		}},
+		engine.Step{Name: "secret", After: []string{"brew"}, Check: ok("")},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := applyWithin(t, p, rec, engine.Options{Jobs: 4})
+	if came.Load() || report.Results["secret"].State != check.OK || report.Results["cask"].State == check.Failed {
+		t.Errorf("brew's wait came %v, secret = %+v: want brew done waiting without 1password, then secret checked", came.Load(), report.Results["secret"])
 	}
 }

@@ -127,9 +127,9 @@ type run struct {
 	cfg         *config.Config
 	kindsByName map[string]kind.Kind
 	lists       map[string]config.List
-	// holding are the sections of each kind's lines held back, by kind, as
-	// they're placed once the run's steps are known.
-	holding map[string][]kind.Held
+	// placing is how each kind's lines install, by kind, as they're placed
+	// once the run's steps are known.
+	placing map[string]kind.Placing
 	repo    gitrepo.Repo
 	record  drift.Record
 }
@@ -293,7 +293,7 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 	r := &run{
 		command: command, machine: machine, version: a.Version, sink: sink, face: face, log: log,
 		stateDir: dirs.State, now: now, run: observed, cfg: cfg, homeDir: home, logsDir: dirs.Logs, dataDir: dirs.Data,
-		kindsByName: map[string]kind.Kind{}, lists: map[string]config.List{}, holding: map[string][]kind.Held{},
+		kindsByName: map[string]kind.Kind{}, lists: map[string]config.List{}, placing: map[string]kind.Placing{},
 		repo: gitrepo.Repo{Dir: dirs.Config, Run: observed}, record: record,
 		drifters: map[string]drifter{}, admin: &steps.Admin{},
 	}
@@ -336,8 +336,7 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 		if len(list.Entries) == 0 && unread == nil && (ks.declaredOnly || !runner.Has(observed, ks.kind.Program())) {
 			continue
 		}
-		held := func() []kind.Held { return r.holding[name] }
-		step := kind.Holding(ks.kind, list, held, ks.needs...)
+		step := kind.Placed(ks.kind, list, func() kind.Placing { return r.placing[name] }, ks.needs...)
 		step.Area = steps.AreaDrift
 		if unread != nil {
 			step.Check = func(context.Context) check.Result {
@@ -352,7 +351,7 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 		kinds = append(kinds, quietened(step, record, now))
 		r.kinds = append(r.kinds, name)
 		r.drift = append(r.drift, name)
-		r.drifters[name] = kindDrifter{k: ks.kind, list: list, held: held}
+		r.drifters[name] = kindDrifter{k: ks.kind, list: list, held: func() []kind.Held { return r.placing[name].Held }}
 	}
 	homebrew := hb.Step()
 	homebrew.Area = steps.AreaDrift
@@ -456,7 +455,7 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 	}
 	if err == nil {
 		r.steps = slices.Concat(base, scripts, byHandOwn)
-		r.placeHeld(r.steps)
+		r.placeLines(r.steps)
 		r.pipeline, err = engine.New(r.steps...)
 	}
 	if err != nil {

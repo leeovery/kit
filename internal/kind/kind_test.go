@@ -7,7 +7,10 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/config"
@@ -440,7 +443,7 @@ func heldWorld(ready bool) (*fakeKind, config.List, []kind.Held) {
 // install with its variable set, which the rest's isn't.
 func TestHeldLinesInstallApart(t *testing.T) {
 	k, list, held := heldWorld(true)
-	s := kind.Holding(k, list, func() []kind.Held { return held })
+	s := kind.Placed(k, list, func() kind.Placing { return kind.Placing{Held: held} })
 	if err := s.Apply(t.Context(), s.Check(t.Context())); err != nil {
 		t.Fatal(err)
 	}
@@ -457,7 +460,7 @@ func TestHeldLinesInstallApart(t *testing.T) {
 // applying's tried; the rest install.
 func TestHeldLinesWaitingForWhatNeverComes(t *testing.T) {
 	k, list, held := heldWorld(false)
-	s := kind.Holding(k, list, func() []kind.Held { return held })
+	s := kind.Placed(k, list, func() kind.Placing { return kind.Placing{Held: held} })
 	found := s.Check(t.Context())
 	if got := found.Items; len(got) != 3 || got[0].Action != kind.Install || got[2].Action != kind.Install {
 		t.Fatalf("before applying, items = %+v: want each to install", got)
@@ -494,9 +497,351 @@ func (e echoingKind) Install(ctx context.Context, names []string) error {
 // An install with a secret set that fails says so without its value.
 func TestAHeldInstallFailingHidesItsSecret(t *testing.T) {
 	k, list, held := heldWorld(true)
-	s := kind.Holding(echoingKind{k}, list, func() []kind.Held { return held })
+	s := kind.Placed(echoingKind{k}, list, func() kind.Placing { return kind.Placing{Held: held} })
 	err := s.Apply(t.Context(), s.Check(t.Context()))
 	if err == nil || err.Error() != "couldn't install owner/private/fetcher, owner/private/helper: fetch failed with [redacted]" {
 		t.Errorf("Apply() = %v, want the held install's failure, its secret hidden", err)
+	}
+}
+
+// fetchingKind is a countingKind whose install downloads first, a
+// "fetched" line for each download, and says "begin" as it begins
+// installing.
+type fetchingKind struct{ *countingKind }
+
+func (*fetchingKind) Fetched(line string, _ []string) (string, bool) {
+	return strings.CutPrefix(line, "fetched ")
+}
+
+func (*fetchingKind) Begun(line string) bool { return line == "begin" }
+
+// A kind whose install downloads first has its step say it's downloading,
+// from the start, counting those it's installing as each is downloaded,
+// and, once the install proper's begun, installing, counting them done. A
+// dependency's download, and one said twice, count nothing.
+func TestStepSaysItsDownloading(t *testing.T) {
+	k := &fetchingKind{&countingKind{
+		fakeKind: knowing("a", "b"),
+		prints:   []string{"fetched b", "fetched libdep", "fetched b", "fetched a", "begin", "fetched a", "done a", "done b"},
+	}}
+	var said []event.Doing
+	s := kind.Step(k, declared("a", "b"))
+	if err := s.Apply(saying(&said), s.Check(context.Background())); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	want := []event.Doing{
+		{Says: "downloading", Of: 2},
+		{Says: "downloading", Done: 1, Of: 2},
+		{Says: "downloading", Done: 2, Of: 2},
+		{Says: "installing a", Of: 2},
+		{Says: "installing b", Done: 1, Of: 2},
+		{Says: "installing", Done: 2, Of: 2},
+	}
+	if !slices.Equal(said, want) {
+		t.Errorf("the step said %+v\nwant %+v", said, want)
+	}
+}
+
+// A thing said installed ends the downloading, though nothing said the
+// install had begun.
+func TestStepInstallingWithoutABeginning(t *testing.T) {
+	k := &fetchingKind{&countingKind{fakeKind: knowing("a", "b"), prints: []string{"done a"}}}
+	var said []event.Doing
+	s := kind.Step(k, declared("a", "b"))
+	if err := s.Apply(saying(&said), s.Check(context.Background())); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	if want := []event.Doing{{Says: "downloading", Of: 2}, {Says: "installing b", Done: 1, Of: 2}}; !slices.Equal(said, want) {
+		t.Errorf("the step said %+v, want %+v", said, want)
+	}
+}
+
+// waitingKind is a countingKind whose install waits its turn behind
+// another's step before it runs.
+type waitingKind struct{ *countingKind }
+
+func (w *waitingKind) Install(ctx context.Context, names []string) error {
+	resume := kind.Waiting(ctx, "Homebrew formulae")
+	resume()
+	return w.countingKind.Install(ctx, names)
+}
+
+// An install waiting its turn says so, by the title of the step it waits
+// for, then how it's going once it's its turn; one nothing counts says
+// nothing.
+func TestAnInstallWaitingItsTurn(t *testing.T) {
+	k := &waitingKind{&countingKind{fakeKind: knowing("a"), prints: []string{"done a"}}}
+	var said []event.Doing
+	s := kind.Step(k, declared("a"))
+	if err := s.Apply(saying(&said), s.Check(context.Background())); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	want := []event.Doing{{Says: "installing a", Of: 1}, {Says: "waiting for Homebrew formulae"}, {Says: "installing a", Of: 1}, {Says: "installing", Done: 1, Of: 1}}
+	if !slices.Equal(said, want) {
+		t.Errorf("the step said %+v\nwant %+v", said, want)
+	}
+	said = nil
+	kind.Waiting(saying(&said), "Homebrew formulae")()
+	if said != nil {
+		t.Errorf("waiting outside an install said %+v, want nothing", said)
+	}
+}
+
+// The lines a step waits for install first, on their own, as one command,
+// then the rest; one installed already is left be, and one held back keeps
+// to its section.
+func TestWhatsWaitedForInstallsFirst(t *testing.T) {
+	k, list, held := heldWorld(true)
+	list.Entries = append(list.Entries, config.Entry{Name: "mise", File: "brew"}, config.Entry{Name: "zoxide", File: "brew"})
+	k.aliases["mise"], k.aliases["zoxide"], k.aliases["fzf"] = "mise", "zoxide", "fzf"
+	k.installed = []kind.Installed{{Name: "fzf", Explicit: true}}
+	list.Entries = append(list.Entries, config.Entry{Name: "fzf", File: "brew"})
+	placing := kind.Placing{First: []string{"zoxide", "mise", "fzf", "owner/private/helper"}, Held: held}
+	s := kind.Placed(k, list, func() kind.Placing { return placing })
+	if err := s.Apply(t.Context(), s.Check(t.Context())); err != nil {
+		t.Fatal(err)
+	}
+	want := [][]string{{"mise", "zoxide"}, {"jq"}, {"owner/private/fetcher", "owner/private/helper"}}
+	if !slices.EqualFunc(k.installs, want, slices.Equal) {
+		t.Errorf("installed %q, want %q: what's waited for first, as the check lists it, then the rest, then the section held back", k.installs, want)
+	}
+}
+
+// installLog is what kinds taking turns installed, in the order they did,
+// each as kind:names.
+type installLog struct {
+	mu       sync.Mutex
+	installs []string
+}
+
+func (l *installLog) add(name string, names []string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.installs = append(l.installs, name+":"+strings.Join(names, ","))
+}
+
+func (l *installLog) has(install string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return slices.Contains(l.installs, install)
+}
+
+// await waits till install is in the log, or a while.
+func (l *installLog) await(install string) {
+	for deadline := time.Now().Add(3 * time.Second); !l.has(install) && time.Now().Before(deadline); {
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func (l *installLog) all() []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return slices.Clone(l.installs)
+}
+
+// turnKind is a fakeKind named name whose installs go in log, each once
+// what its after says it waits for is in log, or a while.
+type turnKind struct {
+	*fakeKind
+	name  string
+	log   *installLog
+	after map[string]string
+}
+
+func (k *turnKind) Name() string { return k.name }
+
+func (k *turnKind) Install(ctx context.Context, names []string) error {
+	if after, ok := k.after[strings.Join(names, ",")]; ok {
+		k.log.await(after)
+	}
+	k.log.add(k.name, names)
+	return k.fakeKind.Install(ctx, names)
+}
+
+// watcher is a sink that closes heard once step says says.
+type watcher struct {
+	step, says string
+	heard      chan struct{}
+	once       sync.Once
+}
+
+func (w *watcher) Emit(e event.Event) {
+	if d, ok := e.(event.Doing); ok && d.Step == w.step && d.Says == w.says {
+		w.once.Do(func() { close(w.heard) })
+	}
+}
+
+// sharingWorld is two kinds that take turns: brew, missing jq, behind the
+// thing cask installs first, app, which ready says is in, and cask,
+// missing app and zoom, whose first check is as checking says, given
+// whether brew is waiting, or its own, once checking says nothing. cask
+// installs zoom once brew's installed jq, or a while.
+func sharingWorld(log *installLog, ready func(context.Context) bool, checking func(waiting <-chan struct{}) check.Result) (brew, cask engine.Step, w *watcher) {
+	w = &watcher{step: "brew", says: "waiting for Homebrew casks", heard: make(chan struct{})}
+	brewKind := &turnKind{fakeKind: knowing("jq"), name: "brew", log: log}
+	brewing := kind.Placing{Behind: []engine.Wait{{Step: "cask", Thing: "app", Ready: ready}}}
+	brew = kind.Placed(brewKind, declared("jq"), func() kind.Placing { return brewing })
+	caskKind := &turnKind{fakeKind: knowing("app", "zoom"), name: "cask", log: log, after: map[string]string{"zoom": "brew:jq"}}
+	casking := kind.Placing{First: []string{"app"}}
+	cask = kind.Placed(caskKind, declared("app", "zoom"), func() kind.Placing { return casking })
+	compare := cask.Check
+	var first sync.Once
+	cask.Check = func(ctx context.Context) check.Result {
+		var res check.Result
+		first.Do(func() { res = checking(w.heard) })
+		if res.State != "" {
+			return res
+		}
+		return compare(ctx)
+	}
+	return brew, cask, w
+}
+
+// applied applies steps in ctx, failing the test should the run not
+// finish in a few seconds, as when a wait is never told what it waits for
+// came: the engine looks again by itself only every 30 seconds.
+func applied(ctx context.Context, t *testing.T, sink event.Sink, opts engine.Options, steps ...engine.Step) engine.Report {
+	t.Helper()
+	p, err := engine.New(steps...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan engine.Report)
+	go func() {
+		report, _ := p.Apply(ctx, sink, opts)
+		done <- report
+	}()
+	select {
+	case report := <-done:
+		return report
+	case <-time.After(5 * time.Second):
+		t.Fatal("the run never finished")
+		return engine.Report{}
+	}
+}
+
+// A kind taking turns with another installs the rest of its lines once
+// the other's first are in, though it's ready first: the thing another
+// step waits for isn't held up behind them. It says what it waits for,
+// and looks again as soon as the other's install ends, not once the
+// other's step has.
+func TestTheRestWaitsBehindAnotherKindsFirst(t *testing.T) {
+	log := &installLog{}
+	brew, cask, w := sharingWorld(log, func(context.Context) bool { return log.has("cask:app") }, func(waiting <-chan struct{}) check.Result {
+		select {
+		case <-waiting:
+		case <-time.After(3 * time.Second):
+		}
+		return check.Result{}
+	})
+	applied(t.Context(), t, w, engine.Options{Jobs: 4}, brew, cask)
+	if want := []string{"cask:app", "brew:jq", "cask:zoom"}; !slices.Equal(log.all(), want) {
+		t.Errorf("installed %q, want %q: cask's app, which a step waits for, then brew's jq, as soon as app's install ended", log.all(), want)
+	}
+	select {
+	case <-w.heard:
+	default:
+		t.Error("brew never said it was waiting for Homebrew casks")
+	}
+}
+
+// A thing of another kind's in place already holds nothing up, nor does
+// one whose step fails, or isn't in the run.
+func TestTheRestNeverWaitsForGood(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		ready bool
+		check check.Result
+		only  []string
+	}{
+		{name: "in place", ready: true},
+		{name: "its step failing", check: check.Result{State: check.Failed, Reason: "brew list exited 1"}},
+		{name: "its step not run", only: []string{"brew"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			log := &installLog{}
+			brew, cask, w := sharingWorld(log, func(context.Context) bool { return tt.ready }, func(<-chan struct{}) check.Result {
+				// While brew holds nothing up, its install comes first.
+				if tt.check.State == "" {
+					log.await("brew:jq")
+				}
+				return tt.check
+			})
+			report := applied(t.Context(), t, w, engine.Options{Jobs: 4, Only: tt.only}, brew, cask)
+			if !log.has("brew:jq") {
+				t.Errorf("installed %q, want brew's jq", log.all())
+			}
+			if tt.ready {
+				select {
+				case <-w.heard:
+					t.Error("brew said it was waiting, for what was in place")
+				default:
+				}
+			}
+			if got := report.Results["brew"]; got.State == check.Failed || got.State == check.Deferred {
+				t.Errorf("brew = %+v, want it applied", got)
+			}
+		})
+	}
+}
+
+// A run stopped while the rest wait behind another kind's first installs
+// none of them.
+func TestTheRestStoppedWhileWaiting(t *testing.T) {
+	log := &installLog{}
+	ctx, stop := context.WithCancel(t.Context())
+	defer stop()
+	brew, cask, w := sharingWorld(log, func(context.Context) bool { return false }, func(waiting <-chan struct{}) check.Result {
+		<-waiting
+		stop()
+		return check.Result{State: check.Failed, Reason: "stopped"}
+	})
+	applied(ctx, t, w, engine.Options{Jobs: 4}, brew, cask)
+	if log.has("brew:jq") {
+		t.Errorf("installed %q, though the run was stopped while jq waited", log.all())
+	}
+}
+
+// signingKind is a fakeKind named cask whose install of app prints that
+// it's installed, then goes on till signed is closed, or a while.
+type signingKind struct {
+	*fakeKind
+	in     atomic.Bool
+	signed chan struct{}
+}
+
+func (*signingKind) Name() string { return "cask" }
+
+func (s *signingKind) Install(ctx context.Context, names []string) error {
+	s.in.Store(true)
+	kind.Lines(ctx)("done app")
+	select {
+	case <-s.signed:
+	case <-time.After(3 * time.Second):
+	}
+	return s.fakeKind.Install(ctx, names)
+}
+
+func (*signingKind) Done(line string, _ []string) (string, bool) {
+	return strings.CutPrefix(line, "done ")
+}
+
+// A step waiting for a thing a kind installs looks again as soon as the
+// install says it's in, while the rest of that install goes on.
+func TestAWaitSeesAThingTheMomentItsCounted(t *testing.T) {
+	k := &signingKind{fakeKind: knowing("app", "zoom"), signed: make(chan struct{})}
+	cask := kind.Step(k, declared("app", "zoom"))
+	signIn := engine.Step{
+		Name:  "sign-in",
+		Waits: []engine.Wait{{Step: "cask", Thing: "app", Ready: func(context.Context) bool { return k.in.Load() }}},
+		Check: func(context.Context) check.Result {
+			close(k.signed)
+			return check.Result{State: check.OK}
+		},
+	}
+	start := time.Now()
+	report := applied(t.Context(), t, &watcher{heard: make(chan struct{})}, engine.Options{Jobs: 4}, cask, signIn)
+	if got := report.Results["sign-in"]; got.State != check.OK || time.Since(start) >= 3*time.Second {
+		t.Errorf("sign-in = %+v after %v: want it checked while app's install went on", got, time.Since(start))
 	}
 }

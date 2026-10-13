@@ -215,6 +215,28 @@ type Counter interface {
 	Done(line string, names []string) (string, bool)
 }
 
+// Fetcher is a Counter whose install downloads all it needs before it
+// installs any of it, as Homebrew's does: the step says it's downloading,
+// counting the things it was asked to install as each is downloaded, till
+// the install proper begins.
+type Fetcher interface {
+	Counter
+	// Fetched is which of names line says is downloaded: none when it says
+	// nothing of them, as of a dependency's download.
+	Fetched(line string, names []string) (string, bool)
+	// Begun reports whether line says the install proper has begun.
+	Begun(line string) bool
+}
+
+// Sharing is a kind whose installs take turns with other kinds', as they go
+// through one program that changes one thing at a time, as Homebrew's
+// formulae and casks do: the lines it installs after its first (Placing)
+// wait for the others' first, so none of theirs waits its turn behind them.
+type Sharing interface {
+	// Shares names the kinds it takes turns with.
+	Shares() []string
+}
+
 // Install is the action that installs an item.
 const Install = "install"
 
@@ -236,7 +258,7 @@ const (
 // the steps named in needs. An install that fails has failed for what's
 // still missing after it, named.
 func Step(k Kind, declared config.List, needs ...string) engine.Step {
-	return Holding(k, declared, nil, needs...)
+	return Placed(k, declared, nil, needs...)
 }
 
 // Held is a section of a kind's lines held back, as [homebrew formulae
@@ -255,11 +277,27 @@ type Held struct {
 	Env func() ([]string, error)
 }
 
-// Holding is the step Step is, k's lines in the sections held, as the run
-// places them once its steps are known, installed apart (InstallDeclared). A
-// section whose wait ends without what it waited for isn't installed: its
-// lines stay missing, saying what isn't there, as a Blocker's do.
-func Holding(k Kind, declared config.List, held func() []Held, needs ...string) engine.Step {
+// Placing is how a kind's lines install, as the run places them among its
+// steps, once they're known.
+type Placing struct {
+	// First are the lines other steps wait for, by name, as in --after
+	// cask:1password: installed ahead of the rest, as one command.
+	First []string
+	// Behind are what the rest wait for before they install, once First
+	// are installed: the things of the kinds a Sharing kind takes turns
+	// with that those kinds install first.
+	Behind []engine.Wait
+	// Held are its sections holding their lines back, in order.
+	Held []Held
+}
+
+// Placed is the step Step is, k's lines installed as placed says, once the
+// run's steps are known: those other steps wait for first, then the rest,
+// once what they wait for has come, the sections held apart
+// (InstallDeclared). A section whose wait ends without what it waited for
+// isn't installed: its lines stay missing, saying what isn't there, as a
+// Blocker's do.
+func Placed(k Kind, declared config.List, placed func() Placing, needs ...string) engine.Step {
 	var unmet deferred
 	return engine.Step{
 		Name:  k.Name(),
@@ -267,11 +305,11 @@ func Holding(k Kind, declared config.List, held func() []Held, needs ...string) 
 		Needs: needs,
 		Check: func(ctx context.Context) check.Result { return unmet.mark(Compare(ctx, k, declared), declared) },
 		Apply: func(ctx context.Context, found check.Result) error {
-			var sections []Held
-			if held != nil {
-				sections = held()
+			var placing Placing
+			if placed != nil {
+				placing = placed()
 			}
-			why, err := installApart(ctx, k, declared, sections, toInstall(found))
+			why, err := installApart(ctx, k, declared, placing, toInstall(found))
 			unmet.add(why)
 			return err
 		},
@@ -284,7 +322,7 @@ func Holding(k Kind, declared config.List, held func() []Held, needs ...string) 
 // command in its own environment. A section whose wait ended without what
 // it waited for isn't installed, saying what isn't there.
 func InstallDeclared(ctx context.Context, k Kind, declared config.List, held []Held, names []string) error {
-	why, err := installApart(ctx, k, declared, held, names)
+	why, err := installApart(ctx, k, declared, Placing{Held: held}, names)
 	var errs []string
 	if err != nil {
 		errs = append(errs, err.Error())
@@ -300,17 +338,23 @@ func InstallDeclared(ctx context.Context, k Kind, declared config.List, held []H
 	return nil
 }
 
-// installApart installs names as InstallDeclared does, returning why each
-// section held whose wait ended without what it waited for was left, by
-// hold.
-func installApart(ctx context.Context, k Kind, declared config.List, held []Held, names []string) (map[string]string, error) {
-	plain, apart := heldApart(names, declared, held)
+// installApart installs names as placing says, as Placed does, returning
+// why each section held whose wait ended without what it waited for was
+// left, by hold.
+func installApart(ctx context.Context, k Kind, declared config.List, placing Placing, names []string) (map[string]string, error) {
+	first, plain, apart := split(names, declared, placing)
 	var errs []string
-	if err := install(ctx, k, declared, plain, nil); err != nil {
+	if err := install(ctx, k, declared, first, nil); err != nil {
 		errs = append(errs, err.Error())
 	}
 	unmet := map[string]string{}
-	for _, h := range held {
+	if len(plain)+len(apart) > 0 && !waitBehind(ctx, placing.Behind) {
+		return unmet, ctx.Err()
+	}
+	if err := install(ctx, k, declared, plain, nil); err != nil {
+		errs = append(errs, err.Error())
+	}
+	for _, h := range placing.Held {
 		why, err := installHeld(ctx, k, declared, h, apart[h.Hold])
 		switch {
 		case ctx.Err() != nil:
@@ -327,11 +371,24 @@ func installApart(ctx context.Context, k Kind, declared config.List, held []Held
 	return unmet, nil
 }
 
-// heldApart splits names, to install, into those in no section held, and
-// those in each section held, by its hold.
-func heldApart(names []string, declared config.List, held []Held) ([]string, map[string][]string) {
-	holds := make(map[string]bool, len(held))
-	for _, h := range held {
+// waitBehind waits for each of behind in turn, as engine.Await does, saying
+// it's waiting for its step, by its title: it reports whether the run's
+// still going.
+func waitBehind(ctx context.Context, behind []engine.Wait) bool {
+	for _, w := range behind {
+		if engine.Await(ctx, w, "waiting for "+Label(w.Step)); ctx.Err() != nil {
+			return false
+		}
+	}
+	return true
+}
+
+// split splits names, to install, into those placing installs first, those
+// in no section held, and those in each section held, by its hold: a line
+// held keeps to its section, first or not.
+func split(names []string, declared config.List, placing Placing) (first, plain []string, apart map[string][]string) {
+	holds := make(map[string]bool, len(placing.Held))
+	for _, h := range placing.Held {
 		holds[h.Hold] = true
 	}
 	holdOf := make(map[string]string, len(declared.Entries))
@@ -340,16 +397,18 @@ func heldApart(names []string, declared config.List, held []Held) ([]string, map
 			holdOf[e.Name] = e.Hold
 		}
 	}
-	var plain []string
-	apart := map[string][]string{}
+	apart = map[string][]string{}
 	for _, name := range names {
-		if hold := holdOf[name]; hold != "" {
+		switch hold := holdOf[name]; {
+		case hold != "":
 			apart[hold] = append(apart[hold], name)
-		} else {
+		case slices.Contains(placing.First, name):
+			first = append(first, name)
+		default:
 			plain = append(plain, name)
 		}
 	}
-	return plain, apart
+	return first, plain, apart
 }
 
 // installHeld installs names, the lines of section h, once what it waits
@@ -380,13 +439,15 @@ func installHeld(ctx context.Context, k Kind, declared config.List, h Held, name
 
 // install installs names of k, with env set for the install alone: one
 // that fails has failed for what's still missing after it, named, the
-// values env sets hidden.
+// values env sets hidden. Once it ends, the steps waiting for k's things
+// look again.
 func install(ctx context.Context, k Kind, declared config.List, names, env []string) error {
 	if len(names) == 0 {
 		return nil
 	}
 	installing := runner.WithSecretEnv(ctx, env...)
 	err := k.Install(counting(installing, k, names), names)
+	engine.Changed(ctx)
 	if err == nil {
 		return nil
 	}
@@ -459,43 +520,117 @@ func toInstall(found check.Result) []string {
 	return names
 }
 
-type linesKey struct{}
+type progressKey struct{}
 
 // Lines is what an install command's lines go to, as runner.Command's Lines,
 // in ctx: nil when nothing counts them.
 func Lines(ctx context.Context) func(line string) {
-	lines, _ := ctx.Value(linesKey{}).(func(string))
-	return lines
+	if p, ok := ctx.Value(progressKey{}).(*progress); ok {
+		return p.line
+	}
+	return nil
 }
 
-// counting is ctx for installing names, when k is a Counter: as each is
-// done, by the lines its install prints, the step says it's installing the
-// next, and how many of names are done.
+// Waiting has the step whose install ctx counts say, till resume, that the
+// install waits for what, the title of the step whose turn it is, as a
+// Sharing kind's waits while another's install goes on; then how its
+// install's going again. Where nothing counts the install, it says nothing.
+func Waiting(ctx context.Context, what string) (resume func()) {
+	p, ok := ctx.Value(progressKey{}).(*progress)
+	if !ok {
+		return func() {}
+	}
+	p.wait(what)
+	return func() { p.wait("") }
+}
+
+// counting is ctx for installing names, when k is a Counter: the step says
+// how the install's going, from the start, by the lines it prints.
 func counting(ctx context.Context, k Kind, names []string) context.Context {
 	c, ok := k.(Counter)
 	if !ok {
 		return ctx
 	}
-	var mu sync.Mutex
-	done := make(map[string]bool, len(names))
-	say := func() {
-		next := ""
-		if i := slices.IndexFunc(names, func(name string) bool { return !done[name] }); i >= 0 {
-			next = " " + names[i]
+	f, fetches := k.(Fetcher)
+	p := &progress{ctx: ctx, counter: c, fetcher: f, names: names, fetching: fetches, done: map[string]bool{}, fetched: map[string]bool{}}
+	p.say()
+	return context.WithValue(ctx, progressKey{}, p)
+}
+
+// progress is how an install of names is going, as a Counter reads the lines
+// it prints: a Fetcher's downloading, from the start till the install proper
+// begins, counting those of names downloaded; then installing, as each is
+// done, the next not yet done, counting those done. Each done has the steps
+// waiting for the kind's things look again.
+type progress struct {
+	ctx     context.Context
+	counter Counter
+	fetcher Fetcher
+	names   []string
+
+	mu       sync.Mutex
+	fetching bool
+	// waiting is the title of the step the install waits for, while it does.
+	waiting       string
+	done, fetched map[string]bool
+}
+
+// line reads a line the install printed.
+func (p *progress) line(line string) {
+	name, done := p.counter.Done(line, p.names)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	switch {
+	case done:
+		if p.note(p.done, name) {
+			p.fetching = false
+			p.say()
+			engine.Changed(p.ctx)
 		}
-		event.Say(ctx, event.Doing{Says: "installing" + next, Done: len(done), Of: len(names)})
+	case p.fetching && p.fetcher.Begun(line):
+		p.fetching = false
+		p.say()
+	case p.fetching:
+		if name, ok := p.fetcher.Fetched(line, p.names); ok && p.note(p.fetched, name) {
+			p.say()
+		}
 	}
-	say()
-	return context.WithValue(ctx, linesKey{}, func(line string) {
-		name, ok := c.Done(line, names)
-		mu.Lock()
-		defer mu.Unlock()
-		if !ok || done[name] || !slices.Contains(names, name) {
-			return
+}
+
+// note adds name to set, when it's one of the names installing and not in
+// it yet, reporting whether it did.
+func (p *progress) note(set map[string]bool, name string) bool {
+	if !slices.Contains(p.names, name) || set[name] {
+		return false
+	}
+	set[name] = true
+	return true
+}
+
+// wait notes what the install waits for, "" once it's done waiting, and
+// says so.
+func (p *progress) wait(what string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.waiting = what
+	p.say()
+}
+
+// say says how the install's going. Once lines can come, p.mu must be
+// held.
+func (p *progress) say() {
+	switch {
+	case p.waiting != "":
+		event.Say(p.ctx, event.Doing{Says: "waiting for " + p.waiting})
+	case p.fetching:
+		event.Say(p.ctx, event.Doing{Says: "downloading", Done: len(p.fetched), Of: len(p.names)})
+	default:
+		next := ""
+		if i := slices.IndexFunc(p.names, func(name string) bool { return !p.done[name] }); i >= 0 {
+			next = " " + p.names[i]
 		}
-		done[name] = true
-		say()
-	})
+		event.Say(p.ctx, event.Doing{Says: "installing" + next, Done: len(p.done), Of: len(p.names)})
+	}
 }
 
 // UnattendedApply is k's step's apply as the scheduled run takes it:

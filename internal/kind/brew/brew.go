@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/leeovery/kit/internal/check"
@@ -47,8 +48,10 @@ type Homebrew struct {
 	}
 	// changing is held while brew installs or uninstalls: formulae's and
 	// casks' steps run side by side, and two of Homebrew changing things at
-	// once can clash over its locks.
+	// once can clash over its locks. turn is the name of the kind that last
+	// took it.
 	changing sync.Mutex
+	turn     atomic.Pointer[string]
 }
 
 // New returns Homebrew, driven through run.
@@ -135,19 +138,35 @@ func (h *Homebrew) updated(ctx context.Context) error {
 	return h.update.err
 }
 
-// install runs brew install, after brew update, of names, with which says
-// what they are: --formula or --cask.
-func (h *Homebrew) install(ctx context.Context, which string, names []string) error {
+// install runs brew install, after brew update, of names, the kind named
+// kindName's, with which says what they are: --formula or --cask.
+func (h *Homebrew) install(ctx context.Context, kindName, which string, names []string) error {
 	if err := h.updated(ctx); err != nil {
 		return err
 	}
-	h.changing.Lock()
-	defer h.changing.Unlock()
+	defer h.take(ctx, kindName)()
 	_, err := h.run.Run(ctx, runner.Command{
 		Name: "brew", Args: slices.Concat([]string{"install", which}, names),
 		Timeout: installTimeout(len(names)), Env: h.sudoEnv(ctx, which), Lines: kind.Lines(ctx),
 	})
 	return err
+}
+
+// take takes Homebrew's turn to change things, for the kind named kindName:
+// while another's install or uninstall has it, the step installing says it
+// waits for that kind's (kind.Waiting). It returns what gives the turn back.
+func (h *Homebrew) take(ctx context.Context, kindName string) (giveBack func()) {
+	if !h.changing.TryLock() {
+		holder := "Homebrew"
+		if name := h.turn.Load(); name != nil {
+			holder = kind.Label(*name)
+		}
+		resume := kind.Waiting(ctx, holder)
+		h.changing.Lock()
+		resume()
+	}
+	h.turn.Store(&kindName)
+	return h.changing.Unlock
 }
 
 // The lines brew install prints as each formula, and each cask, is
@@ -159,6 +178,27 @@ var (
 	formulaInstalled = regexp.MustCompile(`(?:^|\s)/\S*/([^/\s]+)/[^/\s]+: (?:[\d,]+ files, )?[\d.]+[KMGT]?B\b`)
 	caskInstalled    = regexp.MustCompile(`(?:^|\s)(\S+) was successfully installed!$`)
 )
+
+// The lines brew install prints as it downloads, before it installs
+// anything: one as each download's done, a dependency's as well as those
+// asked for, by its name and version, a formula's bottle, a formula without
+// one, or a cask (a bottle's manifest, fetched first, isn't one); then the
+// line each install starts with, a formula's, a cask's or a dependency's.
+var (
+	downloaded = regexp.MustCompile(`^✔\x{FE0E}?\s+(?:Bottle|Formula|Cask)\s+(\S+)\s+\(`)
+	begun      = regexp.MustCompile(`^==> (?:Installing|Pouring)\b`)
+)
+
+// fetched is which of names line, from brew install, says is downloaded.
+func fetched(line string, names []string) (string, bool) {
+	return installed(downloaded, line, names)
+}
+
+// hasBegun reports whether line, from brew install, says it's begun
+// installing what it downloaded.
+func hasBegun(line string) bool {
+	return begun.MatchString(strings.TrimSpace(line))
+}
 
 // installed is which of names, by their names in their taps, line says is
 // installed, as installedLine finds the name it says.
@@ -174,10 +214,10 @@ func installed(installedLine *regexp.Regexp, line string, names []string) (strin
 	return names[i], true
 }
 
-// uninstall runs brew uninstall of names, with which says what they are.
-func (h *Homebrew) uninstall(ctx context.Context, which string, names []string) error {
-	h.changing.Lock()
-	defer h.changing.Unlock()
+// uninstall runs brew uninstall of names, the kind named kindName's, with
+// which says what they are.
+func (h *Homebrew) uninstall(ctx context.Context, kindName, which string, names []string) error {
+	defer h.take(ctx, kindName)()
 	_, err := h.run.Run(ctx, runner.Command{Name: "brew", Args: slices.Concat([]string{"uninstall", which}, names), Env: h.sudoEnv(ctx, which)})
 	return err
 }
@@ -264,7 +304,7 @@ func (f formulae) Install(ctx context.Context, names []string) error {
 	slices.SortStableFunc(ordered, func(a, b string) int {
 		return cmp.Compare(boolInt(!strings.Contains(a, "/")), boolInt(!strings.Contains(b, "/")))
 	})
-	return f.install(ctx, "--formula", ordered)
+	return f.install(ctx, f.Name(), "--formula", ordered)
 }
 
 // Done is which of names line, from brew install, says is installed.
@@ -272,8 +312,19 @@ func (formulae) Done(line string, names []string) (string, bool) {
 	return installed(formulaInstalled, line, names)
 }
 
+// Fetched is which of names line, from brew install, says is downloaded.
+func (formulae) Fetched(line string, names []string) (string, bool) { return fetched(line, names) }
+
+// Begun reports whether line, from brew install, says it's begun
+// installing what it downloaded.
+func (formulae) Begun(line string) bool { return hasBegun(line) }
+
+// Shares names the kind formulae take turns with: casks, which Homebrew
+// installs too.
+func (formulae) Shares() []string { return []string{"cask"} }
+
 func (f formulae) Remove(ctx context.Context, names []string) error {
-	return f.uninstall(ctx, "--formula", names)
+	return f.uninstall(ctx, f.Name(), "--formula", names)
 }
 
 // Blocked finds the missing formulae whose names another tap's formula,
@@ -339,7 +390,7 @@ func (c casks) Resolve(ctx context.Context, names []string) (map[string]string, 
 }
 
 func (c casks) Install(ctx context.Context, names []string) error {
-	return c.install(ctx, "--cask", names)
+	return c.install(ctx, c.Name(), "--cask", names)
 }
 
 // Done is which of names line, from brew install, says is installed.
@@ -347,8 +398,19 @@ func (casks) Done(line string, names []string) (string, bool) {
 	return installed(caskInstalled, line, names)
 }
 
+// Fetched is which of names line, from brew install, says is downloaded.
+func (casks) Fetched(line string, names []string) (string, bool) { return fetched(line, names) }
+
+// Begun reports whether line, from brew install, says it's begun
+// installing what it downloaded.
+func (casks) Begun(line string) bool { return hasBegun(line) }
+
+// Shares names the kind casks take turns with: formulae, which Homebrew
+// installs too.
+func (casks) Shares() []string { return []string{"brew"} }
+
 func (c casks) Remove(ctx context.Context, names []string) error {
-	return c.uninstall(ctx, "--cask", names)
+	return c.uninstall(ctx, c.Name(), "--cask", names)
 }
 
 // Blocked finds the missing casks that install through a package, which

@@ -84,8 +84,10 @@ type Wait struct {
 	Ready       func(ctx context.Context) bool
 }
 
-// waitPoll is how often a step waiting for a thing looks again.
-var waitPoll = 3 * time.Second
+// waitPoll is how often a step waiting for a thing looks again, when the
+// step putting it in place hasn't said it may have (Changed): looking can
+// cost, as listing what Homebrew has installed does.
+var waitPoll = 30 * time.Second
 
 // NotYet is what applying a step returns when the step can't be applied
 // yet, as what it needs isn't there: the step doesn't stand ok, isn't
@@ -417,6 +419,7 @@ func (p *Pipeline) run(ctx context.Context, sink event.Sink, opts Options, apply
 		resumed:  make(chan chan struct{}),
 		over:     make(map[string]chan struct{}, len(steps)),
 		freed:    make(map[string]map[string]bool),
+		pokes:    make(map[string]chan struct{}),
 	}
 	for _, s := range steps {
 		d.over[s.Name] = make(chan struct{})
@@ -433,9 +436,9 @@ func (p *Pipeline) run(ctx context.Context, sink event.Sink, opts Options, apply
 
 // dispatch runs a run's steps: it starts each, in pipeline order, once what
 // it needs is done and a job is free, and defers each whose needs didn't
-// stand ok. Only its own goroutine touches its maps, but freed, which mu
-// guards, and titles and over, which steps' goroutines read, as they never
-// change once it's started.
+// stand ok. Only its own goroutine touches its maps, but freed and pokes,
+// which mu guards, and titles and over, which steps' goroutines read, as
+// they never change once it's started.
 type dispatch struct {
 	sink     event.Sink
 	now      func() time.Time
@@ -456,9 +459,12 @@ type dispatch struct {
 	// its things.
 	over map[string]chan struct{}
 	// freed are, for each step, the steps it takes as done before they've
-	// finished, as each waits for what that step leads up to (free).
+	// finished, as each waits for what that step leads up to (free); pokes,
+	// for each step, what's closed the next time it says one of its things
+	// may be in place (Changed).
 	mu    sync.Mutex
 	freed map[string]map[string]bool
+	pokes map[string]chan struct{}
 }
 
 // parking is a step waiting for a thing of the step on, or for on itself.
@@ -502,7 +508,8 @@ func (d *dispatch) run(ctx context.Context, steps []Step, jobs int) {
 }
 
 // free has the steps p.on leads up to take p.step as done, as p.step waits
-// on p.on: none of them, then, waits for p.step, which waits for them.
+// on p.on: none of them, then, waits for p.step, which waits for them. Those
+// waiting for p.step's things look again, to see it.
 func (d *dispatch) free(p parking) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -512,6 +519,7 @@ func (d *dispatch) free(p parking) {
 		}
 		d.freed[name][p.step] = true
 	}
+	d.wake(p.step)
 }
 
 // isFreed reports whether step takes the step from as done, as from waits
@@ -520,6 +528,34 @@ func (d *dispatch) isFreed(step, from string) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.freed[step][from]
+}
+
+// poked is what's closed the next time step says one of its things may be
+// in place.
+func (d *dispatch) poked(step string) <-chan struct{} {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	c, ok := d.pokes[step]
+	if !ok {
+		c = make(chan struct{})
+		d.pokes[step] = c
+	}
+	return c
+}
+
+// poke wakes the steps waiting for step's things, to look again.
+func (d *dispatch) poke(step string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.wake(step)
+}
+
+// wake is poke, mu held.
+func (d *dispatch) wake(step string) {
+	if c, ok := d.pokes[step]; ok {
+		close(c)
+		delete(d.pokes, step)
+	}
 }
 
 // startReady goes through the steps not yet started, in order, and starts
@@ -565,13 +601,15 @@ func (d *dispatch) startReady(ctx context.Context, steps []Step, running *int, j
 }
 
 // stepContext is ctx for running s: what runs in it is s's, what s says
-// it's doing as it goes is emitted, and what it waits for partway through
-// applying is waited for as its Later are.
+// it's doing as it goes is emitted, what it waits for partway through
+// applying is waited for as its Later are, and what it says may be in
+// place has the steps waiting for its things look again.
 func (d *dispatch) stepContext(ctx context.Context, s Step) context.Context {
 	ctx = event.WithSaying(event.WithStep(ctx, s.Name), func(e event.Doing) {
 		e.Time, e.Step = d.now(), s.Name
 		d.sink.Emit(e)
 	})
+	ctx = context.WithValue(ctx, changedKey{}, func() { d.poke(s.Name) })
 	return context.WithValue(ctx, awaitKey{}, func(ctx context.Context, w Wait, says string) bool {
 		return d.await(ctx, s, w, func() { event.Say(ctx, event.Doing{Says: says}) })
 	})
@@ -579,16 +617,30 @@ func (d *dispatch) stepContext(ctx context.Context, s Step) context.Context {
 
 type awaitKey struct{}
 
-// Await waits, partway through applying the step ctx is running, for w, one
-// of its Later, the step saying says meanwhile: till w's thing is in place,
-// w's step has finished, or the run's stopped. It reports whether w came: a
-// step waited for itself comes once it's finished. Outside a run, it waits
-// for nothing.
+// Await waits, partway through applying the step ctx is running, for w, the
+// step saying says meanwhile: till w's thing is in place, w's step has
+// finished, or takes this one as done, or the run's stopped. It reports
+// whether w came: a step waited for itself comes once it's finished. w is
+// one of its Later, or a thing of a step whose lead-up has no step needing
+// this one: New refuses Later that wait on what can't finish till the step
+// has, but sees no other wait. Outside a run, it waits for nothing.
 func Await(ctx context.Context, w Wait, says string) bool {
 	if await, ok := ctx.Value(awaitKey{}).(func(context.Context, Wait, string) bool); ok {
 		return await(ctx, w, says)
 	}
 	return w.Ready == nil || w.Ready(ctx)
+}
+
+type changedKey struct{}
+
+// Changed tells the run the step ctx is running may have put one of its
+// things in place, as an install does as it counts one done, and as it
+// ends: the steps waiting for its things look again at once, rather than
+// at their next look. Outside a run, it does nothing.
+func Changed(ctx context.Context) {
+	if changed, ok := ctx.Value(changedKey{}).(func()); ok {
+		changed()
+	}
 }
 
 // stopped is the result of a step the run was stopped before, or during.
@@ -685,14 +737,19 @@ func (d *dispatch) waitFor(ctx context.Context, s Step) []string {
 
 // await waits, for s, for w: till its thing's in place, its step has
 // finished, or has taken s as done (free), or the run's stopped; saying
-// so, as waiting does, once it starts. Meanwhile s's job is another's, and
-// the steps w's step leads up to take s as done. It reports whether w came:
-// a step waited for itself, once it's finished, or has taken s as done. A
-// thing of s's own, or of a step the run doesn't take, isn't waited for.
+// so, as waiting does, once it starts. It looks again each time w's step
+// says one of its things may be in place, and every waitPoll. Meanwhile s's
+// job is another's, and the steps w's step leads up to take s as done. It
+// reports whether w came: a step waited for itself, once it's finished, or
+// has taken s as done. A thing of s's own, or of a step the run doesn't
+// take, isn't waited for.
 func (d *dispatch) await(ctx context.Context, s Step, w Wait, waiting func()) bool {
 	if _, taken := d.titles[w.Step]; w.Step == s.Name || !taken {
 		return w.Ready == nil || w.Ready(ctx)
 	}
+	// Each look follows taking what's closed at the next poke, so none
+	// between a look and the wait after it is missed.
+	poked := d.poked(w.Step)
 	if came, settled := d.settled(ctx, s, w); settled {
 		return came
 	}
@@ -706,8 +763,10 @@ func (d *dispatch) await(ctx context.Context, s Step, w Wait, waiting func()) bo
 		case <-ctx.Done():
 			return false
 		case <-d.over[w.Step]:
+		case <-poked:
 		case <-tick.C:
 		}
+		poked = d.poked(w.Step)
 		if came, settled := d.settled(ctx, s, w); settled {
 			return came
 		}

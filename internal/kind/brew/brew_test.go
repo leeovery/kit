@@ -297,8 +297,10 @@ const installing = `==> Fetching downloads for: ffmpeg and hello
 🍺  /opt/homebrew/Cellar/hello/2.12.3: 12 files, 193.3KB
 `
 
-// Applying the formulae counts them by what brew install prints, in one
-// install of them all.
+// Applying the formulae, in one install of them all, says it's downloading
+// as it starts, counting those asked for as each is downloaded, then, once
+// brew's begun installing, counts them installed, by what brew install
+// prints.
 func TestApplyingCountsTheFormulae(t *testing.T) {
 	fake := runnertest.New(t)
 	fake.On("brew", "list", "--formula", "--full-name", "-1").Prints("jq\n")
@@ -313,9 +315,120 @@ func TestApplyingCountsTheFormulae(t *testing.T) {
 	if err := s.Apply(ctx, s.Check(ctx)); err != nil {
 		t.Fatal(err)
 	}
-	want := []event.Doing{{Says: "installing ffmpeg", Of: 2}, {Says: "installing hello", Done: 1, Of: 2}, {Says: "installing", Done: 2, Of: 2}}
+	want := []event.Doing{
+		{Says: "downloading", Of: 2}, {Says: "downloading", Done: 1, Of: 2}, {Says: "downloading", Done: 2, Of: 2},
+		{Says: "installing ffmpeg", Of: 2}, {Says: "installing hello", Done: 1, Of: 2}, {Says: "installing", Done: 2, Of: 2},
+	}
 	if !slices.Equal(said, want) {
 		t.Errorf("applying said %+v, want %+v", said, want)
+	}
+}
+
+// brew install says, in a line, which of the things asked for is
+// downloaded, a formula's bottle, a formula without one, or a cask, by its
+// name in its tap, before it's begun installing any, and when it begins.
+// A dependency's download, a bottle's manifest, and what brew says before
+// and between them, are neither.
+func TestFetchedAndBegun(t *testing.T) {
+	formulae, casks := brew.New(nil).Formulae().(kind.Fetcher), brew.New(nil).Casks().(kind.Fetcher)
+	for _, tt := range []struct {
+		name    string
+		kind    kind.Fetcher
+		line    string
+		names   []string
+		fetched string
+		begun   bool
+	}{
+		{"bottle", formulae, "✔︎ Bottle igbinary@8.4 (3.2.16)", []string{"owner/extensions/igbinary@8.4"}, "owner/extensions/igbinary@8.4", false},
+		{"formula without a bottle", formulae, "✔︎ Formula tuicr (0.19.1)", []string{"jq", "owner/tap/tuicr"}, "owner/tap/tuicr", false},
+		{"cask", casks, "✔︎ Cask 1password-cli (2.38.1)", []string{"owner/tap/1password-cli"}, "owner/tap/1password-cli", false},
+		{"cask, its version latest", casks, "✔︎ Cask font-lato (latest)", []string{"font-lato"}, "font-lato", false},
+		{"a dependency's bottle", formulae, "✔︎ Bottle aom (3.13.1)", []string{"ffmpeg"}, "", false},
+		{"a manifest", formulae, "✔︎ Bottle Manifest hello (2.12.3)", []string{"hello", "Manifest"}, "", false},
+		{"fetching", formulae, "==> Fetching downloads for: hello and jq", []string{"hello", "jq"}, "", false},
+		{"manifests", formulae, "==> Downloading bottle manifests", []string{"hello"}, "", false},
+		{"tapping", formulae, "==> Tapping owner/tap", []string{"owner/tap/tuicr"}, "", false},
+		{"installing a tap's", formulae, "==> Installing tuicr from owner/tap", []string{"owner/tap/tuicr"}, "", true},
+		{"installing dependencies", formulae, "==> Installing dependencies for ffmpeg: aom", []string{"ffmpeg"}, "", true},
+		{"pouring", formulae, "==> Pouring hello--2.12.3.arm64_tahoe.bottle.1.tar.gz", []string{"hello"}, "", true},
+		{"installing a cask", casks, "==> Installing Cask ghostty", []string{"ghostty"}, "", true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := tt.kind.Fetched(tt.line, tt.names)
+			if got != tt.fetched || ok != (tt.fetched != "") {
+				t.Errorf("Fetched(%q, %q) = %q, %v; want %q", tt.line, tt.names, got, ok, tt.fetched)
+			}
+			if got := tt.kind.Begun(tt.line); got != tt.begun {
+				t.Errorf("Begun(%q) = %v, want %v", tt.line, got, tt.begun)
+			}
+		})
+	}
+}
+
+// Formulae and casks take turns, each kind naming the other by its name.
+func TestFormulaeAndCasksShare(t *testing.T) {
+	h := brew.New(nil)
+	formulae, casks := h.Formulae(), h.Casks()
+	if got := formulae.(kind.Sharing).Shares(); !slices.Equal(got, []string{casks.Name()}) {
+		t.Errorf("formulae share with %q, want casks", got)
+	}
+	if got := casks.(kind.Sharing).Shares(); !slices.Equal(got, []string{formulae.Name()}) {
+		t.Errorf("casks share with %q, want formulae", got)
+	}
+}
+
+// An install waiting its turn while the other kind's goes on says it's
+// waiting for that kind's step, by its title, then how it's going once it
+// has its turn.
+func TestAnInstallWaitingItsTurnSaysSo(t *testing.T) {
+	fake := runnertest.New(t)
+	started, release := make(chan struct{}), make(chan struct{})
+	fake.On("brew", "update", "--quiet")
+	fake.On("brew", "install", "--formula", "jq").Does(func() {
+		close(started)
+		<-release
+	})
+	fake.On("brew", "list", "--cask", "--full-name", "-1")
+	fake.On("brew", "info", "--json=v2", "--cask", "ghostty").Prints(`{"formulae": [], "casks": [{"token": "ghostty", "full_token": "ghostty"}]}`)
+	fake.On("brew", "install", "--cask", "ghostty")
+	h := brew.New(fake)
+	var formulae sync.WaitGroup
+	formulae.Go(func() {
+		if err := h.Formulae().Install(t.Context(), []string{"jq"}); err != nil {
+			t.Error(err)
+		}
+	})
+	<-started
+
+	var mu sync.Mutex
+	var said []event.Doing
+	waiting := make(chan struct{})
+	ctx := event.WithSaying(t.Context(), func(d event.Doing) {
+		mu.Lock()
+		defer mu.Unlock()
+		said = append(said, d)
+		if d.Says == "waiting for Homebrew formulae" {
+			close(waiting)
+		}
+	})
+	s := kind.Step(h.Casks(), config.List{Kind: "cask", Entries: []config.Entry{{Name: "ghostty"}}})
+	var casks sync.WaitGroup
+	casks.Go(func() {
+		if err := s.Apply(ctx, s.Check(ctx)); err != nil {
+			t.Error(err)
+		}
+	})
+	select {
+	case <-waiting:
+	case <-time.After(5 * time.Second):
+		t.Error("the casks' install never said it was waiting for the formulae's")
+	}
+	close(release)
+	formulae.Wait()
+	casks.Wait()
+	want := []event.Doing{{Says: "downloading", Of: 1}, {Says: "waiting for Homebrew formulae"}, {Says: "downloading", Of: 1}}
+	if !slices.Equal(said, want) {
+		t.Errorf("the casks' step said %+v, want %+v", said, want)
 	}
 }
 

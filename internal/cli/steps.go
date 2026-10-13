@@ -137,60 +137,102 @@ func (r *run) place(after, before []string, names map[string]bool) (steps []stri
 	return steps, waits, ahead, nil
 }
 
-// placeHeld places the sections of each kind's lines held back among all,
-// the run's steps: what each waits for, a step or one of a step's things,
-// and the secrets it needs, each waited for partway through applying, and,
-// a variable, set for its install. A section placed after what isn't a
-// step, or needing a secret not declared, fails its kind's step, saying so.
-func (r *run) placeHeld(all []engine.Step) {
+// placeLines places each kind's lines among all, the run's steps: its
+// sections held back (heldSections), each waited for partway through
+// applying; the lines a step or a section held back names, as in --after
+// cask:1password, to install first; and, for a kind taking turns with
+// others (kind.Sharing), their first, for the rest of its lines to wait
+// for. A section placed after what isn't a step, or needing a secret not
+// declared, fails its kind's step, saying so.
+func (r *run) placeLines(all []engine.Step) {
 	names := make(map[string]bool, len(all))
+	named := map[string][]string{}
 	for _, s := range all {
 		names[s.Name] = true
+		for _, w := range s.Waits {
+			named[w.Step] = append(named[w.Step], w.Thing)
+		}
 	}
 	for i, s := range all {
 		if !slices.Contains(r.kinds, s.Name) {
 			continue
 		}
-		held, err := r.heldSections(r.lists[s.Name], names)
+		held, things, err := r.heldSections(r.lists[s.Name], names)
 		if err != nil {
 			reason := err.Error()
 			all[i].Apply = nil
 			all[i].Check = func(context.Context) check.Result { return check.Result{State: check.Failed, Reason: reason} }
 			continue
 		}
-		r.holding[s.Name] = held
+		r.placing[s.Name] = kind.Placing{Held: held}
 		for _, h := range held {
 			all[i].Later = append(all[i].Later, h.Waits...)
 		}
+		for _, w := range things {
+			named[w.Step] = append(named[w.Step], w.Thing)
+		}
 	}
+	for name, p := range r.placing {
+		p.First = firstOf(r.lists[name], named[name])
+		r.placing[name] = p
+	}
+	// What a kind waits for behind another stays out of its step's Later,
+	// unlike its sections' waits: there each kind's lead-up would take in
+	// the other's, and a step waiting for a thing of one would free from it
+	// what comes after the other, as secrets from 1Password's sign-in.
+	for name, p := range r.placing {
+		sharing, ok := r.kindsByName[name].(kind.Sharing)
+		if !ok {
+			continue
+		}
+		for _, other := range sharing.Shares() {
+			for _, thing := range r.placing[other].First {
+				p.Behind = append(p.Behind, engine.Wait{Step: other, Thing: thing, Ready: r.installed(other, thing)})
+			}
+		}
+		r.placing[name] = p
+	}
+}
+
+// firstOf are list's lines that things name, by full name or a tap's thing
+// by its own, as installed finds them: those installed first, in order. A
+// line held back isn't one: it keeps to its section.
+func firstOf(list config.List, things []string) []string {
+	var first []string
+	for _, e := range list.Entries {
+		if e.Hold == "" && slices.ContainsFunc(things, func(thing string) bool { return sameThing(e.Name, thing) }) {
+			first = append(first, e.Name)
+		}
+	}
+	return first
 }
 
 // heldSections are list's sections holding their lines back, in order, each
 // placed among names, the run's steps: a step it comes after is waited for
 // till it's finished, one of a step's things till it's in, then each secret
-// it needs.
-func (r *run) heldSections(list config.List, names map[string]bool) ([]kind.Held, error) {
-	var held []kind.Held
+// it needs. things are the steps' things they come after.
+func (r *run) heldSections(list config.List, names map[string]bool) (held []kind.Held, things []engine.Wait, err error) {
 	for _, e := range list.Entries {
 		if e.Hold == "" || slices.ContainsFunc(held, func(h kind.Held) bool { return h.Hold == e.Hold }) {
 			continue
 		}
-		after, things, _, err := r.place(e.After(), nil, names)
+		after, comesAfter, _, err := r.place(e.After(), nil, names)
 		var secrets []engine.Wait
 		var env func() ([]string, error)
 		if err == nil {
 			secrets, env, err = r.needing(e.Secrets())
 		}
 		if err != nil {
-			return nil, fmt.Errorf("%s: [%s]: %w", e.Path(), e.Section, err)
+			return nil, nil, fmt.Errorf("%s: [%s]: %w", e.Path(), e.Section, err)
 		}
 		var waits []engine.Wait
 		for _, step := range after {
 			waits = append(waits, engine.Wait{Step: step})
 		}
-		held = append(held, kind.Held{Hold: e.Hold, Waits: slices.Concat(waits, things, secrets), Env: env})
+		held = append(held, kind.Held{Hold: e.Hold, Waits: slices.Concat(waits, comesAfter, secrets), Env: env})
+		things = append(things, comesAfter...)
 	}
-	return held, nil
+	return held, things, nil
 }
 
 // needing is what needing the secrets named takes: a wait for each, till
@@ -244,16 +286,19 @@ func (r *run) needing(names []string) ([]engine.Wait, func() ([]string, error), 
 // installed reports whether the kind named kind has thing installed, by its
 // full name, or a tap's thing by its own, as Homebrew lists a tap's cask.
 func (r *run) installed(kindName, thing string) func(context.Context) bool {
-	short := thing[strings.LastIndex(thing, "/")+1:]
 	return func(ctx context.Context) bool {
 		have, err := r.kindsByName[kindName].Installed(ctx)
 		if err != nil {
 			return false
 		}
-		return slices.ContainsFunc(have, func(in kind.Installed) bool {
-			return in.Name == thing || in.Name[strings.LastIndex(in.Name, "/")+1:] == short
-		})
+		return slices.ContainsFunc(have, func(in kind.Installed) bool { return sameThing(in.Name, thing) })
 	}
+}
+
+// sameThing reports whether name is thing, by its full name, or a tap's
+// thing by its own.
+func sameThing(name, thing string) bool {
+	return name == thing || name[strings.LastIndex(name, "/")+1:] == thing[strings.LastIndex(thing, "/")+1:]
 }
 
 // stepOptions are kit step add's options.
