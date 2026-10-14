@@ -162,10 +162,10 @@ func (h *Homebrew) install(ctx context.Context, kindName, which string, names []
 	}
 	defer h.take(ctx, kindName)()
 	kind.Starting(ctx)
-	_, err := h.run.Run(ctx, runner.Command{
+	_, err := h.run.Run(ctx, h.sudoed(ctx, runner.Command{
 		Name: "brew", Args: slices.Concat([]string{"install", which}, names),
-		Timeout: installTimeout(len(names)), Env: h.sudoEnv(ctx, which), Lines: kind.Lines(ctx),
-	})
+		Timeout: installTimeout(len(names)), Lines: kind.Lines(ctx),
+	}))
 	return err
 }
 
@@ -235,20 +235,24 @@ func installed(installedLine *regexp.Regexp, line string, names []string) (strin
 // which says what they are.
 func (h *Homebrew) uninstall(ctx context.Context, kindName, which string, names []string) error {
 	defer h.take(ctx, kindName)()
-	_, err := h.run.Run(ctx, runner.Command{Name: "brew", Args: slices.Concat([]string{"uninstall", which}, names), Env: h.sudoEnv(ctx, which)})
+	_, err := h.run.Run(ctx, h.sudoed(ctx, runner.Command{Name: "brew", Args: slices.Concat([]string{"uninstall", which}, names)}))
 	return err
 }
 
-// sudoEnv is what brew is told, installing or uninstalling casks (which),
-// when an administrator's password is at hand for the run: that its check
-// of sudo is done. That check makes sudo forget the password it was given,
-// so a cask that installs through a package would have sudo ask for it
-// again, mid-run. Formulae never use sudo.
-func (h *Homebrew) sudoEnv(ctx context.Context, which string) []string {
-	if which != "--cask" || h.Admin == nil || !h.Admin(ctx) {
-		return nil
+// sudoed is cmd, brew installing or uninstalling, when an administrator's
+// password is at hand for the run: told its check of sudo is done, as that
+// check makes sudo forget the password it was given, so sudo would ask for
+// it again, mid-run, of brew and of everything after it (formulae make the
+// check too: the third run, 14 Oct); and run in kit's own session, whose
+// sudo has the password, so a Mac with Touch ID for sudo shows no sheet
+// for it (SharesSudo: Homebrew's sudo asks kit, never the terminal).
+func (h *Homebrew) sudoed(ctx context.Context, cmd runner.Command) runner.Command {
+	if h.Admin == nil || !h.Admin(ctx) {
+		return cmd
 	}
-	return []string{"HOMEBREW_SUDO_CHECKED=1"}
+	cmd.Env = append(cmd.Env, "HOMEBREW_SUDO_CHECKED=1")
+	cmd.SharesSudo = true
+	return cmd
 }
 
 // Uses lists the formulae installed that need the formula name.

@@ -545,29 +545,37 @@ func TestCasksBlockedWithoutAnAdministrator(t *testing.T) {
 	}
 }
 
-// With an administrator's password at hand for the run, brew is told its
-// check of sudo is done, which would have sudo forget it; without, brew
-// checks as it would.
+// With an administrator's password at hand for the run, brew, installing
+// or removing formulae or casks, is told its check of sudo is done, which
+// would have sudo forget it, and runs in kit's session, whose sudo has it;
+// without, brew checks as it would, in a session of its own.
 func TestInstallsKeepSudosPassword(t *testing.T) {
 	for _, held := range []bool{true, false} {
 		fake := runnertest.New(t)
 		fake.On("brew", "update", "--quiet")
 		fake.On("brew", "install", "--cask", "zoom")
 		fake.On("brew", "uninstall", "--cask", "zoom")
+		fake.On("brew", "install", "--formula", "jq")
+		fake.On("brew", "uninstall", "--formula", "jq")
 		h := brew.New(fake)
 		h.Admin = func(context.Context) bool { return held }
-		if err := h.Casks().Install(t.Context(), []string{"zoom"}); err != nil {
-			t.Fatal(err)
-		}
-		if err := h.Casks().Remove(t.Context(), []string{"zoom"}); err != nil {
-			t.Fatal(err)
+		for _, k := range []struct {
+			kind kind.Kind
+			name string
+		}{{h.Casks(), "zoom"}, {h.Formulae(), "jq"}} {
+			if err := k.kind.Install(t.Context(), []string{k.name}); err != nil {
+				t.Fatal(err)
+			}
+			if err := k.kind.Remove(t.Context(), []string{k.name}); err != nil {
+				t.Fatal(err)
+			}
 		}
 		for _, cmd := range fake.Commands() {
 			if cmd.Args[0] == "update" {
 				continue
 			}
-			if told := slices.Contains(cmd.Env, "HOMEBREW_SUDO_CHECKED=1"); told != held {
-				t.Errorf("held %v: %s ran with %q", held, cmd, cmd.Env)
+			if told := slices.Contains(cmd.Env, "HOMEBREW_SUDO_CHECKED=1"); told != held || cmd.SharesSudo != held {
+				t.Errorf("held %v: %s ran with %q, sharing sudo %v", held, cmd, cmd.Env, cmd.SharesSudo)
 			}
 		}
 	}

@@ -245,6 +245,18 @@ func TestExecRunsKitsOwnSudoInKitsSession(t *testing.T) {
 	}
 }
 
+// A program sharing kit's sudo, as Homebrew does, runs in kit's session, its
+// own process group's leader, where sudo holds the password kit gave it.
+func TestExecRunsWhatSharesSudoInKitsSession(t *testing.T) {
+	r, _ := programs(t, map[string]string{"brew": "echo $$; exec /bin/sleep 10"})
+	for _, shares := range []bool{true, false} {
+		leader, inSession := whereRun(t, r, runner.Command{Name: "brew", Args: []string{"install"}, SharesSudo: shares})
+		if inSession != shares || leader == shares {
+			t.Errorf("sharing sudo %v: in kit's session %v, leading its own %v", shares, inSession, leader)
+		}
+	}
+}
+
 // Nothing kit runs has kit's terminal, but an interactive command and kit's
 // own sudo: each leads a session of its own, so a program that asks at a
 // terminal, as a program's own sudo does, fails at once, where in the

@@ -52,6 +52,11 @@ type Command struct {
 	// its errors, as it prints them: a line a carriage return starts again
 	// is given as it ends. Never for an interactive command.
 	Lines func(line string)
+	// SharesSudo runs it in kit's own session, as kit's own sudo runs, so
+	// that the sudo it runs finds the password kit gave sudo: no asking
+	// again, and no Touch ID. Only for a program whose sudo never asks at
+	// the terminal, as Homebrew's, which asks kit (SUDO_ASKPASS, -A).
+	SharesSudo bool
 }
 
 // String is the command as a shell would take it, each argument quoted

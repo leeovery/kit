@@ -74,6 +74,9 @@ type world struct {
 func newWorld(t *testing.T, files map[string]string) *world {
 	t.Helper()
 	w := &world{home: t.TempDir(), env: map[string]string{}, now: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC), fake: runnertest.New(t)}
+	// Without a terminal, Homebrew's installs ask whether sudo holds a
+	// password: it doesn't, unless a test says so.
+	w.fake.On("sudo", "-n", "true").Exits(1).PrintsToStderr("sudo: a password is required")
 	for name, content := range files {
 		w.write(t, filepath.Join(".config", "kit", name), content)
 	}
