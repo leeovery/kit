@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -30,7 +31,7 @@ ghostty
 const laptopFile = `[homebrew formulae]
 # Development
 go
-	node@24	# for the old projects
+node@24	# for the old projects
 
 [claude mcp]
 docs --transport http https://docs.example.com/mcp   # the docs server
@@ -55,7 +56,7 @@ func TestList(t *testing.T) {
 		{Name: "go", Scope: "laptop", Section: f, Line: 3},
 		{Name: "node@24", Scope: "laptop", Section: f, Line: 4, Note: "for the old projects"},
 	}
-	if got.Kind != "brew" || !slices.Equal(got.Entries, want) {
+	if got.Kind != "brew" || !reflect.DeepEqual(got.Entries, want) {
 		t.Errorf("List() = %+v\nwant %+v", got.Entries, want)
 	}
 	if names := got.Names(); !slices.Equal(names, []string{"jq", "ripgrep", "owner/tap/tool", "git", "go", "node@24"}) {
@@ -76,7 +77,7 @@ func TestListCommands(t *testing.T) {
 		{Name: "design", Value: `--transport http https://design.example.com/mcp --header "Authorization: Bearer ${DESIGN_KEY}"`, Scope: "laptop", Section: "claude mcp", Line: 8},
 		{Name: "~/Code/site:mail", Value: "--env MAIL_KEY=${MAIL_KEY} -- npx -y mail-mcp", Scope: "laptop", Section: "claude mcp ~/Code/site", Folder: "~/Code/site", Line: 11},
 	}
-	if !slices.Equal(got.Entries, want) {
+	if !reflect.DeepEqual(got.Entries, want) {
 		t.Errorf("List() = %+v\nwant %+v", got.Entries, want)
 	}
 }
@@ -93,7 +94,7 @@ func TestListSecretsByItem(t *testing.T) {
 		{Name: "KEY", Value: "op://vault/Other/key", Scope: "laptop", Section: "secrets", Line: 2},
 		{Name: "TOKEN", Value: "GitHub/token", Scope: "laptop", Section: "secrets op://vault/Some Item", Item: "op://vault/Some Item", Line: 6, Note: "the CLI's"},
 	}
-	if !slices.Equal(got.Entries, want) {
+	if !reflect.DeepEqual(got.Entries, want) {
 		t.Errorf("List() = %+v\nwant %+v", got.Entries, want)
 	}
 }
@@ -110,7 +111,7 @@ func TestFeaturesWait(t *testing.T) {
 		{Name: "prefs", Scope: "laptop", Section: "features", Line: 2},
 		{Name: "arq", Scope: "laptop", Section: "features --after cask:app", Hold: "--after cask:app", Line: 6},
 	}
-	if !slices.Equal(got.Entries, want) || !slices.Equal(got.Entries[1].After(), []string{"cask:app"}) {
+	if !reflect.DeepEqual(got.Entries, want) || !slices.Equal(got.Entries[1].After(), []string{"cask:app"}) {
 		t.Errorf("List() = %+v\nwant %+v, arq after cask:app", got.Entries, want)
 	}
 	cfg = loadRepo(t, map[string]string{"laptop/declarations": "[features --secret TOKEN]\narq\n"})
@@ -133,7 +134,7 @@ func TestListHeldLines(t *testing.T) {
 		{Name: "jq", Scope: "laptop", Section: "homebrew formulae", Line: 2},
 		{Name: "owner/private/fetcher", Scope: "laptop", Section: "homebrew formulae " + hold, Hold: hold, Line: 6, Note: "a note"},
 	}
-	if !slices.Equal(got.Entries, want) {
+	if !reflect.DeepEqual(got.Entries, want) {
 		t.Fatalf("List() = %+v\nwant %+v", got.Entries, want)
 	}
 	held := got.Entries[1]
@@ -174,6 +175,10 @@ func TestListRefuses(t *testing.T) {
 		{name: "options on a section that isn't a list's", files: map[string]string{"shared/declarations": "[git config --after brew]\nuser.name Someone\n"}, want: "shared/declarations:1: [git config --after brew]: only a list's sections, and [features], take options"},
 		{name: "two sections holding lines back for the same", files: map[string]string{"shared/declarations": "[homebrew formulae --secret A --after b]\njq\n\n[homebrew formulae --after b --secret A]\ngo\n"}, want: "shared/declarations:4: [homebrew formulae --after b --secret A] is at line 1 too"},
 		{name: "a name in a list's section and one holding lines back", files: map[string]string{"shared/declarations": "[homebrew formulae]\njq\n\n[homebrew formulae --secret A]\njq\n"}, want: "shared/declarations:5: jq is in [homebrew formulae] at line 2 too"},
+		{name: "a list's line indented", files: map[string]string{"shared/declarations": "[homebrew formulae]\njq\n  ripgrep\n"}, want: `shared/declarations:3: "ripgrep" is indented, but only a [manual] line takes steps, indented under it`},
+		{name: "a step with no line above it", files: map[string]string{"shared/declarations": "[manual]\n  Scan the code\n"}, want: `shared/declarations:2: "Scan the code" is indented, but there's no line directly above it for it to be a step of`},
+		{name: "a step after a blank line", files: map[string]string{"shared/declarations": "[manual]\nsign-in \"Sign in\"\n\n\tScan the code\n"}, want: `shared/declarations:4: "Scan the code" is indented, but there's no line directly above`},
+		{name: "a step after a comment", files: map[string]string{"shared/declarations": "[manual]\nsign-in \"Sign in\"\n# the code\n  Scan the code\n"}, want: `shared/declarations:4: "Scan the code" is indented, but there's no line directly above`},
 		{name: "in the shared file and a Mac's", files: map[string]string{"shared/declarations": "[homebrew formulae]\njq\n", "laptop/declarations": "[homebrew formulae]\ngo\njq\n"}, want: "laptop/declarations:3: jq is in shared/declarations too (line 2)"},
 	}
 	for _, tt := range tests {
@@ -194,6 +199,30 @@ func TestListRefuses(t *testing.T) {
 	}
 }
 
+// A step by hand's steps are the lines indented directly under it, in
+// order, tabs or spaces; a comment indented among them is a comment.
+func TestListSteps(t *testing.T) {
+	cfg := loadRepo(t, map[string]string{"laptop/declarations": "[manual]\n" +
+		"sign-in \"Sign in to the app\" --open \"System Settings\"\n" +
+		"  Scan the code the app shows   # with the phone\n" +
+		"\tTurn on its command line\n" +
+		"# the next\n" +
+		"tool \"Install the tool\" --test test -d /Applications/Tool.app\n"})
+	got, err := cfg.List(config.ManualKind, "laptop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Entries) != 2 {
+		t.Fatalf("List() = %+v, want two lines", got.Entries)
+	}
+	if steps := got.Entries[0].Steps; !slices.Equal(steps, []string{"Scan the code the app shows   # with the phone", "Turn on its command line"}) {
+		t.Errorf("sign-in's steps = %q", steps)
+	}
+	if steps := got.Entries[1].Steps; steps != nil {
+		t.Errorf("tool's steps = %q, want none", steps)
+	}
+}
+
 // A # inside quotes is part of a command, not its note.
 func TestCommandsKeepAQuotedHash(t *testing.T) {
 	cfg := loadRepo(t, map[string]string{"laptop/declarations": "[claude mcp]\nx --header \"X-Tag: a #b\"   # the note\n"})
@@ -207,7 +236,7 @@ func TestWhere(t *testing.T) {
 	cfg := loadRepo(t, map[string]string{"shared/declarations": sharedFile, "laptop/declarations": laptopFile, "studio/declarations": "[homebrew formulae]\n# Media\nffmpeg   # for video\n"})
 	got, err := cfg.Where("brew", "ffmpeg")
 	want := []config.Entry{{Name: "ffmpeg", Scope: "studio", Section: "homebrew formulae", Line: 3, Note: "for video"}}
-	if err != nil || !slices.Equal(got, want) {
+	if err != nil || !reflect.DeepEqual(got, want) {
 		t.Errorf("Where(ffmpeg) = %+v, %v; want %+v", got, err, want)
 	}
 	if got, err := cfg.Where("claude-mcp", "~/Code/site:mail"); err != nil || len(got) != 1 || got[0].Folder != "~/Code/site" {
