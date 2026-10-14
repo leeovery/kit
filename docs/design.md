@@ -177,9 +177,9 @@ terminal); a value given in full, outside the items' sections, is left where it 
 step), and `--test` and a command saying whether it's done (exit 0: done), the rest of the line,
 as in `tool "Install the tool from its site" --test test -d /Applications/Tool.app`. The lines
 indented under it are its steps, one each, in order, which kit keeps with it. One with no
-command is done once marked on this Mac (`kit manual done <name>`, `--undo` to unmark). Those not
-done are items of their step, in the Manual area, saying what to do, so `kit status` shows them;
-what kit can check itself stays a check that says what to do. While `kit apply` runs at a
+command is done once marked on this Mac (`kit manual done <name>`, `--undo` to unmark). Those
+not done are items of their step, in the Manual area, saying what to do, so `kit status` shows
+them; what kit can check itself stays a check that says what to do. While `kit apply` runs at a
 terminal, one that comes due is raised as a card on its screen, front and centre: its title, its
 steps numbered, its app opened, once, and a notification. `o` opens the app again; `enter` says
 it's done (marked as `kit manual done` marks it; one with a command is looked at at once, as it
@@ -187,9 +187,9 @@ is every few seconds anyway); `l` puts it off: it ends to do, listed in what's l
 run ends. One card is up at a time, the next waiting its turn. A line with `--after` or
 `--before` is a step of its own, raised once what it comes after is in; the rest come up at the
 run's end, after every other step, in order. `kit check|hourly|nightly add <name> -- <command>`
-and `kit manual add <name> "<what to do>" [-- <command>]` (written as `--test`) declare checks, jobs and steps by
-hand (a check, and a step's command, run once as it's added, to say how it stands); `kit remove
-check|hourly|nightly|manual <name>` undeclares one.
+and `kit manual add <name> "<what to do>" [-- <command>]` (written as `--test`) declare checks,
+jobs and steps by hand (a check, and a step's command, run once as it's added, to say how it
+stands); `kit remove check|hourly|nightly|manual <name>` undeclares one.
 
 **Steps of the user's own** are set-up that's done or not, too particular to be kit's (a tool
 installed by its maker's script, a certificate authority trusted, a key imported). Each is a
