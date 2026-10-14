@@ -100,13 +100,14 @@ func (r *run) manualSteps(ordered []steps.ManualStep, others []engine.Step, rais
 // placeByHand places the steps by hand with no place of their own among
 // all, the run's steps, when they're raised at a terminal: applied once
 // every other step has finished, however it stands, as what's done by hand
-// comes last; but for the steps that come after them, which they can't
-// wait for.
+// comes last, saying so while it waits; but for the steps that come after
+// them, which they can't wait for.
 func (r *run) placeByHand(all []engine.Step) {
 	i := slices.IndexFunc(all, func(s engine.Step) bool { return s.Name == steps.ManualName })
 	if !r.byHandLast || i < 0 {
 		return
 	}
+	all[i].Waiting = "at the end, once the rest is done"
 	later := following(all, steps.ManualName)
 	for _, s := range all {
 		if !later[s.Name] && !slices.Contains(all[i].After, s.Name) {
