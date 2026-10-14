@@ -13,8 +13,9 @@
 //   - what to do starts "→ ", the command in it white;
 //   - one blank line between blocks, none inside one;
 //   - the states: done a pink ●, needs you an orange ▲, failed a red ✗,
-//     running a cyan ◐, queued a cyan ○, skipped a grey –. Grey means only
-//     "didn't run", and colour is never the only sign.
+//     running a cyan ◐, queued a cyan ○, skipped a grey –, to do a white △.
+//     Grey means only "didn't run", orange only "needs you now", and colour
+//     is never the only sign.
 package look
 
 import (
@@ -74,6 +75,8 @@ func Says(parts ...string) string { return strings.Join(parts, dot) }
 // State is how a thing stands, as its mark shows it.
 type State int
 
+// ToDo is a thing that ran and left something for the person at the Mac to
+// do later: nothing's wrong with it, and nothing's to do now.
 const (
 	Done State = iota
 	NeedsYou
@@ -81,10 +84,11 @@ const (
 	Running
 	Queued
 	Skipped
+	ToDo
 )
 
 // marks are the states' marks, uncoloured.
-var marks = map[State]string{Done: "●", NeedsYou: "▲", Failed: "✗", Running: "◐", Queued: "○", Skipped: "–"}
+var marks = map[State]string{Done: "●", NeedsYou: "▲", Failed: "✗", Running: "◐", Queued: "○", Skipped: "–", ToDo: "△"}
 
 // Mark is a state's mark, in its colour.
 func Mark(s State) string {
@@ -97,6 +101,8 @@ func Mark(s State) string {
 		return Cyan(marks[s])
 	case Skipped:
 		return Muted(marks[s])
+	case ToDo:
+		return White(marks[s])
 	}
 	return Pink(marks[Done])
 }
@@ -110,6 +116,8 @@ func Words(s State, text string) string {
 		return Red(text)
 	case Running:
 		return Cyan(text)
+	case ToDo:
+		return White(text)
 	}
 	return Muted(text)
 }
@@ -300,8 +308,8 @@ type Lamp struct {
 }
 
 // Lights are a run's areas, each led by its mark, two spaces between: an
-// area that needs you or failed a pill; one that didn't finish, as a run
-// stopped leaves it, grey.
+// area that needs you or failed a pill; one with something left to do
+// white; one that didn't finish, as a run stopped leaves it, grey.
 func Lights(ls ...Lamp) string {
 	parts := make([]string, len(ls))
 	for i, l := range ls {
@@ -309,8 +317,8 @@ func Lights(ls ...Lamp) string {
 		switch l.State {
 		case NeedsYou, Failed:
 			parts[i] = Pill(marks[l.State]+" "+n, l.State)
-		case Running:
-			parts[i] = Mark(Running) + " " + White(n)
+		case Running, ToDo:
+			parts[i] = Mark(l.State) + " " + White(n)
 		case Queued:
 			parts[i] = Mark(Queued) + " " + Muted(n)
 		case Skipped:
@@ -411,8 +419,8 @@ func GridHit(w int, areas []Area, x, y int) (area, cell int, ok bool) {
 
 // cell is a step in a grid, its mark and its name, cut to fit: muted once
 // done, bold while it runs, dim while it waits, in its state's colour when
-// it's wrong, grey when it didn't run; a pinned step's name pink, its mark
-// as it stands.
+// it's wrong, plain white when it's left something to do, grey when it
+// didn't run; a pinned step's name pink, its mark as it stands.
 func cell(c Cell) string {
 	name := Cut(c.Name, GridCell-4)
 	switch {
@@ -426,6 +434,8 @@ func cell(c Cell) string {
 		return Mark(NeedsYou) + " " + Orange(name)
 	case c.State == Failed:
 		return Mark(Failed) + " " + Red(name)
+	case c.State == ToDo:
+		return Mark(ToDo) + " " + White(name)
 	case c.State == Skipped:
 		return Muted(marks[Skipped] + " " + name)
 	}
@@ -468,12 +478,25 @@ func Bar(done, running, of int, ended State) string {
 // regions.
 func Edge(w int) string { return Dim(strings.Repeat("─", w)) }
 
-// A panel's rule before its row, after the margin; and how much of the
-// rule a row cut to fit it leaves after it.
+// A panel's rule before its row, after the margin; how much of the rule a
+// row cut to fit it leaves after it; and where what's under the row starts,
+// under its name.
 const (
 	panelLead  = "── "
 	panelLeast = 3
+	panelUnder = "       "
 )
+
+// ruled is a rule across, w wide with the margins, in rule's colour,
+// carrying a row's line and, at its end, tail: the line cut to fit, some
+// rule kept after it.
+func ruled(w int, rule func(string) string, r Row, tail string) string {
+	end := w - 2
+	lead := "  " + rule(panelLead)
+	row := Cut(line("", r), end-ansi.StringWidth(lead+tail)-1-panelLeast)
+	fill := end - ansi.StringWidth(lead+row+tail) - 1
+	return lead + row + " " + rule(strings.Repeat("─", max(fill, 0))) + tail
+}
 
 // Panel is a part of a screen given to a row: a rule across, w wide with
 // the margins, carrying the row, pink when the panel has the focus and dim
@@ -486,17 +509,90 @@ func Panel(w int, focused bool, below int, r Row) []string {
 	if focused {
 		rule = Pink
 	}
-	lead, tail := "  "+rule(panelLead), ""
+	tail := ""
 	if below > 0 {
 		tail = " " + Muted(fmt.Sprintf("↑ %d more", below)) + " " + rule("──")
 	}
-	end := w - 2
-	row := Cut(line("", r), end-ansi.StringWidth(lead+tail)-1-panelLeast)
-	fill := end - ansi.StringWidth(lead+row+tail) - 1
-	out := []string{lead + row + " " + rule(strings.Repeat("─", max(fill, 0))) + tail}
-	under := strings.Repeat(" ", ansi.StringWidth(lead)+2)
+	out := []string{ruled(w, rule, r, tail)}
 	for _, u := range r.Under {
-		out = append(out, Cut(under+u, end))
+		out = append(out, Cut(panelUnder+u, w-2))
+	}
+	return out
+}
+
+// Card is what needs you, front and centre on a screen, w wide with the
+// margins: an orange rule carrying the needs-you mark, the title and what
+// it says; a blank line; its steps, numbered, the numbers orange, each
+// wrapped under its own text and a blank line after it; then, when there's
+// something to say after them, that, muted, and a blank line.
+func Card(w int, title, says string, steps []string, after string) []string {
+	out := []string{ruled(w, Orange, Row{State: NeedsYou, Name: title, Says: says}, ""), ""}
+	room := w - 2 - len(panelUnder)
+	for i, s := range steps {
+		n := fmt.Sprint(i + 1)
+		at := fg(orange).Bold(true).Render(n) + "  "
+		for _, l := range Wrap(s, room-len(n)-2) {
+			out = append(out, Cut(panelUnder+at+White(l), w-2))
+			at = strings.Repeat(" ", len(n)+2)
+		}
+		out = append(out, "")
+	}
+	if after != "" {
+		for _, l := range Wrap(after, room) {
+			out = append(out, Cut(panelUnder+Muted(l), w-2))
+		}
+		out = append(out, "")
+	}
+	return out
+}
+
+// Task is a thing left for the person at the Mac to do: what, and how, a
+// line each.
+type Task struct {
+	Title string
+	How   []string
+}
+
+// Tasks are things left to do, as a run's record ends with them, w wide:
+// each the to-do mark, its number and its title, then how to do it under
+// the title, each line what to do, muted, wrapped under its own words.
+func Tasks(w int, ts ...Task) []string {
+	var out []string
+	for i, t := range ts {
+		lead := "  " + Mark(ToDo) + " " + White(fmt.Sprint(i+1)) + "  "
+		out = append(out, Cut(lead+Strong(t.Title), w))
+		under := strings.Repeat(" ", ansi.StringWidth(lead))
+		for _, how := range t.How {
+			for j, l := range Wrap(how, w-len(under)-2) {
+				if j == 0 {
+					out = append(out, Cut(under+Todo(Muted(l)), w))
+				} else {
+					out = append(out, Cut(under+"  "+Muted(l), w))
+				}
+			}
+		}
+	}
+	return out
+}
+
+// Wrap cuts text into lines no wider than width, at spaces: a word wider
+// than that alone on its line.
+func Wrap(text string, width int) []string {
+	var out []string
+	line := ""
+	for word := range strings.FieldsSeq(text) {
+		switch {
+		case line == "":
+			line = word
+		case ansi.StringWidth(line)+1+ansi.StringWidth(word) > width:
+			out = append(out, line)
+			line = word
+		default:
+			line += " " + word
+		}
+	}
+	if line != "" {
+		out = append(out, line)
 	}
 	return out
 }

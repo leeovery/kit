@@ -63,13 +63,16 @@ func TestRowsAreCut(t *testing.T) {
 }
 
 func TestStatesMarks(t *testing.T) {
-	for s, want := range map[look.State]string{look.Done: "●", look.NeedsYou: "▲", look.Failed: "✗", look.Running: "◐", look.Queued: "○", look.Skipped: "–"} {
+	for s, want := range map[look.State]string{look.Done: "●", look.NeedsYou: "▲", look.Failed: "✗", look.Running: "◐", look.Queued: "○", look.Skipped: "–", look.ToDo: "△"} {
 		if got := ansi.Strip(look.Mark(s)); got != want {
 			t.Errorf("Mark(%d) = %q, want %q", s, got, want)
 		}
 	}
 	if look.Mark(look.Done) == look.Mark(look.Failed) || ansi.Strip(look.Words(look.Failed, "x")) != "x" {
 		t.Error("marks and words: want each state its colour, the words kept")
+	}
+	if look.Mark(look.ToDo) != look.White("△") || look.Words(look.ToDo, "no backup disk") != look.White("no backup disk") {
+		t.Error("what's left to do: want its mark and its words white, never orange")
 	}
 }
 
@@ -130,12 +133,16 @@ func TestLights(t *testing.T) {
 		look.Lamp{Name: "Steps", State: look.Running},
 		look.Lamp{Name: "Mac", State: look.Queued},
 		look.Lamp{Name: "Jobs", State: look.Skipped},
+		look.Lamp{Name: "Manual", State: look.ToDo},
 	)
-	if want := "  ● BACKUPS 5   ▲ CONFIG   ◐ STEPS  ○ MAC  – JOBS"; ansi.Strip(got) != want {
+	if want := "  ● BACKUPS 5   ▲ CONFIG   ◐ STEPS  ○ MAC  – JOBS  △ MANUAL"; ansi.Strip(got) != want {
 		t.Errorf("Lights() = %q, want %q", ansi.Strip(got), want)
 	}
-	if !strings.HasSuffix(got, look.Muted("– JOBS")) {
+	if !strings.Contains(got, look.Muted("– JOBS")) {
 		t.Errorf("Lights() = %q, want an area a stopped run didn't finish grey, mark and all", got)
+	}
+	if !strings.HasSuffix(got, look.White("△")+" "+look.White("MANUAL")) {
+		t.Errorf("Lights() = %q, want an area with something left to do its white mark, its name white", got)
 	}
 }
 
@@ -146,13 +153,13 @@ func TestLights(t *testing.T) {
 func TestGrid(t *testing.T) {
 	got := look.Grid(60,
 		look.Area{Name: "Mac", Cells: []look.Cell{{State: look.Done, Name: "Disk space"}, {State: look.Running, Name: "Memory"}, {State: look.Queued, Name: "Load"}}},
-		look.Area{Name: "Backups", Cells: []look.Cell{{State: look.NeedsYou, Name: "Time Machine"}, {State: look.Failed, Name: "Arq"}, {State: look.Skipped, Name: "A name far too long for its cell"}}},
+		look.Area{Name: "Backups", Cells: []look.Cell{{State: look.NeedsYou, Name: "Time Machine"}, {State: look.Failed, Name: "Arq"}, {State: look.Skipped, Name: "A name far too long for its cell"}, {State: look.ToDo, Name: "App settings"}}},
 	)
 	same(t, got,
 		"  MAC      ● Disk space            ◐ Memory",
 		"           ○ Load",
 		"  BACKUPS  ▲ Time Machine          ✗ Arq",
-		"           – A name far too long…",
+		"           – A name far too long…  △ App settings",
 	)
 	for _, want := range []struct {
 		line int
@@ -163,6 +170,7 @@ func TestGrid(t *testing.T) {
 		{1, look.Cyan("○") + " " + look.Dim("Load")},
 		{2, look.Orange("▲") + " " + look.Orange("Time Machine")},
 		{2, look.Red("✗") + " " + look.Red("Arq")},
+		{3, look.White("△") + " " + look.White("App settings")},
 	} {
 		if !strings.Contains(got[want.line], want.cell) {
 			t.Errorf("line %d is %q; want the cell %q", want.line, got[want.line], want.cell)
@@ -271,6 +279,75 @@ func TestPanel(t *testing.T) {
 				t.Errorf("at %d wide, %d below, the rule is %d wide; want it to end two cells from the edge, %d", w, below, got, w-2)
 			}
 		}
+	}
+}
+
+// A card: an orange rule across, w wide with the margins, carrying the
+// needs-you mark, the title strong and what it says; a blank line; its
+// steps numbered, the numbers orange, each wrapped under its own words and
+// a blank line after it; then what's said after them, muted, wrapped, and
+// a blank line. A title too long for its rule is cut, some rule kept.
+func TestCard(t *testing.T) {
+	steps := []string{"1Password is open: kit opened it for you", "In 1Password, Settings › Developer › turn on Integrate with 1Password CLI"}
+	got := look.Card(70, "Sign in to 1Password", look.Says(look.Orange("needs you"), look.Muted("2 more after this")), steps, "kit carries on by itself once it's done")
+	same(t, got,
+		"  ── ▲ Sign in to 1Password  needs you · 2 more after this ─────────",
+		"",
+		"       1  1Password is open: kit opened it for you",
+		"",
+		"       2  In 1Password, Settings › Developer › turn on Integrate",
+		"          with 1Password CLI",
+		"",
+		"       kit carries on by itself once it's done",
+		"",
+	)
+	if !strings.HasPrefix(got[0], "  "+look.Orange("── ")+look.Orange("▲")+" "+look.Strong("Sign in to 1Password")) || !strings.HasSuffix(got[0], " "+look.Orange("─────────")) {
+		t.Errorf("the card's rule is %q; want it orange, the mark orange, the title strong", got[0])
+	}
+	for _, l := range got {
+		if w := ansi.StringWidth(l); w > 68 {
+			t.Errorf("%q is %d wide; want it to end two cells from the edge", ansi.Strip(l), w)
+		}
+	}
+	same(t, look.Card(30, "Allow Karabiner-Elements", look.Orange("needs you"), []string{"Allow its driver"}, ""),
+		"  ── ▲ Allow Karabiner-… ───",
+		"",
+		"       1  Allow its driver",
+		"",
+	)
+}
+
+// What's left to do, numbered: the to-do mark, the number and the title,
+// then how, each thing under the title after an arrow, muted, wrapped
+// under its own words; a title too long cut.
+func TestTasks(t *testing.T) {
+	got := look.Tasks(50,
+		look.Task{Title: "Add a Time Machine disk", How: []string{"System Settings › General › Time Machine › Add Backup Disk"}},
+		look.Task{Title: "Install Paper", How: []string{"Download it from paper.example.com", "Drag it to Applications"}},
+		look.Task{Title: "A title far too long for a list fifty cells wide"},
+	)
+	same(t, got,
+		"  △ 1  Add a Time Machine disk",
+		"       → System Settings › General › Time Machine",
+		"         › Add Backup Disk",
+		"  △ 2  Install Paper",
+		"       → Download it from paper.example.com",
+		"       → Drag it to Applications",
+		"  △ 3  A title far too long for a list fifty cell…",
+	)
+	if !strings.HasPrefix(got[0], "  "+look.White("△")+" "+look.White("1")+"  "+look.Strong("Add a Time Machine disk")) {
+		t.Errorf("a task's line is %q; want its mark and number white, its title strong", got[0])
+	}
+}
+
+// Wrapping cuts at spaces, no line wider than asked but a word too wide on
+// its own.
+func TestWrap(t *testing.T) {
+	if got := look.Wrap("turn on Integrate with 1Password CLI", 16); !slices.Equal(got, []string{"turn on", "Integrate with", "1Password CLI"}) {
+		t.Errorf("Wrap() = %q", got)
+	}
+	if got := look.Wrap("a karabiner_grabber b", 5); !slices.Equal(got, []string{"a", "karabiner_grabber", "b"}) {
+		t.Errorf("Wrap() = %q, want the long word on its own", got)
 	}
 }
 
