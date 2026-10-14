@@ -1,6 +1,10 @@
 package steps_test
 
 import (
+	"context"
+	"errors"
+	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -8,7 +12,9 @@ import (
 
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/config"
+	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/event"
+	"github.com/leeovery/kit/internal/hand"
 	"github.com/leeovery/kit/internal/runner"
 	"github.com/leeovery/kit/internal/runner/runnertest"
 	"github.com/leeovery/kit/internal/steps"
@@ -24,7 +30,7 @@ func TestManual(t *testing.T) {
 	}}
 	fake.On("test", "-d", "/Applications/Tool.app")
 	fake.On("test", "-d", "/Applications/App.app").Exits(1)
-	step := steps.Manual(fake, "/home/someone", state, list)
+	step := steps.Manual(fake, "/home/someone", state, list, nil)
 	res := step.Check(t.Context())
 	var got []string
 	for _, it := range res.Items {
@@ -40,12 +46,18 @@ func TestManual(t *testing.T) {
 	if res := step.Check(t.Context()); len(res.Items) != 1 || res.Items[0].ID != "manual:app" {
 		t.Errorf("after kit done, items = %+v", res.Items)
 	}
+	if step.Apply != nil {
+		t.Error("the steps by hand have an apply with no one to act on them")
+	}
 }
 
 func TestManualLinesRead(t *testing.T) {
 	for value, want := range map[string]string{
 		`--test test -d x`:                      "what to do comes after the name",
-		`"Do it" test -d x`:                     `"test" isn't one of a step by hand's options: --after, --before and --test`,
+		`"Do it" test -d x`:                     `"test" isn't one of a step by hand's options: --after, --before, --open and --test`,
+		`"Do it" --open`:                        `--open needs the app it opens after it, as in --open "System Settings"`,
+		`"Do it" --open --test true`:            "--open needs the app it opens after it",
+		`"Do it" --open One --open Two`:         "--open is there twice: a step by hand opens one app",
 		`"Do it" --test`:                        "--test needs the command",
 		`"Do it" -- test -d x`:                  "comes after --test now",
 		`"Do it" --after`:                       "--after needs a step's name after it",
@@ -61,13 +73,20 @@ func TestManualLinesRead(t *testing.T) {
 			t.Errorf("%q: error = %v, want %q", value, err, want)
 		}
 	}
-	m, err := steps.ParseManual("/home", config.Entry{Name: "1password", Value: `"Sign in" --after cask:1password --after cask:tap/one/1password-cli --before secret --test sh -c 'op account list | grep -q .' ~/bin`})
+	m, err := steps.ParseManual("/home", config.Entry{
+		Name:  "1password",
+		Value: `"Sign in" --after cask:1password --after cask:tap/one/1password-cli --open "System Settings" --before secret --test sh -c 'op account list | grep -q .' ~/bin --open x`,
+		Steps: []string{"Scan the code", "Turn on its CLI"},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !m.Ordered() || strings.Join(m.After, ",") != "cask:1password,cask:tap/one/1password-cli" || strings.Join(m.Before, ",") != "secret" ||
-		m.Command.Name != "sh" || strings.Join(m.Command.Args, "|") != "-c|op account list | grep -q .|/home/bin" {
+		m.Command.Name != "sh" || strings.Join(m.Command.Args, "|") != "-c|op account list | grep -q .|/home/bin|--open|x" {
 		t.Errorf("ParseManual() = %+v, %+v", m, m.Command)
+	}
+	if m.Open != "System Settings" || strings.Join(m.Steps, "|") != "Scan the code|Turn on its CLI" {
+		t.Errorf("ParseManual() opens %q, its steps %q", m.Open, m.Steps)
 	}
 }
 
@@ -83,64 +102,261 @@ func (e *events) Emit(ev event.Event) {
 	e.seen = append(e.seen, ev)
 }
 
-// A step by hand of its own, applied at a terminal, is raised: in its row,
-// what to do under it, and a notification; then waited on, its command run
-// every few seconds, till it's done.
-func TestOwnManualRaisedAndWaitedOn(t *testing.T) {
-	defer steps.SetManualPoll(time.Millisecond)()
+// card is a run at a terminal, as steps by hand are raised in it: what's
+// emitted, the desk the person answers cards on, and the programs run.
+type card struct {
+	raise *steps.Raise
+	sink  *events
+	desk  *hand.Desk
+	fake  *runnertest.Fake
+	state string
+}
+
+func newCard(t *testing.T) *card {
 	fake := runnertest.New(t)
-	fake.On("test", "-d", "/Applications/1Password.app").Exits(1).Then().Exits(1).Then()
-	fake.On("osascript", "-e", `display notification "Sign in, then turn on its CLI" with title "kit" subtitle "1password"`)
-	sink := &events{}
-	m := steps.ManualStep{Name: "1password", Do: "Sign in, then turn on its CLI", Before: []string{"secret"},
-		Command: &runner.Command{Name: "test", Args: []string{"-d", "/Applications/1Password.app"}}}
-	step := steps.OwnManual(fake, t.TempDir(), m, &steps.Raise{Sink: sink, Now: time.Now, Notify: steps.Notify(fake)})
-	if step.Name != "1password" || step.Area != steps.AreaManual {
-		t.Errorf("step = %+v", step)
+	c := &card{sink: &events{}, desk: hand.New(), fake: fake, state: t.TempDir()}
+	c.raise = &steps.Raise{Sink: c.sink, Now: time.Now, Open: steps.OpenApp(fake), Desk: c.desk}
+	return c
+}
+
+// cards waits till n cards have gone up, as the events say, a card put up
+// again among them, and returns them.
+func (c *card) cards(t *testing.T, n int) []event.NeedsYou {
+	t.Helper()
+	for range 5000 {
+		var up []event.NeedsYou
+		c.sink.mu.Lock()
+		for _, e := range c.sink.seen {
+			if card, ok := e.(event.NeedsYou); ok {
+				up = append(up, card)
+			}
+		}
+		c.sink.mu.Unlock()
+		if len(up) >= n {
+			return up
+		}
+		time.Sleep(time.Millisecond)
 	}
-	found := step.Check(t.Context())
-	if found.State != check.Attention || len(found.Items) != 1 || found.Items[0].Name != "Sign in, then turn on its CLI" {
-		t.Fatalf("check before = %+v", found)
+	t.Fatalf("%d cards never went up", n)
+	return nil
+}
+
+// answer answers step's card with a, once it's taken.
+func (c *card) answer(t *testing.T, step string, a hand.Answer) {
+	t.Helper()
+	for range 5000 {
+		if c.desk.Answer(step, a) {
+			return
+		}
+		time.Sleep(time.Millisecond)
 	}
-	if err := step.Apply(t.Context(), found); err != nil {
-		t.Fatal(err)
-	}
-	if res := step.Check(t.Context()); res.State != check.OK {
-		t.Errorf("check after = %+v", res)
-	}
-	var raised bool
-	for _, e := range sink.seen {
-		if d, ok := e.(event.Doing); ok && d.Step == "1password" && d.Says == "needs you" && d.Todo == "Sign in, then turn on its CLI" {
-			raised = true
+	t.Fatalf("%s's card never took %v", step, a)
+}
+
+// opened is how many times app was opened.
+func (c *card) opened(app string) int {
+	n := 0
+	for _, cmd := range c.fake.Commands() {
+		if cmd.Name == "open" && slices.Equal(cmd.Args, []string{"-a", app}) {
+			n++
 		}
 	}
-	if !raised || len(fake.Commands()) < 3 {
-		t.Errorf("raised %v, ran %d commands: want it raised, then waited on", raised, len(fake.Commands()))
+	return n
+}
+
+// applying applies step, as the run would, its check's finding given it.
+func applying(t *testing.T, step engine.Step) <-chan error {
+	found := step.Check(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- step.Apply(t.Context(), found) }()
+	return done
+}
+
+// ended waits for applying to end, and returns how it did.
+func ended(t *testing.T, applying <-chan error) error {
+	t.Helper()
+	select {
+	case err := <-applying:
+		return err
+	case <-time.After(5 * time.Second):
+		t.Fatal("applying the step by hand never ended")
+		return nil
 	}
 }
 
-// With no one to act, applying a step by hand leaves it as it stands; one
-// without a command is raised but not waited on, as kit can't tell when
-// it's done.
-func TestOwnManualUnraisedOrUntested(t *testing.T) {
-	fake := runnertest.New(t)
-	step := steps.OwnManual(fake, t.TempDir(), steps.ManualStep{Name: "sign-in", Do: "Sign in", After: []string{"cask"}}, nil)
-	if err := step.Apply(t.Context(), check.Result{}); err != nil {
+// A step by hand of its own, come due at a terminal, goes up as a card: its
+// line's name, what to do, its steps, the app it opened (once), whether kit
+// tells by itself when it's done, and a notification posted. Open opens the
+// app again; Done, with no test, marks it done on this Mac, as kit manual
+// done does.
+func TestACardGoesUpAndIsDone(t *testing.T) {
+	c := newCard(t)
+	c.fake.On("open", "-a", "System Settings")
+	c.fake.On("osascript", "-e", `display notification "Turn on sharing" with title "kit" subtitle "sharing"`)
+	c.raise.Notify = steps.Notify(c.fake)
+	m := steps.ManualStep{Name: "sharing", Do: "Turn on sharing", After: []string{"cask"}, Open: "System Settings", Steps: []string{"General › Sharing", "Turn on Remote Login"}}
+	step := steps.OwnManual(c.fake, c.state, m, c.raise)
+	applied := applying(t, step)
+
+	up := c.cards(t, 1)[0]
+	want := event.NeedsYou{Time: up.Time, Step: "sharing", Item: "sharing", Title: "Turn on sharing", Steps: m.Steps, Opened: "System Settings"}
+	if !reflect.DeepEqual(up, want) || c.opened("System Settings") != 1 || !slices.Contains(c.fake.Calls(), `osascript -e 'display notification "Turn on sharing" with title "kit" subtitle "sharing"'`) {
+		t.Errorf("card = %+v, opened %d times, ran %q; want %+v, opened once, a notification posted", up, c.opened("System Settings"), c.fake.Calls(), want)
+	}
+	c.answer(t, "sharing", hand.Open)
+	c.answer(t, "sharing", hand.Done)
+	if err := ended(t, applied); err != nil {
+		t.Fatal(err)
+	}
+	if n := c.opened("System Settings"); n != 2 {
+		t.Errorf("opened %d times, want again for Open", n)
+	}
+	if res := step.Check(t.Context()); res.State != check.OK {
+		t.Errorf("after Done, check = %+v, want it marked done", res)
+	}
+}
+
+// An app that won't open isn't said to be open.
+func TestACardsAppThatWontOpen(t *testing.T) {
+	c := newCard(t)
+	c.fake.On("open", "-a", "Missing").Exits(1)
+	step := steps.OwnManual(c.fake, c.state, steps.ManualStep{Name: "missing", Do: "Use the missing app", Open: "Missing", After: []string{"cask"}}, c.raise)
+	applied := applying(t, step)
+	if up := c.cards(t, 1)[0]; up.Opened != "" {
+		t.Errorf("card opened %q, want nothing, as the app didn't open", up.Opened)
+	}
+	c.answer(t, "missing", hand.Later)
+	if err := ended(t, applied); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A step by hand with a test is done when its test passes: looked at every
+// few seconds, and at once for Done, the card staying up while it fails.
+func TestACardWithATest(t *testing.T) {
+	defer steps.SetManualPoll(time.Hour)()
+	c := newCard(t)
+	// Its check, its look as it goes up, Done while it still fails, Done.
+	c.fake.On("test", "-f", "/signed-in").Exits(1).Then().Exits(1).Then().Exits(1).Then()
+	m := steps.ManualStep{Name: "sign-in", Do: "Sign in", Before: []string{"secret"}, Command: &runner.Command{Name: "test", Args: []string{"-f", "/signed-in"}}}
+	applied := applying(t, steps.OwnManual(c.fake, c.state, m, c.raise))
+	if up := c.cards(t, 1)[0]; !up.Tells {
+		t.Errorf("card = %+v, want it to say kit tells when it's done", up)
+	}
+	c.answer(t, "sign-in", hand.Done)
+	c.answer(t, "sign-in", hand.Done)
+	if err := ended(t, applied); err != nil {
+		t.Fatal(err)
+	}
+	if runs := len(c.fake.Commands()); runs != 4 {
+		t.Errorf("ran %q, want the test run at once for each Done", c.fake.Calls())
+	}
+}
+
+// Raised with no one there, a step by hand with a test is done once it
+// passes, looked at every few seconds.
+func TestACardWithATestLooksAgain(t *testing.T) {
+	defer steps.SetManualPoll(time.Millisecond)()
+	c := newCard(t)
+	c.fake.On("test", "-d", "/Applications/App.app").Exits(1).Then().Exits(1).Then().Exits(1).Then()
+	m := steps.ManualStep{Name: "app", Do: "Install the app", After: []string{"cask"}, Command: &runner.Command{Name: "test", Args: []string{"-d", "/Applications/App.app"}}}
+	step := steps.OwnManual(c.fake, c.state, m, c.raise)
+	if err := ended(t, applying(t, step)); err != nil {
+		t.Fatal(err)
+	}
+	if res := step.Check(t.Context()); res.State != check.OK || len(c.fake.Commands()) < 4 {
+		t.Errorf("check after = %+v, ran %q: want it looked at till it passed", res, c.fake.Calls())
+	}
+}
+
+// Put off, a step by hand ends not done, what's left for the person to do:
+// nothing's wrong with it. With no one to act, applying leaves it as it
+// stands.
+func TestACardPutOff(t *testing.T) {
+	c := newCard(t)
+	m := steps.ManualStep{Name: "sign-in", Do: "Sign in", After: []string{"cask"}}
+	if err := steps.OwnManual(c.fake, c.state, m, nil).Apply(t.Context(), check.Result{}); err != nil {
 		t.Errorf("apply without anyone to act = %v", err)
 	}
-	if res := step.Check(t.Context()); res.State != check.Attention || res.Items[0].Detail != "then: kit manual done sign-in" {
-		t.Errorf("check = %+v", res)
+	step := steps.OwnManual(c.fake, c.state, m, c.raise)
+	applied := applying(t, step)
+	c.answer(t, "sign-in", hand.Later)
+	if err := ended(t, applied); err != nil {
+		t.Fatal(err)
 	}
-	sink := &events{}
-	raised := steps.OwnManual(fake, t.TempDir(), steps.ManualStep{Name: "sign-in", Do: "Sign in", After: []string{"cask"}}, &steps.Raise{Sink: sink, Now: time.Now})
-	done := make(chan error, 1)
-	go func() { done <- raised.Apply(t.Context(), check.Result{}) }()
-	select {
-	case err := <-done:
-		if err != nil || len(sink.seen) != 1 {
-			t.Errorf("apply = %v, events %+v: want it raised, and left", err, sink.seen)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("a step by hand without a command was waited on")
+	res := step.Check(t.Context())
+	if !res.ToDo() || res.Items[0].State != check.ByHand || res.Items[0].Detail != "then: kit manual done sign-in" {
+		t.Errorf("check after Later = %+v, want it left to do", res)
+	}
+}
+
+// One card is up at a time: one coming due meanwhile waits its turn,
+// counted in the More of the card up, which goes up again to say so, and
+// goes up once that's answered; one that stops waiting isn't counted.
+func TestOneCardAtATime(t *testing.T) {
+	c := newCard(t)
+	own := func(name string) engine.Step {
+		return steps.OwnManual(c.fake, c.state, steps.ManualStep{Name: name, Do: "Do " + name, After: []string{"cask"}}, c.raise)
+	}
+	first := applying(t, own("first"))
+	c.cards(t, 1)
+	second := applying(t, own("second"))
+	ctx, stop := context.WithCancel(t.Context())
+	third := make(chan error, 1)
+	go func() { third <- own("third").Apply(ctx, check.Result{}) }()
+	up := c.cards(t, 3)
+	if up[1].Item != "first" || up[1].More != 1 || up[2].Item != "first" || up[2].More != 2 {
+		t.Fatalf("cards = %+v, want the first's put up again, 1 then 2 more after it", up)
+	}
+	stop()
+	if err := ended(t, third); !errors.Is(err, context.Canceled) {
+		t.Errorf("the third, stopped while it waited = %v", err)
+	}
+	if up := c.cards(t, 4)[3]; up.Item != "first" || up.More != 1 {
+		t.Errorf("card = %+v, want the first's, 1 more after it", up)
+	}
+	c.answer(t, "first", hand.Done)
+	if err := ended(t, first); err != nil {
+		t.Fatal(err)
+	}
+	if up := c.cards(t, 5)[4]; up.Item != "second" || up.More != 0 {
+		t.Errorf("card = %+v, want the second's, none after it", up)
+	}
+	c.answer(t, "second", hand.Later)
+	if err := ended(t, second); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(c.cards(t, 5)); n != 5 {
+		t.Errorf("%d cards went up, want 5", n)
+	}
+}
+
+// The rest of the steps by hand, raised, come up one card each, in order,
+// those not done: each saying how many follow it; one put off, the next
+// comes up; what's left, left to do.
+func TestTheRestOneCardEach(t *testing.T) {
+	c := newCard(t)
+	c.fake.On("test", "-d", "/Applications/Done.app")
+	c.fake.On("test", "-d", "/Applications/App.app").Exits(1)
+	list := config.List{Entries: []config.Entry{
+		{Name: "app", Value: `"Install the app" --test test -d /Applications/App.app`, Scope: "laptop", Line: 2},
+		{Name: "done", Value: `"Install the done app" --test test -d /Applications/Done.app`, Scope: "laptop", Line: 3},
+		{Name: "sign-in", Value: `"Sign in to the service"`, Scope: "laptop", Line: 4, Steps: []string{"Open the service", "Sign in"}},
+	}}
+	step := steps.Manual(c.fake, "/home/someone", c.state, list, c.raise)
+	applied := applying(t, step)
+	if up := c.cards(t, 1)[0]; up.Step != steps.ManualName || up.Item != "app" || up.More != 1 || !up.Tells {
+		t.Errorf("first card = %+v, want the app's, 1 more after it", up)
+	}
+	c.answer(t, steps.ManualName, hand.Later)
+	if up := c.cards(t, 2)[1]; up.Item != "sign-in" || up.More != 0 || up.Tells || !slices.Equal(up.Steps, []string{"Open the service", "Sign in"}) {
+		t.Errorf("second card = %+v, want the sign-in's, its steps, none after it", up)
+	}
+	c.answer(t, steps.ManualName, hand.Done)
+	if err := ended(t, applied); err != nil {
+		t.Fatal(err)
+	}
+	if res := step.Check(t.Context()); !res.ToDo() || len(res.Items) != 1 || res.Items[0].ID != "manual:app" {
+		t.Errorf("check after = %+v, want the app left to do", res)
 	}
 }
