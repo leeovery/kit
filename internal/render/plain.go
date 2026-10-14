@@ -62,6 +62,10 @@ func (p *Plain) Emit(e event.Event) {
 		if e.Todo != "" {
 			p.printf("%s %s\n", e.Step, strings.ReplaceAll(e.Todo, "\n", " "))
 		}
+	case event.NeedsYou:
+		for _, line := range append([]string{e.Title}, e.Steps...) {
+			p.printf("%s %s\n", e.Step, line)
+		}
 	}
 }
 

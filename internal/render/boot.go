@@ -465,7 +465,7 @@ func (f *BootFace) blocks(width int, live bool) []block {
 		switch {
 		case !a.order && len(a.steps) == 1 && (r == nil || r.finished == nil):
 			lines := heading
-			for _, l := range wrap(a.steps[0].Waiting, width-4) {
+			for _, l := range look.Wrap(a.steps[0].Waiting, width-4) {
 				lines = append(lines, "  "+b.Full(l))
 			}
 			if r != nil && r.running && r.code != nil {
@@ -485,27 +485,6 @@ func (f *BootFace) blocks(width int, live bool) []block {
 				out = append(out, block{state: row.State, lines: b.Rows(width, row)})
 			}
 		}
-	}
-	return out
-}
-
-// wrap cuts text into lines no wider than width, at spaces.
-func wrap(text string, width int) []string {
-	var out []string
-	line := ""
-	for word := range strings.FieldsSeq(text) {
-		switch {
-		case line == "":
-			line = word
-		case utf8.RuneCountInString(line)+1+utf8.RuneCountInString(word) > width:
-			out = append(out, line)
-			line = word
-		default:
-			line += " " + word
-		}
-	}
-	if line != "" {
-		out = append(out, line)
 	}
 	return out
 }
@@ -679,7 +658,7 @@ func (f *BootFace) asked() []string {
 // spaces to fit beside it.
 func (f *BootFace) todo(text string) []string {
 	b := f.look
-	lines := wrap(text, look.Width-len(look.BootUnder)-4)
+	lines := look.Wrap(text, look.Width-len(look.BootUnder)-4)
 	out := make([]string, len(lines))
 	for i, l := range lines {
 		if i == 0 {

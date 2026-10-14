@@ -1,6 +1,7 @@
 package render
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -14,14 +15,15 @@ import (
 )
 
 // Applying at a terminal big enough takes a screen of its own while it runs
-// (kit-look, rounds 6 and 7): the terminal's alternate screen, drawn whole
+// (kit-look, rounds 6 to 8): the terminal's alternate screen, drawn whole
 // each time, at the window's full size. Its header is the wordmark, as the
 // arrival leaves it, with what runs, the bar and the counts beside it; then
-// every step in a grid, by area; then, between two rules, the log, a panel
-// a step at work, or a step pinned; then what needs you, and the keys,
-// which it reads while it's up, the terminal in its raw mode, with the
-// mouse's clicks and wheel (applykeys.go). When the run ends the screen
-// goes, and its record is printed under the run's heading.
+// every step in a grid, by area; then, between two rules, what needs you,
+// as a card, and the log, a panel a step at work, or a step pinned; then
+// macOS asking, and the keys, which it reads while it's up, the terminal in
+// its raw mode, with the mouse's clicks and wheel (applykeys.go). When the
+// run ends the screen goes, and its record is printed under the run's
+// heading.
 
 // The alternate screen, which applying takes while it runs, and gives back;
 // and the mouse's buttons and wheel, reported in SGR's form while it reads
@@ -41,10 +43,6 @@ const (
 	screenHeight = 30
 	logLeast     = 8
 )
-
-// slot is a place in applying's log: the step in it, and the step it took
-// the place from, whose lines come back if it gives the place up.
-type slot struct{ step, was string }
 
 // headline is what runs, the Mac and when, on the line beside the
 // wordmark's first, as applying's screen has it and the arrival types it
@@ -159,13 +157,13 @@ func (p *Pretty) leaveScreen() {
 
 // screenLayout is applying's screen, w by h, as it's laid out: the header
 // and the grid, a rule under them; the foot, a rule over it; and the log
-// between, its lines, its panels' steps, in order, and how many lines each
-// has.
+// between, its lines: the card up for you, the lines it needs, then its
+// panels' steps, in order, and how many lines each has of what's left.
 type screenLayout struct {
-	head, foot []string
-	log        int
-	steps      []string
-	rooms      []int
+	head, foot, card []string
+	log              int
+	steps            []string
+	rooms            []int
 }
 
 // layout lays applying's screen out, w by h.
@@ -173,14 +171,16 @@ func (p *Pretty) layout(w, h int) screenLayout {
 	head := append(p.screenHead(w), look.Edge(w))
 	foot := append([]string{look.Edge(w)}, p.screenFoot(w)...)
 	log := max(h-len(head)-len(foot), 0)
-	steps, rooms := p.panelRooms(log)
-	return screenLayout{head: head, foot: foot, log: log, steps: steps, rooms: rooms}
+	card := p.cardLines(w, true)
+	card = card[:min(len(card), log)]
+	steps, rooms := p.panelRooms(log - len(card))
+	return screenLayout{head: head, foot: foot, card: card, log: log, steps: steps, rooms: rooms}
 }
 
 // panelAt is the panel at line y of the screen, by its place in the log:
 // ok is false off the log's panels.
 func (l screenLayout) panelAt(y int) (int, bool) {
-	top := len(l.head)
+	top := len(l.head) + len(l.card)
 	for i, room := range l.rooms {
 		if y >= top && y < top+room {
 			return i, true
@@ -263,32 +263,66 @@ func (p *Pretty) stepAt(w, x, y int) (string, bool) {
 }
 
 // standing is how the step named step stands as the run goes: finished,
-// and how; cut off, or never run, by the run stopping; waiting on you; at
-// work; or waiting its turn.
+// and how; waiting on you; at work; or waiting its turn.
 func (p *Pretty) standing(step string) look.State {
 	if f, ok := p.results[step]; ok {
-		if wasStopped(f) {
-			return look.Skipped
-		}
-		return state(f.Result.State)
+		return p.ended(f)
 	}
 	r, ok := p.runningOf(step)
 	switch {
-	case ok && r.todo != "":
+	case ok && p.needsYou(r), p.carded(step):
 		return look.NeedsYou
-	case ok && r.atWork():
+	case ok && p.atWork(r):
 		return look.Running
 	}
 	return look.Queued
 }
 
-// logPanels are the log, as l lays it out: a panel each of its steps,
-// its rule carrying the step's row, pink when it has the focus, then the
-// lines it printed, the last of them or as far back as it's scrolled, and,
-// once it's finished, what's left of it, which they give way to; blank
-// where nothing's taken them.
+// ended is how a finished step stands: cut off, or never run, by the run
+// stopping; left for the person at the Mac to do; or as its result says.
+func (p *Pretty) ended(f event.StepFinished) look.State {
+	switch {
+	case wasStopped(f):
+		return look.Skipped
+	case p.toDo(f.Step):
+		return look.ToDo
+	}
+	return state(f.Result.State)
+}
+
+// toDo is whether the step named step finished leaving only the person at
+// the Mac something to do: its own result says so, or it was deferred
+// behind steps that did, and nothing else.
+func (p *Pretty) toDo(step string) bool {
+	f, ok := p.results[step]
+	switch {
+	case !ok:
+		return false
+	case f.Result.ToDo():
+		return true
+	case f.Result.State != check.Deferred:
+		return false
+	}
+	behind := false
+	for _, w := range p.step(step).Waits {
+		switch {
+		case p.results[w].Result.State == check.OK:
+		case p.toDo(w):
+			behind = true
+		default:
+			return false
+		}
+	}
+	return behind
+}
+
+// logPanels are the log, as l lays it out: the card up for you, then a panel
+// each of its steps, its rule carrying the step's row, pink when it has the
+// focus, then the lines it printed, the last of them or as far back as it's
+// scrolled, and, once it's finished, what's left of it, which they give way
+// to; blank where nothing's taken them.
 func (p *Pretty) logPanels(w int, l screenLayout) []string {
-	var out []string
+	out := slices.Clone(l.card)
 	focus := p.focused(len(l.steps))
 	for i, step := range l.steps {
 		row := p.listRow(p.step(step))
@@ -306,37 +340,56 @@ func (p *Pretty) logPanels(w int, l screenLayout) []string {
 // finished, what's left of it. below is how many of its lines are after
 // those shown.
 func (p *Pretty) panelLines(step string, room int) (lines []string, below int) {
-	left := p.slotLeft(step, room)
+	left := p.panelLeft(step, room)
 	out := p.output[step]
 	start, end := scrolled(len(out), room-len(left), p.keys.back[step])
 	return append(look.Output(out[start:end]...), left...), len(out) - end
 }
 
-// slotLeft is what's left of step once it's finished, as applying's list
-// has it, in at most room lines: none while it runs, or when the run
-// stopping cut it off.
-func (p *Pretty) slotLeft(step string, room int) []string {
+// panelLeft is what's left of step once it's finished, in at most room
+// lines: what it's left you to do, or, unwell, what's left of it, as
+// applying's list has it; none while it runs, or when the run stopping cut
+// it off.
+func (p *Pretty) panelLeft(step string, room int) []string {
 	f, ok := p.results[step]
 	if !ok || wasStopped(f) {
 		return nil
 	}
-	left := whatsLeft(f.Result, p.step(step).Part, p.start.Time)
+	var left []string
+	if p.toDo(step) {
+		left = toDoLeft(f.Result)
+	} else {
+		left = whatsLeft(f.Result, p.step(step).Part, p.start.Time)
+	}
 	return left[:min(len(left), room)]
 }
 
+// toDoLeft is what a step left the person at the Mac to do, as its panel
+// shows it: each thing, white, with how under it when it says.
+func toDoLeft(r check.Result) []string {
+	var lines []string
+	for _, it := range r.Items {
+		lines = append(lines, look.White(it.Name))
+		if it.Detail != "" {
+			lines = append(lines, todo(it.Detail))
+		}
+	}
+	return lines
+}
+
 // panelSteps are the steps the log's panels show: those pinned, in the
-// order pinned; else those in its slots, which follow what's running.
+// order pinned; else those at work applying, in the order they started.
 func (p *Pretty) panelSteps() []string {
 	if len(p.keys.pinned) > 0 {
 		return p.keys.pinned
 	}
-	var taken []string
-	for _, s := range p.slots {
-		if s.step != "" {
-			taken = append(taken, s.step)
+	var working []string
+	for _, r := range p.running {
+		if r.applying && p.atWork(r) {
+			working = append(working, r.step)
 		}
 	}
-	return taken
+	return working
 }
 
 // panelRooms are the steps in the log's panels, in order, and how many
@@ -356,72 +409,56 @@ func (p *Pretty) panelRooms(n int) (steps []string, rooms []int) {
 	return steps[:k], rooms
 }
 
-// screenFoot is what's at the screen's foot: what needs you, when anything
-// does, a blank line above it (macOS asking, then each step waiting on
-// you, with what to do), or, while it asks, whether to stop in its place;
-// then a blank line, and the keys.
+// screenFoot is what's at the screen's foot: what you're asked to do
+// elsewhere, when anything is, a blank line above it (macOS asking, then
+// each step saying what you're to do while it waits on you), or, while it
+// asks, whether to stop in its place; then a blank line, and the keys.
 func (p *Pretty) screenFoot(w int) []string {
 	if p.keys.asking {
 		return append(append([]string{""}, p.stopQuestion(w)...), "", p.footKeys())
 	}
-	needs := p.askingLines(w)
+	asked := p.askingLines(w)
 	for _, r := range p.running {
 		if r.todo != "" {
-			needs = append(needs, look.Timeline("  ", w, p.runningRow(r, w))...)
+			asked = append(asked, look.Timeline("  ", w, p.runningRow(r, w))...)
 		}
 	}
 	var foot []string
-	if len(needs) > 0 {
-		foot = append(append(foot, ""), needs...)
+	if len(asked) > 0 {
+		foot = append(append(foot, ""), asked...)
 	}
 	return append(foot, "", p.footKeys())
 }
 
-// takeSlot gives step a place in the log, as it starts applying, when it
-// hasn't one: it keeps it while it runs, and its lines stay there once it's
-// done, till another step needs the place.
-func (p *Pretty) takeSlot(step string) {
-	if slices.ContainsFunc(p.slots[:], func(s slot) bool { return s.step == step }) {
-		return
+// cardLines are the step by hand up for you, front and centre, as a card
+// w wide: what to do, how many more wait after it, its steps, numbered,
+// the app kit opened for it first, and, when kit tells by itself that it's
+// done, that it carries on; none when no card's up. Without keys to
+// answer it, as in a window too small for applying's screen, one waiting
+// for an answer says how to get them.
+func (p *Pretty) cardLines(w int, keys bool) []string {
+	c := p.card
+	if c == nil {
+		return nil
 	}
-	if i := p.freeSlot(); i >= 0 {
-		p.slots[i] = slot{step: step, was: p.slots[i].step}
+	says := []string{look.Orange("needs you")}
+	if c.More > 0 {
+		says = append(says, look.Muted(fmt.Sprintf("%d more after this", c.More)))
 	}
+	steps := c.Steps
+	if c.Opened != "" {
+		steps = append([]string{c.Opened + " is open: kit opened it for you"}, steps...)
+	}
+	var after string
+	switch {
+	case c.Tells:
+		after = "kit carries on by itself once it's done"
+	case !keys:
+		after = "a bigger window shows the keys to answer it"
+	}
+	return look.Card(w, c.Title, look.Says(says...), steps, after)
 }
 
-// freeSlot is the slot a step starting takes: an empty one; else the one
-// whose step finished longest ago and didn't fail; else the one whose step
-// failed longest ago. -1 while every slot's step runs.
-func (p *Pretty) freeSlot() int {
-	free := -1
-	for i, s := range p.slots {
-		if s.step == "" {
-			return i
-		}
-		if _, done := p.results[s.step]; done && (free < 0 || p.givesWay(s.step, p.slots[free].step)) {
-			free = i
-		}
-	}
-	return free
-}
-
-// givesWay is whether finished step a gives its slot up before finished
-// step b: one that didn't fail before one that failed, then the one that
-// finished first.
-func (p *Pretty) givesWay(a, b string) bool {
-	aFailed, bFailed := p.results[a].Result.State == check.Failed, p.results[b].Result.State == check.Failed
-	if aFailed != bFailed {
-		return bFailed
-	}
-	return p.finished[a] < p.finished[b]
-}
-
-// giveSlotBack gives the place step took in the log back to the step it
-// took it from, as it waits on you: it shows at the foot, with what to do.
-func (p *Pretty) giveSlotBack(step string) {
-	for i, s := range p.slots {
-		if s.step == step {
-			p.slots[i] = slot{step: s.was}
-		}
-	}
-}
+// cardID is how a step by hand's card is known among those that came up:
+// its step, and its line.
+func cardID(step, item string) string { return step + "\x00" + item }

@@ -16,6 +16,7 @@ import (
 	"github.com/leeovery/kit/internal/ask"
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/event"
+	"github.com/leeovery/kit/internal/hand"
 	"github.com/leeovery/kit/internal/look"
 	"github.com/leeovery/kit/internal/render"
 )
@@ -103,6 +104,8 @@ var (
 	keyTab      = ask.Key{Name: "tab"}
 	keyShiftTab = ask.Key{Name: "shift+tab"}
 	keyA        = ask.Key{Text: "a"}
+	keyO        = ask.Key{Text: "o"}
+	keyL        = ask.Key{Text: "l"}
 )
 
 // click is the mouse's left button pressed at column x of line y; wheel the
@@ -206,6 +209,52 @@ func TestApplyingAsksBeforeStopping(t *testing.T) {
 	}
 }
 
+// answered is what the keys answered a step by hand's card with.
+type answered struct {
+	step   string
+	answer hand.Answer
+}
+
+// o, enter and l answer the card up, passing the answer to its step, each
+// only when the card's keys offer it: o when kit opened an app for it,
+// enter when kit can't tell by itself that it's done, l always. With no
+// card up, or once its step's finished, they answer nothing.
+func TestApplyingCardKeys(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		events []event.Event
+		want   []answered
+	}{
+		{"kit opened it, and tells", cardUp(signIn), []answered{{signIn.Step, hand.Open}, {signIn.Step, hand.Later}}},
+		{"kit opened it", cardUp(handCard), []answered{{handCard.Step, hand.Open}, {handCard.Step, hand.Done}, {handCard.Step, hand.Later}}},
+		{"neither", cardUp(paperCard), []answered{{paperCard.Step, hand.Done}, {paperCard.Step, hand.Later}}},
+		{"no card", casksFailed(), nil},
+		{"its step finished", append(cardUp(handCard), event.StepFinished{Time: at, Step: handCard.Step, Result: check.Result{State: check.OK, Summary: "done"}}), nil},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			face, _, kb := applyAt(160, 64, time.Minute, tt.events)
+			defer func() { _ = face.Close() }()
+			var mu sync.Mutex
+			var got []answered
+			face.Hands(func(step string, a hand.Answer) bool {
+				mu.Lock()
+				defer mu.Unlock()
+				got = append(got, answered{step, a})
+				return true
+			})
+			kb.press(t, keyO, keyEnter, keyL)
+			mu.Lock()
+			defer mu.Unlock()
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("o, enter and l answered %v; want %v", got, tt.want)
+			}
+			if n := kb.stops(); n != 0 {
+				t.Errorf("answering the card stopped the run %d times", n)
+			}
+		})
+	}
+}
+
 // ctrl+c, a key in the terminal's raw mode, not an interrupt, stops the
 // run at once, asking or not.
 func TestApplyingStopsAtCtrlC(t *testing.T) {
@@ -240,7 +289,7 @@ const (
 // scrolls it forth, back to the newest; no other panel moves. Each panel
 // keeps how far it's scrolled when the focus moves on.
 func TestApplyingScrollsThePanelWithTheFocus(t *testing.T) {
-	face, out, kb := applyAt(160, 64, time.Minute, sixMinutesIn())
+	face, out, kb := applyAt(160, 64, time.Minute, withHistory())
 	defer func() { _ = face.Close() }()
 	check := func(when string, formulae, casks []string) {
 		t.Helper()
@@ -252,17 +301,17 @@ func TestApplyingScrollsThePanelWithTheFocus(t *testing.T) {
 			t.Errorf("%s, Homebrew casks' panel shows\n%s\nwant\n%s", when, strings.Join(c, "\n"), strings.Join(casks, "\n"))
 		}
 	}
-	check("at first", shows(formula, 8, 16), shows(cask, 2, 10))
+	check("at first", shows(formula, 34, 46), shows(cask, 18, 30))
 	kb.press(t, keyUp, keyUp, keyUp)
-	check("↑ three times", shows(formula, 5, 13), shows(cask, 2, 10))
-	kb.press(t, slices.Repeat([]ask.Key{keyUp}, 20)...)
-	check("↑ past the first", shows(formula, 1, 9), shows(cask, 2, 10))
+	check("↑ three times", shows(formula, 31, 43), shows(cask, 18, 30))
+	kb.press(t, slices.Repeat([]ask.Key{keyUp}, 40)...)
+	check("↑ past the first", shows(formula, 1, 13), shows(cask, 18, 30))
 	kb.press(t, keyDown)
-	check("↓ once from there", shows(formula, 2, 10), shows(cask, 2, 10))
+	check("↓ once from there", shows(formula, 2, 14), shows(cask, 18, 30))
 	kb.press(t, keyTab, keyUp)
-	check("tab, then ↑", shows(formula, 2, 10), shows(cask, 1, 9))
-	kb.press(t, append([]ask.Key{keyShiftTab}, slices.Repeat([]ask.Key{keyDown}, 20)...)...)
-	check("back, then ↓ past the newest", shows(formula, 8, 16), shows(cask, 1, 9))
+	check("tab, then ↑", shows(formula, 2, 14), shows(cask, 17, 29))
+	kb.press(t, append([]ask.Key{keyShiftTab}, slices.Repeat([]ask.Key{keyDown}, 40)...)...)
+	check("back, then ↓ past the newest", shows(formula, 34, 46), shows(cask, 17, 29))
 }
 
 // The focus: on the first panel at first, its rule pink, every other's
@@ -277,10 +326,10 @@ func TestApplyingMovesTheFocus(t *testing.T) {
 	}{
 		{nil, "Homebrew formulae"},
 		{[]ask.Key{keyTab}, "Homebrew casks"},
-		{[]ask.Key{keyTab, keyTab}, "fonts"},
+		{[]ask.Key{keyTab}, "claude-code"},
 		{[]ask.Key{keyTab}, "Homebrew formulae"},
-		{[]ask.Key{keyShiftTab}, "fonts"},
-		{[]ask.Key{keyShiftTab, keyShiftTab, keyShiftTab}, "Homebrew formulae"},
+		{[]ask.Key{keyShiftTab}, "claude-code"},
+		{[]ask.Key{keyShiftTab, keyShiftTab, keyShiftTab}, "claude-code"},
 	} {
 		kb.press(t, tt.keys...)
 		if got := focused(out.String()); !slices.Equal(got, []string{tt.want}) {
@@ -330,14 +379,14 @@ func TestApplyingWheelScrollsThePanelUnderIt(t *testing.T) {
 	casks := lineOf(got, "  ── ◐ Homebrew casks")
 	kb.press(t, wheel("up", casks+4), wheel("up", casks))
 	got = screen(out.String())
-	if _, f := panelOf(got, "Homebrew formulae"); !slices.Equal(f, shows(formula, 8, 16)) {
+	if _, f := panelOf(got, "Homebrew formulae"); !slices.Equal(f, shows(formula, 4, 16)) {
 		t.Errorf("the wheel over Homebrew casks moved Homebrew formulae's panel to\n%s", strings.Join(f, "\n"))
 	}
-	if _, c := panelOf(got, "Homebrew casks"); !slices.Equal(c, shows(cask, 16, 24)) {
+	if _, c := panelOf(got, "Homebrew casks"); !slices.Equal(c, shows(cask, 12, 24)) {
 		t.Errorf("turned up twice over it, Homebrew casks' panel shows\n%s\nwant it six lines back", strings.Join(c, "\n"))
 	}
 	kb.press(t, wheel("down", casks+9))
-	if _, c := panelOf(screen(out.String()), "Homebrew casks"); !slices.Equal(c, shows(cask, 19, 27)) {
+	if _, c := panelOf(screen(out.String()), "Homebrew casks"); !slices.Equal(c, shows(cask, 15, 27)) {
 		t.Errorf("turned down once over its last line, Homebrew casks' panel shows\n%s\nwant it three lines forth", strings.Join(c, "\n"))
 	}
 	before := screen(out.String())
@@ -351,7 +400,7 @@ func TestApplyingWheelScrollsThePanelUnderIt(t *testing.T) {
 // its column and its line.
 func cellOf(t *testing.T, screen, title string) (x, y int) {
 	t.Helper()
-	cell := regexp.MustCompile(`[●◐○▲✗–] ` + regexp.QuoteMeta(title) + `( |$)`)
+	cell := regexp.MustCompile(`[●◐○▲✗–△] ` + regexp.QuoteMeta(title) + `( |$)`)
 	for y, l := range lines(screen) {
 		if strings.HasPrefix(l, "──") {
 			break
@@ -425,13 +474,13 @@ func TestApplyingPinsSteps(t *testing.T) {
 }
 
 // The keys at the screen's foot while it reads them, once something's
-// pinned: a click unpins too, and a unpins every step.
-const pinnedFoot = "  tab panel · ↑↓ scroll · click a step to pin or unpin · a auto · q stop · shift+drag selects"
+// pinned: a goes back to the steps running.
+const pinnedFoot = "  tab panel · ↑↓ scroll · click a step to see it · a back to running · q stop"
 
 // a unpins every step at once: the panels follow what's running again, the
 // grid's names their own colours, and the keys lose a. With nothing
 // pinned, a does nothing.
-func TestApplyingAutoUnpinsEverything(t *testing.T) {
+func TestApplyingGoesBackToRunning(t *testing.T) {
 	face, out, kb := applyIn(colorprofile.TrueColor, 160, 64, time.Minute, casksFailed())
 	defer func() { _ = face.Close() }()
 	plain := func() string { return screen(uncoloured(out.String())) }
@@ -471,7 +520,7 @@ func TestApplyingPinnedScreens(t *testing.T) {
 		{"apply-screen-one.golden", withHistory, []string{"Homebrew formulae"}, nil, []string{"Homebrew formulae"}},
 		{"apply-screen-two.golden", withHistory, []string{"Homebrew formulae", "Homebrew casks"}, nil, []string{"Homebrew formulae", "Homebrew casks"}},
 		{"apply-screen-four.golden", casksFailed, []string{"Homebrew formulae", "Homebrew casks", "claude-code", "App settings"}, nil, []string{"Homebrew formulae", "Homebrew casks", "claude-code", "App settings"}},
-		{"apply-screen-scrolled.golden", withHistory, nil, append([]ask.Key{keyTab}, slices.Repeat([]ask.Key{keyUp}, 12)...), []string{"Homebrew formulae", "Homebrew casks", "claude-code", "fonts"}},
+		{"apply-screen-scrolled.golden", withHistory, nil, append([]ask.Key{keyTab}, slices.Repeat([]ask.Key{keyUp}, 12)...), []string{"Homebrew formulae", "Homebrew casks", "claude-code"}},
 	} {
 		t.Run(tt.golden, func(t *testing.T) {
 			face, out, kb := applyAt(160, 64, 6*time.Minute+12*time.Second, tt.events())
