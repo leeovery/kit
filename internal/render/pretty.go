@@ -15,6 +15,7 @@ import (
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/event"
+	"github.com/leeovery/kit/internal/hand"
 	"github.com/leeovery/kit/internal/look"
 )
 
@@ -136,6 +137,9 @@ type Pretty struct {
 	onScreen  bool
 	drawnSize [2]int
 	keys      screenKeys
+	// hands passes what the person answers a step by hand's card with
+	// back to the step: false when no card of the step's is up.
+	hands func(step string, a hand.Answer) bool
 	// out is what's being written, sent to the terminal whole at the end of
 	// an event or a turn of the spinner, for the terminal to show at once.
 	out     strings.Builder

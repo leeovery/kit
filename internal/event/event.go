@@ -132,6 +132,25 @@ type Doing struct {
 	Done, Of int
 }
 
+// NeedsYou is a step by hand come up for the person at the Mac, front and
+// centre on applying's screen: its line's name (Item); what to do, as its
+// line says it (Title); its steps, in order; the app kit opened for it, if
+// it did; whether kit tells by itself when it's done (the line's --test),
+// else the person says so; and how many more by hand wait after it. The
+// step finishing, or another NeedsYou for the step, takes it down.
+type NeedsYou struct {
+	Time   time.Time
+	Step   string
+	Item   string
+	Title  string
+	Steps  []string `json:",omitempty"`
+	Opened string   `json:",omitempty"`
+	Tells  bool     `json:",omitempty"`
+	More   int      `json:",omitempty"`
+}
+
+func (e NeedsYou) At() time.Time { return e.Time }
+
 // Asking is macOS asking the person at the Mac something, in a window of
 // its own, as "asking for a permission": the run's time limits wait on the
 // answer. Nothing once it's been answered.

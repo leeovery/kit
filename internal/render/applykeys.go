@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/leeovery/kit/internal/ask"
+	"github.com/leeovery/kit/internal/hand"
 	"github.com/leeovery/kit/internal/look"
 )
 
@@ -74,6 +75,15 @@ func (p *Pretty) Keys(listen func() (<-chan ask.Key, func()), halt func()) *Pret
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.keys.listen, p.keys.halt = listen, halt
+	return p
+}
+
+// Hands has applying's screen pass what the person answers the card of a
+// step by hand with (enter, o, l) to answer, which passes it to the step.
+func (p *Pretty) Hands(answer func(step string, a hand.Answer) bool) *Pretty {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.hands = answer
 	return p
 }
 
