@@ -752,6 +752,33 @@ func TestApplyingToDo(t *testing.T) {
 	}
 }
 
+// In a window too small for applying's screen, keys aren't read: a card
+// waiting for an answer says a bigger window shows them; one kit tells
+// about by itself says it carries on.
+func TestApplyingCardInASmallWindow(t *testing.T) {
+	for _, tt := range []struct {
+		card event.NeedsYou
+		want string
+	}{
+		{paperCard, "a bigger window shows the keys to answer it"},
+		{signIn, "kit carries on by itself once it's done"},
+	} {
+		var narrow syncBuffer
+		small := render.NewPretty(&colorprofile.Writer{Forward: &narrow, Profile: colorprofile.Ascii}, 80, true).Sized(func() (int, int) { return 80, 40 })
+		for _, e := range cardUp(tt.card) {
+			small.Emit(e)
+		}
+		time.Sleep(300 * time.Millisecond)
+		live := turned(screen(narrow.String()))
+		if !strings.Contains(live, tt.card.Title) || !strings.Contains(live, tt.want) {
+			t.Errorf("%s in a small window:\n%s\nwant its card, saying %q", tt.card.Title, live, tt.want)
+		}
+		if err := small.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 // A window too small for the screen keeps the run in place under its
 // heading, as before; the screen takes a window wide and tall enough for
 // its grid, its rules and the log.

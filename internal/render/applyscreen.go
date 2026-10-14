@@ -171,7 +171,7 @@ func (p *Pretty) layout(w, h int) screenLayout {
 	head := append(p.screenHead(w), look.Edge(w))
 	foot := append([]string{look.Edge(w)}, p.screenFoot(w)...)
 	log := max(h-len(head)-len(foot), 0)
-	card := p.cardLines(w)
+	card := p.cardLines(w, true)
 	card = card[:min(len(card), log)]
 	steps, rooms := p.panelRooms(log - len(card))
 	return screenLayout{head: head, foot: foot, card: card, log: log, steps: steps, rooms: rooms}
@@ -433,8 +433,10 @@ func (p *Pretty) screenFoot(w int) []string {
 // cardLines are the step by hand up for you, front and centre, as a card
 // w wide: what to do, how many more wait after it, its steps, numbered,
 // the app kit opened for it first, and, when kit tells by itself that it's
-// done, that it carries on; none when no card's up.
-func (p *Pretty) cardLines(w int) []string {
+// done, that it carries on; none when no card's up. Without keys to
+// answer it, as in a window too small for applying's screen, one waiting
+// for an answer says how to get them.
+func (p *Pretty) cardLines(w int, keys bool) []string {
 	c := p.card
 	if c == nil {
 		return nil
@@ -448,8 +450,11 @@ func (p *Pretty) cardLines(w int) []string {
 		steps = append([]string{c.Opened + " is open: kit opened it for you"}, steps...)
 	}
 	var after string
-	if c.Tells {
+	switch {
+	case c.Tells:
 		after = "kit carries on by itself once it's done"
+	case !keys:
+		after = "a bigger window shows the keys to answer it"
 	}
 	return look.Card(w, c.Title, look.Says(says...), steps, after)
 }

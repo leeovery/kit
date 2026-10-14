@@ -51,7 +51,7 @@ func (p *Pretty) applyLive() []string {
 		unwell bool
 	}
 	// macOS asking something comes first: the run waits on it.
-	blocks := []block{{lines: append(p.askingLines(p.width), p.cardLines(p.width)...)}}
+	blocks := []block{{lines: append(p.askingLines(p.width), p.cardLines(p.width, false)...)}}
 	kept, unwell := len(blocks[0].lines), 0
 	for _, area := range viewOrder {
 		for _, s := range p.start.Steps {
