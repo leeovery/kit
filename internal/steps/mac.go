@@ -27,7 +27,7 @@ const (
 
 // Problem is the state of a check's item that needs fixing: its name says
 // what's wrong, its detail what to do.
-const Problem = "problem"
+const Problem = check.Problem
 
 // The checks' thresholds, as bin/health had them.
 const (

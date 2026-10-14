@@ -141,7 +141,7 @@ func OwnManual(run runner.Runner, stateDir string, m ManualStep, raise *Raise) e
 			if done(ctx) {
 				return check.Result{State: check.OK, Summary: "done"}
 			}
-			it := check.Item{ID: ManualName + ":" + m.Name, Name: m.Do, State: "manual"}
+			it := check.Item{ID: ManualName + ":" + m.Name, Name: m.Do, State: check.ByHand}
 			if m.Command == nil {
 				it.Detail = "then: kit manual done " + m.Name
 			}
@@ -200,7 +200,7 @@ func Manual(run runner.Runner, home, stateDir string, list config.List) engine.S
 				if err != nil {
 					return failed(fmt.Errorf("%s: %s: %w", e.Pos(), e.Name, err))
 				}
-				it := check.Item{ID: ManualName + ":" + m.Name, Name: m.Do, State: "manual"}
+				it := check.Item{ID: ManualName + ":" + m.Name, Name: m.Do, State: check.ByHand}
 				switch {
 				case m.Command != nil:
 					if r, err := run.Run(ctx, *m.Command); Outcome(*m.Command, r, err) == "" {

@@ -48,6 +48,29 @@ type Item struct {
 	Action string `json:"action,omitempty"`
 }
 
+// The states of items that are the person's to do: a problem only they can
+// put right, as a backup disk to add, what to do its detail; and a step by
+// hand.
+const (
+	Problem = "problem"
+	ByHand  = "manual"
+)
+
+// ToDo reports whether r has left something for the person at the Mac to
+// do, and only that: attention whose every item is theirs to do. Nothing's
+// wrong with the step: it's to do.
+func (r Result) ToDo() bool {
+	if r.State != Attention || len(r.Items) == 0 {
+		return false
+	}
+	for _, it := range r.Items {
+		if it.State != Problem && it.State != ByHand {
+			return false
+		}
+	}
+	return true
+}
+
 // NotAllowed is the state of the item of a check that couldn't look at how
 // its step stands, as macOS hasn't let kit, till the person at the Mac
 // allows it: its name says what isn't allowed, its detail where to allow
