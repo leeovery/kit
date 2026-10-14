@@ -216,6 +216,23 @@ func TestACardGoesUpAndIsDone(t *testing.T) {
 	}
 }
 
+// A card waiting for an answer is done, too, once it's marked done
+// elsewhere, as by kit manual done in another window.
+func TestACardMarkedDoneElsewhere(t *testing.T) {
+	defer steps.SetManualPoll(10 * time.Millisecond)()
+	c := newCard(t)
+	m := steps.ManualStep{Name: "paper", Do: "Install Paper"}
+	step := steps.OwnManual(c.fake, c.state, m, c.raise)
+	applied := applying(t, step)
+	c.cards(t, 1)
+	if err := steps.MarkDone(c.state, []string{"paper"}, time.Now(), false); err != nil {
+		t.Fatal(err)
+	}
+	if err := ended(t, applied); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // An app that won't open isn't said to be open.
 func TestACardsAppThatWontOpen(t *testing.T) {
 	c := newCard(t)

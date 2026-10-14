@@ -897,17 +897,13 @@ func (r runningStep) counted(says string) []string {
 	return []string{says, look.Muted(fmt.Sprintf("%d of %d", r.done, r.of))}
 }
 
-// queuedForYou is what a step by hand says while its card waits its turn,
-// another's up.
-const queuedForYou = "needs you"
-
 // carded is whether the card up is step's.
 func (p *Pretty) carded(step string) bool { return p.card != nil && p.card.Step == step }
 
 // needsYou is whether r waits on you: its card up, saying what you're to
 // do, or its card waiting its turn.
 func (p *Pretty) needsYou(r runningStep) bool {
-	return r.todo != "" || r.doing == queuedForYou || p.carded(r.step)
+	return r.todo != "" || r.doing == event.Queued || p.carded(r.step)
 }
 
 // atWork is whether r's at work: not waiting on you, nor its turn, for a

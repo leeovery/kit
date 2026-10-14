@@ -151,6 +151,10 @@ type NeedsYou struct {
 
 func (e NeedsYou) At() time.Time { return e.Time }
 
+// Queued is what a step by hand says, in a Doing, while its card waits its
+// turn.
+const Queued = "needs you"
+
 // Asking is macOS asking the person at the Mac something, in a window of
 // its own, as "asking for a permission": the run's time limits wait on the
 // answer. Nothing once it's been answered.

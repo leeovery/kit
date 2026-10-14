@@ -198,7 +198,7 @@ var manualPoll = 3 * time.Second
 // done does, and has kit look at once at one it can, as it does every few
 // seconds anyway; Open opens its app again.
 func (r *Raise) up(ctx context.Context, step string, b byHand, more int) error {
-	r.Sink.Emit(event.Doing{Time: r.Now(), Step: step, Says: "needs you"})
+	r.Sink.Emit(event.Doing{Time: r.Now(), Step: step, Says: event.Queued})
 	if err := r.turn(ctx); err != nil {
 		return err
 	}
@@ -209,12 +209,11 @@ func (r *Raise) up(ctx context.Context, step string, b byHand, more int) error {
 	answers, down := r.Desk.Listen(step)
 	defer down()
 	r.show(ctx, step, b, more)
-	var poll <-chan time.Time
-	if b.Command != nil {
-		tick := time.NewTicker(manualPoll)
-		defer tick.Stop()
-		poll = tick.C
-	}
+	// Looking every few seconds finds it done by its command, or marked done
+	// elsewhere, as by kit manual done in another window.
+	tick := time.NewTicker(manualPoll)
+	defer tick.Stop()
+	poll := tick.C
 	for {
 		select {
 		case <-ctx.Done():
