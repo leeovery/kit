@@ -19,13 +19,17 @@ import (
 var now = func() time.Time { return time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC) }
 
 // checked runs s's check, and says what it found: its state, summary or
-// reason, and its items' ids.
+// reason, and its items' ids. What needs attention is the person's to do,
+// each item saying what's wrong and what to do.
 func checked(t *testing.T, s engine.Step) (check.State, string, []string) {
 	t.Helper()
 	res := s.Check(t.Context())
 	text := res.Summary
 	if res.State == check.Failed {
 		text = res.Reason
+	}
+	if res.State == check.Attention && !res.ToDo() {
+		t.Errorf("%s: %+v, want it the person's to do", s.Name, res)
 	}
 	var ids []string
 	for _, it := range res.Items {
