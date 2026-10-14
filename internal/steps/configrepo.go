@@ -31,12 +31,12 @@ func ConfigPrivate(run runner.Runner, dir string) engine.Step {
 				return check.Result{State: check.OK, Summary: "no remote, so not public"}
 			}
 			if err != nil {
-				return check.Result{State: check.Failed, Reason: err.Error()}
+				return failed(err)
 			}
 			repo, visibility, err := gitrepo.GitHubVisibility(ctx, run, string(res.Stdout))
 			switch {
 			case err != nil:
-				return check.Result{State: check.Failed, Reason: err.Error()}
+				return failed(err)
 			case repo == "":
 				return check.Result{State: check.OK, Summary: "not on GitHub, so not public there"}
 			}

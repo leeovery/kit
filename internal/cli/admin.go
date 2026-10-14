@@ -7,8 +7,10 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"github.com/leeovery/kit/internal/askpass"
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/look"
@@ -26,16 +28,13 @@ const adminWait = "needs an administrator's password: run kit %s at a terminal"
 // password is at hand for the installs that need one, so no step asks
 // mid-run: wanted are what's to be installed, by kind. At a terminal, when
 // any of them needs the password, kit asks for it once, through sudo, and
-// keeps sudo's hold on it fresh till stop is called. Without a terminal it
-// asks nothing: sudo either holds a password already, or those installs
-// wait. Every kind that can need the password is told how it stands, and
-// held says too; it's nil when nothing wanted needs the password.
+// keeps sudo's hold on it fresh till stop is called (renewSudo). Without a
+// terminal it asks nothing: sudo either holds a password already, or those
+// installs wait. Every kind that can need the password is told how it
+// stands, and held says too; it's nil when nothing wanted needs the
+// password.
 func (a *app) holdAdmin(ctx context.Context, r *run, wanted map[string][]string) (held func(context.Context) bool, stop func()) {
 	stop = func() {}
-	sudo := func(ctx context.Context, interactive bool, args ...string) bool {
-		_, err := r.run.Run(ctx, runner.Command{Name: "sudo", Args: args, Interactive: interactive})
-		return err == nil
-	}
 	var admins []kind.Admin
 	for _, name := range r.allKinds {
 		if ad, ok := r.kindsByName[name].(kind.Admin); ok {
@@ -52,7 +51,10 @@ func (a *app) holdAdmin(ctx context.Context, r *run, wanted map[string][]string)
 		var once sync.Once
 		var has bool
 		held = func(ctx context.Context) bool {
-			once.Do(func() { has = sudo(ctx, false, "-n", "true") })
+			once.Do(func() {
+				_, err := r.run.Run(ctx, runner.Command{Name: "sudo", Args: []string{"-n", "true"}})
+				has = err == nil
+			})
 			return has
 		}
 		tell(held)
@@ -61,24 +63,18 @@ func (a *app) holdAdmin(ctx context.Context, r *run, wanted map[string][]string)
 	if !needsAdmin(ctx, r, wanted) {
 		return nil, stop
 	}
-	has := a.askAdmin(ctx, r, wanted)
-	held = func(context.Context) bool { return has }
+	var has atomic.Bool
+	has.Store(a.askAdmin(ctx, r, wanted))
+	held = func(context.Context) bool { return has.Load() }
 	tell(held)
-	if !has {
+	if !has.Load() {
 		return held, stop
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	var wg sync.WaitGroup
 	wg.Go(func() {
-		tick := time.NewTicker(sudoRefresh)
-		defer tick.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-tick.C:
-				sudo(ctx, false, "-n", "-v")
-			}
+		if !renewSudo(ctx, r.run, r.askpass, sudoRefresh, has.Load) {
+			has.Store(false)
 		}
 	})
 	return held, func() {
@@ -87,15 +83,63 @@ func (a *app) holdAdmin(ctx context.Context, r *run, wanted map[string][]string)
 	}
 }
 
+// renewSudo renews sudo's hold on the run's password every interval, while
+// held says the run holds one, till ctx ends. When sudo has forgotten it,
+// as after the Mac slept past sudo's five minutes, or sudo -K, it's given
+// again, as asks answers sudo: the password kept, else the person's, in
+// kit's field; the log has sudo -n -v failing, then sudo -v given it. It
+// returns false once it couldn't be given again, the password forgotten
+// then, for nothing to be given a wrong one.
+func renewSudo(ctx context.Context, run runner.Runner, asks *askpass.Server, interval time.Duration, held func() bool) bool {
+	tick := time.NewTicker(interval)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return true
+		case <-tick.C:
+		}
+		if !held() {
+			continue
+		}
+		if _, err := run.Run(ctx, runner.Command{Name: "sudo", Args: []string{"-n", "-v"}}); err == nil || ctx.Err() != nil {
+			continue
+		}
+		if asks != nil && giveSudo(ctx, run, asks.Answer()) {
+			continue
+		}
+		if ctx.Err() != nil {
+			return true
+		}
+		if asks != nil {
+			asks.Keep("")
+		}
+		return false
+	}
+}
+
 // sudoAsks is the prompt kit has sudo give on its standard error when it
 // wants the password, for kit to ask for it in its own field.
 const sudoAsks = "[kit: sudo wants the password]"
 
+// giveSudo has sudo take an administrator's password, Touch ID first,
+// where sudo has it; else, each time sudo asks, what answer gives, on its
+// input, never on a command line or in the log. Whether sudo took it.
+func giveSudo(ctx context.Context, run runner.Runner, answer func(ctx context.Context, asked int) (string, error)) bool {
+	_, err := run.Run(ctx, runner.Command{
+		Name:    "sudo",
+		Args:    []string{"-S", "-p", sudoAsks, "-v"},
+		Timeout: 5 * time.Minute,
+		Asks:    sudoAsks,
+		Answer:  answer,
+	})
+	return err == nil
+}
+
 // askAdmin has sudo take an administrator's password for the installs
-// wanted, by kind: Touch ID first, where sudo has it; else, each time sudo
-// asks, kit asks in its own field, under the run's heading, a row
-// naming what needs it, and gives sudo what's typed, on its input, never on
-// a command line or in the log. Whether sudo took it.
+// wanted, by kind (giveSudo): each time sudo asks, kit asks in its own
+// field, under the run's heading, a row naming what needs it. Whether sudo
+// took it.
 func (a *app) askAdmin(ctx context.Context, r *run, wanted map[string][]string) bool {
 	// What kit was doing is taken down for the question.
 	r.sink.Emit(event.Preparing{Time: r.now, Command: r.command, Machine: r.machine})
@@ -110,28 +154,22 @@ func (a *app) askAdmin(ctx context.Context, r *run, wanted map[string][]string) 
 	case len(names) > 1:
 		about.Says = look.Orange("need an administrator's password")
 	}
-	_, err := r.run.Run(ctx, runner.Command{
-		Name:    "sudo",
-		Args:    []string{"-S", "-p", sudoAsks, "-v"},
-		Timeout: 5 * time.Minute,
-		Asks:    sudoAsks,
-		Answer: func(ctx context.Context, asked int) (string, error) {
-			row := about
-			if asked > 0 {
-				row.Says = look.Orange("that wasn't it: try again")
-			}
-			typed, err := a.ReadSecret(ctx, row)
-			// What's typed is kept for the run, for what asks later.
-			if err == nil && r.askpass != nil {
-				r.askpass.Keep(typed)
-			}
-			return typed, err
-		},
+	took := giveSudo(ctx, r.run, func(ctx context.Context, asked int) (string, error) {
+		row := about
+		if asked > 0 {
+			row.Says = look.Orange("that wasn't it: try again")
+		}
+		typed, err := a.ReadSecret(ctx, row)
+		// What's typed is kept for the run, for what asks later.
+		if err == nil && r.askpass != nil {
+			r.askpass.Keep(typed)
+		}
+		return typed, err
 	})
-	if err != nil && r.askpass != nil {
+	if !took && r.askpass != nil {
 		r.askpass.Keep("")
 	}
-	return err == nil
+	return took
 }
 
 // waitingForAdmin are which of names, of the kind called kindName, to

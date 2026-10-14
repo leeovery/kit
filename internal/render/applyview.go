@@ -116,7 +116,7 @@ func (p *Pretty) runningRow(r runningStep, w int) look.Row {
 func (p *Pretty) workSays(r runningStep) string {
 	says := r.counted(look.Cyan(r.doing))
 	if c := p.command[r.step]; c != "" {
-		says = append(says, look.Dim(c))
+		says = append(says, look.Dim(look.OneLine(c)))
 	}
 	return look.Says(says...)
 }
@@ -291,14 +291,13 @@ func todoLines(text string, width int) []string {
 }
 
 // workRow is a finished step's row in applying's list: what applying did
-// first, a few things named, or counted, then what the step says; the last
-// lines a failed step printed, then what's left of it, under it.
+// first, a few things named, or counted, then what the step says; why a
+// failed step failed, the last lines it printed (printedFailing), then
+// what's left of it, under it.
 func (p *Pretty) workRow(f event.StepFinished, part string) look.Row {
 	row := resultRow(p.title(f.Step), f.Result, part, p.start.Time)
-	if out := p.output[f.Step]; f.Result.State == check.Failed && len(out) > 0 {
-		what, _, _ := strings.Cut(f.Result.Reason, ":")
-		row.Says = look.Says(look.Red(what), look.Dim(p.command[f.Step]))
-		row.Under = append(look.Output(lastOf(out, keptFailing)...), row.Under...)
+	if f.Result.State == check.Failed && len(p.output[f.Step]) > 0 {
+		row.Says, row.Under = p.printedFailing(f, part, keptFailing)
 	}
 	if done := doneGroups(f.Result.Done); len(done) > 0 {
 		var did []string

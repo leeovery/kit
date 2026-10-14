@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"slices"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -70,10 +71,6 @@ on there: the whole of kit apply, then a fresh shell.`,
 	_ = cmd.Flags().MarkHidden("handed-over")
 	return cmd
 }
-
-// bootSudoRefresh is how often the boot renews sudo's hold on the password
-// while it installs, well inside sudo's own five minutes.
-const bootSudoRefresh = time.Minute
 
 func (a *app) bootstrap(ctx context.Context, mac, repo string, handedOver bool) error {
 	dirs, err := a.dirs()
@@ -146,7 +143,7 @@ func (a *app) bootstrap(ctx context.Context, mac, repo string, handedOver bool) 
 		if asks == nil {
 			return nil
 		}
-		return []string{"SUDO_ASKPASS=" + asks.Helper()}
+		return asks.Env()
 	})
 	observed := runner.Observed(exec, func(ctx context.Context, rep runner.Report) { sink.Emit(event.Command(ctx, rep)) }, a.Now)
 	observed = runner.Streamed(observed, event.Changing, func(ctx context.Context, cmd runner.Command, line string) {
@@ -208,7 +205,7 @@ func (a *app) bootstrap(ctx context.Context, mac, repo string, handedOver bool) 
 	}
 	report, err := signIn.Apply(ctx, sink, opts)
 	if err == nil && ctx.Err() == nil && !report.Attention() {
-		report, err = a.bootOrder(ctx, b, boots, sink, opts, planned)
+		report, err = a.bootOrder(ctx, b, boots, asks, sink, opts, planned)
 	}
 	booted := err == nil && ctx.Err() == nil && !report.Attention()
 	if booted && boots != nil && !b.InTerminal() {
@@ -330,8 +327,9 @@ const (
 
 // bootOrder runs the boot order, planned from the kit-config signing in
 // read, its rows under signing in's (planned), with sudo's hold on the
-// password kept fresh once it's given.
-func (a *app) bootOrder(ctx context.Context, b *boot.Boot, boots *render.BootFace, sink event.Sink, opts engine.Options, planned []event.Step) (engine.Report, error) {
+// password kept fresh once it's given, and given again, through asks, when
+// sudo forgets it (renewSudo).
+func (a *app) bootOrder(ctx context.Context, b *boot.Boot, boots *render.BootFace, asks *askpass.Server, sink event.Sink, opts engine.Options, planned []event.Step) (engine.Report, error) {
 	order, err := engine.New(b.Order()...)
 	if err != nil {
 		return engine.Report{}, err
@@ -344,21 +342,12 @@ func (a *app) bootOrder(ctx context.Context, b *boot.Boot, boots *render.BootFac
 		boots.Show(slices.Concat(planned, more))
 	}
 	ctx, stop := context.WithCancel(ctx)
-	defer stop()
-	go func() {
-		tick := time.NewTicker(bootSudoRefresh)
-		defer tick.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-tick.C:
-				if b.Held() {
-					_, _ = b.Run.Run(ctx, runner.Command{Name: "sudo", Args: []string{"-n", "-v"}})
-				}
-			}
-		}
+	var wg sync.WaitGroup
+	defer func() {
+		stop()
+		wg.Wait()
 	}()
+	wg.Go(func() { renewSudo(ctx, b.Run, asks, sudoRefresh, b.Held) })
 	return order.Apply(ctx, sink, opts)
 }
 

@@ -78,16 +78,17 @@ func TestQuietenLeavesOtherResultsAlone(t *testing.T) {
 
 func TestSeen(t *testing.T) {
 	r := drift.Record{
-		FirstSeen: map[string]time.Time{"brew:kept": ago(48 * time.Hour), "brew:gone": ago(48 * time.Hour), "cask:unchecked": ago(48 * time.Hour), "mas:failed": ago(48 * time.Hour)},
+		FirstSeen: map[string]time.Time{"brew:kept": ago(48 * time.Hour), "brew:gone": ago(48 * time.Hour), "cask:unchecked": ago(48 * time.Hour), "mas:failed": ago(48 * time.Hour), "login-item:unseen": ago(48 * time.Hour)},
 		Snoozed:   map[string]time.Time{"brew:kept": now.Add(time.Hour), "brew:ended": ago(time.Second), "brew:gone": now.Add(time.Hour)},
 		Temporary: map[string]time.Time{"brew:gone": ago(time.Hour), "brew:kept": ago(time.Hour)},
 	}
 	r.Seen(map[string]check.Result{
-		"brew": {State: check.Attention, Items: []check.Item{extra("kept"), extra("fresh"), extra("ended")}},
-		"mas":  {State: check.Failed},
+		"brew":       {State: check.Attention, Items: []check.Item{extra("kept"), extra("fresh"), extra("ended")}},
+		"mas":        {State: check.Failed},
+		"login-item": refused,
 	}, now)
 
-	wantSeen := map[string]time.Time{"brew:kept": ago(48 * time.Hour), "brew:fresh": now, "brew:ended": now, "cask:unchecked": ago(48 * time.Hour), "mas:failed": ago(48 * time.Hour)}
+	wantSeen := map[string]time.Time{"brew:kept": ago(48 * time.Hour), "brew:fresh": now, "brew:ended": now, "cask:unchecked": ago(48 * time.Hour), "mas:failed": ago(48 * time.Hour), "login-item:unseen": ago(48 * time.Hour)}
 	if fmt.Sprint(r.FirstSeen) != fmt.Sprint(wantSeen) {
 		t.Errorf("FirstSeen = %v\nwant %v", r.FirstSeen, wantSeen)
 	}
@@ -96,6 +97,19 @@ func TestSeen(t *testing.T) {
 	}
 	if wantTemp := map[string]time.Time{"brew:kept": ago(time.Hour)}; fmt.Sprint(r.Temporary) != fmt.Sprint(wantTemp) {
 		t.Errorf("Temporary = %v, want %v", r.Temporary, wantTemp)
+	}
+}
+
+// refused is a kind's check that couldn't look at what's installed, as
+// macOS hasn't let it.
+var refused = check.Result{State: check.Attention, Items: []check.Item{{ID: "login-item:allowed", Name: "macOS hasn't let the terminal control System Events", State: check.NotAllowed}}}
+
+// A check that couldn't look isn't drift: what it says needs the person at
+// the Mac now, never quiet as new.
+func TestQuietenLeavesWhatsNotAllowedLoud(t *testing.T) {
+	got := drift.Quieten(refused, drift.Record{}, now)
+	if got.State != check.Attention || got.Items[0].Quiet != "" {
+		t.Errorf("Quieten() = %+v, want it needing attention, loud", got)
 	}
 }
 

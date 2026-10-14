@@ -139,12 +139,12 @@ func (d kindDrifter) settle(ctx context.Context, r *run, c *changes, dec decisio
 			return check.Result{State: check.Failed, Reason: "kit doesn't know what it was"}
 		}
 		if err := rv.Revert(event.WithChanging(ctx), dec.item.Name); err != nil {
-			return check.Result{State: check.Failed, Reason: "couldn't put it back: " + err.Error()}
+			return check.Result{State: check.Failed, Reason: "couldn't put it back: " + engine.Reason(err)}
 		}
 		return check.Result{State: check.OK, Summary: "put back as it was"}
 	case dec.action == revert:
 		if err := d.k.Install(event.WithChanging(ctx), []string{dec.item.Name}); err != nil {
-			return check.Result{State: check.Failed, Reason: "couldn't put it back: " + err.Error()}
+			return check.Result{State: check.Failed, Reason: "couldn't put it back: " + engine.Reason(err)}
 		}
 		return check.Result{State: check.OK, Summary: "put back as declared"}
 	}
@@ -155,7 +155,7 @@ func (d kindDrifter) settle(ctx context.Context, r *run, c *changes, dec decisio
 		return removeOne(ctx, r, c, d.k, dec.item.Name, dec.shared)
 	case install:
 		if err := kind.InstallDeclared(event.WithChanging(ctx), d.k, d.list, d.held(), []string{dec.item.Name}); err != nil {
-			return check.Result{State: check.Failed, Reason: "couldn't install: " + err.Error()}
+			return check.Result{State: check.Failed, Reason: "couldn't install: " + engine.Reason(err)}
 		}
 		return check.Result{State: check.OK, Summary: "installed"}
 	}
@@ -307,12 +307,12 @@ func (d configDrifter) settle(ctx context.Context, _ *run, c *changes, dec decis
 		if dec.item.State == steps.ConfigAdded {
 			binned, err := linked.ToBin(d.home, filepath.Join(d.repo.Dir, dec.item.Name))
 			if err != nil {
-				return check.Result{State: check.Failed, Reason: "couldn't move it to the Bin: " + err.Error()}
+				return check.Result{State: check.Failed, Reason: "couldn't move it to the Bin: " + engine.Reason(err)}
 			}
 			return check.Result{State: check.OK, Summary: "undone: the file is in the Bin (" + binned + ")"}
 		}
 		if err := d.repo.Restore(ctx, dec.item.Name); err != nil {
-			return check.Result{State: check.Failed, Reason: "couldn't undo it: " + err.Error()}
+			return check.Result{State: check.Failed, Reason: "couldn't undo it: " + engine.Reason(err)}
 		}
 		return check.Result{State: check.OK, Summary: "undone: back to the last commit"}
 	}

@@ -7,7 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -179,6 +181,126 @@ func TestExecEndsACommandWhenItsContextIsDone(t *testing.T) {
 	}
 	if took := time.Since(cancelled); took > 2*time.Second {
 		t.Errorf("Run() returned %v after its context was done, want it ended then, with everything it started", took)
+	}
+}
+
+// terminalCheck prints whether the program has a terminal to ask at: one
+// it can open, as sudo opens /dev/tty to ask for a password.
+const terminalCheck = `if (exec 3</dev/tty) 2>/dev/null; then echo terminal; else echo none; fi`
+
+// leads reports whether the process pid leads a session of its own, and
+// with it a process group: one without kit's terminal.
+func leads(pid int) bool {
+	sid, err := syscall.Getsid(pid)
+	pgid, groupErr := syscall.Getpgid(pid)
+	return err == nil && groupErr == nil && sid == pid && pgid == pid
+}
+
+// inKitsSession reports whether the process pid is in this process's
+// session, leading a process group of its own.
+func inKitsSession(pid int) bool {
+	sid, err := syscall.Getsid(pid)
+	own, ownErr := syscall.Getsid(0)
+	pgid, groupErr := syscall.Getpgid(pid)
+	return err == nil && ownErr == nil && groupErr == nil && sid == own && sid != pid && pgid == pid
+}
+
+// whereRun runs cmd, a program that prints its process id, then waits, and
+// reports, while it runs, whether it leads a session of its own, or is in
+// kit's, leading a process group there.
+func whereRun(t *testing.T, r runner.Exec, cmd runner.Command) (leader, inSession bool) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(t.Context())
+	cmd.Lines = func(line string) {
+		if pid, err := strconv.Atoi(line); err == nil {
+			leader, inSession = leads(pid), inKitsSession(pid)
+			cancel()
+		}
+	}
+	if _, err := r.Run(ctx, cmd); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Run(%s) = %v, want it ended once it had said where it runs", cmd, err)
+	}
+	return leader, inSession
+}
+
+// kit's own sudo, which never asks at the terminal, stays in kit's session,
+// where sudo holds the password kit gave it; any other sudo runs as any
+// program does, in a session of its own.
+func TestExecRunsKitsOwnSudoInKitsSession(t *testing.T) {
+	r, _ := programs(t, map[string]string{"sudo": "echo $$; exec /bin/sleep 10"})
+	for _, tc := range []struct {
+		args []string
+		kits bool
+	}{
+		{[]string{"-n", "true"}, true},
+		{[]string{"-S", "-p", "ASK>", "-v"}, true},
+		{[]string{"-A", "true"}, true},
+		{[]string{"true"}, false},
+		{[]string{"-u", "someone", "-n", "true"}, false},
+	} {
+		leader, inSession := whereRun(t, r, runner.Command{Name: "sudo", Args: tc.args})
+		if inSession != tc.kits || leader == tc.kits {
+			t.Errorf("sudo %q: in kit's session %v, leading its own %v; want in kit's %v", tc.args, inSession, leader, tc.kits)
+		}
+	}
+}
+
+// Nothing kit runs has kit's terminal, but an interactive command and kit's
+// own sudo: each leads a session of its own, so a program that asks at a
+// terminal, as a program's own sudo does, fails at once, where in the
+// background of kit's terminal it would stop, unseen, for good.
+func TestExecRunsACommandWithoutKitsTerminal(t *testing.T) {
+	r, _ := programs(t, map[string]string{"alone": "echo $$; " + terminalCheck + "; exec /bin/sleep 10"})
+	ctx, cancel := context.WithCancel(t.Context())
+	var said []string
+	leader := false
+
+	_, err := r.Run(ctx, runner.Command{Name: "alone", Lines: func(line string) {
+		said = append(said, line)
+		if pid, err := strconv.Atoi(line); err == nil {
+			leader = leads(pid)
+		}
+		if line == "none" || line == "terminal" {
+			cancel()
+		}
+	}})
+	if !errors.Is(err, context.Canceled) || !leader || !slices.Contains(said, "none") {
+		t.Errorf("Run() = %v, said %q, leading a session of its own %v; want no terminal to ask at", err, said, leader)
+	}
+}
+
+// A command kit answers runs without kit's terminal too, but kit's own
+// sudo, answered on its input.
+func TestExecAnswersACommandWithoutKitsTerminal(t *testing.T) {
+	asks := `echo $$ > "$PIDFILE"; ` + terminalCheck + `; printf 'ASK>' >&2; read a; echo "$a"`
+	r, _ := programs(t, map[string]string{"asks": asks, "sudo": asks})
+	for _, tc := range []struct {
+		cmd  runner.Command
+		kits bool
+	}{
+		{runner.Command{Name: "asks"}, false},
+		{runner.Command{Name: "sudo", Args: []string{"-S", "-p", "ASK>", "-v"}}, true},
+	} {
+		marker := filepath.Join(t.TempDir(), "pid")
+		var leader, inSession bool
+		tc.cmd.Env, tc.cmd.Asks = []string{"PIDFILE=" + marker}, "ASK>"
+		tc.cmd.Answer = func(context.Context, int) (string, error) {
+			data, err := os.ReadFile(marker)
+			if err != nil {
+				return "", err
+			}
+			if pid, err := strconv.Atoi(strings.TrimSpace(string(data))); err == nil {
+				leader, inSession = leads(pid), inKitsSession(pid)
+			}
+			return "given", nil
+		}
+		res, err := r.Run(t.Context(), tc.cmd)
+		if err != nil || !strings.HasSuffix(string(res.Stdout), "given\n") || inSession != tc.kits || leader == tc.kits {
+			t.Errorf("%s: %q, %v, in kit's session %v, leading its own %v; want the answer, in kit's %v", tc.cmd, res.Stdout, err, inSession, leader, tc.kits)
+		}
+		if !tc.kits && string(res.Stdout) != "none\ngiven\n" {
+			t.Errorf("%s printed %q, want no terminal to ask at", tc.cmd, res.Stdout)
+		}
 	}
 }
 

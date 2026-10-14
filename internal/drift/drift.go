@@ -57,9 +57,11 @@ func Update(stateDir string, change func(*Record)) error {
 // Quieten marks each of res's items quiet while its time hasn't come, saying
 // when it was first seen: new, first seen under Grace ago, or now; snoozed,
 // until a time still ahead; temporary, installed so under TemporaryFor ago.
-// A step whose items are all quiet stands ok.
+// A step whose items are all quiet stands ok. One whose check couldn't look,
+// as macOS hasn't let it (check.Result's Refused), isn't drift, so is never
+// quiet.
 func Quieten(res check.Result, r Record, now time.Time) check.Result {
-	if len(res.Items) == 0 {
+	if _, refused := res.Refused(); refused || len(res.Items) == 0 {
 		return res
 	}
 	items := slices.Clone(res.Items)
@@ -90,13 +92,13 @@ func Quieten(res check.Result, r Record, now time.Time) check.Result {
 // Seen notes, in r, each item of results (by kind) first seen now that
 // wasn't seen before. For each kind whose check ran, standing ok or needing
 // attention, it forgets what's no longer drifting; a kind not checked, or
-// whose check failed or was deferred, keeps what it had. Snoozes that have
-// ended go.
+// whose check failed, was deferred or couldn't look, keeps what it had.
+// Snoozes that have ended go.
 func (r *Record) Seen(results map[string]check.Result, now time.Time) {
 	present := make(map[string]bool)
 	ran := make(map[string]bool)
 	for kind, res := range results {
-		if res.State != check.OK && res.State != check.Attention {
+		if _, refused := res.Refused(); refused || res.State != check.OK && res.State != check.Attention {
 			continue
 		}
 		ran[kind] = true

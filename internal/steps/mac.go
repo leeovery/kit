@@ -52,8 +52,10 @@ func problem(step, summary string, problems ...[3]string) check.Result {
 	return res
 }
 
+// failed is a check's result when looking failed with err, saying why, as
+// engine.Reason has it.
 func failed(err error) check.Result {
-	return check.Result{State: check.Failed, Reason: err.Error()}
+	return check.Result{State: check.Failed, Reason: engine.Reason(err)}
 }
 
 // output runs a command, returning what it printed.

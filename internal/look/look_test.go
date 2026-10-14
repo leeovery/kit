@@ -308,6 +308,19 @@ func TestRan(t *testing.T) {
 	}
 }
 
+// A command of many lines, as a script given with -e, shows on one line,
+// cut in the middle to fit.
+func TestRanOnOneLine(t *testing.T) {
+	script := "osascript -l JavaScript -e 'function run() {\n  var se = Application(1);\n  return 2;\n}'"
+	got := ansi.Strip(look.Ran(script, 1, "2m00s", 60))
+	if strings.Contains(got, "\n") || ansi.StringWidth(got) > 60 || !strings.HasPrefix(got, "osascript -l") || !strings.HasSuffix(got, "return 2; }' · exit 1 · 2m00s") {
+		t.Errorf("Ran() = %q, want it on one line, cut in the middle to 60", got)
+	}
+	if got := look.OneLine("a\n  b\tc  "); got != "a b c" {
+		t.Errorf("OneLine() = %q, want %q", got, "a b c")
+	}
+}
+
 func TestRule(t *testing.T) {
 	if got := ansi.Strip(look.Rule(10)); got != "  ────────" {
 		t.Errorf("Rule(10) = %q", got)

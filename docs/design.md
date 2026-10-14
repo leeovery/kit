@@ -295,9 +295,16 @@ tool).
 do, then checks it again: each step then says what it did ("installed: jq"). It never removes
 or adopts: reconcile does those. At a terminal, when a missing cask installs through a
 package, kit asks for an administrator's password once, through `sudo -v`, before anything is
-applied, and keeps sudo's hold fresh while it runs; without a terminal it asks nothing, and
+applied, and keeps sudo's hold fresh while it runs, giving the password again if sudo forgets
+it (the person asked only if sudo refuses the one kept); without a terminal it asks nothing, and
 those casks wait, saying why (requirement 4). App Store apps need the password for every
 install, as mas runs as root; `kit <kind> add` and reconcile's installs ask up front the same way.
+Nothing kit runs asks at its terminal: each command runs in a session of its own, without it, so
+a program that asks there fails at once, never stopped unseen in the background; kit's own sudo,
+which never asks there (`-n`, or `-S` on its input), stays in kit's session, as sudo holds a
+password only for the session it was given in. A program's own sudo asks kit instead (`SUDO_ASKPASS`, and `DISPLAY` set,
+without which sudo, having no terminal, won't), and is given the password kept, so a step declared
+`--sudo` uses plain `sudo`; `sudo -n` never asks, so goes without.
 
 `kit <kind> add` installs each name, unless it's installed, and declares it in this Mac's file, in
 its sorted place, or for every Mac with `--shared` (taking it out of each Mac's own file); it

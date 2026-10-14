@@ -3,9 +3,15 @@
 
   03:04:05  ● Homebrew  /opt/homebrew
             │ brew --prefix · exit 0 · 0.1s
-  03:04:06  ✗ remote-session  couldn't apply: run apply exited 1
+  03:04:06  ✗ remote-session  couldn't apply
             │ /Users/someone/.conf…teps/remote-session/run apply · exit 1 · 0.3s
             │ sudo: a password is required
+  03:04:06  ✗ gpg-key  couldn't apply
+            │ its check still says not imported
+            │ /Users/someone/.conf…aptop/steps/gpg-key/run apply · exit 0 · 0.2s
+  03:04:07  ✗ macOS login items  couldn't check
+            │ osascript -l JavaSc…function run() { return 1; }' · exit 1 · 2m00s
+            │ execution error: Error: AppleEvent timed out. (-1712)
             ✗ fonts  didn't finish
 
-  1 failed · 1 fine · 4.0s
+  3 failed · 1 fine · 4.0s

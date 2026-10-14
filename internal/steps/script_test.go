@@ -96,8 +96,8 @@ func TestScriptStepChecks(t *testing.T) {
 		{"can't tell", func(sc *runnertest.Script) { sc.Exits(2).Prints("can't read the keychain\n") }, check.Result{State: check.Failed, Reason: "can't read the keychain"}},
 		{"not yet", func(sc *runnertest.Script) { sc.Exits(3).Prints("no key file: kit secret sync writes it\n") }, check.Result{State: check.Deferred, Reason: "no key file: kit secret sync writes it"}},
 		{"crashed", func(sc *runnertest.Script) {
-			sc.Exits(127).Prints("checking\n").PrintsToStderr("run: line 4: tool: command not found\n")
-		}, check.Result{State: check.Failed, Reason: "run: line 4: tool: command not found"}},
+			sc.Exits(127).Prints("checking\n").PrintsToStderr(run + ": line 4: tool: command not found\n")
+		}, check.Result{State: check.Failed, Reason: "tool: command not found"}},
 		{"silent", func(sc *runnertest.Script) { sc.Exits(5) }, check.Result{State: check.Failed, Reason: "it exited 5, saying nothing"}},
 		{"slow", func(sc *runnertest.Script) { sc.Fails(context.DeadlineExceeded) }, check.Result{State: check.Failed, Reason: "it didn't finish: " + context.DeadlineExceeded.Error()}},
 	} {
@@ -161,6 +161,9 @@ func TestScriptStepApplies(t *testing.T) {
 	}
 }
 
+// A script that fails to apply says it couldn't, then why, in the words
+// it last said, never its path: a shell's own error without the lead
+// naming the script and its line.
 func TestScriptStepApplyFails(t *testing.T) {
 	s := script(t, steps.Script{Does: "Installs the tool"})
 	run := filepath.Join(s.Dir, "run")
@@ -171,11 +174,17 @@ func TestScriptStepApplyFails(t *testing.T) {
 	}{
 		{"says why", func(apply, _ *runnertest.Script) {
 			apply.Exits(1).Prints("Downloading\n").PrintsToStderr("curl: (6) Could not resolve host\n\n")
-		}, "curl: (6) Could not resolve host"},
-		{"says it last", func(apply, _ *runnertest.Script) { apply.Exits(1).Prints("Downloading\nno space left\n") }, "no space left"},
-		{"says nothing", func(apply, _ *runnertest.Script) { apply.Exits(3) }, "it exited 3, saying nothing"},
-		{"isn't believed", func(_, checking *runnertest.Script) { checking.Exits(1).Prints("not installed\n") }, "applied, but its check still says: not installed"},
-		{"breaks its check", func(_, checking *runnertest.Script) { checking.Exits(4).Prints("can't tell\n") }, "applied, but its check still says: can't tell"},
+		}, "couldn't apply: curl: (6) Could not resolve host"},
+		{"the shell says why", func(apply, _ *runnertest.Script) {
+			apply.Exits(127).PrintsToStderr(run + ": line 53: gpg: command not found\n")
+		}, "couldn't apply: gpg: command not found"},
+		{"the shell says why, without a line", func(apply, _ *runnertest.Script) {
+			apply.Exits(1).PrintsToStderr(run + ": TOKEN: unbound variable\n")
+		}, "couldn't apply: TOKEN: unbound variable"},
+		{"says it last", func(apply, _ *runnertest.Script) { apply.Exits(1).Prints("Downloading\nno space left\n") }, "couldn't apply: no space left"},
+		{"says nothing", func(apply, _ *runnertest.Script) { apply.Exits(3) }, "couldn't apply: it exited 3, saying nothing"},
+		{"isn't believed", func(_, checking *runnertest.Script) { checking.Exits(1).Prints("not installed\n") }, "couldn't apply: its check still says not installed"},
+		{"breaks its check", func(_, checking *runnertest.Script) { checking.Exits(4).Prints("can't tell\n") }, "couldn't apply: its check still says can't tell"},
 	} {
 		fake := runnertest.New(t)
 		checking := fake.On(run, "check")
@@ -237,7 +246,7 @@ func TestScriptStepNeedingASecret(t *testing.T) {
 	if found.Summary != "not fetched with [redacted]" {
 		t.Errorf("Check() = %+v, want what it said, its secret hidden", found)
 	}
-	if err := step.Apply(t.Context(), found); err == nil || err.Error() != "denied: [redacted]" {
+	if err := step.Apply(t.Context(), found); err == nil || err.Error() != "couldn't apply: denied: [redacted]" {
 		t.Errorf("Apply() = %v, want its failure, its secret hidden", err)
 	}
 	if err := step.Apply(t.Context(), found); err != nil {

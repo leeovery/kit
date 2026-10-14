@@ -234,9 +234,9 @@ type Counter interface {
 }
 
 // Fetcher is a Counter whose install downloads all it needs before it
-// installs any of it, as Homebrew's does: the step says it's downloading,
-// counting the things it was asked to install as each is downloaded, till
-// the install proper begins.
+// installs any of it, as Homebrew's does: from when its command starts
+// (Starting), the step says it's downloading, counting the things it was
+// asked to install as each is downloaded, till the install proper begins.
 type Fetcher interface {
 	Counter
 	// Fetched is which of names line says is downloaded: none when it says
@@ -254,6 +254,21 @@ type Sharing interface {
 	// Shares names the kinds it takes turns with.
 	Shares() []string
 }
+
+// NotAllowed is the error a kind returns when macOS hasn't let kit do what
+// it must, as look at what's installed, till the person at the Mac allows
+// it: its step needs them, saying what isn't allowed and where to allow
+// it, rather than failing.
+type NotAllowed struct {
+	// What is what macOS hasn't let kit do, as in "macOS hasn't let the
+	// terminal control System Events".
+	What string
+	// Where is where to allow it, as in System Settings › Privacy &
+	// Security › Automation: short enough for a row.
+	Where string
+}
+
+func (n *NotAllowed) Error() string { return n.What + ": allow it in " + n.Where }
 
 // Install is the action that installs an item.
 const Install = "install"
@@ -485,7 +500,7 @@ func install(ctx context.Context, k Kind, declared config.List, names, env []str
 		err = fmt.Errorf("couldn't install %s: %w", strings.Join(left, ", "), err)
 	}
 	if values := runner.SecretValues(installing); len(values) > 0 {
-		return errors.New(redact.Text(err.Error(), values...))
+		return errors.New(redact.Text(engine.Reason(err), values...))
 	}
 	return err
 }
@@ -549,17 +564,34 @@ func Lines(ctx context.Context) func(line string) {
 	return nil
 }
 
-// Waiting has the step whose install ctx counts say, till resume, that the
-// install waits for what, the title of the step whose turn it is, as a
-// Sharing kind's waits while another's install goes on; then how its
-// install's going again. Where nothing counts the install, it says nothing.
-func Waiting(ctx context.Context, what string) (resume func()) {
+// Saying has the step whose install ctx counts say says, till resume,
+// rather than how its install's going: what the install does first, as
+// Homebrew updating itself, or waits for; then how its install's going
+// again. Where nothing counts the install, it says nothing.
+func Saying(ctx context.Context, says string) (resume func()) {
 	p, ok := ctx.Value(progressKey{}).(*progress)
 	if !ok {
 		return func() {}
 	}
-	p.wait(what)
-	return func() { p.wait("") }
+	p.aside(says)
+	return func() { p.aside("") }
+}
+
+// Waiting is Saying that the install waits for what, the title of the step
+// whose turn it is, as a Sharing kind's waits while another's install goes
+// on.
+func Waiting(ctx context.Context, what string) (resume func()) {
+	return Saying(ctx, "waiting for "+what)
+}
+
+// Starting has the step whose install ctx counts say its install command is
+// starting: a Fetcher's says it's downloading from then, and not before, as
+// its Install may first do, or wait for, something else (Saying). A
+// Fetcher's Install calls it as its command starts.
+func Starting(ctx context.Context) {
+	if p, ok := ctx.Value(progressKey{}).(*progress); ok {
+		p.start()
+	}
 }
 
 // counting is ctx for installing names, when k is a Counter: the step says
@@ -570,26 +602,28 @@ func counting(ctx context.Context, k Kind, names []string) context.Context {
 		return ctx
 	}
 	f, fetches := k.(Fetcher)
-	p := &progress{ctx: ctx, counter: c, fetcher: f, names: names, fetching: fetches, done: map[string]bool{}, fetched: map[string]bool{}}
+	p := &progress{ctx: ctx, counter: c, fetcher: f, names: names, unstarted: fetches, done: map[string]bool{}, fetched: map[string]bool{}}
 	p.say()
 	return context.WithValue(ctx, progressKey{}, p)
 }
 
 // progress is how an install of names is going, as a Counter reads the lines
-// it prints: a Fetcher's downloading, from the start till the install proper
-// begins, counting those of names downloaded; then installing, as each is
-// done, the next not yet done, counting those done. Each done has the steps
-// waiting for the kind's things look again.
+// it prints: a Fetcher's downloading, from when its command starts till the
+// install proper begins, counting those of names downloaded; then
+// installing, as each is done, the next not yet done, counting those done.
+// Each done has the steps waiting for the kind's things look again.
 type progress struct {
 	ctx     context.Context
 	counter Counter
 	fetcher Fetcher
 	names   []string
 
-	mu       sync.Mutex
-	fetching bool
-	// waiting is the title of the step the install waits for, while it does.
-	waiting       string
+	mu sync.Mutex
+	// unstarted is a Fetcher's install before its command starts, saying
+	// nothing of downloading yet; fetching, its command downloading.
+	unstarted, fetching bool
+	// says is what the install does first, or waits for, while it does.
+	says          string
 	done, fetched map[string]bool
 }
 
@@ -601,7 +635,7 @@ func (p *progress) line(line string) {
 	switch {
 	case done:
 		if p.note(p.done, name) {
-			p.fetching = false
+			p.unstarted, p.fetching = false, false
 			p.say()
 			engine.Changed(p.ctx)
 		}
@@ -625,21 +659,32 @@ func (p *progress) note(set map[string]bool, name string) bool {
 	return true
 }
 
-// wait notes what the install waits for, "" once it's done waiting, and
-// says so.
-func (p *progress) wait(what string) {
+// aside notes what the install does first, or waits for, "" once it's
+// done, and says so.
+func (p *progress) aside(says string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.waiting = what
+	p.says = says
 	p.say()
 }
 
-// say says how the install's going. Once lines can come, p.mu must be
-// held.
+// start notes the install's command is starting: a Fetcher's downloading.
+func (p *progress) start() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.unstarted {
+		p.unstarted, p.fetching = false, true
+		p.say()
+	}
+}
+
+// say says how the install's going: nothing, for a Fetcher's whose command
+// hasn't started. Once lines can come, p.mu must be held.
 func (p *progress) say() {
 	switch {
-	case p.waiting != "":
-		event.Say(p.ctx, event.Doing{Says: "waiting for " + p.waiting})
+	case p.says != "":
+		event.Say(p.ctx, event.Doing{Says: p.says})
+	case p.unstarted:
 	case p.fetching:
 		event.Say(p.ctx, event.Doing{Says: "downloading", Done: len(p.fetched), Of: len(p.names)})
 	default:
@@ -689,7 +734,7 @@ func Compare(ctx context.Context, k Kind, declared config.List) check.Result {
 	case errors.Is(err, runner.ErrNotFound):
 		return check.Result{State: check.Deferred, Reason: "needs " + k.Program() + ", which isn't installed"}
 	case err != nil:
-		return check.Result{State: check.Failed, Reason: err.Error()}
+		return failed(k, err)
 	}
 	key := func(name string) string { return name }
 	if kd, ok := k.(Keyed); ok {
@@ -724,7 +769,7 @@ func Compare(ctx context.Context, k Kind, declared config.List) check.Result {
 	if len(unmatched) > 0 {
 		resolved, err := k.Resolve(ctx, unmatched)
 		if err != nil {
-			return check.Result{State: check.Failed, Reason: err.Error()}
+			return failed(k, err)
 		}
 		for _, name := range unmatched {
 			full, known := resolved[name]
@@ -743,7 +788,7 @@ func Compare(ctx context.Context, k Kind, declared config.List) check.Result {
 	if b, ok := k.(Blocker); ok && len(missing) > 0 {
 		var err error
 		if blocked, err = b.Blocked(ctx, fullNames, installed); err != nil {
-			return check.Result{State: check.Failed, Reason: err.Error()}
+			return failed(k, err)
 		}
 	}
 	var extra, unused []string
@@ -762,7 +807,7 @@ func Compare(ctx context.Context, k Kind, declared config.List) check.Result {
 	if d, ok := k.(Differ); ok && len(installedDeclared) > 0 {
 		var err error
 		if changed, err = d.Differs(ctx, installedDeclared); err != nil {
-			return check.Result{State: check.Failed, Reason: err.Error()}
+			return failed(k, err)
 		}
 	}
 
@@ -828,6 +873,18 @@ func Compare(ctx context.Context, k Kind, declared config.List) check.Result {
 		res.State = check.Attention
 	}
 	return res
+}
+
+// failed is how k's step stands when looking at what's installed failed
+// with err: needing the person at the Mac when macOS hasn't let kit look
+// (NotAllowed), saying what to allow; else failed, saying why.
+func failed(k Kind, err error) check.Result {
+	if na, ok := errors.AsType[*NotAllowed](err); ok {
+		return check.Result{State: check.Attention, Summary: "needs your permission", Items: []check.Item{{
+			ID: k.Name() + ":allowed", Name: na.What, State: check.NotAllowed, Detail: na.Where,
+		}}}
+	}
+	return check.Result{State: check.Failed, Reason: engine.Reason(err)}
 }
 
 // items are names as k's items in state, sorted, each with detail.

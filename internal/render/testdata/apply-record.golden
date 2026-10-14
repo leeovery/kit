@@ -35,6 +35,7 @@
   ● File Sharing  turned on
   ● Homebrew formulae  fine
   ✗ Homebrew casks  couldn't install tailscale-app · brew install --cask tailsc…
+  │ installer: The install failed. (The Installer encountered an error that cau…
   │ ==> Installing Cask 6
   │ ==> Installing Cask 7
   │ ==> Installing Cask 8
@@ -42,7 +43,6 @@
   │ ==> Installing Cask 10
   │ ==> Installing Cask tailscale-app
   │ installer: Package name is Tailscale
-  │ installer: The install failed. (The Installer encountered an error that cau…
   ● App Store apps  fine
   ● npm packages  fine
   ● Composer packages  fine

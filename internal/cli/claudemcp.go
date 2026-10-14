@@ -11,6 +11,7 @@ import (
 
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/config"
+	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/kind/mcp"
 )
@@ -103,7 +104,7 @@ func switchOne(ctx context.Context, r *run, c *changes, m *mcp.MCP, name string,
 			err = m.Install(event.WithChanging(ctx), []string{name})
 		}
 		if err != nil {
-			return check.Result{State: check.Failed, Reason: strings.Join(append(done, "couldn't install: "+err.Error()), "; ")}
+			return check.Result{State: check.Failed, Reason: strings.Join(append(done, "couldn't install: "+engine.Reason(err)), "; ")}
 		}
 		done = append(done, "installed")
 	case !on && isIn:

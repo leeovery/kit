@@ -18,6 +18,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/leeovery/kit/internal/ask"
+	"github.com/leeovery/kit/internal/askpass"
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/look"
 	"github.com/leeovery/kit/internal/runner"
@@ -300,8 +301,7 @@ func Real(version string) Deps {
 			return runner.Become(self, args, os.Environ())
 		},
 		Shell: func() error {
-			env := slices.DeleteFunc(os.Environ(), func(v string) bool { return strings.HasPrefix(v, "SUDO_ASKPASS=") })
-			return runner.BecomeLoginShell(cmp.Or(os.Getenv("SHELL"), "/bin/zsh"), env)
+			return runner.BecomeLoginShell(cmp.Or(os.Getenv("SHELL"), "/bin/zsh"), askpass.Without(os.Environ()))
 		},
 		WatchDialogs: true,
 		Scratch:      "/Volumes/Scratch",

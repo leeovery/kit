@@ -80,8 +80,8 @@ func (a *app) list(ctx context.Context, r *run, args []string) error {
 	for _, name := range kinds {
 		k := r.kindsByName[name]
 		res := kind.Compare(ctx, k, r.lists[name])
-		if res.State == check.Failed {
-			return fmt.Errorf("couldn't check %s: %s", kind.Label(k.Name()), res.Reason)
+		if err := unchecked(kind.Label(k.Name()), res); err != nil {
+			return err
 		}
 		missing := make(map[string]bool)
 		for _, it := range res.Items {
@@ -279,4 +279,17 @@ func (a *app) why(ctx context.Context, r *run, name string) error {
 	}
 	_, err := fmt.Fprint(a.Stdout, b.String())
 	return err
+}
+
+// unchecked is the error for the kind called label whose check, res,
+// couldn't tell what's installed: it failed, or macOS hasn't let it look.
+// Nil when it could.
+func unchecked(label string, res check.Result) error {
+	if it, ok := res.Refused(); ok {
+		return fmt.Errorf("couldn't check %s: %s; allow it in %s", label, it.Name, it.Detail)
+	}
+	if res.State == check.Failed {
+		return fmt.Errorf("couldn't check %s: %s", label, res.Reason)
+	}
+	return nil
 }

@@ -203,6 +203,41 @@ func TestFileLeavesOutLinesAsTheyCome(t *testing.T) {
 	}
 }
 
+// macOS asking the person at the Mac something is a line as its window's
+// seen, saying what it asks, and a line once it's gone, saying what it
+// asked; nothing once the run's end is written, so that stays the last
+// line.
+func TestALogRecordsMacOSAsking(t *testing.T) {
+	l, err := logs.Open(t.TempDir(), at, "apply", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range []event.Event{
+		event.RunStarted{Time: at, Command: "apply", Machine: "laptop"},
+		event.Asking{Time: at.Add(time.Second), Says: "asking for a permission"},
+		event.Asking{Time: at.Add(time.Minute)},
+		event.RunFinished{Time: at.Add(2 * time.Minute)},
+		event.Asking{Time: at.Add(3 * time.Minute), Says: "asking for an administrator's password"},
+	} {
+		l.Emit(e)
+	}
+	if err := l.Close(); err != nil {
+		t.Fatal(err)
+	}
+	records, err := logs.Read(l.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, r := range records {
+		got = append(got, r.Event+" "+r.Says+" "+r.Time.Sub(at).String())
+	}
+	want := []string{"run_started  0s", "asking asking for a permission 1s", "answered asking for a permission 1m0s", "run_finished  2m0s"}
+	if !slices.Equal(got, want) {
+		t.Errorf("records = %q\nwant %q", got, want)
+	}
+}
+
 // Runs lists the runs logged, newest first, each as it started and ended,
 // a run that didn't finish said so.
 // Runs lists the runs newest first, each from its start, after commands run

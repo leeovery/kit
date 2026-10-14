@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/leeovery/kit/internal/ask"
+	"github.com/leeovery/kit/internal/runner"
 )
 
 const zoomInfo = `{"formulae": [], "casks": [{"token": "zoom", "full_token": "zoom", "old_tokens": [], "artifacts": [{"pkg": ["zoomusInstallerFull.pkg"]}]}]}`
@@ -143,6 +144,37 @@ func TestApplyAtATerminalAsksForThePasswordUpFront(t *testing.T) {
 		if strings.HasPrefix(c, "brew install") || strings.HasPrefix(c, "brew update") {
 			t.Errorf("ran %q before asking for the password, want nothing applied first", c)
 		}
+	}
+}
+
+// A step declared --sudo, applied at a terminal, has its own sudo given the
+// password kit asked for: through kit's helper, which sudo runs with -A, or
+// without it once sudo has no terminal, as nothing kit runs has, and
+// DISPLAY is set.
+func TestAStepsOwnSudoIsGivenThePassword(t *testing.T) {
+	w := laptopWorld(t)
+	w.terminal = true
+	w.writeSection(t, "laptop", "steps", `trust "Trusts the authority" --sudo`+"\n")
+	run := w.stepScript(t, "laptop", "trust")
+	w.fake.On(run, "check").Exits(1).Prints("not trusted\n").
+		Then().Exits(1).Prints("not trusted\n").
+		Then().Prints("trusted\n")
+	w.fake.On(run, "apply")
+	w.expectPassword()
+
+	if _, errOut, code := w.run(t, "apply", "trust"); code != 0 {
+		t.Errorf("kit apply trust exit %d (%s), want 0", code, errOut)
+	}
+	applied := slices.IndexFunc(w.fake.Commands(), func(cmd runner.Command) bool { return cmd.String() == run+" apply" })
+	if applied < 0 {
+		t.Fatalf("ran %q, want the step applied", w.fake.Calls())
+	}
+	env := w.fake.Commands()[applied].Env
+	askpass := slices.ContainsFunc(env, func(kv string) bool {
+		return strings.HasPrefix(kv, "SUDO_ASKPASS=") && strings.HasSuffix(kv, "/kit-askpass")
+	})
+	if !askpass || !slices.Contains(env, "DISPLAY=") {
+		t.Errorf("the step applied with %q; want kit's helper, and DISPLAY set", env)
 	}
 }
 

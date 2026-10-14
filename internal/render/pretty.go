@@ -385,9 +385,7 @@ func (p *Pretty) row(f event.StepFinished) look.Row {
 	r := f.Result
 	row := resultRow(p.title(f.Step), r, p.step(f.Step).Part, p.start.Time)
 	if out := p.output[f.Step]; r.State == check.Failed && len(out) > 0 {
-		what, _, _ := strings.Cut(r.Reason, ":")
-		row.Says = look.Says(look.Red(what), look.Dim(p.command[f.Step]))
-		row.Under = append(look.Output(out...), row.Under...)
+		row.Says, row.Under = p.printedFailing(f, p.step(f.Step).Part, len(out))
 	}
 	if f.Step == configStep && r.State == check.OK && r.Summary == "nothing changed" {
 		row.State, row.Says = look.Skipped, look.Muted("nothing to commit")
@@ -396,6 +394,25 @@ func (p *Pretty) row(f event.StepFinished) look.Row {
 		row.Says = look.Says(look.Muted("applied"), row.Says)
 	}
 	return row
+}
+
+// printedFailing is the words of the row of f, a step that failed having
+// printed something, and what's under it, of part: what went wrong, then
+// the command that printed, dim, on one line; why, then the last kept of
+// the lines it printed, but for the last when it's why said whole (as with
+// a path before it, which a row too narrow for it would cut off), then
+// what's left of it.
+func (p *Pretty) printedFailing(f event.StepFinished, part string, kept int) (says string, under []string) {
+	head, why := failure(f.Result)
+	says = look.Red(head)
+	if c := p.command[f.Step]; c != "" {
+		says = look.Says(says, look.Dim(look.OneLine(c)))
+	}
+	out := lastOf(p.output[f.Step], kept)
+	if why != "" && strings.HasSuffix(out[len(out)-1], why) {
+		out = out[:len(out)-1]
+	}
+	return says, slices.Concat(whyFailed(f.Result), look.Output(out...), whatsLeft(f.Result, part, p.start.Time))
 }
 
 // saying is a result's words as a row says them: the parts of a summary
@@ -432,6 +449,12 @@ func (p *Pretty) configRows(fs []event.StepFinished) []look.Row {
 	var repo []string
 	for _, f := range fs {
 		r, part := f.Result, p.step(f.Step).Part
+		if _, refused := r.Refused(); refused {
+			// It couldn't look, so it has nothing to count: its row says what
+			// to allow.
+			rows = append(rows, p.row(f))
+			continue
+		}
 		if r.State == check.Failed || r.State == check.Deferred {
 			rows = append(rows, p.row(f))
 		}

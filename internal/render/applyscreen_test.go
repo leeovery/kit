@@ -139,7 +139,7 @@ func casksFailed() []event.Event {
 		events = append(events, event.Output{Step: stepName("Drift", "Homebrew casks"), Command: "brew install --cask tailscale-app", Line: l})
 	}
 	events = append(events,
-		finished("Drift", "Homebrew casks", check.Result{State: check.Failed, Reason: "couldn't install tailscale-app: brew install --cask tailscale-app exited 1"}),
+		finished("Drift", "Homebrew casks", check.Result{State: check.Failed, Reason: "couldn't install tailscale-app: installer: The install failed. (The Installer encountered an error that caused the installation to fail.)"}),
 		finished("Backups", "Arq", check.Result{State: check.Attention, Summary: "no backup plan", Items: []check.Item{
 			{ID: "arq:plan", Name: "no backup plan is chosen", State: "problem", Detail: "open Arq and choose its backup plan"}}}),
 		fine("Drift", "macOS login items", "14 added"),
@@ -667,5 +667,54 @@ func TestApplyingGivesTheScreenBack(t *testing.T) {
 	}
 	if n := kb.listens(); n != 3 {
 		t.Errorf("the face read keys %d times; want once each time its screen went up, 3", n)
+	}
+}
+
+// A step that failed says what went wrong in a few words, never a command
+// or a path: one that printed has the command it ran after them, dim, on
+// one line however many lines it has, why under its row, then the last
+// lines it printed, but for one saying why whole, as after the script's
+// path; one that printed nothing has why on the line under its row.
+func TestApplyingFailedStepsSayWhatWentWrong(t *testing.T) {
+	gpg := stepName("Steps", "gpg-key")
+	run := "/Users/someone/.config/kit/laptop/steps/gpg-key/run"
+	login := stepName("Drift", "macOS login items")
+	script := "osascript -l JavaScript -e 'function run() {\n  var se = Application(1);\n  return 1;\n}'"
+	events := []event.Event{
+		event.RunStarted{Time: at, Command: "apply", Machine: "laptop", Steps: newMacSteps()},
+		event.StepStarted{Time: at, Step: gpg, Doing: "applying"},
+		event.Output{Step: gpg, Command: run + " apply", Line: run + ": line 53: gpg: command not found"},
+		finished("Steps", "gpg-key", check.Result{State: check.Failed, Reason: "couldn't apply: gpg: command not found"}),
+		event.StepStarted{Time: at, Step: login, Doing: "applying"},
+		event.Output{Step: login, Command: script, Line: "execution error: Error: AppleEvent timed out. (-1712)"},
+		finished("Drift", "macOS login items", check.Result{State: check.Failed, Reason: "couldn't add com.example.app: execution error: Error: AppleEvent timed out. (-1712)"}),
+		finished("Drift", "Sync", check.Result{State: check.Failed, Reason: "not a git repository"}),
+	}
+	face, out, _ := applyAt(160, 64, time.Minute, events)
+	live := screen(out.String())
+	for title, want := range map[string]string{
+		"gpg-key":           "  ── ✗ gpg-key  couldn't apply · " + run + " apply ─",
+		"macOS login items": "  ── ✗ macOS login items  couldn't add com.example.app · osascript -l JavaScript -e 'function run() { var se = Application(1); return 1; }' ─",
+	} {
+		if rule, _ := panelOf(live, title); !strings.HasPrefix(rule, want) {
+			t.Errorf("%s's panel's rule is\n%q\nwant it to start\n%q", title, rule, want)
+		}
+	}
+	if _, under := panelOf(live, "macOS login items"); len(under) != 1 {
+		t.Errorf("the login items' panel shows %q, want the line it printed alone: its command on its rule, on one line", under)
+	}
+	face.Emit(event.RunFinished{Time: at, Duration: time.Minute, Counts: map[check.State]int{check.Failed: 3}})
+	if err := face.Close(); err != nil {
+		t.Fatal(err)
+	}
+	record := screen(out.String())
+	for _, want := range []string{
+		"  ✗ gpg-key  couldn't apply · /Users/someone/.config/kit/laptop/steps/gpg-key/r…\n  │ gpg: command not found\n",
+		"  ✗ macOS login items  couldn't add com.example.app · osascript -l JavaScript -…\n  │ execution error: Error: AppleEvent timed out. (-1712)\n  ○ Claude MCP",
+		"  ✗ Sync  couldn't check\n  │ not a git repository\n",
+	} {
+		if !strings.Contains(record, want) {
+			t.Errorf("the record is\n%s\nwant\n%s", record, want)
+		}
 	}
 }

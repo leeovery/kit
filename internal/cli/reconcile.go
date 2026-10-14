@@ -168,8 +168,8 @@ func (a *app) driftItems(ctx context.Context, r *run, only []string) ([]driftIte
 		}
 		d := r.drifters[name]
 		res := drift.Quieten(d.check(ctx), r.record, r.now)
-		if res.State == check.Failed {
-			return nil, fmt.Errorf("couldn't check %s: %s", name, res.Reason)
+		if err := unchecked(name, res); err != nil {
+			return nil, err
 		}
 		for _, it := range res.Items {
 			items = append(items, driftItem{Item: it, Kind: name, Choices: choiceActions(d.choices(it))})

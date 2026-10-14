@@ -3,7 +3,8 @@
 // com.getdropbox.dropbox, which stays put when an app is renamed or moved;
 // a declaration's note carries the app's name. System Events is driven by
 // small JavaScript for Automation scripts, through osascript, which needs
-// the Automation permission for System Events.
+// macOS's permission for the terminal to control System Events, asked for
+// the first time it does.
 package login
 
 import (
@@ -16,6 +17,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/leeovery/kit/internal/hold"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/runner"
 )
@@ -112,12 +114,16 @@ func (it item) named() string {
 	return strings.Join(strings.Fields(it.Name), "-")
 }
 
+// notAllowed is the error for System Events not answering kit, as macOS
+// hasn't let the terminal kit runs in control it.
+var notAllowed = &kind.NotAllowed{
+	What:  "macOS hasn't let the terminal control System Events",
+	Where: "System Settings › Privacy & Security › Automation",
+}
+
 // script runs a script with args, reading the JSON it prints into into.
 func (l *Login) script(ctx context.Context, script string, into any, args ...string) error {
-	res, err := l.run.Run(ctx, runner.Command{Name: "osascript", Args: slices.Concat([]string{"-l", "JavaScript", "-e", script}, args)})
-	if exit, ok := errors.AsType[*runner.ExitError](err); ok && (strings.Contains(exit.Stderr, "-1743") || strings.Contains(exit.Stderr, "Not authorized")) {
-		return errors.New("kit needs the Automation permission for System Events: System Settings › Privacy & Security › Automation, for the terminal kit runs in")
-	}
+	res, err := l.osascript(ctx, slices.Concat([]string{"-l", "JavaScript", "-e", script}, args))
 	if err != nil || into == nil {
 		return err
 	}
@@ -125,6 +131,31 @@ func (l *Login) script(ctx context.Context, script string, into any, args ...str
 		return fmt.Errorf("read System Events' answer: %w", err)
 	}
 	return nil
+}
+
+// osascript runs osascript with args. The first time the terminal kit runs
+// in drives System Events, macOS asks the person at the Mac whether it may,
+// and System Events doesn't answer till they have: osascript gives up
+// waiting after two minutes, so, when macOS was asking meanwhile, it's run
+// again, and again while the question's up. Refused, or never answered,
+// macOS hasn't let kit control System Events (notAllowed).
+func (l *Login) osascript(ctx context.Context, args []string) (runner.Result, error) {
+	for {
+		var res runner.Result
+		var err error
+		asked := hold.During(ctx, func() { res, err = l.run.Run(ctx, runner.Command{Name: "osascript", Args: args}) })
+		exit, exited := errors.AsType[*runner.ExitError](err)
+		switch {
+		case !exited:
+			return res, err
+		case strings.Contains(exit.Stderr, "(-1743)") || strings.Contains(exit.Stderr, "Not authorized"):
+			return res, notAllowed
+		case !strings.Contains(exit.Stderr, "(-1712)"):
+			return res, err
+		case !asked || ctx.Err() != nil:
+			return res, notAllowed
+		}
+	}
 }
 
 func (l *Login) items(ctx context.Context) ([]item, error) {

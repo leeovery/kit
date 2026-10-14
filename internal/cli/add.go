@@ -11,6 +11,7 @@ import (
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/drift"
+	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/look"
@@ -123,7 +124,7 @@ func addOne(ctx context.Context, r *run, c *changes, k kind.Kind, scope, name st
 			return check.Result{State: check.Failed, Reason: fmt.Sprintf(adminWait, kindName+" add")}
 		}
 		if err := k.Install(event.WithChanging(ctx), []string{name}); err != nil {
-			return check.Result{State: check.Failed, Reason: "couldn't install: " + err.Error()}
+			return check.Result{State: check.Failed, Reason: "couldn't install: " + engine.Reason(err)}
 		}
 		verb = "installed"
 	}

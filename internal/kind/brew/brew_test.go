@@ -297,10 +297,10 @@ const installing = `==> Fetching downloads for: ffmpeg and hello
 🍺  /opt/homebrew/Cellar/hello/2.12.3: 12 files, 193.3KB
 `
 
-// Applying the formulae, in one install of them all, says it's downloading
-// as it starts, counting those asked for as each is downloaded, then, once
-// brew's begun installing, counts them installed, by what brew install
-// prints.
+// Applying the formulae, in one install of them all, says it's updating
+// Homebrew, then it's downloading as brew install starts, counting those
+// asked for as each is downloaded, then, once brew's begun installing,
+// counts them installed, by what brew install prints.
 func TestApplyingCountsTheFormulae(t *testing.T) {
 	fake := runnertest.New(t)
 	fake.On("brew", "list", "--formula", "--full-name", "-1").Prints("jq\n")
@@ -316,6 +316,7 @@ func TestApplyingCountsTheFormulae(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []event.Doing{
+		{Says: "updating Homebrew"},
 		{Says: "downloading", Of: 2}, {Says: "downloading", Done: 1, Of: 2}, {Says: "downloading", Done: 2, Of: 2},
 		{Says: "installing ffmpeg", Of: 2}, {Says: "installing hello", Done: 1, Of: 2}, {Says: "installing", Done: 2, Of: 2},
 	}
@@ -426,9 +427,68 @@ func TestAnInstallWaitingItsTurnSaysSo(t *testing.T) {
 	close(release)
 	formulae.Wait()
 	casks.Wait()
-	want := []event.Doing{{Says: "downloading", Of: 1}, {Says: "waiting for Homebrew formulae"}, {Says: "downloading", Of: 1}}
+	want := []event.Doing{{Says: "waiting for Homebrew formulae"}, {Says: "downloading", Of: 1}}
 	if !slices.Equal(said, want) {
 		t.Errorf("the casks' step said %+v, want %+v", said, want)
+	}
+}
+
+// An install that comes while another kind's brew update runs says it's
+// waiting for that, not that it's downloading, till its own brew install
+// starts; it doesn't update Homebrew again.
+func TestAnInstallWaitingForTheUpdateSaysSo(t *testing.T) {
+	fake := runnertest.New(t)
+	updating, release := make(chan struct{}), make(chan struct{})
+	fake.On("brew", "update", "--quiet").Does(func() {
+		close(updating)
+		<-release
+	})
+	fake.On("brew", "install", "--formula", "jq")
+	fake.On("brew", "list", "--cask", "--full-name", "-1")
+	fake.On("brew", "info", "--json=v2", "--cask", "ghostty").Prints(`{"formulae": [], "casks": [{"token": "ghostty", "full_token": "ghostty"}]}`)
+	fake.On("brew", "install", "--cask", "ghostty")
+	h := brew.New(fake)
+	var formulae sync.WaitGroup
+	formulae.Go(func() {
+		if err := h.Formulae().Install(t.Context(), []string{"jq"}); err != nil {
+			t.Error(err)
+		}
+	})
+	<-updating
+
+	var mu sync.Mutex
+	var said []event.Doing
+	waiting := make(chan struct{})
+	ctx := event.WithSaying(t.Context(), func(d event.Doing) {
+		mu.Lock()
+		defer mu.Unlock()
+		said = append(said, d)
+		if d.Says == "waiting for Homebrew's update" {
+			close(waiting)
+		}
+	})
+	s := kind.Step(h.Casks(), config.List{Kind: "cask", Entries: []config.Entry{{Name: "ghostty"}}})
+	var casks sync.WaitGroup
+	casks.Go(func() {
+		if err := s.Apply(ctx, s.Check(ctx)); err != nil {
+			t.Error(err)
+		}
+	})
+	select {
+	case <-waiting:
+	case <-time.After(5 * time.Second):
+		t.Error("the casks' install never said it was waiting for Homebrew's update")
+	}
+	close(release)
+	formulae.Wait()
+	casks.Wait()
+	// Between, it may wait its turn behind the formulae's install.
+	downloading := event.Doing{Says: "downloading", Of: 1}
+	if len(said) < 2 || said[0] != (event.Doing{Says: "waiting for Homebrew's update"}) || slices.Index(said, downloading) != len(said)-1 {
+		t.Errorf("the casks' step said %+v, want it waiting for Homebrew's update first, downloading only last", said)
+	}
+	if n := slices.Index(fake.Calls(), "brew update --quiet"); n < 0 || slices.Index(fake.Calls()[n+1:], "brew update --quiet") >= 0 {
+		t.Errorf("ran %q, want brew update once", fake.Calls())
 	}
 }
 

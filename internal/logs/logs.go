@@ -40,7 +40,7 @@ var ErrNoLogs = errors.New("no runs logged yet")
 type Record struct {
 	Time time.Time `json:"time"`
 	// Event is what happened: run_started, step_started, step_finished,
-	// command or run_finished.
+	// command, asking, answered or run_finished.
 	Event   string       `json:"event"`
 	Command string       `json:"command,omitempty"`
 	Machine string       `json:"machine,omitempty"`
@@ -60,6 +60,9 @@ type Record struct {
 	StderrSize int                 `json:"stderr_bytes,omitempty"`
 	Error      string              `json:"error,omitempty"`
 	Counts     map[check.State]int `json:"counts,omitempty"`
+	// Says is what macOS asked, as in "asking for a permission", from when
+	// its window was seen (asking) till it was gone (answered).
+	Says string `json:"says,omitempty"`
 }
 
 // File is a run's log, as a sink.
@@ -70,6 +73,10 @@ type File struct {
 	path    string
 	verbose bool
 	err     error
+	// asked is what macOS is asking, while it is; finished, whether the
+	// run's end is written, after which what it asks isn't.
+	asked    string
+	finished bool
 }
 
 // Open starts the log of a run of command, at now, in dir: a new file,
@@ -128,11 +135,16 @@ func (l *File) Emit(e event.Event) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	// A command's output, as it comes, is in its command's line whole; a run
-	// getting ready is in its start; what a step's doing, and macOS asking
-	// meanwhile, in how it ended.
+	// getting ready is in its start; what a step's doing in how it ended.
+	// macOS asking is its own line, as it's seen and as it's gone, but not
+	// after the run's end, which is the log's last line.
 	switch e.(type) {
-	case event.Output, event.Preparing, event.Doing, event.Asking, event.DeviceCode, event.SelfTest:
+	case event.Output, event.Preparing, event.Doing, event.DeviceCode, event.SelfTest:
 		return
+	case event.Asking:
+		if l.finished {
+			return
+		}
 	}
 	if l.err != nil {
 		return
@@ -140,7 +152,8 @@ func (l *File) Emit(e event.Event) {
 	l.err = l.enc.Encode(l.record(e))
 }
 
-// record is e as a log's line.
+// record is e as a log's line, noting what it needs of it: what macOS is
+// asking, and whether the run's finished.
 func (l *File) record(e event.Event) Record {
 	r := Record{Time: e.At()}
 	switch e := e.(type) {
@@ -156,8 +169,15 @@ func (l *File) record(e event.Event) Record {
 		r.Event, r.Step, r.Command, r.Exit, r.DurationMS, r.Error = "command", e.Step, e.Command, &exit, e.Duration.Milliseconds(), e.Error
 		r.Stdout, r.StdoutSize = l.capped(e.Stdout)
 		r.Stderr, r.StderrSize = l.capped(e.Stderr)
+	case event.Asking:
+		r.Event, r.Says = "asking", e.Says
+		if e.Says == "" {
+			r.Event, r.Says = "answered", l.asked
+		}
+		l.asked = e.Says
 	case event.RunFinished:
 		r.Event, r.DurationMS, r.Counts = "run_finished", e.Duration.Milliseconds(), e.Counts
+		l.finished = true
 	}
 	return r
 }

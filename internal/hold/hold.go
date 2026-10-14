@@ -31,10 +31,11 @@ func WithTimeout(ctx context.Context, d time.Duration) (context.Context, context
 	}
 	inner, cancel := context.WithCancel(ctx)
 	c := &limited{Context: inner}
+	look := every
 	go func() {
 		left, last := d, time.Now()
 		for left > 0 {
-			t := time.NewTimer(min(left, every))
+			t := time.NewTimer(min(left, look))
 			select {
 			case <-inner.Done():
 				t.Stop()
@@ -64,4 +65,35 @@ func (c *limited) Err() error {
 		return context.DeadlineExceeded
 	}
 	return c.Context.Err()
+}
+
+// During runs f, reporting whether ctx's time limits were held at any look
+// while it ran, its end included: as when macOS asked the person at the Mac
+// something meanwhile, which what f ran may have waited on, and given up
+// waiting for.
+func During(ctx context.Context, f func()) bool {
+	held, _ := ctx.Value(heldKey{}).(func() bool)
+	if held == nil {
+		f()
+		return false
+	}
+	var seen bool
+	done, looked := make(chan struct{}), make(chan struct{})
+	tick := time.NewTicker(every)
+	go func() {
+		defer close(looked)
+		defer tick.Stop()
+		for {
+			seen = seen || held()
+			select {
+			case <-done:
+				return
+			case <-tick.C:
+			}
+		}
+	}()
+	f()
+	close(done)
+	<-looked
+	return seen || held()
 }

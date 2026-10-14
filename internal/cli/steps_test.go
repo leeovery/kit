@@ -58,7 +58,7 @@ func TestAStepThatDoesntApply(t *testing.T) {
 		t.Errorf("kit apply tool printed\n%s exit %d", out, code)
 	}
 	w.fake.On(run, "apply")
-	if out, _, code := w.run(t, "apply", "tool"); code != 1 || !strings.Contains(out, "applied, but its check still says: not installed") {
+	if out, _, code := w.run(t, "apply", "tool"); code != 1 || !strings.Contains(out, "couldn't apply: its check still says not installed") {
 		t.Errorf("an apply its check doesn't believe printed\n%s exit %d", out, code)
 	}
 }

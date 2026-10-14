@@ -1,10 +1,11 @@
 // Package askpass lets a program kit runs ask the run for an administrator's
-// password, as sudo -A asks: SUDO_ASKPASS names a link to kit in a directory
+// password, through sudo: SUDO_ASKPASS names a link to kit in a directory
 // of the run's own, beside a socket the run answers on. sudo runs kit
-// through the link, with its prompt; kit, run so, asks the run over the
-// socket and prints the answer, for sudo to read. Only a program the run
-// started may ask, and the password is never on a command line, in a file
-// or in the log.
+// through the link, with its prompt, as sudo -A does, and plain sudo
+// without a terminal (Env); kit, run so, asks the run over the socket and
+// prints the answer, for sudo to read. Only a program the run started may
+// ask, and the password is never on a command line, in a file or in the
+// log.
 package askpass
 
 import (
@@ -16,6 +17,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -38,6 +40,8 @@ type Server struct {
 	ln  net.Listener
 	ask Asker
 	wg  sync.WaitGroup
+	// asking has the person asked one thing at a time.
+	asking sync.Mutex
 
 	mu       sync.Mutex
 	password string
@@ -79,6 +83,23 @@ func Start(base, self string, ask Asker) (*Server, error) {
 // Helper is the link sudo runs: what SUDO_ASKPASS names.
 func (s *Server) Helper() string {
 	return filepath.Join(s.dir, Name)
+}
+
+// Env is what a program kit runs is given, for its sudo to ask the run:
+// SUDO_ASKPASS, naming the helper, and DISPLAY, as sudo without -A runs the
+// helper only when it has no terminal and DISPLAY is set, to anything
+// (sudo 1.9.17, proven on macOS 26). Empty, DISPLAY tells everything else
+// there's no display.
+func (s *Server) Env() []string {
+	return []string{"SUDO_ASKPASS=" + s.Helper(), "DISPLAY="}
+}
+
+// Without is environ without what Env adds, for what outlives the run, as
+// the shell kit becomes.
+func Without(environ []string) []string {
+	return slices.DeleteFunc(slices.Clone(environ), func(kv string) bool {
+		return strings.HasPrefix(kv, "SUDO_ASKPASS=") || kv == "DISPLAY="
+	})
 }
 
 // Keep keeps the password the person gave, for the rest of the run: ""
@@ -133,8 +154,7 @@ func (s *Server) answer(c net.Conn) {
 	_, _ = io.WriteString(c, password+"\n")
 }
 
-// passwordFor is the answer for the sudo whose process is sudo: the
-// password kept, the first time it asks; else the person's.
+// passwordFor is the answer for the sudo whose process is sudo.
 func (s *Server) passwordFor(sudo int) (string, error) {
 	s.mu.Lock()
 	a := s.sudos[sudo]
@@ -142,6 +162,24 @@ func (s *Server) passwordFor(sudo int) (string, error) {
 		a = &answered{}
 		s.sudos[sudo] = a
 	}
+	s.mu.Unlock()
+	return s.next(context.Background(), a)
+}
+
+// Answer answers a sudo kit runs itself, reading the password on its input
+// (runner.Command's Answer), each time it asks, as the helper answers a
+// program's sudo.
+func (s *Server) Answer() func(ctx context.Context, asked int) (string, error) {
+	a := &answered{}
+	return func(ctx context.Context, _ int) (string, error) {
+		return s.next(ctx, a)
+	}
+}
+
+// next is the answer for a sudo answered so far as a says: the password
+// kept, the first time it asks; else the person's, which is kept.
+func (s *Server) next(ctx context.Context, a *answered) (string, error) {
+	s.mu.Lock()
 	if !a.kept && s.password != "" {
 		a.kept = true
 		password := s.password
@@ -151,7 +189,9 @@ func (s *Server) passwordFor(sudo int) (string, error) {
 	asked := a.asked
 	a.asked++
 	s.mu.Unlock()
-	password, err := s.ask(context.Background(), asked)
+	s.asking.Lock()
+	defer s.asking.Unlock()
+	password, err := s.ask(ctx, asked)
 	if err == nil {
 		s.Keep(password)
 	}

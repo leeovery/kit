@@ -42,8 +42,11 @@ type Homebrew struct {
 	// when kit isn't installing, and asks nothing.
 	Admin func(ctx context.Context) bool
 
+	// update is brew update's, once a run: mu is held while it runs, and
+	// done once it has.
 	update struct {
-		once sync.Once
+		mu   sync.Mutex
+		done bool
 		err  error
 	}
 	// changing is held while brew installs or uninstalls: formulae's and
@@ -132,9 +135,22 @@ func (h *Homebrew) brew(ctx context.Context, args ...string) (runner.Result, err
 }
 
 // updated brings Homebrew's formulae up to date, once a run, before the
-// first install: an install from stale formulae can fail.
+// first install: an install from stale formulae can fail. The step
+// installing says it's updating Homebrew, or, while another kind's install
+// updates it, that it waits for that (kind.Saying).
 func (h *Homebrew) updated(ctx context.Context) error {
-	h.update.once.Do(func() { _, h.update.err = h.brew(ctx, "update", "--quiet") })
+	if !h.update.mu.TryLock() {
+		resume := kind.Saying(ctx, "waiting for Homebrew's update")
+		h.update.mu.Lock()
+		resume()
+	}
+	defer h.update.mu.Unlock()
+	if !h.update.done {
+		resume := kind.Saying(ctx, "updating Homebrew")
+		_, h.update.err = h.brew(ctx, "update", "--quiet")
+		h.update.done = true
+		resume()
+	}
 	return h.update.err
 }
 
@@ -145,6 +161,7 @@ func (h *Homebrew) install(ctx context.Context, kindName, which string, names []
 		return err
 	}
 	defer h.take(ctx, kindName)()
+	kind.Starting(ctx)
 	_, err := h.run.Run(ctx, runner.Command{
 		Name: "brew", Args: slices.Concat([]string{"install", which}, names),
 		Timeout: installTimeout(len(names)), Env: h.sudoEnv(ctx, which), Lines: kind.Lines(ctx),

@@ -111,7 +111,7 @@ func statusRun() []event.Event {
 		event.StepFinished{Time: at, Step: "cask", Result: ok("3 declared, all installed", map[string]int{"installed": 3})},
 		event.StepFinished{Time: at, Step: "defaults", Result: ok("9 declared, all set", map[string]int{"installed": 9})},
 		event.StepFinished{Time: at, Step: "config-private", Result: check.Result{State: check.OK, Summary: "private on GitHub", Glance: "private"}},
-		event.StepFinished{Time: at, Step: "config-sync", Result: check.Result{State: check.Failed, Reason: "git status exited 128: not a git repository"}},
+		event.StepFinished{Time: at, Step: "config-sync", Result: check.Result{State: check.Failed, Reason: "not a git repository"}},
 		event.StepFinished{Time: at, Step: "brew", Result: brew},
 		event.StepFinished{Time: at, Step: "mas", Result: check.Result{State: check.Deferred, Reason: "needs Homebrew"}},
 		event.StepFinished{Time: at, Step: "time-machine", Result: ok("last backup 02:35", nil)},
@@ -149,6 +149,56 @@ func TestPrettyColour(t *testing.T) {
 	var out bytes.Buffer
 	show(t, render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.TrueColor}, 80, false), statusRun())
 	golden(t, "pretty-colour.golden", out.String())
+}
+
+// A failed step's row is headed by the phase it failed in, as its result
+// says, when its reason doesn't say what couldn't be done: couldn't apply,
+// couldn't check, or, where nothing says, couldn't check; why under it.
+func TestPrettyFailedRowNamesItsPhase(t *testing.T) {
+	var out bytes.Buffer
+	show(t, render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.NoTTY}, 80, false), []event.Event{
+		event.RunStarted{Command: "apply a", Machine: "laptop", Only: []string{"a", "b", "c", "d"}, Steps: []event.Step{{Name: "a", Title: "a"}, {Name: "b", Title: "b"}, {Name: "c", Title: "c"}, {Name: "d", Title: "d"}}},
+		event.StepFinished{Step: "a", Result: check.Result{State: check.Failed, Reason: "the link points elsewhere", Phase: check.Applying}},
+		event.StepFinished{Step: "b", Result: check.Result{State: check.Failed, Reason: "not a git repository", Phase: check.Checking}},
+		event.StepFinished{Step: "c", Result: check.Result{State: check.Failed, Reason: "not a git repository"}},
+		event.StepFinished{Step: "d", Result: check.Result{State: check.Failed, Reason: "couldn't install jq: no network", Phase: check.Applying}},
+	})
+	want := "\n" +
+		"  ✗ a  couldn't apply\n  │ the link points elsewhere\n" +
+		"  ✗ b  couldn't check\n  │ not a git repository\n" +
+		"  ✗ c  couldn't check\n  │ not a git repository\n" +
+		"  ✗ d  couldn't install jq\n  │ no network\n"
+	if out.String() != want {
+		t.Errorf("printed\n%s\nwant\n%s", out.String(), want)
+	}
+}
+
+// A kind macOS hasn't let look needs you: status's Config shows its row,
+// saying so, what isn't allowed and where to allow it under it, and counts
+// nothing of it.
+func TestPrettyStatusSaysWhatsNotAllowed(t *testing.T) {
+	var out bytes.Buffer
+	refused := check.Result{State: check.Attention, Summary: "needs your permission", Items: []check.Item{{
+		ID: "login-item:allowed", Name: "macOS hasn't let the terminal control System Events", State: check.NotAllowed,
+		Detail: "System Settings › Privacy & Security › Automation",
+	}}}
+	show(t, render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.NoTTY}, 80, false), []event.Event{
+		event.RunStarted{Time: at, Command: "status", Machine: "laptop", Steps: []event.Step{
+			{Name: "defaults", Title: "macOS settings", Area: "Drift", Part: render.PartSettings},
+			{Name: "login-item", Title: "macOS login items", Area: "Drift", Part: render.PartSettings},
+		}},
+		event.StepFinished{Time: at, Step: "defaults", Result: check.Result{State: check.OK, Summary: "9 declared, all set", Counts: map[string]int{"installed": 9}}},
+		event.StepFinished{Time: at, Step: "login-item", Result: refused},
+		event.RunFinished{Time: at, Duration: time.Second, Counts: map[check.State]int{check.OK: 1, check.Attention: 1}},
+	})
+	want := "  CONFIG\n" +
+		"  ▲ macOS login items  needs your permission\n" +
+		"    macOS hasn't let the terminal control System Events\n" +
+		"    → System Settings › Privacy & Security › Automation\n" +
+		"  ● Settings  9 set\n"
+	if !strings.Contains(out.String(), want) {
+		t.Errorf("printed\n%s\nwant\n%s", out.String(), want)
+	}
 }
 
 func TestJSON(t *testing.T) {
@@ -303,8 +353,9 @@ func TestJSONWritesNothingWithoutARun(t *testing.T) {
 }
 
 // A command aimed at one thing is a timeline: a row a step, in the run's
-// order whatever order they finish in, no wordmark and no summary; a
-// commit with nothing to commit was skipped.
+// order whatever order they finish in, no wordmark and no summary; a step
+// that failed says what went wrong, and why on the line under it; a commit
+// with nothing to commit was skipped.
 func TestPrettyTimeline(t *testing.T) {
 	var out bytes.Buffer
 	show(t, render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.NoTTY}, 80, false), []event.Event{
@@ -316,7 +367,8 @@ func TestPrettyTimeline(t *testing.T) {
 	})
 	want := "\n" +
 		"  ● jq  already installed · declared already, in laptop\n" +
-		"  ✗ ripgrap  couldn't install: No available formula with the name \"ripgrap\"\n" +
+		"  ✗ ripgrap  couldn't install\n" +
+		"  │ No available formula with the name \"ripgrap\"\n" +
 		"  – kit-config  nothing to commit\n"
 	if out.String() != want {
 		t.Errorf("printed\n%s\nwant\n%s", out.String(), want)
@@ -490,7 +542,7 @@ func TestPrettyShowsWhatACommandPrints(t *testing.T) {
 	face.Emit(event.StepFinished{Step: "jq", Result: check.Result{State: check.OK, Summary: "installed; declared in laptop"}})
 	face.Emit(event.StepStarted{Step: "ripgrap", Doing: "changing"})
 	face.Emit(event.Output{Step: "ripgrap", Command: "brew install --formula ripgrap", Line: "\x1b[31mWarning:\x1b[0m No available formula with the name \"ripgrap\"."})
-	face.Emit(event.StepFinished{Step: "ripgrap", Result: check.Result{State: check.Failed, Reason: "couldn't install: brew install --formula ripgrap exited 1"}})
+	face.Emit(event.StepFinished{Step: "ripgrap", Result: check.Result{State: check.Failed, Reason: "couldn't install: Warning: No available formula with the name \"ripgrap\"."}})
 	face.Emit(event.RunFinished{Counts: map[check.State]int{check.OK: 1, check.Failed: 1}})
 	if err := face.Close(); err != nil {
 		t.Fatal(err)
@@ -579,7 +631,7 @@ func TestPrettyApplyingFitsTheTerminal(t *testing.T) {
 	got := screen(out.String())
 	// The heading is a blank line, the wordmark's three and a blank line.
 	live := strings.Split(strings.TrimRight(got, "\n"), "\n")[5:]
-	if len(live) > 11 || !strings.Contains(got, "✗ Step 04  couldn't apply: it broke\n  and 9 more\n  ◐ Step 14  applying") || strings.Contains(got, "Step 05") {
+	if len(live) > 11 || !strings.Contains(got, "✗ Step 04  couldn't apply\n  and 9 more\n  ◐ Step 14  applying") || strings.Contains(got, "Step 05") {
 		t.Errorf("at 12 lines, the live part is %d lines:\n%s\nwant at most 11: five that failed, the other nine counted, then Step 14", len(live), got)
 	}
 	for i := 14; i < 20; i++ {

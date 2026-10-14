@@ -285,7 +285,7 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 		if asks == nil {
 			return nil
 		}
-		return []string{"SUDO_ASKPASS=" + asks.Helper()}
+		return asks.Env()
 	})
 	observed := runner.Observed(exec, func(ctx context.Context, rep runner.Report) { sink.Emit(event.Command(ctx, rep)) }, a.Now)
 	observed = runner.Streamed(observed, event.Changing, func(ctx context.Context, cmd runner.Command, line string) {

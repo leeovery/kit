@@ -10,7 +10,8 @@
 # - apply does it, safe to run again; kit checks again afterwards. When it
 #   fails, the last line it prints says why.
 # The folder's other files are the step's own data. A step declared --sudo
-# may use sudo -n: kit has asked for the password before applying.
+# may use sudo: kit has asked for the password before applying, and gives it
+# to sudo when sudo asks; sudo -n, which never asks, goes without.
 set -euo pipefail
 
 check() {

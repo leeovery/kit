@@ -519,8 +519,10 @@ func Ran(command string, exit int, took string, w int) string {
 	return Dim(command) + dot + Dim(code) + dot + Dim(took)
 }
 
-// Squeeze cuts s to n cells in the middle, keeping its start and its end.
+// Squeeze is s on one line (OneLine), cut to n cells in the middle,
+// keeping its start and its end.
 func Squeeze(s string, n int) string {
+	s = OneLine(s)
 	r := []rune(s)
 	if len(r) <= n || n < 2 {
 		return s
@@ -528,6 +530,11 @@ func Squeeze(s string, n int) string {
 	head := n * 2 / 5
 	return string(r[:head]) + "…" + string(r[len(r)-(n-head-1):])
 }
+
+// OneLine is s on one line, each run of white space in it, line breaks
+// and all, a space: a command, or what one said, shown in a row or a rule,
+// where a line break would spill it across what follows.
+func OneLine(s string) string { return strings.Join(strings.Fields(s), " ") }
 
 // Cut cuts a line to w cells, an ellipsis ending it when it's cut.
 func Cut(s string, w int) string { return ansi.Truncate(s, w, "…") }

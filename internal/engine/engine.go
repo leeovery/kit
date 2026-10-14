@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -17,6 +18,7 @@ import (
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/hold"
+	"github.com/leeovery/kit/internal/runner"
 )
 
 // DefaultJobs is how many steps run side by side, unless Options say.
@@ -109,6 +111,32 @@ func NotThere(things []string) string {
 		return "needs " + things[0] + ", which isn't there yet"
 	}
 	return "needs " + strings.Join(things, " and ") + ", which aren't there yet"
+}
+
+// Reason is err as a step's reason says it: a command that failed by what
+// it said, the last line of its standard error, or, when it said nothing,
+// by its program and how it exited; never the command itself, which can be
+// long, or many lines, and is in the run's log.
+func Reason(err error) string {
+	exit, ok := errors.AsType[*runner.ExitError](err)
+	if !ok {
+		return err.Error()
+	}
+	said := exit.Stderr
+	if said == "" {
+		said = fmt.Sprintf("%s exited %d", program(exit.Command), exit.Code)
+	}
+	return strings.Replace(err.Error(), exit.Error(), said, 1)
+}
+
+// program is the name of the program command runs, command as a shell
+// would take it, its first word quoted when it needs to be.
+func program(command string) string {
+	first, _, _ := strings.Cut(command, " ")
+	if quoted, ok := strings.CutPrefix(command, "'"); ok {
+		first, _, _ = strings.Cut(quoted, "'")
+	}
+	return filepath.Base(first)
 }
 
 // title is the step's title, or its name.
@@ -796,7 +824,7 @@ func (d *dispatch) step(ctx context.Context, s Step) check.Result {
 			if _, ok := errors.AsType[*notYet](err); ok {
 				return check.Result{State: check.Deferred, Reason: err.Error()}
 			}
-			return check.Result{State: check.Failed, Reason: err.Error()}
+			return check.Result{State: check.Failed, Reason: Reason(err), Phase: check.Applying}
 		}
 		res = d.check(ctx, s)
 		res.Done = done(before, res)
@@ -929,7 +957,7 @@ func done(before, after check.Result) []check.Item {
 // finish records s's result, and emits it.
 func (d *dispatch) finish(s Step, res check.Result, took time.Duration) {
 	if res.State == "" {
-		res = check.Result{State: check.Failed, Reason: "the check said nothing of how the step stands"}
+		res = check.Result{State: check.Failed, Reason: "the check said nothing of how the step stands", Phase: check.Checking}
 	}
 	d.results[s.Name] = res
 	d.sink.Emit(event.StepFinished{Time: d.now(), Step: s.Name, Result: res, Duration: took})
@@ -950,8 +978,17 @@ func checkSafely(ctx context.Context, s Step) (res check.Result) {
 
 // check runs s's check, giving it d.within to answer: one that doesn't is
 // tried once more, then fails, saying so, while the rest of the run goes
-// on.
+// on. A check that fails, failed checking.
 func (d *dispatch) check(ctx context.Context, s Step) check.Result {
+	res := d.checkWithin(ctx, s)
+	if res.State == check.Failed {
+		res.Phase = check.Checking
+	}
+	return res
+}
+
+// checkWithin is check, before the phase it failed in is said.
+func (d *dispatch) checkWithin(ctx context.Context, s Step) check.Result {
 	for try := 0; ; try++ {
 		within, cancel := hold.WithTimeout(ctx, d.within)
 		res := checkSafely(within, s)

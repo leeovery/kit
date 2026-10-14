@@ -170,14 +170,22 @@ func LogRun(w io.Writer, width int, records []logs.Record) error {
 	for _, s := range run.Steps {
 		r, ok := results[s.Name]
 		row := look.Row{State: look.Failed, Name: cmp.Or(s.Title, s.Name), Says: look.Red("didn't finish")}
+		why := 0
 		if ok && r.Result != nil {
 			row = resultRow(row.Name, *r.Result, s.Part, run.Time)
+			why = len(whyFailed(*r.Result))
 		}
 		var under []string
 		for _, c := range commands[s.Name] {
 			under = append(under, ran(c, width-logGutter-2)...)
 		}
-		row.Under = append(under, row.Under...)
+		// Why a step failed, under its row, then the commands it ran: but
+		// when a command it ran said the same, as it failed, that says it.
+		lead := row.Under[:why]
+		if why > 0 && slices.Contains(under, row.Under[0]) {
+			lead = nil
+		}
+		row.Under = slices.Concat(lead, under, row.Under[why:])
 		at := started[s.Name]
 		if at.IsZero() {
 			at = r.Time
@@ -231,10 +239,23 @@ func ran(c logs.Record, w int) []string {
 		line = look.Says(look.Red(look.Squeeze(c.Command, w-ansi.StringWidth(" · didn't run"))), look.Red("didn't run"))
 	}
 	out := []string{line}
-	if (c.Exit == nil || *c.Exit != 0) && c.Error != "" {
-		out = append(out, look.Muted(c.Error))
+	if why := said(c); (c.Exit == nil || *c.Exit != 0) && why != "" {
+		out = append(out, look.Muted(why))
 	}
 	return out
+}
+
+// said is what a command in a run's log said as it failed, on one line: its
+// error, without the command and how it exited, which the command's own
+// line shows.
+func said(c logs.Record) string {
+	text := c.Error
+	if exited, ok := strings.CutPrefix(text, c.Command+" exited "); ok {
+		_, text, _ = strings.Cut(exited, ": ")
+	} else {
+		text = strings.TrimPrefix(text, c.Command+": ")
+	}
+	return look.OneLine(text)
 }
 
 // resultRow is a step's row from its result r, of part, in a run started
@@ -242,16 +263,44 @@ func ran(c logs.Record, w int) []string {
 // what's left of it, as whatsLeft has it, on the lines under it.
 func resultRow(title string, r check.Result, part string, start time.Time) look.Row {
 	row := look.Row{State: state(r.State), Name: title}
-	switch {
-	case r.State == check.Failed && strings.HasPrefix(r.Reason, "couldn't"):
-		row.Says = saying(look.Failed, r.Reason)
-	case r.State == check.Failed:
-		row.Says = look.Says(look.Red("couldn't check"), look.Muted(r.Reason))
-	case r.State == check.Deferred:
+	switch r.State {
+	case check.Failed:
+		head, _ := failure(r)
+		row.Says = look.Red(head)
+	case check.Deferred:
 		row.Says = look.Says(look.Muted("not checked"), look.Muted(r.Reason))
 	default:
 		row.Says = saying(row.State, r.Summary)
 	}
-	row.Under = whatsLeft(r, part, start)
+	row.Under = append(whyFailed(r), whatsLeft(r, part, start)...)
 	return row
+}
+
+// whyFailed is the line under a failed result's row saying why it failed:
+// none when it says no more than its headline, or didn't fail.
+func whyFailed(r check.Result) []string {
+	if r.State != check.Failed {
+		return nil
+	}
+	if _, why := failure(r); why != "" {
+		return []string{look.Muted(why)}
+	}
+	return nil
+}
+
+// failure is what a failed result r says, on one line each: what went
+// wrong, in a few words, as "couldn't install jq", and why, the line under
+// it, as what failed said it. A reason that says what couldn't be done
+// heads it; else the phase the step failed in does, as in "couldn't
+// apply": where nothing says the phase, it couldn't be checked.
+func failure(r check.Result) (head, why string) {
+	reason := look.OneLine(r.Reason)
+	if strings.HasPrefix(reason, "couldn't") {
+		head, why, _ = strings.Cut(reason, ": ")
+		return head, why
+	}
+	if r.Phase == check.Applying {
+		return "couldn't apply", reason
+	}
+	return "couldn't check", reason
 }

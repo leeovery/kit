@@ -3,6 +3,7 @@ package engine_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"slices"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/event"
+	"github.com/leeovery/kit/internal/runner"
 )
 
 // recorder notes a run's events.
@@ -1255,5 +1257,96 @@ func TestAStepGoingOnKeepsTheRunFromGoingQuiet(t *testing.T) {
 	report := applyWithin(t, p, rec, engine.Options{Jobs: 1})
 	if got := report.Results["npm"]; got.State != check.OK {
 		t.Errorf("npm = %+v, want it checked once brew, going on, put npm there", got)
+	}
+}
+
+// A step's reason says what a command that failed said, never the command:
+// the last line of its standard error, or its program and how it exited
+// when it said nothing; what the error wraps it in stays.
+func TestReason(t *testing.T) {
+	script := &runner.ExitError{Command: "osascript -l JavaScript -e 'function run() {\n  return 1;\n}'", Code: 1, Stderr: "execution error: Error: AppleEvent timed out. (-1712)"}
+	for _, tt := range []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"what it said", script, "execution error: Error: AppleEvent timed out. (-1712)"},
+		{"wrapped", fmt.Errorf("couldn't install 9 of 9: %w", &runner.ExitError{Command: "sudo -n mas install 1 2", Code: 1, Stderr: "sudo: a password is required"}), "couldn't install 9 of 9: sudo: a password is required"},
+		{"saying nothing", fmt.Errorf("couldn't install jq: %w", &runner.ExitError{Command: "/opt/homebrew/bin/brew install --formula jq", Code: 1}), "couldn't install jq: brew exited 1"},
+		{"its program quoted", &runner.ExitError{Command: "'/Users/someone/My Steps/run' apply", Code: 2}, "run exited 2"},
+		{"no command", errors.New("no such file"), "no such file"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := engine.Reason(tt.err); got != tt.want {
+				t.Errorf("Reason() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// A step that fails says which phase it failed in: its check, before or
+// after applying, or its apply; one that doesn't fail says none.
+func TestAFailedStepSaysItsPhase(t *testing.T) {
+	failing := func(context.Context) check.Result {
+		return check.Result{State: check.Failed, Reason: "not a git repository"}
+	}
+	var fixed atomic.Bool
+	p, err := engine.New(
+		engine.Step{Name: "sync", Check: failing},
+		engine.Step{Name: "silent", Check: func(context.Context) check.Result { return check.Result{} }},
+		engine.Step{
+			Name:  "tool",
+			Check: func(context.Context) check.Result { return check.Result{State: check.Attention} },
+			Apply: func(context.Context, check.Result) error { return errors.New("it broke") },
+		},
+		engine.Step{
+			Name: "after",
+			Check: func(ctx context.Context) check.Result {
+				if fixed.Load() {
+					return failing(ctx)
+				}
+				return check.Result{State: check.Attention}
+			},
+			Apply: func(context.Context, check.Result) error {
+				fixed.Store(true)
+				return nil
+			},
+		},
+		engine.Step{Name: "fine", Check: func(context.Context) check.Result { return check.Result{State: check.OK} }},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := p.Apply(t.Context(), &recorder{}, engine.Options{Command: "apply"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for step, want := range map[string]check.Phase{"sync": check.Checking, "silent": check.Checking, "tool": check.Applying, "after": check.Checking, "fine": ""} {
+		if got := report.Results[step].Phase; got != want {
+			t.Errorf("%s's phase = %q, want %q", step, got, want)
+		}
+	}
+}
+
+// A step whose apply fails on a command stands failed saying what the
+// command said, not the command.
+func TestAFailedApplySaysWhatTheCommandSaid(t *testing.T) {
+	step := engine.Step{
+		Name:  "mas",
+		Check: func(context.Context) check.Result { return check.Result{State: check.Attention} },
+		Apply: func(context.Context, check.Result) error {
+			return fmt.Errorf("couldn't install 2 of 2: %w", &runner.ExitError{Command: "sudo -n mas install 1 2", Code: 1, Stderr: "sudo: a password is required"})
+		},
+	}
+	p, err := engine.New(step)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := p.Apply(t.Context(), &recorder{}, engine.Options{Command: "apply"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := report.Results["mas"]; got.State != check.Failed || got.Reason != "couldn't install 2 of 2: sudo: a password is required" {
+		t.Errorf("mas = %+v, want it failed saying what sudo said", got)
 	}
 }

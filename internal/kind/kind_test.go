@@ -159,6 +159,26 @@ func TestCompareFails(t *testing.T) {
 	if got.State != check.Failed || got.Reason != "brew info: context canceled" {
 		t.Errorf("Compare() = %+v, want it failed with resolve's error", got)
 	}
+	script := &runner.ExitError{Command: "osascript -l JavaScript -e 'function run() {\n  return 1;\n}'", Code: 1, Stderr: "execution error: Error: AppleEvent timed out. (-1712)"}
+	got = kind.Compare(context.Background(), &fakeKind{err: script}, declared("jq"))
+	if got.State != check.Failed || got.Reason != "execution error: Error: AppleEvent timed out. (-1712)" {
+		t.Errorf("Compare() = %+v, want it failed saying what the command said, not the command", got)
+	}
+}
+
+// A kind macOS hasn't let look at what's installed needs the person at the
+// Mac: the step says so, its one item what isn't allowed and where to allow
+// it, and nothing applying would do.
+func TestCompareNotAllowed(t *testing.T) {
+	no := &kind.NotAllowed{What: "macOS hasn't let the terminal control System Events", Where: "System Settings › Privacy & Security › Automation"}
+	got := kind.Compare(context.Background(), &fakeKind{err: fmt.Errorf("read: %w", no)}, declared("jq"))
+	want := check.Item{ID: "brew:allowed", Name: no.What, State: check.NotAllowed, Detail: no.Where}
+	if got.State != check.Attention || got.Summary != "needs your permission" || len(got.Items) != 1 || got.Items[0] != want || got.Actions() {
+		t.Errorf("Compare() = %+v, want it needing you, its item %+v", got, want)
+	}
+	if it, ok := got.Refused(); !ok || it != want {
+		t.Errorf("Refused() = %+v, %v; want its item", it, ok)
+	}
 }
 
 func TestStep(t *testing.T) {
@@ -522,7 +542,20 @@ func TestAHeldInstallFailingHidesItsSecret(t *testing.T) {
 // fetchingKind is a countingKind whose install downloads first, a
 // "fetched" line for each download, and says "begin" as it begins
 // installing.
-type fetchingKind struct{ *countingKind }
+// fetchingKind is a countingKind whose install downloads first: its
+// command starts once it's done what it does first, saying so, if anything.
+type fetchingKind struct {
+	*countingKind
+	first string
+}
+
+func (f *fetchingKind) Install(ctx context.Context, names []string) error {
+	if f.first != "" {
+		kind.Saying(ctx, f.first)()
+	}
+	kind.Starting(ctx)
+	return f.countingKind.Install(ctx, names)
+}
 
 func (*fetchingKind) Fetched(line string, _ []string) (string, bool) {
 	return strings.CutPrefix(line, "fetched ")
@@ -531,11 +564,11 @@ func (*fetchingKind) Fetched(line string, _ []string) (string, bool) {
 func (*fetchingKind) Begun(line string) bool { return line == "begin" }
 
 // A kind whose install downloads first has its step say it's downloading,
-// from the start, counting those it's installing as each is downloaded,
-// and, once the install proper's begun, installing, counting them done. A
-// dependency's download, and one said twice, count nothing.
+// from when its command starts, counting those it's installing as each is
+// downloaded, and, once the install proper's begun, installing, counting
+// them done. A dependency's download, and one said twice, count nothing.
 func TestStepSaysItsDownloading(t *testing.T) {
-	k := &fetchingKind{&countingKind{
+	k := &fetchingKind{countingKind: &countingKind{
 		fakeKind: knowing("a", "b"),
 		prints:   []string{"fetched b", "fetched libdep", "fetched b", "fetched a", "begin", "fetched a", "done a", "done b"},
 	}}
@@ -557,10 +590,37 @@ func TestStepSaysItsDownloading(t *testing.T) {
 	}
 }
 
+// A kind whose install downloads first says nothing of downloading before
+// its command starts: what it does first, or waits for, as Homebrew's
+// update, then downloading once its command starts.
+func TestStepSaysDownloadingOnceItsCommandStarts(t *testing.T) {
+	k := &fetchingKind{countingKind: &countingKind{fakeKind: knowing("a"), prints: []string{"fetched a", "done a"}}, first: "waiting for Homebrew's update"}
+	var said []event.Doing
+	s := kind.Step(k, declared("a"))
+	if err := s.Apply(saying(&said), s.Check(context.Background())); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	want := []event.Doing{
+		{Says: "waiting for Homebrew's update"},
+		{Says: "downloading", Of: 1},
+		{Says: "downloading", Done: 1, Of: 1},
+		{Says: "installing", Done: 1, Of: 1},
+	}
+	if !slices.Equal(said, want) {
+		t.Errorf("the step said %+v\nwant %+v", said, want)
+	}
+	said = nil
+	kind.Saying(saying(&said), "updating Homebrew")()
+	kind.Starting(saying(&said))
+	if said != nil {
+		t.Errorf("outside an install, Saying and Starting said %+v, want nothing", said)
+	}
+}
+
 // A thing said installed ends the downloading, though nothing said the
 // install had begun.
 func TestStepInstallingWithoutABeginning(t *testing.T) {
-	k := &fetchingKind{&countingKind{fakeKind: knowing("a", "b"), prints: []string{"done a"}}}
+	k := &fetchingKind{countingKind: &countingKind{fakeKind: knowing("a", "b"), prints: []string{"done a"}}}
 	var said []event.Doing
 	s := kind.Step(k, declared("a", "b"))
 	if err := s.Apply(saying(&said), s.Check(context.Background())); err != nil {

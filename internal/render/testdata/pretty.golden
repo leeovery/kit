@@ -14,7 +14,8 @@
   CONFIG
   ▲ jq  declared, not installed · → kit apply
   ▲ ffmpeg  installed, not declared · 2 days · → kit reconcile
-  ✗ Sync  couldn't check · git status exited 128: not a git repository
+  ✗ Sync  couldn't check
+    not a git repository
   – App Store  not checked · needs Homebrew
   ● Packages  7 installed · 1 new
   ● Settings  9 set

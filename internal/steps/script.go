@@ -169,7 +169,7 @@ func ScriptStep(run runner.Runner, admin *Admin, s Script) engine.Step {
 		case exited && exit.Code == notYet:
 			return check.Result{State: check.Deferred, Reason: cmp.Or(said, "can't be done yet")}
 		}
-		return check.Result{State: check.Failed, Reason: hide(why(res, err, firstLine(res.Stdout)))}
+		return check.Result{State: check.Failed, Reason: hide(why(script, res, err, firstLine(res.Stdout)))}
 	}
 	return engine.Step{
 		Name: s.Name, Title: s.Name, Area: AreaSteps, After: s.After, Before: s.Before, Later: s.Needed, Admin: s.Admin,
@@ -196,10 +196,10 @@ func ScriptStep(run runner.Runner, admin *Admin, s Script) engine.Step {
 			}
 			res, err := run.Run(applying, command("apply", scriptApplyTimeout))
 			if err != nil {
-				return errors.New(hide(why(res, err, lastLine(res.Stdout))))
+				return errors.New("couldn't apply: " + hide(why(script, res, err, lastLine(res.Stdout))))
 			}
 			if after := checks(ctx); after.State != check.OK {
-				return fmt.Errorf("applied, but its check still says: %s", cmp.Or(after.Summary, after.Reason))
+				return fmt.Errorf("couldn't apply: its check still says %s", cmp.Or(after.Summary, after.Reason))
 			}
 			return nil
 		},
@@ -249,20 +249,35 @@ func runnable(path, shown string) error {
 	return nil
 }
 
-// why says why a step's script failed, as it ran: the last thing it said on
-// its standard error, else said (from its standard output), else how it
-// ended.
-func why(res runner.Result, err error, said string) string {
+// why says why a step's script, at path script, failed, as it ran: the
+// last thing it said on its standard error, without the shell's lead
+// naming the script and the line, else said (from its standard output),
+// else how it ended.
+func why(script string, res runner.Result, err error, said string) string {
 	if line := lastLine(res.Stderr); line != "" {
-		return line
+		return withoutLead(line, script)
 	}
 	if said != "" {
 		return said
 	}
 	if _, exited := errors.AsType[*runner.ExitError](err); !exited {
-		return "it didn't finish: " + err.Error()
+		return "it didn't finish: " + engine.Reason(err)
 	}
 	return fmt.Sprintf("it exited %d, saying nothing", res.ExitCode)
+}
+
+// withoutLead is line, from the standard error of the script at path
+// script, without the lead a shell puts before its own errors, as in
+// "/path/to/run: line 53: gpg: command not found".
+func withoutLead(line, script string) string {
+	rest, ok := strings.CutPrefix(line, script+": ")
+	if !ok {
+		return line
+	}
+	if at, after, ok := strings.Cut(rest, ": "); ok && strings.HasPrefix(at, "line ") {
+		return after
+	}
+	return rest
 }
 
 // firstLine is the first line of out that says something.

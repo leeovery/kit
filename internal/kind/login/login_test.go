@@ -5,10 +5,12 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/config"
+	"github.com/leeovery/kit/internal/hold"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/kind/login"
 	"github.com/leeovery/kit/internal/runner/runnertest"
@@ -41,12 +43,55 @@ func TestInstalled(t *testing.T) {
 	}
 }
 
+// timedOut is what osascript says when System Events didn't answer in
+// time, as while macOS asks whether the terminal may control it.
+const timedOut = "execution error: Error: Error: AppleEvent timed out. (-1712)"
+
+// Without macOS's permission to control System Events, refused or never
+// answered, the login items need the person at the Mac: their step says
+// what isn't allowed and where to allow it, and doesn't fail.
 func TestWithoutTheAutomationPermission(t *testing.T) {
+	for name, answer := range map[string]func(*runnertest.Script){
+		"refused": func(s *runnertest.Script) {
+			s.Exits(1).PrintsToStderr("execution error: Not authorized to send Apple events to System Events. (-1743)")
+		},
+		"never answered": func(s *runnertest.Script) { s.Exits(1).PrintsToStderr(timedOut) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			fake := runnertest.New(t)
+			answer(fake.On("osascript", osascript(login.ReadScript)...))
+			got := kind.Compare(t.Context(), login.New(fake, "/home"), declared("com.getdropbox.dropbox"))
+			want := check.Item{
+				ID: "login-item:allowed", Name: "macOS hasn't let the terminal control System Events", State: check.NotAllowed,
+				Detail: "System Settings › Privacy & Security › Automation",
+			}
+			if got.State != check.Attention || len(got.Items) != 1 || got.Items[0] != want {
+				t.Errorf("Compare() = %+v, want it needing you: %+v", got, want)
+			}
+			if calls := fake.Calls(); len(calls) != 1 {
+				t.Errorf("ran osascript %d times, want once: nothing was asked meanwhile", len(calls))
+			}
+		})
+	}
+}
+
+// While macOS asks whether the terminal may control System Events, as kit's
+// watch for its windows holds the run's time limits, System Events not
+// answering in time isn't a failure: it's asked again, while the question's
+// up, and once it's been answered.
+func TestTheAutomationPermissionAnsweredLate(t *testing.T) {
+	var asking atomic.Bool
 	fake := runnertest.New(t)
-	fake.On("osascript", osascript(login.ReadScript)...).Exits(1).PrintsToStderr("execution error: Not authorized to send Apple events to System Events. (-1743)")
-	_, err := login.New(fake, "/home").Installed(t.Context())
-	if err == nil || !strings.Contains(err.Error(), "kit needs the Automation permission for System Events") {
-		t.Errorf("Installed() error = %v, want it to say what permission", err)
+	fake.On("osascript", osascript(login.ReadScript)...).
+		Does(func() { asking.Store(true) }).Exits(1).PrintsToStderr(timedOut).Then().
+		Exits(1).PrintsToStderr(timedOut).Then().
+		Does(func() { asking.Store(false) }).Prints(items)
+	got, err := login.New(fake, "/home").Installed(hold.With(t.Context(), asking.Load))
+	if err != nil || len(got) != 3 {
+		t.Errorf("Installed() = %+v, %v; want the login items, once the question was answered", got, err)
+	}
+	if calls := fake.Calls(); len(calls) != 3 {
+		t.Errorf("ran osascript %d times, want 3: twice while macOS asked, then once it was answered", len(calls))
 	}
 }
 

@@ -121,7 +121,7 @@ func TestAddThatCantInstallDeclaresNothing(t *testing.T) {
 	w.fake.On("brew", "update", "--quiet")
 	w.fake.On("brew", "install", "--formula", "nosuch").Exits(1).PrintsToStderr(`Error: No available formula with the name "nosuch".`)
 	out, _, code := w.run(t, "brew", "add", "nosuch")
-	if !strings.Contains(out, `nosuch failed couldn't install: brew install --formula nosuch exited 1: Error: No available formula with the name "nosuch".`) || code != 1 {
+	if !strings.Contains(out, `nosuch failed couldn't install: Error: No available formula with the name "nosuch".`) || code != 1 {
 		t.Errorf("kit printed add\n%s exit %d; want the install's failure, exit 1", out, code)
 	}
 	if got := w.readSection(t, "laptop", "homebrew formulae"); got != "go\n" {
@@ -208,7 +208,7 @@ func TestRemoveRefusedByHomebrewChangesNothing(t *testing.T) {
 	w := laptopWorld(t)
 	w.fake.On("brew", "uninstall", "--formula", "go").Exits(1).PrintsToStderr("Error: Refusing to uninstall go because it is required by gopls")
 	out, _, code := w.run(t, "brew", "remove", "go")
-	if !strings.Contains(out, "go failed couldn't uninstall: brew uninstall --formula go exited 1: Error: Refusing to uninstall go because it is required by gopls\n") || code != 1 {
+	if !strings.Contains(out, "go failed couldn't uninstall: Error: Refusing to uninstall go because it is required by gopls\n") || code != 1 {
 		t.Errorf("kit printed remove\n%s exit %d", out, code)
 	}
 	if got := w.readSection(t, "laptop", "homebrew formulae"); got != "go\n" {

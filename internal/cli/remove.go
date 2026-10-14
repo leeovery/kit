@@ -6,6 +6,7 @@ import (
 
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/config"
+	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/kind"
 )
@@ -48,7 +49,7 @@ func removeDeclared(ctx context.Context, r *run, c *changes, k kind.Kind, d kind
 	verb := "wasn't installed"
 	if isIn {
 		if err := k.Remove(event.WithChanging(ctx), []string{name}); err != nil {
-			return check.Result{State: check.Failed, Reason: "couldn't uninstall: " + err.Error()}
+			return check.Result{State: check.Failed, Reason: "couldn't uninstall: " + engine.Reason(err)}
 		}
 		verb = "uninstalled"
 	}
@@ -94,7 +95,7 @@ func removeOne(ctx context.Context, r *run, c *changes, k kind.Kind, name string
 	verb := "wasn't installed"
 	if isIn {
 		if err := k.Remove(event.WithChanging(ctx), []string{name}); err != nil {
-			return check.Result{State: check.Failed, Reason: "couldn't uninstall: " + err.Error()}
+			return check.Result{State: check.Failed, Reason: "couldn't uninstall: " + engine.Reason(err)}
 		}
 		verb = "uninstalled"
 	}

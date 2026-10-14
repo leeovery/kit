@@ -19,6 +19,16 @@ const (
 	Deferred State = "deferred"
 )
 
+// Phase is what a step was doing.
+type Phase string
+
+const (
+	// Checking is a step's check, before or after it's applied.
+	Checking Phase = "check"
+	// Applying is a step's apply.
+	Applying Phase = "apply"
+)
+
 // Item is one thing a check found that needs attention, or will.
 type Item struct {
 	// ID names it, the same from run to run: its kind and name, as in
@@ -36,6 +46,23 @@ type Item struct {
 	// Action is what applying the step would do about it, as in install:
 	// none when it would leave it.
 	Action string `json:"action,omitempty"`
+}
+
+// NotAllowed is the state of the item of a check that couldn't look at how
+// its step stands, as macOS hasn't let kit, till the person at the Mac
+// allows it: its name says what isn't allowed, its detail where to allow
+// it.
+const NotAllowed = "not-allowed"
+
+// Refused is r's item saying what macOS hasn't let its check do, when it
+// couldn't look till the person at the Mac allows it.
+func (r Result) Refused() (Item, bool) {
+	for _, it := range r.Items {
+		if it.State == NotAllowed {
+			return it, true
+		}
+	}
+	return Item{}, false
 }
 
 // Actions reports whether any of r's items has an action: something
@@ -59,6 +86,9 @@ type Result struct {
 	Glance string `json:"glance,omitempty"`
 	// Reason says why a check failed, or the step was deferred.
 	Reason string `json:"reason,omitempty"`
+	// Phase is what a failed step was doing as it failed, as the run knows
+	// it: checking or applying. None where nothing says.
+	Phase Phase `json:"phase,omitempty"`
 	// Counts are figures behind the summary, as in declared: 129.
 	Counts map[string]int `json:"counts,omitempty"`
 	// Items are the things that need attention.

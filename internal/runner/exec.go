@@ -25,7 +25,9 @@ const waitDelay = 5 * time.Second
 
 // Exec is the runner that runs real programs: each found on Path, kit's own,
 // and run in Env alone, never the environment kit inherited, the command's
-// own variables over it, then those its context sets (WithSecretEnv).
+// own variables over it, then those its context sets (WithSecretEnv); and
+// without kit's terminal, but an interactive one and kit's own sudo
+// (detach).
 type Exec struct {
 	Path []string
 	Env  []string
@@ -90,22 +92,41 @@ func (e Exec) start(ctx context.Context, program string, cmd Command) (stdout, s
 			stderr.end()
 		}()
 	}
-	// The command runs in a process group of its own, and is ended with
-	// everything it started, as os/exec ends the command alone: a child left
-	// running would outlive it, holding its output open until waitDelay
-	// passed.
-	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	c.Cancel = func() error {
-		return syscall.Kill(-c.Process.Pid, syscall.SIGKILL)
-	}
-	c.WaitDelay = waitDelay
+	detach(c, cmd)
 	err = c.Run()
 	return out.Bytes(), errOut.Bytes(), err
 }
 
-// converse runs c, the command cmd, in a process group of its own, answering
-// what it asks on its standard error, as cmd says, on its standard input;
-// what it printed, its prompts taken out.
+// detach has c, the command cmd, run in a process group of its own, ended
+// with everything it started, as os/exec ends the command alone: a child
+// left running would outlive it, holding its output open until waitDelay
+// passed. Unless it's kit's own sudo (ownSudo), it runs in a session of its
+// own too, without kit's terminal: a program that asks there, as a
+// program's own sudo asks for a password, fails at once, where in the
+// background of kit's terminal it would stop, unseen, for good.
+func detach(c *exec.Cmd, cmd Command) {
+	c.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if ownSudo(cmd) {
+		c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	}
+	c.Cancel = func() error {
+		return syscall.Kill(-c.Process.Pid, syscall.SIGKILL)
+	}
+	c.WaitDelay = waitDelay
+}
+
+// ownSudo reports whether cmd is sudo as kit runs it, never asking at the
+// terminal: -n never asks, -S asks on its input, -A asks kit (askpass). It
+// stays in kit's session, as sudo holds a password only for the session
+// it's given in (proven on macOS 26: a time stamp of another session isn't
+// current), so that kit's sudos share the one kit gave it.
+func ownSudo(cmd Command) bool {
+	return filepath.Base(cmd.Name) == "sudo" && len(cmd.Args) > 0 && slices.Contains([]string{"-n", "-S", "-A"}, cmd.Args[0])
+}
+
+// converse runs c, the command cmd, detached, answering what it asks on its
+// standard error, as cmd says, on its standard input; what it printed, its
+// prompts taken out.
 func converse(ctx context.Context, c *exec.Cmd, cmd Command) (stdout, stderr []byte, err error) {
 	in, err := c.StdinPipe()
 	if err != nil {
@@ -117,11 +138,7 @@ func converse(ctx context.Context, c *exec.Cmd, cmd Command) (stdout, stderr []b
 	}
 	var out bytes.Buffer
 	c.Stdout = &out
-	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	c.Cancel = func() error {
-		return syscall.Kill(-c.Process.Pid, syscall.SIGKILL)
-	}
-	c.WaitDelay = waitDelay
+	detach(c, cmd)
 	if err := c.Start(); err != nil {
 		return nil, nil, err
 	}

@@ -69,7 +69,7 @@ func TestConfigPrivate(t *testing.T) {
 				f.On("git", remote...).Prints("git@github.com:someone/kit-config.git\n")
 				f.On("gh", view("someone/kit-config")...).Exits(4).PrintsToStderr("To get started with GitHub CLI, please run:  gh auth login")
 			},
-			want: check.Result{State: check.Failed, Reason: "couldn't ask GitHub: gh repo view someone/kit-config --json visibility --jq .visibility exited 4: To get started with GitHub CLI, please run:  gh auth login"},
+			want: check.Result{State: check.Failed, Reason: "couldn't ask GitHub: To get started with GitHub CLI, please run:  gh auth login"},
 		},
 		{
 			name:   "no git",
