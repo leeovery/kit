@@ -38,6 +38,9 @@ func TestPrefs(t *testing.T) {
 			if res.State != tt.state || !strings.Contains(res.Summary, tt.text) || (tt.id != "" && (len(res.Items) != 1 || res.Items[0].ID != tt.id)) {
 				t.Errorf("result = %+v", res)
 			}
+			if res.State == check.Attention && (!res.ToDo() || res.Items[0].Detail == "") {
+				t.Errorf("result = %+v, want it the person's to do, saying what to do", res)
+			}
 		})
 	}
 }

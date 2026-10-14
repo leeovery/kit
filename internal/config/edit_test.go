@@ -111,6 +111,18 @@ func TestDeclare(t *testing.T) {
 			after: "[homebrew formulae]\njq\n\n[homebrew formulae --secret TOKEN --after secret]\nowner/private/archiver\nowner/private/fetcher\n",
 		},
 		{
+			name:   "a step by hand with its steps, in its place by name, another's steps kept with it",
+			before: "[manual]\nalpha \"Do alpha\"\n  its step\n# why zeta\nzeta \"Do zeta\"\n  its step\n",
+			kind:   config.ManualKind, entry: config.Entry{Name: "mid", Value: `"Do mid" --open "System Settings"`, Steps: []string{"one", " two "}},
+			after: "[manual]\nalpha \"Do alpha\"\n  its step\nmid \"Do mid\" --open \"System Settings\"\n  one\n  two\n# why zeta\nzeta \"Do zeta\"\n  its step\n",
+		},
+		{
+			name:   "a step by hand after the last one's steps",
+			before: "[manual]\nalpha \"Do alpha\"\n  its step\n\n[checks]\ndisk -- df -h\n",
+			kind:   config.ManualKind, entry: config.Entry{Name: "beta", Value: `"Do beta"`},
+			after: "[manual]\nalpha \"Do alpha\"\n  its step\nbeta \"Do beta\"\n\n[checks]\ndisk -- df -h\n",
+		},
+		{
 			name:   "a section holding lines back made, after its kind's own",
 			before: "[homebrew formulae]\njq\n\n[homebrew casks]\nghostty\n",
 			kind:   "brew", entry: config.Entry{Name: "owner/private/fetcher", Hold: "--secret TOKEN"},
@@ -187,6 +199,18 @@ func TestUndeclare(t *testing.T) {
 			after: "[paths]\n# the PATH\n\n# mine\n~/bin\n",
 		},
 		{
+			name:   "a step by hand, with its notes and steps, another's kept",
+			before: "[manual]\n# why alpha\nalpha \"Do alpha\"\n  first\n\tsecond\nbeta \"Do beta\"\n  third\n",
+			kind:   config.ManualKind, entry: "alpha",
+			after: "[manual]\nbeta \"Do beta\"\n  third\n",
+		},
+		{
+			name:   "the last step by hand, with its steps",
+			before: "[manual]\nalpha \"Do alpha\"\n  first\nbeta \"Do beta\"\n  second\n\n[checks]\ndisk -- df -h\n",
+			kind:   config.ManualKind, entry: "beta",
+			after: "[manual]\nalpha \"Do alpha\"\n  first\n\n[checks]\ndisk -- df -h\n",
+		},
+		{
 			name:   "the last section left empty goes, and the blank before it",
 			before: "[homebrew formulae]\nbat\n\n[claude mcp ~/Code/site]\nmail -- mail-mcp\n",
 			kind:   "claude-mcp", entry: "~/Code/site:mail",
@@ -212,6 +236,16 @@ func TestReplaceKeepsTheNotesAbove(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got, want := readFile(t, cfg, "laptop/declarations"), "[claude mcp]\n# the tablet\ntablet --off -- zsh -c tablet-mcp   # over USB\n"; got != want {
+		t.Errorf("laptop =\n%s\nwant\n%s", got, want)
+	}
+}
+
+func TestReplaceKeepsTheSteps(t *testing.T) {
+	cfg := loadRepo(t, map[string]string{"laptop/declarations": "[manual]\nalpha \"Do alpha\"\n  first\n  second\nbeta \"Do beta\"\n"})
+	if err := cfg.Replace(config.ManualKind, "laptop", config.Entry{Name: "alpha", Value: `"Do it now" --test true`}); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := readFile(t, cfg, "laptop/declarations"), "[manual]\nalpha \"Do it now\" --test true\n  first\n  second\nbeta \"Do beta\"\n"; got != want {
 		t.Errorf("laptop =\n%s\nwant\n%s", got, want)
 	}
 }
@@ -262,6 +296,9 @@ func TestEditingRefuses(t *testing.T) {
 		"a command without options": cfg.Declare("claude-mcp", "laptop", config.Entry{Name: "docs"}),
 		"a path with a colon":       cfg.Declare(config.PathsKind, "laptop", config.Entry{Name: "/opt/x:/opt/y"}),
 		"a path the shell expands":  cfg.Declare(config.PathsKind, "laptop", config.Entry{Name: "$HOME/bin"}),
+		"steps under a package":     cfg.Declare("brew", "laptop", config.Entry{Name: "bat", Steps: []string{"Run it"}}),
+		"a step that's a comment":   cfg.Declare(config.ManualKind, "laptop", config.Entry{Name: "x", Value: `"Do x"`, Steps: []string{"# not a step"}}),
+		"a step that's blank":       cfg.Declare(config.ManualKind, "laptop", config.Entry{Name: "x", Value: `"Do x"`, Steps: []string{" "}}),
 	} {
 		if err == nil {
 			t.Errorf("%s: no error", name)

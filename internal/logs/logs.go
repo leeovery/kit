@@ -40,7 +40,7 @@ var ErrNoLogs = errors.New("no runs logged yet")
 type Record struct {
 	Time time.Time `json:"time"`
 	// Event is what happened: run_started, step_started, step_finished,
-	// command, asking, answered or run_finished.
+	// command, asking, answered, needs_you or run_finished.
 	Event   string       `json:"event"`
 	Command string       `json:"command,omitempty"`
 	Machine string       `json:"machine,omitempty"`
@@ -63,6 +63,13 @@ type Record struct {
 	// Says is what macOS asked, as in "asking for a permission", from when
 	// its window was seen (asking) till it was gone (answered).
 	Says string `json:"says,omitempty"`
+	// Item, Title, Tells and More are a step by hand's card, as it went up
+	// (needs_you): its line's name, what to do, whether kit tells by itself
+	// when it's done, and how many more by hand waited after it.
+	Item  string `json:"item,omitempty"`
+	Title string `json:"title,omitempty"`
+	Tells bool   `json:"tells,omitempty"`
+	More  int    `json:"more,omitempty"`
 }
 
 // File is a run's log, as a sink.
@@ -175,6 +182,8 @@ func (l *File) record(e event.Event) Record {
 			r.Event, r.Says = "answered", l.asked
 		}
 		l.asked = e.Says
+	case event.NeedsYou:
+		r.Event, r.Step, r.Item, r.Title, r.Tells, r.More = "needs_you", e.Step, e.Item, e.Title, e.Tells, e.More
 	case event.RunFinished:
 		r.Event, r.DurationMS, r.Counts = "run_finished", e.Duration.Milliseconds(), e.Counts
 		l.finished = true

@@ -97,6 +97,51 @@ func (r *run) manualSteps(ordered []steps.ManualStep, others []engine.Step, rais
 	return out, nil
 }
 
+// placeByHand places the steps by hand with no place of their own among
+// all, the run's steps, when they're raised at a terminal: applied once
+// every other step has finished, however it stands, as what's done by hand
+// comes last, saying so while it waits; but for the steps that come after
+// them, which they can't wait for.
+func (r *run) placeByHand(all []engine.Step) {
+	i := slices.IndexFunc(all, func(s engine.Step) bool { return s.Name == steps.ManualName })
+	if !r.byHandLast || i < 0 {
+		return
+	}
+	all[i].Waiting = "at the end, once the rest is done"
+	later := following(all, steps.ManualName)
+	for _, s := range all {
+		if !later[s.Name] && !slices.Contains(all[i].After, s.Name) {
+			all[i].After = append(all[i].After, s.Name)
+		}
+	}
+}
+
+// following are the steps of all that come after the one called name, and
+// it: needing it, applied after it, or placed after it by its Before, or
+// after one of those.
+func following(all []engine.Step, name string) map[string]bool {
+	next := map[string][]string{}
+	for _, s := range all {
+		for _, n := range slices.Concat(s.Needs, s.After) {
+			next[n] = append(next[n], s.Name)
+		}
+		next[s.Name] = append(next[s.Name], s.Before...)
+	}
+	later := map[string]bool{}
+	var visit func(name string)
+	visit = func(name string) {
+		if later[name] {
+			return
+		}
+		later[name] = true
+		for _, n := range next[name] {
+			visit(n)
+		}
+	}
+	visit(name)
+	return later
+}
+
 // placeScript places s among names, the run's steps, as place does, and
 // returns the waits for the things it's applied after.
 func (r *run) placeScript(s *steps.Script, names map[string]bool) ([]engine.Wait, error) {

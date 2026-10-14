@@ -19,6 +19,7 @@ import (
 	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/gitrepo"
+	"github.com/leeovery/kit/internal/hand"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/kind/appstore"
 	"github.com/leeovery/kit/internal/kind/brew"
@@ -107,6 +108,9 @@ type run struct {
 	drifters map[string]drifter
 	// files are the config repository's linked files.
 	files *linked.Files
+	// byHandLast is whether the steps by hand with no place of their own
+	// come last, raised at a terminal (placeByHand).
+	byHandLast bool
 	// admin is whether an administrator's password is at hand, for the
 	// steps whose apply needs one; adminSteps are those steps.
 	admin      *steps.Admin
@@ -436,9 +440,21 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 		_ = log.Close()
 		return nil, err
 	}
+	// A step by hand that comes due while kit applies at a terminal is
+	// raised there, a card, and waited on: the rest, with no place of their
+	// own, once everything else has finished.
+	var raise *steps.Raise
+	if slices.Contains(applies, command) && a.pretty(a.Stdout) {
+		desk := hand.New()
+		raise = &steps.Raise{Sink: sink, Now: a.Now, Notify: steps.Notify(observed), Open: steps.OpenApp(observed), Desk: desk}
+		if f, ok := face.(*render.Pretty); ok {
+			f.Hands(desk.Answer)
+		}
+		r.byHandLast = true
+	}
 	plain, ordered := steps.SplitManual(home, byHand)
 	if len(plain.Entries) > 0 {
-		checks = append(checks, steps.Manual(observed, home, dirs.State, plain))
+		checks = append(checks, steps.Manual(observed, home, dirs.State, plain, raise))
 	}
 	hourly, daily, err := a.jobs(r)
 	if err != nil {
@@ -453,12 +469,6 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 	for i := range base {
 		base[i].Part = partOf(base[i].Name)
 	}
-	// A step by hand that comes due while kit applies at a terminal is
-	// raised there, and waited on.
-	var raise *steps.Raise
-	if slices.Contains(applies, command) && a.pretty(a.Stdout) {
-		raise = &steps.Raise{Sink: sink, Now: a.Now, Notify: steps.Notify(observed)}
-	}
 	scripts, err := r.scriptSteps(base)
 	var byHandOwn []engine.Step
 	if err == nil {
@@ -468,6 +478,7 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 		r.steps = slices.Concat(base, scripts, byHandOwn)
 		r.placeFeatures(r.steps, features, featured)
 		r.placeLines(r.steps)
+		r.placeByHand(r.steps)
 		r.pipeline, err = engine.New(r.steps...)
 	}
 	if err != nil {
@@ -489,6 +500,7 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 // kit apply's.
 func (r *run) lead(steps []engine.Step) error {
 	all := slices.Concat(steps, r.steps)
+	r.placeByHand(all)
 	p, err := engine.New(all...)
 	if err != nil {
 		return err

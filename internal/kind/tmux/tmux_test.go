@@ -3,6 +3,7 @@ package tmux_test
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -75,7 +76,7 @@ func TestDeclared(t *testing.T) {
 		{Name: "jaclu/tmux-menus#main", File: "~/.config/tmux/tmux.conf", Line: 4},
 		{Name: "joshmedeski/tmux-nerd-font-window-name", File: "~/.config/tmux/more.conf", Line: 1},
 	}
-	if err != nil || got.Kind != "tmux" || !slices.Equal(got.Entries, want) {
+	if err != nil || got.Kind != "tmux" || !reflect.DeepEqual(got.Entries, want) {
 		t.Errorf("Declared() = %+v, %v\nwant %+v", got.Entries, err, want)
 	}
 }

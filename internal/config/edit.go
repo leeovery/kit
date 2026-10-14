@@ -2,6 +2,7 @@ package config
 
 import (
 	"cmp"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -21,6 +22,9 @@ const (
 	// notes, moving with it.
 	commentLine
 	entryLine
+	// stepLine is a step of the entry above it, indented under it, as a
+	// step by hand's are: they move with it.
+	stepLine
 )
 
 // body is a section's lines, each with what it is and, for an entry, its
@@ -42,6 +46,8 @@ func splitBody(f form, lines []string) body {
 			kind = blankLine
 		case strings.HasPrefix(trimmed, "#"):
 			kind = commentLine
+		case line[0] == ' ' || line[0] == '\t':
+			kind = stepLine
 		case f == commands || f == settings || f == secrets:
 			name, _, _, _ = splitCommand(line)
 		case f == defaults:
@@ -78,11 +84,20 @@ func (b body) notesStart(i int) int {
 	return i
 }
 
-// lastEntryEnd is where a line goes after the last entry in [from, to), or
-// at from when there's none.
+// end is where entry i's block ends: after the steps indented under it.
+func (b body) end(i int) int {
+	i++
+	for i < len(b.kinds) && b.kinds[i] == stepLine {
+		i++
+	}
+	return i
+}
+
+// lastEntryEnd is where a line goes after the last entry in [from, to), and
+// its steps, or at from when there's none.
 func (b body) lastEntryEnd(from, to int) int {
 	if es := b.entries(from, to); len(es) > 0 {
-		return es[len(es)-1] + 1
+		return b.end(es[len(es)-1])
 	}
 	return from
 }
@@ -270,13 +285,14 @@ func (c *Config) Items(kind, scope string) ([]string, error) {
 }
 
 // Declare declares e in kind's section of scope's declarations, shared or a
-// Mac's, as in laptop, with its note after it: in a sorted section, which
-// stays sorted (sortedLines); in another, a name in its sorted place, and a
-// path last, as paths are searched in order. The section is made, in its
-// place among the file's, when there's none, and the file and its folder
-// too; a kind with sections for items declares it in e.Item's, and a list
-// in the section holding its lines back for e.Hold, when it says. The rest
-// of the file is kept as it is.
+// Mac's, as in laptop, with its note after it, and a step by hand's steps
+// indented under it: in a sorted section, which stays sorted (sortedLines);
+// in another, a name in its sorted place, and a path last, as paths are
+// searched in order. The section is made, in its place among the file's,
+// when there's none, and the file and its folder too; a kind with sections
+// for items declares it in e.Item's, and a list in the section holding its
+// lines back for e.Hold, when it says. The rest of the file is kept as it
+// is.
 func (c *Config) Declare(kind, scope string, e Entry) error {
 	d, f, err := c.editable(kind, scope)
 	if err != nil {
@@ -300,6 +316,10 @@ func (c *Config) Declare(kind, scope string, e Entry) error {
 	if err != nil {
 		return err
 	}
+	steps, err := stepLines(d, e.Steps)
+	if err != nil {
+		return err
+	}
 	if s, _ := f.holding(d, e.Name); s != nil {
 		return fmt.Errorf("%s is in %s already", e.Name, DeclFile(scope))
 	}
@@ -307,22 +327,24 @@ func (c *Config) Declare(kind, scope string, e Entry) error {
 	if s == nil {
 		s = f.add(d, arg, hold)
 	}
+	block := append([]string{line}, steps...)
 	switch b := splitBody(d.form, s.body); {
 	case d.sorted:
 		s.body = sortedLines(d.form, s.body, line)
 	case d.form == paths:
-		b.insert(b.lastEntryEnd(0, len(b.lines)), line)
+		b.insert(b.lastEntryEnd(0, len(b.lines)), block...)
 		s.body = b.lines
 	default:
-		b.insert(b.sortedPlace(0, len(b.lines), name), line)
+		b.insert(b.sortedPlace(0, len(b.lines), name), block...)
 		s.body = b.lines
 	}
 	return c.writeDecl(f, d, e.Name, true)
 }
 
 // Undeclare takes name out of kind's sections of scope's declarations, with
-// the notes directly above it, keeping a sorted section sorted; a section it
-// leaves empty goes. The rest of the file is kept as it is.
+// the notes directly above it and the steps under it, keeping a sorted
+// section sorted; a section it leaves empty goes. The rest of the file is
+// kept as it is.
 func (c *Config) Undeclare(kind, scope, name string) error {
 	d, f, err := c.editable(kind, scope)
 	if err != nil {
@@ -341,7 +363,7 @@ func (c *Config) Undeclare(kind, scope, name string) error {
 	if i < 0 {
 		return fmt.Errorf("%s isn't in %s", name, DeclFile(scope))
 	}
-	b.remove(b.notesStart(i), i+1)
+	b.remove(b.notesStart(i), b.end(i))
 	s.body = b.lines
 	if len(b.entries(0, len(b.lines))) == 0 {
 		f.drop(s)
@@ -350,8 +372,8 @@ func (c *Config) Undeclare(kind, scope, name string) error {
 }
 
 // Replace rewrites the line declaring e.Name in kind's sections of scope's
-// declarations, with e's value and note; the notes above it are kept, and a
-// sorted section sorted.
+// declarations, with e's value and note; the notes above it and the steps
+// under it are kept, and a sorted section sorted.
 func (c *Config) Replace(kind, scope string, e Entry) error {
 	d, f, err := c.editable(kind, scope)
 	if err != nil {
@@ -415,6 +437,31 @@ func entryText(d sectionDef, name string, e Entry) (string, error) {
 		line += noteGap + note
 	}
 	return line, nil
+}
+
+// stepIndent is what a step's line starts with, under its entry.
+const stepIndent = "  "
+
+// stepsUnderManual says which lines take steps, for a line that has them
+// and doesn't.
+const stepsUnderManual = "only a [manual] line takes steps, indented under it"
+
+// stepLines are steps, in order, as lines under their entry in d's
+// sections: only a step by hand's take them, and each is a line of what to
+// do.
+func stepLines(d sectionDef, steps []string) ([]string, error) {
+	if len(steps) > 0 && !d.steps {
+		return nil, errors.New(stepsUnderManual)
+	}
+	lines := make([]string, len(steps))
+	for i, step := range steps {
+		step = strings.TrimSpace(step)
+		if step == "" || strings.HasPrefix(step, "#") || strings.ContainsAny(step, "\r\n") {
+			return nil, fmt.Errorf("%q isn't a step: a step is a line of what to do, not starting with #", step)
+		}
+		lines[i] = stepIndent + step
+	}
+	return lines, nil
 }
 
 // add adds a section of d for arg (a project folder, or an item) and hold,

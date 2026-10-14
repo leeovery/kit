@@ -38,7 +38,8 @@ const (
 )
 
 // ManualKind names the section of the steps a person does by hand: a name,
-// what to do, and, after --, a command saying whether it's done.
+// what to do, and its options, then the steps to do it, each a line of its
+// own indented under it.
 const ManualKind = "manual"
 
 // StepsKind names the section of steps of the user's own: a name, what the
@@ -124,6 +125,9 @@ type sectionDef struct {
 	// PATH's is the order it's searched in; commands' are as written, a new
 	// one in its place by name.
 	sorted bool
+	// steps is whether its lines take steps, each a line of its own
+	// indented under the line: a step by hand's.
+	steps bool
 }
 
 // sectionDefs are the sections a declarations file may hold, in the order
@@ -151,7 +155,7 @@ var sectionDefs = []sectionDef{
 	{header: "prefs apps", kind: PrefsAppsKind, form: settings},
 	{header: "prefs machine-bound", kind: PrefsMachineBoundKind, form: paths},
 	{header: "steps", kind: StepsKind, form: commands},
-	{header: "manual", kind: ManualKind, form: commands},
+	{header: "manual", kind: ManualKind, form: commands, steps: true},
 	{header: "checks", kind: ChecksKind, form: commands},
 	{header: "hourly", kind: HourlyKind, form: commands},
 	{header: "nightly", kind: NightlyKind, form: commands},
@@ -219,6 +223,9 @@ type Entry struct {
 	Line int
 	// Note is the comment after it, saying why it's there, if any.
 	Note string
+	// Steps are what to do, in order, as the lines indented under it say: a
+	// step by hand's.
+	Steps []string `json:",omitempty"`
 	// Off is whether it's declared, but not to be installed: never installed
 	// by kit, and left alone when it is. Kinds whose lines say so set it.
 	Off bool `json:",omitempty"`
@@ -473,10 +480,17 @@ func (s *section) entries(scope string) ([]Entry, error) {
 	seen := make(map[string]int)
 	b := splitBody(s.def.form, s.body)
 	for i, line := range s.body {
+		n := s.start + 1 + i
+		if b.kinds[i] == stepLine {
+			if err := s.stepOf(b, i); err != nil {
+				return nil, fmt.Errorf("%s:%d: %q is indented, but %w", file, n, strings.TrimSpace(line), err)
+			}
+			out[len(out)-1].Steps = append(out[len(out)-1].Steps, strings.TrimSpace(line))
+			continue
+		}
 		if b.kinds[i] != entryLine {
 			continue
 		}
-		n := s.start + 1 + i
 		e, err := s.entry(line)
 		if err != nil {
 			return nil, fmt.Errorf("%s:%d: %w", file, n, err)
@@ -489,6 +503,18 @@ func (s *section) entries(scope string) ([]Entry, error) {
 		out = append(out, e)
 	}
 	return out, nil
+}
+
+// stepOf says why line i of the section, indented, isn't a step of the
+// entry above it: nil when it is.
+func (s *section) stepOf(b body, i int) error {
+	switch {
+	case !s.def.steps:
+		return errors.New(stepsUnderManual)
+	case i == 0 || b.kinds[i-1] != entryLine && b.kinds[i-1] != stepLine:
+		return errors.New("there's no line directly above it for it to be a step of")
+	}
+	return nil
 }
 
 // entry reads one of the section's entry lines.
