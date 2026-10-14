@@ -147,13 +147,19 @@ func casksFailed() []event.Event {
 	return append(events, applyingStep("Backups", "App settings", "kit prefs restore", "com.example.editor restored", "com.example.terminal restored")...)
 }
 
-// waitingOnYou is the run once 1Password's sign-in has come due, a step by
-// hand, while macOS asks for an administrator's password.
+// signIn is 1Password's sign-in come up, a step by hand: kit opened the
+// app for it, and tells by itself once it's done.
+var signIn = event.NeedsYou{Time: at, Step: stepName("Manual", "1password"), Item: "1password", Title: "Sign in to 1Password", Steps: []string{
+	"Scan the QR code it shows with the 1Password app on your phone",
+	"In 1Password, Settings › Developer › turn on Integrate with 1Password CLI",
+}, Opened: "1Password", Tells: true}
+
+// waitingOnYou is the run once 1Password's sign-in has come up, while
+// macOS asks for an administrator's password.
 func waitingOnYou() []event.Event {
-	name := stepName("Manual", "1password")
 	return append(casksFailed(),
-		event.StepStarted{Step: name, Doing: "applying"},
-		event.Doing{Step: name, Says: "waiting on you", Todo: "Sign in to 1Password with your phone, then turn on Settings › Developer › Integrate with 1Password CLI"},
+		event.StepStarted{Step: signIn.Step, Doing: "applying"},
+		signIn,
 		event.Asking{Time: at, Says: "asking for an administrator's password"},
 	)
 }
@@ -216,11 +222,17 @@ func theRest(events []event.Event, end func(event.Step) check.Result) []event.Ev
 	return events
 }
 
-// appliedRun is casksFailed to its end: the rest done, but two steps by
-// hand left to do, one saying what to run once it's done, one saying
-// nothing more.
+// editor is a step by hand come up with steps of its own, then put off.
+var editor = event.NeedsYou{Time: at, Step: stepName("Manual", "By hand"), Item: "editor", Title: "Install the editor from its site (no Homebrew cask)", Steps: []string{
+	"Download it from editor.example.com",
+	"Drag it to Applications",
+}, More: 1}
+
+// appliedRun is casksFailed to its end: the rest done, but Time Machine's
+// disk and Arq's plan left to do, and two steps by hand, one saying what to
+// run once it's done, one come up with steps of its own and put off.
 func appliedRun() []event.Event {
-	events := theRest(casksFailed(), func(s event.Step) check.Result {
+	events := theRest(append(casksFailed(), editor), func(s event.Step) check.Result {
 		if s.Title == "By hand" {
 			return check.Result{State: check.Attention, Summary: "2 to do", Items: []check.Item{
 				{ID: "manual:sharing", Name: "Allow remote users Full Disk Access: System Settings › General › Sharing", State: "manual", Detail: "then: kit manual done sharing"},
@@ -242,11 +254,14 @@ func stoppedRun() []event.Event {
 
 // panelRow is a row in the log, in its panel's rule: a mark, then a step's
 // name.
-var panelRow = regexp.MustCompile(`(?m)^  ── [●◐✗▲–○] (\S+)`)
+var panelRow = regexp.MustCompile(`(?m)^  ── [●◐✗▲–○△] (\S+)`)
 
 // The keys at the screen's foot while it reads them, before anything's
-// pinned.
-const runningFoot = "  tab panel · ↑↓ scroll · click a step to pin · q stop · shift+drag selects"
+// pinned, with no card up; and with 1Password's sign-in up.
+const (
+	runningFoot = "  tab panel · ↑↓ scroll · click a step to see it · q stop"
+	signInFoot  = "  o open 1Password again · l later · tab panel · ↑↓ scroll · click a step to see it · q stop"
+)
 
 // lines are a screen's lines.
 func lines(screen string) []string { return strings.Split(screen, "\n") }
@@ -308,18 +323,19 @@ func panelTitles(screen string) []string {
 
 // While applying, at a terminal big enough, kit has a screen of its own,
 // the window's whole size: the header with the bar and the counts, every
-// step in a grid, a rule, the log's panels, a rule, what needs you, the
-// keys; a blank line over the first rule and under the second, none
-// between the panels.
+// step in a grid, a rule, the card up for you and the log's panels, a
+// rule, macOS asking, the keys; a blank line over the first rule and under
+// the second, none between the panels. What's left to do is counted on
+// its own, never as needing you.
 func TestApplyingHasAScreenOfItsOwn(t *testing.T) {
 	for _, tt := range []struct {
-		golden, counts string
-		took           time.Duration
-		events         func() []event.Event
+		golden, counts, keys string
+		took                 time.Duration
+		events               func() []event.Event
 	}{
-		{"apply-screen.golden", "31 of 51 · 3 running · 6m12s", 6*time.Minute + 12*time.Second, sixMinutesIn},
-		{"apply-screen-failed.golden", "35 of 51 · 1 failed · 2 running · 10m48s", 10*time.Minute + 48*time.Second, casksFailed},
-		{"apply-screen-you.golden", "35 of 51 · 1 failed · 2 running · 1 needs you · 12m40s", 12*time.Minute + 40*time.Second, waitingOnYou},
+		{"apply-screen.golden", "31 of 51 · 3 running · 1 to do · 6m12s", runningFoot, 6*time.Minute + 12*time.Second, sixMinutesIn},
+		{"apply-screen-failed.golden", "35 of 51 · 1 failed · 2 running · 2 to do · 10m48s", runningFoot, 10*time.Minute + 48*time.Second, casksFailed},
+		{"apply-screen-you.golden", "35 of 51 · 1 failed · 2 running · 1 needs you · 2 to do · 12m40s", signInFoot, 12*time.Minute + 40*time.Second, waitingOnYou},
 	} {
 		t.Run(tt.golden, func(t *testing.T) {
 			face, out, _ := applyAt(160, 64, tt.took, tt.events())
@@ -329,11 +345,14 @@ func TestApplyingHasAScreenOfItsOwn(t *testing.T) {
 			}
 			golden(t, tt.golden, got+"\n")
 			ls := lines(got)
-			if len(ls) != 64 || !strings.HasSuffix(ls[3], "│  "+tt.counts) || ls[63] != runningFoot {
-				t.Errorf("the screen is %d lines, its counts and keys\n%s\n%s\nwant 64 lines, the counts %q, the keys at the foot", len(ls), ls[3], ls[len(ls)-1], tt.counts)
+			if len(ls) != 64 || !strings.HasSuffix(ls[3], "│  "+tt.counts) || ls[63] != tt.keys {
+				t.Errorf("the screen is %d lines, its counts and keys\n%s\n%s\nwant 64 lines, the counts %q, the keys %q", len(ls), ls[3], ls[len(ls)-1], tt.counts, tt.keys)
 			}
 			if !strings.Contains(out.String(), "\x1b[?1049h\x1b[?25l") {
 				t.Error("applying didn't take the alternate screen, its cursor hidden")
+			}
+			if strings.Contains(out.String(), "shift+drag") {
+				t.Error("the keys say shift+drag selects; want no word of it")
 			}
 			rules := edges(ls)
 			if len(rules) != 2 || ls[rules[0]-1] != "" || ls[rules[1]+1] != "" || ls[rules[0]+1] == "" || !panelRow.MatchString(ls[rules[0]+1]) {
@@ -368,86 +387,57 @@ func TestApplyingScreenTakesOverFromTheArrival(t *testing.T) {
 	}
 }
 
-// The log's panels, with nothing pinned, follow its slots: a step takes
-// one as it starts applying, an empty one first, and keeps it while it
-// runs; once it's done, its lines stay till another needs the place, the
-// one done longest ago giving way first, one that failed last. While every
-// slot's step runs, a step starting has none.
-func TestApplyingLogsSlots(t *testing.T) {
-	var steps []event.Step
-	for _, n := range []string{"a", "b", "c", "d", "e", "f", "g", "h"} {
-		steps = append(steps, event.Step{Name: n, Title: n, Area: "Steps"})
-	}
-	events := []event.Event{event.RunStarted{Time: at, Command: "apply", Machine: "laptop", Steps: steps}}
-	start := func(names ...string) {
-		for _, n := range names {
-			events = append(events, event.StepStarted{Step: n, Doing: "applying"}, event.Output{Step: n, Command: "run apply", Line: n + " at work"})
-		}
-	}
-	finish := func(n string, s check.State) {
-		events = append(events, event.StepFinished{Step: n, Result: check.Result{State: s, Summary: "done", Reason: "couldn't apply"}})
-	}
-	start("a", "b", "c", "d")
-	finish("a", check.OK)
-	finish("c", check.OK)
-	finish("b", check.Failed)
-	start("e", "f", "g")
-	events = append(events, event.StepStarted{Step: "h", Doing: "applying"})
-	finish("d", check.OK)
-	face, out, _ := applyAt(160, 64, time.Second, events)
-	got := screen(out.String())
-	if err := face.Close(); err != nil {
-		t.Fatal(err)
-	}
-	var rows []string
-	for _, m := range panelRow.FindAllStringSubmatch(got, -1) {
-		rows = append(rows, m[1])
-	}
-	if want := []string{"e", "g", "f", "d"}; !slices.Equal(rows, want) {
-		t.Errorf("the log's panels hold %q; want %q: a's place, done first, then the failed b's, then c's; h, starting with every slot's step running, none\n%s", rows, want, got)
-	}
-	if rule, under := panelOf(got, "d"); !strings.HasPrefix(rule, "  ── ● d  done ─") || !slices.Equal(under, []string{"d at work"}) {
-		t.Errorf("d's panel, once it's done, is %q, then %q; want its row in the rule, its lines kept", rule, under)
-	}
-}
-
-// A step waiting partway through applying, for a thing another step puts
-// in place, gives its place in the log up to a step at work, and takes one
-// again once it's back at work.
-func TestApplyingSlotsAreForStepsAtWork(t *testing.T) {
+// The log's panels, with nothing pinned, are the steps at work applying,
+// in the order they started: a step finishing leaves its panel at once,
+// failed or not; one only checking has none; one waiting partway through
+// applying, for a thing another step puts in place, gives its panel up,
+// and has it again once it's back at work.
+func TestApplyingPanelsAreForStepsAtWork(t *testing.T) {
 	var steps []event.Step
 	for _, n := range []string{"a", "b", "c", "d", "e"} {
 		steps = append(steps, event.Step{Name: n, Title: n, Area: "Steps"})
 	}
-	events := []event.Event{event.RunStarted{Time: at, Command: "apply", Machine: "laptop", Steps: steps}}
-	for _, n := range []string{"a", "b", "c", "d"} {
-		events = append(events, event.StepStarted{Step: n, Doing: "applying"}, event.Output{Step: n, Command: "run apply", Line: n + " at work"})
+	face, out, _ := applyAt(160, 64, time.Second, []event.Event{event.RunStarted{Time: at, Command: "apply", Machine: "laptop", Steps: steps}})
+	defer func() { _ = face.Close() }()
+	start := func(names ...string) {
+		for _, n := range names {
+			face.Emit(event.StepStarted{Step: n, Doing: "checking"})
+			face.Emit(event.StepStarted{Step: n, Doing: "applying"})
+			face.Emit(event.Output{Step: n, Command: "run apply", Line: n + " at work"})
+		}
 	}
-	events = append(events,
-		event.Doing{Step: "a", Says: "waiting for TOKEN: 2 to install"},
-		event.StepStarted{Step: "e", Doing: "applying"}, event.Output{Step: "e", Command: "run apply", Line: "e at work"},
-		event.StepFinished{Step: "b", Result: check.Result{State: check.OK, Summary: "done"}},
-		event.Doing{Step: "a", Says: "installing owner/private/fetcher", Of: 2},
-		event.Output{Step: "a", Command: "brew install", Line: "a at work again"},
-	)
-	face, out, _ := applyAt(160, 64, time.Second, events)
+	panels := func(when string, want ...string) {
+		t.Helper()
+		time.Sleep(300 * time.Millisecond)
+		if got := panelTitles(screen(out.String())); !slices.Equal(got, want) {
+			t.Errorf("%s, the log's panels are %q; want %q\n%s", when, got, want, screen(out.String()))
+		}
+	}
+	start("a", "b", "c")
+	face.Emit(event.StepStarted{Step: "d", Doing: "checking"})
+	panels("with a, b and c applying, d checking", "a", "b", "c")
+	face.Emit(event.StepFinished{Step: "b", Result: check.Result{State: check.Failed, Reason: "couldn't apply: it broke"}})
+	face.Emit(event.Doing{Step: "a", Says: "waiting for TOKEN: 2 to install"})
+	start("e")
+	panels("b failed, a waiting, e started", "c", "e")
+	face.Emit(event.Doing{Step: "a", Says: "installing owner/private/fetcher", Of: 2})
+	face.Emit(event.Output{Step: "a", Command: "brew install", Line: "a at work again"})
+	face.Emit(event.StepFinished{Step: "c", Result: check.Result{State: check.OK, Summary: "done"}})
+	panels("a back at work, c done", "a", "e")
+	face.Emit(event.StepFinished{Step: "a", Result: check.Result{State: check.OK, Summary: "done"}})
+	face.Emit(event.StepFinished{Step: "e", Result: check.Result{State: check.OK, Summary: "done"}})
+	time.Sleep(300 * time.Millisecond)
 	got := screen(out.String())
-	if err := face.Close(); err != nil {
-		t.Fatal(err)
-	}
-	var rows []string
-	for _, m := range panelRow.FindAllStringSubmatch(got, -1) {
-		rows = append(rows, m[1])
-	}
-	if want := []string{"e", "a", "c", "d"}; !slices.Equal(rows, want) {
-		t.Errorf("the log's panels hold %q; want %q: a's place e's while a waited, then b's, done, a's\n%s", rows, want, got)
+	rules := edges(lines(got))
+	if len(rules) != 2 || panelTitles(got) != nil || strings.TrimSpace(strings.Join(lines(got)[rules[0]+1:rules[1]], "")) != "" {
+		t.Errorf("with nothing at work, nothing pinned and no card, the log is\n%s\nwant it empty", got)
 	}
 }
 
 // scratchLeft is a run in which the Scratch volume's step made the volume,
-// printing as it did, but found two things still left once it checked
-// again, one saying what to do, while Claude Code installs.
-func scratchLeft() []event.Event {
+// printing as it did, but found two things, each of state, still left once
+// it checked again, one saying what to do, while Claude Code installs.
+func scratchLeft(state string) []event.Event {
 	var steps []event.Step
 	for _, a := range []struct{ area, title string }{{"Mac", "Scratch volume"}, {"Mac", "Disk space"}, {"Steps", "claude-code"}} {
 		steps = append(steps, event.Step{Name: stepName(a.area, a.title), Title: a.title, Area: a.area})
@@ -458,8 +448,8 @@ func scratchLeft() []event.Event {
 	events = append(events, finished("Mac", "Scratch volume", check.Result{
 		State: check.Attention, Summary: "not set up as it should be",
 		Items: []check.Item{
-			{ID: "scratch:tmpdir", Name: "Claude Code's settings don't send TMPDIR to it", State: "problem", Detail: "set it in Claude Code's settings"},
-			{ID: "scratch:backups", Name: "Time Machine still backs it up", State: "problem"},
+			{ID: "scratch:tmpdir", Name: "Claude Code's settings don't send TMPDIR to it", State: state, Detail: "set it in Claude Code's settings"},
+			{ID: "scratch:backups", Name: "Time Machine still backs it up", State: state},
 		},
 		Done: []check.Item{{ID: "scratch:mounted", Name: "/Volumes/Scratch", Action: "create"}},
 	}))
@@ -467,32 +457,298 @@ func scratchLeft() []event.Event {
 	return append(events, applyingStep("Steps", "claude-code", "run apply", "Setting up Claude Code...", "Verifying checksum")...)
 }
 
-// A step that finished not well says in its panel what's left of it, as
-// the record does, under the last lines it printed, which give way to it
-// when the panel hasn't the room for both: each thing by name, what to do
-// about it under it when it says, in orange, as it needs you.
-func TestApplyingPanelSaysWhatsLeft(t *testing.T) {
-	events := scratchLeft()
-	face, out, kb := applyIn(colorprofile.TrueColor, 100, 30, time.Minute, events)
-	got := screen(uncoloured(out.String()))
-	golden(t, "apply-screen-left.golden", got+"\n")
+// A finished step has a panel only once it's pinned: under the last lines
+// it printed, which give way to it when the panel hasn't the room for
+// both, what's left of it, as the record has it. What it's left you to do
+// is each thing by name, white, how under it; what's wrong with a step
+// unwell, in orange. The record has the step unwell's row with what's left
+// under it; the to-do's row says it's below, under TO DO, cutting what
+// else it says to keep that.
+func TestApplyingPinnedPanelSaysWhatsLeft(t *testing.T) {
 	left := []string{"Claude Code's settings don't send TMPDIR to it", "→ set it in Claude Code's settings", "Time Machine still backs it up"}
-	if _, under := panelOf(got, "Scratch volume"); len(under) < 4 || !slices.Equal(under[len(under)-4:], append([]string{"    Indexing disabled."}, left...)) {
-		t.Errorf("the Scratch volume's panel shows\n%s\nwant its last line printed, then what's left: %q", strings.Join(under, "\n"), left)
+	for _, tt := range []struct {
+		state, golden string
+		named         func(string) string
+		record        []string
+	}{
+		{check.Problem, "apply-screen-left.golden", look.White, []string{
+			"\n  △ Scratch volume  created /Volumes/Scratch · not set up as it … · to do, below\n  ● Disk space",
+			"\n  TO DO  2, in any order: kit apply checks them\n  △ 1  Claude Code's settings don't send TMPDIR to it\n       → set it in Claude Code's settings\n  △ 2  Time Machine still backs it up\n",
+		}},
+		{string(check.Attention), "", look.Orange, []string{"\n  ▲ Scratch volume  created /Volumes/Scratch · not set up as it should be\n  │ " + strings.Join(left, "\n  │ ") + "\n"}},
+	} {
+		t.Run(tt.state, func(t *testing.T) {
+			face, out, kb := applyIn(colorprofile.TrueColor, 100, 30, time.Minute, scratchLeft(tt.state))
+			if got := panelTitles(screen(uncoloured(out.String()))); !slices.Equal(got, []string{"claude-code"}) {
+				t.Errorf("before it's pinned, the panels are %q; want claude-code's alone, at work", got)
+			}
+			pin(t, out, kb, "Scratch volume")
+			got := screen(uncoloured(out.String()))
+			if tt.golden != "" {
+				golden(t, tt.golden, got+"\n")
+			}
+			if _, under := panelOf(got, "Scratch volume"); len(under) < 4 || !slices.Equal(under[len(under)-4:], append([]string{"    Indexing disabled."}, left...)) {
+				t.Errorf("the Scratch volume's panel shows\n%s\nwant its last line printed, then what's left: %q", strings.Join(under, "\n"), left)
+			}
+			if frame := strings.Join(lastFrame(out.String()), "\n"); !strings.Contains(frame, tt.named(left[0])) || !strings.Contains(frame, tt.named(left[2])) {
+				t.Errorf("the things left aren't named as they should be in\n%s", frame)
+			}
+			kb.press(t, slices.Repeat([]ask.Key{keyUp}, 20)...)
+			if _, under := panelOf(screen(uncoloured(out.String())), "Scratch volume"); len(under) < 4 || under[0] != "==> Adding volume 1" || !slices.Equal(under[len(under)-3:], left) {
+				t.Errorf("scrolled back as far as it goes, the Scratch volume's panel shows\n%s\nwant its first lines printed, then what's left", strings.Join(under, "\n"))
+			}
+			face.Emit(event.RunFinished{Time: at, Duration: time.Minute, Counts: map[check.State]int{check.OK: 2, check.Attention: 1}})
+			if err := face.Close(); err != nil {
+				t.Fatal(err)
+			}
+			record := screen(uncoloured(out.String()))
+			for _, want := range tt.record {
+				if !strings.Contains(record, want) {
+					t.Errorf("the record is\n%s\nwant it to hold\n%s", record, want)
+				}
+			}
+			if tt.state == string(check.Attention) && strings.Contains(record, "TO DO") {
+				t.Errorf("the record is\n%s\nwant no TO DO: nothing's left only for you to do", record)
+			}
+		})
 	}
-	if frame := strings.Join(lastFrame(out.String()), "\n"); !strings.Contains(frame, look.Orange(left[0])) || !strings.Contains(frame, look.Orange(left[2])) {
-		t.Errorf("the things left aren't named in orange in\n%s", frame)
+}
+
+// handCard is a step by hand come up with nothing to tell kit it's done:
+// kit opened System Settings for it, and two more wait after it.
+var handCard = event.NeedsYou{Time: at, Step: stepName("Manual", "By hand"), Item: "karabiner", Title: "Allow Karabiner-Elements", Steps: []string{
+	"Allow Karabiner-Elements' driver (the Allow button, near the bottom)",
+	"Then Input Monitoring › turn on karabiner_grabber and karabiner_observer",
+}, Opened: "System Settings", More: 2}
+
+// paperCard is a step by hand come up that kit neither opened anything for
+// nor can tell is done.
+var paperCard = event.NeedsYou{Time: at, Step: stepName("Manual", "By hand"), Item: "paper", Title: "Install Paper", Steps: []string{"Download it from paper.example.com"}}
+
+// cardUp is casksFailed with card come up for its step, running.
+func cardUp(card event.NeedsYou) []event.Event {
+	return append(casksFailed(), event.StepStarted{Step: card.Step, Doing: "applying"}, card)
+}
+
+// A step by hand come up is a card, straight under the first rule, over
+// the panels: an orange rule carrying the needs-you mark, its title, that
+// it needs you, and how many more wait after it; its steps numbered, the
+// app kit opened for it the first, a blank line after each; and, when kit
+// tells by itself it's done, that kit carries on. Its cell in the grid
+// needs you, in orange; the counts say so; the keys answering it lead the
+// foot: o when kit opened an app, enter when kit can't tell by itself, l
+// always. The step finishing takes it down.
+func TestApplyingCard(t *testing.T) {
+	for _, tt := range []struct {
+		name, golden string
+		card         event.NeedsYou
+		lines        []string
+		keys         string
+	}{
+		{"kit opened it, and tells", "", signIn, []string{
+			"  ── ▲ Sign in to 1Password  needs you ─",
+			"",
+			"       1  1Password is open: kit opened it for you",
+			"",
+			"       2  Scan the QR code it shows with the 1Password app on your phone",
+			"",
+			"       3  In 1Password, Settings › Developer › turn on Integrate with 1Password CLI",
+			"",
+			"       kit carries on by itself once it's done",
+			"",
+		}, signInFoot},
+		{"kit opened it, more after it", "apply-screen-hand.golden", handCard, []string{
+			"  ── ▲ Allow Karabiner-Elements  needs you · 2 more after this ─",
+			"",
+			"       1  System Settings is open: kit opened it for you",
+			"",
+			"       2  Allow Karabiner-Elements' driver (the Allow button, near the bottom)",
+			"",
+			"       3  Then Input Monitoring › turn on karabiner_grabber and karabiner_observer",
+			"",
+		}, "  o open System Settings again · enter done · l later · tab panel · ↑↓ scroll · click a step to see it · q stop"},
+		{"neither", "", paperCard, []string{
+			"  ── ▲ Install Paper  needs you ─",
+			"",
+			"       1  Download it from paper.example.com",
+			"",
+		}, "  enter done · l later · tab panel · ↑↓ scroll · click a step to see it · q stop"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			face, out, _ := applyIn(colorprofile.TrueColor, 160, 64, time.Minute, cardUp(tt.card))
+			defer func() { _ = face.Close() }()
+			got := screen(uncoloured(out.String()))
+			if tt.golden != "" {
+				golden(t, tt.golden, got+"\n")
+			}
+			ls := lines(got)
+			rules := edges(ls)
+			card := ls[rules[0]+1 : rules[0]+1+len(tt.lines)]
+			for i, want := range tt.lines {
+				if !strings.HasPrefix(card[i], want) || (want == "" && card[i] != "") {
+					t.Errorf("the card is\n%s\nwant\n%s", strings.Join(card, "\n"), strings.Join(tt.lines, "\n"))
+					break
+				}
+			}
+			if after := ls[rules[0]+1+len(tt.lines)]; !strings.HasPrefix(after, "  ── ◐ Homebrew formulae") {
+				t.Errorf("under the card is %q; want the panels", after)
+			}
+			if !strings.Contains(ls[3], " · 1 needs you · ") || foot(got, 1)[0] != tt.keys {
+				t.Errorf("the counts are %q, the keys %q; want 1 needs you, the keys %q", ls[3], foot(got, 1)[0], tt.keys)
+			}
+			frame := strings.Join(lastFrame(out.String()), "\n")
+			if cell := look.Orange("▲") + " " + look.Orange("By hand"); tt.card.Step == stepName("Manual", "By hand") && !strings.Contains(frame, cell) {
+				t.Errorf("the grid has no cell %q", cell)
+			}
+			if rule := "  " + look.Orange("── ") + look.Orange("▲") + " " + look.Strong(tt.card.Title) + "  " + look.Orange("needs you"); !strings.Contains(frame, rule) {
+				t.Errorf("the card's rule isn't orange, its title strong, needs you orange:\n%s", frame)
+			}
+			face.Emit(event.StepFinished{Time: at, Step: tt.card.Step, Result: check.Result{State: check.OK, Summary: "done"}})
+			time.Sleep(300 * time.Millisecond)
+			got = screen(uncoloured(out.String()))
+			if strings.Contains(got, tt.card.Title) || strings.Contains(got, "needs you") || foot(got, 1)[0] != runningFoot {
+				t.Errorf("its step done, the screen is\n%s\nwant the card gone, nothing needing you, the keys as they were", got)
+			}
+		})
 	}
-	kb.press(t, slices.Repeat([]ask.Key{keyUp}, 20)...)
-	if _, under := panelOf(screen(uncoloured(out.String())), "Scratch volume"); len(under) < 4 || under[0] != "==> Adding volume 1" || !slices.Equal(under[len(under)-3:], left) {
-		t.Errorf("scrolled back as far as it goes, the Scratch volume's panel shows\n%s\nwant its first lines printed, then what's left", strings.Join(under, "\n"))
+}
+
+// There's one card at a time: the last come up, whatever its step. A step
+// finishing takes its own card down, never another's; a step by hand
+// moving on to its next line replaces its card. A step queued for its
+// card's turn has the needs-you mark in the grid, but only the card up is
+// counted as needing you.
+func TestApplyingOneCardAtATime(t *testing.T) {
+	face, out, _ := applyIn(colorprofile.TrueColor, 160, 64, time.Minute, append(cardUp(signIn),
+		event.StepStarted{Step: paperCard.Step, Doing: "applying"},
+		event.Doing{Step: paperCard.Step, Says: "needs you"},
+	))
+	defer func() { _ = face.Close() }()
+	shows := func(when, title string) {
+		t.Helper()
+		time.Sleep(300 * time.Millisecond)
+		got := screen(uncoloured(out.String()))
+		ls := lines(got)
+		rules := edges(ls)
+		if rule := ls[rules[0]+1]; !strings.HasPrefix(rule, "  ── ▲ "+title+"  needs you") || strings.Count(got, "  needs you") != 1 {
+			t.Errorf("%s, the screen is\n%s\nwant one card, %s's", when, got, title)
+		}
+		if !strings.Contains(ls[3], " · 1 needs you · ") {
+			t.Errorf("%s, the counts are %q; want 1 needs you, the card up alone", when, ls[3])
+		}
+		frame := strings.Join(lastFrame(out.String()), "\n")
+		if cell := look.Orange("▲") + " " + look.Orange("By hand"); !strings.Contains(frame, cell) {
+			t.Errorf("%s, By hand isn't marked as needing you in the grid", when)
+		}
 	}
-	face.Emit(event.RunFinished{Time: at, Duration: time.Minute, Counts: map[check.State]int{check.OK: 2, check.Attention: 1}})
+	shows("1Password's card up, By hand queued for its turn", signIn.Title)
+	face.Emit(paperCard)
+	shows("By hand's card come up", paperCard.Title)
+	face.Emit(event.StepFinished{Time: at, Step: signIn.Step, Result: check.Result{State: check.OK, Summary: "signed in"}})
+	shows("1Password's step finished after", paperCard.Title)
+	face.Emit(handCard)
+	shows("By hand on to its next line", handCard.Title)
+}
+
+// A step waiting its turn says its own words, when it has some, rather
+// than what it waits for.
+func TestApplyingWaitingInItsOwnWords(t *testing.T) {
+	steps := []event.Step{
+		{Name: "cask", Title: "Homebrew casks", Area: "Drift"},
+		{Name: "arq", Title: "Arq", Area: "Backups", Waits: []string{"cask"}},
+		{Name: "manual", Title: "By hand", Area: "Manual", Waits: []string{"cask", "arq"}, Waiting: "at the end, once the rest is done"},
+	}
+	face, out, kb := applyAt(160, 64, time.Minute, []event.Event{
+		event.RunStarted{Time: at, Command: "apply", Machine: "laptop", Steps: steps},
+		event.StepStarted{Step: "cask", Doing: "applying"},
+	})
+	defer func() { _ = face.Close() }()
+	pin(t, out, kb, "Arq", "By hand")
+	got := screen(out.String())
+	for _, want := range []string{"  ── ○ Arq  waiting for Homebrew casks ─", "  ── ○ By hand  at the end, once the rest is done ─"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the screen is\n%s\nwant a panel %q", got, want)
+		}
+	}
+}
+
+// A step that's left only something for you to do (a problem only you can
+// put right, or a step by hand), or that was deferred behind such steps
+// alone, is to do: in the grid a white △, its name white, never orange;
+// counted on its own, white; its area's light the white △ once nothing in
+// it failed or needs you, at once, before what's running. A step deferred
+// behind a failure isn't, nor one with anything else wrong. In a window
+// too small for the screen, it isn't listed as unwell.
+func TestApplyingToDo(t *testing.T) {
+	steps := []event.Step{
+		{Name: "time-machine", Title: "Time Machine", Area: "Backups"},
+		{Name: "prefs", Title: "App settings", Area: "Backups"},
+		{Name: "scratch", Title: "Scratch volume", Area: "Mac", Waits: []string{"prefs"}},
+		{Name: "disk", Title: "Disk space", Area: "Mac"},
+		{Name: "cask", Title: "Homebrew casks", Area: "Drift"},
+		{Name: "login", Title: "macOS login items", Area: "Drift", Waits: []string{"cask"}},
+		{Name: "brew", Title: "Homebrew formulae", Area: "Drift"},
+		{Name: "by-hand", Title: "By hand", Area: "Manual"},
+		{Name: "1password", Title: "1password", Area: "Manual"},
+	}
+	problem := func(name, detail string) check.Result {
+		return check.Result{State: check.Attention, Summary: name, Items: []check.Item{{ID: "x:" + name, Name: name, State: check.Problem, Detail: detail}}}
+	}
+	events := []event.Event{
+		event.RunStarted{Time: at, Command: "apply", Machine: "laptop", Steps: steps},
+		event.StepFinished{Step: "time-machine", Result: problem("no backup disk yet", "System Settings › General › Time Machine › Add Backup Disk")},
+		event.StepFinished{Step: "prefs", Result: problem("not restored yet", "kit prefs restore")},
+		event.StepFinished{Step: "scratch", Result: check.Result{State: check.Deferred, Reason: "waits for App settings"}},
+		event.StepFinished{Step: "disk", Result: check.Result{State: check.Attention, Summary: "8% free", Items: []check.Item{{ID: "disk:low", Name: "only 8% free", State: string(check.Attention)}}}},
+		event.StepFinished{Step: "cask", Result: check.Result{State: check.Failed, Reason: "couldn't install tailscale-app"}},
+		event.StepFinished{Step: "login", Result: check.Result{State: check.Deferred, Reason: "needs Homebrew casks"}},
+		event.StepStarted{Step: "brew", Doing: "applying"},
+		event.StepFinished{Step: "by-hand", Result: check.Result{State: check.Attention, Summary: "1 to do", Items: []check.Item{{ID: "manual:paper", Name: "Install Paper", State: check.ByHand}}}},
+		event.StepStarted{Step: "1password", Doing: "applying"},
+	}
+	face, out, _ := applyIn(colorprofile.TrueColor, 160, 64, time.Minute, events)
+	got := screen(uncoloured(out.String()))
+	if counts := lines(got)[3]; !strings.HasSuffix(counts, "│  7 of 9 · 1 failed · 2 running · 4 to do · 1m00s") {
+		t.Errorf("the counts are %q; want 4 to do, on their own", counts)
+	}
+	frame := strings.Join(lastFrame(out.String()), "\n")
+	for _, title := range []string{"Time Machine", "App settings", "Scratch volume", "By hand"} {
+		if !strings.Contains(frame, look.White("△")+" "+look.White(title)) || strings.Contains(frame, look.Orange(title)) {
+			t.Errorf("%s isn't a white △ and its name white in the grid", title)
+		}
+	}
+	for _, cell := range []string{look.Orange("▲") + " " + look.Orange("Disk space"), look.Muted("– macOS login items")} {
+		if !strings.Contains(frame, cell) {
+			t.Errorf("the grid has no cell %q: want what's wrong, and what's deferred behind a failure, as they were", cell)
+		}
+	}
+	if !strings.Contains(frame, look.White("4 to do")) {
+		t.Error("what's to do isn't counted in white")
+	}
 	if err := face.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if record := screen(uncoloured(out.String())); !strings.Contains(record, "  ▲ Scratch volume  created /Volumes/Scratch · not set up as it should be\n  │ "+strings.Join(left, "\n  │ ")+"\n") {
-		t.Errorf("the record is\n%s\nwant the Scratch volume's row, what's left under it, as its slot had them", record)
+
+	var narrow syncBuffer
+	small := render.NewPretty(&colorprofile.Writer{Forward: &narrow, Profile: colorprofile.Ascii}, 80, true).Sized(func() (int, int) { return 80, 40 })
+	for _, e := range events {
+		small.Emit(e)
+	}
+	time.Sleep(300 * time.Millisecond)
+	live := turned(screen(narrow.String()))
+	if want := "  △ BACKUPS   ▲ MAC    ✗ CONFIG   △ MANUAL\n"; !strings.Contains(live, want) {
+		t.Errorf("in a small window, the screen is\n%s\nwant the lights\n%s", live, want)
+	}
+	for _, title := range []string{"Time Machine", "App settings", "Scratch volume", "By hand"} {
+		if strings.Contains(live, title) {
+			t.Errorf("in a small window, the screen is\n%s\nwant no row for %s: it's to do, not unwell", live, title)
+		}
+	}
+	if !strings.Contains(live, "  ▲ Disk space  8% free\n") || !strings.Contains(live, "  ✗ Homebrew casks  couldn't install tailscale-app\n") {
+		t.Errorf("in a small window, the screen is\n%s\nwant what's unwell listed", live)
+	}
+	if err := small.Close(); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -556,9 +812,10 @@ func TestApplyingSaysHowFarAStepHasGot(t *testing.T) {
 
 // When the run ends, the screen goes and the record is left under the
 // run's heading, kept to column 80: the lights, the bar with how the run
-// ended, then every step, what needs you with what to do under it. A run
-// stopped greys what it cut off and what never ran, says so, nothing red
-// but what failed, and says where to carry on.
+// ended, then every step, what failed with why and what to run under it,
+// then what's left to do. A run stopped greys what it cut off and what
+// never ran, says so, nothing red but what failed, and says where to carry
+// on.
 func TestApplyingLeavesItsRecord(t *testing.T) {
 	for _, tt := range []struct {
 		golden string
@@ -588,23 +845,46 @@ func TestApplyingLeavesItsRecord(t *testing.T) {
 	}
 }
 
-// The record names each thing a step left to do, as its panel does, what
-// to do about it under it when it says: a step by hand with nothing more to
-// say shows its name alone.
-func TestApplyingRecordNamesWhatsLeft(t *testing.T) {
-	face, out, _ := applyAt(160, 64, time.Minute, appliedRun())
+// The record ends with what the run's left you to do, numbered, each with
+// how to do it under it: a thing's own words, or, for a step by hand that
+// came up with steps of its own, those. Its steps' rows say it's below,
+// in white, never as needing you; the bar counts it on its own.
+func TestApplyingRecordListsWhatsToDo(t *testing.T) {
+	face, out, _ := applyIn(colorprofile.TrueColor, 160, 64, time.Minute, appliedRun())
 	if err := face.Close(); err != nil {
 		t.Fatal(err)
 	}
-	want := strings.Join([]string{
-		"  ▲ By hand  2 to do",
-		"  │ Allow remote users Full Disk Access: System Settings › General › Sharing",
-		"  │ → then: kit manual done sharing",
-		"  │ Install the editor from its site (no Homebrew cask)",
-		"  ● 1password  fine",
-	}, "\n")
-	if record := screen(out.String()); !strings.Contains(record, want) {
-		t.Errorf("the record is\n%s\nwant By hand's row, each thing to do by name under it\n%s", record, want)
+	record := screen(uncoloured(out.String()))
+	for _, want := range []string{
+		"\n  △ Time Machine  no backup disk · to do, below\n  △ Arq  no backup plan · to do, below\n",
+		"\n  △ By hand  2 to do · to do, below\n",
+		"  1 failed · 4 to do · 24m31s\n",
+		"\n" + strings.Join([]string{
+			"  TO DO  4, in any order: kit apply checks them",
+			"  △ 1  no backup disk is set up",
+			"       → System Settings › General › Time Machine › Add Backup Disk",
+			"  △ 2  no backup plan is chosen",
+			"       → open Arq and choose its backup plan",
+			"  △ 3  Allow remote users Full Disk Access: System Settings › General › Sharing",
+			"       → then: kit manual done sharing",
+			"  △ 4  Install the editor from its site (no Homebrew cask)",
+			"       → Download it from editor.example.com",
+			"       → Drag it to Applications",
+		}, "\n") + "\n",
+	} {
+		if !strings.Contains(record, want) {
+			t.Errorf("the record is\n%s\nwant it to hold\n%s", record, want)
+		}
+	}
+	raw := out.String()
+	raw = raw[strings.LastIndex(raw, "\x1b[?1049l"):]
+	for _, want := range []string{look.White("△") + " " + look.Strong("By hand") + "  " + look.White("2 to do"), look.White("4 to do"), look.Strong("Install the editor from its site (no Homebrew cask)")} {
+		if !strings.Contains(raw, want) {
+			t.Errorf("the record doesn't hold %q", want)
+		}
+	}
+	if strings.Contains(raw, look.Orange("▲")) || strings.Contains(raw, "need you") {
+		t.Error("the record has something needing you; want what's left to do white")
 	}
 }
 
@@ -671,10 +951,10 @@ func TestApplyingGivesTheScreenBack(t *testing.T) {
 }
 
 // A step that failed says what went wrong in a few words, never a command
-// or a path: one that printed has the command it ran after them, dim, on
-// one line however many lines it has, why under its row, then the last
-// lines it printed, but for one saying why whole, as after the script's
-// path; one that printed nothing has why on the line under its row.
+// or a path: pinned, its panel has the command it ran after them, dim, on
+// one line however many lines it has, then the last lines it printed. In
+// the record, what went wrong is red, why is under it, or, when nothing
+// says, the last line it printed, then what to run to try it again.
 func TestApplyingFailedStepsSayWhatWentWrong(t *testing.T) {
 	gpg := stepName("Steps", "gpg-key")
 	run := "/Users/someone/.config/kit/laptop/steps/gpg-key/run"
@@ -690,7 +970,11 @@ func TestApplyingFailedStepsSayWhatWentWrong(t *testing.T) {
 		finished("Drift", "macOS login items", check.Result{State: check.Failed, Reason: "couldn't add com.example.app: execution error: Error: AppleEvent timed out. (-1712)"}),
 		finished("Drift", "Sync", check.Result{State: check.Failed, Reason: "not a git repository"}),
 	}
-	face, out, _ := applyAt(160, 64, time.Minute, events)
+	face, out, kb := applyAt(160, 64, time.Minute, events)
+	if got := panelTitles(screen(out.String())); got != nil {
+		t.Errorf("with nothing at work, the panels are %q; want none: what failed stays in the grid", got)
+	}
+	pin(t, out, kb, "gpg-key", "macOS login items")
 	live := screen(out.String())
 	for title, want := range map[string]string{
 		"gpg-key":           "  ── ✗ gpg-key  couldn't apply · " + run + " apply ─",
@@ -709,9 +993,9 @@ func TestApplyingFailedStepsSayWhatWentWrong(t *testing.T) {
 	}
 	record := screen(out.String())
 	for _, want := range []string{
-		"  ✗ gpg-key  couldn't apply · /Users/someone/.config/kit/laptop/steps/gpg-key/r…\n  │ gpg: command not found\n",
-		"  ✗ macOS login items  couldn't add com.example.app · osascript -l JavaScript -…\n  │ execution error: Error: AppleEvent timed out. (-1712)\n  ○ Claude MCP",
-		"  ✗ Sync  couldn't check\n  │ not a git repository\n",
+		"  ✗ gpg-key  couldn't apply\n  │ gpg: command not found\n  │ → kit apply Steps/gpg-key\n",
+		"  ✗ macOS login items  couldn't add com.example.app\n  │ execution error: Error: AppleEvent timed out. (-1712)\n  │ → kit apply Drift/macOS login items\n  ○ Claude MCP",
+		"  ✗ Sync  couldn't check\n  │ not a git repository\n  │ → kit apply Drift/Sync\n",
 	} {
 		if !strings.Contains(record, want) {
 			t.Errorf("the record is\n%s\nwant\n%s", record, want)

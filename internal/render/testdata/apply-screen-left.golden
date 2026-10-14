@@ -1,13 +1,22 @@
 
   █  ▄▀  ▀█▀  ▀▀█▀▀  │  apply · laptop · Fri 2 Jan · 03:04
   █▀▀▄    █     █    │  ▮▮▮
-  █   █  ▄█▄    █    │  2 of 3 · 1 running · 1m00s
+  █   █  ▄█▄    █    │  2 of 3 · 1 running · 1 to do · 1m00s
 
-  MAC    ▲ Scratch volume        ● Disk space
+  MAC    △ Scratch volume        ● Disk space
   STEPS  ◐ claude-code
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────
-  ── ▲ Scratch volume  created /Volumes/Scratch · not set up as it should be ─────────────────────
+  ── △ Scratch volume  created /Volumes/Scratch · not set up as it should be ─────────────────────
+       ==> Adding volume 2
+       ==> Adding volume 3
+       ==> Adding volume 4
+       ==> Adding volume 5
+       ==> Adding volume 6
+       ==> Adding volume 7
+       ==> Adding volume 8
+       ==> Adding volume 9
+       ==> Adding volume 10
        ==> Adding volume 11
        ==> Adding volume 12
        mdutil disabling Spotlight
@@ -16,15 +25,6 @@
        Claude Code's settings don't send TMPDIR to it
        → set it in Claude Code's settings
        Time Machine still backs it up
-  ── ◐ claude-code  applying · run apply ─────────────────────────────────────────────────────────
-       Setting up Claude Code...
-       Verifying checksum
-
-
-
-
-
-
 ────────────────────────────────────────────────────────────────────────────────────────────────────
 
-  tab panel · ↑↓ scroll · click a step to pin · q stop · shift+drag selects
+  tab panel · ↑↓ scroll · click a step to see it · a back to running · q stop

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -137,6 +138,31 @@ func TestPlain(t *testing.T) {
 	var out bytes.Buffer
 	show(t, render.NewPlain(&out), run())
 	golden(t, "plain.golden", out.String())
+}
+
+// A step by hand come up shows without a terminal as its title, then each
+// of its steps, a line each, led by its step's name; the JSON face's
+// document is as it would be without it.
+func TestFacesWithoutATerminalShowACard(t *testing.T) {
+	events := []event.Event{
+		event.RunStarted{Command: "apply", Machine: "laptop", Steps: []event.Step{{Name: "1password", Title: "1password", Area: "Manual"}}},
+		event.StepStarted{Step: "1password", Doing: "applying"},
+		event.NeedsYou{Step: "1password", Item: "1password", Title: "Sign in to 1Password", Steps: []string{"Scan the QR code it shows", "Turn on Integrate with 1Password CLI"}, Opened: "1Password", Tells: true},
+		event.StepFinished{Step: "1password", Result: check.Result{State: check.OK, Summary: "signed in"}},
+		event.RunFinished{Counts: map[check.State]int{check.OK: 1}},
+	}
+	var plain bytes.Buffer
+	show(t, render.NewPlain(&plain), events)
+	want := "kit apply · laptop\n1password Sign in to 1Password\n1password Scan the QR code it shows\n1password Turn on Integrate with 1Password CLI\n1password ok signed in\nNothing needs attention\n"
+	if plain.String() != want {
+		t.Errorf("plain printed\n%s\nwant\n%s", plain.String(), want)
+	}
+	var with, without bytes.Buffer
+	show(t, render.NewJSON(&with), events)
+	show(t, render.NewJSON(&without), slices.Delete(slices.Clone(events), 2, 3))
+	if with.String() != without.String() {
+		t.Errorf("with a card, JSON printed\n%s\nwant it as without\n%s", with.String(), without.String())
+	}
 }
 
 func TestPrettyLayout(t *testing.T) {
@@ -603,7 +629,7 @@ func TestPrettyApplyingNow(t *testing.T) {
 	}
 	got = screen(out.String())
 	want := "\n  █  ▄▀  ▀█▀  ▀▀█▀▀  │  apply\n  █▀▀▄    █     █    │  laptop\n  █   █  ▄█▄    █    │  Fri 2 Jan · 03:04\n\n" +
-		"  ● BACKUPS 1  ● CONFIG 2  ● STEPS 1\n  ▮▮▮▮  1 done · 4.2s\n\n" +
+		"  ● BACKUPS 1  ● CONFIG 2  ● STEPS 1\n  ▮▮▮▮  4.2s\n\n" +
 		"  BACKUPS\n  ● Time Machine  last backup 02:35\n\n" +
 		"  CONFIG\n  ● Formulae  installed jq · 1 declared, all installed\n  ● Casks  none declared\n\n" +
 		"  STEPS\n  ● fonts  16 installed\n"
@@ -793,7 +819,7 @@ func TestPrettyBootstrapInTheTerminal(t *testing.T) {
 		t.Fatal(err)
 	}
 	got = screen(out.String())
-	if want := "  ● BOOT 2  ● CONFIG 3  ● STEPS 1\n  ▮▮▮▮▮▮  6 fine · 4.2s\n\n  CONFIG\n  ● 1Password  signed in\n"; !strings.Contains(got, want) {
+	if want := "  ● BOOT 2  ● CONFIG 3  ● STEPS 1\n  ▮▮▮▮▮▮  4.2s\n\n  CONFIG\n  ● 1Password  signed in\n"; !strings.Contains(got, want) {
 		t.Errorf("once done, the screen is\n%s\nwant it to hold\n%s", got, want)
 	}
 }

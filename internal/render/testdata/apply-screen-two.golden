@@ -1,11 +1,11 @@
 
   █  ▄▀  ▀█▀  ▀▀█▀▀  │  bootstrap · laptop · Fri 2 Jan · 03:04
   █▀▀▄    █     █    │  ▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮
-  █   █  ▄█▄    █    │  31 of 51 · 3 running · 6m12s
+  █   █  ▄█▄    █    │  31 of 51 · 3 running · 1 to do · 6m12s
 
   BOOT     ● GitHub                ● This Mac              ● Password              ● Homebrew              ● Apps                  ● kit-config
            ● Full Disk Access      ● Ghostty
-  BACKUPS  ▲ Time Machine          ○ Arq                   ○ App settings          ● Full Disk Access
+  BACKUPS  △ Time Machine          ○ Arq                   ○ App settings          ● Full Disk Access
   JOBS     ○ Scheduled runs
   MAC      ● Scratch volume        ● Disk space            ● Memory                ● File events           ● Load
   CONFIG   ● Homebrew              ● Linked files          ● Shell PATH            ● Touch ID for sudo     ● Remote Login          ● File Sharing
@@ -61,4 +61,4 @@
        ==> Installing Cask 30
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-  tab panel · ↑↓ scroll · click a step to pin or unpin · a auto · q stop · shift+drag selects
+  tab panel · ↑↓ scroll · click a step to see it · a back to running · q stop

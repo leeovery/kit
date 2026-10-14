@@ -1,11 +1,11 @@
 
   █  ▄▀  ▀█▀  ▀▀█▀▀  │  bootstrap · laptop · Fri 2 Jan · 03:04
   █▀▀▄    █     █    │  ▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮
-  █   █  ▄█▄    █    │  35 of 51 · 1 failed · 2 running · 10m48s
+  █   █  ▄█▄    █    │  35 of 51 · 1 failed · 2 running · 2 to do · 10m48s
 
   BOOT     ● GitHub                ● This Mac              ● Password              ● Homebrew              ● Apps                  ● kit-config
            ● Full Disk Access      ● Ghostty
-  BACKUPS  ▲ Time Machine          ▲ Arq                   ◐ App settings          ● Full Disk Access
+  BACKUPS  △ Time Machine          △ Arq                   ◐ App settings          ● Full Disk Access
   JOBS     ○ Scheduled runs
   MAC      ● Scratch volume        ● Disk space            ● Memory                ● File events           ● Load
   CONFIG   ● Homebrew              ● Linked files          ● Shell PATH            ● Touch ID for sudo     ● Remote Login          ● File Sharing
@@ -18,6 +18,13 @@
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
   ── ◐ Homebrew formulae  installing ffmpeg · 38 of 129 · brew install --formula ffmpeg ──────────────────────────────────────────────────────────────────────
+       ==> Pouring formula 1
+       ==> Pouring formula 2
+       ==> Pouring formula 3
+       ==> Pouring formula 4
+       ==> Pouring formula 5
+       ==> Pouring formula 6
+       ==> Pouring formula 7
        ==> Pouring formula 8
        ==> Pouring formula 9
        ==> Pouring formula 10
@@ -27,22 +34,6 @@
        ==> Pouring formula 14
        ==> Pouring formula 15
        ==> Pouring formula 16
-  ── ✗ Homebrew casks  couldn't install tailscale-app · brew install --cask tailscale-app ────────────────────────────────────────────────────────────────────
-       ==> Installing Cask 5
-       ==> Installing Cask 6
-       ==> Installing Cask 7
-       ==> Installing Cask 8
-       ==> Installing Cask 9
-       ==> Installing Cask 10
-       ==> Installing Cask tailscale-app
-       installer: Package name is Tailscale
-       installer: The install failed. (The Installer encountered an error that caused the installation to fail.)
-  ── ● claude-code  installed 2.1.296 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-       Setting up Claude Code...
-       Checking installation status...
-       Downloading 2.1.296 for darwin-arm64
-       Verifying checksum
-
 
 
 
@@ -59,6 +50,15 @@
 
 
 
+
+
+
+
+
+
+
+
+
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-  tab panel · ↑↓ scroll · click a step to pin · q stop · shift+drag selects
+  tab panel · ↑↓ scroll · click a step to see it · q stop

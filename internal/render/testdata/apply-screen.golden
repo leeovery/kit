@@ -1,11 +1,11 @@
 
   █  ▄▀  ▀█▀  ▀▀█▀▀  │  bootstrap · laptop · Fri 2 Jan · 03:04
   █▀▀▄    █     █    │  ▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮
-  █   █  ▄█▄    █    │  31 of 51 · 3 running · 6m12s
+  █   █  ▄█▄    █    │  31 of 51 · 3 running · 1 to do · 6m12s
 
   BOOT     ● GitHub                ● This Mac              ● Password              ● Homebrew              ● Apps                  ● kit-config
            ● Full Disk Access      ● Ghostty
-  BACKUPS  ▲ Time Machine          ○ Arq                   ○ App settings          ● Full Disk Access
+  BACKUPS  △ Time Machine          ○ Arq                   ○ App settings          ● Full Disk Access
   JOBS     ○ Scheduled runs
   MAC      ● Scratch volume        ● Disk space            ● Memory                ● File events           ● Load
   CONFIG   ● Homebrew              ● Linked files          ● Shell PATH            ● Touch ID for sudo     ● Remote Login          ● File Sharing
@@ -18,6 +18,10 @@
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
   ── ◐ Homebrew formulae  installing ffmpeg · 38 of 129 · brew install --formula ffmpeg ──────────────────────────────────────────────────────────────────────
+       ==> Pouring formula 4
+       ==> Pouring formula 5
+       ==> Pouring formula 6
+       ==> Pouring formula 7
        ==> Pouring formula 8
        ==> Pouring formula 9
        ==> Pouring formula 10
@@ -28,6 +32,7 @@
        ==> Pouring formula 15
        ==> Pouring formula 16
   ── ◐ Homebrew casks  installing 1password · 4 of 42 · brew install --cask 1password ────────────────────────────────────────────────────────────────────────
+       ==> Installing Cask 1
        ==> Installing Cask 2
        ==> Installing Cask 3
        ==> Installing Cask 4
@@ -37,6 +42,9 @@
        ==> Installing Cask 8
        ==> Installing Cask 9
        ==> Installing Cask 10
+
+
+
   ── ◐ claude-code  applying · run apply ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
        Setting up Claude Code...
        Checking installation status...
@@ -47,18 +55,10 @@
 
 
 
-  ── ● fonts  16 installed ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-       ==> copied font 1
-       ==> copied font 2
-       ==> copied font 3
-       ==> copied font 4
-       ==> copied font 5
-       ==> copied font 6
-       ==> copied font 7
-       ==> copied font 8
-       ==> copied font 9
+
+
 
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-  tab panel · ↑↓ scroll · click a step to pin · q stop · shift+drag selects
+  tab panel · ↑↓ scroll · click a step to see it · q stop

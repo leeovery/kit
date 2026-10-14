@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"fmt"
 	"io"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -13,7 +14,6 @@ import (
 
 	"github.com/leeovery/kit/internal/boot"
 	"github.com/leeovery/kit/internal/check"
-	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/hand"
 	"github.com/leeovery/kit/internal/look"
@@ -125,12 +125,14 @@ type Pretty struct {
 	size   func() (int, int)
 	// now tells the time, for how long a run has taken.
 	now func() time.Time
-	// slots are the places in applying's log, a step each; finished is the
-	// order steps finished in, for which slot gives way first; cut are the
-	// steps the run was stopped in the middle of, as they stood.
-	slots    [engine.DefaultJobs]slot
-	finished map[string]int
-	cut      map[string]runningStep
+	// cut are the steps the run was stopped in the middle of, as they stood.
+	cut map[string]runningStep
+	// card is the step by hand up for the person at the Mac, front and
+	// centre, till its step finishes: nil when none is; cards are every one
+	// that came up, by its step and its line, for what's left to do once
+	// the run's done.
+	card  *event.NeedsYou
+	cards map[string]event.NeedsYou
 	// onScreen is whether applying has the terminal's alternate screen, and
 	// drawnSize the size it was last drawn at; keys are the keys it reads
 	// while it has it, and what they've done.
@@ -195,7 +197,7 @@ func (p *Pretty) Emit(e event.Event) {
 	case event.RunStarted:
 		p.start, p.results = e, make(map[string]event.StepFinished, len(e.Steps))
 		p.output, p.command, p.began = map[string][]string{}, map[string]string{}, p.now()
-		p.finished, p.cut, p.slots = map[string]int{}, map[string]runningStep{}, [engine.DefaultJobs]slot{}
+		p.cut, p.card, p.cards = map[string]runningStep{}, nil, map[string]event.NeedsYou{}
 		p.order.start(e.Steps)
 		p.preparing = ""
 		p.open(e.Command, e.Machine, e.Time, e.Only)
@@ -207,35 +209,34 @@ func (p *Pretty) Emit(e event.Event) {
 			p.clearLive()
 		}
 	case event.StepStarted:
-		p.running = append(without(p.running, e.Step), runningStep{step: e.Step, title: p.title(e.Step), doing: cmp.Or(e.Doing, "checking")})
-		if e.Doing == "applying" {
-			p.takeSlot(e.Step)
-		}
+		p.running = append(without(p.running, e.Step), runningStep{step: e.Step, title: p.title(e.Step), doing: cmp.Or(e.Doing, "checking"), applying: e.Doing == "applying"})
 		p.spin()
 	case event.Doing:
 		// A step at work says what it's doing; one waiting on you, what you're
-		// to do; one waiting for a thing, what for. Only a step at work keeps
-		// its place in the log.
+		// to do; one waiting for a thing, what for.
 		for i, r := range p.running {
 			if r.step == e.Step {
 				p.running[i].doing, p.running[i].todo = cmp.Or(e.Says, r.doing), e.Todo
 				p.running[i].done, p.running[i].of = e.Done, e.Of
 			}
 		}
-		if r, ok := p.runningOf(e.Step); ok && !r.atWork() {
-			p.giveSlotBack(e.Step)
-		}
+		p.drawSpinner()
+	case event.NeedsYou:
+		p.card = &e
+		p.cards[cardID(e.Step, e.Item)] = e
 		p.drawSpinner()
 	case event.Asking:
 		p.asking = e.Says
 		p.drawSpinner()
 	case event.StepFinished:
-		if r, ok := p.runningOf(e.Step); ok && r.atWork() && wasStopped(e) {
+		if r, ok := p.runningOf(e.Step); ok && p.atWork(r) && wasStopped(e) {
 			p.cut[e.Step] = r
+		}
+		if p.carded(e.Step) {
+			p.card = nil
 		}
 		p.running = without(p.running, e.Step)
 		p.results[e.Step] = e
-		p.finished[e.Step] = len(p.results)
 		if !p.byArea() {
 			if ready := p.order.finish(e); len(ready) > 0 {
 				p.clearLive()
@@ -247,10 +248,12 @@ func (p *Pretty) Emit(e event.Event) {
 		p.drawSpinner()
 	case event.Output:
 		line := strings.TrimRight(strings.ReplaceAll(ansi.Strip(e.Line), "\t", "    "), " ")
-		p.output[e.Step] = append(lastOf(p.output[e.Step], keptSlot-1), line)
+		p.output[e.Step] = append(lastOf(p.output[e.Step], keptPanel-1), line)
 		p.command[e.Step] = e.Command
-		if r, ok := p.runningOf(e.Step); ok && r.atWork() {
-			p.takeSlot(e.Step)
+		for i, r := range p.running {
+			if r.step == e.Step {
+				p.running[i].applying = true
+			}
 		}
 		// A command can print faster than a terminal is worth redrawing:
 		// the spinner's turn draws what came since.
@@ -344,20 +347,20 @@ func (p *Pretty) report() []string {
 	return out
 }
 
-// lamp is an area's light: how its steps stand at worst, and how many there
-// are, when they're all well. A step not checked leaves it uncounted, not
-// grey, which is for an area a stopped run didn't finish.
-func lamp(area string, fs []event.StepFinished) look.Lamp {
+// lamp is the light of an area whose steps have all finished, as they
+// stand: at worst, and how many there are, when they're all well. A step
+// not checked leaves it uncounted, not grey, which is for an area a
+// stopped run didn't finish.
+func lamp(area string, states []look.State) look.Lamp {
 	l, counted := look.Lamp{Name: area, State: look.Done}, true
-	for _, f := range fs {
-		s := state(f.Result.State)
+	for _, s := range states {
 		counted = counted && s != look.Skipped
 		if s != look.Skipped && worse(s, l.State) {
 			l.State = s
 		}
 	}
 	if l.State == look.Done && counted {
-		l.Count = fmt.Sprint(len(fs))
+		l.Count = fmt.Sprint(len(states))
 	}
 	return l
 }
@@ -376,9 +379,10 @@ func state(s check.State) look.State {
 	return look.Done
 }
 
-// worse is whether a is worse than b: failed, then needs you, then skipped.
+// worse is whether a is worse than b: failed, then needs you, then left
+// to do, then skipped.
 func worse(a, b look.State) bool {
-	rank := map[look.State]int{look.Done: 0, look.Skipped: 1, look.NeedsYou: 2, look.Failed: 3}
+	rank := map[look.State]int{look.Done: 0, look.Skipped: 1, look.ToDo: 2, look.NeedsYou: 3, look.Failed: 4}
 	return rank[a] > rank[b]
 }
 
@@ -560,39 +564,59 @@ func wrong(part string, it check.Item) string {
 	return cmp.Or(it.Detail, strings.ReplaceAll(it.State, "-", " "))
 }
 
-// foot is how the run ended: the counts and how long it took; when
-// applying, after the bar.
+// foot is how the run ended: what went wrong, counted, then what was well,
+// and how long it took. Applying's is after the bar, what it's left you to
+// do counted on its own, what was well left to the lights.
 func (p *Pretty) foot(e event.RunFinished) []string {
+	if p.applying() {
+		return []string{p.appliedFoot(e)}
+	}
 	parts := tally(e.Counts)
-	done := 0
-	for _, f := range p.results {
-		done += len(f.Result.Done)
-	}
-	settled := e.Counts[check.OK]
-	if f, ok := p.results[configStep]; ok && f.Result.State == check.OK {
-		settled--
-	}
-	switch {
-	case p.applying() && done > 0:
-		parts = append(parts, look.White(fmt.Sprintf("%d done", done)))
-	case !p.byArea():
-		parts = append(parts, look.White(fmt.Sprintf("%d settled", settled)))
-	default:
+	if p.byArea() {
 		parts = append(parts, look.White(fmt.Sprintf("%d fine", e.Counts[check.OK])))
+	} else {
+		settled := e.Counts[check.OK]
+		if f, ok := p.results[configStep]; ok && f.Result.State == check.OK {
+			settled--
+		}
+		parts = append(parts, look.White(fmt.Sprintf("%d settled", settled)))
+	}
+	return []string{look.Summary(append(parts, look.Muted(took(e.Duration)))...)}
+}
+
+// appliedFoot is how applying ended, after its bar, the last segment red
+// when something failed, orange when something needs you: what went wrong,
+// what's left you to do, and how long it took.
+func (p *Pretty) appliedFoot(e event.RunFinished) string {
+	counts := p.withoutToDo(e.Counts)
+	parts := tally(counts)
+	if n := len(p.tasks()); n > 0 {
+		parts = append(parts, look.White(fmt.Sprintf("%d to do", n)))
 	}
 	parts = append(parts, look.Muted(took(e.Duration)))
-	if !p.applying() {
-		return []string{look.Summary(parts...)}
-	}
 	ended := look.Done
 	switch {
-	case e.Counts[check.Failed] > 0:
+	case counts[check.Failed] > 0:
 		ended = look.Failed
-	case e.Counts[check.Attention] > 0:
+	case counts[check.Attention] > 0:
 		ended = look.NeedsYou
 	}
 	n := len(p.start.Steps)
-	return []string{look.Cut("  "+look.Bar(n, 0, n, ended)+"  "+look.Says(parts...), p.width)}
+	return look.Cut("  "+look.Bar(n, 0, n, ended)+"  "+look.Says(parts...), p.width)
+}
+
+// withoutToDo are counts, a run's steps by how they stand, without those
+// that left the person at the Mac something to do: they're neither unwell
+// nor unchecked.
+func (p *Pretty) withoutToDo(counts map[check.State]int) map[check.State]int {
+	out := make(map[check.State]int, len(counts))
+	maps.Copy(out, counts)
+	for _, f := range p.results {
+		if p.toDo(f.Step) {
+			out[f.Result.State]--
+		}
+	}
+	return out
 }
 
 // tally is what went wrong in a run, counted: what failed, what needs
@@ -737,7 +761,7 @@ func (p *Pretty) drawLive(lines []string) {
 const (
 	keptRunning = 5
 	keptFailing = 8
-	keptSlot    = 100
+	keptPanel   = 100
 )
 
 // lastOf is the last n of lines.
@@ -860,6 +884,9 @@ type runningStep struct {
 	step, title, doing, todo string
 	// done and of are how far it's got, when it counts: done of of things.
 	done, of int
+	// applying is whether it's applying, or has printed something: what a
+	// panel on applying's screen is for, while it's at work.
+	applying bool
 }
 
 // counted is says, then how far the step had got, muted, when it counts.
@@ -870,10 +897,23 @@ func (r runningStep) counted(says string) []string {
 	return []string{says, look.Muted(fmt.Sprintf("%d of %d", r.done, r.of))}
 }
 
-// atWork is whether the step's at work: not waiting on you, nor its turn,
-// for a thing another step puts in place.
-func (r runningStep) atWork() bool {
-	return r.todo == "" && !strings.HasPrefix(r.doing, "waiting for ")
+// queuedForYou is what a step by hand says while its card waits its turn,
+// another's up.
+const queuedForYou = "needs you"
+
+// carded is whether the card up is step's.
+func (p *Pretty) carded(step string) bool { return p.card != nil && p.card.Step == step }
+
+// needsYou is whether r waits on you: its card up, saying what you're to
+// do, or its card waiting its turn.
+func (p *Pretty) needsYou(r runningStep) bool {
+	return r.todo != "" || r.doing == queuedForYou || p.carded(r.step)
+}
+
+// atWork is whether r's at work: not waiting on you, nor its turn, for a
+// thing another step puts in place.
+func (p *Pretty) atWork(r runningStep) bool {
+	return !p.needsYou(r) && !strings.HasPrefix(r.doing, "waiting for ")
 }
 
 // runningOf is the step named step, when it's running.

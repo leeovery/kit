@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/leeovery/kit/internal/ask"
+	"github.com/leeovery/kit/internal/engine"
+	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/hand"
 	"github.com/leeovery/kit/internal/look"
 )
@@ -32,25 +34,50 @@ type screenKeys struct {
 // reading is keys being read, and what stops it.
 type reading struct{ stop func() }
 
-// The keys at the foot of applying's screen: while it reads keys, those
-// that move between the log's panels, scroll them, pin steps and stop,
-// and, as the mouse is read, how text is selected; while it asks whether
-// to stop, those that answer; without keys, the terminal's interrupt,
-// which stops the run.
+// The keys at the foot of applying's screen while it asks whether to stop,
+// those that answer; without keys, the terminal's interrupt, which stops
+// the run.
 var (
-	selecting    = look.Muted("shift+drag selects")
 	stoppingKeys = []look.Key{{Key: "↑↓", Does: "choose"}, {Key: "enter", Does: "decide"}, {Key: "esc", Does: "keep going"}}
 	signalKeys   = []look.Key{{Key: "ctrl+c", Does: "stop"}}
 )
 
-// runningKeys are the keys while the screen reads them: once a step's
-// pinned, clicking a step pins or unpins it, and a unpins them all.
-func runningKeys(pinned bool) []look.Key {
-	click, auto := "a step to pin", []look.Key(nil)
-	if pinned {
-		click, auto = "a step to pin or unpin", []look.Key{{Key: "a", Does: "auto"}}
+// runningKeys are the keys while the screen reads them: those that answer
+// the card up, when one is; those that move between the log's panels,
+// scroll them and see a step; once a step's pinned, the one going back to
+// the steps running; and the one that stops.
+func (p *Pretty) runningKeys() []look.Key {
+	var ks []look.Key
+	if p.card != nil {
+		for _, a := range cardKeys(*p.card) {
+			ks = append(ks, a.key)
+		}
 	}
-	return slices.Concat([]look.Key{{Key: "tab", Does: "panel"}, {Key: "↑↓", Does: "scroll"}, {Key: "click", Does: click}}, auto, []look.Key{{Key: "q", Does: "stop"}})
+	ks = append(ks, look.Key{Key: "tab", Does: "panel"}, look.Key{Key: "↑↓", Does: "scroll"}, look.Key{Key: "click", Does: "a step to see it"})
+	if len(p.keys.pinned) > 0 {
+		ks = append(ks, look.Key{Key: "a", Does: "back to running"})
+	}
+	return append(ks, look.Key{Key: "q", Does: "stop"})
+}
+
+// answerKey is a key answering a step by hand's card, and its answer.
+type answerKey struct {
+	key    look.Key
+	answer hand.Answer
+}
+
+// cardKeys are the keys answering card c: o opens its app again, when kit
+// opened one; enter says it's done, when kit can't tell by itself; l puts
+// it off till the run's end.
+func cardKeys(c event.NeedsYou) []answerKey {
+	var ks []answerKey
+	if c.Opened != "" {
+		ks = append(ks, answerKey{look.Key{Key: "o", Does: "open " + c.Opened + " again"}, hand.Open})
+	}
+	if !c.Tells {
+		ks = append(ks, answerKey{look.Key{Key: "enter", Does: "done"}, hand.Done})
+	}
+	return append(ks, answerKey{look.Key{Key: "l", Does: "later"}, hand.Later})
 }
 
 // wheelLines are how many lines a turn of the mouse's wheel scrolls a
@@ -70,7 +97,8 @@ const stopIt = 1
 // run, as ctrl+c does at once; tab moves the focus between the log's
 // panels, and ↑ and ↓ scroll the one with it, as the wheel scrolls the one
 // under the mouse; a click on a step in the grid pins it, or unpins it,
-// and a unpins every step, the panels following the steps at work again.
+// and a unpins every step, the panels following the steps at work again;
+// with a card up, o, enter and l answer it.
 func (p *Pretty) Keys(listen func() (<-chan ask.Key, func()), halt func()) *Pretty {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -133,16 +161,19 @@ func (p *Pretty) read(r *reading, keys <-chan ask.Key) {
 }
 
 // press is what a key does on applying's screen, and whether it stops the
-// run: ctrl+c at once; q asks first, at the foot; tab and shift+tab move
-// the focus between the log's panels; ↑ and ↓ scroll the one with it a
-// line, and the wheel the one under the mouse; a click on a step in the
-// grid pins it, or unpins it, and a unpins every step.
+// run: ctrl+c at once; q asks first, at the foot; o, enter and l answer
+// the card up; tab and shift+tab move the focus between the log's panels;
+// ↑ and ↓ scroll the one with it a line, and the wheel the one under the
+// mouse; a click on a step in the grid pins it, or unpins it, and a unpins
+// every step.
 func (p *Pretty) press(k ask.Key) (halt bool) {
 	switch {
 	case k.Is("ctrl+c"):
 		return true
 	case p.keys.asking:
 		return p.answer(k)
+	case k.Is("o", "enter", "l"):
+		p.answerCard(k)
 	case k.Is("q"):
 		p.keys.asking, p.keys.choice = true, 0
 	case k.Is("tab"):
@@ -163,6 +194,20 @@ func (p *Pretty) press(k ask.Key) (halt bool) {
 		p.keys.pinned = nil
 	}
 	return false
+}
+
+// answerCard passes what k answers the card up with to its step, when the
+// card's keys offer it: nothing with no card up.
+func (p *Pretty) answerCard(k ask.Key) {
+	if p.card == nil || p.hands == nil {
+		return
+	}
+	for _, a := range cardKeys(*p.card) {
+		if k.Is(a.key.Key) {
+			p.hands(p.card.Step, a.answer)
+			return
+		}
+	}
 }
 
 // answer is what a key does to the question whether to stop, and whether
@@ -217,7 +262,7 @@ func (p *Pretty) scrollAt(y, by int) {
 // forth to its newest.
 func (p *Pretty) scroll(l screenLayout, i, by int) {
 	step, room := l.steps[i], l.rooms[i]-1
-	most := max(len(p.output[step])-(room-len(p.slotLeft(step, room))), 0)
+	most := max(len(p.output[step])-(room-len(p.panelLeft(step, room))), 0)
 	if p.keys.back == nil {
 		p.keys.back = map[string]int{}
 	}
@@ -242,15 +287,18 @@ func (p *Pretty) click(x, y int) {
 	}
 }
 
+// mostPinned is how many steps can be pinned: as many as run at once.
+const mostPinned = engine.DefaultJobs
+
 // pin pins step, after those pinned, its panel taking the focus; or unpins
-// it, when it's pinned. With as many pinned as the log has panels, the one
-// pinned first gives way.
+// it, when it's pinned. With mostPinned pinned, the one pinned first gives
+// way.
 func (p *Pretty) pin(step string) {
 	if i := slices.Index(p.keys.pinned, step); i >= 0 {
 		p.keys.pinned = slices.Delete(p.keys.pinned, i, i+1)
 		return
 	}
-	if len(p.keys.pinned) == len(p.slots) {
+	if len(p.keys.pinned) == mostPinned {
 		p.keys.pinned = slices.Delete(p.keys.pinned, 0, 1)
 	}
 	p.keys.pinned = append(p.keys.pinned, step)
@@ -263,7 +311,7 @@ func (p *Pretty) footKeys() string {
 	case p.keys.asking:
 		return look.Keys(stoppingKeys...)
 	case p.keys.listen != nil:
-		return look.Says(look.Keys(runningKeys(len(p.keys.pinned) > 0)...), selecting)
+		return look.Keys(p.runningKeys()...)
 	}
 	return look.Keys(signalKeys...)
 }
@@ -272,7 +320,7 @@ func (p *Pretty) footKeys() string {
 // foot: what stops where it is, the steps at work, and the answers.
 func (p *Pretty) stopQuestion(w int) []string {
 	var says string
-	switch names := p.atWork(); len(names) {
+	switch names := p.titlesAtWork(); len(names) {
 	case 0:
 	case 1:
 		says = look.Muted(names[0] + " stops where it is")
@@ -282,11 +330,12 @@ func (p *Pretty) stopQuestion(w int) []string {
 	return look.Timeline("  ", w, look.Row{State: look.NeedsYou, Name: "Stop applying?", Says: says, Under: look.Answers(stopAnswers, p.keys.choice)})
 }
 
-// atWork are the titles of the steps at work, in the order they started.
-func (p *Pretty) atWork() []string {
+// titlesAtWork are the titles of the steps at work, in the order they
+// started.
+func (p *Pretty) titlesAtWork() []string {
 	var titles []string
 	for _, r := range p.running {
-		if r.atWork() {
+		if p.atWork(r) {
 			titles = append(titles, r.title)
 		}
 	}
