@@ -6,9 +6,12 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/leeovery/kit/internal/check"
+	"github.com/leeovery/kit/internal/event"
+	"github.com/leeovery/kit/internal/runner"
 	"github.com/leeovery/kit/internal/runner/runnertest"
 	"github.com/leeovery/kit/internal/steps"
 )
@@ -106,10 +109,31 @@ func TestFullDiskAccess(t *testing.T) {
 	}
 }
 
+// changes is a runner that notes the commands run as a step's changing
+// things, whose output is shown as they print it.
+type changes struct {
+	runner.Runner
+	mu  sync.Mutex
+	ran []string
+}
+
+func (c *changes) Run(ctx context.Context, cmd runner.Command) (runner.Result, error) {
+	if event.Changing(ctx) {
+		c.mu.Lock()
+		c.ran = append(c.ran, cmd.String())
+		c.mu.Unlock()
+	}
+	return c.Runner.Run(ctx, cmd)
+}
+
+// Applying makes the volume and sets it up, through sudo; finding the
+// startup disk's container on the way is a look, run as a check runs it,
+// its output never shown as the step's changes.
 func TestScratchApplyMakesWhatsMissing(t *testing.T) {
 	fake := runnertest.New(t)
 	admin := &steps.Admin{Held: func(context.Context) bool { return true }}
-	step := steps.Scratch(fake, admin, "/Volumes/Scratch", t.TempDir(), 501, nil)
+	run := &changes{Runner: fake}
+	step := steps.Scratch(run, admin, "/Volumes/Scratch", t.TempDir(), 501, nil)
 	fake.On("mount").Prints("/dev/disk3s5 on /System/Volumes/Data (apfs)\n")
 	res := step.Check(t.Context())
 	if res.Items[0].Action != steps.ActionFix || !step.Admin {
@@ -126,10 +150,13 @@ func TestScratchApplyMakesWhatsMissing(t *testing.T) {
 	} {
 		fake.On("sudo", args...)
 	}
-	if err := step.Apply(t.Context(), res); err != nil {
+	if err := step.Apply(event.WithChanging(t.Context()), res); err != nil {
 		t.Fatalf("Apply() = %v", err)
 	}
 	if n := len(fake.Calls()); n != 8 {
 		t.Errorf("ran %d commands:\n%s", n, strings.Join(fake.Calls(), "\n"))
+	}
+	if len(run.ran) != 6 || slices.Contains(run.ran, "diskutil info -plist /") {
+		t.Errorf("ran as changes:\n%s\nwant sudo's six, not the look at the startup disk", strings.Join(run.ran, "\n"))
 	}
 }

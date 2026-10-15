@@ -11,6 +11,7 @@ import (
 
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/engine"
+	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/runner"
 )
 
@@ -58,9 +59,11 @@ func failed(err error) check.Result {
 	return check.Result{State: check.Failed, Reason: engine.Reason(err)}
 }
 
-// output runs a command, returning what it printed.
+// output runs a command that looks at how things stand, returning what it
+// printed: run as a check runs it, even while its step applies, so what it
+// prints is never shown as the step's changing things.
 func output(ctx context.Context, run runner.Runner, name string, args ...string) (string, error) {
-	res, err := run.Run(ctx, runner.Command{Name: name, Args: args})
+	res, err := run.Run(event.WithChecking(ctx), runner.Command{Name: name, Args: args})
 	return string(res.Stdout), err
 }
 
