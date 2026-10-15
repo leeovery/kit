@@ -280,12 +280,16 @@ func TestDoneRecognisesWhatsInstalled(t *testing.T) {
 	}
 }
 
-// installing is what brew install --formula ffmpeg hello prints: ffmpeg
+// installing is what brew install --formula owner/tap/tuicr ffmpeg hello
+// prints: a tap's formula, by its name in its tap, from its tap; ffmpeg
 // with a dependency, then hello.
-const installing = `==> Fetching downloads for: ffmpeg and hello
+const installing = `==> Fetching downloads for: tuicr, ffmpeg and hello
+✔︎ Formula tuicr (0.19.1)
 ✔︎ Bottle aom (3.13.1)
 ✔︎ Bottle ffmpeg (8.0)
 ✔︎ Bottle hello (2.12.3)
+==> Installing tuicr from owner/tap
+🍺  /opt/homebrew/Cellar/tuicr/0.19.1: 4 files, 12.6MB, built in 2 seconds
 ==> Installing dependencies for ffmpeg: aom
 ==> Installing ffmpeg dependency: aom
 ==> Pouring aom--3.13.1.arm64_tahoe.bottle.tar.gz
@@ -297,31 +301,75 @@ const installing = `==> Fetching downloads for: ffmpeg and hello
 🍺  /opt/homebrew/Cellar/hello/2.12.3: 12 files, 193.3KB
 `
 
-// Applying the formulae, in one install of them all, says it's updating
-// Homebrew, then it's downloading as brew install starts, counting those
-// asked for as each is downloaded, then, once brew's begun installing,
-// counts them installed, by what brew install prints.
+// Applying the formulae, in one install of them all, a tap's first, says
+// it's updating Homebrew, then it's downloading as brew install starts,
+// counting those asked for as each is downloaded, then, once brew's begun
+// installing, counts them installed, naming the one brew says it's
+// installing, whatever the order they're declared in.
 func TestApplyingCountsTheFormulae(t *testing.T) {
 	fake := runnertest.New(t)
 	fake.On("brew", "list", "--formula", "--full-name", "-1").Prints("jq\n")
 	fake.On("brew", "leaves").Prints("jq\n")
 	fake.On("brew", "leaves", "--installed-on-request").Prints("jq\n")
+	fake.On("brew", "tap")
 	fake.On("brew", "info", "--json=v2", "--formula", "ffmpeg", "hello").Prints(`{"formulae": [{"name": "ffmpeg", "full_name": "ffmpeg"}, {"name": "hello", "full_name": "hello"}], "casks": []}`)
 	fake.On("brew", "update", "--quiet")
-	fake.On("brew", "install", "--formula", "ffmpeg", "hello").Prints(installing)
+	fake.On("brew", "install", "--formula", "owner/tap/tuicr", "ffmpeg", "hello").Prints(installing)
 	var said []event.Doing
 	ctx := event.WithSaying(t.Context(), func(d event.Doing) { said = append(said, d) })
-	s := kind.Step(brew.New(fake).Formulae(), config.List{Kind: "brew", Entries: []config.Entry{{Name: "jq"}, {Name: "ffmpeg"}, {Name: "hello"}}})
+	s := kind.Step(brew.New(fake).Formulae(), config.List{Kind: "brew", Entries: []config.Entry{{Name: "ffmpeg"}, {Name: "hello"}, {Name: "jq"}, {Name: "owner/tap/tuicr"}}})
 	if err := s.Apply(ctx, s.Check(ctx)); err != nil {
 		t.Fatal(err)
 	}
 	want := []event.Doing{
 		{Says: "updating Homebrew"},
-		{Says: "downloading", Of: 2}, {Says: "downloading", Done: 1, Of: 2}, {Says: "downloading", Done: 2, Of: 2},
-		{Says: "installing ffmpeg", Of: 2}, {Says: "installing hello", Done: 1, Of: 2}, {Says: "installing", Done: 2, Of: 2},
+		{Says: "downloading", Of: 3}, {Says: "downloading", Done: 1, Of: 3}, {Says: "downloading", Done: 2, Of: 3}, {Says: "downloading", Done: 3, Of: 3},
+		{Says: "installing owner/tap/tuicr", Of: 3}, {Says: "installing", Done: 1, Of: 3},
+		{Says: "installing ffmpeg", Done: 1, Of: 3}, {Says: "installing", Done: 2, Of: 3},
+		{Says: "installing hello", Done: 2, Of: 3}, {Says: "installing", Done: 3, Of: 3},
 	}
 	if !slices.Equal(said, want) {
-		t.Errorf("applying said %+v, want %+v", said, want)
+		t.Errorf("applying said %+v\nwant %+v", said, want)
+	}
+}
+
+// brew install says, as it begins installing one of the things asked for,
+// which: a formula or a cask, by its name in full or in its tap, from its
+// tap, its dependencies by it, or its bottle as it's poured; matched by its
+// full name, else its name in its tap. A dependency's own install, and what
+// brew says before and after, are none.
+func TestInstallingRecognisesWhatsBegun(t *testing.T) {
+	formulae, casks := brew.New(nil).Formulae().(kind.Announcer), brew.New(nil).Casks().(kind.Announcer)
+	php, corePHP := "shivammathur/php/php@8.2", "php@8.2"
+	for _, tt := range []struct {
+		name  string
+		kind  kind.Announcer
+		line  string
+		names []string
+		want  string
+	}{
+		{"a formula", formulae, "==> Installing awscli", []string{"argocd", "awscli"}, "awscli"},
+		{"a tap's, in full", formulae, "==> Installing " + php, []string{"argocd", php}, php},
+		{"a tap's, from its tap", formulae, "==> Installing php@8.2 from shivammathur/php", []string{"argocd", php}, php},
+		{"a tap's, by its full name first", formulae, "==> Installing php@8.2 from shivammathur/php", []string{corePHP, php}, php},
+		{"Homebrew's own, by its name first", formulae, "==> Installing php@8.2", []string{php, corePHP}, corePHP},
+		{"declared short", formulae, "==> Installing " + php, []string{"PHP@8.2"}, "PHP@8.2"},
+		{"its dependencies", formulae, "==> Installing dependencies for " + php + ": apr, argon2", []string{php}, php},
+		{"a dependency of it", formulae, "==> Installing " + php + " dependency: apr (1.7.6)", []string{php, "apr"}, php},
+		{"a bottle poured", formulae, "==> Pouring argocd--3.5.5.arm64_tahoe.bottle.tar.gz", []string{"argocd"}, "argocd"},
+		{"a dependency's bottle", formulae, "==> Pouring aom--3.13.1.arm64_tahoe.bottle.tar.gz", []string{"ffmpeg"}, ""},
+		{"a keg", formulae, "🍺  /opt/homebrew/Cellar/argocd/3.5.5: 10 files, 273.4MB", []string{"argocd"}, ""},
+		{"fetching", formulae, "==> Fetching downloads for: argocd and awscli", []string{"argocd", "awscli"}, ""},
+		{"a cask", casks, "==> Installing Cask blender", []string{"blender"}, "blender"},
+		{"a tap's cask", casks, "==> Installing Cask 1password-cli", []string{"1password/tap/1password-cli"}, "1password/tap/1password-cli"},
+		{"a cask's app moved", casks, "==> Moving App 'Blender.app' to '/Applications/Blender.app'", []string{"blender"}, ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := tt.kind.Installing(tt.line, tt.names)
+			if got != tt.want || ok != (tt.want != "") {
+				t.Errorf("Installing(%q, %q) = %q, %v; want %q", tt.line, tt.names, got, ok, tt.want)
+			}
+		})
 	}
 }
 
@@ -342,6 +390,7 @@ func TestFetchedAndBegun(t *testing.T) {
 	}{
 		{"bottle", formulae, "✔︎ Bottle igbinary@8.4 (3.2.16)", []string{"owner/extensions/igbinary@8.4"}, "owner/extensions/igbinary@8.4", false},
 		{"formula without a bottle", formulae, "✔︎ Formula tuicr (0.19.1)", []string{"jq", "owner/tap/tuicr"}, "owner/tap/tuicr", false},
+		{"a tap's, in full", formulae, "✔︎ Formula owner/tap/tuicr (0.19.1)", []string{"tuicr", "owner/tap/tuicr"}, "owner/tap/tuicr", false},
 		{"cask", casks, "✔︎ Cask 1password-cli (2.38.1)", []string{"owner/tap/1password-cli"}, "owner/tap/1password-cli", false},
 		{"cask, its version latest", casks, "✔︎ Cask font-lato (latest)", []string{"font-lato"}, "font-lato", false},
 		{"a dependency's bottle", formulae, "✔︎ Bottle aom (3.13.1)", []string{"ffmpeg"}, "", false},

@@ -142,17 +142,25 @@ func TimeMachine(run runner.Runner, now func() time.Time) engine.Step {
 
 // arqStats is what arqc stats says, as far as the check needs.
 type arqStats struct {
-	BackupPlans []struct {
-		Name         string `json:"name"`
-		LastBackedUp string `json:"lastBackedUp"`
-		Schedule     struct {
-			Type string `json:"type"`
-		} `json:"schedule"`
-	} `json:"backupPlans"`
+	BackupPlans []arqPlan `json:"backupPlans"`
+}
+
+// arqPlan is a backup plan, as arqc stats says.
+type arqPlan struct {
+	Name         string `json:"name"`
+	LastBackedUp string `json:"lastBackedUp"`
+	Schedule     struct {
+		Type string `json:"type"`
+	} `json:"schedule"`
 }
 
 // arqManual is the schedule of a plan Arq never runs by itself.
 const arqManual = "manual"
+
+// arqUnlicensed is what arqc says, failing, till Arq's licence agreement
+// is accepted, as it is on first opening Arq: on a Mac it's just been
+// installed on.
+const arqUnlicensed = "acceptLicenseAgreement"
 
 // Arq checks the backup plans Arq runs on its own schedules: one at least,
 // each backed up within 26 hours. A plan with no schedule ("Manual") isn't
@@ -161,16 +169,9 @@ func Arq(run runner.Runner, now func() time.Time) engine.Step {
 	return engine.Step{
 		Name: FeatureArq, Title: "Arq", Area: AreaBackups,
 		Check: func(ctx context.Context) check.Result {
-			out, err := output(ctx, run, Arqc, "stats")
-			if errors.Is(err, runner.ErrNotFound) {
-				return problem(FeatureArq, "not installed", [3]string{"missing", "Arq isn't installed", "install it: kit cask add arq"})
-			}
-			var stats arqStats
-			if err == nil {
-				err = json.Unmarshal([]byte(out), &stats)
-			}
-			if err != nil {
-				return problem(FeatureArq, "status unreadable", [3]string{"unreadable", "couldn't read Arq's status", "open Arq: is its agent running? If it complains, restart the Mac"})
+			stats, unread, ok := arqStatus(ctx, run)
+			if !ok {
+				return unread
 			}
 			var problems [][3]string
 			var good, times []string
@@ -212,6 +213,34 @@ func Arq(run runner.Runner, now func() time.Time) engine.Step {
 			return check.Result{State: check.OK, Summary: summary, Glance: "Arq " + strings.Join(times, ", ")}
 		},
 	}
+}
+
+// arqStatus is Arq's plans, as arqc stats says: ok is false, with the
+// check's result, when there are none to look at. Arq not installed; never
+// set up, its licence agreement not yet accepted or no plan made, as Time
+// Machine without a backup disk isn't; or its status unreadable.
+func arqStatus(ctx context.Context, run runner.Runner) (stats arqStats, unread check.Result, ok bool) {
+	res, err := run.Run(ctx, runner.Command{Name: Arqc, Args: []string{"stats"}})
+	switch {
+	case errors.Is(err, runner.ErrNotFound):
+		return stats, problem(FeatureArq, "not installed", [3]string{"missing", "Arq isn't installed", "install it: kit cask add arq"}), false
+	case err != nil && strings.Contains(string(res.Stderr), arqUnlicensed):
+		return stats, arqNotSetUp(), false
+	case err == nil:
+		err = json.Unmarshal(res.Stdout, &stats)
+	}
+	switch {
+	case err != nil:
+		return stats, problem(FeatureArq, "status unreadable", [3]string{"unreadable", "couldn't read Arq's status", "open Arq: is its agent running? If it complains, restart the Mac"}), false
+	case len(stats.BackupPlans) == 0:
+		return stats, arqNotSetUp(), false
+	}
+	return stats, check.Result{}, true
+}
+
+// arqNotSetUp is Arq's check on a Mac it's never been set up on.
+func arqNotSetUp() check.Result {
+	return problem(FeatureArq, "not set up", [3]string{"none", "no backup plan is chosen yet", "open Arq, sign in, then choose a backup plan"})
 }
 
 // slug is a name as part of an id: lowercase letters and digits, dashes

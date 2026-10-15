@@ -90,6 +90,14 @@ type Wait struct {
 	Ready       func(ctx context.Context) bool
 }
 
+// there reports whether w's thing is in place, as Ready says, looked at as
+// a check looks, whichever step waits and however far it's got applying:
+// what a command run to look prints is never shown as the step's changing
+// things.
+func (w Wait) there(ctx context.Context) bool {
+	return w.Ready(event.WithChecking(ctx))
+}
+
 // waitPoll is how often a step waiting for a thing looks again, when the
 // step putting it in place hasn't said it may have (Changed): looking can
 // cost, as listing what Homebrew has installed does.
@@ -747,7 +755,7 @@ func Await(ctx context.Context, w Wait, says string) bool {
 	if await, ok := ctx.Value(awaitKey{}).(func(context.Context, Wait, string) bool); ok {
 		return await(ctx, w, says)
 	}
-	return w.Ready == nil || w.Ready(ctx)
+	return w.Ready == nil || w.there(ctx)
 }
 
 type changedKey struct{}
@@ -877,7 +885,7 @@ func (d *dispatch) waitFor(ctx context.Context, s Step) string {
 // thing of s's own, or of a step the run doesn't take, isn't waited for.
 func (d *dispatch) await(ctx context.Context, s Step, w Wait, waiting func()) bool {
 	if _, taken := d.titles[w.Step]; w.Step == s.Name || w.Step != "" && !taken {
-		return w.Ready == nil || w.Ready(ctx)
+		return w.Ready == nil || w.there(ctx)
 	}
 	// Watched before the first look, so nothing that comes between a look
 	// and the wait after it is missed.
@@ -914,16 +922,16 @@ func (d *dispatch) await(ctx context.Context, s Step, w Wait, waiting func()) bo
 // it's in place, or the run's gone quiet without it.
 func (d *dispatch) settled(ctx context.Context, s Step, w Wait, lk *look) (came, over bool) {
 	if w.Step == "" {
-		ready := w.Ready(ctx)
+		ready := w.there(ctx)
 		return ready, ready || d.isQuiet(lk)
 	}
 	select {
 	case <-d.over[w.Step]:
-		return w.Ready == nil || w.Ready(ctx), true
+		return w.Ready == nil || w.there(ctx), true
 	default:
 	}
 	switch {
-	case w.Ready != nil && w.Ready(ctx):
+	case w.Ready != nil && w.there(ctx):
 		return true, true
 	case d.isFreed(s.Name, w.Step):
 		return w.Ready == nil, true

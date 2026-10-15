@@ -7,8 +7,9 @@
 //
 // Checking never asks 1Password, which would ask for a fingerprint every
 // hour: it reads only what's on the Mac. Syncing reads every value from
-// 1Password in one sitting; a value that fails to read keeps its previous
-// one. Values never pass through kit's events or log.
+// 1Password in one run of op, as 1Password has the person approve each run;
+// a value that fails to read keeps its previous one. Values never pass
+// through kit's events or log.
 package secret
 
 import (
@@ -272,27 +273,38 @@ func (r Report) Summary() string {
 }
 
 // signInTimeout is how long 1Password's app may wait for a person to
-// approve kit's use of it, a fingerprint at the prompt it shows.
+// approve kit's use of it, a fingerprint at the prompt it shows: for each
+// run of op that reads a value, as each command kit runs is in a session of
+// its own (runner.Exec), and 1Password asks once a session.
 const signInTimeout = time.Minute
 
-// Ready says whether 1Password answers: nil for a session open already (op
-// whoami, which never opens one), or one the app opens, asking for a
-// fingerprint, within a minute (listing the vaults needs one). Listing no
-// account, it isn't signed in, or its CLI isn't on, and it's not ready yet,
-// said at once, with nothing asked of anyone.
+// Ready says whether 1Password answers: nil for a session open already, or
+// one the app opens, asking for a fingerprint, within a minute (listing the
+// vaults needs one). Not signed in, it's not ready yet, as signedIn says.
 func (s *Secrets) Ready(ctx context.Context) error {
-	if _, err := s.run.Run(ctx, runner.Command{Name: "op", Args: []string{"whoami"}, Timeout: opTimeout}); err == nil {
-		return nil
-	}
-	res, err := s.run.Run(ctx, runner.Command{Name: "op", Args: []string{"account", "list", "--format", "json"}, Timeout: opTimeout})
-	var accounts []json.RawMessage
-	if err != nil || json.Unmarshal(res.Stdout, &accounts) != nil || len(accounts) == 0 {
-		return engine.NotYet(SignedOut)
+	if open, err := s.signedIn(ctx); open || err != nil {
+		return err
 	}
 	if _, err := s.run.Run(ctx, runner.Command{Name: "op", Args: []string{"vault", "list", "--format", "json"}, Timeout: signInTimeout}); err != nil {
 		return errors.New(SignIn)
 	}
 	return nil
+}
+
+// signedIn says whether 1Password is signed in, asking no one: open for a
+// session open already (op whoami, which never opens one). Listing no
+// account, it isn't signed in, or its CLI isn't on, and it's not ready yet,
+// said at once.
+func (s *Secrets) signedIn(ctx context.Context) (open bool, err error) {
+	if _, err := s.run.Run(ctx, runner.Command{Name: "op", Args: []string{"whoami"}, Timeout: opTimeout}); err == nil {
+		return true, nil
+	}
+	res, err := s.run.Run(ctx, runner.Command{Name: "op", Args: []string{"account", "list", "--format", "json"}, Timeout: opTimeout})
+	var accounts []json.RawMessage
+	if err != nil || json.Unmarshal(res.Stdout, &accounts) != nil || len(accounts) == 0 {
+		return false, engine.NotYet(SignedOut)
+	}
+	return false, nil
 }
 
 // Answers reports whether 1Password answers, as Ready says.
@@ -301,35 +313,118 @@ func (s *Secrets) Answers(ctx context.Context) bool { return s.Ready(ctx) == nil
 // read reads a value from 1Password, its output kept from every report,
 // without the newline op ends it with.
 func (s *Secrets) read(ctx context.Context, ref string) (string, error) {
-	res, err := s.run.Run(ctx, runner.Command{Name: "op", Args: []string{"read", ref}, Timeout: opTimeout, Secret: true})
+	res, err := s.run.Run(ctx, runner.Command{Name: "op", Args: []string{"read", ref}, Timeout: signInTimeout, Secret: true})
 	if err != nil {
 		return "", errors.New("1Password couldn't read it")
 	}
 	return strings.TrimRight(string(res.Stdout), "\n"), nil
 }
 
+// inject reads refs from 1Password in one run of op inject, its output kept
+// from every report: a template on its standard input, each ref between
+// lines of a mark no value holds, so that a value of many lines reads back
+// whole, and each value without the newlines it ends with, as read has it.
+// A ref with a $ or }} in it isn't taken: a template would read it as a
+// variable, or as the reference's end.
+func (s *Secrets) inject(ctx context.Context, refs []string) (map[string]string, error) {
+	mark := "kit-" + newID()
+	var template strings.Builder
+	for _, ref := range refs {
+		if strings.Contains(ref, "$") || strings.Contains(ref, "}}") {
+			return nil, fmt.Errorf("op inject would read %s otherwise", ref)
+		}
+		template.WriteString(mark + "\n{{ " + ref + " }}\n")
+	}
+	template.WriteString(mark + "\n")
+	res, err := s.run.Run(ctx, runner.Command{Name: "op", Args: []string{"inject"}, Input: template.String(), Timeout: signInTimeout, Secret: true})
+	if err != nil {
+		return nil, errors.New("1Password couldn't read them")
+	}
+	parts := strings.Split(string(res.Stdout), mark)
+	if len(parts) != len(refs)+2 {
+		return nil, errors.New("op inject gave back other than its template")
+	}
+	values := make(map[string]string, len(refs))
+	for i, ref := range refs {
+		values[ref] = strings.TrimRight(strings.TrimPrefix(parts[i+1], "\n"), "\n")
+	}
+	return values, nil
+}
+
+// readAll reads refs from 1Password in as few runs of op as it can, as
+// 1Password has the person approve each: one, when every ref reads. Should
+// that fail, once 1Password answers, they're read in halves, so that a ref
+// that won't read costs the rest nothing. A value that won't read is left
+// out.
+func (s *Secrets) readAll(ctx context.Context, refs []string) (map[string]string, error) {
+	if len(refs) == 0 {
+		return map[string]string{}, nil
+	}
+	if values, err := s.inject(ctx, refs); err == nil {
+		return values, nil
+	}
+	if err := s.Ready(ctx); err != nil {
+		return nil, err
+	}
+	values := map[string]string{}
+	s.halves(ctx, refs, values)
+	return values, nil
+}
+
+// halves reads each half of refs into values, as readSome does.
+func (s *Secrets) halves(ctx context.Context, refs []string, values map[string]string) {
+	half := len(refs) / 2
+	s.readSome(ctx, refs[:half], values)
+	s.readSome(ctx, refs[half:], values)
+}
+
+// readSome reads refs into values: one alone, with op read; more at once,
+// or, should that fail, in halves.
+func (s *Secrets) readSome(ctx context.Context, refs []string, values map[string]string) {
+	switch len(refs) {
+	case 0:
+	case 1:
+		if v, err := s.read(ctx, refs[0]); err == nil {
+			values[refs[0]] = v
+		}
+	default:
+		got, err := s.inject(ctx, refs)
+		if err != nil {
+			s.halves(ctx, refs, values)
+			return
+		}
+		maps.Copy(values, got)
+	}
+}
+
+// refs are the declared secrets' references, each once, in turn.
+func (s *Secrets) refs() []string {
+	var refs []string
+	for _, sec := range s.declared {
+		if !slices.Contains(refs, sec.Ref) {
+			refs = append(refs, sec.Ref)
+		}
+	}
+	return refs
+}
+
 // Sync reads every declared secret from 1Password and puts each in place:
 // ~/.secrets.zsh written whole (a variable that fails to read keeps its
 // line, so a partial read never shrinks it), each file written beside its
-// place then renamed into it. It fails at once when 1Password doesn't
-// answer.
+// place then renamed into it. It fails at once when 1Password isn't signed
+// in, or doesn't answer.
 func (s *Secrets) Sync(ctx context.Context) (Report, error) {
 	report := Report{Failed: map[string]string{}}
-	if err := s.Ready(ctx); err != nil {
+	if _, err := s.signedIn(ctx); err != nil {
 		return report, err
 	}
 	old, oldOrder, err := s.envLines()
 	if err != nil {
 		return report, err
 	}
-	values := map[string]string{}
-	for _, sec := range s.declared {
-		if _, ok := values[sec.Ref]; ok {
-			continue
-		}
-		if v, err := s.read(ctx, sec.Ref); err == nil {
-			values[sec.Ref] = v
-		}
+	values, err := s.readAll(ctx, s.refs())
+	if err != nil {
+		return report, err
 	}
 	var env []string
 	for _, sec := range s.declared {

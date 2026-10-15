@@ -114,6 +114,24 @@ func TestFakeHasWhatsScripted(t *testing.T) {
 	}
 }
 
+func TestFakeFiltersItsInput(t *testing.T) {
+	fake := runnertest.New(t)
+	fake.On("op", "inject").Filters(func(in string) (string, error) {
+		if in == "bad" {
+			return "", errors.New("no such item")
+		}
+		return "read " + in, nil
+	})
+	res, err := fake.Run(t.Context(), runner.Command{Name: "op", Args: []string{"inject"}, Input: "good"})
+	if err != nil || string(res.Stdout) != "read good" {
+		t.Errorf("op inject of good = %q, %v; want what the filter made of it", res.Stdout, err)
+	}
+	res, err = fake.Run(t.Context(), runner.Command{Name: "op", Args: []string{"inject"}, Input: "bad"})
+	if exit, ok := errors.AsType[*runner.ExitError](err); !ok || exit.Code != 1 || string(res.Stderr) != "no such item" || len(res.Stdout) != 0 {
+		t.Errorf("op inject of bad = %+v, %v; want exit 1 with the filter's error", res, err)
+	}
+}
+
 func TestFakeDoesWhatItsTold(t *testing.T) {
 	fake := runnertest.New(t)
 	ran := 0

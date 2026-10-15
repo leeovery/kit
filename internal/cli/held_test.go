@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/leeovery/kit/internal/kind/secret/secrettest"
 	"github.com/leeovery/kit/internal/runner"
 )
 
@@ -84,11 +85,11 @@ func noSecretKept(t *testing.T, w *world, printed string) {
 func TestALinesSectionWaitsForItsSecret(t *testing.T) {
 	w := heldWorld(t)
 	w.fake.On("op", "whoami")
-	w.fake.On("op", "read", "op://vault/Item/Section/token").Prints("plain-token-value\n")
+	secrettest.Holds(w.fake, map[string]string{"op://vault/Item/Section/token": "plain-token-value"})
 
 	out, errOut, _ := w.run(t, "apply")
 	calls := w.fake.Calls()
-	plain, synced, held := slices.Index(calls, "brew install --formula ripgrep"), slices.Index(calls, "op read op://vault/Item/Section/token"), slices.Index(calls, "brew install --formula owner/private/fetcher")
+	plain, synced, held := slices.Index(calls, "brew install --formula ripgrep"), slices.Index(calls, "op inject"), slices.Index(calls, "brew install --formula owner/private/fetcher")
 	if plain < 0 || synced < 0 || held < plain || held < synced {
 		t.Fatalf("ran %q: want ripgrep installed, and TOKEN synced, then fetcher installed", calls)
 	}

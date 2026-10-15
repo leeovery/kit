@@ -79,20 +79,31 @@ const DeleteScript = `function run(argv) {
   return '';
 }`
 
-// notInstalled is why a login item can't be added yet.
-const notInstalled = "not installed: install the app first"
+// notInstalled is why a login item can't be added yet: its app isn't
+// installed, or, a helper an app puts in place when it's first opened, as
+// Figma's agent, that app hasn't been opened.
+const notInstalled = "not installed: install the app, or open the app it comes with"
+
+// helperDirs are the folders inside an app where the apps that come with
+// it live, as a helper that opens at login: Keyboard Maestro's engine, in
+// Contents/MacOS.
+var helperDirs = []string{"Contents/MacOS", "Contents/Library/LoginItems", "Contents/Helpers"}
 
 // Login is the login items, driven through a runner.
 type Login struct {
 	run runner.Runner
 	// home is the user's home, where ~/Applications is.
 	home string
+	// AppDirs are the folders apps live in, where an app LaunchServices
+	// doesn't know is looked for: /Applications, its Utilities, and
+	// ~/Applications.
+	AppDirs []string
 }
 
 // New returns the login items, driven through run, for the user whose home
 // is home.
 func New(run runner.Runner, home string) *Login {
-	return &Login{run: run, home: home}
+	return &Login{run: run, home: home, AppDirs: []string{"/Applications", "/Applications/Utilities", filepath.Join(home, "Applications")}}
 }
 
 func (*Login) Name() string    { return "login-item" }
@@ -164,8 +175,77 @@ func (l *Login) items(ctx context.Context) ([]item, error) {
 	return items, err
 }
 
-// identify finds the apps wanted names, by path or bundle id, in order.
+// identify finds the apps wanted names, by path or bundle id, in order. A
+// bundle id LaunchServices doesn't know, as it doesn't an app installed a
+// moment ago, or one inside another app till that's been opened, is looked
+// for in the folders apps live in (lookFor).
 func (l *Login) identify(ctx context.Context, wanted []string) ([]item, error) {
+	apps, err := l.ask(ctx, wanted)
+	if err != nil {
+		return nil, err
+	}
+	var missed []int
+	for i, app := range apps {
+		if app.Path == "" && !strings.HasPrefix(wanted[i], "/") {
+			missed = append(missed, i)
+		}
+	}
+	if len(missed) == 0 {
+		return apps, nil
+	}
+	found, err := l.lookFor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, i := range missed {
+		if app, ok := found[l.Key(wanted[i])]; ok {
+			apps[i] = app
+		}
+	}
+	return apps, nil
+}
+
+// lookFor finds the apps in AppDirs, and the apps inside each that come
+// with it (helperDirs), by bundle id, as Key has it: each read from its
+// bundle, in one run of the script, the first of an id found kept.
+func (l *Login) lookFor(ctx context.Context) (map[string]item, error) {
+	var paths []string
+	for _, dir := range l.AppDirs {
+		for _, app := range appsIn(dir) {
+			paths = append(paths, app)
+			for _, sub := range helperDirs {
+				paths = append(paths, appsIn(filepath.Join(app, sub))...)
+			}
+		}
+	}
+	apps, err := l.ask(ctx, paths)
+	if err != nil {
+		return nil, err
+	}
+	found := make(map[string]item, len(apps))
+	for _, app := range apps {
+		if _, seen := found[l.Key(app.ID)]; app.ID != "" && !seen {
+			found[l.Key(app.ID)] = app
+		}
+	}
+	return found, nil
+}
+
+// appsIn are the apps in dir, by path: none when it can't be read.
+func appsIn(dir string) []string {
+	entries, _ := os.ReadDir(dir)
+	var apps []string
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".app") {
+			apps = append(apps, filepath.Join(dir, e.Name()))
+		}
+	}
+	return apps
+}
+
+// ask asks the script of the apps wanted names, by path or bundle id, in
+// order: LaunchServices finds an app by its id.
+func (l *Login) ask(ctx context.Context, wanted []string) ([]item, error) {
 	if len(wanted) == 0 {
 		return nil, nil
 	}
@@ -289,7 +369,7 @@ func (l *Login) Find(ctx context.Context, typed string) ([]kind.Found, error) {
 	case strings.Contains(typed, ".") && !strings.ContainsAny(typed, " /"):
 	default:
 		wanted = ""
-		for _, dir := range []string{"/Applications", "/Applications/Utilities", filepath.Join(l.home, "Applications"), "/System/Applications"} {
+		for _, dir := range append(slices.Clone(l.AppDirs), "/System/Applications") {
 			if path := filepath.Join(dir, typed+".app"); exists(path) {
 				wanted = path
 				break

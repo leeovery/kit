@@ -17,6 +17,16 @@ const PrefsName = "prefs"
 // as the nightly run captures once a day.
 const prefsEvery = 26 * time.Hour
 
+// SettingsToCome reports whether apps' settings are yet to be restored on
+// this Mac from p's store, as the step checking them says it's paused:
+// capture isn't switched on, by a restore or by starting fresh.
+func SettingsToCome(p *prefs.Prefs) func() bool {
+	return func() bool {
+		rec, err := p.Load()
+		return err == nil && rec.On == ""
+	}
+}
+
 // Prefs checks apps' settings are being saved: capture switched on, this
 // Mac owning its folder in the store, a capture in the last day without
 // errors, and its commits pushed within a day. It reads kit's record

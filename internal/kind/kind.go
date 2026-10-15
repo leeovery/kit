@@ -246,6 +246,17 @@ type Fetcher interface {
 	Begun(line string) bool
 }
 
+// Announcer is a Counter whose install says, in a line, which of the things
+// it was asked to install it's installing now, as Homebrew's does: the step
+// names that one, rather than the next not yet done, as the install needn't
+// take them in the order they were asked for.
+type Announcer interface {
+	Counter
+	// Installing is which of names line says is being installed now: none
+	// when it says nothing of them, as of a dependency.
+	Installing(line string, names []string) (string, bool)
+}
+
 // Sharing is a kind whose installs take turns with other kinds', as they go
 // through one program that changes one thing at a time, as Homebrew's
 // formulae and casks do: the lines it installs after its first (Placing)
@@ -602,7 +613,8 @@ func counting(ctx context.Context, k Kind, names []string) context.Context {
 		return ctx
 	}
 	f, fetches := k.(Fetcher)
-	p := &progress{ctx: ctx, counter: c, fetcher: f, names: names, unstarted: fetches, done: map[string]bool{}, fetched: map[string]bool{}}
+	a, _ := k.(Announcer)
+	p := &progress{ctx: ctx, counter: c, fetcher: f, announcer: a, names: names, unstarted: fetches, done: map[string]bool{}, fetched: map[string]bool{}}
 	p.say()
 	return context.WithValue(ctx, progressKey{}, p)
 }
@@ -610,13 +622,14 @@ func counting(ctx context.Context, k Kind, names []string) context.Context {
 // progress is how an install of names is going, as a Counter reads the lines
 // it prints: a Fetcher's downloading, from when its command starts till the
 // install proper begins, counting those of names downloaded; then
-// installing, as each is done, the next not yet done, counting those done.
-// Each done has the steps waiting for the kind's things look again.
+// installing, as each is done, the next (next), counting those done. Each
+// done has the steps waiting for the kind's things look again.
 type progress struct {
-	ctx     context.Context
-	counter Counter
-	fetcher Fetcher
-	names   []string
+	ctx       context.Context
+	counter   Counter
+	fetcher   Fetcher
+	announcer Announcer
+	names     []string
 
 	mu sync.Mutex
 	// unstarted is a Fetcher's install before its command starts, saying
@@ -625,13 +638,21 @@ type progress struct {
 	// says is what the install does first, or waits for, while it does.
 	says          string
 	done, fetched map[string]bool
+	// now is the one of names an Announcer's install last said it's
+	// installing.
+	now string
 }
 
 // line reads a line the install printed.
 func (p *progress) line(line string) {
 	name, done := p.counter.Done(line, p.names)
+	now, announced := p.announced(line)
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	moved := announced && now != p.now && !p.done[now]
+	if moved {
+		p.now = now
+	}
 	switch {
 	case done:
 		if p.note(p.done, name) {
@@ -646,7 +667,34 @@ func (p *progress) line(line string) {
 		if name, ok := p.fetcher.Fetched(line, p.names); ok && p.note(p.fetched, name) {
 			p.say()
 		}
+	case moved:
+		p.say()
 	}
+}
+
+// announced is which of names line says the install is installing now: none
+// unless its kind is an Announcer.
+func (p *progress) announced(line string) (string, bool) {
+	if p.announcer == nil {
+		return "", false
+	}
+	return p.announcer.Installing(line, p.names)
+}
+
+// next is which of names the install is at: for an Announcer's, the one it
+// last said it's installing, till it's done; else the first not yet done.
+// "" for none.
+func (p *progress) next() string {
+	if p.announcer != nil {
+		if p.done[p.now] {
+			return ""
+		}
+		return p.now
+	}
+	if i := slices.IndexFunc(p.names, func(name string) bool { return !p.done[name] }); i >= 0 {
+		return p.names[i]
+	}
+	return ""
 }
 
 // note adds name to set, when it's one of the names installing and not in
@@ -688,11 +736,7 @@ func (p *progress) say() {
 	case p.fetching:
 		event.Say(p.ctx, event.Doing{Says: "downloading", Done: len(p.fetched), Of: len(p.names)})
 	default:
-		next := ""
-		if i := slices.IndexFunc(p.names, func(name string) bool { return !p.done[name] }); i >= 0 {
-			next = " " + p.names[i]
-		}
-		event.Say(p.ctx, event.Doing{Says: "installing" + next, Done: len(p.done), Of: len(p.names)})
+		event.Say(p.ctx, event.Doing{Says: strings.TrimSpace("installing " + p.next()), Done: len(p.done), Of: len(p.names)})
 	}
 }
 

@@ -134,8 +134,8 @@ func (s *Secrets) ReadBack(ctx context.Context, ref, want string) error {
 	return nil
 }
 
-// newID is an id for a new field or section, as 1Password's are: 26
-// lower-case letters and digits.
+// newID is an id for a new field or section, as 1Password's are, or a
+// template's mark: 26 lower-case letters and digits, at random.
 func newID() string {
 	b := make([]byte, 13)
 	_, _ = rand.Read(b)

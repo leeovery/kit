@@ -403,11 +403,8 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 	if features.on(steps.FeatureArq) {
 		checks = append(checks, feature(steps.FeatureArq, steps.Arq(observed, a.Now)))
 	}
-	if features.on(steps.FeatureScratch) {
-		scratch := feature(steps.FeatureScratch, steps.Scratch(observed, r.admin, a.Scratch, home, a.UID))
-		r.adminSteps = append(r.adminSteps, scratch)
-		checks = append(checks, scratch)
-	}
+	var settingsToCome func() bool
+	var settings []engine.Step
 	if features.on(steps.FeaturePrefs) {
 		p, err := a.prefs(r)
 		if err != nil {
@@ -415,8 +412,15 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 			_ = log.Close()
 			return nil, err
 		}
-		checks = append(checks, feature(steps.FeaturePrefs, steps.Prefs(p, a.Now)), feature(steps.FeaturePrefs, steps.FullDiskAccess(home)))
+		settingsToCome = steps.SettingsToCome(p)
+		settings = []engine.Step{feature(steps.FeaturePrefs, steps.Prefs(p, a.Now)), feature(steps.FeaturePrefs, steps.FullDiskAccess(home))}
 	}
+	if features.on(steps.FeatureScratch) {
+		scratch := feature(steps.FeatureScratch, steps.Scratch(observed, r.admin, a.Scratch, home, a.UID, settingsToCome))
+		r.adminSteps = append(r.adminSteps, scratch)
+		checks = append(checks, scratch)
+	}
+	checks = append(checks, settings...)
 	edits := steps.ConfigEdits(r.repo)
 	r.drift = append(r.drift, steps.ConfigEditsName)
 	r.drifters[steps.ConfigEditsName] = configDrifter{repo: r.repo, home: home, step: edits}

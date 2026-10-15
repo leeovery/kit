@@ -206,9 +206,35 @@ var (
 	begun      = regexp.MustCompile(`^==> (?:Installing|Pouring)\b`)
 )
 
+// The lines brew install prints as it begins installing one of the things
+// asked for: a formula, a cask, or a formula's dependencies, by its name in
+// full, or by its name in its tap, from that tap; and a formula's bottle as
+// it's poured, by its name in its tap. A dependency's install is named for
+// what needs it (==> Installing ffmpeg dependency: aom).
+var (
+	installingLine = regexp.MustCompile(`^==> Installing (?:Cask |dependencies for )?([^\s:]+)(?: from (\S+))?`)
+	pouringLine    = regexp.MustCompile(`^==> Pouring (\S+?)--`)
+)
+
 // fetched is which of names line, from brew install, says is downloaded.
 func fetched(line string, names []string) (string, bool) {
 	return installed(downloaded, line, names)
+}
+
+// installing is which of names line, from brew install, says it begins
+// installing.
+func installing(line string, names []string) (string, bool) {
+	line = strings.TrimSpace(line)
+	if m := installingLine.FindStringSubmatch(line); m != nil {
+		if m[2] != "" {
+			return named(m[2]+"/"+m[1], names)
+		}
+		return named(m[1], names)
+	}
+	if m := pouringLine.FindStringSubmatch(line); m != nil {
+		return named(m[1], names)
+	}
+	return "", false
 }
 
 // hasBegun reports whether line, from brew install, says it's begun
@@ -217,14 +243,24 @@ func hasBegun(line string) bool {
 	return begun.MatchString(strings.TrimSpace(line))
 }
 
-// installed is which of names, by their names in their taps, line says is
-// installed, as installedLine finds the name it says.
+// installed is which of names line says is installed, as installedLine
+// finds the name it says.
 func installed(installedLine *regexp.Regexp, line string, names []string) (string, bool) {
 	m := installedLine.FindStringSubmatch(strings.TrimSpace(line))
 	if m == nil {
 		return "", false
 	}
-	i := slices.IndexFunc(names, func(name string) bool { return strings.EqualFold(lastPart(name), m[1]) })
+	return named(m[1], names)
+}
+
+// named is which of names said is, as Homebrew says a name: in full, as in
+// owner/tap/tool, or by its name in its tap. The one of that full name, else
+// the first of that name in its tap.
+func named(said string, names []string) (string, bool) {
+	i := slices.IndexFunc(names, func(name string) bool { return strings.EqualFold(name, said) })
+	if i < 0 {
+		i = slices.IndexFunc(names, func(name string) bool { return strings.EqualFold(lastPart(name), lastPart(said)) })
+	}
 	if i < 0 {
 		return "", false
 	}
@@ -340,6 +376,12 @@ func (formulae) Fetched(line string, names []string) (string, bool) { return fet
 // installing what it downloaded.
 func (formulae) Begun(line string) bool { return hasBegun(line) }
 
+// Installing is which of names line, from brew install, says it begins
+// installing.
+func (formulae) Installing(line string, names []string) (string, bool) {
+	return installing(line, names)
+}
+
 // Shares names the kind formulae take turns with: casks, which Homebrew
 // installs too.
 func (formulae) Shares() []string { return []string{"cask"} }
@@ -425,6 +467,12 @@ func (casks) Fetched(line string, names []string) (string, bool) { return fetche
 // Begun reports whether line, from brew install, says it's begun
 // installing what it downloaded.
 func (casks) Begun(line string) bool { return hasBegun(line) }
+
+// Installing is which of names line, from brew install, says it begins
+// installing.
+func (casks) Installing(line string, names []string) (string, bool) {
+	return installing(line, names)
+}
 
 // Shares names the kind casks take turns with: formulae, which Homebrew
 // installs too.
