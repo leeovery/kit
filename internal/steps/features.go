@@ -22,9 +22,11 @@ import (
 // Spotlight and Time Machine, with a tmp folder the user, uid, can write,
 // and Claude Code's temporary files sent there (from home's settings).
 // Applying makes and sets up what it can, through sudo: the volume (with
-// its change log off), Spotlight off, out of Time Machine, the tmp folder;
-// Claude Code's settings are Claude Code's setup's.
-func Scratch(run runner.Runner, admin *Admin, volume, home string, uid int) engine.Step {
+// its change log off), Spotlight off, out of Time Machine, the tmp folder.
+// Claude Code's settings come with apps' settings while toCome says those
+// are yet to be restored on this Mac (nil: kit keeps none); else they're
+// the person's to set.
+func Scratch(run runner.Runner, admin *Admin, volume, home string, uid int, toCome func() bool) engine.Step {
 	tmp := filepath.Join(volume, "tmp")
 	fix := func(it check.Item) check.Item {
 		it.Action = ActionFix
@@ -53,7 +55,7 @@ func Scratch(run runner.Runner, admin *Admin, volume, home string, uid int) engi
 				problems = append(problems, [3]string{"tmp", tmp + " isn't writable", "kit apply makes it, yours alone"})
 			}
 			if missing := claudeTmp(home, volume); len(missing) > 0 {
-				problems = append(problems, [3]string{"claude", "Claude Code's settings don't send " + strings.Join(missing, " and ") + " to it", "set them in ~/.claude/settings.json's env: \"TMPDIR\": \"" + tmp + "/\", \"CLAUDE_CODE_TMPDIR\": \"" + tmp + "\""})
+				problems = append(problems, claudeProblem(missing, tmp, toCome != nil && toCome()))
 			}
 			if len(problems) > 0 {
 				res := problem(FeatureScratch, "mounted, not set up as it should be", problems...)
@@ -132,6 +134,17 @@ func dataContainer(ctx context.Context, run runner.Runner) (string, error) {
 
 // writable is access(2)'s W_OK: whether the caller may write.
 const writable = 2
+
+// claudeProblem is the Scratch volume's problem of Claude Code's settings
+// not sending missing to tmp: they come with apps' settings while those are
+// yet to be restored (toCome), else the person sets them.
+func claudeProblem(missing []string, tmp string, toCome bool) [3]string {
+	name := "Claude Code's settings don't send " + strings.Join(missing, " and ") + " to it"
+	if toCome {
+		return [3]string{"claude", name, "they come with apps' settings, which kit prefs restore brings back"}
+	}
+	return [3]string{"claude", name, "set them in ~/.claude/settings.json's env: \"TMPDIR\": \"" + tmp + "/\", \"CLAUDE_CODE_TMPDIR\": \"" + tmp + "\""}
+}
 
 // claudeTmp are the variables Claude Code's settings don't point at the
 // volume, of TMPDIR and CLAUDE_CODE_TMPDIR.

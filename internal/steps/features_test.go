@@ -45,9 +45,41 @@ func TestScratch(t *testing.T) {
 			fake.On("mount").Prints(tt.mount)
 			fake.On("mdutil", "-s", volume).Prints(tt.mdutil)
 			fake.On("tmutil", "isexcluded", volume).Prints(tt.excluded)
-			state, _, ids := checked(t, steps.Scratch(fake, &steps.Admin{}, volume, home, 501))
+			state, _, ids := checked(t, steps.Scratch(fake, &steps.Admin{}, volume, home, 501, nil))
 			if state != tt.state || !slices.Equal(ids, tt.ids) {
 				t.Errorf("= %s %q, want %s %q", state, ids, tt.state, tt.ids)
+			}
+		})
+	}
+}
+
+// Claude Code's settings come with apps' settings: while those are yet to
+// be restored on this Mac, the Scratch volume's item says so, left to do,
+// rather than sending the person to set them by hand, as it does once
+// they're restored, or when kit keeps none.
+func TestScratchClaudeSettingsComeWithAppsSettings(t *testing.T) {
+	volume, home := t.TempDir(), t.TempDir()
+	if err := os.Mkdir(filepath.Join(volume, "tmp"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	byHand := `set them in ~/.claude/settings.json's env: "TMPDIR": "` + volume + `/tmp/", "CLAUDE_CODE_TMPDIR": "` + volume + `/tmp"`
+	for _, tt := range []struct {
+		name   string
+		toCome func() bool
+		detail string
+	}{
+		{"yet to be restored", func() bool { return true }, "they come with apps' settings, which kit prefs restore brings back"},
+		{"restored", func() bool { return false }, byHand},
+		{"kept by no one", nil, byHand},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			fake := runnertest.New(t)
+			fake.On("mount").Prints("/dev/disk3s7 on " + volume + " (apfs, local, nobrowse)\n")
+			fake.On("mdutil", "-s", volume).Prints(volume + ":\n\tIndexing disabled.\n")
+			fake.On("tmutil", "isexcluded", volume).Prints("[Excluded]    " + volume + "\n")
+			res := steps.Scratch(fake, &steps.Admin{}, volume, home, 501, tt.toCome).Check(t.Context())
+			if len(res.Items) != 1 || res.Items[0].ID != "scratch:claude" || res.Items[0].Detail != tt.detail || res.Items[0].Action != "" || !res.ToDo() {
+				t.Errorf("result = %+v, want Claude Code's settings left to do: %q", res, tt.detail)
 			}
 		})
 	}
@@ -77,7 +109,7 @@ func TestFullDiskAccess(t *testing.T) {
 func TestScratchApplyMakesWhatsMissing(t *testing.T) {
 	fake := runnertest.New(t)
 	admin := &steps.Admin{Held: func(context.Context) bool { return true }}
-	step := steps.Scratch(fake, admin, "/Volumes/Scratch", t.TempDir(), 501)
+	step := steps.Scratch(fake, admin, "/Volumes/Scratch", t.TempDir(), 501, nil)
 	fake.On("mount").Prints("/dev/disk3s5 on /System/Volumes/Data (apfs)\n")
 	res := step.Check(t.Context())
 	if res.Items[0].Action != steps.ActionFix || !step.Admin {
