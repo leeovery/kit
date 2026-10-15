@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/leeovery/kit/internal/kind/secret/secrettest"
 	"github.com/leeovery/kit/internal/runner"
 )
 
@@ -38,7 +39,7 @@ func TestEachKindWaitsForItsCommand(t *testing.T) {
 		formulae += "mise\n"
 		f.On("brew", "list", "--formula", "--full-name", "-1").Prints(formulae)
 	})
-	synced, npm, mcp := "op read op://vault/Item/Section/token", "npm install --global intelephense", `claude mcp add-json -s user docs '{"type":"http","url":"https://docs.example.com/mcp"}'`
+	synced, npm, mcp := "op inject", "npm install --global intelephense", `claude mcp add-json -s user docs '{"type":"http","url":"https://docs.example.com/mcp"}'`
 	// The rest of the formulae take a while, as a new Mac's do.
 	var meanwhile atomic.Bool
 	f.On("brew", "install", "--formula", "ripgrep").Does(func() {
@@ -52,7 +53,7 @@ func TestEachKindWaitsForItsCommand(t *testing.T) {
 	f.On("brew", "install", "--cask", "1password", "owner/tap/1password-cli").Does(func() {
 		f.On("brew", "list", "--cask", "--full-name", "-1").Prints("ghostty\nfirefox\n1password\nowner/tap/1password-cli\n")
 		f.On("op", "whoami")
-		f.On("op", "read", "op://vault/Item/Section/token").Prints("plain-token-value\n")
+		secrettest.Holds(f, map[string]string{"op://vault/Item/Section/token": "plain-token-value"})
 	})
 	f.On("test", "-f", "/signed-in")
 	// A program is on kit's PATH once a command of it is scripted.

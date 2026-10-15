@@ -11,20 +11,21 @@ import (
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/kind/secret"
+	"github.com/leeovery/kit/internal/kind/secret/secrettest"
 	"github.com/leeovery/kit/internal/runner/runnertest"
 )
 
 const item = "op://vault/Item"
 
 // declare declares each line's secret: one in full in the plain section,
-// the rest in item's.
+// quoted or not, the rest in item's.
 func declare(t *testing.T, s *secret.Secrets, lines ...[2]string) config.List {
 	t.Helper()
 	var list config.List
 	for i, l := range lines {
 		value, note, _ := strings.Cut(l[1], "   # ")
 		e := config.Entry{Name: l[0], Value: value, Note: note, Scope: "shared", Line: i + 2, Section: "secrets"}
-		if !strings.HasPrefix(value, "op://") {
+		if !strings.HasPrefix(strings.TrimPrefix(value, "'"), "op://") {
 			e.Item, e.Section = item, "secrets "+item
 		}
 		list.Entries = append(list.Entries, e)
@@ -90,30 +91,27 @@ func TestSyncPutsEachInPlace(t *testing.T) {
 	declare(t, s,
 		[2]string{"PLAIN", "Section/plain   # a note"},
 		[2]string{"AWKWARD", "Section/awkward"},
-		[2]string{"BROKEN", "Section/broken"},
 		[2]string{"~/.config/tool/token", "Section/plain"},
+		[2]string{"~/.config/tool/key", "key-file --mode 640"},
 		[2]string{"ELSEWHERE", "op://vault/Other/field"},
 	)
-	if err := os.WriteFile(filepath.Join(home, ".secrets.zsh"), []byte("export BROKEN='old value'\nexport STRAY='kept'\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(home, ".secrets.zsh"), []byte("export STRAY='kept'\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	awkward := `it's $HOME, a ` + "`date`" + `, a \ and "quotes"`
 	fake.On("op", "whoami")
-	fake.On("op", "read", item+"/Section/plain").Prints("plain value\n")
-	fake.On("op", "read", item+"/Section/awkward").Prints(awkward + "\n")
-	fake.On("op", "read", item+"/Section/broken").Exits(1).PrintsToStderr("not found")
-	fake.On("op", "read", "op://vault/Other/field").Prints("elsewhere\n")
+	secrettest.Holds(fake, map[string]string{
+		item + "/Section/plain":   "plain value",
+		item + "/Section/awkward": awkward,
+		item + "/key-file":        "line one\nline two\n",
+		"op://vault/Other/field":  "elsewhere",
+	})
 	report, err := s.Sync(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.Synced != 4 || len(report.Failed) != 1 || report.Failed["BROKEN"] == "" {
+	if report.Synced != 5 || report.Changed != 5 || len(report.Failed) != 0 {
 		t.Errorf("report = %+v", report)
-	}
-	for _, c := range fake.Commands() {
-		if c.Name == "op" && c.Args[0] == "read" && !c.Secret {
-			t.Errorf("%s: its output isn't kept from the log", c)
-		}
 	}
 	token := filepath.Join(home, ".config/tool/token")
 	if data, _ := os.ReadFile(token); string(data) != "plain value\n" {
@@ -122,8 +120,15 @@ func TestSyncPutsEachInPlace(t *testing.T) {
 	if info, _ := os.Stat(token); info.Mode().Perm() != 0o600 {
 		t.Errorf("the file is %v", info.Mode().Perm())
 	}
+	key := filepath.Join(home, ".config/tool/key")
+	if data, _ := os.ReadFile(key); string(data) != "line one\nline two\n" {
+		t.Errorf("the file of many lines holds %q", data)
+	}
+	if info, _ := os.Stat(key); info.Mode().Perm() != 0o640 {
+		t.Errorf("the file of many lines is %v", info.Mode().Perm())
+	}
 	env, _ := os.ReadFile(filepath.Join(home, ".secrets.zsh"))
-	for _, want := range []string{"export PLAIN='plain value'   # a note\n", "export ELSEWHERE='elsewhere'\n", "export BROKEN='old value'\n", "export STRAY='kept'\n"} {
+	for _, want := range []string{"export PLAIN='plain value'   # a note\n", "export ELSEWHERE='elsewhere'\n", "export STRAY='kept'\n"} {
 		if !strings.Contains(string(env), want) {
 			t.Errorf("~/.secrets.zsh =\n%s\nwant a line %q", env, want)
 		}
@@ -131,6 +136,106 @@ func TestSyncPutsEachInPlace(t *testing.T) {
 	out, err := exec.Command("/bin/zsh", "-f", "-c", `source "$1"; printf %s "$AWKWARD"`, "zsh", filepath.Join(home, ".secrets.zsh")).Output()
 	if err != nil || string(out) != awkward {
 		t.Errorf("zsh read back %q, %v; want %q", out, err, awkward)
+	}
+	if report, err := s.Sync(t.Context()); err != nil || report.Changed != 0 {
+		t.Errorf("a second sync = %+v, %v; want nothing changed", report, err)
+	}
+}
+
+// Each run of op that reads a value has the person approve it, as each is
+// in a session of its own: a sync reads every value in one, op inject, its
+// references on its standard input and its output kept from the log, after
+// asking, of no one, whether 1Password is signed in.
+func TestSyncReadsEveryValueInOneRunOfOp(t *testing.T) {
+	fake := runnertest.New(t)
+	s := secret.New(fake, t.TempDir())
+	declare(t, s,
+		[2]string{"ONE", "Section/one"},
+		[2]string{"TWO", "Section/two"},
+		[2]string{"~/.ssh/key", "'op://vault/Key Item/private key'"},
+		[2]string{"ALSO_ONE", "Section/one"},
+	)
+	fake.On("op", "whoami").Exits(1).PrintsToStderr("account is not signed in")
+	fake.On("op", "account", "list", "--format", "json").Prints(`[{"url": "my.1password.com"}]`)
+	secrettest.Holds(fake, map[string]string{item + "/Section/one": "1", item + "/Section/two": "2", "op://vault/Key Item/private key": "-----BEGIN KEY-----\nabc\n-----END KEY-----"})
+	if report, err := s.Sync(t.Context()); err != nil || report.Synced != 4 {
+		t.Fatalf("Sync() = %+v, %v", report, err)
+	}
+	want := []string{"op whoami", "op account list --format json", "op inject"}
+	if got := fake.Calls(); !slices.Equal(got, want) {
+		t.Errorf("ran %q, want %q: one run of op reading the values", got, want)
+	}
+	inject := fake.Commands()[2]
+	if !inject.Secret || strings.Count(inject.Input, "{{") != 3 || !strings.Contains(inject.Input, "{{ op://vault/Key Item/private key }}") {
+		t.Errorf("op inject read %q (secret: %v): want each reference once, its output kept from the log", inject.Input, inject.Secret)
+	}
+}
+
+// A reference that won't read fails op inject whole: once 1Password
+// answers, the rest are read in halves, and only what won't read is read
+// alone, keeping its previous value.
+func TestSyncReadsAroundAReferenceThatWontRead(t *testing.T) {
+	home := t.TempDir()
+	fake := runnertest.New(t)
+	s := secret.New(fake, home)
+	declare(t, s,
+		[2]string{"A", "Section/a"},
+		[2]string{"B", "Section/b"},
+		[2]string{"BROKEN", "Section/broken"},
+		[2]string{"D", "Section/d"},
+	)
+	if err := os.WriteFile(filepath.Join(home, ".secrets.zsh"), []byte("export BROKEN='old value'\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fake.On("op", "whoami").Exits(1)
+	fake.On("op", "account", "list", "--format", "json").Prints(`[{"url": "my.1password.com"}]`)
+	fake.On("op", "vault", "list", "--format", "json").Prints("[]")
+	secrettest.Holds(fake, map[string]string{item + "/Section/a": "a", item + "/Section/b": "b", item + "/Section/d": "d"})
+	fake.On("op", "read", item+"/Section/broken").Exits(1).PrintsToStderr("not found")
+	report, err := s.Sync(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Synced != 3 || len(report.Failed) != 1 || report.Failed["BROKEN"] == "" {
+		t.Errorf("report = %+v", report)
+	}
+	var reads []string
+	for _, c := range fake.Calls() {
+		if strings.HasPrefix(c, "op read ") || c == "op inject" {
+			reads = append(reads, c)
+		}
+	}
+	want := []string{"op inject", "op inject", "op inject", "op read " + item + "/Section/broken", "op read " + item + "/Section/d"}
+	if !slices.Equal(reads, want) {
+		t.Errorf("read with %q, want %q: all, each half, then the half that failed, each alone", reads, want)
+	}
+	env, _ := os.ReadFile(filepath.Join(home, ".secrets.zsh"))
+	for _, line := range []string{"export A='a'\n", "export D='d'\n", "export BROKEN='old value'\n"} {
+		if !strings.Contains(string(env), line) {
+			t.Errorf("~/.secrets.zsh =\n%s\nwant a line %q", env, line)
+		}
+	}
+}
+
+// A template would read a $ in a reference as a variable, and }} as its
+// end: such a reference is read alone, never through op inject.
+func TestSyncReadsAnAwkwardReferenceAlone(t *testing.T) {
+	fake := runnertest.New(t)
+	s := secret.New(fake, t.TempDir())
+	awkward := "op://vault/Item $HOME/field}}"
+	declare(t, s, [2]string{"PLAIN", "Section/plain"}, [2]string{"AWKWARD", "'" + awkward + "'"})
+	fake.On("op", "whoami")
+	secrettest.Holds(fake, map[string]string{item + "/Section/plain": "plain", awkward: "awkward"})
+	if report, err := s.Sync(t.Context()); err != nil || report.Synced != 2 {
+		t.Fatalf("Sync() = %+v, %v", report, err)
+	}
+	for _, c := range fake.Commands() {
+		if c.String() == "op inject" && strings.Contains(c.Input, "$HOME") {
+			t.Errorf("op inject read %q", c.Input)
+		}
+	}
+	if !slices.Contains(fake.Calls(), "op read '"+awkward+"'") {
+		t.Errorf("ran %q: want the awkward reference read alone", fake.Calls())
 	}
 }
 
@@ -148,8 +253,7 @@ func TestVariableReadsWhatASyncWrote(t *testing.T) {
 	)
 	awkward := `it's $HOME, ''a ` + "`date`" + `, a \ and "quotes" # not a note'`
 	fake.On("op", "whoami")
-	fake.On("op", "read", item+"/Section/plain").Prints("plain value\n")
-	fake.On("op", "read", item+"/Section/awkward").Prints(awkward + "\n")
+	secrettest.Holds(fake, map[string]string{item + "/Section/plain": "plain value", item + "/Section/awkward": awkward})
 	if _, err := s.Sync(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -176,15 +280,22 @@ func TestVariableReadsWhatASyncWrote(t *testing.T) {
 	}
 }
 
+// When the one run of op that reads every value fails for want of the
+// person's approval, the sync asks once more, then gives up, reading
+// nothing alone.
 func TestSyncNeedsOnePasswordToAnswer(t *testing.T) {
 	fake := runnertest.New(t)
 	s := secret.New(fake, t.TempDir())
-	declare(t, s, [2]string{"PLAIN", "Section/plain"})
+	declare(t, s, [2]string{"PLAIN", "Section/plain"}, [2]string{"OTHER", "Section/other"})
 	fake.On("op", "whoami").Exits(1)
 	fake.On("op", "account", "list", "--format", "json").Prints(`[{"url": "my.1password.com"}]`)
+	fake.On("op", "inject").Exits(1).PrintsToStderr("authorization prompt dismissed")
 	fake.On("op", "vault", "list", "--format", "json").Exits(1)
 	if _, err := s.Sync(t.Context()); err == nil || err.Error() != secret.SignIn {
 		t.Errorf("Sync() = %v", err)
+	}
+	if n := len(fake.Calls()); n != 6 {
+		t.Errorf("ran %q: want no value read alone once 1Password doesn't answer", fake.Calls())
 	}
 }
 
@@ -201,23 +312,8 @@ func TestSyncWhenOnePasswordIsntSignedIn(t *testing.T) {
 	if err == nil || err.Error() != secret.SignedOut {
 		t.Errorf("Sync() = %v", err)
 	}
-	for _, c := range fake.Commands() {
-		if slices.Contains(c.Args, "vault") {
-			t.Error("it asked the app for a session: want nothing asked of anyone")
-		}
-	}
-}
-
-func TestSyncOpensASessionWhenNoneIsOpen(t *testing.T) {
-	fake := runnertest.New(t)
-	s := secret.New(fake, t.TempDir())
-	declare(t, s, [2]string{"PLAIN", "Section/plain"})
-	fake.On("op", "whoami").Exits(1).PrintsToStderr("account is not signed in")
-	fake.On("op", "account", "list", "--format", "json").Prints(`[{"url": "my.1password.com"}]`)
-	fake.On("op", "vault", "list", "--format", "json").Prints("[]")
-	fake.On("op", "read", item+"/Section/plain").Prints("v\n")
-	if report, err := s.Sync(t.Context()); err != nil || report.Synced != 1 {
-		t.Errorf("Sync() = %+v, %v; want the app asked for a session, and the sync done", report, err)
+	if want := []string{"op whoami", "op account list --format json"}; !slices.Equal(fake.Calls(), want) {
+		t.Errorf("ran %q, want %q: nothing asked of anyone", fake.Calls(), want)
 	}
 }
 

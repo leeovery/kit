@@ -60,6 +60,7 @@ type answer struct {
 	err      error
 	duration time.Duration
 	does     func()
+	filter   func(input string) (string, error)
 	asks     int
 }
 
@@ -96,6 +97,14 @@ func (s *Script) Fails(err error) *Script {
 // on the Mac: a file it writes, say.
 func (s *Script) Does(f func()) *Script {
 	s.last().does = f
+	return s
+}
+
+// Filters has the command print what f makes of what it reads on its
+// standard input, as a filter such as op inject does: when f fails, it
+// prints the error on its standard error instead, and exits 1.
+func (s *Script) Filters(f func(input string) (string, error)) *Script {
+	s.last().filter = f
 	return s
 }
 
@@ -178,8 +187,9 @@ func (f *Fake) Run(ctx context.Context, cmd runner.Command) (runner.Result, erro
 	if a.does != nil {
 		a.does()
 	}
+	stdout, stderr, exit := a.output(cmd.Input)
 	if cmd.Lines != nil && !cmd.Interactive {
-		for _, text := range []string{a.stdout, a.stderr} {
+		for _, text := range []string{stdout, stderr} {
 			for line := range strings.Lines(text) {
 				if line = strings.TrimRight(line, "\n"); strings.TrimSpace(line) != "" {
 					cmd.Lines(line)
@@ -187,11 +197,23 @@ func (f *Fake) Run(ctx context.Context, cmd runner.Command) (runner.Result, erro
 			}
 		}
 	}
-	res := runner.Result{Stdout: []byte(a.stdout), Stderr: []byte(a.stderr), ExitCode: a.exit, Duration: a.duration}
-	if a.exit != 0 {
-		return res, &runner.ExitError{Command: cmd.String(), Code: a.exit, Stderr: a.stderr}
+	res := runner.Result{Stdout: []byte(stdout), Stderr: []byte(stderr), ExitCode: exit, Duration: a.duration}
+	if exit != 0 {
+		return res, &runner.ExitError{Command: cmd.String(), Code: exit, Stderr: stderr}
 	}
 	return res, nil
+}
+
+// output is what the run prints, and exits with, given input.
+func (a *answer) output(input string) (stdout, stderr string, exit int) {
+	if a.filter == nil {
+		return a.stdout, a.stderr, a.exit
+	}
+	out, err := a.filter(input)
+	if err != nil {
+		return "", err.Error(), 1
+	}
+	return out, a.stderr, a.exit
 }
 
 // script is the latest script for cmd, or nil.
