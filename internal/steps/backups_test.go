@@ -132,6 +132,7 @@ func TestArq(t *testing.T) {
 		{"never", stats(`{"name": "User data", "schedule": {"type": "Daily"}}`), check.Attention, "no recent backup", []string{"arq:never:user-data"}},
 		{"none scheduled", stats(plan("User data", "Manual", now())), check.Attention, "no plan scheduled", []string{"arq:no-plan"}},
 		{"unreadable", "Error: the agent isn't running", check.Attention, "status unreadable", []string{"arq:unreadable"}},
+		{"no plan made", stats(""), check.Attention, "not set up", []string{"arq:none"}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			fake := runnertest.New(t)
@@ -146,5 +147,31 @@ func TestArq(t *testing.T) {
 	fake.On(steps.Arqc, "stats").Fails(runner.ErrNotFound)
 	if state, _, ids := checked(t, steps.Arq(fake, now)); state != check.Attention || !slices.Equal(ids, []string{"arq:missing"}) {
 		t.Errorf("not installed = %s %q", state, ids)
+	}
+}
+
+// Arq just installed, never opened, asks for its licence agreement to be
+// accepted: it isn't set up, as Time Machine without a backup disk isn't,
+// saying how to set it up, not that its agent doesn't answer. Failing
+// otherwise, its status is unreadable.
+func TestArqNeverSetUp(t *testing.T) {
+	for _, tt := range []struct {
+		name, stderr string
+		text         string
+		item         check.Item
+	}{
+		{"licence not accepted", "Please review the license agreement at https://example.com/license.html and run 'arqc acceptLicenseAgreement' to accept it\n", "not set up",
+			check.Item{ID: "arq:none", Name: "no backup plan is chosen yet", State: steps.Problem, Detail: "open Arq, sign in, then choose a backup plan"}},
+		{"agent not answering", "Error: couldn't connect to the agent\n", "status unreadable",
+			check.Item{ID: "arq:unreadable", Name: "couldn't read Arq's status", State: steps.Problem, Detail: "open Arq: is its agent running? If it complains, restart the Mac"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			fake := runnertest.New(t)
+			fake.On(steps.Arqc, "stats").Exits(1).PrintsToStderr(tt.stderr)
+			res := steps.Arq(fake, now).Check(t.Context())
+			if res.State != check.Attention || res.Summary != tt.text || len(res.Items) != 1 || res.Items[0] != tt.item {
+				t.Errorf("= %+v\nwant %s, %+v", res, tt.text, tt.item)
+			}
+		})
 	}
 }

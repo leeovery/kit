@@ -154,23 +154,36 @@ type arqStats struct {
 // arqManual is the schedule of a plan Arq never runs by itself.
 const arqManual = "manual"
 
+// arqUnlicensed is what arqc says, failing, till Arq's licence agreement
+// is accepted, as it is on first opening Arq: on a Mac it's just been
+// installed on.
+const arqUnlicensed = "acceptLicenseAgreement"
+
 // Arq checks the backup plans Arq runs on its own schedules: one at least,
 // each backed up within 26 hours. A plan with no schedule ("Manual") isn't
 // expected to run, so it's left out, as a plan kept for its history is.
+// Arq never set up, its licence not yet accepted or no plan made, isn't
+// set up, as Time Machine without a backup disk isn't.
 func Arq(run runner.Runner, now func() time.Time) engine.Step {
 	return engine.Step{
 		Name: FeatureArq, Title: "Arq", Area: AreaBackups,
 		Check: func(ctx context.Context) check.Result {
-			out, err := output(ctx, run, Arqc, "stats")
-			if errors.Is(err, runner.ErrNotFound) {
+			res, err := run.Run(ctx, runner.Command{Name: Arqc, Args: []string{"stats"}})
+			switch {
+			case errors.Is(err, runner.ErrNotFound):
 				return problem(FeatureArq, "not installed", [3]string{"missing", "Arq isn't installed", "install it: kit cask add arq"})
+			case err != nil && strings.Contains(string(res.Stderr), arqUnlicensed):
+				return arqNotSetUp()
 			}
 			var stats arqStats
 			if err == nil {
-				err = json.Unmarshal([]byte(out), &stats)
+				err = json.Unmarshal(res.Stdout, &stats)
 			}
 			if err != nil {
 				return problem(FeatureArq, "status unreadable", [3]string{"unreadable", "couldn't read Arq's status", "open Arq: is its agent running? If it complains, restart the Mac"})
+			}
+			if len(stats.BackupPlans) == 0 {
+				return arqNotSetUp()
 			}
 			var problems [][3]string
 			var good, times []string
@@ -212,6 +225,11 @@ func Arq(run runner.Runner, now func() time.Time) engine.Step {
 			return check.Result{State: check.OK, Summary: summary, Glance: "Arq " + strings.Join(times, ", ")}
 		},
 	}
+}
+
+// arqNotSetUp is Arq's check on a Mac it's never been set up on.
+func arqNotSetUp() check.Result {
+	return problem(FeatureArq, "not set up", [3]string{"none", "no backup plan is chosen yet", "open Arq, sign in, then choose a backup plan"})
 }
 
 // slug is a name as part of an id: lowercase letters and digits, dashes
