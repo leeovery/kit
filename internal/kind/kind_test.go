@@ -368,6 +368,41 @@ func TestStepCountsWhatsInstalled(t *testing.T) {
 	}
 }
 
+// announcingKind is a countingKind whose install says which thing it's
+// installing, each "installing" line naming it.
+type announcingKind struct{ *countingKind }
+
+func (*announcingKind) Installing(line string, names []string) (string, bool) {
+	name, ok := strings.CutPrefix(line, "installing ")
+	return name, ok && slices.Contains(names, name)
+}
+
+// A kind that says which thing it's installing has its step name that one,
+// in whatever order it takes them, not the next not yet done in the order
+// asked for; till it says, and once that one's done, it names none. A
+// thing it wasn't asked to install, as a dependency, and one said again,
+// change nothing.
+func TestStepNamesWhatTheInstallSaysItsInstalling(t *testing.T) {
+	k := &announcingKind{&countingKind{
+		fakeKind: knowing("a", "b", "c"),
+		prints:   []string{"installing c", "installing libdep", "installing c", "done c", "installing a", "done a", "installing b", "done b"},
+	}}
+	var said []event.Doing
+	s := kind.Step(k, declared("a", "b", "c"))
+	if err := s.Apply(saying(&said), s.Check(context.Background())); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	want := []event.Doing{
+		{Says: "installing", Of: 3},
+		{Says: "installing c", Of: 3}, {Says: "installing", Done: 1, Of: 3},
+		{Says: "installing a", Done: 1, Of: 3}, {Says: "installing", Done: 2, Of: 3},
+		{Says: "installing b", Done: 2, Of: 3}, {Says: "installing", Done: 3, Of: 3},
+	}
+	if !slices.Equal(said, want) {
+		t.Errorf("the step said %+v\nwant %+v", said, want)
+	}
+}
+
 // A kind that can't tell has its step say nothing as it installs, and its
 // install has no lines to give.
 func TestStepWithoutCountingSaysNothing(t *testing.T) {
