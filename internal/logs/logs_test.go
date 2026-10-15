@@ -26,13 +26,14 @@ func TestALogRecordsEveryEvent(t *testing.T) {
 	if want := filepath.Join(dir, "2026-01-02T030405.678-status.jsonl"); l.Path() != want {
 		t.Errorf("Path() = %s, want %s", l.Path(), want)
 	}
-	steps := []event.Step{{Name: "brew", Title: "Formulae"}}
+	steps := []event.Step{{Name: "brew", Title: "Formulae"}, {Name: "manual", Title: "By hand", ByHand: []event.Hand{{Name: "sign-in", Title: "Sign in"}}}}
 	result := check.Result{State: check.Attention, Summary: "2 declared, 1 installed", Items: []check.Item{{ID: "brew:jq", Name: "jq", State: "missing"}}}
 	for _, e := range []event.Event{
 		event.RunStarted{Time: at, Command: "status", Machine: "laptop", Version: "0.1.0", Steps: steps},
 		event.StepStarted{Time: at, Step: "brew"},
 		event.CommandRan{Time: at, Step: "brew", Command: "brew leaves", Exit: 0, Duration: 1500 * time.Millisecond, Stdout: "ripgrep\n"},
 		event.CommandRan{Time: at, Step: "brew", Command: "brew info jq", Exit: 1, Stderr: "Error: no\n", Error: "brew info jq exited 1: Error: no"},
+		event.Logged{Time: at, Step: "brew", Line: "Installed ripgrep"},
 		event.StepFinished{Time: at, Step: "brew", Result: result, Duration: 2 * time.Second},
 		event.NeedsYou{Time: at, Step: "manual", Item: "sign-in", Title: "Sign in", Steps: []string{"Scan the code"}, Opened: "System Settings", Tells: true, More: 2},
 		event.RunFinished{Time: at, Duration: 3 * time.Second, Counts: map[check.State]int{check.Attention: 1}},
@@ -54,7 +55,7 @@ func TestALogRecordsEveryEvent(t *testing.T) {
 			t.Errorf("%s at %v, want %v", r.Event, r.Time, at)
 		}
 	}
-	if want := []string{"run_started", "step_started", "command", "command", "step_finished", "needs_you", "run_finished"}; !slices.Equal(kinds, want) {
+	if want := []string{"run_started", "step_started", "command", "command", "logged", "step_finished", "needs_you", "run_finished"}; !slices.Equal(kinds, want) {
 		t.Fatalf("records = %q, want %q", kinds, want)
 	}
 	if r := records[0]; r.Command != "status" || r.Machine != "laptop" || r.Version != "0.1.0" || !reflect.DeepEqual(r.Steps, steps) {
@@ -66,13 +67,16 @@ func TestALogRecordsEveryEvent(t *testing.T) {
 	if r := records[3]; r.Exit == nil || *r.Exit != 1 || r.Stderr != "Error: no\n" || r.Error != "brew info jq exited 1: Error: no" {
 		t.Errorf("second command = %+v", r)
 	}
-	if r := records[4]; r.Result == nil || r.Result.State != check.Attention || r.Result.Items[0].ID != "brew:jq" || r.DurationMS != 2000 {
+	if r := records[4]; r.Step != "brew" || r.Line != "Installed ripgrep" {
+		t.Errorf("logged = %+v", r)
+	}
+	if r := records[5]; r.Result == nil || r.Result.State != check.Attention || r.Result.Items[0].ID != "brew:jq" || r.DurationMS != 2000 {
 		t.Errorf("step_finished = %+v", r)
 	}
-	if r := records[5]; r.Step != "manual" || r.Item != "sign-in" || r.Title != "Sign in" || !r.Tells || r.More != 2 {
+	if r := records[6]; r.Step != "manual" || r.Item != "sign-in" || r.Title != "Sign in" || !r.Tells || r.More != 2 {
 		t.Errorf("needs_you = %+v", r)
 	}
-	if r := records[6]; r.Counts[check.Attention] != 1 || r.DurationMS != 3000 {
+	if r := records[7]; r.Counts[check.Attention] != 1 || r.DurationMS != 3000 {
 		t.Errorf("run_finished = %+v", r)
 	}
 	info, err := os.Stat(l.Path())

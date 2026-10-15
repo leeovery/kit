@@ -90,6 +90,43 @@ func TestManualLinesRead(t *testing.T) {
 	}
 }
 
+// The steps by hand are listed with the step raising them, from the start of
+// a run: the rest's, every line that reads, done or not, in order; one of
+// its own, its line alone.
+func TestTheStepsByHandAreListed(t *testing.T) {
+	state := t.TempDir()
+	if err := steps.MarkDone(state, []string{"sign-in"}, time.Now(), false); err != nil {
+		t.Fatal(err)
+	}
+	list := config.List{Entries: []config.Entry{
+		{Name: "sign-in", Value: `"Sign in to the service"`, Scope: "laptop", Line: 2},
+		{Name: "broken", Value: `--test true`, Scope: "laptop", Line: 3},
+		{Name: "backups", Value: `"Turn backups on"`, Scope: "laptop", Line: 4},
+	}}
+	own := steps.ManualStep{Name: "licence", Do: "Enter the app's licence", After: []string{steps.ManualName}}
+	p, err := engine.New(steps.Manual(nil, "/home/someone", state, list, nil), steps.OwnManual(nil, state, own, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sink := &events{}
+	if _, err := p.Check(t.Context(), sink, engine.Options{Jobs: 1}); err != nil {
+		t.Fatal(err)
+	}
+	start, ok := sink.seen[0].(event.RunStarted)
+	if !ok || len(start.Steps) != 2 {
+		t.Fatalf("the run began with %+v, want its start, with both steps", sink.seen[0])
+	}
+	want := map[string][]event.Hand{
+		steps.ManualName: {{Name: "sign-in", Title: "Sign in to the service"}, {Name: "backups", Title: "Turn backups on"}},
+		"licence":        {{Name: "licence", Title: "Enter the app's licence"}},
+	}
+	for _, s := range start.Steps {
+		if !slices.Equal(s.ByHand, want[s.Name]) {
+			t.Errorf("%s lists %+v by hand, want %+v", s.Name, s.ByHand, want[s.Name])
+		}
+	}
+}
+
 // events notes the events a step emits.
 type events struct {
 	mu   sync.Mutex

@@ -40,7 +40,7 @@ var ErrNoLogs = errors.New("no runs logged yet")
 type Record struct {
 	Time time.Time `json:"time"`
 	// Event is what happened: run_started, step_started, step_finished,
-	// command, asking, answered, needs_you or run_finished.
+	// command, logged, asking, answered, needs_you or run_finished.
 	Event   string       `json:"event"`
 	Command string       `json:"command,omitempty"`
 	Machine string       `json:"machine,omitempty"`
@@ -70,6 +70,8 @@ type Record struct {
 	Title string `json:"title,omitempty"`
 	Tells bool   `json:"tells,omitempty"`
 	More  int    `json:"more,omitempty"`
+	// Line is what a step told the run's log, in kit's own words (logged).
+	Line string `json:"line,omitempty"`
 }
 
 // File is a run's log, as a sink.
@@ -184,6 +186,8 @@ func (l *File) record(e event.Event) Record {
 		l.asked = e.Says
 	case event.NeedsYou:
 		r.Event, r.Step, r.Item, r.Title, r.Tells, r.More = "needs_you", e.Step, e.Item, e.Title, e.Tells, e.More
+	case event.Logged:
+		r.Event, r.Step, r.Line = "logged", e.Step, e.Line
 	case event.RunFinished:
 		r.Event, r.DurationMS, r.Counts = "run_finished", e.Duration.Milliseconds(), e.Counts
 		l.finished = true

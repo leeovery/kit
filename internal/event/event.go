@@ -52,6 +52,15 @@ type Step struct {
 	// Waits are the steps it waits for, by name: those it needs and those
 	// it's applied after.
 	Waits []string `json:",omitempty"`
+	// ByHand are the steps by hand it raises, in order, known before it
+	// runs: a list of what may need the person at the Mac.
+	ByHand []Hand `json:",omitempty"`
+}
+
+// Hand is a step by hand, as a step that raises it lists it: its line's
+// name, as its NeedsYou's Item, and what to do, as its Title.
+type Hand struct {
+	Name, Title string
 }
 
 // Preparing is kit getting a run ready, before it starts, as applying works
@@ -131,6 +140,16 @@ type Doing struct {
 	// Done of Of things, as in 38 of 129 installed.
 	Done, Of int
 }
+
+// Logged is a line of kit's own words for the run's log: something a step
+// did, as it did it, as in "Installed jq".
+type Logged struct {
+	Time time.Time
+	Step string
+	Line string
+}
+
+func (e Logged) At() time.Time { return e.Time }
 
 // NeedsYou is a step by hand come up for the person at the Mac, front and
 // centre on applying's screen: its line's name (Item); what to do, as its
@@ -254,6 +273,22 @@ func Say(ctx context.Context, d Doing) {
 }
 
 type sayingKey struct{}
+
+// WithLogging returns ctx for running a step that tells the run's log what
+// it did, in lines of kit's own: each line is given to log.
+func WithLogging(ctx context.Context, log func(Logged)) context.Context {
+	return context.WithValue(ctx, loggingKey{}, log)
+}
+
+// Log has the step ctx is running tell the run's log l: nothing when ctx
+// isn't a step's.
+func Log(ctx context.Context, l Logged) {
+	if log, ok := ctx.Value(loggingKey{}).(func(Logged)); ok {
+		log(l)
+	}
+}
+
+type loggingKey struct{}
 
 // Changing reports whether ctx is a step changing things.
 func Changing(ctx context.Context) bool {

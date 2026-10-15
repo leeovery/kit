@@ -52,6 +52,16 @@ func TestSay(t *testing.T) {
 	}
 }
 
+func TestLog(t *testing.T) {
+	event.Log(t.Context(), event.Logged{Line: "outside a step, logged nowhere"})
+	var logged []event.Logged
+	ctx := event.WithLogging(t.Context(), func(l event.Logged) { logged = append(logged, l) })
+	event.Log(ctx, event.Logged{Line: "Installed jq"})
+	if want := []event.Logged{{Line: "Installed jq"}}; !slices.Equal(logged, want) {
+		t.Errorf("logged %+v, want %+v", logged, want)
+	}
+}
+
 func TestCommand(t *testing.T) {
 	started := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	rep := runner.Report{

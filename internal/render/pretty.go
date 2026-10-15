@@ -99,7 +99,10 @@ type Pretty struct {
 	// changed things, and command the command printing them.
 	output  map[string][]string
 	command map[string]string
-	frame   int
+	// logged are the lines steps told the run's log, in order, for applying's
+	// view to show as its log: none shown yet.
+	logged []event.Logged
+	frame  int
 	// began is when the run began, by the clock, for how long it's taken;
 	// drawn when the live part was last drawn.
 	began, drawn time.Time
@@ -198,6 +201,7 @@ func (p *Pretty) Emit(e event.Event) {
 		p.start, p.results = e, make(map[string]event.StepFinished, len(e.Steps))
 		p.output, p.command, p.began = map[string][]string{}, map[string]string{}, p.now()
 		p.cut, p.card, p.cards = map[string]runningStep{}, nil, map[string]event.NeedsYou{}
+		p.logged = nil
 		p.order.start(e.Steps)
 		p.preparing = ""
 		p.open(e.Command, e.Machine, e.Time, e.Only)
@@ -225,6 +229,8 @@ func (p *Pretty) Emit(e event.Event) {
 		p.card = &e
 		p.cards[cardID(e.Step, e.Item)] = e
 		p.drawSpinner()
+	case event.Logged:
+		p.logged = append(p.logged, e)
 	case event.Asking:
 		p.asking = e.Says
 		p.drawSpinner()

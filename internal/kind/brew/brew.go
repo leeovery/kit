@@ -382,6 +382,9 @@ func (formulae) Installing(line string, names []string) (string, bool) {
 	return installing(line, names)
 }
 
+// Short is the part of name a formula's shown by: its name in its tap.
+func (formulae) Short(name string) string { return lastPart(name) }
+
 // Shares names the kind formulae take turns with: casks, which Homebrew
 // installs too.
 func (formulae) Shares() []string { return []string{"cask"} }
@@ -473,6 +476,9 @@ func (casks) Begun(line string) bool { return hasBegun(line) }
 func (casks) Installing(line string, names []string) (string, bool) {
 	return installing(line, names)
 }
+
+// Short is the part of name a cask's shown by: its name in its tap.
+func (casks) Short(name string) string { return lastPart(name) }
 
 // Shares names the kind casks take turns with: formulae, which Homebrew
 // installs too.

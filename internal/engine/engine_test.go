@@ -395,6 +395,52 @@ func TestAStepSaysWhatItsDoing(t *testing.T) {
 	}
 }
 
+// What a step tells the run's log is emitted as its, at the time it tells
+// it.
+func TestAStepTellsTheRunsLog(t *testing.T) {
+	clock := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	p, _ := engine.New(engine.Step{Name: "brew", Check: func(ctx context.Context) check.Result {
+		event.Log(ctx, event.Logged{Line: "Installed jq"})
+		return check.Result{State: check.OK}
+	}})
+	rec := &recorder{}
+	if _, err := p.Check(t.Context(), rec, engine.Options{Jobs: 1, Now: func() time.Time { return clock }}); err != nil {
+		t.Fatal(err)
+	}
+	want := event.Logged{Time: clock, Step: "brew", Line: "Installed jq"}
+	if !slices.Contains(rec.events, event.Event(want)) {
+		t.Errorf("events = %+v, want %+v among them", rec.events, want)
+	}
+}
+
+// The steps by hand a step raises are listed with it, from the start: as a
+// run is planned, and as it starts.
+func TestARunListsTheStepsByHand(t *testing.T) {
+	hands := []event.Hand{{Name: "sign-in", Title: "Sign in to the app"}, {Name: "backup", Title: "Turn backups on"}}
+	p, err := engine.New(
+		engine.Step{Name: "manual", Title: "By hand", Check: ok("0 of 2 done"), ByHand: hands},
+		engine.Step{Name: "brew", Check: ok("1 declared, all installed")},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []event.Step{{Name: "manual", Title: "By hand", ByHand: hands}, {Name: "brew", Title: "brew"}}
+	planned, err := p.Planned(engine.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(planned, want) {
+		t.Errorf("Planned() = %+v\nwant %+v", planned, want)
+	}
+	rec := &recorder{}
+	if _, err := p.Check(t.Context(), rec, engine.Options{Jobs: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if start, ok := rec.events[0].(event.RunStarted); !ok || !reflect.DeepEqual(start.Steps, want) {
+		t.Errorf("the run started with %+v\nwant steps %+v", rec.events[0], want)
+	}
+}
+
 func TestApply(t *testing.T) {
 	installed := false
 	var applied []string

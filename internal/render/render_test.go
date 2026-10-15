@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -162,6 +163,44 @@ func TestFacesWithoutATerminalShowACard(t *testing.T) {
 	show(t, render.NewJSON(&without), slices.Delete(slices.Clone(events), 2, 3))
 	if with.String() != without.String() {
 		t.Errorf("with a card, JSON printed\n%s\nwant it as without\n%s", with.String(), without.String())
+	}
+}
+
+// What a step tells the run's log changes nothing a face shows yet: plain
+// says what a step installed as it finishes, as it did; the JSON face's
+// document, and what the pretty face prints, are as they would be without
+// it.
+func TestFacesShowNothingOfTheLogsLines(t *testing.T) {
+	installed := check.Result{State: check.OK, Summary: "2 declared, all installed", Done: []check.Item{
+		{ID: "brew:jq", Name: "jq", Action: "install"}, {ID: "brew:owner/tap/tool", Name: "owner/tap/tool", Action: "install"},
+	}}
+	events := []event.Event{
+		event.RunStarted{Command: "apply", Machine: "laptop", Steps: []event.Step{{Name: "brew", Title: "Formulae"}}},
+		event.StepStarted{Step: "brew", Doing: "applying"},
+		event.Logged{Step: "brew", Line: "Installed jq"},
+		event.Logged{Step: "brew", Line: "Installed tool"},
+		event.StepFinished{Step: "brew", Result: installed},
+		event.RunFinished{Counts: map[check.State]int{check.OK: 1}},
+	}
+	without := slices.Delete(slices.Clone(events), 2, 4)
+	var plain bytes.Buffer
+	show(t, render.NewPlain(&plain), events)
+	if want := "kit apply · laptop\nbrew ok 2 declared, all installed\nbrew installed jq, owner/tap/tool\nNothing needs attention\n"; plain.String() != want {
+		t.Errorf("plain printed\n%s\nwant\n%s", plain.String(), want)
+	}
+	faces := map[string]func(w io.Writer) render.Face{
+		"json": func(w io.Writer) render.Face { return render.NewJSON(w) },
+		"pretty": func(w io.Writer) render.Face {
+			return render.NewPretty(&colorprofile.Writer{Forward: w, Profile: colorprofile.NoTTY}, 80, false)
+		},
+	}
+	for name, face := range faces {
+		var with, wout bytes.Buffer
+		show(t, face(&with), events)
+		show(t, face(&wout), without)
+		if with.String() != wout.String() {
+			t.Errorf("with the log's lines, %s printed\n%s\nwant it as without\n%s", name, with.String(), wout.String())
+		}
 	}
 }
 

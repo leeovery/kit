@@ -118,6 +118,23 @@ func appToOpen(had string, words []string, i int) (string, error) {
 	return words[i+1], nil
 }
 
+// hand is the step by hand m is, as the step raising it lists it.
+func (m ManualStep) hand() event.Hand {
+	return event.Hand{Name: m.Name, Title: m.Do}
+}
+
+// hands are the steps by hand list's lines are, in order: but those that
+// don't read, which its step's check fails on.
+func hands(home string, list config.List) []event.Hand {
+	var out []event.Hand
+	for _, e := range list.Entries {
+		if m, err := ParseManual(home, e); err == nil {
+			out = append(out, m.hand())
+		}
+	}
+	return out
+}
+
 // SplitManual splits [manual]'s lines: those saying what they come after
 // or before, each a step of its own, and the rest, checked together. One
 // that doesn't read stays with the rest, whose check says so.
@@ -323,7 +340,7 @@ func (r *Raise) recount() {
 func OwnManual(run runner.Runner, stateDir string, m ManualStep, raise *Raise) engine.Step {
 	b := byHand{ManualStep: m, run: run, stateDir: stateDir}
 	return engine.Step{
-		Name: m.Name, Title: m.Name, Area: AreaManual,
+		Name: m.Name, Title: m.Name, Area: AreaManual, ByHand: []event.Hand{m.hand()},
 		Check: func(ctx context.Context) check.Result {
 			if b.done(ctx) {
 				return check.Result{State: check.OK, Summary: "done"}
@@ -375,7 +392,7 @@ func Manual(run runner.Runner, home, stateDir string, list config.List, raise *R
 		return out, nil
 	}
 	step := engine.Step{
-		Name: ManualName, Title: "By hand", Area: AreaManual,
+		Name: ManualName, Title: "By hand", Area: AreaManual, ByHand: hands(home, list),
 		Check: func(ctx context.Context) check.Result {
 			if _, err := state.Load[manualDone](stateDir, manualRecord); err != nil {
 				return failed(err)

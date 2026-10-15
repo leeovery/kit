@@ -368,6 +368,49 @@ func TestStepCountsWhatsInstalled(t *testing.T) {
 	}
 }
 
+// shortKind is a countingKind whose things are shown by the part of their
+// names after a slash.
+type shortKind struct{ *countingKind }
+
+func (*shortKind) Short(name string) string { return name[strings.LastIndex(name, "/")+1:] }
+
+// Each thing a kind's install says is done is told to the run's log as it's
+// done, before the step says what's next: by the part of its name it's
+// shown by, for a kind that's Shortened, else by its name. A thing it
+// wasn't asked to install, as a dependency, and a thing said twice, are
+// told nothing of.
+func TestStepTellsTheLogOfEachThingInstalled(t *testing.T) {
+	prints := []string{"done tap/b", "done libdep", "done a", "done a"}
+	for _, tt := range []struct {
+		name string
+		kind kind.Kind
+		b    string
+	}{
+		{"by its name", &countingKind{fakeKind: knowing("a", "tap/b"), prints: prints}, "tap/b"},
+		{"shortened", &shortKind{&countingKind{fakeKind: knowing("a", "tap/b"), prints: prints}}, "b"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var told []event.Event
+			ctx := event.WithSaying(context.Background(), func(d event.Doing) { told = append(told, d) })
+			ctx = event.WithLogging(ctx, func(l event.Logged) { told = append(told, l) })
+			s := kind.Step(tt.kind, declared("a", "tap/b"))
+			if err := s.Apply(ctx, s.Check(context.Background())); err != nil {
+				t.Fatalf("Apply() error = %v", err)
+			}
+			want := []event.Event{
+				event.Doing{Says: "installing a", Of: 2},
+				event.Logged{Line: "Installed " + tt.b},
+				event.Doing{Says: "installing a", Done: 1, Of: 2},
+				event.Logged{Line: "Installed a"},
+				event.Doing{Says: "installing", Done: 2, Of: 2},
+			}
+			if !slices.Equal(told, want) {
+				t.Errorf("the step told %+v\nwant %+v", told, want)
+			}
+		})
+	}
+}
+
 // announcingKind is a countingKind whose install says which thing it's
 // installing, each "installing" line naming it.
 type announcingKind struct{ *countingKind }

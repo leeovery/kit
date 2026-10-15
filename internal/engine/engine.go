@@ -78,6 +78,8 @@ type Step struct {
 	// Admin is whether applying it needs an administrator's password, which
 	// the command settles before anything is applied.
 	Admin bool
+	// ByHand are the steps by hand applying it raises, in order.
+	ByHand []event.Hand
 }
 
 // Wait is a thing a step is applied after: one of the things another step
@@ -428,7 +430,7 @@ func (s Step) info() event.Step {
 			waits = append(waits, w.Step)
 		}
 	}
-	return event.Step{Name: s.Name, Title: s.title(), Area: s.Area, Part: s.Part, Waiting: s.Waiting, Waits: waits}
+	return event.Step{Name: s.Name, Title: s.title(), Area: s.Area, Part: s.Part, Waiting: s.Waiting, Waits: waits, ByHand: s.ByHand}
 }
 
 func (p *Pipeline) run(ctx context.Context, sink event.Sink, opts Options, apply bool) (Report, error) {
@@ -728,11 +730,15 @@ func (d *dispatch) startReady(ctx context.Context, steps []Step, running *int, j
 }
 
 // stepContext is ctx for running s: what runs in it is s's, what s says
-// it's doing as it goes is emitted, what it waits for partway through
-// applying is waited for as its Later are, and what it says may be in
-// place has the steps waiting for its things look again.
+// it's doing as it goes, and tells the run's log, is emitted, what it waits
+// for partway through applying is waited for as its Later are, and what it
+// says may be in place has the steps waiting for its things look again.
 func (d *dispatch) stepContext(ctx context.Context, s Step) context.Context {
 	ctx = event.WithSaying(event.WithStep(ctx, s.Name), func(e event.Doing) {
+		e.Time, e.Step = d.now(), s.Name
+		d.sink.Emit(e)
+	})
+	ctx = event.WithLogging(ctx, func(e event.Logged) {
 		e.Time, e.Step = d.now(), s.Name
 		d.sink.Emit(e)
 	})

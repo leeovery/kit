@@ -270,6 +270,11 @@ func TestDoneRecognisesWhatsInstalled(t *testing.T) {
 		{"a dependency's cask", casks, "🍺  ghostty was successfully installed!", []string{"zoom"}, ""},
 		{"cask installing", casks, "==> Installing Cask ghostty", []string{"ghostty"}, ""},
 		{"a formula's line", casks, "🍺  /opt/homebrew/Cellar/ghostty/1.0: 12 files, 1MB", []string{"ghostty"}, ""},
+		{"keg elsewhere", formulae, "🍺  /usr/local/Cellar/hello/2.12.3: 12 files, 193.3KB", []string{"hello"}, "hello"},
+		{"keg in a home", formulae, "🍺  /Users/someone/homebrew/Cellar/hello/2.12.3: 12 files, 193.3KB", []string{"hello"}, "hello"},
+		{"a dependency's install", formulae, "==> Installing gnupg dependency: gmp (6.3.0)", []string{"gnupg"}, ""},
+		{"a formula's other line", formulae, "==> Summary", []string{"hello"}, ""},
+		{"a cask's other line", casks, "==> Moving App 'Ghostty.app' to '/Applications/Ghostty.app'", []string{"ghostty"}, ""},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			got, ok := tt.kind.Done(tt.line, tt.names)
@@ -330,6 +335,74 @@ func TestApplyingCountsTheFormulae(t *testing.T) {
 	}
 	if !slices.Equal(said, want) {
 		t.Errorf("applying said %+v\nwant %+v", said, want)
+	}
+}
+
+// A formula, or a cask, is shown by its name in its tap.
+func TestShort(t *testing.T) {
+	for _, k := range []kind.Kind{brew.New(nil).Formulae(), brew.New(nil).Casks()} {
+		short := k.(kind.Shortened)
+		for name, want := range map[string]string{"jq": "jq", "owner/tap/tool": "tool", "php@8.5": "php@8.5"} {
+			if got := short.Short(name); got != want {
+				t.Errorf("%s: Short(%q) = %q, want %q", k.Name(), name, got, want)
+			}
+		}
+	}
+}
+
+// installingCasks is what brew install --cask ghostty owner/tap/tool-cli
+// prints.
+const installingCasks = `==> Fetching downloads for: ghostty and tool-cli
+✔︎ Cask ghostty (1.2.0)
+✔︎ Cask tool-cli (2.30.0)
+==> Installing Cask ghostty
+==> Moving App 'Ghostty.app' to '/Applications/Ghostty.app'
+🍺  ghostty was successfully installed!
+==> Installing Cask tool-cli
+==> Linking Binary 'tool' to '/opt/homebrew/bin/tool'
+🍺  tool-cli was successfully installed!
+`
+
+// Applying formulae, or casks, tells the run's log of each asked for as
+// brew says it's installed, by its name in its tap, in the order brew
+// installs them: a dependency's install is told nothing of.
+func TestApplyingTellsTheLogOfEachInstalled(t *testing.T) {
+	for _, tt := range []struct {
+		kind    string
+		install []string
+		prints  string
+		want    []string
+	}{
+		{"brew", []string{"--formula", "owner/tap/tuicr", "ffmpeg", "hello"}, installing, []string{"Installed tuicr", "Installed ffmpeg", "Installed hello"}},
+		{"cask", []string{"--cask", "ghostty", "owner/tap/tool-cli"}, installingCasks, []string{"Installed ghostty", "Installed tool-cli"}},
+	} {
+		t.Run(tt.kind, func(t *testing.T) {
+			fake := runnertest.New(t)
+			fake.On("brew", "list", "--formula", "--full-name", "-1")
+			fake.On("brew", "leaves")
+			fake.On("brew", "leaves", "--installed-on-request")
+			fake.On("brew", "list", "--cask", "--full-name", "-1")
+			fake.On("brew", "tap").Prints("owner/tap\n")
+			fake.On("brew", "info", "--json=v2", "--formula", "owner/tap/tuicr", "ffmpeg", "hello").Prints(`{"formulae": [{"name": "ffmpeg", "full_name": "ffmpeg"}, {"name": "hello", "full_name": "hello"}, {"name": "tuicr", "full_name": "owner/tap/tuicr"}], "casks": []}`)
+			fake.On("brew", "info", "--json=v2", "--cask", "ghostty", "owner/tap/tool-cli").Prints(`{"formulae": [], "casks": [{"token": "ghostty", "full_token": "ghostty"}, {"token": "tool-cli", "full_token": "owner/tap/tool-cli"}]}`)
+			fake.On("brew", "update", "--quiet")
+			fake.On("brew", append([]string{"install"}, tt.install...)...).Prints(tt.prints)
+			var told []string
+			ctx := event.WithLogging(t.Context(), func(l event.Logged) { told = append(told, l.Line) })
+			h := brew.New(fake)
+			k := map[string]kind.Kind{"brew": h.Formulae(), "cask": h.Casks()}[tt.kind]
+			var entries []config.Entry
+			for _, name := range tt.install[1:] {
+				entries = append(entries, config.Entry{Name: name})
+			}
+			s := kind.Step(k, config.List{Kind: tt.kind, Entries: entries})
+			if err := s.Apply(ctx, s.Check(ctx)); err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(told, tt.want) {
+				t.Errorf("applying told the log %q, want %q", told, tt.want)
+			}
+		})
 	}
 }
 

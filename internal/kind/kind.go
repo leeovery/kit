@@ -225,8 +225,8 @@ type Found struct {
 // Counter is a kind that can tell, in a line its install command printed,
 // that one of the things it was asked to install is installed: the step
 // counts them as they're done, saying which it's installing next and how
-// far it's got. Its Install gives its install command's lines to
-// Lines(ctx).
+// far it's got, and tells the run's log of each, as in "Installed jq". Its
+// Install gives its install command's lines to Lines(ctx).
 type Counter interface {
 	// Done is which of names line says is installed: none when it says
 	// nothing of them, as of a dependency pulled in.
@@ -255,6 +255,13 @@ type Announcer interface {
 	// Installing is which of names line says is being installed now: none
 	// when it says nothing of them, as of a dependency.
 	Installing(line string, names []string) (string, bool)
+}
+
+// Shortened is a kind whose things are shown by part of their names, as
+// Homebrew's from a tap by their names in the tap.
+type Shortened interface {
+	// Short is the part of name it's shown by.
+	Short(name string) string
 }
 
 // Sharing is a kind whose installs take turns with other kinds', as they go
@@ -614,7 +621,8 @@ func counting(ctx context.Context, k Kind, names []string) context.Context {
 	}
 	f, fetches := k.(Fetcher)
 	a, _ := k.(Announcer)
-	p := &progress{ctx: ctx, counter: c, fetcher: f, announcer: a, names: names, unstarted: fetches, done: map[string]bool{}, fetched: map[string]bool{}}
+	s, _ := k.(Shortened)
+	p := &progress{ctx: ctx, counter: c, fetcher: f, announcer: a, shortened: s, names: names, unstarted: fetches, done: map[string]bool{}, fetched: map[string]bool{}}
 	p.say()
 	return context.WithValue(ctx, progressKey{}, p)
 }
@@ -623,12 +631,14 @@ func counting(ctx context.Context, k Kind, names []string) context.Context {
 // it prints: a Fetcher's downloading, from when its command starts till the
 // install proper begins, counting those of names downloaded; then
 // installing, as each is done, the next (next), counting those done. Each
-// done has the steps waiting for the kind's things look again.
+// done is told to the run's log, and has the steps waiting for the kind's
+// things look again.
 type progress struct {
 	ctx       context.Context
 	counter   Counter
 	fetcher   Fetcher
 	announcer Announcer
+	shortened Shortened
 	names     []string
 
 	mu sync.Mutex
@@ -657,6 +667,7 @@ func (p *progress) line(line string) {
 	case done:
 		if p.note(p.done, name) {
 			p.unstarted, p.fetching = false, false
+			event.Log(p.ctx, event.Logged{Line: "Installed " + p.shown(name)})
 			p.say()
 			engine.Changed(p.ctx)
 		}
@@ -679,6 +690,15 @@ func (p *progress) announced(line string) (string, bool) {
 		return "", false
 	}
 	return p.announcer.Installing(line, p.names)
+}
+
+// shown is name as the run's log shows it: by the part its kind shows it
+// by, if it's Shortened.
+func (p *progress) shown(name string) string {
+	if p.shortened == nil {
+		return name
+	}
+	return p.shortened.Short(name)
 }
 
 // next is which of names the install is at: for an Announcer's, the one it
