@@ -8,7 +8,6 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/leeovery/kit/internal/boot"
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/look"
@@ -31,7 +30,7 @@ func (p *Pretty) height() int {
 }
 
 // applyLive is applying's live part in place under its heading, in a
-// window too small for its screen: the lights, the bar and its counts,
+// window too small for its screen: the rows' lights, the bar and its counts,
 // then what's happening and what's wrong: macOS asking something first,
 // then the card up for you; then, in the views' order, each step running,
 // with the last lines its commands printed; each waiting on you, with what
@@ -41,7 +40,7 @@ func (p *Pretty) height() int {
 // terminal: when what finished unwell won't all fit, the last are counted.
 func (p *Pretty) applyLive() []string {
 	bar, counts := p.progress()
-	top := []string{look.Lights(p.lamps()...), "", "  " + bar + "  " + counts, ""}
+	top := append(look.Lights(p.width, p.lamps()...), "", "  "+bar+"  "+counts, "")
 	running := map[string]runningStep{}
 	for _, r := range p.running {
 		running[r.step] = r
@@ -51,7 +50,7 @@ func (p *Pretty) applyLive() []string {
 		unwell bool
 	}
 	// macOS asking something comes first: the run waits on it.
-	blocks := []block{{lines: append(p.askingLines(p.width), p.cardLines(p.width, false)...)}}
+	blocks := []block{{lines: append(p.askingLines(p.width), p.cardLines(p.width)...)}}
 	kept, unwell := len(blocks[0].lines), 0
 	for _, area := range viewOrder {
 		for _, s := range p.start.Steps {
@@ -176,106 +175,6 @@ func (p *Pretty) progress() (bar, counts string) {
 	}
 	parts = append(parts, look.Muted(took(p.now().Sub(p.began))))
 	return look.Bar(done, working, total, look.Done), look.Says(parts...)
-}
-
-// lamps are the run's lights as it stands, or the steps it will run while
-// it's getting ready: an area with a step waiting on you, or failed, says
-// so at once; one a stopped run didn't finish is grey; then one done shows
-// how it stood; one that's left you something to do says so; one running
-// is running, and the rest wait.
-func (p *Pretty) lamps() []look.Lamp {
-	planned := p.start.Steps
-	if planned == nil {
-		planned = p.planned
-	}
-	var lamps []look.Lamp
-	for _, area := range viewOrder {
-		var finished []look.State
-		n, now, asking, cut := 0, false, false, false
-		for _, s := range planned {
-			if viewArea(s.Area) != area {
-				continue
-			}
-			n++
-			st := p.standing(s.Name)
-			f, done := p.results[s.Name]
-			switch {
-			case done:
-				finished = append(finished, st)
-				cut = cut || wasStopped(f)
-			case st == look.NeedsYou:
-				asking = true
-			case st == look.Running:
-				now = true
-			}
-		}
-		switch {
-		case n == 0:
-			continue
-		case asking:
-			lamps = append(lamps, look.Lamp{Name: area, State: look.NeedsYou})
-		case slices.Contains(finished, look.Failed):
-			lamps = append(lamps, look.Lamp{Name: area, State: look.Failed})
-		case cut:
-			lamps = append(lamps, look.Lamp{Name: area, State: look.Skipped})
-		case len(finished) == n:
-			lamps = append(lamps, lamp(area, finished))
-		case slices.Contains(finished, look.ToDo):
-			lamps = append(lamps, look.Lamp{Name: area, State: look.ToDo})
-		case now:
-			lamps = append(lamps, look.Lamp{Name: area, State: look.Running})
-		default:
-			lamps = append(lamps, look.Lamp{Name: area, State: look.Queued})
-		}
-	}
-	return lamps
-}
-
-// workList is applying's list of steps, the run's last word: a block an
-// area in the views' order, each step a row as recordRow has it, what
-// belongs to it on a line from its mark. The boot's steps, shown as it ran,
-// have their light, and a row here only once one isn't well.
-func (p *Pretty) workList() (lines []string) {
-	for _, area := range viewOrder {
-		var shown []event.Step
-		for _, s := range p.start.Steps {
-			if viewArea(s.Area) != area {
-				continue
-			}
-			if f, ok := p.results[s.Name]; area != boot.AreaBooted || ok && f.Result.State != check.OK {
-				shown = append(shown, s)
-			}
-		}
-		if len(shown) == 0 {
-			continue
-		}
-		lines = append(lines, look.Header(area, ""))
-		for _, s := range shown {
-			lines = append(lines, look.Timeline("  ", p.width, p.recordRow(s))...)
-		}
-		lines = append(lines, "")
-	}
-	return lines[:max(len(lines)-1, 0)]
-}
-
-// recordRow is a step's row in applying's record: one that failed says
-// what went wrong, why under it, then what to run; one that's left you
-// something to do says it's below; the rest as listRow has them.
-func (p *Pretty) recordRow(s event.Step) look.Row {
-	f, isDone := p.results[s.Name]
-	switch {
-	case isDone && p.ended(f) == look.Failed:
-		return p.failedRow(f)
-	case isDone && p.toDo(s.Name):
-		row := p.toDoRow(f)
-		// That it's below is never cut off: what the step says is cut to
-		// make room for it.
-		below := look.Says("", look.Muted("to do, below"))
-		room := p.width - ansi.StringWidth(look.Rows("  ", p.width, look.Row{State: row.State, Name: row.Name})[0]) - 2 - ansi.StringWidth(below)
-		row.Says = look.Cut(row.Says, max(room, 1)) + below
-		return row
-	}
-	return p.listRow(s)
 }
 
 // failedRow is a failed step's row in applying's record: what applying did,
@@ -449,22 +348,22 @@ func IsDrift(it check.Item) bool {
 	return ok
 }
 
-// applied is applying's last word, under its heading: the lights, the bar
-// with how the run ended under them, then the whole work list as it
-// finished, then what it's left you to do; a run stopped says so, and
+// The bar at the head of applying's record, in cells.
+const recordBar = 32
+
+// applied is applying's record, its last word, in place of its screen or
+// its live part: its head, the wordmark with what ran, the bar and the
+// tally, when its heading was drawn live, else the bar and the tally under
+// the heading; then what it's left you to do, what failed, what needs you,
+// and the rows done, each only when it has any. A run stopped says so, and
 // where to carry on.
 func (p *Pretty) applied(e event.RunFinished) []string {
 	stopped := p.stoppedRun()
-	out := []string{look.Lights(p.lamps()...)}
-	if stopped {
-		out = append(out, p.stoppedFoot(e))
-	} else {
-		out = append(out, p.foot(e)...)
-	}
-	out = append(append(out, ""), p.workList()...)
-	if tasks := p.tasks(); len(tasks) > 0 {
-		out = append(out, "", look.Header("To do", fmt.Sprintf("%d, in any order: kit apply checks them", len(tasks))))
-		out = append(out, look.Tasks(p.width, tasks...)...)
+	out := p.recordHead(e, stopped)
+	for _, section := range [][]string{p.toDoSection(), p.unwellSection(look.Failed), p.unwellSection(look.NeedsYou), p.doneSection()} {
+		if len(section) > 0 {
+			out = append(append(out, ""), section...)
+		}
 	}
 	if stopped {
 		out = append(out, "", "  "+look.Todo(look.Cmd("kit apply")+look.Muted(" carries on from here")))
@@ -475,18 +374,174 @@ func (p *Pretty) applied(e event.RunFinished) []string {
 	return out
 }
 
+// recordHead is the record's head: the bar, its last cell in the colour
+// the run ended in, and the tally, or how far a stopped run got; beside the
+// wordmark, with what ran, the Mac and when, when its heading was drawn
+// live, as the record takes its place.
+func (p *Pretty) recordHead(e event.RunFinished, stopped bool) []string {
+	got, says := 1.0, p.tally(e)
+	if stopped {
+		got, says = p.stoppedSays(e)
+	}
+	bar := look.Progress(got, recordBar, p.endedAs())
+	if p.liveHead == nil {
+		return []string{"  " + bar + "  " + says}
+	}
+	line := headline{p.start.Command, p.start.Machine, when(p.start.Time)}
+	return look.Head(line.whole(), bar, says)
+}
+
+// endedAs is how the run ended: failed, when a step did; needing you, when
+// one does; else well.
+func (p *Pretty) endedAs() look.State {
+	ended := look.Done
+	for _, f := range p.results {
+		switch p.ended(f) {
+		case look.Failed:
+			return look.Failed
+		case look.NeedsYou:
+			ended = look.NeedsYou
+		}
+	}
+	return ended
+}
+
+// tally is how the run ended, counted: what it's left you to do, the steps
+// that failed and those that need you, the rows whose steps were all well,
+// and how long it took.
+func (p *Pretty) tally(e event.RunFinished) string {
+	var parts []string
+	if n := len(p.tasks()); n > 0 {
+		parts = append(parts, look.White(fmt.Sprintf("%d to do", n)))
+	}
+	if n := len(p.unwell(look.Failed)); n > 0 {
+		parts = append(parts, look.Red(fmt.Sprintf("%d failed", n)))
+	}
+	if n := len(p.unwell(look.NeedsYou)); n > 0 {
+		parts = append(parts, look.Orange(fmt.Sprintf("%d %s you", n, plural(n, "needs", "need"))))
+	}
+	parts = append(parts, look.White(fmt.Sprintf("%d fine", len(p.rowsDone()))), look.Muted(took(e.Duration)))
+	return look.Says(parts...)
+}
+
+// toDoSection is what the run's left you to do, numbered, each with how to
+// do it.
+func (p *Pretty) toDoSection() []string {
+	tasks := p.tasks()
+	if len(tasks) == 0 {
+		return nil
+	}
+	return append([]string{look.Header("To do", fmt.Sprintf("%d, in any order · kit apply checks them", len(tasks)))}, look.Tasks(p.width, tasks...)...)
+}
+
+// unwellSection is the steps that ended as st, failed or needing you, a row
+// each under its header: named by its row, and by itself too when its row
+// has others; what went wrong, or what's left of it, under it.
+func (p *Pretty) unwellSection(st look.State) []string {
+	unwell := p.unwell(st)
+	if len(unwell) == 0 {
+		return nil
+	}
+	label := map[look.State]string{look.Failed: "Failed", look.NeedsYou: "Needs you"}[st]
+	out := []string{look.Header(label, fmt.Sprint(len(unwell)))}
+	for _, s := range unwell {
+		row := p.listRow(s)
+		if st == look.Failed {
+			row = p.failedRow(p.results[s.Name])
+		}
+		row.Name = p.recordName(s)
+		out = append(out, look.Timeline("  ", p.width, row)...)
+	}
+	return out
+}
+
+// doneSection is the rows whose steps were all well, a line each, in
+// order, saying what they did; what of theirs is still waiting, for a
+// password say, under it.
+func (p *Pretty) doneSection() []string {
+	done := p.rowsDone()
+	if len(done) == 0 {
+		return nil
+	}
+	out := []string{look.Header("Done", fmt.Sprint(len(done)))}
+	for _, r := range done {
+		row := look.Row{State: look.Done, Name: r.name, Says: p.doneSays(r)}
+		for _, s := range r.steps {
+			row.Under = append(row.Under, p.workRow(p.results[s.Name], s.Part).Under...)
+		}
+		out = append(out, look.Timeline("  ", p.width, row)...)
+	}
+	return out
+}
+
+// unwell are the steps that ended as st, by their rows, in order, then the
+// steps by hand.
+func (p *Pretty) unwell(st look.State) []event.Step {
+	var out []event.Step
+	for _, s := range p.recordOrder() {
+		if f, ok := p.results[s.Name]; ok && p.ended(f) == st {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// recordOrder are the run's steps as the record lists them: by their
+// rows, in order, then the steps by hand.
+func (p *Pretty) recordOrder() []event.Step {
+	var out []event.Step
+	for _, r := range p.shownRows() {
+		out = append(out, r.steps...)
+	}
+	for _, s := range p.start.Steps {
+		if row, _ := RowOf(s); row == "" {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// recordName is the name the record gives step s: its row's, and its own
+// after it when the row has more steps than it and it's called otherwise;
+// a step by hand's own.
+func (p *Pretty) recordName(s event.Step) string {
+	title := p.title(s.Name)
+	for _, r := range p.shownRows() {
+		switch {
+		case !slices.ContainsFunc(r.steps, func(t event.Step) bool { return t.Name == s.Name }):
+		case len(r.steps) == 1 || title == r.name:
+			return r.name
+		default:
+			return r.name + " · " + title
+		}
+	}
+	return title
+}
+
+// rowsDone are the rows whose steps all finished well, in order.
+func (p *Pretty) rowsDone() []applyRow {
+	var done []applyRow
+	for _, r := range p.shownRows() {
+		if !slices.ContainsFunc(r.steps, func(s event.Step) bool {
+			f, ok := p.results[s.Name]
+			return !ok || p.ended(f) != look.Done
+		}) {
+			done = append(done, r)
+		}
+	}
+	return done
+}
+
 // tasks are what the run's left the person at the Mac to do, in the order
-// the record lists its steps: each thing by name, with how to do it (taskHow).
+// of its steps by area: each thing by name, with how to do it (taskHow).
 func (p *Pretty) tasks() []look.Task {
 	var tasks []look.Task
-	for _, steps := range p.gridSteps() {
-		for _, s := range steps {
-			if !p.toDo(s.Name) {
-				continue
-			}
-			for _, it := range p.results[s.Name].Result.Items {
-				tasks = append(tasks, look.Task{Title: it.Name, How: p.taskHow(s.Name, it)})
-			}
+	for _, s := range p.stepsByArea() {
+		if !p.toDo(s.Name) {
+			continue
+		}
+		for _, it := range p.results[s.Name].Result.Items {
+			tasks = append(tasks, look.Task{Title: it.Name, How: p.taskHow(s.Name, it)})
 		}
 	}
 	return tasks
@@ -516,11 +571,11 @@ func (p *Pretty) stoppedRun() bool {
 	return false
 }
 
-// stoppedFoot is how a stopped run ended, after its bar: stopped, how many
-// of its steps were done, how many of those failed, and how long it took.
-// What was cut off, or never ran, isn't counted as failing; what needs you
-// is in the list, as the line has no room for it.
-func (p *Pretty) stoppedFoot(e event.RunFinished) string {
+// stoppedSays is how far a stopped run got, of 1, and how it ended: that
+// it was stopped, how many of its steps were done, how many of those
+// failed, and how long it took. What was cut off, or never ran, isn't
+// counted as failing; what's left is in the record.
+func (p *Pretty) stoppedSays(e event.RunFinished) (got float64, says string) {
 	done, failed := 0, 0
 	for _, f := range p.results {
 		switch {
@@ -538,5 +593,5 @@ func (p *Pretty) stoppedFoot(e event.RunFinished) string {
 		parts = append(parts, look.Red(fmt.Sprintf("%d failed", failed)))
 	}
 	parts = append(parts, look.Muted(took(e.Duration)))
-	return "  " + look.Bar(done, 0, n, look.Done) + "  " + look.Says(parts...)
+	return float64(done) / float64(max(n, 1)), look.Says(parts...)
 }

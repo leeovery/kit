@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"fmt"
 	"io"
-	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -99,10 +98,9 @@ type Pretty struct {
 	// changed things, and command the command printing them.
 	output  map[string][]string
 	command map[string]string
-	// logged are the lines steps told the run's log, in order, for applying's
-	// view to show as its log: none shown yet.
-	logged []event.Logged
-	frame  int
+	// log is applying's log: every line of the run, in order.
+	log   []logLine
+	frame int
 	// began is when the run began, by the clock, for how long it's taken;
 	// drawn when the live part was last drawn.
 	began, drawn time.Time
@@ -119,6 +117,9 @@ type Pretty struct {
 	// underHome is whether the run started from kit's home, under its
 	// wordmark.
 	underHome bool
+	// liveHead is the run's heading, when it's drawn live, as applying's
+	// is, for its record to take its place: nil when it's printed.
+	liveHead []string
 	// aside is whether the face has stepped aside for a question asked
 	// mid-run: it draws nothing, and holds what it writes, till it's back.
 	aside bool
@@ -131,11 +132,15 @@ type Pretty struct {
 	// cut are the steps the run was stopped in the middle of, as they stood.
 	cut map[string]runningStep
 	// card is the step by hand up for the person at the Mac, front and
-	// centre, till its step finishes: nil when none is; cards are every one
-	// that came up, by its step and its line, for what's left to do once
-	// the run's done.
-	card  *event.NeedsYou
-	cards map[string]event.NeedsYou
+	// centre, till its step finishes: nil when none is; cardSince when it
+	// came up. cards are every one that came up, by its step and its line,
+	// for what's left to do once the run's done; handsDone those done
+	// meanwhile, and putOff those put off till later.
+	card      *event.NeedsYou
+	cardSince time.Time
+	cards     map[string]event.NeedsYou
+	handsDone map[string]bool
+	putOff    map[string]bool
 	// onScreen is whether applying has the terminal's alternate screen, and
 	// drawnSize the size it was last drawn at; keys are the keys it reads
 	// while it has it, and what they've done.
@@ -201,19 +206,24 @@ func (p *Pretty) Emit(e event.Event) {
 		p.start, p.results = e, make(map[string]event.StepFinished, len(e.Steps))
 		p.output, p.command, p.began = map[string][]string{}, map[string]string{}, p.now()
 		p.cut, p.card, p.cards = map[string]runningStep{}, nil, map[string]event.NeedsYou{}
-		p.logged = nil
+		p.handsDone, p.putOff, p.log = map[string]bool{}, map[string]bool{}, nil
 		p.order.start(e.Steps)
 		p.preparing = ""
 		p.open(e.Command, e.Machine, e.Time, e.Only)
 		// Applying's live part takes the place of what showed while it was
-		// getting ready, drawn over it; anything else starts afresh.
+		// getting ready, drawn over it, its clock turning from the start;
+		// anything else starts afresh.
 		if p.whole && p.applying() {
-			p.drawSpinner()
+			p.spin()
 		} else {
 			p.clearLive()
 		}
 	case event.StepStarted:
-		p.running = append(without(p.running, e.Step), runningStep{step: e.Step, title: p.title(e.Step), doing: cmp.Or(e.Doing, "checking"), applying: e.Doing == "applying"})
+		since := p.stamp(e.Time)
+		if r, ok := p.runningOf(e.Step); ok {
+			since = r.since
+		}
+		p.running = append(without(p.running, e.Step), runningStep{step: e.Step, title: p.title(e.Step), doing: cmp.Or(e.Doing, "checking"), applying: e.Doing == "applying", since: since})
 		p.spin()
 	case event.Doing:
 		// A step at work says what it's doing; one waiting on you, what you're
@@ -226,11 +236,15 @@ func (p *Pretty) Emit(e event.Event) {
 		}
 		p.drawSpinner()
 	case event.NeedsYou:
-		p.card = &e
-		p.cards[cardID(e.Step, e.Item)] = e
+		p.raise(e)
 		p.drawSpinner()
 	case event.Logged:
-		p.logged = append(p.logged, e)
+		if p.applying() {
+			p.note(p.stamp(e.Time), p.rowOf(e.Step), look.Dim("+"), look.Muted(e.Line))
+		}
+		if time.Since(p.drawn) >= drawEvery {
+			p.drawSpinner()
+		}
 	case event.Asking:
 		p.asking = e.Says
 		p.drawSpinner()
@@ -238,11 +252,14 @@ func (p *Pretty) Emit(e event.Event) {
 		if r, ok := p.runningOf(e.Step); ok && p.atWork(r) && wasStopped(e) {
 			p.cut[e.Step] = r
 		}
-		if p.carded(e.Step) {
-			p.card = nil
-		}
 		p.running = without(p.running, e.Step)
 		p.results[e.Step] = e
+		if p.carded(e.Step) {
+			p.lower(e.Time, &e)
+		}
+		if p.byArea() && p.applying() {
+			p.noteFinished(e)
+		}
 		if !p.byArea() {
 			if ready := p.order.finish(e); len(ready) > 0 {
 				p.clearLive()
@@ -254,7 +271,7 @@ func (p *Pretty) Emit(e event.Event) {
 		p.drawSpinner()
 	case event.Output:
 		line := strings.TrimRight(strings.ReplaceAll(ansi.Strip(e.Line), "\t", "    "), " ")
-		p.output[e.Step] = append(lastOf(p.output[e.Step], keptPanel-1), line)
+		p.output[e.Step] = append(lastOf(p.output[e.Step], keptPrinted-1), line)
 		p.command[e.Step] = e.Command
 		for i, r := range p.running {
 			if r.step == e.Step {
@@ -283,6 +300,8 @@ func (p *Pretty) Emit(e event.Event) {
 
 // open shows the run's heading, once: a blank line, then, for a command
 // looking at the whole Mac, the wordmark with what ran, the Mac and when.
+// Applying, animated, draws the wordmark live, for its record, which says
+// how it ended beside it, to take its place.
 func (p *Pretty) open(command, machine string, at time.Time, only []string) {
 	if p.opened {
 		return
@@ -290,10 +309,28 @@ func (p *Pretty) open(command, machine string, at time.Time, only []string) {
 	p.opened = true
 	p.whole = slices.Contains(wholeMac, command) && len(only) == 0
 	heading := []string{""}
-	if p.whole && !p.underHome {
-		heading = append(append(heading, look.Head(look.Meta(command, machine, when(at))...)...), "")
+	switch head := look.Head(look.Meta(command, machine, when(at))...); {
+	case !p.whole || p.underHome:
+	case p.animate && slices.Contains(applyingCommands, command):
+		p.liveHead = head
+	default:
+		heading = append(append(heading, head...), "")
 	}
 	p.lines(heading...)
+}
+
+// headingLive is the run's heading as it's drawn live, over what's drawn
+// under it: the wordmark, then a blank line; and, alone, another, for what
+// kit asks meanwhile to be asked there, under it. None when the heading's
+// printed.
+func (p *Pretty) headingLive(alone bool) []string {
+	if p.liveHead == nil {
+		return nil
+	}
+	if alone {
+		return append(slices.Clone(p.liveHead), "", "")
+	}
+	return append(slices.Clone(p.liveHead), "")
 }
 
 // byArea is whether the run shows its steps by area: one looking at the
@@ -316,8 +353,13 @@ func (p *Pretty) step(name string) event.Step {
 	return event.Step{Name: name}
 }
 
+// title is how step is named: a step by hand of its own by what to do, as
+// its card says it, not by its line's name.
 func (p *Pretty) title(step string) string {
 	s := p.step(step)
+	if len(s.ByHand) == 1 && s.ByHand[0].Name == s.Name {
+		return s.ByHand[0].Title
+	}
 	return cmp.Or(s.Title, s.Name)
 }
 
@@ -351,24 +393,6 @@ func (p *Pretty) report() []string {
 		out = append(append(out, look.Block(area, p.width, rows...)...), "")
 	}
 	return out
-}
-
-// lamp is the light of an area whose steps have all finished, as they
-// stand: at worst, and how many there are, when they're all well. A step
-// not checked leaves it uncounted, not grey, which is for an area a
-// stopped run didn't finish.
-func lamp(area string, states []look.State) look.Lamp {
-	l, counted := look.Lamp{Name: area, State: look.Done}, true
-	for _, s := range states {
-		counted = counted && s != look.Skipped
-		if s != look.Skipped && worse(s, l.State) {
-			l.State = s
-		}
-	}
-	if l.State == look.Done && counted {
-		l.Count = fmt.Sprint(len(states))
-	}
-	return l
 }
 
 // state is how a step's result shows: a deferred step wasn't checked, so is
@@ -571,12 +595,8 @@ func wrong(part string, it check.Item) string {
 }
 
 // foot is how the run ended: what went wrong, counted, then what was well,
-// and how long it took. Applying's is after the bar, what it's left you to
-// do counted on its own, what was well left to the lights.
+// and how long it took.
 func (p *Pretty) foot(e event.RunFinished) []string {
-	if p.applying() {
-		return []string{p.appliedFoot(e)}
-	}
 	parts := tally(e.Counts)
 	if p.byArea() {
 		parts = append(parts, look.White(fmt.Sprintf("%d fine", e.Counts[check.OK])))
@@ -588,41 +608,6 @@ func (p *Pretty) foot(e event.RunFinished) []string {
 		parts = append(parts, look.White(fmt.Sprintf("%d settled", settled)))
 	}
 	return []string{look.Summary(append(parts, look.Muted(took(e.Duration)))...)}
-}
-
-// appliedFoot is how applying ended, after its bar, the last segment red
-// when something failed, orange when something needs you: what went wrong,
-// what's left you to do, and how long it took.
-func (p *Pretty) appliedFoot(e event.RunFinished) string {
-	counts := p.withoutToDo(e.Counts)
-	parts := tally(counts)
-	if n := len(p.tasks()); n > 0 {
-		parts = append(parts, look.White(fmt.Sprintf("%d to do", n)))
-	}
-	parts = append(parts, look.Muted(took(e.Duration)))
-	ended := look.Done
-	switch {
-	case counts[check.Failed] > 0:
-		ended = look.Failed
-	case counts[check.Attention] > 0:
-		ended = look.NeedsYou
-	}
-	n := len(p.start.Steps)
-	return look.Cut("  "+look.Bar(n, 0, n, ended)+"  "+look.Says(parts...), p.width)
-}
-
-// withoutToDo are counts, a run's steps by how they stand, without those
-// that left the person at the Mac something to do: they're neither unwell
-// nor unchecked.
-func (p *Pretty) withoutToDo(counts map[check.State]int) map[check.State]int {
-	out := make(map[check.State]int, len(counts))
-	maps.Copy(out, counts)
-	for _, f := range p.results {
-		if p.toDo(f.Step) {
-			out[f.Result.State]--
-		}
-	}
-	return out
 }
 
 // tally is what went wrong in a run, counted: what failed, what needs
@@ -687,7 +672,7 @@ func (p *Pretty) drawSpinner() {
 	}
 	p.fit()
 	if p.tab && len(p.start.Steps) > 0 && len(p.running) > 0 {
-		p.write(fmt.Sprintf("\x1b]9;4;1;%d\x07", len(p.results)*100/len(p.start.Steps)))
+		p.write(fmt.Sprintf("\x1b]9;4;1;%d\x07", int(p.howFar()*100)))
 	}
 	if p.whole && p.applying() {
 		p.drawApplying()
@@ -696,14 +681,16 @@ func (p *Pretty) drawSpinner() {
 	mark := look.Cyan(spinning[p.frame%len(spinning)])
 	if len(p.running) == 0 {
 		switch loader := "  " + mark + " " + look.Muted(p.preparing); {
-		case p.preparing == "" || p.start.Command != "":
+		case p.start.Command != "", p.preparing == "" && p.liveHead == nil:
 			p.clearLive()
+		case p.preparing == "":
+			p.drawLive(p.headingLive(true))
 		case len(p.planned) > 0:
 			// Getting a run ready whose steps are known: its lights, and what
 			// kit's doing where the bar will be.
-			p.drawLive([]string{look.Lights(p.lamps()...), "", loader})
+			p.drawLive(slices.Concat(p.headingLive(false), look.Lights(p.width, p.lamps()...), []string{"", loader}))
 		default:
-			p.drawLive([]string{loader})
+			p.drawLive(append(p.headingLive(false), loader))
 		}
 		return
 	}
@@ -762,12 +749,12 @@ func (p *Pretty) drawLive(lines []string) {
 }
 
 // How many of what a step's commands printed show: while it runs, and once
-// it's failed; and how many are kept, for its panel on applying's screen,
-// pinned to fill the log in a tall window, to scroll back through.
+// it's failed; and how many are kept, as a failed step's row on a timeline
+// shows them.
 const (
 	keptRunning = 5
 	keptFailing = 8
-	keptPanel   = 100
+	keptPrinted = 100
 )
 
 // lastOf is the last n of lines.
@@ -890,9 +877,11 @@ type runningStep struct {
 	step, title, doing, todo string
 	// done and of are how far it's got, when it counts: done of of things.
 	done, of int
-	// applying is whether it's applying, or has printed something: what a
-	// panel on applying's screen is for, while it's at work.
+	// applying is whether it's applying, or has printed something: what's
+	// under way at the foot of applying's log, while it's at work.
 	applying bool
+	// since is when it started.
+	since time.Time
 }
 
 // counted is says, then how far the step had got, muted, when it counts.

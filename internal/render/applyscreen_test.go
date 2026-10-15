@@ -2,7 +2,6 @@ package render_test
 
 import (
 	"fmt"
-	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -16,151 +15,162 @@ import (
 	"github.com/leeovery/kit/internal/boot"
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/event"
+	"github.com/leeovery/kit/internal/hand"
 	"github.com/leeovery/kit/internal/look"
 	"github.com/leeovery/kit/internal/render"
 )
 
-// newMac are a new Mac's steps by area, as round 6 draws its run: the
-// boot's eight, done before kit apply starts, then apply's.
-var newMac = []struct {
-	area   string
-	titles []string
-}{
-	{boot.AreaBooted, []string{"GitHub", "This Mac", "Password", "Homebrew", "Apps", "kit-config", "Full Disk Access", "Ghostty"}},
-	{"Backups", []string{"Time Machine", "Arq", "App settings", "Full Disk Access"}},
-	{"Jobs", []string{"Scheduled runs"}},
-	{"Mac", []string{"Scratch volume", "Disk space", "Memory", "File events", "Load"}},
-	{"Drift", []string{"Homebrew", "Linked files", "Shell PATH", "Touch ID for sudo", "Remote Login", "File Sharing",
-		"Homebrew formulae", "Homebrew casks", "App Store apps", "npm packages", "Composer packages", "Go tools",
-		"GitHub extensions", "tmux plugins", "macOS login items", "Claude MCP", "macOS settings", "Power settings",
-		"Backup exclusions", "Spotlight exclusions", "kit-config edits", "Secrets", "git config", "Sync", "Privacy"}},
-	{"Steps", []string{"claude-code", "fonts", "mise", "remote-session", "valet", "gpg-key"}},
-	{"Manual", []string{"By hand", "1password"}},
+// newMac are a new Mac's steps, as kit apply runs them once the boot's in
+// the terminal: the boot's, checked again, kit's own, by the names kit
+// gives them, the user's own, and two steps by hand: 1Password's sign-in,
+// which the secrets wait for, and the rest, at the end.
+var newMac = []event.Step{
+	{Name: "boot-github", Title: "GitHub", Area: boot.AreaBooted},
+	{Name: "boot-mac", Title: "This Mac", Area: boot.AreaBooted},
+	{Name: "boot-homebrew", Title: "Homebrew", Area: boot.AreaBooted},
+	{Name: "boot-kit-config", Title: "kit-config", Area: boot.AreaBooted},
+	{Name: "homebrew", Title: "Homebrew", Area: "Drift"},
+	{Name: "file", Title: "Linked files", Area: "Drift", Part: render.PartFiles},
+	{Name: "path", Title: "Shell PATH", Area: "Drift"},
+	{Name: "touch-id-sudo", Title: "Touch ID for sudo", Area: "Drift"},
+	{Name: "defaults", Title: "macOS settings", Area: "Drift"},
+	{Name: "power", Title: "Power settings", Area: "Drift"},
+	{Name: "brew", Title: "Homebrew formulae", Area: "Drift", Waits: []string{"homebrew"}},
+	{Name: "cask", Title: "Homebrew casks", Area: "Drift", Waits: []string{"homebrew"}},
+	{Name: "mas", Title: "App Store apps", Area: "Drift"},
+	{Name: "npm", Title: "npm packages", Area: "Drift", Waits: []string{"brew"}},
+	{Name: "composer", Title: "Composer packages", Area: "Drift", Waits: []string{"brew"}},
+	{Name: "login-item", Title: "macOS login items", Area: "Drift", Waits: []string{"cask", "mas"}},
+	{Name: "secret", Title: "Secrets", Area: "Drift", Waits: []string{"1password"}},
+	{Name: "git-config", Title: "git config", Area: "Drift", Waits: []string{"secret"}},
+	{Name: "config", Title: "kit-config edits", Area: "Drift"},
+	{Name: "config-sync", Title: "Sync", Area: "Config"},
+	{Name: "time-machine", Title: "Time Machine", Area: "Backups"},
+	{Name: "arq", Title: "Arq", Area: "Backups", Waits: []string{"cask"}},
+	{Name: "prefs", Title: "App settings", Area: "Backups", Waits: []string{"cask"}},
+	{Name: "disk", Title: "Disk space", Area: "Mac"},
+	{Name: "load", Title: "Load", Area: "Mac"},
+	{Name: "claude-code", Title: "claude-code", Area: "Steps"},
+	{Name: "fonts", Title: "fonts", Area: "Steps"},
+	{Name: "mise", Title: "mise", Area: "Steps", Waits: []string{"brew"}},
+	{Name: "1password", Title: "1password", Area: "Manual", ByHand: []event.Hand{{Name: "1password", Title: "Sign in to 1Password"}}},
+	{Name: "manual", Title: "By hand", Area: "Manual", Waiting: "at the end, once the rest is done", ByHand: []event.Hand{
+		{Name: "sharing", Title: "Allow remote users Full Disk Access"},
+		{Name: "editor", Title: "Install the editor from its site"},
+		{Name: "karabiner", Title: "Allow Karabiner-Elements"},
+	}},
 }
 
-// stepName is the name of the step titled title, in area: titles repeat
-// across areas.
-func stepName(area, title string) string { return area + "/" + title }
+// after is sec seconds into the run.
+func after(sec int) time.Time { return at.Add(time.Duration(sec) * time.Second) }
 
-func newMacSteps() []event.Step {
-	var steps []event.Step
-	for _, a := range newMac {
-		for _, title := range a.titles {
-			steps = append(steps, event.Step{Name: stepName(a.area, title), Title: title, Area: a.area})
-		}
-	}
-	return steps
+// finished is the step called step finished sec seconds in, as r.
+func finished(sec int, step string, r check.Result) event.Event {
+	return event.StepFinished{Time: after(sec), Step: step, Result: r}
 }
 
-func finished(area, title string, r check.Result) event.Event {
-	return event.StepFinished{Time: at, Step: stepName(area, title), Result: r}
+// fine is the step called step finished well sec seconds in, saying
+// summary.
+func fine(sec int, step, summary string) event.Event {
+	return finished(sec, step, check.Result{State: check.OK, Summary: summary})
 }
 
-func fine(area, title, summary string) event.Event {
-	return finished(area, title, check.Result{State: check.OK, Summary: summary})
+// applying is the step called step starting sec seconds in, checking, then
+// applying.
+func applying(sec int, step string) []event.Event {
+	return []event.Event{event.StepStarted{Time: after(sec), Step: step, Doing: "checking"}, event.StepStarted{Time: after(sec), Step: step, Doing: "applying"}}
 }
 
-// applyingStep is a step starting to apply, running command, which prints
-// lines.
-func applyingStep(area, title, command string, lines ...string) []event.Event {
-	name := stepName(area, title)
-	events := []event.Event{event.StepStarted{Step: name, Doing: "checking"}, event.StepStarted{Step: name, Doing: "applying"}}
-	for _, l := range lines {
-		events = append(events, event.Output{Step: name, Command: command, Line: l})
+// installed are a kind's lines for the run's log: what it installed, names
+// one at a time from sec seconds in, every every seconds.
+func installed(step string, sec, every int, names ...string) []event.Event {
+	var events []event.Event
+	for i, n := range names {
+		events = append(events, event.Logged{Time: after(sec + i*every), Step: step, Line: "Installed " + n})
 	}
 	return events
 }
 
+// numbered are n names, what each and its number.
 func numbered(what string, n int) []string {
-	lines := make([]string, n)
-	for i := range lines {
-		lines[i] = fmt.Sprintf("==> %s %d", what, i+1)
+	names := make([]string, n)
+	for i := range names {
+		names[i] = fmt.Sprintf("%s-%d", what, i+1)
 	}
-	return lines
+	return names
 }
 
-// sixMinutesIn is the run six minutes in: the boot done, what's quick done
-// too, Homebrew's formulae and casks installing, Claude Code setting itself
-// up, the fonts done.
-func sixMinutesIn() []event.Event { return sixMinutesInWith(16, 10) }
+// sixMinutesIn is the run six minutes in: the boot's steps done, what's
+// quick done too, Time Machine left for later; Homebrew's formulae and
+// casks installing, each telling the log what it's installed; Claude Code
+// setting itself up; the rest waiting.
+func sixMinutesIn() []event.Event { return sixMinutesInWith(12, 8) }
 
-// sixMinutesInWith is sixMinutesIn, Homebrew's formulae having printed
-// formulae lines, and its casks casks.
+// sixMinutesInWith is sixMinutesIn, Homebrew having installed formulae
+// formulae and casks casks.
 func sixMinutesInWith(formulae, casks int) []event.Event {
-	events := []event.Event{event.RunStarted{Time: at, Command: "bootstrap", Machine: "laptop", Steps: newMacSteps()}}
-	for _, title := range newMac[0].titles {
-		events = append(events, fine(boot.AreaBooted, title, "fine"))
+	events := []event.Event{event.RunStarted{Time: at, Command: "bootstrap", Machine: "laptop", Steps: newMac}}
+	for _, s := range []string{"boot-github", "boot-mac", "boot-homebrew", "boot-kit-config"} {
+		events = append(events, fine(1, s, "fine"))
 	}
-	events = append(events, applyingStep("Drift", "Homebrew formulae", "brew install --formula ffmpeg", numbered("Pouring formula", formulae)...)...)
-	events = append(events, event.Doing{Step: stepName("Drift", "Homebrew formulae"), Says: "installing ffmpeg", Done: 38, Of: 129})
-	events = append(events, applyingStep("Drift", "Homebrew casks", "brew install --cask 1password", numbered("Installing Cask", casks)...)...)
-	events = append(events, event.Doing{Step: stepName("Drift", "Homebrew casks"), Says: "installing 1password", Done: 4, Of: 42})
-	events = append(events, applyingStep("Steps", "claude-code", "run apply", "Setting up Claude Code...", "Checking installation status...", "Downloading 2.1.296 for darwin-arm64", "Verifying checksum")...)
-	events = append(events, applyingStep("Steps", "fonts", "run apply", numbered("copied font", 9)...)...)
-	return append(events,
-		finished("Backups", "Time Machine", check.Result{State: check.Attention, Summary: "no backup disk", Items: []check.Item{
-			{ID: "time-machine:disk", Name: "no backup disk is set up", State: "problem", Detail: "System Settings › General › Time Machine › Add Backup Disk"}}}),
-		fine("Backups", "Full Disk Access", "granted"),
-		fine("Mac", "Scratch volume", "mounted; not indexed"),
-		fine("Mac", "Disk space", "71% free"),
-		fine("Mac", "Memory", "0.0 GB swap"),
-		fine("Mac", "File events", "fseventsd 0.0 GB"),
-		fine("Mac", "Load", "load 3.1 on 8 cores"),
-		fine("Drift", "Homebrew", "/opt/homebrew"),
-		fine("Drift", "Linked files", "54 linked"),
-		fine("Drift", "Shell PATH", "15 directories"),
-		fine("Drift", "Touch ID for sudo", "turned on"),
-		fine("Drift", "Remote Login", "turned on"),
-		fine("Drift", "File Sharing", "turned on"),
-		fine("Drift", "Go tools", "none declared"),
-		fine("Drift", "macOS settings", "99 set"),
-		fine("Drift", "Power settings", "6 set"),
-		fine("Drift", "Backup exclusions", "89 excluded"),
-		fine("Drift", "Spotlight exclusions", "1 excluded"),
-		fine("Drift", "kit-config edits", "all committed"),
-		fine("Drift", "Sync", "pushed"),
-		fine("Drift", "Privacy", "private on GitHub"),
-		fine("Steps", "fonts", "16 installed"),
-		fine("Steps", "remote-session", "applied"),
+	events = append(events,
+		fine(2, "homebrew", "/opt/homebrew"),
+		fine(3, "file", "54 linked"),
+		fine(3, "path", "15 directories"),
+		finished(5, "time-machine", check.Result{State: check.Attention, Summary: "no backup disk", Items: []check.Item{
+			{ID: "time-machine:disk", Name: "Add a Time Machine disk", State: check.Problem, Detail: "System Settings › General › Time Machine › Add Backup Disk"}}}),
+		fine(6, "disk", "71% free"),
+		fine(6, "load", "load 3.1 on 8 cores"),
+		fine(8, "touch-id-sudo", "turned on"),
+		fine(21, "fonts", "16 installed"),
+		fine(40, "defaults", "99 set"),
+		fine(41, "power", "6 set"),
+		fine(44, "config", "all committed"),
+		fine(46, "config-sync", "pushed"),
 	)
+	events = append(events, applying(30, "cask")...)
+	events = append(events, applying(52, "brew")...)
+	events = append(events, applying(60, "claude-code")...)
+	events = append(events, installed("cask", 31, 37, numbered("cask", casks)...)...)
+	events = append(events, installed("brew", 53, 25, numbered("formula", formulae)...)...)
+	events = append(events,
+		event.Doing{Time: after(350), Step: "brew", Says: "installing ffmpeg", Done: 38, Of: 129},
+		event.Doing{Time: after(350), Step: "cask", Says: "installing slack", Done: 4, Of: 42},
+	)
+	// The run tells them as they happen.
+	slices.SortStableFunc(events, func(a, b event.Event) int { return a.At().Compare(b.At()) })
+	return events
 }
 
-// casksFailed is the run once Homebrew's casks have failed: one wouldn't
-// install. Claude Code is done; App settings restores, taking the fonts'
-// place in the log, done longest ago.
+// signIn is 1Password's sign-in come up, a step by hand the secrets wait
+// for: kit opened the app for it, and tells by itself once it's done.
+var signIn = event.NeedsYou{Time: after(345), Step: "1password", Item: "1password", Title: "Sign in to 1Password", Steps: []string{
+	"Scan the QR code it shows with the 1Password app on your phone",
+	"In 1Password, Settings › Developer › turn on Integrate with 1Password CLI",
+}, Opened: "1Password", Tells: true}
+
+// cardUp is sixMinutesIn with card come up for its step, applying.
+func cardUp(card event.NeedsYou) []event.Event {
+	return append(sixMinutesIn(), event.StepStarted{Time: card.Time, Step: card.Step, Doing: "applying"}, card)
+}
+
+// waitingOnYou is the run once 1Password's sign-in has come up.
+func waitingOnYou() []event.Event { return cardUp(signIn) }
+
+// casksFailed is the run once Homebrew's casks have failed, one wouldn't
+// install, and macOS login items, which need them, weren't checked.
 func casksFailed() []event.Event {
 	events := sixMinutesIn()
-	events = append(events, fine("Steps", "claude-code", "installed 2.1.296"))
 	for _, l := range []string{
 		"==> Installing Cask tailscale-app",
 		"installer: Package name is Tailscale",
 		"installer: The install failed. (The Installer encountered an error that caused the installation to fail.)",
 	} {
-		events = append(events, event.Output{Step: stepName("Drift", "Homebrew casks"), Command: "brew install --cask tailscale-app", Line: l})
+		events = append(events, event.Output{Time: after(355), Step: "cask", Command: "brew install --cask tailscale-app", Line: l})
 	}
-	events = append(events,
-		finished("Drift", "Homebrew casks", check.Result{State: check.Failed, Reason: "couldn't install tailscale-app: installer: The install failed. (The Installer encountered an error that caused the installation to fail.)"}),
-		finished("Backups", "Arq", check.Result{State: check.Attention, Summary: "no backup plan", Items: []check.Item{
-			{ID: "arq:plan", Name: "no backup plan is chosen", State: "problem", Detail: "open Arq and choose its backup plan"}}}),
-		fine("Drift", "macOS login items", "14 added"),
-	)
-	return append(events, applyingStep("Backups", "App settings", "kit prefs restore", "com.example.editor restored", "com.example.terminal restored")...)
-}
-
-// signIn is 1Password's sign-in come up, a step by hand: kit opened the
-// app for it, and tells by itself once it's done.
-var signIn = event.NeedsYou{Time: at, Step: stepName("Manual", "1password"), Item: "1password", Title: "Sign in to 1Password", Steps: []string{
-	"Scan the QR code it shows with the 1Password app on your phone",
-	"In 1Password, Settings › Developer › turn on Integrate with 1Password CLI",
-}, Opened: "1Password", Tells: true}
-
-// waitingOnYou is the run once 1Password's sign-in has come up, while
-// macOS asks for an administrator's password.
-func waitingOnYou() []event.Event {
-	return append(casksFailed(),
-		event.StepStarted{Step: signIn.Step, Doing: "applying"},
-		signIn,
-		event.Asking{Time: at, Says: "asking for an administrator's password"},
+	return append(events,
+		finished(356, "cask", check.Result{State: check.Failed, Reason: "couldn't install tailscale-app: installer: The install failed. (The Installer encountered an error that caused the installation to fail.)"}),
+		finished(357, "login-item", check.Result{State: check.Deferred, Reason: "needs Homebrew casks"}),
 	)
 }
 
@@ -192,17 +202,27 @@ func applyAt(w, h int, took time.Duration, events []event.Event) (*render.Pretty
 
 // applyIn is applyAt at a terminal showing colour as profile does.
 func applyIn(profile colorprofile.Profile, w, h int, took time.Duration, events []event.Event) (*render.Pretty, *syncBuffer, *keyboard) {
-	var out syncBuffer
+	face, out, kb, _ := applyClocked(profile, w, h, took, events)
+	return face, out, kb
+}
+
+// applyClocked is applyIn, with the clock the face tells the time by, at
+// each event's time as it comes.
+func applyClocked(profile colorprofile.Profile, w, h int, took time.Duration, events []event.Event) (*render.Pretty, *syncBuffer, *keyboard, *clock) {
+	out := &syncBuffer{}
 	c := &clock{t: at}
-	kb := &keyboard{out: &out}
-	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: profile}, 80, true).
+	kb := &keyboard{out: out}
+	face := render.NewPretty(&colorprofile.Writer{Forward: out, Profile: profile}, 80, true).
 		Sized(func() (int, int) { return w, h }).Clocked(c.now).Keys(kb.listen, kb.halt)
 	for _, e := range events {
+		if t := e.At(); !t.IsZero() {
+			c.set(t)
+		}
 		face.Emit(e)
 	}
 	c.set(at.Add(took))
 	time.Sleep(300 * time.Millisecond)
-	return face, &out, kb
+	return face, out, kb, c
 }
 
 // theRest are events finished, then each step they didn't finish, as end
@@ -214,33 +234,34 @@ func theRest(events []event.Event, end func(event.Step) check.Result) []event.Ev
 			done[f.Step] = true
 		}
 	}
-	for _, s := range newMacSteps() {
+	for _, s := range newMac {
 		if !done[s.Name] {
-			events = append(events, event.StepFinished{Time: at, Step: s.Name, Result: end(s)})
+			events = append(events, event.StepFinished{Time: after(1400), Step: s.Name, Result: end(s)})
 		}
 	}
 	return events
 }
 
-// editor is a step by hand come up with steps of its own, then put off.
-var editor = event.NeedsYou{Time: at, Step: stepName("Manual", "By hand"), Item: "editor", Title: "Install the editor from its site (no Homebrew cask)", Steps: []string{
+// editor is the step by hand at the end come up with steps of its own,
+// then put off.
+var editor = event.NeedsYou{Time: after(1380), Step: "manual", Item: "editor", Title: "Install the editor from its site", Steps: []string{
 	"Download it from editor.example.com",
 	"Drag it to Applications",
 }, More: 1}
 
 // appliedRun is casksFailed to its end: the rest done, but Time Machine's
-// disk and Arq's plan left to do, and two steps by hand, one saying what to
-// run once it's done, one come up with steps of its own and put off.
+// disk left to do, and two steps by hand, one saying what to run once it's
+// done, one come up with steps of its own and put off.
 func appliedRun() []event.Event {
 	events := theRest(append(casksFailed(), editor), func(s event.Step) check.Result {
-		if s.Title == "By hand" {
-			return check.Result{State: check.Attention, Summary: "2 to do", Items: []check.Item{
-				{ID: "manual:sharing", Name: "Allow remote users Full Disk Access: System Settings › General › Sharing", State: "manual", Detail: "then: kit manual done sharing"},
-				{ID: "manual:editor", Name: "Install the editor from its site (no Homebrew cask)", State: "manual"}}}
+		if s.Name == "manual" {
+			return check.Result{State: check.Attention, Summary: "1 of 3 done", Items: []check.Item{
+				{ID: "manual:sharing", Name: "Allow remote users Full Disk Access", State: check.ByHand, Detail: "then: kit manual done sharing"},
+				{ID: "manual:editor", Name: "Install the editor from its site", State: check.ByHand}}}
 		}
 		return check.Result{State: check.OK, Summary: "fine"}
 	})
-	return append(events, event.RunFinished{Time: at, Duration: 24*time.Minute + 31*time.Second, Counts: map[check.State]int{check.OK: 47, check.Attention: 3, check.Failed: 1}})
+	return append(events, event.RunFinished{Time: after(1471), Duration: 24*time.Minute + 31*time.Second, Counts: map[check.State]int{check.OK: 27, check.Attention: 2, check.Failed: 1}})
 }
 
 // stoppedRun is waitingOnYou stopped by ctrl+c: what was running cut off,
@@ -249,126 +270,156 @@ func stoppedRun() []event.Event {
 	events := theRest(waitingOnYou(), func(event.Step) check.Result {
 		return check.Result{State: check.Failed, Reason: event.ErrStopped.Error()}
 	})
-	return append(events, event.RunFinished{Time: at, Duration: 13*time.Minute + 2*time.Second, Counts: map[check.State]int{check.OK: 32, check.Attention: 2, check.Failed: 17}})
+	return append(events, event.RunFinished{Time: after(782), Duration: 13*time.Minute + 2*time.Second, Counts: map[check.State]int{check.OK: 17, check.Attention: 1, check.Failed: 12}})
 }
-
-// panelRow is a row in the log, in its panel's rule: a mark, then a step's
-// name.
-var panelRow = regexp.MustCompile(`(?m)^  ── [●◐✗▲–○△] (\S+)`)
-
-// The keys at the screen's foot while it reads them, before anything's
-// pinned, with no card up; and with 1Password's sign-in up.
-const (
-	runningFoot = "  tab panel · ↑↓ scroll · click a step to see it · q stop"
-	signInFoot  = "  o open 1Password again · l later · tab panel · ↑↓ scroll · click a step to see it · q stop"
-)
 
 // lines are a screen's lines.
 func lines(screen string) []string { return strings.Split(screen, "\n") }
 
-// edges are where a screen's lines are rules across the whole window.
-func edges(ls []string) []int {
-	var at []int
-	for i, l := range ls {
-		if l != "" && strings.Trim(l, "─") == "" {
-			at = append(at, i)
-		}
+// headLines are how many lines the screen's header and the rule under it
+// take: a blank line, the wordmark's three, a blank line, the rule.
+const headLines = 6
+
+// split is the column applying's panes part at in a window w wide.
+func split(w int) int { return max(52, min(w*60/160, w-41)) }
+
+// panes are a screen w wide's left and right panes, a line each of the
+// screen's under its header, trailing spaces trimmed: the left without the
+// rule between them, the right without it.
+func panes(screen string, w int) (left, right []string) {
+	at := split(w)
+	for _, l := range lines(screen)[headLines:] {
+		r := []rune(l)
+		left = append(left, strings.TrimRight(string(r[:min(at, len(r))]), " "))
+		right = append(right, strings.TrimRight(string(r[min(at+1, len(r)):]), " "))
 	}
-	return at
+	return left, right
 }
 
-// panelTitle is the title of the step whose row a panel's rule, line,
-// carries: ok is false for any other line.
-func panelTitle(line string) (string, bool) {
-	rest, ok := strings.CutPrefix(line, "  ── ")
-	if !ok {
-		return "", false
-	}
-	_, rest, _ = strings.Cut(rest, " ")
-	name, _, _ := strings.Cut(rest, "  ")
-	name, _, _ = strings.Cut(name, " ─")
-	return name, true
-}
-
-// panelOf is the panel on screen carrying title's row: its rule, then the
-// lines under it, without their indent.
-func panelOf(screen, title string) (rule string, under []string) {
-	ls := lines(screen)
-	for i, l := range ls {
-		if name, ok := panelTitle(l); !ok || name != title {
-			continue
-		}
-		for _, u := range ls[i+1:] {
-			text, ok := strings.CutPrefix(u, "       ")
-			if !ok {
-				break
+// rowAt is the screen's line the row called name is on, in a screen w
+// wide: -1 for none.
+func rowAt(screen string, w int, name string) int {
+	left, _ := panes(screen, w)
+	for i, l := range left {
+		if rest, ok := strings.CutPrefix(l, "  "); ok && len([]rune(rest)) > 2 {
+			if r := string([]rune(rest)[1:]); strings.TrimSpace(r) == name || strings.HasPrefix(strings.TrimSpace(r), name+"  ") {
+				return headLines + i
 			}
-			under = append(under, text)
 		}
-		return l, under
 	}
-	return "", nil
+	return -1
 }
 
-// panelTitles are the titles of the steps in a screen's panels, in order.
-func panelTitles(screen string) []string {
-	var titles []string
-	for _, l := range lines(screen) {
-		if name, ok := panelTitle(l); ok {
-			titles = append(titles, name)
-		}
+// rowLine is the row called name's line in a screen w wide.
+func rowLine(t *testing.T, screen string, w int, name string) string {
+	t.Helper()
+	at := rowAt(screen, w, name)
+	if at < 0 {
+		t.Fatalf("no row %s in\n%s", name, screen)
 	}
-	return titles
+	left, _ := panes(screen, w)
+	return left[at-headLines]
+}
+
+// logOf is what the log shows in a screen w wide: the right pane's lines
+// under its heading, to the last that isn't blank.
+func logOf(screen string, w int) []string {
+	_, right := panes(screen, w)
+	at := slices.IndexFunc(right, func(l string) bool {
+		return strings.HasPrefix(l, "  EVERYTHING  ") || strings.Contains(l, "  its lines alone · esc for everything")
+	})
+	if at < 0 {
+		return nil
+	}
+	shown := right[at+2:]
+	for len(shown) > 0 && shown[len(shown)-1] == "" {
+		shown = shown[:len(shown)-1]
+	}
+	return shown
+}
+
+// laterOf is what the left pane lists for later, in a screen w wide.
+func laterOf(screen string, w int) (header string, items []string) {
+	left, _ := panes(screen, w)
+	at := slices.IndexFunc(left, func(l string) bool { return strings.HasPrefix(l, "  FOR LATER") })
+	if at < 0 {
+		return "", nil
+	}
+	for _, l := range left[at+1:] {
+		if l == "" {
+			break
+		}
+		items = append(items, l)
+	}
+	return left[at], items
+}
+
+// clickRow is a click on the row called name, as the screen w wide has it.
+func clickRow(name string) func(screen string, w int) []ask.Key {
+	return func(screen string, w int) []ask.Key { return []ask.Key{click(8, rowAt(screen, w, name))} }
+}
+
+// pressing are keys, pressed whatever the screen.
+func pressing(keys ...ask.Key) func(string, int) []ask.Key {
+	return func(string, int) []ask.Key { return keys }
 }
 
 // While applying, at a terminal big enough, kit has a screen of its own,
-// the window's whole size: the header with the bar and the counts, every
-// step in a grid, a rule, the card up for you and the log's panels, a
-// rule, macOS asking, the keys; a blank line over the first rule and under
-// the second, none between the panels. What's left to do is counted on
-// its own, never as needing you.
+// the window's whole size: the header, the bar and how the run stands
+// beside the wordmark; a rule across with a junction where the panes part;
+// the rows at the left, the log at the right. Each is drawn as round 10
+// has it, at the size round 10 drew and at the least the screen takes:
+// following the log, a card up, a row chosen, scrolled back, a step
+// failed.
 func TestApplyingHasAScreenOfItsOwn(t *testing.T) {
+	took := 6*time.Minute + 12*time.Second
 	for _, tt := range []struct {
-		golden, counts, keys string
-		took                 time.Duration
-		events               func() []event.Event
+		name   string
+		events func() []event.Event
+		keys   func(screen string, w int) []ask.Key
 	}{
-		{"apply-screen.golden", "31 of 51 · 3 running · 1 to do · 6m12s", runningFoot, 6*time.Minute + 12*time.Second, sixMinutesIn},
-		{"apply-screen-failed.golden", "35 of 51 · 1 failed · 2 running · 2 to do · 10m48s", runningFoot, 10*time.Minute + 48*time.Second, casksFailed},
-		{"apply-screen-you.golden", "35 of 51 · 1 failed · 2 running · 1 needs you · 2 to do · 12m40s", signInFoot, 12*time.Minute + 40*time.Second, waitingOnYou},
+		{"following", sixMinutesIn, nil},
+		{"card", waitingOnYou, nil},
+		{"row", sixMinutesIn, clickRow("Homebrew casks")},
+		{"scrolled", func() []event.Event { return sixMinutesInWith(40, 12) }, pressing(keyUp, keyUp, keyUp, keyUp, keyUp)},
+		{"failed", casksFailed, nil},
 	} {
-		t.Run(tt.golden, func(t *testing.T) {
-			face, out, _ := applyAt(160, 64, tt.took, tt.events())
-			got := screen(out.String())
-			if err := face.Close(); err != nil {
-				t.Fatal(err)
-			}
-			golden(t, tt.golden, got+"\n")
-			ls := lines(got)
-			if len(ls) != 64 || !strings.HasSuffix(ls[3], "│  "+tt.counts) || ls[63] != tt.keys {
-				t.Errorf("the screen is %d lines, its counts and keys\n%s\n%s\nwant 64 lines, the counts %q, the keys %q", len(ls), ls[3], ls[len(ls)-1], tt.counts, tt.keys)
-			}
-			if !strings.Contains(out.String(), "\x1b[?1049h\x1b[?25l") {
-				t.Error("applying didn't take the alternate screen, its cursor hidden")
-			}
-			if strings.Contains(out.String(), "shift+drag") {
-				t.Error("the keys say shift+drag selects; want no word of it")
-			}
-			rules := edges(ls)
-			if len(rules) != 2 || ls[rules[0]-1] != "" || ls[rules[1]+1] != "" || ls[rules[0]+1] == "" || !panelRow.MatchString(ls[rules[0]+1]) {
-				t.Errorf("the screen's rules are at lines %v; want two, a blank line over the first and under the second, the first panel straight under the first", rules)
-			}
-		})
+		for _, size := range [][2]int{{160, 64}, {100, 30}} {
+			name := fmt.Sprintf("apply-screen-%s-%dx%d.golden", tt.name, size[0], size[1])
+			t.Run(name, func(t *testing.T) {
+				face, out, kb := applyAt(size[0], size[1], took, tt.events())
+				defer func() { _ = face.Close() }()
+				if tt.keys != nil {
+					kb.press(t, tt.keys(screen(out.String()), size[0])...)
+				}
+				got := screen(out.String())
+				golden(t, name, got+"\n")
+				ls := lines(got)
+				if len(ls) != size[1] {
+					t.Errorf("the screen is %d lines, want %d", len(ls), size[1])
+				}
+				for i, l := range ls {
+					if w := ansi.StringWidth(l); w > size[0] {
+						t.Errorf("line %d is %d wide, wider than the window, %d", i, w, size[0])
+					}
+				}
+				if rule := []rune(ls[headLines-1]); len(rule) != size[0] || rule[split(size[0])] != '┬' || strings.Trim(string(rule), "─┬") != "" {
+					t.Errorf("under the header is %q; want a rule across, ┬ at column %d", ls[headLines-1], split(size[0]))
+				}
+				if !strings.Contains(out.String(), "\x1b[?1049h\x1b[?25l") {
+					t.Error("applying didn't take the alternate screen, its cursor hidden")
+				}
+			})
+		}
 	}
 }
 
 // The screen's header is the one the arrival lands on: a blank line, then
 // the wordmark two cells in, what runs, the Mac and when beside it, so the
-// hand-over moves nothing; the bar and the counts fill in under that line.
-// As the run starts, nothing in the log yet, the keys are at the foot all
-// the same.
+// hand-over moves nothing; the bar and how the run stands fill in under
+// that line.
 func TestApplyingScreenTakesOverFromTheArrival(t *testing.T) {
-	face, out, _ := applyAt(160, 64, time.Second, sixMinutesIn()[:9])
+	face, out, _ := applyAt(160, 64, time.Second, sixMinutesIn()[:3])
 	got := lines(screen(out.String()))
 	if err := face.Close(); err != nil {
 		t.Fatal(err)
@@ -382,373 +433,429 @@ func TestApplyingScreenTakesOverFromTheArrival(t *testing.T) {
 	if got[1] != landed[1] {
 		t.Errorf("the screen's first line is %q; want the arrival's, %q", got[1], landed[1])
 	}
-	if len(got) != 64 || got[63] != runningFoot {
-		t.Errorf("as the run starts, the screen is %d lines, the last %q; want 64, the keys at the foot", len(got), got[len(got)-1])
-	}
 }
 
-// The log's panels, with nothing pinned, are the steps at work applying,
-// in the order they started: a step finishing leaves its panel at once,
-// failed or not; one only checking has none; one waiting partway through
-// applying, for a thing another step puts in place, gives its panel up,
-// and has it again once it's back at work.
-func TestApplyingPanelsAreForStepsAtWork(t *testing.T) {
-	var steps []event.Step
-	for _, n := range []string{"a", "b", "c", "d", "e"} {
-		steps = append(steps, event.Step{Name: n, Title: n, Area: "Steps"})
-	}
-	face, out, _ := applyAt(160, 64, time.Second, []event.Event{event.RunStarted{Time: at, Command: "apply", Machine: "laptop", Steps: steps}})
-	defer func() { _ = face.Close() }()
-	start := func(names ...string) {
-		for _, n := range names {
-			face.Emit(event.StepStarted{Step: n, Doing: "checking"})
-			face.Emit(event.StepStarted{Step: n, Doing: "applying"})
-			face.Emit(event.Output{Step: n, Command: "run apply", Line: n + " at work"})
-		}
-	}
-	panels := func(when string, want ...string) {
-		t.Helper()
-		time.Sleep(300 * time.Millisecond)
-		if got := panelTitles(screen(out.String())); !slices.Equal(got, want) {
-			t.Errorf("%s, the log's panels are %q; want %q\n%s", when, got, want, screen(out.String()))
-		}
-	}
-	start("a", "b", "c")
-	face.Emit(event.StepStarted{Step: "d", Doing: "checking"})
-	panels("with a, b and c applying, d checking", "a", "b", "c")
-	face.Emit(event.StepFinished{Step: "b", Result: check.Result{State: check.Failed, Reason: "couldn't apply: it broke"}})
-	face.Emit(event.Doing{Step: "a", Says: "waiting for TOKEN: 2 to install"})
-	start("e")
-	panels("b failed, a waiting, e started", "c", "e")
-	face.Emit(event.Doing{Step: "a", Says: "installing owner/private/fetcher", Of: 2})
-	face.Emit(event.Output{Step: "a", Command: "brew install", Line: "a at work again"})
-	face.Emit(event.StepFinished{Step: "c", Result: check.Result{State: check.OK, Summary: "done"}})
-	panels("a back at work, c done", "a", "e")
-	face.Emit(event.StepFinished{Step: "a", Result: check.Result{State: check.OK, Summary: "done"}})
-	face.Emit(event.StepFinished{Step: "e", Result: check.Result{State: check.OK, Summary: "done"}})
-	time.Sleep(300 * time.Millisecond)
-	got := screen(out.String())
-	rules := edges(lines(got))
-	if len(rules) != 2 || panelTitles(got) != nil || strings.TrimSpace(strings.Join(lines(got)[rules[0]+1:rules[1]], "")) != "" {
-		t.Errorf("with nothing at work, nothing pinned and no card, the log is\n%s\nwant it empty", got)
-	}
-}
-
-// scratchLeft is a run in which the Scratch volume's step made the volume,
-// printing as it did, but found two things, each of state, still left once
-// it checked again, one saying what to do, while Claude Code installs.
-func scratchLeft(state string) []event.Event {
-	var steps []event.Step
-	for _, a := range []struct{ area, title string }{{"Mac", "Scratch volume"}, {"Mac", "Disk space"}, {"Steps", "claude-code"}} {
-		steps = append(steps, event.Step{Name: stepName(a.area, a.title), Title: a.title, Area: a.area})
-	}
-	events := []event.Event{event.RunStarted{Time: at, Command: "apply", Machine: "laptop", Steps: steps}}
-	events = append(events, applyingStep("Mac", "Scratch volume", "mdutil -i off /Volumes/Scratch", append(numbered("Adding volume", 12),
-		"mdutil disabling Spotlight", "/System/Volumes/Data/Volumes/Scratch:", "    Indexing disabled.")...)...)
-	events = append(events, finished("Mac", "Scratch volume", check.Result{
-		State: check.Attention, Summary: "not set up as it should be",
-		Items: []check.Item{
-			{ID: "scratch:tmpdir", Name: "Claude Code's settings don't send TMPDIR to it", State: state, Detail: "set it in Claude Code's settings"},
-			{ID: "scratch:backups", Name: "Time Machine still backs it up", State: state},
-		},
-		Done: []check.Item{{ID: "scratch:mounted", Name: "/Volumes/Scratch", Action: "create"}},
-	}))
-	events = append(events, fine("Mac", "Disk space", "71% free"))
-	return append(events, applyingStep("Steps", "claude-code", "run apply", "Setting up Claude Code...", "Verifying checksum")...)
-}
-
-// A finished step has a panel only once it's pinned: under the last lines
-// it printed, which give way to it when the panel hasn't the room for
-// both, what's left of it, as the record has it. What it's left you to do
-// is each thing by name, white, how under it; what's wrong with a step
-// unwell, in orange. The record has the step unwell's row with what's left
-// under it; the to-do's row says it's below, under TO DO, cutting what
-// else it says to keep that.
-func TestApplyingPinnedPanelSaysWhatsLeft(t *testing.T) {
-	left := []string{"Claude Code's settings don't send TMPDIR to it", "→ set it in Claude Code's settings", "Time Machine still backs it up"}
+// Each of kit's steps is in a row of its own kind's or area's, never an
+// app's; a step of the user's own is in Your steps whatever it's called; a
+// step by hand in none; a step kit doesn't know falls back on its area.
+func TestApplyingRowsByKitsOwnStructure(t *testing.T) {
 	for _, tt := range []struct {
-		state, golden string
-		named         func(string) string
-		record        []string
+		step  event.Step
+		row   string
+		known bool
 	}{
-		{check.Problem, "apply-screen-left.golden", look.White, []string{
-			"\n  △ Scratch volume  created /Volumes/Scratch · not set up as it … · to do, below\n  ● Disk space",
-			"\n  TO DO  2, in any order: kit apply checks them\n  △ 1  Claude Code's settings don't send TMPDIR to it\n       → set it in Claude Code's settings\n  △ 2  Time Machine still backs it up\n",
-		}},
-		{string(check.Attention), "", look.Orange, []string{"\n  ▲ Scratch volume  created /Volumes/Scratch · not set up as it should be\n  │ " + strings.Join(left, "\n  │ ") + "\n"}},
+		{event.Step{Name: "boot-github", Area: boot.AreaBooted}, "This Mac", true},
+		{event.Step{Name: "full-disk-access", Area: "Backups"}, "This Mac", true},
+		{event.Step{Name: "oh-my-zsh", Area: "Drift"}, "Files and shell", true},
+		{event.Step{Name: "oh-my-zsh", Area: "Steps"}, "Your steps", true},
+		{event.Step{Name: "spotlight-exclusion", Area: "Drift"}, "Mac settings", true},
+		{event.Step{Name: "secret", Area: "Drift"}, "Secrets", true},
+		{event.Step{Name: "homebrew", Area: "Drift"}, "Homebrew formulae", true},
+		{event.Step{Name: "cask", Area: "Drift"}, "Homebrew casks", true},
+		{event.Step{Name: "mas", Area: "Drift"}, "App Store apps", true},
+		{event.Step{Name: "claude-mcp", Area: "Drift"}, "Developer tools", true},
+		{event.Step{Name: "config-private", Area: "Config"}, "Git", true},
+		{event.Step{Name: "login-item", Area: "Drift"}, "Login items", true},
+		{event.Step{Name: "checks", Area: "Checks"}, "Your steps", true},
+		{event.Step{Name: "scratch", Area: "Mac"}, "Backups", true},
+		{event.Step{Name: "nightly", Area: "Jobs"}, "Backups", true},
+		{event.Step{Name: "manual", Area: "Manual"}, "", true},
+		{event.Step{Name: "1password", Area: "Manual"}, "", true},
+		{event.Step{Name: "something-new", Area: boot.AreaBooted}, "This Mac", false},
+		{event.Step{Name: "something-new", Area: "Mac"}, "This Mac", false},
+		{event.Step{Name: "something-new", Area: "Backups"}, "Backups", false},
+		{event.Step{Name: "hourly:asimov", Area: "Jobs"}, "Backups", false},
+		{event.Step{Name: "something-new", Area: "Config"}, "Git", false},
+		{event.Step{Name: "something-new", Area: "Drift"}, "This Mac", false},
 	} {
-		t.Run(tt.state, func(t *testing.T) {
-			face, out, kb := applyIn(colorprofile.TrueColor, 100, 30, time.Minute, scratchLeft(tt.state))
-			if got := panelTitles(screen(uncoloured(out.String()))); !slices.Equal(got, []string{"claude-code"}) {
-				t.Errorf("before it's pinned, the panels are %q; want claude-code's alone, at work", got)
-			}
-			pin(t, out, kb, "Scratch volume")
-			got := screen(uncoloured(out.String()))
-			if tt.golden != "" {
-				golden(t, tt.golden, got+"\n")
-			}
-			if _, under := panelOf(got, "Scratch volume"); len(under) < 4 || !slices.Equal(under[len(under)-4:], append([]string{"    Indexing disabled."}, left...)) {
-				t.Errorf("the Scratch volume's panel shows\n%s\nwant its last line printed, then what's left: %q", strings.Join(under, "\n"), left)
-			}
-			if frame := strings.Join(lastFrame(out.String()), "\n"); !strings.Contains(frame, tt.named(left[0])) || !strings.Contains(frame, tt.named(left[2])) {
-				t.Errorf("the things left aren't named as they should be in\n%s", frame)
-			}
-			kb.press(t, slices.Repeat([]ask.Key{keyUp}, 20)...)
-			if _, under := panelOf(screen(uncoloured(out.String())), "Scratch volume"); len(under) < 4 || under[0] != "==> Adding volume 1" || !slices.Equal(under[len(under)-3:], left) {
-				t.Errorf("scrolled back as far as it goes, the Scratch volume's panel shows\n%s\nwant its first lines printed, then what's left", strings.Join(under, "\n"))
-			}
-			face.Emit(event.RunFinished{Time: at, Duration: time.Minute, Counts: map[check.State]int{check.OK: 2, check.Attention: 1}})
-			if err := face.Close(); err != nil {
-				t.Fatal(err)
-			}
-			record := screen(uncoloured(out.String()))
-			for _, want := range tt.record {
-				if !strings.Contains(record, want) {
-					t.Errorf("the record is\n%s\nwant it to hold\n%s", record, want)
-				}
-			}
-			if tt.state == string(check.Attention) && strings.Contains(record, "TO DO") {
-				t.Errorf("the record is\n%s\nwant no TO DO: nothing's left only for you to do", record)
-			}
-		})
-	}
-}
-
-// handCard is a step by hand come up with nothing to tell kit it's done:
-// kit opened System Settings for it, and two more wait after it.
-var handCard = event.NeedsYou{Time: at, Step: stepName("Manual", "By hand"), Item: "karabiner", Title: "Allow Karabiner-Elements", Steps: []string{
-	"Allow Karabiner-Elements' driver (the Allow button, near the bottom)",
-	"Then Input Monitoring › turn on karabiner_grabber and karabiner_observer",
-}, Opened: "System Settings", More: 2}
-
-// paperCard is a step by hand come up that kit neither opened anything for
-// nor can tell is done.
-var paperCard = event.NeedsYou{Time: at, Step: stepName("Manual", "By hand"), Item: "paper", Title: "Install Paper", Steps: []string{"Download it from paper.example.com"}}
-
-// cardUp is casksFailed with card come up for its step, running.
-func cardUp(card event.NeedsYou) []event.Event {
-	return append(casksFailed(), event.StepStarted{Step: card.Step, Doing: "applying"}, card)
-}
-
-// A step by hand come up is a card, straight under the first rule, over
-// the panels: an orange rule carrying the needs-you mark, its title, that
-// it needs you, and how many more wait after it; its steps numbered, the
-// app kit opened for it the first, a blank line after each; and, when kit
-// tells by itself it's done, that kit carries on. Its cell in the grid
-// needs you, in orange; the counts say so; the keys answering it lead the
-// foot: o when kit opened an app, enter when kit can't tell by itself, l
-// always. The step finishing takes it down.
-func TestApplyingCard(t *testing.T) {
-	for _, tt := range []struct {
-		name, golden string
-		card         event.NeedsYou
-		lines        []string
-		keys         string
-	}{
-		{"kit opened it, and tells", "", signIn, []string{
-			"  ── ▲ Sign in to 1Password  needs you ─",
-			"",
-			"       1  1Password is open: kit opened it for you",
-			"",
-			"       2  Scan the QR code it shows with the 1Password app on your phone",
-			"",
-			"       3  In 1Password, Settings › Developer › turn on Integrate with 1Password CLI",
-			"",
-			"       kit carries on by itself once it's done",
-			"",
-		}, signInFoot},
-		{"kit opened it, more after it", "apply-screen-hand.golden", handCard, []string{
-			"  ── ▲ Allow Karabiner-Elements  needs you · 2 more after this ─",
-			"",
-			"       1  System Settings is open: kit opened it for you",
-			"",
-			"       2  Allow Karabiner-Elements' driver (the Allow button, near the bottom)",
-			"",
-			"       3  Then Input Monitoring › turn on karabiner_grabber and karabiner_observer",
-			"",
-		}, "  o open System Settings again · enter done · l later · tab panel · ↑↓ scroll · click a step to see it · q stop"},
-		{"neither", "", paperCard, []string{
-			"  ── ▲ Install Paper  needs you ─",
-			"",
-			"       1  Download it from paper.example.com",
-			"",
-		}, "  enter done · l later · tab panel · ↑↓ scroll · click a step to see it · q stop"},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			face, out, _ := applyIn(colorprofile.TrueColor, 160, 64, time.Minute, cardUp(tt.card))
-			defer func() { _ = face.Close() }()
-			got := screen(uncoloured(out.String()))
-			if tt.golden != "" {
-				golden(t, tt.golden, got+"\n")
-			}
-			ls := lines(got)
-			rules := edges(ls)
-			card := ls[rules[0]+1 : rules[0]+1+len(tt.lines)]
-			for i, want := range tt.lines {
-				if !strings.HasPrefix(card[i], want) || (want == "" && card[i] != "") {
-					t.Errorf("the card is\n%s\nwant\n%s", strings.Join(card, "\n"), strings.Join(tt.lines, "\n"))
-					break
-				}
-			}
-			if after := ls[rules[0]+1+len(tt.lines)]; !strings.HasPrefix(after, "  ── ◐ Homebrew formulae") {
-				t.Errorf("under the card is %q; want the panels", after)
-			}
-			if !strings.Contains(ls[3], " · 1 needs you · ") || foot(got, 1)[0] != tt.keys {
-				t.Errorf("the counts are %q, the keys %q; want 1 needs you, the keys %q", ls[3], foot(got, 1)[0], tt.keys)
-			}
-			frame := strings.Join(lastFrame(out.String()), "\n")
-			if cell := look.Orange("▲") + " " + look.Orange("By hand"); tt.card.Step == stepName("Manual", "By hand") && !strings.Contains(frame, cell) {
-				t.Errorf("the grid has no cell %q", cell)
-			}
-			if rule := "  " + look.Orange("── ") + look.Orange("▲") + " " + look.Strong(tt.card.Title) + "  " + look.Orange("needs you"); !strings.Contains(frame, rule) {
-				t.Errorf("the card's rule isn't orange, its title strong, needs you orange:\n%s", frame)
-			}
-			face.Emit(event.StepFinished{Time: at, Step: tt.card.Step, Result: check.Result{State: check.OK, Summary: "done"}})
-			time.Sleep(300 * time.Millisecond)
-			got = screen(uncoloured(out.String()))
-			if strings.Contains(got, tt.card.Title) || strings.Contains(got, "needs you") || foot(got, 1)[0] != runningFoot {
-				t.Errorf("its step done, the screen is\n%s\nwant the card gone, nothing needing you, the keys as they were", got)
-			}
-		})
-	}
-}
-
-// There's one card at a time: the last come up, whatever its step. A step
-// finishing takes its own card down, never another's; a step by hand
-// moving on to its next line replaces its card. A step queued for its
-// card's turn has the needs-you mark in the grid, but only the card up is
-// counted as needing you.
-func TestApplyingOneCardAtATime(t *testing.T) {
-	face, out, _ := applyIn(colorprofile.TrueColor, 160, 64, time.Minute, append(cardUp(signIn),
-		event.StepStarted{Step: paperCard.Step, Doing: "applying"},
-		event.Doing{Step: paperCard.Step, Says: "needs you"},
-	))
-	defer func() { _ = face.Close() }()
-	shows := func(when, title string) {
-		t.Helper()
-		time.Sleep(300 * time.Millisecond)
-		got := screen(uncoloured(out.String()))
-		ls := lines(got)
-		rules := edges(ls)
-		if rule := ls[rules[0]+1]; !strings.HasPrefix(rule, "  ── ▲ "+title+"  needs you") || strings.Count(got, "  needs you") != 1 {
-			t.Errorf("%s, the screen is\n%s\nwant one card, %s's", when, got, title)
-		}
-		if !strings.Contains(ls[3], " · 1 needs you · ") {
-			t.Errorf("%s, the counts are %q; want 1 needs you, the card up alone", when, ls[3])
-		}
-		frame := strings.Join(lastFrame(out.String()), "\n")
-		if cell := look.Orange("▲") + " " + look.Orange("By hand"); !strings.Contains(frame, cell) {
-			t.Errorf("%s, By hand isn't marked as needing you in the grid", when)
-		}
-	}
-	shows("1Password's card up, By hand queued for its turn", signIn.Title)
-	face.Emit(paperCard)
-	shows("By hand's card come up", paperCard.Title)
-	face.Emit(event.StepFinished{Time: at, Step: signIn.Step, Result: check.Result{State: check.OK, Summary: "signed in"}})
-	shows("1Password's step finished after", paperCard.Title)
-	face.Emit(handCard)
-	shows("By hand on to its next line", handCard.Title)
-}
-
-// A step waiting its turn says its own words, when it has some, rather
-// than what it waits for.
-func TestApplyingWaitingInItsOwnWords(t *testing.T) {
-	steps := []event.Step{
-		{Name: "cask", Title: "Homebrew casks", Area: "Drift"},
-		{Name: "arq", Title: "Arq", Area: "Backups", Waits: []string{"cask"}},
-		{Name: "manual", Title: "By hand", Area: "Manual", Waits: []string{"cask", "arq"}, Waiting: "at the end, once the rest is done"},
-	}
-	face, out, kb := applyAt(160, 64, time.Minute, []event.Event{
-		event.RunStarted{Time: at, Command: "apply", Machine: "laptop", Steps: steps},
-		event.StepStarted{Step: "cask", Doing: "applying"},
-	})
-	defer func() { _ = face.Close() }()
-	pin(t, out, kb, "Arq", "By hand")
-	got := screen(out.String())
-	for _, want := range []string{"  ── ○ Arq  waiting for Homebrew casks ─", "  ── ○ By hand  at the end, once the rest is done ─"} {
-		if !strings.Contains(got, want) {
-			t.Errorf("the screen is\n%s\nwant a panel %q", got, want)
+		if row, known := render.RowOf(tt.step); row != tt.row || known != tt.known {
+			t.Errorf("RowOf(%s in %s) = %q, known %v; want %q, known %v", tt.step.Name, tt.step.Area, row, known, tt.row, tt.known)
 		}
 	}
 }
 
-// A step that's left only something for you to do (a problem only you can
-// put right, or a step by hand), or that was deferred behind such steps
-// alone, is to do: in the grid a white △, its name white, never orange;
-// counted on its own, white; its area's light the white △ once nothing in
-// it failed or needs you, at once, before what's running. A step deferred
-// behind a failure isn't, nor one with anything else wrong. In a window
-// too small for the screen, it isn't listed as unwell.
-func TestApplyingToDo(t *testing.T) {
-	steps := []event.Step{
+// rowsRun is a run of steps, the steps by name in rows of their own, and
+// events after it started, at a screen 160 by 64.
+func rowsRun(steps []event.Step, events ...event.Event) []event.Event {
+	return append([]event.Event{event.RunStarted{Time: at, Command: "apply", Machine: "laptop", Steps: steps}}, events...)
+}
+
+// What a row says is its steps taken together, the first rule that holds:
+// one failed, why, or how many did; a card up for a step by hand holding it
+// up, that it waits for you; one at work, what it's doing and how far it's
+// got, a bar under it when it counts; some waiting, what for, how many are
+// done first; all finished, how many things are for later; all well, what
+// its step did, or that all are done; none started, that it's waiting.
+// Each in its state's mark and colour.
+func TestApplyingRowSays(t *testing.T) {
+	tools := []event.Step{
+		{Name: "homebrew", Title: "Homebrew", Area: "Drift"},
+		{Name: "brew", Title: "Homebrew formulae", Area: "Drift", Waits: []string{"homebrew"}},
+		{Name: "secret", Title: "Secrets", Area: "Drift", Waits: []string{"1password"}},
 		{Name: "time-machine", Title: "Time Machine", Area: "Backups"},
-		{Name: "prefs", Title: "App settings", Area: "Backups"},
-		{Name: "scratch", Title: "Scratch volume", Area: "Mac", Waits: []string{"prefs"}},
-		{Name: "disk", Title: "Disk space", Area: "Mac"},
-		{Name: "cask", Title: "Homebrew casks", Area: "Drift"},
-		{Name: "login", Title: "macOS login items", Area: "Drift", Waits: []string{"cask"}},
-		{Name: "brew", Title: "Homebrew formulae", Area: "Drift"},
-		{Name: "by-hand", Title: "By hand", Area: "Manual"},
+		{Name: "arq", Title: "Arq", Area: "Backups"},
+		{Name: "fonts", Title: "fonts", Area: "Steps"},
+		{Name: "mise", Title: "mise", Area: "Steps", Waits: []string{"brew"}},
+		{Name: "valet", Title: "valet", Area: "Steps"},
 		{Name: "1password", Title: "1password", Area: "Manual"},
 	}
-	problem := func(name, detail string) check.Result {
-		return check.Result{State: check.Attention, Summary: name, Items: []check.Item{{ID: "x:" + name, Name: name, State: check.Problem, Detail: detail}}}
+	toDo := func(name string) check.Result {
+		return check.Result{State: check.Attention, Summary: "to do", Items: []check.Item{{ID: "x:" + name, Name: name, State: check.Problem}}}
 	}
-	events := []event.Event{
-		event.RunStarted{Time: at, Command: "apply", Machine: "laptop", Steps: steps},
-		event.StepFinished{Step: "time-machine", Result: problem("no backup disk yet", "System Settings › General › Time Machine › Add Backup Disk")},
-		event.StepFinished{Step: "prefs", Result: problem("not restored yet", "kit prefs restore")},
-		event.StepFinished{Step: "scratch", Result: check.Result{State: check.Deferred, Reason: "waits for App settings"}},
-		event.StepFinished{Step: "disk", Result: check.Result{State: check.Attention, Summary: "8% free", Items: []check.Item{{ID: "disk:low", Name: "only 8% free", State: string(check.Attention)}}}},
-		event.StepFinished{Step: "cask", Result: check.Result{State: check.Failed, Reason: "couldn't install tailscale-app"}},
-		event.StepFinished{Step: "login", Result: check.Result{State: check.Deferred, Reason: "needs Homebrew casks"}},
-		event.StepStarted{Step: "brew", Doing: "applying"},
-		event.StepFinished{Step: "by-hand", Result: check.Result{State: check.Attention, Summary: "1 to do", Items: []check.Item{{ID: "manual:paper", Name: "Install Paper", State: check.ByHand}}}},
-		event.StepStarted{Step: "1password", Doing: "applying"},
+	for _, tt := range []struct {
+		name, row, want string
+		events          []event.Event
+		mark            string
+		under           string
+	}{
+		{"one failed", "Homebrew formulae", "  ✗ Homebrew formulae  couldn't install jq", []event.Event{
+			finished(3, "brew", check.Result{State: check.Failed, Reason: "couldn't install jq: it broke"})}, look.Red("✗"), ""},
+		{"two failed", "Homebrew formulae", "  ✗ Homebrew formulae  2 failed", []event.Event{
+			finished(2, "homebrew", check.Result{State: check.Failed, Reason: "couldn't install Homebrew"}),
+			finished(3, "brew", check.Result{State: check.Failed, Reason: "couldn't install jq"})}, look.Red("✗"), ""},
+		{"needs you", "Secrets", "  ▲ Secrets  waits for you: Sign in to 1Password", []event.Event{
+			event.StepStarted{Time: after(2), Step: "1password", Doing: "applying"},
+			event.NeedsYou{Time: after(2), Step: "1password", Item: "1password", Title: "Sign in to 1Password"}}, look.Orange("▲"), ""},
+		{"at work", "Homebrew formulae", "  ◐ Homebrew formulae  installing jq · 67 of 129", append(applying(10, "brew"),
+			event.Doing{Time: after(20), Step: "brew", Says: "installing jq", Done: 67, Of: 129}), look.Cyan("◐"), "    ▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮  50.0s"},
+		{"at work, a step of several", "Your steps", "  ◐ Your steps  applying valet", applying(10, "valet"), look.Cyan("◐"), ""},
+		{"waiting, some done", "Your steps", "  ○ Your steps  1 of 3 · mise waits for Homebrew formulae", []event.Event{fine(2, "fonts", "16 installed")}, look.Cyan("○"), ""},
+		{"waiting for a thing, at work no more", "Homebrew formulae", "  ○ Homebrew formulae  waits for TOKEN: 2 to install", append(applying(10, "brew"),
+			event.Doing{Time: after(20), Step: "brew", Says: "waiting for TOKEN: 2 to install"}), look.Cyan("○"), ""},
+		{"waiting, one step", "Secrets", "  ○ Secrets  waits for 1password", nil, look.Cyan("○"), ""},
+		{"for later", "Backups", "  △ Backups  2 for later", []event.Event{
+			finished(2, "time-machine", toDo("Add a Time Machine disk")), finished(3, "arq", toDo("Choose Arq's backup plan"))}, look.White("△"), ""},
+		{"done, one step", "Secrets", "  ● Secrets  24 synced", []event.Event{fine(2, "secret", "24 synced")}, look.Pink("●"), ""},
+		{"done, several", "Your steps", "  ● Your steps  all 3 done", []event.Event{
+			fine(2, "fonts", "16 installed"), fine(3, "mise", "fine"), fine(4, "valet", "fine")}, look.Pink("●"), ""},
+		{"not started", "Your steps", "  ○ Your steps  waiting", nil, look.Cyan("○"), ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			events := tt.events
+			if tt.name == "not started" {
+				events = nil
+				tools = slices.DeleteFunc(slices.Clone(tools), func(s event.Step) bool { return s.Name == "mise" })
+			}
+			face, out, _ := applyIn(colorprofile.TrueColor, 160, 64, time.Minute, rowsRun(tools, events...))
+			defer func() { _ = face.Close() }()
+			got := screen(uncoloured(out.String()))
+			if line := rowLine(t, got, 160, tt.row); !strings.HasPrefix(line, tt.want) || len(line) > len(tt.want) && !strings.HasPrefix(line[len(tt.want):], " ") && line != tt.want {
+				t.Errorf("the row is %q; want %q", line, tt.want)
+			}
+			frame := strings.Join(lastFrame(out.String()), "\n")
+			if !strings.Contains(frame, "  "+tt.mark+" ") {
+				t.Errorf("the row's mark isn't %q", ansi.Strip(tt.mark))
+			}
+			if tt.under != "" {
+				left, _ := panes(got, 160)
+				if at := rowAt(got, 160, tt.row) - headLines; left[at+1] != tt.under {
+					t.Errorf("under the row is %q; want its bar and how long it's been at work, %q", left[at+1], tt.under)
+				}
+			}
+		})
 	}
-	face, out, _ := applyIn(colorprofile.TrueColor, 160, 64, time.Minute, events)
+}
+
+// The bar is weighted by work: each step one, a step finished one, a step
+// at work that counts as far as it's got; the header says the same
+// percentage, and so does the terminal's tab.
+func TestApplyingBarIsWeighted(t *testing.T) {
+	steps := []event.Step{{Name: "a", Title: "a", Area: "Steps"}, {Name: "b", Title: "b", Area: "Steps"}, {Name: "c", Title: "c", Area: "Steps"}, {Name: "d", Title: "d", Area: "Steps"}}
+	var out syncBuffer
+	c := &clock{t: at}
+	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).
+		Sized(func() (int, int) { return 160, 64 }).Clocked(c.now).ShowTabProgress()
+	defer func() { _ = face.Close() }()
+	for _, e := range rowsRun(steps, fine(1, "a", "fine"), event.StepStarted{Step: "b", Doing: "applying"}, event.Doing{Step: "b", Says: "installing", Done: 1, Of: 4}) {
+		face.Emit(e)
+	}
+	time.Sleep(300 * time.Millisecond)
+	head := lines(screen(out.String()))[2]
+	if want := "  ▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮  31% · 0.0s so far"; !strings.HasSuffix(head, want) {
+		t.Errorf("one of four done, one a quarter of the way, the header's bar is %q; want it to end %q", head, want)
+	}
+	if !strings.Contains(out.String(), "\x1b]9;4;1;31\x07") {
+		t.Error("the tab's progress isn't 31%")
+	}
+}
+
+// What's for later: the steps by hand at the end, all of them till their
+// step's finished, but the one up now and those done meanwhile; then what
+// each step finished left to do. They're counted in their header and in
+// the state line; once their step's finished, the steps by hand left are
+// what it says is left. In a window too short for them, the last are
+// counted.
+func TestApplyingForLater(t *testing.T) {
+	base := sixMinutesIn()
+	face, out, _ := applyAt(160, 64, time.Minute, base)
+	got := screen(out.String())
+	header, items := laterOf(got, 160)
+	want := []string{"  △ Allow remote users Full Disk Access", "  △ Install the editor from its site", "  △ Allow Karabiner-Elements", "  △ Add a Time Machine disk"}
+	if header != "  FOR LATER  4" || !slices.Equal(items, want) {
+		t.Errorf("for later is %q\n%s\nwant FOR LATER 4\n%s", header, strings.Join(items, "\n"), strings.Join(want, "\n"))
+	}
+	if state := lines(got)[3]; !strings.HasSuffix(state, "│  ◐ working · nothing needs you · 4 for later") {
+		t.Errorf("the state line is %q; want 4 for later", state)
+	}
+	_ = face.Close()
+
+	karabiner := event.NeedsYou{Time: after(400), Step: "manual", Item: "karabiner", Title: "Allow Karabiner-Elements", More: 1}
+	sharing := event.NeedsYou{Time: after(420), Step: "manual", Item: "sharing", Title: "Allow remote users Full Disk Access"}
+	face, out, _ = applyAt(160, 64, time.Minute, append(slices.Clone(base), event.StepStarted{Time: after(399), Step: "manual", Doing: "applying"}, karabiner))
+	if _, items := laterOf(screen(out.String()), 160); slices.Contains(items, "  △ Allow Karabiner-Elements") {
+		t.Errorf("with Karabiner's card up, for later is\n%s\nwant it left out: the panel shows it", strings.Join(items, "\n"))
+	}
+	face.Emit(sharing)
+	time.Sleep(300 * time.Millisecond)
+	if _, items := laterOf(screen(out.String()), 160); !slices.Equal(items, []string{want[1], want[3]}) {
+		t.Errorf("Karabiner done, the next card up, for later is\n%s\nwant\n%s", strings.Join(items, "\n"), strings.Join([]string{want[1], want[3]}, "\n"))
+	}
+	face.Emit(finished(500, "manual", check.Result{State: check.Attention, Summary: "1 of 3 done", Items: []check.Item{
+		{ID: "manual:sharing", Name: "Allow remote users Full Disk Access", State: check.ByHand},
+		{ID: "manual:editor", Name: "Install the editor from its site", State: check.ByHand}}}))
+	time.Sleep(300 * time.Millisecond)
+	if _, items := laterOf(screen(out.String()), 160); !slices.Equal(items, []string{want[3], want[0], want[1]}) {
+		t.Errorf("their step finished, for later is\n%s\nwant what each step left to do, the steps by hand left among them", strings.Join(items, "\n"))
+	}
+	_ = face.Close()
+
+	face, out, _ = applyAt(100, 30, time.Minute, append(slices.Clone(base), applying(70, "mise")...))
+	defer func() { _ = face.Close() }()
+	header, items = laterOf(screen(out.String()), 100)
+	if header != "  FOR LATER  4" || len(items) == 0 || len(items) == 4 || !strings.HasPrefix(items[len(items)-1], "  and ") {
+		t.Errorf("at 100 by 30, for later is %q\n%s\nwant as many as fit, then how many more", header, strings.Join(items, "\n"))
+	}
+}
+
+// The log: every line of the run, oldest first, its time and a mark: what
+// a kind installed, dim +; a step finished well, pink, and what it did; one
+// left to do, white △; one failed, red, why and what to run on the spine
+// under it; one not checked, grey; a card up, orange ▲, and done with, how
+// long it was up, or put off. Steps starting and their checks have no line.
+// What's under way is at its foot, the time now on its first line.
+func TestApplyingLog(t *testing.T) {
+	events := append(casksFailed(),
+		event.StepStarted{Time: after(360), Step: "1password", Doing: "applying"},
+		event.NeedsYou{Time: after(360), Step: "1password", Item: "1password", Title: "Sign in to 1Password"},
+		finished(400, "1password", check.Result{State: check.OK, Summary: "done"}),
+	)
+	face, out, _ := applyAt(160, 64, 7*time.Minute, events)
+	defer func() { _ = face.Close() }()
+	log := logOf(screen(out.String()), 160)
+	for _, want := range []string{
+		"  03:04:06  ● GitHub: fine",
+		"  03:04:10  △ Time Machine: no backup disk",
+		"  03:04:26  ● fonts: 16 installed",
+		"  03:04:36  + Installed cask-1",
+		"  03:04:58  + Installed formula-1",
+		"  03:10:01  ✗ Homebrew casks failed: couldn't install tailscale-app\n" +
+			"            │ installer: The install failed. (The Installer encountered an error that caused the i…\n" +
+			"            │ → kit apply cask",
+		"  03:10:02  – macOS login items: not checked · needs Homebrew casks",
+		"  03:10:05  ▲ Sign in to 1Password: waiting for you",
+		"  03:10:45  ● Sign in to 1Password: done, in 40.0s",
+		"  03:11:05  ◐ Installing ffmpeg · 38 of 129\n            ◐ Applying claude-code",
+	} {
+		if !strings.Contains(strings.Join(log, "\n"), want) {
+			t.Errorf("the log is\n%s\nwant it to hold\n%s", strings.Join(log, "\n"), want)
+		}
+	}
+	for _, l := range log {
+		if strings.Contains(l, "checking") {
+			t.Errorf("the log has a line for a step starting or checking: %q", l)
+		}
+	}
+	if first, last := slices.Index(log, "  03:04:06  ● GitHub: fine"), slices.IndexFunc(log, func(l string) bool { return strings.Contains(l, "Sign in to 1Password: done") }); first < 0 || last < first {
+		t.Error("the log isn't oldest first")
+	}
+	if slices.ContainsFunc(log, func(l string) bool { return strings.Contains(l, "1password") }) {
+		t.Error("the log says a step by hand's end twice: its card's line, and its step's by its line's name")
+	}
+}
+
+// A card put off with l: the log says it's for later, never done.
+func TestApplyingLogSaysACardPutOff(t *testing.T) {
+	face, out, kb := applyAt(160, 64, 7*time.Minute, cardUp(signIn))
+	defer func() { _ = face.Close() }()
+	face.Hands(func(string, hand.Answer) bool { return true })
+	kb.press(t, keyL)
+	face.Emit(finished(400, "1password", check.Result{State: check.Attention, Summary: "not done", Items: []check.Item{{ID: "manual:1password", Name: "Sign in to 1Password", State: check.ByHand}}}))
+	time.Sleep(300 * time.Millisecond)
+	log := strings.Join(logOf(screen(out.String()), 160), "\n")
+	if !strings.Contains(log, "  03:10:45  △ Sign in to 1Password: for later\n") || strings.Contains(log, "Sign in to 1Password: done") {
+		t.Errorf("put off, the log is\n%s\nwant it for later, not done", log)
+	}
+}
+
+// A row chosen, the log is its lines alone, a step by hand's in the row of
+// the step it holds up, what's under way its own; the steps by hand at the
+// end are in no row, shown with everything alone.
+func TestApplyingLogOfARow(t *testing.T) {
+	events := append(sixMinutesIn(),
+		event.StepStarted{Time: after(360), Step: "1password", Doing: "applying"},
+		event.NeedsYou{Time: after(360), Step: "1password", Item: "1password", Title: "Sign in to 1Password"},
+		finished(400, "1password", check.Result{State: check.OK, Summary: "done"}),
+		fine(401, "secret", "24 synced"),
+		event.StepStarted{Time: after(402), Step: "manual", Doing: "applying"},
+		event.NeedsYou{Time: after(402), Step: "manual", Item: "editor", Title: "Install the editor from its site"},
+	)
+	face, out, kb := applyAt(160, 64, 7*time.Minute, events)
+	defer func() { _ = face.Close() }()
+	kb.press(t, clickRow("Secrets")(screen(out.String()), 160)...)
+	got := screen(out.String())
+	_, right := panes(got, 160)
+	if !slices.Contains(right, "  SECRETS  its lines alone · esc for everything") {
+		t.Errorf("with Secrets chosen, the right pane is\n%s\nwant its heading", strings.Join(right, "\n"))
+	}
+	want := []string{
+		"  03:10:05  ▲ Sign in to 1Password: waiting for you",
+		"  03:10:45  ● Sign in to 1Password: done, in 40.0s",
+		"  03:10:46  ● Secrets: 24 synced",
+	}
+	if log := logOf(got, 160); !slices.Equal(log, want) {
+		t.Errorf("with Secrets chosen, the log is\n%s\nwant\n%s", strings.Join(log, "\n"), strings.Join(want, "\n"))
+	}
+	kb.press(t, clickRow("Homebrew formulae")(screen(out.String()), 160)...)
+	log := logOf(screen(out.String()), 160)
+	if len(log) == 0 || log[len(log)-1] != "  03:11:05  ◐ Installing ffmpeg · 38 of 129" || slices.ContainsFunc(log, func(l string) bool { return strings.Contains(l, "cask") }) {
+		t.Errorf("with Homebrew formulae chosen, the log is\n%s\nwant its lines alone, what it's doing at its foot", strings.Join(log, "\n"))
+	}
+	kb.press(t, keyEsc)
+	if log := strings.Join(logOf(screen(out.String()), 160), "\n"); !strings.Contains(log, "Install the editor from its site: waiting for you") {
+		t.Errorf("with everything, the log is\n%s\nwant the steps by hand at the end with it", log)
+	}
+}
+
+// While a card's up, it's a panel over the log, ruled off: its title,
+// orange, how long it's waited at the right, how many more are after it;
+// why the run waits for it; its steps, numbered, the app kit opened first;
+// that kit carries on by itself, when it tells; the keys answering it. The
+// header says the run's waiting for you; the row it holds up does too. The
+// card done, the panel goes.
+func TestApplyingPanel(t *testing.T) {
+	face, out, _ := applyIn(colorprofile.TrueColor, 160, 64, 6*time.Minute+12*time.Second, waitingOnYou())
+	defer func() { _ = face.Close() }()
 	got := screen(uncoloured(out.String()))
-	if counts := lines(got)[3]; !strings.HasSuffix(counts, "│  7 of 9 · 1 failed · 2 running · 4 to do · 1m00s") {
-		t.Errorf("the counts are %q; want 4 to do, on their own", counts)
+	_, right := panes(got, 160)
+	want := []string{
+		"",
+		"  ▲ Sign in to 1Password" + strings.Repeat(" ", 60) + "waiting 27.0s",
+		"",
+		"      The run waits for this, for Secrets.",
+		"",
+		"      1  1Password is open: kit opened it",
+		"      2  Scan the QR code it shows with the 1Password app on your phone",
+		"      3  In 1Password, Settings › Developer › turn on Integrate with 1Password CLI",
+		"",
+		"      kit carries on by itself once it's done",
+		"      o opens 1Password again",
+		"      l later",
+		"",
+		"───────────────────────────────────────────────────────────────────────────────────────────────────",
+		"",
+		"  EVERYTHING  click a row for its lines alone",
+	}
+	if !slices.Equal(right[:len(want)], want) {
+		t.Errorf("the right pane starts\n%s\nwant\n%s", strings.Join(right[:len(want)], "\n"), strings.Join(want, "\n"))
+	}
+	if rule := lines(got)[headLines+13]; !strings.Contains(rule, "├───") {
+		t.Errorf("the panel's rule is %q; want it to join the rule between the panes", rule)
+	}
+	if state := lines(got)[3]; !strings.HasSuffix(state, "│  ▲ waiting for you · Sign in to 1Password · 4 for later") {
+		t.Errorf("the state line is %q; want it waiting for you, the card's title", state)
 	}
 	frame := strings.Join(lastFrame(out.String()), "\n")
-	for _, title := range []string{"Time Machine", "App settings", "Scratch volume", "By hand"} {
-		if !strings.Contains(frame, look.White("△")+" "+look.White(title)) || strings.Contains(frame, look.Orange(title)) {
-			t.Errorf("%s isn't a white △ and its name white in the grid", title)
+	for _, styled := range []string{look.Orange("▲") + " " + look.Urgent("Sign in to 1Password"), look.Urgent("1") + "  ", look.Urgent("o") + " " + look.White("opens 1Password again"), look.Orange("▲ waiting for you")} {
+		if !strings.Contains(frame, styled) {
+			t.Errorf("the screen has no %q, styled as it should be", ansi.Strip(styled))
 		}
 	}
-	for _, cell := range []string{look.Orange("▲") + " " + look.Orange("Disk space"), look.Muted("– macOS login items")} {
-		if !strings.Contains(frame, cell) {
-			t.Errorf("the grid has no cell %q: want what's wrong, and what's deferred behind a failure, as they were", cell)
+	face.Emit(finished(400, "1password", check.Result{State: check.OK, Summary: "done"}))
+	time.Sleep(300 * time.Millisecond)
+	got = screen(uncoloured(out.String()))
+	if _, right := panes(got, 160); right[1] != "  EVERYTHING  click a row for its lines alone" || strings.Contains(lines(got)[3], "waiting for you") {
+		t.Errorf("the card done, the screen is\n%s\nwant the panel gone, the log with the whole side", got)
+	}
+}
+
+// A card's panel says why the run waits for it: the steps it holds up; the
+// steps by hand at the end, that the rest is done; one nothing waits for,
+// that the run carries on. More after it, it says how many, by how long
+// it's waited. One kit can't tell is done takes enter.
+func TestApplyingPanelSaysWhy(t *testing.T) {
+	for _, tt := range []struct {
+		card       event.NeedsYou
+		why, title string
+		keys       []string
+	}{
+		{event.NeedsYou{Time: after(360), Step: "manual", Item: "karabiner", Title: "Allow Karabiner-Elements", More: 2},
+			"      The rest is done: this is what's left.", "2 more after this · waiting 12.0s", []string{"      enter when it's done", "      l later"}},
+		{event.NeedsYou{Time: after(360), Step: "1password", Item: "1password", Title: "Sign in to 1Password", Tells: true},
+			"      The run waits for this, for Secrets.", "waiting 12.0s", []string{"      kit carries on by itself once it's done", "      l later"}},
+	} {
+		steps := slices.Clone(newMac)
+		face, out, _ := applyAt(160, 64, 6*time.Minute+12*time.Second, append(rowsRun(steps, event.StepStarted{Time: after(360), Step: tt.card.Step, Doing: "applying"}), tt.card))
+		_, right := panes(screen(out.String()), 160)
+		if !strings.HasSuffix(right[1], tt.title) || right[3] != tt.why || !slices.Equal(right[5:5+len(tt.keys)], tt.keys) {
+			t.Errorf("%s's panel is\n%s\nwant it to say %q, %q, then %q", tt.card.Title, strings.Join(right[:10], "\n"), tt.title, tt.why, tt.keys)
+		}
+		_ = face.Close()
+	}
+	steps := []event.Step{{Name: "cask", Title: "Homebrew casks", Area: "Drift"}, {Name: "switchboard", Title: "switchboard", Area: "Manual"}}
+	face, out, _ := applyAt(160, 64, time.Minute, rowsRun(steps, event.StepStarted{Step: "switchboard", Doing: "applying"},
+		event.NeedsYou{Step: "switchboard", Item: "switchboard", Title: "Set up switchboard"}))
+	defer func() { _ = face.Close() }()
+	if _, right := panes(screen(out.String()), 160); right[3] != "      Nothing waits for this: the rest of the run carries on meanwhile." {
+		t.Errorf("a card nothing waits for says %q", right[3])
+	}
+}
+
+// The state line says the run's working, else what it waits on you for,
+// macOS asking among it, where to answer; then what failed, and what's for
+// later.
+func TestApplyingStateLine(t *testing.T) {
+	face, out, _ := applyAt(160, 64, time.Minute, append(casksFailed(), event.Asking{Time: after(358), Says: "asking for an administrator's password"}))
+	defer func() { _ = face.Close() }()
+	if state := lines(screen(out.String()))[3]; !strings.HasSuffix(state, "│  ▲ waiting for you · macOS asking for an administrator's password · → answer it in the window macOS shows · 1 failed · 4 for later") {
+		t.Errorf("macOS asking, the state line is %q", state)
+	}
+	face.Emit(event.Asking{Time: after(359)})
+	time.Sleep(300 * time.Millisecond)
+	if state := lines(screen(out.String()))[3]; !strings.HasSuffix(state, "│  ◐ working · nothing needs you · 1 failed · 4 for later") {
+		t.Errorf("macOS answered, the state line is %q", state)
+	}
+}
+
+// A window too small for the screen keeps the run in place under its
+// heading, as before, the rows' lights at its top; the screen takes a
+// window 100 by 30 or more.
+func TestApplyingScreenNeedsTheRoom(t *testing.T) {
+	for _, tt := range []struct {
+		w, h   int
+		screen bool
+	}{{99, 64, false}, {100, 64, true}, {160, 29, false}, {160, 30, true}, {100, 30, true}} {
+		var out syncBuffer
+		face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).Sized(func() (int, int) { return tt.w, tt.h })
+		for _, e := range sixMinutesIn()[:12] {
+			face.Emit(e)
+		}
+		if got := strings.Contains(out.String(), "\x1b[?1049h"); got != tt.screen {
+			t.Errorf("at %d×%d, a screen of its own: %v, want %v", tt.w, tt.h, got, tt.screen)
+		}
+		if err := face.Close(); err != nil {
+			t.Fatal(err)
 		}
 	}
-	if !strings.Contains(frame, look.White("4 to do")) {
-		t.Error("what's to do isn't counted in white")
-	}
+	face, out, _ := applyAt(99, 40, 6*time.Minute+12*time.Second, sixMinutesIn())
+	got := turned(screen(out.String()))
 	if err := face.Close(); err != nil {
 		t.Fatal(err)
 	}
-
-	var narrow syncBuffer
-	small := render.NewPretty(&colorprofile.Writer{Forward: &narrow, Profile: colorprofile.Ascii}, 80, true).Sized(func() (int, int) { return 80, 40 })
-	for _, e := range events {
-		small.Emit(e)
-	}
-	time.Sleep(300 * time.Millisecond)
-	live := turned(screen(narrow.String()))
-	if want := "  △ BACKUPS   ▲ MAC    ✗ CONFIG   △ MANUAL\n"; !strings.Contains(live, want) {
-		t.Errorf("in a small window, the screen is\n%s\nwant the lights\n%s", live, want)
-	}
-	for _, title := range []string{"Time Machine", "App settings", "Scratch volume", "By hand"} {
-		if strings.Contains(live, title) {
-			t.Errorf("in a small window, the screen is\n%s\nwant no row for %s: it's to do, not unwell", live, title)
+	golden(t, "apply-small.golden", got+"\n")
+	for _, want := range []string{"  ● THIS MAC 6  ● FILES AND SHELL 2  ● MAC SETTINGS 3  ○ SECRETS\n  ◐ HOMEBREW FORMULAE", "  ◐ YOUR STEPS  ○ BACKUPS\n"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("in a small window, the screen is\n%s\nwant the rows' lights, as the screen's rows stand\n%s", got, want)
 		}
-	}
-	if !strings.Contains(live, "  ▲ Disk space  8% free\n") || !strings.Contains(live, "  ✗ Homebrew casks  couldn't install tailscale-app\n") {
-		t.Errorf("in a small window, the screen is\n%s\nwant what's unwell listed", live)
-	}
-	if err := small.Close(); err != nil {
-		t.Fatal(err)
 	}
 }
 
@@ -756,11 +863,12 @@ func TestApplyingToDo(t *testing.T) {
 // waiting for an answer says a bigger window shows them; one kit tells
 // about by itself says it carries on.
 func TestApplyingCardInASmallWindow(t *testing.T) {
+	paper := event.NeedsYou{Time: after(360), Step: "manual", Item: "editor", Title: "Install the editor from its site", Steps: []string{"Download it from editor.example.com"}}
 	for _, tt := range []struct {
 		card event.NeedsYou
 		want string
 	}{
-		{paperCard, "a bigger window shows the keys to answer it"},
+		{paper, "a bigger window shows the keys to answer it"},
 		{signIn, "kit carries on by itself once it's done"},
 	} {
 		var narrow syncBuffer
@@ -779,70 +887,10 @@ func TestApplyingCardInASmallWindow(t *testing.T) {
 	}
 }
 
-// A window too small for the screen keeps the run in place under its
-// heading, as before; the screen takes a window wide and tall enough for
-// its grid, its rules and the log.
-func TestApplyingScreenNeedsTheRoom(t *testing.T) {
-	for _, tt := range []struct {
-		w, h   int
-		screen bool
-	}{{99, 64, false}, {100, 64, true}, {160, 29, false}, {160, 30, true}, {100, 37, false}, {100, 38, true}} {
-		var out syncBuffer
-		face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).Sized(func() (int, int) { return tt.w, tt.h })
-		for _, e := range sixMinutesIn()[:12] {
-			face.Emit(e)
-		}
-		if got := strings.Contains(out.String(), "\x1b[?1049h"); got != tt.screen {
-			t.Errorf("at %d×%d, a screen of its own: %v, want %v", tt.w, tt.h, got, tt.screen)
-		}
-		if err := face.Close(); err != nil {
-			t.Fatal(err)
-		}
-	}
-	face, out, _ := applyAt(99, 40, 6*time.Minute+12*time.Second, sixMinutesIn())
-	got := screen(out.String())
-	if err := face.Close(); err != nil {
-		t.Fatal(err)
-	}
-	golden(t, "apply-small.golden", got+"\n")
-}
-
-// A step that counts what it's doing says how far it's got after what it's
-// doing, in its panel's row, and, cut off by the run stopping, in its row in
-// the record; a step that doesn't count says what it did before.
-func TestApplyingSaysHowFarAStepHasGot(t *testing.T) {
-	for _, tt := range []struct {
-		events func() []event.Event
-		want   []string
-	}{
-		{sixMinutesIn, []string{
-			"  ── ◐ Homebrew formulae  installing ffmpeg · 38 of 129 · brew install --formula ffmpeg ─",
-			"  ── ◐ claude-code  applying · run apply ─",
-		}},
-		{stoppedRun, []string{
-			"  – Homebrew formulae  stopped · 38 of 129\n",
-			"  – App settings  stopped\n",
-		}},
-	} {
-		face, out, _ := applyAt(160, 64, time.Minute, tt.events())
-		got := screen(out.String())
-		if err := face.Close(); err != nil {
-			t.Fatal(err)
-		}
-		for _, want := range tt.want {
-			if !strings.Contains(got, want) {
-				t.Errorf("the face shows\n%s\nwant a row %q", got, want)
-			}
-		}
-	}
-}
-
-// When the run ends, the screen goes and the record is left under the
-// run's heading, kept to column 80: the lights, the bar with how the run
-// ended, then every step, what failed with why and what to run under it,
-// then what's left to do. A run stopped greys what it cut off and what
-// never ran, says so, nothing red but what failed, and says where to carry
-// on.
+// When the run ends, the screen goes and its record is left in its place,
+// kept to column 80: the wordmark, with what ran, the bar and the tally
+// beside it; then what's to do, what failed, and the rows done. A run
+// stopped says so, and where to carry on; nothing's red but what failed.
 func TestApplyingLeavesItsRecord(t *testing.T) {
 	for _, tt := range []struct {
 		golden string
@@ -868,36 +916,38 @@ func TestApplyingLeavesItsRecord(t *testing.T) {
 					t.Errorf("%q is %d columns, want at most %d", l, w, look.Width)
 				}
 			}
+			if strings.Count(got, "█  ▄▀") != 1 {
+				t.Errorf("the record is\n%s\nwant the wordmark once: the record's head in the heading's place", got)
+			}
 		})
 	}
 }
 
-// The record ends with what the run's left you to do, numbered, each with
-// how to do it under it: a thing's own words, or, for a step by hand that
-// came up with steps of its own, those. Its steps' rows say it's below,
-// in white, never as needing you; the bar counts it on its own.
-func TestApplyingRecordListsWhatsToDo(t *testing.T) {
+// The record's sections: what's to do, numbered, each with how, a step by
+// hand's from its card; what failed, a row each, named by its row and its
+// step when the row has others, why and what to run under it; the rows
+// whose steps were all well, saying what they did. The tally counts to-do
+// items, steps failed and rows fine, white, red and white; the bar's last
+// cell red.
+func TestApplyingRecordSections(t *testing.T) {
 	face, out, _ := applyIn(colorprofile.TrueColor, 160, 64, time.Minute, appliedRun())
 	if err := face.Close(); err != nil {
 		t.Fatal(err)
 	}
 	record := screen(uncoloured(out.String()))
 	for _, want := range []string{
-		"\n  △ Time Machine  no backup disk · to do, below\n  △ Arq  no backup plan · to do, below\n",
-		"\n  △ By hand  2 to do · to do, below\n",
-		"  1 failed · 4 to do · 24m31s\n",
-		"\n" + strings.Join([]string{
-			"  TO DO  4, in any order: kit apply checks them",
-			"  △ 1  no backup disk is set up",
-			"       → System Settings › General › Time Machine › Add Backup Disk",
-			"  △ 2  no backup plan is chosen",
-			"       → open Arq and choose its backup plan",
-			"  △ 3  Allow remote users Full Disk Access: System Settings › General › Sharing",
-			"       → then: kit manual done sharing",
-			"  △ 4  Install the editor from its site (no Homebrew cask)",
-			"       → Download it from editor.example.com",
-			"       → Drag it to Applications",
-		}, "\n") + "\n",
+		"│  bootstrap · laptop · Fri 2 Jan · 03:04\n",
+		"│  3 to do · 1 failed · 9 fine · 24m31s\n",
+		"\n\n  TO DO  3, in any order · kit apply checks them\n" +
+			"  △ 1  Add a Time Machine disk\n" +
+			"       → System Settings › General › Time Machine › Add Backup Disk\n" +
+			"  △ 2  Allow remote users Full Disk Access\n" +
+			"       → then: kit manual done sharing\n" +
+			"  △ 3  Install the editor from its site\n" +
+			"       → Download it from editor.example.com\n" +
+			"       → Drag it to Applications\n\n",
+		"\n  FAILED  1\n  ✗ Homebrew casks  couldn't install tailscale-app\n  │ installer: The install failed. (The Installer encountered an error that cau…\n  │ → kit apply cask\n\n",
+		"\n  DONE  9\n  ● This Mac  all 6 done\n  ● Files and shell  all 2 done\n  ● Mac settings  all 3 done\n  ● Secrets  fine\n  ● Homebrew formulae  all 2 done\n  ● App Store apps  fine\n",
 	} {
 		if !strings.Contains(record, want) {
 			t.Errorf("the record is\n%s\nwant it to hold\n%s", record, want)
@@ -905,22 +955,49 @@ func TestApplyingRecordListsWhatsToDo(t *testing.T) {
 	}
 	raw := out.String()
 	raw = raw[strings.LastIndex(raw, "\x1b[?1049l"):]
-	for _, want := range []string{look.White("△") + " " + look.Strong("By hand") + "  " + look.White("2 to do"), look.White("4 to do"), look.Strong("Install the editor from its site (no Homebrew cask)")} {
-		if !strings.Contains(raw, want) {
-			t.Errorf("the record doesn't hold %q", want)
+	for _, styled := range []string{look.White("3 to do"), look.Red("1 failed"), look.White("9 fine"), look.Red("▮")} {
+		if !strings.Contains(raw, styled) {
+			t.Errorf("the record has no %q, styled as it should be", ansi.Strip(styled))
 		}
 	}
-	if strings.Contains(raw, look.Orange("▲")) || strings.Contains(raw, "need you") {
-		t.Error("the record has something needing you; want what's left to do white")
+}
+
+// The record names a step by its row alone when the step's called as its
+// row is, and a row done keeps under it what of its steps is still waiting,
+// a password say, in the log too.
+func TestApplyingRecordKeepsWhatWaits(t *testing.T) {
+	events := rowsRun(newMac[4:13],
+		fine(10, "homebrew", "4.6.1"),
+		finished(20, "brew", check.Result{State: check.Attention, Summary: "3 declared, all installed", Items: []check.Item{
+			{ID: "brew:ffmpeg", Name: "ffmpeg", State: "extra", Detail: "installed, not declared"}}}),
+		finished(30, "mas", check.Result{State: check.OK, Summary: "2 declared, 1 installed", Items: []check.Item{
+			{ID: "mas:bear", Name: "bear", State: "missing", Quiet: "new", Detail: "needs an administrator's password"}}}),
+	)
+	face, out, _ := applyAt(160, 64, time.Minute, events)
+	if log := strings.Join(logOf(screen(out.String()), 160), "\n"); !strings.Contains(log, "● App Store apps: 2 declared, 1 installed\n            │ bear · needs an administrator's password") {
+		t.Errorf("the log is\n%s\nwant Bear waiting under the App Store's line", log)
+	}
+	face.Emit(event.RunFinished{Time: after(40), Duration: 40 * time.Second, Counts: map[check.State]int{check.OK: 2, check.Attention: 1}})
+	if err := face.Close(); err != nil {
+		t.Fatal(err)
+	}
+	record := screen(out.String())
+	for _, want := range []string{
+		"\n  NEEDS YOU  1\n  ▲ Homebrew formulae  3 declared, all installed\n  │ ffmpeg · ",
+		"\n  ● App Store apps  2 declared, 1 installed\n  │ bear · needs an administrator's password\n",
+	} {
+		if !strings.Contains(record, want) {
+			t.Errorf("the record is\n%s\nwant it to hold\n%s", record, want)
+		}
 	}
 }
 
 // However applying's screen is left, the terminal's own screen comes back,
-// the cursor shown, the mouse no longer reported, and its keys stop being
-// read, the terminal out of its raw mode, as the question needs it: for a question asked mid-run, and
-// back after it; when the window's made too small for it, the run drawn in
-// place, and taken again when it's big enough; when the face closes
-// without the run finishing.
+// the cursor shown, the mouse and focus no longer reported, and its keys
+// stop being read, the terminal out of its raw mode, as the question needs
+// it: for a question asked mid-run, and back after it; when the window's
+// made too small for it, the run drawn in place, and taken again when it's
+// big enough; when the face closes without the run finishing.
 func TestApplyingGivesTheScreenBack(t *testing.T) {
 	var out syncBuffer
 	var mu sync.Mutex
@@ -941,7 +1018,7 @@ func TestApplyingGivesTheScreenBack(t *testing.T) {
 		face.Emit(e)
 	}
 	time.Sleep(300 * time.Millisecond)
-	onScreen := func() bool { return strings.Contains(screen(out.String()), "BOOT     ● GitHub") }
+	onScreen := func() bool { return strings.Contains(screen(out.String()), "click a row for its lines alone") }
 	mouse := func() bool { return mouseReported(out.String()) }
 	if !onScreen() || !mouse() || !kb.isRaw() {
 		t.Error("with its screen up, applying isn't reading keys, the terminal in its raw mode, and the mouse")
@@ -959,7 +1036,7 @@ func TestApplyingGivesTheScreenBack(t *testing.T) {
 		t.Error("back from the question, the face didn't take its screen, its keys and the mouse again")
 	}
 	resize(99)
-	if got := screen(out.String()); onScreen() || mouse() || !mouseOffFirst(kb) || kb.isRaw() || !strings.Contains(got, "◐ Homebrew formulae  installing ffmpeg") {
+	if got := turned(screen(out.String())); onScreen() || mouse() || !mouseOffFirst(kb) || kb.isRaw() || !strings.Contains(got, "◐ Homebrew formulae  installing ffmpeg") {
 		t.Errorf("made too small, the window shows\n%s\nraw: %v; want the run in place on the terminal's own screen, the mouse no longer reported, then not raw", got, kb.isRaw())
 	}
 	resize(160)
@@ -974,58 +1051,5 @@ func TestApplyingGivesTheScreenBack(t *testing.T) {
 	}
 	if n := kb.listens(); n != 3 {
 		t.Errorf("the face read keys %d times; want once each time its screen went up, 3", n)
-	}
-}
-
-// A step that failed says what went wrong in a few words, never a command
-// or a path: pinned, its panel has the command it ran after them, dim, on
-// one line however many lines it has, then the last lines it printed. In
-// the record, what went wrong is red, why is under it, or, when nothing
-// says, the last line it printed, then what to run to try it again.
-func TestApplyingFailedStepsSayWhatWentWrong(t *testing.T) {
-	gpg := stepName("Steps", "gpg-key")
-	run := "/Users/someone/.config/kit/laptop/steps/gpg-key/run"
-	login := stepName("Drift", "macOS login items")
-	script := "osascript -l JavaScript -e 'function run() {\n  var se = Application(1);\n  return 1;\n}'"
-	events := []event.Event{
-		event.RunStarted{Time: at, Command: "apply", Machine: "laptop", Steps: newMacSteps()},
-		event.StepStarted{Time: at, Step: gpg, Doing: "applying"},
-		event.Output{Step: gpg, Command: run + " apply", Line: run + ": line 53: gpg: command not found"},
-		finished("Steps", "gpg-key", check.Result{State: check.Failed, Reason: "couldn't apply: gpg: command not found"}),
-		event.StepStarted{Time: at, Step: login, Doing: "applying"},
-		event.Output{Step: login, Command: script, Line: "execution error: Error: AppleEvent timed out. (-1712)"},
-		finished("Drift", "macOS login items", check.Result{State: check.Failed, Reason: "couldn't add com.example.app: execution error: Error: AppleEvent timed out. (-1712)"}),
-		finished("Drift", "Sync", check.Result{State: check.Failed, Reason: "not a git repository"}),
-	}
-	face, out, kb := applyAt(160, 64, time.Minute, events)
-	if got := panelTitles(screen(out.String())); got != nil {
-		t.Errorf("with nothing at work, the panels are %q; want none: what failed stays in the grid", got)
-	}
-	pin(t, out, kb, "gpg-key", "macOS login items")
-	live := screen(out.String())
-	for title, want := range map[string]string{
-		"gpg-key":           "  ── ✗ gpg-key  couldn't apply · " + run + " apply ─",
-		"macOS login items": "  ── ✗ macOS login items  couldn't add com.example.app · osascript -l JavaScript -e 'function run() { var se = Application(1); return 1; }' ─",
-	} {
-		if rule, _ := panelOf(live, title); !strings.HasPrefix(rule, want) {
-			t.Errorf("%s's panel's rule is\n%q\nwant it to start\n%q", title, rule, want)
-		}
-	}
-	if _, under := panelOf(live, "macOS login items"); len(under) != 1 {
-		t.Errorf("the login items' panel shows %q, want the line it printed alone: its command on its rule, on one line", under)
-	}
-	face.Emit(event.RunFinished{Time: at, Duration: time.Minute, Counts: map[check.State]int{check.Failed: 3}})
-	if err := face.Close(); err != nil {
-		t.Fatal(err)
-	}
-	record := screen(out.String())
-	for _, want := range []string{
-		"  ✗ gpg-key  couldn't apply\n  │ gpg: command not found\n  │ → kit apply Steps/gpg-key\n",
-		"  ✗ macOS login items  couldn't add com.example.app\n  │ execution error: Error: AppleEvent timed out. (-1712)\n  │ → kit apply Drift/macOS login items\n  ○ Claude MCP",
-		"  ✗ Sync  couldn't check\n  │ not a git repository\n  │ → kit apply Drift/Sync\n",
-	} {
-		if !strings.Contains(record, want) {
-			t.Errorf("the record is\n%s\nwant\n%s", record, want)
-		}
 	}
 }

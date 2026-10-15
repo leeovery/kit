@@ -62,7 +62,7 @@ func equal(t *testing.T, what string, got, want []string) {
 // when it comes in parts; other sequences dropped, and one cut short kept
 // for the rest.
 func TestParse(t *testing.T) {
-	keys, rest := parse([]byte("\x1b[A\x1bOB\rjé\x03\x7f\x1b[I\x1b[200~ab\ncd\x1b[201~\x1b"))
+	keys, rest := parse([]byte("\x1b[A\x1bOB\rjé\x03\x7f\x1b[3~\x1b[200~ab\ncd\x1b[201~\x1b"))
 	want := []key{{name: "up"}, {name: "down"}, {name: "enter"}, {text: "j"}, {text: "é"}, {name: "ctrl+c"}, {name: "backspace"}, {text: "ab\ncd", paste: true}, {name: "esc"}}
 	if !slices.Equal(keys, want) || len(rest) != 0 {
 		t.Errorf("parse = %+v, rest %q; want %+v", keys, rest, want)
@@ -80,6 +80,38 @@ func TestParse(t *testing.T) {
 	keys, rest = parse([]byte("\t\x1b[Zq"))
 	if want := []key{{name: "tab"}, {name: "shift+tab"}, {text: "q"}}; !slices.Equal(keys, want) || len(rest) != 0 {
 		t.Errorf("tab, shift+tab, q: %+v, rest %q; want %+v", keys, rest, want)
+	}
+}
+
+// Home and end, in each form a terminal sends them, and page up and down,
+// as keys; the window coming into focus and leaving it, as a terminal
+// reports them once asked to, as keys of their own, never text typed.
+func TestParseMovesAndFocus(t *testing.T) {
+	for _, tt := range []struct {
+		sent string
+		want key
+	}{
+		{"\x1b[H", key{name: "home"}},
+		{"\x1bOH", key{name: "home"}},
+		{"\x1b[1~", key{name: "home"}},
+		{"\x1b[7~", key{name: "home"}},
+		{"\x1b[1;5H", key{name: "home"}},
+		{"\x1b[F", key{name: "end"}},
+		{"\x1bOF", key{name: "end"}},
+		{"\x1b[4~", key{name: "end"}},
+		{"\x1b[8~", key{name: "end"}},
+		{"\x1b[5~", key{name: "pgup"}},
+		{"\x1b[6~", key{name: "pgdown"}},
+		{"\x1b[I", key{name: "focus in"}},
+		{"\x1b[O", key{name: "focus out"}},
+	} {
+		if keys, rest := parse([]byte(tt.sent)); !slices.Equal(keys, []key{tt.want}) || len(rest) != 0 {
+			t.Errorf("parse(%q) = %+v, rest %q; want %+v", tt.sent, keys, rest, tt.want)
+		}
+	}
+	keys, rest := parse([]byte("\x1b[O\x1b[<0;3;4M\x1b[I\x1bOA"))
+	if want := []key{{name: "focus out"}, {name: "click", x: 2, y: 3}, {name: "focus in"}, {name: "up"}}; !slices.Equal(keys, want) || len(rest) != 0 {
+		t.Errorf("focus out, a click, focus in, up: %+v, rest %q; want %+v", keys, rest, want)
 	}
 }
 

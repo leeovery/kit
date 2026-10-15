@@ -2,12 +2,10 @@ package render
 
 import (
 	"io"
-	"slices"
 	"strings"
 	"time"
 
 	"github.com/leeovery/kit/internal/ask"
-	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/hand"
 	"github.com/leeovery/kit/internal/look"
@@ -16,49 +14,43 @@ import (
 // screenKeys are the keys applying's screen reads while it's up, and what
 // they've done: listen reads them, in the terminal's raw mode, till the
 // stop it returns puts the terminal back; halt stops the run. reading is
-// the reading under way; asking is whether the foot asks whether to stop,
-// choice the answer its cursor's on. focus is the log's panel with the
-// focus, by its place; back how many lines back each step's panel is
-// scrolled; pinned the steps pinned, in the order pinned.
+// the reading under way; asking is whether the left pane asks whether to
+// stop, choice the answer its cursor's on.
 type screenKeys struct {
 	listen  func() (<-chan ask.Key, func())
 	halt    func()
 	reading *reading
 	asking  bool
 	choice  int
-	focus   int
-	back    map[string]int
-	pinned  []string
+	// chosen is the row whose lines alone the log shows, "" for everything.
+	// anchored is whether the log's scrolled back, top the first of its
+	// lines shown then; else it follows the newest.
+	chosen   string
+	anchored bool
+	top      int
+	// Where the screen was last drawn: which choice each line of the left
+	// pane is, by its line in the pane; the screen's line the panes start
+	// at, and the log; the column they part at.
+	choices      map[int]string
+	paneAt       int
+	logAt, split int
+	// away is whether the window's out of focus; focused when it last came
+	// into it.
+	away    bool
+	focused time.Time
 }
 
 // reading is keys being read, and what stops it.
 type reading struct{ stop func() }
 
-// The keys at the foot of applying's screen while it asks whether to stop,
-// those that answer; without keys, the terminal's interrupt, which stops
-// the run.
+// The keys at the foot of applying's left pane: while it reads them; while
+// it asks whether to stop, those that answer; without keys, the terminal's
+// interrupt, which stops the run.
 var (
+	runningKeys  = []look.Key{{Key: "tab", Does: "next row"}, {Key: "↑↓", Does: "scroll"}, {Key: "q", Does: "stop"}}
 	stoppingKeys = []look.Key{{Key: "↑↓", Does: "choose"}, {Key: "enter", Does: "decide"}, {Key: "esc", Does: "keep going"}}
 	signalKeys   = []look.Key{{Key: "ctrl+c", Does: "stop"}}
 )
-
-// runningKeys are the keys while the screen reads them: those that answer
-// the card up, when one is; those that move between the log's panels,
-// scroll them and see a step; once a step's pinned, the one going back to
-// the steps running; and the one that stops.
-func (p *Pretty) runningKeys() []look.Key {
-	var ks []look.Key
-	if p.card != nil {
-		for _, a := range cardKeys(*p.card) {
-			ks = append(ks, a.key)
-		}
-	}
-	ks = append(ks, look.Key{Key: "tab", Does: "panel"}, look.Key{Key: "↑↓", Does: "scroll"}, look.Key{Key: "click", Does: "a step to see it"})
-	if len(p.keys.pinned) > 0 {
-		ks = append(ks, look.Key{Key: "a", Does: "back to running"})
-	}
-	return append(ks, look.Key{Key: "q", Does: "stop"})
-}
 
 // answerKey is a key answering a step by hand's card, and its answer.
 type answerKey struct {
@@ -68,21 +60,25 @@ type answerKey struct {
 
 // cardKeys are the keys answering card c: o opens its app again, when kit
 // opened one; enter says it's done, when kit can't tell by itself; l puts
-// it off till the run's end.
+// it off till later.
 func cardKeys(c event.NeedsYou) []answerKey {
 	var ks []answerKey
 	if c.Opened != "" {
-		ks = append(ks, answerKey{look.Key{Key: "o", Does: "open " + c.Opened + " again"}, hand.Open})
+		ks = append(ks, answerKey{look.Key{Key: "o", Does: "opens " + c.Opened + " again"}, hand.Open})
 	}
 	if !c.Tells {
-		ks = append(ks, answerKey{look.Key{Key: "enter", Does: "done"}, hand.Done})
+		ks = append(ks, answerKey{look.Key{Key: "enter", Does: "when it's done"}, hand.Done})
 	}
 	return append(ks, answerKey{look.Key{Key: "l", Does: "later"}, hand.Later})
 }
 
-// wheelLines are how many lines a turn of the mouse's wheel scrolls a
-// panel.
+// wheelLines are how many lines a turn of the mouse's wheel scrolls the
+// log.
 const wheelLines = 3
+
+// focusSettles is how long after the window comes into focus a click is
+// taken as the one that brought it there, and not as a choice.
+const focusSettles = 300 * time.Millisecond
 
 // stopAnswers are the answers to whether to stop, and stopIt the one that
 // does.
@@ -93,12 +89,11 @@ const stopIt = 1
 // Keys has applying's screen read keys while it's up, and the mouse's
 // clicks and wheel, through listen, which reads them in the terminal's raw
 // mode till the stop it returns puts the terminal back as it was; halt
-// stops the run. q asks at the foot whether to stop, and Stop stops the
-// run, as ctrl+c does at once; tab moves the focus between the log's
-// panels, and ↑ and ↓ scroll the one with it, as the wheel scrolls the one
-// under the mouse; a click on a step in the grid pins it, or unpins it,
-// and a unpins every step, the panels following the steps at work again;
-// with a card up, o, enter and l answer it.
+// stops the run. q asks whether to stop, and Stop stops the run, as ctrl+c
+// does at once; tab and shift+tab choose the next row and the one before,
+// a click on one chooses it, and esc chooses everything; the arrows, the
+// page keys, home, end and the wheel scroll the log; with a card up, o,
+// enter and l answer it.
 func (p *Pretty) Keys(listen func() (<-chan ask.Key, func()), halt func()) *Pretty {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -161,15 +156,17 @@ func (p *Pretty) read(r *reading, keys <-chan ask.Key) {
 }
 
 // press is what a key does on applying's screen, and whether it stops the
-// run: ctrl+c at once; q asks first, at the foot; o, enter and l answer
-// the card up; tab and shift+tab move the focus between the log's panels;
-// ↑ and ↓ scroll the one with it a line, and the wheel the one under the
-// mouse; a click on a step in the grid pins it, or unpins it, and a unpins
-// every step.
+// run: ctrl+c at once; q asks first; o, enter and l answer the card up;
+// tab, shift+tab, esc and a click choose what the log shows; the rest
+// scroll it. The window's focus coming and going is noted, for a click.
 func (p *Pretty) press(k ask.Key) (halt bool) {
 	switch {
 	case k.Is("ctrl+c"):
 		return true
+	case k.Is("focus in"):
+		p.keys.away, p.keys.focused = false, p.now()
+	case k.Is("focus out"):
+		p.keys.away = true
 	case p.keys.asking:
 		return p.answer(k)
 	case k.Is("o", "enter", "l"):
@@ -177,34 +174,31 @@ func (p *Pretty) press(k ask.Key) (halt bool) {
 	case k.Is("q"):
 		p.keys.asking, p.keys.choice = true, 0
 	case k.Is("tab"):
-		p.moveFocus(1)
+		p.chooseNext(1)
 	case k.Is("shift+tab"):
-		p.moveFocus(-1)
-	case k.Is("up"):
-		p.scrollFocused(1)
-	case k.Is("down"):
-		p.scrollFocused(-1)
-	case k.Is("wheel up"):
-		p.scrollAt(k.Y, wheelLines)
-	case k.Is("wheel down"):
-		p.scrollAt(k.Y, -wheelLines)
+		p.chooseNext(-1)
+	case k.Is("esc"):
+		p.choose("")
 	case k.Is("click"):
 		p.click(k.X, k.Y)
-	case k.Is("a"):
-		p.keys.pinned = nil
+	default:
+		p.scrollKey(k)
 	}
 	return false
 }
 
 // answerCard passes what k answers the card up with to its step, when the
-// card's keys offer it: nothing with no card up.
+// card's keys offer it: nothing with no card up. A card put off is noted,
+// for the log to say so as it goes.
 func (p *Pretty) answerCard(k ask.Key) {
 	if p.card == nil || p.hands == nil {
 		return
 	}
 	for _, a := range cardKeys(*p.card) {
 		if k.Is(a.key.Key) {
-			p.hands(p.card.Step, a.answer)
+			if p.hands(p.card.Step, a.answer) && a.answer == hand.Later {
+				p.putOff[cardID(p.card.Step, p.card.Item)] = true
+			}
 			return
 		}
 	}
@@ -225,99 +219,110 @@ func (p *Pretty) answer(k ask.Key) (halt bool) {
 	return false
 }
 
-// focused is the log's panel with the focus, of n: the one it was moved
-// to, or the last, when there are fewer now.
-func (p *Pretty) focused(n int) int { return min(p.keys.focus, n-1) }
-
-// moveFocus moves the focus by places among the log's panels, round from
-// the last to the first and back.
-func (p *Pretty) moveFocus(by int) {
-	w, h := p.window()
-	if n := len(p.layout(w, h).steps); n > 0 {
-		p.keys.focus = ((p.focused(n)+by)%n + n) % n
-	}
+// choose has the log show row's lines alone, or every line for "", from
+// the newest.
+func (p *Pretty) choose(row string) {
+	p.keys.chosen, p.keys.anchored = row, false
 }
 
-// scrollFocused scrolls the log's panel with the focus by lines.
-func (p *Pretty) scrollFocused(by int) {
-	w, h := p.window()
-	l := p.layout(w, h)
-	if len(l.steps) > 0 {
-		p.scroll(l, p.focused(len(l.steps)), by)
+// chooseNext chooses the row by places after the one chosen, round from
+// the last to everything and back.
+func (p *Pretty) chooseNext(by int) {
+	choices := []string{""}
+	for _, r := range p.shownRows() {
+		choices = append(choices, r.name)
 	}
-}
-
-// scrollAt scrolls the log's panel at the screen's line y by lines: off
-// the panels, nothing.
-func (p *Pretty) scrollAt(y, by int) {
-	w, h := p.window()
-	l := p.layout(w, h)
-	if i, ok := l.panelAt(y); ok {
-		p.scroll(l, i, by)
+	at := 0
+	for i, c := range choices {
+		if c == p.keys.chosen {
+			at = i
+		}
 	}
-}
-
-// scroll scrolls the panel at i of the log, as l lays it out, by lines:
-// back for more than none, forth for fewer; back as far as its first line,
-// forth to its newest.
-func (p *Pretty) scroll(l screenLayout, i, by int) {
-	step, room := l.steps[i], l.rooms[i]-1
-	most := max(len(p.output[step])-(room-len(p.panelLeft(step, room))), 0)
-	if p.keys.back == nil {
-		p.keys.back = map[string]int{}
-	}
-	p.keys.back[step] = max(min(min(p.keys.back[step], most)+by, most), 0)
-}
-
-// scrolled is the window of n lines room shows, ending back lines before
-// the newest, or the first room, scrolled back past them: where it starts,
-// and where it ends.
-func scrolled(n, room, back int) (start, end int) {
-	end = max(n-back, min(room, n))
-	return max(end-room, 0), end
+	p.choose(choices[((at+by)%len(choices)+len(choices))%len(choices)])
 }
 
 // click is the mouse's left button pressed at column x of the screen's
-// line y: on a step in the grid, it pins the step, or unpins it; anywhere
-// else, nothing.
+// line y: on Everything or a row, in the left pane, it chooses it, or, on
+// the row chosen, everything; anywhere else, nothing. A click while the
+// window's out of focus, or just after it's come into it, brings it
+// forward, and does nothing more.
 func (p *Pretty) click(x, y int) {
-	w, _ := p.window()
-	if step, ok := p.stepAt(w, x, y); ok {
-		p.pin(step)
-	}
-}
-
-// mostPinned is how many steps can be pinned: as many as run at once.
-const mostPinned = engine.DefaultJobs
-
-// pin pins step, after those pinned, its panel taking the focus; or unpins
-// it, when it's pinned. With mostPinned pinned, the one pinned first gives
-// way.
-func (p *Pretty) pin(step string) {
-	if i := slices.Index(p.keys.pinned, step); i >= 0 {
-		p.keys.pinned = slices.Delete(p.keys.pinned, i, i+1)
+	if p.keys.away || p.now().Sub(p.keys.focused) < focusSettles || x >= p.keys.split {
 		return
 	}
-	if len(p.keys.pinned) == mostPinned {
-		p.keys.pinned = slices.Delete(p.keys.pinned, 0, 1)
+	row, ok := p.keys.choices[y-p.keys.paneAt]
+	switch {
+	case !ok:
+	case row == p.keys.chosen:
+		p.choose("")
+	default:
+		p.choose(row)
 	}
-	p.keys.pinned = append(p.keys.pinned, step)
-	p.keys.focus = len(p.keys.pinned) - 1
 }
 
-// footKeys are the keys at the screen's foot, as it reads them.
+// scrollKey scrolls the log as k does: ↑ and ↓ a line, the page keys a
+// page, home to its first line, end to follow its newest; the wheel, over
+// the log, a few lines a turn.
+func (p *Pretty) scrollKey(k ask.Key) {
+	n, room := p.logSize()
+	page := max(room-backFoot, 1)
+	over := k.X > p.keys.split && k.Y >= p.keys.logAt
+	switch {
+	case k.Is("up"):
+		p.scroll(n, room, 1)
+	case k.Is("down"):
+		p.scroll(n, room, -1)
+	case k.Is("pgup"):
+		p.scroll(n, room, page)
+	case k.Is("pgdown"):
+		p.scroll(n, room, -page)
+	case k.Is("home"):
+		p.scroll(n, room, n)
+	case k.Is("end"):
+		p.keys.anchored = false
+	case k.Is("wheel up") && over:
+		p.scroll(n, room, wheelLines)
+	case k.Is("wheel down") && over:
+		p.scroll(n, room, -wheelLines)
+	}
+}
+
+// scroll scrolls the log, n lines with room for room, by lines: back for
+// more than none, forth for fewer; back as far as its first line, forth to
+// where it follows the newest again. Where all of it shows, nothing.
+func (p *Pretty) scroll(n, room, by int) {
+	if n <= room {
+		return
+	}
+	top := n - room
+	if p.keys.anchored {
+		top = p.keys.top
+	}
+	top = max(top-by, 0)
+	p.keys.anchored, p.keys.top = top < n-room, top
+}
+
+// logSize is how many lines the log has, as it's chosen, and how many it
+// has room for, in the window as it is.
+func (p *Pretty) logSize() (n, room int) {
+	w, h := p.window()
+	top, _ := p.paneTop(w - splitAt(w) - 1)
+	return len(p.logBody(p.keys.chosen)), h - len(p.header()) - 1 - len(top)
+}
+
+// footKeys are the keys at the left pane's foot, as it reads them.
 func (p *Pretty) footKeys() string {
 	switch {
 	case p.keys.asking:
-		return look.Keys(stoppingKeys...)
+		return look.Hints(stoppingKeys...)
 	case p.keys.listen != nil:
-		return look.Keys(p.runningKeys()...)
+		return look.Hints(runningKeys...)
 	}
-	return look.Keys(signalKeys...)
+	return look.Hints(signalKeys...)
 }
 
-// stopQuestion is the question whether to stop, w wide, at the screen's
-// foot: what stops where it is, the steps at work, and the answers.
+// stopQuestion is the question whether to stop, w wide: what stops where it
+// is, the steps at work, and the answers.
 func (p *Pretty) stopQuestion(w int) []string {
 	var says string
 	switch names := p.titlesAtWork(); len(names) {
@@ -325,7 +330,7 @@ func (p *Pretty) stopQuestion(w int) []string {
 	case 1:
 		says = look.Muted(names[0] + " stops where it is")
 	default:
-		says = look.Muted(strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1] + " stop where they are")
+		says = look.Muted(inWords(names) + " stop where they are")
 	}
 	return look.Timeline("  ", w, look.Row{State: look.NeedsYou, Name: "Stop applying?", Says: says, Under: look.Answers(stopAnswers, p.keys.choice)})
 }
@@ -343,9 +348,9 @@ func (p *Pretty) titlesAtWork() []string {
 }
 
 // Unwind puts the terminal back at once, for kit to panic on, whatever the
-// face had going: the mouse no longer reported, its own screen, the cursor
-// shown, the keys no longer read and the terminal's mode as it was. It
-// draws nothing after, and what it held isn't written.
+// face had going: the mouse and the window's focus no longer reported, its
+// own screen, the cursor shown, the keys no longer read and the terminal's
+// mode as it was. It draws nothing after, and what it held isn't written.
 func (p *Pretty) Unwind() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -353,7 +358,7 @@ func (p *Pretty) Unwind() {
 	p.out.Reset()
 	var back strings.Builder
 	if p.keys.reading != nil {
-		back.WriteString(mouseOff)
+		back.WriteString(focusOff + mouseOff)
 	}
 	if p.onScreen {
 		back.WriteString(altOff)

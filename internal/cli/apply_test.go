@@ -6,6 +6,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/leeovery/kit/internal/ask"
 	"github.com/leeovery/kit/internal/runner"
 )
@@ -247,8 +249,10 @@ func TestApplyStopsFromItsScreen(t *testing.T) {
 			w.fake.On("brew", "install", "--formula", "ripgrep").Does(func() { kb.press(t, tt.press...) }).Exits(1)
 
 			out, errOut, code := w.run(t, "apply")
-			record := out[strings.LastIndex(out, "\n\n  MAC\n")+1:]
-			if code != 1 || !strings.Contains(out, "  stopped · ") || !strings.Contains(record, "  – search  not run\n") || !strings.Contains(record, "→ kit apply carries on from here") {
+			// The record's wordmark is the last kit draws.
+			record := ansi.Strip(out[max(strings.LastIndex(out, "  █  ▄▀"), 0):])
+			searched := slices.ContainsFunc(w.fake.Calls(), func(c string) bool { return strings.Contains(c, "/searched") })
+			if code != 1 || searched || !strings.Contains(record, "│  stopped · ") || !strings.Contains(record, "→ kit apply carries on from here") {
 				t.Errorf("kit apply, stopped from its screen, exit %d (%s), printed\n%s\nwant the run stopped, the step after the formulae not run, exit 1", code, errOut, record)
 			}
 			if len(w.asked) > 0 {

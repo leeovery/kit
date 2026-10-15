@@ -239,9 +239,10 @@ func (k key) exported() Key {
 }
 
 // parse turns what the terminal sent into keys, and returns what's left of
-// a paste or a sequence still coming: the arrows, as either form sends
-// them, enter, tab and shift+tab, escape alone, Ctrl+C, backspace, a paste
-// whole, text, and the mouse's clicks and wheel; other controls and
+// a paste or a sequence still coming: the arrows, home and end, as either
+// form sends them, page up and down, enter, tab and shift+tab, escape
+// alone, Ctrl+C, backspace, a paste whole, text, the window's focus coming
+// and going, and the mouse's clicks and wheel; other controls and
 // sequences, the mouse's other reports among them, are dropped.
 func parse(b []byte) (keys []key, rest []byte) {
 	for len(b) > 0 {
@@ -299,17 +300,29 @@ func parse(b []byte) (keys []key, rest []byte) {
 }
 
 // sequence is the key a control sequence is, intro its [ or O, params
-// what comes between and final its last byte: the arrows, shift+tab, and
-// the mouse's report in SGR's form, when it's a key; ok is false for any
-// other.
+// what comes between and final its last byte: the arrows, home and end,
+// page up and down, shift+tab, the window coming into focus and leaving it,
+// as a terminal reports them once asked, and the mouse's report in SGR's
+// form, when it's a key; ok is false for any other.
 func sequence(intro byte, params string, final byte) (key, bool) {
 	switch {
 	case final == 'A':
 		return key{name: "up"}, true
 	case final == 'B':
 		return key{name: "down"}, true
+	case final == 'H':
+		return key{name: "home"}, true
+	case final == 'F':
+		return key{name: "end"}, true
+	case intro == '[' && final == '~':
+		name, ok := map[string]string{"1": "home", "7": "home", "4": "end", "8": "end", "5": "pgup", "6": "pgdown"}[params]
+		return key{name: name}, ok
 	case intro == '[' && final == 'Z':
 		return key{name: "shift+tab"}, true
+	case intro == '[' && params == "" && final == 'I':
+		return key{name: "focus in"}, true
+	case intro == '[' && params == "" && final == 'O':
+		return key{name: "focus out"}, true
 	case intro == '[' && (final == 'M' || final == 'm') && strings.HasPrefix(params, "<"):
 		return mouse(params, final)
 	}

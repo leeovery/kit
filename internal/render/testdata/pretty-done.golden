@@ -3,18 +3,15 @@
   █▀▀▄    █     █    │  laptop
   █   █  ▄█▄    █    │  Fri 2 Jan · 03:04
 
-  ● MAC 1   ▲ CONFIG   ● STEPS 1
-  ▮▮▮▮  1 needs you · 4.2s
+  ▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮  1 needs you · 3 fine · 4.2s
 
-  MAC
-  ● Disk space  48% free
-
-  CONFIG
-  ● Formulae  installed jq, ripgrep · 3 declared, all installed
-  ▲ Casks  2 declared, 0 installed
+  NEEDS YOU  1
+  ▲ Homebrew casks  2 declared, 0 installed
   │ ghostty · declared, not installed
   │ zoom · declared, not installed · needs an administrator's password
   │ → kit apply
 
-  STEPS
-  ● fonts  applied · 16 installed
+  DONE  3
+  ● This Mac  48% free
+  ● Homebrew formulae  installed jq, ripgrep · 3 declared, all installed
+  ● Your steps  applied · 16 installed

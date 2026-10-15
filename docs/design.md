@@ -523,18 +523,29 @@ arguments (redacted), exit code, duration and output; a step deferred, with the 
 step failed, with the error; the run finishing, with its summary. Faces subscribe:
 
 - **pretty** at a terminal, in kit's look (`internal/look`, the components every screen is
-  drawn from; the rules signed off in the look's design, round 4): colour brought down to
-  what the terminal shows, no glyphs that need a particular font, and no line past 80
-  columns. Commands looking at the whole Mac (`status`, `apply`, `nightly`, `reconcile`) open
-  with the wordmark, what ran, the Mac and when stacked beside it; their steps show a block
-  an area (Backups, Jobs, Mac, Config, Steps, Manual, Checks), a row a step: its mark, its
-  title, then what it says, the parts after dots, what to do on the line under it. Config
-  takes the drift and the config repository: what needs attention, a row a thing (what's
-  wrong, for how long, what to run), then Packages, Settings, Files and Secrets counted (each
-  step's part says which it counts towards) and the config repository's row. Applying leads
-  with the lights, an area each, shows only what it did and what needs attention, and ends
-  with the bar. Commands aimed at one thing (`add`, `remove`, a step named) are a timeline, a
-  row a step as its turn comes, no wordmark. A summary ends a whole-Mac command: what failed,
+  drawn from; the rules signed off in the look's design, round 4): colour brought down to what
+  the terminal shows, no glyphs that need a particular font, and no line past 80 columns but
+  on applying's screen, which takes the window. Commands looking at the whole Mac (`status`,
+  `apply`, `nightly`, `reconcile`) open with the wordmark, what ran, the Mac and when stacked
+  beside it; their steps show a block an area (Backups, Jobs, Mac, Config, Steps, Manual,
+  Checks), a row a step: its mark, its title, then what it says, the parts after dots, what to
+  do on the line under it. Config takes the drift and the config repository: what needs
+  attention, a row a thing (what's wrong, for how long, what to run), then Packages, Settings,
+  Files and Secrets counted (each step's part says which it counts towards) and the config
+  repository's row. Applying, in a window of 100 by 30 or more, has a screen of its own (the
+  look's round 10): the wordmark, the bar (each step one, a running one counting as far as it
+  says it has got) and what the run is doing or waiting for you to do; on the left a row for
+  each part of the Mac a person recognises (This Mac, Files and shell, Mac settings, Secrets,
+  Homebrew formulae, Homebrew casks, App Store apps, Developer tools, Git, Login items, Your
+  steps, Backups), each step in one by its kind or feature, a step by hand in the row it holds
+  up, each row saying what its steps are doing, then what's for later; on the right the log,
+  every line of the run with its time, or a row's lines alone once it's chosen (tab or a
+  click; esc for all), scrolled back and followed again, with a step by hand's card above it
+  while it's up. In a smaller window the run is drawn in place: a light a row, the bar, what's
+  running and what's wrong. Once applied, its record takes the screen's place: the wordmark
+  with the bar and the tally, then what's left to do, what failed, what needs you, and the
+  rows done. Commands aimed at one thing (`add`, `remove`, a step named) are a timeline, a row
+  a step as its turn comes, no wordmark. A summary ends a whole-Mac command: what failed,
   needs you or wasn't checked, what's fine, and how long it took. `kit log` shows a run as a
   timeline; kit's help and its errors take the look too (an error is a row, what to run about
   it under it: `→ did you mean kit brew add jq`);

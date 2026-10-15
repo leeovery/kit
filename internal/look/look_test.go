@@ -124,162 +124,29 @@ func TestBlocksAndSummaries(t *testing.T) {
 	)
 }
 
-// A run's lights: each area led by its mark; one that needs you, or failed,
-// a pill.
+// A run's lights: each row led by its mark, two spaces between, as many
+// to a line as fit; one that needs you, or failed, a pill.
 func TestLights(t *testing.T) {
-	got := look.Lights(
-		look.Lamp{Name: "Backups", State: look.Done, Count: "5"},
-		look.Lamp{Name: "Config", State: look.NeedsYou},
-		look.Lamp{Name: "Steps", State: look.Running},
-		look.Lamp{Name: "Mac", State: look.Queued},
-		look.Lamp{Name: "Jobs", State: look.Skipped},
-		look.Lamp{Name: "Manual", State: look.ToDo},
+	lamps := []look.Lamp{
+		{Name: "Backups", State: look.Done, Count: "5"},
+		{Name: "Git", State: look.NeedsYou},
+		{Name: "Your steps", State: look.Running},
+		{Name: "This Mac", State: look.Queued},
+		{Name: "Login items", State: look.Skipped},
+		{Name: "Secrets", State: look.ToDo},
+	}
+	got := look.Lights(80, lamps...)
+	same(t, got, "  ● BACKUPS 5   ▲ GIT   ◐ YOUR STEPS  ○ THIS MAC  – LOGIN ITEMS  △ SECRETS")
+	if !strings.Contains(got[0], look.Muted("– LOGIN ITEMS")) {
+		t.Errorf("Lights() = %q, want a row a stopped run didn't finish grey, mark and all", got[0])
+	}
+	if !strings.HasSuffix(got[0], look.White("△")+" "+look.White("SECRETS")) {
+		t.Errorf("Lights() = %q, want a row with something left to do its white mark, its name white", got[0])
+	}
+	same(t, look.Lights(40, lamps...),
+		"  ● BACKUPS 5   ▲ GIT   ◐ YOUR STEPS",
+		"  ○ THIS MAC  – LOGIN ITEMS  △ SECRETS",
 	)
-	if want := "  ● BACKUPS 5   ▲ CONFIG   ◐ STEPS  ○ MAC  – JOBS  △ MANUAL"; ansi.Strip(got) != want {
-		t.Errorf("Lights() = %q, want %q", ansi.Strip(got), want)
-	}
-	if !strings.Contains(got, look.Muted("– JOBS")) {
-		t.Errorf("Lights() = %q, want an area a stopped run didn't finish grey, mark and all", got)
-	}
-	if !strings.HasSuffix(got, look.White("△")+" "+look.White("MANUAL")) {
-		t.Errorf("Lights() = %q, want an area with something left to do its white mark, its name white", got)
-	}
-}
-
-// A grid: every step a cell of one width, so the marks line up in columns;
-// an area's name at the left of its first line, padded to the longest; as
-// many cells across as fit, the rest under the first; a name too long for
-// its cell cut.
-func TestGrid(t *testing.T) {
-	got := look.Grid(60,
-		look.Area{Name: "Mac", Cells: []look.Cell{{State: look.Done, Name: "Disk space"}, {State: look.Running, Name: "Memory"}, {State: look.Queued, Name: "Load"}}},
-		look.Area{Name: "Backups", Cells: []look.Cell{{State: look.NeedsYou, Name: "Time Machine"}, {State: look.Failed, Name: "Arq"}, {State: look.Skipped, Name: "A name far too long for its cell"}, {State: look.ToDo, Name: "App settings"}}},
-	)
-	same(t, got,
-		"  MAC      ● Disk space            ◐ Memory",
-		"           ○ Load",
-		"  BACKUPS  ▲ Time Machine          ✗ Arq",
-		"           – A name far too long…  △ App settings",
-	)
-	for _, want := range []struct {
-		line int
-		cell string
-	}{
-		{0, look.Pink("●") + " " + look.Muted("Disk space")},
-		{0, look.Cyan("◐") + " " + look.Strong("Memory")},
-		{1, look.Cyan("○") + " " + look.Dim("Load")},
-		{2, look.Orange("▲") + " " + look.Orange("Time Machine")},
-		{2, look.Red("✗") + " " + look.Red("Arq")},
-		{3, look.White("△") + " " + look.White("App settings")},
-	} {
-		if !strings.Contains(got[want.line], want.cell) {
-			t.Errorf("line %d is %q; want the cell %q", want.line, got[want.line], want.cell)
-		}
-	}
-	if skipped := look.Grid(80, look.Area{Name: "Jobs", Cells: []look.Cell{{State: look.Skipped, Name: "Scheduled runs"}}}); !strings.HasSuffix(skipped[0], look.Muted("– Scheduled runs")) {
-		t.Errorf("a step that didn't run is %q; want it grey, mark and all", skipped[0])
-	}
-}
-
-// A pinned step's name in the grid is pink, without a background, a space
-// after its mark as it stands, a failed step's red ✗ included; its name cut
-// where it would be unpinned, and the next cell's mark where it would be.
-func TestGridPinned(t *testing.T) {
-	got := look.Grid(60,
-		look.Area{Name: "Config", Cells: []look.Cell{{State: look.Running, Name: "Homebrew formulae", Pinned: true}, {State: look.Failed, Name: "Homebrew casks", Pinned: true}}},
-		look.Area{Name: "Steps", Cells: []look.Cell{{State: look.Done, Name: "A name far too long for its cell", Pinned: true}, {State: look.Queued, Name: "mise"}}},
-	)
-	same(t, got,
-		"  CONFIG  ◐ Homebrew formulae     ✗ Homebrew casks",
-		"  STEPS   ● A name far too long…  ○ mise",
-	)
-	for _, want := range []struct {
-		line int
-		cell string
-	}{
-		{0, look.Cyan("◐") + " " + look.Pink("Homebrew formulae")},
-		{0, look.Red("✗") + " " + look.Pink("Homebrew casks")},
-		{1, look.Pink("●") + " " + look.Pink("A name far too long…")},
-	} {
-		if !strings.Contains(got[want.line], want.cell) {
-			t.Errorf("line %d is %q; want the pinned cell %q", want.line, got[want.line], want.cell)
-		}
-	}
-	if pill := look.Pill("Homebrew casks", look.Done); strings.Contains(strings.Join(got, "\n"), pill) {
-		t.Errorf("a pinned cell is a pill %q; want its name pink text", pill)
-	}
-}
-
-// Which cell is where comes from the grid as it's drawn: every mark's
-// column, on its line, and the cells' room to the next mark, is that
-// cell; the areas' names, and the room past a line's last cell, are none.
-func TestGridHit(t *testing.T) {
-	areas := []look.Area{
-		{Name: "Mac", Cells: []look.Cell{{State: look.Done, Name: "Disk space"}, {State: look.Running, Name: "Memory", Pinned: true}, {State: look.Queued, Name: "Load"}}},
-		{Name: "Backups", Cells: []look.Cell{{State: look.NeedsYou, Name: "Time Machine"}, {State: look.Failed, Name: "Arq"}, {State: look.Skipped, Name: "App settings"}}},
-	}
-	const w = 60
-	type hit struct{ area, cell int }
-	var drawn []hit
-	for y, l := range text(look.Grid(w, areas...)...) {
-		for x, r := range []rune(l) {
-			if !strings.ContainsRune("●◐○▲✗–", r) {
-				continue
-			}
-			a, c, ok := look.GridHit(w, areas, x, y)
-			name := strings.TrimSpace(strings.SplitN(string([]rune(l)[x+1:]), "  ", 2)[0])
-			if !ok || areas[a].Cells[c].Name != name {
-				t.Errorf("the mark at column %d of line %d, %s's, hits %d, %d, %v", x, y, name, a, c, ok)
-			}
-			if a2, c2, ok := look.GridHit(w, areas, x+look.GridCell-1, y); !ok || a2 != a || c2 != c {
-				t.Errorf("the room after %s's mark, to the next, hits %d, %d, %v; want %s", name, a2, c2, ok, name)
-			}
-			drawn = append(drawn, hit{a, c})
-		}
-	}
-	if len(drawn) != 6 {
-		t.Errorf("the grid drew %d marks, want 6", len(drawn))
-	}
-	for _, off := range []struct{ x, y int }{{2, 0}, {10, 2}, {59, 0}, {35, 1}, {11, 4}, {11, -1}} {
-		if a, c, ok := look.GridHit(w, areas, off.x, off.y); ok {
-			t.Errorf("column %d of line %d hits %d, %d; want no cell there", off.x, off.y, a, c)
-		}
-	}
-}
-
-// A panel: a rule across, the margins kept, carrying a row as it stands;
-// what belongs to the row under its name, without a line; the rule pink
-// with the focus, dim without it; scrolled back, how many lines are below,
-// at the rule's end; a row too long cut, some rule kept after it.
-func TestPanel(t *testing.T) {
-	row := look.Row{State: look.Running, Name: "Homebrew casks", Says: look.Says(look.Cyan("installing arq"), look.Dim("brew install --cask arq")), Under: look.Output("==> Installing Cask arq", "arq was successfully installed!")}
-	same(t, look.Panel(80, false, 0, row),
-		"  ── ◐ Homebrew casks  installing arq · brew install --cask arq ──────────────",
-		"       ==> Installing Cask arq",
-		"       arq was successfully installed!",
-	)
-	same(t, look.Panel(80, true, 12, look.Row{State: look.Done, Name: "fonts", Says: look.Muted("16 installed")}),
-		"  ── ● fonts  16 installed ────────────────────────────────────── ↑ 12 more ──",
-	)
-	same(t, look.Panel(50, false, 3, row),
-		"  ── ◐ Homebrew casks  installi… ─── ↑ 3 more ──",
-		"       ==> Installing Cask arq",
-		"       arq was successfully installed!",
-	)
-	if dim, pink := look.Panel(80, false, 0, row)[0], look.Panel(80, true, 0, row)[0]; !strings.HasPrefix(dim, "  "+look.Dim("── ")) || !strings.HasSuffix(dim, look.Dim("──────────────")) ||
-		!strings.HasPrefix(pink, "  "+look.Pink("── ")) || !strings.HasSuffix(pink, look.Pink("──────────────")) {
-		t.Errorf("the rule without the focus is %q, with it %q; want it dim, then pink", dim, pink)
-	}
-	if scrolled := look.Panel(80, true, 12, row)[0]; !strings.HasSuffix(scrolled, " "+look.Muted("↑ 12 more")+" "+look.Pink("──")) {
-		t.Errorf("scrolled back, the rule ends %q; want how many are below, muted, then the rule", scrolled)
-	}
-	for _, w := range []int{50, 80, 160} {
-		for _, below := range []int{0, 7} {
-			if got := ansi.StringWidth(look.Panel(w, false, below, row)[0]); got != w-2 {
-				t.Errorf("at %d wide, %d below, the rule is %d wide; want it to end two cells from the edge, %d", w, below, got, w-2)
-			}
-		}
-	}
 }
 
 // A card: an orange rule across, w wide with the margins, carrying the
@@ -351,13 +218,6 @@ func TestWrap(t *testing.T) {
 	}
 }
 
-// The line parting a screen's regions: dim, across the whole window.
-func TestEdge(t *testing.T) {
-	if got := look.Edge(6); got != look.Dim("──────") {
-		t.Errorf("Edge(6) = %q", got)
-	}
-}
-
 // The bar: a segment a step, the last one in the colour the run ended in.
 func TestBar(t *testing.T) {
 	running := look.Bar(2, 1, 5, look.Done)
@@ -370,6 +230,41 @@ func TestBar(t *testing.T) {
 	ended := look.Bar(5, 0, 5, look.Failed)
 	if !strings.HasSuffix(ended, look.Red("▮")) {
 		t.Errorf("Bar(5, 0, 5, Failed) = %q, want the last segment red", ended)
+	}
+}
+
+// Progress: frac of n cells along the gradient, rounded, the rest dim;
+// ended failed or needing you, the last lit cell in that state's colour.
+func TestProgress(t *testing.T) {
+	half := look.Progress(0.5, 10, look.Done)
+	if ansi.Strip(half) != "▮▮▮▮▮▮▮▮▮▮" || strings.Count(half, look.Dim("▮")) != 5 {
+		t.Errorf("Progress(0.5, 10) = %q, want 5 of 10 lit", half)
+	}
+	if got := look.Progress(0.04, 10, look.Done); strings.Count(got, look.Dim("▮")) != 10 {
+		t.Errorf("Progress(0.04, 10) = %q, want none lit, rounded down", got)
+	}
+	if got := look.Progress(1, 32, look.Failed); ansi.StringWidth(got) != 32 || !strings.HasSuffix(got, look.Red("▮")) {
+		t.Errorf("Progress(1, 32, Failed) = %q, want 32 cells, the last red", got)
+	}
+	if got := look.Progress(1, 4, look.Done); strings.Contains(got, look.Red("▮")) || strings.Contains(got, look.Dim("▮")) {
+		t.Errorf("Progress(1, 4, Done) = %q, want every cell along the gradient", got)
+	}
+}
+
+// A junction: a dim rule across, w wide, the joint where it meets another.
+func TestJunction(t *testing.T) {
+	if got := look.Junction(8, 3, "┬"); got != look.Dim("───┬────") {
+		t.Errorf("Junction(8, 3, ┬) = %q", got)
+	}
+	if got := look.Junction(5, 0, "├"); got != look.Dim("├────") {
+		t.Errorf("Junction(5, 0, ├) = %q", got)
+	}
+}
+
+// Hints: a screen's keys, dim, after the margin.
+func TestHints(t *testing.T) {
+	if got := look.Hints(look.Key{Key: "tab", Does: "next row"}, look.Key{Key: "q", Does: "stop"}); got != "  "+look.Dim("tab next row · q stop") {
+		t.Errorf("Hints() = %q", got)
 	}
 }
 
