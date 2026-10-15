@@ -841,6 +841,44 @@ func TestAStepWaitsPartwayThroughApplying(t *testing.T) {
 	}
 }
 
+// Looking whether a wait's thing is in place is a check, whichever step
+// waits and however far it's got applying, and outside a run: what the
+// commands it runs print, as Homebrew's listings, isn't shown as the step's
+// changing things.
+func TestAWaitLooksAsACheckDoes(t *testing.T) {
+	defer engine.SetWaitPoll(time.Millisecond)()
+	var synced, changing atomic.Bool
+	var looks atomic.Int32
+	look := func(ctx context.Context) bool {
+		looks.Add(1)
+		if event.Changing(ctx) {
+			changing.Store(true)
+		}
+		return synced.Load()
+	}
+	token := engine.Wait{Step: "secret", Thing: "TOKEN", Ready: look}
+	notDone := func(context.Context) check.Result { return check.Result{State: check.Attention} }
+	p, err := engine.New(
+		engine.Step{Name: "brew", Later: []engine.Wait{token}, Check: notDone,
+			Apply: func(ctx context.Context, _ check.Result) error {
+				if !engine.Await(ctx, token, "waiting for TOKEN") {
+					return errors.New("TOKEN never came")
+				}
+				return nil
+			}},
+		engine.Step{Name: "sign-in", Waits: []engine.Wait{token}, Check: notDone, Apply: func(context.Context, check.Result) error { return nil }},
+		engine.Step{Name: "secret", Check: notDone, Apply: func(context.Context, check.Result) error { synced.Store(true); return nil }},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	applyWithin(t, p, &recorder{}, engine.Options{Jobs: 4})
+	engine.Await(event.WithChanging(t.Context()), token, "")
+	if looks.Load() < 3 || changing.Load() {
+		t.Errorf("looked %d times, as a step changing things: %v; want each look a check's", looks.Load(), changing.Load())
+	}
+}
+
 // A wait partway through applying ends when its thing's step finishes
 // without it, and says it didn't come; a wait for a step itself comes once
 // that step has finished, however it stands. Outside a run, nothing's
