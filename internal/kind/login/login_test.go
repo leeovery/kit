@@ -101,15 +101,67 @@ func TestCompare(t *testing.T) {
 	fake.On("osascript", osascript(login.ReadScript)...).Prints(items)
 	fake.On("osascript", osascript(login.IdentifyScript, "com.example.notyet", "com.manytricks.moom")...).
 		Prints(`[{"id":"","name":"","path":""},{"id":"com.manytricks.Moom","name":"Moom.app","path":"/Applications/Moom.app"}]`)
-	got := kind.Compare(t.Context(), login.New(fake, "/home"), declared("Com.GetDropbox.Dropbox", "com.manytricks.moom", "com.example.notyet"))
+	l := login.New(fake, "/home")
+	l.AppDirs = []string{t.TempDir()}
+	got := kind.Compare(t.Context(), l, declared("Com.GetDropbox.Dropbox", "com.manytricks.moom", "com.example.notyet"))
 	want := []check.Item{
-		{ID: "login-item:com.example.notyet", Name: "com.example.notyet", State: kind.Missing, Detail: "not installed: install the app first"},
+		{ID: "login-item:com.example.notyet", Name: "com.example.notyet", State: kind.Missing, Detail: "not installed: install the app, or open the app it comes with"},
 		{ID: "login-item:com.manytricks.moom", Name: "com.manytricks.moom", State: kind.Missing, Action: kind.Install},
 		{ID: "login-item:Gone-Helper", Name: "Gone-Helper", State: kind.Extra},
 		{ID: "login-item:com.stairways.keyboardmaestro.engine", Name: "com.stairways.keyboardmaestro.engine", State: kind.Extra},
 	}
 	if got.Summary != "3 declared, 1 installed" || !slices.Equal(got.Items, want) {
 		t.Errorf("Compare() = %+v\nwant items %+v", got, want)
+	}
+}
+
+// An app LaunchServices doesn't know yet, as one installed a moment ago, or
+// a helper inside another app, as Keyboard Maestro's engine, till that's
+// been opened, is looked for in the folders apps live in, and in the
+// folders inside each app where its helpers live, each read from its
+// bundle: found, its login item can be added. Only what LaunchServices
+// missed is looked for, and one found nowhere is held up.
+func TestAnAppLaunchServicesDoesntKnowIsLookedFor(t *testing.T) {
+	apps, more := t.TempDir(), t.TempDir()
+	spaceman := filepath.Join(apps, "Spaceman.app")
+	maestro := filepath.Join(apps, "Keyboard Maestro.app")
+	engine := filepath.Join(maestro, "Contents/MacOS/Keyboard Maestro Engine.app")
+	atLogin, helper := filepath.Join(apps, "DBngin.app/Contents/Library/LoginItems/Login.app"), filepath.Join(more, "Tool.app/Contents/Helpers/Helper.app")
+	for _, dir := range []string{spaceman, engine, atLogin, helper, filepath.Join(maestro, "Contents/Resources/Not A Helper.app")} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(apps, "notes.app.txt"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fake := runnertest.New(t)
+	fake.On("osascript", osascript(login.ReadScript)...).Prints("[]")
+	none := `{"id":"","name":"","path":""}`
+	fake.On("osascript", osascript(login.IdentifyScript, "com.example.gone", "com.manytricks.moom", "com.stairways.keyboardmaestro.engine", "dev.example.spaceman")...).
+		Prints(`[` + none + `,{"id":"com.manytricks.Moom","name":"Moom.app","path":"/Applications/Moom.app"},` + none + `,` + none + `]`)
+	fake.On("osascript", osascript(login.IdentifyScript, filepath.Join(apps, "DBngin.app"), atLogin, maestro, engine, spaceman, filepath.Join(more, "Tool.app"), helper)...).
+		Prints(`[{"id":"com.example.dbngin","name":"DBngin.app","path":"` + filepath.Join(apps, "DBngin.app") + `"},{"id":"com.example.login","name":"Login.app","path":"` + atLogin + `"},` +
+			`{"id":"com.stairways.keyboardmaestro.editor","name":"Keyboard Maestro.app","path":"` + maestro + `"},` +
+			`{"id":"com.stairways.keyboardmaestro.engine","name":"Keyboard Maestro Engine.app","path":"` + engine + `"},` +
+			`{"id":"Dev.Example.Spaceman","name":"Spaceman.app","path":"` + spaceman + `"},` +
+			`{"id":"com.example.tool","name":"Tool.app","path":"` + filepath.Join(more, "Tool.app") + `"},` + none + `]`)
+	l := login.New(fake, "/home")
+	l.AppDirs = []string{apps, filepath.Join(more, "missing"), more}
+	got := kind.Compare(t.Context(), l, declared("com.example.gone", "com.manytricks.moom", "com.stairways.keyboardmaestro.engine", "dev.example.spaceman"))
+	want := []check.Item{
+		{ID: "login-item:com.example.gone", Name: "com.example.gone", State: kind.Missing, Detail: "not installed: install the app, or open the app it comes with"},
+		{ID: "login-item:com.manytricks.moom", Name: "com.manytricks.moom", State: kind.Missing, Action: kind.Install},
+		{ID: "login-item:com.stairways.keyboardmaestro.engine", Name: "com.stairways.keyboardmaestro.engine", State: kind.Missing, Action: kind.Install},
+		{ID: "login-item:dev.example.spaceman", Name: "dev.example.spaceman", State: kind.Missing, Action: kind.Install},
+	}
+	if !slices.Equal(got.Items, want) {
+		t.Errorf("Compare() = %+v\nwant items %+v", got.Items, want)
+	}
+	fake.On("osascript", osascript(login.IdentifyScript, "com.stairways.keyboardmaestro.engine", "dev.example.spaceman")...).Prints(`[` + none + `,` + none + `]`)
+	fake.On("osascript", osascript(login.AddScript, engine, spaceman)...)
+	if err := l.Install(t.Context(), []string{"com.stairways.keyboardmaestro.engine", "dev.example.spaceman"}); err != nil {
+		t.Errorf("Install() = %v, want the login items added by the paths found", err)
 	}
 }
 
