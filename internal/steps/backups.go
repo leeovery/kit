@@ -79,7 +79,7 @@ func TimeMachine(run runner.Runner, now func() time.Time) engine.Step {
 		Check: func(ctx context.Context) check.Result {
 			out, err := output(ctx, run, "defaults", "export", timeMachinePrefs, "-")
 			if _, exited := errors.AsType[*runner.ExitError](err); exited {
-				return problem(FeatureTimeMachine, "not set up", [3]string{"none", "no backup disk is set up", "System Settings › General › Time Machine › Add Backup Disk"})
+				return timeMachineNoDisk()
 			}
 			if err != nil {
 				return failed(err)
@@ -91,7 +91,7 @@ func TimeMachine(run runner.Runner, now func() time.Time) engine.Step {
 			}
 			destinations, _ := prefs["Destinations"].([]any)
 			if len(destinations) == 0 {
-				return problem(FeatureTimeMachine, "not set up", [3]string{"none", "no backup disk is set up", "System Settings › General › Time Machine › Add Backup Disk"})
+				return timeMachineNoDisk()
 			}
 			var problems [][3]string
 			if !plist.Equal(prefs["AutoBackup"], true) {
@@ -138,6 +138,21 @@ func TimeMachine(run runner.Runner, now func() time.Time) engine.Step {
 			return check.Result{State: check.OK, Summary: summary, Glance: "Time Machine " + when(last, now())}
 		},
 	}
+}
+
+// timeMachineDisk is the to-do of a Mac whose Time Machine has no backup
+// disk.
+var timeMachineDisk = check.ToDo{
+	Title: "Add a Time Machine disk",
+	Why:   "Time Machine has nowhere to back up to.",
+	Steps: []string{"Plug in your backup disk", "System Settings › General › Time Machine › Add Backup Disk, and choose it"},
+	Watch: "Time Machine has a disk",
+	Group: groupBackups,
+}
+
+// timeMachineNoDisk is Time Machine's check on a Mac with no backup disk.
+func timeMachineNoDisk() check.Result {
+	return yours(FeatureTimeMachine, "not set up", "none", "Plug in your backup disk, then System Settings › General › Time Machine › Add Backup Disk", timeMachineDisk)
 }
 
 // arqStats is what arqc stats says, as far as the check needs.
@@ -238,9 +253,18 @@ func arqStatus(ctx context.Context, run runner.Runner) (stats arqStats, unread c
 	return stats, check.Result{}, true
 }
 
+// arqPlanToDo is the to-do of a Mac with Arq installed and never set up.
+var arqPlanToDo = check.ToDo{
+	Title: "Set up Arq's backup plan",
+	Why:   "Arq is in, but has nothing to back up to yet.",
+	Steps: []string{"Open Arq", "Sign in to your Arq account", "Adopt this Mac's plan, and let it run"},
+	Watch: "Arq has a plan",
+	Group: groupBackups,
+}
+
 // arqNotSetUp is Arq's check on a Mac it's never been set up on.
 func arqNotSetUp() check.Result {
-	return problem(FeatureArq, "not set up", [3]string{"none", "no backup plan is chosen yet", "open Arq, sign in, then choose a backup plan"})
+	return yours(FeatureArq, "not set up", "none", "Open Arq, sign in to your Arq account, and adopt this Mac's plan", arqPlanToDo)
 }
 
 // slug is a name as part of an id: lowercase letters and digits, dashes

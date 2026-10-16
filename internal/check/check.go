@@ -46,6 +46,36 @@ type Item struct {
 	// Action is what applying the step would do about it, as in install:
 	// none when it would leave it.
 	Action string `json:"action,omitempty"`
+	// ToDo is what the person at the Mac is to do about it, when it's
+	// theirs alone to do and applying at a terminal raises it at its end,
+	// with the steps by hand: none for anything else.
+	ToDo *ToDo `json:"to_do,omitempty"`
+	// ComesWith is the id of the to-do that brings it, when doing that
+	// does this too, as bringing back apps' settings brings Claude Code's:
+	// once that's done, its step is checked again.
+	ComesWith string `json:"comes_with,omitempty"`
+}
+
+// ToDo is something for the person at the Mac to do, as applying raises it
+// at its end, one at a time: what to do, its title; why; its steps, in
+// order; what kit watches for to tell it's done, in words, as in "Time
+// Machine has a disk"; the group it's in; the keys of a choice, when it's
+// one; and whether it comes first, before the steps by hand the config
+// declares, rather than after them.
+type ToDo struct {
+	Title string   `json:"title"`
+	Why   string   `json:"why,omitempty"`
+	Steps []string `json:"steps,omitempty"`
+	Watch string   `json:"watch,omitempty"`
+	Group string   `json:"group,omitempty"`
+	Keys  []Key    `json:"keys,omitempty"`
+	First bool     `json:"first,omitempty"`
+}
+
+// Key is a key answering a choice, and what it does.
+type Key struct {
+	Key  string `json:"key"`
+	Does string `json:"does"`
 }
 
 // The states of items that are the person's to do: a problem only they can

@@ -142,6 +142,9 @@ type Pretty struct {
 	card      *event.NeedsYou
 	cardSince time.Time
 	cards     map[string]event.NeedsYou
+	// todos are the to-dos at the run's end, as they stand, once they've
+	// started: applying's screen is theirs till the run's done.
+	todos *event.ToDos
 	// onScreen is whether applying has the terminal's alternate screen, and
 	// drawnSize the size it was last drawn at; keys are the keys it reads
 	// while it has it, and what they've done.
@@ -207,7 +210,7 @@ func (p *Pretty) Emit(e event.Event) {
 		p.start, p.results = e, make(map[string]event.StepFinished, len(e.Steps))
 		p.output, p.command, p.began = map[string][]string{}, map[string]string{}, p.now()
 		p.raw, p.rawSeq = map[string][]rawLine{}, 0
-		p.cut, p.card, p.cards = map[string]runningStep{}, nil, map[string]event.NeedsYou{}
+		p.cut, p.card, p.cards, p.todos = map[string]runningStep{}, nil, map[string]event.NeedsYou{}, nil
 		p.log = nil
 		p.order.start(e.Steps)
 		p.preparing = ""
@@ -239,6 +242,9 @@ func (p *Pretty) Emit(e event.Event) {
 		p.drawSpinner()
 	case event.NeedsYou:
 		p.raise(e)
+		p.drawSpinner()
+	case event.ToDos:
+		p.workThrough(e)
 		p.drawSpinner()
 	case event.Logged:
 		switch {

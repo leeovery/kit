@@ -1,0 +1,188 @@
+package steps
+
+import (
+	"context"
+	"errors"
+	"slices"
+	"time"
+
+	"github.com/leeovery/kit/internal/check"
+	"github.com/leeovery/kit/internal/engine"
+	"github.com/leeovery/kit/internal/event"
+	"github.com/leeovery/kit/internal/hand"
+)
+
+// The groups kit's own to-dos are in.
+const (
+	groupApps    = "Apps"
+	groupBackups = "Backups"
+)
+
+// toDo is one of the to-dos at the run's end: what the list, and the
+// record, say of it, and how it's raised.
+type toDo interface {
+	raised
+	entry() event.ToDo
+}
+
+// toDoList is what's left for the person at the Mac to do as the run ends,
+// in kit's order: kit's own that come first (as apps' settings do, so the
+// apps opened next start with them), then due, the config's lines not
+// done, then the rest of kit's own, each from a step that's finished, in
+// the run's order. Then grouped: each group where its first comes, those
+// in it in that order, one with no group as a group of its own.
+func toDoList(ctx context.Context, due []byHand) []toDo {
+	var first, last []toDo
+	for _, f := range engine.Finished(ctx) {
+		for _, it := range f.Result.Items {
+			switch {
+			case it.ToDo == nil:
+			case it.ToDo.First:
+				first = append(first, ownToDo{step: f.Step, item: it})
+			default:
+				last = append(last, ownToDo{step: f.Step, item: it})
+			}
+		}
+	}
+	lines := make([]toDo, len(due))
+	for i, b := range due {
+		lines[i] = b
+	}
+	return grouped(slices.Concat(first, lines, last))
+}
+
+// grouped is list by group, each group where its first comes, those in it
+// in list's order.
+func grouped(list []toDo) []toDo {
+	var groups []string
+	in := map[string][]toDo{}
+	for _, t := range list {
+		g := t.entry().Group
+		if _, ok := in[g]; !ok {
+			groups = append(groups, g)
+		}
+		in[g] = append(in[g], t)
+	}
+	out := make([]toDo, 0, len(list))
+	for _, g := range groups {
+		out = append(out, in[g]...)
+	}
+	return out
+}
+
+// ownToDo is one of kit's own to-dos: the item a step's check found for
+// the person to do (its ToDo), and the step, which tells when it's done.
+type ownToDo struct {
+	step string
+	item check.Item
+}
+
+func (o ownToDo) entry() event.ToDo {
+	t := o.item.ToDo
+	return event.ToDo{Step: o.step, ID: o.item.ID, Title: t.Title, Group: t.Group, How: howOf(t.Steps, o.item.Detail)}
+}
+
+// card is what its card says: as its step readies it, when it's a choice;
+// kit telling by itself when it's done, but for a choice, whose keys say.
+func (o ownToDo) card(ctx context.Context) event.NeedsYou {
+	it := o.item
+	if c := engine.ChoiceOf(ctx, o.step); c != nil {
+		it = c.Ready(ctx, it)
+	}
+	t := it.ToDo
+	return event.NeedsYou{Item: it.ID, Title: t.Title, Group: t.Group, Why: t.Why, Steps: t.Steps, Watch: t.Watch, Keys: t.Keys, Tells: len(t.Keys) == 0}
+}
+
+// done reports whether it's done, as its step's check finds it: the check
+// looked, and found it gone; and what the check says, as what kit saw.
+func (o ownToDo) done(ctx context.Context) (bool, string) {
+	res, ok := engine.Look(ctx, o.step)
+	switch {
+	case !ok, res.State == check.Failed, res.State == check.Deferred:
+		return false, ""
+	case slices.ContainsFunc(res.Items, func(it check.Item) bool { return it.ID == o.item.ID }):
+		return false, ""
+	}
+	return true, res.Summary
+}
+
+// answer is what the person's answer does: a choice's key does what its
+// step says, then kit looks, taking what the step said it did as what it
+// saw, should that have done it; what goes wrong, the log says, and it
+// stays up. Done has kit look at once.
+func (o ownToDo) answer(ctx context.Context, a hand.Answer, _ time.Time) (bool, string, error) {
+	if !slices.ContainsFunc(o.item.ToDo.Keys, func(k check.Key) bool { return hand.Answer(k.Key) == a }) {
+		ok, saw := o.done(ctx)
+		return ok, saw, nil
+	}
+	c := engine.ChoiceOf(ctx, o.step)
+	if c == nil {
+		return false, "", nil
+	}
+	said, err := c.Answer(ctx, o.item, string(a))
+	if err != nil {
+		event.Log(ctx, event.Logged{Line: o.item.ToDo.Title + ": " + err.Error(), Alert: true})
+		return false, "", nil
+	}
+	ok, _ := o.done(ctx)
+	return ok, said, nil
+}
+
+// workThrough raises list's to-dos for step one at a time, in order, each
+// till it's done: the list emitted as each comes up, and once they're over.
+// The person can stop where they are (hand.Stop): what's left stays to do.
+// Then the steps the to-dos done held are checked again (recheckHeld).
+func (r *Raise) workThrough(ctx context.Context, step string, list []toDo) error {
+	if len(list) == 0 {
+		return nil
+	}
+	entries := make([]event.ToDo, len(list))
+	for i, t := range list {
+		entries[i] = t.entry()
+	}
+	emit := func(up int) {
+		r.Sink.Emit(event.ToDos{Time: r.Now(), Step: step, List: slices.Clone(entries), Up: up})
+	}
+	resolved := map[string]bool{}
+	for i, t := range list {
+		emit(i)
+		saw, err := r.up(ctx, step, t, len(list)-1-i)
+		if errors.Is(err, errStopHere) {
+			break
+		}
+		if err != nil {
+			return err
+		}
+		entries[i].Done, entries[i].Saw = true, saw
+		resolved[entries[i].ID] = true
+	}
+	emit(-1)
+	recheckHeld(ctx, entries, resolved)
+	return nil
+}
+
+// recheckHeld checks again the steps the to-dos done held, for their rows
+// and the run's record: those they came from, and those with something
+// that comes with one of them (an item's ComesWith), as Claude Code's
+// settings come with apps'. resolved are the done ones' ids.
+func recheckHeld(ctx context.Context, entries []event.ToDo, resolved map[string]bool) {
+	from := map[string]bool{}
+	for _, e := range entries {
+		if resolved[e.ID] {
+			from[e.Step] = true
+		}
+	}
+	var held []string
+	for _, f := range engine.Finished(ctx) {
+		if from[f.Step] || slices.ContainsFunc(f.Result.Items, func(it check.Item) bool { return resolved[it.ComesWith] }) {
+			held = append(held, f.Step)
+		}
+	}
+	if len(held) == 0 {
+		return
+	}
+	event.Say(ctx, event.Doing{Says: "checking once more"})
+	for _, name := range held {
+		engine.Recheck(ctx, name)
+	}
+}

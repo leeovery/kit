@@ -159,7 +159,13 @@ in the last day without errors, pushed within a day; read from kit's record alon
 section, a line each:
 a name, then `--` and a command, which exits 0 when all's well, or prints what's wrong on
 its first line (a minute's timeout), each failing one an item of the `checks` step. Every step has an area (Backups, Jobs, Mac, Drift,
-Config, Checks), which the status document carries.
+Config, Checks), which the status document carries. What only the person at the Mac can do
+about a check is a to-do, an item with a title, why, steps, what kit watches for, a group and,
+for a choice, its keys, raised at the end of applying (Steps by hand): bringing back apps'
+settings (`prefs`, paused), a Time Machine disk to add, Arq's backup plan to set up; titled the
+same wherever the item shows. The rest (disk space, a stale backup, commits that won't push)
+are how the Mac stands, not to-dos. Full Disk Access isn't one: a grant takes effect only once
+the terminal restarts, so kit couldn't watch for it.
 
 **Adding a secret:** `kit secret add <name>` takes its value typed (unshown), on standard
 input (`--stdin`, how an agent passes one, never on a command line), from a file (`--from`,
@@ -192,7 +198,20 @@ anyway); a card with a command offers no key, kit carrying on by itself once it'
 no putting a card off: it's done, or the run's stopped. One card is up at a time, the next
 waiting its turn. A line with `--before` is a step of its own, raised mid-run once what it comes
 after is in, as the steps it comes before wait for it; the rest, `--after` alone only ordering
-them, come up at the run's end, after every other step, in order. `kit check|hourly|nightly add
+them, come up at the run's end, after every other step, with the to-dos kit's own checks left
+(Checks). That end is a list worked through one to-do at a time, in kit's order, with no choosing
+and nothing skipped: kit's own that come first (bringing back apps' settings, so the apps opened
+next start with them), then the lines not done, in order, then kit's own the rest (the backups');
+grouped, each group where its first comes (kit's own in Apps and Backups). Each is looked at
+while it's up, a line by its command every few seconds, one of kit's own by its step's check, and
+once done the log says so, how long it took and what kit saw, and the next comes up; `space` says
+one with no command is done; a choice is answered by its keys (apps' settings: `r` brings them
+back from this Mac's last save, its date said, as `kit prefs restore` does; `f` starts afresh, as
+`kit prefs start-fresh` does). Stopping there (`q`'s Stop) leaves what's left to do, in that
+order in the record, the run ending as it stands. After the last, kit checks again the steps the
+to-dos held, those they came from and any with something that comes with one (Scratch's Claude
+Code settings come with apps' settings), so their rows and the record are right, then finishes.
+Without a terminal, nothing's raised: kit's own stay items of their steps. `kit check|hourly|nightly add
 <name> -- <command>` and `kit manual add <name> "<what to do>" [-- <command>]` (written as
 `--test`; `--group` as on the line) declare checks, jobs and steps by hand (a check, and a
 step's command, run once as it's added, to say how it stands); `kit remove
@@ -256,9 +275,15 @@ waits for take it as done, so none waits on it while it waits on them; one of th
 refused when the pipeline is built. A step waiting for a thing no step in particular puts in
 place (a command) waits till it's there, or till the run's quiet: no step at work, none able
 to start, none about to look again at what it waits for; then each such wait ends together.
-Applying a step that doesn't stand ok runs its apply, then its check again. What a person must
-do by hand shows as an item while the step needs attention. A run that's stopped (an interrupt)
-fails the steps it hadn't started.
+Applying a step that doesn't stand ok runs its apply, then its check again; a step marked to be
+always applied (the steps by hand at the run's end, which raise the rest's to-dos too) is applied
+however it stands. What a person must do by hand shows as an item while the step needs
+attention. A running step can work on the run's others: see those that have finished, as they
+stand; look at one, its check run as that step's own, the run's record of it left; check one
+again, what it finds taking its place in the report and emitted as the step finishing again, for
+the faces and the log, with what applying it did earlier kept; and use one's choice, the keys of
+the to-dos its check finds, run as that step's own. A run that's stopped (an interrupt) fails the
+steps it hadn't started.
 
 ## Commands
 
@@ -548,10 +573,16 @@ step failed, with the error; the run finishing, with its summary. Faces subscrib
   up, each row saying what its steps are doing, then what's for later; on the right the log,
   every line of the run with its time, or a row's lines alone once it's chosen (tab or a
   click; esc for all), scrolled back and followed again, with a step by hand's card above it
-  while it's up. In a smaller window the run is drawn in place: a light a row, the bar, what's
-  running and what's wrong. Once applied, its record takes the screen's place: the wordmark
-  with the bar and the tally, then what's left to do, what failed, what needs you, and the
-  rows done. Commands aimed at one thing (`add`, `remove`, a step named) are a timeline, a row
+  while it's up. At the run's end its to-dos take the screen (round 12): the state line counts
+  what's left and what's done, then says kit's carrying on once they're over; the left pane lists
+  them, To do and how many, each group's name muted, done ones ticked, the one up a pill, `q`
+  stopping there at its foot; on the right the one up is a panel ruled off over the log, as a
+  card is: its title and where it is in the list, why, its steps, then how it ends (kit watching,
+  and what for; `space`; a choice's keys). In a smaller window the run is drawn in place: a light
+  a row, the bar, what's running and what's wrong, a card or a to-do up in place under them, no
+  list. Once applied, its record takes the screen's place: the wordmark with the bar and the
+  tally, then what's left to do (the to-dos at the end first, in their order, each its steps as
+  how), what failed, what needs you, and the rows done. Commands aimed at one thing (`add`, `remove`, a step named) are a timeline, a row
   a step as its turn comes, no wordmark. A summary ends a whole-Mac command: what failed,
   needs you or wasn't checked, what's fine, and how long it took. `kit log` shows a run as a
   timeline; kit's help and its errors take the look too (an error is a row, what to run about

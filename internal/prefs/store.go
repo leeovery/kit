@@ -187,6 +187,24 @@ func untar(data []byte, dir string) error {
 	}
 }
 
+// LastSave is when this Mac's folder in the store last changed: its last
+// save, as a restore brings it back. The store's cloned first, when this
+// Mac has no clone yet.
+func (p *Prefs) LastSave(ctx context.Context) (time.Time, error) {
+	if err := p.ensureClone(ctx); err != nil {
+		return time.Time{}, err
+	}
+	res, err := p.git(ctx, "log", "-1", "--format=%cI", "--", p.Mac)
+	if err != nil {
+		return time.Time{}, err
+	}
+	last := strings.TrimSpace(string(res.Stdout))
+	if last == "" {
+		return time.Time{}, fmt.Errorf("no settings stored for %s", p.Mac)
+	}
+	return time.Parse(time.RFC3339, last)
+}
+
 // head is the clone's last commit.
 func (p *Prefs) head(ctx context.Context) string {
 	res, err := p.git(ctx, "rev-parse", "HEAD")

@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/leeovery/kit/internal/prefs"
 )
@@ -255,5 +256,19 @@ func TestHistory(t *testing.T) {
 	}
 	if _, err := w.p.History(t.Context(), "", "~/.config/tool/settings.json", 5); err == nil || !strings.Contains(err.Error(), "no history for laptop/files/.config/tool/settings.json") {
 		t.Errorf("History(file) = %v", err)
+	}
+}
+
+// The last save is when this Mac's folder in the store last changed, as a
+// restore brings it back; with nothing saved for it, there's none.
+func TestLastSave(t *testing.T) {
+	w := newWorld(t, prefs.Lists{})
+	w.fake.On("git", "-C", w.clone, "log", "-1", "--format=%cI", "--", "laptop").Prints("2026-10-15T03:00:12+01:00\n").Then().Prints("")
+	last, err := w.p.LastSave(t.Context())
+	if want := time.Date(2026, 10, 15, 2, 0, 12, 0, time.UTC); err != nil || !last.Equal(want) {
+		t.Errorf("LastSave() = %v, %v; want %v", last, err, want)
+	}
+	if _, err := w.p.LastSave(t.Context()); err == nil || err.Error() != "no settings stored for laptop" {
+		t.Errorf("with nothing saved, LastSave() = %v", err)
 	}
 }

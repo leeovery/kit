@@ -511,7 +511,8 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 	}
 	// A step by hand that comes due while kit applies at a terminal is
 	// raised there, a card, and waited on: the rest, with no place of their
-	// own, once everything else has finished.
+	// own, once everything else has finished, with what the run left the
+	// person to do, so that step's there whether or not any are declared.
 	var raise *steps.Raise
 	if slices.Contains(applies, command) && a.pretty(a.Stdout) {
 		desk := hand.New()
@@ -522,7 +523,7 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 		r.byHandLast = true
 	}
 	plain, ordered := steps.SplitManual(home, byHand)
-	if len(plain.Entries) > 0 {
+	if len(plain.Entries) > 0 || raise != nil {
 		checks = append(checks, steps.Manual(observed, home, dirs.State, plain, raise))
 	}
 	hourly, daily, err := a.jobs(r)

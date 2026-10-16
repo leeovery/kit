@@ -40,7 +40,7 @@ var ErrNoLogs = errors.New("no runs logged yet")
 type Record struct {
 	Time time.Time `json:"time"`
 	// Event is what happened: run_started, step_started, step_finished,
-	// command, logged, asking, answered, needs_you or run_finished.
+	// command, logged, asking, answered, needs_you, to_dos or run_finished.
 	Event   string       `json:"event"`
 	Command string       `json:"command,omitempty"`
 	Machine string       `json:"machine,omitempty"`
@@ -74,6 +74,10 @@ type Record struct {
 	// and Alert whether it's something to look at.
 	Line  string `json:"line,omitempty"`
 	Alert bool   `json:"alert,omitempty"`
+	// ToDos are the to-dos at the run's end, as they stood (to_dos), and Up
+	// the one up, by its place: -1 once they're over.
+	ToDos []event.ToDo `json:"to_dos,omitempty"`
+	Up    *int         `json:"up,omitempty"`
 }
 
 // File is a run's log, as a sink.
@@ -190,6 +194,9 @@ func (l *File) record(e event.Event) Record {
 		r.Event, r.Step, r.Item, r.Title, r.Tells, r.More = "needs_you", e.Step, e.Item, e.Title, e.Tells, e.More
 	case event.Logged:
 		r.Event, r.Step, r.Line, r.Alert = "logged", e.Step, e.Line, e.Alert
+	case event.ToDos:
+		up := e.Up
+		r.Event, r.Step, r.ToDos, r.Up = "to_dos", e.Step, e.List, &up
 	case event.RunFinished:
 		r.Event, r.DurationMS, r.Counts = "run_finished", e.Duration.Milliseconds(), e.Counts
 		l.finished = true

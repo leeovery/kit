@@ -53,6 +53,15 @@ func problem(step, summary string, problems ...[3]string) check.Result {
 	return res
 }
 
+// yours is a check's result when what's wrong is t for the person at the Mac
+// to do: its item an id within step, t's title its name, what to do in a
+// line (detail) its detail, as kit status and the record say it.
+func yours(step, summary, id, detail string, t check.ToDo) check.Result {
+	res := problem(step, summary, [3]string{id, t.Title, detail})
+	res.Items[0].ToDo = &t
+	return res
+}
+
 // failed is a check's result when looking failed with err, saying why, as
 // engine.Reason has it.
 func failed(err error) check.Result {

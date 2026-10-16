@@ -4,12 +4,16 @@ package hand
 
 import "sync"
 
-// Answer is what the person answers a step by hand with.
-type Answer int
+// Answer is what the person answers a step by hand with: that it's done,
+// that they're stopping here, or, a choice, its key.
+type Answer string
 
 const (
 	// Done is the person saying they've done it.
-	Done Answer = iota + 1
+	Done Answer = "done"
+	// Stop is the person stopping where they are, at the run's to-dos: what's
+	// left stays to do.
+	Stop Answer = "stop"
 )
 
 // Desk passes answers from the screen to the step whose card is up.

@@ -90,7 +90,9 @@ const stopIt = 1
 // a click on one chooses it, and esc chooses everything; with a row
 // chosen, r shows its raw view, and esc or r goes back to the log; the
 // arrows, the page keys, home, end and the wheel scroll the log; with a
-// card up, space and enter say it's done.
+// card up, space and enter say it's done, or, a choice, its keys answer
+// it. With the to-dos at the run's end up, there are no rows to choose, and
+// Stop stops there, what's left staying to do.
 func (p *Pretty) Keys(listen func() (<-chan ask.Key, func()), halt func()) *Pretty {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -99,7 +101,8 @@ func (p *Pretty) Keys(listen func() (<-chan ask.Key, func()), halt func()) *Pret
 }
 
 // Hands has applying's screen pass what the person answers the card of a
-// step by hand with (space, enter) to answer, which passes it to the step.
+// step by hand with (space, enter, a choice's keys, stopping at the to-dos)
+// to answer, which passes it to the step.
 func (p *Pretty) Hands(answer func(step string, a hand.Answer) bool) *Pretty {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -153,10 +156,10 @@ func (p *Pretty) read(r *reading, keys <-chan ask.Key) {
 }
 
 // press is what a key does on applying's screen, and whether it stops the
-// run: ctrl+c at once; q asks first; space and enter answer the card up;
-// tab, shift+tab, esc and a click choose what the log shows, r and esc
-// whether a row's raw view shows in its place; the rest scroll it. The
-// window's focus coming and going is noted, for a click.
+// run: ctrl+c at once; q asks first; a choice's keys, space and enter
+// answer the card up; tab, shift+tab, esc and a click choose what the log
+// shows, r and esc whether a row's raw view shows in its place; the rest
+// scroll it. The window's focus coming and going is noted, for a click.
 func (p *Pretty) press(k ask.Key) (halt bool) {
 	switch {
 	case k.Is("ctrl+c"):
@@ -167,6 +170,7 @@ func (p *Pretty) press(k ask.Key) (halt bool) {
 		p.keys.away = true
 	case p.keys.asking:
 		return p.answer(k)
+	case p.answerChoice(k):
 	case k.Is(" ", "enter"):
 		p.answerCard()
 	case k.Is("q"):
@@ -188,27 +192,50 @@ func (p *Pretty) press(k ask.Key) (halt bool) {
 }
 
 // answerCard passes the card up's step that it's done, when kit can't tell
-// by itself: nothing with no card up.
+// by itself and it isn't a choice: nothing with no card up.
 func (p *Pretty) answerCard() {
-	if p.card == nil || p.hands == nil || p.card.Tells {
+	if p.card == nil || p.hands == nil || p.card.Tells || len(p.card.Keys) > 0 {
 		return
 	}
 	p.hands(p.card.Step, hand.Done)
 }
 
+// answerChoice passes k to the card up's step, when it's one of its
+// choice's keys, and reports whether it was.
+func (p *Pretty) answerChoice(k ask.Key) bool {
+	if p.card == nil || p.hands == nil {
+		return false
+	}
+	for _, c := range p.card.Keys {
+		if k.Is(c.Key) {
+			p.hands(p.card.Step, hand.Answer(c.Key))
+			return true
+		}
+	}
+	return false
+}
+
 // answer is what a key does to the question whether to stop, and whether
-// it's stopping: ↑ and ↓ choose, enter decides, esc keeps going.
+// it's stopping the run: ↑ and ↓ choose, enter decides, esc keeps going.
+// Stop with one of the to-dos at the run's end up stops there, the run
+// carrying on to its end, what's left staying to do.
 func (p *Pretty) answer(k ask.Key) (halt bool) {
 	switch {
 	case k.Is("up", "down"):
 		p.keys.choice = (p.keys.choice + 1) % len(stopAnswers)
 	case k.Is("enter"):
 		p.keys.asking = false
-		return p.keys.choice == stopIt
+		return p.keys.choice == stopIt && !p.stopHere()
 	case k.Is("esc"):
 		p.keys.asking = false
 	}
 	return false
+}
+
+// stopHere has the to-dos stop where they are, when one's up, and reports
+// whether they took it.
+func (p *Pretty) stopHere() bool {
+	return p.card != nil && p.listing(p.card.Step) && p.hands != nil && p.hands(p.card.Step, hand.Stop)
 }
 
 // choose has the log show row's lines alone, or every line for "", from
@@ -220,8 +247,12 @@ func (p *Pretty) choose(row string) {
 }
 
 // chooseNext chooses the row by places after the one chosen, round from
-// the last to everything and back.
+// the last to everything and back: none while the to-dos have the left
+// pane.
 func (p *Pretty) chooseNext(by int) {
+	if p.todos != nil {
+		return
+	}
 	choices := []string{""}
 	for _, r := range p.shownRows() {
 		choices = append(choices, r.name)
@@ -310,6 +341,8 @@ func (p *Pretty) footKeys() string {
 	switch {
 	case p.keys.asking:
 		return look.Hints(stoppingKeys...)
+	case p.keys.listen != nil && p.todos != nil:
+		return look.Hints(toDoKeys...)
 	case p.keys.listen != nil:
 		return look.Hints(runningKeys...)
 	}

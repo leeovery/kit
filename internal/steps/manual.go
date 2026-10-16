@@ -162,9 +162,9 @@ type byHand struct {
 	stateDir string
 }
 
-// done reports whether it's done: its command exits 0, or, without one,
+// isDone reports whether it's done: its command exits 0, or, without one,
 // it's been marked done on this Mac.
-func (b byHand) done(ctx context.Context) bool {
+func (b byHand) isDone(ctx context.Context) bool {
 	if b.Command != nil {
 		r, err := b.run.Run(ctx, *b.Command)
 		return Outcome(*b.Command, r, err) == ""
@@ -182,6 +182,61 @@ func (b byHand) item() check.Item {
 	}
 	return it
 }
+
+// card is what its card says: its line's name, what to do, its group, why,
+// its steps, and whether kit tells by itself when it's done.
+func (b byHand) card(context.Context) event.NeedsYou {
+	return event.NeedsYou{Item: b.Name, Title: b.Do, Group: b.Group, Why: b.Why, Steps: b.Steps, Tells: b.Command != nil}
+}
+
+// done reports whether it's done, as isDone does; kit has no words for it.
+func (b byHand) done(ctx context.Context) (bool, string) { return b.isDone(ctx), "" }
+
+// answer is what the person's answer does: done, with no test, marks it
+// done on this Mac, as kit manual done does; with one, has kit look at once,
+// as it does every few seconds anyway.
+func (b byHand) answer(ctx context.Context, a hand.Answer, now time.Time) (bool, string, error) {
+	switch {
+	case a != hand.Done:
+		return false, "", nil
+	case b.Command == nil:
+		return true, "", MarkDone(b.stateDir, []string{b.Name}, now, false)
+	}
+	return b.isDone(ctx), "", nil
+}
+
+// entry is it as the list of to-dos at the run's end has it.
+func (b byHand) entry() event.ToDo {
+	it := b.item()
+	return event.ToDo{Step: ManualName, ID: it.ID, Title: b.Do, Group: b.Group, How: howOf(b.Steps, it.Detail)}
+}
+
+// howOf is how to do a to-do, as the record says: its steps, else what its
+// item says, if anything.
+func howOf(steps []string, detail string) []string {
+	switch {
+	case len(steps) > 0:
+		return steps
+	case detail != "":
+		return []string{detail}
+	}
+	return nil
+}
+
+// raised is what a card is raised for, and how to tell it's done: a step by
+// hand's line, or one of kit's own to-dos. card is what its card says, but
+// its step and how many follow it; done whether it's done, and what kit saw,
+// in words, if it has some; answer what the person's answer does, at now,
+// and likewise.
+type raised interface {
+	card(ctx context.Context) event.NeedsYou
+	done(ctx context.Context) (bool, string)
+	answer(ctx context.Context, a hand.Answer, now time.Time) (bool, string, error)
+}
+
+// errStopHere is why a card came down without being done: the person
+// stopped where they were, at the run's to-dos, what's left staying to do.
+var errStopHere = errors.New("stopped here")
 
 // Raise is how a step by hand that's come due is raised while kit applies
 // at a terminal, where someone can act on it: a card, front and centre, one
@@ -216,70 +271,70 @@ type Notifier interface {
 // whether it's done.
 var manualPoll = 3 * time.Second
 
-// up puts b's card up for the step called step, once it's the card's turn,
-// unless b's been done meanwhile, after more of the step's own cards to
-// follow it; then waits till b's done, the step's job given up meanwhile,
-// for other steps to go on (engine.Release). Done on the card marks done
-// on this Mac one kit can't tell about, as kit manual done does, and has
-// kit look at once at one it can, as it does every few seconds anyway.
-func (r *Raise) up(ctx context.Context, step string, b byHand, more int) error {
+// up puts c's card up for the step called step, once it's the card's turn,
+// unless it's been done meanwhile, after more of the step's own cards to
+// follow it; then waits till it's done, the step's job given up meanwhile,
+// for other steps to go on (engine.Release), looking every few seconds as
+// well as at each answer. It returns what kit saw as it was done, in words,
+// if it has some; errStopHere when the person stopped where they were.
+func (r *Raise) up(ctx context.Context, step string, c raised, more int) (string, error) {
 	defer engine.Release(ctx)()
 	r.Sink.Emit(event.Doing{Time: r.Now(), Step: step, Says: event.Queued})
 	if err := r.turn(ctx); err != nil {
-		return err
+		return "", err
 	}
 	defer r.pass()
-	if b.done(ctx) {
-		return nil
+	if ok, saw := c.done(ctx); ok {
+		return saw, nil
 	}
 	answers, down := r.Desk.Listen(step)
 	defer down()
-	r.show(ctx, step, b, more)
-	defer r.unnotify(ctx, step, b)
-	// Looking every few seconds finds it done by its command, or marked done
-	// elsewhere, as by kit manual done in another window.
+	card := c.card(ctx)
+	r.show(ctx, step, card, more)
+	defer r.unnotify(ctx, step, card.Item)
+	// Looking every few seconds finds it done by its command or its check,
+	// or marked done elsewhere, as by kit manual done in another window.
 	tick := time.NewTicker(manualPoll)
 	defer tick.Stop()
-	poll := tick.C
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
-		case <-poll:
-			if b.done(ctx) {
-				return nil
+			return "", ctx.Err()
+		case <-tick.C:
+			if ok, saw := c.done(ctx); ok {
+				return saw, nil
 			}
 		case a := <-answers:
-			switch {
-			case a == hand.Done && b.Command == nil:
-				return MarkDone(b.stateDir, []string{b.Name}, r.Now(), false)
-			case a == hand.Done && b.done(ctx):
-				return nil
+			if a == hand.Stop {
+				return "", errStopHere
+			}
+			if ok, saw, err := c.answer(ctx, a, r.Now()); ok || err != nil {
+				return saw, err
 			}
 		}
 	}
 }
 
-// show puts b's card up for step, a notification posted once it's up; its
+// show puts card up for step, a notification posted once it's up; its
 // More counting more of the step's own cards to follow it, and those
 // waiting for their turn.
-func (r *Raise) show(ctx context.Context, step string, b byHand, more int) {
-	card := event.NeedsYou{Step: step, Item: b.Name, Title: b.Do, Group: b.Group, Why: b.Why, Steps: b.Steps, Tells: b.Command != nil}
+func (r *Raise) show(ctx context.Context, step string, card event.NeedsYou, more int) {
+	card.Step = step
 	r.mu.Lock()
 	card.Time, card.More = r.Now(), more+len(r.queued)
 	r.card, r.after, r.shown = card, more, true
 	r.Sink.Emit(card)
 	r.mu.Unlock()
 	if r.Notify != nil {
-		r.Notify.Notify(ctx, noticeID(step, b.Name), b.Do, notice(b))
+		r.Notify.Notify(ctx, noticeID(step, card.Item), card.Title, notice(card))
 	}
 }
 
-// unnotify takes b's notification away, once its card's down: done, or the
-// run stopped.
-func (r *Raise) unnotify(ctx context.Context, step string, b byHand) {
+// unnotify takes the notification of item's card away, once it's down:
+// done, or the run stopped.
+func (r *Raise) unnotify(ctx context.Context, step, item string) {
 	if r.Notify != nil {
-		r.Notify.Clear(context.WithoutCancel(ctx), noticeID(step, b.Name))
+		r.Notify.Clear(context.WithoutCancel(ctx), noticeID(step, item))
 	}
 }
 
@@ -288,11 +343,11 @@ func noticeID(step, item string) string {
 	return "card:" + step + ":" + item
 }
 
-// notice is what b's notification says under its title: its first step,
-// else that kit waits for it.
-func notice(b byHand) string {
-	if len(b.Steps) > 0 {
-		return b.Steps[0]
+// notice is what a card's notification says under its title: its first
+// step, else that kit waits for it.
+func notice(card event.NeedsYou) string {
+	if len(card.Steps) > 0 {
+		return card.Steps[0]
 	}
 	return "kit waits for you to do this"
 }
@@ -361,7 +416,7 @@ func OwnManual(run runner.Runner, stateDir string, m ManualStep, raise *Raise) e
 	return engine.Step{
 		Name: m.Name, Title: m.Name, Area: AreaManual, ByHand: []event.Hand{m.hand()},
 		Check: func(ctx context.Context) check.Result {
-			if b.done(ctx) {
+			if b.isDone(ctx) {
 				return check.Result{State: check.OK, Summary: "done"}
 			}
 			return check.Result{State: check.Attention, Summary: "not done", Items: []check.Item{b.item()}}
@@ -370,7 +425,10 @@ func OwnManual(run runner.Runner, stateDir string, m ManualStep, raise *Raise) e
 			if raise == nil {
 				return nil
 			}
-			return raise.up(ctx, m.Name, b, 0)
+			if _, err := raise.up(ctx, m.Name, b, 0); !errors.Is(err, errStopHere) {
+				return err
+			}
+			return nil
 		},
 	}
 }
@@ -378,8 +436,10 @@ func OwnManual(run runner.Runner, stateDir string, m ManualStep, raise *Raise) e
 // Manual checks what a person must do by hand, as [manual] declares it: a
 // step with a command is done when it exits 0; one without, when it's been
 // marked done on this Mac (kit manual done). Each step not done is an item
-// saying what to do. Applied with raise, each not done is raised in turn,
-// in order, as OwnManual raises its own.
+// saying what to do. Applied with raise, at the run's end, it works through
+// the to-dos: each line not done, with what the run's other steps left for
+// the person to do (an item's ToDo), one at a time in kit's order, as
+// OwnManual raises its own; so it's applied however its own lines stand.
 func Manual(run runner.Runner, home, stateDir string, list config.List, raise *Raise) engine.Step {
 	lines := func() ([]byHand, error) {
 		out := make([]byHand, 0, len(list.Entries))
@@ -404,17 +464,20 @@ func Manual(run runner.Runner, home, stateDir string, list config.List, raise *R
 			}
 			res := check.Result{State: check.OK}
 			for _, b := range all {
-				if !b.done(ctx) {
+				if !b.isDone(ctx) {
 					res.Items = append(res.Items, b.item())
 				}
 			}
 			done := len(all) - len(res.Items)
 			res.Summary = fmt.Sprintf("%d of %d done", done, len(all))
 			res.Glance = res.Summary
-			if len(res.Items) == 0 {
+			switch {
+			case len(all) == 0:
+				res.Summary, res.Glance = "none declared", ""
+			case len(res.Items) == 0:
 				res.Summary = fmt.Sprintf("all %d done", len(all))
 				res.Glance = "all done"
-			} else {
+			default:
 				res.State = check.Attention
 			}
 			return res
@@ -423,20 +486,15 @@ func Manual(run runner.Runner, home, stateDir string, list config.List, raise *R
 	if raise == nil {
 		return step
 	}
+	step.AlwaysApply = true
 	step.Apply = func(ctx context.Context, found check.Result) error {
+		// A line that doesn't read fails the step, but the rest of the run's
+		// to-dos still come up.
 		all, err := lines()
-		if err != nil {
-			return err
-		}
 		due := slices.DeleteFunc(all, func(b byHand) bool {
 			return !slices.ContainsFunc(found.Items, func(it check.Item) bool { return it.ID == b.item().ID })
 		})
-		for i, b := range due {
-			if err := raise.up(ctx, ManualName, b, len(due)-1-i); err != nil {
-				return err
-			}
-		}
-		return nil
+		return errors.Join(raise.workThrough(ctx, ManualName, toDoList(ctx, due)), err)
 	}
 	return step
 }

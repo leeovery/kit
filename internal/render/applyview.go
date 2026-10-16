@@ -589,19 +589,46 @@ func (p *Pretty) rowsDone() []applyRow {
 	return done
 }
 
-// tasks are what the run's left the person at the Mac to do, in the order
-// of its steps by area: each thing by name, with how to do it (taskHow).
+// tasks are what the run's left the person at the Mac to do: the to-dos at
+// its end not done, in their order, each by its title with how to do it;
+// then the rest, in the order of its steps by area, each thing by name,
+// with how to do it (taskHow).
 func (p *Pretty) tasks() []look.Task {
 	var tasks []look.Task
+	listed := map[string]bool{}
+	if p.todos != nil {
+		for _, t := range p.todos.List {
+			listed[cardID(t.Step, t.ID)] = true
+			if p.leftToDo(t) {
+				tasks = append(tasks, look.Task{Title: t.Title, How: t.How})
+			}
+		}
+	}
 	for _, s := range p.stepsByArea() {
 		if !p.toDo(s.Name) {
 			continue
 		}
 		for _, it := range p.results[s.Name].Result.Items {
-			tasks = append(tasks, look.Task{Title: it.Name, How: p.taskHow(s.Name, it)})
+			if !listed[cardID(s.Name, it.ID)] {
+				tasks = append(tasks, look.Task{Title: it.Name, How: p.taskHow(s.Name, it)})
+			}
 		}
 	}
 	return tasks
+}
+
+// leftToDo is whether t, one of the to-dos at the run's end, is still to
+// do: not done, and still among what its step's result has left, unless
+// the run stopped that step before it said.
+func (p *Pretty) leftToDo(t event.ToDo) bool {
+	f, ok := p.results[t.Step]
+	switch {
+	case t.Done:
+		return false
+	case !ok, wasStopped(f):
+		return true
+	}
+	return slices.ContainsFunc(f.Result.Items, func(it check.Item) bool { return it.ID == t.ID })
 }
 
 // taskHow is how to do it, a thing step left to do: a step by hand's steps,

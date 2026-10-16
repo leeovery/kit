@@ -60,3 +60,72 @@ func TestSettingsToCome(t *testing.T) {
 		}
 	}
 }
+
+// Apps' settings' to-do is a choice. As it comes up, r says the date of
+// this Mac's last save, the store cloned first when it isn't, and nothing
+// when there's none to say. r brings them back, as kit prefs restore does,
+// saying how many and from when, and how many wait for their apps; f starts
+// afresh, as kit prefs start-fresh does; either switches capture on, so
+// it's done. Nothing to bring back, r says why, and it isn't.
+func TestAppsSettingsChoice(t *testing.T) {
+	state, clone := t.TempDir(), filepath.Join(t.TempDir(), "prefs")
+	if err := os.WriteFile(filepath.Join(state, "prefs.json"), []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fake := runnertest.New(t)
+	for _, kv := range [][2]string{{"user.name", "kit"}, {"user.email", "kit@localhost"}, {"commit.gpgsign", "false"}, {"tag.gpgsign", "false"}, {"core.excludesFile", "/dev/null"}, {"core.hooksPath", "/dev/null"}, {"core.autocrlf", "false"}} {
+		fake.On("git", "-C", clone, "config", kv[0], kv[1])
+	}
+	fake.On("git", "clone", "--quiet", "git@github.com:someone/prefs.git", clone).Does(func() {
+		if err := os.MkdirAll(filepath.Join(clone, ".git"), 0o700); err != nil {
+			t.Error(err)
+		}
+	})
+	fake.On("git", "-C", clone, "log", "-1", "--format=%cI", "--", "laptop").Prints("2026-10-04T03:00:00Z\n")
+	fake.On("git", "-C", clone, "pull", "--rebase", "--autostash", "--quiet")
+	fake.On("git", "-C", clone, "rev-parse", "HEAD").Prints("abc123\n")
+	p := prefs.New(fake, t.TempDir(), state, clone, "git@github.com:someone/prefs.git", "laptop", prefs.Lists{}, now)
+	p.Probes, p.AppDirs = nil, []string{t.TempDir()}
+	step := steps.Prefs(p, now)
+	paused := step.Check(t.Context()).Items[0]
+
+	ready := step.Choice.Ready(t.Context(), paused)
+	if got := ready.ToDo.Keys[0].Does; got != "brings them back from this Mac's last save, 4 Oct" || paused.ToDo.Keys[0].Does != "brings them back from this Mac's last save" {
+		t.Errorf("readied, r says %q, and the check's to-do %q; want the date added to a copy", got, paused.ToDo.Keys[0].Does)
+	}
+	if _, err := step.Choice.Answer(t.Context(), paused, "r"); err == nil || err.Error() != "no settings stored for laptop" {
+		t.Errorf("with nothing saved, r = %v; want it to say so", err)
+	}
+	if step.Check(t.Context()).Items[0].ID != "prefs:paused" {
+		t.Error("r failing, capture was switched on")
+	}
+	stored := filepath.Join(clone, "laptop", "domains", "com.example.app.plist")
+	if err := os.MkdirAll(filepath.Dir(stored), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(stored, []byte(`<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict/></plist>`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	said, err := step.Choice.Answer(t.Context(), paused, "r")
+	if err != nil || said != "0 apps' settings, from 4 Oct; 1 wait for their apps" {
+		t.Errorf("r = %q, %v; want how many, from when, and how many wait", said, err)
+	}
+	if res := step.Check(t.Context()); res.Summary != "not captured yet" {
+		t.Errorf("brought back, the check says %+v; want capture switched on", res)
+	}
+
+	fresh := t.TempDir()
+	if err := os.WriteFile(filepath.Join(fresh, "prefs.json"), []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	afresh := steps.Prefs(prefs.New(runnertest.New(t), t.TempDir(), fresh, t.TempDir(), "", "laptop", prefs.Lists{}, now), now)
+	if said, err := afresh.Choice.Answer(t.Context(), paused, "f"); err != nil || said != "started afresh, saving from now" {
+		t.Errorf("f = %q, %v", said, err)
+	}
+	if res := afresh.Check(t.Context()); res.Summary != "not captured yet" {
+		t.Errorf("started afresh, the check says %+v; want capture switched on", res)
+	}
+	if ready := afresh.Choice.Ready(t.Context(), paused); ready.ToDo.Keys[0].Does != "brings them back from this Mac's last save" {
+		t.Errorf("with no store to look at, r says %q; want no date", ready.ToDo.Keys[0].Does)
+	}
+}

@@ -54,14 +54,18 @@ func Scratch(run runner.Runner, admin *Admin, volume, home string, uid int, toCo
 			if err := syscall.Access(tmp, writable); err != nil {
 				problems = append(problems, [3]string{"tmp", tmp + " isn't writable", "kit apply makes it, yours alone"})
 			}
+			settings := toCome != nil && toCome()
 			if missing := claudeTmp(home, volume); len(missing) > 0 {
-				problems = append(problems, claudeProblem(missing, tmp, toCome != nil && toCome()))
+				problems = append(problems, claudeProblem(missing, tmp, settings))
 			}
 			if len(problems) > 0 {
 				res := problem(FeatureScratch, "mounted, not set up as it should be", problems...)
 				for i, it := range res.Items {
-					if it.ID != FeatureScratch+":claude" {
+					switch {
+					case it.ID != FeatureScratch+":claude":
 						res.Items[i] = fix(it)
+					case settings:
+						res.Items[i].ComesWith = settingsPaused
 					}
 				}
 				return res

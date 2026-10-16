@@ -1,0 +1,30 @@
+
+  █  ▄▀  ▀█▀  ▀▀█▀▀  │  bootstrap · laptop · Fri 2 Jan · 03:04
+  █▀▀▄    █     █    │  ▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮  96% · 32m51s so far
+  █   █  ▄█▄    █    │  △ 3 to do · ● 3 done
+
+────────────────────────────────────────────────────┬───────────────────────────────────────────────
+                                                    │
+  TO DO  6                                          │  △ Allow Full Disk Access for remote… 4 of 6  
+                                                    │
+  Apps                                              │      So an SSH session from another Mac can
+  ● Bring back apps' settings                       │      reach everything, which Remote Login
+  ● Open Karabiner-Elements                         │      alone can't.
+  ● Open Hammerspoon                                │
+                                                    │      1  System Settings › General › Sharing ›
+  System Settings                                   │         Remote Login › ⓘ
+  △ Allow Full Disk Access for remote users         │      2  Turn on Allow full disk access for
+                                                    │         remote users
+  Backups                                           │
+  △ Add a Time Machine disk                         │      space when it's done
+  △ Set up Arq's backup plan                        │
+                                                    ├───────────────────────────────────────────────
+                                                    │
+                                                    │  LOG
+                                                    │
+                                                    │  03:32:51  ● fonts: fine
+                                                    │  03:32:52  ● mise: fine
+                                                    │  03:32:53  ● Sign in to 1Password: fine
+                                                    │  03:34:45  ● Bring back apps' settings: done,…
+                                                    │  03:35:38  ● Open Karabiner-Elements: done, i…
+  q stop here                                       │  03:36:44  ● Open Hammerspoon: done, in 1m06s

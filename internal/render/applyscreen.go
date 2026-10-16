@@ -248,8 +248,13 @@ func (p *Pretty) howFar() float64 {
 
 // stateLine says how the run stands, always whether it needs you: working,
 // or waiting for you, and what for; then what failed. What's left to do
-// waits for the run's end: there's no later during it (Lee, 16 Oct).
+// waits for the run's end: there's no later during it (Lee, 16 Oct). Its
+// to-dos up, how many are left, and done; once they're over, that kit's
+// carrying on.
 func (p *Pretty) stateLine() string {
+	if p.todos != nil {
+		return p.toDoState()
+	}
 	parts := []string{look.Cyan("◐ working"), look.White("nothing needs you")}
 	if waits := p.waitsOnYou(); len(waits) > 0 {
 		parts = append([]string{look.Orange("▲ waiting for you")}, waits...)
@@ -293,8 +298,11 @@ func (p *Pretty) failedSteps() int {
 // leftPane is the screen's left pane, w wide and room lines: Everything,
 // then the rows, each with a bar under it while a step of its that counts
 // is at work; the keys at its foot. It notes which choice each line is, for
-// the mouse.
+// the mouse. Once the to-dos at the run's end have started, it's theirs.
 func (p *Pretty) leftPane(w, room int) []string {
+	if p.todos != nil {
+		return p.toDoPane(w, room)
+	}
 	every := "  " + look.Dim("≡") + " " + look.Strong("Everything")
 	if p.keys.chosen == "" {
 		every = "  " + look.Dim("≡") + look.Pill("Everything", look.Done)
@@ -370,8 +378,13 @@ func (p *Pretty) rightPane(w, room int) (lines []string, rules map[int]bool, log
 // line over and under it; or, in the log's place, the raw view's heading.
 func (p *Pretty) paneTop(w int) (top []string, rule int) {
 	rule = -1
-	if p.card != nil {
+	switch {
+	case p.card != nil && p.listing(p.card.Step):
+		top = p.toDoPanel(w)
+	case p.card != nil:
 		top = p.panel(w)
+	}
+	if top != nil {
 		rule = len(top)
 		top = append(top, "")
 	}

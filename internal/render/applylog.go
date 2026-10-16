@@ -9,6 +9,7 @@ import (
 
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/look"
+	"github.com/leeovery/kit/internal/steps"
 )
 
 // Applying's log (kit-look, round 10) is every line of the run, oldest
@@ -69,7 +70,10 @@ func told(style func(string) string, title, says string) string {
 func (p *Pretty) noteFinished(f event.StepFinished) {
 	at, row, title, part := p.stamp(f.Time), p.rowOf(f.Step), p.title(f.Step), p.step(f.Step).Part
 	ended := p.ended(f)
-	if p.toldByItsCard(f.Step) && (ended == look.Done || ended == look.ToDo) {
+	switch {
+	case p.toldByItsCard(f.Step) && (ended == look.Done || ended == look.ToDo):
+		return
+	case ended == look.Done && (p.toldByItsToDos(f.Step) || p.nothingByHand(f.Step)):
 		return
 	}
 	switch ended {
@@ -102,8 +106,23 @@ func (p *Pretty) toldByItsCard(step string) bool {
 	return raised
 }
 
+// toldByItsToDos is whether step is the step whose to-dos the run worked
+// through at its end, so the log has said how each went.
+func (p *Pretty) toldByItsToDos(step string) bool {
+	return p.todos != nil && p.todos.Step == step
+}
+
+// nothingByHand is whether step is the steps by hand with no lines of
+// their own: there at a terminal for the to-dos the rest of the run leaves,
+// done, they've nothing to say.
+func (p *Pretty) nothingByHand(step string) bool {
+	s := p.step(step)
+	return s.Area == steps.AreaManual && len(s.ByHand) == 0
+}
+
 // raise is a card come up for e's step by hand: the card up before it done
-// with, when it's another; the log saying it waits for you. The same card
+// with, when it's another; the log saying it waits for you, unless it's
+// one of the to-dos at the run's end, which their list shows. The same card
 // again, as when more come to wait after it, changes only what it says.
 func (p *Pretty) raise(e event.NeedsYou) {
 	if p.card != nil && cardID(p.card.Step, p.card.Item) != cardID(e.Step, e.Item) {
@@ -111,10 +130,54 @@ func (p *Pretty) raise(e event.NeedsYou) {
 	}
 	if p.card == nil {
 		p.cardSince = p.stamp(e.Time)
-		p.note(p.cardSince, p.rowOf(e.Step), look.Mark(look.NeedsYou), look.White(e.Title+": waiting for you"))
+		if !p.listing(e.Step) {
+			p.note(p.cardSince, p.rowOf(e.Step), look.Mark(look.NeedsYou), look.White(e.Title+": waiting for you"))
+		}
 	}
 	p.card = &e
 	p.cards[cardID(e.Step, e.Item)] = e
+}
+
+// listing is whether step's to-dos are being worked through, one up.
+func (p *Pretty) listing(step string) bool {
+	return p.todos != nil && p.todos.Step == step && p.todos.Up >= 0
+}
+
+// workThrough is the to-dos at the run's end as they stand now: the log
+// says each newly done, what kit saw when it has words, and how long it
+// took when it came up; the one that was up left, as the person stopped
+// there, that it's not done. Its card's down once it's no longer up. The
+// first time, the log shows every line: the to-dos take the left pane, so
+// there's no row to choose.
+func (p *Pretty) workThrough(e event.ToDos) {
+	before, wasUp := p.todos, -1
+	if before == nil {
+		p.choose("")
+	} else {
+		wasUp = before.Up
+	}
+	at, row := p.stamp(e.Time), p.rowOf(e.Step)
+	for i, t := range e.List {
+		if !t.Done || before != nil && i < len(before.List) && before.List[i].Done {
+			continue
+		}
+		text := t.Title + ": done"
+		if i == wasUp && p.card != nil {
+			text += ", in " + took(at.Sub(p.cardSince))
+		}
+		parts := []string{look.White(text)}
+		if t.Saw != "" {
+			parts = append(parts, look.Muted(t.Saw))
+		}
+		p.note(at, row, look.Mark(look.Done), look.Says(parts...))
+	}
+	if wasUp >= 0 && wasUp != e.Up && p.listing(e.Step) && p.card != nil {
+		if !e.List[wasUp].Done {
+			p.note(at, row, look.Mark(look.ToDo), look.White(e.List[wasUp].Title+": not done"))
+		}
+		p.card = nil
+	}
+	p.todos = &e
 }
 
 // lower takes the card up down, at at, its step finished as finished, if

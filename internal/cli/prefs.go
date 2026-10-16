@@ -195,7 +195,7 @@ func captureResult(report prefs.Report, err error) check.Result {
 	var notOwner prefs.NotOwnerError
 	switch {
 	case errors.Is(err, prefs.ErrPaused):
-		return check.Result{State: check.Attention, Summary: "paused: capture isn't switched on for this Mac", Items: []check.Item{{ID: "prefs:paused", Name: "apps' settings aren't being saved", State: steps.Problem, Detail: "kit prefs restore, or kit prefs start-fresh"}}}
+		return check.Result{State: check.Attention, Summary: "paused: capture isn't switched on for this Mac", Items: []check.Item{{ID: "prefs:paused", Name: "Bring back apps' settings", State: steps.Problem, Detail: "kit prefs restore, or kit prefs start-fresh"}}}
 	case errors.As(err, &notOwner):
 		return check.Result{State: check.Attention, Summary: "another Mac owns this Mac's folder in the store", Items: []check.Item{{ID: "prefs:not-owner", Name: err.Error(), State: steps.Problem}}}
 	case err != nil:

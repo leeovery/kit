@@ -164,25 +164,56 @@ type Logged struct {
 func (e Logged) At() time.Time { return e.Time }
 
 // NeedsYou is a step by hand come up for the person at the Mac, front and
-// centre on applying's screen: its line's name (Item); what to do, as its
-// line says it (Title); the group it's in, if any; why, as the notes above
-// its line say; its steps, in order; whether kit tells by itself when it's
-// done (the line's --test), else the person says so; and how many more by
-// hand wait after it. The step finishing, or another NeedsYou for the
-// step, takes it down.
+// centre on applying's screen, or one of the to-dos at its end: its line's
+// name, or the to-do's item's id (Item); what to do (Title); the group
+// it's in, if any; why, as the notes above its line say; its steps, in
+// order; whether kit tells by itself when it's done (the line's --test, or
+// a to-do's check), else the person says so, and what kit watches for, in
+// words, when it says; the keys of a choice, when it's one; and how many
+// more by hand wait after it. The step finishing, or another NeedsYou for
+// the step, takes it down.
 type NeedsYou struct {
 	Time  time.Time
 	Step  string
 	Item  string
 	Title string
-	Group string   `json:",omitempty"`
-	Why   string   `json:",omitempty"`
-	Steps []string `json:",omitempty"`
-	Tells bool     `json:",omitempty"`
-	More  int      `json:",omitempty"`
+	Group string      `json:",omitempty"`
+	Why   string      `json:",omitempty"`
+	Steps []string    `json:",omitempty"`
+	Tells bool        `json:",omitempty"`
+	Watch string      `json:",omitempty"`
+	Keys  []check.Key `json:",omitempty"`
+	More  int         `json:",omitempty"`
 }
 
 func (e NeedsYou) At() time.Time { return e.Time }
+
+// ToDos are what's left for the person at the Mac to do as applying ends,
+// worked through on its screen one at a time, in kit's order, by the step
+// raising them: the list, and the one up, by its place (-1 for none, once
+// they're over). Emitted as the list starts, and as each comes up.
+type ToDos struct {
+	Time time.Time
+	Step string
+	List []ToDo
+	Up   int
+}
+
+func (e ToDos) At() time.Time { return e.Time }
+
+// ToDo is one of the to-dos at a run's end, as the list has it: the step
+// whose check found it and its item's id; what to do (Title); the group
+// it's in, if any; how to do it, as the record says, its steps or what its
+// item says; and whether it's done, with what kit saw when it was, in
+// words, if it has some.
+type ToDo struct {
+	Step, ID string
+	Title    string
+	Group    string   `json:",omitempty"`
+	How      []string `json:",omitempty"`
+	Done     bool     `json:",omitempty"`
+	Saw      string   `json:",omitempty"`
+}
 
 // Queued is what a step by hand says, in a Doing, while its card waits its
 // turn.

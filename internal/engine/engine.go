@@ -83,6 +83,23 @@ type Step struct {
 	// Did is what applying says it did to each thing it put in place, as
 	// in installed, set or synced: a kind's verb. Optional.
 	Did string
+	// AlwaysApply has a run that applies apply it however its check finds
+	// it, as the steps by hand at the run's end are, which raise what the
+	// rest of the run left the person to do as well as their own lines.
+	AlwaysApply bool
+	// Choice is what the to-dos its check finds do when they're a choice
+	// (an item's ToDo with keys), as applying raises them at its end.
+	// Optional.
+	Choice *Choice
+}
+
+// Choice is what a step's to-dos that are a choice do: Ready is one as it
+// comes up, what it says filled in where that takes looking, as the date
+// of the save a key brings back (optional); Answer does what key says, and
+// says what it did, in kit's words.
+type Choice struct {
+	Ready  func(ctx context.Context, it check.Item) check.Item
+	Answer func(ctx context.Context, it check.Item, key string) (said string, err error)
 }
 
 // Wait is a thing a step is applied after: one of the things another step
@@ -464,6 +481,8 @@ func (p *Pipeline) run(ctx context.Context, sink event.Sink, opts Options, apply
 		apply:    apply,
 		titles:   titles,
 		byName:   byName,
+		steps:    steps,
+		calls:    make(chan func()),
 		results:  make(map[string]check.Result, len(steps)),
 		started:  make(map[string]bool, len(steps)),
 		finished: make(chan outcome),
@@ -491,8 +510,9 @@ func (p *Pipeline) run(ctx context.Context, sink event.Sink, opts Options, apply
 // dispatch runs a run's steps: it starts each, in pipeline order, once what
 // it needs is done and a job is free, and defers each whose needs didn't
 // stand ok. Only its own goroutine touches its maps, but away, putting,
-// freed and looks, which mu guards, and titles and over, which steps' goroutines read, as
-// they never change once it's started.
+// freed and looks, which mu guards, and titles, byName, steps and over,
+// which steps' goroutines read, as they never change once it's started; a
+// step's goroutine has it do anything else through calls (inLoop).
 type dispatch struct {
 	sink     event.Sink
 	now      func() time.Time
@@ -500,6 +520,8 @@ type dispatch struct {
 	apply    bool
 	titles   map[string]string
 	byName   map[string]Step
+	steps    []Step
+	calls    chan func()
 	results  map[string]check.Result
 	started  map[string]bool
 	finished chan outcome
@@ -579,8 +601,22 @@ func (d *dispatch) run(ctx context.Context, steps []Step, jobs int) {
 		case granted := <-d.resumed:
 			d.queued = append(d.queued, granted)
 		case <-d.looked:
+		case call := <-d.calls:
+			call()
 		}
 	}
+}
+
+// inLoop has the dispatcher's goroutine do f, for a step's, and waits till
+// it's done: the dispatcher's still running while the step that asks is,
+// as it runs till every step has finished.
+func (d *dispatch) inLoop(f func()) {
+	done := make(chan struct{})
+	d.calls <- func() {
+		f()
+		close(done)
+	}
+	<-done
 }
 
 // hush has the waits for things no step in particular puts in place end,
@@ -747,14 +783,7 @@ func (d *dispatch) startReady(ctx context.Context, steps []Step, running *int, j
 // may be in place has the steps waiting for its things look again, and what
 // it says it's putting in place isn't there for them till it says it is.
 func (d *dispatch) stepContext(ctx context.Context, s Step) context.Context {
-	ctx = event.WithSaying(event.WithStep(ctx, s.Name), func(e event.Doing) {
-		e.Time, e.Step = d.now(), s.Name
-		d.sink.Emit(e)
-	})
-	ctx = event.WithLogging(ctx, func(e event.Logged) {
-		e.Time, e.Step = d.now(), s.Name
-		d.sink.Emit(e)
-	})
+	ctx = context.WithValue(d.attributed(ctx, s), dispatchKey{}, d)
 	ctx = context.WithValue(ctx, changedKey{}, func() { d.poke(s.Name) })
 	ctx = context.WithValue(ctx, releaseKey{}, func() func() { return d.release(s) })
 	ctx = context.WithValue(ctx, puttingKey{}, func(things []string) func() { return d.putIn(s.Name, things) })
@@ -762,6 +791,129 @@ func (d *dispatch) stepContext(ctx context.Context, s Step) context.Context {
 	return context.WithValue(ctx, awaitKey{}, func(ctx context.Context, w Wait, says string) bool {
 		return d.await(ctx, s, w, func() { event.Say(ctx, event.Doing{Says: says}) })
 	})
+}
+
+// attributed is ctx for running something of s's: what runs in it is s's,
+// and what it says it's doing, and tells the run's log, is emitted as s's.
+func (d *dispatch) attributed(ctx context.Context, s Step) context.Context {
+	ctx = event.WithSaying(event.WithStep(ctx, s.Name), func(e event.Doing) {
+		e.Time, e.Step = d.now(), s.Name
+		d.sink.Emit(e)
+	})
+	return event.WithLogging(ctx, func(e event.Logged) {
+		e.Time, e.Step = d.now(), s.Name
+		d.sink.Emit(e)
+	})
+}
+
+type dispatchKey struct{}
+
+// running is the run ctx is a step of, if it is.
+func running(ctx context.Context) (*dispatch, bool) {
+	d, ok := ctx.Value(dispatchKey{}).(*dispatch)
+	return d, ok
+}
+
+// StepResult is a step of the run, by name, and how it stands.
+type StepResult struct {
+	Step   string
+	Result check.Result
+}
+
+// Finished are the steps of the run that have finished, in the pipeline's
+// order, each with how it stands now, as the step ctx is running sees them.
+// Outside a run, none.
+func Finished(ctx context.Context) []StepResult {
+	d, ok := running(ctx)
+	if !ok {
+		return nil
+	}
+	var out []StepResult
+	d.inLoop(func() {
+		for _, s := range d.steps {
+			if res, done := d.results[s.Name]; done {
+				out = append(out, StepResult{Step: s.Name, Result: res})
+			}
+		}
+	})
+	return out
+}
+
+// Look runs the check of the run's step called name, for the step ctx is
+// running, as that step's own, given the time a check is given: how it
+// stands now, the run's record of it left as it is. False outside a run,
+// or for a step the run doesn't take.
+func Look(ctx context.Context, name string) (check.Result, bool) {
+	d, ok := running(ctx)
+	if !ok {
+		return check.Result{}, false
+	}
+	s, ok := d.byName[name]
+	if !ok {
+		return check.Result{}, false
+	}
+	return d.check(d.attributed(event.WithChecking(ctx), s), s), true
+}
+
+// Recheck checks again the run's step called name, finished, for the step
+// ctx is running, as Look does, and takes what it finds as how the step
+// stands, as when what held it has been done: in the run's report, and
+// emitted as the step finishing again, for the faces and the run's log,
+// with what applying it did earlier in the run. False outside a run, for a
+// step not finished, and once the run's stopped.
+func Recheck(ctx context.Context, name string) (check.Result, bool) {
+	d, ok := running(ctx)
+	if !ok || ctx.Err() != nil {
+		return check.Result{}, false
+	}
+	s, ok := d.byName[name]
+	if !ok {
+		return check.Result{}, false
+	}
+	var before check.Result
+	d.inLoop(func() { before, ok = d.results[name] })
+	if !ok {
+		return check.Result{}, false
+	}
+	d.sink.Emit(event.StepStarted{Time: d.now(), Step: name, Doing: "checking"})
+	began := d.now()
+	res := orFailed(withManual(s, d.check(d.attributed(event.WithChecking(ctx), s), s)))
+	if ctx.Err() != nil {
+		return check.Result{}, false
+	}
+	res.Done = before.Done
+	d.inLoop(func() {
+		d.results[name] = res
+		d.sink.Emit(event.StepFinished{Time: d.now(), Step: name, Result: res, Duration: d.now().Sub(began)})
+	})
+	return res, true
+}
+
+// ChoiceOf is the choice of the run's step called name, for the step ctx is
+// running, each of its parts run as that step's own: nil when it has none,
+// or outside a run.
+func ChoiceOf(ctx context.Context, name string) *Choice {
+	d, ok := running(ctx)
+	if !ok {
+		return nil
+	}
+	s, ok := d.byName[name]
+	if !ok || s.Choice == nil {
+		return nil
+	}
+	c := *s.Choice
+	ready := func(_ context.Context, it check.Item) check.Item { return it }
+	if c.Ready != nil {
+		ready = func(ctx context.Context, it check.Item) check.Item {
+			return c.Ready(d.attributed(event.WithChecking(ctx), s), it)
+		}
+	}
+	return &Choice{
+		Ready: ready,
+		Answer: func(ctx context.Context, it check.Item, key string) (string, error) {
+			return c.Answer(d.attributed(event.WithChanging(ctx), s), it, key)
+		},
+	}
 }
 
 type awaitKey struct{}
@@ -952,7 +1104,7 @@ func (d *dispatch) step(ctx context.Context, s Step) check.Result {
 	if missing != "" && res.State != check.OK {
 		return check.Result{State: check.Deferred, Reason: missing}
 	}
-	if d.apply && missing == "" && res.State != check.Deferred && (res.State != check.OK || res.Actions()) && s.Apply != nil && ctx.Err() == nil {
+	if d.apply && missing == "" && res.State != check.Deferred && (res.State != check.OK || res.Actions() || s.AlwaysApply) && s.Apply != nil && ctx.Err() == nil {
 		d.sink.Emit(event.StepStarted{Time: d.now(), Step: s.Name, Doing: "applying"})
 		before := res
 		if err := applySafely(event.WithChanging(ctx), s, res); err != nil {
@@ -964,6 +1116,12 @@ func (d *dispatch) step(ctx context.Context, s Step) check.Result {
 		res = d.check(ctx, s)
 		res.Done = done(before, res)
 	}
+	return withManual(s, res)
+}
+
+// withManual is res, s's check's finding, with what a person must do by
+// hand an item while s needs attention.
+func withManual(s Step, res check.Result) check.Result {
 	if res.State == check.Attention && s.Manual != "" {
 		res.Items = append(res.Items, check.Item{ID: s.Name + ":manual", Name: s.Manual, State: "manual"})
 	}
@@ -1092,13 +1250,20 @@ func done(before, after check.Result) []check.Item {
 
 // finish records s's result, and emits it.
 func (d *dispatch) finish(s Step, res check.Result, took time.Duration) {
-	if res.State == "" {
-		res = check.Result{State: check.Failed, Reason: "the check said nothing of how the step stands", Phase: check.Checking}
-	}
+	res = orFailed(res)
 	d.results[s.Name] = res
 	d.sink.Emit(event.StepFinished{Time: d.now(), Step: s.Name, Result: res, Duration: took})
 	close(d.over[s.Name])
 	d.poke(s.Name)
+}
+
+// orFailed is res, or, when it says nothing of how its step stands, that
+// its check failed for that.
+func orFailed(res check.Result) check.Result {
+	if res.State == "" {
+		return check.Result{State: check.Failed, Reason: "the check said nothing of how the step stands", Phase: check.Checking}
+	}
+	return res
 }
 
 // checkSafely runs s's check, a panic in it failing the step rather than

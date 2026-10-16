@@ -1,6 +1,7 @@
 package steps_test
 
 import (
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -161,7 +162,7 @@ func TestArqNeverSetUp(t *testing.T) {
 		item         check.Item
 	}{
 		{"licence not accepted", "Please review the license agreement at https://example.com/license.html and run 'arqc acceptLicenseAgreement' to accept it\n", "not set up",
-			check.Item{ID: "arq:none", Name: "no backup plan is chosen yet", State: steps.Problem, Detail: "open Arq, sign in, then choose a backup plan"}},
+			check.Item{ID: "arq:none", Name: "Set up Arq's backup plan", State: steps.Problem, Detail: "Open Arq, sign in to your Arq account, and adopt this Mac's plan", ToDo: &arqPlan}},
 		{"agent not answering", "Error: couldn't connect to the agent\n", "status unreadable",
 			check.Item{ID: "arq:unreadable", Name: "couldn't read Arq's status", State: steps.Problem, Detail: "open Arq: is its agent running? If it complains, restart the Mac"}},
 	} {
@@ -169,7 +170,7 @@ func TestArqNeverSetUp(t *testing.T) {
 			fake := runnertest.New(t)
 			fake.On(steps.Arqc, "stats").Exits(1).PrintsToStderr(tt.stderr)
 			res := steps.Arq(fake, now).Check(t.Context())
-			if res.State != check.Attention || res.Summary != tt.text || len(res.Items) != 1 || res.Items[0] != tt.item {
+			if res.State != check.Attention || res.Summary != tt.text || len(res.Items) != 1 || !reflect.DeepEqual(res.Items[0], tt.item) {
 				t.Errorf("= %+v\nwant %s, %+v", res, tt.text, tt.item)
 			}
 		})
