@@ -55,6 +55,9 @@ type Step struct {
 	// ByHand are the steps by hand it raises, in order, known before it
 	// runs: a list of what may need the person at the Mac.
 	ByHand []Hand `json:",omitempty"`
+	// Did is what it says it did to each thing it put in place, as in
+	// installed, set or synced, when it says.
+	Did string `json:",omitempty"`
 }
 
 // Hand is a step by hand, as a step that raises it lists it: its line's

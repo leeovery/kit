@@ -668,7 +668,7 @@ func TestPrettyApplyingNow(t *testing.T) {
 	}
 	got = screen(out.String())
 	want := "\n  █  ▄▀  ▀█▀  ▀▀█▀▀  │  apply · laptop · Fri 2 Jan · 03:04\n  █▀▀▄    █     █    │  ▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮\n  █   █  ▄█▄    █    │  4 fine · 4.2s\n\n" +
-		"  DONE  4\n  ● Homebrew formulae  installed jq · 1 declared, all installed\n  ● Homebrew casks  none declared\n" +
+		"  DONE  4\n  ● Homebrew formulae  installed jq\n  ● Homebrew casks  none declared\n" +
 		"  ● Your steps  16 installed\n  ● Backups  last backup 02:35\n"
 	if got != want {
 		t.Errorf("once applied, the screen is\n%s\nwant\n%s", got, want)

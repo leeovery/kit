@@ -80,6 +80,9 @@ type Step struct {
 	Admin bool
 	// ByHand are the steps by hand applying it raises, in order.
 	ByHand []event.Hand
+	// Did is what applying says it did to each thing it put in place, as
+	// in installed, set or synced: a kind's verb. Optional.
+	Did string
 }
 
 // Wait is a thing a step is applied after: one of the things another step
@@ -430,7 +433,7 @@ func (s Step) info() event.Step {
 			waits = append(waits, w.Step)
 		}
 	}
-	return event.Step{Name: s.Name, Title: s.title(), Area: s.Area, Part: s.Part, Waiting: s.Waiting, Waits: waits, ByHand: s.ByHand}
+	return event.Step{Name: s.Name, Title: s.title(), Area: s.Area, Part: s.Part, Waiting: s.Waiting, Waits: waits, ByHand: s.ByHand, Did: s.Did}
 }
 
 func (p *Pipeline) run(ctx context.Context, sink event.Sink, opts Options, apply bool) (Report, error) {

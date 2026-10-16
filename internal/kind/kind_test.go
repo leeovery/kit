@@ -1052,3 +1052,19 @@ func TestAWaitSeesAThingTheMomentItsCounted(t *testing.T) {
 		t.Errorf("sign-in = %+v after %v: want it checked while app's install went on", got, time.Since(start))
 	}
 }
+
+// A kind's step says what it does to each thing it puts in place: the
+// kind's verb, or installed.
+func TestAKindsStepSaysItsVerb(t *testing.T) {
+	if s := kind.Step(knowing("a"), declared("a")); s.Did != "installed" {
+		t.Errorf("Did = %q, want installed", s.Did)
+	}
+	if s := kind.Step(setting{knowing("a")}, declared("a")); s.Did != "set" {
+		t.Errorf("a Verber's Did = %q, want set", s.Did)
+	}
+}
+
+// setting is a fakeKind whose things are set.
+type setting struct{ *fakeKind }
+
+func (setting) Verb() string { return "set" }

@@ -232,7 +232,7 @@ func ended(t *testing.T, applying <-chan error) error {
 func TestACardGoesUpAndIsDone(t *testing.T) {
 	c := newCard(t)
 	c.fake.On("open", "-a", "System Settings")
-	c.fake.On("osascript", "-e", `display notification "Turn on sharing" with title "kit" subtitle "sharing"`)
+	c.fake.On("osascript", "-e", `display notification "General › Sharing" with title "kit" subtitle "Turn on sharing"`)
 	c.raise.Notify = steps.Notify(c.fake)
 	m := steps.ManualStep{Name: "sharing", Do: "Turn on sharing", After: []string{"cask"}, Open: "System Settings", Steps: []string{"General › Sharing", "Turn on Remote Login"}}
 	step := steps.OwnManual(c.fake, c.state, m, c.raise)
@@ -240,7 +240,7 @@ func TestACardGoesUpAndIsDone(t *testing.T) {
 
 	up := c.cards(t, 1)[0]
 	want := event.NeedsYou{Time: up.Time, Step: "sharing", Item: "sharing", Title: "Turn on sharing", Steps: m.Steps, Opened: "System Settings"}
-	if !reflect.DeepEqual(up, want) || c.opened("System Settings") != 1 || !slices.Contains(c.fake.Calls(), `osascript -e 'display notification "Turn on sharing" with title "kit" subtitle "sharing"'`) {
+	if !reflect.DeepEqual(up, want) || c.opened("System Settings") != 1 || !slices.Contains(c.fake.Calls(), `osascript -e 'display notification "General › Sharing" with title "kit" subtitle "Turn on sharing"'`) {
 		t.Errorf("card = %+v, opened %d times, ran %q; want %+v, opened once, a notification posted", up, c.opened("System Settings"), c.fake.Calls(), want)
 	}
 	c.answer(t, "sharing", hand.Open)

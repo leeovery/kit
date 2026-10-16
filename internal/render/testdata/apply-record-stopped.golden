@@ -7,6 +7,22 @@
   △ 1  Add a Time Machine disk
        → System Settings › General › Time Machine › Add Backup Disk
 
+  DIDN'T RUN  14
+  – Secrets  not run
+  – Homebrew formulae  cut off installing ffmpeg · 38 of 129
+  – Homebrew casks  cut off installing slack · 4 of 42
+  – App Store apps  not run
+  – Developer tools · npm packages  not run
+  – Developer tools · Composer packages  not run
+  – Git · git config  not run
+  – Login items  not run
+  – Your steps · claude-code  cut off applying
+  – Your steps · mise  not run
+  – Backups · Arq  not run
+  – Backups · App settings  not run
+  – Sign in to 1Password  not run
+  – By hand  not run
+
   DONE  3
   ● This Mac  all 6 done
   ● Files and shell  all 2 done

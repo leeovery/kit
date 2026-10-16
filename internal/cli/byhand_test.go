@@ -57,7 +57,7 @@ func TestApplyRaisesAStepByHand(t *testing.T) {
 	kb := &keyboard{}
 	w.listen = kb.listen
 	w.fake.On("open", "-a", "Tool").Does(func() { kb.press(t, ask.Key{Name: "ctrl+c"}) })
-	w.fake.On("osascript", "-e", `display notification "Sign in to the tool" with title "kit" subtitle "sign-in"`)
+	w.fake.On("osascript", "-e", `display notification "Open the tool" with title "kit" subtitle "Sign in to the tool"`)
 	// osascript there, the login items are checked too: there are none.
 	w.fake.On("osascript", "-l", "JavaScript", "-e", login.ReadScript).Prints("[]")
 

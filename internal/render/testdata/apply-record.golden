@@ -17,6 +17,9 @@
   │ installer: The install failed. (The Installer encountered an error that cau…
   │ → kit apply cask
 
+  DIDN'T RUN  1
+  – Login items  not checked · needs Homebrew casks
+
   DONE  9
   ● This Mac  all 6 done
   ● Files and shell  all 2 done

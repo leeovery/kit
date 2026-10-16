@@ -194,6 +194,15 @@ type Verber interface {
 	Verb() string
 }
 
+// verbOf is what a thing of k's on the Mac as declared is: its Verb, or
+// installed.
+func verbOf(k Kind) string {
+	if v, ok := k.(Verber); ok {
+		return v.Verb()
+	}
+	return "installed"
+}
+
 // Reverter is a kind whose things found on the Mac and not declared were
 // changed there from a value kit knows, as a watched setting is: kit
 // reconcile can put the value back.
@@ -364,6 +373,7 @@ func Placed(k Kind, declared config.List, placed func() Placing, needs ...string
 	return engine.Step{
 		Name:  k.Name(),
 		Title: Label(k.Name()),
+		Did:   verbOf(k),
 		Needs: needs,
 		Check: func(ctx context.Context) check.Result { return unmet.mark(Compare(ctx, k, declared), declared) },
 		Apply: func(ctx context.Context, found check.Result) error {
@@ -977,10 +987,7 @@ func Compare(ctx context.Context, k Kind, declared config.List) check.Result {
 		}
 	}
 
-	verb := "installed"
-	if v, ok := k.(Verber); ok {
-		verb = v.Verb()
-	}
+	verb := verbOf(k)
 	declaredCount := len(declared.Entries) - off
 	missingCount := len(missing) + len(unknown)
 	res := check.Result{

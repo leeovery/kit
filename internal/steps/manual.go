@@ -265,13 +265,22 @@ func (r *Raise) show(ctx context.Context, step string, b byHand, more int) {
 		card.Opened = b.Open
 	}
 	if r.Notify != nil {
-		r.Notify(ctx, b.Name, b.Do)
+		r.Notify(ctx, b.Do, notice(b))
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	card.Time, card.More = r.Now(), more+len(r.queued)
 	r.card, r.after, r.shown = card, more, true
 	r.Sink.Emit(card)
+}
+
+// notice is what b's notification says under its title: its first step,
+// else that kit waits for it.
+func notice(b byHand) string {
+	if len(b.Steps) > 0 {
+		return b.Steps[0]
+	}
+	return "kit waits for you to do this"
 }
 
 // open opens app, reporting whether it did: none, when there's no app.
@@ -358,7 +367,7 @@ func OwnManual(run runner.Runner, stateDir string, m ManualStep, raise *Raise) e
 }
 
 // Notify posts a macOS notification from kit: about a step by hand that
-// needs someone, its name and what to do.
+// needs someone, what to do, and its first step.
 func Notify(run runner.Runner) func(ctx context.Context, title, text string) {
 	quote := func(s string) string { return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(s) + `"` }
 	return func(ctx context.Context, title, text string) {

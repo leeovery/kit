@@ -998,3 +998,54 @@ func TestApplyingGivesTheScreenBack(t *testing.T) {
 		t.Errorf("the face read keys %d times; want once each time its screen went up, 3", n)
 	}
 }
+
+// A step finished says what it did once, in its own verb: a kind's things
+// installed, set or synced, a few named, or counted, and its summary only
+// when that says more than that all it declares is so; a thing named as the
+// step itself isn't named again; problems fixed are counted; a step of the
+// user's own that says what it did isn't said to be applied too. More than
+// a few things alike under it are one line, counted.
+func TestApplyingLogSaysWhatEachDid(t *testing.T) {
+	steps := []event.Step{
+		{Name: "secret", Title: "Secrets", Area: "Drift", Part: "Secrets", Did: "synced"},
+		{Name: "defaults", Title: "macOS settings", Area: "Drift", Part: "Settings", Did: "set"},
+		{Name: "file-sharing", Title: "File Sharing", Area: "Drift", Part: "Settings"},
+		{Name: "scratch", Title: "Scratch volume", Area: "Mac"},
+		{Name: "fonts", Title: "fonts", Area: "Steps"},
+		{Name: "claude-mcp", Title: "Claude MCP", Area: "Drift", Part: "Packages", Did: "installed"},
+	}
+	install := func(names ...string) []check.Item {
+		var items []check.Item
+		for _, n := range names {
+			items = append(items, check.Item{ID: "x:" + n, Name: n, Action: "install"})
+		}
+		return items
+	}
+	var waiting []check.Item
+	for _, n := range []string{"a", "b", "c", "d"} {
+		waiting = append(waiting, check.Item{ID: "claude-mcp:" + n, Name: n, State: "missing", Detail: "no project folder yet"})
+	}
+	face, out, _ := applyAt(160, 64, time.Minute, rowsRun(steps,
+		finished(2, "secret", check.Result{State: check.OK, Summary: "24 declared, all synced", Done: install("A", "B", "C", "D")}),
+		finished(3, "defaults", check.Result{State: check.OK, Summary: "99 declared, all set", Done: install("one", "two")}),
+		finished(4, "file-sharing", check.Result{State: check.OK, Summary: "on", Done: install("File Sharing")}),
+		finished(5, "scratch", check.Result{State: check.OK, Summary: "mounted", Done: []check.Item{{ID: "scratch:x", Name: "it isn't mounted", Action: "fix"}}}),
+		finished(6, "fonts", check.Result{State: check.OK, Summary: "16 fonts installed", Done: []check.Item{{ID: "fonts", Name: "Operator Mono", Action: "run"}}}),
+		finished(7, "claude-mcp", check.Result{State: check.OK, Summary: "19 declared, 8 installed", Done: install("dex"), Items: waiting}),
+	))
+	defer func() { _ = face.Close() }()
+	log := strings.Join(logOf(screen(out.String()), 160), "\n")
+	for _, want := range []string{
+		"  03:04:07  ● Secrets: synced 4\n",
+		"  03:04:08  ● macOS settings: set one, two\n",
+		"  03:04:09  ● File Sharing: on\n",
+		"  03:04:10  ● Scratch volume: fixed 1 problem · mounted\n",
+		"  03:04:11  ● fonts: 16 fonts installed\n",
+		"  03:04:12  ● Claude MCP: installed dex · 19 declared, 8 installed\n",
+		"│ 4 declared, not installed · no project folder yet",
+	} {
+		if !strings.Contains(log+"\n", want) {
+			t.Errorf("the log is\n%s\nwant %q", log, want)
+		}
+	}
+}

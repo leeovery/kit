@@ -2,6 +2,7 @@ package render
 
 import (
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -185,7 +186,7 @@ func (p *Pretty) failedRow(f event.StepFinished) look.Row {
 	if out := p.output[f.Step]; why == "" && len(out) > 0 {
 		why = out[len(out)-1]
 	}
-	row := look.Row{State: look.Failed, Name: p.title(f.Step), Says: look.Says(append(did(f.Result.Done), look.Red(head))...)}
+	row := look.Row{State: look.Failed, Name: p.title(f.Step), Says: look.Says(append(did(f.Result.Done, p.step(f.Step), false), look.Red(head))...)}
 	if why != "" {
 		row.Under = append(row.Under, look.Muted(why))
 	}
@@ -204,7 +205,7 @@ func (p *Pretty) listRow(s event.Step) look.Row {
 	case isRunning:
 		return p.runningRow(r, p.width)
 	case isDone && wasStopped(f) && isCut:
-		return look.Row{State: look.Skipped, Name: p.title(s.Name), Says: look.Says(cut.counted(look.Muted("stopped"))...)}
+		return look.Row{State: look.Skipped, Name: p.title(s.Name), Says: look.Says(cut.counted(look.Muted("cut off " + cut.doing))...)}
 	case isDone && wasStopped(f):
 		return look.Row{State: look.Skipped, Name: p.title(s.Name), Says: look.Muted("not run")}
 	case isDone && p.toDo(s.Name):
@@ -223,7 +224,7 @@ func (p *Pretty) toDoRow(f event.StepFinished) look.Row {
 	if f.Result.State == check.Deferred {
 		says = f.Result.Reason
 	}
-	parts := did(f.Result.Done)
+	parts := did(f.Result.Done, p.step(f.Step), says != "")
 	if says != "" {
 		parts = append(parts, saying(look.ToDo, says))
 	}
@@ -273,30 +274,53 @@ func (p *Pretty) workRow(f event.StepFinished, part string) look.Row {
 	if f.Result.State == check.Failed && len(p.output[f.Step]) > 0 {
 		row.Says, row.Under = p.printedFailing(f, part, keptFailing)
 	}
-	if did := did(f.Result.Done); len(did) > 0 {
+	did := did(f.Result.Done, p.step(f.Step), f.Result.Summary != "")
+	switch {
+	case len(did) > 0 && declaredAll.MatchString(f.Result.Summary):
+		row.Says = look.Says(did...)
+	case len(did) > 0:
 		row.Says = look.Says(append(did, row.Says)...)
 	}
 	return row
 }
 
-// did is what applying a step did, as its row says it first: what each
-// action did, a few things named, or counted; a step of the user's own,
-// that it was applied.
-func did(done []check.Item) []string {
+// declaredAll is a kind's summary saying no more than that all it declares
+// is as declared, as in 24 declared, all synced: what it did says enough.
+var declaredAll = regexp.MustCompile(`^\d+ declared, all [a-z]+$`)
+
+// did is what applying step s did, as its row says it first, once each:
+// what each action did, a few things named, or counted, in the step's verb
+// (installed, set, synced); problems fixed, counted; a step of the user's
+// own, that it was applied, unless it says what it did (said). A thing
+// named as the step is isn't named again: its row says how it stands.
+func did(done []check.Item, s event.Step, said bool) []string {
 	var parts []string
 	for _, g := range doneGroups(done) {
-		if g.action == "run" {
+		names := slices.DeleteFunc(g.names, func(name string) bool { return name == s.Title })
+		switch {
+		case g.action == "run" && said:
+		case g.action == "run":
 			parts = append(parts, look.Muted("applied"))
-			continue
+		case g.action == "fix":
+			parts = append(parts, look.Muted(fmt.Sprintf("fixed %d %s", len(g.names), plural(len(g.names), "problem", "problems"))))
+		case len(names) == 0:
+		default:
+			verb := past(g.action)
+			if g.action == kindInstall && s.Did != "" {
+				verb = s.Did
+			}
+			named := strings.Join(names, ", ")
+			if len(names) > 3 {
+				named = fmt.Sprint(len(names))
+			}
+			parts = append(parts, look.Muted(verb+" "+named))
 		}
-		names := strings.Join(g.names, ", ")
-		if len(g.names) > 3 {
-			names = fmt.Sprint(len(g.names))
-		}
-		parts = append(parts, look.Muted(past(g.action)+" "+names))
 	}
 	return parts
 }
+
+// kindInstall is the action a kind's step takes on a thing missing.
+const kindInstall = "install"
 
 // whatsLeft is what's left to do about a step's result r, of part, in a run
 // started at start, as every row of the step has it under it (status, the
@@ -305,7 +329,23 @@ func did(done []check.Item) []string {
 // why it's not done yet; then what to run.
 func whatsLeft(r check.Result, part string, start time.Time) []string {
 	var lines, hints []string
+	alike := map[string]int{}
 	for _, it := range r.Items {
+		if IsDrift(it) && it.Detail != "" {
+			alike[it.State+"|"+it.Detail]++
+		}
+	}
+	told := map[string]bool{}
+	for _, it := range r.Items {
+		// More than a few alike, as Claude's servers waiting for their
+		// projects' folders, are one line, counted.
+		if key := it.State + "|" + it.Detail; it.Quiet == "" && alike[key] > 3 {
+			if !told[key] {
+				told[key] = true
+				lines = append(lines, look.Says(look.Orange(fmt.Sprintf("%d %s", alike[key], wrong(part, it))), look.Muted(it.Detail)))
+			}
+			continue
+		}
 		switch {
 		case it.Quiet != "" && it.Detail != "":
 			// Too new to count as drift, but applying says why it's not done:
@@ -355,12 +395,12 @@ const recordBar = 32
 // its live part: its head, the wordmark with what ran, the bar and the
 // tally, when its heading was drawn live, else the bar and the tally under
 // the heading; then what it's left you to do, what failed, what needs you,
-// and the rows done, each only when it has any. A run stopped says so, and
-// where to carry on.
+// what didn't run, and the rows done, each only when it has any. A run
+// stopped says so, and where to carry on.
 func (p *Pretty) applied(e event.RunFinished) []string {
 	stopped := p.stoppedRun()
 	out := p.recordHead(e, stopped)
-	for _, section := range [][]string{p.toDoSection(), p.unwellSection(look.Failed), p.unwellSection(look.NeedsYou), p.doneSection()} {
+	for _, section := range [][]string{p.toDoSection(), p.unwellSection(look.Failed), p.unwellSection(look.NeedsYou), p.notRunSection(), p.doneSection()} {
 		if len(section) > 0 {
 			out = append(append(out, ""), section...)
 		}
@@ -449,6 +489,23 @@ func (p *Pretty) unwellSection(st look.State) []string {
 		if st == look.Failed {
 			row = p.failedRow(p.results[s.Name])
 		}
+		row.Name = p.recordName(s)
+		out = append(out, look.Timeline("  ", p.width, row)...)
+	}
+	return out
+}
+
+// notRunSection is the steps that didn't run to their end, a row each
+// under its header, as listRow has it: cut off by the run stopping, and
+// what it was doing; never run before it stopped; or not checked, and why.
+func (p *Pretty) notRunSection() []string {
+	notRun := p.unwell(look.Skipped)
+	if len(notRun) == 0 {
+		return nil
+	}
+	out := []string{look.Header("Didn't run", fmt.Sprint(len(notRun)))}
+	for _, s := range notRun {
+		row := p.listRow(s)
 		row.Name = p.recordName(s)
 		out = append(out, look.Timeline("  ", p.width, row)...)
 	}

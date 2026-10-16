@@ -27,8 +27,8 @@ import (
 	"github.com/leeovery/kit/internal/runner"
 )
 
-// notHere is why a project's server waits.
-const notHere = "the folder isn't here yet"
+// notHere is why a project's server waits: said of one, or of several.
+const notHere = "no project folder yet"
 
 // Server is an MCP server as kit declares it, or finds it installed.
 type Server struct {

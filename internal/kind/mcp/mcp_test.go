@@ -112,7 +112,7 @@ func TestCompare(t *testing.T) {
 	m, list := newMCP(t, runnertest.New(t), world(t))
 	got := kind.Compare(t.Context(), m, list)
 	want := []check.Item{
-		{ID: "claude-mcp:~/Code/gone:tracker", Name: "~/Code/gone:tracker", State: kind.Missing, Detail: "the folder isn't here yet"},
+		{ID: "claude-mcp:~/Code/gone:tracker", Name: "~/Code/gone:tracker", State: kind.Missing, Detail: "no project folder yet"},
 		{ID: "claude-mcp:design", Name: "design", State: kind.Changed, Detail: "installed differently: headers", Action: kind.Install},
 		{ID: "claude-mcp:~/Code/site:mail", Name: "~/Code/site:mail", State: kind.Changed, Detail: "installed differently: env", Action: kind.Install},
 		{ID: "claude-mcp:stray", Name: "stray", State: kind.Extra},
