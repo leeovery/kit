@@ -68,10 +68,10 @@ func (r *run) scriptSteps(base []engine.Step) ([]engine.Step, error) {
 	return out, nil
 }
 
-// manualSteps are the steps by hand that say what they come after or
-// before, each a step of its own among others, the run's other steps: one
-// placed after or before what isn't a step fails, saying so; one named as
-// another step is can't be told apart from it, and is refused.
+// manualSteps are the steps by hand a step comes after (Ordered), each a
+// step of its own among others, the run's other steps: one placed after or
+// before what isn't a step fails, saying so; one named as another step is
+// can't be told apart from it, and is refused.
 func (r *run) manualSteps(ordered []steps.ManualStep, others []engine.Step, raise *steps.Raise) ([]engine.Step, error) {
 	names := make(map[string]bool, len(others)+len(ordered))
 	for _, s := range others {

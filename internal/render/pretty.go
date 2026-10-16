@@ -134,13 +134,10 @@ type Pretty struct {
 	// card is the step by hand up for the person at the Mac, front and
 	// centre, till its step finishes: nil when none is; cardSince when it
 	// came up. cards are every one that came up, by its step and its line,
-	// for what's left to do once the run's done; handsDone those done
-	// meanwhile, and putOff those put off till later.
+	// for what's left to do once the run's done.
 	card      *event.NeedsYou
 	cardSince time.Time
 	cards     map[string]event.NeedsYou
-	handsDone map[string]bool
-	putOff    map[string]bool
 	// onScreen is whether applying has the terminal's alternate screen, and
 	// drawnSize the size it was last drawn at; keys are the keys it reads
 	// while it has it, and what they've done.
@@ -206,7 +203,7 @@ func (p *Pretty) Emit(e event.Event) {
 		p.start, p.results = e, make(map[string]event.StepFinished, len(e.Steps))
 		p.output, p.command, p.began = map[string][]string{}, map[string]string{}, p.now()
 		p.cut, p.card, p.cards = map[string]runningStep{}, nil, map[string]event.NeedsYou{}
-		p.handsDone, p.putOff, p.log = map[string]bool{}, map[string]bool{}, nil
+		p.log = nil
 		p.order.start(e.Steps)
 		p.preparing = ""
 		p.open(e.Command, e.Machine, e.Time, e.Only)
@@ -231,7 +228,7 @@ func (p *Pretty) Emit(e event.Event) {
 		for i, r := range p.running {
 			if r.step == e.Step {
 				p.running[i].doing, p.running[i].todo = cmp.Or(e.Says, r.doing), e.Todo
-				p.running[i].done, p.running[i].of = e.Done, e.Of
+				p.running[i].done, p.running[i].of, p.running[i].far = e.Done, e.Of, e.Far
 			}
 		}
 		p.drawSpinner()
@@ -239,7 +236,10 @@ func (p *Pretty) Emit(e event.Event) {
 		p.raise(e)
 		p.drawSpinner()
 	case event.Logged:
-		if p.applying() {
+		switch {
+		case p.applying() && e.Alert:
+			p.note(p.stamp(e.Time), p.rowOf(e.Step), look.Mark(look.NeedsYou), look.Orange(e.Line))
+		case p.applying():
 			p.note(p.stamp(e.Time), p.rowOf(e.Step), look.Dim("+"), look.Muted(e.Line))
 		}
 		if time.Since(p.drawn) >= drawEvery {
@@ -875,13 +875,24 @@ func (p *Pretty) Running() []string {
 // applying, or what it says; and, while it waits on you, what you're to do.
 type runningStep struct {
 	step, title, doing, todo string
-	// done and of are how far it's got, when it counts: done of of things.
+	// done and of are how far it's got, when it counts: done of of things;
+	// far, of 1, when it says, as an install downloading first does.
 	done, of int
+	far      float64
 	// applying is whether it's applying, or has printed something: what's
 	// under way at the foot of applying's log, while it's at work.
 	applying bool
 	// since is when it started.
 	since time.Time
+}
+
+// howFar is how far r's got, of 1, when it counts: as far as it says,
+// else done of of.
+func (r runningStep) howFar() float64 {
+	if r.far > 0 {
+		return min(r.far, 1)
+	}
+	return float64(min(r.done, r.of)) / float64(r.of)
 }
 
 // counted is says, then how far the step had got, muted, when it counts.

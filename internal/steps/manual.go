@@ -45,9 +45,11 @@ type ManualStep struct {
 	Pos string
 }
 
-// Ordered reports whether the line says what it comes after or before: a
-// step of its own, then, rather than one of the rest.
-func (m ManualStep) Ordered() bool { return len(m.After) > 0 || len(m.Before) > 0 }
+// Ordered reports whether the line says a step comes after it (--before),
+// as one waits on it: a step of its own, then, its card up mid-run, rather
+// than one of the rest, at the end. --after alone only orders it, and the
+// end is after everything.
+func (m ManualStep) Ordered() bool { return len(m.Before) > 0 }
 
 // ParseManual reads a [manual] line's value: what to do, in quotes, then
 // --after and --before, each as often as wanted, --open and the app it
@@ -135,8 +137,8 @@ func hands(home string, list config.List) []event.Hand {
 	return out
 }
 
-// SplitManual splits [manual]'s lines: those saying what they come after
-// or before, each a step of its own, and the rest, checked together. One
+// SplitManual splits [manual]'s lines: those a step comes after
+// (Ordered), each a step of its own, and the rest, checked together. One
 // that doesn't read stays with the rest, whose check says so.
 func SplitManual(home string, list config.List) (rest config.List, own []ManualStep) {
 	rest = config.List{Kind: list.Kind}
@@ -210,11 +212,13 @@ var manualPoll = 3 * time.Second
 
 // up puts b's card up for the step called step, once it's the card's turn,
 // unless b's been done meanwhile, after more of the step's own cards to
-// follow it; then waits till b's done, or the person puts it off. Done on
+// follow it; then waits till b's done, the step's job given up meanwhile,
+// for other steps to go on (engine.Release). Done on
 // the card marks done on this Mac one kit can't tell about, as kit manual
 // done does, and has kit look at once at one it can, as it does every few
 // seconds anyway; Open opens its app again.
 func (r *Raise) up(ctx context.Context, step string, b byHand, more int) error {
+	defer engine.Release(ctx)()
 	r.Sink.Emit(event.Doing{Time: r.Now(), Step: step, Says: event.Queued})
 	if err := r.turn(ctx); err != nil {
 		return err
@@ -241,8 +245,6 @@ func (r *Raise) up(ctx context.Context, step string, b byHand, more int) error {
 			}
 		case a := <-answers:
 			switch {
-			case a == hand.Later:
-				return nil
 			case a == hand.Open:
 				r.open(ctx, b.Open)
 			case a == hand.Done && b.Command == nil:
@@ -332,11 +334,10 @@ func (r *Raise) recount() {
 	}
 }
 
-// OwnManual is a step by hand that says what it comes after or before, as
-// a step of its own: done when its command exits 0, or once marked done.
-// Applying it with raise raises it, and waits till it's done, or put off
-// till later, as what's left to do. Without raise, with no one to act,
-// applying leaves it as it stands.
+// OwnManual is a step by hand a step comes after (Ordered), as a step of
+// its own: done when its command exits 0, or once marked done. Applying it
+// with raise raises it, and waits till it's done. Without raise, with no
+// one to act, applying leaves it as it stands.
 func OwnManual(run runner.Runner, stateDir string, m ManualStep, raise *Raise) engine.Step {
 	b := byHand{ManualStep: m, run: run, stateDir: stateDir}
 	return engine.Step{
@@ -378,7 +379,7 @@ func OpenApp(run runner.Runner) func(ctx context.Context, app string) error {
 // step with a command is done when it exits 0; one without, when it's been
 // marked done on this Mac (kit manual done). Each step not done is an item
 // saying what to do. Applied with raise, each not done is raised in turn,
-// in order, as OwnManual raises its own; one put off, the next is.
+// in order, as OwnManual raises its own.
 func Manual(run runner.Runner, home, stateDir string, list config.List, raise *Raise) engine.Step {
 	lines := func() ([]byHand, error) {
 		out := make([]byHand, 0, len(list.Entries))

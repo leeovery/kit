@@ -1,11 +1,11 @@
 
   █  ▄▀  ▀█▀  ▀▀█▀▀  │  bootstrap · laptop · Fri 2 Jan · 03:04
   █▀▀▄    █     █    │  ▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮  54% · 6m12s so far
-  █   █  ▄█▄    █    │  ▲ waiting for you · Sign in to 1Password · 4 for later
+  █   █  ▄█▄    █    │  ▲ waiting for you · Sign in to 1Password
 
 ────────────────────────────────────────────────────────────┬───────────────────────────────────────────────────────────────────────────────────────────────────
                                                             │
-  ≡ Everything  the whole log, as it happens                │  ▲ Sign in to 1Password                                                            waiting 27.0s  
+  ≡ Everything                                              │  ▲ Sign in to 1Password                                                            waiting 27.0s  
                                                             │
   ● This Mac  all 6 done                                    │      The run waits for this, for Secrets.
   ● Files and shell  all 2 done                             │
@@ -15,18 +15,17 @@
     ▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮  5m20s                         │
   ◐ Homebrew casks  installing slack · 4 of 42              │      kit carries on by itself once it's done
     ▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮  5m42s                         │      o opens 1Password again
-  ○ App Store apps  waiting                                 │      l later
-  ○ Developer tools  waits for Homebrew formulae            │
-  ○ Git  2 of 3 · git config waits for Secrets              ├───────────────────────────────────────────────────────────────────────────────────────────────────
-  ○ Login items  waits for Homebrew casks                   │
-  ◐ Your steps  applying claude-code                        │  EVERYTHING  click a row for its lines alone
-  ○ Backups  1 of 3 · Arq waits for Homebrew casks          │
-                                                            │  03:04:06  ● GitHub: fine
-  FOR LATER  4                                              │  03:04:06  ● This Mac: fine
-  △ Allow remote users Full Disk Access                     │  03:04:06  ● Homebrew: fine
-  △ Install the editor from its site                        │  03:04:06  ● kit-config: fine
-  △ Allow Karabiner-Elements                                │  03:04:07  ● Homebrew: /opt/homebrew
-  △ Add a Time Machine disk                                 │  03:04:08  ● Linked files: 54 linked
+  ○ App Store apps  waiting                                 │
+  ○ Developer tools  waits for Homebrew formulae            ├───────────────────────────────────────────────────────────────────────────────────────────────────
+  ○ Git  2 of 3 · git config waits for Secrets              │
+  ○ Login items  waits for Homebrew casks                   │  LOG
+  ◐ Your steps  applying claude-code                        │
+  ○ Backups  1 of 3 · Arq waits for Homebrew casks          │  03:04:06  ● GitHub: fine
+                                                            │  03:04:06  ● This Mac: fine
+                                                            │  03:04:06  ● Homebrew: fine
+                                                            │  03:04:06  ● kit-config: fine
+                                                            │  03:04:07  ● Homebrew: /opt/homebrew
+                                                            │  03:04:08  ● Linked files: 54 linked
                                                             │  03:04:08  ● Shell PATH: 15 directories
                                                             │  03:04:10  △ Time Machine: no backup disk
                                                             │  03:04:11  ● Disk space: 71% free
@@ -61,4 +60,5 @@
                                                             │  03:10:17  ◐ Installing slack · 4 of 42
                                                             │            ◐ Installing ffmpeg · 38 of 129
                                                             │            ◐ Applying claude-code
+                                                            │
   tab next row · ↑↓ scroll · q stop                         │

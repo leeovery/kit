@@ -985,6 +985,77 @@ func TestAWaitingStepGivesItsJobUp(t *testing.T) {
 	}
 }
 
+// A thing its step says it's putting in place isn't there for a step
+// waiting on it, whatever a look finds, till the step says it's in (Put):
+// a cask with an installer is listed once staged, before it's installed.
+// A wait's thing is one by its last part. Outside a run, they do nothing.
+func TestAThingBeingPutInPlaceIsntThereYet(t *testing.T) {
+	defer engine.SetWaitPoll(time.Millisecond)()
+	var listed, put, early atomic.Bool
+	arq := engine.Wait{Step: "cask", Thing: "arq", Ready: func(context.Context) bool { return listed.Load() }}
+	p, err := engine.New(
+		engine.Step{Name: "arq", Waits: []engine.Wait{arq}, Check: func(context.Context) check.Result {
+			early.Store(!put.Load())
+			return check.Result{State: check.OK}
+		}},
+		engine.Step{Name: "cask", Check: func(context.Context) check.Result { return check.Result{State: check.Attention} },
+			Apply: func(ctx context.Context, _ check.Result) error {
+				defer engine.Putting(ctx, []string{"homebrew/cask/arq"})()
+				listed.Store(true)
+				engine.Changed(ctx)
+				time.Sleep(30 * time.Millisecond)
+				put.Store(true)
+				engine.Put(ctx, "homebrew/cask/arq")
+				return nil
+			}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	applyWithin(t, p, &recorder{}, engine.Options{})
+	if early.Load() {
+		t.Error("arq was checked once its cask was listed, before the install said it was in")
+	}
+	engine.Putting(t.Context(), []string{"arq"})()
+	engine.Put(t.Context(), "arq")
+}
+
+// A step waiting for a person gives its job up (Release): one job runs the
+// rest meanwhile, and the run doesn't go quiet, as the person may put in
+// place what another step waits for. Outside a run, Release does nothing.
+func TestAStepWaitingForAPersonGivesItsJobUp(t *testing.T) {
+	defer engine.SetWaitPoll(time.Hour)()
+	var signedIn atomic.Bool
+	looked, ranOther := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	op := engine.Wait{Thing: "op", Ready: func(context.Context) bool {
+		once.Do(func() { close(looked) })
+		return signedIn.Load()
+	}}
+	attention := func(context.Context) check.Result { return check.Result{State: check.Attention} }
+	p, err := engine.New(
+		engine.Step{Name: "sign-in", Check: attention, Apply: func(ctx context.Context, _ check.Result) error {
+			back := engine.Release(ctx)
+			<-ranOther
+			<-looked
+			signedIn.Store(true)
+			engine.Changed(ctx)
+			back()
+			return nil
+		}},
+		engine.Step{Name: "other", Check: attention, Apply: func(context.Context, check.Result) error { close(ranOther); return nil }},
+		engine.Step{Name: "secret", Waits: []engine.Wait{op}, Check: attention},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := applyWithin(t, p, &recorder{}, engine.Options{Jobs: 1})
+	if got := report.Results["secret"]; got.State != check.Attention {
+		t.Errorf("secret = %+v, want it checked once op came: the run never went quiet while the sign-in waited", got)
+	}
+	engine.Release(t.Context())()
+}
+
 // A step waiting for another that can't finish till it has, as that one,
 // or one it comes after, needs it, is refused: the run would wait for good.
 func TestNewRefusesStepsWaitingOnEachOther(t *testing.T) {

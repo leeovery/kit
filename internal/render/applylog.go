@@ -65,7 +65,7 @@ func told(style func(string) string, title, says string) string {
 // or unwell, what it says; not checked, why; well, what it did or found,
 // and what's still waiting under it. A step the run was stopped before, or
 // in the middle of, has no line. A step by hand of its own whose card came
-// up has its card's line, done or for later, and no other.
+// up has its card's line, and no other.
 func (p *Pretty) noteFinished(f event.StepFinished) {
 	at, row, title, part := p.stamp(f.Time), p.rowOf(f.Step), p.title(f.Step), p.step(f.Step).Part
 	ended := p.ended(f)
@@ -118,18 +118,17 @@ func (p *Pretty) raise(e event.NeedsYou) {
 }
 
 // lower takes the card up down, at at, its step finished as finished, if
-// that's why: put off, or left to do as its step ended, it's for later;
-// else it's done, and how long it was up; the run stopped, it says nothing.
+// that's why: left to do as its step ended, it's not done; else it's done,
+// and how long it was up; the run stopped, it says nothing.
 func (p *Pretty) lower(at time.Time, finished *event.StepFinished) {
 	c := *p.card
 	p.card = nil
-	id, at, row := cardID(c.Step, c.Item), p.stamp(at), p.rowOf(c.Step)
+	at, row := p.stamp(at), p.rowOf(c.Step)
 	switch {
 	case finished != nil && wasStopped(*finished):
-	case p.putOff[id] || finished != nil && stillToDo(finished.Result, c.Item):
-		p.note(at, row, look.Mark(look.ToDo), look.White(c.Title+": for later"))
+	case finished != nil && stillToDo(finished.Result, c.Item):
+		p.note(at, row, look.Mark(look.ToDo), look.White(c.Title+": not done"))
 	default:
-		p.handsDone[id] = true
 		p.note(at, row, look.Mark(look.Done), look.White(c.Title+": done, in "+took(at.Sub(p.cardSince))))
 	}
 }

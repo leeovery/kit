@@ -1,11 +1,11 @@
 
   █  ▄▀  ▀█▀  ▀▀█▀▀  │  bootstrap · laptop · Fri 2 Jan · 03:04
   █▀▀▄    █     █    │  ▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮  54% · 6m12s so far
-  █   █  ▄█▄    █    │  ◐ working · nothing needs you · 4 for later
+  █   █  ▄█▄    █    │  ◐ working · nothing needs you
 
 ────────────────────────────────────────────────────────────┬───────────────────────────────────────────────────────────────────────────────────────────────────
                                                             │
-  ≡ Everything  the whole log, as it happens                │  EVERYTHING  click a row for its lines alone
+  ≡ Everything                                              │  LOG
                                                             │
   ● This Mac  all 6 done                                    │  03:04:06  ● GitHub: fine
   ● Files and shell  all 2 done                             │  03:04:06  ● This Mac: fine
@@ -22,11 +22,11 @@
   ◐ Your steps  applying claude-code                        │  03:04:36  + Installed cask-1
   ○ Backups  1 of 3 · Arq waits for Homebrew casks          │  03:04:45  ● macOS settings: 99 set
                                                             │  03:04:46  ● Power settings: 6 set
-  FOR LATER  4                                              │  03:04:49  ● kit-config edits: all committed
-  △ Allow remote users Full Disk Access                     │  03:04:51  ● Sync: pushed
-  △ Install the editor from its site                        │  03:04:58  + Installed formula-1
-  △ Allow Karabiner-Elements                                │  03:05:13  + Installed cask-2
-  △ Add a Time Machine disk                                 │  03:05:23  + Installed formula-2
+                                                            │  03:04:49  ● kit-config edits: all committed
+                                                            │  03:04:51  ● Sync: pushed
+                                                            │  03:04:58  + Installed formula-1
+                                                            │  03:05:13  + Installed cask-2
+                                                            │  03:05:23  + Installed formula-2
                                                             │  03:05:48  + Installed formula-3
                                                             │  03:05:50  + Installed cask-3
                                                             │  03:06:13  + Installed formula-4

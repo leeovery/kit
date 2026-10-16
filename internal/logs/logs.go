@@ -70,8 +70,10 @@ type Record struct {
 	Title string `json:"title,omitempty"`
 	Tells bool   `json:"tells,omitempty"`
 	More  int    `json:"more,omitempty"`
-	// Line is what a step told the run's log, in kit's own words (logged).
-	Line string `json:"line,omitempty"`
+	// Line is what a step told the run's log, in kit's own words (logged),
+	// and Alert whether it's something to look at.
+	Line  string `json:"line,omitempty"`
+	Alert bool   `json:"alert,omitempty"`
 }
 
 // File is a run's log, as a sink.
@@ -187,7 +189,7 @@ func (l *File) record(e event.Event) Record {
 	case event.NeedsYou:
 		r.Event, r.Step, r.Item, r.Title, r.Tells, r.More = "needs_you", e.Step, e.Item, e.Title, e.Tells, e.More
 	case event.Logged:
-		r.Event, r.Step, r.Line = "logged", e.Step, e.Line
+		r.Event, r.Step, r.Line, r.Alert = "logged", e.Step, e.Line, e.Alert
 	case event.RunFinished:
 		r.Event, r.DurationMS, r.Counts = "run_finished", e.Duration.Milliseconds(), e.Counts
 		l.finished = true

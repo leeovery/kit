@@ -1,11 +1,11 @@
 
   █  ▄▀  ▀█▀  ▀▀█▀▀  │  bootstrap · laptop · Fri 2 Jan · 03:04
   █▀▀▄    █     █    │  ▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮  60% · 6m12s so far
-  █   █  ▄█▄    █    │  ◐ working · nothing needs you · 1 failed · 4 for later
+  █   █  ▄█▄    █    │  ◐ working · nothing needs you · 1 failed
 
 ────────────────────────────────────────────────────┬───────────────────────────────────────────────
                                                     │
-  ≡ Everything  the whole log, as it happens        │  EVERYTHING  click a row for its lines alone
+  ≡ Everything                                      │  LOG
                                                     │
   ● This Mac  all 6 done                            │  03:05:50  + Installed cask-3
   ● Files and shell  all 2 done                     │  03:06:13  + Installed formula-4
@@ -21,10 +21,10 @@
   ◐ Your steps  applying claude-code                │  03:08:43  + Installed formula-10
   ○ Backups  1 of 3 · Arq waiting                   │  03:08:55  + Installed cask-8
                                                     │  03:09:08  + Installed formula-11
-  FOR LATER  4                                      │  03:09:33  + Installed formula-12
-  △ Allow remote users Full Disk Access             │  03:10:01  ✗ Homebrew casks failed: couldn't …
-  △ Install the editor from its site                │            │ installer: The install failed. (…
-  △ Allow Karabiner-Elements                        │            │ → kit apply cask
-  △ Add a Time Machine disk                         │  03:10:02  – macOS login items: not checked ·…
+                                                    │  03:09:33  + Installed formula-12
+                                                    │  03:10:01  ✗ Homebrew casks failed: couldn't …
+                                                    │            │ installer: The install failed. (…
+                                                    │            │ → kit apply cask
+                                                    │  03:10:02  – macOS login items: not checked ·…
                                                     │  03:10:17  ◐ Installing ffmpeg · 38 of 129
   tab next row · ↑↓ scroll · q stop                 │            ◐ Applying claude-code

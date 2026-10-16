@@ -41,7 +41,7 @@ func cards(records []logs.Record) []logs.Record {
 func signInWorld(t *testing.T) *world {
 	t.Helper()
 	w := missingWorld(t)
-	w.writeSection(t, "laptop", "manual", `sign-in "Sign in to the tool" --after brew --open Tool --test test -f /signed-in`+"\n  Open the tool\n  Sign in\n")
+	w.writeSection(t, "laptop", "manual", `sign-in "Sign in to the tool" --after brew --before gh --open Tool --test test -f /signed-in`+"\n  Open the tool\n  Sign in\n")
 	w.fake.On("brew", "update", "--quiet")
 	w.fake.On("brew", "install", "--formula", "ripgrep")
 	w.fake.On("test", "-f", "/signed-in").Exits(1)

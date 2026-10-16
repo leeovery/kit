@@ -88,8 +88,8 @@ func TestApplyWithoutATerminalNeverPrompts(t *testing.T) {
 		if cmd.Interactive || slices.Equal(cmd.Args, []string{"-v"}) || slices.Contains(cmd.Args, "--cask") && cmd.Args[0] == "install" {
 			t.Errorf("ran %s, want nothing asked and nothing installed for zoom", cmd)
 		}
-		if len(cmd.Env) > 0 {
-			t.Errorf("ran %s with %q; want nothing that asks kit, without a terminal", cmd, cmd.Env)
+		if env := slices.DeleteFunc(slices.Clone(cmd.Env), func(kv string) bool { return strings.HasPrefix(kv, "HOMEBREW_SSH_CONFIG_PATH=") }); len(env) > 0 {
+			t.Errorf("ran %s with %q; want nothing that asks kit, without a terminal", cmd, env)
 		}
 	}
 }

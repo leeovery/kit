@@ -22,12 +22,13 @@ func TestWhatsWaitedForInstallsFirst(t *testing.T) {
 	w.writeSection(t, "laptop", "homebrew formulae", "go\nmise\nripgrep\n")
 	w.writeSection(t, "laptop", "homebrew casks", "owner/tap/signer\nzoom\n")
 	w.writeSection(t, "laptop", "manual", strings.Join([]string{
-		`sign-in "Sign in to the signer" --after cask:signer --test test -f /signed-in`,
-		`tools "Set the tools up" --after brew:mise --test test -f /tools`,
+		`sign-in "Sign in to the signer" --after cask:signer --before gh --test test -f /signed-in`,
+		`tools "Set the tools up" --after brew:mise --before gh --test test -f /tools`,
 	}, "\n")+"\n")
 	f := w.fake
 	f.On("brew", "list", "--cask", "--full-name", "-1").Prints("ghostty\nfirefox\n").Does(func() { time.Sleep(50 * time.Millisecond) })
 	f.On("brew", "tap")
+	f.On("brew", "tap", "owner/tap")
 	f.On("brew", "info", "--json=v2", "--formula", "mise", "ripgrep").Prints(`{"formulae": [{"name": "mise", "full_name": "mise"}, {"name": "ripgrep", "full_name": "ripgrep"}], "casks": []}`)
 	f.On("brew", "info", "--json=v2", "--cask", "zoom").Prints(`{"formulae": [], "casks": [{"token": "zoom", "full_token": "zoom", "artifacts": [{"app": ["zoom.us.app"]}]}]}`)
 	f.On("brew", "update", "--quiet")

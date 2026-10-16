@@ -368,6 +368,54 @@ func TestStepCountsWhatsInstalled(t *testing.T) {
 	}
 }
 
+// quietKind is a countingKind whose install, having printed its lines,
+// prints nothing for a while, then one line more.
+type quietKind struct {
+	*countingKind
+	quiet time.Duration
+}
+
+func (q *quietKind) Install(ctx context.Context, names []string) error {
+	err := q.countingKind.Install(ctx, names)
+	time.Sleep(q.quiet)
+	kind.Lines(ctx)("done b")
+	return err
+}
+
+// An install that prints nothing for a while is noted quiet: the run's log
+// told once, as something to look at, naming its last line; the step saying
+// since when, till a line comes.
+func TestAQuietInstallIsNoted(t *testing.T) {
+	defer kind.SetQuiet(20*time.Millisecond, 2*time.Millisecond)()
+	k := &quietKind{countingKind: &countingKind{fakeKind: knowing("a", "b"), prints: []string{"done a", "Cloning into tap"}}, quiet: 100 * time.Millisecond}
+	var said []event.Doing
+	var logged []event.Logged
+	var mu sync.Mutex
+	ctx := event.WithSaying(context.Background(), func(d event.Doing) { mu.Lock(); said = append(said, d); mu.Unlock() })
+	ctx = event.WithLogging(ctx, func(l event.Logged) { mu.Lock(); logged = append(logged, l); mu.Unlock() })
+	s := kind.Step(k, declared("a", "b"))
+	if err := s.Apply(ctx, s.Check(context.Background())); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	var alerts []string
+	for _, l := range logged {
+		if l.Alert {
+			alerts = append(alerts, l.Line)
+		}
+	}
+	if len(alerts) != 1 || !strings.Contains(alerts[0], " has said nothing since ") || !strings.HasSuffix(alerts[0], "; its last line: Cloning into tap") {
+		t.Errorf("alerts = %q, want one, naming the last line", alerts)
+	}
+	var quiet, after bool
+	for _, d := range said {
+		quiet = quiet || strings.HasPrefix(d.Says, "installing b · nothing since ")
+		after = quiet && d.Says == "installing" && d.Done == 2
+	}
+	if !quiet || !after {
+		t.Errorf("the step said %+v, want it quiet since a time, then done", said)
+	}
+}
+
 // shortKind is a countingKind whose things are shown by the part of their
 // names after a slash.
 type shortKind struct{ *countingKind }
@@ -375,7 +423,8 @@ type shortKind struct{ *countingKind }
 func (*shortKind) Short(name string) string { return name[strings.LastIndex(name, "/")+1:] }
 
 // Each thing a kind's install says is done is told to the run's log as it's
-// done, before the step says what's next: by the part of its name it's
+// done, once the step's said what's next, so a screen drawn as the log's
+// told is never a line behind it: by the part of its name it's
 // shown by, for a kind that's Shortened, else by its name. A thing it
 // wasn't asked to install, as a dependency, and a thing said twice, are
 // told nothing of.
@@ -399,10 +448,10 @@ func TestStepTellsTheLogOfEachThingInstalled(t *testing.T) {
 			}
 			want := []event.Event{
 				event.Doing{Says: "installing a", Of: 2},
-				event.Logged{Line: "Installed " + tt.b},
 				event.Doing{Says: "installing a", Done: 1, Of: 2},
-				event.Logged{Line: "Installed a"},
+				event.Logged{Line: "Installed " + tt.b},
 				event.Doing{Says: "installing", Done: 2, Of: 2},
+				event.Logged{Line: "Installed a"},
 			}
 			if !slices.Equal(told, want) {
 				t.Errorf("the step told %+v\nwant %+v", told, want)
@@ -641,10 +690,15 @@ func (*fetchingKind) Fetched(line string, _ []string) (string, bool) {
 
 func (*fetchingKind) Begun(line string) bool { return line == "begin" }
 
+// half is how far a kind's install that downloads first has got through
+// one of its halves, done of of: downloading, then installing.
+func half(done, of int) float64 { return float64(done) / float64(of) / 2 }
+
 // A kind whose install downloads first has its step say it's downloading,
 // from when its command starts, counting those it's installing as each is
 // downloaded, and, once the install proper's begun, installing, counting
-// them done. A dependency's download, and one said twice, count nothing.
+// them done, moving through each half the way. A dependency's download, and
+// one said twice, count nothing.
 func TestStepSaysItsDownloading(t *testing.T) {
 	k := &fetchingKind{countingKind: &countingKind{
 		fakeKind: knowing("a", "b"),
@@ -657,11 +711,11 @@ func TestStepSaysItsDownloading(t *testing.T) {
 	}
 	want := []event.Doing{
 		{Says: "downloading", Of: 2},
-		{Says: "downloading", Done: 1, Of: 2},
-		{Says: "downloading", Done: 2, Of: 2},
-		{Says: "installing a", Of: 2},
-		{Says: "installing b", Done: 1, Of: 2},
-		{Says: "installing", Done: 2, Of: 2},
+		{Says: "downloading", Done: 1, Of: 2, Far: half(1, 2)},
+		{Says: "downloading", Done: 2, Of: 2, Far: half(2, 2)},
+		{Says: "installing a", Of: 2, Far: 0.5},
+		{Says: "installing b", Done: 1, Of: 2, Far: 0.5 + half(1, 2)},
+		{Says: "installing", Done: 2, Of: 2, Far: 0.5 + half(2, 2)},
 	}
 	if !slices.Equal(said, want) {
 		t.Errorf("the step said %+v\nwant %+v", said, want)
@@ -681,8 +735,8 @@ func TestStepSaysDownloadingOnceItsCommandStarts(t *testing.T) {
 	want := []event.Doing{
 		{Says: "waiting for Homebrew's update"},
 		{Says: "downloading", Of: 1},
-		{Says: "downloading", Done: 1, Of: 1},
-		{Says: "installing", Done: 1, Of: 1},
+		{Says: "downloading", Done: 1, Of: 1, Far: half(1, 1)},
+		{Says: "installing", Done: 1, Of: 1, Far: 0.5 + half(1, 1)},
 	}
 	if !slices.Equal(said, want) {
 		t.Errorf("the step said %+v\nwant %+v", said, want)
@@ -704,7 +758,7 @@ func TestStepInstallingWithoutABeginning(t *testing.T) {
 	if err := s.Apply(saying(&said), s.Check(context.Background())); err != nil {
 		t.Fatalf("Apply() error = %v", err)
 	}
-	if want := []event.Doing{{Says: "downloading", Of: 2}, {Says: "installing b", Done: 1, Of: 2}}; !slices.Equal(said, want) {
+	if want := []event.Doing{{Says: "downloading", Of: 2}, {Says: "installing b", Done: 1, Of: 2, Far: 0.5 + half(1, 2)}}; !slices.Equal(said, want) {
 		t.Errorf("the step said %+v, want %+v", said, want)
 	}
 }

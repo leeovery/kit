@@ -21,7 +21,7 @@ import (
 // arrival leaves it, with what runs, the bar and how the run stands beside
 // it; under a rule, two panes. The left has Everything, then the rows, a
 // row each of kit's kinds and its own areas, each saying how its steps
-// stand; then what's for later, and the keys. The right has what the run
+// stand; then the keys. The right has what the run
 // waits on you for, when it does, a panel ruled off above the log; then the
 // log, everything or a row's lines alone, following the newest or scrolled
 // back. It reads keys while it's up, the terminal in its raw mode, with the
@@ -240,14 +240,15 @@ func (p *Pretty) howFar() float64 {
 	got := float64(len(p.results))
 	for _, r := range p.running {
 		if r.of > 0 {
-			got += float64(min(r.done, r.of)) / float64(r.of)
+			got += r.howFar()
 		}
 	}
 	return min(got/float64(total), 1)
 }
 
 // stateLine says how the run stands, always whether it needs you: working,
-// or waiting for you, and what for; then what failed, and what's for later.
+// or waiting for you, and what for; then what failed. What's left to do
+// waits for the run's end: there's no later during it (Lee, 16 Oct).
 func (p *Pretty) stateLine() string {
 	parts := []string{look.Cyan("◐ working"), look.White("nothing needs you")}
 	if waits := p.waitsOnYou(); len(waits) > 0 {
@@ -256,22 +257,19 @@ func (p *Pretty) stateLine() string {
 	if n := p.failedSteps(); n > 0 {
 		parts = append(parts, look.Red(fmt.Sprintf("%d failed", n)))
 	}
-	if n := len(p.later()); n > 0 {
-		parts = append(parts, look.White(fmt.Sprintf("%d for later", n)))
-	}
 	return look.Says(parts...)
 }
 
 // waitsOnYou is what the run waits on you for, if anything: the card up;
-// macOS asking, in a window of its own, and where to answer; a step saying
-// what you're to do.
+// macOS asking, and that it's in a window of its own; a step saying what
+// you're to do.
 func (p *Pretty) waitsOnYou() []string {
 	var waits []string
 	if p.card != nil {
 		waits = append(waits, look.White(p.card.Title))
 	}
 	if p.asking != "" {
-		waits = append(waits, look.White("macOS "+p.asking), look.Todo(look.Muted("answer it in the window macOS shows")))
+		waits = append(waits, look.White("macOS "+p.asking), look.Muted("in its window"))
 	}
 	for _, r := range p.running {
 		if r.todo != "" {
@@ -292,17 +290,14 @@ func (p *Pretty) failedSteps() int {
 	return n
 }
 
-// everythingSays is what the left pane's first choice, the whole log, says.
-const everythingSays = "the whole log, as it happens"
-
 // leftPane is the screen's left pane, w wide and room lines: Everything,
 // then the rows, each with a bar under it while a step of its that counts
-// is at work; then what's for later, as much as fits; the keys at its foot.
-// It notes which choice each line is, for the mouse.
+// is at work; the keys at its foot. It notes which choice each line is, for
+// the mouse.
 func (p *Pretty) leftPane(w, room int) []string {
-	every := "  " + look.Dim("≡") + " " + look.Strong("Everything") + "  " + look.Muted(everythingSays)
+	every := "  " + look.Dim("≡") + " " + look.Strong("Everything")
 	if p.keys.chosen == "" {
-		every = "  " + look.Dim("≡") + look.Pill("Everything", look.Done) + " " + look.Muted(everythingSays)
+		every = "  " + look.Dim("≡") + look.Pill("Everything", look.Done)
 	}
 	lines := []string{"", every, ""}
 	choices := map[int]string{1: ""}
@@ -311,12 +306,11 @@ func (p *Pretty) leftPane(w, room int) []string {
 		choices[len(lines)] = r.name
 		lines = append(lines, p.rowLine(row, w))
 		if run, ok := p.rowAtWork(r); ok && row.State == look.Running && run.of > 0 {
-			lines = append(lines, "    "+look.Progress(float64(run.done)/float64(run.of), rowBar, look.Done)+"  "+look.Muted(took(p.now().Sub(run.since))))
+			lines = append(lines, "    "+look.Progress(run.howFar(), rowBar, look.Done)+"  "+look.Muted(took(p.now().Sub(run.since))))
 		}
 	}
 	foot := p.leftFoot(w)
 	room -= len(foot)
-	lines = append(lines, laterBlock(p.later(), room-len(lines))...)
 	lines = lines[:min(len(lines), max(room, 0))]
 	for at := range choices {
 		if at >= len(lines) {
@@ -338,27 +332,6 @@ func (p *Pretty) rowLine(row look.Row, w int) string {
 		l += " " + row.Says
 	}
 	return look.Cut(l, w)
-}
-
-// laterBlock is what's for later, in at most room lines: a blank line, its
-// header and count, then a line each, the last saying how many more there
-// are when they don't all fit; none when there's nothing, or no room.
-func laterBlock(titles []string, room int) []string {
-	if len(titles) == 0 || room < 3 {
-		return nil
-	}
-	shown := titles
-	if 2+len(titles) > room {
-		shown = titles[:room-3]
-	}
-	block := []string{"", look.Header("For later", fmt.Sprint(len(titles)))}
-	for _, t := range shown {
-		block = append(block, "  "+look.Mark(look.ToDo)+" "+look.White(t))
-	}
-	if n := len(titles) - len(shown); n > 0 {
-		block = append(block, "  "+look.Muted(fmt.Sprintf("and %d more", n)))
-	}
-	return block
 }
 
 // leftFoot is the left pane's foot, w wide: a blank line and the keys, the
@@ -393,7 +366,8 @@ func (p *Pretty) rightPane(w, room int) (lines []string, rules map[int]bool, log
 
 // paneTop is what's over the log in the right pane, w wide, and which of
 // its lines is a rule, -1 for none: the panel, while a card's up, a rule
-// under it; then the log's heading, a blank line over and under it.
+// under it; then the log's heading, Log, or Log and the row chosen, a blank
+// line over and under it.
 func (p *Pretty) paneTop(w int) (top []string, rule int) {
 	rule = -1
 	if p.card != nil {
@@ -401,9 +375,9 @@ func (p *Pretty) paneTop(w int) (top []string, rule int) {
 		rule = len(top)
 		top = append(top, "")
 	}
-	head := look.Header("Everything", "click a row for its lines alone")
+	head := look.Header("Log", "")
 	if p.keys.chosen != "" {
-		head = look.Header(p.keys.chosen, "its lines alone · esc for everything")
+		head = look.Header("Log · "+p.keys.chosen, "")
 	}
 	return append(top, "", head, ""), rule
 }
@@ -454,13 +428,14 @@ func (p *Pretty) panel(w int) []string {
 	return append(out, "")
 }
 
-// cardWhy is why the run waits for the card up: the steps it holds up; or,
-// the steps by hand that come once the rest is done, that it's what's
-// left; or that nothing waits for it.
+// cardWhy is why the run waits for the card up: the steps it holds up, but
+// those by hand, which wait for everything; or, the steps by hand that come
+// once the rest is done, that it's what's left; or that nothing waits for
+// it.
 func (p *Pretty) cardWhy() string {
 	var held []string
 	for _, s := range p.start.Steps {
-		if slices.Contains(s.Waits, p.card.Step) {
+		if s.Area != steps.AreaManual && slices.Contains(s.Waits, p.card.Step) {
 			held = append(held, p.title(s.Name))
 		}
 	}

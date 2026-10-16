@@ -8,11 +8,11 @@ func TestAnswerReachesTheCardUp(t *testing.T) {
 		t.Fatal("an answer with no card up was taken")
 	}
 	ch, down := d.Listen("1password")
-	if !d.Answer("1password", Later) {
+	if !d.Answer("1password", Open) {
 		t.Fatal("the card up didn't take its answer")
 	}
-	if got := <-ch; got != Later {
-		t.Fatalf("got %v, want Later", got)
+	if got := <-ch; got != Open {
+		t.Fatalf("got %v, want Open", got)
 	}
 	down()
 	if d.Answer("1password", Done) {

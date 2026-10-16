@@ -10,9 +10,6 @@ type Answer int
 const (
 	// Done is the person saying they've done it.
 	Done Answer = iota + 1
-	// Later is the person putting it off till the run's end: what's left to
-	// do then lists it.
-	Later
 	// Open is the person asking for its app to be opened again.
 	Open
 )

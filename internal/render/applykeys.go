@@ -59,8 +59,8 @@ type answerKey struct {
 }
 
 // cardKeys are the keys answering card c: o opens its app again, when kit
-// opened one; enter says it's done, when kit can't tell by itself; l puts
-// it off till later.
+// opened one; enter says it's done, when kit can't tell by itself. There's
+// no putting one off: it's done, or the run's stopped.
 func cardKeys(c event.NeedsYou) []answerKey {
 	var ks []answerKey
 	if c.Opened != "" {
@@ -69,7 +69,7 @@ func cardKeys(c event.NeedsYou) []answerKey {
 	if !c.Tells {
 		ks = append(ks, answerKey{look.Key{Key: "enter", Does: "when it's done"}, hand.Done})
 	}
-	return append(ks, answerKey{look.Key{Key: "l", Does: "later"}, hand.Later})
+	return ks
 }
 
 // wheelLines are how many lines a turn of the mouse's wheel scrolls the
@@ -169,7 +169,7 @@ func (p *Pretty) press(k ask.Key) (halt bool) {
 		p.keys.away = true
 	case p.keys.asking:
 		return p.answer(k)
-	case k.Is("o", "enter", "l"):
+	case k.Is("o", "enter"):
 		p.answerCard(k)
 	case k.Is("q"):
 		p.keys.asking, p.keys.choice = true, 0
@@ -188,17 +188,14 @@ func (p *Pretty) press(k ask.Key) (halt bool) {
 }
 
 // answerCard passes what k answers the card up with to its step, when the
-// card's keys offer it: nothing with no card up. A card put off is noted,
-// for the log to say so as it goes.
+// card's keys offer it: nothing with no card up.
 func (p *Pretty) answerCard(k ask.Key) {
 	if p.card == nil || p.hands == nil {
 		return
 	}
 	for _, a := range cardKeys(*p.card) {
 		if k.Is(a.key.Key) {
-			if p.hands(p.card.Step, a.answer) && a.answer == hand.Later {
-				p.putOff[cardID(p.card.Step, p.card.Item)] = true
-			}
+			p.hands(p.card.Step, a.answer)
 			return
 		}
 	}

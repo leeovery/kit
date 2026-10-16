@@ -30,6 +30,7 @@ func heldWorld(t *testing.T) *world {
 	f.On("brew", "leaves").Prints("go\njq\nowner/tap/tool\nnode@20\nffmpeg\n").Then().Prints("go\njq\nowner/tap/tool\nnode@20\nffmpeg\n" + after)
 	f.On("brew", "leaves", "--installed-on-request").Prints("go\njq\nowner/tap/tool\nffmpeg\n").Then().Prints("go\njq\nowner/tap/tool\nffmpeg\n" + after)
 	f.On("brew", "tap").Prints("owner/tap\n")
+	f.On("brew", "tap", "owner/private")
 	f.On("brew", "info", "--json=v2", "--formula", "ripgrep").Prints(`{"formulae": [{"name": "ripgrep", "full_name": "ripgrep", "aliases": [], "oldnames": []}], "casks": []}`)
 	f.On("brew", "update", "--quiet")
 	f.On("brew", "install", "--formula", "ripgrep")

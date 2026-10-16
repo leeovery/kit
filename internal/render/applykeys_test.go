@@ -229,19 +229,20 @@ var (
 	paper = event.NeedsYou{Time: after(360), Step: "manual", Item: "editor", Title: "Install the editor from its site", Steps: []string{"Download it from editor.example.com"}}
 )
 
-// o, enter and l answer the card up, passing the answer to its step, each
+// o and enter answer the card up, passing the answer to its step, each
 // only when the card's keys offer it: o when kit opened an app for it,
-// enter when kit can't tell by itself that it's done, l always. With no
-// card up, or once its step's finished, they answer nothing.
+// enter when kit can't tell by itself that it's done. l, once a card's
+// putting off, answers nothing: a card's done, or the run's stopped. With
+// no card up, or once its step's finished, they answer nothing.
 func TestApplyingCardKeys(t *testing.T) {
 	for _, tt := range []struct {
 		name   string
 		events []event.Event
 		want   []answered
 	}{
-		{"kit opened it, and tells", cardUp(signIn), []answered{{signIn.Step, hand.Open}, {signIn.Step, hand.Later}}},
-		{"kit opened it", cardUp(karabiner), []answered{{karabiner.Step, hand.Open}, {karabiner.Step, hand.Done}, {karabiner.Step, hand.Later}}},
-		{"neither", cardUp(paper), []answered{{paper.Step, hand.Done}, {paper.Step, hand.Later}}},
+		{"kit opened it, and tells", cardUp(signIn), []answered{{signIn.Step, hand.Open}}},
+		{"kit opened it", cardUp(karabiner), []answered{{karabiner.Step, hand.Open}, {karabiner.Step, hand.Done}}},
+		{"neither", cardUp(paper), []answered{{paper.Step, hand.Done}}},
 		{"no card", sixMinutesIn(), nil},
 		{"its step finished", append(cardUp(karabiner), finished(400, karabiner.Step, check.Result{State: check.OK, Summary: "done"})), nil},
 	} {
@@ -405,7 +406,7 @@ func TestApplyingChoosesRows(t *testing.T) {
 		}
 	}
 	kb.press(t, keyShiftTab)
-	if _, right := panes(screen(uncoloured(out.String())), 160); right[1] != "  BACKUPS  its lines alone · esc for everything" {
+	if _, right := panes(screen(uncoloured(out.String())), 160); right[1] != "  LOG · BACKUPS" {
 		t.Errorf("Backups chosen, the log's heading is %q", right[1])
 	}
 }
@@ -421,16 +422,16 @@ func TestApplyingClicksChooseRows(t *testing.T) {
 		return right[1]
 	}
 	kb.press(t, clickRow("Homebrew casks")(screen(out.String()), 160)...)
-	if h := heading(); h != "  HOMEBREW CASKS  its lines alone · esc for everything" {
+	if h := heading(); h != "  LOG · HOMEBREW CASKS" {
 		t.Errorf("Homebrew casks clicked, the log's heading is %q", h)
 	}
 	kb.press(t, clickRow("Homebrew casks")(screen(out.String()), 160)...)
-	if h := heading(); h != "  EVERYTHING  click a row for its lines alone" {
+	if h := heading(); h != "  LOG" {
 		t.Errorf("the row chosen clicked again, the log's heading is %q", h)
 	}
 	kb.press(t, clickRow("Secrets")(screen(out.String()), 160)...)
 	kb.press(t, click(10, headLines+1))
-	if h := heading(); h != "  EVERYTHING  click a row for its lines alone" {
+	if h := heading(); h != "  LOG" {
 		t.Errorf("Everything clicked, the log's heading is %q", h)
 	}
 	before := screen(out.String())
@@ -454,18 +455,18 @@ func TestApplyingClickBringingTheWindowForward(t *testing.T) {
 	casks := clickRow("Homebrew casks")(screen(out.String()), 160)
 	kb.press(t, focusOut)
 	kb.press(t, casks...)
-	if h := heading(); h != "  EVERYTHING  click a row for its lines alone" {
+	if h := heading(); h != "  LOG" {
 		t.Errorf("clicked out of focus, the log's heading is %q; want everything still", h)
 	}
 	kb.press(t, focusIn)
 	c.set(at.Add(time.Minute + 299*time.Millisecond))
 	kb.press(t, casks...)
-	if h := heading(); h != "  EVERYTHING  click a row for its lines alone" {
+	if h := heading(); h != "  LOG" {
 		t.Errorf("clicked just after coming into focus, the log's heading is %q; want everything still", h)
 	}
 	c.set(at.Add(time.Minute + 300*time.Millisecond))
 	kb.press(t, casks...)
-	if h := heading(); h != "  HOMEBREW CASKS  its lines alone · esc for everything" {
+	if h := heading(); h != "  LOG · HOMEBREW CASKS" {
 		t.Errorf("clicked once in focus, the log's heading is %q; want Homebrew casks", h)
 	}
 }

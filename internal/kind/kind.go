@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/config"
@@ -257,6 +258,16 @@ type Announcer interface {
 	Installing(line string, names []string) (string, bool)
 }
 
+// Readier is a kind that readies what the things it's to install need
+// before it installs any, as Homebrew taps the taps they're from: as its
+// step starts applying, while the Mac is as the run found it, before other
+// steps change what that takes, as the user's git settings would send a
+// tap's clone their way.
+type Readier interface {
+	// Ready readies what names need, saying what it's doing as it does.
+	Ready(ctx context.Context, names []string) error
+}
+
 // Shortened is a kind whose things are shown by part of their names, as
 // Homebrew's from a tap by their names in the tap.
 type Shortened interface {
@@ -389,12 +400,17 @@ func InstallDeclared(ctx context.Context, k Kind, declared config.List, held []H
 	return nil
 }
 
-// installApart installs names as placing says, as Placed does, returning
-// why each section held whose wait ended without what it waited for was
-// left, by hold.
+// installApart installs names as placing says, as Placed does, a Readier's
+// readied first, returning why each section held whose wait ended without
+// what it waited for was left, by hold.
 func installApart(ctx context.Context, k Kind, declared config.List, placing Placing, names []string) (map[string]string, error) {
 	first, plain, apart := split(names, declared, placing)
 	var errs []string
+	if r, ok := k.(Readier); ok && len(names) > 0 {
+		if err := r.Ready(ctx, names); err != nil {
+			errs = append(errs, err.Error())
+		}
+	}
 	if err := install(ctx, k, declared, first, nil); err != nil {
 		errs = append(errs, err.Error())
 	}
@@ -497,7 +513,17 @@ func install(ctx context.Context, k Kind, declared config.List, names, env []str
 		return nil
 	}
 	installing := runner.WithSecretEnv(ctx, env...)
-	err := k.Install(counting(installing, k, names), names)
+	stop := func() {}
+	if _, counts := k.(Counter); counts {
+		// What it counts isn't there for a step waiting on it till the
+		// install says it's done, whatever the kind's list says meanwhile.
+		stop = engine.Putting(ctx, names)
+	}
+	counted := counting(installing, k, names)
+	unwatch := watchQuiet(counted)
+	err := k.Install(counted, names)
+	unwatch()
+	stop()
 	engine.Changed(ctx)
 	if err == nil {
 		return nil
@@ -622,7 +648,8 @@ func counting(ctx context.Context, k Kind, names []string) context.Context {
 	f, fetches := k.(Fetcher)
 	a, _ := k.(Announcer)
 	s, _ := k.(Shortened)
-	p := &progress{ctx: ctx, counter: c, fetcher: f, announcer: a, shortened: s, names: names, unstarted: fetches, done: map[string]bool{}, fetched: map[string]bool{}}
+	p := &progress{ctx: ctx, counter: c, fetcher: f, announcer: a, shortened: s, names: names, program: Command(k),
+		unstarted: fetches, done: map[string]bool{}, fetched: map[string]bool{}, heard: time.Now()}
 	p.say()
 	return context.WithValue(ctx, progressKey{}, p)
 }
@@ -631,8 +658,8 @@ func counting(ctx context.Context, k Kind, names []string) context.Context {
 // it prints: a Fetcher's downloading, from when its command starts till the
 // install proper begins, counting those of names downloaded; then
 // installing, as each is done, the next (next), counting those done. Each
-// done is told to the run's log, and has the steps waiting for the kind's
-// things look again.
+// downloaded, and each done, is told to the run's log; each done has the
+// steps waiting for the kind's things look again.
 type progress struct {
 	ctx       context.Context
 	counter   Counter
@@ -651,14 +678,75 @@ type progress struct {
 	// now is the one of names an Announcer's install last said it's
 	// installing.
 	now string
+	// program is the command installing; heard, when it last printed a
+	// line, last; quiet, whether it's printed nothing for quietAfter since.
+	program string
+	heard   time.Time
+	last    string
+	quiet   bool
 }
 
-// line reads a line the install printed.
+// quietAfter is how long an install may print nothing before its step says
+// so, naming the last line it printed, as a command waiting on what no one
+// can see shows: ssh asking at a terminal behind kit's screen (the fifth
+// run, 16 Oct). quietLook is how often it looks.
+var quietAfter, quietLook = 2 * time.Minute, 15 * time.Second
+
+// watchQuiet watches the install ctx counts for going quiet, as hush does,
+// till the func it returns is called: nothing, where nothing counts it.
+func watchQuiet(ctx context.Context) (stop func()) {
+	p, ok := ctx.Value(progressKey{}).(*progress)
+	if !ok {
+		return func() {}
+	}
+	done := make(chan struct{})
+	after, tick := quietAfter, time.NewTicker(quietLook)
+	go func() {
+		defer tick.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-tick.C:
+				p.hush(after)
+			}
+		}
+	}()
+	return func() { close(done) }
+}
+
+// hush notes the install quiet, once it's printed nothing for after: the
+// run's log told, as something to look at, naming its last line; the step
+// saying since when.
+func (p *progress) hush(after time.Duration) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.quiet || time.Since(p.heard) < after {
+		return
+	}
+	p.quiet = true
+	last := "it's printed nothing yet"
+	if p.last != "" {
+		last = "its last line: " + p.last
+	}
+	event.Log(p.ctx, event.Logged{Line: fmt.Sprintf("%s has said nothing since %s; %s", p.program, p.heard.Format("15:04:05"), last), Alert: true})
+	p.say()
+}
+
+// line reads a line the install printed: heard, it's no longer quiet.
 func (p *progress) line(line string) {
 	name, done := p.counter.Done(line, p.names)
 	now, announced := p.announced(line)
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.heard = time.Now()
+	if l := strings.TrimSpace(line); l != "" {
+		p.last = l
+	}
+	if p.quiet {
+		p.quiet = false
+		p.say()
+	}
 	moved := announced && now != p.now && !p.done[now]
 	if moved {
 		p.now = now
@@ -667,9 +755,11 @@ func (p *progress) line(line string) {
 	case done:
 		if p.note(p.done, name) {
 			p.unstarted, p.fetching = false, false
-			event.Log(p.ctx, event.Logged{Line: "Installed " + p.shown(name)})
+			// What's next is said first, so a screen drawn as the log's told
+			// is never a line behind it, still installing what's in.
 			p.say()
-			engine.Changed(p.ctx)
+			event.Log(p.ctx, event.Logged{Line: "Installed " + p.shown(name)})
+			engine.Put(p.ctx, name)
 		}
 	case p.fetching && p.fetcher.Begun(line):
 		p.fetching = false
@@ -677,6 +767,7 @@ func (p *progress) line(line string) {
 	case p.fetching:
 		if name, ok := p.fetcher.Fetched(line, p.names); ok && p.note(p.fetched, name) {
 			p.say()
+			event.Log(p.ctx, event.Logged{Line: "Downloaded " + p.shown(name)})
 		}
 	case moved:
 		p.say()
@@ -747,16 +838,27 @@ func (p *progress) start() {
 }
 
 // say says how the install's going: nothing, for a Fetcher's whose command
-// hasn't started. Once lines can come, p.mu must be held.
+// hasn't started; a Fetcher's moving through downloading, then installing,
+// each half the way; quiet, since when it's said nothing. Once lines can
+// come, p.mu must be held.
 func (p *progress) say() {
+	quiet := func(says string) string {
+		if p.quiet {
+			return says + " · nothing since " + p.heard.Format("15:04")
+		}
+		return says
+	}
+	n := float64(len(p.names))
 	switch {
 	case p.says != "":
-		event.Say(p.ctx, event.Doing{Says: p.says})
+		event.Say(p.ctx, event.Doing{Says: quiet(p.says)})
 	case p.unstarted:
 	case p.fetching:
-		event.Say(p.ctx, event.Doing{Says: "downloading", Done: len(p.fetched), Of: len(p.names)})
+		event.Say(p.ctx, event.Doing{Says: quiet("downloading"), Done: len(p.fetched), Of: len(p.names), Far: float64(len(p.fetched)) / n / 2})
+	case p.fetcher != nil:
+		event.Say(p.ctx, event.Doing{Says: quiet(strings.TrimSpace("installing " + p.next())), Done: len(p.done), Of: len(p.names), Far: 0.5 + float64(len(p.done))/n/2})
 	default:
-		event.Say(p.ctx, event.Doing{Says: strings.TrimSpace("installing " + p.next()), Done: len(p.done), Of: len(p.names)})
+		event.Say(p.ctx, event.Doing{Says: quiet(strings.TrimSpace("installing " + p.next())), Done: len(p.done), Of: len(p.names)})
 	}
 }
 

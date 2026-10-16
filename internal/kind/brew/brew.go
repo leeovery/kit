@@ -20,6 +20,7 @@ import (
 
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/engine"
+	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/runner"
 )
@@ -131,7 +132,72 @@ func (h *Homebrew) Casks() kind.Kind {
 }
 
 func (h *Homebrew) brew(ctx context.Context, args ...string) (runner.Result, error) {
-	return h.run.Run(ctx, runner.Command{Name: "brew", Args: args})
+	return h.run.Run(ctx, h.batched(runner.Command{Name: "brew", Args: args}))
+}
+
+// batched is cmd, a brew command, with Homebrew's git over SSH never asking
+// anything (SSHConfig): brew installing runs in kit's session, with kit's
+// terminal, where ssh would ask, unseen behind kit's screen, for good, as it
+// did whether to trust GitHub's host key when the user's git settings sent
+// a tap's clone over SSH (the fifth run, 16 Oct). Asking, it fails at once,
+// saying why.
+func (h *Homebrew) batched(cmd runner.Command) runner.Command {
+	if path, err := SSHConfig(); err == nil {
+		cmd.Env = append(cmd.Env, "HOMEBREW_SSH_CONFIG_PATH="+path)
+	}
+	return cmd
+}
+
+// sshConfig is the ssh config Homebrew's git uses as kit runs brew: batch
+// mode, then the user's own config, as ssh takes the first value it reads.
+const sshConfig = `# Homebrew's git over SSH as kit runs brew: never asking, as no one would
+# see it. Written by kit; then the user's own.
+BatchMode yes
+Include ~/.ssh/config
+`
+
+// SSHConfig writes the ssh config Homebrew's git uses as kit runs brew, in
+// the user's own temporary folder, and returns where it is.
+func SSHConfig() (string, error) {
+	path := filepath.Join(os.TempDir(), "kit-homebrew-ssh-config")
+	if had, err := os.ReadFile(path); err == nil && string(had) == sshConfig {
+		return path, nil
+	}
+	return path, os.WriteFile(path, []byte(sshConfig), 0o600)
+}
+
+// ready taps the taps names, the kind named kindName's, are from that
+// aren't tapped yet, each as one command, saying so: in Homebrew's turn to
+// change things.
+func (h *Homebrew) ready(ctx context.Context, kindName string, names []string) error {
+	var taps []string
+	for _, name := range names {
+		if parts := strings.Split(name, "/"); len(parts) == 3 && !slices.Contains(taps, parts[0]+"/"+parts[1]) {
+			taps = append(taps, parts[0]+"/"+parts[1])
+		}
+	}
+	if len(taps) == 0 {
+		return nil
+	}
+	tapped, err := h.lines(ctx, "tap")
+	if err != nil {
+		return err
+	}
+	taps = slices.DeleteFunc(taps, func(tap string) bool {
+		return slices.ContainsFunc(tapped, func(had string) bool { return strings.EqualFold(had, tap) })
+	})
+	if len(taps) == 0 {
+		return nil
+	}
+	defer h.take(ctx, kindName)()
+	var errs []error
+	for _, tap := range taps {
+		event.Say(ctx, event.Doing{Says: "tapping " + tap})
+		if _, err := h.brew(ctx, "tap", tap); err != nil {
+			errs = append(errs, fmt.Errorf("couldn't tap %s: %w", tap, err))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // updated brings Homebrew's formulae up to date, once a run, before the
@@ -162,10 +228,10 @@ func (h *Homebrew) install(ctx context.Context, kindName, which string, names []
 	}
 	defer h.take(ctx, kindName)()
 	kind.Starting(ctx)
-	_, err := h.run.Run(ctx, h.sudoed(ctx, runner.Command{
+	_, err := h.run.Run(ctx, h.sudoed(ctx, h.batched(runner.Command{
 		Name: "brew", Args: slices.Concat([]string{"install", which}, names),
 		Timeout: installTimeout(len(names)), Lines: kind.Lines(ctx),
-	}))
+	})))
 	return err
 }
 
@@ -271,7 +337,7 @@ func named(said string, names []string) (string, bool) {
 // which says what they are.
 func (h *Homebrew) uninstall(ctx context.Context, kindName, which string, names []string) error {
 	defer h.take(ctx, kindName)()
-	_, err := h.run.Run(ctx, h.sudoed(ctx, runner.Command{Name: "brew", Args: slices.Concat([]string{"uninstall", which}, names)}))
+	_, err := h.run.Run(ctx, h.sudoed(ctx, h.batched(runner.Command{Name: "brew", Args: slices.Concat([]string{"uninstall", which}, names)})))
 	return err
 }
 
@@ -385,6 +451,11 @@ func (formulae) Installing(line string, names []string) (string, bool) {
 // Short is the part of name a formula's shown by: its name in its tap.
 func (formulae) Short(name string) string { return lastPart(name) }
 
+// Ready taps the taps the formulae names are from, before any's installed.
+func (f formulae) Ready(ctx context.Context, names []string) error {
+	return f.ready(ctx, f.Name(), names)
+}
+
 // Shares names the kind formulae take turns with: casks, which Homebrew
 // installs too.
 func (formulae) Shares() []string { return []string{"cask"} }
@@ -479,6 +550,11 @@ func (casks) Installing(line string, names []string) (string, bool) {
 
 // Short is the part of name a cask's shown by: its name in its tap.
 func (casks) Short(name string) string { return lastPart(name) }
+
+// Ready taps the taps the casks names are from, before any's installed.
+func (c casks) Ready(ctx context.Context, names []string) error {
+	return c.ready(ctx, c.Name(), names)
+}
 
 // Shares names the kind casks take turns with: formulae, which Homebrew
 // installs too.

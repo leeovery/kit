@@ -468,6 +468,7 @@ func (p *Pipeline) run(ctx context.Context, sink event.Sink, opts Options, apply
 		resumed:  make(chan chan struct{}),
 		looked:   make(chan struct{}),
 		over:     make(map[string]chan struct{}, len(steps)),
+		putting:  make(map[string]map[string]bool),
 		freed:    make(map[string]map[string]bool),
 		looks:    make(map[*look]bool),
 	}
@@ -486,8 +487,8 @@ func (p *Pipeline) run(ctx context.Context, sink event.Sink, opts Options, apply
 
 // dispatch runs a run's steps: it starts each, in pipeline order, once what
 // it needs is done and a job is free, and defers each whose needs didn't
-// stand ok. Only its own goroutine touches its maps, but freed and looks,
-// which mu guards, and titles and over, which steps' goroutines read, as
+// stand ok. Only its own goroutine touches its maps, but away, putting,
+// freed and looks, which mu guards, and titles and over, which steps' goroutines read, as
 // they never change once it's started.
 type dispatch struct {
 	sink     event.Sink
@@ -510,12 +511,17 @@ type dispatch struct {
 	// over are closed as each step finishes, for a step waiting on one of
 	// its things.
 	over map[string]chan struct{}
-	// freed are, for each step, the steps it takes as done before they've
-	// finished, as each waits for what that step leads up to (free); looks,
-	// the waits of the steps waiting.
-	mu    sync.Mutex
-	freed map[string]map[string]bool
-	looks map[*look]bool
+	// away are how many steps have given their jobs up while they wait for
+	// a person (Release), who may put in place what others wait for;
+	// putting, for each step, the things it says it's putting in place, not
+	// there yet (Putting); freed, for each step, the steps it takes as done
+	// before they've finished, as each waits for what that step leads up to
+	// (free); looks, the waits of the steps waiting.
+	mu      sync.Mutex
+	away    int
+	putting map[string]map[string]bool
+	freed   map[string]map[string]bool
+	looks   map[*look]bool
 }
 
 // look is a step's wait for a thing of the step on, or, on none, for one no
@@ -576,11 +582,14 @@ func (d *dispatch) run(ctx context.Context, steps []Step, jobs int) {
 
 // hush has the waits for things no step in particular puts in place end,
 // as the run's gone quiet: no step's at work, or can start, or is to look
-// again at what it waits for, so none could put them there. Each looks once
-// more, then ends without what it waited for.
+// again at what it waits for, or waits for a person, so none could put them
+// there. Each looks once more, then ends without what it waited for.
 func (d *dispatch) hush() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if d.away > 0 {
+		return
+	}
 	for lk := range d.looks {
 		if lk.woken {
 			return
@@ -731,8 +740,9 @@ func (d *dispatch) startReady(ctx context.Context, steps []Step, running *int, j
 
 // stepContext is ctx for running s: what runs in it is s's, what s says
 // it's doing as it goes, and tells the run's log, is emitted, what it waits
-// for partway through applying is waited for as its Later are, and what it
-// says may be in place has the steps waiting for its things look again.
+// for partway through applying is waited for as its Later are, what it says
+// may be in place has the steps waiting for its things look again, and what
+// it says it's putting in place isn't there for them till it says it is.
 func (d *dispatch) stepContext(ctx context.Context, s Step) context.Context {
 	ctx = event.WithSaying(event.WithStep(ctx, s.Name), func(e event.Doing) {
 		e.Time, e.Step = d.now(), s.Name
@@ -743,6 +753,9 @@ func (d *dispatch) stepContext(ctx context.Context, s Step) context.Context {
 		d.sink.Emit(e)
 	})
 	ctx = context.WithValue(ctx, changedKey{}, func() { d.poke(s.Name) })
+	ctx = context.WithValue(ctx, releaseKey{}, func() func() { return d.release(s) })
+	ctx = context.WithValue(ctx, puttingKey{}, func(things []string) func() { return d.putIn(s.Name, things) })
+	ctx = context.WithValue(ctx, putKey{}, func(thing string) { d.put(s.Name, thing) })
 	return context.WithValue(ctx, awaitKey{}, func(ctx context.Context, w Wait, says string) bool {
 		return d.await(ctx, s, w, func() { event.Say(ctx, event.Doing{Says: says}) })
 	})
@@ -762,6 +775,111 @@ func Await(ctx context.Context, w Wait, says string) bool {
 		return await(ctx, w, says)
 	}
 	return w.Ready == nil || w.there(ctx)
+}
+
+type releaseKey struct{}
+
+// Release gives up the job of the step ctx is running while it waits for a
+// person, as a step by hand waits for its card's turn and for what it asks
+// to be done: the run starts others meanwhile. It returns what takes a job
+// back, waiting for one before any step not yet started, to be called
+// before the step goes on, or finishes. Outside a run, it does nothing.
+func Release(ctx context.Context) (back func()) {
+	if release, ok := ctx.Value(releaseKey{}).(func() func()); ok {
+		return release()
+	}
+	return func() {}
+}
+
+// release gives s's job up, as it waits for a person (Release), and
+// returns what takes one back: s is away meanwhile, so the run doesn't go
+// quiet while it waits, as a person may put in place what others wait for;
+// asking for its job back, it's queued, and no longer away.
+func (d *dispatch) release(s Step) (back func()) {
+	d.mu.Lock()
+	d.away++
+	d.mu.Unlock()
+	d.parked <- parking{step: s.Name}
+	return func() {
+		granted := make(chan struct{})
+		d.resumed <- granted
+		d.mu.Lock()
+		d.away--
+		d.mu.Unlock()
+		<-granted
+	}
+}
+
+type puttingKey struct{}
+
+// Putting tells the run the step ctx is running is putting things in place,
+// not there yet whatever a look finds, as a cask with an installer is
+// listed installed once it's staged, before its installer's done: a wait
+// for one of them isn't over till the step says it's in place (Put), stops
+// putting them (the func it returns), or finishes. Things are named as its
+// kind names them: a wait's thing is one by its name in full, or its last
+// part, as cask:1password-cli is 1password/tap/1password-cli. Outside a
+// run, it does nothing.
+func Putting(ctx context.Context, things []string) (stop func()) {
+	if putting, ok := ctx.Value(puttingKey{}).(func([]string) func()); ok {
+		return putting(things)
+	}
+	return func() {}
+}
+
+type putKey struct{}
+
+// Put tells the run the step ctx is running has put thing in place: no
+// longer one it's putting (Putting), and the steps waiting for its things
+// look again at once, as Changed has them. Outside a run, it does nothing.
+func Put(ctx context.Context, thing string) {
+	if put, ok := ctx.Value(putKey{}).(func(string)); ok {
+		put(thing)
+	}
+}
+
+// putIn notes things step is putting in place, and returns what notes it
+// putting them no more.
+func (d *dispatch) putIn(step string, things []string) (stop func()) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.putting[step] == nil {
+		d.putting[step] = map[string]bool{}
+	}
+	for _, t := range things {
+		d.putting[step][t] = true
+	}
+	return func() {
+		d.mu.Lock()
+		defer d.mu.Unlock()
+		for _, t := range things {
+			delete(d.putting[step], t)
+		}
+		d.wake(step)
+	}
+}
+
+// put notes thing put in place by step, waking the steps waiting for its
+// things.
+func (d *dispatch) put(step, thing string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	delete(d.putting[step], thing)
+	d.wake(step)
+}
+
+// isPutting reports whether step is putting thing in place, by its name in
+// full or its last part.
+func (d *dispatch) isPutting(step, thing string) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	last := func(name string) string { return name[strings.LastIndex(name, "/")+1:] }
+	for t := range d.putting[step] {
+		if t == thing || last(t) == last(thing) {
+			return true
+		}
+	}
+	return false
 }
 
 type changedKey struct{}
@@ -922,7 +1040,8 @@ func (d *dispatch) await(ctx context.Context, s Step, w Wait, waiting func()) bo
 
 // settled reports whether s's wait for w, watched by lk, is over, and
 // whether w came: once w's step has finished, w came if its thing's in
-// place, or it's the step itself; before, once its thing's in place, or
+// place, or it's the step itself; before, once its thing's in place and its
+// step isn't saying it's still putting it there (Putting), or
 // once its step takes s as done, as it waits for what s leads up to, when
 // only the step itself has come. A wait for a thing of no step is over once
 // it's in place, or the run's gone quiet without it.
@@ -937,7 +1056,7 @@ func (d *dispatch) settled(ctx context.Context, s Step, w Wait, lk *look) (came,
 	default:
 	}
 	switch {
-	case w.Ready != nil && w.there(ctx):
+	case w.Ready != nil && !d.isPutting(w.Step, w.Thing) && w.there(ctx):
 		return true, true
 	case d.isFreed(s.Name, w.Step):
 		return w.Ready == nil, true

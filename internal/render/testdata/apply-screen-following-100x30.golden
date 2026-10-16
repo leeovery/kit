@@ -1,11 +1,11 @@
 
   █  ▄▀  ▀█▀  ▀▀█▀▀  │  bootstrap · laptop · Fri 2 Jan · 03:04
   █▀▀▄    █     █    │  ▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮  54% · 6m12s so far
-  █   █  ▄█▄    █    │  ◐ working · nothing needs you · 4 for later
+  █   █  ▄█▄    █    │  ◐ working · nothing needs you
 
 ────────────────────────────────────────────────────┬───────────────────────────────────────────────
                                                     │
-  ≡ Everything  the whole log, as it happens        │  EVERYTHING  click a row for its lines alone
+  ≡ Everything                                      │  LOG
                                                     │
   ● This Mac  all 6 done                            │  03:05:13  + Installed cask-2
   ● Files and shell  all 2 done                     │  03:05:23  + Installed formula-2
@@ -22,9 +22,9 @@
   ◐ Your steps  applying claude-code                │  03:08:18  + Installed cask-7
   ○ Backups  1 of 3 · Arq waits for Homebrew casks  │  03:08:18  + Installed formula-9
                                                     │  03:08:43  + Installed formula-10
-  FOR LATER  4                                      │  03:08:55  + Installed cask-8
-  △ Allow remote users Full Disk Access             │  03:09:08  + Installed formula-11
-  △ Install the editor from its site                │  03:09:33  + Installed formula-12
-  and 2 more                                        │  03:10:17  ◐ Installing slack · 4 of 42
+                                                    │  03:08:55  + Installed cask-8
+                                                    │  03:09:08  + Installed formula-11
+                                                    │  03:09:33  + Installed formula-12
+                                                    │  03:10:17  ◐ Installing slack · 4 of 42
                                                     │            ◐ Installing ffmpeg · 38 of 129
   tab next row · ↑↓ scroll · q stop                 │            ◐ Applying claude-code

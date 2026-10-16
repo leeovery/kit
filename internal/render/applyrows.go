@@ -147,12 +147,13 @@ func (p *Pretty) heldRow(name string, seen map[string]bool) string {
 // rowLook is a row as it stands, its steps taken together: a step failed,
 // what went wrong, or how many did; a card up for a step by hand holding
 // one of them up, or one of them needing you, orange; one at work, what
-// it's doing; some waiting, what for; all finished, what they've left to do
-// later, or that they didn't run, or, all well, what's done.
+// it's doing; some waiting, what for; all finished, how many things
+// they've left to do at the end, or that they didn't run, or, all well,
+// what's done.
 func (p *Pretty) rowLook(r applyRow) look.Row {
 	row := look.Row{Name: r.name}
 	var failed, unwell, skipped []event.Step
-	finished, later := 0, 0
+	finished, toDo := 0, 0
 	for _, s := range r.steps {
 		f, ok := p.results[s.Name]
 		if !ok {
@@ -165,7 +166,7 @@ func (p *Pretty) rowLook(r applyRow) look.Row {
 		case look.NeedsYou:
 			unwell = append(unwell, s)
 		case look.ToDo:
-			later += len(f.Result.Items)
+			toDo += len(f.Result.Items)
 		case look.Skipped:
 			skipped = append(skipped, s)
 		}
@@ -186,8 +187,8 @@ func (p *Pretty) rowLook(r applyRow) look.Row {
 		row.State, row.Says = look.Running, work.doingSays(len(r.steps) > 1, false)
 	case finished < len(r.steps):
 		row.State, row.Says = look.Queued, look.Muted(p.rowWaiting(r, finished))
-	case later > 0:
-		row.State, row.Says = look.ToDo, look.White(fmt.Sprintf("%d for later", later))
+	case toDo > 0:
+		row.State, row.Says = look.ToDo, look.White(fmt.Sprintf("%d to do at the end", toDo))
 	case len(skipped) > 0:
 		row.State, row.Says = look.Skipped, p.listRow(skipped[0]).Says
 	default:
@@ -225,7 +226,7 @@ func (p *Pretty) rowWaitsOnYou(r applyRow) (string, bool) {
 // rowWaiting is what r says while none of its steps is at work and not all
 // have finished, finished of them: what the first waiting for something
 // waits for, as waiting says it; how many are done first, and which waits,
-// when some are.
+// when some are, unless it's named as the row is.
 func (p *Pretty) rowWaiting(r applyRow, finished int) string {
 	var first event.Step
 	words := ""
@@ -241,7 +242,10 @@ func (p *Pretty) rowWaiting(r applyRow, finished int) string {
 	if finished == 0 || len(r.steps) == 1 {
 		return words
 	}
-	return fmt.Sprintf("%d of %d · %s %s", finished, len(r.steps), p.title(first.Name), words)
+	if title := p.title(first.Name); title != r.name {
+		words = title + " " + words
+	}
+	return fmt.Sprintf("%d of %d · %s", finished, len(r.steps), words)
 }
 
 // waitWords are what a step not finished and not at work waits for: what
@@ -280,27 +284,6 @@ func (p *Pretty) lamps() []look.Lamp {
 		lamps = append(lamps, l)
 	}
 	return lamps
-}
-
-// later are the titles of what's left for later, in order: the steps by
-// hand that come at the run's end, till theirs has finished, all but those
-// done meanwhile and the one up now; then what the steps finished have
-// left to do, as the record lists it.
-func (p *Pretty) later() []string {
-	var titles []string
-	if _, finished := p.results[steps.ManualName]; !finished {
-		for _, h := range p.step(steps.ManualName).ByHand {
-			id := cardID(steps.ManualName, h.Name)
-			if p.handsDone[id] || p.card != nil && cardID(p.card.Step, p.card.Item) == id {
-				continue
-			}
-			titles = append(titles, h.Title)
-		}
-	}
-	for _, t := range p.tasks() {
-		titles = append(titles, t.Title)
-	}
-	return titles
 }
 
 // stillToDo is whether the step by hand called item is among what r, its

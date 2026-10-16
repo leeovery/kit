@@ -15,7 +15,6 @@ import (
 	"github.com/leeovery/kit/internal/boot"
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/event"
-	"github.com/leeovery/kit/internal/hand"
 	"github.com/leeovery/kit/internal/look"
 	"github.com/leeovery/kit/internal/render"
 )
@@ -326,7 +325,7 @@ func rowLine(t *testing.T, screen string, w int, name string) string {
 func logOf(screen string, w int) []string {
 	_, right := panes(screen, w)
 	at := slices.IndexFunc(right, func(l string) bool {
-		return strings.HasPrefix(l, "  EVERYTHING  ") || strings.Contains(l, "  its lines alone · esc for everything")
+		return l == "  LOG" || strings.HasPrefix(l, "  LOG · ")
 	})
 	if at < 0 {
 		return nil
@@ -336,22 +335,6 @@ func logOf(screen string, w int) []string {
 		shown = shown[:len(shown)-1]
 	}
 	return shown
-}
-
-// laterOf is what the left pane lists for later, in a screen w wide.
-func laterOf(screen string, w int) (header string, items []string) {
-	left, _ := panes(screen, w)
-	at := slices.IndexFunc(left, func(l string) bool { return strings.HasPrefix(l, "  FOR LATER") })
-	if at < 0 {
-		return "", nil
-	}
-	for _, l := range left[at+1:] {
-		if l == "" {
-			break
-		}
-		items = append(items, l)
-	}
-	return left[at], items
 }
 
 // clickRow is a click on the row called name, as the screen w wide has it.
@@ -484,7 +467,8 @@ func rowsRun(steps []event.Step, events ...event.Event) []event.Event {
 // one failed, why, or how many did; a card up for a step by hand holding it
 // up, that it waits for you; one at work, what it's doing and how far it's
 // got, a bar under it when it counts; some waiting, what for, how many are
-// done first; all finished, how many things are for later; all well, what
+// done first, the one waiting named unless it's named as its row is; all
+// finished, how many things are to do at the end; all well, what
 // its step did, or that all are done; none started, that it's waiting.
 // Each in its state's mark and colour.
 func TestApplyingRowSays(t *testing.T) {
@@ -523,7 +507,9 @@ func TestApplyingRowSays(t *testing.T) {
 		{"waiting for a thing, at work no more", "Homebrew formulae", "  ○ Homebrew formulae  waits for TOKEN: 2 to install", append(applying(10, "brew"),
 			event.Doing{Time: after(20), Step: "brew", Says: "waiting for TOKEN: 2 to install"}), look.Cyan("○"), ""},
 		{"waiting, one step", "Secrets", "  ○ Secrets  waits for 1password", nil, look.Cyan("○"), ""},
-		{"for later", "Backups", "  △ Backups  2 for later", []event.Event{
+		{"waiting, some done, one named as its row", "Homebrew formulae", "  ○ Homebrew formulae  1 of 2 · waits for Homebrew casks", append([]event.Event{fine(2, "homebrew", "/opt/homebrew")},
+			append(applying(10, "brew"), event.Doing{Time: after(20), Step: "brew", Says: "waiting for Homebrew casks"})...), look.Cyan("○"), ""},
+		{"to do at the end", "Backups", "  △ Backups  2 to do at the end", []event.Event{
 			finished(2, "time-machine", toDo("Add a Time Machine disk")), finished(3, "arq", toDo("Choose Arq's backup plan"))}, look.White("△"), ""},
 		{"done, one step", "Secrets", "  ● Secrets  24 synced", []event.Event{fine(2, "secret", "24 synced")}, look.Pink("●"), ""},
 		{"done, several", "Your steps", "  ● Your steps  all 3 done", []event.Event{
@@ -579,51 +565,17 @@ func TestApplyingBarIsWeighted(t *testing.T) {
 	}
 }
 
-// What's for later: the steps by hand at the end, all of them till their
-// step's finished, but the one up now and those done meanwhile; then what
-// each step finished left to do. They're counted in their header and in
-// the state line; once their step's finished, the steps by hand left are
-// what it says is left. In a window too short for them, the last are
-// counted.
-func TestApplyingForLater(t *testing.T) {
-	base := sixMinutesIn()
-	face, out, _ := applyAt(160, 64, time.Minute, base)
-	got := screen(out.String())
-	header, items := laterOf(got, 160)
-	want := []string{"  △ Allow remote users Full Disk Access", "  △ Install the editor from its site", "  △ Allow Karabiner-Elements", "  △ Add a Time Machine disk"}
-	if header != "  FOR LATER  4" || !slices.Equal(items, want) {
-		t.Errorf("for later is %q\n%s\nwant FOR LATER 4\n%s", header, strings.Join(items, "\n"), strings.Join(want, "\n"))
-	}
-	if state := lines(got)[3]; !strings.HasSuffix(state, "│  ◐ working · nothing needs you · 4 for later") {
-		t.Errorf("the state line is %q; want 4 for later", state)
-	}
-	_ = face.Close()
-
-	karabiner := event.NeedsYou{Time: after(400), Step: "manual", Item: "karabiner", Title: "Allow Karabiner-Elements", More: 1}
-	sharing := event.NeedsYou{Time: after(420), Step: "manual", Item: "sharing", Title: "Allow remote users Full Disk Access"}
-	face, out, _ = applyAt(160, 64, time.Minute, append(slices.Clone(base), event.StepStarted{Time: after(399), Step: "manual", Doing: "applying"}, karabiner))
-	if _, items := laterOf(screen(out.String()), 160); slices.Contains(items, "  △ Allow Karabiner-Elements") {
-		t.Errorf("with Karabiner's card up, for later is\n%s\nwant it left out: the panel shows it", strings.Join(items, "\n"))
-	}
-	face.Emit(sharing)
-	time.Sleep(300 * time.Millisecond)
-	if _, items := laterOf(screen(out.String()), 160); !slices.Equal(items, []string{want[1], want[3]}) {
-		t.Errorf("Karabiner done, the next card up, for later is\n%s\nwant\n%s", strings.Join(items, "\n"), strings.Join([]string{want[1], want[3]}, "\n"))
-	}
-	face.Emit(finished(500, "manual", check.Result{State: check.Attention, Summary: "1 of 3 done", Items: []check.Item{
-		{ID: "manual:sharing", Name: "Allow remote users Full Disk Access", State: check.ByHand},
-		{ID: "manual:editor", Name: "Install the editor from its site", State: check.ByHand}}}))
-	time.Sleep(300 * time.Millisecond)
-	if _, items := laterOf(screen(out.String()), 160); !slices.Equal(items, []string{want[3], want[0], want[1]}) {
-		t.Errorf("their step finished, for later is\n%s\nwant what each step left to do, the steps by hand left among them", strings.Join(items, "\n"))
-	}
-	_ = face.Close()
-
-	face, out, _ = applyAt(100, 30, time.Minute, append(slices.Clone(base), applying(70, "mise")...))
+// There's no later during the run (Lee, 16 Oct): what's left to do waits
+// for its end, counted neither in the state line nor listed on the left.
+func TestApplyingHasNoLater(t *testing.T) {
+	face, out, _ := applyAt(160, 64, time.Minute, sixMinutesIn())
 	defer func() { _ = face.Close() }()
-	header, items = laterOf(screen(out.String()), 100)
-	if header != "  FOR LATER  4" || len(items) == 0 || len(items) == 4 || !strings.HasPrefix(items[len(items)-1], "  and ") {
-		t.Errorf("at 100 by 30, for later is %q\n%s\nwant as many as fit, then how many more", header, strings.Join(items, "\n"))
+	got := screen(out.String())
+	if strings.Contains(got, "FOR LATER") || strings.Contains(got, "for later") {
+		t.Errorf("the screen says for later\n%s", got)
+	}
+	if state := lines(got)[3]; !strings.HasSuffix(state, "│  ◐ working · nothing needs you") {
+		t.Errorf("the state line is %q; want working, nothing needs you, and nothing more", state)
 	}
 }
 
@@ -673,20 +625,6 @@ func TestApplyingLog(t *testing.T) {
 	}
 }
 
-// A card put off with l: the log says it's for later, never done.
-func TestApplyingLogSaysACardPutOff(t *testing.T) {
-	face, out, kb := applyAt(160, 64, 7*time.Minute, cardUp(signIn))
-	defer func() { _ = face.Close() }()
-	face.Hands(func(string, hand.Answer) bool { return true })
-	kb.press(t, keyL)
-	face.Emit(finished(400, "1password", check.Result{State: check.Attention, Summary: "not done", Items: []check.Item{{ID: "manual:1password", Name: "Sign in to 1Password", State: check.ByHand}}}))
-	time.Sleep(300 * time.Millisecond)
-	log := strings.Join(logOf(screen(out.String()), 160), "\n")
-	if !strings.Contains(log, "  03:10:45  △ Sign in to 1Password: for later\n") || strings.Contains(log, "Sign in to 1Password: done") {
-		t.Errorf("put off, the log is\n%s\nwant it for later, not done", log)
-	}
-}
-
 // A row chosen, the log is its lines alone, a step by hand's in the row of
 // the step it holds up, what's under way its own; the steps by hand at the
 // end are in no row, shown with everything alone.
@@ -704,7 +642,7 @@ func TestApplyingLogOfARow(t *testing.T) {
 	kb.press(t, clickRow("Secrets")(screen(out.String()), 160)...)
 	got := screen(out.String())
 	_, right := panes(got, 160)
-	if !slices.Contains(right, "  SECRETS  its lines alone · esc for everything") {
+	if !slices.Contains(right, "  LOG · SECRETS") {
 		t.Errorf("with Secrets chosen, the right pane is\n%s\nwant its heading", strings.Join(right, "\n"))
 	}
 	want := []string{
@@ -749,19 +687,18 @@ func TestApplyingPanel(t *testing.T) {
 		"",
 		"      kit carries on by itself once it's done",
 		"      o opens 1Password again",
-		"      l later",
 		"",
 		"───────────────────────────────────────────────────────────────────────────────────────────────────",
 		"",
-		"  EVERYTHING  click a row for its lines alone",
+		"  LOG",
 	}
 	if !slices.Equal(right[:len(want)], want) {
 		t.Errorf("the right pane starts\n%s\nwant\n%s", strings.Join(right[:len(want)], "\n"), strings.Join(want, "\n"))
 	}
-	if rule := lines(got)[headLines+13]; !strings.Contains(rule, "├───") {
+	if rule := lines(got)[headLines+12]; !strings.Contains(rule, "├───") {
 		t.Errorf("the panel's rule is %q; want it to join the rule between the panes", rule)
 	}
-	if state := lines(got)[3]; !strings.HasSuffix(state, "│  ▲ waiting for you · Sign in to 1Password · 4 for later") {
+	if state := lines(got)[3]; !strings.HasSuffix(state, "│  ▲ waiting for you · Sign in to 1Password") {
 		t.Errorf("the state line is %q; want it waiting for you, the card's title", state)
 	}
 	frame := strings.Join(lastFrame(out.String()), "\n")
@@ -773,7 +710,7 @@ func TestApplyingPanel(t *testing.T) {
 	face.Emit(finished(400, "1password", check.Result{State: check.OK, Summary: "done"}))
 	time.Sleep(300 * time.Millisecond)
 	got = screen(uncoloured(out.String()))
-	if _, right := panes(got, 160); right[1] != "  EVERYTHING  click a row for its lines alone" || strings.Contains(lines(got)[3], "waiting for you") {
+	if _, right := panes(got, 160); right[1] != "  LOG" || strings.Contains(lines(got)[3], "waiting for you") {
 		t.Errorf("the card done, the screen is\n%s\nwant the panel gone, the log with the whole side", got)
 	}
 }
@@ -789,9 +726,9 @@ func TestApplyingPanelSaysWhy(t *testing.T) {
 		keys       []string
 	}{
 		{event.NeedsYou{Time: after(360), Step: "manual", Item: "karabiner", Title: "Allow Karabiner-Elements", More: 2},
-			"      The rest is done: this is what's left.", "2 more after this · waiting 12.0s", []string{"      enter when it's done", "      l later"}},
+			"      The rest is done: this is what's left.", "2 more after this · waiting 12.0s", []string{"      enter when it's done"}},
 		{event.NeedsYou{Time: after(360), Step: "1password", Item: "1password", Title: "Sign in to 1Password", Tells: true},
-			"      The run waits for this, for Secrets.", "waiting 12.0s", []string{"      kit carries on by itself once it's done", "      l later"}},
+			"      The run waits for this, for Secrets.", "waiting 12.0s", []string{"      kit carries on by itself once it's done"}},
 	} {
 		steps := slices.Clone(newMac)
 		face, out, _ := applyAt(160, 64, 6*time.Minute+12*time.Second, append(rowsRun(steps, event.StepStarted{Time: after(360), Step: tt.card.Step, Doing: "applying"}), tt.card))
@@ -808,6 +745,14 @@ func TestApplyingPanelSaysWhy(t *testing.T) {
 	if _, right := panes(screen(out.String()), 160); right[3] != "      Nothing waits for this: the rest of the run carries on meanwhile." {
 		t.Errorf("a card nothing waits for says %q", right[3])
 	}
+	steps = []event.Step{{Name: "secret", Title: "Secrets", Area: "Drift", Waits: []string{"1password"}},
+		{Name: "1password", Title: "1password", Area: "Manual"}, {Name: "manual", Title: "By hand", Area: "Manual", Waits: []string{"secret", "1password"}}}
+	held, out, _ := applyAt(160, 64, time.Minute, rowsRun(steps, event.StepStarted{Step: "1password", Doing: "applying"},
+		event.NeedsYou{Step: "1password", Item: "1password", Title: "Sign in to 1Password"}))
+	defer func() { _ = held.Close() }()
+	if _, right := panes(screen(out.String()), 160); right[3] != "      The run waits for this, for Secrets." {
+		t.Errorf("a card the steps by hand at the end wait for too says %q; want them left out", right[3])
+	}
 }
 
 // The state line says the run's working, else what it waits on you for,
@@ -816,12 +761,12 @@ func TestApplyingPanelSaysWhy(t *testing.T) {
 func TestApplyingStateLine(t *testing.T) {
 	face, out, _ := applyAt(160, 64, time.Minute, append(casksFailed(), event.Asking{Time: after(358), Says: "asking for an administrator's password"}))
 	defer func() { _ = face.Close() }()
-	if state := lines(screen(out.String()))[3]; !strings.HasSuffix(state, "│  ▲ waiting for you · macOS asking for an administrator's password · → answer it in the window macOS shows · 1 failed · 4 for later") {
+	if state := lines(screen(out.String()))[3]; !strings.HasSuffix(state, "│  ▲ waiting for you · macOS asking for an administrator's password · in its window · 1 failed") {
 		t.Errorf("macOS asking, the state line is %q", state)
 	}
 	face.Emit(event.Asking{Time: after(359)})
 	time.Sleep(300 * time.Millisecond)
-	if state := lines(screen(out.String()))[3]; !strings.HasSuffix(state, "│  ◐ working · nothing needs you · 1 failed · 4 for later") {
+	if state := lines(screen(out.String()))[3]; !strings.HasSuffix(state, "│  ◐ working · nothing needs you · 1 failed") {
 		t.Errorf("macOS answered, the state line is %q", state)
 	}
 }
@@ -1018,7 +963,7 @@ func TestApplyingGivesTheScreenBack(t *testing.T) {
 		face.Emit(e)
 	}
 	time.Sleep(300 * time.Millisecond)
-	onScreen := func() bool { return strings.Contains(screen(out.String()), "click a row for its lines alone") }
+	onScreen := func() bool { return strings.Contains(screen(out.String()), "≡") }
 	mouse := func() bool { return mouseReported(out.String()) }
 	if !onScreen() || !mouse() || !kb.isRaw() {
 		t.Error("with its screen up, applying isn't reading keys, the terminal in its raw mode, and the mouse")

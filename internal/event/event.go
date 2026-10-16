@@ -139,14 +139,20 @@ type Doing struct {
 	// Done and Of are how far it's got, when it counts what it's doing:
 	// Done of Of things, as in 38 of 129 installed.
 	Done, Of int
+	// Far is how far it's got, of 1, when it counts and that's more than
+	// Done of Of: an install that downloads everything first moves through
+	// downloading, then installing, each half the way.
+	Far float64
 }
 
 // Logged is a line of kit's own words for the run's log: something a step
-// did, as it did it, as in "Installed jq".
+// did, as it did it, as in "Installed jq"; or, an Alert, something to look
+// at, as a command that's said nothing for minutes.
 type Logged struct {
-	Time time.Time
-	Step string
-	Line string
+	Time  time.Time
+	Step  string
+	Line  string
+	Alert bool
 }
 
 func (e Logged) At() time.Time { return e.Time }

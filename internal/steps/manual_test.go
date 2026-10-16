@@ -87,6 +87,9 @@ func TestManualLinesRead(t *testing.T) {
 	}
 	if m.Open != "System Settings" || strings.Join(m.Steps, "|") != "Scan the code|Turn on its CLI" {
 		t.Errorf("ParseManual() opens %q, its steps %q", m.Open, m.Steps)
+	} // --after alone only orders a line: it's one of the rest, at the end.
+	if m, err := steps.ParseManual("/home", config.Entry{Name: "x", Value: `"Do it" --after cask:jetbrains-toolbox`}); err != nil || m.Ordered() {
+		t.Errorf("ParseManual(--after alone) = %+v, %v; want it not a step of its own", m, err)
 	}
 }
 
@@ -279,7 +282,7 @@ func TestACardsAppThatWontOpen(t *testing.T) {
 	if up := c.cards(t, 1)[0]; up.Opened != "" {
 		t.Errorf("card opened %q, want nothing, as the app didn't open", up.Opened)
 	}
-	c.answer(t, "missing", hand.Later)
+	c.answer(t, "missing", hand.Done)
 	if err := ended(t, applied); err != nil {
 		t.Fatal(err)
 	}
@@ -323,24 +326,27 @@ func TestACardWithATestLooksAgain(t *testing.T) {
 	}
 }
 
-// Put off, a step by hand ends not done, what's left for the person to do:
-// nothing's wrong with it. With no one to act, applying leaves it as it
+// There's no putting a card off: a step by hand raised ends done, or with
+// the run stopped, left to do. With no one to act, applying leaves it as it
 // stands.
-func TestACardPutOff(t *testing.T) {
+func TestACardIsDoneOrStopped(t *testing.T) {
 	c := newCard(t)
-	m := steps.ManualStep{Name: "sign-in", Do: "Sign in", After: []string{"cask"}}
+	m := steps.ManualStep{Name: "sign-in", Do: "Sign in", Before: []string{"secret"}}
 	if err := steps.OwnManual(c.fake, c.state, m, nil).Apply(t.Context(), check.Result{}); err != nil {
 		t.Errorf("apply without anyone to act = %v", err)
 	}
 	step := steps.OwnManual(c.fake, c.state, m, c.raise)
-	applied := applying(t, step)
-	c.answer(t, "sign-in", hand.Later)
-	if err := ended(t, applied); err != nil {
-		t.Fatal(err)
+	ctx, stop := context.WithCancel(t.Context())
+	applied := make(chan error, 1)
+	go func() { applied <- step.Apply(ctx, step.Check(ctx)) }()
+	c.cards(t, 1)
+	stop()
+	if err := ended(t, applied); !errors.Is(err, context.Canceled) {
+		t.Errorf("stopped while its card was up = %v, want it stopped", err)
 	}
 	res := step.Check(t.Context())
 	if !res.ToDo() || res.Items[0].State != check.ByHand || res.Items[0].Detail != "then: kit manual done sign-in" {
-		t.Errorf("check after Later = %+v, want it left to do", res)
+		t.Errorf("check after = %+v, want it left to do", res)
 	}
 }
 
@@ -376,7 +382,7 @@ func TestOneCardAtATime(t *testing.T) {
 	if up := c.cards(t, 5)[4]; up.Item != "second" || up.More != 0 {
 		t.Errorf("card = %+v, want the second's, none after it", up)
 	}
-	c.answer(t, "second", hand.Later)
+	c.answer(t, "second", hand.Done)
 	if err := ended(t, second); err != nil {
 		t.Fatal(err)
 	}
@@ -386,12 +392,13 @@ func TestOneCardAtATime(t *testing.T) {
 }
 
 // The rest of the steps by hand, raised, come up one card each, in order,
-// those not done: each saying how many follow it; one put off, the next
-// comes up; what's left, left to do.
+// those not done: each saying how many follow it; one done, the next comes
+// up.
 func TestTheRestOneCardEach(t *testing.T) {
 	c := newCard(t)
 	c.fake.On("test", "-d", "/Applications/Done.app")
-	c.fake.On("test", "-d", "/Applications/App.app").Exits(1)
+	// Its check, its look as it goes up, Done once it's there.
+	c.fake.On("test", "-d", "/Applications/App.app").Exits(1).Then().Exits(1).Then()
 	list := config.List{Entries: []config.Entry{
 		{Name: "app", Value: `"Install the app" --test test -d /Applications/App.app`, Scope: "laptop", Line: 2},
 		{Name: "done", Value: `"Install the done app" --test test -d /Applications/Done.app`, Scope: "laptop", Line: 3},
@@ -402,7 +409,7 @@ func TestTheRestOneCardEach(t *testing.T) {
 	if up := c.cards(t, 1)[0]; up.Step != steps.ManualName || up.Item != "app" || up.More != 1 || !up.Tells {
 		t.Errorf("first card = %+v, want the app's, 1 more after it", up)
 	}
-	c.answer(t, steps.ManualName, hand.Later)
+	c.answer(t, steps.ManualName, hand.Done)
 	if up := c.cards(t, 2)[1]; up.Item != "sign-in" || up.More != 0 || up.Tells || !slices.Equal(up.Steps, []string{"Open the service", "Sign in"}) {
 		t.Errorf("second card = %+v, want the sign-in's, its steps, none after it", up)
 	}
@@ -410,7 +417,7 @@ func TestTheRestOneCardEach(t *testing.T) {
 	if err := ended(t, applied); err != nil {
 		t.Fatal(err)
 	}
-	if res := step.Check(t.Context()); !res.ToDo() || len(res.Items) != 1 || res.Items[0].ID != "manual:app" {
-		t.Errorf("check after = %+v, want the app left to do", res)
+	if res := step.Check(t.Context()); res.State != check.OK {
+		t.Errorf("check after = %+v, want all done", res)
 	}
 }

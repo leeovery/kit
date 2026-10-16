@@ -319,6 +319,7 @@ func TestApplyingCountsTheFormulae(t *testing.T) {
 	fake.On("brew", "tap")
 	fake.On("brew", "info", "--json=v2", "--formula", "ffmpeg", "hello").Prints(`{"formulae": [{"name": "ffmpeg", "full_name": "ffmpeg"}, {"name": "hello", "full_name": "hello"}], "casks": []}`)
 	fake.On("brew", "update", "--quiet")
+	fake.On("brew", "tap", "owner/tap")
 	fake.On("brew", "install", "--formula", "owner/tap/tuicr", "ffmpeg", "hello").Prints(installing)
 	var said []event.Doing
 	ctx := event.WithSaying(t.Context(), func(d event.Doing) { said = append(said, d) })
@@ -326,12 +327,15 @@ func TestApplyingCountsTheFormulae(t *testing.T) {
 	if err := s.Apply(ctx, s.Check(ctx)); err != nil {
 		t.Fatal(err)
 	}
+	half := func(done int) float64 { return float64(done) / 3.0 / 2 }
 	want := []event.Doing{
+		{Says: "tapping owner/tap"},
 		{Says: "updating Homebrew"},
-		{Says: "downloading", Of: 3}, {Says: "downloading", Done: 1, Of: 3}, {Says: "downloading", Done: 2, Of: 3}, {Says: "downloading", Done: 3, Of: 3},
-		{Says: "installing owner/tap/tuicr", Of: 3}, {Says: "installing", Done: 1, Of: 3},
-		{Says: "installing ffmpeg", Done: 1, Of: 3}, {Says: "installing", Done: 2, Of: 3},
-		{Says: "installing hello", Done: 2, Of: 3}, {Says: "installing", Done: 3, Of: 3},
+		{Says: "downloading", Of: 3}, {Says: "downloading", Done: 1, Of: 3, Far: half(1)},
+		{Says: "downloading", Done: 2, Of: 3, Far: half(2)}, {Says: "downloading", Done: 3, Of: 3, Far: half(3)},
+		{Says: "installing owner/tap/tuicr", Of: 3, Far: 0.5}, {Says: "installing", Done: 1, Of: 3, Far: 0.5 + half(1)},
+		{Says: "installing ffmpeg", Done: 1, Of: 3, Far: 0.5 + half(1)}, {Says: "installing", Done: 2, Of: 3, Far: 0.5 + half(2)},
+		{Says: "installing hello", Done: 2, Of: 3, Far: 0.5 + half(2)}, {Says: "installing", Done: 3, Of: 3, Far: 0.5 + half(3)},
 	}
 	if !slices.Equal(said, want) {
 		t.Errorf("applying said %+v\nwant %+v", said, want)
@@ -364,8 +368,8 @@ const installingCasks = `==> Fetching downloads for: ghostty and tool-cli
 `
 
 // Applying formulae, or casks, tells the run's log of each asked for as
-// brew says it's installed, by its name in its tap, in the order brew
-// installs them: a dependency's install is told nothing of.
+// brew says it's downloaded, then installed, by its name in its tap, in the
+// order brew does them: a dependency's is told nothing of.
 func TestApplyingTellsTheLogOfEachInstalled(t *testing.T) {
 	for _, tt := range []struct {
 		kind    string
@@ -373,8 +377,8 @@ func TestApplyingTellsTheLogOfEachInstalled(t *testing.T) {
 		prints  string
 		want    []string
 	}{
-		{"brew", []string{"--formula", "owner/tap/tuicr", "ffmpeg", "hello"}, installing, []string{"Installed tuicr", "Installed ffmpeg", "Installed hello"}},
-		{"cask", []string{"--cask", "ghostty", "owner/tap/tool-cli"}, installingCasks, []string{"Installed ghostty", "Installed tool-cli"}},
+		{"brew", []string{"--formula", "owner/tap/tuicr", "ffmpeg", "hello"}, installing, []string{"Downloaded tuicr", "Downloaded ffmpeg", "Downloaded hello", "Installed tuicr", "Installed ffmpeg", "Installed hello"}},
+		{"cask", []string{"--cask", "ghostty", "owner/tap/tool-cli"}, installingCasks, []string{"Downloaded ghostty", "Downloaded tool-cli", "Installed ghostty", "Installed tool-cli"}},
 	} {
 		t.Run(tt.kind, func(t *testing.T) {
 			fake := runnertest.New(t)
@@ -870,5 +874,28 @@ func TestInstallSaysWhatFailed(t *testing.T) {
 	fake.On("curl", "-fsSL", "--retry", "2", "-o", brew.InstallerFile(), "https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh").Exits(6)
 	if err := brew.Install(context.Background(), fake); err == nil || !strings.HasPrefix(err.Error(), "download Homebrew's installer") {
 		t.Errorf("Install() = %v", err)
+	}
+}
+
+// Every brew kit runs has Homebrew's git over SSH never ask: ssh in batch
+// mode, then the user's own config, as brew installing has kit's terminal,
+// where a question would wait, unseen behind kit's screen, for good.
+func TestBrewsGitNeverAsks(t *testing.T) {
+	fake := runnertest.New(t)
+	fake.On("brew", "--prefix").Prints("/opt/homebrew\n")
+	brew.New(fake).Step().Check(t.Context())
+	cmds := fake.Commands()
+	if len(cmds) != 1 {
+		t.Fatalf("ran %q", fake.Calls())
+	}
+	var path string
+	for _, kv := range cmds[0].Env {
+		if v, ok := strings.CutPrefix(kv, "HOMEBREW_SSH_CONFIG_PATH="); ok {
+			path = v
+		}
+	}
+	got, err := os.ReadFile(path)
+	if err != nil || !strings.Contains(string(got), "\nBatchMode yes\nInclude ~/.ssh/config\n") {
+		t.Errorf("brew's ssh config at %q = %q, %v; want batch mode, then the user's own", path, got, err)
 	}
 }
