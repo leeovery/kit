@@ -10,8 +10,6 @@ type Answer int
 const (
 	// Done is the person saying they've done it.
 	Done Answer = iota + 1
-	// Open is the person asking for its app to be opened again.
-	Open
 )
 
 // Desk passes answers from the screen to the step whose card is up.

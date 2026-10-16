@@ -148,7 +148,7 @@ func TestFacesWithoutATerminalShowACard(t *testing.T) {
 	events := []event.Event{
 		event.RunStarted{Command: "apply", Machine: "laptop", Steps: []event.Step{{Name: "1password", Title: "1password", Area: "Manual"}}},
 		event.StepStarted{Step: "1password", Doing: "applying"},
-		event.NeedsYou{Step: "1password", Item: "1password", Title: "Sign in to 1Password", Steps: []string{"Scan the QR code it shows", "Turn on Integrate with 1Password CLI"}, Opened: "1Password", Tells: true},
+		event.NeedsYou{Step: "1password", Item: "1password", Title: "Sign in to 1Password", Why: "Secrets come from it.", Steps: []string{"Scan the QR code it shows", "Turn on Integrate with 1Password CLI"}, Tells: true},
 		event.StepFinished{Step: "1password", Result: check.Result{State: check.OK, Summary: "signed in"}},
 		event.RunFinished{Counts: map[check.State]int{check.OK: 1}},
 	}

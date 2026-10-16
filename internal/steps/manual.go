@@ -30,17 +30,17 @@ type manualDone struct {
 	Done map[string]time.Time `json:"done,omitempty"`
 }
 
-// ManualStep is a [manual] line: what to do; what it comes after (a step,
-// or one of a step's things, as in cask:1password) and the steps it comes
-// before; the app it opens; the command saying whether it's done, if it
-// has one; and the steps to do it, as the lines indented under it say.
+// ManualStep is a [manual] line: what to do; why, as the notes above it
+// say; what it comes after (a step, or one of a step's things, as in
+// cask:1password) and the steps it comes before; the group it's in, if
+// any; the command saying whether it's done, if it has one; and the steps
+// to do it, as the lines indented under it say.
 type ManualStep struct {
-	Name, Do      string
+	Name, Do, Why string
 	After, Before []string
-	// Open is the app it opens, by its name, as in System Settings.
-	Open    string
-	Command *runner.Command
-	Steps   []string
+	Group         string
+	Command       *runner.Command
+	Steps         []string
 	// Pos is where its line is, as in laptop/declarations:12.
 	Pos string
 }
@@ -52,12 +52,12 @@ type ManualStep struct {
 func (m ManualStep) Ordered() bool { return len(m.Before) > 0 }
 
 // ParseManual reads a [manual] line's value: what to do, in quotes, then
-// --after and --before, each as often as wanted, --open and the app it
-// opens, and --test, then the rest of the line, the command saying whether
-// it's done (exit 0: done), a word starting ~/ starting at home. Its steps
-// are the entry's.
+// --after and --before, each as often as wanted, --group and the group
+// it's in, and --test, then the rest of the line, the command saying
+// whether it's done (exit 0: done), a word starting ~/ starting at home.
+// Its why and its steps are the entry's notes and steps.
 func ParseManual(home string, e config.Entry) (ManualStep, error) {
-	m := ManualStep{Name: e.Name, Steps: e.Steps, Pos: e.Pos()}
+	m := ManualStep{Name: e.Name, Why: e.Notes, Steps: e.Steps, Pos: e.Pos()}
 	words, err := config.Words(e.Value)
 	if err != nil {
 		return m, err
@@ -80,11 +80,13 @@ func ParseManual(home string, e config.Entry) (ManualStep, error) {
 			} else {
 				m.Before = append(m.Before, name)
 			}
-		case "--open":
-			if m.Open, err = appToOpen(m.Open, words, i); err != nil {
+		case "--group":
+			if m.Group, err = groupOf(m.Group, words, i); err != nil {
 				return m, err
 			}
 			i++
+		case "--open":
+			return m, errors.New(`--open is gone: kit opens nothing, so say what to open in a step, a line indented under it, as in "Open 1Password"`)
 		case "--test":
 			if cmd = words[i+1:]; len(cmd) == 0 {
 				return m, errors.New("--test needs the command saying whether it's done after it")
@@ -92,7 +94,7 @@ func ParseManual(home string, e config.Entry) (ManualStep, error) {
 		case "--":
 			return m, errors.New("the command saying whether it's done comes after --test now")
 		default:
-			return m, fmt.Errorf("%q isn't one of a step by hand's options: --after, --before, --open and --test", w)
+			return m, fmt.Errorf("%q isn't one of a step by hand's options: --after, --before, --group and --test", w)
 		}
 	}
 	if cmd == nil {
@@ -107,22 +109,22 @@ func ParseManual(home string, e config.Entry) (ManualStep, error) {
 	return m, nil
 }
 
-// appToOpen is the app the --open at words[i] names, one word, quoted when
-// it has spaces; had is what an --open before it named, as a step by hand
-// opens one app.
-func appToOpen(had string, words []string, i int) (string, error) {
+// groupOf is the group the --group at words[i] names, one word, quoted
+// when it has spaces; had is what a --group before it named, as a step by
+// hand is in one group.
+func groupOf(had string, words []string, i int) (string, error) {
 	switch {
 	case had != "":
-		return "", errors.New("--open is there twice: a step by hand opens one app")
-	case i+1 == len(words) || strings.HasPrefix(words[i+1], "--"):
-		return "", errors.New(`--open needs the app it opens after it, as in --open "System Settings"`)
+		return "", errors.New("--group is there twice: a step by hand is in one group")
+	case i+1 == len(words) || strings.TrimSpace(words[i+1]) == "" || strings.HasPrefix(words[i+1], "--"):
+		return "", errors.New(`--group needs the group's name after it, as in --group "First things"`)
 	}
 	return words[i+1], nil
 }
 
 // hand is the step by hand m is, as the step raising it lists it.
 func (m ManualStep) hand() event.Hand {
-	return event.Hand{Name: m.Name, Title: m.Do}
+	return event.Hand{Name: m.Name, Title: m.Do, Group: m.Group, Why: m.Why}
 }
 
 // hands are the steps by hand list's lines are, in order: but those that
@@ -183,16 +185,13 @@ func (b byHand) item() check.Item {
 
 // Raise is how a step by hand that's come due is raised while kit applies
 // at a terminal, where someone can act on it: a card, front and centre, one
-// up at a time, with the steps to do it; its app opened, and a
-// notification, in case they're away from it. What they answer the card
-// with comes back on Desk.
+// up at a time, with the steps to do it; and a notification, in case
+// they're away from it. What they answer the card with comes back on Desk.
 type Raise struct {
 	Sink   event.Sink
 	Now    func() time.Time
 	Notify func(ctx context.Context, title, text string)
-	// Open opens an app by its name, as open -a does.
-	Open func(ctx context.Context, app string) error
-	Desk *hand.Desk
+	Desk   *hand.Desk
 
 	// mu guards the turn: whether a card has it (busy); the card up, once
 	// it's shown, and how many of its step's cards follow it (after); and
@@ -213,10 +212,9 @@ var manualPoll = 3 * time.Second
 // up puts b's card up for the step called step, once it's the card's turn,
 // unless b's been done meanwhile, after more of the step's own cards to
 // follow it; then waits till b's done, the step's job given up meanwhile,
-// for other steps to go on (engine.Release). Done on
-// the card marks done on this Mac one kit can't tell about, as kit manual
-// done does, and has kit look at once at one it can, as it does every few
-// seconds anyway; Open opens its app again.
+// for other steps to go on (engine.Release). Done on the card marks done
+// on this Mac one kit can't tell about, as kit manual done does, and has
+// kit look at once at one it can, as it does every few seconds anyway.
 func (r *Raise) up(ctx context.Context, step string, b byHand, more int) error {
 	defer engine.Release(ctx)()
 	r.Sink.Emit(event.Doing{Time: r.Now(), Step: step, Says: event.Queued})
@@ -245,8 +243,6 @@ func (r *Raise) up(ctx context.Context, step string, b byHand, more int) error {
 			}
 		case a := <-answers:
 			switch {
-			case a == hand.Open:
-				r.open(ctx, b.Open)
 			case a == hand.Done && b.Command == nil:
 				return MarkDone(b.stateDir, []string{b.Name}, r.Now(), false)
 			case a == hand.Done && b.done(ctx):
@@ -256,14 +252,11 @@ func (r *Raise) up(ctx context.Context, step string, b byHand, more int) error {
 	}
 }
 
-// show puts b's card up for step: its app opened, when it has one, and a
-// notification posted; its More counting more of the step's own cards to
-// follow it, and those waiting for their turn.
+// show puts b's card up for step, a notification posted; its More counting
+// more of the step's own cards to follow it, and those waiting for their
+// turn.
 func (r *Raise) show(ctx context.Context, step string, b byHand, more int) {
-	card := event.NeedsYou{Step: step, Item: b.Name, Title: b.Do, Steps: b.Steps, Tells: b.Command != nil}
-	if r.open(ctx, b.Open) {
-		card.Opened = b.Open
-	}
+	card := event.NeedsYou{Step: step, Item: b.Name, Title: b.Do, Group: b.Group, Why: b.Why, Steps: b.Steps, Tells: b.Command != nil}
 	if r.Notify != nil {
 		r.Notify(ctx, b.Do, notice(b))
 	}
@@ -281,11 +274,6 @@ func notice(b byHand) string {
 		return b.Steps[0]
 	}
 	return "kit waits for you to do this"
-}
-
-// open opens app, reporting whether it did: none, when there's no app.
-func (r *Raise) open(ctx context.Context, app string) bool {
-	return app != "" && r.Open != nil && r.Open(ctx, app) == nil
 }
 
 // turn waits for a card's turn, one up at a time, first come first: while
@@ -373,14 +361,6 @@ func Notify(run runner.Runner) func(ctx context.Context, title, text string) {
 	return func(ctx context.Context, title, text string) {
 		script := "display notification " + quote(text) + " with title " + quote("kit") + " subtitle " + quote(title)
 		_, _ = run.Run(ctx, runner.Command{Name: "osascript", Args: []string{"-e", script}})
-	}
-}
-
-// OpenApp opens an app by its name, as open -a does, through run.
-func OpenApp(run runner.Runner) func(ctx context.Context, app string) error {
-	return func(ctx context.Context, app string) error {
-		_, err := run.Run(ctx, runner.Command{Name: "open", Args: []string{"-a", app}})
-		return err
 	}
 }
 

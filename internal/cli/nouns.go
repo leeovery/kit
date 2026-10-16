@@ -281,6 +281,9 @@ func newLineAdd(a *app, name, short string) *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&opts.shared, "shared", false, "declare for every Mac, not this one alone")
 	cmd.Flags().StringVar(&opts.note, "note", "", "why it's declared, kept after it")
+	if name == config.ManualKind {
+		cmd.Flags().StringVar(&opts.group, "group", "", "the group it's in")
+	}
 	return cmd
 }
 

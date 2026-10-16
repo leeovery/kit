@@ -142,11 +142,16 @@ func sixMinutesInWith(formulae, casks int) []event.Event {
 }
 
 // signIn is 1Password's sign-in come up, a step by hand the secrets wait
-// for: kit opened the app for it, and tells by itself once it's done.
-var signIn = event.NeedsYou{Time: after(345), Step: "1password", Item: "1password", Title: "Sign in to 1Password", Steps: []string{
-	"Scan the QR code it shows with the 1Password app on your phone",
-	"In 1Password, Settings › Developer › turn on Integrate with 1Password CLI",
-}, Opened: "1Password", Tells: true}
+// for: why, as its notes say; its steps, a subheading among them; and kit
+// tells by itself once it's done.
+var signIn = event.NeedsYou{Time: after(345), Step: "1password", Item: "1password", Title: "Sign in to 1Password",
+	Why: "Every secret kit puts in place comes from 1Password, so it needs the app signed in and its command line turned on.",
+	Steps: []string{
+		"Open 1Password",
+		"Scan the QR code it shows with the 1Password app on your phone",
+		"If it doesn't ask, in 1Password:",
+		"Settings › Developer › turn on Integrate with 1Password CLI",
+	}, Tells: true}
 
 // cardUp is sixMinutesIn with card come up for its step, applying.
 func cardUp(card event.NeedsYou) []event.Event {
@@ -241,16 +246,17 @@ func theRest(events []event.Event, end func(event.Step) check.Result) []event.Ev
 	return events
 }
 
-// editor is the step by hand at the end come up with steps of its own,
-// then put off.
+// editor is the step by hand at the end come up with steps of its own, a
+// subheading among them, and left to do.
 var editor = event.NeedsYou{Time: after(1380), Step: "manual", Item: "editor", Title: "Install the editor from its site", Steps: []string{
 	"Download it from editor.example.com",
+	"Once it's downloaded, in Finder:",
 	"Drag it to Applications",
 }, More: 1}
 
 // appliedRun is casksFailed to its end: the rest done, but Time Machine's
 // disk left to do, and two steps by hand, one saying what to run once it's
-// done, one come up with steps of its own and put off.
+// done, one come up with steps of its own and left to do.
 func appliedRun() []event.Event {
 	events := theRest(append(casksFailed(), editor), func(s event.Step) check.Result {
 		if s.Name == "manual" {
@@ -583,8 +589,8 @@ func TestApplyingHasNoLater(t *testing.T) {
 // a kind installed, dim +; a step finished well, pink, and what it did; one
 // left to do, white △; one failed, red, why and what to run on the spine
 // under it; one not checked, grey; a card up, orange ▲, and done with, how
-// long it was up, or put off. Steps starting and their checks have no line.
-// What's under way is at its foot, the time now on its first line.
+// long it was up, or left to do. Steps starting and their checks have no
+// line. What's under way is at its foot, the time now on its first line.
 func TestApplyingLog(t *testing.T) {
 	events := append(casksFailed(),
 		event.StepStarted{Time: after(360), Step: "1password", Doing: "applying"},
@@ -666,10 +672,11 @@ func TestApplyingLogOfARow(t *testing.T) {
 
 // While a card's up, it's a panel over the log, ruled off: its title,
 // orange, how long it's waited at the right, how many more are after it;
-// why the run waits for it; its steps, numbered, the app kit opened first;
-// that kit carries on by itself, when it tells; the keys answering it. The
-// header says the run's waiting for you; the row it holds up does too. The
-// card done, the panel goes.
+// why it's there, muted and wrapped, then why the run waits for it; its
+// steps, numbered, a subheading muted and unnumbered after a blank line,
+// the numbering carrying on across it; that kit carries on by itself, when
+// it tells, and no key to answer it. The header says the run's waiting for
+// you; the row it holds up does too. The card done, the panel goes.
 func TestApplyingPanel(t *testing.T) {
 	face, out, _ := applyIn(colorprofile.TrueColor, 160, 64, 6*time.Minute+12*time.Second, waitingOnYou())
 	defer func() { _ = face.Close() }()
@@ -679,14 +686,17 @@ func TestApplyingPanel(t *testing.T) {
 		"",
 		"  ▲ Sign in to 1Password" + strings.Repeat(" ", 60) + "waiting 27.0s",
 		"",
+		"      Every secret kit puts in place comes from 1Password, so it needs the app signed in and its",
+		"      command line turned on.",
 		"      The run waits for this, for Secrets.",
 		"",
-		"      1  1Password is open: kit opened it",
+		"      1  Open 1Password",
 		"      2  Scan the QR code it shows with the 1Password app on your phone",
-		"      3  In 1Password, Settings › Developer › turn on Integrate with 1Password CLI",
+		"",
+		"      If it doesn't ask, in 1Password:",
+		"      3  Settings › Developer › turn on Integrate with 1Password CLI",
 		"",
 		"      kit carries on by itself once it's done",
-		"      o opens 1Password again",
 		"",
 		"───────────────────────────────────────────────────────────────────────────────────────────────────",
 		"",
@@ -695,14 +705,14 @@ func TestApplyingPanel(t *testing.T) {
 	if !slices.Equal(right[:len(want)], want) {
 		t.Errorf("the right pane starts\n%s\nwant\n%s", strings.Join(right[:len(want)], "\n"), strings.Join(want, "\n"))
 	}
-	if rule := lines(got)[headLines+12]; !strings.Contains(rule, "├───") {
+	if rule := lines(got)[headLines+15]; !strings.Contains(rule, "├───") {
 		t.Errorf("the panel's rule is %q; want it to join the rule between the panes", rule)
 	}
 	if state := lines(got)[3]; !strings.HasSuffix(state, "│  ▲ waiting for you · Sign in to 1Password") {
 		t.Errorf("the state line is %q; want it waiting for you, the card's title", state)
 	}
 	frame := strings.Join(lastFrame(out.String()), "\n")
-	for _, styled := range []string{look.Orange("▲") + " " + look.Urgent("Sign in to 1Password"), look.Urgent("1") + "  ", look.Urgent("o") + " " + look.White("opens 1Password again"), look.Orange("▲ waiting for you")} {
+	for _, styled := range []string{look.Orange("▲") + " " + look.Urgent("Sign in to 1Password"), look.Urgent("1") + "  ", look.Muted("command line turned on."), look.Muted("If it doesn't ask, in 1Password:"), look.Orange("▲ waiting for you")} {
 		if !strings.Contains(frame, styled) {
 			t.Errorf("the screen has no %q, styled as it should be", ansi.Strip(styled))
 		}
@@ -718,7 +728,7 @@ func TestApplyingPanel(t *testing.T) {
 // A card's panel says why the run waits for it: the steps it holds up; the
 // steps by hand at the end, that the rest is done; one nothing waits for,
 // that the run carries on. More after it, it says how many, by how long
-// it's waited. One kit can't tell is done takes enter.
+// it's waited. One kit can't tell is done offers space.
 func TestApplyingPanelSaysWhy(t *testing.T) {
 	for _, tt := range []struct {
 		card       event.NeedsYou
@@ -726,7 +736,7 @@ func TestApplyingPanelSaysWhy(t *testing.T) {
 		keys       []string
 	}{
 		{event.NeedsYou{Time: after(360), Step: "manual", Item: "karabiner", Title: "Allow Karabiner-Elements", More: 2},
-			"      The rest is done: this is what's left.", "2 more after this · waiting 12.0s", []string{"      enter when it's done"}},
+			"      The rest is done: this is what's left.", "2 more after this · waiting 12.0s", []string{"      space when it's done"}},
 		{event.NeedsYou{Time: after(360), Step: "1password", Item: "1password", Title: "Sign in to 1Password", Tells: true},
 			"      The run waits for this, for Secrets.", "waiting 12.0s", []string{"      kit carries on by itself once it's done"}},
 	} {
@@ -806,15 +816,21 @@ func TestApplyingScreenNeedsTheRoom(t *testing.T) {
 
 // In a window too small for applying's screen, keys aren't read: a card
 // waiting for an answer says a bigger window shows them; one kit tells
-// about by itself says it carries on.
+// about by itself says it carries on. Why it's there comes under its
+// title, before its steps, a subheading among them unnumbered, the
+// numbering carrying on across it.
 func TestApplyingCardInASmallWindow(t *testing.T) {
 	paper := event.NeedsYou{Time: after(360), Step: "manual", Item: "editor", Title: "Install the editor from its site", Steps: []string{"Download it from editor.example.com"}}
 	for _, tt := range []struct {
-		card event.NeedsYou
-		want string
+		card  event.NeedsYou
+		want  string
+		order []string
 	}{
-		{paper, "a bigger window shows the keys to answer it"},
-		{signIn, "kit carries on by itself once it's done"},
+		{paper, "a bigger window shows the keys to answer it", nil},
+		{signIn, "kit carries on by itself once it's done", []string{
+			"Sign in to 1Password", "Every secret kit puts in place", "1  Open 1Password", "2  Scan the QR code",
+			"\n       If it doesn't ask, in 1Password:\n       3  Settings › Developer",
+		}},
 	} {
 		var narrow syncBuffer
 		small := render.NewPretty(&colorprofile.Writer{Forward: &narrow, Profile: colorprofile.Ascii}, 80, true).Sized(func() (int, int) { return 80, 40 })
@@ -825,6 +841,9 @@ func TestApplyingCardInASmallWindow(t *testing.T) {
 		live := turned(screen(narrow.String()))
 		if !strings.Contains(live, tt.card.Title) || !strings.Contains(live, tt.want) {
 			t.Errorf("%s in a small window:\n%s\nwant its card, saying %q", tt.card.Title, live, tt.want)
+		}
+		if !inOrder(live, tt.order...) {
+			t.Errorf("%s in a small window:\n%s\nwant in order %q", tt.card.Title, live, tt.order)
 		}
 		if err := small.Close(); err != nil {
 			t.Fatal(err)
@@ -883,13 +902,14 @@ func TestApplyingRecordSections(t *testing.T) {
 	for _, want := range []string{
 		"│  bootstrap · laptop · Fri 2 Jan · 03:04\n",
 		"│  3 to do · 1 failed · 9 fine · 24m31s\n",
-		"\n\n  TO DO  3, in any order · kit apply checks them\n" +
+		"\n\n  TO DO  3 · kit apply brings them back\n" +
 			"  △ 1  Add a Time Machine disk\n" +
 			"       → System Settings › General › Time Machine › Add Backup Disk\n" +
 			"  △ 2  Allow remote users Full Disk Access\n" +
 			"       → then: kit manual done sharing\n" +
 			"  △ 3  Install the editor from its site\n" +
 			"       → Download it from editor.example.com\n" +
+			"       Once it's downloaded, in Finder:\n" +
 			"       → Drag it to Applications\n\n",
 		"\n  FAILED  1\n  ✗ Homebrew casks  couldn't install tailscale-app\n  │ installer: The install failed. (The Installer encountered an error that cau…\n  │ → kit apply cask\n\n",
 		"\n  DONE  9\n  ● This Mac  all 6 done\n  ● Files and shell  all 2 done\n  ● Mac settings  all 3 done\n  ● Secrets  fine\n  ● Homebrew formulae  all 2 done\n  ● App Store apps  fine\n",

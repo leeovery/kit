@@ -61,9 +61,12 @@ type Step struct {
 }
 
 // Hand is a step by hand, as a step that raises it lists it: its line's
-// name, as its NeedsYou's Item, and what to do, as its Title.
+// name, as its NeedsYou's Item; what to do, as its Title; the group it's
+// in, if any; and why, as the notes above its line say.
 type Hand struct {
 	Name, Title string
+	Group       string `json:",omitempty"`
+	Why         string `json:",omitempty"`
 }
 
 // Preparing is kit getting a run ready, before it starts, as applying works
@@ -162,19 +165,21 @@ func (e Logged) At() time.Time { return e.Time }
 
 // NeedsYou is a step by hand come up for the person at the Mac, front and
 // centre on applying's screen: its line's name (Item); what to do, as its
-// line says it (Title); its steps, in order; the app kit opened for it, if
-// it did; whether kit tells by itself when it's done (the line's --test),
-// else the person says so; and how many more by hand wait after it. The
-// step finishing, or another NeedsYou for the step, takes it down.
+// line says it (Title); the group it's in, if any; why, as the notes above
+// its line say; its steps, in order; whether kit tells by itself when it's
+// done (the line's --test), else the person says so; and how many more by
+// hand wait after it. The step finishing, or another NeedsYou for the
+// step, takes it down.
 type NeedsYou struct {
-	Time   time.Time
-	Step   string
-	Item   string
-	Title  string
-	Steps  []string `json:",omitempty"`
-	Opened string   `json:",omitempty"`
-	Tells  bool     `json:",omitempty"`
-	More   int      `json:",omitempty"`
+	Time  time.Time
+	Step  string
+	Item  string
+	Title string
+	Group string   `json:",omitempty"`
+	Why   string   `json:",omitempty"`
+	Steps []string `json:",omitempty"`
+	Tells bool     `json:",omitempty"`
+	More  int      `json:",omitempty"`
 }
 
 func (e NeedsYou) At() time.Time { return e.Time }

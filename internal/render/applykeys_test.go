@@ -104,6 +104,7 @@ var (
 	keyCtrlC    = ask.Key{Name: "ctrl+c"}
 	keyTab      = ask.Key{Name: "tab"}
 	keyShiftTab = ask.Key{Name: "shift+tab"}
+	keySpace    = ask.Key{Text: " "}
 	keyO        = ask.Key{Text: "o"}
 	keyL        = ask.Key{Text: "l"}
 	focusIn     = ask.Key{Name: "focus in"}
@@ -219,30 +220,27 @@ type answered struct {
 	answer hand.Answer
 }
 
-// karabiner and paper are steps by hand at the end come up: one kit opened
-// System Settings for, the other kit neither opened anything for nor can
-// tell is done.
-var (
-	karabiner = event.NeedsYou{Time: after(360), Step: "manual", Item: "karabiner", Title: "Allow Karabiner-Elements", Steps: []string{
-		"Allow Karabiner-Elements' driver (the Allow button, near the bottom)",
-	}, Opened: "System Settings", More: 2}
-	paper = event.NeedsYou{Time: after(360), Step: "manual", Item: "editor", Title: "Install the editor from its site", Steps: []string{"Download it from editor.example.com"}}
-)
+// karabiner is a step by hand at the end come up, one kit can't tell is
+// done.
+var karabiner = event.NeedsYou{Time: after(360), Step: "manual", Item: "karabiner", Title: "Allow Karabiner-Elements", Steps: []string{
+	"Open System Settings",
+	"Allow Karabiner-Elements' driver (the Allow button, near the bottom)",
+}, More: 2}
 
-// o and enter answer the card up, passing the answer to its step, each
-// only when the card's keys offer it: o when kit opened an app for it,
-// enter when kit can't tell by itself that it's done. l, once a card's
-// putting off, answers nothing: a card's done, or the run's stopped. With
-// no card up, or once its step's finished, they answer nothing.
+// space and enter say the card up is done, passing that to its step, when
+// kit can't tell by itself that it is; one it can tell about takes
+// neither. o, once a card's app opening again, and l, once a card's
+// putting off, answer nothing: kit opens nothing, and a card's done, or
+// the run's stopped. With no card up, or once its step's finished,
+// nothing's answered.
 func TestApplyingCardKeys(t *testing.T) {
 	for _, tt := range []struct {
 		name   string
 		events []event.Event
 		want   []answered
 	}{
-		{"kit opened it, and tells", cardUp(signIn), []answered{{signIn.Step, hand.Open}}},
-		{"kit opened it", cardUp(karabiner), []answered{{karabiner.Step, hand.Open}, {karabiner.Step, hand.Done}}},
-		{"neither", cardUp(paper), []answered{{paper.Step, hand.Done}}},
+		{"kit tells", cardUp(signIn), nil},
+		{"kit can't tell", cardUp(karabiner), []answered{{karabiner.Step, hand.Done}, {karabiner.Step, hand.Done}}},
 		{"no card", sixMinutesIn(), nil},
 		{"its step finished", append(cardUp(karabiner), finished(400, karabiner.Step, check.Result{State: check.OK, Summary: "done"})), nil},
 	} {
@@ -257,11 +255,11 @@ func TestApplyingCardKeys(t *testing.T) {
 				got = append(got, answered{step, a})
 				return true
 			})
-			kb.press(t, keyO, keyEnter, keyL)
+			kb.press(t, keyO, keySpace, keyEnter, keyL)
 			mu.Lock()
 			defer mu.Unlock()
 			if !slices.Equal(got, tt.want) {
-				t.Errorf("o, enter and l answered %v; want %v", got, tt.want)
+				t.Errorf("o, space, enter and l answered %v; want %v", got, tt.want)
 			}
 			if n := kb.stops(); n != 0 {
 				t.Errorf("answering the card stopped the run %d times", n)

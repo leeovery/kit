@@ -35,7 +35,7 @@ func TestALogRecordsEveryEvent(t *testing.T) {
 		event.CommandRan{Time: at, Step: "brew", Command: "brew info jq", Exit: 1, Stderr: "Error: no\n", Error: "brew info jq exited 1: Error: no"},
 		event.Logged{Time: at, Step: "brew", Line: "Installed ripgrep"},
 		event.StepFinished{Time: at, Step: "brew", Result: result, Duration: 2 * time.Second},
-		event.NeedsYou{Time: at, Step: "manual", Item: "sign-in", Title: "Sign in", Steps: []string{"Scan the code"}, Opened: "System Settings", Tells: true, More: 2},
+		event.NeedsYou{Time: at, Step: "manual", Item: "sign-in", Title: "Sign in", Steps: []string{"Scan the code"}, Tells: true, More: 2},
 		event.RunFinished{Time: at, Duration: 3 * time.Second, Counts: map[check.State]int{check.Attention: 1}},
 	} {
 		l.Emit(e)

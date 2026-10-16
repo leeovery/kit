@@ -173,23 +173,30 @@ it, and keeps or deletes its value in 1Password (`--keep-value`, `--delete-value
 terminal); a value given in full, outside the items' sections, is left where it is.
 
 **Steps by hand** go in a `[manual]` section, a line each: a name, what to do in quotes, then
-`--after` and `--before` (as on any line), `--open <app>` (an app kit opens as it raises the
-step), and `--test` and a command saying whether it's done (exit 0: done), the rest of the line,
-as in `tool "Install the tool from its site" --test test -d /Applications/Tool.app`. The lines
-indented under it are its steps, one each, in order, which kit keeps with it. One with no
-command is done once marked on this Mac (`kit manual done <name>`, `--undo` to unmark). Those
-not done are items of their step, in the Manual area, saying what to do, so `kit status` shows
-them; what kit can check itself stays a check that says what to do. While `kit apply` runs at a
-terminal, one that comes due is raised as a card on its screen, front and centre: its title, its
-steps numbered, its app opened, once, and a notification. `o` opens the app again; `enter` says
-it's done (marked as `kit manual done` marks it; one with a command is looked at at once, as it
-is every few seconds anyway); `l` puts it off: it ends to do, listed in what's left to do as the
-run ends. One card is up at a time, the next waiting its turn. A line with `--after` or
-`--before` is a step of its own, raised once what it comes after is in; the rest come up at the
-run's end, after every other step, in order. `kit check|hourly|nightly add <name> -- <command>`
-and `kit manual add <name> "<what to do>" [-- <command>]` (written as `--test`) declare checks,
-jobs and steps by hand (a check, and a step's command, run once as it's added, to say how it
-stands); `kit remove check|hourly|nightly|manual <name>` undeclares one.
+`--after` and `--before` (as on any line), `--group <name>` (the group it's in, one word or
+quoted, at most once), and `--test` and a command saying whether it's done (exit 0: done), the
+rest of the line, as in `tool "Install the tool from its site" --test test -d
+/Applications/Tool.app`. The comment lines directly above it, no blank line between, are its
+notes: why it's there, one paragraph. The lines indented under it are its steps, one each, in
+order, which kit keeps with it, notes and all; a step ending with a colon heads the steps after
+it, as in `If it doesn't ask, in System Settings:`, shown muted and unnumbered, the numbering
+carrying on across it. kit opens nothing for a step by hand: its steps say what to open, and the
+person does it (`--open` is refused, saying so). One with no command is done once marked on this
+Mac (`kit manual done <name>`, `--undo` to unmark). Those not done are items of their step, in
+the Manual area, saying what to do, so `kit status` shows them; what kit can check itself stays
+a check that says what to do. While `kit apply` runs at a terminal, one that comes due is raised
+as a card on its screen, front and centre: its title, its notes, why the run waits for it, its
+steps numbered, and a notification. `space` says it's done (`enter` too, unshown: marked as `kit
+manual done` marks it; one with a command is looked at at once, as it is every few seconds
+anyway); a card with a command offers no key, kit carrying on by itself once it's done. There's
+no putting a card off: it's done, or the run's stopped. One card is up at a time, the next
+waiting its turn. A line with `--before` is a step of its own, raised mid-run once what it comes
+after is in, as the steps it comes before wait for it; the rest, `--after` alone only ordering
+them, come up at the run's end, after every other step, in order. `kit check|hourly|nightly add
+<name> -- <command>` and `kit manual add <name> "<what to do>" [-- <command>]` (written as
+`--test`; `--group` as on the line) declare checks, jobs and steps by hand (a check, and a
+step's command, run once as it's added, to say how it stands); `kit remove
+check|hourly|nightly|manual <name>` undeclares one.
 
 **Steps of the user's own** are set-up that's done or not, too particular to be kit's (a tool
 installed by its maker's script, a certificate authority trusted, a key imported). Each is a
@@ -284,7 +291,7 @@ kit secret remove <name>...  Take it off the Mac, undeclare it     [--keep-value
 kit secret sync              Read every secret from 1Password, and put each in place
 kit prefs capture|restore|history|pending|start-fresh   Apps' settings, saved to a private repository and restored
 kit check|hourly add <name> -- <command>, kit nightly add <name> -- <command>   Your own checks and jobs
-kit manual add <name> "<what to do>" [-- <command>]; kit manual done <name>...  Steps by hand
+kit manual add <name> "<what to do>" [-- <command>]; kit manual done <name>...  Steps by hand   [--group]
 kit step add <name> "<what it does>"; kit step remove <name>...  Steps of your own   [--after] [--before] [--secret] [--sudo] [--shared]
 kit version                  As --version
 ```

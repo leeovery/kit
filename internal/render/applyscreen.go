@@ -387,9 +387,9 @@ const panelAt = "      "
 
 // panel is the card up, as the panel over the log has it, w wide: its
 // title, orange, how many more wait after it and how long it's waited at
-// the right; why the run waits for it; its steps, numbered, the app kit
-// opened for it first; that kit carries on by itself, when it tells; and
-// the keys answering it, a line each.
+// the right; why it's there, as its line's notes say, and why the run
+// waits for it; its steps (panelSteps); that kit carries on by itself,
+// when it tells; and the keys answering it, a line each.
 func (p *Pretty) panel(w int) []string {
 	c := p.card
 	var right []string
@@ -400,32 +400,49 @@ func (p *Pretty) panel(w int) []string {
 	title := "  " + look.Mark(look.NeedsYou) + " " + look.Urgent(c.Title)
 	out := []string{"", spread(title, look.Says(right...)+"  ", w), ""}
 	room := w - len(panelAt)
-	for _, l := range look.Wrap(p.cardWhy(), room) {
-		out = append(out, panelAt+look.Muted(l))
-	}
-	out = append(out, "")
-	todo := c.Steps
-	if c.Opened != "" {
-		todo = append([]string{c.Opened + " is open: kit opened it"}, todo...)
-	}
-	for i, s := range todo {
-		n := fmt.Sprint(i + 1)
-		lead := look.Urgent(n) + "  "
-		for _, l := range look.Wrap(s, room-len(n)-2) {
-			out = append(out, panelAt+lead+look.White(l))
-			lead = strings.Repeat(" ", len(n)+2)
+	for _, why := range []string{c.Why, p.cardWhy()} {
+		for _, l := range look.Wrap(why, room) {
+			out = append(out, panelAt+look.Muted(l))
 		}
 	}
-	if len(todo) > 0 {
+	out = append(append(out, ""), panelSteps(c.Steps, room)...)
+	if len(c.Steps) > 0 {
 		out = append(out, "")
 	}
 	if c.Tells {
 		out = append(out, panelAt+look.White("kit carries on by itself once it's done"))
 	}
 	for _, k := range cardKeys(*c) {
-		out = append(out, panelAt+look.Urgent(k.key.Key)+" "+look.White(k.key.Does))
+		out = append(out, panelAt+look.Urgent(k.Key)+" "+look.White(k.Does))
 	}
 	return append(out, "")
+}
+
+// panelSteps are a card's steps as its panel has them, room wide after
+// the panel's margin: numbered, a subheading muted and unnumbered, after a
+// blank line, the numbering carrying on across it.
+func panelSteps(steps []string, room int) []string {
+	var out []string
+	n := 0
+	for i, s := range steps {
+		if look.Subheading(s) {
+			if i > 0 {
+				out = append(out, "")
+			}
+			for _, l := range look.Wrap(s, room) {
+				out = append(out, panelAt+look.Muted(l))
+			}
+			continue
+		}
+		n++
+		num := fmt.Sprint(n)
+		lead := look.Urgent(num) + "  "
+		for _, l := range look.Wrap(s, room-len(num)-2) {
+			out = append(out, panelAt+lead+look.White(l))
+			lead = strings.Repeat(" ", len(num)+2)
+		}
+	}
+	return out
 }
 
 // cardWhy is why the run waits for the card up: the steps it holds up, but
@@ -506,10 +523,9 @@ func (p *Pretty) toDo(step string) bool {
 
 // cardLines are the step by hand up for you as a card w wide, in place
 // under the run's heading in a window too small for applying's screen:
-// what to do, how many more wait after it, its steps, numbered, the app
-// kit opened for it first, and that kit carries on by itself, when it
-// tells, else that a bigger window shows the keys to answer it; none when
-// no card's up.
+// what to do, how many more wait after it, why it's there, its steps, and
+// that kit carries on by itself, when it tells, else that a bigger window
+// shows the keys to answer it; none when no card's up.
 func (p *Pretty) cardLines(w int) []string {
 	c := p.card
 	if c == nil {
@@ -519,15 +535,11 @@ func (p *Pretty) cardLines(w int) []string {
 	if c.More > 0 {
 		says = append(says, look.Muted(fmt.Sprintf("%d more after this", c.More)))
 	}
-	todo := c.Steps
-	if c.Opened != "" {
-		todo = append([]string{c.Opened + " is open: kit opened it for you"}, todo...)
-	}
 	after := "a bigger window shows the keys to answer it"
 	if c.Tells {
 		after = "kit carries on by itself once it's done"
 	}
-	return look.Card(w, c.Title, look.Says(says...), todo, after)
+	return look.Card(w, look.CardText{Title: c.Title, Says: look.Says(says...), Why: c.Why, Steps: c.Steps, After: after})
 }
 
 // cardID is how a step by hand's card is known among those that came up:

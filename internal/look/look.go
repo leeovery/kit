@@ -430,32 +430,58 @@ const (
 	cardUnder = "       "
 )
 
+// CardText is what a card says: what needs you, and what it says beside
+// that; why, a paragraph; the steps to do it; and what to say after them.
+type CardText struct {
+	Title, Says, Why string
+	Steps            []string
+	After            string
+}
+
+// Subheading reports whether a step by hand's step heads those after it,
+// as a line ending with a colon does: shown muted, unnumbered.
+func Subheading(step string) bool { return strings.HasSuffix(step, ":") }
+
 // Card is what needs you, front and centre, w wide with the margins: an
 // orange rule carrying the needs-you mark, the title and what it says, cut
-// to fit, some rule kept after it; a blank line; its steps, numbered, the
-// numbers orange, each wrapped under its own text and a blank line after
-// it; then, when there's something to say after them, that, muted, and a
-// blank line.
-func Card(w int, title, says string, steps []string, after string) []string {
+// to fit, some rule kept after it; a blank line; why, muted, and a blank
+// line, when there's a why; its steps, numbered, the numbers orange, each
+// wrapped under its own text and a blank line after it, a subheading
+// muted, unnumbered and straight on to the step after it; then, when
+// there's something to say after them, that, muted, and a blank line.
+func Card(w int, c CardText) []string {
 	end := w - 2
 	lead := "  " + Orange(cardLead)
-	row := Cut(line("", Row{State: NeedsYou, Name: title, Says: says}), end-ansi.StringWidth(lead)-1-cardLeast)
+	row := Cut(line("", Row{State: NeedsYou, Name: c.Title, Says: c.Says}), end-ansi.StringWidth(lead)-1-cardLeast)
 	fill := end - ansi.StringWidth(lead+row) - 1
 	out := []string{lead + row + " " + Orange(strings.Repeat("─", max(fill, 0))), ""}
 	room := w - 2 - len(cardUnder)
-	for i, s := range steps {
-		n := fmt.Sprint(i + 1)
-		at := Urgent(n) + "  "
-		for _, l := range Wrap(s, room-len(n)-2) {
+	muted := func(text string) {
+		for _, l := range Wrap(text, room) {
+			out = append(out, Cut(cardUnder+Muted(l), w-2))
+		}
+	}
+	if c.Why != "" {
+		muted(c.Why)
+		out = append(out, "")
+	}
+	n := 0
+	for _, s := range c.Steps {
+		if Subheading(s) {
+			muted(s)
+			continue
+		}
+		n++
+		num := fmt.Sprint(n)
+		at := Urgent(num) + "  "
+		for _, l := range Wrap(s, room-len(num)-2) {
 			out = append(out, Cut(cardUnder+at+White(l), w-2))
-			at = strings.Repeat(" ", len(n)+2)
+			at = strings.Repeat(" ", len(num)+2)
 		}
 		out = append(out, "")
 	}
-	if after != "" {
-		for _, l := range Wrap(after, room) {
-			out = append(out, Cut(cardUnder+Muted(l), w-2))
-		}
+	if c.After != "" {
+		muted(c.After)
 		out = append(out, "")
 	}
 	return out
@@ -470,7 +496,8 @@ type Task struct {
 
 // Tasks are things left to do, as a run's record ends with them, w wide:
 // each the to-do mark, its number and its title, then how to do it under
-// the title, each line what to do, muted, wrapped under its own words.
+// the title, each line what to do, muted, wrapped under its own words; a
+// subheading among them muted, without the arrow.
 func Tasks(w int, ts ...Task) []string {
 	var out []string
 	for i, t := range ts {
@@ -478,12 +505,13 @@ func Tasks(w int, ts ...Task) []string {
 		out = append(out, Cut(lead+Strong(t.Title), w))
 		under := strings.Repeat(" ", ansi.StringWidth(lead))
 		for _, how := range t.How {
-			for j, l := range Wrap(how, w-len(under)-2) {
-				if j == 0 {
-					out = append(out, Cut(under+Todo(Muted(l)), w))
-				} else {
-					out = append(out, Cut(under+"  "+Muted(l), w))
-				}
+			at, rest := under+Todo(""), under+"  "
+			if Subheading(how) {
+				at, rest = under, under
+			}
+			for _, l := range Wrap(how, w-len(under)-2) {
+				out = append(out, Cut(at+Muted(l), w))
+				at = rest
 			}
 		}
 	}

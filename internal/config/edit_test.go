@@ -113,8 +113,8 @@ func TestDeclare(t *testing.T) {
 		{
 			name:   "a step by hand with its steps, in its place by name, another's steps kept with it",
 			before: "[manual]\nalpha \"Do alpha\"\n  its step\n# why zeta\nzeta \"Do zeta\"\n  its step\n",
-			kind:   config.ManualKind, entry: config.Entry{Name: "mid", Value: `"Do mid" --open "System Settings"`, Steps: []string{"one", " two "}},
-			after: "[manual]\nalpha \"Do alpha\"\n  its step\nmid \"Do mid\" --open \"System Settings\"\n  one\n  two\n# why zeta\nzeta \"Do zeta\"\n  its step\n",
+			kind:   config.ManualKind, entry: config.Entry{Name: "mid", Value: `"Do mid" --group "First things"`, Steps: []string{"one", " two "}},
+			after: "[manual]\nalpha \"Do alpha\"\n  its step\nmid \"Do mid\" --group \"First things\"\n  one\n  two\n# why zeta\nzeta \"Do zeta\"\n  its step\n",
 		},
 		{
 			name:   "a step by hand after the last one's steps",

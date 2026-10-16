@@ -49,11 +49,11 @@ func TestList(t *testing.T) {
 	}
 	f := "homebrew formulae"
 	want := []config.Entry{
-		{Name: "jq", Scope: "shared", Section: f, Line: 9},
+		{Name: "jq", Scope: "shared", Section: f, Line: 9, Notes: "Shell"},
 		{Name: "ripgrep", Scope: "shared", Section: f, Line: 10, Note: "searching code"},
 		{Name: "owner/tap/tool", Scope: "shared", Section: f, Line: 11},
-		{Name: "git", Scope: "shared", Section: f, Line: 14},
-		{Name: "go", Scope: "laptop", Section: f, Line: 3},
+		{Name: "git", Scope: "shared", Section: f, Line: 14, Notes: "Git"},
+		{Name: "go", Scope: "laptop", Section: f, Line: 3, Notes: "Development"},
 		{Name: "node@24", Scope: "laptop", Section: f, Line: 4, Note: "for the old projects"},
 	}
 	if got.Kind != "brew" || !reflect.DeepEqual(got.Entries, want) {
@@ -92,7 +92,7 @@ func TestListSecretsByItem(t *testing.T) {
 	}
 	want := []config.Entry{
 		{Name: "KEY", Value: "op://vault/Other/key", Scope: "laptop", Section: "secrets", Line: 2},
-		{Name: "TOKEN", Value: "GitHub/token", Scope: "laptop", Section: "secrets op://vault/Some Item", Item: "op://vault/Some Item", Line: 6, Note: "the CLI's"},
+		{Name: "TOKEN", Value: "GitHub/token", Scope: "laptop", Section: "secrets op://vault/Some Item", Item: "op://vault/Some Item", Line: 6, Note: "the CLI's", Notes: "Tokens"},
 	}
 	if !reflect.DeepEqual(got.Entries, want) {
 		t.Errorf("List() = %+v\nwant %+v", got.Entries, want)
@@ -109,7 +109,7 @@ func TestFeaturesWait(t *testing.T) {
 	}
 	want := []config.Entry{
 		{Name: "prefs", Scope: "laptop", Section: "features", Line: 2},
-		{Name: "arq", Scope: "laptop", Section: "features --after cask:app", Hold: "--after cask:app", Line: 6},
+		{Name: "arq", Scope: "laptop", Section: "features --after cask:app", Hold: "--after cask:app", Line: 6, Notes: "Its check reads the app."},
 	}
 	if !reflect.DeepEqual(got.Entries, want) || !slices.Equal(got.Entries[1].After(), []string{"cask:app"}) {
 		t.Errorf("List() = %+v\nwant %+v, arq after cask:app", got.Entries, want)
@@ -132,7 +132,7 @@ func TestListHeldLines(t *testing.T) {
 	hold := "--after cask:app --secret TOKEN"
 	want := []config.Entry{
 		{Name: "jq", Scope: "laptop", Section: "homebrew formulae", Line: 2},
-		{Name: "owner/private/fetcher", Scope: "laptop", Section: "homebrew formulae " + hold, Hold: hold, Line: 6, Note: "a note"},
+		{Name: "owner/private/fetcher", Scope: "laptop", Section: "homebrew formulae " + hold, Hold: hold, Line: 6, Note: "a note", Notes: "Their releases are private."},
 	}
 	if !reflect.DeepEqual(got.Entries, want) {
 		t.Fatalf("List() = %+v\nwant %+v", got.Entries, want)
@@ -203,9 +203,10 @@ func TestListRefuses(t *testing.T) {
 // order, tabs or spaces; a comment indented among them is a comment.
 func TestListSteps(t *testing.T) {
 	cfg := loadRepo(t, map[string]string{"laptop/declarations": "[manual]\n" +
-		"sign-in \"Sign in to the app\" --open \"System Settings\"\n" +
+		"sign-in \"Sign in to the app\" --group \"First things\"\n" +
 		"  Scan the code the app shows   # with the phone\n" +
 		"\tTurn on its command line\n" +
+		"  If it doesn't ask, in its settings:\n" +
 		"# the next\n" +
 		"tool \"Install the tool\" --test test -d /Applications/Tool.app\n"})
 	got, err := cfg.List(config.ManualKind, "laptop")
@@ -215,11 +216,43 @@ func TestListSteps(t *testing.T) {
 	if len(got.Entries) != 2 {
 		t.Fatalf("List() = %+v, want two lines", got.Entries)
 	}
-	if steps := got.Entries[0].Steps; !slices.Equal(steps, []string{"Scan the code the app shows   # with the phone", "Turn on its command line"}) {
+	if steps := got.Entries[0].Steps; !slices.Equal(steps, []string{"Scan the code the app shows   # with the phone", "Turn on its command line", "If it doesn't ask, in its settings:"}) {
 		t.Errorf("sign-in's steps = %q", steps)
 	}
 	if steps := got.Entries[1].Steps; steps != nil {
 		t.Errorf("tool's steps = %q, want none", steps)
+	}
+}
+
+// An entry's notes are the comments directly above it, as one paragraph:
+// each without its # and the space after it, joined with single spaces. A
+// comment block a blank line away isn't its notes, nor is one above the
+// entry before it.
+func TestListNotes(t *testing.T) {
+	cfg := loadRepo(t, map[string]string{"laptop/declarations": "[manual]\n" +
+		"# Opening the section.\n" +
+		"\n" +
+		"backups \"Turn backups on\"\n" +
+		"#   Indented a little,\n" +
+		"  #then not spaced.\n" +
+		"#\n" +
+		"# Last. \n" +
+		"sign-in \"Sign in to the app\"\n" +
+		"  Scan the code\n" +
+		"# Apart from it.\n" +
+		"\n" +
+		"tool \"Install the tool\"\n"})
+	got, err := cfg.List(config.ManualKind, "laptop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var notes []string
+	for _, e := range got.Entries {
+		notes = append(notes, e.Name+": "+e.Notes)
+	}
+	want := []string{"backups: ", "sign-in:   Indented a little, then not spaced. Last.", "tool: "}
+	if !slices.Equal(notes, want) {
+		t.Errorf("notes = %q, want %q", notes, want)
 	}
 }
 
@@ -235,7 +268,7 @@ func TestCommandsKeepAQuotedHash(t *testing.T) {
 func TestWhere(t *testing.T) {
 	cfg := loadRepo(t, map[string]string{"shared/declarations": sharedFile, "laptop/declarations": laptopFile, "studio/declarations": "[homebrew formulae]\n# Media\nffmpeg   # for video\n"})
 	got, err := cfg.Where("brew", "ffmpeg")
-	want := []config.Entry{{Name: "ffmpeg", Scope: "studio", Section: "homebrew formulae", Line: 3, Note: "for video"}}
+	want := []config.Entry{{Name: "ffmpeg", Scope: "studio", Section: "homebrew formulae", Line: 3, Note: "for video", Notes: "Media"}}
 	if err != nil || !reflect.DeepEqual(got, want) {
 		t.Errorf("Where(ffmpeg) = %+v, %v; want %+v", got, err, want)
 	}

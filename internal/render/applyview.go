@@ -471,7 +471,7 @@ func (p *Pretty) toDoSection() []string {
 	if len(tasks) == 0 {
 		return nil
 	}
-	return append([]string{look.Header("To do", fmt.Sprintf("%d, in any order · kit apply checks them", len(tasks)))}, look.Tasks(p.width, tasks...)...)
+	return append([]string{look.Header("To do", fmt.Sprintf("%d · kit apply brings them back", len(tasks)))}, look.Tasks(p.width, tasks...)...)
 }
 
 // unwellSection is the steps that ended as st, failed or needing you, a row

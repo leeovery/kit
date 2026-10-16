@@ -38,6 +38,9 @@ func (a *app) addLine(ctx context.Context, r *run, name string, args []string, d
 		return errors.New("say it as " + usage)
 	case kind == config.ManualKind:
 		value = config.Quote(args[1])
+		if opts.group != "" {
+			value += " --group " + config.Quote(opts.group)
+		}
 		if dash >= 0 {
 			value += " --test " + quoteAll(args[2:])
 		}
@@ -48,6 +51,11 @@ func (a *app) addLine(ctx context.Context, r *run, name string, args []string, d
 	}
 	scope := r.scope(opts.shared)
 	entry := config.Entry{Name: args[0], Value: value, Note: opts.note}
+	if kind == config.ManualKind {
+		if _, err := steps.ParseManual(r.homeDir, entry); err != nil {
+			return err
+		}
+	}
 	c := startChanges(r, args[:1])
 	c.step(ctx, args[0], func(ctx context.Context) check.Result {
 		if err := r.cfg.Declare(kind, scope, entry); err != nil {

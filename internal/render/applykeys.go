@@ -52,24 +52,18 @@ var (
 	signalKeys   = []look.Key{{Key: "ctrl+c", Does: "stop"}}
 )
 
-// answerKey is a key answering a step by hand's card, and its answer.
-type answerKey struct {
-	key    look.Key
-	answer hand.Answer
-}
+// doneKey is the key the card shows saying a step by hand's done, when kit
+// can't tell by itself; enter says so too, unshown. There's no putting one
+// off: it's done, or the run's stopped.
+var doneKey = look.Key{Key: "space", Does: "when it's done"}
 
-// cardKeys are the keys answering card c: o opens its app again, when kit
-// opened one; enter says it's done, when kit can't tell by itself. There's
-// no putting one off: it's done, or the run's stopped.
-func cardKeys(c event.NeedsYou) []answerKey {
-	var ks []answerKey
-	if c.Opened != "" {
-		ks = append(ks, answerKey{look.Key{Key: "o", Does: "opens " + c.Opened + " again"}, hand.Open})
+// cardKeys are the keys card c shows answering it: none when kit tells by
+// itself that it's done.
+func cardKeys(c event.NeedsYou) []look.Key {
+	if c.Tells {
+		return nil
 	}
-	if !c.Tells {
-		ks = append(ks, answerKey{look.Key{Key: "enter", Does: "when it's done"}, hand.Done})
-	}
-	return ks
+	return []look.Key{doneKey}
 }
 
 // wheelLines are how many lines a turn of the mouse's wheel scrolls the
@@ -92,8 +86,8 @@ const stopIt = 1
 // stops the run. q asks whether to stop, and Stop stops the run, as ctrl+c
 // does at once; tab and shift+tab choose the next row and the one before,
 // a click on one chooses it, and esc chooses everything; the arrows, the
-// page keys, home, end and the wheel scroll the log; with a card up, o,
-// enter and l answer it.
+// page keys, home, end and the wheel scroll the log; with a card up, space
+// and enter say it's done.
 func (p *Pretty) Keys(listen func() (<-chan ask.Key, func()), halt func()) *Pretty {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -102,7 +96,7 @@ func (p *Pretty) Keys(listen func() (<-chan ask.Key, func()), halt func()) *Pret
 }
 
 // Hands has applying's screen pass what the person answers the card of a
-// step by hand with (enter, o, l) to answer, which passes it to the step.
+// step by hand with (space, enter) to answer, which passes it to the step.
 func (p *Pretty) Hands(answer func(step string, a hand.Answer) bool) *Pretty {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -156,7 +150,7 @@ func (p *Pretty) read(r *reading, keys <-chan ask.Key) {
 }
 
 // press is what a key does on applying's screen, and whether it stops the
-// run: ctrl+c at once; q asks first; o, enter and l answer the card up;
+// run: ctrl+c at once; q asks first; space and enter answer the card up;
 // tab, shift+tab, esc and a click choose what the log shows; the rest
 // scroll it. The window's focus coming and going is noted, for a click.
 func (p *Pretty) press(k ask.Key) (halt bool) {
@@ -169,8 +163,8 @@ func (p *Pretty) press(k ask.Key) (halt bool) {
 		p.keys.away = true
 	case p.keys.asking:
 		return p.answer(k)
-	case k.Is("o", "enter"):
-		p.answerCard(k)
+	case k.Is(" ", "enter"):
+		p.answerCard()
 	case k.Is("q"):
 		p.keys.asking, p.keys.choice = true, 0
 	case k.Is("tab"):
@@ -187,18 +181,13 @@ func (p *Pretty) press(k ask.Key) (halt bool) {
 	return false
 }
 
-// answerCard passes what k answers the card up with to its step, when the
-// card's keys offer it: nothing with no card up.
-func (p *Pretty) answerCard(k ask.Key) {
-	if p.card == nil || p.hands == nil {
+// answerCard passes the card up's step that it's done, when kit can't tell
+// by itself: nothing with no card up.
+func (p *Pretty) answerCard() {
+	if p.card == nil || p.hands == nil || p.card.Tells {
 		return
 	}
-	for _, a := range cardKeys(*p.card) {
-		if k.Is(a.key.Key) {
-			p.hands(p.card.Step, a.answer)
-			return
-		}
-	}
+	p.hands(p.card.Step, hand.Done)
 }
 
 // answer is what a key does to the question whether to stop, and whether

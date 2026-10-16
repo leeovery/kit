@@ -3,13 +3,14 @@
   █▀▀▄    █     █    │  ▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮
   █   █  ▄█▄    █    │  3 to do · 1 failed · 9 fine · 24m31s
 
-  TO DO  3, in any order · kit apply checks them
+  TO DO  3 · kit apply brings them back
   △ 1  Add a Time Machine disk
        → System Settings › General › Time Machine › Add Backup Disk
   △ 2  Allow remote users Full Disk Access
        → then: kit manual done sharing
   △ 3  Install the editor from its site
        → Download it from editor.example.com
+       Once it's downloaded, in Finder:
        → Drag it to Applications
 
   FAILED  1

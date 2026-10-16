@@ -21,7 +21,7 @@ import (
 // administrator's password, as settled before anything's installed.
 type addOptions struct {
 	shared, temp bool
-	note         string
+	note, group  string
 	waiting      map[string]bool
 	secret       secretOptions
 }

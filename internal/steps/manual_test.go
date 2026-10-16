@@ -54,10 +54,12 @@ func TestManual(t *testing.T) {
 func TestManualLinesRead(t *testing.T) {
 	for value, want := range map[string]string{
 		`--test test -d x`:                      "what to do comes after the name",
-		`"Do it" test -d x`:                     `"test" isn't one of a step by hand's options: --after, --before, --open and --test`,
-		`"Do it" --open`:                        `--open needs the app it opens after it, as in --open "System Settings"`,
-		`"Do it" --open --test true`:            "--open needs the app it opens after it",
-		`"Do it" --open One --open Two`:         "--open is there twice: a step by hand opens one app",
+		`"Do it" test -d x`:                     `"test" isn't one of a step by hand's options: --after, --before, --group and --test`,
+		`"Do it" --open "System Settings"`:      `--open is gone: kit opens nothing, so say what to open in a step, a line indented under it, as in "Open 1Password"`,
+		`"Do it" --group`:                       `--group needs the group's name after it, as in --group "First things"`,
+		`"Do it" --group --test true`:           "--group needs the group's name after it",
+		`"Do it" --group ""`:                    "--group needs the group's name after it",
+		`"Do it" --group One --group Two`:       "--group is there twice: a step by hand is in one group",
 		`"Do it" --test`:                        "--test needs the command",
 		`"Do it" -- test -d x`:                  "comes after --test now",
 		`"Do it" --after`:                       "--after needs a step's name after it",
@@ -75,8 +77,9 @@ func TestManualLinesRead(t *testing.T) {
 	}
 	m, err := steps.ParseManual("/home", config.Entry{
 		Name:  "1password",
-		Value: `"Sign in" --after cask:1password --after cask:tap/one/1password-cli --open "System Settings" --before secret --test sh -c 'op account list | grep -q .' ~/bin --open x`,
-		Steps: []string{"Scan the code", "Turn on its CLI"},
+		Value: `"Sign in" --after cask:1password --after cask:tap/one/1password-cli --group "First things" --before secret --test sh -c 'op account list | grep -q .' ~/bin --open x`,
+		Notes: "It unlocks every secret.",
+		Steps: []string{"Scan the code", "If it doesn't ask, in its settings:", "Turn on its CLI"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -85,11 +88,15 @@ func TestManualLinesRead(t *testing.T) {
 		m.Command.Name != "sh" || strings.Join(m.Command.Args, "|") != "-c|op account list | grep -q .|/home/bin|--open|x" {
 		t.Errorf("ParseManual() = %+v, %+v", m, m.Command)
 	}
-	if m.Open != "System Settings" || strings.Join(m.Steps, "|") != "Scan the code|Turn on its CLI" {
-		t.Errorf("ParseManual() opens %q, its steps %q", m.Open, m.Steps)
-	} // --after alone only orders a line: it's one of the rest, at the end.
+	if m.Group != "First things" || m.Why != "It unlocks every secret." || strings.Join(m.Steps, "|") != "Scan the code|If it doesn't ask, in its settings:|Turn on its CLI" {
+		t.Errorf("ParseManual() is in group %q, why %q, its steps %q", m.Group, m.Why, m.Steps)
+	}
+	// --after alone only orders a line: it's one of the rest, at the end.
 	if m, err := steps.ParseManual("/home", config.Entry{Name: "x", Value: `"Do it" --after cask:jetbrains-toolbox`}); err != nil || m.Ordered() {
 		t.Errorf("ParseManual(--after alone) = %+v, %v; want it not a step of its own", m, err)
+	}
+	if m, err := steps.ParseManual("/home", config.Entry{Name: "x", Value: `"Do it" --group setup`}); err != nil || m.Group != "setup" {
+		t.Errorf("ParseManual(--group setup) = %+v, %v; want it in the group setup", m, err)
 	}
 }
 
@@ -104,7 +111,7 @@ func TestTheStepsByHandAreListed(t *testing.T) {
 	list := config.List{Entries: []config.Entry{
 		{Name: "sign-in", Value: `"Sign in to the service"`, Scope: "laptop", Line: 2},
 		{Name: "broken", Value: `--test true`, Scope: "laptop", Line: 3},
-		{Name: "backups", Value: `"Turn backups on"`, Scope: "laptop", Line: 4},
+		{Name: "backups", Value: `"Turn backups on" --group Mac`, Notes: "Nothing's backed up till then.", Scope: "laptop", Line: 4},
 	}}
 	own := steps.ManualStep{Name: "licence", Do: "Enter the app's licence", After: []string{steps.ManualName}}
 	p, err := engine.New(steps.Manual(nil, "/home/someone", state, list, nil), steps.OwnManual(nil, state, own, nil))
@@ -120,7 +127,7 @@ func TestTheStepsByHandAreListed(t *testing.T) {
 		t.Fatalf("the run began with %+v, want its start, with both steps", sink.seen[0])
 	}
 	want := map[string][]event.Hand{
-		steps.ManualName: {{Name: "sign-in", Title: "Sign in to the service"}, {Name: "backups", Title: "Turn backups on"}},
+		steps.ManualName: {{Name: "sign-in", Title: "Sign in to the service"}, {Name: "backups", Title: "Turn backups on", Group: "Mac", Why: "Nothing's backed up till then."}},
 		"licence":        {{Name: "licence", Title: "Enter the app's licence"}},
 	}
 	for _, s := range start.Steps {
@@ -155,7 +162,7 @@ type card struct {
 func newCard(t *testing.T) *card {
 	fake := runnertest.New(t)
 	c := &card{sink: &events{}, desk: hand.New(), fake: fake, state: t.TempDir()}
-	c.raise = &steps.Raise{Sink: c.sink, Now: time.Now, Open: steps.OpenApp(fake), Desk: c.desk}
+	c.raise = &steps.Raise{Sink: c.sink, Now: time.Now, Desk: c.desk}
 	return c
 }
 
@@ -193,17 +200,6 @@ func (c *card) answer(t *testing.T, step string, a hand.Answer) {
 	t.Fatalf("%s's card never took %v", step, a)
 }
 
-// opened is how many times app was opened.
-func (c *card) opened(app string) int {
-	n := 0
-	for _, cmd := range c.fake.Commands() {
-		if cmd.Name == "open" && slices.Equal(cmd.Args, []string{"-a", app}) {
-			n++
-		}
-	}
-	return n
-}
-
 // applying applies step, as the run would, its check's finding given it.
 func applying(t *testing.T, step engine.Step) <-chan error {
 	found := step.Check(t.Context())
@@ -225,31 +221,25 @@ func ended(t *testing.T, applying <-chan error) error {
 }
 
 // A step by hand of its own, come due at a terminal, goes up as a card: its
-// line's name, what to do, its steps, the app it opened (once), whether kit
-// tells by itself when it's done, and a notification posted. Open opens the
-// app again; Done, with no test, marks it done on this Mac, as kit manual
-// done does.
+// line's name, what to do, its group, why, its steps, whether kit tells by
+// itself when it's done, and a notification posted; kit opens nothing.
+// Done, with no test, marks it done on this Mac, as kit manual done does.
 func TestACardGoesUpAndIsDone(t *testing.T) {
 	c := newCard(t)
-	c.fake.On("open", "-a", "System Settings")
-	c.fake.On("osascript", "-e", `display notification "General › Sharing" with title "kit" subtitle "Turn on sharing"`)
+	c.fake.On("osascript", "-e", `display notification "Open System Settings" with title "kit" subtitle "Turn on sharing"`)
 	c.raise.Notify = steps.Notify(c.fake)
-	m := steps.ManualStep{Name: "sharing", Do: "Turn on sharing", After: []string{"cask"}, Open: "System Settings", Steps: []string{"General › Sharing", "Turn on Remote Login"}}
+	m := steps.ManualStep{Name: "sharing", Do: "Turn on sharing", Why: "For logging in from elsewhere.", Group: "Mac", After: []string{"cask"}, Steps: []string{"Open System Settings", "General › Sharing", "Turn on Remote Login"}}
 	step := steps.OwnManual(c.fake, c.state, m, c.raise)
 	applied := applying(t, step)
 
 	up := c.cards(t, 1)[0]
-	want := event.NeedsYou{Time: up.Time, Step: "sharing", Item: "sharing", Title: "Turn on sharing", Steps: m.Steps, Opened: "System Settings"}
-	if !reflect.DeepEqual(up, want) || c.opened("System Settings") != 1 || !slices.Contains(c.fake.Calls(), `osascript -e 'display notification "General › Sharing" with title "kit" subtitle "Turn on sharing"'`) {
-		t.Errorf("card = %+v, opened %d times, ran %q; want %+v, opened once, a notification posted", up, c.opened("System Settings"), c.fake.Calls(), want)
+	want := event.NeedsYou{Time: up.Time, Step: "sharing", Item: "sharing", Title: "Turn on sharing", Group: "Mac", Why: "For logging in from elsewhere.", Steps: m.Steps}
+	if !reflect.DeepEqual(up, want) || !slices.Equal(c.fake.Calls(), []string{`osascript -e 'display notification "Open System Settings" with title "kit" subtitle "Turn on sharing"'`}) {
+		t.Errorf("card = %+v, ran %q; want %+v, a notification posted, nothing else run", up, c.fake.Calls(), want)
 	}
-	c.answer(t, "sharing", hand.Open)
 	c.answer(t, "sharing", hand.Done)
 	if err := ended(t, applied); err != nil {
 		t.Fatal(err)
-	}
-	if n := c.opened("System Settings"); n != 2 {
-		t.Errorf("opened %d times, want again for Open", n)
 	}
 	if res := step.Check(t.Context()); res.State != check.OK {
 		t.Errorf("after Done, check = %+v, want it marked done", res)
@@ -268,21 +258,6 @@ func TestACardMarkedDoneElsewhere(t *testing.T) {
 	if err := steps.MarkDone(c.state, []string{"paper"}, time.Now(), false); err != nil {
 		t.Fatal(err)
 	}
-	if err := ended(t, applied); err != nil {
-		t.Fatal(err)
-	}
-}
-
-// An app that won't open isn't said to be open.
-func TestACardsAppThatWontOpen(t *testing.T) {
-	c := newCard(t)
-	c.fake.On("open", "-a", "Missing").Exits(1)
-	step := steps.OwnManual(c.fake, c.state, steps.ManualStep{Name: "missing", Do: "Use the missing app", Open: "Missing", After: []string{"cask"}}, c.raise)
-	applied := applying(t, step)
-	if up := c.cards(t, 1)[0]; up.Opened != "" {
-		t.Errorf("card opened %q, want nothing, as the app didn't open", up.Opened)
-	}
-	c.answer(t, "missing", hand.Done)
 	if err := ended(t, applied); err != nil {
 		t.Fatal(err)
 	}

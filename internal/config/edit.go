@@ -84,6 +84,19 @@ func (b body) notesStart(i int) int {
 	return i
 }
 
+// notes are entry i's notes, the comments directly above it, as one
+// paragraph: each without its # and the space after that.
+func (b body) notes(i int) string {
+	var words []string
+	for _, line := range b.lines[b.notesStart(i):i] {
+		line = strings.TrimPrefix(strings.TrimPrefix(strings.TrimSpace(line), "#"), " ")
+		if line != "" {
+			words = append(words, line)
+		}
+	}
+	return strings.Join(words, " ")
+}
+
 // end is where entry i's block ends: after the steps indented under it.
 func (b body) end(i int) int {
 	i++

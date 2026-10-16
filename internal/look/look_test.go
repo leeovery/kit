@@ -150,20 +150,32 @@ func TestLights(t *testing.T) {
 }
 
 // A card: an orange rule across, w wide with the margins, carrying the
-// needs-you mark, the title strong and what it says; a blank line; its
-// steps numbered, the numbers orange, each wrapped under its own words and
-// a blank line after it; then what's said after them, muted, wrapped, and
-// a blank line. A title too long for its rule is cut, some rule kept.
+// needs-you mark, the title strong and what it says; a blank line; why,
+// muted, wrapped, and a blank line; its steps numbered, the numbers
+// orange, each wrapped under its own words and a blank line after it, a
+// subheading muted, unnumbered, straight on to the step after it, the
+// numbering carrying on across it; then what's said after them, muted,
+// wrapped, and a blank line. A title too long for its rule is cut, some
+// rule kept.
 func TestCard(t *testing.T) {
-	steps := []string{"1Password is open: kit opened it for you", "In 1Password, Settings › Developer › turn on Integrate with 1Password CLI"}
-	got := look.Card(70, "Sign in to 1Password", look.Says(look.Orange("needs you"), look.Muted("2 more after this")), steps, "kit carries on by itself once it's done")
+	got := look.Card(70, look.CardText{
+		Title: "Sign in to 1Password",
+		Says:  look.Says(look.Orange("needs you"), look.Muted("2 more after this")),
+		Why:   "It unlocks every secret kit puts in place, so the rest of the run waits for it.",
+		Steps: []string{"Open 1Password", "If it doesn't ask, in its settings:", "Settings › Developer › turn on Integrate with 1Password CLI"},
+		After: "kit carries on by itself once it's done",
+	})
 	same(t, got,
 		"  ── ▲ Sign in to 1Password  needs you · 2 more after this ─────────",
 		"",
-		"       1  1Password is open: kit opened it for you",
+		"       It unlocks every secret kit puts in place, so the rest of the",
+		"       run waits for it.",
 		"",
-		"       2  In 1Password, Settings › Developer › turn on Integrate",
-		"          with 1Password CLI",
+		"       1  Open 1Password",
+		"",
+		"       If it doesn't ask, in its settings:",
+		"       2  Settings › Developer › turn on Integrate with 1Password",
+		"          CLI",
 		"",
 		"       kit carries on by itself once it's done",
 		"",
@@ -171,12 +183,15 @@ func TestCard(t *testing.T) {
 	if !strings.HasPrefix(got[0], "  "+look.Orange("── ")+look.Orange("▲")+" "+look.Strong("Sign in to 1Password")) || !strings.HasSuffix(got[0], " "+look.Orange("─────────")) {
 		t.Errorf("the card's rule is %q; want it orange, the mark orange, the title strong", got[0])
 	}
+	if got[2] != "       "+look.Muted("It unlocks every secret kit puts in place, so the rest of the") || got[7] != "       "+look.Muted("If it doesn't ask, in its settings:") {
+		t.Errorf("why and the subheading are %q and %q; want them muted", got[2], got[7])
+	}
 	for _, l := range got {
 		if w := ansi.StringWidth(l); w > 68 {
 			t.Errorf("%q is %d wide; want it to end two cells from the edge", ansi.Strip(l), w)
 		}
 	}
-	same(t, look.Card(30, "Allow Karabiner-Elements", look.Orange("needs you"), []string{"Allow its driver"}, ""),
+	same(t, look.Card(30, look.CardText{Title: "Allow Karabiner-Elements", Says: look.Orange("needs you"), Steps: []string{"Allow its driver"}}),
 		"  ── ▲ Allow Karabiner-… ───",
 		"",
 		"       1  Allow its driver",
@@ -186,11 +201,12 @@ func TestCard(t *testing.T) {
 
 // What's left to do, numbered: the to-do mark, the number and the title,
 // then how, each thing under the title after an arrow, muted, wrapped
-// under its own words; a title too long cut.
+// under its own words, a subheading without the arrow; a title too long
+// cut.
 func TestTasks(t *testing.T) {
 	got := look.Tasks(50,
 		look.Task{Title: "Add a Time Machine disk", How: []string{"System Settings › General › Time Machine › Add Backup Disk"}},
-		look.Task{Title: "Install Paper", How: []string{"Download it from paper.example.com", "Drag it to Applications"}},
+		look.Task{Title: "Install Paper", How: []string{"Download it from paper.example.com", "If it won't open, in System Settings:", "Drag it to Applications"}},
 		look.Task{Title: "A title far too long for a list fifty cells wide"},
 	)
 	same(t, got,
@@ -199,9 +215,13 @@ func TestTasks(t *testing.T) {
 		"         › Add Backup Disk",
 		"  △ 2  Install Paper",
 		"       → Download it from paper.example.com",
+		"       If it won't open, in System Settings:",
 		"       → Drag it to Applications",
 		"  △ 3  A title far too long for a list fifty cell…",
 	)
+	if got[5] != "       "+look.Muted("If it won't open, in System Settings:") {
+		t.Errorf("a subheading's line is %q; want it muted, without the arrow", got[5])
+	}
 	if !strings.HasPrefix(got[0], "  "+look.White("△")+" "+look.White("1")+"  "+look.Strong("Add a Time Machine disk")) {
 		t.Errorf("a task's line is %q; want its mark and number white, its title strong", got[0])
 	}

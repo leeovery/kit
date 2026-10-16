@@ -37,27 +37,26 @@ func cards(records []logs.Record) []logs.Record {
 }
 
 // signInWorld is a Mac with ripgrep missing, and a step by hand that comes
-// after it: signing in to a tool, which it opens.
+// after it: signing in to a tool, in a group, with notes saying why.
 func signInWorld(t *testing.T) *world {
 	t.Helper()
 	w := missingWorld(t)
-	w.writeSection(t, "laptop", "manual", `sign-in "Sign in to the tool" --after brew --before gh --open Tool --test test -f /signed-in`+"\n  Open the tool\n  Sign in\n")
+	w.writeSection(t, "laptop", "manual", "# The tool's commands need it.\n"+`sign-in "Sign in to the tool" --after brew --before gh --group "First things" --test test -f /signed-in`+"\n  Open the tool\n  Sign in\n")
 	w.fake.On("brew", "update", "--quiet")
 	w.fake.On("brew", "install", "--formula", "ripgrep")
 	w.fake.On("test", "-f", "/signed-in").Exits(1)
 	return w
 }
 
-// At a terminal, a step by hand come due goes up as a card: its app opened
-// once, a notification posted, and the card in the run's log. Stopped, the
-// run ends with it not done.
+// At a terminal, a step by hand come due goes up as a card: a notification
+// posted, nothing opened, and the card in the run's log. Stopped, the run
+// ends with it not done.
 func TestApplyRaisesAStepByHand(t *testing.T) {
 	w := signInWorld(t)
 	w.terminal, w.size = true, [2]int{160, 64}
 	kb := &keyboard{}
 	w.listen = kb.listen
-	w.fake.On("open", "-a", "Tool").Does(func() { kb.press(t, ask.Key{Name: "ctrl+c"}) })
-	w.fake.On("osascript", "-e", `display notification "Open the tool" with title "kit" subtitle "Sign in to the tool"`)
+	w.fake.On("osascript", "-e", `display notification "Open the tool" with title "kit" subtitle "Sign in to the tool"`).Does(func() { kb.press(t, ask.Key{Name: "ctrl+c"}) })
 	// osascript there, the login items are checked too: there are none.
 	w.fake.On("osascript", "-l", "JavaScript", "-e", login.ReadScript).Prints("[]")
 
@@ -68,8 +67,8 @@ func TestApplyRaisesAStepByHand(t *testing.T) {
 	if len(up) != 1 || up[0].Step != "sign-in" || up[0].Item != "sign-in" || up[0].Title != "Sign in to the tool" || !up[0].Tells || up[0].More != 0 {
 		t.Errorf("cards logged = %+v, want sign-in's, kit telling when it's done", up)
 	}
-	if opened := slices.Index(w.fake.Calls(), "open -a Tool"); opened < 0 || slices.Index(w.fake.Calls()[opened+1:], "open -a Tool") >= 0 {
-		t.Errorf("ran %q, want the tool opened once", w.fake.Calls())
+	if slices.ContainsFunc(w.fake.Calls(), func(c string) bool { return strings.HasPrefix(c, "open ") }) {
+		t.Errorf("ran %q, want nothing opened", w.fake.Calls())
 	}
 }
 

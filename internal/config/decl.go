@@ -223,6 +223,9 @@ type Entry struct {
 	Line int
 	// Note is the comment after it, saying why it's there, if any.
 	Note string
+	// Notes are the comments directly above it, no blank line between, as
+	// one paragraph: each without its # and the space after that.
+	Notes string `json:",omitempty"`
 	// Steps are what to do, in order, as the lines indented under it say: a
 	// step by hand's.
 	Steps []string `json:",omitempty"`
@@ -499,7 +502,7 @@ func (s *section) entries(scope string) ([]Entry, error) {
 			return nil, fmt.Errorf("%s:%d: %s is already at line %d", file, n, e.Name, first)
 		}
 		seen[e.Name] = n
-		e.Scope, e.Line = scope, n
+		e.Scope, e.Line, e.Notes = scope, n, b.notes(i)
 		out = append(out, e)
 	}
 	return out, nil

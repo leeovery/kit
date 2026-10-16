@@ -61,6 +61,20 @@ func TestStepsByHand(t *testing.T) {
 	}
 }
 
+// kit manual add --group puts the step by hand in its group, on its line
+// before its command.
+func TestAStepByHandInAGroup(t *testing.T) {
+	w := laptopWorld(t)
+	w.fake.On("test", "-d", "/Applications/Tool.app").Exits(1)
+	w.expectSync([]string{"laptop/declarations"}, "kit manual add tool (laptop)")
+	if out, _, code := w.run(t, "manual", "add", "tool", "Install the tool from its site", "--group", "First things", "--", "test", "-d", "/Applications/Tool.app"); code != 0 {
+		t.Errorf("kit manual add --group printed\n%s exit %d", out, code)
+	}
+	if got := w.readSection(t, "laptop", "manual"); got != "tool \"Install the tool from its site\" --group \"First things\" --test test -d /Applications/Tool.app\n" {
+		t.Errorf("[manual] = %q", got)
+	}
+}
+
 func TestAStepByHandKitChecksItself(t *testing.T) {
 	w := laptopWorld(t)
 	w.fake.On("test", "-d", "/Applications/Tool.app").Exits(1)
