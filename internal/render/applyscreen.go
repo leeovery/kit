@@ -353,7 +353,7 @@ func (p *Pretty) rightPane(w, room int) (lines []string, rules map[int]bool, log
 	if rule >= 0 {
 		rules[rule] = true
 	}
-	body := p.logBody(p.keys.chosen)
+	body := p.paneBody()
 	start, end, back := p.keys.logWindow(len(body), room-len(top))
 	lines = append(top, body[start:end]...)
 	if back {
@@ -367,7 +367,7 @@ func (p *Pretty) rightPane(w, room int) (lines []string, rules map[int]bool, log
 // paneTop is what's over the log in the right pane, w wide, and which of
 // its lines is a rule, -1 for none: the panel, while a card's up, a rule
 // under it; then the log's heading, Log, or Log and the row chosen, a blank
-// line over and under it.
+// line over and under it; or, in the log's place, the raw view's heading.
 func (p *Pretty) paneTop(w int) (top []string, rule int) {
 	rule = -1
 	if p.card != nil {
@@ -375,11 +375,7 @@ func (p *Pretty) paneTop(w int) (top []string, rule int) {
 		rule = len(top)
 		top = append(top, "")
 	}
-	head := look.Header("Log", "")
-	if p.keys.chosen != "" {
-		head = look.Header("Log · "+p.keys.chosen, "")
-	}
-	return append(top, "", head, ""), rule
+	return append(top, "", p.paneHeading(w), ""), rule
 }
 
 // panelAt is where a panel's words start, under its title's.

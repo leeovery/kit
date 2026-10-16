@@ -98,6 +98,10 @@ type Pretty struct {
 	// changed things, and command the command printing them.
 	output  map[string][]string
 	command map[string]string
+	// raw are the lines each step's commands printed while it changed
+	// things, as applying's raw view shows them, rawSeq how many came.
+	raw    map[string][]rawLine
+	rawSeq int
 	// log is applying's log: every line of the run, in order.
 	log   []logLine
 	frame int
@@ -202,6 +206,7 @@ func (p *Pretty) Emit(e event.Event) {
 	case event.RunStarted:
 		p.start, p.results = e, make(map[string]event.StepFinished, len(e.Steps))
 		p.output, p.command, p.began = map[string][]string{}, map[string]string{}, p.now()
+		p.raw, p.rawSeq = map[string][]rawLine{}, 0
 		p.cut, p.card, p.cards = map[string]runningStep{}, nil, map[string]event.NeedsYou{}
 		p.log = nil
 		p.order.start(e.Steps)
@@ -272,6 +277,7 @@ func (p *Pretty) Emit(e event.Event) {
 	case event.Output:
 		line := strings.TrimRight(strings.ReplaceAll(ansi.Strip(e.Line), "\t", "    "), " ")
 		p.output[e.Step] = append(lastOf(p.output[e.Step], keptPrinted-1), line)
+		p.keepRaw(e, line)
 		p.command[e.Step] = e.Command
 		for i, r := range p.running {
 			if r.step == e.Step {
@@ -758,7 +764,7 @@ const (
 )
 
 // lastOf is the last n of lines.
-func lastOf(lines []string, n int) []string {
+func lastOf[T any](lines []T, n int) []T {
 	return lines[max(len(lines)-n, 0):]
 }
 

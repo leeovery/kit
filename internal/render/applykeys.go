@@ -22,10 +22,12 @@ type screenKeys struct {
 	reading *reading
 	asking  bool
 	choice  int
-	// chosen is the row whose lines alone the log shows, "" for everything.
-	// anchored is whether the log's scrolled back, top the first of its
-	// lines shown then; else it follows the newest.
+	// chosen is the row whose lines alone the log shows, "" for everything;
+	// raw is whether its raw view shows in the log's place. anchored is
+	// whether the log's scrolled back, top the first of its lines shown
+	// then; else it follows the newest.
 	chosen   string
+	raw      bool
 	anchored bool
 	top      int
 	// Where the screen was last drawn: which choice each line of the left
@@ -85,9 +87,10 @@ const stopIt = 1
 // mode till the stop it returns puts the terminal back as it was; halt
 // stops the run. q asks whether to stop, and Stop stops the run, as ctrl+c
 // does at once; tab and shift+tab choose the next row and the one before,
-// a click on one chooses it, and esc chooses everything; the arrows, the
-// page keys, home, end and the wheel scroll the log; with a card up, space
-// and enter say it's done.
+// a click on one chooses it, and esc chooses everything; with a row
+// chosen, r shows its raw view, and esc or r goes back to the log; the
+// arrows, the page keys, home, end and the wheel scroll the log; with a
+// card up, space and enter say it's done.
 func (p *Pretty) Keys(listen func() (<-chan ask.Key, func()), halt func()) *Pretty {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -151,8 +154,9 @@ func (p *Pretty) read(r *reading, keys <-chan ask.Key) {
 
 // press is what a key does on applying's screen, and whether it stops the
 // run: ctrl+c at once; q asks first; space and enter answer the card up;
-// tab, shift+tab, esc and a click choose what the log shows; the rest
-// scroll it. The window's focus coming and going is noted, for a click.
+// tab, shift+tab, esc and a click choose what the log shows, r and esc
+// whether a row's raw view shows in its place; the rest scroll it. The
+// window's focus coming and going is noted, for a click.
 func (p *Pretty) press(k ask.Key) (halt bool) {
 	switch {
 	case k.Is("ctrl+c"):
@@ -171,8 +175,10 @@ func (p *Pretty) press(k ask.Key) (halt bool) {
 		p.chooseNext(1)
 	case k.Is("shift+tab"):
 		p.chooseNext(-1)
+	case k.Is("r"):
+		p.toggleRaw()
 	case k.Is("esc"):
-		p.choose("")
+		p.back()
 	case k.Is("click"):
 		p.click(k.X, k.Y)
 	default:
@@ -206,9 +212,11 @@ func (p *Pretty) answer(k ask.Key) (halt bool) {
 }
 
 // choose has the log show row's lines alone, or every line for "", from
-// the newest.
+// the newest: a row's raw view, while it's open, shows row's instead, and
+// goes with everything.
 func (p *Pretty) choose(row string) {
 	p.keys.chosen, p.keys.anchored = row, false
+	p.keys.raw = p.keys.raw && row != ""
 }
 
 // chooseNext chooses the row by places after the one chosen, round from
@@ -288,12 +296,13 @@ func (p *Pretty) scroll(n, room, by int) {
 	p.keys.anchored, p.keys.top = top < n-room, top
 }
 
-// logSize is how many lines the log has, as it's chosen, and how many it
+// logSize is how many lines the log has, as it's chosen, or the raw view
+// in its place, and how many it
 // has room for, in the window as it is.
 func (p *Pretty) logSize() (n, room int) {
 	w, h := p.window()
 	top, _ := p.paneTop(w - splitAt(w) - 1)
-	return len(p.logBody(p.keys.chosen)), h - len(p.header()) - 1 - len(top)
+	return len(p.paneBody()), h - len(p.header()) - 1 - len(top)
 }
 
 // footKeys are the keys at the left pane's foot, as it reads them.

@@ -359,7 +359,7 @@ func pressing(keys ...ask.Key) func(string, int) []ask.Key {
 // the rows at the left, the log at the right. Each is drawn as round 10
 // has it, at the size round 10 drew and at the least the screen takes:
 // following the log, a card up, a row chosen, scrolled back, a step
-// failed.
+// failed, a row chosen that's printed something, and its raw view.
 func TestApplyingHasAScreenOfItsOwn(t *testing.T) {
 	took := 6*time.Minute + 12*time.Second
 	for _, tt := range []struct {
@@ -372,6 +372,8 @@ func TestApplyingHasAScreenOfItsOwn(t *testing.T) {
 		{"row", sixMinutesIn, clickRow("Homebrew casks")},
 		{"scrolled", func() []event.Event { return sixMinutesInWith(40, 12) }, pressing(keyUp, keyUp, keyUp, keyUp, keyUp)},
 		{"failed", casksFailed, nil},
+		{"row-printed", printing, clickRow("Homebrew formulae")},
+		{"raw", printing, func(screen string, w int) []ask.Key { return append(clickRow("Homebrew formulae")(screen, w), keyR) }},
 	} {
 		for _, size := range [][2]int{{160, 64}, {100, 30}} {
 			name := fmt.Sprintf("apply-screen-%s-%dx%d.golden", tt.name, size[0], size[1])
