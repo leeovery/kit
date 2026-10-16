@@ -149,20 +149,50 @@ func (e *events) Emit(ev event.Event) {
 	e.seen = append(e.seen, ev)
 }
 
+// notices notes the notifications posted and taken away: a clear in a
+// context that's done, so that it can't run, says so.
+type notices struct {
+	mu   sync.Mutex
+	seen []string
+}
+
+func (n *notices) Notify(_ context.Context, id, title, body string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.seen = append(n.seen, "notify "+id+" | "+title+" | "+body)
+}
+
+func (n *notices) Clear(ctx context.Context, id string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if ctx.Err() != nil {
+		id += " (in a context that's done)"
+	}
+	n.seen = append(n.seen, "clear "+id)
+}
+
+func (n *notices) posted() []string {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return slices.Clone(n.seen)
+}
+
 // card is a run at a terminal, as steps by hand are raised in it: what's
-// emitted, the desk the person answers cards on, and the programs run.
+// emitted, the desk the person answers cards on, the programs run, and the
+// notifications posted.
 type card struct {
-	raise *steps.Raise
-	sink  *events
-	desk  *hand.Desk
-	fake  *runnertest.Fake
-	state string
+	raise   *steps.Raise
+	sink    *events
+	desk    *hand.Desk
+	fake    *runnertest.Fake
+	notices *notices
+	state   string
 }
 
 func newCard(t *testing.T) *card {
 	fake := runnertest.New(t)
-	c := &card{sink: &events{}, desk: hand.New(), fake: fake, state: t.TempDir()}
-	c.raise = &steps.Raise{Sink: c.sink, Now: time.Now, Desk: c.desk}
+	c := &card{sink: &events{}, desk: hand.New(), fake: fake, notices: &notices{}, state: t.TempDir()}
+	c.raise = &steps.Raise{Sink: c.sink, Now: time.Now, Notify: c.notices, Desk: c.desk}
 	return c
 }
 
@@ -222,20 +252,20 @@ func ended(t *testing.T, applying <-chan error) error {
 
 // A step by hand of its own, come due at a terminal, goes up as a card: its
 // line's name, what to do, its group, why, its steps, whether kit tells by
-// itself when it's done, and a notification posted; kit opens nothing.
-// Done, with no test, marks it done on this Mac, as kit manual done does.
+// itself when it's done, and a notification posted: its title what to do,
+// its body the first step; kit opens nothing, and runs nothing. Done, with
+// no test, marks it done on this Mac, as kit manual done does, and takes
+// the notification away.
 func TestACardGoesUpAndIsDone(t *testing.T) {
 	c := newCard(t)
-	c.fake.On("osascript", "-e", `display notification "Open System Settings" with title "kit" subtitle "Turn on sharing"`)
-	c.raise.Notify = steps.Notify(c.fake)
 	m := steps.ManualStep{Name: "sharing", Do: "Turn on sharing", Why: "For logging in from elsewhere.", Group: "Mac", After: []string{"cask"}, Steps: []string{"Open System Settings", "General › Sharing", "Turn on Remote Login"}}
 	step := steps.OwnManual(c.fake, c.state, m, c.raise)
 	applied := applying(t, step)
 
 	up := c.cards(t, 1)[0]
 	want := event.NeedsYou{Time: up.Time, Step: "sharing", Item: "sharing", Title: "Turn on sharing", Group: "Mac", Why: "For logging in from elsewhere.", Steps: m.Steps}
-	if !reflect.DeepEqual(up, want) || !slices.Equal(c.fake.Calls(), []string{`osascript -e 'display notification "Open System Settings" with title "kit" subtitle "Turn on sharing"'`}) {
-		t.Errorf("card = %+v, ran %q; want %+v, a notification posted, nothing else run", up, c.fake.Calls(), want)
+	if !reflect.DeepEqual(up, want) || len(c.fake.Calls()) != 0 {
+		t.Errorf("card = %+v, ran %q; want %+v, nothing run", up, c.fake.Calls(), want)
 	}
 	c.answer(t, "sharing", hand.Done)
 	if err := ended(t, applied); err != nil {
@@ -243,6 +273,10 @@ func TestACardGoesUpAndIsDone(t *testing.T) {
 	}
 	if res := step.Check(t.Context()); res.State != check.OK {
 		t.Errorf("after Done, check = %+v, want it marked done", res)
+	}
+	notified := []string{"notify card:sharing:sharing | Turn on sharing | Open System Settings", "clear card:sharing:sharing"}
+	if got := c.notices.posted(); !slices.Equal(got, notified) {
+		t.Errorf("notifications %q, want %q", got, notified)
 	}
 }
 
@@ -302,8 +336,9 @@ func TestACardWithATestLooksAgain(t *testing.T) {
 }
 
 // There's no putting a card off: a step by hand raised ends done, or with
-// the run stopped, left to do. With no one to act, applying leaves it as it
-// stands.
+// the run stopped, left to do, its notification, saying kit waits for it
+// as it has no steps, taken away all the same. With no one to act, applying
+// leaves it as it stands.
 func TestACardIsDoneOrStopped(t *testing.T) {
 	c := newCard(t)
 	m := steps.ManualStep{Name: "sign-in", Do: "Sign in", Before: []string{"secret"}}
@@ -322,6 +357,10 @@ func TestACardIsDoneOrStopped(t *testing.T) {
 	res := step.Check(t.Context())
 	if !res.ToDo() || res.Items[0].State != check.ByHand || res.Items[0].Detail != "then: kit manual done sign-in" {
 		t.Errorf("check after = %+v, want it left to do", res)
+	}
+	want := []string{"notify card:sign-in:sign-in | Sign in | kit waits for you to do this", "clear card:sign-in:sign-in"}
+	if got := c.notices.posted(); !slices.Equal(got, want) {
+		t.Errorf("notifications %q, want %q", got, want)
 	}
 }
 
@@ -368,7 +407,7 @@ func TestOneCardAtATime(t *testing.T) {
 
 // The rest of the steps by hand, raised, come up one card each, in order,
 // those not done: each saying how many follow it; one done, the next comes
-// up.
+// up, its notification posted once the last one's taken away.
 func TestTheRestOneCardEach(t *testing.T) {
 	c := newCard(t)
 	c.fake.On("test", "-d", "/Applications/Done.app")
@@ -394,5 +433,12 @@ func TestTheRestOneCardEach(t *testing.T) {
 	}
 	if res := step.Check(t.Context()); res.State != check.OK {
 		t.Errorf("check after = %+v, want all done", res)
+	}
+	want := []string{
+		"notify card:manual:app | Install the app | kit waits for you to do this", "clear card:manual:app",
+		"notify card:manual:sign-in | Sign in to the service | Open the service", "clear card:manual:sign-in",
+	}
+	if got := c.notices.posted(); !slices.Equal(got, want) {
+		t.Errorf("notifications %q, want %q", got, want)
 	}
 }

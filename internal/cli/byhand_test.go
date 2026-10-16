@@ -1,6 +1,7 @@
 package cli_test
 
 import (
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"github.com/leeovery/kit/internal/ask"
 	"github.com/leeovery/kit/internal/kind/login"
 	"github.com/leeovery/kit/internal/logs"
+	"github.com/leeovery/kit/internal/runner"
 )
 
 // lastLog is the run log the world's last run wrote.
@@ -69,6 +71,52 @@ func TestApplyRaisesAStepByHand(t *testing.T) {
 	}
 	if slices.ContainsFunc(w.fake.Calls(), func(c string) bool { return strings.HasPrefix(c, "open ") }) {
 		t.Errorf("ran %q, want nothing opened", w.fake.Calls())
+	}
+}
+
+// Where kit's app can be built, a run that raises cards builds it, once, in
+// kit's data folder: the card's notification is posted through it, under an
+// id of its step and item, a click bringing forward the terminal kit runs
+// in, and taken away as the run ends with the card not done.
+func TestApplyNotifiesThroughKitsApp(t *testing.T) {
+	w := signInWorld(t)
+	w.terminal, w.size = true, [2]int{160, 64}
+	w.env["__CFBundleIdentifier"] = "com.example.terminal"
+	kb := &keyboard{}
+	w.listen = kb.listen
+	data := filepath.Join(w.home, ".local", "share", "kit")
+	work := filepath.Join(data, ".kit.app-build")
+	exe := filepath.Join(work, "kit.app", "Contents", "MacOS", "kit")
+	app := filepath.Join(data, "kit.app")
+	built := []runner.Command{
+		{Name: "xcode-select", Args: []string{"-p"}},
+		{Name: "swiftc", Args: []string{"-O", "-o", exe, filepath.Join(work, "kit.swift")}},
+		{Name: "codesign", Args: []string{"-s", "-", "-f", filepath.Join(work, "kit.app")}},
+	}
+	notify := runner.Command{Name: "open", Args: []string{"-g", "-n", app, "--args", "notify", "--id", "card:sign-in:sign-in", "--title", "Sign in to the tool", "--body", "Open the tool", "--activate", "com.example.terminal"}}
+	clear := runner.Command{Name: "open", Args: []string{"-g", "-n", app, "--args", "clear", "--id", "card:sign-in:sign-in"}}
+	w.fake.On("xcode-select", "-p")
+	w.fake.On("codesign", built[2].Args...)
+	w.fake.On("swiftc", built[1].Args...).Does(func() {
+		if err := os.WriteFile(exe, nil, 0o755); err != nil {
+			t.Error(err)
+		}
+	})
+	w.fake.On("open", notify.Args...).Does(func() { kb.press(t, ask.Key{Name: "ctrl+c"}) })
+	w.fake.On("open", clear.Args...)
+
+	if _, errOut, code := w.run(t, "apply"); code != 1 {
+		t.Errorf("kit apply, stopped at the card, exit %d (%s), want 1", code, errOut)
+	}
+	var ran []string
+	for _, c := range w.fake.Calls() {
+		if strings.HasPrefix(c, "xcode-select") || strings.HasPrefix(c, "swiftc") || strings.HasPrefix(c, "codesign") || strings.HasPrefix(c, "open -g") {
+			ran = append(ran, c)
+		}
+	}
+	want := []string{built[0].String(), built[1].String(), built[2].String(), notify.String(), clear.String()}
+	if !slices.Equal(ran, want) {
+		t.Errorf("ran %q, want %q", ran, want)
 	}
 }
 

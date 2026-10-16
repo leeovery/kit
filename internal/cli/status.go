@@ -39,6 +39,7 @@ import (
 	"github.com/leeovery/kit/internal/linked"
 	"github.com/leeovery/kit/internal/logs"
 	"github.com/leeovery/kit/internal/look"
+	"github.com/leeovery/kit/internal/macapp"
 	"github.com/leeovery/kit/internal/nightly"
 	"github.com/leeovery/kit/internal/redact"
 	"github.com/leeovery/kit/internal/render"
@@ -122,6 +123,10 @@ type run struct {
 	// the run's time limits wait on, at a terminal; unwatch stops watching.
 	held    func() bool
 	unwatch func()
+	// notices is kit's app, which posts the run's notifications, once the
+	// run has any to post; unready stops readying it.
+	notices *macapp.App
+	unready func()
 	now     time.Time
 	run     runner.Runner
 	// homeDir is the user's home, logsDir where kit's logs go, and dataDir
@@ -200,6 +205,9 @@ func (r *run) close() error {
 	if r.unwatch != nil {
 		r.unwatch()
 	}
+	if r.unready != nil {
+		r.unready()
+	}
 	if r.askpass != nil {
 		_ = r.askpass.Close()
 	}
@@ -210,29 +218,86 @@ func (r *run) close() error {
 	return faceErr
 }
 
+// notifier is kit's app, which posts the run's notifications: one a run, a
+// click on one bringing forward the terminal kit runs in, when macOS names
+// it.
+func (r *run) notifier(getenv func(string) string) *macapp.App {
+	if r.notices == nil {
+		r.notices = macapp.New(r.run, r.dataDir, getenv("__CFBundleIdentifier"))
+	}
+	return r.notices
+}
+
+// readyNotices readies kit's app aside, as the run starts, so its first
+// notification needn't wait for it to be built.
+func (r *run) readyNotices(getenv func(string) string) {
+	app := r.notifier(getenv)
+	ctx, stop := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		app.Ready(ctx)
+	}()
+	r.unready = func() {
+		stop()
+		<-done
+	}
+}
+
 // watchDialogs watches, till unwatch, for macOS asking the person at the
 // Mac something in a window of its own, through run, a runner whose commands
 // aren't logged: the run says so once the window's stayed, and as it's
-// answered, and a notification's sent, in case the window's out of sight.
-// held is whether such a window is on screen, from the first look that saw
-// it.
-func watchDialogs(run runner.Runner, sink event.Sink, now func() time.Time) (held func() bool, unwatch func()) {
+// answered, and notices posts a notification while it's up, in case the
+// window's out of sight. held is whether such a window is on screen, from
+// the first look that saw it.
+func watchDialogs(run runner.Runner, notices steps.Notifier, sink event.Sink, now func() time.Time) (held func() bool, unwatch func()) {
 	var watch dialog.Watch
 	ctx, stop := context.WithCancel(context.Background())
-	notify := steps.Notify(run)
 	done := make(chan struct{})
+	notice := askingNotice{notices: notices}
 	go func() {
 		defer close(done)
 		watch.Run(ctx, run, func(what string) {
 			sink.Emit(event.Asking{Time: now(), Says: what})
-			if what != "" {
-				notify(ctx, "macOS is "+what, "Answer it in the window macOS shows")
-			}
+			notice.changed(ctx, what)
 		})
+		notice.end(ctx)
 	}()
 	return watch.Up, func() {
 		stop()
 		<-done
+	}
+}
+
+// askingNoticeID is the id of the notification that macOS is asking.
+const askingNoticeID = "dialog"
+
+// askingNotice keeps a notification up while macOS is asking: posted as it
+// asks, taken away once it's answered, or the watch has ended.
+type askingNotice struct {
+	notices steps.Notifier
+	up      bool
+}
+
+// changed is told what macOS is asking, each time that changes: nothing,
+// once it's answered.
+func (n *askingNotice) changed(ctx context.Context, what string) {
+	switch {
+	case what != "":
+		n.notices.Notify(ctx, askingNoticeID, "macOS is "+what, "Answer it in the window macOS shows")
+		n.up = true
+	case n.up:
+		n.notices.Clear(ctx, askingNoticeID)
+		n.up = false
+	}
+}
+
+// end takes the notification away, when it's up, as the watch ends: ctx,
+// the watch's, is done by then.
+func (n *askingNotice) end(ctx context.Context) {
+	if n.up {
+		n.notices.Clear(context.WithoutCancel(ctx), askingNoticeID)
+		n.up = false
 	}
 }
 
@@ -450,7 +515,7 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 	var raise *steps.Raise
 	if slices.Contains(applies, command) && a.pretty(a.Stdout) {
 		desk := hand.New()
-		raise = &steps.Raise{Sink: sink, Now: a.Now, Notify: steps.Notify(observed), Desk: desk}
+		raise = &steps.Raise{Sink: sink, Now: a.Now, Notify: r.notifier(a.Getenv), Desk: desk}
 		if f, ok := face.(*render.Pretty); ok {
 			f.Hands(desk.Answer)
 		}
@@ -495,7 +560,10 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 		r.askpass = asks
 	}
 	if a.WatchDialogs && a.pretty(a.Stdout) {
-		r.held, r.unwatch = watchDialogs(a.Runner(path, env), sink, a.Now)
+		r.held, r.unwatch = watchDialogs(a.Runner(path, env), r.notifier(a.Getenv), sink, a.Now)
+	}
+	if raise != nil {
+		r.readyNotices(a.Getenv)
 	}
 	return r, nil
 }

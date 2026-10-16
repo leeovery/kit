@@ -190,7 +190,7 @@ func (b byHand) item() check.Item {
 type Raise struct {
 	Sink   event.Sink
 	Now    func() time.Time
-	Notify func(ctx context.Context, title, text string)
+	Notify Notifier
 	Desk   *hand.Desk
 
 	// mu guards the turn: whether a card has it (busy); the card up, once
@@ -203,6 +203,13 @@ type Raise struct {
 	card   event.NeedsYou
 	after  int
 	queued []chan struct{}
+}
+
+// Notifier posts notifications, each under an id, replacing any posted
+// under it before, and takes them away.
+type Notifier interface {
+	Notify(ctx context.Context, id, title, body string)
+	Clear(ctx context.Context, id string)
 }
 
 // manualPoll is how often a raised step by hand's command is run, to see
@@ -228,6 +235,7 @@ func (r *Raise) up(ctx context.Context, step string, b byHand, more int) error {
 	answers, down := r.Desk.Listen(step)
 	defer down()
 	r.show(ctx, step, b, more)
+	defer r.unnotify(ctx, step, b)
 	// Looking every few seconds finds it done by its command, or marked done
 	// elsewhere, as by kit manual done in another window.
 	tick := time.NewTicker(manualPoll)
@@ -252,19 +260,32 @@ func (r *Raise) up(ctx context.Context, step string, b byHand, more int) error {
 	}
 }
 
-// show puts b's card up for step, a notification posted; its More counting
-// more of the step's own cards to follow it, and those waiting for their
-// turn.
+// show puts b's card up for step, a notification posted once it's up; its
+// More counting more of the step's own cards to follow it, and those
+// waiting for their turn.
 func (r *Raise) show(ctx context.Context, step string, b byHand, more int) {
 	card := event.NeedsYou{Step: step, Item: b.Name, Title: b.Do, Group: b.Group, Why: b.Why, Steps: b.Steps, Tells: b.Command != nil}
-	if r.Notify != nil {
-		r.Notify(ctx, b.Do, notice(b))
-	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	card.Time, card.More = r.Now(), more+len(r.queued)
 	r.card, r.after, r.shown = card, more, true
 	r.Sink.Emit(card)
+	r.mu.Unlock()
+	if r.Notify != nil {
+		r.Notify.Notify(ctx, noticeID(step, b.Name), b.Do, notice(b))
+	}
+}
+
+// unnotify takes b's notification away, once its card's down: done, or the
+// run stopped.
+func (r *Raise) unnotify(ctx context.Context, step string, b byHand) {
+	if r.Notify != nil {
+		r.Notify.Clear(context.WithoutCancel(ctx), noticeID(step, b.Name))
+	}
+}
+
+// noticeID is the id of the notification for the card of item, of step.
+func noticeID(step, item string) string {
+	return "card:" + step + ":" + item
 }
 
 // notice is what b's notification says under its title: its first step,
@@ -351,16 +372,6 @@ func OwnManual(run runner.Runner, stateDir string, m ManualStep, raise *Raise) e
 			}
 			return raise.up(ctx, m.Name, b, 0)
 		},
-	}
-}
-
-// Notify posts a macOS notification from kit: about a step by hand that
-// needs someone, what to do, and its first step.
-func Notify(run runner.Runner) func(ctx context.Context, title, text string) {
-	quote := func(s string) string { return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(s) + `"` }
-	return func(ctx context.Context, title, text string) {
-		script := "display notification " + quote(text) + " with title " + quote("kit") + " subtitle " + quote(title)
-		_, _ = run.Run(ctx, runner.Command{Name: "osascript", Args: []string{"-e", script}})
 	}
 }
 
