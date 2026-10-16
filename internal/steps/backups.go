@@ -72,7 +72,8 @@ var (
 )
 
 // TimeMachine checks this Mac's Time Machine backups: a backup disk set up,
-// automatic backups on, the last backup within 3 hours, and none stuck.
+// automatic backups on, the last backup within 3 hours, and none stuck; a
+// disk just added, its first backup to come, is fine for now.
 func TimeMachine(run runner.Runner, now func() time.Time) engine.Step {
 	return engine.Step{
 		Name: FeatureTimeMachine, Title: "Time Machine", Area: AreaBackups,
@@ -98,6 +99,7 @@ func TimeMachine(run runner.Runner, now func() time.Time) engine.Step {
 				problems = append(problems, [3]string{"off", "automatic backups are off", "System Settings › General › Time Machine › Options: back up every hour"})
 			}
 			var last time.Time
+			tried := false
 			for _, d := range destinations {
 				dest, _ := d.(map[string]any)
 				dates, _ := dest["SnapshotDates"].([]any)
@@ -106,22 +108,38 @@ func TimeMachine(run runner.Runner, now func() time.Time) engine.Step {
 						last = t
 					}
 				}
+				attempts, _ := dest["AttemptDates"].([]any)
+				tried = tried || len(attempts) > 0
+			}
+			status, err := output(ctx, run, "tmutil", "status")
+			running := err == nil && strings.Contains(status, "Running = 1")
+			// away says the backup disk isn't connected, when tmutil says
+			// so.
+			away := func() string {
+				if info, err := output(ctx, run, "tmutil", "destinationinfo"); err == nil && !mountPoint.MatchString(info) {
+					return " (the backup disk isn't connected)"
+				}
+				return ""
 			}
 			summary := "no backup yet"
 			switch {
+			// A disk just added is fine for now: its first backup is under
+			// way, or, none tried yet and the disk there, soon.
+			case last.IsZero() && running:
+				summary = "first backup under way"
 			case last.IsZero():
-				problems = append(problems, [3]string{"never", "no completed backup yet", "connect the backup disk and back up now"})
+				if where := away(); tried || where != "" {
+					problems = append(problems, [3]string{"never", "no completed backup yet" + where, "connect the backup disk and back up now"})
+				} else {
+					summary = "first backup soon"
+				}
 			default:
 				summary = "last backup " + when(last, now())
 				if now().Sub(last) > timeMachineEvery {
-					where := ""
-					if info, err := output(ctx, run, "tmutil", "destinationinfo"); err == nil && !mountPoint.MatchString(info) {
-						where = " (the backup disk isn't connected)"
-					}
-					problems = append(problems, [3]string{"stale", "last backup " + ago(last, now()) + where, "connect the backup disk; if it is connected, check System Settings › General › Time Machine"})
+					problems = append(problems, [3]string{"stale", "last backup " + ago(last, now()) + away(), "connect the backup disk; if it is connected, check System Settings › General › Time Machine"})
 				}
 			}
-			if status, err := output(ctx, run, "tmutil", "status"); err == nil && strings.Contains(status, "Running = 1") {
+			if running {
 				if m := stateChanged.FindStringSubmatch(status); m != nil {
 					if since, err := time.Parse("2006-01-02 15:04:05 -0700", m[1]); err == nil && now().Sub(since) > timeMachineStuck {
 						phase := "one phase"
@@ -134,6 +152,9 @@ func TimeMachine(run runner.Runner, now func() time.Time) engine.Step {
 			}
 			if len(problems) > 0 {
 				return problem(FeatureTimeMachine, summary, problems...)
+			}
+			if last.IsZero() {
+				return check.Result{State: check.OK, Summary: summary, Glance: "Time Machine's " + summary}
 			}
 			return check.Result{State: check.OK, Summary: summary, Glance: "Time Machine " + when(last, now())}
 		},

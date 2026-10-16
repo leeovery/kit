@@ -45,6 +45,8 @@ type Record struct {
 	// restore, or by starting fresh. A rebuilt Mac has no record, so never
 	// captures fresh defaults over a good store before it's restored.
 	On string `json:"on,omitempty"`
+	// OnAt is when capture was switched on.
+	OnAt time.Time `json:"on_at,omitzero"`
 	// Captured is when the last capture ran, and Summary what it found.
 	Captured time.Time `json:"captured,omitzero"`
 	Summary  string    `json:"summary,omitempty"`
@@ -139,7 +141,7 @@ func (p *Prefs) update(change func(*Record)) error {
 // this Mac's store from what's on it.
 func (p *Prefs) StartFresh() error {
 	return p.update(func(r *Record) {
-		r.On = "started fresh " + p.Now().Format("2006-01-02 15:04")
+		r.On, r.OnAt = "started fresh "+p.Now().Format("2006-01-02 15:04"), p.Now()
 	})
 }
 

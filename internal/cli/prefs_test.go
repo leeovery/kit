@@ -6,7 +6,8 @@ import (
 )
 
 // kit prefs: capture waits until it's switched on; start-fresh switches it
-// on; kit status says how it stands once the feature is on.
+// on; kit status says how it stands once the feature is on: fine for now,
+// saving from tonight.
 func TestPrefsCommands(t *testing.T) {
 	w := laptopWorld(t)
 	w.writeSection(t, "laptop", "features", "prefs\n")
@@ -24,7 +25,7 @@ func TestPrefsCommands(t *testing.T) {
 		t.Errorf("kit prefs start-fresh printed %q, exit %d", out, code)
 	}
 	out, _, _ = w.run(t, "status")
-	if !strings.Contains(out, "prefs attention not captured yet\n") || !strings.Contains(out, "full-disk-access ok") {
+	if !strings.Contains(out, "prefs ok saving from tonight\n") || !strings.Contains(out, "full-disk-access ok") {
 		t.Errorf("kit status printed\n%s", out)
 	}
 }

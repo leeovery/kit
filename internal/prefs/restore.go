@@ -407,7 +407,7 @@ func (p *Prefs) Restore(ctx context.Context, opts RestoreOptions) (RestoreReport
 		if full && !opts.Pending {
 			r.Restored = &Restored{From: report.From, Commit: commit, At: p.Now()}
 			if len(report.Failed) == 0 {
-				r.On = "restored from " + report.From + " " + p.Now().Format("2006-01-02 15:04")
+				r.On, r.OnAt = "restored from "+report.From+" "+p.Now().Format("2006-01-02 15:04"), p.Now()
 			}
 		}
 	})

@@ -91,8 +91,23 @@ func TestTimeMachine(t *testing.T) {
 		{"never set up", func(f *runnertest.Fake) {
 			f.On("defaults", prefs...).Exits(1).PrintsToStderr("file does not exist")
 		}, check.Attention, "not set up", []string{"time-machine:none"}},
-		{"no backup yet", func(f *runnertest.Fake) {
+		{"a disk just added", func(f *runnertest.Fake) {
 			f.On("defaults", prefs...).Prints(tmPrefs("<true/>"))
+			f.On("tmutil", "destinationinfo").Prints(tmConnected)
+			f.On("tmutil", "status").Prints(tmIdle)
+		}, check.OK, "first backup soon", nil},
+		{"its first backup under way", func(f *runnertest.Fake) {
+			f.On("defaults", prefs...).Prints(tmPrefs("<true/>"))
+			f.On("tmutil", "status").Prints(tmStuck(now().Add(-10 * time.Minute)))
+		}, check.OK, "first backup under way", nil},
+		{"no backup yet, one tried", func(f *runnertest.Fake) {
+			f.On("defaults", prefs...).Prints(strings.Replace(tmPrefs("<true/>"), "<key>SnapshotDates</key>", "<key>AttemptDates</key>\n\t\t\t<array><date>"+recent.UTC().Format(time.RFC3339)+"</date></array>\n\t\t\t<key>SnapshotDates</key>", 1))
+			f.On("tmutil", "destinationinfo").Prints(tmConnected)
+			f.On("tmutil", "status").Prints(tmIdle)
+		}, check.Attention, "no backup yet", []string{"time-machine:never"}},
+		{"no backup yet, the disk away", func(f *runnertest.Fake) {
+			f.On("defaults", prefs...).Prints(tmPrefs("<true/>"))
+			f.On("tmutil", "destinationinfo").Prints("====================================================\nName          : Backups\nKind          : Local\nID            : 0000\n")
 			f.On("tmutil", "status").Prints(tmIdle)
 		}, check.Attention, "no backup yet", []string{"time-machine:never"}},
 	} {

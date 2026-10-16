@@ -104,6 +104,10 @@ func Prefs(p *prefs.Prefs, now func() time.Time) engine.Step {
 				return problem(PrefsName, "another Mac owns this Mac's folder in the store", [3]string{"not-owner", rec.NotOwner, "this Mac doesn't capture until it takes ownership (kit takeover, to come)"})
 			case rec.On == "":
 				return yours(PrefsName, "paused: capture isn't switched on for this Mac", "paused", "kit prefs restore, or kit prefs start-fresh", settingsBack)
+			case rec.Captured.IsZero() && !rec.OnAt.IsZero() && now().Sub(rec.OnAt) <= prefsEvery:
+				// Just switched on, it's fine for now: the nightly run
+				// saves them.
+				return check.Result{State: check.OK, Summary: "saving from tonight", Glance: "app settings from tonight"}
 			case rec.Captured.IsZero():
 				return problem(PrefsName, "not captured yet", [3]string{"never", "apps' settings haven't been saved yet", "the nightly run captures them; or kit prefs capture"})
 			case now().Sub(rec.Captured) > prefsEvery:

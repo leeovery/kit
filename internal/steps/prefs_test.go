@@ -22,7 +22,9 @@ func TestPrefs(t *testing.T) {
 	}{
 		{"captured", `{"on": "started fresh", "captured": "` + recent + `", "summary": "57 domains, 2 changed; 1056 files, 0 changed"}`, check.OK, "saved 10:00", ""},
 		{"never switched on", `{}`, check.Attention, "paused: capture isn't switched on for this Mac", "prefs:paused"},
-		{"not captured yet", `{"on": "started fresh"}`, check.Attention, "not captured yet", "prefs:never"},
+		{"just switched on", `{"on": "started fresh", "on_at": "` + recent + `"}`, check.OK, "saving from tonight", ""},
+		{"not captured yet", `{"on": "started fresh", "on_at": "` + old + `"}`, check.Attention, "not captured yet", "prefs:never"},
+		{"not captured yet, from before kit kept when", `{"on": "started fresh"}`, check.Attention, "not captured yet", "prefs:never"},
 		{"stale", `{"on": "started fresh", "captured": "` + old + `"}`, check.Attention, "last capture", "prefs:stale"},
 		{"errors", `{"on": "started fresh", "captured": "` + recent + `", "summary": "57 domains; 1 errors", "errors": 1}`, check.Attention, "57 domains; 1 errors", "prefs:errors"},
 		{"unpushed for a day", `{"on": "started fresh", "captured": "` + recent + `", "unpushed": "` + old + `", "push_error": "offline"}`, check.Attention, "not pushed since", "prefs:unpushed"},
@@ -110,8 +112,8 @@ func TestAppsSettingsChoice(t *testing.T) {
 	if err != nil || said != "0 apps' settings, from 4 Oct; 1 wait for their apps" {
 		t.Errorf("r = %q, %v; want how many, from when, and how many wait", said, err)
 	}
-	if res := step.Check(t.Context()); res.Summary != "not captured yet" {
-		t.Errorf("brought back, the check says %+v; want capture switched on", res)
+	if res := step.Check(t.Context()); res.State != check.OK || res.Summary != "saving from tonight" {
+		t.Errorf("brought back, the check says %+v; want capture switched on, fine for now", res)
 	}
 
 	fresh := t.TempDir()
@@ -122,8 +124,8 @@ func TestAppsSettingsChoice(t *testing.T) {
 	if said, err := afresh.Choice.Answer(t.Context(), paused, "f"); err != nil || said != "started afresh, saving from now" {
 		t.Errorf("f = %q, %v", said, err)
 	}
-	if res := afresh.Check(t.Context()); res.Summary != "not captured yet" {
-		t.Errorf("started afresh, the check says %+v; want capture switched on", res)
+	if res := afresh.Check(t.Context()); res.State != check.OK || res.Summary != "saving from tonight" {
+		t.Errorf("started afresh, the check says %+v; want capture switched on, fine for now", res)
 	}
 	if ready := afresh.Choice.Ready(t.Context(), paused); ready.ToDo.Keys[0].Does != "brings them back from this Mac's last save" {
 		t.Errorf("with no store to look at, r says %q; want no date", ready.ToDo.Keys[0].Does)
