@@ -1417,7 +1417,8 @@ func TestAStepGoingOnKeepsTheRunFromGoingQuiet(t *testing.T) {
 
 // A step's reason says what a command that failed said, never the command:
 // the last line of its standard error, or its program and how it exited
-// when it said nothing; what the error wraps it in stays.
+// when it said nothing; what the error wraps it in stays. Each of several
+// joined says so.
 func TestReason(t *testing.T) {
 	script := &runner.ExitError{Command: "osascript -l JavaScript -e 'function run() {\n  return 1;\n}'", Code: 1, Stderr: "execution error: Error: AppleEvent timed out. (-1712)"}
 	for _, tt := range []struct {
@@ -1429,6 +1430,10 @@ func TestReason(t *testing.T) {
 		{"wrapped", fmt.Errorf("couldn't install 9 of 9: %w", &runner.ExitError{Command: "sudo -n mas install 1 2", Code: 1, Stderr: "sudo: a password is required"}), "couldn't install 9 of 9: sudo: a password is required"},
 		{"saying nothing", fmt.Errorf("couldn't install jq: %w", &runner.ExitError{Command: "/opt/homebrew/bin/brew install --formula jq", Code: 1}), "couldn't install jq: brew exited 1"},
 		{"its program quoted", &runner.ExitError{Command: "'/Users/someone/My Steps/run' apply", Code: 2}, "run exited 2"},
+		{"several joined", fmt.Errorf("couldn't install gh-a, gh-b: %w", errors.Join(
+			&runner.ExitError{Command: "gh extension install owner/gh-a", Code: 1, Stderr: "no such repository"},
+			fmt.Errorf("gh-b: %w", &runner.ExitError{Command: "gh extension install owner/gh-b", Code: 1}),
+		)), "couldn't install gh-a, gh-b: no such repository\ngh-b: gh exited 1"},
 		{"no command", errors.New("no such file"), "no such file"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {

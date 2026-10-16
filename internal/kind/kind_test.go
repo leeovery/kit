@@ -264,6 +264,22 @@ func TestStepFailingInstallSaysWhatsLeft(t *testing.T) {
 	}
 }
 
+// A kind's install failing says what each command that failed said, never
+// the command: the one install that failed, or each of several, as the
+// lines others wait for install apart from the rest.
+func TestStepFailingInstallSaysWhatItSaid(t *testing.T) {
+	k := knowing("jq", "op")
+	k.installErr = &runner.ExitError{Command: "brew install --formula jq op", Code: 1, Stderr: "Error: it broke"}
+	s := kind.Step(k, declared("jq"))
+	if got := engine.Reason(s.Apply(t.Context(), s.Check(t.Context()))); got != "couldn't install jq: Error: it broke" {
+		t.Errorf("one install failing, the reason is %q; want what it said, not the command", got)
+	}
+	s = kind.Placed(k, declared("jq", "op"), func() kind.Placing { return kind.Placing{First: []string{"op"}} })
+	if got := engine.Reason(s.Apply(t.Context(), s.Check(t.Context()))); got != "couldn't install op: Error: it broke; couldn't install jq: Error: it broke" {
+		t.Errorf("two installs failing, the reason is %q; want what each said, not the commands", got)
+	}
+}
+
 func TestLabels(t *testing.T) {
 	for name, label := range kind.Labels {
 		// A kind declared in a section of kit-config's is named as it is.

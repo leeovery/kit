@@ -633,6 +633,52 @@ func TestApplyingLog(t *testing.T) {
 	}
 }
 
+// A step by hand's card found not done after all goes up again, as signing
+// in to the App Store does once the App Store's first install finds no one
+// signed in: the row it holds up waits for you again, the panel's back, its
+// time from now, and the log says it waits for you once more, then done, how
+// long it was up the second time; its step finishing again has no line of
+// its own.
+func TestApplyingCardUpAgain(t *testing.T) {
+	steps := []event.Step{
+		{Name: "appstore", Title: "appstore", Area: "Manual", ByHand: []event.Hand{{Name: "appstore", Title: "Sign in to the App Store"}}},
+		{Name: "mas", Title: "App Store apps", Area: "Drift", Waits: []string{"appstore"}},
+	}
+	card := event.NeedsYou{Step: "appstore", Item: "appstore", Title: "Sign in to the App Store", Steps: []string{"Open the App Store", "Store › Sign In, with your Apple Account"}}
+	first, second := card, card
+	first.Time, second.Time = after(10), after(60)
+	events := append(rowsRun(steps, event.StepStarted{Time: after(10), Step: "appstore", Doing: "applying"}, first, fine(30, "appstore", "done")), applying(31, "mas")...)
+	events = append(events, event.Doing{Time: after(60), Step: "mas", Says: "waiting for Sign in to the App Store"}, second)
+	face, out, _ := applyAt(160, 64, 70*time.Second, events)
+	got := screen(out.String())
+	if line := rowLine(t, got, 160, "App Store apps"); !strings.HasPrefix(line, "  ▲ App Store apps  waits for you: Sign in to the App Store") {
+		t.Errorf("with the card up again, the row is %q; want it waiting for you", line)
+	}
+	if _, right := panes(got, 160); !strings.HasPrefix(right[1], "  ▲ Sign in to the App Store") || !strings.HasSuffix(right[1], "waiting 10.0s") {
+		t.Errorf("with the card up again, the right pane is\n%s\nwant its panel, waiting from when it went up again", strings.Join(right, "\n"))
+	}
+	_ = face.Close()
+
+	events = append(events,
+		event.StepStarted{Time: after(105), Step: "appstore", Doing: "checking"},
+		fine(105, "appstore", "done"),
+		event.Doing{Time: after(105), Step: "mas", Says: "applying"},
+		fine(120, "mas", "3 installed"),
+	)
+	face, out, _ = applyAt(160, 64, 2*time.Minute, events)
+	defer func() { _ = face.Close() }()
+	want := []string{
+		"  03:04:15  ▲ Sign in to the App Store: waiting for you",
+		"  03:04:35  ● Sign in to the App Store: done, in 20.0s",
+		"  03:05:05  ▲ Sign in to the App Store: waiting for you",
+		"  03:05:50  ● Sign in to the App Store: done, in 45.0s",
+		"  03:06:05  ● App Store apps: 3 installed",
+	}
+	if log := logOf(screen(out.String()), 160); !slices.Equal(log, want) {
+		t.Errorf("the log is\n%s\nwant\n%s", strings.Join(log, "\n"), strings.Join(want, "\n"))
+	}
+}
+
 // A row chosen, the log is its lines alone, a step by hand's in the row of
 // the step it holds up, what's under way its own; the steps by hand at the
 // end are in no row, shown with everything alone.

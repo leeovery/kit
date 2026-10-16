@@ -395,41 +395,64 @@ func Placed(k Kind, declared config.List, placed func() Placing, needs ...string
 // it waited for isn't installed, saying what isn't there.
 func InstallDeclared(ctx context.Context, k Kind, declared config.List, held []Held, names []string) error {
 	why, err := installApart(ctx, k, declared, Placing{Held: held}, names)
-	var errs []string
+	var errs []error
 	if err != nil {
-		errs = append(errs, err.Error())
+		errs = append(errs, err)
 	}
 	for _, h := range held {
 		if reason, ok := why[h.Hold]; ok {
-			errs = append(errs, reason)
+			errs = append(errs, errors.New(reason))
 		}
 	}
-	if len(errs) > 0 {
-		return errors.New(strings.Join(errs, "; "))
-	}
-	return nil
+	return joined(errs)
 }
+
+// joined is errs as one error: nil for none, one as it is, several said one
+// after another, each still there to find (errors.As), as engine.Reason
+// finds the commands that failed.
+func joined(errs []error) error {
+	switch len(errs) {
+	case 0:
+		return nil
+	case 1:
+		return errs[0]
+	}
+	return several(errs)
+}
+
+// several are errors said one after another.
+type several []error
+
+func (s several) Error() string {
+	said := make([]string, len(s))
+	for i, err := range s {
+		said[i] = err.Error()
+	}
+	return strings.Join(said, "; ")
+}
+
+func (s several) Unwrap() []error { return s }
 
 // installApart installs names as placing says, as Placed does, a Readier's
 // readied first, returning why each section held whose wait ended without
 // what it waited for was left, by hold.
 func installApart(ctx context.Context, k Kind, declared config.List, placing Placing, names []string) (map[string]string, error) {
 	first, plain, apart := split(names, declared, placing)
-	var errs []string
+	var errs []error
 	if r, ok := k.(Readier); ok && len(names) > 0 {
 		if err := r.Ready(ctx, names); err != nil {
-			errs = append(errs, err.Error())
+			errs = append(errs, err)
 		}
 	}
 	if err := install(ctx, k, declared, first, nil); err != nil {
-		errs = append(errs, err.Error())
+		errs = append(errs, err)
 	}
 	unmet := map[string]string{}
 	if len(plain)+len(apart) > 0 && !waitBehind(ctx, placing.Behind) {
 		return unmet, ctx.Err()
 	}
 	if err := install(ctx, k, declared, plain, nil); err != nil {
-		errs = append(errs, err.Error())
+		errs = append(errs, err)
 	}
 	for _, h := range placing.Held {
 		why, err := installHeld(ctx, k, declared, h, apart[h.Hold])
@@ -437,15 +460,12 @@ func installApart(ctx context.Context, k Kind, declared config.List, placing Pla
 		case ctx.Err() != nil:
 			return unmet, ctx.Err()
 		case err != nil:
-			errs = append(errs, err.Error())
+			errs = append(errs, err)
 		case why != "":
 			unmet[h.Hold] = why
 		}
 	}
-	if len(errs) > 0 {
-		return unmet, errors.New(strings.Join(errs, "; "))
-	}
-	return unmet, nil
+	return unmet, joined(errs)
 }
 
 // waitBehind waits for each of behind in turn, as engine.Await does, saying

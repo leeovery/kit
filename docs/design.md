@@ -46,7 +46,7 @@ undeclared for adopting, removing or snoozing, and report both.
 | Kind | Declared as | Found by | Install, remove |
 |---|---|---|---|
 | `brew`, `cask` | `jq`, `owner/tap/tool`, `php@8.5` | `brew list`, `brew leaves` | `brew install`, `brew uninstall` |
-| `mas` | `xcode@497799835`: the name, then the id | `mas list` | `mas install`, `mas uninstall`, through sudo |
+| `mas` | `xcode@497799835`: the name, then the id | `mas list` | `mas install` (the first app alone, the check that someone's signed in, then the rest), `mas uninstall`, through sudo |
 | `npm` | `typescript@5` (a version optional) | `npm ls --global` | `npm install --global`, `npm uninstall --global` |
 | `composer` | `laravel/valet:^4.0` (a constraint optional) | `composer global show --direct` | `composer global require`, `composer global remove` |
 | `go` | `golang.org/x/tools/cmd/goimports` (`@version` optional) | the programs in Go's bin folder, by the package each was built from | `go install`; removing deletes the program |
@@ -211,7 +211,16 @@ back from this Mac's last save, its date said, as `kit prefs restore` does; `f` 
 order in the record, the run ending as it stands. After the last, kit checks again the steps the
 to-dos held, those they came from and any with something that comes with one (Scratch's Claude
 Code settings come with apps' settings), so their rows and the record are right, then finishes.
-Without a terminal, nothing's raised: kit's own stay items of their steps. `kit check|hourly|nightly add
+Without a terminal, nothing's raised: kit's own stay items of their steps. A step a line comes
+before can find, as it applies, that the line wasn't done after all, as the App Store's first
+install finds no one signed in (signing in has no `--test`: mas can't say who's signed in, and
+macOS keeps it private): the line, marked done no more, comes up again as it did, card and
+notification, the step waiting for it meanwhile, its row saying it waits for you, and the log
+that it's waiting for you, then, once it's done, done and how long it took; then the step tries
+again, as often as it finds it not done. So kit installs one App Store app first, the check, and
+the rest once that's in: while someone's at the terminal, no app fails for want of a sign-in. A
+line whose test still passes has nothing to raise again; without a terminal nothing is raised,
+and the install fails at once, naming the fix (sign in to the App Store, then try again). `kit check|hourly|nightly add
 <name> -- <command>` and `kit manual add <name> "<what to do>" [-- <command>]` (written as
 `--test`; `--group` as on the line) declare checks, jobs and steps by hand (a check, and a
 step's command, run once as it's added, to say how it stands); `kit remove
@@ -282,8 +291,11 @@ attention. A running step can work on the run's others: see those that have fini
 stand; look at one, its check run as that step's own, the run's record of it left; check one
 again, what it finds taking its place in the report and emitted as the step finishing again, for
 the faces and the log, with what applying it did earlier kept; and use one's choice, the keys of
-the to-dos its check finds, run as that step's own. A run that's stopped (an interrupt) fails the
-steps it hadn't started.
+the to-dos its check finds, run as that step's own; and say what it comes after wasn't done after
+all: each of those steps that can be done again (a step by hand of its own, its card raised again)
+is, in order, as its own, then checked again as above, the step saying meanwhile that it waits for
+it, and carrying on once they stand ok. A run that's stopped (an interrupt) fails the steps it
+hadn't started.
 
 ## Commands
 

@@ -2,8 +2,11 @@ package engine_test
 
 import (
 	"context"
+	"errors"
 	"slices"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/leeovery/kit/internal/check"
@@ -219,5 +222,136 @@ func TestAStepsChoiceRunsAsItsOwn(t *testing.T) {
 	}
 	if engine.ChoiceOf(t.Context(), "prefs") != nil {
 		t.Error("outside a run, a step's choice was there")
+	}
+}
+
+// A step can find what it comes after wasn't done after all, as an App Store
+// install finds no one signed in: each step it's applied after that can be
+// done again is, as that step's own, changing things, the step saying it
+// waits for what the step by hand asks meanwhile, then that it's applying
+// again; then checked again, finishing again for the faces and the log. A
+// step it comes after that can't be done again isn't, nor is one that can
+// that it doesn't come after.
+func TestAStepFindsWhatItComesAfterUndone(t *testing.T) {
+	var signedIn atomic.Bool
+	var again []string
+	signIn := engine.Step{Name: "sign-in", Before: []string{"mas"}, ByHand: []event.Hand{{Name: "sign-in", Title: "Sign in to the store"}},
+		Check: func(context.Context) check.Result {
+			if signedIn.Load() {
+				return check.Result{State: check.OK, Summary: "done"}
+			}
+			return check.Result{State: check.Attention, Summary: "not done"}
+		},
+		Apply: func(context.Context, check.Result) error { signedIn.Store(true); return nil },
+		Again: func(ctx context.Context) error {
+			as := event.StepOf(ctx)
+			if event.Changing(ctx) {
+				as += " changing"
+			}
+			again = append(again, as)
+			signedIn.Store(true)
+			return nil
+		},
+	}
+	elsewhere := engine.Step{Name: "elsewhere", Check: ok("done"), Again: func(context.Context) error {
+		again = append(again, "elsewhere")
+		return nil
+	}}
+	var undone bool
+	mas := engine.Step{Name: "mas", After: []string{"cask"}, AlwaysApply: true, Check: ok("all installed"), Apply: func(ctx context.Context, _ check.Result) error {
+		signedIn.Store(false)
+		undone = engine.Undone(ctx)
+		return nil
+	}}
+	p, err := engine.New(engine.Step{Name: "cask", Check: ok("fine")}, signIn, elsewhere, mas)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := &recorder{}
+	report, err := p.Apply(t.Context(), rec, engine.Options{Jobs: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !undone || !slices.Equal(again, []string{"sign-in changing"}) || report.Results["sign-in"].State != check.OK {
+		t.Errorf("undone %v, done again %q, sign-in stands %s; want sign-in alone done again, as its own, changing things, and ok", undone, again, report.Results["sign-in"].State)
+	}
+	var seen []string
+	for _, e := range rec.events {
+		switch e := e.(type) {
+		case event.StepStarted:
+			if e.Step != "mas" {
+				seen = append(seen, e.Step+" started "+e.Doing)
+			}
+		case event.StepFinished:
+			seen = append(seen, e.Step+" finished "+string(e.Result.State))
+		case event.Doing:
+			seen = append(seen, e.Step+" says "+e.Says)
+		}
+	}
+	want := []string{
+		"cask started checking", "cask finished ok",
+		"sign-in started checking", "sign-in started applying", "sign-in finished ok",
+		"elsewhere started checking", "elsewhere finished ok",
+		"mas says waiting for Sign in to the store",
+		"sign-in started checking", "sign-in finished ok",
+		"mas says applying",
+		"mas finished ok",
+	}
+	if !slices.Equal(seen, want) {
+		t.Errorf("the run went\n%s\nwant\n%s", strings.Join(seen, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// What a step comes after isn't done again, and Undone says so: outside a
+// run; with none of it able to be done again; once the run's stopped. Done
+// again, it says so too when doing it fails, or it still doesn't stand ok.
+func TestWhatComesBeforeIsntAlwaysDoneAgain(t *testing.T) {
+	if engine.Undone(t.Context()) {
+		t.Error("outside a run, something was done again")
+	}
+	for _, tt := range []struct {
+		name  string
+		again func(context.Context) error
+		stop  bool
+		state check.State
+		tried bool
+	}{
+		{name: "none can be", state: check.OK},
+		{name: "stopped", again: func(context.Context) error { return nil }, stop: true, state: check.OK},
+		{name: "doing it fails", again: func(context.Context) error { return errors.New("it broke") }, state: check.OK, tried: true},
+		{name: "still not ok", again: func(context.Context) error { return nil }, state: check.Attention, tried: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, stop := context.WithCancel(t.Context())
+			defer stop()
+			tried := false
+			before := engine.Step{Name: "sign-in", Before: []string{"mas"}, Check: func(context.Context) check.Result {
+				return check.Result{State: tt.state, Summary: "as it is"}
+			}}
+			if tt.again != nil {
+				before.Again = func(ctx context.Context) error {
+					tried = true
+					return tt.again(ctx)
+				}
+			}
+			undone := true
+			mas := lastStep(nil, func(ctx context.Context) {
+				if tt.stop {
+					stop()
+				}
+				undone = engine.Undone(ctx)
+			})
+			mas.Name = "mas"
+			p, err := engine.New(before, mas)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := p.Apply(ctx, &recorder{}, engine.Options{Jobs: 1}); err != nil {
+				t.Fatal(err)
+			}
+			if undone || tried != tt.tried {
+				t.Errorf("undone %v, tried %v; want it not done again, tried %v", undone, tried, tt.tried)
+			}
+		})
 	}
 }

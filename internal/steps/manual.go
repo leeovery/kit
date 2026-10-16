@@ -409,11 +409,13 @@ func (r *Raise) recount() {
 
 // OwnManual is a step by hand a step comes after (Ordered), as a step of
 // its own: done when its command exits 0, or once marked done. Applying it
-// with raise raises it, and waits till it's done. Without raise, with no
-// one to act, applying leaves it as it stands.
+// with raise raises it, and waits till it's done; and so does doing it again,
+// should a step it comes before find it wasn't done after all (again).
+// Without raise, with no one to act, applying leaves it as it stands, and
+// it can't be done again.
 func OwnManual(run runner.Runner, stateDir string, m ManualStep, raise *Raise) engine.Step {
 	b := byHand{ManualStep: m, run: run, stateDir: stateDir}
-	return engine.Step{
+	step := engine.Step{
 		Name: m.Name, Title: m.Name, Area: AreaManual, ByHand: []event.Hand{m.hand()},
 		Check: func(ctx context.Context) check.Result {
 			if b.isDone(ctx) {
@@ -431,6 +433,27 @@ func OwnManual(run runner.Runner, stateDir string, m ManualStep, raise *Raise) e
 			return nil
 		},
 	}
+	if raise != nil {
+		step.Again = func(ctx context.Context) error { return b.again(ctx, raise) }
+	}
+	return step
+}
+
+// again raises it once more, as a step it comes before found it wasn't done
+// after all (engine.Undone), and waits till it's done: marked done no more,
+// as kit manual done --undo unmarks it, else it'd be found done before its
+// card went up. One whose test still passes has nothing to raise.
+func (b byHand) again(ctx context.Context, raise *Raise) error {
+	switch {
+	case b.Command == nil:
+		if err := MarkDone(b.stateDir, []string{b.Name}, time.Time{}, true); err != nil {
+			return err
+		}
+	case b.isDone(ctx):
+		return fmt.Errorf("%s's test says it's done", b.Name)
+	}
+	_, err := raise.up(ctx, b.Name, b, 0)
+	return err
 }
 
 // Manual checks what a person must do by hand, as [manual] declares it: a

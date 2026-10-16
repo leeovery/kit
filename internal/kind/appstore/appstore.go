@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/runner"
 )
@@ -147,11 +148,57 @@ func (*AppStore) Resolve(_ context.Context, names []string) (map[string]string, 
 	return resolved, nil
 }
 
-// Install installs the apps names name, through sudo: mas needs root to
-// install.
+// Install installs the apps names name, through sudo, as mas needs root to
+// install: the first alone, the check that someone's signed in to the App
+// Store (first), then the rest, whatever else went wrong with the first, as
+// installing them all at once would have.
 func (s *AppStore) Install(ctx context.Context, names []string) error {
-	return s.sudo(ctx, "install", names, installTimeout)
+	if len(names) == 0 {
+		return nil
+	}
+	err := s.first(ctx, names[0])
+	if len(names) == 1 || signedOut(err) {
+		return err
+	}
+	if rest := s.sudo(ctx, "install", names[1:], installTimeout); rest != nil {
+		return rest
+	}
+	return err
 }
+
+// first installs name, the first of the apps to install, alone: while mas
+// says no one's signed in to the App Store, signing in, a step by hand
+// before the App Store's, wasn't done after all, so it's done again
+// (engine.Undone), then name's tried again. With nothing to do again, as
+// without a terminal, it fails, naming the fix.
+func (s *AppStore) first(ctx context.Context, name string) error {
+	for {
+		err := s.sudo(ctx, "install", []string{name}, installTimeout)
+		if !signedOut(err) {
+			return err
+		}
+		if !engine.Undone(ctx) {
+			return &notSignedIn{err}
+		}
+	}
+}
+
+// signedOut reports whether err is mas saying no one's signed in to the App
+// Store, as in "account is not signed in": mas has no way to say who is.
+func signedOut(err error) bool {
+	exit, ok := errors.AsType[*runner.ExitError](err)
+	return ok && strings.Contains(strings.ToLower(exit.Stderr), "not signed in")
+}
+
+// notSignedIn is mas failing for want of someone signed in to the App Store,
+// in kit's words, naming the fix: what mas said is in the run's log.
+type notSignedIn struct{ err error }
+
+func (n *notSignedIn) Error() string {
+	return "no one's signed in: sign in to the App Store, then try again"
+}
+
+func (n *notSignedIn) Unwrap() error { return n.err }
 
 // Remove uninstalls the apps names name, through sudo, as mas needs.
 func (s *AppStore) Remove(ctx context.Context, names []string) error {

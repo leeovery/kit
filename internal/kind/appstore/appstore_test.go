@@ -2,6 +2,7 @@ package appstore_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -11,6 +12,8 @@ import (
 
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/config"
+	"github.com/leeovery/kit/internal/engine"
+	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/kind/appstore"
 	"github.com/leeovery/kit/internal/runner/runnertest"
@@ -76,19 +79,24 @@ func TestCompare(t *testing.T) {
 	}
 }
 
+// Installing goes through sudo, given an hour or more, as Xcode is
+// gigabytes: the first app alone, the check that someone's signed in, then
+// the rest together.
 func TestInstallAndRemoveGoThroughSudo(t *testing.T) {
 	fake := runnertest.New(t)
-	fake.On("sudo", "-n", "mas", "install", "1091189122", "497799835")
+	fake.On("sudo", "-n", "mas", "install", "1091189122")
+	fake.On("sudo", "-n", "mas", "install", "497799835", "409203825")
 	fake.On("sudo", "-n", "mas", "uninstall", "1294126402")
 	s := appstore.New(fake)
-	if err := s.Install(t.Context(), []string{"bear@1091189122", "xcode@497799835"}); err != nil {
+	if err := s.Install(t.Context(), []string{"bear@1091189122", "xcode@497799835", "numbers@409203825"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Remove(t.Context(), []string{"heic-converter@1294126402"}); err != nil {
 		t.Fatal(err)
 	}
-	if cmds := fake.Commands(); len(cmds) != 2 || cmds[0].Timeout < time.Hour {
-		t.Errorf("ran %+v, want the install given an hour or more", cmds)
+	want := []string{"sudo -n mas install 1091189122", "sudo -n mas install 497799835 409203825", "sudo -n mas uninstall 1294126402"}
+	if cmds := fake.Commands(); !slices.Equal(fake.Calls(), want) || cmds[0].Timeout < time.Hour || cmds[1].Timeout < time.Hour {
+		t.Errorf("ran %q, want %q, each install given an hour or more", fake.Calls(), want)
 	}
 	if err := s.Install(t.Context(), []string{"bear"}); err == nil || !strings.Contains(err.Error(), "bear isn't an App Store app's name") {
 		t.Errorf("Install(bear) = %v, want it refused", err)
@@ -148,5 +156,104 @@ func TestFind(t *testing.T) {
 		if _, err := s.Find(t.Context(), typed); err == nil || err.Error() != want {
 			t.Errorf("Find(%q) error = %v, want %q", typed, err, want)
 		}
+	}
+}
+
+// signedOut is what mas says when no one's signed in to the App Store.
+const signedOut = "[ERROR] 2026/10/16 04:22:49 account is not signed in"
+
+// installed is what mas list says of the apps named, by id.
+func installed(ids ...int64) string {
+	var b strings.Builder
+	for _, id := range ids {
+		fmt.Fprintf(&b, "{\"adamID\":%d,\"name\":\"App %d\"}\n", id, id)
+	}
+	return b.String()
+}
+
+// storeRun applies the App Store's apps, declared, after a step by hand
+// signing in to it, done again as many times as it's asked, unless it
+// can't be (no one to act): the App Store's result, and how many times
+// signing in was done again.
+func storeRun(t *testing.T, fake *runnertest.Fake, someone bool, declared config.List) (check.Result, int) {
+	t.Helper()
+	again := 0
+	signIn := engine.Step{Name: "appstore", Before: []string{"mas"}, Check: func(context.Context) check.Result {
+		return check.Result{State: check.OK, Summary: "done"}
+	}}
+	if someone {
+		signIn.Again = func(context.Context) error {
+			again++
+			return nil
+		}
+	}
+	p, err := engine.New(signIn, kind.Step(appstore.New(fake), declared))
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := p.Apply(t.Context(), event.NewFanout(), engine.Options{Jobs: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return report.Results["mas"], again
+}
+
+// The first app's install is the check that someone's signed in: while mas
+// says no one is, signing in, the step by hand before the App Store's, is
+// done again, then the first's tried again; only once it's in, the rest.
+func TestASignInNotDoneIsDoneAgain(t *testing.T) {
+	fake := runnertest.New(t)
+	fake.On("mas", "list", "--json").Prints("").Then().Prints(installed(1091189122, 409203825, 497799835))
+	fake.On("sudo", "-n", "mas", "install", "1091189122").Exits(1).PrintsToStderr(signedOut).
+		Then().Exits(1).PrintsToStderr(signedOut).
+		Then()
+	fake.On("sudo", "-n", "mas", "install", "409203825", "497799835")
+	res, again := storeRun(t, fake, true, declared("bear@1091189122", "numbers@409203825", "xcode@497799835"))
+	if res.State != check.OK || again != 2 {
+		t.Errorf("the App Store's apps stand %+v, signing in done again %d times; want them installed, it done again twice", res, again)
+	}
+	want := []string{
+		"mas list --json",
+		"sudo -n mas install 1091189122", "sudo -n mas install 1091189122", "sudo -n mas install 1091189122",
+		"sudo -n mas install 409203825 497799835",
+		"mas list --json",
+	}
+	if !slices.Equal(fake.Calls(), want) {
+		t.Errorf("ran %q\nwant %q", fake.Calls(), want)
+	}
+}
+
+// Another failure of the first app's install fails as it would have,
+// installing them all at once: nothing's done again, and the rest still
+// install.
+func TestTheFirstFailingOtherwiseFailsAsBefore(t *testing.T) {
+	fake := runnertest.New(t)
+	fake.On("mas", "list", "--json").Prints("").Then().Prints(installed(409203825, 497799835))
+	fake.On("sudo", "-n", "mas", "install", "1091189122").Exits(1).PrintsToStderr("[ERROR] 2026/10/16 04:22:49 no app has the id 1091189122")
+	fake.On("sudo", "-n", "mas", "install", "409203825", "497799835")
+	res, again := storeRun(t, fake, true, declared("bear@1091189122", "numbers@409203825", "xcode@497799835"))
+	if want := "couldn't install bear@1091189122: [ERROR] 2026/10/16 04:22:49 no app has the id 1091189122"; res.State != check.Failed || res.Reason != want || again != 0 {
+		t.Errorf("the App Store's apps stand %+v, signing in done again %d times; want them failed, %q, nothing done again", res, again, want)
+	}
+}
+
+// With no one to sign in, as without a terminal, or outside a run, no one
+// signed in fails the install at once, every app, naming the fix: the rest
+// aren't tried.
+func TestNoOneToSignInFailsNamingTheFix(t *testing.T) {
+	fake := runnertest.New(t)
+	fake.On("mas", "list", "--json").Prints("")
+	fake.On("sudo", "-n", "mas", "install", "1091189122").Exits(1).PrintsToStderr(signedOut)
+	res, _ := storeRun(t, fake, false, declared("bear@1091189122", "numbers@409203825", "xcode@497799835"))
+	want := "couldn't install bear@1091189122, numbers@409203825, xcode@497799835: no one's signed in: sign in to the App Store, then try again"
+	if res.State != check.Failed || res.Reason != want {
+		t.Errorf("the App Store's apps stand %+v; want them failed, %q", res, want)
+	}
+	err := appstore.New(fake).Install(t.Context(), []string{"bear@1091189122", "xcode@497799835"})
+	if err == nil || err.Error() != "no one's signed in: sign in to the App Store, then try again" {
+		t.Errorf("outside a run, Install = %v; want it failed, naming the fix", err)
+	}
+	if slices.ContainsFunc(fake.Calls(), func(c string) bool { return strings.HasSuffix(c, "497799835") }) {
+		t.Errorf("ran %q; want the rest not tried", fake.Calls())
 	}
 }

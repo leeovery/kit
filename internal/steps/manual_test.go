@@ -442,3 +442,67 @@ func TestTheRestOneCardEach(t *testing.T) {
 		t.Errorf("notifications %q, want %q", got, want)
 	}
 }
+
+// A step by hand of its own that a step it comes before finds wasn't done
+// after all (engine.Undone), as the App Store's first install finds no one
+// signed in, goes up again: marked done no more, its card and notification
+// as the first time; done again, the step carries on. One whose test still
+// passes has nothing to raise; with no one to act, none can go up again.
+func TestACardGoesUpAgain(t *testing.T) {
+	c := newCard(t)
+	m := steps.ManualStep{Name: "appstore", Do: "Sign in to the App Store", Before: []string{"mas"}, Why: "The App Store's apps install once you're signed in.", Steps: []string{"Open the App Store", "Store › Sign In, with your Apple Account"}}
+	signIn := steps.OwnManual(c.fake, c.state, m, c.raise)
+	signIn.Before = m.Before
+	var undone bool
+	mas := engine.Step{Name: "mas", AlwaysApply: true, Check: func(context.Context) check.Result { return check.Result{State: check.OK, Summary: "all installed"} },
+		Apply: func(ctx context.Context, _ check.Result) error {
+			undone = engine.Undone(ctx)
+			return nil
+		}}
+	p, err := engine.New(signIn, mas)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ran := make(chan engine.Report, 1)
+	go func() {
+		report, _ := p.Apply(t.Context(), c.sink, engine.Options{Jobs: 1})
+		ran <- report
+	}()
+	first := c.cards(t, 1)[0]
+	c.answer(t, "appstore", hand.Done)
+	again := c.cards(t, 2)[1]
+	first.Time, again.Time = time.Time{}, time.Time{}
+	if !reflect.DeepEqual(again, first) {
+		t.Errorf("the card again = %+v, want it as the first time, %+v", again, first)
+	}
+	if res := signIn.Check(t.Context()); res.State == check.OK {
+		t.Errorf("with its card up again, its check = %+v; want it marked done no more", res)
+	}
+	c.answer(t, "appstore", hand.Done)
+	var report engine.Report
+	select {
+	case report = <-ran:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the run never ended")
+	}
+	if !undone || report.Results["appstore"].State != check.OK {
+		t.Errorf("undone %v, the step by hand stands %+v; want it done again", undone, report.Results["appstore"])
+	}
+	posted := []string{
+		"notify card:appstore:appstore | Sign in to the App Store | Open the App Store", "clear card:appstore:appstore",
+		"notify card:appstore:appstore | Sign in to the App Store | Open the App Store", "clear card:appstore:appstore",
+	}
+	if got := c.notices.posted(); !slices.Equal(got, posted) {
+		t.Errorf("notifications %q, want %q", got, posted)
+	}
+
+	c = newCard(t)
+	c.fake.On("test", "-f", "/signed-in")
+	tested := steps.OwnManual(c.fake, c.state, steps.ManualStep{Name: "sign-in", Do: "Sign in", Before: []string{"secret"}, Command: &runner.Command{Name: "test", Args: []string{"-f", "/signed-in"}}}, c.raise)
+	if err := tested.Again(t.Context()); err == nil || len(c.notices.posted()) != 0 {
+		t.Errorf("again, its test passing = %v, posted %q; want it refused, nothing raised", err, c.notices.posted())
+	}
+	if steps.OwnManual(c.fake, c.state, m, nil).Again != nil {
+		t.Error("with no one to act, a step by hand can be done again")
+	}
+}

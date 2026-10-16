@@ -91,6 +91,10 @@ type Step struct {
 	// (an item's ToDo with keys), as applying raises them at its end.
 	// Optional.
 	Choice *Choice
+	// Again does the step once more, finished, should a step applied after
+	// it find it wasn't done after all (Undone), as a step by hand's card
+	// raised again. Optional.
+	Again func(ctx context.Context) error
 }
 
 // Choice is what a step's to-dos that are a choice do: Ready is one as it
@@ -143,20 +147,39 @@ func NotThere(things []string) string {
 	return "needs " + strings.Join(things, " and ") + ", which aren't there yet"
 }
 
-// Reason is err as a step's reason says it: a command that failed by what
-// it said, the last line of its standard error, or, when it said nothing,
-// by its program and how it exited; never the command itself, which can be
-// long, or many lines, and is in the run's log.
+// Reason is err as a step's reason says it: each command that failed, as
+// wrapped or among several joined, by what it said, the last line of its
+// standard error, or, when it said nothing, by its program and how it
+// exited; never the command itself, which can be long, or many lines, and
+// is in the run's log.
 func Reason(err error) string {
-	exit, ok := errors.AsType[*runner.ExitError](err)
-	if !ok {
-		return err.Error()
+	reason := err.Error()
+	for _, exit := range exits(err) {
+		said := exit.Stderr
+		if said == "" {
+			said = fmt.Sprintf("%s exited %d", program(exit.Command), exit.Code)
+		}
+		reason = strings.Replace(reason, exit.Error(), said, 1)
 	}
-	said := exit.Stderr
-	if said == "" {
-		said = fmt.Sprintf("%s exited %d", program(exit.Command), exit.Code)
+	return reason
+}
+
+// exits are the commands that failed that err holds, wrapped or joined, in
+// order.
+func exits(err error) []*runner.ExitError {
+	switch e := err.(type) {
+	case *runner.ExitError:
+		return []*runner.ExitError{e}
+	case interface{ Unwrap() error }:
+		return exits(e.Unwrap())
+	case interface{ Unwrap() []error }:
+		var out []*runner.ExitError
+		for _, inner := range e.Unwrap() {
+			out = append(out, exits(inner)...)
+		}
+		return out
 	}
-	return strings.Replace(err.Error(), exit.Error(), said, 1)
+	return nil
 }
 
 // program is the name of the program command runs, command as a shell
@@ -172,6 +195,15 @@ func program(command string) string {
 // title is the step's title, or its name.
 func (s Step) title() string {
 	return cmp.Or(s.Title, s.Name)
+}
+
+// asks is what the step asks of the person, as its card's title says, when
+// it's a step by hand of its own, as the faces show it; else its title.
+func (s Step) asks() string {
+	if len(s.ByHand) == 1 && s.ByHand[0].Name == s.Name {
+		return s.ByHand[0].Title
+	}
+	return s.title()
 }
 
 // runsOn reports whether the step runs on the Mac named mac.
@@ -780,14 +812,16 @@ func (d *dispatch) startReady(ctx context.Context, steps []Step, running *int, j
 // stepContext is ctx for running s: what runs in it is s's, what s says
 // it's doing as it goes, and tells the run's log, is emitted, what it waits
 // for partway through applying is waited for as its Later are, what it says
-// may be in place has the steps waiting for its things look again, and what
-// it says it's putting in place isn't there for them till it says it is.
+// may be in place has the steps waiting for its things look again, what it
+// says it's putting in place isn't there for them till it says it is, and
+// what it comes after that it finds wasn't done after all is done again.
 func (d *dispatch) stepContext(ctx context.Context, s Step) context.Context {
 	ctx = context.WithValue(d.attributed(ctx, s), dispatchKey{}, d)
 	ctx = context.WithValue(ctx, changedKey{}, func() { d.poke(s.Name) })
 	ctx = context.WithValue(ctx, releaseKey{}, func() func() { return d.release(s) })
 	ctx = context.WithValue(ctx, puttingKey{}, func(things []string) func() { return d.putIn(s.Name, things) })
 	ctx = context.WithValue(ctx, putKey{}, func(thing string) { d.put(s.Name, thing) })
+	ctx = context.WithValue(ctx, undoneKey{}, func(ctx context.Context) bool { return d.undone(ctx, s) })
 	return context.WithValue(ctx, awaitKey{}, func(ctx context.Context, w Wait, says string) bool {
 		return d.await(ctx, s, w, func() { event.Say(ctx, event.Doing{Says: says}) })
 	})
@@ -914,6 +948,52 @@ func ChoiceOf(ctx context.Context, name string) *Choice {
 			return c.Answer(d.attributed(event.WithChanging(ctx), s), it, key)
 		},
 	}
+}
+
+type undoneKey struct{}
+
+// Undone tells the run that what the step ctx is running comes after wasn't
+// done after all, as an App Store install finds no one signed in, which a
+// step by hand before it asks for: each of the steps it's applied after that
+// can be done again (Again), finished, is, in the pipeline's order, as its
+// own, then checked again, as Recheck does; the step saying meanwhile that it
+// waits for it, then that it's applying again. It reports whether each was
+// done again and stands ok: false outside a run, with none to do again, or
+// once the run's stopped.
+func Undone(ctx context.Context) bool {
+	if undone, ok := ctx.Value(undoneKey{}).(func(context.Context) bool); ok {
+		return undone(ctx)
+	}
+	return false
+}
+
+// undone does again, for s, what it comes after that can be (Undone).
+func (d *dispatch) undone(ctx context.Context, s Step) bool {
+	if ctx.Err() != nil {
+		return false
+	}
+	var again []Step
+	d.inLoop(func() {
+		for _, a := range d.steps {
+			if _, done := d.results[a.Name]; done && a.Again != nil && slices.Contains(s.After, a.Name) {
+				again = append(again, a)
+			}
+		}
+	})
+	if len(again) == 0 {
+		return false
+	}
+	defer event.Say(ctx, event.Doing{Says: "applying"})
+	for _, a := range again {
+		event.Say(ctx, event.Doing{Says: "waiting for " + a.asks()})
+		if err := a.Again(d.attributed(event.WithChanging(ctx), a)); err != nil {
+			return false
+		}
+		if res, ok := Recheck(ctx, a.Name); !ok || res.State != check.OK {
+			return false
+		}
+	}
+	return true
 }
 
 type awaitKey struct{}
