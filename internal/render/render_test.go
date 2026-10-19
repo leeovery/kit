@@ -817,6 +817,34 @@ func TestPrettyHidesTheCursorAfterAQuestion(t *testing.T) {
 	}
 }
 
+// While a question's asked under the heading, as sudo's password is, the
+// heading holds still: a turn of the spinner would draw it again from where
+// the question left the cursor, over the question.
+func TestPrettyHoldsStillForAQuestion(t *testing.T) {
+	var out syncBuffer
+	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).Sized(func() (int, int) { return 80, 40 })
+	steps := []event.Step{{Name: "brew", Title: "Homebrew formulae", Area: "Drift"}}
+	face.Emit(event.Preparing{Time: at, Command: "apply", Machine: "laptop", Doing: "checking what will need an administrator's password", Steps: steps})
+	face.Emit(event.Preparing{Time: at, Command: "apply", Machine: "laptop"})
+	asked := out.String()
+	time.Sleep(400 * time.Millisecond)
+	if drawn := strings.TrimPrefix(out.String(), asked); drawn != "" {
+		t.Errorf("while the question was up, the face drew %q; want nothing", drawn)
+	}
+	face.Emit(event.RunStarted{Time: at, Command: "apply", Machine: "laptop", Steps: steps})
+	face.Emit(event.StepStarted{Step: "brew", Doing: "applying"})
+	before := out.String()
+	time.Sleep(400 * time.Millisecond)
+	if out.String() == before {
+		t.Error("once the run started, the spinner didn't turn again")
+	}
+	face.Emit(event.StepFinished{Step: "brew", Result: check.Result{State: check.OK, Summary: "fine"}})
+	face.Emit(event.RunFinished{Duration: time.Second, Counts: map[check.State]int{check.OK: 1}})
+	if err := face.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // Once the boot's in the terminal, it's kit apply: the boot's steps among
 // This Mac's; a step waiting on you says what for and what to do, the
 // light of the row it holds up asking.

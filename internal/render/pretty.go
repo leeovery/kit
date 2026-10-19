@@ -205,7 +205,16 @@ func (p *Pretty) Emit(e event.Event) {
 		if e.Steps != nil {
 			p.planned = e.Steps
 		}
-		p.spin()
+		if e.Doing != "" || p.liveHead == nil {
+			p.spin()
+			break
+		}
+		// Taken down for a question, asked under the heading: it's drawn
+		// once, and holds still while the question draws below it, as a
+		// turn of the spinner would draw it again from wherever the
+		// question left the cursor.
+		p.halt()
+		p.drawSpinner()
 	case event.RunStarted:
 		p.start, p.results = e, make(map[string]event.StepFinished, len(e.Steps))
 		p.output, p.command, p.began = map[string][]string{}, map[string]string{}, p.now()
@@ -788,18 +797,24 @@ func (p *Pretty) clearLive() {
 	p.live = 0
 }
 
-// stopSpinner stops the spinner turning, and takes the live part down: its
-// lines, or applying's screen, the cursor shown again. It releases the lock
-// while the spinner's goroutine finishes, which takes it.
-func (p *Pretty) stopSpinner() {
-	if p.stop != nil {
-		close(p.stop)
-		stopped := p.stopped
-		p.stop = nil
-		p.mu.Unlock()
-		<-stopped
-		p.mu.Lock()
+// halt stops the spinner turning, leaving what it drew. It releases the
+// lock while the spinner's goroutine finishes, which takes it.
+func (p *Pretty) halt() {
+	if p.stop == nil {
+		return
 	}
+	close(p.stop)
+	stopped := p.stopped
+	p.stop = nil
+	p.mu.Unlock()
+	<-stopped
+	p.mu.Lock()
+}
+
+// stopSpinner stops the spinner turning, and takes the live part down: its
+// lines, or applying's screen, the cursor shown again.
+func (p *Pretty) stopSpinner() {
+	p.halt()
 	p.clearLive()
 	p.leaveScreen()
 	if p.hidden {
