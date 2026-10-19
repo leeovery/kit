@@ -67,6 +67,7 @@ var labels = map[string]string{
 	"gh":                  "GitHub extensions",
 	"tmux":                "tmux plugins",
 	"claude-mcp":          "Claude MCP",
+	"claude-skill":        "Claude skills",
 	"login-item":          "macOS login items",
 	"defaults":            "macOS settings",
 	"power":               "Power settings",

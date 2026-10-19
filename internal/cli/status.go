@@ -34,6 +34,7 @@ import (
 	"github.com/leeovery/kit/internal/kind/npm"
 	"github.com/leeovery/kit/internal/kind/power"
 	"github.com/leeovery/kit/internal/kind/secret"
+	"github.com/leeovery/kit/internal/kind/skill"
 	"github.com/leeovery/kit/internal/kind/spotlight"
 	"github.com/leeovery/kit/internal/kind/tmux"
 	"github.com/leeovery/kit/internal/linked"
@@ -172,6 +173,7 @@ func kindSteps(hb *brew.Homebrew, run runner.Runner, home, configHome, stateDir 
 		// Login items open the apps the casks and the App Store install.
 		{kind: login.New(run, home), after: []string{"cask", "mas"}},
 		{kind: mcp.New(run, home)},
+		{kind: skill.New(run, home)},
 		{kind: secret.New(run, home), declaredOnly: true},
 		// git's settings sign with, and reach GitHub by, the SSH key the
 		// secrets write.

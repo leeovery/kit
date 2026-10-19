@@ -27,9 +27,10 @@ read, and kept in kit's state; a replacement Mac can take an old one's name.
 **Kinds.** A kind is a list of things of one sort. Built: Homebrew formulae (`brew`) and casks
 (`cask`), App Store apps (`mas`), npm and Composer global packages (`npm`, `composer`), Go tools
 (`go`), GitHub CLI extensions (`gh`), tmux plugins (`tmux`), login items (`login-item`), Claude
-Code's MCP servers (`claude-mcp`), git's settings (`git`) and
+Code's MCP servers (`claude-mcp`), Claude's skills for every project (`claude-skill`, installed
+by agntc), git's settings (`git`) and
 macOS settings (`defaults`), power settings (`power`), the backup and Spotlight exclusions
-(`backup-exclusion`, `spotlight-exclusion`), and secrets (`secret`). Later: Claude Code's skills.
+(`backup-exclusion`, `spotlight-exclusion`), and secrets (`secret`).
 Not Claude Code's plugins: its user settings (`~/.claude/settings.json`) declare them, and
 it fetches the plugins they enable itself, so a list of kit's would be a second copy (a
 `claude-plugin` kind was built, then retired).
@@ -54,6 +55,7 @@ undeclared for adopting, removing or snoozing, and report both.
 | `tmux` | `set -g @plugin` lines in tmux's config | the folders in TPM's plugin folder | cloned as TPM does; removing deletes the folder |
 | `login-item` | the app's bundle id, `com.example.app` | System Events' login items | System Events (JavaScript for Automation) |
 | `claude-mcp` | a name, then `claude mcp add`'s options; a project's in `[claude mcp <folder>]` | `~/.claude.json`, read directly | `claude mcp add-json`, `claude mcp remove` (a project's in local scope, in its folder) |
+| `claude-skill` | `[claude skills]`: agntc's key for an install, a GitHub repo and what in it, `github/gh-stack/gh-stack` (the skill of that name; a path, the pack there; the repo alone when it's one skill or pack), `@version` or a range optional | agntc's record, `~/.agntc/manifest.json`, read directly (`agntc list` asks every repo what's newer) | `agntc add -g` (`--all` for a repo alone, `--skill` for a name, else `--pack`), `agntc remove -g -y`; `--json` for agntc's own words when one fails |
 | `git-config` | `[git config]`: a key, then its value as one word, as `git config --global` takes them (`alias.st "status -sb"`) | `git config --global --list` | `git config --global --replace-all`, `--unset-all` |
 | `power` | `[power settings]`: pmset's words, the source then the setting and value (`-c sleep 0`; `-a` every source, `-b` the battery, `-u` a UPS), named `charger:sleep` | `pmset -g custom`, by source | `sudo pmset`; undeclaring leaves the value |
 | `backup-exclusion` | `[backup exclusions]`: a path a line, `~` and `*` globs, expanded on every check (a plain path stands for itself, there or not) | Time Machine's fixed-path exclusions (`SkipPaths`), and each glob match excluded where it is (`tmutil isexcluded`); Arq inherits both | a plain path: `sudo tmutil addexclusion -p` (Full Disk Access for the terminal); a glob's match: `tmutil addexclusion`, no password, so `kit nightly` does it unattended; `removeexclusion -p` |
@@ -317,7 +319,7 @@ kit machine [<name>]         This Mac's name: shown, or set (one of kit.toml's M
 What kit manages, a command each:
 kit <kind> add <name>...     Install, and declare for this Mac   [--shared] [--temp] [--note]
 kit <kind> remove <name>...  Uninstall, and undeclare            [--shared]
-    (brew, cask, mas, npm, composer, go, gh, tmux, claude-mcp, login-item,
+    (brew, cask, mas, npm, composer, go, gh, tmux, claude-mcp, claude-skill, login-item,
      defaults, power, git-config, backup-exclusion, spotlight-exclusion)
 kit claude-mcp on|off <name>...  Declare Claude's MCP servers on or off, and install or remove them
 kit feature on|off <name>... Switch features on or off for this Mac   [--shared]

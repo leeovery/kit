@@ -42,7 +42,7 @@ var rowSteps = map[string][]string{
 	rowFormulae: {"homebrew", "brew"},
 	rowCasks:    {"cask"},
 	rowAppStore: {"mas"},
-	rowTools:    {"npm", "composer", "go", "gh", "tmux", "claude-mcp"},
+	rowTools:    {"npm", "composer", "go", "gh", "tmux", "claude-mcp", "claude-skill"},
 	rowGit:      {"git-config", "config", "config-sync", "config-private"},
 	rowLogin:    {"login-item"},
 	rowBackups:  {"time-machine", "arq", "prefs", "scratch", "nightly"},

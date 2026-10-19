@@ -149,6 +149,7 @@ var sectionDefs = []sectionDef{
 	{header: "github extensions", kind: "gh", form: names, sorted: true, holds: listOptions},
 	{header: "macos login items", kind: "login-item", form: names, sorted: true, holds: listOptions},
 	{header: "claude mcp", kind: "claude-mcp", form: commands, folders: true},
+	{header: "claude skills", kind: "claude-skill", form: names, sorted: true, holds: listOptions},
 	{header: "secrets", kind: "secret", form: secrets, sorted: true, items: true},
 	{header: "prefs files", kind: PrefsFilesKind, form: paths},
 	{header: "prefs deny", kind: PrefsDenyKind, form: paths},
