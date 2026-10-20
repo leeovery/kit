@@ -44,7 +44,7 @@ var rowSteps = map[string][]string{
 	rowFiles:    {"file", "path", "oh-my-zsh"},
 	rowSettings: {"touch-id-sudo", "remote-login", "file-sharing"},
 	rowGit:      {"config", "config-sync", "config-private"},
-	rowBackups:  {"time-machine", "arq", "prefs", "scratch", "nightly"},
+	rowBackups:  {"prefs", "scratch", "nightly"},
 }
 
 // rowNamed is the row of each of kit's own steps, by its name.

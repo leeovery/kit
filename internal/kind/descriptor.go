@@ -89,10 +89,13 @@ type Switcher interface {
 
 // Deps are what every kind is made from: the runner its commands go
 // through, the user's home, XDG's config folder there ("" for the default)
-// and kit's state folder, and what kinds share, made once for them all.
+// and kit's state folder, the backup tools the Mac uses, by the names its
+// [backups] section gives them, and what kinds share, made once for them
+// all.
 type Deps struct {
 	Run                        runner.Runner
 	Home, ConfigHome, StateDir string
+	Backups                    []string
 
 	mu     sync.Mutex
 	shared map[any]any

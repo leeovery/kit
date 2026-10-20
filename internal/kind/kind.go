@@ -54,22 +54,27 @@ type Kind interface {
 	Remove(ctx context.Context, names []string) error
 }
 
-// Commanded is a kind whose check and install run a command other than its
+// Commanded is a kind whose check and install run commands other than its
 // Program, or none, as tmux's plugins, read from tmux's config and cloned
-// with git, which macOS has, need no tmux.
+// with git, which macOS has, need no tmux; or several, as exclusions run
+// the program of each backup tool keeping them.
 type Commanded interface {
-	// Command is the command its check and install run: "" for none.
-	Command() string
+	// Commands are the commands its check and install run: none for none.
+	Commands() []string
 }
 
-// Command is the command k's check and install run, which, as kit applies,
-// its step waits for while it isn't on kit's PATH, as another step may put
-// it there: its Program, unless it says otherwise (Commanded); "" for none.
-func Command(k Kind) string {
+// Commands are the commands k's check and install run, which, as kit
+// applies, its step waits for while they aren't on kit's PATH, as another
+// step may put them there: its Program, unless it says otherwise
+// (Commanded).
+func Commands(k Kind) []string {
 	if c, ok := k.(Commanded); ok {
-		return c.Command()
+		return c.Commands()
 	}
-	return k.Program()
+	if p := k.Program(); p != "" {
+		return []string{p}
+	}
+	return nil
 }
 
 // Card is a step by hand a kind's things need done before its step, which
@@ -680,7 +685,7 @@ func counting(ctx context.Context, k Kind, names []string) context.Context {
 	f, fetches := k.(Fetcher)
 	a, _ := k.(Announcer)
 	s, _ := k.(Shortened)
-	p := &progress{ctx: ctx, counter: c, fetcher: f, announcer: a, shortened: s, names: names, program: Command(k),
+	p := &progress{ctx: ctx, counter: c, fetcher: f, announcer: a, shortened: s, names: names, program: strings.Join(Commands(k), " and "),
 		unstarted: fetches, done: map[string]bool{}, fetched: map[string]bool{}, heard: time.Now()}
 	p.say()
 	return context.WithValue(ctx, progressKey{}, p)

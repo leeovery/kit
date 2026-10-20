@@ -229,7 +229,7 @@ func ofKinds(name string) bool {
 }
 
 // placeFeatures places the steps of each feature whose section says what it
-// waits for, as [features --after cask:arq] does, among all, the run's
+// waits for, as [features --after cask:app] does, among all, the run's
 // steps, featured saying which feature each step is for: each comes after
 // the steps named, and waits for the things, checking once they're in, as a
 // step of your own does. One placed after what isn't a step fails, saying

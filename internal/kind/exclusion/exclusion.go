@@ -1,12 +1,11 @@
 // Package exclusion is the backup exclusions as a kind: paths declared in a
 // [backup exclusions] section (~ for the home folder, * globs), kept out of
-// Time Machine, which Arq inherits through its "Skip items excluded by Time
-// Machine rules". A plain path is a fixed-path exclusion, which holds before
-// its folder exists and needs an administrator's password. The globs are
-// expanded on every check, and a new folder matching one is excluded where
-// it is, a sticky exclusion, which needs no password, so kit's scheduled run
-// excludes it within the hour. Arq honours sticky exclusions as it does
-// fixed-path ones (tested on 6 Oct 2026).
+// the backups of the tools the Mac uses, through each tool's driver: its
+// own exclusions, or those of the tool it follows (backup.Excluders). A
+// plain path is kept out fixed, which holds before its folder exists. The
+// globs are expanded on every check, and a new folder matching one is kept
+// out where it is, so with a tool doing that without a password, kit's
+// scheduled run keeps it out within the hour.
 package exclusion
 
 import (
@@ -17,26 +16,22 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/leeovery/kit/internal/backup"
+	"github.com/leeovery/kit/internal/backup/tool"
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/kind"
-	"github.com/leeovery/kit/internal/plist"
 	"github.com/leeovery/kit/internal/runner"
 )
 
-// TimeMachinePrefs is Time Machine's settings, whose SkipPaths are its
-// fixed-path exclusions, as defaults names the domain: read through macOS's
-// settings service, which has a change the moment it's made, where the file
-// on disk lags behind.
-const TimeMachinePrefs = "/Library/Preferences/com.apple.TimeMachine"
-
-// Exclusions is the backup exclusions, driven through tmutil.
+// Exclusions is the backup exclusions, kept out by excluders.
 type Exclusions struct {
-	run   runner.Runner
-	home  string
-	prefs string
-	admin func(ctx context.Context) bool
-	// matched are the paths a glob matched, by name: excluded sticky.
-	matched map[string]bool
+	run       runner.Runner
+	home      string
+	excluders []tool.Excluder
+	admin     func(ctx context.Context) bool
+	// matched are the paths a glob matched, by name: kept out where they
+	// are; declared every path declared, a glob by its matches.
+	matched, declared map[string]bool
 }
 
 // kindName names the kind.
@@ -49,22 +44,39 @@ var Descriptor = kind.Descriptor{
 	Group:   kind.Settings,
 	Section: &config.Section{Kind: kindName, Header: "backup exclusions", Form: config.Paths, Sorted: true},
 	Help: &kind.Help{
-		What:   "Folders Time Machine and Arq leave out",
+		What:   "Folders the backups leave out",
 		Add:    "Leave folders out of backups, and declare them",
 		Remove: "Put folders back in backups, and undeclare them",
 	},
 	Row: "Mac settings",
-	New: func(d *kind.Deps) kind.Kind { return New(d.Run, d.Home, TimeMachinePrefs) },
+	New: func(d *kind.Deps) kind.Kind { return New(d.Run, d.Home, backup.Excluders(d.Backups)) },
 }
 
-// New returns the backup exclusions for the user whose home is home, with
-// Time Machine's settings at prefs.
-func New(run runner.Runner, home, prefs string) *Exclusions {
-	return &Exclusions{run: run, home: home, prefs: prefs}
+// errNoTool is the kind's error on a Mac with no backup tool keeping
+// exclusions.
+var errNoTool = errors.New("no backup tool this Mac uses keeps them out: name the tools in [backups]")
+
+// New returns the backup exclusions for the user whose home is home, kept
+// out by excluders.
+func New(run runner.Runner, home string, excluders []tool.Excluder) *Exclusions {
+	return &Exclusions{run: run, home: home, excluders: excluders}
 }
 
-func (x *Exclusions) Name() string    { return kindName }
-func (x *Exclusions) Program() string { return "tmutil" }
+func (x *Exclusions) Name() string { return kindName }
+
+// Program is the excluders' programs.
+func (x *Exclusions) Program() string { return strings.Join(x.Commands(), " and ") }
+
+// Commands are the excluders' programs, each once.
+func (x *Exclusions) Commands() []string {
+	var out []string
+	for _, ex := range x.excluders {
+		if p := ex.Program(); !slices.Contains(out, p) {
+			out = append(out, p)
+		}
+	}
+	return out
+}
 
 // Verb says a path as declared is excluded.
 func (x *Exclusions) Verb() string { return "excluded" }
@@ -86,15 +98,16 @@ func (x *Exclusions) shown(path string) string {
 }
 
 // Expand replaces each glob with what matches it now; a plain path stands
-// for itself, there or not, as a fixed-path exclusion holds before its
-// folder exists.
+// for itself, there or not, as a fixed exclusion holds before its folder
+// exists.
 func (x *Exclusions) Expand(list config.List) (config.List, error) {
 	out := list
 	out.Entries = nil
-	x.matched = map[string]bool{}
+	x.matched, x.declared = map[string]bool{}, map[string]bool{}
 	for _, e := range list.Entries {
 		if !strings.ContainsAny(e.Name, "*?[") {
 			out.Entries = append(out.Entries, e)
+			x.declared[e.Name] = true
 			continue
 		}
 		matches, err := filepath.Glob(x.full(e.Name))
@@ -106,49 +119,48 @@ func (x *Exclusions) Expand(list config.List) (config.List, error) {
 			match.Name = x.shown(m)
 			out.Entries = append(out.Entries, match)
 			x.matched[match.Name] = true
+			x.declared[match.Name] = true
 		}
 	}
 	return out, nil
 }
 
-// Installed lists Time Machine's fixed-path exclusions, and the glob matches
-// excluded where they are.
+// Installed lists the paths kept out of the backups: one declared while
+// every excluder keeps it out, and one declared nowhere while any does, so
+// it's seen.
 func (x *Exclusions) Installed(ctx context.Context) ([]kind.Installed, error) {
-	res, err := x.run.Run(ctx, runner.Command{Name: "defaults", Args: []string{"export", x.prefs, "-"}})
-	if err != nil {
-		return nil, err
+	if len(x.excluders) == 0 {
+		return nil, errNoTool
 	}
-	v, err := plist.Read(string(res.Stdout))
-	if err != nil {
-		return nil, err
-	}
-	prefs, _ := v.(map[string]any)
-	skip, _ := prefs["SkipPaths"].([]any)
-	var out []kind.Installed
-	fixed := map[string]bool{}
-	for _, p := range skip {
-		if path, ok := p.(string); ok {
-			out = append(out, kind.Installed{Name: x.shown(path), Explicit: true})
-			fixed[x.shown(path)] = true
-		}
-	}
-	var sticky []string
+	var here []string
 	for name := range x.matched {
-		if !fixed[name] {
-			sticky = append(sticky, x.full(name))
+		here = append(here, x.full(name))
+	}
+	slices.Sort(here)
+	var order []string
+	keepers := map[string]int{}
+	for _, ex := range x.excluders {
+		paths, err := ex.Excluded(ctx, x.run, here)
+		if err != nil {
+			return nil, err
+		}
+		seen := map[string]bool{}
+		for _, p := range paths {
+			name := x.shown(p)
+			if seen[name] {
+				continue
+			}
+			seen[name] = true
+			if keepers[name] == 0 {
+				order = append(order, name)
+			}
+			keepers[name]++
 		}
 	}
-	if len(sticky) == 0 {
-		return out, nil
-	}
-	slices.Sort(sticky)
-	res, err = x.run.Run(ctx, runner.Command{Name: "tmutil", Args: append([]string{"isexcluded"}, sticky...)})
-	if err != nil {
-		return nil, err
-	}
-	for line := range strings.Lines(string(res.Stdout)) {
-		if path, ok := strings.CutPrefix(strings.TrimSpace(line), "[Excluded]"); ok {
-			out = append(out, kind.Installed{Name: x.shown(strings.TrimSpace(path)), Explicit: true})
+	var out []kind.Installed
+	for _, name := range order {
+		if keepers[name] == len(x.excluders) || !x.declared[name] {
+			out = append(out, kind.Installed{Name: name, Explicit: true})
 		}
 	}
 	return out, nil
@@ -163,61 +175,83 @@ func (x *Exclusions) Resolve(_ context.Context, names []string) (map[string]stri
 	return out, nil
 }
 
-// Install excludes each path from Time Machine, one at a time so one that
-// fails leaves the rest: a glob's match where it is, sticky; a plain path
-// as a fixed-path exclusion, through sudo, which needs Full Disk Access for
-// the terminal kit runs in.
+// Install keeps each path out of every excluder's backups, one at a time so
+// one that fails leaves the rest: a glob's match where it is, first; a
+// plain path fixed.
 func (x *Exclusions) Install(ctx context.Context, names []string) error {
-	var fixed, sticky []string
+	var here, fixed []string
 	for _, name := range names {
 		if x.matched[name] {
-			sticky = append(sticky, name)
+			here = append(here, name)
 		} else {
 			fixed = append(fixed, name)
 		}
 	}
 	var errs []error
-	for _, name := range sticky {
-		if _, err := x.run.Run(ctx, runner.Command{Name: "tmutil", Args: []string{"addexclusion", x.full(name)}}); err != nil {
-			errs = append(errs, fmt.Errorf("%s: %w", name, err))
+	for _, ex := range x.excluders {
+		for _, name := range here {
+			errs = append(errs, named(name, ex.Exclude(ctx, x.run, x.full(name), false)))
+		}
+		for _, name := range fixed {
+			errs = append(errs, named(name, ex.Exclude(ctx, x.run, x.full(name), true)))
 		}
 	}
-	return errors.Join(append(errs, x.each(ctx, "addexclusion", fixed))...)
+	return errors.Join(errs...)
 }
 
-// Unattended is the glob matches among names: excluding one where it is
-// needs no password, so the scheduled run does it.
+// Remove stops keeping each path out, through the excluders keeping it
+// out.
+func (x *Exclusions) Remove(ctx context.Context, names []string) error {
+	var errs []error
+	for _, ex := range x.excluders {
+		kept, err := ex.Excluded(ctx, x.run, nil)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		for _, name := range names {
+			if path := x.full(name); slices.Contains(kept, path) {
+				errs = append(errs, named(name, ex.Include(ctx, x.run, path)))
+			}
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// named is err, keeping the path called name out or no longer, saying
+// which.
+func named(name string, err error) error {
+	if err != nil {
+		return fmt.Errorf("%s: %w", name, err)
+	}
+	return nil
+}
+
+// asAdmin reports whether keeping the path called name out needs an
+// administrator's password, for any excluder.
+func (x *Exclusions) asAdmin(name string) bool {
+	fixed := !x.matched[name]
+	return slices.ContainsFunc(x.excluders, func(ex tool.Excluder) bool { return ex.NeedsAdmin(fixed) })
+}
+
+// Unattended is those of names kept out with no password, so the scheduled
+// run keeps them out.
 func (x *Exclusions) Unattended(names []string) []string {
 	var out []string
 	for _, name := range names {
-		if x.matched[name] {
+		if !x.asAdmin(name) {
 			out = append(out, name)
 		}
 	}
 	return out
 }
 
-// Remove stops excluding each path.
-func (x *Exclusions) Remove(ctx context.Context, names []string) error {
-	return x.each(ctx, "removeexclusion", names)
-}
-
-func (x *Exclusions) each(ctx context.Context, verb string, names []string) error {
-	var errs []error
-	for _, name := range names {
-		if _, err := x.run.Run(ctx, runner.Command{Name: "sudo", Args: []string{"-n", "tmutil", verb, "-p", x.full(name)}}); err != nil {
-			errs = append(errs, fmt.Errorf("%s: %w", name, err))
-		}
-	}
-	return errors.Join(errs...)
-}
-
-// NeedsAdmin is the plain paths among names: tmutil needs root for
-// fixed-path exclusions.
+// NeedsAdmin is those of names that need an administrator's password to
+// keep out.
 func (x *Exclusions) NeedsAdmin(_ context.Context, names []string) ([]string, error) {
 	var out []string
 	for _, name := range names {
-		if !x.matched[name] {
+		if x.asAdmin(name) {
 			out = append(out, name)
 		}
 	}
@@ -228,15 +262,15 @@ func (x *Exclusions) NeedsAdmin(_ context.Context, names []string) ([]string, er
 // at hand.
 func (x *Exclusions) SetAdmin(held func(ctx context.Context) bool) { x.admin = held }
 
-// Blocked holds up every path missing while kit has no administrator's
-// password.
+// Blocked holds up every path missing that needs an administrator's
+// password while kit has none.
 func (x *Exclusions) Blocked(ctx context.Context, missing map[string]string, _ []kind.Installed) (map[string]string, error) {
 	blocked := map[string]string{}
 	if x.admin == nil || x.admin(ctx) {
 		return blocked, nil
 	}
 	for name := range missing {
-		if !x.matched[name] {
+		if x.asAdmin(name) {
 			blocked[name] = "waiting for an administrator's password: kit apply at a terminal asks for it"
 		}
 	}
@@ -245,6 +279,7 @@ func (x *Exclusions) Blocked(ctx context.Context, missing map[string]string, _ [
 
 var _ interface {
 	kind.Kind
+	kind.Commanded
 	kind.Expander
 	kind.Unattended
 	kind.Admin

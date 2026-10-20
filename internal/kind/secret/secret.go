@@ -92,9 +92,9 @@ func (s *Secrets) Program() string {
 	return ""
 }
 
-// Command is none: syncing waits for each store's program itself, so one
+// Commands are none: syncing waits for each store's program itself, so one
 // store's missing program holds back only that store's secrets.
-func (s *Secrets) Command() string { return "" }
+func (s *Secrets) Commands() []string { return nil }
 
 // used are the stores the secrets declared are in, each once, in turn.
 func (s *Secrets) used() []store.Driver {

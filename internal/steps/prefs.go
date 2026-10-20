@@ -111,13 +111,13 @@ func Prefs(p *prefs.Prefs, now func() time.Time) engine.Step {
 			case rec.Captured.IsZero():
 				return problem(PrefsName, "not captured yet", [3]string{"never", "apps' settings haven't been saved yet", "the nightly run captures them; or kit prefs capture"})
 			case now().Sub(rec.Captured) > prefsEvery:
-				return problem(PrefsName, "last capture "+ago(rec.Captured, now()), [3]string{"stale", "apps' settings haven't been saved for over a day", "kit prefs capture says why"})
+				return problem(PrefsName, "last capture "+check.Ago(rec.Captured, now()), [3]string{"stale", "apps' settings haven't been saved for over a day", "kit prefs capture says why"})
 			case rec.Errors > 0:
 				return problem(PrefsName, rec.Summary, [3]string{"errors", fmt.Sprintf("the last capture couldn't save %d", rec.Errors), "kit prefs capture lists them"})
 			case !rec.Unpushed.IsZero() && now().Sub(rec.Unpushed) > prefsEvery:
-				return problem(PrefsName, "not pushed since "+ago(rec.Unpushed, now()), [3]string{"unpushed", rec.PushError, "the next capture pushes again; kit prefs capture shows it"})
+				return problem(PrefsName, "not pushed since "+check.Ago(rec.Unpushed, now()), [3]string{"unpushed", rec.PushError, "the next capture pushes again; kit prefs capture shows it"})
 			}
-			at := when(rec.Captured, now())
+			at := check.When(rec.Captured, now())
 			return check.Result{State: check.OK, Summary: "saved " + at, Glance: "app settings " + at}
 		},
 	}

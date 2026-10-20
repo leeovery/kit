@@ -83,15 +83,15 @@ func (f *fakeKind) Resolve(_ context.Context, names []string) (map[string]string
 // commandedKind is a fakeKind whose check and install run no command.
 type commandedKind struct{ *fakeKind }
 
-func (commandedKind) Command() string { return "" }
+func (commandedKind) Commands() []string { return nil }
 
-// A kind's command is its program, unless it says otherwise.
-func TestCommand(t *testing.T) {
-	if got := kind.Command(&fakeKind{}); got != "brew" {
-		t.Errorf("Command() = %q, want its program, brew", got)
+// A kind's commands are its program, unless it says otherwise.
+func TestCommands(t *testing.T) {
+	if got := kind.Commands(&fakeKind{}); !slices.Equal(got, []string{"brew"}) {
+		t.Errorf("Commands() = %q, want its program, brew", got)
 	}
-	if got := kind.Command(commandedKind{&fakeKind{}}); got != "" {
-		t.Errorf("Command() = %q, want none, as it says", got)
+	if got := kind.Commands(commandedKind{&fakeKind{}}); len(got) > 0 {
+		t.Errorf("Commands() = %q, want none, as it says", got)
 	}
 }
 

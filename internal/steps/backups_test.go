@@ -1,193 +1,128 @@
 package steps_test
 
 import (
+	"context"
+	"errors"
 	"reflect"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/leeovery/kit/internal/backup/tool"
 	"github.com/leeovery/kit/internal/check"
+	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/runner"
 	"github.com/leeovery/kit/internal/runner/runnertest"
 	"github.com/leeovery/kit/internal/steps"
 )
 
-// tmPrefs is Time Machine's settings, as defaults exports them: automatic
-// backups as given, and one destination whose backups are dates.
-func tmPrefs(auto string, dates ...time.Time) string {
-	var b strings.Builder
-	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-	<key>AutoBackup</key>
-	` + auto + `
-	<key>AutoBackupInterval</key>
-	<integer>3600</integer>
-	<key>Destinations</key>
-	<array>
-		<dict>
-			<key>BackupAlias</key>
-			<data>
-			AAAAAAEcAAIAAA==
-			</data>
-			<key>LastKnownVolumeName</key>
-			<string>Backups</string>
-			<key>SnapshotDates</key>
-			<array>
-`)
-	for _, d := range dates {
-		b.WriteString("\t\t\t\t<date>" + d.UTC().Format(time.RFC3339) + "</date>\n")
+// A [backups] line names a tool kit knows, then what its check comes
+// after and before, as a step's line does; a tool kit doesn't know is
+// refused, naming those it has.
+func TestParseBackup(t *testing.T) {
+	for _, tc := range []struct {
+		name, value, wrong string
+		after, before      []string
+	}{
+		{name: "time-machine"},
+		{name: "arq", value: "--after cask:arq --before nightly --after brew", after: []string{"cask:arq", "brew"}, before: []string{"nightly"}},
+		{name: "time-capsule", wrong: "laptop/declarations:4: kit doesn't know the backup tool time-capsule: one of arq, time-machine"},
+		{name: "arq", value: "--sideways", wrong: `laptop/declarations:4: "--sideways" isn't one of a backup tool's options: --after and --before`},
+		{name: "arq", value: "--after", wrong: "laptop/declarations:4: --after needs a step's name after it"},
+		{name: "arq", value: "--before cask:arq", wrong: "--before a step"},
+		{name: "arq", value: `--after "cask:arq`, wrong: "a quote isn't closed"},
+	} {
+		got, err := steps.ParseBackup(config.Entry{Name: tc.name, Value: tc.value, Scope: "laptop", Line: 4})
+		switch {
+		case tc.wrong != "":
+			if err == nil || !strings.Contains(err.Error(), tc.wrong) {
+				t.Errorf("%s %s: err = %v, want %q", tc.name, tc.value, err, tc.wrong)
+			}
+			continue
+		case err != nil:
+			t.Errorf("%s %s: %v", tc.name, tc.value, err)
+			continue
+		}
+		if got.Driver.About().ID != tc.name || !slices.Equal(got.After, tc.after) || !slices.Equal(got.Before, tc.before) || got.Pos != "laptop/declarations:4" {
+			t.Errorf("%s %s = %+v", tc.name, tc.value, got)
+		}
 	}
-	b.WriteString(`			</array>
-		</dict>
-	</array>
-	<key>SkipPaths</key>
-	<array/>
-</dict>
-</plist>
-`)
-	return b.String()
 }
 
-const (
-	tmIdle      = "Backup session status:\n{\n    ClientID = \"com.apple.backupd\";\n    Percent = \"-1\";\n    Running = 0;\n}\n"
-	tmConnected = "====================================================\nName          : Backups\nKind          : Local\nMount Point   : /Volumes/Backups\nID            : 0000\n"
-)
-
-func tmStuck(since time.Time) string {
-	return "Backup session status:\n{\n    BackupPhase = Copying;\n    DateOfStateChange = \"" + since.Format("2006-01-02 15:04:05 -0700") + "\";\n    Running = 1;\n}\n"
+// fakeTool is a backup tool whose backups stand as status says, or that
+// can't be looked at, err.
+type fakeTool struct {
+	status tool.Status
+	err    error
 }
 
-func TestTimeMachine(t *testing.T) {
-	prefs := []string{"export", "/Library/Preferences/com.apple.TimeMachine", "-"}
-	recent := now().Add(-40 * time.Minute)
-	old := now().Add(-5 * time.Hour)
+func (f fakeTool) About() tool.About {
+	return tool.About{ID: "vault", Name: "Vault", SetUp: tool.SetUp{
+		Title: "Set up Vault", Why: "Vault has nowhere to back up to.", Steps: []string{"Open Vault", "Choose a disk"},
+		Watch: "Vault has a disk", Do: "Open Vault, and choose a disk",
+	}}
+}
+
+func (f fakeTool) Look(context.Context, runner.Runner, time.Time) (tool.Status, error) {
+	return f.status, f.err
+}
+
+func (f fakeTool) Excluder() tool.Excluder { return nil }
+
+// A backup tool's step says what its driver does, in kit's words where the
+// driver leaves them to kit: its summary from when its backups last
+// finished, a plan named, or, none finished, the first under way or none
+// yet; its glance its name and those times, or its summary; its problems
+// keyed by the tool; and setting it up the person's to-do, in the Backups
+// group.
+func TestBackupStep(t *testing.T) {
+	at := func(h, m int) time.Time { return time.Date(2026, 10, 5, h, m, 0, 0, time.UTC) }
 	for _, tt := range []struct {
 		name   string
-		script func(*runnertest.Fake)
+		status tool.Status
 		state  check.State
 		text   string
+		glance string
 		ids    []string
 	}{
-		{"backing up", func(f *runnertest.Fake) {
-			f.On("defaults", prefs...).Prints(tmPrefs("<true/>", old, recent))
-			f.On("tmutil", "status").Prints(tmIdle)
-		}, check.OK, "last backup 11:20", nil},
-		{"automatic backups off, as an integer", func(f *runnertest.Fake) {
-			f.On("defaults", prefs...).Prints(tmPrefs("<integer>0</integer>", recent))
-			f.On("tmutil", "status").Prints(tmIdle)
-		}, check.Attention, "last backup 11:20", []string{"time-machine:off"}},
-		{"stale, the disk away", func(f *runnertest.Fake) {
-			f.On("defaults", prefs...).Prints(tmPrefs("<integer>1</integer>", old))
-			f.On("tmutil", "destinationinfo").Prints("====================================================\nName          : Backups\nKind          : Local\nID            : 0000\n")
-			f.On("tmutil", "status").Prints(tmIdle)
-		}, check.Attention, "last backup 07:00", []string{"time-machine:stale"}},
-		{"stuck", func(f *runnertest.Fake) {
-			f.On("defaults", prefs...).Prints(tmPrefs("<true/>", recent))
-			f.On("tmutil", "status").Prints(tmStuck(now().Add(-4 * time.Hour)))
-		}, check.Attention, "last backup 11:20", []string{"time-machine:stuck"}},
-		{"never set up", func(f *runnertest.Fake) {
-			f.On("defaults", prefs...).Exits(1).PrintsToStderr("file does not exist")
-		}, check.Attention, "not set up", []string{"time-machine:none"}},
-		{"a disk just added", func(f *runnertest.Fake) {
-			f.On("defaults", prefs...).Prints(tmPrefs("<true/>"))
-			f.On("tmutil", "destinationinfo").Prints(tmConnected)
-			f.On("tmutil", "status").Prints(tmIdle)
-		}, check.OK, "first backup soon", nil},
-		{"its first backup under way", func(f *runnertest.Fake) {
-			f.On("defaults", prefs...).Prints(tmPrefs("<true/>"))
-			f.On("tmutil", "status").Prints(tmStuck(now().Add(-10 * time.Minute)))
-		}, check.OK, "first backup under way", nil},
-		{"no backup yet, one tried", func(f *runnertest.Fake) {
-			f.On("defaults", prefs...).Prints(strings.Replace(tmPrefs("<true/>"), "<key>SnapshotDates</key>", "<key>AttemptDates</key>\n\t\t\t<array><date>"+recent.UTC().Format(time.RFC3339)+"</date></array>\n\t\t\t<key>SnapshotDates</key>", 1))
-			f.On("tmutil", "destinationinfo").Prints(tmConnected)
-			f.On("tmutil", "status").Prints(tmIdle)
-		}, check.Attention, "no backup yet", []string{"time-machine:never"}},
-		{"no backup yet, the disk away", func(f *runnertest.Fake) {
-			f.On("defaults", prefs...).Prints(tmPrefs("<true/>"))
-			f.On("tmutil", "destinationinfo").Prints("====================================================\nName          : Backups\nKind          : Local\nID            : 0000\n")
-			f.On("tmutil", "status").Prints(tmIdle)
-		}, check.Attention, "no backup yet", []string{"time-machine:never"}},
+		{"one backup", tool.Status{Backups: []tool.Backup{{Last: at(11, 20)}}}, check.OK, "last backup 11:20", "Vault 11:20", nil},
+		{"a day before", tool.Status{Backups: []tool.Backup{{Last: at(11, 20).Add(-24 * time.Hour)}}}, check.OK, "last backup 4 Oct 11:20", "Vault 4 Oct 11:20", nil},
+		{"plans, named and sorted", tool.Status{Backups: []tool.Backup{{Plan: "Work", Last: at(9, 0)}, {Plan: "Home", Last: at(10, 0)}}}, check.OK, "last backup Home 10:00, Work 09:00", "Vault 09:00, 10:00", nil},
+		{"the first under way", tool.Status{Backups: []tool.Backup{{}}, Running: true}, check.OK, "first backup under way", "Vault's first backup under way", nil},
+		{"none finished, its words left to kit", tool.Status{Backups: []tool.Backup{{}}}, check.OK, "no backup yet", "Vault's no backup yet", nil},
+		{"none finished, in its words", tool.Status{Backups: []tool.Backup{{}}, Summary: "first backup soon"}, check.OK, "first backup soon", "Vault's first backup soon", nil},
+		{"its own words", tool.Status{Summary: "resting", Backups: []tool.Backup{{Last: at(11, 20)}}}, check.OK, "resting", "Vault 11:20", nil},
+		{"problems", tool.Status{Backups: []tool.Backup{{Last: at(11, 20)}}, Problems: []tool.Problem{{Key: "off", What: "it's off", Do: "turn it on"}, {Key: "stale:home", What: "Home: old", Do: "look"}}}, check.Attention, "last backup 11:20", "", []string{"vault:off", "vault:stale:home"}},
+		{"not set up", tool.Status{NotSetUp: true, Summary: "ignored"}, check.Attention, "not set up", "", []string{"vault:none"}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			fake := runnertest.New(t)
-			tt.script(fake)
-			state, text, ids := checked(t, steps.TimeMachine(fake, now))
-			if state != tt.state || text != tt.text || !slices.Equal(ids, tt.ids) {
-				t.Errorf("= %s %q %q; want %s %q %q", state, text, ids, tt.state, tt.text, tt.ids)
+			step := steps.Backup(runnertest.New(t), fakeTool{status: tt.status}, now)
+			res := step.Check(t.Context())
+			var ids []string
+			for _, it := range res.Items {
+				ids = append(ids, it.ID)
+			}
+			if res.State != tt.state || res.Summary != tt.text || res.Glance != tt.glance || !slices.Equal(ids, tt.ids) {
+				t.Errorf("= %s %q %q %q; want %s %q %q %q", res.State, res.Summary, res.Glance, ids, tt.state, tt.text, tt.glance, tt.ids)
+			}
+			if res.State == check.Attention && !res.ToDo() {
+				t.Errorf("%+v, want it the person's to do", res)
+			}
+			if step.Name != "vault" || step.Title != "Vault" || step.Area != steps.AreaBackups || step.Row != "Backups" {
+				t.Errorf("step = %s %q %s %s, want the tool's, in Backups", step.Name, step.Title, step.Area, step.Row)
 			}
 		})
 	}
-	// A stale backup with the disk connected says nothing of the disk.
-	fake := runnertest.New(t)
-	fake.On("defaults", prefs...).Prints(tmPrefs("<true/>", old))
-	fake.On("tmutil", "destinationinfo").Prints(tmConnected)
-	fake.On("tmutil", "status").Prints(tmIdle)
-	res := steps.TimeMachine(fake, now).Check(t.Context())
-	if len(res.Items) != 1 || res.Items[0].Name != "last backup 5 hours ago" {
-		t.Errorf("stale, the disk connected: %+v", res.Items)
+	res := steps.Backup(runnertest.New(t), fakeTool{status: tool.Status{NotSetUp: true}}, now).Check(t.Context())
+	want := check.Item{ID: "vault:none", Name: "Set up Vault", State: steps.Problem, Detail: "Open Vault, and choose a disk", ToDo: &check.ToDo{
+		Title: "Set up Vault", Why: "Vault has nowhere to back up to.", Steps: []string{"Open Vault", "Choose a disk"}, Watch: "Vault has a disk", Group: "Backups",
+	}}
+	if len(res.Items) != 1 || !reflect.DeepEqual(res.Items[0], want) {
+		t.Errorf("not set up: items = %+v\nwant %+v, %+v", res.Items, want, want.ToDo)
 	}
-}
-
-func TestArq(t *testing.T) {
-	stats := func(plans string) string { return `{"arqVersion": "7.0", "backupPlans": [` + plans + `]}` }
-	plan := func(name, schedule string, last time.Time) string {
-		return `{"name": "` + name + `", "schedule": {"type": "` + schedule + `"}, "lastBackedUp": "` + last.UTC().Format("2006-01-02T15:04:05.000Z") + `"}`
-	}
-	for _, tt := range []struct {
-		name  string
-		out   string
-		state check.State
-		text  string
-		ids   []string
-	}{
-		{"backed up, a plan with no schedule left out", stats(plan("Old Mac", "Manual", now().Add(-30*24*time.Hour)) + "," + plan("User data", "Daily", now().Add(-11*time.Hour))), check.OK, "last backup 01:00", nil},
-		{"stale", stats(plan("User data", "Daily", now().Add(-50*time.Hour))), check.Attention, "no recent backup", []string{"arq:stale:user-data"}},
-		{"never", stats(`{"name": "User data", "schedule": {"type": "Daily"}}`), check.Attention, "no recent backup", []string{"arq:never:user-data"}},
-		{"none scheduled", stats(plan("User data", "Manual", now())), check.Attention, "no plan scheduled", []string{"arq:no-plan"}},
-		{"unreadable", "Error: the agent isn't running", check.Attention, "status unreadable", []string{"arq:unreadable"}},
-		{"no plan made", stats(""), check.Attention, "not set up", []string{"arq:none"}},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			fake := runnertest.New(t)
-			fake.On(steps.Arqc, "stats").Prints(tt.out)
-			state, text, ids := checked(t, steps.Arq(fake, now))
-			if state != tt.state || text != tt.text || !slices.Equal(ids, tt.ids) {
-				t.Errorf("= %s %q %q; want %s %q %q", state, text, ids, tt.state, tt.text, tt.ids)
-			}
-		})
-	}
-	fake := runnertest.New(t)
-	fake.On(steps.Arqc, "stats").Fails(runner.ErrNotFound)
-	if state, _, ids := checked(t, steps.Arq(fake, now)); state != check.Attention || !slices.Equal(ids, []string{"arq:missing"}) {
-		t.Errorf("not installed = %s %q", state, ids)
-	}
-}
-
-// Arq just installed, never opened, asks for its licence agreement to be
-// accepted: it isn't set up, as Time Machine without a backup disk isn't,
-// saying how to set it up, not that its agent doesn't answer. Failing
-// otherwise, its status is unreadable.
-func TestArqNeverSetUp(t *testing.T) {
-	for _, tt := range []struct {
-		name, stderr string
-		text         string
-		item         check.Item
-	}{
-		{"licence not accepted", "Please review the license agreement at https://example.com/license.html and run 'arqc acceptLicenseAgreement' to accept it\n", "not set up",
-			check.Item{ID: "arq:none", Name: "Set up Arq's backup plan", State: steps.Problem, Detail: "Open Arq, sign in to your Arq account, and adopt this Mac's plan", ToDo: &arqPlan}},
-		{"agent not answering", "Error: couldn't connect to the agent\n", "status unreadable",
-			check.Item{ID: "arq:unreadable", Name: "couldn't read Arq's status", State: steps.Problem, Detail: "open Arq: is its agent running? If it complains, restart the Mac"}},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			fake := runnertest.New(t)
-			fake.On(steps.Arqc, "stats").Exits(1).PrintsToStderr(tt.stderr)
-			res := steps.Arq(fake, now).Check(t.Context())
-			if res.State != check.Attention || res.Summary != tt.text || len(res.Items) != 1 || !reflect.DeepEqual(res.Items[0], tt.item) {
-				t.Errorf("= %+v\nwant %s, %+v", res, tt.text, tt.item)
-			}
-		})
+	res = steps.Backup(runnertest.New(t), fakeTool{err: errors.New("couldn't read Vault's settings")}, now).Check(t.Context())
+	if res.State != check.Failed || res.Reason != "couldn't read Vault's settings" {
+		t.Errorf("unread: %+v, want failed, saying why", res)
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/leeovery/kit/internal/backup"
 	"github.com/leeovery/kit/internal/boot"
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/engine"
@@ -49,7 +50,7 @@ func TestEveryStepHasARow(t *testing.T) {
 	made = slices.Concat(made, []engine.Step{
 		steps.PathFile(nil, ""), steps.OhMyZsh(fake, home),
 		steps.TouchIDSudo(fake, admin, ""), steps.RemoteLogin(fake, admin), steps.FileSharing(fake, admin),
-		steps.TimeMachine(fake, never), steps.Arq(fake, never), steps.Prefs(nil, never), steps.FullDiskAccess(home),
+		steps.Prefs(nil, never), steps.FullDiskAccess(home),
 		steps.Scratch(fake, admin, "", home, 501, nil),
 		steps.ConfigEdits(gitrepo.Repo{}), steps.ConfigSync(fake, "", never), steps.ConfigPrivate(fake, ""),
 		steps.Disk(fake), steps.Memory(fake), steps.FileEvents(fake), steps.Load(fake, never),
@@ -58,6 +59,9 @@ func TestEveryStepHasARow(t *testing.T) {
 		steps.ScriptStep(fake, admin, steps.Script{Name: "fonts"}), steps.BrokenScript(config.Entry{Name: "gpg-key"}, errors.New("unread")),
 		nightly.Check(nil, true, true, state, never),
 	})
+	for _, d := range backup.Tools {
+		made = append(made, steps.Backup(fake, d, never))
+	}
 	// kit.toml naming a terminal, the boot makes every step it has.
 	booted := (&boot.Boot{Config: configDir}).Booted()
 	if !slices.ContainsFunc(booted, func(s engine.Step) bool { return s.Name == "boot-"+boot.TerminalStep }) {

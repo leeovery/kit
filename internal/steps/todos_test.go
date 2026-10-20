@@ -21,25 +21,12 @@ import (
 	"github.com/leeovery/kit/internal/steps"
 )
 
-// arqPlan is Arq's to-do, never set up, in kit's words.
-var arqPlan = check.ToDo{
-	Title: "Set up Arq's backup plan",
-	Why:   "Arq is in, but has nothing to back up to yet.",
-	Steps: []string{"Open Arq", "Sign in to your Arq account", "Adopt this Mac's plan, and let it run"},
-	Watch: "Arq has a plan",
-	Group: "Backups",
-}
-
 // kit's own to-dos are its checks' items, in its words, one wording
 // wherever they show: the to-do's title the item's name, how to do it in a
 // line its detail; then why, its steps, what kit watches for and its group;
 // apps' settings a choice, of bringing them back or starting afresh, that
-// comes first.
+// comes first. The backup tools' are their drivers', tested with them.
 func TestKitsOwnToDos(t *testing.T) {
-	tm := runnertest.New(t)
-	tm.On("defaults", "export", "/Library/Preferences/com.apple.TimeMachine", "-").Exits(1).PrintsToStderr("file does not exist")
-	arq := runnertest.New(t)
-	arq.On(steps.Arqc, "stats").Prints(`{"backupPlans": []}`)
 	state := t.TempDir()
 	if err := os.WriteFile(filepath.Join(state, "prefs.json"), []byte(`{}`), 0o600); err != nil {
 		t.Fatal(err)
@@ -49,19 +36,6 @@ func TestKitsOwnToDos(t *testing.T) {
 		step engine.Step
 		want check.Item
 	}{
-		{steps.TimeMachine(tm, now), check.Item{
-			ID: "time-machine:none", Name: "Add a Time Machine disk", State: steps.Problem,
-			Detail: "Plug in your backup disk, then System Settings › General › Time Machine › Add Backup Disk",
-			ToDo: &check.ToDo{
-				Title: "Add a Time Machine disk",
-				Why:   "Time Machine has nowhere to back up to.",
-				Steps: []string{"Plug in your backup disk", "System Settings › General › Time Machine › Add Backup Disk, and choose it"},
-				Watch: "Time Machine has a disk",
-				Group: "Backups",
-			}}},
-		{steps.Arq(arq, now), check.Item{
-			ID: "arq:none", Name: "Set up Arq's backup plan", State: steps.Problem,
-			Detail: "Open Arq, sign in to your Arq account, and adopt this Mac's plan", ToDo: &arqPlan}},
 		{steps.Prefs(settings, now), check.Item{
 			ID: "prefs:paused", Name: "Bring back apps' settings", State: steps.Problem,
 			Detail: "kit prefs restore, or kit prefs start-fresh",
