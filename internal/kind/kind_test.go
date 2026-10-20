@@ -795,6 +795,36 @@ func TestAnInstallWaitingItsTurn(t *testing.T) {
 	}
 }
 
+// A command that counts nothing, watched, says what it's doing; printing
+// nothing for a while, the run's log is told once, naming its last line,
+// and the step says since when, till it prints again; the lines still
+// reach what read them before.
+func TestAWatchedCommandGoingQuietIsNoted(t *testing.T) {
+	defer kind.SetQuiet(20*time.Millisecond, 2*time.Millisecond)()
+	var said []string
+	var logged []event.Logged
+	var mu sync.Mutex
+	ctx := event.WithSaying(context.Background(), func(d event.Doing) { mu.Lock(); said = append(said, d.Says); mu.Unlock() })
+	ctx = event.WithLogging(ctx, func(l event.Logged) { mu.Lock(); logged = append(logged, l); mu.Unlock() })
+	var read []string
+	cmd, stop := kind.Watch(ctx, "uninstalling", runner.Command{Name: "brew", Lines: func(l string) { read = append(read, l) }})
+	cmd.Lines("==> Uninstalling Cask zoom")
+	time.Sleep(100 * time.Millisecond)
+	cmd.Lines("==> Removing files")
+	stop()
+	mu.Lock()
+	defer mu.Unlock()
+	if len(logged) != 1 || !logged[0].Alert || !strings.HasPrefix(logged[0].Line, "brew has said nothing since ") || !strings.HasSuffix(logged[0].Line, "; its last line: ==> Uninstalling Cask zoom") {
+		t.Errorf("logged %+v, want one alert naming the last line", logged)
+	}
+	if len(said) != 3 || said[0] != "uninstalling" || !strings.HasPrefix(said[1], "uninstalling · nothing since ") || said[2] != "uninstalling" {
+		t.Errorf("the step said %q, want what it's doing, quiet since a time, then what it's doing again", said)
+	}
+	if len(read) != 2 {
+		t.Errorf("what read the lines before read %q", read)
+	}
+}
+
 // slowTurnKind is a countingKind whose install waits its turn behind
 // another's step for a while before it runs.
 type slowTurnKind struct {

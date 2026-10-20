@@ -21,7 +21,6 @@ import (
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/engine"
-	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/runner"
 )
@@ -248,8 +247,10 @@ func (h *Homebrew) ready(ctx context.Context, kindName string, names []string) e
 	defer h.take(ctx, kindName)()
 	var errs []error
 	for _, tap := range taps {
-		event.Say(ctx, event.Doing{Says: "tapping " + tap})
-		if _, err := h.brew(ctx, "tap", tap); err != nil {
+		cmd, unwatch := kind.Watch(ctx, "tapping "+tap, h.batched(runner.Command{Name: "brew", Args: []string{"tap", tap}}))
+		_, err := h.run.Run(ctx, cmd)
+		unwatch()
+		if err != nil {
 			errs = append(errs, fmt.Errorf("couldn't tap %s: %w", tap, err))
 		}
 	}
@@ -262,7 +263,7 @@ func (h *Homebrew) ready(ctx context.Context, kindName string, names []string) e
 // updates it, that it waits for that (kind.Saying).
 func (h *Homebrew) updated(ctx context.Context) error {
 	if !h.update.mu.TryLock() {
-		resume := kind.Saying(ctx, "waiting for Homebrew's update")
+		resume := kind.Waiting(ctx, "Homebrew's update")
 		h.update.mu.Lock()
 		resume()
 	}
@@ -390,10 +391,13 @@ func named(said string, names []string) (string, bool) {
 }
 
 // uninstall runs brew uninstall of names, the kind named kindName's, with
-// which says what they are.
+// which says what they are, watched for going quiet (kind.Watch), as it
+// holds Homebrew's turn: a kind waiting for it is never quiet itself.
 func (h *Homebrew) uninstall(ctx context.Context, kindName, which string, names []string) error {
 	defer h.take(ctx, kindName)()
-	_, err := h.run.Run(ctx, h.sudoed(ctx, h.batched(runner.Command{Name: "brew", Args: slices.Concat([]string{"uninstall", which}, names)})))
+	cmd, unwatch := kind.Watch(ctx, "uninstalling", h.sudoed(ctx, h.batched(runner.Command{Name: "brew", Args: slices.Concat([]string{"uninstall", which}, names)})))
+	defer unwatch()
+	_, err := h.run.Run(ctx, cmd)
 	return err
 }
 

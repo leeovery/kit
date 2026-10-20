@@ -328,6 +328,9 @@ func TestApplyingCountsTheFormulae(t *testing.T) {
 	if err := s.Apply(ctx, s.Check(ctx)); err != nil {
 		t.Fatal(err)
 	}
+	if i := slices.IndexFunc(fake.Commands(), func(c runner.Command) bool { return c.String() == "brew tap owner/tap" }); i < 0 || fake.Commands()[i].Lines == nil {
+		t.Error("the tap, holding Homebrew's turn, isn't watched for going quiet")
+	}
 	half := func(done int) float64 { return float64(done) / 3.0 / 2 }
 	want := []event.Doing{
 		{Says: "tapping owner/tap"},
@@ -647,6 +650,13 @@ func TestRemove(t *testing.T) {
 	}
 	if err := h.Casks().Remove(context.Background(), []string{"zoom"}); err == nil || !strings.Contains(err.Error(), "required by something") {
 		t.Errorf("Remove(zoom) error = %v, want Homebrew's refusal", err)
+	}
+	// Each holds Homebrew's turn, so each is watched for going quiet, as an
+	// install is.
+	for _, c := range fake.Commands() {
+		if c.Lines == nil {
+			t.Errorf("%s isn't watched", c)
+		}
 	}
 }
 

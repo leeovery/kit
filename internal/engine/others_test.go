@@ -152,35 +152,41 @@ func TestAStepWorksOnTheRunsOthers(t *testing.T) {
 	}
 }
 
-// A step can count how many of the run's steps wait on another: those that
-// need it, come after it, by their own After or its Before, or wait for it
-// or one of its things, partway or not, and those waiting on them in turn,
-// each once, a step waiting back on it not counting it. Outside a run, none.
+// A step can count how many of the run's steps not finished yet wait on
+// another: those that need it, come after it, by their own After or its
+// Before, or wait for it or one of its things, partway or not, and those
+// waiting on them in turn, each once, a step waiting back on it not
+// counting it; a finished step waits on nothing, so neither does what came
+// after it through it. Outside a run, none.
 func TestAStepCountsWhatWaitsOnAnother(t *testing.T) {
 	ready := func(context.Context) bool { return true }
 	held := map[string]int{}
+	needed := func(context.Context) check.Result {
+		return check.Result{State: check.Attention, Items: []check.Item{{ID: "signin:it", Name: "it", State: "missing", Action: "install"}}}
+	}
 	steps := []engine.Step{
-		{Name: "signin", Check: ok("fine"), Before: []string{"secret"}},
+		// Finished before the sign-in's applied, though it waits on the
+		// secrets partway.
+		{Name: "apps", Check: ok("fine"), Later: []engine.Wait{{Step: "secret"}}},
+		{Name: "signin", Check: needed, After: []string{"apps"}, Before: []string{"secret"}, Apply: func(ctx context.Context, _ check.Result) error {
+			for _, s := range []string{"signin", "secret", "apps", "alone", "nothing"} {
+				held[s] = engine.Holding(ctx, s)
+			}
+			return nil
+		}},
 		{Name: "secret", Check: ok("fine"), Later: []engine.Wait{{Step: "signin"}}},
 		{Name: "git", Check: ok("fine"), After: []string{"secret"}},
 		{Name: "tool", Check: ok("fine"), Waits: []engine.Wait{{Step: "secret", Thing: "TOKEN", Ready: ready}}, Needs: []string{"git"}},
-		{Name: "store", Check: ok("fine"), Before: []string{"apps"}, Later: []engine.Wait{{Step: "apps"}}},
-		{Name: "apps", Check: ok("fine"), Later: []engine.Wait{{Step: "secret"}}},
 		{Name: "alone", Check: ok("fine"), Waits: []engine.Wait{{Thing: "a program", Ready: ready}}},
 	}
-	steps = append(steps, lastStep(nil, func(ctx context.Context) {
-		for _, s := range []string{"signin", "secret", "store", "apps", "alone", "nothing"} {
-			held[s] = engine.Holding(ctx, s)
-		}
-	}))
 	p, err := engine.New(steps...)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := p.Apply(t.Context(), &recorder{}, engine.Options{}); err != nil {
+	if _, err := p.Apply(t.Context(), &recorder{}, engine.Options{Jobs: 1}); err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]int{"signin": 5, "secret": 4, "store": 1, "apps": 1, "alone": 0, "nothing": 0}
+	want := map[string]int{"signin": 3, "secret": 2, "apps": 4, "alone": 0, "nothing": 0}
 	if !maps.Equal(held, want) {
 		t.Errorf("held %v; want %v", held, want)
 	}

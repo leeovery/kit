@@ -131,12 +131,12 @@ func (p *Pretty) raise(e event.NeedsYou) {
 	if p.card != nil && cardID(p.card.Step, p.card.Item) != id {
 		p.lower(e.Time, nil)
 	}
-	since, back := p.asides[id]
+	aside, back := p.asides[id]
 	delete(p.asides, id)
 	switch {
 	case p.card != nil:
 	case back:
-		p.cardSince = since
+		p.cardSince = aside.since
 	default:
 		p.cardSince = p.stamp(e.Time)
 		if !p.listing(e.Step) {
@@ -154,8 +154,25 @@ func (p *Pretty) setAside(step string) {
 	if !p.carded(step) || p.listing(step) {
 		return
 	}
-	p.asides[cardID(p.card.Step, p.card.Item)] = p.cardSince
+	p.asides[cardID(p.card.Step, p.card.Item)] = upCard{card: *p.card, since: p.cardSince}
 	p.card = nil
+}
+
+// upCard is a card that came up, and when it first did.
+type upCard struct {
+	card  event.NeedsYou
+	since time.Time
+}
+
+// lowerAside takes down the cards set aside of f's step, finished, as lower
+// takes the card up down: done meanwhile, or left to do.
+func (p *Pretty) lowerAside(f event.StepFinished) {
+	for id, a := range p.asides {
+		if a.card.Step == f.Step {
+			delete(p.asides, id)
+			p.noteDown(a.card, a.since, f.Time, &f)
+		}
+	}
 }
 
 // listing is whether step's to-dos are being worked through, one up.
@@ -206,13 +223,19 @@ func (p *Pretty) workThrough(e event.ToDos) {
 func (p *Pretty) lower(at time.Time, finished *event.StepFinished) {
 	c := *p.card
 	p.card = nil
+	p.noteDown(c, p.cardSince, at, finished)
+}
+
+// noteDown has the log say card c, up since since, came down at at, as
+// lower says.
+func (p *Pretty) noteDown(c event.NeedsYou, since, at time.Time, finished *event.StepFinished) {
 	at, row := p.stamp(at), p.rowOf(c.Step)
 	switch {
 	case finished != nil && wasStopped(*finished):
 	case finished != nil && stillToDo(finished.Result, c.Item):
 		p.note(at, row, look.Mark(look.ToDo), look.White(c.Title+": not done"))
 	default:
-		p.note(at, row, look.Mark(look.Done), look.White(c.Title+": done, in "+took(at.Sub(p.cardSince))))
+		p.note(at, row, look.Mark(look.Done), look.White(c.Title+": done, in "+took(at.Sub(since))))
 	}
 }
 

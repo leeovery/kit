@@ -340,8 +340,9 @@ func TestTheToDosInASmallWindow(t *testing.T) {
 
 // With a to-do up, a choice's keys answer it, and space doesn't; space
 // says one kit can't tell about is done, and nothing of one it tells
-// about; tab chooses no row, as the to-dos have the left pane; Stop stops
-// there, the run carrying on, but stops the run once they're over.
+// about; tab chooses no row, as the to-dos have the left pane, nor moves on
+// from the to-do up, though more come after it; Stop stops there, the run
+// carrying on, but stops the run once they're over.
 func TestTheToDosKeys(t *testing.T) {
 	for _, tt := range []struct {
 		name  string

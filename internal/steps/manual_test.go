@@ -562,13 +562,157 @@ func TestCardsComeUpByWhatWaitsOnThem(t *testing.T) {
 	}
 }
 
+// upNow waits till the card up, as the events last say, is item's.
+func (c *card) upNow(t *testing.T, item string) {
+	t.Helper()
+	for range 5000 {
+		c.sink.mu.Lock()
+		last := ""
+		for _, e := range c.sink.seen {
+			if card, ok := e.(event.NeedsYou); ok {
+				last = card.Item
+			}
+		}
+		c.sink.mu.Unlock()
+		if last == item {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("%s's card never went up", item)
+}
+
+// ups are the cards that went up, by item, in order, one put up again
+// straight after itself counted once.
+func (c *card) ups() []string {
+	var out []string
+	for _, turn := range c.turns() {
+		if f := strings.Fields(turn); f[0] == "up" && (len(out) == 0 || out[len(out)-1] != f[1]) {
+			out = append(out, f[1])
+		}
+	}
+	return out
+}
+
+// finishedAt is where the step called step finishing is among the events,
+// -1 for not yet.
+func (c *card) finishedAt(step string) int {
+	c.sink.mu.Lock()
+	defer c.sink.mu.Unlock()
+	return slices.IndexFunc(c.sink.seen, func(e event.Event) bool {
+		f, ok := e.(event.StepFinished)
+		return ok && f.Step == step
+	})
+}
+
+// storeAndVault is a run whose store's sign-in comes due first, holding up
+// the App Store's apps; then, once gate's closed, the vault's, holding up
+// more: the secrets, and what waits on them. vault is the vault's line.
+func storeAndVault(c *card, gate <-chan struct{}, vault steps.ManualStep) *engine.Pipeline {
+	store := steps.OwnManual(c.fake, c.state, steps.ManualStep{Name: "store", Do: "Sign in to the store"}, c.raise)
+	store.Before = []string{"apps"}
+	v := steps.OwnManual(c.fake, c.state, vault, c.raise)
+	v.After, v.Before = []string{"cask"}, []string{"secret"}
+	p, err := engine.New(store, v, gated("cask", gate), fine("apps"), fine("secret"), fine("git", "secret"), fine("tool", "git"))
+	if err != nil {
+		panic(err)
+	}
+	return p
+}
+
+// A card coming due that more waits on, found done as its turn comes,
+// leaves the line at once, and the card it set aside goes up again: none is
+// lost, its run carrying on.
+func TestACardSetAsideComesBackWhenTheOneBeforeItIsDone(t *testing.T) {
+	defer steps.SetManualPoll(time.Hour)()
+	for range 50 {
+		c := newCard(t)
+		gate := make(chan struct{})
+		// Its check finds it not done; done by the time its turn comes.
+		c.fake.On("test", "-f", "/signed-in").Exits(1).Then()
+		ran := running(t, c, storeAndVault(c, gate, steps.ManualStep{Name: "vault", Do: "Sign in to the vault", Command: &runner.Command{Name: "test", Args: []string{"-f", "/signed-in"}}}))
+		c.upNow(t, "store")
+		close(gate)
+		c.cards(t, 2)
+		c.answer(t, "store", hand.Done)
+		over(t, ran)
+		want := []string{"queued store", "up store 0", "queued vault", "queued store", "up store 0"}
+		if got := c.turns(); !slices.Equal(got, want) {
+			t.Fatalf("turns %q, want %q", got, want)
+		}
+	}
+}
+
+// Tab moving on to a card found done meanwhile, the card left goes up
+// again at once.
+func TestTabToACardDoneMeanwhile(t *testing.T) {
+	defer steps.SetManualPoll(time.Hour)()
+	for range 50 {
+		c := newCard(t)
+		gate := make(chan struct{})
+		ran := running(t, c, storeAndVault(c, gate, steps.ManualStep{Name: "vault", Do: "Sign in to the vault"}))
+		c.upNow(t, "store")
+		close(gate)
+		c.upNow(t, "vault")
+		if err := steps.MarkDone(c.state, []string{"store"}, time.Now(), false); err != nil {
+			t.Fatal(err)
+		}
+		c.answer(t, "vault", hand.Next)
+		c.cards(t, 3)
+		c.answer(t, "vault", hand.Done)
+		over(t, ran)
+		want := []string{"queued store", "up store 0", "queued vault", "queued store", "up vault 1", "queued vault", "up vault 0"}
+		if got := c.turns(); !slices.Equal(got, want) {
+			t.Fatalf("turns %q, want %q", got, want)
+		}
+	}
+}
+
+// A card set aside is still looked at every few seconds: done meanwhile,
+// it leaves the line, its step finishing and what waits on it carrying on
+// at once, while the card up stays up, counting one fewer after it.
+func TestACardSetAsideDoneMeanwhile(t *testing.T) {
+	defer steps.SetManualPoll(5 * time.Millisecond)()
+	c := newCard(t)
+	gate := make(chan struct{})
+	ran := running(t, c, storeAndVault(c, gate, steps.ManualStep{Name: "vault", Do: "Sign in to the vault"}))
+	c.upNow(t, "store")
+	close(gate)
+	c.upNow(t, "vault")
+	if err := steps.MarkDone(c.state, []string{"store"}, time.Now(), false); err != nil {
+		t.Fatal(err)
+	}
+	for range 5000 {
+		if c.finishedAt("apps") >= 0 {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if c.finishedAt("apps") < 0 {
+		t.Fatal("the App Store's apps were still held with the store's sign-in done")
+	}
+	c.answer(t, "vault", hand.Done)
+	report := over(t, ran)
+	want := []string{"queued store", "up store 0", "queued vault", "queued store", "up vault 1", "up vault 0"}
+	if got := c.turns(); !slices.Equal(got, want) {
+		t.Errorf("turns %q, want %q", got, want)
+	}
+	if report.Results["store"].State != check.OK {
+		t.Errorf("the store's sign-in stands %+v; want it done", report.Results["store"])
+	}
+}
+
 // The to-dos at the run's end are held: one up stays up till it's done,
 // though a card more of the run waits on comes due meanwhile, and tab
-// doesn't move on from it.
+// doesn't move on from it. That card goes up once the to-do up is done,
+// before the next to-do, as it holds up the run.
 func TestAToDoUpStaysUp(t *testing.T) {
 	c := newCard(t)
 	gate := make(chan struct{})
-	list := config.List{Entries: []config.Entry{{Name: "printer", Value: `"Add the printer"`, Scope: "laptop", Line: 2}}}
+	list := config.List{Entries: []config.Entry{
+		{Name: "printer", Value: `"Add the printer"`, Scope: "laptop", Line: 2},
+		{Name: "scanner", Value: `"Add the scanner"`, Scope: "laptop", Line: 3},
+	}}
 	vault := steps.OwnManual(c.fake, c.state, steps.ManualStep{Name: "vault", Do: "Sign in to the vault"}, c.raise)
 	vault.After, vault.Before = []string{"cask"}, []string{"secret"}
 	p, err := engine.New(steps.Manual(c.fake, "/home/someone", c.state, list, c.raise), vault, gated("cask", gate), fine("secret"), fine("git", "secret"))
@@ -576,18 +720,22 @@ func TestAToDoUpStaysUp(t *testing.T) {
 		t.Fatal(err)
 	}
 	ran := running(t, c, p)
-	c.cards(t, 1)
+	c.upNow(t, "printer")
 	close(gate)
 	c.cards(t, 2)
 	c.answer(t, steps.ManualName, hand.Next)
 	c.answer(t, steps.ManualName, hand.Done)
-	c.cards(t, 3)
+	c.upNow(t, "vault")
 	c.answer(t, "vault", hand.Done)
+	c.upNow(t, "scanner")
+	c.answer(t, steps.ManualName, hand.Done)
 	over(t, ran)
 
-	want := []string{"queued manual", "up printer 0", "queued vault", "up printer 1", "up vault 0"}
-	if got := c.turns(); !slices.Equal(got, want) {
-		t.Errorf("turns %q, want %q", got, want)
+	if got := c.turns()[:4]; !slices.Equal(got, []string{"queued manual", "up printer 1", "queued vault", "up printer 2"}) {
+		t.Errorf("turns start %q; want the printer's to-do up, the vault's card waiting after it", got)
+	}
+	if got, want := c.ups(), []string{"printer", "vault", "scanner"}; !slices.Equal(got, want) {
+		t.Errorf("cards up %q, want %q", got, want)
 	}
 }
 

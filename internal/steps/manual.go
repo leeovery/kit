@@ -293,11 +293,11 @@ type Raise struct {
 	Notify Notifier
 	Desk   *hand.Desk
 
-	// mu guards the line, the first's turn it is, and the card up, once
-	// it's shown (shown).
+	// mu guards the line, the first's turn it is; and the card up, and
+	// whose it is (shown), nil while none is.
 	mu    sync.Mutex
 	line  []*place
-	shown bool
+	shown *place
 	card  event.NeedsYou
 }
 
@@ -350,98 +350,95 @@ type Notifier interface {
 // whether it's done.
 var manualPoll = 3 * time.Second
 
-// errAside is why a card came down without being done: another card has
-// its turn, and it waits for its turn again.
-var errAside = errors.New("set aside")
-
-// up puts c's card up for the step called step once it's the card's turn,
-// taking its place in the line as s says, unless it's been done meanwhile;
-// then waits till it's done, the step's job given up meanwhile, for other
-// steps to go on (engine.Release). Set aside, it waits for its turn again.
-// It returns what kit saw as it was done, in words, if it has some;
-// errStopHere when the person stopped where they were.
+// up puts c's card up for the step called step whenever it's the card's
+// turn, taking its place in the line as s says, and waits till it's done,
+// the step's job given up meanwhile, for other steps to go on
+// (engine.Release). Each time it wakes it looks at everything afresh: its
+// turn come and its card not up, it looks whether it's done, and if not
+// puts its card up; every few seconds, up or set aside, it looks whether
+// it's done; and it takes the person's answers. Done, it leaves the line,
+// the next card's turn coming. It returns what kit saw as it was done, in
+// words, if it has some; errStopHere when the person stopped where they
+// were.
 func (r *Raise) up(ctx context.Context, step string, c raised, s seat) (string, error) {
 	defer engine.Release(ctx)()
 	r.Sink.Emit(event.Doing{Time: r.Now(), Step: step, Says: event.Queued})
 	pl := r.join(step, s)
 	defer r.leave(pl)
 	defer r.unnotify(ctx, pl)
-	for {
-		if err := r.turn(ctx, pl); err != nil {
-			return "", err
-		}
-		if ok, saw := c.done(ctx); ok {
-			return saw, nil
-		}
-		saw, err := r.hold(ctx, pl, c)
-		if !errors.Is(err, errAside) {
-			return saw, err
-		}
-	}
-}
-
-// hold puts c's card up for pl's step and waits till it's done, looking
-// every few seconds as well as at each answer; or till another card has
-// its turn: errAside.
-func (r *Raise) hold(ctx context.Context, pl *place, c raised) (string, error) {
-	answers, down := r.Desk.Listen(pl.step)
+	answers, down := r.Desk.Listen(step)
 	defer down()
-	if !r.show(ctx, pl, c.card(ctx)) {
-		return "", errAside
-	}
-	if o, ok := c.(opener); ok {
-		o.open(ctx)
-	}
 	// Looking every few seconds finds it done by its command or its check,
 	// or marked done elsewhere, as by kit manual done in another window.
 	tick := time.NewTicker(manualPoll)
 	defer tick.Stop()
 	for {
+		if r.due(pl) {
+			if ok, saw := c.done(ctx); ok {
+				return saw, nil
+			}
+			r.show(ctx, pl, c)
+		}
 		select {
 		case <-ctx.Done():
 			return "", ctx.Err()
 		case <-pl.moved:
-			if !r.has(pl) {
-				return "", errAside
-			}
 		case <-tick.C:
 			if ok, saw := c.done(ctx); ok {
 				return saw, nil
 			}
 		case a := <-answers:
-			switch a {
-			case hand.Stop:
-				return "", errStopHere
-			case hand.Next:
-				r.next(pl)
-				continue
-			}
-			if ok, saw, err := c.answer(ctx, a, r.Now()); ok || err != nil {
+			if saw, ok, err := r.answered(ctx, pl, c, a); ok || err != nil {
 				return saw, err
 			}
 		}
 	}
 }
 
-// show puts card up for pl's step, when it's still pl's turn, reporting
-// whether it did: its More counting the cards waiting after it, its step's
-// own and those in the line; a notification posted the first time.
-func (r *Raise) show(ctx context.Context, pl *place, card event.NeedsYou) bool {
+// answered is what the person's answer to pl's card does: Stop stops where
+// they are (errStopHere); Next moves on to the next card waiting; the rest
+// are c's to answer, reporting whether it's done, and what kit saw.
+func (r *Raise) answered(ctx context.Context, pl *place, c raised, a hand.Answer) (string, bool, error) {
+	switch a {
+	case hand.Stop:
+		return "", false, errStopHere
+	case hand.Next:
+		r.next(pl)
+		return "", false, nil
+	}
+	ok, saw, err := c.answer(ctx, a, r.Now())
+	return saw, ok, err
+}
+
+// due reports whether it's pl's turn and its card isn't up.
+func (r *Raise) due(pl *place) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.hasLocked(pl) && r.shown != pl
+}
+
+// show puts c's card up for pl's step, when it's still pl's turn: its More
+// counting the cards waiting after it, its step's own and those in the
+// line; a notification posted, and its app opened, the first time.
+func (r *Raise) show(ctx context.Context, pl *place, c raised) {
+	card := c.card(ctx)
 	card.Step = pl.step
 	r.mu.Lock()
 	if !r.hasLocked(pl) {
 		r.mu.Unlock()
-		return false
+		return
 	}
 	card.Time, card.More = r.Now(), pl.after+len(r.line)-1
-	r.card, r.shown = card, true
+	r.card, r.shown = card, pl
 	r.Sink.Emit(card)
 	r.mu.Unlock()
 	if r.Notify != nil && pl.notified == "" {
 		pl.notified = card.Item
 		r.Notify.Notify(ctx, noticeID(pl.step, card.Item), card.Title, notice(card))
 	}
-	return true
+	if o, ok := c.(opener); ok {
+		o.open(ctx)
+	}
 }
 
 // unnotify takes the notification of pl's card away, once it's down: done,
@@ -466,26 +463,7 @@ func notice(card event.NeedsYou) string {
 	return "kit waits for you to do this"
 }
 
-// turn waits for pl's turn: what's done with the run stopped meanwhile.
-func (r *Raise) turn(ctx context.Context, pl *place) error {
-	for !r.has(pl) {
-		select {
-		case <-pl.moved:
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
-	return nil
-}
-
-// has reports whether it's pl's turn.
-func (r *Raise) has(pl *place) bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.hasLocked(pl)
-}
-
-// hasLocked is has, mu held.
+// hasLocked reports whether it's pl's turn. mu is held.
 func (r *Raise) hasLocked(pl *place) bool { return len(r.line) > 0 && r.line[0] == pl }
 
 // join gives a card for step its place in the line, as s says, the card up
@@ -544,11 +522,11 @@ func (r *Raise) leave(pl *place) {
 		return
 	}
 	r.line = slices.Delete(r.line, i, i+1)
-	if i == 0 {
-		r.shown = false
-		if len(r.line) > 0 {
-			r.line[0].poke()
-		}
+	if r.shown == pl {
+		r.shown = nil
+	}
+	if i == 0 && len(r.line) > 0 {
+		r.line[0].poke()
 	}
 	r.recount()
 }
@@ -558,8 +536,8 @@ func (r *Raise) leave(pl *place) {
 // held.
 func (r *Raise) setAside() {
 	up := r.line[0]
-	if r.shown {
-		r.shown = false
+	if r.shown == up {
+		r.shown = nil
 		r.Sink.Emit(event.Doing{Time: r.Now(), Step: up.step, Says: event.Queued})
 	}
 	up.poke()
@@ -568,10 +546,10 @@ func (r *Raise) setAside() {
 // recount puts the card up up again when how many wait after it has
 // changed. mu is held.
 func (r *Raise) recount() {
-	if !r.shown {
+	if r.shown == nil {
 		return
 	}
-	if more := r.line[0].after + len(r.line) - 1; more != r.card.More {
+	if more := r.shown.after + len(r.line) - 1; more != r.card.More {
 		r.card.Time, r.card.More = r.Now(), more
 		r.Sink.Emit(r.card)
 	}

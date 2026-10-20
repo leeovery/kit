@@ -259,7 +259,9 @@ order they came: one coming due that more waits on goes up in place of the card 
 its turn again, as a password manager's sign-in, which the secrets and everything after them
 wait for, comes before the App Store's. While another waits, `tab` moves on to it, the card up
 staying to do and coming back after (the card says so, and tab then chooses no row); the
-to-dos at the run's end are never moved on from. A line with `--before` is a step of its own, raised mid-run once what it comes
+to-dos at the run's end are never moved on from. A card waiting its turn is still looked at
+every few seconds: done meanwhile, it's done, the log says so, and what it held up carries
+on at once. A line with `--before` is a step of its own, raised mid-run once what it comes
 after is in, as the steps it comes before wait for it; the rest, `--after` alone only ordering
 them, come up at the run's end, after every other step, with the to-dos kit's own checks left
 (Checks). That end is a list worked through one to-do at a time, in kit's order, with no choosing
@@ -645,7 +647,9 @@ step failed, with the error; the run finishing, with its summary. Faces subscrib
   up, each row saying what its steps are doing, then what's for later (with done's mark, as is
   its line in the log: nothing's to do till the end, where the to-dos take the to-do mark); a
   step at work that's printed nothing for two minutes says since when, and the log is told,
-  but never a step waiting its turn, which says only what it waits for; on the right the log,
+  but never a step waiting its turn, which says only what it waits for, while whatever holds
+  the turn is watched (Homebrew's update, an install, an uninstall, a tap); on the right the
+  log,
   every line of the run with its time, or a row's lines alone once it's chosen (tab or a
   click; esc for all), scrolled back and followed again, with a step by hand's card above it
   while it's up. In a terminal whose driver says it shows progress on its tab (Ghostty's),

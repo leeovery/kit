@@ -745,6 +745,18 @@ func watchQuiet(ctx context.Context) (stop func()) {
 	if !ok {
 		return func() {}
 	}
+	return watching(p)
+}
+
+// hushing is a command's output, watched for going quiet: hush notes it
+// quiet once it's printed nothing for after.
+type hushing interface {
+	hush(after time.Duration)
+}
+
+// watching looks every so often whether h has gone quiet, till the func it
+// returns is called.
+func watching(h hushing) (stop func()) {
 	done := make(chan struct{})
 	after, tick := quietAfter, time.NewTicker(quietLook)
 	go func() {
@@ -754,11 +766,77 @@ func watchQuiet(ctx context.Context) (stop func()) {
 			case <-done:
 				return
 			case <-tick.C:
-				p.hush(after)
+				h.hush(after)
 			}
 		}
 	}()
 	return func() { close(done) }
+}
+
+// quietSince is what the run's log is told of program, quiet since heard:
+// since when, and the last line it printed, if any.
+func quietSince(program string, heard time.Time, last string) string {
+	said := "it's printed nothing yet"
+	if last != "" {
+		said = "its last line: " + last
+	}
+	return fmt.Sprintf("%s has said nothing since %s; %s", program, heard.Format("15:04:05"), said)
+}
+
+// Watch has cmd, a command of a kind's that counts nothing, as an uninstall
+// or a tap, watched for going quiet as an install is: printing nothing for
+// a while, the run's log is told, naming its last line, and the step
+// saying says says since when, till it prints again. It returns cmd
+// reading its lines, and what ends the watch.
+func Watch(ctx context.Context, says string, cmd runner.Command) (watched runner.Command, stop func()) {
+	l := &listening{ctx: ctx, program: cmd.Name, says: says, heard: time.Now()}
+	if lines := cmd.Lines; lines != nil {
+		cmd.Lines = func(line string) {
+			l.line(line)
+			lines(line)
+		}
+	} else {
+		cmd.Lines = l.line
+	}
+	event.Say(ctx, event.Doing{Says: says})
+	return cmd, watching(l)
+}
+
+// listening is a command Watch watches: what its step says it's doing;
+// when it last printed a line, and that line; and whether it's quiet.
+type listening struct {
+	ctx           context.Context
+	program, says string
+
+	mu    sync.Mutex
+	heard time.Time
+	last  string
+	quiet bool
+}
+
+// line reads a line the command printed: heard, it's no longer quiet.
+func (l *listening) line(line string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.heard = time.Now()
+	if s := strings.TrimSpace(line); s != "" {
+		l.last = s
+	}
+	if l.quiet {
+		l.quiet = false
+		event.Say(l.ctx, event.Doing{Says: l.says})
+	}
+}
+
+func (l *listening) hush(after time.Duration) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.quiet || time.Since(l.heard) < after {
+		return
+	}
+	l.quiet = true
+	event.Log(l.ctx, event.Logged{Line: quietSince(l.program, l.heard, l.last), Alert: true})
+	event.Say(l.ctx, event.Doing{Says: l.says + " · nothing since " + l.heard.Format("15:04")})
 }
 
 // hush notes the install quiet, once it's printed nothing for after: the
@@ -771,11 +849,7 @@ func (p *progress) hush(after time.Duration) {
 		return
 	}
 	p.quiet = true
-	last := "it's printed nothing yet"
-	if p.last != "" {
-		last = "its last line: " + p.last
-	}
-	event.Log(p.ctx, event.Logged{Line: fmt.Sprintf("%s has said nothing since %s; %s", p.program, p.heard.Format("15:04:05"), last), Alert: true})
+	event.Log(p.ctx, event.Logged{Line: quietSince(p.program, p.heard, p.last), Alert: true})
 	p.say()
 }
 

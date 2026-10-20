@@ -824,6 +824,56 @@ func TestApplyingCardsTakeTurns(t *testing.T) {
 	}
 }
 
+// A card set aside and done meanwhile, its step finishing, is done: the log
+// says so, how long since it first came up, the card up staying up; raised
+// again later, it's a card come up afresh, the log saying it waits for you
+// once more, its time from then.
+func TestApplyingCardDoneWhileSetAside(t *testing.T) {
+	steps := []event.Step{
+		{Name: "appstore", Title: "appstore", Area: "Manual", ByHand: []event.Hand{{Name: "appstore", Title: "Sign in to the App Store"}}},
+		{Name: "vault", Title: "vault", Area: "Manual", ByHand: []event.Hand{{Name: "vault", Title: "Sign in to the vault"}}},
+		{Name: "mas", Title: "App Store apps", Area: "Drift", Row: "App Store apps", Waits: []string{"appstore"}},
+		{Name: "secret", Title: "Secrets", Area: "Drift", Row: "Secrets", Waits: []string{"vault"}},
+	}
+	store := event.NeedsYou{Time: after(10), Step: "appstore", Item: "appstore", Title: "Sign in to the App Store"}
+	events := rowsRun(steps,
+		event.StepStarted{Time: after(10), Step: "appstore", Doing: "applying"},
+		store,
+		event.StepStarted{Time: after(40), Step: "vault", Doing: "applying"},
+		event.Doing{Time: after(40), Step: "appstore", Says: event.Queued},
+		event.NeedsYou{Time: after(40), Step: "vault", Item: "vault", Title: "Sign in to the vault", More: 1},
+		fine(50, "appstore", "done"),
+		event.NeedsYou{Time: after(50), Step: "vault", Item: "vault", Title: "Sign in to the vault"},
+	)
+	face, out, _ := applyAt(160, 64, 55*time.Second, events)
+	got := screen(out.String())
+	want := []string{
+		"  03:04:15  ▲ Sign in to the App Store: waiting for you",
+		"  03:04:45  ▲ Sign in to the vault: waiting for you",
+		"  03:04:55  ● Sign in to the App Store: done, in 40.0s",
+	}
+	if log := logOf(got, 160); !slices.Equal(log, want) {
+		t.Errorf("the log is\n%s\nwant\n%s", strings.Join(log, "\n"), strings.Join(want, "\n"))
+	}
+	if _, right := panes(got, 160); !strings.Contains(right[1], "Sign in to the vault") {
+		t.Errorf("the panel's title line is %q; want the vault's card still up", right[1])
+	}
+	_ = face.Close()
+
+	again := store
+	again.Time = after(60)
+	events = append(events, event.StepStarted{Time: after(60), Step: "appstore", Doing: "applying"}, event.Doing{Time: after(60), Step: "vault", Says: event.Queued}, again)
+	face, out, _ = applyAt(160, 64, 65*time.Second, events)
+	defer func() { _ = face.Close() }()
+	got = screen(out.String())
+	if log := logOf(got, 160); log[len(log)-1] != "  03:05:05  ▲ Sign in to the App Store: waiting for you" {
+		t.Errorf("raised again, the log is\n%s\nwant it waiting for you once more", strings.Join(log, "\n"))
+	}
+	if _, right := panes(got, 160); !strings.HasSuffix(right[1], "waiting 5.0s") {
+		t.Errorf("raised again, the panel's title line is %q; want its time from then", right[1])
+	}
+}
+
 // A row chosen, the log is its lines alone, a step by hand's in the row of
 // the step it holds up, what's under way its own; the steps by hand at the
 // end are in no row, shown with everything alone.

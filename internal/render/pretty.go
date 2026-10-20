@@ -139,11 +139,11 @@ type Pretty struct {
 	// centre, till its step finishes: nil when none is; cardSince when it
 	// came up. cards are every one that came up, by its step and its line,
 	// for what's left to do once the run's done; asides, those set aside
-	// for another to take their turn, by when they came up.
+	// for another to take their turn, with when they came up.
 	card      *event.NeedsYou
 	cardSince time.Time
 	cards     map[string]event.NeedsYou
-	asides    map[string]time.Time
+	asides    map[string]upCard
 	// todos are the to-dos at the run's end, as they stand, once they've
 	// started: applying's screen is theirs till the run's done.
 	todos *event.ToDos
@@ -221,7 +221,7 @@ func (p *Pretty) Emit(e event.Event) {
 		p.start, p.results = e, make(map[string]event.StepFinished, len(e.Steps))
 		p.output, p.command, p.began = map[string][]string{}, map[string]string{}, p.now()
 		p.raw, p.rawSeq = map[string][]rawLine{}, 0
-		p.cut, p.card, p.cards, p.asides, p.todos = map[string]runningStep{}, nil, map[string]event.NeedsYou{}, map[string]time.Time{}, nil
+		p.cut, p.card, p.cards, p.asides, p.todos = map[string]runningStep{}, nil, map[string]event.NeedsYou{}, map[string]upCard{}, nil
 		p.log = nil
 		p.order.start(e.Steps)
 		p.preparing = ""
@@ -283,6 +283,7 @@ func (p *Pretty) Emit(e event.Event) {
 		if p.carded(e.Step) {
 			p.lower(e.Time, &e)
 		}
+		p.lowerAside(e)
 		if p.byArea() && p.applying() {
 			p.noteFinished(e)
 		}
