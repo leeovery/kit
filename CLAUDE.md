@@ -76,8 +76,8 @@ programs. Ever.
   - clears kit's variables (`KIT_`), and those of the programs it drives that can hold real
     tokens or lead to real state (`HOMEBREW_`, `OP_`, `GH_`, `GITHUB_`, `GIT_`, `SSH_`,
     `CLAUDE_`, `ANTHROPIC_`, tmux's) and proxies';
-  - puts only stubs of brew, claude, composer, defaults, gh, git, go, launchctl, mas, npm, op,
-    open, osascript, sudo, tmutil and tmux on `PATH`;
+  - puts only stubs of the programs kit drives on `PATH` (the list is `stubbed`, in
+    `internal/testguard/stubs.go`: brew, mas, sudo, op, agntc, curl, swiftc and the rest);
   - lets `http.DefaultTransport`, and transports cloned from it, dial loopback, and unix
     sockets in the temporary directory, alone.
 - **testguard fails the run, even when every test passed,** when:
