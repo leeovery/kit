@@ -36,12 +36,15 @@ type Skills struct {
 	home string
 }
 
+// kindName names the kind.
+const kindName = "claude-skill"
+
 // Descriptor is Claude's skills' kind, as kit's shared code knows it.
 var Descriptor = kind.Descriptor{
-	Name:    "claude-skill",
+	Name:    kindName,
 	Label:   "Claude skills",
 	Group:   kind.Packages,
-	Section: &config.Section{Header: "claude skills", Form: config.Names, Sorted: true, Held: true},
+	Section: &config.Section{Kind: kindName, Header: "claude skills", Form: config.Names, Sorted: true, Held: true},
 	Help: &kind.Help{
 		What:   "Claude's skills for every project, installed by agntc",
 		Add:    "Install Claude skills with agntc, as owner/repo and the skill or pack in it, and declare them",
@@ -57,7 +60,7 @@ func New(run runner.Runner, home string) *Skills {
 	return &Skills{run: run, home: home}
 }
 
-func (*Skills) Name() string    { return Descriptor.Name }
+func (*Skills) Name() string    { return kindName }
 func (*Skills) Program() string { return "agntc" }
 
 func (s *Skills) agntc(ctx context.Context, args ...string) error {

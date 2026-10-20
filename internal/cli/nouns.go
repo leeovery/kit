@@ -35,7 +35,7 @@ var groups = []*cobra.Group{
 
 // helpGroups are the groups of kit's help the kinds' commands are in, by the
 // kinds' groups.
-var helpGroups = map[kind.Group]string{kind.Packages: groupPackages, kind.Settings: groupSettings, kind.Secrets: groupFiles}
+var helpGroups = map[kind.Group]string{kind.Packages: groupPackages, kind.Settings: groupSettings}
 
 // nounCommands are the commands of what kit manages: a command each for the
 // kinds whose things are added and removed alike, installed and declared,

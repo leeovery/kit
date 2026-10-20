@@ -36,12 +36,15 @@ type AppStore struct {
 	admin func(ctx context.Context) bool
 }
 
+// kindName names the kind.
+const kindName = "mas"
+
 // Descriptor is the App Store's apps' kind, as kit's shared code knows it.
 var Descriptor = kind.Descriptor{
-	Name:    "mas",
+	Name:    kindName,
 	Label:   "App Store apps",
 	Group:   kind.Packages,
-	Section: &config.Section{Header: "app store apps", Form: config.Names, Sorted: true, Held: true},
+	Section: &config.Section{Kind: kindName, Header: "app store apps", Form: config.Names, Sorted: true, Held: true},
 	Help: &kind.Help{
 		What:   "App Store apps",
 		Add:    "Install App Store apps, by name or id, and declare them",
@@ -56,7 +59,7 @@ func New(run runner.Runner) *AppStore {
 	return &AppStore{run: run}
 }
 
-func (*AppStore) Name() string    { return Descriptor.Name }
+func (*AppStore) Name() string    { return kindName }
 func (*AppStore) Program() string { return "mas" }
 
 // app is what mas says of an app, as far as kit needs.

@@ -51,13 +51,16 @@ type Spotlight struct {
 	admin    func(ctx context.Context) bool
 }
 
+// kindName names the kind.
+const kindName = "spotlight-exclusion"
+
 // Descriptor is Spotlight's exclusions' kind, as kit's shared code knows
 // it.
 var Descriptor = kind.Descriptor{
-	Name:    "spotlight-exclusion",
+	Name:    kindName,
 	Label:   "Spotlight exclusions",
 	Group:   kind.Settings,
-	Section: &config.Section{Header: "spotlight exclusions", Form: config.Paths, Sorted: true},
+	Section: &config.Section{Kind: kindName, Header: "spotlight exclusions", Form: config.Paths, Sorted: true},
 	Help: &kind.Help{
 		What:   "Folders Spotlight leaves out",
 		Add:    "Leave folders out of Spotlight, and declare them",
@@ -72,7 +75,7 @@ func New(run runner.Runner, home, stateDir string) *Spotlight {
 	return &Spotlight{run: run, home: home, stateDir: stateDir}
 }
 
-func (s *Spotlight) Name() string    { return Descriptor.Name }
+func (s *Spotlight) Name() string    { return kindName }
 func (s *Spotlight) Program() string { return "mdfind" }
 
 // Verb says a path as declared is excluded.

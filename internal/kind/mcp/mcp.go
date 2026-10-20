@@ -72,13 +72,16 @@ type MCP struct {
 	declared map[string]Server
 }
 
+// kindName names the kind.
+const kindName = "claude-mcp"
+
 // Descriptor is Claude Code's MCP servers' kind, as kit's shared code knows
 // it.
 var Descriptor = kind.Descriptor{
-	Name:    "claude-mcp",
+	Name:    kindName,
 	Label:   "Claude MCP",
 	Group:   kind.Packages,
-	Section: &config.Section{Header: "claude mcp", Form: config.Commands, Folders: true},
+	Section: &config.Section{Kind: kindName, Header: "claude mcp", Form: config.Commands, Folders: true},
 	Help: &kind.Help{
 		What:   "Claude Code's MCP servers",
 		Add:    "Declare MCP servers Claude Code has, as it has them",
@@ -100,7 +103,7 @@ func New(run runner.Runner, home string) *MCP {
 	return &MCP{run: run, home: home, declared: map[string]Server{}}
 }
 
-func (*MCP) Name() string    { return Descriptor.Name }
+func (*MCP) Name() string    { return kindName }
 func (*MCP) Program() string { return "claude" }
 
 // SetOff is a server's line after its name, declared off, or on: its

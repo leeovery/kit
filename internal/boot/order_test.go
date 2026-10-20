@@ -94,6 +94,17 @@ func TestOrder(t *testing.T) {
 // The password, once, in its row, asked again when it's wrong, given to
 // sudo on its input and kept for the run; then Touch ID turned on for sudo,
 // as the Mac declares it.
+// The Mac's features are read from declarations holding kinds' sections
+// too, those the boot's given.
+func TestDeclaresAmongTheKindsSections(t *testing.T) {
+	b, _ := newBoot(t, runnertest.New(t), GitHub{}, &asker{})
+	b.Kinds = kinds.Sections()
+	read(t, b, map[string]string{config.File: kitToml, "shared/declarations": "[features]\ntouch-id-sudo\n\n[homebrew formulae]\njq\n"}, "laptop")
+	if !b.declares("touch-id-sudo") {
+		t.Error("touch-id-sudo isn't declared, want it read beside the formulae")
+	}
+}
+
 func TestPasswordOnceThenTouchID(t *testing.T) {
 	run := runnertest.New(t)
 	run.On("brew", "--version").Fails(runner.ErrNotFound)

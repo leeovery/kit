@@ -28,12 +28,15 @@ type Go struct {
 	run runner.Runner
 }
 
+// kindName names the kind.
+const kindName = "go"
+
 // Descriptor is Go tools' kind, as kit's shared code knows it.
 var Descriptor = kind.Descriptor{
-	Name:    "go",
+	Name:    kindName,
 	Label:   "Go tools",
 	Group:   kind.Packages,
-	Section: &config.Section{Header: "go tools", Form: config.Names, Sorted: true, Held: true},
+	Section: &config.Section{Kind: kindName, Header: "go tools", Form: config.Names, Sorted: true, Held: true},
 	Help: &kind.Help{
 		What:   "Go tools",
 		Add:    "Install Go tools, by module path, and declare them",
@@ -48,7 +51,7 @@ func New(run runner.Runner) *Go {
 	return &Go{run: run}
 }
 
-func (*Go) Name() string    { return Descriptor.Name }
+func (*Go) Name() string    { return kindName }
 func (*Go) Program() string { return "go" }
 
 // program is a program in Go's bin folder, and the package it was built

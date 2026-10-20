@@ -7,7 +7,6 @@ import (
 
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/event"
-	"github.com/leeovery/kit/internal/kinds"
 	"github.com/leeovery/kit/internal/look"
 	"github.com/leeovery/kit/internal/steps"
 )
@@ -33,8 +32,12 @@ const (
 var applyRows = []string{rowThisMac, rowFiles, rowSettings, rowSecrets, rowFormulae, rowCasks,
 	rowAppStore, rowTools, rowGit, rowLogin, rowYours, rowBackups}
 
-// rowSteps are kit's own steps that aren't kinds', by name, in each row: a
-// kind's step, and the steps it needs, are in the row it says.
+// Rows are applying's rows, in the order they show: the screen's design,
+// one of which each kind sits in (kind.Descriptor.Row).
+func Rows() []string { return slices.Clone(applyRows) }
+
+// rowSteps are kit's own steps that don't say their row, by name, in each
+// row: a kind's step, and the steps it needs, say theirs (event.Step.Row).
 var rowSteps = map[string][]string{
 	rowThisMac: {"boot-github", "boot-mac", "boot-password", "boot-homebrew", "boot-apps", "boot-kit-config",
 		"boot-full-disk-access", "boot-terminal", "disk", "memory", "file-events", "load", "full-disk-access"},
@@ -52,21 +55,14 @@ var rowNamed = func() map[string]string {
 			named[n] = row
 		}
 	}
-	for _, d := range kinds.All {
-		named[d.Name] = d.Row
-		for _, need := range d.Needs {
-			if _, ok := named[need]; !ok {
-				named[need] = d.Row
-			}
-		}
-	}
 	return named
 }()
 
 // RowOf is the row of applying's screen the step s is in, and whether it
 // has one of its own: a step of the user's own (a [steps] line, or one of
 // their checks) is in Your steps whatever it's called, as one can share a
-// name with one of kit's; one of kit's in its kind's row, or its feature's;
+// name with one of kit's; one of kit's in the row it says, as a kind's
+// does, or its own (rowSteps);
 // a step by hand in none, as its lines go to the row of the step it holds
 // up. Any other falls back on its area, known false: a new step of kit's
 // is to have a row of its own.
@@ -76,6 +72,9 @@ func RowOf(s event.Step) (row string, known bool) {
 		return rowYours, true
 	case steps.AreaManual:
 		return "", true
+	}
+	if s.Row != "" {
+		return s.Row, true
 	}
 	if row, ok := rowNamed[s.Name]; ok {
 		return row, true

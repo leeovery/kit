@@ -36,10 +36,14 @@ func TestEveryStepHasARow(t *testing.T) {
 
 	made := []engine.Step{{Name: linked.StepName, Area: steps.AreaDrift}}
 	deps := &kind.Deps{Run: fake, Home: home, StateDir: state}
+	// A kind's steps say their row, as the run has them do.
 	for _, d := range kinds.All {
-		made = append(made, engine.Step{Name: d.New(deps).Name(), Area: steps.AreaDrift})
+		made = append(made, engine.Step{Name: d.New(deps).Name(), Area: steps.AreaDrift, Row: d.Row})
 		if d.Setup != nil {
-			made = append(made, d.Setup(deps)...)
+			for _, s := range d.Setup(deps) {
+				s.Row = d.Row
+				made = append(made, s)
+			}
 		}
 	}
 	made = slices.Concat(made, []engine.Step{
@@ -62,7 +66,7 @@ func TestEveryStepHasARow(t *testing.T) {
 	made = append(made, booted...)
 
 	for _, s := range made {
-		if row, known := render.RowOf(event.Step{Name: s.Name, Area: s.Area}); !known {
+		if row, known := render.RowOf(event.Step{Name: s.Name, Area: s.Area, Row: s.Row}); !known {
 			t.Errorf("%s (area %q) falls back on %s: give it a row", s.Name, s.Area, row)
 		}
 	}

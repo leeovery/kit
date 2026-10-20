@@ -281,6 +281,22 @@ func (f *declFile) holding(d sectionDef, name string) (*section, string) {
 	return nil, line
 }
 
+// AddSection adds kind's section, empty, to scope's declarations, shared or
+// a Mac's, in its place, unless the file has one of the kind's already: the
+// kind's looked after from then on (List.Declared). It reports whether it
+// added one.
+func (c *Config) AddSection(kind, scope string) (bool, error) {
+	d, f, err := c.editable(kind, scope)
+	if err != nil {
+		return false, err
+	}
+	if slices.ContainsFunc(f.sections, func(s *section) bool { return s.def.kind == d.kind }) {
+		return false, nil
+	}
+	f.add(d, "", "")
+	return true, c.write(f, func(*declFile) error { return nil })
+}
+
 // Items are the 1Password items kind's sections in scope's declarations are
 // for, in order, as in op://vault/item: none for its plain section.
 func (c *Config) Items(kind, scope string) ([]string, error) {
@@ -357,9 +373,9 @@ func (c *Config) Declare(kind, scope string, e Entry) error {
 // Undeclare takes name out of kind's sections of scope's declarations, with
 // the notes directly above it and the steps under it, keeping a sorted
 // section sorted; a section it leaves empty goes, unless it's the last
-// declaring its kind for a Mac (keeps), which stays, empty, as the kind's
-// own section, so the kind's still looked after (List.Declared). The rest of
-// the file is kept as it is.
+// declaring its kind for a Mac (keeps), which stays, header and all, empty,
+// so the kind's still looked after (List.Declared). The rest of the file is
+// kept as it is.
 func (c *Config) Undeclare(kind, scope, name string) error {
 	d, f, err := c.editable(kind, scope)
 	if err != nil {
@@ -536,14 +552,9 @@ func (c *Config) keeps(f *declFile, s *section) bool {
 	return err != nil || !ofKind(shared.sections)
 }
 
-// empty leaves section s, with nothing in it, as its kind's own section,
-// for no folder or item, holding nothing back, a blank line after it when
-// another follows.
+// empty leaves section s, with nothing in it, as it is, header and all, a
+// blank line after it when another follows.
 func (f *declFile) empty(s *section) {
-	if s.arg != "" || s.hold != "" {
-		s.arg, s.hold = "", ""
-		s.header = "[" + s.name() + "]"
-	}
 	last := s == f.sections[len(f.sections)-1]
 	if n := len(s.body); !last && (n == 0 || strings.TrimSpace(s.body[n-1]) != "") {
 		s.body = append(s.body, "")
@@ -592,22 +603,33 @@ func (c *Config) editable(kind, scope string) (sectionDef, *declFile, error) {
 // with name declared in d's sections, or not, as in says: a name another
 // kind's section has too, as a step can share a formula's, is that kind's.
 func (c *Config) writeDecl(f *declFile, d sectionDef, name string, in bool) error {
+	return c.write(f, func(back *declFile) error {
+		found := false
+		for _, s := range back.sections {
+			if s.def.kind != d.kind {
+				continue
+			}
+			entries, _ := s.entries(f.scope)
+			found = found || slices.ContainsFunc(entries, func(e Entry) bool { return e.Name == name })
+		}
+		if found != in {
+			return fmt.Errorf("the edit didn't leave %s as it should in %s", name, DeclFile(f.scope))
+		}
+		return nil
+	})
+}
+
+// write writes f, whole or not at all, having checked it reads back, as
+// check says too.
+func (c *Config) write(f *declFile, check func(back *declFile) error) error {
 	content := f.String()
 	file := DeclFile(f.scope)
 	back, err := parseFile(f.defs, f.scope, content)
 	if err != nil {
 		return fmt.Errorf("the edit would leave %s unreadable: %w", file, err)
 	}
-	found := false
-	for _, s := range back.sections {
-		if s.def.kind != d.kind {
-			continue
-		}
-		entries, _ := s.entries(f.scope)
-		found = found || slices.ContainsFunc(entries, func(e Entry) bool { return e.Name == name })
-	}
-	if found != in {
-		return fmt.Errorf("the edit didn't leave %s as it should in %s", name, file)
+	if err := check(back); err != nil {
+		return err
 	}
 	path := filepath.Join(c.Dir, file)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

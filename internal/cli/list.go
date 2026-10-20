@@ -73,6 +73,9 @@ func (a *app) list(ctx context.Context, r *run, args []string) error {
 		if _, err := r.kindNamed(args[0]); err != nil {
 			return err
 		}
+		if !slices.Contains(r.kinds, args[0]) {
+			return fmt.Errorf("no kind named %s on this Mac: one of %s", args[0], strings.Join(r.kinds, ", "))
+		}
 		names = args
 	}
 	var entries []listed

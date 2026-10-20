@@ -20,7 +20,6 @@ import (
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/event"
-	"github.com/leeovery/kit/internal/kinds"
 	"github.com/leeovery/kit/internal/runner"
 	kitstate "github.com/leeovery/kit/internal/state"
 )
@@ -83,6 +82,8 @@ type Boot struct {
 	// State is kit's state folder, Data its data folder, and Config where
 	// the config repository is cloned.
 	State, Data, Config string
+	// Kinds are the kinds' sections the config's declarations may hold.
+	Kinds []config.Section
 	// Repo is the config repository, as owner/name: the person's own
 	// kit-config when "".
 	Repo string
@@ -142,7 +143,7 @@ func (b *Boot) archive() string { return filepath.Join(b.Data, "bootstrap", "kit
 // boot's copy; nil when there's neither.
 func (b *Boot) config() *config.Config {
 	for _, dir := range []string{b.Config, b.archive()} {
-		if cfg, err := config.Load(dir, kinds.Sections()); err == nil {
+		if cfg, err := config.Load(dir, b.Kinds); err == nil {
 			return cfg
 		}
 	}

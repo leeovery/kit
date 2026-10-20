@@ -23,7 +23,7 @@ type Descriptor struct {
 	// kit's reports count them.
 	Group Group
 	// Section is how its section in a declarations file reads, its Kind
-	// the kind's name; nil for a kind declared in a file of its own
+	// the kind's Name; nil for a kind declared in a file of its own
 	// (Declarer), as tmux's plugins are, in tmux's config.
 	Section *config.Section
 	// Help is its command, kit <name>, adding and removing its things: nil
@@ -95,22 +95,29 @@ type Deps struct {
 	Home, ConfigHome, StateDir string
 
 	mu     sync.Mutex
-	shared map[string]any
+	shared map[any]any
 }
 
-// Share is the thing called name the kinds made from d share, made by build
-// the first time one asks for it: Homebrew's formulae and casks share
+// Key is what a thing kinds share is kept by: each NewKey makes is its own,
+// holding a T alone, so no two kinds can take each other's by mistake.
+type Key[T any] struct{ name string }
+
+// NewKey is a key of its own for a T kinds share, named for what it is.
+func NewKey[T any](name string) *Key[T] { return &Key[T]{name: name} }
+
+// Share is the thing key keeps that the kinds made from d share, made by
+// build the first time one asks for it: Homebrew's formulae and casks share
 // Homebrew, taking turns with its lock.
-func Share[T any](d *Deps, name string, build func() T) T {
+func Share[T any](d *Deps, key *Key[T], build func() T) T {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if v, ok := d.shared[name].(T); ok {
-		return v
+	if v, ok := d.shared[key]; ok {
+		return v.(T)
 	}
 	if d.shared == nil {
-		d.shared = map[string]any{}
+		d.shared = map[any]any{}
 	}
 	v := build()
-	d.shared[name] = v
+	d.shared[key] = v
 	return v
 }

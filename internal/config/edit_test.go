@@ -187,10 +187,16 @@ func TestUndeclare(t *testing.T) {
 			after: "[homebrew formulae]\nbat\n\n[npm packages]\n\n[macos login items]\ncom.example.app\n",
 		},
 		{
-			name:   "a kind's last section left empty, a project folder's, stays as the kind's own",
-			before: "[homebrew formulae]\nbat\n\n[claude mcp ~/Code/site]\nmail -- mail-mcp\n",
+			name:   "a kind's last section left empty, a project folder's, stays as it was",
+			before: "[homebrew formulae]\nbat\n\n[claude mcp ~/Code/site]   # the site's\nmail -- mail-mcp\n",
 			kind:   "claude-mcp", entry: "~/Code/site:mail",
-			after: "[homebrew formulae]\nbat\n\n[claude mcp]\n",
+			after: "[homebrew formulae]\nbat\n\n[claude mcp ~/Code/site]   # the site's\n",
+		},
+		{
+			name:   "a kind's last section left empty, an item's, stays as it was",
+			before: "[secrets op://vault/item]   # the item\nTOKEN a/b\n\n[checks]\ndisk -- df -h\n",
+			kind:   "secret", entry: "TOKEN",
+			after: "[secrets op://vault/item]   # the item\n\n[checks]\ndisk -- df -h\n",
 		},
 		{
 			name:   "a secret, from whichever item's section has it",
@@ -251,6 +257,42 @@ func TestUndeclareLeavesTheSharedSection(t *testing.T) {
 	}
 	if list, err := cfg.List("npm", "laptop"); err != nil || !list.Declared {
 		t.Errorf("List(npm, laptop) = %+v, %v; want it declared still", list, err)
+	}
+}
+
+// The shared file's last section of a kind, left empty, stays: every Mac's
+// kind's still looked after.
+func TestUndeclareKeepsTheSharedFilesLastSection(t *testing.T) {
+	cfg := loadRepo(t, map[string]string{
+		"shared/declarations": "[npm packages]\ntypescript\n",
+		"laptop/declarations": "[npm packages]\nintelephense\n",
+	})
+	if err := cfg.Undeclare("npm", config.Shared, "typescript"); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := readFile(t, cfg, "shared/declarations"), "[npm packages]\n"; got != want {
+		t.Errorf("shared =\n%s\nwant\n%s", got, want)
+	}
+}
+
+// AddSection adds a kind's section, empty, in its place, unless the file has
+// one of the kind's.
+func TestAddSection(t *testing.T) {
+	cfg := loadRepo(t, map[string]string{"laptop/declarations": "[paths]\n~/bin\n\n[homebrew formulae --after mise]\nbat\n"})
+	for _, tt := range []struct {
+		kind  string
+		added bool
+		want  string
+	}{
+		{"npm", true, "[paths]\n~/bin\n\n[homebrew formulae --after mise]\nbat\n\n[npm packages]\n"},
+		{"npm", false, "[paths]\n~/bin\n\n[homebrew formulae --after mise]\nbat\n\n[npm packages]\n"},
+		{"brew", false, "[paths]\n~/bin\n\n[homebrew formulae --after mise]\nbat\n\n[npm packages]\n"},
+		{"git-config", true, "[paths]\n~/bin\n\n[git config]\n\n[homebrew formulae --after mise]\nbat\n\n[npm packages]\n"},
+	} {
+		added, err := cfg.AddSection(tt.kind, "laptop")
+		if got := readFile(t, cfg, "laptop/declarations"); err != nil || added != tt.added || got != tt.want {
+			t.Errorf("AddSection(%s) = %v, %v; laptop =\n%s\nwant %v,\n%s", tt.kind, added, err, got, tt.added, tt.want)
+		}
 	}
 }
 

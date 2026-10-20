@@ -122,6 +122,19 @@ func TestSnoozeAndTemporarily(t *testing.T) {
 	}
 }
 
+// Forgetting kinds forgets everything of theirs, and nothing of others'.
+func TestForget(t *testing.T) {
+	rec := drift.Record{
+		FirstSeen: map[string]time.Time{"npm:docx": ago(time.Hour), "brew:jq": ago(time.Hour), "npmish:x": ago(time.Hour)},
+		Snoozed:   map[string]time.Time{"npm:docx": now.Add(time.Hour), "brew:jq": now.Add(time.Hour)},
+		Temporary: map[string]time.Time{"npm:left-pad": ago(time.Hour), "cask:zoom": ago(time.Hour)},
+	}
+	rec.Forget([]string{"npm", "go"})
+	if len(rec.FirstSeen) != 2 || len(rec.Snoozed) != 1 || len(rec.Temporary) != 1 || rec.Snoozed["brew:jq"].IsZero() || rec.Temporary["cask:zoom"].IsZero() {
+		t.Errorf("Forget(npm, go) left %+v, want npm's gone and the rest kept", rec)
+	}
+}
+
 func TestUpdateAndLoad(t *testing.T) {
 	state := t.TempDir() + "/state/kit"
 	if r, err := drift.Load(state); err != nil || r.FirstSeen != nil {

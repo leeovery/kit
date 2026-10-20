@@ -13,6 +13,7 @@ import (
 
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/config"
+	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/kind/brew"
@@ -505,12 +506,16 @@ func TestFormulaeAndCasksShare(t *testing.T) {
 }
 
 // An install waiting its turn while the other kind's goes on says it's
-// waiting for that kind's step, by its title, then how it's going once it
-// has its turn.
+// waiting for that kind's step, by the title the run knows it by, then how
+// it's going once it has its turn.
 func TestAnInstallWaitingItsTurnSaysSo(t *testing.T) {
 	fake := runnertest.New(t)
 	started, release := make(chan struct{}), make(chan struct{})
 	fake.On("brew", "update", "--quiet")
+	fake.On("brew", "list", "--formula", "--full-name", "-1")
+	fake.On("brew", "leaves")
+	fake.On("brew", "leaves", "--installed-on-request")
+	fake.On("brew", "info", "--json=v2", "--formula", "jq").Prints(`{"formulae": [{"name": "jq", "full_name": "jq"}], "casks": []}`)
 	fake.On("brew", "install", "--formula", "jq").Does(func() {
 		close(started)
 		<-release
@@ -519,44 +524,58 @@ func TestAnInstallWaitingItsTurnSaysSo(t *testing.T) {
 	fake.On("brew", "info", "--json=v2", "--cask", "ghostty").Prints(`{"formulae": [], "casks": [{"token": "ghostty", "full_token": "ghostty"}]}`)
 	fake.On("brew", "install", "--cask", "ghostty")
 	h := brew.New(fake)
-	var formulae sync.WaitGroup
-	formulae.Go(func() {
-		if err := h.Formulae().Install(t.Context(), []string{"jq"}); err != nil {
-			t.Error(err)
-		}
-	})
-	<-started
+	formulae := kind.Step(h.Formulae(), config.List{Kind: "brew", Entries: []config.Entry{{Name: "jq"}}})
+	casks := kind.Step(h.Casks(), config.List{Kind: "cask", Entries: []config.Entry{{Name: "ghostty"}}})
+	formulae.Title, casks.Title = "Homebrew formulae", "Homebrew casks"
+	// The casks are checked once the formulae's install has started, so
+	// they wait their turn.
+	checking := casks.Check
+	casks.Check = func(ctx context.Context) check.Result {
+		<-started
+		return checking(ctx)
+	}
+	sink := &doings{step: "cask", heard: "waiting for Homebrew formulae", release: release}
+	p, err := engine.New(formulae, casks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Apply(t.Context(), sink, engine.Options{Jobs: 2}); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"waiting for Homebrew formulae", "downloading"}
+	if got := sink.said(); !slices.Equal(got, want) {
+		t.Errorf("the casks' step said %q, want %q", got, want)
+	}
+}
 
-	var mu sync.Mutex
-	var said []event.Doing
-	waiting := make(chan struct{})
-	ctx := event.WithSaying(t.Context(), func(d event.Doing) {
-		mu.Lock()
-		defer mu.Unlock()
-		said = append(said, d)
-		if d.Says == "waiting for Homebrew formulae" {
-			close(waiting)
-		}
-	})
-	s := kind.Step(h.Casks(), config.List{Kind: "cask", Entries: []config.Entry{{Name: "ghostty"}}})
-	var casks sync.WaitGroup
-	casks.Go(func() {
-		if err := s.Apply(ctx, s.Check(ctx)); err != nil {
-			t.Error(err)
-		}
-	})
-	select {
-	case <-waiting:
-	case <-time.After(5 * time.Second):
-		t.Error("the casks' install never said it was waiting for the formulae's")
+// doings is a sink keeping what step says it's doing, once it's begun
+// installing, letting release go once it says heard.
+type doings struct {
+	step, heard string
+	release     chan struct{}
+	mu          sync.Mutex
+	says        []string
+}
+
+func (d *doings) Emit(e event.Event) {
+	do, ok := e.(event.Doing)
+	if !ok || do.Step != d.step {
+		return
 	}
-	close(release)
-	formulae.Wait()
-	casks.Wait()
-	want := []event.Doing{{Says: "waiting for Homebrew formulae"}, {Says: "downloading", Of: 1}}
-	if !slices.Equal(said, want) {
-		t.Errorf("the casks' step said %+v, want %+v", said, want)
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if do.Says == d.heard || len(d.says) > 0 {
+		d.says = append(d.says, do.Says)
 	}
+	if do.Says == d.heard {
+		close(d.release)
+	}
+}
+
+func (d *doings) said() []string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return slices.Clone(d.says)
 }
 
 // An install that comes while another kind's brew update runs says it's

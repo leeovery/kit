@@ -446,7 +446,7 @@ func installApart(ctx context.Context, k Kind, declared config.List, placing Pla
 // still going.
 func waitBehind(ctx context.Context, behind []engine.Wait) bool {
 	for _, w := range behind {
-		if engine.Await(ctx, w, "waiting for "+cmp.Or(w.Title, w.Step)); ctx.Err() != nil {
+		if engine.Await(ctx, w, "waiting for "+engine.Title(ctx, w.Step)); ctx.Err() != nil {
 			return false
 		}
 	}
@@ -490,7 +490,7 @@ func installHeld(ctx context.Context, k Kind, declared config.List, h Held, name
 	}
 	var missing []string
 	for _, w := range h.Waits {
-		what := cmp.Or(w.Thing, w.Title, w.Step)
+		what := cmp.Or(w.Thing, engine.Title(ctx, w.Step))
 		if !engine.Await(ctx, w, fmt.Sprintf("waiting for %s: %d to install", what, len(names))) {
 			missing = append(missing, what)
 		}

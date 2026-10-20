@@ -144,7 +144,19 @@ func addOne(ctx context.Context, r *run, c *changes, k kind.Kind, scope, name st
 		if err := drift.Update(r.stateDir, func(rec *drift.Record) { rec.Temporarily(kindName+":"+full, r.now) }); err != nil {
 			return check.Result{State: check.Failed, Reason: err.Error()}
 		}
-		return check.Result{State: check.OK, Summary: verb + ", for now: not declared, quiet for 7 days, then kit reconcile asks"}
+		summary := verb + ", for now: not declared, quiet for 7 days, then kit reconcile asks"
+		// reconcile asks only of a kind looked after: one with a section.
+		if d, _ := kinds.Named(kindName); d.Section != nil && !r.lists[kindName].Declared {
+			added, err := r.cfg.AddSection(kindName, scope)
+			if err != nil {
+				return check.Result{State: check.Failed, Reason: verb + ", but couldn't add its kind's section: " + err.Error()}
+			}
+			if added {
+				c.changed(config.DeclFile(scope))
+				summary += "; [" + d.Section.Header + "] added to " + scope + ", empty"
+			}
+		}
+		return check.Result{State: check.OK, Summary: summary}
 	}
 	note := opts.note
 	if d, ok := k.(kind.Describer); ok {

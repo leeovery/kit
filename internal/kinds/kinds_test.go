@@ -10,6 +10,7 @@ import (
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/kinds"
+	"github.com/leeovery/kit/internal/render"
 	"github.com/leeovery/kit/internal/runner/runnertest"
 )
 
@@ -42,6 +43,11 @@ func TestEveryKindIsComplete(t *testing.T) {
 			t.Errorf("%s has a section, and is declared in a file of its own", k.Name)
 		case k.Section != nil && (k.Section.Header == "" || !strings.EqualFold(k.Label, k.Section.Header)):
 			t.Errorf("%s's label is %q, want its section's words, %q", k.Name, k.Label, k.Section.Header)
+		case k.Section != nil && k.Section.Kind != k.Name:
+			t.Errorf("%s's section declares %q, want it", k.Name, k.Section.Kind)
+		}
+		if !slices.Contains(render.Rows(), k.Row) {
+			t.Errorf("%s sits in the row %q, want one of applying's: %v", k.Name, k.Row, render.Rows())
 		}
 		if h := k.Help; h != nil && (h.What == "" || h.Add == "" || h.Remove == "") {
 			t.Errorf("%s's help = %+v: want what it manages, and what adding and removing do", k.Name, *h)

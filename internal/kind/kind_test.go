@@ -883,15 +883,17 @@ func (w *watcher) Emit(e event.Event) {
 // thing cask installs first, app, which ready says is in, and cask,
 // missing app and zoom, whose first check is as checking says, given
 // whether brew is waiting, or its own, once checking says nothing. cask
-// installs zoom once brew's installed jq, or a while.
+// installs zoom once brew's installed jq, or a while. Each is titled as a
+// run titles it, which is how brew's wait names cask's.
 func sharingWorld(log *installLog, ready func(context.Context) bool, checking func(waiting <-chan struct{}) check.Result) (brew, cask engine.Step, w *watcher) {
 	w = &watcher{step: "brew", says: "waiting for Homebrew casks", heard: make(chan struct{})}
 	brewKind := &turnKind{fakeKind: knowing("jq"), name: "brew", log: log}
-	brewing := kind.Placing{Behind: []engine.Wait{{Step: "cask", Thing: "app", Title: "Homebrew casks", Ready: ready}}}
+	brewing := kind.Placing{Behind: []engine.Wait{{Step: "cask", Thing: "app", Ready: ready}}}
 	brew = kind.Placed(brewKind, declared("jq"), func() kind.Placing { return brewing })
 	caskKind := &turnKind{fakeKind: knowing("app", "zoom"), name: "cask", log: log, after: map[string]string{"zoom": "brew:jq"}}
 	casking := kind.Placing{First: []string{"app"}}
 	cask = kind.Placed(caskKind, declared("app", "zoom"), func() kind.Placing { return casking })
+	brew.Title, cask.Title = "Homebrew formulae", "Homebrew casks"
 	compare := cask.Check
 	var first sync.Once
 	cask.Check = func(ctx context.Context) check.Result {

@@ -40,12 +40,15 @@ type Power struct {
 	admin func(ctx context.Context) bool
 }
 
+// kindName names the kind.
+const kindName = "power"
+
 // Descriptor is power settings' kind, as kit's shared code knows it.
 var Descriptor = kind.Descriptor{
-	Name:    "power",
+	Name:    kindName,
 	Label:   "Power settings",
 	Group:   kind.Settings,
-	Section: &config.Section{Header: "power settings", Form: config.Power, Sorted: true},
+	Section: &config.Section{Kind: kindName, Header: "power settings", Form: config.Power, Sorted: true},
 	Help: &kind.Help{
 		What:   "Power settings, in pmset's form",
 		Add:    "Declare power settings as this Mac has them",
@@ -61,7 +64,7 @@ func New(run runner.Runner, stateDir string) *Power {
 	return &Power{run: run, stateDir: stateDir, declared: map[string]string{}}
 }
 
-func (p *Power) Name() string    { return Descriptor.Name }
+func (p *Power) Name() string    { return kindName }
 func (p *Power) Program() string { return "pmset" }
 
 // Verb says a setting as declared is set.

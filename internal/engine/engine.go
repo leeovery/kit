@@ -42,6 +42,10 @@ type Step struct {
 	// Part is what the step counts towards in a view rolling its area up:
 	// Packages, Settings, Files, Secrets, or the config repository.
 	Part string
+	// Row is the row of applying's screen it sits in, when it says, as a
+	// kind's step does; Tool is what its commands run, as the person knows
+	// it, when it says: Homebrew.
+	Row, Tool string
 	// Macs are the Macs it runs on: every Mac when empty.
 	Macs []string
 	// Needs are the steps that must stand ok before it's checked or applied.
@@ -113,10 +117,7 @@ type Choice struct {
 // thing or Ready, that step itself.
 type Wait struct {
 	Step, Thing string
-	// Title is its step's title, as what's waited for is said: the step's
-	// name when it's "".
-	Title string
-	Ready func(ctx context.Context) bool
+	Ready       func(ctx context.Context) bool
 }
 
 // there reports whether w's thing is in place, as Ready says, looked at as
@@ -485,7 +486,7 @@ func (s Step) info() event.Step {
 			waits = append(waits, w.Step)
 		}
 	}
-	return event.Step{Name: s.Name, Title: s.title(), Area: s.Area, Part: s.Part, Waiting: s.Waiting, Waits: waits, ByHand: s.ByHand, Did: s.Did}
+	return event.Step{Name: s.Name, Title: s.title(), Area: s.Area, Part: s.Part, Row: s.Row, Tool: s.Tool, Waiting: s.Waiting, Waits: waits, ByHand: s.ByHand, Did: s.Did}
 }
 
 func (p *Pipeline) run(ctx context.Context, sink event.Sink, opts Options, apply bool) (Report, error) {
@@ -849,6 +850,17 @@ type dispatchKey struct{}
 func running(ctx context.Context) (*dispatch, bool) {
 	d, ok := ctx.Value(dispatchKey{}).(*dispatch)
 	return d, ok
+}
+
+// Title is the title of the step called name, as the run ctx is a step of
+// knows it: its name outside a run, or for a step the run hasn't.
+func Title(ctx context.Context, name string) string {
+	if d, ok := running(ctx); ok {
+		if title, ok := d.titles[name]; ok {
+			return title
+		}
+	}
+	return name
 }
 
 // StepResult is a step of the run, by name, and how it stands.

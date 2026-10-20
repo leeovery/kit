@@ -85,13 +85,13 @@ func run() []event.Event {
 // each sort.
 func statusRun() []event.Event {
 	steps := []event.Step{
-		{Name: "homebrew", Title: "Homebrew", Area: "Drift", Part: render.PartPackages},
-		{Name: "brew", Title: "Formulae", Area: "Drift", Part: render.PartPackages},
-		{Name: "cask", Title: "Casks", Area: "Drift", Part: render.PartPackages},
-		{Name: "defaults", Title: "macOS settings", Area: "Drift", Part: render.PartSettings},
+		{Name: "homebrew", Title: "Homebrew", Area: "Drift", Row: "Homebrew formulae", Tool: "Homebrew", Part: render.PartPackages},
+		{Name: "brew", Title: "Formulae", Area: "Drift", Row: "Homebrew formulae", Tool: "Homebrew", Part: render.PartPackages},
+		{Name: "cask", Title: "Casks", Area: "Drift", Row: "Homebrew casks", Tool: "Homebrew", Part: render.PartPackages},
+		{Name: "defaults", Title: "macOS settings", Area: "Drift", Row: "Mac settings", Part: render.PartSettings},
 		{Name: "config-private", Title: "Privacy", Area: "Config", Part: render.PartConfig},
 		{Name: "config-sync", Title: "Sync", Area: "Config", Part: render.PartConfig},
-		{Name: "mas", Title: "App Store", Area: "Drift", Part: render.PartPackages},
+		{Name: "mas", Title: "App Store", Area: "Drift", Row: "App Store apps", Part: render.PartPackages},
 		{Name: "time-machine", Title: "Time Machine", Area: "Backups"},
 		{Name: "disk", Title: "Disk space", Area: "Mac"},
 		{Name: "fonts", Title: "fonts", Area: "Steps"},
@@ -249,8 +249,8 @@ func TestPrettyStatusSaysWhatsNotAllowed(t *testing.T) {
 	}}}
 	show(t, render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.NoTTY}, 80, false), []event.Event{
 		event.RunStarted{Time: at, Command: "status", Machine: "laptop", Steps: []event.Step{
-			{Name: "defaults", Title: "macOS settings", Area: "Drift", Part: render.PartSettings},
-			{Name: "login-item", Title: "macOS login items", Area: "Drift", Part: render.PartSettings},
+			{Name: "defaults", Title: "macOS settings", Area: "Drift", Row: "Mac settings", Part: render.PartSettings},
+			{Name: "login-item", Title: "macOS login items", Area: "Drift", Row: "Login items", Part: render.PartSettings},
 		}},
 		event.StepFinished{Time: at, Step: "defaults", Result: check.Result{State: check.OK, Summary: "9 declared, all set", Counts: map[string]int{"installed": 9}}},
 		event.StepFinished{Time: at, Step: "login-item", Result: refused},
@@ -274,7 +274,7 @@ func TestJSON(t *testing.T) {
 
 func TestEverythingOK(t *testing.T) {
 	events := []event.Event{
-		event.RunStarted{Command: "status", Machine: "studio", Steps: []event.Step{{Name: "brew", Title: "Formulae", Area: "Drift", Part: render.PartPackages}}},
+		event.RunStarted{Command: "status", Machine: "studio", Steps: []event.Step{{Name: "brew", Title: "Formulae", Area: "Drift", Row: "Homebrew formulae", Tool: "Homebrew", Part: render.PartPackages}}},
 		event.StepFinished{Step: "brew", Result: check.Result{State: check.OK, Summary: "2 declared, all installed", Counts: map[string]int{"installed": 2}}},
 		event.RunFinished{Counts: map[check.State]int{check.OK: 1}},
 	}
@@ -295,7 +295,7 @@ func TestPrettyKeepsToItsWidth(t *testing.T) {
 		names = append(names, check.Item{ID: "brew:" + n, Name: n, State: "extra"})
 	}
 	events := []event.Event{
-		event.RunStarted{Command: "status", Machine: "laptop", Steps: []event.Step{{Name: "brew", Title: "Formulae", Area: "Drift", Part: render.PartPackages}}},
+		event.RunStarted{Command: "status", Machine: "laptop", Steps: []event.Step{{Name: "brew", Title: "Formulae", Area: "Drift", Row: "Homebrew formulae", Tool: "Homebrew", Part: render.PartPackages}}},
 		event.StepFinished{Step: "brew", Result: check.Result{State: check.Attention, Summary: "10 not declared", Items: names}},
 		event.RunFinished{Counts: map[check.State]int{check.Attention: 1}},
 	}
@@ -312,7 +312,7 @@ func TestPrettyKeepsToItsWidth(t *testing.T) {
 func TestPrettySpinsWhileStepsRun(t *testing.T) {
 	var out bytes.Buffer
 	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.NoTTY}, 80, true)
-	steps := []event.Step{{Name: "brew", Title: "Formulae", Area: "Drift", Part: render.PartPackages}, {Name: "cask", Title: "Casks", Area: "Drift", Part: render.PartPackages}}
+	steps := []event.Step{{Name: "brew", Title: "Formulae", Area: "Drift", Row: "Homebrew formulae", Tool: "Homebrew", Part: render.PartPackages}, {Name: "cask", Title: "Casks", Area: "Drift", Row: "Homebrew casks", Tool: "Homebrew", Part: render.PartPackages}}
 	face.Emit(event.RunStarted{Command: "status", Machine: "laptop", Steps: steps})
 	face.Emit(event.StepStarted{Step: "brew"})
 	face.Emit(event.StepStarted{Step: "cask"})
@@ -351,7 +351,7 @@ func TestPrettySpinsWhileStepsRun(t *testing.T) {
 
 func TestQuietItems(t *testing.T) {
 	events := []event.Event{
-		event.RunStarted{Command: "status", Machine: "laptop", Steps: []event.Step{{Name: "brew", Title: "Formulae", Area: "Drift", Part: render.PartPackages}}},
+		event.RunStarted{Command: "status", Machine: "laptop", Steps: []event.Step{{Name: "brew", Title: "Formulae", Area: "Drift", Row: "Homebrew formulae", Tool: "Homebrew", Part: render.PartPackages}}},
 		event.StepFinished{Step: "brew", Result: check.Result{State: check.Attention, Summary: "3 declared, all installed", Items: []check.Item{
 			{ID: "brew:hello", Name: "hello", State: "extra", Quiet: "new"},
 			{ID: "brew:ffmpeg", Name: "ffmpeg", State: "extra"},
@@ -396,8 +396,8 @@ func TestActionsAndWhatWasDone(t *testing.T) {
 	var pretty bytes.Buffer
 	show(t, render.NewPretty(&colorprofile.Writer{Forward: &pretty, Profile: colorprofile.NoTTY}, 80, false), []event.Event{
 		event.RunStarted{Command: "apply", Machine: "laptop", Time: at, Steps: []event.Step{
-			{Name: "brew", Title: "Formulae", Area: "Drift", Part: render.PartPackages},
-			{Name: "cask", Title: "Casks", Area: "Drift", Part: render.PartPackages},
+			{Name: "brew", Title: "Formulae", Area: "Drift", Row: "Homebrew formulae", Tool: "Homebrew", Part: render.PartPackages},
+			{Name: "cask", Title: "Casks", Area: "Drift", Row: "Homebrew casks", Tool: "Homebrew", Part: render.PartPackages},
 			{Name: "fonts", Title: "fonts", Area: "Steps"},
 			{Name: "disk", Title: "Disk space", Area: "Mac"},
 		}},
@@ -627,8 +627,8 @@ func TestPrettyApplyingNow(t *testing.T) {
 	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).Sized(func() (int, int) { return 80, 40 })
 	steps := []event.Step{
 		{Name: "time-machine", Title: "Time Machine", Area: "Backups"},
-		{Name: "brew", Title: "Formulae", Area: "Drift", Part: render.PartPackages},
-		{Name: "cask", Title: "Casks", Area: "Drift", Part: render.PartPackages},
+		{Name: "brew", Title: "Formulae", Area: "Drift", Row: "Homebrew formulae", Tool: "Homebrew", Part: render.PartPackages},
+		{Name: "cask", Title: "Casks", Area: "Drift", Row: "Homebrew casks", Tool: "Homebrew", Part: render.PartPackages},
 		{Name: "fonts", Title: "fonts", Area: "Steps"},
 	}
 	face.Emit(event.Preparing{Time: at, Command: "apply", Machine: "laptop", Doing: "checking what will need an administrator's password", Steps: steps})
@@ -715,7 +715,7 @@ func TestPrettyApplyingFitsTheTerminal(t *testing.T) {
 func TestPrettyApplyingWhileMacOSAsks(t *testing.T) {
 	var out syncBuffer
 	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).Sized(func() (int, int) { return 80, 40 })
-	steps := []event.Step{{Name: "1password", Title: "1password", Area: "Manual"}, {Name: "cask", Title: "Homebrew casks", Area: "Drift"}}
+	steps := []event.Step{{Name: "1password", Title: "1password", Area: "Manual"}, {Name: "cask", Title: "Homebrew casks", Area: "Drift", Row: "Homebrew casks", Tool: "Homebrew"}}
 	face.Emit(event.RunStarted{Time: at, Command: "apply", Machine: "laptop", Steps: steps})
 	face.Emit(event.StepStarted{Step: "cask", Doing: "applying"})
 	face.Emit(event.StepStarted{Step: "1password", Doing: "checking"})
@@ -744,8 +744,8 @@ func TestPrettyLightsSayAtOnce(t *testing.T) {
 	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).Sized(func() (int, int) { return 80, 40 })
 	steps := []event.Step{
 		{Name: "arq", Title: "Arq", Area: "Backups"},
-		{Name: "brew", Title: "Homebrew formulae", Area: "Drift"},
-		{Name: "cask", Title: "Homebrew casks", Area: "Drift"},
+		{Name: "brew", Title: "Homebrew formulae", Area: "Drift", Row: "Homebrew formulae", Tool: "Homebrew"},
+		{Name: "cask", Title: "Homebrew casks", Area: "Drift", Row: "Homebrew casks", Tool: "Homebrew"},
 		{Name: "fonts", Title: "fonts", Area: "Steps"},
 	}
 	face.Emit(event.RunStarted{Time: at, Command: "apply", Machine: "laptop", Steps: steps})
@@ -773,7 +773,7 @@ func TestPrettyFollowsTheTerminalsWidth(t *testing.T) {
 	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, width, true).Sized(func() (int, int) { return 80, 40 })
 	steps := []event.Step{
 		{Name: "time-machine", Title: "Time Machine", Area: "Backups"},
-		{Name: "brew", Title: "Homebrew formulae", Area: "Drift"},
+		{Name: "brew", Title: "Homebrew formulae", Area: "Drift", Row: "Homebrew formulae", Tool: "Homebrew"},
 		{Name: "fonts", Title: "fonts", Area: "Steps"},
 		{Name: "by-hand", Title: "By hand", Area: "Manual"},
 	}
@@ -797,7 +797,7 @@ func TestPrettyFollowsTheTerminalsWidth(t *testing.T) {
 func TestPrettyHidesTheCursorAfterAQuestion(t *testing.T) {
 	var out syncBuffer
 	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).Sized(func() (int, int) { return 80, 40 })
-	steps := []event.Step{{Name: "brew", Title: "Homebrew formulae", Area: "Drift"}}
+	steps := []event.Step{{Name: "brew", Title: "Homebrew formulae", Area: "Drift", Row: "Homebrew formulae", Tool: "Homebrew"}}
 	face.Emit(event.Preparing{Time: at, Command: "apply", Machine: "laptop", Doing: "checking what will need an administrator's password", Steps: steps})
 	face.Emit(event.Preparing{Time: at, Command: "apply", Machine: "laptop"})
 	_, _ = out.Write([]byte("\x1b[?25h"))
@@ -823,7 +823,7 @@ func TestPrettyHidesTheCursorAfterAQuestion(t *testing.T) {
 func TestPrettyHoldsStillForAQuestion(t *testing.T) {
 	var out syncBuffer
 	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).Sized(func() (int, int) { return 80, 40 })
-	steps := []event.Step{{Name: "brew", Title: "Homebrew formulae", Area: "Drift"}}
+	steps := []event.Step{{Name: "brew", Title: "Homebrew formulae", Area: "Drift", Row: "Homebrew formulae", Tool: "Homebrew"}}
 	face.Emit(event.Preparing{Time: at, Command: "apply", Machine: "laptop", Doing: "checking what will need an administrator's password", Steps: steps})
 	face.Emit(event.Preparing{Time: at, Command: "apply", Machine: "laptop"})
 	asked := out.String()
@@ -855,8 +855,8 @@ func TestPrettyBootstrapInTheTerminal(t *testing.T) {
 		{Name: "boot-github", Title: "GitHub", Area: boot.AreaBooted},
 		{Name: "boot-access", Title: "Full Disk Access", Area: boot.AreaBooted, Waits: []string{"boot-github"}},
 		{Name: "1password", Title: "1Password", Area: "Manual"},
-		{Name: "cask", Title: "Casks", Area: "Drift"},
-		{Name: "secret", Title: "Secrets", Area: "Drift", Waits: []string{"1password"}},
+		{Name: "cask", Title: "Casks", Area: "Drift", Row: "Homebrew casks", Tool: "Homebrew"},
+		{Name: "secret", Title: "Secrets", Area: "Drift", Row: "Secrets", Waits: []string{"1password"}},
 		{Name: "gpg-key", Title: "gpg-key", Area: "Steps", Waits: []string{"secret"}},
 	}
 	face.Emit(event.RunStarted{Time: at, Command: "bootstrap", Machine: "laptop", Steps: steps})

@@ -7,7 +7,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/leeovery/kit/internal/event"
-	"github.com/leeovery/kit/internal/kinds"
 	"github.com/leeovery/kit/internal/look"
 )
 
@@ -28,37 +27,25 @@ type rawLine struct {
 	at, line string
 }
 
-// toolsOfRows are the tools the rows' steps run, as the person knows them,
-// for the rows whose kinds all say they run the same one, and that hold no
-// step of kit's own.
-var toolsOfRows = func() map[string]string {
-	tools := map[string]string{}
-	for _, row := range applyRows {
-		if _, own := rowSteps[row]; own {
-			continue
-		}
-		var said []string
-		for _, d := range kinds.All {
-			if d.Row == row {
-				said = append(said, d.Tool)
-			}
-		}
-		slices.Sort(said)
-		if said = slices.Compact(said); len(said) == 1 && said[0] != "" {
-			tools[row] = said[0]
-		}
-	}
-	return tools
-}()
-
 // rawKeys are the keys the raw view reads, at its heading's right end.
 var rawKeys = []look.Key{{Key: "↑↓", Does: "scroll"}, {Key: "esc", Does: "back to the log"}}
 
-// ownOutput is what row's raw view is: its tool's own output, or, without
-// one, its own.
-func ownOutput(row string) string {
-	if tool, ok := toolsOfRows[row]; ok {
-		return tool + "'s own output"
+// ownOutput is what row's raw view is: its tool's own output, when every
+// step in it says it runs the same tool, as Homebrew's formulae do; or,
+// without one, its own.
+func (p *Pretty) ownOutput(row string) string {
+	var tools []string
+	for _, r := range p.shownRows() {
+		if r.name != row {
+			continue
+		}
+		for _, s := range r.steps {
+			tools = append(tools, s.Tool)
+		}
+	}
+	slices.Sort(tools)
+	if tools = slices.Compact(tools); len(tools) == 1 && tools[0] != "" {
+		return tools[0] + "'s own output"
 	}
 	return "its own output"
 }
@@ -144,11 +131,11 @@ func (p *Pretty) paneHeading(w int) string {
 	row := p.keys.chosen
 	switch {
 	case p.keys.raw:
-		return headed(look.Header(row+" · "+ownOutput(row), ""), w, rawKeys...)
+		return headed(look.Header(row+" · "+p.ownOutput(row), ""), w, rawKeys...)
 	case row == "":
 		return look.Header("Log", "")
 	case p.hasRaw(row):
-		return headed(look.Header("Log · "+row, ""), w, look.Key{Key: "r", Does: ownOutput(row)})
+		return headed(look.Header("Log · "+row, ""), w, look.Key{Key: "r", Does: p.ownOutput(row)})
 	}
 	return look.Header("Log · "+row, "")
 }

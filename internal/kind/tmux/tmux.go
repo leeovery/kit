@@ -34,10 +34,13 @@ type Tmux struct {
 	System string
 }
 
+// kindName names the kind.
+const kindName = "tmux"
+
 // Descriptor is tmux's plugins' kind, as kit's shared code knows it: they're
 // declared in tmux's config, not a section of kit's.
 var Descriptor = kind.Descriptor{
-	Name:  "tmux",
+	Name:  kindName,
 	Label: "tmux plugins",
 	Group: kind.Packages,
 	Help: &kind.Help{
@@ -59,7 +62,7 @@ func New(run runner.Runner, home, configHome string) *Tmux {
 	return &Tmux{run: run, home: home, configHome: configHome, System: "/etc/tmux.conf"}
 }
 
-func (*Tmux) Name() string    { return Descriptor.Name }
+func (*Tmux) Name() string    { return kindName }
 func (*Tmux) Program() string { return "tmux" }
 
 // Command is none: the plugins are read from tmux's config and cloned with

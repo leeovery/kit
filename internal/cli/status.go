@@ -131,7 +131,8 @@ type run struct {
 }
 
 // remember notes, in the drift record, the drift the run's checks found:
-// what's new, and what's gone.
+// what's new, and what's gone; and it forgets the kinds the run doesn't
+// look after.
 func (r *run) remember(report engine.Report) error {
 	results := make(map[string]check.Result)
 	for _, name := range r.drift {
@@ -139,7 +140,11 @@ func (r *run) remember(report engine.Report) error {
 			results[name] = res
 		}
 	}
-	return drift.Update(r.stateDir, func(rec *drift.Record) { rec.Seen(results, r.now) })
+	unmanaged := slices.DeleteFunc(slices.Clone(r.allKinds), func(k string) bool { return slices.Contains(r.kinds, k) })
+	return drift.Update(r.stateDir, func(rec *drift.Record) {
+		rec.Seen(results, r.now)
+		rec.Forget(unmanaged)
+	})
 }
 
 func (r *run) options(a *app, only []string) engine.Options {
@@ -357,12 +362,12 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 			continue
 		}
 		step := kind.Placed(k, list, func() kind.Placing { return r.placing[d.Name] }, d.Needs...)
-		step.Title, step.Area = d.Label, steps.AreaDrift
+		step.Title, step.Area, step.Row, step.Tool = d.Label, steps.AreaDrift, d.Row, d.Tool
 		if unread != nil {
 			step.Check = func(context.Context) check.Result {
 				return check.Result{State: check.Failed, Reason: unread.Error()}
 			}
-		} else if program := kind.Command(k); program != "" && slices.Contains(applies, command) {
+		} else if program := kind.Command(k); program != "" && len(list.Entries) > 0 && slices.Contains(applies, command) {
 			step.Waits = append(step.Waits, engine.Wait{Thing: program, Ready: func(context.Context) bool { return runner.Has(observed, program) }})
 		}
 		for _, after := range d.After {
@@ -374,7 +379,14 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 		r.kinds = append(r.kinds, d.Name)
 		r.drift = append(r.drift, d.Name)
 		r.drifters[d.Name] = kindDrifter{k: k, list: list, held: func() []kind.Held { return r.placing[d.Name].Held }}
-		needed = r.withNeeded(needed, d, deps)
+		needed = withNeeded(needed, d, deps)
+	}
+	// One needing an administrator's password, as installing Homebrew
+	// does, asks for it with the rest.
+	for _, step := range needed {
+		if step.Admin {
+			r.adminSteps = append(r.adminSteps, step)
+		}
 	}
 	features, err := r.features()
 	if err != nil {
@@ -518,10 +530,8 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 }
 
 // withNeeded is needed, the steps the run's kinds need that are their own,
-// with those d's Setup makes that it hasn't already: one needing an
-// administrator's password, as installing Homebrew does, asks for it with
-// the rest.
-func (r *run) withNeeded(needed []engine.Step, d kind.Descriptor, deps *kind.Deps) []engine.Step {
+// with those d's Setup makes that it hasn't already, each in d's row.
+func withNeeded(needed []engine.Step, d kind.Descriptor, deps *kind.Deps) []engine.Step {
 	if d.Setup == nil {
 		return needed
 	}
@@ -529,10 +539,7 @@ func (r *run) withNeeded(needed []engine.Step, d kind.Descriptor, deps *kind.Dep
 		if slices.ContainsFunc(needed, func(s engine.Step) bool { return s.Name == step.Name }) {
 			continue
 		}
-		step.Area = steps.AreaDrift
-		if step.Admin {
-			r.adminSteps = append(r.adminSteps, step)
-		}
+		step.Area, step.Row, step.Tool = steps.AreaDrift, d.Row, d.Tool
 		needed = append(needed, step)
 	}
 	return needed

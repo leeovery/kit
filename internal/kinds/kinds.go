@@ -89,9 +89,7 @@ func Sections() []config.Section {
 	for _, group := range fileOrder {
 		for _, d := range All {
 			if d.Section != nil && d.Group == group {
-				s := *d.Section
-				s.Kind = d.Name
-				out = append(out, s)
+				out = append(out, *d.Section)
 			}
 		}
 	}

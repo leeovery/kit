@@ -21,13 +21,16 @@ type GH struct {
 	run runner.Runner
 }
 
+// kindName names the kind.
+const kindName = "gh"
+
 // Descriptor is the GitHub CLI's extensions' kind, as kit's shared code
 // knows it.
 var Descriptor = kind.Descriptor{
-	Name:    "gh",
+	Name:    kindName,
 	Label:   "GitHub extensions",
 	Group:   kind.Packages,
-	Section: &config.Section{Header: "github extensions", Form: config.Names, Sorted: true, Held: true},
+	Section: &config.Section{Kind: kindName, Header: "github extensions", Form: config.Names, Sorted: true, Held: true},
 	Help: &kind.Help{
 		What:   "The GitHub CLI's extensions",
 		Add:    "Install GitHub CLI extensions, as owner/repo, and declare them",
@@ -42,7 +45,7 @@ func New(run runner.Runner) *GH {
 	return &GH{run: run}
 }
 
-func (*GH) Name() string    { return Descriptor.Name }
+func (*GH) Name() string    { return kindName }
 func (*GH) Program() string { return "gh" }
 
 // Installed lists the extensions installed from repositories, by

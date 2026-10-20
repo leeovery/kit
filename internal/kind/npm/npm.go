@@ -28,12 +28,15 @@ type NPM struct {
 	home string
 }
 
+// kindName names the kind.
+const kindName = "npm"
+
 // Descriptor is npm's global packages' kind, as kit's shared code knows it.
 var Descriptor = kind.Descriptor{
-	Name:    "npm",
+	Name:    kindName,
 	Label:   "npm packages",
 	Group:   kind.Packages,
-	Section: &config.Section{Header: "npm packages", Form: config.Names, Sorted: true, Held: true},
+	Section: &config.Section{Kind: kindName, Header: "npm packages", Form: config.Names, Sorted: true, Held: true},
 	Help: &kind.Help{
 		What:   "npm's global packages",
 		Add:    "Install global npm packages, and declare them",
@@ -48,7 +51,7 @@ func New(run runner.Runner, home string) *NPM {
 	return &NPM{run: run, home: home}
 }
 
-func (*NPM) Name() string    { return Descriptor.Name }
+func (*NPM) Name() string    { return kindName }
 func (*NPM) Program() string { return "npm" }
 
 func (n *NPM) npm(ctx context.Context, timeout time.Duration, args ...string) (runner.Result, error) {

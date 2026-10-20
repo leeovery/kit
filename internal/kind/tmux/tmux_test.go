@@ -81,8 +81,6 @@ func TestDeclared(t *testing.T) {
 	}
 }
 
-// The plugins are read from tmux's config and cloned with git: no command
-// of tmux's is waited for.
 // tmux's plugins are declared at all while its config declares one, or
 // starts TPM; not without either, nor without a config.
 func TestDeclaredAtAll(t *testing.T) {
@@ -108,6 +106,8 @@ func TestDeclaredAtAll(t *testing.T) {
 	}
 }
 
+// The plugins are read from tmux's config and cloned with git: no command
+// of tmux's is waited for.
 func TestCommandIsNone(t *testing.T) {
 	if got := kind.Command(newTmux(t, runnertest.New(t), t.TempDir())); got != "" {
 		t.Errorf("Command() = %q, want none", got)

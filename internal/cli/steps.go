@@ -271,7 +271,7 @@ func (r *run) placeLines(all []engine.Step) {
 		}
 		for _, other := range sharing.Shares() {
 			for _, thing := range r.placing[other].First {
-				p.Behind = append(p.Behind, engine.Wait{Step: other, Thing: thing, Title: kinds.Label(other), Ready: r.installed(other, thing)})
+				p.Behind = append(p.Behind, engine.Wait{Step: other, Thing: thing, Ready: r.installed(other, thing)})
 			}
 		}
 		r.placing[name] = p
@@ -311,7 +311,7 @@ func (r *run) heldSections(list config.List, names map[string]bool) (held []kind
 		}
 		var waits []engine.Wait
 		for _, step := range after {
-			waits = append(waits, engine.Wait{Step: step, Title: kinds.Label(step)})
+			waits = append(waits, engine.Wait{Step: step})
 		}
 		held = append(held, kind.Held{Hold: e.Hold, Waits: slices.Concat(waits, comesAfter, secrets), Env: env})
 		things = append(things, comesAfter...)

@@ -46,6 +46,12 @@ type Step struct {
 	// Part is what the step counts towards in a view rolling its area up:
 	// Packages, Settings, Files, Secrets, or the config repository.
 	Part string `json:",omitempty"`
+	// Row is the row of applying's screen it sits in, when it says, as a
+	// kind's step does: else the face places it.
+	Row string `json:",omitempty"`
+	// Tool is what its commands run, as the person knows it, when it says:
+	// Homebrew.
+	Tool string `json:",omitempty"`
 	// Waiting is what the step says while it waits its turn, when that's
 	// more than that it's waiting: what it'll need of you, or do.
 	Waiting string `json:",omitempty"`

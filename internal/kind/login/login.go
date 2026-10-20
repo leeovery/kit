@@ -101,12 +101,15 @@ type Login struct {
 	AppDirs []string
 }
 
+// kindName names the kind.
+const kindName = "login-item"
+
 // Descriptor is login items' kind, as kit's shared code knows it.
 var Descriptor = kind.Descriptor{
-	Name:    "login-item",
+	Name:    kindName,
 	Label:   "macOS login items",
 	Group:   kind.Packages,
-	Section: &config.Section{Header: "macos login items", Form: config.Names, Sorted: true, Held: true},
+	Section: &config.Section{Kind: kindName, Header: "macos login items", Form: config.Names, Sorted: true, Held: true},
 	Help: &kind.Help{
 		What:   "macOS login items",
 		Add:    "Add login items, by app, and declare them",
@@ -124,7 +127,7 @@ func New(run runner.Runner, home string) *Login {
 	return &Login{run: run, home: home, AppDirs: []string{"/Applications", "/Applications/Utilities", filepath.Join(home, "Applications")}}
 }
 
-func (*Login) Name() string    { return Descriptor.Name }
+func (*Login) Name() string    { return kindName }
 func (*Login) Program() string { return "osascript" }
 
 // item is a login item, or an app, as the scripts tell of it.

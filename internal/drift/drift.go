@@ -123,6 +123,19 @@ func (r *Record) Seen(results map[string]check.Result, now time.Time) {
 	maps.DeleteFunc(r.Temporary, func(id string, _ time.Time) bool { return gone(id) })
 }
 
+// Forget forgets everything of the kinds named: kinds no longer looked
+// after, whose items would otherwise come back with old dates when they're
+// looked after again.
+func (r *Record) Forget(kinds []string) {
+	of := func(id string, _ time.Time) bool {
+		kind, _, _ := strings.Cut(id, ":")
+		return slices.Contains(kinds, kind)
+	}
+	maps.DeleteFunc(r.FirstSeen, of)
+	maps.DeleteFunc(r.Snoozed, of)
+	maps.DeleteFunc(r.Temporary, of)
+}
+
 // Snooze quiets the item id until SnoozeFor from now.
 func (r *Record) Snooze(id string, now time.Time) {
 	if r.Snoozed == nil {

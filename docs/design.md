@@ -51,9 +51,11 @@ kind whose things can be declared off), the steps it needs and is applied after,
 applying's screen it sits in, and how it's made from what every kind is made from (the
 runner, the home, XDG's config folder, kit's state folder, and what kinds share, as
 Homebrew's formulae and casks share Homebrew). `internal/kinds` lists them, in the order a
-run takes them; the config's parsing, the commands, the run, the reports' parts and the
-screen's rows read them from there, so adding a kind is its package and a line in that
-list, and removing one the reverse. A declarations file has the kinds' sections between
+run takes them; the config's parsing, the commands, the run and the reports' parts read
+them from there, so adding a kind is its package and a line in that list, and removing one
+the reverse. The faces don't: a kind's step, and the steps it needs, carry its row and
+tool to them, as its title does. The rows and their order are the screen's design, the
+face's own, and a kind picks one of them. A declarations file has the kinds' sections between
 the config's own (`features`, `paths` first; `prefs …`, `steps`, `manual`, `checks`,
 `hourly`, `nightly` last): the settings' first, then the packages', then the secrets', each
 in the run's order.
@@ -61,13 +63,16 @@ in the run's order.
 **A kind only when declared.** A kind is in a run (check, apply, status, drift, the record)
 only while the config has its section for the Mac, in the shared file or its own, even an
 empty one: an empty section says to look after the kind with nothing of it declared yet,
-so what's installed is drift `kit reconcile` offers. With no section, kit doesn't look at
-the kind at all, its program installed or not; tmux's plugins, declared in tmux's config,
+so what's installed is drift `kit reconcile` offers, and, with its program not installed,
+it's fine without waiting for it. With no section, kit doesn't look at the kind at all,
+its program installed or not (`kit list` of it refuses), and the drift record forgets what
+it held of it; tmux's plugins, declared in tmux's config,
 are looked after while it declares one or starts TPM. A step a kind needs, as Homebrew's
 for its formulae and casks, is in the run only with a kind needing it. `kit <kind> add`
-writes the section when there's none; removing a kind's last thing leaves its section,
-empty, when it's the last declaring the kind for the Mac (a Mac's own, the shared file
-having none, or the shared file's), so the kind's still looked after.
+writes the section when there's none, `--temp` too, so reconcile asks once the
+throwaway's time is up; removing a kind's last thing leaves its section as it was, header
+and all, empty, when it's the last declaring the kind for the Mac (a Mac's own, the shared
+file having none, or the shared file's), so the kind's still looked after.
 
 | Kind | Declared as | Found by | Install, remove |
 |---|---|---|---|

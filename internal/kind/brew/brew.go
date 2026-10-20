@@ -59,15 +59,21 @@ type Homebrew struct {
 	turn     atomic.Pointer[string]
 }
 
+// formulaeName and casksName name Homebrew's kinds.
+const (
+	formulaeName = "brew"
+	casksName    = "cask"
+)
+
 // FormulaeDescriptor and CasksDescriptor are Homebrew's formulae's and
 // casks' kinds, as kit's shared code knows them: each needs Homebrew, its
 // step made with the first in a run, and shares it with the other (Of).
 var (
 	FormulaeDescriptor = kind.Descriptor{
-		Name:    "brew",
+		Name:    formulaeName,
 		Label:   "Homebrew formulae",
 		Group:   kind.Packages,
-		Section: &config.Section{Header: "homebrew formulae", Form: config.Names, Sorted: true, Held: true},
+		Section: &config.Section{Kind: formulaeName, Header: "homebrew formulae", Form: config.Names, Sorted: true, Held: true},
 		Help: &kind.Help{
 			What:   "Homebrew's formulae",
 			Add:    "Install formulae, and declare them",
@@ -80,10 +86,10 @@ var (
 		New:   func(d *kind.Deps) kind.Kind { return Of(d).Formulae() },
 	}
 	CasksDescriptor = kind.Descriptor{
-		Name:    "cask",
+		Name:    casksName,
 		Label:   "Homebrew casks",
 		Group:   kind.Packages,
-		Section: &config.Section{Header: "homebrew casks", Form: config.Names, Sorted: true, Held: true},
+		Section: &config.Section{Kind: casksName, Header: "homebrew casks", Form: config.Names, Sorted: true, Held: true},
 		Help: &kind.Help{
 			What:   "Homebrew's casks",
 			Add:    "Install casks, and declare them",
@@ -100,17 +106,12 @@ var (
 // setup is the step Homebrew's kinds need: Homebrew's own.
 func setup(d *kind.Deps) []engine.Step { return []engine.Step{Of(d).Step()} }
 
+// shared keeps the Homebrew Homebrew's kinds share.
+var shared = kind.NewKey[*Homebrew]("Homebrew")
+
 // Of is the Homebrew the kinds made from d share.
 func Of(d *kind.Deps) *Homebrew {
-	return kind.Share(d, StepName, func() *Homebrew { return New(d.Run) })
-}
-
-// labelOf is the label of Homebrew's kind named name.
-func labelOf(name string) string {
-	if name == CasksDescriptor.Name {
-		return CasksDescriptor.Label
-	}
-	return FormulaeDescriptor.Label
+	return kind.Share(d, shared, func() *Homebrew { return New(d.Run) })
 }
 
 // New returns Homebrew, driven through run.
@@ -297,7 +298,7 @@ func (h *Homebrew) take(ctx context.Context, kindName string) (giveBack func()) 
 	if !h.changing.TryLock() {
 		holder := "Homebrew"
 		if name := h.turn.Load(); name != nil {
-			holder = labelOf(*name)
+			holder = engine.Title(ctx, *name)
 		}
 		resume := kind.Waiting(ctx, holder)
 		h.changing.Lock()
@@ -434,7 +435,7 @@ func (h *Homebrew) lines(ctx context.Context, args ...string) ([]string, error) 
 
 type formulae struct{ *Homebrew }
 
-func (formulae) Name() string    { return FormulaeDescriptor.Name }
+func (formulae) Name() string    { return formulaeName }
 func (formulae) Program() string { return "brew" }
 
 // Installed lists the formulae installed, by full name, from three listings
@@ -548,7 +549,7 @@ func lastPart(name string) string {
 
 type casks struct{ *Homebrew }
 
-func (casks) Name() string    { return CasksDescriptor.Name }
+func (casks) Name() string    { return casksName }
 func (casks) Program() string { return "brew" }
 
 // NeedsAdmin finds which of names install through a package or an

@@ -25,13 +25,16 @@ type Composer struct {
 	run runner.Runner
 }
 
+// kindName names the kind.
+const kindName = "composer"
+
 // Descriptor is Composer's global packages' kind, as kit's shared code
 // knows it.
 var Descriptor = kind.Descriptor{
-	Name:    "composer",
+	Name:    kindName,
 	Label:   "Composer packages",
 	Group:   kind.Packages,
-	Section: &config.Section{Header: "composer packages", Form: config.Names, Sorted: true, Held: true},
+	Section: &config.Section{Kind: kindName, Header: "composer packages", Form: config.Names, Sorted: true, Held: true},
 	Help: &kind.Help{
 		What:   "Composer's global packages",
 		Add:    "Install global Composer packages, and declare them",
@@ -46,7 +49,7 @@ func New(run runner.Runner) *Composer {
 	return &Composer{run: run}
 }
 
-func (*Composer) Name() string    { return Descriptor.Name }
+func (*Composer) Name() string    { return kindName }
 func (*Composer) Program() string { return "composer" }
 
 func (c *Composer) global(ctx context.Context, timeout time.Duration, args ...string) (runner.Result, error) {

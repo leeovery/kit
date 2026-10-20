@@ -28,20 +28,20 @@ var newMac = []event.Step{
 	{Name: "boot-mac", Title: "This Mac", Area: boot.AreaBooted},
 	{Name: "boot-homebrew", Title: "Homebrew", Area: boot.AreaBooted},
 	{Name: "boot-kit-config", Title: "kit-config", Area: boot.AreaBooted},
-	{Name: "homebrew", Title: "Homebrew", Area: "Drift"},
+	{Name: "homebrew", Title: "Homebrew", Area: "Drift", Row: "Homebrew formulae", Tool: "Homebrew"},
 	{Name: "file", Title: "Linked files", Area: "Drift", Part: render.PartFiles},
 	{Name: "path", Title: "Shell PATH", Area: "Drift"},
 	{Name: "touch-id-sudo", Title: "Touch ID for sudo", Area: "Drift"},
-	{Name: "defaults", Title: "macOS settings", Area: "Drift"},
-	{Name: "power", Title: "Power settings", Area: "Drift"},
-	{Name: "brew", Title: "Homebrew formulae", Area: "Drift", Waits: []string{"homebrew"}},
-	{Name: "cask", Title: "Homebrew casks", Area: "Drift", Waits: []string{"homebrew"}},
-	{Name: "mas", Title: "App Store apps", Area: "Drift"},
-	{Name: "npm", Title: "npm packages", Area: "Drift", Waits: []string{"brew"}},
-	{Name: "composer", Title: "Composer packages", Area: "Drift", Waits: []string{"brew"}},
-	{Name: "login-item", Title: "macOS login items", Area: "Drift", Waits: []string{"cask", "mas"}},
-	{Name: "secret", Title: "Secrets", Area: "Drift", Waits: []string{"1password"}},
-	{Name: "git-config", Title: "git config", Area: "Drift", Waits: []string{"secret"}},
+	{Name: "defaults", Title: "macOS settings", Area: "Drift", Row: "Mac settings"},
+	{Name: "power", Title: "Power settings", Area: "Drift", Row: "Mac settings"},
+	{Name: "brew", Title: "Homebrew formulae", Area: "Drift", Row: "Homebrew formulae", Tool: "Homebrew", Waits: []string{"homebrew"}},
+	{Name: "cask", Title: "Homebrew casks", Area: "Drift", Row: "Homebrew casks", Tool: "Homebrew", Waits: []string{"homebrew"}},
+	{Name: "mas", Title: "App Store apps", Area: "Drift", Row: "App Store apps"},
+	{Name: "npm", Title: "npm packages", Area: "Drift", Row: "Developer tools", Waits: []string{"brew"}},
+	{Name: "composer", Title: "Composer packages", Area: "Drift", Row: "Developer tools", Waits: []string{"brew"}},
+	{Name: "login-item", Title: "macOS login items", Area: "Drift", Row: "Login items", Waits: []string{"cask", "mas"}},
+	{Name: "secret", Title: "Secrets", Area: "Drift", Row: "Secrets", Waits: []string{"1password"}},
+	{Name: "git-config", Title: "git config", Area: "Drift", Row: "Git", Waits: []string{"secret"}},
 	{Name: "config", Title: "kit-config edits", Area: "Drift"},
 	{Name: "config-sync", Title: "Sync", Area: "Config"},
 	{Name: "time-machine", Title: "Time Machine", Area: "Backups"},
@@ -426,9 +426,10 @@ func TestApplyingScreenTakesOverFromTheArrival(t *testing.T) {
 	}
 }
 
-// Each of kit's steps is in a row of its own kind's or area's, never an
-// app's; a step of the user's own is in Your steps whatever it's called; a
-// step by hand in none; a step kit doesn't know falls back on its area.
+// Each of kit's steps is in the row it says, as a kind's does, or one of its
+// own or its area's, never an app's; a step of the user's own is in Your
+// steps whatever it's called; a step by hand in none; a step kit doesn't
+// know falls back on its area.
 func TestApplyingRowsByKitsOwnStructure(t *testing.T) {
 	for _, tt := range []struct {
 		step  event.Step
@@ -439,14 +440,10 @@ func TestApplyingRowsByKitsOwnStructure(t *testing.T) {
 		{event.Step{Name: "full-disk-access", Area: "Backups"}, "This Mac", true},
 		{event.Step{Name: "oh-my-zsh", Area: "Drift"}, "Files and shell", true},
 		{event.Step{Name: "oh-my-zsh", Area: "Steps"}, "Your steps", true},
-		{event.Step{Name: "spotlight-exclusion", Area: "Drift"}, "Mac settings", true},
-		{event.Step{Name: "secret", Area: "Drift"}, "Secrets", true},
-		{event.Step{Name: "homebrew", Area: "Drift"}, "Homebrew formulae", true},
-		{event.Step{Name: "cask", Area: "Drift"}, "Homebrew casks", true},
-		{event.Step{Name: "mas", Area: "Drift"}, "App Store apps", true},
-		{event.Step{Name: "claude-mcp", Area: "Drift"}, "Developer tools", true},
+		{event.Step{Name: "secret", Area: "Drift", Row: "Secrets"}, "Secrets", true},
+		{event.Step{Name: "a-new-kind", Area: "Drift", Row: "Developer tools"}, "Developer tools", true},
+		{event.Step{Name: "oh-my-zsh", Area: "Steps", Row: "Developer tools"}, "Your steps", true},
 		{event.Step{Name: "config-private", Area: "Config"}, "Git", true},
-		{event.Step{Name: "login-item", Area: "Drift"}, "Login items", true},
 		{event.Step{Name: "checks", Area: "Checks"}, "Your steps", true},
 		{event.Step{Name: "scratch", Area: "Mac"}, "Backups", true},
 		{event.Step{Name: "nightly", Area: "Jobs"}, "Backups", true},
@@ -481,9 +478,9 @@ func rowsRun(steps []event.Step, events ...event.Event) []event.Event {
 // Each in its state's mark and colour.
 func TestApplyingRowSays(t *testing.T) {
 	tools := []event.Step{
-		{Name: "homebrew", Title: "Homebrew", Area: "Drift"},
-		{Name: "brew", Title: "Homebrew formulae", Area: "Drift", Waits: []string{"homebrew"}},
-		{Name: "secret", Title: "Secrets", Area: "Drift", Waits: []string{"1password"}},
+		{Name: "homebrew", Title: "Homebrew", Area: "Drift", Row: "Homebrew formulae", Tool: "Homebrew"},
+		{Name: "brew", Title: "Homebrew formulae", Area: "Drift", Row: "Homebrew formulae", Tool: "Homebrew", Waits: []string{"homebrew"}},
+		{Name: "secret", Title: "Secrets", Area: "Drift", Row: "Secrets", Waits: []string{"1password"}},
 		{Name: "time-machine", Title: "Time Machine", Area: "Backups"},
 		{Name: "arq", Title: "Arq", Area: "Backups"},
 		{Name: "fonts", Title: "fonts", Area: "Steps"},
@@ -642,7 +639,7 @@ func TestApplyingLog(t *testing.T) {
 func TestApplyingCardUpAgain(t *testing.T) {
 	steps := []event.Step{
 		{Name: "appstore", Title: "appstore", Area: "Manual", ByHand: []event.Hand{{Name: "appstore", Title: "Sign in to the App Store"}}},
-		{Name: "mas", Title: "App Store apps", Area: "Drift", Waits: []string{"appstore"}},
+		{Name: "mas", Title: "App Store apps", Area: "Drift", Row: "App Store apps", Waits: []string{"appstore"}},
 	}
 	card := event.NeedsYou{Step: "appstore", Item: "appstore", Title: "Sign in to the App Store", Steps: []string{"Open the App Store", "Store › Sign In, with your Apple Account"}}
 	first, second := card, card
@@ -796,14 +793,14 @@ func TestApplyingPanelSaysWhy(t *testing.T) {
 		}
 		_ = face.Close()
 	}
-	steps := []event.Step{{Name: "cask", Title: "Homebrew casks", Area: "Drift"}, {Name: "switchboard", Title: "switchboard", Area: "Manual"}}
+	steps := []event.Step{{Name: "cask", Title: "Homebrew casks", Area: "Drift", Row: "Homebrew casks", Tool: "Homebrew"}, {Name: "switchboard", Title: "switchboard", Area: "Manual"}}
 	face, out, _ := applyAt(160, 64, time.Minute, rowsRun(steps, event.StepStarted{Step: "switchboard", Doing: "applying"},
 		event.NeedsYou{Step: "switchboard", Item: "switchboard", Title: "Set up switchboard"}))
 	defer func() { _ = face.Close() }()
 	if _, right := panes(screen(out.String()), 160); right[3] != "      Nothing waits for this: the rest of the run carries on meanwhile." {
 		t.Errorf("a card nothing waits for says %q", right[3])
 	}
-	steps = []event.Step{{Name: "secret", Title: "Secrets", Area: "Drift", Waits: []string{"1password"}},
+	steps = []event.Step{{Name: "secret", Title: "Secrets", Area: "Drift", Row: "Secrets", Waits: []string{"1password"}},
 		{Name: "1password", Title: "1password", Area: "Manual"}, {Name: "manual", Title: "By hand", Area: "Manual", Waits: []string{"secret", "1password"}}}
 	held, out, _ := applyAt(160, 64, time.Minute, rowsRun(steps, event.StepStarted{Step: "1password", Doing: "applying"},
 		event.NeedsYou{Step: "1password", Item: "1password", Title: "Sign in to 1Password"}))
@@ -1075,12 +1072,12 @@ func TestApplyingGivesTheScreenBack(t *testing.T) {
 // a few things alike under it are one line, counted.
 func TestApplyingLogSaysWhatEachDid(t *testing.T) {
 	steps := []event.Step{
-		{Name: "secret", Title: "Secrets", Area: "Drift", Part: "Secrets", Did: "synced"},
-		{Name: "defaults", Title: "macOS settings", Area: "Drift", Part: "Settings", Did: "set"},
+		{Name: "secret", Title: "Secrets", Area: "Drift", Row: "Secrets", Part: "Secrets", Did: "synced"},
+		{Name: "defaults", Title: "macOS settings", Area: "Drift", Row: "Mac settings", Part: "Settings", Did: "set"},
 		{Name: "file-sharing", Title: "File Sharing", Area: "Drift", Part: "Settings"},
 		{Name: "scratch", Title: "Scratch volume", Area: "Mac"},
 		{Name: "fonts", Title: "fonts", Area: "Steps"},
-		{Name: "claude-mcp", Title: "Claude MCP", Area: "Drift", Part: "Packages", Did: "installed"},
+		{Name: "claude-mcp", Title: "Claude MCP", Area: "Drift", Row: "Developer tools", Part: "Packages", Did: "installed"},
 	}
 	install := func(names ...string) []check.Item {
 		var items []check.Item
