@@ -3,42 +3,44 @@ package cli_test
 import (
 	"strings"
 	"testing"
-	"time"
 )
 
-// A feature switched on brings its check into the run; one kit doesn't know
-// is refused, saying where.
-func TestFeaturesBringTheirChecks(t *testing.T) {
+// A feature switched on brings its steps into the run; one kit doesn't
+// know is refused, saying where; a backup tool is refused as a feature,
+// saying where it goes now and what its line there is.
+func TestFeaturesBringTheirSteps(t *testing.T) {
 	w := laptopWorld(t)
-	w.writeSection(t, "shared", "features", "arq\n")
-	w.fake.On("/Applications/Arq.app/Contents/Resources/arqc", "stats").Prints(`{"backupPlans": [{"name": "User data", "schedule": {"type": "Daily"}, "lastBackedUp": "` + w.now.Add(-2*time.Hour).UTC().Format(time.RFC3339) + `"}]}`)
-	out, _, _ := w.run(t, "status", "arq")
-	if !strings.Contains(out, "arq ok last backup 01:04\n") {
-		t.Errorf("kit status arq printed\n%s", out)
-	}
-	if out, _, _ := w.run(t, "status", "time-machine"); strings.Contains(out, "time-machine ok") {
-		t.Errorf("time-machine checked though not switched on:\n%s", out)
+	w.writeSection(t, "laptop", "features", "remote-login\n")
+	w.fake.On("launchctl", "print-disabled", "system").Prints(`disabled services = {` + "\n" + `	"com.openssh.sshd" => enabled` + "\n}\n")
+	if out, _, _ := w.run(t, "status", "remote-login"); !strings.Contains(out, "remote-login ok on\n") {
+		t.Errorf("kit status remote-login printed\n%s", out)
 	}
 
-	w.writeSection(t, "laptop", "features", "time-capsule\n")
-	_, errOut, code := w.run(t, "status")
-	if !strings.Contains(errOut, "laptop/declarations:5: kit doesn't know the feature time-capsule") || code != 2 {
-		t.Errorf("kit status printed %q, exit %d", errOut, code)
+	for _, tt := range []struct{ header, line, want string }{
+		{"features", "time-capsule\n", "laptop/declarations:5: kit doesn't know the feature time-capsule"},
+		{"features", "time-machine\n", "laptop/declarations:5: time-machine is a backup tool, so it goes in [backups] now, not [features]: its line there is time-machine"},
+		{"features --after cask:arq", "arq\n", "laptop/declarations:5: arq is a backup tool, so it goes in [backups] now, not [features]: its line there is arq --after cask:arq"},
+	} {
+		w := laptopWorld(t)
+		w.writeSection(t, "laptop", tt.header, tt.line)
+		if _, errOut, code := w.run(t, "status"); !strings.Contains(errOut, tt.want) || code != 2 {
+			t.Errorf("[%s] %s: kit status printed %q, exit %d; want %q", tt.header, tt.line, errOut, code, tt.want)
+		}
 	}
 }
 
 func TestFeatureOnAndOff(t *testing.T) {
 	w := laptopWorld(t)
-	w.expectSync([]string{"laptop/declarations"}, "kit feature on time-machine (laptop)")
-	out, errOut, code := w.run(t, "feature", "on", "time-machine")
-	if code != 0 || !strings.Contains(out, "time-machine ok on, in laptop\n") {
+	w.expectSync([]string{"laptop/declarations"}, "kit feature on remote-login (laptop)")
+	out, errOut, code := w.run(t, "feature", "on", "remote-login")
+	if code != 0 || !strings.Contains(out, "remote-login ok on, in laptop\n") {
 		t.Fatalf("kit feature on printed\n%s%s exit %d", out, errOut, code)
 	}
-	if got := w.readSection(t, "laptop", "features"); got != "time-machine\n" {
+	if got := w.readSection(t, "laptop", "features"); got != "remote-login\n" {
 		t.Errorf("[features] = %q", got)
 	}
-	w.expectSync([]string{"laptop/declarations"}, "kit feature off time-machine (laptop)")
-	if _, errOut, code := w.run(t, "feature", "off", "time-machine"); code != 0 {
+	w.expectSync([]string{"laptop/declarations"}, "kit feature off remote-login (laptop)")
+	if _, errOut, code := w.run(t, "feature", "off", "remote-login"); code != 0 {
 		t.Fatalf("kit feature off: %s exit %d", errOut, code)
 	}
 	if got := w.readSection(t, "laptop", "features"); got != "" {
@@ -46,6 +48,9 @@ func TestFeatureOnAndOff(t *testing.T) {
 	}
 	if _, errOut, code := w.run(t, "feature", "on", "time-capsule"); !strings.Contains(errOut, "kit doesn't know the feature time-capsule") || code != 2 {
 		t.Errorf("kit feature on time-capsule printed %q, exit %d", errOut, code)
+	}
+	if _, errOut, code := w.run(t, "feature", "on", "time-machine"); !strings.Contains(errOut, "time-machine is a backup tool, so it goes in [backups] now, not [features]") || code != 2 {
+		t.Errorf("kit feature on time-machine printed %q, exit %d", errOut, code)
 	}
 }
 
@@ -61,52 +66,16 @@ func TestOwnChecksRun(t *testing.T) {
 	}
 }
 
-// A feature's section can say what it waits for: applying, its check waits
-// till the cask it checks is in, which installs first, rather than reading
-// "not installed" while the cask waits its turn. Switched off, it leaves
-// its section, which goes once it's empty.
-func TestAFeatureWaitsForWhatItChecks(t *testing.T) {
-	w := laptopWorld(t)
-	w.writeSection(t, "laptop", "homebrew casks", "arq\nzoom\n")
-	w.writeSection(t, "laptop", "features --after cask:arq", "arq\n")
-	f := w.fake
-	f.On("brew", "list", "--cask", "--full-name", "-1").Prints("ghostty\nfirefox\n").Does(func() { time.Sleep(50 * time.Millisecond) })
-	f.On("brew", "info", "--json=v2", "--cask", "arq", "zoom").Prints(`{"formulae": [], "casks": [{"token": "arq", "full_token": "arq", "artifacts": [{"app": ["Arq.app"]}]}, {"token": "zoom", "full_token": "zoom", "artifacts": [{"app": ["zoom.us.app"]}]}]}`)
-	f.On("sudo", "-n", "true").Exits(1)
-	f.On("brew", "update", "--quiet")
-	f.On("brew", "install", "--cask", "arq")
-	f.On("brew", "install", "--cask", "zoom")
-	arqc := "/Applications/Arq.app/Contents/Resources/arqc"
-	f.On(arqc, "stats").Prints(`{"backupPlans": [{"name": "User data", "schedule": {"type": "Daily"}, "lastBackedUp": "` + w.now.Add(-2*time.Hour).UTC().Format(time.RFC3339) + `"}]}`)
-
-	out, errOut, _ := w.run(t, "apply")
-	calls := w.fake.Calls()
-	if !before(calls, "brew install --cask arq", "brew install --cask zoom") || !before(calls, "brew install --cask arq", arqc+" stats") {
-		t.Errorf("ran %q: want arq's cask installed on its own, first, then Arq checked", calls)
-	}
-	if !strings.Contains(out, "arq ok last backup 01:04\n") {
-		t.Errorf("kit apply printed\n%s%s\nwant Arq checked once its cask was in", out, errOut)
-	}
-
-	w.expectSync([]string{"laptop/declarations"}, "kit feature off arq (laptop)")
-	if _, errOut, code := w.run(t, "feature", "off", "arq"); code != 0 {
-		t.Fatalf("kit feature off arq: %s exit %d", errOut, code)
-	}
-	if got := w.readSection(t, "laptop", "features --after cask:arq"); got != "" {
-		t.Errorf("[features --after cask:arq] = %q, want it gone", got)
-	}
-}
-
 // A feature's section placed after what isn't a step, or a thing of a step
 // that isn't a kind's, fails the feature's steps, saying so.
 func TestAFeatureWaitingForWhatIsntThere(t *testing.T) {
 	for _, after := range []string{"nothing", "disk:x"} {
 		t.Run(after, func(t *testing.T) {
 			w := laptopWorld(t)
-			w.writeSection(t, "laptop", "features --after "+after, "arq\n")
-			out, _, code := w.run(t, "status", "arq")
-			if want := "arq failed laptop/declarations: [features --after " + after + "]: it comes after " + after + ", which isn't a step\n"; !strings.Contains(out, want) || code != 1 {
-				t.Errorf("kit status arq printed\n%s\nexit %d; want %q", out, code, want)
+			w.writeSection(t, "laptop", "features --after "+after, "remote-login\n")
+			out, _, code := w.run(t, "status", "remote-login")
+			if want := "remote-login failed laptop/declarations: [features --after " + after + "]: it comes after " + after + ", which isn't a step\n"; !strings.Contains(out, want) || code != 1 {
+				t.Errorf("kit status remote-login printed\n%s\nexit %d; want %q", out, code, want)
 			}
 		})
 	}

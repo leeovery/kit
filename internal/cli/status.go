@@ -348,7 +348,13 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 	// kindSteps are the kinds' steps; needed, the steps they need that are
 	// their own, as Homebrew's.
 	var kindSteps, needed []engine.Step
-	deps := &kind.Deps{Run: observed, Home: home, ConfigHome: a.configHome(), StateDir: dirs.State}
+	backups, err := r.backups()
+	if err != nil {
+		_ = face.Close()
+		_ = log.Close()
+		return nil, err
+	}
+	deps := &kind.Deps{Run: observed, Home: home, ConfigHome: a.configHome(), StateDir: dirs.State, Backups: backupNames(backups)}
 	for _, d := range kinds.All {
 		k := d.New(deps)
 		list, unread, err := declared(cfg, k, machine)
@@ -425,11 +431,8 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 		}
 	}
 	var checks []engine.Step
-	if features.on(steps.FeatureTimeMachine) {
-		checks = append(checks, feature(steps.FeatureTimeMachine, steps.TimeMachine(observed, a.Now)))
-	}
-	if features.on(steps.FeatureArq) {
-		checks = append(checks, feature(steps.FeatureArq, steps.Arq(observed, a.Now)))
+	for _, b := range backups {
+		checks = append(checks, steps.Backup(observed, b.Driver, a.Now))
 	}
 	var settingsToCome func() bool
 	var settings []engine.Step
@@ -513,6 +516,7 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 	if err == nil {
 		r.steps = slices.Concat(base, scripts, byHandOwn)
 		r.placeFeatures(r.steps, features, featured)
+		r.placeBackups(r.steps, backups)
 		r.placeLines(r.steps)
 		r.placeByHand(r.steps)
 		r.pipeline, err = engine.New(r.steps...)
@@ -617,6 +621,9 @@ func (r *run) features() (featuresOn, error) {
 	}
 	on := make(featuresOn, len(list.Entries))
 	for _, e := range list.Entries {
+		if err := movedToBackups(e); err != nil {
+			return nil, err
+		}
 		if !slices.Contains(steps.Features, e.Name) {
 			return nil, fmt.Errorf("%s: kit doesn't know the feature %s: one of %s", e.Pos(), e.Name, strings.Join(steps.Features, ", "))
 		}

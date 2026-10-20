@@ -56,7 +56,7 @@ them from there, so adding a kind is its package and a line in that list, and re
 the reverse. The faces don't: a kind's step, and the steps it needs, carry its row and
 tool to them, as its title does. The rows and their order are the screen's design, the
 face's own, and a kind picks one of them. A declarations file has the kinds' sections between
-the config's own (`features`, `paths` first; `prefs …`, `steps`, `manual`, `checks`,
+the config's own (`features`, `backups`, `paths` first; `prefs …`, `steps`, `manual`, `checks`,
 `hourly`, `nightly` last): the settings' first, then the packages', then the secrets', each
 in the run's order.
 
@@ -88,7 +88,7 @@ file having none, or the shared file's), so the kind's still looked after.
 | `claude-skill` | `[claude skills]`: agntc's key for an install, a GitHub repo and what in it, `github/gh-stack/gh-stack` (the skill of that name; a path, the pack there; the repo alone when it's one skill or pack), `@version` or a range optional | agntc's record, `~/.agntc/manifest.json`, read directly (`agntc list` asks every repo what's newer) | `agntc add -g` (`--all` for a repo alone, `--skill` for a name, else `--pack`), `agntc remove -g -y`; `--json` for agntc's own words when one fails |
 | `git-config` | `[git config]`: a key, then its value as one word, as `git config --global` takes them (`alias.st "status -sb"`) | `git config --global --list` | `git config --global --replace-all`, `--unset-all` |
 | `power` | `[power settings]`: pmset's words, the source then the setting and value (`-c sleep 0`; `-a` every source, `-b` the battery, `-u` a UPS), named `charger:sleep` | `pmset -g custom`, by source | `sudo pmset`; undeclaring leaves the value |
-| `backup-exclusion` | `[backup exclusions]`: a path a line, `~` and `*` globs, expanded on every check (a plain path stands for itself, there or not) | Time Machine's fixed-path exclusions (`SkipPaths`), and each glob match excluded where it is (`tmutil isexcluded`); Arq inherits both | a plain path: `sudo tmutil addexclusion -p` (Full Disk Access for the terminal); a glob's match: `tmutil addexclusion`, no password, so `kit nightly` does it unattended; `removeexclusion -p` |
+| `backup-exclusion` | `[backup exclusions]`: a path a line, `~` and `*` globs, expanded on every check (a plain path stands for itself, there or not) | what the backup tools the Mac lists in `[backups]` keep out, each through its driver (a path declared kept out while every one keeps it out): Time Machine's fixed-path exclusions (`SkipPaths`), and each glob match excluded where it is (`tmutil isexcluded`); Arq keeps none of its own, following Time Machine's list ("Skip items excluded by Time Machine rules"), so Arq alone has Time Machine's written, no backup disk needed; with no tool listed the check fails, saying so | through each tool's driver, Time Machine's: a plain path `sudo tmutil addexclusion -p` (Full Disk Access for the terminal); a glob's match `tmutil addexclusion`, no password, so `kit nightly` does it unattended; `removeexclusion -p` |
 | `spotlight-exclusion` | `[spotlight exclusions]`: a folder a line | Spotlight asked for files in each folder (`mdfind -count`); its own list is root's alone, so nothing extra is found | added to Spotlight's privacy list through sudo, taking effect after a restart (kit remembers, and says so); removing is System Settings' |
 | `secret` | `[secrets op://vault/item]`, a section for each item a file keeps secrets in (the header says where they are; several spread them across items): what it fills (a variable's name, or a file's path) then the field or attachment, short (`GitHub/token`); a plain `[secrets]` for references in full (`op://vault/item/field`); a name once a file. `--mode 644` for a file's. GitHub Actions secrets aren't kit's: they're a repository's, not the Mac's | `~/.secrets.zsh`'s exports, the files with their modes: never 1Password, which would ask for a fingerprint each hour | a sync: every value read from 1Password in one run of op (`op inject`, the references on its input, its output kept from the log), as 1Password has the person approve each run, each in a session of its own; should it fail, the values read in halves, down to each alone with `op read`; `~/.secrets.zsh` written whole with each value single-quoted (one that fails to read keeps its line), files written beside and renamed in; `kit secret sync` forces one. Removing takes a secret off the Mac; 1Password keeps it |
 | `defaults` | `[macos settings]`: `defaults write`'s words (`com.apple.dock tilesize -int 60`; `-currentHost` first for this host's; `-dict-add` and an entry's XML; or a value as XML), named `domain:key[:entry]` | `defaults export` of each domain | `defaults write` (through sudo for a domain under `/Library`), then the app that reads it restarted or keyboard shortcuts reloaded; `defaults delete` |
@@ -162,23 +162,47 @@ file having none, or the shared file's), so the kind's still looked after.
 
 **Features.** Each piece of kit stands alone, and is on when it's declared: a list by having
 entries (the kinds, later the folders to restore), a piece with nothing to list by a switch
-in a Mac's `[features]` section (`time-machine`, `arq`, `scratch`, `prefs`,
+in a Mac's `[features]` section (`scratch`, `prefs`,
 `oh-my-zsh`, `touch-id-sudo`, `remote-login`, `file-sharing`), so
 turning one off loses nothing that isn't its own. Built-ins are generic and lasting; what's
 specific to a user, or to the moment, goes in their config: checks of their own in
 `[checks]`, jobs of their own in `[hourly]` and `[nightly]`. `kit feature
 on|off <name>` (`--shared` for every Mac) changes one. A features section can say what its
-features wait for, `--after` alone, as a list's can: under `[features --after cask:arq]`, as
-kit applies, Arq's check waits till Arq's cask is in (installed first, as anything a step
-names is) or the casks' step has finished, rather than reading "not installed" while the cask
-waits its turn; a section placed after what isn't a step fails its features' steps, saying
-so. kit is built for its author's Macs: built-in support is for the tools they use, and the
-switches exist because those Macs differ.
+features wait for, `--after` alone, as a list's can: under `[features --after cask:app]`, as
+kit applies, the features' steps wait till the app's cask is in (installed first, as anything
+a step names is) or the casks' step has finished; a section placed after what isn't a step
+fails its features' steps, saying so. kit is built for its author's Macs: built-in support is
+for the tools they use, and the switches exist because those Macs differ.
+
+**Backups.** A Mac's `[backups]` section names the backup tools it uses, a line each: the
+tool, then `--after` and `--before` as on any line (`arq --after cask:arq`: as kit applies,
+Arq's check waits till its cask is in, rather than reading "not installed" while the cask
+waits its turn; one placed after or before what isn't a step fails its check, saying so). A
+Mac with no `[backups]` has no backup steps. Each tool is a driver behind one contract
+(`internal/backup/tool`), a folder each (`internal/backup/timemachine`, `.../arq`), listed in
+`backup.Tools`, so adding one is its folder and a line there: a tool kit doesn't know is a
+config error naming those it has, and `time-machine` or `arq` in `[features]`, where they were
+before, is refused, saying they go in `[backups]` and what the line there is. The driver says
+everything that's the tool's: its name; whether it's set up, and, when it isn't, setting it
+up as a to-do (its title, why, its steps, what kit watches for, and in a line for `kit
+status`); when its backups last finished, as plans when it has several, and whether one is
+running; what's wrong, in its words, each with a key and what to do; its summary when its
+words differ from kit's; and what it does with `[backup exclusions]`, keeping them as its own
+(Time Machine) or following another tool's list (Arq). kit's shared code makes the step: a
+tool not set up is the person's to-do, in Backups; its problems are items keyed by the tool
+(`time-machine:stale`); otherwise kit says how it stands from the backups ("last backup
+11:20", plans named and sorted, or "first backup under way" or "soon" before any has finished)
+and its glance ("Time Machine 11:20"). Time Machine: a backup disk, automatic backups on, the
+last backup within 3 hours (the disk away said so) and none stuck in a phase over 3 hours; a
+disk just added, its first backup under way or none tried yet with the disk there, is fine
+for now. Arq, through `arqc stats`: the plans it runs on a schedule (one marked "Manual" isn't
+expected to run), one at least, each backed up within 26 hours; not installed, or its status
+unreadable, says so; its licence agreement not yet accepted, or no plan made, is not set up.
 
 **Checks.** Steps with a check and no apply, each problem an item with a stable id saying
 what's wrong and what to do: the Mac's (`disk`, `memory`, `file-events`, `load`), always;
-the backups' (`time-machine`, `arq`: each runs on its own schedule, and kit checks it did,
-only the plans Arq is scheduled to run), when switched on; the config repository's
+the backup tools' a Mac lists in `[backups]` (`time-machine`, `arq`: each runs on its own
+schedule, and kit checks it did, only the plans Arq is scheduled to run; Backups above); the config repository's
 (`config-sync`: commits that won't push; `config-private`); the scheduled runs' (`nightly`: the hourly run within two
 hours, the nightly one finished within 26 and none stuck over six, each job's last outcome;
 quiet until `kit nightly` has run on a schedule); with their features, `scratch` (mounted,
@@ -502,7 +526,8 @@ mail --env MAIL_KEY=${MAIL_KEY} -- npx -y mail-mcp
 pages --transport http https://pages.example.com/mcp
 ```
 
-The sections, in the order kit writes them: `features` (the switches), `paths` (kit's PATH, in order, `~` expands; the
+The sections, in the order kit writes them: `features` (the switches), `backups` (the backup
+tools, a line each, with `--after` and `--before`), `paths` (kit's PATH, in order, `~` expands; the
 shared file's, then the Mac's), `homebrew formulae`, `homebrew casks`, `app store apps`,
 `npm packages`, `composer packages`, `go tools`, `github extensions`, `macos login items`,
 `claude mcp` (and `claude mcp <folder>`), `steps` (the steps of the user's own), `manual`, `checks`, `hourly`, `nightly`
@@ -512,7 +537,8 @@ skipped; so is a line before any section, a section twice, or a file named for a
 
 Each section's lines read one way. A name list's: one name a line, a version or a
 constraint allowed after it (`typescript@5`, `laravel/valet:^4.0`). A path's: the whole line,
-spaces and all. A command's: a name, then options, split into words as a shell splits them.
+spaces and all. A command's: a name, then options, split into words as a shell splits them;
+a backup tool's the same, its options optional.
 A `#` at the start of a line or after a space (outside quotes, in a command) starts a
 comment: the comments directly above an entry, and the one after it on its line, are its
 notes, saying why it's there. A name is declared in the shared declarations or a Mac's, never

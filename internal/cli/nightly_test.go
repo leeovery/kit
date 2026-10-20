@@ -139,11 +139,14 @@ func TestNightlyAlertsAndReport(t *testing.T) {
 
 // The scheduled run excludes a new folder matching a backup exclusion's
 // glob where it is, needing no password; a plain path it leaves to kit
-// apply, and it installs nothing else.
+// apply, and it installs nothing else. Arq alone keeps them through Time
+// Machine's list.
 func TestNightlyExcludesNewMatchesByItself(t *testing.T) {
 	w := jobsWorld(t)
 	w.write(t, "Library/Caches/one/.keep", "")
 	w.writeSection(t, "shared", "backup exclusions", "~/Library/Caches/*\n/Applications\n")
+	w.writeSection(t, "shared", "backups", "arq\n")
+	w.fake.On("/Applications/Arq.app/Contents/Resources/arqc", "stats").Prints(`{"backupPlans": [{"name": "User data", "schedule": {"type": "Daily"}, "lastBackedUp": "` + w.now.Add(-2*time.Hour).UTC().Format(time.RFC3339) + `"}]}`)
 	w.fake.On("defaults", "export", "/Library/Preferences/com.apple.TimeMachine", "-").Prints("<plist><dict><key>SkipPaths</key><array/></dict></plist>")
 	match := filepath.Join(w.home, "Library/Caches/one")
 	w.fake.On("tmutil", "isexcluded", match).Prints("[Included]  " + match + "\n")

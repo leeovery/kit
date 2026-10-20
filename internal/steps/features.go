@@ -18,6 +18,17 @@ import (
 	"github.com/leeovery/kit/internal/runner"
 )
 
+// The features: the pieces with nothing to list, switched on for a Mac in
+// its [features] section.
+const (
+	FeatureScratch = "scratch"
+	FeaturePrefs   = "prefs"
+	FeatureOhMyZsh = "oh-my-zsh"
+)
+
+// Features are the features kit knows.
+var Features = []string{FeatureFileSharing, FeatureOhMyZsh, FeaturePrefs, FeatureRemoteLogin, FeatureScratch, FeatureTouchIDSudo}
+
 // Scratch checks the Scratch volume at volume is mounted, kept out of
 // Spotlight and Time Machine, with a tmp folder the user, uid, can write,
 // and Claude Code's temporary files sent there (from home's settings).

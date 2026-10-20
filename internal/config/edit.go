@@ -48,7 +48,7 @@ func splitBody(f Form, lines []string) body {
 			kind = commentLine
 		case line[0] == ' ' || line[0] == '\t':
 			kind = stepLine
-		case f == Commands || f == Settings || f == Secrets:
+		case f == Commands || f == Settings || f == Secrets || f == Options:
 			name, _, _, _ = splitCommand(line)
 		case f == Defaults:
 			name = defaultsName(line)
@@ -440,6 +440,13 @@ func entryText(d sectionDef, name string, e Entry) (string, error) {
 			return "", fmt.Errorf("%s needs its %s", name, map[Form]string{Commands: "options", Settings: "value", Secrets: "reference"}[d.form])
 		}
 		line += " " + strings.TrimSpace(e.Value)
+	case Options:
+		if !commandName.MatchString(name) {
+			return "", fmt.Errorf("%q isn't a name", name)
+		}
+		if value := strings.TrimSpace(e.Value); value != "" {
+			line += " " + value
+		}
 	case Paths:
 		if err := checkDir(name); err != nil {
 			return "", err

@@ -104,6 +104,18 @@ func TestDeclare(t *testing.T) {
 			after: "[secrets op://vault/A --as tokens]\nA_TOKEN x/z\nB_TOKEN x/y\n",
 		},
 		{
+			name:   "a backup tool, with its options, in its place by name",
+			before: "[features]\nprefs\n\n[backups]\ntime-machine\n\n[paths]\n/opt/homebrew/bin\n",
+			kind:   config.BackupsKind, entry: config.Entry{Name: "arq", Value: "--after cask:arq", Note: "offsite"},
+			after: "[features]\nprefs\n\n[backups]\narq --after cask:arq   # offsite\ntime-machine\n\n[paths]\n/opt/homebrew/bin\n",
+		},
+		{
+			name:   "a backup tool's section made after features, the tool with no options",
+			before: "[features]\nprefs\n\n[paths]\n/opt/homebrew/bin\n",
+			kind:   config.BackupsKind, entry: config.Entry{Name: "time-machine"},
+			after: "[features]\nprefs\n\n[backups]\ntime-machine\n\n[paths]\n/opt/homebrew/bin\n",
+		},
+		{
 			name:   "a file made",
 			before: "",
 			kind:   "mas", entry: config.Entry{Name: "xcode@497799835"},

@@ -207,6 +207,38 @@ func TestFeaturesWait(t *testing.T) {
 	}
 }
 
+// A backups section names the tools a Mac uses, a line each: a tool's
+// name, then any options, words as a shell splits them, and a note; never
+// options after its header.
+func TestBackupsSection(t *testing.T) {
+	cfg := loadRepo(t, map[string]string{
+		"shared/declarations": "[backups]\ntime-machine\n",
+		"laptop/declarations": "[backups]\n# Offsite.\narq --after cask:arq --before \"my step\"   # the second copy\n",
+	})
+	got, err := cfg.List(config.BackupsKind, "laptop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []config.Entry{
+		{Name: "time-machine", Scope: "shared", Section: "backups", Line: 2},
+		{Name: "arq", Value: `--after cask:arq --before "my step"`, Scope: "laptop", Section: "backups", Line: 3, Note: "the second copy", Notes: "Offsite."},
+	}
+	if !reflect.DeepEqual(got.Entries, want) || !got.Declared {
+		t.Errorf("List() = %+v\nwant %+v", got, want)
+	}
+	for _, tt := range []struct{ file, wrong string }{
+		{"[backups]\ntime/machine\n", `laptop/declarations:2: "time/machine" isn't a name`},
+		{"[backups]\narq --after \"cask:arq\n", "laptop/declarations:2: "},
+		{"[backups --after cask:arq]\narq\n", "laptop/declarations:1: [backups --after cask:arq]: only a list's sections, and [features], take options"},
+		{"[backups]\narq\n\n[backups]\ntime-machine\n", "laptop/declarations:4: [backups] is at line 1 too"},
+	} {
+		cfg := loadRepo(t, map[string]string{"laptop/declarations": tt.file})
+		if _, err := cfg.List(config.BackupsKind, "laptop"); err == nil || !strings.Contains(err.Error(), tt.wrong) {
+			t.Errorf("%q: List() error = %v, want %q", tt.file, err, tt.wrong)
+		}
+	}
+}
+
 // A list's section can hold its lines back, what for after its header:
 // its entries are the list's like any other, saying what they wait for and
 // need, as kit writes it, however the header has it.

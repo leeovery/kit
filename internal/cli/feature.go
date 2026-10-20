@@ -19,7 +19,7 @@ func newFeatureCommand(a *app) *cobra.Command {
 		Short:   "Features: the pieces with nothing to list, switched on or off",
 		GroupID: groupFiles,
 		Long: `Switch features on or off: the pieces kit has that come with nothing to list,
-such as a backup tool, its checks and its jobs. A feature is on for this Mac
+such as apps' settings, their checks and their jobs. A feature is on for this Mac
 when its file or the shared one lists it in [features]; one of ` + strings.Join(steps.Features, ", ") + `.
 The change is committed and pushed to the config repository.`,
 	}
@@ -55,6 +55,9 @@ The change is committed and pushed to the config repository.`,
 // Mac's file or the shared one, then commits and pushes.
 func (a *app) switchFeatures(ctx context.Context, r *run, names []string, on, shared bool) error {
 	for _, name := range names {
+		if err := notAFeature(name); err != nil {
+			return err
+		}
 		if !slices.Contains(steps.Features, name) {
 			return fmt.Errorf("kit doesn't know the feature %s: one of %s", name, strings.Join(steps.Features, ", "))
 		}

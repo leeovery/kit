@@ -27,13 +27,12 @@ const timeMachinePrefs = `<?xml version="1.0" encoding="UTF-8"?>
 </dict></array>
 </dict></plist>`
 
-// toDoWorld is a Mac at a terminal 160 by 64, with Time Machine switched
-// on: no backup disk as its step's checked, one there each time it's
+// toDoWorld is a Mac at a terminal 160 by 64, using Time Machine: no backup disk as its step's checked, one there each time it's
 // looked at after, unless never.
 func toDoWorld(t *testing.T, never bool) (*world, *keyboard) {
 	t.Helper()
 	w := laptopWorld(t)
-	w.writeSection(t, "laptop", "features", "time-machine\n")
+	w.writeSection(t, "laptop", "backups", "time-machine\n")
 	tm := w.fake.On("defaults", "export", "/Library/Preferences/com.apple.TimeMachine", "-").Exits(1).PrintsToStderr("file does not exist")
 	if !never {
 		tm.Then().Prints(timeMachinePrefs)
@@ -96,7 +95,7 @@ func titles(list logs.Record) []string {
 // stand now.
 func TestApplyWorksThroughTheToDos(t *testing.T) {
 	w, kb := toDoWorld(t, false)
-	w.writeSection(t, "laptop", "features", "prefs\ntime-machine\n")
+	w.writeSection(t, "laptop", "features", "prefs\n")
 	w.writeSection(t, "laptop", "manual", `sharing "Allow remote users Full Disk Access" --group "System Settings"`+"\n  System Settings › General › Sharing\n")
 	notified(t, w, kb, "Bring back apps' settings", "kit waits for you to do this", ask.Key{Text: "f"})
 	notified(t, w, kb, "Allow remote users Full Disk Access", "System Settings › General › Sharing", ask.Key{Text: " "})

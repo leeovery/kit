@@ -67,8 +67,12 @@ const (
 )
 
 // FeaturesKind names the section of the pieces switched on for a Mac, by
-// name: the parts with nothing to list, such as a backup tool.
+// name: the parts with nothing to list, such as apps' settings.
 const FeaturesKind = "features"
+
+// BackupsKind names the section of the backup tools a Mac uses: a line
+// each, the tool's name, then the options placing its check.
+const BackupsKind = "backups"
 
 // Form is how a section's lines read.
 type Form int
@@ -98,6 +102,9 @@ const (
 	// them: the power source (-a every one, -b the battery, -c the charger,
 	// -u a UPS), the setting and its value, then an optional note.
 	Power
+	// Options: a name, then its options, if it has any, its words as a
+	// shell splits them, then an optional note.
+	Options
 )
 
 // Section is a kind's section of a declarations file, as the kind says:
@@ -169,6 +176,7 @@ type sectionDef struct {
 var (
 	ownLeading = []sectionDef{
 		{header: "features", kind: FeaturesKind, form: Names, holds: []string{afterOption}},
+		{header: "backups", kind: BackupsKind, form: Options},
 		{header: "paths", kind: PathsKind, form: Paths},
 	}
 	ownTrailing = []sectionDef{
@@ -638,13 +646,13 @@ func (s *section) entry(line string) (Entry, error) {
 		e.Name, e.Note = text, note
 	case Paths:
 		e.Name, e.Note = splitComment(line)
-	case Commands, Settings, Secrets:
+	case Commands, Settings, Secrets, Options:
 		name, value, note, err := splitCommand(line)
 		if err != nil {
 			return e, err
 		}
 		switch {
-		case s.def.form == Commands && !commandName.MatchString(name):
+		case (s.def.form == Commands || s.def.form == Options) && !commandName.MatchString(name):
 			return e, fmt.Errorf("%q isn't a name: letters, digits, dots, hyphens and underscores", name)
 		case s.def.form == Settings && !settingKey.MatchString(name):
 			return e, fmt.Errorf("%q isn't a setting's key", name)
@@ -652,7 +660,7 @@ func (s *section) entry(line string) (Entry, error) {
 			return e, fmt.Errorf("%q isn't what a secret fills: an environment variable's name, or a file's path from ~ or /", name)
 		case value == "" && s.def.form == Commands:
 			return e, fmt.Errorf("%s has nothing after its name: its options follow it", name)
-		case value == "":
+		case value == "" && s.def.form != Options:
 			return e, fmt.Errorf("%s has no value after it", name)
 		}
 		e.Name, e.Value, e.Note = name, value, note
