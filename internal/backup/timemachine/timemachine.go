@@ -158,7 +158,9 @@ func settings(ctx context.Context, run runner.Runner) (map[string]any, error) {
 }
 
 // absent reports whether err is defaults saying Time Machine's settings
-// domain doesn't exist, as on a Mac whose Time Machine was never set up.
+// domain doesn't exist. defaults export prints an empty dict for a domain
+// that doesn't exist (macOS 26, tried 20 Oct 2026), read as no settings;
+// this covers a defaults that refuses instead, as defaults read does.
 func absent(err error) bool {
 	exit, ok := errors.AsType[*runner.ExitError](err)
 	return ok && strings.Contains(exit.Stderr, "does not exist")
