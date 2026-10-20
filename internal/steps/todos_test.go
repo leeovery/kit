@@ -410,8 +410,10 @@ func TestAToDoLeavesAnother(t *testing.T) {
 	}
 }
 
-// q's Stop, pressed while kit did what a key said, which did it: the to-do
-// is done, and the run stops there, the rest staying to do.
+// q's Stop, pressed while kit did what a key said, which did it, after the
+// key was pressed twice, the second waiting unread: the Stop's taken all
+// the same, the to-do is done, the to-do it left joins the list, and the
+// run stops there, the rest staying to do.
 func TestStoppingWhileAKeyIsDone(t *testing.T) {
 	defer steps.SetManualPoll(time.Hour)()
 	c := newCard(t)
@@ -423,7 +425,8 @@ func TestStoppingWhileAKeyIsDone(t *testing.T) {
 			mu.Lock()
 			defer mu.Unlock()
 			if brought {
-				return check.Result{State: check.OK, Summary: "saving from tonight"}
+				return check.Result{State: check.Attention, Summary: "1 app to open once", Items: []check.Item{{ID: "prefs:open", Name: "Open Boxed App once and quit it", State: steps.Problem,
+					ToDo: &check.ToDo{Title: "Open Boxed App once and quit it", Watch: "Boxed App has its settings folder", First: true}}}}
 			}
 			return check.Result{State: check.Attention, Summary: "paused", Items: []check.Item{toDoItem("prefs", check.ToDo{
 				Title: "Bring back apps' settings", First: true, Keys: []check.Key{{Key: "r", Does: "brings them back"}},
@@ -431,8 +434,8 @@ func TestStoppingWhileAKeyIsDone(t *testing.T) {
 		},
 		Choice: &engine.Choice{
 			Answer: func(context.Context, check.Item, string) (string, error) {
-				if !c.desk.Answer(steps.ManualName, hand.Stop) {
-					t.Error("q's Stop, pressed while r was being done, wasn't passed on")
+				if !c.desk.Answer(steps.ManualName, "r") || !c.desk.Answer(steps.ManualName, hand.Stop) {
+					t.Error("r again, then q's Stop, pressed while r was being done, weren't both passed on")
 				}
 				mu.Lock()
 				defer mu.Unlock()
@@ -448,14 +451,53 @@ func TestStoppingWhileAKeyIsDone(t *testing.T) {
 	}()
 	c.cards(t, 1)
 	c.answer(t, steps.ManualName, "r")
-	<-done
+	over(t, done)
 	last := toDoLists(c.sink)
 	l := last[len(last)-1]
-	if l.Up != -1 || !l.List[0].Done || l.List[0].Saw != "214 apps' settings" || l.List[1].Done {
-		t.Errorf("the to-dos ended %+v; want the first done, the run stopped there, the rest to do", l)
+	var ids []string
+	for _, e := range l.List {
+		ids = append(ids, e.ID)
+	}
+	if l.Up != -1 || !slices.Equal(ids, []string{"prefs:none", "prefs:open", "time-machine:none"}) ||
+		!l.List[0].Done || l.List[0].Saw != "214 apps' settings" || l.List[1].Done || l.List[2].Done {
+		t.Errorf("the to-dos ended %+v; want the first done, the app to open after it, the run stopped there, the rest to do", l)
 	}
 	if got := len(c.cardsNow()); got != 2 {
 		t.Errorf("%d cards went up, want the first, then it answered by r, and no more", got)
+	}
+}
+
+// q's Stop, pressed while an answer waits unread as kit looks whether the
+// to-do up is done: the Stop's taken all the same, and the run stops there.
+func TestStoppingWhileKitLooks(t *testing.T) {
+	defer steps.SetManualPoll(5 * time.Millisecond)()
+	c := newCard(t)
+	looking, carryOn := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	c.fake.On("test", "-f", "/printer").Exits(1).Then().Exits(1).Then().Exits(1).Does(func() {
+		once.Do(func() {
+			close(looking)
+			<-carryOn
+		})
+	})
+	list := config.List{Entries: []config.Entry{
+		{Name: "printer", Value: `"Add the printer" --test test -f /printer`, Scope: "laptop", Line: 2},
+		{Name: "scanner", Value: `"Add the scanner"`, Scope: "laptop", Line: 3},
+	}}
+	applied := applying(t, steps.Manual(c.fake, "/home/someone", c.state, list, c.raise))
+	<-looking
+	if !c.desk.Answer(steps.ManualName, hand.Done) || !c.desk.Answer(steps.ManualName, hand.Stop) {
+		t.Error("space, then q's Stop, pressed while kit looked, weren't both passed on")
+	}
+	close(carryOn)
+	if err := ended(t, applied); err != nil {
+		t.Fatal(err)
+	}
+	if got := c.ups(); !slices.Equal(got, []string{"manual:printer"}) {
+		t.Errorf("cards up %q, want the printer's alone", got)
+	}
+	if todos := c.lastToDos(); len(todos) != 2 || todos[0].Done || todos[1].Done {
+		t.Errorf("the to-dos ended %+v, want both left to do", todos)
 	}
 }
 
@@ -567,5 +609,47 @@ func TestAChoiceDoneWithACardWaiting(t *testing.T) {
 	}
 	if l := c.lastToDos(); len(l) != 2 || !l[0].Done || l[0].Saw != "1 app's settings; 1 app to open once" || l[1].ID != "prefs:open" || !l[1].Done {
 		t.Errorf("the to-dos ended %+v; want r's done, what it did as what kit saw, then the app to open, done", l)
+	}
+}
+
+// The run stopped while kit did what a key said, which didn't do it: the
+// card isn't offered with its keys again.
+func TestARunStoppedWhileAKeyIsDone(t *testing.T) {
+	defer steps.SetManualPoll(time.Hour)()
+	c := newCard(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	step := engine.Step{
+		Name: "prefs", Title: "App settings", Area: steps.AreaBackups,
+		Check: func(context.Context) check.Result {
+			return check.Result{State: check.Attention, Summary: "paused", Items: []check.Item{toDoItem("prefs", check.ToDo{
+				Title: "Bring back apps' settings", First: true, Keys: []check.Key{{Key: "r", Does: "brings them back"}},
+			})}}
+		},
+		Choice: &engine.Choice{
+			Answer: func(context.Context, check.Item, string) (string, error) {
+				cancel()
+				return "", nil
+			},
+		},
+	}
+	p, err := engine.New(atTheEnd(steps.Manual(c.fake, "/home/someone", c.state, config.List{}, c.raise), step)...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ran := make(chan engine.Report, 1)
+	go func() {
+		report, _ := p.Apply(ctx, c.sink, engine.Options{Command: "apply", Jobs: 4})
+		ran <- report
+	}()
+	c.cards(t, 1)
+	c.answer(t, steps.ManualName, "r")
+	over(t, ran)
+	var answering []string
+	for _, card := range c.cardsNow() {
+		answering = append(answering, card.Answering)
+	}
+	if !slices.Equal(answering, []string{"", "r"}) {
+		t.Errorf("the card went up answered by %q; want its keys, then r while it worked, and its keys never again", answering)
 	}
 }

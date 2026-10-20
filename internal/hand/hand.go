@@ -46,7 +46,9 @@ func (d *Desk) Listen(step string) (<-chan Answer, func()) {
 }
 
 // Answer passes a to step's card, when one is up and isn't still taking
-// its last answer: false when nothing takes it.
+// its last answer: false when nothing takes it. A Stop is never refused
+// while a card's up: it takes the place of an answer still waiting, as
+// stopping is what the person said last.
 func (d *Desk) Answer(step string, a Answer) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -54,10 +56,18 @@ func (d *Desk) Answer(step string, a Answer) bool {
 	if !ok {
 		return false
 	}
-	select {
-	case ch <- a:
-		return true
-	default:
-		return false
+	for {
+		select {
+		case ch <- a:
+			return true
+		default:
+		}
+		if a != Stop {
+			return false
+		}
+		select {
+		case <-ch:
+		default:
+		}
 	}
 }

@@ -973,3 +973,38 @@ func TestACardGoesUpAgain(t *testing.T) {
 		t.Error("with no one to act, a step by hand can be done again")
 	}
 }
+
+// A card up between two to-dos counts every to-do still to come after it,
+// not the next alone.
+func TestACardBetweenToDosCountsThemAll(t *testing.T) {
+	c := newCard(t)
+	gate := make(chan struct{})
+	list := config.List{Entries: []config.Entry{
+		{Name: "printer", Value: `"Add the printer"`, Scope: "laptop", Line: 2},
+		{Name: "scanner", Value: `"Add the scanner"`, Scope: "laptop", Line: 3},
+		{Name: "copier", Value: `"Add the copier"`, Scope: "laptop", Line: 4},
+	}}
+	vault := steps.OwnManual(c.fake, c.state, steps.ManualStep{Name: "vault", Do: "Sign in to the vault"}, c.raise)
+	vault.After, vault.Before = []string{"cask"}, []string{"secret"}
+	p, err := engine.New(steps.Manual(c.fake, "/home/someone", c.state, list, c.raise), vault, gated("cask", gate), fine("secret"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ran := running(t, c, p)
+	c.upNow(t, "manual:printer")
+	close(gate)
+	c.cards(t, 2)
+	c.answer(t, steps.ManualName, hand.Done)
+	for i := 0; !slices.Contains(c.turns(), "up vault 2"); i++ {
+		if i == 5000 {
+			t.Fatalf("turns %q; want the vault's card up, the scanner and the copier after it", c.turns())
+		}
+		time.Sleep(time.Millisecond)
+	}
+	c.answer(t, "vault", hand.Done)
+	c.upNow(t, "manual:scanner")
+	c.answer(t, steps.ManualName, hand.Done)
+	c.upNow(t, "manual:copier")
+	c.answer(t, steps.ManualName, hand.Done)
+	over(t, ran)
+}

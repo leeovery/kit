@@ -281,8 +281,8 @@ the log naming each of those with why; a watched to-do of kit's own, found done,
 it waited for, as bringing those apps' settings back; `f` starts afresh, as `kit prefs
 start-fresh` does, saying saving's on and how many still wait to come back). Stopping there
 (`q`'s Stop, between two to-dos as well, as the one up is found done, and while kit does what a
-key says) leaves what's left to do, the one up done if it was, in that
-order in the record, the run ending as it stands. After the last, kit checks again the steps the
+key says, taken even with another key waiting unread) leaves what's left to do, the one up done
+if it was, with the to-dos it left, in that order in the record, the run ending as it stands. After the last, kit checks again the steps the
 to-dos held, those they came from, so their rows and the record are right, then finishes.
 Without a terminal, nothing's raised: kit's own stay items of their steps. A step a line comes
 before can find, as it applies, that the line wasn't done after all, as the App Store's first

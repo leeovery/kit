@@ -473,6 +473,8 @@ func (r *Raise) answered(ctx context.Context, pl *place, c raised, a hand.Answer
 	switch {
 	case ok || err != nil || !chose:
 		return saw, ok, err
+	case ctx.Err() != nil:
+		return "", false, ctx.Err()
 	case stoppedMeanwhile(answers):
 		return "", false, errStopHere
 	}
@@ -515,7 +517,7 @@ func (r *Raise) show(ctx context.Context, pl *place, c raised) {
 		r.mu.Unlock()
 		return
 	}
-	card.Time, card.More = r.Now(), pl.after+len(r.line)-1
+	card.Time, card.More = r.Now(), r.moreLocked(pl)
 	r.card, r.shown = card, pl
 	r.Sink.Emit(card)
 	r.mu.Unlock()
@@ -637,10 +639,22 @@ func (r *Raise) recount() {
 	if r.shown == nil {
 		return
 	}
-	if more := r.shown.after + len(r.line) - 1; more != r.card.More {
+	if more := r.moreLocked(r.shown); more != r.card.More {
 		r.card.Time, r.card.More = r.Now(), more
 		r.Sink.Emit(r.card)
 	}
+}
+
+// moreLocked is how many cards wait after pl's: its step's own to follow
+// it, and each other in the line with those to follow it. mu is held.
+func (r *Raise) moreLocked(pl *place) int {
+	more := pl.after
+	for _, o := range r.line {
+		if o != pl {
+			more += 1 + o.after
+		}
+	}
+	return more
 }
 
 // OwnManual is a step by hand a step comes after (Ordered), as a step of

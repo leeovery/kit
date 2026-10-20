@@ -204,12 +204,12 @@ func (r *Raise) workThrough(ctx context.Context, step string, list []toDo) error
 		case !errors.Is(err, errStopHere):
 			return err
 		}
-		if err != nil {
-			break
-		}
 		for j, t := range followUps(ctx, list[i], list) {
 			list = slices.Insert(list, i+1+j, t)
 			entries = slices.Insert(entries, i+1+j, t.entry())
+		}
+		if err != nil {
+			break
 		}
 	}
 	emit(-1)
