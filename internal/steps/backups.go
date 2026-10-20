@@ -12,7 +12,6 @@ import (
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/engine"
-	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/runner"
 )
 
@@ -30,27 +29,38 @@ type BackupTool struct {
 	Pos string
 }
 
-// ParseBackup reads a [backups] line: a tool kit knows, by its ID, then
-// --after and --before, each with a step's name (--after one of a step's
-// things too, as in cask:arq) and as often as wanted.
+// ParseBackup reads a [backups] line, as ReadBackup does, saying where it
+// is when it doesn't read.
 func ParseBackup(e config.Entry) (BackupTool, error) {
-	d, ok := backup.Named(e.Name)
-	if !ok {
-		return BackupTool{}, fmt.Errorf("%s: kit doesn't know the backup tool %s: one of %s", e.Pos(), e.Name, strings.Join(backup.IDs(), ", "))
-	}
-	b := BackupTool{Driver: d, Pos: e.Pos()}
-	words, err := config.Words(e.Value)
+	b, err := ReadBackup(e.Name, e.Value)
 	if err != nil {
 		return b, fmt.Errorf("%s: %w", e.Pos(), err)
+	}
+	b.Pos = e.Pos()
+	return b, nil
+}
+
+// ReadBackup reads a backup tool's line: name, a tool kit knows, by its
+// ID; options, --after and --before, each with a step's name (--after one
+// of a step's things too, as in cask:arq) and as often as wanted.
+func ReadBackup(name, options string) (BackupTool, error) {
+	d, ok := backup.Named(name)
+	if !ok {
+		return BackupTool{}, fmt.Errorf("kit doesn't know the backup tool %s: one of %s", name, strings.Join(backup.IDs(), ", "))
+	}
+	b := BackupTool{Driver: d}
+	words, err := config.Words(options)
+	if err != nil {
+		return b, err
 	}
 	for i := 0; i < len(words); i++ {
 		w := words[i]
 		if w != "--after" && w != "--before" {
-			return b, fmt.Errorf("%s: %q isn't one of a backup tool's options: --after and --before", e.Pos(), w)
+			return b, fmt.Errorf("%q isn't one of a backup tool's options: --after and --before", w)
 		}
 		name, err := orderedBy(w, words, i)
 		if err != nil {
-			return b, fmt.Errorf("%s: %w", e.Pos(), err)
+			return b, err
 		}
 		i++
 		if w == "--after" {
@@ -72,7 +82,7 @@ func Backup(run runner.Runner, d tool.Driver, now func() time.Time) engine.Step 
 		Name: about.ID, Title: about.Name, Area: AreaBackups, Row: rowBackups,
 		Check: func(ctx context.Context) check.Result {
 			at := now()
-			st, err := d.Look(event.WithChecking(ctx), run, at)
+			st, err := d.Look(ctx, run, at)
 			switch {
 			case err != nil:
 				return failed(err)
@@ -99,7 +109,7 @@ func Backup(run runner.Runner, d tool.Driver, now func() time.Time) engine.Step 
 
 // backupSummary is how a tool's backups stand: in its words, when it has
 // some; else when each last finished, the plan named when it has one, or,
-// none finished yet, whether the first is under way.
+// none finished yet, the first under way or none yet.
 func backupSummary(st tool.Status, now time.Time) string {
 	if st.Summary != "" {
 		return st.Summary
@@ -113,7 +123,7 @@ func backupSummary(st tool.Status, now time.Time) string {
 	case st.Running:
 		return "first backup under way"
 	}
-	return "first backup soon"
+	return "no backup yet"
 }
 
 // finished are the backups that have finished, each as say has it, sorted.

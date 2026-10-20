@@ -199,12 +199,20 @@ func (x *Exclusions) Install(ctx context.Context, names []string) error {
 	return errors.Join(errs...)
 }
 
-// Remove stops keeping each path out.
+// Remove stops keeping each path out, through the excluders keeping it
+// out.
 func (x *Exclusions) Remove(ctx context.Context, names []string) error {
 	var errs []error
 	for _, ex := range x.excluders {
+		kept, err := ex.Excluded(ctx, x.run, nil)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
 		for _, name := range names {
-			errs = append(errs, named(name, ex.Include(ctx, x.run, x.full(name))))
+			if path := x.full(name); slices.Contains(kept, path) {
+				errs = append(errs, named(name, ex.Include(ctx, x.run, path)))
+			}
 		}
 	}
 	return errors.Join(errs...)

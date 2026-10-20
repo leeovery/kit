@@ -178,11 +178,15 @@ for the tools they use, and the switches exist because those Macs differ.
 tool, then `--after` and `--before` as on any line (`arq --after cask:arq`: as kit applies,
 Arq's check waits till its cask is in, rather than reading "not installed" while the cask
 waits its turn; one placed after or before what isn't a step fails its check, saying so). A
-Mac with no `[backups]` has no backup steps. Each tool is a driver behind one contract
+Mac with no `[backups]` has no backup steps; the tools' steps run in kit's order (Time
+Machine, then Arq), whatever the files' order. `kit backup add <tool>` (`--after`, `--before`,
+`--shared`, `--note`) declares one, refusing one declared already or placed after what isn't a
+step, and `kit backup remove <tool>` (`--shared`) takes it out, each committed and pushed. Each tool is a driver behind one contract
 (`internal/backup/tool`), a folder each (`internal/backup/timemachine`, `.../arq`), listed in
 `backup.Tools`, so adding one is its folder and a line there: a tool kit doesn't know is a
 config error naming those it has, and `time-machine` or `arq` in `[features]`, where they were
-before, is refused, saying they go in `[backups]` and what the line there is. The driver says
+before, is refused, saying they go in `[backups]` and the `kit backup add` that puts them there
+(`kit feature on|off` of one names `kit backup add|remove`). The driver says
 everything that's the tool's: its name; whether it's set up, and, when it isn't, setting it
 up as a to-do (its title, why, its steps, what kit watches for, and in a line for `kit
 status`); when its backups last finished, as plans when it has several, and whether one is
@@ -377,6 +381,7 @@ kit <kind> remove <name>...  Uninstall, and undeclare            [--shared]
      defaults, power, git-config, backup-exclusion, spotlight-exclusion)
 kit claude-mcp on|off <name>...  Declare Claude's MCP servers on or off, and install or remove them
 kit feature on|off <name>... Switch features on or off for this Mac   [--shared]
+kit backup add|remove <tool> The backup tools this Mac uses, each checked   [--after] [--before] [--shared]
 kit file add|remove <path>...    Files linked into the home folder from kit-config
 kit path add|remove <dir>...     Directories on the PATH
 kit secret add <name>        Keep a secret in 1Password, declare it, sync it   [--stdin] [--from] [--ref] [--field] [--item] [--mode]

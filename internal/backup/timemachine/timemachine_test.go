@@ -78,46 +78,53 @@ func TestTimeMachine(t *testing.T) {
 		text   string
 		glance string
 		ids    []string
+		// what is what's wrong, as its first item says, when it matters.
+		what string
 	}{
 		{"backing up", func(f *runnertest.Fake) {
 			f.On("defaults", prefs...).Prints(tmPrefs("<true/>", old, recent))
 			f.On("tmutil", "status").Prints(tmIdle)
-		}, check.OK, "last backup 11:20", "Time Machine 11:20", nil},
+		}, check.OK, "last backup 11:20", "Time Machine 11:20", nil, ""},
 		{"automatic backups off, as an integer", func(f *runnertest.Fake) {
 			f.On("defaults", prefs...).Prints(tmPrefs("<integer>0</integer>", recent))
 			f.On("tmutil", "status").Prints(tmIdle)
-		}, check.Attention, "last backup 11:20", "", []string{"time-machine:off"}},
+		}, check.Attention, "last backup 11:20", "", []string{"time-machine:off"}, ""},
 		{"stale, the disk away", func(f *runnertest.Fake) {
 			f.On("defaults", prefs...).Prints(tmPrefs("<integer>1</integer>", old))
 			f.On("tmutil", "destinationinfo").Prints(tmAway)
 			f.On("tmutil", "status").Prints(tmIdle)
-		}, check.Attention, "last backup 07:00", "", []string{"time-machine:stale"}},
+		}, check.Attention, "last backup 07:00", "", []string{"time-machine:stale"}, "last backup 5 hours ago (the backup disk isn't connected)"},
+		{"stale while one runs", func(f *runnertest.Fake) {
+			f.On("defaults", prefs...).Prints(tmPrefs("<true/>", old))
+			f.On("tmutil", "destinationinfo").Prints(tmConnected)
+			f.On("tmutil", "status").Prints(tmStuck(now().Add(-20 * time.Minute)))
+		}, check.Attention, "last backup 07:00", "", []string{"time-machine:stale"}, "last backup 5 hours ago"},
 		{"stuck", func(f *runnertest.Fake) {
 			f.On("defaults", prefs...).Prints(tmPrefs("<true/>", recent))
 			f.On("tmutil", "status").Prints(tmStuck(now().Add(-4 * time.Hour)))
-		}, check.Attention, "last backup 11:20", "", []string{"time-machine:stuck"}},
+		}, check.Attention, "last backup 11:20", "", []string{"time-machine:stuck"}, ""},
 		{"never set up", func(f *runnertest.Fake) {
 			f.On("defaults", prefs...).Exits(1).PrintsToStderr("file does not exist")
-		}, check.Attention, "not set up", "", []string{"time-machine:none"}},
+		}, check.Attention, "not set up", "", []string{"time-machine:none"}, ""},
 		{"a disk just added", func(f *runnertest.Fake) {
 			f.On("defaults", prefs...).Prints(tmPrefs("<true/>"))
 			f.On("tmutil", "destinationinfo").Prints(tmConnected)
 			f.On("tmutil", "status").Prints(tmIdle)
-		}, check.OK, "first backup soon", "Time Machine's first backup soon", nil},
+		}, check.OK, "first backup soon", "Time Machine's first backup soon", nil, ""},
 		{"its first backup under way", func(f *runnertest.Fake) {
 			f.On("defaults", prefs...).Prints(tmPrefs("<true/>"))
 			f.On("tmutil", "status").Prints(tmStuck(now().Add(-10 * time.Minute)))
-		}, check.OK, "first backup under way", "Time Machine's first backup under way", nil},
+		}, check.OK, "first backup under way", "Time Machine's first backup under way", nil, ""},
 		{"no backup yet, one tried", func(f *runnertest.Fake) {
 			f.On("defaults", prefs...).Prints(strings.Replace(tmPrefs("<true/>"), "<key>SnapshotDates</key>", "<key>AttemptDates</key>\n\t\t\t<array><date>"+recent.UTC().Format(time.RFC3339)+"</date></array>\n\t\t\t<key>SnapshotDates</key>", 1))
 			f.On("tmutil", "destinationinfo").Prints(tmConnected)
 			f.On("tmutil", "status").Prints(tmIdle)
-		}, check.Attention, "no backup yet", "", []string{"time-machine:never"}},
+		}, check.Attention, "no backup yet", "", []string{"time-machine:never"}, ""},
 		{"no backup yet, the disk away", func(f *runnertest.Fake) {
 			f.On("defaults", prefs...).Prints(tmPrefs("<true/>"))
 			f.On("tmutil", "destinationinfo").Prints(tmAway)
 			f.On("tmutil", "status").Prints(tmIdle)
-		}, check.Attention, "no backup yet", "", []string{"time-machine:never"}},
+		}, check.Attention, "no backup yet", "", []string{"time-machine:never"}, "no completed backup yet (the backup disk isn't connected)"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			fake := runnertest.New(t)
@@ -132,6 +139,9 @@ func TestTimeMachine(t *testing.T) {
 			}
 			if res.State == check.Attention && !res.ToDo() {
 				t.Errorf("%+v, want it the person's to do", res)
+			}
+			if tt.what != "" && (len(res.Items) == 0 || res.Items[0].Name != tt.what) {
+				t.Errorf("items = %+v, want the first saying %q", res.Items, tt.what)
 			}
 		})
 	}
@@ -213,11 +223,17 @@ func TestTimeMachineExcludes(t *testing.T) {
 	if err := ex.Include(t.Context(), fake, "/Users/someone/Movies"); err != nil {
 		t.Errorf("Include() = %v", err)
 	}
-	// Never set up, Time Machine has no settings, so no exclusions yet.
+	// Never set up, Time Machine has no settings, so no exclusions yet; its
+	// settings unread otherwise, it can't say.
 	never := runnertest.New(t)
-	never.On("defaults", prefs...).Exits(1).PrintsToStderr("file does not exist")
+	never.On("defaults", prefs...).Exits(1).PrintsToStderr("Domain " + timemachine.Prefs + " does not exist\n")
 	if got, err := ex.Excluded(t.Context(), never, nil); err != nil || len(got) != 0 {
 		t.Errorf("Excluded(), never set up = %q, %v; want none", got, err)
+	}
+	refused := runnertest.New(t)
+	refused.On("defaults", prefs...).Exits(1).PrintsToStderr("Could not export domain: Operation not permitted\n")
+	if got, err := ex.Excluded(t.Context(), refused, nil); err == nil || !strings.Contains(err.Error(), "Operation not permitted") {
+		t.Errorf("Excluded(), settings refused = %q, %v; want the error", got, err)
 	}
 	if !ex.NeedsAdmin(true) || ex.NeedsAdmin(false) || ex.Program() != "tmutil" {
 		t.Errorf("NeedsAdmin(fixed) = %v, NeedsAdmin(where it is) = %v, Program() = %q; want the password for fixed alone, through tmutil", ex.NeedsAdmin(true), ex.NeedsAdmin(false), ex.Program())

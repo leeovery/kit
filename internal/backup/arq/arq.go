@@ -1,7 +1,8 @@
 // Package arq is Arq as a backup tool's driver: the backup plans it runs on
 // its own schedules, checked through arqc. It keeps no exclusions of its
 // own: set to "Skip items excluded by Time Machine rules", it leaves out
-// what Time Machine's list does.
+// what Time Machine's list does, a folder excluded where it is (sticky) as
+// a fixed-path one (tested on 6 Oct 2026).
 package arq
 
 import (

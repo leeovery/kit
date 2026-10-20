@@ -72,8 +72,8 @@ func (f fakeTool) Excluder() tool.Excluder { return nil }
 
 // A backup tool's step says what its driver does, in kit's words where the
 // driver leaves them to kit: its summary from when its backups last
-// finished, a plan named, or, none finished, whether the first is under
-// way; its glance its name and those times, or its summary; its problems
+// finished, a plan named, or, none finished, the first under way or none
+// yet; its glance its name and those times, or its summary; its problems
 // keyed by the tool; and setting it up the person's to-do, in the Backups
 // group.
 func TestBackupStep(t *testing.T) {
@@ -90,7 +90,8 @@ func TestBackupStep(t *testing.T) {
 		{"a day before", tool.Status{Backups: []tool.Backup{{Last: at(11, 20).Add(-24 * time.Hour)}}}, check.OK, "last backup 4 Oct 11:20", "Vault 4 Oct 11:20", nil},
 		{"plans, named and sorted", tool.Status{Backups: []tool.Backup{{Plan: "Work", Last: at(9, 0)}, {Plan: "Home", Last: at(10, 0)}}}, check.OK, "last backup Home 10:00, Work 09:00", "Vault 09:00, 10:00", nil},
 		{"the first under way", tool.Status{Backups: []tool.Backup{{}}, Running: true}, check.OK, "first backup under way", "Vault's first backup under way", nil},
-		{"the first soon", tool.Status{Backups: []tool.Backup{{}}}, check.OK, "first backup soon", "Vault's first backup soon", nil},
+		{"none finished, its words left to kit", tool.Status{Backups: []tool.Backup{{}}}, check.OK, "no backup yet", "Vault's no backup yet", nil},
+		{"none finished, in its words", tool.Status{Backups: []tool.Backup{{}}, Summary: "first backup soon"}, check.OK, "first backup soon", "Vault's first backup soon", nil},
 		{"its own words", tool.Status{Summary: "resting", Backups: []tool.Backup{{Last: at(11, 20)}}}, check.OK, "resting", "Vault 11:20", nil},
 		{"problems", tool.Status{Backups: []tool.Backup{{Last: at(11, 20)}}, Problems: []tool.Problem{{Key: "off", What: "it's off", Do: "turn it on"}, {Key: "stale:home", What: "Home: old", Do: "look"}}}, check.Attention, "last backup 11:20", "", []string{"vault:off", "vault:stale:home"}},
 		{"not set up", tool.Status{NotSetUp: true, Summary: "ignored"}, check.Attention, "not set up", "", []string{"vault:none"}},

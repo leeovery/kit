@@ -66,7 +66,8 @@ type Status struct {
 	Running bool
 	// Summary is how its backups stand, in its own words, when the backups
 	// don't say it: "" for kit to say it from them, as in "last backup
-	// 11:20", or "first backup under way" when none has finished.
+	// 11:20", or, none finished, "first backup under way" or "no backup
+	// yet".
 	Summary string
 	// Problems are what's wrong, each in its own words.
 	Problems []Problem

@@ -20,11 +20,17 @@ var Tools = []tool.Driver{
 
 // Named is the tool whose ID is id, and whether kit knows one.
 func Named(id string) (tool.Driver, bool) {
-	i := slices.IndexFunc(Tools, func(d tool.Driver) bool { return d.About().ID == id })
+	i := Index(id)
 	if i < 0 {
 		return nil, false
 	}
 	return Tools[i], true
+}
+
+// Index is where the tool whose ID is id is in Tools, the order the tools'
+// steps run in: -1 for none.
+func Index(id string) int {
+	return slices.IndexFunc(Tools, func(d tool.Driver) bool { return d.About().ID == id })
 }
 
 // IDs are the IDs of the tools kit knows, sorted.

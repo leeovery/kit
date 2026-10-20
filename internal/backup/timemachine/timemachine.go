@@ -92,8 +92,9 @@ func (Driver) Look(ctx context.Context, run runner.Runner, now time.Time) (tool.
 	case last.IsZero() && st.Running:
 	case last.IsZero():
 		if where := away(); tried || where != "" {
-			st.Summary = "no backup yet"
 			st.Problems = append(st.Problems, tool.Problem{Key: "never", What: "no completed backup yet" + where, Do: "connect the backup disk and back up now"})
+		} else {
+			st.Summary = "first backup soon"
 		}
 	case now.Sub(last) > every:
 		st.Problems = append(st.Problems, tool.Problem{Key: "stale", What: "last backup " + check.Ago(last, now) + away(), Do: "connect the backup disk; if it is connected, check System Settings › General › Time Machine"})
@@ -142,7 +143,7 @@ func stuckIn(status string, now time.Time) (tool.Problem, bool) {
 }
 
 // settings are Time Machine's settings: a runner.ExitError when it has
-// none, never set up.
+// none, never set up (absent), or they couldn't be read.
 func settings(ctx context.Context, run runner.Runner) (map[string]any, error) {
 	out, err := output(ctx, run, "defaults", "export", Prefs, "-")
 	if err != nil {
@@ -156,6 +157,13 @@ func settings(ctx context.Context, run runner.Runner) (map[string]any, error) {
 	return prefs, nil
 }
 
+// absent reports whether err is defaults saying Time Machine's settings
+// domain doesn't exist, as on a Mac whose Time Machine was never set up.
+func absent(err error) bool {
+	exit, ok := errors.AsType[*runner.ExitError](err)
+	return ok && strings.Contains(exit.Stderr, "does not exist")
+}
+
 // output runs a command, returning what it printed.
 func output(ctx context.Context, run runner.Runner, name string, args ...string) (string, error) {
 	res, err := run.Run(ctx, runner.Command{Name: name, Args: args})
@@ -167,8 +175,7 @@ func (Driver) Excluder() tool.Excluder { return exclusions{} }
 
 // exclusions are Time Machine's exclusions, through tmutil: fixed-path
 // ones, which hold before their folder exists, need root; one where a
-// folder is now (sticky) needs no password. Arq honours sticky exclusions as
-// it does fixed-path ones (tested on 6 Oct 2026).
+// folder is now (sticky) needs no password.
 type exclusions struct{}
 
 func (exclusions) Program() string { return "tmutil" }
@@ -179,7 +186,7 @@ func (exclusions) Program() string { return "tmutil" }
 // as a Mac using Arq alone needs.
 func (exclusions) Excluded(ctx context.Context, run runner.Runner, here []string) ([]string, error) {
 	prefs, err := settings(ctx, run)
-	if _, exited := errors.AsType[*runner.ExitError](err); exited {
+	if absent(err) {
 		prefs, err = nil, nil
 	}
 	if err != nil {

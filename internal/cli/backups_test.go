@@ -1,6 +1,8 @@
 package cli_test
 
 import (
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -105,15 +107,15 @@ func TestABackupToolWaitingForWhatIsntThere(t *testing.T) {
 }
 
 // The backup exclusions are written through the tools the Mac lists: Arq
-// alone has them kept by Time Machine's list, which it follows; with no
-// tool listed, they can't be kept, the kind's check saying where the tools
-// go.
+// alone has them kept by Time Machine's list, which it follows, though Time
+// Machine was never set up and has no settings at all; with no tool listed,
+// they can't be kept, the kind's check saying where the tools go.
 func TestBackupExclusionsThroughTheTools(t *testing.T) {
 	w := laptopWorld(t)
 	w.writeSection(t, "laptop", "backup exclusions", "/Applications\n")
 	w.writeSection(t, "laptop", "backups", "arq\n")
 	w.fake.On(arqc, "stats").Prints(arqStats(w.now.Add(-2 * time.Hour)))
-	w.fake.On("defaults", "export", "/Library/Preferences/com.apple.TimeMachine", "-").Prints("<plist><dict><key>SkipPaths</key><array/></dict></plist>")
+	w.fake.On("defaults", "export", "/Library/Preferences/com.apple.TimeMachine", "-").Exits(1).PrintsToStderr("Domain /Library/Preferences/com.apple.TimeMachine does not exist\n")
 	if out, _, _ := w.run(t, "status", "backup-exclusion"); !strings.Contains(out, "backup-exclusion missing:new /Applications") {
 		t.Errorf("kit status backup-exclusion printed\n%s\nwant /Applications missing from Time Machine's list", out)
 	}
@@ -121,5 +123,96 @@ func TestBackupExclusionsThroughTheTools(t *testing.T) {
 	w.writeSection(t, "laptop", "backups", "")
 	if out, _, _ := w.run(t, "status", "backup-exclusion"); !strings.Contains(out, "backup-exclusion failed no backup tool this Mac uses keeps them out: name the tools in [backups]") {
 		t.Errorf("kit status backup-exclusion printed\n%s\nwant it failed, naming [backups]", out)
+	}
+}
+
+// The backup tools' steps run in kit's order, Time Machine then Arq,
+// whatever order the files list them in, shared or a Mac's.
+func TestBackupToolsInKitsOrder(t *testing.T) {
+	w := laptopWorld(t)
+	w.writeSection(t, "shared", "backups", "arq --after cask:arq\n")
+	w.writeSection(t, "laptop", "backups", "time-machine\n")
+	w.fake.On(arqc, "stats").Prints(arqStats(w.now.Add(-2 * time.Hour)))
+	w.fake.On("defaults", "export", "/Library/Preferences/com.apple.TimeMachine", "-").Exits(1).PrintsToStderr("Domain /Library/Preferences/com.apple.TimeMachine does not exist\n")
+	out, _, _ := w.run(t, "status")
+	tm, arq := strings.Index(out, "\ntime-machine "), strings.Index(out, "\narq ")
+	if tm < 0 || arq < 0 || tm > arq {
+		t.Errorf("kit status printed\n%s\nwant Time Machine, then Arq", out)
+	}
+	var names []string
+	for _, s := range runStarted(t, w).Steps {
+		if s.Name == "time-machine" || s.Name == "arq" {
+			names = append(names, s.Name)
+		}
+	}
+	if !slices.Equal(names, []string{"time-machine", "arq"}) {
+		t.Errorf("the run's steps are %q, want Time Machine's, then Arq's", names)
+	}
+}
+
+// kit backup add declares a backup tool for this Mac, or every Mac with
+// --shared, its check placed as --after and --before say, and kit backup
+// remove takes it out, each committed and pushed; one declared already, a
+// tool kit doesn't know, or one placed after what isn't a step is refused.
+func TestBackupAddAndRemove(t *testing.T) {
+	w := laptopWorld(t)
+	w.expectSync([]string{"laptop/declarations"}, "kit backup add arq (laptop): offsite")
+	out, errOut, code := w.run(t, "backup", "add", "arq", "--after", "cask:arq", "--before", "config", "--note", "offsite")
+	if code != 0 || !strings.Contains(out, "arq ok declared in laptop\n") {
+		t.Fatalf("kit backup add printed\n%s%s exit %d", out, errOut, code)
+	}
+	if got := w.readSection(t, "laptop", "backups"); got != "arq --after cask:arq --before config   # offsite\n" {
+		t.Errorf("[backups] = %q", got)
+	}
+	w.expectSync([]string{"shared/declarations"}, "kit backup add time-machine (laptop)")
+	if out, errOut, code := w.run(t, "backup", "add", "time-machine", "--shared"); code != 0 || !strings.Contains(out, "time-machine ok declared in shared\n") {
+		t.Fatalf("kit backup add --shared printed\n%s%s exit %d", out, errOut, code)
+	}
+	if got := w.readSection(t, "shared", "backups"); got != "time-machine\n" {
+		t.Errorf("shared [backups] = %q", got)
+	}
+	for _, tt := range []struct {
+		args []string
+		want string
+		code int
+	}{
+		{[]string{"add", "arq"}, "arq failed declared already, in laptop/declarations:", 1},
+		{[]string{"add", "time-capsule"}, "kit doesn't know the backup tool time-capsule: one of arq, time-machine", 2},
+		{[]string{"add", "arq", "--before", "cask:arq"}, "--before a step", 2},
+		{[]string{"remove", "time-machine"}, "time-machine failed declared for every Mac, in shared/declarations:", 1},
+	} {
+		out, errOut, code := w.run(t, append([]string{"backup"}, tt.args...)...)
+		if !strings.Contains(out+errOut, tt.want) || code != tt.code {
+			t.Errorf("kit backup %s printed\n%s%s exit %d; want %q, exit %d", strings.Join(tt.args, " "), out, errOut, code, tt.want, tt.code)
+		}
+	}
+	w.writeSection(t, "laptop", "backups", "")
+	if out, _, code := w.run(t, "backup", "add", "arq", "--after", "nothing"); !strings.Contains(out, "arq failed it comes after nothing, which isn't a step") || code != 1 {
+		t.Errorf("kit backup add arq --after nothing printed\n%s exit %d", out, code)
+	}
+	w.writeSection(t, "laptop", "backups", "arq\n")
+	w.expectSync([]string{"laptop/declarations"}, "kit backup remove arq (laptop)")
+	if out, errOut, code := w.run(t, "backup", "remove", "arq"); code != 0 || !strings.Contains(out, "arq ok out of laptop\n") {
+		t.Fatalf("kit backup remove printed\n%s%s exit %d", out, errOut, code)
+	}
+	if got := w.readSection(t, "laptop", "backups"); got != "" {
+		t.Errorf("[backups] = %q, want it empty", got)
+	}
+}
+
+// Applying, the backup exclusions wait for the program of the tool keeping
+// them, Time Machine's tmutil for Arq alone, as another step may put it on
+// kit's PATH: one that never comes leaves them deferred, saying so.
+func TestBackupExclusionsWaitForTheirProgram(t *testing.T) {
+	w := laptopWorld(t)
+	w.writeSection(t, "laptop", "backup exclusions", "/Applications\n")
+	w.writeSection(t, "laptop", "backups", "arq\n")
+	w.fake.On(arqc, "stats").Prints(arqStats(w.now.Add(-2 * time.Hour)))
+	w.fake.On("defaults", "export", "/Library/Preferences/com.apple.TimeMachine", "-").Prints("<plist><dict><key>SkipPaths</key><array/></dict></plist>")
+	w.fake.On("sudo", "-n", "true")
+	w.write(t, filepath.Join(".local", "state", "kit", "drift.json"), `{"first_seen": {"backup-exclusion:/Applications": "2025-12-31T00:00:00Z"}}`)
+	out, errOut, _ := w.run(t, "apply")
+	if !strings.Contains(out, "backup-exclusion deferred needs tmutil, which isn't there yet\n") {
+		t.Errorf("kit apply printed\n%s%s\nwant the exclusions waiting for tmutil", out, errOut)
 	}
 }

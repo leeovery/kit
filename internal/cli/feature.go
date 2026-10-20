@@ -55,7 +55,11 @@ The change is committed and pushed to the config repository.`,
 // Mac's file or the shared one, then commits and pushes.
 func (a *app) switchFeatures(ctx context.Context, r *run, names []string, on, shared bool) error {
 	for _, name := range names {
-		if err := notAFeature(name); err != nil {
+		words := []string{map[bool]string{true: "add", false: "remove"}[on], name}
+		if shared {
+			words = append(words, "--shared")
+		}
+		if err := notAFeature(name, words...); err != nil {
 			return err
 		}
 		if !slices.Contains(steps.Features, name) {

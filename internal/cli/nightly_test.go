@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/leeovery/kit/internal/runner/runnertest"
 )
 
 // jobsWorld is laptopWorld with jobs of its own: one hourly, one nightly.
@@ -140,23 +142,37 @@ func TestNightlyAlertsAndReport(t *testing.T) {
 // The scheduled run excludes a new folder matching a backup exclusion's
 // glob where it is, needing no password; a plain path it leaves to kit
 // apply, and it installs nothing else. Arq alone keeps them through Time
-// Machine's list.
+// Machine's list, Time Machine set up or never, with no settings at all.
 func TestNightlyExcludesNewMatchesByItself(t *testing.T) {
-	w := jobsWorld(t)
-	w.write(t, "Library/Caches/one/.keep", "")
-	w.writeSection(t, "shared", "backup exclusions", "~/Library/Caches/*\n/Applications\n")
-	w.writeSection(t, "shared", "backups", "arq\n")
-	w.fake.On("/Applications/Arq.app/Contents/Resources/arqc", "stats").Prints(`{"backupPlans": [{"name": "User data", "schedule": {"type": "Daily"}, "lastBackedUp": "` + w.now.Add(-2*time.Hour).UTC().Format(time.RFC3339) + `"}]}`)
-	w.fake.On("defaults", "export", "/Library/Preferences/com.apple.TimeMachine", "-").Prints("<plist><dict><key>SkipPaths</key><array/></dict></plist>")
-	match := filepath.Join(w.home, "Library/Caches/one")
-	w.fake.On("tmutil", "isexcluded", match).Prints("[Included]  " + match + "\n")
-	w.fake.On("tmutil", "addexclusion", match)
-	w.run(t, "nightly")
-	calls := strings.Join(w.fake.Calls(), "\n")
-	if !strings.Contains(calls, "tmutil addexclusion "+match) {
-		t.Errorf("ran\n%s\nwant the new match excluded", calls)
-	}
-	if strings.Contains(calls, "sudo") || strings.Contains(calls, "brew install") {
-		t.Errorf("ran\n%s\nwant nothing that needs the password, and nothing else installed", calls)
+	for _, tt := range []struct {
+		name     string
+		settings func(*runnertest.Script)
+	}{
+		{"Time Machine's settings there", func(s *runnertest.Script) {
+			s.Prints("<plist><dict><key>SkipPaths</key><array/></dict></plist>")
+		}},
+		{"Time Machine never set up", func(s *runnertest.Script) {
+			s.Exits(1).PrintsToStderr("Domain /Library/Preferences/com.apple.TimeMachine does not exist\n")
+		}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			w := jobsWorld(t)
+			w.write(t, "Library/Caches/one/.keep", "")
+			w.writeSection(t, "shared", "backup exclusions", "~/Library/Caches/*\n/Applications\n")
+			w.writeSection(t, "shared", "backups", "arq\n")
+			w.fake.On("/Applications/Arq.app/Contents/Resources/arqc", "stats").Prints(`{"backupPlans": [{"name": "User data", "schedule": {"type": "Daily"}, "lastBackedUp": "` + w.now.Add(-2*time.Hour).UTC().Format(time.RFC3339) + `"}]}`)
+			tt.settings(w.fake.On("defaults", "export", "/Library/Preferences/com.apple.TimeMachine", "-"))
+			match := filepath.Join(w.home, "Library/Caches/one")
+			w.fake.On("tmutil", "isexcluded", match).Prints("[Included]  " + match + "\n")
+			w.fake.On("tmutil", "addexclusion", match)
+			w.run(t, "nightly")
+			calls := strings.Join(w.fake.Calls(), "\n")
+			if !strings.Contains(calls, "tmutil addexclusion "+match) {
+				t.Errorf("ran\n%s\nwant the new match excluded", calls)
+			}
+			if strings.Contains(calls, "sudo") || strings.Contains(calls, "brew install") {
+				t.Errorf("ran\n%s\nwant nothing that needs the password, and nothing else installed", calls)
+			}
+		})
 	}
 }

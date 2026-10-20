@@ -13,14 +13,16 @@ import (
 	"github.com/leeovery/kit/internal/steps"
 )
 
-// lineKinds are the sections of lines of your own, which aren't kinds, by
-// their commands' names: checks, jobs, steps by hand, and steps of your own.
+// lineKinds are the sections of lines that aren't kinds, by their commands'
+// names: those of your own, checks, jobs, steps by hand and steps of your
+// own; and the backup tools a Mac uses.
 var lineKinds = map[string]string{
-	"check":     config.ChecksKind,
-	"hourly":    config.HourlyKind,
-	"nightly":   config.NightlyKind,
-	"manual":    config.ManualKind,
-	stepCommand: config.StepsKind,
+	"check":       config.ChecksKind,
+	"hourly":      config.HourlyKind,
+	"nightly":     config.NightlyKind,
+	"manual":      config.ManualKind,
+	stepCommand:   config.StepsKind,
+	backupCommand: config.BackupsKind,
 }
 
 // addLine declares a check, a job or a step by hand: args are its name, for

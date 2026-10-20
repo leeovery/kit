@@ -144,6 +144,23 @@ func TestExclusionsKeptByEach(t *testing.T) {
 	if err := x.Install(t.Context(), []string{"/Applications"}); err != nil || !slices.Equal(first.did, []string{"fixed /Applications"}) || !slices.Equal(second.did, []string{"fixed /Applications"}) {
 		t.Errorf("Install() = %v, the first did %q, the second %q; want each to keep it out", err, first.did, second.did)
 	}
+	first.did, second.did = nil, nil
+	if err := x.Remove(t.Context(), []string{"/Volumes/Old"}); err != nil || !slices.Equal(first.did, []string{"include /Volumes/Old"}) || len(second.did) != 0 {
+		t.Errorf("Remove() = %v, the first did %q, the second %q; want it put back by the one keeping it out alone", err, first.did, second.did)
+	}
+}
+
+// The kind runs its excluders' programs, each once, which applying waits
+// for while they aren't on kit's PATH.
+func TestExclusionsCommands(t *testing.T) {
+	keeper, other := &fakeExcluder{}, &fakeExcluder{}
+	x := exclusion.New(runnertest.New(t), home(t), []tool.Excluder{keeper, other})
+	if got := kind.Commands(x); !slices.Equal(got, []string{"keeper"}) || x.Program() != "keeper" {
+		t.Errorf("Commands() = %q, Program() = %q; want the excluders' program, once", got, x.Program())
+	}
+	if got := kind.Commands(exclusion.New(runnertest.New(t), home(t), nil)); len(got) != 0 {
+		t.Errorf("Commands() with no excluder = %q, want none", got)
+	}
 }
 
 // A Mac whose backup tools keep no exclusions, or that names none, can't
@@ -161,7 +178,8 @@ func TestExclusionsWithNoTool(t *testing.T) {
 
 // The exclusions are written through tmutil whichever of the tools are
 // listed: Time Machine's own, and Arq's alone by Time Machine's list, which
-// Arq follows, needing no Time Machine disk.
+// Arq follows, on a Mac whose Time Machine was never set up, with no
+// settings at all.
 func TestExclusionsThroughTheTools(t *testing.T) {
 	for _, tools := range [][]string{{timemachine.ID}, {arq.ID}, {timemachine.ID, arq.ID}} {
 		t.Run(strings.Join(tools, " and "), func(t *testing.T) {
@@ -172,7 +190,8 @@ func TestExclusionsThroughTheTools(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			fake.On("defaults", "export", timemachine.Prefs, "-").Prints("<plist><dict><key>SkipPaths</key><array/></dict></plist>")
+			// Time Machine never set up: it has no settings at all.
+			fake.On("defaults", "export", timemachine.Prefs, "-").Exits(1).PrintsToStderr("Domain " + timemachine.Prefs + " does not exist\n")
 			if items := kind.Compare(t.Context(), x, list).Items; len(items) != 1 || items[0].Name != "/Applications" || items[0].State != "missing" {
 				t.Errorf("items = %+v, want /Applications missing", items)
 			}

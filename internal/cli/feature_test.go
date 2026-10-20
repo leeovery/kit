@@ -7,7 +7,8 @@ import (
 
 // A feature switched on brings its steps into the run; one kit doesn't
 // know is refused, saying where; a backup tool is refused as a feature,
-// saying where it goes now and what its line there is.
+// saying where it goes now and the command declaring it there, as its
+// section had it.
 func TestFeaturesBringTheirSteps(t *testing.T) {
 	w := laptopWorld(t)
 	w.writeSection(t, "laptop", "features", "remote-login\n")
@@ -16,13 +17,14 @@ func TestFeaturesBringTheirSteps(t *testing.T) {
 		t.Errorf("kit status remote-login printed\n%s", out)
 	}
 
-	for _, tt := range []struct{ header, line, want string }{
-		{"features", "time-capsule\n", "laptop/declarations:5: kit doesn't know the feature time-capsule"},
-		{"features", "time-machine\n", "laptop/declarations:5: time-machine is a backup tool, so it goes in [backups] now, not [features]: its line there is time-machine"},
-		{"features --after cask:arq", "arq\n", "laptop/declarations:5: arq is a backup tool, so it goes in [backups] now, not [features]: its line there is arq --after cask:arq"},
+	for _, tt := range []struct{ scope, header, line, want string }{
+		{"laptop", "features", "time-capsule\n", "laptop/declarations:5: kit doesn't know the feature time-capsule"},
+		{"laptop", "features", "time-machine\n", "laptop/declarations:5: time-machine is a backup tool, so it goes in [backups] now, not [features]: kit backup add time-machine, once its line's out"},
+		{"laptop", "features --after cask:arq", "arq\n", "laptop/declarations:5: arq is a backup tool, so it goes in [backups] now, not [features]: kit backup add arq --after cask:arq, once its line's out"},
+		{"shared", "features --after cask:arq", "arq\n", "arq is a backup tool, so it goes in [backups] now, not [features]: kit backup add arq --after cask:arq --shared, once its line's out"},
 	} {
 		w := laptopWorld(t)
-		w.writeSection(t, "laptop", tt.header, tt.line)
+		w.writeSection(t, tt.scope, tt.header, tt.line)
 		if _, errOut, code := w.run(t, "status"); !strings.Contains(errOut, tt.want) || code != 2 {
 			t.Errorf("[%s] %s: kit status printed %q, exit %d; want %q", tt.header, tt.line, errOut, code, tt.want)
 		}
@@ -49,8 +51,11 @@ func TestFeatureOnAndOff(t *testing.T) {
 	if _, errOut, code := w.run(t, "feature", "on", "time-capsule"); !strings.Contains(errOut, "kit doesn't know the feature time-capsule") || code != 2 {
 		t.Errorf("kit feature on time-capsule printed %q, exit %d", errOut, code)
 	}
-	if _, errOut, code := w.run(t, "feature", "on", "time-machine"); !strings.Contains(errOut, "time-machine is a backup tool, so it goes in [backups] now, not [features]") || code != 2 {
+	if _, errOut, code := w.run(t, "feature", "on", "time-machine"); !strings.Contains(errOut, "time-machine is a backup tool, so it goes in [backups] now, not [features]: kit backup add time-machine\n") || code != 2 {
 		t.Errorf("kit feature on time-machine printed %q, exit %d", errOut, code)
+	}
+	if _, errOut, code := w.run(t, "feature", "off", "arq", "--shared"); !strings.Contains(errOut, "arq is a backup tool, so it goes in [backups] now, not [features]: kit backup remove arq --shared\n") || code != 2 {
+		t.Errorf("kit feature off arq --shared printed %q, exit %d", errOut, code)
 	}
 }
 
