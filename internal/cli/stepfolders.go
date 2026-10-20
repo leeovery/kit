@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/steps"
@@ -81,7 +82,8 @@ func (r *run) makeStepFolder(s steps.Script, does string, m folderMove) (string,
 		if hadParent {
 			return nil
 		}
-		if err := os.Remove(parent); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		// No longer empty, it holds something else now, so it stays.
+		if err := os.Remove(parent); err != nil && !errors.Is(err, fs.ErrNotExist) && !errors.Is(err, syscall.ENOTEMPTY) {
 			return err
 		}
 		return nil

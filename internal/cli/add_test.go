@@ -338,3 +338,28 @@ func TestAddANameGivenTwice(t *testing.T) {
 		t.Errorf("ran %q, want ripgrep installed once", w.fake.Calls())
 	}
 }
+
+// The commit names what was added: not a name whose install failed.
+func TestAddCommitsWhatWasAdded(t *testing.T) {
+	w := laptopWorld(t)
+	w.fake.On("brew", "update", "--quiet")
+	w.fake.On("brew", "install", "--formula", "nosuch").Exits(1).PrintsToStderr(`Error: No available formula with the name "nosuch".`)
+	w.fake.On("brew", "install", "--formula", "ripgrep")
+	w.expectSync([]string{"laptop/declarations"}, "kit brew add ripgrep (laptop)")
+	if out, errOut, code := w.run(t, "brew", "add", "nosuch", "ripgrep"); code != 1 || !strings.Contains(out, "kit-config ok committed and pushed") {
+		t.Errorf("kit brew add nosuch ripgrep printed\n%s%s exit %d", out, errOut, code)
+	}
+}
+
+// A name typed twice is asked about once.
+func TestAddAsksOnceOfANameTypedTwice(t *testing.T) {
+	w := laptopWorld(t)
+	w.terminal = true
+	w.fake.On("mas", "search", "--json", "sleep").Prints(sleepSearch)
+	asked := 0
+	w.choose = func(string, []string) (int, error) { asked++; return 0, ask.ErrCancelled }
+	w.run(t, "mas", "add", "sleep", "sleep")
+	if asked != 1 {
+		t.Errorf("asked %d times, want once", asked)
+	}
+}

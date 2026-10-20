@@ -118,19 +118,6 @@ func (r Repo) Changes(ctx context.Context) ([]Change, error) {
 	return changes, nil
 }
 
-// known reports whether path is there, or git keeps something under it,
-// in its index: one that's neither git won't take.
-func (r Repo) known(ctx context.Context, path string) (bool, error) {
-	if _, err := os.Lstat(filepath.Join(r.Dir, path)); err == nil {
-		return true, nil
-	}
-	res, err := r.git(ctx, "ls-files", "--cached", "--", path)
-	if err != nil {
-		return false, err
-	}
-	return strings.TrimSpace(string(res.Stdout)) != "", nil
-}
-
 // unquote is a path as git prints it, without the quotes it puts round one
 // with unusual characters.
 func unquote(name string) string {
@@ -157,35 +144,61 @@ func (r Repo) Restore(ctx context.Context, path string) error {
 }
 
 // Commit commits the changes to files, paths in the repository, alone, with
-// message: anything else uncommitted is left as it is. Files with no changes
-// commit nothing, which is no error; it reports whether it committed. A path
-// that's gone, and that git never kept, is left out, as git won't take it.
+// message: anything else uncommitted, staged or not, is left as it is.
+// Files with no changes commit nothing, which is no error; it reports
+// whether it committed. Those on disk are added; those gone are committed
+// as status names them, a deletion or a rename's old side, staged or not,
+// as git won't add what isn't there. A path gone that status doesn't name,
+// git never kept: left out, and with nothing left, nothing's committed, as
+// a commit given no path would take whatever's staged.
 func (r Repo) Commit(ctx context.Context, message string, files ...string) (bool, error) {
 	res, err := r.git(ctx, slices.Concat([]string{"status", "--porcelain", "--"}, files)...)
 	if err != nil {
 		return false, err
 	}
-	if strings.TrimSpace(string(res.Stdout)) == "" {
+	changed := statusPaths(string(res.Stdout))
+	var add, commit []string
+	for _, f := range files {
+		_, err := os.Lstat(filepath.Join(r.Dir, f))
+		switch {
+		case err == nil:
+			add = append(add, f)
+			commit = append(commit, f)
+		case slices.ContainsFunc(changed, func(c string) bool { return c == f || strings.HasPrefix(c, f+"/") }):
+			commit = append(commit, f)
+		}
+	}
+	if len(changed) == 0 || len(commit) == 0 {
 		return false, nil
 	}
-	var kept []string
-	for _, f := range files {
-		known, err := r.known(ctx, f)
-		if err != nil {
+	if len(add) > 0 {
+		if _, err := r.git(ctx, slices.Concat([]string{"add", "--"}, add)...); err != nil {
 			return false, err
 		}
-		if known {
-			kept = append(kept, f)
-		}
 	}
-	paths := slices.Concat([]string{"--"}, kept)
-	if _, err := r.git(ctx, slices.Concat([]string{"add"}, paths)...); err != nil {
-		return false, err
-	}
-	if _, err := r.git(ctx, slices.Concat([]string{"commit", "--quiet", "-m", message}, paths)...); err != nil {
+	if _, err := r.git(ctx, slices.Concat([]string{"commit", "--quiet", "-m", message, "--"}, commit)...); err != nil {
 		return false, err
 	}
 	return true, nil
+}
+
+// statusPaths are the paths git status --porcelain names, both sides of a
+// rename.
+func statusPaths(out string) []string {
+	var paths []string
+	for line := range strings.Lines(out) {
+		line = strings.TrimRight(line, "\n")
+		if len(line) < 4 {
+			continue
+		}
+		name := line[3:]
+		if from, to, ok := strings.Cut(name, " -> "); ok {
+			paths = append(paths, unquote(from))
+			name = to
+		}
+		paths = append(paths, unquote(name))
+	}
+	return paths
 }
 
 // Push brings in the remote's changes, rebasing what's committed here onto

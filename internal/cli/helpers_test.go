@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -174,19 +175,81 @@ func (w *world) run(t *testing.T, args ...string) (stdout, stderr string, status
 var errNotFound = runner.ErrNotFound
 
 // expectSync scripts the config repository's commit of files with message,
-// and its push.
+// and its push. git's status of them is as git prints it, of what the run
+// leaves in them against what they held when this was called, all of it
+// committed then: a file changed ( M), gone ( D) or new (??; a new folder as
+// one, as git shows an untracked folder); and what's added and committed is
+// what git would take: the paths there, and those gone that status names.
 func (w *world) expectSync(files []string, message string) {
 	dir := filepath.Join(w.home, ".config", "kit")
 	git := func(args ...string) []string { return append([]string{"-C", dir}, args...) }
-	w.fake.On("git", git(append([]string{"status", "--porcelain", "--"}, files...)...)...).Prints(" M " + strings.Join(files, "\n M ") + "\n")
-	for _, f := range files {
-		w.fake.On("git", git("ls-files", "--cached", "--", f)...).Prints(f + "\n")
-	}
-	w.fake.On("git", git(append([]string{"add", "--"}, files...)...)...)
-	w.fake.On("git", git(append([]string{"commit", "--quiet", "-m", message, "--"}, files...)...)...)
+	before := filesUnder(dir, files)
+	w.fake.On("git", git(append([]string{"status", "--porcelain", "--"}, files...)...)...).Filters(func(string) (string, error) {
+		after := filesUnder(dir, files)
+		var lines, add, commit []string
+		for _, f := range files {
+			had, has := before[f], after[f]
+			info, err := os.Stat(filepath.Join(dir, f))
+			switch {
+			case err == nil && info.IsDir() && len(had) == 0:
+				lines = append(lines, "?? "+f+"/")
+			default:
+				paths := slices.Concat(slices.Collect(maps.Keys(had)), slices.Collect(maps.Keys(has)))
+				for _, path := range slices.Compact(slices.Sorted(slices.Values(paths))) {
+					was, wasThere := had[path]
+					is, isThere := has[path]
+					switch {
+					case wasThere && isThere && was != is:
+						lines = append(lines, " M "+path)
+					case wasThere && !isThere:
+						lines = append(lines, " D "+path)
+					case !wasThere && isThere:
+						lines = append(lines, "?? "+path)
+					}
+				}
+			}
+			if err == nil {
+				add = append(add, f)
+			}
+			if err == nil || slices.ContainsFunc(lines, func(l string) bool { return l[3:] == f || strings.HasPrefix(l[3:], f+"/") }) {
+				commit = append(commit, f)
+			}
+		}
+		if len(lines) == 0 {
+			return "", nil
+		}
+		if len(add) > 0 {
+			w.fake.On("git", git(append([]string{"add", "--"}, add...)...)...)
+		}
+		w.fake.On("git", git(append([]string{"commit", "--quiet", "-m", message, "--"}, commit...)...)...)
+		return strings.Join(lines, "\n") + "\n", nil
+	})
 	w.fake.On("git", git("remote")...).Prints("origin\n")
 	w.fake.On("git", git("pull", "--rebase", "--autostash", "--quiet")...)
 	w.fake.On("git", git("push", "--quiet")...)
+}
+
+// filesUnder are the files at or under each of paths in dir, by path, each
+// by its path in dir, with what it holds: none for a path that isn't there.
+func filesUnder(dir string, paths []string) map[string]map[string]string {
+	out := make(map[string]map[string]string, len(paths))
+	for _, p := range paths {
+		held := map[string]string{}
+		_ = filepath.WalkDir(filepath.Join(dir, p), func(path string, d os.DirEntry, err error) error {
+			if err != nil || d.IsDir() {
+				return nil
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return nil
+			}
+			rel, _ := filepath.Rel(dir, path)
+			held[rel] = string(data)
+			return nil
+		})
+		out[p] = held
+	}
+	return out
 }
 
 // writeSection sets the section headed header, in scope's declarations

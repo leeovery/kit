@@ -20,6 +20,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/kind"
@@ -233,9 +234,39 @@ func readDeclared(e config.Entry) (declaredValue, error) {
 		if err != nil {
 			return dv, fmt.Errorf("its XML doesn't read: %w", err)
 		}
+		if err := writable(v); err != nil {
+			return dv, err
+		}
 		dv.value = v
 	}
 	return dv, nil
+}
+
+// writable says why defaults write wouldn't take v, read from a line's XML:
+// nil when it would. Nothing it knows (an element defaults has no type for)
+// and a date finer than the second, it refuses.
+func writable(v any) error {
+	switch x := v.(type) {
+	case nil:
+		return errors.New("its XML holds something defaults write doesn't take: a value is a dict, array, string, integer, real, date, data, true or false")
+	case time.Time:
+		if x.Nanosecond() != 0 {
+			return fmt.Errorf("its date, %s, is finer than the second, which defaults write doesn't take", x.Format(time.RFC3339Nano))
+		}
+	case map[string]any:
+		for _, item := range x {
+			if err := writable(item); err != nil {
+				return err
+			}
+		}
+	case []any:
+		for _, item := range x {
+			if err := writable(item); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // domainID names a domain as exported: currentHost: first for one of this

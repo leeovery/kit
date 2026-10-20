@@ -63,3 +63,15 @@ func TestXMLReadsBack(t *testing.T) {
 		t.Errorf("ReadValue(XML()) = %#v, %v", back, err)
 	}
 }
+
+// A string's text, and a key's, read exactly, spaces and all, as defaults
+// write keeps them; a number's trimmed.
+func TestReadKeepsAStringsSpaces(t *testing.T) {
+	v, err := plist.Read(`<plist><dict><key> x</key><string> a </string><key>n</key><integer> 5 </integer></dict></plist>`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m := v.(map[string]any); m[" x"] != " a " || m["n"] != int64(5) {
+		t.Errorf("read %#v", m)
+	}
+}

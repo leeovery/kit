@@ -188,11 +188,10 @@ func TestAddAStepSharedMovesItsFolder(t *testing.T) {
 	dir := filepath.Join(w.home, ".config", "kit")
 	git := func(args ...string) []string { return append([]string{"-C", dir}, args...) }
 	all := []string{"laptop/declarations", "laptop/steps/tool", "shared/declarations", "shared/steps/tool", "studio/declarations", "studio/steps/tool"}
+	there := []string{"laptop/declarations", "shared/declarations", "shared/steps/tool", "studio/declarations"}
 	kept := []string{"laptop/declarations", "shared/declarations", "shared/steps/tool", "studio/declarations", "studio/steps/tool"}
-	w.fake.On("git", git(append([]string{"status", "--porcelain", "--"}, all...)...)...).Prints(" M laptop/declarations\n M shared/declarations\n?? shared/steps/tool/run\n M studio/declarations\n D studio/steps/tool/run\n")
-	w.fake.On("git", git("ls-files", "--cached", "--", "laptop/steps/tool")...)
-	w.fake.On("git", git("ls-files", "--cached", "--", "studio/steps/tool")...).Prints("studio/steps/tool/run\n")
-	w.fake.On("git", git(append([]string{"add", "--"}, kept...)...)...)
+	w.fake.On("git", git(append([]string{"status", "--porcelain", "--"}, all...)...)...).Prints(" M laptop/declarations\n M shared/declarations\n?? shared/steps/tool/\n M studio/declarations\n D studio/steps/tool/run\n")
+	w.fake.On("git", git(append([]string{"add", "--"}, there...)...)...)
 	w.fake.On("git", git(append([]string{"commit", "--quiet", "-m", "kit step add tool (laptop)", "--"}, kept...)...)...)
 	w.fake.On("git", git("remote")...).Prints("origin\n")
 	w.fake.On("git", git("pull", "--rebase", "--autostash", "--quiet")...)

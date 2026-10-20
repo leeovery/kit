@@ -36,7 +36,7 @@ func (a *app) add(ctx context.Context, r *run, kindName string, names []string, 
 		return err
 	}
 	scope := r.scope(opts.shared)
-	if names, err = a.find(ctx, k, names); err != nil {
+	if names, err = a.find(ctx, k, once(names)); err != nil {
 		return err
 	}
 	names = once(names)
@@ -56,15 +56,18 @@ func (a *app) add(ctx context.Context, r *run, kindName string, names []string, 
 	defer stop()
 	opts.waiting = waitingForAdmin(ctx, r, kindName, missing, held)
 	c := startChanges(r, names)
+	var added []string
 	for _, name := range names {
-		c.step(ctx, name, func(ctx context.Context) check.Result {
+		res := c.step(ctx, name, func(ctx context.Context) check.Result {
 			if err := refused[name]; err != nil {
 				return check.Result{State: check.Failed, Reason: "couldn't declare: " + err.Error()}
 			}
 			return installAndDeclare(ctx, r, c, k, scope, name, opts, !slices.Contains(missing, name), prepared[name])
 		})
+		if res.State == check.OK {
+			added = append(added, name)
+		}
 	}
-	added := slices.DeleteFunc(slices.Clone(names), func(name string) bool { return refused[name] != nil })
 	c.sync(ctx, commitMessage("add", kindName, added, r.machine, opts.note))
 	return c.finish()
 }

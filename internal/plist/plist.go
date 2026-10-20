@@ -54,9 +54,15 @@ func plistValue(d *xml.Decoder) (any, error) {
 }
 
 func plistElement(d *xml.Decoder, start xml.StartElement) (any, error) {
-	text := func() (string, error) {
+	// A string's text, or a key's, is kept exactly, spaces and all, as
+	// defaults write keeps it; a number's, a date's or data's, trimmed.
+	exact := func() (string, error) {
 		var s string
 		err := d.DecodeElement(&s, &start)
+		return s, err
+	}
+	text := func() (string, error) {
+		s, err := exact()
 		return strings.TrimSpace(s), err
 	}
 	switch start.Name.Local {
@@ -93,10 +99,10 @@ func plistElement(d *xml.Decoder, start xml.StartElement) (any, error) {
 			a = append(a, v)
 		}
 	case "key":
-		s, err := text()
+		s, err := exact()
 		return plistKey(s), err
 	case "string":
-		return text()
+		return exact()
 	case "integer":
 		s, err := text()
 		if err != nil {

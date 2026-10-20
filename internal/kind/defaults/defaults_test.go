@@ -170,7 +170,7 @@ func TestThisHostsAndTheSystemsSettings(t *testing.T) {
 
 func TestDeclaredValuesRead(t *testing.T) {
 	d := defaults.New(runnertest.New(t), t.TempDir())
-	for _, value := range []string{"-bool maybe", "-int sixty", `-dict-add "<integer>sixty</integer>"`} {
+	for _, value := range []string{"-bool maybe", "-int sixty", `-dict-add "<integer>sixty</integer>"`, "<foo/>", "'<dict><key>a</key><bar/></dict>'", "<date>2026-01-01T00:00:00.5Z</date>"} {
 		list := config.List{Entries: []config.Entry{{Name: "com.apple.dock:x:y", Value: value, Scope: "shared", Line: 2}}}
 		if !strings.HasPrefix(value, "-dict-add") {
 			list.Entries[0].Name = "com.apple.dock:x"
@@ -221,5 +221,21 @@ func TestTheMicrophoneAndCameraItemIsNoise(t *testing.T) {
 	m.set("com.apple.controlcenter", "<key>NSStatusItem VisibleCC AudioVideoModule</key><true/><key>NSStatusItem Visible Bluetooth</key><true/>")
 	if got := m.items(list); !slices.Equal(got, []string{"com.apple.controlcenter:NSStatusItem Visible Bluetooth extra"}) {
 		t.Errorf("items = %q; want the microphone's item left out, Bluetooth's found", got)
+	}
+}
+
+// Status reads a defaults export as it's printed, laid out over lines, the
+// same as before: a string as declared is as declared; and a string's
+// spaces, which defaults write keeps, count.
+func TestAnExportsStringsReadExactly(t *testing.T) {
+	m := newMac(t)
+	list := m.declare("com.apple.finder:FXPreferredViewStyle", "-string Nlsv", "com.apple.finder:Padded", "-string ' a '")
+	m.set("com.apple.finder", "\n\t<key>FXPreferredViewStyle</key>\n\t<string>Nlsv</string>\n\t<key>Padded</key>\n\t<string> a </string>\n")
+	if got := m.items(list); len(got) != 0 {
+		t.Errorf("items = %q; want none, both as declared", got)
+	}
+	m.set("com.apple.finder", "\n\t<key>FXPreferredViewStyle</key>\n\t<string>Nlsv</string>\n\t<key>Padded</key>\n\t<string>a</string>\n")
+	if got := m.items(list); len(got) != 1 || !strings.HasPrefix(got[0], "com.apple.finder:Padded") {
+		t.Errorf("items = %q; want Padded alone set otherwise", got)
 	}
 }

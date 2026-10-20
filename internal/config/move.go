@@ -53,7 +53,7 @@ func (d sectionDef) reading(e Entry) ([]string, error) {
 
 // says is what e's line says, its notes aside, as a set of parts, so that
 // two lines saying the same, however written, have the same: its reading,
-// with its section's hold and its steps.
+// with its section's hold and its steps, each by its place.
 func (d sectionDef) says(e Entry) ([]string, error) {
 	parts, err := d.reading(e)
 	if err != nil {
@@ -62,8 +62,8 @@ func (d sectionDef) says(e Entry) ([]string, error) {
 	if e.Hold != "" {
 		parts = append(parts, "its section's "+e.Hold)
 	}
-	if len(e.Steps) > 0 {
-		parts = append(parts, "the steps "+strings.Join(e.Steps, "; "))
+	for i, step := range e.Steps {
+		parts = append(parts, fmt.Sprintf("step %d: %s", i+1, step))
 	}
 	return slices.Compact(slices.Sorted(slices.Values(parts))), nil
 }
