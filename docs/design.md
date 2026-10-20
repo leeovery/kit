@@ -162,8 +162,8 @@ file having none, or the shared file's), so the kind's still looked after.
 
 **Features.** Each piece of kit stands alone, and is on when it's declared: a list by having
 entries (the kinds, later the folders to restore), a piece with nothing to list by a switch
-in a Mac's `[features]` section (`scratch`, `prefs`,
-`oh-my-zsh`, `touch-id-sudo`, `remote-login`, `file-sharing`), so
+in a Mac's `[features]` section (`prefs`, `touch-id-sudo`, `remote-login`,
+`file-sharing`), so
 turning one off loses nothing that isn't its own. Built-ins are generic and lasting; what's
 specific to a user, or to the moment, goes in their config: checks of their own in
 `[checks]`, jobs of their own in `[hourly]` and `[nightly]`. `kit feature
@@ -209,11 +209,7 @@ the backup tools' a Mac lists in `[backups]` (`time-machine`, `arq`: each runs o
 schedule, and kit checks it did, only the plans Arq is scheduled to run; Backups above); the config repository's
 (`config-sync`: commits that won't push; `config-private`); the scheduled runs' (`nightly`: the hourly run within two
 hours, the nightly one finished within 26 and none stuck over six, each job's last outcome;
-quiet until `kit nightly` has run on a schedule); with their features, `scratch` (mounted,
-out of Spotlight and Time Machine, `tmp` writable, Claude Code's temporary files sent there;
-applying, through sudo, makes the volume with its change log off, turns Spotlight off,
-excludes it and makes `tmp`)
-and `prefs` (apps' settings saved: capture switched on, this Mac owning its folder, a capture
+quiet until `kit nightly` has run on a schedule); with its feature, `prefs` (apps' settings saved: capture switched on, this Mac owning its folder, a capture
 in the last day without errors, pushed within a day; read from kit's record alone) with
 `full-disk-access` (what capture needs); and the user's own, in a `[checks]`
 section, a line each:
@@ -269,8 +265,7 @@ one with no command is done; a choice is answered by its keys (apps' settings: `
 back from this Mac's last save, its date said, as `kit prefs restore` does; `f` starts afresh, as
 `kit prefs start-fresh` does). Stopping there (`q`'s Stop) leaves what's left to do, in that
 order in the record, the run ending as it stands. After the last, kit checks again the steps the
-to-dos held, those they came from and any with something that comes with one (Scratch's Claude
-Code settings come with apps' settings), so their rows and the record are right, then finishes.
+to-dos held, those they came from, so their rows and the record are right, then finishes.
 Without a terminal, nothing's raised: kit's own stay items of their steps. A step a line comes
 before can find, as it applies, that the line wasn't done after all, as the App Store's first
 install finds no one signed in (signing in has no `--test`: mas can't say who's signed in, and
@@ -461,11 +456,9 @@ area, the drift and the config repository one area, Config.
 `kit nightly` is what the hourly launch runs: the jobs due, in order (one failing never stops
 the others), then every check. It installs only what a kind lets it install with no one
 there, cheap and safe, and removes nothing: today, a new folder matching a backup
-exclusion's glob, excluded where it is. Besides the user's own jobs, two are built in, nightly, each
-with its feature: `scratch`'s clean-up (`/Volumes/Scratch/tmp` cleared of items untouched for a
-week; Claude Code's session folders judged one by one over 30 days, kept while their
-transcript changed) and, last, `prefs`'s capture (`kit prefs capture`, stopped after 15
-minutes); and one hourly, `prefs`'s retry of the apps' settings waiting to be restored, once
+exclusion's glob, excluded where it is. Besides the user's own jobs, two are built in, with
+the `prefs` feature: nightly, last, its capture (`kit prefs capture`, stopped after 15
+minutes); and hourly, its retry of the apps' settings waiting to be restored, once
 their apps are installed and closed. The hourly jobs run every time; the nightly ones once a day,
 when the nightly run falls due (`nightly_at` in `kit.toml`, 03:00 unless it says), or on the
 first run after it's been missed, as by a Mac asleep then. Each job's outcome is kept in kit's
@@ -611,9 +604,6 @@ so a config that doesn't read never leaves a shell without its PATH. Relative en
 or a `~` that doesn't start the home folder is refused. `kit path add <dir>` puts a
 directory last (`--shared`: on every Mac), `kit path remove <dir>` takes it off; both write
 the file and commit.
-
-The `oh-my-zsh` feature checks Oh My Zsh is installed, and applying runs its installer,
-unattended, keeping `.zshrc` and the login shell.
 
 Three features change the system, each applied through sudo: `touch-id-sudo` (sudo takes a
 fingerprint, by a line in `/etc/pam.d/sudo_local`, which macOS updates leave alone),

@@ -202,8 +202,8 @@ func TestHomebrewsStepComesWithItsKinds(t *testing.T) {
 	}
 }
 
-// Oh My Zsh comes after Homebrew when the run has it, and is placed without
-// it when it hasn't; so is a step of your own that comes after Homebrew.
+// A step of your own that comes after Homebrew comes after it when the run
+// has it, and is placed without it when it hasn't.
 func TestPlacedAfterHomebrewOrWithoutIt(t *testing.T) {
 	for _, tt := range []struct {
 		name, laptop string
@@ -214,7 +214,7 @@ func TestPlacedAfterHomebrewOrWithoutIt(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			w := laptopWorld(t)
-			w.write(t, ".config/kit/shared/declarations", "[features]\noh-my-zsh\n\n[steps]\nfonts \"the fonts\" --after homebrew\n")
+			w.write(t, ".config/kit/shared/declarations", "[steps]\nfonts \"the fonts\" --after homebrew\n")
 			w.write(t, ".config/kit/laptop/declarations", tt.laptop)
 			w.write(t, ".config/kit/shared/steps/fonts/run", "#!/bin/sh\n")
 			w.fake.On(filepath.Join(w.home, ".config/kit/shared/steps/fonts/run"), "check")
@@ -227,7 +227,7 @@ func TestPlacedAfterHomebrewOrWithoutIt(t *testing.T) {
 				waits[s.Name] = s.Waits
 			}
 			_, inRun := waits["homebrew"]
-			if inRun != tt.homebrew || slices.Contains(waits["oh-my-zsh"], "homebrew") != tt.homebrew || slices.Contains(waits["fonts"], "homebrew") != tt.homebrew {
+			if inRun != tt.homebrew || slices.Contains(waits["fonts"], "homebrew") != tt.homebrew {
 				t.Errorf("the run's steps wait for %v; want Homebrew's step and the waits for it %v", waits, tt.homebrew)
 			}
 		})

@@ -34,7 +34,7 @@ var toDoList = []event.ToDo{
 // watched, each saying what for.
 var toDoCards = []event.NeedsYou{
 	{Item: "prefs:paused", Title: "Bring back apps' settings", Group: "Apps",
-		Why:  "First, so the apps you open next start with yours. This Mac saves its own once they're back. Claude Code's come too, sending its temporary files to Scratch.",
+		Why:  "First, so the apps you open next start with yours. This Mac saves its own once they're back. Claude Code's come too.",
 		Keys: []check.Key{{Key: "r", Does: "brings them back from this Mac's last save, 15 Oct"}, {Key: "f", Does: "starts afresh: nothing back, saving from now"}}},
 	{Item: "karabiner", Title: "Open Karabiner-Elements", Group: "Apps", Tells: true,
 		Why: "Its key remapping needs its driver and Input Monitoring, which only you can allow. Opened, it asks for both.",
@@ -268,7 +268,7 @@ func TestTheToDoPanel(t *testing.T) {
 			"  △ Bring back apps' settings" + strings.Repeat(" ", 62) + "1 of 6",
 			"",
 			"      First, so the apps you open next start with yours. This Mac saves its own once they're back.",
-			"      Claude Code's come too, sending its temporary files to Scratch.",
+			"      Claude Code's come too.",
 			"",
 			"      r brings them back from this Mac's last save, 15 Oct",
 			"      f starts afresh: nothing back, saving from now",

@@ -37,27 +37,6 @@ func TestRemovePathOnEveryMacNeedsShared(t *testing.T) {
 	}
 }
 
-func TestOhMyZshAsAFeature(t *testing.T) {
-	w := laptopWorld(t)
-	w.writeSection(t, "laptop", "features", "oh-my-zsh\n")
-	out, _, _ := w.run(t, "status")
-	if !strings.Contains(out, "oh-my-zsh ok not installed\noh-my-zsh missing:new Oh My Zsh (to install)\n") {
-		t.Errorf("kit status printed\n%s", out)
-	}
-	w.fake.On("curl", "-fsSL", "https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/HEAD/tools/install.sh").Prints("echo installing\n")
-	w.fake.On("env", "KEEP_ZSHRC=yes", "ZSH="+filepath.Join(w.home, ".oh-my-zsh"), "sh", "-s", "--", "--unattended")
-	if out, _, _ := w.run(t, "apply", "oh-my-zsh"); !strings.Contains(out, "oh-my-zsh") {
-		t.Errorf("kit apply printed\n%s", out)
-	}
-	ran := false
-	for _, c := range w.fake.Commands() {
-		ran = ran || c.Name == "env" && strings.Contains(c.Input, "echo installing")
-	}
-	if !ran {
-		t.Error("the installer didn't run, given what curl downloaded")
-	}
-}
-
 func TestApplyWritesTheShellsPath(t *testing.T) {
 	w := laptopWorld(t)
 	w.writeSection(t, "laptop", "paths", "~/tools/bin\n")

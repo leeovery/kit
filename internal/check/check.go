@@ -50,10 +50,6 @@ type Item struct {
 	// theirs alone to do and applying at a terminal raises it at its end,
 	// with the steps by hand: none for anything else.
 	ToDo *ToDo `json:"to_do,omitempty"`
-	// ComesWith is the id of the to-do that brings it, when doing that
-	// does this too, as bringing back apps' settings brings Claude Code's:
-	// once that's done, its step is checked again.
-	ComesWith string `json:"comes_with,omitempty"`
 }
 
 // ToDo is something for the person at the Mac to do, as applying raises it

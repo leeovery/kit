@@ -47,22 +47,6 @@ func TestPrefs(t *testing.T) {
 	}
 }
 
-// Apps' settings are yet to come to this Mac till capture's switched on, by
-// a restore or by starting fresh, as the step checking them says it's
-// paused.
-func TestSettingsToCome(t *testing.T) {
-	for record, want := range map[string]bool{`{}`: true, `{"on": "restored from studio"}`: false, `{"on": "started fresh"}`: false} {
-		state := t.TempDir()
-		if err := os.WriteFile(filepath.Join(state, "prefs.json"), []byte(record), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		p := prefs.New(runnertest.New(t), t.TempDir(), state, t.TempDir(), "", "laptop", prefs.Lists{}, now)
-		if got := steps.SettingsToCome(p)(); got != want {
-			t.Errorf("%s: SettingsToCome() = %v, want %v", record, got, want)
-		}
-	}
-}
-
 // Apps' settings' to-do is a choice. As it comes up, r says the date of
 // this Mac's last save, the store cloned first when it isn't, and nothing
 // when there's none to say. r brings them back, as kit prefs restore does,

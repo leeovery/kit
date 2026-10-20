@@ -19,20 +19,6 @@ const PrefsName = "prefs"
 // as the nightly run captures once a day.
 const prefsEvery = 26 * time.Hour
 
-// SettingsToCome reports whether apps' settings are yet to be restored on
-// this Mac from p's store, as the step checking them says it's paused:
-// capture isn't switched on, by a restore or by starting fresh.
-func SettingsToCome(p *prefs.Prefs) func() bool {
-	return func() bool {
-		rec, err := p.Load()
-		return err == nil && rec.On == ""
-	}
-}
-
-// settingsPaused is the id of the item of apps' settings yet to be brought
-// back on this Mac: what comes with them comes with it.
-const settingsPaused = PrefsName + ":paused"
-
 // The keys of apps' settings' to-do: bring them back, or start afresh.
 const (
 	keyBringBack = "r"
@@ -44,7 +30,7 @@ const (
 // with them.
 var settingsBack = check.ToDo{
 	Title: "Bring back apps' settings",
-	Why:   "First, so the apps you open next start with yours. This Mac saves its own once they're back. Claude Code's come too, sending its temporary files to Scratch.",
+	Why:   "First, so the apps you open next start with yours. This Mac saves its own once they're back. Claude Code's come too.",
 	Group: groupApps,
 	Keys: []check.Key{
 		{Key: keyBringBack, Does: "brings them back from this Mac's last save"},
