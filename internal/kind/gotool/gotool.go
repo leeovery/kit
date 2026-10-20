@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/runner"
 )
@@ -27,12 +28,27 @@ type Go struct {
 	run runner.Runner
 }
 
+// Descriptor is Go tools' kind, as kit's shared code knows it.
+var Descriptor = kind.Descriptor{
+	Name:    "go",
+	Label:   "Go tools",
+	Group:   kind.Packages,
+	Section: &config.Section{Header: "go tools", Form: config.Names, Sorted: true, Held: true},
+	Help: &kind.Help{
+		What:   "Go tools",
+		Add:    "Install Go tools, by module path, and declare them",
+		Remove: "Uninstall Go tools, and undeclare them",
+	},
+	Row: "Developer tools",
+	New: func(d *kind.Deps) kind.Kind { return New(d.Run) },
+}
+
 // New returns Go's tool installs, driven through run.
 func New(run runner.Runner) *Go {
 	return &Go{run: run}
 }
 
-func (*Go) Name() string    { return "go" }
+func (*Go) Name() string    { return Descriptor.Name }
 func (*Go) Program() string { return "go" }
 
 // program is a program in Go's bin folder, and the package it was built

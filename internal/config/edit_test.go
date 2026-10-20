@@ -181,10 +181,16 @@ func TestUndeclare(t *testing.T) {
 			after: "[backup exclusions]\n# Why these\n\n~/b\n",
 		},
 		{
-			name:   "a section left empty goes",
+			name:   "a kind's last section left empty stays, so the kind's still looked after",
 			before: "[homebrew formulae]\nbat\n\n[npm packages]\n# for the PHP files\nintelephense\n\n[macos login items]\ncom.example.app\n",
 			kind:   "npm", entry: "intelephense",
-			after: "[homebrew formulae]\nbat\n\n[macos login items]\ncom.example.app\n",
+			after: "[homebrew formulae]\nbat\n\n[npm packages]\n\n[macos login items]\ncom.example.app\n",
+		},
+		{
+			name:   "a kind's last section left empty, a project folder's, stays as the kind's own",
+			before: "[homebrew formulae]\nbat\n\n[claude mcp ~/Code/site]\nmail -- mail-mcp\n",
+			kind:   "claude-mcp", entry: "~/Code/site:mail",
+			after: "[homebrew formulae]\nbat\n\n[claude mcp]\n",
 		},
 		{
 			name:   "a secret, from whichever item's section has it",
@@ -212,8 +218,8 @@ func TestUndeclare(t *testing.T) {
 		},
 		{
 			name:   "the last section left empty goes, and the blank before it",
-			before: "[homebrew formulae]\nbat\n\n[claude mcp ~/Code/site]\nmail -- mail-mcp\n",
-			kind:   "claude-mcp", entry: "~/Code/site:mail",
+			before: "[homebrew formulae]\nbat\n\n[checks]\ndisk -- df -h\n",
+			kind:   config.ChecksKind, entry: "disk",
 			after: "[homebrew formulae]\nbat\n",
 		},
 	}
@@ -227,6 +233,24 @@ func TestUndeclare(t *testing.T) {
 				t.Errorf("laptop =\n%s\nwant\n%s", got, tt.after)
 			}
 		})
+	}
+}
+
+// A Mac's last section of a kind, left empty, goes while the shared file
+// has the kind's: the kind's still looked after on the Mac.
+func TestUndeclareLeavesTheSharedSection(t *testing.T) {
+	cfg := loadRepo(t, map[string]string{
+		"shared/declarations": "[npm packages]\n",
+		"laptop/declarations": "[homebrew formulae]\nbat\n\n[npm packages]\nintelephense\n",
+	})
+	if err := cfg.Undeclare("npm", "laptop", "intelephense"); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := readFile(t, cfg, "laptop/declarations"), "[homebrew formulae]\nbat\n"; got != want {
+		t.Errorf("laptop =\n%s\nwant\n%s", got, want)
+	}
+	if list, err := cfg.List("npm", "laptop"); err != nil || !list.Declared {
+		t.Errorf("List(npm, laptop) = %+v, %v; want it declared still", list, err)
 	}
 }
 

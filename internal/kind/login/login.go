@@ -17,6 +17,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/hold"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/runner"
@@ -100,13 +101,30 @@ type Login struct {
 	AppDirs []string
 }
 
+// Descriptor is login items' kind, as kit's shared code knows it.
+var Descriptor = kind.Descriptor{
+	Name:    "login-item",
+	Label:   "macOS login items",
+	Group:   kind.Packages,
+	Section: &config.Section{Header: "macos login items", Form: config.Names, Sorted: true, Held: true},
+	Help: &kind.Help{
+		What:   "macOS login items",
+		Add:    "Add login items, by app, and declare them",
+		Remove: "Remove login items, and undeclare them",
+	},
+	Row: "Login items",
+	// Login items open the apps the casks and the App Store install.
+	After: []string{"cask", "mas"},
+	New:   func(d *kind.Deps) kind.Kind { return New(d.Run, d.Home) },
+}
+
 // New returns the login items, driven through run, for the user whose home
 // is home.
 func New(run runner.Runner, home string) *Login {
 	return &Login{run: run, home: home, AppDirs: []string{"/Applications", "/Applications/Utilities", filepath.Join(home, "Applications")}}
 }
 
-func (*Login) Name() string    { return "login-item" }
+func (*Login) Name() string    { return Descriptor.Name }
 func (*Login) Program() string { return "osascript" }
 
 // item is a login item, or an app, as the scripts tell of it.

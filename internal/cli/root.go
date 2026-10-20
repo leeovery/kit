@@ -20,6 +20,7 @@ import (
 	"github.com/leeovery/kit/internal/ask"
 	"github.com/leeovery/kit/internal/askpass"
 	"github.com/leeovery/kit/internal/config"
+	"github.com/leeovery/kit/internal/kinds"
 	"github.com/leeovery/kit/internal/look"
 	"github.com/leeovery/kit/internal/runner"
 	"github.com/leeovery/kit/internal/steps"
@@ -233,7 +234,7 @@ func (a *app) dirs() (config.Dirs, error) {
 
 // loadConfig loads the config repository, and checks this kit reads it.
 func (a *app) loadConfig(dirs config.Dirs) (*config.Config, error) {
-	cfg, err := config.Load(dirs.Config)
+	cfg, err := config.Load(dirs.Config, kinds.Sections())
 	if errors.Is(err, config.ErrNoConfig) {
 		return nil, fmt.Errorf("%w: clone your config repository to %s, or point KIT_CONFIG at it", err, dirs.Config)
 	}

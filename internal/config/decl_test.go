@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/leeovery/kit/internal/config"
+	"github.com/leeovery/kit/internal/kinds"
 )
 
 const sharedFile = `# Every Mac's declarations.
@@ -145,8 +146,30 @@ func TestListHeldLines(t *testing.T) {
 
 func TestListWithoutFiles(t *testing.T) {
 	got, err := loadRepo(t, map[string]string{}).List("brew", "laptop")
-	if err != nil || len(got.Entries) != 0 {
+	if err != nil || len(got.Entries) != 0 || got.Declared {
 		t.Errorf("List() = %+v, %v; want nothing declared", got, err)
+	}
+}
+
+// A kind is declared for a Mac while the shared file or the Mac's has a
+// section of it, even an empty one; not while neither has.
+func TestListDeclaredBySection(t *testing.T) {
+	cfg := loadRepo(t, map[string]string{
+		"shared/declarations": "[homebrew casks]\n\n[claude mcp ~/Code/site]\nmail -- mail-mcp\n",
+		"laptop/declarations": "[npm packages]\n# none yet\n",
+	})
+	for _, tt := range []struct {
+		kind, mac string
+		want      bool
+	}{
+		{"cask", "laptop", true}, {"cask", "studio", true},
+		{"claude-mcp", "studio", true},
+		{"npm", "laptop", true}, {"npm", "studio", false},
+		{"brew", "laptop", false},
+	} {
+		if got, err := cfg.List(tt.kind, tt.mac); err != nil || got.Declared != tt.want {
+			t.Errorf("List(%s, %s) = %+v, %v; want declared %v", tt.kind, tt.mac, got, err, tt.want)
+		}
 	}
 }
 
@@ -279,14 +302,14 @@ func TestWhere(t *testing.T) {
 
 func TestLoadRefusesFilesForUnknownMacs(t *testing.T) {
 	dir := writeRepo(t, map[string]string{config.File: twoMacs, "mini/declarations": "# The mini\n[homebrew casks]\nplex-media-server\n", "personal-patterns": "[Ss]omeone\n", "README.md": "[homebrew casks]\n", "notes/todo": "[homebrew casks]\n"})
-	if _, err := config.Load(dir); err == nil || !strings.Contains(err.Error(), "mini/declarations declares for a Mac kit.toml doesn't name") {
+	if _, err := config.Load(dir, kinds.Sections()); err == nil || !strings.Contains(err.Error(), "mini/declarations declares for a Mac kit.toml doesn't name") {
 		t.Errorf("Load() error = %v, want mini refused", err)
 	}
 }
 
 func TestAMacCantBeCalledShared(t *testing.T) {
 	dir := writeRepo(t, map[string]string{config.File: "format = 1\nprimary = \"shared\"\n\n[macs.shared]\n"})
-	if _, err := config.Load(dir); err == nil || !strings.Contains(err.Error(), "a Mac can't be called shared") {
+	if _, err := config.Load(dir, kinds.Sections()); err == nil || !strings.Contains(err.Error(), "a Mac can't be called shared") {
 		t.Errorf("Load() error = %v", err)
 	}
 }

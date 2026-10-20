@@ -70,49 +70,78 @@ const (
 // name: the parts with nothing to list, such as a backup tool.
 const FeaturesKind = "features"
 
-// form is how a section's lines read.
-type form int
+// Form is how a section's lines read.
+type Form int
 
 const (
-	// names: a name, then an optional note.
-	names form = iota
-	// paths: a path, the whole line, spaces and all, then an optional note.
-	paths
-	// commands: a name, then a command's options, its words as a shell
+	// Names: a name, then an optional note.
+	Names Form = iota
+	// Paths: a path, the whole line, spaces and all, then an optional note.
+	Paths
+	// Commands: a name, then a command's options, its words as a shell
 	// splits them, then an optional note.
-	commands
-	// settings: a setting's key, then its value, as a shell splits words,
+	Commands
+	// Settings: a setting's key, then its value, as a shell splits words,
 	// then an optional note, as in git config --global's form.
-	settings
-	// defaults: a macOS setting in defaults write's form, its words as a
+	Settings
+	// Defaults: a macOS setting in defaults write's form, its words as a
 	// shell splits them: -currentHost for one of this Mac's host, the
 	// domain, the key, and the value (-bool, -int, -float or -string and
 	// the value; -dict-add, an entry's key and its value as XML; or a value
 	// as XML), then an optional note.
-	defaults
-	// secrets: a secret, what it fills (an environment variable's name, or a
+	Defaults
+	// Secrets: a secret, what it fills (an environment variable's name, or a
 	// file's path) then where 1Password keeps its value and any options,
 	// words as a shell splits them, then an optional note.
-	secrets
-	// power: a power setting in pmset's form, its words as a shell splits
+	Secrets
+	// Power: a power setting in pmset's form, its words as a shell splits
 	// them: the power source (-a every one, -b the battery, -c the charger,
 	// -u a UPS), the setting and its value, then an optional note.
-	power
+	Power
 )
 
+// Section is a kind's section of a declarations file, as the kind says:
+// its header, and how its lines read. The config reads the kinds' sections
+// it's loaded with (Load), each kind's own.
+type Section struct {
+	// Header is the section's header, between its brackets, as in homebrew
+	// formulae.
+	Header string
+	// Kind names the kind it declares, as in brew.
+	Kind string
+	Form Form
+	// Folders is whether the kind has a section for each project folder,
+	// the folder after the header, as in [claude mcp ~/Code/site].
+	Folders bool
+	// Items is whether the kind has a section for each 1Password item, the
+	// item after the header, as in [secrets op://vault/item]: its lines'
+	// references are short for the item's fields, their names unprefixed.
+	Items bool
+	// Held is whether it's a list whose sections can hold their lines back,
+	// options after the header saying what for: --after a step, or one of a
+	// step's things; --secret a secret they need, as in [homebrew formulae
+	// --secret NAME].
+	Held bool
+	// Sorted is whether kit keeps the section sorted, each line with its
+	// notes.
+	Sorted bool
+}
+
 // sectionDef is a section a declarations file may hold: one kind's list, or
-// kit's own PATH.
+// one of the config's own, such as kit's own PATH.
 type sectionDef struct {
 	// header is the section's header, between its brackets.
 	header string
 	kind   string
-	form   form
+	form   Form
+	// isKind is whether it's a kind's: one a Mac's run takes up only while
+	// the config has a section of it (List.Declared).
+	isKind bool
 	// folders is whether the kind has a section for each project folder,
 	// the folder after the header, as in [claude mcp ~/Code/site].
 	folders bool
 	// items is whether the kind has a section for each 1Password item, the
-	// item after the header, as in [secrets op://vault/item]: its lines'
-	// references are short for the item's fields, their names unprefixed.
+	// item after the header, as in [secrets op://vault/item].
 	items bool
 	// holds are the options the kind's sections take after the header,
 	// holding their lines back, what for (its hold): --after a step, or one
@@ -130,54 +159,48 @@ type sectionDef struct {
 	steps bool
 }
 
+// ownLeading and ownTrailing are the config's own sections, which aren't
+// kinds': those kit writes before the kinds', and those it writes after.
+var (
+	ownLeading = []sectionDef{
+		{header: "features", kind: FeaturesKind, form: Names, holds: []string{afterOption}},
+		{header: "paths", kind: PathsKind, form: Paths},
+	}
+	ownTrailing = []sectionDef{
+		{header: "prefs files", kind: PrefsFilesKind, form: Paths},
+		{header: "prefs deny", kind: PrefsDenyKind, form: Paths},
+		{header: "prefs apps", kind: PrefsAppsKind, form: Settings},
+		{header: "prefs machine-bound", kind: PrefsMachineBoundKind, form: Paths},
+		{header: "steps", kind: StepsKind, form: Commands},
+		{header: "manual", kind: ManualKind, form: Commands, steps: true},
+		{header: "checks", kind: ChecksKind, form: Commands},
+		{header: "hourly", kind: HourlyKind, form: Commands},
+		{header: "nightly", kind: NightlyKind, form: Commands},
+	}
+)
+
 // sectionDefs are the sections a declarations file may hold, in the order
-// kit writes them.
-var sectionDefs = []sectionDef{
-	{header: "features", kind: FeaturesKind, form: names, holds: []string{afterOption}},
-	{header: "paths", kind: PathsKind, form: paths},
-	{header: "git config", kind: "git-config", form: settings, sorted: true},
-	{header: "macos settings", kind: "defaults", form: defaults, sorted: true},
-	{header: "power settings", kind: "power", form: power, sorted: true},
-	{header: "backup exclusions", kind: "backup-exclusion", form: paths, sorted: true},
-	{header: "spotlight exclusions", kind: "spotlight-exclusion", form: paths, sorted: true},
-	{header: "homebrew formulae", kind: "brew", form: names, sorted: true, holds: listOptions},
-	{header: "homebrew casks", kind: "cask", form: names, sorted: true, holds: listOptions},
-	{header: "app store apps", kind: "mas", form: names, sorted: true, holds: listOptions},
-	{header: "npm packages", kind: "npm", form: names, sorted: true, holds: listOptions},
-	{header: "composer packages", kind: "composer", form: names, sorted: true, holds: listOptions},
-	{header: "go tools", kind: "go", form: names, sorted: true, holds: listOptions},
-	{header: "github extensions", kind: "gh", form: names, sorted: true, holds: listOptions},
-	{header: "macos login items", kind: "login-item", form: names, sorted: true, holds: listOptions},
-	{header: "claude mcp", kind: "claude-mcp", form: commands, folders: true},
-	{header: "claude skills", kind: "claude-skill", form: names, sorted: true, holds: listOptions},
-	{header: "secrets", kind: "secret", form: secrets, sorted: true, items: true},
-	{header: "prefs files", kind: PrefsFilesKind, form: paths},
-	{header: "prefs deny", kind: PrefsDenyKind, form: paths},
-	{header: "prefs apps", kind: PrefsAppsKind, form: settings},
-	{header: "prefs machine-bound", kind: PrefsMachineBoundKind, form: paths},
-	{header: "steps", kind: StepsKind, form: commands},
-	{header: "manual", kind: ManualKind, form: commands, steps: true},
-	{header: "checks", kind: ChecksKind, form: commands},
-	{header: "hourly", kind: HourlyKind, form: commands},
-	{header: "nightly", kind: NightlyKind, form: commands},
+// kit writes them: the config's own first ones, the kinds', in the order
+// given, then the config's own others.
+func sectionDefs(kinds []Section) []sectionDef {
+	defs := slices.Clone(ownLeading)
+	for _, k := range kinds {
+		d := sectionDef{header: k.Header, kind: k.Kind, form: k.Form, isKind: true, folders: k.Folders, items: k.Items, sorted: k.Sorted}
+		if k.Held {
+			d.holds = listOptions
+		}
+		defs = append(defs, d)
+	}
+	return append(defs, ownTrailing...)
 }
 
 // defFor is the section kind's declarations go in.
-func defFor(kind string) (sectionDef, error) {
-	i := slices.IndexFunc(sectionDefs, func(d sectionDef) bool { return d.kind == kind })
+func (c *Config) defFor(kind string) (sectionDef, error) {
+	i := slices.IndexFunc(c.defs, func(d sectionDef) bool { return d.kind == kind })
 	if i < 0 {
 		return sectionDef{}, fmt.Errorf("no section declares %s", kind)
 	}
-	return sectionDefs[i], nil
-}
-
-// Header is the header of kind's section, as in homebrew formulae.
-func Header(kind string) string {
-	d, err := defFor(kind)
-	if err != nil {
-		return kind
-	}
-	return d.header
+	return c.defs[i], nil
 }
 
 // List is what one kind declares for one Mac: the shared file's entries, then
@@ -185,6 +208,11 @@ func Header(kind string) string {
 type List struct {
 	Kind    string
 	Entries []Entry
+	// Declared is whether the kind is declared for the Mac at all: a section
+	// of its, even an empty one, in the shared file or the Mac's. A kind is
+	// looked after only then, an empty section saying to look after it with
+	// nothing of it declared yet.
+	Declared bool
 }
 
 // Names are the list's names, in order.
@@ -338,7 +366,9 @@ var headerLine = regexp.MustCompile(`^\[([^\]]*)\]\s*(#.*)?$`)
 // editing in place: what's before the first section, and each section's
 // header and lines.
 type declFile struct {
-	scope    string
+	scope string
+	// defs are the sections it may hold, in the order kit writes them.
+	defs     []sectionDef
 	preamble []string
 	sections []*section
 }
@@ -379,9 +409,9 @@ func (f *declFile) String() string {
 // matchHeader finds the section a header names: a kind's own, or a kind's
 // for a project folder or a 1Password item (arg), or with options after its
 // name (opts), as a list's holding its lines back.
-func matchHeader(text string) (d sectionDef, arg, opts string, ok bool) {
+func matchHeader(defs []sectionDef, text string) (d sectionDef, arg, opts string, ok bool) {
 	text = strings.Join(strings.Fields(text), " ")
-	for _, d := range sectionDefs {
+	for _, d := range defs {
 		if text == d.header {
 			return d, "", "", true
 		}
@@ -405,11 +435,11 @@ func ItemRef(ref string) bool {
 	return strings.HasPrefix(ref, "op://") && ok && vault != "" && item != "" && !strings.Contains(item, "/")
 }
 
-// parseFile splits scope's declarations file into its sections, and checks
-// every line reads as its section's lines do: a section kit doesn't know, or
-// one twice, is refused.
-func parseFile(scope, content string) (*declFile, error) {
-	f := &declFile{scope: scope}
+// parseFile splits scope's declarations file into its sections, those defs
+// define, and checks every line reads as its section's lines do: a section
+// kit doesn't know, or one twice, is refused.
+func parseFile(defs []sectionDef, scope, content string) (*declFile, error) {
+	f := &declFile{scope: scope, defs: defs}
 	name := DeclFile(scope)
 	if content == "" {
 		return f, nil
@@ -428,7 +458,7 @@ func parseFile(scope, content string) (*declFile, error) {
 			}
 			continue
 		}
-		d, arg, opts, ok := matchHeader(m[1])
+		d, arg, opts, ok := matchHeader(defs, m[1])
 		switch {
 		case !ok:
 			return nil, fmt.Errorf("%s:%d: kit doesn't know the section [%s]", name, i+1, m[1])
@@ -530,33 +560,33 @@ func (s *section) entry(line string) (Entry, error) {
 		e.Folder = s.arg
 	}
 	switch s.def.form {
-	case names:
+	case Names:
 		text, note := splitComment(line)
 		if !lineName.MatchString(text) {
 			return e, fmt.Errorf("%q isn't a name: one name a line, a note after a space and #", text)
 		}
 		e.Name, e.Note = text, note
-	case paths:
+	case Paths:
 		e.Name, e.Note = splitComment(line)
-	case commands, settings, secrets:
+	case Commands, Settings, Secrets:
 		name, value, note, err := splitCommand(line)
 		if err != nil {
 			return e, err
 		}
 		switch {
-		case s.def.form == commands && !commandName.MatchString(name):
+		case s.def.form == Commands && !commandName.MatchString(name):
 			return e, fmt.Errorf("%q isn't a name: letters, digits, dots, hyphens and underscores", name)
-		case s.def.form == settings && !settingKey.MatchString(name):
+		case s.def.form == Settings && !settingKey.MatchString(name):
 			return e, fmt.Errorf("%q isn't a setting's key", name)
-		case s.def.form == secrets && !secretName.MatchString(name):
+		case s.def.form == Secrets && !secretName.MatchString(name):
 			return e, fmt.Errorf("%q isn't what a secret fills: an environment variable's name, or a file's path from ~ or /", name)
-		case value == "" && s.def.form == commands:
+		case value == "" && s.def.form == Commands:
 			return e, fmt.Errorf("%s has nothing after its name: its options follow it", name)
 		case value == "":
 			return e, fmt.Errorf("%s has no value after it", name)
 		}
 		e.Name, e.Value, e.Note = name, value, note
-	case defaults:
+	case Defaults:
 		text, note := splitNote(line)
 		words, err := Words(text)
 		if err != nil {
@@ -567,7 +597,7 @@ func (s *section) entry(line string) (Entry, error) {
 			return e, err
 		}
 		e.Name, e.Value, e.Note = setting.Name(), value, note
-	case power:
+	case Power:
 		text, note := splitNote(line)
 		words, err := Words(text)
 		if err != nil {
@@ -595,36 +625,36 @@ func (c *Config) Scopes() []string {
 func (c *Config) readDecl(scope string) (*declFile, error) {
 	data, err := os.ReadFile(filepath.Join(c.Dir, DeclFile(scope)))
 	if errors.Is(err, fs.ErrNotExist) {
-		return &declFile{scope: scope}, nil
+		return &declFile{scope: scope, defs: c.defs}, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", DeclFile(scope), err)
 	}
-	return parseFile(scope, string(data))
+	return parseFile(c.defs, scope, string(data))
 }
 
-// declared is what scope's declarations file declares in kind's sections.
-func (c *Config) declared(kind, scope string) ([]Entry, error) {
-	d, err := defFor(kind)
+// declared is what scope's declarations file declares in kind's sections,
+// and whether it has any, empty or not.
+func (c *Config) declared(kind, scope string) (entries []Entry, has bool, err error) {
+	d, err := c.defFor(kind)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	f, err := c.readDecl(scope)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	var out []Entry
 	for _, s := range f.sections {
 		if s.def.kind != d.kind {
 			continue
 		}
-		entries, err := s.entries(scope)
+		in, err := s.entries(scope)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
-		out = append(out, entries...)
+		entries, has = append(entries, in...), true
 	}
-	return out, nil
+	return entries, has, nil
 }
 
 // List reads what kind declares for the Mac named mac: the shared file's,
@@ -633,11 +663,11 @@ func (c *Config) List(kind, mac string) (List, error) {
 	if !c.Knows(mac) {
 		return List{}, fmt.Errorf("no Mac named %s in %s: one of %s", mac, File, c.macList())
 	}
-	shared, err := c.declared(kind, Shared)
+	shared, inShared, err := c.declared(kind, Shared)
 	if err != nil {
 		return List{}, err
 	}
-	own, err := c.declared(kind, mac)
+	own, inOwn, err := c.declared(kind, mac)
 	if err != nil {
 		return List{}, err
 	}
@@ -650,7 +680,7 @@ func (c *Config) List(kind, mac string) (List, error) {
 			return List{}, fmt.Errorf("%s: %s is in %s too (line %d): a thing goes in the shared declarations or a Mac's, not both", e.Pos(), e.Name, DeclFile(s.Scope), s.Line)
 		}
 	}
-	return List{Kind: kind, Entries: append(shared, own...)}, nil
+	return List{Kind: kind, Entries: append(shared, own...), Declared: inShared || inOwn}, nil
 }
 
 // Where are the entries for name in kind's sections: the shared file's,
@@ -658,7 +688,7 @@ func (c *Config) List(kind, mac string) (List, error) {
 func (c *Config) Where(kind, name string) ([]Entry, error) {
 	var found []Entry
 	for _, scope := range c.Scopes() {
-		entries, err := c.declared(kind, scope)
+		entries, _, err := c.declared(kind, scope)
 		if err != nil {
 			return nil, err
 		}

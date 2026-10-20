@@ -17,6 +17,7 @@ import (
 	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/kind/secret"
+	"github.com/leeovery/kit/internal/kinds"
 	"github.com/leeovery/kit/internal/steps"
 )
 
@@ -151,10 +152,10 @@ func (r *run) placeScript(s *steps.Script, names map[string]bool) ([]engine.Wait
 }
 
 // place checks what a line's step comes after and before are among names,
-// the run's steps, or kinds this Mac doesn't use, which it's then placed
-// without; it returns the steps it comes after, a wait for each of a
-// kind's things it comes after, as in cask:1password, and the steps it
-// comes before. An error says what isn't a step or a kind.
+// the run's steps, or kinds this Mac doesn't use and the steps they need,
+// which it's then placed without; it returns the steps it comes after, a
+// wait for each of a kind's things it comes after, as in cask:1password,
+// and the steps it comes before. An error says what isn't a step or a kind.
 func (r *run) place(after, before []string, names map[string]bool) (steps []string, waits []engine.Wait, ahead []string, err error) {
 	var wrong []string
 	for _, a := range after {
@@ -164,7 +165,7 @@ func (r *run) place(after, before []string, names map[string]bool) (steps []stri
 			waits = append(waits, engine.Wait{Step: kindName, Thing: thing, Ready: r.installed(kindName, thing)})
 		case names[a]:
 			steps = append(steps, a)
-		case !slices.Contains(r.allKinds, kindName):
+		case !ofKinds(kindName):
 			wrong = append(wrong, "it comes after "+a+", which isn't a step")
 		}
 	}
@@ -172,7 +173,7 @@ func (r *run) place(after, before []string, names map[string]bool) (steps []stri
 		switch {
 		case names[b]:
 			ahead = append(ahead, b)
-		case !slices.Contains(r.allKinds, b):
+		case !ofKinds(b):
 			wrong = append(wrong, "it comes before "+b+", which isn't a step")
 		}
 	}
@@ -180,6 +181,13 @@ func (r *run) place(after, before []string, names map[string]bool) (steps []stri
 		return steps, waits, ahead, errors.New(strings.Join(wrong, "; "))
 	}
 	return steps, waits, ahead, nil
+}
+
+// ofKinds reports whether the step called name is a kind's, or one a kind
+// needs, whether or not this run has it.
+func ofKinds(name string) bool {
+	_, ok := kinds.Of(name)
+	return ok
 }
 
 // placeFeatures places the steps of each feature whose section says what it
@@ -263,7 +271,7 @@ func (r *run) placeLines(all []engine.Step) {
 		}
 		for _, other := range sharing.Shares() {
 			for _, thing := range r.placing[other].First {
-				p.Behind = append(p.Behind, engine.Wait{Step: other, Thing: thing, Ready: r.installed(other, thing)})
+				p.Behind = append(p.Behind, engine.Wait{Step: other, Thing: thing, Title: kinds.Label(other), Ready: r.installed(other, thing)})
 			}
 		}
 		r.placing[name] = p
@@ -303,7 +311,7 @@ func (r *run) heldSections(list config.List, names map[string]bool) (held []kind
 		}
 		var waits []engine.Wait
 		for _, step := range after {
-			waits = append(waits, engine.Wait{Step: step})
+			waits = append(waits, engine.Wait{Step: step, Title: kinds.Label(step)})
 		}
 		held = append(held, kind.Held{Hold: e.Hold, Waits: slices.Concat(waits, comesAfter, secrets), Env: env})
 		things = append(things, comesAfter...)

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/runner"
 )
@@ -24,12 +25,28 @@ type Composer struct {
 	run runner.Runner
 }
 
+// Descriptor is Composer's global packages' kind, as kit's shared code
+// knows it.
+var Descriptor = kind.Descriptor{
+	Name:    "composer",
+	Label:   "Composer packages",
+	Group:   kind.Packages,
+	Section: &config.Section{Header: "composer packages", Form: config.Names, Sorted: true, Held: true},
+	Help: &kind.Help{
+		What:   "Composer's global packages",
+		Add:    "Install global Composer packages, and declare them",
+		Remove: "Uninstall global Composer packages, and undeclare them",
+	},
+	Row: "Developer tools",
+	New: func(d *kind.Deps) kind.Kind { return New(d.Run) },
+}
+
 // New returns Composer, driven through run.
 func New(run runner.Runner) *Composer {
 	return &Composer{run: run}
 }
 
-func (*Composer) Name() string    { return "composer" }
+func (*Composer) Name() string    { return Descriptor.Name }
 func (*Composer) Program() string { return "composer" }
 
 func (c *Composer) global(ctx context.Context, timeout time.Duration, args ...string) (runner.Result, error) {

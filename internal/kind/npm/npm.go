@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/runner"
 )
@@ -27,12 +28,27 @@ type NPM struct {
 	home string
 }
 
+// Descriptor is npm's global packages' kind, as kit's shared code knows it.
+var Descriptor = kind.Descriptor{
+	Name:    "npm",
+	Label:   "npm packages",
+	Group:   kind.Packages,
+	Section: &config.Section{Header: "npm packages", Form: config.Names, Sorted: true, Held: true},
+	Help: &kind.Help{
+		What:   "npm's global packages",
+		Add:    "Install global npm packages, and declare them",
+		Remove: "Uninstall global npm packages, and undeclare them",
+	},
+	Row: "Developer tools",
+	New: func(d *kind.Deps) kind.Kind { return New(d.Run, d.Home) },
+}
+
 // New returns npm, driven through run, run from home.
 func New(run runner.Runner, home string) *NPM {
 	return &NPM{run: run, home: home}
 }
 
-func (*NPM) Name() string    { return "npm" }
+func (*NPM) Name() string    { return Descriptor.Name }
 func (*NPM) Program() string { return "npm" }
 
 func (n *NPM) npm(ctx context.Context, timeout time.Duration, args ...string) (runner.Result, error) {

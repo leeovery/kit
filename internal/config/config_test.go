@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/leeovery/kit/internal/config"
+	"github.com/leeovery/kit/internal/kinds"
 )
 
 func TestLoad(t *testing.T) {
@@ -23,7 +24,7 @@ description = "Mac Studio"
 
 [macs.mac-mini-2]
 `})
-	cfg, err := config.Load(dir)
+	cfg, err := config.Load(dir, kinds.Sections())
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -42,7 +43,7 @@ description = "Mac Studio"
 }
 
 func TestLoadWithoutAConfig(t *testing.T) {
-	_, err := config.Load(t.TempDir())
+	_, err := config.Load(t.TempDir(), kinds.Sections())
 	if !errors.Is(err, config.ErrNoConfig) {
 		t.Errorf("Load() of a directory without kit.toml: error = %v, want ErrNoConfig", err)
 	}
@@ -71,7 +72,7 @@ func TestLoadRefuses(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := config.Load(writeRepo(t, map[string]string{config.File: tt.toml}))
+			_, err := config.Load(writeRepo(t, map[string]string{config.File: tt.toml}), kinds.Sections())
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Errorf("Load() error = %v, want one saying %q", err, tt.want)
 			}
@@ -116,7 +117,7 @@ func TestNightlyAt(t *testing.T) {
 		t.Errorf("NightlyAt = %v, want 2h30m", cfg.NightlyAt)
 	}
 	dir := writeRepo(t, map[string]string{config.File: "format = 1\nprimary = \"laptop\"\nnightly_at = \"3am\"\n\n[macs.laptop]\n"})
-	if _, err := config.Load(dir); err == nil || !strings.Contains(err.Error(), `nightly_at "3am" isn't a time of day`) {
+	if _, err := config.Load(dir, kinds.Sections()); err == nil || !strings.Contains(err.Error(), `nightly_at "3am" isn't a time of day`) {
 		t.Errorf("Load() = %v", err)
 	}
 }
@@ -133,7 +134,7 @@ func TestTerminal(t *testing.T) {
 		t.Errorf("terminal %q", cfg.Terminal)
 	}
 	dir := writeRepo(t, map[string]string{config.File: "format = 1\nprimary = \"laptop\"\npassword_manager = \"1password\"\n\n[macs.laptop]\n"})
-	if _, err := config.Load(dir); err == nil || !strings.Contains(err.Error(), "password_manager") {
+	if _, err := config.Load(dir, kinds.Sections()); err == nil || !strings.Contains(err.Error(), "password_manager") {
 		t.Errorf("Load() with a password manager = %v, want it refused", err)
 	}
 }

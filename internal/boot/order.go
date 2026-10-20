@@ -18,6 +18,7 @@ import (
 	"github.com/leeovery/kit/internal/gitrepo"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/kind/brew"
+	"github.com/leeovery/kit/internal/kinds"
 	"github.com/leeovery/kit/internal/linked"
 	"github.com/leeovery/kit/internal/plist"
 	"github.com/leeovery/kit/internal/runner"
@@ -357,7 +358,7 @@ func (b *Boot) configStep() engine.Step {
 				says = append(says, plural(n, "differs: kit reconcile settles it", "differ: kit reconcile settles them"))
 			}
 			if st, _ := kitstate.Load[state](b.State, stateName); st.NewMac != "" {
-				if cfg, err := config.Load(b.Config); err == nil && cfg.Knows(st.NewMac) {
+				if cfg, err := config.Load(b.Config, kinds.Sections()); err == nil && cfg.Knows(st.NewMac) {
 					says = append(says, st.NewMac+" added to kit.toml")
 				}
 			}
@@ -434,7 +435,7 @@ func (b *Boot) addNewMac() error {
 	if err != nil || st.NewMac == "" {
 		return err
 	}
-	cfg, err := config.Load(b.Config)
+	cfg, err := config.Load(b.Config, kinds.Sections())
 	if err != nil {
 		return err
 	}

@@ -113,7 +113,10 @@ type Choice struct {
 // thing or Ready, that step itself.
 type Wait struct {
 	Step, Thing string
-	Ready       func(ctx context.Context) bool
+	// Title is its step's title, as what's waited for is said: the step's
+	// name when it's "".
+	Title string
+	Ready func(ctx context.Context) bool
 }
 
 // there reports whether w's thing is in place, as Ready says, looked at as

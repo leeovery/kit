@@ -72,12 +72,23 @@ type Secrets struct {
 	declared []Secret
 }
 
+// Descriptor is secrets' kind, as kit's shared code knows it: kit secret is
+// a command of its own.
+var Descriptor = kind.Descriptor{
+	Name:    "secret",
+	Label:   "Secrets",
+	Group:   kind.Secrets,
+	Section: &config.Section{Header: "secrets", Form: config.Secrets, Sorted: true, Items: true},
+	Row:     "Secrets",
+	New:     func(d *kind.Deps) kind.Kind { return New(d.Run, d.Home) },
+}
+
 // New returns the secrets of the user whose home is home.
 func New(run runner.Runner, home string) *Secrets {
 	return &Secrets{run: run, home: home}
 }
 
-func (s *Secrets) Name() string    { return "secret" }
+func (s *Secrets) Name() string    { return Descriptor.Name }
 func (s *Secrets) Program() string { return "op" }
 
 // Verb says a secret on the Mac as declared is synced.

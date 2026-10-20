@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/runner"
 )
@@ -20,12 +21,28 @@ type GH struct {
 	run runner.Runner
 }
 
+// Descriptor is the GitHub CLI's extensions' kind, as kit's shared code
+// knows it.
+var Descriptor = kind.Descriptor{
+	Name:    "gh",
+	Label:   "GitHub extensions",
+	Group:   kind.Packages,
+	Section: &config.Section{Header: "github extensions", Form: config.Names, Sorted: true, Held: true},
+	Help: &kind.Help{
+		What:   "The GitHub CLI's extensions",
+		Add:    "Install GitHub CLI extensions, as owner/repo, and declare them",
+		Remove: "Uninstall GitHub CLI extensions, and undeclare them",
+	},
+	Row: "Developer tools",
+	New: func(d *kind.Deps) kind.Kind { return New(d.Run) },
+}
+
 // New returns the GitHub CLI's extensions, driven through run.
 func New(run runner.Runner) *GH {
 	return &GH{run: run}
 }
 
-func (*GH) Name() string    { return "gh" }
+func (*GH) Name() string    { return Descriptor.Name }
 func (*GH) Program() string { return "gh" }
 
 // Installed lists the extensions installed from repositories, by

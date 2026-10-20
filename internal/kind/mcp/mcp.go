@@ -72,14 +72,40 @@ type MCP struct {
 	declared map[string]Server
 }
 
+// Descriptor is Claude Code's MCP servers' kind, as kit's shared code knows
+// it.
+var Descriptor = kind.Descriptor{
+	Name:    "claude-mcp",
+	Label:   "Claude MCP",
+	Group:   kind.Packages,
+	Section: &config.Section{Header: "claude mcp", Form: config.Commands, Folders: true},
+	Help: &kind.Help{
+		What:   "Claude Code's MCP servers",
+		Add:    "Declare MCP servers Claude Code has, as it has them",
+		Remove: "Remove MCP servers from Claude Code, and undeclare them",
+		Switch: &kind.SwitchHelp{
+			On:     "Declare MCP servers on, and install them",
+			Off:    "Declare MCP servers off, and remove them from Claude Code: their lines stay",
+			Naming: "Name a project's server as <folder>:<name>, as kit status shows it.",
+			Holder: "Claude Code",
+		},
+	},
+	Row: "Developer tools",
+	New: func(d *kind.Deps) kind.Kind { return New(d.Run, d.Home) },
+}
+
 // New returns Claude Code's MCP servers, driven through run, for the user
 // whose home is home.
 func New(run runner.Runner, home string) *MCP {
 	return &MCP{run: run, home: home, declared: map[string]Server{}}
 }
 
-func (*MCP) Name() string    { return "claude-mcp" }
+func (*MCP) Name() string    { return Descriptor.Name }
 func (*MCP) Program() string { return "claude" }
+
+// SetOff is a server's line after its name, declared off, or on: its
+// servers can be declared off and kept (kind.Switcher).
+func (*MCP) SetOff(value string, off bool) (string, error) { return SetOff(value, off) }
 
 // Values reads each declared server's line into its definition, marking
 // those declared off. A line that doesn't read, or holds a key in plain

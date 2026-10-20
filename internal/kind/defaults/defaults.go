@@ -108,13 +108,28 @@ type declaredValue struct {
 	words []string
 }
 
+// Descriptor is macOS settings' kind, as kit's shared code knows it.
+var Descriptor = kind.Descriptor{
+	Name:    "defaults",
+	Label:   "macOS settings",
+	Group:   kind.Settings,
+	Section: &config.Section{Header: "macos settings", Form: config.Defaults, Sorted: true},
+	Help: &kind.Help{
+		What:   "macOS settings, in defaults write's form",
+		Add:    "Declare macOS settings as this Mac has them",
+		Remove: "Unset macOS settings, macOS's default coming back, and undeclare them",
+	},
+	Row: "Mac settings",
+	New: func(d *kind.Deps) kind.Kind { return New(d.Run, d.StateDir) },
+}
+
 // New returns macOS settings, driven through run, with kit's records in
 // stateDir.
 func New(run runner.Runner, stateDir string) *Defaults {
 	return &Defaults{run: run, stateDir: stateDir, declared: map[string]declaredValue{}}
 }
 
-func (d *Defaults) Name() string    { return "defaults" }
+func (d *Defaults) Name() string    { return Descriptor.Name }
 func (d *Defaults) Program() string { return "defaults" }
 
 // Verb says a setting as declared is set.

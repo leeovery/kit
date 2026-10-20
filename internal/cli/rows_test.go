@@ -13,7 +13,8 @@ import (
 	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/gitrepo"
-	"github.com/leeovery/kit/internal/kind/brew"
+	"github.com/leeovery/kit/internal/kind"
+	"github.com/leeovery/kit/internal/kinds"
 	"github.com/leeovery/kit/internal/linked"
 	"github.com/leeovery/kit/internal/nightly"
 	"github.com/leeovery/kit/internal/render"
@@ -32,11 +33,14 @@ func TestEveryStepHasARow(t *testing.T) {
 	}
 	never := func() time.Time { return time.Time{} }
 	admin := &steps.Admin{}
-	hb := brew.New(fake)
 
-	made := []engine.Step{hb.Step(), {Name: linked.StepName, Area: steps.AreaDrift}}
-	for _, ks := range kindSteps(hb, fake, home, "", state) {
-		made = append(made, engine.Step{Name: ks.kind.Name(), Area: steps.AreaDrift})
+	made := []engine.Step{{Name: linked.StepName, Area: steps.AreaDrift}}
+	deps := &kind.Deps{Run: fake, Home: home, StateDir: state}
+	for _, d := range kinds.All {
+		made = append(made, engine.Step{Name: d.New(deps).Name(), Area: steps.AreaDrift})
+		if d.Setup != nil {
+			made = append(made, d.Setup(deps)...)
+		}
 	}
 	made = slices.Concat(made, []engine.Step{
 		steps.PathFile(nil, ""), steps.OhMyZsh(fake, home),

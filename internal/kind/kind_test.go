@@ -183,8 +183,8 @@ func TestCompareNotAllowed(t *testing.T) {
 
 func TestStep(t *testing.T) {
 	s := kind.Step(&fakeKind{installed: []kind.Installed{{Name: "jq", Explicit: true}}}, declared("jq"), "homebrew")
-	if s.Name != "brew" || s.Title != "Homebrew formulae" || !slices.Equal(s.Needs, []string{"homebrew"}) {
-		t.Errorf("Step() = %+v, want the kind's name and label, needing homebrew", s)
+	if s.Name != "brew" || !slices.Equal(s.Needs, []string{"homebrew"}) {
+		t.Errorf("Step() = %+v, want the kind's name, needing homebrew", s)
 	}
 	if got := s.Check(context.Background()); got.State != check.OK {
 		t.Errorf("its check = %+v, want ok", got)
@@ -277,21 +277,6 @@ func TestStepFailingInstallSaysWhatItSaid(t *testing.T) {
 	s = kind.Placed(k, declared("jq", "op"), func() kind.Placing { return kind.Placing{First: []string{"op"}} })
 	if got := engine.Reason(s.Apply(t.Context(), s.Check(t.Context()))); got != "couldn't install op: Error: it broke; couldn't install jq: Error: it broke" {
 		t.Errorf("two installs failing, the reason is %q; want what each said, not the commands", got)
-	}
-}
-
-func TestLabels(t *testing.T) {
-	for name, label := range kind.Labels {
-		// A kind declared in a section of kit-config's is named as it is.
-		if header := config.Header(name); header != name && !strings.EqualFold(label, header) {
-			t.Errorf("%s's row is %q, want its section's words, %q", name, label, header)
-		}
-	}
-	if got := kind.Label("brew"); got != "Homebrew formulae" {
-		t.Errorf("Label(brew) = %q, want Homebrew formulae", got)
-	}
-	if got := kind.Label("unknown"); got != "unknown" {
-		t.Errorf("Label(unknown) = %q, want its name", got)
 	}
 }
 
@@ -902,7 +887,7 @@ func (w *watcher) Emit(e event.Event) {
 func sharingWorld(log *installLog, ready func(context.Context) bool, checking func(waiting <-chan struct{}) check.Result) (brew, cask engine.Step, w *watcher) {
 	w = &watcher{step: "brew", says: "waiting for Homebrew casks", heard: make(chan struct{})}
 	brewKind := &turnKind{fakeKind: knowing("jq"), name: "brew", log: log}
-	brewing := kind.Placing{Behind: []engine.Wait{{Step: "cask", Thing: "app", Ready: ready}}}
+	brewing := kind.Placing{Behind: []engine.Wait{{Step: "cask", Thing: "app", Title: "Homebrew casks", Ready: ready}}}
 	brew = kind.Placed(brewKind, declared("jq"), func() kind.Placing { return brewing })
 	caskKind := &turnKind{fakeKind: knowing("app", "zoom"), name: "cask", log: log, after: map[string]string{"zoom": "brew:jq"}}
 	casking := kind.Placing{First: []string{"app"}}

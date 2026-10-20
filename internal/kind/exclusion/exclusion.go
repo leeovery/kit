@@ -39,13 +39,28 @@ type Exclusions struct {
 	matched map[string]bool
 }
 
+// Descriptor is the backup exclusions' kind, as kit's shared code knows it.
+var Descriptor = kind.Descriptor{
+	Name:    "backup-exclusion",
+	Label:   "Backup exclusions",
+	Group:   kind.Settings,
+	Section: &config.Section{Header: "backup exclusions", Form: config.Paths, Sorted: true},
+	Help: &kind.Help{
+		What:   "Folders Time Machine and Arq leave out",
+		Add:    "Leave folders out of backups, and declare them",
+		Remove: "Put folders back in backups, and undeclare them",
+	},
+	Row: "Mac settings",
+	New: func(d *kind.Deps) kind.Kind { return New(d.Run, d.Home, TimeMachinePrefs) },
+}
+
 // New returns the backup exclusions for the user whose home is home, with
 // Time Machine's settings at prefs.
 func New(run runner.Runner, home, prefs string) *Exclusions {
 	return &Exclusions{run: run, home: home, prefs: prefs}
 }
 
-func (x *Exclusions) Name() string    { return "backup-exclusion" }
+func (x *Exclusions) Name() string    { return Descriptor.Name }
 func (x *Exclusions) Program() string { return "tmutil" }
 
 // Verb says a path as declared is excluded.

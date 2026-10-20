@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/leeovery/kit/internal/event"
+	"github.com/leeovery/kit/internal/kinds"
 	"github.com/leeovery/kit/internal/look"
 )
 
@@ -28,8 +29,27 @@ type rawLine struct {
 }
 
 // toolsOfRows are the tools the rows' steps run, as the person knows them,
-// for the rows whose steps run one.
-var toolsOfRows = map[string]string{rowFormulae: "Homebrew", rowCasks: "Homebrew"}
+// for the rows whose kinds all say they run the same one, and that hold no
+// step of kit's own.
+var toolsOfRows = func() map[string]string {
+	tools := map[string]string{}
+	for _, row := range applyRows {
+		if _, own := rowSteps[row]; own {
+			continue
+		}
+		var said []string
+		for _, d := range kinds.All {
+			if d.Row == row {
+				said = append(said, d.Tool)
+			}
+		}
+		slices.Sort(said)
+		if said = slices.Compact(said); len(said) == 1 && said[0] != "" {
+			tools[row] = said[0]
+		}
+	}
+	return tools
+}()
 
 // rawKeys are the keys the raw view reads, at its heading's right end.
 var rawKeys = []look.Key{{Key: "↑↓", Does: "scroll"}, {Key: "esc", Does: "back to the log"}}

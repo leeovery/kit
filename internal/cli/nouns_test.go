@@ -10,7 +10,7 @@ import (
 func TestHelpGroupsTheCommands(t *testing.T) {
 	out, _, code := laptopWorld(t).run(t, "--help")
 	at := 0
-	for _, want := range []string{"This Mac:", "  status ", "  apply ", "  reconcile ", "Packages:", "  brew ", "  login-item ", "Settings:", "  defaults ", "  git-config ", "  backup-exclusion ", "  spotlight-exclusion ", "Files, secrets and features:", "  file ", "  path ", "  secret ", "  feature ", "Your own:", "  check ", "  hourly ", "  manual "} {
+	for _, want := range []string{"This Mac:", "  status ", "  apply ", "  reconcile ", "Packages:", "  brew ", "  login-item ", "Settings:", "  git-config ", "  defaults ", "  backup-exclusion ", "  spotlight-exclusion ", "Files, secrets and features:", "  file ", "  path ", "  secret ", "  feature ", "Your own:", "  check ", "  hourly ", "  manual "} {
 		i := strings.Index(out[at:], want)
 		if i < 0 {
 			t.Fatalf("kit --help printed\n%s\nwant %q after what's before it", out, want)
@@ -45,7 +45,7 @@ func TestHelpAtATerminal(t *testing.T) {
 	for _, want := range []string{"│  help\n", "  kit sets a Mac up from a config repository, and keeps it that way.\n",
 		"  THIS MAC\n  status  how this Mac stands against its config\n",
 		"  PACKAGES  each takes add and remove\n  brew · cask · mas",
-		"  SETTINGS  each takes add and remove\n  defaults · power",
+		"  SETTINGS  each takes add and remove\n  git-config · defaults · power",
 		"  FILES, SECRETS AND FEATURES\n  file · path · secret · prefs · feature\n",
 		"  YOUR OWN  each takes add and remove\n  check · hourly · manual · step\n",
 		"  FLAGS\n  --json  print one JSON document, for scripts and agents\n"} {

@@ -16,6 +16,7 @@ import (
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/kind/brew"
+	"github.com/leeovery/kit/internal/kinds"
 	"github.com/leeovery/kit/internal/runner"
 	"github.com/leeovery/kit/internal/runner/runnertest"
 	kitstate "github.com/leeovery/kit/internal/state"
@@ -276,7 +277,7 @@ func TestKitConfigAddsANewMac(t *testing.T) {
 	if err := b.configStep().Apply(context.Background(), check.Result{}); err != nil {
 		t.Fatalf("apply = %v", err)
 	}
-	cfg, err := config.Load(b.Config)
+	cfg, err := config.Load(b.Config, kinds.Sections())
 	if err != nil || !cfg.Knows("mini") {
 		t.Fatalf("kit.toml after: %v", err)
 	}

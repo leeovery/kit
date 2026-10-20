@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/leeovery/kit/internal/config"
+	"github.com/leeovery/kit/internal/kinds"
 )
 
 // twoMacs is a kit.toml knowing two Macs.
@@ -43,7 +44,7 @@ func loadRepo(t *testing.T, files map[string]string) *config.Config {
 	if _, ok := files[config.File]; !ok {
 		files[config.File] = twoMacs
 	}
-	cfg, err := config.Load(writeRepo(t, files))
+	cfg, err := config.Load(writeRepo(t, files), kinds.Sections())
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}

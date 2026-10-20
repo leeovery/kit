@@ -20,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/runner"
 )
@@ -35,13 +36,28 @@ type Skills struct {
 	home string
 }
 
+// Descriptor is Claude's skills' kind, as kit's shared code knows it.
+var Descriptor = kind.Descriptor{
+	Name:    "claude-skill",
+	Label:   "Claude skills",
+	Group:   kind.Packages,
+	Section: &config.Section{Header: "claude skills", Form: config.Names, Sorted: true, Held: true},
+	Help: &kind.Help{
+		What:   "Claude's skills for every project, installed by agntc",
+		Add:    "Install Claude skills with agntc, as owner/repo and the skill or pack in it, and declare them",
+		Remove: "Remove Claude skills with agntc, and undeclare them",
+	},
+	Row: "Developer tools",
+	New: func(d *kind.Deps) kind.Kind { return New(d.Run, d.Home) },
+}
+
 // New returns agntc's installs for every project, driven through run, for
 // the user whose home is home.
 func New(run runner.Runner, home string) *Skills {
 	return &Skills{run: run, home: home}
 }
 
-func (*Skills) Name() string    { return "claude-skill" }
+func (*Skills) Name() string    { return Descriptor.Name }
 func (*Skills) Program() string { return "agntc" }
 
 func (s *Skills) agntc(ctx context.Context, args ...string) error {

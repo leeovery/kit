@@ -24,12 +24,31 @@ type GitConfig struct {
 	declared map[string]string
 }
 
+// Descriptor is git's global settings' kind, as kit's shared code knows
+// it.
+var Descriptor = kind.Descriptor{
+	Name:    "git-config",
+	Label:   "git config",
+	Group:   kind.Settings,
+	Section: &config.Section{Header: "git config", Form: config.Settings, Sorted: true},
+	Help: &kind.Help{
+		What:   "git's global settings",
+		Add:    "Declare git settings as this Mac has them",
+		Remove: "Unset git settings, and undeclare them",
+	},
+	Row: "Git",
+	// git's settings sign with, and reach GitHub by, the SSH key the
+	// secrets write.
+	After: []string{"secret"},
+	New:   func(d *kind.Deps) kind.Kind { return New(d.Run) },
+}
+
 // New returns git's global settings, run through run.
 func New(run runner.Runner) *GitConfig {
 	return &GitConfig{run: run, declared: map[string]string{}}
 }
 
-func (g *GitConfig) Name() string    { return "git-config" }
+func (g *GitConfig) Name() string    { return Descriptor.Name }
 func (g *GitConfig) Program() string { return "git" }
 
 // Verb says a setting as declared is set.

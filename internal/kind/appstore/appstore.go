@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/runner"
@@ -35,12 +36,27 @@ type AppStore struct {
 	admin func(ctx context.Context) bool
 }
 
+// Descriptor is the App Store's apps' kind, as kit's shared code knows it.
+var Descriptor = kind.Descriptor{
+	Name:    "mas",
+	Label:   "App Store apps",
+	Group:   kind.Packages,
+	Section: &config.Section{Header: "app store apps", Form: config.Names, Sorted: true, Held: true},
+	Help: &kind.Help{
+		What:   "App Store apps",
+		Add:    "Install App Store apps, by name or id, and declare them",
+		Remove: "Uninstall App Store apps, and undeclare them",
+	},
+	Row: "App Store apps",
+	New: func(d *kind.Deps) kind.Kind { return New(d.Run) },
+}
+
 // New returns the App Store, driven through run.
 func New(run runner.Runner) *AppStore {
 	return &AppStore{run: run}
 }
 
-func (*AppStore) Name() string    { return "mas" }
+func (*AppStore) Name() string    { return Descriptor.Name }
 func (*AppStore) Program() string { return "mas" }
 
 // app is what mas says of an app, as far as kit needs.

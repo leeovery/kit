@@ -83,6 +83,31 @@ func TestDeclared(t *testing.T) {
 
 // The plugins are read from tmux's config and cloned with git: no command
 // of tmux's is waited for.
+// tmux's plugins are declared at all while its config declares one, or
+// starts TPM; not without either, nor without a config.
+func TestDeclaredAtAll(t *testing.T) {
+	for _, tt := range []struct {
+		name, conf string
+		want       bool
+	}{
+		{"no config", "", false},
+		{"no TPM", "set -g mouse on\n", false},
+		{"TPM started, no plugin yet", "run '~/.tmux/plugins/tpm/tpm'\n", true},
+		{"a plugin", "set -g @plugin 'tmux-plugins/tmux-sensible'\n", true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			h := t.TempDir()
+			if tt.conf != "" {
+				write(t, h, map[string]string{".tmux.conf": tt.conf})
+			}
+			got, err := newTmux(t, runnertest.New(t), h).Declared()
+			if err != nil || got.Declared != tt.want {
+				t.Errorf("Declared() = %+v, %v; want declared %v", got, err, tt.want)
+			}
+		})
+	}
+}
+
 func TestCommandIsNone(t *testing.T) {
 	if got := kind.Command(newTmux(t, runnertest.New(t), t.TempDir())); got != "" {
 		t.Errorf("Command() = %q, want none", got)

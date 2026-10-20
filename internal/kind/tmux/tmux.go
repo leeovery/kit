@@ -34,6 +34,21 @@ type Tmux struct {
 	System string
 }
 
+// Descriptor is tmux's plugins' kind, as kit's shared code knows it: they're
+// declared in tmux's config, not a section of kit's.
+var Descriptor = kind.Descriptor{
+	Name:  "tmux",
+	Label: "tmux plugins",
+	Group: kind.Packages,
+	Help: &kind.Help{
+		What:   "tmux's plugins, declared in tmux's config",
+		Add:    "Install tmux plugins, and declare them in tmux's config",
+		Remove: "Uninstall tmux plugins, and take them out of tmux's config",
+	},
+	Row: "Developer tools",
+	New: func(d *kind.Deps) kind.Kind { return New(d.Run, d.Home, d.ConfigHome) },
+}
+
 // New returns tmux's plugins, driven through run, for the user whose home
 // is home and whose XDG config folder is configHome ("" for the default,
 // ~/.config).
@@ -44,7 +59,7 @@ func New(run runner.Runner, home, configHome string) *Tmux {
 	return &Tmux{run: run, home: home, configHome: configHome, System: "/etc/tmux.conf"}
 }
 
-func (*Tmux) Name() string    { return "tmux" }
+func (*Tmux) Name() string    { return Descriptor.Name }
 func (*Tmux) Program() string { return "tmux" }
 
 // Command is none: the plugins are read from tmux's config and cloned with
@@ -113,14 +128,17 @@ func (t *Tmux) read(line func(file string, n int, text string)) error {
 }
 
 // Declared is what tmux's config declares: each set -g @plugin line's
-// plugin, the file and line declaring it.
+// plugin, the file and line declaring it. The plugins are declared at all
+// (config.List.Declared) while it declares one, or starts TPM.
 func (t *Tmux) Declared() (config.List, error) {
 	list := config.List{Kind: t.Name()}
 	err := t.read(func(file string, n int, text string) {
 		if m := pluginLine.FindStringSubmatch(text); m != nil {
 			list.Entries = append(list.Entries, config.Entry{Name: unquote(m[2]), File: t.shown(file), Line: n})
 		}
+		list.Declared = list.Declared || runLine.MatchString(text)
 	})
+	list.Declared = list.Declared || len(list.Entries) > 0
 	return list, err
 }
 

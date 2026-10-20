@@ -28,7 +28,7 @@ read, and kept in kit's state; a replacement Mac can take an old one's name.
 (`cask`), App Store apps (`mas`), npm and Composer global packages (`npm`, `composer`), Go tools
 (`go`), GitHub CLI extensions (`gh`), tmux plugins (`tmux`), login items (`login-item`), Claude
 Code's MCP servers (`claude-mcp`), Claude's skills for every project (`claude-skill`, installed
-by agntc), git's settings (`git`) and
+by agntc), git's settings (`git-config`) and
 macOS settings (`defaults`), power settings (`power`), the backup and Spotlight exclusions
 (`backup-exclusion`, `spotlight-exclusion`), and secrets (`secret`).
 Not Claude Code's plugins: its user settings (`~/.claude/settings.json`) declare them, and
@@ -43,6 +43,31 @@ Each kind supplies five parts:
 
 The engine does the rest: install what's declared but missing, offer what's on the Mac but
 undeclared for adopting, removing or snoozing, and report both.
+
+**A kind is self-contained.** Its package describes it (`kind.Descriptor`): its name and
+label, its section's header and how its lines read, its group (packages, settings or
+secrets), its command's help and any commands it brings (`kit claude-mcp on|off`, for a
+kind whose things can be declared off), the steps it needs and is applied after, the row of
+applying's screen it sits in, and how it's made from what every kind is made from (the
+runner, the home, XDG's config folder, kit's state folder, and what kinds share, as
+Homebrew's formulae and casks share Homebrew). `internal/kinds` lists them, in the order a
+run takes them; the config's parsing, the commands, the run, the reports' parts and the
+screen's rows read them from there, so adding a kind is its package and a line in that
+list, and removing one the reverse. A declarations file has the kinds' sections between
+the config's own (`features`, `paths` first; `prefs …`, `steps`, `manual`, `checks`,
+`hourly`, `nightly` last): the settings' first, then the packages', then the secrets', each
+in the run's order.
+
+**A kind only when declared.** A kind is in a run (check, apply, status, drift, the record)
+only while the config has its section for the Mac, in the shared file or its own, even an
+empty one: an empty section says to look after the kind with nothing of it declared yet,
+so what's installed is drift `kit reconcile` offers. With no section, kit doesn't look at
+the kind at all, its program installed or not; tmux's plugins, declared in tmux's config,
+are looked after while it declares one or starts TPM. A step a kind needs, as Homebrew's
+for its formulae and casks, is in the run only with a kind needing it. `kit <kind> add`
+writes the section when there's none; removing a kind's last thing leaves its section,
+empty, when it's the last declaring the kind for the Mac (a Mac's own, the shared file
+having none, or the shared file's), so the kind's still looked after.
 
 | Kind | Declared as | Found by | Install, remove |
 |---|---|---|---|
@@ -68,8 +93,7 @@ undeclared for adopting, removing or snoozing, and report both.
   repositories and bundle ids without regard to case.
 - **Changed on purpose:** a setting set otherwise than declared (git's) was changed on the
   Mac, so it's *diverged*: applying leaves it, and `kit reconcile` adopts it (the declared
-  line takes the Mac's value) or reverts it (the declared value set again). A kind of
-  settings is checked only while something of it is declared.
+  line takes the Mac's value) or reverts it (the declared value set again).
 - **macOS settings** keep a record (`settings.json` in kit's state directory). A declared
   setting is diverged only once kit has seen it as declared: one the Mac has never had as
   declared (a new Mac, a new line) is missing when unset, or changed when set otherwise;
@@ -82,8 +106,8 @@ undeclared for adopting, removing or snoozing, and report both.
   declared, and not one macOS changes by itself (a list in kit: window frames, recent
   items, timestamps, the Dock's apps) is extra, and reconcile adopts it or puts it back as
   it was (a dict whose entries are declared is watched entry by entry).
-- **A kind's program:** while it isn't installed, a kind with nothing declared for the Mac
-  isn't checked at all, and one with something declared is deferred, saying what it needs.
+- **A kind's program:** while it isn't installed, a kind in the run is deferred, saying what
+  it needs, or, with nothing declared, fine.
   Where a kind's command comes from isn't kit's to know: while kit applies (not `kit
   status`, not the nightly run), a kind whose command isn't on kit's PATH yet (npm's `npm`,
   the secrets' `op`, MCP's `claude`; none for tmux's plugins, read from its config and
@@ -104,7 +128,8 @@ undeclared for adopting, removing or snoozing, and report both.
   is hidden in whatever's said of it. A wait ends when the thing's in, when its step has
   finished without it, or when the run's stopped: without it, the section's lines stay
   missing, saying what isn't there. Otherwise they're the list's like any other: checked,
-  listed, sorted, removed from whichever section holds them, a section going once empty.
+  listed, sorted, removed from whichever section holds them, a section going once empty
+  (but a kind's last, as above).
 - **What's waited for goes first:** a thing a step names (`--after cask:1password`) is
   installed ahead of the rest of its list, as one command, then the rest as one; where kinds
   share a tool's lock (Homebrew's formulae and casks), neither's rest begins till the other's
@@ -664,8 +689,9 @@ output.
 | `internal/redact` | Hiding secrets in what's logged |
 | `internal/runner` | The one place a process starts: kit's PATH, a clean environment, timeouts, output captured, each command reported as an event. `runner/runnertest` is the fake |
 | `internal/engine` | Steps, ordering by needs, running checks side by side, deferral, failure isolation, the summary |
-| `internal/kind` | The kind interface and the comparison that makes a kind a step |
-| `internal/kind/brew` | Homebrew's formulae and casks |
+| `internal/kind` | The kind interface, the descriptor each kind gives of itself, and the comparison that makes a kind a step |
+| `internal/kind/<kind>` | A kind each, with its descriptor: `brew` (Homebrew's formulae and casks), `appstore`, `npm`, `composer`, `gotool`, `ghext`, `tmux`, `login`, `mcp`, `skill`, `secret`, `gitconfig`, `defaults`, `power`, `exclusion`, `spotlight` |
+| `internal/kinds` | The list of kinds, in the run's order: what the rest of kit reads them from |
 | `internal/status` | The status document behind `kit status` and `--json` |
 | `internal/testguard` | Every package's `TestMain`: keeps tests off the real system (see Test isolation in `CLAUDE.md`) |
 

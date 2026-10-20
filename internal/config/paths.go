@@ -38,7 +38,7 @@ func (c *Config) SearchPath(home, mac string) ([]string, error) {
 func (c *Config) ShellPath(home, mac string) ([]string, error) {
 	var out []string
 	for _, scope := range []string{Shared, mac} {
-		entries, err := c.declared(PathsKind, scope)
+		entries, _, err := c.declared(PathsKind, scope)
 		if err != nil {
 			return nil, err
 		}

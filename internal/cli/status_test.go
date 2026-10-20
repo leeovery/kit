@@ -37,8 +37,9 @@ func laptopWorld(t *testing.T) *world {
 	f.On("brew", "list", "--cask", "--full-name", "-1").Prints("ghostty\nfirefox\n")
 	f.On("git", "-C", filepath.Join(w.home, ".config", "kit"), "remote", "get-url", "origin").Prints("git@github.com:someone/kit-config.git\n")
 	f.On("gh", "repo", "view", "someone/kit-config", "--json", "visibility", "--jq", ".visibility").Prints("PRIVATE\n")
-	// gh is installed, for the config's check, with no extensions.
-	f.On("gh", "extension", "list")
+	// gh is installed, for the config's check, with an extension: the config
+	// has no section of them, so kit doesn't look.
+	f.On("gh", "extension", "list").Prints("gh dash\tdlvhdr/gh-dash\tv4.0.0\n")
 	healthyMac(w)
 	return w
 }
@@ -68,7 +69,6 @@ brew extra ffmpeg
 brew unused-dependency node@20
 cask attention 1 declared, all installed
 cask extra firefox
-gh ok none declared
 config ok all committed
 disk ok 48% free
 memory ok 0.3 GB swap, pressure normal
@@ -89,7 +89,7 @@ func TestStatusJSON(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &doc); err != nil || code != 1 {
 		t.Fatalf("kit status --json printed %q, exit %d: %v", out, code, err)
 	}
-	if doc.Schema != 1 || doc.Kit != "0.1.0" || doc.Machine != "laptop" || !doc.Attention || len(doc.Steps) != 12 {
+	if doc.Schema != 1 || doc.Kit != "0.1.0" || doc.Machine != "laptop" || !doc.Attention || len(doc.Steps) != 11 {
 		t.Fatalf("document = %+v", doc)
 	}
 	brew := doc.Steps[2]
@@ -242,19 +242,34 @@ func TestStatusQuietensNewDrift(t *testing.T) {
 	}
 }
 
-// A kind with nothing declared for the Mac, whose program isn't installed,
-// has nothing to check, so its step isn't in the run.
-func TestStatusLeavesOutAKindWithNothingToCheck(t *testing.T) {
+// A kind the config has no section of for the Mac, the shared file's or its
+// own, isn't in the run, though its program's installed with things of its
+// own; and Homebrew's step isn't either, with no kind needing it.
+func TestStatusLeavesOutAKindWithoutASection(t *testing.T) {
 	w := newWorld(t, map[string]string{"kit.toml": twoMacs, "studio/declarations": "[homebrew formulae]\nffmpeg\n"})
 	w.write(t, filepath.Join(".local", "state", "kit", "machine"), "laptop\n")
-	w.fake.On("brew", "--prefix").Fails(errNotFound)
+	w.fake.On("brew", "--prefix").Prints("/opt/homebrew\n")
+	w.fake.On("brew", "list", "--formula", "--full-name", "-1").Prints("ffmpeg\n")
+	w.fake.On("brew", "leaves").Prints("ffmpeg\n")
+	w.fake.On("brew", "leaves", "--installed-on-request").Prints("ffmpeg\n")
+	w.fake.On("brew", "list", "--cask", "--full-name", "-1").Prints("firefox\n")
 	w.fake.On("git", "-C", filepath.Join(w.home, ".config", "kit"), "remote", "get-url", "origin").Prints("git@github.com:someone/kit-config.git\n")
 	w.fake.On("gh", "repo", "view", "someone/kit-config", "--json", "visibility", "--jq", ".visibility").Prints("PRIVATE\n")
-	w.fake.On("gh", "extension", "list").Fails(errNotFound)
+	w.fake.On("gh", "extension", "list").Prints("gh dash\tdlvhdr/gh-dash\tv4.0.0\n")
 	healthyMac(w)
 
-	out, _, _ := w.run(t, "status")
-	if !strings.Contains(out, "homebrew attention not installed: brew isn't on kit's PATH\n") || strings.Contains(out, "\nbrew ") || strings.Contains(out, "\ncask ") || strings.Contains(out, "\ngh ") {
-		t.Errorf("kit status printed\n%s\nwant Homebrew not installed, and no kind with nothing to check", out)
+	out, _, code := w.run(t, "status")
+	for _, step := range []string{"homebrew", "brew", "cask", "gh"} {
+		if strings.Contains(out, "\n"+step+" ") {
+			t.Errorf("kit status printed\n%s\nwant no %s: nothing declares it for laptop", out, step)
+		}
+	}
+	if code != 0 {
+		t.Errorf("kit status: exit %d, want 0", code)
+	}
+	for _, call := range w.fake.Calls() {
+		if strings.HasPrefix(call, "brew ") || strings.HasPrefix(call, "gh extension") {
+			t.Errorf("kit status ran %s: want neither kind looked at", call)
+		}
 	}
 }

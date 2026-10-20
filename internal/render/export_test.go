@@ -18,3 +18,6 @@ func (p *Pretty) Clocked(now func() time.Time) *Pretty {
 	p.now = now
 	return p
 }
+
+// Rows are applying's rows, in the order they show.
+var Rows = applyRows

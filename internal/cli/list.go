@@ -14,6 +14,7 @@ import (
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/kind"
+	"github.com/leeovery/kit/internal/kinds"
 	"github.com/leeovery/kit/internal/linked"
 	"github.com/leeovery/kit/internal/render"
 )
@@ -67,20 +68,20 @@ func newListCommand(a *app) *cobra.Command {
 }
 
 func (a *app) list(ctx context.Context, r *run, args []string) error {
-	kinds := r.kinds
+	names := r.kinds
 	if len(args) == 1 {
 		if _, err := r.kindNamed(args[0]); err != nil {
 			return err
 		}
-		kinds = args
+		names = args
 	}
 	var entries []listed
 	stop := a.loading(a.Stdout, "checking what's installed")
 	defer stop()
-	for _, name := range kinds {
+	for _, name := range names {
 		k := r.kindsByName[name]
 		res := kind.Compare(ctx, k, r.lists[name])
-		if err := unchecked(kind.Label(k.Name()), res); err != nil {
+		if err := unchecked(kinds.Label(k.Name()), res); err != nil {
 			return err
 		}
 		missing := make(map[string]bool)
@@ -201,8 +202,8 @@ func (a *app) why(ctx context.Context, r *run, name string) error {
 		if err != nil {
 			return err
 		}
-		// A kind the run doesn't check has its program not installed, so
-		// nothing of it is.
+		// A kind the run doesn't check isn't looked after on this Mac, so
+		// nothing of it is looked for.
 		isIn := false
 		if slices.Contains(r.kinds, kindName) {
 			if isIn, err = installed(ctx, k, name); err != nil {
@@ -212,7 +213,7 @@ func (a *app) why(ctx context.Context, r *run, name string) error {
 		if len(declared) == 0 && !isIn {
 			continue
 		}
-		w := why{Kind: kindName, Step: kind.Label(k.Name()), Declared: declared, Installed: isIn}
+		w := why{Kind: kindName, Step: kinds.Label(k.Name()), Declared: declared, Installed: isIn}
 		_, outside := k.(kind.Declarer)
 		w.ForThisMac = slices.ContainsFunc(declared, func(e config.Entry) bool {
 			return outside || e.Scope == config.Shared || e.Scope == r.machine

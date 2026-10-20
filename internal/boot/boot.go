@@ -20,6 +20,7 @@ import (
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/event"
+	"github.com/leeovery/kit/internal/kinds"
 	"github.com/leeovery/kit/internal/runner"
 	kitstate "github.com/leeovery/kit/internal/state"
 )
@@ -141,7 +142,7 @@ func (b *Boot) archive() string { return filepath.Join(b.Data, "bootstrap", "kit
 // boot's copy; nil when there's neither.
 func (b *Boot) config() *config.Config {
 	for _, dir := range []string{b.Config, b.archive()} {
-		if cfg, err := config.Load(dir); err == nil {
+		if cfg, err := config.Load(dir, kinds.Sections()); err == nil {
 			return cfg
 		}
 	}

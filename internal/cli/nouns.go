@@ -7,6 +7,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/leeovery/kit/internal/config"
+	"github.com/leeovery/kit/internal/kind"
+	"github.com/leeovery/kit/internal/kinds"
 	"github.com/leeovery/kit/internal/linked"
 	"github.com/leeovery/kit/internal/redact"
 )
@@ -31,43 +33,20 @@ var groups = []*cobra.Group{
 	{ID: groupOwn, Title: "Your own:"},
 }
 
-// noun is a kind kit manages as a command of its own: its name, its group in
-// kit's help, what it manages, as its help shows it, and what adding and
-// removing do.
-type noun struct {
-	name, group, what, add, remove string
-}
+// helpGroups are the groups of kit's help the kinds' commands are in, by the
+// kinds' groups.
+var helpGroups = map[kind.Group]string{kind.Packages: groupPackages, kind.Settings: groupSettings, kind.Secrets: groupFiles}
 
-// kindNouns are the kinds whose things are added and removed alike:
-// installed and declared, or uninstalled and undeclared.
-var kindNouns = []noun{
-	{"brew", groupPackages, "Homebrew's formulae", "Install formulae, and declare them", "Uninstall formulae, and undeclare them"},
-	{"cask", groupPackages, "Homebrew's casks", "Install casks, and declare them", "Uninstall casks, and undeclare them"},
-	{"mas", groupPackages, "App Store apps", "Install App Store apps, by name or id, and declare them", "Uninstall App Store apps, and undeclare them"},
-	{"npm", groupPackages, "npm's global packages", "Install global npm packages, and declare them", "Uninstall global npm packages, and undeclare them"},
-	{"composer", groupPackages, "Composer's global packages", "Install global Composer packages, and declare them", "Uninstall global Composer packages, and undeclare them"},
-	{"go", groupPackages, "Go tools", "Install Go tools, by module path, and declare them", "Uninstall Go tools, and undeclare them"},
-	{"gh", groupPackages, "The GitHub CLI's extensions", "Install GitHub CLI extensions, as owner/repo, and declare them", "Uninstall GitHub CLI extensions, and undeclare them"},
-	{"tmux", groupPackages, "tmux's plugins, declared in tmux's config", "Install tmux plugins, and declare them in tmux's config", "Uninstall tmux plugins, and take them out of tmux's config"},
-	{"claude-mcp", groupPackages, "Claude Code's MCP servers", "Declare MCP servers Claude Code has, as it has them", "Remove MCP servers from Claude Code, and undeclare them"},
-	{"claude-skill", groupPackages, "Claude's skills for every project, installed by agntc", "Install Claude skills with agntc, as owner/repo and the skill or pack in it, and declare them", "Remove Claude skills with agntc, and undeclare them"},
-	{"login-item", groupPackages, "macOS login items", "Add login items, by app, and declare them", "Remove login items, and undeclare them"},
-	{"defaults", groupSettings, "macOS settings, in defaults write's form", "Declare macOS settings as this Mac has them", "Unset macOS settings, macOS's default coming back, and undeclare them"},
-	{"power", groupSettings, "Power settings, in pmset's form", "Declare power settings as this Mac has them", "Undeclare power settings, leaving their values"},
-	{"git-config", groupSettings, "git's global settings", "Declare git settings as this Mac has them", "Unset git settings, and undeclare them"},
-	{"backup-exclusion", groupSettings, "Folders Time Machine and Arq leave out", "Leave folders out of backups, and declare them", "Put folders back in backups, and undeclare them"},
-	{"spotlight-exclusion", groupSettings, "Folders Spotlight leaves out", "Leave folders out of Spotlight, and declare them", "Undeclare Spotlight's exclusions (System Settings takes a folder off its list)"},
-}
-
-// nounCommands are the commands of what kit manages.
+// nounCommands are the commands of what kit manages: a command each for the
+// kinds whose things are added and removed alike, installed and declared,
+// or uninstalled and undeclared, in the order a run takes them; then the
+// rest.
 func nounCommands(a *app) []*cobra.Command {
 	var cmds []*cobra.Command
-	for _, n := range kindNouns {
-		var extra []*cobra.Command
-		if n.name == claudeMCP {
-			extra = mcpSwitches(a)
+	for _, d := range kinds.All {
+		if d.Help != nil {
+			cmds = append(cmds, newKindCommand(a, d))
 		}
-		cmds = append(cmds, newKindCommand(a, n, extra...))
 	}
 	return append(cmds,
 		newFileCommand(a),
@@ -111,27 +90,28 @@ It's taken out of this Mac's declarations file; one declared for every Mac
 needs --shared, which takes it out of the shared file, every Mac's list. The
 change is committed and pushed to the config repository.`
 
-// newKindCommand is kit <noun>: adding and removing a kind's things, and
-// extra, what else the kind does.
-func newKindCommand(a *app, n noun, extra ...*cobra.Command) *cobra.Command {
+// newKindCommand is kit <kind>: adding and removing d's things, and turning
+// them off and on, when they can be.
+func newKindCommand(a *app, d kind.Descriptor) *cobra.Command {
+	n := d.Help
 	cmd := &cobra.Command{
-		Use:     n.name,
-		Short:   n.what,
-		GroupID: n.group,
+		Use:     d.Name,
+		Short:   n.What,
+		GroupID: helpGroups[d.Group],
 	}
 	var opts addOptions
 	add := &cobra.Command{
 		Use:   "add <name>...",
-		Short: n.add + " for this Mac (--shared: every Mac)",
-		Long: n.add + "." + declaredWhere + `
+		Short: n.Add + " for this Mac (--shared: every Mac)",
+		Long: n.Add + "." + declaredWhere + `
 
 Each goes in its sorted place. --note records why, after the name. --temp
 installs without declaring, for a throwaway: it's quiet for 7 days, then kit
 reconcile asks.`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return a.prepared(cmd, n.name+" add", func(ctx context.Context, r *run) error {
-				return a.add(ctx, r, n.name, args, opts)
+			return a.prepared(cmd, d.Name+" add", func(ctx context.Context, r *run) error {
+				return a.add(ctx, r, d.Name, args, opts)
 			})
 		},
 	}
@@ -142,20 +122,23 @@ reconcile asks.`,
 	remove := &cobra.Command{
 		Use:     "remove <name>...",
 		Aliases: []string{"rm"},
-		Short:   n.remove,
-		Long: n.remove + "." + undeclaredWhere + `
+		Short:   n.Remove,
+		Long: n.Remove + "." + undeclaredWhere + `
 
 When something installed still needs it, nothing changes, and why is passed
 on.`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return a.prepared(cmd, n.name+" remove", func(ctx context.Context, r *run) error {
-				return a.remove(ctx, r, n.name, args, shared)
+			return a.prepared(cmd, d.Name+" remove", func(ctx context.Context, r *run) error {
+				return a.remove(ctx, r, d.Name, args, shared)
 			})
 		},
 	}
 	remove.Flags().BoolVar(&shared, "shared", false, "take it out of the shared file, every Mac's list")
-	cmd.AddCommand(append([]*cobra.Command{add, remove}, extra...)...)
+	cmd.AddCommand(add, remove)
+	if n.Switch != nil {
+		cmd.AddCommand(switchCommands(a, d)...)
+	}
 	return cmd
 }
 

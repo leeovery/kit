@@ -70,21 +70,23 @@ func rawShown(screen string, w int) []string {
 // heading alone; in a pane too narrow for both, the heading alone.
 func TestApplyingLogHeadingOffersTheRawView(t *testing.T) {
 	for _, tt := range []struct {
-		name  string
-		w, h  int
-		keys  func(string, int) []ask.Key
-		want  string
-		ends  string
-		whole int
+		name   string
+		w, h   int
+		keys   func(string, int) []ask.Key
+		events []event.Event
+		want   string
+		ends   string
+		whole  int
 	}{
 		{name: "no row", w: 160, h: 64, want: "  LOG"},
 		{name: "a row that printed nothing", w: 160, h: 64, keys: clickRow("Homebrew casks"), want: "  LOG · HOMEBREW CASKS"},
 		{name: "Homebrew's", w: 160, h: 64, keys: clickRow("Homebrew formulae"), want: "  LOG · HOMEBREW FORMULAE", ends: "r Homebrew's own output", whole: 160 - 60 - 1 - 2},
 		{name: "a row without a tool", w: 160, h: 64, keys: clickRow("Your steps"), want: "  LOG · YOUR STEPS", ends: "r its own output", whole: 160 - 60 - 1 - 2},
+		{name: "a row whose kinds run tools of their own", w: 160, h: 64, keys: clickRow("Developer tools"), events: printed("npm", 354, "added 1 package"), want: "  LOG · DEVELOPER TOOLS", ends: "r its own output", whole: 160 - 60 - 1 - 2},
 		{name: "too narrow for both", w: 100, h: 30, keys: clickRow("Homebrew formulae"), want: "  LOG · HOMEBREW FORMULAE"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			face, out, kb := applyAt(tt.w, tt.h, 6*time.Minute+12*time.Second, printing())
+			face, out, kb := applyAt(tt.w, tt.h, 6*time.Minute+12*time.Second, slices.Concat(printing(), tt.events))
 			defer func() { _ = face.Close() }()
 			if tt.keys != nil {
 				kb.press(t, tt.keys(screen(out.String()), tt.w)...)

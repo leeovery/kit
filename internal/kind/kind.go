@@ -36,8 +36,8 @@ type Installed struct {
 
 // Kind is a list of things of one sort.
 type Kind interface {
-	// Name names the kind, its items and its step, as in brew; the config
-	// declares it in the section that names it, as in [homebrew formulae].
+	// Name names the kind, its items and its step, as in brew: its
+	// descriptor's name.
 	Name() string
 	// Program is the program the kind runs to find what's installed, as in
 	// brew: while it isn't installed, there's nothing of the kind to find.
@@ -53,33 +53,6 @@ type Kind interface {
 	// Remove uninstalls names.
 	Remove(ctx context.Context, names []string) error
 }
-
-// labels name the kinds' rows, each as the config's section declaring it is
-// named, cased: [homebrew formulae]'s row is Homebrew formulae. tmux's
-// plugins are declared in tmux's own config.
-var labels = map[string]string{
-	"brew":                "Homebrew formulae",
-	"cask":                "Homebrew casks",
-	"mas":                 "App Store apps",
-	"npm":                 "npm packages",
-	"composer":            "Composer packages",
-	"go":                  "Go tools",
-	"gh":                  "GitHub extensions",
-	"tmux":                "tmux plugins",
-	"claude-mcp":          "Claude MCP",
-	"claude-skill":        "Claude skills",
-	"login-item":          "macOS login items",
-	"defaults":            "macOS settings",
-	"power":               "Power settings",
-	"git-config":          "git config",
-	"backup-exclusion":    "Backup exclusions",
-	"spotlight-exclusion": "Spotlight exclusions",
-	"secret":              "Secrets",
-}
-
-// Label is the name of the row of the kind named name, as in Homebrew
-// formulae for brew.
-func Label(name string) string { return cmp.Or(labels[name], name) }
 
 // Commanded is a kind whose check and install run a command other than its
 // Program, or none, as tmux's plugins, read from tmux's config and cloned
@@ -373,7 +346,6 @@ func Placed(k Kind, declared config.List, placed func() Placing, needs ...string
 	var unmet deferred
 	return engine.Step{
 		Name:  k.Name(),
-		Title: Label(k.Name()),
 		Did:   verbOf(k),
 		Needs: needs,
 		Check: func(ctx context.Context) check.Result { return unmet.mark(Compare(ctx, k, declared), declared) },
@@ -474,7 +446,7 @@ func installApart(ctx context.Context, k Kind, declared config.List, placing Pla
 // still going.
 func waitBehind(ctx context.Context, behind []engine.Wait) bool {
 	for _, w := range behind {
-		if engine.Await(ctx, w, "waiting for "+Label(w.Step)); ctx.Err() != nil {
+		if engine.Await(ctx, w, "waiting for "+cmp.Or(w.Title, w.Step)); ctx.Err() != nil {
 			return false
 		}
 	}
@@ -518,7 +490,7 @@ func installHeld(ctx context.Context, k Kind, declared config.List, h Held, name
 	}
 	var missing []string
 	for _, w := range h.Waits {
-		what := cmp.Or(w.Thing, Label(w.Step))
+		what := cmp.Or(w.Thing, w.Title, w.Step)
 		if !engine.Await(ctx, w, fmt.Sprintf("waiting for %s: %d to install", what, len(names))) {
 			missing = append(missing, what)
 		}

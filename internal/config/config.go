@@ -50,6 +50,9 @@ type Config struct {
 	// by its name in apps.Terminals: none when "", and the boot carries on
 	// in Terminal.
 	Terminal string
+	// defs are the sections a declarations file may hold, in the order kit
+	// writes them: the config's own, and the kinds' it was loaded with.
+	defs []sectionDef
 }
 
 // DefaultNightlyAt is when the nightly run is due when kit.toml doesn't say.
@@ -85,8 +88,9 @@ func ValidName(name string) bool { return macName.MatchString(name) }
 
 // Load reads the config repository in dir, checking its settings: a format
 // this kit reads, at least one Mac, every Mac's name, and a primary among
-// them.
-func Load(dir string) (*Config, error) {
+// them. Its declarations files may hold the kinds' sections, in the order
+// kit writes them, as well as the config's own.
+func Load(dir string, kinds []Section) (*Config, error) {
 	path := filepath.Join(dir, File)
 	data, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -129,6 +133,7 @@ func Load(dir string) (*Config, error) {
 	cfg := &Config{
 		Dir: dir, Format: f.Format, MinimumKit: f.MinimumKit, Primary: f.Primary, Macs: make(map[string]Mac, len(f.Macs)),
 		NightlyAt: DefaultNightlyAt, PrefsRepo: strings.TrimSpace(f.PrefsRepo), Terminal: f.Terminal,
+		defs: sectionDefs(kinds),
 	}
 	if f.NightlyAt != "" {
 		at, err := time.Parse("15:04", f.NightlyAt)

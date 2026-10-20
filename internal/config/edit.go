@@ -31,13 +31,13 @@ const (
 // name as the line has it, for editing in place: what isn't edited is kept
 // as it is.
 type body struct {
-	form  form
+	form  Form
 	lines []string
 	kinds []lineKind
 	names []string
 }
 
-func splitBody(f form, lines []string) body {
+func splitBody(f Form, lines []string) body {
 	b := body{form: f}
 	for _, line := range lines {
 		kind, name := entryLine, ""
@@ -48,11 +48,11 @@ func splitBody(f form, lines []string) body {
 			kind = commentLine
 		case line[0] == ' ' || line[0] == '\t':
 			kind = stepLine
-		case f == commands || f == settings || f == secrets:
+		case f == Commands || f == Settings || f == Secrets:
 			name, _, _, _ = splitCommand(line)
-		case f == defaults:
+		case f == Defaults:
 			name = defaultsName(line)
-		case f == power:
+		case f == Power:
 			name = powerName(line)
 		default:
 			name, _ = splitComment(line)
@@ -151,7 +151,7 @@ func (b *body) remove(from, to int) {
 // after the last; then the blank lines ending the section, as they were. A
 // comment apart from any entry is a note on the entry after it, and the
 // blank lines between entries go.
-func sortedLines(f form, lines []string, added ...string) []string {
+func sortedLines(f Form, lines []string, added ...string) []string {
 	end := len(lines)
 	for end > 0 && strings.TrimSpace(lines[end-1]) == "" {
 		end--
@@ -207,12 +207,12 @@ func trimBlank(lines []string) []string {
 // by its name (packageName), a macOS setting kept for this Mac's host among
 // its domain's, anything else as written; case aside and numbers by their
 // value (28 before 184); then as written.
-func compareNames(f form, a, b string) int {
+func compareNames(f Form, a, b string) int {
 	ka, kb := a, b
 	switch f {
-	case names:
+	case Names:
 		ka, kb = packageName(a), packageName(b)
-	case defaults:
+	case Defaults:
 		ka, kb = strings.TrimPrefix(a, currentHostName), strings.TrimPrefix(b, currentHostName)
 	}
 	return cmp.Or(natural(ka, kb), natural(a, b), strings.Compare(a, b))
@@ -344,7 +344,7 @@ func (c *Config) Declare(kind, scope string, e Entry) error {
 	switch b := splitBody(d.form, s.body); {
 	case d.sorted:
 		s.body = sortedLines(d.form, s.body, line)
-	case d.form == paths:
+	case d.form == Paths:
 		b.insert(b.lastEntryEnd(0, len(b.lines)), block...)
 		s.body = b.lines
 	default:
@@ -356,8 +356,10 @@ func (c *Config) Declare(kind, scope string, e Entry) error {
 
 // Undeclare takes name out of kind's sections of scope's declarations, with
 // the notes directly above it and the steps under it, keeping a sorted
-// section sorted; a section it leaves empty goes. The rest of the file is
-// kept as it is.
+// section sorted; a section it leaves empty goes, unless it's the last
+// declaring its kind for a Mac (keeps), which stays, empty, as the kind's
+// own section, so the kind's still looked after (List.Declared). The rest of
+// the file is kept as it is.
 func (c *Config) Undeclare(kind, scope, name string) error {
 	d, f, err := c.editable(kind, scope)
 	if err != nil {
@@ -378,7 +380,11 @@ func (c *Config) Undeclare(kind, scope, name string) error {
 	}
 	b.remove(b.notesStart(i), b.end(i))
 	s.body = b.lines
-	if len(b.entries(0, len(b.lines))) == 0 {
+	switch {
+	case len(b.entries(0, len(b.lines))) > 0:
+	case c.keeps(f, s):
+		f.empty(s)
+	default:
 		f.drop(s)
 	}
 	return c.writeDecl(f, d, name, false)
@@ -417,29 +423,29 @@ func (c *Config) Replace(kind, scope string, e Entry) error {
 func entryText(d sectionDef, name string, e Entry) (string, error) {
 	line := name
 	switch d.form {
-	case names:
+	case Names:
 		if !lineName.MatchString(name) {
 			return "", fmt.Errorf("%q isn't a name", name)
 		}
-	case commands, settings, secrets:
-		if d.form == commands && !commandName.MatchString(name) || d.form == settings && !settingKey.MatchString(name) || d.form == secrets && !secretName.MatchString(name) {
+	case Commands, Settings, Secrets:
+		if d.form == Commands && !commandName.MatchString(name) || d.form == Settings && !settingKey.MatchString(name) || d.form == Secrets && !secretName.MatchString(name) {
 			return "", fmt.Errorf("%q isn't a name", name)
 		}
 		if strings.TrimSpace(e.Value) == "" {
-			return "", fmt.Errorf("%s needs its %s", name, map[form]string{commands: "options", settings: "value", secrets: "1Password reference"}[d.form])
+			return "", fmt.Errorf("%s needs its %s", name, map[Form]string{Commands: "options", Settings: "value", Secrets: "1Password reference"}[d.form])
 		}
 		line += " " + strings.TrimSpace(e.Value)
-	case paths:
+	case Paths:
 		if err := checkDir(name); err != nil {
 			return "", err
 		}
-	case defaults:
+	case Defaults:
 		text, err := defaultsText(name, e.Value)
 		if err != nil {
 			return "", err
 		}
 		line = text
-	case power:
+	case Power:
 		text, err := powerText(name, e.Value)
 		if err != nil {
 			return "", err
@@ -483,7 +489,7 @@ func stepLines(d sectionDef, steps []string) ([]string, error) {
 // sections after its own, by folder, item or hold.
 func (f *declFile) add(d sectionDef, arg, hold string) *section {
 	order := func(s *section) (int, string) {
-		return slices.IndexFunc(sectionDefs, func(x sectionDef) bool { return x.kind == s.def.kind }), s.arg + s.hold
+		return slices.IndexFunc(f.defs, func(x sectionDef) bool { return x.kind == s.def.kind }), s.arg + s.hold
 	}
 	s := &section{def: d, arg: arg, hold: hold}
 	s.header = "[" + s.name() + "]"
@@ -513,6 +519,37 @@ func (f *declFile) add(d sectionDef, arg, hold string) *section {
 	return s
 }
 
+// keeps reports whether f keeps its section s once it's empty: a kind's
+// last section in the shared file, or in a Mac's while the shared file has
+// none of the kind.
+func (c *Config) keeps(f *declFile, s *section) bool {
+	ofKind := func(sections []*section) bool {
+		return slices.ContainsFunc(sections, func(other *section) bool { return other != s && other.def.kind == s.def.kind })
+	}
+	if !s.def.isKind || ofKind(f.sections) {
+		return false
+	}
+	if f.scope == Shared {
+		return true
+	}
+	shared, err := c.readDecl(Shared)
+	return err != nil || !ofKind(shared.sections)
+}
+
+// empty leaves section s, with nothing in it, as its kind's own section,
+// for no folder or item, holding nothing back, a blank line after it when
+// another follows.
+func (f *declFile) empty(s *section) {
+	if s.arg != "" || s.hold != "" {
+		s.arg, s.hold = "", ""
+		s.header = "[" + s.name() + "]"
+	}
+	last := s == f.sections[len(f.sections)-1]
+	if n := len(s.body); !last && (n == 0 || strings.TrimSpace(s.body[n-1]) != "") {
+		s.body = append(s.body, "")
+	}
+}
+
 // drop takes section s out of the file, and the blank line before it when
 // it was the last.
 func (f *declFile) drop(s *section) {
@@ -537,7 +574,7 @@ func (f *declFile) drop(s *section) {
 // editable reads scope's declarations file for editing kind's sections: a
 // file that doesn't read isn't edited.
 func (c *Config) editable(kind, scope string) (sectionDef, *declFile, error) {
-	d, err := defFor(kind)
+	d, err := c.defFor(kind)
 	if err != nil {
 		return d, nil, err
 	}
@@ -557,7 +594,7 @@ func (c *Config) editable(kind, scope string) (sectionDef, *declFile, error) {
 func (c *Config) writeDecl(f *declFile, d sectionDef, name string, in bool) error {
 	content := f.String()
 	file := DeclFile(f.scope)
-	back, err := parseFile(f.scope, content)
+	back, err := parseFile(f.defs, f.scope, content)
 	if err != nil {
 		return fmt.Errorf("the edit would leave %s unreadable: %w", file, err)
 	}

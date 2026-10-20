@@ -21,22 +21,8 @@ import (
 	"github.com/leeovery/kit/internal/gitrepo"
 	"github.com/leeovery/kit/internal/hand"
 	"github.com/leeovery/kit/internal/kind"
-	"github.com/leeovery/kit/internal/kind/appstore"
 	"github.com/leeovery/kit/internal/kind/brew"
-	"github.com/leeovery/kit/internal/kind/composer"
-	"github.com/leeovery/kit/internal/kind/defaults"
-	"github.com/leeovery/kit/internal/kind/exclusion"
-	"github.com/leeovery/kit/internal/kind/ghext"
-	"github.com/leeovery/kit/internal/kind/gitconfig"
-	"github.com/leeovery/kit/internal/kind/gotool"
-	"github.com/leeovery/kit/internal/kind/login"
-	"github.com/leeovery/kit/internal/kind/mcp"
-	"github.com/leeovery/kit/internal/kind/npm"
-	"github.com/leeovery/kit/internal/kind/power"
-	"github.com/leeovery/kit/internal/kind/secret"
-	"github.com/leeovery/kit/internal/kind/skill"
-	"github.com/leeovery/kit/internal/kind/spotlight"
-	"github.com/leeovery/kit/internal/kind/tmux"
+	"github.com/leeovery/kit/internal/kinds"
 	"github.com/leeovery/kit/internal/linked"
 	"github.com/leeovery/kit/internal/logs"
 	"github.com/leeovery/kit/internal/look"
@@ -57,10 +43,10 @@ func newStatusCommand(a *app) *cobra.Command {
 attention, such as packages declared but missing, or installed but not declared.
 
 Name steps, as kit status shows them (homebrew, brew, cask, config-private),
-to check only those, with what they need. A kind with nothing declared for
-this Mac, whose program isn't installed, has nothing to check, and isn't
-shown. Exits 0 when nothing needs attention, 1 when something does, and 2
-when kit couldn't check. Each run is logged: see kit log.`,
+to check only those, with what they need. A kind is checked only while the
+config has its section for this Mac, the shared file's or its own, even an
+empty one. Exits 0 when nothing needs attention, 1 when something does, and
+2 when kit couldn't check. Each run is logged: see kit log.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			r, err := a.prepare("status", "status")
 			if err != nil {
@@ -98,8 +84,8 @@ type run struct {
 	log      *logs.File
 	stateDir string
 	// kinds are the kinds the run checks, by name, in pipeline order: their
-	// items are drift. A kind with nothing declared for this Mac, whose
-	// program isn't installed, has nothing to check.
+	// items are drift. A kind is checked only while the config has its
+	// section for this Mac, even an empty one.
 	kinds []string
 	// allKinds are every kind kit knows, by name, in pipeline order.
 	allKinds []string
@@ -142,47 +128,6 @@ type run struct {
 	placing map[string]kind.Placing
 	repo    gitrepo.Repo
 	record  drift.Record
-}
-
-// kindStep is a kind as a run takes it: the steps it needs, and the steps
-// it's applied after, as what they put in place is its own data.
-type kindStep struct {
-	kind  kind.Kind
-	needs []string
-	after []string
-	// declaredOnly is whether the kind is checked only while something of
-	// it is declared, as git's settings are: a Mac whose settings kit
-	// doesn't look after has nothing extra.
-	declaredOnly bool
-}
-
-// kindSteps are every kind kit knows, in pipeline order, driven through
-// run, for the user whose home is home and XDG config folder configHome.
-// Where a kind's command comes from isn't kit's to know: while kit applies,
-// each waits for its own (kind.Command).
-func kindSteps(hb *brew.Homebrew, run runner.Runner, home, configHome, stateDir string) []kindStep {
-	return []kindStep{
-		{kind: hb.Formulae(), needs: []string{brew.StepName}},
-		{kind: hb.Casks(), needs: []string{brew.StepName}},
-		{kind: appstore.New(run)},
-		{kind: npm.New(run, home)},
-		{kind: composer.New(run)},
-		{kind: gotool.New(run)},
-		{kind: ghext.New(run)},
-		{kind: tmux.New(run, home, configHome)},
-		// Login items open the apps the casks and the App Store install.
-		{kind: login.New(run, home), after: []string{"cask", "mas"}},
-		{kind: mcp.New(run, home)},
-		{kind: skill.New(run, home)},
-		{kind: secret.New(run, home), declaredOnly: true},
-		// git's settings sign with, and reach GitHub by, the SSH key the
-		// secrets write.
-		{kind: gitconfig.New(run), after: []string{"secret"}, declaredOnly: true},
-		{kind: defaults.New(run, stateDir), declaredOnly: true},
-		{kind: power.New(run, stateDir), declaredOnly: true},
-		{kind: exclusion.New(run, home, exclusion.TimeMachinePrefs), declaredOnly: true},
-		{kind: spotlight.New(run, home, stateDir), declaredOnly: true},
-	}
 }
 
 // remember notes, in the drift record, the drift the run's checks found:
@@ -362,7 +307,6 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 	observed = runner.Streamed(observed, event.Changing, func(ctx context.Context, cmd runner.Command, line string) {
 		sink.Emit(event.Output{Time: a.Now(), Step: event.StepOf(ctx), Command: redact.Text(cmd.String()), Line: redact.Text(line, runner.SecretValues(ctx)...)})
 	})
-	hb := brew.New(observed)
 	r := &run{
 		command: command, machine: machine, version: a.Version, sink: sink, face: face, log: log,
 		stateDir: dirs.State, now: now, run: observed, cfg: cfg, homeDir: home, logsDir: dirs.Logs, dataDir: dirs.Data,
@@ -395,43 +339,43 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 		step := steps.PathFile(shellPath, filepath.Join(dirs.State, steps.PathFileName))
 		addSetup(step, applyDrifter{step: step, label: "write it"})
 	}
-	var kinds []engine.Step
-	for _, ks := range kindSteps(hb, observed, home, a.configHome(), dirs.State) {
-		name := ks.kind.Name()
-		list, unread, err := declared(cfg, ks.kind, machine)
+	// kindSteps are the kinds' steps; needed, the steps they need that are
+	// their own, as Homebrew's.
+	var kindSteps, needed []engine.Step
+	deps := &kind.Deps{Run: observed, Home: home, ConfigHome: a.configHome(), StateDir: dirs.State}
+	for _, d := range kinds.All {
+		k := d.New(deps)
+		list, unread, err := declared(cfg, k, machine)
 		if err != nil {
 			_ = face.Close()
 			_ = log.Close()
 			return nil, err
 		}
-		r.allKinds = append(r.allKinds, name)
-		r.kindsByName[name], r.lists[name] = ks.kind, list
-		if len(list.Entries) == 0 && unread == nil && (ks.declaredOnly || !runner.Has(observed, ks.kind.Program())) {
+		r.allKinds = append(r.allKinds, d.Name)
+		r.kindsByName[d.Name], r.lists[d.Name] = k, list
+		if !list.Declared && unread == nil {
 			continue
 		}
-		step := kind.Placed(ks.kind, list, func() kind.Placing { return r.placing[name] }, ks.needs...)
-		step.Area = steps.AreaDrift
+		step := kind.Placed(k, list, func() kind.Placing { return r.placing[d.Name] }, d.Needs...)
+		step.Title, step.Area = d.Label, steps.AreaDrift
 		if unread != nil {
 			step.Check = func(context.Context) check.Result {
 				return check.Result{State: check.Failed, Reason: unread.Error()}
 			}
-		} else if program := kind.Command(ks.kind); program != "" && slices.Contains(applies, command) {
+		} else if program := kind.Command(k); program != "" && slices.Contains(applies, command) {
 			step.Waits = append(step.Waits, engine.Wait{Thing: program, Ready: func(context.Context) bool { return runner.Has(observed, program) }})
 		}
-		for _, after := range ks.after {
+		for _, after := range d.After {
 			if slices.Contains(r.kinds, after) {
 				step.After = append(step.After, after)
 			}
 		}
-		kinds = append(kinds, quietened(step, record, now))
-		r.kinds = append(r.kinds, name)
-		r.drift = append(r.drift, name)
-		r.drifters[name] = kindDrifter{k: ks.kind, list: list, held: func() []kind.Held { return r.placing[name].Held }}
+		kindSteps = append(kindSteps, quietened(step, record, now))
+		r.kinds = append(r.kinds, d.Name)
+		r.drift = append(r.drift, d.Name)
+		r.drifters[d.Name] = kindDrifter{k: k, list: list, held: func() []kind.Held { return r.placing[d.Name].Held }}
+		needed = r.withNeeded(needed, d, deps)
 	}
-	homebrew := hb.Step()
-	homebrew.Area = steps.AreaDrift
-	// Installing Homebrew needs the password, asked with the rest.
-	r.adminSteps = append(r.adminSteps, homebrew)
 	features, err := r.features()
 	if err != nil {
 		_ = face.Close()
@@ -447,7 +391,9 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 	}
 	if features.on(steps.FeatureOhMyZsh) {
 		step := feature(steps.FeatureOhMyZsh, steps.OhMyZsh(observed, home))
-		step.After = []string{brew.StepName}
+		if slices.ContainsFunc(needed, func(s engine.Step) bool { return s.Name == brew.StepName }) {
+			step.After = []string{brew.StepName}
+		}
 		addSetup(step, applyDrifter{step: step, label: "install it"})
 	}
 	for _, system := range []struct {
@@ -537,7 +483,7 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 	if jobs := slices.Concat(hourly, daily); len(jobs) > 0 {
 		checks = append(checks, nightly.Check(jobs, len(hourly) > 0, len(daily) > 0, dirs.State, a.Now))
 	}
-	base := slices.Concat([]engine.Step{homebrew}, setup, kinds, checks)
+	base := slices.Concat(needed, setup, kindSteps, checks)
 	for i := range base {
 		base[i].Part = partOf(base[i].Name)
 	}
@@ -569,6 +515,27 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 		r.readyNotices(a.Getenv)
 	}
 	return r, nil
+}
+
+// withNeeded is needed, the steps the run's kinds need that are their own,
+// with those d's Setup makes that it hasn't already: one needing an
+// administrator's password, as installing Homebrew does, asks for it with
+// the rest.
+func (r *run) withNeeded(needed []engine.Step, d kind.Descriptor, deps *kind.Deps) []engine.Step {
+	if d.Setup == nil {
+		return needed
+	}
+	for _, step := range d.Setup(deps) {
+		if slices.ContainsFunc(needed, func(s engine.Step) bool { return s.Name == step.Name }) {
+			continue
+		}
+		step.Area = steps.AreaDrift
+		if step.Admin {
+			r.adminSteps = append(r.adminSteps, step)
+		}
+		needed = append(needed, step)
+	}
+	return needed
 }
 
 // lead puts steps at the head of the run: the bootstrap's own steps lead
@@ -753,26 +720,25 @@ func childEnv(getenv func(string) string, environ []string, home string, path []
 }
 
 // partOf is what the step called name counts towards in a view rolling its
-// area up: a kind's things are packages or settings, as kit's help groups
-// them; the home folder's set-up and the Mac's switches are packages or
-// settings too; the config repository's steps are its own.
+// area up: a kind's things, and the steps it needs, are its group's; the
+// home folder's set-up and the Mac's switches are packages or settings too;
+// the config repository's steps are its own.
 func partOf(name string) string {
-	for _, n := range kindNouns {
-		if n.name == name {
-			return map[string]string{groupPackages: render.PartPackages, groupSettings: render.PartSettings}[n.group]
-		}
+	if d, ok := kinds.Of(name); ok {
+		return groupParts[d.Group]
 	}
 	switch name {
-	case brew.StepName, steps.FeatureOhMyZsh:
+	case steps.FeatureOhMyZsh:
 		return render.PartPackages
 	case steps.PathName, steps.FeatureTouchIDSudo, steps.FeatureRemoteLogin, steps.FeatureFileSharing:
 		return render.PartSettings
 	case linked.StepName:
 		return render.PartFiles
-	case secretKind:
-		return render.PartSecrets
 	case steps.ConfigEditsName, steps.ConfigSyncName, steps.ConfigPrivateName:
 		return render.PartConfig
 	}
 	return ""
 }
+
+// groupParts are what each group of kinds' things count towards.
+var groupParts = map[kind.Group]string{kind.Packages: render.PartPackages, kind.Settings: render.PartSettings, kind.Secrets: render.PartSecrets}

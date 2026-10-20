@@ -7,6 +7,7 @@ import (
 
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/event"
+	"github.com/leeovery/kit/internal/kinds"
 	"github.com/leeovery/kit/internal/look"
 	"github.com/leeovery/kit/internal/steps"
 )
@@ -32,19 +33,14 @@ const (
 var applyRows = []string{rowThisMac, rowFiles, rowSettings, rowSecrets, rowFormulae, rowCasks,
 	rowAppStore, rowTools, rowGit, rowLogin, rowYours, rowBackups}
 
-// rowSteps are kit's own steps, by name, in each row.
+// rowSteps are kit's own steps that aren't kinds', by name, in each row: a
+// kind's step, and the steps it needs, are in the row it says.
 var rowSteps = map[string][]string{
 	rowThisMac: {"boot-github", "boot-mac", "boot-password", "boot-homebrew", "boot-apps", "boot-kit-config",
 		"boot-full-disk-access", "boot-terminal", "disk", "memory", "file-events", "load", "full-disk-access"},
 	rowFiles:    {"file", "path", "oh-my-zsh"},
-	rowSettings: {"defaults", "power", "touch-id-sudo", "remote-login", "file-sharing", "backup-exclusion", "spotlight-exclusion"},
-	rowSecrets:  {"secret"},
-	rowFormulae: {"homebrew", "brew"},
-	rowCasks:    {"cask"},
-	rowAppStore: {"mas"},
-	rowTools:    {"npm", "composer", "go", "gh", "tmux", "claude-mcp", "claude-skill"},
-	rowGit:      {"git-config", "config", "config-sync", "config-private"},
-	rowLogin:    {"login-item"},
+	rowSettings: {"touch-id-sudo", "remote-login", "file-sharing"},
+	rowGit:      {"config", "config-sync", "config-private"},
 	rowBackups:  {"time-machine", "arq", "prefs", "scratch", "nightly"},
 }
 
@@ -54,6 +50,14 @@ var rowNamed = func() map[string]string {
 	for row, names := range rowSteps {
 		for _, n := range names {
 			named[n] = row
+		}
+	}
+	for _, d := range kinds.All {
+		named[d.Name] = d.Row
+		for _, need := range d.Needs {
+			if _, ok := named[need]; !ok {
+				named[need] = d.Row
+			}
 		}
 	}
 	return named

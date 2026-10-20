@@ -14,6 +14,7 @@ import (
 	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/kind"
+	"github.com/leeovery/kit/internal/kinds"
 	"github.com/leeovery/kit/internal/look"
 )
 
@@ -76,7 +77,7 @@ func (a *app) find(ctx context.Context, k kind.Kind, typed []string) ([]string, 
 				answers[i] = look.Choice{Label: f.Label}
 			}
 			i, err := a.Choose(ctx, ask.Question{
-				About:   look.Row{State: look.NeedsYou, Name: t, Says: look.Says(look.Muted(kind.Label(k.Name())), look.Orange("which is it?"))},
+				About:   look.Row{State: look.NeedsYou, Name: t, Says: look.Says(look.Muted(kinds.Label(k.Name())), look.Orange("which is it?"))},
 				Answers: answers,
 			})
 			if errors.Is(err, ask.ErrCancelled) {
