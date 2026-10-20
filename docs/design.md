@@ -90,7 +90,7 @@ file having none, or the shared file's), so the kind's still looked after.
 | `power` | `[power settings]`: pmset's words, the source then the setting and value (`-c sleep 0`; `-a` every source, `-b` the battery, `-u` a UPS), named `charger:sleep` | `pmset -g custom`, by source | `sudo pmset`; undeclaring leaves the value |
 | `backup-exclusion` | `[backup exclusions]`: a path a line, `~` and `*` globs, expanded on every check (a plain path stands for itself, there or not) | what the backup tools the Mac lists in `[backups]` keep out, each through its driver (a path declared kept out while every one keeps it out): Time Machine's fixed-path exclusions (`SkipPaths`), and each glob match excluded where it is (`tmutil isexcluded`); Arq keeps none of its own, following Time Machine's list ("Skip items excluded by Time Machine rules"), so Arq alone has Time Machine's written, no backup disk needed; with no tool listed the check fails, saying so | through each tool's driver, Time Machine's: a plain path `sudo tmutil addexclusion -p` (Full Disk Access for the terminal); a glob's match `tmutil addexclusion`, no password, so `kit nightly` does it unattended; `removeexclusion -p` |
 | `spotlight-exclusion` | `[spotlight exclusions]`: a folder a line | Spotlight asked for files in each folder (`mdfind -count`); its own list is root's alone, so nothing extra is found | added to Spotlight's privacy list through sudo, taking effect after a restart (kit remembers, and says so); removing is System Settings' |
-| `secret` | `[secrets op://vault/item]`, a section for each item a file keeps secrets in (the header says where they are; several spread them across items): what it fills (a variable's name, or a file's path) then the field or attachment, short (`GitHub/token`); a plain `[secrets]` for references in full (`op://vault/item/field`); a name once a file. `--mode 644` for a file's. GitHub Actions secrets aren't kit's: they're a repository's, not the Mac's | `~/.secrets.zsh`'s exports, the files with their modes: never 1Password, which would ask for a fingerprint each hour | a sync: every value read from 1Password in one run of op (`op inject`, the references on its input, its output kept from the log), as 1Password has the person approve each run, each in a session of its own; should it fail, the values read in halves, down to each alone with `op read`; `~/.secrets.zsh` written whole with each value single-quoted (one that fails to read keeps its line), files written beside and renamed in; `kit secret sync` forces one. Removing takes a secret off the Mac; 1Password keeps it |
+| `secret` | `[secrets <item>]`, a section for each item a file keeps secrets in, in any store kit has a driver for, as in `[secrets op://vault/item]` (the header says where they are; several spread them across items and stores), `--as <name>` after the item naming the block, so commands can say `--in <name>` (a name stands for one item, in the files a Mac reads): what it fills (a variable's name, or a file's path) then the field or attachment, short (`GitHub/token`); a plain `[secrets]` for references in full (`op://vault/item/field`); a name once a file. `--mode 644` for a file's. GitHub Actions secrets aren't kit's: they're a repository's, not the Mac's | `~/.secrets.zsh`'s exports, the files with their modes: never the stores, which may ask the person each time (1Password for a fingerprint each hour) | a sync: each value read through its reference's store driver, picked by the reference's scheme (`op://` is 1Password's), a store's values in one read where its driver does that, as a store may have the person approve each, each store waiting for its own sign-in (one signed out holds back its own secrets alone); should that fail, the values read in halves, down to each alone. 1Password's driver reads many in one run of op (`op inject`, the references on its input, its output kept from the log), each run in a session of its own, and one alone with `op read`; `~/.secrets.zsh` written whole with each value single-quoted (one that fails to read keeps its line), files written beside and renamed in; `kit secret sync` forces one. Removing takes a secret off the Mac; its value stays in its store unless `--delete-value` says otherwise |
 | `defaults` | `[macos settings]`: `defaults write`'s words (`com.apple.dock tilesize -int 60`; `-currentHost` first for this host's; `-dict-add` and an entry's XML; or a value as XML), named `domain:key[:entry]` | `defaults export` of each domain | `defaults write` (through sudo for a domain under `/Library`), then the app that reads it restarted or keyboard shortcuts reloaded; `defaults delete` |
 
 - **Matching:** a kind may match on part of a name: an App Store app on its id (so an app the
@@ -115,10 +115,10 @@ file having none, or the shared file's), so the kind's still looked after.
   it needs, or, with nothing declared, fine.
   Where a kind's command comes from isn't kit's to know: while kit applies (not `kit
   status`, not the nightly run), a kind whose command isn't on kit's PATH yet (npm's `npm`,
-  the secrets' `op`, MCP's `claude`; none for tmux's plugins, read from its config and
-  cloned with git) waits for it before its check, saying so, looking again as installs end,
-  till it's there or nothing still at work in the run could bring it, then stands deferred,
-  saying it isn't there yet. The config's waits order the rest (the secrets after the
+  each secrets store's, as 1Password's `op`, MCP's `claude`; none for tmux's plugins, read
+  from its config and cloned with git) waits for it before its check, saying so, looking
+  again as installs end, till it's there or nothing still at work in the run could bring it,
+  then stands deferred, saying it isn't there yet. The config's waits order the rest (the secrets after the
   sign-in, `--before secret`; npm after mise, `--before npm`). Two orders stay, being kit's
   own data: git's settings after the secrets they sign with, login items after the casks
   and App Store apps they open.
@@ -180,8 +180,9 @@ Arq's check waits till its cask is in, rather than reading "not installed" while
 waits its turn; one placed after or before what isn't a step fails its check, saying so). A
 Mac with no `[backups]` has no backup steps; the tools' steps run in kit's order (Time
 Machine, then Arq), whatever the files' order. `kit backup add <tool>` (`--after`, `--before`,
-`--shared`, `--note`) declares one, refusing one declared already or placed after what isn't a
-step, and `kit backup remove <tool>` (`--shared`) takes it out, each committed and pushed. Each tool is a driver behind one contract
+`--shared`, `--note`) declares one (with `--shared`, for every Mac, taking it out of each Mac's
+own file), refusing one declared already, in the shared file or the one it goes in, or placed
+after what isn't a step, and `kit backup remove <tool>` (`--shared`) takes it out, each committed and pushed. Each tool is a driver behind one contract
 (`internal/backup/tool`), a folder each (`internal/backup/timemachine`, `.../arq`), listed in
 `backup.Tools`, so adding one is its folder and a line there: a tool kit doesn't know is a
 config error naming those it has, and `time-machine` or `arq` in `[features]`, where they were
@@ -226,13 +227,22 @@ the terminal restarts, so kit couldn't watch for it.
 **Adding a secret:** `kit secret add <name>` takes its value typed (unshown), on standard
 input (`--stdin`, how an agent passes one, never on a command line), from a file (`--from`,
 kept as an attachment), or as an existing reference (`--ref`, nothing stored: its line goes in
-its item's section, short, when the file has one, else in the plain `[secrets]`, in full). A
-value is kept in the item of the file's secrets section (`--item op://vault/item` when it has
-none, which makes the section, or several), as `--field <section>/<field>`, by editing the item
-with its JSON on op's standard input; then read back and compared, declared, and synced, never
-shown. `--mode` as on the line. `kit secret remove <name>` takes it off the Mac, undeclares
-it, and keeps or deletes its value in 1Password (`--keep-value`, `--delete-value`; asked at a
-terminal); a value given in full, outside the items' sections, is left where it is.
+the file's block for its item, short, when the file has one, else in the plain `[secrets]`, in
+full). A new value goes where it's told, never by default: `--in <name>`, a block by the name
+its header gives it (`--as`), or `--item` and an item, in full; with neither it's refused,
+listing the blocks, as `kit secret places` does (each block's name, store, item, file and how
+many it holds). `--field` says where in the item, in its store's words (1Password's
+`<section>/<field>`). The line goes in the file's block for that item, which kit makes when
+there's none, going by the name `--in` gave. Everything's checked before the value's asked
+for: where it goes, the line as the config would read with it, the store answering, and
+nothing kept there already. The value's kept through its store's driver (1Password's edits the
+item with its JSON on op's standard input), then read back and compared, declared, and synced,
+never shown. `--mode` as on the line. `--shared` declares it in the shared file, in the block
+`--in` or `--item` names, and takes it out of each Mac's own file that had it, whatever block
+it was in, in the same edit; one the shared file has already is refused, before anything's
+stored. `kit secret remove <name>` takes it off the Mac, undeclares it, and keeps or deletes
+its value in its store (`--keep-value`, `--delete-value`; asked at a terminal); a value given
+in full, outside the items' blocks, is left where it is.
 
 **Steps by hand** go in a `[manual]` section, a line each: a name, what to do in quotes, then
 `--after` and `--before` (as on any line), `--group <name>` (the group it's in, one word or
@@ -406,9 +416,10 @@ kit feature on|off <name>... Switch features on or off for this Mac   [--shared]
 kit backup add|remove <tool> The backup tools this Mac uses, each checked   [--after] [--before] [--shared]
 kit file add|remove <path>...    Files linked into the home folder from kit-config
 kit path add|remove <dir>...     Directories on the PATH
-kit secret add <name>        Keep a secret in 1Password, declare it, sync it   [--stdin] [--from] [--ref] [--field] [--item] [--mode]
+kit secret add <name>        Keep a secret in its store, declare it, sync it   [--stdin] [--from] [--ref] [--in] [--item] [--field] [--mode] [--shared]
 kit secret remove <name>...  Take it off the Mac, undeclare it     [--keep-value] [--delete-value]
-kit secret sync              Read every secret from 1Password, and put each in place
+kit secret sync              Read every secret from its store, and put each in place
+kit secret places            The blocks secrets are declared in: name, store, item, file, count
 kit prefs capture|restore|history|pending|start-fresh   Apps' settings, saved to a private repository and restored
 kit check|hourly add <name> -- <command>, kit nightly add <name> -- <command>   Your own checks and jobs
 kit manual add <name> "<what to do>" [-- <command>]; kit manual done <name>...  Steps by hand   [--group]
@@ -785,7 +796,7 @@ built:
 | 3 | kit sets its own PATH, from the same list the shell uses | `cli.TestStatusRunsProgramsOnKitsOwnPath` |
 | 4 | Questions up front, then unattended: no step asks its own | `cli.TestApplyWithoutATerminalNeverPrompts`, `cli.TestApplyAtATerminalAsksForThePasswordUpFront` |
 | 5 | Full Disk Access for the terminal kit runs in, checked before anything that needs it | later |
-| 6 | 1Password signed in, with an unlocked session, before secrets | later |
+| 6 | Each secrets store signed in, with a session open, before its secrets | later |
 | 7 | GitHub over SSH only once the key exists; GitHub's host keys seeded | later |
 | 8 | A secret that fails to fetch keeps its previous value; a partial fetch never shrinks the file | later |
 | 9 | Settings restore and capture wait for a fully synced store | later |
