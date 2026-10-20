@@ -135,17 +135,24 @@ func checkLine(e config.Entry) error {
 	return err
 }
 
-// lineSays is what e's line says: where its value is, in full, and a
-// file's mode, however the line gives them.
-func lineSays(e config.Entry) (string, error) {
+// lineSays is what e's line says, in parts: where its value is, in full,
+// and a file's mode, however the line gives them.
+func lineSays(e config.Entry) ([]string, error) {
 	sec, err := parse(e)
-	return fmt.Sprintf("%s --mode %o", sec.Ref, sec.Mode), err
+	if err != nil || !sec.IsFile() {
+		return []string{sec.Ref}, err
+	}
+	return []string{sec.Ref, ModeOption(sec.Mode)}, nil
 }
 
-// Ref is where e's line says its store keeps its value, in full.
-func Ref(e config.Entry) (string, error) {
+// ModeOption is a file's mode as its line gives it, as in --mode 644.
+func ModeOption(mode os.FileMode) string { return fmt.Sprintf("--mode %o", mode) }
+
+// Where is where e's line says its store keeps its value, in full, and the
+// file's mode it says.
+func Where(e config.Entry) (ref string, mode os.FileMode, err error) {
 	sec, err := parse(e)
-	return sec.Ref, err
+	return sec.Ref, sec.Mode, err
 }
 
 // parse reads e's line as a secret's: its reference, then its options.

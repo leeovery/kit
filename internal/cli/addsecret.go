@@ -73,25 +73,27 @@ func (a *app) addSecret(ctx context.Context, r *run, names []string, opts addOpt
 	d, item := at.store, at.entry.Item
 	c := startChanges(r, []string{at.entry.Name})
 	c.step(ctx, at.entry.Name, func(ctx context.Context) check.Result {
-		short := at.short
+		kept := at.short
 		var err error
 		switch {
 		case so.ref != "":
 		case so.from != "":
-			short, err = k.Attach(ctx, d, item, short, so.from)
+			kept, err = k.Attach(ctx, d, item, at.short, so.from)
 		default:
-			short, err = k.Store(ctx, d, item, short, value)
+			kept, err = k.Store(ctx, d, item, at.short, value)
 		}
-		if err != nil {
+		switch {
+		case err != nil:
 			return check.Result{State: check.Failed, Reason: err.Error()}
+		case kept != at.short:
+			return check.Result{State: check.Failed, Reason: fmt.Sprintf("kept in %s, but as %s, not %s, where kit checked it could go: nothing declared", d.About().Name, d.Join(item, kept), d.Join(item, at.short))}
 		}
 		if so.ref == "" {
-			if err := k.ReadBack(ctx, d, d.Join(item, short), value); err != nil {
+			if err := k.ReadBack(ctx, d, d.Join(item, at.short), value); err != nil {
 				return check.Result{State: check.Failed, Reason: "stored, but reading it back failed: " + err.Error()}
 			}
 		}
 		e := at.entry
-		e.Value = secretLine(short, so.mode)
 		moved, err := c.declare(secretKind, at.scope, e)
 		if err != nil {
 			return check.Result{State: check.Failed, Reason: "kept in " + d.About().Name + ", but couldn't declare: " + err.Error()}
@@ -114,7 +116,7 @@ func (a *app) addSecret(ctx context.Context, r *run, names []string, opts addOpt
 		}
 		summary := "declared in " + at.scope + outOf(moved) + ", synced"
 		if so.ref == "" {
-			summary = "kept in " + d.About().Name + " (" + d.Join(item, short) + ") and read back; " + summary
+			summary = "kept in " + d.About().Name + " (" + d.Join(item, at.short) + ") and read back; " + summary
 		}
 		return check.Result{State: check.OK, Summary: summary}
 	})
@@ -157,6 +159,11 @@ func (a *app) secretTarget(ctx context.Context, r *run, k *secret.Secrets, name 
 	if err != nil {
 		return at, err
 	}
+	if so.ref != "" && item == "" && opts.shared {
+		if item, err = movedItem(r, name, so.ref); err != nil {
+			return at, err
+		}
+	}
 	if at.store, err = storeOf(item, so.ref); err != nil {
 		return at, err
 	}
@@ -165,7 +172,7 @@ func (a *app) secretTarget(ctx context.Context, r *run, k *secret.Secrets, name 
 	}
 	at.entry = config.Entry{Name: name, Value: secretLine(at.short, so.mode), Note: opts.note, Item: item, As: as}
 	if err := r.checkDeclare(secretKind, at.scope, at.entry); err != nil {
-		return at, sharingHint(err, at)
+		return at, sharingHint(err)
 	}
 	if err := k.Ready(ctx, at.store); err != nil {
 		return at, err
@@ -177,22 +184,22 @@ func (a *app) secretTarget(ctx context.Context, r *run, k *secret.Secrets, name 
 }
 
 // sharingHint is err, a declare's refusal, saying, when it's of a Mac's
-// line keeping the secret elsewhere, how to share the value that line has:
-// --ref and where it is.
-func sharingHint(err error, at secretTarget) error {
+// line saying otherwise where the secret is, or its mode, how to share the
+// value that line has: --ref and where it is, and the mode it gives.
+func sharingHint(err error) error {
 	differs, ok := errors.AsType[config.LineDiffers](err)
 	if !ok {
 		return err
 	}
-	mine := at.short
-	if at.entry.Item != "" {
-		mine = at.store.Join(at.entry.Item, at.short)
-	}
-	theirs, rerr := secret.Ref(differs.Line)
-	if rerr != nil || theirs == mine {
+	ref, mode, rerr := secret.Where(differs.Line)
+	if rerr != nil {
 		return err
 	}
-	return fmt.Errorf("%w; --ref %s shares the value it has", err, config.Quote(theirs))
+	hint := "--ref " + config.Quote(ref)
+	if mode != 0o600 {
+		hint += " " + secret.ModeOption(mode)
+	}
+	return fmt.Errorf("%w; %s shares the value it has", err, hint)
 }
 
 // secretShort is where in item, or in full, so says a secret's value is, or
@@ -328,6 +335,28 @@ func secretPlace(so secretOptions, places []config.Place, scope string) (item, a
 		return places[i].Item, so.in, nil
 	}
 	return "", "", fmt.Errorf("say where it goes: --in <a block's name>, or --item <an item> (%s), its block made when the file has none; %s", secret.Items(), blocksSaid(places))
+}
+
+// movedItem is the item of the block a Mac's line declaring name is in,
+// when ref is in it: where, the shared file having no block for it, a
+// shared declare by ref puts the line, so the block it's moved from keeps
+// going by its name. None when no Mac's is.
+func movedItem(r *run, name, ref string) (string, error) {
+	where, err := r.cfg.Where(secretKind, name)
+	if err != nil {
+		return "", err
+	}
+	for _, e := range where {
+		if e.Scope == config.Shared || e.Item == "" {
+			continue
+		}
+		if d, err := secret.ItemStore(e.Item); err == nil {
+			if _, in := d.Short(e.Item, ref); in && d.IsRef(ref) {
+				return e.Item, nil
+			}
+		}
+	}
+	return "", nil
 }
 
 // blocksSaid says the blocks for items of places, the blocks a new value

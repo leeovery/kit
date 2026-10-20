@@ -238,11 +238,14 @@ for: where it goes, the line as the config would read with it, the store answeri
 nothing kept there already. The value's kept through its store's driver (1Password's edits the
 item with its JSON on op's standard input), then read back and compared, declared, and synced,
 never shown. `--mode` as on the line. `--shared` declares it in the shared file, in the block
-`--in` or `--item` names, or, with `--ref`, as above, and takes it out of each Mac's own file
-that had it, whatever block it was in, in the same edit, as long as the lines say the same
-(the rule for moving a line, under `kit <kind> add`); one the shared file has already is refused, before anything's stored. `kit secret remove <name>` takes it off the Mac, undeclares it, and keeps or deletes
-its value in its store (`--keep-value`, `--delete-value`; asked at a terminal); a value given
-in full, outside the items' blocks, is left where it is.
+`--in` or `--item` names, or, with `--ref`, as above (the shared file having no block for its
+item, in one made for the item of the Mac's block holding it, going by that block's name), and
+takes it out of each Mac's own file, whatever block it was in, by the rule for moving a line
+(below): a Mac's line keeping it elsewhere, or of another mode, is refused before
+anything's stored, saying the `--ref` and `--mode` that share the value it has; one the shared
+file has already is refused. `kit secret remove <name>` takes it off the Mac, undeclares it, and
+keeps or deletes its value in its store (`--keep-value`, `--delete-value`; asked at a terminal);
+a value given in full, outside the items' blocks, is left where it is.
 
 **Steps by hand** go in a `[manual]` section, a line each: a name, what to do in quotes, then
 `--after` and `--before` (as on any line), `--group <name>` (the group it's in, one word or
@@ -469,19 +472,32 @@ at a time: a program's sudo waits for kit's own question, the run's time limits 
 
 `kit <kind> add` installs each name, unless it's installed, and declares it in this Mac's file, in
 its sorted place, or for every Mac with `--shared` (taking it out of each Mac's own file); it
-asks nothing about where. Every command declaring for every Mac moves a Mac's line so, losing
-nothing it says: the shared line must say the same, by meaning (`--after` and `--before` in any
-order; a secret's full reference and mode), else it's refused before anything's stored,
-installed or asked for, naming the line and what it says, to give the same or take that line
-out first (a secret kept elsewhere: `--ref` and where it is shares the value it has). The
-shared line keeps the moved lines' note when the command gives none, a note given winning, and
-the comments above them, its notes, above it, a note given staying after the line; moved lines
-whose notes or comments differ are refused, naming each. `--temp` installs without declaring: quiet for 7 days, then reconcile
+asks nothing about where. `--temp` installs without declaring: quiet for 7 days, then reconcile
 asks.
 `kit <kind> remove` uninstalls and takes each name out of this Mac's file; one declared for every Mac
 needs `--shared`. Both handle each name on its own (one failing leaves the others), then commit
 the config's changed files, with a message saying what, for which Mac and why, and push to
 main, pulling with rebase first. A push that fails leaves the commit, and says so.
+
+**Moving a line.** Every command declaring for every Mac takes the name out of each Mac's own
+file in the same edit, losing nothing the lines it moves say, all judged before anything's
+stored, installed or asked for:
+- What the command can say must be the same, by meaning: the line's words, `--after`,
+  `--before` and `--secret` in any order, a secret's full reference (short in its block or in
+  full) and its mode. Otherwise it's refused, naming the line and what differs, to give the same
+  or take that line out first; for a secret, with the `--ref` and `--mode` sharing its value.
+- What no command can say is carried, the same in every line moved: its section's hold
+  (`[homebrew formulae --after cask:x]`), and a step by hand's steps, `--after` and `--before`.
+- Their note, unless the command gives one, and the comments above them, compared by their
+  words (one set apart from the line by a blank line is the line's, as kit's sorting has it),
+  are carried, one between them; a note given stays after the line, the comments above it. A
+  note kit makes up, as a login item's app name, is the note only when nothing else gives one.
+- So is the name of an item's block (`--as`), for a block the shared file hasn't.
+- A step of your own's folder moves with its line: the Macs' folders, all the same, go to the
+  shared one, or are left for one there already that's the same.
+
+Lines moved that differ in what's carried are refused, naming each. A name in the shared file
+already is refused as before.
 
 `kit reconcile` settles drift. At a terminal it goes through each item that needs attention
 (`--all`: quiet ones too; name kinds, as in `kit reconcile brew`, for theirs alone), asking

@@ -260,3 +260,29 @@ func TestAddAtATerminalAsksForThePasswordFirst(t *testing.T) {
 		t.Errorf("kit cask add zoom printed\n%s\nwant zoom's row adding as it runs", ansi.Strip(out))
 	}
 }
+
+// A shared add the move would refuse is refused before anything's installed
+// or asked for: the files as they were, Homebrew never run to install.
+func TestAddSharedRefusedInstallsNothing(t *testing.T) {
+	w := laptopWorld(t)
+	w.writeSection(t, "laptop", "homebrew formulae", "go\nhello   # a test\n")
+	w.writeSection(t, "studio", "homebrew formulae", "hello   # for work\n")
+	before := map[string]string{}
+	for _, scope := range []string{"shared", "laptop", "studio"} {
+		before[scope] = w.read(t, filepath.Join(".config", "kit", scope, "declarations"))
+	}
+	_, errOut, code := w.run(t, "brew", "add", "hello", "--shared")
+	if code != 2 || !strings.Contains(ansi.Strip(errOut), `hello: the lines it moves have different notes, laptop/declarations:`) {
+		t.Errorf("kit brew add --shared printed %q, exit %d; want it refused", errOut, code)
+	}
+	for _, call := range w.fake.Calls() {
+		if strings.HasPrefix(call, "brew install") || strings.HasPrefix(call, "brew update") || strings.HasPrefix(call, "sudo") {
+			t.Errorf("ran %s: want nothing installed or asked for", call)
+		}
+	}
+	for scope, was := range before {
+		if got := w.read(t, filepath.Join(".config", "kit", scope, "declarations")); got != was {
+			t.Errorf("%s's declarations = %q, want them untouched", scope, got)
+		}
+	}
+}

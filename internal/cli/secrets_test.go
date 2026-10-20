@@ -354,13 +354,13 @@ func TestAddASecretSharedRefusesWhatAMacSaysOtherwise(t *testing.T) {
 		args                     []string
 	}{
 		{"a file of another mode", "secrets op://vault/Item --as mac-secrets", "~/.npmrc Section/npmrc --mode 644\n",
-			"laptop/declarations:5 has ~/.npmrc Section/npmrc --mode 644 in [secrets op://vault/Item --as mac-secrets]: give the same, or take that line out first",
+			"laptop/declarations:5 has ~/.npmrc with --mode 644, where this gives --mode 600: give the same, or take that line out first; --ref op://vault/Item/Section/npmrc --mode 644 shares the value it has",
 			[]string{"~/.npmrc", "--ref", "op://vault/Item/Section/npmrc"}},
 		{"a value at another field", "secrets op://vault/Item --as mac-secrets", "FOO Section/foo\n",
-			"has FOO Section/foo in [secrets op://vault/Item --as mac-secrets]: give the same, or take that line out first; --ref op://vault/Item/Section/foo shares the value it has",
+			"laptop/declarations:5 has FOO with op://vault/Item/Section/foo, where this gives op://vault/Item/Section/other: give the same, or take that line out first; --ref op://vault/Item/Section/foo shares the value it has",
 			[]string{"FOO", "--item", "op://vault/Item", "--field", "Section/other", "--stdin"}},
 		{"a block of the same name for another item", "", "",
-			"studio/declarations:5 has FOO Section/foo in [secrets op://vault/Other --as mac-secrets]: give the same, or take that line out first; --ref op://vault/Other/Section/foo shares the value it has",
+			"studio/declarations:5 has FOO with op://vault/Other/Section/foo, where this gives op://vault/Item/Section/foo: give the same, or take that line out first; --ref op://vault/Other/Section/foo shares the value it has",
 			[]string{"FOO", "--in", "mac-secrets", "--field", "Section/foo", "--stdin"}},
 	} {
 		w := laptopWorld(t)
@@ -569,5 +569,27 @@ func TestSecretPlacesJSON(t *testing.T) {
 	}
 	if plain := doc.Places[1]; plain.Name != "" || plain.Store != "" || plain.Item != "" || plain.Scope != "laptop" || plain.Secrets != 1 {
 		t.Errorf("places[1] = %+v, want the plain block, no store or item", plain)
+	}
+}
+
+// Declared for every Mac by a reference in a Mac's block, with no block for
+// its item in the shared file yet, a secret goes in a block made for that
+// item, going by the Mac block's name, so the name isn't lost as the Mac's
+// block empties.
+func TestAddASecretSharedKeepsItsBlocksName(t *testing.T) {
+	w := laptopWorld(t)
+	w.writeSection(t, "laptop", "secrets op://vault/Item --as mac-secrets", "FOO Section/foo\n")
+	f := w.fake
+	f.On("op", "whoami")
+	optest.Holds(f, map[string]string{"op://vault/Item/Section/foo": "foo"})
+	w.expectSync([]string{"laptop/declarations", "shared/declarations"}, "kit secret add FOO (laptop)")
+	if out, _, code := w.run(t, "secret", "add", "FOO", "--shared", "--ref", "op://vault/Item/Section/foo"); code != 0 {
+		t.Fatalf("kit secret add --shared printed\n%s exit %d", out, code)
+	}
+	if got := w.readSection(t, "shared", "secrets op://vault/Item --as mac-secrets"); got != "FOO Section/foo\n" {
+		t.Errorf("shared's [secrets op://vault/Item --as mac-secrets] = %q", got)
+	}
+	if got := w.read(t, filepath.Join(".config", "kit", "laptop", "declarations")); strings.Contains(got, "FOO") || strings.Contains(got, "mac-secrets") {
+		t.Errorf("laptop's declarations = %q, want its block gone", got)
 	}
 }

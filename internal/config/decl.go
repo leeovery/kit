@@ -133,10 +133,11 @@ type Section struct {
 	// a line it refuses (Config.Declare).
 	Line func(Entry) error
 	// Says, when set, is what one of its lines says, as the kind reads it,
-	// its note aside: two lines saying the same, however written, are
-	// alike, as a shared declare needs of the lines it moves. Unset, it's
-	// the line's words, --after, --before and --secret in any order.
-	Says func(Entry) (string, error)
+	// its note aside, in parts, which a shared declare compares, in any
+	// order, with those of the lines it moves, naming those that differ.
+	// Unset, it's the line's words, --after, --before and --secret a part
+	// each, in any order.
+	Says func(Entry) ([]string, error)
 	// Held is whether it's a list whose sections can hold their lines back,
 	// options after the header saying what for: --after a step, or one of a
 	// step's things; --secret a secret they need, as in [homebrew formulae
@@ -167,7 +168,10 @@ type sectionDef struct {
 	// line is the kind's own check of a line (Section.Line).
 	line func(Entry) error
 	// lineSays is the kind's own reading of what a line says (Section.Says).
-	lineSays func(Entry) (string, error)
+	lineSays func(Entry) ([]string, error)
+	// carries are the options of its lines that no command gives, so a
+	// shared declare carries them from the lines it moves (sectionDef.carry).
+	carries []string
 	// holds are the options the kind's sections take after the header,
 	// holding their lines back, what for (its hold): --after a step, or one
 	// of a step's things; --secret a secret they need, as in [homebrew
@@ -198,7 +202,7 @@ var (
 		{header: "prefs apps", kind: PrefsAppsKind, form: Settings},
 		{header: "prefs machine-bound", kind: PrefsMachineBoundKind, form: Paths},
 		{header: "steps", kind: StepsKind, form: Commands},
-		{header: "manual", kind: ManualKind, form: Commands, steps: true},
+		{header: "manual", kind: ManualKind, form: Commands, steps: true, carries: []string{afterOption, beforeOption}},
 		{header: "checks", kind: ChecksKind, form: Commands},
 		{header: "hourly", kind: HourlyKind, form: Commands},
 		{header: "nightly", kind: NightlyKind, form: Commands},
@@ -289,6 +293,10 @@ type Entry struct {
 	// Off is whether it's declared, but not to be installed: never installed
 	// by kit, and left alone when it is. Kinds whose lines say so set it.
 	Off bool `json:",omitempty"`
+	// DefaultNote is a note kit makes up for a line it declares, as an
+	// app's name: its note only when neither Note nor a line a shared
+	// declare moves gives one. Never read from a file.
+	DefaultNote string `json:"-"`
 }
 
 // Path is the file declaring the entry: its scope's declarations file, as in
@@ -314,9 +322,10 @@ func (e Entry) After() []string { return holdOption(e.Hold, afterOption) }
 // says, each by what it fills.
 func (e Entry) Secrets() []string { return holdOption(e.Hold, secretOption) }
 
-// The options of a section holding its lines back.
+// The options of a section holding its lines back, and --before, a line's.
 const (
 	afterOption  = "--after"
+	beforeOption = "--before"
 	secretOption = "--secret"
 )
 

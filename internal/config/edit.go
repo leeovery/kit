@@ -85,10 +85,16 @@ func (b body) notesStart(i int) int {
 }
 
 // notes are entry i's notes, the comments directly above it, as one
-// paragraph: each without its # and the space after that.
+// paragraph (noteWords).
 func (b body) notes(i int) string {
+	return noteWords(b.lines[b.notesStart(i):i])
+}
+
+// noteWords are comments as one paragraph: each without its # and the
+// space after that.
+func noteWords(comments []string) string {
 	var words []string
-	for _, line := range b.lines[b.notesStart(i):i] {
+	for _, line := range comments {
 		line = strings.TrimPrefix(strings.TrimPrefix(strings.TrimSpace(line), "#"), " ")
 		if line != "" {
 			words = append(words, line)
@@ -146,11 +152,11 @@ func (b *body) remove(from, to int) {
 }
 
 // sortedLines are a sorted section's lines as kit keeps them, with added,
-// entry lines, each with the comments above it, among them: the comments opening the section, before a blank
-// line; each entry in order, the comments above it with it; any comments
-// after the last; then the blank lines ending the section, as they were. A
-// comment apart from any entry is a note on the entry after it, and the
-// blank lines between entries go.
+// entry lines, each with the comments above it, among them: the comments
+// opening the section, before a blank line; each entry in order, the
+// comments above it with it; any comments after the last; then the blank
+// lines ending the section, as they were. A comment apart from any entry is
+// a note on the entry after it, and the blank lines between entries go.
 func sortedLines(f Form, lines []string, added ...string) []string {
 	end := len(lines)
 	for end > 0 && strings.TrimSpace(lines[end-1]) == "" {
@@ -325,10 +331,10 @@ func (c *Config) Declare(kind, scope string, e Entry) error {
 // DeclareShared declares e in the shared declarations, as Declare does,
 // taking it out of the files of each of the Macs from, as Undeclare does:
 // one edit, judged as a whole before any of it's written. Nothing a line it
-// moves says is lost: the shared line must say the same (LineDiffers); it
-// takes their note when given none, and the comments above them, refused
-// when theirs differ. It returns the
-// scopes whose files it wrote, those written before one failed too.
+// moves says is lost: what its command can say must be the same
+// (LineDiffers), and what none can, its notes and comments are carried
+// (sectionDef.carry). It returns the scopes whose files it wrote, those
+// written before one failed too.
 func (c *Config) DeclareShared(kind string, e Entry, from []string) ([]string, error) {
 	d, files, err := c.declaring(kind, Shared, e, from...)
 	if err != nil {
@@ -383,29 +389,7 @@ func (c *Config) declaring(kind, scope string, e Entry, from ...string) (section
 	if e.Hold != "" && len(d.holds) == 0 {
 		return d, nil, fmt.Errorf("[%s] holds no lines back: only a list's sections, and [features], do", d.header)
 	}
-	hold, err := readHold(d, e.Hold)
-	if err != nil {
-		return d, nil, err
-	}
-	moved, err := c.movedLines(kind, e.Name, from)
-	if err != nil {
-		return d, nil, err
-	}
-	if e.Note == "" {
-		if e.Note, err = carriedNote(moved); err != nil {
-			return d, nil, err
-		}
-	}
-	notes, err := carriedNotes(moved)
-	if err != nil {
-		return d, nil, err
-	}
-	line, err := entryText(d, name, e)
-	if err != nil {
-		return d, nil, err
-	}
-	steps, err := stepLines(d, e.Steps)
-	if err != nil {
+	if _, err := readHold(d, e.Hold); err != nil {
 		return d, nil, err
 	}
 	if s, _ := f.holding(d, e.Name); s != nil {
@@ -419,6 +403,26 @@ func (c *Config) declaring(kind, scope string, e Entry, from ...string) (section
 		if s, _ := shared.holding(d, e.Name); s != nil {
 			return d, nil, fmt.Errorf("%s is in the shared declarations already (%s), for every Mac", e.Name, DeclFile(Shared))
 		}
+	}
+	moved, err := c.movedLines(kind, e.Name, from)
+	if err != nil {
+		return d, nil, err
+	}
+	e, notes, err := d.carry(e, moved)
+	if err != nil {
+		return d, nil, err
+	}
+	hold, err := readHold(d, e.Hold)
+	if err != nil {
+		return d, nil, err
+	}
+	line, err := entryText(d, name, e)
+	if err != nil {
+		return d, nil, err
+	}
+	steps, err := stepLines(d, e.Steps)
+	if err != nil {
+		return d, nil, err
 	}
 	s := f.find(d, arg, hold)
 	if s == nil {
@@ -515,17 +519,8 @@ func (c *Config) undeclaring(kind, scope, name string) (sectionDef, *declFile, e
 	if err != nil {
 		return d, nil, err
 	}
-	s, line := f.holding(d, name)
-	var b body
-	i := -1
-	if s != nil {
-		if d.sorted {
-			s.body = sortedLines(d.form, s.body)
-		}
-		b = splitBody(d.form, s.body)
-		i = slices.Index(b.names, line)
-	}
-	if i < 0 {
+	s, b, i := f.lineBlock(d, name)
+	if s == nil {
 		return d, nil, fmt.Errorf("%s isn't in %s", name, DeclFile(scope))
 	}
 	b.remove(b.notesStart(i), b.end(i))
@@ -538,6 +533,28 @@ func (c *Config) undeclaring(kind, scope, name string) (sectionDef, *declFile, e
 		f.drop(s)
 	}
 	return d, f, nil
+}
+
+// lineBlock is the block removing the line declaring name in f's sections
+// of d takes: its section, sorted first when kit keeps it sorted, so a
+// comment standing apart is the next line's (sortedLines); the section's
+// lines; and the line's index among them, its block running from the
+// comments above it (notesStart) to the end of the steps under it (end).
+// Nil when f doesn't declare it.
+func (f *declFile) lineBlock(d sectionDef, name string) (*section, body, int) {
+	s, line := f.holding(d, name)
+	if s == nil {
+		return nil, body{}, -1
+	}
+	if d.sorted {
+		s.body = sortedLines(d.form, s.body)
+	}
+	b := splitBody(d.form, s.body)
+	i := slices.Index(b.names, line)
+	if i < 0 {
+		return nil, body{}, -1
+	}
+	return s, b, i
 }
 
 // Replace rewrites the line declaring e.Name in kind's sections of scope's

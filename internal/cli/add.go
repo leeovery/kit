@@ -40,6 +40,11 @@ func (a *app) add(ctx context.Context, r *run, kindName string, names []string, 
 	if err != nil {
 		return err
 	}
+	for _, name := range names {
+		if err := checkAdding(ctx, r, k, scope, name, opts, !slices.Contains(missing, name)); err != nil {
+			return fmt.Errorf("%s: %w", name, err)
+		}
+	}
 	ctx, held, stop := a.holdAdmin(ctx, r, map[string][]string{kindName: missing})
 	defer stop()
 	opts.waiting = waitingForAdmin(ctx, r, kindName, missing, held)
@@ -112,12 +117,16 @@ func declaredFor(r *run, kindName, name string, shared bool) ([]config.Entry, er
 }
 
 // addOne installs name, unless it's installed, and declares it in scope's
-// declarations, unless it's declared already, or temporary.
+// declarations, unless it's declared already, or temporary: a declare
+// that would be refused is refused before anything's installed.
 func addOne(ctx context.Context, r *run, c *changes, k kind.Kind, scope, name string, opts addOptions) check.Result {
 	kindName := k.Name()
 	isIn, err := installed(ctx, k, name)
 	if err != nil {
 		return check.Result{State: check.Failed, Reason: err.Error()}
+	}
+	if err := checkAdding(ctx, r, k, scope, name, opts, isIn); err != nil {
+		return check.Result{State: check.Failed, Reason: "couldn't declare: " + err.Error()}
 	}
 	verb := "already installed"
 	if !isIn {
@@ -158,12 +167,6 @@ func addOne(ctx context.Context, r *run, c *changes, k kind.Kind, scope, name st
 		}
 		return check.Result{State: check.OK, Summary: summary}
 	}
-	note := opts.note
-	if d, ok := k.(kind.Describer); ok {
-		if what := d.Describe(ctx, name); what != "" {
-			note = strings.TrimSuffix(what+": "+note, ": ")
-		}
-	}
 	if d, ok := k.(kind.Declarer); ok {
 		file, err := d.Declare(name)
 		if err != nil {
@@ -172,17 +175,57 @@ func addOne(ctx context.Context, r *run, c *changes, k kind.Kind, scope, name st
 		r.changedFile(c, file)
 		return check.Result{State: check.OK, Summary: verb + "; declared in " + r.files.Tilde(file)}
 	}
-	e := config.Entry{Name: name, Note: note}
-	if v, ok := k.(kind.Valued); ok {
-		if e.Value, err = v.Value(ctx, name); err != nil {
-			return check.Result{State: check.Failed, Reason: verb + ", but couldn't declare: " + err.Error()}
-		}
+	e, err := addedLine(ctx, k, name, opts)
+	if err != nil {
+		return check.Result{State: check.Failed, Reason: verb + ", but couldn't declare: " + err.Error()}
 	}
 	moved, err := c.declare(kindName, scope, e)
 	if err != nil {
 		return check.Result{State: check.Failed, Reason: verb + ", but couldn't declare: " + err.Error()}
 	}
 	return check.Result{State: check.OK, Summary: fmt.Sprintf("%s; declared in %s%s", verb, scope, outOf(moved))}
+}
+
+// checkAdding says why declaring name, as adding it would, would be refused:
+// nil when it wouldn't, or when adding declares nothing (declared already,
+// temporary, or in a file of the kind's own), or when its line's value
+// isn't read yet, as it's read from it installed, or doesn't read, which
+// declaring says.
+func checkAdding(ctx context.Context, r *run, k kind.Kind, scope, name string, opts addOptions, isIn bool) error {
+	_, declarer := k.(kind.Declarer)
+	_, valued := k.(kind.Valued)
+	if opts.temp || declarer || valued && !isIn {
+		return nil
+	}
+	mine, err := declaredFor(r, k.Name(), name, opts.shared)
+	if err != nil || len(mine) > 0 {
+		return err
+	}
+	if e, err := addedLine(ctx, k, name, opts); err == nil {
+		return r.checkDeclare(k.Name(), scope, e)
+	}
+	return nil
+}
+
+// addedLine is the line adding name declares: its value, for a kind whose
+// lines have one, as it's installed; the note given, after what the kind
+// says it is, or that alone as the note kit makes up (DefaultNote).
+func addedLine(ctx context.Context, k kind.Kind, name string, opts addOptions) (config.Entry, error) {
+	e := config.Entry{Name: name, Note: opts.note}
+	if d, ok := k.(kind.Describer); ok {
+		if what := d.Describe(ctx, name); what != "" && opts.note != "" {
+			e.Note = what + ": " + opts.note
+		} else {
+			e.DefaultNote = what
+		}
+	}
+	if v, ok := k.(kind.Valued); ok {
+		var err error
+		if e.Value, err = v.Value(ctx, name); err != nil {
+			return e, err
+		}
+	}
+	return e, nil
 }
 
 // notInstalled are which of names k doesn't find installed.

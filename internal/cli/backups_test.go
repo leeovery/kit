@@ -194,7 +194,7 @@ func TestBackupAddAndRemove(t *testing.T) {
 	for _, scope := range []string{"shared", "laptop", "studio"} {
 		before[scope] = w.readSection(t, scope, "backups")
 	}
-	if out, _, code := w.run(t, "backup", "add", "arq", "--shared"); code != 1 || !strings.Contains(out, "arq failed laptop/declarations:") || !strings.Contains(out, "has arq --after cask:arq --before config: give the same, or take that line out first") {
+	if out, _, code := w.run(t, "backup", "add", "arq", "--shared"); code != 1 || !strings.Contains(out, "arq failed laptop/declarations:") || !strings.Contains(out, "has arq with --after cask:arq and --before config, where this doesn't: give the same, or take that line out first") {
 		t.Errorf("kit backup add --shared, dropping the Macs' options, printed\n%s exit %d", out, code)
 	}
 	for scope, was := range before {

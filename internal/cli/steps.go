@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/fs"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -521,40 +519,45 @@ func (a *app) addStep(ctx context.Context, r *run, name, does string, opts stepO
 	entry := config.Entry{Name: name, Value: strings.Join(words, " "), Note: opts.note, Scope: scope}
 	c := startChanges(r, []string{name})
 	c.step(ctx, name, func(context.Context) check.Result {
-		fail := func(err error) check.Result { return check.Result{State: check.Failed, Reason: err.Error()} }
 		s, err := steps.ParseScript(r.cfg.Dir, entry)
 		if err != nil {
-			return fail(err)
+			return failed(err)
+		}
+		var from []string
+		if opts.shared {
+			if from, err = r.macsDeclaring(config.StepsKind, name); err != nil {
+				return failed(err)
+			}
 		}
 		names := make(map[string]bool)
 		for _, step := range r.pipeline.Steps() {
 			names[step.Name] = true
 		}
-		if names[name] {
-			return fail(fmt.Errorf("a step called %s is there already", name))
+		if names[name] && !slices.Contains(from, r.machine) {
+			return failed(fmt.Errorf("a step called %s is there already", name))
 		}
 		if _, err := r.placeScript(&s, names); err != nil {
-			return fail(err)
+			return failed(err)
 		}
 		if _, _, err := r.needing(s.Secrets); err != nil {
-			return fail(err)
+			return failed(err)
 		}
-		if _, err := os.Stat(s.Dir); !errors.Is(err, fs.ErrNotExist) {
-			return fail(fmt.Errorf("%s is there already: remove it, or name the step otherwise", s.Folder))
+		folders, err := r.planStepFolder(s, from)
+		if err != nil {
+			return failed(err)
+		}
+		if err := r.checkDeclare(config.StepsKind, scope, entry); err != nil {
+			return failed(err)
 		}
 		moved, err := c.declare(config.StepsKind, scope, entry)
 		if err != nil {
-			return fail(err)
+			return failed(err)
 		}
-		if err := os.MkdirAll(s.Dir, 0o755); err != nil {
-			return fail(err)
+		said, err := r.placeStepFolder(c, s, does, folders)
+		if err != nil {
+			return failed(err)
 		}
-		script := filepath.Join(s.Dir, steps.ScriptName)
-		if err := os.WriteFile(script, []byte(steps.Template(name, does)), 0o755); err != nil {
-			return fail(err)
-		}
-		c.changed(s.Folder)
-		return check.Result{State: check.OK, Summary: "declared in " + scope + outOf(moved) + "; its script, " + s.Folder + "/" + steps.ScriptName + ", is a template: write its check and apply"}
+		return check.Result{State: check.OK, Summary: "declared in " + scope + outOf(moved) + "; " + said}
 	})
 	c.sync(ctx, commitMessage("add", stepCommand, []string{name}, r.machine, opts.note))
 	return c.finish()

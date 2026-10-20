@@ -140,3 +140,67 @@ func TestAddAndRemoveAStep(t *testing.T) {
 		t.Errorf("its folder is still there: %v", err)
 	}
 }
+
+// Added for every Mac, a step the Macs declare moves with its folder, in
+// one edit and commit: theirs, the same, goes to the shared one, and none is
+// left behind. Their folders differing, or a shared one there otherwise,
+// it's refused, nothing changed.
+func TestAddAStepSharedMovesItsFolder(t *testing.T) {
+	line := `tool "Installs the tool" --after brew` + "\n"
+	setUp := func(t *testing.T, studio, shared string) *world {
+		w := laptopWorld(t)
+		w.writeSection(t, "laptop", "steps", line)
+		w.writeSection(t, "studio", "steps", line)
+		w.stepScript(t, "laptop", "tool")
+		w.write(t, filepath.Join(".config", "kit", "studio", "steps", "tool", "run"), studio)
+		if err := os.Chmod(filepath.Join(w.home, ".config", "kit", "studio", "steps", "tool", "run"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if shared != "" {
+			w.write(t, filepath.Join(".config", "kit", "shared", "steps", "tool", "run"), shared)
+		}
+		return w
+	}
+	w := setUp(t, "#!/bin/bash\n", "")
+	w.expectSync([]string{"laptop/declarations", "laptop/steps/tool", "shared/declarations", "shared/steps/tool", "studio/declarations", "studio/steps/tool"}, "kit step add tool (laptop)")
+	out, errOut, code := w.run(t, "step", "add", "tool", "Installs the tool", "--after", "brew", "--shared")
+	if code != 0 || !strings.Contains(out, "tool ok declared in shared, out of laptop and studio; its folder moved from laptop/steps/tool and studio/steps/tool") {
+		t.Fatalf("kit step add --shared printed\n%s%s exit %d", out, errOut, code)
+	}
+	if got := w.readSection(t, "shared", "steps"); got != line {
+		t.Errorf("shared [steps] = %q", got)
+	}
+	if got := w.read(t, filepath.Join(".config", "kit", "shared", "steps", "tool", "run")); got != "#!/bin/bash\n" {
+		t.Errorf("shared/steps/tool/run = %q, want the Macs' script", got)
+	}
+	for _, mac := range []string{"laptop", "studio"} {
+		if _, err := os.Stat(filepath.Join(w.home, ".config", "kit", mac, "steps", "tool")); !os.IsNotExist(err) {
+			t.Errorf("%s/steps/tool is still there: %v", mac, err)
+		}
+		if got := w.readSection(t, mac, "steps"); got != "" {
+			t.Errorf("%s's [steps] = %q, want tool out of it", mac, got)
+		}
+	}
+
+	for _, c := range []struct {
+		name, studio, shared, want string
+	}{
+		{"the Macs' folders differ", "#!/bin/bash\necho studio\n", "", "tool failed laptop/steps/tool and studio/steps/tool differ: make them the same, or take one out first"},
+		{"a shared folder otherwise", "#!/bin/bash\n", "#!/bin/bash\necho shared\n", "tool failed laptop/steps/tool and shared/steps/tool differ: make them the same, or take one out first"},
+	} {
+		w := setUp(t, c.studio, c.shared)
+		before := map[string]string{}
+		for _, path := range []string{"shared/declarations", "laptop/declarations", "studio/declarations", "laptop/steps/tool/run", "studio/steps/tool/run"} {
+			before[path] = w.read(t, filepath.Join(".config", "kit", path))
+		}
+		out, _, code := w.run(t, "step", "add", "tool", "Installs the tool", "--after", "brew", "--shared")
+		if code != 1 || !strings.Contains(out, c.want) {
+			t.Errorf("%s: kit step add --shared printed\n%s exit %d; want %q", c.name, out, code, c.want)
+		}
+		for path, was := range before {
+			if got := w.read(t, filepath.Join(".config", "kit", path)); got != was {
+				t.Errorf("%s: %s = %q, want it untouched", c.name, path, got)
+			}
+		}
+	}
+}

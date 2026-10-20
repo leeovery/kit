@@ -65,12 +65,15 @@ func TestSharedTakesTheNameOutOfTheMacs(t *testing.T) {
 	}
 
 	w.fake.On("dig", "example.com")
-	if out, _, code := w.run(t, "check", "add", "dns", "--shared", "--", "dig", "example.org"); code != 1 || !strings.Contains(out, "studio/declarations:5 has dns -- dig example.com: give the same, or take that line out first") {
+	if out, _, code := w.run(t, "check", "add", "dns", "--shared", "--", "dig", "example.org"); code != 1 || !strings.Contains(out, "studio/declarations:5 has dns with -- dig example.com, where this gives -- dig example.org: give the same, or take that line out first") {
 		t.Errorf("kit check add --shared, another command than studio's, printed\n%s exit %d", out, code)
 	}
 	w.expectSync([]string{"shared/declarations", "studio/declarations"}, "kit check add dns (laptop)")
 	if out, _, code := w.run(t, "check", "add", "dns", "--shared", "--", "dig", "example.com"); code != 0 || !strings.Contains(out, "dns ok declared in shared, out of studio") {
 		t.Errorf("kit check add --shared printed\n%s exit %d", out, code)
+	}
+	if got := w.readSection(t, "studio", "checks"); got != "" {
+		t.Errorf("studio's [checks] = %q, want dns out of it", got)
 	}
 
 	w.expectSync([]string{"laptop/declarations", "shared/declarations"}, "kit feature on remote-login (laptop)")
