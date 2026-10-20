@@ -512,7 +512,7 @@ func TestDeclareSharedMovesItOutOfTheMacs(t *testing.T) {
 		"laptop/declarations": "[homebrew formulae]\ngo\nripgrep\n",
 		"studio/declarations": "[homebrew formulae]\ngo\n",
 	})
-	written, err := cfg.DeclareShared("brew", config.Entry{Name: "go"}, []string{"laptop", "studio"})
+	written, _, err := cfg.DeclareShared("brew", config.Entry{Name: "go"}, []string{"laptop", "studio"})
 	if err != nil || !slices.Equal(written, []string{"shared", "laptop", "studio"}) {
 		t.Fatalf("DeclareShared() wrote %q, %v", written, err)
 	}
@@ -525,7 +525,7 @@ func TestDeclareSharedMovesItOutOfTheMacs(t *testing.T) {
 			t.Errorf("%s = %q, want %q", path, got, want)
 		}
 	}
-	if written, err := cfg.DeclareShared("brew", config.Entry{Name: "ripgrep"}, nil); err == nil || len(written) > 0 {
+	if written, _, err := cfg.DeclareShared("brew", config.Entry{Name: "ripgrep"}, nil); err == nil || len(written) > 0 {
 		t.Errorf("DeclareShared() of what a Mac's file holds, not moved, wrote %q, %v", written, err)
 	}
 }
@@ -548,9 +548,30 @@ func TestDeclareSharedKeepsWhatAMovedLineSays(t *testing.T) {
 		had, laptop, studio string
 		kind                string
 		e                   config.Entry
-		want, shared        string
+		want, shared, said  string
 		left                map[string]string
 	}{
+		"a setting written otherwise": {laptop: "[macos settings]\ncom.apple.dock tilesize -integer 60\ncom.apple.dock autohide -bool YES\n", kind: "defaults", e: config.Entry{Name: "com.apple.dock:tilesize", Value: "-int 60"},
+			shared: "[macos settings]\ncom.apple.dock tilesize -int 60\n", left: map[string]string{"laptop": "[macos settings]\ncom.apple.dock autohide -bool YES\n"}},
+		"a yes written as true": {laptop: "[macos settings]\ncom.apple.dock autohide -bool YES\n", kind: "defaults", e: config.Entry{Name: "com.apple.dock:autohide", Value: "-bool true"},
+			shared: "[macos settings]\ncom.apple.dock autohide -bool true\n"},
+		"a setting set otherwise": {laptop: "[macos settings]\ncom.apple.dock tilesize -int 48\n", kind: "defaults", e: config.Entry{Name: "com.apple.dock:tilesize", Value: "-int 60"},
+			want: "laptop/declarations:2 has com.apple.dock:tilesize with -int 48, where this gives -int 60: set it the same here, or take that line out first"},
+		"a server in JSON, the same as its options": {laptop: "[claude mcp]\ndocs {\"type\": \"http\", \"url\": \"https://docs.example.com/mcp\"}\n", kind: "claude-mcp", e: config.Entry{Name: "docs", Value: "--transport http https://docs.example.com/mcp"},
+			shared: "[claude mcp]\ndocs --transport http https://docs.example.com/mcp\n"},
+		"a git setting quoted otherwise": {laptop: "[git config]\nalias.st \"status -sb\"\n", kind: "git-config", e: config.Entry{Name: "alias.st", Value: "'status -sb'"},
+			shared: "[git config]\nalias.st 'status -sb'\n"},
+		"an option given twice": {laptop: "[backups]\narq --after cask:arq --after cask:arq\n", kind: config.BackupsKind, e: config.Entry{Name: "arq", Value: "--after cask:arq"},
+			shared: "[backups]\narq --after cask:arq\n"},
+		"a group written elsewhere": {laptop: "[manual]\nsign-in \"Sign in\" --group First --after cask:app\n", kind: config.ManualKind, e: config.Entry{Name: "sign-in", Value: `"Sign in" --group First`},
+			shared: "[manual]\nsign-in \"Sign in\" --after cask:app --group First\n"},
+		"a block's name another item has": {laptop: "[secrets op://vault/Item --as keys]\nFOO Section/foo\n", studio: "[secrets op://vault/Studio --as keys]\nBAR Section/bar\n", kind: "secret", e: config.Entry{Name: "FOO", Value: "Section/foo", Item: "op://vault/Item"},
+			shared: "[secrets op://vault/Item]\nFOO Section/foo\n", said: "its block's name, keys, not carried: studio/declarations:1 gives it to op://vault/Studio",
+			left: map[string]string{"studio": "[secrets op://vault/Studio --as keys]\nBAR Section/bar\n"}},
+		"a section's own comments, kept": {laptop: "[homebrew formulae]\n# my brews\n\ngo\n", kind: "brew", e: config.Entry{Name: "go"},
+			shared: "[homebrew formulae]\ngo\n", left: map[string]string{"laptop": "[homebrew formulae]\n# my brews\n"}},
+		"a blank line before the last, gone": {laptop: "[paths]\n~/bin\n\n~/go/bin\n", kind: config.PathsKind, e: config.Entry{Name: "~/go/bin"},
+			shared: "[paths]\n~/go/bin\n", left: map[string]string{"laptop": "[paths]\n~/bin\n"}},
 		"a section's hold, carried": {laptop: "[homebrew formulae --after cask:x]\ngo\n", kind: "brew", e: config.Entry{Name: "go"},
 			shared: "[homebrew formulae --after cask:x]\ngo\n"},
 		"a hold of two, in another order, carried": {laptop: "[homebrew formulae --secret TOKEN --after cask:x]\ngo\n", studio: "[homebrew formulae --after cask:x --secret TOKEN]\ngo\n", kind: "brew", e: config.Entry{Name: "go"},
@@ -618,11 +639,9 @@ func TestDeclareSharedKeepsWhatAMovedLineSays(t *testing.T) {
 		}
 		checked := cfg.CheckDeclareShared(c.kind, c.e, from)
 		if c.want != "" {
-			_, err := cfg.DeclareShared(c.kind, c.e, from)
-			for call, err := range map[string]error{"CheckDeclareShared": checked, "DeclareShared": err} {
-				if err == nil || !strings.Contains(err.Error(), c.want) {
-					t.Errorf("%s: %s() = %v, want %q", name, call, err, c.want)
-				}
+			_, _, err := cfg.DeclareShared(c.kind, c.e, from)
+			if checked == nil || err == nil || checked.Error() != err.Error() || !strings.Contains(err.Error(), c.want) {
+				t.Errorf("%s: CheckDeclareShared() = %v, DeclareShared() = %v; want both %q, in the same words", name, checked, err, c.want)
 			}
 			for path, before := range files {
 				if got := readFile(t, cfg, path); got != before {
@@ -634,8 +653,8 @@ func TestDeclareSharedKeepsWhatAMovedLineSays(t *testing.T) {
 		if checked != nil {
 			t.Errorf("%s: CheckDeclareShared() = %v", name, checked)
 		}
-		if _, err := cfg.DeclareShared(c.kind, c.e, from); err != nil {
-			t.Errorf("%s: DeclareShared() = %v", name, err)
+		if _, said, err := cfg.DeclareShared(c.kind, c.e, from); err != nil || said != c.said {
+			t.Errorf("%s: DeclareShared() = %q, %v; want %q", name, said, err, c.said)
 		}
 		if got := readFile(t, cfg, "shared/declarations"); got != c.shared {
 			t.Errorf("%s: shared/declarations = %q, want %q", name, got, c.shared)
@@ -660,7 +679,7 @@ func TestDeclareSharedSaysWhatItWroteWhenAWriteFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(laptop, 0o700) })
-	written, err := cfg.DeclareShared("brew", config.Entry{Name: "go"}, []string{"laptop"})
+	written, _, err := cfg.DeclareShared("brew", config.Entry{Name: "go"}, []string{"laptop"})
 	if err == nil || !slices.Equal(written, []string{"shared"}) {
 		t.Errorf("DeclareShared() with laptop's folder read-only wrote %q, %v; want shared's alone, and why laptop's wasn't", written, err)
 	}
@@ -674,7 +693,7 @@ func TestDeclareSharedDropsASectionItEmpties(t *testing.T) {
 		"shared/declarations": "[go tools]\nx\n",
 		"laptop/declarations": "[homebrew formulae]\ngo\n\n[go tools]\ny\n",
 	})
-	if _, err := cfg.DeclareShared("brew", config.Entry{Name: "go"}, []string{"laptop"}); err != nil {
+	if _, _, err := cfg.DeclareShared("brew", config.Entry{Name: "go"}, []string{"laptop"}); err != nil {
 		t.Fatal(err)
 	}
 	if got := readFile(t, cfg, "laptop/declarations"); got != "[go tools]\ny\n" {
@@ -734,5 +753,26 @@ func TestDeclareAPathGoesLast(t *testing.T) {
 	}
 	if got, want := readFile(t, cfg, "laptop/declarations"), "[paths]\n# Homebrew\n/opt/homebrew/bin\n/a/b   # a tool\n\n[homebrew formulae]\njq\n"; got != want {
 		t.Errorf("laptop = %q, want %q", got, want)
+	}
+}
+
+// Undeclaring a section's last line keeps the section when it still holds
+// comments of its own, header and comments, which read back as a section
+// declaring nothing; one without goes.
+func TestUndeclareKeepsASectionsOwnComments(t *testing.T) {
+	cfg := loadRepo(t, map[string]string{
+		"shared/declarations": "[homebrew formulae]\njq\n\n[homebrew casks]\nfirefox\n",
+		"laptop/declarations": "[homebrew formulae]\n# my brews\n\ngo\n\n[homebrew casks]\nzoom\n",
+	})
+	for _, c := range []struct{ kind, name string }{{"brew", "go"}, {"cask", "zoom"}} {
+		if err := cfg.Undeclare(c.kind, "laptop", c.name); err != nil {
+			t.Fatalf("Undeclare(%s) = %v", c.name, err)
+		}
+	}
+	if got := readFile(t, cfg, "laptop/declarations"); got != "[homebrew formulae]\n# my brews\n" {
+		t.Errorf("laptop/declarations = %q, want the section with its comment alone", got)
+	}
+	if list, err := cfg.List("brew", "laptop"); err != nil || !slices.Equal(list.Names(), []string{"jq"}) {
+		t.Errorf("List(brew, laptop) = %v, %v; want the shared jq alone", list.Names(), err)
 	}
 }

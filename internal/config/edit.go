@@ -145,7 +145,7 @@ func (b *body) remove(from, to int) {
 	switch {
 	case from < len(b.lines) && b.kinds[from] == blankLine && (from == 0 || b.kinds[from-1] == blankLine):
 		lines = slices.Delete(lines, from, from+1)
-	case from == len(b.lines) && from > 0 && b.kinds[from-1] == blankLine && from < len(lines):
+	case from == len(b.lines) && from > 0 && b.kinds[from-1] == blankLine:
 		lines = slices.Delete(lines, from-1, from)
 	}
 	*b = splitBody(b.form, lines)
@@ -321,7 +321,7 @@ func (c *Config) AddSection(kind, scope string) (bool, error) {
 // wouldn't read back, as the config and the kind read it (Section.Line),
 // is never written.
 func (c *Config) Declare(kind, scope string, e Entry) error {
-	d, files, err := c.declaring(kind, scope, e)
+	d, files, _, err := c.declaring(kind, scope, e)
 	if err != nil {
 		return err
 	}
@@ -333,27 +333,27 @@ func (c *Config) Declare(kind, scope string, e Entry) error {
 // one edit, judged as a whole before any of it's written. Nothing a line it
 // moves says is lost: what its command can say must be the same
 // (LineDiffers), and what none can, its notes and comments are carried
-// (sectionDef.carry). It returns the scopes whose files it wrote, those
-// written before one failed too.
-func (c *Config) DeclareShared(kind string, e Entry, from []string) ([]string, error) {
-	d, files, err := c.declaring(kind, Shared, e, from...)
+// (Config.carry). It returns the scopes whose files it wrote, those
+// written before one failed too, and what it says of anything it didn't
+// carry.
+func (c *Config) DeclareShared(kind string, e Entry, from []string) (written []string, said string, err error) {
+	d, files, said, err := c.declaring(kind, Shared, e, from...)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	var written []string
 	for i, f := range files {
 		if err := c.writeDecl(f, d, e.Name, i == 0); err != nil {
-			return written, err
+			return written, said, err
 		}
 		written = append(written, f.scope)
 	}
-	return written, nil
+	return written, said, nil
 }
 
 // CheckDeclare says why Declare would refuse e, writing nothing: nil when
 // it would declare it.
 func (c *Config) CheckDeclare(kind, scope string, e Entry) error {
-	_, _, err := c.declaring(kind, scope, e)
+	_, _, _, err := c.declaring(kind, scope, e)
 	return err
 }
 
@@ -361,7 +361,7 @@ func (c *Config) CheckDeclare(kind, scope string, e Entry) error {
 // of the files of the Macs from, writing nothing: nil when it would declare
 // it.
 func (c *Config) CheckDeclareShared(kind string, e Entry, from []string) error {
-	_, _, err := c.declaring(kind, Shared, e, from...)
+	_, _, _, err := c.declaring(kind, Shared, e, from...)
 	return err
 }
 
@@ -369,60 +369,60 @@ func (c *Config) CheckDeclareShared(kind string, e Entry, from []string) error {
 // writes it, then each of the files of the Macs from with it taken out, none
 // yet written, once the config reads as kit reads it with them all
 // (readsAfter).
-func (c *Config) declaring(kind, scope string, e Entry, from ...string) (sectionDef, []*declFile, error) {
+func (c *Config) declaring(kind, scope string, e Entry, from ...string) (sectionDef, []*declFile, string, error) {
 	d, f, err := c.editable(kind, scope)
 	if err != nil {
-		return d, nil, err
+		return d, nil, "", err
 	}
 	arg, name := splitName(d, e.Name)
 	if d.items != nil {
 		arg = strings.TrimSuffix(e.Item, "/")
 		if arg != "" {
 			if err := d.items(arg); err != nil {
-				return d, nil, err
+				return d, nil, "", err
 			}
 		}
 	}
 	if e.As != "" && arg == "" {
-		return d, nil, fmt.Errorf("%s %s names an item's section: say which item", asOption, e.As)
+		return d, nil, "", fmt.Errorf("%s %s names an item's section: say which item", asOption, e.As)
 	}
 	if e.Hold != "" && len(d.holds) == 0 {
-		return d, nil, fmt.Errorf("[%s] holds no lines back: only a list's sections, and [features], do", d.header)
+		return d, nil, "", fmt.Errorf("[%s] holds no lines back: only a list's sections, and [features], do", d.header)
 	}
 	if _, err := readHold(d, e.Hold); err != nil {
-		return d, nil, err
+		return d, nil, "", err
 	}
 	if s, _ := f.holding(d, e.Name); s != nil {
-		return d, nil, fmt.Errorf("%s is in %s already", e.Name, DeclFile(scope))
+		return d, nil, "", fmt.Errorf("%s is in %s already", e.Name, DeclFile(scope))
 	}
 	if scope != Shared {
 		shared, err := c.readDecl(Shared)
 		if err != nil {
-			return d, nil, err
+			return d, nil, "", err
 		}
 		if s, _ := shared.holding(d, e.Name); s != nil {
-			return d, nil, fmt.Errorf("%s is in the shared declarations already (%s), for every Mac", e.Name, DeclFile(Shared))
+			return d, nil, "", fmt.Errorf("%s is in the shared declarations already (%s), for every Mac", e.Name, DeclFile(Shared))
 		}
 	}
 	moved, err := c.movedLines(kind, e.Name, from)
 	if err != nil {
-		return d, nil, err
+		return d, nil, "", err
 	}
-	e, notes, err := d.carry(e, moved)
+	e, notes, said, err := c.carry(d, e, moved)
 	if err != nil {
-		return d, nil, err
+		return d, nil, "", err
 	}
 	hold, err := readHold(d, e.Hold)
 	if err != nil {
-		return d, nil, err
+		return d, nil, "", err
 	}
 	line, err := entryText(d, name, e)
 	if err != nil {
-		return d, nil, err
+		return d, nil, "", err
 	}
 	steps, err := stepLines(d, e.Steps)
 	if err != nil {
-		return d, nil, err
+		return d, nil, "", err
 	}
 	s := f.find(d, arg, hold)
 	if s == nil {
@@ -440,7 +440,7 @@ func (c *Config) declaring(kind, scope string, e Entry, from ...string) (section
 		s.body = b.lines
 	}
 	if err := sameAsMoved(d, f, e.Name, moved); err != nil {
-		return d, nil, err
+		return d, nil, "", err
 	}
 	files := []*declFile{f}
 	// Taken out as the config reads with the shared file edited: whether a
@@ -449,11 +449,11 @@ func (c *Config) declaring(kind, scope string, e Entry, from ...string) (section
 	for _, mac := range from {
 		_, g, err := withShared.undeclaring(kind, mac, e.Name)
 		if err != nil {
-			return d, nil, err
+			return d, nil, "", err
 		}
 		files = append(files, g)
 	}
-	return d, files, c.readsAfter(d, e.Name, files)
+	return d, files, said, c.readsAfter(d, e.Name, files)
 }
 
 // readsAfter says why the config, with files written, the first declaring
@@ -500,10 +500,10 @@ func (c *Config) with(files []*declFile) *Config {
 
 // Undeclare takes name out of kind's sections of scope's declarations, with
 // the notes directly above it and the steps under it, keeping a sorted
-// section sorted; a section it leaves empty goes, unless it's the last
-// declaring its kind for a Mac (keeps), which stays, header and all, empty,
-// so the kind's still looked after (List.Declared). The rest of the file is
-// kept as it is.
+// section sorted; a section it leaves empty goes, unless it still holds
+// comments of its own, which stay, or it's the last declaring its kind for
+// a Mac (keeps), which stays, header and all, empty, so the kind's still
+// looked after (List.Declared). The rest of the file is kept as it is.
 func (c *Config) Undeclare(kind, scope, name string) error {
 	d, f, err := c.undeclaring(kind, scope, name)
 	if err != nil {
@@ -527,7 +527,7 @@ func (c *Config) undeclaring(kind, scope, name string) (sectionDef, *declFile, e
 	s.body = b.lines
 	switch {
 	case len(b.entries(0, len(b.lines))) > 0:
-	case c.keeps(f, s):
+	case c.keeps(f, s) || slices.Contains(b.kinds, commentLine):
 		f.empty(s)
 	default:
 		f.drop(s)

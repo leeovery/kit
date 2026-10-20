@@ -232,7 +232,7 @@ func (a *app) dirs() (config.Dirs, error) {
 
 // loadConfig loads the config repository, and checks this kit reads it.
 func (a *app) loadConfig(dirs config.Dirs) (*config.Config, error) {
-	cfg, err := config.Load(dirs.Config, kinds.Sections())
+	cfg, err := config.Load(dirs.Config, kinds.ConfigSections())
 	if errors.Is(err, config.ErrNoConfig) {
 		return nil, fmt.Errorf("%w: clone your config repository to %s, or point KIT_CONFIG at it", err, dirs.Config)
 	}

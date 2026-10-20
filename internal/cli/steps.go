@@ -549,15 +549,18 @@ func (a *app) addStep(ctx context.Context, r *run, name, does string, opts stepO
 		if err := r.checkDeclare(config.StepsKind, scope, entry); err != nil {
 			return failed(err)
 		}
-		moved, err := c.declare(config.StepsKind, scope, entry)
+		made, undo, err := r.makeStepFolder(s, does, folders)
 		if err != nil {
+			return failed(errors.Join(err, undo()))
+		}
+		said, err := c.declare(config.StepsKind, scope, entry)
+		if err != nil {
+			return failed(errors.Join(err, undo()))
+		}
+		if err := r.finishStepFolder(c, s, folders); err != nil {
 			return failed(err)
 		}
-		said, err := r.placeStepFolder(c, s, does, folders)
-		if err != nil {
-			return failed(err)
-		}
-		return check.Result{State: check.OK, Summary: "declared in " + scope + outOf(moved) + "; " + said}
+		return check.Result{State: check.OK, Summary: "declared in " + scope + said + "; " + made}
 	})
 	c.sync(ctx, commitMessage("add", stepCommand, []string{name}, r.machine, opts.note))
 	return c.finish()

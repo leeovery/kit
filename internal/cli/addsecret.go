@@ -94,7 +94,7 @@ func (a *app) addSecret(ctx context.Context, r *run, names []string, opts addOpt
 			}
 		}
 		e := at.entry
-		moved, err := c.declare(secretKind, at.scope, e)
+		said, err := c.declare(secretKind, at.scope, e)
 		if err != nil {
 			return check.Result{State: check.Failed, Reason: "kept in " + d.About().Name + ", but couldn't declare: " + err.Error()}
 		}
@@ -114,7 +114,7 @@ func (a *app) addSecret(ctx context.Context, r *run, names []string, opts addOpt
 		case report.Held[e.Name] != "":
 			return check.Result{State: check.Failed, Reason: "declared, but couldn't sync it yet: " + report.Held[e.Name]}
 		}
-		summary := "declared in " + at.scope + outOf(moved) + ", synced"
+		summary := "declared in " + at.scope + said + ", synced"
 		if so.ref == "" {
 			summary = "kept in " + d.About().Name + " (" + d.Join(item, at.short) + ") and read back; " + summary
 		}
@@ -172,7 +172,7 @@ func (a *app) secretTarget(ctx context.Context, r *run, k *secret.Secrets, name 
 	}
 	at.entry = config.Entry{Name: name, Value: secretLine(at.short, so.mode), Note: opts.note, Item: item, As: as}
 	if err := r.checkDeclare(secretKind, at.scope, at.entry); err != nil {
-		return at, sharingHint(err)
+		return at, sharingHint(err, at)
 	}
 	if err := k.Ready(ctx, at.store); err != nil {
 		return at, err
@@ -185,19 +185,23 @@ func (a *app) secretTarget(ctx context.Context, r *run, k *secret.Secrets, name 
 
 // sharingHint is err, a declare's refusal, saying, when it's of a Mac's
 // line saying otherwise where the secret is, or its mode, how to share the
-// value that line has: --ref and where it is, and the mode it gives.
-func sharingHint(err error) error {
+// value that line has: --ref and where it is, and its mode, or no --mode
+// where at gives one and the line gives none.
+func sharingHint(err error, at secretTarget) error {
 	differs, ok := errors.AsType[config.LineDiffers](err)
 	if !ok {
 		return err
 	}
-	ref, mode, rerr := secret.Where(differs.Line)
+	ref, theirs, rerr := secret.Where(differs.Line)
 	if rerr != nil {
 		return err
 	}
 	hint := "--ref " + config.Quote(ref)
-	if mode != 0o600 {
-		hint += " " + secret.ModeOption(mode)
+	switch _, ours, _ := secret.Where(at.entry); {
+	case theirs != 0o600:
+		hint += " " + secret.ModeOption(theirs)
+	case ours != theirs:
+		hint += " without --mode"
 	}
 	return fmt.Errorf("%w; %s shares the value it has", err, hint)
 }

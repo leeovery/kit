@@ -82,7 +82,8 @@ type Boot struct {
 	// State is kit's state folder, Data its data folder, and Config where
 	// the config repository is cloned.
 	State, Data, Config string
-	// Kinds are the kinds' sections the config's declarations may hold.
+	// Kinds are the sections the config's declarations may hold, and the
+	// readings of the config's own (kinds.ConfigSections).
 	Kinds []config.Section
 	// Repo is the config repository, as owner/name: the person's own
 	// kit-config when "".

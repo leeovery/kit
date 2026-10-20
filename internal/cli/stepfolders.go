@@ -65,36 +65,41 @@ func (r *run) planStepFolder(s steps.Script, from []string) (folderMove, error) 
 	return m, nil
 }
 
-// placeStepFolder makes the folder of s, the shared one, as m says: the
-// Macs' moved in, or a template written, saying which. Each folder it
-// changes is noted, to commit.
-func (r *run) placeStepFolder(c *changes, s steps.Script, does string, m folderMove) (string, error) {
+// makeStepFolder makes the folder of s, the shared one, as m says, before
+// its line's declared: the first Mac's moved in, or, none having one, a
+// template written. It returns what it did, and undo, putting the folder
+// back as it was, should the declare fail.
+func (r *run) makeStepFolder(s steps.Script, does string, m folderMove) (string, func() error, error) {
 	if len(m.macs) == 0 {
+		undo := func() error { return os.RemoveAll(s.Dir) }
 		if err := os.MkdirAll(s.Dir, 0o755); err != nil {
-			return "", err
+			return "", undo, err
 		}
-		if err := os.WriteFile(filepath.Join(s.Dir, steps.ScriptName), []byte(steps.Template(s.Name, does)), 0o755); err != nil {
-			return "", err
-		}
-		c.changed(s.Folder)
-		return "its script, " + s.Folder + "/" + steps.ScriptName + ", is a template: write its check and apply", nil
+		err := os.WriteFile(filepath.Join(s.Dir, steps.ScriptName), []byte(steps.Template(s.Name, does)), 0o755)
+		return "its script, " + s.Folder + "/" + steps.ScriptName + ", is a template: write its check and apply", undo, err
 	}
-	if !m.there {
-		if err := os.MkdirAll(filepath.Dir(s.Dir), 0o755); err != nil {
-			return "", err
-		}
-		if err := os.Rename(filepath.Join(r.cfg.Dir, m.macs[0]), s.Dir); err != nil {
-			return "", err
-		}
-		c.changed(s.Folder)
+	said := "its folder moved from " + strings.Join(m.macs, " and ")
+	if m.there {
+		return said, func() error { return nil }, nil
 	}
+	first := filepath.Join(r.cfg.Dir, m.macs[0])
+	if err := os.MkdirAll(filepath.Dir(s.Dir), 0o755); err != nil {
+		return "", func() error { return nil }, err
+	}
+	return said, func() error { return os.Rename(s.Dir, first) }, os.Rename(first, s.Dir)
+}
+
+// finishStepFolder takes the Macs' folders out, once the line's moved,
+// noting each folder changed, to commit, the shared one too.
+func (r *run) finishStepFolder(c *changes, s steps.Script, m folderMove) error {
+	c.changed(s.Folder)
 	for _, folder := range m.macs {
 		if err := os.RemoveAll(filepath.Join(r.cfg.Dir, folder)); err != nil {
-			return "", err
+			return err
 		}
 		c.changed(folder)
 	}
-	return "its folder moved from " + strings.Join(m.macs, " and "), nil
+	return nil
 }
 
 // exists reports whether there's anything at path.

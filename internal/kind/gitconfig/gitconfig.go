@@ -33,7 +33,7 @@ var Descriptor = kind.Descriptor{
 	Name:    kindName,
 	Label:   "git config",
 	Group:   kind.Settings,
-	Section: &config.Section{Kind: kindName, Header: "git config", Form: config.Settings, Sorted: true},
+	Section: &config.Section{Kind: kindName, Header: "git config", Form: config.Settings, Sorted: true, Says: lineSays, FromMac: true},
 	Help: &kind.Help{
 		What:   "git's global settings",
 		Add:    "Declare git settings as this Mac has them",
@@ -75,21 +75,36 @@ func (g *GitConfig) Key(name string) string {
 	return strings.ToLower(first) + "." + sub + "." + strings.ToLower(last)
 }
 
-// Values reads each setting's value, one word after its key: quoted when it
-// holds spaces.
+// Values reads each setting's value (readSetting).
 func (g *GitConfig) Values(list config.List) (config.List, error) {
 	g.declared = make(map[string]string, len(list.Entries))
 	for _, e := range list.Entries {
-		words, err := config.Words(e.Value)
+		v, err := readSetting(e)
 		if err != nil {
 			return list, fmt.Errorf("%s: %s: %w", e.Pos(), e.Name, err)
 		}
-		if len(words) != 1 {
-			return list, fmt.Errorf("%s: %s: one value after the key, in quotes when it holds spaces", e.Pos(), e.Name)
-		}
-		g.declared[g.Key(e.Name)] = words[0]
+		g.declared[g.Key(e.Name)] = v
 	}
 	return list, nil
+}
+
+// readSetting is a setting's value, one word after its key: quoted when it
+// holds spaces.
+func readSetting(e config.Entry) (string, error) {
+	words, err := config.Words(e.Value)
+	if err != nil {
+		return "", err
+	}
+	if len(words) != 1 {
+		return "", errors.New("one value after the key, in quotes when it holds spaces")
+	}
+	return words[0], nil
+}
+
+// lineSays is what e's line says: its value, however it's quoted.
+func lineSays(e config.Entry) ([]string, error) {
+	v, err := readSetting(e)
+	return []string{config.Quote(v)}, err
 }
 
 // settings are git's global settings: each key, as git lists it, with its

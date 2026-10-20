@@ -86,11 +86,11 @@ func (a *app) switchFeatures(ctx context.Context, r *run, names []string, on, sh
 			case on && inShared:
 				return check.Result{State: check.OK, Summary: "on already, in the shared declarations"}
 			case on:
-				moved, err := c.declare(config.FeaturesKind, scope, config.Entry{Name: name})
+				said, err := c.declare(config.FeaturesKind, scope, config.Entry{Name: name})
 				if err != nil {
 					return failed(err)
 				}
-				return check.Result{State: check.OK, Summary: verb + ", in " + scope + outOf(moved)}
+				return check.Result{State: check.OK, Summary: verb + ", in " + scope + said}
 			case !in && inShared:
 				return check.Result{State: check.Failed, Reason: "on for every Mac, in " + config.Shared + ": --shared switches it off there"}
 			case !in:

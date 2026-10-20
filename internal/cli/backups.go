@@ -175,11 +175,11 @@ func (a *app) addBackup(ctx context.Context, r *run, name string, opts backupOpt
 		if _, _, _, err := r.place(b.After, b.Before, stepNames(r.pipeline.Steps())); err != nil {
 			return failed(err)
 		}
-		moved, err := c.declare(config.BackupsKind, scope, config.Entry{Name: name, Value: strings.Join(words, " "), Note: opts.note})
+		said, err := c.declare(config.BackupsKind, scope, config.Entry{Name: name, Value: strings.Join(words, " "), Note: opts.note})
 		if err != nil {
 			return failed(err)
 		}
-		return check.Result{State: check.OK, Summary: "declared in " + scope + outOf(moved)}
+		return check.Result{State: check.OK, Summary: "declared in " + scope + said}
 	})
 	c.sync(ctx, commitMessage("add", backupCommand, []string{name}, r.machine, opts.note))
 	return c.finish()

@@ -108,3 +108,17 @@ func TestPushWithoutARemote(t *testing.T) {
 		t.Errorf("Push() error = %v, want ErrNoRemote", err)
 	}
 }
+
+// A path that's gone and that git never kept, as a folder moved before it
+// was ever committed, is left out of the commit, as git won't take it; one
+// git kept, now gone, is committed, gone.
+func TestCommitLeavesOutAPathGitNeverKept(t *testing.T) {
+	fake := runnertest.New(t)
+	fake.On("git", git("status", "--porcelain", "--", "laptop/declarations", "laptop/steps/tool", "studio/steps/tool")...).Prints(" M laptop/declarations\n D studio/steps/tool/run\n")
+	fake.On("git", git("add", "--", "laptop/declarations", "studio/steps/tool")...)
+	fake.On("git", git("commit", "--quiet", "-m", "kit step add tool (laptop)", "--", "laptop/declarations", "studio/steps/tool")...)
+	committed, err := gitrepo.Repo{Dir: dir, Run: fake}.Commit(context.Background(), "kit step add tool (laptop)", "laptop/declarations", "laptop/steps/tool", "studio/steps/tool")
+	if err != nil || !committed {
+		t.Errorf("Commit() = %v, %v, running %q; want laptop/steps/tool left out", committed, err, fake.Calls())
+	}
+}

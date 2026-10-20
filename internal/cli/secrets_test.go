@@ -356,6 +356,9 @@ func TestAddASecretSharedRefusesWhatAMacSaysOtherwise(t *testing.T) {
 		{"a file of another mode", "secrets op://vault/Item --as mac-secrets", "~/.npmrc Section/npmrc --mode 644\n",
 			"laptop/declarations:5 has ~/.npmrc with --mode 644, where this gives --mode 600: give the same, or take that line out first; --ref op://vault/Item/Section/npmrc --mode 644 shares the value it has",
 			[]string{"~/.npmrc", "--ref", "op://vault/Item/Section/npmrc"}},
+		{"a file of the default mode, given another", "secrets op://vault/Item --as mac-secrets", "~/.npmrc Section/npmrc\n",
+			"laptop/declarations:5 has ~/.npmrc with --mode 600, where this gives --mode 644: give the same, or take that line out first; --ref op://vault/Item/Section/npmrc without --mode shares the value it has",
+			[]string{"~/.npmrc", "--ref", "op://vault/Item/Section/npmrc", "--mode", "644"}},
 		{"a value at another field", "secrets op://vault/Item --as mac-secrets", "FOO Section/foo\n",
 			"laptop/declarations:5 has FOO with op://vault/Item/Section/foo, where this gives op://vault/Item/Section/other: give the same, or take that line out first; --ref op://vault/Item/Section/foo shares the value it has",
 			[]string{"FOO", "--item", "op://vault/Item", "--field", "Section/other", "--stdin"}},
@@ -591,5 +594,25 @@ func TestAddASecretSharedKeepsItsBlocksName(t *testing.T) {
 	}
 	if got := w.read(t, filepath.Join(".config", "kit", "laptop", "declarations")); strings.Contains(got, "FOO") || strings.Contains(got, "mac-secrets") {
 		t.Errorf("laptop's declarations = %q, want its block gone", got)
+	}
+}
+
+// A Mac's block name another Mac gives to another item isn't carried into
+// the shared file, where it'd stand for two: the shared block goes unnamed,
+// and kit says why, the secret moved all the same.
+func TestAddASecretSharedLeavesANameAnotherItemHas(t *testing.T) {
+	w := laptopWorld(t)
+	w.writeSection(t, "laptop", "secrets op://vault/Item --as keys", "FOO Section/foo\n")
+	w.writeSection(t, "studio", "secrets op://vault/Studio --as keys", "BAR Section/bar\n")
+	f := w.fake
+	f.On("op", "whoami")
+	optest.Holds(f, map[string]string{"op://vault/Item/Section/foo": "foo"})
+	w.expectSync([]string{"laptop/declarations", "shared/declarations"}, "kit secret add FOO (laptop)")
+	out, _, code := w.run(t, "secret", "add", "FOO", "--shared", "--ref", "op://vault/Item/Section/foo")
+	if code != 0 || !strings.Contains(out, "declared in shared, out of laptop; its block's name, keys, not carried: studio/declarations:4 gives it to op://vault/Studio, synced") {
+		t.Fatalf("kit secret add --shared printed\n%s exit %d", out, code)
+	}
+	if got := w.readSection(t, "shared", "secrets op://vault/Item"); got != "FOO Section/foo\n" {
+		t.Errorf("shared's [secrets op://vault/Item] = %q", got)
 	}
 }

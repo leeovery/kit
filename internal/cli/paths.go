@@ -26,11 +26,11 @@ func (a *app) addPaths(ctx context.Context, r *run, dirs []string, opts addOptio
 	c := startChanges(r, dirs)
 	for _, dir := range dirs {
 		c.step(ctx, dir, func(context.Context) check.Result {
-			moved, err := c.declare(config.PathsKind, scope, config.Entry{Name: dir, Note: opts.note})
+			said, err := c.declare(config.PathsKind, scope, config.Entry{Name: dir, Note: opts.note})
 			if err != nil {
 				return check.Result{State: check.Failed, Reason: err.Error()}
 			}
-			return check.Result{State: check.OK, Summary: "declared in " + scope + outOf(moved) + ", last on the PATH"}
+			return check.Result{State: check.OK, Summary: "declared in " + scope + said + ", last on the PATH"}
 		})
 	}
 	a.writeShellPath(ctx, r, c)

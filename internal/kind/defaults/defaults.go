@@ -116,7 +116,7 @@ var Descriptor = kind.Descriptor{
 	Name:    kindName,
 	Label:   "macOS settings",
 	Group:   kind.Settings,
-	Section: &config.Section{Kind: kindName, Header: "macos settings", Form: config.Defaults, Sorted: true},
+	Section: &config.Section{Kind: kindName, Header: "macos settings", Form: config.Defaults, Sorted: true, Says: lineSays, FromMac: true},
 	Help: &kind.Help{
 		What:   "macOS settings, in defaults write's form",
 		Add:    "Declare macOS settings as this Mac has them",
@@ -154,6 +154,27 @@ func (d *Defaults) Values(list config.List) (config.List, error) {
 		d.declared[e.Name] = v
 	}
 	return list, nil
+}
+
+// lineSays is what e's line says: its value, by its type, as defaults
+// write takes it, however the line writes it (-integer 60 as -int 60,
+// -bool YES as -bool true).
+func lineSays(e config.Entry) ([]string, error) {
+	dv, err := readDeclared(e)
+	if err != nil {
+		return nil, err
+	}
+	switch v := dv.value.(type) {
+	case bool:
+		return []string{fmt.Sprintf("-bool %t", v)}, nil
+	case int64:
+		return []string{fmt.Sprintf("-int %d", v)}, nil
+	case float64:
+		return []string{"-float " + strconv.FormatFloat(v, 'g', -1, 64)}, nil
+	case string:
+		return []string{"-string " + config.Quote(v)}, nil
+	}
+	return []string{plist.XML(dv.value)}, nil
 }
 
 // readDeclared reads an entry's setting and value.

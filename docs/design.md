@@ -72,7 +72,9 @@ for its formulae and casks, is in the run only with a kind needing it. `kit <kin
 writes the section when there's none, `--temp` too, so reconcile asks once the
 throwaway's time is up; removing a kind's last thing leaves its section as it was, header
 and all, empty, when it's the last declaring the kind for the Mac (a Mac's own, the shared
-file having none, or the shared file's), so the kind's still looked after.
+file having none, or the shared file's), so the kind's still looked after. A section any
+removal leaves without lines stays too while it holds comments of its own, its header and
+those comments, as nothing written by hand goes without being asked.
 
 | Kind | Declared as | Found by | Install, remove |
 |---|---|---|---|
@@ -482,22 +484,27 @@ main, pulling with rebase first. A push that fails leaves the commit, and says s
 **Moving a line.** Every command declaring for every Mac takes the name out of each Mac's own
 file in the same edit, losing nothing the lines it moves say, all judged before anything's
 stored, installed or asked for:
-- What the command can say must be the same, by meaning: the line's words, `--after`,
-  `--before` and `--secret` in any order, a secret's full reference (short in its block or in
-  full) and its mode. Otherwise it's refused, naming the line and what differs, to give the same
-  or take that line out first; for a secret, with the `--ref` and `--mode` sharing its value.
+- What the command can say must be the same, by meaning, as each kind reads its lines: options
+  in any order and once each, a macOS setting's value by its type (`-integer 60` is `-int 60`,
+  `-bool YES` is `-bool true`), an MCP server in JSON or as options, a secret's full reference
+  (short in its block or in full) and its mode. Otherwise it's refused, naming the line and
+  what differs: give the same, or, for a value kit reads from the Mac (macOS, power and git
+  settings, MCP servers), set it the same here, or take that line out first; for a secret,
+  with the `--ref` and `--mode` sharing its value.
 - What no command can say is carried, the same in every line moved: its section's hold
   (`[homebrew formulae --after cask:x]`), and a step by hand's steps, `--after` and `--before`.
 - Their note, unless the command gives one, and the comments above them, compared by their
   words (one set apart from the line by a blank line is the line's, as kit's sorting has it),
   are carried, one between them; a note given stays after the line, the comments above it. A
   note kit makes up, as a login item's app name, is the note only when nothing else gives one.
-- So is the name of an item's block (`--as`), for a block the shared file hasn't.
+- So is the name of an item's block (`--as`), for a block the shared file hasn't, unless a
+  file gives that name to another item: then the block goes unnamed, kit saying why.
 - A step of your own's folder moves with its line: the Macs' folders, all the same, go to the
   shared one, or are left for one there already that's the same.
 
 Lines moved that differ in what's carried are refused, naming each. A name in the shared file
-already is refused as before.
+already is refused as before. `kit <kind> add` judges each name before anything's installed
+or asked for: one refused fails alone, in its row, and the rest carry on.
 
 `kit reconcile` settles drift. At a terminal it goes through each item that needs attention
 (`--all`: quiet ones too; name kinds, as in `kit reconcile brew`, for theirs alone), asking

@@ -85,7 +85,7 @@ func (a *app) bootstrap(ctx context.Context, mac, repo string, handedOver bool) 
 	if handedOver {
 		b := &boot.Boot{
 			GitHub: boot.NewGitHub(&http.Client{Timeout: time.Minute}), Now: a.Now, Ask: &plainAsker{},
-			State: dirs.State, Data: dirs.Data, Config: dirs.Config, Kinds: kinds.Sections(), Repo: repo, Mac: mac, Getenv: a.Getenv,
+			State: dirs.State, Data: dirs.Data, Config: dirs.Config, Kinds: kinds.ConfigSections(), Repo: repo, Mac: mac, Getenv: a.Getenv,
 			Home: home, Applications: "/Applications", SudoLocal: a.SudoLocal, HandedOver: true,
 		}
 		// Handed over, kit says so at once: the boot in Terminal is waiting.
@@ -152,7 +152,7 @@ func (a *app) bootstrap(ctx context.Context, mac, repo string, handedOver bool) 
 	})
 	b := &boot.Boot{
 		Run: observed, Sink: sink, Ask: asker, GitHub: boot.NewGitHub(&http.Client{Timeout: time.Minute}), Now: a.Now,
-		State: dirs.State, Data: dirs.Data, Config: dirs.Config, Kinds: kinds.Sections(), Repo: repo, Mac: mac, Getenv: a.Getenv,
+		State: dirs.State, Data: dirs.Data, Config: dirs.Config, Kinds: kinds.ConfigSections(), Repo: repo, Mac: mac, Getenv: a.Getenv,
 		Home: home, Applications: "/Applications", SudoLocal: a.SudoLocal, Self: self, HandedOver: handedOver,
 	}
 	if asks != nil {

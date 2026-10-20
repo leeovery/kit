@@ -178,7 +178,7 @@ var errNotFound = runner.ErrNotFound
 func (w *world) expectSync(files []string, message string) {
 	dir := filepath.Join(w.home, ".config", "kit")
 	git := func(args ...string) []string { return append([]string{"-C", dir}, args...) }
-	w.fake.On("git", git(append([]string{"status", "--porcelain", "--"}, files...)...)...).Prints(" M " + files[0] + "\n")
+	w.fake.On("git", git(append([]string{"status", "--porcelain", "--"}, files...)...)...).Prints(" M " + strings.Join(files, "\n M ") + "\n")
 	w.fake.On("git", git(append([]string{"add", "--"}, files...)...)...)
 	w.fake.On("git", git(append([]string{"commit", "--quiet", "-m", message, "--"}, files...)...)...)
 	w.fake.On("git", git("remote")...).Prints("origin\n")

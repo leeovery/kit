@@ -261,28 +261,65 @@ func TestAddAtATerminalAsksForThePasswordFirst(t *testing.T) {
 	}
 }
 
-// A shared add the move would refuse is refused before anything's installed
-// or asked for: the files as they were, Homebrew never run to install.
-func TestAddSharedRefusedInstallsNothing(t *testing.T) {
-	w := laptopWorld(t)
-	w.writeSection(t, "laptop", "homebrew formulae", "go\nhello   # a test\n")
-	w.writeSection(t, "studio", "homebrew formulae", "hello   # for work\n")
-	before := map[string]string{}
-	for _, scope := range []string{"shared", "laptop", "studio"} {
-		before[scope] = w.read(t, filepath.Join(".config", "kit", scope, "declarations"))
+// Adding several names, one the move would refuse fails alone, in its own
+// row, nothing installed or asked for it, the files as they were for it;
+// the rest are installed and declared, plainly and in JSON alike.
+func TestAddSharedRefusedFailsAlone(t *testing.T) {
+	for _, asJSON := range []bool{false, true} {
+		w := laptopWorld(t)
+		w.writeSection(t, "laptop", "homebrew formulae", "go\nhello   # a test\n")
+		w.writeSection(t, "studio", "homebrew formulae", "hello   # for work\n")
+		w.fake.On("brew", "update", "--quiet")
+		w.fake.On("brew", "install", "--formula", "ripgrep")
+		w.expectSync([]string{"shared/declarations"}, "kit brew add hello, ripgrep (laptop)")
+		args := []string{"brew", "add", "hello", "ripgrep", "--shared"}
+		if asJSON {
+			args = append(args, "--json")
+		}
+		out, errOut, code := w.run(t, args...)
+		refused := "hello failed couldn't declare: the lines it moves have different notes, laptop/declarations:3 (\"a test\"), studio/declarations:2 (\"for work\"): say which with --note"
+		if asJSON {
+			refused = `"state": "failed"`
+		}
+		if code != 1 || !strings.Contains(out, refused) || !strings.Contains(out, "ripgrep") {
+			t.Errorf("--json %v: kit brew add hello ripgrep --shared printed\n%s%s exit %d; want hello failed alone", asJSON, out, errOut, code)
+		}
+		for _, call := range w.fake.Calls() {
+			if strings.Contains(call, "install --formula hello") {
+				t.Errorf("--json %v: ran %s: want hello not installed", asJSON, call)
+			}
+		}
+		if got := w.readSection(t, "shared", "homebrew formulae"); got != "# Shell\njq\nripgrep\nowner/tap/tool\n" {
+			t.Errorf("--json %v: shared = %q, want ripgrep added alone", asJSON, got)
+		}
+		if got := w.readSection(t, "laptop", "homebrew formulae"); got != "go\nhello   # a test\n" {
+			t.Errorf("--json %v: laptop = %q, want it as it was", asJSON, got)
+		}
 	}
-	_, errOut, code := w.run(t, "brew", "add", "hello", "--shared")
-	if code != 2 || !strings.Contains(ansi.Strip(errOut), `hello: the lines it moves have different notes, laptop/declarations:`) {
-		t.Errorf("kit brew add --shared printed %q, exit %d; want it refused", errOut, code)
+}
+
+// A refused name never reaches the password's question: a cask that would
+// need one, refused at a terminal, is never asked about, nor the password
+// asked for, and the cask beside it installs.
+func TestAddSharedRefusedAsksNoPassword(t *testing.T) {
+	w := laptopWorld(t)
+	w.terminal = true
+	w.writeSection(t, "laptop", "homebrew casks", "zoom   # calls\n")
+	w.writeSection(t, "studio", "homebrew casks", "zoom   # meetings\n")
+	w.fake.On("brew", "info", "--json=v2", "--cask", "iterm2").Prints(`{"formulae": [], "casks": [{"token": "iterm2", "full_token": "iterm2", "old_tokens": [], "artifacts": [{"app": ["iTerm.app"]}]}]}`)
+	w.fake.On("brew", "update", "--quiet")
+	w.fake.On("brew", "install", "--cask", "iterm2")
+	w.expectSync([]string{"shared/declarations"}, "kit cask add zoom, iterm2 (laptop)")
+	out, errOut, code := w.run(t, "cask", "add", "zoom", "iterm2", "--shared")
+	if out = ansi.Strip(out); code != 1 || !strings.Contains(out, "✗ zoom  couldn't declare") || !strings.Contains(out, "● iterm2  installed · declared in shared") {
+		t.Errorf("kit cask add zoom iterm2 --shared printed\n%s%s exit %d", out, errOut, code)
 	}
 	for _, call := range w.fake.Calls() {
-		if strings.HasPrefix(call, "brew install") || strings.HasPrefix(call, "brew update") || strings.HasPrefix(call, "sudo") {
-			t.Errorf("ran %s: want nothing installed or asked for", call)
+		if strings.HasPrefix(call, "sudo") || strings.HasPrefix(call, "brew") && strings.Contains(call, "zoom") {
+			t.Errorf("ran %s: want nothing asked, looked up or installed for zoom", call)
 		}
 	}
-	for scope, was := range before {
-		if got := w.read(t, filepath.Join(".config", "kit", scope, "declarations")); got != was {
-			t.Errorf("%s's declarations = %q, want them untouched", scope, got)
-		}
+	if len(w.asked) > 0 {
+		t.Errorf("asked %q, want nothing", w.asked)
 	}
 }

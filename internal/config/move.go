@@ -7,18 +7,23 @@ import (
 )
 
 // LineDiffers is a shared declare's refusal of a Mac's line it would move,
-// as the shared line wouldn't say what that line says, of what its command
-// can say.
+// as the shared line wouldn't say what that line says.
 type LineDiffers struct {
 	// Line is the Mac's line, as the config reads it.
 	Line Entry
 	// Theirs is what the Mac's line says that the shared line wouldn't,
 	// and Ours what the shared line would say that the Mac's doesn't.
 	Theirs, Ours []string
+	// FromMac is whether the line's value is read from this Mac as it's
+	// set (Section.FromMac): set the same here, not given.
+	FromMac bool
 }
 
 func (l LineDiffers) Error() string {
-	const advice = ": give the same, or take that line out first"
+	advice := ": give the same, or take that line out first"
+	if l.FromMac {
+		advice = ": set it the same here, or take that line out first"
+	}
 	ours := strings.Join(l.Ours, " and ")
 	if len(l.Theirs) == 0 {
 		return fmt.Sprintf("%s has %s without %s%s", l.Line.Pos(), l.Line.Name, ours, advice)
@@ -30,60 +35,29 @@ func (l LineDiffers) Error() string {
 	return fmt.Sprintf("%s has %s with %s, %s%s", l.Line.Pos(), l.Line.Name, strings.Join(l.Theirs, " and "), where, advice)
 }
 
-// orderFree are the options a line may give in any order, each as often as
-// wanted: two lines giving the same of them say the same.
-var orderFree = []string{afterOption, beforeOption, secretOption}
-
-// restOfLine are the words after which the rest of a line is a command, as
-// it's written.
-var restOfLine = []string{"--", "--test"}
-
-// lineOptions splits a line's value, each word quoted, into its words
-// before restOfLine but the options of flags; those options, each flag and
-// its value, sorted; and the words from restOfLine on.
-func lineOptions(value string, flags []string) (words, options, rest []string, err error) {
-	all, err := Words(value)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	for i := 0; i < len(all); i++ {
-		switch w := all[i]; {
-		case slices.Contains(restOfLine, w):
-			for _, r := range all[i:] {
-				rest = append(rest, Quote(r))
-			}
-			i = len(all)
-		case slices.Contains(flags, w) && i+1 < len(all):
-			options = append(options, w+" "+Quote(all[i+1]))
-			i++
-		default:
-			words = append(words, Quote(w))
-		}
-	}
-	slices.Sort(options)
-	return words, options, rest, nil
-}
-
-// says is what e's line says, as d reads it, its notes aside, in parts, so
-// that two lines saying the same, however written, have the same, sorted:
-// the kind's own reading when it has one; else its words, one part, and
-// those of orderFree, a part each, with its section's item and hold, and
-// its steps.
-func (d sectionDef) says(e Entry) ([]string, error) {
+// reading is what e's line says, as its kind reads it, in parts: the
+// kind's own reading (Section.Says), else its words, quoted, as one.
+func (d sectionDef) reading(e Entry) ([]string, error) {
 	if d.lineSays != nil {
-		parts, err := d.lineSays(e)
-		return slices.Sorted(slices.Values(parts)), err
+		return d.lineSays(e)
 	}
-	words, options, rest, err := lineOptions(e.Value, orderFree)
-	if err != nil {
+	words, err := Words(e.Value)
+	if err != nil || len(words) == 0 {
 		return nil, err
 	}
-	parts := options
-	if text := strings.Join(slices.Concat(words, rest), " "); text != "" {
-		parts = append(parts, text)
+	for i, w := range words {
+		words[i] = Quote(w)
 	}
-	if e.Item != "" {
-		parts = append(parts, "in "+e.Item)
+	return []string{strings.Join(words, " ")}, nil
+}
+
+// says is what e's line says, its notes aside, as a set of parts, so that
+// two lines saying the same, however written, have the same: its reading,
+// with its section's hold and its steps.
+func (d sectionDef) says(e Entry) ([]string, error) {
+	parts, err := d.reading(e)
+	if err != nil {
+		return nil, err
 	}
 	if e.Hold != "" {
 		parts = append(parts, "its section's "+e.Hold)
@@ -91,8 +65,7 @@ func (d sectionDef) says(e Entry) ([]string, error) {
 	if len(e.Steps) > 0 {
 		parts = append(parts, "the steps "+strings.Join(e.Steps, "; "))
 	}
-	slices.Sort(parts)
-	return parts, nil
+	return slices.Compact(slices.Sorted(slices.Values(parts))), nil
 }
 
 // movedLine is a Mac's line a shared declare takes out: its entry, as the
@@ -148,80 +121,120 @@ func (f *declFile) entryOf(d sectionDef, name string) (Entry, bool, error) {
 const sameAdvice = "make them the same, or take those lines out first"
 
 // carry is e as a shared line takes from the lines it moves what e doesn't
-// give, and the comments to go above it. Of what a command has no way to
-// say, it takes the hold of their section, a step by hand's steps and the
-// options of d.carries, each the same in every line moved; and their note,
-// the comments above them, compared by their words, and, for an item's
-// block, the name it goes by, one between them. Moved lines that differ in
-// any are refused, naming each. Given no note, and none moved, e takes its
-// DefaultNote.
-func (d sectionDef) carry(e Entry, moved []movedLine) (Entry, []string, error) {
+// give, the comments to go above it, and what it says of a name it didn't
+// carry. Of what a command has no way to say, it takes the hold of their
+// section, a step by hand's steps and the options of d.carries, each the
+// same in every line moved; and their note, the comments above them,
+// compared by their words, and, for an item's block, the name it goes by,
+// one between them, the name only when no file gives it to another item.
+// Moved lines that differ in any are refused, naming each. Given no note,
+// and none moved, e takes its DefaultNote.
+func (c *Config) carry(d sectionDef, e Entry, moved []movedLine) (Entry, []string, string, error) {
 	var err error
 	if e.Hold == "" {
 		if e.Hold, err = agreed(moved, "sections", sameAdvice, true, func(m movedLine) string { return m.Hold }); err != nil {
-			return e, nil, err
+			return e, nil, "", err
 		}
 	}
 	if len(e.Steps) == 0 && d.steps {
 		steps, err := agreed(moved, "steps under them", sameAdvice, true, func(m movedLine) string { return strings.Join(m.Steps, "\n") })
 		if err != nil {
-			return e, nil, err
+			return e, nil, "", err
 		}
 		if steps != "" {
 			e.Steps = strings.Split(steps, "\n")
 		}
 	}
-	if e.Value, err = d.carryOptions(e.Value, moved); err != nil {
-		return e, nil, err
+	if e.Value, err = d.carryOptions(e, moved); err != nil {
+		return e, nil, "", err
 	}
 	if e.Note == "" {
 		if e.Note, err = agreed(moved, "notes", "say which with --note", false, func(m movedLine) string { return m.Note }); err != nil {
-			return e, nil, err
+			return e, nil, "", err
 		}
 	}
 	if e.Note == "" {
 		e.Note = e.DefaultNote
 	}
+	var said string
 	if e.As == "" && d.items != nil {
-		item := strings.TrimSuffix(e.Item, "/")
-		if e.As, err = agreed(moved, "names for their block", sameAdvice, false, func(m movedLine) string {
-			if m.Item != item {
-				return ""
-			}
-			return m.As
-		}); err != nil {
-			return e, nil, err
+		if e.As, said, err = c.carriedName(d, e.Item, moved); err != nil {
+			return e, nil, "", err
 		}
 	}
 	words, err := agreed(moved, "comments above them", sameAdvice, false, func(m movedLine) string { return noteWords(m.comments) })
 	if err != nil || words == "" {
-		return e, nil, err
+		return e, nil, said, err
 	}
 	i := slices.IndexFunc(moved, func(m movedLine) bool { return noteWords(m.comments) == words })
-	return e, moved[i].comments, nil
+	return e, moved[i].comments, said, nil
 }
 
-// carryOptions is value with the options of d.carries the lines moved
-// give, when it gives none of them, before what's from restOfLine on.
-func (d sectionDef) carryOptions(value string, moved []movedLine) (string, error) {
-	if len(d.carries) == 0 {
-		return value, nil
+// carriedName is the name the moved lines' blocks for item go by, for the
+// shared one, should it be made: none, saying why, when a file gives it to
+// another item, as it'd stand for two.
+func (c *Config) carriedName(d sectionDef, item string, moved []movedLine) (string, string, error) {
+	item = strings.TrimSuffix(item, "/")
+	as, err := agreed(moved, "names for their block", sameAdvice, false, func(m movedLine) string {
+		if m.Item != item {
+			return ""
+		}
+		return m.As
+	})
+	if err != nil || as == "" {
+		return "", "", err
 	}
-	words, given, rest, err := lineOptions(value, d.carries)
+	for _, scope := range c.Scopes() {
+		f, err := c.readDecl(scope)
+		if err != nil {
+			continue
+		}
+		for _, s := range f.sections {
+			if s.def.kind == d.kind && s.as == as && s.arg != item {
+				return "", fmt.Sprintf("its block's name, %s, not carried: %s:%d gives it to %s", as, DeclFile(scope), s.start, s.arg), nil
+			}
+		}
+	}
+	return as, "", nil
+}
+
+// carryOptions is e's value with the options of d.carries the lines moved
+// give, when it gives none of them, after its first word.
+func (d sectionDef) carryOptions(e Entry, moved []movedLine) (string, error) {
+	if len(d.carries) == 0 {
+		return e.Value, nil
+	}
+	given, err := d.carried(e)
 	if err != nil || len(given) > 0 {
-		return value, err
+		return e.Value, err
 	}
 	options, err := agreed(moved, "options", sameAdvice, true, func(m movedLine) string {
-		_, options, _, err := lineOptions(m.Value, d.carries)
+		parts, err := d.carried(m.Entry)
 		if err != nil {
 			return m.Value
 		}
-		return strings.Join(options, " ")
+		return strings.Join(parts, " ")
 	})
 	if err != nil || options == "" {
-		return value, err
+		return e.Value, err
 	}
-	return strings.Join(slices.Concat(words, []string{options}, rest), " "), nil
+	words, err := Words(e.Value)
+	if err != nil || len(words) == 0 {
+		return e.Value, err
+	}
+	rest := make([]string, len(words)-1)
+	for i, w := range words[1:] {
+		rest[i] = Quote(w)
+	}
+	return strings.Join(slices.Concat([]string{Quote(words[0]), options}, rest), " "), nil
+}
+
+// carried are the parts of e's reading that are options of d.carries.
+func (d sectionDef) carried(e Entry) ([]string, error) {
+	parts, err := d.reading(e)
+	return slices.DeleteFunc(parts, func(p string) bool {
+		return !slices.ContainsFunc(d.carries, func(flag string) bool { return strings.HasPrefix(p, flag+" ") })
+	}), err
 }
 
 // agreed is what the lines moved have, as of says: the one thing they all
@@ -279,7 +292,7 @@ func sameAsMoved(d sectionDef, f *declFile, name string, moved []movedLine) erro
 			return fmt.Errorf("%s: %w", m.Pos(), err)
 		}
 		if !slices.Equal(theirs, ours) {
-			return LineDiffers{Line: m.Entry, Theirs: without(theirs, ours), Ours: without(ours, theirs)}
+			return LineDiffers{Line: m.Entry, Theirs: without(theirs, ours), Ours: without(ours, theirs), FromMac: d.fromMac}
 		}
 	}
 	return nil

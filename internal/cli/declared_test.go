@@ -64,9 +64,8 @@ func TestAnEmptySectionLooksAfterItsKind(t *testing.T) {
 // on.
 func TestAddWritesTheKindsSection(t *testing.T) {
 	w := laptopWorld(t)
-	// Adding looks twice before it installs.
+	// Adding looks once before it installs.
 	w.fake.On("npm", "ls", "--global", "--depth=0", "--json").Prints(`{"dependencies": {}}`).
-		Then().Prints(`{"dependencies": {}}`).
 		Then().Prints(`{"dependencies": {"typescript": {}}}`)
 	w.fake.On("npm", "install", "--global", "typescript")
 	w.expectSync([]string{"laptop/declarations"}, "kit npm add typescript (laptop)")
@@ -123,7 +122,6 @@ func TestListOfAKindWithoutASection(t *testing.T) {
 func TestAddTemporarilyWritesTheKindsSection(t *testing.T) {
 	w := laptopWorld(t)
 	w.fake.On("npm", "ls", "--global", "--depth=0", "--json").Prints(`{"dependencies": {}}`).
-		Then().Prints(`{"dependencies": {}}`).
 		Then().Prints(`{"dependencies": {"left-pad": {}}}`)
 	w.fake.On("npm", "install", "--global", "left-pad")
 	w.expectSync([]string{"laptop/declarations"}, "kit npm add left-pad (laptop)")

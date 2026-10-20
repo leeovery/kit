@@ -118,6 +118,24 @@ func (r Repo) Changes(ctx context.Context) ([]Change, error) {
 	return changes, nil
 }
 
+// statusPaths are the paths git status --porcelain lists, each where it is
+// now.
+func statusPaths(out string) []string {
+	var paths []string
+	for line := range strings.Lines(out) {
+		line = strings.TrimRight(line, "\n")
+		if len(line) < 4 {
+			continue
+		}
+		name := unquote(line[3:])
+		if _, to, ok := strings.Cut(name, " -> "); ok {
+			name = unquote(to)
+		}
+		paths = append(paths, name)
+	}
+	return paths
+}
+
 // unquote is a path as git prints it, without the quotes it puts round one
 // with unusual characters.
 func unquote(name string) string {
@@ -145,16 +163,24 @@ func (r Repo) Restore(ctx context.Context, path string) error {
 
 // Commit commits the changes to files, paths in the repository, alone, with
 // message: anything else uncommitted is left as it is. Files with no changes
-// commit nothing, which is no error; it reports whether it committed.
+// commit nothing, which is no error; it reports whether it committed. A path
+// that's gone, and that git never kept, is left out, as git won't take it.
 func (r Repo) Commit(ctx context.Context, message string, files ...string) (bool, error) {
-	paths := slices.Concat([]string{"--"}, files)
-	res, err := r.git(ctx, slices.Concat([]string{"status", "--porcelain"}, paths)...)
+	res, err := r.git(ctx, slices.Concat([]string{"status", "--porcelain", "--"}, files)...)
 	if err != nil {
 		return false, err
 	}
 	if strings.TrimSpace(string(res.Stdout)) == "" {
 		return false, nil
 	}
+	changed := statusPaths(string(res.Stdout))
+	files = slices.DeleteFunc(slices.Clone(files), func(f string) bool {
+		if _, err := os.Lstat(filepath.Join(r.Dir, f)); err == nil {
+			return false
+		}
+		return !slices.ContainsFunc(changed, func(c string) bool { return c == f || strings.HasPrefix(c, f+"/") })
+	})
+	paths := slices.Concat([]string{"--"}, files)
 	if _, err := r.git(ctx, slices.Concat([]string{"add"}, paths)...); err != nil {
 		return false, err
 	}

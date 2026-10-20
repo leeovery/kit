@@ -48,7 +48,7 @@ var Descriptor = kind.Descriptor{
 	Name:    kindName,
 	Label:   "Power settings",
 	Group:   kind.Settings,
-	Section: &config.Section{Kind: kindName, Header: "power settings", Form: config.Power, Sorted: true},
+	Section: &config.Section{Kind: kindName, Header: "power settings", Form: config.Power, Sorted: true, Says: lineSays, FromMac: true},
 	Help: &kind.Help{
 		What:   "Power settings, in pmset's form",
 		Add:    "Declare power settings as this Mac has them",
@@ -82,6 +82,10 @@ func (p *Power) Values(list config.List) (config.List, error) {
 	}
 	return list, nil
 }
+
+// lineSays is what e's line says: its value, as the kind compares it with
+// pmset's.
+func lineSays(e config.Entry) ([]string, error) { return []string{e.Value}, nil }
 
 // settings are the power settings as they are, by source and setting, as
 // in charger:sleep. A Mac with one source, which pmset shows without a

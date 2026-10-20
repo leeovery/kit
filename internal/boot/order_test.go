@@ -98,7 +98,7 @@ func TestOrder(t *testing.T) {
 // too, those the boot's given.
 func TestDeclaresAmongTheKindsSections(t *testing.T) {
 	b, _ := newBoot(t, runnertest.New(t), GitHub{}, &asker{})
-	b.Kinds = kinds.Sections()
+	b.Kinds = kinds.ConfigSections()
 	read(t, b, map[string]string{config.File: kitToml, "shared/declarations": "[features]\ntouch-id-sudo\n\n[homebrew formulae]\njq\n"}, "laptop")
 	if !b.declares("touch-id-sudo") {
 		t.Error("touch-id-sudo isn't declared, want it read beside the formulae")
@@ -288,7 +288,7 @@ func TestKitConfigAddsANewMac(t *testing.T) {
 	if err := b.configStep().Apply(context.Background(), check.Result{}); err != nil {
 		t.Fatalf("apply = %v", err)
 	}
-	cfg, err := config.Load(b.Config, kinds.Sections())
+	cfg, err := config.Load(b.Config, kinds.ConfigSections())
 	if err != nil || !cfg.Knows("mini") {
 		t.Fatalf("kit.toml after: %v", err)
 	}

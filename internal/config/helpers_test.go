@@ -44,7 +44,7 @@ func loadRepo(t *testing.T, files map[string]string) *config.Config {
 	if _, ok := files[config.File]; !ok {
 		files[config.File] = twoMacs
 	}
-	cfg, err := config.Load(writeRepo(t, files), kinds.Sections())
+	cfg, err := config.Load(writeRepo(t, files), kinds.ConfigSections())
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}

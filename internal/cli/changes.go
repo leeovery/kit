@@ -154,25 +154,30 @@ func (r *run) scope(shared bool) string {
 // declare declares e in scope's declarations, noting each file it writes
 // changed: in the shared one, it takes e out of each Mac's file declaring
 // it, in the same edit, as a thing is in the shared declarations or a
-// Mac's, never both. It returns the Macs it's moved out of.
-func (c *changes) declare(kindName, scope string, e config.Entry) ([]string, error) {
+// Mac's, never both (config.DeclareShared). It returns what to say after
+// where it's declared: the Macs it's moved out of, and anything of theirs
+// it didn't carry.
+func (c *changes) declare(kindName, scope string, e config.Entry) (string, error) {
 	r := c.run
 	if scope != config.Shared {
 		if err := r.cfg.Declare(kindName, scope, e); err != nil {
-			return nil, err
+			return "", err
 		}
 		c.changed(config.DeclFile(scope))
-		return nil, nil
+		return "", nil
 	}
 	moved, err := r.macsDeclaring(kindName, e.Name)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-	written, err := r.cfg.DeclareShared(kindName, e, moved)
+	written, said, err := r.cfg.DeclareShared(kindName, e, moved)
 	for _, scope := range written {
 		c.changed(config.DeclFile(scope))
 	}
-	return moved, err
+	if said != "" {
+		said = "; " + said
+	}
+	return outOf(moved) + said, err
 }
 
 // checkDeclare says why declare would refuse e in scope's declarations,

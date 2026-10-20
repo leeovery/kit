@@ -182,6 +182,23 @@ func TestAddAStepSharedMovesItsFolder(t *testing.T) {
 		}
 	}
 
+	// A Mac's folder git never kept is moved, and left out of the commit,
+	// git having nothing of it to take out.
+	w = setUp(t, "#!/bin/bash\n", "")
+	dir := filepath.Join(w.home, ".config", "kit")
+	git := func(args ...string) []string { return append([]string{"-C", dir}, args...) }
+	all := []string{"laptop/declarations", "laptop/steps/tool", "shared/declarations", "shared/steps/tool", "studio/declarations", "studio/steps/tool"}
+	kept := []string{"laptop/declarations", "shared/declarations", "shared/steps/tool", "studio/declarations", "studio/steps/tool"}
+	w.fake.On("git", git(append([]string{"status", "--porcelain", "--"}, all...)...)...).Prints(" M laptop/declarations\n M shared/declarations\n?? shared/steps/tool/run\n M studio/declarations\n D studio/steps/tool/run\n")
+	w.fake.On("git", git(append([]string{"add", "--"}, kept...)...)...)
+	w.fake.On("git", git(append([]string{"commit", "--quiet", "-m", "kit step add tool (laptop)", "--"}, kept...)...)...)
+	w.fake.On("git", git("remote")...).Prints("origin\n")
+	w.fake.On("git", git("pull", "--rebase", "--autostash", "--quiet")...)
+	w.fake.On("git", git("push", "--quiet")...)
+	if out, errOut, code := w.run(t, "step", "add", "tool", "Installs the tool", "--after", "brew", "--shared"); code != 0 || !strings.Contains(out, "kit-config ok committed and pushed") {
+		t.Errorf("kit step add --shared, laptop's folder never committed, printed\n%s%s exit %d", out, errOut, code)
+	}
+
 	for _, c := range []struct {
 		name, studio, shared, want string
 	}{

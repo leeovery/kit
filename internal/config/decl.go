@@ -133,11 +133,14 @@ type Section struct {
 	// a line it refuses (Config.Declare).
 	Line func(Entry) error
 	// Says, when set, is what one of its lines says, as the kind reads it,
-	// its note aside, in parts, which a shared declare compares, in any
-	// order, with those of the lines it moves, naming those that differ.
-	// Unset, it's the line's words, --after, --before and --secret a part
-	// each, in any order.
+	// its note aside, in parts, which a shared declare compares, as a set,
+	// with those of the lines it moves, naming those that differ. Unset,
+	// it's the line's words, as one part.
 	Says func(Entry) ([]string, error)
+	// FromMac is whether its lines' values are read from the Mac as it's
+	// set, so a line moved that says otherwise is set the same here, not
+	// given: a refusal says so.
+	FromMac bool
 	// Held is whether it's a list whose sections can hold their lines back,
 	// options after the header saying what for: --after a step, or one of a
 	// step's things; --secret a secret they need, as in [homebrew formulae
@@ -167,10 +170,14 @@ type sectionDef struct {
 	items func(ref string) error
 	// line is the kind's own check of a line (Section.Line).
 	line func(Entry) error
-	// lineSays is the kind's own reading of what a line says (Section.Says).
+	// lineSays is the kind's own reading of what a line says (Section.Says),
+	// and fromMac whether its values are read from the Mac (Section.FromMac).
 	lineSays func(Entry) ([]string, error)
+	fromMac  bool
 	// carries are the options of its lines that no command gives, so a
-	// shared declare carries them from the lines it moves (sectionDef.carry).
+	// shared declare carries them from the lines it moves (sectionDef.carry),
+	// each as its reading has it, as in --after cask:app, after the line's
+	// first word.
 	carries []string
 	// holds are the options the kind's sections take after the header,
 	// holding their lines back, what for (its hold): --after a step, or one
@@ -211,17 +218,29 @@ var (
 
 // sectionDefs are the sections a declarations file may hold, in the order
 // kit writes them: the config's own first ones, the kinds', in the order
-// given, then the config's own others.
+// given, then the config's own others. A section given for one of the
+// config's own gives its reading alone (Section.Says), as the packages
+// reading those lines import this one.
 func sectionDefs(kinds []Section) []sectionDef {
-	defs := slices.Clone(ownLeading)
+	lead, trail := slices.Clone(ownLeading), slices.Clone(ownTrailing)
+	var defs []sectionDef
 	for _, k := range kinds {
-		d := sectionDef{header: k.Header, kind: k.Kind, form: k.Form, isKind: true, folders: k.Folders, items: k.Items, line: k.Line, lineSays: k.Says, sorted: k.Sorted}
+		own := func(d sectionDef) bool { return d.kind == k.Kind }
+		if i := slices.IndexFunc(lead, own); i >= 0 {
+			lead[i].lineSays = k.Says
+			continue
+		}
+		if i := slices.IndexFunc(trail, own); i >= 0 {
+			trail[i].lineSays = k.Says
+			continue
+		}
+		d := sectionDef{header: k.Header, kind: k.Kind, form: k.Form, isKind: true, folders: k.Folders, items: k.Items, line: k.Line, lineSays: k.Says, fromMac: k.FromMac, sorted: k.Sorted}
 		if k.Held {
 			d.holds = listOptions
 		}
 		defs = append(defs, d)
 	}
-	return append(defs, ownTrailing...)
+	return slices.Concat(lead, defs, trail)
 }
 
 // defFor is the section kind's declarations go in.
