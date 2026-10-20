@@ -63,6 +63,7 @@ type answer struct {
 	filter   func(input string) (string, error)
 	asks     int
 	late     bool
+	hangs    bool
 }
 
 func (s *Script) last() *answer {
@@ -129,6 +130,14 @@ func (s *Script) Asks(times int) *Script {
 // Answered.
 func (s *Script) AnswersLate() *Script {
 	s.last().late = true
+	return s
+}
+
+// Hangs has the command, having printed what it prints, wait for good,
+// till its context is done, then fail as the runner ends one: with the
+// context's error.
+func (s *Script) Hangs() *Script {
+	s.last().hangs = true
 	return s
 }
 
@@ -209,6 +218,10 @@ func (f *Fake) Run(ctx context.Context, cmd runner.Command) (runner.Result, erro
 				}
 			}
 		}
+	}
+	if a.hangs {
+		<-ctx.Done()
+		return runner.Result{ExitCode: -1}, fmt.Errorf("%s: %w", cmd, ctx.Err())
 	}
 	res := runner.Result{Stdout: []byte(stdout), Stderr: []byte(stderr), ExitCode: exit, Duration: a.duration}
 	if exit != 0 {

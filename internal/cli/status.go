@@ -109,8 +109,10 @@ type run struct {
 	// hold is how the password stands while kit asks for it as the run goes
 	// on: nil when it doesn't.
 	hold *adminHold
-	// held is whether macOS is asking the person at the Mac something, which
-	// the run's time limits wait on, at a terminal; unwatch stops watching.
+	// held is whether the person at the Mac is being asked something, which
+	// the run's time limits wait on, at a terminal: by macOS, in a window of
+	// its own, or for a program's sudo, through askpass, which holds up the
+	// command it's in; unwatch stops watching macOS.
 	held    func() bool
 	unwatch func()
 	// notices is kit's app, which posts the run's notifications, once the
@@ -370,7 +372,7 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 		if !list.Declared && unread == nil {
 			continue
 		}
-		step := kind.Placed(k, list, func() kind.Placing { return r.placed(d.Name) }, d.Needs...)
+		step := kind.Placed(k, list, func(ctx context.Context) kind.Placing { return r.placed(ctx, d.Name) }, d.Needs...)
 		step.Title, step.Area, step.Row, step.Tool = d.Label, steps.AreaDrift, d.Row, d.Tool
 		if unread != nil {
 			step.Check = func(context.Context) check.Result {
@@ -526,6 +528,10 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 	if a.WatchDialogs && a.pretty(a.Stdout) {
 		r.held, r.unwatch = watchDialogs(a.Runner(path, env), r.notifier(a.Getenv), sink, a.Now)
 	}
+	if asks != nil {
+		dialogs := r.held
+		r.held = func() bool { return asks.Pending() || dialogs != nil && dialogs() }
+	}
 	if raise != nil {
 		r.readyNotices(a.Getenv)
 	}
@@ -600,13 +606,26 @@ func (a *app) askpass(face render.Face) *askpass.Server {
 }
 
 // placed is how the kind called name's lines install, as the run places
-// them: what needs an administrator's password waiting for it while kit
-// asks, and left out once it's not to be had, as a check made while kit
-// asked took it as coming.
-func (r *run) placed(name string) kind.Placing {
+// them: while kit asks for an administrator's password, what needs it waits
+// for the answer, and it's left out once the password's not to be had, as
+// a check made while kit asked took it as coming. Nothing waits behind
+// another kind's things that wait for the answer: only what waits for
+// those things themselves does.
+func (r *run) placed(ctx context.Context, name string) kind.Placing {
 	p := r.placing[name]
-	if r.hold != nil && !r.hold.has.Load() {
-		p.Admin = r.hold.wait
+	if r.hold == nil {
+		return p
+	}
+	p.Admin = r.hold
+	if !r.hold.Held() {
+		p.Behind = slices.DeleteFunc(slices.Clone(p.Behind), func(w engine.Wait) bool {
+			ad, ok := r.kindsByName[w.Step].(kind.Admin)
+			if !ok {
+				return false
+			}
+			needing, err := ad.NeedsAdmin(ctx, []string{w.Thing})
+			return err == nil && len(needing) > 0
+		})
 	}
 	return p
 }

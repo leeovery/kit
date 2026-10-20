@@ -362,12 +362,35 @@ type Placing struct {
 	Behind []engine.Wait
 	// Held are its sections holding their lines back, in order.
 	Held []Held
-	// Admin, while kit asks for an administrator's password as the run goes
-	// on, waits for the answer, reporting whether it's held: the things that
-	// need it (Admin's NeedsAdmin) go in last, once it's answered, the rest
-	// meanwhile, and are left when it isn't given. Nil when kit holds the
-	// password, or doesn't ask as the run goes on.
-	Admin func(ctx context.Context) bool
+	// Admin is the administrator's password kit asks for as the run goes
+	// on: while it isn't held, the things that need it (Admin's NeedsAdmin)
+	// go in last, once it's answered, the rest meanwhile, and are left when
+	// it isn't given; each install can wait for it again (AwaitAdmin). Nil
+	// when kit doesn't ask as the run goes on.
+	Admin Password
+}
+
+// Password is an administrator's password kit asks for as the run goes on.
+type Password interface {
+	// Held reports whether it's held.
+	Held() bool
+	// Wait waits, while kit asks for it, for the answer, the step saying
+	// so, and reports whether it's held.
+	Wait(ctx context.Context) bool
+}
+
+type passwordKey struct{}
+
+// AwaitAdmin waits, for an install ctx runs that needs an administrator's
+// password, while kit asks for it, first or again, as it does once sudo's
+// forgotten it, reporting whether it's held: as an install's things that
+// need it wait (Placing's Admin). Where kit doesn't ask as the run goes on,
+// it waits for nothing: the password is as the run settled it.
+func AwaitAdmin(ctx context.Context) bool {
+	if p, ok := ctx.Value(passwordKey{}).(Password); ok {
+		return p.Wait(ctx)
+	}
+	return true
 }
 
 // Placed is the step Step is, k's lines installed as placed says, once the
@@ -376,7 +399,7 @@ type Placing struct {
 // (InstallDeclared). A section whose wait ends without what it waited for
 // isn't installed: its lines stay missing, saying what isn't there, as a
 // Blocker's do.
-func Placed(k Kind, declared config.List, placed func() Placing, needs ...string) engine.Step {
+func Placed(k Kind, declared config.List, placed func(context.Context) Placing, needs ...string) engine.Step {
 	var unmet deferred
 	return engine.Step{
 		Name:  k.Name(),
@@ -386,7 +409,7 @@ func Placed(k Kind, declared config.List, placed func() Placing, needs ...string
 		Apply: func(ctx context.Context, found check.Result) error {
 			var placing Placing
 			if placed != nil {
-				placing = placed()
+				placing = placed(ctx)
 			}
 			why, err := installApart(ctx, k, declared, placing, toInstall(found))
 			unmet.add(why)
@@ -451,6 +474,11 @@ func installApart(ctx context.Context, k Kind, declared config.List, placing Pla
 			errs = append(errs, err)
 		}
 	}
+	if placing.Admin != nil {
+		ctx = context.WithValue(ctx, passwordKey{}, placing.Admin)
+	}
+	// One count of names, across the installs they go in.
+	ctx = counting(ctx, k, names)
 	waiting := awaitingAdmin(ctx, k, placing, names)
 	// later are the installs of what waits for the password, each as it
 	// would have gone in.
@@ -490,7 +518,7 @@ func installApart(ctx context.Context, k Kind, declared config.List, placing Pla
 			put(apart[h.Hold], env)
 		}
 	}
-	if len(later) > 0 && placing.Admin(ctx) {
+	if len(later) > 0 && placing.Admin.Wait(ctx) {
 		for _, b := range later {
 			if err := install(ctx, k, declared, b.names, b.env); err != nil {
 				errs = append(errs, err)
@@ -507,11 +535,11 @@ type batch struct {
 }
 
 // awaitingAdmin are which of names wait for an administrator's password
-// kit doesn't hold (placing.Admin), as k says they need it: every one, when
-// k can't say; none, when nothing waits for it.
+// kit asks for and doesn't hold (placing.Admin), as k says they need it:
+// every one, when k can't say; none, when nothing waits for it.
 func awaitingAdmin(ctx context.Context, k Kind, placing Placing, names []string) map[string]bool {
 	ad, ok := k.(Admin)
-	if placing.Admin == nil || !ok || len(names) == 0 {
+	if placing.Admin == nil || placing.Admin.Held() || !ok || len(names) == 0 {
 		return nil
 	}
 	needing, err := ad.NeedsAdmin(ctx, names)
@@ -605,9 +633,8 @@ func install(ctx context.Context, k Kind, declared config.List, names, env []str
 		// install says it's done, whatever the kind's list says meanwhile.
 		stop = engine.Putting(ctx, names)
 	}
-	counted := counting(installing, k, names)
-	unwatch := watchQuiet(counted)
-	err := k.Install(counted, names)
+	unwatch := watchQuiet(installing)
+	err := k.Install(installing, names)
 	unwatch()
 	stop()
 	engine.Changed(ctx)
@@ -713,6 +740,26 @@ func Saying(ctx context.Context, says string) (resume func()) {
 	return func() { p.aside("") }
 }
 
+// Away has the step whose install ctx counts wait for something that says
+// so itself, as a step by hand done again (engine.Undone): it isn't quiet
+// meanwhile; back, it says how the install's going again, its quiet
+// counted from then.
+func Away(ctx context.Context) (back func()) {
+	p, ok := ctx.Value(progressKey{}).(*progress)
+	if !ok {
+		return func() {}
+	}
+	p.mu.Lock()
+	p.away = true
+	p.mu.Unlock()
+	return func() {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		p.away, p.quiet, p.heard = false, false, time.Now()
+		p.say()
+	}
+}
+
 // Waiting is Saying that the install waits for what, the title of the step
 // whose turn it is, as a Sharing kind's waits while another's install goes
 // on.
@@ -776,6 +823,9 @@ type progress struct {
 	heard   time.Time
 	last    string
 	quiet   bool
+	// away is whether the step waits for something that says so itself
+	// (Away).
+	away bool
 	// far is how far a Fetcher's install has said it's got, of 1.
 	far float64
 }
@@ -787,12 +837,14 @@ type progress struct {
 var quietAfter, quietLook = 2 * time.Minute, 15 * time.Second
 
 // watchQuiet watches the install ctx counts for going quiet, as hush does,
-// till the func it returns is called: nothing, where nothing counts it.
+// from now, till the func it returns is called: nothing, where nothing
+// counts it.
 func watchQuiet(ctx context.Context) (stop func()) {
 	p, ok := ctx.Value(progressKey{}).(*progress)
 	if !ok {
 		return func() {}
 	}
+	p.listen()
 	done := make(chan struct{})
 	after, tick := quietAfter, time.NewTicker(quietLook)
 	go func() {
@@ -815,7 +867,7 @@ func watchQuiet(ctx context.Context) (stop func()) {
 func (p *progress) hush(after time.Duration) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.quiet || time.Since(p.heard) < after {
+	if p.quiet || p.away || time.Since(p.heard) < after {
 		return
 	}
 	p.quiet = true
@@ -825,6 +877,18 @@ func (p *progress) hush(after time.Duration) {
 	}
 	event.Log(p.ctx, event.Logged{Line: fmt.Sprintf("%s has said nothing since %s; %s", p.program, p.heard.Format("15:04:05"), last), Alert: true})
 	p.say()
+}
+
+// listen notes the install's quiet counted from now, as it starts, or
+// it's back from waiting (Away): it's not quiet now.
+func (p *progress) listen() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.heard = time.Now()
+	if p.quiet {
+		p.quiet = false
+		p.say()
+	}
 }
 
 // line reads a line the install printed: heard, it's no longer quiet.

@@ -274,7 +274,7 @@ func TestStepFailingInstallSaysWhatItSaid(t *testing.T) {
 	if got := engine.Reason(s.Apply(t.Context(), s.Check(t.Context()))); got != "couldn't install jq: Error: it broke" {
 		t.Errorf("one install failing, the reason is %q; want what it said, not the command", got)
 	}
-	s = kind.Placed(k, declared("jq", "op"), func() kind.Placing { return kind.Placing{First: []string{"op"}} })
+	s = kind.Placed(k, declared("jq", "op"), func(context.Context) kind.Placing { return kind.Placing{First: []string{"op"}} })
 	if got := engine.Reason(s.Apply(t.Context(), s.Check(t.Context()))); got != "couldn't install op: Error: it broke; couldn't install jq: Error: it broke" {
 		t.Errorf("two installs failing, the reason is %q; want what each said, not the commands", got)
 	}
@@ -606,7 +606,7 @@ func heldWorld(ready bool) (*fakeKind, config.List, []kind.Held) {
 // install with its variable set, which the rest's isn't.
 func TestHeldLinesInstallApart(t *testing.T) {
 	k, list, held := heldWorld(true)
-	s := kind.Placed(k, list, func() kind.Placing { return kind.Placing{Held: held} })
+	s := kind.Placed(k, list, func(context.Context) kind.Placing { return kind.Placing{Held: held} })
 	if err := s.Apply(t.Context(), s.Check(t.Context())); err != nil {
 		t.Fatal(err)
 	}
@@ -623,7 +623,7 @@ func TestHeldLinesInstallApart(t *testing.T) {
 // applying's tried; the rest install.
 func TestHeldLinesWaitingForWhatNeverComes(t *testing.T) {
 	k, list, held := heldWorld(false)
-	s := kind.Placed(k, list, func() kind.Placing { return kind.Placing{Held: held} })
+	s := kind.Placed(k, list, func(context.Context) kind.Placing { return kind.Placing{Held: held} })
 	found := s.Check(t.Context())
 	if got := found.Items; len(got) != 3 || got[0].Action != kind.Install || got[2].Action != kind.Install {
 		t.Fatalf("before applying, items = %+v: want each to install", got)
@@ -660,7 +660,7 @@ func (e echoingKind) Install(ctx context.Context, names []string) error {
 // An install with a secret set that fails says so without its value.
 func TestAHeldInstallFailingHidesItsSecret(t *testing.T) {
 	k, list, held := heldWorld(true)
-	s := kind.Placed(echoingKind{k}, list, func() kind.Placing { return kind.Placing{Held: held} })
+	s := kind.Placed(echoingKind{k}, list, func(context.Context) kind.Placing { return kind.Placing{Held: held} })
 	err := s.Apply(t.Context(), s.Check(t.Context()))
 	if err == nil || err.Error() != "couldn't install owner/private/fetcher, owner/private/helper: fetch failed with [redacted]" {
 		t.Errorf("Apply() = %v, want the held install's failure, its secret hidden", err)
@@ -805,7 +805,7 @@ func TestWhatsWaitedForInstallsFirst(t *testing.T) {
 	k.installed = []kind.Installed{{Name: "fzf", Explicit: true}}
 	list.Entries = append(list.Entries, config.Entry{Name: "fzf", File: "brew"})
 	placing := kind.Placing{First: []string{"zoxide", "mise", "fzf", "owner/private/helper"}, Held: held}
-	s := kind.Placed(k, list, func() kind.Placing { return placing })
+	s := kind.Placed(k, list, func(context.Context) kind.Placing { return placing })
 	if err := s.Apply(t.Context(), s.Check(t.Context())); err != nil {
 		t.Fatal(err)
 	}
@@ -828,46 +828,184 @@ func (a *adminKind) NeedsAdmin(_ context.Context, names []string) ([]string, err
 
 func (*adminKind) SetAdmin(func(context.Context) bool) {}
 
+// password is a kind.Password: given, whether it's given; answered,
+// whether it has been; asked is what was in each time it was waited for.
+type password struct {
+	given, answered bool
+	installs        *[][]string
+	asked           [][][]string
+}
+
+func (p *password) Held() bool { return p.answered && p.given }
+
+func (p *password) Wait(context.Context) bool {
+	if p.installs != nil {
+		p.asked = append(p.asked, slices.Clone(*p.installs))
+	}
+	p.answered = true
+	return p.given
+}
+
 // While kit asks for an administrator's password as the run goes on, what
 // needs it goes in once it's answered, last, each as it would have gone in,
 // what's waited for first, a section held back with its variable; the rest
-// go in meanwhile. Refused, what needs it isn't installed.
+// go in meanwhile. Refused, what needs it isn't installed. Held already,
+// or not asked for, nothing waits.
 func TestWhatNeedsThePasswordWaitsForIt(t *testing.T) {
-	for _, held := range []bool{true, false} {
+	for _, given := range []bool{true, false} {
 		k, list, sections := heldWorld(true)
 		list.Entries = append(list.Entries, config.Entry{Name: "zoom", File: "brew"}, config.Entry{Name: "arq", File: "brew"})
 		k.aliases["zoom"], k.aliases["arq"] = "zoom", "arq"
 		ak := &adminKind{fakeKind: k, needing: []string{"zoom", "arq", "owner/private/helper"}}
-		var asked [][][]string
-		placing := kind.Placing{First: []string{"arq", "jq"}, Held: sections, Admin: func(context.Context) bool {
-			asked = append(asked, slices.Clone(k.installs))
-			return held
-		}}
-		s := kind.Placed(ak, list, func() kind.Placing { return placing })
+		pw := &password{given: given, installs: &k.installs}
+		placing := kind.Placing{First: []string{"arq", "jq"}, Held: sections, Admin: pw}
+		s := kind.Placed(ak, list, func(context.Context) kind.Placing { return placing })
 		if err := s.Apply(t.Context(), s.Check(t.Context())); err != nil {
 			t.Fatal(err)
 		}
 		before := [][]string{{"jq"}, {"owner/private/fetcher"}}
-		if len(asked) != 1 || !slices.EqualFunc(asked[0], before, slices.Equal) {
-			t.Errorf("held %v: when the answer was waited for, %q were in; want %q", held, asked, before)
+		if len(pw.asked) != 1 || !slices.EqualFunc(pw.asked[0], before, slices.Equal) {
+			t.Errorf("given %v: when the answer was waited for, %q were in; want %q", given, pw.asked, before)
 		}
 		want := before
-		if held {
+		if given {
 			want = append(want, []string{"arq"}, []string{"zoom"}, []string{"owner/private/helper"})
 		}
 		if !slices.EqualFunc(k.installs, want, slices.Equal) {
-			t.Errorf("held %v: installed %q, want %q", held, k.installs, want)
+			t.Errorf("given %v: installed %q, want %q", given, k.installs, want)
 		}
-		if held && !slices.Equal(k.envs[4], []string{"TOKEN=plain-words-value"}) {
+		if given && !slices.Equal(k.envs[4], []string{"TOKEN=plain-words-value"}) {
 			t.Errorf("the held section's line needing the password installed with %q, want its variable", k.envs[4])
 		}
 	}
-	// Not asking, nothing waits.
-	k, list, _ := heldWorld(true)
-	ak := &adminKind{fakeKind: k, needing: []string{"jq"}}
-	s := kind.Placed(ak, list, func() kind.Placing { return kind.Placing{} })
-	if err := s.Apply(t.Context(), s.Check(t.Context())); err != nil || !slices.EqualFunc(k.installs, [][]string{{"jq", "owner/private/fetcher", "owner/private/helper"}}, slices.Equal) {
-		t.Errorf("not asking, installed %q, %v; want everything as one", k.installs, err)
+	for name, placing := range map[string]kind.Placing{
+		"not asked for": {},
+		"held already":  {Admin: &password{given: true, answered: true}},
+	} {
+		k, list, _ := heldWorld(true)
+		ak := &adminKind{fakeKind: k, needing: []string{"jq"}}
+		s := kind.Placed(ak, list, func(context.Context) kind.Placing { return placing })
+		if err := s.Apply(t.Context(), s.Check(t.Context())); err != nil || !slices.EqualFunc(k.installs, [][]string{{"jq", "owner/private/fetcher", "owner/private/helper"}}, slices.Equal) {
+			t.Errorf("%s, installed %q, %v; want everything as one", name, k.installs, err)
+		}
+	}
+}
+
+// awaitingKind is a countingKind whose install, of each thing, says it's
+// done; things named needing need the password, and wait for it again
+// (AwaitAdmin), noting whether it's held, and aren't installed without it.
+type awaitingKind struct {
+	*countingKind
+	needing []string
+	held    []bool
+}
+
+func (a *awaitingKind) Install(ctx context.Context, names []string) error {
+	if slices.ContainsFunc(names, func(name string) bool { return slices.Contains(a.needing, name) }) {
+		held := kind.AwaitAdmin(ctx)
+		if a.held = append(a.held, held); !held {
+			return nil
+		}
+	}
+	for _, name := range names {
+		kind.Lines(ctx)("done " + name)
+	}
+	return a.fakeKind.Install(ctx, names)
+}
+
+// answers is a kind.Password not held, answered each time it's waited for
+// as the next of answers.
+type answers []bool
+
+func (*answers) Held() bool { return false }
+
+func (a *answers) Wait(context.Context) bool {
+	next := (*a)[0]
+	*a = (*a)[1:]
+	return next
+}
+
+func (a *awaitingKind) NeedsAdmin(_ context.Context, names []string) ([]string, error) {
+	return slices.DeleteFunc(slices.Clone(names), func(name string) bool { return !slices.Contains(a.needing, name) }), nil
+}
+
+func (*awaitingKind) SetAdmin(func(context.Context) bool) {}
+
+// An install can wait for the password again, as kit asks for it again: as
+// its placing's password says, or, kit not asking as the run goes on, at
+// once. And what goes in once the password's given is counted with the
+// rest: one count across the step's installs.
+func TestAnInstallWaitsForThePasswordAgain(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		admin kind.Password
+		held  []bool
+	}{
+		{"given", &answers{true, true}, []bool{true}},
+		{"given, then forgotten and refused", &answers{true, false}, []bool{false}},
+		{"not asked for", nil, []bool{true}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			k := &awaitingKind{countingKind: &countingKind{fakeKind: knowing("a", "b")}, needing: []string{"b"}}
+			var said []event.Doing
+			s := kind.Placed(k, declared("a", "b"), func(context.Context) kind.Placing { return kind.Placing{Admin: tt.admin} })
+			if err := s.Apply(saying(&said), s.Check(context.Background())); err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(k.held, tt.held) {
+				t.Errorf("each install found the password held %v, want %v", k.held, tt.held)
+			}
+			for _, d := range said {
+				if d.Of != 2 {
+					t.Errorf("the step said %+v, want each count of both", said)
+					break
+				}
+			}
+		})
+	}
+}
+
+// awayKind is a countingKind whose install, having printed its lines, waits
+// for something that says so itself (kind.Away) for a while, then prints
+// one line more.
+type awayKind struct {
+	*countingKind
+	away time.Duration
+}
+
+func (a *awayKind) Install(ctx context.Context, names []string) error {
+	err := a.countingKind.Install(ctx, names)
+	back := kind.Away(ctx)
+	event.Say(ctx, event.Doing{Says: "waiting for Sign in"})
+	time.Sleep(a.away)
+	back()
+	kind.Lines(ctx)("done b")
+	return err
+}
+
+// An install waiting for something that says so itself isn't noted quiet
+// meanwhile, however long it waits; back, it says how it's going again.
+func TestAnInstallAwayIsntQuiet(t *testing.T) {
+	defer kind.SetQuiet(20*time.Millisecond, 2*time.Millisecond)()
+	k := &awayKind{countingKind: &countingKind{fakeKind: knowing("a", "b"), prints: []string{"done a"}}, away: 100 * time.Millisecond}
+	var said []event.Doing
+	var alerts []string
+	var mu sync.Mutex
+	ctx := event.WithSaying(context.Background(), func(d event.Doing) { mu.Lock(); said = append(said, d); mu.Unlock() })
+	ctx = event.WithLogging(ctx, func(l event.Logged) {
+		mu.Lock()
+		defer mu.Unlock()
+		if l.Alert {
+			alerts = append(alerts, l.Line)
+		}
+	})
+	s := kind.Step(k, declared("a", "b"))
+	if err := s.Apply(ctx, s.Check(context.Background())); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	waiting := slices.IndexFunc(said, func(d event.Doing) bool { return d.Says == "waiting for Sign in" })
+	if len(alerts) > 0 || waiting < 0 || waiting+1 >= len(said) || said[waiting+1] != (event.Doing{Says: "installing b", Done: 1, Of: 2}) {
+		t.Errorf("alerts %q, the step said %+v; want none, waiting, then how the install's going", alerts, said)
 	}
 }
 
@@ -945,10 +1083,10 @@ func sharingWorld(log *installLog, ready func(context.Context) bool, checking fu
 	w = &watcher{step: "brew", says: "waiting for Homebrew casks", heard: make(chan struct{})}
 	brewKind := &turnKind{fakeKind: knowing("jq"), name: "brew", log: log}
 	brewing := kind.Placing{Behind: []engine.Wait{{Step: "cask", Thing: "app", Ready: ready}}}
-	brew = kind.Placed(brewKind, declared("jq"), func() kind.Placing { return brewing })
+	brew = kind.Placed(brewKind, declared("jq"), func(context.Context) kind.Placing { return brewing })
 	caskKind := &turnKind{fakeKind: knowing("app", "zoom"), name: "cask", log: log, after: map[string]string{"zoom": "brew:jq"}}
 	casking := kind.Placing{First: []string{"app"}}
-	cask = kind.Placed(caskKind, declared("app", "zoom"), func() kind.Placing { return casking })
+	cask = kind.Placed(caskKind, declared("app", "zoom"), func(context.Context) kind.Placing { return casking })
 	brew.Title, cask.Title = "Homebrew formulae", "Homebrew casks"
 	compare := cask.Check
 	var first sync.Once

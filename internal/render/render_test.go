@@ -847,7 +847,8 @@ func TestPrettyHoldsStillForAQuestion(t *testing.T) {
 
 // Held still while a question's up under the heading, as sudo's password
 // is as the run goes on, the face draws nothing of the run meanwhile, the
-// question left as it is, then, once it's answered, the run as it stands.
+// question left as it is, though another's asked and answered in turn,
+// then, once it's answered, the run as it stands.
 func TestPrettyHoldsStillWhileTheRunGoesOn(t *testing.T) {
 	var out syncBuffer
 	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).Sized(func() (int, int) { return 80, 40 })
@@ -859,6 +860,11 @@ func TestPrettyHoldsStillWhileTheRunGoesOn(t *testing.T) {
 	face.Emit(event.RunStarted{Time: at, Command: "apply", Machine: "laptop", Steps: steps})
 	face.Emit(event.StepStarted{Step: "brew", Doing: "applying"})
 	face.Emit(event.Doing{Step: "brew", Says: "installing jq", Of: 1})
+	// A program's sudo asking meanwhile has the face step aside, and back,
+	// as kit's own question's still up: it stays as it is.
+	aside := face.StepAside()
+	aside()
+	aside()
 	time.Sleep(400 * time.Millisecond)
 	if drawn := strings.TrimPrefix(out.String(), asked); drawn != "" {
 		t.Errorf("while the question was up, the face drew %q; want nothing", drawn)

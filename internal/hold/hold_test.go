@@ -109,6 +109,30 @@ func TestWithTimeoutWaitsForATurn(t *testing.T) {
 	hold.Waiting(context.Background())()
 }
 
+// A limit on going quiet counts from the last thing heard: what keeps
+// saying something runs on past it; what then says nothing for it ends.
+func TestWithQuiet(t *testing.T) {
+	defer hold.SetEvery(5 * time.Millisecond)()
+	ctx, heard, cancel := hold.WithQuiet(context.Background(), 60*time.Millisecond)
+	defer cancel()
+	for range 10 {
+		heard()
+		select {
+		case <-ctx.Done():
+			t.Fatal("ended while what ran under it was still saying something")
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+	select {
+	case <-ctx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("not ended once it had gone quiet")
+	}
+	if !errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		t.Errorf("Err() = %v, want the deadline exceeded", ctx.Err())
+	}
+}
+
 // During says whether the time limits were held at any look while what it
 // ran ran: held for a moment in the middle, held as it ends, or never; and
 // never, without With.

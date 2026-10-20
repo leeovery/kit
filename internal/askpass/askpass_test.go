@@ -87,8 +87,8 @@ func TestDescends(t *testing.T) {
 }
 
 // A sudo kit runs itself is answered as the helper answers a program's: the
-// password kept, the first time it asks, then the person's, which is kept
-// for the next sudo to be given first.
+// password kept, the first time it asks, then the person's; what they give
+// isn't kept, for kit to keep once sudo's taken it.
 func TestAnswersASudoKitRuns(t *testing.T) {
 	var asked []int
 	s, err := Start("", "/usr/bin/true", func(_ context.Context, n int) (string, error) {
@@ -107,8 +107,8 @@ func TestAnswersASudoKitRuns(t *testing.T) {
 			t.Errorf("asked %d: %q, %v; want %q", i, got, err, want)
 		}
 	}
-	if got, err := s.Answer()(t.Context(), 0); got != "typed1" || err != nil {
-		t.Errorf("the next sudo: %q, %v; want the password the person gave, kept", got, err)
+	if got, err := s.Answer()(t.Context(), 0); got != "hunter2" || err != nil {
+		t.Errorf("the next sudo: %q, %v; want the password kept, as it was", got, err)
 	}
 	if len(asked) != 2 {
 		t.Errorf("the person asked %v, want twice", asked)
@@ -123,8 +123,8 @@ func TestAnswersASudoKitRunsFromThePerson(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = s.Close() })
 
-	if got, err := s.Answer()(t.Context(), 0); got != "typed" || err != nil || s.kept() != "typed" {
-		t.Errorf("answered %q, %v, kept %q; want the person's, kept", got, err, s.kept())
+	if got, err := s.Answer()(t.Context(), 0); got != "typed" || err != nil || s.kept() != "" {
+		t.Errorf("answered %q, %v, kept %q; want the person's, not kept", got, err, s.kept())
 	}
 }
 
@@ -152,9 +152,10 @@ func TestEnvHasSudoAskTheRun(t *testing.T) {
 	}
 }
 
-// kit's own question, asked through the server, is asked alone: a sudo
-// asking meanwhile waits its turn, then, the person having given the
-// password, is given it, asking nothing more. What's given is kept.
+// What kit asks the person in its turn is asked alone: a program's sudo
+// asking meanwhile is pending, waiting its turn; then, the password the
+// person gave kept, as kit keeps it once its own sudo has taken it, is
+// given it, the person asked nothing more.
 func TestAsksOneThingAtATime(t *testing.T) {
 	asking := make(chan struct{}, 2)
 	s, err := Start("", "/usr/bin/true", func(context.Context, int) (string, error) {
@@ -165,32 +166,34 @@ func TestAsksOneThingAtATime(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = s.Close() })
-	up, answer := make(chan struct{}), make(chan struct{})
-	asked := make(chan string, 1)
+	up, answer, turned := make(chan struct{}), make(chan struct{}), make(chan struct{})
 	go func() {
-		password, err := s.Ask(t.Context(), func(context.Context, int) (string, error) {
+		defer close(turned)
+		s.Turn(func() {
 			close(up)
 			<-answer
-			return "typed", nil
-		}, 0)
-		if err != nil {
-			t.Error(err)
-		}
-		asked <- password
+			s.Keep("typed")
+		})
 	}()
 	<-up
 	given := make(chan string, 1)
 	go func() {
-		password, err := s.Answer()(t.Context(), 0)
+		password, err := ask(t, s)
 		if err != nil {
 			t.Error(err)
 		}
 		given <- password
 	}()
-	// The sudo's to be waiting its turn as the person answers.
-	time.Sleep(50 * time.Millisecond)
+	deadline := time.Now().Add(time.Second)
+	for !s.Pending() && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !s.Pending() {
+		t.Error("the sudo waiting its turn isn't pending")
+	}
 	close(answer)
-	if got, sudo := <-asked, <-given; got != "typed" || sudo != "typed" || s.kept() != "typed" || len(asking) != 0 {
-		t.Errorf("kit's question got %q, the sudo waiting %q, kept %q, the person asked again %d times; want typed, given once", got, sudo, s.kept(), len(asking))
+	<-turned
+	if sudo := <-given; sudo != "typed\n" || len(asking) != 0 || s.Pending() {
+		t.Errorf("the sudo waiting was given %q, the person asked again %d times, pending %v; want typed, given once", sudo, len(asking), s.Pending())
 	}
 }

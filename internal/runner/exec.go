@@ -49,6 +49,10 @@ func (e Exec) Run(ctx context.Context, cmd Command) (Result, error) {
 	started := e.Now()
 	stdout, stderr, err := e.start(ctx, program, cmd)
 	res := Result{Stdout: stdout, Stderr: stderr, ExitCode: -1, Duration: e.Now().Sub(started)}
+	// Ended, it may still exit as it chooses, as sudo does with what it ran.
+	if ctxErr := ctx.Err(); err != nil && ctxErr != nil {
+		return res, fmt.Errorf("%s: %w", cmd, ctxErr)
+	}
 	if exit, ok := errors.AsType[*exec.ExitError](err); ok && exit.Exited() {
 		res.ExitCode = exit.ExitCode()
 		exited := &ExitError{Command: cmd.String(), Code: res.ExitCode, Stderr: lastLine(stderr)}
@@ -58,9 +62,6 @@ func (e Exec) Run(ctx context.Context, cmd Command) (Result, error) {
 		return res, exited
 	}
 	if err != nil {
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return res, fmt.Errorf("%s: %w", cmd, ctxErr)
-		}
 		return res, fmt.Errorf("run %s: %w", cmd, err)
 	}
 	res.ExitCode = 0
@@ -104,7 +105,7 @@ func (e Exec) start(ctx context.Context, program string, cmd Command) (stdout, s
 			stderr.end()
 		}()
 	}
-	detach(c, cmd)
+	defer detach(c, cmd)()
 	err = c.Run()
 	return out.Bytes(), errOut.Bytes(), err
 }
@@ -116,16 +117,38 @@ func (e Exec) start(ctx context.Context, program string, cmd Command) (stdout, s
 // it runs in a session of its own too, without kit's terminal: a program
 // that asks there, as a program's own sudo asks for a password, fails at
 // once, where in the background of kit's terminal it would stop, unseen,
-// for good.
-func detach(c *exec.Cmd, cmd Command) {
+// for good. It returns what's called once c has ended.
+func detach(c *exec.Cmd, cmd Command) (ended func()) {
 	c.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if ownSudo(cmd) || cmd.SharesSudo {
 		c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	}
-	c.Cancel = func() error {
-		return syscall.Kill(-c.Process.Pid, syscall.SIGKILL)
-	}
+	group := func() error { return syscall.Kill(-c.Process.Pid, syscall.SIGKILL) }
+	c.Cancel = group
 	c.WaitDelay = waitDelay
+	if !ownSudo(cmd) {
+		return func() {}
+	}
+	// What kit's sudo runs runs as root, which kit can't signal: SIGKILL
+	// would end sudo alone, and leave it running. sudo passes SIGTERM on to
+	// it; the group's killed only once that's been ignored for waitDelay,
+	// before os/exec gives up on its output.
+	var mu sync.Mutex
+	var fallback *time.Timer
+	c.Cancel = func() error {
+		mu.Lock()
+		defer mu.Unlock()
+		fallback = time.AfterFunc(waitDelay, func() { _ = group() })
+		return c.Process.Signal(syscall.SIGTERM)
+	}
+	c.WaitDelay = 2 * waitDelay
+	return func() {
+		mu.Lock()
+		defer mu.Unlock()
+		if fallback != nil {
+			fallback.Stop()
+		}
+	}
 }
 
 // ownSudo reports whether cmd is sudo as kit runs it, never asking at the
@@ -151,7 +174,7 @@ func converse(ctx context.Context, c *exec.Cmd, cmd Command) (stdout, stderr []b
 	}
 	var out bytes.Buffer
 	c.Stdout = &out
-	detach(c, cmd)
+	defer detach(c, cmd)()
 	if err := c.Start(); err != nil {
 		return nil, nil, err
 	}

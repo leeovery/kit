@@ -148,38 +148,56 @@ func TestApplyAtATerminalAsksForThePasswordUpFront(t *testing.T) {
 
 // While kit asks for the password, the run goes on, however long the
 // answer takes: what doesn't need it is installed meanwhile, and what does
-// waits for the answer.
+// waits for the answer. A step waiting for a thing that needs the password,
+// as a line after zoom waits for it, waits for the answer too; the formulae,
+// which wait behind what the casks install first, don't.
 func TestApplyGoesOnWhileItAsksForThePassword(t *testing.T) {
-	w := missingWorld(t)
-	w.terminal = true
-	w.choose = func(string, []string) (int, error) { return 1, nil }
-	w.writeSection(t, "laptop", "homebrew casks", "zoom\n")
-	w.fake.On("brew", "list", "--cask", "--full-name", "-1").Prints("ghostty\n").
-		Then().Prints("ghostty\n").
-		Then().Prints("ghostty\nzoom\n")
-	w.fake.On("brew", "info", "--json=v2", "--cask", "zoom").Prints(zoomInfo)
-	w.expectPassword()
-	w.fake.On("brew", "update", "--quiet")
-	installed := make(chan struct{})
-	w.fake.On("brew", "install", "--formula", "ripgrep").Does(func() { close(installed) })
-	var typed atomic.Bool
-	w.typing = func() {
-		select {
-		case <-installed:
-		case <-time.After(10 * time.Second):
-			t.Error("nothing was installed while kit asked for the password, want ripgrep")
-		}
-		typed.Store(true)
-	}
-	w.fake.On("brew", "install", "--cask", "zoom").Does(func() {
-		if !typed.Load() {
-			t.Error("zoom was installed before the password was given")
-		}
-	})
+	for name, manual := range map[string]string{
+		"":                "",
+		"zoom waited for": `open "Open Zoom" --after cask:zoom --before gh --test test -f /opened` + "\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			w := missingWorld(t)
+			w.terminal = true
+			w.choose = func(string, []string) (int, error) { return 1, nil }
+			w.writeSection(t, "laptop", "homebrew casks", "zoom\n")
+			if manual != "" {
+				w.writeSection(t, "laptop", "manual", manual)
+				w.fake.On("test", "-f", "/opened")
+			}
+			var zoomIn atomic.Bool
+			w.fake.On("brew", "list", "--cask", "--full-name", "-1").Filters(func(string) (string, error) {
+				if zoomIn.Load() {
+					return "ghostty\nzoom\n", nil
+				}
+				return "ghostty\n", nil
+			})
+			w.fake.On("brew", "info", "--json=v2", "--cask", "zoom").Prints(zoomInfo)
+			w.expectPassword()
+			w.fake.On("brew", "update", "--quiet")
+			installed := make(chan struct{})
+			w.fake.On("brew", "install", "--formula", "ripgrep").Does(func() { close(installed) })
+			var typed atomic.Bool
+			w.typing = func() {
+				select {
+				case <-installed:
+				case <-time.After(10 * time.Second):
+					t.Error("nothing was installed while kit asked for the password, want ripgrep")
+				}
+				typed.Store(true)
+			}
+			w.fake.On("brew", "install", "--cask", "zoom").Does(func() {
+				if !typed.Load() {
+					t.Error("zoom was installed before the password was given")
+				}
+				zoomIn.Store(true)
+			})
 
-	out, errOut, _ := w.run(t, "apply")
-	if calls := w.fake.Calls(); !slices.Contains(calls, "brew install --cask zoom") {
-		t.Errorf("ran %q, want zoom installed once the password was given\n%s%s", calls, out, errOut)
+			out, errOut, _ := w.run(t, "apply")
+			if calls := w.fake.Calls(); !slices.Contains(calls, "brew install --cask zoom") {
+				t.Errorf("ran %q, want zoom installed once the password was given\n%s%s", calls, out, errOut)
+			}
+		})
 	}
 }
 

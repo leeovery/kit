@@ -45,14 +45,13 @@ func (a *app) holdAdmin(ctx context.Context, r *run, wanted map[string][]string)
 	if !needsAdmin(ctx, r, wanted) {
 		return nil, func() {}
 	}
-	var has atomic.Bool
-	has.Store(a.askAdmin(ctx, r, wanted))
-	held = func(context.Context) bool { return has.Load() }
-	r.tellAdmin(held)
-	if !has.Load() {
-		return held, func() {}
+	h := newAdminHold()
+	h.settle(a.askAdmin(ctx, r, wanted))
+	r.tellAdmin(h.held)
+	if !h.Held() {
+		return h.held, func() {}
 	}
-	return held, r.keepSudo(ctx, &has)
+	return h.held, r.keepSudo(ctx, h)
 }
 
 // holdAdminAlongside is holdAdmin for a run that goes on while kit asks, as
@@ -68,7 +67,7 @@ func (a *app) holdAdminAlongside(ctx context.Context, r *run, wanted map[string]
 	if !needsAdmin(ctx, r, wanted) {
 		return func() {}
 	}
-	h := &adminHold{answered: make(chan struct{})}
+	h := newAdminHold()
 	r.hold = h
 	r.tellAdmin(h.held)
 	about := a.readyToAsk(r, wanted)
@@ -80,11 +79,10 @@ func (a *app) holdAdminAlongside(ctx context.Context, r *run, wanted map[string]
 	keep := func() {}
 	var wg sync.WaitGroup
 	wg.Go(func() {
-		h.has.Store(a.giveAdmin(ctx, r, about))
-		close(h.answered)
+		h.settle(a.giveAdmin(ctx, r, about))
 		back()
-		if h.has.Load() {
-			keep = r.keepSudo(ctx, &h.has)
+		if h.Held() {
+			keep = r.keepSudo(ctx, h)
 		}
 	})
 	return func() {
@@ -94,57 +92,103 @@ func (a *app) holdAdminAlongside(ctx context.Context, r *run, wanted map[string]
 	}
 }
 
-// adminHold is how an administrator's password stands for a run that asks
-// for it as it goes on: being asked for till answered is closed, then held
-// or not, as has says.
+// adminHold is how an administrator's password stands for a run: being
+// asked for, first or again, till answered is closed, then held or not, as
+// has says. It's kind.Password, for what needs it to wait for it.
 type adminHold struct {
+	mu       sync.Mutex
 	answered chan struct{}
 	has      atomic.Bool
 }
 
-// asking reports whether kit's still asking.
+func newAdminHold() *adminHold {
+	return &adminHold{answered: make(chan struct{})}
+}
+
+// turn is what's closed once kit's asked.
+func (h *adminHold) turn() chan struct{} {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.answered
+}
+
+// asking reports whether kit's asking.
 func (h *adminHold) asking() bool {
 	select {
-	case <-h.answered:
+	case <-h.turn():
 		return false
 	default:
 		return true
 	}
 }
 
-// held reports whether the password's at hand: while kit's still asking, a
-// check takes it as coming, so what needs it is still to install, and
-// anything else as not yet.
+// askAgain notes kit asking for the password again, as sudo forgot it: it
+// isn't held meanwhile.
+func (h *adminHold) askAgain() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.has.Store(false)
+	select {
+	case <-h.answered:
+		h.answered = make(chan struct{})
+	default:
+	}
+}
+
+// settle notes kit's asked: has, whether the password's held.
+func (h *adminHold) settle(has bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.has.Store(has)
+	select {
+	case <-h.answered:
+	default:
+		close(h.answered)
+	}
+}
+
+// Held reports whether the password's held.
+func (h *adminHold) Held() bool {
+	return h.has.Load()
+}
+
+// held reports whether the password's at hand, as the kinds are told: while
+// kit's asking, a check takes it as coming, so what needs it is still to
+// install, and anything else as not yet.
 func (h *adminHold) held(ctx context.Context) bool {
 	if h.asking() {
 		return !event.Changing(ctx)
 	}
-	return h.has.Load()
+	return h.Held()
 }
 
-// wait waits, for the step ctx is running, while kit asks, for the answer,
+// Wait waits, for the step ctx is running, while kit asks, for the answer,
 // the step saying so and giving its job up meanwhile; it reports whether
 // the password's held.
-func (h *adminHold) wait(ctx context.Context) bool {
-	if h.asking() {
-		event.Say(ctx, event.Doing{Says: "waiting for an administrator's password"})
-		back := engine.Release(ctx)
-		select {
-		case <-h.answered:
-		case <-ctx.Done():
-		}
-		back()
-		event.Say(ctx, event.Doing{Says: "applying"})
+func (h *adminHold) Wait(ctx context.Context) bool {
+	turn := h.turn()
+	select {
+	case <-turn:
+		return h.Held()
+	default:
 	}
-	return h.has.Load()
+	event.Say(ctx, event.Doing{Says: "waiting for an administrator's password"})
+	back := engine.Release(ctx)
+	select {
+	case <-turn:
+	case <-ctx.Done():
+	}
+	back()
+	event.Say(ctx, event.Doing{Says: "applying"})
+	return h.Held()
 }
 
 // afterAdmin is apply, a step's whose apply needs an administrator's
-// password, applied once kit has it, should kit still be asking for it.
+// password, applied once kit has it, should kit be asking for it.
 func (r *run) afterAdmin(apply func(context.Context, check.Result) error) func(context.Context, check.Result) error {
 	return func(ctx context.Context, found check.Result) error {
 		if r.hold != nil {
-			r.hold.wait(ctx)
+			r.hold.Wait(ctx)
 		}
 		return apply(ctx, found)
 	}
@@ -175,54 +219,62 @@ func sudoHolds(r *run) func(context.Context) bool {
 	}
 }
 
-// keepSudo keeps sudo's hold on the run's password fresh (renewSudo) till
-// the stop it returns, has forgetting it once sudo can't be given it again.
-func (r *run) keepSudo(ctx context.Context, has *atomic.Bool) (stop func()) {
+// keepSudo keeps sudo's hold on the run's password, as h holds it, fresh
+// (renewSudo) till the stop it returns.
+func (r *run) keepSudo(ctx context.Context, h *adminHold) (stop func()) {
 	ctx, cancel := context.WithCancel(ctx)
 	var wg sync.WaitGroup
-	wg.Go(func() {
-		if !renewSudo(ctx, r.run, r.askpass, sudoRefresh, has.Load) {
-			has.Store(false)
-		}
-	})
+	wg.Go(func() { renewSudo(ctx, r.run, r.askpass, sudoRefresh, h) })
 	return func() {
 		cancel()
 		wg.Wait()
 	}
 }
 
+// holding is how the run holds its password, as renewSudo keeps it.
+type holding interface {
+	Held() bool
+	askAgain()
+	settle(has bool)
+}
+
 // renewSudo renews sudo's hold on the run's password every interval, while
-// held says the run holds one, till ctx ends. When sudo has forgotten it,
-// as after the Mac slept past sudo's five minutes, or sudo -K, it's given
-// again, as asks answers sudo: the password kept, else the person's, in
-// kit's field; the log has sudo -n -v failing, then sudo -v given it. It
-// returns false once it couldn't be given again, the password forgotten
-// then, for nothing to be given a wrong one.
-func renewSudo(ctx context.Context, run runner.Runner, asks *askpass.Server, interval time.Duration, held func() bool) bool {
+// h holds one, till ctx ends. When sudo has forgotten it, as after the Mac
+// slept past sudo's five minutes, or sudo -K, it's given again, as asks
+// answers sudo: the password kept, else the person's, in kit's field; the
+// log has sudo -n -v failing, then sudo -v given it. It isn't held
+// meanwhile, and what sudo takes is kept; once it couldn't be given again,
+// it's forgotten, for nothing to be given a wrong one.
+func renewSudo(ctx context.Context, run runner.Runner, asks *askpass.Server, interval time.Duration, h holding) {
 	tick := time.NewTicker(interval)
 	defer tick.Stop()
 	for {
 		select {
 		case <-ctx.Done():
-			return true
+			return
 		case <-tick.C:
 		}
-		if !held() {
+		if !h.Held() {
 			continue
 		}
 		if _, err := run.Run(ctx, runner.Command{Name: "sudo", Args: []string{"-n", "-v"}}); err == nil || ctx.Err() != nil {
 			continue
 		}
-		if asks != nil && giveSudo(ctx, run, asks.Answer()) {
-			continue
-		}
-		if ctx.Err() != nil {
-			return true
-		}
+		h.askAgain()
+		took := false
 		if asks != nil {
-			asks.Keep("")
+			asks.Turn(func() {
+				var given string
+				if given, took = giveSudo(ctx, run, asks.Answer()); took && given != "" {
+					asks.Keep(given)
+				} else if !took && ctx.Err() == nil {
+					asks.Keep("")
+				}
+			})
 		}
-		return false
+		if h.settle(took); !took {
+			return
+		}
 	}
 }
 
@@ -235,8 +287,8 @@ const sudoAsks = "[kit: sudo wants the password]"
 // input, never on a command line or in the log. kit gives sudo no time
 // limit: sudo's own, five minutes for the password, can run out while the
 // person's away, so the answer that came too late is given to sudo asked
-// again. Whether sudo took it.
-func giveSudo(ctx context.Context, run runner.Runner, answer func(ctx context.Context, asked int) (string, error)) bool {
+// again. Whether sudo took it, and what it took: none, for Touch ID.
+func giveSudo(ctx context.Context, run runner.Runner, answer func(ctx context.Context, asked int) (string, error)) (given string, took bool) {
 	var late string
 	for {
 		var last string
@@ -247,6 +299,7 @@ func giveSudo(ctx context.Context, run runner.Runner, answer func(ctx context.Co
 			Asks:    sudoAsks,
 			Answer: func(ctx context.Context, asked int) (string, error) {
 				if asked == 0 && late != "" {
+					last = late
 					return late, nil
 				}
 				given, err := answer(ctx, asked)
@@ -256,9 +309,9 @@ func giveSudo(ctx context.Context, run runner.Runner, answer func(ctx context.Co
 		})
 		switch {
 		case err == nil:
-			return true
+			return last, true
 		case !errors.Is(err, runner.ErrAnsweredLate) || last == "" || ctx.Err() != nil:
-			return false
+			return "", false
 		}
 		late = last
 	}
@@ -292,9 +345,9 @@ func (a *app) readyToAsk(r *run, wanted map[string][]string) look.Row {
 
 // giveAdmin has sudo take an administrator's password (giveSudo): each time
 // sudo asks, kit asks in its own field, in the row about, nothing else
-// asking meanwhile; what's typed is kept for the run, for what asks later.
-// Whether sudo took it.
-func (a *app) giveAdmin(ctx context.Context, r *run, about look.Row) bool {
+// asking meanwhile (askpass's Turn); what sudo takes is kept for the run,
+// for what asks later. Whether sudo took it.
+func (a *app) giveAdmin(ctx context.Context, r *run, about look.Row) (took bool) {
 	ask := func(ctx context.Context, asked int) (string, error) {
 		row := about
 		if asked > 0 {
@@ -302,15 +355,18 @@ func (a *app) giveAdmin(ctx context.Context, r *run, about look.Row) bool {
 		}
 		return a.ReadSecret(ctx, row)
 	}
-	took := giveSudo(ctx, r.run, func(ctx context.Context, asked int) (string, error) {
-		if r.askpass == nil {
-			return ask(ctx, asked)
-		}
-		return r.askpass.Ask(ctx, ask, asked)
-	})
-	if !took && r.askpass != nil {
-		r.askpass.Keep("")
+	if r.askpass == nil {
+		_, took = giveSudo(ctx, r.run, ask)
+		return took
 	}
+	r.askpass.Turn(func() {
+		var given string
+		if given, took = giveSudo(ctx, r.run, ask); !took {
+			r.askpass.Keep("")
+		} else if given != "" {
+			r.askpass.Keep(given)
+		}
+	})
 	return took
 }
 

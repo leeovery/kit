@@ -38,6 +38,20 @@ func waitsOf(ctx context.Context) []*atomic.Int32 {
 // ctx's limits are held, or while what runs under it waits its turn
 // (Waiting).
 func WithTimeout(ctx context.Context, d time.Duration) (context.Context, context.CancelFunc) {
+	return limit(ctx, d, nil)
+}
+
+// WithQuiet is WithTimeout, but its time counts from the last call of heard:
+// a limit on how long what runs under it may go on saying nothing.
+func WithQuiet(ctx context.Context, d time.Duration) (_ context.Context, heard func(), _ context.CancelFunc) {
+	said := new(atomic.Bool)
+	c, cancel := limit(ctx, d, said)
+	return c, func() { said.Store(true) }, cancel
+}
+
+// limit is ctx limited to d, its time counted from the start, and again
+// from each time said is set.
+func limit(ctx context.Context, d time.Duration, said *atomic.Bool) (context.Context, context.CancelFunc) {
 	held, _ := ctx.Value(heldKey{}).(func() bool)
 	waits := new(atomic.Int32)
 	inner, cancel := context.WithCancel(context.WithValue(ctx, waitsKey{}, append(slices.Clip(waitsOf(ctx)), waits)))
@@ -54,6 +68,9 @@ func WithTimeout(ctx context.Context, d time.Duration) (context.Context, context
 			case now := <-t.C:
 				if waits.Load() == 0 && (held == nil || !held()) {
 					left -= now.Sub(last)
+				}
+				if said != nil && said.Swap(false) {
+					left = d
 				}
 				last = now
 			}

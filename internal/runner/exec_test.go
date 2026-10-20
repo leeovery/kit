@@ -184,6 +184,49 @@ func TestExecEndsACommandWhenItsContextIsDone(t *testing.T) {
 	}
 }
 
+// kit's own sudo, once ended, is sent SIGTERM, which sudo passes on to
+// what it runs as root, and which kit can't signal itself; ignored, as long
+// as kit waits for a command's output once ended, the group's killed.
+func TestExecEndsKitsOwnSudoThroughSudo(t *testing.T) {
+	dir := t.TempDir()
+	relayed, child := filepath.Join(dir, "relayed"), filepath.Join(dir, "child")
+	r, _ := programs(t, map[string]string{
+		"sudo":     `/bin/sleep 30 & pid=$!; trap 'echo relayed > "$2"; kill $pid; exit 143' TERM; echo ready; wait`,
+		"stubborn": `trap '' TERM; /bin/sleep 30 & echo $! > "$2"; echo ready; wait`,
+	})
+	// endOnceReady runs sudo, ending it once it's ready.
+	endOnceReady := func(arg string) {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		ready := func(line string) {
+			if line == "ready" {
+				cancel()
+			}
+		}
+		if _, err := r.Run(ctx, runner.Command{Name: "sudo", Args: []string{"-n", arg}, Lines: ready}); !errors.Is(err, context.Canceled) {
+			t.Errorf("Run() = %v, want it ended", err)
+		}
+	}
+	start := time.Now()
+	endOnceReady(relayed)
+	if _, err := os.Stat(relayed); err != nil || time.Since(start) > 3*time.Second {
+		t.Errorf("sudo wasn't sent SIGTERM to pass on (%v), or wasn't ended at once (%v)", err, time.Since(start))
+	}
+
+	if err := os.Rename(filepath.Join(r.Path[0], "stubborn"), filepath.Join(r.Path[0], "sudo")); err != nil {
+		t.Fatal(err)
+	}
+	endOnceReady(child)
+	data, err := os.ReadFile(child)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, _ := strconv.Atoi(strings.TrimSpace(string(data)))
+	if pid == 0 || syscall.Kill(pid, 0) == nil {
+		t.Errorf("what sudo ran, ignoring SIGTERM, still runs (%d), want its group killed", pid)
+	}
+}
+
 // terminalCheck prints whether the program has a terminal to ask at: one
 // it can open, as sudo opens /dev/tty to ask for a password.
 const terminalCheck = `if (exec 3</dev/tty) 2>/dev/null; then echo terminal; else echo none; fi`

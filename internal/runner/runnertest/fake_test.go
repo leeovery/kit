@@ -161,3 +161,17 @@ func TestFakeAsks(t *testing.T) {
 		t.Errorf("Run() = %v, answered %q; want exit 1, the answer too late, none kept", err, late.Answered())
 	}
 }
+
+// A command scripted to hang prints what it prints, then waits till its
+// context is done, failing with the context's error.
+func TestFakeHangs(t *testing.T) {
+	fake := runnertest.New(t)
+	fake.On("mas", "install", "1").Prints("==> Downloading Bear\n").Hangs()
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	var heard []string
+	_, err := fake.Run(ctx, runner.Command{Name: "mas", Args: []string{"install", "1"}, Lines: func(line string) { heard = append(heard, line) }})
+	if !errors.Is(err, context.DeadlineExceeded) || !slices.Equal(heard, []string{"==> Downloading Bear"}) {
+		t.Errorf("Run() = %v, printing %q; want what it prints, then the deadline exceeded", err, heard)
+	}
+}
