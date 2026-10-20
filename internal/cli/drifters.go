@@ -268,6 +268,9 @@ func (d configDrifter) choices(it check.Item) []choice {
 		// repository whole, the user's to move.
 		return []choice{snoozeChoice}
 	}
+	if it.State == steps.ConfigUntracked {
+		return []choice{{action: adopt, label: "commit it: out of kit-config, kept on this Mac"}, {action: revert, label: "undo it: tracked again"}, snoozeChoice}
+	}
 	undo := map[string]string{
 		steps.ConfigEdited:  "undo it: back to the last commit",
 		steps.ConfigAdded:   "undo it: the file to the Bin",
@@ -284,6 +287,7 @@ func (d configDrifter) describe(it check.Item) string {
 		steps.ConfigEdited:     "edited, not committed",
 		steps.ConfigAdded:      "new, not committed",
 		steps.ConfigDeleted:    "deleted, not committed",
+		steps.ConfigUntracked:  "untracked, kept on this Mac",
 		steps.ConfigRepository: "a repository of its own, which kit-config can't keep: move it out of kit-config",
 	}[it.State]
 }
@@ -310,19 +314,32 @@ func (d configDrifter) settle(ctx context.Context, _ *run, c *changes, dec decis
 		c.changed(dec.item.Name)
 		return check.Result{State: check.OK, Summary: "to commit"}
 	case revert:
-		if dec.item.State == steps.ConfigAdded {
-			binned, err := linked.ToBin(d.home, filepath.Join(d.repo.Dir, dec.item.Name))
-			if err != nil {
-				return check.Result{State: check.Failed, Reason: "couldn't move it to the Bin: " + engine.Reason(err)}
-			}
-			return check.Result{State: check.OK, Summary: "undone: the file is in the Bin (" + binned + ")"}
-		}
-		if err := d.repo.Restore(ctx, dec.item.Name); err != nil {
-			return check.Result{State: check.Failed, Reason: "couldn't undo it: " + engine.Reason(err)}
-		}
-		return check.Result{State: check.OK, Summary: "undone: back to the last commit"}
+		return d.undo(ctx, dec.item.Item)
 	}
 	return check.Result{State: check.Failed, Reason: "nothing to do: " + dec.action}
+}
+
+// undo puts the edit it back as last committed: a new file in the Bin, one
+// untracked in git's index again, kept as it is on disk, anything else as
+// it was.
+func (d configDrifter) undo(ctx context.Context, it check.Item) check.Result {
+	switch it.State {
+	case steps.ConfigAdded:
+		binned, err := linked.ToBin(d.home, filepath.Join(d.repo.Dir, it.Name))
+		if err != nil {
+			return check.Result{State: check.Failed, Reason: "couldn't move it to the Bin: " + engine.Reason(err)}
+		}
+		return check.Result{State: check.OK, Summary: "undone: the file is in the Bin (" + binned + ")"}
+	case steps.ConfigUntracked:
+		if err := d.repo.Track(ctx, it.Name); err != nil {
+			return check.Result{State: check.Failed, Reason: "couldn't undo it: " + engine.Reason(err)}
+		}
+		return check.Result{State: check.OK, Summary: "undone: tracked again"}
+	}
+	if err := d.repo.Restore(ctx, it.Name); err != nil {
+		return check.Result{State: check.Failed, Reason: "couldn't undo it: " + engine.Reason(err)}
+	}
+	return check.Result{State: check.OK, Summary: "undone: back to the last commit"}
 }
 
 // applyDrifter is drift the step's apply settles, with nothing to declare

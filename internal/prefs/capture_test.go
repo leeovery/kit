@@ -47,25 +47,37 @@ func newWorld(t *testing.T, lists prefs.Lists) *world {
 // pushes scripts the commit of the Mac's folder with message, git's
 // status of it being status (-z), each file of which kit stages as it is on
 // disk in an index of its own (update), what's staged there being staged
-// (-z), as real git prints them; and a private remote taking it.
+// (-z), the files committed, which the user's index then takes as
+// committed, as real git prints them; and a private remote taking it, with
+// nothing new of its own.
 func (w *world) pushes(t *testing.T, message, status string, update []string, staged string) {
 	t.Helper()
-	reads := func(in string) (string, error) {
-		if want := strings.Join(update, "\x00") + "\x00"; in != want {
-			t.Errorf("git read %q, want %q", in, want)
+	reads := func(want string) func(string) (string, error) {
+		return func(in string) (string, error) {
+			if in != want {
+				t.Errorf("git read %q, want %q", in, want)
+			}
+			return "", nil
 		}
-		return "", nil
 	}
+	const head = "0e0bf17a399109574ffb00e33300280a33f81ab7"
+	gitDir := filepath.Join(w.clone, ".git")
 	w.fake.On("git", "-C", w.clone, "--literal-pathspecs", "status", "--porcelain", "-z", "--untracked-files=all", "--no-renames", "--", "laptop").Prints(status)
-	w.fake.On("git", "-C", w.clone, "rev-parse", "--absolute-git-dir", "--verify", "--quiet", "HEAD").Prints(t.TempDir() + "\n0e0bf17a399109574ffb00e33300280a33f81ab7\n")
-	w.fake.On("git", "-C", w.clone, "read-tree", "HEAD")
-	w.fake.On("git", "-C", w.clone, "update-index", "--add", "--remove", "--replace", "-z", "--stdin").Filters(reads)
+	w.fake.On("git", "-C", w.clone, "rev-parse", "--absolute-git-dir").Prints(gitDir + "\n")
+	w.fake.On("git", "-C", w.clone, "rev-parse", "--verify", "--quiet", "HEAD").Prints(head + "\n")
+	w.fake.On("git", "-C", w.clone, "read-tree", head)
+	w.fake.On("git", "-C", w.clone, "update-index", "--add", "--remove", "--replace", "-z", "--stdin").Filters(reads(strings.Join(update, "\x00") + "\x00"))
 	w.fake.On("git", "-C", w.clone, "diff", "--cached", "--name-only", "-z", "--no-renames").Prints(staged)
 	w.fake.On("git", "-C", w.clone, "commit", "--quiet", "-m", message)
-	w.fake.On("git", "-C", w.clone, "--literal-pathspecs", "reset", "--quiet", "--pathspec-from-file=-", "--pathspec-file-nul").Filters(reads)
+	w.fake.On("git", "-C", w.clone, "rev-parse", "--verify", "--quiet", "HEAD^").Prints(head + "\n")
+	w.fake.On("git", "-C", w.clone, "--literal-pathspecs", "reset", "--quiet", "--pathspec-from-file=-", "--pathspec-file-nul").Filters(reads(staged)).Does(func() {
+		w.write(t, filepath.Join(gitDir, "kit-index.next"), "the index, as committed")
+	})
 	w.fake.On("git", "-C", w.clone, "remote", "get-url", "origin").Prints(remote + "\n")
 	w.fake.On("gh", "repo", "view", "someone/prefs", "--json", "visibility", "--jq", ".visibility").Prints("PRIVATE\n")
 	w.fake.On("git", "-C", w.clone, "remote").Prints("origin\n")
+	w.fake.On("git", "-C", w.clone, "fetch", "--quiet")
+	w.fake.On("git", "-C", w.clone, "rev-list", "--count", "HEAD..@{u}").Prints("0\n")
 	w.fake.On("git", "-C", w.clone, "push", "--quiet")
 }
 

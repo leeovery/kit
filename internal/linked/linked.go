@@ -463,8 +463,8 @@ func (f *Files) Revert(ctx context.Context, name string) (string, error) {
 // scope's home folder in the repository, and links each back: the links it
 // made, and the files in the folder git ignores, by name, left as they are
 // on this Mac alone. Nothing moves unless all can: a file already
-// declared, a link, one outside the home folder, or a path git ignores
-// itself, is refused.
+// declared, a link, one outside the home folder, a path git ignores
+// itself, or a folder holding a repository, is refused.
 func (f *Files) Add(ctx context.Context, path, scope string) ([]Link, []string, error) {
 	rel, err := filepath.Rel(f.Home, path)
 	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, "../") || path == f.Repo.Dir || strings.HasPrefix(path, f.Repo.Dir+"/") {
@@ -482,23 +482,8 @@ func (f *Files) Add(ctx context.Context, path, scope string) ([]Link, []string, 
 		}
 		return nil, nil, fmt.Errorf("%s is a link: add the file it leads to", f.Tilde(path))
 	case info.IsDir():
-		err := filepath.WalkDir(path, func(p string, d fs.DirEntry, err error) error {
-			switch {
-			case err != nil:
-				return err
-			case p == f.Repo.Dir:
-				return filepath.SkipDir
-			}
-			if d.Type().IsRegular() && d.Name() != ".DS_Store" {
-				files = append(files, p)
-			}
-			return nil
-		})
-		if err != nil {
+		if files, err = f.filesIn(path); err != nil {
 			return nil, nil, err
-		}
-		if len(files) == 0 {
-			return nil, nil, fmt.Errorf("%s has no files of its own to add", f.Tilde(path))
 		}
 	case info.Mode().IsRegular():
 		files = []string{path}
@@ -546,6 +531,31 @@ func (f *Files) Add(ctx context.Context, path, scope string) ([]Link, []string, 
 		}
 	}
 	return links, ignored, f.remember(append(declared, links...))
+}
+
+// filesIn are the files in the folder at path, to add, but Finder's
+// .DS_Store files: a folder that is a repository, or holds one, a .git file
+// or folder anywhere in it, is refused, naming where, as kit-config can't
+// keep a repository in it.
+func (f *Files) filesIn(path string) ([]string, error) {
+	var files []string
+	err := filepath.WalkDir(path, func(p string, d fs.DirEntry, err error) error {
+		switch {
+		case err != nil:
+			return err
+		case p == f.Repo.Dir:
+			return filepath.SkipDir
+		case d.Name() == ".git":
+			return fmt.Errorf("%s is a repository of its own (.git), which kit-config can't keep", f.Tilde(filepath.Dir(p)))
+		case d.Type().IsRegular() && d.Name() != ".DS_Store":
+			files = append(files, p)
+		}
+		return nil
+	})
+	if err == nil && len(files) == 0 {
+		err = fmt.Errorf("%s has no files of its own to add", f.Tilde(path))
+	}
+	return files, err
 }
 
 // keptByGit are links but those whose files git ignores, by the

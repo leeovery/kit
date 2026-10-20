@@ -43,7 +43,7 @@ func ConfigSync(run runner.Runner, dir string, now func() time.Time) engine.Step
 				count++
 			}
 			if count > 0 && now().Sub(time.Unix(oldest, 0)) > syncWithin {
-				return problem("config-sync", "commits waiting", [3]string{"unpushed", fmt.Sprintf("%d commits not pushed, the oldest over an hour old", count), "push them: git -C " + dir + " push (kit pulls with rebase first when it commits)"})
+				return problem("config-sync", "commits waiting", [3]string{"unpushed", fmt.Sprintf("%d commits not pushed, the oldest over an hour old", count), "push them: git -C " + dir + " push (kit rebases onto the remote first when it pushes)"})
 			}
 			return check.Result{State: check.OK, Summary: "pushed", Glance: "pushed"}
 		},
@@ -51,11 +51,14 @@ func ConfigSync(run runner.Runner, dir string, now func() time.Time) engine.Step
 }
 
 // The states of kit-config's edits, as the config step's items carry them:
-// a repository is one of its own, nested in kit-config, which it can't keep.
+// untracked is a file taken out of git's index, kept on this Mac, as git
+// ignores it; a repository is one of its own, nested in kit-config, which
+// it can't keep.
 const (
 	ConfigEdited     = gitrepo.Edited
 	ConfigAdded      = gitrepo.Added
 	ConfigDeleted    = gitrepo.Deleted
+	ConfigUntracked  = gitrepo.Untracked
 	ConfigRepository = gitrepo.Repository
 )
 
@@ -76,11 +79,7 @@ func ConfigEdits(repo gitrepo.Repo) engine.Step {
 			}
 			res := check.Result{State: check.OK, Summary: "all committed"}
 			for _, c := range changes {
-				detail := fmt.Sprintf("+%d −%d lines", c.Added, c.Removed)
-				if c.State == ConfigRepository {
-					detail = "a repository of its own, which kit-config can't keep"
-				}
-				res.Items = append(res.Items, check.Item{ID: ConfigEditsName + ":" + c.Path, Name: c.Path, State: c.State, Detail: detail})
+				res.Items = append(res.Items, check.Item{ID: ConfigEditsName + ":" + c.Path, Name: c.Path, State: c.State, Detail: editDetail(c)})
 			}
 			if n := len(res.Items); n > 0 {
 				res.State = check.Attention
@@ -89,6 +88,19 @@ func ConfigEdits(repo gitrepo.Repo) engine.Step {
 			return res
 		},
 	}
+}
+
+// editDetail says more of an edit: the lines it adds and removes, or what
+// to do about a repository nested in kit-config; nothing of a file
+// untracked, whose lines are kept.
+func editDetail(c gitrepo.Change) string {
+	switch c.State {
+	case ConfigUntracked:
+		return ""
+	case ConfigRepository:
+		return "kit-config can't keep it"
+	}
+	return fmt.Sprintf("+%d −%d lines", c.Added, c.Removed)
 }
 
 // plural is one or many, as n says.

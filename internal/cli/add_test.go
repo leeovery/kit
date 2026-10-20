@@ -355,17 +355,28 @@ func TestAddCommitsWhatWasAdded(t *testing.T) {
 }
 
 // A shared declare that writes the shared file, then fails on a Mac's,
-// commits what it wrote under the name it tried.
+// commits what it wrote under the name it tried, beside a name declared.
 func TestAddSharedFailingPartwayCommitsWhatItWrote(t *testing.T) {
-	w := laptopWorld(t)
-	laptop := filepath.Join(w.home, ".config", "kit", "laptop")
-	if err := os.Chmod(laptop, 0o500); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(laptop, 0o700) })
-	w.expectSync(t, []string{"shared/declarations"}, "kit brew add go (laptop)")
-	if out, errOut, code := w.run(t, "brew", "add", "go", "--shared"); code != 1 || !strings.Contains(out, "go failed") {
-		t.Errorf("kit brew add go --shared, laptop's file read-only, printed\n%s%s exit %d", out, errOut, code)
+	for _, c := range []struct {
+		names   []string
+		message string
+	}{
+		{[]string{"go"}, "kit brew add go (laptop)"},
+		{[]string{"ripgrep", "go"}, "kit brew add ripgrep, go (laptop)"},
+	} {
+		w := laptopWorld(t)
+		laptop := filepath.Join(w.home, ".config", "kit", "laptop")
+		if err := os.Chmod(laptop, 0o500); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(laptop, 0o700) })
+		w.fake.On("brew", "update", "--quiet")
+		w.fake.On("brew", "install", "--formula", "ripgrep")
+		w.expectSync(t, []string{"shared/declarations"}, c.message)
+		args := slices.Concat([]string{"brew", "add"}, c.names, []string{"--shared"})
+		if out, errOut, code := w.run(t, args...); code != 1 || !strings.Contains(out, "go failed") {
+			t.Errorf("kit %s, laptop's file read-only, printed\n%s%s exit %d", strings.Join(args, " "), out, errOut, code)
+		}
 	}
 }
 

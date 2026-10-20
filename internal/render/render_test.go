@@ -945,3 +945,32 @@ func TestPrettyBootstrapShowsABootStepNotWell(t *testing.T) {
 		t.Errorf("the screen is\n%s\nwant the boot's step not well, alone, as\n%s", got, want)
 	}
 }
+
+// kit-config's edits git can't commit as others are drift all the same,
+// for kit reconcile: a file the user untracked, kept on this Mac, and a
+// repository nested in kit-config, each saying what it is, then what more
+// there is to say.
+func TestPrettyStatusShowsEditsGitKeepsApart(t *testing.T) {
+	edits := check.Result{State: check.Attention, Summary: "2 files not committed", Items: []check.Item{
+		{ID: "config:shared/home/.secret", Name: "shared/home/.secret", State: "untracked", Since: at.Add(-50 * time.Hour)},
+		{ID: "config:vendor/tool/", Name: "vendor/tool/", State: "repository", Detail: "kit-config can't keep it", Since: at.Add(-50 * time.Hour)},
+	}}
+	for _, it := range edits.Items {
+		if !render.IsDrift(it) {
+			t.Errorf("%s isn't drift", it.State)
+		}
+	}
+	var out bytes.Buffer
+	show(t, render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.NoTTY}, 80, false), []event.Event{
+		event.RunStarted{Time: at, Command: "status", Machine: "laptop", Steps: []event.Step{{Name: "config", Title: "kit-config edits", Area: "Drift"}}},
+		event.StepFinished{Time: at, Step: "config", Result: edits},
+		event.RunFinished{Time: at, Duration: time.Second, Counts: map[check.State]int{check.Attention: 1}},
+	})
+	want := "  CONFIG\n" +
+		"  ▲ shared/home/.secret  untracked, kept on this Mac · 2 days · → kit reconcile\n" +
+		"  ▲ vendor/tool/  a repository of its own · kit-config can't keep it · 2 days\n" +
+		"    → kit reconcile\n"
+	if !strings.Contains(out.String(), want) {
+		t.Errorf("printed\n%s\nwant\n%s", out.String(), want)
+	}
+}

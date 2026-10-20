@@ -28,6 +28,10 @@ type changes struct {
 	results []check.Result
 	// files are the config's files changed, to commit.
 	files []string
+	// wrote are the steps that changed any of them, by name; current is the
+	// step running, "" between steps.
+	wrote   map[string]bool
+	current string
 	// doings say what each step does as it runs, when the command doesn't.
 	doings map[string]string
 }
@@ -46,7 +50,7 @@ func startChanges(r *run, names []string) *changes {
 // doings says as it runs, and the step that syncs the config.
 func startChangesOf(r *run, steps []event.Step, doings map[string]string) *changes {
 	steps = append(slices.Clone(steps), event.Step{Name: syncStep, Title: syncStep})
-	c := &changes{run: r, started: time.Now(), doings: doings}
+	c := &changes{run: r, started: time.Now(), wrote: map[string]bool{}, doings: doings}
 	r.sink.Emit(event.RunStarted{Time: r.now, Command: r.command, Machine: r.machine, Version: r.version, Steps: steps})
 	return c
 }
@@ -55,7 +59,9 @@ func startChangesOf(r *run, steps []event.Step, doings map[string]string) *chang
 func (c *changes) step(ctx context.Context, name string, do func(ctx context.Context) check.Result) check.Result {
 	started := time.Now()
 	c.run.sink.Emit(event.StepStarted{Time: started, Step: name, Doing: c.doing(name)})
+	c.current = name
 	res := do(event.WithStep(ctx, name))
+	c.current = ""
 	c.results = append(c.results, res)
 	c.run.sink.Emit(event.StepFinished{Time: time.Now(), Step: name, Result: res, Duration: time.Since(started)})
 	return res
@@ -82,11 +88,21 @@ func (c *changes) doing(name string) string {
 	return "changing"
 }
 
-// changed notes file as changed, to commit.
+// changed notes file as changed, to commit, by the step running.
 func (c *changes) changed(file string) {
+	if c.current != "" {
+		c.wrote[c.current] = true
+	}
 	if !slices.Contains(c.files, file) {
 		c.files = append(c.files, file)
 	}
+}
+
+// whoWrote are those of names whose steps changed the config's files,
+// whether or not they went on to fail, in turn: what a commit of them is
+// of.
+func (c *changes) whoWrote(names []string) []string {
+	return slices.DeleteFunc(slices.Clone(names), func(name string) bool { return !c.wrote[name] })
 }
 
 // sync commits the config's changed files with message, and pushes, as the

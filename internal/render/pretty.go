@@ -621,6 +621,10 @@ func wrong(part string, it check.Item) string {
 		return "new, not committed"
 	case "deleted":
 		return "deleted, not committed"
+	case "untracked":
+		return "untracked, kept on this Mac"
+	case "repository":
+		return "a repository of its own"
 	}
 	return cmp.Or(it.Detail, strings.ReplaceAll(it.State, "-", " "))
 }
@@ -1025,6 +1029,8 @@ var driftStates = map[string]string{
 	"edited":            "not committed",
 	"added":             "new, not committed",
 	"deleted":           "deleted, not committed",
+	"untracked":         "untracked, kept on this Mac",
+	"repository":        "a repository of its own",
 }
 
 // since says how long d is, roughly, in days.

@@ -2,6 +2,7 @@ package defaults_test
 
 import (
 	"encoding/json"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -217,12 +218,13 @@ func TestNoiseKitTookBeforeKnowingItIsForgotten(t *testing.T) {
 }
 
 // A value kit took before it read a string's outer spaces and a key's
-// exactly, in a record from then, is unchanged while it reads the same
-// that way, compared as XML, and is taken again as it is: once, the record
-// then marked. Any other change shows, as every change does once the
-// record's marked: a number or a boolean changed, even by a little or for
-// one macOS reads the same; a key beside one it's the same as once
-// trimmed; a value taken exactly with its spaces, now without.
+// exactly, unmarked in its record, is unchanged while it reads the same
+// that way, compared as XML, and is taken again as it is: once, the
+// baseline then marked exact. Any other change shows, as every change does
+// to a baseline marked: a number or a boolean changed, even by a little or
+// for one macOS reads the same; a key beside one it's the same as once
+// trimmed; a value taken exactly with its spaces, now without. A change
+// that shows leaves the baseline as it was marked.
 func TestAValueTakenTrimmedIsTakenAgainExactly(t *testing.T) {
 	cases := []struct {
 		name, was, now string
@@ -245,7 +247,7 @@ func TestAValueTakenTrimmedIsTakenAgainExactly(t *testing.T) {
 			for range 20 {
 				m := newMac(t)
 				list := m.declare()
-				record, err := json.Marshal(map[string]any{"domains": map[string]bool{"NSGlobalDomain": true}, "baseline": map[string]string{"NSGlobalDomain:K": c.was}, "exact": marked})
+				record, err := json.Marshal(map[string]any{"domains": map[string]bool{"NSGlobalDomain": true}, "baseline": map[string]string{"NSGlobalDomain:K": c.was}, "exact_baselines": map[string]bool{"NSGlobalDomain:K": marked}})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -265,19 +267,60 @@ func TestAValueTakenTrimmedIsTakenAgainExactly(t *testing.T) {
 				if got := m.items(list); !slices.Equal(got, want) {
 					t.Fatalf("%s, marked %v: items = %q, want %q", c.name, marked, got, want)
 				}
-				var rec struct {
-					Baseline map[string]string
-					Exact    bool
-				}
-				data, err := os.ReadFile(filepath.Join(m.state, "settings.json"))
-				if err == nil {
-					err = json.Unmarshal(data, &rec)
-				}
-				if err != nil || rec.Baseline["NSGlobalDomain:K"] != baseline || !rec.Exact {
-					t.Fatalf("%s, marked %v: record = %+v, %v; want the baseline %q, the record marked", c.name, marked, rec, err, baseline)
+				rec := m.record()
+				if exact := marked || c.absorbed; rec.Baseline["NSGlobalDomain:K"] != baseline || rec.Exact["NSGlobalDomain:K"] != exact {
+					t.Fatalf("%s, marked %v: record = %+v; want the baseline %q, marked exact %v", c.name, marked, rec, baseline, exact)
 				}
 			}
 		}
+	}
+}
+
+// record is kit's record of the watched settings' baselines.
+func (m *mac) record() (rec struct {
+	Baseline map[string]string
+	Exact    map[string]bool `json:"exact_baselines"`
+},
+) {
+	m.t.Helper()
+	data, err := os.ReadFile(filepath.Join(m.state, "settings.json"))
+	if err == nil {
+		err = json.Unmarshal(data, &rec)
+	}
+	if err != nil {
+		m.t.Fatal(err)
+	}
+	return rec
+}
+
+// Each baseline is marked exact as kit finds it so, or takes it: one of a
+// domain kit doesn't read in a pass, as one no longer declared, stays
+// unmarked, so a value it took trimmed reads the same when the domain is
+// read again, and is taken again then; one it takes now, of a domain it's
+// never watched, is marked.
+func TestEachBaselineIsMarkedExactOnItsOwn(t *testing.T) {
+	m := newMac(t)
+	record := `{"domains": {"NSGlobalDomain": true, "com.example.app": true}, "baseline": {"NSGlobalDomain:K": "<string>x</string>", "com.example.app:K": "<string>Dark</string>"}}`
+	if err := os.WriteFile(filepath.Join(m.state, "settings.json"), []byte(record), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m.set("NSGlobalDomain", "<key>K</key><string>x</string>")
+	m.set("com.apple.dock", "<key>tilesize</key><integer>48</integer>")
+	if got := m.items(m.declare()); got != nil {
+		t.Fatalf("items = %q, want none", got)
+	}
+	rec := m.record()
+	if want := map[string]bool{"NSGlobalDomain:K": true, "com.apple.dock:tilesize": true}; !maps.Equal(rec.Exact, want) {
+		t.Errorf("marked exact %v, want %v: the global domain's found the same, the Dock's taken, the app's not read", rec.Exact, want)
+	}
+
+	list := m.declare("com.example.app:Theme", "-string Dark")
+	m.set("com.example.app", "<key>Theme</key><string>Dark</string><key>K</key><string>Dark </string>")
+	if got := m.items(list); got != nil {
+		t.Errorf("items = %q, want the app's value taken trimmed taken again", got)
+	}
+	if rec := m.record(); rec.Baseline["com.example.app:K"] != "<string>Dark </string>" || !rec.Exact["com.example.app:K"] {
+		t.Errorf("record = %+v, want the app's value taken again, exactly, marked", rec)
 	}
 }
 

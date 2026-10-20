@@ -348,6 +348,28 @@ func TestAddLeavesTheFilesGitIgnoresInAFolder(t *testing.T) {
 	}
 }
 
+// A folder that is a repository, or holds one anywhere in it, by a .git
+// folder or, as a worktree's or a submodule's, a .git file, is refused
+// before anything moves, naming where: kit-config can't keep a repository
+// in it.
+func TestAddRefusesAFolderHoldingARepository(t *testing.T) {
+	for _, c := range []struct{ name, git, want string }{
+		{"the folder itself", ".config/tool/.git/HEAD", "~/.config/tool is a repository of its own (.git), which kit-config can't keep"},
+		{"a folder in it", ".config/tool/plugins/theme/.git/HEAD", "~/.config/tool/plugins/theme is a repository of its own (.git), which kit-config can't keep"},
+		{"a worktree's .git file in it", ".config/tool/plugins/theme/.git", "~/.config/tool/plugins/theme is a repository of its own (.git), which kit-config can't keep"},
+	} {
+		m := newMac(t)
+		m.write(".config/tool/config", "tool\n", 0o600)
+		m.write(c.git, "ref: refs/heads/main\n", 0o644)
+		if _, _, err := m.files.Add(t.Context(), filepath.Join(m.home, ".config/tool"), "laptop"); err == nil || err.Error() != c.want {
+			t.Errorf("%s: Add() = %v, want %q", c.name, err, c.want)
+		}
+		if m.target(".config/tool/config") != "" || len(m.fake.Calls()) != 0 {
+			t.Errorf("%s: linked a file, or ran %q; want nothing done", c.name, m.fake.Calls())
+		}
+	}
+}
+
 func TestRemovePutsACopyBack(t *testing.T) {
 	m := newMac(t)
 	m.write(".config/kit/laptop/home/.config/tool/config", "tool\n", 0o600)

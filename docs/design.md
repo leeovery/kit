@@ -352,14 +352,27 @@ land in the repository outside kit (through a link, by hand, by an app), and kit
 its own changes: the paths it changed, each whole as it is on disk (a rename's two sides, a
 deletion, a new folder's every file, a file become a folder), whatever the user's git config
 says, committed from an index of the last commit's and those paths alone, so nothing else
-staged goes in or is touched. What git can't keep (an ignored file, an empty folder, a
-repository nested in kit-config, which `kit reconcile` names and only snoozes) is left out.
-With nothing to commit it says nothing changed, pushing only commits still waiting for the
-upstream, as when a push failed. The `config` step makes each file changed and not committed an item
-(`config:shared/home/.zshrc`, edited, added or deleted, with the lines it adds and removes),
-quiet for a day as drift is; `kit reconcile` shows an edit's diff and offers adopt (commit it,
-then push, `--note` the message's end), revert (back to the last commit; a new file to the
-Bin) or snooze. kit pulls with rebase before it pushes, so two Macs don't fight.
+staged goes in or is touched. As `git commit` does, it holds git's index (`index.lock`, taken
+only when no other git holds it, else tried again for a moment, then refused, naming it) from
+before it reads the last commit until the user's index holds the files it committed as
+committed, written through a copy and put in place as git does; with nothing committed, the
+user's index is left as it is. It refuses while git is part way through a merge, rebase,
+cherry-pick, revert or `git am`, or a conflict in its paths waits to be resolved: its change
+waits till that's finished. A commit that lands on another commit than it was made from,
+HEAD moved meanwhile by another git, is an error naming both. What git can't keep (an
+ignored file, an empty folder, a repository nested in kit-config, which `kit reconcile` names
+and only snoozes) is left out. With nothing to commit it says nothing changed, pushing only
+commits still waiting for the upstream, as when a push failed. The `config` step makes each
+file changed and not committed an item (`config:shared/home/.zshrc`, edited, added or deleted,
+with the lines it adds and removes; untracked, a file taken out of git's index and kept on
+this Mac as git ignores it; a repository, by its folder, `config:vendor/tool/`), quiet for a
+day as drift is; `kit reconcile` shows an edit's diff and offers adopt (commit it, then push,
+`--note` the message's end; an untracked file is committed as deleted, kept on this Mac),
+revert (back to the last commit; a new file to the Bin; an untracked file tracked again, as
+it is) or snooze. Before it pushes, kit fetches, and when the remote has commits this Mac
+hasn't, rebases onto them, so two Macs don't fight, with anything not committed set aside in
+git's stash and put back as it was, staged or not; a stash that won't go back is kept and
+named, never dropped, and nothing is pushed.
 
 **Steps.** Everything kit applies is a step in one pipeline. A step has:
 
@@ -679,7 +692,8 @@ is refused. The step `file` finds each one:
 (`--shared`: every Mac's) and links it back. A path git ignores itself (kit-config's rules or
 the user's global ones), a file or a folder whole, is refused, naming the rule, as kit-config
 could never keep it; files it ignores inside a folder stay where they are, on that Mac alone,
-the row naming them. `kit file remove <path>` puts a copy back in place of the link and takes
+the row naming them. A folder that is a repository, or holds one anywhere in it (a `.git`
+folder or file), is refused, naming where. `kit file remove <path>` puts a copy back in place of the link and takes
 the file out. Both commit and push.
 
 ### kit's PATH, and the shell's

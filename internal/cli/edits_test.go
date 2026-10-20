@@ -41,7 +41,8 @@ func TestReconcileCommitsAnEdit(t *testing.T) {
 }
 
 // An edit staged, then put back as committed, is no change to commit:
-// adopting it stages it as it is, and the sync says nothing changed. It
+// adopting it stages it as it is, in kit's own index, and the sync says
+// nothing changed, the user's staged edit left as it is, never reset. It
 // pushes only commits waiting for the upstream, as one whose push failed:
 // none without an upstream. What git prints is what real git does.
 func TestReconcileAdoptingNothingToCommit(t *testing.T) {
@@ -65,13 +66,11 @@ func TestReconcileAdoptingNothingToCommit(t *testing.T) {
 		git := func(args ...string) []string { return append([]string{"-C", dir}, args...) }
 		w.edits(t, "MM shared/home/.zshrc\x00", "")
 		w.fake.On("git", git("--literal-pathspecs", "status", "--porcelain", "-z", "--untracked-files=all", "--no-renames", "--", "shared/home/.zshrc")...).Prints("MM shared/home/.zshrc\x00")
+		w.fake.On("git", git("rev-parse", "--absolute-git-dir")...).Prints(t.TempDir() + "\n")
 		w.fake.On("git", git("update-index", "--add", "--remove", "--replace", "-z", "--stdin")...)
 		w.fake.On("git", git("diff", "--cached", "--name-only", "-z", "--no-renames")...)
-		w.fake.On("git", git("--literal-pathspecs", "reset", "--quiet", "--pathspec-from-file=-", "--pathspec-file-nul")...)
 		w.fake.On("git", git("rev-list", "--count", "@{u}..HEAD")...).Prints(c.unpushed).Exits(c.exit)
-		w.fake.On("git", git("remote")...).Prints("origin\n")
-		w.fake.On("git", git("pull", "--rebase", "--autostash", "--quiet")...)
-		w.fake.On("git", git("push", "--quiet")...)
+		w.expectPush()
 		out, _, code := w.run(t, "reconcile", "config:shared/home/.zshrc", "--adopt")
 		if code != 0 || !strings.Contains(out, "config:shared/home/.zshrc ok to commit\n"+c.want) {
 			t.Errorf("%s: kit reconcile printed\n%s exit %d", c.name, out, code)
@@ -95,13 +94,54 @@ func TestReconcileAdoptingNothingToCommit(t *testing.T) {
 func TestReconcileANestedRepository(t *testing.T) {
 	w := laptopWorld(t)
 	w.edits(t, "?? vendor/tool/\x00", "")
-	if out, _, _ := w.run(t, "status"); !strings.Contains(out, "config repository:new vendor/tool (a repository of its own, which kit-config can't keep)\n") {
+	if out, _, _ := w.run(t, "status"); !strings.Contains(out, "config repository:new vendor/tool/ (kit-config can't keep it)\n") {
 		t.Errorf("kit status printed\n%s", out)
 	}
 	for flag, past := range map[string]string{"--adopt": "adopted", "--revert": "reverted"} {
-		if _, errOut, code := w.run(t, "reconcile", "config:vendor/tool", flag); code != 2 || !strings.Contains(errOut, "config:vendor/tool can't be "+past+": --snooze") {
+		if _, errOut, code := w.run(t, "reconcile", "config:vendor/tool/", flag); code != 2 || !strings.Contains(errOut, "config:vendor/tool/ can't be "+past+": --snooze") {
 			t.Errorf("kit reconcile %s printed %q, exit %d", flag, errOut, code)
 		}
+	}
+}
+
+// A file the user took out of git's index, kept on disk as git ignores it,
+// is untracked: kit says so, and adopting it commits it as the user left
+// it, deleted from kit-config and kept on this Mac; undoing it tracks it
+// again, the file as it is. Status names it as real git does.
+func TestReconcileAnUntrackedFile(t *testing.T) {
+	const secret = "shared/home/.secret"
+	untracked := func(t *testing.T) *world {
+		w := laptopWorld(t)
+		w.write(t, ".config/kit/"+secret, "s\n")
+		// Out of git's index, and ignored: no file of kit's to link.
+		w.keeps()
+		w.edits(t, "D  "+secret+"\x00", "")
+		return w
+	}
+	w := untracked(t)
+	if out, _, _ := w.run(t, "status"); !strings.Contains(out, "config untracked:new "+secret+"\n") {
+		t.Errorf("kit status printed\n%s", out)
+	}
+
+	w = untracked(t)
+	w.expectCommit(t, commit{message: "kit reconcile (laptop): adopt config:" + secret, paths: []string{secret}, status: "D  " + secret + "\x00", staged: secret + "\x00"})
+	w.fake.On("git", "-C", filepath.Join(w.home, ".config", "kit"), "update-index", "--force-remove", "-z", "--stdin").Filters(func(in string) (string, error) {
+		if in != secret+"\x00" {
+			t.Errorf("committed %q as deleted, want the file untracked", in)
+		}
+		return "", nil
+	})
+	if out, _, code := w.run(t, "reconcile", "config:"+secret, "--adopt"); code != 0 || !strings.Contains(out, "kit-config ok committed and pushed "+secret) || w.read(t, ".config/kit/"+secret) != "s\n" {
+		t.Errorf("kit reconcile --adopt printed\n%s exit %d; want it committed and the file kept", out, code)
+	}
+
+	w = untracked(t)
+	w.fake.On("git", "-C", filepath.Join(w.home, ".config", "kit"), "--literal-pathspecs", "restore", "--source=HEAD", "--staged", "--", secret)
+	if out, _, code := w.run(t, "reconcile", "config:"+secret, "--revert"); code != 0 || !strings.Contains(out, "undone: tracked again") || w.read(t, ".config/kit/"+secret) != "s\n" {
+		t.Errorf("kit reconcile --revert printed\n%s exit %d; want it tracked and the file kept", out, code)
+	}
+	if slices.ContainsFunc(w.fake.Calls(), func(c string) bool { return strings.Contains(c, "--worktree") }) {
+		t.Errorf("ran %q, want the file on disk left as it is", w.fake.Calls())
 	}
 }
 

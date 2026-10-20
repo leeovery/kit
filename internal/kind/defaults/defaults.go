@@ -42,9 +42,17 @@ type record struct {
 	// Baseline is each watched setting's value as kit last accepted it, as
 	// XML, by name.
 	Baseline map[string]string `json:"baseline,omitempty"`
-	// Exact is whether kit took the baseline reading a string's outer
-	// spaces and a key's exactly: false in a record from before it did.
-	Exact bool `json:"exact,omitempty"`
+	// Exact are the watched settings whose baseline kit knows it read
+	// exactly, a string's outer spaces and a key's kept, by name: each it
+	// took, or found the same; none in a record from before it read them
+	// so.
+	Exact map[string]bool `json:"exact_baselines,omitempty"`
+}
+
+// take makes v the baseline of the watched setting name, read exactly.
+func (r *record) take(name, v string) {
+	r.Baseline[name] = v
+	r.Exact[name] = true
 }
 
 // Watched are Apple's domains whose settings kit watches for changes, as
@@ -368,6 +376,9 @@ func (d *Defaults) Installed(ctx context.Context) ([]kind.Installed, error) {
 		if rec.Baseline == nil {
 			rec.Baseline = map[string]string{}
 		}
+		if rec.Exact == nil {
+			rec.Exact = map[string]bool{}
+		}
 		for _, name := range slices.Sorted(maps.Keys(d.declared)) {
 			dv := d.declared[name]
 			v, set := l.actual(dv.setting)
@@ -382,7 +393,6 @@ func (d *Defaults) Installed(ctx context.Context) ([]kind.Installed, error) {
 		for _, name := range d.changed(l, rec) {
 			out = append(out, kind.Installed{Name: name, Explicit: true})
 		}
-		rec.Exact = true
 	})
 	return out, err
 }
@@ -425,36 +435,54 @@ func (d *Defaults) changed(l look, rec *record) []string {
 		now := d.watchedSettings(id, l.domains[id])
 		if !rec.Domains[id] {
 			rec.Domains[id] = true
-			maps.Copy(rec.Baseline, now)
+			for name, v := range now {
+				rec.take(name, v)
+			}
 			continue
 		}
-		prefix := id + ":"
-		for name, was := range rec.Baseline {
-			if !strings.HasPrefix(name, prefix) {
-				continue
-			}
-			if s, err := config.ParseSetting(name); err == nil && isNoise(s.Domain, firstKey(s.Key)) {
-				// Taken before kit knew it for noise.
-				delete(rec.Baseline, name)
-				continue
-			}
-			// A record from before kit read spaces exactly: once, its first pass.
-			if now[name] != was && !rec.Exact && takenTrimmed(was, now[name]) {
-				rec.Baseline[name] = now[name]
-				continue
-			}
-			if now[name] != was && !d.isDeclared(name) {
-				names = append(names, name)
-			}
-		}
-		for name := range now {
-			if _, known := rec.Baseline[name]; !known && !d.isDeclared(name) {
-				names = append(names, name)
-			}
-		}
+		names = append(names, d.changedIn(id, now, rec)...)
 	}
 	slices.Sort(names)
 	return slices.Compact(names)
+}
+
+// changedIn are the watched settings of the domain id, now as now has them,
+// changed since kit took their values, and not declared. A baseline found
+// the same is known exact; one kit took before it read a string's outer
+// spaces and a key's exactly, reading the same that way, is taken again,
+// exactly, once.
+func (d *Defaults) changedIn(id string, now map[string]string, rec *record) []string {
+	var names []string
+	for name, was := range rec.Baseline {
+		if !strings.HasPrefix(name, id+":") {
+			continue
+		}
+		switch is := now[name]; {
+		case isNoiseSetting(name):
+			// Taken before kit knew it for noise.
+			delete(rec.Baseline, name)
+			delete(rec.Exact, name)
+		case is == was:
+			rec.Exact[name] = true
+		case !rec.Exact[name] && takenTrimmed(was, is):
+			rec.take(name, is)
+		case !d.isDeclared(name):
+			names = append(names, name)
+		}
+	}
+	for name := range now {
+		if _, known := rec.Baseline[name]; !known && !d.isDeclared(name) {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+// isNoiseSetting reports whether the watched setting name is noise, a
+// value macOS keeps for itself.
+func isNoiseSetting(name string) bool {
+	s, err := config.ParseSetting(name)
+	return err == nil && isNoise(s.Domain, firstKey(s.Key))
 }
 
 // takenTrimmed reports whether was, a value kit took before it read a

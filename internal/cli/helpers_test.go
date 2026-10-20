@@ -181,7 +181,7 @@ var errNotFound = runner.ErrNotFound
 // answers to it, as real git gives them: kit commits paths with message;
 // status is git's status of them (-z); kit stages update, each file as it
 // is on disk, in an index of its own; staged is what git says is staged
-// there (-z); and the user's index takes update's entries as committed.
+// there (-z); and the user's index takes the files staged as committed.
 type commit struct {
 	message        string
 	paths, update  []string
@@ -222,13 +222,18 @@ func (w *world) expectSync(t *testing.T, files []string, message string) {
 	})
 }
 
+// head is the commit HEAD names in kit-config, as git rev-parse prints it.
+const head = "0e0bf17a399109574ffb00e33300280a33f81ab7"
+
 // expectCommit scripts git's answers to c, and the push after it, failing
-// the test unless kit commits, unless what it stages and hands back to the
-// user's index is update, and unless the status given is so of the files on
-// disk once kit asks, when each of checks runs too.
+// the test unless kit commits, unless what it stages is update and what it
+// hands back to the user's index the files staged, the user's index then
+// the one git made, and unless the status given is so of the files on disk
+// once kit asks, when each of checks runs too.
 func (w *world) expectCommit(t *testing.T, c commit, checks ...func()) {
 	t.Helper()
 	dir := filepath.Join(w.home, ".config", "kit")
+	gitDir := t.TempDir()
 	git := func(args ...string) []string { return append([]string{"-C", dir}, args...) }
 	asked := func() {
 		onDisk(t, dir, c.status)
@@ -236,30 +241,49 @@ func (w *world) expectCommit(t *testing.T, c commit, checks ...func()) {
 			check()
 		}
 	}
-	reads := func(what string) func(string) (string, error) {
+	reads := func(what, want string) func(string) (string, error) {
 		return func(in string) (string, error) {
-			if want := strings.Join(c.update, "\x00") + "\x00"; in != want {
+			if in != want {
 				t.Errorf("%s read %q, want %q", what, in, want)
 			}
 			return "", nil
 		}
 	}
 	w.fake.On("git", git(slices.Concat([]string{"--literal-pathspecs", "status", "--porcelain", "-z", "--untracked-files=all", "--no-renames", "--"}, c.paths)...)...).Prints(c.status).Does(asked)
-	w.fake.On("git", git("rev-parse", "--absolute-git-dir", "--verify", "--quiet", "HEAD")...).Prints(t.TempDir() + "\n0e0bf17a399109574ffb00e33300280a33f81ab7\n")
-	w.fake.On("git", git("read-tree", "HEAD")...)
-	w.fake.On("git", git("update-index", "--add", "--remove", "--replace", "-z", "--stdin")...).Filters(reads("update-index"))
+	w.fake.On("git", git("rev-parse", "--absolute-git-dir")...).Prints(gitDir + "\n")
+	w.fake.On("git", git("rev-parse", "--verify", "--quiet", "HEAD")...).Prints(head + "\n")
+	w.fake.On("git", git("read-tree", head)...)
+	w.fake.On("git", git("update-index", "--add", "--remove", "--replace", "-z", "--stdin")...).Filters(reads("update-index", strings.Join(c.update, "\x00")+"\x00"))
 	w.fake.On("git", git("diff", "--cached", "--name-only", "-z", "--no-renames")...).Prints(c.staged)
 	var committed atomic.Bool
 	w.fake.On("git", git("commit", "--quiet", "-m", c.message)...).Does(func() { committed.Store(true) })
-	w.fake.On("git", git("--literal-pathspecs", "reset", "--quiet", "--pathspec-from-file=-", "--pathspec-file-nul")...).Filters(reads("reset"))
-	w.fake.On("git", git("remote")...).Prints("origin\n")
-	w.fake.On("git", git("pull", "--rebase", "--autostash", "--quiet")...)
-	w.fake.On("git", git("push", "--quiet")...)
+	w.fake.On("git", git("rev-parse", "--verify", "--quiet", "HEAD^")...).Prints(head + "\n")
+	const reset = "the user's index, kit's files as committed"
+	w.fake.On("git", git("--literal-pathspecs", "reset", "--quiet", "--pathspec-from-file=-", "--pathspec-file-nul")...).Filters(reads("reset", c.staged)).Does(func() {
+		if err := os.WriteFile(filepath.Join(gitDir, "kit-index.next"), []byte(reset), 0o600); err != nil {
+			t.Error(err)
+		}
+	})
+	w.expectPush()
 	t.Cleanup(func() {
 		if !committed.Load() {
 			t.Errorf("kit didn't commit %q", c.message)
 		}
+		entries, _ := os.ReadDir(gitDir)
+		if data, _ := os.ReadFile(filepath.Join(gitDir, "index")); len(entries) != 1 || string(data) != reset {
+			t.Errorf("the git folder holds %v, its index %q; want the index git reset", entries, data)
+		}
 	})
+}
+
+// expectPush scripts a push of kit-config's, the remote with nothing new.
+func (w *world) expectPush() {
+	dir := filepath.Join(w.home, ".config", "kit")
+	git := func(args ...string) []string { return append([]string{"-C", dir}, args...) }
+	w.fake.On("git", git("remote")...).Prints("origin\n")
+	w.fake.On("git", git("fetch", "--quiet")...)
+	w.fake.On("git", git("rev-list", "--count", "HEAD..@{u}")...).Prints("0\n")
+	w.fake.On("git", git("push", "--quiet")...)
 }
 
 // edits scripts git's answers as kit asks for kit-config's edits, as real
@@ -271,21 +295,26 @@ func (w *world) edits(t *testing.T, status, numstat string) {
 	dir := filepath.Join(w.home, ".config", "kit")
 	git := func(args ...string) []string { return append([]string{"-C", dir}, args...) }
 	w.fake.On("git", git("--literal-pathspecs", "status", "--porcelain", "-z", "--untracked-files=all", "--no-renames", "--")...).Prints(status)
-	w.fake.On("git", git("rev-parse", "--absolute-git-dir", "--verify", "--quiet", "HEAD")...).Prints(t.TempDir() + "\n0e0bf17a399109574ffb00e33300280a33f81ab7\n")
-	w.fake.On("git", git("read-tree", "HEAD")...)
+	w.fake.On("git", git("rev-parse", "--verify", "--quiet", "HEAD")...).Prints(head + "\n")
+	w.fake.On("git", git("read-tree", head)...)
 	w.fake.On("git", git("diff", "--numstat", "-z", "--no-renames", "--no-ext-diff", "HEAD")...).Prints(numstat)
 }
 
 // onDisk fails the test unless status, as git prints it (-z), is so of the
-// files in dir: each it names deleted is gone, and each other there.
+// files in dir: each it names deleted on disk is gone, and each other there
+// but one deleted only in git's index, which is there when the user
+// untracked it, kept as git ignores it, and gone else.
 func onDisk(t *testing.T, dir, status string) {
 	for rec := range strings.SplitSeq(status, "\x00") {
 		if len(rec) < 4 {
 			continue
 		}
 		code, path := rec[:2], rec[3:]
+		if code == "D " {
+			continue
+		}
 		_, err := os.Lstat(filepath.Join(dir, path))
-		if there := err == nil; there == strings.Contains(code, "D") {
+		if there := err == nil; there == (code[1] == 'D') {
 			t.Errorf("git status has %q %s, and it's there: %v", code, path, there)
 		}
 	}

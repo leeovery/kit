@@ -118,7 +118,8 @@ type Prefs struct {
 	Probes []string
 	// AppDirs are where apps are installed.
 	AppDirs []string
-	// Sleep waits between looks at an app starting or quitting.
+	// Sleep waits between looks at an app starting or quitting, and while
+	// another git holds the store's index.
 	Sleep func(time.Duration)
 }
 

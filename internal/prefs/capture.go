@@ -374,7 +374,7 @@ func (p *Prefs) Capture(ctx context.Context) (Report, error) {
 		_ = p.update(func(r *Record) { r.NotOwner = refused.Error() })
 		return report, refused
 	}
-	repo := gitrepo.Repo{Dir: p.Clone, Run: p.Run}
+	repo := gitrepo.Repo{Dir: p.Clone, Run: p.Run, Sleep: p.Sleep}
 	if !owned {
 		if err := p.claim(ctx, store, hardware); err != nil {
 			return report, err
