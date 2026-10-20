@@ -2,142 +2,88 @@ package secret
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"slices"
 	"strings"
 
-	"github.com/leeovery/kit/internal/runner"
+	"github.com/leeovery/kit/internal/kind/secret/store"
 )
 
-// itemArgs are op's arguments naming item (op://vault/item): the item, and
-// its vault.
-func itemArgs(item string) ([]string, error) {
-	rest, ok := strings.CutPrefix(item, "op://")
-	vault, name, found := strings.Cut(rest, "/")
-	if !ok || !found || vault == "" || name == "" || strings.Contains(name, "/") {
-		return nil, fmt.Errorf("%q isn't a 1Password item's reference, as in op://vault/item", item)
+// StoreOf is the store whose item, or value in full, ref is.
+func (s *Secrets) StoreOf(ref string) (store.Driver, error) {
+	if d, ok := s.stores.ofItem(ref); ok {
+		return d, nil
 	}
-	return []string{name, "--vault", vault}, nil
+	if d, ok := s.stores.ofRef(ref); ok {
+		return d, nil
+	}
+	return nil, fmt.Errorf("%q isn't a reference kit knows: an item's (%s), or a value's in full (%s)", ref, s.stores.items(), s.stores.refs())
 }
 
-// Store keeps value in item (op://vault/item), as the field section/field,
-// a concealed one, by editing the item with its JSON on op's standard
-// input, so the value is never on a command line. A field there already is
-// refused. It's the short reference.
+// ItemOf is the store whose item ref is: an error, naming the items kit
+// knows, when it's no store's.
+func (s *Secrets) ItemOf(ref string) (store.Driver, error) {
+	if d, ok := s.stores.ofItem(ref); ok {
+		return d, nil
+	}
+	return nil, s.stores.itemOf(ref)
+}
+
+// RefOf is the store whose value ref is, in full: an error, naming the
+// references kit knows, when it's no store's.
+func (s *Secrets) RefOf(ref string) (store.Driver, error) {
+	if d, ok := s.stores.ofRef(ref); ok {
+		return d, nil
+	}
+	return nil, fmt.Errorf("%q isn't where a store keeps a value, in full: %s", ref, s.stores.refs())
+}
+
+// Items says how the stores' items' references read, as in 1Password's,
+// op://vault/item.
+func (s *Secrets) Items() string { return s.stores.items() }
+
+// Store keeps value in item, where field says, in its store's words: its
+// reference, short for item. A field there already is refused.
 func (s *Secrets) Store(ctx context.Context, item, field, value string) (string, error) {
-	section, label, ok := strings.Cut(field, "/")
-	if !ok || section == "" || label == "" || strings.Contains(label, "/") {
-		return "", fmt.Errorf("%q isn't where in 1Password it goes: a section and a field, as in GitHub/token", field)
-	}
-	args, err := itemArgs(item)
+	d, err := s.ItemOf(item)
 	if err != nil {
 		return "", err
 	}
-	res, err := s.run.Run(ctx, runner.Command{Name: "op", Args: slices.Concat([]string{"item", "get"}, args, []string{"--format", "json"}), Timeout: opTimeout, Secret: true})
-	if err != nil {
-		return "", fmt.Errorf("read the item from 1Password: %w", err)
-	}
-	var doc map[string]any
-	if err := json.Unmarshal(res.Stdout, &doc); err != nil {
-		return "", fmt.Errorf("read the item from 1Password: %w", err)
-	}
-	sections, _ := doc["sections"].([]any)
-	sectionID := ""
-	for _, sc := range sections {
-		if m, _ := sc.(map[string]any); m["label"] == section {
-			sectionID, _ = m["id"].(string)
-		}
-	}
-	if sectionID == "" {
-		sectionID = newID()
-		doc["sections"] = append(sections, map[string]any{"id": sectionID, "label": section})
-	}
-	fields, _ := doc["fields"].([]any)
-	for _, f := range fields {
-		m, _ := f.(map[string]any)
-		sec, _ := m["section"].(map[string]any)
-		if m["label"] == label && sec["id"] == sectionID {
-			return "", fmt.Errorf("%s is in 1Password already: change it there, or give it with --ref", field)
-		}
-	}
-	doc["fields"] = append(fields, map[string]any{"id": newID(), "type": "CONCEALED", "label": label, "value": value, "section": map[string]any{"id": sectionID}})
-	edited, err := json.Marshal(doc)
-	if err != nil {
-		return "", err
-	}
-	if _, err := s.run.Run(ctx, runner.Command{Name: "op", Args: slices.Concat([]string{"item", "edit"}, args), Input: string(edited), Timeout: opTimeout, Secret: true}); err != nil {
-		return "", fmt.Errorf("keep it in 1Password: %w", err)
-	}
-	return section + "/" + label, nil
+	return d.Store(ctx, s.run, item, field, value)
 }
 
-// assigned is a field's or attachment's name as op's assignments take it:
-// each period, equals sign and backslash escaped, as op would read a period
-// as a section's end.
-func assigned(name string) string {
-	return strings.NewReplacer(`\`, `\\`, ".", `\.`, "=", `\=`).Replace(name)
-}
-
-// Attach keeps the file at path in item (op://vault/item), as an attachment
-// named name. It's the short reference.
+// Attach keeps the file at path in item, named name: its reference, short
+// for item.
 func (s *Secrets) Attach(ctx context.Context, item, name, path string) (string, error) {
-	if strings.Contains(name, "/") {
-		return "", fmt.Errorf("%q isn't an attachment's name: no /", name)
-	}
-	args, err := itemArgs(item)
+	d, err := s.ItemOf(item)
 	if err != nil {
 		return "", err
 	}
-	if _, err := os.Stat(path); err != nil {
-		return "", err
-	}
-	if _, err := s.run.Run(ctx, runner.Command{Name: "op", Args: slices.Concat([]string{"item", "edit"}, args, []string{assigned(name) + "[file]=" + path}), Timeout: opTimeout, Secret: true}); err != nil {
-		return "", fmt.Errorf("attach it in 1Password: %w", err)
-	}
-	return name, nil
+	return d.Attach(ctx, s.run, item, name, path)
 }
 
-// Delete deletes the field or attachment a short reference names from item
-// (op://vault/item).
+// Delete deletes the value short names from item.
 func (s *Secrets) Delete(ctx context.Context, item, short string) error {
-	args, err := itemArgs(item)
+	d, err := s.ItemOf(item)
 	if err != nil {
 		return err
 	}
-	// A section's name, then a field's, as section.field; an attachment's
-	// alone.
-	parts := strings.Split(short, "/")
-	for i, part := range parts {
-		parts[i] = assigned(part)
-	}
-	if _, err := s.run.Run(ctx, runner.Command{Name: "op", Args: slices.Concat([]string{"item", "edit"}, args, []string{strings.Join(parts, ".") + "[delete]"}), Timeout: opTimeout, Secret: true}); err != nil {
-		return fmt.Errorf("delete it from 1Password: %w", err)
-	}
-	return nil
+	return d.Delete(ctx, s.run, item, short)
 }
 
-// ReadBack reads ref, in full, from 1Password and compares it with want,
+// ReadBack reads ref, in full, from its store and compares it with want,
 // never showing either.
 func (s *Secrets) ReadBack(ctx context.Context, ref, want string) error {
-	got, err := s.read(ctx, ref)
+	d, err := s.RefOf(ref)
+	if err != nil {
+		return err
+	}
+	got, err := d.Read(ctx, s.run, ref)
 	if err != nil {
 		return err
 	}
 	if got != strings.TrimRight(want, "\n") {
-		return errors.New("1Password gave back a different value")
+		return errors.New(d.About().Name + " gave back a different value")
 	}
 	return nil
-}
-
-// newID is an id for a new field or section, as 1Password's are, or a
-// template's mark: 26 lower-case letters and digits, at random.
-func newID() string {
-	b := make([]byte, 13)
-	_, _ = rand.Read(b)
-	return hex.EncodeToString(b)
 }

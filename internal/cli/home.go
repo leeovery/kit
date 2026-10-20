@@ -35,7 +35,7 @@ func (a *app) home(cmd *cobra.Command) error {
 		{Label: "Log", Does: "past runs", Cmd: "kit log"},
 		{Label: "Nightly", Does: "run the jobs that are due, then every check", Cmd: "kit nightly"},
 		{Label: "App settings", Does: "save apps' settings now", Cmd: "kit prefs capture"},
-		{Label: "Secrets", Does: "fetch them from 1Password again", Cmd: "kit secret sync"},
+		{Label: "Secrets", Does: "fetch them again from their stores", Cmd: "kit secret sync"},
 		{Label: "Declared", Does: "what's declared for this Mac", Cmd: "kit list"},
 		{Label: "Help", Does: "every command", Cmd: "kit --help"},
 	}

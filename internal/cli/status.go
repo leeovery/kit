@@ -22,6 +22,7 @@ import (
 	"github.com/leeovery/kit/internal/hand"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/kind/brew"
+	"github.com/leeovery/kit/internal/kind/secret"
 	"github.com/leeovery/kit/internal/kinds"
 	"github.com/leeovery/kit/internal/linked"
 	"github.com/leeovery/kit/internal/logs"
@@ -367,8 +368,10 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 			step.Check = func(context.Context) check.Result {
 				return check.Result{State: check.Failed, Reason: unread.Error()}
 			}
-		} else if program := kind.Command(k); program != "" && len(list.Entries) > 0 && slices.Contains(applies, command) {
-			step.Waits = append(step.Waits, engine.Wait{Thing: program, Ready: func(context.Context) bool { return runner.Has(observed, program) }})
+		} else if len(list.Entries) > 0 && slices.Contains(applies, command) {
+			for _, program := range kind.Commands(k) {
+				step.Waits = append(step.Waits, engine.Wait{Thing: program, Ready: func(context.Context) bool { return runner.Has(observed, program) }})
+			}
 		}
 		for _, after := range d.After {
 			if slices.Contains(r.kinds, after) {
@@ -485,6 +488,9 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 	plain, ordered := steps.SplitManual(home, byHand)
 	if len(plain.Entries) > 0 || raise != nil {
 		checks = append(checks, steps.Manual(observed, home, dirs.State, plain, raise))
+	}
+	if raise != nil {
+		checks = append(checks, r.cardSteps(raise, a.appDirs(home))...)
 	}
 	hourly, daily, err := a.jobs(r)
 	if err != nil {
@@ -706,23 +712,17 @@ func (a *app) stoppable(ctx context.Context, face render.Face) (context.Context,
 
 // childEnv is the environment kit runs programs in, never the one it
 // inherited whole: who and where the user is, the SSH agent (git signs and
-// pushes through it), kit's own PATH, Homebrew kept from updating itself,
-// nagging or colouring its output on its own, and git from asking for a
-// password mid-run.
+// pushes through it), kit's own PATH, what the secrets stores' programs need
+// (secret.Env), Homebrew kept from updating itself, nagging or colouring its
+// output on its own, and git from asking for a password mid-run.
 func childEnv(getenv func(string) string, environ []string, home string, path []string) []string {
 	env := []string{"HOME=" + home, "PATH=" + strings.Join(path, ":")}
-	// A 1Password session signed in with a password, over a remote
-	// connection, is a variable named for the account.
-	for _, kv := range environ {
-		if strings.HasPrefix(kv, "OP_SESSION_") {
-			env = append(env, kv)
-		}
-	}
-	for _, name := range []string{"USER", "LOGNAME", "SHELL", "TMPDIR", "LANG", "LC_ALL", "SSH_AUTH_SOCK", "OP_ACCOUNT", "OP_BIOMETRIC_UNLOCK_ENABLED"} {
+	for _, name := range []string{"USER", "LOGNAME", "SHELL", "TMPDIR", "LANG", "LC_ALL", "SSH_AUTH_SOCK"} {
 		if v := getenv(name); v != "" {
 			env = append(env, name+"="+v)
 		}
 	}
+	env = append(env, secret.Env(getenv, environ)...)
 	return append(env, "HOMEBREW_NO_AUTO_UPDATE=1", "HOMEBREW_NO_ANALYTICS=1", "HOMEBREW_NO_ENV_HINTS=1", "HOMEBREW_NO_COLOR=1", "GIT_TERMINAL_PROMPT=0")
 }
 

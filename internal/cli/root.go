@@ -86,6 +86,9 @@ type Deps struct {
 	TCC string
 	// UID is the user's id, which names Claude Code's folder in Scratch.
 	UID int
+	// AppDirs are the folders apps are installed in, but the one in the
+	// home, which kit adds: /Applications.
+	AppDirs []string
 	// WatchDialogs is whether a run at a terminal watches for macOS asking
 	// the person at the Mac something, its time limits waiting meanwhile.
 	WatchDialogs bool
@@ -309,6 +312,7 @@ func Real(version string) Deps {
 		SudoLocal:    steps.SudoLocal,
 		TCC:          "/Library/Application Support/com.apple.TCC/TCC.db",
 		UID:          os.Getuid(),
+		AppDirs:      []string{"/Applications"},
 	}
 }
 

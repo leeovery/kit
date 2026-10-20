@@ -91,8 +91,8 @@ const (
 	// as XML), then an optional note.
 	Defaults
 	// Secrets: a secret, what it fills (an environment variable's name, or a
-	// file's path) then where 1Password keeps its value and any options,
-	// words as a shell splits them, then an optional note.
+	// file's path) then where a secrets store keeps its value and any
+	// options, words as a shell splits them, then an optional note.
 	Secrets
 	// Power: a power setting in pmset's form, its words as a shell splits
 	// them: the power source (-a every one, -b the battery, -c the charger,
@@ -113,10 +113,14 @@ type Section struct {
 	// Folders is whether the kind has a section for each project folder,
 	// the folder after the header, as in [claude mcp ~/Code/site].
 	Folders bool
-	// Items is whether the kind has a section for each 1Password item, the
-	// item after the header, as in [secrets op://vault/item]: its lines'
-	// references are short for the item's fields, their names unprefixed.
-	Items bool
+	// Items, for a kind with a section for each item of a store's, the item
+	// after the header, as in [secrets op://vault/item], says whether what
+	// follows the header is an item: nil when it is, else why not, naming
+	// the items the kind knows. Its lines' references are short for the
+	// item's fields, their names unprefixed; and the section may go by a
+	// name (--as), which stands for its item in every file. Nil for a kind
+	// without.
+	Items func(ref string) error
 	// Held is whether it's a list whose sections can hold their lines back,
 	// options after the header saying what for: --after a step, or one of a
 	// step's things; --secret a secret they need, as in [homebrew formulae
@@ -140,9 +144,10 @@ type sectionDef struct {
 	// folders is whether the kind has a section for each project folder,
 	// the folder after the header, as in [claude mcp ~/Code/site].
 	folders bool
-	// items is whether the kind has a section for each 1Password item, the
-	// item after the header, as in [secrets op://vault/item].
-	items bool
+	// items, for a kind with a section for each item of a store's, the item
+	// after the header, as in [secrets op://vault/item], says whether what
+	// follows the header is one (Section.Items).
+	items func(ref string) error
 	// holds are the options the kind's sections take after the header,
 	// holding their lines back, what for (its hold): --after a step, or one
 	// of a step's things; --secret a secret they need, as in [homebrew
@@ -241,9 +246,11 @@ type Entry struct {
 	Section string
 	// Folder is the project folder whose section it's in, if any.
 	Folder string `json:",omitempty"`
-	// Item is the 1Password item whose section it's in, if any, as in
-	// op://vault/item.
+	// Item is the store's item whose section it's in, if any, as in
+	// op://vault/item; As is the name that section goes by, if it has one,
+	// as its header says after --as.
 	Item string `json:",omitempty"`
+	As   string `json:",omitempty"`
 	// Hold is what its section holds its lines back for, as its header says
 	// after its name, if it does, as kit writes it: --after a step or one of
 	// a step's things, --secret a secret they need (After, Secrets).
@@ -279,7 +286,7 @@ func (e Entry) Pos() string {
 }
 
 // After are what the entry's section has its lines installed after, as its
-// Hold says: steps, or steps' things, as in cask:1password.
+// Hold says: steps, or steps' things, as in cask:firefox.
 func (e Entry) After() []string { return holdOption(e.Hold, afterOption) }
 
 // Secrets are the secrets the entry's section's lines need, as its Hold
@@ -309,7 +316,7 @@ func holdOption(hold, flag string) []string {
 
 // readHold reads what a section of d holds its lines back for, its
 // header's options, those d's take: --after a step, or one of a step's
-// things, as in cask:1password; --secret a secret, by what it fills; each as
+// things, as in cask:firefox; --secret a secret, by what it fills; each as
 // often as wanted. It returns them as kit writes them, sorted, so sections
 // holding their lines for the same are one.
 func readHold(d sectionDef, text string) (string, error) {
@@ -330,7 +337,7 @@ func readHold(d sectionDef, text string) (string, error) {
 		step, thing, isThing := strings.Cut(value, ":")
 		switch {
 		case flag == afterOption && (step == "" || isThing && thing == ""):
-			return "", fmt.Errorf("--after %s: --after names a step, or one of its things as in cask:1password", value)
+			return "", fmt.Errorf("--after %s: --after names a step, or one of its things as in cask:firefox", value)
 		case flag == secretOption && !secretName.MatchString(value):
 			return "", fmt.Errorf("--secret %s: a secret is named by what it fills: an environment variable's name, or a file's path from ~ or /", value)
 		}
@@ -375,12 +382,13 @@ type declFile struct {
 
 // section is a section of a declarations file: its header, its definition,
 // what follows the header's name, if anything (a project folder, or a
-// 1Password item, its arg; or what a list's section holds its lines back
-// for, its hold, as kit writes it), and its lines, which start at line
-// start.
+// store's item, its arg, and the name the item's section goes by, as; or
+// what a list's section holds its lines back for, its hold, as kit writes
+// it), and its lines, which start at line start.
 type section struct {
 	def    sectionDef
 	arg    string
+	as     string
 	hold   string
 	header string
 	start  int
@@ -388,9 +396,39 @@ type section struct {
 }
 
 // name is the section's name, as its lines' entries have it: its header's,
-// then its folder, item or hold.
+// then its folder, item (and the name it goes by) or hold.
 func (s *section) name() string {
-	return strings.TrimSpace(s.def.header + " " + s.arg + s.hold)
+	name := s.def.header + " " + s.arg
+	if s.as != "" {
+		name += " " + asOption + " " + s.as
+	}
+	return strings.TrimSpace(name + s.hold)
+}
+
+// asOption names an item's section, after its item, as in [secrets
+// op://vault/item --as tokens]: a name that stands for the item.
+const asOption = "--as"
+
+// placeName is what a section's name (--as) may be.
+var placeName = commandName
+
+// readAs reads what follows an item in its section's header: --as and the
+// name the section goes by, or nothing.
+func readAs(text string) (string, error) {
+	if text == "" {
+		return "", nil
+	}
+	words, err := Words(text)
+	if err != nil {
+		return "", err
+	}
+	switch {
+	case len(words) != 2 || words[0] != asOption:
+		return "", fmt.Errorf("%q isn't what follows an item: --as and the name its section goes by, alone", text)
+	case !placeName.MatchString(words[1]):
+		return "", fmt.Errorf("--as %s: a name is letters, digits, dots, hyphens and underscores", words[1])
+	}
+	return words[1], nil
 }
 
 // String is the file's text.
@@ -407,8 +445,9 @@ func (f *declFile) String() string {
 }
 
 // matchHeader finds the section a header names: a kind's own, or a kind's
-// for a project folder or a 1Password item (arg), or with options after its
-// name (opts), as a list's holding its lines back.
+// for a project folder or a store's item (arg), or with options after its
+// name (opts), as a list's holding its lines back, or an item's going by a
+// name.
 func matchHeader(defs []sectionDef, text string) (d sectionDef, arg, opts string, ok bool) {
 	text = strings.Join(strings.Fields(text), " ")
 	for _, d := range defs {
@@ -419,20 +458,17 @@ func matchHeader(defs []sectionDef, text string) (d sectionDef, arg, opts string
 		switch {
 		case ok && d.folders && (strings.HasPrefix(rest, "~/") || strings.HasPrefix(rest, "/")):
 			return d, rest, "", true
-		case ok && d.items && strings.HasPrefix(rest, "op://"):
-			return d, strings.TrimSuffix(rest, "/"), "", true
 		case ok && strings.HasPrefix(rest, "--"):
 			return d, "", rest, true
+		case ok && d.items != nil:
+			item, opts, _ := strings.Cut(rest, " --")
+			if opts != "" {
+				opts = "--" + opts
+			}
+			return d, strings.TrimSuffix(item, "/"), opts, true
 		}
 	}
 	return sectionDef{}, "", "", false
-}
-
-// ItemRef reports whether ref is a 1Password item's reference: "op://", a
-// vault and an item, as in op://vault/item.
-func ItemRef(ref string) bool {
-	vault, item, ok := strings.Cut(strings.TrimPrefix(ref, "op://"), "/")
-	return strings.HasPrefix(ref, "op://") && ok && vault != "" && item != "" && !strings.Contains(item, "/")
 }
 
 // parseFile splits scope's declarations file into its sections, those defs
@@ -459,22 +495,16 @@ func parseFile(defs []sectionDef, scope, content string) (*declFile, error) {
 			continue
 		}
 		d, arg, opts, ok := matchHeader(defs, m[1])
-		switch {
-		case !ok:
+		if !ok {
 			return nil, fmt.Errorf("%s:%d: kit doesn't know the section [%s]", name, i+1, m[1])
-		case d.items && arg != "" && !ItemRef(arg):
-			return nil, fmt.Errorf("%s:%d: [%s]: %q isn't a 1Password item's reference, as in op://vault/item", name, i+1, m[1], arg)
-		case opts != "" && len(d.holds) == 0:
-			return nil, fmt.Errorf("%s:%d: [%s]: only a list's sections, and [features], take options, as in [homebrew formulae --after cask:1password]", name, i+1, m[1])
 		}
-		hold, err := readHold(d, opts)
-		if err != nil {
+		cur = &section{def: d, arg: arg, header: line, start: i + 1}
+		if err := f.readOptions(cur, opts); err != nil {
 			return nil, fmt.Errorf("%s:%d: [%s]: %w", name, i+1, m[1], err)
 		}
-		if prev := f.find(d, arg, hold); prev != nil {
+		if prev := f.find(d, cur.arg, cur.hold); prev != nil {
 			return nil, fmt.Errorf("%s:%d: [%s] is at line %d too", name, i+1, m[1], prev.start)
 		}
-		cur = &section{def: d, arg: arg, hold: hold, header: line, start: i + 1}
 		f.sections = append(f.sections, cur)
 	}
 	seen := map[string]Entry{}
@@ -494,6 +524,46 @@ func parseFile(defs []sectionDef, scope, content string) (*declFile, error) {
 		}
 	}
 	return f, nil
+}
+
+// readOptions reads what follows s's header's name, opts, into s, checking
+// its item, should it be for one: an item's section may go by a name (--as),
+// one an item's in the file; a list's may hold its lines back (hold).
+func (f *declFile) readOptions(s *section, opts string) error {
+	d := s.def
+	var err error
+	switch {
+	case d.items != nil && s.arg != "":
+		if err := d.items(s.arg); err != nil {
+			return err
+		}
+		if s.as, err = readAs(opts); err != nil {
+			return err
+		}
+	case d.items != nil && opts != "":
+		return fmt.Errorf("%s names an item's section, after its item, as in [%s <item> %s <name>]", asOption, d.header, asOption)
+	case opts != "" && len(d.holds) == 0:
+		return errors.New("only a list's sections, and [features], take options, as in [homebrew formulae --after cask:firefox]")
+	default:
+		if s.hold, err = readHold(d, opts); err != nil {
+			return err
+		}
+	}
+	if prev := f.named(d, s.as); prev != nil {
+		return fmt.Errorf("%s %s names [%s] at line %d too: a name stands for one item", asOption, s.as, prev.name(), prev.start)
+	}
+	return nil
+}
+
+// named is the file's section of d going by the name as, or nil: none for
+// no name.
+func (f *declFile) named(d sectionDef, as string) *section {
+	for _, s := range f.sections {
+		if as != "" && s.def.kind == d.kind && s.as == as {
+			return s
+		}
+	}
+	return nil
 }
 
 // find is the file's section of d, for arg (a project folder, or an item)
@@ -554,8 +624,8 @@ func (s *section) stepOf(b body, i int) error {
 // entry reads one of the section's entry lines.
 func (s *section) entry(line string) (Entry, error) {
 	e := Entry{Section: s.name(), Hold: s.hold}
-	if s.def.items {
-		e.Item = s.arg
+	if s.def.items != nil {
+		e.Item, e.As = s.arg, s.as
 	} else {
 		e.Folder = s.arg
 	}
@@ -680,7 +750,58 @@ func (c *Config) List(kind, mac string) (List, error) {
 			return List{}, fmt.Errorf("%s: %s is in %s too (line %d): a thing goes in the shared declarations or a Mac's, not both", e.Pos(), e.Name, DeclFile(s.Scope), s.Line)
 		}
 	}
+	if _, err := c.Places(kind, mac); err != nil {
+		return List{}, err
+	}
 	return List{Kind: kind, Entries: append(shared, own...), Declared: inShared || inOwn}, nil
+}
+
+// Place is one of the sections of a kind with sections for items
+// (Section.Items), where its things are kept: the item it's for, "" for the
+// plain section; the name it goes by (--as), if any; whose declarations
+// file it's in, shared or a Mac's, and the line of its header; and how many
+// things it declares.
+type Place struct {
+	Item, As string
+	Scope    string
+	Line     int
+	Count    int
+}
+
+// Places are kind's sections in the shared file then the Mac named mac's,
+// in order, when kind has sections for items: none, else. A name stands for
+// one item, in both files.
+func (c *Config) Places(kind, mac string) ([]Place, error) {
+	d, err := c.defFor(kind)
+	if err != nil || d.items == nil {
+		return nil, err
+	}
+	var places []Place
+	named := map[string]Place{}
+	for _, scope := range []string{Shared, mac} {
+		f, err := c.readDecl(scope)
+		if err != nil {
+			return nil, err
+		}
+		for _, s := range f.sections {
+			if s.def.kind != d.kind {
+				continue
+			}
+			entries, err := s.entries(scope)
+			if err != nil {
+				return nil, err
+			}
+			p := Place{Item: s.arg, As: s.as, Scope: scope, Line: s.start, Count: len(entries)}
+			if other, ok := named[p.As]; ok && other.Item != p.Item {
+				return nil, fmt.Errorf("%s:%d: [%s]: %s %s is %s in %s (line %d): a name stands for one item", DeclFile(scope), p.Line, s.name(), asOption, p.As, other.Item, DeclFile(other.Scope), other.Line)
+			}
+			if p.As != "" {
+				named[p.As] = p
+			}
+			places = append(places, p)
+		}
+	}
+	return places, nil
 }
 
 // Where are the entries for name in kind's sections: the shared file's,

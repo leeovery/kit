@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"errors"
 	"reflect"
 	"slices"
 	"strings"
@@ -100,6 +101,91 @@ func TestListSecretsByItem(t *testing.T) {
 	}
 }
 
+// An item's secrets section may go by a name, --as after its item, which
+// its lines carry; a name stands for its item in the shared file and each
+// Mac's, and Places lists each section with how many it holds.
+func TestSecretsSectionsGoByNames(t *testing.T) {
+	cfg := loadRepo(t, map[string]string{
+		"shared/declarations": "[secrets op://vault/Shared Item --as tokens]\nA a/b\nB a/c\n",
+		"laptop/declarations": "[secrets]\nKEY op://vault/Other/key\n\n[secrets op://vault/Shared Item --as tokens]\nC a/d\n",
+	})
+	got, err := cfg.List("secret", "laptop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e := got.Entries[0]; e.Item != "op://vault/Shared Item" || e.As != "tokens" || e.Section != "secrets op://vault/Shared Item --as tokens" {
+		t.Errorf("List() = %+v, want its section's item and name", e)
+	}
+	places, err := cfg.Places("secret", "laptop")
+	want := []config.Place{
+		{Item: "op://vault/Shared Item", As: "tokens", Scope: "shared", Line: 1, Count: 2},
+		{Scope: "laptop", Line: 1, Count: 1},
+		{Item: "op://vault/Shared Item", As: "tokens", Scope: "laptop", Line: 4, Count: 1},
+	}
+	if err != nil || !reflect.DeepEqual(places, want) {
+		t.Errorf("Places() = %+v, %v\nwant %+v", places, err, want)
+	}
+}
+
+// A secrets section's name is its item's alone: another item's section
+// going by it, in the same file or the shared one, is refused; so is a name
+// with no item, or other than --as after an item.
+func TestSecretsSectionsNamesRefused(t *testing.T) {
+	for name, c := range map[string]struct {
+		files map[string]string
+		want  string
+	}{
+		"two items by one name in a file": {map[string]string{"laptop/declarations": "[secrets op://vault/A --as tokens]\nX a/b\n\n[secrets op://vault/B --as tokens]\nY c/d\n"},
+			"laptop/declarations:4: [secrets op://vault/B --as tokens]: --as tokens names [secrets op://vault/A --as tokens] at line 1 too: a name stands for one item"},
+		"two items by one name, shared and a Mac's": {map[string]string{"shared/declarations": "[secrets op://vault/A --as tokens]\nX a/b\n", "laptop/declarations": "[secrets op://vault/B --as tokens]\nY c/d\n"},
+			"laptop/declarations:1: [secrets op://vault/B --as tokens]: --as tokens is op://vault/A in shared/declarations (line 1): a name stands for one item"},
+		"a name without an item": {map[string]string{"laptop/declarations": "[secrets --as tokens]\nX op://vault/A/b\n"},
+			"laptop/declarations:1: [secrets --as tokens]: --as names an item's section, after its item, as in [secrets <item> --as <name>]"},
+		"an option other than --as": {map[string]string{"laptop/declarations": "[secrets op://vault/A --after brew]\nX a/b\n"},
+			`laptop/declarations:1: [secrets op://vault/A --after brew]: "--after brew" isn't what follows an item: --as and the name its section goes by, alone`},
+		"a name that isn't one": {map[string]string{"laptop/declarations": "[secrets op://vault/A --as -x]\nX a/b\n"},
+			"--as -x: a name is letters, digits, dots, hyphens and underscores"},
+	} {
+		cfg := loadRepo(t, c.files)
+		if _, err := cfg.List("secret", "laptop"); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: List() error = %v, want one saying %q", name, err, c.want)
+		}
+	}
+	// Each Mac reads the shared file and its own: the same name in two
+	// Macs' files stands for each Mac's item.
+	cfg := loadRepo(t, map[string]string{"laptop/declarations": "[secrets op://vault/A --as tokens]\nX a/b\n", "studio/declarations": "[secrets op://vault/B --as tokens]\nX a/b\n"})
+	if _, err := cfg.List("secret", "laptop"); err != nil {
+		t.Errorf("List() error = %v, want none", err)
+	}
+}
+
+// What follows a header's name is an item when the kind's section says it
+// is: the config knows no store's references of its own.
+func TestItemsAreTheKindsToRecognise(t *testing.T) {
+	sections := []config.Section{{Kind: "token", Header: "tokens", Form: config.Secrets, Items: func(ref string) error {
+		if strings.HasPrefix(ref, "vault:") {
+			return nil
+		}
+		return errors.New("not a vault's item, as in vault:item")
+	}}}
+	dir := writeRepo(t, map[string]string{config.File: twoMacs, "laptop/declarations": "[tokens vault:keys --as keys]\nKEY key\n"})
+	cfg, err := config.Load(dir, sections)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := cfg.List("token", "laptop"); err != nil || got.Entries[0].Item != "vault:keys" || got.Entries[0].As != "keys" {
+		t.Errorf("List() = %+v, %v", got, err)
+	}
+	dir = writeRepo(t, map[string]string{config.File: twoMacs, "laptop/declarations": "[tokens op://vault/item]\nKEY key\n"})
+	cfg, err = config.Load(dir, sections)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cfg.List("token", "laptop"); err == nil || err.Error() != "laptop/declarations:1: [tokens op://vault/item]: not a vault's item, as in vault:item" {
+		t.Errorf("List() error = %v", err)
+	}
+}
+
 // A features section can say what its features wait for, as a list's
 // section does, but never a secret they need.
 func TestFeaturesWait(t *testing.T) {
@@ -190,10 +276,10 @@ func TestListRefuses(t *testing.T) {
 		{name: "a command with nothing after its name", files: map[string]string{"laptop/declarations": "[claude mcp]\ndocs\n"}, want: "laptop/declarations:2: docs has nothing after its name"},
 		{name: "a quote left open", files: map[string]string{"laptop/declarations": "[claude mcp]\ndocs --header \"X: y\n"}, want: "laptop/declarations:2: a quote isn't closed"},
 		{name: "a secret in two items' sections", files: map[string]string{"laptop/declarations": "[secrets op://vault/A]\nX a/b\n\n[secrets op://vault/B]\nX c/d\n"}, want: "laptop/declarations:5: X is in [secrets op://vault/A] at line 2 too"},
-		{name: "a secrets section for what isn't an item", files: map[string]string{"laptop/declarations": "[secrets op://vault/item/field]\nX a/b\n"}, want: `laptop/declarations:1: [secrets op://vault/item/field]: "op://vault/item/field" isn't a 1Password item's reference`},
+		{name: "a secrets section for what isn't an item", files: map[string]string{"laptop/declarations": "[secrets op://vault/item/field]\nX a/b\n"}, want: `laptop/declarations:1: [secrets op://vault/item/field]: "op://vault/item/field" isn't an item's reference kit knows: 1Password's, as in op://vault/item`},
 		{name: "a list section's option kit doesn't know", files: map[string]string{"shared/declarations": "[homebrew formulae --needs secret]\njq\n"}, want: `shared/declarations:1: [homebrew formulae --needs secret]: "--needs" isn't one of [homebrew formulae]'s options: --after and --secret`},
 		{name: "a list section's option without its value", files: map[string]string{"shared/declarations": "[homebrew formulae --after cask:app --secret]\njq\n"}, want: "shared/declarations:1: [homebrew formulae --after cask:app --secret]: --secret needs a secret's name after it"},
-		{name: "a list section waiting for half a thing", files: map[string]string{"shared/declarations": "[homebrew formulae --after cask:]\njq\n"}, want: "--after cask:: --after names a step, or one of its things as in cask:1password"},
+		{name: "a list section waiting for half a thing", files: map[string]string{"shared/declarations": "[homebrew formulae --after cask:]\njq\n"}, want: "--after cask:: --after names a step, or one of its things as in cask:firefox"},
 		{name: "a list section needing what no secret fills", files: map[string]string{"shared/declarations": "[homebrew formulae --secret 9LIVES]\njq\n"}, want: "--secret 9LIVES: a secret is named by what it fills"},
 		{name: "options on a section that isn't a list's", files: map[string]string{"shared/declarations": "[git config --after brew]\nuser.name Someone\n"}, want: "shared/declarations:1: [git config --after brew]: only a list's sections, and [features], take options"},
 		{name: "two sections holding lines back for the same", files: map[string]string{"shared/declarations": "[homebrew formulae --secret A --after b]\njq\n\n[homebrew formulae --after b --secret A]\ngo\n"}, want: "shared/declarations:4: [homebrew formulae --after b --secret A] is at line 1 too"},

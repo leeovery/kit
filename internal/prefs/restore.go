@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/leeovery/kit/internal/apps"
 	"github.com/leeovery/kit/internal/plist"
 	"github.com/leeovery/kit/internal/runner"
 )
@@ -87,7 +88,7 @@ var helperDirs = []string{"Contents/MacOS", "Contents/Library/LoginItems", "Cont
 // a folder below, and the helper apps inside them (Keyboard Maestro's
 // Engine, login items). The first found of a bundle id is kept.
 func (p *Prefs) installedApps() map[string]string {
-	apps := map[string]string{}
+	byID := map[string]string{}
 	for _, base := range p.AppDirs {
 		var found []string
 		for _, pattern := range []string{"*.app", "*/*.app"} {
@@ -101,31 +102,15 @@ func (p *Prefs) installedApps() map[string]string {
 				bundles = append(bundles, h...)
 			}
 			for _, b := range bundles {
-				if id := bundleID(b); id != "" {
-					if _, seen := apps[id]; !seen {
-						apps[id] = b
+				if id := apps.BundleID(b); id != "" {
+					if _, seen := byID[id]; !seen {
+						byID[id] = b
 					}
 				}
 			}
 		}
 	}
-	return apps
-}
-
-// bundleID is an app's bundle id, from its Info.plist: "" when it doesn't
-// say.
-func bundleID(app string) string {
-	data, err := os.ReadFile(filepath.Join(app, "Contents", "Info.plist"))
-	if err != nil {
-		return ""
-	}
-	v, err := plist.Decode(data)
-	if err != nil {
-		return ""
-	}
-	m, _ := v.(map[string]any)
-	id, _ := m["CFBundleIdentifier"].(string)
-	return id
+	return byID
 }
 
 // groupPrefix is a group container's or team's prefix on a domain.

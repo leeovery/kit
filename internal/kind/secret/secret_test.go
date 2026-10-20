@@ -11,11 +11,15 @@ import (
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/kind/secret"
+	"github.com/leeovery/kit/internal/kind/secret/onepassword"
 	"github.com/leeovery/kit/internal/kind/secret/secrettest"
 	"github.com/leeovery/kit/internal/runner/runnertest"
 )
 
 const item = "op://vault/Item"
+
+// onePassword is what kit knows of 1Password.
+var onePassword = onepassword.Driver{}.About()
 
 // declare declares each line's secret: one in full in the plain section,
 // quoted or not, the rest in item's.
@@ -39,7 +43,7 @@ func declare(t *testing.T, s *secret.Secrets, lines ...[2]string) config.List {
 func TestLinesRead(t *testing.T) {
 	s := secret.New(runnertest.New(t), t.TempDir())
 	for _, c := range []struct{ item, value, want string }{
-		{"", "GitHub/token", `"GitHub/token" is short for a field of an item: in a plain [secrets], give where 1Password keeps it in full`},
+		{"", "GitHub/token", `"GitHub/token" isn't a reference kit knows: in a plain [secrets], give where its store keeps it in full (1Password's, as in op://vault/item/field), or put it in its item's section`},
 		{item, "op://vault/a/b", "op://vault/a/b is in full: in [secrets " + item + "] a line names a field or attachment of its item"},
 		{"", "op://vault/a/b --mode", "--mode needs its value"},
 		{item, "a/b --mode 9", "--mode 9 isn't a file's permissions"},
@@ -291,7 +295,7 @@ func TestSyncNeedsOnePasswordToAnswer(t *testing.T) {
 	fake.On("op", "account", "list", "--format", "json").Prints(`[{"url": "my.1password.com"}]`)
 	fake.On("op", "inject").Exits(1).PrintsToStderr("authorization prompt dismissed")
 	fake.On("op", "vault", "list", "--format", "json").Exits(1)
-	if _, err := s.Sync(t.Context()); err == nil || err.Error() != secret.SignIn {
+	if _, err := s.Sync(t.Context()); err == nil || err.Error() != onePassword.NoAnswer {
 		t.Errorf("Sync() = %v", err)
 	}
 	if n := len(fake.Calls()); n != 6 {
@@ -309,7 +313,7 @@ func TestSyncWhenOnePasswordIsntSignedIn(t *testing.T) {
 	fake.On("op", "whoami").Exits(1)
 	fake.On("op", "account", "list", "--format", "json").Prints("[]")
 	_, err := s.Sync(t.Context())
-	if err == nil || err.Error() != secret.SignedOut {
+	if err == nil || err.Error() != onePassword.SignedOut {
 		t.Errorf("Sync() = %v", err)
 	}
 	if want := []string{"op whoami", "op account list --format json"}; !slices.Equal(fake.Calls(), want) {

@@ -123,7 +123,7 @@ func (m *MCP) Values(list config.List) (config.List, error) {
 			return list, fmt.Errorf("%s: %s: %w", e.Pos(), e.Name, err)
 		}
 		if plain := PlainKeys(def); len(plain) > 0 {
-			return list, fmt.Errorf("%s: %s: %s holds a key in plain text: put the key in 1Password, and name it here as ${VAR}", e.Pos(), e.Name, strings.Join(plain, " and "))
+			return list, fmt.Errorf("%s: %s: %s holds a key in plain text: keep the key as a secret (kit secret add VAR), and name it here as ${VAR}", e.Pos(), e.Name, strings.Join(plain, " and "))
 		}
 		folder, name := splitID(e.Name)
 		m.declared[e.Name] = Server{Folder: folder, Name: name, Definition: def, Off: isOff}
@@ -134,8 +134,8 @@ func (m *MCP) Values(list config.List) (config.List, error) {
 
 // Value is the line to declare the server name with, after its name, as
 // Claude Code has it, its empty fields left out. A server holding a key in
-// plain text isn't declared: the key goes in 1Password first, named in its
-// definition as ${VAR}.
+// plain text isn't declared: the key's kept as a secret first, named in
+// its definition as ${VAR}.
 func (m *MCP) Value(_ context.Context, name string) (string, error) {
 	servers, err := m.installed()
 	if err != nil {
@@ -146,7 +146,7 @@ func (m *MCP) Value(_ context.Context, name string) (string, error) {
 		return "", fmt.Errorf("%s isn't installed in Claude Code", name)
 	}
 	if plain := PlainKeys(servers[i].Definition); len(plain) > 0 {
-		return "", fmt.Errorf("%s holds a key in plain text (%s): put the key in 1Password, name it in the server's definition as ${VAR}, then declare it", name, strings.Join(plain, " and "))
+		return "", fmt.Errorf("%s holds a key in plain text (%s): keep the key as a secret (kit secret add VAR), name it in the server's definition as ${VAR}, then declare it", name, strings.Join(plain, " and "))
 	}
 	return writeValue(normal(servers[i].Definition), false)
 }

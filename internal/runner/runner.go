@@ -34,8 +34,8 @@ type Command struct {
 	// to it directly, for a program that asks a person something, such as
 	// sudo its password; nothing it prints is captured.
 	Interactive bool
-	// Secret is whether what it prints is a secret, as 1Password's values
-	// are: kept from every report, the log included.
+	// Secret is whether what it prints is a secret, as a secrets store's
+	// values are: kept from every report, the log included.
 	Secret bool
 	// Env is added to the environment the command runs in, its own values
 	// winning over the runner's.

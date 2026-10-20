@@ -1,21 +1,21 @@
 // Package secret is secrets as a kind: each declared in a secrets section,
 // what it fills (an environment variable, in ~/.secrets.zsh, which the shell
-// sources; or a file, by its path) then where 1Password keeps its value: a
-// field or attachment of the item the section's header names, as in
-// [secrets op://vault/item], or in full in a plain [secrets]. An option:
-// --mode for a file's (600 unless it says).
+// sources; or a file, by its path) then where a secrets store keeps its
+// value: a field or attachment of the item the section's header names, as
+// in [secrets op://vault/item], or in full in a plain [secrets]. An option:
+// --mode for a file's (600 unless it says). The reference picks the store,
+// its driver (Stores): a config may keep secrets in several.
 //
-// Checking never asks 1Password, which would ask for a fingerprint every
-// hour: it reads only what's on the Mac. Syncing reads every value from
-// 1Password in one run of op, as 1Password has the person approve each run;
-// a value that fails to read keeps its previous one. Values never pass
-// through kit's events or log.
+// Checking never asks a store, which may ask for a fingerprint every hour:
+// it reads only what's on the Mac. Syncing reads each store's values at
+// once, as a store may have the person approve each read; a value that
+// fails to read keeps its previous one, and a store that's signed out fails
+// its own secrets alone. Values never pass through kit's events or log.
 package secret
 
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -25,11 +25,11 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/kind"
+	"github.com/leeovery/kit/internal/kind/secret/store"
 	"github.com/leeovery/kit/internal/runner"
 )
 
@@ -37,27 +37,18 @@ import (
 // folder, which the shell sources.
 const EnvFile = ".secrets.zsh"
 
-// opTimeout is how long 1Password may take to answer, or to read a value:
-// it has hung after a restart and over remote connections.
-const opTimeout = 15 * time.Second
-
-// SignIn says how to have 1Password answer, once it's signed in.
-const SignIn = "1Password doesn't answer: unlock its app, with Settings › Developer › Integrate with 1Password CLI on; over a remote connection, sign in with a password in the shell kit runs from: eval $(OP_BIOMETRIC_UNLOCK_ENABLED=false op signin)"
-
-// SignedOut says what's wanting when 1Password's CLI lists no account: its
-// app isn't signed in, or the CLI isn't turned on in it.
-const SignedOut = "1Password isn't signed in, or its CLI isn't turned on: sign in to its app, then turn on Settings › Developer › Integrate with 1Password CLI"
-
 // Secret is a declared secret.
 type Secret struct {
 	// Name is what it fills: an environment variable's name, or a file's
 	// path as declared, ~ and all.
 	Name string
-	// Ref is where 1Password keeps its value, in full.
+	// Ref is where its store keeps its value, in full.
 	Ref string
 	// Mode is a file's permissions.
 	Mode os.FileMode
 	Note string
+	// store is the store keeping its value, as Ref says.
+	store store.Driver
 }
 
 // IsFile reports whether the secret is a file's.
@@ -65,10 +56,11 @@ func (s Secret) IsFile() bool {
 	return strings.HasPrefix(s.Name, "~/") || strings.HasPrefix(s.Name, "/")
 }
 
-// Secrets is the secrets, driven through op.
+// Secrets is the secrets, each read from its store.
 type Secrets struct {
 	run      runner.Runner
 	home     string
+	stores   drivers
 	declared []Secret
 }
 
@@ -81,29 +73,63 @@ var Descriptor = kind.Descriptor{
 	Name:    kindName,
 	Label:   "Secrets",
 	Group:   kind.Secrets,
-	Section: &config.Section{Kind: kindName, Header: "secrets", Form: config.Secrets, Sorted: true, Items: true},
+	Section: &config.Section{Kind: kindName, Header: "secrets", Form: config.Secrets, Sorted: true, Items: drivers(Stores).itemOf},
 	Row:     "Secrets",
 	New:     func(d *kind.Deps) kind.Kind { return New(d.Run, d.Home) },
 }
 
-// New returns the secrets of the user whose home is home.
+// New returns the secrets of the user whose home is home, in the stores kit
+// knows (Stores).
 func New(run runner.Runner, home string) *Secrets {
-	return &Secrets{run: run, home: home}
+	return NewWith(run, home, Stores)
 }
 
-func (s *Secrets) Name() string    { return kindName }
-func (s *Secrets) Program() string { return "op" }
+// NewWith returns the secrets of the user whose home is home, in stores.
+func NewWith(run runner.Runner, home string, stores []store.Driver) *Secrets {
+	return &Secrets{run: run, home: home, stores: stores}
+}
+
+func (s *Secrets) Name() string { return kindName }
+
+// Program is the programs of the stores the secrets declared are in.
+func (s *Secrets) Program() string { return strings.Join(s.Commands(), " and ") }
+
+// Commands are the programs of the stores the secrets declared are in, each
+// once: syncing runs them.
+func (s *Secrets) Commands() []string {
+	var out []string
+	for _, d := range s.used() {
+		out = append(out, d.About().Program)
+	}
+	return out
+}
+
+// used are the stores the secrets declared are in, each once, in turn.
+func (s *Secrets) used() []store.Driver {
+	var out []store.Driver
+	for _, sec := range s.declared {
+		if !slices.ContainsFunc(out, func(d store.Driver) bool { return sameStore(d, sec.store) }) {
+			out = append(out, sec.store)
+		}
+	}
+	return out
+}
+
+// sameStore reports whether a and b are one store, by its ID.
+func sameStore(a, b store.Driver) bool { return a.About().ID == b.About().ID }
 
 // Verb says a secret on the Mac as declared is synced.
 func (s *Secrets) Verb() string { return "synced" }
 
 // Values reads each secret's line: its reference, short in an item's
-// section or full in the plain one, and its options.
+// section or full in the plain one, picking its store, and its options. A
+// list that doesn't read declares nothing.
 func (s *Secrets) Values(list config.List) (config.List, error) {
 	s.declared = nil
 	for _, e := range list.Entries {
 		sec, err := s.parse(e)
 		if err != nil {
+			s.declared = nil
 			return list, fmt.Errorf("%s: %s: %w", e.Pos(), e.Name, err)
 		}
 		s.declared = append(s.declared, sec)
@@ -118,17 +144,11 @@ func (s *Secrets) parse(e config.Entry) (Secret, error) {
 		return sec, err
 	}
 	if len(words) == 0 {
-		return sec, errors.New("where 1Password keeps it comes after the name")
+		return sec, errors.New("where its store keeps it comes after the name")
 	}
-	switch ref := words[0]; {
-	case e.Item != "" && strings.HasPrefix(ref, "op://"):
-		return sec, fmt.Errorf("%s is in full: in [%s] a line names a field or attachment of its item, as in GitHub/token; a full reference goes in a plain [secrets]", ref, e.Section)
-	case e.Item != "":
-		sec.Ref = e.Item + "/" + ref
-	case !strings.HasPrefix(ref, "op://"):
-		return sec, fmt.Errorf("%q is short for a field of an item: in a plain [secrets], give where 1Password keeps it in full (op://vault/item/field), or put it in its item's section, as in [secrets op://vault/item]", ref)
-	default:
-		sec.Ref = ref
+	ref := words[0]
+	if err := s.place(&sec, e, ref); err != nil {
+		return sec, err
 	}
 	for i := 1; i < len(words); i++ {
 		if i+1 >= len(words) {
@@ -148,6 +168,29 @@ func (s *Secrets) parse(e config.Entry) (Secret, error) {
 		return sec, errors.New("--mode is a file's")
 	}
 	return sec, nil
+}
+
+// place reads ref, a secret's reference on e's line, into sec: short for a
+// field of the item e's section names, or, in a plain section, in full, its
+// form picking its store.
+func (s *Secrets) place(sec *Secret, e config.Entry, ref string) error {
+	if e.Item == "" {
+		d, ok := s.stores.ofRef(ref)
+		if !ok {
+			return fmt.Errorf("%q isn't a reference kit knows: in a plain [secrets], give where its store keeps it in full (%s), or put it in its item's section", ref, s.stores.refs())
+		}
+		sec.Ref, sec.store = ref, d
+		return nil
+	}
+	d, ok := s.stores.ofItem(e.Item)
+	if !ok {
+		return s.stores.itemOf(e.Item)
+	}
+	if _, full := s.stores.ofRef(ref); full {
+		return fmt.Errorf("%s is in full: in [%s] a line names a field or attachment of its item, as in %s; a full reference goes in a plain [secrets]", ref, e.Section, d.About().Field)
+	}
+	sec.Ref, sec.store = d.Join(e.Item, ref), d
+	return nil
 }
 
 // path is a file secret's full path.
@@ -190,7 +233,7 @@ func (s *Secrets) envLines() (map[string]string, []string, error) {
 
 // Installed lists the secrets in place: each variable ~/.secrets.zsh
 // exports (one no line declares is extra), and each file there with its
-// declared mode. It asks 1Password nothing.
+// declared mode. It asks no store anything.
 func (s *Secrets) Installed(context.Context) ([]kind.Installed, error) {
 	_, order, err := s.envLines()
 	if err != nil {
@@ -219,8 +262,8 @@ func (s *Secrets) Has(ctx context.Context, name string) bool {
 }
 
 // Variable is the value ~/.secrets.zsh holds for the variable name, as kit
-// wrote it, syncing: ok is false when it holds none. It asks 1Password
-// nothing, and reads no environment.
+// wrote it, syncing: ok is false when it holds none. It asks no store
+// anything, and reads no environment.
 func (s *Secrets) Variable(name string) (value string, ok bool, err error) {
 	lines, _, err := s.envLines()
 	if err != nil {
@@ -245,9 +288,9 @@ func (s *Secrets) Resolve(_ context.Context, names []string) (map[string]string,
 	return out, nil
 }
 
-// Value can't say where 1Password keeps a secret found on the Mac.
+// Value can't say where a secret found on the Mac is kept.
 func (s *Secrets) Value(_ context.Context, name string) (string, error) {
-	return "", fmt.Errorf("kit can't tell where 1Password keeps %s: declare it with kit secret add %s --ref op://vault/item/field", name, name)
+	return "", fmt.Errorf("kit can't tell where %s is kept: declare it with kit secret add %s --ref <where its store keeps it, in full> (%s)", name, name, s.stores.refs())
 }
 
 // Install syncs every secret: those missing, and the rest, in one sitting.
@@ -286,158 +329,149 @@ func (r Report) Summary() string {
 	return text
 }
 
-// signInTimeout is how long 1Password's app may wait for a person to
-// approve kit's use of it, a fingerprint at the prompt it shows: for each
-// run of op that reads a value, as each command kit runs is in a session of
-// its own (runner.Exec), and 1Password asks once a session.
-const signInTimeout = time.Minute
-
-// Ready says whether 1Password answers: nil for a session open already, or
-// one the app opens, asking for a fingerprint, within a minute (listing the
-// vaults needs one). Not signed in, it's not ready yet, as signedIn says.
-func (s *Secrets) Ready(ctx context.Context) error {
-	if open, err := s.signedIn(ctx); open || err != nil {
+// Ready says whether the store keeping ref, an item or a value in full,
+// answers, as ready does.
+func (s *Secrets) Ready(ctx context.Context, ref string) error {
+	d, err := s.StoreOf(ref)
+	if err != nil {
 		return err
 	}
-	if _, err := s.run.Run(ctx, runner.Command{Name: "op", Args: []string{"vault", "list", "--format", "json"}, Timeout: signInTimeout}); err != nil {
-		return errors.New(SignIn)
+	return s.ready(ctx, d)
+}
+
+// ready says whether d answers: nil for a session open already, or one it
+// opens, the person approving it (store.Driver.Unlock). Signed out, it's
+// not ready yet, as signedIn says.
+func (s *Secrets) ready(ctx context.Context, d store.Driver) error {
+	switch d.Session(ctx, s.run) {
+	case store.Open:
+		return nil
+	case store.SignedOut:
+		return engine.NotYet(d.About().SignedOut)
+	}
+	if err := d.Unlock(ctx, s.run); err != nil {
+		return errors.New(d.About().NoAnswer)
 	}
 	return nil
 }
 
-// signedIn says whether 1Password is signed in, asking no one: open for a
-// session open already (op whoami, which never opens one). Listing no
-// account, it isn't signed in, or its CLI isn't on, and it's not ready yet,
-// said at once.
-func (s *Secrets) signedIn(ctx context.Context) (open bool, err error) {
-	if _, err := s.run.Run(ctx, runner.Command{Name: "op", Args: []string{"whoami"}, Timeout: opTimeout}); err == nil {
-		return true, nil
+// signedIn is nil when d is signed in, asking no one; else it's not ready
+// yet, said at once in d's words.
+func (s *Secrets) signedIn(ctx context.Context, d store.Driver) error {
+	if d.Session(ctx, s.run) == store.SignedOut {
+		return engine.NotYet(d.About().SignedOut)
 	}
-	res, err := s.run.Run(ctx, runner.Command{Name: "op", Args: []string{"account", "list", "--format", "json"}, Timeout: opTimeout})
-	var accounts []json.RawMessage
-	if err != nil || json.Unmarshal(res.Stdout, &accounts) != nil || len(accounts) == 0 {
-		return false, engine.NotYet(SignedOut)
-	}
-	return false, nil
+	return nil
 }
 
-// Answers reports whether 1Password answers, as Ready says.
-func (s *Secrets) Answers(ctx context.Context) bool { return s.Ready(ctx) == nil }
-
-// read reads a value from 1Password, its output kept from every report,
-// without the newline op ends it with.
-func (s *Secrets) read(ctx context.Context, ref string) (string, error) {
-	res, err := s.run.Run(ctx, runner.Command{Name: "op", Args: []string{"read", ref}, Timeout: signInTimeout, Secret: true})
-	if err != nil {
-		return "", errors.New("1Password couldn't read it")
+// Cards are the sign-ins of the stores the secrets declared are in, each a
+// card kit raises before syncing, watched till its store says it's signed
+// in: waiting for the store's program and app, which kit opens.
+func (s *Secrets) Cards() []kind.Card {
+	var out []kind.Card
+	for _, d := range s.used() {
+		a := d.About()
+		out = append(out, kind.Card{
+			Name: a.ID + "-sign-in", Title: a.SignIn.Title, Why: "Your secrets come from " + a.Name + ".", Steps: a.SignIn.Steps,
+			Done:    func(ctx context.Context) bool { return d.Session(ctx, s.run) != store.SignedOut },
+			Program: a.Program, App: a.SignIn.App, AppName: a.SignIn.AppName,
+		})
 	}
-	return strings.TrimRight(string(res.Stdout), "\n"), nil
+	return out
 }
 
-// inject reads refs from 1Password in one run of op inject, its output kept
-// from every report: a template on its standard input, each ref between
-// lines of a mark no value holds, so that a value of many lines reads back
-// whole, and each value without the newlines it ends with, as read has it.
-// A ref with a $ or }} in it isn't taken: a template would read it as a
-// variable, or as the reference's end.
-func (s *Secrets) inject(ctx context.Context, refs []string) (map[string]string, error) {
-	mark := "kit-" + newID()
-	var template strings.Builder
-	for _, ref := range refs {
-		if strings.Contains(ref, "$") || strings.Contains(ref, "}}") {
-			return nil, fmt.Errorf("op inject would read %s otherwise", ref)
-		}
-		template.WriteString(mark + "\n{{ " + ref + " }}\n")
-	}
-	template.WriteString(mark + "\n")
-	res, err := s.run.Run(ctx, runner.Command{Name: "op", Args: []string{"inject"}, Input: template.String(), Timeout: signInTimeout, Secret: true})
-	if err != nil {
-		return nil, errors.New("1Password couldn't read them")
-	}
-	parts := strings.Split(string(res.Stdout), mark)
-	if len(parts) != len(refs)+2 {
-		return nil, errors.New("op inject gave back other than its template")
-	}
-	values := make(map[string]string, len(refs))
-	for i, ref := range refs {
-		values[ref] = strings.TrimRight(strings.TrimPrefix(parts[i+1], "\n"), "\n")
-	}
-	return values, nil
-}
-
-// readAll reads refs from 1Password in as few runs of op as it can, as
-// 1Password has the person approve each: one, when every ref reads. Should
-// that fail, once 1Password answers, they're read in halves, so that a ref
-// that won't read costs the rest nothing. A value that won't read is left
-// out.
-func (s *Secrets) readAll(ctx context.Context, refs []string) (map[string]string, error) {
+// readAll reads refs from d in as few reads as it can, as a store may have
+// the person approve each: one, when every ref reads. Should that fail,
+// once d answers, they're read in halves, so that a ref that won't read
+// costs the rest nothing. A value that won't read is left out.
+func (s *Secrets) readAll(ctx context.Context, d store.Driver, refs []string) (map[string]string, error) {
 	if len(refs) == 0 {
 		return map[string]string{}, nil
 	}
-	if values, err := s.inject(ctx, refs); err == nil {
+	if values, err := d.ReadMany(ctx, s.run, refs); err == nil {
 		return values, nil
 	}
-	if err := s.Ready(ctx); err != nil {
+	if err := s.ready(ctx, d); err != nil {
 		return nil, err
 	}
 	values := map[string]string{}
-	s.halves(ctx, refs, values)
+	s.halves(ctx, d, refs, values)
 	return values, nil
 }
 
-// halves reads each half of refs into values, as readSome does.
-func (s *Secrets) halves(ctx context.Context, refs []string, values map[string]string) {
+// halves reads each half of refs from d into values, as readSome does.
+func (s *Secrets) halves(ctx context.Context, d store.Driver, refs []string, values map[string]string) {
 	half := len(refs) / 2
-	s.readSome(ctx, refs[:half], values)
-	s.readSome(ctx, refs[half:], values)
+	s.readSome(ctx, d, refs[:half], values)
+	s.readSome(ctx, d, refs[half:], values)
 }
 
-// readSome reads refs into values: one alone, with op read; more at once,
-// or, should that fail, in halves.
-func (s *Secrets) readSome(ctx context.Context, refs []string, values map[string]string) {
+// readSome reads refs from d into values: one alone; more at once, or,
+// should that fail, in halves.
+func (s *Secrets) readSome(ctx context.Context, d store.Driver, refs []string, values map[string]string) {
 	switch len(refs) {
 	case 0:
 	case 1:
-		if v, err := s.read(ctx, refs[0]); err == nil {
+		if v, err := d.Read(ctx, s.run, refs[0]); err == nil {
 			values[refs[0]] = v
 		}
 	default:
-		got, err := s.inject(ctx, refs)
+		got, err := d.ReadMany(ctx, s.run, refs)
 		if err != nil {
-			s.halves(ctx, refs, values)
+			s.halves(ctx, d, refs, values)
 			return
 		}
 		maps.Copy(values, got)
 	}
 }
 
-// refs are the declared secrets' references, each once, in turn.
-func (s *Secrets) refs() []string {
+// refs are the references of the declared secrets d keeps, each once, in
+// turn.
+func (s *Secrets) refs(d store.Driver) []string {
 	var refs []string
 	for _, sec := range s.declared {
-		if !slices.Contains(refs, sec.Ref) {
+		if sameStore(sec.store, d) && !slices.Contains(refs, sec.Ref) {
 			refs = append(refs, sec.Ref)
 		}
 	}
 	return refs
 }
 
-// Sync reads every declared secret from 1Password and puts each in place:
+// Sync reads every declared secret from its store and puts each in place:
 // ~/.secrets.zsh written whole (a variable that fails to read keeps its
 // line, so a partial read never shrinks it), each file written beside its
-// place then renamed into it. It fails at once when 1Password isn't signed
-// in, or doesn't answer.
+// place then renamed into it. A store that isn't signed in, or doesn't
+// answer, fails its own secrets alone; when none does, the sync fails at
+// once, saying why in each store's words.
 func (s *Secrets) Sync(ctx context.Context) (Report, error) {
 	report := Report{Failed: map[string]string{}}
-	if _, err := s.signedIn(ctx); err != nil {
+	used := s.used()
+	down := map[string]error{}
+	for _, d := range used {
+		if err := s.signedIn(ctx, d); err != nil {
+			down[d.About().ID] = err
+		}
+	}
+	if err := allDown(used, down); err != nil {
 		return report, err
 	}
 	old, oldOrder, err := s.envLines()
 	if err != nil {
 		return report, err
 	}
-	values, err := s.readAll(ctx, s.refs())
-	if err != nil {
+	values := map[string]string{}
+	for _, d := range used {
+		if down[d.About().ID] != nil {
+			continue
+		}
+		got, err := s.readAll(ctx, d, s.refs(d))
+		if err != nil {
+			down[d.About().ID] = err
+			continue
+		}
+		maps.Copy(values, got)
+	}
+	if err := allDown(used, down); err != nil {
 		return report, err
 	}
 	var env []string
@@ -445,7 +479,7 @@ func (s *Secrets) Sync(ctx context.Context) (Report, error) {
 		v, ok := values[sec.Ref]
 		switch {
 		case !ok:
-			report.Failed[sec.Name] = "1Password couldn't read " + sec.Ref
+			report.Failed[sec.Name] = unread(sec, down)
 			if line, kept := old[sec.Name]; kept && !sec.IsFile() {
 				env = append(env, line)
 			}
@@ -475,11 +509,48 @@ func (s *Secrets) Sync(ctx context.Context) (Report, error) {
 			env = append(env, old[name])
 		}
 	}
-	header := "# Written by kit from 1Password: kit-config's secrets sections. kit apply\n# and kit secret sync rewrite it whole; change a secret in 1Password, or with kit.\n"
-	if err := writeFile(filepath.Join(s.home, EnvFile), header+strings.Join(env, "\n")+"\n", 0o600); err != nil {
+	if err := writeFile(filepath.Join(s.home, EnvFile), header(used)+strings.Join(env, "\n")+"\n", 0o600); err != nil {
 		return report, err
 	}
 	return report, nil
+}
+
+// allDown is why the sync can't go on, when every store used, of used, is
+// down, as down says by its ID: nil while one isn't, or none is used.
+func allDown(used []store.Driver, down map[string]error) error {
+	if len(used) == 0 || len(down) < len(used) {
+		return nil
+	}
+	errs := make([]error, len(used))
+	for i, d := range used {
+		errs[i] = down[d.About().ID]
+	}
+	if len(errs) == 1 {
+		return errs[0]
+	}
+	return errors.Join(errs...)
+}
+
+// unread is why sec's value didn't read: its store's being down, as down
+// says, or the store couldn't read it.
+func unread(sec Secret, down map[string]error) string {
+	if err := down[sec.store.About().ID]; err != nil {
+		return err.Error()
+	}
+	return sec.store.About().Name + " couldn't read " + sec.Ref
+}
+
+// header heads ~/.secrets.zsh, naming the stores used, its values' sources.
+func header(used []store.Driver) string {
+	from := "Written by kit"
+	if len(used) > 0 {
+		names := make([]string, len(used))
+		for i, d := range used {
+			names[i] = d.About().Name
+		}
+		from += " from " + strings.Join(names, " and ")
+	}
+	return "# " + from + ": kit-config's secrets sections. kit apply\n# and kit secret sync rewrite it whole; change a secret in its store, or with kit.\n"
 }
 
 // writeFile puts a file secret's value in place, with its mode, ended by a
@@ -498,7 +569,7 @@ func (s *Secrets) writeFile(sec Secret, value string) (int, error) {
 }
 
 // Remove takes each secret off the Mac: a variable out of ~/.secrets.zsh, a
-// file deleted. 1Password keeps the value.
+// file deleted. Its store keeps the value.
 func (s *Secrets) Remove(_ context.Context, names []string) error {
 	var errs []error
 	drop := map[string]bool{}
@@ -597,4 +668,6 @@ var _ interface {
 	kind.Kind
 	kind.Valued
 	kind.Verber
+	kind.Commanded
+	kind.Carded
 } = (*Secrets)(nil)

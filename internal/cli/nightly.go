@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -262,7 +263,7 @@ func (a *app) jobs(r *run) (hourly, daily []nightly.Job, err error) {
 		}))
 		daily = append(daily, nightly.CaptureSettings(func(ctx context.Context) error {
 			if res := captureResult(p.Capture(ctx)); res.State != check.OK {
-				return errors.New(cmpOr(res.Reason, res.Summary))
+				return errors.New(cmp.Or(res.Reason, res.Summary))
 			}
 			return nil
 		}))

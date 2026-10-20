@@ -32,9 +32,11 @@ type manualDone struct {
 
 // ManualStep is a [manual] line: what to do; why, as the notes above it
 // say; what it comes after (a step, or one of a step's things, as in
-// cask:1password) and the steps it comes before; the group it's in, if
-// any; the command saying whether it's done, if it has one; and the steps
-// to do it, as the lines indented under it say.
+// cask:firefox) and the steps it comes before; the group it's in, if any;
+// the command saying whether it's done, if it has one; and the steps to do
+// it, as the lines indented under it say. Or it's one of kit's own, as a
+// kind's card is (kind.Card): told done as Done says, and opening its app
+// as its card first comes up, which a [manual] line never does.
 type ManualStep struct {
 	Name, Do, Why string
 	After, Before []string
@@ -43,6 +45,12 @@ type ManualStep struct {
 	Steps         []string
 	// Pos is where its line is, as in laptop/declarations:12.
 	Pos string
+	// Done reports whether it's done, asking no one, for one of kit's own;
+	// nil for a [manual] line.
+	Done func(ctx context.Context) bool
+	// Open is the app, by bundle id, kit opens as its card first comes up:
+	// "" for none, as for every [manual] line.
+	Open string
 }
 
 // Ordered reports whether the line says a step comes after it (--before),
@@ -86,7 +94,7 @@ func ParseManual(home string, e config.Entry) (ManualStep, error) {
 			}
 			i++
 		case "--open":
-			return m, errors.New(`--open is gone: kit opens nothing, so say what to open in a step, a line indented under it, as in "Open 1Password"`)
+			return m, errors.New(`--open is gone: a step by hand of yours opens nothing, so say what to open in a step, a line indented under it, as in "Open Firefox"`)
 		case "--test":
 			if cmd = words[i+1:]; len(cmd) == 0 {
 				return m, errors.New("--test needs the command saying whether it's done after it")
@@ -155,16 +163,24 @@ func SplitManual(home string, list config.List) (rest config.List, own []ManualS
 }
 
 // byHand is a step by hand as its step checks and raises it: its line, and
-// where to look to tell it's done.
+// where to look to tell it's done; and, for one opening its app, whether
+// it's opened it yet.
 type byHand struct {
 	ManualStep
 	run      runner.Runner
 	stateDir string
+	opened   *sync.Once
 }
 
-// isDone reports whether it's done: its command exits 0, or, without one,
-// it's been marked done on this Mac.
+// watched reports whether kit tells by itself when it's done.
+func (b byHand) watched() bool { return b.Command != nil || b.Done != nil }
+
+// isDone reports whether it's done: as Done says, or its command exits 0,
+// or, without either, it's been marked done on this Mac.
 func (b byHand) isDone(ctx context.Context) bool {
+	if b.Done != nil {
+		return b.Done(ctx)
+	}
 	if b.Command != nil {
 		r, err := b.run.Run(ctx, *b.Command)
 		return Outcome(*b.Command, r, err) == ""
@@ -177,7 +193,7 @@ func (b byHand) isDone(ctx context.Context) bool {
 // kit can't tell it's done, how to say so.
 func (b byHand) item() check.Item {
 	it := check.Item{ID: ManualName + ":" + b.Name, Name: b.Do, State: check.ByHand}
-	if b.Command == nil {
+	if !b.watched() {
 		it.Detail = "then: kit manual done " + b.Name
 	}
 	return it
@@ -186,7 +202,18 @@ func (b byHand) item() check.Item {
 // card is what its card says: its line's name, what to do, its group, why,
 // its steps, and whether kit tells by itself when it's done.
 func (b byHand) card(context.Context) event.NeedsYou {
-	return event.NeedsYou{Item: b.Name, Title: b.Do, Group: b.Group, Why: b.Why, Steps: b.Steps, Tells: b.Command != nil}
+	return event.NeedsYou{Item: b.Name, Title: b.Do, Group: b.Group, Why: b.Why, Steps: b.Steps, Tells: b.watched()}
+}
+
+// open opens its app, once, as its card comes up: nothing for one with
+// none. What opening says, the run's log has.
+func (b byHand) open(ctx context.Context) {
+	if b.Open == "" || b.opened == nil {
+		return
+	}
+	b.opened.Do(func() {
+		_, _ = b.run.Run(ctx, runner.Command{Name: "open", Args: []string{"-b", b.Open}})
+	})
 }
 
 // done reports whether it's done, as isDone does; kit has no words for it.
@@ -199,7 +226,7 @@ func (b byHand) answer(ctx context.Context, a hand.Answer, now time.Time) (bool,
 	switch {
 	case a != hand.Done:
 		return false, "", nil
-	case b.Command == nil:
+	case !b.watched():
 		return true, "", MarkDone(b.stateDir, []string{b.Name}, now, false)
 	}
 	return b.isDone(ctx), "", nil
@@ -232,6 +259,12 @@ type raised interface {
 	card(ctx context.Context) event.NeedsYou
 	done(ctx context.Context) (bool, string)
 	answer(ctx context.Context, a hand.Answer, now time.Time) (bool, string, error)
+}
+
+// opener is a raised card that opens something as it comes up: a step by
+// hand of kit's own, its app.
+type opener interface {
+	open(ctx context.Context)
 }
 
 // errStopHere is why a card came down without being done: the person
@@ -292,6 +325,9 @@ func (r *Raise) up(ctx context.Context, step string, c raised, more int) (string
 	card := c.card(ctx)
 	r.show(ctx, step, card, more)
 	defer r.unnotify(ctx, step, card.Item)
+	if o, ok := c.(opener); ok {
+		o.open(ctx)
+	}
 	// Looking every few seconds finds it done by its command or its check,
 	// or marked done elsewhere, as by kit manual done in another window.
 	tick := time.NewTicker(manualPoll)
@@ -408,13 +444,14 @@ func (r *Raise) recount() {
 }
 
 // OwnManual is a step by hand a step comes after (Ordered), as a step of
-// its own: done when its command exits 0, or once marked done. Applying it
-// with raise raises it, and waits till it's done; and so does doing it again,
-// should a step it comes before find it wasn't done after all (again).
-// Without raise, with no one to act, applying leaves it as it stands, and
-// it can't be done again.
+// its own: done as its Done says, when its command exits 0, or once marked
+// done. Applying it with raise raises it, opening its app the first time,
+// and waits till it's done; and so does doing it again, should a step it
+// comes before find it wasn't done after all (again). Without raise, with
+// no one to act, applying leaves it as it stands, and it can't be done
+// again.
 func OwnManual(run runner.Runner, stateDir string, m ManualStep, raise *Raise) engine.Step {
-	b := byHand{ManualStep: m, run: run, stateDir: stateDir}
+	b := byHand{ManualStep: m, run: run, stateDir: stateDir, opened: &sync.Once{}}
 	step := engine.Step{
 		Name: m.Name, Title: m.Name, Area: AreaManual, ByHand: []event.Hand{m.hand()},
 		Check: func(ctx context.Context) check.Result {
@@ -445,7 +482,7 @@ func OwnManual(run runner.Runner, stateDir string, m ManualStep, raise *Raise) e
 // card went up. One whose test still passes has nothing to raise.
 func (b byHand) again(ctx context.Context, raise *Raise) error {
 	switch {
-	case b.Command == nil:
+	case !b.watched():
 		if err := MarkDone(b.stateDir, []string{b.Name}, time.Time{}, true); err != nil {
 			return err
 		}

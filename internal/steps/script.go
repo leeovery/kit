@@ -55,7 +55,7 @@ func Template(name, does string) string {
 
 // Script is a step of the user's own, as a [steps] line declares it: what it
 // does, what it's applied after (a step, or one of a step's things, as in
-// cask:1password) and the steps it's applied before, the secrets it needs,
+// cask:firefox) and the steps it's applied before, the secrets it needs,
 // whether applying it needs an administrator's password; and its folder,
 // holding its script and its data.
 type Script struct {
@@ -77,7 +77,7 @@ type Script struct {
 
 // ParseScript reads a [steps] line of the config repository at configDir:
 // what the step does, in quotes, then --after and --before, each with a
-// step's name (--after one of a step's things too, as in cask:1password) and
+// step's name (--after one of a step's things too, as in cask:firefox) and
 // as often as wanted, --secret with a secret's name as often, and --sudo.
 func ParseScript(configDir string, e config.Entry) (Script, error) {
 	folder := config.StepFolder(e.Scope, e.Name)
@@ -121,14 +121,14 @@ func ParseScript(configDir string, e config.Entry) (Script, error) {
 }
 
 // orderedBy is what the --after or --before at words[i] names: a step, or,
-// after --after, one of a step's things, as in cask:1password.
+// after --after, one of a step's things, as in cask:firefox.
 func orderedBy(flag string, words []string, i int) (string, error) {
 	if i+1 == len(words) || strings.HasPrefix(words[i+1], "--") {
 		return "", fmt.Errorf("%s needs a step's name after it", flag)
 	}
 	name := words[i+1]
 	if step, thing, ok := strings.Cut(name, ":"); ok && (flag == "--before" || step == "" || thing == "") {
-		return "", fmt.Errorf("%s %s: --after names a step, or one of its things as in cask:1password; --before a step", flag, name)
+		return "", fmt.Errorf("%s %s: --after names a step, or one of its things as in cask:firefox; --before a step", flag, name)
 	}
 	return name, nil
 }

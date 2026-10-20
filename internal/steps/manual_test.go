@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -55,7 +56,7 @@ func TestManualLinesRead(t *testing.T) {
 	for value, want := range map[string]string{
 		`--test test -d x`:                      "what to do comes after the name",
 		`"Do it" test -d x`:                     `"test" isn't one of a step by hand's options: --after, --before, --group and --test`,
-		`"Do it" --open "System Settings"`:      `--open is gone: kit opens nothing, so say what to open in a step, a line indented under it, as in "Open 1Password"`,
+		`"Do it" --open "System Settings"`:      `--open is gone: a step by hand of yours opens nothing, so say what to open in a step, a line indented under it, as in "Open Firefox"`,
 		`"Do it" --group`:                       `--group needs the group's name after it, as in --group "First things"`,
 		`"Do it" --group --test true`:           "--group needs the group's name after it",
 		`"Do it" --group ""`:                    "--group needs the group's name after it",
@@ -64,7 +65,7 @@ func TestManualLinesRead(t *testing.T) {
 		`"Do it" -- test -d x`:                  "comes after --test now",
 		`"Do it" --after`:                       "--after needs a step's name after it",
 		`"Do it" --before cask:1password`:       "--before a step",
-		`"Do it" --after cask: --test true`:     "one of its things as in cask:1password",
+		`"Do it" --after cask: --test true`:     "one of its things as in cask:firefox",
 		`"Do it" --test test -d x --after cask`: "",
 	} {
 		_, err := steps.ParseManual("/home", config.Entry{Name: "x", Value: value})
@@ -332,6 +333,53 @@ func TestACardWithATestLooksAgain(t *testing.T) {
 	}
 	if res := step.Check(t.Context()); res.State != check.OK || len(c.fake.Commands()) < 4 {
 		t.Errorf("check after = %+v, ran %q: want it looked at till it passed", res, c.fake.Calls())
+	}
+}
+
+// A step by hand of kit's own, as a store's sign-in, is told done as its
+// Done says: done, it's never raised; not done, its card goes up, watched,
+// kit opening its app as it first comes up, and comes down by itself once
+// Done says so. Raised again, the app isn't opened again.
+func TestKitsOwnCardIsWatchedAndOpensItsApp(t *testing.T) {
+	defer steps.SetManualPoll(time.Millisecond)()
+	c := newCard(t)
+	var signedIn atomic.Bool
+	opened := make(chan struct{}, 2)
+	c.fake.On("open", "-b", "com.example.vault").Does(func() { opened <- struct{}{} })
+	m := steps.ManualStep{Name: "vault-sign-in", Do: "Sign in to the vault", Why: "Your secrets come from it.", Steps: []string{"Scan the code"}, Before: []string{"secret"},
+		Done: func(context.Context) bool { return signedIn.Load() }, Open: "com.example.vault"}
+	step := steps.OwnManual(c.fake, c.state, m, c.raise)
+	if res := step.Check(t.Context()); res.State != check.Attention || res.Items[0].Detail != "" {
+		t.Errorf("check = %+v, want it not done, kit telling when it is", res)
+	}
+	applied := applying(t, step)
+	up := c.cards(t, 1)[0]
+	if up.Title != "Sign in to the vault" || up.Why != "Your secrets come from it." || !slices.Equal(up.Steps, m.Steps) || !up.Tells {
+		t.Errorf("card = %+v, want what the step says, watched", up)
+	}
+	<-opened
+	signedIn.Store(true)
+	if err := ended(t, applied); err != nil {
+		t.Fatal(err)
+	}
+	if res := step.Check(t.Context()); res.State != check.OK {
+		t.Errorf("check once signed in = %+v", res)
+	}
+	signedIn.Store(false)
+	again := make(chan error, 1)
+	go func() { again <- step.Again(t.Context()) }()
+	c.cards(t, 2)
+	signedIn.Store(true)
+	if err := ended(t, again); err != nil {
+		t.Fatal(err)
+	}
+	if got := c.fake.Calls(); !slices.Equal(got, []string{"open -b com.example.vault"}) {
+		t.Errorf("ran %q, want the app opened once", got)
+	}
+
+	done := steps.OwnManual(c.fake, c.state, m, c.raise)
+	if err := ended(t, applying(t, done)); err != nil || len(c.cards(t, 2)) != 2 {
+		t.Errorf("signed in already: applied = %v, cards %d, want none raised", err, len(c.cards(t, 2)))
 	}
 }
 

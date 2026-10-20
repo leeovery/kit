@@ -1,4 +1,5 @@
-// Package apps is what kit knows of the apps kit.toml names: the terminal a
+// Package apps is what kit knows of the Mac's apps: whether one's
+// installed, by its bundle id; and the apps kit.toml names: the terminal a
 // new Mac's boot hands over to, which the boot installs before anything
 // else, so kit knows it by name: its cask, its bundle, how to tell kit is
 // running in it, and its driver, which opens its windows.

@@ -41,7 +41,7 @@ func TestBareKitMenu(t *testing.T) {
 		"    Log  past runs · kit log",
 		"    Nightly  run the jobs that are due, then every check · kit nightly",
 		"    App settings  save apps' settings now · kit prefs capture",
-		"    Secrets  fetch them from 1Password again · kit secret sync",
+		"    Secrets  fetch them again from their stores · kit secret sync",
 		"    Declared  what's declared for this Mac · kit list",
 		"    Help  every command · kit --help",
 	}

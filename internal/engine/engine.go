@@ -111,7 +111,7 @@ type Choice struct {
 }
 
 // Wait is a thing a step is applied after: one of the things another step
-// puts in place, by its step's name and its own, as in cask:1password, and
+// puts in place, by its step's name and its own, as in cask:firefox, and
 // whether it's in place yet; among a step's Waits, without a step, a thing
 // no step in particular puts in place; or, among a step's Later, without a
 // thing or Ready, that step itself.
@@ -1068,8 +1068,7 @@ type puttingKey struct{}
 // for one of them isn't over till the step says it's in place (Put), stops
 // putting them (the func it returns), or finishes. Things are named as its
 // kind names them: a wait's thing is one by its name in full, or its last
-// part, as cask:1password-cli is 1password/tap/1password-cli. Outside a
-// run, it does nothing.
+// part, as cask:tool is owner/tap/tool. Outside a run, it does nothing.
 func Putting(ctx context.Context, things []string) (stop func()) {
 	if putting, ok := ctx.Value(puttingKey{}).(func([]string) func()); ok {
 		return putting(things)

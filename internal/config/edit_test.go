@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 	"testing"
 
 	"github.com/leeovery/kit/internal/config"
@@ -91,6 +90,18 @@ func TestDeclare(t *testing.T) {
 			before: "[secrets]\nKEY op://vault/i/f\n",
 			kind:   "secret", entry: config.Entry{Name: "A_TOKEN", Value: "x/z", Item: "op://vault/A/"},
 			after: "[secrets]\nKEY op://vault/i/f\n\n[secrets op://vault/A]\nA_TOKEN x/z\n",
+		},
+		{
+			name:   "a secret's item's section made, going by its name",
+			before: "[secrets]\nKEY op://vault/i/f\n",
+			kind:   "secret", entry: config.Entry{Name: "A_TOKEN", Value: "x/z", Item: "op://vault/A", As: "tokens"},
+			after: "[secrets]\nKEY op://vault/i/f\n\n[secrets op://vault/A --as tokens]\nA_TOKEN x/z\n",
+		},
+		{
+			name:   "a secret in its item's section, whatever name it goes by",
+			before: "[secrets op://vault/A --as tokens]\nB_TOKEN x/y\n",
+			kind:   "secret", entry: config.Entry{Name: "A_TOKEN", Value: "x/z", Item: "op://vault/A", As: "other"},
+			after: "[secrets op://vault/A --as tokens]\nA_TOKEN x/z\nB_TOKEN x/y\n",
 		},
 		{
 			name:   "a file made",
@@ -391,8 +402,8 @@ func TestDeclareASecretOnce(t *testing.T) {
 	if got := readFile(t, cfg, "laptop/declarations"); got != before {
 		t.Errorf("laptop = %q, want it untouched", got)
 	}
-	if items, err := cfg.Items("secret", "laptop"); err != nil || strings.Join(items, ",") != "op://vault/A" {
-		t.Errorf("Items() = %q, %v", items, err)
+	if places, err := cfg.Places("secret", "laptop"); err != nil || len(places) != 1 || places[0] != (config.Place{Item: "op://vault/A", Scope: "laptop", Line: 1, Count: 1}) {
+		t.Errorf("Places() = %+v, %v", places, err)
 	}
 }
 

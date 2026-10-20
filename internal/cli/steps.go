@@ -12,12 +12,14 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/leeovery/kit/internal/apps"
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/kind/secret"
 	"github.com/leeovery/kit/internal/kinds"
+	"github.com/leeovery/kit/internal/runner"
 	"github.com/leeovery/kit/internal/steps"
 )
 
@@ -98,6 +100,40 @@ func (r *run) manualSteps(ordered []steps.ManualStep, others []engine.Step, rais
 	return out, nil
 }
 
+// cardSteps are the steps by hand the run's kinds need done before their
+// own (kind.Carded), as a secrets store's sign-in, each a step of its own
+// come before its kind's, raised with raise at a terminal: it waits first
+// for the program it needs on kit's PATH and the app it needs installed in
+// one of appDirs, which kit opens as its card first comes up.
+func (r *run) cardSteps(raise *steps.Raise, appDirs []string) []engine.Step {
+	var out []engine.Step
+	for _, name := range r.kinds {
+		carded, ok := r.kindsByName[name].(kind.Carded)
+		if !ok {
+			continue
+		}
+		for _, c := range carded.Cards() {
+			m := steps.ManualStep{Name: c.Name, Do: c.Title, Why: c.Why, Steps: c.Steps, Before: []string{name}, Done: c.Done, Open: c.App}
+			step := steps.OwnManual(r.run, r.stateDir, m, raise)
+			step.Before = m.Before
+			if c.Program != "" {
+				step.Waits = append(step.Waits, engine.Wait{Thing: c.Program, Ready: func(context.Context) bool { return runner.Has(r.run, c.Program) }})
+			}
+			if c.App != "" {
+				step.Waits = append(step.Waits, engine.Wait{Thing: c.AppName, Ready: func(context.Context) bool { return apps.Installed(appDirs, c.App) }})
+			}
+			out = append(out, step)
+		}
+	}
+	return out
+}
+
+// appDirs are the folders apps are installed in: kit's own (Deps.AppDirs),
+// and the Applications folder in home.
+func (a *app) appDirs(home string) []string {
+	return append(slices.Clone(a.AppDirs), filepath.Join(home, "Applications"))
+}
+
 // placeByHand places the steps by hand with no place of their own among
 // all, the run's steps, when they're raised at a terminal: applied once
 // every other step has finished, however it stands, as what's done by hand
@@ -154,7 +190,7 @@ func (r *run) placeScript(s *steps.Script, names map[string]bool) ([]engine.Wait
 // place checks what a line's step comes after and before are among names,
 // the run's steps, or kinds this Mac doesn't use and the steps they need,
 // which it's then placed without; it returns the steps it comes after, a
-// wait for each of a kind's things it comes after, as in cask:1password,
+// wait for each of a kind's things it comes after, as in cask:firefox,
 // and the steps it comes before. An error says what isn't a step or a kind.
 func (r *run) place(after, before []string, names map[string]bool) (steps []string, waits []engine.Wait, ahead []string, err error) {
 	var wrong []string
@@ -226,7 +262,7 @@ func broken(step *engine.Step, reason string) {
 // placeLines places each kind's lines among all, the run's steps: its
 // sections held back (heldSections), each waited for partway through
 // applying; the lines a step or a section held back names, as in --after
-// cask:1password, to install first; and, for a kind taking turns with
+// cask:firefox, to install first; and, for a kind taking turns with
 // others (kind.Sharing), their first, for the rest of its lines to wait
 // for. A section placed after what isn't a step, or needing a secret not
 // declared, fails its kind's step, saying so.
@@ -263,7 +299,7 @@ func (r *run) placeLines(all []engine.Step) {
 	// What a kind waits for behind another stays out of its step's Later,
 	// unlike its sections' waits: there each kind's lead-up would take in
 	// the other's, and a step waiting for a thing of one would free from it
-	// what comes after the other, as secrets from 1Password's sign-in.
+	// what comes after the other, as secrets from their store's sign-in.
 	for name, p := range r.placing {
 		sharing, ok := r.kindsByName[name].(kind.Sharing)
 		if !ok {
@@ -403,7 +439,7 @@ kit-config, its folder's other files its data. kit runs the script as run
 check (exit 0: done; 1: not done; 3: can't be done yet; its first line saying
 how it stands) and, when it isn't done, as run apply, then checks again.
 --after names a step it's applied after, or one of a step's things, as in
-cask:1password; --before a step applied after it; --secret a secret it needs,
+cask:firefox; --before a step applied after it; --secret a secret it needs,
 declared in a secrets section, which it's applied once it's in place, its
 script run with it set when it's a variable; each as often as wanted. --sudo
 says applying needs an administrator's password.
@@ -417,7 +453,7 @@ apply.` + declaredWhere,
 			})
 		},
 	}
-	add.Flags().StringArrayVar(&opts.after, "after", nil, "a step it's applied after, or one of a step's things, as in cask:1password")
+	add.Flags().StringArrayVar(&opts.after, "after", nil, "a step it's applied after, or one of a step's things, as in cask:firefox")
 	add.Flags().StringArrayVar(&opts.before, "before", nil, "a step applied after it")
 	add.Flags().StringArrayVar(&opts.secrets, "secret", nil, "a secret it needs, by what it fills, as its secrets section declares it")
 	add.Flags().BoolVar(&opts.sudo, "sudo", false, "applying it needs an administrator's password")
