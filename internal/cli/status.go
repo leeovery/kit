@@ -21,7 +21,6 @@ import (
 	"github.com/leeovery/kit/internal/gitrepo"
 	"github.com/leeovery/kit/internal/hand"
 	"github.com/leeovery/kit/internal/kind"
-	"github.com/leeovery/kit/internal/kind/brew"
 	"github.com/leeovery/kit/internal/kind/secret"
 	"github.com/leeovery/kit/internal/kinds"
 	"github.com/leeovery/kit/internal/linked"
@@ -410,13 +409,6 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 		featured[step.Name] = name
 		return step
 	}
-	if features.on(steps.FeatureOhMyZsh) {
-		step := feature(steps.FeatureOhMyZsh, steps.OhMyZsh(observed, home))
-		if slices.ContainsFunc(needed, func(s engine.Step) bool { return s.Name == brew.StepName }) {
-			step.After = []string{brew.StepName}
-		}
-		addSetup(step, applyDrifter{step: step, label: "install it"})
-	}
 	for _, system := range []struct {
 		name string
 		step func() engine.Step
@@ -434,7 +426,6 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 	for _, b := range backups {
 		checks = append(checks, steps.Backup(observed, b.Driver, a.Now))
 	}
-	var settingsToCome func() bool
 	var settings []engine.Step
 	if features.on(steps.FeaturePrefs) {
 		p, err := a.prefs(r)
@@ -443,13 +434,7 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 			_ = log.Close()
 			return nil, err
 		}
-		settingsToCome = steps.SettingsToCome(p)
 		settings = []engine.Step{feature(steps.FeaturePrefs, steps.Prefs(p, a.Now)), feature(steps.FeaturePrefs, steps.FullDiskAccess(home))}
-	}
-	if features.on(steps.FeatureScratch) {
-		scratch := feature(steps.FeatureScratch, steps.Scratch(observed, r.admin, a.Scratch, home, a.UID, settingsToCome))
-		r.adminSteps = append(r.adminSteps, scratch)
-		checks = append(checks, scratch)
 	}
 	checks = append(checks, settings...)
 	edits := steps.ConfigEdits(r.repo)
@@ -742,8 +727,6 @@ func partOf(name string) string {
 		return groupParts[d.Group]
 	}
 	switch name {
-	case steps.FeatureOhMyZsh:
-		return render.PartPackages
 	case steps.PathName, steps.FeatureTouchIDSudo, steps.FeatureRemoteLogin, steps.FeatureFileSharing:
 		return render.PartSettings
 	case linked.StepName:

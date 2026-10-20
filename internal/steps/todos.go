@@ -161,10 +161,9 @@ func (r *Raise) workThrough(ctx context.Context, step string, list []toDo) error
 	return nil
 }
 
-// recheckHeld checks again the steps the to-dos done held, for their rows
-// and the run's record: those they came from, and those with something
-// that comes with one of them (an item's ComesWith), as Claude Code's
-// settings come with apps'. resolved are the done ones' ids.
+// recheckHeld checks again the steps the to-dos done held, those they came
+// from, for their rows and the run's record. resolved are the done ones'
+// ids.
 func recheckHeld(ctx context.Context, entries []event.ToDo, resolved map[string]bool) {
 	from := map[string]bool{}
 	for _, e := range entries {
@@ -174,7 +173,7 @@ func recheckHeld(ctx context.Context, entries []event.ToDo, resolved map[string]
 	}
 	var held []string
 	for _, f := range engine.Finished(ctx) {
-		if from[f.Step] || slices.ContainsFunc(f.Result.Items, func(it check.Item) bool { return resolved[it.ComesWith] }) {
+		if from[f.Step] {
 			held = append(held, f.Step)
 		}
 	}

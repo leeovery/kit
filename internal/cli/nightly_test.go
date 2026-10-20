@@ -89,10 +89,9 @@ func TestNightlyRunsAJobByName(t *testing.T) {
 // The built-in jobs follow the user's own, settings capture last.
 func TestNightlyBuiltInJobs(t *testing.T) {
 	w := jobsWorld(t)
-	w.writeSection(t, "laptop", "features", "scratch\nprefs\n")
-	w.fake.On("mount").Prints("/dev/disk3s1 on / (apfs, local, journaled)\n")
+	w.writeSection(t, "laptop", "features", "prefs\n")
 	out, _, _ := w.run(t, "nightly", "--plan")
-	order := []string{"hourly:marks ok due", "retry-pending ok due", "nightly:tidy ok due", "clean-scratch ok due", "capture-settings ok due"}
+	order := []string{"hourly:marks ok due", "retry-pending ok due", "nightly:tidy ok due", "capture-settings ok due"}
 	last := -1
 	for _, line := range order {
 		i := strings.Index(out, line)

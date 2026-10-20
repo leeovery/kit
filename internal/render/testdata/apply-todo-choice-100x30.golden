@@ -9,18 +9,18 @@
                                                     │
   Apps                                              │      First, so the apps you open next start
   △ Bring back apps' settings                       │      with yours. This Mac saves its own once
-  △ Open Karabiner-Elements                         │      they're back. Claude Code's come too,
-  △ Open Hammerspoon                                │      sending its temporary files to Scratch.
-                                                    │
-  System Settings                                   │      r brings them back from this Mac's last
-  △ Allow Full Disk Access for remote users         │        save, 15 Oct
-                                                    │      f starts afresh: nothing back, saving
-  Backups                                           │        from now
-  △ Add a Time Machine disk                         │
-  △ Set up Arq's backup plan                        ├───────────────────────────────────────────────
-                                                    │
+  △ Open Karabiner-Elements                         │      they're back. Claude Code's come too.
+  △ Open Hammerspoon                                │
+                                                    │      r brings them back from this Mac's last
+  System Settings                                   │        save, 15 Oct
+  △ Allow Full Disk Access for remote users         │      f starts afresh: nothing back, saving
+                                                    │        from now
+  Backups                                           │
+  △ Add a Time Machine disk                         ├───────────────────────────────────────────────
+  △ Set up Arq's backup plan                        │
                                                     │  LOG
                                                     │
+                                                    │  03:32:46  △ Arq: not set up
                                                     │  03:32:47  △ App settings: not set up
                                                     │  03:32:48  ● Disk space: fine
                                                     │  03:32:49  ● Load: fine

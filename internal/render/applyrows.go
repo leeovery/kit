@@ -41,10 +41,10 @@ func Rows() []string { return slices.Clone(applyRows) }
 var rowSteps = map[string][]string{
 	rowThisMac: {"boot-github", "boot-mac", "boot-password", "boot-homebrew", "boot-apps", "boot-kit-config",
 		"boot-full-disk-access", "boot-terminal", "disk", "memory", "file-events", "load", "full-disk-access"},
-	rowFiles:    {"file", "path", "oh-my-zsh"},
+	rowFiles:    {"file", "path"},
 	rowSettings: {"touch-id-sudo", "remote-login", "file-sharing"},
 	rowGit:      {"config", "config-sync", "config-private"},
-	rowBackups:  {"prefs", "scratch", "nightly"},
+	rowBackups:  {"prefs", "nightly"},
 }
 
 // rowNamed is the row of each of kit's own steps, by its name.

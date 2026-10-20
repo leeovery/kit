@@ -211,8 +211,8 @@ func nightlyPipeline(jobs []nightly.Job, due map[string]bool, r *run, now func()
 
 // jobs are the jobs this Mac runs: its own hourly ones, then its own
 // nightly ones, each named for its section, as in hourly:asimov; then the
-// built-in nightly ones its features switch on, the Scratch clean-up and,
-// last, so it can never hold up the rest, settings capture.
+// built-in ones its features switch on, settings capture last of the
+// nightly ones, so it can never hold up the rest.
 func (a *app) jobs(r *run) (hourly, daily []nightly.Job, err error) {
 	home := r.homeDir
 	for _, section := range []string{config.HourlyKind, config.NightlyKind} {
@@ -242,9 +242,6 @@ func (a *app) jobs(r *run) (hourly, daily []nightly.Job, err error) {
 	features, err := r.features()
 	if err != nil {
 		return nil, nil, err
-	}
-	if features.on(steps.FeatureScratch) {
-		daily = append(daily, nightly.CleanScratch(filepath.Join(a.Scratch, "tmp"), home, a.UID, a.Now))
 	}
 	if features.on(steps.FeaturePrefs) {
 		p, err := a.prefs(r)

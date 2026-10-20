@@ -75,17 +75,12 @@ type Deps struct {
 	// Shell has kit become the person's login shell, as a terminal starts
 	// it: it replaces this process, and returns only when it can't.
 	Shell func() error
-	// Scratch is the Scratch volume, which the scratch feature checks and
-	// clears: /Volumes/Scratch.
-	Scratch string
 	// SudoLocal is sudo's file of local settings, which the touch-id-sudo
 	// feature checks: /etc/pam.d/sudo_local.
 	SudoLocal string
 	// TCC is macOS's database of privacy grants, readable only with Full
 	// Disk Access: one of what prefs probes for it.
 	TCC string
-	// UID is the user's id, which names Claude Code's folder in Scratch.
-	UID int
 	// AppDirs are the folders apps are installed in, but the one in the
 	// home, which kit adds: /Applications.
 	AppDirs []string
@@ -308,10 +303,8 @@ func Real(version string) Deps {
 			return runner.BecomeLoginShell(cmp.Or(os.Getenv("SHELL"), "/bin/zsh"), askpass.Without(os.Environ()))
 		},
 		WatchDialogs: true,
-		Scratch:      "/Volumes/Scratch",
 		SudoLocal:    steps.SudoLocal,
 		TCC:          "/Library/Application Support/com.apple.TCC/TCC.db",
-		UID:          os.Getuid(),
 		AppDirs:      []string{"/Applications"},
 	}
 }

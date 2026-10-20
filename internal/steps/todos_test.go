@@ -41,7 +41,7 @@ func TestKitsOwnToDos(t *testing.T) {
 			Detail: "kit prefs restore, or kit prefs start-fresh",
 			ToDo: &check.ToDo{
 				Title: "Bring back apps' settings",
-				Why:   "First, so the apps you open next start with yours. This Mac saves its own once they're back. Claude Code's come too, sending its temporary files to Scratch.",
+				Why:   "First, so the apps you open next start with yours. This Mac saves its own once they're back. Claude Code's come too.",
 				Group: "Apps",
 				Keys: []check.Key{
 					{Key: "r", Does: "brings them back from this Mac's last save"},
@@ -145,8 +145,7 @@ func finishes(sink *events) (map[string]int, map[string]check.State) {
 // own. Each is looked at as its turn comes, and goes up only when it isn't
 // done: done, the list ticks it, with what kit saw. After the last, the
 // steps they held are checked again, in place of how they stood: those
-// they came from, and one with something that comes with one of them; no
-// other.
+// they came from, and no other.
 func TestTheToDosInKitsOrder(t *testing.T) {
 	c := newCard(t)
 	for _, f := range []string{"/k", "/s", "/n", "/l"} {
@@ -158,11 +157,9 @@ func TestTheToDosInKitsOrder(t *testing.T) {
 		{Name: "serial", Value: `"Note the serial" --test test -f /n`, Scope: "laptop", Line: 4},
 		{Name: "label", Value: `"Label the backup disk" --group Backups --test test -f /l`, Scope: "laptop", Line: 5},
 	}}
-	scratch := check.Item{ID: "scratch:claude", Name: "Claude Code's settings", State: steps.Problem, ComesWith: "prefs:none"}
 	report := applied(t, c, atTheEnd(steps.Manual(c.fake, "/home/someone", c.state, list, c.raise),
 		ownStep("time-machine", toDoItem("time-machine", check.ToDo{Title: "Add a Time Machine disk", Group: "Backups"})),
 		ownStep("arq", toDoItem("arq", check.ToDo{Title: "Set up Arq's backup plan", Group: "Backups"})),
-		ownStep("scratch", scratch),
 		ownStep("prefs", toDoItem("prefs", check.ToDo{Title: "Bring back apps' settings", Group: "Apps", First: true})),
 		engine.Step{Name: "disk", Title: "Disk space", Check: func(context.Context) check.Result {
 			return check.Result{State: check.Attention, Summary: "nearly full", Items: []check.Item{{ID: "disk:low", Name: "nearly full", State: steps.Problem}}}
@@ -203,7 +200,7 @@ func TestTheToDosInKitsOrder(t *testing.T) {
 		t.Errorf("cards went up for %+v; want none, each done when its turn came", up)
 	}
 	times, stood := finishes(c.sink)
-	for _, name := range []string{"prefs", "time-machine", "arq", "scratch"} {
+	for _, name := range []string{"prefs", "time-machine", "arq"} {
 		if times[name] != 2 || stood[name] != check.OK || report.Results[name].State != check.OK {
 			t.Errorf("%s finished %d times, last %s, the report %s; want it checked again once its to-do was done, ok", name, times[name], stood[name], report.Results[name].State)
 		}

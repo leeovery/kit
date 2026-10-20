@@ -290,9 +290,9 @@ var declaredAll = regexp.MustCompile(`^\d+ declared, all [a-z]+$`)
 
 // did is what applying step s did, as its row says it first, once each:
 // what each action did, a few things named, or counted, in the step's verb
-// (installed, set, synced); problems fixed, counted; a step of the user's
-// own, that it was applied, unless it says what it did (said). A thing
-// named as the step is isn't named again: its row says how it stands.
+// (installed, set, synced); a step of the user's own, that it was applied,
+// unless it says what it did (said). A thing named as the step is isn't
+// named again: its row says how it stands.
 func did(done []check.Item, s event.Step, said bool) []string {
 	var parts []string
 	for _, g := range doneGroups(done) {
@@ -301,8 +301,6 @@ func did(done []check.Item, s event.Step, said bool) []string {
 		case g.action == "run" && said:
 		case g.action == "run":
 			parts = append(parts, look.Muted("applied"))
-		case g.action == "fix":
-			parts = append(parts, look.Muted(fmt.Sprintf("fixed %d %s", len(g.names), plural(len(g.names), "problem", "problems"))))
 		case len(names) == 0:
 		default:
 			verb := past(g.action)
