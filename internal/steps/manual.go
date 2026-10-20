@@ -313,7 +313,9 @@ var manualPoll = 3 * time.Second
 // follow it; then waits till it's done, the step's job given up meanwhile,
 // for other steps to go on (engine.Release), looking every few seconds as
 // well as at each answer. While kit does what a choice's key says, the card
-// offers none of its keys, and offers them again should it still be to do.
+// offers none of its keys, and offers them again should it still be to do,
+// any answer that came meanwhile dropped: a key the screen passed on before
+// it showed the card being answered.
 // It returns what kit saw as it was done, in words, if it has some;
 // errStopHere when the person stopped where they were.
 func (r *Raise) up(ctx context.Context, step string, c raised, more int) (string, error) {
@@ -358,8 +360,26 @@ func (r *Raise) up(ctx context.Context, step string, c raised, more int) (string
 				return saw, err
 			}
 			if chose {
+				if stoppedMeanwhile(answers) {
+					return "", errStopHere
+				}
 				r.answering("")
 			}
+		}
+	}
+}
+
+// stoppedMeanwhile empties answers of what came while a key was being done,
+// without waiting, and reports whether the person stopped where they were
+// meanwhile, which isn't dropped.
+func stoppedMeanwhile(answers <-chan hand.Answer) bool {
+	stop := false
+	for {
+		select {
+		case a := <-answers:
+			stop = stop || a == hand.Stop
+		default:
+			return stop
 		}
 	}
 }

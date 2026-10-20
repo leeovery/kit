@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -142,7 +143,7 @@ func TestRestoreNamedDomains(t *testing.T) {
 	w.imports(t, "com.example.stubborn", "laptop", map[string]any{"A": int64(2)}, map[string]any{"A": int64(2)})
 	w.fake.On("git", "-C", w.clone, "rev-parse", "HEAD").Prints("abc123\n")
 	report, err := w.p.Restore(t.Context(), prefs.RestoreOptions{Domains: []string{"com.example.loose", "com.example.stubborn"}})
-	if err != nil || !slices.Equal(report.Restored, []string{"com.example.loose"}) || !strings.Contains(report.Failed["com.example.stubborn"], "reads back different") {
+	if err != nil || !slices.Equal(report.Restored, []string{"com.example.loose"}) || report.Failed["com.example.stubborn"] != "macOS took them, but they read back different" {
 		t.Errorf("Restore() = %+v, %v", report, err)
 	}
 	if rec, _ := w.p.Load(); rec.On != "" {
@@ -150,6 +151,46 @@ func TestRestoreNamedDomains(t *testing.T) {
 	}
 	if _, err := w.p.Restore(t.Context(), prefs.RestoreOptions{Domains: []string{"com.example.absent"}}); err == nil || !strings.Contains(err.Error(), "not in the store: com.example.absent") {
 		t.Errorf("Restore(absent) = %v", err)
+	}
+}
+
+// A settings file that can't be put back fails alone, named with why: the
+// rest of the restore goes on, capture's switched on, the restore recorded,
+// and the file held aside with the domains waiting, each with why, till
+// --pending puts it back.
+func TestRestoreHoldsAFailedFileAside(t *testing.T) {
+	w := newWorld(t, prefs.Lists{})
+	store := filepath.Join(w.clone, "laptop")
+	w.write(t, filepath.Join(store, "domains", "com.example.missing.plist"), stored(t, map[string]any{"A": true}))
+	w.write(t, filepath.Join(store, "files", ".config", "tool", "settings.json"), "saved settings")
+	w.write(t, filepath.Join(store, "files", ".config", "other.json"), "other settings")
+	// A file where its folder should be: the settings file can't go there.
+	w.write(t, filepath.Join(w.home, ".config", "tool"), "in the way")
+	w.fake.On("git", "-C", w.clone, "rev-parse", "HEAD").Prints("abc123\n")
+
+	report, err := w.p.Restore(t.Context(), prefs.RestoreOptions{})
+	if err != nil || report.Files != 1 || report.FilesFailed["~/.config/tool/settings.json"] != "it couldn't be put in place" {
+		t.Errorf("Restore() = %+v, %v; want the other file back, this one failed, with why", report, err)
+	}
+	if got := report.Summary(); !strings.HasSuffix(got, "; 1 pending (not installed or running); 1 failed") {
+		t.Errorf("Summary() = %q, want the failed file counted", got)
+	}
+	rec, _ := w.p.Load()
+	want := &prefs.Pending{From: "laptop", Domains: []string{"com.example.missing"}, Files: []string{"~/.config/tool/settings.json"},
+		Why: map[string]string{"com.example.missing": "not installed", "~/.config/tool/settings.json": "it couldn't be put in place"}}
+	if rec.On == "" || rec.Restored == nil || !reflect.DeepEqual(rec.Pending, want) {
+		t.Errorf("record = %+v, pending %+v; want capture on, the restore recorded, and pending %+v", rec, rec.Pending, want)
+	}
+
+	if err := os.Remove(filepath.Join(w.home, ".config", "tool")); err != nil {
+		t.Fatal(err)
+	}
+	report, err = w.p.Restore(t.Context(), prefs.RestoreOptions{Pending: true})
+	if err != nil || report.Files != 1 || len(report.FilesFailed) != 0 || w.read(t, filepath.Join(w.home, ".config", "tool", "settings.json")) != "saved settings" {
+		t.Errorf("Restore(--pending) = %+v, %v; want the held file put back", report, err)
+	}
+	if rec, _ := w.p.Load(); rec.Pending == nil || len(rec.Pending.Files) != 0 || !reflect.DeepEqual(rec.Pending.Why, map[string]string{"com.example.missing": "not installed"}) {
+		t.Errorf("pending = %+v, want the file off it, the domain left with why", rec.Pending)
 	}
 }
 
@@ -204,8 +245,8 @@ func TestRestoreHoldsAFailedAppAsideAndSwitchesCaptureOn(t *testing.T) {
 		t.Errorf("Restore() = %+v, %v; want the app failed, named, with why", report, err)
 	}
 	rec, _ := w.p.Load()
-	if rec.On == "" || rec.Pending == nil || !slices.Equal(rec.Pending.Domains, []string{"com.example.boxed", "com.example.later"}) {
-		t.Errorf("record = %+v, pending %+v; want capture on, the failed app held aside with the one waiting", rec, rec.Pending)
+	if rec.On == "" || rec.Pending == nil || !slices.Equal(rec.Pending.Domains, []string{"com.example.boxed", "com.example.later"}) || rec.Pending.Why["com.example.boxed"] != "opened once, it still has no settings folder" {
+		t.Errorf("record = %+v, pending %+v; want capture on, the failed app held aside with the one waiting, with why", rec, rec.Pending)
 	}
 
 	w.imports(t, "com.example.boxed", "laptop", map[string]any{}, map[string]any{"A": true})

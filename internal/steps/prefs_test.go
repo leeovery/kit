@@ -154,8 +154,7 @@ func TestAppsSettingsWhy(t *testing.T) {
 
 // An app that couldn't be brought back is named in the log, with why, and
 // counted in what r says; saving switches on all the same, so the to-do's
-// done, the app held aside to be tried again. f, after, says saving's on
-// and how many still wait, not that the restore was thrown away.
+// done, the app held aside to be tried again.
 func TestAppsSettingsFailedApp(t *testing.T) {
 	state, clone, home, appDir := t.TempDir(), filepath.Join(t.TempDir(), "prefs"), t.TempDir(), t.TempDir()
 	if err := os.WriteFile(filepath.Join(state, "prefs.json"), []byte(`{}`), 0o600); err != nil {
@@ -172,9 +171,13 @@ func TestAppsSettingsFailedApp(t *testing.T) {
 	}
 	empty := `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict/></plist>`
 	write(filepath.Join(clone, ".git", "HEAD"), "")
+	theme := `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>Theme</key><string>dark</string></dict></plist>`
 	write(filepath.Join(clone, "laptop", "domains", "com.example.boxed.plist"), empty)
+	write(filepath.Join(clone, "laptop", "domains", "com.example.plain.plist"), theme)
 	app := filepath.Join(appDir, "Boxed App.app")
 	write(filepath.Join(app, "Contents", "Info.plist"), `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>com.example.boxed</string></dict></plist>`)
+	plain := filepath.Join(appDir, "Plain.app")
+	write(filepath.Join(plain, "Contents", "Info.plist"), `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>com.example.plain</string></dict></plist>`)
 	fake := runnertest.New(t)
 	configures(fake, clone)
 	fake.On("git", "-C", clone, "pull", "--rebase", "--autostash", "--quiet")
@@ -184,6 +187,11 @@ func TestAppsSettingsFailedApp(t *testing.T) {
 	fake.On("codesign", "-d", "--entitlements", "-", "--xml", app).Prints("<key>com.apple.security.app-sandbox</key><true/>")
 	fake.On("open", "-g", "-j", "-b", "com.example.boxed")
 	fake.On("osascript", "-e", `tell application id "com.example.boxed" to quit`)
+	fake.On("osascript", "-e", `application id "com.example.plain" is running`).Prints("false\n")
+	fake.On("codesign", "-d", "--entitlements", "-", "--xml", plain)
+	fake.On("defaults", "export", "com.example.plain", "-").Exits(1).Then().Prints(theme)
+	fake.On("defaults", "delete", "com.example.plain")
+	fake.On("defaults", "import", "com.example.plain", filepath.Join(clone, "laptop", "domains", "com.example.plain.plist"))
 	p := prefs.New(fake, home, state, clone, "git@github.com:someone/prefs.git", "laptop", prefs.Lists{}, now)
 	p.Probes, p.AppDirs, p.Sleep = nil, []string{appDir}, func(time.Duration) {}
 	step := steps.Prefs(p, now)
@@ -192,7 +200,7 @@ func TestAppsSettingsFailedApp(t *testing.T) {
 	var logged []event.Logged
 	ctx := event.WithLogging(t.Context(), func(l event.Logged) { logged = append(logged, l) })
 	said, err := step.Choice.Answer(ctx, paused, "r")
-	if err != nil || said != "0 apps' settings, from 4 Oct; 1 didn't come back, tried again hourly" {
+	if err != nil || said != "1 app's settings, from 4 Oct; 1 didn't come back, tried again hourly" {
 		t.Errorf("r = %q, %v; want how many didn't come back, and that they're tried again", said, err)
 	}
 	want := []event.Logged{
@@ -206,7 +214,20 @@ func TestAppsSettingsFailedApp(t *testing.T) {
 	if res := step.Check(t.Context()); res.State != check.OK || res.Summary != "saving from tonight" {
 		t.Errorf("with an app failed, the check says %+v; want saving switched on all the same", res)
 	}
-	if said, err := step.Choice.Answer(t.Context(), paused, "f"); err != nil || said != "saving from now; 1 still waits to come back" {
-		t.Errorf("f after r = %q, %v; want saving on, and how many still wait", said, err)
+}
+
+// f on a record from before a restore switched saving on itself, the only
+// way a restore can come before it now, says saving's on and how many
+// still wait, not that the restore was thrown away.
+func TestAppsSettingsAfreshAfterAnOlderRestore(t *testing.T) {
+	state := t.TempDir()
+	record := `{"restored": {"from": "laptop", "at": "2026-10-04T03:00:00Z"}, "pending": {"from": "laptop", "domains": ["com.example.app"], "files": ["~/.config/tool/settings.json"]}}`
+	if err := os.WriteFile(filepath.Join(state, "prefs.json"), []byte(record), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	step := steps.Prefs(prefs.New(runnertest.New(t), t.TempDir(), state, t.TempDir(), "", "laptop", prefs.Lists{}, now), now)
+	paused := step.Check(t.Context()).Items[0]
+	if said, err := step.Choice.Answer(t.Context(), paused, "f"); err != nil || said != "saving from now; 2 still wait to come back" {
+		t.Errorf("f = %q, %v; want saving on, and how many still wait", said, err)
 	}
 }

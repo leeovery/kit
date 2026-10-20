@@ -232,17 +232,20 @@ func (a *app) prefsRestore(ctx context.Context, r *run, opts prefs.RestoreOption
 		if err != nil {
 			return check.Result{State: check.Failed, Reason: err.Error()}
 		}
-		if opts.Pending && report.Restored == nil && len(report.Waiting) == 0 && len(report.Failed) == 0 {
+		if opts.Pending && report.Restored == nil && report.Files == 0 && len(report.Waiting) == 0 && report.Failures() == 0 {
 			return check.Result{State: check.OK, Summary: "nothing pending"}
 		}
 		res := check.Result{State: check.OK, Summary: report.Summary()}
 		for _, d := range slices.Sorted(maps.Keys(report.Failed)) {
 			res.Items = append(res.Items, check.Item{ID: "prefs:failed:" + d, Name: d, State: "failed", Detail: report.Failed[d]})
 		}
+		for _, f := range slices.Sorted(maps.Keys(report.FilesFailed)) {
+			res.Items = append(res.Items, check.Item{ID: "prefs:failed:" + f, Name: f, State: "failed", Detail: report.FilesFailed[f]})
+		}
 		for _, d := range slices.Sorted(maps.Keys(report.Waiting)) {
 			res.Items = append(res.Items, check.Item{ID: "prefs:pending:" + d, Name: d, State: "pending", Detail: report.Waiting[d], Quiet: "until it's installed and closed: kit prefs restore --pending"})
 		}
-		if len(report.Failed) > 0 {
+		if report.Failures() > 0 {
 			res.State = check.Attention
 		}
 		return res
@@ -260,7 +263,7 @@ func (a *app) prefsPending(r *run, clear bool) error {
 		if err != nil {
 			return err
 		}
-		_, err = fmt.Fprintf(a.Stdout, "Cleared %s: capture saves what's on the Mac for them now.\n", plural(n, "pending domain"))
+		_, err = fmt.Fprintf(a.Stdout, "Cleared %s: capture saves what's on the Mac for them now.\n", plural(n, "pending setting"))
 		return err
 	}
 	rec, err := p.Load()
@@ -281,8 +284,12 @@ func (a *app) prefsPending(r *run, clear bool) error {
 	if _, err := fmt.Fprintf(a.Stdout, "Waiting to be restored from %s (kit prefs restore --pending):\n", rec.Pending.From); err != nil {
 		return err
 	}
-	for _, d := range rec.Pending.Domains {
-		if _, err := fmt.Fprintln(a.Stdout, "  "+d); err != nil {
+	for _, name := range slices.Concat(rec.Pending.Domains, rec.Pending.Files) {
+		line := "  " + name
+		if why := rec.Pending.Why[name]; why != "" {
+			line += ": " + why
+		}
+		if _, err := fmt.Fprintln(a.Stdout, line); err != nil {
 			return err
 		}
 	}

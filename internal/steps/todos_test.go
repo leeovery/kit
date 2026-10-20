@@ -241,7 +241,8 @@ func (c *card) waitForList(t *testing.T, n int) event.ToDos {
 // kit not telling by itself; a key does what its step says, the card
 // offering none of its keys meanwhile, and, should that do it, it's done,
 // what the step said it did as what kit saw. What goes wrong, the log says,
-// as something to look at, and it stays up, its keys offered again.
+// as something to look at, and it stays up, its keys offered again, a key
+// pressed while the first was being done dropped.
 func TestAChoiceToDo(t *testing.T) {
 	defer steps.SetManualPoll(time.Hour)()
 	c := newCard(t)
@@ -275,6 +276,10 @@ func TestAChoiceToDo(t *testing.T) {
 				shown := c.cardsNow()
 				answering = append(answering, shown[len(shown)-1].Answering)
 				if len(pressed) == 1 {
+					// f, pressed before the screen showed r being done.
+					if !c.desk.Answer(steps.ManualName, "f") {
+						t.Error("f, pressed while r was being done, wasn't passed on")
+					}
 					return "", errors.New("couldn't reach the store")
 				}
 				brought = true

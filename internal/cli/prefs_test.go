@@ -29,3 +29,18 @@ func TestPrefsCommands(t *testing.T) {
 		t.Errorf("kit status printed\n%s", out)
 	}
 }
+
+// kit prefs pending lists what waits, domains then settings files, each
+// with why where the record says.
+func TestPrefsPendingSaysWhy(t *testing.T) {
+	w := laptopWorld(t)
+	w.write(t, ".local/state/kit/prefs.json", `{"pending": {"from": "laptop", "domains": ["com.example.app", "com.example.old"], "files": ["~/.config/tool/settings.json"],
+		"why": {"com.example.app": "not installed", "~/.config/tool/settings.json": "it couldn't be put in place"}}}`)
+	want := "Waiting to be restored from laptop (kit prefs restore --pending):\n" +
+		"  com.example.app: not installed\n" +
+		"  com.example.old\n" +
+		"  ~/.config/tool/settings.json: it couldn't be put in place\n"
+	if out, _, _ := w.run(t, "prefs", "pending"); out != want {
+		t.Errorf("kit prefs pending printed\n%s\nwant\n%s", out, want)
+	}
+}

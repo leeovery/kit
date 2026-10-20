@@ -77,7 +77,7 @@ file having none, or the shared file's), so the kind's still looked after.
 | Kind | Declared as | Found by | Install, remove |
 |---|---|---|---|
 | `brew`, `cask` | `jq`, `owner/tap/tool`, `php@8.5` | `brew list`, `brew leaves` | `brew install`, `brew uninstall` |
-| `mas` | `xcode@497799835`: the name, then the id | `mas list` | `mas install` (the first app alone, the check that someone's signed in, then the rest), `mas uninstall`, through sudo |
+| `mas` | `xcode@497799835`: the name, then the id | `mas list`, which reads Spotlight's index; an app in the Applications folders carrying the App Store's receipt that it doesn't list yet, its id looked up by its bundle id (`mas lookup --bundle`) | `mas install` (the first app alone, the check that someone's signed in, then the rest), `mas uninstall`, through sudo |
 | `npm` | `typescript@5` (a version optional) | `npm ls --global` | `npm install --global`, `npm uninstall --global` |
 | `composer` | `laravel/valet:^4.0` (a constraint optional) | `composer global show --direct` | `composer global require`, `composer global remove` |
 | `go` | `golang.org/x/tools/cmd/goimports` (`@version` optional) | the programs in Go's bin folder, by the package each was built from | `go install`; removing deletes the program |
@@ -829,13 +829,13 @@ the hardware UUID of the Mac the folder belongs to.
   app launched hidden once to make its container, the run's log naming it as it opens (its own
   windows, notifications and permission prompts may follow); the stored copy checked, the live
   settings saved, `defaults delete` then `import`, read back and compared. A full restore puts
-  back the files that differ (each saved first), writes the pending list, those that failed on it
-  with those waiting (capture leaves them alone; `--pending` and the hourly retry try them
-  again), records its commit, and switches capture on, failures or not. Each that failed is
-  named by its app, with why. From another Mac's folder, or onto other hardware,
+  back the files that differ (each saved first), writes the pending list, the domains and files
+  that failed on it with those waiting, each with why (capture leaves them alone; `--pending`
+  and the hourly retry try them again), records its commit, and switches capture on, failures or
+  not. Each that failed is named, a domain by its app, with why in plain words. From another Mac's folder, or onto other hardware,
   `[prefs machine-bound]` stays behind (Tailscale's identity and the like). `--at` unpacks the
   folder as it was then from history.
-- **`kit prefs history`**, **`pending [--clear]`**, **`start-fresh`**. `[prefs deny]` leaves
+- **`kit prefs history`**, **`pending [--clear]`** (what waits, each with why), **`start-fresh`**. `[prefs deny]` leaves
   domains out.
 
 ## Open-source hygiene

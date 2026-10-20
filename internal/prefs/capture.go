@@ -210,7 +210,8 @@ type Report struct {
 	Domains, Files int
 	changes        []change
 	Removed        []string
-	// Pending counts the domains left alone, waiting to be restored.
+	// Pending counts the domains and settings files left alone, waiting to
+	// be restored.
 	Pending int
 	// Errors are what couldn't be saved, each with why: kept as stored.
 	Errors []string
@@ -385,13 +386,16 @@ func (p *Prefs) Capture(ctx context.Context) (Report, error) {
 	}
 
 	domainsDir, filesDir := filepath.Join(store, "domains"), filepath.Join(store, "files")
-	protected := map[string]bool{}
+	protected, heldFiles := map[string]bool{}, map[string]bool{}
 	if rec.Pending != nil && rec.Pending.From == p.Mac {
 		for _, d := range rec.Pending.Domains {
 			protected[d] = true
 		}
+		for _, f := range rec.Pending.Files {
+			heldFiles[f] = true
+		}
 	}
-	report.Pending = len(protected)
+	report.Pending = len(protected) + len(heldFiles)
 	// What stays stored: domains captured now, ones that failed to export
 	// (still there, unreadable this time) and pending ones. A domain that
 	// exports empty counts as gone: macOS lists a deleted domain for a
@@ -435,6 +439,9 @@ func (p *Prefs) Capture(ctx context.Context) (Report, error) {
 	for _, source := range sources {
 		stored := p.storedPath(filesDir, source)
 		wanted[stored] = true
+		if heldFiles[p.tilde(source)] {
+			continue
+		}
 		data, err := os.ReadFile(source)
 		var what string
 		if err == nil {

@@ -353,7 +353,7 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 		_ = log.Close()
 		return nil, err
 	}
-	deps := &kind.Deps{Run: observed, Home: home, ConfigHome: a.configHome(), StateDir: dirs.State, Backups: backupNames(backups)}
+	deps := &kind.Deps{Run: observed, Home: home, ConfigHome: a.configHome(), StateDir: dirs.State, Backups: backupNames(backups), AppDirs: a.appFolders(home).Dirs}
 	for _, d := range kinds.All {
 		k := d.New(deps)
 		list, unread, err := declared(cfg, k, machine)

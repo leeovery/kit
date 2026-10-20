@@ -132,14 +132,18 @@ func bringBack(ctx context.Context, p *prefs.Prefs, now func() time.Time) (strin
 		name := cmp.Or(report.Apps[domain], domain)
 		event.Log(ctx, event.Logged{Line: name + "'s settings didn't come back: " + report.Failed[domain], Alert: true})
 	}
-	said := fmt.Sprintf("%d apps' settings", len(report.Restored))
+	for _, file := range slices.Sorted(maps.Keys(report.FilesFailed)) {
+		event.Log(ctx, event.Logged{Line: file + " didn't come back: " + report.FilesFailed[file], Alert: true})
+	}
+	n := len(report.Restored)
+	said := fmt.Sprintf("%d %s", n, plural(n, "app's settings", "apps' settings"))
 	if last, err := p.LastSave(ctx); err == nil {
 		said += ", from " + day(last, now())
 	}
 	if n := len(report.Waiting); n > 0 {
 		said += fmt.Sprintf("; %d %s", n, plural(n, "waits for its app", "wait for their apps"))
 	}
-	if n := len(report.Failed); n > 0 {
+	if n := report.Failures(); n > 0 {
 		said += fmt.Sprintf("; %d didn't come back, tried again hourly", n)
 	}
 	return said, nil
@@ -147,7 +151,8 @@ func bringBack(ctx context.Context, p *prefs.Prefs, now func() time.Time) (strin
 
 // startAfresh switches saving on with nothing brought back, as kit prefs
 // start-fresh does, saying so, and how many of an earlier restore's still
-// wait to come back, which saving leaves be.
+// wait to come back, which saving leaves be. A restore switches saving on
+// itself, so only a record from before it did can have one to tell of.
 func startAfresh(p *prefs.Prefs) (string, error) {
 	if err := p.StartFresh(); err != nil {
 		return "", err
@@ -161,7 +166,7 @@ func startAfresh(p *prefs.Prefs) (string, error) {
 		said = "saving from now"
 	}
 	if rec.Pending != nil {
-		n := len(rec.Pending.Domains)
+		n := len(rec.Pending.Domains) + len(rec.Pending.Files)
 		said += fmt.Sprintf("; %d still %s to come back", n, plural(n, "waits", "wait"))
 	}
 	return said, nil

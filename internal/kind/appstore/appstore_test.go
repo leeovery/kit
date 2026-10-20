@@ -64,6 +64,56 @@ func TestInstalled(t *testing.T) {
 	}
 }
 
+// An app the App Store installed that mas doesn't list yet, as Spotlight
+// hasn't indexed it, is found in the Applications folders by the store's
+// receipt it carries, its id looked up by its bundle id; one mas lists
+// isn't looked up, nor one without a receipt, as a download's, nor one the
+// lookup doesn't find.
+func TestInstalledFindsAppsMasDoesntListYet(t *testing.T) {
+	dir := t.TempDir()
+	bundle := func(name, id string, receipt bool) {
+		t.Helper()
+		app := filepath.Join(dir, name+".app", "Contents")
+		files := map[string]string{"Info.plist": `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>` + id + `</string></dict></plist>`}
+		if receipt {
+			files[filepath.Join("_MASReceipt", "receipt")] = "a receipt"
+		}
+		for name, content := range files {
+			if err := os.MkdirAll(filepath.Dir(filepath.Join(app, name)), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(app, name), []byte(content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	bundle("Xcode", "com.apple.dt.Xcode", true)
+	bundle("Amphetamine", "com.example.amphetamine", true)
+	bundle("Downloaded", "com.example.downloaded", false)
+	bundle("Delisted", "com.example.delisted", true)
+	fake := runnertest.New(t)
+	fake.On("mas", "list", "--json").Prints(fixture(t, "list.jsonl"))
+	fake.On("mas", "lookup", "--json", "--bundle", "com.example.amphetamine").Prints(`{"adamID":937984704,"bundleID":"com.example.amphetamine","name":"Amphetamine"}` + "\n")
+	fake.On("mas", "lookup", "--json", "--bundle", "com.example.delisted").Exits(1).PrintsToStderr("No results found")
+	store := appstore.New(fake)
+	store.AppDirs = []string{dir}
+	got, err := store.Installed(t.Context())
+	want := []kind.Installed{
+		{Name: "xcode@497799835", Explicit: true},
+		{Name: "numbers@409203825", Explicit: true},
+		{Name: "heic-converter@1294126402", Explicit: true},
+		{Name: "amphetamine@937984704", Explicit: true},
+	}
+	if err != nil || !slices.Equal(got, want) {
+		t.Errorf("Installed() = %+v, %v; want %+v", got, err, want)
+	}
+	for _, c := range fake.Calls() {
+		if strings.Contains(c, "com.apple.dt.Xcode") || strings.Contains(c, "downloaded") {
+			t.Errorf("ran %s: an app mas lists, or one without the store's receipt, isn't looked up", c)
+		}
+	}
+}
+
 // Apps match by id: one the store renamed still matches its declaration.
 func TestCompare(t *testing.T) {
 	fake := runnertest.New(t)

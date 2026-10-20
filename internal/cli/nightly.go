@@ -253,7 +253,7 @@ func (a *app) jobs(r *run) (hourly, daily []nightly.Job, err error) {
 				return err
 			}
 			report, err := p.Restore(ctx, prefs.RestoreOptions{Pending: true})
-			if err == nil && len(report.Failed) > 0 {
+			if err == nil && report.Failures() > 0 {
 				err = fmt.Errorf("%s: kit prefs pending lists them", report.Summary())
 			}
 			return err

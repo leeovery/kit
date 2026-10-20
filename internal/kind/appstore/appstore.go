@@ -9,12 +9,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/leeovery/kit/internal/apps"
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/kind"
@@ -34,6 +37,9 @@ const most = 8
 type AppStore struct {
 	run   runner.Runner
 	admin func(ctx context.Context) bool
+	// AppDirs are the folders apps are installed in, where an app the App
+	// Store installed that mas doesn't list yet is looked for.
+	AppDirs []string
 }
 
 // kindName names the kind.
@@ -51,7 +57,11 @@ var Descriptor = kind.Descriptor{
 		Remove: "Uninstall App Store apps, and undeclare them",
 	},
 	Row: "App Store apps",
-	New: func(d *kind.Deps) kind.Kind { return New(d.Run) },
+	New: func(d *kind.Deps) kind.Kind {
+		s := New(d.Run)
+		s.AppDirs = d.AppDirs
+		return s
+	},
 }
 
 // New returns the App Store, driven through run.
@@ -64,8 +74,9 @@ func (*AppStore) Program() string { return "mas" }
 
 // app is what mas says of an app, as far as kit needs.
 type app struct {
-	ID   int64  `json:"adamID"`
-	Name string `json:"name"`
+	ID     int64  `json:"adamID"`
+	Bundle string `json:"bundleID"`
+	Name   string `json:"name"`
 }
 
 // named is the app's name as kit declares it.
@@ -134,17 +145,48 @@ func (s *AppStore) apps(ctx context.Context, args ...string) ([]app, error) {
 }
 
 // Installed lists the apps installed from the App Store, each installed for
-// itself.
+// itself: those mas lists, then those it doesn't yet (unlisted).
 func (s *AppStore) Installed(ctx context.Context) ([]kind.Installed, error) {
 	apps, err := s.apps(ctx, "list", "--json")
 	if err != nil {
 		return nil, err
 	}
+	apps = append(apps, s.unlisted(ctx, apps)...)
 	installed := make([]kind.Installed, len(apps))
 	for i, a := range apps {
 		installed[i] = kind.Installed{Name: a.named(), Explicit: true}
 	}
 	return installed, nil
+}
+
+// unlisted are the apps in AppDirs the App Store installed that listed,
+// what mas lists, leaves out: mas lists what Spotlight has indexed, which a
+// new app may not be yet. One the App Store installed carries its receipt;
+// its id is the App Store's, looked up by its bundle id, which the app
+// says. One the lookup doesn't find is left out.
+func (s *AppStore) unlisted(ctx context.Context, listed []app) []app {
+	known := map[string]bool{}
+	for _, a := range listed {
+		known[strings.ToLower(a.Bundle)] = true
+	}
+	var missed []app
+	for _, dir := range s.AppDirs {
+		paths, _ := filepath.Glob(filepath.Join(dir, "*.app"))
+		for _, path := range paths {
+			if _, err := os.Stat(filepath.Join(path, "Contents", "_MASReceipt", "receipt")); err != nil {
+				continue
+			}
+			bundle := apps.BundleID(path)
+			if bundle == "" || known[strings.ToLower(bundle)] {
+				continue
+			}
+			known[strings.ToLower(bundle)] = true
+			if looked, err := s.apps(ctx, "lookup", "--json", "--bundle", bundle); err == nil && len(looked) == 1 {
+				missed = append(missed, looked[0])
+			}
+		}
+	}
+	return missed
 }
 
 // Key is an app's id: apps match by it, whatever their names are now.

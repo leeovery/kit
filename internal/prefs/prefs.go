@@ -65,11 +65,15 @@ type Record struct {
 	NotOwner string `json:"not_owner,omitempty"`
 }
 
-// Pending are domains waiting to be restored: their apps weren't installed,
-// or were running, or the restore failed.
+// Pending are what waits to be restored: domains whose apps weren't
+// installed, or were running, or whose restore failed; settings files whose
+// restore failed, by their paths from ~ (or /); and why each waits, by
+// domain or path, where kit knows.
 type Pending struct {
-	From    string   `json:"from"`
-	Domains []string `json:"domains"`
+	From    string            `json:"from"`
+	Domains []string          `json:"domains"`
+	Files   []string          `json:"files,omitempty"`
+	Why     map[string]string `json:"why,omitempty"`
 }
 
 // Restored is where a full restore came from.
@@ -151,7 +155,7 @@ func (p *Prefs) ClearPending() (int, error) {
 	n := 0
 	err := p.update(func(r *Record) {
 		if r.Pending != nil {
-			n = len(r.Pending.Domains)
+			n = len(r.Pending.Domains) + len(r.Pending.Files)
 		}
 		r.Pending = nil
 	})
