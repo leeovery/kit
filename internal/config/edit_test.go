@@ -534,10 +534,13 @@ func TestDeclareSharedMovesItOutOfTheMacs(t *testing.T) {
 // the shared line must say the same, by meaning (options in any order, a
 // secret's reference short or in full), else it's refused, naming the line;
 // it takes the moved lines' note when given none, refused when theirs
-// differ, a note given winning. CheckDeclareShared judges as DeclareShared
+// differ, a note given winning; and the comments above them, in its place
+// in the section, refused when theirs differ, a note given kept after the
+// line. CheckDeclareShared judges as DeclareShared
 // does, writing nothing.
 func TestDeclareSharedKeepsWhatAMovedLineSays(t *testing.T) {
 	for name, c := range map[string]struct {
+		had            string
 		laptop, studio string
 		kind           string
 		e              config.Entry
@@ -563,10 +566,18 @@ func TestDeclareSharedKeepsWhatAMovedLineSays(t *testing.T) {
 			shared: "[homebrew formulae]\ngo   # a compiler\n"},
 		"notes that differ": {laptop: "[homebrew formulae]\ngo   # a compiler\n", studio: "[homebrew formulae]\ngo   # for work\n", kind: "brew", e: config.Entry{Name: "go"},
 			want: `the lines it moves have different notes, laptop/declarations:2 ("a compiler"), studio/declarations:2 ("for work"): say which with --note`},
+		"comments carried, in their place": {had: "[homebrew formulae]\n# about jq\njq\n", laptop: "[homebrew formulae]\n# the compiler\n# for work\ngo\n", studio: "[homebrew formulae]\ngo\n", kind: "brew", e: config.Entry{Name: "go"},
+			shared: "[homebrew formulae]\n# the compiler\n# for work\ngo\n# about jq\njq\n"},
+		"comments carried, in a section kit doesn't sort": {studio: "[steps]\n# from its maker\ntool \"Install it\"\n", kind: config.StepsKind, e: config.Entry{Name: "tool", Value: `"Install it"`},
+			shared: "[steps]\n# from its maker\ntool \"Install it\"\n"},
+		"comments that differ": {laptop: "[homebrew formulae]\n# the compiler\ngo\n", studio: "[homebrew formulae]\n# for work\ngo\n", kind: "brew", e: config.Entry{Name: "go"},
+			want: "the lines it moves have different comments above them, laptop/declarations:3, studio/declarations:3: make them the same, or take those lines out first"},
+		"comments and a note given": {laptop: "[homebrew formulae]\n# the compiler\ngo   # a compiler\n", kind: "brew", e: config.Entry{Name: "go", Note: "Go"},
+			shared: "[homebrew formulae]\n# the compiler\ngo   # Go\n"},
 		"a note given": {laptop: "[homebrew formulae]\ngo   # a compiler\n", studio: "[homebrew formulae]\ngo   # for work\n", kind: "brew", e: config.Entry{Name: "go", Note: "Go"},
 			shared: "[homebrew formulae]\ngo   # Go\n"},
 	} {
-		files := map[string]string{"shared/declarations": "", "laptop/declarations": c.laptop, "studio/declarations": c.studio}
+		files := map[string]string{"shared/declarations": c.had, "laptop/declarations": c.laptop, "studio/declarations": c.studio}
 		cfg := loadRepo(t, files)
 		var from []string
 		for _, mac := range []string{"laptop", "studio"} {

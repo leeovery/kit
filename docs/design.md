@@ -473,9 +473,10 @@ asks nothing about where. Every command declaring for every Mac moves a Mac's li
 nothing it says: the shared line must say the same, by meaning (`--after` and `--before` in any
 order; a secret's full reference and mode), else it's refused before anything's stored,
 installed or asked for, naming the line and what it says, to give the same or take that line
-out first (a secret kept elsewhere: `--ref` and where it is shares the value it has); and the
-shared line keeps the moved lines' note when the command gives none, refused when theirs
-differ, a note given winning. `--temp` installs without declaring: quiet for 7 days, then reconcile
+out first (a secret kept elsewhere: `--ref` and where it is shares the value it has). The
+shared line keeps the moved lines' note when the command gives none, a note given winning, and
+the comments above them, its notes, above it, a note given staying after the line; moved lines
+whose notes or comments differ are refused, naming each. `--temp` installs without declaring: quiet for 7 days, then reconcile
 asks.
 `kit <kind> remove` uninstalls and takes each name out of this Mac's file; one declared for every Mac
 needs `--shared`. Both handle each name on its own (one failing leaves the others), then commit

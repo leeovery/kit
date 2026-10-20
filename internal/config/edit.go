@@ -146,7 +146,7 @@ func (b *body) remove(from, to int) {
 }
 
 // sortedLines are a sorted section's lines as kit keeps them, with added,
-// entry lines, among them: the comments opening the section, before a blank
+// entry lines, each with the comments above it, among them: the comments opening the section, before a blank
 // line; each entry in order, the comments above it with it; any comments
 // after the last; then the blank lines ending the section, as they were. A
 // comment apart from any entry is a note on the entry after it, and the
@@ -177,8 +177,14 @@ func sortedLines(f Form, lines []string, added ...string) []string {
 			notes = nil
 		}
 	}
+	var addedNotes []string
 	for _, line := range added {
-		blocks = append(blocks, block{splitBody(f, []string{line}).names[0], []string{line}})
+		if strings.HasPrefix(strings.TrimSpace(line), "#") {
+			addedNotes = append(addedNotes, line)
+			continue
+		}
+		blocks = append(blocks, block{splitBody(f, []string{line}).names[0], append(addedNotes, line)})
+		addedNotes = nil
 	}
 	slices.SortStableFunc(blocks, func(x, y block) int { return compareNames(f, x.name, y.name) })
 	var out []string
@@ -319,8 +325,9 @@ func (c *Config) Declare(kind, scope string, e Entry) error {
 // DeclareShared declares e in the shared declarations, as Declare does,
 // taking it out of the files of each of the Macs from, as Undeclare does:
 // one edit, judged as a whole before any of it's written. Nothing a line it
-// moves says is lost: the shared line must say the same (LineDiffers), and
-// takes their note when given none, refused when theirs differ. It returns the
+// moves says is lost: the shared line must say the same (LineDiffers); it
+// takes their note when given none, and the comments above them, refused
+// when theirs differ. It returns the
 // scopes whose files it wrote, those written before one failed too.
 func (c *Config) DeclareShared(kind string, e Entry, from []string) ([]string, error) {
 	d, files, err := c.declaring(kind, Shared, e, from...)
@@ -389,6 +396,10 @@ func (c *Config) declaring(kind, scope string, e Entry, from ...string) (section
 			return d, nil, err
 		}
 	}
+	notes, err := carriedNotes(moved)
+	if err != nil {
+		return d, nil, err
+	}
 	line, err := entryText(d, name, e)
 	if err != nil {
 		return d, nil, err
@@ -413,10 +424,10 @@ func (c *Config) declaring(kind, scope string, e Entry, from ...string) (section
 	if s == nil {
 		s = f.add(&section{def: d, arg: arg, as: e.As, hold: hold})
 	}
-	block := append([]string{line}, steps...)
+	block := slices.Concat(notes, []string{line}, steps)
 	switch b := splitBody(d.form, s.body); {
 	case d.sorted:
-		s.body = sortedLines(d.form, s.body, line)
+		s.body = sortedLines(d.form, s.body, slices.Concat(notes, []string{line})...)
 	case d.form == Paths:
 		b.insert(b.lastEntryEnd(0, len(b.lines)), block...)
 		s.body = b.lines

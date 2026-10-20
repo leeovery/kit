@@ -62,10 +62,17 @@ func (d sectionDef) says(e Entry) (string, error) {
 	return strings.Join(append(parts, e.Steps...), "\n"), nil
 }
 
+// movedLine is a Mac's line a shared declare takes out: its entry, as the
+// config reads it, and the comments directly above it, as written.
+type movedLine struct {
+	Entry
+	comments []string
+}
+
 // movedLines are the lines declaring name in the files of the Macs from,
-// those a shared declare takes out, as the config reads them.
-func (c *Config) movedLines(kind, name string, from []string) ([]Entry, error) {
-	var lines []Entry
+// those a shared declare takes out.
+func (c *Config) movedLines(kind, name string, from []string) ([]movedLine, error) {
+	var lines []movedLine
 	for _, mac := range from {
 		d, f, err := c.editable(kind, mac)
 		if err != nil {
@@ -76,7 +83,7 @@ func (c *Config) movedLines(kind, name string, from []string) ([]Entry, error) {
 			return nil, err
 		}
 		if ok {
-			lines = append(lines, e)
+			lines = append(lines, movedLine{e, f.commentsAbove(d, name)})
 		}
 	}
 	return lines, nil
@@ -100,11 +107,48 @@ func (f *declFile) entryOf(d sectionDef, name string) (Entry, bool, error) {
 	return entries[i], true, nil
 }
 
+// commentsAbove are the comments directly above the line declaring name in
+// f's sections of d, its notes, as written.
+func (f *declFile) commentsAbove(d sectionDef, name string) []string {
+	s, line := f.holding(d, name)
+	if s == nil {
+		return nil
+	}
+	b := splitBody(d.form, s.body)
+	i := slices.Index(b.names, line)
+	return slices.Clone(b.lines[b.notesStart(i):i])
+}
+
+// carriedNotes are the comments a shared line takes from above the lines it
+// moves: theirs, when they have one block between them; refused, naming
+// them, when theirs differ.
+func carriedNotes(moved []movedLine) ([]string, error) {
+	var with []movedLine
+	for _, m := range moved {
+		if len(m.comments) > 0 {
+			with = append(with, m)
+		}
+	}
+	for _, m := range with {
+		if m.Notes != with[0].Notes {
+			var said []string
+			for _, w := range with {
+				said = append(said, w.Pos())
+			}
+			return nil, fmt.Errorf("the lines it moves have different comments above them, %s: make them the same, or take those lines out first", strings.Join(said, ", "))
+		}
+	}
+	if len(with) == 0 {
+		return nil, nil
+	}
+	return with[0].comments, nil
+}
+
 // carriedNote is the note a shared line takes from the lines it moves,
 // when it's given none: theirs, when they have one between them; refused,
 // naming them, when they differ.
-func carriedNote(moved []Entry) (string, error) {
-	var noted []Entry
+func carriedNote(moved []movedLine) (string, error) {
+	var noted []movedLine
 	var notes []string
 	for _, e := range moved {
 		if e.Note != "" {
@@ -129,7 +173,7 @@ func carriedNote(moved []Entry) (string, error) {
 // sameAsMoved says why the line declaring name in f, the shared file as the
 // edit leaves it, doesn't say what each of moved says (LineDiffers): nil
 // when it does.
-func sameAsMoved(d sectionDef, f *declFile, name string, moved []Entry) error {
+func sameAsMoved(d sectionDef, f *declFile, name string, moved []movedLine) error {
 	if len(moved) == 0 {
 		return nil
 	}
@@ -142,8 +186,8 @@ func sameAsMoved(d sectionDef, f *declFile, name string, moved []Entry) error {
 		return err
 	}
 	for _, e := range moved {
-		if other, err := d.says(e); err != nil || other != says {
-			return LineDiffers{Line: e}
+		if other, err := d.says(e.Entry); err != nil || other != says {
+			return LineDiffers{Line: e.Entry}
 		}
 	}
 	return nil
