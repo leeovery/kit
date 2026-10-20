@@ -54,7 +54,7 @@ func healthyMac(w *world) {
 	f.On("top", "-l", "1", "-pid", "412", "-stats", "mem").Prints("MEM\n102M\n")
 	f.On("sysctl", "-n", "vm.loadavg", "hw.ncpu", "kern.boottime").Prints("{ 2.10 2.00 1.90 }\n10\n{ sec = 1767312245, usec = 0 } Fri Jan  2 00:04:05 2026\n")
 	dir := filepath.Join(w.home, ".config", "kit")
-	f.On("git", "-C", dir, "status", "--porcelain", "--untracked-files=all")
+	f.On("git", "-C", dir, "--literal-pathspecs", "status", "--porcelain", "-z", "--untracked-files=all", "--no-renames", "--")
 	f.On("git", "-C", dir, "log", "@{u}..HEAD", "--format=%ct")
 }
 

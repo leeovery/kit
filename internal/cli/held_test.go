@@ -205,7 +205,7 @@ func TestHeldLinesAreTheListsLikeAnyOther(t *testing.T) {
 		t.Errorf("kit list brew --json printed\n%s", out)
 	}
 	w.fake.On("brew", "uninstall", "--formula", "go")
-	w.expectSync([]string{"laptop/declarations"}, "kit brew remove go (laptop)")
+	w.expectSync(t, []string{"laptop/declarations"}, "kit brew remove go (laptop)")
 	out, errOut, code := w.run(t, "brew", "remove", "go")
 	if !strings.Contains(out, "go ok uninstalled; out of laptop\n") || code != 0 {
 		t.Errorf("kit brew remove go printed\n%s%s exit %d", out, errOut, code)
@@ -224,7 +224,11 @@ func TestAddAStepNeedingASecret(t *testing.T) {
 	if code == 0 || !strings.Contains(out, "it needs NOPE, which no [secrets] section declares") {
 		t.Errorf("kit step add --secret NOPE printed\n%s exit %d", out, code)
 	}
-	w.expectSync([]string{"laptop/declarations", "laptop/steps/fetch"}, "kit step add fetch (laptop)")
+	w.expectCommit(t, commit{
+		message: "kit step add fetch (laptop)", paths: []string{"laptop/declarations", "laptop/steps/fetch"},
+		status: " M laptop/declarations\x00?? laptop/steps/fetch/run\x00", update: []string{"laptop/declarations", "laptop/steps/fetch/run"},
+		staged: "laptop/declarations\x00laptop/steps/fetch/run\x00", commit: []string{"laptop/declarations", "laptop/steps/fetch"},
+	})
 	out, _, code = w.run(t, "step", "add", "fetch", "Fetches the releases", "--secret", "TOKEN")
 	if code != 0 || w.readSection(t, "laptop", "steps") != `fetch "Fetches the releases" --secret TOKEN`+"\n" {
 		t.Errorf("kit step add --secret TOKEN printed\n%s exit %d; [steps] = %q", out, code, w.readSection(t, "laptop", "steps"))

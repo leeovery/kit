@@ -8,7 +8,7 @@ import (
 
 func TestAddPathDeclaresItLastAndWritesTheShellsPath(t *testing.T) {
 	w := laptopWorld(t)
-	w.expectSync([]string{"laptop/declarations"}, "kit path add ~/tools/bin (laptop): the tools")
+	w.expectSync(t, []string{"laptop/declarations"}, "kit path add ~/tools/bin (laptop): the tools")
 	out, _, code := w.run(t, "path", "add", filepath.Join(w.home, "tools/bin"), "--note", "the tools")
 	if code != 0 || !strings.Contains(out, "~/tools/bin ok declared in laptop, last on the PATH") {
 		t.Errorf("kit path add printed\n%s exit %d", out, code)
@@ -28,7 +28,7 @@ func TestRemovePathOnEveryMacNeedsShared(t *testing.T) {
 	if code == 0 || !strings.Contains(out, "on every Mac's PATH, in shared/declarations:3: --shared takes it out of every Mac's") {
 		t.Errorf("kit path remove printed\n%s exit %d", out, code)
 	}
-	w.expectSync([]string{"shared/declarations"}, "kit path remove /opt/homebrew/bin (laptop)")
+	w.expectSync(t, []string{"shared/declarations"}, "kit path remove /opt/homebrew/bin (laptop)")
 	if _, _, code := w.run(t, "path", "remove", "/opt/homebrew/bin", "--shared"); code != 0 {
 		t.Errorf("kit path remove --shared exit %d", code)
 	}
@@ -56,7 +56,7 @@ func TestSharedTakesTheNameOutOfTheMacs(t *testing.T) {
 	w.writeSection(t, "studio", "checks", "dns -- dig example.com\n")
 	w.writeSection(t, "laptop", "features", "remote-login\n")
 
-	w.expectSync([]string{"laptop/declarations", "shared/declarations"}, "kit path add ~/go/bin (laptop)")
+	w.expectSync(t, []string{"laptop/declarations", "shared/declarations"}, "kit path add ~/go/bin (laptop)")
 	if out, _, code := w.run(t, "path", "add", "~/go/bin", "--shared"); code != 0 || !strings.Contains(out, "~/go/bin ok declared in shared, out of laptop, last on the PATH") {
 		t.Errorf("kit path add --shared printed\n%s exit %d", out, code)
 	}
@@ -68,7 +68,7 @@ func TestSharedTakesTheNameOutOfTheMacs(t *testing.T) {
 	if out, _, code := w.run(t, "check", "add", "dns", "--shared", "--", "dig", "example.org"); code != 1 || !strings.Contains(out, "studio/declarations:5 has dns with -- dig example.com, where this gives -- dig example.org: give the same, or take that line out first") {
 		t.Errorf("kit check add --shared, another command than studio's, printed\n%s exit %d", out, code)
 	}
-	w.expectSync([]string{"shared/declarations", "studio/declarations"}, "kit check add dns (laptop)")
+	w.expectSync(t, []string{"shared/declarations", "studio/declarations"}, "kit check add dns (laptop)")
 	if out, _, code := w.run(t, "check", "add", "dns", "--shared", "--", "dig", "example.com"); code != 0 || !strings.Contains(out, "dns ok declared in shared, out of studio") {
 		t.Errorf("kit check add --shared printed\n%s exit %d", out, code)
 	}
@@ -76,7 +76,7 @@ func TestSharedTakesTheNameOutOfTheMacs(t *testing.T) {
 		t.Errorf("studio's [checks] = %q, want dns out of it", got)
 	}
 
-	w.expectSync([]string{"laptop/declarations", "shared/declarations"}, "kit feature on remote-login (laptop)")
+	w.expectSync(t, []string{"laptop/declarations", "shared/declarations"}, "kit feature on remote-login (laptop)")
 	if out, _, code := w.run(t, "feature", "on", "remote-login", "--shared"); code != 0 || !strings.Contains(out, "remote-login ok on, in shared, out of laptop") {
 		t.Errorf("kit feature on --shared printed\n%s exit %d", out, code)
 	}

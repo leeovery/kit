@@ -41,7 +41,7 @@ func TestReconcileAdoptsAndPutsBackSettings(t *testing.T) {
 	w := macosWorld(t, "<key>tilesize</key><integer>60</integer>")
 	w.run(t, "status")
 	w.exports("com.apple.dock", "<key>tilesize</key><integer>48</integer><key>autohide</key><true/>")
-	w.expectSync([]string{"shared/declarations"}, "kit reconcile (laptop): adopt defaults:com.apple.dock:tilesize")
+	w.expectSync(t, []string{"shared/declarations"}, "kit reconcile (laptop): adopt defaults:com.apple.dock:tilesize")
 	if out, _, code := w.run(t, "reconcile", "defaults:com.apple.dock:tilesize", "--adopt"); code != 0 || !strings.Contains(out, "declared as it is now, in shared") {
 		t.Errorf("kit reconcile --adopt printed\n%s exit %d", out, code)
 	}
@@ -62,7 +62,7 @@ func TestReconcileAdoptsASettingNeverSeenAsDeclared(t *testing.T) {
 	if !strings.Contains(out, `"id": "defaults:com.apple.dock:tilesize"`) || !strings.Contains(out, `"install",`) || !strings.Contains(out, `"adopt",`) {
 		t.Errorf("kit reconcile --json printed\n%s\nwant the size to set or adopt", out)
 	}
-	w.expectSync([]string{"shared/declarations"}, "kit reconcile (laptop): adopt defaults:com.apple.dock:tilesize")
+	w.expectSync(t, []string{"shared/declarations"}, "kit reconcile (laptop): adopt defaults:com.apple.dock:tilesize")
 	if out, _, code := w.run(t, "reconcile", "defaults:com.apple.dock:tilesize", "--adopt"); code != 0 {
 		t.Errorf("kit reconcile --adopt printed\n%s exit %d", out, code)
 	}

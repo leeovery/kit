@@ -14,7 +14,7 @@ func TestReconcileAdoptsALoginItemWithItsAppsName(t *testing.T) {
 	w.writeSection(t, "laptop", "macos login items", "")
 	read := `[{"name":"Dropbox","path":"/Applications/Dropbox.app","id":"com.getdropbox.dropbox"}]`
 	w.fake.On("osascript", "-l", "JavaScript", "-e", login.ReadScript).Prints(read)
-	w.expectSync([]string{"laptop/declarations"}, "kit reconcile (laptop): adopt login-item:com.getdropbox.dropbox: syncs the files")
+	w.expectSync(t, []string{"laptop/declarations"}, "kit reconcile (laptop): adopt login-item:com.getdropbox.dropbox: syncs the files")
 
 	out, errOut, code := w.run(t, "reconcile", "login-item:com.getdropbox.dropbox", "--adopt", "--note", "syncs the files")
 	if code != 0 {
@@ -36,7 +36,7 @@ func TestAddALoginItemSharedKeepsTheMacsNote(t *testing.T) {
 	read := `[{"name":"Dropbox","path":"/Applications/Dropbox.app","id":"com.getdropbox.dropbox"}]`
 	w.fake.On("osascript", "-l", "JavaScript", "-e", login.ReadScript).Prints(read)
 	w.fake.On("osascript", "-l", "JavaScript", "-e", login.IdentifyScript, "com.getdropbox.dropbox").Prints(`[{"id":"com.getdropbox.dropbox","name":"Dropbox","path":"/Applications/Dropbox.app"}]`)
-	w.expectSync([]string{"laptop/declarations", "shared/declarations"}, "kit login-item add com.getdropbox.dropbox (laptop)")
+	w.expectSync(t, []string{"laptop/declarations", "shared/declarations"}, "kit login-item add com.getdropbox.dropbox (laptop)")
 	out, errOut, code := w.run(t, "login-item", "add", "com.getdropbox.dropbox", "--shared")
 	if code != 0 || !strings.Contains(out, "declared in shared, out of laptop") {
 		t.Fatalf("kit login-item add --shared printed\n%s%s exit %d", out, errOut, code)

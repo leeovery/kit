@@ -6,11 +6,11 @@ import (
 	"context"
 	"errors"
 	"io"
-	"maps"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -174,82 +174,88 @@ func (w *world) run(t *testing.T, args ...string) (stdout, stderr string, status
 // errNotFound is what the runner says of a program that isn't installed.
 var errNotFound = runner.ErrNotFound
 
-// expectSync scripts the config repository's commit of files with message,
-// and its push. git's status of them is as git prints it, of what the run
-// leaves in them against what they held when this was called, all of it
-// committed then: a file changed ( M), gone ( D) or new (??; a new folder as
-// one, as git shows an untracked folder); and what's added and committed is
-// what git would take: the paths there, and those gone that status names.
-func (w *world) expectSync(files []string, message string) {
+// commit is a commit of kit-config's a test expects kit to make, and git's
+// answers to it, as real git gives them: kit commits paths with message;
+// status is git's status of them (-z); kit stages update; staged is git's
+// list of what's staged of paths once it has (-z); and commit, the paths
+// it commits.
+type commit struct {
+	message               string
+	paths, update, commit []string
+	status, staged        string
+}
+
+// edited is a commit of files, each a file edited and committed whole.
+func edited(message string, files ...string) commit {
+	c := commit{message: message, paths: files, update: files, commit: files}
+	for _, f := range files {
+		c.status += " M " + f + "\x00"
+		c.staged += f + "\x00"
+	}
+	return c
+}
+
+// expectSync expects kit to commit files, each a file the run edits, with
+// message, and push: each must hold something else once kit asks git's
+// status than it held when this was called. A file edited before the run is
+// expectCommit's, its status stated.
+func (w *world) expectSync(t *testing.T, files []string, message string) {
+	t.Helper()
+	dir := filepath.Join(w.home, ".config", "kit")
+	was := make(map[string]string, len(files))
+	for _, f := range files {
+		was[f] = w.read(t, filepath.Join(".config", "kit", f))
+	}
+	w.expectCommit(t, edited(message, files...), func() {
+		for _, f := range files {
+			if data, err := os.ReadFile(filepath.Join(dir, f)); err != nil || string(data) == was[f] {
+				t.Errorf("kit commits %s as edited, and the run didn't edit it: %v", f, err)
+			}
+		}
+	})
+}
+
+// expectCommit scripts git's answers to c, and the push after it, failing
+// the test unless kit commits, and unless the status given is so of the
+// files on disk once kit asks, when each of checks runs too.
+func (w *world) expectCommit(t *testing.T, c commit, checks ...func()) {
+	t.Helper()
 	dir := filepath.Join(w.home, ".config", "kit")
 	git := func(args ...string) []string { return append([]string{"-C", dir}, args...) }
-	before := filesUnder(dir, files)
-	w.fake.On("git", git(append([]string{"status", "--porcelain", "--"}, files...)...)...).Filters(func(string) (string, error) {
-		after := filesUnder(dir, files)
-		var lines, add, commit []string
-		for _, f := range files {
-			had, has := before[f], after[f]
-			info, err := os.Stat(filepath.Join(dir, f))
-			switch {
-			case err == nil && info.IsDir() && len(had) == 0:
-				lines = append(lines, "?? "+f+"/")
-			default:
-				paths := slices.Concat(slices.Collect(maps.Keys(had)), slices.Collect(maps.Keys(has)))
-				for _, path := range slices.Compact(slices.Sorted(slices.Values(paths))) {
-					was, wasThere := had[path]
-					is, isThere := has[path]
-					switch {
-					case wasThere && isThere && was != is:
-						lines = append(lines, " M "+path)
-					case wasThere && !isThere:
-						lines = append(lines, " D "+path)
-					case !wasThere && isThere:
-						lines = append(lines, "?? "+path)
-					}
-				}
-			}
-			if err == nil {
-				add = append(add, f)
-			}
-			if err == nil || slices.ContainsFunc(lines, func(l string) bool { return l[3:] == f || strings.HasPrefix(l[3:], f+"/") }) {
-				commit = append(commit, f)
-			}
+	asked := func() {
+		onDisk(t, dir, c.status)
+		for _, check := range checks {
+			check()
 		}
-		if len(lines) == 0 {
-			return "", nil
-		}
-		if len(add) > 0 {
-			w.fake.On("git", git(append([]string{"add", "--"}, add...)...)...)
-		}
-		w.fake.On("git", git(append([]string{"commit", "--quiet", "-m", message, "--"}, commit...)...)...)
-		return strings.Join(lines, "\n") + "\n", nil
-	})
+	}
+	w.fake.On("git", git(slices.Concat([]string{"--literal-pathspecs", "status", "--porcelain", "-z", "--untracked-files=all", "--no-renames", "--"}, c.paths)...)...).Prints(c.status).Does(asked)
+	w.fake.On("git", git(slices.Concat([]string{"update-index", "--add", "--remove", "--"}, c.update)...)...)
+	w.fake.On("git", git(slices.Concat([]string{"--literal-pathspecs", "diff", "--cached", "--name-only", "-z", "--no-renames", "--"}, c.paths)...)...).Prints(c.staged)
+	var committed atomic.Bool
+	w.fake.On("git", git(slices.Concat([]string{"--literal-pathspecs", "commit", "--quiet", "-m", c.message, "--"}, c.commit)...)...).Does(func() { committed.Store(true) })
 	w.fake.On("git", git("remote")...).Prints("origin\n")
 	w.fake.On("git", git("pull", "--rebase", "--autostash", "--quiet")...)
 	w.fake.On("git", git("push", "--quiet")...)
+	t.Cleanup(func() {
+		if !committed.Load() {
+			t.Errorf("kit didn't commit %q, %q", c.message, c.commit)
+		}
+	})
 }
 
-// filesUnder are the files at or under each of paths in dir, by path, each
-// by its path in dir, with what it holds: none for a path that isn't there.
-func filesUnder(dir string, paths []string) map[string]map[string]string {
-	out := make(map[string]map[string]string, len(paths))
-	for _, p := range paths {
-		held := map[string]string{}
-		_ = filepath.WalkDir(filepath.Join(dir, p), func(path string, d os.DirEntry, err error) error {
-			if err != nil || d.IsDir() {
-				return nil
-			}
-			data, err := os.ReadFile(path)
-			if err != nil {
-				return nil
-			}
-			rel, _ := filepath.Rel(dir, path)
-			held[rel] = string(data)
-			return nil
-		})
-		out[p] = held
+// onDisk fails the test unless status, as git prints it (-z), is so of the
+// files in dir: each it names deleted is gone, and each other there.
+func onDisk(t *testing.T, dir, status string) {
+	for rec := range strings.SplitSeq(status, "\x00") {
+		if len(rec) < 4 {
+			continue
+		}
+		code, path := rec[:2], rec[3:]
+		_, err := os.Lstat(filepath.Join(dir, path))
+		if there := err == nil; there == strings.Contains(code, "D") {
+			t.Errorf("git status has %q %s, and it's there: %v", code, path, there)
+		}
 	}
-	return out
 }
 
 // writeSection sets the section headed header, in scope's declarations

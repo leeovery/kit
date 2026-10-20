@@ -27,7 +27,17 @@ type Repo struct {
 }
 
 func (r Repo) git(ctx context.Context, args ...string) (runner.Result, error) {
-	return r.Run.Run(ctx, runner.Command{Name: "git", Args: slices.Concat([]string{"-C", r.Dir}, args)})
+	return r.Run.Run(ctx, r.command(args...))
+}
+
+func (r Repo) command(args ...string) runner.Command {
+	return runner.Command{Name: "git", Args: slices.Concat([]string{"-C", r.Dir}, args)}
+}
+
+// gitOn runs git's args on paths in the repository, each taken as it's
+// written: a name holding *, ? or [ is that file, never a pattern.
+func (r Repo) gitOn(ctx context.Context, args []string, paths ...string) (runner.Result, error) {
+	return r.git(ctx, slices.Concat([]string{"--literal-pathspecs"}, args, []string{"--"}, paths)...)
 }
 
 // Files are the files git keeps, or would keep, under paths in the
@@ -35,18 +45,29 @@ func (r Repo) git(ctx context.Context, args ...string) (runner.Result, error) {
 // repository, once; a tracked file deleted but not yet committed is still
 // among them.
 func (r Repo) Files(ctx context.Context, paths ...string) ([]string, error) {
-	res, err := r.git(ctx, slices.Concat([]string{"ls-files", "-z", "--cached", "--others", "--exclude-standard", "--"}, paths)...)
+	res, err := r.gitOn(ctx, []string{"ls-files", "-z", "--cached", "--others", "--exclude-standard"}, paths...)
 	if err != nil {
 		return nil, err
 	}
 	var files []string
-	for name := range strings.SplitSeq(string(res.Stdout), "\x00") {
-		if name != "" && !slices.Contains(files, name) {
+	for _, name := range names(res.Stdout) {
+		if !slices.Contains(files, name) {
 			files = append(files, name)
 		}
 	}
 	slices.Sort(files)
 	return files, nil
+}
+
+// names are the paths git prints separated by NULs, as -z has it.
+func names(out []byte) []string {
+	var paths []string
+	for name := range strings.SplitSeq(string(out), "\x00") {
+		if name != "" {
+			paths = append(paths, name)
+		}
+	}
+	return paths
 }
 
 // The states of a change not committed.
@@ -67,42 +88,37 @@ type Change struct {
 }
 
 // Changes are the files changed and not committed, staged or not, new ones
-// each by name, with the lines each adds and removes.
+// each by name, a rename as its two sides, with the lines each adds and
+// removes: a file added then gone before it was committed is none.
 func (r Repo) Changes(ctx context.Context) ([]Change, error) {
-	res, err := r.git(ctx, "status", "--porcelain", "--untracked-files=all")
+	entries, err := r.status(ctx)
 	if err != nil {
 		return nil, err
 	}
 	var changes []Change
-	for line := range strings.Lines(string(res.Stdout)) {
-		line = strings.TrimRight(line, "\n")
-		if len(line) < 4 {
+	for _, e := range entries {
+		state, ok := e.state()
+		if !ok {
 			continue
 		}
-		code, name := line[:2], unquote(line[3:])
-		if _, to, ok := strings.Cut(name, " -> "); ok {
-			name = unquote(to)
+		if i := slices.IndexFunc(changes, func(c Change) bool { return c.Path == e.path }); i >= 0 {
+			// Staged as deleted, and on disk untracked: committed, and there.
+			changes[i].State = Edited
+			continue
 		}
-		c := Change{Path: name, State: Edited}
-		switch {
-		case code == "??" || strings.Contains(code, "A"):
-			c.State = Added
-		case strings.Contains(code, "D"):
-			c.State = Deleted
-		}
-		changes = append(changes, c)
+		changes = append(changes, Change{Path: e.path, State: state})
 	}
 	if len(changes) == 0 {
 		return nil, nil
 	}
 	counts := make(map[string][2]int)
-	if res, err := r.git(ctx, "diff", "--numstat", "HEAD"); err == nil {
-		for line := range strings.Lines(string(res.Stdout)) {
-			f := strings.SplitN(strings.TrimRight(line, "\n"), "\t", 3)
+	if res, err := r.git(ctx, "diff", "--numstat", "-z", "--no-renames", "HEAD"); err == nil {
+		for _, rec := range names(res.Stdout) {
+			f := strings.SplitN(rec, "\t", 3)
 			if len(f) == 3 {
 				added, _ := strconv.Atoi(f[0])
 				removed, _ := strconv.Atoi(f[1])
-				counts[unquote(f[2])] = [2]int{added, removed}
+				counts[f[2]] = [2]int{added, removed}
 			}
 		}
 	}
@@ -118,19 +134,51 @@ func (r Repo) Changes(ctx context.Context) ([]Change, error) {
 	return changes, nil
 }
 
-// unquote is a path as git prints it, without the quotes it puts round one
-// with unusual characters.
-func unquote(name string) string {
-	if s, err := strconv.Unquote(name); err == nil {
-		return s
+// entry is a file git status names: its two letters, staged and not, and
+// its path in the repository.
+type entry struct {
+	code, path string
+}
+
+// addedThenGone is status's code for a file added to the index, then
+// deleted before it was committed: in neither the last commit nor on disk.
+const addedThenGone = "AD"
+
+// state is what e's change is: none for a file added then gone.
+func (e entry) state() (string, bool) {
+	switch {
+	case e.code == addedThenGone:
+		return "", false
+	case e.code == "??" || strings.Contains(e.code, "A"):
+		return Added, true
+	case strings.Contains(e.code, "D"):
+		return Deleted, true
 	}
-	return name
+	return Edited, true
+}
+
+// status is git status of the files changed under paths, or the whole
+// repository given none: each by its own path, new ones file by file and a
+// rename as its two sides, whatever the user's config says of untracked
+// files, renames or quoting.
+func (r Repo) status(ctx context.Context, paths ...string) ([]entry, error) {
+	res, err := r.gitOn(ctx, []string{"status", "--porcelain", "-z", "--untracked-files=all", "--no-renames"}, paths...)
+	if err != nil {
+		return nil, err
+	}
+	var entries []entry
+	for _, rec := range names(res.Stdout) {
+		if len(rec) > 3 {
+			entries = append(entries, entry{code: rec[:2], path: rec[3:]})
+		}
+	}
+	return entries, nil
 }
 
 // Diff is the change to path not committed, as git shows it: none for a
 // file new to the repository.
 func (r Repo) Diff(ctx context.Context, path string) (string, error) {
-	res, err := r.git(ctx, "diff", "HEAD", "--", path)
+	res, err := r.gitOn(ctx, []string{"diff", "HEAD"}, path)
 	if err != nil {
 		return "", err
 	}
@@ -139,66 +187,92 @@ func (r Repo) Diff(ctx context.Context, path string) (string, error) {
 
 // Restore puts path back as it was last committed, staged and not.
 func (r Repo) Restore(ctx context.Context, path string) error {
-	_, err := r.git(ctx, "restore", "--source=HEAD", "--staged", "--worktree", "--", path)
+	_, err := r.gitOn(ctx, []string{"restore", "--source=HEAD", "--staged", "--worktree"}, path)
 	return err
 }
 
-// Commit commits the changes to files, paths in the repository, alone, with
-// message: anything else uncommitted, staged or not, is left as it is.
-// Files with no changes commit nothing, which is no error; it reports
-// whether it committed. Those on disk are added; those gone are committed
-// as status names them, a deletion or a rename's old side, staged or not,
-// as git won't add what isn't there. A path gone that status doesn't name,
-// git never kept: left out, and with nothing left, nothing's committed, as
-// a commit given no path would take whatever's staged.
-func (r Repo) Commit(ctx context.Context, message string, files ...string) (bool, error) {
-	res, err := r.git(ctx, slices.Concat([]string{"status", "--porcelain", "--"}, files)...)
+// Commit commits paths in the repository with message, each whole as it is
+// on disk: a file edited, new or deleted, staged or not, a rename's two
+// sides, a folder's every file. Anything else staged is left as it is.
+// What git can't keep is left out, never failing the rest: an ignored file,
+// an empty folder, a path gone that git never kept, and a file added then
+// gone before it was committed, taken out of the index, as git would
+// otherwise find nothing to commit of it, for ever. It reports whether it
+// committed: with nothing to commit it doesn't, which is no error.
+func (r Repo) Commit(ctx context.Context, message string, paths ...string) (bool, error) {
+	if len(paths) == 0 {
+		return false, nil
+	}
+	changed, err := r.status(ctx, paths...)
+	if err != nil || len(changed) == 0 {
+		return false, err
+	}
+	var files []string
+	for _, e := range changed {
+		if !slices.Contains(files, e.path) {
+			files = append(files, e.path)
+		}
+	}
+	// Each staged as it is on disk, one gone taken out of the index.
+	if _, err := r.git(ctx, slices.Concat([]string{"update-index", "--add", "--remove", "--"}, files)...); err != nil {
+		return false, err
+	}
+	res, err := r.gitOn(ctx, []string{"diff", "--cached", "--name-only", "-z", "--no-renames"}, paths...)
 	if err != nil {
 		return false, err
 	}
-	changed := statusPaths(string(res.Stdout))
-	var add, commit []string
-	for _, f := range files {
-		_, err := os.Lstat(filepath.Join(r.Dir, f))
-		switch {
-		case err == nil:
-			add = append(add, f)
-			commit = append(commit, f)
-		case slices.ContainsFunc(changed, func(c string) bool { return c == f || strings.HasPrefix(c, f+"/") }):
-			commit = append(commit, f)
-		}
-	}
-	if len(changed) == 0 || len(commit) == 0 {
+	staged := names(res.Stdout)
+	// Only paths holding a change: one matching nothing git keeps or kept
+	// fails the whole commit.
+	commit := slices.DeleteFunc(slices.Clone(paths), func(p string) bool {
+		return !slices.ContainsFunc(staged, func(s string) bool { return s == p || strings.HasPrefix(s, p+"/") })
+	})
+	if len(commit) == 0 {
 		return false, nil
 	}
-	if len(add) > 0 {
-		if _, err := r.git(ctx, slices.Concat([]string{"add", "--"}, add)...); err != nil {
-			return false, err
-		}
-	}
-	if _, err := r.git(ctx, slices.Concat([]string{"commit", "--quiet", "-m", message, "--"}, commit)...); err != nil {
+	if _, err := r.gitOn(ctx, []string{"commit", "--quiet", "-m", message}, commit...); err != nil {
 		return false, err
 	}
 	return true, nil
 }
 
-// statusPaths are the paths git status --porcelain names, both sides of a
-// rename.
-func statusPaths(out string) []string {
-	var paths []string
-	for line := range strings.Lines(out) {
-		line = strings.TrimRight(line, "\n")
-		if len(line) < 4 {
+// Rule is one of git's rules ignoring a file: its pattern, and the file and
+// line it's in.
+type Rule struct {
+	Pattern, Source string
+	Line            int
+}
+
+// Ignored are those of paths in the repository git ignores, each with the
+// rule that does: a file at one, git would never keep.
+func (r Repo) Ignored(ctx context.Context, paths ...string) (map[string]Rule, error) {
+	if len(paths) == 0 {
+		return nil, nil
+	}
+	// check-ignore refuses --literal-pathspecs, and needs none: it matches
+	// each path against the rules alone, never against the files there.
+	cmd := r.command("check-ignore", "--verbose", "--stdin", "-z")
+	cmd.Input = strings.Join(paths, "\x00") + "\x00"
+	res, err := r.Run.Run(ctx, cmd)
+	if exit, ok := errors.AsType[*runner.ExitError](err); ok && exit.Code == 1 {
+		// No rule matched any of them.
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	ignored := map[string]Rule{}
+	f := strings.Split(string(res.Stdout), "\x00")
+	for i := 0; i+3 < len(f); i += 4 {
+		source, line, pattern, path := f[i], f[i+1], f[i+2], f[i+3]
+		if strings.HasPrefix(pattern, "!") {
+			// A rule that keeps it.
 			continue
 		}
-		name := line[3:]
-		if from, to, ok := strings.Cut(name, " -> "); ok {
-			paths = append(paths, unquote(from))
-			name = to
-		}
-		paths = append(paths, unquote(name))
+		n, _ := strconv.Atoi(line)
+		ignored[path] = Rule{Pattern: pattern, Source: source, Line: n}
 	}
-	return paths
+	return ignored, nil
 }
 
 // Push brings in the remote's changes, rebasing what's committed here onto

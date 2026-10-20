@@ -24,7 +24,7 @@ func TestStatusShowsGitsSettings(t *testing.T) {
 
 func TestReconcileAdoptsASettingChangedOnTheMac(t *testing.T) {
 	w := gitWorld(t)
-	w.expectSync([]string{"shared/declarations"}, "kit reconcile (laptop): adopt git-config:core.editor")
+	w.expectSync(t, []string{"shared/declarations"}, "kit reconcile (laptop): adopt git-config:core.editor")
 	out, _, code := w.run(t, "reconcile", "git-config:core.editor", "--adopt")
 	if code != 0 || !strings.Contains(out, "declared as it is now, in shared") {
 		t.Errorf("kit reconcile printed\n%s exit %d", out, code)
@@ -45,7 +45,7 @@ func TestReconcilePutsASettingBack(t *testing.T) {
 
 func TestReconcileAdoptsAnUndeclaredSetting(t *testing.T) {
 	w := gitWorld(t)
-	w.expectSync([]string{"laptop/declarations"}, "kit reconcile (laptop): adopt git-config:delta.pager")
+	w.expectSync(t, []string{"laptop/declarations"}, "kit reconcile (laptop): adopt git-config:delta.pager")
 	if out, _, code := w.run(t, "reconcile", "git-config:delta.pager", "--adopt"); code != 0 {
 		t.Errorf("kit reconcile printed\n%s exit %d", out, code)
 	}

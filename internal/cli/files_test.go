@@ -31,7 +31,7 @@ func (w *world) keeps(paths ...string) {
 			folders = append(folders, scope+"/home")
 		}
 	}
-	args := append([]string{"-C", dir, "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--"}, folders...)
+	args := append([]string{"-C", dir, "--literal-pathspecs", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--"}, folders...)
 	w.fake.On("git", args...).Prints(strings.Join(paths, "\x00") + "\x00")
 }
 
@@ -83,7 +83,7 @@ func TestReconcileRevertsADivergedFile(t *testing.T) {
 
 func TestReconcileAdoptsADivergedFile(t *testing.T) {
 	w := filesWorld(t)
-	w.expectSync([]string{"shared/home/.differs"}, "kit reconcile (laptop): adopt file:~/.differs")
+	w.expectSync(t, []string{"shared/home/.differs"}, "kit reconcile (laptop): adopt file:~/.differs")
 	out, _, code := w.run(t, "reconcile", "file:~/.differs", "--adopt")
 	if code != 0 || !strings.Contains(out, "kit-config ok committed and pushed shared/home/.differs") {
 		t.Errorf("kit reconcile printed\n%s exit %d", out, code)
@@ -103,13 +103,34 @@ func TestReconcileOffersWhatSuitsAFile(t *testing.T) {
 func TestAddFileMovesItIntoKitConfig(t *testing.T) {
 	w := filesWorld(t)
 	w.write(t, ".config/new/conf", "new\n")
-	w.expectSync([]string{"laptop/home/.config/new/conf"}, "kit file add ~/.config/new/conf (laptop)")
+	w.fake.On("git", "-C", filepath.Join(w.home, ".config", "kit"), "check-ignore", "--verbose", "--stdin", "-z").Exits(1)
+	w.expectCommit(t, commit{
+		message: "kit file add ~/.config/new/conf (laptop)", paths: []string{"laptop/home/.config/new/conf"},
+		status: "?? laptop/home/.config/new/conf\x00", update: []string{"laptop/home/.config/new/conf"},
+		staged: "laptop/home/.config/new/conf\x00", commit: []string{"laptop/home/.config/new/conf"},
+	})
 	out, _, code := w.run(t, "file", "add", filepath.Join(w.home, ".config/new/conf"))
 	if code != 0 || !strings.Contains(out, "in kit-config, linked: laptop/home/.config/new/conf") {
 		t.Errorf("kit file add printed\n%s exit %d", out, code)
 	}
 	if w.read(t, ".config/kit/laptop/home/.config/new/conf") != "new\n" || w.linksTo(".config/new/conf") == "" {
 		t.Error("the file isn't in kit-config, linked back")
+	}
+}
+
+// A file git ignores is refused, as check-ignore names the rule, nothing
+// moved and nothing committed.
+func TestAddFileGitIgnores(t *testing.T) {
+	w := filesWorld(t)
+	w.write(t, ".config/new/lib.jar", "jar\n")
+	w.fake.On("git", "-C", filepath.Join(w.home, ".config", "kit"), "check-ignore", "--verbose", "--stdin", "-z").
+		Prints(w.home + "/.gitignore_global\x002\x00*.jar\x00laptop/home/.config/new/lib.jar\x00")
+	out, _, code := w.run(t, "file", "add", filepath.Join(w.home, ".config/new/lib.jar"))
+	if code != 1 || !strings.Contains(out, "git ignores ~/.config/new/lib.jar, by *.jar in ~/.gitignore_global, line 2: kit-config can't keep it") || !strings.Contains(out, "kit-config ok nothing changed") {
+		t.Errorf("kit file add printed\n%s exit %d", out, code)
+	}
+	if w.linksTo(".config/new/lib.jar") != "" || w.read(t, ".config/kit/laptop/home/.config/new/lib.jar") != "" {
+		t.Error("the file was moved into kit-config")
 	}
 }
 
@@ -120,7 +141,11 @@ func TestRemoveAFileEveryMacLinksNeedsShared(t *testing.T) {
 	if code == 0 || !strings.Contains(out, "linked on every Mac, from shared/home/.zshrc: --shared takes it out of every Mac's") {
 		t.Errorf("kit file remove printed\n%s exit %d", out, code)
 	}
-	w.expectSync([]string{"shared/home/.zshrc"}, "kit file remove ~/.zshrc (laptop)")
+	w.expectCommit(t, commit{
+		message: "kit file remove ~/.zshrc (laptop)", paths: []string{"shared/home/.zshrc"},
+		status: " D shared/home/.zshrc\x00", update: []string{"shared/home/.zshrc"},
+		staged: "shared/home/.zshrc\x00", commit: []string{"shared/home/.zshrc"},
+	})
 	out, _, code = w.run(t, "file", "remove", "~/.zshrc", "--shared")
 	if code != 0 || w.linksTo(".zshrc") != "" || w.read(t, ".zshrc") != "zsh\n" {
 		t.Errorf("kit file remove --shared printed\n%s exit %d; want a copy back in place of the link", out, code)

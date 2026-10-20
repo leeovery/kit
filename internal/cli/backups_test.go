@@ -158,7 +158,7 @@ func TestBackupToolsInKitsOrder(t *testing.T) {
 // what isn't a step is refused.
 func TestBackupAddAndRemove(t *testing.T) {
 	w := laptopWorld(t)
-	w.expectSync([]string{"laptop/declarations"}, "kit backup add arq (laptop): offsite")
+	w.expectSync(t, []string{"laptop/declarations"}, "kit backup add arq (laptop): offsite")
 	out, errOut, code := w.run(t, "backup", "add", "arq", "--after", "cask:arq", "--before", "config", "--note", "offsite")
 	if code != 0 || !strings.Contains(out, "arq ok declared in laptop\n") {
 		t.Fatalf("kit backup add printed\n%s%s exit %d", out, errOut, code)
@@ -166,7 +166,7 @@ func TestBackupAddAndRemove(t *testing.T) {
 	if got := w.readSection(t, "laptop", "backups"); got != "arq --after cask:arq --before config   # offsite\n" {
 		t.Errorf("[backups] = %q", got)
 	}
-	w.expectSync([]string{"shared/declarations"}, "kit backup add time-machine (laptop)")
+	w.expectSync(t, []string{"shared/declarations"}, "kit backup add time-machine (laptop)")
 	if out, errOut, code := w.run(t, "backup", "add", "time-machine", "--shared"); code != 0 || !strings.Contains(out, "time-machine ok declared in shared\n") {
 		t.Fatalf("kit backup add --shared printed\n%s%s exit %d", out, errOut, code)
 	}
@@ -202,7 +202,7 @@ func TestBackupAddAndRemove(t *testing.T) {
 			t.Errorf("%s's [backups] = %q, want it untouched", scope, got)
 		}
 	}
-	w.expectSync([]string{"laptop/declarations", "shared/declarations", "studio/declarations"}, "kit backup add arq (laptop)")
+	w.expectSync(t, []string{"laptop/declarations", "shared/declarations", "studio/declarations"}, "kit backup add arq (laptop)")
 	if out, errOut, code := w.run(t, "backup", "add", "arq", "--shared", "--before", "config", "--after", "cask:arq"); code != 0 || !strings.Contains(out, "arq ok declared in shared, out of laptop and studio\n") {
 		t.Fatalf("kit backup add --shared, declared by Macs, printed\n%s%s exit %d", out, errOut, code)
 	}
@@ -222,7 +222,7 @@ func TestBackupAddAndRemove(t *testing.T) {
 		t.Errorf("kit backup add arq --after nothing printed\n%s exit %d", out, code)
 	}
 	w.writeSection(t, "laptop", "backups", "arq\n")
-	w.expectSync([]string{"laptop/declarations"}, "kit backup remove arq (laptop)")
+	w.expectSync(t, []string{"laptop/declarations"}, "kit backup remove arq (laptop)")
 	if out, errOut, code := w.run(t, "backup", "remove", "arq"); code != 0 || !strings.Contains(out, "arq ok out of laptop\n") {
 		t.Fatalf("kit backup remove printed\n%s%s exit %d", out, errOut, code)
 	}

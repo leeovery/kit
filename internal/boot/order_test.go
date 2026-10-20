@@ -252,7 +252,7 @@ func TestKitConfig(t *testing.T) {
 	})
 	run.On("security", "delete-generic-password", "-s", keychainItem)
 	run.On("git", "-C", b.Config, "config", "credential.https://github.com.helper", "!gh auth git-credential")
-	run.On("git", "-C", b.Config, "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "shared/home").Prints("shared/home/.zshrc\x00")
+	run.On("git", "-C", b.Config, "--literal-pathspecs", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "shared/home").Prints("shared/home/.zshrc\x00")
 	step := b.configStep()
 	if res := step.Check(context.Background()); res.State != check.Attention || res.Summary != "not cloned yet" {
 		t.Fatalf("check before = %+v", res)

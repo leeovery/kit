@@ -69,7 +69,7 @@ func (m *mac) keeps(paths ...string) {
 			folders = append(folders, scope+"/home")
 		}
 	}
-	args := append([]string{"-C", m.repo, "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--"}, folders...)
+	args := append([]string{"-C", m.repo, "--literal-pathspecs", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--"}, folders...)
 	m.fake.On("git", args...).Prints(strings.Join(paths, "\x00") + "\x00")
 }
 
@@ -257,6 +257,7 @@ func TestAddMovesFilesIntoKitConfig(t *testing.T) {
 	m.write(".config/tool/.DS_Store", "x", 0o644)
 	m.write(".zshrc", "zsh\n", 0o644)
 	m.keeps()
+	m.fake.On("git", "-C", m.repo, "check-ignore", "--verbose", "--stdin", "-z").Exits(1)
 
 	links, err := m.files.Add(t.Context(), filepath.Join(m.home, ".config/tool"), "laptop")
 	if err != nil {
@@ -284,6 +285,38 @@ func TestAddMovesFilesIntoKitConfig(t *testing.T) {
 	} {
 		if _, err := m.files.Add(t.Context(), filepath.Join(m.home, path), "laptop"); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("Add(%s) = %v, want it refused: %s", path, err, want)
+		}
+	}
+}
+
+// A file git ignores, by kit-config's rules or the user's own, is refused
+// before anything moves, naming the rule: kit-config could never keep it.
+// What check-ignore prints is what real git does.
+func TestAddRefusesAFileGitIgnores(t *testing.T) {
+	for _, c := range []struct {
+		name, prints, want string
+	}{
+		{"the user's own rule", "HOME/.gitignore_global\x003\x00*.jar\x00laptop/home/.config/tool/lib.jar\x00",
+			"git ignores ~/.config/tool/lib.jar, by *.jar in ~/.gitignore_global, line 3: kit-config can't keep it"},
+		{"kit-config's own rule", ".gitignore\x001\x00*.jar\x00laptop/home/.config/tool/lib.jar\x00",
+			"git ignores ~/.config/tool/lib.jar, by *.jar in kit-config's .gitignore, line 1: kit-config can't keep it"},
+	} {
+		m := newMac(t)
+		m.write(".config/tool/config", "tool\n", 0o600)
+		m.write(".config/tool/lib.jar", "jar\n", 0o644)
+		m.keeps()
+		m.fake.On("git", "-C", m.repo, "check-ignore", "--verbose", "--stdin", "-z").Prints(strings.ReplaceAll(c.prints, "HOME", m.home))
+		if _, err := m.files.Add(t.Context(), filepath.Join(m.home, ".config/tool"), "laptop"); err == nil || err.Error() != c.want {
+			t.Errorf("%s: Add() = %v, want %q", c.name, err, c.want)
+		}
+		if in := m.fake.Commands()[len(m.fake.Commands())-1].Input; in != "laptop/home/.config/tool/config\x00laptop/home/.config/tool/lib.jar\x00" {
+			t.Errorf("%s: check-ignore read %q", c.name, in)
+		}
+		if m.target(".config/tool/config") != "" {
+			t.Errorf("%s: the file git doesn't ignore was linked; want nothing moved", c.name)
+		}
+		if _, err := os.Stat(filepath.Join(m.repo, "laptop")); !os.IsNotExist(err) {
+			t.Errorf("%s: kit-config holds laptop/: %v; want nothing moved", c.name, err)
 		}
 	}
 }

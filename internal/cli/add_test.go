@@ -14,7 +14,7 @@ func TestAddInstallsAndDeclares(t *testing.T) {
 	w := laptopWorld(t)
 	w.fake.On("brew", "update", "--quiet")
 	w.fake.On("brew", "install", "--formula", "hello")
-	w.expectSync([]string{"laptop/declarations"}, "kit brew add hello (laptop): a test")
+	w.expectSync(t, []string{"laptop/declarations"}, "kit brew add hello (laptop): a test")
 
 	out, errOut, code := w.run(t, "brew", "add", "hello", "--note", "a test")
 	want := "kit brew add hello · laptop\nhello ok installed; declared in laptop\nkit-config ok committed and pushed laptop/declarations\nNothing needs attention\n"
@@ -34,7 +34,7 @@ func TestAddAsksNothing(t *testing.T) {
 	w.writeSection(t, "laptop", "homebrew formulae", "# Shell\nbat\n\n# Go\ngo\n")
 	w.fake.On("brew", "update", "--quiet")
 	w.fake.On("brew", "install", "--formula", "golangci-lint")
-	w.expectSync([]string{"laptop/declarations"}, "kit brew add golangci-lint (laptop)")
+	w.expectSync(t, []string{"laptop/declarations"}, "kit brew add golangci-lint (laptop)")
 
 	if _, errOut, code := w.run(t, "brew", "add", "golangci-lint"); code != 0 {
 		t.Fatalf("kit exit add %d: %s", code, errOut)
@@ -70,7 +70,7 @@ func TestAddHasNoGroups(t *testing.T) {
 func TestAddSharedMovesItOutOfTheMacsFiles(t *testing.T) {
 	w := laptopWorld(t)
 	w.writeSection(t, "studio", "homebrew formulae", "ffmpeg\ngo\n")
-	w.expectSync([]string{"laptop/declarations", "shared/declarations", "studio/declarations"}, "kit brew add go (laptop)")
+	w.expectSync(t, []string{"laptop/declarations", "shared/declarations", "studio/declarations"}, "kit brew add go (laptop)")
 
 	out, errOut, code := w.run(t, "brew", "add", "go", "--shared")
 	if !strings.Contains(out, "go ok already installed; declared in shared, out of laptop and studio\n") || code != 0 {
@@ -139,7 +139,7 @@ func TestAddAnUnknownKind(t *testing.T) {
 func TestRemoveUninstallsAndUndeclares(t *testing.T) {
 	w := laptopWorld(t)
 	w.fake.On("brew", "uninstall", "--formula", "go")
-	w.expectSync([]string{"laptop/declarations"}, "kit brew remove go (laptop)")
+	w.expectSync(t, []string{"laptop/declarations"}, "kit brew remove go (laptop)")
 	out, errOut, code := w.run(t, "brew", "remove", "go")
 	if !strings.Contains(out, "go ok uninstalled; out of laptop\n") || code != 0 {
 		t.Errorf("kit printed remove\n%s%s exit %d", out, errOut, code)
@@ -153,7 +153,7 @@ func TestRemoveUninstallsAndUndeclares(t *testing.T) {
 func TestRemoveAsRm(t *testing.T) {
 	w := laptopWorld(t)
 	w.fake.On("brew", "uninstall", "--formula", "go")
-	w.expectSync([]string{"laptop/declarations"}, "kit brew remove go (laptop)")
+	w.expectSync(t, []string{"laptop/declarations"}, "kit brew remove go (laptop)")
 	if out, errOut, code := w.run(t, "brew", "rm", "go"); !strings.Contains(out, "go ok uninstalled; out of laptop\n") || code != 0 {
 		t.Errorf("kit brew rm go printed\n%s%s exit %d", out, errOut, code)
 	}
@@ -169,7 +169,7 @@ func TestRemoveAtATerminalAsksForThePasswordFirst(t *testing.T) {
 	w.fake.On("brew", "info", "--json=v2", "--cask", "zoom").Prints(zoomInfo)
 	w.expectPassword()
 	w.fake.On("brew", "uninstall", "--cask", "zoom")
-	w.expectSync([]string{"laptop/declarations"}, "kit cask remove zoom (laptop)")
+	w.expectSync(t, []string{"laptop/declarations"}, "kit cask remove zoom (laptop)")
 	if _, errOut, code := w.run(t, "cask", "rm", "zoom"); code != 0 {
 		t.Fatalf("kit cask rm zoom: exit %d, %s", code, errOut)
 	}
@@ -197,7 +197,7 @@ func TestRemoveFromEveryMacNeedsShared(t *testing.T) {
 	}
 
 	w.fake.On("brew", "uninstall", "--formula", "jq")
-	w.expectSync([]string{"shared/declarations"}, "kit brew remove jq (laptop)")
+	w.expectSync(t, []string{"shared/declarations"}, "kit brew remove jq (laptop)")
 	out, _, code = w.run(t, "brew", "remove", "jq", "--shared")
 	if !strings.Contains(out, "jq ok uninstalled; out of shared\n") || code != 0 {
 		t.Errorf("kit remove --shared printed\n%s exit %d", out, code)
@@ -245,7 +245,7 @@ func TestAddAtATerminalAsksForThePasswordFirst(t *testing.T) {
 	w.expectPassword()
 	w.fake.On("brew", "update", "--quiet")
 	w.fake.On("brew", "install", "--cask", "zoom")
-	w.expectSync([]string{"laptop/declarations"}, "kit cask add zoom (laptop)")
+	w.expectSync(t, []string{"laptop/declarations"}, "kit cask add zoom (laptop)")
 
 	out, errOut, code := w.run(t, "cask", "add", "zoom")
 	if code != 0 {
@@ -271,7 +271,7 @@ func TestAddSharedRefusedFailsAlone(t *testing.T) {
 		w.writeSection(t, "studio", "homebrew formulae", "hello   # for work\n")
 		w.fake.On("brew", "update", "--quiet")
 		w.fake.On("brew", "install", "--formula", "ripgrep")
-		w.expectSync([]string{"shared/declarations"}, "kit brew add ripgrep (laptop)")
+		w.expectSync(t, []string{"shared/declarations"}, "kit brew add ripgrep (laptop)")
 		args := []string{"brew", "add", "hello", "ripgrep", "--shared"}
 		if asJSON {
 			args = append(args, "--json")
@@ -309,7 +309,7 @@ func TestAddSharedRefusedAsksNoPassword(t *testing.T) {
 	w.fake.On("brew", "info", "--json=v2", "--cask", "iterm2").Prints(`{"formulae": [], "casks": [{"token": "iterm2", "full_token": "iterm2", "old_tokens": [], "artifacts": [{"app": ["iTerm.app"]}]}]}`)
 	w.fake.On("brew", "update", "--quiet")
 	w.fake.On("brew", "install", "--cask", "iterm2")
-	w.expectSync([]string{"shared/declarations"}, "kit cask add iterm2 (laptop)")
+	w.expectSync(t, []string{"shared/declarations"}, "kit cask add iterm2 (laptop)")
 	out, errOut, code := w.run(t, "cask", "add", "zoom", "iterm2", "--shared")
 	if out = ansi.Strip(out); code != 1 || !strings.Contains(out, "✗ zoom  couldn't declare") || !strings.Contains(out, "● iterm2  installed · declared in shared") {
 		t.Errorf("kit cask add zoom iterm2 --shared printed\n%s%s exit %d", out, errOut, code)
@@ -329,7 +329,7 @@ func TestAddANameGivenTwice(t *testing.T) {
 	w := laptopWorld(t)
 	w.fake.On("brew", "update", "--quiet")
 	w.fake.On("brew", "install", "--formula", "ripgrep")
-	w.expectSync([]string{"laptop/declarations"}, "kit brew add ripgrep (laptop)")
+	w.expectSync(t, []string{"laptop/declarations"}, "kit brew add ripgrep (laptop)")
 	out, errOut, code := w.run(t, "brew", "add", "ripgrep", "ripgrep")
 	if code != 0 || strings.Count(out, "ripgrep ok") != 1 {
 		t.Errorf("kit brew add ripgrep ripgrep printed\n%s%s exit %d; want it added once", out, errOut, code)
@@ -339,15 +339,17 @@ func TestAddANameGivenTwice(t *testing.T) {
 	}
 }
 
-// The commit names what was added: not a name whose install failed.
+// The commit names what was declared: not a name whose install failed, nor
+// one installed and declared already.
 func TestAddCommitsWhatWasAdded(t *testing.T) {
 	w := laptopWorld(t)
 	w.fake.On("brew", "update", "--quiet")
 	w.fake.On("brew", "install", "--formula", "nosuch").Exits(1).PrintsToStderr(`Error: No available formula with the name "nosuch".`)
 	w.fake.On("brew", "install", "--formula", "ripgrep")
-	w.expectSync([]string{"laptop/declarations"}, "kit brew add ripgrep (laptop)")
-	if out, errOut, code := w.run(t, "brew", "add", "nosuch", "ripgrep"); code != 1 || !strings.Contains(out, "kit-config ok committed and pushed") {
-		t.Errorf("kit brew add nosuch ripgrep printed\n%s%s exit %d", out, errOut, code)
+	w.expectSync(t, []string{"laptop/declarations"}, "kit brew add ripgrep (laptop)")
+	out, errOut, code := w.run(t, "brew", "add", "nosuch", "jq", "ripgrep")
+	if code != 1 || !strings.Contains(out, "jq ok already installed; declared already, in shared") || !strings.Contains(out, "kit-config ok committed and pushed") {
+		t.Errorf("kit brew add nosuch jq ripgrep printed\n%s%s exit %d", out, errOut, code)
 	}
 }
 

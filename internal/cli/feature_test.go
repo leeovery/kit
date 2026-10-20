@@ -36,7 +36,7 @@ func TestFeaturesBringTheirSteps(t *testing.T) {
 
 func TestFeatureOnAndOff(t *testing.T) {
 	w := laptopWorld(t)
-	w.expectSync([]string{"laptop/declarations"}, "kit feature on remote-login (laptop)")
+	w.expectSync(t, []string{"laptop/declarations"}, "kit feature on remote-login (laptop)")
 	out, errOut, code := w.run(t, "feature", "on", "remote-login")
 	if code != 0 || !strings.Contains(out, "remote-login ok on, in laptop\n") {
 		t.Fatalf("kit feature on printed\n%s%s exit %d", out, errOut, code)
@@ -44,7 +44,7 @@ func TestFeatureOnAndOff(t *testing.T) {
 	if got := w.readSection(t, "laptop", "features"); got != "remote-login\n" {
 		t.Errorf("[features] = %q", got)
 	}
-	w.expectSync([]string{"laptop/declarations"}, "kit feature off remote-login (laptop)")
+	w.expectSync(t, []string{"laptop/declarations"}, "kit feature off remote-login (laptop)")
 	if _, errOut, code := w.run(t, "feature", "off", "remote-login"); code != 0 {
 		t.Fatalf("kit feature off: %s exit %d", errOut, code)
 	}

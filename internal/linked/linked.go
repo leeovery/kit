@@ -520,6 +520,9 @@ func (f *Files) Add(ctx context.Context, path, scope string) ([]Link, error) {
 		}
 		links = append(links, l)
 	}
+	if err := f.notIgnored(ctx, links); err != nil {
+		return nil, err
+	}
 	for _, l := range links {
 		data, err := os.ReadFile(l.Dst)
 		if err != nil {
@@ -540,6 +543,30 @@ func (f *Files) Add(ctx context.Context, path, scope string) ([]Link, error) {
 		}
 	}
 	return links, f.remember(append(declared, links...))
+}
+
+// notIgnored refuses the first of links whose file git ignores, by the
+// repository's rules or the user's own, naming the rule: kit-config could
+// never keep it.
+func (f *Files) notIgnored(ctx context.Context, links []Link) error {
+	paths := make([]string, len(links))
+	for i, l := range links {
+		paths[i] = l.Path
+	}
+	ignored, err := f.Repo.Ignored(ctx, paths...)
+	if err != nil {
+		return fmt.Errorf("couldn't ask git whether it ignores them: %w", err)
+	}
+	for _, l := range links {
+		if rule, ok := ignored[l.Path]; ok {
+			in := f.Tilde(rule.Source)
+			if !filepath.IsAbs(rule.Source) {
+				in = "kit-config's " + rule.Source
+			}
+			return fmt.Errorf("git ignores %s, by %s in %s, line %d: kit-config can't keep it", l.Name, rule.Pattern, in, rule.Line)
+		}
+	}
+	return nil
 }
 
 // Remove puts a copy of the repository's file back where the link at name

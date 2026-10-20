@@ -349,7 +349,10 @@ step did.
 
 **The config repository's own edits** are drift, not a problem: linked files mean edits
 land in the repository outside kit (through a link, by hand, by an app), and kit commits only
-its own changes. The `config` step makes each file changed and not committed an item
+its own changes: the paths it changed, each whole as it is on disk (a rename's two sides, a
+deletion, a new folder's every file), never anything else staged, whatever the user's git
+config says; what git can't keep (an ignored file, an empty folder) is left out, and with
+nothing left to commit it says nothing changed and pushes nothing. The `config` step makes each file changed and not committed an item
 (`config:shared/home/.zshrc`, edited, added or deleted, with the lines it adds and removes),
 quiet for a day as drift is; `kit reconcile` shows an edit's diff and offers adopt (commit it,
 then push, `--note` the message's end), revert (back to the last commit; a new file to the
@@ -670,8 +673,10 @@ is refused. The step `file` finds each one:
   and in every folder a home folder mirrors); applying removes it.
 
 `kit file add <path>` moves a file, or every file in a folder, into this Mac's home folder
-(`--shared`: every Mac's) and links it back; `kit file remove <path>` puts a copy back in
-place of the link and takes the file out. Both commit and push.
+(`--shared`: every Mac's) and links it back, refusing a file git ignores (kit-config's rules
+or the user's global ones), naming the rule, as kit-config could never keep it; `kit file
+remove <path>` puts a copy back in place of the link and takes the file out. Both commit and
+push.
 
 ### kit's PATH, and the shell's
 

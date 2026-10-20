@@ -44,11 +44,15 @@ func newWorld(t *testing.T, lists prefs.Lists) *world {
 	return w
 }
 
-// pushes scripts a private remote taking the commit made with message.
-func (w *world) pushes(message string) {
-	w.fake.On("git", "-C", w.clone, "status", "--porcelain", "--", "laptop").Prints(" M laptop\n")
-	w.fake.On("git", "-C", w.clone, "add", "--", "laptop")
-	w.fake.On("git", "-C", w.clone, "commit", "--quiet", "-m", message, "--", "laptop")
+// pushes scripts the commit of the Mac's folder with message, git's
+// status of it being status (-z), each file of which kit stages (update),
+// what's staged of it then being staged (-z), as real git prints them; and
+// a private remote taking it.
+func (w *world) pushes(message, status string, update []string, staged string) {
+	w.fake.On("git", "-C", w.clone, "--literal-pathspecs", "status", "--porcelain", "-z", "--untracked-files=all", "--no-renames", "--", "laptop").Prints(status)
+	w.fake.On("git", slices.Concat([]string{"-C", w.clone, "update-index", "--add", "--remove", "--"}, update)...)
+	w.fake.On("git", "-C", w.clone, "--literal-pathspecs", "diff", "--cached", "--name-only", "-z", "--no-renames", "--", "laptop").Prints(staged)
+	w.fake.On("git", "-C", w.clone, "--literal-pathspecs", "commit", "--quiet", "-m", message, "--", "laptop")
 	w.fake.On("git", "-C", w.clone, "remote", "get-url", "origin").Prints(remote + "\n")
 	w.fake.On("gh", "repo", "view", "someone/prefs", "--json", "visibility", "--jq", ".visibility").Prints("PRIVATE\n")
 	w.fake.On("git", "-C", w.clone, "remote").Prints("origin\n")
@@ -140,11 +144,26 @@ removed: domains/com.example.empty.plist
 removed: domains/com.example.gone.plist
 removed: files/.config/dropped.json
 claimed: the folder, for this Mac's hardware`
-	w.pushes(message)
+	// The store's files from before were committed then.
+	w.pushes(message,
+		" D laptop/domains/com.example.empty.plist\x00 D laptop/domains/com.example.gone.plist\x00 D laptop/files/.config/dropped.json\x00"+
+			"?? laptop/.gitignore\x00?? laptop/domains/com.example.app.plist\x00?? laptop/files/.config/folder/deeper/two.txt\x00?? laptop/files/.config/folder/one.txt\x00"+
+			"?? laptop/files/.config/tool/settings.json\x00?? laptop/files/Library/Tool/App2026.1/options/ui.xml\x00?? laptop/files/Library/Tool/App2026.2/options/ui.xml\x00?? laptop/owner\x00",
+		[]string{
+			"laptop/domains/com.example.empty.plist", "laptop/domains/com.example.gone.plist", "laptop/files/.config/dropped.json",
+			"laptop/.gitignore", "laptop/domains/com.example.app.plist", "laptop/files/.config/folder/deeper/two.txt", "laptop/files/.config/folder/one.txt",
+			"laptop/files/.config/tool/settings.json", "laptop/files/Library/Tool/App2026.1/options/ui.xml", "laptop/files/Library/Tool/App2026.2/options/ui.xml", "laptop/owner",
+		},
+		"laptop/.gitignore\x00laptop/domains/com.example.app.plist\x00laptop/domains/com.example.empty.plist\x00laptop/domains/com.example.gone.plist\x00laptop/files/.config/dropped.json\x00"+
+			"laptop/files/.config/folder/deeper/two.txt\x00laptop/files/.config/folder/one.txt\x00laptop/files/.config/tool/settings.json\x00"+
+			"laptop/files/Library/Tool/App2026.1/options/ui.xml\x00laptop/files/Library/Tool/App2026.2/options/ui.xml\x00laptop/owner\x00")
 
 	report, err := w.p.Capture(t.Context())
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !report.Committed {
+		t.Error("the capture wasn't committed")
 	}
 	if got, want := report.Summary(), "2 domains, 1 changed (1 new); 5 files, 5 changed (5 new); 3 removed; 3 pending restore; 1 errors"; got != want {
 		t.Errorf("Summary() = %q, want %q", got, want)
@@ -246,7 +265,10 @@ func TestCaptureNeverPushesToAPublicStore(t *testing.T) {
 	writeRecord(t, w.state, `{"on": "started fresh"}`)
 	w.fake.On("defaults", "domains").Prints("com.example.app\n")
 	w.exports(t, "com.example.app", map[string]any{"Theme": "dark"})
-	w.pushes("Capture 2026-10-06 03:00: 1 new\n\nnew: com.example.app\nclaimed: the folder, for this Mac's hardware")
+	w.pushes("Capture 2026-10-06 03:00: 1 new\n\nnew: com.example.app\nclaimed: the folder, for this Mac's hardware",
+		"?? laptop/.gitignore\x00?? laptop/domains/com.example.app.plist\x00?? laptop/owner\x00",
+		[]string{"laptop/.gitignore", "laptop/domains/com.example.app.plist", "laptop/owner"},
+		"laptop/.gitignore\x00laptop/domains/com.example.app.plist\x00laptop/owner\x00")
 	w.fake.On("gh", "repo", "view", "someone/prefs", "--json", "visibility", "--jq", ".visibility").Prints("PUBLIC\n")
 	report, err := w.p.Capture(t.Context())
 	if err != nil || !strings.Contains(report.PushError, "someone/prefs is public on GitHub: kit pushes apps' settings only to a private repository") {
@@ -271,7 +293,10 @@ func TestPatterns(t *testing.T) {
 	w.fake.On("defaults", "domains").Prints("jetbrains.ps.262.csat, jetbrains.csat, a.x.c, a.b.c\n")
 	w.exports(t, "jetbrains.csat", map[string]any{"a": true})
 	w.exports(t, "a.b.c", map[string]any{"a": true})
-	w.pushes("Capture 2026-10-06 03:00: 3 new\n\nnew: a.b.c\nnew: jetbrains.csat\nnew: ~/Tool/App2026.2/opts/x\nclaimed: the folder, for this Mac's hardware")
+	w.pushes("Capture 2026-10-06 03:00: 3 new\n\nnew: a.b.c\nnew: jetbrains.csat\nnew: ~/Tool/App2026.2/opts/x\nclaimed: the folder, for this Mac's hardware",
+		"?? laptop/.gitignore\x00?? laptop/domains/a.b.c.plist\x00?? laptop/domains/jetbrains.csat.plist\x00?? laptop/files/Tool/App2026.2/opts/x\x00?? laptop/owner\x00",
+		[]string{"laptop/.gitignore", "laptop/domains/a.b.c.plist", "laptop/domains/jetbrains.csat.plist", "laptop/files/Tool/App2026.2/opts/x", "laptop/owner"},
+		"laptop/.gitignore\x00laptop/domains/a.b.c.plist\x00laptop/domains/jetbrains.csat.plist\x00laptop/files/Tool/App2026.2/opts/x\x00laptop/owner\x00")
 	if report, err := w.p.Capture(t.Context()); err != nil || report.Domains != 2 || report.Files != 1 {
 		t.Errorf("Capture() = %+v, %v", report, err)
 	}

@@ -90,17 +90,22 @@ func (c *changes) changed(file string) {
 }
 
 // sync commits the config's changed files with message, and pushes, as the
-// last step: nothing to do when nothing changed.
+// last step: nothing to do when nothing changed, the files as committed.
 func (c *changes) sync(ctx context.Context, message string) {
 	c.step(ctx, syncStep, func(ctx context.Context) check.Result {
+		nothing := check.Result{State: check.OK, Summary: "nothing changed"}
 		if len(c.files) == 0 {
-			return check.Result{State: check.OK, Summary: "nothing changed"}
+			return nothing
 		}
 		slices.Sort(c.files)
-		if _, err := c.run.repo.Commit(ctx, message, c.files...); err != nil {
+		committed, err := c.run.repo.Commit(ctx, message, c.files...)
+		if err != nil {
 			return check.Result{State: check.Failed, Reason: "couldn't commit " + strings.Join(c.files, ", ") + ": " + err.Error()}
 		}
-		err := c.run.repo.Push(ctx)
+		if !committed {
+			return nothing
+		}
+		err = c.run.repo.Push(ctx)
 		switch {
 		case errors.Is(err, gitrepo.ErrNoRemote):
 			return check.Result{State: check.OK, Summary: "committed; no remote to push to"}

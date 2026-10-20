@@ -243,13 +243,18 @@ func readDeclared(e config.Entry) (declaredValue, error) {
 }
 
 // writable says why defaults write wouldn't take v, read from a line's XML:
-// nil when it would. Nothing it knows (an element defaults has no type for)
-// and a date finer than the second, it refuses.
+// nil when it would. Nothing it knows (an element defaults has no type for),
+// a date with an offset, +00:00 too, and one finer than the second, it
+// refuses: it takes a date only as 2026-01-01T00:00:00Z.
 func writable(v any) error {
 	switch x := v.(type) {
 	case nil:
 		return errors.New("its XML holds something defaults write doesn't take: a value is a dict, array, string, integer, real, date, data, true or false")
 	case time.Time:
+		// A date read with an offset is never in time.UTC, whatever the offset.
+		if x.Location() != time.UTC {
+			return fmt.Errorf("its date, %s, has an offset, which defaults write doesn't take: the same time is %s", x.Format("2006-01-02T15:04:05.999999999-07:00"), x.UTC().Format(time.RFC3339Nano))
+		}
 		if x.Nanosecond() != 0 {
 			return fmt.Errorf("its date, %s, is finer than the second, which defaults write doesn't take", x.Format(time.RFC3339Nano))
 		}
@@ -429,6 +434,10 @@ func (d *Defaults) changed(l look, rec *record) []string {
 				delete(rec.Baseline, name)
 				continue
 			}
+			if now[name] != was && takenTrimmed(was, now[name]) {
+				rec.Baseline[name] = now[name]
+				continue
+			}
 			if now[name] != was && !d.isDeclared(name) {
 				names = append(names, name)
 			}
@@ -441,6 +450,40 @@ func (d *Defaults) changed(l look, rec *record) []string {
 	}
 	slices.Sort(names)
 	return slices.Compact(names)
+}
+
+// takenTrimmed reports whether was, a value kit took, could have been taken
+// before kit read a string's outer spaces and a key's exactly, holding none,
+// and is, the value now, read that way, as it was: then it's no change.
+func takenTrimmed(was, is string) bool {
+	wasV, err := plist.ReadValue(was)
+	if err != nil {
+		return false
+	}
+	isV, err := plist.ReadValue(is)
+	return err == nil && plist.Equal(wasV, trimmed(wasV)) && plist.Equal(wasV, trimmed(isV))
+}
+
+// trimmed is v as kit read it before it kept a string's outer spaces and a
+// key's: each trimmed.
+func trimmed(v any) any {
+	switch x := v.(type) {
+	case string:
+		return strings.TrimSpace(x)
+	case []any:
+		out := make([]any, len(x))
+		for i, item := range x {
+			out[i] = trimmed(item)
+		}
+		return out
+	case map[string]any:
+		out := make(map[string]any, len(x))
+		for k, item := range x {
+			out[strings.TrimSpace(k)] = trimmed(item)
+		}
+		return out
+	}
+	return v
 }
 
 // firstKey is a setting's key, without a dict entry's key after it.

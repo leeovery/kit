@@ -105,7 +105,11 @@ func TestAStepWaitsForThePassword(t *testing.T) {
 
 func TestAddAndRemoveAStep(t *testing.T) {
 	w := laptopWorld(t)
-	w.expectSync([]string{"laptop/declarations", "laptop/steps/tool"}, "kit step add tool (laptop): from its maker")
+	w.expectCommit(t, commit{
+		message: "kit step add tool (laptop): from its maker", paths: []string{"laptop/declarations", "laptop/steps/tool"},
+		status: " M laptop/declarations\x00?? laptop/steps/tool/run\x00", update: []string{"laptop/declarations", "laptop/steps/tool/run"},
+		staged: "laptop/declarations\x00laptop/steps/tool/run\x00", commit: []string{"laptop/declarations", "laptop/steps/tool"},
+	})
 	out, _, code := w.run(t, "step", "add", "tool", "Installs the tool, from its maker", "--after", "brew", "--sudo", "--note", "from its maker")
 	if code != 0 || !strings.Contains(out, "tool ok declared in laptop; its script, laptop/steps/tool/run, is a template: write its check and apply") {
 		t.Errorf("kit step add printed\n%s exit %d", out, code)
@@ -132,7 +136,11 @@ func TestAddAndRemoveAStep(t *testing.T) {
 			t.Errorf("kit step add %q printed\n%s exit %d, want %q", tc.args, out, code, tc.want)
 		}
 	}
-	w.expectSync([]string{"laptop/declarations", "laptop/steps/tool"}, "kit step remove tool (laptop)")
+	w.expectCommit(t, commit{
+		message: "kit step remove tool (laptop)", paths: []string{"laptop/declarations", "laptop/steps/tool"},
+		status: " M laptop/declarations\x00 D laptop/steps/tool/run\x00", update: []string{"laptop/declarations", "laptop/steps/tool/run"},
+		staged: "laptop/declarations\x00laptop/steps/tool/run\x00", commit: []string{"laptop/declarations", "laptop/steps/tool"},
+	})
 	if out, _, code := w.run(t, "step", "remove", "tool"); code != 0 || w.readSection(t, "laptop", "steps") != "" {
 		t.Errorf("kit step remove printed\n%s exit %d", out, code)
 	}
@@ -162,7 +170,14 @@ func TestAddAStepSharedMovesItsFolder(t *testing.T) {
 		return w
 	}
 	w := setUp(t, "#!/bin/bash\n", "")
-	w.expectSync([]string{"laptop/declarations", "laptop/steps/tool", "shared/declarations", "shared/steps/tool", "studio/declarations", "studio/steps/tool"}, "kit step add tool (laptop)")
+	all := []string{"laptop/declarations", "laptop/steps/tool", "shared/declarations", "shared/steps/tool", "studio/declarations", "studio/steps/tool"}
+	w.expectCommit(t, commit{
+		message: "kit step add tool (laptop)", paths: all,
+		status: " M laptop/declarations\x00 D laptop/steps/tool/run\x00 M shared/declarations\x00 M studio/declarations\x00 D studio/steps/tool/run\x00?? shared/steps/tool/run\x00",
+		update: []string{"laptop/declarations", "laptop/steps/tool/run", "shared/declarations", "studio/declarations", "studio/steps/tool/run", "shared/steps/tool/run"},
+		staged: "laptop/declarations\x00laptop/steps/tool/run\x00shared/declarations\x00shared/steps/tool/run\x00studio/declarations\x00studio/steps/tool/run\x00",
+		commit: all,
+	})
 	out, errOut, code := w.run(t, "step", "add", "tool", "Installs the tool", "--after", "brew", "--shared")
 	if code != 0 || !strings.Contains(out, "tool ok declared in shared, out of laptop and studio; its folder moved from laptop/steps/tool and studio/steps/tool") {
 		t.Fatalf("kit step add --shared printed\n%s%s exit %d", out, errOut, code)
@@ -185,17 +200,13 @@ func TestAddAStepSharedMovesItsFolder(t *testing.T) {
 	// A Mac's folder git never kept is moved, and left out of the commit,
 	// git having nothing of it to take out.
 	w = setUp(t, "#!/bin/bash\n", "")
-	dir := filepath.Join(w.home, ".config", "kit")
-	git := func(args ...string) []string { return append([]string{"-C", dir}, args...) }
-	all := []string{"laptop/declarations", "laptop/steps/tool", "shared/declarations", "shared/steps/tool", "studio/declarations", "studio/steps/tool"}
-	there := []string{"laptop/declarations", "shared/declarations", "shared/steps/tool", "studio/declarations"}
-	kept := []string{"laptop/declarations", "shared/declarations", "shared/steps/tool", "studio/declarations", "studio/steps/tool"}
-	w.fake.On("git", git(append([]string{"status", "--porcelain", "--"}, all...)...)...).Prints(" M laptop/declarations\n M shared/declarations\n?? shared/steps/tool/\n M studio/declarations\n D studio/steps/tool/run\n")
-	w.fake.On("git", git(append([]string{"add", "--"}, there...)...)...)
-	w.fake.On("git", git(append([]string{"commit", "--quiet", "-m", "kit step add tool (laptop)", "--"}, kept...)...)...)
-	w.fake.On("git", git("remote")...).Prints("origin\n")
-	w.fake.On("git", git("pull", "--rebase", "--autostash", "--quiet")...)
-	w.fake.On("git", git("push", "--quiet")...)
+	w.expectCommit(t, commit{
+		message: "kit step add tool (laptop)", paths: all,
+		status: " M laptop/declarations\x00 M shared/declarations\x00 M studio/declarations\x00 D studio/steps/tool/run\x00?? shared/steps/tool/run\x00",
+		update: []string{"laptop/declarations", "shared/declarations", "studio/declarations", "studio/steps/tool/run", "shared/steps/tool/run"},
+		staged: "laptop/declarations\x00shared/declarations\x00shared/steps/tool/run\x00studio/declarations\x00studio/steps/tool/run\x00",
+		commit: []string{"laptop/declarations", "shared/declarations", "shared/steps/tool", "studio/declarations", "studio/steps/tool"},
+	})
 	if out, errOut, code := w.run(t, "step", "add", "tool", "Installs the tool", "--after", "brew", "--shared"); code != 0 || !strings.Contains(out, "kit-config ok committed and pushed") {
 		t.Errorf("kit step add --shared, laptop's folder never committed, printed\n%s%s exit %d", out, errOut, code)
 	}
@@ -236,7 +247,7 @@ func TestAddAStepSharedPutsItsFolderBack(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(studio, 0o700) })
-	w.expectSync([]string{"laptop/declarations", "shared/declarations"}, "kit step add tool (laptop)")
+	w.expectSync(t, []string{"laptop/declarations", "shared/declarations"}, "kit step add tool (laptop)")
 	out, _, code := w.run(t, "step", "add", "tool", "Installs the tool", "--after", "brew", "--shared")
 	if code != 1 || !strings.Contains(out, "tool failed") {
 		t.Errorf("kit step add --shared, studio's file read-only, printed\n%s exit %d; want it failed", out, code)

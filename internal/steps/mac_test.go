@@ -184,21 +184,22 @@ func TestConfigEdits(t *testing.T) {
 	git := func(args ...string) []string { return append([]string{"-C", repo}, args...) }
 
 	fake := runnertest.New(t)
-	fake.On("git", git("status", "--porcelain", "--untracked-files=all")...)
+	status := git("--literal-pathspecs", "status", "--porcelain", "-z", "--untracked-files=all", "--no-renames", "--")
+	fake.On("git", status...)
 	step := steps.ConfigEdits(gitrepo.Repo{Dir: repo, Run: fake})
 	if res := step.Check(t.Context()); res.State != check.OK || res.Summary != "all committed" || step.Area != steps.AreaDrift {
 		t.Errorf("nothing waiting = %s %q in %s", res.State, res.Summary, step.Area)
 	}
 
 	fake = runnertest.New(t)
-	fake.On("git", git("status", "--porcelain", "--untracked-files=all")...).Prints(" M shared/home/.zshrc\n?? notes\n D personal/declarations\n")
-	fake.On("git", git("diff", "--numstat", "HEAD")...).Prints("3\t1\tshared/home/.zshrc\n0\t40\tpersonal/declarations\n")
+	fake.On("git", status...).Prints(" D personal/declarations\x00 M shared/home/.zshrc\x00?? notes\x00")
+	fake.On("git", git("diff", "--numstat", "-z", "--no-renames", "HEAD")...).Prints("0\t40\tpersonal/declarations\x003\t1\tshared/home/.zshrc\x00")
 	res := steps.ConfigEdits(gitrepo.Repo{Dir: repo, Run: fake}).Check(t.Context())
 	var got []string
 	for _, it := range res.Items {
 		got = append(got, it.ID+" "+it.State+" "+it.Detail)
 	}
-	want := []string{"config:shared/home/.zshrc edited +3 −1 lines", "config:notes added +2 −0 lines", "config:personal/declarations deleted +0 −40 lines"}
+	want := []string{"config:personal/declarations deleted +0 −40 lines", "config:shared/home/.zshrc edited +3 −1 lines", "config:notes added +2 −0 lines"}
 	if res.State != check.Attention || res.Summary != "3 files not committed" || !slices.Equal(got, want) {
 		t.Errorf("edits = %s %q %q, want %q", res.State, res.Summary, got, want)
 	}

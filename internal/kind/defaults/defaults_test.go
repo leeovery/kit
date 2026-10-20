@@ -1,6 +1,8 @@
 package defaults_test
 
 import (
+	"encoding/json"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -181,6 +183,25 @@ func TestDeclaredValuesRead(t *testing.T) {
 	}
 }
 
+// defaults write takes a date only to the second, in UTC, ending Z: one
+// with an offset, +00:00 too, or finer than the second, it can't parse, as
+// macOS's own defaults showed.
+func TestADateDefaultsWriteTakes(t *testing.T) {
+	d := defaults.New(runnertest.New(t), t.TempDir())
+	for value, want := range map[string]string{
+		"<date>2026-01-01T00:00:00Z</date>":      "",
+		"<date>2026-01-01T00:00:00+01:00</date>": "its date, 2026-01-01T00:00:00+01:00, has an offset, which defaults write doesn't take: the same time is 2025-12-31T23:00:00Z",
+		"<date>2026-01-01T00:00:00+00:00</date>": "its date, 2026-01-01T00:00:00+00:00, has an offset",
+		"<date>2026-01-01T00:00:00-05:00</date>": "its date, 2026-01-01T00:00:00-05:00, has an offset",
+		"<date>2026-01-01T00:00:00.5Z</date>":    "its date, 2026-01-01T00:00:00.5Z, is finer than the second",
+	} {
+		_, err := d.Values(config.List{Entries: []config.Entry{{Name: "com.apple.dock:x", Value: value, Scope: "shared", Line: 2}}})
+		if want == "" && err != nil || want != "" && (err == nil || !strings.Contains(err.Error(), want)) {
+			t.Errorf("Values(%s) error = %v, want %q", value, err, want)
+		}
+	}
+}
+
 func TestNoiseKitTookBeforeKnowingItIsForgotten(t *testing.T) {
 	m := newMac(t)
 	list := m.declare()
@@ -192,6 +213,47 @@ func TestNoiseKitTookBeforeKnowingItIsForgotten(t *testing.T) {
 	m.set("com.apple.controlcenter", "<key>NSStatusItem Visible WiFi</key><true/>")
 	if got := m.items(list); !slices.Equal(got, []string{"com.apple.controlcenter:NSStatusItem Visible WiFi extra"}) {
 		t.Errorf("items = %q; want the noise forgotten, the new setting found", got)
+	}
+}
+
+// A value kit took before it read a string's outer spaces and a key's
+// exactly is unchanged while it reads the same that way, and is taken again
+// as it is; one taken exactly, or changed, still shows.
+func TestAValueTakenTrimmedIsTakenAgainExactly(t *testing.T) {
+	m := newMac(t)
+	list := m.declare()
+	// kit's record from before: each string and key trimmed, as it read them.
+	record := `{"domains": {"NSGlobalDomain": true}, "baseline": {` +
+		`"NSGlobalDomain:Style": "<string>Dark</string>", ` +
+		`"NSGlobalDomain:Recent": "<dict><key>a</key><array><string>x</string></array></dict>", ` +
+		`"NSGlobalDomain:Exact": "<string>Light&#xA;</string>", ` +
+		`"NSGlobalDomain:Changed": "<string>One</string>"}}`
+	if err := os.WriteFile(filepath.Join(m.state, "settings.json"), []byte(record), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m.set("NSGlobalDomain", "<key>Style</key><string>Dark\n</string>"+
+		"<key>Recent</key><dict><key> a</key><array><string>x </string></array></dict>"+
+		"<key>Exact</key><string>Light</string>"+
+		"<key>Changed</key><string>Two\n</string>")
+	if got, want := m.items(list), []string{"NSGlobalDomain:Changed extra", "NSGlobalDomain:Exact extra"}; !slices.Equal(got, want) {
+		t.Errorf("items = %q, want %q", got, want)
+	}
+	data, err := os.ReadFile(filepath.Join(m.state, "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got struct{ Baseline map[string]string }
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"NSGlobalDomain:Style":   "<string>Dark&#xA;</string>",
+		"NSGlobalDomain:Recent":  "<dict><key> a</key><array><string>x </string></array></dict>",
+		"NSGlobalDomain:Exact":   "<string>Light&#xA;</string>",
+		"NSGlobalDomain:Changed": "<string>One</string>",
+	}
+	if !maps.Equal(got.Baseline, want) {
+		t.Errorf("baseline = %q, want %q", got.Baseline, want)
 	}
 }
 

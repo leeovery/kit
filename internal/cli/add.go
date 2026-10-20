@@ -56,19 +56,20 @@ func (a *app) add(ctx context.Context, r *run, kindName string, names []string, 
 	defer stop()
 	opts.waiting = waitingForAdmin(ctx, r, kindName, missing, held)
 	c := startChanges(r, names)
-	var added []string
+	var declared []string
 	for _, name := range names {
-		res := c.step(ctx, name, func(ctx context.Context) check.Result {
+		c.step(ctx, name, func(ctx context.Context) check.Result {
 			if err := refused[name]; err != nil {
 				return check.Result{State: check.Failed, Reason: "couldn't declare: " + err.Error()}
 			}
-			return installAndDeclare(ctx, r, c, k, scope, name, opts, !slices.Contains(missing, name), prepared[name])
+			res, did := installAndDeclare(ctx, r, c, k, scope, name, opts, !slices.Contains(missing, name), prepared[name])
+			if did {
+				declared = append(declared, name)
+			}
+			return res
 		})
-		if res.State == check.OK {
-			added = append(added, name)
-		}
 	}
-	c.sync(ctx, commitMessage("add", kindName, added, r.machine, opts.note))
+	c.sync(ctx, commitMessage("add", kindName, declared, r.machine, opts.note))
 	return c.finish()
 }
 
@@ -153,7 +154,8 @@ func addOne(ctx context.Context, r *run, c *changes, k kind.Kind, scope, name st
 	if err != nil {
 		return check.Result{State: check.Failed, Reason: "couldn't declare: " + err.Error()}
 	}
-	return installAndDeclare(ctx, r, c, k, scope, name, opts, isIn, p)
+	res, _ := installAndDeclare(ctx, r, c, k, scope, name, opts, isIn, p)
+	return res
 }
 
 // adding is what adding a name declares, settled before it's installed:
@@ -189,21 +191,22 @@ func prepareAdding(ctx context.Context, r *run, k kind.Kind, scope, name string,
 }
 
 // installAndDeclare installs name, unless it's installed, then declares it as p
-// says, unless it's declared already, or temporary.
-func installAndDeclare(ctx context.Context, r *run, c *changes, k kind.Kind, scope, name string, opts addOptions, isIn bool, p adding) check.Result {
+// says, unless it's declared already, or temporary: whether it declared
+// anything, its kind's empty section for one temporary.
+func installAndDeclare(ctx context.Context, r *run, c *changes, k kind.Kind, scope, name string, opts addOptions, isIn bool, p adding) (check.Result, bool) {
 	kindName := k.Name()
 	verb := "already installed"
 	if !isIn {
 		if opts.waiting[name] {
-			return check.Result{State: check.Failed, Reason: fmt.Sprintf(adminWait, kindName+" add")}
+			return check.Result{State: check.Failed, Reason: fmt.Sprintf(adminWait, kindName+" add")}, false
 		}
 		if err := k.Install(event.WithChanging(ctx), []string{name}); err != nil {
-			return check.Result{State: check.Failed, Reason: "couldn't install: " + engine.Reason(err)}
+			return check.Result{State: check.Failed, Reason: "couldn't install: " + engine.Reason(err)}, false
 		}
 		verb = "installed"
 	}
 	if len(p.mine) > 0 {
-		return check.Result{State: check.OK, Summary: verb + "; declared already, in " + p.mine[0].Scope}
+		return check.Result{State: check.OK, Summary: verb + "; declared already, in " + p.mine[0].Scope}, false
 	}
 	if opts.temp {
 		return temporarily(ctx, r, c, k, scope, name, verb)
@@ -211,49 +214,52 @@ func installAndDeclare(ctx context.Context, r *run, c *changes, k kind.Kind, sco
 	if d, ok := k.(kind.Declarer); ok {
 		file, err := d.Declare(name)
 		if err != nil {
-			return check.Result{State: check.Failed, Reason: verb + ", but couldn't declare: " + err.Error()}
+			return check.Result{State: check.Failed, Reason: verb + ", but couldn't declare: " + err.Error()}, false
 		}
 		r.changedFile(c, file)
-		return check.Result{State: check.OK, Summary: verb + "; declared in " + r.files.Tilde(file)}
+		return check.Result{State: check.OK, Summary: verb + "; declared in " + r.files.Tilde(file)}, true
 	}
 	line := p.line
 	if !p.ready {
 		var err error
 		if line, err = addedLine(ctx, k, name, opts); err != nil {
-			return check.Result{State: check.Failed, Reason: verb + ", but couldn't declare: " + err.Error()}
+			return check.Result{State: check.Failed, Reason: verb + ", but couldn't declare: " + err.Error()}, false
 		}
 	}
 	said, err := c.declare(kindName, scope, line)
 	if err != nil {
-		return check.Result{State: check.Failed, Reason: verb + ", but couldn't declare: " + err.Error()}
+		return check.Result{State: check.Failed, Reason: verb + ", but couldn't declare: " + err.Error()}, false
 	}
-	return check.Result{State: check.OK, Summary: fmt.Sprintf("%s; declared in %s%s", verb, scope, said)}
+	return check.Result{State: check.OK, Summary: fmt.Sprintf("%s; declared in %s%s", verb, scope, said)}, true
 }
 
 // temporarily marks name, installed, as not declared for now: quiet for 7
-// days, then reconcile asks, its kind looked after so it can.
-func temporarily(ctx context.Context, r *run, c *changes, k kind.Kind, scope, name, verb string) check.Result {
+// days, then reconcile asks, its kind looked after so it can, with an empty
+// section added when it has none: whether it added one.
+func temporarily(ctx context.Context, r *run, c *changes, k kind.Kind, scope, name, verb string) (check.Result, bool) {
 	kindName := k.Name()
 	full := name
 	if resolved, err := k.Resolve(ctx, []string{name}); err == nil && resolved[name] != "" {
 		full = resolved[name]
 	}
 	if err := drift.Update(r.stateDir, func(rec *drift.Record) { rec.Temporarily(kindName+":"+full, r.now) }); err != nil {
-		return check.Result{State: check.Failed, Reason: err.Error()}
+		return check.Result{State: check.Failed, Reason: err.Error()}, false
 	}
 	summary := verb + ", for now: not declared, quiet for 7 days, then kit reconcile asks"
 	// reconcile asks only of a kind looked after: one with a section.
-	if d, _ := kinds.Named(kindName); d.Section != nil && !r.lists[kindName].Declared {
-		added, err := r.cfg.AddSection(kindName, scope)
-		if err != nil {
-			return check.Result{State: check.Failed, Reason: verb + ", but couldn't add its kind's section: " + err.Error()}
-		}
-		if added {
-			c.changed(config.DeclFile(scope))
-			summary += "; [" + d.Section.Header + "] added to " + scope + ", empty"
-		}
+	d, _ := kinds.Named(kindName)
+	if d.Section == nil || r.lists[kindName].Declared {
+		return check.Result{State: check.OK, Summary: summary}, false
 	}
-	return check.Result{State: check.OK, Summary: summary}
+	added, err := r.cfg.AddSection(kindName, scope)
+	if err != nil {
+		return check.Result{State: check.Failed, Reason: verb + ", but couldn't add its kind's section: " + err.Error()}, false
+	}
+	if added {
+		c.changed(config.DeclFile(scope))
+		summary += "; [" + d.Section.Header + "] added to " + scope + ", empty"
+	}
+	return check.Result{State: check.OK, Summary: summary}, added
 }
 
 // addedLine is the line adding name declares: its value, for a kind whose

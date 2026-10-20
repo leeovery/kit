@@ -49,7 +49,7 @@ func TestAnEmptySectionLooksAfterItsKind(t *testing.T) {
 	if !strings.Contains(out, "npm:docx extra") {
 		t.Errorf("kit reconcile printed\n%s\nwant docx offered", out)
 	}
-	w.expectSync([]string{"laptop/declarations"}, "kit reconcile (laptop): adopt npm:docx")
+	w.expectSync(t, []string{"laptop/declarations"}, "kit reconcile (laptop): adopt npm:docx")
 	out, errOut, code := w.run(t, "reconcile", "npm:docx", "--adopt")
 	if code != 0 {
 		t.Fatalf("kit reconcile npm:docx --adopt printed\n%s%s exit %d", out, errOut, code)
@@ -68,7 +68,7 @@ func TestAddWritesTheKindsSection(t *testing.T) {
 	w.fake.On("npm", "ls", "--global", "--depth=0", "--json").Prints(`{"dependencies": {}}`).
 		Then().Prints(`{"dependencies": {"typescript": {}}}`)
 	w.fake.On("npm", "install", "--global", "typescript")
-	w.expectSync([]string{"laptop/declarations"}, "kit npm add typescript (laptop)")
+	w.expectSync(t, []string{"laptop/declarations"}, "kit npm add typescript (laptop)")
 
 	out, errOut, code := w.run(t, "npm", "add", "typescript")
 	if code != 0 || !strings.Contains(out, "typescript ok installed; declared in laptop\n") {
@@ -91,7 +91,7 @@ func TestRemovingTheLastThingKeepsTheSection(t *testing.T) {
 	w.fake.On("npm", "ls", "--global", "--depth=0", "--json").Prints(`{"dependencies": {"typescript": {}, "docx": {}}}`).
 		Then().Prints(`{"dependencies": {"docx": {}}}`)
 	w.fake.On("npm", "uninstall", "--global", "typescript")
-	w.expectSync([]string{"laptop/declarations"}, "kit npm remove typescript (laptop)")
+	w.expectSync(t, []string{"laptop/declarations"}, "kit npm remove typescript (laptop)")
 
 	out, errOut, code := w.run(t, "npm", "remove", "typescript")
 	if code != 0 {
@@ -124,7 +124,7 @@ func TestAddTemporarilyWritesTheKindsSection(t *testing.T) {
 	w.fake.On("npm", "ls", "--global", "--depth=0", "--json").Prints(`{"dependencies": {}}`).
 		Then().Prints(`{"dependencies": {"left-pad": {}}}`)
 	w.fake.On("npm", "install", "--global", "left-pad")
-	w.expectSync([]string{"laptop/declarations"}, "kit npm add left-pad (laptop)")
+	w.expectSync(t, []string{"laptop/declarations"}, "kit npm add left-pad (laptop)")
 
 	out, errOut, code := w.run(t, "npm", "add", "left-pad", "--temp")
 	if code != 0 || !strings.Contains(out, "left-pad ok installed, for now: not declared, quiet for 7 days, then kit reconcile asks; [npm packages] added to laptop, empty\n") {

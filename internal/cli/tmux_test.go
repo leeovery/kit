@@ -73,7 +73,7 @@ func TestTmuxsConfigInKitConfigIsCommitted(t *testing.T) {
 		t.Fatal(err)
 	}
 	w.keeps("shared/home/.config/tmux/tmux.conf")
-	w.expectSync([]string{"shared/home/.config/tmux/tmux.conf"}, "kit reconcile (laptop): adopt tmux:tmux-plugins/tmux-yank")
+	w.expectSync(t, []string{"shared/home/.config/tmux/tmux.conf"}, "kit reconcile (laptop): adopt tmux:tmux-plugins/tmux-yank")
 	out, _, code := w.run(t, "reconcile", "tmux:tmux-plugins/tmux-yank", "--adopt")
 	if code != 0 || !strings.Contains(out, "declared in ~/.config/kit/shared/home/.config/tmux/tmux.conf") || !strings.Contains(out, "committed and pushed shared/home/.config/tmux/tmux.conf") {
 		t.Errorf("kit reconcile --adopt printed\n%s exit %d", out, code)
