@@ -132,6 +132,20 @@ func (b body) sortedPlace(from, to int, name string) int {
 	return b.lastEntryEnd(from, to)
 }
 
+// afterOwnComments puts block, the first entry of a section holding no
+// other, after the comments the section holds, and a blank line, so they
+// stay the section's own, not notes on it.
+func (b *body) afterOwnComments(block []string) {
+	at := len(b.lines)
+	for at > 0 && b.kinds[at-1] == blankLine {
+		at--
+	}
+	if at > 0 {
+		block = slices.Concat([]string{""}, block)
+	}
+	b.insert(at, block...)
+}
+
 func (b *body) insert(at int, lines ...string) {
 	b.lines = slices.Insert(b.lines, at, lines...)
 	*b = splitBody(b.form, b.lines)
@@ -432,6 +446,9 @@ func (c *Config) declaring(kind, scope string, e Entry, from ...string) (section
 	switch b := splitBody(d.form, s.body); {
 	case d.sorted:
 		s.body = sortedLines(d.form, s.body, slices.Concat(notes, []string{line})...)
+	case len(b.entries(0, len(b.lines))) == 0:
+		b.afterOwnComments(block)
+		s.body = b.lines
 	case d.form == Paths:
 		b.insert(b.lastEntryEnd(0, len(b.lines)), block...)
 		s.body = b.lines

@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -775,4 +776,77 @@ func TestUndeclareKeepsASectionsOwnComments(t *testing.T) {
 	if list, err := cfg.List("brew", "laptop"); err != nil || !slices.Equal(list.Names(), []string{"jq"}) {
 		t.Errorf("List(brew, laptop) = %v, %v; want the shared jq alone", list.Names(), err)
 	}
+}
+
+// A line declared into a section kit doesn't sort that holds comments
+// alone goes after them and a blank line, so they stay the section's own.
+func TestDeclareAfterASectionsOwnComments(t *testing.T) {
+	cfg := loadRepo(t, map[string]string{"laptop/declarations": "[paths]\n# my paths\n"})
+	if err := cfg.Declare(config.PathsKind, "laptop", config.Entry{Name: "~/a"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, cfg, "laptop/declarations"); got != "[paths]\n# my paths\n\n~/a\n" {
+		t.Errorf("laptop/declarations = %q, want ~/a after the comment and a blank line", got)
+	}
+}
+
+// Each kind's reading tells apart lines that write different things,
+// however alike they look: a shared declare of one never moves the other.
+func TestReadingsTellLinesApart(t *testing.T) {
+	for name, c := range map[string]struct {
+		section, line, kind string
+		e                   config.Entry
+	}{
+		"a dict's entry, not a key":           {"macos settings", "com.apple.dock persistent -dict-add tile '<integer>5</integer>'", "defaults", config.Entry{Name: "com.apple.dock:persistent:tile", Value: "-int 5"}},
+		"a key, not a dict's entry":           {"macos settings", "com.apple.dock persistent:tile -int 5", "defaults", config.Entry{Name: "com.apple.dock:persistent:tile", Value: "-dict-add '<integer>5</integer>'"}},
+		"a string, not a number":              {"macos settings", "com.apple.dock tilesize -string 60", "defaults", config.Entry{Name: "com.apple.dock:tilesize", Value: "-int 60"}},
+		"a server elsewhere":                  {"claude mcp", "docs --transport http https://docs.example.com/mcp", "claude-mcp", config.Entry{Name: "docs", Value: "--transport http https://other.example.com/mcp"}},
+		"a server declared off":               {"claude mcp", "docs --off --transport http https://docs.example.com/mcp", "claude-mcp", config.Entry{Name: "docs", Value: "--transport http https://docs.example.com/mcp"}},
+		"a git setting's other value":         {"git config", "pull.rebase true", "git-config", config.Entry{Name: "pull.rebase", Value: "false"}},
+		"a power setting's other value":       {"power settings", "-c sleep 0", "power", config.Entry{Name: "charger:sleep", Value: "10"}},
+		"a step without --sudo":               {"steps", `tool "Install it" --sudo`, config.StepsKind, config.Entry{Name: "tool", Value: `"Install it"`}},
+		"a step needing another secret":       {"steps", `tool "Install it" --secret TOKEN`, config.StepsKind, config.Entry{Name: "tool", Value: `"Install it" --secret OTHER`}},
+		"a step doing otherwise":              {"steps", `tool "Install it"`, config.StepsKind, config.Entry{Name: "tool", Value: `"Install the tool"`}},
+		"a step by hand in another group":     {"manual", `sign-in "Sign in" --group First`, config.ManualKind, config.Entry{Name: "sign-in", Value: `"Sign in" --group Second`}},
+		"a step by hand tested otherwise":     {"manual", `sign-in "Sign in" --test true`, config.ManualKind, config.Entry{Name: "sign-in", Value: `"Sign in" --test false`}},
+		"a job running otherwise":             {"nightly", "tidy -- tidy --all", config.NightlyKind, config.Entry{Name: "tidy", Value: "-- tidy"}},
+		"a backup tool placed otherwise":      {"backups", "arq --before config", config.BackupsKind, config.Entry{Name: "arq", Value: "--after config"}},
+		"a secret's file of another mode":     {"secrets", "~/.npmrc op://vault/Item/npmrc --mode 644", "secret", config.Entry{Name: "~/.npmrc", Value: "op://vault/Item/npmrc --mode 640"}},
+		"a secret kept elsewhere":             {"secrets", "TOKEN op://vault/Item/token", "secret", config.Entry{Name: "TOKEN", Value: "op://vault/Other/token"}},
+		"a formula held for another":          {"homebrew formulae --after cask:x", "go", "brew", config.Entry{Name: "go", Hold: "--after cask:y"}},
+		"a step by hand's steps, given apart": {"manual", "sign-in \"Sign in\"\n  Open the app", config.ManualKind, config.Entry{Name: "sign-in", Value: `"Sign in"`, Steps: []string{"Open it"}}},
+	} {
+		cfg := loadRepo(t, map[string]string{"laptop/declarations": "[" + c.section + "]\n" + c.line + "\n"})
+		err := cfg.CheckDeclareShared(c.kind, c.e, []string{"laptop"})
+		if _, differs := errors.AsType[config.LineDiffers](err); !differs {
+			t.Errorf("%s: CheckDeclareShared() = %v, want it refused as saying otherwise", name, err)
+		}
+	}
+}
+
+// Options carried from the lines moved compare as a set: written in
+// another order, or one given twice, they're the same.
+func TestCarriedOptionsAreASet(t *testing.T) {
+	cfg := loadRepo(t, map[string]string{
+		"laptop/declarations": "[manual]\nsign-in \"Sign in\" --after a --after b --after a\n",
+		"studio/declarations": "[manual]\nsign-in \"Sign in\" --after b --after a\n",
+	})
+	if _, _, err := cfg.DeclareShared(config.ManualKind, config.Entry{Name: "sign-in", Value: `"Sign in"`}, []string{"laptop", "studio"}); err != nil {
+		t.Fatalf("DeclareShared() = %v", err)
+	}
+	if got := readFile(t, cfg, "shared/declarations"); got != "[manual]\nsign-in \"Sign in\" --after a --after b\n" {
+		t.Errorf("shared/declarations = %q", got)
+	}
+}
+
+// A reading given for none of the config's own sections is a mistake in
+// kit: loading panics, rather than taking it for a kind with no header.
+func TestAReadingForNoSectionPanics(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Error("Load() didn't panic")
+		}
+	}()
+	dir := writeRepo(t, map[string]string{config.File: twoMacs})
+	_, _ = config.Load(dir, []config.Section{{Kind: "nothing", Says: func(config.Entry) ([]string, error) { return nil, nil }}})
 }

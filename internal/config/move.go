@@ -187,7 +187,7 @@ func (c *Config) carriedName(d sectionDef, item string, moved []movedLine) (stri
 	for _, scope := range c.Scopes() {
 		f, err := c.readDecl(scope)
 		if err != nil {
-			continue
+			return "", "", err
 		}
 		for _, s := range f.sections {
 			if s.def.kind == d.kind && s.as == as && s.arg != item {
@@ -229,12 +229,14 @@ func (d sectionDef) carryOptions(e Entry, moved []movedLine) (string, error) {
 	return strings.Join(slices.Concat([]string{Quote(words[0]), options}, rest), " "), nil
 }
 
-// carried are the parts of e's reading that are options of d.carries.
+// carried are the parts of e's reading that are options of d.carries, as
+// a set: sorted, each once.
 func (d sectionDef) carried(e Entry) ([]string, error) {
 	parts, err := d.reading(e)
-	return slices.DeleteFunc(parts, func(p string) bool {
+	parts = slices.DeleteFunc(parts, func(p string) bool {
 		return !slices.ContainsFunc(d.carries, func(flag string) bool { return strings.HasPrefix(p, flag+" ") })
-	}), err
+	})
+	return slices.Compact(slices.Sorted(slices.Values(parts))), err
 }
 
 // agreed is what the lines moved have, as of says: the one thing they all

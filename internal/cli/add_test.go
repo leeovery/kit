@@ -271,7 +271,7 @@ func TestAddSharedRefusedFailsAlone(t *testing.T) {
 		w.writeSection(t, "studio", "homebrew formulae", "hello   # for work\n")
 		w.fake.On("brew", "update", "--quiet")
 		w.fake.On("brew", "install", "--formula", "ripgrep")
-		w.expectSync([]string{"shared/declarations"}, "kit brew add hello, ripgrep (laptop)")
+		w.expectSync([]string{"shared/declarations"}, "kit brew add ripgrep (laptop)")
 		args := []string{"brew", "add", "hello", "ripgrep", "--shared"}
 		if asJSON {
 			args = append(args, "--json")
@@ -309,7 +309,7 @@ func TestAddSharedRefusedAsksNoPassword(t *testing.T) {
 	w.fake.On("brew", "info", "--json=v2", "--cask", "iterm2").Prints(`{"formulae": [], "casks": [{"token": "iterm2", "full_token": "iterm2", "old_tokens": [], "artifacts": [{"app": ["iTerm.app"]}]}]}`)
 	w.fake.On("brew", "update", "--quiet")
 	w.fake.On("brew", "install", "--cask", "iterm2")
-	w.expectSync([]string{"shared/declarations"}, "kit cask add zoom, iterm2 (laptop)")
+	w.expectSync([]string{"shared/declarations"}, "kit cask add iterm2 (laptop)")
 	out, errOut, code := w.run(t, "cask", "add", "zoom", "iterm2", "--shared")
 	if out = ansi.Strip(out); code != 1 || !strings.Contains(out, "✗ zoom  couldn't declare") || !strings.Contains(out, "● iterm2  installed · declared in shared") {
 		t.Errorf("kit cask add zoom iterm2 --shared printed\n%s%s exit %d", out, errOut, code)
@@ -321,5 +321,20 @@ func TestAddSharedRefusedAsksNoPassword(t *testing.T) {
 	}
 	if len(w.asked) > 0 {
 		t.Errorf("asked %q, want nothing", w.asked)
+	}
+}
+
+// A name given twice is added once, its row once.
+func TestAddANameGivenTwice(t *testing.T) {
+	w := laptopWorld(t)
+	w.fake.On("brew", "update", "--quiet")
+	w.fake.On("brew", "install", "--formula", "ripgrep")
+	w.expectSync([]string{"laptop/declarations"}, "kit brew add ripgrep (laptop)")
+	out, errOut, code := w.run(t, "brew", "add", "ripgrep", "ripgrep")
+	if code != 0 || strings.Count(out, "ripgrep ok") != 1 {
+		t.Errorf("kit brew add ripgrep ripgrep printed\n%s%s exit %d; want it added once", out, errOut, code)
+	}
+	if n := slices.Index(w.fake.Calls(), "brew install --formula ripgrep"); n < 0 || slices.Contains(w.fake.Calls()[n+1:], "brew install --formula ripgrep") {
+		t.Errorf("ran %q, want ripgrep installed once", w.fake.Calls())
 	}
 }

@@ -220,7 +220,8 @@ var (
 // kit writes them: the config's own first ones, the kinds', in the order
 // given, then the config's own others. A section given for one of the
 // config's own gives its reading alone (Section.Says), as the packages
-// reading those lines import this one.
+// reading those lines import this one; one with no header that's none of
+// them is a mistake in kit, so it panics.
 func sectionDefs(kinds []Section) []sectionDef {
 	lead, trail := slices.Clone(ownLeading), slices.Clone(ownTrailing)
 	var defs []sectionDef
@@ -233,6 +234,9 @@ func sectionDefs(kinds []Section) []sectionDef {
 		if i := slices.IndexFunc(trail, own); i >= 0 {
 			trail[i].lineSays = k.Says
 			continue
+		}
+		if k.Header == "" {
+			panic(fmt.Sprintf("config: a reading for %s, which is none of the config's own sections", k.Kind))
 		}
 		d := sectionDef{header: k.Header, kind: k.Kind, form: k.Form, isKind: true, folders: k.Folders, items: k.Items, line: k.Line, lineSays: k.Says, fromMac: k.FromMac, sorted: k.Sorted}
 		if k.Held {

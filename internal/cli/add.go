@@ -39,6 +39,7 @@ func (a *app) add(ctx context.Context, r *run, kindName string, names []string, 
 	if names, err = a.find(ctx, k, names); err != nil {
 		return err
 	}
+	names = once(names)
 	missing, err := notInstalled(ctx, k, names)
 	if err != nil {
 		return err
@@ -63,8 +64,20 @@ func (a *app) add(ctx context.Context, r *run, kindName string, names []string, 
 			return installAndDeclare(ctx, r, c, k, scope, name, opts, !slices.Contains(missing, name), prepared[name])
 		})
 	}
-	c.sync(ctx, commitMessage("add", kindName, names, r.machine, opts.note))
+	added := slices.DeleteFunc(slices.Clone(names), func(name string) bool { return refused[name] != nil })
+	c.sync(ctx, commitMessage("add", kindName, added, r.machine, opts.note))
 	return c.finish()
+}
+
+// once is names, each once, in the order first given.
+func once(names []string) []string {
+	var out []string
+	for _, name := range names {
+		if !slices.Contains(out, name) {
+			out = append(out, name)
+		}
+	}
+	return out
 }
 
 // find settles what each typed name means, for a kind that finds things

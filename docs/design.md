@@ -486,8 +486,9 @@ file in the same edit, losing nothing the lines it moves say, all judged before 
 stored, installed or asked for:
 - What the command can say must be the same, by meaning, as each kind reads its lines: options
   in any order and once each, a macOS setting's value by its type (`-integer 60` is `-int 60`,
-  `-bool YES` is `-bool true`), an MCP server in JSON or as options, a secret's full reference
-  (short in its block or in full) and its mode. Otherwise it's refused, naming the line and
+  `-bool YES` is `-bool true`) and whether it's a dict's entry, an MCP server in JSON or as
+  options, a secret's full reference (short in its block or in full) and its mode. A reading
+  only evens out how a line is written, never what it does. Otherwise it's refused, naming the line and
   what differs: give the same, or, for a value kit reads from the Mac (macOS, power and git
   settings, MCP servers), set it the same here, or take that line out first; for a secret,
   with the `--ref` and `--mode` sharing its value.

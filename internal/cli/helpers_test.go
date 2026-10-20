@@ -179,6 +179,9 @@ func (w *world) expectSync(files []string, message string) {
 	dir := filepath.Join(w.home, ".config", "kit")
 	git := func(args ...string) []string { return append([]string{"-C", dir}, args...) }
 	w.fake.On("git", git(append([]string{"status", "--porcelain", "--"}, files...)...)...).Prints(" M " + strings.Join(files, "\n M ") + "\n")
+	for _, f := range files {
+		w.fake.On("git", git("ls-files", "--cached", "--", f)...).Prints(f + "\n")
+	}
 	w.fake.On("git", git(append([]string{"add", "--"}, files...)...)...)
 	w.fake.On("git", git(append([]string{"commit", "--quiet", "-m", message, "--"}, files...)...)...)
 	w.fake.On("git", git("remote")...).Prints("origin\n")

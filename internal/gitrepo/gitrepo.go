@@ -118,22 +118,17 @@ func (r Repo) Changes(ctx context.Context) ([]Change, error) {
 	return changes, nil
 }
 
-// statusPaths are the paths git status --porcelain lists, each where it is
-// now.
-func statusPaths(out string) []string {
-	var paths []string
-	for line := range strings.Lines(out) {
-		line = strings.TrimRight(line, "\n")
-		if len(line) < 4 {
-			continue
-		}
-		name := unquote(line[3:])
-		if _, to, ok := strings.Cut(name, " -> "); ok {
-			name = unquote(to)
-		}
-		paths = append(paths, name)
+// known reports whether path is there, or git keeps something under it,
+// in its index: one that's neither git won't take.
+func (r Repo) known(ctx context.Context, path string) (bool, error) {
+	if _, err := os.Lstat(filepath.Join(r.Dir, path)); err == nil {
+		return true, nil
 	}
-	return paths
+	res, err := r.git(ctx, "ls-files", "--cached", "--", path)
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(string(res.Stdout)) != "", nil
 }
 
 // unquote is a path as git prints it, without the quotes it puts round one
@@ -173,14 +168,17 @@ func (r Repo) Commit(ctx context.Context, message string, files ...string) (bool
 	if strings.TrimSpace(string(res.Stdout)) == "" {
 		return false, nil
 	}
-	changed := statusPaths(string(res.Stdout))
-	files = slices.DeleteFunc(slices.Clone(files), func(f string) bool {
-		if _, err := os.Lstat(filepath.Join(r.Dir, f)); err == nil {
-			return false
+	var kept []string
+	for _, f := range files {
+		known, err := r.known(ctx, f)
+		if err != nil {
+			return false, err
 		}
-		return !slices.ContainsFunc(changed, func(c string) bool { return c == f || strings.HasPrefix(c, f+"/") })
-	})
-	paths := slices.Concat([]string{"--"}, files)
+		if known {
+			kept = append(kept, f)
+		}
+	}
+	paths := slices.Concat([]string{"--"}, kept)
 	if _, err := r.git(ctx, slices.Concat([]string{"add"}, paths)...); err != nil {
 		return false, err
 	}

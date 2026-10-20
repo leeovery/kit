@@ -190,6 +190,8 @@ func TestAddAStepSharedMovesItsFolder(t *testing.T) {
 	all := []string{"laptop/declarations", "laptop/steps/tool", "shared/declarations", "shared/steps/tool", "studio/declarations", "studio/steps/tool"}
 	kept := []string{"laptop/declarations", "shared/declarations", "shared/steps/tool", "studio/declarations", "studio/steps/tool"}
 	w.fake.On("git", git(append([]string{"status", "--porcelain", "--"}, all...)...)...).Prints(" M laptop/declarations\n M shared/declarations\n?? shared/steps/tool/run\n M studio/declarations\n D studio/steps/tool/run\n")
+	w.fake.On("git", git("ls-files", "--cached", "--", "laptop/steps/tool")...)
+	w.fake.On("git", git("ls-files", "--cached", "--", "studio/steps/tool")...).Prints("studio/steps/tool/run\n")
 	w.fake.On("git", git(append([]string{"add", "--"}, kept...)...)...)
 	w.fake.On("git", git(append([]string{"commit", "--quiet", "-m", "kit step add tool (laptop)", "--"}, kept...)...)...)
 	w.fake.On("git", git("remote")...).Prints("origin\n")
@@ -219,5 +221,31 @@ func TestAddAStepSharedMovesItsFolder(t *testing.T) {
 				t.Errorf("%s: %s = %q, want it untouched", c.name, path, got)
 			}
 		}
+	}
+}
+
+// A step's line that couldn't be moved after its folder was puts the folder
+// back where it was, and leaves no folder of steps it made in shared.
+func TestAddAStepSharedPutsItsFolderBack(t *testing.T) {
+	line := `tool "Installs the tool" --after brew` + "\n"
+	w := laptopWorld(t)
+	w.writeSection(t, "laptop", "steps", line)
+	w.writeSection(t, "studio", "steps", line)
+	w.stepScript(t, "laptop", "tool")
+	studio := filepath.Join(w.home, ".config", "kit", "studio")
+	if err := os.Chmod(studio, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(studio, 0o700) })
+	w.expectSync([]string{"laptop/declarations", "shared/declarations"}, "kit step add tool (laptop)")
+	out, _, code := w.run(t, "step", "add", "tool", "Installs the tool", "--after", "brew", "--shared")
+	if code != 1 || !strings.Contains(out, "tool failed") {
+		t.Errorf("kit step add --shared, studio's file read-only, printed\n%s exit %d; want it failed", out, code)
+	}
+	if got := w.read(t, filepath.Join(".config", "kit", "laptop", "steps", "tool", "run")); got != "#!/bin/bash\n" {
+		t.Errorf("laptop/steps/tool/run = %q, want it back", got)
+	}
+	if _, err := os.Stat(filepath.Join(w.home, ".config", "kit", "shared", "steps")); !os.IsNotExist(err) {
+		t.Errorf("shared/steps is there: %v, want it gone", err)
 	}
 }

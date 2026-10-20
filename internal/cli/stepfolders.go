@@ -67,11 +67,27 @@ func (r *run) planStepFolder(s steps.Script, from []string) (folderMove, error) 
 
 // makeStepFolder makes the folder of s, the shared one, as m says, before
 // its line's declared: the first Mac's moved in, or, none having one, a
-// template written. It returns what it did, and undo, putting the folder
-// back as it was, should the declare fail.
+// template written. It returns what it did, and undo, putting things back
+// as they were, should the declare fail: nothing to undo till something's
+// made, and the folder of steps it made, once empty, gone too.
 func (r *run) makeStepFolder(s steps.Script, does string, m folderMove) (string, func() error, error) {
+	nothing := func() error { return nil }
+	parent := filepath.Dir(s.Dir)
+	hadParent, err := exists(parent)
+	if err != nil {
+		return "", nothing, err
+	}
+	tidy := func() error {
+		if hadParent {
+			return nil
+		}
+		if err := os.Remove(parent); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+		return nil
+	}
 	if len(m.macs) == 0 {
-		undo := func() error { return os.RemoveAll(s.Dir) }
+		undo := func() error { return errors.Join(os.RemoveAll(s.Dir), tidy()) }
 		if err := os.MkdirAll(s.Dir, 0o755); err != nil {
 			return "", undo, err
 		}
@@ -80,13 +96,16 @@ func (r *run) makeStepFolder(s steps.Script, does string, m folderMove) (string,
 	}
 	said := "its folder moved from " + strings.Join(m.macs, " and ")
 	if m.there {
-		return said, func() error { return nil }, nil
+		return said, nothing, nil
+	}
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		return "", tidy, err
 	}
 	first := filepath.Join(r.cfg.Dir, m.macs[0])
-	if err := os.MkdirAll(filepath.Dir(s.Dir), 0o755); err != nil {
-		return "", func() error { return nil }, err
+	if err := os.Rename(first, s.Dir); err != nil {
+		return "", tidy, err
 	}
-	return said, func() error { return os.Rename(s.Dir, first) }, os.Rename(first, s.Dir)
+	return said, func() error { return errors.Join(os.Rename(s.Dir, first), tidy()) }, nil
 }
 
 // finishStepFolder takes the Macs' folders out, once the line's moved,

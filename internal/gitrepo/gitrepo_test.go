@@ -18,6 +18,7 @@ func git(args ...string) []string { return append([]string{"-C", dir}, args...) 
 func TestCommit(t *testing.T) {
 	fake := runnertest.New(t)
 	fake.On("git", git("status", "--porcelain", "--", "brew.laptop")...).Prints(" M brew.laptop\n")
+	fake.On("git", git("ls-files", "--cached", "--", "brew.laptop")...).Prints("brew.laptop\n")
 	fake.On("git", git("add", "--", "brew.laptop")...)
 	fake.On("git", git("commit", "--quiet", "-m", "kit add brew jq (laptop)", "--", "brew.laptop")...)
 
@@ -27,6 +28,7 @@ func TestCommit(t *testing.T) {
 	}
 	want := []string{
 		"git -C " + dir + " status --porcelain -- brew.laptop",
+		"git -C " + dir + " ls-files --cached -- brew.laptop",
 		"git -C " + dir + " add -- brew.laptop",
 		"git -C " + dir + " commit --quiet -m 'kit add brew jq (laptop)' -- brew.laptop",
 	}
@@ -47,6 +49,7 @@ func TestCommitWithNothingToCommit(t *testing.T) {
 func TestCommitFails(t *testing.T) {
 	fake := runnertest.New(t)
 	fake.On("git", git("status", "--porcelain", "--", "brew")...).Prints(" M brew\n")
+	fake.On("git", git("ls-files", "--cached", "--", "brew")...).Prints("brew\n")
 	fake.On("git", git("add", "--", "brew")...)
 	fake.On("git", git("commit", "--quiet", "-m", "kit add brew jq", "--", "brew")...).Exits(1).PrintsToStderr("error: gpg failed to sign the data")
 	if _, err := (gitrepo.Repo{Dir: dir, Run: fake}).Commit(context.Background(), "kit add brew jq", "brew"); err == nil || !strings.Contains(err.Error(), "gpg failed to sign") {
@@ -111,14 +114,20 @@ func TestPushWithoutARemote(t *testing.T) {
 
 // A path that's gone and that git never kept, as a folder moved before it
 // was ever committed, is left out of the commit, as git won't take it; one
-// git kept, now gone, is committed, gone.
+// git keeps, now gone, is committed, gone, a rename staged already too, as
+// git's index says, not its status.
 func TestCommitLeavesOutAPathGitNeverKept(t *testing.T) {
 	fake := runnertest.New(t)
-	fake.On("git", git("status", "--porcelain", "--", "laptop/declarations", "laptop/steps/tool", "studio/steps/tool")...).Prints(" M laptop/declarations\n D studio/steps/tool/run\n")
-	fake.On("git", git("add", "--", "laptop/declarations", "studio/steps/tool")...)
-	fake.On("git", git("commit", "--quiet", "-m", "kit step add tool (laptop)", "--", "laptop/declarations", "studio/steps/tool")...)
-	committed, err := gitrepo.Repo{Dir: dir, Run: fake}.Commit(context.Background(), "kit step add tool (laptop)", "laptop/declarations", "laptop/steps/tool", "studio/steps/tool")
+	fake.On("git", git("status", "--porcelain", "--", "laptop/declarations", "laptop/steps/tool", "studio/steps/tool", "old/steps/tool")...).Prints(" M laptop/declarations\n D studio/steps/tool/run\nR  old/steps/tool/run -> shared/steps/tool/run\n")
+	fake.On("git", git("ls-files", "--cached", "--", "laptop/declarations")...).Prints("laptop/declarations\n")
+	fake.On("git", git("ls-files", "--cached", "--", "laptop/steps/tool")...)
+	fake.On("git", git("ls-files", "--cached", "--", "studio/steps/tool")...).Prints("studio/steps/tool/run\n")
+	fake.On("git", git("ls-files", "--cached", "--", "old/steps/tool")...).Prints("old/steps/tool/run\n")
+	kept := []string{"laptop/declarations", "studio/steps/tool", "old/steps/tool"}
+	fake.On("git", git(append([]string{"add", "--"}, kept...)...)...)
+	fake.On("git", git(append([]string{"commit", "--quiet", "-m", "kit step add tool (laptop)", "--"}, kept...)...)...)
+	committed, err := gitrepo.Repo{Dir: dir, Run: fake}.Commit(context.Background(), "kit step add tool (laptop)", "laptop/declarations", "laptop/steps/tool", "studio/steps/tool", "old/steps/tool")
 	if err != nil || !committed {
-		t.Errorf("Commit() = %v, %v, running %q; want laptop/steps/tool left out", committed, err, fake.Calls())
+		t.Errorf("Commit() = %v, %v, running %q; want laptop/steps/tool alone left out", committed, err, fake.Calls())
 	}
 }

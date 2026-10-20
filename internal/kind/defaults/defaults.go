@@ -156,25 +156,31 @@ func (d *Defaults) Values(list config.List) (config.List, error) {
 	return list, nil
 }
 
-// lineSays is what e's line says: its value, by its type, as defaults
-// write takes it, however the line writes it (-integer 60 as -int 60,
-// -bool YES as -bool true).
+// lineSays is what e's line says: whether it sets a dict's entry
+// (-dict-add), and its value, by its type, as defaults write takes it,
+// however the line writes it (-integer 60 as -int 60, -bool YES as -bool
+// true). Where it's kept, this host's or not, the domain and the key, is
+// its name.
 func lineSays(e config.Entry) ([]string, error) {
 	dv, err := readDeclared(e)
 	if err != nil {
 		return nil, err
 	}
+	var parts []string
+	if dv.setting.Entry != "" {
+		parts = append(parts, "-dict-add")
+	}
 	switch v := dv.value.(type) {
 	case bool:
-		return []string{fmt.Sprintf("-bool %t", v)}, nil
+		return append(parts, fmt.Sprintf("-bool %t", v)), nil
 	case int64:
-		return []string{fmt.Sprintf("-int %d", v)}, nil
+		return append(parts, fmt.Sprintf("-int %d", v)), nil
 	case float64:
-		return []string{"-float " + strconv.FormatFloat(v, 'g', -1, 64)}, nil
+		return append(parts, "-float "+strconv.FormatFloat(v, 'g', -1, 64)), nil
 	case string:
-		return []string{"-string " + config.Quote(v)}, nil
+		return append(parts, "-string "+config.Quote(v)), nil
 	}
-	return []string{plist.XML(dv.value)}, nil
+	return append(parts, plist.XML(dv.value)), nil
 }
 
 // readDeclared reads an entry's setting and value.
