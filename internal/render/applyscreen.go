@@ -508,20 +508,29 @@ func (p *Pretty) ended(f event.StepFinished) look.State {
 // the Mac something to do: its own result says so, or it was deferred
 // behind steps that did, and nothing else.
 func (p *Pretty) toDo(step string) bool {
+	return p.toDoSeen(step, map[string]bool{})
+}
+
+// toDoSeen is toDo, seen the steps on the way to step: steps can wait for
+// each other partway through applying (engine.Step.Later), which the run
+// allows, so a step met again on the way holds nothing behind it.
+func (p *Pretty) toDoSeen(step string, seen map[string]bool) bool {
 	f, ok := p.results[step]
 	switch {
-	case !ok:
+	case !ok || seen[step]:
 		return false
 	case f.Result.ToDo():
 		return true
 	case f.Result.State != check.Deferred:
 		return false
 	}
+	seen[step] = true
+	defer delete(seen, step)
 	behind := false
 	for _, w := range p.step(step).Waits {
 		switch {
 		case p.results[w].Result.State == check.OK:
-		case p.toDo(w):
+		case p.toDoSeen(w, seen):
 			behind = true
 		default:
 			return false

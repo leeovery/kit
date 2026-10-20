@@ -1,12 +1,14 @@
 package secret_test
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/leeovery/kit/internal/check"
@@ -23,10 +25,12 @@ import (
 )
 
 // fakeStore is a secrets store of a kind other than 1Password: a value's
-// reference is vault:<item>/<field>, an item's vault:<item>. It holds
-// values, stands as session says, and notes the references each read asks
-// for.
+// reference is vault:<item>/<field>, an item's vault:<item>, or, named, as
+// other, other:<item>/<field> and other:<item>. It holds values, stands as
+// session says, and notes the references each read asks for.
 type fakeStore struct {
+	name    string
+	mu      sync.Mutex
 	session store.Session
 	values  map[string]string
 	reads   [][]string
@@ -37,6 +41,11 @@ type fakeStore struct {
 }
 
 func (f *fakeStore) About() store.About {
+	if f.name != "" {
+		title := "The " + f.name + " store"
+		return store.About{ID: f.name, Name: title, Program: f.name, Ref: f.name + ":item/field", Item: f.name + ":item", Field: "<field>",
+			NoAnswer: title + " doesn't answer", SignedOut: title + " is signed out", SignIn: store.SignIn{Title: "Sign in to " + title}}
+	}
 	return store.About{
 		ID: "fake", Name: "Fake Vault", Program: "fakevault", Env: []string{"FAKE_ACCOUNT", "FAKE_SESSION_*"},
 		Ref: "vault:item/field", Item: "vault:item", Field: "<field>",
@@ -45,13 +54,16 @@ func (f *fakeStore) About() store.About {
 	}
 }
 
+// scheme is what its references start with.
+func (f *fakeStore) scheme() string { return cmp.Or(f.name, "vault") + ":" }
+
 func (f *fakeStore) IsRef(ref string) bool {
-	rest, ok := strings.CutPrefix(ref, "vault:")
+	rest, ok := strings.CutPrefix(ref, f.scheme())
 	return ok && strings.Count(rest, "/") == 1
 }
 
 func (f *fakeStore) IsItem(ref string) bool {
-	rest, ok := strings.CutPrefix(ref, "vault:")
+	rest, ok := strings.CutPrefix(ref, f.scheme())
 	return ok && rest != "" && !strings.Contains(rest, "/")
 }
 
@@ -59,7 +71,18 @@ func (f *fakeStore) Join(item, short string) string { return item + "/" + short 
 
 func (f *fakeStore) Short(item, ref string) (string, bool) { return strings.CutPrefix(ref, item+"/") }
 
-func (f *fakeStore) Session(context.Context, runner.Runner) store.Session { return f.session }
+func (f *fakeStore) Session(context.Context, runner.Runner) store.Session {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.session
+}
+
+// signIn has the store signed in, as a person signing in does.
+func (f *fakeStore) signIn() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.session = store.SignedIn
+}
 
 func (f *fakeStore) Unlock(context.Context, runner.Runner) error {
 	if f.unlock == nil {
@@ -88,6 +111,10 @@ func (f *fakeStore) ReadMany(_ context.Context, _ runner.Runner, refs []string) 
 	}
 	return values, nil
 }
+
+func (f *fakeStore) Field(field string) (string, error) { return field, nil }
+
+func (f *fakeStore) Attachment(name string) (string, error) { return name, nil }
 
 func (f *fakeStore) Store(context.Context, runner.Runner, string, string, string) (string, error) {
 	return "", errors.New("not kept here")
@@ -180,7 +207,7 @@ func TestAStoreSignedOutHoldsBackItsOwnAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 	res := applying(t, s, list)
-	if res.State != check.Deferred || !strings.HasSuffix(res.Reason, ": Fake Vault is signed out") || len(fake.reads) > 0 {
+	if res.State != check.Deferred || res.Reason != "Fake Vault is signed out" || len(fake.reads) > 0 {
 		t.Errorf("the step finished %+v, the fake read %q: want it not done yet, in the fake's words, nothing asked of it", res, fake.reads)
 	}
 	env, _ := os.ReadFile(filepath.Join(home, ".secrets.zsh"))
@@ -231,7 +258,7 @@ func TestEveryStoreDown(t *testing.T) {
 	if _, err := s.Values(list); err != nil {
 		t.Fatal(err)
 	}
-	if res := applying(t, s, list); res.State != check.Deferred || !strings.Contains(res.Reason, onePassword.SignedOut) || !strings.Contains(res.Reason, "Fake Vault is signed out") {
+	if res := applying(t, s, list); res.State != check.Deferred || res.Reason != onePassword.SignedOut+"; Fake Vault is signed out" {
 		t.Errorf("both signed out: the step finished %+v", res)
 	}
 	fake.session, fake.locked, fake.unlock = store.SignedIn, true, errors.New("dismissed")
@@ -338,5 +365,60 @@ func TestEnvPassesOnWhatTheStoresName(t *testing.T) {
 	secret.UseStores(t, &fakeStore{})
 	if got, want := secret.Env(getenv, environ), []string{"FAKE_ACCOUNT=someone", "FAKE_SESSION_x=token"}; !slices.Equal(got, want) {
 		t.Errorf("Env() = %q, want %q", got, want)
+	}
+}
+
+// Stores held at first are waited for together: one whose sign-in is done
+// syncs while another still waits for what its sign-in needs, never held
+// back by it. Here B's sign-in waits, as for an app that never comes, until
+// C's secret is in place, which it can be only if C's sync doesn't wait for
+// B.
+func TestStoresHeldAreAwaitedTogether(t *testing.T) {
+	b, c := &fakeStore{name: "bee", session: store.SignedOut}, &fakeStore{name: "sea", session: store.SignedOut, values: map[string]string{"sea:keys/c": "c"}}
+	secret.UseStores(t, b, c)
+	home := t.TempDir()
+	run := runnertest.New(t)
+	run.On("bee")
+	run.On("sea")
+	s := secret.New(run, home)
+	list := config.List{Kind: "secret", Declared: true, Entries: []config.Entry{
+		{Name: "B", Value: "bee:keys/b", Section: "secrets"},
+		{Name: "C", Value: "sea:keys/c", Section: "secrets"},
+	}}
+	if _, err := s.Values(list); err != nil {
+		t.Fatal(err)
+	}
+	cPlaced := func(context.Context) bool {
+		env, _ := os.ReadFile(filepath.Join(home, ".secrets.zsh"))
+		return strings.Contains(string(env), "export C='c'")
+	}
+	sawC := false
+	signIns := []engine.Step{
+		{Name: "bee-sign-in", Check: func(context.Context) check.Result { return check.Result{State: check.Attention} },
+			Apply: func(ctx context.Context, _ check.Result) error {
+				sawC = engine.Await(ctx, engine.Wait{Thing: "the bee store's app", Ready: cPlaced}, "waiting for the bee store's app")
+				return engine.NotYet("needs the bee store's app")
+			}},
+		{Name: "sea-sign-in", Check: func(context.Context) check.Result { return check.Result{State: check.Attention} },
+			Apply: func(context.Context, check.Result) error {
+				c.signIn()
+				return nil
+			}},
+	}
+	step := kind.Placed(s, list, func() kind.Placing { return kind.Placing{} })
+	step.Later = []engine.Wait{{Step: "bee-sign-in"}, {Step: "sea-sign-in"}}
+	p, err := engine.New(append(signIns, step)...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := p.Apply(t.Context(), event.NewFanout(), engine.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sawC {
+		t.Error("C wasn't synced while the bee store's sign-in waited: C's sync waited for B's")
+	}
+	if res := report.Results["secret"]; res.State != check.Deferred || res.Reason != "The bee store is signed out" {
+		t.Errorf("the secrets finished %+v, want B not yet, in its store's words", res)
 	}
 }

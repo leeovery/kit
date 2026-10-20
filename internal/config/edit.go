@@ -305,77 +305,110 @@ func (c *Config) AddSection(kind, scope string) (bool, error) {
 // when there's none, and the file and its folder too; a kind with sections
 // for items declares it in e.Item's, whatever name it goes by, or makes one
 // going by e.As; and a list in the section holding its lines back for
-// e.Hold, when it says. The rest of the file is kept as it is.
+// e.Hold, when it says. The rest of the file is kept as it is. A line that
+// wouldn't read back, as the config and the kind read it (Section.Line),
+// is never written.
 func (c *Config) Declare(kind, scope string, e Entry) error {
-	d, f, err := c.editable(kind, scope)
+	p, err := c.declaring(kind, scope, e)
 	if err != nil {
 		return err
+	}
+	d, s := p.def, p.section
+	if s == nil {
+		s = p.file.add(p.made)
+	}
+	block := append([]string{p.line}, p.steps...)
+	switch b := splitBody(d.form, s.body); {
+	case d.sorted:
+		s.body = sortedLines(d.form, s.body, p.line)
+	case d.form == Paths:
+		b.insert(b.lastEntryEnd(0, len(b.lines)), block...)
+		s.body = b.lines
+	default:
+		b.insert(b.sortedPlace(0, len(b.lines), p.name), block...)
+		s.body = b.lines
+	}
+	return c.writeDecl(p.file, d, e.Name, true)
+}
+
+// CheckDeclare says why Declare would refuse e, writing nothing: nil when
+// it would declare it.
+func (c *Config) CheckDeclare(kind, scope string, e Entry) error {
+	_, err := c.declaring(kind, scope, e)
+	return err
+}
+
+// declaration is a line Declare writes, checked: its section's definition,
+// the file it goes in, its section there, or, when there's none, the one
+// made for it, its name, the line and the steps under it.
+type declaration struct {
+	def     sectionDef
+	file    *declFile
+	section *section
+	made    *section
+	name    string
+	line    string
+	steps   []string
+}
+
+// declaring is e's line as Declare writes it, in scope's declarations,
+// once every check passes: the name new to the file, the section's item one
+// a store knows and its name free, and the line reading back as the config
+// reads it, then as the kind does (Section.Line).
+func (c *Config) declaring(kind, scope string, e Entry) (declaration, error) {
+	d, f, err := c.editable(kind, scope)
+	if err != nil {
+		return declaration{}, err
 	}
 	arg, name := splitName(d, e.Name)
 	if d.items != nil {
 		arg = strings.TrimSuffix(e.Item, "/")
 		if arg != "" {
 			if err := d.items(arg); err != nil {
-				return err
+				return declaration{}, err
 			}
 		}
 	}
 	if e.As != "" && arg == "" {
-		return fmt.Errorf("%s %s names an item's section: say which item", asOption, e.As)
+		return declaration{}, fmt.Errorf("%s %s names an item's section: say which item", asOption, e.As)
 	}
 	if e.Hold != "" && len(d.holds) == 0 {
-		return fmt.Errorf("[%s] holds no lines back: only a list's sections, and [features], do", d.header)
+		return declaration{}, fmt.Errorf("[%s] holds no lines back: only a list's sections, and [features], do", d.header)
 	}
 	hold, err := readHold(d, e.Hold)
 	if err != nil {
-		return err
+		return declaration{}, err
 	}
 	line, err := entryText(d, name, e)
 	if err != nil {
-		return err
+		return declaration{}, err
 	}
 	steps, err := stepLines(d, e.Steps)
 	if err != nil {
-		return err
+		return declaration{}, err
 	}
 	if s, _ := f.holding(d, e.Name); s != nil {
-		return fmt.Errorf("%s is in %s already", e.Name, DeclFile(scope))
+		return declaration{}, fmt.Errorf("%s is in %s already", e.Name, DeclFile(scope))
 	}
-	s := f.find(d, arg, hold)
-	if s == nil {
+	p := declaration{def: d, file: f, section: f.find(d, arg, hold), name: name, line: line, steps: steps}
+	in := p.section
+	if in == nil {
 		if err := c.nameFree(d, scope, arg, e.As); err != nil {
-			return err
+			return declaration{}, err
 		}
-		s = f.add(&section{def: d, arg: arg, as: e.As, hold: hold})
+		p.made = &section{def: d, arg: arg, as: e.As, hold: hold}
+		in = p.made
 	}
-	block := append([]string{line}, steps...)
-	switch b := splitBody(d.form, s.body); {
-	case d.sorted:
-		s.body = sortedLines(d.form, s.body, line)
-	case d.form == Paths:
-		b.insert(b.lastEntryEnd(0, len(b.lines)), block...)
-		s.body = b.lines
-	default:
-		b.insert(b.sortedPlace(0, len(b.lines), name), block...)
-		s.body = b.lines
+	if d.line != nil {
+		read, err := in.entry(line)
+		if err == nil {
+			err = d.line(read)
+		}
+		if err != nil {
+			return declaration{}, fmt.Errorf("%s: %w", e.Name, err)
+		}
 	}
-	return c.writeDecl(f, d, e.Name, true)
-}
-
-// CheckName says why a section of kind's for item, made in scope's
-// declarations, can't go by the name as, as Declare would make it: the
-// name stands for another item in a file read with scope's. Nil when it
-// can, or when the file has the item's section already, which Declare
-// joins, naming nothing.
-func (c *Config) CheckName(kind, scope, item, as string) error {
-	d, f, err := c.editable(kind, scope)
-	if err != nil {
-		return err
-	}
-	if f.find(d, item, "") != nil {
-		return nil
-	}
-	return c.nameFree(d, scope, item, as)
+	return p, nil
 }
 
 // nameFree says why a section of d for item, made in scope's declarations,

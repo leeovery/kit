@@ -167,11 +167,12 @@ func itemArgs(item string) ([]string, error) {
 // Store keeps value in item as the field section/field, a concealed one,
 // by editing the item with its JSON on op's standard input, so the value is
 // never on a command line. A field there already is refused.
-func (Driver) Store(ctx context.Context, run runner.Runner, item, field, value string) (string, error) {
-	section, label, ok := strings.Cut(field, "/")
-	if !ok || section == "" || label == "" || strings.Contains(label, "/") {
-		return "", fmt.Errorf("%q isn't where in 1Password it goes: %s", field, about.Field)
+func (d Driver) Store(ctx context.Context, run runner.Runner, item, field, value string) (string, error) {
+	short, err := d.Field(field)
+	if err != nil {
+		return "", err
 	}
+	section, label, _ := strings.Cut(short, "/")
 	args, err := itemArgs(item)
 	if err != nil {
 		return "", err
@@ -211,7 +212,24 @@ func (Driver) Store(ctx context.Context, run runner.Runner, item, field, value s
 	if _, err := run.Run(ctx, runner.Command{Name: program, Args: slices.Concat([]string{"item", "edit"}, args), Input: string(edited), Timeout: opTimeout, Secret: true}); err != nil {
 		return "", fmt.Errorf("keep it in 1Password: %w", err)
 	}
-	return section + "/" + label, nil
+	return short, nil
+}
+
+// Field is field, a section's name and a field's, as in GitHub/token.
+func (Driver) Field(field string) (string, error) {
+	section, label, ok := strings.Cut(field, "/")
+	if !ok || section == "" || label == "" || strings.Contains(label, "/") {
+		return "", fmt.Errorf("%q isn't where in 1Password it goes: %s", field, about.Field)
+	}
+	return field, nil
+}
+
+// Attachment is name, an attachment's, with no /.
+func (Driver) Attachment(name string) (string, error) {
+	if name == "" || strings.Contains(name, "/") {
+		return "", fmt.Errorf("%q isn't an attachment's name: no /", name)
+	}
+	return name, nil
 }
 
 // assigned is a field's or attachment's name as op's assignments take it:
@@ -222,9 +240,9 @@ func assigned(name string) string {
 }
 
 // Attach keeps the file at path in item as an attachment named name.
-func (Driver) Attach(ctx context.Context, run runner.Runner, item, name, path string) (string, error) {
-	if strings.Contains(name, "/") {
-		return "", fmt.Errorf("%q isn't an attachment's name: no /", name)
+func (d Driver) Attach(ctx context.Context, run runner.Runner, item, name, path string) (string, error) {
+	if _, err := d.Attachment(name); err != nil {
+		return "", err
 	}
 	args, err := itemArgs(item)
 	if err != nil {

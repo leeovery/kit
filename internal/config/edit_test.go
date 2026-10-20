@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/leeovery/kit/internal/config"
@@ -423,8 +424,8 @@ func TestDeclareASecretsNameStandsForOneItem(t *testing.T) {
 		"shared, by a Mac's name": {"shared", "op://vault/A", "tokens", "--as tokens is op://vault/T in studio/declarations (line 1): a name stands for one item"},
 		"a Mac's, by shared's":    {"laptop", "op://vault/A", "keys", "--as keys is op://vault/S in shared/declarations (line 1): a name stands for one item"},
 	} {
-		if err := cfg.CheckName("secret", c.scope, c.item, c.as); err == nil || err.Error() != c.want {
-			t.Errorf("%s: CheckName() = %v, want %q", name, err, c.want)
+		if err := cfg.CheckDeclare("secret", c.scope, config.Entry{Name: "A", Value: "a/f", Item: c.item, As: c.as}); err == nil || err.Error() != c.want {
+			t.Errorf("%s: CheckDeclare() = %v, want %q", name, err, c.want)
 		}
 		if err := cfg.Declare("secret", c.scope, config.Entry{Name: "A", Value: "a/f", Item: c.item, As: c.as}); err == nil || err.Error() != c.want {
 			t.Errorf("%s: Declare() = %v, want %q", name, err, c.want)
@@ -440,9 +441,42 @@ func TestDeclareASecretsNameStandsForOneItem(t *testing.T) {
 		"another Mac's name":         {"laptop", "op://vault/A", "tokens"},
 		"no name":                    {"shared", "op://vault/A", ""},
 	} {
-		if err := cfg.CheckName("secret", c.scope, c.item, c.as); err != nil {
-			t.Errorf("%s: CheckName() = %v", name, err)
+		if err := cfg.CheckDeclare("secret", c.scope, config.Entry{Name: "A", Value: "a/f", Item: c.item, As: c.as}); err != nil {
+			t.Errorf("%s: CheckDeclare() = %v", name, err)
 		}
+	}
+}
+
+// kit never writes a line that wouldn't read back as the kind reads it:
+// Declare refuses it, as CheckDeclare says, and the file's untouched.
+func TestDeclareRefusesALineTheKindWontRead(t *testing.T) {
+	before := "[secrets op://vault/A]\nTOKEN a/b\n"
+	cfg := loadRepo(t, map[string]string{"laptop/declarations": before})
+	for _, c := range []struct {
+		e    config.Entry
+		want string
+	}{
+		{config.Entry{Name: "NEW", Value: "a/c --mode 644", Item: "op://vault/A"}, "NEW: --mode is a file's"},
+		{config.Entry{Name: "~/.x", Value: "a/c --mode abc", Item: "op://vault/A"}, "~/.x: --mode abc isn't a file's permissions, as in 600"},
+		{config.Entry{Name: "~/.x", Value: "a/c --mode 1000", Item: "op://vault/A"}, "~/.x: --mode 1000 isn't a file's permissions, as in 600"},
+		{config.Entry{Name: "NEW", Value: "op://vault/B/c --mode 644"}, "NEW: --mode is a file's"},
+		{config.Entry{Name: "NEW", Value: "op://vault/B/c", Item: "op://vault/A"}, "NEW: op://vault/B/c is in full"},
+		{config.Entry{Name: "NEW", Value: "elsewhere"}, `NEW: "elsewhere" isn't a reference kit knows`},
+	} {
+		for name, err := range map[string]error{
+			"CheckDeclare": cfg.CheckDeclare("secret", "laptop", c.e),
+			"Declare":      cfg.Declare("secret", "laptop", c.e),
+		} {
+			if err == nil || !strings.HasPrefix(err.Error(), c.want) {
+				t.Errorf("%s(%s %s) = %v, want %q", name, c.e.Name, c.e.Value, err, c.want)
+			}
+		}
+	}
+	if got := readFile(t, cfg, "laptop/declarations"); got != before {
+		t.Errorf("laptop = %q, want it untouched", got)
+	}
+	if err := cfg.CheckDeclare("secret", "laptop", config.Entry{Name: "~/.x", Value: "a/c --mode 644", Item: "op://vault/A"}); err != nil {
+		t.Errorf("CheckDeclare(a file's, --mode 644) = %v", err)
 	}
 }
 

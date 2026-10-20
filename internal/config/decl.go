@@ -121,6 +121,10 @@ type Section struct {
 	// name (--as), which stands for its item in every file. Nil for a kind
 	// without.
 	Items func(ref string) error
+	// Line, when set, says why one of its lines, as the config reads it,
+	// doesn't read as the kind reads it: nil when it does. kit never writes
+	// a line it refuses (Config.Declare).
+	Line func(Entry) error
 	// Held is whether it's a list whose sections can hold their lines back,
 	// options after the header saying what for: --after a step, or one of a
 	// step's things; --secret a secret they need, as in [homebrew formulae
@@ -148,6 +152,8 @@ type sectionDef struct {
 	// after the header, as in [secrets op://vault/item], says whether what
 	// follows the header is one (Section.Items).
 	items func(ref string) error
+	// line is the kind's own check of a line (Section.Line).
+	line func(Entry) error
 	// holds are the options the kind's sections take after the header,
 	// holding their lines back, what for (its hold): --after a step, or one
 	// of a step's things; --secret a secret they need, as in [homebrew
@@ -190,7 +196,7 @@ var (
 func sectionDefs(kinds []Section) []sectionDef {
 	defs := slices.Clone(ownLeading)
 	for _, k := range kinds {
-		d := sectionDef{header: k.Header, kind: k.Kind, form: k.Form, isKind: true, folders: k.Folders, items: k.Items, sorted: k.Sorted}
+		d := sectionDef{header: k.Header, kind: k.Kind, form: k.Form, isKind: true, folders: k.Folders, items: k.Items, line: k.Line, sorted: k.Sorted}
 		if k.Held {
 			d.holds = listOptions
 		}

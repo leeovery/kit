@@ -142,6 +142,13 @@ type notYet struct{ reason string }
 
 func (n *notYet) Error() string { return n.reason }
 
+// IsNotYet reports whether err says a step can't be applied yet (NotYet),
+// rather than that applying it failed.
+func IsNotYet(err error) bool {
+	_, ok := errors.AsType[*notYet](err)
+	return ok
+}
+
 // NotThere is why what a step's applying needs can't be done without
 // things, by name, that haven't come: needs TOKEN, which isn't there yet.
 func NotThere(things []string) string {
@@ -1218,7 +1225,7 @@ func (d *dispatch) step(ctx context.Context, s Step) check.Result {
 		d.sink.Emit(event.StepStarted{Time: d.now(), Step: s.Name, Doing: "applying"})
 		before := res
 		if err := applySafely(event.WithChanging(ctx), s, res); err != nil {
-			if _, ok := errors.AsType[*notYet](err); ok {
+			if IsNotYet(err) {
 				return check.Result{State: check.Deferred, Reason: err.Error()}
 			}
 			return check.Result{State: check.Failed, Reason: Reason(err), Phase: check.Applying}
@@ -1327,7 +1334,11 @@ func (d *dispatch) settled(ctx context.Context, s Step, w Wait, lk *look) (came,
 	default:
 	}
 	switch {
-	case w.Ready != nil && !d.isPutting(w.Step, w.Thing) && w.there(ctx):
+	// Asked again after the look: a step starts putting a thing in place
+	// (Putting) before a look can find it, so a look finding it between a
+	// first ask and the step starting isn't taken as it being in place.
+	// The first spares the look while it's being put.
+	case w.Ready != nil && !d.isPutting(w.Step, w.Thing) && w.there(ctx) && !d.isPutting(w.Step, w.Thing):
 		return true, true
 	case d.isFreed(s.Name, w.Step):
 		return w.Ready == nil, true

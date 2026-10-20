@@ -70,7 +70,7 @@ var Descriptor = kind.Descriptor{
 	Name:    kindName,
 	Label:   "Secrets",
 	Group:   kind.Secrets,
-	Section: &config.Section{Kind: kindName, Header: "secrets", Form: config.Secrets, Sorted: true, Items: checkItem},
+	Section: &config.Section{Kind: kindName, Header: "secrets", Form: config.Secrets, Sorted: true, Items: checkItem, Line: checkLine},
 	Row:     "Secrets",
 	New:     func(d *kind.Deps) kind.Kind { return New(d.Run, d.Home) },
 }
@@ -119,7 +119,7 @@ func (s *Secrets) Verb() string { return "synced" }
 func (s *Secrets) Values(list config.List) (config.List, error) {
 	s.declared = nil
 	for _, e := range list.Entries {
-		sec, err := s.parse(e)
+		sec, err := parse(e)
 		if err != nil {
 			s.declared = nil
 			return list, fmt.Errorf("%s: %s: %w", e.Pos(), e.Name, err)
@@ -129,7 +129,14 @@ func (s *Secrets) Values(list config.List) (config.List, error) {
 	return list, nil
 }
 
-func (s *Secrets) parse(e config.Entry) (Secret, error) {
+// checkLine says why e's line doesn't read as a secret's: nil when it does.
+func checkLine(e config.Entry) error {
+	_, err := parse(e)
+	return err
+}
+
+// parse reads e's line as a secret's: its reference, then its options.
+func parse(e config.Entry) (Secret, error) {
 	sec := Secret{Name: e.Name, Mode: 0o600, Note: e.Note}
 	words, err := config.Words(e.Value)
 	if err != nil {
@@ -139,7 +146,7 @@ func (s *Secrets) parse(e config.Entry) (Secret, error) {
 		return sec, errors.New("where its store keeps it comes after the name")
 	}
 	ref := words[0]
-	if err := s.place(&sec, e, ref); err != nil {
+	if err := place(&sec, e, ref); err != nil {
 		return sec, err
 	}
 	for i := 1; i < len(words); i++ {
@@ -166,7 +173,7 @@ func (s *Secrets) parse(e config.Entry) (Secret, error) {
 // field of the item e's section names, or, in a plain section, in full, its
 // form picking its store. In an item's section, a reference of a store's
 // own, a value's or an item's, is refused: it's not short for a field.
-func (s *Secrets) place(sec *Secret, e config.Entry, ref string) error {
+func place(sec *Secret, e config.Entry, ref string) error {
 	ds := stores()
 	if e.Item == "" {
 		d, ok := ds.forRef(ref)

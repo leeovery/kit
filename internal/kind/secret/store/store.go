@@ -37,12 +37,19 @@ type Driver interface {
 	// ReadMany reads the values at refs at once, as Read does each,
 	// failing whole when one won't read.
 	ReadMany(ctx context.Context, run runner.Runner, refs []string) (map[string]string, error)
-	// Store keeps value in item, where field says, in the store's own
-	// words (About.Field), refusing a field there already: its reference,
-	// short for item.
+	// Field is field short for item, where Store would keep a value, as
+	// Store returns it: an error, in the store's own words (About.Field),
+	// when it isn't where one can go. It asks the store nothing.
+	Field(field string) (string, error)
+	// Attachment is name short for item, where Attach would keep a file, as
+	// Attach returns it: an error when it isn't an attachment's name. It
+	// asks the store nothing.
+	Attachment(name string) (string, error)
+	// Store keeps value in item, where field says (Field), refusing a field
+	// there already: its reference, short for item.
 	Store(ctx context.Context, run runner.Runner, item, field, value string) (string, error)
-	// Attach keeps the file at path in item, named name: its reference,
-	// short for item.
+	// Attach keeps the file at path in item, named name (Attachment): its
+	// reference, short for item.
 	Attach(ctx context.Context, run runner.Runner, item, name, path string) (string, error)
 	// Delete deletes the value short names in item.
 	Delete(ctx context.Context, run runner.Runner, item, short string) error

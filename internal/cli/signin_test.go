@@ -9,6 +9,7 @@ import (
 	"github.com/leeovery/kit/internal/ask"
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/kind/login"
+	"github.com/leeovery/kit/internal/kind/secret/onepassword"
 	"github.com/leeovery/kit/internal/kind/secret/onepassword/optest"
 	"github.com/leeovery/kit/internal/logs"
 	"github.com/leeovery/kit/internal/runner"
@@ -135,8 +136,12 @@ func TestApplyPlainRaisesNoSignIn(t *testing.T) {
 	f.On("op", "account", "list", "--format", "json").Prints("[]")
 
 	out, _, _ := w.run(t, "apply")
-	if !strings.Contains(out, "1Password isn't signed in, or its CLI isn't turned on") || len(cards(w.lastLog(t))) > 0 || strings.Contains(out, "1password-sign-in") {
-		t.Errorf("kit apply printed\n%s\nwant nothing raised, the secrets not synced in 1Password's words", out)
+	records := w.lastLog(t)
+	if len(cards(records)) > 0 || strings.Contains(out, "1password-sign-in") {
+		t.Errorf("kit apply printed\n%s\nwant nothing raised", out)
+	}
+	if res, ok := finished(records, "secret"); !ok || res.State != check.Deferred || res.Reason != (onepassword.Driver{}).About().SignedOut {
+		t.Errorf("the secrets finished %+v, %v: want them not yet, in 1Password's words alone", res, ok)
 	}
 }
 
@@ -154,7 +159,7 @@ func TestApplySignInWaitsForTheApp(t *testing.T) {
 	w.run(t, "apply")
 	records := w.lastLog(t)
 	res, ok := finished(records, "1password-sign-in")
-	if len(cards(records)) > 0 || !ok || res.State != check.Deferred || !strings.Contains(res.Reason, "needs 1Password, which isn't there yet") {
+	if len(cards(records)) > 0 || !ok || res.State != check.Deferred || res.Reason != "needs 1Password, which isn't there yet" {
 		t.Errorf("the sign-in finished %+v, %v, cards %+v: want it waiting for the app, nothing raised", res, ok, cards(records))
 	}
 }
@@ -174,7 +179,7 @@ func TestApplySignInWaitsForTheProgram(t *testing.T) {
 	w.run(t, "apply")
 	records := w.lastLog(t)
 	for _, step := range []string{"1password-sign-in", "secret"} {
-		if res, ok := finished(records, step); !ok || res.State != check.Deferred || !strings.Contains(res.Reason, "needs op, which isn't there yet") {
+		if res, ok := finished(records, step); !ok || res.State != check.Deferred || res.Reason != "needs op, which isn't there yet" {
 			t.Errorf("%s finished %+v, %v: want it waiting for op", step, res, ok)
 		}
 	}

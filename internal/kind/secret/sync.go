@@ -200,9 +200,9 @@ func (s *Secrets) refs(d store.Driver) []string {
 
 // Sync reads every declared secret from its store and puts each in place:
 // first the secrets of the stores ready now, signed in with their programs
-// on kit's PATH; then, store by store, each other's, once what it waits for
-// has come, in a run that applies: its program, and its sign-in, raised at
-// a terminal (Cards). ~/.secrets.zsh is written whole each time (a variable
+// on kit's PATH; then, waiting for the rest together, each other's as soon
+// as what it waits for has come, in a run that applies: its program, and
+// its sign-in, raised at a terminal (Cards). ~/.secrets.zsh is written whole each time (a variable
 // not read keeps its line, so a partial read never shrinks it), each file
 // beside its place then renamed into it. A store signed out, or whose
 // program never comes, holds back its own secrets alone (Report.Held); one
@@ -232,18 +232,8 @@ func (s *Secrets) Sync(ctx context.Context) (Report, error) {
 	if err := sy.put(ctx); err != nil {
 		return sy.report, err
 	}
-	for _, d := range later {
-		if !sy.await(ctx, d) {
-			continue
-		}
-		if err := s.signedIn(ctx, d); err != nil {
-			sy.down[d.About().ID] = err
-			continue
-		}
-		sy.read(ctx, d)
-		if err := sy.put(ctx); err != nil {
-			return sy.report, err
-		}
+	if err := sy.awaitStores(ctx, later); err != nil {
+		return sy.report, err
 	}
 	return sy.finish()
 }
@@ -273,19 +263,87 @@ func (sy *syncing) read(ctx context.Context, d store.Driver) {
 	maps.Copy(sy.values, got)
 }
 
-// await waits, partway through applying, for what d's secrets wait for: its
-// program on kit's PATH, then its sign-in, should the run take it. It
-// reports whether the program came, d held back when it didn't.
-func (sy *syncing) await(ctx context.Context, d store.Driver) bool {
+// awaitStores waits, partway through applying, for the stores held at
+// first, together, each read and its secrets put in place as soon as it's
+// ready, whatever the rest are waiting for: one store never holds back
+// another's secrets. Those still waiting once the run's gone quiet, with
+// nothing at work that could bring what they wait for, or stopped, are held
+// back.
+func (sy *syncing) awaitStores(ctx context.Context, held []store.Driver) error {
+	for len(held) > 0 {
+		settled := func(ctx context.Context) bool {
+			return slices.ContainsFunc(held, func(d store.Driver) bool { return sy.pending(ctx, d) == "" })
+		}
+		awaited := sy.awaited(ctx, held)
+		came := ctx.Err() == nil && engine.Await(ctx, engine.Wait{Thing: awaited, Ready: settled}, "waiting for "+awaited)
+		var still []store.Driver
+		for _, d := range held {
+			switch {
+			case sy.pending(ctx, d) == "":
+				if err := sy.settle(ctx, d); err != nil {
+					return err
+				}
+			case !came:
+				sy.down[d.About().ID] = sy.heldBack(d)
+			default:
+				still = append(still, d)
+			}
+		}
+		held = still
+	}
+	return nil
+}
+
+// pending is what store d, held at first, still waits for: its program on
+// kit's PATH, or its sign-in, while the run's step for it hasn't finished.
+// "" once it's settled: its program there, and signed in, or with no
+// sign-in to come.
+func (sy *syncing) pending(ctx context.Context, d store.Driver) string {
 	program := d.About().Program
-	there := engine.Wait{Thing: program, Ready: func(context.Context) bool { return runner.Has(sy.s.run, program) }}
-	if !engine.Await(ctx, there, "waiting for "+program) {
-		sy.down[d.About().ID] = holdBack(engine.NotThere([]string{program}))
-		return false
+	if !runner.Has(sy.s.run, program) {
+		return program
 	}
 	name := signInName(d)
-	engine.Await(ctx, engine.Wait{Step: name}, "waiting for "+engine.Title(ctx, name))
-	return ctx.Err() == nil
+	if d.Session(ctx, sy.s.run) == store.SignedOut && engine.Takes(ctx, name) && !finished(ctx, name) {
+		return engine.Title(ctx, name)
+	}
+	return ""
+}
+
+// awaited says what the stores held wait for, each once.
+func (sy *syncing) awaited(ctx context.Context, held []store.Driver) string {
+	var what []string
+	for _, d := range held {
+		if w := sy.pending(ctx, d); w != "" && !slices.Contains(what, w) {
+			what = append(what, w)
+		}
+	}
+	return strings.Join(what, ", ")
+}
+
+// heldBack is why store d's secrets are held back, its wait over without
+// it settling: its program isn't there, or it isn't signed in.
+func (sy *syncing) heldBack(d store.Driver) error {
+	if program := d.About().Program; !runner.Has(sy.s.run, program) {
+		return holdBack(engine.NotThere([]string{program}))
+	}
+	return holdBack(d.About().SignedOut)
+}
+
+// settle reads store d's secrets and puts them in place, now it's settled:
+// held back when it's still signed out.
+func (sy *syncing) settle(ctx context.Context, d store.Driver) error {
+	if err := sy.s.signedIn(ctx, d); err != nil {
+		sy.down[d.About().ID] = err
+		return nil
+	}
+	sy.read(ctx, d)
+	return sy.put(ctx)
+}
+
+// finished reports whether the run's step called name has finished.
+func finished(ctx context.Context, name string) bool {
+	return slices.ContainsFunc(engine.Finished(ctx), func(r engine.StepResult) bool { return r.Step == name })
 }
 
 // put puts in place what's been read and isn't yet, as Sync says, and has
@@ -378,26 +436,28 @@ func (sy *syncing) finish() (Report, error) {
 
 // allDown is why the sync went no further, when nothing was read and every
 // store used is down alike, each held back or each failing: their reasons
-// together. Nil otherwise, each store's secrets reported as it stands.
+// together, held back when each is. Nil otherwise, each store's secrets
+// reported as it stands.
 func (sy *syncing) allDown() error {
 	if len(sy.values) > 0 || len(sy.used) == 0 || len(sy.down) < len(sy.used) {
 		return nil
 	}
-	errs := make([]error, len(sy.used))
+	said := make([]string, len(sy.used))
 	held := 0
 	for i, d := range sy.used {
-		errs[i] = sy.down[d.About().ID]
-		if isHeld(errs[i]) {
+		err := sy.down[d.About().ID]
+		said[i] = err.Error()
+		if isHeld(err) {
 			held++
 		}
 	}
-	switch {
-	case held != 0 && held != len(errs):
-		return nil
-	case len(errs) == 1:
-		return errs[0]
+	switch held {
+	case len(said):
+		return holdBack(strings.Join(said, "; "))
+	case 0:
+		return errors.New(strings.Join(said, "; "))
 	}
-	return errors.Join(errs...)
+	return nil
 }
 
 // header heads ~/.secrets.zsh, naming the stores used, its values' sources.

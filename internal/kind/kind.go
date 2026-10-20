@@ -551,8 +551,14 @@ func install(ctx context.Context, k Kind, declared config.List, names, env []str
 	unwatch()
 	stop()
 	engine.Changed(ctx)
-	if err == nil {
+	switch values := runner.SecretValues(installing); {
+	case err == nil:
 		return nil
+	case engine.IsNotYet(err) && len(values) > 0:
+		return engine.NotYet(redact.Text(err.Error(), values...))
+	case engine.IsNotYet(err):
+		// Held back, not failed: it says why in its own words.
+		return err
 	}
 	// An install can fail having installed all it was given: a formula
 	// Homebrew installs but can't link, as another's linked in its place, is

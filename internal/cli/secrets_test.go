@@ -197,6 +197,7 @@ func TestAddASecretAsksForNoValueTillItKnowsWhereItGoes(t *testing.T) {
 		}
 	}
 	w.notTyped = ask.ErrCancelled
+	w.fake.On("op", "whoami")
 	w.run(t, "secret", "add", "NEW_ONE", "--in", "tokens", "--field", "S/f")
 	if !slices.Equal(w.typedFor, []string{"NEW_ONE  needs its value"}) {
 		t.Errorf("asked for %q, want its value, once it knew where it goes", w.typedFor)
@@ -212,11 +213,57 @@ func TestAddASecretSharedByANameAMacHas(t *testing.T) {
 	w.writeSection(t, "studio", "secrets op://vault/Other --as tokens", "OTHER Section/other\n")
 	w.stdin = "x"
 	_, errOut, code := w.run(t, "secret", "add", "NEW_ONE", "--shared", "--in", "tokens", "--field", "Section/new", "--stdin")
-	if code == 0 || !strings.Contains(errOut, "--in tokens: --as tokens is op://vault/Other in studio/declarations (line ") || !strings.Contains(errOut, "a name stands for one item") {
+	if code == 0 || !strings.Contains(errOut, "--as tokens is op://vault/Other in studio/declarations (line ") || !strings.Contains(errOut, "a name stands for one item") {
 		t.Errorf("printed %q, exit %d", errOut, code)
 	}
 	if strings.Contains(w.read(t, filepath.Join(".config", "kit", "shared", "declarations")), "tokens") {
 		t.Error("the shared file took a block going by tokens")
+	}
+}
+
+// Nothing kit secret add would refuse to declare is asked for, at a
+// terminal, or stored, without one: a line that wouldn't read back as the
+// kind reads it, a name that isn't one or is declared already, a field the
+// store wouldn't take, or a store that isn't signed in.
+func TestAddASecretChecksAllBeforeTheValue(t *testing.T) {
+	for _, c := range []struct {
+		name, want string
+		args       []string
+		signedOut  bool
+	}{
+		{"--mode on a variable", "NEW_ONE: --mode is a file's", []string{"NEW_ONE", "--item", "op://vault/Item", "--field", "S/f", "--mode", "644"}, false},
+		{"--mode that isn't one", "~/.x: --mode abc isn't a file's permissions, as in 600", []string{"~/.x", "--item", "op://vault/Item", "--field", "S/f", "--mode", "abc"}, false},
+		{"--mode past 777", "~/.x: --mode 1000 isn't a file's permissions, as in 600", []string{"~/.x", "--item", "op://vault/Item", "--field", "S/f", "--mode", "1000"}, false},
+		{"--ref with --mode on a variable", "NEW_ONE: --mode is a file's", []string{"NEW_ONE", "--ref", "op://vault/Item/S/f", "--mode", "644"}, false},
+		{"declared already", "TOKEN is in laptop/declarations already", []string{"TOKEN", "--item", "op://vault/Item", "--field", "S/f"}, false},
+		{"a name starting with a digit", `"9BAD" isn't a name`, []string{"9BAD", "--item", "op://vault/Item", "--field", "S/f"}, false},
+		{"a name with a hyphen", `"bad-name" isn't a name`, []string{"bad-name", "--item", "op://vault/Item", "--field", "S/f"}, false},
+		{"a field with no section", `"nosection" isn't where in 1Password it goes: <section>/<field>`, []string{"NEW_ONE", "--item", "op://vault/Item", "--field", "nosection"}, false},
+		{"a field in full", `"op://vault/Other/x" isn't where in 1Password it goes`, []string{"NEW_ONE", "--item", "op://vault/Item", "--field", "op://vault/Other/x"}, false},
+		{"signed out", "1Password isn't signed in", []string{"NEW_ONE", "--item", "op://vault/Item", "--field", "S/f"}, true},
+	} {
+		for _, terminal := range []bool{true, false} {
+			w := secretsWorld(t)
+			w.terminal, w.stdin = terminal, "the value"
+			if c.signedOut {
+				w.fake.On("op", "whoami").Exits(1)
+				w.fake.On("op", "account", "list", "--format", "json").Prints("[]")
+			} else {
+				w.fake.On("op", "whoami")
+			}
+			args := append([]string{"secret", "add"}, c.args...)
+			if !terminal && !slices.Contains(args, "--ref") {
+				args = append(args, "--stdin")
+			}
+			_, errOut, code := w.run(t, args...)
+			stored := slices.ContainsFunc(w.fake.Calls(), func(call string) bool { return strings.HasPrefix(call, "op item") })
+			if code != 2 || !strings.Contains(ansi.Strip(errOut), c.want) || len(w.typedFor) > 0 || stored {
+				t.Errorf("%s, at a terminal %v: printed %q, exit %d, asked for %q, ran %q; want it refused with %q, nothing asked or stored", c.name, terminal, errOut, code, w.typedFor, w.fake.Calls(), c.want)
+			}
+			if got := w.read(t, filepath.Join(".config", "kit", "laptop", "declarations")); strings.Contains(got, "NEW_ONE") || strings.Contains(got, "~/.x") {
+				t.Errorf("%s: laptop's declarations = %q, want nothing declared", c.name, got)
+			}
+		}
 	}
 }
 

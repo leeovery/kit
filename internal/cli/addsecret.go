@@ -54,61 +54,32 @@ func (r *run) secrets() (*secret.Secrets, error) {
 // the file's block for that item, made when there's none; a reference in an
 // item a block of the file is for goes in that block, short, and any other
 // in the plain [secrets], in full. Everything's checked before the value's
-// asked for, or read.
+// asked for, or read (secretTarget).
 func (a *app) addSecret(ctx context.Context, r *run, names []string, opts addOptions) error {
 	so := opts.secret
 	k, err := r.secrets()
 	if err != nil {
 		return err
 	}
-	if err := checkSources(so, a.pretty(a.Stdout)); err != nil {
-		return err
-	}
-	if so.ref != "" {
-		if _, err := secret.ValueStore(so.ref); err != nil {
-			return fmt.Errorf("--ref: %w", err)
-		}
-	}
-	name := r.tildePaths(names)[0]
-	scope := r.scope(opts.shared)
-	places, err := r.cfg.Places(secretKind, r.machine)
+	at, err := a.secretTarget(ctx, r, k, r.tildePaths(names)[0], opts)
 	if err != nil {
 		return err
 	}
-	item, as, err := secretPlace(so, places, scope)
+	value, err := a.secretValue(ctx, r, at.entry.Name, so)
 	if err != nil {
 		return err
 	}
-	if err := r.cfg.CheckName(secretKind, scope, item, as); err != nil {
-		return fmt.Errorf("--in %s: %w", as, err)
-	}
-	d, err := storeOf(item, so.ref)
-	if err != nil {
-		return err
-	}
-	store := d.About()
-	if so.ref == "" && so.from == "" && so.field == "" {
-		return fmt.Errorf("say where in %s's item it goes: --field %s", store.Name, store.Field)
-	}
-	value, err := a.secretValue(ctx, r, name, so)
-	if err != nil {
-		return err
-	}
-	c := startChanges(r, []string{name})
-	c.step(ctx, name, func(ctx context.Context) check.Result {
-		if err := k.Ready(ctx, d); err != nil {
-			return check.Result{State: check.Failed, Reason: err.Error()}
-		}
-		short := so.ref
+	d, item := at.store, at.entry.Item
+	c := startChanges(r, []string{at.entry.Name})
+	c.step(ctx, at.entry.Name, func(ctx context.Context) check.Result {
+		short := at.short
 		var err error
 		switch {
-		case so.ref != "" && item != "":
-			short, _ = d.Short(item, so.ref)
 		case so.ref != "":
 		case so.from != "":
-			short, err = k.Attach(ctx, d, item, cmp.Or(so.field, filepath.Base(so.from)), so.from)
+			short, err = k.Attach(ctx, d, item, short, so.from)
 		default:
-			short, err = k.Store(ctx, d, item, so.field, value)
+			short, err = k.Store(ctx, d, item, short, value)
 		}
 		if err != nil {
 			return check.Result{State: check.Failed, Reason: err.Error()}
@@ -118,14 +89,12 @@ func (a *app) addSecret(ctx context.Context, r *run, names []string, opts addOpt
 				return check.Result{State: check.Failed, Reason: "stored, but reading it back failed: " + err.Error()}
 			}
 		}
-		line := config.Quote(short)
-		if so.mode != "" {
-			line += " --mode " + so.mode
+		e := at.entry
+		e.Value = secretLine(short, so.mode)
+		if err := r.cfg.Declare(secretKind, at.scope, e); err != nil {
+			return check.Result{State: check.Failed, Reason: "kept in " + d.About().Name + ", but couldn't declare: " + err.Error()}
 		}
-		if err := r.cfg.Declare(secretKind, scope, config.Entry{Name: name, Value: line, Note: opts.note, Item: item, As: as}); err != nil {
-			return check.Result{State: check.Failed, Reason: "kept in " + store.Name + ", but couldn't declare: " + err.Error()}
-		}
-		c.changed(config.DeclFile(scope))
+		c.changed(config.DeclFile(at.scope))
 		list, err := r.cfg.List(secretKind, r.machine)
 		if err == nil {
 			_, err = k.Values(list)
@@ -137,19 +106,95 @@ func (a *app) addSecret(ctx context.Context, r *run, names []string, opts addOpt
 		switch {
 		case err != nil:
 			return check.Result{State: check.Failed, Reason: "declared, but couldn't sync: " + err.Error()}
-		case report.Failed[name] != "":
-			return check.Result{State: check.Failed, Reason: "declared, but couldn't sync it: " + report.Failed[name]}
-		case report.Held[name] != "":
-			return check.Result{State: check.Failed, Reason: "declared, but couldn't sync it yet: " + report.Held[name]}
+		case report.Failed[e.Name] != "":
+			return check.Result{State: check.Failed, Reason: "declared, but couldn't sync it: " + report.Failed[e.Name]}
+		case report.Held[e.Name] != "":
+			return check.Result{State: check.Failed, Reason: "declared, but couldn't sync it yet: " + report.Held[e.Name]}
 		}
-		summary := "declared in " + scope + ", synced"
+		summary := "declared in " + at.scope + ", synced"
 		if so.ref == "" {
-			summary = "kept in " + store.Name + " (" + d.Join(item, short) + ") and read back; " + summary
+			summary = "kept in " + d.About().Name + " (" + d.Join(item, short) + ") and read back; " + summary
 		}
 		return check.Result{State: check.OK, Summary: summary}
 	})
-	c.sync(ctx, commitMessage("add", secretKind, []string{name}, r.machine, opts.note))
+	c.sync(ctx, commitMessage("add", secretKind, []string{at.entry.Name}, r.machine, opts.note))
 	return c.finish()
+}
+
+// secretTarget is where kit secret add puts a secret: the file, by its
+// scope; its store; where in the store, short (as the store will return it,
+// for a new value); and its line, as it'll be declared.
+type secretTarget struct {
+	scope string
+	store store.Driver
+	short string
+	entry config.Entry
+}
+
+// secretTarget checks everything kit secret add can before it asks for a
+// value, or reads one, or stores one: where the value comes from and where
+// it goes (--in, --item or --ref), where in its item (--field, by the
+// store's form), the line as it'll be declared, read back as the kind
+// reads it, its name free in the file, and the store answering.
+func (a *app) secretTarget(ctx context.Context, r *run, k *secret.Secrets, name string, opts addOptions) (secretTarget, error) {
+	so := opts.secret
+	if err := checkSources(so, a.pretty(a.Stdout)); err != nil {
+		return secretTarget{}, err
+	}
+	if so.ref != "" {
+		if _, err := secret.ValueStore(so.ref); err != nil {
+			return secretTarget{}, fmt.Errorf("--ref: %w", err)
+		}
+	}
+	at := secretTarget{scope: r.scope(opts.shared)}
+	places, err := r.cfg.Places(secretKind, r.machine)
+	if err != nil {
+		return at, err
+	}
+	item, as, err := secretPlace(so, places, at.scope)
+	if err != nil {
+		return at, err
+	}
+	if at.store, err = storeOf(item, so.ref); err != nil {
+		return at, err
+	}
+	if at.short, err = secretShort(at.store, item, so); err != nil {
+		return at, err
+	}
+	at.entry = config.Entry{Name: name, Value: secretLine(at.short, so.mode), Note: opts.note, Item: item, As: as}
+	if err := r.cfg.CheckDeclare(secretKind, at.scope, at.entry); err != nil {
+		return at, err
+	}
+	return at, k.Ready(ctx, at.store)
+}
+
+// secretShort is where in item, or in full, so says a secret's value is, or
+// goes, as its store will return it: --ref's, short for item when it's in
+// it; an attachment's name, --field or the file's own; or --field, as the
+// store says a field.
+func secretShort(d store.Driver, item string, so secretOptions) (string, error) {
+	switch {
+	case so.ref != "" && item != "":
+		short, _ := d.Short(item, so.ref)
+		return short, nil
+	case so.ref != "":
+		return so.ref, nil
+	case so.from != "":
+		return d.Attachment(cmp.Or(so.field, filepath.Base(so.from)))
+	case so.field == "":
+		return "", fmt.Errorf("say where in %s's item it goes: --field %s", d.About().Name, d.About().Field)
+	}
+	return d.Field(so.field)
+}
+
+// secretLine is a secret's line, after its name: where its value is, and a
+// file's mode, when given.
+func secretLine(short, mode string) string {
+	line := config.Quote(short)
+	if mode != "" {
+		line += " --mode " + mode
+	}
+	return line
 }
 
 // storeOf is the store of item, when there's one, else of ref, in full.
