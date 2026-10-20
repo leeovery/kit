@@ -416,10 +416,10 @@ package, kit asks for an administrator's password once, through `sudo -v`, as th
 under its heading, which holds still till it's answered. The run goes on meanwhile, and only
 what needs the password waits for it, its row saying so, however long the answer takes: kit
 gives the question no time limit, and an answer that came after sudo's own five minutes ended
-it is given to sudo again. What a kind puts off for the answer, nothing waits behind for order's
-sake, as the formulae otherwise wait behind what the casks install first: once the casks step
-has put a cask off, a cask from a tap it's just added as much as any, only what waits for that
-cask itself waits for the answer. Once it's given, kit keeps sudo's hold fresh while it runs,
+it is given to sudo again. What a kind is done with for now, tried, failed included, or put off
+for the answer, nothing waits behind for order's sake, as the formulae otherwise wait behind
+what the casks install first: once the casks step has put a cask off, a cask from a tap it's
+just added as much as any, only what waits for that cask itself waits for the answer. Once it's given, kit keeps sudo's hold fresh while it runs,
 giving the password again if sudo forgets it (the person asked only if sudo refuses the one
 kept), what needs it waiting meanwhile, an App Store app at a time; an App Store install sudo
 says has forgotten it, as after the Mac slept, has kit find out at once, ask again if it must,

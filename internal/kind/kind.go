@@ -368,9 +368,10 @@ type Placing struct {
 	// it isn't given; each install can wait for it again (AwaitAdmin). Nil
 	// when kit doesn't ask as the run goes on.
 	Admin Password
-	// PutOff, when set, is told the lines put off till kit has the
-	// password: nothing waits behind them (Behind) for them now.
-	PutOff func(things []string)
+	// Settled, when set, is told the lines the kind's done with for now:
+	// tried, whether they went in or not, or put off till kit has the
+	// password. Nothing waits behind them (Behind) any more.
+	Settled func(things []string)
 }
 
 // Password is an administrator's password kit asks for as the run goes on.
@@ -513,6 +514,12 @@ func installApart(ctx context.Context, k Kind, declared config.List, placing Pla
 	// later are the installs of what waits for the password, each as it
 	// would have gone in.
 	var later []batch
+	settled := func(names []string) {
+		if placing.Settled != nil && len(names) > 0 {
+			placing.Settled(names)
+			engine.Changed(ctx)
+		}
+	}
 	put := func(names, env []string) {
 		var now, wait []string
 		for _, name := range names {
@@ -524,14 +531,12 @@ func installApart(ctx context.Context, k Kind, declared config.List, placing Pla
 		}
 		if len(wait) > 0 {
 			later = append(later, batch{names: wait, env: env})
-			if placing.PutOff != nil {
-				placing.PutOff(wait)
-				engine.Changed(ctx)
-			}
+			settled(wait)
 		}
 		if err := install(ctx, k, declared, now, env); err != nil {
 			errs = append(errs, err)
 		}
+		settled(now)
 	}
 	put(first, nil)
 	unmet := map[string]string{}

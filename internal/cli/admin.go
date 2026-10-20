@@ -46,7 +46,7 @@ func (a *app) holdAdmin(ctx context.Context, r *run, wanted map[string][]string)
 	if !needsAdmin(ctx, r, wanted) {
 		return ctx, nil, func() {}
 	}
-	h := newAdminHold()
+	h := newAdminHold(r.run, r.askpass)
 	h.settle(a.askAdmin(ctx, r, wanted))
 	r.tellAdmin(h.held)
 	installing = kind.WithPassword(ctx, h)
@@ -69,7 +69,7 @@ func (a *app) holdAdminAlongside(ctx context.Context, r *run, wanted map[string]
 	if !needsAdmin(ctx, r, wanted) {
 		return func() {}
 	}
-	h := newAdminHold()
+	h := newAdminHold(r.run, r.askpass)
 	r.hold = h
 	r.tellAdmin(h.held)
 	about := a.readyToAsk(r, wanted)
@@ -105,8 +105,12 @@ type adminHold struct {
 	keeper *sudoKeeper
 }
 
-func newAdminHold() *adminHold {
-	return &adminHold{answered: make(chan struct{})}
+// newAdminHold is a password being asked for, kept, once held, through
+// run, given again through asks.
+func newAdminHold(run runner.Runner, asks *askpass.Server) *adminHold {
+	h := &adminHold{answered: make(chan struct{})}
+	h.keeper = &sudoKeeper{run: run, asks: asks, h: h}
+	return h
 }
 
 // turn is what's closed once kit's asked.
@@ -209,13 +213,10 @@ func (h *adminHold) Forgotten(ctx context.Context) bool {
 	if h.asking() {
 		return h.Wait(ctx)
 	}
-	h.mu.Lock()
-	k := h.keeper
-	h.mu.Unlock()
-	if k == nil || !h.Held() {
-		return h.Held()
+	if !h.Held() {
+		return false
 	}
-	return k.renew(ctx)
+	return h.keeper.renew(ctx)
 }
 
 // afterAdmin is apply, a step's whose apply needs an administrator's
@@ -257,13 +258,9 @@ func sudoHolds(r *run) func(context.Context) bool {
 // keepSudo keeps sudo's hold on the run's password, as h holds it, fresh
 // (sudoKeeper) till the stop it returns.
 func (r *run) keepSudo(ctx context.Context, h *adminHold) (stop func()) {
-	k := &sudoKeeper{run: r.run, asks: r.askpass, h: h}
-	h.mu.Lock()
-	h.keeper = k
-	h.mu.Unlock()
 	ctx, cancel := context.WithCancel(ctx)
 	var wg sync.WaitGroup
-	wg.Go(func() { k.keep(ctx, sudoRefresh) })
+	wg.Go(func() { h.keeper.keep(ctx, sudoRefresh) })
 	return func() {
 		cancel()
 		wg.Wait()
@@ -315,10 +312,20 @@ func (k *sudoKeeper) keep(ctx context.Context, interval time.Duration) {
 // kit's field; the log has sudo -n -v failing, then sudo -v given it. It
 // isn't held meanwhile, and what sudo takes is kept; once it couldn't be
 // given again, it's forgotten, for nothing to be given a wrong one. It
-// reports whether it's held.
+// reports whether it's held. A renewal under way already, as the person's
+// asked, is waited for, the step ctx runs giving its job up meanwhile, and
+// what it came to stands: one refused isn't asked again.
 func (k *sudoKeeper) renew(ctx context.Context) bool {
-	k.mu.Lock()
+	if !k.mu.TryLock() {
+		event.Say(ctx, event.Doing{Says: "waiting for an administrator's password"})
+		back := engine.Release(ctx)
+		k.mu.Lock()
+		back()
+	}
 	defer k.mu.Unlock()
+	if !k.h.Held() {
+		return false
+	}
 	if _, err := k.run.Run(ctx, runner.Command{Name: "sudo", Args: []string{"-n", "-v"}}); err == nil || ctx.Err() != nil {
 		return err == nil
 	}

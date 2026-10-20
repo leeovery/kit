@@ -45,15 +45,16 @@ func (e Exec) Run(ctx context.Context, cmd Command) (Result, error) {
 	if err != nil {
 		return Result{ExitCode: -1}, err
 	}
+	stopping := ctx
 	ctx, cancel := limited(ctx, cmd.Timeout)
 	defer cancel()
 	started := e.Now()
 	r, err := e.start(ctx, program, cmd)
 	res := Result{Stdout: r.stdout, Stderr: r.stderr, ExitCode: -1, Duration: e.Now().Sub(started), Group: r.group}
 	ctxErr := ctx.Err()
-	// Ended by kit, it may still exit as it chooses, as sudo does with what
-	// it ran.
-	if err != nil && ctxErr != nil && r.ended {
+	// Ended by kit, or with the run, it may still exit as it chooses, as
+	// sudo does with what it ran.
+	if err != nil && ctxErr != nil && (r.ended || stopping.Err() != nil) {
 		return res, fmt.Errorf("%s: %w", cmd, ctxErr)
 	}
 	if exit, ok := errors.AsType[*exec.ExitError](err); ok && exit.Exited() {

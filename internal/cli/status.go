@@ -107,10 +107,10 @@ type run struct {
 	// for an administrator's password: nil when nothing will.
 	askpass *askpass.Server
 	// hold is how the password stands while kit asks for it as the run goes
-	// on: nil when it doesn't. putOff are the things the kinds have put off
-	// till it's answered.
-	hold   *adminHold
-	putOff putOff
+	// on: nil when it doesn't. settled are the things the kinds are done
+	// with for now, which nothing waits behind.
+	hold    *adminHold
+	settled settled
 	// held is whether the person at the Mac is being asked something, which
 	// the run's time limits wait on, at a terminal: by macOS, in a window of
 	// its own, or for a program's sudo, through askpass, which holds up the
@@ -610,15 +610,14 @@ func (a *app) askpass(face render.Face) *askpass.Server {
 // placed is how the kind called name's lines install, as the run places
 // them: while kit asks for an administrator's password, what needs it waits
 // for the answer, and it's left out once the password's not to be had, as
-// a check made while kit asked took it as coming. What the kind puts off
-// for the answer, nothing waits behind (putOff).
+// a check made while kit asked took it as coming. What the kind's done
+// with for now, nothing waits behind (settled).
 func (r *run) placed(name string) kind.Placing {
 	p := r.placing[name]
-	if r.hold == nil {
-		return p
+	p.Settled = func(things []string) { r.settled.note(name, things) }
+	if r.hold != nil {
+		p.Admin = r.hold
 	}
-	p.Admin = r.hold
-	p.PutOff = func(things []string) { r.putOff.note(name, things) }
 	return p
 }
 

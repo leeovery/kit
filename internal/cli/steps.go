@@ -420,37 +420,38 @@ func (r *run) installed(kindName, thing string) func(context.Context) bool {
 
 // behind is whether what waits behind thing, a thing of the kind called
 // kindName, as a kind taking turns with it does, has waited enough: once
-// it's installed, or put off till kit has the administrator's password,
-// which nothing waits for for order's sake.
+// it's installed, or the kind's done with it for now (settled), as when it
+// failed, or is put off till kit has the administrator's password, which
+// nothing waits for for order's sake.
 func (r *run) behind(kindName, thing string) func(context.Context) bool {
 	installed := r.installed(kindName, thing)
 	return func(ctx context.Context) bool {
-		return r.putOff.has(kindName, thing) || installed(ctx)
+		return r.settled.has(kindName, thing) || installed(ctx)
 	}
 }
 
-// putOff are the things the kinds have put off till kit has the
-// administrator's password, by kind.
-type putOff struct {
+// settled are the things the kinds are done with for now, by kind (Placing's
+// Settled).
+type settled struct {
 	mu     sync.Mutex
 	things map[string][]string
 }
 
-// note notes things of the kind called kindName put off.
-func (p *putOff) note(kindName string, things []string) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.things == nil {
-		p.things = map[string][]string{}
+// note notes things of the kind called kindName settled.
+func (s *settled) note(kindName string, things []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.things == nil {
+		s.things = map[string][]string{}
 	}
-	p.things[kindName] = append(p.things[kindName], things...)
+	s.things[kindName] = append(s.things[kindName], things...)
 }
 
-// has reports whether thing, of the kind called kindName, is put off.
-func (p *putOff) has(kindName, thing string) bool {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return slices.ContainsFunc(p.things[kindName], func(name string) bool { return sameThing(name, thing) })
+// has reports whether thing, of the kind called kindName, is settled.
+func (s *settled) has(kindName, thing string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.ContainsFunc(s.things[kindName], func(name string) bool { return sameThing(name, thing) })
 }
 
 // sameThing reports whether name is thing, by its full name, or a tap's

@@ -240,19 +240,24 @@ func TestExecSaysTheGroupACommandRanIn(t *testing.T) {
 	}
 }
 
-// A command that fails on its own as the run's ending, kit not having ended
-// it, says how it exited: here the run ends as its last line's read, once
-// it's exited.
+// A command that fails on its own as its time limit runs out, kit not
+// having ended it, says how it exited; one that does as the run stops says
+// it was stopped: here each as its last line's read, once it's exited.
 func TestExecSaysAnExitKitDidntCause(t *testing.T) {
 	r, _ := programs(t, map[string]string{"fails": "echo bye; exit 3"})
+	slowly := func(string) { time.Sleep(time.Second) }
+	res, err := r.Run(t.Context(), runner.Command{Name: "fails", Timeout: 500 * time.Millisecond, Lines: slowly})
+	if exit, ok := errors.AsType[*runner.ExitError](err); !ok || exit.Code != 3 || res.ExitCode != 3 {
+		t.Errorf("Run(), its limit up = exit %d, %v; want exit 3", res.ExitCode, err)
+	}
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	res, err := r.Run(ctx, runner.Command{Name: "fails", Lines: func(string) {
-		time.Sleep(200 * time.Millisecond)
+	stopping := func(line string) {
+		slowly(line)
 		cancel()
-	}})
-	if exit, ok := errors.AsType[*runner.ExitError](err); !ok || exit.Code != 3 || res.ExitCode != 3 {
-		t.Errorf("Run() = exit %d, %v; want exit 3", res.ExitCode, err)
+	}
+	if _, err := r.Run(ctx, runner.Command{Name: "fails", Lines: stopping}); !errors.Is(err, context.Canceled) {
+		t.Errorf("Run(), the run stopping = %v; want it stopped", err)
 	}
 }
 

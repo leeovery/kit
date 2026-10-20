@@ -74,6 +74,9 @@ func limit(ctx context.Context, d time.Duration, said *atomic.Bool) (context.Con
 				last = now
 			}
 		}
+		if said != nil && said.Load() {
+			return
+		}
 		c.expired.Store(true)
 		cancel()
 	}()

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -15,30 +16,24 @@ import (
 	"github.com/leeovery/kit/internal/runner/runnertest"
 )
 
-// renewing is the run's password as renewSudo keeps it, for a test: held
-// as has says for the first renewal, then the run ends.
+// renewing is the run's password as a sudoKeeper keeps it, for a test.
 type renewing struct {
-	mu       sync.Mutex
-	cancel   func()
-	has      bool
-	renewals int
-	again    bool
+	mu    sync.Mutex
+	has   bool
+	again int
 }
 
 func (h *renewing) Held() bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if h.renewals++; h.renewals > 1 {
-		h.cancel()
-		return false
-	}
 	return h.has
 }
 
 func (h *renewing) askAgain() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.has, h.again = false, true
+	h.has = false
+	h.again++
 }
 
 func (h *renewing) settle(has bool) {
@@ -47,14 +42,8 @@ func (h *renewing) settle(has bool) {
 	h.has = has
 }
 
-// holds is whether the run holds the password now.
-func (h *renewing) holds() bool {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	return h.has
-}
-
-// While the run holds the password, kit renews sudo's hold on it; when sudo
+// Renewing while the run holds the password, kit renews sudo's hold on it;
+// when sudo
 // has forgotten it, kit gives it the password it kept, the person asked only
 // when sudo refuses that, and keeps what sudo takes, the password not held
 // meanwhile; when it can't be given again, it's let go of, for what needs it
@@ -84,15 +73,14 @@ func TestRenewSudo(t *testing.T) {
 		{name: "not held", forgot: true, kept: "hunter2"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx, cancel := context.WithCancel(t.Context())
-			h := &renewing{cancel: cancel, has: tc.held}
+			h := &renewing{has: tc.held}
 			fake := runnertest.New(t)
 			check := fake.On("sudo", "-n", "-v")
 			if tc.forgot {
 				check.Exits(1).PrintsToStderr("sudo: a password is required\n")
 			}
 			heldWhileGiven := false
-			give := fake.On("sudo", "-S", "-p", sudoAsks, "-v").Asks(tc.asks).Does(func() { heldWhileGiven = h.holds() })
+			give := fake.On("sudo", "-S", "-p", sudoAsks, "-v").Asks(tc.asks).Does(func() { heldWhileGiven = h.Held() })
 			personAsked := 0
 			asks, err := askpass.Start("", "/usr/bin/true", func(context.Context, int) (string, error) {
 				personAsked++
@@ -107,13 +95,13 @@ func TestRenewSudo(t *testing.T) {
 			t.Cleanup(func() { _ = asks.Close() })
 			asks.Keep("hunter2")
 
-			renewSudo(ctx, fake, asks, time.Millisecond, h)
+			holds := (&sudoKeeper{run: fake, asks: asks, h: h}).renew(t.Context())
 
-			if !slices.Equal(give.Answered(), tc.given) || personAsked != tc.personAsked || h.holds() != tc.holds {
+			if !slices.Equal(give.Answered(), tc.given) || personAsked != tc.personAsked || holds != tc.holds || h.Held() != tc.holds {
 				t.Errorf("sudo given %q, the person asked %d times, holds %v; want %q, %d, %v (ran %q)",
-					give.Answered(), personAsked, h.holds(), tc.given, tc.personAsked, tc.holds, fake.Calls())
+					give.Answered(), personAsked, h.Held(), tc.given, tc.personAsked, tc.holds, fake.Calls())
 			}
-			if h.again != (tc.held && tc.forgot) || heldWhileGiven {
+			if (h.again == 1) != (tc.held && tc.forgot) || heldWhileGiven {
 				t.Errorf("asked for again %v, held while sudo was given it %v; want it asked again once sudo forgot it, not held meanwhile", h.again, heldWhileGiven)
 			}
 			if !tc.held && len(fake.Calls()) > 0 {
@@ -140,7 +128,7 @@ func TestAdminHold(t *testing.T) {
 		{name: "refused"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			h := newAdminHold()
+			h := newAdminHold(nil, nil)
 			r := &run{hold: h, placing: map[string]kind.Placing{}}
 			changing := event.WithChanging(t.Context())
 			for _, again := range []bool{false, true} {
@@ -209,7 +197,7 @@ func TestAForgottenPasswordIsFoundOutAtOnce(t *testing.T) {
 			if tc.forgot {
 				check.Exits(1).PrintsToStderr("sudo: a password is required\n")
 			}
-			h := newAdminHold()
+			var h *adminHold
 			askingWhileGiven := false
 			give := fake.On("sudo", "-S", "-p", sudoAsks, "-v").Asks(1).Does(func() { askingWhileGiven = h.asking() && !h.Held() })
 			asks, err := askpass.Start("", "/usr/bin/true", func(context.Context, int) (string, error) { return "typed", nil })
@@ -218,6 +206,7 @@ func TestAForgottenPasswordIsFoundOutAtOnce(t *testing.T) {
 			}
 			t.Cleanup(func() { _ = asks.Close() })
 			r := &run{run: fake, askpass: asks}
+			h = newAdminHold(fake, asks)
 			h.settle(tc.held)
 			if tc.held {
 				defer r.keepSudo(t.Context(), h)()
@@ -232,5 +221,37 @@ func TestAForgottenPasswordIsFoundOutAtOnce(t *testing.T) {
 				t.Errorf("ran %q, want nothing once refused", fake.Calls())
 			}
 		})
+	}
+}
+
+// Two renewals at once, as the minute's and an install's sudo finding the
+// password forgotten, ask the person once: the second waits for the first,
+// and, the password refused, asks nothing again.
+func TestRenewalsAtOnceAskOnce(t *testing.T) {
+	fake := runnertest.New(t)
+	fake.On("sudo", "-n", "-v").Exits(1).PrintsToStderr("sudo: a password is required\n")
+	fake.On("sudo", "-S", "-p", sudoAsks, "-v").Asks(1)
+	asking := make(chan struct{})
+	var personAsked atomic.Int32
+	asks, err := askpass.Start("", "/usr/bin/true", func(context.Context, int) (string, error) {
+		if personAsked.Add(1) == 1 {
+			close(asking)
+			time.Sleep(100 * time.Millisecond)
+		}
+		return "", errors.New("cancelled")
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = asks.Close() })
+	h := &renewing{has: true}
+	k := &sudoKeeper{run: fake, asks: asks, h: h}
+	var wg sync.WaitGroup
+	wg.Go(func() { k.renew(t.Context()) })
+	<-asking
+	wg.Go(func() { k.renew(t.Context()) })
+	wg.Wait()
+	if personAsked.Load() != 1 || h.again != 1 || h.Held() {
+		t.Errorf("the person was asked %d times, the password asked for again %d times, held %v; want once, once, not held", personAsked.Load(), h.again, h.Held())
 	}
 }

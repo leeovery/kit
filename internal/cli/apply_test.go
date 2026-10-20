@@ -1,6 +1,7 @@
 package cli_test
 
 import (
+	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -151,27 +152,40 @@ func TestApplyAtATerminalAsksForThePasswordUpFront(t *testing.T) {
 // waits for the answer. A step waiting for a thing that needs the password,
 // as a line after a cask does, waits for the answer too; the formulae,
 // which wait behind what the casks install first, don't, once the casks
-// have put it off: zoom, or drivers, a cask from a tap not added yet,
-// which nothing can say needs the password till it is.
+// are done with it for now: zoom, or drivers, a cask from a tap not added
+// yet, which nothing can say needs the password till it is, put off; or
+// broken, which needs no password, tried and failed.
 func TestApplyGoesOnWhileItAsksForThePassword(t *testing.T) {
 	for _, tc := range []struct {
 		name, manual string
-		tapped       bool
+		// casks are those declared but zoom, and whether each needs the
+		// password; broken fails to install.
+		casks map[string]bool
+		setUp func(w *world)
 	}{
 		{name: "nothing waits for it"},
 		{name: "zoom waited for", manual: `open "Open Zoom" --after cask:zoom --before gh --test test -f /done`},
-		{name: "a cask from a tap not added waited for", manual: `allow "Allow the drivers" --after cask:org/tap/drivers --before gh --test test -f /done`, tapped: true},
+		{
+			name:   "a cask from a tap not added waited for",
+			manual: `allow "Allow the drivers" --after cask:org/tap/drivers --before gh --test test -f /done`,
+			casks:  map[string]bool{"org/tap/drivers": true}, setUp: tapCask,
+		},
+		{
+			name:   "a cask that fails waited for",
+			manual: `open "Open it" --after cask:broken --before gh --test test -f /done`,
+			casks:  map[string]bool{"broken": false}, setUp: brokenCask,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			w := missingWorld(t)
 			w.terminal = true
 			w.choose = func(string, []string) (int, error) { return 1, nil }
-			casks := []string{"zoom"}
-			if tc.tapped {
-				casks = []string{"org/tap/drivers", "zoom"}
-				tapCask(w)
+			casks := map[string]bool{"zoom": true}
+			maps.Copy(casks, tc.casks)
+			if tc.setUp != nil {
+				tc.setUp(w)
 			}
-			w.writeSection(t, "laptop", "homebrew casks", strings.Join(casks, "\n")+"\n")
+			w.writeSection(t, "laptop", "homebrew casks", strings.Join(slices.Sorted(maps.Keys(casks)), "\n")+"\n")
 			if tc.manual != "" {
 				w.writeSection(t, "laptop", "manual", tc.manual+"\n")
 				w.fake.On("test", "-f", "/done")
@@ -179,7 +193,7 @@ func TestApplyGoesOnWhileItAsksForThePassword(t *testing.T) {
 			var in sync.Map
 			w.fake.On("brew", "list", "--cask", "--full-name", "-1").Filters(func(string) (string, error) {
 				listed := "ghostty\n"
-				for _, cask := range casks {
+				for cask := range casks {
 					if _, ok := in.Load(cask); ok {
 						listed += cask + "\n"
 					}
@@ -200,9 +214,14 @@ func TestApplyGoesOnWhileItAsksForThePassword(t *testing.T) {
 				}
 				typed.Store(true)
 			}
-			for _, cask := range casks {
-				w.fake.On("brew", "install", "--cask", cask).Does(func() {
-					if !typed.Load() {
+			for cask, needs := range casks {
+				install := w.fake.On("brew", "install", "--cask", cask)
+				if cask == "broken" {
+					install.Exits(1).PrintsToStderr("Error: Download failed")
+					continue
+				}
+				install.Does(func() {
+					if needs && !typed.Load() {
 						t.Errorf("%s was installed before the password was given", cask)
 					}
 					in.Store(cask, true)
@@ -210,13 +229,22 @@ func TestApplyGoesOnWhileItAsksForThePassword(t *testing.T) {
 			}
 
 			out, errOut, _ := w.run(t, "apply")
-			for _, cask := range casks {
+			for cask := range casks {
 				if calls := w.fake.Calls(); !slices.Contains(calls, "brew install --cask "+cask) {
-					t.Errorf("ran %q, want %s installed once the password was given\n%s%s", calls, cask, out, errOut)
+					t.Errorf("ran %q, want %s installed\n%s%s", calls, cask, out, errOut)
 				}
 			}
 		})
 	}
+}
+
+// brokenCask has w's Homebrew know broken, a cask that installs an app,
+// needing no password.
+func brokenCask(w *world) {
+	broken := `{"token": "broken", "full_token": "broken", "old_tokens": [], "artifacts": [{"app": ["Broken.app"]}]}`
+	zoom := `{"token": "zoom", "full_token": "zoom", "old_tokens": [], "artifacts": [{"pkg": ["zoomusInstallerFull.pkg"]}]}`
+	w.fake.On("brew", "info", "--json=v2", "--cask", "broken", "zoom").Prints(`{"formulae": [], "casks": [` + broken + `, ` + zoom + `]}`)
+	w.fake.On("brew", "info", "--json=v2", "--cask", "broken").Prints(`{"formulae": [], "casks": [` + broken + `]}`)
 }
 
 // tapCask has w's Homebrew find org/tap/drivers, a cask that installs
