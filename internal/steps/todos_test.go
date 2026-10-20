@@ -41,7 +41,7 @@ func TestKitsOwnToDos(t *testing.T) {
 			Detail: "kit prefs restore, or kit prefs start-fresh",
 			ToDo: &check.ToDo{
 				Title: "Bring back apps' settings",
-				Why:   "First, so the apps you open next start with yours. Bringing them back opens some apps once: their windows, notifications and permission prompts may follow. This Mac saves its own once they're back.",
+				Why:   "First, so the apps you open next start with yours. Bringing them back opens some apps once, never again: their windows, notifications and permission prompts may follow. This Mac saves its own once they're back.",
 				Group: "Apps",
 				Keys: []check.Key{
 					{Key: "r", Does: "brings them back from this Mac's last save"},
@@ -330,6 +330,83 @@ func TestAChoiceToDo(t *testing.T) {
 	}
 	if !slices.Equal(shown, []string{"", "r", "", "r"}) {
 		t.Errorf("the card went up answered by %q; want its keys, then r while it worked, its keys again once it failed, then r", shown)
+	}
+}
+
+// A to-do of kit's own done, the to-dos its step's check finds then come
+// next, as apps to open once bringing back their settings left: a watched
+// one, kit offering no keys, done once its check finds it gone, settling
+// what it waited for, what that did as what kit saw.
+func TestAToDoLeavesAnother(t *testing.T) {
+	defer steps.SetManualPoll(5 * time.Millisecond)()
+	c := newCard(t)
+	var mu sync.Mutex
+	brought, opened := false, false
+	var settled []string
+	step := engine.Step{
+		Name: "prefs", Title: "App settings", Area: steps.AreaBackups,
+		Check: func(context.Context) check.Result {
+			mu.Lock()
+			defer mu.Unlock()
+			switch {
+			case !brought:
+				return check.Result{State: check.Attention, Summary: "paused", Items: []check.Item{toDoItem("prefs", check.ToDo{
+					Title: "Bring back apps' settings", First: true, Keys: []check.Key{{Key: "r", Does: "brings them back"}},
+				})}}
+			case !opened:
+				return check.Result{State: check.Attention, Summary: "1 app to open once", Items: []check.Item{{ID: "prefs:open", Name: "Open Boxed App once and quit it", State: steps.Problem,
+					ToDo: &check.ToDo{Title: "Open Boxed App once and quit it", Watch: "Boxed App has its settings folder", First: true}}}}
+			}
+			return check.Result{State: check.OK, Summary: "saving from tonight"}
+		},
+		Choice: &engine.Choice{
+			Answer: func(context.Context, check.Item, string) (string, error) {
+				mu.Lock()
+				defer mu.Unlock()
+				brought = true
+				return "1 app's settings; 1 app to open once", nil
+			},
+			Settle: func(_ context.Context, it check.Item) string {
+				mu.Lock()
+				defer mu.Unlock()
+				settled = append(settled, it.ID)
+				if it.ID == "prefs:open" {
+					return "1 app's settings"
+				}
+				return ""
+			},
+		},
+	}
+	done := make(chan engine.Report, 1)
+	go func() {
+		done <- applied(t, c, atTheEnd(steps.Manual(c.fake, "/home/someone", c.state, config.List{}, c.raise), step))
+	}()
+	c.cards(t, 1)
+	c.answer(t, steps.ManualName, "r")
+	var up event.NeedsYou
+	for range 5000 {
+		if shown := c.cardsNow(); shown[len(shown)-1].Item == "prefs:open" {
+			up = shown[len(shown)-1]
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if up.Title != "Open Boxed App once and quit it" || !up.Tells || len(up.Keys) != 0 {
+		t.Fatalf("after r, the card up is %+v; want the apps to open, watched", up)
+	}
+	mu.Lock()
+	opened = true
+	mu.Unlock()
+	report := <-done
+	last := toDoLists(c.sink)
+	l := last[len(last)-1]
+	if len(l.List) != 2 || l.List[1].Title != "Open Boxed App once and quit it" || !l.List[1].Done || l.List[1].Saw != "1 app's settings" {
+		t.Errorf("the to-dos ended %+v; want the apps to open next, done, kit having seen their settings back", l.List)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if !slices.Contains(settled, "prefs:open") || report.Results["prefs"].State != check.OK {
+		t.Errorf("settled %q, prefs stands %s; want the apps to open settled, then prefs ok", settled, report.Results["prefs"].State)
 	}
 }
 

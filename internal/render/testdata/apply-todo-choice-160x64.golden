@@ -7,9 +7,9 @@
                                                             │
   TO DO  6                                                  │  △ Bring back apps' settings                                                              1 of 6  
                                                             │
-  Apps                                                      │      First, so the apps you open next start with yours. Bringing them back opens some apps once:
-  △ Bring back apps' settings                               │      their windows, notifications and permission prompts may follow. This Mac saves its own once
-  △ Open Karabiner-Elements                                 │      they're back. Settings files come back too.
+  Apps                                                      │      First, so the apps you open next start with yours. Bringing them back opens some apps once,
+  △ Bring back apps' settings                               │      never again: their windows, notifications and permission prompts may follow. This Mac saves
+  △ Open Karabiner-Elements                                 │      its own once they're back. Settings files come back too.
   △ Open Hammerspoon                                        │
                                                             │      r brings them back from this Mac's last save, 15 Oct
   System Settings                                           │      f starts afresh: nothing back, saving from now

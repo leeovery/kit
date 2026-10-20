@@ -68,12 +68,18 @@ type Record struct {
 // Pending are what waits to be restored: domains whose apps weren't
 // installed, or were running, or whose restore failed; settings files whose
 // restore failed, by their paths from ~ (or /); and why each waits, by
-// domain or path, where kit knows.
+// domain or path, where kit knows. Of the domains, Open are those whose
+// apps the person opens once, each with its app, as no settings folder
+// came of kit opening them, or kit opens none unattended; Failed, those
+// whose restore failed otherwise, which only kit prefs restore --pending,
+// run by hand, tries again, as it does the files.
 type Pending struct {
 	From    string            `json:"from"`
 	Domains []string          `json:"domains"`
 	Files   []string          `json:"files,omitempty"`
 	Why     map[string]string `json:"why,omitempty"`
+	Open    map[string]App    `json:"open,omitempty"`
+	Failed  []string          `json:"failed,omitempty"`
 }
 
 // Restored is where a full restore came from.

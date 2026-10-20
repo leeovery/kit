@@ -3,6 +3,7 @@ package steps_test
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -129,7 +130,7 @@ func TestAppsSettingsChoice(t *testing.T) {
 // files beside the apps' settings, that those come back too. It names no
 // app.
 func TestAppsSettingsWhy(t *testing.T) {
-	opens := "Bringing them back opens some apps once: their windows, notifications and permission prompts may follow."
+	opens := "Bringing them back opens some apps once, never again: their windows, notifications and permission prompts may follow."
 	for _, tt := range []struct {
 		name  string
 		files []string
@@ -152,10 +153,13 @@ func TestAppsSettingsWhy(t *testing.T) {
 	}
 }
 
-// An app that couldn't be brought back is named in the log, with why, and
-// counted in what r says; saving switches on all the same, so the to-do's
-// done, the app held aside to be tried again.
-func TestAppsSettingsFailedApp(t *testing.T) {
+// r names, in the log, each app whose settings failed otherwise, with why,
+// and says how many apps are to be opened once and how many are held for
+// kit prefs restore --pending; saving switches on all the same. The apps to
+// open are then a to-do, by name, watched: once each has its settings
+// folder, it's done, and settling it brings their settings back, opening
+// nothing, leaving what failed otherwise alone.
+func TestAppsSettingsAppsToOpen(t *testing.T) {
 	state, clone, home, appDir := t.TempDir(), filepath.Join(t.TempDir(), "prefs"), t.TempDir(), t.TempDir()
 	if err := os.WriteFile(filepath.Join(state, "prefs.json"), []byte(`{}`), 0o600); err != nil {
 		t.Fatal(err)
@@ -169,29 +173,32 @@ func TestAppsSettingsFailedApp(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	empty := `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict/></plist>`
 	write(filepath.Join(clone, ".git", "HEAD"), "")
 	theme := `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>Theme</key><string>dark</string></dict></plist>`
-	write(filepath.Join(clone, "laptop", "domains", "com.example.boxed.plist"), empty)
-	write(filepath.Join(clone, "laptop", "domains", "com.example.plain.plist"), theme)
-	app := filepath.Join(appDir, "Boxed App.app")
-	write(filepath.Join(app, "Contents", "Info.plist"), `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>com.example.boxed</string></dict></plist>`)
-	plain := filepath.Join(appDir, "Plain.app")
-	write(filepath.Join(plain, "Contents", "Info.plist"), `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>com.example.plain</string></dict></plist>`)
 	fake := runnertest.New(t)
+	apps := map[string]string{}
+	for _, a := range [][2]string{{"Boxed App", "com.example.boxed"}, {"Plain", "com.example.plain"}, {"Stubborn", "com.example.stubborn"}} {
+		apps[a[1]] = filepath.Join(appDir, a[0]+".app")
+		write(filepath.Join(clone, "laptop", "domains", a[1]+".plist"), theme)
+		write(filepath.Join(apps[a[1]], "Contents", "Info.plist"), `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>`+a[1]+`</string></dict></plist>`)
+		fake.On("osascript", "-e", `application id "`+a[1]+`" is running`).Prints("false\n")
+		fake.On("defaults", "delete", a[1])
+	}
 	configures(fake, clone)
 	fake.On("git", "-C", clone, "pull", "--rebase", "--autostash", "--quiet")
 	fake.On("git", "-C", clone, "rev-parse", "HEAD").Prints("abc123\n")
 	fake.On("git", "-C", clone, "log", "-1", "--format=%cI", "--", "laptop").Prints("2026-10-04T03:00:00Z\n")
-	fake.On("osascript", "-e", `application id "com.example.boxed" is running`).Prints("false\n")
-	fake.On("codesign", "-d", "--entitlements", "-", "--xml", app).Prints("<key>com.apple.security.app-sandbox</key><true/>")
+	fake.On("codesign", "-d", "--entitlements", "-", "--xml", apps["com.example.boxed"]).Prints("<key>com.apple.security.app-sandbox</key><true/>")
 	fake.On("open", "-g", "-j", "-b", "com.example.boxed")
 	fake.On("osascript", "-e", `tell application id "com.example.boxed" to quit`)
-	fake.On("osascript", "-e", `application id "com.example.plain" is running`).Prints("false\n")
-	fake.On("codesign", "-d", "--entitlements", "-", "--xml", plain)
-	fake.On("defaults", "export", "com.example.plain", "-").Exits(1).Then().Prints(theme)
-	fake.On("defaults", "delete", "com.example.plain")
-	fake.On("defaults", "import", "com.example.plain", filepath.Join(clone, "laptop", "domains", "com.example.plain.plist"))
+	for _, id := range []string{"com.example.boxed", "com.example.plain"} {
+		fake.On("defaults", "export", id, "-").Exits(1).Then().Prints(theme)
+		fake.On("defaults", "import", id, filepath.Join(clone, "laptop", "domains", id+".plist"))
+	}
+	fake.On("codesign", "-d", "--entitlements", "-", "--xml", apps["com.example.plain"])
+	fake.On("codesign", "-d", "--entitlements", "-", "--xml", apps["com.example.stubborn"])
+	fake.On("defaults", "export", "com.example.stubborn", "-").Exits(1)
+	fake.On("defaults", "import", "com.example.stubborn", filepath.Join(clone, "laptop", "domains", "com.example.stubborn.plist")).Exits(1)
 	p := prefs.New(fake, home, state, clone, "git@github.com:someone/prefs.git", "laptop", prefs.Lists{}, now)
 	p.Probes, p.AppDirs, p.Sleep = nil, []string{appDir}, func(time.Duration) {}
 	step := steps.Prefs(p, now)
@@ -200,19 +207,42 @@ func TestAppsSettingsFailedApp(t *testing.T) {
 	var logged []event.Logged
 	ctx := event.WithLogging(t.Context(), func(l event.Logged) { logged = append(logged, l) })
 	said, err := step.Choice.Answer(ctx, paused, "r")
-	if err != nil || said != "1 app's settings, from 4 Oct; 1 didn't come back, tried again hourly" {
-		t.Errorf("r = %q, %v; want how many didn't come back, and that they're tried again", said, err)
+	if err != nil || said != "1 app's settings, from 4 Oct; 1 app to open once; 1 held for kit prefs restore --pending" {
+		t.Errorf("r = %q, %v; want how many came back, how many apps to open, and how many held", said, err)
 	}
 	want := []event.Logged{
 		{Line: "Bringing back apps' settings from this Mac's last save"},
 		{Line: "Opening Boxed App once, for its settings folder"},
-		{Line: "Boxed App's settings didn't come back: opened once, it still has no settings folder", Alert: true},
+		{Line: "Stubborn's settings didn't come back: macOS didn't take them", Alert: true},
 	}
 	if !slices.Equal(logged, want) {
 		t.Errorf("the log says %+v\nwant %+v", logged, want)
 	}
-	if res := step.Check(t.Context()); res.State != check.OK || res.Summary != "saving from tonight" {
-		t.Errorf("with an app failed, the check says %+v; want saving switched on all the same", res)
+
+	res := step.Check(t.Context())
+	open := check.ToDo{
+		Title: "Open Boxed App once and quit it", Why: "Its settings come back after: macOS makes its settings folder only once it's opened.",
+		Steps: []string{"Open Boxed App", "Quit it"}, Watch: "Boxed App has its settings folder", Group: "Apps", First: true,
+	}
+	if res.State != check.Attention || res.Summary != "1 app to open once" || len(res.Items) != 1 || res.Items[0].ID != "prefs:open" || !reflect.DeepEqual(*res.Items[0].ToDo, open) {
+		t.Errorf("with an app to open, the check says %+v; want its to-do, watched, kit not offering keys", res)
+	}
+	item := res.Items[0]
+	if said := step.Choice.Settle(t.Context(), paused); said != "" {
+		t.Errorf("settling another to-do said %q, want nothing done", said)
+	}
+
+	write(filepath.Join(home, "Library", "Containers", "com.example.boxed", ".made"), "")
+	if res := step.Check(t.Context()); res.State != check.OK {
+		t.Errorf("its folder there, the check says %+v; want the to-do gone", res)
+	}
+	opened := strings.Count(strings.Join(fake.Calls(), "\n"), "open -g -j -b")
+	if said := step.Choice.Settle(t.Context(), item); said != "1 app's settings" {
+		t.Errorf("settled, it said %q; want the app's settings back", said)
+	}
+	calls := strings.Join(fake.Calls(), "\n")
+	if strings.Count(calls, "open -g -j -b") != opened || strings.Count(calls, "defaults import com.example.stubborn") != 1 {
+		t.Errorf("settling ran\n%s\nwant nothing opened, and what failed otherwise left alone", calls)
 	}
 }
 

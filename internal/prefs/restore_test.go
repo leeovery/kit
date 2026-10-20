@@ -224,38 +224,132 @@ func TestRestoreMakesASandboxedAppsContainer(t *testing.T) {
 	}
 }
 
-// An app that fails is named, with why; a full restore switches capture on
-// all the same, the app held aside with those waiting, so capture leaves
-// it be, and --pending tries it again.
-func TestRestoreHoldsAFailedAppAsideAndSwitchesCaptureOn(t *testing.T) {
+// opened is the calls of w's fake that opened an app.
+func (w *world) opened() []string {
+	var out []string
+	for _, c := range w.fake.Calls() {
+		if strings.HasPrefix(c, "open ") {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// A sandboxed app whose settings folder didn't appear when kit opened it is
+// held for the person to open once, named, with why; a full restore
+// switches capture on all the same. The hourly pass opens nothing: with no
+// folder yet it leaves the app held, and once the folder's there and the
+// app's closed, it brings its settings back.
+func TestRestoreHoldsAnAppToOpenTillItsFolderIsThere(t *testing.T) {
 	w := newWorld(t, prefs.Lists{})
 	store := filepath.Join(w.clone, "laptop")
 	w.write(t, filepath.Join(store, "domains", "com.example.boxed.plist"), stored(t, map[string]any{"A": true}))
 	w.write(t, filepath.Join(store, "domains", "com.example.later.plist"), stored(t, map[string]any{"A": true}))
 	app := w.app(t, w.apps, "Boxed App", "com.example.boxed")
 	w.fake.On("codesign", "-d", "--entitlements", "-", "--xml", app).Prints("<key>com.apple.security.app-sandbox</key><true/>")
-	container := filepath.Join(w.home, "Library", "Containers", "com.example.boxed")
-	w.fake.On("open", "-g", "-j", "-b", "com.example.boxed").Then().Does(func() { _ = os.MkdirAll(container, 0o700) })
+	w.fake.On("open", "-g", "-j", "-b", "com.example.boxed")
 	w.fake.On("osascript", "-e", `tell application id "com.example.boxed" to quit`)
 	w.closed("com.example.boxed")
 	w.fake.On("git", "-C", w.clone, "rev-parse", "HEAD").Prints("abc123\n")
 
 	report, err := w.p.Restore(t.Context(), prefs.RestoreOptions{})
-	if err != nil || len(report.Restored) != 0 || report.Failed["com.example.boxed"] != "opened once, it still has no settings folder" || report.Apps["com.example.boxed"] != "Boxed App" {
-		t.Errorf("Restore() = %+v, %v; want the app failed, named, with why", report, err)
+	boxed := prefs.App{ID: "com.example.boxed", Name: "Boxed App"}
+	if err != nil || len(report.Restored) != 0 || report.ToOpen["com.example.boxed"] != "opened once, it still has no settings folder" || report.Apps["com.example.boxed"] != boxed {
+		t.Errorf("Restore() = %+v, %v; want the app to open, named, with why", report, err)
 	}
 	rec, _ := w.p.Load()
-	if rec.On == "" || rec.Pending == nil || !slices.Equal(rec.Pending.Domains, []string{"com.example.boxed", "com.example.later"}) || rec.Pending.Why["com.example.boxed"] != "opened once, it still has no settings folder" {
-		t.Errorf("record = %+v, pending %+v; want capture on, the failed app held aside with the one waiting, with why", rec, rec.Pending)
+	if rec.On == "" || rec.Pending == nil || !slices.Equal(rec.Pending.Domains, []string{"com.example.boxed", "com.example.later"}) || rec.Pending.Open["com.example.boxed"] != boxed || rec.Pending.Why["com.example.boxed"] != "opened once, it still has no settings folder" {
+		t.Errorf("record = %+v, pending %+v; want capture on, the app held to open with the one waiting, with why", rec, rec.Pending)
+	}
+	if got := w.p.ToOpen(rec); !slices.Equal(got, []prefs.App{boxed}) {
+		t.Errorf("ToOpen() = %+v, want the app", got)
+	}
+	opens := len(w.opened())
+
+	hourly := prefs.RestoreOptions{Pending: true, Unattended: true}
+	if report, err := w.p.Restore(t.Context(), hourly); err != nil || len(report.Restored) != 0 || len(report.ToOpen) != 1 {
+		t.Errorf("the hourly pass, no folder yet = %+v, %v; want the app left to open", report, err)
+	}
+	if rec, _ := w.p.Load(); rec.Pending.Open["com.example.boxed"] != boxed || rec.Pending.Why["com.example.boxed"] != "opened once, it still has no settings folder" {
+		t.Errorf("pending = %+v, want the app still held to open", rec.Pending)
 	}
 
+	w.write(t, filepath.Join(w.home, "Library", "Containers", "com.example.boxed", ".made"), "")
 	w.imports(t, "com.example.boxed", "laptop", map[string]any{}, map[string]any{"A": true})
-	report, err = w.p.Restore(t.Context(), prefs.RestoreOptions{Pending: true})
-	if err != nil || !slices.Equal(report.Restored, []string{"com.example.boxed"}) {
-		t.Errorf("Restore(--pending) = %+v, %v; want the failed app tried again", report, err)
+	if report, err := w.p.Restore(t.Context(), hourly); err != nil || !slices.Equal(report.Restored, []string{"com.example.boxed"}) {
+		t.Errorf("the hourly pass, its folder there = %+v, %v; want its settings back", report, err)
 	}
-	if rec, _ := w.p.Load(); rec.Pending == nil || !slices.Equal(rec.Pending.Domains, []string{"com.example.later"}) {
+	rec, _ = w.p.Load()
+	if rec.Pending == nil || !slices.Equal(rec.Pending.Domains, []string{"com.example.later"}) || len(rec.Pending.Open) != 0 || len(w.p.ToOpen(rec)) != 0 {
 		t.Errorf("pending = %+v, want com.example.later left", rec.Pending)
+	}
+	if got := w.opened(); len(got) != opens {
+		t.Errorf("the hourly pass ran %q; want it to open nothing", got[opens:])
+	}
+}
+
+// The hourly pass opens no app, for any reason: a sandboxed app installed
+// since, with no settings folder yet, is held for the person to open.
+func TestTheHourlyPassOpensNothing(t *testing.T) {
+	w := newWorld(t, prefs.Lists{})
+	store := filepath.Join(w.clone, "laptop")
+	w.write(t, filepath.Join(store, "domains", "com.example.boxed.plist"), stored(t, map[string]any{"A": true}))
+	writeRecord(t, w.state, `{"on": "restored", "pending": {"from": "laptop", "domains": ["com.example.boxed"], "why": {"com.example.boxed": "not installed"}}}`)
+	app := w.app(t, w.apps, "Boxed App", "com.example.boxed")
+	w.fake.On("codesign", "-d", "--entitlements", "-", "--xml", app).Prints("<key>com.apple.security.app-sandbox</key><true/>")
+	w.closed("com.example.boxed")
+	w.fake.On("git", "-C", w.clone, "rev-parse", "HEAD").Prints("abc123\n")
+	report, err := w.p.Restore(t.Context(), prefs.RestoreOptions{Pending: true, Unattended: true})
+	if err != nil || report.ToOpen["com.example.boxed"] != "it has no settings folder till it's opened once" {
+		t.Errorf("Restore(hourly) = %+v, %v; want the app left for you to open", report, err)
+	}
+	if got := w.opened(); len(got) != 0 {
+		t.Errorf("the hourly pass ran %q; want it to open nothing", got)
+	}
+	if rec, _ := w.p.Load(); rec.Pending == nil || rec.Pending.Open["com.example.boxed"] != (prefs.App{ID: "com.example.boxed", Name: "Boxed App"}) {
+		t.Errorf("pending = %+v, want the app held to open", rec.Pending)
+	}
+}
+
+// An import that failed otherwise is held with why: the hourly pass leaves
+// it alone, and kit prefs restore --pending, by hand, tries it again.
+func TestAFailedImportWaitsForPendingByHand(t *testing.T) {
+	w := newWorld(t, prefs.Lists{})
+	store := filepath.Join(w.clone, "laptop")
+	w.write(t, filepath.Join(store, "domains", "com.example.app.plist"), stored(t, map[string]any{"A": true}))
+	app := w.app(t, w.apps, "Example", "com.example.app")
+	w.fake.On("codesign", "-d", "--entitlements", "-", "--xml", app)
+	w.closed("com.example.app")
+	w.exports(t, "com.example.app", map[string]any{})
+	w.fake.On("defaults", "delete", "com.example.app")
+	imported := w.fake.On("defaults", "import", "com.example.app", filepath.Join(store, "domains", "com.example.app.plist")).Exits(1)
+	w.fake.On("git", "-C", w.clone, "rev-parse", "HEAD").Prints("abc123\n")
+
+	report, err := w.p.Restore(t.Context(), prefs.RestoreOptions{})
+	if err != nil || report.Failed["com.example.app"] != "macOS didn't take them" || report.Apps["com.example.app"].Name != "Example" {
+		t.Errorf("Restore() = %+v, %v; want it failed, named, with why", report, err)
+	}
+	if rec, _ := w.p.Load(); rec.Pending == nil || !slices.Equal(rec.Pending.Failed, []string{"com.example.app"}) || rec.Pending.Why["com.example.app"] != "macOS didn't take them" {
+		t.Errorf("pending = %+v, want it held as failed, with why", rec.Pending)
+	}
+	imports := func() int {
+		n := 0
+		for _, c := range w.fake.Calls() {
+			if strings.HasPrefix(c, "defaults import com.example.app") {
+				n++
+			}
+		}
+		return n
+	}
+	if report, err := w.p.Restore(t.Context(), prefs.RestoreOptions{Pending: true, Unattended: true}); err != nil || imports() != 1 || report.Failures() != 0 {
+		t.Errorf("the hourly pass = %+v, %v, %d imports; want it left alone", report, err, imports())
+	}
+	imported.Then().Does(func() { w.exports(t, "com.example.app", map[string]any{"A": true}) })
+	if report, err := w.p.Restore(t.Context(), prefs.RestoreOptions{Pending: true}); err != nil || imports() != 2 || !slices.Equal(report.Restored, []string{"com.example.app"}) {
+		t.Errorf("--pending by hand = %+v, %v, %d imports; want it tried again, and back", report, err, imports())
+	}
+	if rec, _ := w.p.Load(); rec.Pending != nil {
+		t.Errorf("pending = %+v, want nothing left", rec.Pending)
 	}
 }
 

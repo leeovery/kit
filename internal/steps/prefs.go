@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/leeovery/kit/internal/check"
@@ -33,7 +34,7 @@ const (
 // and, when the config keeps settings files beside the apps' settings,
 // that they come back too.
 func settingsBack(files bool) check.ToDo {
-	why := "First, so the apps you open next start with yours. Bringing them back opens some apps once: their windows, notifications and permission prompts may follow. This Mac saves its own once they're back."
+	why := "First, so the apps you open next start with yours. Bringing them back opens some apps once, never again: their windows, notifications and permission prompts may follow. This Mac saves its own once they're back."
 	if files {
 		why += " Settings files come back too."
 	}
@@ -49,12 +50,37 @@ func settingsBack(files bool) check.ToDo {
 	}
 }
 
+// appsToOpen is the to-do of a Mac with apps whose settings wait for their
+// settings folders, which macOS makes only once each app's opened, kit
+// having opened it to no effect, or opening none unattended: open each
+// once and quit it. kit watches for the folders.
+func appsToOpen(apps []prefs.App) check.ToDo {
+	t := check.ToDo{Group: groupApps, First: true}
+	if len(apps) == 1 {
+		name := apps[0].Name
+		t.Title = "Open " + name + " once and quit it"
+		t.Why = "Its settings come back after: macOS makes its settings folder only once it's opened."
+		t.Steps = []string{"Open " + name, "Quit it"}
+		t.Watch = name + " has its settings folder"
+		return t
+	}
+	t.Title = "Open these apps once and quit them"
+	t.Why = "Their settings come back after: macOS makes their settings folders only once they're opened."
+	for _, a := range apps {
+		t.Steps = append(t.Steps, "Open "+a.Name+", then quit it")
+	}
+	t.Watch = "each has its settings folder"
+	return t
+}
+
 // Prefs checks apps' settings are being saved: capture switched on, this
 // Mac owning its folder in the store, a capture in the last day without
 // errors, and its commits pushed within a day. It reads kit's record
 // alone: no git, no GitHub. Not switched on, it's a to-do: bring them back
 // from this Mac's last save, as kit prefs restore does, its date said as it
-// comes up; or start afresh, as kit prefs start-fresh does.
+// comes up; or start afresh, as kit prefs start-fresh does. With apps held
+// for their settings folders, it's a to-do to open them, watched: once
+// they're there, the settings of those not running come back at once.
 func Prefs(p *prefs.Prefs, now func() time.Time) engine.Step {
 	return engine.Step{
 		Name: PrefsName, Title: "App settings", Area: AreaBackups,
@@ -86,6 +112,12 @@ func Prefs(p *prefs.Prefs, now func() time.Time) engine.Step {
 				}
 				return "", fmt.Errorf("%s isn't one of its keys", key)
 			},
+			Settle: func(ctx context.Context, it check.Item) string {
+				if it.ID != PrefsName+":"+idOpen {
+					return ""
+				}
+				return bringBackOpened(ctx, p)
+			},
 		},
 		Check: func(context.Context) check.Result {
 			rec, err := p.Load()
@@ -97,6 +129,14 @@ func Prefs(p *prefs.Prefs, now func() time.Time) engine.Step {
 				return problem(PrefsName, "another Mac owns this Mac's folder in the store", [3]string{"not-owner", rec.NotOwner, "this Mac doesn't capture until it takes ownership (kit takeover, to come)"})
 			case rec.On == "":
 				return yours(PrefsName, "paused: capture isn't switched on for this Mac", "paused", "kit prefs restore, or kit prefs start-fresh", settingsBack(len(p.Lists.Files) > 0))
+			case len(p.ToOpen(rec)) > 0:
+				apps := p.ToOpen(rec)
+				names := make([]string, len(apps))
+				for i, a := range apps {
+					names[i] = a.Name
+				}
+				summary := fmt.Sprintf("%d %s to open once", len(apps), plural(len(apps), "app", "apps"))
+				return yours(PrefsName, summary, idOpen, "open once and quit: "+strings.Join(names, ", "), appsToOpen(apps))
 			case rec.Captured.IsZero() && !rec.OnAt.IsZero() && now().Sub(rec.OnAt) <= prefsEvery:
 				// Just switched on, it's fine for now: the nightly run
 				// saves them.
@@ -116,12 +156,15 @@ func Prefs(p *prefs.Prefs, now func() time.Time) engine.Step {
 	}
 }
 
+// idOpen is the id, in its step, of the to-do to open apps once.
+const idOpen = "open"
+
 // bringBack brings back apps' settings from this Mac's last save, as kit
 // prefs restore does, saying what it brought back, as in 214 apps'
-// settings, from 15 Oct, how many wait for their apps, and how many didn't
-// come back, the log naming each, with why. Those that didn't are held
-// aside with those waiting, and tried again with them; saving starts all
-// the same.
+// settings, from 15 Oct; how many wait for their apps; how many apps are
+// to be opened once, which a to-do asks for next; and how many are held,
+// having failed otherwise, for kit prefs restore --pending, the log naming
+// each, with why. Saving starts all the same.
 func bringBack(ctx context.Context, p *prefs.Prefs, now func() time.Time) (string, error) {
 	event.Log(ctx, event.Logged{Line: "Bringing back apps' settings from this Mac's last save"})
 	report, err := p.Restore(ctx, prefs.RestoreOptions{})
@@ -129,24 +172,63 @@ func bringBack(ctx context.Context, p *prefs.Prefs, now func() time.Time) (strin
 		return "", err
 	}
 	for _, domain := range slices.Sorted(maps.Keys(report.Failed)) {
-		name := cmp.Or(report.Apps[domain], domain)
+		name := cmp.Or(report.Apps[domain].Name, domain)
 		event.Log(ctx, event.Logged{Line: name + "'s settings didn't come back: " + report.Failed[domain], Alert: true})
 	}
 	for _, file := range slices.Sorted(maps.Keys(report.FilesFailed)) {
 		event.Log(ctx, event.Logged{Line: file + " didn't come back: " + report.FilesFailed[file], Alert: true})
 	}
-	n := len(report.Restored)
-	said := fmt.Sprintf("%d %s", n, plural(n, "app's settings", "apps' settings"))
+	said := cameBack(report)
 	if last, err := p.LastSave(ctx); err == nil {
 		said += ", from " + day(last, now())
 	}
-	if n := len(report.Waiting); n > 0 {
-		said += fmt.Sprintf("; %d %s", n, plural(n, "waits for its app", "wait for their apps"))
+	said += waitingFor(report)
+	if n := appsOf(report.ToOpen, report.Apps); n > 0 {
+		said += fmt.Sprintf("; %d %s to open once", n, plural(n, "app", "apps"))
 	}
 	if n := report.Failures(); n > 0 {
-		said += fmt.Sprintf("; %d didn't come back, tried again hourly", n)
+		said += fmt.Sprintf("; %d held for kit prefs restore --pending", n)
 	}
 	return said, nil
+}
+
+// bringBackOpened brings back the settings of the apps held for their
+// settings folders that have them now and aren't running, opening
+// nothing, as the hourly pass does: what it brought back, and how many
+// still wait for their apps.
+func bringBackOpened(ctx context.Context, p *prefs.Prefs) string {
+	report, err := p.Restore(ctx, prefs.RestoreOptions{Pending: true, Unattended: true})
+	if err != nil {
+		event.Log(ctx, event.Logged{Line: "Bring back apps' settings: " + err.Error(), Alert: true})
+		return ""
+	}
+	return cameBack(report) + waitingFor(report)
+}
+
+// cameBack is how many domains' settings report brought back, as in 214
+// apps' settings.
+func cameBack(report prefs.RestoreReport) string {
+	n := len(report.Restored)
+	return fmt.Sprintf("%d %s", n, plural(n, "app's settings", "apps' settings"))
+}
+
+// waitingFor is how many of report's domains wait for their apps, after a
+// semicolon: "" for none.
+func waitingFor(report prefs.RestoreReport) string {
+	n := len(report.Waiting)
+	if n == 0 {
+		return ""
+	}
+	return fmt.Sprintf("; %d %s", n, plural(n, "waits for its app", "wait for their apps"))
+}
+
+// appsOf counts the apps of domains, as apps names them, each once.
+func appsOf(domains map[string]string, apps map[string]prefs.App) int {
+	ids := map[string]bool{}
+	for d := range domains {
+		ids[cmp.Or(apps[d].ID, d)] = true
+	}
+	return len(ids)
 }
 
 // startAfresh switches saving on with nothing brought back, as kit prefs

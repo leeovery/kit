@@ -175,3 +175,35 @@ func TestNightlyExcludesNewMatchesByItself(t *testing.T) {
 		})
 	}
 }
+
+// The hourly pass brings back what's waiting without opening any app: a
+// sandboxed app with no settings folder yet is held for you to open once.
+func TestTheHourlyPassOpensNoApp(t *testing.T) {
+	w := jobsWorld(t)
+	w.writeSection(t, "laptop", "features", "prefs\n")
+	clone := filepath.Join(w.home, ".local", "share", "kit", "prefs")
+	w.write(t, ".local/share/kit/prefs/.git/HEAD", "")
+	w.write(t, ".local/share/kit/prefs/laptop/domains/com.example.boxed.plist", `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>A</key><true/></dict></plist>`)
+	w.write(t, ".local/state/kit/prefs.json", `{"on": "restored", "pending": {"from": "laptop", "domains": ["com.example.boxed"]}}`)
+	app := filepath.Join(w.home, "Applications", "Boxed App.app")
+	w.write(t, "Applications/Boxed App.app/Contents/Info.plist", `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>com.example.boxed</string></dict></plist>`)
+	for _, kv := range [][2]string{{"user.name", "kit"}, {"user.email", "kit@localhost"}, {"commit.gpgsign", "false"}, {"tag.gpgsign", "false"}, {"core.excludesFile", "/dev/null"}, {"core.hooksPath", "/dev/null"}, {"core.autocrlf", "false"}} {
+		w.fake.On("git", "-C", clone, "config", kv[0], kv[1])
+	}
+	w.fake.On("git", "-C", clone, "pull", "--rebase", "--autostash", "--quiet")
+	w.fake.On("git", "-C", clone, "rev-parse", "HEAD").Prints("abc123\n")
+	w.fake.On("osascript", "-e", `application id "com.example.boxed" is running`).Prints("false\n")
+	w.fake.On("codesign", "-d", "--entitlements", "-", "--xml", app).Prints("<key>com.apple.security.app-sandbox</key><true/>")
+
+	if out, _, _ := w.run(t, "nightly", "retry-pending"); !strings.Contains(out, "retry-pending ok ran\n") {
+		t.Errorf("kit nightly retry-pending printed\n%s", out)
+	}
+	for _, c := range w.fake.Calls() {
+		if strings.HasPrefix(c, "open ") {
+			t.Errorf("the hourly pass ran %q; want it to open no app", c)
+		}
+	}
+	if rec := w.read(t, ".local/state/kit/prefs.json"); !strings.Contains(rec, `"open": {`) || !strings.Contains(rec, `"name": "Boxed App"`) {
+		t.Errorf("prefs.json says\n%s\nwant the app held for you to open", rec)
+	}
+}

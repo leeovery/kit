@@ -33,8 +33,8 @@ func CaptureSettings(capture func(ctx context.Context) error) Job {
 }
 
 // RetryPending is the hourly job restoring the apps' settings that wait
-// for their apps to be installed and closed, through retry: what went
-// wrong, else nothing.
+// for their apps to be installed and closed, or to have their settings
+// folders, opening none, through retry: what went wrong, else nothing.
 func RetryPending(retry func(ctx context.Context) error) Job {
 	return Job{Name: RetryPendingJob, Title: "Pending settings", Run: retry}
 }
