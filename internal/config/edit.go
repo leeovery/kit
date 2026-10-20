@@ -343,6 +343,9 @@ func (c *Config) Declare(kind, scope string, e Entry) error {
 	}
 	s := f.find(d, arg, hold)
 	if s == nil {
+		if err := c.nameFree(d, scope, arg, e.As); err != nil {
+			return err
+		}
 		s = f.add(&section{def: d, arg: arg, as: e.As, hold: hold})
 	}
 	block := append([]string{line}, steps...)
@@ -357,6 +360,47 @@ func (c *Config) Declare(kind, scope string, e Entry) error {
 		s.body = b.lines
 	}
 	return c.writeDecl(f, d, e.Name, true)
+}
+
+// CheckName says why a section of kind's for item, made in scope's
+// declarations, can't go by the name as, as Declare would make it: the
+// name stands for another item in a file read with scope's. Nil when it
+// can, or when the file has the item's section already, which Declare
+// joins, naming nothing.
+func (c *Config) CheckName(kind, scope, item, as string) error {
+	d, f, err := c.editable(kind, scope)
+	if err != nil {
+		return err
+	}
+	if f.find(d, item, "") != nil {
+		return nil
+	}
+	return c.nameFree(d, scope, item, as)
+}
+
+// nameFree says why a section of d for item, made in scope's declarations,
+// can't go by the name as: a section going by it is for another item in a
+// file read with scope's, a Mac's own with the shared one, the shared one
+// with each Mac's own. Its own file, Declare checks writing it. Nil for no
+// name.
+func (c *Config) nameFree(d sectionDef, scope, item, as string) error {
+	if as == "" {
+		return nil
+	}
+	others := []string{Shared}
+	if scope == Shared {
+		others = c.MacNames()
+	}
+	for _, other := range others {
+		f, err := c.readDecl(other)
+		if err != nil {
+			return err
+		}
+		if s := f.named(d, as); s != nil && s.arg != item {
+			return fmt.Errorf("%s %s is %s in %s (line %d): a name stands for one item", asOption, as, s.arg, DeclFile(other), s.start)
+		}
+	}
+	return nil
 }
 
 // Undeclare takes name out of kind's sections of scope's declarations, with

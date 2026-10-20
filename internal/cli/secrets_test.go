@@ -10,7 +10,8 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/leeovery/kit/internal/kind/secret/secrettest"
+	"github.com/leeovery/kit/internal/ask"
+	"github.com/leeovery/kit/internal/kind/secret/onepassword/optest"
 )
 
 // itemSection is the header of the secrets section for the item the tests'
@@ -33,7 +34,7 @@ func TestSecretsSync(t *testing.T) {
 		t.Errorf("kit status printed\n%s", out)
 	}
 	w.fake.On("op", "whoami")
-	secrettest.Holds(w.fake, map[string]string{"op://vault/Item/Section/token": "the value"})
+	optest.Holds(w.fake, map[string]string{"op://vault/Item/Section/token": "the value"})
 	out, _, code := w.run(t, "secret", "sync")
 	if code != 0 || !strings.Contains(out, "secret ok 1 synced, 1 changed\n") || strings.Contains(out, "the value") {
 		t.Errorf("kit secret sync printed\n%s exit %d", out, code)
@@ -65,7 +66,7 @@ func TestAddASecretKeepsItInOnePassword(t *testing.T) {
 	f.On("op", "whoami")
 	f.On("op", "item", "get", "Item", "--vault", "vault", "--format", "json").Prints(`{"id":"abc","title":"Item","sections":[{"id":"s1","label":"Section"}],"fields":[{"id":"f1","label":"token","type":"CONCEALED","value":"the value","section":{"id":"s1"}}]}`)
 	f.On("op", "item", "edit", "Item", "--vault", "vault")
-	secrettest.Holds(f, map[string]string{"op://vault/Item/Section/new": "new value", "op://vault/Item/Section/token": "the value"})
+	optest.Holds(f, map[string]string{"op://vault/Item/Section/new": "new value", "op://vault/Item/Section/token": "the value"})
 	w.expectSync([]string{"laptop/declarations"}, "kit secret add NEW_ONE (laptop): a new one")
 	out, _, code := w.run(t, "secret", "add", "NEW_ONE", "--item", "op://vault/Item", "--field", "Section/new", "--stdin", "--note", "a new one")
 	if code != 0 || !strings.Contains(out, "kept in 1Password (op://vault/Item/Section/new) and read back; declared in laptop, synced") {
@@ -93,7 +94,7 @@ func TestAddASecretByItsReference(t *testing.T) {
 	w := secretsWorld(t)
 	f := w.fake
 	f.On("op", "whoami")
-	secrettest.Holds(f, map[string]string{"op://vault/Item/Section/token": "the value", "op://vault/Item/Section/other": "other", "op://vault/Elsewhere/key": "key"})
+	optest.Holds(f, map[string]string{"op://vault/Item/Section/token": "the value", "op://vault/Item/Section/other": "other", "op://vault/Elsewhere/key": "key"})
 	w.expectSync([]string{"laptop/declarations"}, "kit secret add OTHER (laptop)")
 	if out, _, code := w.run(t, "secret", "add", "OTHER", "--ref", "op://vault/Item/Section/other"); code != 0 {
 		t.Errorf("kit secret add printed\n%s exit %d", out, code)
@@ -157,7 +158,7 @@ func TestAddASecretInANamedBlock(t *testing.T) {
 	f.On("op", "whoami")
 	f.On("op", "item", "get", "Item", "--vault", "vault", "--format", "json").Prints(`{"id":"abc","title":"Item","sections":[{"id":"s1","label":"Section"}],"fields":[]}`)
 	f.On("op", "item", "edit", "Item", "--vault", "vault")
-	secrettest.Holds(f, map[string]string{"op://vault/Item/Section/new": "new value", "op://vault/Item/Section/token": "the value", "op://vault/Item/Section/more": "more"})
+	optest.Holds(f, map[string]string{"op://vault/Item/Section/new": "new value", "op://vault/Item/Section/token": "the value", "op://vault/Item/Section/more": "more"})
 	w.expectSync([]string{"laptop/declarations"}, "kit secret add NEW_ONE (laptop)")
 	if out, _, code := w.run(t, "secret", "add", "NEW_ONE", "--in", "tokens", "--field", "Section/new", "--stdin"); code != 0 {
 		t.Fatalf("kit secret add printed\n%s exit %d", out, code)
@@ -172,6 +173,50 @@ func TestAddASecretInANamedBlock(t *testing.T) {
 	}
 	if got := w.readSection(t, "shared", "secrets op://vault/Item --as tokens"); got != "MORE Section/more\nTOKEN Section/token\n" {
 		t.Errorf("shared's [secrets op://vault/Item --as tokens] = %q, want it joined", got)
+	}
+}
+
+// Everything's checked before a value's asked for: told nowhere, or
+// somewhere that isn't, or not the field, kit asks for nothing, and asks
+// once it knows.
+func TestAddASecretAsksForNoValueTillItKnowsWhereItGoes(t *testing.T) {
+	w := laptopWorld(t)
+	w.terminal, w.size = true, [2]int{160, 64}
+	w.writeSection(t, "shared", "secrets op://vault/A --as tokens", "A_TOKEN S/a\n")
+	w.writeSection(t, "studio", "secrets op://vault/B --as keys", "B_TOKEN S/b\n")
+	for _, args := range [][]string{
+		{"--field", "S/f"},
+		{"--in", "typo", "--field", "S/f"},
+		{"--item", "op://vault/A/S", "--field", "S/f"},
+		{"--in", "tokens"},
+		{"--ref", "elsewhere:x"},
+		{"--in", "keys", "--item", "op://vault/A", "--field", "S/f"},
+	} {
+		if _, errOut, code := w.run(t, append([]string{"secret", "add", "NEW_ONE"}, args...)...); code == 0 || len(w.typedFor) > 0 {
+			t.Errorf("%q: printed %q, exit %d, asked for %q: want it refused, nothing asked", args, errOut, code, w.typedFor)
+		}
+	}
+	w.notTyped = ask.ErrCancelled
+	w.run(t, "secret", "add", "NEW_ONE", "--in", "tokens", "--field", "S/f")
+	if !slices.Equal(w.typedFor, []string{"NEW_ONE  needs its value"}) {
+		t.Errorf("asked for %q, want its value, once it knew where it goes", w.typedFor)
+	}
+}
+
+// A block made in the shared file goes by a name no Mac's file has for
+// another item: kit refuses it, naming that block, before anything's asked
+// for or stored.
+func TestAddASecretSharedByANameAMacHas(t *testing.T) {
+	w := laptopWorld(t)
+	w.writeSection(t, "laptop", "secrets op://vault/Item --as tokens", "TOKEN Section/token\n")
+	w.writeSection(t, "studio", "secrets op://vault/Other --as tokens", "OTHER Section/other\n")
+	w.stdin = "x"
+	_, errOut, code := w.run(t, "secret", "add", "NEW_ONE", "--shared", "--in", "tokens", "--field", "Section/new", "--stdin")
+	if code == 0 || !strings.Contains(errOut, "--in tokens: --as tokens is op://vault/Other in studio/declarations (line ") || !strings.Contains(errOut, "a name stands for one item") {
+		t.Errorf("printed %q, exit %d", errOut, code)
+	}
+	if strings.Contains(w.read(t, filepath.Join(".config", "kit", "shared", "declarations")), "tokens") {
+		t.Error("the shared file took a block going by tokens")
 	}
 }
 
@@ -234,7 +279,7 @@ func TestASecretFilesAttachmentNamedWithAPeriod(t *testing.T) {
 	f := w.fake
 	f.On("op", "whoami")
 	f.On("op", "item", "edit", "Item", "--vault", "vault", `token\.json[file]=`+from)
-	secrettest.Holds(f, map[string]string{"op://vault/Item/token.json": `{"token":"x"}` + "\n", "op://vault/Item/Section/token": "the value"})
+	optest.Holds(f, map[string]string{"op://vault/Item/token.json": `{"token":"x"}` + "\n", "op://vault/Item/Section/token": "the value"})
 	w.expectSync([]string{"laptop/declarations"}, "kit secret add ~/.config/tool/token.json (laptop)")
 	if out, _, code := w.run(t, "secret", "add", "~/.config/tool/token.json", "--from", from, "--item", "op://vault/Item"); code != 0 {
 		t.Fatalf("kit secret add printed\n%s exit %d", out, code)

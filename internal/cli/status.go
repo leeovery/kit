@@ -368,10 +368,8 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 			step.Check = func(context.Context) check.Result {
 				return check.Result{State: check.Failed, Reason: unread.Error()}
 			}
-		} else if len(list.Entries) > 0 && slices.Contains(applies, command) {
-			for _, program := range kind.Commands(k) {
-				step.Waits = append(step.Waits, engine.Wait{Thing: program, Ready: func(context.Context) bool { return runner.Has(observed, program) }})
-			}
+		} else if program := kind.Command(k); program != "" && len(list.Entries) > 0 && slices.Contains(applies, command) {
+			step.Waits = append(step.Waits, engine.Wait{Thing: program, Ready: func(context.Context) bool { return runner.Has(observed, program) }})
 		}
 		for _, after := range d.After {
 			if slices.Contains(r.kinds, after) {
@@ -490,7 +488,7 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 		checks = append(checks, steps.Manual(observed, home, dirs.State, plain, raise))
 	}
 	if raise != nil {
-		checks = append(checks, r.cardSteps(raise, a.appDirs(home))...)
+		checks = append(checks, r.cardSteps(raise, a.appFolders(home), kindSteps)...)
 	}
 	hourly, daily, err := a.jobs(r)
 	if err != nil {

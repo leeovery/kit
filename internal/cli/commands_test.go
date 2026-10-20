@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/leeovery/kit/internal/kind/secret/secrettest"
+	"github.com/leeovery/kit/internal/kind/secret/onepassword/optest"
 	"github.com/leeovery/kit/internal/runner"
 )
 
@@ -53,7 +53,7 @@ func TestEachKindWaitsForItsCommand(t *testing.T) {
 	f.On("brew", "install", "--cask", "1password", "owner/tap/1password-cli").Does(func() {
 		f.On("brew", "list", "--cask", "--full-name", "-1").Prints("ghostty\nfirefox\n1password\nowner/tap/1password-cli\n")
 		f.On("op", "whoami")
-		secrettest.Holds(f, map[string]string{"op://vault/Item/Section/token": "plain-token-value"})
+		optest.Holds(f, map[string]string{"op://vault/Item/Section/token": "plain-token-value"})
 	})
 	f.On("test", "-f", "/signed-in")
 	// A program is on kit's PATH once a command of it is scripted.

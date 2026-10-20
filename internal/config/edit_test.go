@@ -407,6 +407,45 @@ func TestDeclareASecretOnce(t *testing.T) {
 	}
 }
 
+// A section made goes by a name only when no file read with its own has
+// that name for another item: the shared file's checked against each Mac's,
+// a Mac's against the shared one.
+func TestDeclareASecretsNameStandsForOneItem(t *testing.T) {
+	files := map[string]string{
+		"shared/declarations": "[secrets op://vault/S --as keys]\nS s/f\n",
+		"laptop/declarations": "[homebrew formulae]\njq\n",
+		"studio/declarations": "[secrets op://vault/T --as tokens]\nT t/f\n",
+	}
+	cfg := loadRepo(t, files)
+	for name, c := range map[string]struct {
+		scope, item, as, want string
+	}{
+		"shared, by a Mac's name": {"shared", "op://vault/A", "tokens", "--as tokens is op://vault/T in studio/declarations (line 1): a name stands for one item"},
+		"a Mac's, by shared's":    {"laptop", "op://vault/A", "keys", "--as keys is op://vault/S in shared/declarations (line 1): a name stands for one item"},
+	} {
+		if err := cfg.CheckName("secret", c.scope, c.item, c.as); err == nil || err.Error() != c.want {
+			t.Errorf("%s: CheckName() = %v, want %q", name, err, c.want)
+		}
+		if err := cfg.Declare("secret", c.scope, config.Entry{Name: "A", Value: "a/f", Item: c.item, As: c.as}); err == nil || err.Error() != c.want {
+			t.Errorf("%s: Declare() = %v, want %q", name, err, c.want)
+		}
+	}
+	for path, before := range files {
+		if got := readFile(t, cfg, path); got != before {
+			t.Errorf("%s = %q, want it untouched", path, got)
+		}
+	}
+	for name, c := range map[string]struct{ scope, item, as string }{
+		"the same item, by its name": {"shared", "op://vault/T", "tokens"},
+		"another Mac's name":         {"laptop", "op://vault/A", "tokens"},
+		"no name":                    {"shared", "op://vault/A", ""},
+	} {
+		if err := cfg.CheckName("secret", c.scope, c.item, c.as); err != nil {
+			t.Errorf("%s: CheckName() = %v", name, err)
+		}
+	}
+}
+
 func TestDeclareAPathGoesLast(t *testing.T) {
 	cfg := loadRepo(t, map[string]string{"laptop/declarations": "[paths]\n# Homebrew\n/opt/homebrew/bin\n\n[homebrew formulae]\njq\n"})
 	if err := cfg.Declare(config.PathsKind, "laptop", config.Entry{Name: "/a/b", Note: "a tool"}); err != nil {

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/leeovery/kit/internal/kind/secret/secrettest"
+	"github.com/leeovery/kit/internal/kind/secret/onepassword/optest"
 	"github.com/leeovery/kit/internal/runner"
 )
 
@@ -86,7 +86,7 @@ func noSecretKept(t *testing.T, w *world, printed string) {
 func TestALinesSectionWaitsForItsSecret(t *testing.T) {
 	w := heldWorld(t)
 	w.fake.On("op", "whoami")
-	secrettest.Holds(w.fake, map[string]string{"op://vault/Item/Section/token": "plain-token-value"})
+	optest.Holds(w.fake, map[string]string{"op://vault/Item/Section/token": "plain-token-value"})
 
 	out, errOut, _ := w.run(t, "apply")
 	calls := w.fake.Calls()

@@ -51,6 +51,10 @@ type ManualStep struct {
 	// Open is the app, by bundle id, kit opens as its card first comes up:
 	// "" for none, as for every [manual] line.
 	Open string
+	// Await are what one of kit's own waits for once it's found not done,
+	// before its card goes up, as a store's sign-in waits for the store's
+	// program and app: nothing to wait for while it's done.
+	Await []engine.Wait
 }
 
 // Ordered reports whether the line says a step comes after it (--before),
@@ -464,6 +468,9 @@ func OwnManual(run runner.Runner, stateDir string, m ManualStep, raise *Raise) e
 			if raise == nil {
 				return nil
 			}
+			if err := awaitAll(ctx, m.Await); err != nil {
+				return err
+			}
 			if _, err := raise.up(ctx, m.Name, b, 0); !errors.Is(err, errStopHere) {
 				return err
 			}
@@ -474,6 +481,25 @@ func OwnManual(run runner.Runner, stateDir string, m ManualStep, raise *Raise) e
 		step.Again = func(ctx context.Context) error { return b.again(ctx, raise) }
 	}
 	return step
+}
+
+// awaitAll waits, partway through applying, for each of waits in turn: not
+// yet, saying what didn't come, when one doesn't.
+func awaitAll(ctx context.Context, waits []engine.Wait) error {
+	var missing []string
+	for _, w := range waits {
+		if engine.Await(ctx, w, "waiting for "+w.Thing) {
+			continue
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		missing = append(missing, w.Thing)
+	}
+	if len(missing) > 0 {
+		return engine.NotYet(engine.NotThere(missing))
+	}
+	return nil
 }
 
 // again raises it once more, as a step it comes before found it wasn't done

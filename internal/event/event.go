@@ -55,8 +55,9 @@ type Step struct {
 	// Waiting is what the step says while it waits its turn, when that's
 	// more than that it's waiting: what it'll need of you, or do.
 	Waiting string `json:",omitempty"`
-	// Waits are the steps it waits for, by name: those it needs and those
-	// it's applied after.
+	// Waits are the steps it waits for, by name: those it needs, those it's
+	// applied after, and those it waits for, finished, partway through
+	// applying.
 	Waits []string `json:",omitempty"`
 	// ByHand are the steps by hand it raises, in order, known before it
 	// runs: a list of what may need the person at the Mac.

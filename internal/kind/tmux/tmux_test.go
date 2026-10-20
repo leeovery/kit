@@ -109,8 +109,8 @@ func TestDeclaredAtAll(t *testing.T) {
 // The plugins are read from tmux's config and cloned with git: no command
 // of tmux's is waited for.
 func TestCommandIsNone(t *testing.T) {
-	if got := kind.Commands(newTmux(t, runnertest.New(t), t.TempDir())); len(got) > 0 {
-		t.Errorf("Commands() = %q, want none", got)
+	if got := kind.Command(newTmux(t, runnertest.New(t), t.TempDir())); got != "" {
+		t.Errorf("Command() = %q, want none", got)
 	}
 }
 

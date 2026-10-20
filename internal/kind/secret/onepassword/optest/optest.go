@@ -1,6 +1,6 @@
-// Package secrettest stands in for 1Password in tests, through runnertest's
-// fake.
-package secrettest
+// Package optest stands in for 1Password's CLI, op, in tests, through
+// runnertest's fake.
+package optest
 
 import (
 	"fmt"

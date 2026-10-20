@@ -486,6 +486,11 @@ func (s Step) info() event.Step {
 			waits = append(waits, w.Step)
 		}
 	}
+	for _, w := range s.Later {
+		if w.Thing == "" && !slices.Contains(waits, w.Step) {
+			waits = append(waits, w.Step)
+		}
+	}
 	return event.Step{Name: s.Name, Title: s.title(), Area: s.Area, Part: s.Part, Row: s.Row, Tool: s.Tool, Waiting: s.Waiting, Waits: waits, ByHand: s.ByHand, Did: s.Did}
 }
 
@@ -861,6 +866,17 @@ func Title(ctx context.Context, name string) string {
 		}
 	}
 	return name
+}
+
+// Takes reports whether the run ctx is a step of takes the step called
+// name: false outside a run.
+func Takes(ctx context.Context, name string) bool {
+	d, ok := running(ctx)
+	if !ok {
+		return false
+	}
+	_, ok = d.titles[name]
+	return ok
 }
 
 // StepResult is a step of the run, by name, and how it stands.

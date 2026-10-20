@@ -11,16 +11,20 @@ import (
 
 // Stores are the secrets stores kit knows, each a driver in a folder of its
 // own: a store comes and goes with its line here. A secret's reference picks
-// its store, so a config can use several.
+// its store, so a config can use several. It's the one list the config's
+// secrets sections and the secrets kind read.
 var Stores = []store.Driver{
 	onepassword.Driver{},
 }
 
-// drivers are secrets stores: those a kind is made with.
+// drivers are secrets stores: Stores, as a kind reads them.
 type drivers []store.Driver
 
-// ofRef is the store whose value ref is, in full.
-func (ds drivers) ofRef(ref string) (store.Driver, bool) {
+// stores are the stores kit knows, as Stores has them now.
+func stores() drivers { return drivers(Stores) }
+
+// forRef is the store whose value ref is, in full.
+func (ds drivers) forRef(ref string) (store.Driver, bool) {
 	i := slices.IndexFunc(ds, func(d store.Driver) bool { return d.IsRef(ref) })
 	if i < 0 {
 		return nil, false
@@ -28,13 +32,21 @@ func (ds drivers) ofRef(ref string) (store.Driver, bool) {
 	return ds[i], true
 }
 
-// ofItem is the store whose item ref is.
-func (ds drivers) ofItem(ref string) (store.Driver, bool) {
+// forItem is the store whose item ref is.
+func (ds drivers) forItem(ref string) (store.Driver, bool) {
 	i := slices.IndexFunc(ds, func(d store.Driver) bool { return d.IsItem(ref) })
 	if i < 0 {
 		return nil, false
 	}
 	return ds[i], true
+}
+
+// owns reports whether ref is one of a store's own references, a value's
+// in full or an item's: never short for a field of an item.
+func (ds drivers) owns(ref string) bool {
+	_, value := ds.forRef(ref)
+	_, item := ds.forItem(ref)
+	return value || item
 }
 
 // refs says how the stores' values' references read, in full: each store's,
@@ -59,28 +71,44 @@ func (ds drivers) say(example func(store.About) string) string {
 	return strings.Join(said, "; ")
 }
 
-// itemOf is nil when ref is one of a store's items, else why not: what
-// follows [secrets in an item's section's header.
-func (ds drivers) itemOf(ref string) error {
-	if _, ok := ds.ofItem(ref); ok {
+// checkItem says why ref isn't one of a store's items, as what follows
+// [secrets in an item's section's header: nil when it is.
+func checkItem(ref string) error {
+	if _, ok := stores().forItem(ref); ok {
 		return nil
 	}
-	return fmt.Errorf("%q isn't an item's reference kit knows: %s", ref, ds.items())
+	return fmt.Errorf("%q isn't an item's reference kit knows: %s", ref, stores().items())
 }
+
+// ItemStore is the store whose item ref is: an error, naming the items kit
+// knows, when it's no store's.
+func ItemStore(ref string) (store.Driver, error) {
+	if d, ok := stores().forItem(ref); ok {
+		return d, nil
+	}
+	return nil, checkItem(ref)
+}
+
+// ValueStore is the store whose value ref is, in full: an error, naming the
+// references kit knows, when it's no store's.
+func ValueStore(ref string) (store.Driver, error) {
+	if d, ok := stores().forRef(ref); ok {
+		return d, nil
+	}
+	return nil, fmt.Errorf("%q isn't where a store keeps a value, in full: %s", ref, stores().refs())
+}
+
+// Items says how the stores' items' references read, as in 1Password's,
+// op://vault/item.
+func Items() string { return stores().items() }
 
 // Env are the variables of environ, kit's environment, that the stores'
 // programs need passed on to what kit runs, as each store names them
 // (store.About.Env), each as name=value: a name's value as getenv has it,
 // and every variable a name ending * starts.
 func Env(getenv func(string) string, environ []string) []string {
-	return drivers(Stores).env(getenv, environ)
-}
-
-// env are the variables of environ the stores' programs need passed on, as
-// Env says.
-func (ds drivers) env(getenv func(string) string, environ []string) []string {
 	var env []string
-	for _, d := range ds {
+	for _, d := range Stores {
 		for _, name := range d.About().Env {
 			if prefix, ok := strings.CutSuffix(name, "*"); ok {
 				for _, kv := range environ {

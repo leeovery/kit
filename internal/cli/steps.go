@@ -101,37 +101,39 @@ func (r *run) manualSteps(ordered []steps.ManualStep, others []engine.Step, rais
 }
 
 // cardSteps are the steps by hand the run's kinds need done before their
-// own (kind.Carded), as a secrets store's sign-in, each a step of its own
-// come before its kind's, raised with raise at a terminal: it waits first
-// for the program it needs on kit's PATH and the app it needs installed in
-// one of appDirs, which kit opens as its card first comes up.
-func (r *run) cardSteps(raise *steps.Raise, appDirs []string) []engine.Step {
+// things (kind.Carded), as a secrets store's sign-in, each a step of its
+// own, raised with raise at a terminal: once found not done, it waits for
+// the program it needs on kit's PATH and the app it needs installed in
+// folders, which kit opens as its card first comes up. Its kind's step,
+// among kindSteps, waits for it partway through applying (Later), not
+// before it starts: one store's sign-in holds back that store's secrets
+// alone.
+func (r *run) cardSteps(raise *steps.Raise, folders *apps.Folders, kindSteps []engine.Step) []engine.Step {
 	var out []engine.Step
-	for _, name := range r.kinds {
-		carded, ok := r.kindsByName[name].(kind.Carded)
+	for i, ks := range kindSteps {
+		carded, ok := r.kindsByName[ks.Name].(kind.Carded)
 		if !ok {
 			continue
 		}
 		for _, c := range carded.Cards() {
-			m := steps.ManualStep{Name: c.Name, Do: c.Title, Why: c.Why, Steps: c.Steps, Before: []string{name}, Done: c.Done, Open: c.App}
-			step := steps.OwnManual(r.run, r.stateDir, m, raise)
-			step.Before = m.Before
+			m := steps.ManualStep{Name: c.Name, Do: c.Title, Why: c.Why, Steps: c.Steps, Done: c.Done, Open: c.App}
 			if c.Program != "" {
-				step.Waits = append(step.Waits, engine.Wait{Thing: c.Program, Ready: func(context.Context) bool { return runner.Has(r.run, c.Program) }})
+				m.Await = append(m.Await, engine.Wait{Thing: c.Program, Ready: func(context.Context) bool { return runner.Has(r.run, c.Program) }})
 			}
 			if c.App != "" {
-				step.Waits = append(step.Waits, engine.Wait{Thing: c.AppName, Ready: func(context.Context) bool { return apps.Installed(appDirs, c.App) }})
+				m.Await = append(m.Await, engine.Wait{Thing: c.AppName, Ready: func(context.Context) bool { return folders.Has(c.App) }})
 			}
-			out = append(out, step)
+			kindSteps[i].Later = append(kindSteps[i].Later, engine.Wait{Step: c.Name})
+			out = append(out, steps.OwnManual(r.run, r.stateDir, m, raise))
 		}
 	}
 	return out
 }
 
-// appDirs are the folders apps are installed in: kit's own (Deps.AppDirs),
-// and the Applications folder in home.
-func (a *app) appDirs(home string) []string {
-	return append(slices.Clone(a.AppDirs), filepath.Join(home, "Applications"))
+// appFolders are the folders apps are installed in: kit's own
+// (Deps.AppDirs), and the Applications folder in home.
+func (a *app) appFolders(home string) *apps.Folders {
+	return &apps.Folders{Dirs: append(slices.Clone(a.AppDirs), filepath.Join(home, "Applications"))}
 }
 
 // placeByHand places the steps by hand with no place of their own among

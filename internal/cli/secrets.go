@@ -156,6 +156,8 @@ func (a *app) secretsSync(ctx context.Context, r *run) error {
 		res = check.Result{State: check.Failed, Reason: err.Error()}
 	case len(report.Failed) > 0:
 		res = check.Result{State: check.Failed, Reason: report.Error()}
+	case len(report.Held) > 0:
+		res = check.Result{State: check.Deferred, Reason: report.Error()}
 	}
 	r.sink.Emit(event.StepFinished{Time: time.Now(), Step: secretKind, Result: res, Duration: time.Since(started)})
 	counts := event.Tally(res)
@@ -187,10 +189,6 @@ type place struct {
 // secretPlaces lists the blocks secrets are declared in, for this Mac: as
 // one document with --json, else a row each.
 func (a *app) secretPlaces(r *run) error {
-	k, err := r.secrets()
-	if err != nil {
-		return err
-	}
 	found, err := r.cfg.Places(secretKind, r.machine)
 	if err != nil {
 		return err
@@ -198,7 +196,7 @@ func (a *app) secretPlaces(r *run) error {
 	places := make([]place, len(found))
 	for i, p := range found {
 		places[i] = place{Name: p.As, Item: p.Item, Scope: p.Scope, File: config.DeclFile(p.Scope), Line: p.Line, Secrets: p.Count}
-		if d, err := k.ItemOf(p.Item); p.Item != "" && err == nil {
+		if d, err := secret.ItemStore(p.Item); p.Item != "" && err == nil {
 			places[i].Store = d.About().Name
 		}
 	}

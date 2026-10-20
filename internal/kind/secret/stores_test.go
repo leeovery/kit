@@ -9,11 +9,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/config"
+	"github.com/leeovery/kit/internal/engine"
+	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/kind/secret"
 	"github.com/leeovery/kit/internal/kind/secret/onepassword"
-	"github.com/leeovery/kit/internal/kind/secret/secrettest"
+	"github.com/leeovery/kit/internal/kind/secret/onepassword/optest"
 	"github.com/leeovery/kit/internal/kind/secret/store"
 	"github.com/leeovery/kit/internal/runner"
 	"github.com/leeovery/kit/internal/runner/runnertest"
@@ -27,6 +30,10 @@ type fakeStore struct {
 	session store.Session
 	values  map[string]string
 	reads   [][]string
+	// locked has every read at once fail till Unlock; unlock is what
+	// Unlock gives back.
+	locked bool
+	unlock error
 }
 
 func (f *fakeStore) About() store.About {
@@ -54,7 +61,12 @@ func (f *fakeStore) Short(item, ref string) (string, bool) { return strings.CutP
 
 func (f *fakeStore) Session(context.Context, runner.Runner) store.Session { return f.session }
 
-func (f *fakeStore) Unlock(context.Context, runner.Runner) error { return nil }
+func (f *fakeStore) Unlock(context.Context, runner.Runner) error {
+	if f.unlock == nil {
+		f.locked = false
+	}
+	return f.unlock
+}
 
 func (f *fakeStore) Read(ctx context.Context, run runner.Runner, ref string) (string, error) {
 	got, err := f.ReadMany(ctx, run, []string{ref})
@@ -63,6 +75,9 @@ func (f *fakeStore) Read(ctx context.Context, run runner.Runner, ref string) (st
 
 func (f *fakeStore) ReadMany(_ context.Context, _ runner.Runner, refs []string) (map[string]string, error) {
 	f.reads = append(f.reads, refs)
+	if f.locked {
+		return nil, errors.New("not approved")
+	}
 	values := map[string]string{}
 	for _, ref := range refs {
 		v, ok := f.values[ref]
@@ -86,16 +101,18 @@ func (f *fakeStore) Delete(context.Context, runner.Runner, string, string) error
 	return errors.New("not kept here")
 }
 
-// twoStores are the secrets of a home in 1Password and fake, each driven
-// as its reference says, and the fake runner standing in for 1Password,
-// signed in, holding A: A in 1Password's item; B in full in the fake's,
-// and C in the fake's item.
-func twoStores(t *testing.T, fake *fakeStore) (*secret.Secrets, *runnertest.Fake, string) {
+// twoStores are the secrets of a home in 1Password and fake, the stores
+// kit knows, each driven as its reference says, and the fake runner
+// standing in for 1Password, signed in, holding A, and with the fake's
+// program: A in 1Password's item; B in full in the fake's, and C in the
+// fake's item.
+func twoStores(t *testing.T, fake *fakeStore) (*secret.Secrets, config.List, *runnertest.Fake, string) {
 	t.Helper()
+	secret.UseStores(t, onepassword.Driver{}, fake)
 	home := t.TempDir()
 	run := runnertest.New(t)
-	s := secret.NewWith(run, home, []store.Driver{onepassword.Driver{}, fake})
-	list := config.List{Entries: []config.Entry{
+	s := secret.New(run, home)
+	list := config.List{Kind: "secret", Declared: true, Entries: []config.Entry{
 		{Name: "A", Value: "Section/a", Item: item, Section: "secrets " + item, Scope: "shared", Line: 2},
 		{Name: "B", Value: "vault:keys/b", Section: "secrets", Scope: "shared", Line: 5},
 		{Name: "C", Value: "c", Item: "vault:keys", Section: "secrets vault:keys", Scope: "shared", Line: 8},
@@ -104,17 +121,34 @@ func twoStores(t *testing.T, fake *fakeStore) (*secret.Secrets, *runnertest.Fake
 		t.Fatal(err)
 	}
 	run.On("op", "whoami")
-	secrettest.Holds(run, map[string]string{item + "/Section/a": "a"})
-	return s, run, home
+	optest.Holds(run, map[string]string{item + "/Section/a": "a"})
+	run.On("fakevault")
+	return s, list, run, home
+}
+
+// applying applies the secrets declared by list, as a run does, and
+// returns how the step finished.
+func applying(t *testing.T, s *secret.Secrets, list config.List) check.Result {
+	t.Helper()
+	step := kind.Placed(s, list, func() kind.Placing { return kind.Placing{} })
+	p, err := engine.New(step)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := p.Apply(t.Context(), event.NewFanout(), engine.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return report.Results["secret"]
 }
 
 // Each secret's reference picks its store: a config can use two, and each
 // reads its own, once each.
 func TestEachStoreReadsItsOwn(t *testing.T) {
 	fake := &fakeStore{session: store.Open, values: map[string]string{"vault:keys/b": "b", "vault:keys/c": "c"}}
-	s, run, home := twoStores(t, fake)
+	s, _, run, home := twoStores(t, fake)
 	report, err := s.Sync(t.Context())
-	if err != nil || report.Synced != 3 || len(report.Failed) != 0 {
+	if err != nil || report.Synced != 3 || len(report.Failed)+len(report.Held) != 0 {
 		t.Fatalf("Sync() = %+v, %v", report, err)
 	}
 	if want := [][]string{{"vault:keys/b", "vault:keys/c"}}; !slices.EqualFunc(fake.reads, want, slices.Equal) {
@@ -131,45 +165,100 @@ func TestEachStoreReadsItsOwn(t *testing.T) {
 			t.Errorf("~/.secrets.zsh =\n%s\nwant %q", env, want)
 		}
 	}
-	if got := s.Commands(); !slices.Equal(got, []string{"op", "fakevault"}) {
-		t.Errorf("Commands() = %q, want each store's program", got)
+	if got := s.Program(); got != "" {
+		t.Errorf("Program() = %q, want none: the secrets are in two stores", got)
 	}
 }
 
-// A store that's signed out fails its own secrets alone, in its words, each
-// keeping its previous value; the rest sync. With every store signed out,
-// the sync can't go on.
-func TestAStoreSignedOutFailsItsOwnAlone(t *testing.T) {
+// A store that's signed out holds back its own secrets alone, in its
+// words, each keeping its previous value; the rest sync, and the step
+// stands not done yet, as with one store, rather than failed.
+func TestAStoreSignedOutHoldsBackItsOwnAlone(t *testing.T) {
 	fake := &fakeStore{session: store.SignedOut}
-	s, _, home := twoStores(t, fake)
+	s, list, _, home := twoStores(t, fake)
 	if err := os.WriteFile(filepath.Join(home, ".secrets.zsh"), []byte("export B='old b'\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	report, err := s.Sync(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if report.Synced != 1 || report.Failed["B"] != "Fake Vault is signed out" || report.Failed["C"] != "Fake Vault is signed out" || len(fake.reads) > 0 {
-		t.Errorf("Sync() = %+v, read %q: want B and C failed in the fake's words, nothing asked of it", report, fake.reads)
+	res := applying(t, s, list)
+	if res.State != check.Deferred || !strings.HasSuffix(res.Reason, ": Fake Vault is signed out") || len(fake.reads) > 0 {
+		t.Errorf("the step finished %+v, the fake read %q: want it not done yet, in the fake's words, nothing asked of it", res, fake.reads)
 	}
 	env, _ := os.ReadFile(filepath.Join(home, ".secrets.zsh"))
 	if !strings.Contains(string(env), "export A='a'\n") || !strings.Contains(string(env), "export B='old b'\n") {
 		t.Errorf("~/.secrets.zsh =\n%s\nwant A synced and B as it was", env)
 	}
+	report, err := s.Sync(t.Context())
+	if err != nil || report.Synced != 1 || report.Held["B"] != "Fake Vault is signed out" || report.Held["C"] != "Fake Vault is signed out" || len(report.Failed) != 0 {
+		t.Errorf("Sync() = %+v, %v; want B and C held back", report, err)
+	}
+}
 
-	s = secret.NewWith(runnertest.New(t), t.TempDir(), []store.Driver{fake})
-	if _, err := s.Values(config.List{Entries: []config.Entry{{Name: "B", Value: "vault:keys/b", Section: "secrets"}}}); err != nil {
+// A store signed in that doesn't answer fails its own secrets, in its
+// words, beside one that syncs; with no store left that answers, the sync
+// goes no further.
+func TestAStoreThatDoesntAnswerFailsItsOwnAlone(t *testing.T) {
+	fake := &fakeStore{session: store.SignedIn, locked: true, unlock: errors.New("dismissed")}
+	s, list, _, home := twoStores(t, fake)
+	res := applying(t, s, list)
+	if res.State != check.Failed || !strings.Contains(res.Reason, "B: Fake Vault doesn't answer") || !strings.Contains(res.Reason, "C: Fake Vault doesn't answer") {
+		t.Errorf("the step finished %+v, want B and C failed in the fake's words", res)
+	}
+	if env, _ := os.ReadFile(filepath.Join(home, ".secrets.zsh")); !strings.Contains(string(env), "export A='a'\n") {
+		t.Errorf("~/.secrets.zsh =\n%s\nwant A synced", env)
+	}
+
+	fake.locked, fake.unlock, fake.values = true, nil, map[string]string{"vault:keys/b": "b", "vault:keys/c": "c"}
+	if report, err := s.Sync(t.Context()); err != nil || report.Synced != 3 {
+		t.Errorf("Sync() once it answers = %+v, %v", report, err)
+	}
+}
+
+// With every store down alike, nothing read, the sync goes no further,
+// saying why in each one's words; with one held back and one failing, each
+// store's secrets are reported as they stand.
+func TestEveryStoreDown(t *testing.T) {
+	fake := &fakeStore{session: store.SignedOut}
+	secret.UseStores(t, onepassword.Driver{}, fake)
+	run := runnertest.New(t)
+	run.On("op", "whoami").Exits(1)
+	run.On("op", "account", "list", "--format", "json").Prints("[]")
+	run.On("fakevault")
+	s := secret.New(run, t.TempDir())
+	list := config.List{Kind: "secret", Declared: true, Entries: []config.Entry{
+		{Name: "A", Value: item + "/a", Section: "secrets"},
+		{Name: "B", Value: "vault:keys/b", Section: "secrets"},
+	}}
+	if _, err := s.Values(list); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Sync(t.Context()); err == nil || err.Error() != "Fake Vault is signed out" {
-		t.Errorf("Sync() of the signed-out store's alone = %v", err)
+	if res := applying(t, s, list); res.State != check.Deferred || !strings.Contains(res.Reason, onePassword.SignedOut) || !strings.Contains(res.Reason, "Fake Vault is signed out") {
+		t.Errorf("both signed out: the step finished %+v", res)
+	}
+	fake.session, fake.locked, fake.unlock = store.SignedIn, true, errors.New("dismissed")
+	report, err := s.Sync(t.Context())
+	if err != nil || report.Held["A"] != onePassword.SignedOut || report.Failed["B"] != "Fake Vault doesn't answer" {
+		t.Errorf("one held back, one failing: Sync() = %+v, %v", report, err)
+	}
+}
+
+// A store whose program isn't on kit's PATH holds back its own secrets
+// alone: the rest sync.
+func TestAStoresProgramMissingHoldsBackItsOwnAlone(t *testing.T) {
+	fake := &fakeStore{session: store.Open, values: map[string]string{"vault:keys/b": "b", "vault:keys/c": "c"}}
+	s, _, run, _ := twoStores(t, fake)
+	run.On("fakevault").Fails(runner.ErrNotFound)
+	report, err := s.Sync(t.Context())
+	if err != nil || report.Synced != 1 || report.Held["B"] != "needs fakevault, which isn't there yet" || len(fake.reads) > 0 {
+		t.Errorf("Sync() = %+v, %v, the fake read %q", report, err, fake.reads)
 	}
 }
 
 // A reference, or an item, no store knows is refused, naming how each
-// store's read.
+// store's read; so is, in an item's section, any reference of a store's
+// own, a value's or an item's.
 func TestAReferenceNoStoreKnows(t *testing.T) {
-	s := secret.NewWith(runnertest.New(t), t.TempDir(), []store.Driver{onepassword.Driver{}, &fakeStore{}})
+	secret.UseStores(t, onepassword.Driver{}, &fakeStore{})
+	s := secret.New(runnertest.New(t), t.TempDir())
 	for _, c := range []struct {
 		e    config.Entry
 		want string
@@ -180,6 +269,10 @@ func TestAReferenceNoStoreKnows(t *testing.T) {
 			`"elsewhere:a" isn't an item's reference kit knows: 1Password's, as in op://vault/item; Fake Vault's, as in vault:item`},
 		{config.Entry{Name: "X", Value: "op://vault/a/b", Item: "vault:keys", Section: "secrets vault:keys"},
 			"op://vault/a/b is in full: in [secrets vault:keys] a line names a field or attachment of its item, as in <field>"},
+		{config.Entry{Name: "X", Value: "op://vault/other", Item: item, Section: "secrets " + item},
+			"op://vault/other is in full: in [secrets " + item + "] a line names a field or attachment of its item"},
+		{config.Entry{Name: "X", Value: "vault:other", Item: "vault:keys", Section: "secrets vault:keys"},
+			"vault:other is in full"},
 	} {
 		c.e.Scope, c.e.Line = "shared", 2
 		if _, err := s.Values(config.List{Entries: []config.Entry{c.e}}); err == nil || !strings.HasPrefix(err.Error(), "shared/declarations:2: X: "+c.want) {
@@ -188,12 +281,25 @@ func TestAReferenceNoStoreKnows(t *testing.T) {
 	}
 }
 
+// The config's secrets sections know the items of the stores kit knows,
+// the same list the kind reads: a store's item reads as a section's.
+func TestSectionsKnowTheStoresItems(t *testing.T) {
+	secret.UseStores(t, &fakeStore{})
+	if err := secret.Descriptor.Section.Items("vault:keys"); err != nil {
+		t.Errorf("Items(vault:keys) = %v, want the fake store's item", err)
+	}
+	if err := secret.Descriptor.Section.Items("op://vault/item"); err == nil {
+		t.Error("Items(op://vault/item) = nil, with 1Password not among the stores")
+	}
+}
+
 // Each store the secrets are in brings its sign-in, a card from the store's
 // own words: watched, done once the store's signed in; waiting for its
 // program and its app. A store kept nothing in brings none.
 func TestEachStoreUsedBringsItsSignIn(t *testing.T) {
 	fake := &fakeStore{session: store.SignedOut}
-	s := secret.NewWith(runnertest.New(t), t.TempDir(), []store.Driver{onepassword.Driver{}, fake})
+	secret.UseStores(t, onepassword.Driver{}, fake)
+	s := secret.New(runnertest.New(t), t.TempDir())
 	if _, err := s.Values(config.List{Entries: []config.Entry{{Name: "B", Value: "vault:keys/b", Section: "secrets"}}}); err != nil {
 		t.Fatal(err)
 	}
@@ -213,6 +319,9 @@ func TestEachStoreUsedBringsItsSignIn(t *testing.T) {
 	if !c.Done(t.Context()) {
 		t.Error("Done() with the store signed in = false")
 	}
+	if got := s.Program(); got != "fakevault" {
+		t.Errorf("Program() = %q, want the one store's", got)
+	}
 	var _ kind.Carded = s
 }
 
@@ -223,11 +332,11 @@ func TestEnvPassesOnWhatTheStoresName(t *testing.T) {
 		return map[string]string{"FAKE_ACCOUNT": "someone", "OP_ACCOUNT": "my", "HOME": "/Users/someone"}[name]
 	}
 	environ := []string{"FAKE_SESSION_x=token", "OP_SESSION_y=other", "UNRELATED=z"}
-	got := secret.EnvOf([]store.Driver{&fakeStore{}}, getenv, environ)
-	if want := []string{"FAKE_ACCOUNT=someone", "FAKE_SESSION_x=token"}; !slices.Equal(got, want) {
-		t.Errorf("EnvOf() = %q, want %q", got, want)
-	}
 	if got := secret.Env(getenv, environ); !slices.Equal(got, []string{"OP_SESSION_y=other", "OP_ACCOUNT=my"}) {
 		t.Errorf("Env() = %q, want 1Password's", got)
+	}
+	secret.UseStores(t, &fakeStore{})
+	if got, want := secret.Env(getenv, environ), []string{"FAKE_ACCOUNT=someone", "FAKE_SESSION_x=token"}; !slices.Equal(got, want) {
+		t.Errorf("Env() = %q, want %q", got, want)
 	}
 }

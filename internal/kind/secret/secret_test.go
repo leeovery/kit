@@ -12,7 +12,7 @@ import (
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/kind/secret"
 	"github.com/leeovery/kit/internal/kind/secret/onepassword"
-	"github.com/leeovery/kit/internal/kind/secret/secrettest"
+	"github.com/leeovery/kit/internal/kind/secret/onepassword/optest"
 	"github.com/leeovery/kit/internal/runner/runnertest"
 )
 
@@ -104,7 +104,7 @@ func TestSyncPutsEachInPlace(t *testing.T) {
 	}
 	awkward := `it's $HOME, a ` + "`date`" + `, a \ and "quotes"`
 	fake.On("op", "whoami")
-	secrettest.Holds(fake, map[string]string{
+	optest.Holds(fake, map[string]string{
 		item + "/Section/plain":   "plain value",
 		item + "/Section/awkward": awkward,
 		item + "/key-file":        "line one\nline two\n",
@@ -161,7 +161,7 @@ func TestSyncReadsEveryValueInOneRunOfOp(t *testing.T) {
 	)
 	fake.On("op", "whoami").Exits(1).PrintsToStderr("account is not signed in")
 	fake.On("op", "account", "list", "--format", "json").Prints(`[{"url": "my.1password.com"}]`)
-	secrettest.Holds(fake, map[string]string{item + "/Section/one": "1", item + "/Section/two": "2", "op://vault/Key Item/private key": "-----BEGIN KEY-----\nabc\n-----END KEY-----"})
+	optest.Holds(fake, map[string]string{item + "/Section/one": "1", item + "/Section/two": "2", "op://vault/Key Item/private key": "-----BEGIN KEY-----\nabc\n-----END KEY-----"})
 	if report, err := s.Sync(t.Context()); err != nil || report.Synced != 4 {
 		t.Fatalf("Sync() = %+v, %v", report, err)
 	}
@@ -194,7 +194,7 @@ func TestSyncReadsAroundAReferenceThatWontRead(t *testing.T) {
 	fake.On("op", "whoami").Exits(1)
 	fake.On("op", "account", "list", "--format", "json").Prints(`[{"url": "my.1password.com"}]`)
 	fake.On("op", "vault", "list", "--format", "json").Prints("[]")
-	secrettest.Holds(fake, map[string]string{item + "/Section/a": "a", item + "/Section/b": "b", item + "/Section/d": "d"})
+	optest.Holds(fake, map[string]string{item + "/Section/a": "a", item + "/Section/b": "b", item + "/Section/d": "d"})
 	fake.On("op", "read", item+"/Section/broken").Exits(1).PrintsToStderr("not found")
 	report, err := s.Sync(t.Context())
 	if err != nil {
@@ -229,7 +229,7 @@ func TestSyncReadsAnAwkwardReferenceAlone(t *testing.T) {
 	awkward := "op://vault/Item $HOME/field}}"
 	declare(t, s, [2]string{"PLAIN", "Section/plain"}, [2]string{"AWKWARD", "'" + awkward + "'"})
 	fake.On("op", "whoami")
-	secrettest.Holds(fake, map[string]string{item + "/Section/plain": "plain", awkward: "awkward"})
+	optest.Holds(fake, map[string]string{item + "/Section/plain": "plain", awkward: "awkward"})
 	if report, err := s.Sync(t.Context()); err != nil || report.Synced != 2 {
 		t.Fatalf("Sync() = %+v, %v", report, err)
 	}
@@ -257,7 +257,7 @@ func TestVariableReadsWhatASyncWrote(t *testing.T) {
 	)
 	awkward := `it's $HOME, ''a ` + "`date`" + `, a \ and "quotes" # not a note'`
 	fake.On("op", "whoami")
-	secrettest.Holds(fake, map[string]string{item + "/Section/plain": "plain value", item + "/Section/awkward": awkward})
+	optest.Holds(fake, map[string]string{item + "/Section/plain": "plain value", item + "/Section/awkward": awkward})
 	if _, err := s.Sync(t.Context()); err != nil {
 		t.Fatal(err)
 	}

@@ -16,6 +16,7 @@ import (
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/kind/secret"
+	"github.com/leeovery/kit/internal/kind/secret/store"
 	"github.com/leeovery/kit/internal/look"
 )
 
@@ -52,36 +53,36 @@ func (r *run) secrets() (*secret.Secrets, error) {
 // it's told, the block named (--in) or the item (--item), and its line in
 // the file's block for that item, made when there's none; a reference in an
 // item a block of the file is for goes in that block, short, and any other
-// in the plain [secrets], in full.
+// in the plain [secrets], in full. Everything's checked before the value's
+// asked for, or read.
 func (a *app) addSecret(ctx context.Context, r *run, names []string, opts addOptions) error {
 	so := opts.secret
 	k, err := r.secrets()
 	if err != nil {
 		return err
 	}
-	if err := checkSources(so); err != nil {
+	if err := checkSources(so, a.pretty(a.Stdout)); err != nil {
 		return err
 	}
 	if so.ref != "" {
-		if _, err := k.RefOf(so.ref); err != nil {
+		if _, err := secret.ValueStore(so.ref); err != nil {
 			return fmt.Errorf("--ref: %w", err)
 		}
 	}
 	name := r.tildePaths(names)[0]
-	value, err := a.secretValue(ctx, r, name, so)
-	if err != nil {
-		return err
-	}
 	scope := r.scope(opts.shared)
 	places, err := r.cfg.Places(secretKind, r.machine)
 	if err != nil {
 		return err
 	}
-	item, as, err := secretPlace(k, so, places, scope)
+	item, as, err := secretPlace(so, places, scope)
 	if err != nil {
 		return err
 	}
-	d, err := k.StoreOf(cmp.Or(item, so.ref))
+	if err := r.cfg.CheckName(secretKind, scope, item, as); err != nil {
+		return fmt.Errorf("--in %s: %w", as, err)
+	}
+	d, err := storeOf(item, so.ref)
 	if err != nil {
 		return err
 	}
@@ -89,9 +90,13 @@ func (a *app) addSecret(ctx context.Context, r *run, names []string, opts addOpt
 	if so.ref == "" && so.from == "" && so.field == "" {
 		return fmt.Errorf("say where in %s's item it goes: --field %s", store.Name, store.Field)
 	}
+	value, err := a.secretValue(ctx, r, name, so)
+	if err != nil {
+		return err
+	}
 	c := startChanges(r, []string{name})
 	c.step(ctx, name, func(ctx context.Context) check.Result {
-		if err := k.Ready(ctx, cmp.Or(item, so.ref)); err != nil {
+		if err := k.Ready(ctx, d); err != nil {
 			return check.Result{State: check.Failed, Reason: err.Error()}
 		}
 		short := so.ref
@@ -101,15 +106,15 @@ func (a *app) addSecret(ctx context.Context, r *run, names []string, opts addOpt
 			short, _ = d.Short(item, so.ref)
 		case so.ref != "":
 		case so.from != "":
-			short, err = k.Attach(ctx, item, cmp.Or(so.field, filepath.Base(so.from)), so.from)
+			short, err = k.Attach(ctx, d, item, cmp.Or(so.field, filepath.Base(so.from)), so.from)
 		default:
-			short, err = k.Store(ctx, item, so.field, value)
+			short, err = k.Store(ctx, d, item, so.field, value)
 		}
 		if err != nil {
 			return check.Result{State: check.Failed, Reason: err.Error()}
 		}
 		if so.ref == "" {
-			if err := k.ReadBack(ctx, d.Join(item, short), value); err != nil {
+			if err := k.ReadBack(ctx, d, d.Join(item, short), value); err != nil {
 				return check.Result{State: check.Failed, Reason: "stored, but reading it back failed: " + err.Error()}
 			}
 		}
@@ -134,6 +139,8 @@ func (a *app) addSecret(ctx context.Context, r *run, names []string, opts addOpt
 			return check.Result{State: check.Failed, Reason: "declared, but couldn't sync: " + err.Error()}
 		case report.Failed[name] != "":
 			return check.Result{State: check.Failed, Reason: "declared, but couldn't sync it: " + report.Failed[name]}
+		case report.Held[name] != "":
+			return check.Result{State: check.Failed, Reason: "declared, but couldn't sync it yet: " + report.Held[name]}
 		}
 		summary := "declared in " + scope + ", synced"
 		if so.ref == "" {
@@ -145,9 +152,18 @@ func (a *app) addSecret(ctx context.Context, r *run, names []string, opts addOpt
 	return c.finish()
 }
 
+// storeOf is the store of item, when there's one, else of ref, in full.
+func storeOf(item, ref string) (store.Driver, error) {
+	if item != "" {
+		return secret.ItemStore(item)
+	}
+	return secret.ValueStore(ref)
+}
+
 // checkSources checks kit secret add's flags say where its value comes
-// from once, at most, and where it goes once, for a new value alone.
-func checkSources(so secretOptions) error {
+// from once, and where it goes once, for a new value alone: typed, at a
+// terminal, when they don't say.
+func checkSources(so secretOptions, terminal bool) error {
 	sources := 0
 	for _, set := range []bool{so.ref != "", so.from != "", so.stdin} {
 		if set {
@@ -161,13 +177,15 @@ func checkSources(so secretOptions) error {
 		return errors.New("--in and --item say where a new value goes; --ref says where one is already")
 	case so.item != "" && so.in != "":
 		return errors.New("--in or --item, not both: --in names a block, --item an item")
+	case sources == 0 && !terminal:
+		return errors.New("say where its value comes from: --stdin (how an agent passes one), --from <file>, or --ref <where its store keeps it>")
 	}
 	return nil
 }
 
 // secretValue is a new secret's value, as so says where it comes from:
-// none for a reference; a file's; standard input's; or typed, unshown, at a
-// terminal.
+// none for a reference; a file's; standard input's; else typed, unshown, at
+// the terminal (checkSources).
 func (a *app) secretValue(ctx context.Context, r *run, name string, so secretOptions) (string, error) {
 	var value string
 	switch {
@@ -186,7 +204,7 @@ func (a *app) secretValue(ctx context.Context, r *run, name string, so secretOpt
 		}
 		// As a value typed has no newline, nor does one passed in.
 		value = strings.TrimRight(string(data), "\r\n")
-	case a.pretty(a.Stdout):
+	default:
 		// The run's heading first, then the field under it.
 		r.sink.Emit(event.Preparing{Time: r.now, Command: r.command, Machine: r.machine})
 		typed, err := a.ReadSecret(ctx, look.Row{State: look.NeedsYou, Name: name, Says: look.Orange("needs its value")})
@@ -197,8 +215,6 @@ func (a *app) secretValue(ctx context.Context, r *run, name string, so secretOpt
 			return "", err
 		}
 		value = typed
-	default:
-		return "", errors.New("say where its value comes from: --stdin (how an agent passes one), --from <file>, or --ref <where its store keeps it>")
 	}
 	if strings.TrimSpace(value) == "" {
 		return "", errors.New("its value is empty")
@@ -212,14 +228,14 @@ func (a *app) secretValue(ctx context.Context, r *run, name string, so secretOpt
 // block it's in, if one is, else none (the plain [secrets]); for a new
 // value, --item's, or the item --in's name stands for. A new value needs
 // one of them: else it's refused, listing the blocks.
-func secretPlace(k *secret.Secrets, so secretOptions, places []config.Place, scope string) (item, as string, err error) {
+func secretPlace(so secretOptions, places []config.Place, scope string) (item, as string, err error) {
 	switch {
 	case so.ref != "":
 		for _, p := range places {
 			if p.Scope != scope || p.Item == "" {
 				continue
 			}
-			if d, err := k.ItemOf(p.Item); err == nil {
+			if d, err := secret.ItemStore(p.Item); err == nil {
 				if _, in := d.Short(p.Item, so.ref); in && d.IsRef(so.ref) {
 					return p.Item, "", nil
 				}
@@ -228,7 +244,7 @@ func secretPlace(k *secret.Secrets, so secretOptions, places []config.Place, sco
 		return "", "", nil
 	case so.item != "":
 		item := strings.TrimSuffix(so.item, "/")
-		if _, err := k.ItemOf(item); err != nil {
+		if _, err := secret.ItemStore(item); err != nil {
 			return "", "", fmt.Errorf("--item: %w", err)
 		}
 		return item, "", nil
@@ -239,7 +255,7 @@ func secretPlace(k *secret.Secrets, so secretOptions, places []config.Place, sco
 		}
 		return places[i].Item, so.in, nil
 	}
-	return "", "", fmt.Errorf("say where it goes: --in <a block's name>, or --item <an item> (%s), its block made when the file has none; %s", k.Items(), blocksSaid(places))
+	return "", "", fmt.Errorf("say where it goes: --in <a block's name>, or --item <an item> (%s), its block made when the file has none; %s", secret.Items(), blocksSaid(places))
 }
 
 // blocksSaid says the blocks for items of places, the blocks a new value
@@ -284,7 +300,7 @@ func (a *app) removeSecrets(ctx context.Context, r *run, names []string, shared 
 			}
 		}
 	}
-	where := storesSaid(k, refs)
+	where := storesSaid(refs)
 	del := value.delete
 	switch {
 	case value.delete && value.keep:
@@ -319,9 +335,9 @@ func (a *app) removeSecrets(ctx context.Context, r *run, names []string, shared 
 				res.Summary += fmt.Sprintf("; its value is outside every item a secrets block is for (%s), so kit leaves it", e.Value)
 				return res
 			}
-			d, err := k.ItemOf(e.Item)
+			d, err := secret.ItemStore(e.Item)
 			if err == nil {
-				err = k.Delete(ctx, e.Item, e.Value)
+				err = k.Delete(ctx, d, e.Item, e.Value)
 			}
 			if err != nil {
 				return check.Result{State: check.Failed, Reason: res.Summary + ", but " + err.Error()}
@@ -336,10 +352,10 @@ func (a *app) removeSecrets(ctx context.Context, r *run, names []string, shared 
 
 // storesSaid names the stores keeping the values of the secrets declared
 // by refs, as in 1Password: "their stores" when it can't say.
-func storesSaid(k *secret.Secrets, refs map[string]config.Entry) string {
+func storesSaid(refs map[string]config.Entry) string {
 	var stores []string
 	for _, e := range refs {
-		d, err := k.StoreOf(cmp.Or(e.Item, e.Value))
+		d, err := storeOf(e.Item, e.Value)
 		if err == nil && !slices.Contains(stores, d.About().Name) {
 			stores = append(stores, d.About().Name)
 		}

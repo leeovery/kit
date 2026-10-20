@@ -65,9 +65,9 @@ func New(run runner.Runner, home, configHome string) *Tmux {
 func (*Tmux) Name() string    { return kindName }
 func (*Tmux) Program() string { return "tmux" }
 
-// Commands are none: the plugins are read from tmux's config and cloned
-// with git, which macOS has, without running tmux.
-func (*Tmux) Commands() []string { return nil }
+// Command is none: the plugins are read from tmux's config and cloned with
+// git, which macOS has, without running tmux.
+func (*Tmux) Command() string { return "" }
 
 // files are tmux's config files TPM reads, in its order.
 func (t *Tmux) files() []string {

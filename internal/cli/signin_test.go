@@ -9,8 +9,9 @@ import (
 	"github.com/leeovery/kit/internal/ask"
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/kind/login"
-	"github.com/leeovery/kit/internal/kind/secret/secrettest"
+	"github.com/leeovery/kit/internal/kind/secret/onepassword/optest"
 	"github.com/leeovery/kit/internal/logs"
+	"github.com/leeovery/kit/internal/runner"
 )
 
 // signInApp is 1Password's app, by its bundle id, as the store's driver
@@ -44,8 +45,8 @@ func finished(records []logs.Record, step string) (check.Result, bool) {
 
 // At a terminal, the store the secrets are in brings its sign-in, which kit
 // raises before the secrets sync when the store says it isn't signed in: a
-// card of the store's words, watched, the store's app opened, once, as it
-// comes up.
+// card of the store's words, watched, the store's app opened as it comes
+// up.
 func TestApplyRaisesTheStoresSignIn(t *testing.T) {
 	w := secretsWorld(t)
 	w.installApp(t, "1Password", signInApp)
@@ -69,7 +70,7 @@ func TestApplyRaisesTheStoresSignIn(t *testing.T) {
 	}
 	opened := slices.DeleteFunc(f.Calls(), func(c string) bool { return !strings.HasPrefix(c, "open ") })
 	if !slices.Equal(opened, []string{"open -b " + signInApp}) {
-		t.Errorf("opened %q, want 1Password's app, once", opened)
+		t.Errorf("opened %q, want 1Password's app", opened)
 	}
 	if slices.Contains(f.Calls(), "op inject") {
 		t.Errorf("ran %q: want nothing read before the sign-in", f.Calls())
@@ -83,7 +84,7 @@ func TestApplySignedInRaisesNothing(t *testing.T) {
 	w.terminal, w.size = true, [2]int{160, 64}
 	f := w.fake
 	f.On("op", "whoami")
-	secrettest.Holds(f, map[string]string{"op://vault/Item/Section/token": "the value"})
+	optest.Holds(f, map[string]string{"op://vault/Item/Section/token": "the value"})
 	f.On("osascript", "-l", "JavaScript", "-e", login.ReadScript).Prints("[]")
 	w.choose = func(string, []string) (int, error) { return 1, nil }
 
@@ -94,6 +95,30 @@ func TestApplySignedInRaisesNothing(t *testing.T) {
 	}
 	if res, ok := finished(records, "1password-sign-in"); !ok || res.State != check.OK {
 		t.Errorf("the sign-in finished %+v, %v; want it found done", res, ok)
+	}
+	if got := w.read(t, ".secrets.zsh"); !strings.Contains(got, "export TOKEN='the value'") {
+		t.Errorf("~/.secrets.zsh = %q", got)
+	}
+}
+
+// Signed in already, the sign-in waits for nothing: without the store's app
+// it's found done, nothing raised, and the secrets sync.
+func TestApplySignedInWaitsForNoApp(t *testing.T) {
+	w := secretsWorld(t)
+	w.terminal, w.size = true, [2]int{160, 64}
+	f := w.fake
+	f.On("op", "whoami")
+	optest.Holds(f, map[string]string{"op://vault/Item/Section/token": "the value"})
+	f.On("osascript", "-l", "JavaScript", "-e", login.ReadScript).Prints("[]")
+	w.choose = func(string, []string) (int, error) { return 1, nil }
+
+	w.run(t, "apply")
+	records := w.lastLog(t)
+	if res, ok := finished(records, "1password-sign-in"); !ok || res.State != check.OK || len(cards(records)) > 0 {
+		t.Errorf("the sign-in finished %+v, %v, cards %+v: want it found done, nothing raised", res, ok, cards(records))
+	}
+	if res, ok := finished(records, "secret"); !ok || res.State != check.OK {
+		t.Errorf("the secrets finished %+v, %v", res, ok)
 	}
 	if got := w.read(t, ".secrets.zsh"); !strings.Contains(got, "export TOKEN='the value'") {
 		t.Errorf("~/.secrets.zsh = %q", got)
@@ -131,5 +156,29 @@ func TestApplySignInWaitsForTheApp(t *testing.T) {
 	res, ok := finished(records, "1password-sign-in")
 	if len(cards(records)) > 0 || !ok || res.State != check.Deferred || !strings.Contains(res.Reason, "needs 1Password, which isn't there yet") {
 		t.Errorf("the sign-in finished %+v, %v, cards %+v: want it waiting for the app, nothing raised", res, ok, cards(records))
+	}
+}
+
+// The sign-in waits for the store's program too: without it, nothing's
+// raised, and the sign-in and the secrets say what they need.
+func TestApplySignInWaitsForTheProgram(t *testing.T) {
+	w := secretsWorld(t)
+	w.installApp(t, "1Password", signInApp)
+	w.terminal, w.size = true, [2]int{160, 64}
+	f := w.fake
+	f.On("op", "whoami").Fails(runner.ErrNotFound)
+	f.On("op", "account", "list", "--format", "json").Fails(runner.ErrNotFound)
+	f.On("osascript", "-l", "JavaScript", "-e", login.ReadScript).Prints("[]")
+	w.choose = func(string, []string) (int, error) { return 1, nil }
+
+	w.run(t, "apply")
+	records := w.lastLog(t)
+	for _, step := range []string{"1password-sign-in", "secret"} {
+		if res, ok := finished(records, step); !ok || res.State != check.Deferred || !strings.Contains(res.Reason, "needs op, which isn't there yet") {
+			t.Errorf("%s finished %+v, %v: want it waiting for op", step, res, ok)
+		}
+	}
+	if up := cards(records); len(up) > 0 || slices.ContainsFunc(f.Calls(), func(c string) bool { return strings.HasPrefix(c, "open -b") }) {
+		t.Errorf("cards %+v, ran %q: want none raised, nothing opened", up, f.Calls())
 	}
 }

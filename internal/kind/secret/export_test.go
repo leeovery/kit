@@ -1,8 +1,14 @@
 package secret
 
-import "github.com/leeovery/kit/internal/kind/secret/store"
+import (
+	"testing"
 
-// EnvOf is Env, for stores rather than those kit knows.
-func EnvOf(stores []store.Driver, getenv func(string) string, environ []string) []string {
-	return drivers(stores).env(getenv, environ)
+	"github.com/leeovery/kit/internal/kind/secret/store"
+)
+
+// UseStores has kit know stores alone, as Stores, till t ends.
+func UseStores(t testing.TB, stores ...store.Driver) {
+	was := Stores
+	Stores = stores
+	t.Cleanup(func() { Stores = was })
 }

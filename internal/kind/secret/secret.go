@@ -19,7 +19,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -27,7 +26,6 @@ import (
 	"strings"
 
 	"github.com/leeovery/kit/internal/config"
-	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/kind/secret/store"
 	"github.com/leeovery/kit/internal/runner"
@@ -60,7 +58,6 @@ func (s Secret) IsFile() bool {
 type Secrets struct {
 	run      runner.Runner
 	home     string
-	stores   drivers
 	declared []Secret
 }
 
@@ -73,7 +70,7 @@ var Descriptor = kind.Descriptor{
 	Name:    kindName,
 	Label:   "Secrets",
 	Group:   kind.Secrets,
-	Section: &config.Section{Kind: kindName, Header: "secrets", Form: config.Secrets, Sorted: true, Items: drivers(Stores).itemOf},
+	Section: &config.Section{Kind: kindName, Header: "secrets", Form: config.Secrets, Sorted: true, Items: checkItem},
 	Row:     "Secrets",
 	New:     func(d *kind.Deps) kind.Kind { return New(d.Run, d.Home) },
 }
@@ -81,28 +78,23 @@ var Descriptor = kind.Descriptor{
 // New returns the secrets of the user whose home is home, in the stores kit
 // knows (Stores).
 func New(run runner.Runner, home string) *Secrets {
-	return NewWith(run, home, Stores)
-}
-
-// NewWith returns the secrets of the user whose home is home, in stores.
-func NewWith(run runner.Runner, home string, stores []store.Driver) *Secrets {
-	return &Secrets{run: run, home: home, stores: stores}
+	return &Secrets{run: run, home: home}
 }
 
 func (s *Secrets) Name() string { return kindName }
 
-// Program is the programs of the stores the secrets declared are in.
-func (s *Secrets) Program() string { return strings.Join(s.Commands(), " and ") }
-
-// Commands are the programs of the stores the secrets declared are in, each
-// once: syncing runs them.
-func (s *Secrets) Commands() []string {
-	var out []string
-	for _, d := range s.used() {
-		out = append(out, d.About().Program)
+// Program is the program of the store the secrets declared are in: none
+// when they're in several, or none.
+func (s *Secrets) Program() string {
+	if used := s.used(); len(used) == 1 {
+		return used[0].About().Program
 	}
-	return out
+	return ""
 }
+
+// Command is none: syncing waits for each store's program itself, so one
+// store's missing program holds back only that store's secrets.
+func (s *Secrets) Command() string { return "" }
 
 // used are the stores the secrets declared are in, each once, in turn.
 func (s *Secrets) used() []store.Driver {
@@ -172,21 +164,23 @@ func (s *Secrets) parse(e config.Entry) (Secret, error) {
 
 // place reads ref, a secret's reference on e's line, into sec: short for a
 // field of the item e's section names, or, in a plain section, in full, its
-// form picking its store.
+// form picking its store. In an item's section, a reference of a store's
+// own, a value's or an item's, is refused: it's not short for a field.
 func (s *Secrets) place(sec *Secret, e config.Entry, ref string) error {
+	ds := stores()
 	if e.Item == "" {
-		d, ok := s.stores.ofRef(ref)
+		d, ok := ds.forRef(ref)
 		if !ok {
-			return fmt.Errorf("%q isn't a reference kit knows: in a plain [secrets], give where its store keeps it in full (%s), or put it in its item's section", ref, s.stores.refs())
+			return fmt.Errorf("%q isn't a reference kit knows: in a plain [secrets], give where its store keeps it in full (%s), or put it in its item's section", ref, ds.refs())
 		}
 		sec.Ref, sec.store = ref, d
 		return nil
 	}
-	d, ok := s.stores.ofItem(e.Item)
+	d, ok := ds.forItem(e.Item)
 	if !ok {
-		return s.stores.itemOf(e.Item)
+		return checkItem(e.Item)
 	}
-	if _, full := s.stores.ofRef(ref); full {
+	if ds.owns(ref) {
 		return fmt.Errorf("%s is in full: in [%s] a line names a field or attachment of its item, as in %s; a full reference goes in a plain [secrets]", ref, e.Section, d.About().Field)
 	}
 	sec.Ref, sec.store = d.Join(e.Item, ref), d
@@ -290,282 +284,7 @@ func (s *Secrets) Resolve(_ context.Context, names []string) (map[string]string,
 
 // Value can't say where a secret found on the Mac is kept.
 func (s *Secrets) Value(_ context.Context, name string) (string, error) {
-	return "", fmt.Errorf("kit can't tell where %s is kept: declare it with kit secret add %s --ref <where its store keeps it, in full> (%s)", name, name, s.stores.refs())
-}
-
-// Install syncs every secret: those missing, and the rest, in one sitting.
-func (s *Secrets) Install(ctx context.Context, _ []string) error {
-	report, err := s.Sync(ctx)
-	if err != nil {
-		return err
-	}
-	if len(report.Failed) > 0 {
-		return report
-	}
-	return nil
-}
-
-// Report is what a sync did: how many it synced, how many of those changed,
-// and those that failed, each with why, keeping their previous values.
-type Report struct {
-	Synced, Changed int
-	Failed          map[string]string
-}
-
-func (r Report) Error() string {
-	var parts []string
-	for _, name := range slices.Sorted(maps.Keys(r.Failed)) {
-		parts = append(parts, name+": "+r.Failed[name])
-	}
-	return "couldn't sync " + strings.Join(parts, "; ") + " (each keeps its previous value)"
-}
-
-// Summary says what the sync did, values never shown.
-func (r Report) Summary() string {
-	text := fmt.Sprintf("%d synced, %d changed", r.Synced, r.Changed)
-	if len(r.Failed) > 0 {
-		text += fmt.Sprintf(", %d failed", len(r.Failed))
-	}
-	return text
-}
-
-// Ready says whether the store keeping ref, an item or a value in full,
-// answers, as ready does.
-func (s *Secrets) Ready(ctx context.Context, ref string) error {
-	d, err := s.StoreOf(ref)
-	if err != nil {
-		return err
-	}
-	return s.ready(ctx, d)
-}
-
-// ready says whether d answers: nil for a session open already, or one it
-// opens, the person approving it (store.Driver.Unlock). Signed out, it's
-// not ready yet, as signedIn says.
-func (s *Secrets) ready(ctx context.Context, d store.Driver) error {
-	switch d.Session(ctx, s.run) {
-	case store.Open:
-		return nil
-	case store.SignedOut:
-		return engine.NotYet(d.About().SignedOut)
-	}
-	if err := d.Unlock(ctx, s.run); err != nil {
-		return errors.New(d.About().NoAnswer)
-	}
-	return nil
-}
-
-// signedIn is nil when d is signed in, asking no one; else it's not ready
-// yet, said at once in d's words.
-func (s *Secrets) signedIn(ctx context.Context, d store.Driver) error {
-	if d.Session(ctx, s.run) == store.SignedOut {
-		return engine.NotYet(d.About().SignedOut)
-	}
-	return nil
-}
-
-// Cards are the sign-ins of the stores the secrets declared are in, each a
-// card kit raises before syncing, watched till its store says it's signed
-// in: waiting for the store's program and app, which kit opens.
-func (s *Secrets) Cards() []kind.Card {
-	var out []kind.Card
-	for _, d := range s.used() {
-		a := d.About()
-		out = append(out, kind.Card{
-			Name: a.ID + "-sign-in", Title: a.SignIn.Title, Why: "Your secrets come from " + a.Name + ".", Steps: a.SignIn.Steps,
-			Done:    func(ctx context.Context) bool { return d.Session(ctx, s.run) != store.SignedOut },
-			Program: a.Program, App: a.SignIn.App, AppName: a.SignIn.AppName,
-		})
-	}
-	return out
-}
-
-// readAll reads refs from d in as few reads as it can, as a store may have
-// the person approve each: one, when every ref reads. Should that fail,
-// once d answers, they're read in halves, so that a ref that won't read
-// costs the rest nothing. A value that won't read is left out.
-func (s *Secrets) readAll(ctx context.Context, d store.Driver, refs []string) (map[string]string, error) {
-	if len(refs) == 0 {
-		return map[string]string{}, nil
-	}
-	if values, err := d.ReadMany(ctx, s.run, refs); err == nil {
-		return values, nil
-	}
-	if err := s.ready(ctx, d); err != nil {
-		return nil, err
-	}
-	values := map[string]string{}
-	s.halves(ctx, d, refs, values)
-	return values, nil
-}
-
-// halves reads each half of refs from d into values, as readSome does.
-func (s *Secrets) halves(ctx context.Context, d store.Driver, refs []string, values map[string]string) {
-	half := len(refs) / 2
-	s.readSome(ctx, d, refs[:half], values)
-	s.readSome(ctx, d, refs[half:], values)
-}
-
-// readSome reads refs from d into values: one alone; more at once, or,
-// should that fail, in halves.
-func (s *Secrets) readSome(ctx context.Context, d store.Driver, refs []string, values map[string]string) {
-	switch len(refs) {
-	case 0:
-	case 1:
-		if v, err := d.Read(ctx, s.run, refs[0]); err == nil {
-			values[refs[0]] = v
-		}
-	default:
-		got, err := d.ReadMany(ctx, s.run, refs)
-		if err != nil {
-			s.halves(ctx, d, refs, values)
-			return
-		}
-		maps.Copy(values, got)
-	}
-}
-
-// refs are the references of the declared secrets d keeps, each once, in
-// turn.
-func (s *Secrets) refs(d store.Driver) []string {
-	var refs []string
-	for _, sec := range s.declared {
-		if sameStore(sec.store, d) && !slices.Contains(refs, sec.Ref) {
-			refs = append(refs, sec.Ref)
-		}
-	}
-	return refs
-}
-
-// Sync reads every declared secret from its store and puts each in place:
-// ~/.secrets.zsh written whole (a variable that fails to read keeps its
-// line, so a partial read never shrinks it), each file written beside its
-// place then renamed into it. A store that isn't signed in, or doesn't
-// answer, fails its own secrets alone; when none does, the sync fails at
-// once, saying why in each store's words.
-func (s *Secrets) Sync(ctx context.Context) (Report, error) {
-	report := Report{Failed: map[string]string{}}
-	used := s.used()
-	down := map[string]error{}
-	for _, d := range used {
-		if err := s.signedIn(ctx, d); err != nil {
-			down[d.About().ID] = err
-		}
-	}
-	if err := allDown(used, down); err != nil {
-		return report, err
-	}
-	old, oldOrder, err := s.envLines()
-	if err != nil {
-		return report, err
-	}
-	values := map[string]string{}
-	for _, d := range used {
-		if down[d.About().ID] != nil {
-			continue
-		}
-		got, err := s.readAll(ctx, d, s.refs(d))
-		if err != nil {
-			down[d.About().ID] = err
-			continue
-		}
-		maps.Copy(values, got)
-	}
-	if err := allDown(used, down); err != nil {
-		return report, err
-	}
-	var env []string
-	for _, sec := range s.declared {
-		v, ok := values[sec.Ref]
-		switch {
-		case !ok:
-			report.Failed[sec.Name] = unread(sec, down)
-			if line, kept := old[sec.Name]; kept && !sec.IsFile() {
-				env = append(env, line)
-			}
-			continue
-		case sec.IsFile():
-			changed, err := s.writeFile(sec, v)
-			if err != nil {
-				report.Failed[sec.Name] = err.Error()
-				continue
-			}
-			report.Changed += changed
-		default:
-			line := "export " + sec.Name + "=" + quote(v)
-			if sec.Note != "" {
-				line += "   # " + sec.Note
-			}
-			if old[sec.Name] != line {
-				report.Changed++
-			}
-			env = append(env, line)
-		}
-		report.Synced++
-	}
-	// A variable no line declares stays: taking it out is kit reconcile's.
-	for _, name := range oldOrder {
-		if !slices.ContainsFunc(s.declared, func(sec Secret) bool { return sec.Name == name }) {
-			env = append(env, old[name])
-		}
-	}
-	if err := writeFile(filepath.Join(s.home, EnvFile), header(used)+strings.Join(env, "\n")+"\n", 0o600); err != nil {
-		return report, err
-	}
-	return report, nil
-}
-
-// allDown is why the sync can't go on, when every store used, of used, is
-// down, as down says by its ID: nil while one isn't, or none is used.
-func allDown(used []store.Driver, down map[string]error) error {
-	if len(used) == 0 || len(down) < len(used) {
-		return nil
-	}
-	errs := make([]error, len(used))
-	for i, d := range used {
-		errs[i] = down[d.About().ID]
-	}
-	if len(errs) == 1 {
-		return errs[0]
-	}
-	return errors.Join(errs...)
-}
-
-// unread is why sec's value didn't read: its store's being down, as down
-// says, or the store couldn't read it.
-func unread(sec Secret, down map[string]error) string {
-	if err := down[sec.store.About().ID]; err != nil {
-		return err.Error()
-	}
-	return sec.store.About().Name + " couldn't read " + sec.Ref
-}
-
-// header heads ~/.secrets.zsh, naming the stores used, its values' sources.
-func header(used []store.Driver) string {
-	from := "Written by kit"
-	if len(used) > 0 {
-		names := make([]string, len(used))
-		for i, d := range used {
-			names[i] = d.About().Name
-		}
-		from += " from " + strings.Join(names, " and ")
-	}
-	return "# " + from + ": kit-config's secrets sections. kit apply\n# and kit secret sync rewrite it whole; change a secret in its store, or with kit.\n"
-}
-
-// writeFile puts a file secret's value in place, with its mode, ended by a
-// newline: 1 when it changed, else 0.
-func (s *Secrets) writeFile(sec Secret, value string) (int, error) {
-	path := s.path(sec)
-	if old, err := os.ReadFile(path); err == nil && string(old) == value+"\n" {
-		if info, err := os.Stat(path); err == nil && info.Mode().Perm() == sec.Mode {
-			return 0, nil
-		}
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return 0, err
-	}
-	return 1, writeFile(path, value+"\n", sec.Mode)
+	return "", fmt.Errorf("kit can't tell where %s is kept: declare it with kit secret add %s --ref <where its store keeps it, in full> (%s)", name, name, stores().refs())
 }
 
 // Remove takes each secret off the Mac: a variable out of ~/.secrets.zsh, a
