@@ -70,7 +70,7 @@ var Descriptor = kind.Descriptor{
 	Name:    kindName,
 	Label:   "Secrets",
 	Group:   kind.Secrets,
-	Section: &config.Section{Kind: kindName, Header: "secrets", Form: config.Secrets, Sorted: true, Items: checkItem, Line: checkLine},
+	Section: &config.Section{Kind: kindName, Header: "secrets", Form: config.Secrets, Sorted: true, Items: checkItem, Line: checkLine, Says: lineSays},
 	Row:     "Secrets",
 	New:     func(d *kind.Deps) kind.Kind { return New(d.Run, d.Home) },
 }
@@ -133,6 +133,19 @@ func (s *Secrets) Values(list config.List) (config.List, error) {
 func checkLine(e config.Entry) error {
 	_, err := parse(e)
 	return err
+}
+
+// lineSays is what e's line says: where its value is, in full, and a
+// file's mode, however the line gives them.
+func lineSays(e config.Entry) (string, error) {
+	sec, err := parse(e)
+	return fmt.Sprintf("%s --mode %o", sec.Ref, sec.Mode), err
+}
+
+// Ref is where e's line says its store keeps its value, in full.
+func Ref(e config.Entry) (string, error) {
+	sec, err := parse(e)
+	return sec.Ref, err
 }
 
 // parse reads e's line as a secret's: its reference, then its options.

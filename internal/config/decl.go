@@ -132,6 +132,11 @@ type Section struct {
 	// doesn't read as the kind reads it: nil when it does. kit never writes
 	// a line it refuses (Config.Declare).
 	Line func(Entry) error
+	// Says, when set, is what one of its lines says, as the kind reads it,
+	// its note aside: two lines saying the same, however written, are
+	// alike, as a shared declare needs of the lines it moves. Unset, it's
+	// the line's words, --after, --before and --secret in any order.
+	Says func(Entry) (string, error)
 	// Held is whether it's a list whose sections can hold their lines back,
 	// options after the header saying what for: --after a step, or one of a
 	// step's things; --secret a secret they need, as in [homebrew formulae
@@ -161,6 +166,8 @@ type sectionDef struct {
 	items func(ref string) error
 	// line is the kind's own check of a line (Section.Line).
 	line func(Entry) error
+	// lineSays is the kind's own reading of what a line says (Section.Says).
+	lineSays func(Entry) (string, error)
 	// holds are the options the kind's sections take after the header,
 	// holding their lines back, what for (its hold): --after a step, or one
 	// of a step's things; --secret a secret they need, as in [homebrew
@@ -204,7 +211,7 @@ var (
 func sectionDefs(kinds []Section) []sectionDef {
 	defs := slices.Clone(ownLeading)
 	for _, k := range kinds {
-		d := sectionDef{header: k.Header, kind: k.Kind, form: k.Form, isKind: true, folders: k.Folders, items: k.Items, line: k.Line, sorted: k.Sorted}
+		d := sectionDef{header: k.Header, kind: k.Kind, form: k.Form, isKind: true, folders: k.Folders, items: k.Items, line: k.Line, lineSays: k.Says, sorted: k.Sorted}
 		if k.Held {
 			d.holds = listOptions
 		}

@@ -189,12 +189,24 @@ func TestBackupAddAndRemove(t *testing.T) {
 			t.Errorf("kit backup %s printed\n%s%s exit %d; want %q, exit %d", strings.Join(tt.args, " "), out, errOut, code, tt.want, tt.code)
 		}
 	}
-	w.writeSection(t, "studio", "backups", "arq\n")
+	w.writeSection(t, "studio", "backups", "arq --before config --after cask:arq\n")
+	before := map[string]string{}
+	for _, scope := range []string{"shared", "laptop", "studio"} {
+		before[scope] = w.readSection(t, scope, "backups")
+	}
+	if out, _, code := w.run(t, "backup", "add", "arq", "--shared"); code != 1 || !strings.Contains(out, "arq failed laptop/declarations:") || !strings.Contains(out, "has arq --after cask:arq --before config: give the same, or take that line out first") {
+		t.Errorf("kit backup add --shared, dropping the Macs' options, printed\n%s exit %d", out, code)
+	}
+	for scope, was := range before {
+		if got := w.readSection(t, scope, "backups"); got != was {
+			t.Errorf("%s's [backups] = %q, want it untouched", scope, got)
+		}
+	}
 	w.expectSync([]string{"laptop/declarations", "shared/declarations", "studio/declarations"}, "kit backup add arq (laptop)")
-	if out, errOut, code := w.run(t, "backup", "add", "arq", "--shared"); code != 0 || !strings.Contains(out, "arq ok declared in shared, out of laptop and studio\n") {
+	if out, errOut, code := w.run(t, "backup", "add", "arq", "--shared", "--before", "config", "--after", "cask:arq"); code != 0 || !strings.Contains(out, "arq ok declared in shared, out of laptop and studio\n") {
 		t.Fatalf("kit backup add --shared, declared by Macs, printed\n%s%s exit %d", out, errOut, code)
 	}
-	if got := w.readSection(t, "shared", "backups"); got != "arq\ntime-machine\n" {
+	if got := w.readSection(t, "shared", "backups"); got != "arq --after cask:arq --before config   # offsite\ntime-machine\n" {
 		t.Errorf("shared [backups] = %q", got)
 	}
 	for _, mac := range []string{"laptop", "studio"} {

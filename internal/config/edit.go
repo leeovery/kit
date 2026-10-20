@@ -318,7 +318,9 @@ func (c *Config) Declare(kind, scope string, e Entry) error {
 
 // DeclareShared declares e in the shared declarations, as Declare does,
 // taking it out of the files of each of the Macs from, as Undeclare does:
-// one edit, judged as a whole before any of it's written. It returns the
+// one edit, judged as a whole before any of it's written. Nothing a line it
+// moves says is lost: the shared line must say the same (LineDiffers), and
+// takes their note when given none, refused when theirs differ. It returns the
 // scopes whose files it wrote, those written before one failed too.
 func (c *Config) DeclareShared(kind string, e Entry, from []string) ([]string, error) {
 	d, files, err := c.declaring(kind, Shared, e, from...)
@@ -378,6 +380,15 @@ func (c *Config) declaring(kind, scope string, e Entry, from ...string) (section
 	if err != nil {
 		return d, nil, err
 	}
+	moved, err := c.movedLines(kind, e.Name, from)
+	if err != nil {
+		return d, nil, err
+	}
+	if e.Note == "" {
+		if e.Note, err = carriedNote(moved); err != nil {
+			return d, nil, err
+		}
+	}
 	line, err := entryText(d, name, e)
 	if err != nil {
 		return d, nil, err
@@ -412,6 +423,9 @@ func (c *Config) declaring(kind, scope string, e Entry, from ...string) (section
 	default:
 		b.insert(b.sortedPlace(0, len(b.lines), name), block...)
 		s.body = b.lines
+	}
+	if err := sameAsMoved(d, f, e.Name, moved); err != nil {
+		return d, nil, err
 	}
 	files := []*declFile{f}
 	// Taken out as the config reads with the shared file edited: whether a

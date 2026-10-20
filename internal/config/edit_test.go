@@ -530,32 +530,74 @@ func TestDeclareSharedMovesItOutOfTheMacs(t *testing.T) {
 	}
 }
 
-// CheckDeclareShared judges a move as DeclareShared would, writing nothing:
-// a secret in a Mac's block for another item moves, one the shared file has
-// already is refused, in the same words.
-func TestCheckDeclareSharedJudgesTheMove(t *testing.T) {
-	files := map[string]string{
-		"shared/declarations": "[secrets op://vault/Item --as mac-secrets]\nTOKEN Section/token\n",
-		"laptop/declarations": "[secrets op://vault/Other --as keys]\nFOO Section/foo\n",
-	}
-	cfg := loadRepo(t, files)
-	foo := config.Entry{Name: "FOO", Value: "Section/foo", Item: "op://vault/Item"}
-	if err := cfg.CheckDeclareShared("secret", foo, []string{"laptop"}); err != nil {
-		t.Errorf("CheckDeclareShared() of a Mac's secret, moved = %v", err)
-	}
-	if err := cfg.CheckDeclareShared("secret", foo, nil); err == nil {
-		t.Error("CheckDeclareShared() of a Mac's secret, not moved = nil, want it refused")
-	}
-	for path, before := range files {
-		if got := readFile(t, cfg, path); got != before {
-			t.Errorf("%s = %q, want it untouched", path, got)
+// A shared declare loses nothing a line it moves says, whatever the kind:
+// the shared line must say the same, by meaning (options in any order, a
+// secret's reference short or in full), else it's refused, naming the line;
+// it takes the moved lines' note when given none, refused when theirs
+// differ, a note given winning. CheckDeclareShared judges as DeclareShared
+// does, writing nothing.
+func TestDeclareSharedKeepsWhatAMovedLineSays(t *testing.T) {
+	for name, c := range map[string]struct {
+		laptop, studio string
+		kind           string
+		e              config.Entry
+		want, shared   string
+	}{
+		"a section's hold, the same": {laptop: "[homebrew formulae --after cask:x]\ngo\n", kind: "brew", e: config.Entry{Name: "go", Hold: "--after cask:x"},
+			shared: "[homebrew formulae --after cask:x]\ngo\n"},
+		"a section's hold, dropped": {laptop: "[homebrew formulae --after cask:x]\ngo\n", kind: "brew", e: config.Entry{Name: "go"},
+			want: "laptop/declarations:2 has go in [homebrew formulae --after cask:x]: give the same, or take that line out first"},
+		"options in another order": {laptop: "[backups]\narq --after cask:arq --before config\n", kind: config.BackupsKind, e: config.Entry{Name: "arq", Value: "--before config --after cask:arq"},
+			shared: "[backups]\narq --before config --after cask:arq\n"},
+		"options dropped": {laptop: "[backups]\narq --after cask:arq\n", kind: config.BackupsKind, e: config.Entry{Name: "arq"},
+			want: "laptop/declarations:2 has arq --after cask:arq: give the same, or take that line out first"},
+		"a step's --after dropped": {studio: "[steps]\ntool \"Install it\" --after mise\n", kind: config.StepsKind, e: config.Entry{Name: "tool", Value: `"Install it"`},
+			want: "studio/declarations:2 has tool \"Install it\" --after mise"},
+		"a secret's reference, short for the same": {laptop: "[secrets]\nFOO op://vault/Item/Section/foo\n", kind: "secret", e: config.Entry{Name: "FOO", Value: "Section/foo", Item: "op://vault/Item"},
+			shared: "[secrets op://vault/Item]\nFOO Section/foo\n"},
+		"a secret in another item": {laptop: "[secrets op://vault/Other --as keys]\nFOO Section/foo\n", kind: "secret", e: config.Entry{Name: "FOO", Value: "Section/foo", Item: "op://vault/Item"},
+			want: "laptop/declarations:2 has FOO Section/foo in [secrets op://vault/Other --as keys]"},
+		"a file's mode dropped": {laptop: "[secrets op://vault/Item]\n~/.npmrc Section/npmrc --mode 644\n", kind: "secret", e: config.Entry{Name: "~/.npmrc", Value: "Section/npmrc", Item: "op://vault/Item"},
+			want: "laptop/declarations:2 has ~/.npmrc Section/npmrc --mode 644 in [secrets op://vault/Item]"},
+		"a note carried": {laptop: "[homebrew formulae]\ngo   # a compiler\n", studio: "[homebrew formulae]\ngo\n", kind: "brew", e: config.Entry{Name: "go"},
+			shared: "[homebrew formulae]\ngo   # a compiler\n"},
+		"notes that differ": {laptop: "[homebrew formulae]\ngo   # a compiler\n", studio: "[homebrew formulae]\ngo   # for work\n", kind: "brew", e: config.Entry{Name: "go"},
+			want: `the lines it moves have different notes, laptop/declarations:2 ("a compiler"), studio/declarations:2 ("for work"): say which with --note`},
+		"a note given": {laptop: "[homebrew formulae]\ngo   # a compiler\n", studio: "[homebrew formulae]\ngo   # for work\n", kind: "brew", e: config.Entry{Name: "go", Note: "Go"},
+			shared: "[homebrew formulae]\ngo   # Go\n"},
+	} {
+		files := map[string]string{"shared/declarations": "", "laptop/declarations": c.laptop, "studio/declarations": c.studio}
+		cfg := loadRepo(t, files)
+		var from []string
+		for _, mac := range []string{"laptop", "studio"} {
+			if files[mac+"/declarations"] != "" {
+				from = append(from, mac)
+			}
 		}
-	}
-	token := config.Entry{Name: "TOKEN", Value: "Section/new", Item: "op://vault/Item"}
-	checked := cfg.CheckDeclareShared("secret", token, nil)
-	_, declared := cfg.DeclareShared("secret", token, nil)
-	if checked == nil || declared == nil || checked.Error() != declared.Error() {
-		t.Errorf("CheckDeclareShared() = %v, DeclareShared() = %v: want both refusing a name in shared, alike", checked, declared)
+		checked := cfg.CheckDeclareShared(c.kind, c.e, from)
+		if c.want != "" {
+			_, err := cfg.DeclareShared(c.kind, c.e, from)
+			for call, err := range map[string]error{"CheckDeclareShared": checked, "DeclareShared": err} {
+				if err == nil || !strings.Contains(err.Error(), c.want) {
+					t.Errorf("%s: %s() = %v, want %q", name, call, err, c.want)
+				}
+			}
+			for path, before := range files {
+				if got := readFile(t, cfg, path); got != before {
+					t.Errorf("%s: %s = %q, want it untouched", name, path, got)
+				}
+			}
+			continue
+		}
+		if checked != nil {
+			t.Errorf("%s: CheckDeclareShared() = %v", name, checked)
+		}
+		if _, err := cfg.DeclareShared(c.kind, c.e, from); err != nil {
+			t.Errorf("%s: DeclareShared() = %v", name, err)
+		}
+		if got := readFile(t, cfg, "shared/declarations"); got != c.shared {
+			t.Errorf("%s: shared/declarations = %q, want %q", name, got, c.shared)
+		}
 	}
 }
 

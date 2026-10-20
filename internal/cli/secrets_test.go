@@ -307,36 +307,86 @@ func TestAddASecretNamedInTheSharedFile(t *testing.T) {
 	}
 }
 
-// Declared for every Mac, a secret comes out of the Macs' files that had
-// it, whatever block it was in, in the same edit and commit as its shared
-// line goes in the block --in names.
+// Declared for every Mac by the reference the Macs' lines give, short or in
+// full, whatever block they're in, a secret comes out of their files in the
+// same edit and commit, its shared line in the shared block for its item,
+// keeping their note; nothing is stored.
 func TestAddASecretSharedTakesItOutOfTheMacs(t *testing.T) {
 	w := laptopWorld(t)
-	w.writeSection(t, "laptop", "secrets op://vault/Item --as mac-secrets", "FOO Section/foo\nTOKEN Section/token\n")
-	w.writeSection(t, "studio", "secrets op://vault/Other --as keys", "FOO Section/foo\n")
-	w.stdin = "new value"
+	w.writeSection(t, "shared", "secrets op://vault/Item --as mac-secrets", "TOKEN Section/token\n")
+	w.writeSection(t, "laptop", "secrets op://vault/Item --as mac-secrets", "FOO Section/foo   # a token\n")
+	w.writeSection(t, "studio", "secrets", "FOO op://vault/Item/Section/foo\n")
 	f := w.fake
 	f.On("op", "whoami")
-	f.On("op", "item", "get", "Item", "--vault", "vault", "--format", "json").Prints(`{"id":"abc","title":"Item","sections":[{"id":"s1","label":"Section"}],"fields":[]}`)
-	f.On("op", "item", "edit", "Item", "--vault", "vault")
-	optest.Holds(f, map[string]string{"op://vault/Item/Section/shared-foo": "new value", "op://vault/Item/Section/token": "the value"})
+	optest.Holds(f, map[string]string{"op://vault/Item/Section/foo": "foo", "op://vault/Item/Section/token": "the value"})
 	w.expectSync([]string{"laptop/declarations", "shared/declarations", "studio/declarations"}, "kit secret add FOO (laptop)")
-	out, _, code := w.run(t, "secret", "add", "FOO", "--shared", "--in", "mac-secrets", "--field", "Section/shared-foo", "--stdin")
+	out, _, code := w.run(t, "secret", "add", "FOO", "--shared", "--ref", "op://vault/Item/Section/foo")
 	if code != 0 || !strings.Contains(out, "declared in shared, out of laptop and studio, synced") {
 		t.Fatalf("kit secret add --shared printed\n%s exit %d", out, code)
 	}
-	if got := w.readSection(t, "shared", "secrets op://vault/Item --as mac-secrets"); got != "FOO Section/shared-foo\n" {
+	if got := w.readSection(t, "shared", "secrets op://vault/Item --as mac-secrets"); got != "FOO Section/foo   # a token\nTOKEN Section/token\n" {
 		t.Errorf("shared's [secrets op://vault/Item --as mac-secrets] = %q", got)
 	}
-	if got := w.readSection(t, "laptop", "secrets op://vault/Item --as mac-secrets"); got != "TOKEN Section/token\n" {
-		t.Errorf("laptop's [secrets op://vault/Item --as mac-secrets] = %q, want FOO out of it", got)
+	for _, mac := range []string{"laptop", "studio"} {
+		if got := w.read(t, filepath.Join(".config", "kit", mac, "declarations")); strings.Contains(got, "FOO") {
+			t.Errorf("%s's declarations = %q, want FOO out of them", mac, got)
+		}
 	}
-	if got := w.read(t, filepath.Join(".config", "kit", "studio", "declarations")); strings.Contains(got, "FOO") {
-		t.Errorf("studio's declarations = %q, want FOO out of them", got)
+	for _, call := range f.Calls() {
+		if strings.HasPrefix(call, "op item") {
+			t.Errorf("ran %s: a reference stores nothing", call)
+		}
 	}
 	commits := slices.DeleteFunc(f.Calls(), func(call string) bool { return !strings.Contains(call, " commit ") })
 	if len(commits) != 1 {
 		t.Errorf("committed %q, want one commit", commits)
+	}
+}
+
+// Declared for every Mac, a secret a Mac's line keeps elsewhere, or as a
+// file of another mode, is refused before the store's asked anything, the
+// files untouched, naming the line, and, for a value elsewhere, the --ref
+// that shares it: whatever block the line is in, one going by the same name
+// for another item too.
+func TestAddASecretSharedRefusesWhatAMacSaysOtherwise(t *testing.T) {
+	for _, c := range []struct {
+		name, header, line, want string
+		args                     []string
+	}{
+		{"a file of another mode", "secrets op://vault/Item --as mac-secrets", "~/.npmrc Section/npmrc --mode 644\n",
+			"laptop/declarations:5 has ~/.npmrc Section/npmrc --mode 644 in [secrets op://vault/Item --as mac-secrets]: give the same, or take that line out first",
+			[]string{"~/.npmrc", "--ref", "op://vault/Item/Section/npmrc"}},
+		{"a value at another field", "secrets op://vault/Item --as mac-secrets", "FOO Section/foo\n",
+			"has FOO Section/foo in [secrets op://vault/Item --as mac-secrets]: give the same, or take that line out first; --ref op://vault/Item/Section/foo shares the value it has",
+			[]string{"FOO", "--item", "op://vault/Item", "--field", "Section/other", "--stdin"}},
+		{"a block of the same name for another item", "", "",
+			"studio/declarations:5 has FOO Section/foo in [secrets op://vault/Other --as mac-secrets]: give the same, or take that line out first; --ref op://vault/Other/Section/foo shares the value it has",
+			[]string{"FOO", "--in", "mac-secrets", "--field", "Section/foo", "--stdin"}},
+	} {
+		w := laptopWorld(t)
+		w.stdin = "new value"
+		if c.header != "" {
+			w.writeSection(t, "laptop", c.header, c.line)
+		} else {
+			w.writeSection(t, "laptop", "secrets op://vault/Item --as mac-secrets", "TOKEN Section/token\n")
+			w.writeSection(t, "studio", "secrets op://vault/Other --as mac-secrets", "FOO Section/foo\n")
+		}
+		before := map[string]string{}
+		for _, scope := range []string{"shared", "laptop", "studio"} {
+			before[scope] = w.read(t, filepath.Join(".config", "kit", scope, "declarations"))
+		}
+		_, errOut, code := w.run(t, append([]string{"secret", "add", "--shared"}, c.args...)...)
+		if code != 2 || !strings.Contains(ansi.Strip(errOut), c.want) {
+			t.Errorf("%s: printed %q, exit %d; want it refused with %q", c.name, errOut, code, c.want)
+		}
+		if calls := w.fake.Calls(); len(calls) > 0 {
+			t.Errorf("%s: ran %q, want the store asked nothing, nothing committed", c.name, calls)
+		}
+		for scope, was := range before {
+			if got := w.read(t, filepath.Join(".config", "kit", scope, "declarations")); got != was {
+				t.Errorf("%s: %s's declarations = %q, want them untouched", c.name, scope, got)
+			}
+		}
 	}
 }
 

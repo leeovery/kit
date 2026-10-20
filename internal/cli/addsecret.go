@@ -165,7 +165,7 @@ func (a *app) secretTarget(ctx context.Context, r *run, k *secret.Secrets, name 
 	}
 	at.entry = config.Entry{Name: name, Value: secretLine(at.short, so.mode), Note: opts.note, Item: item, As: as}
 	if err := r.checkDeclare(secretKind, at.scope, at.entry); err != nil {
-		return at, err
+		return at, sharingHint(err, at)
 	}
 	if err := k.Ready(ctx, at.store); err != nil {
 		return at, err
@@ -174,6 +174,25 @@ func (a *app) secretTarget(ctx context.Context, r *run, k *secret.Secrets, name 
 		return at, k.Reads(ctx, at.store, so.ref)
 	}
 	return at, k.Free(ctx, at.store, item, at.short)
+}
+
+// sharingHint is err, a declare's refusal, saying, when it's of a Mac's
+// line keeping the secret elsewhere, how to share the value that line has:
+// --ref and where it is.
+func sharingHint(err error, at secretTarget) error {
+	differs, ok := errors.AsType[config.LineDiffers](err)
+	if !ok {
+		return err
+	}
+	mine := at.short
+	if at.entry.Item != "" {
+		mine = at.store.Join(at.entry.Item, at.short)
+	}
+	theirs, rerr := secret.Ref(differs.Line)
+	if rerr != nil || theirs == mine {
+		return err
+	}
+	return fmt.Errorf("%w; --ref %s shares the value it has", err, config.Quote(theirs))
 }
 
 // secretShort is where in item, or in full, so says a secret's value is, or

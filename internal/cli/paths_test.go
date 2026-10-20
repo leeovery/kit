@@ -47,7 +47,8 @@ func TestApplyWritesTheShellsPath(t *testing.T) {
 }
 
 // Declared for every Mac, a name comes out of the Macs' files that had it,
-// in the same edit, whatever the command; declared for this Mac, one the
+// in the same edit, whatever the command, refused where a Mac's line says
+// otherwise; declared for this Mac, one the
 // shared file has is refused, saying so.
 func TestSharedTakesTheNameOutOfTheMacs(t *testing.T) {
 	w := laptopWorld(t)
@@ -64,6 +65,9 @@ func TestSharedTakesTheNameOutOfTheMacs(t *testing.T) {
 	}
 
 	w.fake.On("dig", "example.com")
+	if out, _, code := w.run(t, "check", "add", "dns", "--shared", "--", "dig", "example.org"); code != 1 || !strings.Contains(out, "studio/declarations:5 has dns -- dig example.com: give the same, or take that line out first") {
+		t.Errorf("kit check add --shared, another command than studio's, printed\n%s exit %d", out, code)
+	}
 	w.expectSync([]string{"shared/declarations", "studio/declarations"}, "kit check add dns (laptop)")
 	if out, _, code := w.run(t, "check", "add", "dns", "--shared", "--", "dig", "example.com"); code != 0 || !strings.Contains(out, "dns ok declared in shared, out of studio") {
 		t.Errorf("kit check add --shared printed\n%s exit %d", out, code)
