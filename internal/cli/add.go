@@ -56,18 +56,24 @@ func (a *app) add(ctx context.Context, r *run, kindName string, names []string, 
 	defer stop()
 	opts.waiting = waitingForAdmin(ctx, r, kindName, missing, held)
 	c := startChanges(r, names)
-	var declared []string
+	var tried, declared []string
 	for _, name := range names {
 		c.step(ctx, name, func(ctx context.Context) check.Result {
 			if err := refused[name]; err != nil {
 				return check.Result{State: check.Failed, Reason: "couldn't declare: " + err.Error()}
 			}
+			tried = append(tried, name)
 			res, did := installAndDeclare(ctx, r, c, k, scope, name, opts, !slices.Contains(missing, name), prepared[name])
 			if did {
 				declared = append(declared, name)
 			}
 			return res
 		})
+	}
+	if len(declared) == 0 {
+		// A declare that wrote some files, then failed, leaves them to
+		// commit, under what was tried.
+		declared = tried
 	}
 	c.sync(ctx, commitMessage("add", kindName, declared, r.machine, opts.note))
 	return c.finish()

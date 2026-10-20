@@ -42,6 +42,9 @@ type record struct {
 	// Baseline is each watched setting's value as kit last accepted it, as
 	// XML, by name.
 	Baseline map[string]string `json:"baseline,omitempty"`
+	// Exact is whether kit took the baseline reading a string's outer
+	// spaces and a key's exactly: false in a record from before it did.
+	Exact bool `json:"exact,omitempty"`
 }
 
 // Watched are Apple's domains whose settings kit watches for changes, as
@@ -379,6 +382,7 @@ func (d *Defaults) Installed(ctx context.Context) ([]kind.Installed, error) {
 		for _, name := range d.changed(l, rec) {
 			out = append(out, kind.Installed{Name: name, Explicit: true})
 		}
+		rec.Exact = true
 	})
 	return out, err
 }
@@ -434,7 +438,8 @@ func (d *Defaults) changed(l look, rec *record) []string {
 				delete(rec.Baseline, name)
 				continue
 			}
-			if now[name] != was && takenTrimmed(was, now[name]) {
+			// A record from before kit read spaces exactly: once, its first pass.
+			if now[name] != was && !rec.Exact && takenTrimmed(was, now[name]) {
 				rec.Baseline[name] = now[name]
 				continue
 			}
@@ -452,38 +457,49 @@ func (d *Defaults) changed(l look, rec *record) []string {
 	return slices.Compact(names)
 }
 
-// takenTrimmed reports whether was, a value kit took, could have been taken
-// before kit read a string's outer spaces and a key's exactly, holding none,
-// and is, the value now, read that way, as it was: then it's no change.
+// takenTrimmed reports whether was, a value kit took before it read a
+// string's outer spaces and a key's exactly, is is read that way: its XML,
+// each string and key trimmed, the same. Two keys the same once trimmed
+// never are.
 func takenTrimmed(was, is string) bool {
-	wasV, err := plist.ReadValue(was)
+	v, err := plist.ReadValue(is)
 	if err != nil {
 		return false
 	}
-	isV, err := plist.ReadValue(is)
-	return err == nil && plist.Equal(wasV, trimmed(wasV)) && plist.Equal(wasV, trimmed(isV))
+	t, ok := trimmed(v)
+	return ok && plist.XML(t) == was
 }
 
 // trimmed is v as kit read it before it kept a string's outer spaces and a
-// key's: each trimmed.
-func trimmed(v any) any {
+// key's: each trimmed. It's not, when two of a dict's keys are the same
+// once trimmed.
+func trimmed(v any) (any, bool) {
 	switch x := v.(type) {
 	case string:
-		return strings.TrimSpace(x)
+		return strings.TrimSpace(x), true
 	case []any:
 		out := make([]any, len(x))
 		for i, item := range x {
-			out[i] = trimmed(item)
+			t, ok := trimmed(item)
+			if !ok {
+				return nil, false
+			}
+			out[i] = t
 		}
-		return out
+		return out, true
 	case map[string]any:
 		out := make(map[string]any, len(x))
 		for k, item := range x {
-			out[strings.TrimSpace(k)] = trimmed(item)
+			t, ok := trimmed(item)
+			k = strings.TrimSpace(k)
+			if _, twice := out[k]; twice || !ok {
+				return nil, false
+			}
+			out[k] = t
 		}
-		return out
+		return out, true
 	}
-	return v
+	return v, true
 }
 
 // firstKey is a setting's key, without a dict entry's key after it.

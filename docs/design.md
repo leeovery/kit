@@ -350,9 +350,12 @@ step did.
 **The config repository's own edits** are drift, not a problem: linked files mean edits
 land in the repository outside kit (through a link, by hand, by an app), and kit commits only
 its own changes: the paths it changed, each whole as it is on disk (a rename's two sides, a
-deletion, a new folder's every file), never anything else staged, whatever the user's git
-config says; what git can't keep (an ignored file, an empty folder) is left out, and with
-nothing left to commit it says nothing changed and pushes nothing. The `config` step makes each file changed and not committed an item
+deletion, a new folder's every file, a file become a folder), whatever the user's git config
+says, committed from an index of the last commit's and those paths alone, so nothing else
+staged goes in or is touched. What git can't keep (an ignored file, an empty folder, a
+repository nested in kit-config, which `kit reconcile` names and only snoozes) is left out.
+With nothing to commit it says nothing changed, pushing only commits still waiting for the
+upstream, as when a push failed. The `config` step makes each file changed and not committed an item
 (`config:shared/home/.zshrc`, edited, added or deleted, with the lines it adds and removes),
 quiet for a day as drift is; `kit reconcile` shows an edit's diff and offers adopt (commit it,
 then push, `--note` the message's end), revert (back to the last commit; a new file to the
@@ -673,10 +676,11 @@ is refused. The step `file` finds each one:
   and in every folder a home folder mirrors); applying removes it.
 
 `kit file add <path>` moves a file, or every file in a folder, into this Mac's home folder
-(`--shared`: every Mac's) and links it back, refusing a file git ignores (kit-config's rules
-or the user's global ones), naming the rule, as kit-config could never keep it; `kit file
-remove <path>` puts a copy back in place of the link and takes the file out. Both commit and
-push.
+(`--shared`: every Mac's) and links it back. A path git ignores itself (kit-config's rules or
+the user's global ones), a file or a folder whole, is refused, naming the rule, as kit-config
+could never keep it; files it ignores inside a folder stay where they are, on that Mac alone,
+the row naming them. `kit file remove <path>` puts a copy back in place of the link and takes
+the file out. Both commit and push.
 
 ### kit's PATH, and the shell's
 

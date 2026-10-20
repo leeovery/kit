@@ -461,24 +461,26 @@ func (f *Files) Revert(ctx context.Context, name string) (string, error) {
 
 // Add moves the file at path, or every file in the folder at path, into
 // scope's home folder in the repository, and links each back: the links it
-// made. Nothing moves unless all can: a file already declared, a link, or
-// one outside the home folder is refused.
-func (f *Files) Add(ctx context.Context, path, scope string) ([]Link, error) {
+// made, and the files in the folder git ignores, by name, left as they are
+// on this Mac alone. Nothing moves unless all can: a file already
+// declared, a link, one outside the home folder, or a path git ignores
+// itself, is refused.
+func (f *Files) Add(ctx context.Context, path, scope string) ([]Link, []string, error) {
 	rel, err := filepath.Rel(f.Home, path)
 	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, "../") || path == f.Repo.Dir || strings.HasPrefix(path, f.Repo.Dir+"/") {
-		return nil, fmt.Errorf("%s isn't in the home folder, outside kit-config", path)
+		return nil, nil, fmt.Errorf("%s isn't in the home folder, outside kit-config", path)
 	}
 	info, err := os.Lstat(path)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var files []string
 	switch {
 	case info.Mode()&fs.ModeSymlink != 0:
 		if target, _ := os.Readlink(path); strings.HasPrefix(resolve(path, target), f.Repo.Dir+"/") {
-			return nil, fmt.Errorf("%s is linked already", f.Tilde(path))
+			return nil, nil, fmt.Errorf("%s is linked already", f.Tilde(path))
 		}
-		return nil, fmt.Errorf("%s is a link: add the file it leads to", f.Tilde(path))
+		return nil, nil, fmt.Errorf("%s is a link: add the file it leads to", f.Tilde(path))
 	case info.IsDir():
 		err := filepath.WalkDir(path, func(p string, d fs.DirEntry, err error) error {
 			switch {
@@ -493,19 +495,19 @@ func (f *Files) Add(ctx context.Context, path, scope string) ([]Link, error) {
 			return nil
 		})
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if len(files) == 0 {
-			return nil, fmt.Errorf("%s has no files of its own to add", f.Tilde(path))
+			return nil, nil, fmt.Errorf("%s has no files of its own to add", f.Tilde(path))
 		}
 	case info.Mode().IsRegular():
 		files = []string{path}
 	default:
-		return nil, fmt.Errorf("%s isn't a file", f.Tilde(path))
+		return nil, nil, fmt.Errorf("%s isn't a file", f.Tilde(path))
 	}
 	declared, err := f.Declared(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	links := make([]Link, 0, len(files))
 	for _, p := range files {
@@ -513,60 +515,82 @@ func (f *Files) Add(ctx context.Context, path, scope string) ([]Link, error) {
 		l := Link{Name: "~/" + rel, Scope: scope, Path: HomeFolder(scope) + "/" + rel, Dst: p}
 		l.Src = filepath.Join(f.Repo.Dir, l.Path)
 		if i := slices.IndexFunc(declared, func(d Link) bool { return d.Name == l.Name }); i >= 0 {
-			return nil, fmt.Errorf("%s is declared already, in %s", l.Name, declared[i].Path)
+			return nil, nil, fmt.Errorf("%s is declared already, in %s", l.Name, declared[i].Path)
 		}
 		if _, err := os.Lstat(l.Src); err == nil {
-			return nil, fmt.Errorf("%s is in kit-config already", l.Path)
+			return nil, nil, fmt.Errorf("%s is in kit-config already", l.Path)
 		}
 		links = append(links, l)
 	}
-	if err := f.notIgnored(ctx, links); err != nil {
-		return nil, err
+	links, ignored, err := f.keptByGit(ctx, path, scope, info.IsDir(), links)
+	if err != nil {
+		return nil, nil, err
 	}
 	for _, l := range links {
 		data, err := os.ReadFile(l.Dst)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		info, err := os.Stat(l.Dst)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if err := os.MkdirAll(filepath.Dir(l.Src), 0o755); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if err := writeFile(l.Src, data, info.Mode().Perm()); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if err := f.link(l); err != nil {
-			return nil, fmt.Errorf("%s: %w", l.Name, err)
+			return nil, nil, fmt.Errorf("%s: %w", l.Name, err)
 		}
 	}
-	return links, f.remember(append(declared, links...))
+	return links, ignored, f.remember(append(declared, links...))
 }
 
-// notIgnored refuses the first of links whose file git ignores, by the
-// repository's rules or the user's own, naming the rule: kit-config could
-// never keep it.
-func (f *Files) notIgnored(ctx context.Context, links []Link) error {
-	paths := make([]string, len(links))
-	for i, l := range links {
-		paths[i] = l.Path
+// keptByGit are links but those whose files git ignores, by the
+// repository's rules or the user's own, and the names of those: kit-config
+// could never keep one. The path added, a file or a folder whole, git
+// ignoring it itself, is refused, naming the rule, as is a folder all of
+// whose files it ignores.
+func (f *Files) keptByGit(ctx context.Context, path, scope string, folder bool, links []Link) ([]Link, []string, error) {
+	rel, _ := filepath.Rel(f.Home, path)
+	// A folder's rule (tool/) matches it, not yet in the repository, only
+	// asked of as a folder, ending in a slash.
+	itself := HomeFolder(scope) + "/" + rel
+	if folder {
+		itself += "/"
+	}
+	paths := []string{itself}
+	for _, l := range links {
+		if l.Path != itself {
+			paths = append(paths, l.Path)
+		}
 	}
 	ignored, err := f.Repo.Ignored(ctx, paths...)
 	if err != nil {
-		return fmt.Errorf("couldn't ask git whether it ignores them: %w", err)
+		return nil, nil, fmt.Errorf("couldn't ask git whether it ignores them: %w", err)
 	}
-	for _, l := range links {
-		if rule, ok := ignored[l.Path]; ok {
-			in := f.Tilde(rule.Source)
-			if !filepath.IsAbs(rule.Source) {
-				in = "kit-config's " + rule.Source
-			}
-			return fmt.Errorf("git ignores %s, by %s in %s, line %d: kit-config can't keep it", l.Name, rule.Pattern, in, rule.Line)
+	if rule, ok := ignored[itself]; ok {
+		in := f.Tilde(rule.Source)
+		if !filepath.IsAbs(rule.Source) {
+			in = "kit-config's " + rule.Source
 		}
+		return nil, nil, fmt.Errorf("git ignores %s, by %s in %s, line %d: kit-config can't keep it", f.Tilde(path), rule.Pattern, in, rule.Line)
 	}
-	return nil
+	var kept []Link
+	var left []string
+	for _, l := range links {
+		if _, ok := ignored[l.Path]; ok {
+			left = append(left, l.Name)
+			continue
+		}
+		kept = append(kept, l)
+	}
+	if len(kept) == 0 {
+		return nil, nil, fmt.Errorf("git ignores every file in %s: kit-config can't keep them", f.Tilde(path))
+	}
+	return kept, left, nil
 }
 
 // Remove puts a copy of the repository's file back where the link at name

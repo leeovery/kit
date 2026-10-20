@@ -263,6 +263,11 @@ func (d configDrifter) check(ctx context.Context) check.Result {
 }
 
 func (d configDrifter) choices(it check.Item) []choice {
+	if it.State == steps.ConfigRepository {
+		// Neither committed nor binned: git can't keep it, and it's a
+		// repository whole, the user's to move.
+		return []choice{snoozeChoice}
+	}
 	undo := map[string]string{
 		steps.ConfigEdited:  "undo it: back to the last commit",
 		steps.ConfigAdded:   "undo it: the file to the Bin",
@@ -276,9 +281,10 @@ const diffLines = 20
 
 func (d configDrifter) describe(it check.Item) string {
 	return map[string]string{
-		steps.ConfigEdited:  "edited, not committed",
-		steps.ConfigAdded:   "new, not committed",
-		steps.ConfigDeleted: "deleted, not committed",
+		steps.ConfigEdited:     "edited, not committed",
+		steps.ConfigAdded:      "new, not committed",
+		steps.ConfigDeleted:    "deleted, not committed",
+		steps.ConfigRepository: "a repository of its own, which kit-config can't keep: move it out of kit-config",
 	}[it.State]
 }
 

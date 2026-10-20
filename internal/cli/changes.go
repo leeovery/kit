@@ -90,30 +90,58 @@ func (c *changes) changed(file string) {
 }
 
 // sync commits the config's changed files with message, and pushes, as the
-// last step: nothing to do when nothing changed, the files as committed.
+// last step. With nothing to commit, it pushes only what was committed
+// before and is waiting, as when that push failed: nothing else would.
 func (c *changes) sync(ctx context.Context, message string) {
 	c.step(ctx, syncStep, func(ctx context.Context) check.Result {
-		nothing := check.Result{State: check.OK, Summary: "nothing changed"}
 		if len(c.files) == 0 {
-			return nothing
+			return c.pushWaiting(ctx)
 		}
 		slices.Sort(c.files)
 		committed, err := c.run.repo.Commit(ctx, message, c.files...)
-		if err != nil {
-			return check.Result{State: check.Failed, Reason: "couldn't commit " + strings.Join(c.files, ", ") + ": " + err.Error()}
-		}
-		if !committed {
-			return nothing
-		}
-		err = c.run.repo.Push(ctx)
 		switch {
-		case errors.Is(err, gitrepo.ErrNoRemote):
-			return check.Result{State: check.OK, Summary: "committed; no remote to push to"}
-		case err != nil:
-			return check.Result{State: check.Attention, Summary: "committed, not pushed: " + err.Error()}
+		case !committed && err != nil:
+			return check.Result{State: check.Failed, Reason: "couldn't commit " + strings.Join(c.files, ", ") + ": " + err.Error()}
+		case !committed:
+			return c.pushWaiting(ctx)
 		}
-		return check.Result{State: check.OK, Summary: "committed and pushed " + strings.Join(c.files, ", ")}
+		res := c.push(ctx)
+		if err != nil {
+			res.State, res.Summary = check.Attention, res.Summary+"; "+err.Error()
+		}
+		return res
 	})
+}
+
+// push pushes what sync committed.
+func (c *changes) push(ctx context.Context) check.Result {
+	err := c.run.repo.Push(ctx)
+	switch {
+	case errors.Is(err, gitrepo.ErrNoRemote):
+		return check.Result{State: check.OK, Summary: "committed; no remote to push to"}
+	case err != nil:
+		return check.Result{State: check.Attention, Summary: "committed, not pushed: " + err.Error()}
+	}
+	return check.Result{State: check.OK, Summary: "committed and pushed " + strings.Join(c.files, ", ")}
+}
+
+// pushWaiting is sync's step with nothing committed: the commits waiting
+// for the upstream pushed, if there are any.
+func (c *changes) pushWaiting(ctx context.Context) check.Result {
+	nothing := check.Result{State: check.OK, Summary: "nothing changed"}
+	n := c.run.repo.Unpushed(ctx)
+	if n == 0 {
+		return nothing
+	}
+	waiting := plural(n, "commit") + " waiting"
+	err := c.run.repo.Push(ctx)
+	switch {
+	case errors.Is(err, gitrepo.ErrNoRemote):
+		return nothing
+	case err != nil:
+		return check.Result{State: check.Attention, Summary: "nothing changed; " + waiting + ", not pushed: " + err.Error()}
+	}
+	return check.Result{State: check.OK, Summary: "nothing changed; pushed " + waiting}
 }
 
 // finish ends the run, returning attention when a step didn't stand ok.

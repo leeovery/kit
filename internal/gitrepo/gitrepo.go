@@ -70,18 +70,21 @@ func names(out []byte) []string {
 	return paths
 }
 
-// The states of a change not committed.
+// The states of a change not committed: a repository is one of its own,
+// nested in this one, which git can't keep.
 const (
-	Edited  = "edited"
-	Added   = "added"
-	Deleted = "deleted"
+	Edited     = "edited"
+	Added      = "added"
+	Deleted    = "deleted"
+	Repository = "repository"
 )
 
 // Change is a file in the repository changed and not committed.
 type Change struct {
 	// Path is the file, as a path in the repository.
 	Path string
-	// State is edited, added (new to the repository) or deleted.
+	// State is edited, added (new to the repository), deleted, or a
+	// repository nested in this one.
 	State string
 	// Added and Removed count the lines the change adds and removes.
 	Added, Removed int
@@ -89,7 +92,8 @@ type Change struct {
 
 // Changes are the files changed and not committed, staged or not, new ones
 // each by name, a rename as its two sides, with the lines each adds and
-// removes: a file added then gone before it was committed is none.
+// removes against the last commit: a file added then gone before it was
+// committed is none.
 func (r Repo) Changes(ctx context.Context) ([]Change, error) {
 	entries, err := r.status(ctx)
 	if err != nil {
@@ -101,27 +105,18 @@ func (r Repo) Changes(ctx context.Context) ([]Change, error) {
 		if !ok {
 			continue
 		}
-		if i := slices.IndexFunc(changes, func(c Change) bool { return c.Path == e.path }); i >= 0 {
+		path := strings.TrimSuffix(e.path, "/")
+		if i := slices.IndexFunc(changes, func(c Change) bool { return c.Path == path }); i >= 0 {
 			// Staged as deleted, and on disk untracked: committed, and there.
 			changes[i].State = Edited
 			continue
 		}
-		changes = append(changes, Change{Path: e.path, State: state})
+		changes = append(changes, Change{Path: path, State: state})
 	}
 	if len(changes) == 0 {
 		return nil, nil
 	}
-	counts := make(map[string][2]int)
-	if res, err := r.git(ctx, "diff", "--numstat", "-z", "--no-renames", "HEAD"); err == nil {
-		for _, rec := range names(res.Stdout) {
-			f := strings.SplitN(rec, "\t", 3)
-			if len(f) == 3 {
-				added, _ := strconv.Atoi(f[0])
-				removed, _ := strconv.Atoi(f[1])
-				counts[f[2]] = [2]int{added, removed}
-			}
-		}
-	}
+	counts := r.counts(ctx)
 	for i, c := range changes {
 		n, ok := counts[c.Path]
 		if !ok && c.State == Added {
@@ -134,8 +129,29 @@ func (r Repo) Changes(ctx context.Context) ([]Change, error) {
 	return changes, nil
 }
 
+// counts are the lines each file on disk adds and removes against the last
+// commit, by path, whatever's staged: none it can't count.
+func (r Repo) counts(ctx context.Context) map[string][2]int {
+	counts := make(map[string][2]int)
+	_ = r.withHeadIndex(ctx, func(env []string) error {
+		res, err := r.gitIn(ctx, env, nil, "diff", "--numstat", "-z", "--no-renames", "--no-ext-diff", "HEAD")
+		if err != nil {
+			return err
+		}
+		for _, rec := range names(res.Stdout) {
+			if f := strings.SplitN(rec, "\t", 3); len(f) == 3 {
+				added, _ := strconv.Atoi(f[0])
+				removed, _ := strconv.Atoi(f[1])
+				counts[f[2]] = [2]int{added, removed}
+			}
+		}
+		return nil
+	})
+	return counts
+}
+
 // entry is a file git status names: its two letters, staged and not, and
-// its path in the repository.
+// its path in the repository, a nested repository's ending in a slash.
 type entry struct {
 	code, path string
 }
@@ -149,12 +165,20 @@ func (e entry) state() (string, bool) {
 	switch {
 	case e.code == addedThenGone:
 		return "", false
+	case e.nested():
+		return Repository, true
 	case e.code == "??" || strings.Contains(e.code, "A"):
 		return Added, true
 	case strings.Contains(e.code, "D"):
 		return Deleted, true
 	}
 	return Edited, true
+}
+
+// nested reports whether e is a repository nested in this one: status
+// names one as a folder, every other file by name.
+func (e entry) nested() bool {
+	return strings.HasSuffix(e.path, "/")
 }
 
 // status is git status of the files changed under paths, or the whole
@@ -175,10 +199,10 @@ func (r Repo) status(ctx context.Context, paths ...string) ([]entry, error) {
 	return entries, nil
 }
 
-// Diff is the change to path not committed, as git shows it: none for a
-// file new to the repository.
+// Diff is the change to path not committed, as git shows it, uncoloured:
+// none for a file new to the repository.
 func (r Repo) Diff(ctx context.Context, path string) (string, error) {
-	res, err := r.gitOn(ctx, []string{"diff", "HEAD"}, path)
+	res, err := r.gitOn(ctx, []string{"diff", "--no-color", "--no-ext-diff", "HEAD"}, path)
 	if err != nil {
 		return "", err
 	}
@@ -193,12 +217,16 @@ func (r Repo) Restore(ctx context.Context, path string) error {
 
 // Commit commits paths in the repository with message, each whole as it is
 // on disk: a file edited, new or deleted, staged or not, a rename's two
-// sides, a folder's every file. Anything else staged is left as it is.
-// What git can't keep is left out, never failing the rest: an ignored file,
-// an empty folder, a path gone that git never kept, and a file added then
-// gone before it was committed, taken out of the index, as git would
-// otherwise find nothing to commit of it, for ever. It reports whether it
-// committed: with nothing to commit it doesn't, which is no error.
+// sides, a folder's every file, a file become a folder or a folder a file.
+// Anything else staged is left as it is, the commit made from an index of
+// the last commit's and these alone; hooks and signing run as for any. A
+// file staged as deleted, on disk and ignored, is committed as deleted, as
+// the user staged it. What git can't keep is left out, never failing the
+// rest: an ignored file, an empty folder, a path gone git never kept, a
+// repository nested in this one. Then the index holds those files as
+// committed, so a file added then gone before it was committed (AD) is out
+// of it. It reports whether it committed: with nothing to commit it
+// doesn't, which is no error; an error once it has is the index's.
 func (r Repo) Commit(ctx context.Context, message string, paths ...string) (bool, error) {
 	if len(paths) == 0 {
 		return false, nil
@@ -207,33 +235,108 @@ func (r Repo) Commit(ctx context.Context, message string, paths ...string) (bool
 	if err != nil || len(changed) == 0 {
 		return false, err
 	}
-	var files []string
-	for _, e := range changed {
-		if !slices.Contains(files, e.path) {
-			files = append(files, e.path)
+	stage, deleted, files := plan(changed)
+	if len(files) == 0 {
+		return false, nil
+	}
+	committed := false
+	err = r.withHeadIndex(ctx, func(env []string) error {
+		if len(deleted) > 0 {
+			if _, err := r.gitIn(ctx, env, deleted, "update-index", "--force-remove", "-z", "--stdin"); err != nil {
+				return err
+			}
 		}
-	}
-	// Each staged as it is on disk, one gone taken out of the index.
-	if _, err := r.git(ctx, slices.Concat([]string{"update-index", "--add", "--remove", "--"}, files)...); err != nil {
-		return false, err
-	}
-	res, err := r.gitOn(ctx, []string{"diff", "--cached", "--name-only", "-z", "--no-renames"}, paths...)
+		if len(stage) > 0 {
+			if _, err := r.gitIn(ctx, env, stage, "update-index", "--add", "--remove", "--replace", "-z", "--stdin"); err != nil {
+				return err
+			}
+		}
+		res, err := r.gitIn(ctx, env, nil, "diff", "--cached", "--name-only", "-z", "--no-renames")
+		if err != nil || len(names(res.Stdout)) == 0 {
+			return err
+		}
+		if _, err := r.gitIn(ctx, env, nil, "commit", "--quiet", "-m", message); err != nil {
+			return err
+		}
+		committed = true
+		return nil
+	})
 	if err != nil {
 		return false, err
 	}
-	staged := names(res.Stdout)
-	// Only paths holding a change: one matching nothing git keeps or kept
-	// fails the whole commit.
-	commit := slices.DeleteFunc(slices.Clone(paths), func(p string) bool {
-		return !slices.ContainsFunc(staged, func(s string) bool { return s == p || strings.HasPrefix(s, p+"/") })
-	})
-	if len(commit) == 0 {
-		return false, nil
+	if _, err := r.gitIn(ctx, nil, files, "--literal-pathspecs", "reset", "--quiet", "--pathspec-from-file=-", "--pathspec-file-nul"); err != nil {
+		return committed, fmt.Errorf("git's index still shows them as they were: %w", err)
 	}
-	if _, err := r.gitOn(ctx, []string{"commit", "--quiet", "-m", message}, commit...); err != nil {
-		return false, err
+	return committed, nil
+}
+
+// plan is what a commit does with each file status names: those to stage as
+// they are on disk; those to commit as deleted, staged so and on disk, with
+// no untracked twin, as an ignored file has none; and every file it
+// touches, whose index entries then take the last commit's. A nested
+// repository it leaves alone.
+func plan(changed []entry) (stage, deleted, files []string) {
+	untracked := func(path string) bool {
+		return slices.Contains(changed, entry{code: "??", path: path})
 	}
-	return true, nil
+	for _, e := range changed {
+		switch {
+		case e.nested() || slices.Contains(files, e.path):
+			continue
+		case e.code == "D " && !untracked(e.path):
+			deleted = append(deleted, e.path)
+		default:
+			stage = append(stage, e.path)
+		}
+		files = append(files, e.path)
+	}
+	return stage, deleted, files
+}
+
+// withHeadIndex runs do with an index of the last commit's alone (empty
+// before the first), a file of its own in the repository's git folder, so
+// the user's is never touched: git run with env uses it. The file goes
+// once do returns.
+func (r Repo) withHeadIndex(ctx context.Context, do func(env []string) error) error {
+	res, err := r.git(ctx, "rev-parse", "--absolute-git-dir", "--verify", "--quiet", "HEAD")
+	unborn := false
+	if exit, ok := errors.AsType[*runner.ExitError](err); ok && exit.Code == 1 {
+		// HEAD names no commit yet: the git folder's printed all the same.
+		unborn, err = true, nil
+	}
+	if err != nil {
+		return err
+	}
+	gitDir, _, _ := strings.Cut(string(res.Stdout), "\n")
+	f, err := os.CreateTemp(gitDir, "kit-index-*")
+	if err != nil {
+		return fmt.Errorf("couldn't make an index of its own: %w", err)
+	}
+	index := f.Name()
+	// git writes it: an empty file doesn't read as an index.
+	_ = f.Close()
+	_ = os.Remove(index)
+	defer func() {
+		_ = os.Remove(index)
+		_ = os.Remove(index + ".lock")
+	}()
+	env := []string{"GIT_INDEX_FILE=" + index}
+	if !unborn {
+		if _, err := r.gitIn(ctx, env, nil, "read-tree", "HEAD"); err != nil {
+			return err
+		}
+	}
+	return do(env)
+}
+
+// gitIn runs git's args with env, reading paths, each ended by a NUL.
+func (r Repo) gitIn(ctx context.Context, env, paths []string, args ...string) (runner.Result, error) {
+	cmd := r.command(args...)
+	cmd.Env = env
+	for _, p := range paths {
+		cmd.Input += p + "\x00"
+	}
+	return r.Run.Run(ctx, cmd)
 }
 
 // Rule is one of git's rules ignoring a file: its pattern, and the file and
@@ -251,9 +354,7 @@ func (r Repo) Ignored(ctx context.Context, paths ...string) (map[string]Rule, er
 	}
 	// check-ignore refuses --literal-pathspecs, and needs none: it matches
 	// each path against the rules alone, never against the files there.
-	cmd := r.command("check-ignore", "--verbose", "--stdin", "-z")
-	cmd.Input = strings.Join(paths, "\x00") + "\x00"
-	res, err := r.Run.Run(ctx, cmd)
+	res, err := r.gitIn(ctx, nil, paths, "check-ignore", "--verbose", "--stdin", "-z")
 	if exit, ok := errors.AsType[*runner.ExitError](err); ok && exit.Code == 1 {
 		// No rule matched any of them.
 		return nil, nil
@@ -297,6 +398,17 @@ func (r Repo) Push(ctx context.Context) error {
 		return fmt.Errorf("couldn't push: %w", err)
 	}
 	return nil
+}
+
+// Unpushed is how many commits are waiting to be pushed to the branch's
+// upstream: none without an upstream.
+func (r Repo) Unpushed(ctx context.Context) int {
+	res, err := r.git(ctx, "rev-list", "--count", "@{u}..HEAD")
+	if err != nil {
+		return 0
+	}
+	n, _ := strconv.Atoi(strings.TrimSpace(string(res.Stdout)))
+	return n
 }
 
 // githubRemote reads a GitHub remote's owner and repository, in either of

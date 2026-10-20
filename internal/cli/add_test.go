@@ -2,6 +2,7 @@ package cli_test
 
 import (
 	"github.com/charmbracelet/x/ansi"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -350,6 +351,21 @@ func TestAddCommitsWhatWasAdded(t *testing.T) {
 	out, errOut, code := w.run(t, "brew", "add", "nosuch", "jq", "ripgrep")
 	if code != 1 || !strings.Contains(out, "jq ok already installed; declared already, in shared") || !strings.Contains(out, "kit-config ok committed and pushed") {
 		t.Errorf("kit brew add nosuch jq ripgrep printed\n%s%s exit %d", out, errOut, code)
+	}
+}
+
+// A shared declare that writes the shared file, then fails on a Mac's,
+// commits what it wrote under the name it tried.
+func TestAddSharedFailingPartwayCommitsWhatItWrote(t *testing.T) {
+	w := laptopWorld(t)
+	laptop := filepath.Join(w.home, ".config", "kit", "laptop")
+	if err := os.Chmod(laptop, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(laptop, 0o700) })
+	w.expectSync(t, []string{"shared/declarations"}, "kit brew add go (laptop)")
+	if out, errOut, code := w.run(t, "brew", "add", "go", "--shared"); code != 1 || !strings.Contains(out, "go failed") {
+		t.Errorf("kit brew add go --shared, laptop's file read-only, printed\n%s%s exit %d", out, errOut, code)
 	}
 }
 

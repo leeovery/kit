@@ -2,7 +2,6 @@ package defaults_test
 
 import (
 	"encoding/json"
-	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -12,6 +11,7 @@ import (
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/kind/defaults"
+	"github.com/leeovery/kit/internal/plist"
 	"github.com/leeovery/kit/internal/runner/runnertest"
 )
 
@@ -217,43 +217,67 @@ func TestNoiseKitTookBeforeKnowingItIsForgotten(t *testing.T) {
 }
 
 // A value kit took before it read a string's outer spaces and a key's
-// exactly is unchanged while it reads the same that way, and is taken again
-// as it is; one taken exactly, or changed, still shows.
+// exactly, in a record from then, is unchanged while it reads the same
+// that way, compared as XML, and is taken again as it is: once, the record
+// then marked. Any other change shows, as every change does once the
+// record's marked: a number or a boolean changed, even by a little or for
+// one macOS reads the same; a key beside one it's the same as once
+// trimmed; a value taken exactly with its spaces, now without.
 func TestAValueTakenTrimmedIsTakenAgainExactly(t *testing.T) {
-	m := newMac(t)
-	list := m.declare()
-	// kit's record from before: each string and key trimmed, as it read them.
-	record := `{"domains": {"NSGlobalDomain": true}, "baseline": {` +
-		`"NSGlobalDomain:Style": "<string>Dark</string>", ` +
-		`"NSGlobalDomain:Recent": "<dict><key>a</key><array><string>x</string></array></dict>", ` +
-		`"NSGlobalDomain:Exact": "<string>Light&#xA;</string>", ` +
-		`"NSGlobalDomain:Changed": "<string>One</string>"}}`
-	if err := os.WriteFile(filepath.Join(m.state, "settings.json"), []byte(record), 0o600); err != nil {
-		t.Fatal(err)
+	cases := []struct {
+		name, was, now string
+		absorbed       bool
+	}{
+		{"a string gaining a newline", "<string>Dark</string>", "<string>Dark\n</string>", true},
+		{"a string gaining a space", "<string>omw</string>", "<string>omw </string>", true},
+		{"an array's string gaining a space", "<array><string>x</string></array>", "<array><string>x </string></array>", true},
+		{"a dict's key gaining a space", "<dict><key>a</key><string>x</string></dict>", "<dict><key> a</key><string>x</string></dict>", true},
+		{"an integer changed", "<integer>1760000000</integer>", "<integer>1760001000</integer>", false},
+		{"1 become true", "<integer>1</integer>", "<true/>", false},
+		{"0 become false", "<integer>0</integer>", "<false/>", false},
+		{"a real changed a little", "<real>0.5</real>", "<real>0.5000001</real>", false},
+		{"a key beside one the same once trimmed", "<dict><key>a</key><string>x</string></dict>", "<dict><key>a</key><string>x</string><key> a</key><string>x</string></dict>", false},
+		{"a value taken with its spaces, now without", "<string>Light&#xA;</string>", "<string>Light</string>", false},
 	}
-	m.set("NSGlobalDomain", "<key>Style</key><string>Dark\n</string>"+
-		"<key>Recent</key><dict><key> a</key><array><string>x </string></array></dict>"+
-		"<key>Exact</key><string>Light</string>"+
-		"<key>Changed</key><string>Two\n</string>")
-	if got, want := m.items(list), []string{"NSGlobalDomain:Changed extra", "NSGlobalDomain:Exact extra"}; !slices.Equal(got, want) {
-		t.Errorf("items = %q, want %q", got, want)
-	}
-	data, err := os.ReadFile(filepath.Join(m.state, "settings.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var got struct{ Baseline map[string]string }
-	if err := json.Unmarshal(data, &got); err != nil {
-		t.Fatal(err)
-	}
-	want := map[string]string{
-		"NSGlobalDomain:Style":   "<string>Dark&#xA;</string>",
-		"NSGlobalDomain:Recent":  "<dict><key> a</key><array><string>x </string></array></dict>",
-		"NSGlobalDomain:Exact":   "<string>Light&#xA;</string>",
-		"NSGlobalDomain:Changed": "<string>One</string>",
-	}
-	if !maps.Equal(got.Baseline, want) {
-		t.Errorf("baseline = %q, want %q", got.Baseline, want)
+	for _, marked := range []bool{false, true} {
+		for _, c := range cases {
+			// A dict's keys are read in no set order: each, many times.
+			for range 20 {
+				m := newMac(t)
+				list := m.declare()
+				record, err := json.Marshal(map[string]any{"domains": map[string]bool{"NSGlobalDomain": true}, "baseline": map[string]string{"NSGlobalDomain:K": c.was}, "exact": marked})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(m.state, "settings.json"), record, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				m.set("NSGlobalDomain", "<key>K</key>"+c.now)
+				want, baseline := []string{"NSGlobalDomain:K extra"}, c.was
+				if c.absorbed && !marked {
+					want = nil
+					v, err := plist.Read("<plist>" + c.now + "</plist>")
+					if err != nil {
+						t.Fatal(err)
+					}
+					baseline = plist.XML(v)
+				}
+				if got := m.items(list); !slices.Equal(got, want) {
+					t.Fatalf("%s, marked %v: items = %q, want %q", c.name, marked, got, want)
+				}
+				var rec struct {
+					Baseline map[string]string
+					Exact    bool
+				}
+				data, err := os.ReadFile(filepath.Join(m.state, "settings.json"))
+				if err == nil {
+					err = json.Unmarshal(data, &rec)
+				}
+				if err != nil || rec.Baseline["NSGlobalDomain:K"] != baseline || !rec.Exact {
+					t.Fatalf("%s, marked %v: record = %+v, %v; want the baseline %q, the record marked", c.name, marked, rec, err, baseline)
+				}
+			}
+		}
 	}
 }
 

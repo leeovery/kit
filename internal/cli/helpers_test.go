@@ -80,6 +80,9 @@ func newWorld(t *testing.T, files map[string]string) *world {
 	// Without a terminal, Homebrew's installs ask whether sudo holds a
 	// password: it doesn't, unless a test says so.
 	w.fake.On("sudo", "-n", "true").Exits(1).PrintsToStderr("sudo: a password is required")
+	// Every commit of kit-config's pushed: a sync committing nothing finds
+	// none waiting.
+	w.fake.On("git", "-C", filepath.Join(w.home, ".config", "kit"), "rev-list", "--count", "@{u}..HEAD").Prints("0\n")
 	for name, content := range files {
 		w.write(t, filepath.Join(".config", "kit", name), content)
 	}
@@ -176,18 +179,18 @@ var errNotFound = runner.ErrNotFound
 
 // commit is a commit of kit-config's a test expects kit to make, and git's
 // answers to it, as real git gives them: kit commits paths with message;
-// status is git's status of them (-z); kit stages update; staged is git's
-// list of what's staged of paths once it has (-z); and commit, the paths
-// it commits.
+// status is git's status of them (-z); kit stages update, each file as it
+// is on disk, in an index of its own; staged is what git says is staged
+// there (-z); and the user's index takes update's entries as committed.
 type commit struct {
-	message               string
-	paths, update, commit []string
-	status, staged        string
+	message        string
+	paths, update  []string
+	status, staged string
 }
 
 // edited is a commit of files, each a file edited and committed whole.
 func edited(message string, files ...string) commit {
-	c := commit{message: message, paths: files, update: files, commit: files}
+	c := commit{message: message, paths: files, update: files}
 	for _, f := range files {
 		c.status += " M " + f + "\x00"
 		c.staged += f + "\x00"
@@ -195,15 +198,19 @@ func edited(message string, files ...string) commit {
 	return c
 }
 
-// expectSync expects kit to commit files, each a file the run edits, with
-// message, and push: each must hold something else once kit asks git's
-// status than it held when this was called. A file edited before the run is
-// expectCommit's, its status stated.
+// expectSync expects kit to commit files, each a file there before the run
+// and edited by it, with message, and push: each must hold something else
+// once kit asks git's status than it held when this was called. A file the
+// run makes is new to git (??), and a file edited before the run is dirty
+// before it: either is expectCommit's, its status stated.
 func (w *world) expectSync(t *testing.T, files []string, message string) {
 	t.Helper()
 	dir := filepath.Join(w.home, ".config", "kit")
 	was := make(map[string]string, len(files))
 	for _, f := range files {
+		if _, err := os.Lstat(filepath.Join(dir, f)); err != nil {
+			t.Errorf("expectSync: %s isn't there before the run: git says ?? of a file the run makes; state it with expectCommit", f)
+		}
 		was[f] = w.read(t, filepath.Join(".config", "kit", f))
 	}
 	w.expectCommit(t, edited(message, files...), func() {
@@ -216,8 +223,9 @@ func (w *world) expectSync(t *testing.T, files []string, message string) {
 }
 
 // expectCommit scripts git's answers to c, and the push after it, failing
-// the test unless kit commits, and unless the status given is so of the
-// files on disk once kit asks, when each of checks runs too.
+// the test unless kit commits, unless what it stages and hands back to the
+// user's index is update, and unless the status given is so of the files on
+// disk once kit asks, when each of checks runs too.
 func (w *world) expectCommit(t *testing.T, c commit, checks ...func()) {
 	t.Helper()
 	dir := filepath.Join(w.home, ".config", "kit")
@@ -228,19 +236,44 @@ func (w *world) expectCommit(t *testing.T, c commit, checks ...func()) {
 			check()
 		}
 	}
+	reads := func(what string) func(string) (string, error) {
+		return func(in string) (string, error) {
+			if want := strings.Join(c.update, "\x00") + "\x00"; in != want {
+				t.Errorf("%s read %q, want %q", what, in, want)
+			}
+			return "", nil
+		}
+	}
 	w.fake.On("git", git(slices.Concat([]string{"--literal-pathspecs", "status", "--porcelain", "-z", "--untracked-files=all", "--no-renames", "--"}, c.paths)...)...).Prints(c.status).Does(asked)
-	w.fake.On("git", git(slices.Concat([]string{"update-index", "--add", "--remove", "--"}, c.update)...)...)
-	w.fake.On("git", git(slices.Concat([]string{"--literal-pathspecs", "diff", "--cached", "--name-only", "-z", "--no-renames", "--"}, c.paths)...)...).Prints(c.staged)
+	w.fake.On("git", git("rev-parse", "--absolute-git-dir", "--verify", "--quiet", "HEAD")...).Prints(t.TempDir() + "\n0e0bf17a399109574ffb00e33300280a33f81ab7\n")
+	w.fake.On("git", git("read-tree", "HEAD")...)
+	w.fake.On("git", git("update-index", "--add", "--remove", "--replace", "-z", "--stdin")...).Filters(reads("update-index"))
+	w.fake.On("git", git("diff", "--cached", "--name-only", "-z", "--no-renames")...).Prints(c.staged)
 	var committed atomic.Bool
-	w.fake.On("git", git(slices.Concat([]string{"--literal-pathspecs", "commit", "--quiet", "-m", c.message, "--"}, c.commit)...)...).Does(func() { committed.Store(true) })
+	w.fake.On("git", git("commit", "--quiet", "-m", c.message)...).Does(func() { committed.Store(true) })
+	w.fake.On("git", git("--literal-pathspecs", "reset", "--quiet", "--pathspec-from-file=-", "--pathspec-file-nul")...).Filters(reads("reset"))
 	w.fake.On("git", git("remote")...).Prints("origin\n")
 	w.fake.On("git", git("pull", "--rebase", "--autostash", "--quiet")...)
 	w.fake.On("git", git("push", "--quiet")...)
 	t.Cleanup(func() {
 		if !committed.Load() {
-			t.Errorf("kit didn't commit %q, %q", c.message, c.commit)
+			t.Errorf("kit didn't commit %q", c.message)
 		}
 	})
+}
+
+// edits scripts git's answers as kit asks for kit-config's edits, as real
+// git gives them: its status (-z), and the lines each file adds and
+// removes against the last commit (--numstat -z), counted in kit's own
+// index of it.
+func (w *world) edits(t *testing.T, status, numstat string) {
+	t.Helper()
+	dir := filepath.Join(w.home, ".config", "kit")
+	git := func(args ...string) []string { return append([]string{"-C", dir}, args...) }
+	w.fake.On("git", git("--literal-pathspecs", "status", "--porcelain", "-z", "--untracked-files=all", "--no-renames", "--")...).Prints(status)
+	w.fake.On("git", git("rev-parse", "--absolute-git-dir", "--verify", "--quiet", "HEAD")...).Prints(t.TempDir() + "\n0e0bf17a399109574ffb00e33300280a33f81ab7\n")
+	w.fake.On("git", git("read-tree", "HEAD")...)
+	w.fake.On("git", git("diff", "--numstat", "-z", "--no-renames", "--no-ext-diff", "HEAD")...).Prints(numstat)
 }
 
 // onDisk fails the test unless status, as git prints it (-z), is so of the

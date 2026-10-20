@@ -192,15 +192,20 @@ func TestConfigEdits(t *testing.T) {
 	}
 
 	fake = runnertest.New(t)
-	fake.On("git", status...).Prints(" D personal/declarations\x00 M shared/home/.zshrc\x00?? notes\x00")
-	fake.On("git", git("diff", "--numstat", "-z", "--no-renames", "HEAD")...).Prints("0\t40\tpersonal/declarations\x003\t1\tshared/home/.zshrc\x00")
+	fake.On("git", status...).Prints(" D personal/declarations\x00 M shared/home/.zshrc\x00?? notes\x00?? vendor/tool/\x00")
+	fake.On("git", git("rev-parse", "--absolute-git-dir", "--verify", "--quiet", "HEAD")...).Prints(t.TempDir() + "\n0e0bf17a399109574ffb00e33300280a33f81ab7\n")
+	fake.On("git", git("read-tree", "HEAD")...)
+	fake.On("git", git("diff", "--numstat", "-z", "--no-renames", "--no-ext-diff", "HEAD")...).Prints("0\t40\tpersonal/declarations\x003\t1\tshared/home/.zshrc\x00")
 	res := steps.ConfigEdits(gitrepo.Repo{Dir: repo, Run: fake}).Check(t.Context())
 	var got []string
 	for _, it := range res.Items {
 		got = append(got, it.ID+" "+it.State+" "+it.Detail)
 	}
-	want := []string{"config:personal/declarations deleted +0 −40 lines", "config:shared/home/.zshrc edited +3 −1 lines", "config:notes added +2 −0 lines"}
-	if res.State != check.Attention || res.Summary != "3 files not committed" || !slices.Equal(got, want) {
+	want := []string{
+		"config:personal/declarations deleted +0 −40 lines", "config:shared/home/.zshrc edited +3 −1 lines", "config:notes added +2 −0 lines",
+		"config:vendor/tool repository a repository of its own, which kit-config can't keep",
+	}
+	if res.State != check.Attention || res.Summary != "4 files not committed" || !slices.Equal(got, want) {
 		t.Errorf("edits = %s %q %q, want %q", res.State, res.Summary, got, want)
 	}
 }

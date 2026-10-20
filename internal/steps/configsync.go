@@ -50,11 +50,13 @@ func ConfigSync(run runner.Runner, dir string, now func() time.Time) engine.Step
 	}
 }
 
-// The states of kit-config's edits, as the config step's items carry them.
+// The states of kit-config's edits, as the config step's items carry them:
+// a repository is one of its own, nested in kit-config, which it can't keep.
 const (
-	ConfigEdited  = gitrepo.Edited
-	ConfigAdded   = gitrepo.Added
-	ConfigDeleted = gitrepo.Deleted
+	ConfigEdited     = gitrepo.Edited
+	ConfigAdded      = gitrepo.Added
+	ConfigDeleted    = gitrepo.Deleted
+	ConfigRepository = gitrepo.Repository
 )
 
 // ConfigEditsName names the step of the config repository's edits, and its
@@ -75,6 +77,9 @@ func ConfigEdits(repo gitrepo.Repo) engine.Step {
 			res := check.Result{State: check.OK, Summary: "all committed"}
 			for _, c := range changes {
 				detail := fmt.Sprintf("+%d −%d lines", c.Added, c.Removed)
+				if c.State == ConfigRepository {
+					detail = "a repository of its own, which kit-config can't keep"
+				}
 				res.Items = append(res.Items, check.Item{ID: ConfigEditsName + ":" + c.Path, Name: c.Path, State: c.State, Detail: detail})
 			}
 			if n := len(res.Items); n > 0 {

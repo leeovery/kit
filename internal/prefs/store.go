@@ -102,7 +102,7 @@ func (p *Prefs) History(ctx context.Context, mac, target string, count int) (str
 	if _, err := os.Stat(filepath.Join(p.Clone, ".git")); err != nil {
 		return "", errors.New("this Mac has no clone of the prefs repository yet: its first capture or restore makes one")
 	}
-	format := []string{"log", "-n" + strconv.Itoa(count), "--date=format:%Y-%m-%d %H:%M", "--format=%h  %ad  %s"}
+	format := []string{"log", "--no-color", "-n" + strconv.Itoa(count), "--date=format:%Y-%m-%d %H:%M", "--format=%h  %ad  %s"}
 	path := mac
 	if target != "" {
 		path = filepath.Join(mac, "domains", target+".plist")

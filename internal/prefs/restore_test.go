@@ -479,7 +479,7 @@ func TestRestoreAt(t *testing.T) {
 
 func TestHistory(t *testing.T) {
 	w := newWorld(t, prefs.Lists{})
-	format := []string{"-C", w.clone, "log", "-n5", "--date=format:%Y-%m-%d %H:%M", "--format=%h  %ad  %s"}
+	format := []string{"-C", w.clone, "log", "--no-color", "-n5", "--date=format:%Y-%m-%d %H:%M", "--format=%h  %ad  %s"}
 	w.fake.On("git", append(format, "--shortstat", "--", "laptop")...).Prints("abc1234  2026-10-06 03:00  Capture 2026-10-06 03:00: 1 changed\n")
 	w.fake.On("git", append(format, "-p", "--", "laptop/domains/com.example.app.plist")...).Prints("a diff\n")
 	w.fake.On("git", append(format, "-p", "--", "laptop/files/.config/tool/settings.json")...).Prints("")

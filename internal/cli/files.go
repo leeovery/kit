@@ -27,17 +27,21 @@ func (a *app) addFiles(ctx context.Context, r *run, paths []string, opts addOpti
 	c := startChanges(r, names)
 	for i, name := range names {
 		c.step(ctx, name, func(ctx context.Context) check.Result {
-			links, err := r.files.Add(ctx, full[i], scope)
+			links, ignored, err := r.files.Add(ctx, full[i], scope)
 			if err != nil {
 				return check.Result{State: check.Failed, Reason: err.Error()}
 			}
 			for _, l := range links {
 				c.changed(l.Path)
 			}
+			summary := fmt.Sprintf("%d files in kit-config, linked: %s", len(links), linked.HomeFolder(scope)+"/"+strings.TrimPrefix(name, "~/"))
 			if len(links) == 1 {
-				return check.Result{State: check.OK, Summary: "in kit-config, linked: " + links[0].Path}
+				summary = "in kit-config, linked: " + links[0].Path
 			}
-			return check.Result{State: check.OK, Summary: fmt.Sprintf("%d files in kit-config, linked: %s", len(links), linked.HomeFolder(scope)+"/"+strings.TrimPrefix(name, "~/"))}
+			if len(ignored) > 0 {
+				summary += "; git ignores " + strings.Join(ignored, ", ") + map[bool]string{true: ", which stays", false: ", which stay"}[len(ignored) == 1] + " on this Mac only"
+			}
+			return check.Result{State: check.OK, Summary: summary}
 		})
 	}
 	c.sync(ctx, commitMessage("add", linked.StepName, names, r.machine, opts.note))

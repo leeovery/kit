@@ -108,7 +108,7 @@ func TestAddAndRemoveAStep(t *testing.T) {
 	w.expectCommit(t, commit{
 		message: "kit step add tool (laptop): from its maker", paths: []string{"laptop/declarations", "laptop/steps/tool"},
 		status: " M laptop/declarations\x00?? laptop/steps/tool/run\x00", update: []string{"laptop/declarations", "laptop/steps/tool/run"},
-		staged: "laptop/declarations\x00laptop/steps/tool/run\x00", commit: []string{"laptop/declarations", "laptop/steps/tool"},
+		staged: "laptop/declarations\x00laptop/steps/tool/run\x00",
 	})
 	out, _, code := w.run(t, "step", "add", "tool", "Installs the tool, from its maker", "--after", "brew", "--sudo", "--note", "from its maker")
 	if code != 0 || !strings.Contains(out, "tool ok declared in laptop; its script, laptop/steps/tool/run, is a template: write its check and apply") {
@@ -139,7 +139,7 @@ func TestAddAndRemoveAStep(t *testing.T) {
 	w.expectCommit(t, commit{
 		message: "kit step remove tool (laptop)", paths: []string{"laptop/declarations", "laptop/steps/tool"},
 		status: " M laptop/declarations\x00 D laptop/steps/tool/run\x00", update: []string{"laptop/declarations", "laptop/steps/tool/run"},
-		staged: "laptop/declarations\x00laptop/steps/tool/run\x00", commit: []string{"laptop/declarations", "laptop/steps/tool"},
+		staged: "laptop/declarations\x00laptop/steps/tool/run\x00",
 	})
 	if out, _, code := w.run(t, "step", "remove", "tool"); code != 0 || w.readSection(t, "laptop", "steps") != "" {
 		t.Errorf("kit step remove printed\n%s exit %d", out, code)
@@ -176,7 +176,6 @@ func TestAddAStepSharedMovesItsFolder(t *testing.T) {
 		status: " M laptop/declarations\x00 D laptop/steps/tool/run\x00 M shared/declarations\x00 M studio/declarations\x00 D studio/steps/tool/run\x00?? shared/steps/tool/run\x00",
 		update: []string{"laptop/declarations", "laptop/steps/tool/run", "shared/declarations", "studio/declarations", "studio/steps/tool/run", "shared/steps/tool/run"},
 		staged: "laptop/declarations\x00laptop/steps/tool/run\x00shared/declarations\x00shared/steps/tool/run\x00studio/declarations\x00studio/steps/tool/run\x00",
-		commit: all,
 	})
 	out, errOut, code := w.run(t, "step", "add", "tool", "Installs the tool", "--after", "brew", "--shared")
 	if code != 0 || !strings.Contains(out, "tool ok declared in shared, out of laptop and studio; its folder moved from laptop/steps/tool and studio/steps/tool") {
@@ -205,7 +204,6 @@ func TestAddAStepSharedMovesItsFolder(t *testing.T) {
 		status: " M laptop/declarations\x00 M shared/declarations\x00 M studio/declarations\x00 D studio/steps/tool/run\x00?? shared/steps/tool/run\x00",
 		update: []string{"laptop/declarations", "shared/declarations", "studio/declarations", "studio/steps/tool/run", "shared/steps/tool/run"},
 		staged: "laptop/declarations\x00shared/declarations\x00shared/steps/tool/run\x00studio/declarations\x00studio/steps/tool/run\x00",
-		commit: []string{"laptop/declarations", "shared/declarations", "shared/steps/tool", "studio/declarations", "studio/steps/tool"},
 	})
 	if out, errOut, code := w.run(t, "step", "add", "tool", "Installs the tool", "--after", "brew", "--shared"); code != 0 || !strings.Contains(out, "kit-config ok committed and pushed") {
 		t.Errorf("kit step add --shared, laptop's folder never committed, printed\n%s%s exit %d", out, errOut, code)
