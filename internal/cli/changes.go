@@ -151,6 +151,45 @@ func (r *run) scope(shared bool) string {
 	return r.machine
 }
 
+// declare declares e in scope's declarations, noting each file it writes
+// changed: in the shared one, it takes e out of each Mac's file declaring
+// it, in the same edit, as a thing is in the shared declarations or a
+// Mac's, never both. It returns the Macs it's moved out of.
+func (c *changes) declare(kindName, scope string, e config.Entry) ([]string, error) {
+	r := c.run
+	if scope != config.Shared {
+		if err := r.cfg.Declare(kindName, scope, e); err != nil {
+			return nil, err
+		}
+		c.changed(config.DeclFile(scope))
+		return nil, nil
+	}
+	where, err := r.where(kindName, e.Name)
+	if err != nil {
+		return nil, err
+	}
+	var moved []string
+	for _, w := range where {
+		if w.Scope != scope {
+			moved = append(moved, w.Scope)
+		}
+	}
+	written, err := r.cfg.DeclareShared(kindName, e, moved)
+	for _, scope := range written {
+		c.changed(config.DeclFile(scope))
+	}
+	return moved, err
+}
+
+// outOf says the Macs a thing declared shared was moved out of, after what
+// it says it did: nothing for none.
+func outOf(moved []string) string {
+	if len(moved) == 0 {
+		return ""
+	}
+	return ", out of " + strings.Join(moved, " and ")
+}
+
 // where are the entries declaring name, of the kind called kindName: in
 // every declarations file; or, for a kind declared outside the config
 // repository, in its own file, matching as the kind matches things.

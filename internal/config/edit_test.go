@@ -476,11 +476,11 @@ func TestDeclareJudgedByTheConfigAfter(t *testing.T) {
 		want        string
 	}{
 		"a Mac's, named in shared": {"secret", "laptop", config.Entry{Name: "TOKEN", Value: "Section/new", Item: "op://vault/Item"},
-			"the config wouldn't read with it: laptop/declarations:3: TOKEN is in shared/declarations too (line 2): a thing goes in the shared declarations or a Mac's, not both"},
+			"TOKEN is in the shared declarations already (shared/declarations), for every Mac"},
 		"shared, named in a Mac's": {"secret", "shared", config.Entry{Name: "STUDIO", Value: "Section/new", Item: "op://vault/Item"},
 			"the config wouldn't read with it: studio/declarations:2: STUDIO is in shared/declarations too (line 2): a thing goes in the shared declarations or a Mac's, not both"},
 		"another kind's, named in shared": {"brew", "laptop", config.Entry{Name: "jq"},
-			"the config wouldn't read with it: laptop/declarations:2: jq is in shared/declarations too (line 5): a thing goes in the shared declarations or a Mac's, not both"},
+			"jq is in the shared declarations already (shared/declarations), for every Mac"},
 	} {
 		for check, err := range map[string]error{"CheckDeclare": cfg.CheckDeclare(c.kind, c.scope, c.e), "Declare": cfg.Declare(c.kind, c.scope, c.e)} {
 			if err == nil || err.Error() != c.want {
@@ -512,8 +512,9 @@ func TestDeclareSharedMovesItOutOfTheMacs(t *testing.T) {
 		"laptop/declarations": "[homebrew formulae]\ngo\nripgrep\n",
 		"studio/declarations": "[homebrew formulae]\ngo\n",
 	})
-	if err := cfg.DeclareShared("brew", config.Entry{Name: "go"}, []string{"laptop", "studio"}); err != nil {
-		t.Fatal(err)
+	written, err := cfg.DeclareShared("brew", config.Entry{Name: "go"}, []string{"laptop", "studio"})
+	if err != nil || !slices.Equal(written, []string{"shared", "laptop", "studio"}) {
+		t.Fatalf("DeclareShared() wrote %q, %v", written, err)
 	}
 	for path, want := range map[string]string{
 		"shared/declarations": "[homebrew formulae]\ngo\njq\n",
@@ -524,8 +525,54 @@ func TestDeclareSharedMovesItOutOfTheMacs(t *testing.T) {
 			t.Errorf("%s = %q, want %q", path, got, want)
 		}
 	}
-	if err := cfg.DeclareShared("brew", config.Entry{Name: "ripgrep"}, nil); err == nil {
-		t.Error("DeclareShared() of what a Mac's file holds, not moved = nil")
+	if written, err := cfg.DeclareShared("brew", config.Entry{Name: "ripgrep"}, nil); err == nil || len(written) > 0 {
+		t.Errorf("DeclareShared() of what a Mac's file holds, not moved, wrote %q, %v", written, err)
+	}
+}
+
+// A move that fails partway says which files it wrote, so they're
+// committed: the shared file written, a Mac's not.
+func TestDeclareSharedSaysWhatItWroteWhenAWriteFails(t *testing.T) {
+	cfg := loadRepo(t, map[string]string{
+		"shared/declarations": "[homebrew formulae]\njq\n",
+		"laptop/declarations": "[homebrew formulae]\ngo\n",
+	})
+	laptop := filepath.Join(cfg.Dir, "laptop")
+	if err := os.Chmod(laptop, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(laptop, 0o700) })
+	written, err := cfg.DeclareShared("brew", config.Entry{Name: "go"}, []string{"laptop"})
+	if err == nil || !slices.Equal(written, []string{"shared"}) {
+		t.Errorf("DeclareShared() with laptop's folder read-only wrote %q, %v; want shared's alone, and why laptop's wasn't", written, err)
+	}
+}
+
+// A Mac's section the move leaves empty goes, as the shared file has the
+// kind's section once the same edit's written: as the shared declaration
+// then the Mac's taken out one after another left it.
+func TestDeclareSharedDropsASectionItEmpties(t *testing.T) {
+	cfg := loadRepo(t, map[string]string{
+		"shared/declarations": "[go tools]\nx\n",
+		"laptop/declarations": "[homebrew formulae]\ngo\n\n[go tools]\ny\n",
+	})
+	if _, err := cfg.DeclareShared("brew", config.Entry{Name: "go"}, []string{"laptop"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, cfg, "laptop/declarations"); got != "[go tools]\ny\n" {
+		t.Errorf("laptop = %q, want its emptied section gone", got)
+	}
+}
+
+// A Mac's file can't declare what the shared one does: Declare says it's in
+// the shared declarations, for every Mac, whatever the kind.
+func TestDeclareWhatTheSharedFileHas(t *testing.T) {
+	cfg := loadRepo(t, map[string]string{"shared/declarations": "[homebrew formulae]\njq\n\n[paths]\n~/bin\n"})
+	for kind, name := range map[string]string{"brew": "jq", config.PathsKind: "~/bin"} {
+		want := name + " is in the shared declarations already (shared/declarations), for every Mac"
+		if err := cfg.Declare(kind, "laptop", config.Entry{Name: name}); err == nil || err.Error() != want {
+			t.Errorf("Declare(%s %s) = %v, want %q", kind, name, err, want)
+		}
 	}
 }
 

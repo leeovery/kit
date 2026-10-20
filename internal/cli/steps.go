@@ -505,10 +505,10 @@ func (a *app) addStep(ctx context.Context, r *run, name, does string, opts stepO
 		if _, err := os.Stat(s.Dir); !errors.Is(err, fs.ErrNotExist) {
 			return fail(fmt.Errorf("%s is there already: remove it, or name the step otherwise", s.Folder))
 		}
-		if err := r.cfg.Declare(config.StepsKind, scope, entry); err != nil {
+		moved, err := c.declare(config.StepsKind, scope, entry)
+		if err != nil {
 			return fail(err)
 		}
-		c.changed(config.DeclFile(scope))
 		if err := os.MkdirAll(s.Dir, 0o755); err != nil {
 			return fail(err)
 		}
@@ -517,7 +517,7 @@ func (a *app) addStep(ctx context.Context, r *run, name, does string, opts stepO
 			return fail(err)
 		}
 		c.changed(s.Folder)
-		return check.Result{State: check.OK, Summary: "declared in " + scope + "; its script, " + s.Folder + "/" + steps.ScriptName + ", is a template: write its check and apply"}
+		return check.Result{State: check.OK, Summary: "declared in " + scope + outOf(moved) + "; its script, " + s.Folder + "/" + steps.ScriptName + ", is a template: write its check and apply"}
 	})
 	c.sync(ctx, commitMessage("add", stepCommand, []string{name}, r.machine, opts.note))
 	return c.finish()

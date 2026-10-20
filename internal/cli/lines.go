@@ -60,11 +60,11 @@ func (a *app) addLine(ctx context.Context, r *run, name string, args []string, d
 	}
 	c := startChanges(r, args[:1])
 	c.step(ctx, args[0], func(ctx context.Context) check.Result {
-		if err := r.cfg.Declare(kind, scope, entry); err != nil {
+		moved, err := c.declare(kind, scope, entry)
+		if err != nil {
 			return check.Result{State: check.Failed, Reason: err.Error()}
 		}
-		c.changed(config.DeclFile(scope))
-		summary := "declared in " + scope
+		summary := "declared in " + scope + outOf(moved)
 		switch kind {
 		case config.ChecksKind:
 			summary += "; " + a.tryCheck(ctx, r, entry)

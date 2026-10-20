@@ -1,6 +1,7 @@
 package onepassword_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/leeovery/kit/internal/kind/secret/onepassword"
@@ -78,5 +79,21 @@ func TestFree(t *testing.T) {
 		if c != "op item get Item --vault vault --format json" {
 			t.Errorf("ran %q: want the item read alone", c)
 		}
+	}
+}
+
+// A field goes in the item's last section of its label, when several have
+// it.
+func TestStoreInTheLastSectionOfItsLabel(t *testing.T) {
+	run := runnertest.New(t)
+	run.On("op", "item", "get", "Item", "--vault", "vault", "--format", "json").
+		Prints(`{"sections":[{"id":"s1","label":"GitHub"},{"id":"s2","label":"GitHub"}],"fields":[]}`)
+	run.On("op", "item", "edit", "Item", "--vault", "vault")
+	if _, err := (onepassword.Driver{}).Store(t.Context(), run, "op://vault/Item", "GitHub/token", "the value"); err != nil {
+		t.Fatal(err)
+	}
+	cmds := run.Commands()
+	if edit := cmds[len(cmds)-1]; !strings.Contains(edit.Input, `"section":{"id":"s2"}`) {
+		t.Error("Store() didn't put the field in the last GitHub section")
 	}
 }

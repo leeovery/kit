@@ -178,37 +178,11 @@ func addOne(ctx context.Context, r *run, c *changes, k kind.Kind, scope, name st
 			return check.Result{State: check.Failed, Reason: verb + ", but couldn't declare: " + err.Error()}
 		}
 	}
-	moved, err := r.declare(kindName, scope, e, opts.shared)
+	moved, err := c.declare(kindName, scope, e)
 	if err != nil {
 		return check.Result{State: check.Failed, Reason: verb + ", but couldn't declare: " + err.Error()}
 	}
-	for _, s := range append([]string{scope}, moved...) {
-		c.changed(config.DeclFile(s))
-	}
-	summary := fmt.Sprintf("%s; declared in %s", verb, scope)
-	if len(moved) > 0 {
-		summary += ", out of " + strings.Join(moved, " and ")
-	}
-	return check.Result{State: check.OK, Summary: summary}
-}
-
-// declare declares e in scope's declarations, and, shared, takes it out of
-// each Mac's file declaring it, as one edit: the Macs it's moved out of.
-func (r *run) declare(kindName, scope string, e config.Entry, shared bool) ([]string, error) {
-	if !shared {
-		return nil, r.cfg.Declare(kindName, scope, e)
-	}
-	where, err := r.where(kindName, e.Name)
-	if err != nil {
-		return nil, err
-	}
-	var moved []string
-	for _, w := range where {
-		if w.Scope != scope {
-			moved = append(moved, w.Scope)
-		}
-	}
-	return moved, r.cfg.DeclareShared(kindName, e, moved)
+	return check.Result{State: check.OK, Summary: fmt.Sprintf("%s; declared in %s%s", verb, scope, outOf(moved))}
 }
 
 // notInstalled are which of names k doesn't find installed.

@@ -276,7 +276,7 @@ func TestAddASecretNamedInTheOtherFile(t *testing.T) {
 		name, want string
 		args       []string
 	}{
-		{"this Mac's, named in shared", "laptop/declarations:5: TOKEN is in", []string{"TOKEN"}},
+		{"this Mac's, named in shared", "TOKEN is in the shared declarations already", []string{"TOKEN"}},
 		{"shared, named in a Mac's", "studio/declarations:5: STUDIO is in", []string{"STUDIO", "--shared"}},
 	} {
 		for _, terminal := range []bool{true, false} {

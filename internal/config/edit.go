@@ -318,18 +318,21 @@ func (c *Config) Declare(kind, scope string, e Entry) error {
 
 // DeclareShared declares e in the shared declarations, as Declare does,
 // taking it out of the files of each of the Macs from, as Undeclare does:
-// one edit, judged as a whole before any of it's written.
-func (c *Config) DeclareShared(kind string, e Entry, from []string) error {
+// one edit, judged as a whole before any of it's written. It returns the
+// scopes whose files it wrote, those written before one failed too.
+func (c *Config) DeclareShared(kind string, e Entry, from []string) ([]string, error) {
 	d, files, err := c.declaring(kind, Shared, e, from...)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	var written []string
 	for i, f := range files {
 		if err := c.writeDecl(f, d, e.Name, i == 0); err != nil {
-			return err
+			return written, err
 		}
+		written = append(written, f.scope)
 	}
-	return nil
+	return written, nil
 }
 
 // CheckDeclare says why Declare would refuse e, writing nothing: nil when
@@ -378,6 +381,15 @@ func (c *Config) declaring(kind, scope string, e Entry, from ...string) (section
 	if s, _ := f.holding(d, e.Name); s != nil {
 		return d, nil, fmt.Errorf("%s is in %s already", e.Name, DeclFile(scope))
 	}
+	if scope != Shared {
+		shared, err := c.readDecl(Shared)
+		if err != nil {
+			return d, nil, err
+		}
+		if s, _ := shared.holding(d, e.Name); s != nil {
+			return d, nil, fmt.Errorf("%s is in the shared declarations already (%s), for every Mac", e.Name, DeclFile(Shared))
+		}
+	}
 	s := f.find(d, arg, hold)
 	if s == nil {
 		s = f.add(&section{def: d, arg: arg, as: e.As, hold: hold})
@@ -394,8 +406,11 @@ func (c *Config) declaring(kind, scope string, e Entry, from ...string) (section
 		s.body = b.lines
 	}
 	files := []*declFile{f}
+	// Taken out as the config reads with the shared file edited: whether a
+	// Mac's section left empty stays (keeps) turns on the shared file.
+	withShared := c.with(files)
 	for _, mac := range from {
-		_, g, err := c.undeclaring(kind, mac, e.Name)
+		_, g, err := withShared.undeclaring(kind, mac, e.Name)
 		if err != nil {
 			return d, nil, err
 		}

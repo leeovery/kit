@@ -233,16 +233,17 @@ func getItem(ctx context.Context, run runner.Runner, item string) ([]string, map
 	return args, doc, nil
 }
 
-// sectionOf is the id of the item's section labelled section: "" for none.
+// sectionOf is the id of the item's section labelled section, the last
+// when several are: "" for none.
 func sectionOf(doc map[string]any, section string) string {
 	sections, _ := doc["sections"].([]any)
+	id := ""
 	for _, sc := range sections {
 		if m, _ := sc.(map[string]any); m["label"] == section {
-			id, _ := m["id"].(string)
-			return id
+			id, _ = m["id"].(string)
 		}
 	}
-	return ""
+	return id
 }
 
 // holds reports whether the item keeps something at short: a field of its

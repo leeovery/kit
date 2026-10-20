@@ -79,14 +79,19 @@ func (a *app) switchFeatures(ctx context.Context, r *run, names []string, on, sh
 				return failed(err)
 			}
 			in := slices.ContainsFunc(where, func(e config.Entry) bool { return e.Scope == scope })
+			inShared := slices.ContainsFunc(where, func(e config.Entry) bool { return e.Scope == config.Shared })
 			switch {
 			case on && in:
 				return check.Result{State: check.OK, Summary: "on already, in " + scope}
+			case on && inShared:
+				return check.Result{State: check.OK, Summary: "on already, in the shared declarations"}
 			case on:
-				if err := r.cfg.Declare(config.FeaturesKind, scope, config.Entry{Name: name}); err != nil {
+				moved, err := c.declare(config.FeaturesKind, scope, config.Entry{Name: name})
+				if err != nil {
 					return failed(err)
 				}
-			case !in && slices.ContainsFunc(where, func(e config.Entry) bool { return e.Scope == config.Shared }):
+				return check.Result{State: check.OK, Summary: verb + ", in " + scope + outOf(moved)}
+			case !in && inShared:
 				return check.Result{State: check.Failed, Reason: "on for every Mac, in " + config.Shared + ": --shared switches it off there"}
 			case !in:
 				return check.Result{State: check.OK, Summary: "off already"}

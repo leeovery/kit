@@ -66,3 +66,38 @@ func TestApplyWritesTheShellsPath(t *testing.T) {
 		t.Errorf("kit apply path printed\n%s exit %d", out, code)
 	}
 }
+
+// Declared for every Mac, a name comes out of the Macs' files that had it,
+// in the same edit, whatever the command; declared for this Mac, one the
+// shared file has is refused, saying so.
+func TestSharedTakesTheNameOutOfTheMacs(t *testing.T) {
+	w := laptopWorld(t)
+	w.writeSection(t, "laptop", "paths", "~/go/bin\n")
+	w.writeSection(t, "studio", "checks", "dns -- dig example.com\n")
+	w.writeSection(t, "laptop", "features", "remote-login\n")
+
+	w.expectSync([]string{"laptop/declarations", "shared/declarations"}, "kit path add ~/go/bin (laptop)")
+	if out, _, code := w.run(t, "path", "add", "~/go/bin", "--shared"); code != 0 || !strings.Contains(out, "~/go/bin ok declared in shared, out of laptop, last on the PATH") {
+		t.Errorf("kit path add --shared printed\n%s exit %d", out, code)
+	}
+	if got := w.readSection(t, "laptop", "paths"); got != "" {
+		t.Errorf("laptop's [paths] = %q, want ~/go/bin out of it", got)
+	}
+
+	w.fake.On("dig", "example.com")
+	w.expectSync([]string{"shared/declarations", "studio/declarations"}, "kit check add dns (laptop)")
+	if out, _, code := w.run(t, "check", "add", "dns", "--shared", "--", "dig", "example.com"); code != 0 || !strings.Contains(out, "dns ok declared in shared, out of studio") {
+		t.Errorf("kit check add --shared printed\n%s exit %d", out, code)
+	}
+
+	w.expectSync([]string{"laptop/declarations", "shared/declarations"}, "kit feature on remote-login (laptop)")
+	if out, _, code := w.run(t, "feature", "on", "remote-login", "--shared"); code != 0 || !strings.Contains(out, "remote-login ok on, in shared, out of laptop") {
+		t.Errorf("kit feature on --shared printed\n%s exit %d", out, code)
+	}
+	if out, _, code := w.run(t, "feature", "on", "remote-login"); code != 0 || !strings.Contains(out, "remote-login ok on already, in the shared declarations") {
+		t.Errorf("kit feature on, on for every Mac, printed\n%s exit %d", out, code)
+	}
+	if out, _, code := w.run(t, "path", "add", "~/go/bin"); code == 0 || !strings.Contains(out, "~/go/bin is in the shared declarations already (shared/declarations), for every Mac") {
+		t.Errorf("kit path add of a shared path printed\n%s exit %d", out, code)
+	}
+}
