@@ -64,6 +64,72 @@ func TestInstalled(t *testing.T) {
 	}
 }
 
+// An app the App Store installed that mas doesn't list yet, as Spotlight
+// hasn't indexed it, is found, declared and missing, in the Applications
+// folders by the store's receipt it carries, its id looked up by its bundle
+// id, once: what the store says is kept, that it has none for a day. With
+// nothing declared missing, nothing's looked for; an app mas lists isn't
+// looked up, nor one without a receipt, as a download's.
+func TestAnAppMasDoesntListYetIsFound(t *testing.T) {
+	dir := t.TempDir()
+	bundle := func(name, id string, receipt bool) {
+		t.Helper()
+		app := filepath.Join(dir, name+".app", "Contents")
+		files := map[string]string{"Info.plist": `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>` + id + `</string></dict></plist>`}
+		if receipt {
+			files[filepath.Join("_MASReceipt", "receipt")] = "a receipt"
+		}
+		for name, content := range files {
+			if err := os.MkdirAll(filepath.Dir(filepath.Join(app, name)), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(app, name), []byte(content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	bundle("Xcode", "com.apple.dt.Xcode", true)
+	bundle("Amphetamine", "com.example.amphetamine", true)
+	bundle("Downloaded", "com.example.downloaded", false)
+	bundle("Delisted", "com.example.delisted", true)
+	fake := runnertest.New(t)
+	fake.On("mas", "list", "--json").Prints(fixture(t, "list.jsonl"))
+	fake.On("mas", "lookup", "--json", "--bundle", "com.example.amphetamine").Prints(`{"adamID":937984704,"bundleID":"com.example.amphetamine","name":"Amphetamine"}` + "\n")
+	fake.On("mas", "lookup", "--json", "--bundle", "com.example.delisted").Exits(1).PrintsToStderr("Error: No apps found in the App Store for bundle ID com.example.delisted")
+	store := appstore.New(fake)
+	at := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+	store.AppDirs, store.StateDir, store.Now = []string{dir}, t.TempDir(), func() time.Time { return at }
+	lookups := func() []string {
+		var out []string
+		for _, c := range fake.Calls() {
+			if strings.HasPrefix(c, "mas lookup") {
+				out = append(out, c)
+			}
+		}
+		return out
+	}
+
+	kind.Compare(t.Context(), store, declared("xcode@497799835"))
+	if got := lookups(); len(got) != 0 {
+		t.Errorf("with nothing declared missing, it looked up %q", got)
+	}
+	for range 2 {
+		res := kind.Compare(t.Context(), store, declared("xcode@497799835", "amphetamine@937984704"))
+		if slices.ContainsFunc(res.Items, func(it check.Item) bool { return it.Name == "amphetamine@937984704" }) {
+			t.Errorf("Compare() = %+v; want the app mas doesn't list yet found", res.Items)
+		}
+	}
+	want := []string{"mas lookup --json --bundle com.example.amphetamine", "mas lookup --json --bundle com.example.delisted"}
+	if got := lookups(); !slices.Equal(got, want) {
+		t.Errorf("looked up %q; want %q, once each", got, want)
+	}
+	at = at.Add(25 * time.Hour)
+	kind.Compare(t.Context(), store, declared("xcode@497799835", "amphetamine@937984704", "other@1"))
+	if got := lookups(); !slices.Equal(got, append(want, "mas lookup --json --bundle com.example.delisted")) {
+		t.Errorf("a day on, looked up %q; want the one the store hadn't asked again, alone", got)
+	}
+}
+
 // Apps match by id: one the store renamed still matches its declaration.
 func TestCompare(t *testing.T) {
 	fake := runnertest.New(t)

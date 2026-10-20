@@ -409,7 +409,7 @@ func (r *run) needing(names []string) ([]engine.Wait, func() ([]string, error), 
 // full name, or a tap's thing by its own, as Homebrew lists a tap's cask.
 func (r *run) installed(kindName, thing string) func(context.Context) bool {
 	return func(ctx context.Context) bool {
-		have, err := r.kindsByName[kindName].Installed(ctx)
+		have, err := kind.InstalledOf(ctx, r.kindsByName[kindName], []string{thing})
 		if err != nil {
 			return false
 		}

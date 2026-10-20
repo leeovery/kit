@@ -77,7 +77,7 @@ file having none, or the shared file's), so the kind's still looked after.
 | Kind | Declared as | Found by | Install, remove |
 |---|---|---|---|
 | `brew`, `cask` | `jq`, `owner/tap/tool`, `php@8.5` | `brew list`, `brew leaves` | `brew install`, `brew uninstall` |
-| `mas` | `xcode@497799835`: the name, then the id | `mas list` | `mas install` (the first app alone, the check that someone's signed in, then the rest), `mas uninstall`, through sudo |
+| `mas` | `xcode@497799835`: the name, then the id | `mas list`, which reads Spotlight's index; with a declared app missing from it, an app in the Applications folders carrying the App Store's receipt that it doesn't list yet, its id looked up by its bundle id (`mas lookup --bundle`), once, what the store said kept in kit's state (that it hasn't the app, for a day); a wait for an app and `kit mas add|remove` go by the same | `mas install` (the first app alone, the check that someone's signed in, then the rest), `mas uninstall`, through sudo |
 | `npm` | `typescript@5` (a version optional) | `npm ls --global` | `npm install --global`, `npm uninstall --global` |
 | `composer` | `laravel/valet:^4.0` (a constraint optional) | `composer global show --direct` | `composer global require`, `composer global remove` |
 | `go` | `golang.org/x/tools/cmd/goimports` (`@version` optional) | the programs in Go's bin folder, by the package each was built from | `go install`; removing deletes the program |
@@ -270,10 +270,18 @@ next start with them), then the lines not done, in order, then kit's own the res
 grouped, each group where its first comes (kit's own in Apps and Backups). Each is looked at
 while it's up, a line by its command every few seconds, one of kit's own by its step's check, and
 once done the log says so, how long it took and what kit saw, and the next comes up; `space` says
-one with no command is done; a choice is answered by its keys (apps' settings: `r` brings them
-back from this Mac's last save, its date said, as `kit prefs restore` does; `f` starts afresh, as
-`kit prefs start-fresh` does). Stopping there (`q`'s Stop, between two to-dos as well, and as
-the one up is found done) leaves what's left to do, in that
+one with no command is done; a choice is answered by its keys, none offered while kit does what
+the one pressed says, its words turning in their place, and keys pressed meanwhile dropped
+(apps' settings, whose why says first that bringing them back opens some apps once, and, when
+the config has `[prefs files]`, that settings files come back too: `r` brings them back from
+this Mac's last save, its date said, as `kit prefs restore` does, saying how many came back, how
+many wait for their apps, how many apps to open once (a to-do that comes next, kit's own done
+leading to those its check finds then) and how many are held for `kit prefs restore --pending`,
+the log naming each of those with why; a watched to-do of kit's own, found done, finishing what
+it waited for, as bringing those apps' settings back; `f` starts afresh, as `kit prefs
+start-fresh` does, saying saving's on and how many still wait to come back). Stopping there
+(`q`'s Stop, between two to-dos as well, as the one up is found done, and while kit does what a
+key says) leaves what's left to do, the one up done if it was, in that
 order in the record, the run ending as it stands. After the last, kit checks again the steps the
 to-dos held, those they came from, so their rows and the record are right, then finishes.
 Without a terminal, nothing's raised: kit's own stay items of their steps. A step a line comes
@@ -469,7 +477,7 @@ there, cheap and safe, and removes nothing: today, a new folder matching a backu
 exclusion's glob, excluded where it is. Besides the user's own jobs, two are built in, with
 the `prefs` feature: nightly, last, its capture (`kit prefs capture`, stopped after 15
 minutes); and hourly, its retry of the apps' settings waiting to be restored, once
-their apps are installed and closed. The hourly jobs run every time; the nightly ones once a day,
+their apps are installed and closed and have their settings folders, opening none. The hourly jobs run every time; the nightly ones once a day,
 when the nightly run falls due (`nightly_at` in `kit.toml`, 03:00 unless it says), or on the
 first run after it's been missed, as by a Mac asleep then. Each job's outcome is kept in kit's
 state (`nightly.json`). It installs and removes nothing. `--plan` says what's due; naming jobs
@@ -839,13 +847,30 @@ the hardware UUID of the Mac the folder belongs to.
 - **`kit prefs restore [<domain>...]`** (`--from`, `--at`, `--as`, `--pending`, `--dry-run`): a
   domain's app found from the installed apps' bundle ids (sub-domains, shared domains, group and
   team prefixes, `[prefs apps]` for the rest); not installed or running, it waits; a sandboxed
-  app launched hidden once to make its container; the stored copy checked, the live settings
-  saved, `defaults delete` then `import`, read back and compared. A full restore puts back the
-  files that differ (each saved first), writes the pending list, records its commit, and
-  switches capture on when nothing failed. From another Mac's folder, or onto other hardware,
+  app launched hidden once to make its container, the run's log naming it as it opens (its own
+  windows, notifications and permission prompts may follow); the stored copy checked, the live
+  settings saved, `defaults delete` then `import`, read back and compared. A full restore puts
+  back the files that differ (each saved first), writes the pending list, records its commit, and
+  switches capture on, failures or not. What it couldn't restore waits on the pending list,
+  each with why, and capture leaves it alone: a domain whose app isn't installed or is running;
+  one whose sandboxed app has no settings folder, as none came of kit opening it, for the person
+  to open once (a to-do, below); and a domain or file that failed otherwise, named with why in
+  plain words. kit opens an app at most once, and only in a restore the person started (the
+  run's `r`, or `kit prefs restore` by hand). The hourly pass (`--pending`, unattended) opens
+  none: it brings back a waiting domain once its app is installed, not running and, sandboxed,
+  has its settings folder (one without stays for the person to open), and leaves what failed
+  otherwise alone; `kit prefs restore --pending`, by hand, tries everything waiting, failed or
+  not, opening an app once. From another Mac's folder, or onto other hardware,
   `[prefs machine-bound]` stays behind (Tailscale's identity and the like). `--at` unpacks the
   folder as it was then from history.
-- **`kit prefs history`**, **`pending [--clear]`**, **`start-fresh`**. `[prefs deny]` leaves
+- **`kit prefs history`**, **`pending [--clear]`** (what waits, each with why), **`start-fresh`**.
+  An app held for its settings folder is a to-do of its own, watched, titled with the app (`Open
+  <app> once and quit it`): it moves on once the app has its folder and is quit, and its settings
+  come back then, opening nothing. An app to open that's running stays to open till it's quit. What failed
+  otherwise is said by the check, apps' settings and settings files apart, as held for `kit prefs
+  restore --pending`, after anything wrong with capture itself. A held
+  file's saved copy stays in the store, on the Mac or not. One restore opens an app once,
+  however many domains it has. `[prefs deny]` leaves
   domains out.
 
 ## Open-source hygiene

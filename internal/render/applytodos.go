@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/look"
 )
 
@@ -96,9 +97,10 @@ func (p *Pretty) toDoPanel(w int) []string {
 }
 
 // toDoEnds is how the to-do up ends, as its panel says it, room wide after
-// its margin: a choice, its keys, a line each; one kit tells by itself,
-// that kit's watching, and what for, when it says; else the key that says
-// it's done. Each is wrapped under its own words.
+// its margin: a choice being answered, what its key does, turning; a
+// choice, its keys, a line each; one kit tells by itself, that kit's
+// watching, and what for, when it says; else the key that says it's done.
+// Each is wrapped under its own words.
 func (p *Pretty) toDoEnds(room int) []string {
 	c := p.card
 	key := func(k, does string) []string { return led(look.Urgent(k), len(k), does, room) }
@@ -107,6 +109,8 @@ func (p *Pretty) toDoEnds(room int) []string {
 		watching = "kit's watching: it moves on once " + c.Watch
 	}
 	switch {
+	case c.Answering != "":
+		return led(look.Cyan("◐"), 1, answeringWith(*c), room)
 	case len(c.Keys) > 0:
 		var out []string
 		for _, k := range c.Keys {
@@ -129,4 +133,15 @@ func led(lead string, wide int, text string, room int) []string {
 		at = panelAt + strings.Repeat(" ", wide+1)
 	}
 	return out
+}
+
+// answeringWith is what the key card c's being answered with does, as its
+// keys say.
+func answeringWith(c event.NeedsYou) string {
+	for _, k := range c.Keys {
+		if k.Key == c.Answering {
+			return k.Does
+		}
+	}
+	return ""
 }

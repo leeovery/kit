@@ -572,8 +572,9 @@ func (p *Pretty) standing(step string, seen map[string]bool) standing {
 // cardLines are the step by hand up for you as a card w wide, in place
 // under the run's heading in a window too small for applying's screen:
 // what to do, how many more wait after it, why it's there (cardWhy), its
-// steps, and that kit carries on by itself, when it tells, else that a
-// bigger window shows the keys to answer it; none when no card's up.
+// steps, and that kit carries on by itself, when it tells, what its key
+// does while it's being answered, else that a bigger window shows the keys
+// to answer it; none when no card's up.
 func (p *Pretty) cardLines(w int) []string {
 	c := p.card
 	if c == nil {
@@ -584,8 +585,11 @@ func (p *Pretty) cardLines(w int) []string {
 		says = append(says, look.Muted(fmt.Sprintf("%d more after this", c.More)))
 	}
 	after := "a bigger window shows the keys to answer it"
-	if c.Tells {
+	switch {
+	case c.Tells:
 		after = "kit carries on by itself once it's done"
+	case c.Answering != "":
+		after = answeringWith(*c)
 	}
 	return look.Card(w, look.CardText{Title: c.Title, Says: look.Says(says...), Why: p.cardWhy(), Steps: c.Steps, After: after})
 }

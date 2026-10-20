@@ -63,13 +63,15 @@ type Record struct {
 	// Says is what macOS asked, as in "asking for a permission", from when
 	// its window was seen (asking) till it was gone (answered).
 	Says string `json:"says,omitempty"`
-	// Item, Title, Tells and More are a step by hand's card, as it went up
-	// (needs_you): its line's name, what to do, whether kit tells by itself
-	// when it's done, and how many more by hand waited after it.
-	Item  string `json:"item,omitempty"`
-	Title string `json:"title,omitempty"`
-	Tells bool   `json:"tells,omitempty"`
-	More  int    `json:"more,omitempty"`
+	// Item, Title, Tells, Answering and More are a step by hand's card, as
+	// it went up (needs_you): its line's name, what to do, whether kit tells
+	// by itself when it's done, the key of a choice it was being answered
+	// with, and how many more by hand waited after it.
+	Item      string `json:"item,omitempty"`
+	Title     string `json:"title,omitempty"`
+	Tells     bool   `json:"tells,omitempty"`
+	Answering string `json:"answering,omitempty"`
+	More      int    `json:"more,omitempty"`
 	// Line is what a step told the run's log, in kit's own words (logged),
 	// and Alert whether it's something to look at.
 	Line  string `json:"line,omitempty"`
@@ -191,7 +193,7 @@ func (l *File) record(e event.Event) Record {
 		}
 		l.asked = e.Says
 	case event.NeedsYou:
-		r.Event, r.Step, r.Item, r.Title, r.Tells, r.More = "needs_you", e.Step, e.Item, e.Title, e.Tells, e.More
+		r.Event, r.Step, r.Item, r.Title, r.Tells, r.Answering, r.More = "needs_you", e.Step, e.Item, e.Title, e.Tells, e.Answering, e.More
 	case event.Logged:
 		r.Event, r.Step, r.Line, r.Alert = "logged", e.Step, e.Line, e.Alert
 	case event.ToDos:

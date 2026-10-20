@@ -9,16 +9,22 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
+	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/leeovery/kit/internal/apps"
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/runner"
+	"github.com/leeovery/kit/internal/state"
 )
 
 // installTimeout is how long an install may take: Xcode is gigabytes.
@@ -34,6 +40,19 @@ const most = 8
 type AppStore struct {
 	run   runner.Runner
 	admin func(ctx context.Context) bool
+	// AppDirs are the folders apps are installed in, where an app the App
+	// Store installed that mas doesn't list yet is looked for; StateDir,
+	// kit's state folder, where what the store said of each such app's
+	// bundle id is kept.
+	AppDirs  []string
+	StateDir string
+	// Now is the time, which says when to ask the store again about an app
+	// it said it hasn't.
+	Now func() time.Time
+
+	// mu guards listed, what mas listed last, which Missed goes by.
+	mu     sync.Mutex
+	listed []app
 }
 
 // kindName names the kind.
@@ -51,12 +70,16 @@ var Descriptor = kind.Descriptor{
 		Remove: "Uninstall App Store apps, and undeclare them",
 	},
 	Row: "App Store apps",
-	New: func(d *kind.Deps) kind.Kind { return New(d.Run) },
+	New: func(d *kind.Deps) kind.Kind {
+		s := New(d.Run)
+		s.AppDirs, s.StateDir = d.AppDirs, d.StateDir
+		return s
+	},
 }
 
 // New returns the App Store, driven through run.
 func New(run runner.Runner) *AppStore {
-	return &AppStore{run: run}
+	return &AppStore{run: run, Now: time.Now}
 }
 
 func (*AppStore) Name() string    { return kindName }
@@ -64,8 +87,9 @@ func (*AppStore) Program() string { return "mas" }
 
 // app is what mas says of an app, as far as kit needs.
 type app struct {
-	ID   int64  `json:"adamID"`
-	Name string `json:"name"`
+	ID     int64  `json:"adamID"`
+	Bundle string `json:"bundleID"`
+	Name   string `json:"name"`
 }
 
 // named is the app's name as kit declares it.
@@ -133,18 +157,131 @@ func (s *AppStore) apps(ctx context.Context, args ...string) ([]app, error) {
 	return apps, nil
 }
 
-// Installed lists the apps installed from the App Store, each installed for
-// itself.
+// Installed lists the apps installed from the App Store, as mas lists them,
+// each installed for itself.
 func (s *AppStore) Installed(ctx context.Context) ([]kind.Installed, error) {
 	apps, err := s.apps(ctx, "list", "--json")
 	if err != nil {
 		return nil, err
 	}
+	s.mu.Lock()
+	s.listed = apps
+	s.mu.Unlock()
 	installed := make([]kind.Installed, len(apps))
 	for i, a := range apps {
 		installed[i] = kind.Installed{Name: a.named(), Explicit: true}
 	}
 	return installed, nil
+}
+
+// lookupsName names kit's record of what the App Store said of the bundle
+// ids it was asked about: each one's app id, 0 for one it doesn't have,
+// and when it said so (Missed), as it's asked again a day on.
+const lookupsName = "appstore.json"
+
+type lookups struct {
+	IDs    map[string]int64     `json:"ids"`
+	Missed map[string]time.Time `json:"missed,omitempty"`
+}
+
+// askAgain is how long the store saying it hasn't an app holds.
+const askAgain = 24 * time.Hour
+
+// notInStore is how mas says the App Store has no app of a bundle id.
+const notInStore = "no apps found in the app store"
+
+// Missed finds which of names, declared and not in mas's last list, which
+// holds what Spotlight has indexed, are installed after all, as an app installed
+// a moment ago is: an app in AppDirs carrying the App Store's receipt, its
+// id the App Store's for the bundle id the app says, asked once and kept
+// in kit's state, as is the store not having it, for a day.
+func (s *AppStore) Missed(ctx context.Context, names []string) ([]kind.Installed, error) {
+	wanted := map[int64]string{}
+	for _, name := range names {
+		wanted[id(name)] = name
+	}
+	s.mu.Lock()
+	listed := s.listed
+	s.mu.Unlock()
+	known := map[string]bool{}
+	for _, a := range listed {
+		known[strings.ToLower(a.Bundle)] = true
+	}
+	rec, err := state.Load[lookups](s.StateDir, lookupsName)
+	if err != nil {
+		return nil, err
+	}
+	var found []kind.Installed
+	asked := map[string]int64{}
+	for _, bundle := range s.received() {
+		if known[strings.ToLower(bundle)] {
+			continue
+		}
+		n, kept := rec.IDs[bundle]
+		if kept && n == 0 && s.Now().Sub(rec.Missed[bundle]) > askAgain {
+			kept = false
+		}
+		if !kept {
+			a, ok := s.lookUp(ctx, bundle)
+			if !ok {
+				continue
+			}
+			n, asked[bundle] = a.ID, a.ID
+		}
+		if name, ok := wanted[n]; ok && n != 0 {
+			found = append(found, kind.Installed{Name: name, Explicit: true})
+		}
+	}
+	if len(asked) == 0 {
+		return found, nil
+	}
+	return found, state.Update(s.StateDir, lookupsName, func(l *lookups) {
+		if l.IDs == nil {
+			l.IDs = map[string]int64{}
+		}
+		if l.Missed == nil {
+			l.Missed = map[string]time.Time{}
+		}
+		maps.Copy(l.IDs, asked)
+		for bundle, n := range asked {
+			if n == 0 {
+				l.Missed[bundle] = s.Now()
+			} else {
+				delete(l.Missed, bundle)
+			}
+		}
+	})
+}
+
+// received are the bundle ids of the apps in AppDirs that carry the App
+// Store's receipt.
+func (s *AppStore) received() []string {
+	var bundles []string
+	for _, dir := range s.AppDirs {
+		paths, _ := filepath.Glob(filepath.Join(dir, "*.app"))
+		for _, path := range paths {
+			if _, err := os.Stat(filepath.Join(path, "Contents", "_MASReceipt", "receipt")); err != nil {
+				continue
+			}
+			if bundle := apps.BundleID(path); bundle != "" {
+				bundles = append(bundles, bundle)
+			}
+		}
+	}
+	return bundles
+}
+
+// lookUp asks the App Store for the app of a bundle id: one with id 0 when
+// it has none, which is worth keeping; not ok when it couldn't say.
+func (s *AppStore) lookUp(ctx context.Context, bundle string) (app, bool) {
+	found, err := s.apps(ctx, "lookup", "--json", "--bundle", bundle)
+	if exit, ok := errors.AsType[*runner.ExitError](err); ok && strings.Contains(strings.ToLower(exit.Stderr), notInStore) {
+		return app{Bundle: bundle}, true
+	}
+	if err != nil || len(found) != 1 {
+		return app{}, false
+	}
+	return found[0], true
 }
 
 // Key is an app's id: apps match by it, whatever their names are now.

@@ -41,7 +41,7 @@ func TestKitsOwnToDos(t *testing.T) {
 			Detail: "kit prefs restore, or kit prefs start-fresh",
 			ToDo: &check.ToDo{
 				Title: "Bring back apps' settings",
-				Why:   "First, so the apps you open next start with yours. This Mac saves its own once they're back. Claude Code's come too.",
+				Why:   "First, so the apps you open next start with yours. Bringing them back opens some apps once: their windows, notifications and permission prompts may follow. This Mac saves its own once they're back.",
 				Group: "Apps",
 				Keys: []check.Key{
 					{Key: "r", Does: "brings them back from this Mac's last save"},
@@ -238,14 +238,16 @@ func (c *card) waitForList(t *testing.T, n int) event.ToDos {
 }
 
 // A to-do that's a choice goes up with its keys, as its step readies it,
-// kit not telling by itself; a key does what its step says, and, should
-// that do it, it's done, what the step said it did as what kit saw. What
-// goes wrong, the log says, as something to look at, and it stays up.
+// kit not telling by itself; a key does what its step says, the card
+// offering none of its keys meanwhile, and, should that do it, it's done,
+// what the step said it did as what kit saw. What goes wrong, the log says,
+// as something to look at, and it stays up, its keys offered again, a key
+// pressed while the first was being done dropped.
 func TestAChoiceToDo(t *testing.T) {
 	defer steps.SetManualPoll(time.Hour)()
 	c := newCard(t)
 	var mu sync.Mutex
-	var pressed []string
+	var pressed, answering []string
 	brought := false
 	step := engine.Step{
 		Name: "prefs", Title: "App settings", Area: steps.AreaBackups,
@@ -271,7 +273,13 @@ func TestAChoiceToDo(t *testing.T) {
 				mu.Lock()
 				defer mu.Unlock()
 				pressed = append(pressed, key)
+				shown := c.cardsNow()
+				answering = append(answering, shown[len(shown)-1].Answering)
 				if len(pressed) == 1 {
+					// f, pressed before the screen showed r being done.
+					if !c.desk.Answer(steps.ManualName, "f") {
+						t.Error("f, pressed while r was being done, wasn't passed on")
+					}
 					return "", errors.New("couldn't reach the store")
 				}
 				brought = true
@@ -313,6 +321,142 @@ func TestAChoiceToDo(t *testing.T) {
 	if !slices.Equal(pressed, []string{"r", "r"}) || report.Results["prefs"].State != check.OK {
 		t.Errorf("pressed %q, prefs stands %s; want r twice, then prefs checked again, ok", pressed, report.Results["prefs"].State)
 	}
+	if !slices.Equal(answering, []string{"r", "r"}) {
+		t.Errorf("while r was being done, the card was answered by %q; want r, its keys not offered", answering)
+	}
+	var shown []string
+	for _, card := range c.cardsNow() {
+		shown = append(shown, card.Answering)
+	}
+	if !slices.Equal(shown, []string{"", "r", "", "r"}) {
+		t.Errorf("the card went up answered by %q; want its keys, then r while it worked, its keys again once it failed, then r", shown)
+	}
+}
+
+// A to-do of kit's own done, the to-dos its step's check finds then come
+// next, as apps to open once bringing back their settings left: a watched
+// one, kit offering no keys, done once its check finds it gone, settling
+// what it waited for, what that did as what kit saw.
+func TestAToDoLeavesAnother(t *testing.T) {
+	defer steps.SetManualPoll(5 * time.Millisecond)()
+	c := newCard(t)
+	var mu sync.Mutex
+	brought, opened := false, false
+	var settled []string
+	step := engine.Step{
+		Name: "prefs", Title: "App settings", Area: steps.AreaBackups,
+		Check: func(context.Context) check.Result {
+			mu.Lock()
+			defer mu.Unlock()
+			switch {
+			case !brought:
+				return check.Result{State: check.Attention, Summary: "paused", Items: []check.Item{toDoItem("prefs", check.ToDo{
+					Title: "Bring back apps' settings", First: true, Keys: []check.Key{{Key: "r", Does: "brings them back"}},
+				})}}
+			case !opened:
+				return check.Result{State: check.Attention, Summary: "1 app to open once", Items: []check.Item{{ID: "prefs:open", Name: "Open Boxed App once and quit it", State: steps.Problem,
+					ToDo: &check.ToDo{Title: "Open Boxed App once and quit it", Watch: "Boxed App has its settings folder", First: true}}}}
+			}
+			return check.Result{State: check.OK, Summary: "saving from tonight"}
+		},
+		Choice: &engine.Choice{
+			Answer: func(context.Context, check.Item, string) (string, error) {
+				mu.Lock()
+				defer mu.Unlock()
+				brought = true
+				return "1 app's settings; 1 app to open once", nil
+			},
+			Settle: func(_ context.Context, it check.Item) string {
+				mu.Lock()
+				defer mu.Unlock()
+				settled = append(settled, it.ID)
+				if it.ID == "prefs:open" {
+					return "1 app's settings"
+				}
+				return ""
+			},
+		},
+	}
+	done := make(chan engine.Report, 1)
+	go func() {
+		done <- applied(t, c, atTheEnd(steps.Manual(c.fake, "/home/someone", c.state, config.List{}, c.raise), step))
+	}()
+	c.cards(t, 1)
+	c.answer(t, steps.ManualName, "r")
+	var up event.NeedsYou
+	for range 5000 {
+		if shown := c.cardsNow(); shown[len(shown)-1].Item == "prefs:open" {
+			up = shown[len(shown)-1]
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if up.Title != "Open Boxed App once and quit it" || !up.Tells || len(up.Keys) != 0 {
+		t.Fatalf("after r, the card up is %+v; want the apps to open, watched", up)
+	}
+	mu.Lock()
+	opened = true
+	mu.Unlock()
+	report := <-done
+	last := toDoLists(c.sink)
+	l := last[len(last)-1]
+	if len(l.List) != 2 || l.List[1].Title != "Open Boxed App once and quit it" || !l.List[1].Done || l.List[1].Saw != "1 app's settings" {
+		t.Errorf("the to-dos ended %+v; want the apps to open next, done, kit having seen their settings back", l.List)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if !slices.Contains(settled, "prefs:open") || report.Results["prefs"].State != check.OK {
+		t.Errorf("settled %q, prefs stands %s; want the apps to open settled, then prefs ok", settled, report.Results["prefs"].State)
+	}
+}
+
+// q's Stop, pressed while kit did what a key said, which did it: the to-do
+// is done, and the run stops there, the rest staying to do.
+func TestStoppingWhileAKeyIsDone(t *testing.T) {
+	defer steps.SetManualPoll(time.Hour)()
+	c := newCard(t)
+	var mu sync.Mutex
+	brought := false
+	step := engine.Step{
+		Name: "prefs", Title: "App settings", Area: steps.AreaBackups,
+		Check: func(context.Context) check.Result {
+			mu.Lock()
+			defer mu.Unlock()
+			if brought {
+				return check.Result{State: check.OK, Summary: "saving from tonight"}
+			}
+			return check.Result{State: check.Attention, Summary: "paused", Items: []check.Item{toDoItem("prefs", check.ToDo{
+				Title: "Bring back apps' settings", First: true, Keys: []check.Key{{Key: "r", Does: "brings them back"}},
+			})}}
+		},
+		Choice: &engine.Choice{
+			Answer: func(context.Context, check.Item, string) (string, error) {
+				if !c.desk.Answer(steps.ManualName, hand.Stop) {
+					t.Error("q's Stop, pressed while r was being done, wasn't passed on")
+				}
+				mu.Lock()
+				defer mu.Unlock()
+				brought = true
+				return "214 apps' settings", nil
+			},
+		},
+	}
+	disk := ownStep("time-machine", toDoItem("time-machine", check.ToDo{Title: "Add a Time Machine disk", Group: "Backups"}))
+	done := make(chan engine.Report, 1)
+	go func() {
+		done <- applied(t, c, atTheEnd(steps.Manual(c.fake, "/home/someone", c.state, config.List{}, c.raise), step, disk))
+	}()
+	c.cards(t, 1)
+	c.answer(t, steps.ManualName, "r")
+	<-done
+	last := toDoLists(c.sink)
+	l := last[len(last)-1]
+	if l.Up != -1 || !l.List[0].Done || l.List[0].Saw != "214 apps' settings" || l.List[1].Done {
+		t.Errorf("the to-dos ended %+v; want the first done, the run stopped there, the rest to do", l)
+	}
+	if got := len(c.cardsNow()); got != 2 {
+		t.Errorf("%d cards went up, want the first, then it answered by r, and no more", got)
+	}
 }
 
 // The person can stop at the to-dos: the one up comes down, the rest stay
@@ -352,5 +496,76 @@ func TestStoppingAtTheToDos(t *testing.T) {
 	want := []string{"notify card:manual:time-machine:none | Add a Time Machine disk | kit waits for you to do this", "clear card:manual:time-machine:none"}
 	if got := c.notices.posted(); !slices.Equal(got, want) {
 		t.Errorf("notifications %q, want %q", got, want)
+	}
+}
+
+// A choice to-do answered while a mid-run card waits behind it: the card
+// shows the key being done, still counting the card waiting; done, the
+// card waiting goes up next, then the to-do its step's check finds now,
+// which follows on.
+func TestAChoiceDoneWithACardWaiting(t *testing.T) {
+	defer steps.SetManualPoll(5 * time.Millisecond)()
+	c := newCard(t)
+	gate := make(chan struct{})
+	var mu sync.Mutex
+	brought, opened := false, false
+	var answering event.NeedsYou
+	prefsStep := engine.Step{
+		Name: "prefs", Title: "App settings", Area: steps.AreaBackups,
+		Check: func(context.Context) check.Result {
+			mu.Lock()
+			defer mu.Unlock()
+			switch {
+			case !brought:
+				return check.Result{State: check.Attention, Summary: "paused", Items: []check.Item{toDoItem("prefs", check.ToDo{
+					Title: "Bring back apps' settings", First: true, Keys: []check.Key{{Key: "r", Does: "brings them back"}},
+				})}}
+			case !opened:
+				return check.Result{State: check.Attention, Summary: "1 app to open once", Items: []check.Item{{ID: "prefs:open", Name: "Open Boxed App once and quit it", State: steps.Problem,
+					ToDo: &check.ToDo{Title: "Open Boxed App once and quit it", Watch: "Boxed App has its settings folder", First: true}}}}
+			}
+			return check.Result{State: check.OK, Summary: "saving from tonight"}
+		},
+		Choice: &engine.Choice{
+			Answer: func(context.Context, check.Item, string) (string, error) {
+				shown := c.cardsNow()
+				mu.Lock()
+				defer mu.Unlock()
+				answering, brought = shown[len(shown)-1], true
+				return "1 app's settings; 1 app to open once", nil
+			},
+		},
+	}
+	vault := steps.OwnManual(c.fake, c.state, steps.ManualStep{Name: "vault", Do: "Sign in to the vault"}, c.raise)
+	vault.After, vault.Before = []string{"cask"}, []string{"secret"}
+	manual := steps.Manual(c.fake, "/home/someone", c.state, config.List{}, c.raise)
+	manual.After = []string{"prefs"}
+	p, err := engine.New(manual, prefsStep, vault, gated("cask", gate), fine("secret"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ran := running(t, c, p)
+	c.upNow(t, "prefs:none")
+	close(gate)
+	c.cards(t, 2)
+	c.answer(t, steps.ManualName, "r")
+	c.upNow(t, "vault")
+	c.answer(t, "vault", hand.Done)
+	c.upNow(t, "prefs:open")
+	mu.Lock()
+	opened = true
+	mu.Unlock()
+	over(t, ran)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if answering.Item != "prefs:none" || answering.Answering != "r" || answering.More != 1 {
+		t.Errorf("as r was done, the card up was %+v; want the to-do, answered by r, the vault's card counted after it", answering)
+	}
+	if got, want := c.ups(), []string{"prefs:none", "vault", "prefs:open"}; !slices.Equal(got, want) {
+		t.Errorf("cards up %q, want %q", got, want)
+	}
+	if l := c.lastToDos(); len(l) != 2 || !l[0].Done || l[0].Saw != "1 app's settings; 1 app to open once" || l[1].ID != "prefs:open" || !l[1].Done {
+		t.Errorf("the to-dos ended %+v; want r's done, what it did as what kit saw, then the app to open, done", l)
 	}
 }

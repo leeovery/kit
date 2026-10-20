@@ -273,7 +273,12 @@ type opener interface {
 
 // errStopHere is why a card came down without being done: the person
 // stopped where they were, at the run's to-dos, what's left staying to do.
-var errStopHere = errors.New("stopped here")
+// errDoneThenStop, that it was done, and they stopped meanwhile: it's done,
+// and the rest stays to do.
+var (
+	errStopHere     = errors.New("stopped here")
+	errDoneThenStop = fmt.Errorf("done, then %w", errStopHere)
+)
 
 // Raise is how a step by hand that's come due is raised while kit applies
 // at a terminal, where someone can act on it: a card, front and centre, one
@@ -359,10 +364,11 @@ var manualPoll = 3 * time.Second
 // (look): the run stopped, it's over; its turn come and its card not up, it
 // looks whether it's done, and if not puts its card up; its card down, its
 // notification goes. Every few seconds, up or set aside, it looks whether
-// it's done; and it takes the person's answers. Done, it leaves the line,
-// the next card's turn coming, unless the person stopped meanwhile
-// (finish). It returns what kit saw as it was done, in words, if it has
-// some; errStopHere when the person stopped where they were.
+// it's done; and it takes the person's answers (answered). Done, it leaves
+// the line, the next card's turn coming, unless the person stopped
+// meanwhile (finish). It returns what kit saw as it was done, in words, if
+// it has some; errStopHere when the person stopped where they were;
+// errDoneThenStop when they stopped as it was done.
 func (r *Raise) up(ctx context.Context, step string, c raised, s seat) (string, error) {
 	answers := s.answers
 	if answers == nil {
@@ -391,7 +397,7 @@ func (r *Raise) up(ctx context.Context, step string, c raised, s seat) (string, 
 				return finish(answers, saw, nil)
 			}
 		case a := <-answers:
-			if saw, ok, err := r.answered(ctx, pl, c, a); ok || err != nil {
+			if saw, ok, err := r.answered(ctx, pl, c, a, answers); ok || err != nil {
 				return finish(answers, saw, err)
 			}
 		}
@@ -419,25 +425,42 @@ func (r *Raise) look(ctx context.Context, pl *place, c raised) (saw string, done
 }
 
 // finish is how a card's wait ends, done, what kit saw, or with err: a
-// Stop the person gave meanwhile, waiting unread, stops there all the same.
+// Stop the person gave meanwhile, waiting unread, stops there all the same,
+// once it's done (errDoneThenStop). What else they answered is dropped,
+// meant for the card now down.
 func finish(answers <-chan hand.Answer, saw string, err error) (string, error) {
-	if err != nil {
+	switch {
+	case err != nil:
 		return "", err
-	}
-	select {
-	case a := <-answers:
-		if a == hand.Stop {
-			return "", errStopHere
-		}
-	default:
+	case stoppedMeanwhile(answers):
+		return saw, errDoneThenStop
 	}
 	return saw, nil
 }
 
+// stoppedMeanwhile empties answers of what came while kit was busy, without
+// waiting, and reports whether the person stopped where they were
+// meanwhile, which isn't dropped.
+func stoppedMeanwhile(answers <-chan hand.Answer) bool {
+	stop := false
+	for {
+		select {
+		case a := <-answers:
+			stop = stop || a == hand.Stop
+		default:
+			return stop
+		}
+	}
+}
+
 // answered is what the person's answer to pl's card does: Stop stops where
 // they are (errStopHere); Next moves on to the next card waiting; the rest
-// are c's to answer, reporting whether it's done, and what kit saw.
-func (r *Raise) answered(ctx context.Context, pl *place, c raised, a hand.Answer) (string, bool, error) {
+// are c's to answer, reporting whether it's done, and what kit saw. While
+// kit does what one of the card's keys says, the card offers none of them,
+// and offers them again should it still be to do, any answer that came
+// meanwhile dropped: a key the screen passed on before it showed the card
+// being answered.
+func (r *Raise) answered(ctx context.Context, pl *place, c raised, a hand.Answer, answers <-chan hand.Answer) (string, bool, error) {
 	switch a {
 	case hand.Stop:
 		return "", false, errStopHere
@@ -445,8 +468,30 @@ func (r *Raise) answered(ctx context.Context, pl *place, c raised, a hand.Answer
 		r.next(pl)
 		return "", false, nil
 	}
+	chose := r.answering(pl, a)
 	ok, saw, err := c.answer(ctx, a, r.Now())
-	return saw, ok, err
+	switch {
+	case ok || err != nil || !chose:
+		return saw, ok, err
+	case stoppedMeanwhile(answers):
+		return "", false, errStopHere
+	}
+	r.answering(pl, "")
+	return "", false, nil
+}
+
+// answering puts pl's card up again, answered by key while kit does what it
+// says, or, "", waiting for an answer again: reporting whether it did, as
+// it does only while pl's card is up and key is one of its keys, or "".
+func (r *Raise) answering(pl *place, key hand.Answer) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.shown != pl || key != "" && !slices.ContainsFunc(r.card.Keys, func(k check.Key) bool { return hand.Answer(k.Key) == key }) {
+		return false
+	}
+	r.card.Time, r.card.Answering = r.Now(), string(key)
+	r.Sink.Emit(r.card)
+	return true
 }
 
 // state is pl's card as the line has it: due, its turn come and its card

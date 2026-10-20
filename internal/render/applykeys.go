@@ -209,7 +209,7 @@ func (p *Pretty) press(k ask.Key) (halt bool) {
 // answerCard passes the card up's step that it's done, when kit can't tell
 // by itself and it isn't a choice: nothing with no card up.
 func (p *Pretty) answerCard() {
-	if p.card == nil || p.hands == nil || p.card.Tells || len(p.card.Keys) > 0 {
+	if p.card == nil || p.hands == nil || p.card.Tells || len(p.card.Keys) > 0 || p.card.Answering != "" {
 		return
 	}
 	p.hands(p.card.Step, hand.Done)
@@ -223,14 +223,17 @@ func (p *Pretty) cardsWaiting() bool {
 }
 
 // answerChoice passes k to the card up's step, when it's one of its
-// choice's keys, and reports whether it was.
+// choice's keys, and reports whether it was: while it's being answered,
+// they do nothing.
 func (p *Pretty) answerChoice(k ask.Key) bool {
 	if p.card == nil || p.hands == nil {
 		return false
 	}
 	for _, c := range p.card.Keys {
 		if k.Is(c.Key) {
-			p.hands(p.card.Step, hand.Answer(c.Key))
+			if p.card.Answering == "" {
+				p.hands(p.card.Step, hand.Answer(c.Key))
+			}
 			return true
 		}
 	}

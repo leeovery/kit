@@ -92,8 +92,8 @@ type Step struct {
 	// rest of the run left the person to do as well as their own lines.
 	AlwaysApply bool
 	// Choice is what the to-dos its check finds do when they're a choice
-	// (an item's ToDo with keys), as applying raises them at its end.
-	// Optional.
+	// (an item's ToDo with keys), as applying raises them at its end, and
+	// once one it watches is done. Optional.
 	Choice *Choice
 	// Again does the step once more, finished, should a step applied after
 	// it find it wasn't done after all (Undone), as a step by hand's card
@@ -101,13 +101,17 @@ type Step struct {
 	Again func(ctx context.Context) error
 }
 
-// Choice is what a step's to-dos that are a choice do: Ready is one as it
-// comes up, what it says filled in where that takes looking, as the date
-// of the save a key brings back (optional); Answer does what key says, and
-// says what it did, in kit's words.
+// Choice is what a step's to-dos do beyond being looked at: Ready is one as
+// it comes up, what it says filled in where that takes looking, as the
+// date of the save a key brings back (optional); Answer does what key
+// says, and says what it did, in kit's words; Settle finishes what one kit
+// watched waited for, once it's found done, as bringing back the settings
+// of the apps it had the person open, and says what it did, if anything
+// (optional).
 type Choice struct {
 	Ready  func(ctx context.Context, it check.Item) check.Item
 	Answer func(ctx context.Context, it check.Item, key string) (said string, err error)
+	Settle func(ctx context.Context, it check.Item) (said string)
 }
 
 // Wait is a thing a step is applied after: one of the things another step
@@ -1031,11 +1035,18 @@ func ChoiceOf(ctx context.Context, name string) *Choice {
 			return c.Ready(d.attributed(event.WithChecking(ctx), s), it)
 		}
 	}
+	settle := func(context.Context, check.Item) string { return "" }
+	if c.Settle != nil {
+		settle = func(ctx context.Context, it check.Item) string {
+			return c.Settle(d.attributed(event.WithChanging(ctx), s), it)
+		}
+	}
 	return &Choice{
 		Ready: ready,
 		Answer: func(ctx context.Context, it check.Item, key string) (string, error) {
 			return c.Answer(d.attributed(event.WithChanging(ctx), s), it, key)
 		},
+		Settle: settle,
 	}
 }
 

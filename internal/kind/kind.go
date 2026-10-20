@@ -100,6 +100,15 @@ type Carded interface {
 	Cards() []Card
 }
 
+// Misser is a kind whose list of what's installed can miss what is, as
+// the App Store's, read from Spotlight's index, misses an app installed a
+// moment ago.
+type Misser interface {
+	// Missed finds which of names, declared and not listed, are installed
+	// after all.
+	Missed(ctx context.Context, names []string) ([]Installed, error)
+}
+
 // Blocker is a kind that can say why some things can't be installed now.
 type Blocker interface {
 	// Blocked says, of the things missing (declared names, by their full
@@ -1008,6 +1017,52 @@ func UnattendedApply(k Kind) func(ctx context.Context, found check.Result) error
 	}
 }
 
+// InstalledOf is what k finds installed, with those of names it doesn't
+// list found after all, when it can miss what's installed (Misser): what
+// a check of one thing, or a wait for it, goes by.
+func InstalledOf(ctx context.Context, k Kind, names []string) ([]Installed, error) {
+	installed, err := k.Installed(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return withMissed(ctx, k, installed, names)
+}
+
+// withMissed is installed, what k lists, with those of names it lacks that
+// k, when it can miss what's installed (Misser), finds are installed after
+// all.
+func withMissed(ctx context.Context, k Kind, installed []Installed, names []string) ([]Installed, error) {
+	m, ok := k.(Misser)
+	if !ok {
+		return installed, nil
+	}
+	key := keyOf(k)
+	listed := make(map[string]bool, len(installed))
+	for _, it := range installed {
+		listed[key(it.Name)] = true
+	}
+	var absent []string
+	for _, name := range names {
+		if !listed[key(name)] {
+			absent = append(absent, name)
+		}
+	}
+	if len(absent) == 0 {
+		return installed, nil
+	}
+	found, err := m.Missed(ctx, absent)
+	return append(installed, found...), err
+}
+
+// keyOf is how k matches its things' names: as they are, unless it says
+// (Keyed).
+func keyOf(k Kind) func(string) string {
+	if kd, ok := k.(Keyed); ok {
+		return kd.Key
+	}
+	return func(name string) string { return name }
+}
+
 // Compare checks what declared lists against what k finds installed: a
 // declared thing is ok installed for any reason, or missing; an undeclared
 // one installed for itself, and needed by nothing, is extra; one installed
@@ -1026,10 +1081,16 @@ func Compare(ctx context.Context, k Kind, declared config.List) check.Result {
 	case err != nil:
 		return failed(k, err)
 	}
-	key := func(name string) string { return name }
-	if kd, ok := k.(Keyed); ok {
-		key = kd.Key
+	var on []string
+	for _, e := range declared.Entries {
+		if !e.Off {
+			on = append(on, e.Name)
+		}
 	}
+	if installed, err = withMissed(ctx, k, installed, on); err != nil {
+		return failed(k, err)
+	}
+	key := keyOf(k)
 	byKey := make(map[string]Installed, len(installed))
 	for _, it := range installed {
 		byKey[key(it.Name)] = it

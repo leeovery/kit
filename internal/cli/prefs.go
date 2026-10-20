@@ -55,15 +55,20 @@ Mac, and this Mac owning its folder in the store.`,
 		Use:   "restore [<domain>...]",
 		Short: "Put apps' settings back from the store: all, or those domains",
 		Long: `Put apps' settings back from the store: every saved domain whose app is
-installed and not running (the rest wait: kit prefs pending), then the
-settings files that differ, the live copy of each saved first. Name domains
-to restore just those, even without their app. A full restore with nothing
-failed switches capture on. Never quits an app.
+installed and not running, then the settings files that differ, the live
+copy of each saved first. A sandboxed app with no settings folder yet is
+opened once, hidden, to make one. Name domains to restore just those, even
+without their app. A full restore switches capture on. What it can't
+restore waits, left alone by capture (kit prefs pending): for its app to be
+installed or quit; for you to open an app once, as no settings folder came
+of kit opening it; or, failed otherwise, for --pending. Never quits an app.
 
 --from restores another Mac's settings, leaving out [prefs machine-bound]
 (as onto other hardware); --at the store as it was then (2026-09-28, "3 days
 ago"); --as one domain into a scratch domain, to test without touching the
-app; --pending what's waiting; --dry-run says what it would do.`,
+app; --pending what's waiting, failed or not, opening an app once for its
+settings folder; --dry-run says what it would do. The hourly pass restores
+what's waiting too, but opens no app and leaves what failed to --pending.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			opts.Domains = args
 			return a.prepared(cmd, prefsNoun+" restore", func(ctx context.Context, r *run) error {
@@ -75,7 +80,7 @@ app; --pending what's waiting; --dry-run says what it would do.`,
 	f.StringVar(&opts.From, "from", "", "restore another Mac's settings, by its name")
 	f.StringVar(&opts.At, "at", "", `the store as it was then, any date git reads: 2026-09-28, "3 days ago"`)
 	f.StringVar(&opts.As, "as", "", "restore one domain into this scratch domain, leaving the app alone")
-	f.BoolVar(&opts.Pending, "pending", false, "restore what's waiting, now its apps are installed and closed")
+	f.BoolVar(&opts.Pending, "pending", false, "restore what's waiting, failed or not, opening an app once for its settings folder")
 	f.BoolVar(&opts.DryRun, "dry-run", false, "say what it would restore, and change nothing")
 	var from string
 	var count int
@@ -110,8 +115,13 @@ sorted XML, so a diff is the setting that changed.`,
 	var clear bool
 	pending := &cobra.Command{
 		Use:   "pending",
-		Short: "What's waiting to be restored (--clear: drop it, and capture what's there)",
-		Args:  cobra.NoArgs,
+		Short: "What's waiting to be restored, each with why (--clear: drop it, and capture what's there)",
+		Long: `What's waiting to be restored, each with why: an app not installed or
+running, which the hourly pass brings back once it's installed and quit; an
+app to open once, which it brings back once the app has its settings folder;
+or a restore that failed otherwise, which only kit prefs restore --pending
+tries again. --clear drops it all, so capture saves what's on the Mac.`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return a.prepared(cmd, prefsNoun+" pending", func(_ context.Context, r *run) error {
 				return a.prefsPending(r, clear)
@@ -160,6 +170,7 @@ func (a *app) prefs(r *run) (*prefs.Prefs, error) {
 	}
 	p := prefs.New(r.run, r.homeDir, r.stateDir, filepath.Join(r.dataDir, prefsNoun), r.cfg.PrefsRepo, r.machine, lists, a.Now)
 	p.Probes = append(p.Probes[:len(p.Probes)-1], a.TCC)
+	p.AppDirs = a.appFolders(r.homeDir).Dirs
 	return p, nil
 }
 
@@ -230,17 +241,23 @@ func (a *app) prefsRestore(ctx context.Context, r *run, opts prefs.RestoreOption
 		if err != nil {
 			return check.Result{State: check.Failed, Reason: err.Error()}
 		}
-		if opts.Pending && report.Restored == nil && len(report.Waiting) == 0 && len(report.Failed) == 0 {
+		if opts.Pending && report.Restored == nil && report.Files == 0 && len(report.Waiting)+len(report.ToOpen) == 0 && report.Failures() == 0 {
 			return check.Result{State: check.OK, Summary: "nothing pending"}
 		}
 		res := check.Result{State: check.OK, Summary: report.Summary()}
 		for _, d := range slices.Sorted(maps.Keys(report.Failed)) {
 			res.Items = append(res.Items, check.Item{ID: "prefs:failed:" + d, Name: d, State: "failed", Detail: report.Failed[d]})
 		}
+		for _, d := range slices.Sorted(maps.Keys(report.ToOpen)) {
+			res.Items = append(res.Items, check.Item{ID: "prefs:open:" + d, Name: d, State: "to open", Detail: report.ToOpen[d], Quiet: "open " + report.Apps[d].Name + " once and quit it: the hourly pass brings it back"})
+		}
+		for _, f := range slices.Sorted(maps.Keys(report.FilesFailed)) {
+			res.Items = append(res.Items, check.Item{ID: "prefs:failed:" + f, Name: f, State: "failed", Detail: report.FilesFailed[f]})
+		}
 		for _, d := range slices.Sorted(maps.Keys(report.Waiting)) {
 			res.Items = append(res.Items, check.Item{ID: "prefs:pending:" + d, Name: d, State: "pending", Detail: report.Waiting[d], Quiet: "until it's installed and closed: kit prefs restore --pending"})
 		}
-		if len(report.Failed) > 0 {
+		if report.Failures() > 0 {
 			res.State = check.Attention
 		}
 		return res
@@ -258,7 +275,7 @@ func (a *app) prefsPending(r *run, clear bool) error {
 		if err != nil {
 			return err
 		}
-		_, err = fmt.Fprintf(a.Stdout, "Cleared %s: capture saves what's on the Mac for them now.\n", plural(n, "pending domain"))
+		_, err = fmt.Fprintf(a.Stdout, "Cleared %s: capture saves what's on the Mac for them now.\n", plural(n, "pending setting"))
 		return err
 	}
 	rec, err := p.Load()
@@ -279,8 +296,12 @@ func (a *app) prefsPending(r *run, clear bool) error {
 	if _, err := fmt.Fprintf(a.Stdout, "Waiting to be restored from %s (kit prefs restore --pending):\n", rec.Pending.From); err != nil {
 		return err
 	}
-	for _, d := range rec.Pending.Domains {
-		if _, err := fmt.Fprintln(a.Stdout, "  "+d); err != nil {
+	for _, name := range slices.Concat(rec.Pending.Domains, rec.Pending.Files) {
+		line := "  " + name
+		if why := rec.Pending.Why[name]; why != "" {
+			line += ": " + why
+		}
+		if _, err := fmt.Fprintln(a.Stdout, line); err != nil {
 			return err
 		}
 	}

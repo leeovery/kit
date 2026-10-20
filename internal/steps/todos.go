@@ -105,7 +105,9 @@ func (o ownToDo) card(ctx context.Context) event.NeedsYou {
 }
 
 // done reports whether it's done, as its step's check finds it: the check
-// looked, and found it gone; and what the check says, as what kit saw.
+// looked, and found it gone; and, as what kit saw, what settling what it
+// waited for did, if anything (engine.Choice's Settle), else what the
+// check says.
 func (o ownToDo) done(ctx context.Context) (bool, string) {
 	res, ok := engine.Look(ctx, o.step)
 	switch {
@@ -114,7 +116,34 @@ func (o ownToDo) done(ctx context.Context) (bool, string) {
 	case slices.ContainsFunc(res.Items, func(it check.Item) bool { return it.ID == o.item.ID }):
 		return false, ""
 	}
+	if c := engine.ChoiceOf(ctx, o.step); c != nil {
+		if said := c.Settle(ctx, o.item); said != "" {
+			return true, said
+		}
+	}
 	return true, res.Summary
+}
+
+// followUps are the to-dos t's step's check finds now that list hasn't,
+// as bringing back apps' settings can leave apps to open: none for one
+// that isn't kit's own.
+func followUps(ctx context.Context, t toDo, list []toDo) []toDo {
+	o, ok := t.(ownToDo)
+	if !ok {
+		return nil
+	}
+	res, ok := engine.Look(ctx, o.step)
+	if !ok {
+		return nil
+	}
+	var more []toDo
+	for _, it := range res.Items {
+		listed := slices.ContainsFunc(list, func(t toDo) bool { return t.entry().ID == it.ID })
+		if it.ToDo != nil && !listed {
+			more = append(more, ownToDo{step: o.step, item: it})
+		}
+	}
+	return more
 }
 
 // answer is what the person's answer does: a choice's key does what its
@@ -140,12 +169,14 @@ func (o ownToDo) answer(ctx context.Context, a hand.Answer, _ time.Time) (bool, 
 }
 
 // workThrough raises list's to-dos for step one at a time, in order, each
-// till it's done: the list emitted as each comes up, and once they're over.
-// The person can stop where they are (hand.Stop), the to-do up kept as
-// done should it be: what's left stays to do. Their answers come on one
-// listener for the whole list, so a Stop given between two to-dos is never
-// lost, and anything else given then, for a to-do done with, goes nowhere.
-// Then the steps the to-dos done held are checked again (recheckHeld).
+// till it's done: the list emitted as each comes up, and once they're over;
+// one of kit's own done, those its step's check finds now come next
+// (followUps). The person can stop where they are (hand.Stop): what's left
+// stays to do, the one up done if it was done as they stopped. Their
+// answers come on one listener for the whole list, so a Stop given between
+// two to-dos is never lost, and anything else given then, for a to-do done
+// with, goes nowhere. Then the steps the to-dos done held are checked again
+// (recheckHeld).
 func (r *Raise) workThrough(ctx context.Context, step string, list []toDo) error {
 	if len(list) == 0 {
 		return nil
@@ -160,43 +191,30 @@ func (r *Raise) workThrough(ctx context.Context, step string, list []toDo) error
 		r.Sink.Emit(event.ToDos{Time: r.Now(), Step: step, List: slices.Clone(entries), Up: up})
 	}
 	resolved := map[string]bool{}
-	for i, t := range list {
+	for i := 0; i < len(list); i++ {
 		emit(i)
-		if stopGiven(answers) {
+		if stoppedMeanwhile(answers) {
 			break
 		}
-		saw, err := r.up(ctx, step, t, seat{held: true, after: len(list) - 1 - i, answers: answers})
-		if errors.Is(err, errStopHere) {
-			if done, doneSaw := t.done(ctx); done {
-				entries[i].Done, entries[i].Saw = true, doneSaw
-				resolved[entries[i].ID] = true
-			}
-			break
-		}
-		if err != nil {
+		saw, err := r.up(ctx, step, list[i], seat{held: true, after: len(list) - 1 - i, answers: answers})
+		switch {
+		case err == nil, errors.Is(err, errDoneThenStop):
+			entries[i].Done, entries[i].Saw = true, saw
+			resolved[entries[i].ID] = true
+		case !errors.Is(err, errStopHere):
 			return err
 		}
-		entries[i].Done, entries[i].Saw = true, saw
-		resolved[entries[i].ID] = true
+		if err != nil {
+			break
+		}
+		for j, t := range followUps(ctx, list[i], list) {
+			list = slices.Insert(list, i+1+j, t)
+			entries = slices.Insert(entries, i+1+j, t.entry())
+		}
 	}
 	emit(-1)
 	recheckHeld(ctx, entries, resolved)
 	return nil
-}
-
-// stopGiven reads what the person answered while no to-do was up, without
-// waiting: whether it was a Stop. Anything else was for a to-do done with.
-func stopGiven(answers <-chan hand.Answer) bool {
-	for {
-		select {
-		case a := <-answers:
-			if a == hand.Stop {
-				return true
-			}
-		default:
-			return false
-		}
-	}
 }
 
 // recheckHeld checks again the steps the to-dos done held, those they came

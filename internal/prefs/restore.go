@@ -15,22 +15,26 @@ import (
 	"time"
 
 	"github.com/leeovery/kit/internal/apps"
+	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/plist"
 	"github.com/leeovery/kit/internal/runner"
 )
 
 // RestoreOptions are what to restore: everything from this Mac's folder
-// unless From names another Mac's; Domains, just those; Pending, the
-// domains waiting; At, the store as it was then; As, one domain into a
-// scratch domain, testing a restore without touching the app; DryRun, only
-// say what would be done.
+// unless From names another Mac's; Domains, just those; Pending, what
+// waits; At, the store as it was then; As, one domain into a scratch
+// domain, testing a restore without touching the app; DryRun, only say
+// what would be done. Unattended, with Pending, is the hourly pass, with no
+// one there: it opens no app, leaving one with no settings folder for the
+// person to open, and leaves what failed otherwise for them to try again.
 type RestoreOptions struct {
-	From    string
-	Domains []string
-	Pending bool
-	At      string
-	As      string
-	DryRun  bool
+	From       string
+	Domains    []string
+	Pending    bool
+	Unattended bool
+	At         string
+	As         string
+	DryRun     bool
 }
 
 // RestoreReport is what a restore did, or would do.
@@ -42,10 +46,16 @@ type RestoreReport struct {
 	Restored   []string
 	Files      int
 	// Waiting are the domains left pending, each with why: not installed,
-	// or running.
-	Waiting map[string]string
-	// Failed are the domains that failed, each with why.
-	Failed map[string]string
+	// or running. ToOpen, those whose apps the person opens once, each with
+	// why: kit opened them and no settings folder came of it, or, unattended,
+	// kit opens none.
+	Waiting, ToOpen map[string]string
+	// Failed are the domains that failed otherwise, each with why;
+	// FilesFailed, the settings files, by their paths from ~ (or /), each
+	// with why.
+	Failed, FilesFailed map[string]string
+	// Apps are the apps of the domains not restored, where kit found them.
+	Apps map[string]App
 	// Saved is where the live settings replaced were saved.
 	Saved  string
 	DryRun bool
@@ -72,13 +82,21 @@ func (r RestoreReport) Summary() string {
 	if len(r.Waiting) > 0 {
 		s += fmt.Sprintf("; %d pending (not installed or running)", len(r.Waiting))
 	}
-	if len(r.Failed) > 0 {
-		s += fmt.Sprintf("; %d failed", len(r.Failed))
+	if len(r.ToOpen) > 0 {
+		s += fmt.Sprintf("; %d to open once", len(r.ToOpen))
+	}
+	if n := r.Failures(); n > 0 {
+		s += fmt.Sprintf("; %d failed", n)
 	}
 	if r.Saved != "" {
 		s += "; previous settings saved in " + r.Saved
 	}
 	return s
+}
+
+// Failures counts the domains and settings files that failed.
+func (r RestoreReport) Failures() int {
+	return len(r.Failed) + len(r.FilesFailed)
 }
 
 // helperDirs are where apps keep helper apps with their own preferences.
@@ -166,19 +184,32 @@ func (p *Prefs) running(ctx context.Context, id string) bool {
 	return err == nil && strings.TrimSpace(string(res.Stdout)) == "true"
 }
 
+// Why a sandboxed app's container isn't there: kit opened it, and none came
+// of it; or kit may not open it; or, opened, it didn't quit.
+var (
+	errNoFolder  = errors.New("opened once, it still has no settings folder")
+	errNotOpened = errors.New("it has no settings folder till it's opened once")
+	errDidntQuit = errors.New("opened once for its settings folder, but it didn't quit")
+)
+
 // ensureContainer makes a sandboxed app's container, where it reads its
-// settings, which exists only once it has run: launched hidden once, then
-// quit. One that won't quit isn't restored, as it would write its defaults
-// back when it did.
-func (p *Prefs) ensureContainer(ctx context.Context, id, app string) error {
-	container := filepath.Join(p.Home, "Library/Containers", id)
-	if _, err := os.Stat(container); err == nil {
+// settings, which exists only once it has run, when open says it may:
+// launched hidden once, then quit, the run's log naming it as it opens.
+// One that won't quit isn't restored, as it would write its defaults back
+// when it did.
+func (p *Prefs) ensureContainer(ctx context.Context, id, app string, open bool) error {
+	if p.hasFolder(id) {
 		return nil
 	}
 	res, _ := p.Run.Run(ctx, runner.Command{Name: "codesign", Args: []string{"-d", "--entitlements", "-", "--xml", app}})
 	if !bytes.Contains(res.Stdout, []byte("com.apple.security.app-sandbox")) {
 		return nil
 	}
+	if !open {
+		return errNotOpened
+	}
+	container := filepath.Join(p.Home, "Library/Containers", id)
+	event.Log(ctx, event.Logged{Line: "Opening " + appName(app) + " once, for its settings folder"})
 	_, _ = p.Run.Run(ctx, runner.Command{Name: "open", Args: []string{"-g", "-j", "-b", id}})
 	for range 40 {
 		if _, err := os.Stat(container); err == nil {
@@ -196,12 +227,18 @@ func (p *Prefs) ensureContainer(ctx context.Context, id, app string) error {
 		p.Sleep(500 * time.Millisecond)
 	}
 	if !quit {
-		return errors.New("launched once to make its container, but it didn't quit")
+		return errDidntQuit
 	}
-	if _, err := os.Stat(container); err != nil {
-		return errors.New("its container didn't appear after launching it once")
+	if !p.hasFolder(id) {
+		return errNoFolder
 	}
 	return nil
+}
+
+// appName is the app at app by the name its bundle has, as the Finder shows
+// it.
+func appName(app string) string {
+	return strings.TrimSuffix(filepath.Base(app), ".app")
 }
 
 // restoreDomain replaces a domain's live settings (target's, when testing
@@ -210,30 +247,30 @@ func (p *Prefs) ensureContainer(ctx context.Context, id, app string) error {
 func (p *Prefs) restoreDomain(ctx context.Context, stored, target, saved string) error {
 	data, err := os.ReadFile(stored)
 	if err != nil {
-		return err
+		return errors.New("its saved copy couldn't be read")
 	}
 	v, err := plist.Decode(data)
 	wanted, _ := v.(map[string]any)
 	if err != nil || len(wanted) == 0 {
-		return errors.New("its stored copy is empty or not a dictionary")
+		return errors.New("its saved copy is empty")
 	}
 	if current, err := p.export(ctx, target); err == nil && len(current) > 0 {
 		backup, err := plist.Encode(current)
-		if err != nil {
-			return fmt.Errorf("save its live settings: %w", err)
+		if err == nil {
+			err = writeIfChanged(filepath.Join(saved, target+".plist"), backup)
 		}
-		if err := writeIfChanged(filepath.Join(saved, target+".plist"), backup); err != nil {
-			return fmt.Errorf("save its live settings: %w", err)
+		if err != nil {
+			return errors.New("its live settings couldn't be saved first")
 		}
 	}
 	// Import merges: deleted first, for an exact restore.
 	_, _ = p.Run.Run(ctx, runner.Command{Name: "defaults", Args: []string{"delete", target}})
 	if _, err := p.Run.Run(ctx, runner.Command{Name: "defaults", Args: []string{"import", target, stored}}); err != nil {
-		return fmt.Errorf("import: %w", err)
+		return errors.New("macOS didn't take them")
 	}
 	back, err := p.export(ctx, target)
 	if err != nil || !plist.Equal(stripVolatile(back), stripVolatile(wanted)) {
-		return errors.New("imported, but reads back different (settings may be in the wrong place)")
+		return errors.New("macOS took them, but they read back different")
 	}
 	return nil
 }
@@ -241,11 +278,13 @@ func (p *Prefs) restoreDomain(ctx context.Context, stored, target, saved string)
 // Restore puts settings from the store back on the Mac: every stored domain
 // whose app is installed and closed (the rest wait, pending), then the
 // settings files that differ, each live copy saved first. A full restore
-// with no failures switches capture on. Never quits an app. From another
-// Mac's folder, or onto other hardware, the settings bound to one Mac are
-// left out.
+// switches capture on, what it couldn't restore held aside, so capture
+// leaves it be: waiting for its app; its app for the person to open once;
+// or, failed otherwise, for kit prefs restore --pending. Never quits an
+// app. From another Mac's folder, or onto other hardware, the settings
+// bound to one Mac are left out.
 func (p *Prefs) Restore(ctx context.Context, opts RestoreOptions) (RestoreReport, error) {
-	report := RestoreReport{From: opts.From, DryRun: opts.DryRun, As: opts.As, Waiting: map[string]string{}, Failed: map[string]string{}}
+	report := RestoreReport{From: opts.From, DryRun: opts.DryRun, As: opts.As, Waiting: map[string]string{}, ToOpen: map[string]string{}, Failed: map[string]string{}, FilesFailed: map[string]string{}, Apps: map[string]App{}}
 	if report.From == "" {
 		report.From = p.Mac
 	}
@@ -254,14 +293,26 @@ func (p *Prefs) Restore(ctx context.Context, opts RestoreOptions) (RestoreReport
 		return report, err
 	}
 	named := slices.Clone(opts.Domains)
+	full := len(named) == 0 && !opts.Pending
+	var files map[string]bool
+	before := heldIn(rec.Pending)
+	if opts.Unattended && !opts.Pending {
+		return report, errors.New("an unattended restore restores what's waiting alone")
+	}
 	if opts.Pending {
 		if len(named) > 0 || opts.As != "" || opts.At != "" {
 			return report, errors.New("--pending restores what's waiting: no domains, --as or --at with it")
 		}
-		if rec.Pending == nil || len(rec.Pending.Domains) == 0 {
+		if rec.Pending == nil || len(rec.Pending.Domains)+len(rec.Pending.Files) == 0 {
+			return report, nil
+		}
+		if opts.Unattended && !before.anyToTry() {
 			return report, nil
 		}
 		report.From, named = rec.Pending.From, slices.Clone(rec.Pending.Domains)
+		if !opts.Unattended {
+			files = maps.Clone(before.files)
+		}
 	}
 	if !opts.DryRun && !p.HasFullDiskAccess() {
 		return report, errNoAccess
@@ -306,7 +357,6 @@ func (p *Prefs) Restore(ctx context.Context, opts RestoreOptions) (RestoreReport
 		return report, err
 	}
 
-	full := len(named) == 0
 	bound, err := p.machineBound(ctx, report.From, store)
 	if err != nil {
 		return report, err
@@ -330,48 +380,29 @@ func (p *Prefs) Restore(ctx context.Context, opts RestoreOptions) (RestoreReport
 		}
 	}
 
-	apps := p.installedApps()
+	installed, containers := p.installedApps(), map[string]error{}
 	for _, domain := range domains {
+		if opts.Unattended && before.failed[domain] {
+			continue
+		}
 		if !slices.Contains(stored, domain) {
 			report.Failed[domain] = "not in the store"
 			continue
 		}
-		owners := p.owningApps(domain, apps)
 		// A domain named by hand is restored even without an app; pending
 		// ones wait until their app is installed.
+		owners := p.owningApps(domain, installed)
 		if len(owners) == 0 && (full || opts.Pending) {
 			report.Waiting[domain] = "not installed"
 			continue
 		}
-		if i := slices.IndexFunc(owners, func(id string) bool { return p.running(ctx, id) }); i >= 0 {
-			report.Waiting[domain] = owners[i] + " is running"
-			continue
-		}
-		if opts.DryRun {
-			report.Restored = append(report.Restored, domain)
-			continue
-		}
-		err := func() error {
-			for _, id := range owners {
-				if err := p.ensureContainer(ctx, id, apps[id]); err != nil {
-					return err
-				}
-			}
-			return p.restoreDomain(ctx, filepath.Join(domainsDir, domain+".plist"), domain, saved)
-		}()
-		if err != nil {
-			report.Failed[domain] = err.Error()
-			continue
-		}
-		report.Restored = append(report.Restored, domain)
+		p.restoreOwned(ctx, &report, domain, owners, installed, restoring{
+			stored: filepath.Join(domainsDir, domain+".plist"), saved: saved, open: !opts.Unattended, dryRun: opts.DryRun, containers: containers,
+		})
 	}
 
-	if full {
-		n, err := p.restoreFiles(filesDir, bound, saved, opts.DryRun)
-		report.Files = n
-		if err != nil {
-			return report, err
-		}
+	if full || len(files) > 0 {
+		report.Files, report.FilesFailed = p.restoreFiles(filesDir, bound, files, saved, opts.DryRun)
 	}
 	report.Saved = savedIfAny(saved)
 	if opts.DryRun || opts.At != "" {
@@ -379,32 +410,106 @@ func (p *Prefs) Restore(ctx context.Context, opts RestoreOptions) (RestoreReport
 	}
 	commit := p.head(ctx)
 	return report, p.update(func(r *Record) {
-		// What's still waiting: after a full restore, what this one left;
-		// otherwise what was waiting, less what was restored now.
 		switch {
-		case full && !opts.Pending:
-			left := slices.Concat(slices.Collect(maps.Keys(report.Waiting)), slices.Collect(maps.Keys(report.Failed)))
-			r.Pending = pendingOf(report.From, left)
-		case r.Pending != nil && r.Pending.From == report.From:
-			left := slices.DeleteFunc(slices.Clone(r.Pending.Domains), func(d string) bool { return slices.Contains(report.Restored, d) })
-			r.Pending = pendingOf(report.From, left)
-		}
-		if full && !opts.Pending {
+		case full:
+			r.Pending = report.held(heldIn(nil), true, true).pending(report.From)
 			r.Restored = &Restored{From: report.From, Commit: commit, At: p.Now()}
-			if len(report.Failed) == 0 {
-				r.On, r.OnAt = "restored from "+report.From+" "+p.Now().Format("2006-01-02 15:04"), p.Now()
-			}
+			r.On, r.OnAt = "restored from "+report.From+" "+p.Now().Format("2006-01-02 15:04"), p.Now()
+		case r.Pending != nil && r.Pending.From == report.From:
+			r.Pending = report.held(heldIn(r.Pending), false, files != nil).pending(report.From)
 		}
 	})
 }
 
-// pendingOf is a pending list, nil when nothing's left.
-func pendingOf(from string, domains []string) *Pending {
-	if len(domains) == 0 {
-		return nil
+// held is what h holds once this restore's done: what it restored taken
+// off; what it couldn't, of what h held, or, every, of all it tried, put on
+// as it found it, but an app to open that's running, open still, as it
+// stays to be quit; and, when it tried them (files), the settings files that
+// failed in place of those held.
+func (r RestoreReport) held(h held, every, files bool) held {
+	for _, d := range r.Restored {
+		h.drop(d)
 	}
-	slices.Sort(domains)
-	return &Pending{From: from, Domains: slices.Compact(domains)}
+	for d, why := range r.Waiting {
+		app, toOpen := h.open[d]
+		switch {
+		case toOpen && running(why):
+			h.toOpen(d, app, why)
+		case every || h.domains[d]:
+			h.hold(d, why)
+		}
+	}
+	for d, why := range r.ToOpen {
+		if every || h.domains[d] {
+			h.toOpen(d, r.Apps[d], why)
+		}
+	}
+	for d, why := range r.Failed {
+		if every || h.domains[d] {
+			h.fail(d, why)
+		}
+	}
+	if files {
+		for f := range h.files {
+			h.drop(f)
+		}
+		for f, why := range r.FilesFailed {
+			h.failFile(f, why)
+		}
+	}
+	return h
+}
+
+// restoring is how a domain is restored: from its stored copy, the live
+// settings saved first in saved; open, whether its app may be opened once
+// for its settings folder; dryRun, only saying it would be. containers
+// are what making each app's container came to, by bundle id, in this
+// restore, so an app with several domains is opened once.
+type restoring struct {
+	stored, saved string
+	open, dryRun  bool
+	containers    map[string]error
+}
+
+// restoreOwned restores domain, whose apps are owners, of those installed,
+// into report: waiting while one's running; its app to open, or waiting,
+// when its settings folder isn't there; failed, as restoreDomain fails;
+// else restored.
+func (p *Prefs) restoreOwned(ctx context.Context, report *RestoreReport, domain string, owners []string, installed map[string]string, how restoring) {
+	app := func(id string) App { return App{ID: id, Name: appName(installed[id])} }
+	if i := slices.IndexFunc(owners, func(id string) bool { return p.running(ctx, id) }); i >= 0 {
+		report.Waiting[domain], report.Apps[domain] = app(owners[i]).Name+" is running", app(owners[i])
+		return
+	}
+	if how.dryRun {
+		report.Restored = append(report.Restored, domain)
+		return
+	}
+	for _, id := range owners {
+		err, made := how.containers[id]
+		if !made {
+			err = p.ensureContainer(ctx, id, installed[id], how.open)
+			how.containers[id] = err
+		}
+		switch {
+		case err == nil:
+			continue
+		case errors.Is(err, errDidntQuit):
+			report.Waiting[domain] = err.Error()
+		default:
+			report.ToOpen[domain] = err.Error()
+		}
+		report.Apps[domain] = app(id)
+		return
+	}
+	if err := p.restoreDomain(ctx, how.stored, domain, how.saved); err != nil {
+		report.Failed[domain] = err.Error()
+		if len(owners) > 0 {
+			report.Apps[domain] = app(owners[0])
+		}
+		return
+	}
+	report.Restored = append(report.Restored, domain)
 }
 
 // savedIfAny is saved when a restore saved anything there, else "".
@@ -435,53 +540,66 @@ func (p *Prefs) machineBound(ctx context.Context, from, store string) ([]string,
 }
 
 // restoreFiles puts back the stored settings files that differ from the
-// live ones, saving each live one first, those bound to one Mac left out:
-// how many.
-func (p *Prefs) restoreFiles(files string, bound []string, saved string, dryRun bool) (int, error) {
+// live ones, saving each live one first, those bound to one Mac left out,
+// and, given only, just those, by their paths from ~ (or /): how many it
+// put back, and those that failed, each with why.
+func (p *Prefs) restoreFiles(files string, bound []string, only map[string]bool, saved string, dryRun bool) (int, map[string]string) {
 	var expanded []string
 	for _, b := range bound {
 		expanded = append(expanded, p.expand(b))
 	}
-	n := 0
+	n, failed := 0, map[string]string{}
 	for _, stored := range storedFiles(files) {
 		target := p.livePath(files, stored)
-		if matches(target, expanded) {
+		name := p.tilde(target)
+		if matches(target, expanded) || only != nil && !only[name] {
 			continue
 		}
-		want, err := os.ReadFile(stored)
-		if err != nil {
-			return n, err
-		}
-		current, err := os.ReadFile(target)
-		if err == nil && bytes.Equal(current, want) {
-			continue
-		}
-		n++
-		if dryRun {
-			continue
-		}
-		mode := fs.FileMode(0o644)
-		if err == nil {
-			info, statErr := os.Stat(target)
-			if statErr == nil {
-				mode = info.Mode().Perm()
-			}
-			rel, _ := filepath.Rel(files, stored)
-			if err := writeIfChanged(filepath.Join(saved, "files", rel), current); err != nil {
-				return n, err
-			}
-		}
-		if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
-			return n, err
-		}
-		tmp := filepath.Join(filepath.Dir(target), "."+filepath.Base(target)+".kit")
-		if err := os.WriteFile(tmp, want, mode); err != nil {
-			return n, err
-		}
-		if err := os.Rename(tmp, target); err != nil {
-			_ = os.Remove(tmp)
-			return n, err
+		back, err := p.restoreFile(files, stored, target, saved, dryRun)
+		switch {
+		case err != nil:
+			failed[name] = err.Error()
+		case back:
+			n++
 		}
 	}
-	return n, nil
+	return n, failed
+}
+
+// restoreFile puts the stored settings file back at target, unless it's the
+// same there already, the live one saved first: whether it did, or would.
+func (p *Prefs) restoreFile(files, stored, target, saved string, dryRun bool) (bool, error) {
+	want, err := os.ReadFile(stored)
+	if err != nil {
+		return false, errors.New("its saved copy couldn't be read")
+	}
+	current, err := os.ReadFile(target)
+	if err == nil && bytes.Equal(current, want) {
+		return false, nil
+	}
+	if dryRun {
+		return true, nil
+	}
+	mode := fs.FileMode(0o644)
+	if err == nil {
+		if info, statErr := os.Stat(target); statErr == nil {
+			mode = info.Mode().Perm()
+		}
+		rel, _ := filepath.Rel(files, stored)
+		if err := writeIfChanged(filepath.Join(saved, "files", rel), current); err != nil {
+			return false, errors.New("its live copy couldn't be saved first")
+		}
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+		return false, errors.New("it couldn't be put in place")
+	}
+	tmp := filepath.Join(filepath.Dir(target), "."+filepath.Base(target)+".kit")
+	if err := os.WriteFile(tmp, want, mode); err != nil {
+		return false, errors.New("it couldn't be put in place")
+	}
+	if err := os.Rename(tmp, target); err != nil {
+		_ = os.Remove(tmp)
+		return false, errors.New("it couldn't be put in place")
+	}
+	return true, nil
 }
