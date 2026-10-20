@@ -508,35 +508,60 @@ func (p *Pretty) ended(f event.StepFinished) look.State {
 // the Mac something to do: its own result says so, or it was deferred
 // behind steps that did, and nothing else.
 func (p *Pretty) toDo(step string) bool {
-	return p.toDoSeen(step, map[string]bool{})
+	return p.standing(step, map[string]bool{}) == toDoLeft
 }
 
-// toDoSeen is toDo, seen the steps on the way to step: steps can wait for
-// each other partway through applying (engine.Step.Later), which the run
-// allows, so a step met again on the way holds nothing behind it.
-func (p *Pretty) toDoSeen(step string, seen map[string]bool) bool {
+// standing is how a finished step stands for those waiting on it.
+type standing int
+
+const (
+	// inTheWay: not finished, failed, or deferred for its own reasons.
+	inTheWay standing = iota
+	// clearOfIt: done; or deferred only behind steps on the way to it, which
+	// don't count against themselves.
+	clearOfIt
+	// toDoLeft: left only the person something to do (toDo).
+	toDoLeft
+)
+
+// standing is how the step named step stands, seen the steps on the way to
+// it: steps can wait for each other partway through applying
+// (engine.Step.Later), which the run allows, so a step met again on the way
+// neither holds it up nor leaves it to do.
+func (p *Pretty) standing(step string, seen map[string]bool) standing {
 	f, ok := p.results[step]
 	switch {
-	case !ok || seen[step]:
-		return false
+	case !ok:
+		return inTheWay
 	case f.Result.ToDo():
-		return true
+		return toDoLeft
+	case f.Result.State == check.OK:
+		return clearOfIt
 	case f.Result.State != check.Deferred:
-		return false
+		return inTheWay
 	}
 	seen[step] = true
 	defer delete(seen, step)
-	behind := false
+	toDo, onTheWay := false, false
 	for _, w := range p.step(step).Waits {
-		switch {
-		case p.results[w].Result.State == check.OK:
-		case p.toDoSeen(w, seen):
-			behind = true
-		default:
-			return false
+		if seen[w] {
+			onTheWay = true
+			continue
+		}
+		switch p.standing(w, seen) {
+		case inTheWay:
+			return inTheWay
+		case toDoLeft:
+			toDo = true
 		}
 	}
-	return behind
+	switch {
+	case toDo:
+		return toDoLeft
+	case onTheWay:
+		return clearOfIt
+	}
+	return inTheWay
 }
 
 // cardLines are the step by hand up for you as a card w wide, in place

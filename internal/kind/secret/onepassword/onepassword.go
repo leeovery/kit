@@ -173,37 +173,20 @@ func (d Driver) Store(ctx context.Context, run runner.Runner, item, field, value
 		return "", err
 	}
 	section, label, _ := strings.Cut(short, "/")
-	args, err := itemArgs(item)
+	args, doc, err := getItem(ctx, run, item)
 	if err != nil {
 		return "", err
 	}
-	res, err := run.Run(ctx, runner.Command{Name: program, Args: slices.Concat([]string{"item", "get"}, args, []string{"--format", "json"}), Timeout: opTimeout, Secret: true})
-	if err != nil {
-		return "", fmt.Errorf("read the item from 1Password: %w", err)
-	}
-	var doc map[string]any
-	if err := json.Unmarshal(res.Stdout, &doc); err != nil {
-		return "", fmt.Errorf("read the item from 1Password: %w", err)
+	if holds(doc, short) {
+		return "", taken(short)
 	}
 	sections, _ := doc["sections"].([]any)
-	sectionID := ""
-	for _, sc := range sections {
-		if m, _ := sc.(map[string]any); m["label"] == section {
-			sectionID, _ = m["id"].(string)
-		}
-	}
+	sectionID := sectionOf(doc, section)
 	if sectionID == "" {
 		sectionID = newID()
 		doc["sections"] = append(sections, map[string]any{"id": sectionID, "label": section})
 	}
 	fields, _ := doc["fields"].([]any)
-	for _, f := range fields {
-		m, _ := f.(map[string]any)
-		sec, _ := m["section"].(map[string]any)
-		if m["label"] == label && sec["id"] == sectionID {
-			return "", fmt.Errorf("%s is in 1Password already: change it there, or give it with --ref", field)
-		}
-	}
 	doc["fields"] = append(fields, map[string]any{"id": newID(), "type": "CONCEALED", "label": label, "value": value, "section": map[string]any{"id": sectionID}})
 	edited, err := json.Marshal(doc)
 	if err != nil {
@@ -213,6 +196,70 @@ func (d Driver) Store(ctx context.Context, run runner.Runner, item, field, value
 		return "", fmt.Errorf("keep it in 1Password: %w", err)
 	}
 	return short, nil
+}
+
+// Free is nil when item keeps nothing at short, a field (section/field) or
+// an attachment: else that it's there already.
+func (Driver) Free(ctx context.Context, run runner.Runner, item, short string) error {
+	_, doc, err := getItem(ctx, run, item)
+	if err != nil {
+		return err
+	}
+	if holds(doc, short) {
+		return taken(short)
+	}
+	return nil
+}
+
+// taken is why a value can't go at short: one's there already.
+func taken(short string) error {
+	return fmt.Errorf("%s is in 1Password already: change it there, or give it with --ref", short)
+}
+
+// getItem is item's arguments to op, and its JSON, as op item get has it.
+func getItem(ctx context.Context, run runner.Runner, item string) ([]string, map[string]any, error) {
+	args, err := itemArgs(item)
+	if err != nil {
+		return nil, nil, err
+	}
+	res, err := run.Run(ctx, runner.Command{Name: program, Args: slices.Concat([]string{"item", "get"}, args, []string{"--format", "json"}), Timeout: opTimeout, Secret: true})
+	if err != nil {
+		return nil, nil, fmt.Errorf("read the item from 1Password: %w", err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(res.Stdout, &doc); err != nil {
+		return nil, nil, fmt.Errorf("read the item from 1Password: %w", err)
+	}
+	return args, doc, nil
+}
+
+// sectionOf is the id of the item's section labelled section: "" for none.
+func sectionOf(doc map[string]any, section string) string {
+	sections, _ := doc["sections"].([]any)
+	for _, sc := range sections {
+		if m, _ := sc.(map[string]any); m["label"] == section {
+			id, _ := m["id"].(string)
+			return id
+		}
+	}
+	return ""
+}
+
+// holds reports whether the item keeps something at short: a field of its
+// section, as in GitHub/token, or an attachment, by its name.
+func holds(doc map[string]any, short string) bool {
+	section, label, isField := strings.Cut(short, "/")
+	if !isField {
+		files, _ := doc["files"].([]any)
+		return slices.ContainsFunc(files, func(f any) bool { m, _ := f.(map[string]any); return m["name"] == short })
+	}
+	id := sectionOf(doc, section)
+	fields, _ := doc["fields"].([]any)
+	return id != "" && slices.ContainsFunc(fields, func(f any) bool {
+		m, _ := f.(map[string]any)
+		sec, _ := m["section"].(map[string]any)
+		return m["label"] == label && sec["id"] == id
+	})
 }
 
 // Field is field, a section's name and a field's, as in GitHub/token.

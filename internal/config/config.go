@@ -53,6 +53,9 @@ type Config struct {
 	// defs are the sections a declarations file may hold, in the order kit
 	// writes them: the config's own, and the kinds' it was loaded with.
 	defs []sectionDef
+	// edited are declarations files as an edit would leave them, by scope,
+	// read in place of what's on disk, to judge the edit before it's made.
+	edited map[string]string
 }
 
 // DefaultNightlyAt is when the nightly run is due when kit.toml doesn't say.

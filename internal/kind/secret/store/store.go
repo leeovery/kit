@@ -45,6 +45,10 @@ type Driver interface {
 	// Attach returns it: an error when it isn't an attachment's name. It
 	// asks the store nothing.
 	Attachment(name string) (string, error)
+	// Free is nil when item keeps nothing at short, where Field or
+	// Attachment says a value would go: else that something's there
+	// already. It changes nothing in the store.
+	Free(ctx context.Context, run runner.Runner, item, short string) error
 	// Store keeps value in item, where field says (Field), refusing a field
 	// there already: its reference, short for item.
 	Store(ctx context.Context, run runner.Runner, item, field, value string) (string, error)

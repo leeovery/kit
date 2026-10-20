@@ -309,131 +309,141 @@ func (c *Config) AddSection(kind, scope string) (bool, error) {
 // wouldn't read back, as the config and the kind read it (Section.Line),
 // is never written.
 func (c *Config) Declare(kind, scope string, e Entry) error {
-	p, err := c.declaring(kind, scope, e)
+	d, files, err := c.declaring(kind, scope, e)
 	if err != nil {
 		return err
 	}
-	d, s := p.def, p.section
-	if s == nil {
-		s = p.file.add(p.made)
+	return c.writeDecl(files[0], d, e.Name, true)
+}
+
+// DeclareShared declares e in the shared declarations, as Declare does,
+// taking it out of the files of each of the Macs from, as Undeclare does:
+// one edit, judged as a whole before any of it's written.
+func (c *Config) DeclareShared(kind string, e Entry, from []string) error {
+	d, files, err := c.declaring(kind, Shared, e, from...)
+	if err != nil {
+		return err
 	}
-	block := append([]string{p.line}, p.steps...)
-	switch b := splitBody(d.form, s.body); {
-	case d.sorted:
-		s.body = sortedLines(d.form, s.body, p.line)
-	case d.form == Paths:
-		b.insert(b.lastEntryEnd(0, len(b.lines)), block...)
-		s.body = b.lines
-	default:
-		b.insert(b.sortedPlace(0, len(b.lines), p.name), block...)
-		s.body = b.lines
+	for i, f := range files {
+		if err := c.writeDecl(f, d, e.Name, i == 0); err != nil {
+			return err
+		}
 	}
-	return c.writeDecl(p.file, d, e.Name, true)
+	return nil
 }
 
 // CheckDeclare says why Declare would refuse e, writing nothing: nil when
 // it would declare it.
 func (c *Config) CheckDeclare(kind, scope string, e Entry) error {
-	_, err := c.declaring(kind, scope, e)
+	_, _, err := c.declaring(kind, scope, e)
 	return err
 }
 
-// declaration is a line Declare writes, checked: its section's definition,
-// the file it goes in, its section there, or, when there's none, the one
-// made for it, its name, the line and the steps under it.
-type declaration struct {
-	def     sectionDef
-	file    *declFile
-	section *section
-	made    *section
-	name    string
-	line    string
-	steps   []string
-}
-
-// declaring is e's line as Declare writes it, in scope's declarations,
-// once every check passes: the name new to the file, the section's item one
-// a store knows and its name free, and the line reading back as the config
-// reads it, then as the kind does (Section.Line).
-func (c *Config) declaring(kind, scope string, e Entry) (declaration, error) {
+// declaring is scope's declarations file with e declared, as Declare
+// writes it, then each of the files of the Macs from with it taken out, none
+// yet written, once the config reads as kit reads it with them all
+// (readsAfter).
+func (c *Config) declaring(kind, scope string, e Entry, from ...string) (sectionDef, []*declFile, error) {
 	d, f, err := c.editable(kind, scope)
 	if err != nil {
-		return declaration{}, err
+		return d, nil, err
 	}
 	arg, name := splitName(d, e.Name)
 	if d.items != nil {
 		arg = strings.TrimSuffix(e.Item, "/")
 		if arg != "" {
 			if err := d.items(arg); err != nil {
-				return declaration{}, err
+				return d, nil, err
 			}
 		}
 	}
 	if e.As != "" && arg == "" {
-		return declaration{}, fmt.Errorf("%s %s names an item's section: say which item", asOption, e.As)
+		return d, nil, fmt.Errorf("%s %s names an item's section: say which item", asOption, e.As)
 	}
 	if e.Hold != "" && len(d.holds) == 0 {
-		return declaration{}, fmt.Errorf("[%s] holds no lines back: only a list's sections, and [features], do", d.header)
+		return d, nil, fmt.Errorf("[%s] holds no lines back: only a list's sections, and [features], do", d.header)
 	}
 	hold, err := readHold(d, e.Hold)
 	if err != nil {
-		return declaration{}, err
+		return d, nil, err
 	}
 	line, err := entryText(d, name, e)
 	if err != nil {
-		return declaration{}, err
+		return d, nil, err
 	}
 	steps, err := stepLines(d, e.Steps)
 	if err != nil {
-		return declaration{}, err
+		return d, nil, err
 	}
 	if s, _ := f.holding(d, e.Name); s != nil {
-		return declaration{}, fmt.Errorf("%s is in %s already", e.Name, DeclFile(scope))
+		return d, nil, fmt.Errorf("%s is in %s already", e.Name, DeclFile(scope))
 	}
-	p := declaration{def: d, file: f, section: f.find(d, arg, hold), name: name, line: line, steps: steps}
-	in := p.section
-	if in == nil {
-		if err := c.nameFree(d, scope, arg, e.As); err != nil {
-			return declaration{}, err
-		}
-		p.made = &section{def: d, arg: arg, as: e.As, hold: hold}
-		in = p.made
+	s := f.find(d, arg, hold)
+	if s == nil {
+		s = f.add(&section{def: d, arg: arg, as: e.As, hold: hold})
 	}
-	if d.line != nil {
-		read, err := in.entry(line)
-		if err == nil {
-			err = d.line(read)
-		}
+	block := append([]string{line}, steps...)
+	switch b := splitBody(d.form, s.body); {
+	case d.sorted:
+		s.body = sortedLines(d.form, s.body, line)
+	case d.form == Paths:
+		b.insert(b.lastEntryEnd(0, len(b.lines)), block...)
+		s.body = b.lines
+	default:
+		b.insert(b.sortedPlace(0, len(b.lines), name), block...)
+		s.body = b.lines
+	}
+	files := []*declFile{f}
+	for _, mac := range from {
+		_, g, err := c.undeclaring(kind, mac, e.Name)
 		if err != nil {
-			return declaration{}, fmt.Errorf("%s: %w", e.Name, err)
+			return d, nil, err
 		}
+		files = append(files, g)
 	}
-	return p, nil
+	return d, files, c.readsAfter(d, e.Name, files)
 }
 
-// nameFree says why a section of d for item, made in scope's declarations,
-// can't go by the name as: a section going by it is for another item in a
-// file read with scope's, a Mac's own with the shared one, the shared one
-// with each Mac's own. Its own file, Declare checks writing it. Nil for no
-// name.
-func (c *Config) nameFree(d sectionDef, scope, item, as string) error {
-	if as == "" {
-		return nil
+// readsAfter says why the config, with files written, the first declaring
+// name, wouldn't read as kit reads it: that entry, as the kind reads it;
+// and each Mac's list of d's kind that reads one of them, as it loads now,
+// the rules between the shared file and a Mac's (a name in one of them, a
+// section's --as naming one item) and all. A Mac's list that didn't load
+// before isn't the edit's to refuse.
+func (c *Config) readsAfter(d sectionDef, name string, files []*declFile) error {
+	after := c.with(files)
+	entries, _, err := after.declared(d.kind, files[0].scope)
+	if err != nil {
+		return err
 	}
-	others := []string{Shared}
-	if scope == Shared {
-		others = c.MacNames()
-	}
-	for _, other := range others {
-		f, err := c.readDecl(other)
-		if err != nil {
-			return err
+	if i := slices.IndexFunc(entries, func(e Entry) bool { return e.Name == name }); i >= 0 && d.line != nil {
+		if err := d.line(entries[i]); err != nil {
+			return fmt.Errorf("%s: %w", name, err)
 		}
-		if s := f.named(d, as); s != nil && s.arg != item {
-			return fmt.Errorf("%s %s is %s in %s (line %d): a name stands for one item", asOption, as, s.arg, DeclFile(other), s.start)
+	}
+	_, shared := after.edited[Shared]
+	for _, mac := range c.MacNames() {
+		if _, edited := after.edited[mac]; !edited && !shared {
+			continue
+		}
+		if _, err := c.List(d.kind, mac); err != nil {
+			continue
+		}
+		if _, err := after.List(d.kind, mac); err != nil {
+			return fmt.Errorf("the config wouldn't read with it: %w", err)
 		}
 	}
 	return nil
+}
+
+// with is the config as it'd read with files written in place of theirs.
+func (c *Config) with(files []*declFile) *Config {
+	after := *c
+	after.edited = map[string]string{}
+	for _, f := range files {
+		after.edited[f.scope] = f.String()
+	}
+	return &after
 }
 
 // Undeclare takes name out of kind's sections of scope's declarations, with
@@ -443,9 +453,19 @@ func (c *Config) nameFree(d sectionDef, scope, item, as string) error {
 // so the kind's still looked after (List.Declared). The rest of the file is
 // kept as it is.
 func (c *Config) Undeclare(kind, scope, name string) error {
-	d, f, err := c.editable(kind, scope)
+	d, f, err := c.undeclaring(kind, scope, name)
 	if err != nil {
 		return err
+	}
+	return c.writeDecl(f, d, name, false)
+}
+
+// undeclaring is scope's declarations file with name taken out of kind's
+// sections, as Undeclare writes it, not yet written.
+func (c *Config) undeclaring(kind, scope, name string) (sectionDef, *declFile, error) {
+	d, f, err := c.editable(kind, scope)
+	if err != nil {
+		return d, nil, err
 	}
 	s, line := f.holding(d, name)
 	var b body
@@ -458,7 +478,7 @@ func (c *Config) Undeclare(kind, scope, name string) error {
 		i = slices.Index(b.names, line)
 	}
 	if i < 0 {
-		return fmt.Errorf("%s isn't in %s", name, DeclFile(scope))
+		return d, nil, fmt.Errorf("%s isn't in %s", name, DeclFile(scope))
 	}
 	b.remove(b.notesStart(i), b.end(i))
 	s.body = b.lines
@@ -469,7 +489,7 @@ func (c *Config) Undeclare(kind, scope, name string) error {
 	default:
 		f.drop(s)
 	}
-	return c.writeDecl(f, d, name, false)
+	return d, f, nil
 }
 
 // Replace rewrites the line declaring e.Name in kind's sections of scope's

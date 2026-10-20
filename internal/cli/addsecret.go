@@ -134,8 +134,9 @@ type secretTarget struct {
 // secretTarget checks everything kit secret add can before it asks for a
 // value, or reads one, or stores one: where the value comes from and where
 // it goes (--in, --item or --ref), where in its item (--field, by the
-// store's form), the line as it'll be declared, read back as the kind
-// reads it, its name free in the file, and the store answering.
+// store's form), the line as it'll be declared, as the config would read
+// with it, the store answering, and --ref reading, or nothing kept where a
+// new value goes.
 func (a *app) secretTarget(ctx context.Context, r *run, k *secret.Secrets, name string, opts addOptions) (secretTarget, error) {
 	so := opts.secret
 	if err := checkSources(so, a.pretty(a.Stdout)); err != nil {
@@ -165,7 +166,13 @@ func (a *app) secretTarget(ctx context.Context, r *run, k *secret.Secrets, name 
 	if err := r.cfg.CheckDeclare(secretKind, at.scope, at.entry); err != nil {
 		return at, err
 	}
-	return at, k.Ready(ctx, at.store)
+	if err := k.Ready(ctx, at.store); err != nil {
+		return at, err
+	}
+	if so.ref != "" {
+		return at, k.Reads(ctx, at.store, so.ref)
+	}
+	return at, k.Free(ctx, at.store, item, at.short)
 }
 
 // secretShort is where in item, or in full, so says a secret's value is, or

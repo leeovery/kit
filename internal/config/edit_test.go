@@ -433,8 +433,8 @@ func TestDeclareASecretsNameStandsForOneItem(t *testing.T) {
 	for name, c := range map[string]struct {
 		scope, item, as, want string
 	}{
-		"shared, by a Mac's name": {"shared", "op://vault/A", "tokens", "--as tokens is op://vault/T in studio/declarations (line 1): a name stands for one item"},
-		"a Mac's, by shared's":    {"laptop", "op://vault/A", "keys", "--as keys is op://vault/S in shared/declarations (line 1): a name stands for one item"},
+		"shared, by a Mac's name": {"shared", "op://vault/A", "tokens", "the config wouldn't read with it: studio/declarations:1: [secrets op://vault/T --as tokens]: --as tokens is op://vault/A in shared/declarations (line 1): a name stands for one item"},
+		"a Mac's, by shared's":    {"laptop", "op://vault/A", "keys", "the config wouldn't read with it: laptop/declarations:4: [secrets op://vault/A --as keys]: --as keys is op://vault/S in shared/declarations (line 1): a name stands for one item"},
 	} {
 		if err := cfg.CheckDeclare("secret", c.scope, config.Entry{Name: "A", Value: "a/f", Item: c.item, As: c.as}); err == nil || err.Error() != c.want {
 			t.Errorf("%s: CheckDeclare() = %v, want %q", name, err, c.want)
@@ -456,6 +456,76 @@ func TestDeclareASecretsNameStandsForOneItem(t *testing.T) {
 		if err := cfg.CheckDeclare("secret", c.scope, config.Entry{Name: "A", Value: "a/f", Item: c.item, As: c.as}); err != nil {
 			t.Errorf("%s: CheckDeclare() = %v", name, err)
 		}
+	}
+}
+
+// An edit is judged by the config as kit would load it after: a name in the
+// shared file can't go in a Mac's, nor one in a Mac's in the shared file,
+// whatever the kind. A Mac whose list didn't load before isn't the edit's
+// to refuse.
+func TestDeclareJudgedByTheConfigAfter(t *testing.T) {
+	files := map[string]string{
+		"shared/declarations": "[secrets op://vault/Item]\nTOKEN Section/token\n\n[homebrew formulae]\njq\n",
+		"laptop/declarations": "[secrets op://vault/Item]\nOWN Section/own\n",
+		"studio/declarations": "[secrets]\nSTUDIO op://vault/S/f\n",
+	}
+	cfg := loadRepo(t, files)
+	for name, c := range map[string]struct {
+		kind, scope string
+		e           config.Entry
+		want        string
+	}{
+		"a Mac's, named in shared": {"secret", "laptop", config.Entry{Name: "TOKEN", Value: "Section/new", Item: "op://vault/Item"},
+			"the config wouldn't read with it: laptop/declarations:3: TOKEN is in shared/declarations too (line 2): a thing goes in the shared declarations or a Mac's, not both"},
+		"shared, named in a Mac's": {"secret", "shared", config.Entry{Name: "STUDIO", Value: "Section/new", Item: "op://vault/Item"},
+			"the config wouldn't read with it: studio/declarations:2: STUDIO is in shared/declarations too (line 2): a thing goes in the shared declarations or a Mac's, not both"},
+		"another kind's, named in shared": {"brew", "laptop", config.Entry{Name: "jq"},
+			"the config wouldn't read with it: laptop/declarations:2: jq is in shared/declarations too (line 5): a thing goes in the shared declarations or a Mac's, not both"},
+	} {
+		for check, err := range map[string]error{"CheckDeclare": cfg.CheckDeclare(c.kind, c.scope, c.e), "Declare": cfg.Declare(c.kind, c.scope, c.e)} {
+			if err == nil || err.Error() != c.want {
+				t.Errorf("%s: %s() = %v, want %q", name, check, err, c.want)
+			}
+		}
+	}
+	for path, before := range files {
+		if got := readFile(t, cfg, path); got != before {
+			t.Errorf("%s = %q, want it untouched", path, got)
+		}
+	}
+
+	broken := loadRepo(t, map[string]string{
+		"shared/declarations": "[secrets]\nTWICE op://vault/S/f\n",
+		"studio/declarations": "[secrets]\nTWICE op://vault/S/f\n",
+	})
+	if err := broken.Declare("secret", "shared", config.Entry{Name: "NEW", Value: "op://vault/S/g"}); err != nil {
+		t.Errorf("Declare() beside a Mac's list broken already = %v", err)
+	}
+}
+
+// Declaring in the shared file what Macs' files hold moves it there, judged
+// as one edit: it reads with every file written, though not with the shared
+// file alone.
+func TestDeclareSharedMovesItOutOfTheMacs(t *testing.T) {
+	cfg := loadRepo(t, map[string]string{
+		"shared/declarations": "[homebrew formulae]\njq\n",
+		"laptop/declarations": "[homebrew formulae]\ngo\nripgrep\n",
+		"studio/declarations": "[homebrew formulae]\ngo\n",
+	})
+	if err := cfg.DeclareShared("brew", config.Entry{Name: "go"}, []string{"laptop", "studio"}); err != nil {
+		t.Fatal(err)
+	}
+	for path, want := range map[string]string{
+		"shared/declarations": "[homebrew formulae]\ngo\njq\n",
+		"laptop/declarations": "[homebrew formulae]\nripgrep\n",
+		"studio/declarations": "",
+	} {
+		if got := readFile(t, cfg, path); got != want {
+			t.Errorf("%s = %q, want %q", path, got, want)
+		}
+	}
+	if err := cfg.DeclareShared("brew", config.Entry{Name: "ripgrep"}, nil); err == nil {
+		t.Error("DeclareShared() of what a Mac's file holds, not moved = nil")
 	}
 }
 

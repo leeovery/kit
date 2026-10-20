@@ -198,6 +198,7 @@ func TestAddASecretAsksForNoValueTillItKnowsWhereItGoes(t *testing.T) {
 	}
 	w.notTyped = ask.ErrCancelled
 	w.fake.On("op", "whoami")
+	w.fake.On("op", "item", "get", "A", "--vault", "vault", "--format", "json").Prints(`{"id":"a","title":"A","fields":[]}`)
 	w.run(t, "secret", "add", "NEW_ONE", "--in", "tokens", "--field", "S/f")
 	if !slices.Equal(w.typedFor, []string{"NEW_ONE  needs its value"}) {
 		t.Errorf("asked for %q, want its value, once it knew where it goes", w.typedFor)
@@ -213,7 +214,7 @@ func TestAddASecretSharedByANameAMacHas(t *testing.T) {
 	w.writeSection(t, "studio", "secrets op://vault/Other --as tokens", "OTHER Section/other\n")
 	w.stdin = "x"
 	_, errOut, code := w.run(t, "secret", "add", "NEW_ONE", "--shared", "--in", "tokens", "--field", "Section/new", "--stdin")
-	if code == 0 || !strings.Contains(errOut, "--as tokens is op://vault/Other in studio/declarations (line ") || !strings.Contains(errOut, "a name stands for one item") {
+	if code == 0 || !strings.Contains(errOut, "the config wouldn't read with it: studio/declarations:4: [secrets op://vault/Other --as tokens]: --as tokens is op://vault/Item in shared/declarations") || !strings.Contains(errOut, "a name stands for one item") {
 		t.Errorf("printed %q, exit %d", errOut, code)
 	}
 	if strings.Contains(w.read(t, filepath.Join(".config", "kit", "shared", "declarations")), "tokens") {
@@ -262,6 +263,85 @@ func TestAddASecretChecksAllBeforeTheValue(t *testing.T) {
 			}
 			if got := w.read(t, filepath.Join(".config", "kit", "laptop", "declarations")); strings.Contains(got, "NEW_ONE") || strings.Contains(got, "~/.x") {
 				t.Errorf("%s: laptop's declarations = %q, want nothing declared", c.name, got)
+			}
+		}
+	}
+}
+
+// A name in the shared file can't go in this Mac's, nor one in any Mac's
+// in the shared file: kit secret add refuses it before anything's asked
+// for, stored, written or committed.
+func TestAddASecretNamedInTheOtherFile(t *testing.T) {
+	for _, c := range []struct {
+		name, want string
+		args       []string
+	}{
+		{"this Mac's, named in shared", "laptop/declarations:5: TOKEN is in", []string{"TOKEN"}},
+		{"shared, named in a Mac's", "studio/declarations:5: STUDIO is in", []string{"STUDIO", "--shared"}},
+	} {
+		for _, terminal := range []bool{true, false} {
+			w := laptopWorld(t)
+			w.writeSection(t, "shared", itemSection, "TOKEN Section/token\n")
+			w.writeSection(t, "studio", itemSection, "STUDIO Section/studio\n")
+			before := map[string]string{}
+			for _, scope := range []string{"shared", "laptop", "studio"} {
+				before[scope] = w.read(t, filepath.Join(".config", "kit", scope, "declarations"))
+			}
+			w.terminal, w.stdin = terminal, "the value"
+			w.fake.On("op", "whoami")
+			args := append(append([]string{"secret", "add"}, c.args...), "--item", "op://vault/Item", "--field", "Section/new")
+			if !terminal {
+				args = append(args, "--stdin")
+			}
+			_, errOut, code := w.run(t, args...)
+			ran := slices.DeleteFunc(w.fake.Calls(), func(call string) bool { return call == "op whoami" })
+			if code != 2 || !strings.Contains(ansi.Strip(errOut), c.want) || len(w.typedFor) > 0 || len(ran) > 0 {
+				t.Errorf("%s, at a terminal %v: printed %q, exit %d, asked for %q, ran %q; want it refused, nothing asked, stored or committed", c.name, terminal, errOut, code, w.typedFor, ran)
+			}
+			for scope, was := range before {
+				if got := w.read(t, filepath.Join(".config", "kit", scope, "declarations")); got != was {
+					t.Errorf("%s: %s's declarations = %q, want them untouched", c.name, scope, got)
+				}
+			}
+		}
+	}
+}
+
+// Where a new value goes must be free in its item, a field or an
+// attachment, and a reference given must read: each found before anything's
+// asked for, stored, declared or committed.
+func TestAddASecretChecksTheStoreBeforeTheValue(t *testing.T) {
+	from := filepath.Join(t.TempDir(), "token.json")
+	if err := os.WriteFile(from, []byte(`{"token":"x"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		name, want string
+		args       []string
+	}{
+		{"a field there already", "Section/token is in 1Password already", []string{"NEW_ONE", "--item", "op://vault/Item", "--field", "Section/token"}},
+		{"an attachment there already", "token.json is in 1Password already", []string{"~/.config/tool/token.json", "--item", "op://vault/Item", "--from", from}},
+		{"a reference that doesn't read", "op://vault/Item/Section/missing doesn't read from 1Password", []string{"NEW_ONE", "--ref", "op://vault/Item/Section/missing"}},
+	} {
+		for _, terminal := range []bool{true, false} {
+			w := secretsWorld(t)
+			before := w.read(t, filepath.Join(".config", "kit", "laptop", "declarations"))
+			w.terminal, w.stdin = terminal, "the value"
+			w.fake.On("op", "whoami")
+			w.fake.On("op", "item", "get", "Item", "--vault", "vault", "--format", "json").
+				Prints(`{"id":"abc","title":"Item","sections":[{"id":"s1","label":"Section"}],"fields":[{"id":"f1","label":"token","section":{"id":"s1"}}],"files":[{"id":"x","name":"token.json"}]}`)
+			w.fake.On("op", "read", "op://vault/Item/Section/missing").Exits(1)
+			args := append([]string{"secret", "add"}, c.args...)
+			if !terminal && !slices.Contains(args, "--ref") && !slices.Contains(args, "--from") {
+				args = append(args, "--stdin")
+			}
+			_, errOut, code := w.run(t, args...)
+			edited := slices.ContainsFunc(w.fake.Calls(), func(call string) bool { return strings.HasPrefix(call, "op item edit") })
+			if code != 2 || !strings.Contains(ansi.Strip(errOut), c.want) || len(w.typedFor) > 0 || edited {
+				t.Errorf("%s, at a terminal %v: printed %q, exit %d, asked for %q, ran %q; want it refused, nothing asked or stored", c.name, terminal, errOut, code, w.typedFor, w.fake.Calls())
+			}
+			if got := w.read(t, filepath.Join(".config", "kit", "laptop", "declarations")); got != before {
+				t.Errorf("%s: laptop's declarations = %q, want them untouched", c.name, got)
 			}
 		}
 	}
@@ -325,6 +405,7 @@ func TestASecretFilesAttachmentNamedWithAPeriod(t *testing.T) {
 	}
 	f := w.fake
 	f.On("op", "whoami")
+	f.On("op", "item", "get", "Item", "--vault", "vault", "--format", "json").Prints(`{"id":"abc","title":"Item","files":[{"id":"x","name":"other.json"}]}`)
 	f.On("op", "item", "edit", "Item", "--vault", "vault", `token\.json[file]=`+from)
 	optest.Holds(f, map[string]string{"op://vault/Item/token.json": `{"token":"x"}` + "\n", "op://vault/Item/Section/token": "the value"})
 	w.expectSync([]string{"laptop/declarations"}, "kit secret add ~/.config/tool/token.json (laptop)")

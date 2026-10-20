@@ -1117,9 +1117,11 @@ func TestApplyingLogSaysWhatEachDid(t *testing.T) {
 
 // Steps can wait for each other partway through applying, which the run
 // allows: the screen follows what a step waits for no further than a step
-// it's met on the way, both left not yet with nothing to do behind them;
-// and a step deferred behind steps that left only things to do is to do,
-// however many ways lead to them.
+// it's met on the way, which neither holds it back nor leaves it to do, two
+// waiting only for each other left not yet; and a step deferred behind
+// steps that left only things to do is to do, however many ways lead to
+// them, a2 behind e as it waits for b2, which waits for it; but not one
+// behind a step deferred for its own reasons, as a3 is behind x.
 func TestApplyingStepsWaitingForEachOther(t *testing.T) {
 	deferred := check.Result{State: check.Deferred, Reason: "needs a secret"}
 	toDo := check.Result{State: check.Attention, Summary: "to do", Items: []check.Item{{ID: "x:disk", Name: "Add a disk", State: check.Problem}}}
@@ -1129,6 +1131,10 @@ func TestApplyingStepsWaitingForEachOther(t *testing.T) {
 		{Name: "c", Title: "c", Area: "Backups", Waits: []string{"d"}},
 		{Name: "b", Title: "b", Area: "Backups", Waits: []string{"d"}},
 		{Name: "a", Title: "a", Area: "Backups", Waits: []string{"b", "c"}},
+		{Name: "b2", Title: "b2", Area: "Backups", Waits: []string{"a2"}},
+		{Name: "a2", Title: "a2", Area: "Backups", Waits: []string{"e", "b2"}},
+		{Name: "x", Title: "x", Area: "Backups"},
+		{Name: "a3", Title: "a3", Area: "Backups", Waits: []string{"e", "x"}},
 		{Name: "cask", Title: "Homebrew casks", Area: "Drift", Row: "Homebrew casks", Waits: []string{"mystep"}},
 		{Name: "mystep", Title: "mystep", Area: "Steps", Waits: []string{"cask"}},
 	}
@@ -1153,9 +1159,12 @@ func TestApplyingStepsWaitingForEachOther(t *testing.T) {
 		}
 	}
 	_, log := panes(got, 160)
-	for _, step := range []string{"a", "b", "c", "d"} {
+	for _, step := range []string{"a", "b", "c", "d", "a2"} {
 		if !slices.ContainsFunc(log, func(l string) bool { return strings.Contains(l, "△ "+step+":") }) {
 			t.Errorf("the log has no %s to do at the end:\n%s", step, strings.Join(log, "\n"))
 		}
+	}
+	if !slices.ContainsFunc(log, func(l string) bool { return strings.Contains(l, "– a3: not checked") }) {
+		t.Errorf("a3, behind x, deferred for its own reasons, is to do:\n%s", strings.Join(log, "\n"))
 	}
 }

@@ -707,6 +707,9 @@ func (c *Config) Scopes() []string {
 
 // readDecl reads scope's declarations file: empty, when there's none.
 func (c *Config) readDecl(scope string) (*declFile, error) {
+	if content, ok := c.edited[scope]; ok {
+		return parseFile(c.defs, scope, content)
+	}
 	data, err := os.ReadFile(filepath.Join(c.Dir, DeclFile(scope)))
 	if errors.Is(err, fs.ErrNotExist) {
 		return &declFile{scope: scope, defs: c.defs}, nil

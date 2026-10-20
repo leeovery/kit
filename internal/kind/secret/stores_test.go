@@ -116,6 +116,13 @@ func (f *fakeStore) Field(field string) (string, error) { return field, nil }
 
 func (f *fakeStore) Attachment(name string) (string, error) { return name, nil }
 
+func (f *fakeStore) Free(_ context.Context, _ runner.Runner, item, short string) error {
+	if _, ok := f.values[f.Join(item, short)]; ok {
+		return errors.New(short + " is kept already")
+	}
+	return nil
+}
+
 func (f *fakeStore) Store(context.Context, runner.Runner, string, string, string) (string, error) {
 	return "", errors.New("not kept here")
 }

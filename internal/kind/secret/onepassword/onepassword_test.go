@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/leeovery/kit/internal/kind/secret/onepassword"
+	"github.com/leeovery/kit/internal/runner/runnertest"
 )
 
 // 1Password's references: a value's is a vault, an item and a field (a
@@ -54,6 +55,28 @@ func TestFieldsAndAttachments(t *testing.T) {
 	for name, ok := range map[string]bool{"token.json": true, "": false, "dir/token.json": false} {
 		if short, err := d.Attachment(name); (err == nil) != ok || ok && short != name {
 			t.Errorf("Attachment(%q) = %q, %v", name, short, err)
+		}
+	}
+}
+
+// Free asks 1Password whether an item keeps something where a value would
+// go, a field of a section or an attachment, changing nothing.
+func TestFree(t *testing.T) {
+	run := runnertest.New(t)
+	run.On("op", "item", "get", "Item", "--vault", "vault", "--format", "json").
+		Prints(`{"sections":[{"id":"s1","label":"GitHub"}],"fields":[{"label":"token","section":{"id":"s1"}},{"label":"loose"}],"files":[{"name":"key.pem"}]}`)
+	d := onepassword.Driver{}
+	for short, free := range map[string]bool{"GitHub/token": false, "GitHub/other": true, "Other/token": true, "key.pem": false, "other.pem": true} {
+		if err := d.Free(t.Context(), run, "op://vault/Item", short); (err == nil) != free {
+			t.Errorf("Free(%s) = %v, want free %v", short, err, free)
+		}
+	}
+	if err := d.Free(t.Context(), run, "op://vault/Item", "GitHub/token"); err == nil || err.Error() != "GitHub/token is in 1Password already: change it there, or give it with --ref" {
+		t.Errorf("Free() of a field there = %v", err)
+	}
+	for _, c := range run.Calls() {
+		if c != "op item get Item --vault vault --format json" {
+			t.Errorf("ran %q: want the item read alone", c)
 		}
 	}
 }

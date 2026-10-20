@@ -3,6 +3,7 @@ package secret
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/leeovery/kit/internal/kind/secret/store"
@@ -12,6 +13,21 @@ import (
 // it does; not yet, signed out; or why not, in d's words.
 func (s *Secrets) Ready(ctx context.Context, d store.Driver) error {
 	return s.ready(ctx, d)
+}
+
+// Free is nil when d's item keeps nothing at short: else that something's
+// there already. It changes nothing.
+func (s *Secrets) Free(ctx context.Context, d store.Driver, item, short string) error {
+	return d.Free(ctx, s.run, item, short)
+}
+
+// Reads is nil when ref, in full, reads from d: else why not, the value
+// never shown.
+func (s *Secrets) Reads(ctx context.Context, d store.Driver, ref string) error {
+	if _, err := d.Read(ctx, s.run, ref); err != nil {
+		return fmt.Errorf("%s doesn't read from %s: %w", ref, d.About().Name, err)
+	}
+	return nil
 }
 
 // Store keeps value in d's item, where field says, in d's words: its
