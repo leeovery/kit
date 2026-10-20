@@ -104,10 +104,11 @@ func Prefs(p *prefs.Prefs, now func() time.Time) engine.Step {
 				return "", fmt.Errorf("%s isn't one of its keys", key)
 			},
 			Settle: func(ctx context.Context, it check.Item) string {
-				if !strings.HasPrefix(it.ID, PrefsName+":"+idOpen+":") {
+				id, ok := strings.CutPrefix(it.ID, PrefsName+":"+idOpen+":")
+				if !ok {
 					return ""
 				}
-				return bringBackOpened(ctx, p)
+				return bringBackOpened(ctx, p, id)
 			},
 		},
 		Check: func(ctx context.Context) check.Result {
@@ -156,13 +157,20 @@ func withHeld(ctx context.Context, p *prefs.Prefs, rec prefs.Record, res check.R
 	if apps := p.ToOpen(ctx, rec); len(apps) > 0 {
 		for _, app := range apps {
 			t := appToOpen(app)
-			items = append(items, check.Item{ID: PrefsName + ":" + idOpen + ":" + app.ID, Name: t.Title, State: Problem, Detail: "open it once and quit it: its settings come back after", ToDo: &t})
+			items = append(items, check.Item{ID: PrefsName + ":" + idOpen + ":" + app.ID, Name: t.Title, State: Problem, Detail: "its settings come back once it's quit", ToDo: &t})
 		}
 		says = append(says, fmt.Sprintf("%d %s to open once", len(apps), plural(len(apps), "app", "apps")))
 	}
-	if n := p.Failures(rec); n > 0 {
-		items = append(items, check.Item{ID: PrefsName + ":held", Name: fmt.Sprintf("%d held after failing to come back", n), State: Problem, Detail: "kit prefs restore --pending tries again; kit prefs pending says why"})
-		says = append(says, fmt.Sprintf("%d held for kit prefs restore --pending", n))
+	if domains, files := p.Failures(rec); domains+files > 0 {
+		var what []string
+		if domains > 0 {
+			what = append(what, fmt.Sprintf("%d %s", domains, plural(domains, "app's settings", "apps' settings")))
+		}
+		if files > 0 {
+			what = append(what, fmt.Sprintf("%d %s", files, plural(files, "settings file", "settings files")))
+		}
+		items = append(items, check.Item{ID: PrefsName + ":held", Name: strings.Join(what, " and ") + " didn't come back", State: Problem, Detail: "kit prefs restore --pending tries again; kit prefs pending says why"})
+		says = append(says, fmt.Sprintf("%d held for kit prefs restore --pending", domains+files))
 	}
 	if len(items) == 0 {
 		return res
@@ -213,15 +221,34 @@ func bringBack(ctx context.Context, p *prefs.Prefs, now func() time.Time) (strin
 
 // bringBackOpened brings back the settings of the apps held for their
 // settings folders that have them now and aren't running, opening
-// nothing, as the hourly pass does: what it brought back, and how many
-// still wait for their apps.
-func bringBackOpened(ctx context.Context, p *prefs.Prefs) string {
+// nothing, as the hourly pass does, once the app of a bundle id, id, has
+// been opened and quit: what it brought back, and how many still wait for
+// their apps; or, the app since removed, that it was.
+func bringBackOpened(ctx context.Context, p *prefs.Prefs, id string) string {
+	if !p.HasApp(id) {
+		return cmp.Or(openedName(p, id), id) + " was removed"
+	}
 	report, err := p.Restore(ctx, prefs.RestoreOptions{Pending: true, Unattended: true})
 	if err != nil {
 		event.Log(ctx, event.Logged{Line: "Bring back apps' settings: " + err.Error(), Alert: true})
 		return ""
 	}
 	return cameBack(report) + waitingFor(report)
+}
+
+// openedName is the name of the app of a bundle id that's held to be
+// opened: "" when none is.
+func openedName(p *prefs.Prefs, id string) string {
+	rec, err := p.Load()
+	if err != nil || rec.Pending == nil {
+		return ""
+	}
+	for _, app := range rec.Pending.Open {
+		if app.ID == id {
+			return app.Name
+		}
+	}
+	return ""
 }
 
 // cameBack is how many domains' settings report brought back, as in 214

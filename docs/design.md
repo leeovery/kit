@@ -77,7 +77,7 @@ file having none, or the shared file's), so the kind's still looked after.
 | Kind | Declared as | Found by | Install, remove |
 |---|---|---|---|
 | `brew`, `cask` | `jq`, `owner/tap/tool`, `php@8.5` | `brew list`, `brew leaves` | `brew install`, `brew uninstall` |
-| `mas` | `xcode@497799835`: the name, then the id | `mas list`, which reads Spotlight's index; with a declared app missing from it, an app in the Applications folders carrying the App Store's receipt that it doesn't list yet, its id looked up by its bundle id (`mas lookup --bundle`), once, what the store said kept in kit's state | `mas install` (the first app alone, the check that someone's signed in, then the rest), `mas uninstall`, through sudo |
+| `mas` | `xcode@497799835`: the name, then the id | `mas list`, which reads Spotlight's index; with a declared app missing from it, an app in the Applications folders carrying the App Store's receipt that it doesn't list yet, its id looked up by its bundle id (`mas lookup --bundle`), once, what the store said kept in kit's state (that it hasn't the app, for a day); a wait for an app and `kit mas add|remove` go by the same | `mas install` (the first app alone, the check that someone's signed in, then the rest), `mas uninstall`, through sudo |
 | `npm` | `typescript@5` (a version optional) | `npm ls --global` | `npm install --global`, `npm uninstall --global` |
 | `composer` | `laravel/valet:^4.0` (a constraint optional) | `composer global show --direct` | `composer global require`, `composer global remove` |
 | `go` | `golang.org/x/tools/cmd/goimports` (`@version` optional) | the programs in Go's bin folder, by the package each was built from | `go install`; removing deletes the program |
@@ -848,8 +848,9 @@ the hardware UUID of the Mac the folder belongs to.
 - **`kit prefs history`**, **`pending [--clear]`** (what waits, each with why), **`start-fresh`**.
   An app held for its settings folder is a to-do of its own, watched, titled with the app (`Open
   <app> once and quit it`): it moves on once the app has its folder and is quit, and its settings
-  come back then, opening nothing. What failed otherwise is said by the check, as how many are
-  held for `kit prefs restore --pending`, after anything wrong with capture itself. A held
+  come back then, opening nothing. An app to open that's running stays to open till it's quit. What failed
+  otherwise is said by the check, apps' settings and settings files apart, as held for `kit prefs
+  restore --pending`, after anything wrong with capture itself. A held
   file's saved copy stays in the store, on the Mac or not. One restore opens an app once,
   however many domains it has. `[prefs deny]` leaves
   domains out.

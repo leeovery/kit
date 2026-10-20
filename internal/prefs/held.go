@@ -48,7 +48,11 @@ func heldIn(p *Pending) held {
 	maps.Copy(h.why, p.Why)
 	if p.Failed == nil && p.Open == nil {
 		for d := range h.domains {
-			if why := h.why[d]; why != "" && !waits(why) {
+			switch why := h.why[d]; {
+			case why == errNoFolder.Error(), why == errNotOpened.Error():
+				// Its app's found again as the next pass tries it.
+				h.open[d] = App{}
+			case why != "" && !waits(why):
 				h.failed[d] = true
 			}
 		}
@@ -59,7 +63,12 @@ func heldIn(p *Pending) held {
 // waits reports whether why is a wait's: not installed, running, or not
 // quitting once opened.
 func waits(why string) bool {
-	return why == "not installed" || strings.HasSuffix(why, " is running") || why == errDidntQuit.Error()
+	return why == "not installed" || running(why) || why == errDidntQuit.Error()
+}
+
+// running reports whether why is that the app is running.
+func running(why string) bool {
+	return strings.HasSuffix(why, " is running")
 }
 
 // anyToTry reports whether h holds anything an unattended pass might bring
@@ -76,9 +85,15 @@ func (h held) anyToTry() bool {
 // Failures counts what rec holds that failed otherwise, domains and
 // settings files, which only kit prefs restore --pending, by hand, tries
 // again.
-func (p *Prefs) Failures(rec Record) int {
+func (p *Prefs) Failures(rec Record) (domains, files int) {
 	h := heldIn(rec.Pending)
-	return len(h.failed) + len(h.files)
+	return len(h.failed), len(h.files)
+}
+
+// HasApp reports whether the app of a bundle id is installed.
+func (p *Prefs) HasApp(id string) bool {
+	_, ok := p.installedApps()[id]
+	return ok
 }
 
 // drop takes name, a domain or a file, off.

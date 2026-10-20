@@ -930,24 +930,50 @@ func UnattendedApply(k Kind) func(ctx context.Context, found check.Result) error
 	}
 }
 
-// missed are the things declared on that byKey, what k lists, by key,
-// hasn't, which k, when it can miss what's installed (Misser), finds are
-// installed after all: none when it can't, or nothing's missing.
-func missed(ctx context.Context, k Kind, declared config.List, byKey map[string]Installed, key func(string) string) ([]Installed, error) {
+// InstalledOf is what k finds installed, with those of names it doesn't
+// list found after all, when it can miss what's installed (Misser): what
+// a check of one thing, or a wait for it, goes by.
+func InstalledOf(ctx context.Context, k Kind, names []string) ([]Installed, error) {
+	installed, err := k.Installed(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return withMissed(ctx, k, installed, names)
+}
+
+// withMissed is installed, what k lists, with those of names it lacks that
+// k, when it can miss what's installed (Misser), finds are installed after
+// all.
+func withMissed(ctx context.Context, k Kind, installed []Installed, names []string) ([]Installed, error) {
 	m, ok := k.(Misser)
 	if !ok {
-		return nil, nil
+		return installed, nil
+	}
+	key := keyOf(k)
+	listed := make(map[string]bool, len(installed))
+	for _, it := range installed {
+		listed[key(it.Name)] = true
 	}
 	var absent []string
-	for _, e := range declared.Entries {
-		if _, listed := byKey[key(e.Name)]; !e.Off && !listed {
-			absent = append(absent, e.Name)
+	for _, name := range names {
+		if !listed[key(name)] {
+			absent = append(absent, name)
 		}
 	}
 	if len(absent) == 0 {
-		return nil, nil
+		return installed, nil
 	}
-	return m.Missed(ctx, absent)
+	found, err := m.Missed(ctx, absent)
+	return append(installed, found...), err
+}
+
+// keyOf is how k matches its things' names: as they are, unless it says
+// (Keyed).
+func keyOf(k Kind) func(string) string {
+	if kd, ok := k.(Keyed); ok {
+		return kd.Key
+	}
+	return func(name string) string { return name }
 }
 
 // Compare checks what declared lists against what k finds installed: a
@@ -968,20 +994,18 @@ func Compare(ctx context.Context, k Kind, declared config.List) check.Result {
 	case err != nil:
 		return failed(k, err)
 	}
-	key := func(name string) string { return name }
-	if kd, ok := k.(Keyed); ok {
-		key = kd.Key
+	var on []string
+	for _, e := range declared.Entries {
+		if !e.Off {
+			on = append(on, e.Name)
+		}
 	}
-	byKey := make(map[string]Installed, len(installed))
-	for _, it := range installed {
-		byKey[key(it.Name)] = it
-	}
-	found, err := missed(ctx, k, declared, byKey, key)
-	if err != nil {
+	if installed, err = withMissed(ctx, k, installed, on); err != nil {
 		return failed(k, err)
 	}
-	for _, it := range found {
-		installed = append(installed, it)
+	key := keyOf(k)
+	byKey := make(map[string]Installed, len(installed))
+	for _, it := range installed {
 		byKey[key(it.Name)] = it
 	}
 	// matched are the installed things declared, by name, and installedDeclared

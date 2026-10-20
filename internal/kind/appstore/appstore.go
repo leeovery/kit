@@ -46,6 +46,9 @@ type AppStore struct {
 	// bundle id is kept.
 	AppDirs  []string
 	StateDir string
+	// Now is the time, which says when to ask the store again about an app
+	// it said it hasn't.
+	Now func() time.Time
 
 	// mu guards listed, what mas listed last, which Missed goes by.
 	mu     sync.Mutex
@@ -76,7 +79,7 @@ var Descriptor = kind.Descriptor{
 
 // New returns the App Store, driven through run.
 func New(run runner.Runner) *AppStore {
-	return &AppStore{run: run}
+	return &AppStore{run: run, Now: time.Now}
 }
 
 func (*AppStore) Name() string    { return kindName }
@@ -172,12 +175,17 @@ func (s *AppStore) Installed(ctx context.Context) ([]kind.Installed, error) {
 }
 
 // lookupsName names kit's record of what the App Store said of the bundle
-// ids it was asked about: each one's app id, 0 for one it doesn't have.
+// ids it was asked about: each one's app id, 0 for one it doesn't have,
+// and when it said so (Missed), as it's asked again a day on.
 const lookupsName = "appstore.json"
 
 type lookups struct {
-	IDs map[string]int64 `json:"ids"`
+	IDs    map[string]int64     `json:"ids"`
+	Missed map[string]time.Time `json:"missed,omitempty"`
 }
+
+// askAgain is how long the store saying it hasn't an app holds.
+const askAgain = 24 * time.Hour
 
 // notInStore is how mas says the App Store has no app of a bundle id.
 const notInStore = "no apps found in the app store"
@@ -186,7 +194,7 @@ const notInStore = "no apps found in the app store"
 // holds what Spotlight has indexed, are installed after all, as an app installed
 // a moment ago is: an app in AppDirs carrying the App Store's receipt, its
 // id the App Store's for the bundle id the app says, asked once and kept
-// in kit's state, as is the store not having it.
+// in kit's state, as is the store not having it, for a day.
 func (s *AppStore) Missed(ctx context.Context, names []string) ([]kind.Installed, error) {
 	wanted := map[int64]string{}
 	for _, name := range names {
@@ -210,6 +218,9 @@ func (s *AppStore) Missed(ctx context.Context, names []string) ([]kind.Installed
 			continue
 		}
 		n, kept := rec.IDs[bundle]
+		if kept && n == 0 && s.Now().Sub(rec.Missed[bundle]) > askAgain {
+			kept = false
+		}
 		if !kept {
 			a, ok := s.lookUp(ctx, bundle)
 			if !ok {
@@ -228,7 +239,17 @@ func (s *AppStore) Missed(ctx context.Context, names []string) ([]kind.Installed
 		if l.IDs == nil {
 			l.IDs = map[string]int64{}
 		}
+		if l.Missed == nil {
+			l.Missed = map[string]time.Time{}
+		}
 		maps.Copy(l.IDs, asked)
+		for bundle, n := range asked {
+			if n == 0 {
+				l.Missed[bundle] = s.Now()
+			} else {
+				delete(l.Missed, bundle)
+			}
+		}
 	})
 }
 

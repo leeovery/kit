@@ -423,14 +423,19 @@ func (p *Prefs) Restore(ctx context.Context, opts RestoreOptions) (RestoreReport
 
 // held is what h holds once this restore's done: what it restored taken
 // off; what it couldn't, of what h held, or, every, of all it tried, put on
-// as it found it; and, when it tried them (files), the settings files that
+// as it found it, but an app to open that's running, open still, as it
+// stays to be quit; and, when it tried them (files), the settings files that
 // failed in place of those held.
 func (r RestoreReport) held(h held, every, files bool) held {
 	for _, d := range r.Restored {
 		h.drop(d)
 	}
 	for d, why := range r.Waiting {
-		if every || h.domains[d] {
+		app, toOpen := h.open[d]
+		switch {
+		case toOpen && running(why):
+			h.toOpen(d, app, why)
+		case every || h.domains[d]:
 			h.hold(d, why)
 		}
 	}

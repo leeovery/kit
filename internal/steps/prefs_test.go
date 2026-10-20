@@ -225,7 +225,7 @@ func TestAppsSettingsAppsToOpen(t *testing.T) {
 		Title: "Open Boxed App once and quit it", Why: "Its settings come back after: macOS makes its settings folder only once it's opened.",
 		Steps: []string{"Open Boxed App", "Quit it"}, Watch: "Boxed App has its settings folder and is quit", Group: "Apps", First: true,
 	}
-	held := check.Item{ID: "prefs:held", Name: "1 held after failing to come back", State: steps.Problem, Detail: "kit prefs restore --pending tries again; kit prefs pending says why"}
+	held := check.Item{ID: "prefs:held", Name: "1 app's settings didn't come back", State: steps.Problem, Detail: "kit prefs restore --pending tries again; kit prefs pending says why"}
 	if res.State != check.Attention || res.Summary != "1 app to open once; 1 held for kit prefs restore --pending" || len(res.Items) != 2 ||
 		res.Items[0].ID != "prefs:open:com.example.boxed" || !reflect.DeepEqual(*res.Items[0].ToDo, open) || !reflect.DeepEqual(res.Items[1], held) {
 		t.Errorf("with an app to open, the check says %+v; want its to-do, watched, kit not offering keys, and what's held", res)
@@ -275,7 +275,7 @@ func TestAppsSettingsAfreshAfterAnOlderRestore(t *testing.T) {
 func TestAppsSettingsHeldNeverHideCapture(t *testing.T) {
 	state, appDir := t.TempDir(), t.TempDir()
 	old := now().Add(-40 * time.Hour).Format(time.RFC3339)
-	record := `{"on": "restored", "captured": "` + old + `", "pending": {"from": "laptop", "domains": ["com.example.boxed", "com.example.app"], "failed": ["com.example.app"],
+	record := `{"on": "restored", "captured": "` + old + `", "pending": {"from": "laptop", "domains": ["com.example.boxed", "com.example.app"], "failed": ["com.example.app"], "files": ["~/.config/tool/settings.json"],
 		"open": {"com.example.boxed": {"id": "com.example.boxed", "name": "Boxed App"}}}}`
 	if err := os.WriteFile(filepath.Join(state, "prefs.json"), []byte(record), 0o600); err != nil {
 		t.Fatal(err)
@@ -296,5 +296,15 @@ func TestAppsSettingsHeldNeverHideCapture(t *testing.T) {
 	}
 	if res.State != check.Attention || !strings.HasPrefix(res.Summary, "last capture") || !slices.Equal(ids, []string{"prefs:stale", "prefs:open:com.example.boxed", "prefs:held"}) {
 		t.Errorf("the check says %q, items %q; want the stale capture first, the app to open and what's held beside it", res.Summary, ids)
+	}
+	if held := res.Items[2].Name; held != "1 app's settings and 1 settings file didn't come back" {
+		t.Errorf("what's held is named %q; want what it is, apps' settings and files apart", held)
+	}
+
+	if err := os.RemoveAll(filepath.Join(appDir, "Boxed App.app")); err != nil {
+		t.Fatal(err)
+	}
+	if said := steps.Prefs(p, now).Choice.Settle(t.Context(), res.Items[1]); said != "Boxed App was removed" {
+		t.Errorf("its app removed while its to-do was up, settling it said %q; want that it was removed", said)
 	}
 }

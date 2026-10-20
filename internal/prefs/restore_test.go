@@ -302,14 +302,48 @@ func TestRestoreHoldsAnAppToOpenTillItsFolderIsThere(t *testing.T) {
 // hourly pass, with nothing else to try, does nothing at all.
 func TestAnOlderRecordsFailuresWaitForPendingByHand(t *testing.T) {
 	w := newWorld(t, prefs.Lists{})
-	writeRecord(t, w.state, `{"on": "restored", "pending": {"from": "laptop", "domains": ["com.example.app", "com.example.gone"], "why": {"com.example.app": "import: exit status 1", "com.example.gone": "not installed"}}}`)
+	writeRecord(t, w.state, `{"on": "restored", "pending": {"from": "laptop", "domains": ["com.example.app", "com.example.boxed", "com.example.gone"],
+		"why": {"com.example.app": "import: exit status 1", "com.example.boxed": "opened once, it still has no settings folder", "com.example.gone": "not installed"}}}`)
 	rec, _ := w.p.Load()
-	if n := w.p.Failures(rec); n != 1 {
-		t.Errorf("Failures() = %d, want the one whose why isn't a wait's", n)
+	if domains, files := w.p.Failures(rec); domains != 1 || files != 0 {
+		t.Errorf("Failures() = %d, %d; want the one whose why isn't a wait's, nor an app's to open", domains, files)
 	}
 	writeRecord(t, w.state, `{"on": "restored", "pending": {"from": "laptop", "domains": ["com.example.app"], "why": {"com.example.app": "import: exit status 1"}}}`)
 	if _, err := w.p.Restore(t.Context(), prefs.RestoreOptions{Pending: true, Unattended: true}); err != nil || len(w.fake.Calls()) != 0 {
 		t.Errorf("the hourly pass = %v, ran %q; want nothing done", err, w.fake.Calls())
+	}
+}
+
+// An app held to open that's running still stays to open, with its why,
+// till it's quit, though another's settings come back on the same pass, as
+// when its to-do, or another app's, settles while it's open.
+func TestAnAppToOpenStaysTillItsQuit(t *testing.T) {
+	w := newWorld(t, prefs.Lists{})
+	store := filepath.Join(w.clone, "laptop")
+	writeRecord(t, w.state, `{"on": "restored", "pending": {"from": "laptop", "domains": ["com.example.one", "com.example.two"],
+		"open": {"com.example.one": {"id": "com.example.one", "name": "One"}, "com.example.two": {"id": "com.example.two", "name": "Two"}},
+		"why": {"com.example.one": "opened once, it still has no settings folder", "com.example.two": "opened once, it still has no settings folder"}}}`)
+	for _, a := range [][2]string{{"One", "com.example.one"}, {"Two", "com.example.two"}} {
+		w.write(t, filepath.Join(store, "domains", a[1]+".plist"), stored(t, map[string]any{"A": true}))
+		w.app(t, w.apps, a[0], a[1])
+		w.write(t, filepath.Join(w.home, "Library", "Containers", a[1], ".made"), "")
+	}
+	w.closed("com.example.one")
+	w.fake.On("osascript", "-e", `application id "com.example.two" is running`).Prints("true\n")
+	w.imports(t, "com.example.one", "laptop", map[string]any{}, map[string]any{"A": true})
+	w.fake.On("git", "-C", w.clone, "rev-parse", "HEAD").Prints("abc123\n")
+
+	report, err := w.p.Restore(t.Context(), prefs.RestoreOptions{Pending: true, Unattended: true})
+	if err != nil || !slices.Equal(report.Restored, []string{"com.example.one"}) || report.Waiting["com.example.two"] != "Two is running" {
+		t.Errorf("Restore(hourly) = %+v, %v; want One back, Two waiting to be quit", report, err)
+	}
+	rec, _ := w.p.Load()
+	two := prefs.App{ID: "com.example.two", Name: "Two"}
+	if rec.Pending == nil || rec.Pending.Open["com.example.two"] != two || rec.Pending.Why["com.example.two"] != "opened once, it still has no settings folder" {
+		t.Errorf("pending = %+v; want Two still to open, with its why", rec.Pending)
+	}
+	if got := w.p.ToOpen(t.Context(), rec); !slices.Equal(got, []prefs.App{two}) {
+		t.Errorf("ToOpen() = %+v, want Two till it's quit", got)
 	}
 }
 

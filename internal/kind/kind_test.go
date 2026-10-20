@@ -1071,3 +1071,44 @@ func TestAKindsStepSaysItsVerb(t *testing.T) {
 type setting struct{ *fakeKind }
 
 func (setting) Verb() string { return "set" }
+
+// missingKind is a fakeKind whose list misses what it's told is there
+// after all, noting what it's asked about.
+type missingKind struct {
+	*fakeKind
+	there []string
+	asked [][]string
+}
+
+func (m *missingKind) Missed(_ context.Context, names []string) ([]kind.Installed, error) {
+	m.asked = append(m.asked, names)
+	var found []kind.Installed
+	for _, n := range names {
+		if slices.Contains(m.there, n) {
+			found = append(found, kind.Installed{Name: n, Explicit: true})
+		}
+	}
+	return found, nil
+}
+
+// What a kind lists can miss what's installed: InstalledOf, which a wait
+// for one thing and a command about one go by, and Compare both ask it
+// about those of the names it lacks, and only those, and nothing when it
+// lacks none.
+func TestWhatAKindsListMisses(t *testing.T) {
+	k := &missingKind{fakeKind: &fakeKind{installed: []kind.Installed{{Name: "listed", Explicit: true}}}, there: []string{"new"}}
+	got, err := kind.InstalledOf(t.Context(), k, []string{"listed", "new", "gone"})
+	if err != nil || !slices.ContainsFunc(got, func(it kind.Installed) bool { return it.Name == "new" }) || len(got) != 2 {
+		t.Errorf("InstalledOf() = %+v, %v; want what's listed and what it missed", got, err)
+	}
+	if _, err := kind.InstalledOf(t.Context(), k, []string{"listed"}); err != nil {
+		t.Fatal(err)
+	}
+	res := kind.Compare(t.Context(), k, config.List{Kind: "brew", Entries: []config.Entry{{Name: "listed"}, {Name: "new"}, {Name: "off", Off: true}}})
+	if res.State != check.OK {
+		t.Errorf("Compare() = %+v; want what it missed counted as installed", res)
+	}
+	if want := [][]string{{"new", "gone"}, {"new"}}; !slices.EqualFunc(k.asked, want, slices.Equal) {
+		t.Errorf("it was asked about %q, want %q", k.asked, want)
+	}
+}

@@ -214,7 +214,7 @@ func (r *run) where(kindName, name string) ([]config.Entry, error) {
 // installed reports whether name, as given, is among what k finds
 // installed: nothing is, while k's program isn't.
 func installed(ctx context.Context, k kind.Kind, name string) (bool, error) {
-	all, err := k.Installed(ctx)
+	all, err := kind.InstalledOf(ctx, k, []string{name})
 	if errors.Is(err, runner.ErrNotFound) {
 		return false, nil
 	}
