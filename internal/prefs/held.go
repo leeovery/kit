@@ -2,10 +2,12 @@ package prefs
 
 import (
 	"cmp"
+	"context"
 	"maps"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 )
 
 // App is an app as kit tells of it: its bundle id, and its name, as its
@@ -25,7 +27,9 @@ type held struct {
 	why                    map[string]string
 }
 
-// heldIn is what p holds: nothing, for none.
+// heldIn is what p holds: nothing, for none. A record from before kit
+// sorted what it held has its failed domains among those waiting: those
+// whose why isn't a wait's.
 func heldIn(p *Pending) held {
 	h := held{domains: map[string]bool{}, files: map[string]bool{}, failed: map[string]bool{}, open: map[string]App{}, why: map[string]string{}}
 	if p == nil {
@@ -42,7 +46,39 @@ func heldIn(p *Pending) held {
 	}
 	maps.Copy(h.open, p.Open)
 	maps.Copy(h.why, p.Why)
+	if p.Failed == nil && p.Open == nil {
+		for d := range h.domains {
+			if why := h.why[d]; why != "" && !waits(why) {
+				h.failed[d] = true
+			}
+		}
+	}
 	return h
+}
+
+// waits reports whether why is a wait's: not installed, running, or not
+// quitting once opened.
+func waits(why string) bool {
+	return why == "not installed" || strings.HasSuffix(why, " is running") || why == errDidntQuit.Error()
+}
+
+// anyToTry reports whether h holds anything an unattended pass might bring
+// back: a domain that didn't fail otherwise.
+func (h held) anyToTry() bool {
+	for d := range h.domains {
+		if !h.failed[d] {
+			return true
+		}
+	}
+	return false
+}
+
+// Failures counts what rec holds that failed otherwise, domains and
+// settings files, which only kit prefs restore --pending, by hand, tries
+// again.
+func (p *Prefs) Failures(rec Record) int {
+	h := heldIn(rec.Pending)
+	return len(h.failed) + len(h.files)
 }
 
 // drop takes name, a domain or a file, off.
@@ -97,20 +133,24 @@ func (h held) pending(from string) *Pending {
 	return p
 }
 
-// ToOpen are the apps the person is to open once, as rec holds them, that
-// have no settings folder yet: each once, by name.
-func (p *Prefs) ToOpen(rec Record) []App {
-	if rec.Pending == nil {
+// ToOpen are the apps the person is to open once and quit, as rec holds
+// them: those installed that have no settings folder yet, or are still
+// running, each once, by name.
+func (p *Prefs) ToOpen(ctx context.Context, rec Record) []App {
+	if rec.Pending == nil || len(rec.Pending.Open) == 0 {
 		return nil
 	}
+	installed := p.installedApps()
 	seen := map[string]bool{}
 	var out []App
 	for _, app := range rec.Pending.Open {
-		if seen[app.ID] || p.hasFolder(app.ID) {
+		if _, ok := installed[app.ID]; seen[app.ID] || !ok {
 			continue
 		}
 		seen[app.ID] = true
-		out = append(out, app)
+		if !p.hasFolder(app.ID) || p.running(ctx, app.ID) {
+			out = append(out, app)
+		}
 	}
 	slices.SortFunc(out, func(a, b App) int { return cmp.Compare(a.Name, b.Name) })
 	return out

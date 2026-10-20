@@ -41,7 +41,7 @@ func TestKitsOwnToDos(t *testing.T) {
 			Detail: "kit prefs restore, or kit prefs start-fresh",
 			ToDo: &check.ToDo{
 				Title: "Bring back apps' settings",
-				Why:   "First, so the apps you open next start with yours. Bringing them back opens some apps once, never again: their windows, notifications and permission prompts may follow. This Mac saves its own once they're back.",
+				Why:   "First, so the apps you open next start with yours. Bringing them back opens some apps once: their windows, notifications and permission prompts may follow. This Mac saves its own once they're back.",
 				Group: "Apps",
 				Keys: []check.Key{
 					{Key: "r", Does: "brings them back from this Mac's last save"},
@@ -407,6 +407,55 @@ func TestAToDoLeavesAnother(t *testing.T) {
 	defer mu.Unlock()
 	if !slices.Contains(settled, "prefs:open") || report.Results["prefs"].State != check.OK {
 		t.Errorf("settled %q, prefs stands %s; want the apps to open settled, then prefs ok", settled, report.Results["prefs"].State)
+	}
+}
+
+// q's Stop, pressed while kit did what a key said, which did it: the to-do
+// is done, and the run stops there, the rest staying to do.
+func TestStoppingWhileAKeyIsDone(t *testing.T) {
+	defer steps.SetManualPoll(time.Hour)()
+	c := newCard(t)
+	var mu sync.Mutex
+	brought := false
+	step := engine.Step{
+		Name: "prefs", Title: "App settings", Area: steps.AreaBackups,
+		Check: func(context.Context) check.Result {
+			mu.Lock()
+			defer mu.Unlock()
+			if brought {
+				return check.Result{State: check.OK, Summary: "saving from tonight"}
+			}
+			return check.Result{State: check.Attention, Summary: "paused", Items: []check.Item{toDoItem("prefs", check.ToDo{
+				Title: "Bring back apps' settings", First: true, Keys: []check.Key{{Key: "r", Does: "brings them back"}},
+			})}}
+		},
+		Choice: &engine.Choice{
+			Answer: func(context.Context, check.Item, string) (string, error) {
+				if !c.desk.Answer(steps.ManualName, hand.Stop) {
+					t.Error("q's Stop, pressed while r was being done, wasn't passed on")
+				}
+				mu.Lock()
+				defer mu.Unlock()
+				brought = true
+				return "214 apps' settings", nil
+			},
+		},
+	}
+	disk := ownStep("time-machine", toDoItem("time-machine", check.ToDo{Title: "Add a Time Machine disk", Group: "Backups"}))
+	done := make(chan engine.Report, 1)
+	go func() {
+		done <- applied(t, c, atTheEnd(steps.Manual(c.fake, "/home/someone", c.state, config.List{}, c.raise), step, disk))
+	}()
+	c.cards(t, 1)
+	c.answer(t, steps.ManualName, "r")
+	<-done
+	last := toDoLists(c.sink)
+	l := last[len(last)-1]
+	if l.Up != -1 || !l.List[0].Done || l.List[0].Saw != "214 apps' settings" || l.List[1].Done {
+		t.Errorf("the to-dos ended %+v; want the first done, the run stopped there, the rest to do", l)
+	}
+	if got := len(c.cardsNow()); got != 2 {
+		t.Errorf("%d cards went up, want the first, then it answered by r, and no more", got)
 	}
 }
 

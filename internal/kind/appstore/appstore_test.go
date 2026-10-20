@@ -65,11 +65,12 @@ func TestInstalled(t *testing.T) {
 }
 
 // An app the App Store installed that mas doesn't list yet, as Spotlight
-// hasn't indexed it, is found in the Applications folders by the store's
-// receipt it carries, its id looked up by its bundle id; one mas lists
-// isn't looked up, nor one without a receipt, as a download's, nor one the
-// lookup doesn't find.
-func TestInstalledFindsAppsMasDoesntListYet(t *testing.T) {
+// hasn't indexed it, is found, declared and missing, in the Applications
+// folders by the store's receipt it carries, its id looked up by its bundle
+// id, once: what the store says, that it has none included, is kept. With
+// nothing declared missing, nothing's looked for; an app mas lists isn't
+// looked up, nor one without a receipt, as a download's.
+func TestAnAppMasDoesntListYetIsFound(t *testing.T) {
 	dir := t.TempDir()
 	bundle := func(name, id string, receipt bool) {
 		t.Helper()
@@ -94,23 +95,32 @@ func TestInstalledFindsAppsMasDoesntListYet(t *testing.T) {
 	fake := runnertest.New(t)
 	fake.On("mas", "list", "--json").Prints(fixture(t, "list.jsonl"))
 	fake.On("mas", "lookup", "--json", "--bundle", "com.example.amphetamine").Prints(`{"adamID":937984704,"bundleID":"com.example.amphetamine","name":"Amphetamine"}` + "\n")
-	fake.On("mas", "lookup", "--json", "--bundle", "com.example.delisted").Exits(1).PrintsToStderr("No results found")
+	fake.On("mas", "lookup", "--json", "--bundle", "com.example.delisted").Exits(1).PrintsToStderr("Error: No apps found in the App Store for bundle ID com.example.delisted")
 	store := appstore.New(fake)
-	store.AppDirs = []string{dir}
-	got, err := store.Installed(t.Context())
-	want := []kind.Installed{
-		{Name: "xcode@497799835", Explicit: true},
-		{Name: "numbers@409203825", Explicit: true},
-		{Name: "heic-converter@1294126402", Explicit: true},
-		{Name: "amphetamine@937984704", Explicit: true},
-	}
-	if err != nil || !slices.Equal(got, want) {
-		t.Errorf("Installed() = %+v, %v; want %+v", got, err, want)
-	}
-	for _, c := range fake.Calls() {
-		if strings.Contains(c, "com.apple.dt.Xcode") || strings.Contains(c, "downloaded") {
-			t.Errorf("ran %s: an app mas lists, or one without the store's receipt, isn't looked up", c)
+	store.AppDirs, store.StateDir = []string{dir}, t.TempDir()
+	lookups := func() []string {
+		var out []string
+		for _, c := range fake.Calls() {
+			if strings.HasPrefix(c, "mas lookup") {
+				out = append(out, c)
+			}
 		}
+		return out
+	}
+
+	kind.Compare(t.Context(), store, declared("xcode@497799835"))
+	if got := lookups(); len(got) != 0 {
+		t.Errorf("with nothing declared missing, it looked up %q", got)
+	}
+	for range 2 {
+		res := kind.Compare(t.Context(), store, declared("xcode@497799835", "amphetamine@937984704"))
+		if slices.ContainsFunc(res.Items, func(it check.Item) bool { return it.Name == "amphetamine@937984704" }) {
+			t.Errorf("Compare() = %+v; want the app mas doesn't list yet found", res.Items)
+		}
+	}
+	want := []string{"mas lookup --json --bundle com.example.amphetamine", "mas lookup --json --bundle com.example.delisted"}
+	if got := lookups(); !slices.Equal(got, want) {
+		t.Errorf("looked up %q; want %q, once each", got, want)
 	}
 }
 

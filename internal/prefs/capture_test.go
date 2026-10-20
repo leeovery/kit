@@ -95,16 +95,17 @@ func stored(t *testing.T, settings map[string]any) string {
 
 func TestCaptureSavesWhatChanged(t *testing.T) {
 	w := newWorld(t, prefs.Lists{
-		Files: []string{"~/.config/tool/settings.json", "~/.config/tool/held.json", "~/.config/folder", "~/Library/Tool/*20[0-9][0-9].[0-9]/options", "~/missing.json"},
+		Files: []string{"~/.config/tool/settings.json", "~/.config/tool/held.json", "~/.config/tool/absent.json", "~/.config/folder", "~/Library/Tool/*20[0-9][0-9].[0-9]/options", "~/missing.json"},
 		Deny:  []string{"net.chatty.*"},
 	})
 	if err := w.p.StartFresh(); err != nil {
 		t.Fatal(err)
 	}
 	store := filepath.Join(w.clone, "laptop")
-	// The record says a domain and a file wait to be restored: capture
-	// leaves them.
-	writeRecord(t, w.state, `{"on": "started fresh", "pending": {"from": "laptop", "domains": ["com.example.pending"], "files": ["~/.config/tool/held.json"]}}`)
+	// The record says a domain and two files wait to be restored, one of
+	// them not on the Mac: capture leaves them.
+	writeRecord(t, w.state, `{"on": "started fresh", "pending": {"from": "laptop", "domains": ["com.example.pending"], "files": ["~/.config/tool/absent.json", "~/.config/tool/held.json"]}}`)
+	w.write(t, filepath.Join(store, "files", ".config", "tool", "absent.json"), "kept though absent")
 	w.write(t, filepath.Join(store, "domains", "com.example.pending.plist"), "kept as stored")
 	w.write(t, filepath.Join(store, "files", ".config", "tool", "held.json"), "kept as stored")
 	w.write(t, filepath.Join(w.home, ".config", "tool", "held.json"), "the Mac's")
@@ -145,7 +146,7 @@ claimed: the folder, for this Mac's hardware`
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := report.Summary(), "2 domains, 1 changed (1 new); 5 files, 5 changed (5 new); 3 removed; 2 pending restore; 1 errors"; got != want {
+	if got, want := report.Summary(), "2 domains, 1 changed (1 new); 5 files, 5 changed (5 new); 3 removed; 3 pending restore; 1 errors"; got != want {
 		t.Errorf("Summary() = %q, want %q", got, want)
 	}
 	if got := w.read(t, filepath.Join(store, "domains", "com.example.app.plist")); got != stored(t, map[string]any{"Theme": "dark"}) {
@@ -154,6 +155,7 @@ claimed: the folder, for this Mac's hardware`
 	for path, want := range map[string]string{
 		"domains/com.example.pending.plist":           "kept as stored",
 		"files/.config/tool/held.json":                "kept as stored",
+		"files/.config/tool/absent.json":              "kept though absent",
 		"domains/com.example.broken.plist":            "unreadable this time",
 		"files/.config/tool/settings.json":            `{"a": 1}`,
 		"files/.config/folder/deeper/two.txt":         "2",

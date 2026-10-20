@@ -457,6 +457,12 @@ func (p *Prefs) Capture(ctx context.Context) (Report, error) {
 		}
 	}
 
+	// A held file's saved copy stays, on the Mac or not: it's what a
+	// restore puts back.
+	for f := range heldFiles {
+		wanted[p.storedPath(filesDir, p.expand(f))] = true
+	}
+
 	// The mirror: what's stored but gone from the Mac, or no longer saved.
 	var stale []string
 	if entries, err := os.ReadDir(domainsDir); err == nil {

@@ -102,7 +102,7 @@ func TestAppsSettingsChoice(t *testing.T) {
 		t.Fatal(err)
 	}
 	said, err := step.Choice.Answer(t.Context(), paused, "r")
-	if err != nil || said != "0 apps' settings, from 4 Oct; 1 waits for its app" {
+	if err != nil || said != "no apps' settings, from 4 Oct; 1 waits for its app" {
 		t.Errorf("r = %q, %v; want how many, from when, and how many wait", said, err)
 	}
 	if res := step.Check(t.Context()); res.State != check.OK || res.Summary != "saving from tonight" {
@@ -130,7 +130,7 @@ func TestAppsSettingsChoice(t *testing.T) {
 // files beside the apps' settings, that those come back too. It names no
 // app.
 func TestAppsSettingsWhy(t *testing.T) {
-	opens := "Bringing them back opens some apps once, never again: their windows, notifications and permission prompts may follow."
+	opens := "Bringing them back opens some apps once: their windows, notifications and permission prompts may follow."
 	for _, tt := range []struct {
 		name  string
 		files []string
@@ -155,10 +155,11 @@ func TestAppsSettingsWhy(t *testing.T) {
 
 // r names, in the log, each app whose settings failed otherwise, with why,
 // and says how many apps are to be opened once and how many are held for
-// kit prefs restore --pending; saving switches on all the same. The apps to
-// open are then a to-do, by name, watched: once each has its settings
-// folder, it's done, and settling it brings their settings back, opening
-// nothing, leaving what failed otherwise alone.
+// kit prefs restore --pending; saving switches on all the same. Each app to
+// open is then a to-do, by name, watched: once it has its settings folder
+// and is quit, it's done, and settling it brings its settings back, opening
+// nothing, leaving what failed otherwise alone, which the check goes on
+// saying is held.
 func TestAppsSettingsAppsToOpen(t *testing.T) {
 	state, clone, home, appDir := t.TempDir(), filepath.Join(t.TempDir(), "prefs"), t.TempDir(), t.TempDir()
 	if err := os.WriteFile(filepath.Join(state, "prefs.json"), []byte(`{}`), 0o600); err != nil {
@@ -222,10 +223,12 @@ func TestAppsSettingsAppsToOpen(t *testing.T) {
 	res := step.Check(t.Context())
 	open := check.ToDo{
 		Title: "Open Boxed App once and quit it", Why: "Its settings come back after: macOS makes its settings folder only once it's opened.",
-		Steps: []string{"Open Boxed App", "Quit it"}, Watch: "Boxed App has its settings folder", Group: "Apps", First: true,
+		Steps: []string{"Open Boxed App", "Quit it"}, Watch: "Boxed App has its settings folder and is quit", Group: "Apps", First: true,
 	}
-	if res.State != check.Attention || res.Summary != "1 app to open once" || len(res.Items) != 1 || res.Items[0].ID != "prefs:open" || !reflect.DeepEqual(*res.Items[0].ToDo, open) {
-		t.Errorf("with an app to open, the check says %+v; want its to-do, watched, kit not offering keys", res)
+	held := check.Item{ID: "prefs:held", Name: "1 held after failing to come back", State: steps.Problem, Detail: "kit prefs restore --pending tries again; kit prefs pending says why"}
+	if res.State != check.Attention || res.Summary != "1 app to open once; 1 held for kit prefs restore --pending" || len(res.Items) != 2 ||
+		res.Items[0].ID != "prefs:open:com.example.boxed" || !reflect.DeepEqual(*res.Items[0].ToDo, open) || !reflect.DeepEqual(res.Items[1], held) {
+		t.Errorf("with an app to open, the check says %+v; want its to-do, watched, kit not offering keys, and what's held", res)
 	}
 	item := res.Items[0]
 	if said := step.Choice.Settle(t.Context(), paused); said != "" {
@@ -233,8 +236,12 @@ func TestAppsSettingsAppsToOpen(t *testing.T) {
 	}
 
 	write(filepath.Join(home, "Library", "Containers", "com.example.boxed", ".made"), "")
-	if res := step.Check(t.Context()); res.State != check.OK {
-		t.Errorf("its folder there, the check says %+v; want the to-do gone", res)
+	fake.On("osascript", "-e", `application id "com.example.boxed" is running`).Prints("true\n").Then().Prints("false\n")
+	if res := step.Check(t.Context()); len(res.Items) != 2 {
+		t.Errorf("its folder there, still open, the check says %+v; want the to-do till it's quit", res)
+	}
+	if res := step.Check(t.Context()); res.Summary != "1 held for kit prefs restore --pending" || len(res.Items) != 1 || res.Items[0].ID != "prefs:held" {
+		t.Errorf("its folder there, quit, the check says %+v; want the to-do gone, what's held still said", res)
 	}
 	opened := strings.Count(strings.Join(fake.Calls(), "\n"), "open -g -j -b")
 	if said := step.Choice.Settle(t.Context(), item); said != "1 app's settings" {
@@ -259,5 +266,35 @@ func TestAppsSettingsAfreshAfterAnOlderRestore(t *testing.T) {
 	paused := step.Check(t.Context()).Items[0]
 	if said, err := step.Choice.Answer(t.Context(), paused, "f"); err != nil || said != "saving from now; 2 still wait to come back" {
 		t.Errorf("f = %q, %v; want saving on, and how many still wait", said, err)
+	}
+}
+
+// With apps to open and settings held after failing, what's wrong with
+// capture itself still comes first: they're said beside it, never in its
+// place.
+func TestAppsSettingsHeldNeverHideCapture(t *testing.T) {
+	state, appDir := t.TempDir(), t.TempDir()
+	old := now().Add(-40 * time.Hour).Format(time.RFC3339)
+	record := `{"on": "restored", "captured": "` + old + `", "pending": {"from": "laptop", "domains": ["com.example.boxed", "com.example.app"], "failed": ["com.example.app"],
+		"open": {"com.example.boxed": {"id": "com.example.boxed", "name": "Boxed App"}}}}`
+	if err := os.WriteFile(filepath.Join(state, "prefs.json"), []byte(record), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	info := filepath.Join(appDir, "Boxed App.app", "Contents", "Info.plist")
+	if err := os.MkdirAll(filepath.Dir(info), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(info, []byte(`<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>com.example.boxed</string></dict></plist>`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p := prefs.New(runnertest.New(t), t.TempDir(), state, t.TempDir(), "", "laptop", prefs.Lists{}, now)
+	p.AppDirs = []string{appDir}
+	res := steps.Prefs(p, now).Check(t.Context())
+	var ids []string
+	for _, it := range res.Items {
+		ids = append(ids, it.ID)
+	}
+	if res.State != check.Attention || !strings.HasPrefix(res.Summary, "last capture") || !slices.Equal(ids, []string{"prefs:stale", "prefs:open:com.example.boxed", "prefs:held"}) {
+		t.Errorf("the check says %q, items %q; want the stale capture first, the app to open and what's held beside it", res.Summary, ids)
 	}
 }

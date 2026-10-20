@@ -273,7 +273,12 @@ type opener interface {
 
 // errStopHere is why a card came down without being done: the person
 // stopped where they were, at the run's to-dos, what's left staying to do.
-var errStopHere = errors.New("stopped here")
+// errDoneThenStop, that it was done, and they stopped meanwhile: it's done,
+// and the rest stays to do.
+var (
+	errStopHere     = errors.New("stopped here")
+	errDoneThenStop = errors.New("done, then stopped here")
+)
 
 // Raise is how a step by hand that's come due is raised while kit applies
 // at a terminal, where someone can act on it: a card, front and centre, one
@@ -317,7 +322,8 @@ var manualPoll = 3 * time.Second
 // any answer that came meanwhile dropped: a key the screen passed on before
 // it showed the card being answered.
 // It returns what kit saw as it was done, in words, if it has some;
-// errStopHere when the person stopped where they were.
+// errStopHere when the person stopped where they were; errDoneThenStop when
+// they stopped while kit did what a key said, which did it.
 func (r *Raise) up(ctx context.Context, step string, c raised, more int) (string, error) {
 	defer engine.Release(ctx)()
 	r.Sink.Emit(event.Doing{Time: r.Now(), Step: step, Says: event.Queued})
@@ -356,13 +362,18 @@ func (r *Raise) up(ctx context.Context, step string, c raised, more int) (string
 			if chose {
 				r.answering(string(a))
 			}
-			if ok, saw, err := c.answer(ctx, a, r.Now()); ok || err != nil {
+			ok, saw, err := c.answer(ctx, a, r.Now())
+			stopped := chose && stoppedMeanwhile(answers)
+			switch {
+			case err != nil:
 				return saw, err
-			}
-			if chose {
-				if stoppedMeanwhile(answers) {
-					return "", errStopHere
-				}
+			case ok && stopped:
+				return saw, errDoneThenStop
+			case ok:
+				return saw, nil
+			case stopped:
+				return "", errStopHere
+			case chose:
 				r.answering("")
 			}
 		}

@@ -100,6 +100,15 @@ type Carded interface {
 	Cards() []Card
 }
 
+// Misser is a kind whose list of what's installed can miss what is, as
+// the App Store's, read from Spotlight's index, misses an app installed a
+// moment ago.
+type Misser interface {
+	// Missed finds which of names, declared and not listed, are installed
+	// after all.
+	Missed(ctx context.Context, names []string) ([]Installed, error)
+}
+
 // Blocker is a kind that can say why some things can't be installed now.
 type Blocker interface {
 	// Blocked says, of the things missing (declared names, by their full
@@ -921,6 +930,26 @@ func UnattendedApply(k Kind) func(ctx context.Context, found check.Result) error
 	}
 }
 
+// missed are the things declared on that byKey, what k lists, by key,
+// hasn't, which k, when it can miss what's installed (Misser), finds are
+// installed after all: none when it can't, or nothing's missing.
+func missed(ctx context.Context, k Kind, declared config.List, byKey map[string]Installed, key func(string) string) ([]Installed, error) {
+	m, ok := k.(Misser)
+	if !ok {
+		return nil, nil
+	}
+	var absent []string
+	for _, e := range declared.Entries {
+		if _, listed := byKey[key(e.Name)]; !e.Off && !listed {
+			absent = append(absent, e.Name)
+		}
+	}
+	if len(absent) == 0 {
+		return nil, nil
+	}
+	return m.Missed(ctx, absent)
+}
+
 // Compare checks what declared lists against what k finds installed: a
 // declared thing is ok installed for any reason, or missing; an undeclared
 // one installed for itself, and needed by nothing, is extra; one installed
@@ -945,6 +974,14 @@ func Compare(ctx context.Context, k Kind, declared config.List) check.Result {
 	}
 	byKey := make(map[string]Installed, len(installed))
 	for _, it := range installed {
+		byKey[key(it.Name)] = it
+	}
+	found, err := missed(ctx, k, declared, byKey, key)
+	if err != nil {
+		return failed(k, err)
+	}
+	for _, it := range found {
+		installed = append(installed, it)
 		byKey[key(it.Name)] = it
 	}
 	// matched are the installed things declared, by name, and installedDeclared

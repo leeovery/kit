@@ -161,7 +161,7 @@ func (o ownToDo) answer(ctx context.Context, a hand.Answer, _ time.Time) (bool, 
 // till it's done: the list emitted as each comes up, and once they're over;
 // one of kit's own done, those its step's check finds now come next
 // (followUps). The person can stop where they are (hand.Stop): what's left
-// stays to do. Then the steps the to-dos done held are checked again
+// stays to do, the one up done if what they'd answered it with did it. Then the steps the to-dos done held are checked again
 // (recheckHeld).
 func (r *Raise) workThrough(ctx context.Context, step string, list []toDo) error {
 	if len(list) == 0 {
@@ -181,11 +181,14 @@ func (r *Raise) workThrough(ctx context.Context, step string, list []toDo) error
 		if errors.Is(err, errStopHere) {
 			break
 		}
-		if err != nil {
+		if err != nil && !errors.Is(err, errDoneThenStop) {
 			return err
 		}
 		entries[i].Done, entries[i].Saw = true, saw
 		resolved[entries[i].ID] = true
+		if err != nil {
+			break
+		}
 		for j, t := range followUps(ctx, list[i], list) {
 			list = slices.Insert(list, i+1+j, t)
 			entries = slices.Insert(entries, i+1+j, t.entry())

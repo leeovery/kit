@@ -34,7 +34,7 @@ var toDoList = []event.ToDo{
 // watched, each saying what for.
 var toDoCards = []event.NeedsYou{
 	{Item: "prefs:paused", Title: "Bring back apps' settings", Group: "Apps",
-		Why:  "First, so the apps you open next start with yours. Bringing them back opens some apps once, never again: their windows, notifications and permission prompts may follow. This Mac saves its own once they're back. Settings files come back too.",
+		Why:  "First, so the apps you open next start with yours. Bringing them back opens some apps once: their windows, notifications and permission prompts may follow. This Mac saves its own once they're back. Settings files come back too.",
 		Keys: []check.Key{{Key: "r", Does: "brings them back from this Mac's last save, 15 Oct"}, {Key: "f", Does: "starts afresh: nothing back, saving from now"}}},
 	{Item: "karabiner", Title: "Open Karabiner-Elements", Group: "Apps", Tells: true,
 		Why: "Its key remapping needs its driver and Input Monitoring, which only you can allow. Opened, it asks for both.",
@@ -267,9 +267,9 @@ func TestTheToDoPanel(t *testing.T) {
 			"",
 			"  △ Bring back apps' settings" + strings.Repeat(" ", 62) + "1 of 6",
 			"",
-			"      First, so the apps you open next start with yours. Bringing them back opens some apps once,",
-			"      never again: their windows, notifications and permission prompts may follow. This Mac saves",
-			"      its own once they're back. Settings files come back too.",
+			"      First, so the apps you open next start with yours. Bringing them back opens some apps once:",
+			"      their windows, notifications and permission prompts may follow. This Mac saves its own once",
+			"      they're back. Settings files come back too.",
 			"",
 			"      r brings them back from this Mac's last save, 15 Oct",
 			"      f starts afresh: nothing back, saving from now",
@@ -331,7 +331,7 @@ func TestAChoiceBeingAnswered(t *testing.T) {
 	face, out, _ := applyIn(colorprofile.TrueColor, 160, 64, time.Minute, events)
 	defer func() { _ = face.Close() }()
 	_, right := panes(screen(uncoloured(out.String())), 160)
-	ends := slices.Index(right, "      its own once they're back. Settings files come back too.")
+	ends := slices.Index(right, "      they're back. Settings files come back too.")
 	if ends < 0 || !slices.Equal(right[ends+1:ends+5], []string{"", "      ◐ brings them back from this Mac's last save, 15 Oct", "", strings.Repeat("─", 99)}) {
 		t.Errorf("being answered, the right pane starts\n%s\nwant what r does, turning, and no keys", strings.Join(right[:min(len(right), 14)], "\n"))
 	}

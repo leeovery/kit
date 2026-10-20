@@ -306,6 +306,9 @@ func (p *Prefs) Restore(ctx context.Context, opts RestoreOptions) (RestoreReport
 		if rec.Pending == nil || len(rec.Pending.Domains)+len(rec.Pending.Files) == 0 {
 			return report, nil
 		}
+		if opts.Unattended && !before.anyToTry() {
+			return report, nil
+		}
 		report.From, named = rec.Pending.From, slices.Clone(rec.Pending.Domains)
 		if !opts.Unattended {
 			files = maps.Clone(before.files)
@@ -377,7 +380,7 @@ func (p *Prefs) Restore(ctx context.Context, opts RestoreOptions) (RestoreReport
 		}
 	}
 
-	installed := p.installedApps()
+	installed, containers := p.installedApps(), map[string]error{}
 	for _, domain := range domains {
 		if opts.Unattended && before.failed[domain] {
 			continue
@@ -394,7 +397,7 @@ func (p *Prefs) Restore(ctx context.Context, opts RestoreOptions) (RestoreReport
 			continue
 		}
 		p.restoreOwned(ctx, &report, domain, owners, installed, restoring{
-			stored: filepath.Join(domainsDir, domain+".plist"), saved: saved, open: !opts.Unattended, dryRun: opts.DryRun,
+			stored: filepath.Join(domainsDir, domain+".plist"), saved: saved, open: !opts.Unattended, dryRun: opts.DryRun, containers: containers,
 		})
 	}
 
@@ -454,10 +457,13 @@ func (r RestoreReport) held(h held, every, files bool) held {
 
 // restoring is how a domain is restored: from its stored copy, the live
 // settings saved first in saved; open, whether its app may be opened once
-// for its settings folder; dryRun, only saying it would be.
+// for its settings folder; dryRun, only saying it would be. containers
+// are what making each app's container came to, by bundle id, in this
+// restore, so an app with several domains is opened once.
 type restoring struct {
 	stored, saved string
 	open, dryRun  bool
+	containers    map[string]error
 }
 
 // restoreOwned restores domain, whose apps are owners, of those installed,
@@ -467,7 +473,7 @@ type restoring struct {
 func (p *Prefs) restoreOwned(ctx context.Context, report *RestoreReport, domain string, owners []string, installed map[string]string, how restoring) {
 	app := func(id string) App { return App{ID: id, Name: appName(installed[id])} }
 	if i := slices.IndexFunc(owners, func(id string) bool { return p.running(ctx, id) }); i >= 0 {
-		report.Waiting[domain], report.Apps[domain] = owners[i]+" is running", app(owners[i])
+		report.Waiting[domain], report.Apps[domain] = app(owners[i]).Name+" is running", app(owners[i])
 		return
 	}
 	if how.dryRun {
@@ -475,7 +481,11 @@ func (p *Prefs) restoreOwned(ctx context.Context, report *RestoreReport, domain 
 		return
 	}
 	for _, id := range owners {
-		err := p.ensureContainer(ctx, id, installed[id], how.open)
+		err, made := how.containers[id]
+		if !made {
+			err = p.ensureContainer(ctx, id, installed[id], how.open)
+			how.containers[id] = err
+		}
 		switch {
 		case err == nil:
 			continue
