@@ -417,7 +417,7 @@ kit backup add|remove <tool> The backup tools this Mac uses, each checked   [--a
 kit file add|remove <path>...    Files linked into the home folder from kit-config
 kit path add|remove <dir>...     Directories on the PATH
 kit secret add <name>        Keep a secret in its store, declare it, sync it   [--stdin] [--from] [--ref] [--in] [--item] [--field] [--mode] [--shared]
-kit secret remove <name>...  Take it off the Mac, undeclare it     [--keep-value] [--delete-value]
+kit secret remove <name>...  Take it off the Mac, undeclare it     [--keep-value] [--delete-value] [--shared]
 kit secret sync              Read every secret from its store, and put each in place
 kit secret places            The blocks secrets are declared in: name, store, item, file, count
 kit prefs capture|restore|history|pending|start-fresh   Apps' settings, saved to a private repository and restored
