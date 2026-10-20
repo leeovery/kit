@@ -75,13 +75,13 @@ func TestABackupToolWaitsForWhatItChecks(t *testing.T) {
 }
 
 // A backup tool's line can place its check before another step, which then
-// waits for it.
+// waits for it as kit applies (kit status checks everything at once).
 func TestABackupToolBeforeAnother(t *testing.T) {
 	w := laptopWorld(t)
 	w.writeSection(t, "laptop", "backups", "time-machine\narq --before time-machine\n")
 	w.fake.On(arqc, "stats").Prints(arqStats(w.now.Add(-2 * time.Hour)))
 	w.fake.On("defaults", "export", "/Library/Preferences/com.apple.TimeMachine", "-").Exits(1).PrintsToStderr("file does not exist")
-	w.run(t, "status")
+	w.run(t, "apply")
 	if calls := w.fake.Calls(); !before(calls, arqc+" stats", "defaults export /Library/Preferences/com.apple.TimeMachine -") {
 		t.Errorf("ran %q: want Arq checked before Time Machine", calls)
 	}
