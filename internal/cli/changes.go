@@ -164,21 +164,44 @@ func (c *changes) declare(kindName, scope string, e config.Entry) ([]string, err
 		c.changed(config.DeclFile(scope))
 		return nil, nil
 	}
-	where, err := r.where(kindName, e.Name)
+	moved, err := r.macsDeclaring(kindName, e.Name)
 	if err != nil {
 		return nil, err
-	}
-	var moved []string
-	for _, w := range where {
-		if w.Scope != scope {
-			moved = append(moved, w.Scope)
-		}
 	}
 	written, err := r.cfg.DeclareShared(kindName, e, moved)
 	for _, scope := range written {
 		c.changed(config.DeclFile(scope))
 	}
 	return moved, err
+}
+
+// checkDeclare says why declare would refuse e in scope's declarations,
+// writing nothing: nil when it would declare it.
+func (r *run) checkDeclare(kindName, scope string, e config.Entry) error {
+	if scope != config.Shared {
+		return r.cfg.CheckDeclare(kindName, scope, e)
+	}
+	moved, err := r.macsDeclaring(kindName, e.Name)
+	if err != nil {
+		return err
+	}
+	return r.cfg.CheckDeclareShared(kindName, e, moved)
+}
+
+// macsDeclaring are the Macs whose own files declare name, of the kind
+// called kindName: those a shared declare takes it out of.
+func (r *run) macsDeclaring(kindName, name string) ([]string, error) {
+	where, err := r.where(kindName, name)
+	if err != nil {
+		return nil, err
+	}
+	var macs []string
+	for _, w := range where {
+		if w.Scope != config.Shared {
+			macs = append(macs, w.Scope)
+		}
+	}
+	return macs, nil
 }
 
 // outOf says the Macs a thing declared shared was moved out of, after what

@@ -52,8 +52,9 @@ A value in a store already (--ref) goes in this file's block for its item,
 short, when there's one, else in the plain [secrets], in full.
 
 --mode sets a file's permissions (600 otherwise). It's declared in this
-Mac's declarations file, unless --shared declares it for every Mac. The
-change is committed and pushed to the config repository.
+Mac's declarations file, unless --shared declares it for every Mac, in the
+shared file, which takes it out of each Mac's own, whatever block it was
+in. The change is committed and pushed to the config repository.
 
 ` + storesKnown(),
 		Args: cobra.ExactArgs(1),

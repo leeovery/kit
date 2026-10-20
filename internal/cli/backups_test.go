@@ -151,9 +151,11 @@ func TestBackupToolsInKitsOrder(t *testing.T) {
 }
 
 // kit backup add declares a backup tool for this Mac, or every Mac with
-// --shared, its check placed as --after and --before say, and kit backup
-// remove takes it out, each committed and pushed; one declared already, a
-// tool kit doesn't know, or one placed after what isn't a step is refused.
+// --shared, taking it out of the Macs' files that had it in the same edit,
+// its check placed as --after and --before say, and kit backup remove takes
+// it out, each committed and pushed; one declared already, in the shared
+// file or the one it goes in, a tool kit doesn't know, or one placed after
+// what isn't a step is refused.
 func TestBackupAddAndRemove(t *testing.T) {
 	w := laptopWorld(t)
 	w.expectSync([]string{"laptop/declarations"}, "kit backup add arq (laptop): offsite")
@@ -177,6 +179,7 @@ func TestBackupAddAndRemove(t *testing.T) {
 		code int
 	}{
 		{[]string{"add", "arq"}, "arq failed declared already, in laptop/declarations:", 1},
+		{[]string{"add", "time-machine", "--shared"}, "time-machine failed declared already, in shared/declarations:", 1},
 		{[]string{"add", "time-capsule"}, "kit doesn't know the backup tool time-capsule: one of arq, time-machine", 2},
 		{[]string{"add", "arq", "--before", "cask:arq"}, "--before a step", 2},
 		{[]string{"remove", "time-machine"}, "time-machine failed declared for every Mac, in shared/declarations:", 1},
@@ -186,7 +189,23 @@ func TestBackupAddAndRemove(t *testing.T) {
 			t.Errorf("kit backup %s printed\n%s%s exit %d; want %q, exit %d", strings.Join(tt.args, " "), out, errOut, code, tt.want, tt.code)
 		}
 	}
-	w.writeSection(t, "laptop", "backups", "")
+	w.writeSection(t, "studio", "backups", "arq\n")
+	w.expectSync([]string{"laptop/declarations", "shared/declarations", "studio/declarations"}, "kit backup add arq (laptop)")
+	if out, errOut, code := w.run(t, "backup", "add", "arq", "--shared"); code != 0 || !strings.Contains(out, "arq ok declared in shared, out of laptop and studio\n") {
+		t.Fatalf("kit backup add --shared, declared by Macs, printed\n%s%s exit %d", out, errOut, code)
+	}
+	if got := w.readSection(t, "shared", "backups"); got != "arq\ntime-machine\n" {
+		t.Errorf("shared [backups] = %q", got)
+	}
+	for _, mac := range []string{"laptop", "studio"} {
+		if got := w.readSection(t, mac, "backups"); got != "" {
+			t.Errorf("%s's [backups] = %q, want arq out of it", mac, got)
+		}
+	}
+	if commits := slices.DeleteFunc(w.fake.Calls(), func(call string) bool { return !strings.Contains(call, " commit ") }); len(commits) != 3 {
+		t.Errorf("committed %q, want one commit for each of the three adds", commits)
+	}
+	w.writeSection(t, "shared", "backups", "")
 	if out, _, code := w.run(t, "backup", "add", "arq", "--after", "nothing"); !strings.Contains(out, "arq failed it comes after nothing, which isn't a step") || code != 1 {
 		t.Errorf("kit backup add arq --after nothing printed\n%s exit %d", out, code)
 	}

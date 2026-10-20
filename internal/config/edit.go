@@ -342,6 +342,14 @@ func (c *Config) CheckDeclare(kind, scope string, e Entry) error {
 	return err
 }
 
+// CheckDeclareShared says why DeclareShared would refuse e, taking it out
+// of the files of the Macs from, writing nothing: nil when it would declare
+// it.
+func (c *Config) CheckDeclareShared(kind string, e Entry, from []string) error {
+	_, _, err := c.declaring(kind, Shared, e, from...)
+	return err
+}
+
 // declaring is scope's declarations file with e declared, as Declare
 // writes it, then each of the files of the Macs from with it taken out, none
 // yet written, once the config reads as kit reads it with them all

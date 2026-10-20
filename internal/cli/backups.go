@@ -144,9 +144,10 @@ cask:arq; --before a step that comes after it; each as often as wanted.` + decla
 }
 
 // addBackup declares the backup tool called name, its check placed as opts
-// say, in this Mac's file or the shared one, then commits and pushes. One
-// declared already, for this Mac or, with --shared, any, is refused, as is
-// one placed after or before what isn't a step.
+// say, in this Mac's file or the shared one, taking it out of the Macs'
+// files that had it, then commits and pushes. One declared already, in the
+// shared file or the one it goes in, is refused, as is one placed after or
+// before what isn't a step.
 func (a *app) addBackup(ctx context.Context, r *run, name string, opts backupOptions) error {
 	var words []string
 	for _, after := range opts.after {
@@ -167,18 +168,18 @@ func (a *app) addBackup(ctx context.Context, r *run, name string, opts backupOpt
 			return failed(err)
 		}
 		for _, e := range where {
-			if opts.shared || e.Scope == config.Shared || e.Scope == r.machine {
+			if e.Scope == config.Shared || e.Scope == scope {
 				return check.Result{State: check.Failed, Reason: "declared already, in " + e.Pos()}
 			}
 		}
 		if _, _, _, err := r.place(b.After, b.Before, stepNames(r.pipeline.Steps())); err != nil {
 			return failed(err)
 		}
-		if err := r.cfg.Declare(config.BackupsKind, scope, config.Entry{Name: name, Value: strings.Join(words, " "), Note: opts.note}); err != nil {
+		moved, err := c.declare(config.BackupsKind, scope, config.Entry{Name: name, Value: strings.Join(words, " "), Note: opts.note})
+		if err != nil {
 			return failed(err)
 		}
-		c.changed(config.DeclFile(scope))
-		return check.Result{State: check.OK, Summary: "declared in " + scope}
+		return check.Result{State: check.OK, Summary: "declared in " + scope + outOf(moved)}
 	})
 	c.sync(ctx, commitMessage("add", backupCommand, []string{name}, r.machine, opts.note))
 	return c.finish()

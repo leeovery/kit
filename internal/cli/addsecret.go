@@ -53,8 +53,9 @@ func (r *run) secrets() (*secret.Secrets, error) {
 // it's told, the block named (--in) or the item (--item), and its line in
 // the file's block for that item, made when there's none; a reference in an
 // item a block of the file is for goes in that block, short, and any other
-// in the plain [secrets], in full. Everything's checked before the value's
-// asked for, or read (secretTarget).
+// in the plain [secrets], in full. Declared for every Mac, it comes out of
+// the Macs' files that had it, in the same edit. Everything's checked before
+// the value's asked for, or read (secretTarget).
 func (a *app) addSecret(ctx context.Context, r *run, names []string, opts addOptions) error {
 	so := opts.secret
 	k, err := r.secrets()
@@ -91,10 +92,10 @@ func (a *app) addSecret(ctx context.Context, r *run, names []string, opts addOpt
 		}
 		e := at.entry
 		e.Value = secretLine(short, so.mode)
-		if err := r.cfg.Declare(secretKind, at.scope, e); err != nil {
+		moved, err := c.declare(secretKind, at.scope, e)
+		if err != nil {
 			return check.Result{State: check.Failed, Reason: "kept in " + d.About().Name + ", but couldn't declare: " + err.Error()}
 		}
-		c.changed(config.DeclFile(at.scope))
 		list, err := r.cfg.List(secretKind, r.machine)
 		if err == nil {
 			_, err = k.Values(list)
@@ -111,7 +112,7 @@ func (a *app) addSecret(ctx context.Context, r *run, names []string, opts addOpt
 		case report.Held[e.Name] != "":
 			return check.Result{State: check.Failed, Reason: "declared, but couldn't sync it yet: " + report.Held[e.Name]}
 		}
-		summary := "declared in " + at.scope + ", synced"
+		summary := "declared in " + at.scope + outOf(moved) + ", synced"
 		if so.ref == "" {
 			summary = "kept in " + d.About().Name + " (" + d.Join(item, short) + ") and read back; " + summary
 		}
@@ -163,7 +164,7 @@ func (a *app) secretTarget(ctx context.Context, r *run, k *secret.Secrets, name 
 		return at, err
 	}
 	at.entry = config.Entry{Name: name, Value: secretLine(at.short, so.mode), Note: opts.note, Item: item, As: as}
-	if err := r.cfg.CheckDeclare(secretKind, at.scope, at.entry); err != nil {
+	if err := r.checkDeclare(secretKind, at.scope, at.entry); err != nil {
 		return at, err
 	}
 	if err := k.Ready(ctx, at.store); err != nil {

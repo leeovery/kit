@@ -268,16 +268,16 @@ func TestAddASecretChecksAllBeforeTheValue(t *testing.T) {
 	}
 }
 
-// A name in the shared file can't go in this Mac's, nor one in any Mac's
-// in the shared file: kit secret add refuses it before anything's asked
-// for, stored, written or committed.
-func TestAddASecretNamedInTheOtherFile(t *testing.T) {
+// A name in the shared file can't go in this Mac's, nor in the shared file
+// again: kit secret add refuses it before anything's asked for, stored,
+// written or committed.
+func TestAddASecretNamedInTheSharedFile(t *testing.T) {
 	for _, c := range []struct {
 		name, want string
 		args       []string
 	}{
-		{"this Mac's, named in shared", "TOKEN is in the shared declarations already", []string{"TOKEN"}},
-		{"shared, named in a Mac's", "studio/declarations:5: STUDIO is in", []string{"STUDIO", "--shared"}},
+		{"this Mac's", "TOKEN is in the shared declarations already", []string{"TOKEN"}},
+		{"shared", "TOKEN is in shared/declarations already", []string{"TOKEN", "--shared"}},
 	} {
 		for _, terminal := range []bool{true, false} {
 			w := laptopWorld(t)
@@ -304,6 +304,39 @@ func TestAddASecretNamedInTheOtherFile(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// Declared for every Mac, a secret comes out of the Macs' files that had
+// it, whatever block it was in, in the same edit and commit as its shared
+// line goes in the block --in names.
+func TestAddASecretSharedTakesItOutOfTheMacs(t *testing.T) {
+	w := laptopWorld(t)
+	w.writeSection(t, "laptop", "secrets op://vault/Item --as mac-secrets", "FOO Section/foo\nTOKEN Section/token\n")
+	w.writeSection(t, "studio", "secrets op://vault/Other --as keys", "FOO Section/foo\n")
+	w.stdin = "new value"
+	f := w.fake
+	f.On("op", "whoami")
+	f.On("op", "item", "get", "Item", "--vault", "vault", "--format", "json").Prints(`{"id":"abc","title":"Item","sections":[{"id":"s1","label":"Section"}],"fields":[]}`)
+	f.On("op", "item", "edit", "Item", "--vault", "vault")
+	optest.Holds(f, map[string]string{"op://vault/Item/Section/shared-foo": "new value", "op://vault/Item/Section/token": "the value"})
+	w.expectSync([]string{"laptop/declarations", "shared/declarations", "studio/declarations"}, "kit secret add FOO (laptop)")
+	out, _, code := w.run(t, "secret", "add", "FOO", "--shared", "--in", "mac-secrets", "--field", "Section/shared-foo", "--stdin")
+	if code != 0 || !strings.Contains(out, "declared in shared, out of laptop and studio, synced") {
+		t.Fatalf("kit secret add --shared printed\n%s exit %d", out, code)
+	}
+	if got := w.readSection(t, "shared", "secrets op://vault/Item --as mac-secrets"); got != "FOO Section/shared-foo\n" {
+		t.Errorf("shared's [secrets op://vault/Item --as mac-secrets] = %q", got)
+	}
+	if got := w.readSection(t, "laptop", "secrets op://vault/Item --as mac-secrets"); got != "TOKEN Section/token\n" {
+		t.Errorf("laptop's [secrets op://vault/Item --as mac-secrets] = %q, want FOO out of it", got)
+	}
+	if got := w.read(t, filepath.Join(".config", "kit", "studio", "declarations")); strings.Contains(got, "FOO") {
+		t.Errorf("studio's declarations = %q, want FOO out of them", got)
+	}
+	commits := slices.DeleteFunc(f.Calls(), func(call string) bool { return !strings.Contains(call, " commit ") })
+	if len(commits) != 1 {
+		t.Errorf("committed %q, want one commit", commits)
 	}
 }
 

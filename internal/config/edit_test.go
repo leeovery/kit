@@ -530,6 +530,35 @@ func TestDeclareSharedMovesItOutOfTheMacs(t *testing.T) {
 	}
 }
 
+// CheckDeclareShared judges a move as DeclareShared would, writing nothing:
+// a secret in a Mac's block for another item moves, one the shared file has
+// already is refused, in the same words.
+func TestCheckDeclareSharedJudgesTheMove(t *testing.T) {
+	files := map[string]string{
+		"shared/declarations": "[secrets op://vault/Item --as mac-secrets]\nTOKEN Section/token\n",
+		"laptop/declarations": "[secrets op://vault/Other --as keys]\nFOO Section/foo\n",
+	}
+	cfg := loadRepo(t, files)
+	foo := config.Entry{Name: "FOO", Value: "Section/foo", Item: "op://vault/Item"}
+	if err := cfg.CheckDeclareShared("secret", foo, []string{"laptop"}); err != nil {
+		t.Errorf("CheckDeclareShared() of a Mac's secret, moved = %v", err)
+	}
+	if err := cfg.CheckDeclareShared("secret", foo, nil); err == nil {
+		t.Error("CheckDeclareShared() of a Mac's secret, not moved = nil, want it refused")
+	}
+	for path, before := range files {
+		if got := readFile(t, cfg, path); got != before {
+			t.Errorf("%s = %q, want it untouched", path, got)
+		}
+	}
+	token := config.Entry{Name: "TOKEN", Value: "Section/new", Item: "op://vault/Item"}
+	checked := cfg.CheckDeclareShared("secret", token, nil)
+	_, declared := cfg.DeclareShared("secret", token, nil)
+	if checked == nil || declared == nil || checked.Error() != declared.Error() {
+		t.Errorf("CheckDeclareShared() = %v, DeclareShared() = %v: want both refusing a name in shared, alike", checked, declared)
+	}
+}
+
 // A move that fails partway says which files it wrote, so they're
 // committed: the shared file written, a Mac's not.
 func TestDeclareSharedSaysWhatItWroteWhenAWriteFails(t *testing.T) {
