@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -47,25 +48,47 @@ func (e Exec) Run(ctx context.Context, cmd Command) (Result, error) {
 	ctx, cancel := limited(ctx, cmd.Timeout)
 	defer cancel()
 	started := e.Now()
-	stdout, stderr, err := e.start(ctx, program, cmd)
-	res := Result{Stdout: stdout, Stderr: stderr, ExitCode: -1, Duration: e.Now().Sub(started)}
-	// Ended, it may still exit as it chooses, as sudo does with what it ran.
-	if ctxErr := ctx.Err(); err != nil && ctxErr != nil {
+	r, err := e.start(ctx, program, cmd)
+	res := Result{Stdout: r.stdout, Stderr: r.stderr, ExitCode: -1, Duration: e.Now().Sub(started), Group: r.group}
+	ctxErr := ctx.Err()
+	// Ended by kit, it may still exit as it chooses, as sudo does with what
+	// it ran.
+	if err != nil && ctxErr != nil && r.ended {
 		return res, fmt.Errorf("%s: %w", cmd, ctxErr)
 	}
 	if exit, ok := errors.AsType[*exec.ExitError](err); ok && exit.Exited() {
 		res.ExitCode = exit.ExitCode()
-		exited := &ExitError{Command: cmd.String(), Code: res.ExitCode, Stderr: lastLine(stderr)}
+		exited := &ExitError{Command: cmd.String(), Code: res.ExitCode, Stderr: lastLine(r.stderr)}
 		if errors.Is(err, ErrAnsweredLate) {
 			return res, errors.Join(exited, ErrAnsweredLate)
 		}
 		return res, exited
 	}
 	if err != nil {
+		if ctxErr != nil {
+			return res, fmt.Errorf("%s: %w", cmd, ctxErr)
+		}
 		return res, fmt.Errorf("run %s: %w", cmd, err)
 	}
 	res.ExitCode = 0
 	return res, nil
+}
+
+// ran is what running a command came to: what it printed; the process
+// group it ran in, detached; and whether kit ended it.
+type ran struct {
+	stdout, stderr []byte
+	group          int
+	ended          bool
+}
+
+// done is what c, the command run detached as d readied it, came to.
+func done(c *exec.Cmd, d *detached, stdout, stderr []byte) ran {
+	r := ran{stdout: stdout, stderr: stderr, ended: d.ended.Load()}
+	if c.Process != nil {
+		r.group = c.Process.Pid
+	}
+	return r
 }
 
 // limited is ctx for a command given timeout, as Command's Timeout says.
@@ -76,8 +99,8 @@ func limited(ctx context.Context, timeout time.Duration) (context.Context, conte
 	return hold.WithTimeout(ctx, cmp.Or(timeout, DefaultTimeout))
 }
 
-// start runs program as cmd says, returning what it printed.
-func (e Exec) start(ctx context.Context, program string, cmd Command) (stdout, stderr []byte, err error) {
+// start runs program as cmd says.
+func (e Exec) start(ctx context.Context, program string, cmd Command) (ran, error) {
 	c := exec.CommandContext(ctx, program, cmd.Args...)
 	c.Env = slices.Concat(e.Env, cmd.Env, SecretEnv(ctx))
 	c.Dir = cmd.Dir
@@ -89,7 +112,7 @@ func (e Exec) start(ctx context.Context, program string, cmd Command) (stdout, s
 		// the only one that may read from it.
 		c.Stdin, c.Stdout, c.Stderr = e.Stdin, e.Stdout, e.Stderr
 		c.WaitDelay = waitDelay
-		return nil, nil, c.Run()
+		return ran{}, c.Run()
 	}
 	if cmd.Input != "" {
 		c.Stdin = strings.NewReader(cmd.Input)
@@ -105,9 +128,10 @@ func (e Exec) start(ctx context.Context, program string, cmd Command) (stdout, s
 			stderr.end()
 		}()
 	}
-	defer detach(c, cmd)()
-	err = c.Run()
-	return out.Bytes(), errOut.Bytes(), err
+	d := detach(c, cmd)
+	defer d.stop()
+	err := c.Run()
+	return done(c, d, out.Bytes(), errOut.Bytes()), err
 }
 
 // detach has c, the command cmd, run in a process group of its own, ended
@@ -117,37 +141,51 @@ func (e Exec) start(ctx context.Context, program string, cmd Command) (stdout, s
 // it runs in a session of its own too, without kit's terminal: a program
 // that asks there, as a program's own sudo asks for a password, fails at
 // once, where in the background of kit's terminal it would stop, unseen,
-// for good. It returns what's called once c has ended.
-func detach(c *exec.Cmd, cmd Command) (ended func()) {
+// for good.
+func detach(c *exec.Cmd, cmd Command) *detached {
+	d := &detached{}
 	c.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if ownSudo(cmd) || cmd.SharesSudo {
 		c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	}
 	group := func() error { return syscall.Kill(-c.Process.Pid, syscall.SIGKILL) }
-	c.Cancel = group
+	c.Cancel = func() error {
+		d.ended.Store(true)
+		return group()
+	}
 	c.WaitDelay = waitDelay
 	if !ownSudo(cmd) {
-		return func() {}
+		return d
 	}
 	// What kit's sudo runs runs as root, which kit can't signal: SIGKILL
 	// would end sudo alone, and leave it running. sudo passes SIGTERM on to
 	// it; the group's killed only once that's been ignored for waitDelay,
 	// before os/exec gives up on its output.
-	var mu sync.Mutex
-	var fallback *time.Timer
 	c.Cancel = func() error {
-		mu.Lock()
-		defer mu.Unlock()
-		fallback = time.AfterFunc(waitDelay, func() { _ = group() })
+		d.ended.Store(true)
+		d.mu.Lock()
+		defer d.mu.Unlock()
+		d.fallback = time.AfterFunc(waitDelay, func() { _ = group() })
 		return c.Process.Signal(syscall.SIGTERM)
 	}
 	c.WaitDelay = 2 * waitDelay
-	return func() {
-		mu.Lock()
-		defer mu.Unlock()
-		if fallback != nil {
-			fallback.Stop()
-		}
+	return d
+}
+
+// detached is a command detach readied: whether kit ended it, and the
+// fallback that kills its group, for kit's own sudo.
+type detached struct {
+	ended    atomic.Bool
+	mu       sync.Mutex
+	fallback *time.Timer
+}
+
+// stop stops the fallback, once the command's ended.
+func (d *detached) stop() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.fallback != nil {
+		d.fallback.Stop()
 	}
 }
 
@@ -163,20 +201,21 @@ func ownSudo(cmd Command) bool {
 // converse runs c, the command cmd, detached, answering what it asks on its
 // standard error, as cmd says, on its standard input; what it printed, its
 // prompts taken out.
-func converse(ctx context.Context, c *exec.Cmd, cmd Command) (stdout, stderr []byte, err error) {
+func converse(ctx context.Context, c *exec.Cmd, cmd Command) (ran, error) {
 	in, err := c.StdinPipe()
 	if err != nil {
-		return nil, nil, err
+		return ran{}, err
 	}
 	errs, err := c.StderrPipe()
 	if err != nil {
-		return nil, nil, err
+		return ran{}, err
 	}
 	var out bytes.Buffer
 	c.Stdout = &out
-	defer detach(c, cmd)()
+	d := detach(c, cmd)
+	defer d.stop()
 	if err := c.Start(); err != nil {
-		return nil, nil, err
+		return ran{}, err
 	}
 	prompt := []byte(cmd.Asks)
 	var said, pending []byte
@@ -219,7 +258,7 @@ func converse(ctx context.Context, c *exec.Cmd, cmd Command) (stdout, stderr []b
 	case answerErr != nil && err == nil:
 		err = answerErr
 	}
-	return out.Bytes(), said, err
+	return done(c, d, out.Bytes(), said), err
 }
 
 // Become replaces kit with the program at path, run with args in env, at

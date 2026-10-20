@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/spf13/cobra"
 
@@ -309,7 +310,7 @@ func (r *run) placeLines(all []engine.Step) {
 		}
 		for _, other := range sharing.Shares() {
 			for _, thing := range r.placing[other].First {
-				p.Behind = append(p.Behind, engine.Wait{Step: other, Thing: thing, Ready: r.installed(other, thing)})
+				p.Behind = append(p.Behind, engine.Wait{Step: other, Thing: thing, Ready: r.behind(other, thing)})
 			}
 		}
 		r.placing[name] = p
@@ -415,6 +416,41 @@ func (r *run) installed(kindName, thing string) func(context.Context) bool {
 		}
 		return slices.ContainsFunc(have, func(in kind.Installed) bool { return sameThing(in.Name, thing) })
 	}
+}
+
+// behind is whether what waits behind thing, a thing of the kind called
+// kindName, as a kind taking turns with it does, has waited enough: once
+// it's installed, or put off till kit has the administrator's password,
+// which nothing waits for for order's sake.
+func (r *run) behind(kindName, thing string) func(context.Context) bool {
+	installed := r.installed(kindName, thing)
+	return func(ctx context.Context) bool {
+		return r.putOff.has(kindName, thing) || installed(ctx)
+	}
+}
+
+// putOff are the things the kinds have put off till kit has the
+// administrator's password, by kind.
+type putOff struct {
+	mu     sync.Mutex
+	things map[string][]string
+}
+
+// note notes things of the kind called kindName put off.
+func (p *putOff) note(kindName string, things []string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.things == nil {
+		p.things = map[string][]string{}
+	}
+	p.things[kindName] = append(p.things[kindName], things...)
+}
+
+// has reports whether thing, of the kind called kindName, is put off.
+func (p *putOff) has(kindName, thing string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return slices.ContainsFunc(p.things[kindName], func(name string) bool { return sameThing(name, thing) })
 }
 
 // sameThing reports whether name is thing, by its full name, or a tap's

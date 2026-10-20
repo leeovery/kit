@@ -368,7 +368,7 @@ func (a *app) carryOut(ctx context.Context, r *run, decisions []decision, note s
 			wanted[d.item.Kind] = append(wanted[d.item.Kind], d.item.Name)
 		}
 	}
-	held, stop := a.holdAdmin(ctx, r, wanted)
+	ctx, held, stop := a.holdAdmin(ctx, r, wanted)
 	defer stop()
 	waiting := make(map[string]bool)
 	for kindName, names := range installs {

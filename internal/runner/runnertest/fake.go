@@ -64,6 +64,7 @@ type answer struct {
 	asks     int
 	late     bool
 	hangs    bool
+	group    int
 }
 
 func (s *Script) last() *answer {
@@ -141,6 +142,12 @@ func (s *Script) Hangs() *Script {
 	return s
 }
 
+// InGroup has the command run in process group n (runner.Result's Group).
+func (s *Script) InGroup(n int) *Script {
+	s.last().group = n
+	return s
+}
+
 // Answered are what the command was given when it asked, in order.
 func (s *Script) Answered() []string {
 	return slices.Clone(s.answered)
@@ -188,7 +195,7 @@ func (f *Fake) Run(ctx context.Context, cmd runner.Command) (runner.Result, erro
 		return runner.Result{ExitCode: -1}, fmt.Errorf("%s: %w (unscripted)", cmd.Name, runner.ErrNotFound)
 	}
 	if a.err != nil {
-		return runner.Result{ExitCode: -1}, a.err
+		return runner.Result{ExitCode: -1, Group: a.group}, a.err
 	}
 	for asked := range a.asks {
 		if cmd.Answer == nil {
@@ -221,9 +228,9 @@ func (f *Fake) Run(ctx context.Context, cmd runner.Command) (runner.Result, erro
 	}
 	if a.hangs {
 		<-ctx.Done()
-		return runner.Result{ExitCode: -1}, fmt.Errorf("%s: %w", cmd, ctx.Err())
+		return runner.Result{ExitCode: -1, Group: a.group}, fmt.Errorf("%s: %w", cmd, ctx.Err())
 	}
-	res := runner.Result{Stdout: []byte(stdout), Stderr: []byte(stderr), ExitCode: exit, Duration: a.duration}
+	res := runner.Result{Stdout: []byte(stdout), Stderr: []byte(stderr), ExitCode: exit, Duration: a.duration, Group: a.group}
 	if exit != 0 {
 		return res, &runner.ExitError{Command: cmd.String(), Code: exit, Stderr: stderr}
 	}

@@ -222,8 +222,37 @@ func TestExecEndsKitsOwnSudoThroughSudo(t *testing.T) {
 		t.Fatal(err)
 	}
 	pid, _ := strconv.Atoi(strings.TrimSpace(string(data)))
+	// Killed, it's there till launchd reaps it, which can take a moment.
+	for deadline := time.Now().Add(2 * time.Second); pid != 0 && syscall.Kill(pid, 0) == nil && time.Now().Before(deadline); {
+		time.Sleep(20 * time.Millisecond)
+	}
 	if pid == 0 || syscall.Kill(pid, 0) == nil {
 		t.Errorf("what sudo ran, ignoring SIGTERM, still runs (%d), want its group killed", pid)
+	}
+}
+
+// A command kit runs detached says the process group it ran in, its own.
+func TestExecSaysTheGroupACommandRanIn(t *testing.T) {
+	r, _ := programs(t, map[string]string{"group": "echo $$"})
+	res, err := r.Run(t.Context(), runner.Command{Name: "group"})
+	if pid, _ := strconv.Atoi(strings.TrimSpace(string(res.Stdout))); err != nil || pid == 0 || res.Group != pid {
+		t.Errorf("Run() = group %d, %v; want the group it led, %q", res.Group, err, res.Stdout)
+	}
+}
+
+// A command that fails on its own as the run's ending, kit not having ended
+// it, says how it exited: here the run ends as its last line's read, once
+// it's exited.
+func TestExecSaysAnExitKitDidntCause(t *testing.T) {
+	r, _ := programs(t, map[string]string{"fails": "echo bye; exit 3"})
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	res, err := r.Run(ctx, runner.Command{Name: "fails", Lines: func(string) {
+		time.Sleep(200 * time.Millisecond)
+		cancel()
+	}})
+	if exit, ok := errors.AsType[*runner.ExitError](err); !ok || exit.Code != 3 || res.ExitCode != 3 {
+		t.Errorf("Run() = exit %d, %v; want exit 3", res.ExitCode, err)
 	}
 }
 

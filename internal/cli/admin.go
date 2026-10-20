@@ -35,23 +35,25 @@ const adminWait = "needs an administrator's password: run kit %s at a terminal"
 // (renewSudo). Without a terminal it asks nothing: sudo either holds a
 // password already, or those installs wait. Every kind that can need the
 // password is told how it stands, and held says too; it's nil when nothing
-// wanted needs the password.
-func (a *app) holdAdmin(ctx context.Context, r *run, wanted map[string][]string) (held func(context.Context) bool, stop func()) {
+// wanted needs the password. The installs are to run in installing, for
+// them to wait for the password, should sudo forget it (kind.Password).
+func (a *app) holdAdmin(ctx context.Context, r *run, wanted map[string][]string) (installing context.Context, held func(context.Context) bool, stop func()) {
 	if !a.pretty(a.Stdout) {
 		held = sudoHolds(r)
 		r.tellAdmin(held)
-		return held, func() {}
+		return ctx, held, func() {}
 	}
 	if !needsAdmin(ctx, r, wanted) {
-		return nil, func() {}
+		return ctx, nil, func() {}
 	}
 	h := newAdminHold()
 	h.settle(a.askAdmin(ctx, r, wanted))
 	r.tellAdmin(h.held)
+	installing = kind.WithPassword(ctx, h)
 	if !h.Held() {
-		return h.held, func() {}
+		return installing, h.held, func() {}
 	}
-	return h.held, r.keepSudo(ctx, h)
+	return installing, h.held, r.keepSudo(ctx, h)
 }
 
 // holdAdminAlongside is holdAdmin for a run that goes on while kit asks, as
@@ -61,7 +63,7 @@ func (a *app) holdAdmin(ctx context.Context, r *run, wanted map[string][]string)
 // it takes.
 func (a *app) holdAdminAlongside(ctx context.Context, r *run, wanted map[string][]string) (stop func()) {
 	if !a.pretty(a.Stdout) {
-		_, stop = a.holdAdmin(ctx, r, wanted)
+		_, _, stop = a.holdAdmin(ctx, r, wanted)
 		return stop
 	}
 	if !needsAdmin(ctx, r, wanted) {
@@ -99,6 +101,8 @@ type adminHold struct {
 	mu       sync.Mutex
 	answered chan struct{}
 	has      atomic.Bool
+	// keeper keeps sudo's hold on it fresh, once it's held.
+	keeper *sudoKeeper
 }
 
 func newAdminHold() *adminHold {
@@ -162,25 +166,56 @@ func (h *adminHold) held(ctx context.Context) bool {
 	return h.Held()
 }
 
-// Wait waits, for the step ctx is running, while kit asks, for the answer,
-// the step saying so and giving its job up meanwhile; it reports whether
-// the password's held.
+// Wait waits, for the step ctx is running, while kit asks, first or again,
+// for the answer, the step saying so and giving its job up meanwhile; it
+// reports whether the password's held.
 func (h *adminHold) Wait(ctx context.Context) bool {
-	turn := h.turn()
-	select {
-	case <-turn:
+	said := false
+	for {
+		turn := h.turn()
+		select {
+		case <-turn:
+			// Answered, unless kit's begun asking again since.
+			if held := h.Held(); held || !h.asking() {
+				if said {
+					event.Say(ctx, event.Doing{Says: "applying"})
+				}
+				return held
+			}
+			continue
+		default:
+		}
+		if !said {
+			event.Say(ctx, event.Doing{Says: "waiting for an administrator's password"})
+			said = true
+		}
+		back := engine.Release(ctx)
+		select {
+		case <-turn:
+		case <-ctx.Done():
+		}
+		back()
+		if ctx.Err() != nil {
+			return h.Held()
+		}
+	}
+}
+
+// Forgotten has kit find out at once whether sudo's forgotten the password,
+// as a command run through sudo -n said, and ask for it again if so
+// (sudoKeeper's renew), or, while kit's asking, waits for the answer; it
+// reports whether the password's held.
+func (h *adminHold) Forgotten(ctx context.Context) bool {
+	if h.asking() {
+		return h.Wait(ctx)
+	}
+	h.mu.Lock()
+	k := h.keeper
+	h.mu.Unlock()
+	if k == nil || !h.Held() {
 		return h.Held()
-	default:
 	}
-	event.Say(ctx, event.Doing{Says: "waiting for an administrator's password"})
-	back := engine.Release(ctx)
-	select {
-	case <-turn:
-	case <-ctx.Done():
-	}
-	back()
-	event.Say(ctx, event.Doing{Says: "applying"})
-	return h.Held()
+	return k.renew(ctx)
 }
 
 // afterAdmin is apply, a step's whose apply needs an administrator's
@@ -220,32 +255,46 @@ func sudoHolds(r *run) func(context.Context) bool {
 }
 
 // keepSudo keeps sudo's hold on the run's password, as h holds it, fresh
-// (renewSudo) till the stop it returns.
+// (sudoKeeper) till the stop it returns.
 func (r *run) keepSudo(ctx context.Context, h *adminHold) (stop func()) {
+	k := &sudoKeeper{run: r.run, asks: r.askpass, h: h}
+	h.mu.Lock()
+	h.keeper = k
+	h.mu.Unlock()
 	ctx, cancel := context.WithCancel(ctx)
 	var wg sync.WaitGroup
-	wg.Go(func() { renewSudo(ctx, r.run, r.askpass, sudoRefresh, h) })
+	wg.Go(func() { k.keep(ctx, sudoRefresh) })
 	return func() {
 		cancel()
 		wg.Wait()
 	}
 }
 
-// holding is how the run holds its password, as renewSudo keeps it.
+// holding is how the run holds its password, as a sudoKeeper keeps it.
 type holding interface {
 	Held() bool
 	askAgain()
 	settle(has bool)
 }
 
-// renewSudo renews sudo's hold on the run's password every interval, while
-// h holds one, till ctx ends. When sudo has forgotten it, as after the Mac
-// slept past sudo's five minutes, or sudo -K, it's given again, as asks
-// answers sudo: the password kept, else the person's, in kit's field; the
-// log has sudo -n -v failing, then sudo -v given it. It isn't held
-// meanwhile, and what sudo takes is kept; once it couldn't be given again,
-// it's forgotten, for nothing to be given a wrong one.
+// renewSudo keeps sudo's hold on the run's password fresh, as h holds it,
+// every interval, till ctx ends (sudoKeeper).
 func renewSudo(ctx context.Context, run runner.Runner, asks *askpass.Server, interval time.Duration, h holding) {
+	(&sudoKeeper{run: run, asks: asks, h: h}).keep(ctx, interval)
+}
+
+// sudoKeeper keeps sudo's hold on the run's password, as h holds it, fresh,
+// one renewal at a time, given again, through asks, when sudo forgets it.
+type sudoKeeper struct {
+	run  runner.Runner
+	asks *askpass.Server
+	h    holding
+	mu   sync.Mutex
+}
+
+// keep renews sudo's hold every interval, while h holds the password, till
+// ctx ends.
+func (k *sudoKeeper) keep(ctx context.Context, interval time.Duration) {
 	tick := time.NewTicker(interval)
 	defer tick.Stop()
 	for {
@@ -254,28 +303,39 @@ func renewSudo(ctx context.Context, run runner.Runner, asks *askpass.Server, int
 			return
 		case <-tick.C:
 		}
-		if !h.Held() {
-			continue
-		}
-		if _, err := run.Run(ctx, runner.Command{Name: "sudo", Args: []string{"-n", "-v"}}); err == nil || ctx.Err() != nil {
-			continue
-		}
-		h.askAgain()
-		took := false
-		if asks != nil {
-			asks.Turn(func() {
-				var given string
-				if given, took = giveSudo(ctx, run, asks.Answer()); took && given != "" {
-					asks.Keep(given)
-				} else if !took && ctx.Err() == nil {
-					asks.Keep("")
-				}
-			})
-		}
-		if h.settle(took); !took {
-			return
+		if k.h.Held() {
+			k.renew(ctx)
 		}
 	}
+}
+
+// renew renews sudo's hold on the password. When sudo has forgotten it, as
+// after the Mac slept past sudo's five minutes, or sudo -K, it's given
+// again, as asks answers sudo: the password kept, else the person's, in
+// kit's field; the log has sudo -n -v failing, then sudo -v given it. It
+// isn't held meanwhile, and what sudo takes is kept; once it couldn't be
+// given again, it's forgotten, for nothing to be given a wrong one. It
+// reports whether it's held.
+func (k *sudoKeeper) renew(ctx context.Context) bool {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	if _, err := k.run.Run(ctx, runner.Command{Name: "sudo", Args: []string{"-n", "-v"}}); err == nil || ctx.Err() != nil {
+		return err == nil
+	}
+	k.h.askAgain()
+	took := false
+	if k.asks != nil {
+		k.asks.Turn(func() {
+			var given string
+			if given, took = giveSudo(ctx, k.run, k.asks.Answer()); took && given != "" {
+				k.asks.Keep(given)
+			} else if !took && ctx.Err() == nil {
+				k.asks.Keep("")
+			}
+		})
+	}
+	k.h.settle(took)
+	return took
 }
 
 // sudoAsks is the prompt kit has sudo give on its standard error when it

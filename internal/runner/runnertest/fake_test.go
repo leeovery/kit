@@ -163,15 +163,16 @@ func TestFakeAsks(t *testing.T) {
 }
 
 // A command scripted to hang prints what it prints, then waits till its
-// context is done, failing with the context's error.
+// context is done, failing with the context's error; one scripted to run in
+// a process group says so.
 func TestFakeHangs(t *testing.T) {
 	fake := runnertest.New(t)
-	fake.On("mas", "install", "1").Prints("==> Downloading Bear\n").Hangs()
+	fake.On("mas", "install", "1").Prints("==> Downloading Bear\n").Hangs().InGroup(4242)
 	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
 	defer cancel()
 	var heard []string
-	_, err := fake.Run(ctx, runner.Command{Name: "mas", Args: []string{"install", "1"}, Lines: func(line string) { heard = append(heard, line) }})
-	if !errors.Is(err, context.DeadlineExceeded) || !slices.Equal(heard, []string{"==> Downloading Bear"}) {
-		t.Errorf("Run() = %v, printing %q; want what it prints, then the deadline exceeded", err, heard)
+	res, err := fake.Run(ctx, runner.Command{Name: "mas", Args: []string{"install", "1"}, Lines: func(line string) { heard = append(heard, line) }})
+	if !errors.Is(err, context.DeadlineExceeded) || !slices.Equal(heard, []string{"==> Downloading Bear"}) || res.Group != 4242 {
+		t.Errorf("Run() = %v, printing %q, in group %d; want what it prints, then the deadline exceeded, in its group", err, heard, res.Group)
 	}
 }

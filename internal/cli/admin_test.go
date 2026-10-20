@@ -150,7 +150,7 @@ func TestAdminHold(t *testing.T) {
 				if !h.held(t.Context()) || h.held(changing) || h.Held() {
 					t.Errorf("held while asking (again %v) = %v checking, %v changing; want it coming for a check alone", again, h.held(t.Context()), h.held(changing))
 				}
-				admin := r.placed(t.Context(), "app store apps").Admin
+				admin := r.placed("app store apps").Admin
 				waited := make(chan bool)
 				go func() { waited <- admin.Wait(changing) }()
 				select {
@@ -185,5 +185,52 @@ func TestGiveSudoGivesALateAnswerAgain(t *testing.T) {
 		if c.Timeout != runner.Unlimited {
 			t.Errorf("ran %q with a limit of %v, want none", c.String(), c.Timeout)
 		}
+	}
+}
+
+// Told sudo's forgotten the password, as a command run through sudo -n
+// says, kit finds out at once: sudo has it still, and it's held; sudo
+// hasn't, and it's asked for again, not held meanwhile, and held once
+// given. Refused before, it isn't held, and nothing's asked.
+func TestAForgottenPasswordIsFoundOutAtOnce(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		held, forgot  bool
+		given         []string
+		holds, asking bool
+	}{
+		{name: "sudo has it", held: true, holds: true},
+		{name: "sudo forgot it", held: true, forgot: true, given: []string{"typed"}, holds: true, asking: true},
+		{name: "refused before", forgot: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := runnertest.New(t)
+			check := fake.On("sudo", "-n", "-v")
+			if tc.forgot {
+				check.Exits(1).PrintsToStderr("sudo: a password is required\n")
+			}
+			h := newAdminHold()
+			askingWhileGiven := false
+			give := fake.On("sudo", "-S", "-p", sudoAsks, "-v").Asks(1).Does(func() { askingWhileGiven = h.asking() && !h.Held() })
+			asks, err := askpass.Start("", "/usr/bin/true", func(context.Context, int) (string, error) { return "typed", nil })
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = asks.Close() })
+			r := &run{run: fake, askpass: asks}
+			h.settle(tc.held)
+			if tc.held {
+				defer r.keepSudo(t.Context(), h)()
+			}
+			if got := h.Forgotten(t.Context()); got != tc.holds || h.Held() != tc.holds {
+				t.Errorf("Forgotten() = %v, held %v; want %v", got, h.Held(), tc.holds)
+			}
+			if !slices.Equal(give.Answered(), tc.given) || askingWhileGiven != tc.asking {
+				t.Errorf("sudo given %q, asking meanwhile %v; want %q, %v (ran %q)", give.Answered(), askingWhileGiven, tc.given, tc.asking, fake.Calls())
+			}
+			if !tc.held && len(fake.Calls()) > 0 {
+				t.Errorf("ran %q, want nothing once refused", fake.Calls())
+			}
+		})
 	}
 }

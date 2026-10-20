@@ -273,12 +273,14 @@ macOS keeps it private): the line, marked done no more, comes up again as it did
 notification, the step waiting for it meanwhile, its row saying it waits for you, and the log
 that it's waiting for you, then, once it's done, done and how long it took; then the step tries
 again, as often as it finds it not done. So kit installs App Store apps one at a time, the
-first the check: mas, with no one signed in, says so or waits for good, saying nothing, so till
-an app's in, mas saying nothing for five minutes is taken as no one signed in, as one mas says
-it of is, however long a download that goes on saying how it's going takes; each install has an
-hour and a half (Xcode is gigabytes), and one failing holds none of the others up. What's left
-of an install kit ended is stopped before the next try: mas runs as root, which only root can
-stop. While someone's at the terminal, no app fails for want of a sign-in. A line whose test
+first the check: mas, with no one signed in, says so or waits for good, saying nothing at all,
+so till an app's in, mas saying nothing for five minutes is taken as no one signed in, as one
+mas says it of is. Once mas has said anything, as that it's downloading, the install takes as
+long as it takes (it draws its progress only at a terminal, so through kit it says nothing more
+till it's done), up to an hour and a half (Xcode is gigabytes); one failing holds none of the
+others up. What's left of an install kit ended, in its process group, is stopped before the
+next try: mas runs as root, which only root can stop. While someone's at the terminal, no app
+fails for want of a sign-in. A line whose test
 still passes has nothing to raise again; without a terminal nothing is raised, and the install
 fails at once, naming the fix (sign in to the App Store, then try again), with what failed
 before it; an install that fails otherwise says what mas said, or that mas didn't finish, never
@@ -414,15 +416,18 @@ package, kit asks for an administrator's password once, through `sudo -v`, as th
 under its heading, which holds still till it's answered. The run goes on meanwhile, and only
 what needs the password waits for it, its row saying so, however long the answer takes: kit
 gives the question no time limit, and an answer that came after sudo's own five minutes ended
-it is given to sudo again. Nothing waits behind another kind's things that need it, as the
-formulae otherwise wait behind what the casks install first: those wait for the answer, and
-only what waits for them waits too. Once it's given, kit keeps sudo's hold fresh while it runs,
+it is given to sudo again. What a kind puts off for the answer, nothing waits behind for order's
+sake, as the formulae otherwise wait behind what the casks install first: once the casks step
+has put a cask off, a cask from a tap it's just added as much as any, only what waits for that
+cask itself waits for the answer. Once it's given, kit keeps sudo's hold fresh while it runs,
 giving the password again if sudo forgets it (the person asked only if sudo refuses the one
-kept), what needs it waiting meanwhile, an App Store app at a time; not given, what needs it is
-left, saying why. kit keeps a password once sudo has taken it, never before. Without a terminal
-it asks nothing, and those casks wait, saying why (requirement 4). App Store apps need the
-password for every install, as mas runs as root; `kit <kind> add` and reconcile's installs ask up
-front, before anything else.
+kept), what needs it waiting meanwhile, an App Store app at a time; an App Store install sudo
+says has forgotten it, as after the Mac slept, has kit find out at once, ask again if it must,
+and try the app once more. Not given, what needs it is left, saying why. kit keeps a password
+once sudo has taken it, never before. Without a terminal it asks nothing, and those casks wait,
+saying why (requirement 4). App Store apps need the password for every install, as mas runs as
+root; `kit <kind> add`, `remove` and reconcile's installs ask up front, before anything else, and
+wait for it the same way should sudo forget it.
 Nothing kit runs asks at its terminal: each command runs in a session of its own, without it, so
 a program that asks there fails at once, never stopped unseen in the background; kit's own sudo,
 which never asks there (`-n`, or `-S` on its input), stays in kit's session, as sudo holds a

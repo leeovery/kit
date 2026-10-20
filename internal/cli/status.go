@@ -107,8 +107,10 @@ type run struct {
 	// for an administrator's password: nil when nothing will.
 	askpass *askpass.Server
 	// hold is how the password stands while kit asks for it as the run goes
-	// on: nil when it doesn't.
-	hold *adminHold
+	// on: nil when it doesn't. putOff are the things the kinds have put off
+	// till it's answered.
+	hold   *adminHold
+	putOff putOff
 	// held is whether the person at the Mac is being asked something, which
 	// the run's time limits wait on, at a terminal: by macOS, in a window of
 	// its own, or for a program's sudo, through askpass, which holds up the
@@ -372,7 +374,7 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 		if !list.Declared && unread == nil {
 			continue
 		}
-		step := kind.Placed(k, list, func(ctx context.Context) kind.Placing { return r.placed(ctx, d.Name) }, d.Needs...)
+		step := kind.Placed(k, list, func(context.Context) kind.Placing { return r.placed(d.Name) }, d.Needs...)
 		step.Title, step.Area, step.Row, step.Tool = d.Label, steps.AreaDrift, d.Row, d.Tool
 		if unread != nil {
 			step.Check = func(context.Context) check.Result {
@@ -608,25 +610,15 @@ func (a *app) askpass(face render.Face) *askpass.Server {
 // placed is how the kind called name's lines install, as the run places
 // them: while kit asks for an administrator's password, what needs it waits
 // for the answer, and it's left out once the password's not to be had, as
-// a check made while kit asked took it as coming. Nothing waits behind
-// another kind's things that wait for the answer: only what waits for
-// those things themselves does.
-func (r *run) placed(ctx context.Context, name string) kind.Placing {
+// a check made while kit asked took it as coming. What the kind puts off
+// for the answer, nothing waits behind (putOff).
+func (r *run) placed(name string) kind.Placing {
 	p := r.placing[name]
 	if r.hold == nil {
 		return p
 	}
 	p.Admin = r.hold
-	if !r.hold.Held() {
-		p.Behind = slices.DeleteFunc(slices.Clone(p.Behind), func(w engine.Wait) bool {
-			ad, ok := r.kindsByName[w.Step].(kind.Admin)
-			if !ok {
-				return false
-			}
-			needing, err := ad.NeedsAdmin(ctx, []string{w.Thing})
-			return err == nil && len(needing) > 0
-		})
-	}
+	p.PutOff = func(things []string) { r.putOff.note(name, things) }
 	return p
 }
 

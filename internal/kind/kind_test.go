@@ -846,6 +846,8 @@ func (p *password) Wait(context.Context) bool {
 	return p.given
 }
 
+func (p *password) Forgotten(ctx context.Context) bool { return p.Wait(ctx) }
+
 // While kit asks for an administrator's password as the run goes on, what
 // needs it goes in once it's answered, last, each as it would have gone in,
 // what's waited for first, a section held back with its variable; the rest
@@ -925,6 +927,8 @@ func (a *answers) Wait(context.Context) bool {
 	return next
 }
 
+func (a *answers) Forgotten(ctx context.Context) bool { return a.Wait(ctx) }
+
 func (a *awaitingKind) NeedsAdmin(_ context.Context, names []string) ([]string, error) {
 	return slices.DeleteFunc(slices.Clone(names), func(name string) bool { return !slices.Contains(a.needing, name) }), nil
 }
@@ -981,6 +985,55 @@ func (a *awayKind) Install(ctx context.Context, names []string) error {
 	back()
 	kind.Lines(ctx)("done b")
 	return err
+}
+
+// slowPassword is a kind.Password not held, given after a while.
+type slowPassword struct{ after time.Duration }
+
+func (slowPassword) Held() bool { return false }
+
+func (p slowPassword) Wait(context.Context) bool {
+	time.Sleep(p.after)
+	return true
+}
+
+func (p slowPassword) Forgotten(ctx context.Context) bool { return p.Wait(ctx) }
+
+// adminWaitingKind is a countingKind whose install waits for the password
+// (AwaitAdmin), then says each thing's done.
+type adminWaitingKind struct{ *countingKind }
+
+func (a adminWaitingKind) Install(ctx context.Context, names []string) error {
+	kind.AwaitAdmin(ctx)
+	for _, name := range names {
+		kind.Lines(ctx)("done " + name)
+	}
+	return a.fakeKind.Install(ctx, names)
+}
+
+// An install waiting for the password isn't noted quiet meanwhile, however
+// long the answer takes.
+func TestAnInstallWaitingForThePasswordIsntQuiet(t *testing.T) {
+	defer kind.SetQuiet(20*time.Millisecond, 2*time.Millisecond)()
+	k := adminWaitingKind{&countingKind{fakeKind: knowing("a")}}
+	var alerts []string
+	var mu sync.Mutex
+	ctx := event.WithLogging(context.Background(), func(l event.Logged) {
+		mu.Lock()
+		defer mu.Unlock()
+		if l.Alert {
+			alerts = append(alerts, l.Line)
+		}
+	})
+	s := kind.Placed(k, declared("a"), func(context.Context) kind.Placing {
+		return kind.Placing{Admin: slowPassword{after: 100 * time.Millisecond}}
+	})
+	if err := s.Apply(ctx, s.Check(context.Background())); err != nil {
+		t.Fatal(err)
+	}
+	if len(alerts) > 0 {
+		t.Errorf("alerts %q, want none while it waited for the password", alerts)
+	}
 }
 
 // An install waiting for something that says so itself isn't noted quiet

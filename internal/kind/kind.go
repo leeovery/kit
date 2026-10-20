@@ -368,6 +368,9 @@ type Placing struct {
 	// it isn't given; each install can wait for it again (AwaitAdmin). Nil
 	// when kit doesn't ask as the run goes on.
 	Admin Password
+	// PutOff, when set, is told the lines put off till kit has the
+	// password: nothing waits behind them (Behind) for them now.
+	PutOff func(things []string)
 }
 
 // Password is an administrator's password kit asks for as the run goes on.
@@ -377,20 +380,47 @@ type Password interface {
 	// Wait waits, while kit asks for it, for the answer, the step saying
 	// so, and reports whether it's held.
 	Wait(ctx context.Context) bool
+	// Forgotten has kit find out at once whether sudo's forgotten it, as a
+	// command run through sudo -n said: asked for again, if so, and waited
+	// for. It reports whether it's held.
+	Forgotten(ctx context.Context) bool
 }
 
 type passwordKey struct{}
 
+// WithPassword is ctx for installs that can need the administrator's
+// password p, for them to wait for it (AwaitAdmin, AdminForgotten).
+func WithPassword(ctx context.Context, p Password) context.Context {
+	return context.WithValue(ctx, passwordKey{}, p)
+}
+
 // AwaitAdmin waits, for an install ctx runs that needs an administrator's
 // password, while kit asks for it, first or again, as it does once sudo's
 // forgotten it, reporting whether it's held: as an install's things that
-// need it wait (Placing's Admin). Where kit doesn't ask as the run goes on,
-// it waits for nothing: the password is as the run settled it.
+// need it wait (Placing's Admin). Its step isn't quiet meanwhile (Away).
+// Where kit holds no password for the install, it waits for nothing: the
+// password is as the run settled it.
 func AwaitAdmin(ctx context.Context) bool {
-	if p, ok := ctx.Value(passwordKey{}).(Password); ok {
-		return p.Wait(ctx)
+	p, ok := ctx.Value(passwordKey{}).(Password)
+	if !ok || p.Held() {
+		return true
 	}
-	return true
+	defer Away(ctx)()
+	return p.Wait(ctx)
+}
+
+// AdminForgotten tells kit sudo's forgotten the administrator's password,
+// as a command kit ran through sudo -n said ("a password is required"):
+// kit finds out at once, asks for it again if it must, and waits, the step
+// not quiet meanwhile (Away). It reports whether the password's held:
+// false where kit holds none for the install.
+func AdminForgotten(ctx context.Context) bool {
+	p, ok := ctx.Value(passwordKey{}).(Password)
+	if !ok {
+		return false
+	}
+	defer Away(ctx)()
+	return p.Forgotten(ctx)
 }
 
 // Placed is the step Step is, k's lines installed as placed says, once the
@@ -475,7 +505,7 @@ func installApart(ctx context.Context, k Kind, declared config.List, placing Pla
 		}
 	}
 	if placing.Admin != nil {
-		ctx = context.WithValue(ctx, passwordKey{}, placing.Admin)
+		ctx = WithPassword(ctx, placing.Admin)
 	}
 	// One count of names, across the installs they go in.
 	ctx = counting(ctx, k, names)
@@ -494,6 +524,10 @@ func installApart(ctx context.Context, k Kind, declared config.List, placing Pla
 		}
 		if len(wait) > 0 {
 			later = append(later, batch{names: wait, env: env})
+			if placing.PutOff != nil {
+				placing.PutOff(wait)
+				engine.Changed(ctx)
+			}
 		}
 		if err := install(ctx, k, declared, now, env); err != nil {
 			errs = append(errs, err)

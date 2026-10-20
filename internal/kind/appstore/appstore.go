@@ -26,10 +26,12 @@ import (
 // gigabytes.
 const installTimeout = 90 * time.Minute
 
-// firstQuiet is how long, till an app's in, mas may say nothing as it
-// installs: mas 7, with no one signed in to the App Store, waits for good
-// rather than saying so (the sixth run, 19 Oct).
-var firstQuiet = 5 * time.Minute
+// firstWord is how long, till an app's in, mas may take to say anything
+// as it installs: mas 7, with no one signed in to the App Store, waits for
+// good, saying nothing, rather than saying so (the sixth run, 19 Oct). Once
+// it's said it's downloading, it says nothing more till it's done: its
+// progress is drawn only at a terminal.
+var firstWord = 5 * time.Minute
 
 // adminWait is why an install waits, without an administrator's password.
 const adminWait = "needs an administrator's password: run kit apply at a terminal"
@@ -210,11 +212,17 @@ func (s *AppStore) install(ctx context.Context, name string, signedIn bool) erro
 		return notAnApp(name)
 	}
 	for {
-		hung, err := s.attempt(ctx, name, signedIn)
-		if err == nil {
+		var hung bool
+		err := s.again(ctx, func() (err error) {
+			hung, err = s.attempt(ctx, name, signedIn)
+			return err
+		})
+		switch {
+		case err == nil:
 			return nil
-		}
-		if !hung && !signedOut(err) {
+		case forgotten(err):
+			return errors.New(adminWait)
+		case !hung && !signedOut(err):
 			return failed(err)
 		}
 		back := kind.Away(ctx)
@@ -227,40 +235,64 @@ func (s *AppStore) install(ctx context.Context, name string, signedIn bool) erro
 }
 
 // attempt installs name once, reporting whether it hung: till an app's in
-// (signedIn), mas saying nothing for firstQuiet, as it downloads nothing.
-// An install kit ended has what's left of it stopped (stopStray).
+// (signedIn), mas not saying anything for firstWord. What's left of an
+// install kit ended is stopped (stopStray).
 func (s *AppStore) attempt(ctx context.Context, name string, signedIn bool) (hung bool, err error) {
 	run, lines := ctx, kind.Lines(ctx)
 	if !signedIn {
-		quiet, heard, cancel := hold.WithQuiet(ctx, firstQuiet)
+		first, heard, cancel := hold.UntilHeard(ctx, firstWord)
 		defer cancel()
 		given := lines
-		run, lines = quiet, func(line string) {
+		run, lines = first, func(line string) {
 			heard()
 			if given != nil {
 				given(line)
 			}
 		}
 	}
-	err = s.sudo(run, "install", []string{name}, installTimeout, lines)
+	res, err := s.sudo(run, "install", []string{name}, installTimeout, lines)
 	hung = !signedIn && errors.Is(run.Err(), context.DeadlineExceeded) && ctx.Err() == nil
 	if err != nil && ctx.Err() == nil && (hung || errors.Is(err, context.DeadlineExceeded)) {
-		s.stopStray(ctx, name)
+		s.stopStray(ctx, res.Group, name)
 	}
 	return hung, err
 }
 
-// stopStray stops what's left of mas installing name, once kit's ended its
-// install: sudo passes on to mas that it's to stop, but mas, running as
-// root, can carry on, holding up the next try. What pgrep finds of it is
-// killed through sudo.
-func (s *AppStore) stopStray(ctx context.Context, name string) {
-	res, err := s.run.Run(ctx, runner.Command{Name: "pgrep", Args: []string{"-f", fmt.Sprintf("mas install %d$", id(name))}})
+// stopStray stops what's left of kit's install of name, in group, the
+// process group it ran in, once kit's ended it: sudo passes on to mas that
+// it's to stop, but mas, running as root, can carry on, holding up the
+// next try. What pgrep finds of it in the group is killed through sudo;
+// nothing outside it, as a mas run by hand.
+func (s *AppStore) stopStray(ctx context.Context, group int, name string) {
+	if group == 0 {
+		return
+	}
+	res, err := s.run.Run(ctx, runner.Command{Name: "pgrep", Args: []string{"-g", strconv.Itoa(group), "-f", fmt.Sprintf("^(/[^ ]*/)?mas install %d$", id(name))}})
 	pids := strings.Fields(string(res.Stdout))
 	if err != nil || len(pids) == 0 {
 		return
 	}
-	_, _ = s.run.Run(ctx, runner.Command{Name: "sudo", Args: append([]string{"-n", "kill", "-KILL"}, pids...)})
+	_ = s.again(ctx, func() error {
+		_, err := s.run.Run(ctx, runner.Command{Name: "sudo", Args: append([]string{"-n", "kill", "-KILL"}, pids...)})
+		return err
+	})
+}
+
+// again runs f, through kit's own sudo -n, and once more should sudo have
+// forgotten the password meanwhile, as when the Mac slept, once kit has it
+// again (kind.AdminForgotten).
+func (s *AppStore) again(ctx context.Context, f func() error) error {
+	err := f()
+	if forgotten(err) && kind.AdminForgotten(ctx) {
+		return f()
+	}
+	return err
+}
+
+// forgotten reports whether err is sudo -n saying it hasn't the password.
+func forgotten(err error) bool {
+	exit, ok := errors.AsType[*runner.ExitError](err)
+	return ok && strings.Contains(exit.Stderr, "a password is required")
 }
 
 // failed is err, an app's install failing, in kit's words: what mas said,
@@ -302,7 +334,10 @@ func (n *notSignedIn) Unwrap() error { return n.err }
 
 // Remove uninstalls the apps names name, through sudo, as mas needs.
 func (s *AppStore) Remove(ctx context.Context, names []string) error {
-	return s.sudo(ctx, "uninstall", names, 0, nil)
+	return s.again(ctx, func() error {
+		_, err := s.sudo(ctx, "uninstall", names, 0, nil)
+		return err
+	})
 }
 
 // installedLine is what mas prints as it's installed an app, by its name,
@@ -327,17 +362,16 @@ func (*AppStore) Done(line string, names []string) (string, bool) {
 
 // sudo runs mas's verb of names through sudo, given timeout, its lines to
 // lines as they come.
-func (s *AppStore) sudo(ctx context.Context, verb string, names []string, timeout time.Duration, lines func(string)) error {
+func (s *AppStore) sudo(ctx context.Context, verb string, names []string, timeout time.Duration, lines func(string)) (runner.Result, error) {
 	args := []string{"-n", "mas", verb}
 	for _, name := range names {
 		n := id(name)
 		if n == 0 {
-			return notAnApp(name)
+			return runner.Result{}, notAnApp(name)
 		}
 		args = append(args, strconv.FormatInt(n, 10))
 	}
-	_, err := s.run.Run(ctx, runner.Command{Name: "sudo", Args: args, Timeout: timeout, Lines: lines})
-	return err
+	return s.run.Run(ctx, runner.Command{Name: "sudo", Args: args, Timeout: timeout, Lines: lines})
 }
 
 // notAnApp refuses name, which isn't an App Store app's.

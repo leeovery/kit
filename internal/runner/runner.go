@@ -102,6 +102,10 @@ type Result struct {
 	// ExitCode is what it exited with: -1 when it didn't run, or was ended.
 	ExitCode int
 	Duration time.Duration
+	// Group is the process group it ran in, its own, as kit runs a command
+	// detached: what it left running is found in it. None for one that
+	// didn't start, or ran at kit's terminal.
+	Group int
 }
 
 // Runner runs commands. Run returns an error when the command couldn't run,

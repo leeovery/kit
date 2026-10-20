@@ -280,18 +280,24 @@ func TestASignInNotDoneIsDoneAgain(t *testing.T) {
 	}
 }
 
-// mas 7, with no one signed in, waits for good rather than saying so: the
-// first app's install that says nothing for its minutes is taken as no one
-// signed in, so what's left of it is stopped, signing in is done again, and
-// the app's tried again.
+// stray is how pgrep finds what's left of kit's install of the app id, in
+// its process group, 4242.
+func stray(id string) []string {
+	return []string{"pgrep", "-g", "4242", "-f", "^(/[^ ]*/)?mas install " + id + "$"}
+}
+
+// mas 7, with no one signed in, waits for good, saying nothing, rather than
+// saying so: the first app's install that says nothing at all for its
+// minutes is taken as no one signed in, so what's left of it, in its process
+// group, is stopped, signing in is done again, and the app's tried again.
 func TestAHangIsTakenAsNoOneSignedIn(t *testing.T) {
-	defer appstore.SetFirstQuiet(50 * time.Millisecond)()
+	defer appstore.SetFirstWord(50 * time.Millisecond)()
 	fake := runnertest.New(t)
 	fake.On("mas", "list", "--json").Prints("").Then().Prints(installed(1091189122, 497799835))
-	fake.On("sudo", "-n", "mas", "install", "1091189122").Prints("==> Downloading Bear\n").Hangs().
+	fake.On("sudo", "-n", "mas", "install", "1091189122").Hangs().InGroup(4242).
 		Then()
-	fake.On("pgrep", "-f", "mas install 1091189122$").Prints("4242\n")
-	fake.On("sudo", "-n", "kill", "-KILL", "4242")
+	fake.On(stray("1091189122")[0], stray("1091189122")[1:]...).Prints("5151\n")
+	fake.On("sudo", "-n", "kill", "-KILL", "5151")
 	fake.On("sudo", "-n", "mas", "install", "497799835")
 	res, again := storeRun(t, fake, true, declared("bear@1091189122", "xcode@497799835"))
 	if res.State != check.OK || again != 1 {
@@ -299,7 +305,7 @@ func TestAHangIsTakenAsNoOneSignedIn(t *testing.T) {
 	}
 	want := []string{
 		"mas list --json",
-		"sudo -n mas install 1091189122", "pgrep -f 'mas install 1091189122$'", "sudo -n kill -KILL 4242",
+		"sudo -n mas install 1091189122", "pgrep -g 4242 -f '^(/[^ ]*/)?mas install 1091189122$'", "sudo -n kill -KILL 5151",
 		"sudo -n mas install 1091189122", "sudo -n mas install 497799835",
 		"mas list --json",
 	}
@@ -308,33 +314,34 @@ func TestAHangIsTakenAsNoOneSignedIn(t *testing.T) {
 	}
 }
 
-// slowRunner is the fake, but mas installing an app says it's downloading,
-// every so often, for a while, then that it's installed it.
+// slowRunner is the fake, but mas installing an app says it's downloading
+// it, then nothing, as through a pipe it draws no progress, for a while,
+// then that it's installed it.
 type slowRunner struct {
 	*runnertest.Fake
-	every, for_ time.Duration
+	for_ time.Duration
 }
 
 func (r slowRunner) Run(ctx context.Context, cmd runner.Command) (runner.Result, error) {
 	if !slices.Contains(cmd.Args, "install") {
 		return r.Fake.Run(ctx, cmd)
 	}
-	for start := time.Now(); time.Since(start) < r.for_; time.Sleep(r.every) {
-		if ctx.Err() != nil {
-			return runner.Result{ExitCode: -1}, fmt.Errorf("%s: %w", cmd, ctx.Err())
-		}
-		cmd.Lines("==> Downloading Xcode")
+	cmd.Lines("==> Downloading Xcode")
+	select {
+	case <-ctx.Done():
+		return runner.Result{ExitCode: -1}, fmt.Errorf("%s: %w", cmd, ctx.Err())
+	case <-time.After(r.for_):
 	}
 	cmd.Lines("==> Installed Xcode")
 	return runner.Result{}, nil
 }
 
-// A first app downloading slowly, mas saying so as it goes, takes as long as
-// it takes: only saying nothing for the minutes is a hang.
+// A first app mas has said it's downloading takes as long as it takes,
+// though mas says nothing more: only saying nothing at all for the minutes
+// is a hang.
 func TestASlowFirstDownloadIsntAHang(t *testing.T) {
-	defer appstore.SetFirstQuiet(50 * time.Millisecond)()
-	fake := runnertest.New(t)
-	slow := slowRunner{Fake: fake, every: 10 * time.Millisecond, for_: 200 * time.Millisecond}
+	defer appstore.SetFirstWord(50 * time.Millisecond)()
+	slow := slowRunner{Fake: runnertest.New(t), for_: 300 * time.Millisecond}
 	if err := appstore.New(slow).Install(t.Context(), []string{"xcode@497799835"}); err != nil {
 		t.Errorf("Install = %v, want Xcode installed, however long it took", err)
 	}
@@ -343,11 +350,11 @@ func TestASlowFirstDownloadIsntAHang(t *testing.T) {
 // Without anyone to sign in, a hang fails every app, in kit's words, naming
 // the fix, never the command; the rest aren't tried.
 func TestAHangWithNoOneToSignInFailsNamingTheFix(t *testing.T) {
-	defer appstore.SetFirstQuiet(50 * time.Millisecond)()
+	defer appstore.SetFirstWord(50 * time.Millisecond)()
 	fake := runnertest.New(t)
 	fake.On("mas", "list", "--json").Prints("")
-	fake.On("sudo", "-n", "mas", "install", "1091189122").Hangs()
-	fake.On("pgrep", "-f", "mas install 1091189122$").Exits(1)
+	fake.On("sudo", "-n", "mas", "install", "1091189122").Hangs().InGroup(4242)
+	fake.On(stray("1091189122")[0], stray("1091189122")[1:]...).Exits(1)
 	res, _ := storeRun(t, fake, false, declared("bear@1091189122", "xcode@497799835"))
 	want := "couldn't install bear@1091189122, xcode@497799835: the App Store didn't answer: sign in to the App Store, then try again"
 	if res.State != check.Failed || res.Reason != want {
@@ -366,15 +373,15 @@ func TestAnInstallFailingOtherwiseFailsItAlone(t *testing.T) {
 	fake.On("sudo", "-n", "mas", "install", "1091189122").Exits(1).PrintsToStderr("[ERROR] 2026/10/16 04:22:49 no app has the id 1091189122")
 	fake.On("sudo", "-n", "mas", "install", "409203825").Fails(errors.New("run sudo -n mas install 409203825: signal: terminated"))
 	fake.On("sudo", "-n", "mas", "install", "497799835")
-	fake.On("sudo", "-n", "mas", "install", "1295203466").Fails(fmt.Errorf("sudo -n mas install 1295203466: %w", context.DeadlineExceeded))
-	fake.On("pgrep", "-f", "mas install 1295203466$").Prints("4242\n")
-	fake.On("sudo", "-n", "kill", "-KILL", "4242")
+	fake.On("sudo", "-n", "mas", "install", "1295203466").Fails(fmt.Errorf("sudo -n mas install 1295203466: %w", context.DeadlineExceeded)).InGroup(4242)
+	fake.On(stray("1295203466")[0], stray("1295203466")[1:]...).Prints("5151\n")
+	fake.On("sudo", "-n", "kill", "-KILL", "5151")
 	res, again := storeRun(t, fake, true, declared("bear@1091189122", "numbers@409203825", "xcode@497799835", "windows-app@1295203466"))
 	want := "couldn't install bear@1091189122, numbers@409203825, windows-app@1295203466: [ERROR] 2026/10/16 04:22:49 no app has the id 1091189122; mas was stopped; mas didn't finish in 90 minutes"
 	if res.State != check.Failed || res.Reason != want || again != 0 {
 		t.Errorf("the App Store's apps stand %+v, signing in done again %d times; want them failed, %q, nothing done again", res, again, want)
 	}
-	if calls := fake.Calls(); slices.Index(calls, "sudo -n mas install 497799835") < slices.Index(calls, "sudo -n kill -KILL 4242") {
+	if calls := fake.Calls(); slices.Index(calls, "sudo -n mas install 497799835") < slices.Index(calls, "sudo -n kill -KILL 5151") {
 		t.Errorf("ran %q, want xcode tried after the others failed, and what's left of the one kit ended stopped", calls)
 	}
 
@@ -415,6 +422,53 @@ func (a *answers) Wait(context.Context) bool {
 	next := (*a)[0]
 	*a = (*a)[1:]
 	return next
+}
+
+func (a *answers) Forgotten(ctx context.Context) bool { return a.Wait(ctx) }
+
+// lapsing is a kind.Password held till sudo forgets it, then given again,
+// or not, as again says.
+type lapsing struct {
+	held, again bool
+	forgot      int
+}
+
+func (l *lapsing) Held() bool                { return l.held }
+func (l *lapsing) Wait(context.Context) bool { return l.held }
+
+func (l *lapsing) Forgotten(context.Context) bool {
+	l.forgot++
+	l.held = l.again
+	return l.again
+}
+
+// sudoForgot is what sudo -n says once it's forgotten the password.
+const sudoForgot = "sudo: a password is required"
+
+// An app whose sudo says it's forgotten the password, as when the Mac slept,
+// has kit find out at once and ask again, then is tried once more; not
+// given, it waits for the password, in kit's words, and the rest aren't
+// tried.
+func TestAForgottenPasswordIsAskedForAgain(t *testing.T) {
+	for _, again := range []bool{true, false} {
+		fake := runnertest.New(t)
+		fake.On("mas", "list", "--json").Prints("")
+		fake.On("sudo", "-n", "mas", "install", "1091189122").Exits(1).PrintsToStderr(sudoForgot).Then()
+		fake.On("sudo", "-n", "mas", "install", "497799835")
+		pw := &lapsing{held: true, again: again}
+		s := kind.Placed(appstore.New(fake), declared("bear@1091189122", "xcode@497799835"), func(context.Context) kind.Placing { return kind.Placing{Admin: pw} })
+		err := s.Apply(t.Context(), s.Check(t.Context()))
+		want := []string{"mas list --json", "sudo -n mas install 1091189122", "sudo -n mas install 1091189122", "sudo -n mas install 497799835"}
+		if !again {
+			want = []string{"mas list --json", "sudo -n mas install 1091189122", "mas list --json"}
+		}
+		if !slices.Equal(fake.Calls(), want) || pw.forgot != 1 {
+			t.Errorf("given again %v: ran %q, kit found out %d times; want %q, once", again, fake.Calls(), pw.forgot, want)
+		}
+		if wantErr := "couldn't install bear@1091189122, xcode@497799835: needs an administrator's password: run kit apply at a terminal"; again && err != nil || !again && (err == nil || err.Error() != wantErr) {
+			t.Errorf("given again %v: Apply = %v; want it installed, or %q", again, err, wantErr)
+		}
+	}
 }
 
 // With no one to sign in, as without a terminal, or outside a run, no one
