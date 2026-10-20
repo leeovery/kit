@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/leeovery/kit/internal/apps"
+	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/plist"
 	"github.com/leeovery/kit/internal/runner"
 )
@@ -46,6 +47,9 @@ type RestoreReport struct {
 	Waiting map[string]string
 	// Failed are the domains that failed, each with why.
 	Failed map[string]string
+	// Apps are the apps of the domains waiting or failed, by the names
+	// their bundles have, where kit found them.
+	Apps map[string]string
 	// Saved is where the live settings replaced were saved.
 	Saved  string
 	DryRun bool
@@ -168,8 +172,8 @@ func (p *Prefs) running(ctx context.Context, id string) bool {
 
 // ensureContainer makes a sandboxed app's container, where it reads its
 // settings, which exists only once it has run: launched hidden once, then
-// quit. One that won't quit isn't restored, as it would write its defaults
-// back when it did.
+// quit, the run's log naming it as it opens. One that won't quit isn't
+// restored, as it would write its defaults back when it did.
 func (p *Prefs) ensureContainer(ctx context.Context, id, app string) error {
 	container := filepath.Join(p.Home, "Library/Containers", id)
 	if _, err := os.Stat(container); err == nil {
@@ -179,6 +183,7 @@ func (p *Prefs) ensureContainer(ctx context.Context, id, app string) error {
 	if !bytes.Contains(res.Stdout, []byte("com.apple.security.app-sandbox")) {
 		return nil
 	}
+	event.Log(ctx, event.Logged{Line: "Opening " + appName(app) + " once, for its settings folder"})
 	_, _ = p.Run.Run(ctx, runner.Command{Name: "open", Args: []string{"-g", "-j", "-b", id}})
 	for range 40 {
 		if _, err := os.Stat(container); err == nil {
@@ -196,12 +201,18 @@ func (p *Prefs) ensureContainer(ctx context.Context, id, app string) error {
 		p.Sleep(500 * time.Millisecond)
 	}
 	if !quit {
-		return errors.New("launched once to make its container, but it didn't quit")
+		return errors.New("opened once for its settings folder, it didn't quit")
 	}
 	if _, err := os.Stat(container); err != nil {
-		return errors.New("its container didn't appear after launching it once")
+		return errors.New("opened once, it still has no settings folder")
 	}
 	return nil
+}
+
+// appName is the app at app by the name its bundle has, as the Finder shows
+// it.
+func appName(app string) string {
+	return strings.TrimSuffix(filepath.Base(app), ".app")
 }
 
 // restoreDomain replaces a domain's live settings (target's, when testing
@@ -241,11 +252,12 @@ func (p *Prefs) restoreDomain(ctx context.Context, stored, target, saved string)
 // Restore puts settings from the store back on the Mac: every stored domain
 // whose app is installed and closed (the rest wait, pending), then the
 // settings files that differ, each live copy saved first. A full restore
-// with no failures switches capture on. Never quits an app. From another
-// Mac's folder, or onto other hardware, the settings bound to one Mac are
-// left out.
+// switches capture on, those that failed held aside with those waiting, so
+// capture leaves them be and later passes try them again. Never quits an
+// app. From another Mac's folder, or onto other hardware, the settings
+// bound to one Mac are left out.
 func (p *Prefs) Restore(ctx context.Context, opts RestoreOptions) (RestoreReport, error) {
-	report := RestoreReport{From: opts.From, DryRun: opts.DryRun, As: opts.As, Waiting: map[string]string{}, Failed: map[string]string{}}
+	report := RestoreReport{From: opts.From, DryRun: opts.DryRun, As: opts.As, Waiting: map[string]string{}, Failed: map[string]string{}, Apps: map[string]string{}}
 	if report.From == "" {
 		report.From = p.Mac
 	}
@@ -344,16 +356,21 @@ func (p *Prefs) Restore(ctx context.Context, opts RestoreOptions) (RestoreReport
 			continue
 		}
 		if i := slices.IndexFunc(owners, func(id string) bool { return p.running(ctx, id) }); i >= 0 {
-			report.Waiting[domain] = owners[i] + " is running"
+			report.Waiting[domain], report.Apps[domain] = owners[i]+" is running", appName(apps[owners[i]])
 			continue
 		}
 		if opts.DryRun {
 			report.Restored = append(report.Restored, domain)
 			continue
 		}
+		app := ""
+		if len(owners) > 0 {
+			app = apps[owners[0]]
+		}
 		err := func() error {
 			for _, id := range owners {
 				if err := p.ensureContainer(ctx, id, apps[id]); err != nil {
+					app = apps[id]
 					return err
 				}
 			}
@@ -361,6 +378,9 @@ func (p *Prefs) Restore(ctx context.Context, opts RestoreOptions) (RestoreReport
 		}()
 		if err != nil {
 			report.Failed[domain] = err.Error()
+			if app != "" {
+				report.Apps[domain] = appName(app)
+			}
 			continue
 		}
 		report.Restored = append(report.Restored, domain)
@@ -391,9 +411,7 @@ func (p *Prefs) Restore(ctx context.Context, opts RestoreOptions) (RestoreReport
 		}
 		if full && !opts.Pending {
 			r.Restored = &Restored{From: report.From, Commit: commit, At: p.Now()}
-			if len(report.Failed) == 0 {
-				r.On, r.OnAt = "restored from "+report.From+" "+p.Now().Format("2006-01-02 15:04"), p.Now()
-			}
+			r.On, r.OnAt = "restored from "+report.From+" "+p.Now().Format("2006-01-02 15:04"), p.Now()
 		}
 	})
 }

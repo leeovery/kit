@@ -34,7 +34,7 @@ var toDoList = []event.ToDo{
 // watched, each saying what for.
 var toDoCards = []event.NeedsYou{
 	{Item: "prefs:paused", Title: "Bring back apps' settings", Group: "Apps",
-		Why:  "First, so the apps you open next start with yours. This Mac saves its own once they're back. Claude Code's come too.",
+		Why:  "First, so the apps you open next start with yours. Bringing them back opens some apps once: their windows, notifications and permission prompts may follow. This Mac saves its own once they're back. Settings files come back too.",
 		Keys: []check.Key{{Key: "r", Does: "brings them back from this Mac's last save, 15 Oct"}, {Key: "f", Does: "starts afresh: nothing back, saving from now"}}},
 	{Item: "karabiner", Title: "Open Karabiner-Elements", Group: "Apps", Tells: true,
 		Why: "Its key remapping needs its driver and Input Monitoring, which only you can allow. Opened, it asks for both.",
@@ -267,8 +267,9 @@ func TestTheToDoPanel(t *testing.T) {
 			"",
 			"  △ Bring back apps' settings" + strings.Repeat(" ", 62) + "1 of 6",
 			"",
-			"      First, so the apps you open next start with yours. This Mac saves its own once they're back.",
-			"      Claude Code's come too.",
+			"      First, so the apps you open next start with yours. Bringing them back opens some apps once:",
+			"      their windows, notifications and permission prompts may follow. This Mac saves its own once",
+			"      they're back. Settings files come back too.",
 			"",
 			"      r brings them back from this Mac's last save, 15 Oct",
 			"      f starts afresh: nothing back, saving from now",
@@ -322,6 +323,28 @@ func TestTheToDoPanel(t *testing.T) {
 	}
 }
 
+// While kit does what a choice's key says, its panel offers none of its
+// keys: what that key does, turning, in their place. So does its card in
+// a window too small for the screen.
+func TestAChoiceBeingAnswered(t *testing.T) {
+	events := answeredWith(toDosUpTo(0), "r")
+	face, out, _ := applyIn(colorprofile.TrueColor, 160, 64, time.Minute, events)
+	defer func() { _ = face.Close() }()
+	_, right := panes(screen(uncoloured(out.String())), 160)
+	ends := slices.Index(right, "      they're back. Settings files come back too.")
+	if ends < 0 || !slices.Equal(right[ends+1:ends+5], []string{"", "      ◐ brings them back from this Mac's last save, 15 Oct", "", strings.Repeat("─", 99)}) {
+		t.Errorf("being answered, the right pane starts\n%s\nwant what r does, turning, and no keys", strings.Join(right[:min(len(right), 14)], "\n"))
+	}
+	if frame := strings.Join(lastFrame(out.String()), "\n"); !strings.Contains(frame, look.Cyan("◐")+" "+look.White("brings them back from this Mac's last save, 15 Oct")) {
+		t.Error("what r does isn't led by the turning mark")
+	}
+	small, out2, _ := applyAt(99, 40, since(events), events)
+	defer func() { _ = small.Close() }()
+	if got := screen(out2.String()); !strings.Contains(got, "brings them back from this Mac's last save, 15 Oct") || strings.Contains(got, "a bigger window shows the keys") {
+		t.Errorf("in a small window, being answered, the card shows\n%s\nwant what r does in place of the keys", got)
+	}
+}
+
 // In a window too small for the screen, the to-do up is a card in place,
 // as a step by hand's is, by its title: no list; a choice, that a bigger
 // window shows its keys.
@@ -338,26 +361,41 @@ func TestTheToDosInASmallWindow(t *testing.T) {
 	}
 }
 
-// With a to-do up, a choice's keys answer it, and space doesn't; space
-// says one kit can't tell about is done, and nothing of one it tells
-// about; tab chooses no row, as the to-dos have the left pane; Stop stops
-// there, the run carrying on, but stops the run once they're over.
+// answeredWith is events, the card up last being answered by key, as kit
+// does what it says.
+func answeredWith(events []event.Event, key string) []event.Event {
+	card := events[len(events)-1].(event.NeedsYou)
+	card.Answering = key
+	return append(slices.Clone(events), card)
+}
+
+// With a to-do up, a choice's keys answer it, and space doesn't; while kit
+// does what one says, no key answers it; space says one kit can't tell
+// about is done, and nothing of one it tells about; tab chooses no row, as
+// the to-dos have the left pane; Stop stops there, the run carrying on, but
+// stops the run once they're over.
 func TestTheToDosKeys(t *testing.T) {
 	for _, tt := range []struct {
-		name  string
-		up    int
-		keys  []ask.Key
-		want  []answered
-		stops int
+		name      string
+		up        int
+		answering string
+		keys      []ask.Key
+		want      []answered
+		stops     int
 	}{
-		{"a choice", 0, []ask.Key{keySpace, keyEnter, keyO, {Text: "r"}, {Text: "f"}}, []answered{{"manual", "r"}, {"manual", "f"}}, 0},
-		{"kit tells", 4, []ask.Key{keySpace, keyEnter, {Text: "r"}}, nil, 0},
-		{"kit can't tell", 3, []ask.Key{keySpace, keyEnter}, []answered{{"manual", hand.Done}, {"manual", hand.Done}}, 0},
-		{"stop here", 3, []ask.Key{keyQ, keyDown, keyEnter}, []answered{{"manual", hand.Stop}}, 0},
-		{"stop once they're over", len(toDoList), []ask.Key{keyQ, keyDown, keyEnter}, nil, 1},
+		{"a choice", 0, "", []ask.Key{keySpace, keyEnter, keyO, {Text: "r"}, {Text: "f"}}, []answered{{"manual", "r"}, {"manual", "f"}}, 0},
+		{"a choice being answered", 0, "r", []ask.Key{{Text: "r"}, {Text: "f"}, keySpace, keyEnter}, nil, 0},
+		{"kit tells", 4, "", []ask.Key{keySpace, keyEnter, {Text: "r"}}, nil, 0},
+		{"kit can't tell", 3, "", []ask.Key{keySpace, keyEnter}, []answered{{"manual", hand.Done}, {"manual", hand.Done}}, 0},
+		{"stop here", 3, "", []ask.Key{keyQ, keyDown, keyEnter}, []answered{{"manual", hand.Stop}}, 0},
+		{"stop once they're over", len(toDoList), "", []ask.Key{keyQ, keyDown, keyEnter}, nil, 1},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			face, out, kb := applyAt(160, 64, time.Minute, toDosUpTo(tt.up))
+			events := toDosUpTo(tt.up)
+			if tt.answering != "" {
+				events = answeredWith(events, tt.answering)
+			}
+			face, out, kb := applyAt(160, 64, time.Minute, events)
 			defer func() { _ = face.Close() }()
 			var mu sync.Mutex
 			var got []answered

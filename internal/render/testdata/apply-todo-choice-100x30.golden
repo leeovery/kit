@@ -8,21 +8,21 @@
   TO DO  6                                          │  △ Bring back apps' settings          1 of 6  
                                                     │
   Apps                                              │      First, so the apps you open next start
-  △ Bring back apps' settings                       │      with yours. This Mac saves its own once
-  △ Open Karabiner-Elements                         │      they're back. Claude Code's come too.
-  △ Open Hammerspoon                                │
+  △ Bring back apps' settings                       │      with yours. Bringing them back opens some
+  △ Open Karabiner-Elements                         │      apps once: their windows, notifications
+  △ Open Hammerspoon                                │      and permission prompts may follow. This
+                                                    │      Mac saves its own once they're back.
+  System Settings                                   │      Settings files come back too.
+  △ Allow Full Disk Access for remote users         │
                                                     │      r brings them back from this Mac's last
-  System Settings                                   │        save, 15 Oct
-  △ Allow Full Disk Access for remote users         │      f starts afresh: nothing back, saving
-                                                    │        from now
-  Backups                                           │
-  △ Add a Time Machine disk                         ├───────────────────────────────────────────────
-  △ Set up Arq's backup plan                        │
+  Backups                                           │        save, 15 Oct
+  △ Add a Time Machine disk                         │      f starts afresh: nothing back, saving
+  △ Set up Arq's backup plan                        │        from now
+                                                    │
+                                                    ├───────────────────────────────────────────────
+                                                    │
                                                     │  LOG
                                                     │
-                                                    │  03:32:46  △ Arq: not set up
-                                                    │  03:32:47  △ App settings: not set up
-                                                    │  03:32:48  ● Disk space: fine
                                                     │  03:32:49  ● Load: fine
                                                     │  03:32:50  ● claude-code: fine
                                                     │  03:32:51  ● fonts: fine

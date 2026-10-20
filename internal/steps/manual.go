@@ -312,8 +312,10 @@ var manualPoll = 3 * time.Second
 // unless it's been done meanwhile, after more of the step's own cards to
 // follow it; then waits till it's done, the step's job given up meanwhile,
 // for other steps to go on (engine.Release), looking every few seconds as
-// well as at each answer. It returns what kit saw as it was done, in words,
-// if it has some; errStopHere when the person stopped where they were.
+// well as at each answer. While kit does what a choice's key says, the card
+// offers none of its keys, and offers them again should it still be to do.
+// It returns what kit saw as it was done, in words, if it has some;
+// errStopHere when the person stopped where they were.
 func (r *Raise) up(ctx context.Context, step string, c raised, more int) (string, error) {
 	defer engine.Release(ctx)()
 	r.Sink.Emit(event.Doing{Time: r.Now(), Step: step, Says: event.Queued})
@@ -348,11 +350,27 @@ func (r *Raise) up(ctx context.Context, step string, c raised, more int) (string
 			if a == hand.Stop {
 				return "", errStopHere
 			}
+			chose := slices.ContainsFunc(card.Keys, func(k check.Key) bool { return hand.Answer(k.Key) == a })
+			if chose {
+				r.answering(string(a))
+			}
 			if ok, saw, err := c.answer(ctx, a, r.Now()); ok || err != nil {
 				return saw, err
 			}
+			if chose {
+				r.answering("")
+			}
 		}
 	}
+}
+
+// answering puts the card up again, answered by key while kit does what it
+// says, or, "", waiting for an answer again.
+func (r *Raise) answering(key string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.card.Time, r.card.Answering = r.Now(), key
+	r.Sink.Emit(r.card)
 }
 
 // show puts card up for step, a notification posted once it's up; its

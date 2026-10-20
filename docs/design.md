@@ -261,9 +261,13 @@ next start with them), then the lines not done, in order, then kit's own the res
 grouped, each group where its first comes (kit's own in Apps and Backups). Each is looked at
 while it's up, a line by its command every few seconds, one of kit's own by its step's check, and
 once done the log says so, how long it took and what kit saw, and the next comes up; `space` says
-one with no command is done; a choice is answered by its keys (apps' settings: `r` brings them
-back from this Mac's last save, its date said, as `kit prefs restore` does; `f` starts afresh, as
-`kit prefs start-fresh` does). Stopping there (`q`'s Stop) leaves what's left to do, in that
+one with no command is done; a choice is answered by its keys, none offered while kit does what
+the one pressed says, its words turning in their place (apps' settings, whose why says first
+that bringing them back opens some apps once, and, when the config has `[prefs files]`, that
+settings files come back too: `r` brings them back from this Mac's last save, its date said, as
+`kit prefs restore` does, saying how many came back, how many wait for their apps and how many
+didn't come back, the log naming each of those with why; `f` starts afresh, as `kit prefs
+start-fresh` does, saying saving's on and how many still wait to come back). Stopping there (`q`'s Stop) leaves what's left to do, in that
 order in the record, the run ending as it stands. After the last, kit checks again the steps the
 to-dos held, those they came from, so their rows and the record are right, then finishes.
 Without a terminal, nothing's raised: kit's own stay items of their steps. A step a line comes
@@ -822,10 +826,13 @@ the hardware UUID of the Mac the folder belongs to.
 - **`kit prefs restore [<domain>...]`** (`--from`, `--at`, `--as`, `--pending`, `--dry-run`): a
   domain's app found from the installed apps' bundle ids (sub-domains, shared domains, group and
   team prefixes, `[prefs apps]` for the rest); not installed or running, it waits; a sandboxed
-  app launched hidden once to make its container; the stored copy checked, the live settings
-  saved, `defaults delete` then `import`, read back and compared. A full restore puts back the
-  files that differ (each saved first), writes the pending list, records its commit, and
-  switches capture on when nothing failed. From another Mac's folder, or onto other hardware,
+  app launched hidden once to make its container, the run's log naming it as it opens (its own
+  windows, notifications and permission prompts may follow); the stored copy checked, the live
+  settings saved, `defaults delete` then `import`, read back and compared. A full restore puts
+  back the files that differ (each saved first), writes the pending list, those that failed on it
+  with those waiting (capture leaves them alone; `--pending` and the hourly retry try them
+  again), records its commit, and switches capture on, failures or not. Each that failed is
+  named by its app, with why. From another Mac's folder, or onto other hardware,
   `[prefs machine-bound]` stays behind (Tailscale's identity and the like). `--at` unpacks the
   folder as it was then from history.
 - **`kit prefs history`**, **`pending [--clear]`**, **`start-fresh`**. `[prefs deny]` leaves

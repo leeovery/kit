@@ -41,7 +41,7 @@ func TestKitsOwnToDos(t *testing.T) {
 			Detail: "kit prefs restore, or kit prefs start-fresh",
 			ToDo: &check.ToDo{
 				Title: "Bring back apps' settings",
-				Why:   "First, so the apps you open next start with yours. This Mac saves its own once they're back. Claude Code's come too.",
+				Why:   "First, so the apps you open next start with yours. Bringing them back opens some apps once: their windows, notifications and permission prompts may follow. This Mac saves its own once they're back.",
 				Group: "Apps",
 				Keys: []check.Key{
 					{Key: "r", Does: "brings them back from this Mac's last save"},
@@ -238,14 +238,15 @@ func (c *card) waitForList(t *testing.T, n int) event.ToDos {
 }
 
 // A to-do that's a choice goes up with its keys, as its step readies it,
-// kit not telling by itself; a key does what its step says, and, should
-// that do it, it's done, what the step said it did as what kit saw. What
-// goes wrong, the log says, as something to look at, and it stays up.
+// kit not telling by itself; a key does what its step says, the card
+// offering none of its keys meanwhile, and, should that do it, it's done,
+// what the step said it did as what kit saw. What goes wrong, the log says,
+// as something to look at, and it stays up, its keys offered again.
 func TestAChoiceToDo(t *testing.T) {
 	defer steps.SetManualPoll(time.Hour)()
 	c := newCard(t)
 	var mu sync.Mutex
-	var pressed []string
+	var pressed, answering []string
 	brought := false
 	step := engine.Step{
 		Name: "prefs", Title: "App settings", Area: steps.AreaBackups,
@@ -271,6 +272,8 @@ func TestAChoiceToDo(t *testing.T) {
 				mu.Lock()
 				defer mu.Unlock()
 				pressed = append(pressed, key)
+				shown := c.cardsNow()
+				answering = append(answering, shown[len(shown)-1].Answering)
 				if len(pressed) == 1 {
 					return "", errors.New("couldn't reach the store")
 				}
@@ -312,6 +315,16 @@ func TestAChoiceToDo(t *testing.T) {
 	}
 	if !slices.Equal(pressed, []string{"r", "r"}) || report.Results["prefs"].State != check.OK {
 		t.Errorf("pressed %q, prefs stands %s; want r twice, then prefs checked again, ok", pressed, report.Results["prefs"].State)
+	}
+	if !slices.Equal(answering, []string{"r", "r"}) {
+		t.Errorf("while r was being done, the card was answered by %q; want r, its keys not offered", answering)
+	}
+	var shown []string
+	for _, card := range c.cardsNow() {
+		shown = append(shown, card.Answering)
+	}
+	if !slices.Equal(shown, []string{"", "r", "", "r"}) {
+		t.Errorf("the card went up answered by %q; want its keys, then r while it worked, its keys again once it failed, then r", shown)
 	}
 }
 

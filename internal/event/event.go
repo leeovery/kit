@@ -176,21 +176,23 @@ func (e Logged) At() time.Time { return e.Time }
 // it's in, if any; why, as the notes above its line say; its steps, in
 // order; whether kit tells by itself when it's done (the line's --test, or
 // a to-do's check), else the person says so, and what kit watches for, in
-// words, when it says; the keys of a choice, when it's one; and how many
-// more by hand wait after it. The step finishing, or another NeedsYou for
-// the step, takes it down.
+// words, when it says; the keys of a choice, when it's one, and the one
+// it's being answered with, while kit does what that key says (Answering),
+// none of them offered meanwhile; and how many more by hand wait after it.
+// The step finishing, or another NeedsYou for the step, takes it down.
 type NeedsYou struct {
-	Time  time.Time
-	Step  string
-	Item  string
-	Title string
-	Group string      `json:",omitempty"`
-	Why   string      `json:",omitempty"`
-	Steps []string    `json:",omitempty"`
-	Tells bool        `json:",omitempty"`
-	Watch string      `json:",omitempty"`
-	Keys  []check.Key `json:",omitempty"`
-	More  int         `json:",omitempty"`
+	Time      time.Time
+	Step      string
+	Item      string
+	Title     string
+	Group     string      `json:",omitempty"`
+	Why       string      `json:",omitempty"`
+	Steps     []string    `json:",omitempty"`
+	Tells     bool        `json:",omitempty"`
+	Watch     string      `json:",omitempty"`
+	Keys      []check.Key `json:",omitempty"`
+	Answering string      `json:",omitempty"`
+	More      int         `json:",omitempty"`
 }
 
 func (e NeedsYou) At() time.Time { return e.Time }

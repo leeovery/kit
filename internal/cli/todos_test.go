@@ -113,7 +113,7 @@ func TestApplyWorksThroughTheToDos(t *testing.T) {
 		t.Errorf("the to-dos came up as %q, %d up; want %q, the first up", got, *lists[0].Up, want)
 	}
 	last := lists[len(lists)-1]
-	for i, saw := range []string{"started afresh, saving from now", "", "last backup 02:34"} {
+	for i, saw := range []string{"saving from now, nothing brought back", "", "last backup 02:34"} {
 		if td := last.ToDos[i]; !td.Done || td.Saw != saw {
 			t.Errorf("%s ended %+v; want it done, kit having seen %q", td.Title, td, saw)
 		}
@@ -121,8 +121,19 @@ func TestApplyWorksThroughTheToDos(t *testing.T) {
 	if *last.Up != -1 {
 		t.Errorf("the last list has %d up, want none", *last.Up)
 	}
-	if got := len(cards(records)); got != 2 {
-		t.Errorf("%d cards went up, want apps' settings' and the config's line: Time Machine's disk was there by its turn", got)
+	var asked, answering []string
+	for _, c := range cards(records) {
+		if c.Answering == "" {
+			asked = append(asked, c.Title)
+		} else {
+			answering = append(answering, c.Title+": "+c.Answering)
+		}
+	}
+	if want := want[:2]; !slices.Equal(asked, want) {
+		t.Errorf("cards went up for %q, want %q: Time Machine's disk was there by its turn", asked, want)
+	}
+	if want := []string{"Bring back apps' settings: f"}; !slices.Equal(answering, want) {
+		t.Errorf("cards went up being answered: %q, want %q, its keys not offered while f was done", answering, want)
 	}
 	if got := finishedAs(records, "time-machine"); !slices.Equal(got, []check.State{check.Attention, check.OK}) {
 		t.Errorf("Time Machine finished %q; want left to do, then, checked again, ok", got)

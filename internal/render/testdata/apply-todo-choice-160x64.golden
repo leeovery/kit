@@ -7,17 +7,18 @@
                                                             │
   TO DO  6                                                  │  △ Bring back apps' settings                                                              1 of 6  
                                                             │
-  Apps                                                      │      First, so the apps you open next start with yours. This Mac saves its own once they're back.
-  △ Bring back apps' settings                               │      Claude Code's come too.
-  △ Open Karabiner-Elements                                 │
-  △ Open Hammerspoon                                        │      r brings them back from this Mac's last save, 15 Oct
-                                                            │      f starts afresh: nothing back, saving from now
-  System Settings                                           │
-  △ Allow Full Disk Access for remote users                 ├───────────────────────────────────────────────────────────────────────────────────────────────────
-                                                            │
-  Backups                                                   │  LOG
-  △ Add a Time Machine disk                                 │
-  △ Set up Arq's backup plan                                │  03:32:25  ● GitHub: fine
+  Apps                                                      │      First, so the apps you open next start with yours. Bringing them back opens some apps once:
+  △ Bring back apps' settings                               │      their windows, notifications and permission prompts may follow. This Mac saves its own once
+  △ Open Karabiner-Elements                                 │      they're back. Settings files come back too.
+  △ Open Hammerspoon                                        │
+                                                            │      r brings them back from this Mac's last save, 15 Oct
+  System Settings                                           │      f starts afresh: nothing back, saving from now
+  △ Allow Full Disk Access for remote users                 │
+                                                            ├───────────────────────────────────────────────────────────────────────────────────────────────────
+  Backups                                                   │
+  △ Add a Time Machine disk                                 │  LOG
+  △ Set up Arq's backup plan                                │
+                                                            │  03:32:25  ● GitHub: fine
                                                             │  03:32:26  ● This Mac: fine
                                                             │  03:32:27  ● Homebrew: fine
                                                             │  03:32:28  ● kit-config: fine
@@ -46,7 +47,6 @@
                                                             │  03:32:51  ● fonts: fine
                                                             │  03:32:52  ● mise: fine
                                                             │  03:32:53  ● Sign in to 1Password: fine
-                                                            │
                                                             │
                                                             │
                                                             │

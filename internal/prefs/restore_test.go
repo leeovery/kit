@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/prefs"
 )
 
@@ -153,7 +154,7 @@ func TestRestoreNamedDomains(t *testing.T) {
 }
 
 // A sandboxed app's container is made first: launched hidden once, then
-// quit.
+// quit, the run's log naming it as it opens.
 func TestRestoreMakesASandboxedAppsContainer(t *testing.T) {
 	w := newWorld(t, prefs.Lists{})
 	store := filepath.Join(w.clone, "laptop")
@@ -167,13 +168,53 @@ func TestRestoreMakesASandboxedAppsContainer(t *testing.T) {
 	w.closed("com.example.boxed")
 	w.imports(t, "com.example.boxed", "laptop", map[string]any{}, map[string]any{"A": true})
 	w.fake.On("git", "-C", w.clone, "rev-parse", "HEAD").Prints("abc123\n")
-	report, err := w.p.Restore(t.Context(), prefs.RestoreOptions{})
+	var logged []string
+	ctx := event.WithLogging(t.Context(), func(l event.Logged) { logged = append(logged, l.Line) })
+	report, err := w.p.Restore(ctx, prefs.RestoreOptions{})
 	if err != nil || !slices.Equal(report.Restored, []string{"com.example.boxed"}) {
 		t.Errorf("Restore() = %+v, %v", report, err)
 	}
 	calls := strings.Join(w.fake.Calls(), "\n")
 	if strings.Index(calls, "open -g -j -b com.example.boxed") > strings.Index(calls, "defaults import com.example.boxed") {
 		t.Errorf("ran\n%s\nwant the container made before the import", calls)
+	}
+	if want := []string{"Opening Boxed once, for its settings folder"}; !slices.Equal(logged, want) {
+		t.Errorf("the log says %q, want %q", logged, want)
+	}
+}
+
+// An app that fails is named, with why; a full restore switches capture on
+// all the same, the app held aside with those waiting, so capture leaves
+// it be, and --pending tries it again.
+func TestRestoreHoldsAFailedAppAsideAndSwitchesCaptureOn(t *testing.T) {
+	w := newWorld(t, prefs.Lists{})
+	store := filepath.Join(w.clone, "laptop")
+	w.write(t, filepath.Join(store, "domains", "com.example.boxed.plist"), stored(t, map[string]any{"A": true}))
+	w.write(t, filepath.Join(store, "domains", "com.example.later.plist"), stored(t, map[string]any{"A": true}))
+	app := w.app(t, w.apps, "Boxed App", "com.example.boxed")
+	w.fake.On("codesign", "-d", "--entitlements", "-", "--xml", app).Prints("<key>com.apple.security.app-sandbox</key><true/>")
+	container := filepath.Join(w.home, "Library", "Containers", "com.example.boxed")
+	w.fake.On("open", "-g", "-j", "-b", "com.example.boxed").Then().Does(func() { _ = os.MkdirAll(container, 0o700) })
+	w.fake.On("osascript", "-e", `tell application id "com.example.boxed" to quit`)
+	w.closed("com.example.boxed")
+	w.fake.On("git", "-C", w.clone, "rev-parse", "HEAD").Prints("abc123\n")
+
+	report, err := w.p.Restore(t.Context(), prefs.RestoreOptions{})
+	if err != nil || len(report.Restored) != 0 || report.Failed["com.example.boxed"] != "opened once, it still has no settings folder" || report.Apps["com.example.boxed"] != "Boxed App" {
+		t.Errorf("Restore() = %+v, %v; want the app failed, named, with why", report, err)
+	}
+	rec, _ := w.p.Load()
+	if rec.On == "" || rec.Pending == nil || !slices.Equal(rec.Pending.Domains, []string{"com.example.boxed", "com.example.later"}) {
+		t.Errorf("record = %+v, pending %+v; want capture on, the failed app held aside with the one waiting", rec, rec.Pending)
+	}
+
+	w.imports(t, "com.example.boxed", "laptop", map[string]any{}, map[string]any{"A": true})
+	report, err = w.p.Restore(t.Context(), prefs.RestoreOptions{Pending: true})
+	if err != nil || !slices.Equal(report.Restored, []string{"com.example.boxed"}) {
+		t.Errorf("Restore(--pending) = %+v, %v; want the failed app tried again", report, err)
+	}
+	if rec, _ := w.p.Load(); rec.Pending == nil || !slices.Equal(rec.Pending.Domains, []string{"com.example.later"}) {
+		t.Errorf("pending = %+v, want com.example.later left", rec.Pending)
 	}
 }
 

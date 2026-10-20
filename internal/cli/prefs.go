@@ -56,9 +56,11 @@ Mac, and this Mac owning its folder in the store.`,
 		Short: "Put apps' settings back from the store: all, or those domains",
 		Long: `Put apps' settings back from the store: every saved domain whose app is
 installed and not running (the rest wait: kit prefs pending), then the
-settings files that differ, the live copy of each saved first. Name domains
-to restore just those, even without their app. A full restore with nothing
-failed switches capture on. Never quits an app.
+settings files that differ, the live copy of each saved first. A sandboxed
+app with no settings folder yet is opened once, hidden, to make one. Name
+domains to restore just those, even without their app. A full restore
+switches capture on; those that failed wait with the rest, left alone by
+capture. Never quits an app.
 
 --from restores another Mac's settings, leaving out [prefs machine-bound]
 (as onto other hardware); --at the store as it was then (2026-09-28, "3 days

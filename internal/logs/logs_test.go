@@ -36,6 +36,7 @@ func TestALogRecordsEveryEvent(t *testing.T) {
 		event.Logged{Time: at, Step: "brew", Line: "Installed ripgrep"},
 		event.StepFinished{Time: at, Step: "brew", Result: result, Duration: 2 * time.Second},
 		event.NeedsYou{Time: at, Step: "manual", Item: "sign-in", Title: "Sign in", Steps: []string{"Scan the code"}, Tells: true, More: 2},
+		event.NeedsYou{Time: at, Step: "manual", Item: "prefs:paused", Title: "Bring back apps' settings", Keys: []check.Key{{Key: "r", Does: "brings them back"}}, Answering: "r"},
 		event.RunFinished{Time: at, Duration: 3 * time.Second, Counts: map[check.State]int{check.Attention: 1}},
 	} {
 		l.Emit(e)
@@ -55,7 +56,7 @@ func TestALogRecordsEveryEvent(t *testing.T) {
 			t.Errorf("%s at %v, want %v", r.Event, r.Time, at)
 		}
 	}
-	if want := []string{"run_started", "step_started", "command", "command", "logged", "step_finished", "needs_you", "run_finished"}; !slices.Equal(kinds, want) {
+	if want := []string{"run_started", "step_started", "command", "command", "logged", "step_finished", "needs_you", "needs_you", "run_finished"}; !slices.Equal(kinds, want) {
 		t.Fatalf("records = %q, want %q", kinds, want)
 	}
 	if r := records[0]; r.Command != "status" || r.Machine != "laptop" || r.Version != "0.1.0" || !reflect.DeepEqual(r.Steps, steps) {
@@ -76,7 +77,10 @@ func TestALogRecordsEveryEvent(t *testing.T) {
 	if r := records[6]; r.Step != "manual" || r.Item != "sign-in" || r.Title != "Sign in" || !r.Tells || r.More != 2 {
 		t.Errorf("needs_you = %+v", r)
 	}
-	if r := records[7]; r.Counts[check.Attention] != 1 || r.DurationMS != 3000 {
+	if r := records[7]; r.Item != "prefs:paused" || r.Answering != "r" {
+		t.Errorf("needs_you, being answered = %+v; want the key it was answered with", r)
+	}
+	if r := records[8]; r.Counts[check.Attention] != 1 || r.DurationMS != 3000 {
 		t.Errorf("run_finished = %+v", r)
 	}
 	info, err := os.Stat(l.Path())
