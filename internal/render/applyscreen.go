@@ -405,7 +405,7 @@ func (p *Pretty) panel(w int) []string {
 	if c.More > 0 {
 		right = append(right, look.Muted(fmt.Sprintf("%d more after this", c.More)))
 	}
-	right = append(right, look.Muted("waiting "+took(p.now().Sub(p.cardSince))))
+	right = append(right, look.Muted("waiting "+took(p.now().Sub(p.upSince()))))
 	title := "  " + look.Mark(look.NeedsYou) + " " + look.Urgent(c.Title)
 	for len(right) > 1 && ansi.StringWidth(title)+ansi.StringWidth(look.Says(right...))+3 > w {
 		right = right[:len(right)-1]

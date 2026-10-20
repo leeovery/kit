@@ -136,14 +136,15 @@ type Pretty struct {
 	// cut are the steps the run was stopped in the middle of, as they stood.
 	cut map[string]runningStep
 	// card is the step by hand up for the person at the Mac, front and
-	// centre, till its step finishes: nil when none is; cardSince when it
-	// came up. cards are every one that came up, by its step and its line,
-	// for what's left to do once the run's done; asides, those set aside
-	// for another to take their turn, with when they came up.
-	card      *event.NeedsYou
-	cardSince time.Time
-	cards     map[string]event.NeedsYou
-	asides    map[string]upCard
+	// centre, till its step finishes: nil when none is. cards are every one
+	// that came up, by its step and its line, for what's left to do once
+	// the run's done; since, when each not yet done with first came up;
+	// asides, those taken down for another to take their place, whose steps
+	// haven't finished.
+	card   *event.NeedsYou
+	cards  map[string]event.NeedsYou
+	since  map[string]time.Time
+	asides map[string]event.NeedsYou
 	// todos are the to-dos at the run's end, as they stand, once they've
 	// started: applying's screen is theirs till the run's done.
 	todos *event.ToDos
@@ -221,7 +222,8 @@ func (p *Pretty) Emit(e event.Event) {
 		p.start, p.results = e, make(map[string]event.StepFinished, len(e.Steps))
 		p.output, p.command, p.began = map[string][]string{}, map[string]string{}, p.now()
 		p.raw, p.rawSeq = map[string][]rawLine{}, 0
-		p.cut, p.card, p.cards, p.asides, p.todos = map[string]runningStep{}, nil, map[string]event.NeedsYou{}, map[string]upCard{}, nil
+		p.cut, p.card, p.cards, p.todos = map[string]runningStep{}, nil, map[string]event.NeedsYou{}, nil
+		p.since, p.asides = map[string]time.Time{}, map[string]event.NeedsYou{}
 		p.log = nil
 		p.order.start(e.Steps)
 		p.preparing = ""

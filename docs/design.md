@@ -249,7 +249,7 @@ the Manual area, saying what to do, so `kit status` shows them; what kit can che
 a check that says what to do. While `kit apply` runs at a terminal, one that comes due is raised
 as a card on its screen, front and centre: its title, why it's there, said once (its notes, or,
 for a line with none, kit's words for why the run waits for it), its steps numbered, and a
-notification, posted once however often the card comes back. `space` says it's done (`enter`
+notification while it's up (taken away while it's set aside, posted again as it comes back). `space` says it's done (`enter`
 too, unshown: marked as `kit manual done` marks it; one with a command is looked at at once, as
 it is every few seconds anyway); a card with a command offers no key, kit carrying on by itself
 once it's done. There's no putting a card off: it's done, or the run's stopped. One card is up
@@ -272,7 +272,8 @@ while it's up, a line by its command every few seconds, one of kit's own by its 
 once done the log says so, how long it took and what kit saw, and the next comes up; `space` says
 one with no command is done; a choice is answered by its keys (apps' settings: `r` brings them
 back from this Mac's last save, its date said, as `kit prefs restore` does; `f` starts afresh, as
-`kit prefs start-fresh` does). Stopping there (`q`'s Stop) leaves what's left to do, in that
+`kit prefs start-fresh` does). Stopping there (`q`'s Stop, between two to-dos as well, and as
+the one up is found done) leaves what's left to do, in that
 order in the record, the run ending as it stands. After the last, kit checks again the steps the
 to-dos held, those they came from, so their rows and the record are right, then finishes.
 Without a terminal, nothing's raised: kit's own stay items of their steps. A step a line comes

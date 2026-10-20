@@ -304,8 +304,8 @@ type Raise struct {
 // place is a card's place in Raise's line: its step; how much of the run
 // waits on it; whether it's held, never moved from its turn; how many of
 // its step's own cards follow it; and moved, told each time its turn comes
-// or goes. notified is the item its notification's for, once posted, which
-// only its own card's goroutine touches.
+// or goes. notified is the item its notification's for, while it's posted,
+// which only its own card's goroutine touches.
 type place struct {
 	step     string
 	weight   int
@@ -326,11 +326,13 @@ func (pl *place) poke() {
 
 // seat is how a card takes its place in the line: by how much of the run
 // waits on it, or, held, at the end; with how many of its step's own cards
-// follow it.
+// follow it; and where the person's answers come, when its step listens
+// for all its cards at once, else nil for the card to listen itself.
 type seat struct {
-	weight int
-	held   bool
-	after  int
+	weight  int
+	held    bool
+	after   int
+	answers <-chan hand.Answer
 }
 
 // midRun is the seat of a card raised mid-run for the step called step: by
@@ -353,46 +355,83 @@ var manualPoll = 3 * time.Second
 // up puts c's card up for the step called step whenever it's the card's
 // turn, taking its place in the line as s says, and waits till it's done,
 // the step's job given up meanwhile, for other steps to go on
-// (engine.Release). Each time it wakes it looks at everything afresh: its
-// turn come and its card not up, it looks whether it's done, and if not
-// puts its card up; every few seconds, up or set aside, it looks whether
+// (engine.Release). Each time it wakes it looks at everything afresh
+// (look): the run stopped, it's over; its turn come and its card not up, it
+// looks whether it's done, and if not puts its card up; its card down, its
+// notification goes. Every few seconds, up or set aside, it looks whether
 // it's done; and it takes the person's answers. Done, it leaves the line,
-// the next card's turn coming. It returns what kit saw as it was done, in
-// words, if it has some; errStopHere when the person stopped where they
-// were.
+// the next card's turn coming, unless the person stopped meanwhile
+// (finish). It returns what kit saw as it was done, in words, if it has
+// some; errStopHere when the person stopped where they were.
 func (r *Raise) up(ctx context.Context, step string, c raised, s seat) (string, error) {
+	answers := s.answers
+	if answers == nil {
+		listened, down := r.Desk.Listen(step)
+		defer down()
+		answers = listened
+	}
 	defer engine.Release(ctx)()
 	r.Sink.Emit(event.Doing{Time: r.Now(), Step: step, Says: event.Queued})
 	pl := r.join(step, s)
 	defer r.leave(pl)
 	defer r.unnotify(ctx, pl)
-	answers, down := r.Desk.Listen(step)
-	defer down()
 	// Looking every few seconds finds it done by its command or its check,
 	// or marked done elsewhere, as by kit manual done in another window.
 	tick := time.NewTicker(manualPoll)
 	defer tick.Stop()
 	for {
-		if r.due(pl) {
-			if ok, saw := c.done(ctx); ok {
-				return saw, nil
-			}
-			r.show(ctx, pl, c)
+		if saw, done, err := r.look(ctx, pl, c); done || err != nil {
+			return finish(answers, saw, err)
 		}
 		select {
 		case <-ctx.Done():
-			return "", ctx.Err()
 		case <-pl.moved:
 		case <-tick.C:
 			if ok, saw := c.done(ctx); ok {
-				return saw, nil
+				return finish(answers, saw, nil)
 			}
 		case a := <-answers:
 			if saw, ok, err := r.answered(ctx, pl, c, a); ok || err != nil {
-				return saw, err
+				return finish(answers, saw, err)
 			}
 		}
 	}
+}
+
+// look is pl's card as things stand: the run stopped, its error; its turn
+// come and its card not up, done, what kit saw, else its card put up; its
+// card down, its notification taken away.
+func (r *Raise) look(ctx context.Context, pl *place, c raised) (saw string, done bool, err error) {
+	if err := ctx.Err(); err != nil {
+		return "", false, err
+	}
+	due, up := r.state(pl)
+	switch {
+	case due:
+		if ok, saw := c.done(ctx); ok {
+			return saw, true, nil
+		}
+		r.show(ctx, pl, c)
+	case !up:
+		r.unnotify(ctx, pl)
+	}
+	return "", false, nil
+}
+
+// finish is how a card's wait ends, done, what kit saw, or with err: a
+// Stop the person gave meanwhile, waiting unread, stops there all the same.
+func finish(answers <-chan hand.Answer, saw string, err error) (string, error) {
+	if err != nil {
+		return "", err
+	}
+	select {
+	case a := <-answers:
+		if a == hand.Stop {
+			return "", errStopHere
+		}
+	default:
+	}
+	return saw, nil
 }
 
 // answered is what the person's answer to pl's card does: Stop stops where
@@ -410,21 +449,24 @@ func (r *Raise) answered(ctx context.Context, pl *place, c raised, a hand.Answer
 	return saw, ok, err
 }
 
-// due reports whether it's pl's turn and its card isn't up.
-func (r *Raise) due(pl *place) bool {
+// state is pl's card as the line has it: due, its turn come and its card
+// not up; up, its card up.
+func (r *Raise) state(pl *place) (due, up bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.hasLocked(pl) && r.shown != pl
+	up = r.shown == pl
+	return r.hasLocked(pl) && !up, up
 }
 
-// show puts c's card up for pl's step, when it's still pl's turn: its More
-// counting the cards waiting after it, its step's own and those in the
-// line; a notification posted, and its app opened, the first time.
+// show puts c's card up for pl's step, when it's still pl's turn and the
+// run hasn't stopped: its More counting the cards waiting after it, its
+// step's own and those in the line; a notification posted each time it
+// comes up, and its app opened the first time.
 func (r *Raise) show(ctx context.Context, pl *place, c raised) {
 	card := c.card(ctx)
 	card.Step = pl.step
 	r.mu.Lock()
-	if !r.hasLocked(pl) {
+	if !r.hasLocked(pl) || ctx.Err() != nil {
 		r.mu.Unlock()
 		return
 	}
@@ -441,11 +483,12 @@ func (r *Raise) show(ctx context.Context, pl *place, c raised) {
 	}
 }
 
-// unnotify takes the notification of pl's card away, once it's down: done,
-// or the run stopped.
+// unnotify takes the notification of pl's card away, once it's down: set
+// aside, done, or the run stopped.
 func (r *Raise) unnotify(ctx context.Context, pl *place) {
 	if r.Notify != nil && pl.notified != "" {
 		r.Notify.Clear(context.WithoutCancel(ctx), noticeID(pl.step, pl.notified))
+		pl.notified = ""
 	}
 }
 

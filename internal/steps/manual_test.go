@@ -519,8 +519,8 @@ func over(t *testing.T, ran <-chan engine.Report) engine.Report {
 // in place of the card up, whose step says again it waits its turn first,
 // and which comes back once that's done. Tab moves on from the card up to
 // the next waiting, the one left staying to do and coming back. Each card's
-// notification is posted once, however often it comes back, and taken away
-// once it's done.
+// notification is posted each time it comes up, and taken away each time
+// it goes down, set aside or done, so only the card up has one.
 func TestCardsComeUpByWhatWaitsOnThem(t *testing.T) {
 	c := newCard(t)
 	gate := make(chan struct{})
@@ -552,13 +552,17 @@ func TestCardsComeUpByWhatWaitsOnThem(t *testing.T) {
 	if report.Results["store"].State != check.OK || report.Results["vault"].State != check.OK {
 		t.Errorf("store %+v, vault %+v; want both done", report.Results["store"], report.Results["vault"])
 	}
-	posted := []string{
-		"notify card:store:store | Sign in to the store | kit waits for you to do this",
-		"notify card:vault:vault | Sign in to the vault | kit waits for you to do this",
-		"clear card:store:store", "clear card:vault:vault",
-	}
-	if got := c.notices.posted(); !slices.Equal(got, posted) {
-		t.Errorf("notifications %q, want %q", got, posted)
+	for _, item := range []string{"store", "vault"} {
+		id := "card:" + item + ":" + item
+		var got []string
+		for _, n := range c.notices.posted() {
+			if f := strings.Fields(n); f[1] == id {
+				got = append(got, f[0])
+			}
+		}
+		if want := []string{"notify", "clear", "notify", "clear"}; !slices.Equal(got, want) {
+			t.Errorf("%s's notifications %q, want %q: posted as it comes up, taken away as it goes down", item, got, want)
+		}
 	}
 }
 
@@ -720,22 +724,151 @@ func TestAToDoUpStaysUp(t *testing.T) {
 		t.Fatal(err)
 	}
 	ran := running(t, c, p)
-	c.upNow(t, "printer")
+	c.upNow(t, "manual:printer")
 	close(gate)
 	c.cards(t, 2)
 	c.answer(t, steps.ManualName, hand.Next)
 	c.answer(t, steps.ManualName, hand.Done)
 	c.upNow(t, "vault")
 	c.answer(t, "vault", hand.Done)
-	c.upNow(t, "scanner")
+	c.upNow(t, "manual:scanner")
 	c.answer(t, steps.ManualName, hand.Done)
 	over(t, ran)
 
-	if got := c.turns()[:4]; !slices.Equal(got, []string{"queued manual", "up printer 1", "queued vault", "up printer 2"}) {
+	if got := c.turns()[:4]; !slices.Equal(got, []string{"queued manual", "up manual:printer 1", "queued vault", "up manual:printer 2"}) {
 		t.Errorf("turns start %q; want the printer's to-do up, the vault's card waiting after it", got)
 	}
-	if got, want := c.ups(), []string{"printer", "vault", "scanner"}; !slices.Equal(got, want) {
+	if got, want := c.ups(), []string{"manual:printer", "vault", "manual:scanner"}; !slices.Equal(got, want) {
 		t.Errorf("cards up %q, want %q", got, want)
+	}
+}
+
+// The last to-do done, a card waiting behind it goes up, and the run ends
+// once that's done.
+func TestACardAfterTheLastToDo(t *testing.T) {
+	for range 50 {
+		c := newCard(t)
+		gate := make(chan struct{})
+		list := config.List{Entries: []config.Entry{{Name: "printer", Value: `"Add the printer"`, Scope: "laptop", Line: 2}}}
+		vault := steps.OwnManual(c.fake, c.state, steps.ManualStep{Name: "vault", Do: "Sign in to the vault"}, c.raise)
+		vault.After, vault.Before = []string{"cask"}, []string{"secret"}
+		p, err := engine.New(steps.Manual(c.fake, "/home/someone", c.state, list, c.raise), vault, gated("cask", gate), fine("secret"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		ran := running(t, c, p)
+		c.upNow(t, "manual:printer")
+		close(gate)
+		c.cards(t, 2)
+		c.answer(t, steps.ManualName, hand.Done)
+		c.upNow(t, "vault")
+		c.answer(t, "vault", hand.Done)
+		over(t, ran)
+		if got, want := c.ups(), []string{"manual:printer", "vault"}; !slices.Equal(got, want) {
+			t.Fatalf("cards up %q, want %q", got, want)
+		}
+	}
+}
+
+// lastToDos are the to-dos as the events last list them.
+func (c *card) lastToDos() []event.ToDo {
+	c.sink.mu.Lock()
+	defer c.sink.mu.Unlock()
+	var list []event.ToDo
+	for _, e := range c.sink.seen {
+		if td, ok := e.(event.ToDos); ok {
+			list = td.List
+		}
+	}
+	return list
+}
+
+// A Stop given just as the to-do up is found done stops there all the
+// same: the to-do kept as done, the next never coming up.
+func TestAStopAsTheToDoIsDone(t *testing.T) {
+	defer steps.SetManualPoll(5 * time.Millisecond)()
+	c := newCard(t)
+	looking, carryOn := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	// Its check, its look as it comes up, then its next look, done, kept
+	// till the Stop's given.
+	c.fake.On("test", "-f", "/printer").Exits(1).Then().Exits(1).Then().Does(func() {
+		once.Do(func() {
+			close(looking)
+			<-carryOn
+		})
+	})
+	list := config.List{Entries: []config.Entry{
+		{Name: "printer", Value: `"Add the printer" --test test -f /printer`, Scope: "laptop", Line: 2},
+		{Name: "scanner", Value: `"Add the scanner"`, Scope: "laptop", Line: 3},
+	}}
+	applied := applying(t, steps.Manual(c.fake, "/home/someone", c.state, list, c.raise))
+	<-looking
+	c.answer(t, steps.ManualName, hand.Stop)
+	close(carryOn)
+	if err := ended(t, applied); err != nil {
+		t.Fatal(err)
+	}
+	if got := c.ups(); !slices.Equal(got, []string{"manual:printer"}) {
+		t.Errorf("cards up %q, want the printer's alone", got)
+	}
+	if todos := c.lastToDos(); len(todos) != 2 || !todos[0].Done || todos[1].Done {
+		t.Errorf("the to-dos ended %+v, want the printer's done, the scanner's left", todos)
+	}
+}
+
+// A Stop given between two to-dos, as one's done and before the next is
+// up, stops there: the next never comes up.
+func TestAStopBetweenToDos(t *testing.T) {
+	defer steps.SetManualPoll(time.Hour)()
+	for range 20 {
+		c := newCard(t)
+		list := config.List{Entries: []config.Entry{
+			{Name: "printer", Value: `"Add the printer"`, Scope: "laptop", Line: 2},
+			{Name: "scanner", Value: `"Add the scanner"`, Scope: "laptop", Line: 3},
+		}}
+		applied := applying(t, steps.Manual(c.fake, "/home/someone", c.state, list, c.raise))
+		c.upNow(t, "manual:printer")
+		c.answer(t, steps.ManualName, hand.Done)
+		c.answer(t, steps.ManualName, hand.Stop)
+		if err := ended(t, applied); err != nil {
+			t.Fatal(err)
+		}
+		if got := c.ups(); !slices.Equal(got, []string{"manual:printer"}) {
+			t.Fatalf("cards up %q, want the printer's alone", got)
+		}
+		if todos := c.lastToDos(); !todos[0].Done || todos[1].Done {
+			t.Fatalf("the to-dos ended %+v, want the printer's done, the scanner's left", todos)
+		}
+	}
+}
+
+// The run stopped while a card's up, the card waiting behind it never goes
+// up.
+func TestNoCardGoesUpOnceTheRunsStopped(t *testing.T) {
+	defer steps.SetManualPoll(time.Hour)()
+	for range 50 {
+		c := newCard(t)
+		ctx, stop := context.WithCancel(t.Context())
+		own := func(name string) <-chan error {
+			step := steps.OwnManual(c.fake, c.state, steps.ManualStep{Name: name, Do: "Do " + name}, c.raise)
+			done := make(chan error, 1)
+			go func() { done <- step.Apply(ctx, check.Result{}) }()
+			return done
+		}
+		first := own("first")
+		c.upNow(t, "first")
+		second := own("second")
+		c.cards(t, 2)
+		stop()
+		for _, applied := range []<-chan error{first, second} {
+			if err := ended(t, applied); !errors.Is(err, context.Canceled) {
+				t.Fatalf("stopped, applying ended %v; want it stopped", err)
+			}
+		}
+		if got := c.ups(); !slices.Equal(got, []string{"first"}) {
+			t.Fatalf("cards up %q, want the first's alone", got)
+		}
 	}
 }
 
@@ -754,11 +887,11 @@ func TestTheRestOneCardEach(t *testing.T) {
 	}}
 	step := steps.Manual(c.fake, "/home/someone", c.state, list, c.raise)
 	applied := applying(t, step)
-	if up := c.cards(t, 1)[0]; up.Step != steps.ManualName || up.Item != "app" || up.More != 1 || !up.Tells {
+	if up := c.cards(t, 1)[0]; up.Step != steps.ManualName || up.Item != "manual:app" || up.More != 1 || !up.Tells {
 		t.Errorf("first card = %+v, want the app's, 1 more after it", up)
 	}
 	c.answer(t, steps.ManualName, hand.Done)
-	if up := c.cards(t, 2)[1]; up.Item != "sign-in" || up.More != 0 || up.Tells || !slices.Equal(up.Steps, []string{"Open the service", "Sign in"}) {
+	if up := c.cards(t, 2)[1]; up.Item != "manual:sign-in" || up.More != 0 || up.Tells || !slices.Equal(up.Steps, []string{"Open the service", "Sign in"}) {
 		t.Errorf("second card = %+v, want the sign-in's, its steps, none after it", up)
 	}
 	c.answer(t, steps.ManualName, hand.Done)
@@ -769,8 +902,8 @@ func TestTheRestOneCardEach(t *testing.T) {
 		t.Errorf("check after = %+v, want all done", res)
 	}
 	want := []string{
-		"notify card:manual:app | Install the app | kit waits for you to do this", "clear card:manual:app",
-		"notify card:manual:sign-in | Sign in to the service | Open the service", "clear card:manual:sign-in",
+		"notify card:manual:manual:app | Install the app | kit waits for you to do this", "clear card:manual:manual:app",
+		"notify card:manual:manual:sign-in | Sign in to the service | Open the service", "clear card:manual:manual:sign-in",
 	}
 	if got := c.notices.posted(); !slices.Equal(got, want) {
 		t.Errorf("notifications %q, want %q", got, want)

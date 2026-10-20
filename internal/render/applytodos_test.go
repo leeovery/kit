@@ -36,14 +36,14 @@ var toDoCards = []event.NeedsYou{
 	{Item: "prefs:paused", Title: "Bring back apps' settings", Group: "Apps",
 		Why:  "First, so the apps you open next start with yours. This Mac saves its own once they're back. Claude Code's come too.",
 		Keys: []check.Key{{Key: "r", Does: "brings them back from this Mac's last save, 15 Oct"}, {Key: "f", Does: "starts afresh: nothing back, saving from now"}}},
-	{Item: "karabiner", Title: "Open Karabiner-Elements", Group: "Apps", Tells: true,
+	{Item: "manual:karabiner", Title: "Open Karabiner-Elements", Group: "Apps", Tells: true,
 		Why: "Its key remapping needs its driver and Input Monitoring, which only you can allow. Opened, it asks for both.",
 		Steps: []string{"Open Karabiner-Elements", "Allow what it asks for", "If it doesn't ask, in System Settings:",
 			"Privacy & Security: allow its driver (the Allow button, near the bottom)", "Privacy & Security › Input Monitoring: turn on Karabiner-Elements"}},
-	{Item: "hammerspoon", Title: "Open Hammerspoon", Group: "Apps",
+	{Item: "manual:hammerspoon", Title: "Open Hammerspoon", Group: "Apps",
 		Why:   "Your window moves and shortcuts need Accessibility, which only you can allow. Opened, it asks.",
 		Steps: []string{"Open Hammerspoon", "Allow what it asks for"}},
-	{Item: "sharing", Title: "Allow Full Disk Access for remote users", Group: "System Settings",
+	{Item: "manual:sharing", Title: "Allow Full Disk Access for remote users", Group: "System Settings",
 		Why:   "So an SSH session from another Mac can reach everything, which Remote Login alone can't.",
 		Steps: []string{"System Settings › General › Sharing › Remote Login › ⓘ", "Turn on Allow full disk access for remote users"}},
 	{Item: "time-machine:none", Title: "Add a Time Machine disk", Group: "Backups", Tells: true, Watch: "Time Machine has a disk",
@@ -379,5 +379,100 @@ func TestTheToDosKeys(t *testing.T) {
 				t.Errorf("answered %v, stopped the run %d times; want %v, %d", got, kb.stops(), tt.want, tt.stops)
 			}
 		})
+	}
+}
+
+// toDosAndACard is a run whose to-dos at the end, printer's alone or a
+// scanner's after it, have begun, the printer's up, when the vault's card,
+// which the secrets wait on, comes due and waits after it; then the
+// printer's done, the screen told the list's change and the vault's card
+// going up in either order, as they're told apart.
+func toDosAndACard(list []event.ToDo, cardFirst bool) []event.Event {
+	steps := []event.Step{
+		{Name: "vault", Title: "vault", Area: "Manual", ByHand: []event.Hand{{Name: "vault", Title: "Sign in to the vault"}}},
+		{Name: "secret", Title: "Secrets", Area: "Drift", Row: "Secrets", Waits: []string{"vault"}},
+		{Name: "manual", Title: "By hand", Area: "Manual", ByHand: []event.Hand{{Name: "printer", Title: "Add the printer"}, {Name: "scanner", Title: "Add the scanner"}}},
+	}
+	printer := event.NeedsYou{Time: after(10), Step: "manual", Item: "manual:printer", Title: "Add the printer", More: len(list) - 1}
+	waited := printer
+	waited.Time, waited.More = after(20), printer.More+1
+	events := rowsRun(steps,
+		event.StepStarted{Time: after(10), Step: "manual", Doing: "applying"},
+		event.ToDos{Time: after(10), Step: "manual", List: slices.Clone(list), Up: 0},
+		event.Doing{Time: after(10), Step: "manual", Says: event.Queued},
+		printer,
+		event.StepStarted{Time: after(20), Step: "vault", Doing: "applying"},
+		event.Doing{Time: after(20), Step: "vault", Says: event.Queued},
+		waited,
+	)
+	done := slices.Clone(list)
+	done[0].Done = true
+	next := -1
+	if len(list) > 1 {
+		next = 1
+	}
+	changed := event.ToDos{Time: after(30), Step: "manual", List: done, Up: next}
+	vault := event.NeedsYou{Time: after(30), Step: "vault", Item: "vault", Title: "Sign in to the vault"}
+	if cardFirst {
+		return append(events, vault, changed)
+	}
+	return append(events, changed, vault)
+}
+
+// A card waiting behind a to-do goes up once the to-do's done, before the
+// next to-do, or the run's end: whichever order the screen's told the
+// to-do's done and the card's up in, the card's panel is up, and each line
+// is in the log once, in the order told: the to-do done, how long it took,
+// and the card waiting for you.
+func TestACardAfterAToDo(t *testing.T) {
+	printer := event.ToDo{Step: "manual", ID: "manual:printer", Title: "Add the printer"}
+	scanner := event.ToDo{Step: "manual", ID: "manual:scanner", Title: "Add the scanner"}
+	for _, list := range [][]event.ToDo{{printer}, {printer, scanner}} {
+		for _, cardFirst := range []bool{true, false} {
+			name := fmt.Sprintf("%d to-dos, the card told first %v", len(list), cardFirst)
+			t.Run(name, func(t *testing.T) {
+				face, out, _ := applyAt(160, 64, 35*time.Second, toDosAndACard(list, cardFirst))
+				defer func() { _ = face.Close() }()
+				got := screen(out.String())
+				if _, right := panes(got, 160); !strings.Contains(right[1], "Sign in to the vault") {
+					t.Errorf("the right pane is\n%s\nwant the vault's card up", strings.Join(right, "\n"))
+				}
+				want := []string{
+					"  03:04:35  ▲ Sign in to the vault: waiting for you",
+					"  03:04:35  ● Add the printer: done, in 20.0s",
+				}
+				log := logOf(got, 160)
+				if slices.Sort(log); !slices.Equal(log, want) {
+					t.Errorf("the log is\n%s\nwant\n%s", strings.Join(log, "\n"), strings.Join(want, "\n"))
+				}
+			})
+		}
+	}
+}
+
+// Stop, between two to-dos, once one's done and before the next is up,
+// stops the to-dos there: it's never the run's.
+func TestStopBetweenToDos(t *testing.T) {
+	list := []event.ToDo{{Step: "manual", ID: "manual:printer", Title: "Add the printer"}, {Step: "manual", ID: "manual:scanner", Title: "Add the scanner"}}
+	events := toDosAndACard(list, false)[:4]
+	done := slices.Clone(list)
+	done[0].Done = true
+	events = append(events, event.NeedsYou{Time: after(10), Step: "manual", Item: "manual:printer", Title: "Add the printer", More: 1},
+		event.ToDos{Time: after(30), Step: "manual", List: done, Up: 1})
+	face, _, kb := applyAt(160, 64, 35*time.Second, events)
+	defer func() { _ = face.Close() }()
+	var mu sync.Mutex
+	var got []answered
+	face.Hands(func(step string, a hand.Answer) bool {
+		mu.Lock()
+		defer mu.Unlock()
+		got = append(got, answered{step, a})
+		return true
+	})
+	kb.press(t, keyQ, keyDown, keyEnter)
+	mu.Lock()
+	defer mu.Unlock()
+	if !slices.Equal(got, []answered{{"manual", hand.Stop}}) || kb.stops() != 0 {
+		t.Errorf("Stop between to-dos answered %v, stopped the run %d times; want the to-dos stopped, not the run", got, kb.stops())
 	}
 }

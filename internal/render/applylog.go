@@ -120,57 +120,60 @@ func (p *Pretty) nothingByHand(step string) bool {
 	return s.Area == steps.AreaManual && len(s.ByHand) == 0
 }
 
-// raise is a card come up for e's step by hand: the card up before it done
-// with, when it's another; the log saying it waits for you, unless it's
-// one of the to-dos at the run's end, which their list shows, or it's come
-// back from being set aside, when it's up since it first came up. The same
-// card again, as when more come to wait after it, changes only what it
-// says.
+// raise is a card come up for e's step by hand, in place of the card up
+// before it, when that's another (putDown). The first time it comes up,
+// the log says it waits for you, unless it's one of the to-dos at the
+// run's end, which their list shows; come back from being set aside, it's
+// up since it first came up. The same card again, as when more come to
+// wait after it, changes only what it says. What came up before never
+// says how that card ended: each card's own end does.
 func (p *Pretty) raise(e event.NeedsYou) {
 	id := cardID(e.Step, e.Item)
 	if p.card != nil && cardID(p.card.Step, p.card.Item) != id {
-		p.lower(e.Time, nil)
+		p.putDown()
 	}
-	aside, back := p.asides[id]
 	delete(p.asides, id)
-	switch {
-	case p.card != nil:
-	case back:
-		p.cardSince = aside.since
-	default:
-		p.cardSince = p.stamp(e.Time)
+	if _, seen := p.since[id]; !seen {
+		p.since[id] = p.stamp(e.Time)
 		if !p.listing(e.Step) {
-			p.note(p.cardSince, p.rowOf(e.Step), look.Mark(look.NeedsYou), look.White(e.Title+": waiting for you"))
+			p.note(p.since[id], p.rowOf(e.Step), look.Mark(look.NeedsYou), look.White(e.Title+": waiting for you"))
 		}
 	}
 	p.card = &e
 	p.cards[id] = e
 }
 
+// putDown takes the card up down for another to take its place, saying
+// nothing of how it ended: a to-do's end its list tells (workThrough),
+// any other's its step finishing (lowerAside).
+func (p *Pretty) putDown() {
+	c := *p.card
+	p.card = nil
+	if !p.listing(c.Step) {
+		p.asides[cardID(c.Step, c.Item)] = c
+	}
+}
+
 // setAside takes the card up down, when it's step's, its step saying it
 // waits its turn again, as another card's taken it: it's still to do, and
 // comes back as it was. The to-dos at the run's end are never set aside.
 func (p *Pretty) setAside(step string) {
-	if !p.carded(step) || p.listing(step) {
-		return
+	if p.carded(step) && !p.listing(step) {
+		p.putDown()
 	}
-	p.asides[cardID(p.card.Step, p.card.Item)] = upCard{card: *p.card, since: p.cardSince}
-	p.card = nil
 }
 
-// upCard is a card that came up, and when it first did.
-type upCard struct {
-	card  event.NeedsYou
-	since time.Time
-}
+// upSince is when the card up first came up.
+func (p *Pretty) upSince() time.Time { return p.since[cardID(p.card.Step, p.card.Item)] }
 
-// lowerAside takes down the cards set aside of f's step, finished, as lower
-// takes the card up down: done meanwhile, or left to do.
+// lowerAside has the log say how the cards down of f's step ended, its
+// step finished, as lower does for the card up: done meanwhile, or left to
+// do.
 func (p *Pretty) lowerAside(f event.StepFinished) {
-	for id, a := range p.asides {
-		if a.card.Step == f.Step {
+	for id, c := range p.asides {
+		if c.Step == f.Step {
 			delete(p.asides, id)
-			p.noteDown(a.card, a.since, f.Time, &f)
+			p.noteDown(c, f.Time, &f)
 		}
 	}
 }
@@ -183,9 +186,10 @@ func (p *Pretty) listing(step string) bool {
 // workThrough is the to-dos at the run's end as they stand now: the log
 // says each newly done, what kit saw when it has words, and how long it
 // took when it came up; the one that was up left, as the person stopped
-// there, that it's not done. Its card's down once it's no longer up. The
-// first time, the log shows every line: the to-dos take the left pane, so
-// there's no row to choose.
+// there, that it's not done. Its card's down once it's no longer up, when
+// it's still the card up: another card may have come up in its place
+// first. The first time, the log shows every line: the to-dos take the
+// left pane, so there's no row to choose.
 func (p *Pretty) workThrough(e event.ToDos) {
 	before, wasUp := p.todos, -1
 	if before == nil {
@@ -199,8 +203,8 @@ func (p *Pretty) workThrough(e event.ToDos) {
 			continue
 		}
 		text := t.Title + ": done"
-		if i == wasUp && p.card != nil {
-			text += ", in " + took(at.Sub(p.cardSince))
+		if since, up := p.since[cardID(e.Step, t.ID)]; up {
+			text += ", in " + took(at.Sub(since))
 		}
 		parts := []string{look.White(text)}
 		if t.Saw != "" {
@@ -208,11 +212,16 @@ func (p *Pretty) workThrough(e event.ToDos) {
 		}
 		p.note(at, row, look.Mark(look.Done), look.Says(parts...))
 	}
-	if wasUp >= 0 && wasUp != e.Up && p.listing(e.Step) && p.card != nil {
-		if !e.List[wasUp].Done {
-			p.note(at, row, look.Mark(look.ToDo), look.White(e.List[wasUp].Title+": not done"))
+	if wasUp >= 0 && wasUp != e.Up {
+		t := e.List[wasUp]
+		id := cardID(e.Step, t.ID)
+		if _, up := p.since[id]; up && !t.Done {
+			p.note(at, row, look.Mark(look.ToDo), look.White(t.Title+": not done"))
 		}
-		p.card = nil
+		if p.card != nil && cardID(p.card.Step, p.card.Item) == id {
+			p.card = nil
+		}
+		delete(p.since, id)
 	}
 	p.todos = &e
 }
@@ -223,12 +232,15 @@ func (p *Pretty) workThrough(e event.ToDos) {
 func (p *Pretty) lower(at time.Time, finished *event.StepFinished) {
 	c := *p.card
 	p.card = nil
-	p.noteDown(c, p.cardSince, at, finished)
+	p.noteDown(c, at, finished)
 }
 
-// noteDown has the log say card c, up since since, came down at at, as
-// lower says.
-func (p *Pretty) noteDown(c event.NeedsYou, since, at time.Time, finished *event.StepFinished) {
+// noteDown has the log say card c came down at at, as lower says, how long
+// since it first came up; it's done with.
+func (p *Pretty) noteDown(c event.NeedsYou, at time.Time, finished *event.StepFinished) {
+	id := cardID(c.Step, c.Item)
+	since := p.since[id]
+	delete(p.since, id)
 	at, row := p.stamp(at), p.rowOf(c.Step)
 	switch {
 	case finished != nil && wasStopped(*finished):

@@ -254,10 +254,11 @@ func (p *Pretty) answer(k ask.Key) (halt bool) {
 	return false
 }
 
-// stopHere has the to-dos stop where they are, when one's up, and reports
-// whether they took it.
+// stopHere has the to-dos stop where they are, while they're being worked
+// through, a to-do up or the next coming, and reports whether they took
+// it.
 func (p *Pretty) stopHere() bool {
-	return p.card != nil && p.listing(p.card.Step) && p.hands != nil && p.hands(p.card.Step, hand.Stop)
+	return p.todos != nil && p.todos.Up >= 0 && p.hands != nil && p.hands(p.todos.Step, hand.Stop)
 }
 
 // choose has the log show row's lines alone, or every line for "", from

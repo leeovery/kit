@@ -46,9 +46,20 @@ func toDoList(ctx context.Context, due []byHand) []toDo {
 	}
 	lines := make([]toDo, len(due))
 	for i, b := range due {
-		lines[i] = b
+		lines[i] = lineToDo{b}
 	}
 	return grouped(slices.Concat(first, lines, last))
+}
+
+// lineToDo is a [manual] line as one of the to-dos at the run's end: its
+// card known by the id the list knows it by, as kit's own to-dos' are, so
+// the list's changes and its card name the same to-do.
+type lineToDo struct{ byHand }
+
+func (l lineToDo) card(ctx context.Context) event.NeedsYou {
+	c := l.byHand.card(ctx)
+	c.Item = l.item().ID
+	return c
 }
 
 // grouped is list by group, each group where its first comes, those in it
@@ -130,12 +141,17 @@ func (o ownToDo) answer(ctx context.Context, a hand.Answer, _ time.Time) (bool, 
 
 // workThrough raises list's to-dos for step one at a time, in order, each
 // till it's done: the list emitted as each comes up, and once they're over.
-// The person can stop where they are (hand.Stop): what's left stays to do.
+// The person can stop where they are (hand.Stop), the to-do up kept as
+// done should it be: what's left stays to do. Their answers come on one
+// listener for the whole list, so a Stop given between two to-dos is never
+// lost, and anything else given then, for a to-do done with, goes nowhere.
 // Then the steps the to-dos done held are checked again (recheckHeld).
 func (r *Raise) workThrough(ctx context.Context, step string, list []toDo) error {
 	if len(list) == 0 {
 		return nil
 	}
+	answers, down := r.Desk.Listen(step)
+	defer down()
 	entries := make([]event.ToDo, len(list))
 	for i, t := range list {
 		entries[i] = t.entry()
@@ -146,8 +162,15 @@ func (r *Raise) workThrough(ctx context.Context, step string, list []toDo) error
 	resolved := map[string]bool{}
 	for i, t := range list {
 		emit(i)
-		saw, err := r.up(ctx, step, t, seat{held: true, after: len(list) - 1 - i})
+		if stopGiven(answers) {
+			break
+		}
+		saw, err := r.up(ctx, step, t, seat{held: true, after: len(list) - 1 - i, answers: answers})
 		if errors.Is(err, errStopHere) {
+			if done, doneSaw := t.done(ctx); done {
+				entries[i].Done, entries[i].Saw = true, doneSaw
+				resolved[entries[i].ID] = true
+			}
 			break
 		}
 		if err != nil {
@@ -159,6 +182,21 @@ func (r *Raise) workThrough(ctx context.Context, step string, list []toDo) error
 	emit(-1)
 	recheckHeld(ctx, entries, resolved)
 	return nil
+}
+
+// stopGiven reads what the person answered while no to-do was up, without
+// waiting: whether it was a Stop. Anything else was for a to-do done with.
+func stopGiven(answers <-chan hand.Answer) bool {
+	for {
+		select {
+		case a := <-answers:
+			if a == hand.Stop {
+				return true
+			}
+		default:
+			return false
+		}
+	}
 }
 
 // recheckHeld checks again the steps the to-dos done held, those they came
