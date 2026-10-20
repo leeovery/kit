@@ -362,6 +362,12 @@ type Placing struct {
 	Behind []engine.Wait
 	// Held are its sections holding their lines back, in order.
 	Held []Held
+	// Admin, while kit asks for an administrator's password as the run goes
+	// on, waits for the answer, reporting whether it's held: the things that
+	// need it (Admin's NeedsAdmin) go in last, once it's answered, the rest
+	// meanwhile, and are left when it isn't given. Nil when kit holds the
+	// password, or doesn't ask as the run goes on.
+	Admin func(ctx context.Context) bool
 }
 
 // Placed is the step Step is, k's lines installed as placed says, once the
@@ -405,13 +411,13 @@ func InstallDeclared(ctx context.Context, k Kind, declared config.List, held []H
 			errs = append(errs, errors.New(reason))
 		}
 	}
-	return joined(errs)
+	return Joined(errs)
 }
 
-// joined is errs as one error: nil for none, one as it is, several said one
+// Joined is errs as one error: nil for none, one as it is, several said one
 // after another, each still there to find (errors.As), as engine.Reason
 // finds the commands that failed.
-func joined(errs []error) error {
+func Joined(errs []error) error {
 	switch len(errs) {
 	case 0:
 		return nil
@@ -445,18 +451,34 @@ func installApart(ctx context.Context, k Kind, declared config.List, placing Pla
 			errs = append(errs, err)
 		}
 	}
-	if err := install(ctx, k, declared, first, nil); err != nil {
-		errs = append(errs, err)
+	waiting := awaitingAdmin(ctx, k, placing, names)
+	// later are the installs of what waits for the password, each as it
+	// would have gone in.
+	var later []batch
+	put := func(names, env []string) {
+		var now, wait []string
+		for _, name := range names {
+			if waiting[name] {
+				wait = append(wait, name)
+			} else {
+				now = append(now, name)
+			}
+		}
+		if len(wait) > 0 {
+			later = append(later, batch{names: wait, env: env})
+		}
+		if err := install(ctx, k, declared, now, env); err != nil {
+			errs = append(errs, err)
+		}
 	}
+	put(first, nil)
 	unmet := map[string]string{}
 	if len(plain)+len(apart) > 0 && !waitBehind(ctx, placing.Behind) {
 		return unmet, ctx.Err()
 	}
-	if err := install(ctx, k, declared, plain, nil); err != nil {
-		errs = append(errs, err)
-	}
+	put(plain, nil)
 	for _, h := range placing.Held {
-		why, err := installHeld(ctx, k, declared, h, apart[h.Hold])
+		env, why, err := readyHeld(ctx, h, apart[h.Hold])
 		switch {
 		case ctx.Err() != nil:
 			return unmet, ctx.Err()
@@ -464,9 +486,43 @@ func installApart(ctx context.Context, k Kind, declared config.List, placing Pla
 			errs = append(errs, err)
 		case why != "":
 			unmet[h.Hold] = why
+		default:
+			put(apart[h.Hold], env)
 		}
 	}
-	return unmet, joined(errs)
+	if len(later) > 0 && placing.Admin(ctx) {
+		for _, b := range later {
+			if err := install(ctx, k, declared, b.names, b.env); err != nil {
+				errs = append(errs, err)
+			}
+		}
+	}
+	return unmet, Joined(errs)
+}
+
+// batch is things to install together, with the environment they install
+// in.
+type batch struct {
+	names, env []string
+}
+
+// awaitingAdmin are which of names wait for an administrator's password
+// kit doesn't hold (placing.Admin), as k says they need it: every one, when
+// k can't say; none, when nothing waits for it.
+func awaitingAdmin(ctx context.Context, k Kind, placing Placing, names []string) map[string]bool {
+	ad, ok := k.(Admin)
+	if placing.Admin == nil || !ok || len(names) == 0 {
+		return nil
+	}
+	needing, err := ad.NeedsAdmin(ctx, names)
+	if err != nil {
+		needing = names
+	}
+	waiting := make(map[string]bool, len(needing))
+	for _, name := range needing {
+		waiting[name] = true
+	}
+	return waiting
 }
 
 // waitBehind waits for each of behind in turn, as engine.Await does, saying
@@ -509,12 +565,12 @@ func split(names []string, declared config.List, placing Placing) (first, plain 
 	return first, plain, apart
 }
 
-// installHeld installs names, the lines of section h, once what it waits
-// for has come, in its environment: when a wait ends without it, they're
-// left, and why says what isn't there.
-func installHeld(ctx context.Context, k Kind, declared config.List, h Held, names []string) (why string, err error) {
+// readyHeld waits for what section h waits for, for names, its lines, and
+// reads the environment they install in: when a wait ends without what it
+// waited for, they're left, and why says what isn't there.
+func readyHeld(ctx context.Context, h Held, names []string) (env []string, why string, err error) {
 	if len(names) == 0 {
-		return "", nil
+		return nil, "", nil
 	}
 	var missing []string
 	for _, w := range h.Waits {
@@ -524,15 +580,14 @@ func installHeld(ctx context.Context, k Kind, declared config.List, h Held, name
 		}
 	}
 	if len(missing) > 0 {
-		return engine.NotThere(missing), nil
+		return nil, engine.NotThere(missing), nil
 	}
-	var env []string
 	if h.Env != nil {
 		if env, err = h.Env(); err != nil {
-			return "", fmt.Errorf("couldn't install %s: %w", strings.Join(names, ", "), err)
+			return nil, "", fmt.Errorf("couldn't install %s: %w", strings.Join(names, ", "), err)
 		}
 	}
-	return "", install(ctx, k, declared, names, env)
+	return env, "", nil
 }
 
 // install installs names of k, with env set for the install alone: one
@@ -721,6 +776,8 @@ type progress struct {
 	heard   time.Time
 	last    string
 	quiet   bool
+	// far is how far a Fetcher's install has said it's got, of 1.
+	far float64
 }
 
 // quietAfter is how long an install may print nothing before its step says
@@ -864,14 +921,23 @@ func (p *progress) aside(says string) {
 	p.say()
 }
 
-// start notes the install's command is starting: a Fetcher's downloading.
+// start notes an install command starting: a Fetcher's downloading, from
+// its first, and again from each after it while some of names aren't in,
+// as Homebrew installs a tap's apart.
 func (p *progress) start() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.unstarted {
+	if p.unstarted || p.fetcher != nil && !p.fetching && len(p.done) < len(p.names) {
 		p.unstarted, p.fetching = false, true
 		p.say()
 	}
+}
+
+// farther is far, or how far the install has said it's got, if that's
+// further: a later command's downloads start from what's in.
+func (p *progress) farther(far float64) float64 {
+	p.far = max(p.far, far)
+	return p.far
 }
 
 // say says how the install's going: nothing, for a Fetcher's whose command
@@ -891,9 +957,9 @@ func (p *progress) say() {
 		event.Say(p.ctx, event.Doing{Says: quiet(p.says)})
 	case p.unstarted:
 	case p.fetching:
-		event.Say(p.ctx, event.Doing{Says: quiet("downloading"), Done: len(p.fetched), Of: len(p.names), Far: float64(len(p.fetched)) / n / 2})
+		event.Say(p.ctx, event.Doing{Says: quiet("downloading"), Done: len(p.fetched), Of: len(p.names), Far: p.farther(float64(len(p.fetched)) / n / 2)})
 	case p.fetcher != nil:
-		event.Say(p.ctx, event.Doing{Says: quiet(strings.TrimSpace("installing " + p.next())), Done: len(p.done), Of: len(p.names), Far: 0.5 + float64(len(p.done))/n/2})
+		event.Say(p.ctx, event.Doing{Says: quiet(strings.TrimSpace("installing " + p.next())), Done: len(p.done), Of: len(p.names), Far: p.farther(0.5 + float64(len(p.done))/n/2)})
 	default:
 		event.Say(p.ctx, event.Doing{Says: quiet(strings.TrimSpace("installing " + p.next())), Done: len(p.done), Of: len(p.names)})
 	}

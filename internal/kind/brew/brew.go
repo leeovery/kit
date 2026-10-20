@@ -3,7 +3,6 @@
 package brew
 
 import (
-	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -22,6 +21,7 @@ import (
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/event"
+	"github.com/leeovery/kit/internal/hold"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/runner"
 )
@@ -57,6 +57,11 @@ type Homebrew struct {
 	// took it.
 	changing sync.Mutex
 	turn     atomic.Pointer[string]
+	// updating is held whole while brew update runs, and shared by every
+	// other brew command kit runs (share): Homebrew updating itself swaps
+	// its own code and Ruby, and a command running meanwhile fails ("Another
+	// brew vendor-install ruby process is already running": the sixth run).
+	updating sync.RWMutex
 }
 
 // formulaeName and casksName name Homebrew's kinds.
@@ -188,7 +193,20 @@ func (h *Homebrew) Casks() kind.Kind {
 }
 
 func (h *Homebrew) brew(ctx context.Context, args ...string) (runner.Result, error) {
+	defer h.share(ctx)()
 	return h.run.Run(ctx, h.batched(runner.Command{Name: "brew", Args: args}))
+}
+
+// share waits, while Homebrew updates itself, till it's done, as every
+// brew command but the update does, the wait not counted against the time
+// limits ctx runs under; it returns what lets an update go.
+func (h *Homebrew) share(ctx context.Context) (done func()) {
+	if !h.updating.TryRLock() {
+		waited := hold.Waiting(ctx)
+		h.updating.RLock()
+		waited()
+	}
+	return h.updating.RUnlock
 }
 
 // batched is cmd, a brew command, with Homebrew's git over SSH never asking
@@ -269,7 +287,9 @@ func (h *Homebrew) updated(ctx context.Context) error {
 	defer h.update.mu.Unlock()
 	if !h.update.done {
 		resume := kind.Saying(ctx, "updating Homebrew")
-		_, h.update.err = h.brew(ctx, "update", "--quiet")
+		h.updating.Lock()
+		_, h.update.err = h.run.Run(ctx, h.batched(runner.Command{Name: "brew", Args: []string{"update", "--quiet"}}))
+		h.updating.Unlock()
 		h.update.done = true
 		resume()
 	}
@@ -277,18 +297,66 @@ func (h *Homebrew) updated(ctx context.Context) error {
 }
 
 // install runs brew install, after brew update, of names, the kind named
-// kindName's, with which says what they are: --formula or --cask.
+// kindName's, with which says what they are: --formula or --cask. Each
+// tap's go in apart, so a tap that fails, as one Homebrew refuses (the
+// sixth run), fails its own alone; and first, so a tap's formula claims a
+// name it shares with one of Homebrew's own before anything pulls that in
+// as a dependency (a tap's php, wanted, and Homebrew's, which composer
+// needs a php of, share a keg). Then Homebrew's own, in one go.
 func (h *Homebrew) install(ctx context.Context, kindName, which string, names []string) error {
 	if err := h.updated(ctx); err != nil {
 		return err
 	}
 	defer h.take(ctx, kindName)()
-	kind.Starting(ctx)
-	_, err := h.run.Run(ctx, h.sudoed(ctx, h.batched(runner.Command{
-		Name: "brew", Args: slices.Concat([]string{"install", which}, names),
-		Timeout: installTimeout(len(names)), Lines: kind.Lines(ctx),
-	})))
+	var errs []error
+	for _, batch := range byTap(names) {
+		if ctx.Err() != nil {
+			break
+		}
+		kind.Starting(ctx)
+		if err := h.changes(ctx, runner.Command{
+			Name: "brew", Args: slices.Concat([]string{"install", which}, batch),
+			Timeout: installTimeout(len(batch)), Lines: kind.Lines(ctx),
+		}); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return kind.Joined(errs)
+}
+
+// changes runs cmd, brew installing or uninstalling, as Homebrew's turn to
+// change things has it (take).
+func (h *Homebrew) changes(ctx context.Context, cmd runner.Command) error {
+	defer h.share(ctx)()
+	_, err := h.run.Run(ctx, h.sudoed(ctx, h.batched(cmd)))
 	return err
+}
+
+// byTap are names as they install, in the order they come: each tap's
+// together, then Homebrew's own.
+func byTap(names []string) [][]string {
+	var taps []string
+	byTap := map[string][]string{}
+	var own []string
+	for _, name := range names {
+		tap, ok := tapOf(name)
+		if !ok {
+			own = append(own, name)
+			continue
+		}
+		if _, seen := byTap[tap]; !seen {
+			taps = append(taps, tap)
+		}
+		byTap[tap] = append(byTap[tap], name)
+	}
+	batches := make([][]string, 0, len(taps)+1)
+	for _, tap := range taps {
+		batches = append(batches, byTap[tap])
+	}
+	if len(own) > 0 {
+		batches = append(batches, own)
+	}
+	return batches
 }
 
 // take takes Homebrew's turn to change things, for the kind named kindName:
@@ -393,8 +461,7 @@ func named(said string, names []string) (string, bool) {
 // which says what they are.
 func (h *Homebrew) uninstall(ctx context.Context, kindName, which string, names []string) error {
 	defer h.take(ctx, kindName)()
-	_, err := h.run.Run(ctx, h.sudoed(ctx, h.batched(runner.Command{Name: "brew", Args: slices.Concat([]string{"uninstall", which}, names)})))
-	return err
+	return h.changes(ctx, runner.Command{Name: "brew", Args: slices.Concat([]string{"uninstall", which}, names)})
 }
 
 // sudoed is cmd, brew installing or uninstalling, when an administrator's
@@ -474,16 +541,9 @@ func (f formulae) Resolve(ctx context.Context, names []string) (map[string]strin
 	return resolve(ctx, f.Homebrew, "--formula", names)
 }
 
-// Install installs names, a tap's first: a tap's formula then claims a name
-// it shares with one of Homebrew's own before anything pulls that in as a
-// dependency (a tap's php, wanted, and Homebrew's, which composer needs a
-// php of, share a keg).
+// Install installs names, each tap's apart and first (install).
 func (f formulae) Install(ctx context.Context, names []string) error {
-	ordered := slices.Clone(names)
-	slices.SortStableFunc(ordered, func(a, b string) int {
-		return cmp.Compare(boolInt(!strings.Contains(a, "/")), boolInt(!strings.Contains(b, "/")))
-	})
-	return f.install(ctx, f.Name(), "--formula", ordered)
+	return f.install(ctx, f.Name(), "--formula", names)
 }
 
 // Done is which of names line, from brew install, says is installed.
@@ -535,13 +595,6 @@ func (f formulae) Blocked(_ context.Context, missing map[string]string, installe
 	return blocked, nil
 }
 
-func boolInt(b bool) int {
-	if b {
-		return 1
-	}
-	return 0
-}
-
 // lastPart is a name's last part: its name in its tap.
 func lastPart(name string) string {
 	return name[strings.LastIndex(name, "/")+1:]
@@ -582,6 +635,7 @@ func (c casks) Resolve(ctx context.Context, names []string) (map[string]string, 
 	return resolve(ctx, c.Homebrew, "--cask", names)
 }
 
+// Install installs names, each tap's apart and first (install).
 func (c casks) Install(ctx context.Context, names []string) error {
 	return c.install(ctx, c.Name(), "--cask", names)
 }

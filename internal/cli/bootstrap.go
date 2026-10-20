@@ -274,7 +274,7 @@ func (a *app) inTerminal(ctx context.Context, b *boot.Boot, fresh bool) error {
 	// The heading shows at once, with the run's lights, as kit apply's does.
 	planned, _ := r.pipeline.Planned(r.options(a, nil))
 	r.sink.Emit(event.Preparing{Time: r.now, Command: r.command, Machine: r.machine, Doing: "checking what will need an administrator's password", Steps: planned})
-	_, stopAdmin := a.holdAdmin(ctx, r, toInstall(ctx, r, nil))
+	stopAdmin := a.holdAdminAlongside(ctx, r, toInstall(ctx, r, nil))
 	report, err := r.pipeline.Apply(ctx, r.sink, r.options(a, nil))
 	stopAdmin()
 	if err == nil {

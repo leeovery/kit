@@ -21,8 +21,14 @@ import (
 	"github.com/leeovery/kit/internal/runner"
 )
 
-// installTimeout is how long an install may take: Xcode is gigabytes.
-const installTimeout = 90 * time.Minute
+// How long an app's install may take: once one app's in, an hour and a
+// half, as Xcode is gigabytes; before, firstTimeout, as mas 7, with no one
+// signed in to the App Store, waits for good rather than saying so (the
+// sixth run, 19 Oct).
+const (
+	installTimeout = 90 * time.Minute
+	firstTimeout   = 5 * time.Minute
+)
 
 // adminWait is why an install waits, without an administrator's password.
 const adminWait = "needs an administrator's password: run kit apply at a terminal"
@@ -168,38 +174,68 @@ func (*AppStore) Resolve(_ context.Context, names []string) (map[string]string, 
 }
 
 // Install installs the apps names name, through sudo, as mas needs root to
-// install: the first alone, the check that someone's signed in to the App
-// Store (first), then the rest, whatever else went wrong with the first, as
-// installing them all at once would have.
+// install, one at a time, so one that fails or hangs holds none of the rest
+// up: till one's in, each is the check that someone's signed in to the App
+// Store (install). No one signed in, the rest aren't tried.
 func (s *AppStore) Install(ctx context.Context, names []string) error {
-	if len(names) == 0 {
-		return nil
-	}
-	err := s.first(ctx, names[0])
-	if len(names) == 1 || signedOut(err) {
-		return err
-	}
-	if rest := s.sudo(ctx, "install", names[1:], installTimeout); rest != nil {
-		return rest
-	}
-	return err
-}
-
-// first installs name, the first of the apps to install, alone: while mas
-// says no one's signed in to the App Store, signing in, a step by hand
-// before the App Store's, wasn't done after all, so it's done again
-// (engine.Undone), then name's tried again. With nothing to do again, as
-// without a terminal, it fails, naming the fix.
-func (s *AppStore) first(ctx context.Context, name string) error {
-	for {
-		err := s.sudo(ctx, "install", []string{name}, installTimeout)
-		if !signedOut(err) {
+	var errs []error
+	signedIn := false
+	for _, name := range names {
+		if ctx.Err() != nil {
+			break
+		}
+		err := s.install(ctx, name, signedIn)
+		if _, out := errors.AsType[*notSignedIn](err); out {
 			return err
 		}
-		if !engine.Undone(ctx) {
-			return &notSignedIn{err}
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		signedIn = true
+	}
+	return kind.Joined(errs)
+}
+
+// install installs name alone. Till an app's in (signedIn), an install mas
+// says no one's signed in for, or that runs past firstTimeout, as mas 7's
+// does with no one signed in, means signing in, a step by hand before the
+// App Store's, wasn't done after all: it's done again (engine.Undone), then
+// name's tried again. With nothing to do again, as without a terminal, it
+// fails, naming the fix.
+func (s *AppStore) install(ctx context.Context, name string, signedIn bool) error {
+	if id(name) == 0 {
+		return notAnApp(name)
+	}
+	limit := installTimeout
+	if !signedIn {
+		limit = firstTimeout
+	}
+	for {
+		err := s.sudo(ctx, "install", []string{name}, limit, kind.Lines(ctx))
+		hung := !signedIn && errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil
+		switch {
+		case err == nil:
+			return nil
+		case !hung && !signedOut(err):
+			return failed(err)
+		case !engine.Undone(ctx):
+			return &notSignedIn{err: err, hung: hung}
 		}
 	}
+}
+
+// failed is err, an app's install failing, in kit's words: what mas said,
+// as the run's reason reads it from its exit; else how it ended, never the
+// command, which the run's log has.
+func failed(err error) error {
+	if _, exited := errors.AsType[*runner.ExitError](err); exited {
+		return err
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return fmt.Errorf("mas didn't finish in %d minutes", int(installTimeout.Minutes()))
+	}
+	return errors.New("mas was stopped")
 }
 
 // signedOut reports whether err is mas saying no one's signed in to the App
@@ -210,10 +246,17 @@ func signedOut(err error) bool {
 }
 
 // notSignedIn is mas failing for want of someone signed in to the App Store,
-// in kit's words, naming the fix: what mas said is in the run's log.
-type notSignedIn struct{ err error }
+// saying so, or hanging, in kit's words, naming the fix: what mas said is in
+// the run's log.
+type notSignedIn struct {
+	err  error
+	hung bool
+}
 
 func (n *notSignedIn) Error() string {
+	if n.hung {
+		return "the App Store didn't answer: sign in to the App Store, then try again"
+	}
 	return "no one's signed in: sign in to the App Store, then try again"
 }
 
@@ -221,20 +264,47 @@ func (n *notSignedIn) Unwrap() error { return n.err }
 
 // Remove uninstalls the apps names name, through sudo, as mas needs.
 func (s *AppStore) Remove(ctx context.Context, names []string) error {
-	return s.sudo(ctx, "uninstall", names, 0)
+	return s.sudo(ctx, "uninstall", names, 0, nil)
 }
 
-func (s *AppStore) sudo(ctx context.Context, verb string, names []string, timeout time.Duration) error {
+// installedLine is what mas prints as it's installed an app, by its name,
+// its version after it or not: ==> Installed Xcode (16.0).
+var installedLine = regexp.MustCompile(`^==> Installed (.+?)(?: \([^()]*\))?$`)
+
+// Done is which of names line, from mas install, says is installed: the
+// one declared by the name mas gives it.
+func (*AppStore) Done(line string, names []string) (string, bool) {
+	m := installedLine.FindStringSubmatch(strings.TrimSpace(line))
+	if m == nil {
+		return "", false
+	}
+	said, _, _ := strings.Cut(Name(m[1], 0), "@")
+	for _, name := range names {
+		if declaredAs, _, _ := strings.Cut(name, "@"); declaredAs == said {
+			return name, true
+		}
+	}
+	return "", false
+}
+
+// sudo runs mas's verb of names through sudo, given timeout, its lines to
+// lines as they come.
+func (s *AppStore) sudo(ctx context.Context, verb string, names []string, timeout time.Duration, lines func(string)) error {
 	args := []string{"-n", "mas", verb}
 	for _, name := range names {
 		n := id(name)
 		if n == 0 {
-			return fmt.Errorf("%s isn't an App Store app's name: its name, then @ and its id", name)
+			return notAnApp(name)
 		}
 		args = append(args, strconv.FormatInt(n, 10))
 	}
-	_, err := s.run.Run(ctx, runner.Command{Name: "sudo", Args: args, Timeout: timeout})
+	_, err := s.run.Run(ctx, runner.Command{Name: "sudo", Args: args, Timeout: timeout, Lines: lines})
 	return err
+}
+
+// notAnApp refuses name, which isn't an App Store app's.
+func notAnApp(name string) error {
+	return fmt.Errorf("%s isn't an App Store app's name: its name, then @ and its id", name)
 }
 
 // NeedsAdmin is names: mas needs root for every install.
@@ -304,3 +374,12 @@ func (s *AppStore) Find(ctx context.Context, typed string) ([]kind.Found, error)
 func found(a app) kind.Found {
 	return kind.Found{Name: a.named(), Label: fmt.Sprintf("%s (%d)", a.Name, a.ID)}
 }
+
+var _ interface {
+	kind.Kind
+	kind.Keyed
+	kind.Counter
+	kind.Admin
+	kind.Blocker
+	kind.Finder
+} = (*AppStore)(nil)

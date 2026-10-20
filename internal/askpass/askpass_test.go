@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/leeovery/kit/internal/testguard"
 )
@@ -148,5 +149,48 @@ func TestEnvHasSudoAskTheRun(t *testing.T) {
 	}
 	if got := Without([]string{"DISPLAY=:0", "SUDO_ASKPASS="}); !slices.Equal(got, []string{"DISPLAY=:0"}) {
 		t.Errorf("Without() = %q, want a display of the person's own kept", got)
+	}
+}
+
+// kit's own question, asked through the server, is asked alone: a sudo
+// asking meanwhile waits its turn, then, the person having given the
+// password, is given it, asking nothing more. What's given is kept.
+func TestAsksOneThingAtATime(t *testing.T) {
+	asking := make(chan struct{}, 2)
+	s, err := Start("", "/usr/bin/true", func(context.Context, int) (string, error) {
+		asking <- struct{}{}
+		return "", errors.New("the person was asked twice")
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	up, answer := make(chan struct{}), make(chan struct{})
+	asked := make(chan string, 1)
+	go func() {
+		password, err := s.Ask(t.Context(), func(context.Context, int) (string, error) {
+			close(up)
+			<-answer
+			return "typed", nil
+		}, 0)
+		if err != nil {
+			t.Error(err)
+		}
+		asked <- password
+	}()
+	<-up
+	given := make(chan string, 1)
+	go func() {
+		password, err := s.Answer()(t.Context(), 0)
+		if err != nil {
+			t.Error(err)
+		}
+		given <- password
+	}()
+	// The sudo's to be waiting its turn as the person answers.
+	time.Sleep(50 * time.Millisecond)
+	close(answer)
+	if got, sudo := <-asked, <-given; got != "typed" || sudo != "typed" || s.kept() != "typed" || len(asking) != 0 {
+		t.Errorf("kit's question got %q, the sudo waiting %q, kept %q, the person asked again %d times; want typed, given once", got, sudo, s.kept(), len(asking))
 	}
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/event"
+	"github.com/leeovery/kit/internal/hold"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/kind/brew"
 	"github.com/leeovery/kit/internal/runner"
@@ -206,20 +207,30 @@ func mapsEqual(a, b map[string]string) bool {
 	return true
 }
 
-func TestInstallUpdatesOnceThenInstallsATapsFirst(t *testing.T) {
+// Homebrew's update runs once, before the first install; then each tap's
+// install apart, first, a tap's formula claiming a name it shares with one
+// of Homebrew's own before anything pulls that in; then Homebrew's own, in
+// one go.
+func TestInstallUpdatesOnceThenInstallsEachTapsFirst(t *testing.T) {
 	fake := runnertest.New(t)
 	fake.On("brew", "update", "--quiet")
-	fake.On("brew", "install", "--formula", "owner/tap/php@8.5", "jq", "composer")
+	fake.On("brew", "install", "--formula", "owner/tap/php@8.5", "owner/tap/tool")
+	fake.On("brew", "install", "--formula", "other/tap/thing")
+	fake.On("brew", "install", "--formula", "jq", "homebrew/core/composer")
 	fake.On("brew", "install", "--cask", "ghostty")
 	h := brew.New(fake)
 
-	if err := h.Formulae().Install(context.Background(), []string{"jq", "owner/tap/php@8.5", "composer"}); err != nil {
+	if err := h.Formulae().Install(context.Background(), []string{"jq", "owner/tap/php@8.5", "other/tap/thing", "homebrew/core/composer", "owner/tap/tool"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := h.Casks().Install(context.Background(), []string{"ghostty"}); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"brew update --quiet", "brew install --formula owner/tap/php@8.5 jq composer", "brew install --cask ghostty"}
+	want := []string{
+		"brew update --quiet",
+		"brew install --formula owner/tap/php@8.5 owner/tap/tool", "brew install --formula other/tap/thing", "brew install --formula jq homebrew/core/composer",
+		"brew install --cask ghostty",
+	}
 	if got := fake.Calls(); !slices.Equal(got, want) {
 		t.Errorf("ran %q, want %q", got, want)
 	}
@@ -229,8 +240,53 @@ func TestInstallUpdatesOnceThenInstallsATapsFirst(t *testing.T) {
 		}
 	}
 	// More to install has longer: a new Mac's every cask in one go.
-	if three, one := fake.Commands()[1].Timeout, fake.Commands()[2].Timeout; three <= one {
-		t.Errorf("three formulae may take %v, one cask %v: want longer for more", three, one)
+	if two, one := fake.Commands()[3].Timeout, fake.Commands()[4].Timeout; two <= one {
+		t.Errorf("two formulae may take %v, one cask %v: want longer for more", two, one)
+	}
+}
+
+// A tap that fails, as one Homebrew refuses, fails its own names alone:
+// the rest, Homebrew's own and another tap's, still go in, formulae or
+// casks, and the failure names what didn't.
+func TestATapThatFailsFailsItsOwnAlone(t *testing.T) {
+	for _, tt := range []struct {
+		kind, which string
+		names       []string
+	}{
+		{"cask", "--cask", []string{"1password", "refused/tap/1password-cli", "arq", "owner/tap/tool"}},
+		{"brew", "--formula", []string{"jq", "refused/tap/fetcher", "owner/tap/tool", "ripgrep"}},
+	} {
+		t.Run(tt.kind, func(t *testing.T) {
+			fake := runnertest.New(t)
+			fake.On("brew", "update", "--quiet")
+			for _, name := range tt.names {
+				if !strings.Contains(name, "/") {
+					continue
+				}
+				install := fake.On("brew", "install", tt.which, name)
+				if strings.HasPrefix(name, "refused/") {
+					install.Exits(1).PrintsToStderr("Error: Cannot tap refused/tap: invalid syntax in tap!")
+				}
+			}
+			var own []string
+			for _, name := range tt.names {
+				if !strings.Contains(name, "/") {
+					own = append(own, name)
+				}
+			}
+			fake.On("brew", slices.Concat([]string{"install", tt.which}, own)...)
+			h := brew.New(fake)
+			k := map[string]kind.Kind{"brew": h.Formulae(), "cask": h.Casks()}[tt.kind]
+			err := k.Install(t.Context(), tt.names)
+			if err == nil || engine.Reason(err) != "Error: Cannot tap refused/tap: invalid syntax in tap!" {
+				t.Errorf("Install() error = %v, want the refused tap's alone, in Homebrew's words", err)
+			}
+			for _, name := range append(own, "owner/tap/tool") {
+				if !slices.ContainsFunc(fake.Calls(), func(c string) bool { return strings.HasPrefix(c, "brew install") && strings.Contains(c, " "+name) }) {
+					t.Errorf("ran %q: want %s installed, though another tap failed", fake.Calls(), name)
+				}
+			}
+		})
 	}
 }
 
@@ -286,16 +342,20 @@ func TestDoneRecognisesWhatsInstalled(t *testing.T) {
 	}
 }
 
-// installing is what brew install --formula owner/tap/tuicr ffmpeg hello
-// prints: a tap's formula, by its name in its tap, from its tap; ffmpeg
-// with a dependency, then hello.
-const installing = `==> Fetching downloads for: tuicr, ffmpeg and hello
+// installingTap is what brew install --formula owner/tap/tuicr prints: a
+// tap's formula, by its name in its tap, from its tap.
+const installingTap = `==> Fetching downloads for: tuicr
 ✔︎ Formula tuicr (0.19.1)
+==> Installing tuicr from owner/tap
+🍺  /opt/homebrew/Cellar/tuicr/0.19.1: 4 files, 12.6MB, built in 2 seconds
+`
+
+// installing is what brew install --formula ffmpeg hello prints: ffmpeg
+// with a dependency, then hello.
+const installing = `==> Fetching downloads for: ffmpeg and hello
 ✔︎ Bottle aom (3.13.1)
 ✔︎ Bottle ffmpeg (8.0)
 ✔︎ Bottle hello (2.12.3)
-==> Installing tuicr from owner/tap
-🍺  /opt/homebrew/Cellar/tuicr/0.19.1: 4 files, 12.6MB, built in 2 seconds
 ==> Installing dependencies for ffmpeg: aom
 ==> Installing ffmpeg dependency: aom
 ==> Pouring aom--3.13.1.arm64_tahoe.bottle.tar.gz
@@ -307,11 +367,12 @@ const installing = `==> Fetching downloads for: tuicr, ffmpeg and hello
 🍺  /opt/homebrew/Cellar/hello/2.12.3: 12 files, 193.3KB
 `
 
-// Applying the formulae, in one install of them all, a tap's first, says
-// it's updating Homebrew, then it's downloading as brew install starts,
-// counting those asked for as each is downloaded, then, once brew's begun
-// installing, counts them installed, naming the one brew says it's
-// installing, whatever the order they're declared in.
+// Applying the formulae, a tap's install first, then the rest in one, says
+// it's updating Homebrew, then it's downloading as each brew install
+// starts, counting those asked for as each is downloaded, then, once brew's
+// begun installing, counts them installed, naming the one brew says it's
+// installing, whatever the order they're declared in; never less far than
+// it's said it got.
 func TestApplyingCountsTheFormulae(t *testing.T) {
 	fake := runnertest.New(t)
 	fake.On("brew", "list", "--formula", "--full-name", "-1").Prints("jq\n")
@@ -321,7 +382,8 @@ func TestApplyingCountsTheFormulae(t *testing.T) {
 	fake.On("brew", "info", "--json=v2", "--formula", "ffmpeg", "hello").Prints(`{"formulae": [{"name": "ffmpeg", "full_name": "ffmpeg"}, {"name": "hello", "full_name": "hello"}], "casks": []}`)
 	fake.On("brew", "update", "--quiet")
 	fake.On("brew", "tap", "owner/tap")
-	fake.On("brew", "install", "--formula", "owner/tap/tuicr", "ffmpeg", "hello").Prints(installing)
+	fake.On("brew", "install", "--formula", "owner/tap/tuicr").Prints(installingTap)
+	fake.On("brew", "install", "--formula", "ffmpeg", "hello").Prints(installing)
 	var said []event.Doing
 	ctx := event.WithSaying(t.Context(), func(d event.Doing) { said = append(said, d) })
 	s := kind.Step(brew.New(fake).Formulae(), config.List{Kind: "brew", Entries: []config.Entry{{Name: "ffmpeg"}, {Name: "hello"}, {Name: "jq"}, {Name: "owner/tap/tuicr"}}})
@@ -333,8 +395,9 @@ func TestApplyingCountsTheFormulae(t *testing.T) {
 		{Says: "tapping owner/tap"},
 		{Says: "updating Homebrew"},
 		{Says: "downloading", Of: 3}, {Says: "downloading", Done: 1, Of: 3, Far: half(1)},
-		{Says: "downloading", Done: 2, Of: 3, Far: half(2)}, {Says: "downloading", Done: 3, Of: 3, Far: half(3)},
 		{Says: "installing owner/tap/tuicr", Of: 3, Far: 0.5}, {Says: "installing", Done: 1, Of: 3, Far: 0.5 + half(1)},
+		{Says: "downloading", Done: 1, Of: 3, Far: 0.5 + half(1)},
+		{Says: "downloading", Done: 2, Of: 3, Far: 0.5 + half(1)}, {Says: "downloading", Done: 3, Of: 3, Far: 0.5 + half(1)},
 		{Says: "installing ffmpeg", Done: 1, Of: 3, Far: 0.5 + half(1)}, {Says: "installing", Done: 2, Of: 3, Far: 0.5 + half(2)},
 		{Says: "installing hello", Done: 2, Of: 3, Far: 0.5 + half(2)}, {Says: "installing", Done: 3, Of: 3, Far: 0.5 + half(3)},
 	}
@@ -355,31 +418,36 @@ func TestShort(t *testing.T) {
 	}
 }
 
-// installingCasks is what brew install --cask ghostty owner/tap/tool-cli
-// prints.
-const installingCasks = `==> Fetching downloads for: ghostty and tool-cli
-✔︎ Cask ghostty (1.2.0)
+// installingTapCask is what brew install --cask owner/tap/tool-cli prints,
+// and installingCasks what brew install --cask ghostty does.
+const (
+	installingTapCask = `==> Fetching downloads for: tool-cli
 ✔︎ Cask tool-cli (2.30.0)
-==> Installing Cask ghostty
-==> Moving App 'Ghostty.app' to '/Applications/Ghostty.app'
-🍺  ghostty was successfully installed!
 ==> Installing Cask tool-cli
 ==> Linking Binary 'tool' to '/opt/homebrew/bin/tool'
 🍺  tool-cli was successfully installed!
 `
+	installingCasks = `==> Fetching downloads for: ghostty
+✔︎ Cask ghostty (1.2.0)
+==> Installing Cask ghostty
+==> Moving App 'Ghostty.app' to '/Applications/Ghostty.app'
+🍺  ghostty was successfully installed!
+`
+)
 
 // Applying formulae, or casks, tells the run's log of each asked for as
 // brew says it's downloaded, then installed, by its name in its tap, in the
-// order brew does them: a dependency's is told nothing of.
+// order brew does them, a tap's install first: a dependency's is told
+// nothing of.
 func TestApplyingTellsTheLogOfEachInstalled(t *testing.T) {
 	for _, tt := range []struct {
-		kind    string
-		install []string
-		prints  string
-		want    []string
+		kind, which string
+		// installs are each install's names, then what it prints.
+		installs [][2]string
+		want     []string
 	}{
-		{"brew", []string{"--formula", "owner/tap/tuicr", "ffmpeg", "hello"}, installing, []string{"Downloaded tuicr", "Downloaded ffmpeg", "Downloaded hello", "Installed tuicr", "Installed ffmpeg", "Installed hello"}},
-		{"cask", []string{"--cask", "ghostty", "owner/tap/tool-cli"}, installingCasks, []string{"Downloaded ghostty", "Downloaded tool-cli", "Installed ghostty", "Installed tool-cli"}},
+		{"brew", "--formula", [][2]string{{"owner/tap/tuicr", installingTap}, {"ffmpeg hello", installing}}, []string{"Downloaded tuicr", "Installed tuicr", "Downloaded ffmpeg", "Downloaded hello", "Installed ffmpeg", "Installed hello"}},
+		{"cask", "--cask", [][2]string{{"ghostty", installingCasks}, {"owner/tap/tool-cli", installingTapCask}}, []string{"Downloaded tool-cli", "Installed tool-cli", "Downloaded ghostty", "Installed ghostty"}},
 	} {
 		t.Run(tt.kind, func(t *testing.T) {
 			fake := runnertest.New(t)
@@ -391,15 +459,17 @@ func TestApplyingTellsTheLogOfEachInstalled(t *testing.T) {
 			fake.On("brew", "info", "--json=v2", "--formula", "owner/tap/tuicr", "ffmpeg", "hello").Prints(`{"formulae": [{"name": "ffmpeg", "full_name": "ffmpeg"}, {"name": "hello", "full_name": "hello"}, {"name": "tuicr", "full_name": "owner/tap/tuicr"}], "casks": []}`)
 			fake.On("brew", "info", "--json=v2", "--cask", "ghostty", "owner/tap/tool-cli").Prints(`{"formulae": [], "casks": [{"token": "ghostty", "full_token": "ghostty"}, {"token": "tool-cli", "full_token": "owner/tap/tool-cli"}]}`)
 			fake.On("brew", "update", "--quiet")
-			fake.On("brew", append([]string{"install"}, tt.install...)...).Prints(tt.prints)
+			var entries []config.Entry
+			for _, install := range tt.installs {
+				fake.On("brew", slices.Concat([]string{"install", tt.which}, strings.Fields(install[0]))...).Prints(install[1])
+				for name := range strings.FieldsSeq(install[0]) {
+					entries = append(entries, config.Entry{Name: name})
+				}
+			}
 			var told []string
 			ctx := event.WithLogging(t.Context(), func(l event.Logged) { told = append(told, l.Line) })
 			h := brew.New(fake)
 			k := map[string]kind.Kind{"brew": h.Formulae(), "cask": h.Casks()}[tt.kind]
-			var entries []config.Entry
-			for _, name := range tt.install[1:] {
-				entries = append(entries, config.Entry{Name: name})
-			}
 			s := kind.Step(k, config.List{Kind: tt.kind, Entries: entries})
 			if err := s.Apply(ctx, s.Check(ctx)); err != nil {
 				t.Fatal(err)
@@ -593,14 +663,6 @@ func TestAnInstallWaitingForTheUpdateSaysSo(t *testing.T) {
 	fake.On("brew", "info", "--json=v2", "--cask", "ghostty").Prints(`{"formulae": [], "casks": [{"token": "ghostty", "full_token": "ghostty"}]}`)
 	fake.On("brew", "install", "--cask", "ghostty")
 	h := brew.New(fake)
-	var formulae sync.WaitGroup
-	formulae.Go(func() {
-		if err := h.Formulae().Install(t.Context(), []string{"jq"}); err != nil {
-			t.Error(err)
-		}
-	})
-	<-updating
-
 	var mu sync.Mutex
 	var said []event.Doing
 	waiting := make(chan struct{})
@@ -613,9 +675,18 @@ func TestAnInstallWaitingForTheUpdateSaysSo(t *testing.T) {
 		}
 	})
 	s := kind.Step(h.Casks(), config.List{Kind: "cask", Entries: []config.Entry{{Name: "ghostty"}}})
+	found := s.Check(ctx)
+
+	var formulae sync.WaitGroup
+	formulae.Go(func() {
+		if err := h.Formulae().Install(t.Context(), []string{"jq"}); err != nil {
+			t.Error(err)
+		}
+	})
+	<-updating
 	var casks sync.WaitGroup
 	casks.Go(func() {
-		if err := s.Apply(ctx, s.Check(ctx)); err != nil {
+		if err := s.Apply(ctx, found); err != nil {
 			t.Error(err)
 		}
 	})
@@ -634,6 +705,69 @@ func TestAnInstallWaitingForTheUpdateSaysSo(t *testing.T) {
 	}
 	if n := slices.Index(fake.Calls(), "brew update --quiet"); n < 0 || slices.Index(fake.Calls()[n+1:], "brew update --quiet") >= 0 {
 		t.Errorf("ran %q, want brew update once", fake.Calls())
+	}
+}
+
+// While Homebrew updates itself, no other brew command runs: one started
+// meanwhile, as another kind's check, waits till the update's done, the
+// wait not counted against the check's time limit; and the update waits
+// for the brew commands already running to end before it starts.
+func TestNothingRunsThroughBrewWhileHomebrewUpdatesItself(t *testing.T) {
+	fake := runnertest.New(t)
+	listing, listed := make(chan struct{}), make(chan struct{})
+	fake.On("brew", "list", "--cask", "--full-name", "-1").Does(func() {
+		close(listing)
+		<-listed
+	}).Then()
+	updating, updated := make(chan struct{}), make(chan struct{})
+	fake.On("brew", "update", "--quiet").Does(func() {
+		close(updating)
+		<-updated
+	})
+	fake.On("brew", "install", "--formula", "jq")
+	h := brew.New(fake)
+
+	// A listing's under way as the formulae's install comes to update.
+	var running sync.WaitGroup
+	running.Go(func() {
+		if _, err := h.Casks().Installed(t.Context()); err != nil {
+			t.Error(err)
+		}
+	})
+	<-listing
+	running.Go(func() {
+		if err := h.Formulae().Install(t.Context(), []string{"jq"}); err != nil {
+			t.Error(err)
+		}
+	})
+	time.Sleep(50 * time.Millisecond)
+	if slices.Contains(fake.Calls(), "brew update --quiet") {
+		t.Fatalf("ran %q: Homebrew updated itself while a listing ran", fake.Calls())
+	}
+	close(listed)
+	<-updating
+
+	// Meanwhile, the casks' check, under a time limit shorter than the
+	// update, waits for it, and still has its time.
+	checked := make(chan error, 1)
+	limited, cancel := hold.WithTimeout(t.Context(), 30*time.Millisecond)
+	defer cancel()
+	go func() {
+		_, err := h.Casks().Installed(limited)
+		checked <- err
+	}()
+	time.Sleep(100 * time.Millisecond)
+	if n := slices.Index(fake.Calls(), "brew update --quiet"); slices.Contains(fake.Calls()[n+1:], "brew list --cask --full-name -1") {
+		t.Fatalf("ran %q: a listing ran while Homebrew updated itself", fake.Calls())
+	}
+	close(updated)
+	if err := <-checked; err != nil || limited.Err() != nil {
+		t.Errorf("the check waiting for the update ended %v, its time limit %v; want it run, in time", err, limited.Err())
+	}
+	running.Wait()
+	want := []string{"brew list --cask --full-name -1", "brew update --quiet", "brew list --cask --full-name -1", "brew install --formula jq"}
+	if got := fake.Calls(); !slices.Equal(got, want) && !slices.Equal(got, []string{want[0], want[1], want[3], want[2]}) {
+		t.Errorf("ran %q, want the update alone, between the listings", got)
 	}
 }
 

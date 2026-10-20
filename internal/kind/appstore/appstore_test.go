@@ -2,6 +2,7 @@ package appstore_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -79,13 +80,14 @@ func TestCompare(t *testing.T) {
 	}
 }
 
-// Installing goes through sudo, given an hour or more, as Xcode is
-// gigabytes: the first app alone, the check that someone's signed in, then
-// the rest together.
+// Installing goes through sudo, an app at a time: till one's in, each given
+// minutes, as it's the check that someone's signed in; then each given an
+// hour or more, as Xcode is gigabytes.
 func TestInstallAndRemoveGoThroughSudo(t *testing.T) {
 	fake := runnertest.New(t)
 	fake.On("sudo", "-n", "mas", "install", "1091189122")
-	fake.On("sudo", "-n", "mas", "install", "497799835", "409203825")
+	fake.On("sudo", "-n", "mas", "install", "497799835")
+	fake.On("sudo", "-n", "mas", "install", "409203825")
 	fake.On("sudo", "-n", "mas", "uninstall", "1294126402")
 	s := appstore.New(fake)
 	if err := s.Install(t.Context(), []string{"bear@1091189122", "xcode@497799835", "numbers@409203825"}); err != nil {
@@ -94,12 +96,68 @@ func TestInstallAndRemoveGoThroughSudo(t *testing.T) {
 	if err := s.Remove(t.Context(), []string{"heic-converter@1294126402"}); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"sudo -n mas install 1091189122", "sudo -n mas install 497799835 409203825", "sudo -n mas uninstall 1294126402"}
-	if cmds := fake.Commands(); !slices.Equal(fake.Calls(), want) || cmds[0].Timeout < time.Hour || cmds[1].Timeout < time.Hour {
-		t.Errorf("ran %q, want %q, each install given an hour or more", fake.Calls(), want)
+	want := []string{"sudo -n mas install 1091189122", "sudo -n mas install 497799835", "sudo -n mas install 409203825", "sudo -n mas uninstall 1294126402"}
+	if !slices.Equal(fake.Calls(), want) {
+		t.Errorf("ran %q, want %q", fake.Calls(), want)
+	}
+	cmds := fake.Commands()
+	if first := cmds[0].Timeout; first <= 0 || first > 10*time.Minute {
+		t.Errorf("the first install is given %v, want minutes", first)
+	}
+	for _, cmd := range cmds[1:3] {
+		if cmd.Timeout < time.Hour {
+			t.Errorf("%s is given %v, want an hour or more", cmd, cmd.Timeout)
+		}
 	}
 	if err := s.Install(t.Context(), []string{"bear"}); err == nil || !strings.Contains(err.Error(), "bear isn't an App Store app's name") {
 		t.Errorf("Install(bear) = %v, want it refused", err)
+	}
+}
+
+// mas says, in a line, as it's installed an app, which, by its name and
+// maybe its version: the app declared by that name. Nothing else it says
+// is one.
+func TestDoneRecognisesWhatsInstalled(t *testing.T) {
+	counter := appstore.New(nil)
+	names := []string{"bear@1091189122", "xcode@497799835", "1password-for-safari@1569813296"}
+	for line, want := range map[string]string{
+		"==> Installed Xcode":                "xcode@497799835",
+		"==> Installed Xcode (16.0)":         "xcode@497799835",
+		"==> Installed 1Password for Safari": "1password-for-safari@1569813296",
+		"  ==> Installed bear":               "bear@1091189122",
+		"==> Downloading Xcode":              "",
+		"==> Installed Pages (14.4)":         "",
+		"Warning: No installed apps found":   "",
+	} {
+		got, ok := counter.Done(line, names)
+		if got != want || ok != (want != "") {
+			t.Errorf("Done(%q) = %q, %v; want %q", line, got, ok, want)
+		}
+	}
+}
+
+// Applying the App Store's apps counts them as mas says each is installed,
+// its lines read as they come, so an install that goes quiet is noticed as
+// Homebrew's is.
+func TestApplyingCountsTheApps(t *testing.T) {
+	fake := runnertest.New(t)
+	fake.On("mas", "list", "--json").Prints("")
+	fake.On("sudo", "-n", "mas", "install", "1091189122").Prints("==> Downloading Bear\n==> Installed Bear\n")
+	fake.On("sudo", "-n", "mas", "install", "497799835").Prints("==> Downloading Xcode\n==> Installed Xcode (16.0)\n")
+	var said []event.Doing
+	var told []string
+	ctx := event.WithLogging(event.WithSaying(t.Context(), func(d event.Doing) { said = append(said, d) }), func(l event.Logged) { told = append(told, l.Line) })
+	s := kind.Step(appstore.New(fake), declared("bear@1091189122", "xcode@497799835"))
+	if err := s.Apply(ctx, s.Check(ctx)); err != nil {
+		t.Fatal(err)
+	}
+	want := []event.Doing{
+		{Says: "installing bear@1091189122", Of: 2},
+		{Says: "installing xcode@497799835", Done: 1, Of: 2},
+		{Says: "installing", Done: 2, Of: 2},
+	}
+	if !slices.Equal(said, want) || !slices.Equal(told, []string{"Installed bear@1091189122", "Installed xcode@497799835"}) {
+		t.Errorf("applying said %+v and told the log %q\nwant %+v, each installed", said, told, want)
 	}
 }
 
@@ -200,14 +258,16 @@ func storeRun(t *testing.T, fake *runnertest.Fake, someone bool, declared config
 
 // The first app's install is the check that someone's signed in: while mas
 // says no one is, signing in, the step by hand before the App Store's, is
-// done again, then the first's tried again; only once it's in, the rest.
+// done again, then the first's tried again; only once it's in, the rest,
+// an app at a time.
 func TestASignInNotDoneIsDoneAgain(t *testing.T) {
 	fake := runnertest.New(t)
 	fake.On("mas", "list", "--json").Prints("").Then().Prints(installed(1091189122, 409203825, 497799835))
 	fake.On("sudo", "-n", "mas", "install", "1091189122").Exits(1).PrintsToStderr(signedOut).
 		Then().Exits(1).PrintsToStderr(signedOut).
 		Then()
-	fake.On("sudo", "-n", "mas", "install", "409203825", "497799835")
+	fake.On("sudo", "-n", "mas", "install", "409203825")
+	fake.On("sudo", "-n", "mas", "install", "497799835")
 	res, again := storeRun(t, fake, true, declared("bear@1091189122", "numbers@409203825", "xcode@497799835"))
 	if res.State != check.OK || again != 2 {
 		t.Errorf("the App Store's apps stand %+v, signing in done again %d times; want them installed, it done again twice", res, again)
@@ -215,7 +275,7 @@ func TestASignInNotDoneIsDoneAgain(t *testing.T) {
 	want := []string{
 		"mas list --json",
 		"sudo -n mas install 1091189122", "sudo -n mas install 1091189122", "sudo -n mas install 1091189122",
-		"sudo -n mas install 409203825 497799835",
+		"sudo -n mas install 409203825", "sudo -n mas install 497799835",
 		"mas list --json",
 	}
 	if !slices.Equal(fake.Calls(), want) {
@@ -223,17 +283,57 @@ func TestASignInNotDoneIsDoneAgain(t *testing.T) {
 	}
 }
 
-// Another failure of the first app's install fails as it would have,
-// installing them all at once: nothing's done again, and the rest still
-// install.
-func TestTheFirstFailingOtherwiseFailsAsBefore(t *testing.T) {
+// mas 7, with no one signed in, waits for good rather than saying so: the
+// first app's install that runs past its minutes is taken as no one signed
+// in, so signing in is done again, and the app's tried again.
+func TestAHangIsTakenAsNoOneSignedIn(t *testing.T) {
 	fake := runnertest.New(t)
-	fake.On("mas", "list", "--json").Prints("").Then().Prints(installed(409203825, 497799835))
+	fake.On("mas", "list", "--json").Prints("").Then().Prints(installed(1091189122, 497799835))
+	fake.On("sudo", "-n", "mas", "install", "1091189122").Fails(fmt.Errorf("sudo -n mas install 1091189122: %w", context.DeadlineExceeded)).
+		Then()
+	fake.On("sudo", "-n", "mas", "install", "497799835")
+	res, again := storeRun(t, fake, true, declared("bear@1091189122", "xcode@497799835"))
+	if res.State != check.OK || again != 1 {
+		t.Errorf("the App Store's apps stand %+v, signing in done again %d times; want them installed, it done again once", res, again)
+	}
+}
+
+// Without anyone to sign in, a hang fails every app, in kit's words, naming
+// the fix, never the command; the rest aren't tried.
+func TestAHangWithNoOneToSignInFailsNamingTheFix(t *testing.T) {
+	fake := runnertest.New(t)
+	fake.On("mas", "list", "--json").Prints("")
+	fake.On("sudo", "-n", "mas", "install", "1091189122").Fails(fmt.Errorf("sudo -n mas install 1091189122: %w", context.DeadlineExceeded))
+	res, _ := storeRun(t, fake, false, declared("bear@1091189122", "xcode@497799835"))
+	want := "couldn't install bear@1091189122, xcode@497799835: the App Store didn't answer: sign in to the App Store, then try again"
+	if res.State != check.Failed || res.Reason != want {
+		t.Errorf("the App Store's apps stand %+v; want them failed, %q", res, want)
+	}
+}
+
+// Another failure of an app's install fails that app alone, in kit's words,
+// what mas said or how it ended, never the command: nothing's done again,
+// and the next app's the check that someone's signed in, then the rest, an
+// app at a time, none of them held up by it.
+func TestAnInstallFailingOtherwiseFailsItAlone(t *testing.T) {
+	fake := runnertest.New(t)
+	fake.On("mas", "list", "--json").Prints("").Then().Prints(installed(497799835))
 	fake.On("sudo", "-n", "mas", "install", "1091189122").Exits(1).PrintsToStderr("[ERROR] 2026/10/16 04:22:49 no app has the id 1091189122")
-	fake.On("sudo", "-n", "mas", "install", "409203825", "497799835")
+	fake.On("sudo", "-n", "mas", "install", "409203825").Fails(errors.New("run sudo -n mas install 409203825: signal: terminated"))
+	fake.On("sudo", "-n", "mas", "install", "497799835")
 	res, again := storeRun(t, fake, true, declared("bear@1091189122", "numbers@409203825", "xcode@497799835"))
-	if want := "couldn't install bear@1091189122: [ERROR] 2026/10/16 04:22:49 no app has the id 1091189122"; res.State != check.Failed || res.Reason != want || again != 0 {
+	want := "couldn't install bear@1091189122, numbers@409203825: [ERROR] 2026/10/16 04:22:49 no app has the id 1091189122; mas was stopped"
+	if res.State != check.Failed || res.Reason != want || again != 0 {
 		t.Errorf("the App Store's apps stand %+v, signing in done again %d times; want them failed, %q, nothing done again", res, again, want)
+	}
+	cmds := fake.Commands()
+	for _, cmd := range cmds[1:3] {
+		if cmd.Timeout > 10*time.Minute {
+			t.Errorf("%s is given %v: want minutes, as no app's in yet to say someone's signed in", cmd, cmd.Timeout)
+		}
+	}
+	if len(cmds) < 4 || cmds[3].String() != "sudo -n mas install 497799835" {
+		t.Errorf("ran %q, want xcode tried after the others failed", fake.Calls())
 	}
 }
 

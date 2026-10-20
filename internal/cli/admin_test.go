@@ -8,6 +8,9 @@ import (
 	"time"
 
 	"github.com/leeovery/kit/internal/askpass"
+	"github.com/leeovery/kit/internal/event"
+	"github.com/leeovery/kit/internal/kind"
+	"github.com/leeovery/kit/internal/runner"
 	"github.com/leeovery/kit/internal/runner/runnertest"
 )
 
@@ -85,5 +88,68 @@ func TestRenewSudo(t *testing.T) {
 				t.Errorf("what asks next is given %q, %v; want %q, the person asked when none's kept", next, err, tc.kept)
 			}
 		})
+	}
+}
+
+// While kit asks for the password as the run goes on, a check takes it as
+// coming, and what needs it waits for the answer, however long it takes;
+// once given, nothing waits; once refused, what needs it is left out, a
+// check made while kit asked having taken it as coming.
+func TestAdminHold(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		given bool
+	}{
+		{name: "given", given: true},
+		{name: "refused"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := &adminHold{answered: make(chan struct{})}
+			r := &run{hold: h, placing: map[string]kind.Placing{}}
+			changing := event.WithChanging(t.Context())
+			if !h.held(t.Context()) || h.held(changing) {
+				t.Errorf("held while asking = %v checking, %v changing; want it coming for a check alone", h.held(t.Context()), h.held(changing))
+			}
+			admin := r.placed("app store apps").Admin
+			if admin == nil {
+				t.Fatal("placed while asking has nothing wait for the password")
+			}
+			waited := make(chan bool)
+			go func() { waited <- admin(changing) }()
+			select {
+			case <-waited:
+				t.Fatal("what needs the password went on before it was answered")
+			case <-time.After(20 * time.Millisecond):
+			}
+			h.has.Store(tc.given)
+			close(h.answered)
+			if got := <-waited; got != tc.given {
+				t.Errorf("waited for the answer, got %v; want %v", got, tc.given)
+			}
+			if after := r.placed("app store apps").Admin; tc.given != (after == nil) {
+				t.Errorf("placed once answered (given %v) waits: %v; want it to wait only once refused", tc.given, after != nil)
+			}
+		})
+	}
+}
+
+// kit gives sudo no time limit for the password; an answer that came after
+// sudo's own five minutes ended it is given to sudo asked again, the person
+// asked once.
+func TestGiveSudoGivesALateAnswerAgain(t *testing.T) {
+	fake := runnertest.New(t)
+	give := fake.On("sudo", "-S", "-p", sudoAsks, "-v").Asks(1).AnswersLate().Then().Asks(1)
+	asked := 0
+	took := giveSudo(t.Context(), fake, func(context.Context, int) (string, error) {
+		asked++
+		return "typed", nil
+	})
+	if !took || asked != 1 || !slices.Equal(give.Answered(), []string{"typed"}) {
+		t.Errorf("giveSudo() = %v, the person asked %d times, sudo given %q; want it taken, asked once", took, asked, give.Answered())
+	}
+	for _, c := range fake.Commands() {
+		if c.Timeout != runner.Unlimited {
+			t.Errorf("ran %q with a limit of %v, want none", c.String(), c.Timeout)
+		}
 	}
 }

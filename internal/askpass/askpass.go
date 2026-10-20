@@ -177,21 +177,48 @@ func (s *Server) Answer() func(ctx context.Context, asked int) (string, error) {
 }
 
 // next is the answer for a sudo answered so far as a says: the password
-// kept, the first time it asks; else the person's, which is kept.
+// kept, the first time it asks, should the person give it while this one
+// waits its turn to ask too; else the person's, which is kept.
 func (s *Server) next(ctx context.Context, a *answered) (string, error) {
-	s.mu.Lock()
-	if !a.kept && s.password != "" {
-		a.kept = true
-		password := s.password
-		s.mu.Unlock()
+	if password, ok := s.keptFor(a); ok {
 		return password, nil
 	}
+	s.asking.Lock()
+	defer s.asking.Unlock()
+	if password, ok := s.keptFor(a); ok {
+		return password, nil
+	}
+	s.mu.Lock()
 	asked := a.asked
 	a.asked++
 	s.mu.Unlock()
+	password, err := s.ask(ctx, asked)
+	if err == nil {
+		s.Keep(password)
+	}
+	return password, err
+}
+
+// keptFor is the password kept, for a sudo answered so far as a says, the
+// first time it asks.
+func (s *Server) keptFor(a *answered) (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if a.kept || s.password == "" {
+		return "", false
+	}
+	a.kept = true
+	return s.password, true
+}
+
+// Ask asks the person with ask, asked how many times they've been asked
+// already, as nothing else asks meanwhile, a program's sudo through the
+// helper waiting its turn, and keeps what they give for the rest of the
+// run.
+func (s *Server) Ask(ctx context.Context, ask Asker, asked int) (string, error) {
 	s.asking.Lock()
 	defer s.asking.Unlock()
-	password, err := s.ask(ctx, asked)
+	password, err := ask(ctx, asked)
 	if err == nil {
 		s.Keep(password)
 	}

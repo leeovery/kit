@@ -815,6 +815,62 @@ func TestWhatsWaitedForInstallsFirst(t *testing.T) {
 	}
 }
 
+// adminKind is a fakeKind whose things named needing need an
+// administrator's password to install.
+type adminKind struct {
+	*fakeKind
+	needing []string
+}
+
+func (a *adminKind) NeedsAdmin(_ context.Context, names []string) ([]string, error) {
+	return slices.DeleteFunc(slices.Clone(names), func(name string) bool { return !slices.Contains(a.needing, name) }), nil
+}
+
+func (*adminKind) SetAdmin(func(context.Context) bool) {}
+
+// While kit asks for an administrator's password as the run goes on, what
+// needs it goes in once it's answered, last, each as it would have gone in,
+// what's waited for first, a section held back with its variable; the rest
+// go in meanwhile. Refused, what needs it isn't installed.
+func TestWhatNeedsThePasswordWaitsForIt(t *testing.T) {
+	for _, held := range []bool{true, false} {
+		k, list, sections := heldWorld(true)
+		list.Entries = append(list.Entries, config.Entry{Name: "zoom", File: "brew"}, config.Entry{Name: "arq", File: "brew"})
+		k.aliases["zoom"], k.aliases["arq"] = "zoom", "arq"
+		ak := &adminKind{fakeKind: k, needing: []string{"zoom", "arq", "owner/private/helper"}}
+		var asked [][][]string
+		placing := kind.Placing{First: []string{"arq", "jq"}, Held: sections, Admin: func(context.Context) bool {
+			asked = append(asked, slices.Clone(k.installs))
+			return held
+		}}
+		s := kind.Placed(ak, list, func() kind.Placing { return placing })
+		if err := s.Apply(t.Context(), s.Check(t.Context())); err != nil {
+			t.Fatal(err)
+		}
+		before := [][]string{{"jq"}, {"owner/private/fetcher"}}
+		if len(asked) != 1 || !slices.EqualFunc(asked[0], before, slices.Equal) {
+			t.Errorf("held %v: when the answer was waited for, %q were in; want %q", held, asked, before)
+		}
+		want := before
+		if held {
+			want = append(want, []string{"arq"}, []string{"zoom"}, []string{"owner/private/helper"})
+		}
+		if !slices.EqualFunc(k.installs, want, slices.Equal) {
+			t.Errorf("held %v: installed %q, want %q", held, k.installs, want)
+		}
+		if held && !slices.Equal(k.envs[4], []string{"TOKEN=plain-words-value"}) {
+			t.Errorf("the held section's line needing the password installed with %q, want its variable", k.envs[4])
+		}
+	}
+	// Not asking, nothing waits.
+	k, list, _ := heldWorld(true)
+	ak := &adminKind{fakeKind: k, needing: []string{"jq"}}
+	s := kind.Placed(ak, list, func() kind.Placing { return kind.Placing{} })
+	if err := s.Apply(t.Context(), s.Check(t.Context())); err != nil || !slices.EqualFunc(k.installs, [][]string{{"jq", "owner/private/fetcher", "owner/private/helper"}}, slices.Equal) {
+		t.Errorf("not asking, installed %q, %v; want everything as one", k.installs, err)
+	}
+}
+
 // installLog is what kinds taking turns installed, in the order they did,
 // each as kind:names.
 type installLog struct {

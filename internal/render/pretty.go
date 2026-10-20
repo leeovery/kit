@@ -876,15 +876,32 @@ func (p *Pretty) StepAside() (back func()) {
 	p.stopSpinner()
 	p.flush()
 	p.aside = true
-	return func() {
-		p.mu.Lock()
-		defer p.mu.Unlock()
-		p.aside = false
-		if len(p.running) > 0 {
-			p.spin()
-		}
-		p.flush()
+	return p.comeBack
+}
+
+// HoldStill keeps what's on screen as it is, the heading kit asks a question
+// under, as sudo's password, while the run goes on behind it, and returns
+// what puts the live part back as the run then stands, with what the face
+// held meanwhile.
+func (p *Pretty) HoldStill() (back func()) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.halt()
+	p.flush()
+	p.aside = true
+	return p.comeBack
+}
+
+// comeBack puts the live part back, once the face has stepped aside or held
+// still.
+func (p *Pretty) comeBack() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.aside = false
+	if len(p.running) > 0 {
+		p.spin()
 	}
+	p.flush()
 }
 
 // Running are the titles of the steps running.

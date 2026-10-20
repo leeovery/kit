@@ -62,6 +62,7 @@ type answer struct {
 	does     func()
 	filter   func(input string) (string, error)
 	asks     int
+	late     bool
 }
 
 func (s *Script) last() *answer {
@@ -122,6 +123,15 @@ func (s *Script) Asks(times int) *Script {
 	return s
 }
 
+// AnswersLate has the command, having asked, end before its last answer's
+// given, as sudo does once its own time to wait for a password is up: it
+// exits 1, the answer too late (runner.ErrAnsweredLate), and isn't kept in
+// Answered.
+func (s *Script) AnswersLate() *Script {
+	s.last().late = true
+	return s
+}
+
 // Answered are what the command was given when it asked, in order.
 func (s *Script) Answered() []string {
 	return slices.Clone(s.answered)
@@ -179,6 +189,9 @@ func (f *Fake) Run(ctx context.Context, cmd runner.Command) (runner.Result, erro
 		answer, err := cmd.Answer(ctx, asked)
 		if err != nil {
 			return runner.Result{ExitCode: 1}, &runner.ExitError{Command: cmd.String(), Code: 1, Stderr: "no answer given"}
+		}
+		if a.late && asked == a.asks-1 {
+			return runner.Result{ExitCode: 1}, errors.Join(&runner.ExitError{Command: cmd.String(), Code: 1}, runner.ErrAnsweredLate)
 		}
 		f.mu.Lock()
 		s.answered = append(s.answered, answer)

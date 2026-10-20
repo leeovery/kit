@@ -419,3 +419,37 @@ func TestExecEndsTheInputOfACommandNotAnswered(t *testing.T) {
 		t.Errorf("Run = %q, %v; want it ended, exit 3", res.Stdout, err)
 	}
 }
+
+// A command that ends while its answer's being got, as sudo does once its
+// own time to wait for a password is up, fails saying the answer came too
+// late, as well as how it exited; one answered in time doesn't.
+func TestExecTellsOfAnAnswerThatCameTooLate(t *testing.T) {
+	e, _ := programs(t, map[string]string{"asks": `printf 'ASK>' >&2; exit 1`})
+	res, err := e.Run(t.Context(), runner.Command{Name: "asks", Asks: "ASK>", Answer: func(context.Context, int) (string, error) {
+		time.Sleep(300 * time.Millisecond)
+		return "late", nil
+	}})
+	if exit, ok := errors.AsType[*runner.ExitError](err); !ok || exit.Code != 1 || !errors.Is(err, runner.ErrAnsweredLate) || res.ExitCode != 1 {
+		t.Errorf("Run = exit %d, %v; want exit 1, the answer too late", res.ExitCode, err)
+	}
+	e, _ = programs(t, map[string]string{"asks": `printf 'ASK>' >&2; read a; exit 1`})
+	if _, err := e.Run(t.Context(), runner.Command{Name: "asks", Asks: "ASK>", Answer: func(context.Context, int) (string, error) {
+		return "wrong", nil
+	}}); errors.Is(err, runner.ErrAnsweredLate) {
+		t.Errorf("Run = %v; want an answer heard, and refused, not too late", err)
+	}
+}
+
+// A command given no time limit runs as long as it takes, till its context
+// is done.
+func TestExecRunsAnUnlimitedCommandAsLongAsItTakes(t *testing.T) {
+	e, _ := programs(t, map[string]string{"slow": "/bin/sleep 0.3"})
+	if _, err := e.Run(t.Context(), runner.Command{Name: "slow", Timeout: runner.Unlimited}); err != nil {
+		t.Errorf("Run = %v; want it run to its end", err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+	if _, err := e.Run(ctx, runner.Command{Name: "slow", Timeout: runner.Unlimited}); !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("Run = %v; want it ended with its context", err)
+	}
+}

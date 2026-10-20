@@ -27,8 +27,8 @@ decide. --plan says what applying would do, and does nothing.
 
 Name steps to apply only those, with what they need. Some installs need an
 administrator's password (a cask that installs through a package, an App
-Store app): at a terminal, kit asks for it once, before anything is applied;
-without one, those installs wait.
+Store app): at a terminal, kit asks for it once, as it starts, for as long
+as it takes, the rest applying meanwhile; without one, those installs wait.
 Exits 0 when nothing needs attention after applying, 1 when something does,
 and 2 when kit couldn't apply.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -53,8 +53,7 @@ and 2 when kit couldn't apply.`,
 					steps, _ := r.pipeline.Planned(r.options(a, args))
 					r.sink.Emit(event.Preparing{Time: r.now, Command: command, Machine: r.machine, Doing: "checking what will need an administrator's password", Steps: steps})
 				}
-				wanted := toInstall(ctx, r, args)
-				_, stop := a.holdAdmin(ctx, r, wanted)
+				stop := a.holdAdminAlongside(ctx, r, toInstall(ctx, r, args))
 				report, err = r.pipeline.Apply(ctx, r.sink, r.options(a, args))
 				stop()
 			}

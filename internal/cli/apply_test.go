@@ -4,7 +4,9 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/x/ansi"
 
@@ -142,10 +144,42 @@ func TestApplyAtATerminalAsksForThePasswordUpFront(t *testing.T) {
 			t.Errorf("brew install --cask zoom ran with %q; want kit's helper and Homebrew's check done", cmd.Env)
 		}
 	}
-	for _, c := range calls[:asked] {
-		if strings.HasPrefix(c, "brew install") || strings.HasPrefix(c, "brew update") {
-			t.Errorf("ran %q before asking for the password, want nothing applied first", c)
+}
+
+// While kit asks for the password, the run goes on, however long the
+// answer takes: what doesn't need it is installed meanwhile, and what does
+// waits for the answer.
+func TestApplyGoesOnWhileItAsksForThePassword(t *testing.T) {
+	w := missingWorld(t)
+	w.terminal = true
+	w.choose = func(string, []string) (int, error) { return 1, nil }
+	w.writeSection(t, "laptop", "homebrew casks", "zoom\n")
+	w.fake.On("brew", "list", "--cask", "--full-name", "-1").Prints("ghostty\n").
+		Then().Prints("ghostty\n").
+		Then().Prints("ghostty\nzoom\n")
+	w.fake.On("brew", "info", "--json=v2", "--cask", "zoom").Prints(zoomInfo)
+	w.expectPassword()
+	w.fake.On("brew", "update", "--quiet")
+	installed := make(chan struct{})
+	w.fake.On("brew", "install", "--formula", "ripgrep").Does(func() { close(installed) })
+	var typed atomic.Bool
+	w.typing = func() {
+		select {
+		case <-installed:
+		case <-time.After(10 * time.Second):
+			t.Error("nothing was installed while kit asked for the password, want ripgrep")
 		}
+		typed.Store(true)
+	}
+	w.fake.On("brew", "install", "--cask", "zoom").Does(func() {
+		if !typed.Load() {
+			t.Error("zoom was installed before the password was given")
+		}
+	})
+
+	out, errOut, _ := w.run(t, "apply")
+	if calls := w.fake.Calls(); !slices.Contains(calls, "brew install --cask zoom") {
+		t.Errorf("ran %q, want zoom installed once the password was given\n%s%s", calls, out, errOut)
 	}
 }
 

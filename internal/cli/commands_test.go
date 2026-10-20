@@ -50,7 +50,11 @@ func TestEachKindWaitsForItsCommand(t *testing.T) {
 		formulae += "ripgrep\n"
 		f.On("brew", "list", "--formula", "--full-name", "-1").Prints(formulae)
 	})
-	f.On("brew", "install", "--cask", "1password", "owner/tap/1password-cli").Does(func() {
+	// A tap's cask goes in apart, first.
+	f.On("brew", "install", "--cask", "owner/tap/1password-cli").Does(func() {
+		f.On("brew", "list", "--cask", "--full-name", "-1").Prints("ghostty\nfirefox\nowner/tap/1password-cli\n")
+	})
+	f.On("brew", "install", "--cask", "1password").Does(func() {
 		f.On("brew", "list", "--cask", "--full-name", "-1").Prints("ghostty\nfirefox\n1password\nowner/tap/1password-cli\n")
 		f.On("op", "whoami")
 		optest.Holds(f, map[string]string{"op://vault/Item/Section/token": "plain-token-value"})
@@ -73,7 +77,7 @@ func TestEachKindWaitsForItsCommand(t *testing.T) {
 
 	out, errOut, _ := w.run(t, "apply")
 	calls := f.Calls()
-	if !before(calls, "brew install --cask 1password owner/tap/1password-cli", "test -f /signed-in") || !before(calls, "test -f /signed-in", synced) {
+	if !before(calls, "brew install --cask owner/tap/1password-cli", "brew install --cask 1password") || !before(calls, "brew install --cask 1password", "test -f /signed-in") || !before(calls, "test -f /signed-in", synced) {
 		t.Errorf("ran %q: want the secrets synced once 1Password's casks were in and the sign-in done", calls)
 	}
 	if !before(calls, mise+" apply", npm) {

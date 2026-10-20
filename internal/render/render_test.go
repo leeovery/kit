@@ -845,6 +845,35 @@ func TestPrettyHoldsStillForAQuestion(t *testing.T) {
 	}
 }
 
+// Held still while a question's up under the heading, as sudo's password
+// is as the run goes on, the face draws nothing of the run meanwhile, the
+// question left as it is, then, once it's answered, the run as it stands.
+func TestPrettyHoldsStillWhileTheRunGoesOn(t *testing.T) {
+	var out syncBuffer
+	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).Sized(func() (int, int) { return 80, 40 })
+	steps := []event.Step{{Name: "brew", Title: "Homebrew formulae", Area: "Drift"}}
+	face.Emit(event.Preparing{Time: at, Command: "apply", Machine: "laptop", Doing: "checking what will need an administrator's password", Steps: steps})
+	face.Emit(event.Preparing{Time: at, Command: "apply", Machine: "laptop"})
+	back := face.HoldStill()
+	asked := out.String()
+	face.Emit(event.RunStarted{Time: at, Command: "apply", Machine: "laptop", Steps: steps})
+	face.Emit(event.StepStarted{Step: "brew", Doing: "applying"})
+	face.Emit(event.Doing{Step: "brew", Says: "installing jq", Of: 1})
+	time.Sleep(400 * time.Millisecond)
+	if drawn := strings.TrimPrefix(out.String(), asked); drawn != "" {
+		t.Errorf("while the question was up, the face drew %q; want nothing", drawn)
+	}
+	back()
+	if drawn := strings.TrimPrefix(out.String(), asked); !strings.Contains(drawn, "installing jq") {
+		t.Errorf("once it was answered, the face drew %q; want the run as it stands", drawn)
+	}
+	face.Emit(event.StepFinished{Step: "brew", Result: check.Result{State: check.OK, Summary: "fine"}})
+	face.Emit(event.RunFinished{Duration: time.Second, Counts: map[check.State]int{check.OK: 1}})
+	if err := face.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // Once the boot's in the terminal, it's kit apply: the boot's steps among
 // This Mac's; a step waiting on you says what for and what to do, the
 // light of the row it holds up asking.

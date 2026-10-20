@@ -44,14 +44,18 @@ func (e Exec) Run(ctx context.Context, cmd Command) (Result, error) {
 	if err != nil {
 		return Result{ExitCode: -1}, err
 	}
-	ctx, cancel := hold.WithTimeout(ctx, cmp.Or(cmd.Timeout, DefaultTimeout))
+	ctx, cancel := limited(ctx, cmd.Timeout)
 	defer cancel()
 	started := e.Now()
 	stdout, stderr, err := e.start(ctx, program, cmd)
 	res := Result{Stdout: stdout, Stderr: stderr, ExitCode: -1, Duration: e.Now().Sub(started)}
 	if exit, ok := errors.AsType[*exec.ExitError](err); ok && exit.Exited() {
 		res.ExitCode = exit.ExitCode()
-		return res, &ExitError{Command: cmd.String(), Code: res.ExitCode, Stderr: lastLine(stderr)}
+		exited := &ExitError{Command: cmd.String(), Code: res.ExitCode, Stderr: lastLine(stderr)}
+		if errors.Is(err, ErrAnsweredLate) {
+			return res, errors.Join(exited, ErrAnsweredLate)
+		}
+		return res, exited
 	}
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
@@ -61,6 +65,14 @@ func (e Exec) Run(ctx context.Context, cmd Command) (Result, error) {
 	}
 	res.ExitCode = 0
 	return res, nil
+}
+
+// limited is ctx for a command given timeout, as Command's Timeout says.
+func limited(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	if timeout == Unlimited {
+		return context.WithCancel(ctx)
+	}
+	return hold.WithTimeout(ctx, cmp.Or(timeout, DefaultTimeout))
 }
 
 // start runs program as cmd says, returning what it printed.
@@ -163,7 +175,10 @@ func converse(ctx context.Context, c *exec.Cmd, cmd Command) (stdout, stderr []b
 				_ = in.Close()
 				break
 			}
-			_, _ = io.WriteString(in, answer+"\n")
+			if _, err := io.WriteString(in, answer+"\n"); err != nil {
+				answerErr = ErrAnsweredLate
+				break
+			}
 		}
 		// What could begin a prompt waits for what follows it.
 		keep := min(len(pending), len(prompt)-1)
@@ -175,7 +190,10 @@ func converse(ctx context.Context, c *exec.Cmd, cmd Command) (stdout, stderr []b
 	said = append(said, pending...)
 	_ = in.Close()
 	err = c.Wait()
-	if answerErr != nil && err == nil {
+	switch {
+	case errors.Is(answerErr, ErrAnsweredLate):
+		err = errors.Join(err, answerErr)
+	case answerErr != nil && err == nil:
 		err = answerErr
 	}
 	return out.Bytes(), said, err
