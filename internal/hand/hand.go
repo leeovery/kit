@@ -5,7 +5,8 @@ package hand
 import "sync"
 
 // Answer is what the person answers a step by hand with: that it's done,
-// that they're stopping here, or, a choice, its key.
+// that they're stopping here, that they're moving on to the next card
+// waiting, or, a choice, its key.
 type Answer string
 
 const (
@@ -14,6 +15,9 @@ const (
 	// Stop is the person stopping where they are, at the run's to-dos: what's
 	// left stays to do.
 	Stop Answer = "stop"
+	// Next is the person moving on to the next card waiting, the one up
+	// staying to do, to come back.
+	Next Answer = "next"
 )
 
 // Desk passes answers from the screen to the step whose card is up.

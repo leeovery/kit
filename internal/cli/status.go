@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/leeovery/kit/internal/apps"
 	"github.com/leeovery/kit/internal/askpass"
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/config"
@@ -685,7 +686,7 @@ func (a *app) face() render.Face {
 	if a.underHome {
 		face.UnderHome()
 	}
-	if a.Getenv("TERM_PROGRAM") == "ghostty" {
+	if t, ok := apps.Running(a.Getenv); ok && t.Driver.TabProgress() {
 		face.ShowTabProgress()
 	}
 	return face

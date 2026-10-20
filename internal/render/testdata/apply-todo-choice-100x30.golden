@@ -20,8 +20,8 @@
   △ Set up Arq's backup plan                        │
                                                     │  LOG
                                                     │
-                                                    │  03:32:46  △ Arq: not set up
-                                                    │  03:32:47  △ App settings: not set up
+                                                    │  03:32:46  ● Arq: not set up
+                                                    │  03:32:47  ● App settings: not set up
                                                     │  03:32:48  ● Disk space: fine
                                                     │  03:32:49  ● Load: fine
                                                     │  03:32:50  ● claude-code: fine

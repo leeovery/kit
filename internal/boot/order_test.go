@@ -355,6 +355,8 @@ func (o *opener) Open(_ context.Context, _ runner.Runner, app string, w apps.Win
 	return nil
 }
 
+func (*opener) TabProgress() bool { return false }
+
 // The hand-off, through the terminal's driver, whichever it is: a window
 // opened running kit bootstrap, handed over, maximized, without this run's
 // askpass; done once that kit arrives, saying what macOS asks meanwhile.

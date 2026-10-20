@@ -138,10 +138,12 @@ type Pretty struct {
 	// card is the step by hand up for the person at the Mac, front and
 	// centre, till its step finishes: nil when none is; cardSince when it
 	// came up. cards are every one that came up, by its step and its line,
-	// for what's left to do once the run's done.
+	// for what's left to do once the run's done; asides, those set aside
+	// for another to take their turn, by when they came up.
 	card      *event.NeedsYou
 	cardSince time.Time
 	cards     map[string]event.NeedsYou
+	asides    map[string]time.Time
 	// todos are the to-dos at the run's end, as they stand, once they've
 	// started: applying's screen is theirs till the run's done.
 	todos *event.ToDos
@@ -187,7 +189,7 @@ func (p *Pretty) UnderHome() *Pretty {
 }
 
 // ShowTabProgress has the face show a run's progress on the terminal's tab
-// too, for a terminal that does: Ghostty.
+// too, for a terminal whose driver says it does (apps.Driver).
 func (p *Pretty) ShowTabProgress() *Pretty {
 	p.tab = true
 	return p
@@ -219,7 +221,7 @@ func (p *Pretty) Emit(e event.Event) {
 		p.start, p.results = e, make(map[string]event.StepFinished, len(e.Steps))
 		p.output, p.command, p.began = map[string][]string{}, map[string]string{}, p.now()
 		p.raw, p.rawSeq = map[string][]rawLine{}, 0
-		p.cut, p.card, p.cards, p.todos = map[string]runningStep{}, nil, map[string]event.NeedsYou{}, nil
+		p.cut, p.card, p.cards, p.asides, p.todos = map[string]runningStep{}, nil, map[string]event.NeedsYou{}, map[string]time.Time{}, nil
 		p.log = nil
 		p.order.start(e.Steps)
 		p.preparing = ""
@@ -241,7 +243,11 @@ func (p *Pretty) Emit(e event.Event) {
 		p.spin()
 	case event.Doing:
 		// A step at work says what it's doing; one waiting on you, what you're
-		// to do; one waiting for a thing, what for.
+		// to do; one waiting for a thing, what for; one whose card's up, that
+		// it waits its turn again, set aside.
+		if e.Says == event.Queued {
+			p.setAside(e.Step)
+		}
 		for i, r := range p.running {
 			if r.step == e.Step {
 				p.running[i].doing, p.running[i].todo = cmp.Or(e.Says, r.doing), e.Todo

@@ -795,6 +795,48 @@ func TestAnInstallWaitingItsTurn(t *testing.T) {
 	}
 }
 
+// slowTurnKind is a countingKind whose install waits its turn behind
+// another's step for a while before it runs.
+type slowTurnKind struct {
+	*countingKind
+	wait time.Duration
+}
+
+func (w *slowTurnKind) Install(ctx context.Context, names []string) error {
+	resume := kind.Waiting(ctx, "Homebrew formulae")
+	time.Sleep(w.wait)
+	resume()
+	return w.countingKind.Install(ctx, names)
+}
+
+// An install waiting its turn is never quiet, however long it waits: the
+// run's log isn't told, and the step says only what it waits for.
+func TestAnInstallWaitingIsntQuiet(t *testing.T) {
+	defer kind.SetQuiet(20*time.Millisecond, 2*time.Millisecond)()
+	k := &slowTurnKind{countingKind: &countingKind{fakeKind: knowing("a"), prints: []string{"done a"}}, wait: 100 * time.Millisecond}
+	var said []event.Doing
+	var logged []event.Logged
+	var mu sync.Mutex
+	ctx := event.WithSaying(context.Background(), func(d event.Doing) { mu.Lock(); said = append(said, d); mu.Unlock() })
+	ctx = event.WithLogging(ctx, func(l event.Logged) { mu.Lock(); logged = append(logged, l); mu.Unlock() })
+	s := kind.Step(k, declared("a"))
+	if err := s.Apply(ctx, s.Check(context.Background())); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	for _, l := range logged {
+		if l.Alert {
+			t.Errorf("waiting, the log was told %q", l.Line)
+		}
+	}
+	for _, d := range said {
+		if strings.Contains(d.Says, "nothing since") {
+			t.Errorf("waiting, the step said %q", d.Says)
+		}
+	}
+}
+
 // The lines a step waits for install first, on their own, as one command,
 // then the rest; one installed already is left be, and one held back keeps
 // to its section.

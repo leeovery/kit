@@ -70,7 +70,7 @@ const (
 
 // signInKeys are the ways to sign in to GitHub: with the phone, a QR code
 // to scan; or here, in the browser.
-var signInKeys = []Key{{Key: "enter", Does: "with your phone"}, {Key: "s", Does: "here, in Safari"}}
+var signInKeys = []Key{{Key: "enter", Does: "with your phone"}, {Key: "s", Does: "here, in your browser"}}
 
 // Boot is a new Mac's boot, and what it runs with.
 type Boot struct {

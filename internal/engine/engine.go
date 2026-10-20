@@ -886,6 +886,48 @@ func Takes(ctx context.Context, name string) bool {
 	return ok
 }
 
+// Holding is how many of the steps of the run ctx is a step of wait on the
+// step called name: those that need it, are applied after it, or wait for
+// it or one of its things, and those that wait on them in turn. None
+// outside a run.
+func Holding(ctx context.Context, name string) int {
+	d, ok := running(ctx)
+	if !ok {
+		return 0
+	}
+	return len(waitingOn(name, d.steps))
+}
+
+// waitingOn are the steps of steps that wait on the one called name, by
+// name, as Holding counts them.
+func waitingOn(name string, steps []Step) map[string]bool {
+	next := map[string][]string{}
+	for _, s := range steps {
+		on := slices.Concat(s.Needs, s.After)
+		for _, w := range slices.Concat(s.Waits, s.Later) {
+			if w.Step != "" {
+				on = append(on, w.Step)
+			}
+		}
+		for _, x := range on {
+			next[x] = append(next[x], s.Name)
+		}
+	}
+	held := map[string]bool{}
+	var visit func(name string)
+	visit = func(name string) {
+		for _, s := range next[name] {
+			if !held[s] {
+				held[s] = true
+				visit(s)
+			}
+		}
+	}
+	visit(name)
+	delete(held, name)
+	return held
+}
+
 // StepResult is a step of the run, by name, and how it stands.
 type StepResult struct {
 	Step   string

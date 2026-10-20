@@ -146,7 +146,7 @@ func (r *Raise) workThrough(ctx context.Context, step string, list []toDo) error
 	resolved := map[string]bool{}
 	for i, t := range list {
 		emit(i)
-		saw, err := r.up(ctx, step, t, len(list)-1-i)
+		saw, err := r.up(ctx, step, t, seat{held: true, after: len(list) - 1 - i})
 		if errors.Is(err, errStopHere) {
 			break
 		}

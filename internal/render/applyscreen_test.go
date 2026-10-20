@@ -15,6 +15,7 @@ import (
 	"github.com/leeovery/kit/internal/boot"
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/event"
+	"github.com/leeovery/kit/internal/hand"
 	"github.com/leeovery/kit/internal/look"
 	"github.com/leeovery/kit/internal/render"
 )
@@ -160,6 +161,14 @@ func cardUp(card event.NeedsYou) []event.Event {
 
 // waitingOnYou is the run once 1Password's sign-in has come up.
 func waitingOnYou() []event.Event { return cardUp(signIn) }
+
+// cardsWaiting is the run once 1Password's sign-in has come up with
+// another card waiting after it.
+func cardsWaiting() []event.Event {
+	card := signIn
+	card.More = 1
+	return cardUp(card)
+}
 
 // casksFailed is the run once Homebrew's casks have failed, one wouldn't
 // install, and macOS login items, which need them, weren't checked.
@@ -358,7 +367,8 @@ func pressing(keys ...ask.Key) func(string, int) []ask.Key {
 // beside the wordmark; a rule across with a junction where the panes part;
 // the rows at the left, the log at the right. Each is drawn as round 10
 // has it, at the size round 10 drew and at the least the screen takes:
-// following the log, a card up, a row chosen, scrolled back, a step
+// following the log, a card up, a card up with another waiting, a row
+// chosen, scrolled back, a step
 // failed, a row chosen that's printed something, and its raw view.
 func TestApplyingHasAScreenOfItsOwn(t *testing.T) {
 	took := 6*time.Minute + 12*time.Second
@@ -369,6 +379,7 @@ func TestApplyingHasAScreenOfItsOwn(t *testing.T) {
 	}{
 		{"following", sixMinutesIn, nil},
 		{"card", waitingOnYou, nil},
+		{"cards", cardsWaiting, nil},
 		{"row", sixMinutesIn, clickRow("Homebrew casks")},
 		{"scrolled", func() []event.Event { return sixMinutesInWith(40, 12) }, pressing(keyUp, keyUp, keyUp, keyUp, keyUp)},
 		{"failed", casksFailed, nil},
@@ -473,7 +484,8 @@ func rowsRun(steps []event.Step, events ...event.Event) []event.Event {
 // up, that it waits for you; one at work, what it's doing and how far it's
 // got, a bar under it when it counts; some waiting, what for, how many are
 // done first, the one waiting named unless it's named as its row is; all
-// finished, how many things are to do at the end; all well, what
+// finished, how many things are to do at the end, done's mark, as there's
+// nothing to do till then; all well, what
 // its step did, or that all are done; none started, that it's waiting.
 // Each in its state's mark and colour.
 func TestApplyingRowSays(t *testing.T) {
@@ -514,8 +526,8 @@ func TestApplyingRowSays(t *testing.T) {
 		{"waiting, one step", "Secrets", "  ○ Secrets  waits for 1password", nil, look.Cyan("○"), ""},
 		{"waiting, some done, one named as its row", "Homebrew formulae", "  ○ Homebrew formulae  1 of 2 · waits for Homebrew casks", append([]event.Event{fine(2, "homebrew", "/opt/homebrew")},
 			append(applying(10, "brew"), event.Doing{Time: after(20), Step: "brew", Says: "waiting for Homebrew casks"})...), look.Cyan("○"), ""},
-		{"to do at the end", "Backups", "  △ Backups  2 to do at the end", []event.Event{
-			finished(2, "time-machine", toDo("Add a Time Machine disk")), finished(3, "arq", toDo("Choose Arq's backup plan"))}, look.White("△"), ""},
+		{"to do at the end", "Backups", "  ● Backups  2 to do at the end", []event.Event{
+			finished(2, "time-machine", toDo("Add a Time Machine disk")), finished(3, "arq", toDo("Choose Arq's backup plan"))}, look.Pink("●"), ""},
 		{"done, one step", "Secrets", "  ● Secrets  24 synced", []event.Event{fine(2, "secret", "24 synced")}, look.Pink("●"), ""},
 		{"done, several", "Your steps", "  ● Your steps  all 3 done", []event.Event{
 			fine(2, "fonts", "16 installed"), fine(3, "mise", "fine"), fine(4, "valet", "fine")}, look.Pink("●"), ""},
@@ -586,10 +598,12 @@ func TestApplyingHasNoLater(t *testing.T) {
 
 // The log: every line of the run, oldest first, its time and a mark: what
 // a kind installed, dim +; a step finished well, pink, and what it did; one
-// left to do, white △; one failed, red, why and what to run on the spine
-// under it; one not checked, grey; a card up, orange ▲, and done with, how
-// long it was up, or left to do. Steps starting and their checks have no
-// line. What's under way is at its foot, the time now on its first line.
+// left to do at the end, pink too, as there's nothing to do till then, the
+// to-do mark nowhere mid-run; one failed, red, why and what to run on the
+// spine under it; one not checked, grey; a card up, orange ▲, and done
+// with, how long it was up, or left to do. Steps starting and their checks
+// have no line. What's under way is at its foot, the time now on its first
+// line.
 func TestApplyingLog(t *testing.T) {
 	events := append(casksFailed(),
 		event.StepStarted{Time: after(360), Step: "1password", Doing: "applying"},
@@ -598,10 +612,13 @@ func TestApplyingLog(t *testing.T) {
 	)
 	face, out, _ := applyAt(160, 64, 7*time.Minute, events)
 	defer func() { _ = face.Close() }()
+	if strings.Contains(screen(out.String()), "△") {
+		t.Errorf("mid-run, the screen has the to-do mark, which is the end's:\n%s", screen(out.String()))
+	}
 	log := logOf(screen(out.String()), 160)
 	for _, want := range []string{
 		"  03:04:06  ● GitHub: fine",
-		"  03:04:10  △ Time Machine: no backup disk",
+		"  03:04:10  ● Time Machine: no backup disk",
 		"  03:04:26  ● fonts: 16 installed",
 		"  03:04:36  + Installed cask-1",
 		"  03:04:58  + Installed formula-1",
@@ -676,6 +693,137 @@ func TestApplyingCardUpAgain(t *testing.T) {
 	}
 }
 
+// A card's why is said once: as its line's notes say, when it has some;
+// else, in kit's words, why the run waits for it. On applying's screen and
+// in a window too small for it alike.
+func TestApplyingCardsWhySaidOnce(t *testing.T) {
+	noted := []event.Step{
+		{Name: "appstore", Title: "appstore", Area: "Manual", ByHand: []event.Hand{{Name: "appstore", Title: "Sign in to the App Store"}}},
+		{Name: "mas", Title: "App Store apps", Area: "Drift", Row: "App Store apps", Waits: []string{"appstore"}},
+		{Name: "login-item", Title: "macOS login items", Area: "Drift", Row: "Login items", Waits: []string{"appstore"}},
+	}
+	card := event.NeedsYou{Time: after(10), Step: "appstore", Item: "appstore", Title: "Sign in to the App Store", Steps: []string{"Open the App Store"}}
+	withNote := card
+	withNote.Why = "macOS won't let kit check it, so say when; the first app tells."
+	kits := "The run waits for this, for App Store apps and macOS login items."
+	for _, tt := range []struct {
+		name     string
+		card     event.NeedsYou
+		why, not string
+	}{
+		{"its notes", withNote, withNote.Why, "The run waits for this"},
+		{"kit's words", card, kits, "kit won't"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			events := rowsRun(noted, event.StepStarted{Time: after(10), Step: "appstore", Doing: "applying"}, tt.card)
+			face, out, _ := applyAt(160, 64, 20*time.Second, events)
+			_, right := panes(screen(out.String()), 160)
+			_ = face.Close()
+			panel := strings.Join(right[:6], "\n")
+			if !strings.Contains(panel, "      "+tt.why) || strings.Contains(panel, tt.not) {
+				t.Errorf("the panel starts\n%s\nwant it to say %q, and that alone", panel, tt.why)
+			}
+
+			var narrow syncBuffer
+			small := render.NewPretty(&colorprofile.Writer{Forward: &narrow, Profile: colorprofile.Ascii}, 80, true).Sized(func() (int, int) { return 80, 40 })
+			for _, e := range events {
+				small.Emit(e)
+			}
+			time.Sleep(300 * time.Millisecond)
+			live := turned(screen(narrow.String()))
+			if err := small.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(live, tt.why) || strings.Contains(live, tt.not) {
+				t.Errorf("in a small window:\n%s\nwant the card to say %q, and that alone", live, tt.why)
+			}
+		})
+	}
+}
+
+// Cards take turns: one more of the run waits on goes up in place of the
+// card up, whose step says it waits its turn again; the card set aside is
+// still to do, so the log doesn't call it done, nor says again that it's
+// waiting for you when it comes back, and its panel counts from when it
+// first came up, as its done does. While another card waits, the panel
+// says how many and that tab moves on, the foot's keys losing tab, and tab
+// passes that on to the card up's step; with none waiting, tab chooses the
+// next row as ever.
+func TestApplyingCardsTakeTurns(t *testing.T) {
+	steps := []event.Step{
+		{Name: "appstore", Title: "appstore", Area: "Manual", ByHand: []event.Hand{{Name: "appstore", Title: "Sign in to the App Store"}}},
+		{Name: "vault", Title: "vault", Area: "Manual", ByHand: []event.Hand{{Name: "vault", Title: "Sign in to the vault"}}},
+		{Name: "mas", Title: "App Store apps", Area: "Drift", Row: "App Store apps", Waits: []string{"appstore"}},
+		{Name: "secret", Title: "Secrets", Area: "Drift", Row: "Secrets", Waits: []string{"vault"}},
+	}
+	store := event.NeedsYou{Time: after(10), Step: "appstore", Item: "appstore", Title: "Sign in to the App Store"}
+	vault := event.NeedsYou{Time: after(40), Step: "vault", Item: "vault", Title: "Sign in to the vault", More: 1}
+	events := rowsRun(steps,
+		event.StepStarted{Time: after(10), Step: "appstore", Doing: "applying"},
+		event.Doing{Time: after(10), Step: "appstore", Says: event.Queued},
+		store,
+		event.StepStarted{Time: after(40), Step: "vault", Doing: "applying"},
+		event.Doing{Time: after(40), Step: "vault", Says: event.Queued},
+		event.Doing{Time: after(40), Step: "appstore", Says: event.Queued},
+		vault,
+	)
+	face, out, kb := applyAt(160, 64, 45*time.Second, events)
+	var mu sync.Mutex
+	var got []answered
+	face.Hands(func(step string, a hand.Answer) bool {
+		mu.Lock()
+		defer mu.Unlock()
+		got = append(got, answered{step, a})
+		return true
+	})
+	scr := screen(out.String())
+	_, right := panes(scr, 160)
+	panel := strings.Join(right[:8], "\n")
+	if !strings.Contains(right[1], "Sign in to the vault") || !strings.Contains(right[1], "1 more after this") || !strings.Contains(panel, "      tab next card, this one comes back") {
+		t.Errorf("the panel starts\n%s\nwant the vault's card, 1 more after it, tab moving on", panel)
+	}
+	if f := leftFoot(scr, 160, 1); !slices.Equal(f, []string{"  ↑↓ scroll · q stop"}) {
+		t.Errorf("the foot is %q; want its keys but tab", f)
+	}
+	kb.press(t, keyTab)
+	mu.Lock()
+	if !slices.Equal(got, []answered{{"vault", hand.Next}}) {
+		t.Errorf("tab answered %v; want the vault's card told to move on", got)
+	}
+	mu.Unlock()
+	_ = face.Close()
+
+	back := store
+	back.Time, back.More = after(50), 1
+	events = append(events, event.Doing{Time: after(50), Step: "vault", Says: event.Queued}, back)
+	face, out, _ = applyAt(160, 64, 55*time.Second, events)
+	_, right = panes(screen(out.String()), 160)
+	if !strings.Contains(right[1], "Sign in to the App Store") || !strings.HasSuffix(right[1], "waiting 45.0s") {
+		t.Errorf("the App Store's card back, the panel's title line is %q; want it waiting since it first came up", right[1])
+	}
+	_ = face.Close()
+
+	events = append(events, fine(70, "appstore", "done"), event.StepStarted{Time: after(70), Step: "vault", Doing: "applying"}, event.NeedsYou{Time: after(70), Step: "vault", Item: "vault", Title: "Sign in to the vault"})
+	face, out, kb = applyAt(160, 64, 75*time.Second, events)
+	defer func() { _ = face.Close() }()
+	want := []string{
+		"  03:04:15  ▲ Sign in to the App Store: waiting for you",
+		"  03:04:45  ▲ Sign in to the vault: waiting for you",
+		"  03:05:15  ● Sign in to the App Store: done, in 1m00s",
+	}
+	if log := logOf(screen(out.String()), 160); !slices.Equal(log, want) {
+		t.Errorf("the log is\n%s\nwant\n%s", strings.Join(log, "\n"), strings.Join(want, "\n"))
+	}
+	face.Hands(func(string, hand.Answer) bool {
+		t.Error("with no card waiting, tab answered the card up")
+		return true
+	})
+	kb.press(t, keyTab)
+	if _, right := panes(screen(out.String()), 160); !slices.ContainsFunc(right, func(l string) bool { return strings.HasPrefix(l, "  LOG · ") }) {
+		t.Errorf("tab with no card waiting, the right pane is\n%s\nwant a row chosen", strings.Join(right, "\n"))
+	}
+}
+
 // A row chosen, the log is its lines alone, a step by hand's in the row of
 // the step it holds up, what's under way its own; the steps by hand at the
 // end are in no row, shown with everything alone.
@@ -717,8 +865,7 @@ func TestApplyingLogOfARow(t *testing.T) {
 
 // While a card's up, it's a panel over the log, ruled off: its title,
 // orange, how long it's waited at the right, how many more are after it;
-// why it's there, muted and wrapped, then why the run waits for it; its
-// steps, numbered, a subheading muted and unnumbered after a blank line,
+// why it's there, muted and wrapped, as its notes say; its steps, numbered, a subheading muted and unnumbered after a blank line,
 // the numbering carrying on across it; that kit carries on by itself, when
 // it tells, and no key to answer it. The header says the run's waiting for
 // you; the row it holds up does too. The card done, the panel goes.
@@ -733,7 +880,6 @@ func TestApplyingPanel(t *testing.T) {
 		"",
 		"      Every secret kit puts in place comes from 1Password, so it needs the app signed in and its",
 		"      command line turned on.",
-		"      The run waits for this, for Secrets.",
 		"",
 		"      1  Open 1Password",
 		"      2  Scan the QR code it shows with the 1Password app on your phone",
@@ -750,7 +896,7 @@ func TestApplyingPanel(t *testing.T) {
 	if !slices.Equal(right[:len(want)], want) {
 		t.Errorf("the right pane starts\n%s\nwant\n%s", strings.Join(right[:len(want)], "\n"), strings.Join(want, "\n"))
 	}
-	if rule := lines(got)[headLines+15]; !strings.Contains(rule, "├───") {
+	if rule := lines(got)[headLines+14]; !strings.Contains(rule, "├───") {
 		t.Errorf("the panel's rule is %q; want it to join the rule between the panes", rule)
 	}
 	if state := lines(got)[3]; !strings.HasSuffix(state, "│  ▲ waiting for you · Sign in to 1Password") {
@@ -1149,7 +1295,7 @@ func TestApplyingStepsWaitingForEachOther(t *testing.T) {
 	for row, want := range map[string]string{
 		"Homebrew casks": "  – Homebrew casks  not checked · needs a secret",
 		"Your steps":     "  – Your steps  not checked · needs a secret",
-		"Backups":        "  △ Backups  1 to do at the end",
+		"Backups":        "  ● Backups  1 to do at the end",
 	} {
 		if line := rowLine(t, got, 160, row); !strings.HasPrefix(line, want) {
 			t.Errorf("the row is %q; want %q", line, want)
@@ -1157,7 +1303,7 @@ func TestApplyingStepsWaitingForEachOther(t *testing.T) {
 	}
 	_, log := panes(got, 160)
 	for _, step := range []string{"a", "b", "c", "d", "a2"} {
-		if !slices.ContainsFunc(log, func(l string) bool { return strings.Contains(l, "△ "+step+":") }) {
+		if !slices.ContainsFunc(log, func(l string) bool { return strings.Contains(l, "● "+step+":") }) {
 			t.Errorf("the log has no %s to do at the end:\n%s", step, strings.Join(log, "\n"))
 		}
 	}

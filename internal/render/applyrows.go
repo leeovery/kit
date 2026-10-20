@@ -151,8 +151,8 @@ func (p *Pretty) heldRow(name string, seen map[string]bool) string {
 // what went wrong, or how many did; a card up for a step by hand holding
 // one of them up, or one of them needing you, orange; one at work, what
 // it's doing; some waiting, what for; all finished, how many things
-// they've left to do at the end, or that they didn't run, or, all well,
-// what's done.
+// they've left to do at the end (laterState), or that they didn't run,
+// or, all well, what's done.
 func (p *Pretty) rowLook(r applyRow) look.Row {
 	row := look.Row{Name: r.name}
 	var failed, unwell, skipped []event.Step
@@ -191,13 +191,24 @@ func (p *Pretty) rowLook(r applyRow) look.Row {
 	case finished < len(r.steps):
 		row.State, row.Says = look.Queued, look.Muted(p.rowWaiting(r, finished))
 	case toDo > 0:
-		row.State, row.Says = look.ToDo, look.White(fmt.Sprintf("%d to do at the end", toDo))
+		row.State = p.laterState()
+		row.Says = look.Words(row.State, fmt.Sprintf("%d to do at the end", toDo))
 	case len(skipped) > 0:
 		row.State, row.Says = look.Skipped, p.listRow(skipped[0]).Says
 	default:
 		row.State, row.Says = look.Done, p.doneSays(r)
 	}
 	return row
+}
+
+// laterState is how what's left to do at the run's end shows: done's mark
+// mid-run, as there's nothing to do till then; the to-do mark once the
+// to-dos at the end are up.
+func (p *Pretty) laterState() look.State {
+	if p.todos == nil {
+		return look.Done
+	}
+	return look.ToDo
 }
 
 // rowAtWork is the first of r's steps at work, by when it started, if one

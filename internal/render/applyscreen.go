@@ -396,9 +396,9 @@ const panelAt = "      "
 
 // panel is the card up, as the panel over the log has it, w wide: its
 // title, orange, how many more wait after it and how long it's waited at
-// the right; why it's there, as its line's notes say, and why the run
-// waits for it; its steps (panelSteps); that kit carries on by itself,
-// when it tells; and the keys answering it, a line each.
+// the right, as far as there's room; why it's there (cardWhy); its steps
+// (panelSteps); that kit carries on by itself, when it tells; and its
+// keys, a line each.
 func (p *Pretty) panel(w int) []string {
 	c := p.card
 	var right []string
@@ -407,12 +407,13 @@ func (p *Pretty) panel(w int) []string {
 	}
 	right = append(right, look.Muted("waiting "+took(p.now().Sub(p.cardSince))))
 	title := "  " + look.Mark(look.NeedsYou) + " " + look.Urgent(c.Title)
+	for len(right) > 1 && ansi.StringWidth(title)+ansi.StringWidth(look.Says(right...))+3 > w {
+		right = right[:len(right)-1]
+	}
 	out := []string{"", spread(title, look.Says(right...)+"  ", w), ""}
 	room := w - len(panelAt)
-	for _, why := range []string{c.Why, p.cardWhy()} {
-		for _, l := range look.Wrap(why, room) {
-			out = append(out, panelAt+look.Muted(l))
-		}
+	for _, l := range look.Wrap(p.cardWhy(), room) {
+		out = append(out, panelAt+look.Muted(l))
 	}
 	out = append(append(out, ""), panelSteps(c.Steps, room)...)
 	if len(c.Steps) > 0 {
@@ -454,11 +455,15 @@ func panelSteps(steps []string, room int) []string {
 	return out
 }
 
-// cardWhy is why the run waits for the card up: the steps it holds up, but
-// those by hand, which wait for everything; or, the steps by hand that come
-// once the rest is done, that it's what's left; or that nothing waits for
-// it.
+// cardWhy is why the card up is there, said once: as its line's notes say,
+// when it has some; else, in kit's words, why the run waits for it: the
+// steps it holds up, but those by hand, which wait for everything; or, the
+// steps by hand that come once the rest is done, that it's what's left; or
+// that nothing waits for it.
 func (p *Pretty) cardWhy() string {
+	if p.card.Why != "" {
+		return p.card.Why
+	}
 	var held []string
 	for _, s := range p.start.Steps {
 		if s.Area != steps.AreaManual && slices.Contains(s.Waits, p.card.Step) {
@@ -566,9 +571,9 @@ func (p *Pretty) standing(step string, seen map[string]bool) standing {
 
 // cardLines are the step by hand up for you as a card w wide, in place
 // under the run's heading in a window too small for applying's screen:
-// what to do, how many more wait after it, why it's there, its steps, and
-// that kit carries on by itself, when it tells, else that a bigger window
-// shows the keys to answer it; none when no card's up.
+// what to do, how many more wait after it, why it's there (cardWhy), its
+// steps, and that kit carries on by itself, when it tells, else that a
+// bigger window shows the keys to answer it; none when no card's up.
 func (p *Pretty) cardLines(w int) []string {
 	c := p.card
 	if c == nil {
@@ -582,7 +587,7 @@ func (p *Pretty) cardLines(w int) []string {
 	if c.Tells {
 		after = "kit carries on by itself once it's done"
 	}
-	return look.Card(w, look.CardText{Title: c.Title, Says: look.Says(says...), Why: c.Why, Steps: c.Steps, After: after})
+	return look.Card(w, look.CardText{Title: c.Title, Says: look.Says(says...), Why: p.cardWhy(), Steps: c.Steps, After: after})
 }
 
 // cardID is how a step by hand's card is known among those that came up:

@@ -39,15 +39,30 @@ type Window struct {
 	Maximized    bool
 }
 
-// Driver opens windows of one terminal, the app at app, as only it knows
-// how: one that can't size a window opens it at the terminal's own size.
+// Driver is what only one terminal knows: how to open its windows, the app
+// at app, one that can't size a window opening it at the terminal's own
+// size; and whether it shows a run's progress on its tab, as the escape
+// that ConEmu began (OSC 9;4) has it.
 type Driver interface {
 	Open(ctx context.Context, run runner.Runner, app string, w Window) error
+	TabProgress() bool
 }
 
 // Terminals are the terminals kit knows, by name.
 var Terminals = map[string]Terminal{
 	"ghostty": {Name: "ghostty", Title: "Ghostty", Cask: "ghostty", Bundle: "Ghostty.app", Program: "ghostty", Driver: ghostty{}},
+}
+
+// Running is the terminal kit's running in, among those it knows, as what
+// getenv says it set TERM_PROGRAM to.
+func Running(getenv func(string) string) (Terminal, bool) {
+	program := getenv("TERM_PROGRAM")
+	for _, t := range Terminals {
+		if t.Program == program {
+			return t, true
+		}
+	}
+	return Terminal{}, false
 }
 
 // Open opens a window of the terminal, from the Applications folder at dir.
@@ -75,6 +90,8 @@ func (ghostty) Open(ctx context.Context, run runner.Runner, app string, w Window
 	_, err := run.Run(ctx, runner.Command{Name: "open", Args: args, Env: w.Env})
 	return err
 }
+
+func (ghostty) TabProgress() bool { return true }
 
 // Names lists the names in known, in order, for a message.
 func Names[T any](known map[string]T) string {

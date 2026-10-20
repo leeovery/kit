@@ -83,6 +83,25 @@ config-private ok private on GitHub (someone/kit-config)
 	}
 }
 
+// At a terminal whose driver says it shows a run's progress on its tab, as
+// Ghostty's does, kit shows it there too, and clears it at the end; in one
+// that doesn't, or one kit doesn't know, never.
+func TestStatusShowsTabProgressWhereTheTerminalDoes(t *testing.T) {
+	for _, tt := range []struct {
+		program string
+		want    bool
+	}{{"ghostty", true}, {"Apple_Terminal", false}, {"", false}} {
+		w := laptopWorld(t)
+		w.terminal = true
+		w.env["TERM_PROGRAM"] = tt.program
+		w.environ = []string{"TERM=xterm-256color", "CLICOLOR_FORCE=1"}
+		out, _, _ := w.run(t, "status")
+		if got := strings.Contains(out, "\x1b]9;4;0\x07"); got != tt.want {
+			t.Errorf("in %q, kit status showed tab progress: %v, want %v", tt.program, got, tt.want)
+		}
+	}
+}
+
 func TestStatusJSON(t *testing.T) {
 	out, _, code := laptopWorld(t).run(t, "status", "--json")
 	var doc status.Document

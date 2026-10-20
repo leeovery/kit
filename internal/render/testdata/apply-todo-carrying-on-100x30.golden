@@ -10,9 +10,9 @@
   Apps                                              │  03:32:42  ● git config: fine
   ● Bring back apps' settings                       │  03:32:43  ● kit-config edits: fine
   ● Open Karabiner-Elements                         │  03:32:44  ● Sync: fine
-  ● Open Hammerspoon                                │  03:32:45  △ Time Machine: not set up
-                                                    │  03:32:46  △ Arq: not set up
-  System Settings                                   │  03:32:47  △ App settings: not set up
+  ● Open Hammerspoon                                │  03:32:45  ● Time Machine: not set up
+                                                    │  03:32:46  ● Arq: not set up
+  System Settings                                   │  03:32:47  ● App settings: not set up
   ● Allow Full Disk Access for remote users         │  03:32:48  ● Disk space: fine
                                                     │  03:32:49  ● Load: fine
   Backups                                           │  03:32:50  ● claude-code: fine

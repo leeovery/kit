@@ -223,7 +223,8 @@ type ToDo struct {
 }
 
 // Queued is what a step by hand says, in a Doing, while its card waits its
-// turn.
+// turn: said again once its card's up, it's been set aside for another,
+// still to do.
 const Queued = "needs you"
 
 // Asking is macOS asking the person at the Mac something, in a window of

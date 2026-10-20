@@ -24,7 +24,7 @@ var bootSteps = []event.Step{
 	{Name: "homebrew", Title: "Homebrew", Area: "Boot order"},
 }
 
-var signInKeys = []look.Key{{Key: "enter", Does: "with your phone"}, {Key: "s", Does: "here, in Safari"}}
+var signInKeys = []look.Key{{Key: "enter", Does: "with your phone"}, {Key: "s", Does: "here, in your browser"}}
 
 func plainView(f *render.BootFace, height int) string {
 	lines := f.View(80, height)
@@ -157,7 +157,7 @@ func TestBootFaceNeedsYou(t *testing.T) {
 
 // Signing in takes the whole window, the way chosen: with the phone, the QR
 // code and the code; esc goes back, and the other way can be chosen; here,
-// the code to enter in Safari. Signed in, the window's given back.
+// the code to enter in the browser. Signed in, the window's given back.
 func TestBootFaceSignIn(t *testing.T) {
 	at := time.Date(2026, 10, 8, 18, 2, 0, 0, time.UTC)
 	f := render.NewBootFace(ask.Terminal{Out: &bytes.Buffer{}}, true, func() time.Time { return at }, nil)
@@ -186,7 +186,7 @@ func TestBootFaceSignIn(t *testing.T) {
 	f.Emit(event.StepStarted{Time: at, Step: "github"})
 	f.Emit(event.DeviceCode{Time: at, Step: "github", URI: "https://github.com/login/device", Code: "WDJB-MJHT", Expires: at.Add(15 * time.Minute)})
 	phone := plainFull(f)
-	for _, want := range []string{"Some-MacBook", "█████", "Scan it with your phone's camera", "WDJB-MJHT", "s here, in Safari, instead · esc back"} {
+	for _, want := range []string{"Some-MacBook", "█████", "Scan it with your phone's camera", "WDJB-MJHT", "s here, in your browser, instead · esc back"} {
 		if !strings.Contains(phone, want) {
 			t.Errorf("with the phone, want %q:\n%s", want, phone)
 		}
@@ -197,7 +197,7 @@ func TestBootFaceSignIn(t *testing.T) {
 	}
 	pick("s")
 	here := plainFull(f)
-	for _, want := range []string{"Safari is open at github.com/login/device.", "Enter this code there:", "WDJB-MJHT", "enter with your phone instead · esc back"} {
+	for _, want := range []string{"Your browser is open at github.com/login/device.", "Enter this code there:", "WDJB-MJHT", "enter with your phone instead · esc back"} {
 		if !strings.Contains(here, want) {
 			t.Errorf("here, want %q:\n%s", want, here)
 		}

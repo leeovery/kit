@@ -3,6 +3,7 @@ package steps_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"slices"
 	"strings"
@@ -450,6 +451,143 @@ func TestOneCardAtATime(t *testing.T) {
 	}
 	if n := len(c.cards(t, 5)); n != 5 {
 		t.Errorf("%d cards went up, want 5", n)
+	}
+}
+
+// turns are the cards up, as "up <item> <how many after>", and each step
+// saying its card waits its turn, as "queued <step>", in the order emitted.
+func (c *card) turns() []string {
+	c.sink.mu.Lock()
+	defer c.sink.mu.Unlock()
+	var out []string
+	for _, e := range c.sink.seen {
+		switch e := e.(type) {
+		case event.NeedsYou:
+			out = append(out, fmt.Sprintf("up %s %d", e.Item, e.More))
+		case event.Doing:
+			if e.Says == event.Queued {
+				out = append(out, "queued "+e.Step)
+			}
+		}
+	}
+	return out
+}
+
+// gated is a step whose applying ends once gate's closed: for a step by
+// hand after it to come due then.
+func gated(name string, gate <-chan struct{}) engine.Step {
+	return engine.Step{Name: name,
+		Check: func(context.Context) check.Result {
+			return check.Result{State: check.Attention, Items: []check.Item{{ID: name + ":it", Name: "it", State: "missing", Action: "install"}}}
+		},
+		Apply: func(context.Context, check.Result) error {
+			<-gate
+			return nil
+		}}
+}
+
+// fine is a step that stands ok, after those named.
+func fine(name string, after ...string) engine.Step {
+	return engine.Step{Name: name, After: after, Check: func(context.Context) check.Result { return check.Result{State: check.OK, Summary: "fine"} }}
+}
+
+// running applies p, its steps by hand raised on c, and returns its report
+// once it ends.
+func running(t *testing.T, c *card, p *engine.Pipeline) <-chan engine.Report {
+	ran := make(chan engine.Report, 1)
+	go func() {
+		report, _ := p.Apply(t.Context(), c.sink, engine.Options{Jobs: 4})
+		ran <- report
+	}()
+	return ran
+}
+
+// over waits for the run to end, and returns its report.
+func over(t *testing.T, ran <-chan engine.Report) engine.Report {
+	t.Helper()
+	select {
+	case report := <-ran:
+		return report
+	case <-time.After(5 * time.Second):
+		t.Fatal("the run never ended")
+		return engine.Report{}
+	}
+}
+
+// Cards come up in order of how much of the run waits on them, through the
+// steps that wait on those too: one coming due that more waits on goes up
+// in place of the card up, whose step says again it waits its turn first,
+// and which comes back once that's done. Tab moves on from the card up to
+// the next waiting, the one left staying to do and coming back. Each card's
+// notification is posted once, however often it comes back, and taken away
+// once it's done.
+func TestCardsComeUpByWhatWaitsOnThem(t *testing.T) {
+	c := newCard(t)
+	gate := make(chan struct{})
+	store := steps.OwnManual(c.fake, c.state, steps.ManualStep{Name: "store", Do: "Sign in to the store"}, c.raise)
+	store.Before = []string{"apps"}
+	vault := steps.OwnManual(c.fake, c.state, steps.ManualStep{Name: "vault", Do: "Sign in to the vault"}, c.raise)
+	vault.After, vault.Before = []string{"cask"}, []string{"secret"}
+	p, err := engine.New(store, vault, gated("cask", gate), fine("apps"), fine("secret"), fine("git", "secret"), fine("tool", "git"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ran := running(t, c, p)
+	if up := c.cards(t, 1)[0]; up.Item != "store" {
+		t.Fatalf("first card = %+v, want the store's, the only one come due", up)
+	}
+	close(gate)
+	c.cards(t, 2)
+	c.answer(t, "vault", hand.Next)
+	c.cards(t, 3)
+	c.answer(t, "store", hand.Done)
+	c.cards(t, 4)
+	c.answer(t, "vault", hand.Done)
+	report := over(t, ran)
+
+	want := []string{"queued store", "up store 0", "queued vault", "queued store", "up vault 1", "queued vault", "up store 1", "up vault 0"}
+	if got := c.turns(); !slices.Equal(got, want) {
+		t.Errorf("turns %q, want %q", got, want)
+	}
+	if report.Results["store"].State != check.OK || report.Results["vault"].State != check.OK {
+		t.Errorf("store %+v, vault %+v; want both done", report.Results["store"], report.Results["vault"])
+	}
+	posted := []string{
+		"notify card:store:store | Sign in to the store | kit waits for you to do this",
+		"notify card:vault:vault | Sign in to the vault | kit waits for you to do this",
+		"clear card:store:store", "clear card:vault:vault",
+	}
+	if got := c.notices.posted(); !slices.Equal(got, posted) {
+		t.Errorf("notifications %q, want %q", got, posted)
+	}
+}
+
+// The to-dos at the run's end are held: one up stays up till it's done,
+// though a card more of the run waits on comes due meanwhile, and tab
+// doesn't move on from it.
+func TestAToDoUpStaysUp(t *testing.T) {
+	c := newCard(t)
+	gate := make(chan struct{})
+	list := config.List{Entries: []config.Entry{{Name: "printer", Value: `"Add the printer"`, Scope: "laptop", Line: 2}}}
+	vault := steps.OwnManual(c.fake, c.state, steps.ManualStep{Name: "vault", Do: "Sign in to the vault"}, c.raise)
+	vault.After, vault.Before = []string{"cask"}, []string{"secret"}
+	p, err := engine.New(steps.Manual(c.fake, "/home/someone", c.state, list, c.raise), vault, gated("cask", gate), fine("secret"), fine("git", "secret"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ran := running(t, c, p)
+	c.cards(t, 1)
+	close(gate)
+	c.cards(t, 2)
+	c.answer(t, steps.ManualName, hand.Next)
+	c.answer(t, steps.ManualName, hand.Done)
+	c.cards(t, 3)
+	c.answer(t, "vault", hand.Done)
+	over(t, ran)
+
+	want := []string{"queued manual", "up printer 0", "queued vault", "up printer 1", "up vault 0"}
+	if got := c.turns(); !slices.Equal(got, want) {
+		t.Errorf("turns %q, want %q", got, want)
 	}
 }
 

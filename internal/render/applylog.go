@@ -62,9 +62,9 @@ func told(style func(string) string, title, says string) string {
 }
 
 // noteFinished adds a step finished to the log, in kit's words for it as it
-// ended: failed, what went wrong, why and what to run under it; left to do,
-// or unwell, what it says; not checked, why; well, what it did or found,
-// and what's still waiting under it. A step the run was stopped before, or
+// ended: failed, what went wrong, why and what to run under it; left to do
+// at the end, what it says (laterState); unwell, what it says; not checked,
+// why; well, what it did or found, and what's still waiting under it. A step the run was stopped before, or
 // in the middle of, has no line. A step by hand of its own whose card came
 // up has its card's line, and no other.
 func (p *Pretty) noteFinished(f event.StepFinished) {
@@ -81,7 +81,7 @@ func (p *Pretty) noteFinished(f event.StepFinished) {
 		head, _ := failure(f.Result)
 		p.note(at, row, look.Mark(look.Failed), look.Red(title+" failed: "+head), p.failedRow(f).Under...)
 	case look.ToDo:
-		p.note(at, row, look.Mark(look.ToDo), told(look.White, title, p.toDoRow(f).Says))
+		p.note(at, row, look.Mark(p.laterState()), told(look.White, title, p.toDoRow(f).Says))
 	case look.NeedsYou:
 		r := p.workRow(f, part)
 		p.note(at, row, look.Mark(look.NeedsYou), told(look.White, title, r.Says), r.Under...)
@@ -122,20 +122,40 @@ func (p *Pretty) nothingByHand(step string) bool {
 
 // raise is a card come up for e's step by hand: the card up before it done
 // with, when it's another; the log saying it waits for you, unless it's
-// one of the to-dos at the run's end, which their list shows. The same card
-// again, as when more come to wait after it, changes only what it says.
+// one of the to-dos at the run's end, which their list shows, or it's come
+// back from being set aside, when it's up since it first came up. The same
+// card again, as when more come to wait after it, changes only what it
+// says.
 func (p *Pretty) raise(e event.NeedsYou) {
-	if p.card != nil && cardID(p.card.Step, p.card.Item) != cardID(e.Step, e.Item) {
+	id := cardID(e.Step, e.Item)
+	if p.card != nil && cardID(p.card.Step, p.card.Item) != id {
 		p.lower(e.Time, nil)
 	}
-	if p.card == nil {
+	since, back := p.asides[id]
+	delete(p.asides, id)
+	switch {
+	case p.card != nil:
+	case back:
+		p.cardSince = since
+	default:
 		p.cardSince = p.stamp(e.Time)
 		if !p.listing(e.Step) {
 			p.note(p.cardSince, p.rowOf(e.Step), look.Mark(look.NeedsYou), look.White(e.Title+": waiting for you"))
 		}
 	}
 	p.card = &e
-	p.cards[cardID(e.Step, e.Item)] = e
+	p.cards[id] = e
+}
+
+// setAside takes the card up down, when it's step's, its step saying it
+// waits its turn again, as another card's taken it: it's still to do, and
+// comes back as it was. The to-dos at the run's end are never set aside.
+func (p *Pretty) setAside(step string) {
+	if !p.carded(step) || p.listing(step) {
+		return
+	}
+	p.asides[cardID(p.card.Step, p.card.Item)] = p.cardSince
+	p.card = nil
 }
 
 // listing is whether step's to-dos are being worked through, one up.

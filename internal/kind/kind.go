@@ -650,19 +650,25 @@ func Lines(ctx context.Context) func(line string) {
 // Homebrew updating itself, or waits for; then how its install's going
 // again. Where nothing counts the install, it says nothing.
 func Saying(ctx context.Context, says string) (resume func()) {
-	p, ok := ctx.Value(progressKey{}).(*progress)
-	if !ok {
-		return func() {}
-	}
-	p.aside(says)
-	return func() { p.aside("") }
+	return aside(ctx, says, false)
 }
 
 // Waiting is Saying that the install waits for what, the title of the step
 // whose turn it is, as a Sharing kind's waits while another's install goes
-// on.
+// on: never quiet meanwhile, as its command hasn't started.
 func Waiting(ctx context.Context, what string) (resume func()) {
-	return Saying(ctx, "waiting for "+what)
+	return aside(ctx, "waiting for "+what, true)
+}
+
+// aside has the step whose install ctx counts say says, a wait or not, till
+// resume.
+func aside(ctx context.Context, says string, waits bool) (resume func()) {
+	p, ok := ctx.Value(progressKey{}).(*progress)
+	if !ok {
+		return func() {}
+	}
+	p.aside(says, waits)
+	return func() { p.aside("", false) }
 }
 
 // Starting has the step whose install ctx counts say its install command is
@@ -709,14 +715,17 @@ type progress struct {
 	// unstarted is a Fetcher's install before its command starts, saying
 	// nothing of downloading yet; fetching, its command downloading.
 	unstarted, fetching bool
-	// says is what the install does first, or waits for, while it does.
+	// says is what the install does first, or waits for, while it does;
+	// waiting, whether it waits.
 	says          string
+	waiting       bool
 	done, fetched map[string]bool
 	// now is the one of names an Announcer's install last said it's
 	// installing.
 	now string
 	// program is the command installing; heard, when it last printed a
-	// line, last; quiet, whether it's printed nothing for quietAfter since.
+	// line, last; quiet, whether it's printed nothing for quietAfter since,
+	// never while it waits.
 	program string
 	heard   time.Time
 	last    string
@@ -758,7 +767,7 @@ func watchQuiet(ctx context.Context) (stop func()) {
 func (p *progress) hush(after time.Duration) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.quiet || time.Since(p.heard) < after {
+	if p.quiet || p.waiting || time.Since(p.heard) < after {
 		return
 	}
 	p.quiet = true
@@ -856,11 +865,15 @@ func (p *progress) note(set map[string]bool, name string) bool {
 }
 
 // aside notes what the install does first, or waits for, "" once it's
-// done, and says so.
-func (p *progress) aside(says string) {
+// done, and says so. A wait, starting or over, has the install heard from
+// afresh: what it waited on is no silence of its own.
+func (p *progress) aside(says string, waits bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.says = says
+	if waits || p.waiting {
+		p.heard, p.quiet = time.Now(), false
+	}
+	p.says, p.waiting = says, waits
 	p.say()
 }
 

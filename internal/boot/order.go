@@ -69,20 +69,20 @@ func (b *Boot) terminal(cfg *config.Config) (apps.Terminal, bool) {
 
 // in reports whether kit is running in the terminal t.
 func (b *Boot) in(t apps.Terminal) bool {
-	return b.Getenv("TERM_PROGRAM") == t.Program
+	running, ok := apps.Running(b.Getenv)
+	return ok && running.Name == t.Name
 }
 
 // runningIn is the app kit's running in, by its name, as macOS names it
-// asking for what it may do.
+// asking for what it may do. macOS's own Terminal, where every boot starts,
+// isn't among the terminals kit knows: those are what kit.toml can name to
+// hand over to, which macOS's never is.
 func (b *Boot) runningIn() string {
-	program := b.Getenv("TERM_PROGRAM")
-	if program == "Apple_Terminal" {
+	if b.Getenv("TERM_PROGRAM") == "Apple_Terminal" {
 		return "Terminal"
 	}
-	for _, t := range apps.Terminals {
-		if t.Program == program {
-			return t.Title
-		}
+	if t, ok := apps.Running(b.Getenv); ok {
+		return t.Title
 	}
 	return "your terminal"
 }

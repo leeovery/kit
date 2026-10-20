@@ -616,13 +616,13 @@ func (f *BootFace) Full(width, height int) []string {
 			"",
 			centre(b.Mid("expires in "+left(c.Expires.Sub(f.now())))),
 		)
-		keys = []look.Key{{Key: "s", Does: "here, in Safari, instead"}}
+		keys = []look.Key{{Key: "s", Does: "here, in your browser, instead"}}
 	default:
 		for len(out) < height/2-4 {
 			out = append(out, "")
 		}
 		out = append(out,
-			centre(b.Full("Safari is open at ")+b.Strong(site(c.URI))+b.Full(".")),
+			centre(b.Full("Your browser is open at ")+b.Strong(site(c.URI))+b.Full(".")),
 			centre(b.Full("Enter this code there:")),
 			"",
 			centre(b.Rev(" "+c.Code+" ")),

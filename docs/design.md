@@ -124,7 +124,7 @@ file having none, or the shared file's), so the kind's still looked after.
   and App Store apps they open.
 - **A list's lines held back:** a list's section can say, after its header, what its lines
   wait for, each as often as wanted: `--after` a step, or one of a step's things
-  (`cask:1password`), order alone; `--secret` a secret a secrets section declares (one it
+  (`cask:firefox`), order alone; `--secret` a secret a secrets section declares (one it
   doesn't is a config error, failing the kind's step), which they need, and so wait for, as
   in `[homebrew formulae --secret NAME]`. Applying installs the kind's other lines at once,
   then each such section's as one command once what it waits for is in, the step saying
@@ -135,7 +135,7 @@ file having none, or the shared file's), so the kind's still looked after.
   missing, saying what isn't there. Otherwise they're the list's like any other: checked,
   listed, sorted, removed from whichever section holds them, a section going once empty
   (but a kind's last, as above).
-- **What's waited for goes first:** a thing a step names (`--after cask:1password`) is
+- **What's waited for goes first:** a thing a step names (`--after cask:firefox`) is
   installed ahead of the rest of its list, as one command, then the rest as one; where kinds
   share a tool's lock (Homebrew's formulae and casks), neither's rest begins till the other's
   waited-for things are in, or their step has finished. A wait looks again whenever an
@@ -247,12 +247,19 @@ person does it (`--open` is refused, saying so). One with no command is done onc
 Mac (`kit manual done <name>`, `--undo` to unmark). Those not done are items of their step, in
 the Manual area, saying what to do, so `kit status` shows them; what kit can check itself stays
 a check that says what to do. While `kit apply` runs at a terminal, one that comes due is raised
-as a card on its screen, front and centre: its title, its notes, why the run waits for it, its
-steps numbered, and a notification. `space` says it's done (`enter` too, unshown: marked as `kit
-manual done` marks it; one with a command is looked at at once, as it is every few seconds
-anyway); a card with a command offers no key, kit carrying on by itself once it's done. There's
-no putting a card off: it's done, or the run's stopped. One card is up at a time, the next
-waiting its turn. A line with `--before` is a step of its own, raised mid-run once what it comes
+as a card on its screen, front and centre: its title, why it's there, said once (its notes, or,
+for a line with none, kit's words for why the run waits for it), its steps numbered, and a
+notification, posted once however often the card comes back. `space` says it's done (`enter`
+too, unshown: marked as `kit manual done` marks it; one with a command is looked at at once, as
+it is every few seconds anyway); a card with a command offers no key, kit carrying on by itself
+once it's done. There's no putting a card off: it's done, or the run's stopped. One card is up
+at a time, the rest waiting their turn, in order of how much of the run waits on each (the steps
+that need it, come after it or wait for it, and those waiting on them in turn), as many in the
+order they came: one coming due that more waits on goes up in place of the card up, which waits
+its turn again, as a password manager's sign-in, which the secrets and everything after them
+wait for, comes before the App Store's. While another waits, `tab` moves on to it, the card up
+staying to do and coming back after (the card says so, and tab then chooses no row); the
+to-dos at the run's end are never moved on from. A line with `--before` is a step of its own, raised mid-run once what it comes
 after is in, as the steps it comes before wait for it; the rest, `--after` alone only ordering
 them, come up at the run's end, after every other step, with the to-dos kit's own checks left
 (Checks). That end is a list worked through one to-do at a time, in kit's order, with no choosing
@@ -285,7 +292,7 @@ check|hourly|nightly|manual <name>` undeclares one.
 installed by its maker's script, a certificate authority trusted, a key imported). Each is a
 line in a `[steps]` section, in the form of the command that adds it: a name, what it does in
 quotes, then `--after <step>` (applied after that step, if it's there, or after one of a step's
-things, as in `cask:1password`), `--before <step>`, `--secret <name>` (a secret a secrets
+things, as in `cask:firefox`), `--before <step>`, `--secret <name>` (a secret a secrets
 section declares: applied once it's in place, its script run with it set when it's a variable,
 its value hidden in what the script says), each as often as wanted, and `--sudo` (applying needs
 an administrator's password, settled before anything is applied), as in `tool "Installs the
@@ -635,10 +642,14 @@ step failed, with the error; the run finishing, with its summary. Faces subscrib
   each part of the Mac a person recognises (This Mac, Files and shell, Mac settings, Secrets,
   Homebrew formulae, Homebrew casks, App Store apps, Developer tools, Git, Login items, Your
   steps, Backups), each step in one by its kind or feature, a step by hand in the row it holds
-  up, each row saying what its steps are doing, then what's for later; on the right the log,
+  up, each row saying what its steps are doing, then what's for later (with done's mark, as is
+  its line in the log: nothing's to do till the end, where the to-dos take the to-do mark); a
+  step at work that's printed nothing for two minutes says since when, and the log is told,
+  but never a step waiting its turn, which says only what it waits for; on the right the log,
   every line of the run with its time, or a row's lines alone once it's chosen (tab or a
   click; esc for all), scrolled back and followed again, with a step by hand's card above it
-  while it's up. At the run's end its to-dos take the screen (round 12): the state line counts
+  while it's up. In a terminal whose driver says it shows progress on its tab (Ghostty's),
+  the run's progress is there too. At the run's end its to-dos take the screen (round 12): the state line counts
   what's left and what's done, then says kit's carrying on once they're over; the left pane lists
   them, To do and how many, each group's name muted, done ones ticked, the one up a pill, `q`
   stopping there at its foot; on the right the one up is a panel ruled off over the log, as a
@@ -711,6 +722,7 @@ output.
 | `internal/event` | The events the core emits, and the sinks they go to |
 | `internal/render` | The pretty, plain and json faces |
 | `internal/look` | kit's look: the components the pretty face, the help and the errors are drawn from |
+| `internal/apps` | The Mac's apps kit looks for, and the terminals `kit.toml` can name to hand a new Mac's boot over to, each with its driver: how it opens a window, and whether it shows a run's progress on its tab |
 | `internal/logs` | The run log, its retention, and reading it back for `kit log` |
 | `internal/redact` | Hiding secrets in what's logged |
 | `internal/runner` | The one place a process starts: kit's PATH, a clean environment, timeouts, output captured, each command reported as an event. `runner/runnertest` is the fake |

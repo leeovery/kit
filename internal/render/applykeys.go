@@ -46,10 +46,12 @@ type screenKeys struct {
 type reading struct{ stop func() }
 
 // The keys at the foot of applying's left pane: while it reads them; while
-// it asks whether to stop, those that answer; without keys, the terminal's
-// interrupt, which stops the run.
+// another card waits, those but tab, which the card up says moves on to it;
+// while it asks whether to stop, those that answer; without keys, the
+// terminal's interrupt, which stops the run.
 var (
 	runningKeys  = []look.Key{{Key: "tab", Does: "next row"}, {Key: "↑↓", Does: "scroll"}, {Key: "q", Does: "stop"}}
+	cardingKeys  = []look.Key{{Key: "↑↓", Does: "scroll"}, {Key: "q", Does: "stop"}}
 	stoppingKeys = []look.Key{{Key: "↑↓", Does: "choose"}, {Key: "enter", Does: "decide"}, {Key: "esc", Does: "keep going"}}
 	signalKeys   = []look.Key{{Key: "ctrl+c", Does: "stop"}}
 )
@@ -59,13 +61,22 @@ var (
 // off: it's done, or the run's stopped.
 var doneKey = look.Key{Key: "space", Does: "when it's done"}
 
+// nextKey is the key the card up shows moving on to the next card
+// waiting, while one is: the card left stays to do, and comes back.
+var nextKey = look.Key{Key: "tab", Does: "next card, this one comes back"}
+
 // cardKeys are the keys card c shows answering it: none when kit tells by
-// itself that it's done.
+// itself that it's done; and the key moving on to the next card, while one
+// waits.
 func cardKeys(c event.NeedsYou) []look.Key {
-	if c.Tells {
-		return nil
+	var keys []look.Key
+	if !c.Tells {
+		keys = append(keys, doneKey)
 	}
-	return []look.Key{doneKey}
+	if c.More > 0 {
+		keys = append(keys, nextKey)
+	}
+	return keys
 }
 
 // wheelLines are how many lines a turn of the mouse's wheel scrolls the
@@ -91,8 +102,9 @@ const stopIt = 1
 // chosen, r shows its raw view, and esc or r goes back to the log; the
 // arrows, the page keys, home, end and the wheel scroll the log; with a
 // card up, space and enter say it's done, or, a choice, its keys answer
-// it. With the to-dos at the run's end up, there are no rows to choose, and
-// Stop stops there, what's left staying to do.
+// it, and, while another card waits, tab moves on to it instead of
+// choosing a row. With the to-dos at the run's end up, there are no rows to
+// choose, and Stop stops there, what's left staying to do.
 func (p *Pretty) Keys(listen func() (<-chan ask.Key, func()), halt func()) *Pretty {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -157,9 +169,10 @@ func (p *Pretty) read(r *reading, keys <-chan ask.Key) {
 
 // press is what a key does on applying's screen, and whether it stops the
 // run: ctrl+c at once; q asks first; a choice's keys, space and enter
-// answer the card up; tab, shift+tab, esc and a click choose what the log
-// shows, r and esc whether a row's raw view shows in its place; the rest
-// scroll it. The window's focus coming and going is noted, for a click.
+// answer the card up, and tab moves on from it while another card waits;
+// else tab, and shift+tab, esc and a click, choose what the log shows, r
+// and esc whether a row's raw view shows in its place; the rest scroll it.
+// The window's focus coming and going is noted, for a click.
 func (p *Pretty) press(k ask.Key) (halt bool) {
 	switch {
 	case k.Is("ctrl+c"):
@@ -175,6 +188,8 @@ func (p *Pretty) press(k ask.Key) (halt bool) {
 		p.answerCard()
 	case k.Is("q"):
 		p.keys.asking, p.keys.choice = true, 0
+	case k.Is("tab") && p.cardsWaiting() && p.hands != nil:
+		p.hands(p.card.Step, hand.Next)
 	case k.Is("tab"):
 		p.chooseNext(1)
 	case k.Is("shift+tab"):
@@ -198,6 +213,13 @@ func (p *Pretty) answerCard() {
 		return
 	}
 	p.hands(p.card.Step, hand.Done)
+}
+
+// cardsWaiting is whether another card waits after the card up, mid-run,
+// for tab to move on to: never one of the to-dos at the run's end, worked
+// through in kit's order.
+func (p *Pretty) cardsWaiting() bool {
+	return p.card != nil && !p.listing(p.card.Step) && p.card.More > 0
 }
 
 // answerChoice passes k to the card up's step, when it's one of its
@@ -343,6 +365,8 @@ func (p *Pretty) footKeys() string {
 		return look.Hints(stoppingKeys...)
 	case p.keys.listen != nil && p.todos != nil:
 		return look.Hints(toDoKeys...)
+	case p.keys.listen != nil && p.cardsWaiting():
+		return look.Hints(cardingKeys...)
 	case p.keys.listen != nil:
 		return look.Hints(runningKeys...)
 	}

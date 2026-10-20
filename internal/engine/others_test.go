@@ -3,6 +3,7 @@ package engine_test
 import (
 	"context"
 	"errors"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -148,6 +149,43 @@ func TestAStepWorksOnTheRunsOthers(t *testing.T) {
 	}
 	if _, ok := engine.Recheck(t.Context(), "brew"); ok {
 		t.Error("outside a run, a step was checked again")
+	}
+}
+
+// A step can count how many of the run's steps wait on another: those that
+// need it, come after it, by their own After or its Before, or wait for it
+// or one of its things, partway or not, and those waiting on them in turn,
+// each once, a step waiting back on it not counting it. Outside a run, none.
+func TestAStepCountsWhatWaitsOnAnother(t *testing.T) {
+	ready := func(context.Context) bool { return true }
+	held := map[string]int{}
+	steps := []engine.Step{
+		{Name: "signin", Check: ok("fine"), Before: []string{"secret"}},
+		{Name: "secret", Check: ok("fine"), Later: []engine.Wait{{Step: "signin"}}},
+		{Name: "git", Check: ok("fine"), After: []string{"secret"}},
+		{Name: "tool", Check: ok("fine"), Waits: []engine.Wait{{Step: "secret", Thing: "TOKEN", Ready: ready}}, Needs: []string{"git"}},
+		{Name: "store", Check: ok("fine"), Before: []string{"apps"}, Later: []engine.Wait{{Step: "apps"}}},
+		{Name: "apps", Check: ok("fine"), Later: []engine.Wait{{Step: "secret"}}},
+		{Name: "alone", Check: ok("fine"), Waits: []engine.Wait{{Thing: "a program", Ready: ready}}},
+	}
+	steps = append(steps, lastStep(nil, func(ctx context.Context) {
+		for _, s := range []string{"signin", "secret", "store", "apps", "alone", "nothing"} {
+			held[s] = engine.Holding(ctx, s)
+		}
+	}))
+	p, err := engine.New(steps...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Apply(t.Context(), &recorder{}, engine.Options{}); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]int{"signin": 5, "secret": 4, "store": 1, "apps": 1, "alone": 0, "nothing": 0}
+	if !maps.Equal(held, want) {
+		t.Errorf("held %v; want %v", held, want)
+	}
+	if n := engine.Holding(t.Context(), "signin"); n != 0 {
+		t.Errorf("outside a run, %d wait; want none", n)
 	}
 }
 
