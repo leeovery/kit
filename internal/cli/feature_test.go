@@ -22,9 +22,9 @@ func TestFeaturesBringTheirSteps(t *testing.T) {
 		{"laptop", "features", "time-capsule\n", "laptop/declarations:5: kit doesn't know the feature time-capsule"},
 		{"laptop", "features", "scratch\n", "laptop/declarations:5: kit doesn't know the feature scratch: one of file-sharing, prefs, remote-login, touch-id-sudo\n"},
 		{"shared", "features", "oh-my-zsh\n", "kit doesn't know the feature oh-my-zsh: one of file-sharing, prefs, remote-login, touch-id-sudo\n"},
-		{"laptop", "features", "time-machine\n", "laptop/declarations:5: time-machine is a backup tool, so it goes in [backups] now, not [features]: kit backup add time-machine, once its line's out"},
-		{"laptop", "features --after cask:arq", "arq\n", "laptop/declarations:5: arq is a backup tool, so it goes in [backups] now, not [features]: kit backup add arq --after cask:arq, once its line's out"},
-		{"shared", "features --after cask:arq", "arq\n", "arq is a backup tool, so it goes in [backups] now, not [features]: kit backup add arq --after cask:arq --shared, once its line's out"},
+		{"laptop", "features", "time-machine\n", "laptop/declarations:5: time-machine is a backup tool, so it goes in [backups] now, not [features]: kit backup add time-machine, once you've removed this line"},
+		{"laptop", "features --after cask:arq", "arq\n", "laptop/declarations:5: arq is a backup tool, so it goes in [backups] now, not [features]: kit backup add arq --after cask:arq, once you've removed this line"},
+		{"shared", "features --after cask:arq", "arq\n", "arq is a backup tool, so it goes in [backups] now, not [features]: kit backup add arq --after cask:arq --shared, once you've removed this line"},
 	} {
 		w := laptopWorld(t)
 		w.writeSection(t, tt.scope, tt.header, tt.line)

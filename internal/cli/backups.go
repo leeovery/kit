@@ -102,7 +102,7 @@ func movedToBackups(e config.Entry) error {
 		words = append(words, "--shared")
 	}
 	if err := notAFeature(e.Name, words...); err != nil {
-		return fmt.Errorf("%s: %w, once its line's out", e.Pos(), err)
+		return fmt.Errorf("%s: %w, once you've removed this line", e.Pos(), err)
 	}
 	return nil
 }

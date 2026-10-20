@@ -100,7 +100,7 @@ func Disk(run runner.Runner) engine.Step {
 			free := avail / total * 100
 			summary := fmt.Sprintf("%.0f%% free", free)
 			if free < diskFreeBelow {
-				return problem("disk", summary, [3]string{"low", fmt.Sprintf("only %.0f%% free on the startup disk", free), "clear caches or old data; Time Machine's local snapshots need room too"})
+				return problem("disk", summary, [3]string{"low", fmt.Sprintf("only %.0f%% free on the startup disk", free), "clear caches or old data"})
 			}
 			return check.Result{State: check.OK, Summary: summary, Glance: summary}
 		},

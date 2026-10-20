@@ -59,7 +59,7 @@ scripts/personal-data-scan   # no personal data in the files or the history
 - **Releases are the maintainer's.** Never tag, release, or write a changelog or release
   notes. The maintainer releases with mint (`./release`), which runs the gates first; the tag
   then has GoReleaser add the binaries and update the Homebrew tap.
-- **Never log a secret.** Values go from 1Password to their file without passing through
+- **Never log a secret.** Values go from their store to their file without passing through
   events; arguments, environment and output are redacted before they're logged.
 
 ## Test isolation
