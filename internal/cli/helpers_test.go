@@ -49,8 +49,10 @@ type world struct {
 	// typedFor, what each time it was asked for, as its row reads.
 	typed    string
 	typedFor []string
-	// notTyped, when set, is how asking for a value unshown ends instead.
+	// notTyped, when set, is how asking for a value unshown ends instead;
+	// typing, when set, is what the person does before typing it.
 	notTyped error
+	typing   func()
 	// path and childEnv are what kit last made its runner with.
 	path     []string
 	childEnv []string
@@ -145,6 +147,9 @@ func (w *world) run(t *testing.T, args ...string) (stdout, stderr string, status
 		},
 		ReadSecret: func(_ context.Context, about look.Row) (string, error) {
 			w.typedFor = append(w.typedFor, ansi.Strip(about.Name+"  "+about.Says))
+			if w.typing != nil {
+				w.typing()
+			}
 			if w.notTyped != nil {
 				return "", w.notTyped
 			}

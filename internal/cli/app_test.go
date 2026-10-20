@@ -60,6 +60,7 @@ func TestApplyAsksAgainForAPasswordSudoDidntTake(t *testing.T) {
 	}
 
 	w = appWorld(t)
+	w.fake.On("mas", "list", "--json").Prints(xcodeListed)
 	w.terminal = true
 	w.choose = func(string, []string) (int, error) { return 1, nil }
 	w.notTyped = ask.ErrCancelled

@@ -371,6 +371,66 @@ type Placing struct {
 	Behind []engine.Wait
 	// Held are its sections holding their lines back, in order.
 	Held []Held
+	// Admin is the administrator's password kit asks for as the run goes
+	// on: while it isn't held, the things that need it (Admin's NeedsAdmin)
+	// go in last, once it's answered, the rest meanwhile, and are left when
+	// it isn't given; each install can wait for it again (AwaitAdmin). Nil
+	// when kit doesn't ask as the run goes on.
+	Admin Password
+	// Settled, when set, is told the lines the kind's done with for now:
+	// tried, whether they went in or not, or put off till kit has the
+	// password. Nothing waits behind them (Behind) any more.
+	Settled func(things []string)
+}
+
+// Password is an administrator's password kit asks for as the run goes on.
+type Password interface {
+	// Held reports whether it's held.
+	Held() bool
+	// Wait waits, while kit asks for it, for the answer, the step saying
+	// so, and reports whether it's held.
+	Wait(ctx context.Context) bool
+	// Forgotten has kit find out at once whether sudo's forgotten it, as a
+	// command run through sudo -n said: asked for again, if so, and waited
+	// for. It reports whether it's held.
+	Forgotten(ctx context.Context) bool
+}
+
+type passwordKey struct{}
+
+// WithPassword is ctx for installs that can need the administrator's
+// password p, for them to wait for it (AwaitAdmin, AdminForgotten).
+func WithPassword(ctx context.Context, p Password) context.Context {
+	return context.WithValue(ctx, passwordKey{}, p)
+}
+
+// AwaitAdmin waits, for an install ctx runs that needs an administrator's
+// password, while kit asks for it, first or again, as it does once sudo's
+// forgotten it, reporting whether it's held: as an install's things that
+// need it wait (Placing's Admin). Its step isn't quiet meanwhile (Away).
+// Where kit holds no password for the install, it waits for nothing: the
+// password is as the run settled it.
+func AwaitAdmin(ctx context.Context) bool {
+	p, ok := ctx.Value(passwordKey{}).(Password)
+	if !ok || p.Held() {
+		return true
+	}
+	defer Away(ctx)()
+	return p.Wait(ctx)
+}
+
+// AdminForgotten tells kit sudo's forgotten the administrator's password,
+// as a command kit ran through sudo -n said ("a password is required"):
+// kit finds out at once, asks for it again if it must, and waits, the step
+// not quiet meanwhile (Away). It reports whether the password's held:
+// false where kit holds none for the install.
+func AdminForgotten(ctx context.Context) bool {
+	p, ok := ctx.Value(passwordKey{}).(Password)
+	if !ok {
+		return false
+	}
+	defer Away(ctx)()
+	return p.Forgotten(ctx)
 }
 
 // Placed is the step Step is, k's lines installed as placed says, once the
@@ -379,7 +439,7 @@ type Placing struct {
 // (InstallDeclared). A section whose wait ends without what it waited for
 // isn't installed: its lines stay missing, saying what isn't there, as a
 // Blocker's do.
-func Placed(k Kind, declared config.List, placed func() Placing, needs ...string) engine.Step {
+func Placed(k Kind, declared config.List, placed func(context.Context) Placing, needs ...string) engine.Step {
 	var unmet deferred
 	return engine.Step{
 		Name:  k.Name(),
@@ -389,7 +449,7 @@ func Placed(k Kind, declared config.List, placed func() Placing, needs ...string
 		Apply: func(ctx context.Context, found check.Result) error {
 			var placing Placing
 			if placed != nil {
-				placing = placed()
+				placing = placed(ctx)
 			}
 			why, err := installApart(ctx, k, declared, placing, toInstall(found))
 			unmet.add(why)
@@ -414,13 +474,13 @@ func InstallDeclared(ctx context.Context, k Kind, declared config.List, held []H
 			errs = append(errs, errors.New(reason))
 		}
 	}
-	return joined(errs)
+	return Joined(errs)
 }
 
-// joined is errs as one error: nil for none, one as it is, several said one
+// Joined is errs as one error: nil for none, one as it is, several said one
 // after another, each still there to find (errors.As), as engine.Reason
 // finds the commands that failed.
-func joined(errs []error) error {
+func Joined(errs []error) error {
 	switch len(errs) {
 	case 0:
 		return nil
@@ -454,18 +514,47 @@ func installApart(ctx context.Context, k Kind, declared config.List, placing Pla
 			errs = append(errs, err)
 		}
 	}
-	if err := install(ctx, k, declared, first, nil); err != nil {
-		errs = append(errs, err)
+	if placing.Admin != nil {
+		ctx = WithPassword(ctx, placing.Admin)
 	}
+	// One count of names, across the installs they go in.
+	ctx = counting(ctx, k, names)
+	waiting := awaitingAdmin(ctx, k, placing, names)
+	// later are the installs of what waits for the password, each as it
+	// would have gone in.
+	var later []batch
+	settled := func(names []string) {
+		if placing.Settled != nil && len(names) > 0 {
+			placing.Settled(names)
+			engine.Changed(ctx)
+		}
+	}
+	put := func(names, env []string) {
+		var now, wait []string
+		for _, name := range names {
+			if waiting[name] {
+				wait = append(wait, name)
+			} else {
+				now = append(now, name)
+			}
+		}
+		if len(wait) > 0 {
+			later = append(later, batch{names: wait, env: env})
+			settled(wait)
+		}
+		if err := install(ctx, k, declared, now, env); err != nil {
+			errs = append(errs, err)
+		}
+		settled(now)
+	}
+	put(first, nil)
 	unmet := map[string]string{}
 	if len(plain)+len(apart) > 0 && !waitBehind(ctx, placing.Behind) {
 		return unmet, ctx.Err()
 	}
-	if err := install(ctx, k, declared, plain, nil); err != nil {
-		errs = append(errs, err)
-	}
+	put(plain, nil)
 	for _, h := range placing.Held {
-		why, err := installHeld(ctx, k, declared, h, apart[h.Hold])
+		env, why, err := readyHeld(ctx, h, apart[h.Hold])
 		switch {
 		case ctx.Err() != nil:
 			return unmet, ctx.Err()
@@ -473,9 +562,43 @@ func installApart(ctx context.Context, k Kind, declared config.List, placing Pla
 			errs = append(errs, err)
 		case why != "":
 			unmet[h.Hold] = why
+		default:
+			put(apart[h.Hold], env)
 		}
 	}
-	return unmet, joined(errs)
+	if len(later) > 0 && placing.Admin.Wait(ctx) {
+		for _, b := range later {
+			if err := install(ctx, k, declared, b.names, b.env); err != nil {
+				errs = append(errs, err)
+			}
+		}
+	}
+	return unmet, Joined(errs)
+}
+
+// batch is things to install together, with the environment they install
+// in.
+type batch struct {
+	names, env []string
+}
+
+// awaitingAdmin are which of names wait for an administrator's password
+// kit asks for and doesn't hold (placing.Admin), as k says they need it:
+// every one, when k can't say; none, when nothing waits for it.
+func awaitingAdmin(ctx context.Context, k Kind, placing Placing, names []string) map[string]bool {
+	ad, ok := k.(Admin)
+	if placing.Admin == nil || placing.Admin.Held() || !ok || len(names) == 0 {
+		return nil
+	}
+	needing, err := ad.NeedsAdmin(ctx, names)
+	if err != nil {
+		needing = names
+	}
+	waiting := make(map[string]bool, len(needing))
+	for _, name := range needing {
+		waiting[name] = true
+	}
+	return waiting
 }
 
 // waitBehind waits for each of behind in turn, as engine.Await does, saying
@@ -518,12 +641,12 @@ func split(names []string, declared config.List, placing Placing) (first, plain 
 	return first, plain, apart
 }
 
-// installHeld installs names, the lines of section h, once what it waits
-// for has come, in its environment: when a wait ends without it, they're
-// left, and why says what isn't there.
-func installHeld(ctx context.Context, k Kind, declared config.List, h Held, names []string) (why string, err error) {
+// readyHeld waits for what section h waits for, for names, its lines, and
+// reads the environment they install in: when a wait ends without what it
+// waited for, they're left, and why says what isn't there.
+func readyHeld(ctx context.Context, h Held, names []string) (env []string, why string, err error) {
 	if len(names) == 0 {
-		return "", nil
+		return nil, "", nil
 	}
 	var missing []string
 	for _, w := range h.Waits {
@@ -533,15 +656,14 @@ func installHeld(ctx context.Context, k Kind, declared config.List, h Held, name
 		}
 	}
 	if len(missing) > 0 {
-		return engine.NotThere(missing), nil
+		return nil, engine.NotThere(missing), nil
 	}
-	var env []string
 	if h.Env != nil {
 		if env, err = h.Env(); err != nil {
-			return "", fmt.Errorf("couldn't install %s: %w", strings.Join(names, ", "), err)
+			return nil, "", fmt.Errorf("couldn't install %s: %w", strings.Join(names, ", "), err)
 		}
 	}
-	return "", install(ctx, k, declared, names, env)
+	return env, "", nil
 }
 
 // install installs names of k, with env set for the install alone: one
@@ -559,9 +681,8 @@ func install(ctx context.Context, k Kind, declared config.List, names, env []str
 		// install says it's done, whatever the kind's list says meanwhile.
 		stop = engine.Putting(ctx, names)
 	}
-	counted := counting(installing, k, names)
-	unwatch := watchQuiet(counted)
-	err := k.Install(counted, names)
+	unwatch := watchQuiet(installing)
+	err := k.Install(installing, names)
 	unwatch()
 	stop()
 	engine.Changed(ctx)
@@ -662,6 +783,19 @@ func Saying(ctx context.Context, says string) (resume func()) {
 	return aside(ctx, says, false)
 }
 
+// Away is Waiting for a wait that says what it waits for itself, as a step
+// by hand done again (engine.Undone), or the administrator's password
+// (AwaitAdmin): never quiet meanwhile; back, how the install's going is
+// said again.
+func Away(ctx context.Context) (back func()) {
+	p, ok := ctx.Value(progressKey{}).(*progress)
+	if !ok {
+		return func() {}
+	}
+	p.wait()
+	return func() { p.aside("", false) }
+}
+
 // Waiting is Saying that the install waits for what, the title of the step
 // whose turn it is, as a Sharing kind's waits while another's install goes
 // on: never quiet meanwhile, as its command hasn't started.
@@ -739,6 +873,8 @@ type progress struct {
 	heard   time.Time
 	last    string
 	quiet   bool
+	// far is how far a Fetcher's install has said it's got, of 1.
+	far float64
 }
 
 // quietAfter is how long an install may print nothing before its step says
@@ -748,12 +884,14 @@ type progress struct {
 var quietAfter, quietLook = 2 * time.Minute, 15 * time.Second
 
 // watchQuiet watches the install ctx counts for going quiet, as hush does,
-// till the func it returns is called: nothing, where nothing counts it.
+// from now, till the func it returns is called: nothing, where nothing
+// counts it.
 func watchQuiet(ctx context.Context) (stop func()) {
 	p, ok := ctx.Value(progressKey{}).(*progress)
 	if !ok {
 		return func() {}
 	}
+	p.listen()
 	return watching(p)
 }
 
@@ -862,6 +1000,18 @@ func (p *progress) hush(after time.Duration) {
 	p.say()
 }
 
+// listen notes the install's quiet counted from now, as it starts, or
+// it's back from waiting (Away): it's not quiet now.
+func (p *progress) listen() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.heard = time.Now()
+	if p.quiet {
+		p.quiet = false
+		p.say()
+	}
+}
+
 // line reads a line the install printed: heard, it's no longer quiet.
 func (p *progress) line(line string) {
 	name, done := p.counter.Done(line, p.names)
@@ -947,6 +1097,14 @@ func (p *progress) note(set map[string]bool, name string) bool {
 	return true
 }
 
+// wait notes the install waiting for what says so itself (Away): heard
+// from afresh, as any wait has it.
+func (p *progress) wait() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.heard, p.quiet, p.waiting = time.Now(), false, true
+}
+
 // aside notes what the install does first, or waits for, "" once it's
 // done, and says so. A wait, starting or over, has the install heard from
 // afresh: what it waited on is no silence of its own.
@@ -960,14 +1118,23 @@ func (p *progress) aside(says string, waits bool) {
 	p.say()
 }
 
-// start notes the install's command is starting: a Fetcher's downloading.
+// start notes an install command starting: a Fetcher's downloading, from
+// its first, and again from each after it while some of names aren't in,
+// as Homebrew installs a tap's apart.
 func (p *progress) start() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.unstarted {
+	if p.unstarted || p.fetcher != nil && !p.fetching && len(p.done) < len(p.names) {
 		p.unstarted, p.fetching = false, true
 		p.say()
 	}
+}
+
+// farther is far, or how far the install has said it's got, if that's
+// further: a later command's downloads start from what's in.
+func (p *progress) farther(far float64) float64 {
+	p.far = max(p.far, far)
+	return p.far
 }
 
 // say says how the install's going: nothing, for a Fetcher's whose command
@@ -987,9 +1154,9 @@ func (p *progress) say() {
 		event.Say(p.ctx, event.Doing{Says: quiet(p.says)})
 	case p.unstarted:
 	case p.fetching:
-		event.Say(p.ctx, event.Doing{Says: quiet("downloading"), Done: len(p.fetched), Of: len(p.names), Far: float64(len(p.fetched)) / n / 2})
+		event.Say(p.ctx, event.Doing{Says: quiet("downloading"), Done: len(p.fetched), Of: len(p.names), Far: p.farther(float64(len(p.fetched)) / n / 2)})
 	case p.fetcher != nil:
-		event.Say(p.ctx, event.Doing{Says: quiet(strings.TrimSpace("installing " + p.next())), Done: len(p.done), Of: len(p.names), Far: 0.5 + float64(len(p.done))/n/2})
+		event.Say(p.ctx, event.Doing{Says: quiet(strings.TrimSpace("installing " + p.next())), Done: len(p.done), Of: len(p.names), Far: p.farther(0.5 + float64(len(p.done))/n/2)})
 	default:
 		event.Say(p.ctx, event.Doing{Says: quiet(strings.TrimSpace("installing " + p.next())), Done: len(p.done), Of: len(p.names)})
 	}

@@ -13,11 +13,21 @@ import (
 	"time"
 )
 
-// DefaultTimeout ends a command that runs longer, unless it sets its own.
-const DefaultTimeout = 2 * time.Minute
+// DefaultTimeout ends a command that runs longer, unless it sets its own;
+// Unlimited is the timeout of one that runs as long as it takes, as sudo
+// waiting for a person's password.
+const (
+	DefaultTimeout               = 2 * time.Minute
+	Unlimited      time.Duration = -1
+)
 
 // ErrNotFound is returned for a program that isn't on kit's PATH.
 var ErrNotFound = errors.New("not found")
+
+// ErrAnsweredLate is in the error of a command that ended before what it
+// asked for could be given, as sudo does once its own time to wait for a
+// password is up: the answer came too late, and wasn't heard.
+var ErrAnsweredLate = errors.New("it ended before it was answered")
 
 // Command is a program to run, and how.
 type Command struct {
@@ -28,7 +38,8 @@ type Command struct {
 	Dir string
 	// Input is what it reads on its standard input: nothing when "".
 	Input string
-	// Timeout ends it if it runs longer: DefaultTimeout when 0.
+	// Timeout ends it if it runs longer: DefaultTimeout when 0, never when
+	// Unlimited.
 	Timeout time.Duration
 	// Interactive runs it at kit's own terminal, reading from it and writing
 	// to it directly, for a program that asks a person something, such as
@@ -45,7 +56,8 @@ type Command struct {
 	// prints it, Answer is called with how many times it asked before, and
 	// what Answer returns is written to the command's standard input, a
 	// line, kept nowhere; an error from Answer ends the command's input.
-	// What it printed is reported without the prompts.
+	// One that ended while Answer was getting its answer fails with
+	// ErrAnsweredLate. What it printed is reported without the prompts.
 	Asks   string
 	Answer func(ctx context.Context, asked int) (string, error)
 	// Lines, when set, is given each line the command prints, its output and
@@ -90,6 +102,10 @@ type Result struct {
 	// ExitCode is what it exited with: -1 when it didn't run, or was ended.
 	ExitCode int
 	Duration time.Duration
+	// Group is the process group it ran in, its own, as kit runs a command
+	// detached: what it left running is found in it. None for one that
+	// didn't start, or ran at kit's terminal.
+	Group int
 }
 
 // Runner runs commands. Run returns an error when the command couldn't run,

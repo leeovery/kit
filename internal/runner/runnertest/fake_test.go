@@ -1,6 +1,7 @@
 package runnertest_test
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"slices"
@@ -138,5 +139,40 @@ func TestFakeDoesWhatItsTold(t *testing.T) {
 	fake.On("claude", "plugin", "marketplace", "add", "x/y").Does(func() { ran++ })
 	if _, err := fake.Run(t.Context(), runner.Command{Name: "claude", Args: []string{"plugin", "marketplace", "add", "x/y"}}); err != nil || ran != 1 {
 		t.Errorf("Run() = %v, ran %d times; want it done once", err, ran)
+	}
+}
+
+// A command scripted to ask is given what its Answer gives, each time; one
+// answered too late ends first, saying so, and keeps nothing it was given
+// last.
+func TestFakeAsks(t *testing.T) {
+	fake := runnertest.New(t)
+	sudo := fake.On("sudo", "-S", "-v").Asks(2)
+	answer := func(_ context.Context, asked int) (string, error) { return fmt.Sprint("try ", asked), nil }
+	if _, err := fake.Run(t.Context(), runner.Command{Name: "sudo", Args: []string{"-S", "-v"}, Answer: answer}); err != nil {
+		t.Fatal(err)
+	}
+	if got := sudo.Answered(); len(got) != 2 || got[1] != "try 1" {
+		t.Errorf("Answered() = %q, want each try", got)
+	}
+	late := fake.On("sudo", "-S", "-k").Asks(1).AnswersLate()
+	_, err := fake.Run(t.Context(), runner.Command{Name: "sudo", Args: []string{"-S", "-k"}, Answer: answer})
+	if exit, ok := errors.AsType[*runner.ExitError](err); !ok || exit.Code != 1 || !errors.Is(err, runner.ErrAnsweredLate) || len(late.Answered()) != 0 {
+		t.Errorf("Run() = %v, answered %q; want exit 1, the answer too late, none kept", err, late.Answered())
+	}
+}
+
+// A command scripted to hang prints what it prints, then waits till its
+// context is done, failing with the context's error; one scripted to run in
+// a process group says so.
+func TestFakeHangs(t *testing.T) {
+	fake := runnertest.New(t)
+	fake.On("mas", "install", "1").Prints("==> Downloading Bear\n").Hangs().InGroup(4242)
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	var heard []string
+	res, err := fake.Run(ctx, runner.Command{Name: "mas", Args: []string{"install", "1"}, Lines: func(line string) { heard = append(heard, line) }})
+	if !errors.Is(err, context.DeadlineExceeded) || !slices.Equal(heard, []string{"==> Downloading Bear"}) || res.Group != 4242 {
+		t.Errorf("Run() = %v, printing %q, in group %d; want what it prints, then the deadline exceeded, in its group", err, heard, res.Group)
 	}
 }

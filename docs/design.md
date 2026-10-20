@@ -77,7 +77,7 @@ file having none, or the shared file's), so the kind's still looked after.
 | Kind | Declared as | Found by | Install, remove |
 |---|---|---|---|
 | `brew`, `cask` | `jq`, `owner/tap/tool`, `php@8.5` | `brew list`, `brew leaves` | `brew install`, `brew uninstall` |
-| `mas` | `xcode@497799835`: the name, then the id | `mas list`, which reads Spotlight's index; with a declared app missing from it, an app in the Applications folders carrying the App Store's receipt that it doesn't list yet, its id looked up by its bundle id (`mas lookup --bundle`), once, what the store said kept in kit's state (that it hasn't the app, for a day); a wait for an app and `kit mas add|remove` go by the same | `mas install` (the first app alone, the check that someone's signed in, then the rest), `mas uninstall`, through sudo |
+| `mas` | `xcode@497799835`: the name, then the id | `mas list`, which reads Spotlight's index; with a declared app missing from it, an app in the Applications folders carrying the App Store's receipt that it doesn't list yet, its id looked up by its bundle id (`mas lookup --bundle`), once, what the store said kept in kit's state (that it hasn't the app, for a day); a wait for an app and `kit mas add|remove` go by the same | `mas install` (an app at a time, the first the check that someone's signed in), `mas uninstall`, through sudo |
 | `npm` | `typescript@5` (a version optional) | `npm ls --global` | `npm install --global`, `npm uninstall --global` |
 | `composer` | `laravel/valet:^4.0` (a constraint optional) | `composer global show --direct` | `composer global require`, `composer global remove` |
 | `go` | `golang.org/x/tools/cmd/goimports` (`@version` optional) | the programs in Go's bin folder, by the package each was built from | `go install`; removing deletes the program |
@@ -290,10 +290,19 @@ install finds no one signed in (signing in has no `--test`: mas can't say who's 
 macOS keeps it private): the line, marked done no more, comes up again as it did, card and
 notification, the step waiting for it meanwhile, its row saying it waits for you, and the log
 that it's waiting for you, then, once it's done, done and how long it took; then the step tries
-again, as often as it finds it not done. So kit installs one App Store app first, the check, and
-the rest once that's in: while someone's at the terminal, no app fails for want of a sign-in. A
-line whose test still passes has nothing to raise again; without a terminal nothing is raised,
-and the install fails at once, naming the fix (sign in to the App Store, then try again). `kit check|hourly|nightly add
+again, as often as it finds it not done. So kit installs App Store apps one at a time, the
+first the check: mas, with no one signed in, says so or waits for good, saying nothing at all,
+so till an app's in, mas saying nothing for five minutes is taken as no one signed in, as one
+mas says it of is. Once mas has said anything, as that it's downloading, the install takes as
+long as it takes (it draws its progress only at a terminal, so through kit it says nothing more
+till it's done), up to an hour and a half (Xcode is gigabytes); one failing holds none of the
+others up. What's left of an install kit ended, in its process group, is stopped before the
+next try: mas runs as root, which only root can stop. While someone's at the terminal, no app
+fails for want of a sign-in. A line whose test
+still passes has nothing to raise again; without a terminal nothing is raised, and the install
+fails at once, naming the fix (sign in to the App Store, then try again), with what failed
+before it; an install that fails otherwise says what mas said, or that mas didn't finish, never
+mas's command line, which the run's log has. `kit check|hourly|nightly add
 <name> -- <command>` and `kit manual add <name> "<what to do>" [-- <command>]` (written as
 `--test`; `--group` as on the line) declare checks, jobs and steps by hand (a check, and a
 step's command, run once as it's added, to say how it stands); `kit remove
@@ -306,7 +315,7 @@ quotes, then `--after <step>` (applied after that step, if it's there, or after 
 things, as in `cask:firefox`), `--before <step>`, `--secret <name>` (a secret a secrets
 section declares: applied once it's in place, its script run with it set when it's a variable,
 its value hidden in what the script says), each as often as wanted, and `--sudo` (applying needs
-an administrator's password, settled before anything is applied), as in `tool "Installs the
+an administrator's password, asked for as the run starts, as for installs), as in `tool "Installs the
 tool, from its maker" --after brew`. Its folder, `<scope>/steps/<name>/` beside its declarations
 file, holds `run`, an executable, and whatever data it uses; which Macs it's for is the folder
 it's in. kit runs `run check` and `run apply` in that folder, in its own environment, with
@@ -421,17 +430,31 @@ tool).
 `kit apply` checks every step and applies each that doesn't stand ok, or has something to
 do, then checks it again: each step then says what it did ("installed: jq"). It never removes
 or adopts: reconcile does those. At a terminal, when a missing cask installs through a
-package, kit asks for an administrator's password once, through `sudo -v`, before anything is
-applied, and keeps sudo's hold fresh while it runs, giving the password again if sudo forgets
-it (the person asked only if sudo refuses the one kept); without a terminal it asks nothing, and
-those casks wait, saying why (requirement 4). App Store apps need the password for every
-install, as mas runs as root; `kit <kind> add` and reconcile's installs ask up front the same way.
+package, kit asks for an administrator's password once, through `sudo -v`, as the run starts,
+under its heading, which holds still till it's answered. The run goes on meanwhile, and only
+what needs the password waits for it, its row saying so, however long the answer takes: kit
+gives the question no time limit, and an answer that came after sudo's own five minutes ended
+it is given to sudo again. What a kind is done with for now, tried, failed included, or put off
+for the answer, nothing waits behind for order's sake, as the formulae otherwise wait behind
+what the casks install first: once the casks step has put a cask off, a cask from a tap it's
+just added as much as any, only what waits for that cask itself waits for the answer. Once it's given, kit keeps sudo's hold fresh while it runs,
+giving the password again if sudo forgets it (the person asked only if sudo refuses the one
+kept), what needs it waiting meanwhile, an App Store app at a time; an App Store install sudo
+says has forgotten it, as after the Mac slept, has kit find out at once, ask again if it must,
+and try the app once more. Not given, what needs it is left, saying why. kit keeps a password
+once sudo has taken it, never before. Without a terminal it asks nothing, and those casks wait,
+saying why (requirement 4). App Store apps need the password for every install, as mas runs as
+root; `kit <kind> add`, `remove` and reconcile's installs ask up front, before anything else, and
+wait for it the same way should sudo forget it.
 Nothing kit runs asks at its terminal: each command runs in a session of its own, without it, so
 a program that asks there fails at once, never stopped unseen in the background; kit's own sudo,
 which never asks there (`-n`, or `-S` on its input), stays in kit's session, as sudo holds a
-password only for the session it was given in. A program's own sudo asks kit instead (`SUDO_ASKPASS`, and `DISPLAY` set,
-without which sudo, having no terminal, won't), and is given the password kept, so a step declared
-`--sudo` uses plain `sudo`; `sudo -n` never asks, so goes without.
+password only for the session it was given in, and is ended through sudo, which passes SIGTERM
+on to what it runs as root (its process group killed only once that's been ignored for five
+seconds). A program's own sudo asks kit instead (`SUDO_ASKPASS`, and `DISPLAY` set, without
+which sudo, having no terminal, won't), and is given the password kept, so a step declared
+`--sudo` uses plain `sudo`; `sudo -n` never asks, so goes without. The person's asked one thing
+at a time: a program's sudo waits for kit's own question, the run's time limits waiting with it.
 
 `kit <kind> add` installs each name, unless it's installed, and declares it in this Mac's file, in
 its sorted place, or for every Mac with `--shared` (taking it out of each Mac's own file); it
@@ -627,8 +650,9 @@ Three features change the system, each applied through sudo: `touch-id-sudo` (su
 fingerprint, by a line in `/etc/pam.d/sudo_local`, which macOS updates leave alone),
 `remote-login` (SSH) and `file-sharing` (SMB), each a launchd service on unless launchd lists
 it disabled. A step whose apply needs an administrator's password says so (`Admin`), and
-`kit apply` and `kit reconcile` settle the password before anything is applied, as for the
-kinds whose installs need it: asked once at a terminal; without one, the step waits.
+`kit apply` asks for the password as the run starts, the step waiting for the answer, and
+`kit reconcile` before anything is applied, as for the kinds whose installs need it: asked once
+at a terminal; without one, the step waits.
 
 ## Output
 
@@ -700,9 +724,12 @@ called missing, and a name Homebrew doesn't know is missing and "unknown". Four 
   (what `brew autoremove` removes).
 
 **Installing and removing.** Before its first install in a run kit runs `brew update`, as
-installs from stale formulae fail. Formulae install in one `brew install --formula`, a tap's
-first: a tap's formula then claims a name it shares with one of Homebrew's own before
-anything pulls that in as a dependency. Casks install in one `brew install --cask`. A missing
+installs from stale formulae fail, and runs nothing else through brew till it's done: Homebrew
+can update itself then, its Ruby with it, and a brew run beside that fails. What waits for it
+says so, and the wait doesn't count against its time limit. Formulae and casks install in a
+`brew install` for each tap, the taps' first, then one for Homebrew's own: a tap's formula then
+claims a name it shares with one of Homebrew's own before anything pulls that in as a
+dependency, and a tap that fails fails only its own names. A missing
 item kit can't install now says why, and is left: a name another tap's formula holds (two
 formulae of one name share a keg), or a cask that installs through a package, needing an
 administrator's password kit hasn't got. Items kit would install carry the action `install`,

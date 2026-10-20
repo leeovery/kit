@@ -164,7 +164,7 @@ func twoStores(t *testing.T, fake *fakeStore) (*secret.Secrets, config.List, *ru
 // returns how the step finished.
 func applying(t *testing.T, s *secret.Secrets, list config.List) check.Result {
 	t.Helper()
-	step := kind.Placed(s, list, func() kind.Placing { return kind.Placing{} })
+	step := kind.Placed(s, list, func(context.Context) kind.Placing { return kind.Placing{} })
 	p, err := engine.New(step)
 	if err != nil {
 		t.Fatal(err)
@@ -412,7 +412,7 @@ func TestStoresHeldAreAwaitedTogether(t *testing.T) {
 				return nil
 			}},
 	}
-	step := kind.Placed(s, list, func() kind.Placing { return kind.Placing{} })
+	step := kind.Placed(s, list, func(context.Context) kind.Placing { return kind.Placing{} })
 	step.Later = []engine.Wait{{Step: "bee-sign-in"}, {Step: "sea-sign-in"}}
 	p, err := engine.New(append(signIns, step)...)
 	if err != nil {

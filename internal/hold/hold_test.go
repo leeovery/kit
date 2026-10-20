@@ -55,12 +55,81 @@ func TestWithTimeoutCancelled(t *testing.T) {
 	}
 }
 
+// Without With, a time limit still ends.
 func TestWithTimeoutUnheld(t *testing.T) {
-	// Without With, it's context.WithTimeout: a deadline.
-	ctx, cancel := hold.WithTimeout(context.Background(), time.Hour)
+	defer hold.SetEvery(5 * time.Millisecond)()
+	ctx, cancel := hold.WithTimeout(context.Background(), 30*time.Millisecond)
 	defer cancel()
-	if _, ok := ctx.Deadline(); !ok {
-		t.Error("no deadline, want context.WithTimeout's")
+	select {
+	case <-ctx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("not ended a second on")
+	}
+	if !errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		t.Errorf("Err() = %v, want the deadline exceeded", ctx.Err())
+	}
+}
+
+// While what runs under a time limit waits its turn, the limit waits, held
+// or not, every limit it runs under, the one around it as well as its own;
+// once the turn's come, the limits count again, from where they were.
+func TestWithTimeoutWaitsForATurn(t *testing.T) {
+	defer hold.SetEvery(5 * time.Millisecond)()
+	for _, tt := range []struct {
+		name string
+		ctx  context.Context
+	}{
+		{"unheld", context.Background()},
+		{"held by nothing now", hold.With(context.Background(), func() bool { return false })},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			outer, cancelOuter := hold.WithTimeout(tt.ctx, 30*time.Millisecond)
+			defer cancelOuter()
+			inner, cancelInner := hold.WithTimeout(outer, time.Hour)
+			defer cancelInner()
+			done := hold.Waiting(inner)
+			select {
+			case <-outer.Done():
+				t.Fatal("the limit around ended while what ran under it waited its turn")
+			case <-time.After(150 * time.Millisecond):
+			}
+			done()
+			done()
+			select {
+			case <-outer.Done():
+			case <-time.After(time.Second):
+				t.Fatal("not ended once the turn had come")
+			}
+			if !errors.Is(outer.Err(), context.DeadlineExceeded) {
+				t.Errorf("Err() = %v, want the deadline exceeded", outer.Err())
+			}
+		})
+	}
+	// Outside any limit, waiting holds nothing up.
+	hold.Waiting(context.Background())()
+}
+
+// A limit on saying anything ends what says nothing in time, and is lifted
+// once it's said something, however long it then takes.
+func TestUntilHeard(t *testing.T) {
+	defer hold.SetEvery(5 * time.Millisecond)()
+	ctx, _, cancel := hold.UntilHeard(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	select {
+	case <-ctx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("not ended, though nothing was said")
+	}
+	if !errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		t.Errorf("Err() = %v, want the deadline exceeded", ctx.Err())
+	}
+	ctx, heard, cancel := hold.UntilHeard(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	heard()
+	select {
+	case <-ctx.Done():
+		t.Fatal("ended, though something was said in time")
+	case <-time.After(150 * time.Millisecond):
 	}
 }
 

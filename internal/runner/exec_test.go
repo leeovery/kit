@@ -184,6 +184,83 @@ func TestExecEndsACommandWhenItsContextIsDone(t *testing.T) {
 	}
 }
 
+// kit's own sudo, once ended, is sent SIGTERM, which sudo passes on to
+// what it runs as root, and which kit can't signal itself; ignored, as long
+// as kit waits for a command's output once ended, the group's killed.
+func TestExecEndsKitsOwnSudoThroughSudo(t *testing.T) {
+	dir := t.TempDir()
+	relayed, child := filepath.Join(dir, "relayed"), filepath.Join(dir, "child")
+	r, _ := programs(t, map[string]string{
+		"sudo":     `/bin/sleep 30 & pid=$!; trap 'echo relayed > "$2"; kill $pid; exit 143' TERM; echo ready; wait`,
+		"stubborn": `trap '' TERM; /bin/sleep 30 & echo $! > "$2"; echo ready; wait`,
+	})
+	// endOnceReady runs sudo, ending it once it's ready.
+	endOnceReady := func(arg string) {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		ready := func(line string) {
+			if line == "ready" {
+				cancel()
+			}
+		}
+		if _, err := r.Run(ctx, runner.Command{Name: "sudo", Args: []string{"-n", arg}, Lines: ready}); !errors.Is(err, context.Canceled) {
+			t.Errorf("Run() = %v, want it ended", err)
+		}
+	}
+	start := time.Now()
+	endOnceReady(relayed)
+	if _, err := os.Stat(relayed); err != nil || time.Since(start) > 3*time.Second {
+		t.Errorf("sudo wasn't sent SIGTERM to pass on (%v), or wasn't ended at once (%v)", err, time.Since(start))
+	}
+
+	if err := os.Rename(filepath.Join(r.Path[0], "stubborn"), filepath.Join(r.Path[0], "sudo")); err != nil {
+		t.Fatal(err)
+	}
+	endOnceReady(child)
+	data, err := os.ReadFile(child)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, _ := strconv.Atoi(strings.TrimSpace(string(data)))
+	// Killed, it's there till launchd reaps it, which can take a moment.
+	for deadline := time.Now().Add(2 * time.Second); pid != 0 && syscall.Kill(pid, 0) == nil && time.Now().Before(deadline); {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if pid == 0 || syscall.Kill(pid, 0) == nil {
+		t.Errorf("what sudo ran, ignoring SIGTERM, still runs (%d), want its group killed", pid)
+	}
+}
+
+// A command kit runs detached says the process group it ran in, its own.
+func TestExecSaysTheGroupACommandRanIn(t *testing.T) {
+	r, _ := programs(t, map[string]string{"group": "echo $$"})
+	res, err := r.Run(t.Context(), runner.Command{Name: "group"})
+	if pid, _ := strconv.Atoi(strings.TrimSpace(string(res.Stdout))); err != nil || pid == 0 || res.Group != pid {
+		t.Errorf("Run() = group %d, %v; want the group it led, %q", res.Group, err, res.Stdout)
+	}
+}
+
+// A command that fails on its own as its time limit runs out, kit not
+// having ended it, says how it exited; one that does as the run stops says
+// it was stopped: here each as its last line's read, once it's exited.
+func TestExecSaysAnExitKitDidntCause(t *testing.T) {
+	r, _ := programs(t, map[string]string{"fails": "echo bye; exit 3"})
+	slowly := func(string) { time.Sleep(time.Second) }
+	res, err := r.Run(t.Context(), runner.Command{Name: "fails", Timeout: 500 * time.Millisecond, Lines: slowly})
+	if exit, ok := errors.AsType[*runner.ExitError](err); !ok || exit.Code != 3 || res.ExitCode != 3 {
+		t.Errorf("Run(), its limit up = exit %d, %v; want exit 3", res.ExitCode, err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	stopping := func(line string) {
+		slowly(line)
+		cancel()
+	}
+	if _, err := r.Run(ctx, runner.Command{Name: "fails", Lines: stopping}); !errors.Is(err, context.Canceled) {
+		t.Errorf("Run(), the run stopping = %v; want it stopped", err)
+	}
+}
+
 // terminalCheck prints whether the program has a terminal to ask at: one
 // it can open, as sudo opens /dev/tty to ask for a password.
 const terminalCheck = `if (exec 3</dev/tty) 2>/dev/null; then echo terminal; else echo none; fi`
@@ -417,5 +494,39 @@ func TestExecEndsTheInputOfACommandNotAnswered(t *testing.T) {
 	}})
 	if exit, ok := errors.AsType[*runner.ExitError](err); !ok || exit.Code != 3 || len(res.Stdout) != 0 {
 		t.Errorf("Run = %q, %v; want it ended, exit 3", res.Stdout, err)
+	}
+}
+
+// A command that ends while its answer's being got, as sudo does once its
+// own time to wait for a password is up, fails saying the answer came too
+// late, as well as how it exited; one answered in time doesn't.
+func TestExecTellsOfAnAnswerThatCameTooLate(t *testing.T) {
+	e, _ := programs(t, map[string]string{"asks": `printf 'ASK>' >&2; exit 1`})
+	res, err := e.Run(t.Context(), runner.Command{Name: "asks", Asks: "ASK>", Answer: func(context.Context, int) (string, error) {
+		time.Sleep(300 * time.Millisecond)
+		return "late", nil
+	}})
+	if exit, ok := errors.AsType[*runner.ExitError](err); !ok || exit.Code != 1 || !errors.Is(err, runner.ErrAnsweredLate) || res.ExitCode != 1 {
+		t.Errorf("Run = exit %d, %v; want exit 1, the answer too late", res.ExitCode, err)
+	}
+	e, _ = programs(t, map[string]string{"asks": `printf 'ASK>' >&2; read a; exit 1`})
+	if _, err := e.Run(t.Context(), runner.Command{Name: "asks", Asks: "ASK>", Answer: func(context.Context, int) (string, error) {
+		return "wrong", nil
+	}}); errors.Is(err, runner.ErrAnsweredLate) {
+		t.Errorf("Run = %v; want an answer heard, and refused, not too late", err)
+	}
+}
+
+// A command given no time limit runs as long as it takes, till its context
+// is done.
+func TestExecRunsAnUnlimitedCommandAsLongAsItTakes(t *testing.T) {
+	e, _ := programs(t, map[string]string{"slow": "/bin/sleep 0.3"})
+	if _, err := e.Run(t.Context(), runner.Command{Name: "slow", Timeout: runner.Unlimited}); err != nil {
+		t.Errorf("Run = %v; want it run to its end", err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+	if _, err := e.Run(ctx, runner.Command{Name: "slow", Timeout: runner.Unlimited}); !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("Run = %v; want it ended with its context", err)
 	}
 }

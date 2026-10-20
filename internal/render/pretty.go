@@ -124,9 +124,10 @@ type Pretty struct {
 	// liveHead is the run's heading, when it's drawn live, as applying's
 	// is, for its record to take its place: nil when it's printed.
 	liveHead []string
-	// aside is whether the face has stepped aside for a question asked
-	// mid-run: it draws nothing, and holds what it writes, till it's back.
-	aside bool
+	// aside is how many questions asked mid-run the face has stepped aside
+	// for, or held still for: it draws nothing, and holds what it writes,
+	// till it's back from every one.
+	aside int
 	// asking is what macOS is asking the person at the Mac, in a window of
 	// its own, as the run goes: nothing, mostly.
 	asking string
@@ -697,7 +698,7 @@ func (p *Pretty) spin() {
 // otherwise the loader, the bar, how many steps are done, and which are
 // running. None when nothing runs, or the face doesn't animate.
 func (p *Pretty) drawSpinner() {
-	if !p.animate || p.aside {
+	if !p.animate || p.aside > 0 {
 		return
 	}
 	p.fit()
@@ -848,7 +849,7 @@ func (p *Pretty) write(s string) {
 // flush sends what's been written to the terminal, whole, for it to show at
 // once where it can.
 func (p *Pretty) flush() {
-	if p.aside {
+	if p.aside > 0 {
 		return
 	}
 	if p.out.Len() == 0 || p.err != nil {
@@ -878,22 +879,42 @@ func (p *Pretty) Close() error {
 
 // StepAside takes the live part down and keeps it down, for a question kit
 // asks mid-run in its place, and returns what puts it back: the live part
-// as it then stands, and what the face held meanwhile.
+// as it then stands, and what the face held meanwhile, once it's back from
+// every question it stepped aside or held still for.
 func (p *Pretty) StepAside() (back func()) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.stopSpinner()
 	p.flush()
-	p.aside = true
-	return func() {
-		p.mu.Lock()
-		defer p.mu.Unlock()
-		p.aside = false
-		if len(p.running) > 0 {
-			p.spin()
-		}
-		p.flush()
+	p.aside++
+	return sync.OnceFunc(p.comeBack)
+}
+
+// HoldStill keeps what's on screen as it is, the heading kit asks a question
+// under, as sudo's password, while the run goes on behind it, and returns
+// what puts the live part back as the run then stands, with what the face
+// held meanwhile.
+func (p *Pretty) HoldStill() (back func()) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.halt()
+	p.flush()
+	p.aside++
+	return sync.OnceFunc(p.comeBack)
+}
+
+// comeBack puts the live part back, once the face is back from every
+// question it stepped aside or held still for.
+func (p *Pretty) comeBack() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.aside--; p.aside > 0 {
+		return
 	}
+	if len(p.running) > 0 {
+		p.spin()
+	}
+	p.flush()
 }
 
 // Running are the titles of the steps running.

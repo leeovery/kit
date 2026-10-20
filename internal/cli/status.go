@@ -107,8 +107,15 @@ type run struct {
 	// askpass answers, at a terminal, what the programs the run starts ask
 	// for an administrator's password: nil when nothing will.
 	askpass *askpass.Server
-	// held is whether macOS is asking the person at the Mac something, which
-	// the run's time limits wait on, at a terminal; unwatch stops watching.
+	// hold is how the password stands while kit asks for it as the run goes
+	// on: nil when it doesn't. settled are the things the kinds are done
+	// with for now, which nothing waits behind.
+	hold    *adminHold
+	settled settled
+	// held is whether the person at the Mac is being asked something, which
+	// the run's time limits wait on, at a terminal: by macOS, in a window of
+	// its own, or for a program's sudo, through askpass, which holds up the
+	// command it's in; unwatch stops watching macOS.
 	held    func() bool
 	unwatch func()
 	// notices is kit's app, which posts the run's notifications, once the
@@ -368,7 +375,7 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 		if !list.Declared && unread == nil {
 			continue
 		}
-		step := kind.Placed(k, list, func() kind.Placing { return r.placing[d.Name] }, d.Needs...)
+		step := kind.Placed(k, list, func(context.Context) kind.Placing { return r.placed(d.Name) }, d.Needs...)
 		step.Title, step.Area, step.Row, step.Tool = d.Label, steps.AreaDrift, d.Row, d.Tool
 		if unread != nil {
 			step.Check = func(context.Context) check.Result {
@@ -505,6 +512,11 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 		r.placeBackups(r.steps, backups)
 		r.placeLines(r.steps)
 		r.placeByHand(r.steps)
+		for i, s := range r.steps {
+			if s.Admin && s.Apply != nil {
+				r.steps[i].Apply = r.afterAdmin(s.Apply)
+			}
+		}
 		r.pipeline, err = engine.New(r.steps...)
 	}
 	if err != nil {
@@ -518,6 +530,10 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 	}
 	if a.WatchDialogs && a.pretty(a.Stdout) {
 		r.held, r.unwatch = watchDialogs(a.Runner(path, env), r.notifier(a.Getenv), sink, a.Now)
+	}
+	if asks != nil {
+		dialogs := r.held
+		r.held = func() bool { return asks.Pending() || dialogs != nil && dialogs() }
 	}
 	if raise != nil {
 		r.readyNotices(a.Getenv)
@@ -590,6 +606,20 @@ func (a *app) askpass(face render.Face) *askpass.Server {
 		return nil
 	}
 	return s
+}
+
+// placed is how the kind called name's lines install, as the run places
+// them: while kit asks for an administrator's password, what needs it waits
+// for the answer, and it's left out once the password's not to be had, as
+// a check made while kit asked took it as coming. What the kind's done
+// with for now, nothing waits behind (settled).
+func (r *run) placed(name string) kind.Placing {
+	p := r.placing[name]
+	p.Settled = func(things []string) { r.settled.note(name, things) }
+	if r.hold != nil {
+		p.Admin = r.hold
+	}
+	return p
 }
 
 // isAdminStep reports whether the step named name needs an administrator's

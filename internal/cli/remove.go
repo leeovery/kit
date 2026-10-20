@@ -27,7 +27,7 @@ func (a *app) remove(ctx context.Context, r *run, kindName string, names []strin
 			removing = append(removing, name)
 		}
 	}
-	_, stop := a.holdAdmin(ctx, r, map[string][]string{kindName: removing})
+	ctx, _, stop := a.holdAdmin(ctx, r, map[string][]string{kindName: removing})
 	defer stop()
 	c := startChanges(r, names)
 	for _, name := range names {

@@ -410,7 +410,7 @@ func (p *Pretty) titlesAtWork() []string {
 func (p *Pretty) Unwind() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.aside = true
+	p.aside++
 	p.out.Reset()
 	var back strings.Builder
 	if p.keys.reading != nil {

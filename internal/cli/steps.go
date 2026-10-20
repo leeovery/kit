@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/spf13/cobra"
 
@@ -309,7 +310,7 @@ func (r *run) placeLines(all []engine.Step) {
 		}
 		for _, other := range sharing.Shares() {
 			for _, thing := range r.placing[other].First {
-				p.Behind = append(p.Behind, engine.Wait{Step: other, Thing: thing, Ready: r.installed(other, thing)})
+				p.Behind = append(p.Behind, engine.Wait{Step: other, Thing: thing, Ready: r.behind(other, thing)})
 			}
 		}
 		r.placing[name] = p
@@ -415,6 +416,42 @@ func (r *run) installed(kindName, thing string) func(context.Context) bool {
 		}
 		return slices.ContainsFunc(have, func(in kind.Installed) bool { return sameThing(in.Name, thing) })
 	}
+}
+
+// behind is whether what waits behind thing, a thing of the kind called
+// kindName, as a kind taking turns with it does, has waited enough: once
+// it's installed, or the kind's done with it for now (settled), as when it
+// failed, or is put off till kit has the administrator's password, which
+// nothing waits for for order's sake.
+func (r *run) behind(kindName, thing string) func(context.Context) bool {
+	installed := r.installed(kindName, thing)
+	return func(ctx context.Context) bool {
+		return r.settled.has(kindName, thing) || installed(ctx)
+	}
+}
+
+// settled are the things the kinds are done with for now, by kind (Placing's
+// Settled).
+type settled struct {
+	mu     sync.Mutex
+	things map[string][]string
+}
+
+// note notes things of the kind called kindName settled.
+func (s *settled) note(kindName string, things []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.things == nil {
+		s.things = map[string][]string{}
+	}
+	s.things[kindName] = append(s.things[kindName], things...)
+}
+
+// has reports whether thing, of the kind called kindName, is settled.
+func (s *settled) has(kindName, thing string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.ContainsFunc(s.things[kindName], func(name string) bool { return sameThing(name, thing) })
 }
 
 // sameThing reports whether name is thing, by its full name, or a tap's

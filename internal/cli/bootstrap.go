@@ -274,7 +274,7 @@ func (a *app) inTerminal(ctx context.Context, b *boot.Boot, fresh bool) error {
 	// The heading shows at once, with the run's lights, as kit apply's does.
 	planned, _ := r.pipeline.Planned(r.options(a, nil))
 	r.sink.Emit(event.Preparing{Time: r.now, Command: r.command, Machine: r.machine, Doing: "checking what will need an administrator's password", Steps: planned})
-	_, stopAdmin := a.holdAdmin(ctx, r, toInstall(ctx, r, nil))
+	stopAdmin := a.holdAdminAlongside(ctx, r, toInstall(ctx, r, nil))
 	report, err := r.pipeline.Apply(ctx, r.sink, r.options(a, nil))
 	stopAdmin()
 	if err == nil {
@@ -348,9 +348,18 @@ func (a *app) bootOrder(ctx context.Context, b *boot.Boot, boots *render.BootFac
 		stop()
 		wg.Wait()
 	}()
-	wg.Go(func() { renewSudo(ctx, b.Run, asks, sudoRefresh, b.Held) })
+	wg.Go(func() { renewSudo(ctx, b.Run, asks, sudoRefresh, bootHold(b.Held)) })
 	return order.Apply(ctx, sink, opts)
 }
+
+// bootHold is the boot's password, as renewSudo keeps it: the boot knows
+// only whether sudo's been given it, and nothing waits on its being asked
+// again.
+type bootHold func() bool
+
+func (h bootHold) Held() bool { return h() }
+func (bootHold) askAgain()    {}
+func (bootHold) settle(bool)  {}
 
 // bootAsker asks the boot's questions in the boot's face, in their rows.
 type bootAsker struct{ face *render.BootFace }

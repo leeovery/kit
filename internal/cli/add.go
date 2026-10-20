@@ -40,7 +40,7 @@ func (a *app) add(ctx context.Context, r *run, kindName string, names []string, 
 	if err != nil {
 		return err
 	}
-	held, stop := a.holdAdmin(ctx, r, map[string][]string{kindName: missing})
+	ctx, held, stop := a.holdAdmin(ctx, r, map[string][]string{kindName: missing})
 	defer stop()
 	opts.waiting = waitingForAdmin(ctx, r, kindName, missing, held)
 	c := startChanges(r, names)

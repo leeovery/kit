@@ -20,6 +20,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -40,8 +41,10 @@ type Server struct {
 	ln  net.Listener
 	ask Asker
 	wg  sync.WaitGroup
-	// asking has the person asked one thing at a time.
-	asking sync.Mutex
+	// asking has the person asked one thing at a time (Turn); pending is
+	// how many sudos are waiting for the person, their turn or their answer.
+	asking  sync.Mutex
+	pending atomic.Int32
 
 	mu       sync.Mutex
 	password string
@@ -154,8 +157,11 @@ func (s *Server) answer(c net.Conn) {
 	_, _ = io.WriteString(c, password+"\n")
 }
 
-// passwordFor is the answer for the sudo whose process is sudo.
-func (s *Server) passwordFor(sudo int) (string, error) {
+// passwordFor is the answer for the sudo whose process is sudo: the
+// password kept, the first time it asks, should the person give it while
+// this one waits its turn; else the person's, which is kept, as there's no
+// telling whether sudo took it.
+func (s *Server) passwordFor(sudo int) (password string, err error) {
 	s.mu.Lock()
 	a := s.sudos[sudo]
 	if a == nil {
@@ -163,39 +169,70 @@ func (s *Server) passwordFor(sudo int) (string, error) {
 		s.sudos[sudo] = a
 	}
 	s.mu.Unlock()
-	return s.next(context.Background(), a)
+	if password, ok := s.keptFor(a); ok {
+		return password, nil
+	}
+	s.pending.Add(1)
+	defer s.pending.Add(-1)
+	s.Turn(func() {
+		var asked bool
+		if password, asked, err = s.next(context.Background(), a); asked && err == nil {
+			s.Keep(password)
+		}
+	})
+	return password, err
+}
+
+// Pending reports whether a program's sudo is waiting for the person: for
+// its turn to ask, or for their answer.
+func (s *Server) Pending() bool {
+	return s.pending.Load() > 0
+}
+
+// Turn runs f as nothing else asks the person: what f asks them, a
+// program's sudo through the helper waits for.
+func (s *Server) Turn(f func()) {
+	s.asking.Lock()
+	defer s.asking.Unlock()
+	f()
 }
 
 // Answer answers a sudo kit runs itself, reading the password on its input
 // (runner.Command's Answer), each time it asks, as the helper answers a
-// program's sudo.
+// program's sudo, in a Turn: nothing's kept, for the caller to keep what
+// sudo took.
 func (s *Server) Answer() func(ctx context.Context, asked int) (string, error) {
 	a := &answered{}
 	return func(ctx context.Context, _ int) (string, error) {
-		return s.next(ctx, a)
+		password, _, err := s.next(ctx, a)
+		return password, err
 	}
 }
 
 // next is the answer for a sudo answered so far as a says: the password
-// kept, the first time it asks; else the person's, which is kept.
-func (s *Server) next(ctx context.Context, a *answered) (string, error) {
-	s.mu.Lock()
-	if !a.kept && s.password != "" {
-		a.kept = true
-		password := s.password
-		s.mu.Unlock()
-		return password, nil
+// kept, the first time it asks; else the person's, asked.
+func (s *Server) next(ctx context.Context, a *answered) (password string, asked bool, err error) {
+	if password, ok := s.keptFor(a); ok {
+		return password, false, nil
 	}
-	asked := a.asked
+	s.mu.Lock()
+	times := a.asked
 	a.asked++
 	s.mu.Unlock()
-	s.asking.Lock()
-	defer s.asking.Unlock()
-	password, err := s.ask(ctx, asked)
-	if err == nil {
-		s.Keep(password)
+	password, err = s.ask(ctx, times)
+	return password, true, err
+}
+
+// keptFor is the password kept, for a sudo answered so far as a says, the
+// first time it asks.
+func (s *Server) keptFor(a *answered) (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if a.kept || s.password == "" {
+		return "", false
 	}
-	return password, err
+	a.kept = true
+	return s.password, true
 }
 
 // Ask is kit run as the helper, through the link at path, with sudo's
