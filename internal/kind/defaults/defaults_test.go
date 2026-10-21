@@ -247,7 +247,7 @@ func TestAValueTakenTrimmedIsTakenAgainExactly(t *testing.T) {
 			for range 20 {
 				m := newMac(t)
 				list := m.declare()
-				record, err := json.Marshal(map[string]any{"domains": map[string]bool{"NSGlobalDomain": true}, "baseline": map[string]string{"NSGlobalDomain:K": c.was}, "exact_baselines": map[string]bool{"NSGlobalDomain:K": marked}})
+				record, err := json.Marshal(map[string]any{"domains": map[string]bool{"NSGlobalDomain": true}, "baseline": map[string]string{"NSGlobalDomain:K": c.was}, "exact": map[string]bool{"NSGlobalDomain:K": marked}})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -279,7 +279,7 @@ func TestAValueTakenTrimmedIsTakenAgainExactly(t *testing.T) {
 // record is kit's record of the watched settings' baselines.
 func (m *mac) record() (rec struct {
 	Baseline map[string]string
-	Exact    map[string]bool `json:"exact_baselines"`
+	Exact    map[string]bool `json:"exact"`
 },
 ) {
 	m.t.Helper()

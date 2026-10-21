@@ -176,10 +176,12 @@ func TestConfigSync(t *testing.T) {
 	}
 }
 
-// kit-config's edits are each an item, with the lines it adds and removes:
-// a file the user untracked, kept on this Mac as git ignores it, none, and a
-// repository nested in kit-config what it is. Status is as real git prints
-// it.
+// kit-config's edits, its files on disk that differ from the last commit,
+// are each an item, with the lines it adds and removes: a file the user
+// untracked, kept on this Mac as git ignores it, none, and a repository
+// nested in kit-config what it is. One differing only in git's index, its
+// file on disk as last committed, is none. Status and the lines are as
+// real git prints them.
 func TestConfigEdits(t *testing.T) {
 	repo := t.TempDir()
 	for _, name := range []string{"notes", "secret"} {
@@ -198,10 +200,10 @@ func TestConfigEdits(t *testing.T) {
 	}
 
 	fake = runnertest.New(t)
-	fake.On("git", status...).Prints(" D personal/declarations\x00 M shared/home/.zshrc\x00D  secret\x00?? notes\x00?? vendor/tool/\x00")
+	fake.On("git", status...).Prints(" D personal/declarations\x00MM same\x00 M shared/home/.zshrc\x00D  secret\x00?? notes\x00?? vendor/tool/\x00")
 	fake.On("git", git("rev-parse", "--verify", "--quiet", "HEAD")...).Prints("0e0bf17a399109574ffb00e33300280a33f81ab7\n")
 	fake.On("git", git("read-tree", "0e0bf17a399109574ffb00e33300280a33f81ab7")...)
-	fake.On("git", git("diff", "--numstat", "-z", "--no-renames", "--no-ext-diff", "HEAD")...).Prints("0\t40\tpersonal/declarations\x003\t1\tshared/home/.zshrc\x00")
+	fake.On("git", git("diff", "--numstat", "-z", "--no-renames", "--no-ext-diff", "HEAD")...).Prints("0\t40\tpersonal/declarations\x003\t1\tshared/home/.zshrc\x002\t0\tsecret\x00")
 	res := steps.ConfigEdits(gitrepo.Repo{Dir: repo, Run: fake}).Check(t.Context())
 	var got []string
 	for _, it := range res.Items {

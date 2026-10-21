@@ -24,6 +24,8 @@ type Repo struct {
 	// Sleep waits between tries for git's index while another git holds it:
 	// time.Sleep when nil.
 	Sleep func(time.Duration)
+	// onUnlock, when set, is called as a commit lets go of git's index.
+	onUnlock func()
 }
 
 func (r Repo) git(ctx context.Context, args ...string) (runner.Result, error) {

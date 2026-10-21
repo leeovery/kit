@@ -10,7 +10,14 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/leeovery/kit/internal/runner"
 )
+
+// ErrHeadMoved is Commit's error when its commit went onto another commit
+// than the one it was made from, HEAD moved by another git meanwhile: the
+// commit may undo that one's changes, so it's never to be pushed.
+var ErrHeadMoved = errors.New("HEAD moved while kit committed")
 
 // Commit commits paths in the repository with message, each whole as it is
 // on disk: a file edited, new or deleted, staged or not, a rename's two
@@ -27,8 +34,8 @@ import (
 // too. It refuses while git is part way through a merge, rebase,
 // cherry-pick, revert or am, or a conflict in paths waits to be resolved.
 // It reports whether it committed: with nothing to commit it doesn't, which
-// is no error; an error once it has is the index's, or HEAD moved by
-// another git meanwhile.
+// is no error; an error once it has is the index's, or ErrHeadMoved. A run
+// stopped while git commits, once git has made the commit, has committed.
 func (r Repo) Commit(ctx context.Context, message string, paths ...string) (bool, error) {
 	if len(paths) == 0 {
 		return false, nil
@@ -53,8 +60,6 @@ func (r Repo) Commit(ctx context.Context, message string, paths ...string) (bool
 		return false, err
 	}
 	defer lock.release()
-	sweep(gitDir)
-	defer sweep(gitDir)
 	if err := underWay(gitDir); err != nil {
 		return false, err
 	}
@@ -68,7 +73,7 @@ func (r Repo) commitLocked(ctx context.Context, lock *indexLock, message string,
 	if err != nil {
 		return false, err
 	}
-	files, err := r.commitFrom(ctx, lock.file(ownIndex), base, message, p)
+	files, err := r.commitFrom(ctx, lock, base, message, p)
 	if err != nil {
 		return false, err
 	}
@@ -86,11 +91,11 @@ func (r Repo) commitLocked(ctx context.Context, lock *indexLock, message string,
 	return committed, moved
 }
 
-// commitFrom commits p from an index of base's and p's files alone, at
-// index, and returns the files the commit changes: none, and no commit,
-// when none differ from base.
-func (r Repo) commitFrom(ctx context.Context, index, base, message string, p commitPlan) ([]string, error) {
-	env := []string{"GIT_INDEX_FILE=" + index}
+// commitFrom commits p from an index of base's and p's files alone, kit's
+// own while it holds lock, and returns the files the commit changes: none,
+// and no commit, when none differ from base.
+func (r Repo) commitFrom(ctx context.Context, lock *indexLock, base, message string, p commitPlan) ([]string, error) {
+	env := []string{"GIT_INDEX_FILE=" + lock.file(ownIndex)}
 	if base != "" {
 		if _, err := r.gitIn(ctx, env, nil, "read-tree", base); err != nil {
 			return nil, err
@@ -112,9 +117,39 @@ func (r Repo) commitFrom(ctx context.Context, index, base, message string, p com
 		return nil, err
 	}
 	if _, err := r.gitIn(ctx, env, nil, "commit", "--quiet", "-m", message); err != nil {
-		return nil, err
+		if r.landed(context.WithoutCancel(ctx), env, base) {
+			return files, nil
+		}
+		return nil, commitFailed(err, lock.path())
 	}
 	return files, nil
+}
+
+// landed reports whether git made the commit all the same once git commit
+// failed, as when the run's stopped while a post-commit hook runs: HEAD
+// moved off base onto a commit whose parent is base and whose files are
+// those of kit's own index, run with env. Another git's commit onto base,
+// as a hook can make, which git commit then refuses to follow, isn't.
+func (r Repo) landed(ctx context.Context, env []string, base string) bool {
+	head, err := r.commitAt(ctx, "HEAD")
+	if err != nil || head == "" || head == base {
+		return false
+	}
+	if parent, err := r.commitAt(ctx, "HEAD^"); err != nil || parent != base {
+		return false
+	}
+	_, err = r.gitIn(ctx, env, nil, "diff", "--cached", "--quiet", "HEAD")
+	return err == nil
+}
+
+// commitFailed is git commit's error, but for a hook's that reached for
+// git's own index, which kit holds: said so, rather than as git says it, a
+// lock a git that stopped may have left.
+func commitFailed(err error, lock string) error {
+	if exit, ok := errors.AsType[*runner.ExitError](err); ok && strings.Contains(exit.Stderr, lock+"': File exists") {
+		return errors.New("a hook of the commit's failed: it reached for git's own index, which kit holds while it commits, rather than the one git gives hooks (GIT_INDEX_FILE)")
+	}
+	return err
 }
 
 // checkParent errors unless the commit just made went onto base: another
@@ -123,10 +158,10 @@ func (r Repo) commitFrom(ctx context.Context, index, base, message string, p com
 func (r Repo) checkParent(ctx context.Context, base string) error {
 	parent, err := r.commitAt(ctx, "HEAD^")
 	if err != nil {
-		return fmt.Errorf("couldn't read what kit's commit went onto: %w", err)
+		return fmt.Errorf("%w, or kit couldn't tell, so it isn't pushed: %w", ErrHeadMoved, err)
 	}
 	if parent != base {
-		return fmt.Errorf("HEAD moved while kit committed: its commit went onto %s, not %s, which it was made from, so it may undo what that commit changed: see git show HEAD", named(parent), named(base))
+		return fmt.Errorf("%w: its commit went onto %s, not %s, which it was made from, so it may undo what that commit changed, and isn't pushed: undo it with git revert HEAD, or git reset --soft HEAD~ and run kit again", ErrHeadMoved, named(parent), named(base))
 	}
 	return nil
 }
@@ -147,13 +182,7 @@ func (r Repo) resetIndex(ctx context.Context, lock *indexLock, files []string) e
 		return nil
 	}
 	next := lock.file(nextIndex)
-	data, err := os.ReadFile(lock.file("index"))
-	if err == nil {
-		err = os.WriteFile(next, data, 0o600)
-	} else if errors.Is(err, fs.ErrNotExist) {
-		// No index yet: git makes one.
-		err = nil
-	}
+	mode, err := copyIndex(lock.file("index"), next)
 	if err != nil {
 		return err
 	}
@@ -161,10 +190,30 @@ func (r Repo) resetIndex(ctx context.Context, lock *indexLock, files []string) e
 	if _, err := r.gitIn(ctx, env, files, "--literal-pathspecs", "reset", "--quiet", "--pathspec-from-file=-", "--pathspec-file-nul"); err != nil {
 		return err
 	}
-	if data, err = os.ReadFile(next); err != nil {
-		return err
+	return lock.replace(next, mode)
+}
+
+// copyIndex copies the index at from to to, and is its mode: none when
+// there's no index yet, git making one. The copy keeps the index's time, so
+// git still finds an entry whose file changed within the second the index
+// was written racy, and reads the file (git's racy-git rule): one newer
+// would have git trust the entry, and miss the change.
+func copyIndex(from, to string) (fs.FileMode, error) {
+	info, err := os.Stat(from)
+	if errors.Is(err, fs.ErrNotExist) {
+		return 0, nil
 	}
-	return lock.replace(data)
+	if err != nil {
+		return 0, err
+	}
+	data, err := os.ReadFile(from)
+	if err != nil {
+		return 0, err
+	}
+	if err := os.WriteFile(to, data, 0o600); err != nil {
+		return 0, err
+	}
+	return info.Mode().Perm(), os.Chtimes(to, info.ModTime(), info.ModTime())
 }
 
 // commitPlan is what a commit does with the files status names: those to
@@ -238,23 +287,13 @@ func underWay(gitDir string) error {
 
 // ownIndex and nextIndex are the files in the git folder a commit works in
 // while it holds git's index: an index of its own, then the next of the
-// user's. Every file whose name starts with ownIndex is kit's, swept away.
+// user's. Every file whose name starts with ownIndex is kit's, swept away
+// while kit holds the index, never after: by then another git may hold it,
+// another kit working in its own.
 const (
 	ownIndex  = "kit-index"
 	nextIndex = "kit-index.next"
 )
-
-// sweep clears the git folder of kit's own index files, as a run that
-// stopped part way can leave them: only while kit holds git's index, so
-// none is in use.
-func sweep(gitDir string) {
-	entries, _ := os.ReadDir(gitDir)
-	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), ownIndex) {
-			_ = os.Remove(filepath.Join(gitDir, e.Name()))
-		}
-	}
-}
 
 // lockTries and lockWait are how long a commit waits for another git to let
 // go of the index: as long as a git status takes, never a git commit
@@ -271,28 +310,64 @@ type indexLock struct {
 	gitDir string
 	f      *os.File
 	done   bool
+	// unlocked, when set, is called as kit lets go.
+	unlocked func()
 }
 
 // lockIndex takes git's lock on the index, trying for a while if another git
-// holds it, then refusing, naming the lock, which it leaves be.
+// holds it, then refusing, naming the lock, which it leaves be; kit's own
+// files a run that stopped left are swept away once it has it.
 func (r Repo) lockIndex(ctx context.Context, gitDir string) (*indexLock, error) {
 	path := filepath.Join(gitDir, "index.lock")
 	for try := 1; ; try++ {
 		f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o666)
 		if err == nil {
-			return &indexLock{gitDir: gitDir, f: f}, nil
+			l := &indexLock{gitDir: gitDir, f: f, unlocked: r.onUnlock}
+			l.sweep()
+			return l, nil
 		}
 		if !errors.Is(err, fs.ErrExist) {
 			return nil, fmt.Errorf("couldn't lock git's index: %w", err)
 		}
 		if try == lockTries {
-			return nil, fmt.Errorf("another git holds the repository's index, %s, so kit's change waits till it's done", path)
+			return nil, heldBy(path)
 		}
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 		r.sleep(lockWait)
 	}
+}
+
+// heldBy is the refusal while another git holds the index's lock at path:
+// how old it is, and, for one a git that stopped left, what to do.
+func heldBy(path string) error {
+	age := ""
+	if info, err := os.Stat(path); err == nil {
+		age = ", made " + ago(time.Since(info.ModTime())) + " ago"
+	}
+	return fmt.Errorf("another git holds the repository's index, its lock %s%s, so kit's change waits till it's done; if no git is running, one that stopped left it: remove %s", path, age, path)
+}
+
+// ago says roughly how long d is.
+func ago(d time.Duration) string {
+	switch {
+	case d < time.Minute:
+		return count(int(d.Seconds()), "second")
+	case d < time.Hour:
+		return count(int(d.Minutes()), "minute")
+	case d < 48*time.Hour:
+		return count(int(d.Hours()), "hour")
+	}
+	return count(int(d.Hours()/24), "day")
+}
+
+// count is n of unit, as in 1 hour or 3 hours.
+func count(n int, unit string) string {
+	if n == 1 {
+		return "1 " + unit
+	}
+	return fmt.Sprintf("%d %ss", n, unit)
 }
 
 func (r Repo) sleep(d time.Duration) {
@@ -308,28 +383,72 @@ func (l *indexLock) file(name string) string {
 	return filepath.Join(l.gitDir, name)
 }
 
-// replace makes data the index: written into the lock, which takes the
-// index's place.
-func (l *indexLock) replace(data []byte) error {
+// path is the lock's.
+func (l *indexLock) path() string {
+	return l.f.Name()
+}
+
+// sweep clears the git folder of kit's own index files: only while kit
+// holds the index, so none is in use.
+func (l *indexLock) sweep() {
+	entries, _ := os.ReadDir(l.gitDir)
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ownIndex) {
+			_ = os.Remove(l.file(e.Name()))
+		}
+	}
+}
+
+// replace makes the index at next the index, with mode, unless that's
+// none: written into the lock, with next's time, which takes the index's
+// place, kit's own files swept away first, while it's still the lock.
+func (l *indexLock) replace(next string, mode fs.FileMode) error {
+	info, err := os.Stat(next)
+	if err != nil {
+		return err
+	}
+	data, err := os.ReadFile(next)
+	if err != nil {
+		return err
+	}
 	if _, err := l.f.Write(data); err != nil {
 		return err
 	}
 	if err := l.f.Close(); err != nil {
 		return err
 	}
-	if err := os.Rename(l.f.Name(), l.file("index")); err != nil {
+	if mode != 0 {
+		if err := os.Chmod(l.path(), mode); err != nil {
+			return err
+		}
+	}
+	if err := os.Chtimes(l.path(), info.ModTime(), info.ModTime()); err != nil {
 		return err
 	}
-	l.done = true
+	l.sweep()
+	if err := os.Rename(l.path(), l.file("index")); err != nil {
+		return err
+	}
+	l.letGo()
 	return nil
 }
 
-// release lets go of the lock, the index as it was, unless replace made
-// the lock the index.
+// release lets go of the lock, the index as it was, kit's own files swept
+// away first, unless replace made the lock the index.
 func (l *indexLock) release() {
 	if l.done {
 		return
 	}
 	_ = l.f.Close()
-	_ = os.Remove(l.f.Name())
+	l.sweep()
+	_ = os.Remove(l.path())
+	l.letGo()
+}
+
+// letGo marks the lock let go of, nothing of the git folder kit's again.
+func (l *indexLock) letGo() {
+	l.done = true
+	if l.unlocked != nil {
+		l.unlocked()
+	}
 }

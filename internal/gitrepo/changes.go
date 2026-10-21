@@ -32,19 +32,25 @@ type Change struct {
 	Added, Removed int
 }
 
-// Changes are the files changed and not committed, staged or not, new ones
-// each by name, a rename as its two sides, with the lines each adds and
-// removes against the last commit: a file added then gone before it was
-// committed is none.
+// Changes are the files on disk that differ from the last commit, staged
+// or not, new ones each by name, a rename as its two sides, with the lines
+// each adds and removes against it: a file added then gone before it was
+// committed is none, and so is one whose difference is only in git's
+// index, as the user staged it, its file on disk as last committed, which
+// is the user's own business in git.
 func (r Repo) Changes(ctx context.Context) ([]Change, error) {
 	entries, err := r.status(ctx)
+	if err != nil || len(entries) == 0 {
+		return nil, err
+	}
+	counts, err := r.counts(ctx)
 	if err != nil {
 		return nil, err
 	}
 	var changes []Change
 	for _, e := range entries {
 		state, ok := e.state()
-		if !ok {
+		if _, differs := counts[e.path]; !ok || inHead(e, entries) && !differs {
 			continue
 		}
 		if i := slices.IndexFunc(changes, func(c Change) bool { return c.Path == e.path }); i >= 0 {
@@ -58,10 +64,6 @@ func (r Repo) Changes(ctx context.Context) ([]Change, error) {
 		}
 		changes = append(changes, Change{Path: e.path, State: state})
 	}
-	if len(changes) == 0 {
-		return nil, nil
-	}
-	counts := r.counts(ctx)
 	for i, c := range changes {
 		n, ok := counts[c.Path]
 		if !ok && c.State == Added {
@@ -74,6 +76,19 @@ func (r Repo) Changes(ctx context.Context) ([]Change, error) {
 	return changes, nil
 }
 
+// inHead reports whether e's path is in the last commit, as status says:
+// one staged as new, a nested repository, and one untracked with nothing
+// staged as deleted at it aren't.
+func inHead(e entry, entries []entry) bool {
+	switch {
+	case e.nested():
+		return false
+	case e.code == "??":
+		return slices.Contains(entries, entry{code: "D ", path: e.path})
+	}
+	return e.code[0] != 'A'
+}
+
 // isFile reports whether path, in the repository, is on disk, and no
 // folder.
 func (r Repo) isFile(path string) bool {
@@ -81,11 +96,12 @@ func (r Repo) isFile(path string) bool {
 	return err == nil && !info.IsDir()
 }
 
-// counts are the lines each file on disk adds and removes against the last
-// commit, by path, whatever's staged: none it can't count.
-func (r Repo) counts(ctx context.Context) map[string][2]int {
+// counts are the files on disk that differ from the last commit, by path,
+// each with the lines it adds and removes, whatever's staged: none before
+// the first commit; a binary file's, none counted.
+func (r Repo) counts(ctx context.Context) (map[string][2]int, error) {
 	counts := make(map[string][2]int)
-	_ = r.withHeadIndex(ctx, func(env []string) error {
+	err := r.withHeadIndex(ctx, func(env []string) error {
 		res, err := r.gitIn(ctx, env, nil, "diff", "--numstat", "-z", "--no-renames", "--no-ext-diff", "HEAD")
 		if err != nil {
 			return err
@@ -99,7 +115,7 @@ func (r Repo) counts(ctx context.Context) map[string][2]int {
 		}
 		return nil
 	})
-	return counts
+	return counts, err
 }
 
 // withHeadIndex runs do with an index of the last commit's alone, a file of

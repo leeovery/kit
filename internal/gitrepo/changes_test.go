@@ -17,12 +17,16 @@ import (
 // no change; one staged as deleted and back untracked is edited; one
 // staged as deleted and on disk with no untracked twin, as git ignores it,
 // is untracked; a nested repository is one, by its folder, apart from a
-// file of the same name that was tracked. Lines are counted against the
-// last commit, in kit's own index of it, whatever's staged: a file new to
-// it, by its own lines. What git prints is what real git does.
+// file of the same name that was tracked. What's changed is what differs
+// on disk from the last commit, in kit's own index of it, whatever's
+// staged, with the lines it adds and removes: a file new to it, by its own
+// lines; one whose difference is only in git's index, its file on disk as
+// last committed, none, as real git's diff of the two names none of these:
+// an edit staged then put back, a file untracked then back, ignored or not.
+// What git prints is what real git does.
 func TestChanges(t *testing.T) {
 	root := t.TempDir()
-	for name, text := range map[string]string{"kept": "k\n", "n ew": "n\nw\n", "r s": "1\n2\n3\n4\n5\n6\n", "secret": "s\n", "x/in": "in\n"} {
+	for name, text := range map[string]string{"kept": "k\n", "n ew": "n\nw\n", "r s": "1\n2\n3\n4\n5\n6\n", "secret": "s\n", "x/in": "in\n", "same": "s\n", "twin": "t\n", "hidden": "h\n"} {
 		if err := os.MkdirAll(filepath.Dir(filepath.Join(root, name)), 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -34,20 +38,20 @@ func TestChanges(t *testing.T) {
 	fake := runnertest.New(t)
 	s := &sequence{fake: fake}
 	s.expect(call{args: in("--literal-pathspecs", "status", "--porcelain", "-z", "--untracked-files=all", "--no-renames", "--")}).
-		Prints(" M café\x00AD gone\x00D  kept\x00D  p -> q\x00A  r s\x00D  secret\x00D  x\x00?? kept\x00?? n ew\x00?? nested/\x00?? x/\x00")
+		Prints(" M café\x00AD gone\x00D  hidden\x00D  kept\x00D  p -> q\x00A  r s\x00MM same\x00D  secret\x00D  twin\x00D  x\x00?? kept\x00?? n ew\x00?? nested/\x00?? twin\x00?? x/\x00")
 	s.expect(call{args: in("rev-parse", "--verify", "--quiet", "HEAD")}).Prints(base + "\n")
 	s.expect(call{args: in("read-tree", base), index: readIndex})
-	s.expect(call{args: in("diff", "--numstat", "-z", "--no-renames", "--no-ext-diff", "HEAD"), index: readIndex}).Prints("1\t0\tcafé\x000\t6\tp -> q\x001\t1\tx\x00")
+	s.expect(call{args: in("diff", "--numstat", "-z", "--no-renames", "--no-ext-diff", "HEAD"), index: readIndex}).Prints("1\t0\tcafé\x001\t1\tkept\x000\t6\tp -> q\x002\t0\tsecret\x001\t1\tx\x00")
 	got, err := gitrepo.Repo{Dir: root, Run: fake}.Changes(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := []gitrepo.Change{
 		{Path: "café", State: gitrepo.Edited, Added: 1},
-		{Path: "kept", State: gitrepo.Edited},
+		{Path: "kept", State: gitrepo.Edited, Added: 1, Removed: 1},
 		{Path: "p -> q", State: gitrepo.Deleted, Removed: 6},
 		{Path: "r s", State: gitrepo.Added, Added: 6},
-		{Path: "secret", State: gitrepo.Untracked},
+		{Path: "secret", State: gitrepo.Untracked, Added: 2},
 		{Path: "x", State: gitrepo.Deleted, Added: 1, Removed: 1},
 		{Path: "n ew", State: gitrepo.Added, Added: 2},
 		{Path: "nested/", State: gitrepo.Repository},
@@ -57,6 +61,16 @@ func TestChanges(t *testing.T) {
 		t.Errorf("Changes() = %+v\nwant %+v", got, want)
 	}
 	checkCalls(t, "changes", fake, "", s.want)
+
+	// Counting fails: an error, never every file shown as committed.
+	fake = runnertest.New(t)
+	fake.On("git", s.want[0].args...).Prints(" M café\x00")
+	fake.On("git", s.want[1].args...).Prints(base + "\n")
+	fake.On("git", s.want[2].args...)
+	fake.On("git", s.want[3].args...).Exits(128).PrintsToStderr("fatal: unable to read 0e0bf17a")
+	if got, err := (gitrepo.Repo{Dir: root, Run: fake}).Changes(context.Background()); err == nil {
+		t.Errorf("Changes(), counting failing = %+v; want an error", got)
+	}
 }
 
 // Diff is a file's change on disk against the last commit, in kit's own

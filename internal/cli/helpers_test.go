@@ -42,6 +42,9 @@ type world struct {
 	env  map[string]string
 	now  time.Time
 	fake *runnertest.Fake
+	// edited is whether git's status of kit-config whole is scripted, as
+	// edits does.
+	edited bool
 	// environ is kit's environment, whole, beside env's lookups; stdin is
 	// what kit reads on its standard input.
 	environ []string
@@ -264,7 +267,7 @@ func (w *world) expectCommit(t *testing.T, c commit, checks ...func()) {
 			t.Error(err)
 		}
 	})
-	w.expectPush()
+	w.expectPush(t, gitDir)
 	t.Cleanup(func() {
 		if !committed.Load() {
 			t.Errorf("kit didn't commit %q", c.message)
@@ -276,11 +279,18 @@ func (w *world) expectCommit(t *testing.T, c commit, checks ...func()) {
 	})
 }
 
-// expectPush scripts a push of kit-config's, the remote with nothing new.
-func (w *world) expectPush() {
+// expectPush scripts a push of kit-config's, whose git folder is gitDir,
+// the remote with nothing new: nothing else changed, unless edits says what
+// is.
+func (w *world) expectPush(t *testing.T, gitDir string) {
+	t.Helper()
 	dir := filepath.Join(w.home, ".config", "kit")
 	git := func(args ...string) []string { return append([]string{"-C", dir}, args...) }
 	w.fake.On("git", git("remote")...).Prints("origin\n")
+	w.fake.On("git", git("rev-parse", "--absolute-git-dir")...).Prints(gitDir + "\n")
+	if !w.edited {
+		w.fake.On("git", git("--literal-pathspecs", "status", "--porcelain", "-z", "--untracked-files=all", "--no-renames", "--")...)
+	}
 	w.fake.On("git", git("fetch", "--quiet")...)
 	w.fake.On("git", git("rev-list", "--count", "HEAD..@{u}")...).Prints("0\n")
 	w.fake.On("git", git("push", "--quiet")...)
@@ -295,6 +305,7 @@ func (w *world) edits(t *testing.T, status, numstat string) {
 	dir := filepath.Join(w.home, ".config", "kit")
 	git := func(args ...string) []string { return append([]string{"-C", dir}, args...) }
 	w.fake.On("git", git("--literal-pathspecs", "status", "--porcelain", "-z", "--untracked-files=all", "--no-renames", "--")...).Prints(status)
+	w.edited = true
 	w.fake.On("git", git("rev-parse", "--verify", "--quiet", "HEAD")...).Prints(head + "\n")
 	w.fake.On("git", git("read-tree", head)...)
 	w.fake.On("git", git("diff", "--numstat", "-z", "--no-renames", "--no-ext-diff", "HEAD")...).Prints(numstat)

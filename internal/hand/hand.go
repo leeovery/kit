@@ -34,7 +34,8 @@ func New() *Desk { return &Desk{waiting: map[string]chan Answer{}} }
 func (d *Desk) Listen(step string) (<-chan Answer, func()) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	ch := make(chan Answer, 1)
+	// Room for a Stop behind a Done waiting.
+	ch := make(chan Answer, 2)
 	d.waiting[step] = ch
 	return ch, func() {
 		d.mu.Lock()
@@ -47,27 +48,40 @@ func (d *Desk) Listen(step string) (<-chan Answer, func()) {
 
 // Answer passes a to step's card, when one is up and isn't still taking
 // its last answer: false when nothing takes it. A Stop is never refused
-// while a card's up: it takes the place of an answer still waiting, as
-// stopping is what the person said last.
+// while a card's up: it queues behind a Done still waiting, the only sign,
+// for a step kit can't test, that the person did it, so the Done's taken
+// first; any other answer waiting it takes the place of, as stopping is
+// what the person said last.
 func (d *Desk) Answer(step string, a Answer) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	ch, ok := d.waiting[step]
-	if !ok {
+	switch {
+	case !ok:
+		return false
+	case a == Stop:
+		stop(ch)
+		return true
+	case len(ch) > 0:
 		return false
 	}
-	for {
-		select {
-		case ch <- a:
-			return true
-		default:
-		}
-		if a != Stop {
-			return false
-		}
-		select {
-		case <-ch:
-		default:
-		}
+	ch <- a
+	return true
+}
+
+// stop puts a Stop on ch, behind a Done waiting there, in place of any
+// other answer waiting: only the card's step takes from ch meanwhile.
+func stop(ch chan Answer) {
+	if len(ch) == cap(ch) {
+		// A Done, then a Stop, waiting already.
+		return
 	}
+	select {
+	case waiting := <-ch:
+		if waiting == Done {
+			ch <- Done
+		}
+	default:
+	}
+	ch <- Stop
 }

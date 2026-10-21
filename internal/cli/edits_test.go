@@ -40,51 +40,81 @@ func TestReconcileCommitsAnEdit(t *testing.T) {
 	}
 }
 
-// An edit staged, then put back as committed, is no change to commit:
-// adopting it stages it as it is, in kit's own index, and the sync says
-// nothing changed, the user's staged edit left as it is, never reset. It
-// pushes only commits waiting for the upstream, as one whose push failed:
-// none without an upstream. What git prints is what real git does.
-func TestReconcileAdoptingNothingToCommit(t *testing.T) {
+// Drift is kit-config's files on disk against the last commit: a
+// difference only in git's index, as the user staged it, the file on disk
+// as last committed, is the user's own business in git, never an edit:
+// an edit staged then put back, a file untracked and back. What git prints
+// is what real git does.
+func TestEditsOnlyInGitsIndexArentDrift(t *testing.T) {
+	w := laptopWorld(t)
+	w.edits(t, "MM shared/home/.zshrc\x00D  kept\x00?? kept\x00", "")
+	if out, _, _ := w.run(t, "status"); !strings.Contains(out, "config ok all committed\n") {
+		t.Errorf("kit status printed\n%s", out)
+	}
+	if _, errOut, code := w.run(t, "reconcile", "config:shared/home/.zshrc", "--adopt"); code != 2 || !strings.Contains(errOut, "no item config:shared/home/.zshrc") {
+		t.Errorf("kit reconcile printed %q, exit %d; want no such item", errOut, code)
+	}
+}
+
+// With nothing to commit, the sync says nothing changed, and pushes only
+// commits waiting for the upstream, as one whose push failed: none without
+// an upstream, and none while git's part way through a merge, which
+// pushing would set aside.
+func TestNothingChangedPushesWhatsWaiting(t *testing.T) {
 	for _, c := range []struct {
 		name, unpushed string
 		exit           int
+		merging        bool
 		want           string
 		pushes         bool
 	}{
-		{"none waiting", "0\n", 0, "kit-config ok nothing changed\n", false},
-		{"one waiting", "1\n", 0, "kit-config ok nothing changed; pushed 1 commit waiting\n", true},
-		{"no upstream", "", 128, "kit-config ok nothing changed\n", false},
+		{"none waiting", "0\n", 0, false, "kit-config ok nothing changed\n", false},
+		{"one waiting", "1\n", 0, false, "kit-config ok nothing changed; pushed 1 commit waiting\n", true},
+		{"no upstream", "", 128, false, "kit-config ok nothing changed\n", false},
+		{"one waiting, a merge under way", "1\n", 0, true, "kit-config attention nothing changed; 1 commit waiting, not pushed: a merge is under way in the repository (MERGE_HEAD): kit's change waits till it's finished\n", false},
 	} {
 		w := laptopWorld(t)
 		dir := filepath.Join(w.home, ".config", "kit")
-		w.write(t, ".config/kit/shared/home/.zshrc", "alias a=b\n")
-		w.keeps("shared/home/.zshrc")
-		if err := os.Symlink(filepath.Join(dir, "shared", "home", ".zshrc"), filepath.Join(w.home, ".zshrc")); err != nil {
-			t.Fatal(err)
-		}
 		git := func(args ...string) []string { return append([]string{"-C", dir}, args...) }
-		w.edits(t, "MM shared/home/.zshrc\x00", "")
-		w.fake.On("git", git("--literal-pathspecs", "status", "--porcelain", "-z", "--untracked-files=all", "--no-renames", "--", "shared/home/.zshrc")...).Prints("MM shared/home/.zshrc\x00")
-		w.fake.On("git", git("rev-parse", "--absolute-git-dir")...).Prints(t.TempDir() + "\n")
-		w.fake.On("git", git("update-index", "--add", "--remove", "--replace", "-z", "--stdin")...)
-		w.fake.On("git", git("diff", "--cached", "--name-only", "-z", "--no-renames")...)
+		gitDir := t.TempDir()
+		if c.merging {
+			if err := os.WriteFile(filepath.Join(gitDir, "MERGE_HEAD"), []byte(head+"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
 		w.fake.On("git", git("rev-list", "--count", "@{u}..HEAD")...).Prints(c.unpushed).Exits(c.exit)
-		w.expectPush()
-		out, _, code := w.run(t, "reconcile", "config:shared/home/.zshrc", "--adopt")
-		if code != 0 || !strings.Contains(out, "config:shared/home/.zshrc ok to commit\n"+c.want) {
-			t.Errorf("%s: kit reconcile printed\n%s exit %d", c.name, out, code)
+		w.expectPush(t, gitDir)
+		out, _, _ := w.run(t, "brew", "add", "jq")
+		if !strings.Contains(out, "jq ok already installed; declared already, in shared\n"+c.want) {
+			t.Errorf("%s: kit brew add jq printed\n%s", c.name, out)
 		}
 		pushed := false
 		for _, cmd := range w.fake.Commands() {
 			pushed = pushed || slices.Equal(cmd.Args, git("push", "--quiet"))
-			if slices.Contains(cmd.Args, "commit") {
-				t.Errorf("%s: ran %s, want nothing committed", c.name, cmd)
+			if slices.Contains(cmd.Args, "commit") || slices.Contains(cmd.Args, "stash") {
+				t.Errorf("%s: ran %s, want nothing committed or set aside", c.name, cmd)
 			}
 		}
 		if pushed != c.pushes {
 			t.Errorf("%s: pushed %v, want %v", c.name, pushed, c.pushes)
 		}
+	}
+}
+
+// A commit that went onto another git's, HEAD moved meanwhile, may undo
+// that one's changes: kit says so, and how to put it right, and pushes
+// nothing.
+func TestReconcileHoldsBackACommitWhenHEADMoved(t *testing.T) {
+	w := editsWorld(t)
+	dir := filepath.Join(w.home, ".config", "kit")
+	w.expectCommit(t, edited("kit reconcile (laptop): adopt config:shared/home/.zshrc", "shared/home/.zshrc"))
+	w.fake.On("git", "-C", dir, "rev-parse", "--verify", "--quiet", "HEAD^").Prints("154906a47f12246099602d1bee6b1c558d3409c9\n")
+	out, _, _ := w.run(t, "reconcile", "config:shared/home/.zshrc", "--adopt")
+	if !strings.Contains(out, "kit-config attention committed, not pushed: HEAD moved while kit committed") || !strings.Contains(out, "git revert HEAD") {
+		t.Errorf("kit reconcile printed\n%s", out)
+	}
+	if slices.Contains(w.fake.Calls(), "git -C "+dir+" push --quiet") || slices.Contains(w.fake.Calls(), "git -C "+dir+" fetch --quiet") {
+		t.Errorf("ran %q, want nothing pushed", w.fake.Calls())
 	}
 }
 
@@ -105,7 +135,7 @@ func TestReconcileANestedRepository(t *testing.T) {
 }
 
 // A file the user took out of git's index, kept on disk as git ignores it,
-// is untracked: kit says so, and adopting it commits it as the user left
+// and changed there since the last commit, is untracked: kit says so, and adopting it commits it as the user left
 // it, deleted from kit-config and kept on this Mac; undoing it tracks it
 // again, the file as it is. Status names it as real git does.
 func TestReconcileAnUntrackedFile(t *testing.T) {
@@ -115,7 +145,7 @@ func TestReconcileAnUntrackedFile(t *testing.T) {
 		w.write(t, ".config/kit/"+secret, "s\n")
 		// Out of git's index, and ignored: no file of kit's to link.
 		w.keeps()
-		w.edits(t, "D  "+secret+"\x00", "")
+		w.edits(t, "D  "+secret+"\x00", "1\t0\t"+secret+"\x00")
 		return w
 	}
 	w := untracked(t)

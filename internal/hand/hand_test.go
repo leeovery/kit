@@ -41,3 +41,34 @@ func TestAStopIsNeverRefused(t *testing.T) {
 		t.Fatalf("got %v, want the Stop in the key's place", got)
 	}
 }
+
+// A Stop given while a Done waits unread queues behind it: the Done's taken
+// first, then the Stop, and a Stop given again with both waiting is taken,
+// once.
+func TestAStopQueuesBehindADone(t *testing.T) {
+	d := New()
+	ch, down := d.Listen("paper")
+	defer down()
+	if !d.Answer("paper", Done) || !d.Answer("paper", Stop) || !d.Answer("paper", Stop) {
+		t.Fatal("want the Done taken, then each Stop")
+	}
+	var got []Answer
+	for len(ch) > 0 {
+		got = append(got, <-ch)
+	}
+	if len(got) != 2 || got[0] != Done || got[1] != Stop {
+		t.Fatalf("got %v, want the Done, then the Stop", got)
+	}
+}
+
+// A Done already taken leaves a Stop to wait alone.
+func TestAStopAfterADoneTaken(t *testing.T) {
+	d := New()
+	ch, down := d.Listen("paper")
+	defer down()
+	d.Answer("paper", Done)
+	<-ch
+	if !d.Answer("paper", Stop) || <-ch != Stop || len(ch) != 0 {
+		t.Fatal("want the Stop alone")
+	}
+}

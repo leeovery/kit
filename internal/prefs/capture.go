@@ -490,11 +490,17 @@ func (p *Prefs) Capture(ctx context.Context) (Report, error) {
 	pruneEmpty(filesDir)
 
 	committed, err := repo.Commit(ctx, report.message(p.Now().Format("2006-01-02 15:04")), p.Mac)
+	report.Committed = committed
 	if err != nil {
 		report.Errors = append(report.Errors, "history: "+err.Error())
 	}
-	report.Committed = committed
-	report.PushError = p.push(ctx, repo)
+	// Nothing's pushed once the commit failed, as one refused during a
+	// merge, or went onto another git's, which it may undo.
+	if err == nil || committed && !errors.Is(err, gitrepo.ErrHeadMoved) {
+		report.PushError = p.push(ctx, repo)
+	} else {
+		report.PushError = "not pushed: " + err.Error()
+	}
 	return report, p.update(func(r *Record) {
 		r.Captured, r.Summary, r.Errors, r.NotOwner = p.Now(), report.Summary(), len(report.Errors), ""
 		if report.PushError == "" {

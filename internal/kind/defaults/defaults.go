@@ -46,7 +46,7 @@ type record struct {
 	// exactly, a string's outer spaces and a key's kept, by name: each it
 	// took, or found the same; none in a record from before it read them
 	// so.
-	Exact map[string]bool `json:"exact_baselines,omitempty"`
+	Exact map[string]bool `json:"exact,omitempty"`
 }
 
 // take makes v the baseline of the watched setting name, read exactly.

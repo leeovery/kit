@@ -49,7 +49,7 @@ func newWorld(t *testing.T, lists prefs.Lists) *world {
 // disk in an index of its own (update), what's staged there being staged
 // (-z), the files committed, which the user's index then takes as
 // committed, as real git prints them; and a private remote taking it, with
-// nothing new of its own.
+// nothing new of its own, nothing else changed in the clone.
 func (w *world) pushes(t *testing.T, message, status string, update []string, staged string) {
 	t.Helper()
 	reads := func(want string) func(string) (string, error) {
@@ -76,6 +76,7 @@ func (w *world) pushes(t *testing.T, message, status string, update []string, st
 	w.fake.On("git", "-C", w.clone, "remote", "get-url", "origin").Prints(remote + "\n")
 	w.fake.On("gh", "repo", "view", "someone/prefs", "--json", "visibility", "--jq", ".visibility").Prints("PRIVATE\n")
 	w.fake.On("git", "-C", w.clone, "remote").Prints("origin\n")
+	w.fake.On("git", "-C", w.clone, "--literal-pathspecs", "status", "--porcelain", "-z", "--untracked-files=all", "--no-renames", "--")
 	w.fake.On("git", "-C", w.clone, "fetch", "--quiet")
 	w.fake.On("git", "-C", w.clone, "rev-list", "--count", "HEAD..@{u}").Prints("0\n")
 	w.fake.On("git", "-C", w.clone, "push", "--quiet")
@@ -278,6 +279,43 @@ func asNotOwner(err error, into *prefs.NotOwnerError) bool {
 		*into = e
 	}
 	return ok
+}
+
+// A capture whose commit failed pushes nothing: refused while git's part
+// way through a merge in the clone, which pushing would set aside, or gone
+// onto another git's commit, which it may undo. The record says why.
+func TestCaptureHoldsBackThePushWhenTheCommitFailed(t *testing.T) {
+	const message = "Capture 2026-10-06 03:00: 1 new\n\nnew: com.example.app\nclaimed: the folder, for this Mac's hardware"
+	for _, c := range []struct{ name, want string }{
+		{"a merge under way", "not pushed: a merge is under way in the repository (MERGE_HEAD)"},
+		{"HEAD moved", "not pushed: HEAD moved while kit committed"},
+	} {
+		w := newWorld(t, prefs.Lists{})
+		writeRecord(t, w.state, `{"on": "started fresh"}`)
+		w.fake.On("defaults", "domains").Prints("com.example.app\n")
+		w.exports(t, "com.example.app", map[string]any{"Theme": "dark"})
+		w.pushes(t, message,
+			"?? laptop/.gitignore\x00?? laptop/domains/com.example.app.plist\x00?? laptop/owner\x00",
+			[]string{"laptop/.gitignore", "laptop/domains/com.example.app.plist", "laptop/owner"},
+			"laptop/.gitignore\x00laptop/domains/com.example.app.plist\x00laptop/owner\x00")
+		if c.name == "a merge under way" {
+			w.write(t, filepath.Join(w.clone, ".git", "MERGE_HEAD"), "0e0bf17a399109574ffb00e33300280a33f81ab7\n")
+		} else {
+			w.fake.On("git", "-C", w.clone, "rev-parse", "--verify", "--quiet", "HEAD^").Prints("154906a47f12246099602d1bee6b1c558d3409c9\n")
+		}
+		report, err := w.p.Capture(t.Context())
+		if err != nil || !strings.HasPrefix(report.PushError, c.want) {
+			t.Errorf("%s: Capture() = %+v, %v; want %q", c.name, report, err, c.want)
+		}
+		for _, call := range w.fake.Calls() {
+			if strings.Contains(call, " push --quiet") || strings.Contains(call, " fetch --quiet") || strings.Contains(call, " stash ") {
+				t.Errorf("%s: ran %s, want nothing pushed or set aside", c.name, call)
+			}
+		}
+		if rec, _ := w.p.Load(); rec.Unpushed.IsZero() || !strings.HasPrefix(rec.PushError, c.want) {
+			t.Errorf("%s: record = %+v, want the push held back, and why", c.name, rec)
+		}
+	}
 }
 
 // A store that isn't private is never pushed to: the commit waits, and the

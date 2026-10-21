@@ -817,30 +817,71 @@ func TestAStopAsTheToDoIsDone(t *testing.T) {
 	}
 }
 
-// A Stop given between two to-dos, as one's done and before the next is
-// up, stops there: the next never comes up.
+// A Stop given between two to-dos, once the first's Done is taken and the
+// list has moved on to the next, stops there: the first kept as done, the
+// next left to do.
 func TestAStopBetweenToDos(t *testing.T) {
 	defer steps.SetManualPoll(time.Hour)()
 	for range 20 {
 		c := newCard(t)
-		list := config.List{Entries: []config.Entry{
-			{Name: "printer", Value: `"Add the printer"`, Scope: "laptop", Line: 2},
-			{Name: "scanner", Value: `"Add the scanner"`, Scope: "laptop", Line: 3},
-		}}
-		applied := applying(t, steps.Manual(c.fake, "/home/someone", c.state, list, c.raise))
+		applied := applying(t, steps.Manual(c.fake, "/home/someone", c.state, printerAndScanner, c.raise))
+		c.upNow(t, "manual:printer")
+		c.answer(t, steps.ManualName, hand.Done)
+		c.toDoUp(t, 1)
+		c.answer(t, steps.ManualName, hand.Stop)
+		if err := ended(t, applied); err != nil {
+			t.Fatal(err)
+		}
+		if todos := c.lastToDos(); !todos[0].Done || todos[1].Done {
+			t.Fatalf("the to-dos ended %+v, want the printer's done, the scanner's left", todos)
+		}
+	}
+}
+
+// A Done and a Stop given back to back are both taken, the Done first,
+// whether it was taken before the Stop came or still waited: the to-do up
+// kept as done, the next left to do.
+func TestADoneThenAStopBackToBack(t *testing.T) {
+	defer steps.SetManualPoll(time.Hour)()
+	for range 20 {
+		c := newCard(t)
+		applied := applying(t, steps.Manual(c.fake, "/home/someone", c.state, printerAndScanner, c.raise))
 		c.upNow(t, "manual:printer")
 		c.answer(t, steps.ManualName, hand.Done)
 		c.answer(t, steps.ManualName, hand.Stop)
 		if err := ended(t, applied); err != nil {
 			t.Fatal(err)
 		}
-		if got := c.ups(); !slices.Equal(got, []string{"manual:printer"}) {
-			t.Fatalf("cards up %q, want the printer's alone", got)
-		}
 		if todos := c.lastToDos(); !todos[0].Done || todos[1].Done {
 			t.Fatalf("the to-dos ended %+v, want the printer's done, the scanner's left", todos)
 		}
 	}
+}
+
+// printerAndScanner are two steps by hand, neither with a command to test
+// it by.
+var printerAndScanner = config.List{Entries: []config.Entry{
+	{Name: "printer", Value: `"Add the printer"`, Scope: "laptop", Line: 2},
+	{Name: "scanner", Value: `"Add the scanner"`, Scope: "laptop", Line: 3},
+}}
+
+// toDoUp waits till the run's to-dos have moved on to the one at i, as
+// their events say.
+func (c *card) toDoUp(t *testing.T, i int) {
+	t.Helper()
+	for range 5000 {
+		c.sink.mu.Lock()
+		up := slices.ContainsFunc(c.sink.seen, func(e event.Event) bool {
+			td, ok := e.(event.ToDos)
+			return ok && td.Up == i
+		})
+		c.sink.mu.Unlock()
+		if up {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("the to-dos never moved on to %d", i)
 }
 
 // The run stopped while a card's up, the card waiting behind it never goes
