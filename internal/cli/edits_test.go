@@ -58,20 +58,19 @@ func TestEditsOnlyInGitsIndexArentDrift(t *testing.T) {
 
 // With nothing to commit, the sync says nothing changed, and pushes only
 // commits waiting for the upstream, as one whose push failed: none without
-// an upstream, and none while git's part way through a merge, which
-// pushing would set aside.
+// a remote, and none while git's part way through a merge, which pushing
+// would set aside.
 func TestNothingChangedPushesWhatsWaiting(t *testing.T) {
 	for _, c := range []struct {
-		name, unpushed string
-		exit           int
-		merging        bool
-		want           string
-		pushes         bool
+		name, remotes, waiting string
+		merging                bool
+		want                   string
+		pushes                 bool
 	}{
-		{"none waiting", "0\n", 0, false, "kit-config ok nothing changed\n", false},
-		{"one waiting", "1\n", 0, false, "kit-config ok nothing changed; pushed 1 commit waiting\n", true},
-		{"no upstream", "", 128, false, "kit-config ok nothing changed\n", false},
-		{"one waiting, a merge under way", "1\n", 0, true, "kit-config attention nothing changed; 1 commit waiting, not pushed: a merge is under way in the repository (MERGE_HEAD): kit's change waits till it's finished\n", false},
+		{"none waiting", "origin\n", "", false, "kit-config ok nothing changed\n", false},
+		{"one waiting", "origin\n", "1767312245\n", false, "kit-config ok nothing changed; pushed 1 commit waiting\n", true},
+		{"no remote", "", "", false, "kit-config ok nothing changed\n", false},
+		{"one waiting, a merge under way", "origin\n", "1767312245\n", true, "kit-config attention nothing changed; 1 commit waiting, not pushed: a merge is under way in the repository (MERGE_HEAD): kit's change waits till it's finished\n", false},
 	} {
 		w := laptopWorld(t)
 		dir := filepath.Join(w.home, ".config", "kit")
@@ -82,8 +81,9 @@ func TestNothingChangedPushesWhatsWaiting(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		w.fake.On("git", git("rev-list", "--count", "@{u}..HEAD")...).Prints(c.unpushed).Exits(c.exit)
 		w.expectPush(t, gitDir)
+		w.waiting(c.waiting)
+		w.fake.On("git", git("remote")...).Prints(c.remotes)
 		out, _, _ := w.run(t, "brew", "add", "jq")
 		if !strings.Contains(out, "jq ok already installed; declared already, in shared\n"+c.want) {
 			t.Errorf("%s: kit brew add jq printed\n%s", c.name, out)
@@ -101,20 +101,22 @@ func TestNothingChangedPushesWhatsWaiting(t *testing.T) {
 	}
 }
 
-// A commit HEAD moved under, by another git meanwhile, is refused by git:
-// nothing's committed, kit says so and to run it again, and nothing's
-// pushed or brought in.
-func TestReconcileWhenHEADMoves(t *testing.T) {
+// Other gits moving HEAD each time kit commits leave nothing committed:
+// kit says so, and that kit reconcile commits it, the edit left as drift,
+// and nothing's pushed or brought in.
+func TestReconcileWhenHEADKeepsMoving(t *testing.T) {
 	w := editsWorld(t)
 	dir := filepath.Join(w.home, ".config", "kit")
 	c := edited("kit reconcile (laptop): adopt config:shared/home/.zshrc", "shared/home/.zshrc")
 	c.moved = true
 	w.expectCommit(t, c)
 	out, _, _ := w.run(t, "reconcile", "config:shared/home/.zshrc", "--adopt")
-	if !strings.Contains(out, "kit-config failed couldn't commit shared/home/.zshrc: HEAD moved while kit committed, so nothing was committed: run kit again") {
+	if !strings.Contains(out, "kit-config failed couldn't commit shared/home/.zshrc: HEAD kept moving while kit committed, so nothing was committed: kit reconcile commits it") {
 		t.Errorf("kit reconcile printed\n%s", out)
 	}
-	if slices.Contains(w.fake.Calls(), "git -C "+dir+" push --quiet") || slices.Contains(w.fake.Calls(), "git -C "+dir+" fetch --quiet") {
+	if slices.ContainsFunc(w.fake.Calls(), func(call string) bool {
+		return strings.HasPrefix(call, "git -C "+dir+" push") || strings.HasPrefix(call, "git -C "+dir+" fetch")
+	}) {
 		t.Errorf("ran %q, want nothing pushed", w.fake.Calls())
 	}
 }

@@ -32,8 +32,10 @@ func (r Repo) git(ctx context.Context, args ...string) (runner.Result, error) {
 	return r.Run.Run(ctx, r.command(args...))
 }
 
+// command is git's args in the repository, in the C locale, as kit reads
+// what git says, and git translates its words, fatal: among them.
 func (r Repo) command(args ...string) runner.Command {
-	return runner.Command{Name: "git", Args: slices.Concat([]string{"-C", r.Dir}, args)}
+	return runner.Command{Name: "git", Args: slices.Concat([]string{"-C", r.Dir}, args), Env: []string{"LC_ALL=C"}}
 }
 
 // gitOn runs git's args on paths in the repository, each taken as it's
@@ -45,7 +47,7 @@ func (r Repo) gitOn(ctx context.Context, args []string, paths ...string) (runner
 // gitIn runs git's args with env, reading paths, each ended by a NUL.
 func (r Repo) gitIn(ctx context.Context, env, paths []string, args ...string) (runner.Result, error) {
 	cmd := r.command(args...)
-	cmd.Env = env
+	cmd.Env = append(cmd.Env, env...)
 	for _, p := range paths {
 		cmd.Input += p + "\x00"
 	}
@@ -75,13 +77,20 @@ func (r Repo) commitAt(ctx context.Context, rev string) (string, error) {
 	return strings.TrimSpace(string(res.Stdout)), err
 }
 
+// setting is git's setting, as git config --get reads it with args, the
+// key last: "" when it isn't set.
+func (r Repo) setting(ctx context.Context, args ...string) (string, error) {
+	res, err := r.git(ctx, slices.Concat([]string{"config", "--get"}, args)...)
+	if exit, ok := errors.AsType[*runner.ExitError](err); ok && exit.Code == 1 {
+		return "", nil
+	}
+	return strings.TrimSpace(string(res.Stdout)), err
+}
+
 // flag is git's boolean setting key: false when it isn't set.
 func (r Repo) flag(ctx context.Context, key string) (bool, error) {
-	res, err := r.git(ctx, "config", "--get", "--type=bool", key)
-	if exit, ok := errors.AsType[*runner.ExitError](err); ok && exit.Code == 1 {
-		return false, nil
-	}
-	return strings.TrimSpace(string(res.Stdout)) == "true", err
+	value, err := r.setting(ctx, "--type=bool", key)
+	return value == "true", err
 }
 
 // Files are the files git keeps, or would keep, under paths in the

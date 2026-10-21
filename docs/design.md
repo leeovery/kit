@@ -365,13 +365,20 @@ index or a ref do, as for any git command (`post-index-change`, given kit's own 
 said). The commit is of its index's tree onto the last commit, signed when git's config would
 have `git commit` sign it (`commit.gpgsign`, which `git commit-tree` doesn't read itself, so
 kit passes `-S`, signing with the program and key the config names, as `git commit` does), its
-author and committer git's own; HEAD then moves onto it only from the last commit, so when
-another git moved HEAD meanwhile, git refuses, nothing's committed, HEAD and the user's index
-stay as they were, and kit says so: run kit again. It refuses while git is part way through a
-merge, rebase, cherry-pick, revert or `git am`, or a conflict in its paths waits to be
-resolved: its change waits till that's finished. Nothing's pushed after a commit that failed. A
-run stopped as HEAD moves has committed exactly when HEAD took kit's commit; once it has, the
-user's index catches up whatever becomes of the run. What git can't keep (an ignored file, an
+author and committer git's own, its message as `git commit -m` leaves it (each line's trailing
+whitespace and blank lines first, last or doubled gone). The user's index's next contents are
+made before HEAD moves, written into the lock, so once HEAD has moved all that's left is the
+lock taking the index's place: a run that stops between leaves the lock, never an index from
+which a `git commit` would undo kit's, and should the lock not take its place, kit names the
+`git reset -q -- <files>` that brings the index up to date. HEAD moves onto the commit only
+from the last commit, so when another git moved HEAD meanwhile, git refuses, and kit, still
+holding the index, makes the commit again onto where HEAD is now, a few times at most; then
+nothing's committed, HEAD and the user's index stay as they were, and kit says so, and that
+`kit reconcile` commits it. A branch's lock another git holds is named, as the index's is. It
+refuses while git is part way through a merge, rebase, cherry-pick, revert or `git am`, or a
+conflict in its paths waits to be resolved: its change waits till that's finished. Nothing's
+pushed after a commit that failed. Once git has made the commit, HEAD's move and the index
+catching up are done whatever becomes of the run. What git can't keep (an ignored file, an
 empty folder, a repository nested in kit-config, which `kit reconcile` names and only snoozes)
 is left out. With nothing to commit it says nothing changed, pushing only commits still waiting
 for the upstream, as when a push failed. Drift is kit-config's files on disk against the last
@@ -386,31 +393,39 @@ then push, `--note` the message's end; an untracked file is committed as deleted
 Mac), revert (back to the last commit; a new file to the Bin; an untracked file tracked again,
 as it is) or snooze. kit pulls before it pushes, and pulls the prefs store's clone the same way
 (`kit prefs`): it refuses while git is part way through one of its operations, or a conflict
-waits, as setting work aside would end the one; then it fetches (a remote out of reach said
-plainly). A branch whose upstream the remote hasn't yet, as a new, empty remote's, has nothing
-to bring in and is pushed to it; one with no upstream at all is pushed to the same branch of
-the remote (`origin`, else the first), which becomes its upstream; HEAD on no branch is
-refused. When the remote has commits this Mac hasn't, kit rebases onto them by the commits
-since the two parted (never git's fork-point, which can leave out a commit, so the rebase
-changes no more than the remote's commits do), so two Macs don't fight. Anything not committed
-is set aside in a stash of kit's own and put back as it was, staged or not; but when the
-remote's commits change what's not committed here, nothing is set aside, rebased or pushed, and
-kit names the files and what to do: a file changed here (`kit reconcile` commits or undoes it);
-a change only staged, its file on disk as last committed, which drift doesn't show (the user's
-to commit or unstage); a file git ignores here, which the rebase would replace without a word
-(move it aside), and, of a folder git ignores whole, only what the remote's would replace (a
-file at its path, a file where it needs a folder, or the folder itself, where it has a file),
-as git adds to such a folder harmlessly; counting a folder of the remote's where a file is
-here, or the other way round, and, where git folds case (`core.ignorecase`, as on macOS's own
-disks), names differing only by case. Each file is named once, a file both changed and ignored
-as changed. `kit status`'s Sync line says so too, as far as the last fetch tells, while it
-holds commits back. A stash that won't go back is kept, named, never dropped, kit saying
+waits, as setting work aside would end the one; then it fetches, pruning the remote's branches
+gone from it (a remote out of reach said plainly). An upstream not there on a remote with no
+branches yet, as a new, empty one's, has nothing to bring in, and the branch is pushed to it;
+one gone from a remote that has others, as when it's renamed or deleted there, is refused,
+naming it, as pushing would make it anew. A branch with no upstream follows the remote's branch
+of its name when there is one, made its upstream and caught up with; otherwise it's pushed to
+the remote it's pushed to (`branch.<name>.pushRemote`, then `remote.pushDefault`, then
+`origin`, or the only remote), which becomes its upstream, and with several remotes and none of
+those set, kit refuses. HEAD on no branch is refused. Commits waiting to be pushed are those
+the upstream hasn't, or, with it not there or none, those on none of the remote's branches, so
+a failed first push, or commits made offline, show as waiting. When the remote has commits this
+Mac hasn't, kit rebases onto them by the commits since the two parted (never git's fork-point,
+which can leave out a commit, so the rebase changes no more than the remote's commits do), so
+two Macs don't fight. Anything not committed is set aside in a stash of kit's own and put back
+as it was, staged or not; but when the remote's commits change what's not committed here,
+nothing is set aside, rebased or pushed, and kit names the files and what to do: a file changed
+here (`kit reconcile` commits or undoes it); a change only staged, its file on disk as last
+committed, which drift doesn't show (the user's to commit or unstage); a file git ignores here,
+which the rebase would replace without a word (move it aside), and, of a folder git ignores
+whole, only what the remote's would replace (a file at its path, a file where it needs a
+folder, or the folder itself, where it has a file), as git adds to such a folder harmlessly;
+counting a folder of the remote's where a file is here, or the other way round, and, where git
+folds case (`core.ignorecase`, as on macOS's own disks), names differing only by the case of
+their ASCII letters, as git folds them. Each file is named once, a file both changed and
+ignored as changed. `kit status`'s Sync line says so too, as far as the last fetch tells, while
+it holds commits back. A stash that won't go back is kept, named, never dropped, kit saying
 whether the work is wholly in it or back with git's conflict markers in which files; a rebase
 judged under way by git's own record of it is aborted, one that never started leaves nothing to
 undo, and nothing is pushed. What a program says, kit looks for on the line that carries its
-error (git's `fatal:`, or ssh's above it; mas's `Error:` or `[ERROR]`; brew's `Error:`;
-osascript's `execution error:`; sudo's own), as the reason is often above the last line, and a
-line that merely mentions it isn't the error.
+error (git's `fatal:`, or ssh's own lines above it, some with no prefix of ssh's; mas's
+`Error:` or `[ERROR]`; brew's `Error:`; osascript's `execution error:`; sudo's own), as the
+reason is often above the last line, and a line that merely mentions it isn't the error; git
+runs in the C locale for it, as git translates `fatal:`.
 
 **Steps.** Everything kit applies is a step in one pipeline. A step has:
 

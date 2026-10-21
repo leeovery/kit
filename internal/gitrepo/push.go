@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/leeovery/kit/internal/runner"
 )
@@ -30,16 +31,20 @@ const stashMessage = "kit: set aside while rebasing onto the remote"
 // rebased, as putting it back would conflict, or the rebase replace it. A
 // stash that won't go back is kept, and named. A rebase that stops on a
 // conflict is aborted, leaving the repository as it was. A branch with no
-// upstream yet, or one the remote hasn't yet, as a new remote's, has
-// nothing to bring in.
+// upstream follows the remote's branch of its name, when there is one; a
+// remote with no branches yet, as a new one, has nothing to bring in; and
+// an upstream gone from a remote that has others, as when it's renamed or
+// deleted there, is refused, as pushing would make it anew.
 func (r Repo) Pull(ctx context.Context) error {
 	_, err := r.pull(ctx)
 	return err
 }
 
 // Push pulls the remote's changes (Pull), then pushes, nothing when Pull
-// refuses or fails: to the branch's upstream, or, with none yet, to the
-// same branch of the remote, which becomes its upstream.
+// refuses or fails: to the branch's upstream, or, with none, to the same
+// branch of the remote it's pushed to (branch.<name>.pushRemote, then
+// remote.pushDefault, then origin, or the only remote), which becomes its
+// upstream; with several remotes and none of those, it refuses.
 func (r Repo) Push(ctx context.Context) error {
 	to, err := r.pull(ctx)
 	if err != nil {
@@ -63,21 +68,28 @@ func (r Repo) Holding(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if behind, err := r.count(ctx, "HEAD..@{u}"); err != nil || behind == 0 {
+	remotes, err := r.remotes(ctx)
+	if err != nil || len(remotes) == 0 {
+		return err
+	}
+	c, err := r.catching(ctx, remotes)
+	if err != nil || c.up == "" {
+		return err
+	}
+	if behind, err := r.count(ctx, "HEAD.."+c.up); err != nil || behind == 0 {
 		return nil
 	}
-	return r.clashes(ctx, dirty)
+	return r.clashes(ctx, dirty, c.up)
 }
 
 // pull is Pull, and the remote to push to, making it the branch's
 // upstream, when it has none: "" when it has.
 func (r Repo) pull(ctx context.Context) (string, error) {
-	res, err := r.git(ctx, "remote")
-	if err != nil {
+	remotes, err := r.remotes(ctx)
+	switch {
+	case err != nil:
 		return "", err
-	}
-	remotes := strings.Fields(string(res.Stdout))
-	if len(remotes) == 0 {
+	case len(remotes) == 0:
 		return "", ErrNoRemote
 	}
 	gitDir, dirty, err := r.settled(ctx)
@@ -87,19 +99,25 @@ func (r Repo) pull(ctx context.Context) (string, error) {
 	if err := r.fetch(ctx); err != nil {
 		return "", err
 	}
-	upstream, there, err := r.upstream(ctx)
-	switch {
-	case err != nil:
+	c, err := r.catching(ctx, remotes)
+	if err != nil {
 		return "", err
-	case upstream == "":
-		if slices.Contains(remotes, "origin") {
-			return "origin", nil
-		}
-		return remotes[0], nil
-	case !there:
-		return "", nil
 	}
-	return "", r.catchUp(ctx, gitDir, dirty)
+	if c.adopt {
+		if _, err := r.git(ctx, "branch", "--quiet", "--set-upstream-to="+c.up); err != nil {
+			return "", fmt.Errorf("couldn't follow %s, so nothing was pushed: %w", short(c.up), err)
+		}
+	}
+	if c.up == "" {
+		return c.pushTo, nil
+	}
+	return "", r.catchUp(ctx, gitDir, dirty, c.up)
+}
+
+// remotes are the repository's remotes, by name.
+func (r Repo) remotes(ctx context.Context) ([]string, error) {
+	res, err := r.git(ctx, "remote")
+	return strings.Fields(string(res.Stdout)), err
 }
 
 // settled is the repository's git folder, and what's changed and not
@@ -121,9 +139,10 @@ func (r Repo) settled(ctx context.Context) (gitDir string, dirty []entry, err er
 	return gitDir, dirty, nil
 }
 
-// fetch brings in the remote's commits.
+// fetch brings in the remote's commits, pruning its branches gone from it,
+// so an upstream renamed or deleted there is seen to be gone.
 func (r Repo) fetch(ctx context.Context) error {
-	if _, err := r.git(ctx, "fetch", "--quiet"); err != nil {
+	if _, err := r.git(ctx, "fetch", "--prune", "--quiet"); err != nil {
 		if unreachable(err) {
 			return errors.New("couldn't reach the remote, so nothing was pushed")
 		}
@@ -132,40 +151,127 @@ func (r Repo) fetch(ctx context.Context) error {
 	return nil
 }
 
-// upstream is the remote-tracking branch the branch HEAD is on pulls from
-// and pushes to, as fetched, and whether it's there: none configured, as
-// for a branch never pushed, or not there, as a new remote's.
-func (r Repo) upstream(ctx context.Context) (string, bool, error) {
-	res, err := r.git(ctx, "symbolic-ref", "-q", "HEAD")
-	if exit, ok := errors.AsType[*runner.ExitError](err); ok && exit.Code == 1 {
-		return "", false, errors.New("HEAD isn't on a branch, so nothing was pushed")
-	}
-	if err != nil {
-		return "", false, err
-	}
-	if res, err = r.git(ctx, "for-each-ref", "--format=%(upstream)", strings.TrimSpace(string(res.Stdout))); err != nil {
-		return "", false, err
-	}
-	upstream := strings.TrimSpace(string(res.Stdout))
-	if upstream == "" {
-		return "", false, nil
-	}
-	commit, err := r.commitAt(ctx, upstream)
-	return upstream, commit != "", err
+// tracking is how the branch HEAD is on stands with its remote, as last
+// fetched: the branch; its upstream, as configured, "" for none, and
+// whether that's there; and the remote, the upstream's, or, with none, the
+// one it's pushed to, "" when that isn't set and there are several.
+type tracking struct {
+	branch, upstream, remote string
+	there                    bool
 }
 
-// catchUp rebases onto the upstream's commits HEAD hasn't, if there are
-// any, with what's not committed, dirty, set aside, unless the remote
-// changed some of it.
-func (r Repo) catchUp(ctx context.Context, gitDir string, dirty []entry) error {
-	behind, err := r.count(ctx, "HEAD..@{u}")
+// name is the branch's short name, as in main.
+func (t tracking) name() string {
+	return strings.TrimPrefix(t.branch, "refs/heads/")
+}
+
+func (r Repo) tracking(ctx context.Context, remotes []string) (tracking, error) {
+	res, err := r.git(ctx, "symbolic-ref", "-q", "HEAD")
+	if exit, ok := errors.AsType[*runner.ExitError](err); ok && exit.Code == 1 {
+		return tracking{}, errors.New("HEAD isn't on a branch, so nothing was pushed")
+	}
+	if err != nil {
+		return tracking{}, err
+	}
+	t := tracking{branch: strings.TrimSpace(string(res.Stdout))}
+	if res, err = r.git(ctx, "for-each-ref", "--format=%(upstream)%00%(upstream:remotename)", t.branch); err != nil {
+		return tracking{}, err
+	}
+	t.upstream, t.remote, _ = strings.Cut(strings.TrimSuffix(string(res.Stdout), "\n"), "\x00")
+	if t.upstream == "" {
+		t.remote, err = r.pushRemote(ctx, t.name(), remotes)
+		return t, err
+	}
+	commit, err := r.commitAt(ctx, t.upstream)
+	t.there = commit != ""
+	return t, err
+}
+
+// pushRemote is the remote the branch name's pushed to, as git push has it
+// with no upstream: branch.<name>.pushRemote, then remote.pushDefault, then
+// origin, or the only remote; "" when none of those is.
+func (r Repo) pushRemote(ctx context.Context, name string, remotes []string) (string, error) {
+	for _, key := range []string{"branch." + name + ".pushRemote", "remote.pushDefault"} {
+		if remote, err := r.setting(ctx, key); err != nil || remote != "" {
+			return remote, err
+		}
+	}
+	switch {
+	case slices.Contains(remotes, "origin"):
+		return "origin", nil
+	case len(remotes) == 1:
+		return remotes[0], nil
+	}
+	return "", nil
+}
+
+// catch is what Pull does with the remote: catch up with up, a
+// remote-tracking ref, none when there's nothing to bring in, that ref
+// first made the branch's upstream (adopt); and push to pushTo, making the
+// branch's upstream there, none when it has one.
+type catch struct {
+	up, pushTo string
+	adopt      bool
+}
+
+// catching is what Pull does with the remote, one of remotes, as the
+// branch HEAD is on stands with it (tracking): an error when HEAD's on
+// none, or it's to be pushed to a remote that isn't set, or its upstream's
+// gone.
+func (r Repo) catching(ctx context.Context, remotes []string) (catch, error) {
+	t, err := r.tracking(ctx, remotes)
+	switch {
+	case err != nil:
+		return catch{}, err
+	case t.there:
+		return catch{up: t.upstream}, nil
+	case t.upstream != "":
+		return catch{}, r.gone(ctx, t)
+	case t.remote == "":
+		return catch{}, fmt.Errorf("%s has no upstream, and which remote it's pushed to isn't set, so nothing was pushed: git config remote.pushDefault <remote> sets it", t.name())
+	}
+	theirs := "refs/remotes/" + t.remote + "/" + t.name()
+	commit, err := r.commitAt(ctx, theirs)
+	if commit == "" {
+		return catch{pushTo: t.remote}, err
+	}
+	return catch{up: theirs, adopt: true}, err
+}
+
+// gone is nil for t's upstream not there as its remote has no branches yet,
+// as a new, empty one: nothing to bring in. One gone from a remote that has
+// others, as when it's renamed or deleted there, is refused, as pushing
+// would make it anew.
+func (r Repo) gone(ctx context.Context, t tracking) error {
+	res, err := r.git(ctx, "for-each-ref", "--format=%(refname)", "refs/remotes/"+t.remote+"/")
+	if err != nil {
+		return err
+	}
+	// The remote's HEAD is listed only while the branch it names is, as
+	// real git lists it, so it's never all there is.
+	if strings.TrimSpace(string(res.Stdout)) == "" {
+		return nil
+	}
+	return fmt.Errorf("%s's upstream, %s, is gone from %s, as when it's renamed or deleted there, so nothing was pushed: git branch --set-upstream-to=<remote>/<branch> follows the one it's become", t.name(), short(t.upstream), t.remote)
+}
+
+// short is a remote-tracking ref as git names it short, as in origin/main.
+func short(ref string) string {
+	return strings.TrimPrefix(ref, "refs/remotes/")
+}
+
+// catchUp rebases onto up's commits HEAD hasn't, if there are any, up a
+// remote-tracking ref, with what's not committed, dirty, set aside, unless
+// the remote changed some of it.
+func (r Repo) catchUp(ctx context.Context, gitDir string, dirty []entry, up string) error {
+	behind, err := r.count(ctx, "HEAD.."+up)
 	if err != nil {
 		return fmt.Errorf("couldn't bring in the remote's changes, so nothing was pushed: %w", err)
 	}
 	if behind == 0 {
 		return nil
 	}
-	if err := r.clashes(ctx, dirty); err != nil {
+	if err := r.clashes(ctx, dirty, up); err != nil {
 		return err
 	}
 	stash := ""
@@ -178,7 +284,7 @@ func (r Repo) catchUp(ctx context.Context, gitDir string, dirty []entry) error {
 		// Set aside: it's put back whatever becomes of the run.
 		ctx = context.WithoutCancel(ctx)
 	}
-	settled, rebased := r.rebase(ctx, gitDir)
+	settled, rebased := r.rebase(ctx, gitDir, up)
 	switch {
 	case stash == "":
 		return rebased
@@ -198,25 +304,37 @@ func (r Repo) count(ctx context.Context, revs string) (int, error) {
 }
 
 // unreachable reports whether git failed for want of the remote: no
-// network, or the host not answering, as git's fatal line, or ssh's, says,
-// above its last over ssh.
+// network, or the host not answering, as git's fatal: line says, curl's
+// words in it over https, or ssh's own lines do.
 func unreachable(err error) bool {
 	exit, ok := errors.AsType[*runner.ExitError](err)
-	return ok && slices.ContainsFunc(exit.Lines("fatal:", "ssh:"), func(line string) bool {
-		return slices.ContainsFunc([]string{
-			"Could not resolve host", "Failed to connect", "Connection refused", "Connection timed out",
-			"Operation timed out", "Network is unreachable", "No route to host",
-		}, func(s string) bool { return strings.Contains(line, s) })
+	return ok && slices.ContainsFunc(exit.Lines(), func(line string) bool {
+		if slices.ContainsFunc(sshUnreachable, func(s string) bool { return strings.HasPrefix(line, s) }) {
+			return true
+		}
+		return strings.HasPrefix(line, "fatal:") && slices.ContainsFunc(offline, func(s string) bool { return strings.Contains(line, s) })
 	})
 }
 
-// clashes errors when the remote's commits change what's not committed
-// here: a path changed here, dirty, staged or not; one git ignores, which
-// the rebase would replace; a folder or a file at one of them. Put back
-// after the rebase, a change would conflict, leaving git's markers in a
-// file that may be linked into the home folder. Nothing's touched.
-func (r Repo) clashes(ctx context.Context, dirty []entry) error {
-	res, err := r.git(ctx, "diff", "--name-only", "-z", "--no-renames", "HEAD...@{u}")
+// sshUnreachable start ssh's lines for a host it couldn't reach, the last
+// with no prefix of ssh's; offline are the words for it in git's fatal:
+// line.
+var (
+	sshUnreachable = []string{"ssh: Could not resolve hostname ", "ssh: connect to host ", "Connection timed out during banner exchange"}
+	offline        = []string{
+		"Could not resolve host", "Failed to connect", "Connection refused", "Connection timed out",
+		"Operation timed out", "Network is unreachable", "No route to host",
+	}
+)
+
+// clashes errors when up's commits, up a remote-tracking ref, change what's
+// not committed here: a path changed here, dirty, staged or not; one git
+// ignores, which the rebase would replace; a folder or a file at one of
+// them. Put back after the rebase, a change would conflict, leaving git's
+// markers in a file that may be linked into the home folder. Nothing's
+// touched.
+func (r Repo) clashes(ctx context.Context, dirty []entry, up string) error {
+	res, err := r.git(ctx, "diff", "--name-only", "-z", "--no-renames", "HEAD..."+up)
 	if err != nil {
 		return fmt.Errorf("couldn't read the remote's changes, so nothing was pushed: %w", err)
 	}
@@ -302,7 +420,10 @@ func overlap(a, b string, fold bool) bool {
 // folder's ending in a slash or not, and, folding, whatever their case.
 func same(a, b string, fold bool) bool {
 	a, b = strings.TrimSuffix(a, "/"), strings.TrimSuffix(b, "/")
-	return a == b || fold && strings.EqualFold(a, b)
+	if fold {
+		a, b = folded(a), folded(b)
+	}
+	return a == b
 }
 
 // within reports whether path is in folder, a path in the repository,
@@ -310,9 +431,21 @@ func same(a, b string, fold bool) bool {
 func within(path, folder string, fold bool) bool {
 	folder = strings.TrimSuffix(folder, "/") + "/"
 	if fold {
-		path, folder = strings.ToLower(path), strings.ToLower(folder)
+		path, folder = folded(path), folded(folder)
 	}
 	return strings.HasPrefix(path, folder)
+}
+
+// folded is path with its ASCII letters in lower case, as git folds case:
+// the rest as they are, its length in bytes kept.
+func folded(path string) string {
+	b := []byte(path)
+	for i, c := range b {
+		if 'A' <= c && c <= 'Z' {
+			b[i] = c + 'a' - 'A'
+		}
+	}
+	return string(b)
 }
 
 // byDrift splits paths into those changed on disk, drift (Changes), and
@@ -373,15 +506,15 @@ func (r Repo) stash(ctx context.Context) (string, error) {
 	return after, nil
 }
 
-// rebase rebases what's committed here onto the upstream, aborted if it
-// stops part way: settled once it's rebased, back as it was, or never
-// started, as when a hook refuses it or a file git doesn't keep is in its
-// way; not while git still has it under way.
-func (r Repo) rebase(ctx context.Context, gitDir string) (settled bool, err error) {
+// rebase rebases what's committed here onto up, a remote-tracking ref,
+// aborted if it stops part way: settled once it's rebased, back as it was,
+// or never started, as when a hook refuses it or a file git doesn't keep is
+// in its way; not while git still has it under way.
+func (r Repo) rebase(ctx context.Context, gitDir, up string) (settled bool, err error) {
 	// Not by fork-point, which leaves out a commit the upstream had once,
 	// before it was pushed over, so the rebase changes more than the
 	// remote's commits, as clashes reads them.
-	_, err = r.git(ctx, "rebase", "--no-fork-point", "--quiet")
+	_, err = r.git(ctx, "rebase", "--no-fork-point", "--quiet", up)
 	switch {
 	case err == nil:
 		return true, nil
@@ -435,9 +568,48 @@ func kept(stash string, err error) error {
 	return fmt.Errorf("what wasn't committed is wholly in git's stash, %s (%q), as it couldn't be put back, so nothing was pushed: git stash apply %s puts it back: %w", stash, stashMessage, stash, err)
 }
 
-// Unpushed is how many commits are waiting to be pushed to the branch's
-// upstream: none without an upstream.
+// Waiting is when each commit waiting to be pushed was made: those the
+// upstream hasn't, or, with none there, those on none of the remote's
+// branches, or any remote's when which isn't set. ErrNoRemote without a
+// remote.
+func (r Repo) Waiting(ctx context.Context) ([]time.Time, error) {
+	remotes, err := r.remotes(ctx)
+	switch {
+	case err != nil:
+		return nil, err
+	case len(remotes) == 0:
+		return nil, ErrNoRemote
+	}
+	t, err := r.tracking(ctx, remotes)
+	if err != nil {
+		return nil, err
+	}
+	revs := []string{t.upstream + "..HEAD"}
+	if !t.there {
+		onRemote := "--remotes"
+		if t.remote != "" {
+			onRemote += "=" + t.remote
+		}
+		revs = []string{"HEAD", "--not", onRemote}
+	}
+	res, err := r.git(ctx, slices.Concat([]string{"log", "--format=%ct"}, revs)...)
+	if err != nil {
+		return nil, err
+	}
+	var made []time.Time
+	for f := range strings.FieldsSeq(string(res.Stdout)) {
+		unix, err := strconv.ParseInt(f, 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		made = append(made, time.Unix(unix, 0))
+	}
+	return made, nil
+}
+
+// Unpushed is how many commits are waiting to be pushed (Waiting): none
+// when that can't be told.
 func (r Repo) Unpushed(ctx context.Context) int {
-	n, _ := r.count(ctx, "@{u}..HEAD")
-	return n
+	made, _ := r.Waiting(ctx)
+	return len(made)
 }

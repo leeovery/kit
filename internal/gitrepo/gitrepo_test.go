@@ -42,14 +42,18 @@ type call struct {
 	index string
 }
 
-// checkCalls checks fake ran want, in order, each reading what it says and
-// in the index it says: kit's own and the next of the user's in gitDir, one
-// it only reads a file of the temporary folder's, gone now.
+// checkCalls checks fake ran want, in order, each in the C locale, as kit
+// reads what git says, reading what it says and in the index it says:
+// kit's own and the next of the user's in gitDir, one it only reads a file
+// of the temporary folder's, gone now.
 func checkCalls(t *testing.T, name string, fake *runnertest.Fake, gitDir string, want []call) {
 	t.Helper()
 	var ran []call
 	var read string
 	for _, cmd := range fake.Commands() {
+		if !slices.Contains(cmd.Env, "LC_ALL=C") {
+			t.Errorf("%s: %s ran in the user's locale, not C", name, cmd)
+		}
 		c := call{args: cmd.Args, input: cmd.Input}
 		for _, e := range cmd.Env {
 			path, ok := strings.CutPrefix(e, "GIT_INDEX_FILE=")

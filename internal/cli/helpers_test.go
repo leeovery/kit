@@ -85,7 +85,7 @@ func newWorld(t *testing.T, files map[string]string) *world {
 	w.fake.On("sudo", "-n", "true").Exits(1).PrintsToStderr("sudo: a password is required")
 	// Every commit of kit-config's pushed: a sync committing nothing finds
 	// none waiting.
-	w.fake.On("git", "-C", filepath.Join(w.home, ".config", "kit"), "rev-list", "--count", "@{u}..HEAD").Prints("0\n")
+	w.waiting("")
 	for name, content := range files {
 		w.write(t, filepath.Join(".config", "kit", name), content)
 	}
@@ -185,8 +185,8 @@ var errNotFound = runner.ErrNotFound
 // status is git's status of them (-z); kit stages update, each file as it
 // is on disk, in an index of its own; staged is what git says is staged
 // there (-z); and the user's index takes the files staged as committed.
-// The commit goes onto head, unless moved, HEAD moved by another git
-// meanwhile, when git refuses it, and nothing's committed or pushed.
+// The commit goes onto head, unless moved, other gits moving HEAD every
+// time kit tries, when nothing's committed or pushed.
 type commit struct {
 	message        string
 	paths, update  []string
@@ -229,14 +229,21 @@ func (w *world) expectSync(t *testing.T, files []string, message string) {
 }
 
 // head is the commit HEAD names in kit-config, as git rev-parse prints it;
-// tree the tree git writes of kit's own index of it, made the commit kit
-// makes of that onto it, and theirs another git's, HEAD moved onto it.
+// tree the tree git writes of kit's own index of it, and made the commit
+// kit makes of that onto it.
 const (
-	head   = "0e0bf17a399109574ffb00e33300280a33f81ab7"
-	tree   = "af9055821923c351c404eaaff97d82a5552a1ad5"
-	made   = "2f8f9a0d6c1b4e5a7d3c2b1a0f9e8d7c6b5a4f3e"
-	theirs = "154906a47f12246099602d1bee6b1c558d3409c9"
+	head = "0e0bf17a399109574ffb00e33300280a33f81ab7"
+	tree = "af9055821923c351c404eaaff97d82a5552a1ad5"
+	made = "2f8f9a0d6c1b4e5a7d3c2b1a0f9e8d7c6b5a4f3e"
 )
+
+// theirs are other gits' commits, HEAD moved onto each in turn as kit
+// commits.
+var theirs = []string{
+	"154906a47f12246099602d1bee6b1c558d3409c9",
+	"2c1d8e0f4b6a7c9d3e5f7a1b2c4d6e8f0a1b3c5d",
+	"3d2e9f1a5c7b8d0e4f6a8b2c3d5e7f9a1b2c4d6e",
+}
 
 // expectCommit scripts git's answers to c, and the push after it, failing
 // the test unless kit commits, unless what it stages is update and what it
@@ -265,31 +272,39 @@ func (w *world) expectCommit(t *testing.T, c commit, checks ...func()) {
 	}
 	w.fake.On("git", git(slices.Concat([]string{"--literal-pathspecs", "status", "--porcelain", "-z", "--untracked-files=all", "--no-renames", "--"}, c.paths)...)...).Prints(c.status).Does(asked)
 	w.fake.On("git", git("rev-parse", "--absolute-git-dir")...).Prints(gitDir + "\n")
-	var tried, committed atomic.Bool
+	// The commits HEAD's at as kit tries, each moved off by another git
+	// when moved, the last where HEAD's left.
+	bases, tried := []string{head}, 1
+	if c.moved {
+		bases, tried = append(bases, theirs...), len(theirs)
+	}
+	var moved atomic.Int32
+	var committed atomic.Bool
 	w.fake.On("git", git("rev-parse", "--verify", "--quiet", "HEAD")...).Filters(func(string) (string, error) {
-		if tried.Load() {
-			return theirs + "\n", nil
-		}
-		return head + "\n", nil
+		return bases[moved.Load()] + "\n", nil
 	})
-	w.fake.On("git", git("read-tree", head)...)
 	w.fake.On("git", git("update-index", "--add", "--remove", "--replace", "-z", "--stdin")...).Filters(reads("update-index", strings.Join(c.update, "\x00")+"\x00"))
 	w.fake.On("git", git("diff", "--cached", "--name-only", "-z", "--no-renames")...).Prints(c.staged)
 	w.fake.On("git", git("write-tree")...).Prints(tree + "\n")
 	w.fake.On("git", git("config", "--get", "--type=bool", "commit.gpgsign")...).Exits(1)
-	w.fake.On("git", git("commit-tree", tree, "-p", head, "-m", c.message)...).Prints(made + "\n")
-	subject, _, _ := strings.Cut(c.message, "\n")
-	moveHEAD := w.fake.On("git", git("update-ref", "-m", "kit: "+subject, "HEAD", made, head)...)
 	const reset = "the user's index, kit's files as committed"
-	if c.moved {
-		moveHEAD.Exits(128).PrintsToStderr("fatal: update_ref failed for ref 'HEAD': cannot lock ref 'HEAD': is at " + theirs + " but expected " + head + "\n").Does(func() { tried.Store(true) })
-	} else {
-		moveHEAD.Does(func() { committed.Store(true) })
-		w.fake.On("git", git("--literal-pathspecs", "reset", "--quiet", "--pathspec-from-file=-", "--pathspec-file-nul")...).Filters(reads("reset", c.staged)).Does(func() {
-			if err := os.WriteFile(filepath.Join(gitDir, "kit-index.next"), []byte(reset), 0o600); err != nil {
-				t.Error(err)
-			}
-		})
+	w.fake.On("git", git("--literal-pathspecs", "reset", "--quiet", made, "--pathspec-from-file=-", "--pathspec-file-nul")...).Filters(reads("reset", c.staged)).Does(func() {
+		if err := os.WriteFile(filepath.Join(gitDir, "kit-index.next"), []byte(reset), 0o600); err != nil {
+			t.Error(err)
+		}
+	})
+	subject, _, _ := strings.Cut(c.message, "\n")
+	for i, base := range bases[:tried] {
+		w.fake.On("git", git("read-tree", base)...)
+		w.fake.On("git", git("commit-tree", tree, "-p", base, "-m", c.message)...).Prints(made + "\n")
+		moveHEAD := w.fake.On("git", git("update-ref", "-m", "kit: "+subject, "HEAD", made, base)...)
+		if !c.moved {
+			moveHEAD.Does(func() { committed.Store(true) })
+			continue
+		}
+		moveHEAD.Exits(128).PrintsToStderr("fatal: update_ref failed for ref 'HEAD': cannot lock ref 'HEAD': is at " + bases[i+1] + " but expected " + base + "\n").Does(func() { moved.Add(1) })
+	}
+	if !c.moved {
 		w.expectPush(t, gitDir)
 	}
 	t.Cleanup(func() {
@@ -297,13 +312,38 @@ func (w *world) expectCommit(t *testing.T, c commit, checks ...func()) {
 		data, _ := os.ReadFile(filepath.Join(gitDir, "index"))
 		switch {
 		case committed.Load() == c.moved:
-			t.Errorf("kit committed %q: %v, HEAD moved %v", c.message, committed.Load(), c.moved)
+			t.Errorf("kit committed %q: %v, HEAD moving %v", c.message, committed.Load(), c.moved)
 		case c.moved && len(entries) != 0:
 			t.Errorf("the git folder holds %v; want it left as it was, empty", entries)
 		case !c.moved && (len(entries) != 1 || string(data) != reset):
 			t.Errorf("the git folder holds %v, its index %q; want the index git reset", entries, data)
 		}
 	})
+}
+
+// waiting scripts git's answers as kit asks which of kit-config's commits
+// wait to be pushed, as real git gives them: the remote, origin; the
+// branch, main, its upstream origin's, there; and when each commit its
+// upstream hasn't was made, times (%ct), "" for none.
+func (w *world) waiting(times string) {
+	git := func(args ...string) []string {
+		return append([]string{"-C", filepath.Join(w.home, ".config", "kit")}, args...)
+	}
+	w.fake.On("git", git("remote")...).Prints("origin\n")
+	w.tracks()
+	w.fake.On("git", git("log", "--format=%ct", "refs/remotes/origin/main..HEAD")...).Prints(times)
+}
+
+// tracks scripts git's answers as kit asks how kit-config's branch stands
+// with its remote, as real git gives them: main, its upstream origin's
+// main, there.
+func (w *world) tracks() {
+	git := func(args ...string) []string {
+		return append([]string{"-C", filepath.Join(w.home, ".config", "kit")}, args...)
+	}
+	w.fake.On("git", git("symbolic-ref", "-q", "HEAD")...).Prints("refs/heads/main\n")
+	w.fake.On("git", git("for-each-ref", "--format=%(upstream)%00%(upstream:remotename)", "refs/heads/main")...).Prints("refs/remotes/origin/main\x00origin\n")
+	w.fake.On("git", git("rev-parse", "--verify", "--quiet", "refs/remotes/origin/main")...).Prints(head + "\n")
 }
 
 // expectPush scripts a push of kit-config's, whose git folder is gitDir,
@@ -318,11 +358,9 @@ func (w *world) expectPush(t *testing.T, gitDir string) {
 	if !w.edited {
 		w.fake.On("git", git("--literal-pathspecs", "status", "--porcelain", "-z", "--untracked-files=all", "--no-renames", "--")...)
 	}
-	w.fake.On("git", git("fetch", "--quiet")...)
-	w.fake.On("git", git("symbolic-ref", "-q", "HEAD")...).Prints("refs/heads/main\n")
-	w.fake.On("git", git("for-each-ref", "--format=%(upstream)", "refs/heads/main")...).Prints("refs/remotes/origin/main\n")
-	w.fake.On("git", git("rev-parse", "--verify", "--quiet", "refs/remotes/origin/main")...).Prints(head + "\n")
-	w.fake.On("git", git("rev-list", "--count", "HEAD..@{u}")...).Prints("0\n")
+	w.fake.On("git", git("fetch", "--prune", "--quiet")...)
+	w.tracks()
+	w.fake.On("git", git("rev-list", "--count", "HEAD..refs/remotes/origin/main")...).Prints("0\n")
 	w.fake.On("git", git("push", "--quiet")...)
 }
 

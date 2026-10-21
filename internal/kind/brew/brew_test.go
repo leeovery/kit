@@ -188,11 +188,14 @@ func TestResolveReadsBrewsErrorLine(t *testing.T) {
 	}
 }
 
+// A cask brew info doesn't know, asked with others, has brew name them
+// all as one, as real brew does, so it can't say which: each is asked
+// alone, the unknown left out.
 func TestResolveOneAtATimeWhenANameIsUnknown(t *testing.T) {
 	fake := runnertest.New(t)
-	fake.On("brew", "info", "--json=v2", "--cask", "tailscale", "no-such-cask").Exits(1).PrintsToStderr(`Error: Cask 'no-such-cask' is unavailable`)
+	fake.On("brew", "info", "--json=v2", "--cask", "tailscale", "no-such-cask").Exits(1).PrintsToStderr("Error: Cask 'tailscale no-such-cask' is unavailable: No Cask with this name exists.\n")
 	fake.On("brew", "info", "--json=v2", "--cask", "tailscale").Prints(fixture(t, "info-casks.json"))
-	fake.On("brew", "info", "--json=v2", "--cask", "no-such-cask").Exits(1).PrintsToStderr(`Error: Cask 'no-such-cask' is unavailable`)
+	fake.On("brew", "info", "--json=v2", "--cask", "no-such-cask").Exits(1).PrintsToStderr("Error: Cask 'no-such-cask' is unavailable: No Cask with this name exists.\n")
 
 	got, err := brew.New(fake).Casks().Resolve(context.Background(), []string{"tailscale", "no-such-cask"})
 	if want := map[string]string{"tailscale": "tailscale-app"}; err != nil || !mapsEqual(got, want) {

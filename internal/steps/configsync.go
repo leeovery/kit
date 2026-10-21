@@ -3,8 +3,7 @@ package steps
 import (
 	"context"
 	"fmt"
-	"strconv"
-	"strings"
+	"slices"
 	"time"
 
 	"github.com/leeovery/kit/internal/check"
@@ -27,29 +26,18 @@ func ConfigSync(repo gitrepo.Repo, now func() time.Time) engine.Step {
 	return engine.Step{
 		Name: ConfigSyncName, Title: "Sync", Area: AreaConfig,
 		Check: func(ctx context.Context) check.Result {
-			// What's committed and not pushed, oldest first: none when
-			// there's no upstream to push to.
-			unpushed, err := output(ctx, repo.Run, "git", "-C", repo.Dir, "log", "@{u}..HEAD", "--format=%ct")
+			made, err := repo.Waiting(ctx)
 			if err != nil {
 				return check.Result{State: check.OK, Summary: "nothing to push to", Glance: "nothing to push to"}
 			}
-			var oldest int64
-			count := 0
-			for f := range strings.FieldsSeq(unpushed) {
-				t, _ := strconv.ParseInt(f, 10, 64)
-				if count == 0 || t < oldest {
-					oldest = t
-				}
-				count++
-			}
-			if count == 0 {
+			if len(made) == 0 {
 				return check.Result{State: check.OK, Summary: "pushed", Glance: "pushed"}
 			}
-			waiting := fmt.Sprintf("%d %s not pushed", count, plural(count, "commit", "commits"))
+			waiting := fmt.Sprintf("%d %s not pushed", len(made), plural(len(made), "commit", "commits"))
 			if held := repo.Holding(ctx); held != nil {
 				return problem(ConfigSyncName, "pushes held back", [3]string{"held", waiting, held.Error()})
 			}
-			if now().Sub(time.Unix(oldest, 0)) > syncWithin {
+			if now().Sub(slices.MinFunc(made, time.Time.Compare)) > syncWithin {
 				return problem(ConfigSyncName, "commits waiting", [3]string{"unpushed", waiting + ", the oldest over an hour old", "push them: git -C " + repo.Dir + " push (kit rebases onto the remote first when it pushes)"})
 			}
 			return check.Result{State: check.OK, Summary: "pushed", Glance: "pushed"}

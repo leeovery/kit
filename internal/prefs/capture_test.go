@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -50,11 +51,11 @@ func (w *world) pulls() {
 	w.fake.On("git", "-C", w.clone, "remote").Prints("origin\n")
 	w.fake.On("git", "-C", w.clone, "rev-parse", "--absolute-git-dir").Prints(filepath.Join(w.clone, ".git") + "\n")
 	w.fake.On("git", "-C", w.clone, "--literal-pathspecs", "status", "--porcelain", "-z", "--untracked-files=all", "--no-renames", "--")
-	w.fake.On("git", "-C", w.clone, "fetch", "--quiet")
+	w.fake.On("git", "-C", w.clone, "fetch", "--prune", "--quiet")
 	w.fake.On("git", "-C", w.clone, "symbolic-ref", "-q", "HEAD").Prints("refs/heads/main\n")
-	w.fake.On("git", "-C", w.clone, "for-each-ref", "--format=%(upstream)", "refs/heads/main").Prints("refs/remotes/origin/main\n")
+	w.fake.On("git", "-C", w.clone, "for-each-ref", "--format=%(upstream)%00%(upstream:remotename)", "refs/heads/main").Prints("refs/remotes/origin/main\x00origin\n")
 	w.fake.On("git", "-C", w.clone, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/main").Prints(head + "\n")
-	w.fake.On("git", "-C", w.clone, "rev-list", "--count", "HEAD..@{u}").Prints("0\n")
+	w.fake.On("git", "-C", w.clone, "rev-list", "--count", "HEAD..refs/remotes/origin/main").Prints("0\n")
 }
 
 // pushes scripts the commit of the Mac's folder with message, git's
@@ -85,7 +86,7 @@ func (w *world) pushes(t *testing.T, message, status string, update []string, st
 	w.fake.On("git", "-C", w.clone, "commit-tree", tree, "-p", head, "-m", message).Prints(made + "\n")
 	subject, _, _ := strings.Cut(message, "\n")
 	w.fake.On("git", "-C", w.clone, "update-ref", "-m", "kit: "+subject, "HEAD", made, head)
-	w.fake.On("git", "-C", w.clone, "--literal-pathspecs", "reset", "--quiet", "--pathspec-from-file=-", "--pathspec-file-nul").Filters(reads(staged)).Does(func() {
+	w.fake.On("git", "-C", w.clone, "--literal-pathspecs", "reset", "--quiet", made, "--pathspec-from-file=-", "--pathspec-file-nul").Filters(reads(staged)).Does(func() {
 		w.write(t, filepath.Join(gitDir, "kit-index.next"), "the index, as committed")
 	})
 	w.fake.On("git", "-C", w.clone, "remote", "get-url", "origin").Prints(remote + "\n")
@@ -296,11 +297,11 @@ func TestCaptureRefuses(t *testing.T) {
 		w := newWorld(t, prefs.Lists{})
 		writeRecord(t, w.state, `{"on": "restored from laptop"}`)
 		w.write(t, filepath.Join(w.clone, "laptop", "owner"), "hardware HW-THIS\nmodel Mac99,1\nsince 2026-09-28 17:00\n")
-		w.fake.On("git", "-C", w.clone, "rev-list", "--count", "HEAD..@{u}").Prints("1\n")
-		w.fake.On("git", "-C", w.clone, "diff", "--name-only", "-z", "--no-renames", "HEAD...@{u}").Prints("laptop/owner\x00")
+		w.fake.On("git", "-C", w.clone, "rev-list", "--count", "HEAD..refs/remotes/origin/main").Prints("1\n")
+		w.fake.On("git", "-C", w.clone, "diff", "--name-only", "-z", "--no-renames", "HEAD...refs/remotes/origin/main").Prints("laptop/owner\x00")
 		w.fake.On("git", "-C", w.clone, "config", "--get", "--type=bool", "core.ignorecase").Prints("true\n")
 		w.fake.On("git", "-C", w.clone, "ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory")
-		w.fake.On("git", "-C", w.clone, "rebase", "--no-fork-point", "--quiet").Does(func() {
+		w.fake.On("git", "-C", w.clone, "rebase", "--no-fork-point", "--quiet", "refs/remotes/origin/main").Does(func() {
 			w.write(t, filepath.Join(w.clone, "laptop", "owner"), "hardware HW-NEW\nmodel Mac100,1\nsince 2026-10-05 09:00\n")
 		})
 		var notOwner prefs.NotOwnerError
@@ -320,16 +321,13 @@ func asNotOwner(err error, into *prefs.NotOwnerError) bool {
 
 // A capture whose commit failed pushes nothing: refused while git's part
 // way through a merge in the clone, which pulling or pushing would set
-// aside, so nothing's brought in either; or refused by git as HEAD moved
-// meanwhile. The record says why.
+// aside, so nothing's brought in either; or given up as other gits kept
+// moving HEAD. The record says why.
 func TestCaptureHoldsBackThePushWhenTheCommitFailed(t *testing.T) {
-	const (
-		message = "Capture 2026-10-06 03:00: 1 new\n\nnew: com.example.app\nclaimed: the folder, for this Mac's hardware"
-		moved   = "154906a47f12246099602d1bee6b1c558d3409c9"
-	)
+	const message = "Capture 2026-10-06 03:00: 1 new\n\nnew: com.example.app\nclaimed: the folder, for this Mac's hardware"
 	for _, c := range []struct{ name, want string }{
 		{"a merge under way", "not pushed: a merge is under way in the repository (MERGE_HEAD)"},
-		{"HEAD moved", "not pushed: HEAD moved while kit committed, so nothing was committed: run kit again"},
+		{"HEAD kept moving", "not pushed: HEAD kept moving while kit committed, so nothing was committed"},
 	} {
 		w := newWorld(t, prefs.Lists{})
 		writeRecord(t, w.state, `{"on": "started fresh"}`)
@@ -342,22 +340,39 @@ func TestCaptureHoldsBackThePushWhenTheCommitFailed(t *testing.T) {
 		if c.name == "a merge under way" {
 			w.write(t, filepath.Join(w.clone, ".git", "MERGE_HEAD"), head+"\n")
 		} else {
-			w.fake.On("git", "-C", w.clone, "update-ref", "-m", "kit: Capture 2026-10-06 03:00: 1 new", "HEAD", made, head).Exits(128).
-				PrintsToStderr("fatal: update_ref failed for ref 'HEAD': cannot lock ref 'HEAD': is at " + moved + " but expected " + head + "\n")
-			w.fake.On("git", "-C", w.clone, "rev-parse", "--verify", "--quiet", "HEAD").Prints(head + "\n").Then().Prints(moved + "\n")
+			w.movingHEAD(message)
 		}
 		report, err := w.p.Capture(t.Context())
 		if err != nil || report.Committed || !strings.HasPrefix(report.PushError, c.want) {
 			t.Errorf("%s: Capture() = %+v, %v; want %q", c.name, report, err, c.want)
 		}
 		for _, call := range w.fake.Calls() {
-			if strings.Contains(call, " push --quiet") || strings.Contains(call, " stash ") || c.name == "a merge under way" && strings.Contains(call, " fetch --quiet") {
+			if strings.Contains(call, " push --quiet") || strings.Contains(call, " stash ") || strings.Contains(call, " fetch ") && c.name == "a merge under way" {
 				t.Errorf("%s: ran %s, want nothing pushed or set aside", c.name, call)
 			}
 		}
 		if rec, _ := w.p.Load(); rec.Unpushed.IsZero() || !strings.HasPrefix(rec.PushError, c.want) {
 			t.Errorf("%s: record = %+v, want the push held back, and why", c.name, rec)
 		}
+	}
+}
+
+// movingHEAD scripts other gits moving HEAD each time a capture commits
+// with message, as real git refuses the move: off head, then off each of
+// theirs in turn.
+func (w *world) movingHEAD(message string) {
+	heads := []string{head, "154906a47f12246099602d1bee6b1c558d3409c9", "2c1d8e0f4b6a7c9d3e5f7a1b2c4d6e8f0a1b3c5d", "3d2e9f1a5c7b8d0e4f6a8b2c3d5e7f9a1b2c4d6e"}
+	var moved atomic.Int32
+	w.fake.On("git", "-C", w.clone, "rev-parse", "--verify", "--quiet", "HEAD").Filters(func(string) (string, error) {
+		return heads[moved.Load()] + "\n", nil
+	})
+	subject, _, _ := strings.Cut(message, "\n")
+	for i, base := range heads[:len(heads)-1] {
+		w.fake.On("git", "-C", w.clone, "read-tree", base)
+		w.fake.On("git", "-C", w.clone, "commit-tree", tree, "-p", base, "-m", message).Prints(made + "\n")
+		w.fake.On("git", "-C", w.clone, "update-ref", "-m", "kit: "+subject, "HEAD", made, base).Exits(128).
+			PrintsToStderr("fatal: update_ref failed for ref 'HEAD': cannot lock ref 'HEAD': is at " + heads[i+1] + " but expected " + base + "\n").
+			Does(func() { moved.Add(1) })
 	}
 }
 

@@ -151,20 +151,29 @@ func TestConfigSync(t *testing.T) {
 	repo, gitDir := t.TempDir(), t.TempDir()
 	git := func(args ...string) []string { return append([]string{"-C", repo}, args...) }
 	const head = "0e0bf17a399109574ffb00e33300280a33f81ab7"
-	log := git("log", "@{u}..HEAD", "--format=%ct")
-	// waiting scripts the commits waiting, as times, and the repository as
-	// Push finds it settled, git's status of it status, the remote's last
-	// fetch behind by behind.
+	log := git("log", "--format=%ct", "refs/remotes/origin/main..HEAD")
+	// tracking scripts the branch, main, as git says it stands with its
+	// remote, origin: its upstream origin's main, there.
+	tracking := func(fake *runnertest.Fake) {
+		fake.On("git", git("remote")...).Prints("origin\n")
+		fake.On("git", git("symbolic-ref", "-q", "HEAD")...).Prints("refs/heads/main\n")
+		fake.On("git", git("for-each-ref", "--format=%(upstream)%00%(upstream:remotename)", "refs/heads/main")...).Prints("refs/remotes/origin/main\x00origin\n")
+		fake.On("git", git("rev-parse", "--verify", "--quiet", "refs/remotes/origin/main")...).Prints(head + "\n")
+	}
+	// waiting scripts the commits waiting, as times, newest first as git log
+	// lists them, and the repository as Push finds it settled, git's status
+	// of it status, the remote's last fetch behind by behind.
 	waiting := func(times []time.Time, status, behind string) *runnertest.Fake {
 		fake := runnertest.New(t)
 		var out string
 		for _, at := range times {
 			out += itoa(at.Unix()) + "\n"
 		}
+		tracking(fake)
 		fake.On("git", log...).Prints(out)
 		fake.On("git", git("rev-parse", "--absolute-git-dir")...).Prints(gitDir + "\n")
 		fake.On("git", git("--literal-pathspecs", "status", "--porcelain", "-z", "--untracked-files=all", "--no-renames", "--")...).Prints(status)
-		fake.On("git", git("rev-list", "--count", "HEAD..@{u}")...).Prints(behind + "\n")
+		fake.On("git", git("rev-list", "--count", "HEAD..refs/remotes/origin/main")...).Prints(behind + "\n")
 		return fake
 	}
 	sync := func(fake *runnertest.Fake) engine.Step {
@@ -172,12 +181,13 @@ func TestConfigSync(t *testing.T) {
 	}
 
 	fake := runnertest.New(t)
+	tracking(fake)
 	fake.On("git", log...)
 	if state, text, _ := checked(t, sync(fake)); state != check.OK || text != "pushed" {
 		t.Errorf("all pushed = %s %q", state, text)
 	}
 
-	fake = waiting([]time.Time{now().Add(-3 * time.Hour), now().Add(-time.Minute)}, "", "0")
+	fake = waiting([]time.Time{now().Add(-time.Minute), now().Add(-3 * time.Hour)}, "", "0")
 	state, _, ids := checked(t, sync(fake))
 	if state != check.Attention || !slices.Equal(ids, []string{"config-sync:unpushed"}) {
 		t.Errorf("waiting = %s %q; want the commits unpushed", state, ids)
@@ -192,7 +202,7 @@ func TestConfigSync(t *testing.T) {
 	// remote's commits change too: drift says all's committed, so this says
 	// why nothing's pushed.
 	fake = waiting([]time.Time{now().Add(-time.Minute)}, "MM notes\x00", "1")
-	fake.On("git", git("diff", "--name-only", "-z", "--no-renames", "HEAD...@{u}")...).Prints("notes\x00")
+	fake.On("git", git("diff", "--name-only", "-z", "--no-renames", "HEAD...refs/remotes/origin/main")...).Prints("notes\x00")
 	fake.On("git", git("config", "--get", "--type=bool", "core.ignorecase")...).Prints("true\n")
 	fake.On("git", git("ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory")...)
 	fake.On("git", git("rev-parse", "--verify", "--quiet", "HEAD")...).Prints(head + "\n")
@@ -205,11 +215,11 @@ func TestConfigSync(t *testing.T) {
 		t.Errorf("held back by a staged change = %+v", res)
 	}
 
-	// No upstream: nothing to push to.
+	// No remote: nothing to push to.
 	fake = runnertest.New(t)
-	fake.On("git", log...).Exits(128).PrintsToStderr("fatal: no upstream configured for branch 'main'")
-	if state, _, _ := checked(t, sync(fake)); state != check.OK {
-		t.Errorf("no upstream = %s, want ok", state)
+	fake.On("git", git("remote")...)
+	if state, text, _ := checked(t, sync(fake)); state != check.OK || text != "nothing to push to" {
+		t.Errorf("no remote = %s %q, want ok, nothing to push to", state, text)
 	}
 }
 

@@ -117,7 +117,7 @@ func (c *changes) sync(ctx context.Context, message string) {
 		committed, err := c.run.repo.Commit(ctx, message, c.files...)
 		switch {
 		case !committed && err != nil:
-			return check.Result{State: check.Failed, Reason: "couldn't commit " + strings.Join(c.files, ", ") + ": " + err.Error()}
+			return check.Result{State: check.Failed, Reason: "couldn't commit " + strings.Join(c.files, ", ") + ": " + whyNot(err)}
 		case !committed:
 			return c.pushWaiting(ctx)
 		}
@@ -127,6 +127,15 @@ func (c *changes) sync(ctx context.Context, message string) {
 		}
 		return res
 	})
+}
+
+// whyNot is why sync committed nothing, err, and, when other gits kept
+// moving HEAD, what commits the files it leaves as they are.
+func whyNot(err error) string {
+	if errors.Is(err, gitrepo.ErrHeadMoving) {
+		return err.Error() + ": kit reconcile commits it"
+	}
+	return err.Error()
 }
 
 // push pushes what sync committed.

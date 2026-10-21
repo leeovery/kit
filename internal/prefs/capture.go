@@ -495,7 +495,7 @@ func (p *Prefs) Capture(ctx context.Context) (Report, error) {
 		report.Errors = append(report.Errors, "history: "+err.Error())
 	}
 	// Nothing's pushed once the commit failed, as one refused during a
-	// merge, or as HEAD moved.
+	// merge, or given up as HEAD kept moving.
 	if err == nil || committed {
 		report.PushError = p.push(ctx, repo)
 	} else {
