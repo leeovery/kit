@@ -20,6 +20,9 @@ import (
 // test on any other. It's safe to use from several goroutines.
 type Fake struct {
 	t testing.TB
+	// Env is the environment its commands run in, as a real runner's: none
+	// unless a test sets it, before running anything.
+	Env []string
 
 	mu      sync.Mutex
 	scripts []*Script
@@ -173,6 +176,12 @@ func (f *Fake) Has(name string) bool {
 		}
 	}
 	return false
+}
+
+// Environ is the environment cmd runs in, as a real runner's: Env, cmd's
+// own variables over it, then those ctx sets.
+func (f *Fake) Environ(ctx context.Context, cmd runner.Command) ([]string, bool) {
+	return slices.Concat(f.Env, cmd.Env, runner.SecretEnv(ctx)), true
 }
 
 // Run answers cmd as scripted, as a real runner would, noting the call: its

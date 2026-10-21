@@ -121,9 +121,6 @@ type Prefs struct {
 	// Sleep waits between looks at an app starting or quitting, and while
 	// another git holds the store's index.
 	Sleep func(time.Duration)
-	// Getenv reads the environment kit runs in, for what git takes from it
-	// as it pushes (gitrepo.Repo's).
-	Getenv func(string) string
 }
 
 // New returns apps' settings for the user whose home is home, with kit's

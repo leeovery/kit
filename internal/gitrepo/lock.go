@@ -322,17 +322,18 @@ func (l *indexLock) fill(next string, mode fs.FileMode) error {
 }
 
 // mark leaves, before HEAD moves from base onto made, kit's mark of the
-// lock as filled, for a run that finds it left should this one stop
+// lock as filled, and of what the user's index held for each path the
+// commit takes (read), for a run that finds it left should this one stop
 // (recover), once it's sure it still holds its lock on committing, so no
 // other kit reads it meanwhile: none without that lock.
-func (l *indexLock) mark(base, made string) error {
+func (l *indexLock) mark(base, made string, read map[string]string) error {
 	switch {
 	case l.commits == nil:
 		return nil
 	case !stillAt(l.commits, l.file(commitLock)):
 		return errCommitsTaken
 	}
-	m := mark{base: base, made: made, sum: l.sum, file: fileID(l.made)}
+	m := mark{base: base, made: made, sum: l.sum, file: fileID(l.made), read: read}
 	if err := os.WriteFile(l.file(marked), []byte(m.String()), 0o600); err != nil {
 		return err
 	}

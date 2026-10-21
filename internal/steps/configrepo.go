@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 
 	"github.com/leeovery/kit/internal/check"
@@ -20,7 +19,7 @@ const ConfigPrivateName = "config-private"
 
 // ConfigPrivate checks the config repository, repo, is proven private
 // wherever it goes (gitrepo.Place): every URL kit pushes it to (PushURLs),
-// and origin's, which it's fetched from, each place that isn't named. The
+// pushing, and origin's, fetching, each place that isn't named. The
 // config is personal, and must never be public. With no remote it's pushed
 // to or fetched from, it isn't public; a place git, ssh or gh can't be
 // asked about fails.
@@ -42,12 +41,16 @@ func ConfigPrivate(repo gitrepo.Repo) engine.Step {
 	}
 }
 
-// where is a URL the config repository goes to or comes from, and its
-// remote.
-type where struct{ remote, url string }
+// where is a URL the config repository goes to or comes from, its remote,
+// and which way git goes there.
+type where struct {
+	remote, url string
+	way         gitrepo.Way
+}
 
 // whereTo is every URL kit pushes repo to, none where Push can't tell where
-// to push, as it pushes nowhere, and origin's, without repeats.
+// to push, as it pushes nowhere, and origin's, fetched from: the same URL
+// both ways twice, as ssh's config can send each way elsewhere.
 func whereTo(ctx context.Context, repo gitrepo.Repo) ([]where, error) {
 	remote, urls, err := repo.PushURLs(ctx)
 	if err != nil && !errors.Is(err, gitrepo.ErrNoRemote) && !errors.Is(err, gitrepo.ErrNowhere) {
@@ -55,11 +58,11 @@ func whereTo(ctx context.Context, repo gitrepo.Repo) ([]where, error) {
 	}
 	var all []where
 	for _, url := range urls {
-		all = append(all, where{remote, url})
+		all = append(all, where{remote, url, gitrepo.Pushing})
 	}
 	origin, err := repo.URL(ctx, "origin")
-	if w := (where{"origin", origin}); err == nil && origin != "" && !slices.Contains(all, w) {
-		all = append(all, w)
+	if err == nil && origin != "" {
+		all = append(all, where{"origin", origin, gitrepo.Fetching})
 	}
 	return all, err
 }
@@ -72,7 +75,7 @@ func privacy(ctx context.Context, repo gitrepo.Repo, all []where) check.Result {
 	var items []check.Item
 	seen := map[string]bool{}
 	for _, w := range all {
-		place, err := repo.Place(ctx, w.remote, w.url)
+		place, err := repo.Place(ctx, w.remote, w.url, w.way)
 		if err != nil {
 			return failed(err)
 		}

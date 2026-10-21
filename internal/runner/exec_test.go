@@ -104,6 +104,33 @@ func TestExecRunsInItsOwnEnvironmentAndDirectory(t *testing.T) {
 	}
 }
 
+// The environment a runner says a command runs in is the one the program
+// sees, through every wrapper: Exec's, a WithEnv's variables over it, the
+// command's own over those, then its context's; a variable nothing sets,
+// unset.
+func TestExecSaysTheEnvironmentACommandRunsIn(t *testing.T) {
+	exec, _ := programs(t, map[string]string{"show": "/usr/bin/env"})
+	exec.Env = append(exec.Env, "TOKEN=the runner's", "ADDED=the runner's")
+	added := runner.WithEnv(exec, func() []string { return []string{"ADDED=added", "OTHER=added"} })
+	r := runner.Streamed(runner.Observed(added, func(context.Context, runner.Report) {}, time.Now), func(context.Context) bool { return true }, func(context.Context, runner.Command, string) {})
+	ctx := runner.WithSecretEnv(t.Context(), "TOKEN=the context's")
+	cmd := runner.Command{Name: "show", Env: []string{"OTHER=the command's"}}
+
+	env, ok := runner.Environ(ctx, r, cmd)
+	res, err := r.Run(ctx, cmd)
+	if !ok || err != nil {
+		t.Fatalf("Environ() said %t, Run() failed: %v", ok, err)
+	}
+	seen := strings.Split(strings.TrimSpace(string(res.Stdout)), "\n")
+	for _, name := range []string{"KIT_TEST", "TOKEN", "ADDED", "OTHER", "UNSET"} {
+		said, saidSet := runner.LookupEnv(env, name)
+		got, gotSet := runner.LookupEnv(seen, name)
+		if said != got || saidSet != gotSet {
+			t.Errorf("%s: the runner says %q (set %t), the program saw %q (set %t)", name, said, saidSet, got, gotSet)
+		}
+	}
+}
+
 // A variable a command's context sets is set for that command alone, over
 // the runner's value and the command's own.
 func TestExecSetsTheVariablesItsContextSets(t *testing.T) {

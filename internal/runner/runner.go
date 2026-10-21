@@ -130,6 +130,32 @@ func Has(r Runner, name string) bool {
 	return true
 }
 
+// Environer is a runner that can say what environment it runs a command in.
+type Environer interface {
+	Environ(ctx context.Context, cmd Command) ([]string, bool)
+}
+
+// Environ is the environment r runs cmd in, in ctx, each variable as
+// NAME=value, a name's last value the one the program sees; ok is false
+// for a runner that can't say.
+func Environ(ctx context.Context, r Runner, cmd Command) (env []string, ok bool) {
+	if e, ok := r.(Environer); ok {
+		return e.Environ(ctx, cmd)
+	}
+	return nil, false
+}
+
+// LookupEnv is the value of the variable name in env, as a program run in
+// env sees it: its last; set is false when env doesn't set it.
+func LookupEnv(env []string, name string) (value string, set bool) {
+	for _, kv := range slices.Backward(env) {
+		if k, v, _ := strings.Cut(kv, "="); k == name {
+			return v, true
+		}
+	}
+	return "", false
+}
+
 // ExitError is the error for a command that ran and exited other than 0.
 type ExitError struct {
 	Command string
@@ -210,6 +236,10 @@ func (o observed) Has(name string) bool {
 	return Has(o.runner, name)
 }
 
+func (o observed) Environ(ctx context.Context, cmd Command) ([]string, bool) {
+	return Environ(ctx, o.runner, cmd)
+}
+
 func (o observed) Run(ctx context.Context, cmd Command) (Result, error) {
 	started := o.now()
 	res, err := o.runner.Run(ctx, cmd)
@@ -265,11 +295,20 @@ func (w withEnv) Has(name string) bool {
 	return Has(w.runner, name)
 }
 
+func (w withEnv) Environ(ctx context.Context, cmd Command) ([]string, bool) {
+	return Environ(ctx, w.runner, w.with(cmd))
+}
+
 func (w withEnv) Run(ctx context.Context, cmd Command) (Result, error) {
+	return w.runner.Run(ctx, w.with(cmd))
+}
+
+// with is cmd with env's variables added, its own over them.
+func (w withEnv) with(cmd Command) Command {
 	if env := w.env(); len(env) > 0 {
 		cmd.Env = append(slices.Clone(env), cmd.Env...)
 	}
-	return w.runner.Run(ctx, cmd)
+	return cmd
 }
 
 // Streamed returns r with each line printed by a command run in a context
@@ -288,6 +327,10 @@ type streamed struct {
 
 func (s streamed) Has(name string) bool {
 	return Has(s.runner, name)
+}
+
+func (s streamed) Environ(ctx context.Context, cmd Command) ([]string, bool) {
+	return Environ(ctx, s.runner, cmd)
 }
 
 func (s streamed) Run(ctx context.Context, cmd Command) (Result, error) {

@@ -40,7 +40,6 @@ func newWorld(t *testing.T, lists prefs.Lists) *world {
 	w.p.Probes = nil
 	w.p.AppDirs = []string{w.apps}
 	w.p.Sleep = func(time.Duration) {}
-	w.p.Getenv = func(string) string { return "" }
 	for _, kv := range [][2]string{{"user.name", "kit"}, {"user.email", "kit@localhost"}, {"commit.gpgsign", "false"}, {"tag.gpgsign", "false"}, {"core.excludesFile", "/dev/null"}, {"core.hooksPath", "/dev/null"}, {"core.autocrlf", "false"}} {
 		w.fake.On("git", "-C", w.clone, "config", kv[0], kv[1])
 	}
@@ -94,16 +93,25 @@ func (w *world) pushes(t *testing.T, message, status string, update []string, st
 	w.fake.On("git", "-C", w.clone, "commit-tree", tree, "-p", head, "-m", message).Prints(made + "\n")
 	subject, _, _ := strings.Cut(message, "\n")
 	w.fake.On("git", "-C", w.clone, "update-ref", "-m", "kit: "+subject, "HEAD", made, head)
+	w.fake.On("git", "-C", w.clone, "ls-files", "--stage", "-z").Prints("100644 5e1c309dae7f45e0f39b1bf3ac3cd9db12e7d689 0\t.gitattributes\x00")
 	w.fake.On("git", "-C", w.clone, "--literal-pathspecs", "reset", "--quiet", made, "--pathspec-from-file=-", "--pathspec-file-nul").Filters(reads(staged)).Does(func() {
 		w.write(t, filepath.Join(gitDir, "kit-index.next"), "the index, as committed")
 	})
 	w.fake.On("git", "-C", w.clone, "remote", "get-url", "--push", "--all", "origin").Prints(remote + "\n")
-	w.fake.On("git", "-C", w.clone, "config", "--get", "remote.origin.vcs").Exits(1)
-	w.fake.On("git", "-C", w.clone, "config", "--get", "core.sshCommand").Exits(1)
-	w.fake.On("ssh", "-G", "git@github.com").Prints("user git\nhostname github.com\nport 22\n")
+	for _, key := range []string{"remote.origin.vcs", "core.sshCommand", "ssh.variant", "protocol.version"} {
+		w.fake.On("git", "-C", w.clone, "config", "--get", key).Exits(1)
+	}
+	w.fake.On("git", "-C", w.clone, "config", "-z", "--get-all", "remote.origin.receivepack").Exits(1)
+	w.sshResolves("someone/prefs.git")
 	w.fake.On("gh", "repo", "view", "https://github.com/someone/prefs", "--json", "visibility", "--jq", ".visibility").Prints("PRIVATE\n")
 	w.pulls()
 	w.fake.On("git", "-C", w.clone, "push", "--quiet")
+}
+
+// sshResolves scripts ssh -G resolving git@github.com to github.com, as
+// real ssh prints it, cut short, for git pushing to path there.
+func (w *world) sshResolves(path string) {
+	w.fake.On("ssh", "-G", "git@github.com", "git-receive-pack '"+path+"'").Prints("host github.com\nuser git\nhostname github.com\nport 22\ncanonicalizefallbacklocal yes\ncanonicalizehostname false\ncontrolmaster false\nsessiontype default\n")
 }
 
 // head is the commit HEAD names in the store's clone, tree the tree git
@@ -407,6 +415,7 @@ func TestCaptureNeverPushesToAPublicStore(t *testing.T) {
 			[]string{"laptop/.gitignore", "laptop/domains/com.example.app.plist", "laptop/owner"},
 			"laptop/.gitignore\x00laptop/domains/com.example.app.plist\x00laptop/owner\x00")
 		w.fake.On("git", "-C", w.clone, "remote", "get-url", "--push", "--all", "origin").Prints(c.pushURL + "\n")
+		w.sshResolves(strings.TrimPrefix(c.pushURL, "git@github.com:"))
 		w.fake.On("gh", "repo", "view", "https://github.com/"+c.public, "--json", "visibility", "--jq", ".visibility").Prints("PUBLIC\n")
 		report, err := w.p.Capture(t.Context())
 		if err != nil || !strings.HasPrefix(report.PushError, c.says) {
@@ -421,20 +430,42 @@ func TestCaptureNeverPushesToAPublicStore(t *testing.T) {
 	}
 }
 
-// A store on this Mac, a local path, is proven private, so pushed to.
+// A store on this Mac, a local path that stays on it, is proven private, so
+// pushed to; one in a folder macOS syncs off it, in the home, isn't.
 func TestCapturePushesToAStoreOnThisMac(t *testing.T) {
-	w := newWorld(t, prefs.Lists{})
-	writeRecord(t, w.state, `{"on": "started fresh"}`)
-	w.fake.On("defaults", "domains").Prints("com.example.app\n")
-	w.exports(t, "com.example.app", map[string]any{"Theme": "dark"})
-	w.pushes(t, "Capture 2026-10-06 03:00: 1 new\n\nnew: com.example.app\nclaimed: the folder, for this Mac's hardware",
-		"?? laptop/.gitignore\x00?? laptop/domains/com.example.app.plist\x00?? laptop/owner\x00",
-		[]string{"laptop/.gitignore", "laptop/domains/com.example.app.plist", "laptop/owner"},
-		"laptop/.gitignore\x00laptop/domains/com.example.app.plist\x00laptop/owner\x00")
-	w.fake.On("git", "-C", w.clone, "remote", "get-url", "--push", "--all", "origin").Prints("/Volumes/Backup/prefs.git\n")
-	report, err := w.p.Capture(t.Context())
-	if err != nil || report.PushError != "" || !slices.Contains(w.fake.Calls(), "git -C "+w.clone+" push --quiet") {
-		t.Errorf("Capture(), the store on this Mac = %+v, %v; want it pushed", report, err)
+	for _, c := range []struct {
+		// in is the folder the store's in, in the home when it starts
+		// home/; why why it isn't pushed to: "" when it is.
+		name, in, why string
+	}{
+		{name: "on this Mac", in: "Backup"},
+		{name: "in a cloud drive", in: "home/Library/CloudStorage/Dropbox", why: "it's in ~/Library/CloudStorage/Dropbox, which syncs off this Mac"},
+	} {
+		w := newWorld(t, prefs.Lists{})
+		writeRecord(t, w.state, `{"on": "started fresh"}`)
+		w.fake.On("defaults", "domains").Prints("com.example.app\n")
+		w.exports(t, "com.example.app", map[string]any{"Theme": "dark"})
+		w.pushes(t, "Capture 2026-10-06 03:00: 1 new\n\nnew: com.example.app\nclaimed: the folder, for this Mac's hardware",
+			"?? laptop/.gitignore\x00?? laptop/domains/com.example.app.plist\x00?? laptop/owner\x00",
+			[]string{"laptop/.gitignore", "laptop/domains/com.example.app.plist", "laptop/owner"},
+			"laptop/.gitignore\x00laptop/domains/com.example.app.plist\x00laptop/owner\x00")
+		store := filepath.Join(w.home, strings.TrimPrefix(c.in, "home/"), "prefs.git")
+		if !strings.HasPrefix(c.in, "home/") {
+			store = filepath.Join(t.TempDir(), c.in, "prefs.git")
+		}
+		if err := os.MkdirAll(store, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		w.fake.On("git", "-C", w.clone, "remote", "get-url", "--push", "--all", "origin").Prints(store + "\n")
+		says := ""
+		if c.why != "" {
+			says = "kit pushes apps' settings only to a repository it can prove private, and can't for " + store + ": " + c.why
+		}
+		report, err := w.p.Capture(t.Context())
+		pushed := slices.Contains(w.fake.Calls(), "git -C "+w.clone+" push --quiet")
+		if err != nil || pushed != (says == "") || report.PushError != says {
+			t.Errorf("%s: Capture() = %+v, %v, pushed %t; want it pushed only on this Mac, else held, saying %q", c.name, report, err, pushed, says)
+		}
 	}
 }
 

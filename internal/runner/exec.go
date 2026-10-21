@@ -103,7 +103,7 @@ func limited(ctx context.Context, timeout time.Duration) (context.Context, conte
 // start runs program as cmd says.
 func (e Exec) start(ctx context.Context, program string, cmd Command) (ran, error) {
 	c := exec.CommandContext(ctx, program, cmd.Args...)
-	c.Env = slices.Concat(e.Env, cmd.Env, SecretEnv(ctx))
+	c.Env, _ = e.Environ(ctx, cmd)
 	c.Dir = cmd.Dir
 	if cmd.Answer != nil {
 		return converse(ctx, c, cmd)
@@ -274,6 +274,12 @@ func Become(path string, args, env []string) error {
 // it can't.
 func BecomeLoginShell(shell string, env []string) error {
 	return syscall.Exec(shell, []string{"-" + filepath.Base(shell)}, env)
+}
+
+// Environ is the environment cmd runs in: Env, cmd's own variables over
+// it, then those its context sets.
+func (e Exec) Environ(ctx context.Context, cmd Command) ([]string, bool) {
+	return slices.Concat(e.Env, cmd.Env, SecretEnv(ctx)), true
 }
 
 // Has reports whether the program name is on Path, or is a path to one.

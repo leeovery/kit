@@ -176,3 +176,15 @@ func TestFakeHangs(t *testing.T) {
 		t.Errorf("Run() = %v, printing %q, in group %d; want what it prints, then the deadline exceeded, in its group", err, heard, res.Group)
 	}
 }
+
+// The fake says a command runs in its Env, the command's own variables
+// over it, then those the context sets, as a real runner.
+func TestFakeSaysTheEnvironmentACommandRunsIn(t *testing.T) {
+	f := runnertest.New(t)
+	f.Env = []string{"A=fake", "B=fake"}
+	ctx := runner.WithSecretEnv(t.Context(), "B=context")
+	env, ok := runner.Environ(ctx, f, runner.Command{Name: "git", Env: []string{"A=command"}})
+	if want := []string{"A=fake", "B=fake", "A=command", "B=context"}; !ok || !slices.Equal(env, want) {
+		t.Errorf("Environ() = %q, %t; want %q", env, ok, want)
+	}
+}

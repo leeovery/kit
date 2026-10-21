@@ -1046,15 +1046,13 @@ func TestPushDealsWithWhatAStoppedRunLeft(t *testing.T) {
 	}
 
 	gitDir := gitFolder(t, false)
-	writeFile(t, gitDir, marked, base+" "+stopped+" a-hash 1:2\n")
+	writeFile(t, gitDir, marked, markText(base, map[string]string{"brew": "100644 " + brewBefore + " 0"}))
 	fake := runnertest.New(t)
 	s := &sequence{fake: fake}
 	s.expect(call{args: git("remote")}).Prints("origin\n")
 	s.expect(call{args: gitDirOf}).Prints(gitDir + "\n")
 	s.head(stopped)
-	s.expect(call{args: committedBy}).Prints("brew\x00")
 	s.expect(call{args: indexed}).Prints(entry(brewBefore, "brew"))
-	s.expect(call{args: baseTree}).Prints(blob(brewBefore, "brew"))
 	s.expect(call{args: resetTo(stopped), input: "brew\x00", index: nextIndex}).Does(func() { writeFile(t, gitDir, nextIndex, "repaired") })
 	s.expect(call{args: wholeStatus})
 	s.tracks(tracksOrigin, "", "")

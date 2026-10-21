@@ -217,6 +217,7 @@ func (c commitCase) script(t *testing.T, fake *runnertest.Fake, gitDir string) [
 	}
 	if c.staged != "" {
 		s.commits(onto, c.signs, held)
+		s.reads(c.unborn, c.reset...).Does(held)
 		reset = resetTo(made)
 	}
 	if c.reset != nil {
@@ -245,8 +246,8 @@ func (c commitCase) script(t *testing.T, fake *runnertest.Fake, gitDir string) [
 			if data, _ := os.ReadFile(filepath.Join(gitDir, "index.lock")); string(data) != resetEntries {
 				t.Errorf("%s: HEAD moved with the lock holding %q, want the index's next contents", c.name, data)
 			}
-			if data, want := readFile(gitDir, marked), markOf(t, onto, made, filepath.Join(gitDir, "index.lock")); data != want {
-				t.Errorf("%s: HEAD moved with kit's mark %q, want %q: the commits, and the lock's hash and file", c.name, data, want)
+			if data, want := readFile(gitDir, marked), markOf(t, onto, made, filepath.Join(gitDir, "index.lock"), heldBy(c.unborn, c.reset...)); data != want {
+				t.Errorf("%s: HEAD moved with kit's mark %q, want %q: the commits, the lock's hash and file, and what the index held for the files committed", c.name, data, want)
 			}
 		})
 	}
@@ -281,10 +282,41 @@ func (s *sequence) attempt(gitDir, onto, staged string) *runnertest.Script {
 		return nil
 	}
 	s.commits(onto, false, nil)
+	s.reads(onto == "", "brew")
 	s.expect(call{args: resetTo(made), input: "brew\x00", index: nextIndex}).Does(func() {
 		_ = os.WriteFile(filepath.Join(gitDir, nextIndex), []byte(resetEntries), 0o600)
 	})
 	return s.expect(call{args: moveHEAD(onto)})
+}
+
+// heldBefore is the object of each file the user's index holds as kit
+// commits it, in the tests.
+const heldBefore = "7777777777777777777777777777777777777777"
+
+// reads scripts git listing the user's index as kit reads what it holds
+// for paths before its commit, holding each of them, at heldBefore, and a
+// file besides, or nothing before the first commit (unborn).
+func (s *sequence) reads(unborn bool, paths ...string) *runnertest.Script {
+	listed := ""
+	if !unborn {
+		for _, p := range slices.Sorted(slices.Values(append([]string{"another"}, paths...))) {
+			listed += entry(heldBefore, p)
+		}
+	}
+	return s.expect(call{args: indexed}).Prints(listed)
+}
+
+// heldBy is what kit's mark says the user's index held for paths, as reads
+// lists it.
+func heldBy(unborn bool, paths ...string) map[string]string {
+	held := map[string]string{}
+	for _, p := range paths {
+		held[p] = ""
+		if !unborn {
+			held[p] = "100644 " + heldBefore + " 0"
+		}
+	}
+	return held
 }
 
 // editing scripts a commit of brew, edited, as far as its last commit,
@@ -804,6 +836,7 @@ func TestCommitCleansTheMessage(t *testing.T) {
 	s.expect(call{args: writeIn, index: ownIndex}).Prints(tree + "\n")
 	s.expect(call{args: signing}).Exits(1)
 	s.expect(call{args: git("commit-tree", tree, "-p", base, "-m", "kit test\n\n  body line")}).Prints(made + "\n")
+	s.reads(false, "brew")
 	s.expect(call{args: resetTo(made), input: "brew\x00", index: nextIndex}).Does(func() {
 		_ = os.WriteFile(filepath.Join(gitDir, nextIndex), []byte(resetEntries), 0o600)
 	})
@@ -899,6 +932,7 @@ func TestCommitFails(t *testing.T) {
 	s.expect(call{args: stageIn, input: "brew\x00", index: ownIndex})
 	s.expect(call{args: stagedIn, index: ownIndex}).Prints("brew\x00")
 	s.commits(base, false, nil)
+	s.reads(false, "brew")
 	s.expect(call{args: resetTo(made), input: "brew\x00", index: nextIndex}).Exits(128).PrintsToStderr("fatal: index file corrupt\n")
 	if committed, err := didCommit((gitrepo.Repo{Dir: dir, Run: fake}).Commit(context.Background(), "kit test", "brew")); committed || err == nil || !strings.Contains(err.Error(), "index file corrupt") {
 		t.Errorf("Commit(), the next index not made = %v, %v; want nothing committed, git's error", committed, err)

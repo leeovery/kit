@@ -45,17 +45,24 @@ func laptopWorld(t *testing.T) *world {
 
 // private scripts kit-config's place as its privacy check asks after it,
 // as real git, ssh and gh answer: origin's URL, on GitHub over ssh, the one
-// it's fetched from and pushed to, handed to no helper, with no ssh command
-// set; the host ssh's config resolves git@github.com to; and the
-// repository, private there.
+// it's fetched from and pushed to, handed to no helper, with no ssh command,
+// variant, program for the other end or protocol version set; the host
+// ssh's config resolves git@github.com to, pushing to it and fetching from
+// it, cut short; and the repository, private there.
 func (w *world) private() {
 	const url = "git@github.com:someone/kit-config.git\n"
 	dir := filepath.Join(w.home, ".config", "kit")
 	w.fake.On("git", "-C", dir, "remote", "get-url", "origin").Prints(url)
 	w.fake.On("git", "-C", dir, "remote", "get-url", "--push", "--all", "origin").Prints(url)
-	w.fake.On("git", "-C", dir, "config", "--get", "remote.origin.vcs").Exits(1)
-	w.fake.On("git", "-C", dir, "config", "--get", "core.sshCommand").Exits(1)
-	w.fake.On("ssh", "-G", "git@github.com").Prints("user git\nhostname github.com\nport 22\n")
+	for _, key := range []string{"remote.origin.vcs", "core.sshCommand", "ssh.variant", "protocol.version"} {
+		w.fake.On("git", "-C", dir, "config", "--get", key).Exits(1)
+	}
+	for _, key := range []string{"remote.origin.receivepack", "remote.origin.uploadpack"} {
+		w.fake.On("git", "-C", dir, "config", "-z", "--get-all", key).Exits(1)
+	}
+	said := "host github.com\nuser git\nhostname github.com\nport 22\ncanonicalizefallbacklocal yes\ncanonicalizehostname false\ncontrolmaster false\nsessiontype default\n"
+	w.fake.On("ssh", "-G", "git@github.com", "git-receive-pack 'someone/kit-config.git'").Prints(said)
+	w.fake.On("ssh", "-G", "-o", "SendEnv=GIT_PROTOCOL", "git@github.com", "git-upload-pack 'someone/kit-config.git'").Prints(said)
 	w.fake.On("gh", "repo", "view", "https://github.com/someone/kit-config", "--json", "visibility", "--jq", ".visibility").Prints("PRIVATE\n")
 }
 
@@ -221,6 +228,28 @@ func TestStatusRunsProgramsOnKitsOwnPath(t *testing.T) {
 	}
 	if !slices.Equal(w.childEnv, wantEnv) {
 		t.Errorf("programs' environment = %q\nwant %q", w.childEnv, wantEnv)
+	}
+}
+
+// The config's privacy check reads the environment kit runs git in, never
+// kit's own: an ssh command, or TLS's checking turned off, in kit's own,
+// which git never sees, leaves the config proven private; in git's, it
+// can't be.
+func TestStatusProvesPrivacyInGitsEnvironment(t *testing.T) {
+	w := laptopWorld(t)
+	sets := []string{"GIT_SSH_COMMAND=ssh -o HostName=192.0.2.1", "GIT_SSH=/usr/local/bin/other-ssh", "GIT_SSL_NO_VERIFY=1"}
+	for _, kv := range sets {
+		name, value, _ := strings.Cut(kv, "=")
+		w.env[name] = value
+	}
+	w.environ = append(w.environ, sets...)
+	if out, _, _ := w.run(t, "status"); !strings.Contains(out, "config-private ok private on GitHub (someone/kit-config)\n") {
+		t.Errorf("kit status, an ssh command in kit's own environment, printed\n%s\nwant the config proven private", out)
+	}
+	w.added = sets[:1]
+	want := "config-private attention can't prove github.com:someone/kit-config.git private: GIT_SSH_COMMAND is set, so git may not reach it with ssh as its config says\n"
+	if out, _, _ := w.run(t, "status"); !strings.Contains(out, want) {
+		t.Errorf("kit status, an ssh command in git's environment, printed\n%s\nwant it to hold %q", out, want)
 	}
 }
 

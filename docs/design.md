@@ -378,11 +378,14 @@ kits commit there at once; where the git folder's filesystem takes no such lock 
 locks, some FUSE filesystems), kit commits without it, says so once, and leaves what a stopped
 run left alone, its mark too, leaving none of its own, as it can't then tell that run from one
 at work. Before HEAD moves, once it's sure it still holds the commit lock's file (one removed or
-replaced meanwhile, it commits nothing), kit leaves a mark beside the lock (`kit-mark`) naming
-the commit HEAD's on, the one it's moving onto, and the lock by its hash and its file (device
-and inode, so a lock written later, the same byte for byte, isn't taken for it); a run removes
-only the mark it left. Where there's a mark, and git isn't part way through one of its
-operations (a rebase stopped on kit's commit is never repaired under it), the next commit, pull
+replaced meanwhile, it commits nothing), kit leaves a mark beside the lock (`kit-mark`): a line
+naming the commit HEAD's on, the one it's moving onto, and the lock by its hash and its file
+(device and inode, so a lock written later, the same byte for byte, isn't taken for it); then,
+for each path the commit takes, what the user's index held for it as kit read it under git's
+lock (its entry's mode, object and stage, `-` for none), a tab and the path, ended by a NUL, as
+a path can hold any byte but that; a run removes only the mark it left. Where there's a mark,
+and git isn't part way through one of its operations (a rebase stopped on kit's commit is never
+repaired under it), the next commit, pull
 or push takes the commit lock, so no kit's writing (without a mark, a pull or push never takes
 it, so never waits for a kit at work), and deals with what a stopped run left, by facts, never
 by age, saying what it did: the lock still the very file the mark names, it puts it in the
@@ -390,11 +393,16 @@ index's place when HEAD's on the mark's commit, as the stopped run would have ("
 last run's index"), and removes it when HEAD's on the commit that run started from ("removed the
 lock on git's index a stopped run left; HEAD is where that run started", as when it stopped
 before HEAD moved, or a `git reset --soft` undid its commit); the lock gone, as when it was
-removed as git advises, and HEAD on the mark's commit, it resets to the commit's, under git's
-lock on the index, as kit prepares it, the files that commit changed whose entry in the user's
-index is still the commit before's (or, before the first commit, none), never one the user has
-staged since ("repaired the index a stopped run left"); with nothing to repair, or HEAD moved
-on, the mark's cleared; a repair that fails keeps it, for the next run. Any other lock it names, with how long since it last changed (its change time: kit's
+removed as git advises, it takes git's lock on the index first, then, HEAD on the mark's
+commit, resets to the commit's, as kit prepares it, the paths whose entry the user's index
+still holds as the stopped run read it (as the mark says), as that run would have, a file the
+user had staged before it included, never one staged since ("repaired the index a stopped run
+left"); with nothing to repair, or HEAD moved on, the mark's cleared; a mark that doesn't say
+what the index held (an older kit's one line, or one cut short) is cleared, the index left as it
+is ("left the index a stopped run left as it is, as its mark doesn't say what it held: git
+status shows whether that run's files are staged as they were before its commit"); a repair
+that fails keeps it, for the next run. Any other lock it names, with how long since it last
+changed (its change time: kit's
 own lock carries the index's time) and what to do should no git be running, and a lock no
 longer kit's own, as when another git removed it, kit never puts in place or removes. HEAD
 moves onto the commit only from the last commit, so when another git moved HEAD meanwhile, git refuses, and kit, still
@@ -630,21 +638,49 @@ person's decisions.
 kind, and the config repository being proven private (`config-private`): every URL kit pushes it
 to (the push URLs of the remote it's pushed to, as `git push` has them; git failing to name them
 fails the check) and origin's, which it's fetched from, each place that isn't proven private
-named. Proof is positive, never detection: a URL is proven private only as this Mac's (a local
-path or a `file://` URL), or as a repository on GitHub that `gh` says is private, asked by its
-URL, whatever host `GH_HOST` names. A repository is on GitHub when the host git reaches is
-`github.com` or a host under it, in plain ASCII: a URL's host without who it signs in as, its
-port or a full name's last dot, in lower case; an ssh host as ssh's config resolves it (`ssh -G
-[-p <port>] [<user>@]<host>`, the host given as git gives it, its case and user kept, as `Host`
-patterns are case-sensitive and a `Match user` needs the user; only ssh's answer is lowercased;
-`ssh -G` reads the config alone, connecting nowhere). Anything else is refused, named without
-who it signs in as, with why: a URL git hands to a helper (a scheme outside git's own, `ssh`,
-`git+ssh`, `ssh+git`, `git`, `http`, `https`, `ftp`, `ftps` and `file`, in lower case; a `::`;
-`remote.<name>.vcs`); for ssh, an ssh command set (`core.sshCommand`, `GIT_SSH_COMMAND`,
-`GIT_SSH`) or a proxy in ssh's answer (`proxycommand` or `proxyjump` other than `none`), which can
-take it anywhere, as can a proxy for git's own protocol (`core.gitProxy`, `GIT_PROXY_COMMAND`);
-another host, an IP address, or one not in plain ASCII; a host kit can't read (escaped, in
-brackets, like a flag); a path on GitHub that isn't an owner's repository. With no remote it's
+named, each URL asked of the way git goes there: pushing for the push URLs, fetching for
+origin's. Proof is positive, never detection: a URL is proven private only as this Mac's, or as
+a repository on GitHub that `gh` says is private, asked by its URL, whatever host `GH_HOST`
+names (`gh` not signed in, as it says by exiting 4, fails the check: "gh isn't signed in to
+GitHub: run gh auth login"). This Mac's is a local path, the repository's when relative, or a
+`file://` URL (its path decoded, its host ignored, as git takes them) that stays on the Mac, links
+resolved: on a filesystem that's local (`statfs`'s `MNT_LOCAL`), and outside the folders in the
+home macOS syncs off it, `Library/CloudStorage` (File Provider's cloud drives, as Dropbox's) and
+`Library/Mobile Documents` (iCloud Drive), told by their files, so by any name. A repository is
+on GitHub when the host git reaches is `github.com` or `ssh.github.com`, no other (no other host
+under `github.com`, as `gist.github.com`, holds one git pushes to as owner/name), in plain ASCII,
+reached over https or ssh alone: a URL's host in any case, with a full name's last dot or
+without; over ssh, the host ssh's config resolves, asked of `ssh -G` with what git gives ssh
+going that way, the arguments taken from real git: `-o SendEnv=GIT_PROTOCOL` as git passes it
+(fetching at any protocol version but 0, pushing at version 1 alone, `protocol.version` 2 when
+it isn't set), `-p <port>`, `[<user>@]<host>` as git gives it, its case kept, as `Host`
+patterns are case-sensitive and a `Match user` needs the user, and the command git runs at the
+other end: the remote's `receivepack` pushing or `uploadpack` fetching (its first value, as git
+takes it), else `git-receive-pack` or `git-upload-pack`, then the path as git quotes it for the
+shell (in single quotes, a quote and a `!` escaped outside them), from its `~` when that's its
+second letter, as git has it; a `Match sessiontype exec` or `Match command …` can send the
+command elsewhere, so the check asks with it, never without. `ssh -G` connects nowhere, but runs
+the commands the config's `Match exec` lines name, as ssh does to read its config. Over https,
+TLS's proof of the host must stand. Everything git takes from the environment is read from the
+one kit runs git in, as the runner has it, never kit's own. Anything else is refused, named
+without who it signs in as, with why: a URL git hands to a helper (a scheme outside git's own,
+`ssh`, `git+ssh`, `ssh+git`, `git`, `http`, `https`, `ftp`, `ftps` and `file`, in lower case; a
+`::`; `remote.<name>.vcs`); one git reads otherwise than kit could (a query, a fragment, or a
+password in an ssh URL, which git gives ssh as its user); `git://`, `http://` and `ftp(s)://`,
+which aren't https or ssh; for ssh, an ssh command set (`core.sshCommand`, `GIT_SSH_COMMAND`,
+`GIT_SSH`), a variant other than ssh's own (`GIT_SSH_VARIANT`, `ssh.variant`), which git gives
+other options, a proxy in ssh's answer (`proxycommand` or `proxyjump` other than `none`), a host
+name canonicalized (`canonicalizehostname` other than `false`, which looks it up anew), or a
+`controlpath` naming neither the host ssh reaches nor the connection (ssh prints it with its
+tokens expanded, so the host is looked for in it, and the connection's hash, `%C`, asked of
+`ssh -G -o ControlPath=%C`), as a connection another host has open there can carry git's,
+whatever `controlmaster` says; for https, `GIT_SSL_NO_VERIFY`, `GIT_SSL_CAINFO`,
+`GIT_SSL_CAPATH`, `SSL_CERT_FILE` or `SSL_CERT_DIR` set, or, for the URL (`git config
+--get-urlmatch`, its user kept and its password left out), `http.sslVerify` false,
+`http.sslCAInfo` or `http.sslCAPath` set, or `http.curloptResolve` other than empty; another
+host, an IP address, or one not in plain ASCII; a host kit can't read (escaped, in brackets,
+like a flag); a path on GitHub that isn't an owner's repository; a local path kit can't find,
+on a filesystem that isn't local, or in a folder that syncs off the Mac. With no remote it's
 pushed to or fetched from, it isn't public.
 
 Every command takes `--json` (one document), `--plain` (plain lines, as without a terminal)

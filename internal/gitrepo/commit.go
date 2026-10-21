@@ -206,20 +206,25 @@ func (r Repo) commitTree(ctx context.Context, lock *indexLock, base, message str
 // swap moves HEAD onto made, the commit kit made onto base, only from base,
 // so a commit another git made meanwhile is never undone, the user's
 // index's next contents, paths as made has them, in the lock first, and
-// kit's mark of it beside it: once HEAD has moved, all that's left is the
-// lock taking the index's place, which a run that finds it left does
-// (finish). It's HEAD after: made, or where another git moved it meanwhile.
+// kit's mark of it beside it, with what the index held for paths: once HEAD
+// has moved, all that's left is the lock taking the index's place, which a
+// run that finds it left does (recover). It's HEAD after: made, or where
+// another git moved it meanwhile.
 func (r Repo) swap(ctx context.Context, lock *indexLock, base, made, message string, paths []string) (string, error) {
+	read, err := r.indexed(ctx, paths)
+	if err != nil {
+		return "", err
+	}
 	if err := r.prepare(ctx, lock, made, paths); err != nil {
 		return "", err
 	}
-	if err := lock.mark(base, made); err != nil {
+	if err := lock.mark(base, made, read); err != nil {
 		return "", err
 	}
 	subject, _, _ := strings.Cut(message, "\n")
 	// HEAD's old value is base: "" before the first commit, which has git
 	// refuse should another git have made one meanwhile.
-	_, err := r.git(ctx, "update-ref", "-m", "kit: "+subject, "HEAD", made, base)
+	_, err = r.git(ctx, "update-ref", "-m", "kit: "+subject, "HEAD", made, base)
 	if err == nil {
 		return made, nil
 	}

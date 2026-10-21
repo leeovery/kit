@@ -64,12 +64,12 @@ func (p *Prefs) ensureClone(ctx context.Context) error {
 // repo is the store's clone, as git drives it: pulled, committed and
 // pushed as kit-config is.
 func (p *Prefs) repo() gitrepo.Repo {
-	return gitrepo.Repo{Dir: p.Clone, Run: p.Run, Sleep: p.Sleep, Getenv: p.Getenv}
+	return gitrepo.Repo{Dir: p.Clone, Run: p.Run, Sleep: p.Sleep, Home: p.Home}
 }
 
 // push sends the store's commits to its remote, only when every URL Push
-// pushes to is proven private (gitrepo.Place): what the push did besides
-// (Push), and why it didn't push, or "" once pushed.
+// pushes to is proven private, as git pushes there (gitrepo.Place): what
+// the push did besides (Push), and why it didn't push, or "" once pushed.
 func (p *Prefs) push(ctx context.Context, repo gitrepo.Repo) ([]string, string) {
 	remote, urls, err := repo.PushURLs(ctx)
 	switch {
@@ -79,7 +79,7 @@ func (p *Prefs) push(ctx context.Context, repo gitrepo.Repo) ([]string, string) 
 		return nil, err.Error()
 	}
 	for _, url := range urls {
-		place, err := repo.Place(ctx, remote, url)
+		place, err := repo.Place(ctx, remote, url, gitrepo.Pushing)
 		switch {
 		case err != nil:
 			return nil, err.Error()

@@ -258,6 +258,51 @@ installed() {
 	type -P "$name" || true
 }
 
+# every_installed prints each place the program name is, links resolved,
+# once each: the places given that hold it, and every one on PATH, as a
+# program found first there can be another than the one a test's PATH
+# finds.
+every_installed() {
+	local name=$1 place found seen=$'\n'
+	shift
+	while IFS= read -r place; do
+		found=$(resolved "$place")
+		case $seen in
+		*$'\n'"$found"$'\n'*) continue ;;
+		esac
+		seen+="$found"$'\n'
+		printf '%s\n' "$found"
+	done < <(
+		for place in "$@"; do
+			if [ -f "$place" ] && [ -x "$place" ]; then
+				printf '%s\n' "$place"
+			fi
+		done
+		type -a -P "$name" || true
+	)
+}
+
+# denies_running_every proves the sandbox denies running each copy of the
+# program name there is (every_installed), at the places given, then on
+# PATH: the arguments after -- have each say what it is and stop.
+denies_running_every() {
+	local name=$1 places=() program status=0 any=
+	shift
+	while [ "$1" != -- ]; do
+		places+=("$1")
+		shift
+	done
+	shift
+	while IFS= read -r program; do
+		any=1
+		denies_running "$name" "$program" "$@" || status=1
+	done < <(every_installed "$name" "${places[@]}")
+	if [ -z "$any" ]; then
+		denies_running "$name" "" "$@"
+	fi
+	return "$status"
+}
+
 # starts_clean proves the tests start with none of the variables no test may
 # see, naming any they would, never its value.
 starts_clean() {
@@ -288,8 +333,8 @@ self_check() {
 	denies_running mas "$(installed mas)" version || status=1
 	denies_running gh "$(installed gh)" --version || status=1
 	denies_running op "$(installed op)" --version || status=1
-	denies_running git "$(installed git /usr/bin/git)" --version || status=1
-	denies_running ssh "$(installed ssh /usr/bin/ssh)" -V || status=1
+	denies_running_every git /usr/bin/git -- --version || status=1
+	denies_running_every ssh /usr/bin/ssh -- -V || status=1
 	# Claude Code where its installers put it: a claude first on PATH can be
 	# another program's link, such as a router's.
 	denies_running claude "$(installed claude "$HOME/.local/bin/claude" /opt/homebrew/bin/claude /usr/local/bin/claude "$HOME/.claude/local/claude")" --version || status=1

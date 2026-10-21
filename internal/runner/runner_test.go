@@ -97,3 +97,37 @@ func TestSecretValues(t *testing.T) {
 		t.Error("no variables changed the context, or a context without them set some")
 	}
 }
+
+// only runs commands, and can't say what environment it runs them in.
+type only struct{ runner.Runner }
+
+// A runner that can't say what environment it runs a command in says so,
+// wrapped in any other: never an environment without what it adds.
+func TestEnvironOfARunnerThatCantSay(t *testing.T) {
+	r := only{runnertest.New(t)}
+	wrapped := runner.WithEnv(runner.Observed(r, func(context.Context, runner.Report) {}, time.Now), func() []string { return []string{"A=1"} })
+	for name, r := range map[string]runner.Runner{"alone": r, "wrapped": wrapped} {
+		if env, ok := runner.Environ(t.Context(), r, runner.Command{Name: "git"}); ok || env != nil {
+			t.Errorf("%s: Environ() = %q, %t; want it unknown", name, env, ok)
+		}
+	}
+}
+
+// A variable's value is its last, as a program sees it; one set empty is
+// set.
+func TestLookupEnv(t *testing.T) {
+	env := []string{"A=1", "B=", "A=2", "AB=3"}
+	for _, c := range []struct {
+		name, value string
+		set         bool
+	}{
+		{"A", "2", true},
+		{"B", "", true},
+		{"AB", "3", true},
+		{"C", "", false},
+	} {
+		if value, set := runner.LookupEnv(env, c.name); value != c.value || set != c.set {
+			t.Errorf("LookupEnv(%s) = %q, %t; want %q, %t", c.name, value, set, c.value, c.set)
+		}
+	}
+}
