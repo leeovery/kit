@@ -57,12 +57,13 @@ func (r Repo) gitOn(ctx context.Context, args []string, paths ...string) (runner
 	return r.git(ctx, slices.Concat([]string{"--literal-pathspecs"}, args, []string{"--"}, paths)...)
 }
 
-// gitIn runs git's args with env, reading paths, each ended by a NUL.
-func (r Repo) gitIn(ctx context.Context, env, paths []string, args ...string) (runner.Result, error) {
+// gitIn runs git's args with env, reading records, as paths, each ended by
+// a NUL.
+func (r Repo) gitIn(ctx context.Context, env, records []string, args ...string) (runner.Result, error) {
 	cmd := r.command(args...)
 	cmd.Env = append(cmd.Env, env...)
-	for _, p := range paths {
-		cmd.Input += p + "\x00"
+	for _, record := range records {
+		cmd.Input += record + "\x00"
 	}
 	return r.Run.Run(ctx, cmd)
 }

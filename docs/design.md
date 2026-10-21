@@ -379,37 +379,46 @@ locks, some FUSE filesystems), kit commits without it, says so once, and leaves 
 run left alone, its mark too, leaving none of its own, as it can't then tell that run from one
 at work. Before HEAD moves, once it's sure it still holds the commit lock's file (one removed or
 replaced meanwhile, it commits nothing), kit leaves a mark beside the lock (`kit-mark`): a line
-naming the commit HEAD's on, the one it's moving onto, and the lock by its hash and its file
-(device and inode, so a lock written later, the same byte for byte, isn't taken for it); then,
+naming the commit HEAD's on (`-` before the first) and the one it's moving onto, each by its
+object name in hex, and the lock by its hash and its file (device and inode, so a lock written
+later, the same byte for byte, isn't taken for it); then,
 for each path the commit takes, what the user's index held for it as kit read it under git's
 lock (its entry's mode, object and stage, `-` for none), a tab and the path, ended by a NUL, as
 a path can hold any byte but that; then `end` and a NUL, which no record is, as each holds a
 tab, so a mark cut short anywhere, between records too, is never taken for whole. It's written
 in one step: into `kit-index.mark` first (swept with kit's other files), synced to the disk,
-then renamed over `kit-mark`, so a stop or a power loss leaves it whole or not there. A run
+then renamed over `kit-mark`, the git folder synced after, so a stop or a power loss leaves it
+whole or not there. A folder in the way of `kit-index.mark`, `kit-mark` or `kit-index.next`,
+which no sweep takes, as it holds files, is named, with "remove it, then try again". A run
 removes only the mark it left. Where there's a mark,
 and git isn't part way through one of its operations (a rebase stopped on kit's commit is never
 repaired under it), the next commit, pull
 or push takes the commit lock, so no kit's writing (without a mark, a pull or push never takes
 it, so never waits for a kit at work), and deals with what a stopped run left, by facts, never
-by age, saying what it did: the lock still the very file the mark names, it puts it in the
-index's place when HEAD's on the mark's commit, as the stopped run would have ("finished the
+by age, saying what it did: the lock still the very file the mark's first line names, which that
+line alone tells, its records whole or not, it puts it in the index's place when HEAD's on the
+mark's commit, as the stopped run would have ("finished the
 last run's index"), and removes it when HEAD's on the commit that run started from ("removed the
 lock on git's index a stopped run left; HEAD is where that run started", as when it stopped
 before HEAD moved, or a `git reset --soft` undid its commit); the lock gone, as when it was
 removed as git advises, it takes git's lock on the index first, then, HEAD on the mark's
-commit, resets to the commit's, as kit prepares it, the paths whose entry the user's index
-still holds as the stopped run read it (as the mark says), as that run would have, a file the
-user had staged before it included, never one staged since ("repaired the index a stopped run
-left"); with nothing to repair, or HEAD moved on, the mark's cleared. A mark kit can't use is
-cleared before anything else, the index and any lock left as they are ("left the index a
-stopped run left as it is, as kit can't use its mark: git status shows whether that run's files
-are staged as they were before its commit"): one that isn't whole (cut short, more after its
-end, a first line that isn't the mark's), or with a record whose path isn't one git names a
-file in the repository by (empty, `.`, `..`, absolute, or with an empty, `.` or `..` part), or,
-once kit holds git's lock on the index, naming a folder in the commit, the one before it or the
-user's index, which git's reset would take whole. A repair that fails keeps the mark, for the
-next run, and its error names the mark, saying kit tries again next run, or to remove it once
+commit, sets each path whose entry the user's index still holds as the stopped run read it (as
+the mark says) to the commit's, that entry alone, as `git ls-tree` lists it, or removes that
+entry where the commit has none (`git update-index --index-info`, on a copy of the index), as
+that run would have, so a path never takes the files under it, and a file the commit made a
+folder, or a folder it made a file, replaces what's in its way, as git's reset would, a file
+the user had staged before it included, never one staged since ("repaired the index a stopped
+run left"); with nothing to repair, or HEAD moved on, the mark's cleared. A mark kit can't use
+is cleared, the index and any lock left as they are ("left the index a stopped run left as it
+is, as kit can't use its mark: git status shows whether that run's files
+are staged as they were before its commit"): before anything else, one whose first line isn't
+the mark's (four words, its commits each an object name in hex, `-` for no base, so none reaches
+git as an option); and, its lock gone, as finishing or clearing the lock needs no records and a
+repair does, one whose records kit can't use (cut short, more after its end, or a record whose
+path isn't one git names a file in the repository by: empty, `.`, `..`, absolute, or with an
+empty, `.` or `..` part). A revision kit gives `git ls-tree` or `git reset` comes after
+`--end-of-options`. A repair that fails keeps the mark, for the next run, and its error names
+the mark, saying kit tries again next run, or to remove it once
 `git status` shows the index as it should be. Any other lock it names, with how long since it last
 changed (its change time: kit's
 own lock carries the index's time) and what to do should no git be running, and a lock no
@@ -655,18 +664,24 @@ says by exiting 4, fails the check: "gh isn't signed in to GitHub: run gh auth l
 Mac's is a local path, the repository's when relative, or a `file://` URL (its path decoded, its
 host ignored, as git takes them), where git runs its own program at the other end
 (`remote.<name>.receivepack` pushing, `uploadpack` fetching, unset or exactly `git-receive-pack`
-or `git-upload-pack`: git runs a remote's own for a local path too) and everywhere git writes
-the repository it finds there stays on the Mac. git finds it as real git does at the other end
+or `git-upload-pack`, or those without their dash, `git receive-pack` and `git upload-pack`: git
+runs a remote's own for a local path too) and everywhere git writes the repository it finds
+there stays on the Mac. git finds it as real git does at the other end
 of a push or fetch: the path's trailing slashes dropped, a leading `~` the `HOME` of git's
 environment (another user's `~name` is refused), then the path with `/.git`, nothing,
 `.git/.git` and `.git` added in turn, the first that's a file, or a folder git takes for a
-repository (a `HEAD` of `ref: ` and a path in `refs/`, a link into `refs/`, or an object's hash,
+repository (a `HEAD` of `ref:`, any of git's space (space, tab, newline or carriage return,
+never `\v` or `\f`) and a path in `refs/`, a link into `refs/`, or an object's hash,
 and `objects` and `refs` folders, a worktree's in the common folder its `commondir` names), a
-file followed to the git folder its `gitdir: ` line names, no other tried should that be none.
-Where git writes is the git folder, its common folder, and every link in them, and in the
-folders those lead to, followed as git follows them writing (a link that leads nowhere takes
-nothing); nothing's resolved by name, so `..` after a link leads where the link does. Each
-must be on a filesystem that's local (`statfs`'s `MNT_LOCAL`) and outside the folders in the
+file followed to the git folder its `gitdir: ` line names, no other tried should that be none,
+the file itself no place git writes. Where git writes is the git folder and its common folder:
+all through `objects`, `refs`, `logs` and `worktrees` in each, every link there followed, and
+all through where it leads; and, of what git writes at the top (`packed-refs`, `HEAD`, `index`,
+`config`, `shallow`, `gc.log`, some by auto-gc), where each link there leads, never in it. A
+link that leads nowhere is where git, writing through it, makes the file it names: the nearest
+folder on its way there that exists. Nothing's resolved by name, so `..` after a link leads
+where the link does. Each must be on a filesystem that's local (`statfs`'s `MNT_LOCAL`) and
+outside the folders in the
 home whose files may leave the Mac, told by their files, so by any name: `Library/CloudStorage`
 (File Provider's cloud drives, as Dropbox's) and `Library/Mobile Documents` (iCloud Drive),
 which sync off it, and `Desktop` and `Documents`, which iCloud syncs in place when its Desktop &
@@ -674,8 +689,10 @@ Documents is on, said as maybe syncing, never detected. The list is partial: a p
 Syncthing syncs any folder, which kit can't tell. What the repository there does with what it's
 given is its own, as a server's is, so kit doesn't check it: its hooks (a `post-receive` that
 mirrors it elsewhere), its config (`core.worktree`, `receive.denyCurrentBranch updateInstead`),
-a filesystem mounted inside it. A repository is
-on GitHub when the host git reaches is `github.com` or `ssh.github.com`, no other (no other host
+a filesystem mounted inside it, its `hooks` and `info` folders, which kit doesn't look in (a
+push or fetch writes neither, though the auto-gc after a push can write `info/refs`). A
+repository is on GitHub when the host git reaches is `github.com` or `ssh.github.com`, no other
+(no other host
 under `github.com`, as `gist.github.com`, holds one git pushes to as owner/name), in plain ASCII,
 reached over https or ssh alone: a URL's host in any case, with a full name's last dot or
 without; over ssh, the host ssh's config resolves, asked of `ssh -G` with what git gives ssh
@@ -690,11 +707,18 @@ second letter, as git has it; a `Match sessiontype exec` or `Match command …` 
 command elsewhere, so the check asks with it, never without. ssh's variant is git's: the
 environment's `GIT_SSH_VARIANT` over `ssh.variant`, a value git doesn't know, in its case, being
 ssh's own, and `simple` asked with the host and command alone, as git gives no other. ssh's
-proof of the host must stand: its key checked, strictly or by asking, against files ssh keeps;
-a key ssh takes on first sight (`stricthostkeychecking accept-new`, as a new Mac's first push
-would) only for a host whose key ssh already knows, `ssh-keygen -F <host> -f <file>` finding it
-in one of `userknownhostsfile`'s or `globalknownhostsfile`'s files, `[<host>]:<port>` on a port
-other than 22. A `controlpath` is asked of a host no config means too, `kit-sentinel.invalid`,
+proof of the host must stand: its key checked, strictly or by asking, against what ssh knows (a
+key it can't check, it refuses, or asks of a terminal), never taken from DNS unasked
+(`verifyhostkeydns yes`, which `ssh -G` prints as `true`, takes a key from an SSHFP record DNSSEC
+vouches for, before ssh's files, on the resolver's word; `ask` still asks); a key ssh takes on
+first sight (`stricthostkeychecking accept-new`, as a new Mac's first push would) only for a
+host whose own key ssh already knows, `ssh-keygen -F <host> -f <file>` finding a line for it,
+plain, hashed or a pattern, with no marker after its header (a `@cert-authority` line, marked
+`CA`, vouches for any key it signs, and a `@revoked` one, `REVOKED`, refuses its key alone, so
+ssh takes another on first sight beside either), in one of `userknownhostsfile`'s or
+`globalknownhostsfile`'s files, `[<host>]:<port>` on a port other than 22; `ssh -G` prints those
+files unquoted, a space between, so a part that isn't a path from `/` is the one before's,
+holding a space. A `controlpath` is asked of a host no config means too, `kit-sentinel.invalid`,
 as git's call with the user and port ssh resolved: the same path there is one other hosts share,
 where a connection another host has open can carry git's, whatever `controlmaster` says. A path
 shared on purpose between hosts the config names, or an alias whose `HostName` is GitHub's with
@@ -712,10 +736,10 @@ with a port, which git refuses, a proxy in ssh's answer (`proxycommand` or `prox
 than `none`), a host name canonicalized (`canonicalizehostname` other than `false`, which looks
 it up anew), the host's key not checked (`stricthostkeychecking no`, which `ssh -G` prints as
 `false`), checked by another name (`hostkeyalias`) or against keys a command gives
-(`knownhostscommand`), no file of known hosts (`userknownhostsfile` `/dev/null` or `none`), a key
-taken on first sight for a host ssh doesn't know yet, or a `controlpath` other hosts share; for
-https, `GIT_SSL_NO_VERIFY`, `GIT_SSL_CAINFO`,
-`GIT_SSL_CAPATH`, `SSL_CERT_FILE` or `SSL_CERT_DIR` set, or, for the URL (`git config
+(`knownhostscommand`) or taken from DNS (`verifyhostkeydns yes`), a key taken on first sight for
+a host ssh doesn't know yet, or a `controlpath` other hosts share; for https,
+`GIT_SSL_NO_VERIFY`, `GIT_SSL_CAINFO`, `GIT_SSL_CAPATH`, `SSL_CERT_FILE` or `SSL_CERT_DIR` set,
+or, for the URL (`git config
 --get-urlmatch`, its user kept and its password left out), `http.sslVerify` false,
 `http.sslCAInfo` or `http.sslCAPath` set, or `http.curloptResolve` other than empty; another
 host, an IP address, or one not in plain ASCII; a host kit can't read (escaped, in brackets,

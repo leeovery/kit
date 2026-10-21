@@ -302,7 +302,7 @@ func (w *world) expectCommit(t *testing.T, c commit, checks ...func()) {
 	w.fake.On("git", git("config", "--get", "--type=bool", "commit.gpgsign")...).Exits(1)
 	w.fake.On("git", git("ls-files", "--stage", "-z")...).Prints("100644 5e1c309dae7f45e0f39b1bf3ac3cd9db12e7d689 0\tshared/declarations\x00")
 	const reset = "the user's index, kit's files as committed"
-	w.fake.On("git", git("--literal-pathspecs", "reset", "--quiet", made, "--pathspec-from-file=-", "--pathspec-file-nul")...).Filters(reads("reset", c.staged)).Does(func() {
+	w.fake.On("git", git("--literal-pathspecs", "reset", "--quiet", "--pathspec-from-file=-", "--pathspec-file-nul", "--end-of-options", made)...).Filters(reads("reset", c.staged)).Does(func() {
 		if err := os.WriteFile(filepath.Join(gitDir, "kit-index.next"), []byte(reset), 0o600); err != nil {
 			t.Error(err)
 		}

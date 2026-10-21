@@ -346,12 +346,13 @@ func (l *indexLock) mark(base, made string, read map[string]string) error {
 
 // writeWhole writes data to the file at path in one step, so a stop or a
 // power loss leaves it whole or not there: into the file at next first,
-// synced to the disk, then renamed over it. A next a failure leaves is one
-// of kit's own files, which the sweep takes.
+// synced to the disk, then renamed over it, its folder synced after, so the
+// rename is on the disk too. A next a failure leaves is one of kit's own
+// files, which the sweep takes.
 func writeWhole(path, next, data string) error {
 	f, err := os.OpenFile(next, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
-		return err
+		return inTheWay(next, err)
 	}
 	_, err = f.WriteString(data)
 	if err == nil {
@@ -360,10 +361,31 @@ func writeWhole(path, next, data string) error {
 	if closed := f.Close(); err == nil {
 		err = closed
 	}
+	if err == nil {
+		err = inTheWay(path, os.Rename(next, path))
+	}
 	if err != nil {
 		return err
 	}
-	return os.Rename(next, path)
+	dir, err := os.Open(filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+	defer func() { _ = dir.Close() }()
+	return dir.Sync()
+}
+
+// inTheWay is err, kit failing to write its own file at path, saying so
+// when a folder's there, which the sweep leaves, as it holds files, with
+// what to do; nil for nil.
+func inTheWay(path string, err error) error {
+	if err == nil {
+		return nil
+	}
+	if info, statErr := os.Lstat(path); statErr == nil && info.IsDir() {
+		return fmt.Errorf("a folder is in the way of kit's own file %s: remove it, then try again", path)
+	}
+	return err
 }
 
 // unmark removes this run's mark, when it left one.

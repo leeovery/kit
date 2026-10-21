@@ -13,6 +13,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"syscall"
@@ -23,8 +24,9 @@ const (
 	finishedIndex = "finished the last run's index"
 	clearedLock   = "removed the lock on git's index a stopped run left; HEAD is where that run started"
 	repairedIndex = "repaired the index a stopped run left"
-	// unrepaired is said of a mark kit can't use: not whole, or with a
-	// record that isn't sound.
+	// unrepaired is said of a mark kit can't use: its first line not the
+	// mark's, or, to repair the index by, its records not whole or not
+	// sound.
 	unrepaired = "left the index a stopped run left as it is, as kit can't use its mark: git status shows whether that run's files are staged as they were before its commit"
 	// unlocked is said where kit commits without its own lock.
 	unlocked = "committed without kit's own lock, which the git folder's filesystem can't take"
@@ -35,8 +37,8 @@ const (
 // the one it's moving onto (made); the lock it filled, by its hash and its
 // file (fileID), so a lock written later that's the same byte for byte
 // isn't taken for it; and what the user's index held for each path it
-// commits as it read them (read, as indexed has it): nil for a mark kit
-// can't use.
+// commits as it read them (read, as indexed has it). made is "" for a mark
+// whose first line kit can't use, read nil for one whose records it can't.
 type mark struct {
 	base, made, sum, file string
 	read                  map[string]string
@@ -61,17 +63,22 @@ func (m mark) String() string {
 	return b.String()
 }
 
-// readMark is the mark in the git folder gitDir, if there's one: its read
-// nil when it isn't whole, as String writes one, or a record's path isn't
-// sound (clean).
+// objectID is an object's name as git writes one: a SHA-1's or a
+// SHA-256's hash, in hex.
+var objectID = regexp.MustCompile(`^([0-9a-f]{40}|[0-9a-f]{64})$`)
+
+// readMark is the mark in the git folder gitDir, if there's one: none of
+// it read when its first line isn't four words, as String writes them, its
+// commits each an objectID, "-" for no base; its read nil when its records
+// aren't whole, or a record's path isn't sound (clean).
 func readMark(gitDir string) (mark, bool) {
 	data, err := os.ReadFile(filepath.Join(gitDir, marked))
 	if err != nil {
 		return mark{}, false
 	}
 	first, rest, _ := strings.Cut(string(data), "\n")
-	f := strings.Fields(first)
-	if len(f) != 4 {
+	f := strings.Split(first, " ")
+	if len(f) != 4 || !objectID.MatchString(f[1]) || f[0] != "-" && !objectID.MatchString(f[0]) {
 		return mark{}, true
 	}
 	m := mark{base: f[0], made: f[1], sum: f[2], file: f[3], read: readHeld(rest)}
@@ -138,32 +145,27 @@ func (r Repo) recovered(ctx context.Context, gitDir string) ([]string, error) {
 }
 
 // recover deals with what a run of kit's that stopped left, as its mark
-// tells, kit holding its lock on committing, so that run's over: a mark it
-// can't use it clears, leaving the index and any lock, and says so; the
-// lock on the index it filled, still there, it puts in the index's place
-// once HEAD's on its commit, or removes while HEAD's on the one that run
-// started from; the lock gone, as when it was removed as git advises, HEAD
-// on its commit, it brings the index up to date with it (repair), a repair
-// that fails naming the mark. Any other lock it leaves be, the refusal to
-// come naming it. What it did, it says.
+// tells, kit holding its lock on committing, so that run's over: a mark
+// whose first line it can't use it clears, leaving the index and any lock,
+// and says so; the lock on the index it filled, still there, it puts in
+// the index's place once HEAD's on its commit, or removes while HEAD's on
+// the one that run started from, by the mark's first line alone; the lock
+// gone, as when it was removed as git advises, HEAD on its commit, it
+// brings the index up to date with it (repaired). Any other lock it leaves
+// be, the refusal to come naming it. What it did, it says.
 func (r Repo) recover(ctx context.Context, gitDir string) ([]string, error) {
 	m, ok := readMark(gitDir)
 	switch {
 	case !ok:
 		return nil, nil
-	case m.read == nil:
+	case m.made == "":
 		return cleared(gitDir, unrepaired)
 	}
 	path := filepath.Join(gitDir, "index.lock")
 	info, sum, err := hashed(path)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
-		notes, err := r.repair(ctx, gitDir, m)
-		if err != nil {
-			mark := filepath.Join(gitDir, marked)
-			return nil, fmt.Errorf("couldn't repair the index a stopped run of kit's left, by its mark, %s: %w; kit tries again next run, or, once git status shows the index as it should be, remove %s", mark, err, mark)
-		}
-		return notes, nil
+		return r.repaired(ctx, gitDir, m)
 	case err != nil || sum != m.sum || fileID(info) != m.file:
 		return nil, nil
 	}
@@ -177,6 +179,21 @@ func (r Repo) recover(ctx context.Context, gitDir string) ([]string, error) {
 		return said(clearedLock, replace(path, info, ""), gitDir)
 	}
 	return nil, nil
+}
+
+// repaired is the index brought up to date with m's commit (repair), a
+// failure naming the mark, and what to do; a mark whose records kit can't
+// use it clears, leaving the index, and says so.
+func (r Repo) repaired(ctx context.Context, gitDir string, m mark) ([]string, error) {
+	if m.read == nil {
+		return cleared(gitDir, unrepaired)
+	}
+	notes, err := r.repair(ctx, gitDir, m)
+	if err != nil {
+		mark := filepath.Join(gitDir, marked)
+		return nil, fmt.Errorf("couldn't repair the index a stopped run of kit's left, by its mark, %s: %w; kit tries again next run, or, once git status shows the index as it should be, remove %s", mark, err, mark)
+	}
+	return notes, nil
 }
 
 // replace puts the file at path, info as it was read, at to, or removes it
@@ -208,10 +225,9 @@ func said(what string, err error, gitDir string) ([]string, error) {
 // and the lock gone, as the stopped run would have, holding git's lock on
 // the index from before it reads it: each path the run committed whose
 // entry the index still holds as that run read it (m's read) as the
-// commit has it; any the user has staged since, it leaves be. A mark HEAD's
-// moved on from, or with nothing stale, it clears; one naming a folder
-// (folders), which git's reset would take whole, it clears, saying so; one
-// whose repair fails stays, for the next run to try again.
+// commit has it, its entry alone (entered); any the user has staged since,
+// it leaves be. A mark HEAD's moved on from, or with nothing stale, it
+// clears; one whose repair fails stays, for the next run to try again.
 func (r Repo) repair(ctx context.Context, gitDir string, m mark) ([]string, error) {
 	lock, err := r.lockIndex(ctx, gitDir)
 	if err != nil {
@@ -225,24 +241,16 @@ func (r Repo) repair(ctx context.Context, gitDir string, m mark) ([]string, erro
 	case head != m.made:
 		return cleared(gitDir)
 	}
-	index, err := r.index(ctx)
-	if err != nil {
-		return nil, err
-	}
-	folders, err := r.folders(ctx, index, m.made, m.base)
-	if err != nil {
-		return nil, err
-	}
 	paths := slices.Sorted(maps.Keys(m.read))
-	if slices.ContainsFunc(paths, func(p string) bool { return folders[p] }) {
-		return cleared(gitDir, unrepaired)
+	now, err := r.indexed(ctx, paths)
+	if err != nil {
+		return nil, err
 	}
-	now := heldFor(index, paths)
 	stale := slices.DeleteFunc(paths, func(p string) bool { return now[p] != m.read[p] })
 	if len(stale) == 0 {
 		return cleared(gitDir)
 	}
-	if err := r.prepare(ctx, lock, m.made, stale); err != nil {
+	if err := r.entered(ctx, lock, m.made, stale); err != nil {
 		return nil, err
 	}
 	if err := lock.commit(); err != nil {
@@ -257,62 +265,59 @@ func cleared(gitDir string, says ...string) ([]string, error) {
 	return says, nil
 }
 
-// indexed is what the user's index holds for each of paths (heldFor).
+// indexed is what the user's index holds for each of paths: its entry, as
+// ls-files --stage has it, "mode object stage", "" for none; a conflict's
+// last, never at stage 0, as no run commits a path in conflict, so never
+// what one read.
 func (r Repo) indexed(ctx context.Context, paths []string) (map[string]string, error) {
-	index, err := r.index(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return heldFor(index, paths), nil
-}
-
-// index is what the user's index holds: each path's entry, as ls-files
-// --stage has it, "mode object stage"; a conflict's last, never at stage 0,
-// as no run commits a path in conflict, so never what one read.
-func (r Repo) index(ctx context.Context) (map[string]string, error) {
 	res, err := r.git(ctx, "ls-files", "--stage", "-z")
 	if err != nil {
 		return nil, err
 	}
-	index := map[string]string{}
-	for _, line := range names(res.Stdout) {
-		entry, path, _ := strings.Cut(line, "\t")
-		index[path] = entry
-	}
-	return index, nil
-}
-
-// heldFor is what index holds for each of paths: its entry, "" for none.
-func heldFor(index map[string]string, paths []string) map[string]string {
 	held := make(map[string]string, len(paths))
 	for _, p := range paths {
-		held[p] = index[p]
+		held[p] = ""
 	}
-	return held
+	for _, line := range names(res.Stdout) {
+		entry, path, _ := strings.Cut(line, "\t")
+		if _, ok := held[path]; ok {
+			held[path] = entry
+		}
+	}
+	return held, nil
 }
 
-// folders is every folder in index, the user's, and in the commits given,
-// "" for none, as ls-tree lists them: by its path.
-func (r Repo) folders(ctx context.Context, index map[string]string, commits ...string) (map[string]bool, error) {
-	folders := map[string]bool{}
-	for p := range index {
-		for dir := path.Dir(p); dir != "." && !folders[dir]; dir = path.Dir(dir) {
-			folders[dir] = true
-		}
+// entered writes the user's index's next contents into the lock: a copy of
+// the index, each of paths in it as commit has it, its entry, as ls-tree
+// lists it, or none, by git's update-index, which sets each path's entry
+// alone, where git's reset of a path takes every file under it, a folder's.
+// An entry the index holds in the way of one, as a file where the commit
+// has a folder, git replaces, as an index can't hold both.
+func (r Repo) entered(ctx context.Context, lock *indexLock, commit string, paths []string) error {
+	res, err := r.git(ctx, "ls-tree", "-r", "-z", "--full-tree", "--end-of-options", commit)
+	if err != nil {
+		return err
 	}
-	for _, commit := range commits {
-		if commit == "" {
-			continue
-		}
-		res, err := r.git(ctx, "ls-tree", "-r", "-d", "--name-only", "-z", commit)
-		if err != nil {
-			return nil, err
-		}
-		for _, dir := range names(res.Stdout) {
-			folders[dir] = true
-		}
+	entries := map[string]string{}
+	for _, line := range names(res.Stdout) {
+		_, path, _ := strings.Cut(line, "\t")
+		entries[path] = line
 	}
-	return folders, nil
+	// An entry of mode 0 removes the path's.
+	none := "0 " + strings.Repeat("0", len(commit)) + "\t"
+	var info []string
+	for _, p := range paths {
+		info = append(info, cmp.Or(entries[p], none+p))
+	}
+	next := lock.file(nextIndex)
+	mode, err := copyIndex(lock.file("index"), next)
+	if err != nil {
+		return err
+	}
+	if _, err := r.gitIn(ctx, []string{"GIT_INDEX_FILE=" + next}, info, "update-index", "-z", "--index-info"); err != nil {
+		return err
+	}
+	return lock.fill(next, mode)
 }
 
 // hashed is the file at path, and the hash of what it holds.

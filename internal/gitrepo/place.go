@@ -1,6 +1,7 @@
 package gitrepo
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -54,6 +55,13 @@ func (w Way) pack() (setting, program string) {
 	return "receivepack", "git-receive-pack"
 }
 
+// gitsOwn reports whether program, a remote's setting, is git's own for w,
+// as git-receive-pack, or git receive-pack, without its dash.
+func (w Way) gitsOwn(program string) bool {
+	_, own := w.pack()
+	return program == own || program == strings.Replace(own, "-", " ", 1)
+}
+
 // builtIn are the schemes git reaches by itself, in lower case, as it
 // takes them: any other it hands to a helper, which alone knows where it
 // goes.
@@ -83,10 +91,23 @@ var syncRoots = []syncRoot{
 	{"Documents", "may sync to iCloud"},
 }
 
+// writtenThrough are the folders in a git folder git writes all through:
+// objects, refs and their logs, and worktrees'; the rest it writes at the
+// top, as packed-refs, HEAD and gc's files. unwritten are those kit leaves
+// out, the repository's own: hooks, which a push or fetch never writes,
+// and info, which it writes only by auto-gc (info/refs).
+var (
+	writtenThrough = []string{"objects", "refs", "logs", "worktrees"}
+	unwritten      = []string{"hooks", "info"}
+)
+
 // repoSuffixes are what git adds to a local path, in turn, to find the
 // repository at the other end of a push or fetch (enter_repo): the first
 // that's a file, or a folder that's a repository (isGitDir), is the one.
 var repoSuffixes = []string{"/.git", "", ".git/.git", ".git"}
+
+// gitSpace is what git takes for space (its isspace, without \v and \f).
+const gitSpace = " \t\n\r"
 
 // noRepo is why a local path holds no repository git takes.
 const noRepo = "git finds no repository there"
@@ -233,26 +254,26 @@ func read(remote string) (a address, why string) {
 // onThisMac is the place of path, a local path, the repository's folder's
 // unless it's absolute, git going way to the remote called remote in env:
 // this Mac's when git runs its own program at the other end, not one the
-// remote sets (pack), and every place git writes the repository it finds
-// there (localRepo), links followed (followed), stays on the Mac (leaves);
-// else unproven, saying why.
+// remote sets (gitsOwn), and every place git writes the repository it
+// finds there (localRepo, written) stays on the Mac (leaves); else
+// unproven, saying why.
 func (r Repo) onThisMac(ctx context.Context, remote string, way Way, path string, env []string) (Place, error) {
 	if r.Home == "" {
 		return Place{}, errors.New("kit doesn't know the home folder, to tell a path that syncs off this Mac")
 	}
-	setting, program := way.pack()
+	setting, _ := way.pack()
 	set, err := r.firstSetting(ctx, "remote."+remote+"."+setting)
 	switch {
 	case err != nil:
 		return Place{}, err
-	case set != nil && *set != program:
+	case set != nil && !way.gitsOwn(*set):
 		return unproven("remote.%s.%s is set, so git runs a program of its own there, which can take it anywhere", remote, setting)
 	}
-	roots, why := localRepo(path, r.Dir, env)
+	gitDirs, why := localRepo(path, r.Dir, env)
 	if why != "" {
 		return unproven("%s", why)
 	}
-	written, err := followed(roots)
+	written, err := written(gitDirs)
 	if err != nil {
 		return Place{}, fmt.Errorf("can't tell where git writes %s: %w", path, err)
 	}
@@ -268,11 +289,12 @@ func (r Repo) onThisMac(ctx context.Context, remote string, way Way, path string
 // unless it's absolute, git running in env, as git does for the other end
 // of a push or fetch: trailing slashes dropped, a leading ~ the home in
 // git's environment (homeIn), each of repoSuffixes added in turn, a gitfile
-// followed to the git folder it names (gitfile); roots are what it found,
-// the git folder and its common folder (commonDir), a worktree's elsewhere,
-// which is where git writes. Nothing's resolved by name, as .. after a link
-// leads where the link does. why is why it finds none: "" when it does.
-func localRepo(path, dir string, env []string) (roots []string, why string) {
+// followed to the git folder it names (gitfile); gitDirs are the git folder
+// and its common folder (commonDir), a worktree's elsewhere, where git
+// writes, never the gitfile. Nothing's resolved by name, as .. after a
+// link leads where the link does. why is why it finds none: "" when it
+// does.
+func localRepo(path, dir string, env []string) (gitDirs []string, why string) {
 	for len(path) > 1 && strings.HasSuffix(path, "/") {
 		path = path[:len(path)-1]
 	}
@@ -293,7 +315,7 @@ func localRepo(path, dir string, env []string) (roots []string, why string) {
 			if !ok {
 				return nil, noRepo
 			}
-			return []string{found, gitDir, commonDir(gitDir)}, ""
+			return []string{gitDir, commonDir(gitDir)}, ""
 		case info.IsDir() && isGitDir(found):
 			return []string{found, commonDir(found)}, ""
 		}
@@ -371,8 +393,8 @@ func commonDir(dir string) string {
 
 // validHead reports whether the file at path is a HEAD git can read
 // (validate_headref): a link to a path in refs/, or, in its first 255
-// bytes, "ref:" then, after any spaces, a path in refs/, or an object's
-// hash.
+// bytes, "ref:" then, after any of gitSpace, a path in refs/, or an
+// object's hash.
 func validHead(path string) bool {
 	info, err := os.Lstat(path)
 	if err != nil {
@@ -391,7 +413,7 @@ func validHead(path string) bool {
 	if err != nil {
 		return false
 	}
-	if ref, ok := strings.CutPrefix(string(data), "ref:"); ok && strings.HasPrefix(strings.TrimLeft(ref, " \t\n\v\f\r"), "refs/") {
+	if ref, ok := strings.CutPrefix(string(data), "ref:"); ok && strings.HasPrefix(strings.TrimLeft(ref, gitSpace), "refs/") {
 		return true
 	}
 	return objectHash.Match(data)
@@ -403,30 +425,72 @@ func searchable(path string) bool {
 	return unix.Access(path, unix.X_OK) == nil
 }
 
-// followed is every place git writes in roots, links resolved: each root,
-// and every link in it, and in the folders those lead to, as git follows a
-// link writing into it. A link that leads nowhere it skips, as git writes
-// nothing through one.
-func followed(roots []string) ([]string, error) {
+// written is every place git writes in gitDirs, git folders, resolved:
+// each folder, and in it, everywhere in those git writes all through
+// (writtenThrough), links followed (throughout), and where each other link
+// at its top leads (reached), as git writes there through one; never the
+// unwritten.
+func written(gitDirs []string) ([]string, error) {
 	var all []string
 	seen := map[string]bool{}
-	for len(roots) > 0 {
-		root := roots[0]
-		roots = roots[1:]
-		resolved, err := filepath.EvalSymlinks(root)
+	for _, gitDir := range gitDirs {
+		dir, err := filepath.EvalSymlinks(gitDir)
 		switch {
-		case errors.Is(err, fs.ErrNotExist):
-			continue
 		case err != nil:
 			return nil, err
-		case seen[resolved]:
+		case seen[dir]:
 			continue
 		}
-		seen[resolved] = true
-		all = append(all, resolved)
-		err = filepath.WalkDir(resolved, func(p string, d fs.DirEntry, err error) error {
+		seen[dir] = true
+		all = append(all, dir)
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			return nil, err
+		}
+		for _, e := range entries {
+			p := dir + "/" + e.Name()
+			switch {
+			case slices.Contains(unwritten, e.Name()):
+			case slices.Contains(writtenThrough, e.Name()):
+				found, err := throughout(p, seen)
+				if err != nil {
+					return nil, err
+				}
+				all = append(all, found...)
+			case e.Type()&fs.ModeSymlink != 0:
+				to, _, err := reached(p)
+				if err != nil {
+					return nil, err
+				}
+				all = append(all, to)
+			}
+		}
+	}
+	return all, nil
+}
+
+// throughout is every place under the folder at path git writes, resolved:
+// the folder, and where every link in it leads (reached), and the places
+// under those, once each, by seen; a link that leads nowhere, never the
+// folder its place is in.
+func throughout(path string, seen map[string]bool) ([]string, error) {
+	var all []string
+	for next := []string{path}; len(next) > 0; next = next[1:] {
+		place, there, err := reached(next[0])
+		switch {
+		case err != nil:
+			return nil, err
+		case seen[place]:
+			continue
+		}
+		seen[place] = true
+		all = append(all, place)
+		if !there {
+			continue
+		}
+		err = filepath.WalkDir(place, func(p string, d fs.DirEntry, err error) error {
 			if err == nil && d.Type()&fs.ModeSymlink != 0 {
-				roots = append(roots, p)
+				next = append(next, p)
 			}
 			return err
 		})
@@ -435,6 +499,29 @@ func followed(roots []string) ([]string, error) {
 		}
 	}
 	return all, nil
+}
+
+// reached is where git writes through path, resolved: where it leads,
+// there; or, a link that leads nowhere, the nearest folder on its way
+// there that exists, as git, writing through it, makes the file it names.
+func reached(path string) (place string, there bool, err error) {
+	place, err = filepath.EvalSymlinks(path)
+	if !errors.Is(err, fs.ErrNotExist) {
+		return place, err == nil, err
+	}
+	to, err := os.Readlink(path)
+	if err != nil {
+		return "", false, err
+	}
+	if !strings.HasPrefix(to, "/") {
+		to = path[:strings.LastIndex(path, "/")+1] + to
+	}
+	for {
+		to = to[:strings.LastIndex(to, "/")]
+		if place, err := filepath.EvalSymlinks(cmp.Or(to, "/")); !errors.Is(err, fs.ErrNotExist) {
+			return place, false, err
+		}
+	}
 }
 
 // leaves is why what git writes at p, resolved, may leave this Mac: it's in
@@ -645,13 +732,12 @@ func elsewhere(said map[string]string) string {
 
 // hostKey is why kit can't trust ssh's proof of the host it reaches, as
 // said, ssh -G's answer, has it: the host's key not checked
-// (stricthostkeychecking no), checked by another name (hostkeyalias) or
-// against keys a command gives (knownhostscommand), or no file of known
-// hosts (userknownhostsfile /dev/null or none); or a key taken on first
-// sight (stricthostkeychecking accept-new) for a host whose key ssh doesn't
-// know yet (keyKnown); "" with none.
+// (stricthostkeychecking no), checked by another name (hostkeyalias),
+// against keys a command gives (knownhostscommand), or taken from DNS
+// (verifyhostkeydns yes), which ssh trusts before its files; or a key
+// taken on first sight (stricthostkeychecking accept-new) for a host whose
+// key ssh doesn't know yet (keyKnown); "" with none.
 func (r Repo) hostKey(ctx context.Context, said map[string]string) (string, error) {
-	files := strings.Fields(said["userknownhostsfile"])
 	switch {
 	case said["stricthostkeychecking"] == "false":
 		return "ssh's config doesn't check the host's key (stricthostkeychecking), so another host can pass for it", nil
@@ -659,8 +745,8 @@ func (r Repo) hostKey(ctx context.Context, said map[string]string) (string, erro
 		return "ssh's config checks the host's key by another name (hostkeyalias), so another host can pass for it", nil
 	case said["knownhostscommand"] != "":
 		return "ssh's config takes the keys it knows from a command (knownhostscommand), which can give any", nil
-	case slices.Contains(files, "/dev/null") || slices.Contains(files, "none"):
-		return "ssh's config keeps no file of hosts' keys (userknownhostsfile), so another host can pass for it", nil
+	case said["verifyhostkeydns"] == "true":
+		return "ssh's config takes the host's key from DNS (verifyhostkeydns), which another host can answer for", nil
 	case said["stricthostkeychecking"] != "accept-new":
 		return "", nil
 	}
@@ -673,28 +759,64 @@ func (r Repo) hostKey(ctx context.Context, said map[string]string) (string, erro
 
 // keyKnown reports whether ssh knows a key of the host said, ssh -G's
 // answer, names, on its port, as ssh names a host on another port than
-// 22 ([host]:port): in any of its files of known hosts, the user's and the
-// system's, as ssh-keygen finds it. A file that isn't there, or doesn't
-// hold the host, is no.
+// 22 ([host]:port), in any of its files of known hosts, the user's and the
+// system's (knownHostsFiles), as ssh-keygen finds it (knownIn). A file
+// that isn't there, or doesn't hold the host, is no.
 func (r Repo) keyKnown(ctx context.Context, said map[string]string) (bool, error) {
 	name := said["hostname"]
 	if port := said["port"]; port != "22" {
 		name = "[" + name + "]:" + port
 	}
-	for _, file := range slices.Concat(strings.Fields(said["userknownhostsfile"]), strings.Fields(said["globalknownhostsfile"])) {
-		if file == "none" {
-			continue
-		}
-		_, err := r.Run.Run(ctx, runner.Command{Name: "ssh-keygen", Args: []string{"-F", name, "-f", file}})
+	files := slices.Concat(knownHostsFiles(said["userknownhostsfile"]), knownHostsFiles(said["globalknownhostsfile"]))
+	for _, file := range files {
+		res, err := r.Run.Run(ctx, runner.Command{Name: "ssh-keygen", Args: []string{"-F", name, "-f", file}})
 		if _, no := errors.AsType[*runner.ExitError](err); no {
 			continue
 		}
 		if err != nil {
 			return false, fmt.Errorf("can't tell whether ssh knows %s's key: %w", name, err)
 		}
-		return true, nil
+		if knownIn(string(res.Stdout)) {
+			return true, nil
+		}
 	}
 	return false, nil
+}
+
+// knownHostsFiles is the files of known hosts in list, as ssh -G prints
+// them, unquoted, a space between, so a part that isn't a path from / is
+// the one before's, holding a space; one with no path before it, as none
+// or a relative path, which leads where ssh runs, is left out.
+func knownHostsFiles(list string) []string {
+	var files []string
+	for part := range strings.SplitSeq(list, " ") {
+		switch {
+		case strings.HasPrefix(part, "/"):
+			files = append(files, part)
+		case len(files) > 0:
+			files[len(files)-1] += " " + part
+		}
+	}
+	return files
+}
+
+// knownIn reports whether ssh-keygen -F's answer finds a key of the host's
+// own: a "# Host <name> found: line <n>" with nothing after, where a
+// certificate authority's (CA), which vouches for any key it signs, or a
+// key revoked (REVOKED), says so.
+func knownIn(answer string) bool {
+	for line := range strings.Lines(answer) {
+		found, ok := strings.CutPrefix(line, "# Host ")
+		if !ok {
+			continue
+		}
+		if _, at, ok := strings.Cut(found, " found: line "); ok {
+			if _, marker, _ := strings.Cut(strings.TrimSpace(at), " "); marker == "" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // shared is why kit can't tell where a connection ssh shares takes it, for

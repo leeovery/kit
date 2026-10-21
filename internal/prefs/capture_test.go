@@ -94,7 +94,7 @@ func (w *world) pushes(t *testing.T, message, status string, update []string, st
 	subject, _, _ := strings.Cut(message, "\n")
 	w.fake.On("git", "-C", w.clone, "update-ref", "-m", "kit: "+subject, "HEAD", made, head)
 	w.fake.On("git", "-C", w.clone, "ls-files", "--stage", "-z").Prints("100644 5e1c309dae7f45e0f39b1bf3ac3cd9db12e7d689 0\t.gitattributes\x00")
-	w.fake.On("git", "-C", w.clone, "--literal-pathspecs", "reset", "--quiet", made, "--pathspec-from-file=-", "--pathspec-file-nul").Filters(reads(staged)).Does(func() {
+	w.fake.On("git", "-C", w.clone, "--literal-pathspecs", "reset", "--quiet", "--pathspec-from-file=-", "--pathspec-file-nul", "--end-of-options", made).Filters(reads(staged)).Does(func() {
 		w.write(t, filepath.Join(gitDir, "kit-index.next"), "the index, as committed")
 	})
 	w.fake.On("git", "-C", w.clone, "remote", "get-url", "--push", "--all", "origin").Prints(remote + "\n")

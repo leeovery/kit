@@ -256,11 +256,11 @@ func (r Repo) prepare(ctx context.Context, lock *indexLock, rev string, paths []
 	if err != nil {
 		return err
 	}
-	args := []string{"--literal-pathspecs", "reset", "--quiet"}
+	args := []string{"--literal-pathspecs", "reset", "--quiet", "--pathspec-from-file=-", "--pathspec-file-nul"}
 	if rev != "" {
-		args = append(args, rev)
+		args = append(args, "--end-of-options", rev)
 	}
-	if _, err := r.gitIn(ctx, []string{"GIT_INDEX_FILE=" + next}, paths, append(args, "--pathspec-from-file=-", "--pathspec-file-nul")...); err != nil {
+	if _, err := r.gitIn(ctx, []string{"GIT_INDEX_FILE=" + next}, paths, args...); err != nil {
 		return err
 	}
 	return lock.fill(next, mode)
@@ -295,7 +295,7 @@ func copyIndex(from, to string) (fs.FileMode, error) {
 		return 0, err
 	}
 	if err := os.WriteFile(to, data, 0o600); err != nil {
-		return 0, err
+		return 0, inTheWay(to, err)
 	}
 	return info.Mode().Perm(), os.Chtimes(to, info.ModTime(), info.ModTime())
 }

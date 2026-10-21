@@ -141,7 +141,7 @@ func commitTree(parent string, signs bool) []string {
 
 // resetTo is git's reset of paths in an index to rev's entries.
 func resetTo(rev string) []string {
-	return git("--literal-pathspecs", "reset", "--quiet", rev, "--pathspec-from-file=-", "--pathspec-file-nul")
+	return git("--literal-pathspecs", "reset", "--quiet", "--pathspec-from-file=-", "--pathspec-file-nul", "--end-of-options", rev)
 }
 
 // moveHEAD is git update-ref moving HEAD onto made only from was, the
@@ -688,7 +688,9 @@ func TestCommitOnceAnotherGitLetsGo(t *testing.T) {
 // kit's mark is written whole or not at all, through kit-index.mark, a
 // file of kit's own, then renamed into place: one it can't write there, or
 // can't rename, stops the commit before HEAD moves, nothing committed, the
-// user's index as it was, no mark left, kit-index.mark swept.
+// user's index as it was, no mark left, kit-index.mark swept. A folder in
+// the way of a file of kit's own, there or kit-index.next, which no sweep
+// takes, is named, with what to do.
 func TestCommitMovesHEADOnlyOnceItsMarkIsWhole(t *testing.T) {
 	for _, c := range []struct {
 		// inTheWay is the file a folder's in the way of, holding a file, so
@@ -697,6 +699,7 @@ func TestCommitMovesHEADOnlyOnceItsMarkIsWhole(t *testing.T) {
 	}{
 		{name: "kit-index.mark in the way", inTheWay: "kit-index.mark"},
 		{name: "kit-mark in the way", inTheWay: "kit-mark"},
+		{name: "kit-index.next in the way", inTheWay: "kit-index.next"},
 	} {
 		gitDir := gitFolder(t, false)
 		if err := os.MkdirAll(filepath.Join(gitDir, c.inTheWay, "in the way"), 0o700); err != nil {
@@ -709,12 +712,15 @@ func TestCommitMovesHEADOnlyOnceItsMarkIsWhole(t *testing.T) {
 		s.expect(call{args: stagedIn, index: ownIndex}).Prints("brew\x00")
 		s.commits(base, false, nil)
 		s.reads(false, "brew")
-		s.expect(call{args: resetTo(made), input: "brew\x00", index: nextIndex}).Does(func() {
-			_ = os.WriteFile(filepath.Join(gitDir, nextIndex), []byte(resetEntries), 0o600)
-		})
+		if c.inTheWay != nextIndex {
+			s.expect(call{args: resetTo(made), input: "brew\x00", index: nextIndex}).Does(func() {
+				_ = os.WriteFile(filepath.Join(gitDir, nextIndex), []byte(resetEntries), 0o600)
+			})
+		}
 		committed, err := didCommit(gitrepo.Repo{Dir: dir, Run: fake}.Commit(context.Background(), "kit test", "brew"))
-		if committed || err == nil || !strings.Contains(err.Error(), c.inTheWay) {
-			t.Errorf("%s: Commit() = %v, %v; want nothing committed, naming %s", c.name, committed, err, c.inTheWay)
+		says := "a folder is in the way of kit's own file " + filepath.Join(gitDir, c.inTheWay) + ": remove it, then try again"
+		if committed || err == nil || !strings.Contains(err.Error(), says) {
+			t.Errorf("%s: Commit() = %v, %v; want nothing committed, saying %q", c.name, committed, err, says)
 		}
 		checkCalls(t, c.name, fake, gitDir, s.want)
 		checkGitFolder(t, c.name, gitDir, usersEntries, c.inTheWay)
