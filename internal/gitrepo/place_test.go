@@ -3,10 +3,12 @@ package gitrepo_test
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 
 	"golang.org/x/sys/unix"
@@ -27,6 +29,16 @@ const (
 	uploadPack  = "remote.origin.uploadpack"
 	protocol    = "protocol.version"
 )
+
+// receiving is what Place asks git config of a repository on this Mac a
+// push reaches, as git's --get-regexp matches a setting's name: what it
+// does with its work tree, its hooks' folder, the command listing its
+// alternates' refs, and each hook configured's events.
+const receiving = `^(receive\.denycurrentbranch|core\.(hookspath|alternaterefscommand)|hook\..+\.event)$`
+
+// receiveHooks are the hooks git runs for the repository a push reaches:
+// receive-pack's, and pre-auto-gc, which the gc it starts runs.
+var receiveHooks = []string{"pre-receive", "update", "proc-receive", "post-receive", "post-update", "push-to-checkout", "reference-transaction", "pre-auto-gc"}
 
 // usual is the user and host of the usual form of a remote on GitHub over
 // ssh, git@github.com, split so a scan for personal data doesn't take it
@@ -278,18 +290,18 @@ func TestPlaceProvesPrivate(t *testing.T) {
 // net/url, with a query, a fragment or an ssh password; a way other than
 // https or ssh; over ssh, an ssh command set, or a variant git gives other
 // options, plink, putty or tortoiseplink, or simple with a port, which git
-// refuses, in the environment git runs in or git's config, a proxy in
-// ssh's answer, a host name it canonicalizes, the host's key not checked,
-// checked by another name, against a command's keys or from DNS, or
-// trusted on first sight, on any port, or a controlpath the same for a host no config means,
-// whatever its controlmaster says, as ssh uses a connection there either
-// way; over https, a variable that undoes TLS's proof of the
-// host, or a setting for the URL that does: checking off, certificate
-// authorities of its own, addresses of its own; another host, by name, as
-// ssh resolves it for the command git runs, an IP address, a host not in
-// plain ASCII, or a host under github.com but GitHub's for repositories; a
-// host kit can't read; a path on GitHub that isn't an owner's repository,
-// asked of ssh as git quotes it.
+// refuses, in the environment git runs in or git's config, a proxy in ssh's
+// answer, a host name it canonicalizes, the host's key not checked, checked
+// by another name, against a command's keys or from DNS, or trusted on
+// first sight, on any port, or a controlpath the same for a host no config
+// means, whatever its controlmaster says, as ssh uses a connection there
+// either way; over https, a variable that undoes TLS's proof of the host,
+// or a setting for the URL that does: checking off, certificate authorities
+// of its own, addresses of its own; another host, by name, as ssh resolves
+// it for the command git runs, an IP address, a host not in plain ASCII, or
+// a host under github.com but GitHub's for repositories; a host kit can't
+// read; a path on GitHub that isn't an owner's repository, asked of ssh as
+// git quotes it.
 func TestPlaceLeavesTheRestUnproven(t *testing.T) {
 	helper := "git hands it to a helper, which alone knows where it goes"
 	unread := "kit can't read where it goes"
@@ -409,6 +421,21 @@ func writeAt(t *testing.T, path, data string) {
 	}
 }
 
+// executableAt writes a script at path, making its folder, that its owner
+// may run.
+func executableAt(t *testing.T, path string) {
+	t.Helper()
+	writeAt(t, path, "#!/bin/sh\n")
+	if err := os.Chmod(path, 0o700); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// devOf is the device info, a file's lstat, says it's on.
+func devOf(info fs.FileInfo) uint64 {
+	return uint64(info.Sys().(*syscall.Stat_t).Dev)
+}
+
 // link makes a link at path to to, making its folder.
 func link(t *testing.T, to, path string) {
 	t.Helper()
@@ -422,14 +449,17 @@ func link(t *testing.T, to, path string) {
 
 // localCase is a local remote's URL, origin's, the way git goes to it, the
 // environment git runs in, the remote's program for that way (nil for
-// none), what the filesystem says of itself, and the place Place makes of
-// it.
+// none), the repository's settings git config prints, as receiving matches
+// them ("" for none), what the filesystem says of itself, which device each
+// folder is on, and the place Place makes of it.
 type localCase struct {
 	name, url string
 	way       gitrepo.Way
 	env       []string
 	pack      *string
+	receives  string
 	statfs    func(string, *unix.Statfs_t) error
+	device    func(string, fs.FileInfo) uint64
 	want      gitrepo.Place
 }
 
@@ -447,31 +477,46 @@ func (c localCase) place(t *testing.T, repoDir, home string) (gitrepo.Place, err
 	if c.pack != nil {
 		pack.Prints(*c.pack + "\x00").Exits(0)
 	}
-	repo := gitrepo.WithStatfs(gitrepo.Repo{Dir: repoDir, Run: fake, Home: home}, c.statfs)
+	settings := fake.On("git", "--git-dir=.", "config", "-z", "--get-regexp", receiving).Exits(1)
+	if c.receives != "" {
+		settings.Prints(c.receives).Exits(0)
+	}
+	repo := gitrepo.WithDevice(gitrepo.WithStatfs(gitrepo.Repo{Dir: repoDir, Run: fake, Home: home}, c.statfs), c.device)
 	return repo.Place(context.Background(), "origin", c.url, c.way)
 }
 
 // A local path, or a file:// URL, is this Mac's only while git runs its own
-// program at the other end, never one the remote sets, the repository it
-// finds there holds no link, which could lead git elsewhere, and its
-// folders stay on the Mac: on a filesystem that's local, and outside the
-// folders in the home whose files may leave it, cloud drives' and iCloud
-// Drive's, which sync off it, and the Desktop and Documents, which iCloud
-// may sync, told by their files, so by any name, case or spelling, the
-// home's too; else unproven, saying where it syncs, that it isn't local,
-// or the link. git finds the repository as real git does at the other end
-// of a push: the path's trailing slashes dropped, a leading ~ the home in
-// git's environment, then the path with /.git, nothing, .git/.git and .git
-// added in turn, the first a file, or a folder git takes for a repository
-// (a HEAD naming a branch, by a ref or a link into refs/, or an object, and
-// objects and refs, a worktree's in its common folder; space before a
-// HEAD's ref as git takes space, never \v or \f), a gitfile followed to
-// the folder it names, with no other tried should that be none, and never
-// itself checked; links on the way to it followed, and .. after a link
-// where the link leads. A link in its git folder or its common folder, a
-// worktree's, dangling or not, wherever it leads, in objects, refs, logs,
-// worktrees, info or at its top, leaves it unproven, but in hooks, which
-// git never writes; so does a folder in it kit can't read. git's own
+// program at the other end, never one the remote sets, and the repository
+// it finds there has its folders on the Mac: on a filesystem that's local,
+// and outside the folders in the home whose files may leave it, cloud
+// drives' and iCloud Drive's, which sync off it, and the Desktop and
+// Documents, which iCloud may sync, told by their files, so by any name,
+// case or spelling, the home's too, and told before anything in them is
+// read; holds nothing that leads git elsewhere; and, pushed to, runs
+// nothing of its own; else unproven, saying why. git finds the repository
+// as real git does at the other end of a push: the path's trailing slashes
+// dropped, a leading ~ the home in git's environment, then the path with
+// /.git, nothing, .git/.git and .git added in turn, the first a file, or a
+// folder git takes for a repository (a HEAD naming a branch, by a ref or a
+// link into refs/, or an object, and objects and refs, a worktree's in its
+// common folder; space before a HEAD's ref as git takes space, never \v or
+// \f), a gitfile followed to the folder it names, with no other tried
+// should that be none, and never itself checked; links on the way to it
+// followed, and .. after a link where the link leads. A link in its git
+// folder or its common folder, a worktree's, dangling or not, wherever it
+// leads, in objects, refs, logs, worktrees, info or at its top, leaves it
+// unproven, but in hooks, which git never writes; so does a folder in it
+// kit can't read, a folder on another filesystem than its git folder's,
+// each folder's own, as one mounted there is, never a file said to be, and
+// a file hard-linked, outside objects, where git's local clones hard-link;
+// an entry gone as kit looks through it is passed over. Pushed to, it runs
+// its own when git config says receive.denyCurrentBranch is updateInstead,
+// its last value, in any case, core.hooksPath or core.alternateRefsCommand
+// is set, with a value or none, or a hook is configured for one of
+// receiveHooks, named in git's case, or when its common folder's hooks, a
+// link followed, hold one kit may run, a link to one too; never fetched
+// from, nor for another hook, one kit may not run, a sample, a folder, or
+// one in a worktree's own git folder, which git never runs. git's own
 // program at the other end is git's too without its dash. A relative path
 // is the repository's; a file:// URL's path is decoded, its host ignored,
 // as git takes them.
@@ -609,6 +654,70 @@ func TestPlaceOnThisMac(t *testing.T) {
 	// Mac where .. read by name would lead.
 	gitFolderAt(t, filepath.Join(dropbox, "sub"), "")
 	link(t, filepath.Join(dropbox, "sub"), in("up"))
+	// Repositories whose hooks hold each hook git runs for a push, one it
+	// doesn't, one kit may not run, a sample, a folder named as one, and a
+	// link to one elsewhere; one whose hooks are a link to a folder holding
+	// one; a worktree whose repository's hooks hold one, and one whose own
+	// git folder's do.
+	for _, name := range append([]string{"pre-push"}, receiveHooks...) {
+		executableAt(t, in("hooks/"+name+"/kit.git/hooks/"+name))
+		gitRepoAt(t, in("hooks/"+name+"/kit.git"))
+	}
+	writeAt(t, in("hooks/unrunnable/kit.git/hooks/post-receive"), "#!/bin/sh\n")
+	executableAt(t, in("hooks/sample/kit.git/hooks/post-receive.sample"))
+	gitFolderAt(t, in("hooks/folder/kit.git/hooks/post-receive"), "")
+	executableAt(t, in("deploy"))
+	link(t, in("deploy"), in("hooks/linked/kit.git/hooks/post-receive"))
+	executableAt(t, in("shared hooks/post-receive"))
+	link(t, in("shared hooks"), in("hooks/linkedfolder/kit.git/hooks"))
+	for _, d := range []string{"unrunnable", "sample", "folder", "linked", "linkedfolder"} {
+		gitRepoAt(t, in("hooks/"+d+"/kit.git"))
+	}
+	gitFolderAt(t, in("hooks/wtgit"), "ref: refs/heads/wt\n")
+	writeAt(t, in("hooks/wtgit/commondir"), "../post-receive/kit.git\n")
+	writeAt(t, in("hooks/wt/.git"), "gitdir: "+in("hooks/wtgit")+"\n")
+	gitFolderAt(t, in("hooks/wtgit2"), "ref: refs/heads/wt\n")
+	writeAt(t, in("hooks/wtgit2/commondir"), in("Backup/kit.git")+"\n")
+	executableAt(t, in("hooks/wtgit2/hooks/post-receive"))
+	writeAt(t, in("hooks/wt2/.git"), "gitdir: "+in("hooks/wtgit2")+"\n")
+	// Repositories holding a file hard-linked to one outside: a reflog, the
+	// config, and one at the top named as objects begins; and, in objects, a
+	// pack and a loose object.
+	writeAt(t, in("outside/file"), "x")
+	hardLinked := []struct {
+		name, at string
+		refused  bool
+	}{
+		{name: "a reflog", at: "logs/HEAD", refused: true},
+		{name: "its config", at: "config", refused: true},
+		{name: "a file named as objects begins", at: "objects.bak", refused: true},
+		{name: "a pack", at: "objects/pack/pack-1.pack"},
+		{name: "a loose object", at: "objects/ab/cdef"},
+	}
+	for i, h := range hardLinked {
+		repo := in(fmt.Sprintf("hardlinks/%d/kit.git", i))
+		gitRepoAt(t, repo)
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(repo, h.at)), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Link(in("outside/file"), filepath.Join(repo, h.at)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Repositories whose folder, and whose file, go as kit looks through
+	// them; one in Documents with a folder kit can't read.
+	gitRepoAt(t, in("going/1/kit.git"))
+	gitFolderAt(t, in("going/1/kit.git/objects/aa"), "")
+	writeAt(t, in("going/1/kit.git/objects/bb/cdef"), "x")
+	gitRepoAt(t, in("going/2/kit.git"))
+	gitFolderAt(t, in("going/2/kit.git/logs/refs"), "")
+	writeAt(t, in("going/2/kit.git/logs/x"), "x")
+	lockedDocs := filepath.Join(home, "Documents", "locked", "kit.git")
+	gitRepoAt(t, lockedDocs)
+	if err := os.Mkdir(filepath.Join(lockedDocs, "objects", "locked"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(filepath.Join(lockedDocs, "objects", "locked"), 0o700) })
 
 	onThisMac := gitrepo.Place{OnThisMac: true}
 	syncs := func(in string) gitrepo.Place {
@@ -649,6 +758,35 @@ func TestPlaceOnThisMac(t *testing.T) {
 	aLink := func(path string) gitrepo.Place {
 		return gitrepo.Place{Unproven: resolved(filepath.Dir(path)) + "/" + filepath.Base(path) + " is a link: kit proves a repository on this Mac only when nothing in it leads elsewhere"}
 	}
+	// elsewhereAt says the folder at path, resolved, and everything in it,
+	// are on another device, as a filesystem mounted there is.
+	elsewhereAt := func(path string) func(string, fs.FileInfo) uint64 {
+		path = resolved(path)
+		return func(p string, info fs.FileInfo) uint64 {
+			if p == path || strings.HasPrefix(p, path+"/") {
+				return devOf(info) + 1
+			}
+			return devOf(info)
+		}
+	}
+	// removing removes gone as kit reads which device the folder at,
+	// resolved, is on.
+	removing := func(at, gone string) func(string, fs.FileInfo) uint64 {
+		at = resolved(at)
+		return func(p string, info fs.FileInfo) uint64 {
+			if p == at {
+				if err := os.RemoveAll(gone); err != nil {
+					t.Error(err)
+				}
+			}
+			return devOf(info)
+		}
+	}
+	runsItsOwn := func(hook string) gitrepo.Place {
+		return gitrepo.Place{Unproven: "the repository runs its own " + hook + " hook, which can take the push anywhere"}
+	}
+	updateInstead := gitrepo.Place{Unproven: "receive.denyCurrentBranch is updateInstead, so the push writes the repository's work tree, which can be anywhere"}
+	hooksPath := gitrepo.Place{Unproven: "core.hooksPath is set, so the repository runs hooks from another folder, which can take the push anywhere"}
 	gitsOwn, another := "git-receive-pack", "/opt/kit/receive"
 	usualHome := []string{"HOME=" + home}
 	for _, c := range []localCase{
@@ -707,6 +845,35 @@ func TestPlaceOnThisMac(t *testing.T) {
 		{name: "the home's Documents", url: "~/Documents/Backups/kit.git", env: usualHome, want: mayLeave("Documents/Backups")},
 		{name: "the home's, no HOME", url: "~/kit.git", want: gitrepo.Place{Unproven: "HOME isn't set where git runs, so git finds no repository there"}},
 		{name: "another user's home", url: "~someone/kit.git", env: usualHome, want: gitrepo.Place{Unproven: "it's in ~someone, another user's home folder, which kit doesn't look up"}},
+		{name: "a filesystem mounted in it", url: in("Backup/kit.git"), device: elsewhereAt(in("Backup/kit.git/objects")), want: gitrepo.Place{Unproven: resolved(in("Backup/kit.git/objects")) + " is another filesystem"}},
+		{name: "a filesystem mounted in its hooks", url: in("hookfolder/kit.git"), device: elsewhereAt(in("hookfolder/kit.git/hooks")), want: onThisMac},
+		{name: "a file said to be on another filesystem", url: in("Backup/kit.git"), device: elsewhereAt(in("Backup/kit.git/HEAD")), want: onThisMac},
+		{name: "a worktree whose repository is on another filesystem", url: filepath.Join(home, "Documents", "wt"), device: elsewhereAt(in("Backup/kit.git")), want: onThisMac},
+		{name: "a folder gone as kit looks", url: in("going/1/kit.git"), device: removing(in("going/1/kit.git/objects/aa"), in("going/1/kit.git/objects/bb")), want: onThisMac},
+		{name: "a file gone as kit looks", url: in("going/2/kit.git"), device: removing(in("going/2/kit.git/logs/refs"), in("going/2/kit.git/logs/x")), want: onThisMac},
+		{name: "in Documents, with a folder kit can't read", url: lockedDocs, want: mayLeave("Documents/locked")},
+		{name: "updateInstead", url: in("Backup/kit.git"), receives: "receive.denycurrentbranch\nupdateInstead\x00", want: updateInstead},
+		{name: "updateInstead in another case", url: in("Backup/kit.git"), receives: "receive.denycurrentbranch\nUPDATEINSTEAD\x00", want: updateInstead},
+		{name: "updateInstead, then refuse", url: in("Backup/kit.git"), receives: "receive.denycurrentbranch\nupdateInstead\x00receive.denycurrentbranch\nrefuse\x00", want: onThisMac},
+		{name: "refuse, then updateInstead", url: in("Backup/kit.git"), receives: "receive.denycurrentbranch\nrefuse\x00receive.denycurrentbranch\nupdateInstead\x00", want: updateInstead},
+		{name: "denyCurrentBranch with no value", url: in("Backup/kit.git"), receives: "receive.denycurrentbranch\x00", want: onThisMac},
+		{name: "updateInstead, fetched from", url: in("Backup/kit.git"), way: gitrepo.Fetching, receives: "receive.denycurrentbranch\nupdateInstead\x00", want: onThisMac},
+		{name: "core.hooksPath", url: in("Backup/kit.git"), receives: "core.hookspath\n/opt/hooks\x00", want: hooksPath},
+		{name: "core.hooksPath empty", url: in("Backup/kit.git"), receives: "core.hookspath\n\x00", want: hooksPath},
+		{name: "core.hooksPath with no value", url: in("Backup/kit.git"), receives: "core.hookspath\x00", want: hooksPath},
+		{name: "core.alternateRefsCommand", url: in("Backup/kit.git"), receives: "core.alternaterefscommand\ntrue\x00", want: gitrepo.Place{Unproven: "core.alternateRefsCommand is set, so the repository runs a program of its own, which can take the push anywhere"}},
+		{name: "a hook configured, named in words", url: in("Backup/kit.git"), receives: "hook.lint.event\npre-commit\x00hook.my deploy.v2.event\npost-receive\x00", want: gitrepo.Place{Unproven: "the repository runs its own post-receive hook, hook.my deploy.v2 in git's config, which can take the push anywhere"}},
+		{name: "a hook configured for another", url: in("Backup/kit.git"), receives: "hook.lint.event\npre-commit\x00", want: onThisMac},
+		{name: "a hook configured in another case", url: in("Backup/kit.git"), receives: "hook.Deploy.event\nPOST-RECEIVE\x00", want: onThisMac},
+		{name: "a hook another git doesn't run for a push", url: in("hooks/pre-push/kit.git"), want: onThisMac},
+		{name: "a hook kit may not run", url: in("hooks/unrunnable/kit.git"), want: onThisMac},
+		{name: "a sample", url: in("hooks/sample/kit.git"), want: onThisMac},
+		{name: "a folder named as a hook", url: in("hooks/folder/kit.git"), want: onThisMac},
+		{name: "a link to a hook elsewhere", url: in("hooks/linked/kit.git"), want: runsItsOwn("post-receive")},
+		{name: "hooks a link to a folder holding one", url: in("hooks/linkedfolder/kit.git"), want: runsItsOwn("post-receive")},
+		{name: "a worktree whose repository's hooks hold one", url: in("hooks/wt"), want: runsItsOwn("post-receive")},
+		{name: "a worktree whose own git folder's hooks hold one", url: in("hooks/wt2"), want: onThisMac},
+		{name: "a hook, fetched from", url: in("hooks/post-receive/kit.git"), way: gitrepo.Fetching, want: onThisMac},
 	} {
 		if got, err := c.place(t, repoDir, home); err != nil || got != c.want {
 			t.Errorf("%s: Place(%q) = %+v, %v; want %+v", c.name, c.url, got, err, c.want)
@@ -716,6 +883,27 @@ func TestPlaceOnThisMac(t *testing.T) {
 		repo := in(fmt.Sprintf("links/%d/kit.git", i))
 		if got, err := (localCase{url: repo}).place(t, repoDir, home); err != nil || got != aLink(filepath.Join(repo, l.at)) {
 			t.Errorf("%s: Place(%q) = %+v, %v; want the link said", l.name, repo, got, err)
+		}
+	}
+	for _, name := range receiveHooks {
+		repo := in("hooks/" + name + "/kit.git")
+		if got, err := (localCase{url: repo}).place(t, repoDir, home); err != nil || got != runsItsOwn(name) {
+			t.Errorf("Place(%q), its hooks holding %s = %+v, %v; want %+v", repo, name, got, err, runsItsOwn(name))
+		}
+		configured := gitrepo.Place{Unproven: "the repository runs its own " + name + " hook, hook.mine in git's config, which can take the push anywhere"}
+		if got, err := (localCase{url: in("Backup/kit.git"), receives: "hook.mine.event\n" + name + "\x00"}).place(t, repoDir, home); err != nil || got != configured {
+			t.Errorf("Place(), a hook configured for %s = %+v, %v; want %+v", name, got, err, configured)
+		}
+	}
+	for i, h := range hardLinked {
+		repo := in(fmt.Sprintf("hardlinks/%d/kit.git", i))
+		want := onThisMac
+		if h.refused {
+			at := filepath.Join(repo, h.at)
+			want = gitrepo.Place{Unproven: resolved(filepath.Dir(at)) + "/" + filepath.Base(at) + " is hard-linked, so git writes it wherever its other links are"}
+		}
+		if got, err := (localCase{url: repo}).place(t, repoDir, home); err != nil || got != want {
+			t.Errorf("%s hard-linked: Place(%q) = %+v, %v; want %+v", h.name, repo, got, err, want)
 		}
 	}
 	// The repository's path, or the home, spelled otherwise, through a
@@ -784,9 +972,10 @@ func TestPlaceReadsTheEnvironmentGitRunsIn(t *testing.T) {
 
 // git, ssh or gh failing to answer is an error, never a place: git reading
 // its config, ssh its, ssh naming no host, or failing asked of the
-// sentinel; gh asked, or not signed in, which it says on two lines, the advice on the
-// first, then exits 4; a runner that can't say what environment git runs
-// in; a local path without the home to tell what syncs.
+// sentinel; gh asked, or not signed in, which it says on two lines, the
+// advice on the first, then exits 4; a runner that can't say what
+// environment git runs in; a local path without the home to tell what
+// syncs.
 func TestPlaceFails(t *testing.T) {
 	const ssh = usual + ":someone/kit.git"
 	const tls = "https://github.com/someone/kit"
@@ -837,20 +1026,36 @@ func TestPlaceFails(t *testing.T) {
 
 // A local path whose places kit can't look through all fails, never a
 // place: a filesystem that won't say what it is, git's config unreadable
-// for the remote's program.
+// for the remote's program, or the repository's own, the repository gone
+// as kit looks through it.
 func TestPlaceFailsOnThisMac(t *testing.T) {
 	root := t.TempDir()
 	readable := filepath.Join(root, "readable.git")
 	gitRepoAt(t, readable)
+	readableAt, err := filepath.EvalSymlinks(readable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	going := filepath.Join(root, "going.git")
+	gitRepoAt(t, going)
 	refused := func(string, *unix.Statfs_t) error { return unix.EACCES }
+	gone := func(_ string, st *unix.Statfs_t) error {
+		if err := os.RemoveAll(going); err != nil {
+			t.Error(err)
+		}
+		return unix.Statfs(root, st)
+	}
 	for _, c := range []struct {
 		name, url string
 		statfs    func(string, *unix.Statfs_t) error
 		config    bool
+		receiving bool
 		says      string
 	}{
 		{name: "a filesystem that won't say", url: readable, statfs: refused, says: "can't tell what holds "},
 		{name: "git's config unreadable", url: readable, config: true, says: "fatal: bad config line 3 in file .git/config"},
+		{name: "the repository's config unreadable", url: readable, receiving: true, says: "can't read the config of the repository at " + readableAt + ": "},
+		{name: "the repository gone as kit looks through it", url: going, statfs: gone, says: "can't tell where git writes " + going + ": "},
 	} {
 		fake := runnertest.New(t)
 		fake.On("git", git("config", "--get", originVCS)...).Exits(1)
@@ -858,9 +1063,45 @@ func TestPlaceFailsOnThisMac(t *testing.T) {
 		if c.config {
 			pack.Exits(128).PrintsToStderr("fatal: bad config line 3 in file .git/config\n")
 		}
+		settings := fake.On("git", "--git-dir=.", "config", "-z", "--get-regexp", receiving).Exits(1)
+		if c.receiving {
+			settings.Exits(128).PrintsToStderr("fatal: bad config line 1 in file config\n")
+		}
 		place, err := gitrepo.WithStatfs(gitrepo.Repo{Dir: dir, Run: fake, Home: filepath.Join(root, "home")}, c.statfs).Place(context.Background(), "origin", c.url, gitrepo.Pushing)
 		if err == nil || !strings.Contains(err.Error(), c.says) || place != (gitrepo.Place{}) {
 			t.Errorf("%s: Place() = %+v, %v; want an error saying %q", c.name, place, err, c.says)
+		}
+	}
+}
+
+// The repository a push reaches is asked its settings as receive-pack
+// reads them, in its git folder: a worktree's own, which reads its own
+// settings after its repository's, never its common folder.
+func TestPlaceAsksTheRepositoryInItsGitFolder(t *testing.T) {
+	root := t.TempDir()
+	gitRepoAt(t, filepath.Join(root, "kit.git"))
+	gitFolderAt(t, filepath.Join(root, "wtgit"), "ref: refs/heads/wt\n")
+	writeAt(t, filepath.Join(root, "wtgit", "commondir"), "../kit.git\n")
+	writeAt(t, filepath.Join(root, "wt", ".git"), "gitdir: ../wtgit\n")
+	asked := []string{"--git-dir=.", "config", "-z", "--get-regexp", receiving}
+	for url, at := range map[string]string{filepath.Join(root, "wt"): "wtgit", filepath.Join(root, "kit.git"): "kit.git"} {
+		fake := runnertest.New(t)
+		fake.On("git", git("config", "--get", originVCS)...).Exits(1)
+		fake.On("git", git("config", "-z", "--get-all", receivePack)...).Exits(1)
+		fake.On("git", asked...).Exits(1)
+		place, err := gitrepo.Repo{Dir: dir, Run: fake, Home: filepath.Join(root, "home")}.Place(context.Background(), "origin", url, gitrepo.Pushing)
+		var in []string
+		for _, cmd := range fake.Commands() {
+			if slices.Equal(cmd.Args, asked) {
+				in = append(in, cmd.Dir)
+			}
+		}
+		want, err2 := filepath.EvalSymlinks(filepath.Join(root, at))
+		if err2 != nil {
+			t.Fatal(err2)
+		}
+		if err != nil || !place.OnThisMac || !slices.Equal(in, []string{want}) {
+			t.Errorf("Place(%q) = %+v, %v, asking in %q; want on this Mac, asking in %q", url, place, err, in, want)
 		}
 	}
 }

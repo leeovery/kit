@@ -1,6 +1,7 @@
 package gitrepo
 
 import (
+	"io/fs"
 	"os"
 
 	"golang.org/x/sys/unix"
@@ -24,6 +25,13 @@ func WithFlock(r Repo, f func(fd int) error) Repo {
 // in unix.Statfs's place, for a test to say what holds it.
 func WithStatfs(r Repo, f func(path string, fs *unix.Statfs_t) error) Repo {
 	r.statfs = f
+	return r
+}
+
+// WithDevice is r reading which device a folder is on with f, in its
+// Stat_t's place, for a test to say what's mounted where.
+func WithDevice(r Repo, f func(path string, info fs.FileInfo) uint64) Repo {
+	r.device = f
 	return r
 }
 

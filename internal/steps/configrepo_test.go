@@ -30,7 +30,8 @@ func view(repo string) []string {
 // URLs of the remote it's pushed to (pushURLs), and origin's URL (origin,
 // "" for no origin); and none of the remotes handed to a helper, nor an ssh
 // command, variant, program for the other end or protocol version set, nor
-// anything that undoes TLS's proof of an https URL's host.
+// anything that undoes TLS's proof of an https URL's host, nor a repository
+// on this Mac running anything of its own when pushed to.
 func remotes(f *runnertest.Fake, names, pushRemote, pushURLs, origin string) {
 	f.On("git", gitIn("remote")...).Prints(names)
 	f.On("git", gitIn("symbolic-ref", "-q", "HEAD")...).Prints("refs/heads/main\n")
@@ -55,6 +56,7 @@ func remotes(f *runnertest.Fake, names, pushRemote, pushURLs, origin string) {
 	for _, key := range []string{"remote." + pushRemote + ".receivepack", "remote.origin.uploadpack"} {
 		f.On("git", gitIn("config", "-z", "--get-all", key)...).Exits(1)
 	}
+	f.On("git", "--git-dir=.", "config", "-z", "--get-regexp", `^(receive\.denycurrentbranch|core\.(hookspath|alternaterefscommand)|hook\..+\.event)$`).Exits(1)
 	for _, url := range append(strings.Fields(pushURLs), origin) {
 		f.On("git", gitIn("config", "--type=bool", "--get-urlmatch", "http.sslVerify", url)...).Exits(1)
 		for _, key := range []string{"http.sslCAInfo", "http.sslCAPath", "http.curloptResolve"} {

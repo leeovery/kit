@@ -431,15 +431,20 @@ func TestCaptureNeverPushesToAPublicStore(t *testing.T) {
 }
 
 // A store on this Mac, a local path that stays on it, is proven private, so
-// pushed to; one in a folder macOS syncs off it, in the home, isn't.
+// pushed to; one in a folder macOS syncs off it, in the home, isn't, nor
+// one that runs a hook of its own when pushed to.
 func TestCapturePushesToAStoreOnThisMac(t *testing.T) {
 	for _, c := range []struct {
 		// in is the folder the store's in, in the home when it starts
-		// home/; why why it isn't pushed to: "" when it is.
-		name, in, why string
+		// home/; hooked whether it runs a post-receive hook; why why it
+		// isn't pushed to: "" when it is.
+		name, in string
+		hooked   bool
+		why      string
 	}{
 		{name: "on this Mac", in: "Backup"},
 		{name: "in a cloud drive", in: "home/Library/CloudStorage/Dropbox", why: "git writes it in ~/Library/CloudStorage/Dropbox, which syncs off this Mac"},
+		{name: "running its own hook", in: "Backup", hooked: true, why: "the repository runs its own post-receive hook, which can take the push anywhere"},
 	} {
 		w := newWorld(t, prefs.Lists{})
 		writeRecord(t, w.state, `{"on": "started fresh"}`)
@@ -460,7 +465,14 @@ func TestCapturePushesToAStoreOnThisMac(t *testing.T) {
 			}
 		}
 		w.write(t, filepath.Join(store, "HEAD"), "ref: refs/heads/main\n")
+		if c.hooked {
+			w.write(t, filepath.Join(store, "hooks", "post-receive"), "#!/bin/sh\n")
+			if err := os.Chmod(filepath.Join(store, "hooks", "post-receive"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+		}
 		w.fake.On("git", "-C", w.clone, "remote", "get-url", "--push", "--all", "origin").Prints(store + "\n")
+		w.fake.On("git", "--git-dir=.", "config", "-z", "--get-regexp", `^(receive\.denycurrentbranch|core\.(hookspath|alternaterefscommand)|hook\..+\.event)$`).Exits(1)
 		says := ""
 		if c.why != "" {
 			says = "kit pushes apps' settings only to a repository it can prove private, and can't for " + store + ": " + c.why

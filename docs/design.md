@@ -667,9 +667,9 @@ Mac's is a local path, the repository's when relative, or a `file://` URL (its p
 host ignored, as git takes them), where git runs its own program at the other end
 (`remote.<name>.receivepack` pushing, `uploadpack` fetching, unset or exactly `git-receive-pack`
 or `git-upload-pack`, or those without their dash, `git receive-pack` and `git upload-pack`: git
-runs a remote's own for a local path too), and the repository it finds there holds no link and
-its folders stay on the Mac. git finds it as real git does at the other end of a push or fetch:
-the path's trailing slashes dropped, a leading `~` the `HOME` of git's
+runs a remote's own for a local path too), and the repository it finds there stays on the Mac
+and, pushed to, runs nothing of its own. git finds it as real git does at the other end of a
+push or fetch: the path's trailing slashes dropped, a leading `~` the `HOME` of git's
 environment (another user's `~name` is refused), then the path with `/.git`, nothing,
 `.git/.git` and `.git` added in turn, the first that's a file, or a folder git takes for a
 repository (a `HEAD` of `ref:`, any of git's space (space, tab, newline or carriage return,
@@ -678,25 +678,43 @@ and `objects` and `refs` folders, a worktree's in the common folder its `commond
 file followed to the git folder its `gitdir: ` line names, no other tried should that be none,
 the file itself not checked. Links on the way to the repository (the path itself, a folder above
 it) are followed, nothing resolved by name, so `..` after a link leads where the link does. Then
-two rules, and nothing more. No links: its git folder and its common folder (resolved, as git
-reaches them) hold no symbolic link anywhere, dangling or not, wherever it leads, but under
-`hooks`, which git never writes; any other is refused ("<path> is a link: kit proves a
-repository on this Mac only when nothing in it leads elsewhere"), as git writes through a link
-wherever it leads, and so is a folder in them kit can't read (`EACCES`, `EPERM`), which may hold
-one. Each folder checked by identity, once: on a filesystem that's local (`statfs`'s
-`MNT_LOCAL`) and outside the folders in the home whose files may leave the Mac, told by their
-files (`os.SameFile` up the folder's path), never by comparing names, so by any name, case or
-spelling, as `/System/Volumes/Data/Users/…` is `/Users/…`, the home's too:
+three rules, and nothing more. Its folders stay on the Mac: its git folder and its common folder
+(resolved, as git reaches them), each checked by identity, once, and first, as this reads
+nothing in them, so a repository in the Desktop or Documents, which macOS asks permission to
+read in, is said to maybe sync, never that kit can't read it: on a filesystem that's local
+(`statfs`'s `MNT_LOCAL`) and outside the folders in the home whose files may leave the Mac, told
+by their files (`os.SameFile` up the folder's path), never by comparing names, so by any name,
+case or spelling, as `/System/Volumes/Data/Users/…` is `/Users/…`, the home's too:
 `Library/CloudStorage` (File Provider's cloud drives, as Dropbox's) and `Library/Mobile
 Documents` (iCloud Drive),
 which sync off it, and `Desktop` and `Documents`, which iCloud syncs in place when its Desktop &
 Documents is on, said as maybe syncing, never detected. The list is partial: a program such as
-Syncthing syncs any folder, which kit can't tell. What the repository there does with what it's
-given is its own, as a server's is, so kit doesn't check it: its hooks (a `post-receive` that
-mirrors it elsewhere), its config (`core.worktree`, `receive.denyCurrentBranch updateInstead`),
-a filesystem mounted inside it, its `hooks` folder, which kit doesn't look in, as git never
-writes it, and a file in it hard-linked to one elsewhere. A repository is on GitHub when the
-host git reaches is `github.com` or `ssh.github.com`, no other
+Syncthing syncs any folder, which kit can't tell. Nothing in them leads elsewhere: no symbolic
+link anywhere, dangling or not, wherever it leads, but under `hooks`, which git never writes;
+any other is refused ("<path> is a link: kit proves a repository on this Mac only when nothing
+in it leads elsewhere"), as git writes through a link wherever it leads, a `HEAD` that's a link
+among them, as `core.preferSymlinkRefs` makes, which git deprecates; nor a folder kit can't read
+(`EACCES`, `EPERM`), which may hold one; nor a folder on another filesystem than the git folder
+holding it, as one mounted there is, which `statfs` of the git folder can't speak for, told by
+its device (one `lstat` a folder, none a file): "<path> is another filesystem"; nor a regular
+file outside `objects` hard-linked (a link count above 1), as git appends to a reflog in place,
+through every link: "<path> is hard-linked, so git writes it wherever its other links are" (in
+`objects`, git's local clones hard-link files, which git never writes in place). An entry gone
+while kit looks, as receive-pack's quarantine (`objects/incoming-*`) and a gc's pruning leave,
+is passed over, but the folder itself. And, pushed to (fetched from, it runs none of them), it
+runs nothing of its own, as git reads its config for receive-pack, in its git folder (a
+worktree's reads its own after its repository's), every file's, the system's and the user's
+included (`git --git-dir=. config -z --get-regexp`, run there): `receive.denyCurrentBranch`
+`updateInstead` (its last value, in any case, as git takes it), with which a push writes the
+work tree, wherever `core.worktree` or a linked worktree puts it, is refused, and so is
+`core.hooksPath` set, with any value or none, `core.alternateRefsCommand` set, which
+receive-pack runs for a repository with alternates, a hook configured (`hook.<name>.event`) for
+an event git runs for a push, named in git's case, and an executable regular file (a link to one
+too) named as one in its common folder's `hooks` (a link followed): `pre-receive`, `update`,
+`proc-receive`, `post-receive`, `post-update`, `push-to-checkout`, `reference-transaction`, and
+`pre-auto-gc`, which the gc a push starts runs (a `.sample` is none), each named ("the
+repository runs its own post-receive hook, which can take the push anywhere"). A repository is
+on GitHub when the host git reaches is `github.com` or `ssh.github.com`, no other
 (no other host
 under `github.com`, as `gist.github.com`, holds one git pushes to as owner/name), in plain ASCII,
 reached over https or ssh alone: a URL's host in any case, with a full name's last dot or
@@ -745,9 +763,13 @@ or, for the URL (`git config
 `http.sslCAInfo` or `http.sslCAPath` set, or `http.curloptResolve` other than empty; another
 host, an IP address, or one not in plain ASCII; a host kit can't read (escaped, in brackets,
 like a flag); a path on GitHub that isn't an owner's repository; a local path where git finds no
-repository, whose program at the other end the remote sets, or whose repository holds a link or
-a folder kit can't read, or a folder on a filesystem that isn't local, or in a folder that syncs
-off the Mac or may. With no remote it's pushed to or fetched from, it isn't public.
+repository, whose program at the other end the remote sets, or whose repository is in a folder
+that syncs off the Mac or may, or on a filesystem that isn't local, holds a link (a `HEAD`
+`core.preferSymlinkRefs` makes among them), a folder kit can't read, a filesystem mounted in it
+or a file outside `objects` hard-linked, or, pushed to, writes its work tree
+(`receive.denyCurrentBranch updateInstead`) or runs a program of its own (`core.hooksPath`,
+`core.alternateRefsCommand`, a hook git runs for a push, configured or in its `hooks`). With no
+remote it's pushed to or fetched from, it isn't public.
 
 Every command takes `--json` (one document), `--plain` (plain lines, as without a terminal)
 and `--verbose` (commands' output kept whole in the run's log).

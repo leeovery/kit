@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"syscall"
 
 	"golang.org/x/sys/unix"
 
@@ -94,6 +95,17 @@ var syncRoots = []syncRoot{
 // repository at the other end of a push or fetch (enter_repo): the first
 // that's a file, or a folder that's a repository (isGitDir), is the one.
 var repoSuffixes = []string{"/.git", "", ".git/.git", ".git"}
+
+// receiveHooks are the hooks git runs for the repository a push reaches:
+// receive-pack's, and pre-auto-gc, which the gc it starts runs.
+var receiveHooks = []string{"pre-receive", "update", "proc-receive", "post-receive", "post-update", "push-to-checkout", "reference-transaction", "pre-auto-gc"}
+
+// receiving matches the settings git config reads for the repository a
+// push reaches, by their names as --get-regexp matches them, the section
+// and key in lower case: what it does with its work tree, its hooks'
+// folder, the command listing its alternates' refs, and each hook
+// configured's events (hook.<name>.event).
+const receiving = `^(receive\.denycurrentbranch|core\.(hookspath|alternaterefscommand)|hook\..+\.event)$`
 
 // gitSpace is what git takes for space (its isspace, without \v and \f).
 const gitSpace = " \t\n\r"
@@ -243,9 +255,9 @@ func read(remote string) (a address, why string) {
 // onThisMac is the place of path, a local path, the repository's folder's
 // unless it's absolute, git going way to the remote called remote in env:
 // this Mac's when git runs its own program at the other end, not one the
-// remote sets (gitsOwn), and the repository it finds there (localRepo)
-// holds no link that can lead git elsewhere (unlinked), and its folders
-// stay on the Mac (leaves); else unproven, saying why.
+// remote sets (gitsOwn), what git writes in the repository it finds there
+// (localRepo) stays on the Mac (stays), and, pushed to, the repository
+// runs nothing of its own (runsItsOwn); else unproven, saying why.
 func (r Repo) onThisMac(ctx context.Context, remote string, way Way, path string, env []string) (Place, error) {
 	if r.Home == "" {
 		return Place{}, errors.New("kit doesn't know the home folder, to tell a path that syncs off this Mac")
@@ -258,21 +270,22 @@ func (r Repo) onThisMac(ctx context.Context, remote string, way Way, path string
 	case set != nil && !way.gitsOwn(*set):
 		return unproven("remote.%s.%s is set, so git runs a program of its own there, which can take it anywhere", remote, setting)
 	}
-	gitDirs, why := localRepo(path, r.Dir, env)
+	found, why := localRepo(path, r.Dir, env)
 	if why != "" {
 		return unproven("%s", why)
 	}
-	folders, why, err := unlinked(gitDirs)
+	gitDir, common, err := resolved(found)
 	if err != nil {
 		return Place{}, fmt.Errorf("can't tell where git writes %s: %w", path, err)
 	}
-	if why != "" {
-		return unproven("%s", why)
+	if why, err := r.stays(path, gitDir, common); err != nil || why != "" {
+		return Place{Unproven: why}, err
 	}
-	for _, p := range folders {
-		if why, err := r.leaves(p); err != nil || why != "" {
-			return Place{Unproven: why}, err
-		}
+	if way == Fetching {
+		return Place{OnThisMac: true}, nil
+	}
+	if why, err := r.runsItsOwn(ctx, gitDir, common); err != nil || why != "" {
+		return Place{Unproven: why}, err
 	}
 	return Place{OnThisMac: true}, nil
 }
@@ -281,17 +294,16 @@ func (r Repo) onThisMac(ctx context.Context, remote string, way Way, path string
 // unless it's absolute, git running in env, as git does for the other end
 // of a push or fetch: trailing slashes dropped, a leading ~ the home in
 // git's environment (homeIn), each of repoSuffixes added in turn, a gitfile
-// followed to the git folder it names (gitfile); gitDirs are the git folder
-// and its common folder (commonDir), a worktree's elsewhere, where git
-// writes, never the gitfile. Nothing's resolved by name, as .. after a
-// link leads where the link does. why is why it finds none: "" when it
-// does.
-func localRepo(path, dir string, env []string) (gitDirs []string, why string) {
+// followed to the git folder it names (gitfile); gitDir is the git folder,
+// where git writes, never the gitfile. Nothing's resolved by name, as ..
+// after a link leads where the link does. why is why it finds none: ""
+// when it does.
+func localRepo(path, dir string, env []string) (gitDir, why string) {
 	for len(path) > 1 && strings.HasSuffix(path, "/") {
 		path = path[:len(path)-1]
 	}
 	if path, why = homeIn(path, env); why != "" {
-		return nil, why
+		return "", why
 	}
 	if !strings.HasPrefix(path, "/") {
 		path = dir + "/" + path
@@ -305,14 +317,14 @@ func localRepo(path, dir string, env []string) (gitDirs []string, why string) {
 		case info.Mode().IsRegular():
 			gitDir, ok := gitfile(found)
 			if !ok {
-				return nil, noRepo
+				return "", noRepo
 			}
-			return []string{gitDir, commonDir(gitDir)}, ""
+			return gitDir, ""
 		case info.IsDir() && isGitDir(found):
-			return []string{found, commonDir(found)}, ""
+			return found, ""
 		}
 	}
-	return nil, noRepo
+	return "", noRepo
 }
 
 // homeIn is path with a leading ~ the home folder, as git takes it at the
@@ -417,34 +429,54 @@ func searchable(path string) bool {
 	return unix.Access(path, unix.X_OK) == nil
 }
 
-// unlinked is gitDirs, git folders, resolved, as git reaches them, once
-// each; why is why kit can't prove the repository on this Mac: a link in
-// one (linkIn), as git writes through a link wherever it leads; "" for
-// none.
-func unlinked(gitDirs []string) (folders []string, why string, err error) {
-	for _, gitDir := range gitDirs {
-		dir, err := filepath.EvalSymlinks(gitDir)
-		switch {
-		case err != nil:
-			return nil, "", err
-		case slices.Contains(folders, dir):
-			continue
-		}
-		folders = append(folders, dir)
-		if why, err := linkIn(dir); err != nil || why != "" {
-			return nil, why, err
-		}
+// resolved is the git folder found and its common folder (commonDir), a
+// worktree's elsewhere, as git reaches them: their links resolved.
+func resolved(found string) (gitDir, common string, err error) {
+	if gitDir, err = filepath.EvalSymlinks(found); err != nil {
+		return "", "", err
 	}
-	return folders, "", nil
+	common, err = filepath.EvalSymlinks(commonDir(found))
+	return gitDir, common, err
 }
 
-// linkIn is why the git folder dir, resolved, can lead git elsewhere: the
-// first link in it, dangling or not, as WalkDir finds it, never following
-// one, but in its hooks, which git never writes; or a folder in it kit
-// can't read (EACCES, EPERM), which may hold one; "" for neither.
-func linkIn(dir string) (why string, err error) {
+// stays is why what git writes in the repository at path, in its git
+// folder gitDir and its common folder common, resolved, each once, may
+// leave this Mac: a folder that may (leaves), told first, as it reads
+// nothing in them, which macOS asks permission for in the Desktop and
+// Documents; else what's in one that can take it elsewhere (leadsOut); ""
+// for neither.
+func (r Repo) stays(path, gitDir, common string) (string, error) {
+	folders := slices.Compact([]string{gitDir, common})
+	for _, p := range folders {
+		if why, err := r.leaves(p); err != nil || why != "" {
+			return why, err
+		}
+	}
+	for _, p := range folders {
+		why, err := r.leadsOut(p)
+		if err != nil {
+			return "", fmt.Errorf("can't tell where git writes %s: %w", path, err)
+		}
+		if why != "" {
+			return why, nil
+		}
+	}
+	return "", nil
+}
+
+// leadsOut is why what git writes in the git folder dir, resolved, can
+// leave it, as WalkDir finds the first: a link, dangling or not, which git
+// writes through wherever it leads, never followed, but in its hooks,
+// which git never writes; a folder kit can't read (EACCES, EPERM), which
+// may hold one; or what apart finds. An entry gone since its folder was
+// listed, as receive-pack's quarantine and gc's pruning leave, is passed
+// over, but dir itself; "" for none.
+func (r Repo) leadsOut(dir string) (why string, err error) {
+	var device uint64
 	err = filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
 		switch {
+		case errors.Is(err, fs.ErrNotExist) && p != dir:
+			return nil
 		case errors.Is(err, fs.ErrPermission):
 			why = fmt.Sprintf("kit can't read %s, to tell whether anything in the repository leads elsewhere", p)
 			return fs.SkipAll
@@ -458,9 +490,100 @@ func linkIn(dir string) (why string, err error) {
 			why = p + " is a link: kit proves a repository on this Mac only when nothing in it leads elsewhere"
 			return fs.SkipAll
 		}
-		return nil
+		if why, err = r.apart(dir, p, d, &device); why != "" {
+			return fs.SkipAll
+		}
+		return err
 	})
 	return why, err
+}
+
+// apart is why the entry d at p, in the git folder dir, takes what git
+// writes there off dir's filesystem, whose device it reads at dir into
+// device: a folder on another, as one mounted there is; or a regular file
+// outside objects with another link, which git writes through, as it
+// appends to a reflog in place (in objects, git's local clones hard-link
+// files). It reads an lstat a folder, and a file outside objects, no
+// other; "" for neither, or an entry gone.
+func (r Repo) apart(dir, p string, d fs.DirEntry, device *uint64) (string, error) {
+	if !d.IsDir() && (!d.Type().IsRegular() || strings.HasPrefix(p, dir+"/objects/")) {
+		return "", nil
+	}
+	info, err := d.Info()
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return "", nil
+	case err != nil:
+		return "", err
+	case p == dir:
+		*device = r.deviceOf(p, info)
+	case info.IsDir() && r.deviceOf(p, info) != *device:
+		return p + " is another filesystem", nil
+	case !info.IsDir() && info.Sys().(*syscall.Stat_t).Nlink > 1:
+		return p + " is hard-linked, so git writes it wherever its other links are", nil
+	}
+	return "", nil
+}
+
+// deviceOf is the device the folder at p, info its lstat, is on.
+func (r Repo) deviceOf(p string, info fs.FileInfo) uint64 {
+	if r.device != nil {
+		return r.device(p, info)
+	}
+	return uint64(info.Sys().(*syscall.Stat_t).Dev)
+}
+
+// runsItsOwn is why the repository a push reaches, in its git folder
+// gitDir and its common folder common, resolved, may take the push
+// elsewhere, as git config reads its settings there (receiving), every
+// file's, the system's and the user's too, run in the git folder as
+// receive-pack is, which reads a worktree's own: a work tree the push
+// writes (receive.denyCurrentBranch updateInstead, its last value, in any
+// case, as git takes it), or a program of its own, set (core.hooksPath,
+// core.alternateRefsCommand), configured for one of receiveHooks, named in
+// git's case, or in its hooks folder (hookIn); "" for none.
+func (r Repo) runsItsOwn(ctx context.Context, gitDir, common string) (string, error) {
+	res, err := r.Run.Run(ctx, runner.Command{Name: "git", Args: []string{"--git-dir=.", "config", "-z", "--get-regexp", receiving}, Dir: gitDir, Env: []string{"LC_ALL=C"}})
+	if exit, ok := errors.AsType[*runner.ExitError](err); ok && exit.Code == 1 {
+		err = nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("can't read the config of the repository at %s: %w", gitDir, err)
+	}
+	deny := ""
+	for setting := range strings.SplitSeq(strings.TrimSuffix(string(res.Stdout), "\x00"), "\x00") {
+		key, value, _ := strings.Cut(setting, "\n")
+		switch {
+		case key == "receive.denycurrentbranch":
+			deny = value
+		case key == "core.hookspath":
+			return "core.hooksPath is set, so the repository runs hooks from another folder, which can take the push anywhere", nil
+		case key == "core.alternaterefscommand":
+			return "core.alternateRefsCommand is set, so the repository runs a program of its own, which can take the push anywhere", nil
+		case slices.Contains(receiveHooks, value):
+			return fmt.Sprintf("the repository runs its own %s hook, %s in git's config, which can take the push anywhere", value, strings.TrimSuffix(key, ".event")), nil
+		}
+	}
+	if strings.EqualFold(deny, "updateInstead") {
+		return "receive.denyCurrentBranch is updateInstead, so the push writes the repository's work tree, which can be anywhere", nil
+	}
+	if hook := hookIn(common + "/hooks"); hook != "" {
+		return "the repository runs its own " + hook + " hook, which can take the push anywhere", nil
+	}
+	return "", nil
+}
+
+// hookIn is the first of receiveHooks the folder hooks holds as git runs
+// one: a regular file, through a link too, kit may run (access's X_OK), as
+// git tells one; "" for none.
+func hookIn(hooks string) string {
+	for _, name := range receiveHooks {
+		p := hooks + "/" + name
+		if info, err := os.Stat(p); err == nil && info.Mode().IsRegular() && unix.Access(p, unix.X_OK) == nil {
+			return name
+		}
+	}
+	return ""
 }
 
 // leaves is why what git writes at p, resolved, may leave this Mac: it's in

@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -37,6 +38,9 @@ type Repo struct {
 	// statfs, when set, says what a path's filesystem is in unix.Statfs's
 	// place.
 	statfs func(path string, fs *unix.Statfs_t) error
+	// device, when set, says which device the folder at path, info its
+	// lstat, is on, in its Stat_t's place.
+	device func(path string, info fs.FileInfo) uint64
 	// fsync, when set, syncs the git folder to the disk, once kit's mark is
 	// renamed into it, in (*os.File).Sync's place.
 	fsync func(*os.File) error
