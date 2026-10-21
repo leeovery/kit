@@ -83,7 +83,7 @@ func (r Repo) commitLocked(ctx context.Context, lock *indexLock, message string,
 		// What follows is the index catching up with a commit made: it's
 		// done whatever becomes of the run.
 		ctx = context.WithoutCancel(ctx)
-		moved = r.checkParent(ctx, base)
+		moved = r.checkParent(ctx, lock, base)
 	}
 	if err := r.resetIndex(ctx, lock, slices.Concat(files, p.gone)); err != nil {
 		return committed, errors.Join(moved, fmt.Errorf("git's index still shows them as they were: %w", err))
@@ -117,7 +117,10 @@ func (r Repo) commitFrom(ctx context.Context, lock *indexLock, base, message str
 		return nil, err
 	}
 	if _, err := r.gitIn(ctx, env, nil, "commit", "--quiet", "-m", message); err != nil {
-		if r.landed(context.WithoutCancel(ctx), env, base) {
+		// Made all the same, as when the run's stopped while a post-commit
+		// hook runs. Another git's commit onto base, as a hook can make,
+		// which git commit then refuses to follow, isn't kit's.
+		if made, _ := r.made(context.WithoutCancel(ctx), lock, base); made != "" {
 			return files, nil
 		}
 		return nil, commitFailed(err, lock.path())
@@ -125,28 +128,50 @@ func (r Repo) commitFrom(ctx context.Context, lock *indexLock, base, message str
 	return files, nil
 }
 
-// landed reports whether git made the commit all the same once git commit
-// failed, as when the run's stopped while a post-commit hook runs: HEAD
-// moved off base onto a commit whose parent is base and whose files are
-// those of kit's own index, run with env. Another git's commit onto base,
-// as a hook can make, which git commit then refuses to follow, isn't.
-func (r Repo) landed(ctx context.Context, env []string, base string) bool {
-	head, err := r.commitAt(ctx, "HEAD")
-	if err != nil || head == "" || head == base {
-		return false
+// made is kit's commit, made onto base from kit's own index, which lock
+// holds: the commit on HEAD's first-parent line whose parent is base, and
+// whose files are the index's, as a post-commit hook can commit on top.
+// None when there's no such commit, as when another git moved HEAD.
+func (r Repo) made(ctx context.Context, lock *indexLock, base string) (string, error) {
+	line := "HEAD"
+	if base != "" {
+		line = base + "..HEAD"
 	}
-	if parent, err := r.commitAt(ctx, "HEAD^"); err != nil || parent != base {
-		return false
+	res, err := r.git(ctx, "rev-list", "--first-parent", "--parents", line)
+	if err != nil {
+		return "", err
 	}
-	_, err = r.gitIn(ctx, env, nil, "diff", "--cached", "--quiet", "HEAD")
-	return err == nil
+	for rec := range strings.Lines(string(res.Stdout)) {
+		if f := strings.Fields(rec); len(f) > 0 && parentOf(f) == base {
+			env := []string{"GIT_INDEX_FILE=" + lock.file(ownIndex)}
+			_, err := r.gitIn(ctx, env, nil, "diff", "--cached", "--quiet", f[0])
+			if exit, ok := errors.AsType[*runner.ExitError](err); ok && exit.Code == 1 {
+				// Its files aren't the index's: another's commit.
+				return "", nil
+			}
+			if err != nil {
+				return "", err
+			}
+			return f[0], nil
+		}
+	}
+	return "", nil
+}
+
+// parentOf is the first parent of the commit rev-list --parents names in
+// f, a commit then its parents: "" for a first commit.
+func parentOf(f []string) string {
+	if len(f) < 2 {
+		return ""
+	}
+	return f[1]
 }
 
 // commitFailed is git commit's error, but for a hook's that reached for
 // git's own index, which kit holds: said so, rather than as git says it, a
 // lock a git that stopped may have left.
 func commitFailed(err error, lock string) error {
-	if exit, ok := errors.AsType[*runner.ExitError](err); ok && strings.Contains(exit.Stderr, lock+"': File exists") {
+	if exit, ok := errors.AsType[*runner.ExitError](err); ok && strings.Contains(exit.FullStderr, lock+"': File exists") {
 		return errors.New("a hook of the commit's failed: it reached for git's own index, which kit holds while it commits, rather than the one git gives hooks (GIT_INDEX_FILE)")
 	}
 	return err
@@ -154,16 +179,25 @@ func commitFailed(err error, lock string) error {
 
 // checkParent errors unless the commit just made went onto base: another
 // git that moved HEAD meanwhile, as git reset --soft can while the index is
-// held, leaves kit's commit undoing what it changed.
-func (r Repo) checkParent(ctx context.Context, base string) error {
+// held, leaves kit's commit undoing what it changed. It's held back, taken
+// to be HEAD: the git folder's marked, so no later run pushes it (held).
+func (r Repo) checkParent(ctx context.Context, lock *indexLock, base string) error {
+	made, err := r.made(ctx, lock, base)
+	if err == nil && made != "" {
+		return nil
+	}
+	head, headErr := r.commitAt(ctx, "HEAD")
+	if headErr == nil && head != "" {
+		headErr = hold(lock.gitDir, head)
+	}
+	if err = errors.Join(err, headErr); err != nil {
+		return fmt.Errorf("%w, or kit couldn't tell, so it isn't pushed: %w", ErrHeadMoved, err)
+	}
 	parent, err := r.commitAt(ctx, "HEAD^")
 	if err != nil {
 		return fmt.Errorf("%w, or kit couldn't tell, so it isn't pushed: %w", ErrHeadMoved, err)
 	}
-	if parent != base {
-		return fmt.Errorf("%w: its commit went onto %s, not %s, which it was made from, so it may undo what that commit changed, and isn't pushed: undo it with git revert HEAD, or git reset --soft HEAD~ and run kit again", ErrHeadMoved, named(parent), named(base))
-	}
-	return nil
+	return fmt.Errorf("%w: its commit went onto %s, not %s, which it was made from, so it may undo what that commit changed, and nothing's pushed while it's in the branch: %s", ErrHeadMoved, named(parent), named(base), takeOut(head, head))
 }
 
 // named is commit, or "no commit" for none.
@@ -236,7 +270,7 @@ func plan(changed []entry) commitPlan {
 		switch {
 		case e.code == addedThenGone:
 			p.gone = append(p.gone, e.path)
-		case e.code == "D " && !slices.Contains(changed, entry{code: "??", path: e.path}):
+		case deletedAlone(e, changed):
 			p.deleted = append(p.deleted, e.path)
 		default:
 			p.stage = append(p.stage, e.path)

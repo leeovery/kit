@@ -134,8 +134,18 @@ func Has(r Runner, name string) bool {
 type ExitError struct {
 	Command string
 	Code    int
-	// Stderr is the last of what it printed on its standard error.
+	// Stderr is the last of what it printed on its standard error, as the
+	// error says it.
 	Stderr string
+	// FullStderr is all it printed there: where to look for what it said,
+	// which can be on any line, git's reason often above its last.
+	FullStderr string
+}
+
+// NewExitError is the error for command, which exited code, having printed
+// stderr.
+func NewExitError(command string, code int, stderr []byte) *ExitError {
+	return &ExitError{Command: command, Code: code, Stderr: lastLine(stderr), FullStderr: string(stderr)}
 }
 
 func (e *ExitError) Error() string {

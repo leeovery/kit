@@ -363,32 +363,47 @@ post-commit hook gets it while the lock is still held, where `git commit` gives 
 once it lets go, and post-index-change never fires for the real index; a hook that reaches
 for the real index fails, and kit says so. It refuses while git is part way through a merge,
 rebase, cherry-pick, revert or `git am`, or a conflict in its paths waits to be resolved: its
-change waits till that's finished. A commit that lands on another commit than it was made
-from, HEAD moved meanwhile by another git, is an error naming both, and how to put it right
-(`git revert HEAD`, or `git reset --soft HEAD~` and run kit again), and isn't pushed; nor is
-anything after a commit that failed. A run stopped while git commits, once the commit's made,
-has committed. What git can't keep (an ignored file, an empty folder, a repository nested in
-kit-config, which `kit reconcile` names and only snoozes) is left out. With nothing to commit
-it says nothing changed, pushing only commits still waiting for the upstream, as when a push
-failed. Drift is kit-config's files on disk against the last commit: the `config` step makes
-each file whose working copy differs from it an item (`config:shared/home/.zshrc`, edited,
-added or deleted, with the lines it adds and removes; untracked, a file taken out of git's
-index and kept on this Mac as git ignores it; a repository, by its folder,
-`config:vendor/tool/`), quiet for a day as drift is; a difference only in git's index, the
-file on disk as last committed, is the user's own business in git, never drift. `kit
-reconcile` shows an edit's diff and offers adopt (commit it, then push, `--note` the message's
-end; an untracked file is committed as deleted, kept on this Mac), revert (back to the last
-commit; a new file to the Bin; an untracked file tracked again, as it is) or snooze. Before it
-pushes, kit refuses while git is part way through one of its operations or a conflict waits,
-as setting work aside would end the one; then it fetches (a remote out of reach said plainly),
-and when the remote has commits this Mac hasn't, rebases onto them, so two Macs don't fight.
-Anything not committed is set aside in a stash of kit's own and put back as it was, staged or
-not; but when the remote's commits change a file changed here and not committed, nothing is
-set aside, rebased or pushed, and kit names the files: commit those changes or put them aside,
-and it pushes then. A stash that won't go back is kept, named, never dropped, kit saying
-whether the work is wholly in it or back with git's conflict markers in which files; a rebase
-judged under way by git's own record of it is aborted, one that never started leaves nothing
-to undo, and nothing is pushed.
+change waits till that's finished. kit's commit is the one on HEAD's first-parent line made
+onto the last commit with its index's files, so a post-commit hook may commit on top. One that
+lands on another commit than it was made from, HEAD moved meanwhile by another git, is an
+error naming both, and how to take it out, keeping its change (`git reset --soft HEAD~`, then
+run kit again; never `git revert`, which undoes the change on disk too), and is held back:
+kit marks the git folder (`kit-held`), and no pull or push goes ahead, in that run or any
+after, while that commit's in the branch, as a rebase would make it anew; the mark clears once
+it isn't. Nothing's pushed after a commit that failed either. A run stopped while git commits,
+once the commit's made, has committed. What git can't keep (an ignored file, an empty folder,
+a repository nested in kit-config, which `kit reconcile` names and only snoozes) is left out.
+With nothing to commit it says nothing changed, pushing only commits still waiting for the
+upstream, as when a push failed. Drift is kit-config's files on disk against the last commit:
+the `config` step makes each file whose working copy differs from it an item
+(`config:shared/home/.zshrc`, edited, added, as one to be added with `git add -N` is, or
+deleted, with the lines it adds and removes; untracked, a file taken out of git's index and
+kept on this Mac as git ignores it, changed or not, as committing it deletes it from the other
+Macs; a repository, by its folder, `config:vendor/tool/`), quiet for a day as drift is; any
+other difference only in git's index, the file on disk as last committed, is the user's own
+business in git, never drift. `kit reconcile` shows an edit's diff and offers adopt (commit
+it, then push, `--note` the message's end; an untracked file is committed as deleted, kept on
+this Mac), revert (back to the last commit; a new file to the Bin; an untracked file tracked
+again, as it is) or snooze. kit pulls before it pushes, and pulls the prefs store's clone
+the same way (`kit prefs`): it refuses while git is part way through one of its operations, a
+conflict waits, or a commit it held back is in the branch, as setting work aside would end the
+one; then it fetches (a remote out of reach said plainly), and when the remote has commits
+this Mac hasn't, rebases onto them by the commits since the two parted (never git's
+fork-point, which can leave out a commit, so the rebase changes no more than the remote's
+commits do), so two Macs don't fight. Anything not committed is set aside in a stash of kit's
+own and put back as it was, staged or not; but when the remote's commits change what's not
+committed here, nothing is set aside, rebased or pushed, and kit names the files and what to
+do: a file changed here (`kit reconcile` commits or undoes it); a change only staged, its file
+on disk as last committed, which drift doesn't show (the user's to commit or unstage); a file
+git ignores here, which the rebase would replace without a word (move it aside); counting a
+folder of the remote's where a file is here, or the other way round, and, where git folds case
+(`core.ignorecase`, as on macOS's own disks), names differing only by case. `kit status`'s
+Sync line says so too, as far as the last fetch tells, while it holds commits back. A stash
+that won't go back is kept, named, never dropped, kit saying whether the work is wholly in it
+or back with git's conflict markers in which files; a rebase judged under way by git's own
+record of it is aborted, one that never started leaves nothing to undo, and nothing is pushed.
+What a program says, kit looks for on any line it prints, as git's reason is often above its
+last.
 
 **Steps.** Everything kit applies is a step in one pipeline. A step has:
 

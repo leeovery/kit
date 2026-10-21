@@ -232,7 +232,7 @@ func (f *Fake) Run(ctx context.Context, cmd runner.Command) (runner.Result, erro
 	}
 	res := runner.Result{Stdout: []byte(stdout), Stderr: []byte(stderr), ExitCode: exit, Duration: a.duration, Group: a.group}
 	if exit != 0 {
-		return res, &runner.ExitError{Command: cmd.String(), Code: exit, Stderr: stderr}
+		return res, runner.NewExitError(cmd.String(), exit, res.Stderr)
 	}
 	return res, nil
 }

@@ -309,14 +309,17 @@ type Raise struct {
 // place is a card's place in Raise's line: its step; how much of the run
 // waits on it; whether it's held, never moved from its turn; how many of
 // its step's own cards follow it; and moved, told each time its turn comes
-// or goes. notified is the item its notification's for, while it's posted,
-// which only its own card's goroutine touches.
+// or goes. wentDown is whether its card went down, set aside while up,
+// since its goroutine last looked, which mu guards: its turn can come back
+// before the goroutine wakes. notified is the item its notification's for,
+// while it's posted, which only its own card's goroutine touches.
 type place struct {
 	step     string
 	weight   int
 	held     bool
 	after    int
 	moved    chan struct{}
+	wentDown bool
 	notified string
 }
 
@@ -404,22 +407,23 @@ func (r *Raise) up(ctx context.Context, step string, c raised, s seat) (string, 
 	}
 }
 
-// look is pl's card as things stand: the run stopped, its error; its turn
-// come and its card not up, done, what kit saw, else its card put up; its
-// card down, its notification taken away.
+// look is pl's card as things stand: the run stopped, its error; its card
+// down, or gone down since it last looked, its notification taken away;
+// its turn come and its card not up, done, what kit saw, else its card put
+// up.
 func (r *Raise) look(ctx context.Context, pl *place, c raised) (saw string, done bool, err error) {
 	if err := ctx.Err(); err != nil {
 		return "", false, err
 	}
-	due, up := r.state(pl)
-	switch {
-	case due:
+	due, up, wentDown := r.state(pl)
+	if wentDown || !due && !up {
+		r.unnotify(ctx, pl)
+	}
+	if due {
 		if ok, saw := c.done(ctx); ok {
 			return saw, true, nil
 		}
 		r.show(ctx, pl, c)
-	case !up:
-		r.unnotify(ctx, pl)
 	}
 	return "", false, nil
 }
@@ -497,12 +501,13 @@ func (r *Raise) answering(pl *place, key hand.Answer) bool {
 }
 
 // state is pl's card as the line has it: due, its turn come and its card
-// not up; up, its card up.
-func (r *Raise) state(pl *place) (due, up bool) {
+// not up; up, its card up; wentDown, it went down since pl last looked.
+func (r *Raise) state(pl *place) (due, up, wentDown bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	up = r.shown == pl
-	return r.hasLocked(pl) && !up, up
+	wentDown, pl.wentDown = pl.wentDown, false
+	return r.hasLocked(pl) && !up, up, wentDown
 }
 
 // show puts c's card up for pl's step, when it's still pl's turn and the
@@ -627,7 +632,7 @@ func (r *Raise) leave(pl *place) {
 func (r *Raise) setAside() {
 	up := r.line[0]
 	if r.shown == up {
-		r.shown = nil
+		r.shown, up.wentDown = nil, true
 		r.Sink.Emit(event.Doing{Time: r.Now(), Step: up.step, Says: event.Queued})
 	}
 	up.poke()

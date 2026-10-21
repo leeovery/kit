@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -144,47 +145,99 @@ func TestLoad(t *testing.T) {
 func itoa(n int64) string { return strconv.FormatInt(n, 10) }
 
 // What kit commits and pushes at once never waits; an edit by hand, or a
-// push that failed, is a problem after an hour.
+// push that failed, is a problem after an hour; and one kit holds back is
+// one at once, saying why, as Push would refuse it.
 func TestConfigSync(t *testing.T) {
-	repo := t.TempDir()
+	repo, gitDir := t.TempDir(), t.TempDir()
 	git := func(args ...string) []string { return append([]string{"-C", repo}, args...) }
+	const head = "0e0bf17a399109574ffb00e33300280a33f81ab7"
+	log := git("log", "@{u}..HEAD", "--format=%ct")
+	// waiting scripts the commits waiting, as times, and the repository as
+	// Push finds it settled, git's status of it status, the remote's last
+	// fetch behind by behind.
+	waiting := func(times []time.Time, status, behind string) *runnertest.Fake {
+		fake := runnertest.New(t)
+		var out string
+		for _, at := range times {
+			out += itoa(at.Unix()) + "\n"
+		}
+		fake.On("git", log...).Prints(out)
+		fake.On("git", git("rev-parse", "--absolute-git-dir")...).Prints(gitDir + "\n")
+		fake.On("git", git("--literal-pathspecs", "status", "--porcelain", "-z", "--untracked-files=all", "--no-renames", "--")...).Prints(status)
+		fake.On("git", git("rev-list", "--count", "HEAD..@{u}")...).Prints(behind + "\n")
+		return fake
+	}
+	sync := func(fake *runnertest.Fake) engine.Step {
+		return steps.ConfigSync(gitrepo.Repo{Dir: repo, Run: fake}, now)
+	}
 
 	fake := runnertest.New(t)
-	fake.On("git", git("log", "@{u}..HEAD", "--format=%ct")...)
-	if state, text, _ := checked(t, steps.ConfigSync(fake, repo, now)); state != check.OK || text != "pushed" {
+	fake.On("git", log...)
+	if state, text, _ := checked(t, sync(fake)); state != check.OK || text != "pushed" {
 		t.Errorf("all pushed = %s %q", state, text)
 	}
 
-	fake = runnertest.New(t)
-	fake.On("git", git("log", "@{u}..HEAD", "--format=%ct")...).Prints(itoa(now().Add(-3*time.Hour).Unix()) + "\n" + itoa(now().Add(-time.Minute).Unix()) + "\n")
-	state, _, ids := checked(t, steps.ConfigSync(fake, repo, now))
+	fake = waiting([]time.Time{now().Add(-3 * time.Hour), now().Add(-time.Minute)}, "", "0")
+	state, _, ids := checked(t, sync(fake))
 	if state != check.Attention || !slices.Equal(ids, []string{"config-sync:unpushed"}) {
 		t.Errorf("waiting = %s %q; want the commits unpushed", state, ids)
 	}
 
-	fake = runnertest.New(t)
-	fake.On("git", git("log", "@{u}..HEAD", "--format=%ct")...).Prints(itoa(now().Add(-time.Minute).Unix()) + "\n")
-	if state, _, _ := checked(t, steps.ConfigSync(fake, repo, now)); state != check.OK {
+	fake = waiting([]time.Time{now().Add(-time.Minute)}, "", "0")
+	if state, _, _ := checked(t, sync(fake)); state != check.OK {
 		t.Errorf("a commit a minute old = %s, want ok: kit is pushing it", state)
+	}
+
+	// A change staged here, its file on disk as last committed, which the
+	// remote's commits change too: drift says all's committed, so this says
+	// why nothing's pushed.
+	fake = waiting([]time.Time{now().Add(-time.Minute)}, "MM notes\x00", "1")
+	fake.On("git", git("diff", "--name-only", "-z", "--no-renames", "HEAD...@{u}")...).Prints("notes\x00")
+	fake.On("git", git("config", "--get", "--type=bool", "core.ignorecase")...).Prints("true\n")
+	fake.On("git", git("ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory")...)
+	fake.On("git", git("rev-parse", "--verify", "--quiet", "HEAD")...).Prints(head + "\n")
+	fake.On("git", git("read-tree", head)...)
+	fake.On("git", git("diff", "--numstat", "-z", "--no-renames", "--no-ext-diff", "HEAD")...)
+	res := sync(fake).Check(t.Context())
+	if res.State != check.Attention || res.Summary != "pushes held back" || len(res.Items) != 1 ||
+		res.Items[0].ID != "config-sync:held" || res.Items[0].Name != "1 commit not pushed" ||
+		!strings.Contains(res.Items[0].Detail, "notes staged here, its file on disk as last committed: git's index is yours, to commit or unstage (git restore --staged notes)") {
+		t.Errorf("held back by a staged change = %+v", res)
+	}
+
+	// A commit kit held back, as it went onto another commit than it was
+	// made from.
+	if err := os.WriteFile(filepath.Join(gitDir, "kit-held"), []byte(head+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fake = waiting([]time.Time{now().Add(-time.Minute)}, "", "0")
+	fake.On("git", git("merge-base", "--is-ancestor", head, "HEAD")...)
+	fake.On("git", git("rev-parse", "--verify", "--quiet", "HEAD")...).Prints(head + "\n")
+	res = sync(fake).Check(t.Context())
+	if res.State != check.Attention || len(res.Items) != 1 || res.Items[0].ID != "config-sync:held" ||
+		!strings.Contains(res.Items[0].Detail, "git reset --soft HEAD~ takes it out, keeping its change, then run kit again") {
+		t.Errorf("held back by kit's own commit = %+v", res)
 	}
 
 	// No upstream: nothing to push to.
 	fake = runnertest.New(t)
-	fake.On("git", git("log", "@{u}..HEAD", "--format=%ct")...).Exits(128).PrintsToStderr("fatal: no upstream configured")
-	if state, _, _ := checked(t, steps.ConfigSync(fake, repo, now)); state != check.OK {
+	fake.On("git", log...).Exits(128).PrintsToStderr("fatal: no upstream configured for branch 'main'")
+	if state, _, _ := checked(t, sync(fake)); state != check.OK {
 		t.Errorf("no upstream = %s, want ok", state)
 	}
 }
 
 // kit-config's edits, its files on disk that differ from the last commit,
-// are each an item, with the lines it adds and removes: a file the user
-// untracked, kept on this Mac as git ignores it, none, and a repository
-// nested in kit-config what it is. One differing only in git's index, its
-// file on disk as last committed, is none. Status and the lines are as
-// real git prints them.
+// are each an item, with the lines it adds and removes: one to be added
+// (git add -N) new; a file the user untracked, kept on this Mac as git
+// ignores it, as it was, an item all the same, with no lines, as
+// committing it deletes it from the other Macs; and a repository nested in
+// kit-config what it is. One differing only in git's index, its file on
+// disk as last committed, is none. Status and the lines are as real git
+// prints them.
 func TestConfigEdits(t *testing.T) {
 	repo := t.TempDir()
-	for _, name := range []string{"notes", "secret"} {
+	for _, name := range []string{"notes", "secret", "ita"} {
 		if err := os.WriteFile(filepath.Join(repo, name), []byte("a\nb\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -200,10 +253,10 @@ func TestConfigEdits(t *testing.T) {
 	}
 
 	fake = runnertest.New(t)
-	fake.On("git", status...).Prints(" D personal/declarations\x00MM same\x00 M shared/home/.zshrc\x00D  secret\x00?? notes\x00?? vendor/tool/\x00")
+	fake.On("git", status...).Prints(" D personal/declarations\x00MM same\x00 M shared/home/.zshrc\x00D  secret\x00 A ita\x00?? notes\x00?? vendor/tool/\x00")
 	fake.On("git", git("rev-parse", "--verify", "--quiet", "HEAD")...).Prints("0e0bf17a399109574ffb00e33300280a33f81ab7\n")
 	fake.On("git", git("read-tree", "0e0bf17a399109574ffb00e33300280a33f81ab7")...)
-	fake.On("git", git("diff", "--numstat", "-z", "--no-renames", "--no-ext-diff", "HEAD")...).Prints("0\t40\tpersonal/declarations\x003\t1\tshared/home/.zshrc\x002\t0\tsecret\x00")
+	fake.On("git", git("diff", "--numstat", "-z", "--no-renames", "--no-ext-diff", "HEAD")...).Prints("0\t40\tpersonal/declarations\x003\t1\tshared/home/.zshrc\x00")
 	res := steps.ConfigEdits(gitrepo.Repo{Dir: repo, Run: fake}).Check(t.Context())
 	var got []string
 	for _, it := range res.Items {
@@ -211,9 +264,9 @@ func TestConfigEdits(t *testing.T) {
 	}
 	want := []string{
 		"config:personal/declarations deleted +0 −40 lines", "config:shared/home/.zshrc edited +3 −1 lines", "config:secret untracked ",
-		"config:notes added +2 −0 lines", "config:vendor/tool/ repository kit-config can't keep it",
+		"config:ita added +2 −0 lines", "config:notes added +2 −0 lines", "config:vendor/tool/ repository kit-config can't keep it",
 	}
-	if res.State != check.Attention || res.Summary != "5 files not committed" || !slices.Equal(got, want) {
+	if res.State != check.Attention || res.Summary != "6 files not committed" || !slices.Equal(got, want) {
 		t.Errorf("edits = %s %q %q, want %q", res.State, res.Summary, got, want)
 	}
 }

@@ -37,7 +37,8 @@ type Change struct {
 // each adds and removes against it: a file added then gone before it was
 // committed is none, and so is one whose difference is only in git's
 // index, as the user staged it, its file on disk as last committed, which
-// is the user's own business in git.
+// is the user's own business in git; but not a file untracked, kept on
+// disk as git ignores it, which a commit of it commits as deleted.
 func (r Repo) Changes(ctx context.Context) ([]Change, error) {
 	entries, err := r.status(ctx)
 	if err != nil || len(entries) == 0 {
@@ -50,17 +51,19 @@ func (r Repo) Changes(ctx context.Context) ([]Change, error) {
 	var changes []Change
 	for _, e := range entries {
 		state, ok := e.state()
-		if _, differs := counts[e.path]; !ok || inHead(e, entries) && !differs {
+		_, differs := counts[e.path]
+		switch {
+		case !ok:
+			continue
+		case deletedAlone(e, entries) && r.isFile(e.path):
+			state = Untracked
+		case inHead(e, entries) && !differs:
 			continue
 		}
 		if i := slices.IndexFunc(changes, func(c Change) bool { return c.Path == e.path }); i >= 0 {
 			// Staged as deleted, and on disk untracked: committed, and there.
 			changes[i].State = Edited
 			continue
-		}
-		if e.code == "D " && r.isFile(e.path) {
-			// Staged as deleted, on disk with no untracked twin: ignored.
-			state = Untracked
 		}
 		changes = append(changes, Change{Path: e.path, State: state})
 	}
@@ -77,8 +80,8 @@ func (r Repo) Changes(ctx context.Context) ([]Change, error) {
 }
 
 // inHead reports whether e's path is in the last commit, as status says:
-// one staged as new, a nested repository, and one untracked with nothing
-// staged as deleted at it aren't.
+// one staged as new, or to be (git add -N), a nested repository, and one
+// untracked with nothing staged as deleted at it aren't.
 func inHead(e entry, entries []entry) bool {
 	switch {
 	case e.nested():
@@ -86,7 +89,13 @@ func inHead(e entry, entries []entry) bool {
 	case e.code == "??":
 		return slices.Contains(entries, entry{code: "D ", path: e.path})
 	}
-	return e.code[0] != 'A'
+	return !strings.Contains(e.code, "A")
+}
+
+// deletedAlone reports whether e is a file staged as deleted with no
+// untracked twin among entries: gone, or on disk and ignored.
+func deletedAlone(e entry, entries []entry) bool {
+	return e.code == "D " && !slices.Contains(entries, entry{code: "??", path: e.path})
 }
 
 // isFile reports whether path, in the repository, is on disk, and no

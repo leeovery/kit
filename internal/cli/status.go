@@ -451,7 +451,7 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 	checks = append(checks,
 		quietened(edits, record, now),
 		steps.Disk(observed), steps.Memory(observed), steps.FileEvents(observed), steps.Load(observed, a.Now),
-		steps.ConfigSync(observed, dirs.Config, a.Now), steps.ConfigPrivate(observed, dirs.Config),
+		steps.ConfigSync(r.repo, a.Now), steps.ConfigPrivate(observed, dirs.Config),
 	)
 	own, err := cfg.List(config.ChecksKind, machine)
 	if err != nil {

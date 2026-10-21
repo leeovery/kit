@@ -320,7 +320,8 @@ func (p *Prefs) Restore(ctx context.Context, opts RestoreOptions) (RestoreReport
 	if err := p.ensureClone(ctx); err != nil {
 		return report, err
 	}
-	_ = p.pull(ctx)
+	// Offline, or refused, the clone's restored from as it is.
+	_ = p.repo().Pull(ctx)
 	store := filepath.Join(p.Clone, report.From)
 	if opts.At != "" {
 		dir, commit, date, cleanup, err := p.snapshot(ctx, report.From, opts.At)

@@ -77,7 +77,7 @@ func TestAppsSettingsChoice(t *testing.T) {
 		}
 	})
 	fake.On("git", "-C", clone, "log", "-1", "--format=%cI", "--", "laptop").Prints("2026-10-04T03:00:00Z\n")
-	fake.On("git", "-C", clone, "pull", "--rebase", "--autostash", "--quiet")
+	fake.On("git", "-C", clone, "remote")
 	fake.On("git", "-C", clone, "rev-parse", "HEAD").Prints("abc123\n")
 	p := prefs.New(fake, t.TempDir(), state, clone, "git@github.com:someone/prefs.git", "laptop", prefs.Lists{}, now)
 	p.Probes, p.AppDirs = nil, []string{t.TempDir()}
@@ -186,7 +186,7 @@ func TestAppsSettingsAppsToOpen(t *testing.T) {
 		fake.On("defaults", "delete", a[1])
 	}
 	configures(fake, clone)
-	fake.On("git", "-C", clone, "pull", "--rebase", "--autostash", "--quiet")
+	fake.On("git", "-C", clone, "remote")
 	fake.On("git", "-C", clone, "rev-parse", "HEAD").Prints("abc123\n")
 	fake.On("git", "-C", clone, "log", "-1", "--format=%cI", "--", "laptop").Prints("2026-10-04T03:00:00Z\n")
 	fake.On("codesign", "-d", "--entitlements", "-", "--xml", apps["com.example.boxed"]).Prints("<key>com.apple.security.app-sandbox</key><true/>")

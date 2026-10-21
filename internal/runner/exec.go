@@ -59,7 +59,7 @@ func (e Exec) Run(ctx context.Context, cmd Command) (Result, error) {
 	}
 	if exit, ok := errors.AsType[*exec.ExitError](err); ok && exit.Exited() {
 		res.ExitCode = exit.ExitCode()
-		exited := &ExitError{Command: cmd.String(), Code: res.ExitCode, Stderr: lastLine(r.stderr)}
+		exited := NewExitError(cmd.String(), res.ExitCode, r.stderr)
 		if errors.Is(err, ErrAnsweredLate) {
 			return res, errors.Join(exited, ErrAnsweredLate)
 		}

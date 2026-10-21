@@ -785,7 +785,7 @@ func resolve(ctx context.Context, h *Homebrew, which string, names []string) (ma
 	found, err := lookUp(ctx, h, which, ask)
 	exit, exited := errors.AsType[*runner.ExitError](err)
 	if exited {
-		if known := withoutUnknown(ask, exit.Stderr); len(known) < len(ask) && len(known) > 0 {
+		if known := withoutUnknown(ask, exit.FullStderr); len(known) < len(ask) && len(known) > 0 {
 			found, err = lookUp(ctx, h, which, known)
 			_, exited = errors.AsType[*runner.ExitError](err)
 		}

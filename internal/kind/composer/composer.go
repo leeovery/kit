@@ -60,7 +60,7 @@ func (c *Composer) global(ctx context.Context, timeout time.Duration, args ...st
 // itself; what they need isn't listed.
 func (c *Composer) Installed(ctx context.Context) ([]kind.Installed, error) {
 	res, err := c.global(ctx, 0, "show", "--direct", "--format=json")
-	if exit, exited := errors.AsType[*runner.ExitError](err); exited && strings.Contains(exit.Stderr+string(res.Stdout), "create a composer.json file") {
+	if exit, exited := errors.AsType[*runner.ExitError](err); exited && strings.Contains(exit.FullStderr+string(res.Stdout), "create a composer.json file") {
 		// No global composer.json yet, as on a new Mac: nothing installed.
 		return nil, nil
 	}

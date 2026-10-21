@@ -15,8 +15,12 @@ import (
 
 const dir = "/Users/someone/.config/kit"
 
-// base is the commit HEAD names in the tests' repositories.
-const base = "0e0bf17a399109574ffb00e33300280a33f81ab7"
+// base is the commit HEAD names in the tests' repositories, and made the
+// commit kit makes onto it.
+const (
+	base = "0e0bf17a399109574ffb00e33300280a33f81ab7"
+	made = "2f8f9a0d6c1b4e5a7d3c2b1a0f9e8d7c6b5a4f3e"
+)
 
 func git(args ...string) []string { return append([]string{"-C", dir}, args...) }
 

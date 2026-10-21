@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -38,10 +39,20 @@ func newWorld(t *testing.T, lists prefs.Lists) *world {
 	for _, kv := range [][2]string{{"user.name", "kit"}, {"user.email", "kit@localhost"}, {"commit.gpgsign", "false"}, {"tag.gpgsign", "false"}, {"core.excludesFile", "/dev/null"}, {"core.hooksPath", "/dev/null"}, {"core.autocrlf", "false"}} {
 		w.fake.On("git", "-C", w.clone, "config", kv[0], kv[1])
 	}
-	w.fake.On("git", "-C", w.clone, "pull", "--rebase", "--autostash", "--quiet")
+	w.pulls()
 	w.fake.On("ioreg", "-rd1", "-c", "IOPlatformExpertDevice").Prints(`  "IOPlatformUUID" = "HW-THIS"` + "\n")
 	w.fake.On("sysctl", "-n", "hw.model").Prints("Mac99,1\n")
 	return w
+}
+
+// pulls scripts a pull of the store's, as real git answers, its remote
+// with nothing new, and nothing changed in the clone.
+func (w *world) pulls() {
+	w.fake.On("git", "-C", w.clone, "remote").Prints("origin\n")
+	w.fake.On("git", "-C", w.clone, "rev-parse", "--absolute-git-dir").Prints(filepath.Join(w.clone, ".git") + "\n")
+	w.fake.On("git", "-C", w.clone, "--literal-pathspecs", "status", "--porcelain", "-z", "--untracked-files=all", "--no-renames", "--")
+	w.fake.On("git", "-C", w.clone, "fetch", "--quiet")
+	w.fake.On("git", "-C", w.clone, "rev-list", "--count", "HEAD..@{u}").Prints("0\n")
 }
 
 // pushes scripts the commit of the Mac's folder with message, git's
@@ -60,7 +71,6 @@ func (w *world) pushes(t *testing.T, message, status string, update []string, st
 			return "", nil
 		}
 	}
-	const head = "0e0bf17a399109574ffb00e33300280a33f81ab7"
 	gitDir := filepath.Join(w.clone, ".git")
 	w.fake.On("git", "-C", w.clone, "--literal-pathspecs", "status", "--porcelain", "-z", "--untracked-files=all", "--no-renames", "--", "laptop").Prints(status)
 	w.fake.On("git", "-C", w.clone, "rev-parse", "--absolute-git-dir").Prints(gitDir + "\n")
@@ -69,18 +79,23 @@ func (w *world) pushes(t *testing.T, message, status string, update []string, st
 	w.fake.On("git", "-C", w.clone, "update-index", "--add", "--remove", "--replace", "-z", "--stdin").Filters(reads(strings.Join(update, "\x00") + "\x00"))
 	w.fake.On("git", "-C", w.clone, "diff", "--cached", "--name-only", "-z", "--no-renames").Prints(staged)
 	w.fake.On("git", "-C", w.clone, "commit", "--quiet", "-m", message)
-	w.fake.On("git", "-C", w.clone, "rev-parse", "--verify", "--quiet", "HEAD^").Prints(head + "\n")
+	w.fake.On("git", "-C", w.clone, "rev-list", "--first-parent", "--parents", head+"..HEAD").Prints(made + " " + head + "\n")
+	w.fake.On("git", "-C", w.clone, "diff", "--cached", "--quiet", made)
 	w.fake.On("git", "-C", w.clone, "--literal-pathspecs", "reset", "--quiet", "--pathspec-from-file=-", "--pathspec-file-nul").Filters(reads(staged)).Does(func() {
 		w.write(t, filepath.Join(gitDir, "kit-index.next"), "the index, as committed")
 	})
 	w.fake.On("git", "-C", w.clone, "remote", "get-url", "origin").Prints(remote + "\n")
 	w.fake.On("gh", "repo", "view", "someone/prefs", "--json", "visibility", "--jq", ".visibility").Prints("PRIVATE\n")
-	w.fake.On("git", "-C", w.clone, "remote").Prints("origin\n")
-	w.fake.On("git", "-C", w.clone, "--literal-pathspecs", "status", "--porcelain", "-z", "--untracked-files=all", "--no-renames", "--")
-	w.fake.On("git", "-C", w.clone, "fetch", "--quiet")
-	w.fake.On("git", "-C", w.clone, "rev-list", "--count", "HEAD..@{u}").Prints("0\n")
+	w.pulls()
 	w.fake.On("git", "-C", w.clone, "push", "--quiet")
 }
+
+// head is the commit HEAD names in the store's clone, and made the commit
+// a capture makes onto it.
+const (
+	head = "0e0bf17a399109574ffb00e33300280a33f81ab7"
+	made = "2f8f9a0d6c1b4e5a7d3c2b1a0f9e8d7c6b5a4f3e"
+)
 
 func (w *world) write(t *testing.T, path, text string) {
 	t.Helper()
@@ -271,6 +286,22 @@ func TestCaptureRefuses(t *testing.T) {
 			}
 		}
 	})
+	t.Run("into a folder another Mac took over, as the pull brings in", func(t *testing.T) {
+		w := newWorld(t, prefs.Lists{})
+		writeRecord(t, w.state, `{"on": "restored from laptop"}`)
+		w.write(t, filepath.Join(w.clone, "laptop", "owner"), "hardware HW-THIS\nmodel Mac99,1\nsince 2026-09-28 17:00\n")
+		w.fake.On("git", "-C", w.clone, "rev-list", "--count", "HEAD..@{u}").Prints("1\n")
+		w.fake.On("git", "-C", w.clone, "diff", "--name-only", "-z", "--no-renames", "HEAD...@{u}").Prints("laptop/owner\x00")
+		w.fake.On("git", "-C", w.clone, "config", "--get", "--type=bool", "core.ignorecase").Prints("true\n")
+		w.fake.On("git", "-C", w.clone, "ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory")
+		w.fake.On("git", "-C", w.clone, "rebase", "--no-fork-point", "--quiet").Does(func() {
+			w.write(t, filepath.Join(w.clone, "laptop", "owner"), "hardware HW-NEW\nmodel Mac100,1\nsince 2026-10-05 09:00\n")
+		})
+		var notOwner prefs.NotOwnerError
+		if _, err := w.p.Capture(t.Context()); !asNotOwner(err, &notOwner) || notOwner.Owner.Hardware != "HW-NEW" {
+			t.Errorf("Capture() = %v, want it refused, the folder the new Mac's", err)
+		}
+	})
 }
 
 func asNotOwner(err error, into *prefs.NotOwnerError) bool {
@@ -282,13 +313,27 @@ func asNotOwner(err error, into *prefs.NotOwnerError) bool {
 }
 
 // A capture whose commit failed pushes nothing: refused while git's part
-// way through a merge in the clone, which pushing would set aside, or gone
-// onto another git's commit, which it may undo. The record says why.
+// way through a merge in the clone, which pulling or pushing would set
+// aside, so nothing's brought in either; or gone onto another git's
+// commit, which it may undo. The record says why. A commit held back so
+// holds back the next capture's push too, with nothing to commit, and its
+// pull, while it's in the branch.
 func TestCaptureHoldsBackThePushWhenTheCommitFailed(t *testing.T) {
-	const message = "Capture 2026-10-06 03:00: 1 new\n\nnew: com.example.app\nclaimed: the folder, for this Mac's hardware"
+	const (
+		message = "Capture 2026-10-06 03:00: 1 new\n\nnew: com.example.app\nclaimed: the folder, for this Mac's hardware"
+		moved   = "154906a47f12246099602d1bee6b1c558d3409c9"
+	)
+	pushed := func(calls []string, name string, fetches bool) {
+		t.Helper()
+		for _, call := range calls {
+			if strings.Contains(call, " push --quiet") || strings.Contains(call, " stash ") || !fetches && strings.Contains(call, " fetch --quiet") {
+				t.Errorf("%s: ran %s, want nothing pushed or set aside", name, call)
+			}
+		}
+	}
 	for _, c := range []struct{ name, want string }{
 		{"a merge under way", "not pushed: a merge is under way in the repository (MERGE_HEAD)"},
-		{"HEAD moved", "not pushed: HEAD moved while kit committed"},
+		{"HEAD moved", "not pushed: HEAD moved while kit committed: its commit went onto " + moved},
 	} {
 		w := newWorld(t, prefs.Lists{})
 		writeRecord(t, w.state, `{"on": "started fresh"}`)
@@ -298,23 +343,42 @@ func TestCaptureHoldsBackThePushWhenTheCommitFailed(t *testing.T) {
 			"?? laptop/.gitignore\x00?? laptop/domains/com.example.app.plist\x00?? laptop/owner\x00",
 			[]string{"laptop/.gitignore", "laptop/domains/com.example.app.plist", "laptop/owner"},
 			"laptop/.gitignore\x00laptop/domains/com.example.app.plist\x00laptop/owner\x00")
+		var committed atomic.Bool
 		if c.name == "a merge under way" {
-			w.write(t, filepath.Join(w.clone, ".git", "MERGE_HEAD"), "0e0bf17a399109574ffb00e33300280a33f81ab7\n")
+			w.write(t, filepath.Join(w.clone, ".git", "MERGE_HEAD"), head+"\n")
 		} else {
-			w.fake.On("git", "-C", w.clone, "rev-parse", "--verify", "--quiet", "HEAD^").Prints("154906a47f12246099602d1bee6b1c558d3409c9\n")
+			w.fake.On("git", "-C", w.clone, "commit", "--quiet", "-m", message).Does(func() { committed.Store(true) })
+			w.fake.On("git", "-C", w.clone, "rev-parse", "--verify", "--quiet", "HEAD").Filters(func(string) (string, error) {
+				if committed.Load() {
+					return made + "\n", nil
+				}
+				return head + "\n", nil
+			})
+			w.fake.On("git", "-C", w.clone, "rev-list", "--first-parent", "--parents", head+"..HEAD").Prints(made + " " + moved + "\n")
+			w.fake.On("git", "-C", w.clone, "rev-parse", "--verify", "--quiet", "HEAD^").Prints(moved + "\n")
 		}
 		report, err := w.p.Capture(t.Context())
 		if err != nil || !strings.HasPrefix(report.PushError, c.want) {
 			t.Errorf("%s: Capture() = %+v, %v; want %q", c.name, report, err, c.want)
 		}
-		for _, call := range w.fake.Calls() {
-			if strings.Contains(call, " push --quiet") || strings.Contains(call, " fetch --quiet") || strings.Contains(call, " stash ") {
-				t.Errorf("%s: ran %s, want nothing pushed or set aside", c.name, call)
-			}
-		}
+		pushed(w.fake.Calls(), c.name, c.name == "HEAD moved")
 		if rec, _ := w.p.Load(); rec.Unpushed.IsZero() || !strings.HasPrefix(rec.PushError, c.want) {
 			t.Errorf("%s: record = %+v, want the push held back, and why", c.name, rec)
 		}
+		if c.name != "HEAD moved" {
+			continue
+		}
+
+		// The next capture, nothing changed, the clone's git folder as the
+		// first left it.
+		ran := len(w.fake.Calls())
+		w.fake.On("git", "-C", w.clone, "--literal-pathspecs", "status", "--porcelain", "-z", "--untracked-files=all", "--no-renames", "--", "laptop")
+		w.fake.On("git", "-C", w.clone, "merge-base", "--is-ancestor", made, "HEAD")
+		report, err = w.p.Capture(t.Context())
+		if err != nil || !strings.HasPrefix(report.PushError, "kit's commit "+made+" went onto another commit than it was made from") {
+			t.Errorf("the next capture = %+v, %v; want its push held back", report, err)
+		}
+		pushed(w.fake.Calls()[ran:], "the next capture", false)
 	}
 }
 

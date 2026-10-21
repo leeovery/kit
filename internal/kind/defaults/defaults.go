@@ -45,8 +45,8 @@ type record struct {
 	// Exact are the watched settings whose baseline kit knows it read
 	// exactly, a string's outer spaces and a key's kept, by name: each it
 	// took, or found the same; none in a record from before it read them
-	// so.
-	Exact map[string]bool `json:"exact,omitempty"`
+	// so. Not under "exact", a bool in an earlier build's record.
+	Exact map[string]bool `json:"exact_settings,omitempty"`
 }
 
 // take makes v the baseline of the watched setting name, read exactly.

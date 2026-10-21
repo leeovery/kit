@@ -190,7 +190,7 @@ func TestTheHourlyPassOpensNoApp(t *testing.T) {
 	for _, kv := range [][2]string{{"user.name", "kit"}, {"user.email", "kit@localhost"}, {"commit.gpgsign", "false"}, {"tag.gpgsign", "false"}, {"core.excludesFile", "/dev/null"}, {"core.hooksPath", "/dev/null"}, {"core.autocrlf", "false"}} {
 		w.fake.On("git", "-C", clone, "config", kv[0], kv[1])
 	}
-	w.fake.On("git", "-C", clone, "pull", "--rebase", "--autostash", "--quiet")
+	w.fake.On("git", "-C", clone, "remote")
 	w.fake.On("git", "-C", clone, "rev-parse", "HEAD").Prints("abc123\n")
 	w.fake.On("osascript", "-e", `application id "com.example.boxed" is running`).Prints("false\n")
 	w.fake.On("codesign", "-d", "--entitlements", "-", "--xml", app).Prints("<key>com.apple.security.app-sandbox</key><true/>")

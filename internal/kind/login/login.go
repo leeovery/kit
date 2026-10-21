@@ -180,9 +180,9 @@ func (l *Login) osascript(ctx context.Context, args []string) (runner.Result, er
 		switch {
 		case !exited:
 			return res, err
-		case strings.Contains(exit.Stderr, "(-1743)") || strings.Contains(exit.Stderr, "Not authorized"):
+		case strings.Contains(exit.FullStderr, "(-1743)") || strings.Contains(exit.FullStderr, "Not authorized"):
 			return res, notAllowed
-		case !strings.Contains(exit.Stderr, "(-1712)"):
+		case !strings.Contains(exit.FullStderr, "(-1712)"):
 			return res, err
 		case !asked || ctx.Err() != nil:
 			return res, notAllowed

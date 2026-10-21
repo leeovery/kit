@@ -218,7 +218,8 @@ func TestNoiseKitTookBeforeKnowingItIsForgotten(t *testing.T) {
 }
 
 // A value kit took before it read a string's outer spaces and a key's
-// exactly, unmarked in its record, is unchanged while it reads the same
+// exactly, unmarked in its record (an earlier build's, holding "exact" as
+// a bool, read all the same), is unchanged while it reads the same
 // that way, compared as XML, and is taken again as it is: once, the
 // baseline then marked exact. Any other change shows, as every change does
 // to a baseline marked: a number or a boolean changed, even by a little or
@@ -247,11 +248,18 @@ func TestAValueTakenTrimmedIsTakenAgainExactly(t *testing.T) {
 			for range 20 {
 				m := newMac(t)
 				list := m.declare()
-				record, err := json.Marshal(map[string]any{"domains": map[string]bool{"NSGlobalDomain": true}, "baseline": map[string]string{"NSGlobalDomain:K": c.was}, "exact": map[string]bool{"NSGlobalDomain:K": marked}})
+				record := map[string]any{"domains": map[string]bool{"NSGlobalDomain": true}, "baseline": map[string]string{"NSGlobalDomain:K": c.was}}
+				if marked {
+					record["exact_settings"] = map[string]bool{"NSGlobalDomain:K": true}
+				} else {
+					// As an earlier build wrote it, which marks nothing.
+					record["exact"] = true
+				}
+				data, err := json.Marshal(record)
 				if err != nil {
 					t.Fatal(err)
 				}
-				if err := os.WriteFile(filepath.Join(m.state, "settings.json"), record, 0o600); err != nil {
+				if err := os.WriteFile(filepath.Join(m.state, "settings.json"), data, 0o600); err != nil {
 					t.Fatal(err)
 				}
 				m.set("NSGlobalDomain", "<key>K</key>"+c.now)
@@ -279,7 +287,7 @@ func TestAValueTakenTrimmedIsTakenAgainExactly(t *testing.T) {
 // record is kit's record of the watched settings' baselines.
 func (m *mac) record() (rec struct {
 	Baseline map[string]string
-	Exact    map[string]bool `json:"exact"`
+	Exact    map[string]bool `json:"exact_settings"`
 },
 ) {
 	m.t.Helper()

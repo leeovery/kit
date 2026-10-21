@@ -139,16 +139,21 @@ func TestTheStepsByHandAreListed(t *testing.T) {
 	}
 }
 
-// events notes the events a step emits.
+// events notes the events a step emits, each then given to on, when set,
+// as the step emits it.
 type events struct {
 	mu   sync.Mutex
 	seen []event.Event
+	on   func(event.Event)
 }
 
 func (e *events) Emit(ev event.Event) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
 	e.seen = append(e.seen, ev)
+	e.mu.Unlock()
+	if e.on != nil {
+		e.on(ev)
+	}
 }
 
 // notices notes the notifications posted and taken away: a clear in a
@@ -520,11 +525,14 @@ func over(t *testing.T, ran <-chan engine.Report) engine.Report {
 // and which comes back once that's done. Tab moves on from the card up to
 // the next waiting, the one left staying to do and coming back. Each card's
 // notification is posted each time it comes up, and taken away each time
-// it goes down, set aside or done, so only the card up has one.
+// it goes down, set aside or done, so only the card up has one: the
+// store's taken away and posted again though its card's set aside and back
+// before its step looks, held opening its app meanwhile.
 func TestCardsComeUpByWhatWaitsOnThem(t *testing.T) {
 	c := newCard(t)
-	gate := make(chan struct{})
-	store := steps.OwnManual(c.fake, c.state, steps.ManualStep{Name: "store", Do: "Sign in to the store"}, c.raise)
+	gate, opened := make(chan struct{}), make(chan struct{})
+	c.fake.On("open", "-b", "com.example.store").Does(func() { <-opened })
+	store := steps.OwnManual(c.fake, c.state, steps.ManualStep{Name: "store", Do: "Sign in to the store", Open: "com.example.store"}, c.raise)
 	store.Before = []string{"apps"}
 	vault := steps.OwnManual(c.fake, c.state, steps.ManualStep{Name: "vault", Do: "Sign in to the vault"}, c.raise)
 	vault.After, vault.Before = []string{"cask"}, []string{"secret"}
@@ -539,6 +547,8 @@ func TestCardsComeUpByWhatWaitsOnThem(t *testing.T) {
 	close(gate)
 	c.cards(t, 2)
 	c.answer(t, "vault", hand.Next)
+	c.turnsSeen(t, 6)
+	close(opened)
 	c.cards(t, 3)
 	c.answer(t, "store", hand.Done)
 	c.cards(t, 4)
@@ -584,6 +594,18 @@ func (c *card) upNow(t *testing.T, item string) {
 		time.Sleep(time.Millisecond)
 	}
 	t.Fatalf("%s's card never went up", item)
+}
+
+// turnsSeen waits till n turns have been taken, as turns has them.
+func (c *card) turnsSeen(t *testing.T, n int) {
+	t.Helper()
+	for range 5000 {
+		if len(c.turns()) >= n {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("%d turns never taken: %q", n, c.turns())
 }
 
 // ups are the cards that went up, by item, in order, one put up again
@@ -818,23 +840,27 @@ func TestAStopAsTheToDoIsDone(t *testing.T) {
 }
 
 // A Stop given between two to-dos, once the first's Done is taken and the
-// list has moved on to the next, stops there: the first kept as done, the
-// next left to do.
+// list has moved on to the next, before its card goes up, stops there: the
+// first kept as done, the next left to do, its card never up.
 func TestAStopBetweenToDos(t *testing.T) {
 	defer steps.SetManualPoll(time.Hour)()
-	for range 20 {
-		c := newCard(t)
-		applied := applying(t, steps.Manual(c.fake, "/home/someone", c.state, printerAndScanner, c.raise))
-		c.upNow(t, "manual:printer")
-		c.answer(t, steps.ManualName, hand.Done)
-		c.toDoUp(t, 1)
-		c.answer(t, steps.ManualName, hand.Stop)
-		if err := ended(t, applied); err != nil {
-			t.Fatal(err)
+	c := newCard(t)
+	c.sink.on = func(ev event.Event) {
+		if todos, ok := ev.(event.ToDos); ok && todos.Up == 1 && !c.desk.Answer(steps.ManualName, hand.Stop) {
+			t.Error("the Stop between the to-dos wasn't taken")
 		}
-		if todos := c.lastToDos(); !todos[0].Done || todos[1].Done {
-			t.Fatalf("the to-dos ended %+v, want the printer's done, the scanner's left", todos)
-		}
+	}
+	applied := applying(t, steps.Manual(c.fake, "/home/someone", c.state, printerAndScanner, c.raise))
+	c.upNow(t, "manual:printer")
+	c.answer(t, steps.ManualName, hand.Done)
+	if err := ended(t, applied); err != nil {
+		t.Fatal(err)
+	}
+	if todos := c.lastToDos(); !todos[0].Done || todos[1].Done {
+		t.Errorf("the to-dos ended %+v, want the printer's done, the scanner's left", todos)
+	}
+	if ups := c.ups(); !slices.Equal(ups, []string{"manual:printer"}) {
+		t.Errorf("cards up = %q, want the printer's alone: the scanner's never", ups)
 	}
 }
 
@@ -864,25 +890,6 @@ var printerAndScanner = config.List{Entries: []config.Entry{
 	{Name: "printer", Value: `"Add the printer"`, Scope: "laptop", Line: 2},
 	{Name: "scanner", Value: `"Add the scanner"`, Scope: "laptop", Line: 3},
 }}
-
-// toDoUp waits till the run's to-dos have moved on to the one at i, as
-// their events say.
-func (c *card) toDoUp(t *testing.T, i int) {
-	t.Helper()
-	for range 5000 {
-		c.sink.mu.Lock()
-		up := slices.ContainsFunc(c.sink.seen, func(e event.Event) bool {
-			td, ok := e.(event.ToDos)
-			return ok && td.Up == i
-		})
-		c.sink.mu.Unlock()
-		if up {
-			return
-		}
-		time.Sleep(time.Millisecond)
-	}
-	t.Fatalf("the to-dos never moved on to %d", i)
-}
 
 // The run stopped while a card's up, the card waiting behind it never goes
 // up.

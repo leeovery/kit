@@ -362,8 +362,10 @@ func (p *Prefs) Capture(ctx context.Context) (Report, error) {
 		return report, err
 	}
 	// Pulled first, so a folder another Mac has taken over is seen as its.
-	// Offline, capture carries on, its commit waiting to be pushed.
-	_ = p.pull(ctx)
+	// Offline, or refused, capture carries on, its commit waiting to be
+	// pushed, and the push saying why not.
+	repo := p.repo()
+	_ = repo.Pull(ctx)
 	store := filepath.Join(p.Clone, p.Mac)
 	owner, owned, err := readOwner(store)
 	if err != nil {
@@ -374,7 +376,6 @@ func (p *Prefs) Capture(ctx context.Context) (Report, error) {
 		_ = p.update(func(r *Record) { r.NotOwner = refused.Error() })
 		return report, refused
 	}
-	repo := gitrepo.Repo{Dir: p.Clone, Run: p.Run, Sleep: p.Sleep}
 	if !owned {
 		if err := p.claim(ctx, store, hardware); err != nil {
 			return report, err

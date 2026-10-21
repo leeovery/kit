@@ -163,7 +163,7 @@ func settings(ctx context.Context, run runner.Runner) (map[string]any, error) {
 // this covers a defaults that refuses instead, as defaults read does.
 func absent(err error) bool {
 	exit, ok := errors.AsType[*runner.ExitError](err)
-	return ok && strings.Contains(exit.Stderr, "does not exist")
+	return ok && strings.Contains(exit.FullStderr, "does not exist")
 }
 
 // output runs a command, returning what it printed.

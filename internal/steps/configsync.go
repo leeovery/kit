@@ -10,7 +10,6 @@ import (
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/gitrepo"
-	"github.com/leeovery/kit/internal/runner"
 )
 
 // syncWithin is how long a commit may wait unpushed: kit pushes its own
@@ -21,15 +20,16 @@ const syncWithin = time.Hour
 // is pushed.
 const ConfigSyncName = "config-sync"
 
-// ConfigSync checks the config repository in dir has no commit unpushed for
-// over an hour. Edits not committed are drift (ConfigEdits), not a problem.
-func ConfigSync(run runner.Runner, dir string, now func() time.Time) engine.Step {
+// ConfigSync checks the config repository has no commit unpushed for over
+// an hour, nor any kit holds back, saying why (gitrepo's Holding). Edits
+// not committed are drift (ConfigEdits), not a problem.
+func ConfigSync(repo gitrepo.Repo, now func() time.Time) engine.Step {
 	return engine.Step{
 		Name: ConfigSyncName, Title: "Sync", Area: AreaConfig,
 		Check: func(ctx context.Context) check.Result {
 			// What's committed and not pushed, oldest first: none when
 			// there's no upstream to push to.
-			unpushed, err := output(ctx, run, "git", "-C", dir, "log", "@{u}..HEAD", "--format=%ct")
+			unpushed, err := output(ctx, repo.Run, "git", "-C", repo.Dir, "log", "@{u}..HEAD", "--format=%ct")
 			if err != nil {
 				return check.Result{State: check.OK, Summary: "nothing to push to", Glance: "nothing to push to"}
 			}
@@ -42,8 +42,15 @@ func ConfigSync(run runner.Runner, dir string, now func() time.Time) engine.Step
 				}
 				count++
 			}
-			if count > 0 && now().Sub(time.Unix(oldest, 0)) > syncWithin {
-				return problem("config-sync", "commits waiting", [3]string{"unpushed", fmt.Sprintf("%d commits not pushed, the oldest over an hour old", count), "push them: git -C " + dir + " push (kit rebases onto the remote first when it pushes)"})
+			if count == 0 {
+				return check.Result{State: check.OK, Summary: "pushed", Glance: "pushed"}
+			}
+			waiting := fmt.Sprintf("%d %s not pushed", count, plural(count, "commit", "commits"))
+			if held := repo.Holding(ctx); held != nil {
+				return problem(ConfigSyncName, "pushes held back", [3]string{"held", waiting, held.Error()})
+			}
+			if now().Sub(time.Unix(oldest, 0)) > syncWithin {
+				return problem(ConfigSyncName, "commits waiting", [3]string{"unpushed", waiting + ", the oldest over an hour old", "push them: git -C " + repo.Dir + " push (kit rebases onto the remote first when it pushes)"})
 			}
 			return check.Result{State: check.OK, Summary: "pushed", Glance: "pushed"}
 		},

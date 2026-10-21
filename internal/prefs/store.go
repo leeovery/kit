@@ -61,15 +61,10 @@ func (p *Prefs) ensureClone(ctx context.Context) error {
 	return nil
 }
 
-// pull brings in what other Macs pushed, rebasing this Mac's commits onto
-// it; a rebase that stops is undone. Offline, it fails, and capture carries
-// on, its commit waiting to be pushed.
-func (p *Prefs) pull(ctx context.Context) error {
-	if _, err := p.git(ctx, "pull", "--rebase", "--autostash", "--quiet"); err != nil {
-		_, _ = p.git(ctx, "rebase", "--abort")
-		return err
-	}
-	return nil
+// repo is the store's clone, as git drives it: pulled, committed and
+// pushed as kit-config is.
+func (p *Prefs) repo() gitrepo.Repo {
+	return gitrepo.Repo{Dir: p.Clone, Run: p.Run, Sleep: p.Sleep}
 }
 
 // push sends the store's commits to its remote, only when that's private
