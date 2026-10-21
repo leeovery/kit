@@ -101,7 +101,7 @@ programs. Ever.
   - writes into the home directory, but Go's caches, and into kit's real config and state
     directories, wherever the environment puts them;
   - writes into the directories on `PATH` outside the home, such as `/opt/homebrew/bin`;
-  - running the real brew, mas, gh, op, git, ssh, claude, composer, Node (so npm), Arq's arqc,
+  - running the real brew, mas, gh, op, git, ssh, ssh-keygen, claude, composer, Node (so npm), Arq's arqc,
     asimov, prefsync, defaults, tmutil, sudo, launchctl, osascript, open and tmux (Go builds
     the tests, so it's stubbed, not denied).
 - **It unsets the variables testguard clears** before anything starts, as testguard clears them

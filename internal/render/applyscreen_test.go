@@ -582,7 +582,7 @@ func TestApplyingBarIsWeighted(t *testing.T) {
 	}
 }
 
-// There's no later during the run (Lee, 16 Oct): what's left to do waits
+// There's no later during the run (the maintainer, 16 Oct): what's left to do waits
 // for its end, counted neither in the state line nor listed on the left.
 func TestApplyingHasNoLater(t *testing.T) {
 	face, out, _ := applyAt(160, 64, time.Minute, sixMinutesIn())

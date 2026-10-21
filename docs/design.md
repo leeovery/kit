@@ -557,7 +557,7 @@ kit step add <name> "<what it does>"; kit step remove <name>...  Steps of your o
 kit version                  As --version
 ```
 
-The command shape (Lee, 6 Oct): a command about one kind of thing names it first, then what to
+The command shape (the maintainer, 6 Oct): a command about one kind of thing names it first, then what to
 do, as in `kit brew add`, `kit secret sync`, `kit manual done`; one about the whole Mac is a verb
 alone (`status`, `apply`, `reconcile`, `nightly`, `list`, `why`, `log`, `machine`), a kind named
 after it a filter. Each thing's help shows only its own flags and verbs. The help lists the

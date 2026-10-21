@@ -21,7 +21,7 @@ import (
 
 // BootFace is the boot's face at a terminal, before the hand-off (kit-look,
 // rule 22): the self-test played out, then the boot's areas in turn, drawn
-// in place under it, each shown once the one before is done (Lee, 9 Oct:
+// in place under it, each shown once the one before is done (the maintainer, 9 Oct:
 // "reveal what needs to be revealed at the point that it's needed"). An
 // area before the last says what it's for till its step is done, as
 // signing in does; the last is the boot order, a row a step. What a step

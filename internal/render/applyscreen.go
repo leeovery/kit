@@ -248,7 +248,7 @@ func (p *Pretty) howFar() float64 {
 
 // stateLine says how the run stands, always whether it needs you: working,
 // or waiting for you, and what for; then what failed. What's left to do
-// waits for the run's end: there's no later during it (Lee, 16 Oct). Its
+// waits for the run's end: there's no later during it (the maintainer, 16 Oct). Its
 // to-dos up, how many are left, and done; once they're over, that kit's
 // carrying on.
 func (p *Pretty) stateLine() string {
