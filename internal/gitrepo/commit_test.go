@@ -1,12 +1,14 @@
 package gitrepo_test
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -690,20 +692,28 @@ func TestCommitOnceAnotherGitLetsGo(t *testing.T) {
 // can't rename, stops the commit before HEAD moves, nothing committed, the
 // user's index as it was, no mark left, kit-index.mark swept. A folder in
 // the way of a file of kit's own, there or kit-index.next, which no sweep
-// takes, is named, with what to do.
+// takes, is named, with what to do. The git folder synced after the rename,
+// so the mark's on the disk, a sync that fails stops the commit too, the
+// mark in place removed.
 func TestCommitMovesHEADOnlyOnceItsMarkIsWhole(t *testing.T) {
 	for _, c := range []struct {
 		// inTheWay is the file a folder's in the way of, holding a file, so
-		// no sweep takes it.
-		name, inTheWay string
+		// no sweep takes it, none when ""; says what the error says, as
+		// inTheWay's when "".
+		name, inTheWay, says string
+		// synced is what syncing the git folder does: nil as it does.
+		synced error
 	}{
 		{name: "kit-index.mark in the way", inTheWay: "kit-index.mark"},
 		{name: "kit-mark in the way", inTheWay: "kit-mark"},
 		{name: "kit-index.next in the way", inTheWay: "kit-index.next"},
+		{name: "the git folder's sync failing", synced: syscall.EIO, says: "input/output error"},
 	} {
 		gitDir := gitFolder(t, false)
-		if err := os.MkdirAll(filepath.Join(gitDir, c.inTheWay, "in the way"), 0o700); err != nil {
-			t.Fatal(err)
+		if c.inTheWay != "" {
+			if err := os.MkdirAll(filepath.Join(gitDir, c.inTheWay, "in the way"), 0o700); err != nil {
+				t.Fatal(err)
+			}
 		}
 		fake := runnertest.New(t)
 		s := editing(fake, gitDir, base)
@@ -717,13 +727,45 @@ func TestCommitMovesHEADOnlyOnceItsMarkIsWhole(t *testing.T) {
 				_ = os.WriteFile(filepath.Join(gitDir, nextIndex), []byte(resetEntries), 0o600)
 			})
 		}
-		committed, err := didCommit(gitrepo.Repo{Dir: dir, Run: fake}.Commit(context.Background(), "kit test", "brew"))
-		says := "a folder is in the way of kit's own file " + filepath.Join(gitDir, c.inTheWay) + ": remove it, then try again"
+		repo := gitrepo.WithFsync(gitrepo.Repo{Dir: dir, Run: fake}, func(f *os.File) error {
+			if f.Name() != gitDir {
+				t.Errorf("%s: synced %s; want the git folder", c.name, f.Name())
+			}
+			return c.synced
+		})
+		committed, err := didCommit(repo.Commit(context.Background(), "kit test", "brew"))
+		says := cmp.Or(c.says, "a folder is in the way of kit's own file "+filepath.Join(gitDir, c.inTheWay)+": remove it, then try again")
 		if committed || err == nil || !strings.Contains(err.Error(), says) {
 			t.Errorf("%s: Commit() = %v, %v; want nothing committed, saying %q", c.name, committed, err, says)
 		}
 		checkCalls(t, c.name, fake, gitDir, s.want)
-		checkGitFolder(t, c.name, gitDir, usersEntries, c.inTheWay)
+		var left []string
+		if c.inTheWay != "" {
+			left = append(left, c.inTheWay)
+		}
+		checkGitFolder(t, c.name, gitDir, usersEntries, left...)
+	}
+}
+
+// A filesystem that can't sync a folder (ENOTSUP, EINVAL) has kit's mark on
+// the disk as far as it can, and the commit goes on.
+func TestCommitWhereTheGitFolderCantBeSynced(t *testing.T) {
+	for _, cant := range []error{syscall.ENOTSUP, syscall.EINVAL} {
+		gitDir := gitFolder(t, false)
+		fake := runnertest.New(t)
+		want := anEdit.script(t, fake, gitDir)
+		syncs := 0
+		repo := gitrepo.WithFsync(gitrepo.Repo{Dir: dir, Run: fake}, func(*os.File) error {
+			syncs++
+			return cant
+		})
+		committed, err := didCommit(repo.Commit(context.Background(), "kit test", anEdit.paths...))
+		anEdit.check(t, committed, err)
+		checkCalls(t, cant.Error(), fake, gitDir, want)
+		anEdit.checkFolder(t, gitDir)
+		if syncs != 1 {
+			t.Errorf("%v: the git folder synced %d times; want once, after the mark's rename", cant, syncs)
+		}
 	}
 }
 

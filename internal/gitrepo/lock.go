@@ -137,6 +137,9 @@ type indexLock struct {
 	done   bool
 	// unlocked, when set, is called as kit lets go.
 	unlocked func()
+	// fsync, when set, syncs a file to the disk in (*os.File).Sync's
+	// place.
+	fsync func(*os.File) error
 }
 
 // lockIndex takes git's lock on the index, trying for a while if another
@@ -168,7 +171,7 @@ func (r Repo) lockIndex(ctx context.Context, gitDir string) (*indexLock, error) 
 		_ = os.Remove(path)
 		return nil, fmt.Errorf("couldn't lock git's index: %w", err)
 	}
-	l := &indexLock{gitDir: gitDir, f: f, made: made, unlocked: r.onUnlock}
+	l := &indexLock{gitDir: gitDir, f: f, made: made, unlocked: r.onUnlock, fsync: r.fsync}
 	l.sweep()
 	return l, nil
 }
@@ -328,7 +331,9 @@ func (l *indexLock) fill(next string, mode fs.FileMode) error {
 // commit takes (read), for a run that finds it left should this one stop
 // (recover), once it's sure it still holds its lock on committing, so no
 // other kit reads it meanwhile: none without that lock. It's written whole
-// or not at all (writeWhole).
+// or not at all (writeWhole), then the git folder synced (syncFolder), so
+// it's on the disk; the mark, once in place, is this run's to remove,
+// should the sync fail.
 func (l *indexLock) mark(base, made string, read map[string]string) error {
 	switch {
 	case l.commits == nil:
@@ -341,14 +346,32 @@ func (l *indexLock) mark(base, made string, read map[string]string) error {
 		return err
 	}
 	l.marked = true
+	return l.syncFolder()
+}
+
+// syncFolder syncs the git folder to the disk, so a rename in it is on the
+// disk too; on a filesystem that can't sync a folder (ENOTSUP, EINVAL), as
+// far as it can.
+func (l *indexLock) syncFolder() error {
+	dir, err := os.Open(l.gitDir)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = dir.Close() }()
+	sync := (*os.File).Sync
+	if l.fsync != nil {
+		sync = l.fsync
+	}
+	if err := sync(dir); err != nil && !errors.Is(err, syscall.ENOTSUP) && !errors.Is(err, syscall.EINVAL) {
+		return err
+	}
 	return nil
 }
 
 // writeWhole writes data to the file at path in one step, so a stop or a
 // power loss leaves it whole or not there: into the file at next first,
-// synced to the disk, then renamed over it, its folder synced after, so the
-// rename is on the disk too. A next a failure leaves is one of kit's own
-// files, which the sweep takes.
+// synced to the disk, then renamed over it. A next a failure leaves is one
+// of kit's own files, which the sweep takes.
 func writeWhole(path, next, data string) error {
 	f, err := os.OpenFile(next, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
@@ -364,15 +387,7 @@ func writeWhole(path, next, data string) error {
 	if err == nil {
 		err = inTheWay(path, os.Rename(next, path))
 	}
-	if err != nil {
-		return err
-	}
-	dir, err := os.Open(filepath.Dir(path))
-	if err != nil {
-		return err
-	}
-	defer func() { _ = dir.Close() }()
-	return dir.Sync()
+	return err
 }
 
 // inTheWay is err, kit failing to write its own file at path, saying so

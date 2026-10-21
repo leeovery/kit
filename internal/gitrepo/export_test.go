@@ -1,6 +1,10 @@
 package gitrepo
 
-import "golang.org/x/sys/unix"
+import (
+	"os"
+
+	"golang.org/x/sys/unix"
+)
 
 // OnUnlock is r calling f as soon as a commit lets go of git's index, for a
 // test to be the next git to take it.
@@ -20,6 +24,13 @@ func WithFlock(r Repo, f func(fd int) error) Repo {
 // in unix.Statfs's place, for a test to say what holds it.
 func WithStatfs(r Repo, f func(path string, fs *unix.Statfs_t) error) Repo {
 	r.statfs = f
+	return r
+}
+
+// WithFsync is r syncing a file to the disk with f, in (*os.File).Sync's
+// place, for a test to say what the filesystem does.
+func WithFsync(r Repo, f func(*os.File) error) Repo {
+	r.fsync = f
 	return r
 }
 

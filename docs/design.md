@@ -387,9 +387,11 @@ lock (its entry's mode, object and stage, `-` for none), a tab and the path, end
 a path can hold any byte but that; then `end` and a NUL, which no record is, as each holds a
 tab, so a mark cut short anywhere, between records too, is never taken for whole. It's written
 in one step: into `kit-index.mark` first (swept with kit's other files), synced to the disk,
-then renamed over `kit-mark`, the git folder synced after, so a stop or a power loss leaves it
-whole or not there. A folder in the way of `kit-index.mark`, `kit-mark` or `kit-index.next`,
-which no sweep takes, as it holds files, is named, with "remove it, then try again". A run
+then renamed over `kit-mark`, the git folder synced after (on a filesystem that can't sync a
+folder, saying `ENOTSUP` or `EINVAL`, as far as it can; a sync that fails stops the commit, the
+mark removed), so a stop or a power loss leaves it whole or not there. A folder in the way of
+`kit-index.mark`, `kit-mark` or `kit-index.next`, which no sweep takes, as it holds files, is
+named, with "remove it, then try again". A run
 removes only the mark it left. Where there's a mark,
 and git isn't part way through one of its operations (a rebase stopped on kit's commit is never
 repaired under it), the next commit, pull
@@ -679,8 +681,12 @@ all through `objects`, `refs`, `logs` and `worktrees` in each, every link there 
 all through where it leads; and, of what git writes at the top (`packed-refs`, `HEAD`, `index`,
 `config`, `shallow`, `gc.log`, some by auto-gc), where each link there leads, never in it. A
 link that leads nowhere is where git, writing through it, makes the file it names: the nearest
-folder on its way there that exists. Nothing's resolved by name, so `..` after a link leads
-where the link does. Each must be on a filesystem that's local (`statfs`'s `MNT_LOCAL`) and
+folder on its way there that exists, never walked, so a link that leads to that folder too still
+is; a link through a file, which git can't write through, is nowhere. A loop of links, or a link
+in those four folders to a folder kit won't walk, one holding the home's folders that sync (`/`,
+the home, its `Library`) or the repository itself, leaves it unproven. Nothing's resolved by
+name, so `..` after a link leads where the link does. Each must be on a filesystem that's local
+(`statfs`'s `MNT_LOCAL`) and
 outside the folders in the
 home whose files may leave the Mac, told by their files, so by any name: `Library/CloudStorage`
 (File Provider's cloud drives, as Dropbox's) and `Library/Mobile Documents` (iCloud Drive),
@@ -712,14 +718,17 @@ key it can't check, it refuses, or asks of a terminal), never taken from DNS una
 (`verifyhostkeydns yes`, which `ssh -G` prints as `true`, takes a key from an SSHFP record DNSSEC
 vouches for, before ssh's files, on the resolver's word; `ask` still asks); a key ssh takes on
 first sight (`stricthostkeychecking accept-new`, as a new Mac's first push would) only for a
-host whose own key ssh already knows, `ssh-keygen -F <host> -f <file>` finding a line for it,
+host whose own key ssh already knows, `ssh-keygen -l -F <host> -f <file>` finding a line for it
+whose key it reads, as ssh does (a line whose key ssh can't read, which ssh skips, isn't found),
 plain, hashed or a pattern, with no marker after its header (a `@cert-authority` line, marked
 `CA`, vouches for any key it signs, and a `@revoked` one, `REVOKED`, refuses its key alone, so
 ssh takes another on first sight beside either), in one of `userknownhostsfile`'s or
 `globalknownhostsfile`'s files, `[<host>]:<port>` on a port other than 22; `ssh -G` prints those
-files unquoted, a space between, so a part that isn't a path from `/` is the one before's,
-holding a space. A `controlpath` is asked of a host no config means too, `kit-sentinel.invalid`,
-as git's call with the user and port ssh resolved: the same path there is one other hosts share,
+files unquoted, a space between, so where a part isn't a path from `/` (a path holding a space,
+or a relative one), or parts joined by spaces name a path there is (one holding ` /`), kit can't
+tell them apart, and it's refused; `none` alone is no file. A `controlpath` is asked of a host
+no config means too, `kit-sentinel.invalid`, as git's call with the user and port ssh resolved:
+the same path there is one other hosts share,
 where a connection another host has open can carry git's, whatever `controlmaster` says. A path
 shared on purpose between hosts the config names, or an alias whose `HostName` is GitHub's with
 a proxy that opens the connection there, kit can't see. `ssh -G` connects nowhere, but runs the
@@ -737,16 +746,18 @@ than `none`), a host name canonicalized (`canonicalizehostname` other than `fals
 it up anew), the host's key not checked (`stricthostkeychecking no`, which `ssh -G` prints as
 `false`), checked by another name (`hostkeyalias`) or against keys a command gives
 (`knownhostscommand`) or taken from DNS (`verifyhostkeydns yes`), a key taken on first sight for
-a host ssh doesn't know yet, or a `controlpath` other hosts share; for https,
-`GIT_SSL_NO_VERIFY`, `GIT_SSL_CAINFO`, `GIT_SSL_CAPATH`, `SSL_CERT_FILE` or `SSL_CERT_DIR` set,
+a host ssh doesn't know yet, or where kit can't tell ssh's files of known hosts apart, or a
+`controlpath` other hosts share; for https, `GIT_SSL_NO_VERIFY`, `GIT_SSL_CAINFO`,
+`GIT_SSL_CAPATH`, `SSL_CERT_FILE` or `SSL_CERT_DIR` set,
 or, for the URL (`git config
 --get-urlmatch`, its user kept and its password left out), `http.sslVerify` false,
 `http.sslCAInfo` or `http.sslCAPath` set, or `http.curloptResolve` other than empty; another
 host, an IP address, or one not in plain ASCII; a host kit can't read (escaped, in brackets,
 like a flag); a path on GitHub that isn't an owner's repository; a local path where git finds no
 repository, whose program at the other end the remote sets, or where git writes on a filesystem
-that isn't local, or in a folder that syncs off the Mac or may. With no remote it's pushed to or
-fetched from, it isn't public.
+that isn't local, or in a folder that syncs off the Mac or may, or where kit can't tell where
+git writes (a loop of links, a link to a folder too wide to walk). With no remote it's pushed to
+or fetched from, it isn't public.
 
 Every command takes `--json` (one document), `--plain` (plain lines, as without a terminal)
 and `--verbose` (commands' output kept whole in the run's log).

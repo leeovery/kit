@@ -119,40 +119,32 @@ func sentinelG(path, user, port, command string, args ...string) ran {
 	return sshG(said(dest, sentinel, port, "controlpath "+path+"\n"), slices.Concat(args, []string{"-p", port, dest, command})...)
 }
 
-// keygen is ssh-keygen asked whether file holds name's key, as real
-// ssh-keygen answers: found, exiting 0, printing the line (found); else
-// exiting 1, or 255 for a file that isn't there.
+// keygen is ssh-keygen asked whether file holds name's key, reading each
+// key (-l), as real ssh-keygen answers: found, exiting 0, printing the line
+// (found); else exiting 1, as for a line whose key it can't read, or 255
+// for a file that isn't there.
 func keygen(name, file string, answer int) ran {
-	r := ran{name: "ssh-keygen", args: []string{"-F", name, "-f", file}, exits: answer}
+	r := ran{name: "ssh-keygen", args: []string{"-l", "-F", name, "-f", file}, exits: answer}
 	if answer == 0 {
-		r.prints = found(name, "1", "", name)
+		r.prints = found(name, "1", "")
 	}
 	return r
 }
 
-// keygenFinds is ssh-keygen finding lines, each as found prints it, in
+// keygenFinds is ssh-keygen -l finding lines, each as found prints it, in
 // file for name, exiting 0.
 func keygenFinds(name, file string, lines ...string) ran {
-	return ran{name: "ssh-keygen", args: []string{"-F", name, "-f", file}, prints: strings.Join(lines, "")}
+	return ran{name: "ssh-keygen", args: []string{"-l", "-F", name, "-f", file}, prints: strings.Join(lines, "")}
 }
 
-// found is what real ssh-keygen -F prints of line n of a file of known
-// hosts, found for name, holding a key for hosts: its header, then the
-// line, which marker, REVOKED or CA after the header, says begins @revoked
-// or @cert-authority, none when "".
-func found(name, n, marker, hosts string) string {
-	line := hosts + " ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl\n"
-	switch marker {
-	case "REVOKED":
-		line = "@revoked " + line
-	case "CA":
-		line = "@cert-authority " + line
-	}
-	return "# Host " + name + " found: line " + n + " " + marker + "\n" + line
+// found is what real ssh-keygen -l -F prints of line n of a file of known
+// hosts, found for name, its key read: its header, which marker, REVOKED or
+// CA after it, says begins @revoked or @cert-authority, none when ""; then
+// the key's fingerprint under the name asked, alike for a line plain,
+// hashed or a pattern.
+func found(name, n, marker string) string {
+	return "# Host " + name + " found: line " + n + " " + marker + "\n" + name + " ED25519 SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU\n"
 }
-
-// hashed is a host as a hashed line of known hosts holds it, made up.
-const hashed = "|1|ZmFrZXNhbHRmYWtlc2FsdGZha2U=|ZmFrZWhhc2hmYWtlaGFzaGZha2U="
 
 // tlsSettings are git's settings for the https URL u, as Place reads them,
 // in order, none set but set's.
@@ -245,9 +237,9 @@ func (c placeCase) run(t *testing.T) {
 // git doesn't know, in its case, is ssh's own. ssh's proof of the host
 // stands: its key checked, strictly or asking, in files ssh keeps, any or
 // none, or from DNS only on asking, or, a key taken on first sight, the
-// host's own already known in one, on its port, in a line plain, hashed or
-// a pattern, a revoked key or a certificate authority's beside it, in a
-// file whose path holds a space too.
+// host's own already known in one, on its port, a revoked key, a
+// certificate authority's or a line whose key ssh can't read beside it,
+// its files told apart.
 // A controlpath not the same for a host no config means, asked as git's
 // call with the user and port ssh resolved, leaves it proven. Every answer
 // is real git's, ssh's or ssh-keygen's.
@@ -298,12 +290,9 @@ func TestPlaceProvesPrivate(t *testing.T) {
 		{name: "/dev/null among the files of known hosts", url: usual + ":someone/kit.git", runs: runs(sshSettings(gitrepo.Pushing, nil), sshG(saidWith(githubSaid, "userknownhostsfile", "/Users/someone/.ssh/known_hosts /dev/null"), usual, "git-receive-pack 'someone/kit.git'"), visibility(repo, "PRIVATE")), want: private},
 		{name: "the host's key from DNS on asking", url: usual + ":someone/kit.git", runs: runs(sshSettings(gitrepo.Pushing, nil), sshG(saidWith(githubSaid, "verifyhostkeydns", "ask"), usual, "git-receive-pack 'someone/kit.git'"), visibility(repo, "PRIVATE")), want: private},
 		{name: "a key taken on first sight, no file of the user's, the host's known in the system's", url: usual + ":someone/kit.git", runs: runs(sshSettings(gitrepo.Pushing, nil), sshG(saidWith(firstSight, "userknownhostsfile", "/dev/null"), usual, "git-receive-pack 'someone/kit.git'"), keygen("github.com", "/dev/null", 1), keygen("github.com", "/etc/ssh/ssh_known_hosts", 0), visibility(repo, "PRIVATE")), want: private},
-		{name: "a key taken on first sight, the host's known in a hashed line", url: usual + ":someone/kit.git", runs: runs(sshSettings(gitrepo.Pushing, nil), sshG(firstSight, usual, "git-receive-pack 'someone/kit.git'"), keygenFinds("github.com", "/Users/someone/.ssh/known_hosts", found("github.com", "1", "", hashed)), visibility(repo, "PRIVATE")), want: private},
-		{name: "a key taken on first sight, the host's known by a pattern", url: usual + ":someone/kit.git", runs: runs(sshSettings(gitrepo.Pushing, nil), sshG(firstSight, usual, "git-receive-pack 'someone/kit.git'"), keygenFinds("github.com", "/Users/someone/.ssh/known_hosts", found("github.com", "1", "", "*.com")), visibility(repo, "PRIVATE")), want: private},
-		{name: "a key taken on first sight, a revoked key, then the host's", url: usual + ":someone/kit.git", runs: runs(sshSettings(gitrepo.Pushing, nil), sshG(firstSight, usual, "git-receive-pack 'someone/kit.git'"), keygenFinds("github.com", "/Users/someone/.ssh/known_hosts", found("github.com", "1", "REVOKED", "github.com"), found("github.com", "2", "", "github.com")), visibility(repo, "PRIVATE")), want: private},
-		{name: "a key taken on first sight, a certificate authority's, then the host's among others", url: usual + ":someone/kit.git", runs: runs(sshSettings(gitrepo.Pushing, nil), sshG(firstSight, usual, "git-receive-pack 'someone/kit.git'"), keygenFinds("github.com", "/Users/someone/.ssh/known_hosts", found("github.com", "1", "CA", "*.com"), found("github.com", "2", "", "github.com,192.0.2.1")), visibility(repo, "PRIVATE")), want: private},
-		{name: "a key taken on first sight, the host's known in a file whose path holds a space", url: usual + ":someone/kit.git", runs: runs(sshSettings(gitrepo.Pushing, nil), sshG(saidWith(firstSight, "userknownhostsfile", "/Users/someone/.ssh/known hosts /Users/someone/.ssh/known_hosts2"), usual, "git-receive-pack 'someone/kit.git'"), keygen("github.com", "/Users/someone/.ssh/known hosts", 0), visibility(repo, "PRIVATE")), want: private},
-		{name: "a key taken on first sight, the host's known on its port in a hashed line", url: "ssh://" + usual + ":2222/someone/kit.git", runs: runs(sshSettings(gitrepo.Pushing, nil), sshG(saidWith(said(usual, "github.com", "2222"), "stricthostkeychecking", "accept-new"), "-p", "2222", usual, "git-receive-pack '/someone/kit.git'"), keygenFinds("[github.com]:2222", "/Users/someone/.ssh/known_hosts", found("[github.com]:2222", "1", "", hashed)), visibility(repo, "PRIVATE")), want: private},
+		{name: "a key taken on first sight, a revoked key, then the host's", url: usual + ":someone/kit.git", runs: runs(sshSettings(gitrepo.Pushing, nil), sshG(firstSight, usual, "git-receive-pack 'someone/kit.git'"), keygenFinds("github.com", "/Users/someone/.ssh/known_hosts", found("github.com", "1", "REVOKED"), found("github.com", "2", "")), visibility(repo, "PRIVATE")), want: private},
+		{name: "a key taken on first sight, a line whose key ssh can't read, then the host's", url: usual + ":someone/kit.git", runs: runs(sshSettings(gitrepo.Pushing, nil), sshG(firstSight, usual, "git-receive-pack 'someone/kit.git'"), keygenFinds("github.com", "/Users/someone/.ssh/known_hosts", found("github.com", "2", "")), visibility(repo, "PRIVATE")), want: private},
+		{name: "a key taken on first sight, a certificate authority's, then the host's among others", url: usual + ":someone/kit.git", runs: runs(sshSettings(gitrepo.Pushing, nil), sshG(firstSight, usual, "git-receive-pack 'someone/kit.git'"), keygenFinds("github.com", "/Users/someone/.ssh/known_hosts", found("github.com", "1", "CA"), found("github.com", "2", ""), found("github.com", "3", "")), visibility(repo, "PRIVATE")), want: private},
 		{name: "a key taken on first sight, the host's known on its port in the system's file", url: "ssh://" + usual + ":2222/someone/kit.git", runs: runs(sshSettings(gitrepo.Pushing, nil), sshG(saidWith(said(usual, "github.com", "2222"), "stricthostkeychecking", "accept-new"), "-p", "2222", usual, "git-receive-pack '/someone/kit.git'"), keygen("[github.com]:2222", "/Users/someone/.ssh/known_hosts", 1), keygen("[github.com]:2222", "/Users/someone/.ssh/known_hosts2", 255), keygen("[github.com]:2222", "/etc/ssh/ssh_known_hosts", 0), visibility(repo, "PRIVATE")), want: private},
 		{name: "a controlpath naming the host", url: usual + ":someone/kit.git", runs: runs(sshSettings(gitrepo.Pushing, nil), sshG(said(usual, "github.com", "22", "controlpath /Users/someone/.ssh/cm-"+usual+":22\n"), usual, "git-receive-pack 'someone/kit.git'"), sentinelG("/Users/someone/.ssh/cm-git@"+sentinel+":22", "git", "22", "git-receive-pack 'someone/kit.git'"), visibility(repo, "PRIVATE")), want: private},
 		{name: "a controlpath naming the connection", url: usual + ":someone/kit.git", runs: runs(sshSettings(gitrepo.Pushing, nil), sshG(said(usual, "github.com", "22", "controlpath /Users/someone/.ssh/cm-"+connection+"\n"), usual, "git-receive-pack 'someone/kit.git'"), sentinelG("/Users/someone/.ssh/cm-"+sentinelHash, "git", "22", "git-receive-pack 'someone/kit.git'"), visibility(repo, "PRIVATE")), want: private},
@@ -329,8 +318,11 @@ func TestPlaceProvesPrivate(t *testing.T) {
 // ssh's answer, a host name it canonicalizes, the host's key not checked,
 // checked by another name, against a command's keys or from DNS, or a key
 // taken on first sight for a host not yet known, in any file, on its port,
-// a revoked key or a certificate authority's, for it or a pattern, not its
-// own, or a controlpath the same for a host no config means,
+// a revoked key, a certificate authority's, for it or a pattern, or a line
+// whose key ssh can't read not its own, or where kit can't tell ssh's files
+// of known hosts apart, as ssh -G prints them unquoted: a path holding a
+// space, a relative path, or parts that, joined, name a path there is; or
+// a controlpath the same for a host no config means,
 // whatever its controlmaster says, as ssh uses a connection there either
 // way; over https, a variable that undoes TLS's proof of the
 // host, or a setting for the URL that does: checking off, certificate
@@ -354,6 +346,11 @@ func TestPlaceLeavesTheRestUnproven(t *testing.T) {
 	byUser := "/Users/someone/.ssh/cm-git"
 	firstSight := saidWith(githubSaid, "stricthostkeychecking", "accept-new")
 	unknown := gitrepo.Place{Unproven: "ssh's config takes a host's key on first sight (stricthostkeychecking accept-new), and it knows none for github.com yet, so another host can pass for it"}
+	tangled := gitrepo.Place{Unproven: "ssh's config takes a host's key on first sight (stricthostkeychecking accept-new), and kit can't tell ssh's known-hosts files apart, as ssh -G prints them, to see whether it knows github.com's key yet"}
+	// spaced is a file of known hosts whose path holds " /", which ssh -G
+	// prints as two paths.
+	spaced := filepath.Join(t.TempDir(), "My ")
+	writeAt(t, filepath.Join(spaced, "Keys"), "")
 	for _, c := range []placeCase{
 		{name: "the remote's vcs", url: tls, vcs: "hg", want: gitrepo.Place{Unproven: "remote.origin.vcs hands it to a helper, which alone knows where it goes"}},
 		{name: "s3://", url: "s3://bucket/kit", want: gitrepo.Place{Unproven: "git hands s3:// URLs to a helper, which alone knows where they go"}},
@@ -383,11 +380,16 @@ func TestPlaceLeavesTheRestUnproven(t *testing.T) {
 		{name: "the host's key checked by another name", url: usual + ":someone/kit.git", runs: runs(sshSettings(gitrepo.Pushing, nil), sshG(said(usual, "github.com", "22", "hostkeyalias other.example\n"), usual, pushed)), want: gitrepo.Place{Unproven: "ssh's config checks the host's key by another name (hostkeyalias), so another host can pass for it"}},
 		{name: "the keys ssh knows from a command", url: usual + ":someone/kit.git", runs: runs(sshSettings(gitrepo.Pushing, nil), sshG(said(usual, "github.com", "22", "knownhostscommand /usr/bin/false %H\n"), usual, pushed)), want: gitrepo.Place{Unproven: "ssh's config takes the keys it knows from a command (knownhostscommand), which can give any"}},
 		{name: "the host's key from DNS", url: usual + ":someone/kit.git", runs: runs(sshSettings(gitrepo.Pushing, nil), sshG(saidWith(githubSaid, "verifyhostkeydns", "true"), usual, pushed)), want: gitrepo.Place{Unproven: "ssh's config takes the host's key from DNS (verifyhostkeydns), which another host can answer for"}},
-		{name: "a key taken on first sight, the host's key revoked", url: usual + ":someone/kit.git", runs: runs(sshSettings(gitrepo.Pushing, nil), sshG(firstSight, usual, pushed), keygenFinds("github.com", "/Users/someone/.ssh/known_hosts", found("github.com", "1", "REVOKED", "github.com")), keygen("github.com", "/Users/someone/.ssh/known_hosts2", 255), keygen("github.com", "/etc/ssh/ssh_known_hosts", 255), keygen("github.com", "/etc/ssh/ssh_known_hosts2", 255)), want: unknown},
-		{name: "a key taken on first sight, a certificate authority for the host alone", url: usual + ":someone/kit.git", runs: runs(sshSettings(gitrepo.Pushing, nil), sshG(firstSight, usual, pushed), keygenFinds("github.com", "/Users/someone/.ssh/known_hosts", found("github.com", "1", "CA", "github.com")), keygen("github.com", "/Users/someone/.ssh/known_hosts2", 255), keygen("github.com", "/etc/ssh/ssh_known_hosts", 255), keygen("github.com", "/etc/ssh/ssh_known_hosts2", 255)), want: unknown},
-		{name: "a key taken on first sight, a certificate authority for a pattern, in the system's file", url: usual + ":someone/kit.git", runs: runs(sshSettings(gitrepo.Pushing, nil), sshG(firstSight, usual, pushed), keygen("github.com", "/Users/someone/.ssh/known_hosts", 1), keygen("github.com", "/Users/someone/.ssh/known_hosts2", 255), keygenFinds("github.com", "/etc/ssh/ssh_known_hosts", found("github.com", "1", "CA", "*.com")), keygen("github.com", "/etc/ssh/ssh_known_hosts2", 255)), want: unknown},
+		{name: "a key taken on first sight, the host's key revoked", url: usual + ":someone/kit.git", runs: runs(sshSettings(gitrepo.Pushing, nil), sshG(firstSight, usual, pushed), keygenFinds("github.com", "/Users/someone/.ssh/known_hosts", found("github.com", "1", "REVOKED")), keygen("github.com", "/Users/someone/.ssh/known_hosts2", 255), keygen("github.com", "/etc/ssh/ssh_known_hosts", 255), keygen("github.com", "/etc/ssh/ssh_known_hosts2", 255)), want: unknown},
+		{name: "a key taken on first sight, a certificate authority for the host alone", url: usual + ":someone/kit.git", runs: runs(sshSettings(gitrepo.Pushing, nil), sshG(firstSight, usual, pushed), keygenFinds("github.com", "/Users/someone/.ssh/known_hosts", found("github.com", "1", "CA")), keygen("github.com", "/Users/someone/.ssh/known_hosts2", 255), keygen("github.com", "/etc/ssh/ssh_known_hosts", 255), keygen("github.com", "/etc/ssh/ssh_known_hosts2", 255)), want: unknown},
+		{name: "a key taken on first sight, a certificate authority for a pattern, in the system's file", url: usual + ":someone/kit.git", runs: runs(sshSettings(gitrepo.Pushing, nil), sshG(firstSight, usual, pushed), keygen("github.com", "/Users/someone/.ssh/known_hosts", 1), keygen("github.com", "/Users/someone/.ssh/known_hosts2", 255), keygenFinds("github.com", "/etc/ssh/ssh_known_hosts", found("github.com", "1", "CA")), keygen("github.com", "/etc/ssh/ssh_known_hosts2", 255)), want: unknown},
 		{name: "a key taken on first sight, no file of the user's, none of the system's", url: usual + ":someone/kit.git", runs: runs(sshSettings(gitrepo.Pushing, nil), sshG(saidWith(saidWith(firstSight, "userknownhostsfile", "/dev/null"), "globalknownhostsfile", "none"), usual, pushed), keygen("github.com", "/dev/null", 1)), want: unknown},
 		{name: "a key taken on first sight, known hosts none", url: usual + ":someone/kit.git", runs: runs(sshSettings(gitrepo.Pushing, nil), sshG(saidWith(saidWith(firstSight, "userknownhostsfile", "none"), "globalknownhostsfile", "none"), usual, pushed)), want: unknown},
+		{name: "a key taken on first sight, only a line whose key ssh can't read", url: usual + ":someone/kit.git", runs: runs(sshSettings(gitrepo.Pushing, nil), sshG(firstSight, usual, pushed), keygen("github.com", "/Users/someone/.ssh/known_hosts", 1), keygen("github.com", "/Users/someone/.ssh/known_hosts2", 255), keygen("github.com", "/etc/ssh/ssh_known_hosts", 255), keygen("github.com", "/etc/ssh/ssh_known_hosts2", 255)), want: unknown},
+		{name: "a key taken on first sight, a file whose path holds a space", url: usual + ":someone/kit.git", runs: runs(sshSettings(gitrepo.Pushing, nil), sshG(saidWith(firstSight, "userknownhostsfile", "/Users/someone/.ssh/known hosts /Users/someone/.ssh/known_hosts2"), usual, pushed)), want: tangled},
+		{name: "a key taken on first sight, a relative path", url: usual + ":someone/kit.git", runs: runs(sshSettings(gitrepo.Pushing, nil), sshG(saidWith(firstSight, "userknownhostsfile", "/Users/someone/.ssh/known_hosts relative/known_hosts"), usual, pushed)), want: tangled},
+		{name: "a key taken on first sight, a path holding a space then /", url: usual + ":someone/kit.git", runs: runs(sshSettings(gitrepo.Pushing, nil), sshG(saidWith(firstSight, "userknownhostsfile", spaced+"/Keys /Users/someone/.ssh/known_hosts2"), usual, pushed)), want: tangled},
+		{name: "a key taken on first sight, a system's file whose path holds a space", url: usual + ":someone/kit.git", runs: runs(sshSettings(gitrepo.Pushing, nil), sshG(saidWith(firstSight, "globalknownhostsfile", "/etc/ssh/ssh known_hosts"), usual, pushed)), want: tangled},
 		{name: "a key taken on first sight, the host's not known", url: usual + ":someone/kit.git", runs: runs(sshSettings(gitrepo.Pushing, nil), sshG(firstSight, usual, pushed), keygen("github.com", "/Users/someone/.ssh/known_hosts", 1), keygen("github.com", "/Users/someone/.ssh/known_hosts2", 255), keygen("github.com", "/etc/ssh/ssh_known_hosts", 255), keygen("github.com", "/etc/ssh/ssh_known_hosts2", 255)), want: unknown},
 		{name: "a key taken on first sight, the host known on another port", url: "ssh://" + usual + ":2222/someone/kit.git", runs: runs(sshSettings(gitrepo.Pushing, nil), sshG(saidWith(firstSight, "port", "2222"), "-p", "2222", usual, "git-receive-pack '/someone/kit.git'"), keygen("[github.com]:2222", "/Users/someone/.ssh/known_hosts", 1), keygen("[github.com]:2222", "/Users/someone/.ssh/known_hosts2", 255), keygen("[github.com]:2222", "/etc/ssh/ssh_known_hosts", 255), keygen("[github.com]:2222", "/etc/ssh/ssh_known_hosts2", 255)), want: unknown},
 		{name: "a key taken on first sight, no system's file", url: usual + ":someone/kit.git", runs: runs(sshSettings(gitrepo.Pushing, nil), sshG(saidWith(firstSight, "globalknownhostsfile", "none"), usual, pushed), keygen("github.com", "/Users/someone/.ssh/known_hosts", 1), keygen("github.com", "/Users/someone/.ssh/known_hosts2", 255)), want: unknown},
@@ -525,8 +527,12 @@ func (c localCase) place(t *testing.T, repoDir, home string) (gitrepo.Place, err
 // link leads; in the repository, every link in the folders git writes all
 // through, objects, refs, logs and worktrees, and where each link at its
 // top leads, never in it, a link that leads nowhere the nearest folder on
-// its way there, as git makes the file it names; never hooks or info,
-// which a push or fetch doesn't write. git's own program at the other end
+// its way there, as git makes the file it names, never walked, so a link
+// that leads to that folder too still is, and a link through a file,
+// which git can't write through, nothing; never hooks or info, which a
+// push or fetch doesn't write. A loop of links, or a link in those folders
+// to one kit won't walk, holding the home's folders that sync, as / and
+// the home do, or the repository, leaves it unproven. git's own program at the other end
 // is git's too without its dash. A relative path is the repository's; a file:// URL's path is
 // decoded, its host ignored, as git takes them.
 func TestPlaceOnThisMac(t *testing.T) {
@@ -637,6 +643,42 @@ func TestPlaceOnThisMac(t *testing.T) {
 	gitFolderAt(t, filepath.Join(home, "Documents", "hooks"), "")
 	link(t, filepath.Join(home, "Documents", "hooks"), in("hooked/kit.git/hooks"))
 	link(t, cloud, in("hooked/kit.git/info"))
+	// A repository whose logs hold a link to nowhere, its nearest folder
+	// one on this Mac, sorted before a link to that folder, which holds a
+	// link into the cloud; a worktree whose git folder's logs hold a link to
+	// nowhere in its repository, whose packs are a link into the cloud.
+	link(t, filepath.Join(dropbox, "main.log"), in("ext/main"))
+	gitRepoAt(t, in("hidden/kit.git"))
+	link(t, in("ext/missing/x"), in("hidden/kit.git/logs/HEAD"))
+	link(t, in("ext"), in("hidden/kit.git/logs/refs/heads"))
+	gitRepoAt(t, in("commond.git"))
+	link(t, filepath.Join(dropbox, "pack"), in("commond.git/objects/pack"))
+	gitFolderAt(t, in("wtd"), "ref: refs/heads/wt\n")
+	writeAt(t, in("wtd/commondir"), in("commond.git")+"\n")
+	link(t, in("commond.git/missing/x"), in("wtd/logs/HEAD"))
+	writeAt(t, in("wtdw/.git"), "gitdir: "+in("wtd")+"\n")
+	// A repository with links through a file in the cloud, in its objects
+	// and at its top; one with a loop of links in its objects; ones with a
+	// link in objects to /, in refs to the home, in logs to the home's
+	// Library, in refs to the Desktop, and in logs to the folder that holds
+	// it.
+	writeAt(t, filepath.Join(dropbox, "afile"), "x")
+	gitRepoAt(t, in("throughfile/kit.git"))
+	link(t, filepath.Join(dropbox, "afile", "x"), in("throughfile/kit.git/objects/x"))
+	link(t, filepath.Join(dropbox, "afile", "y"), in("throughfile/kit.git/lfs"))
+	gitRepoAt(t, in("looped/kit.git"))
+	link(t, "b", in("looped/kit.git/objects/a"))
+	link(t, "a", in("looped/kit.git/objects/b"))
+	gitRepoAt(t, in("wide/kit.git"))
+	link(t, "/", in("wide/kit.git/objects/root"))
+	gitRepoAt(t, in("homed/kit.git"))
+	link(t, home, in("homed/kit.git/refs/home"))
+	gitRepoAt(t, in("libbed/kit.git"))
+	link(t, filepath.Join(home, "Library"), in("libbed/kit.git/logs/lib"))
+	gitRepoAt(t, in("desked/kit.git"))
+	link(t, filepath.Join(home, "Desktop"), in("desked/kit.git/refs/desk"))
+	gitRepoAt(t, in("above/kit.git"))
+	link(t, in("above"), in("above/kit.git/logs/up"))
 	// A worktree in Documents whose git folder and repository are on this
 	// Mac.
 	gitFolderAt(t, in("wtlocal"), "ref: refs/heads/wt\n")
@@ -675,6 +717,17 @@ func TestPlaceOnThisMac(t *testing.T) {
 			}
 			return unix.Statfs(p, fs)
 		}
+	}
+	// resolved is path, its links resolved, as kit names it.
+	resolved := func(path string) string {
+		path, err := filepath.EvalSymlinks(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	tooWide := func(in, to, holding string) gitrepo.Place {
+		return gitrepo.Place{Unproven: "a link in " + resolved(in) + " leads to " + resolved(to) + ", which holds " + holding}
 	}
 	gitsOwn, another := "git-receive-pack", "/opt/kit/receive"
 	usualHome := []string{"HOME=" + home}
@@ -723,6 +776,15 @@ func TestPlaceOnThisMac(t *testing.T) {
 		{name: "a link to nowhere in the cloud in its logs", url: in("lost/kit.git"), want: inDropbox},
 		{name: "a link to nowhere in the cloud, from its own folder", url: in("lostnear/kit.git"), want: inDropbox},
 		{name: "a link in its worktrees into the cloud", url: in("wts/kit.git"), want: inDropbox},
+		{name: "a link to nowhere, sorted before a link to its nearest folder", url: in("hidden/kit.git"), want: inDropbox},
+		{name: "a worktree, a link to nowhere in its repository", url: in("wtdw"), want: inDropbox},
+		{name: "links through a file", url: in("throughfile/kit.git"), want: onThisMac},
+		{name: "a loop of links", url: in("looped/kit.git"), want: gitrepo.Place{Unproven: "a loop of links in " + resolved(in("looped/kit.git/objects"))}},
+		{name: "a link in its objects to /", url: in("wide/kit.git"), want: tooWide(in("wide/kit.git/objects"), "/", "folders that sync")},
+		{name: "a link in its refs to the home", url: in("homed/kit.git"), want: tooWide(in("homed/kit.git/refs"), home, "folders that sync")},
+		{name: "a link in its logs to the home's Library", url: in("libbed/kit.git"), want: tooWide(in("libbed/kit.git/logs"), filepath.Join(home, "Library"), "folders that sync")},
+		{name: "a link in its refs to the Desktop", url: in("desked/kit.git"), want: tooWide(in("desked/kit.git/refs"), filepath.Join(home, "Desktop"), "folders that sync")},
+		{name: "a link in its logs to the folder holding it", url: in("above/kit.git"), want: tooWide(in("above/kit.git/logs"), in("above"), "the repository itself")},
 		{name: "its branches linked", url: in("branches/kit.git"), want: inDropbox},
 		{name: "its packed-refs linked", url: in("packed/kit.git"), want: inDropbox},
 		{name: "a link at its top to /", url: in("rooted/kit.git"), want: onThisMac},
@@ -742,6 +804,12 @@ func TestPlaceOnThisMac(t *testing.T) {
 		if got, err := c.place(t, repoDir, home); err != nil || got != c.want {
 			t.Errorf("%s: Place(%q) = %+v, %v; want %+v", c.name, c.url, got, err, c.want)
 		}
+	}
+	// A home given through a link is the folder it leads to.
+	linkedHome := in("linkedhome")
+	link(t, home, linkedHome)
+	if got, err := (localCase{url: in("homed/kit.git")}).place(t, repoDir, linkedHome); err != nil || got != tooWide(in("homed/kit.git/refs"), home, "folders that sync") {
+		t.Errorf("Place(%q), the home a link = %+v, %v; want a link to it too wide to walk", in("homed/kit.git"), got, err)
 	}
 	// A case-insensitive filesystem, as macOS's is by default, takes a
 	// synced folder by any case.
