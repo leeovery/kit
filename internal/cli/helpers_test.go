@@ -357,7 +357,8 @@ const leftIndex = "the index a run of kit's left"
 // leavesIndex leaves in gitDir, a git folder of kit-config's, git's lock
 // holding the index a run of kit's left, stopped once HEAD had moved onto
 // its commit, head, and the run's mark: the commit HEAD was on, that one,
-// and the lock's hash and file, by device and inode.
+// and the lock's hash and file, by device and inode, then the end of its
+// records, of which it has none.
 func (w *world) leavesIndex(t *testing.T, gitDir string) {
 	t.Helper()
 	const before = "9f8e7d6c5b4a39281706f5e4d3c2b1a098765432"
@@ -371,7 +372,7 @@ func (w *world) leavesIndex(t *testing.T, gitDir string) {
 	}
 	st := info.Sys().(*syscall.Stat_t)
 	sum := sha256.Sum256([]byte(leftIndex))
-	mark := fmt.Sprintf("%s %s %s %d:%d\n", before, head, hex.EncodeToString(sum[:]), st.Dev, st.Ino)
+	mark := fmt.Sprintf("%s %s %s %d:%d\nend\x00", before, head, hex.EncodeToString(sum[:]), st.Dev, st.Ino)
 	if err := os.WriteFile(filepath.Join(gitDir, "kit-mark"), []byte(mark), 0o600); err != nil {
 		t.Fatal(err)
 	}

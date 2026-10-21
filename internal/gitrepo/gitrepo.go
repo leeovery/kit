@@ -36,6 +36,9 @@ type Repo struct {
 	// statfs, when set, says what a path's filesystem is in unix.Statfs's
 	// place.
 	statfs func(path string, fs *unix.Statfs_t) error
+	// seen, when set, is what gh said of each repository's visibility, by
+	// its owner/name (Remembering).
+	seen map[string]string
 }
 
 func (r Repo) git(ctx context.Context, args ...string) (runner.Result, error) {

@@ -1053,6 +1053,7 @@ func TestPushDealsWithWhatAStoppedRunLeft(t *testing.T) {
 	s.expect(call{args: gitDirOf}).Prints(gitDir + "\n")
 	s.head(stopped)
 	s.expect(call{args: indexed}).Prints(entry(brewBefore, "brew"))
+	s.readsFolders(base, "", "", func() {})
 	s.expect(call{args: resetTo(stopped), input: "brew\x00", index: nextIndex}).Does(func() { writeFile(t, gitDir, nextIndex, "repaired") })
 	s.expect(call{args: wholeStatus})
 	s.tracks(tracksOrigin, "", "")

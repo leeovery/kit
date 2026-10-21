@@ -97,11 +97,17 @@ func unproven(shown, why string) check.Item {
 // public; git, ssh or gh failing to answer, Push's URLs among them, or gh
 // not signed in, fails.
 func TestConfigPrivate(t *testing.T) {
-	const lees, https = "git@github.com:someone/kit-config.git", "https://github.com/someone/my.config"
+	const usual, https = "git@github.com:someone/kit-config.git", "https://github.com/someone/my.config"
 	home := t.TempDir()
 	local, synced := filepath.Join(t.TempDir(), "kit-config.git"), filepath.Join(home, "Library", "CloudStorage", "Dropbox", "kit-config.git")
+	// Each a repository git takes: a HEAD naming a branch, objects and refs.
 	for _, d := range []string{local, synced} {
-		if err := os.MkdirAll(d, 0o700); err != nil {
+		for _, folder := range []string{"objects", "refs"} {
+			if err := os.MkdirAll(filepath.Join(d, folder), 0o700); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := os.WriteFile(filepath.Join(d, "HEAD"), []byte("ref: refs/heads/main\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -111,9 +117,9 @@ func TestConfigPrivate(t *testing.T) {
 		want   check.Result
 	}{
 		{
-			name: "private, Lee's own form",
+			name: "private, the usual form",
 			script: func(f *runnertest.Fake) {
-				remotes(f, "origin\n", "", lees+"\n", lees)
+				remotes(f, "origin\n", "", usual+"\n", usual)
 				resolves(f, "git@github.com", "github.com", "someone/kit-config.git")
 				f.On("gh", view("someone/kit-config")...).Prints("PRIVATE\n")
 			},
@@ -188,7 +194,7 @@ func TestConfigPrivate(t *testing.T) {
 		{
 			name: "an ssh command set",
 			script: func(f *runnertest.Fake) {
-				remotes(f, "origin\n", "", lees+"\n", lees)
+				remotes(f, "origin\n", "", usual+"\n", usual)
 				f.On("git", gitIn("config", "--get", "core.sshCommand")...).Prints("ssh -F /tmp/other\n")
 			},
 			want: check.Result{State: check.Attention, Summary: "can't prove github.com:someone/kit-config.git private: core.sshCommand is set, so git may not reach it with ssh as its config says", Items: []check.Item{unproven("github.com:someone/kit-config.git", "core.sshCommand is set, so git may not reach it with ssh as its config says")}},
@@ -213,7 +219,7 @@ func TestConfigPrivate(t *testing.T) {
 			script: func(f *runnertest.Fake) {
 				remotes(f, "origin\n", "", synced+"\n", local)
 			},
-			want: check.Result{State: check.Attention, Summary: "can't prove " + synced + " private: it's in ~/Library/CloudStorage/Dropbox, which syncs off this Mac", Items: []check.Item{unproven(synced, "it's in ~/Library/CloudStorage/Dropbox, which syncs off this Mac")}},
+			want: check.Result{State: check.Attention, Summary: "can't prove " + synced + " private: git writes it in ~/Library/CloudStorage/Dropbox, which syncs off this Mac", Items: []check.Item{unproven(synced, "git writes it in ~/Library/CloudStorage/Dropbox, which syncs off this Mac")}},
 		},
 		{
 			name: "no remote",
@@ -256,7 +262,7 @@ func TestConfigPrivate(t *testing.T) {
 		{
 			name: "gh signed out",
 			script: func(f *runnertest.Fake) {
-				remotes(f, "origin\n", "", lees+"\n", lees)
+				remotes(f, "origin\n", "", usual+"\n", usual)
 				resolves(f, "git@github.com", "github.com", "someone/kit-config.git")
 				f.On("gh", view("someone/kit-config")...).Exits(4).PrintsToStderr("To get started with GitHub CLI, please run:  gh auth login\nAlternatively, populate the GH_TOKEN environment variable with a GitHub API authentication token.\n")
 			},
@@ -265,7 +271,7 @@ func TestConfigPrivate(t *testing.T) {
 		{
 			name: "pushed by a command ssh sends elsewhere",
 			script: func(f *runnertest.Fake) {
-				remotes(f, "origin\n", "", lees+"\n", lees)
+				remotes(f, "origin\n", "", usual+"\n", usual)
 				resolves(f, "git@github.com", "github.com", "someone/kit-config.git")
 				f.On("ssh", "-G", "git@github.com", "git-receive-pack 'someone/kit-config.git'").Prints("host github.com\nuser git\nhostname evil.example\nport 22\ncanonicalizefallbacklocal yes\ncanonicalizehostname false\ncontrolmaster false\nsessiontype default\n")
 				f.On("gh", view("someone/kit-config")...).Prints("PRIVATE\n")
@@ -275,7 +281,7 @@ func TestConfigPrivate(t *testing.T) {
 		{
 			name: "fetched by a command ssh sends elsewhere",
 			script: func(f *runnertest.Fake) {
-				remotes(f, "origin\n", "", lees+"\n", lees)
+				remotes(f, "origin\n", "", usual+"\n", usual)
 				resolves(f, "git@github.com", "github.com", "someone/kit-config.git")
 				f.On("ssh", "-G", "-o", "SendEnv=GIT_PROTOCOL", "git@github.com", "git-upload-pack 'someone/kit-config.git'").Prints("host github.com\nuser git\nhostname evil.example\nport 22\ncanonicalizefallbacklocal yes\ncanonicalizehostname false\ncontrolmaster false\nsessiontype default\n")
 				f.On("gh", view("someone/kit-config")...).Prints("PRIVATE\n")
@@ -310,5 +316,34 @@ func TestConfigPrivate(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// gh is asked of each repository on GitHub once a check, whatever URLs and
+// ways lead to it: pushed to and fetched from by the same URL, it's asked
+// once; the next check asks again.
+func TestConfigPrivateAsksGhOnceACheck(t *testing.T) {
+	const usual = "git@github.com:someone/kit-config.git"
+	fake := runnertest.New(t)
+	remotes(fake, "origin\n", "", usual+"\n", usual)
+	resolves(fake, "git@github.com", "github.com", "someone/kit-config.git")
+	fake.On("gh", view("someone/kit-config")...).Prints("PRIVATE\n")
+	s := steps.ConfigPrivate(gitrepo.Repo{Dir: dir, Run: fake, Home: t.TempDir()})
+	asked := func() int {
+		n := 0
+		for _, call := range fake.Calls() {
+			if strings.HasPrefix(call, "gh repo view") {
+				n++
+			}
+		}
+		return n
+	}
+	for check := 1; check <= 2; check++ {
+		if got := s.Check(context.Background()); got.Summary != "private on GitHub (someone/kit-config)" {
+			t.Fatalf("check %d = %+v, want it private", check, got)
+		}
+		if n := asked(); n != check {
+			t.Errorf("after check %d, gh was asked %d times, want once a check", check, n)
+		}
 	}
 }

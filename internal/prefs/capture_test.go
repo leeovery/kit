@@ -439,7 +439,7 @@ func TestCapturePushesToAStoreOnThisMac(t *testing.T) {
 		name, in, why string
 	}{
 		{name: "on this Mac", in: "Backup"},
-		{name: "in a cloud drive", in: "home/Library/CloudStorage/Dropbox", why: "it's in ~/Library/CloudStorage/Dropbox, which syncs off this Mac"},
+		{name: "in a cloud drive", in: "home/Library/CloudStorage/Dropbox", why: "git writes it in ~/Library/CloudStorage/Dropbox, which syncs off this Mac"},
 	} {
 		w := newWorld(t, prefs.Lists{})
 		writeRecord(t, w.state, `{"on": "started fresh"}`)
@@ -453,9 +453,13 @@ func TestCapturePushesToAStoreOnThisMac(t *testing.T) {
 		if !strings.HasPrefix(c.in, "home/") {
 			store = filepath.Join(t.TempDir(), c.in, "prefs.git")
 		}
-		if err := os.MkdirAll(store, 0o700); err != nil {
-			t.Fatal(err)
+		// A repository git takes: a HEAD naming a branch, objects and refs.
+		for _, folder := range []string{"objects", "refs"} {
+			if err := os.MkdirAll(filepath.Join(store, folder), 0o700); err != nil {
+				t.Fatal(err)
+			}
 		}
+		w.write(t, filepath.Join(store, "HEAD"), "ref: refs/heads/main\n")
 		w.fake.On("git", "-C", w.clone, "remote", "get-url", "--push", "--all", "origin").Prints(store + "\n")
 		says := ""
 		if c.why != "" {
@@ -472,7 +476,8 @@ func TestCapturePushesToAStoreOnThisMac(t *testing.T) {
 // leavesIndex leaves in the clone's git folder git's lock holding the index
 // a capture left, stopped once HEAD had moved onto its commit, head, and
 // its mark: the commit HEAD was on, that one, and the lock by its hash and
-// file, device and inode.
+// file, device and inode, then the end of its records, of which it has
+// none.
 func (w *world) leavesIndex(t *testing.T) {
 	t.Helper()
 	const left, before = "the index a capture left", "9f8e7d6c5b4a39281706f5e4d3c2b1a098765432"
@@ -484,7 +489,7 @@ func (w *world) leavesIndex(t *testing.T) {
 	}
 	st := info.Sys().(*syscall.Stat_t)
 	sum := sha256.Sum256([]byte(left))
-	w.write(t, filepath.Join(w.clone, ".git", "kit-mark"), fmt.Sprintf("%s %s %s %d:%d\n", before, head, hex.EncodeToString(sum[:]), st.Dev, st.Ino))
+	w.write(t, filepath.Join(w.clone, ".git", "kit-mark"), fmt.Sprintf("%s %s %s %d:%d\n", before, head, hex.EncodeToString(sum[:]), st.Dev, st.Ino)+"end\x00")
 }
 
 // The index a capture left in git's lock, stopped once HEAD had moved onto

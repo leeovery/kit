@@ -21,10 +21,12 @@ import (
 )
 
 // commitLock is the file in the git folder kit's own lock on committing is
-// on, and marked the mark it leaves before HEAD moves.
+// on, marked the mark it leaves before HEAD moves, and markEnd what ends a
+// mark's records.
 const (
 	commitLock = "kit-commits"
 	marked     = "kit-mark"
+	markEnd    = "end\x00"
 )
 
 // stopped is the commit a run of kit's that stopped was moving HEAD onto,
@@ -43,7 +45,7 @@ func readFile(gitDir, name string) string {
 // markOf is kit's mark of the lock at path, as it is, before HEAD moves from
 // base, "" before the first, onto made, the user's index holding held for
 // the files committed: the commits, the lock's hash and its file, by device
-// and inode, then what the index held (records).
+// and inode, then what the index held (records), then their end.
 func markOf(t *testing.T, base, made, path string, held map[string]string) string {
 	t.Helper()
 	data, err := os.ReadFile(path)
@@ -58,7 +60,7 @@ func markOf(t *testing.T, base, made, path string, held map[string]string) strin
 	}
 	st := info.Sys().(*syscall.Stat_t)
 	sum := sha256.Sum256(data)
-	return fmt.Sprintf("%s %s %s %d:%d\n", cmp.Or(base, "-"), made, hex.EncodeToString(sum[:]), st.Dev, st.Ino) + records(held)
+	return fmt.Sprintf("%s %s %s %d:%d\n", cmp.Or(base, "-"), made, hex.EncodeToString(sum[:]), st.Dev, st.Ino) + records(held) + markEnd
 }
 
 // records is what a mark says the user's index held for each file, held
@@ -409,6 +411,21 @@ const (
 // indexed is git listing the user's index, as kit reads what it holds.
 var indexed = git("ls-files", "--stage", "-z")
 
+// foldersIn is git listing the folders in commit, as kit reads them.
+func foldersIn(commit string) []string {
+	return git("ls-tree", "-r", "-d", "--name-only", "-z", commit)
+}
+
+// readsFolders scripts kit reading the folders in the stopped run's commit
+// and in base, "" before the first: in each, made's, as ls-tree lists them,
+// then base's, none when "".
+func (s *sequence) readsFolders(base, made, based string, held func()) {
+	s.expect(call{args: foldersIn(stopped)}).Prints(made).Does(held)
+	if base != "" {
+		s.expect(call{args: foldersIn(base)}).Prints(based).Does(held)
+	}
+}
+
 // entry is a file's entry in git's index, as ls-files --stage prints it,
 // at stage 0.
 func entry(object, path string) string { return "100644 " + object + " 0\t" + path + "\x00" }
@@ -417,7 +434,7 @@ func entry(object, path string) string { return "100644 " + object + " 0\t" + pa
 // base, "" before the first, onto stopped, the user's index holding held
 // for the files it committed.
 func markText(base string, held map[string]string) string {
-	return cmp.Or(base, "-") + " " + stopped + " a-hash 1:2\n" + records(held)
+	return cmp.Or(base, "-") + " " + stopped + " a-hash 1:2\n" + records(held) + markEnd
 }
 
 // A run of kit's that stopped once HEAD had moved onto its commit, its lock
@@ -429,23 +446,25 @@ func markText(base string, held map[string]string) string {
 // then goes on: a file staged before that run, as it read it, too, as the
 // run would have taken it. A file the user has staged since, or in
 // conflict, it leaves be; with nothing to repair, or HEAD moved on from the
-// mark's commit, it clears the mark, saying nothing; a mark that doesn't
-// say what the index held, as an older kit's, or one cut short, it clears,
-// leaving the index as it is, and says so.
+// mark's commit, it clears the mark, saying nothing; a mark naming a
+// folder, in the commit, the one before or the user's index, which git's
+// reset would take whole, it clears, leaving the index as it is, and says
+// so.
 func TestCommitRepairsTheIndexAStoppedRunLeft(t *testing.T) {
 	const repaired = "the user's entries, the stopped run's files as committed"
+	const unusable = "left the index a stopped run left as it is, as kit can't use its mark: git status shows whether that run's files are staged as they were before its commit"
 	// read is what the stopped run read of the user's index for the files
 	// it committed: brew edited, added new, tmp added then gone.
 	read := map[string]string{"brew": "100644 " + brewBefore + " 0", "added": "", "tmp": "100644 " + tmpBefore + " 0"}
-	first := base + " " + stopped + " a-hash 1:2\n"
 	for _, c := range []struct {
 		name, at string
 		// mark is the mark, and index the user's index's entries, as
-		// ls-files lists them, none read when ""; stale the files kit
-		// resets in it, none when "". A conflict's last entry is the one
-		// the run read but for its stage.
-		mark, index, stale string
-		says               []string
+		// ls-files lists them, none read when ""; made and based the
+		// folders in the stopped run's commit and in base, as ls-tree
+		// lists them; stale the files kit resets in it, none when "". A
+		// conflict's last entry is the one the run read but for its stage.
+		mark, index, made, based, stale string
+		says                            []string
 	}{
 		{name: "the index as it was", at: stopped, mark: markText(base, read), index: entry(brewBefore, "brew") + entry(declTheirs, "decl") + entry(tmpBefore, "tmp"), stale: "added\x00brew\x00tmp\x00", says: []string{"repaired the index a stopped run left"}},
 		{name: "the index as a finished run leaves it", at: stopped, mark: markText(base, read), index: entry(addedMade, "added") + entry(brewMade, "brew") + entry(declTheirs, "decl")},
@@ -454,9 +473,12 @@ func TestCommitRepairsTheIndexAStoppedRunLeft(t *testing.T) {
 		{name: "in conflict", at: stopped, mark: markText(base, map[string]string{"brew": "100644 " + brewBefore + " 0"}), index: "100644 " + brewMade + " 1\tbrew\x00100644 " + brewTheirs + " 2\tbrew\x00100644 " + brewBefore + " 3\tbrew\x00"},
 		{name: "before the first commit", at: stopped, mark: markText("", map[string]string{"brew": "", "added": ""}), index: entry(declTheirs, "decl"), stale: "added\x00brew\x00", says: []string{"repaired the index a stopped run left"}},
 		{name: "HEAD moved on", at: base, mark: markText(base, read)},
-		{name: "an older kit's mark", at: stopped, mark: first, says: []string{"left the index a stopped run left as it is, as its mark doesn't say what it held: git status shows whether that run's files are staged as they were before its commit"}},
-		{name: "a mark cut short", at: stopped, mark: first + "100644 " + brewBefore + " 0\tbrew", says: []string{"left the index a stopped run left as it is, as its mark doesn't say what it held: git status shows whether that run's files are staged as they were before its commit"}},
-		{name: "a record without its tab", at: stopped, mark: first + "brew\x00", says: []string{"left the index a stopped run left as it is, as its mark doesn't say what it held: git status shows whether that run's files are staged as they were before its commit"}},
+		{name: "files in folders", at: stopped, mark: markText(base, map[string]string{"etc/brew": "100644 " + brewBefore + " 0"}), index: entry(brewBefore, "etc/brew") + entry(declTheirs, "etc/decl"), made: "etc\x00", based: "etc\x00", stale: "etc/brew\x00", says: []string{"repaired the index a stopped run left"}},
+		{name: "a folder in the commit", at: stopped, mark: markText(base, map[string]string{"etc": ""}), index: entry(declTheirs, "decl"), made: "etc\x00", says: []string{unusable}},
+		{name: "a folder in the commit before", at: stopped, mark: markText(base, map[string]string{"etc": ""}), index: entry(declTheirs, "decl"), based: "etc\x00", says: []string{unusable}},
+		{name: "a folder deep in a commit", at: stopped, mark: markText(base, map[string]string{"etc/brew": ""}), index: entry(declTheirs, "decl"), made: "etc\x00etc/brew\x00", says: []string{unusable}},
+		{name: "a folder in the index", at: stopped, mark: markText(base, map[string]string{"etc": ""}), index: entry(declTheirs, "etc/decl"), says: []string{unusable}},
+		{name: "a folder deep in the index", at: stopped, mark: markText(base, map[string]string{"etc": ""}), index: entry(declTheirs, "etc/brew/decl"), says: []string{unusable}},
 	} {
 		gitDir := gitFolder(t, false)
 		writeFile(t, gitDir, marked, c.mark)
@@ -470,6 +492,9 @@ func TestCommitRepairsTheIndexAStoppedRunLeft(t *testing.T) {
 		s.head(c.at).Does(held)
 		if c.index != "" {
 			s.expect(call{args: indexed}).Prints(c.index).Does(held)
+			// The mark's base: none, "-", before the first commit.
+			marksBase := strings.TrimPrefix(strings.Fields(c.mark)[0], "-")
+			s.readsFolders(marksBase, c.made, c.based, held)
 		}
 		index := usersEntries
 		if c.stale != "" {
@@ -489,7 +514,71 @@ func TestCommitRepairsTheIndexAStoppedRunLeft(t *testing.T) {
 	}
 }
 
-// A repair that fails leaves the mark, so the next run tries it again.
+// A mark kit can't use it clears before anything else, leaving the index,
+// and any lock, as they are, and says so, then goes on: one cut short at
+// any byte, at a record's end too, as only a whole one ends with its end;
+// one with more after its end; a first line that isn't the mark's; a
+// record whose path isn't one in the repository as git names a file:
+// empty, ., .., absolute, with an empty, . or .. part, or ending in a
+// slash.
+func TestCommitClearsAMarkItCantUse(t *testing.T) {
+	const unusable = "left the index a stopped run left as it is, as kit can't use its mark: git status shows whether that run's files are staged as they were before its commit"
+	whole := markText(base, map[string]string{"brew": "100644 " + brewBefore + " 0", "added": ""})
+	clears := func(name, mark string) {
+		t.Helper()
+		gitDir := gitFolder(t, false)
+		writeFile(t, gitDir, marked, mark)
+		fake := runnertest.New(t)
+		s := started(fake, gitDir)
+		s.goesOn(t, name, gitDir, stopped, usersEntries)
+		out, err := commitBrew(fake)
+		checkCalls(t, name, fake, gitDir, s.want)
+		if !out.Committed || err != nil || !slices.Equal(out.Notes, []string{unusable}) {
+			t.Errorf("%s: Commit() = %+v, %v; want committed, and %q said", name, out, err, unusable)
+		}
+		checkGitFolder(t, name, gitDir, resetEntries)
+	}
+	for at := range len(whole) {
+		clears(fmt.Sprintf("cut at byte %d of %d", at, len(whole)), whole[:at])
+	}
+	first := base + " " + stopped + " a-hash 1:2\n"
+	for name, mark := range map[string]string{
+		"more after its end":        whole + "-\tbrew\x00",
+		"another mark after it":     whole + whole,
+		"a first line of three":     base + " " + stopped + " a-hash\n" + markEnd,
+		"a record without a tab":    first + "brew\x00" + markEnd,
+		"the end run into a record": first + "-\tbrew" + markEnd,
+		"a record with no entry":    first + "\tbrew\x00" + markEnd,
+		"an empty path":             first + "-\t\x00" + markEnd,
+		"the repository's folder":   first + "-\t.\x00" + markEnd,
+		"the folder above":          first + "-\t..\x00" + markEnd,
+		"a path above":              first + "-\t../x\x00" + markEnd,
+		"an absolute path":          first + "100644 " + brewBefore + " 0\t/etc/passwd\x00" + markEnd,
+		"an empty part":             first + "-\tetc//brew\x00" + markEnd,
+		"a . part":                  first + "-\tetc/./brew\x00" + markEnd,
+		"a .. part":                 first + "-\tetc/../brew\x00" + markEnd,
+		"a slash at its end":        first + "-\tetc/\x00" + markEnd,
+	} {
+		clears(name, mark)
+	}
+
+	// The lock a stopped run left, beside a mark kit can't use, stays, for
+	// the refusal to come to name.
+	gitDir := gitFolder(t, false)
+	writeFile(t, gitDir, "index.lock", left)
+	writeFile(t, gitDir, marked, whole[:len(whole)-1])
+	fake := runnertest.New(t)
+	s := started(fake, gitDir)
+	out, err := commitBrew(fake)
+	checkCalls(t, "a lock left", fake, gitDir, s.want)
+	if out.Committed || err == nil || !strings.Contains(err.Error(), "index.lock") || !slices.Equal(out.Notes, []string{unusable}) {
+		t.Errorf("Commit(), a lock beside a mark kit can't use = %+v, %v; want %q said, then refused, naming the lock", out, err, unusable)
+	}
+	checkGitFolder(t, "a lock left", gitDir, usersEntries, "index.lock")
+}
+
+// A repair that fails leaves the mark, so the next run tries it again, and
+// says so, naming the mark, and what to do should it go on failing.
 func TestCommitRepairsAgainOnceARepairFailed(t *testing.T) {
 	gitDir := gitFolder(t, false)
 	mark := markText(base, map[string]string{"brew": "100644 " + brewBefore + " 0"})
@@ -497,13 +586,17 @@ func TestCommitRepairsAgainOnceARepairFailed(t *testing.T) {
 	repairs := func(s *sequence) *runnertest.Script {
 		s.head(stopped)
 		s.expect(call{args: indexed}).Prints(entry(brewBefore, "brew"))
+		s.readsFolders(base, "", "", func() {})
 		return s.expect(call{args: resetTo(stopped), input: "brew\x00", index: nextIndex})
 	}
 	fake := runnertest.New(t)
 	s := started(fake, gitDir)
 	repairs(s).Exits(128).PrintsToStderr("fatal: index file corrupt\n")
-	if out, err := commitBrew(fake); out.Committed || err == nil || !strings.Contains(err.Error(), "index file corrupt") {
-		t.Errorf("Commit(), the repair failing = %+v, %v; want git's error", out, err)
+	path := filepath.Join(gitDir, marked)
+	opens := "couldn't repair the index a stopped run of kit's left, by its mark, " + path + ": "
+	ends := "fatal: index file corrupt; kit tries again next run, or, once git status shows the index as it should be, remove " + path
+	if out, err := commitBrew(fake); out.Committed || err == nil || !strings.HasPrefix(err.Error(), opens) || !strings.HasSuffix(err.Error(), ends) {
+		t.Errorf("Commit(), the repair failing = %+v, %v; want %q, git's error, then %q", out, err, opens, ends)
 	}
 	checkCalls(t, "the repair failing", fake, gitDir, s.want)
 	checkGitFolder(t, "the repair failing", gitDir, usersEntries, marked)

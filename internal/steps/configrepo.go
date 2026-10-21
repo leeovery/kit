@@ -19,16 +19,17 @@ const ConfigPrivateName = "config-private"
 
 // ConfigPrivate checks the config repository, repo, is proven private
 // wherever it goes (gitrepo.Place): every URL kit pushes it to (PushURLs),
-// pushing, and origin's, fetching, each place that isn't named. The
-// config is personal, and must never be public. With no remote it's pushed
-// to or fetched from, it isn't public; a place git, ssh or gh can't be
-// asked about fails.
+// pushing, and origin's, fetching, each place that isn't named, gh asked
+// of each repository on GitHub once a check. The config is personal, and
+// must never be public. With no remote it's pushed to or fetched from, it
+// isn't public; a place git, ssh or gh can't be asked about fails.
 func ConfigPrivate(repo gitrepo.Repo) engine.Step {
 	return engine.Step{
 		Name:  ConfigPrivateName,
 		Title: "Privacy",
 		Area:  AreaConfig,
 		Check: func(ctx context.Context) check.Result {
+			repo := repo.Remembering()
 			all, err := whereTo(ctx, repo)
 			switch {
 			case err != nil:

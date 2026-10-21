@@ -82,8 +82,10 @@
   (regex #"/Cellar/git/")
   ;; ssh, the system's and Homebrew's, which reads the real ssh config,
   ;; finding the home folder by the user, never HOME, and runs what its
-  ;; Match exec lines say.
+  ;; Match exec lines say; and ssh-keygen, which reads the real files of
+  ;; known hosts, Homebrew's in the same rule.
   (literal "/usr/bin/ssh")
+  (literal "/usr/bin/ssh-keygen")
   (regex #"/Cellar/openssh/")
   ;; Claude Code, wherever its installers put it.
   (home-literal "/.local/bin/claude")

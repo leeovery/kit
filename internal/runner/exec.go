@@ -277,9 +277,14 @@ func BecomeLoginShell(shell string, env []string) error {
 }
 
 // Environ is the environment cmd runs in: Env, cmd's own variables over
-// it, then those its context sets.
+// it, then those its context sets; empty, never nil, with none, as exec
+// takes nil for kit's own.
 func (e Exec) Environ(ctx context.Context, cmd Command) ([]string, bool) {
-	return slices.Concat(e.Env, cmd.Env, SecretEnv(ctx)), true
+	env := slices.Concat(e.Env, cmd.Env, SecretEnv(ctx))
+	if env == nil {
+		env = []string{}
+	}
+	return env, true
 }
 
 // Has reports whether the program name is on Path, or is a path to one.

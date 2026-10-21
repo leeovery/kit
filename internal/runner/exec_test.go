@@ -131,6 +131,22 @@ func TestExecSaysTheEnvironmentACommandRunsIn(t *testing.T) {
 	}
 }
 
+// With no variable set, by the runner, the command or its context, a
+// command runs in an empty environment, as the runner says, never kit's
+// own.
+func TestExecRunsInAnEmptyEnvironmentWithNoneSet(t *testing.T) {
+	r := runner.Exec{Now: time.Now}
+	cmd := runner.Command{Name: "/usr/bin/env"}
+	env, ok := runner.Environ(t.Context(), r, cmd)
+	res, err := r.Run(t.Context(), cmd)
+	if !ok || err != nil {
+		t.Fatalf("Environ() said %t, Run() failed: %v", ok, err)
+	}
+	if env == nil || len(env) != 0 || len(res.Stdout) != 0 {
+		t.Errorf("Environ() = %#v; the program saw %q; want both empty", env, res.Stdout)
+	}
+}
+
 // A variable a command's context sets is set for that command alone, over
 // the runner's value and the command's own.
 func TestExecSetsTheVariablesItsContextSets(t *testing.T) {

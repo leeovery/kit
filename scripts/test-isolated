@@ -335,6 +335,8 @@ self_check() {
 	denies_running op "$(installed op)" --version || status=1
 	denies_running_every git /usr/bin/git -- --version || status=1
 	denies_running_every ssh /usr/bin/ssh -- -V || status=1
+	# ssh-keygen with an option it doesn't know says how it's used.
+	denies_running_every ssh-keygen /usr/bin/ssh-keygen -- '-?' || status=1
 	# Claude Code where its installers put it: a claude first on PATH can be
 	# another program's link, such as a router's.
 	denies_running claude "$(installed claude "$HOME/.local/bin/claude" /opt/homebrew/bin/claude /usr/local/bin/claude "$HOME/.claude/local/claude")" --version || status=1

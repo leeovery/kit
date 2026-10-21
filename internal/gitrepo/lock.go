@@ -22,10 +22,12 @@ import (
 // user's. Every file whose name starts with ownIndex is kit's, swept away
 // only while kit holds the repository's commit lock, so no other kit is
 // using one. marked is kit's mark (mark), which outlasts a sweep, as a run
-// that finds it reads it first.
+// that finds it reads it first; nextMark the file it's written in before
+// it takes its place, swept with kit's other files.
 const (
 	ownIndex  = "kit-index"
 	nextIndex = "kit-index.next"
+	nextMark  = "kit-index.mark"
 	marked    = "kit-mark"
 )
 
@@ -325,7 +327,8 @@ func (l *indexLock) fill(next string, mode fs.FileMode) error {
 // lock as filled, and of what the user's index held for each path the
 // commit takes (read), for a run that finds it left should this one stop
 // (recover), once it's sure it still holds its lock on committing, so no
-// other kit reads it meanwhile: none without that lock.
+// other kit reads it meanwhile: none without that lock. It's written whole
+// or not at all (writeWhole).
 func (l *indexLock) mark(base, made string, read map[string]string) error {
 	switch {
 	case l.commits == nil:
@@ -334,11 +337,33 @@ func (l *indexLock) mark(base, made string, read map[string]string) error {
 		return errCommitsTaken
 	}
 	m := mark{base: base, made: made, sum: l.sum, file: fileID(l.made), read: read}
-	if err := os.WriteFile(l.file(marked), []byte(m.String()), 0o600); err != nil {
+	if err := writeWhole(l.file(marked), l.file(nextMark), m.String()); err != nil {
 		return err
 	}
 	l.marked = true
 	return nil
+}
+
+// writeWhole writes data to the file at path in one step, so a stop or a
+// power loss leaves it whole or not there: into the file at next first,
+// synced to the disk, then renamed over it. A next a failure leaves is one
+// of kit's own files, which the sweep takes.
+func writeWhole(path, next, data string) error {
+	f, err := os.OpenFile(next, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	_, err = f.WriteString(data)
+	if err == nil {
+		err = f.Sync()
+	}
+	if closed := f.Close(); err == nil {
+		err = closed
+	}
+	if err != nil {
+		return err
+	}
+	return os.Rename(next, path)
 }
 
 // unmark removes this run's mark, when it left one.

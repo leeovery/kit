@@ -685,11 +685,47 @@ func TestCommitOnceAnotherGitLetsGo(t *testing.T) {
 	anEdit.checkFolder(t, gitDir)
 }
 
+// kit's mark is written whole or not at all, through kit-index.mark, a
+// file of kit's own, then renamed into place: one it can't write there, or
+// can't rename, stops the commit before HEAD moves, nothing committed, the
+// user's index as it was, no mark left, kit-index.mark swept.
+func TestCommitMovesHEADOnlyOnceItsMarkIsWhole(t *testing.T) {
+	for _, c := range []struct {
+		// inTheWay is the file a folder's in the way of, holding a file, so
+		// no sweep takes it.
+		name, inTheWay string
+	}{
+		{name: "kit-index.mark in the way", inTheWay: "kit-index.mark"},
+		{name: "kit-mark in the way", inTheWay: "kit-mark"},
+	} {
+		gitDir := gitFolder(t, false)
+		if err := os.MkdirAll(filepath.Join(gitDir, c.inTheWay, "in the way"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		fake := runnertest.New(t)
+		s := editing(fake, gitDir, base)
+		s.expect(call{args: git("read-tree", base), index: ownIndex})
+		s.expect(call{args: stageIn, input: "brew\x00", index: ownIndex})
+		s.expect(call{args: stagedIn, index: ownIndex}).Prints("brew\x00")
+		s.commits(base, false, nil)
+		s.reads(false, "brew")
+		s.expect(call{args: resetTo(made), input: "brew\x00", index: nextIndex}).Does(func() {
+			_ = os.WriteFile(filepath.Join(gitDir, nextIndex), []byte(resetEntries), 0o600)
+		})
+		committed, err := didCommit(gitrepo.Repo{Dir: dir, Run: fake}.Commit(context.Background(), "kit test", "brew"))
+		if committed || err == nil || !strings.Contains(err.Error(), c.inTheWay) {
+			t.Errorf("%s: Commit() = %v, %v; want nothing committed, naming %s", c.name, committed, err, c.inTheWay)
+		}
+		checkCalls(t, c.name, fake, gitDir, s.want)
+		checkGitFolder(t, c.name, gitDir, usersEntries, c.inTheWay)
+	}
+}
+
 // The files of kit's own a run that stopped part way left in the git
-// folder, older kits' named at random among them, go once kit holds the
-// index, before it runs anything in it.
+// folder, older kits' named at random among them, and a mark it was
+// writing, go once kit holds the index, before it runs anything in it.
 func TestCommitSweepsWhatAStoppedRunLeft(t *testing.T) {
-	left := []string{"kit-index", "kit-index.lock", "kit-index.next", "kit-index.next.lock", "kit-index-123"}
+	left := []string{"kit-index", "kit-index.lock", "kit-index.next", "kit-index.next.lock", "kit-index-123", "kit-index.mark"}
 	gitDir := gitFolder(t, false, left...)
 	for _, name := range left {
 		if err := os.WriteFile(filepath.Join(gitDir, name), []byte("left by a run that stopped"), 0o600); err != nil {
