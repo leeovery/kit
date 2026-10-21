@@ -31,37 +31,47 @@ import (
 // is part way through a merge, rebase, cherry-pick, revert or am, or a
 // conflict in paths waits to be resolved. HEAD moved by another git
 // meanwhile, it commits onto where HEAD is now, a few times at most, then
-// gives up (ErrHeadMoving), HEAD and the user's index left as they were. It
-// reports whether it committed: with nothing to commit it doesn't, which is
-// no error. An error once it has is the index's.
-func (r Repo) Commit(ctx context.Context, message string, paths ...string) (bool, error) {
+// gives up (ErrHeadMoving), HEAD and the user's index left as they were.
+// The index a run of kit's left in git's lock, stopped once HEAD had taken
+// its commit, it first puts in place, as that run would have. It reports
+// what it did: with nothing to commit it doesn't, which is no error. An
+// error once it has is the index's.
+func (r Repo) Commit(ctx context.Context, message string, paths ...string) (Outcome, error) {
 	if len(paths) == 0 {
-		return false, nil
+		return Outcome{}, nil
 	}
 	changed, err := r.status(ctx, paths...)
 	if err != nil {
-		return false, err
+		return Outcome{}, err
 	}
 	if e, ok := unmerged(changed); ok {
-		return false, fmt.Errorf("a conflict in %s is waiting to be resolved: kit's change waits till it's finished", e.path)
+		return Outcome{}, fmt.Errorf("a conflict in %s is waiting to be resolved: kit's change waits till it's finished", e.path)
 	}
 	p := plan(changed)
 	if p.empty() {
-		return false, nil
+		return Outcome{}, nil
 	}
 	gitDir, err := r.gitDir(ctx)
 	if err != nil {
-		return false, err
+		return Outcome{}, err
 	}
 	lock, err := r.lockIndex(ctx, gitDir)
 	if err != nil {
-		return false, err
+		return Outcome{}, err
 	}
 	defer lock.release()
+	out := Outcome{Finished: lock.finished}
 	if err := underWay(gitDir); err != nil {
-		return false, err
+		return out, err
 	}
-	return r.commitLocked(ctx, lock, message, p)
+	out.Committed, err = r.commitLocked(ctx, lock, message, p)
+	return out, err
+}
+
+// Outcome is what Commit did: whether it committed, and whether it first
+// put in place the index a run of kit's that stopped left (Finished).
+type Outcome struct {
+	Committed, Finished bool
 }
 
 // ErrHeadMoving is Commit's error when other gits kept moving HEAD while
@@ -380,33 +390,94 @@ type indexLock struct {
 	gitDir string
 	f      *os.File
 	done   bool
+	// finished is whether the index a run of kit's left in the lock was
+	// put in place before it was taken.
+	finished bool
 	// unlocked, when set, is called as kit lets go.
 	unlocked func()
 }
 
 // lockIndex takes git's lock on the index, trying for a while if another git
-// holds it, then refusing, naming the lock, which it leaves be; kit's own
-// files a run that stopped left are swept away once it has it.
+// holds it, then refusing, naming the lock, which it leaves be, unless it's
+// the index a run of kit's left, which it first puts in place (finish);
+// kit's own files a run that stopped left are swept away once it has it.
 func (r Repo) lockIndex(ctx context.Context, gitDir string) (*indexLock, error) {
 	path := filepath.Join(gitDir, "index.lock")
+	finished := false
 	for try := 1; ; try++ {
 		f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o666)
 		if err == nil {
-			l := &indexLock{gitDir: gitDir, f: f, unlocked: r.onUnlock}
+			l := &indexLock{gitDir: gitDir, f: f, finished: finished, unlocked: r.onUnlock}
 			l.sweep()
 			return l, nil
 		}
 		if !errors.Is(err, fs.ErrExist) {
 			return nil, fmt.Errorf("couldn't lock git's index: %w", err)
 		}
-		if try == lockTries {
-			return nil, heldBy("the repository's index", path)
+		if try >= lockTries {
+			if !r.finish(ctx, gitDir, path) {
+				return nil, heldBy("the repository's index", path)
+			}
+			finished = true
+			continue
 		}
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 		r.sleep(lockWait)
 	}
+}
+
+// finish puts the lock at path in the index's place when it holds the index
+// a run of kit's left, stopped once HEAD had taken its commit, before the
+// lock took the index's place, as that run would have: HEAD's last move
+// kit's, that commit's files as committed in the lock and not in the index,
+// and the lock left alone for as long as kit waits for git's index, so no
+// git is writing it, and unchanged as it's read. The index not having taken
+// the commit tells it from a lock a git took since, as git commit -a's while
+// its editor's open. It reports whether it did.
+func (r Repo) finish(ctx context.Context, gitDir, path string) bool {
+	before, err := os.Stat(path)
+	if err != nil || time.Since(before.ModTime()) < lockTries*lockWait || !r.leftByKit(ctx, path) {
+		return false
+	}
+	after, err := os.Stat(path)
+	if err != nil || !os.SameFile(before, after) || !after.ModTime().Equal(before.ModTime()) || after.Size() != before.Size() {
+		return false
+	}
+	return os.Rename(path, filepath.Join(gitDir, "index")) == nil
+}
+
+// leftByKit reports whether the index at path is one a run of kit's left:
+// HEAD's last move kit's, and the files its commit changed as committed
+// there, while the user's index holds one as it was.
+func (r Repo) leftByKit(ctx context.Context, path string) bool {
+	res, err := r.git(ctx, "log", "--walk-reflogs", "-1", "--no-show-signature", "--format=%gs", "HEAD")
+	if err != nil || !strings.HasPrefix(string(res.Stdout), "kit: ") {
+		return false
+	}
+	res, err = r.git(ctx, "diff-tree", "-r", "--root", "--no-commit-id", "--name-only", "-z", "--no-renames", "HEAD")
+	if err != nil {
+		return false
+	}
+	committed := names(res.Stdout)
+	inLock, err := r.notAtHEAD(ctx, path)
+	if err != nil || slices.ContainsFunc(committed, func(p string) bool { return slices.Contains(inLock, p) }) {
+		return false
+	}
+	inIndex, err := r.notAtHEAD(ctx, "")
+	return err == nil && slices.ContainsFunc(committed, func(p string) bool { return slices.Contains(inIndex, p) })
+}
+
+// notAtHEAD are the files the index at path, the user's for "", holds
+// otherwise than HEAD does: an error when it's no index git can read.
+func (r Repo) notAtHEAD(ctx context.Context, path string) ([]string, error) {
+	var env []string
+	if path != "" {
+		env = []string{"GIT_INDEX_FILE=" + path}
+	}
+	res, err := r.gitIn(ctx, env, nil, "diff-index", "--cached", "--name-only", "-z", "--no-renames", "HEAD")
+	return names(res.Stdout), err
 }
 
 // heldBy is the refusal while another git holds what's locked by the lock

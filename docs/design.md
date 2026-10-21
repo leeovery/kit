@@ -370,7 +370,13 @@ whitespace and blank lines first, last or doubled gone). The user's index's next
 made before HEAD moves, written into the lock, so once HEAD has moved all that's left is the
 lock taking the index's place: a run that stops between leaves the lock, never an index from
 which a `git commit` would undo kit's, and should the lock not take its place, kit names the
-`git reset -q -- <files>` that brings the index up to date. HEAD moves onto the commit only
+`git reset -q -- <files>` that brings the index up to date. A lock so left, the next commit
+puts in the index's place, as the stopped run would have, and says so ("finished the last run's
+index"), once the lock has been left alone for as long as kit waits for git's index and facts
+say it's kit's: HEAD's last move kit's, and that commit's files as committed in the lock but
+not in the user's index, which tells it from a lock a git took since, as `git commit -a`'s
+while its editor's open; any other lock it names, with what to do should no git be running.
+HEAD moves onto the commit only
 from the last commit, so when another git moved HEAD meanwhile, git refuses, and kit, still
 holding the index, makes the commit again onto where HEAD is now, a few times at most; then
 nothing's committed, HEAD and the user's index stay as they were, and kit says so, and that

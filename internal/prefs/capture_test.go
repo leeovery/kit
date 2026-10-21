@@ -400,6 +400,34 @@ func TestCaptureNeverPushesToAPublicStore(t *testing.T) {
 	}
 }
 
+// The index a capture left in git's lock, stopped once HEAD had taken its
+// commit, is put in place before the next commits, and the summary says
+// so. Git's answers about the lock are real git's: HEAD's last move kit's,
+// its commit's file as committed in the lock, but not in the index.
+func TestCaptureFinishesTheIndexAStoppedCaptureLeft(t *testing.T) {
+	const message = "Capture 2026-10-06 03:00: 1 new\n\nnew: com.example.app\nclaimed: the folder, for this Mac's hardware"
+	w := newWorld(t, prefs.Lists{})
+	writeRecord(t, w.state, `{"on": "started fresh"}`)
+	w.fake.On("defaults", "domains").Prints("com.example.app\n")
+	w.exports(t, "com.example.app", map[string]any{"Theme": "dark"})
+	w.pushes(t, message,
+		"?? laptop/.gitignore\x00?? laptop/domains/com.example.app.plist\x00?? laptop/owner\x00",
+		[]string{"laptop/.gitignore", "laptop/domains/com.example.app.plist", "laptop/owner"},
+		"laptop/.gitignore\x00laptop/domains/com.example.app.plist\x00laptop/owner\x00")
+	lock := filepath.Join(w.clone, ".git", "index.lock")
+	w.write(t, lock, "the index a capture left")
+	if stopped := time.Now().Add(-time.Hour); os.Chtimes(lock, stopped, stopped) != nil {
+		t.Fatal("couldn't date the lock")
+	}
+	w.fake.On("git", "-C", w.clone, "log", "--walk-reflogs", "-1", "--no-show-signature", "--format=%gs", "HEAD").Prints("kit: Capture 2026-10-06 02:00: 1 changed\n")
+	w.fake.On("git", "-C", w.clone, "diff-tree", "-r", "--root", "--no-commit-id", "--name-only", "-z", "--no-renames", "HEAD").Prints("laptop/domains/com.example.other.plist\x00")
+	w.fake.On("git", "-C", w.clone, "diff-index", "--cached", "--name-only", "-z", "--no-renames", "HEAD").Then().Prints("laptop/domains/com.example.other.plist\x00")
+	report, err := w.p.Capture(t.Context())
+	if err != nil || !report.Committed || !report.FinishedIndex || !strings.HasSuffix(report.Summary(), "; finished the last run's index") {
+		t.Errorf("Capture() = %+v, %v; want the index finished, then committed, and said", report, err)
+	}
+}
+
 // Python's fnmatch and glob, as prefsync matched: a wildcard matches a
 // slash too in a pattern, and never a hidden name in a glob.
 func TestPatterns(t *testing.T) {

@@ -101,6 +101,27 @@ func TestNothingChangedPushesWhatsWaiting(t *testing.T) {
 	}
 }
 
+// The index a run of kit's left in git's lock, stopped once HEAD had taken
+// its commit, is put in place before kit commits, and said first, whether
+// the commit then goes ahead or fails, as when other gits keep moving HEAD.
+func TestReconcileFinishesTheIndexAStoppedRunLeft(t *testing.T) {
+	for _, c := range []struct {
+		moved bool
+		want  string
+	}{
+		{false, "kit-config ok finished the last run's index; committed and pushed shared/home/.zshrc"},
+		{true, "kit-config failed finished the last run's index; couldn't commit shared/home/.zshrc: HEAD kept moving"},
+	} {
+		w := editsWorld(t)
+		commit := edited("kit reconcile (laptop): adopt config:shared/home/.zshrc", "shared/home/.zshrc")
+		commit.left, commit.moved = true, c.moved
+		w.expectCommit(t, commit)
+		if out, _, _ := w.run(t, "reconcile", "config:shared/home/.zshrc", "--adopt"); !strings.Contains(out, c.want) {
+			t.Errorf("HEAD moving %v: kit reconcile printed\n%s", c.moved, out)
+		}
+	}
+}
+
 // Other gits moving HEAD each time kit commits leave nothing committed:
 // kit says so, and that kit reconcile commits it, the edit left as drift,
 // and nothing's pushed or brought in.

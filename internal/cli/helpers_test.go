@@ -186,12 +186,14 @@ var errNotFound = runner.ErrNotFound
 // is on disk, in an index of its own; staged is what git says is staged
 // there (-z); and the user's index takes the files staged as committed.
 // The commit goes onto head, unless moved, other gits moving HEAD every
-// time kit tries, when nothing's committed or pushed.
+// time kit tries, when nothing's committed or pushed. With left, git's lock
+// holds the index a run of kit's left, stopped once HEAD had taken its
+// commit of laptop/declarations, which kit puts in place first.
 type commit struct {
 	message        string
 	paths, update  []string
 	status, staged string
-	moved          bool
+	moved, left    bool
 }
 
 // edited is a commit of files, each a file edited and committed whole.
@@ -272,6 +274,9 @@ func (w *world) expectCommit(t *testing.T, c commit, checks ...func()) {
 	}
 	w.fake.On("git", git(slices.Concat([]string{"--literal-pathspecs", "status", "--porcelain", "-z", "--untracked-files=all", "--no-renames", "--"}, c.paths)...)...).Prints(c.status).Does(asked)
 	w.fake.On("git", git("rev-parse", "--absolute-git-dir")...).Prints(gitDir + "\n")
+	if c.left {
+		w.leavesIndex(t, dir, gitDir)
+	}
 	// The commits HEAD's at as kit tries, each moved off by another git
 	// when moved, the last where HEAD's left.
 	bases, tried := []string{head}, 1
@@ -307,18 +312,48 @@ func (w *world) expectCommit(t *testing.T, c commit, checks ...func()) {
 	if !c.moved {
 		w.expectPush(t, gitDir)
 	}
+	// The index once kit's done: git's reset of it when kit committed, the
+	// one the stopped run left when it didn't, else none.
+	index := reset
+	switch {
+	case c.moved && c.left:
+		index = leftIndex
+	case c.moved:
+		index = ""
+	}
 	t.Cleanup(func() {
 		entries, _ := os.ReadDir(gitDir)
 		data, _ := os.ReadFile(filepath.Join(gitDir, "index"))
 		switch {
 		case committed.Load() == c.moved:
 			t.Errorf("kit committed %q: %v, HEAD moving %v", c.message, committed.Load(), c.moved)
-		case c.moved && len(entries) != 0:
+		case index == "" && len(entries) != 0:
 			t.Errorf("the git folder holds %v; want it left as it was, empty", entries)
-		case !c.moved && (len(entries) != 1 || string(data) != reset):
-			t.Errorf("the git folder holds %v, its index %q; want the index git reset", entries, data)
+		case index != "" && (len(entries) != 1 || string(data) != index):
+			t.Errorf("the git folder holds %v, its index %q; want %q", entries, data, index)
 		}
 	})
+}
+
+// leftIndex is what the index a run of kit's left holds.
+const leftIndex = "the index a run of kit's left"
+
+// leavesIndex leaves in gitDir, the git folder of kit-config at dir, git's
+// lock holding the index a run of kit's left, stopped a minute ago once
+// HEAD had taken its commit of laptop/declarations, and scripts git's
+// answers about it, as real git gives them: HEAD's last move kit's, its
+// commit's file as committed in the lock, but not in the user's index.
+func (w *world) leavesIndex(t *testing.T, dir, gitDir string) {
+	t.Helper()
+	lock := filepath.Join(gitDir, "index.lock")
+	stopped := time.Now().Add(-time.Minute)
+	if err := errors.Join(os.WriteFile(lock, []byte(leftIndex), 0o644), os.Chtimes(lock, stopped, stopped)); err != nil {
+		t.Fatal(err)
+	}
+	git := func(args ...string) []string { return append([]string{"-C", dir}, args...) }
+	w.fake.On("git", git("log", "--walk-reflogs", "-1", "--no-show-signature", "--format=%gs", "HEAD")...).Prints("kit: kit brew add jq (laptop)\n")
+	w.fake.On("git", git("diff-tree", "-r", "--root", "--no-commit-id", "--name-only", "-z", "--no-renames", "HEAD")...).Prints("laptop/declarations\x00")
+	w.fake.On("git", git("diff-index", "--cached", "--name-only", "-z", "--no-renames", "HEAD")...).Then().Prints("laptop/declarations\x00")
 }
 
 // waiting scripts git's answers as kit asks which of kit-config's commits

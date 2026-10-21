@@ -114,19 +114,42 @@ func (c *changes) sync(ctx context.Context, message string) {
 			return c.pushWaiting(ctx)
 		}
 		slices.Sort(c.files)
-		committed, err := c.run.repo.Commit(ctx, message, c.files...)
-		switch {
-		case !committed && err != nil:
-			return check.Result{State: check.Failed, Reason: "couldn't commit " + strings.Join(c.files, ", ") + ": " + whyNot(err)}
-		case !committed:
-			return c.pushWaiting(ctx)
-		}
-		res := c.push(ctx)
-		if err != nil {
-			res.State, res.Summary = check.Attention, res.Summary+"; "+err.Error()
+		out, err := c.run.repo.Commit(ctx, message, c.files...)
+		res := c.committed(ctx, out.Committed, err)
+		if out.Finished {
+			res = finishedFirst(res)
 		}
 		return res
 	})
+}
+
+// finishedFirst is res, sync's step, first saying the commit put in place
+// the index a run of kit's that stopped left: in its reason when it
+// failed, as a failure's shown by that.
+func finishedFirst(res check.Result) check.Result {
+	const finished = "finished the last run's index; "
+	if res.State == check.Failed {
+		res.Reason = finished + res.Reason
+	} else {
+		res.Summary = finished + res.Summary
+	}
+	return res
+}
+
+// committed is sync's step once the commit's done, as it went: pushed,
+// unless it failed.
+func (c *changes) committed(ctx context.Context, committed bool, err error) check.Result {
+	switch {
+	case !committed && err != nil:
+		return check.Result{State: check.Failed, Reason: "couldn't commit " + strings.Join(c.files, ", ") + ": " + whyNot(err)}
+	case !committed:
+		return c.pushWaiting(ctx)
+	}
+	res := c.push(ctx)
+	if err != nil {
+		res.State, res.Summary = check.Attention, res.Summary+"; "+err.Error()
+	}
+	return res
 }
 
 // whyNot is why sync committed nothing, err, and, when other gits kept
