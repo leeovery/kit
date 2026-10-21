@@ -218,9 +218,9 @@ type Report struct {
 	Claimed bool
 	// Committed is whether anything changed, so a commit was made.
 	Committed bool
-	// FinishedIndex is whether the commit first put in place the index a
-	// capture that stopped left in git's lock.
-	FinishedIndex bool
+	// Notes are what the clone's pull, commit and push did besides, worth
+	// saying, as dealing with what a capture that stopped left.
+	Notes []string
 	// PushError is why the push failed: the commit waits for the next one.
 	PushError string
 }
@@ -232,6 +232,14 @@ func (r Report) Changes() []string {
 		out = append(out, c.what+": "+c.name)
 	}
 	return out
+}
+
+// withNotes is s, a summary, then each of notes, said besides.
+func withNotes(s string, notes []string) string {
+	if len(notes) == 0 {
+		return s
+	}
+	return s + "; " + strings.Join(notes, "; ")
 }
 
 // Summary is the capture in a line, as prefsync's: "57 domains, 2 changed;
@@ -260,9 +268,7 @@ func (r Report) Summary() string {
 	if r.Pending > 0 {
 		s += fmt.Sprintf("; %d pending restore", r.Pending)
 	}
-	if r.FinishedIndex {
-		s += "; finished the last run's index"
-	}
+	s = withNotes(s, r.Notes)
 	if len(r.Errors) > 0 {
 		s += fmt.Sprintf("; %d errors", len(r.Errors))
 	}
@@ -370,7 +376,7 @@ func (p *Prefs) Capture(ctx context.Context) (Report, error) {
 	// Offline, or refused, capture carries on, its commit waiting to be
 	// pushed, and the push saying why not.
 	repo := p.repo()
-	_ = repo.Pull(ctx)
+	report.Notes, _ = repo.Pull(ctx)
 	store := filepath.Join(p.Clone, p.Mac)
 	owner, owned, err := readOwner(store)
 	if err != nil {
@@ -496,14 +502,16 @@ func (p *Prefs) Capture(ctx context.Context) (Report, error) {
 	pruneEmpty(filesDir)
 
 	out, err := repo.Commit(ctx, report.message(p.Now().Format("2006-01-02 15:04")), p.Mac)
-	report.Committed, report.FinishedIndex = out.Committed, out.Finished
+	report.Committed, report.Notes = out.Committed, append(report.Notes, out.Notes...)
 	if err != nil {
 		report.Errors = append(report.Errors, "history: "+err.Error())
 	}
 	// Nothing's pushed once the commit failed, as one refused during a
 	// merge, or given up as HEAD kept moving.
 	if err == nil || out.Committed {
-		report.PushError = p.push(ctx, repo)
+		var notes []string
+		notes, report.PushError = p.push(ctx, repo)
+		report.Notes = append(report.Notes, notes...)
 	} else {
 		report.PushError = "not pushed: " + err.Error()
 	}

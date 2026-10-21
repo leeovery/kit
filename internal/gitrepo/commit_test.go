@@ -245,8 +245,8 @@ func (c commitCase) script(t *testing.T, fake *runnertest.Fake, gitDir string) [
 			if data, _ := os.ReadFile(filepath.Join(gitDir, "index.lock")); string(data) != resetEntries {
 				t.Errorf("%s: HEAD moved with the lock holding %q, want the index's next contents", c.name, data)
 			}
-			if data, _ := os.ReadFile(filepath.Join(gitDir, marked)); string(data) != mark(made, resetEntries) {
-				t.Errorf("%s: HEAD moved with kit's mark %q, want %q: the commit, and the lock's hash", c.name, data, mark(made, resetEntries))
+			if data, want := readFile(gitDir, marked), markOf(t, onto, made, filepath.Join(gitDir, "index.lock")); data != want {
+				t.Errorf("%s: HEAD moved with kit's mark %q, want %q: the commits, and the lock's hash and file", c.name, data, want)
 			}
 		})
 	}
@@ -604,17 +604,18 @@ func TestCommitRefusesAConflict(t *testing.T) {
 }
 
 // While another git holds the index, kit tries again for a moment, then
-// refuses, naming the lock and how old it is, and what to do should no git
-// be running, but leaves it as it is, with no mark of kit's on it: nothing
-// of the folder's touched, not even kit's own files from a run that
-// stopped.
+// refuses, naming the lock and how old it is, by when it last changed,
+// never the time it carries, as kit's own carries the index's, and what to
+// do should no git be running, but leaves it as it is, with no mark of
+// kit's on it: nothing of the folder's touched, not even kit's own files
+// from a run that stopped.
 func TestCommitWaitsForAnotherGit(t *testing.T) {
 	gitDir := gitFolder(t, false, "kit-index-123")
 	lock := filepath.Join(gitDir, "index.lock")
 	if err := os.WriteFile(lock, []byte("another git's"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if made := time.Now().Add(-3*time.Hour - time.Minute); os.Chtimes(lock, made, made) != nil {
+	if carries := time.Now().Add(-3*time.Hour - time.Minute); os.Chtimes(lock, carries, carries) != nil {
 		t.Fatal("couldn't date the lock")
 	}
 	fake := runnertest.New(t)
@@ -625,7 +626,7 @@ func TestCommitWaitsForAnotherGit(t *testing.T) {
 	var waited time.Duration
 	repo := gitrepo.Repo{Dir: dir, Run: fake, Sleep: func(d time.Duration) { tries, waited = tries+1, waited+d }}
 	committed, err := didCommit(repo.Commit(context.Background(), "kit test", "brew"))
-	if want := "another git holds the repository's index, its lock " + lock + ", made 3 hours ago, so kit's change waits till it's done; if no git is running, one that stopped left it: remove " + lock; committed || err == nil || err.Error() != want {
+	if want := "another git holds the repository's index, its lock " + lock + ", made just now, so kit's change waits till it's done; if no git is running, one that stopped left it: remove " + lock; committed || err == nil || err.Error() != want {
 		t.Errorf("Commit() with the index locked = %v, %v; want %q", committed, err, want)
 	}
 	if tries < 2 || waited > 5*time.Second {
@@ -907,15 +908,14 @@ func TestCommitFails(t *testing.T) {
 
 	refs := filepath.Join(gitDir, "refs", "heads")
 	branchLock, headLock := filepath.Join(refs, "main.lock"), filepath.Join(gitDir, "HEAD.lock")
-	locked := time.Now().Add(-2*time.Hour - time.Minute)
-	if err := errors.Join(os.MkdirAll(refs, 0o700), os.WriteFile(branchLock, nil, 0o600), os.Chtimes(branchLock, locked, locked), os.WriteFile(headLock, nil, 0o600)); err != nil {
+	if err := errors.Join(os.MkdirAll(refs, 0o700), os.WriteFile(branchLock, nil, 0o600), os.WriteFile(headLock, nil, 0o600)); err != nil {
 		t.Fatal(err)
 	}
 	refused := func(lock string) string {
 		return "fatal: update_ref failed for ref 'HEAD': cannot lock ref 'HEAD': Unable to create '" + lock + "': File exists.\n\nAnother git process seems to be running in this repository, or the lock file may be stale\n"
 	}
 	for _, c := range []struct{ name, stderr, says string }{
-		{"the branch locked", refused(branchLock), "another git holds HEAD's branch, its lock " + branchLock + ", made 2 hours ago, so kit's change waits till it's done; if no git is running, one that stopped left it: remove " + branchLock},
+		{"the branch locked", refused(branchLock), "another git holds HEAD's branch, its lock " + branchLock + ", made just now, so kit's change waits till it's done; if no git is running, one that stopped left it: remove " + branchLock},
 		{"HEAD locked", refused(headLock), "another git holds HEAD, its lock " + headLock + ", made just now, so"},
 		{"a reference-transaction hook refusing", "no\nfatal: in 'prepared' phase, update aborted by the reference-transaction hook\n", "aborted by the reference-transaction hook"},
 	} {

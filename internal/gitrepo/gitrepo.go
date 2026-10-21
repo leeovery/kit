@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -26,6 +25,9 @@ type Repo struct {
 	Sleep func(time.Duration)
 	// onUnlock, when set, is called as a commit lets go of git's index.
 	onUnlock func()
+	// flock, when set, takes the kernel's lock on the file open at fd in
+	// syscall.Flock's place.
+	flock func(fd int) error
 }
 
 func (r Repo) git(ctx context.Context, args ...string) (runner.Result, error) {
@@ -158,25 +160,4 @@ func (r Repo) Ignored(ctx context.Context, paths ...string) (map[string]Rule, er
 		ignored[path] = Rule{Pattern: pattern, Source: source, Line: n}
 	}
 	return ignored, nil
-}
-
-// githubRemote reads a GitHub remote's owner and repository, in either of
-// git's forms.
-var githubRemote = regexp.MustCompile(`^(?:https://github\.com/|git@github\.com:|ssh://git@github\.com/)([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?/?$`)
-
-// GitHubVisibility is the visibility on GitHub (private, internal or
-// public) of the repository at remote, a URL in either of git's forms,
-// asked through gh, and its owner/name; repo is "" for a remote that isn't
-// on GitHub, so isn't public there.
-func GitHubVisibility(ctx context.Context, run runner.Runner, remote string) (repo, visibility string, err error) {
-	m := githubRemote.FindStringSubmatch(strings.TrimSpace(remote))
-	if m == nil {
-		return "", "", nil
-	}
-	repo = m[1] + "/" + m[2]
-	res, err := run.Run(ctx, runner.Command{Name: "gh", Args: []string{"repo", "view", repo, "--json", "visibility", "--jq", ".visibility"}})
-	if err != nil {
-		return repo, "", fmt.Errorf("couldn't ask GitHub: %w", err)
-	}
-	return repo, strings.ToLower(strings.TrimSpace(string(res.Stdout))), nil
 }

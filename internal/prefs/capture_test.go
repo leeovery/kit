@@ -3,11 +3,13 @@ package prefs_test
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -95,6 +97,7 @@ func (w *world) pushes(t *testing.T, message, status string, update []string, st
 		w.write(t, filepath.Join(gitDir, "kit-index.next"), "the index, as committed")
 	})
 	w.fake.On("git", "-C", w.clone, "remote", "get-url", "--push", "--all", "origin").Prints(remote + "\n")
+	w.fake.On("ssh", "-G", "github.com").Prints("user git\nhostname github.com\nport 22\n")
 	w.fake.On("gh", "repo", "view", "someone/prefs", "--json", "visibility", "--jq", ".visibility").Prints("PRIVATE\n")
 	w.pulls()
 	w.fake.On("git", "-C", w.clone, "push", "--quiet")
@@ -382,12 +385,13 @@ func (w *world) movingHEAD(message string) {
 }
 
 // A store that isn't private is never pushed to: the commit waits, and the
-// record says since when. It's where git push sends it that's looked at, a
-// push URL the remote has, public behind its private URL, among them.
+// record says since when. It's where git push sends it that's looked at: a
+// push URL the remote has set, public, in its private URL's place, which
+// git names alone, as it pushes there alone.
 func TestCaptureNeverPushesToAPublicStore(t *testing.T) {
 	for _, c := range []struct{ name, pushURLs, public string }{
 		{"the store public", remote + "\n", "someone/prefs"},
-		{"a push URL public", remote + "\n" + "git@github.com:someone/public-prefs.git\n", "someone/public-prefs"},
+		{"a push URL public", "git@github.com:someone/public-prefs.git\n", "someone/public-prefs"},
 	} {
 		w := newWorld(t, prefs.Lists{})
 		writeRecord(t, w.state, `{"on": "started fresh"}`)
@@ -412,9 +416,27 @@ func TestCaptureNeverPushesToAPublicStore(t *testing.T) {
 	}
 }
 
-// The index a capture left in git's lock, stopped once HEAD had taken its
-// commit, its mark naming that commit and the lock's hash, is put in place
-// before the next commits, and the summary says so.
+// leavesIndex leaves in the clone's git folder git's lock holding the index
+// a capture left, stopped once HEAD had moved onto its commit, head, and
+// its mark: the commit HEAD was on, that one, and the lock by its hash and
+// file, device and inode.
+func (w *world) leavesIndex(t *testing.T) {
+	t.Helper()
+	const left, before = "the index a capture left", "9f8e7d6c5b4a39281706f5e4d3c2b1a098765432"
+	lock := filepath.Join(w.clone, ".git", "index.lock")
+	w.write(t, lock, left)
+	info, err := os.Stat(lock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := info.Sys().(*syscall.Stat_t)
+	sum := sha256.Sum256([]byte(left))
+	w.write(t, filepath.Join(w.clone, ".git", "kit-mark"), fmt.Sprintf("%s %s %s %d:%d\n", before, head, hex.EncodeToString(sum[:]), st.Dev, st.Ino))
+}
+
+// The index a capture left in git's lock, stopped once HEAD had moved onto
+// its commit, its mark naming that commit and the lock by its hash and
+// file, is put in place before the next commits, and the summary says so.
 func TestCaptureFinishesTheIndexAStoppedCaptureLeft(t *testing.T) {
 	const message = "Capture 2026-10-06 03:00: 1 new\n\nnew: com.example.app\nclaimed: the folder, for this Mac's hardware"
 	w := newWorld(t, prefs.Lists{})
@@ -425,12 +447,9 @@ func TestCaptureFinishesTheIndexAStoppedCaptureLeft(t *testing.T) {
 		"?? laptop/.gitignore\x00?? laptop/domains/com.example.app.plist\x00?? laptop/owner\x00",
 		[]string{"laptop/.gitignore", "laptop/domains/com.example.app.plist", "laptop/owner"},
 		"laptop/.gitignore\x00laptop/domains/com.example.app.plist\x00laptop/owner\x00")
-	const left = "the index a capture left"
-	sum := sha256.Sum256([]byte(left))
-	w.write(t, filepath.Join(w.clone, ".git", "index.lock"), left)
-	w.write(t, filepath.Join(w.clone, ".git", "kit-index.made"), head+" "+hex.EncodeToString(sum[:])+"\n")
+	w.leavesIndex(t)
 	report, err := w.p.Capture(t.Context())
-	if err != nil || !report.Committed || !report.FinishedIndex || !strings.HasSuffix(report.Summary(), "; finished the last run's index") {
+	if err != nil || !report.Committed || !slices.Equal(report.Notes, []string{"finished the last run's index"}) || !strings.HasSuffix(report.Summary(), "; finished the last run's index") {
 		t.Errorf("Capture() = %+v, %v; want the index finished, then committed, and said", report, err)
 	}
 }

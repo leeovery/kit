@@ -115,23 +115,22 @@ func (c *changes) sync(ctx context.Context, message string) {
 		}
 		slices.Sort(c.files)
 		out, err := c.run.repo.Commit(ctx, message, c.files...)
-		res := c.committed(ctx, out.Committed, err)
-		if out.Finished {
-			res = finishedFirst(res)
-		}
-		return res
+		return noted(c.committed(ctx, out.Committed, err), out.Notes)
 	})
 }
 
-// finishedFirst is res, sync's step, first saying the commit put in place
-// the index a run of kit's that stopped left: in its reason when it
-// failed, as a failure's shown by that.
-func finishedFirst(res check.Result) check.Result {
-	const finished = "finished the last run's index; "
+// noted is res, sync's step, first saying what else git's side of it did,
+// notes, as dealing with what a run of kit's that stopped left: in its
+// reason when it failed, as a failure's shown by that.
+func noted(res check.Result, notes []string) check.Result {
+	if len(notes) == 0 {
+		return res
+	}
+	said := strings.Join(notes, "; ") + "; "
 	if res.State == check.Failed {
-		res.Reason = finished + res.Reason
+		res.Reason = said + res.Reason
 	} else {
-		res.Summary = finished + res.Summary
+		res.Summary = said + res.Summary
 	}
 	return res
 }
@@ -163,14 +162,14 @@ func whyNot(err error) string {
 
 // push pushes what sync committed.
 func (c *changes) push(ctx context.Context) check.Result {
-	err := c.run.repo.Push(ctx)
+	notes, err := c.run.repo.Push(ctx)
 	switch {
 	case errors.Is(err, gitrepo.ErrNoRemote):
 		return check.Result{State: check.OK, Summary: "committed; no remote to push to"}
 	case err != nil:
-		return check.Result{State: check.Attention, Summary: "committed, not pushed: " + err.Error()}
+		return noted(check.Result{State: check.Attention, Summary: "committed, not pushed: " + err.Error()}, notes)
 	}
-	return check.Result{State: check.OK, Summary: "committed and pushed " + strings.Join(c.files, ", ")}
+	return noted(check.Result{State: check.OK, Summary: "committed and pushed " + strings.Join(c.files, ", ")}, notes)
 }
 
 // pushWaiting is sync's step with nothing committed: the commits waiting
@@ -182,14 +181,14 @@ func (c *changes) pushWaiting(ctx context.Context) check.Result {
 		return nothing
 	}
 	waiting := plural(n, "commit") + " waiting"
-	err := c.run.repo.Push(ctx)
+	notes, err := c.run.repo.Push(ctx)
 	switch {
 	case errors.Is(err, gitrepo.ErrNoRemote):
 		return nothing
 	case err != nil:
-		return check.Result{State: check.Attention, Summary: "nothing changed; " + waiting + ", not pushed: " + err.Error()}
+		return noted(check.Result{State: check.Attention, Summary: "nothing changed; " + waiting + ", not pushed: " + err.Error()}, notes)
 	}
-	return check.Result{State: check.OK, Summary: "nothing changed; pushed " + waiting}
+	return noted(check.Result{State: check.OK, Summary: "nothing changed; pushed " + waiting}, notes)
 }
 
 // finish ends the run, returning attention when a step didn't stand ok.

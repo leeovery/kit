@@ -68,29 +68,30 @@ func (p *Prefs) repo() gitrepo.Repo {
 }
 
 // push sends the store's commits to its remote, only when every URL Push
-// pushes to is private on GitHub, or not on GitHub at all: why it didn't,
-// or "" once pushed.
-func (p *Prefs) push(ctx context.Context, repo gitrepo.Repo) string {
+// pushes to is private on GitHub, or not on GitHub at all: what the push
+// did besides (Push), and why it didn't push, or "" once pushed.
+func (p *Prefs) push(ctx context.Context, repo gitrepo.Repo) ([]string, string) {
 	urls, err := repo.PushURLs(ctx)
 	switch {
 	case errors.Is(err, gitrepo.ErrNoRemote):
-		return "no remote to push to"
+		return nil, "no remote to push to"
 	case err != nil:
-		return err.Error()
+		return nil, err.Error()
 	}
 	for _, url := range urls {
 		name, visibility, err := gitrepo.GitHubVisibility(ctx, p.Run, url)
 		switch {
 		case err != nil:
-			return err.Error()
+			return nil, err.Error()
 		case name != "" && visibility != "private":
-			return fmt.Sprintf("%s is %s on GitHub: kit pushes apps' settings only to a private repository (gh repo edit %s --visibility private --accept-visibility-change-consequences)", name, visibility, name)
+			return nil, fmt.Sprintf("%s is %s on GitHub: kit pushes apps' settings only to a private repository (gh repo edit %s --visibility private --accept-visibility-change-consequences)", name, visibility, name)
 		}
 	}
-	if err := repo.Push(ctx); err != nil {
-		return err.Error()
+	notes, err := repo.Push(ctx)
+	if err != nil {
+		return notes, err.Error()
 	}
-	return ""
+	return notes, ""
 }
 
 // History is the captures that changed a Mac's folder, newest first, count

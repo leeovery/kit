@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -20,20 +19,22 @@ import (
 
 // ownIndex and nextIndex are the files in the git folder a commit works in
 // while it holds git's index: an index of its own, then the next of the
-// user's; marked is the mark it leaves before HEAD moves. Every file whose
-// name starts with ownIndex is kit's, swept away only while kit holds the
-// repository's commit lock, so no other kit is using one.
+// user's. Every file whose name starts with ownIndex is kit's, swept away
+// only while kit holds the repository's commit lock, so no other kit is
+// using one. marked is kit's mark (mark), which outlasts a sweep, as a run
+// that finds it reads it first.
 const (
 	ownIndex  = "kit-index"
 	nextIndex = "kit-index.next"
-	marked    = "kit-index.made"
+	marked    = "kit-mark"
 )
 
 // commitLock is the file in the git folder whose kernel lock kit holds for
 // a whole commit, so no other kit commits there meanwhile, the kernel
 // letting go should the run die. It's never swept or removed: a kit waiting
-// for it would go on to lock a file no longer there.
-const commitLock = "kit-commit.lock"
+// for it would go on to lock a file no longer there. Its name doesn't end
+// in .lock, which cleaners of git's stale locks remove.
+const commitLock = "kit-commits"
 
 // lockTries and lockWait are how long a commit waits for another git to let
 // go of the index, or another kit of the repository: as long as a git
@@ -49,30 +50,65 @@ var errLockTaken = errors.New("kit's lock on git's index was removed or replaced
 
 // lockCommits takes kit's lock on committing in the repository whose git
 // folder is gitDir, trying for a while if another kit holds it, then
-// refusing. Closing the file lets go of it.
+// refusing; closing the file lets go of it. A file a cleaner removed or
+// replaced meanwhile, it locks the one there now. It's nil, with no error,
+// where the git folder's filesystem takes no such lock (NFS mounted without
+// locks, some FUSE filesystems).
 func (r Repo) lockCommits(ctx context.Context, gitDir string) (*os.File, error) {
-	f, err := os.OpenFile(filepath.Join(gitDir, commitLock), os.O_RDWR|os.O_CREATE, 0o600)
-	if err != nil {
-		return nil, fmt.Errorf("couldn't lock the repository for kit's commit: %w", err)
-	}
+	path := filepath.Join(gitDir, commitLock)
+	var f *os.File
+	unlockable := false
 	got, err := r.wait(ctx, func() (bool, error) {
-		err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
-		if errors.Is(err, syscall.EWOULDBLOCK) {
-			return false, nil
+		if f == nil {
+			var err error
+			if f, err = os.OpenFile(path, os.O_RDONLY|os.O_CREATE, 0o644); err != nil {
+				return false, fmt.Errorf("couldn't lock the repository for kit's commit: %w", err)
+			}
 		}
-		if err != nil {
+		err := r.lockFile(f)
+		switch {
+		case errors.Is(err, syscall.EWOULDBLOCK):
+			return false, nil
+		case errors.Is(err, syscall.ENOTSUP), errors.Is(err, syscall.EOPNOTSUPP), errors.Is(err, syscall.ENOLCK):
+			unlockable = true
+			return true, nil
+		case err != nil:
 			return false, fmt.Errorf("couldn't lock the repository for kit's commit: %w", err)
+		case !stillAt(f, path):
+			_ = f.Close()
+			f = nil
+			return false, nil
 		}
 		return true, nil
 	})
 	if err == nil && !got {
 		err = errors.New("another kit is committing in the repository, so kit's change waits till it's done")
 	}
-	if err != nil {
-		_ = f.Close()
+	if err != nil || unlockable {
+		if f != nil {
+			_ = f.Close()
+		}
 		return nil, err
 	}
 	return f, nil
+}
+
+// lockFile takes the kernel's lock on f, never waiting.
+func (r Repo) lockFile(f *os.File) error {
+	if r.flock != nil {
+		return r.flock(int(f.Fd()))
+	}
+	return syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+}
+
+// stillAt reports whether f, open, is the file at path.
+func stillAt(f *os.File, path string) bool {
+	held, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	now, err := os.Lstat(path)
+	return err == nil && os.SameFile(held, now)
 }
 
 // indexLock is git's lock on the index, index.lock in the git folder, held
@@ -91,14 +127,11 @@ type indexLock struct {
 	unlocked func()
 }
 
-// lockIndex takes git's lock on the index, holding kit's commit lock,
-// trying for a while if another git holds it, then refusing, naming the
-// lock, which it leaves be; kit's own files a run that stopped left are
-// swept away once it has it. A lock holding the index a run of kit's left,
-// it first puts in place (finish), and reports it did.
-func (r Repo) lockIndex(ctx context.Context, gitDir string) (*indexLock, bool, error) {
+// lockIndex takes git's lock on the index, trying for a while if another
+// git holds it, then refusing, naming the lock, which it leaves be; kit's
+// own files a run that stopped left are swept away once it has it.
+func (r Repo) lockIndex(ctx context.Context, gitDir string) (*indexLock, error) {
 	path := filepath.Join(gitDir, "index.lock")
-	finished := r.finish(ctx, gitDir, path)
 	var f *os.File
 	got, err := r.wait(ctx, func() (bool, error) {
 		var err error
@@ -115,17 +148,17 @@ func (r Repo) lockIndex(ctx context.Context, gitDir string) (*indexLock, bool, e
 		err = heldBy("the repository's index", path)
 	}
 	if err != nil {
-		return nil, finished, err
+		return nil, err
 	}
 	made, err := f.Stat()
 	if err != nil {
 		_ = f.Close()
 		_ = os.Remove(path)
-		return nil, finished, fmt.Errorf("couldn't lock git's index: %w", err)
+		return nil, fmt.Errorf("couldn't lock git's index: %w", err)
 	}
 	l := &indexLock{gitDir: gitDir, f: f, made: made, unlocked: r.onUnlock}
 	l.sweep()
-	return l, finished, nil
+	return l, nil
 }
 
 // wait has take try to take what kit waits for, again for a while till it
@@ -143,51 +176,6 @@ func (r Repo) wait(ctx context.Context, take func() (bool, error)) (bool, error)
 		}
 		r.sleep(lockWait)
 	}
-}
-
-// finish puts the lock at path in the index's place when it holds the index
-// a run of kit's left, stopped once HEAD had taken its commit, before the
-// lock took the index's place, as that run would have. Kit holding the
-// commit lock, that run is over; its mark says the rest: HEAD is the commit
-// it names, and the lock the very file it filled, by its hash. It reports
-// whether it did.
-func (r Repo) finish(ctx context.Context, gitDir, path string) bool {
-	mark := filepath.Join(gitDir, marked)
-	data, err := os.ReadFile(mark)
-	if err != nil {
-		return false
-	}
-	made, filled, _ := strings.Cut(strings.TrimSpace(string(data)), " ")
-	info, sum, err := hashed(path)
-	if err != nil || sum != filled {
-		return false
-	}
-	if head, err := r.commitAt(ctx, "HEAD"); err != nil || head != made {
-		return false
-	}
-	if now, err := os.Lstat(path); err != nil || !os.SameFile(info, now) || os.Rename(path, filepath.Join(gitDir, "index")) != nil {
-		return false
-	}
-	_ = os.Remove(mark)
-	return true
-}
-
-// hashed is the file at path, and the hash of what it holds.
-func hashed(path string) (fs.FileInfo, string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, "", err
-	}
-	defer func() { _ = f.Close() }()
-	info, err := f.Stat()
-	if err != nil {
-		return nil, "", err
-	}
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return nil, "", err
-	}
-	return info, hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // lockedRef is git saying another git holds a ref's lock, the lock's path
@@ -215,13 +203,24 @@ func refHeld(err error) error {
 }
 
 // heldBy is the refusal while another git holds what's locked by the lock
-// at path: how old it is, and, for one a git that stopped left, what to do.
+// at path: how old it is, by when it last changed, as a lock of kit's
+// carries the index's time, and, for one a git that stopped left, what to
+// do.
 func heldBy(what, path string) error {
 	age := ""
 	if info, err := os.Stat(path); err == nil {
-		age = ", made " + since(time.Since(info.ModTime()))
+		age = ", made " + since(time.Since(changed(info)))
 	}
 	return fmt.Errorf("another git holds %s, its lock %s%s, so kit's change waits till it's done; if no git is running, one that stopped left it: remove %s", what, path, age, path)
+}
+
+// changed is when the file info describes last changed, its contents or
+// its times.
+func changed(info fs.FileInfo) time.Time {
+	if st, ok := info.Sys().(*syscall.Stat_t); ok {
+		return time.Unix(st.Ctimespec.Unix())
+	}
+	return info.ModTime()
 }
 
 // since says roughly how long ago it was, d ago: just now, or as in 3 hours
@@ -302,24 +301,26 @@ func (l *indexLock) fill(next string, mode fs.FileMode) error {
 		return err
 	}
 	if mode != 0 {
-		if err := os.Chmod(l.path(), mode); err != nil {
+		if err := l.f.Chmod(mode); err != nil {
 			return err
 		}
 	}
 	sum := sha256.Sum256(data)
 	l.sum = hex.EncodeToString(sum[:])
-	return os.Chtimes(l.path(), info.ModTime(), info.ModTime())
+	at := syscall.NsecToTimeval(info.ModTime().UnixNano())
+	return syscall.Futimes(int(l.f.Fd()), []syscall.Timeval{at, at})
 }
 
-// mark leaves, before HEAD moves onto made, the mark of the lock as filled,
-// for a run that finds it left should this one stop before it takes the
-// index's place (finish): made, and the lock's hash.
-func (l *indexLock) mark(made string) error {
-	return os.WriteFile(l.file(marked), []byte(made+" "+l.sum+"\n"), 0o600)
+// mark leaves, before HEAD moves from base onto made, kit's mark of the
+// lock as filled, for a run that finds it left should this one stop
+// (recover).
+func (l *indexLock) mark(base, made string) error {
+	m := mark{base: base, made: made, sum: l.sum, file: fileID(l.made)}
+	return os.WriteFile(l.file(marked), []byte(m.String()), 0o600)
 }
 
 // commit makes the lock, filled, the index, then sweeps kit's own files
-// away, its mark among them; a lock no longer kit's it leaves be.
+// away, and its mark; a lock no longer kit's it leaves be.
 func (l *indexLock) commit() error {
 	if err := l.f.Close(); err != nil {
 		return err
@@ -332,13 +333,14 @@ func (l *indexLock) commit() error {
 		return err
 	}
 	l.sweep()
+	_ = os.Remove(l.file(marked))
 	l.letGo()
 	return nil
 }
 
-// release lets go of the lock, the index as it was, kit's own files swept
-// away, unless commit made the lock the index; a lock no longer kit's it
-// leaves be, and kit's files with it.
+// release lets go of the lock, the index as it was, kit's own files and its
+// mark swept away, unless commit made the lock the index; a lock no longer
+// kit's it leaves be, and kit's files with it.
 func (l *indexLock) release() {
 	if l.done {
 		return
@@ -347,6 +349,7 @@ func (l *indexLock) release() {
 	if l.mine() {
 		l.sweep()
 		_ = os.Remove(l.path())
+		_ = os.Remove(l.file(marked))
 	}
 	l.letGo()
 }

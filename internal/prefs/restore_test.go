@@ -452,6 +452,15 @@ func TestRestorePendingDryRunAndScratch(t *testing.T) {
 	if err != nil || report.Summary() != "imported com.example.later as scratch.test" {
 		t.Errorf("Restore(--as) = %q, %v", report.Summary(), err)
 	}
+
+	// What a capture that stopped left, the pull deals with, and the
+	// summary says.
+	w.leavesIndex(t)
+	w.fake.On("git", "-C", w.clone, "rev-parse", "--verify", "--quiet", "HEAD").Prints(head + "\n")
+	report, err = w.p.Restore(t.Context(), prefs.RestoreOptions{Domains: []string{"com.example.later"}, As: "scratch.test"})
+	if err != nil || report.Summary() != "imported com.example.later as scratch.test; finished the last run's index" {
+		t.Errorf("Restore(--as), a capture's index left = %q, %v", report.Summary(), err)
+	}
 }
 
 // --at restores the store as it was then, from its history.

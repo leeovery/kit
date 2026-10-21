@@ -29,10 +29,9 @@ import (
 // conflict in paths waits to be resolved. HEAD moved by another git
 // meanwhile, it commits onto where HEAD is now, a few times at most, then
 // gives up (ErrHeadMoving), HEAD and the user's index left as they were.
-// The index a run of kit's left in git's lock, stopped once HEAD had taken
-// its commit, it first puts in place, as that run would have. It reports
-// what it did: with nothing to commit it doesn't, which is no error. An
-// error once it has is the index's.
+// What a run of kit's that stopped left it first deals with (recover). It
+// reports what it did: with nothing to commit it doesn't, which is no
+// error. An error once it has is the index's.
 func (r Repo) Commit(ctx context.Context, message string, paths ...string) (Outcome, error) {
 	if len(paths) == 0 {
 		return Outcome{}, nil
@@ -56,9 +55,16 @@ func (r Repo) Commit(ctx context.Context, message string, paths ...string) (Outc
 	if err != nil {
 		return Outcome{}, err
 	}
-	defer func() { _ = commits.Close() }()
-	lock, finished, err := r.lockIndex(ctx, gitDir)
-	out := Outcome{Finished: finished}
+	var out Outcome
+	if commits == nil {
+		out.Notes = []string{unlocked}
+	} else {
+		defer func() { _ = commits.Close() }()
+		if out.Notes, err = r.recover(ctx, gitDir); err != nil {
+			return out, err
+		}
+	}
+	lock, err := r.lockIndex(ctx, gitDir)
 	if err != nil {
 		return out, err
 	}
@@ -70,10 +76,12 @@ func (r Repo) Commit(ctx context.Context, message string, paths ...string) (Outc
 	return out, err
 }
 
-// Outcome is what Commit did: whether it committed, and whether it first
-// put in place the index a run of kit's that stopped left (Finished).
+// Outcome is what Commit did: whether it committed, and what else it did
+// worth saying (Notes), as dealing with what a run of kit's that stopped
+// left.
 type Outcome struct {
-	Committed, Finished bool
+	Committed bool
+	Notes     []string
 }
 
 // ErrHeadMoving is Commit's error when other gits kept moving HEAD while
@@ -201,7 +209,7 @@ func (r Repo) swap(ctx context.Context, lock *indexLock, base, made, message str
 	if err := r.prepare(ctx, lock, made, paths); err != nil {
 		return "", err
 	}
-	if err := lock.mark(made); err != nil {
+	if err := lock.mark(base, made); err != nil {
 		return "", err
 	}
 	subject, _, _ := strings.Cut(message, "\n")

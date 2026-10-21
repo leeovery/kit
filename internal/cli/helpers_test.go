@@ -7,12 +7,14 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -328,7 +330,7 @@ func (w *world) expectCommit(t *testing.T, c commit, checks ...func()) {
 		dir, _ := os.ReadDir(gitDir)
 		for _, e := range dir {
 			// kit's lock on committing, whose file stays.
-			if e.Name() != "kit-commit.lock" {
+			if e.Name() != "kit-commits" {
 				entries = append(entries, e.Name())
 			}
 		}
@@ -348,15 +350,24 @@ func (w *world) expectCommit(t *testing.T, c commit, checks ...func()) {
 const leftIndex = "the index a run of kit's left"
 
 // leavesIndex leaves in gitDir, a git folder of kit-config's, git's lock
-// holding the index a run of kit's left, stopped once HEAD had taken its
-// commit, head, and the run's mark: that commit, and the lock's hash.
+// holding the index a run of kit's left, stopped once HEAD had moved onto
+// its commit, head, and the run's mark: the commit HEAD was on, that one,
+// and the lock's hash and file, by device and inode.
 func (w *world) leavesIndex(t *testing.T, gitDir string) {
 	t.Helper()
+	const before = "9f8e7d6c5b4a39281706f5e4d3c2b1a098765432"
+	lock := filepath.Join(gitDir, "index.lock")
+	if err := os.WriteFile(lock, []byte(leftIndex), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(lock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := info.Sys().(*syscall.Stat_t)
 	sum := sha256.Sum256([]byte(leftIndex))
-	if err := errors.Join(
-		os.WriteFile(filepath.Join(gitDir, "index.lock"), []byte(leftIndex), 0o644),
-		os.WriteFile(filepath.Join(gitDir, "kit-index.made"), []byte(head+" "+hex.EncodeToString(sum[:])+"\n"), 0o600),
-	); err != nil {
+	mark := fmt.Sprintf("%s %s %s %d:%d\n", before, head, hex.EncodeToString(sum[:]), st.Dev, st.Ino)
+	if err := os.WriteFile(filepath.Join(gitDir, "kit-mark"), []byte(mark), 0o600); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -35,13 +35,25 @@ func laptopWorld(t *testing.T) *world {
 	f.On("brew", "leaves").Prints("go\njq\nowner/tap/tool\nnode@20\nffmpeg\n")
 	f.On("brew", "leaves", "--installed-on-request").Prints("go\njq\nowner/tap/tool\nffmpeg\n")
 	f.On("brew", "list", "--cask", "--full-name", "-1").Prints("ghostty\nfirefox\n")
-	f.On("git", "-C", filepath.Join(w.home, ".config", "kit"), "remote", "get-url", "origin").Prints("git@github.com:someone/kit-config.git\n")
-	f.On("gh", "repo", "view", "someone/kit-config", "--json", "visibility", "--jq", ".visibility").Prints("PRIVATE\n")
+	w.private()
 	// gh is installed, for the config's check, with an extension: the config
 	// has no section of them, so kit doesn't look.
 	f.On("gh", "extension", "list").Prints("gh dash\tdlvhdr/gh-dash\tv4.0.0\n")
 	healthyMac(w)
 	return w
+}
+
+// private scripts kit-config's place as its privacy check asks after it,
+// as real git, ssh and gh answer: origin's URL, on GitHub over ssh, the one
+// it's fetched from and pushed to; the host ssh's config resolves
+// github.com to; and the repository, private there.
+func (w *world) private() {
+	const url = "git@github.com:someone/kit-config.git\n"
+	dir := filepath.Join(w.home, ".config", "kit")
+	w.fake.On("git", "-C", dir, "remote", "get-url", "origin").Prints(url)
+	w.fake.On("git", "-C", dir, "remote", "get-url", "--push", "--all", "origin").Prints(url)
+	w.fake.On("ssh", "-G", "github.com").Prints("user git\nhostname github.com\nport 22\n")
+	w.fake.On("gh", "repo", "view", "someone/kit-config", "--json", "visibility", "--jq", ".visibility").Prints("PRIVATE\n")
 }
 
 // healthyMac scripts the Mac's checks' commands as a healthy Mac answers
@@ -272,8 +284,7 @@ func TestStatusLeavesOutAKindWithoutASection(t *testing.T) {
 	w.fake.On("brew", "leaves").Prints("ffmpeg\n")
 	w.fake.On("brew", "leaves", "--installed-on-request").Prints("ffmpeg\n")
 	w.fake.On("brew", "list", "--cask", "--full-name", "-1").Prints("firefox\n")
-	w.fake.On("git", "-C", filepath.Join(w.home, ".config", "kit"), "remote", "get-url", "origin").Prints("git@github.com:someone/kit-config.git\n")
-	w.fake.On("gh", "repo", "view", "someone/kit-config", "--json", "visibility", "--jq", ".visibility").Prints("PRIVATE\n")
+	w.private()
 	w.fake.On("gh", "extension", "list").Prints("gh dash\tdlvhdr/gh-dash\tv4.0.0\n")
 	healthyMac(w)
 

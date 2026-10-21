@@ -34,10 +34,12 @@ const stashMessage = "kit: set aside while rebasing onto the remote"
 // upstream follows the remote's branch of its name, when there is one; a
 // remote with no branches yet, as a new one, has nothing to bring in; and
 // an upstream gone from a remote that has others, as when it's renamed or
-// deleted there, is refused, as pushing would make it anew.
-func (r Repo) Pull(ctx context.Context) error {
-	_, err := r.pull(ctx)
-	return err
+// deleted there, is refused, as pushing would make it anew. What a run of
+// kit's that stopped left it first deals with, as Commit does (recover),
+// and reports what it did.
+func (r Repo) Pull(ctx context.Context) ([]string, error) {
+	_, notes, err := r.pull(ctx, false)
+	return notes, err
 }
 
 // Push pulls the remote's changes (Pull), then pushes, nothing when Pull
@@ -45,27 +47,34 @@ func (r Repo) Pull(ctx context.Context) error {
 // it: branch.<name>.pushRemote, then remote.pushDefault, then its
 // upstream's remote. With no upstream, it's pushed to the same branch of
 // that remote, origin, or the only remote, which becomes its upstream; with
-// several remotes and none of those, it refuses.
-func (r Repo) Push(ctx context.Context) error {
-	to, err := r.pull(ctx)
+// several remotes and none of those, it refuses. Pushed to another remote
+// than its upstream's, that's fetched too, and a branch there with commits
+// this Mac hasn't is refused, before anything's rebased. It reports what
+// Pull did besides.
+func (r Repo) Push(ctx context.Context) ([]string, error) {
+	to, notes, err := r.pull(ctx, true)
 	if err != nil {
-		return err
+		return notes, err
 	}
 	args := []string{"push", "--quiet"}
 	if to != "" {
 		args = append(args, "-u", to, "HEAD")
 	}
 	if _, err := r.git(ctx, args...); err != nil {
-		return fmt.Errorf("couldn't push: %w", err)
+		return notes, fmt.Errorf("couldn't push: %w", err)
 	}
-	return nil
+	return notes, nil
 }
 
 // Holding is why Push holds back now, as far as the remote's last fetch
 // tells: one of Pull's refusals, or nil when there's none. It changes
 // nothing.
 func (r Repo) Holding(ctx context.Context) error {
-	_, dirty, err := r.settled(ctx)
+	gitDir, err := r.gitDir(ctx)
+	if err != nil {
+		return err
+	}
+	dirty, err := r.settled(ctx, gitDir)
 	if err != nil {
 		return err
 	}
@@ -78,6 +87,9 @@ func (r Repo) Holding(ctx context.Context) error {
 		return err
 	}
 	c, err := r.catching(ctx, t)
+	if err == nil {
+		err = r.movedOn(ctx, t)
+	}
 	if err != nil || c.up == "" {
 		return err
 	}
@@ -87,20 +99,35 @@ func (r Repo) Holding(ctx context.Context) error {
 	return r.clashes(ctx, dirty, c.up)
 }
 
-// pull is Pull, and the remote to push to, making it the branch's
-// upstream, when it has none: "" when it has.
-func (r Repo) pull(ctx context.Context) (string, error) {
+// pull is Pull, what it did besides, and the remote to push to, making it
+// the branch's upstream, when it has none: "" when it has; pushing, as for
+// Push, it checks where the branch is pushed too (pushable).
+func (r Repo) pull(ctx context.Context, pushing bool) (to string, notes []string, err error) {
 	remotes, err := r.remotes(ctx)
 	switch {
 	case err != nil:
-		return "", err
+		return "", nil, err
 	case len(remotes) == 0:
-		return "", ErrNoRemote
+		return "", nil, ErrNoRemote
 	}
-	gitDir, dirty, err := r.settled(ctx)
+	gitDir, err := r.gitDir(ctx)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
+	if notes, err = r.recovered(ctx, gitDir); err != nil {
+		return "", notes, err
+	}
+	dirty, err := r.settled(ctx, gitDir)
+	if err == nil {
+		to, err = r.bringIn(ctx, gitDir, dirty, remotes, pushing)
+	}
+	return to, notes, err
+}
+
+// bringIn is pull once the repository's settled, its git folder gitDir,
+// what's not committed dirty, and its remotes remotes: the remote to push
+// to, making it the branch's upstream, "" when it has one.
+func (r Repo) bringIn(ctx context.Context, gitDir string, dirty []entry, remotes []string, pushing bool) (string, error) {
 	t, err := r.tracking(ctx, remotes)
 	if err != nil {
 		return "", err
@@ -113,6 +140,9 @@ func (r Repo) pull(ctx context.Context) (string, error) {
 		return "", err
 	}
 	c, err := r.catching(ctx, t)
+	if err == nil && pushing {
+		err = r.pushable(ctx, t, from)
+	}
 	if err != nil {
 		return "", err
 	}
@@ -133,23 +163,21 @@ func (r Repo) remotes(ctx context.Context) ([]string, error) {
 	return strings.Fields(string(res.Stdout)), err
 }
 
-// settled is the repository's git folder, and what's changed and not
-// committed, unless git is part way through one of its operations there,
-// or a conflict waits to be resolved, which is an error.
-func (r Repo) settled(ctx context.Context) (gitDir string, dirty []entry, err error) {
-	if gitDir, err = r.gitDir(ctx); err != nil {
-		return "", nil, err
-	}
+// settled is what's changed and not committed in the repository whose git
+// folder is gitDir, unless git is part way through one of its operations
+// there, or a conflict waits to be resolved, which is an error.
+func (r Repo) settled(ctx context.Context, gitDir string) ([]entry, error) {
 	if err := underWay(gitDir); err != nil {
-		return "", nil, err
+		return nil, err
 	}
-	if dirty, err = r.status(ctx); err != nil {
-		return "", nil, err
+	dirty, err := r.status(ctx)
+	if err != nil {
+		return nil, err
 	}
 	if e, ok := unmerged(dirty); ok {
-		return "", nil, fmt.Errorf("a conflict in %s is waiting to be resolved: kit's change waits till it's finished", e.path)
+		return nil, fmt.Errorf("a conflict in %s is waiting to be resolved: kit's change waits till it's finished", e.path)
 	}
-	return gitDir, dirty, nil
+	return dirty, nil
 }
 
 // fetch brings in remote's commits, pruning its branches gone from it, so
@@ -228,12 +256,22 @@ func (r Repo) tracking(ctx context.Context, remotes []string) (tracking, error) 
 // pushRemote is the remote t's branch is pushed to, one of remotes, as git
 // push has it: branch.<name>.pushRemote, then remote.pushDefault, then its
 // upstream's remote, or, with no upstream, origin, or the only remote; ""
-// when none of those is.
+// when none of those is. A setting that's a URL, or names no remote, it
+// refuses, as kit pushes only where a remote's URLs say, which it checks.
 func (r Repo) pushRemote(ctx context.Context, t tracking, remotes []string) (string, error) {
 	for _, key := range []string{"branch." + t.name() + ".pushRemote", "remote.pushDefault"} {
-		if remote, err := r.setting(ctx, key); err != nil || remote != "" {
-			return remote, err
+		remote, err := r.setting(ctx, key)
+		switch {
+		case err != nil:
+			return "", err
+		case remote == "":
+			continue
+		case slices.Contains(remotes, remote):
+			return remote, nil
+		case strings.ContainsAny(remote, ":/"):
+			return "", fmt.Errorf("%s is a URL, not a remote's name, so nothing was pushed: kit pushes only to one of the repository's remotes, by its name", key)
 		}
+		return "", fmt.Errorf("%s is %s, not one of the repository's remotes, so nothing was pushed: kit pushes only to a remote by its name", key, remote)
 	}
 	switch {
 	case t.upstream != "":
@@ -295,6 +333,39 @@ func (r Repo) gone(ctx context.Context, t tracking) error {
 		return nil
 	}
 	return fmt.Errorf("%s's upstream, %s, is gone from %s, as when it's renamed or deleted there, so nothing was pushed: git branch --set-upstream-to=<remote>/<branch> follows the one it's become", t.name(), short(t.upstream), t.remote)
+}
+
+// pushable fetches the remote the branch, t, is pushed to, when it's other
+// than the one it's brought in from, from, and is the refusal when its
+// branch there has commits this Mac hasn't (movedOn).
+func (r Repo) pushable(ctx context.Context, t tracking, from string) error {
+	if t.pushTo == "" || t.pushTo == from {
+		return nil
+	}
+	if err := r.fetch(ctx, t.pushTo); err != nil {
+		return err
+	}
+	return r.movedOn(ctx, t)
+}
+
+// movedOn is the refusal when the branch t's pushed to, on another remote
+// than its upstream's, has commits HEAD hasn't, as when it's been pushed to
+// from elsewhere, or HEAD rebased since: pushing would be refused, or,
+// forced, lose them.
+func (r Repo) movedOn(ctx context.Context, t tracking) error {
+	ref := t.pushedTo()
+	if t.upstream == "" || ref == t.upstream || ref == "" {
+		return nil
+	}
+	commit, err := r.commitAt(ctx, ref)
+	if err != nil || commit == "" {
+		return err
+	}
+	ahead, err := r.count(ctx, "HEAD.."+ref)
+	if err != nil || ahead == 0 {
+		return err
+	}
+	return fmt.Errorf("%s, where %s is pushed, has %s this Mac hasn't, so nothing was pushed: bring them in, or push over them, by hand", short(ref), t.name(), count(ahead, "commit"))
 }
 
 // short is a remote-tracking ref as git names it short, as in origin/main.
@@ -659,7 +730,7 @@ func (r Repo) PushURLs(ctx context.Context) ([]string, error) {
 		return nil, t.unset()
 	}
 	res, err := r.git(ctx, "remote", "get-url", "--push", "--all", t.pushTo)
-	return strings.Fields(string(res.Stdout)), err
+	return slices.DeleteFunc(strings.Split(string(res.Stdout), "\n"), func(url string) bool { return url == "" }), err
 }
 
 // tracked is how the branch HEAD is on stands with its remotes (tracking):

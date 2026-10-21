@@ -61,10 +61,19 @@ type RestoreReport struct {
 	DryRun bool
 	// As is the scratch domain a domain was restored into.
 	As string
+	// Notes are what the clone's pull did besides, worth saying, as dealing
+	// with what a capture that stopped left.
+	Notes []string
 }
 
-// Summary is the restore in a line, as prefsync's.
+// Summary is the restore in a line, as prefsync's, then what its pull did
+// besides.
 func (r RestoreReport) Summary() string {
+	return withNotes(r.restored(), r.Notes)
+}
+
+// restored is what the restore did, or would, in a line.
+func (r RestoreReport) restored() string {
 	if r.As != "" {
 		if r.DryRun {
 			return fmt.Sprintf("would import %s as %s", r.Restored[0], r.As)
@@ -321,7 +330,7 @@ func (p *Prefs) Restore(ctx context.Context, opts RestoreOptions) (RestoreReport
 		return report, err
 	}
 	// Offline, or refused, the clone's restored from as it is.
-	_ = p.repo().Pull(ctx)
+	report.Notes, _ = p.repo().Pull(ctx)
 	store := filepath.Join(p.Clone, report.From)
 	if opts.At != "" {
 		dir, commit, date, cleanup, err := p.snapshot(ctx, report.From, opts.At)

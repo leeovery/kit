@@ -168,7 +168,8 @@ func rebasing(script *runnertest.Script, gitDir string, stops bool) {
 
 func push(t *testing.T, fake *runnertest.Fake) error {
 	t.Helper()
-	return gitrepo.Repo{Dir: dir, Run: fake}.Push(context.Background())
+	_, err := gitrepo.Repo{Dir: dir, Run: fake}.Push(context.Background())
+	return err
 }
 
 // repoAt is a repository at a folder of its own, the files on disk in it
@@ -195,7 +196,8 @@ func repoAt(t *testing.T, files ...string) string {
 func pushOrPull(t *testing.T, fake *runnertest.Fake, pull bool) error {
 	t.Helper()
 	if pull {
-		return gitrepo.Repo{Dir: dir, Run: fake}.Pull(context.Background())
+		_, err := gitrepo.Repo{Dir: dir, Run: fake}.Pull(context.Background())
+		return err
 	}
 	return push(t, fake)
 }
@@ -218,7 +220,7 @@ func TestPull(t *testing.T) {
 	s := pushing(fake, t.TempDir(), "", "1")
 	s.incoming("r\x00", "")
 	s.expect(call{args: rebase})
-	if err := (gitrepo.Repo{Dir: dir, Run: fake}).Pull(context.Background()); err != nil {
+	if _, err := (gitrepo.Repo{Dir: dir, Run: fake}).Pull(context.Background()); err != nil {
 		t.Fatalf("Pull() error = %v", err)
 	}
 	checkCalls(t, "pull", fake, "", s.want)
@@ -363,7 +365,7 @@ func TestPushLeavesAnIgnoredFolderAlone(t *testing.T) {
 			s.expect(call{args: rebase})
 			s.expect(call{args: pushIt})
 		}
-		err := gitrepo.Repo{Dir: root, Run: fake}.Push(context.Background())
+		_, err := gitrepo.Repo{Dir: root, Run: fake}.Push(context.Background())
 		switch {
 		case c.want == "" && err != nil:
 			t.Errorf("%s: Push() error = %v", c.name, err)
@@ -384,7 +386,7 @@ func TestPushFoldsASCIILettersAlone(t *testing.T) {
 	s := pushingIn(fake, root, t.TempDir(), "", "1")
 	s.incoming("k\x00", "K\x00")
 	s.expect(call{args: rebase}).Exits(1).PrintsToStderr("error: The following untracked working tree files would be overwritten by checkout:\n\tk\nPlease move or remove them before you switch branches.\nAborting\nerror: could not detach HEAD\n")
-	err := gitrepo.Repo{Dir: root, Run: fake}.Push(context.Background())
+	_, err := gitrepo.Repo{Dir: root, Run: fake}.Push(context.Background())
 	if err == nil || !strings.HasPrefix(err.Error(), "couldn't rebase onto the remote's changes") {
 		t.Errorf("Push() error = %v, want git's refusal to rebase", err)
 	}
@@ -402,7 +404,7 @@ func TestPushNamesAClashOnce(t *testing.T) {
 	s := pushingIn(fake, root, t.TempDir(), "D  secret\x00", "1")
 	s.incoming("secret\x00", "secret\x00")
 	s.drift("D  secret\x00", "")
-	err := gitrepo.Repo{Dir: root, Run: fake}.Push(context.Background())
+	_, err := gitrepo.Repo{Dir: root, Run: fake}.Push(context.Background())
 	if err == nil || !strings.Contains(err.Error(), ": secret changed here") || strings.Count(err.Error(), "secret") != 1 {
 		t.Errorf("Push() error = %v, want secret named once, as changed", err)
 	}
@@ -413,7 +415,7 @@ func TestPushNamesAClashOnce(t *testing.T) {
 	s = pushingIn(fake, root, t.TempDir(), "D  kept\x00?? kept\x00", "1")
 	s.incoming("kept\x00", "")
 	s.drift("D  kept\x00?? kept\x00", "")
-	err = gitrepo.Repo{Dir: root, Run: fake}.Push(context.Background())
+	_, err = gitrepo.Repo{Dir: root, Run: fake}.Push(context.Background())
 	if err == nil || !strings.Contains(err.Error(), ": kept staged here") || strings.Contains(err.Error(), "kept, kept") {
 		t.Errorf("Push() error = %v, want kept named once", err)
 	}
@@ -611,6 +613,7 @@ func TestPushToANewRemote(t *testing.T) {
 		{"the only remote", "backup\n", "", "", "backup"},
 		{"the branch's push remote", "backup\norigin\n", "backup", "", "backup"},
 		{"the remotes' push default", "backup\norigin\n", "", "backup", "backup"},
+		{"a remote named with a slash", "origin\nteam/fork\n", "team/fork", "", "team/fork"},
 	} {
 		fake := runnertest.New(t)
 		s := &sequence{fake: fake}
@@ -630,8 +633,67 @@ func TestPushToANewRemote(t *testing.T) {
 
 // A branch set to be pushed to another remote than its upstream's, as in a
 // triangular workflow, brings in from its upstream's remote, and is pushed
-// with git push, which sends it to the other.
+// with git push, which sends it to the other. That remote's fetched too,
+// and its branch, with commits this Mac hasn't, refused, naming them,
+// before anything's rebased, as git push would refuse it, or, forced, lose
+// them. Pull, pushing nowhere, brings in from the upstream's remote alone;
+// Holding refuses as Push would, as far as the last fetch tells.
 func TestPushToAnotherRemoteThanItsUpstreams(t *testing.T) {
+	const backupAt = "refs/remotes/backup/main"
+	for _, c := range []struct {
+		name string
+		// at is where backup's main is, "" for not there, and ahead its
+		// commits HEAD hasn't.
+		at, ahead, want string
+	}{
+		{name: "the branch there not moved on", at: upstream, ahead: "0"},
+		{name: "the branch not there"},
+		{name: "the branch moved on", at: upstream, ahead: "2", want: "backup/main, where main is pushed, has 2 commits this Mac hasn't, so nothing was pushed: bring them in, or push over them, by hand"},
+	} {
+		for _, holding := range []bool{false, true} {
+			fake := runnertest.New(t)
+			s := &sequence{fake: fake}
+			if holding {
+				s.expect(call{args: gitDirOf}).Prints(t.TempDir() + "\n")
+				s.expect(call{args: wholeStatus})
+			}
+			s.expect(call{args: git("remote")}).Prints("backup\norigin\n")
+			if !holding {
+				s.expect(call{args: gitDirOf}).Prints(t.TempDir() + "\n")
+				s.expect(call{args: wholeStatus})
+			}
+			s.tracks(tracksOrigin, "", "backup")
+			if !holding {
+				s.expect(call{args: fetchIt})
+			}
+			s.expect(call{args: upstreamAt}).Prints(upstream + "\n")
+			if !holding {
+				s.expect(call{args: git("fetch", "--prune", "--quiet", "backup")})
+			}
+			names(s.expect(call{args: git("rev-parse", "--verify", "--quiet", backupAt)}), c.at)
+			if c.at != "" {
+				s.expect(call{args: git("rev-list", "--count", "HEAD.."+backupAt)}).Prints(c.ahead + "\n")
+			}
+			if c.want == "" {
+				s.expect(call{args: behindOf}).Prints("0\n")
+				if !holding {
+					s.expect(call{args: pushIt})
+				}
+			}
+			repo := gitrepo.Repo{Dir: dir, Run: fake}
+			var err error
+			if holding {
+				err = repo.Holding(context.Background())
+			} else {
+				_, err = repo.Push(context.Background())
+			}
+			if (err == nil) != (c.want == "") || err != nil && err.Error() != c.want {
+				t.Errorf("%s, holding %v: %v, want %q", c.name, holding, err, c.want)
+			}
+			checkCalls(t, c.name, fake, "", s.want)
+		}
+	}
+
 	fake := runnertest.New(t)
 	s := &sequence{fake: fake}
 	s.expect(call{args: git("remote")}).Prints("backup\norigin\n")
@@ -641,11 +703,35 @@ func TestPushToAnotherRemoteThanItsUpstreams(t *testing.T) {
 	s.expect(call{args: fetchIt})
 	s.expect(call{args: upstreamAt}).Prints(upstream + "\n")
 	s.expect(call{args: behindOf}).Prints("0\n")
-	s.expect(call{args: pushIt})
-	if err := push(t, fake); err != nil {
-		t.Errorf("Push() = %v", err)
+	if err := pushOrPull(t, fake, true); err != nil {
+		t.Errorf("Pull(), pushed to another remote = %v", err)
 	}
-	checkCalls(t, "pushed to another remote", fake, "", s.want)
+	checkCalls(t, "pulled, pushed to another remote", fake, "", s.want)
+}
+
+// A branch set to be pushed to a URL, or to a remote that isn't one, is
+// refused, as git push would push there unchecked: a URL said plainly,
+// never shown, as it may carry a token.
+func TestPushRefusesAPushRemoteThatIsntOne(t *testing.T) {
+	for _, c := range []struct{ name, branchSays, defaultSays, want string }{
+		{"a URL", "git@github.com:someone/fork.git", "", "branch.main.pushRemote is a URL, not a remote's name, so nothing was pushed: kit pushes only to one of the repository's remotes, by its name"},
+		// Split at its @, which the personal-data scan would take for an
+		// email address's.
+		{"a URL with a token", "", "https://x-access-token:secret@" + "github.com/someone/fork", "remote.pushDefault is a URL, not a remote's name, so nothing was pushed: kit pushes only to one of the repository's remotes, by its name"},
+		{"a local path", "", "../fork", "remote.pushDefault is a URL, not a remote's name, so nothing was pushed: kit pushes only to one of the repository's remotes, by its name"},
+		{"no remote", "fork", "", "branch.main.pushRemote is fork, not one of the repository's remotes, so nothing was pushed: kit pushes only to a remote by its name"},
+	} {
+		fake := runnertest.New(t)
+		s := &sequence{fake: fake}
+		s.expect(call{args: git("remote")}).Prints("origin\n")
+		s.expect(call{args: gitDirOf}).Prints(t.TempDir() + "\n")
+		s.expect(call{args: wholeStatus})
+		s.tracks(tracksOrigin, c.branchSays, c.defaultSays)
+		if err := push(t, fake); err == nil || err.Error() != c.want {
+			t.Errorf("Push(), pushed to %s = %v, want %q", c.name, err, c.want)
+		}
+		checkCalls(t, c.name, fake, "", s.want)
+	}
 }
 
 // PushURLs are where Push pushes, as git push has them: the push URLs of
@@ -660,6 +746,7 @@ func TestPushURLs(t *testing.T) {
 	}{
 		{"the upstream's remote", "origin\n", tracksOrigin, "", "origin", private + "\n", []string{private}, ""},
 		{"the remote set, two push URLs", "backup\norigin\n", tracksOrigin, "backup", "backup", private + "\n" + public + "\n", []string{private, public}, ""},
+		{"a path with a space", "backup\norigin\n", tracksOrigin, "backup", "backup", "/Volumes/My Backups/kit.git\n", []string{"/Volumes/My Backups/kit.git"}, ""},
 		{"no upstream, nor a remote set", "backup\nupstream\n", "\x00\n", "", "", "", nil, "main has no upstream, and which remote it's pushed to isn't set"},
 	} {
 		fake := runnertest.New(t)
@@ -740,7 +827,10 @@ func TestPushRefusesWithNowhereToGo(t *testing.T) {
 				s.expect(call{args: branchesOf}).Prints("refs/remotes/origin/HEAD\nrefs/remotes/origin/trunk\n")
 			}
 			repo := gitrepo.Repo{Dir: dir, Run: fake}
-			check := repo.Push
+			check := func(ctx context.Context) error {
+				_, err := repo.Push(ctx)
+				return err
+			}
 			if holding {
 				check = repo.Holding
 			}
