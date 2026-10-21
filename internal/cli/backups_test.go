@@ -214,7 +214,7 @@ func TestBackupAddAndRemove(t *testing.T) {
 			t.Errorf("%s's [backups] = %q, want arq out of it", mac, got)
 		}
 	}
-	if commits := slices.DeleteFunc(w.fake.Calls(), func(call string) bool { return !strings.Contains(call, " commit ") }); len(commits) != 3 {
+	if commits := slices.DeleteFunc(w.fake.Calls(), func(call string) bool { return !strings.Contains(call, " commit-tree ") }); len(commits) != 3 {
 		t.Errorf("committed %q, want one commit for each of the three adds", commits)
 	}
 	w.writeSection(t, "shared", "backups", "")

@@ -284,7 +284,7 @@ func (s *AppStore) received() []string {
 // it has none, which is worth keeping; not ok when it couldn't say.
 func (s *AppStore) lookUp(ctx context.Context, bundle string) (app, bool) {
 	found, err := s.apps(ctx, "lookup", "--json", "--bundle", bundle)
-	if exit, ok := errors.AsType[*runner.ExitError](err); ok && strings.Contains(strings.ToLower(exit.FullStderr), notInStore) {
+	if says(err, notInStore) {
 		return app{Bundle: bundle}, true
 	}
 	if err != nil || len(found) != 1 {
@@ -429,7 +429,7 @@ func (s *AppStore) again(ctx context.Context, f func() error) error {
 // forgotten reports whether err is sudo -n saying it hasn't the password.
 func forgotten(err error) bool {
 	exit, ok := errors.AsType[*runner.ExitError](err)
-	return ok && strings.Contains(exit.FullStderr, "a password is required")
+	return ok && slices.ContainsFunc(exit.Lines("sudo:"), func(line string) bool { return strings.Contains(line, "a password is required") })
 }
 
 // failed is err, an app's install failing, in kit's words: what mas said,
@@ -448,8 +448,17 @@ func failed(err error) error {
 // signedOut reports whether err is mas saying no one's signed in to the App
 // Store, as in "account is not signed in": mas has no way to say who is.
 func signedOut(err error) bool {
+	return says(err, "not signed in")
+}
+
+// says reports whether err is mas failing, saying text, whatever its case,
+// on its error line: "Error:" for its own, "[ERROR]" as the App Store's
+// sign-in reaches it.
+func says(err error, text string) bool {
 	exit, ok := errors.AsType[*runner.ExitError](err)
-	return ok && strings.Contains(strings.ToLower(exit.FullStderr), "not signed in")
+	return ok && slices.ContainsFunc(exit.Lines("Error:", "[ERROR]"), func(line string) bool {
+		return strings.Contains(strings.ToLower(line), text)
+	})
 }
 
 // notSignedIn is mas failing for want of someone signed in to the App Store,

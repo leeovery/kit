@@ -185,13 +185,13 @@ var errNotFound = runner.ErrNotFound
 // status is git's status of them (-z); kit stages update, each file as it
 // is on disk, in an index of its own; staged is what git says is staged
 // there (-z); and the user's index takes the files staged as committed.
-// The commit lands on head, unless onto names another, HEAD moved by
-// another git meanwhile, when kit holds it back, marking the git folder.
+// The commit goes onto head, unless moved, HEAD moved by another git
+// meanwhile, when git refuses it, and nothing's committed or pushed.
 type commit struct {
 	message        string
 	paths, update  []string
 	status, staged string
-	onto           string
+	moved          bool
 }
 
 // edited is a commit of files, each a file edited and committed whole.
@@ -228,19 +228,23 @@ func (w *world) expectSync(t *testing.T, files []string, message string) {
 	})
 }
 
-// head is the commit HEAD names in kit-config, as git rev-parse prints it,
-// and made the commit kit makes onto it.
+// head is the commit HEAD names in kit-config, as git rev-parse prints it;
+// tree the tree git writes of kit's own index of it, made the commit kit
+// makes of that onto it, and theirs another git's, HEAD moved onto it.
 const (
-	head = "0e0bf17a399109574ffb00e33300280a33f81ab7"
-	made = "2f8f9a0d6c1b4e5a7d3c2b1a0f9e8d7c6b5a4f3e"
+	head   = "0e0bf17a399109574ffb00e33300280a33f81ab7"
+	tree   = "af9055821923c351c404eaaff97d82a5552a1ad5"
+	made   = "2f8f9a0d6c1b4e5a7d3c2b1a0f9e8d7c6b5a4f3e"
+	theirs = "154906a47f12246099602d1bee6b1c558d3409c9"
 )
 
 // expectCommit scripts git's answers to c, and the push after it, failing
 // the test unless kit commits, unless what it stages is update and what it
 // hands back to the user's index the files staged, the user's index then
 // the one git made, and unless the status given is so of the files on disk
-// once kit asks, when each of checks runs too. It's the git folder.
-func (w *world) expectCommit(t *testing.T, c commit, checks ...func()) string {
+// once kit asks, when each of checks runs too. HEAD moved, it fails the
+// test unless kit commits nothing, and leaves the git folder as it was.
+func (w *world) expectCommit(t *testing.T, c commit, checks ...func()) {
 	t.Helper()
 	dir := filepath.Join(w.home, ".config", "kit")
 	gitDir := t.TempDir()
@@ -261,46 +265,45 @@ func (w *world) expectCommit(t *testing.T, c commit, checks ...func()) string {
 	}
 	w.fake.On("git", git(slices.Concat([]string{"--literal-pathspecs", "status", "--porcelain", "-z", "--untracked-files=all", "--no-renames", "--"}, c.paths)...)...).Prints(c.status).Does(asked)
 	w.fake.On("git", git("rev-parse", "--absolute-git-dir")...).Prints(gitDir + "\n")
-	var committed atomic.Bool
+	var tried, committed atomic.Bool
 	w.fake.On("git", git("rev-parse", "--verify", "--quiet", "HEAD")...).Filters(func(string) (string, error) {
-		if committed.Load() {
-			return made + "\n", nil
+		if tried.Load() {
+			return theirs + "\n", nil
 		}
 		return head + "\n", nil
 	})
 	w.fake.On("git", git("read-tree", head)...)
 	w.fake.On("git", git("update-index", "--add", "--remove", "--replace", "-z", "--stdin")...).Filters(reads("update-index", strings.Join(c.update, "\x00")+"\x00"))
 	w.fake.On("git", git("diff", "--cached", "--name-only", "-z", "--no-renames")...).Prints(c.staged)
-	w.fake.On("git", git("commit", "--quiet", "-m", c.message)...).Does(func() { committed.Store(true) })
-	w.fake.On("git", git("rev-list", "--first-parent", "--parents", head+"..HEAD")...).Prints(made + " " + cmp.Or(c.onto, head) + "\n")
-	w.fake.On("git", git("diff", "--cached", "--quiet", made)...)
-	w.fake.On("git", git("rev-parse", "--verify", "--quiet", "HEAD^")...).Prints(c.onto + "\n")
+	w.fake.On("git", git("write-tree")...).Prints(tree + "\n")
+	w.fake.On("git", git("config", "--get", "--type=bool", "commit.gpgsign")...).Exits(1)
+	w.fake.On("git", git("commit-tree", tree, "-p", head, "-m", c.message)...).Prints(made + "\n")
+	subject, _, _ := strings.Cut(c.message, "\n")
+	moveHEAD := w.fake.On("git", git("update-ref", "-m", "kit: "+subject, "HEAD", made, head)...)
 	const reset = "the user's index, kit's files as committed"
-	w.fake.On("git", git("--literal-pathspecs", "reset", "--quiet", "--pathspec-from-file=-", "--pathspec-file-nul")...).Filters(reads("reset", c.staged)).Does(func() {
-		if err := os.WriteFile(filepath.Join(gitDir, "kit-index.next"), []byte(reset), 0o600); err != nil {
-			t.Error(err)
-		}
-	})
-	w.expectPush(t, gitDir)
+	if c.moved {
+		moveHEAD.Exits(128).PrintsToStderr("fatal: update_ref failed for ref 'HEAD': cannot lock ref 'HEAD': is at " + theirs + " but expected " + head + "\n").Does(func() { tried.Store(true) })
+	} else {
+		moveHEAD.Does(func() { committed.Store(true) })
+		w.fake.On("git", git("--literal-pathspecs", "reset", "--quiet", "--pathspec-from-file=-", "--pathspec-file-nul")...).Filters(reads("reset", c.staged)).Does(func() {
+			if err := os.WriteFile(filepath.Join(gitDir, "kit-index.next"), []byte(reset), 0o600); err != nil {
+				t.Error(err)
+			}
+		})
+		w.expectPush(t, gitDir)
+	}
 	t.Cleanup(func() {
-		if !committed.Load() {
-			t.Errorf("kit didn't commit %q", c.message)
-		}
-		want := []string{"index"}
-		if c.onto != "" {
-			want = append(want, "kit-held")
-		}
-		var got []string
 		entries, _ := os.ReadDir(gitDir)
-		for _, e := range entries {
-			got = append(got, e.Name())
-		}
-		held, _ := os.ReadFile(filepath.Join(gitDir, "kit-held"))
-		if data, _ := os.ReadFile(filepath.Join(gitDir, "index")); !slices.Equal(got, want) || string(data) != reset || c.onto != "" && string(held) != made+"\n" {
-			t.Errorf("the git folder holds %q, its index %q, %q held back; want %q, the index git reset", got, data, held, want)
+		data, _ := os.ReadFile(filepath.Join(gitDir, "index"))
+		switch {
+		case committed.Load() == c.moved:
+			t.Errorf("kit committed %q: %v, HEAD moved %v", c.message, committed.Load(), c.moved)
+		case c.moved && len(entries) != 0:
+			t.Errorf("the git folder holds %v; want it left as it was, empty", entries)
+		case !c.moved && (len(entries) != 1 || string(data) != reset):
+			t.Errorf("the git folder holds %v, its index %q; want the index git reset", entries, data)
 		}
 	})
-	return gitDir
 }
 
 // expectPush scripts a push of kit-config's, whose git folder is gitDir,
@@ -316,6 +319,9 @@ func (w *world) expectPush(t *testing.T, gitDir string) {
 		w.fake.On("git", git("--literal-pathspecs", "status", "--porcelain", "-z", "--untracked-files=all", "--no-renames", "--")...)
 	}
 	w.fake.On("git", git("fetch", "--quiet")...)
+	w.fake.On("git", git("symbolic-ref", "-q", "HEAD")...).Prints("refs/heads/main\n")
+	w.fake.On("git", git("for-each-ref", "--format=%(upstream)", "refs/heads/main")...).Prints("refs/remotes/origin/main\n")
+	w.fake.On("git", git("rev-parse", "--verify", "--quiet", "refs/remotes/origin/main")...).Prints(head + "\n")
 	w.fake.On("git", git("rev-list", "--count", "HEAD..@{u}")...).Prints("0\n")
 	w.fake.On("git", git("push", "--quiet")...)
 }

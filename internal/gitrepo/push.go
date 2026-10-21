@@ -23,44 +23,41 @@ const stashMessage = "kit: set aside while rebasing onto the remote"
 // them when there are any. It refuses while git is part way through a
 // merge, rebase, cherry-pick, revert or am, or a conflict waits to be
 // resolved: setting what's not committed aside would end the one, and fail
-// on the other; and while a commit kit held back is in the branch (held),
-// which a rebase would make anew, unmarked. Anything not committed is set
-// aside in git's stash while it rebases, and put back as it was, staged or
-// not; but when the remote's commits change a file not committed here,
-// staged or not, or one git ignores here, or a folder or file at one,
-// nothing's set aside or rebased, as putting it back would conflict, or
-// the rebase replace it. A stash that won't go back is kept, and named. A
-// rebase that stops on a conflict is aborted, leaving the repository as it
-// was.
+// on the other. Anything not committed is set aside in git's stash while
+// it rebases, and put back as it was, staged or not; but when the remote's
+// commits change a file not committed here, staged or not, or one git
+// ignores here, or a folder or file at one, nothing's set aside or
+// rebased, as putting it back would conflict, or the rebase replace it. A
+// stash that won't go back is kept, and named. A rebase that stops on a
+// conflict is aborted, leaving the repository as it was. A branch with no
+// upstream yet, or one the remote hasn't yet, as a new remote's, has
+// nothing to bring in.
 func (r Repo) Pull(ctx context.Context) error {
-	res, err := r.git(ctx, "remote")
-	if err != nil {
-		return err
-	}
-	if strings.TrimSpace(string(res.Stdout)) == "" {
-		return ErrNoRemote
-	}
-	gitDir, dirty, err := r.settled(ctx)
-	if err != nil {
-		return err
-	}
-	return r.catchUp(ctx, gitDir, dirty)
+	_, err := r.pull(ctx)
+	return err
 }
 
-// Push pulls the remote's changes (Pull), then pushes; nothing when Pull
-// refuses or fails.
+// Push pulls the remote's changes (Pull), then pushes, nothing when Pull
+// refuses or fails: to the branch's upstream, or, with none yet, to the
+// same branch of the remote, which becomes its upstream.
 func (r Repo) Push(ctx context.Context) error {
-	if err := r.Pull(ctx); err != nil {
+	to, err := r.pull(ctx)
+	if err != nil {
 		return err
 	}
-	if _, err := r.git(ctx, "push", "--quiet"); err != nil {
+	args := []string{"push", "--quiet"}
+	if to != "" {
+		args = append(args, "-u", to, "HEAD")
+	}
+	if _, err := r.git(ctx, args...); err != nil {
 		return fmt.Errorf("couldn't push: %w", err)
 	}
 	return nil
 }
 
 // Holding is why Push holds back now, as far as the remote's last fetch
-// tells: one of Pull's refusals, or nil when there's none.
+// tells: one of Pull's refusals, or nil when there's none. It changes
+// nothing.
 func (r Repo) Holding(ctx context.Context) error {
 	_, dirty, err := r.settled(ctx)
 	if err != nil {
@@ -72,18 +69,47 @@ func (r Repo) Holding(ctx context.Context) error {
 	return r.clashes(ctx, dirty)
 }
 
+// pull is Pull, and the remote to push to, making it the branch's
+// upstream, when it has none: "" when it has.
+func (r Repo) pull(ctx context.Context) (string, error) {
+	res, err := r.git(ctx, "remote")
+	if err != nil {
+		return "", err
+	}
+	remotes := strings.Fields(string(res.Stdout))
+	if len(remotes) == 0 {
+		return "", ErrNoRemote
+	}
+	gitDir, dirty, err := r.settled(ctx)
+	if err != nil {
+		return "", err
+	}
+	if err := r.fetch(ctx); err != nil {
+		return "", err
+	}
+	upstream, there, err := r.upstream(ctx)
+	switch {
+	case err != nil:
+		return "", err
+	case upstream == "":
+		if slices.Contains(remotes, "origin") {
+			return "origin", nil
+		}
+		return remotes[0], nil
+	case !there:
+		return "", nil
+	}
+	return "", r.catchUp(ctx, gitDir, dirty)
+}
+
 // settled is the repository's git folder, and what's changed and not
-// committed, unless git is part way through one of its operations there, a
-// conflict waits to be resolved, or a commit kit held back is in the
-// branch, which is an error.
+// committed, unless git is part way through one of its operations there,
+// or a conflict waits to be resolved, which is an error.
 func (r Repo) settled(ctx context.Context) (gitDir string, dirty []entry, err error) {
 	if gitDir, err = r.gitDir(ctx); err != nil {
 		return "", nil, err
 	}
 	if err := underWay(gitDir); err != nil {
-		return "", nil, err
-	}
-	if err := r.held(ctx, gitDir); err != nil {
 		return "", nil, err
 	}
 	if dirty, err = r.status(ctx); err != nil {
@@ -95,13 +121,46 @@ func (r Repo) settled(ctx context.Context) (gitDir string, dirty []entry, err er
 	return gitDir, dirty, nil
 }
 
-// catchUp fetches the remote's changes, and rebases onto them when there
-// are any, with what's not committed, dirty, set aside, unless the remote
+// fetch brings in the remote's commits.
+func (r Repo) fetch(ctx context.Context) error {
+	if _, err := r.git(ctx, "fetch", "--quiet"); err != nil {
+		if unreachable(err) {
+			return errors.New("couldn't reach the remote, so nothing was pushed")
+		}
+		return fmt.Errorf("couldn't bring in the remote's changes, so nothing was pushed: %w", err)
+	}
+	return nil
+}
+
+// upstream is the remote-tracking branch the branch HEAD is on pulls from
+// and pushes to, as fetched, and whether it's there: none configured, as
+// for a branch never pushed, or not there, as a new remote's.
+func (r Repo) upstream(ctx context.Context) (string, bool, error) {
+	res, err := r.git(ctx, "symbolic-ref", "-q", "HEAD")
+	if exit, ok := errors.AsType[*runner.ExitError](err); ok && exit.Code == 1 {
+		return "", false, errors.New("HEAD isn't on a branch, so nothing was pushed")
+	}
+	if err != nil {
+		return "", false, err
+	}
+	if res, err = r.git(ctx, "for-each-ref", "--format=%(upstream)", strings.TrimSpace(string(res.Stdout))); err != nil {
+		return "", false, err
+	}
+	upstream := strings.TrimSpace(string(res.Stdout))
+	if upstream == "" {
+		return "", false, nil
+	}
+	commit, err := r.commitAt(ctx, upstream)
+	return upstream, commit != "", err
+}
+
+// catchUp rebases onto the upstream's commits HEAD hasn't, if there are
+// any, with what's not committed, dirty, set aside, unless the remote
 // changed some of it.
 func (r Repo) catchUp(ctx context.Context, gitDir string, dirty []entry) error {
-	behind, err := r.behind(ctx)
+	behind, err := r.count(ctx, "HEAD..@{u}")
 	if err != nil {
-		return err
+		return fmt.Errorf("couldn't bring in the remote's changes, so nothing was pushed: %w", err)
 	}
 	if behind == 0 {
 		return nil
@@ -129,21 +188,6 @@ func (r Repo) catchUp(ctx context.Context, gitDir string, dirty []entry) error {
 	return errors.Join(rebased, r.unstash(ctx, stash))
 }
 
-// behind fetches, and is how many of the upstream's commits HEAD hasn't.
-func (r Repo) behind(ctx context.Context) (int, error) {
-	if _, err := r.git(ctx, "fetch", "--quiet"); err != nil {
-		if unreachable(err) {
-			return 0, errors.New("couldn't reach the remote, so nothing was pushed")
-		}
-		return 0, fmt.Errorf("couldn't bring in the remote's changes, so nothing was pushed: %w", err)
-	}
-	n, err := r.count(ctx, "HEAD..@{u}")
-	if err != nil {
-		return 0, fmt.Errorf("couldn't bring in the remote's changes, so nothing was pushed: %w", err)
-	}
-	return n, nil
-}
-
 // count is how many commits revs names, as git rev-list --count has them.
 func (r Repo) count(ctx context.Context, revs string) (int, error) {
 	res, err := r.git(ctx, "rev-list", "--count", revs)
@@ -154,14 +198,16 @@ func (r Repo) count(ctx context.Context, revs string) (int, error) {
 }
 
 // unreachable reports whether git failed for want of the remote: no
-// network, or the host not answering. git says why above its last line,
-// over ssh.
+// network, or the host not answering, as git's fatal line, or ssh's, says,
+// above its last over ssh.
 func unreachable(err error) bool {
 	exit, ok := errors.AsType[*runner.ExitError](err)
-	return ok && slices.ContainsFunc([]string{
-		"Could not resolve host", "Failed to connect", "Connection refused", "Connection timed out",
-		"Operation timed out", "Network is unreachable", "No route to host",
-	}, func(s string) bool { return strings.Contains(exit.FullStderr, s) })
+	return ok && slices.ContainsFunc(exit.Lines("fatal:", "ssh:"), func(line string) bool {
+		return slices.ContainsFunc([]string{
+			"Could not resolve host", "Failed to connect", "Connection refused", "Connection timed out",
+			"Operation timed out", "Network is unreachable", "No route to host",
+		}, func(s string) bool { return strings.Contains(line, s) })
+	})
 }
 
 // clashes errors when the remote's commits change what's not committed
@@ -178,7 +224,9 @@ func (r Repo) clashes(ctx context.Context, dirty []entry) error {
 	if len(incoming) == 0 {
 		return nil
 	}
-	fold, err := r.foldsCase(ctx)
+	// Paths that differ only by case are one on a disk that folds case, as
+	// macOS's own do.
+	fold, err := r.flag(ctx, "core.ignorecase")
 	if err != nil {
 		return err
 	}
@@ -191,11 +239,20 @@ func (r Repo) clashes(ctx context.Context, dirty []entry) error {
 			changed = append(changed, e.path)
 		}
 	}
+	// A folder git ignores whole is listed as one, ending in a slash.
 	res, err = r.git(ctx, "ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory")
 	if err != nil {
 		return err
 	}
-	ignored := slices.DeleteFunc(names(res.Stdout), func(path string) bool { return !meets(path) })
+	var ignored []string
+	for _, here := range names(res.Stdout) {
+		for _, there := range incoming {
+			hit := r.replaces(here, there, fold)
+			if hit != "" && !slices.ContainsFunc(slices.Concat(changed, ignored), func(p string) bool { return same(p, hit, fold) }) {
+				ignored = append(ignored, hit)
+			}
+		}
+	}
 	if len(changed)+len(ignored) == 0 {
 		return nil
 	}
@@ -206,26 +263,56 @@ func (r Repo) clashes(ctx context.Context, dirty []entry) error {
 	return clash{edited: edited, staged: staged, ignored: ignored}
 }
 
-// foldsCase reports whether the repository's paths differ only by case on
-// its disk, as on macOS's own, by git's core.ignorecase.
-func (r Repo) foldsCase(ctx context.Context) (bool, error) {
-	res, err := r.git(ctx, "config", "--get", "--type=bool", "core.ignorecase")
-	if exit, ok := errors.AsType[*runner.ExitError](err); ok && exit.Code == 1 {
-		// Not set.
-		return false, nil
+// replaces is what of here, a file git ignores or a folder it ignores
+// whole, bringing in the remote's path there would replace: "" for
+// nothing. A file is replaced at there, in a folder there's made a file,
+// or where there needs a folder; a folder, where there's made a file of it
+// or above it, and else only what's in it at there, or a file in it where
+// there needs a folder, as real git checks out over files it ignores
+// without a word, and adds a file to a folder it ignores harmlessly.
+func (r Repo) replaces(here, there string, fold bool) string {
+	switch {
+	case !overlap(here, there, fold):
+		return ""
+	case !strings.HasSuffix(here, "/") || !within(there, here, fold):
+		return here
 	}
-	return strings.TrimSpace(string(res.Stdout)) == "true", err
+	parts := strings.Split(there[len(here):], "/")
+	for i := range parts {
+		path := here + strings.Join(parts[:i+1], "/")
+		info, err := os.Lstat(filepath.Join(r.Dir, path))
+		switch {
+		case err != nil:
+			return ""
+		case i == len(parts)-1 || !info.IsDir():
+			return path
+		}
+	}
+	return ""
 }
 
 // overlap reports whether paths a and b, in the repository, are the same,
 // or one is in the other's folder: a nested repository's, or a folder git
 // ignores whole, ends in a slash. fold compares them whatever their case.
 func overlap(a, b string, fold bool) bool {
+	return same(a, b, fold) || within(a, b, fold) || within(b, a, fold)
+}
+
+// same reports whether paths a and b, in the repository, are one: a
+// folder's ending in a slash or not, and, folding, whatever their case.
+func same(a, b string, fold bool) bool {
 	a, b = strings.TrimSuffix(a, "/"), strings.TrimSuffix(b, "/")
+	return a == b || fold && strings.EqualFold(a, b)
+}
+
+// within reports whether path is in folder, a path in the repository,
+// whether or not it ends in a slash: folding, whatever their case.
+func within(path, folder string, fold bool) bool {
+	folder = strings.TrimSuffix(folder, "/") + "/"
 	if fold {
-		a, b = strings.ToLower(a), strings.ToLower(b)
+		path, folder = strings.ToLower(path), strings.ToLower(folder)
 	}
-	return a == b || strings.HasPrefix(a, b+"/") || strings.HasPrefix(b, a+"/")
+	return strings.HasPrefix(path, folder)
 }
 
 // byDrift splits paths into those changed on disk, drift (Changes), and

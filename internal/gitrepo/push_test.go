@@ -24,7 +24,18 @@ var (
 	rebase      = git("rebase", "--no-fork-point", "--quiet")
 	abort       = git("rebase", "--abort")
 	pushIt      = git("push", "--quiet")
+	behindOf    = git("rev-list", "--count", "HEAD..@{u}")
 )
+
+// The commands that find the branch's upstream, as fetched.
+var (
+	branchOf   = git("symbolic-ref", "-q", "HEAD")
+	upstreamOf = git("for-each-ref", "--format=%(upstream)", "refs/heads/main")
+	upstreamAt = git("rev-parse", "--verify", "--quiet", "refs/remotes/origin/main")
+)
+
+// upstream is the commit the tests' upstream, origin's main, is at.
+const upstream = "51cd7f5e2b6cbb1bd2ff3e2d02cd4f1bbd1c7a33"
 
 // The stashes the tests' git names: the user's own, and the one kit makes.
 const (
@@ -38,15 +49,31 @@ const offline = "ssh: Could not resolve hostname github.com: nodename nor servna
 
 // pushing scripts a push as far as the rebase, as real git answers: the
 // remote; the git folder, and what's changed and not committed (status,
-// -z); the fetch, and the upstream's commits HEAD hasn't (behind).
+// -z); the fetch, the branch's upstream, and its commits HEAD hasn't
+// (behind).
 func pushing(fake *runnertest.Fake, gitDir, status, behind string) *sequence {
-	s := &sequence{fake: fake}
+	return pushingIn(fake, dir, gitDir, status, behind)
+}
+
+// pushingIn is pushing in the repository at root.
+func pushingIn(fake *runnertest.Fake, root, gitDir, status, behind string) *sequence {
+	s := &sequence{fake: fake, root: root}
+	s.fetches(gitDir, status)
+	s.expect(call{args: upstreamAt}).Prints(upstream + "\n")
+	s.expect(call{args: behindOf}).Prints(behind + "\n")
+	return s
+}
+
+// fetches scripts a push as far as the branch's upstream, origin's main:
+// the remote; the git folder, and what's changed and not committed
+// (status, -z); the fetch, the branch, and its upstream.
+func (s *sequence) fetches(gitDir, status string) {
 	s.expect(call{args: git("remote")}).Prints("origin\n")
 	s.expect(call{args: gitDirOf}).Prints(gitDir + "\n")
 	s.expect(call{args: wholeStatus}).Prints(status)
 	s.expect(call{args: git("fetch", "--quiet")})
-	s.expect(call{args: git("rev-list", "--count", "HEAD..@{u}")}).Prints(behind + "\n")
-	return s
+	s.expect(call{args: branchOf}).Prints("refs/heads/main\n")
+	s.expect(call{args: upstreamOf}).Prints("refs/remotes/origin/main\n")
 }
 
 // incoming scripts the remote's changes as git names them: the paths its
@@ -116,6 +143,26 @@ func push(t *testing.T, fake *runnertest.Fake) error {
 	return gitrepo.Repo{Dir: dir, Run: fake}.Push(context.Background())
 }
 
+// repoAt is a repository at a folder of its own, the files on disk in it
+// those of files, by path, a folder for one ending in a slash.
+func repoAt(t *testing.T, files ...string) string {
+	t.Helper()
+	root := t.TempDir()
+	for _, file := range files {
+		path := filepath.Join(root, file)
+		if strings.HasSuffix(file, "/") {
+			if err := os.MkdirAll(path, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if err := errors.Join(os.MkdirAll(filepath.Dir(path), 0o700), os.WriteFile(path, nil, 0o600)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return root
+}
+
 // pushOrPull is Push, or Pull when pull.
 func pushOrPull(t *testing.T, fake *runnertest.Fake, pull bool) error {
 	t.Helper()
@@ -183,84 +230,6 @@ func TestPushRefusesWhileGitIsPartWay(t *testing.T) {
 	}
 }
 
-// A commit kit held back, as it went onto another commit than it was made
-// from, holds back every push and pull while it's in the branch, before
-// anything's fetched or rebased, as a rebase would make it anew, unmarked:
-// saying how to take it out, keeping its change. Once it isn't in the
-// branch, as after git reset --soft, or isn't in the repository at all, the
-// mark's cleared, and the push goes on; git failing otherwise clears
-// nothing. What git says is what real git does.
-func TestPushHoldsBackACommitKitHeld(t *testing.T) {
-	const later = "6c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d"
-	for _, c := range []struct{ name, head, want string }{
-		{"the last commit", made, "kit's commit " + made + " went onto another commit than it was made from, so it may undo what that one changed, and nothing's pushed or brought in while it's in the branch: git reset --soft HEAD~ takes it out, keeping its change, then run kit again"},
-		{"under a later commit", later, "git reset --soft " + made + "~ takes it and the commits since out, keeping their changes, then run kit again"},
-	} {
-		for _, pull := range []bool{false, true} {
-			gitDir := t.TempDir()
-			hold(t, gitDir)
-			fake := runnertest.New(t)
-			s := &sequence{fake: fake}
-			s.expect(call{args: git("remote")}).Prints("origin\n")
-			s.expect(call{args: gitDirOf}).Prints(gitDir + "\n")
-			s.expect(call{args: git("merge-base", "--is-ancestor", made, "HEAD")})
-			s.expect(call{args: headOf}).Prints(c.head + "\n")
-			if err := pushOrPull(t, fake, pull); err == nil || !strings.Contains(err.Error(), c.want) {
-				t.Errorf("%s, pull %v = %v, want %q", c.name, pull, err, c.want)
-			}
-			checkCalls(t, c.name, fake, "", s.want)
-			checkGitFolder(t, c.name, gitDir, "", "kit-held")
-		}
-	}
-
-	for _, c := range []struct {
-		name, stderr string
-		exit         int
-	}{
-		{"taken out", "", 1},
-		{"gone from the repository", "fatal: Not a valid commit name " + made + "\n", 128},
-	} {
-		gitDir := t.TempDir()
-		hold(t, gitDir)
-		fake := runnertest.New(t)
-		s := &sequence{fake: fake}
-		s.expect(call{args: git("remote")}).Prints("origin\n")
-		s.expect(call{args: gitDirOf}).Prints(gitDir + "\n")
-		s.expect(call{args: git("merge-base", "--is-ancestor", made, "HEAD")}).Exits(c.exit).PrintsToStderr(c.stderr)
-		s.expect(call{args: wholeStatus})
-		s.expect(call{args: git("fetch", "--quiet")})
-		s.expect(call{args: git("rev-list", "--count", "HEAD..@{u}")}).Prints("0\n")
-		s.expect(call{args: pushIt})
-		if err := push(t, fake); err != nil {
-			t.Errorf("%s: Push() error = %v", c.name, err)
-		}
-		checkCalls(t, c.name, fake, "", s.want)
-		checkGitFolder(t, c.name, gitDir, "")
-	}
-
-	// git not running at all says nothing of the commit: the mark stays.
-	gitDir := t.TempDir()
-	hold(t, gitDir)
-	fake := runnertest.New(t)
-	s := &sequence{fake: fake}
-	s.expect(call{args: git("remote")}).Prints("origin\n")
-	s.expect(call{args: gitDirOf}).Prints(gitDir + "\n")
-	s.expect(call{args: git("merge-base", "--is-ancestor", made, "HEAD")}).Fails(errors.New("git: signal: killed"))
-	if err := push(t, fake); err == nil || !strings.Contains(err.Error(), "killed") {
-		t.Errorf("Push(), git killed = %v, want its error", err)
-	}
-	checkCalls(t, "git killed", fake, "", s.want)
-	checkGitFolder(t, "git killed", gitDir, "", "kit-held")
-}
-
-// hold marks made held back in gitDir, as Commit does.
-func hold(t *testing.T, gitDir string) {
-	t.Helper()
-	if err := os.WriteFile(filepath.Join(gitDir, "kit-held"), []byte(made+"\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-}
-
 // With the remote ahead, what's committed here is rebased onto it, by the
 // upstream's commits since the two parted, never git's fork-point, which
 // leaves out a commit the upstream once had, so the rebase changes no more
@@ -305,8 +274,8 @@ func TestPushRebasesOntoTheRemote(t *testing.T) {
 // here, which would come back with git's markers in it, kit reconcile's to
 // commit or undo; a change only staged, its file on disk as last
 // committed, which drift doesn't show, the user's to commit or unstage; a
-// file, or a folder, git ignores here, which the rebase would replace, as
-// real git does without a word; and a folder of the remote's where a file
+// file git ignores here, which the rebase would replace, as real git does
+// without a word; and a folder of the remote's where a file
 // is here, or a file where a folder is, which git would refuse to check
 // out. What git prints is what real git does.
 func TestPushLeavesAClashAlone(t *testing.T) {
@@ -319,7 +288,6 @@ func TestPushLeavesAClashAlone(t *testing.T) {
 		{name: "a nested repository", status: "?? vendor/tool/\x00", incoming: "vendor/tool/x\x00", want: ": vendor/tool/" + reconcile},
 		{name: "a change only staged", status: "MM notes\x00", incoming: "notes\x00", want: ": notes staged here, its file on disk as last committed: git's index is yours, to commit or unstage (git restore --staged notes)"},
 		{name: "a file git ignores", incoming: ".gitignore\x00secret.env\x00", ignored: "cache/\x00secret.env\x00", want: ": secret.env ignored here, which the remote's would replace: move it aside"},
-		{name: "a folder git ignores", incoming: "cache/blob\x00", ignored: "cache/\x00", want: ": cache/ ignored here"},
 		{name: "a file here, the remote's folder", status: "?? x\x00", incoming: "x/y\x00", want: ": x" + reconcile},
 		{name: "a folder's file here, the remote's file", status: "?? d/new\x00", incoming: "d\x00", want: ": d/new" + reconcile},
 	} {
@@ -334,6 +302,73 @@ func TestPushLeavesAClashAlone(t *testing.T) {
 		}
 		checkCalls(t, c.name, fake, "", s.want)
 	}
+}
+
+// A folder git ignores whole, listed as one, clashes only where the
+// remote's would replace what's in it, as real git checks out into it
+// without a word: a file there, or a file where the remote's needs a
+// folder, or the folder itself made a file; a file new to it, or one in a
+// folder of it, is no clash. Each is named once, however git lists it, as
+// when it lists a folder it ignores whole and the file in it too. What git
+// lists is what real git does.
+func TestPushLeavesAnIgnoredFolderAlone(t *testing.T) {
+	for _, c := range []struct {
+		name, incoming, ignored string
+		files                   []string
+		want                    string
+	}{
+		{"a file new to it", "logs/new\x00", "logs/\x00", []string{"logs/a.log"}, ""},
+		{"a file in a folder of it", "logs/2026/new\x00", "logs/\x00", []string{"logs/2026/old"}, ""},
+		{"a file of it", "logs/a.log\x00", "logs/\x00logs/a.log\x00", []string{"logs/a.log"}, ": logs/a.log ignored here, which the remote's would replace: move it aside"},
+		{"a file where a folder's needed", "logs/sub/x\x00", "logs/\x00", []string{"logs/sub"}, ": logs/sub ignored here"},
+		{"the folder made a file", "logs\x00", "logs/\x00", []string{"logs/a.log"}, ": logs/ ignored here"},
+	} {
+		root := repoAt(t, c.files...)
+		fake := runnertest.New(t)
+		s := pushingIn(fake, root, t.TempDir(), "", "1")
+		s.incoming(c.incoming, c.ignored)
+		if c.want == "" {
+			s.expect(call{args: rebase})
+			s.expect(call{args: pushIt})
+		}
+		err := gitrepo.Repo{Dir: root, Run: fake}.Push(context.Background())
+		switch {
+		case c.want == "" && err != nil:
+			t.Errorf("%s: Push() error = %v", c.name, err)
+		case c.want != "" && (err == nil || !strings.Contains(err.Error(), c.want) || strings.Count(err.Error(), "logs") != 1):
+			t.Errorf("%s: Push() error = %v, want %q, named once", c.name, err, c.want)
+		}
+		checkCalls(t, c.name, fake, "", s.want)
+	}
+}
+
+// A file is named once, however git lists it: one both changed here and
+// ignored, as one staged as deleted and still on disk, git ignoring it now,
+// as changed, as committing or undoing that change lets the push go on;
+// one git's status lists twice, staged as deleted and untracked on disk, as
+// git rm --cached leaves it, once. What git lists is what real git does.
+func TestPushNamesAClashOnce(t *testing.T) {
+	root := repoAt(t, "secret")
+	fake := runnertest.New(t)
+	s := pushingIn(fake, root, t.TempDir(), "D  secret\x00", "1")
+	s.incoming("secret\x00", "secret\x00")
+	s.drift("D  secret\x00", "")
+	err := gitrepo.Repo{Dir: root, Run: fake}.Push(context.Background())
+	if err == nil || !strings.Contains(err.Error(), ": secret changed here") || strings.Count(err.Error(), "secret") != 1 {
+		t.Errorf("Push() error = %v, want secret named once, as changed", err)
+	}
+	checkCalls(t, "changed and ignored", fake, "", s.want)
+
+	root = repoAt(t, "kept")
+	fake = runnertest.New(t)
+	s = pushingIn(fake, root, t.TempDir(), "D  kept\x00?? kept\x00", "1")
+	s.incoming("kept\x00", "")
+	s.drift("D  kept\x00?? kept\x00", "")
+	err = gitrepo.Repo{Dir: root, Run: fake}.Push(context.Background())
+	if err == nil || !strings.Contains(err.Error(), ": kept staged here") || strings.Contains(err.Error(), "kept, kept") {
+		t.Errorf("Push() error = %v, want kept named once", err)
+	}
+	checkCalls(t, "listed twice", fake, "", s.want)
 }
 
 // Paths that differ only by case are one where git folds case, as on
@@ -464,13 +499,14 @@ func TestPushFails(t *testing.T) {
 		{"offline, over https", "couldn't reach the remote, so nothing was pushed", fetchFails("fatal: unable to access 'https://github.com/someone/kit-config.git/': Could not resolve host: github.com\n")},
 		{"offline, over ssh", "couldn't reach the remote, so nothing was pushed", fetchFails(offline)},
 		{"the remote gone", "couldn't bring in the remote's changes, so nothing was pushed", fetchFails("fatal: 'someone/kit-config.git' does not appear to be a git repository\nfatal: Could not read from remote repository.\n\nPlease make sure you have the correct access rights\nand the repository exists.\n")},
-		{"no upstream", "couldn't bring in the remote's changes, so nothing was pushed", func(fake *runnertest.Fake) *sequence {
+		{"a transport's own line", "couldn't bring in the remote's changes, so nothing was pushed", fetchFails("mirror: Connection refused by the first mirror, its repository gone\nfatal: Could not read from remote repository.\n\nPlease make sure you have the correct access rights\nand the repository exists.\n")},
+		{"HEAD on no branch", "HEAD isn't on a branch, so nothing was pushed", func(fake *runnertest.Fake) *sequence {
 			s := &sequence{fake: fake}
 			s.expect(call{args: git("remote")}).Prints("origin\n")
 			s.expect(call{args: gitDirOf}).Prints(t.TempDir() + "\n")
 			s.expect(call{args: wholeStatus})
 			s.expect(call{args: git("fetch", "--quiet")})
-			s.expect(call{args: git("rev-list", "--count", "HEAD..@{u}")}).Exits(128).PrintsToStderr("fatal: no upstream configured for branch 'main'\n")
+			s.expect(call{args: branchOf}).Exits(1)
 			return s
 		}},
 		{"nothing set aside", "couldn't set aside what's not committed, so nothing was pushed", func(fake *runnertest.Fake) *sequence {
@@ -496,6 +532,53 @@ func TestPushFails(t *testing.T) {
 	}
 }
 
+// A remote with nothing of the branch yet, as a new, empty one, takes it
+// whole: with the branch's upstream set to it but not there, as for a
+// clone of an empty remote, there's nothing to bring in, and the branch is
+// pushed to it; with none set, as for a remote added, it's pushed to the
+// same branch of the remote, origin, else the first, which becomes its
+// upstream. What git says is what real git does.
+func TestPushToANewRemote(t *testing.T) {
+	fake := runnertest.New(t)
+	s := &sequence{fake: fake}
+	s.fetches(t.TempDir(), "")
+	s.expect(call{args: upstreamAt}).Exits(1)
+	s.expect(call{args: pushIt})
+	if err := push(t, fake); err != nil {
+		t.Errorf("Push(), the upstream not there = %v", err)
+	}
+	checkCalls(t, "the upstream not there", fake, "", s.want)
+
+	for _, c := range []struct{ name, remotes, to string }{
+		{"origin", "backup\norigin\n", "origin"},
+		{"no origin", "backup\nupstream\n", "backup"},
+	} {
+		fake := runnertest.New(t)
+		s := &sequence{fake: fake}
+		s.expect(call{args: git("remote")}).Prints(c.remotes)
+		s.expect(call{args: gitDirOf}).Prints(t.TempDir() + "\n")
+		s.expect(call{args: wholeStatus})
+		s.expect(call{args: git("fetch", "--quiet")})
+		s.expect(call{args: branchOf}).Prints("refs/heads/main\n")
+		s.expect(call{args: upstreamOf}).Prints("\n")
+		s.expect(call{args: git("push", "--quiet", "-u", c.to, "HEAD")})
+		if err := push(t, fake); err != nil {
+			t.Errorf("Push(), no upstream, %s = %v", c.name, err)
+		}
+		checkCalls(t, "no upstream, "+c.name, fake, "", s.want)
+	}
+
+	// Pull, with nothing to bring in, pushes nothing.
+	fake = runnertest.New(t)
+	s = &sequence{fake: fake}
+	s.fetches(t.TempDir(), "")
+	s.expect(call{args: upstreamAt}).Exits(1)
+	if err := (gitrepo.Repo{Dir: dir, Run: fake}).Pull(context.Background()); err != nil {
+		t.Errorf("Pull(), the upstream not there = %v", err)
+	}
+	checkCalls(t, "pull, the upstream not there", fake, "", s.want)
+}
+
 func TestPushWithoutARemote(t *testing.T) {
 	fake := runnertest.New(t)
 	fake.On("git", git("remote")...)
@@ -515,7 +598,7 @@ func TestHolding(t *testing.T) {
 		s := &sequence{fake: fake}
 		s.expect(call{args: gitDirOf}).Prints(t.TempDir() + "\n")
 		s.expect(call{args: wholeStatus}).Prints(status)
-		s.expect(call{args: git("rev-list", "--count", "HEAD..@{u}")}).Prints(behind + "\n")
+		s.expect(call{args: behindOf}).Prints(behind + "\n")
 		return s
 	}
 

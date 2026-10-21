@@ -177,12 +177,15 @@ func (l *Login) osascript(ctx context.Context, args []string) (runner.Result, er
 		var err error
 		asked := hold.During(ctx, func() { res, err = l.run.Run(ctx, runner.Command{Name: "osascript", Args: args}) })
 		exit, exited := errors.AsType[*runner.ExitError](err)
-		switch {
-		case !exited:
+		if !exited {
 			return res, err
-		case strings.Contains(exit.FullStderr, "(-1743)") || strings.Contains(exit.FullStderr, "Not authorized"):
+		}
+		// osascript says why on its execution error line.
+		said := strings.Join(slices.DeleteFunc(exit.Lines(), func(line string) bool { return !strings.Contains(line, "execution error:") }), "\n")
+		switch {
+		case strings.Contains(said, "(-1743)") || strings.Contains(said, "Not authorized"):
 			return res, notAllowed
-		case !strings.Contains(exit.FullStderr, "(-1712)"):
+		case !strings.Contains(said, "(-1712)"):
 			return res, err
 		case !asked || ctx.Err() != nil:
 			return res, notAllowed

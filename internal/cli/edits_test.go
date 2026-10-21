@@ -91,7 +91,7 @@ func TestNothingChangedPushesWhatsWaiting(t *testing.T) {
 		pushed := false
 		for _, cmd := range w.fake.Commands() {
 			pushed = pushed || slices.Equal(cmd.Args, git("push", "--quiet"))
-			if slices.Contains(cmd.Args, "commit") || slices.Contains(cmd.Args, "stash") {
+			if slices.Contains(cmd.Args, "commit-tree") || slices.Contains(cmd.Args, "stash") {
 				t.Errorf("%s: ran %s, want nothing committed or set aside", c.name, cmd)
 			}
 		}
@@ -101,43 +101,21 @@ func TestNothingChangedPushesWhatsWaiting(t *testing.T) {
 	}
 }
 
-// A commit that went onto another git's, HEAD moved meanwhile, may undo
-// that one's changes: kit says so, and how to take it out, keeping its
-// change, never git revert, which would undo it on disk too, and pushes
-// nothing; nor does the next run, with nothing to commit, while it's in the
-// branch, as the git folder the first run marked says.
-func TestReconcileHoldsBackACommitWhenHEADMoved(t *testing.T) {
-	const moved = "154906a47f12246099602d1bee6b1c558d3409c9"
+// A commit HEAD moved under, by another git meanwhile, is refused by git:
+// nothing's committed, kit says so and to run it again, and nothing's
+// pushed or brought in.
+func TestReconcileWhenHEADMoves(t *testing.T) {
 	w := editsWorld(t)
 	dir := filepath.Join(w.home, ".config", "kit")
 	c := edited("kit reconcile (laptop): adopt config:shared/home/.zshrc", "shared/home/.zshrc")
-	c.onto = moved
-	gitDir := w.expectCommit(t, c)
+	c.moved = true
+	w.expectCommit(t, c)
 	out, _, _ := w.run(t, "reconcile", "config:shared/home/.zshrc", "--adopt")
-	if !strings.Contains(out, "kit-config attention committed, not pushed: HEAD moved while kit committed: its commit went onto "+moved+", not "+head) ||
-		!strings.Contains(out, "git reset --soft HEAD~ takes it out, keeping its change, then run kit again") || strings.Contains(out, "revert") {
+	if !strings.Contains(out, "kit-config failed couldn't commit shared/home/.zshrc: HEAD moved while kit committed, so nothing was committed: run kit again") {
 		t.Errorf("kit reconcile printed\n%s", out)
 	}
 	if slices.Contains(w.fake.Calls(), "git -C "+dir+" push --quiet") || slices.Contains(w.fake.Calls(), "git -C "+dir+" fetch --quiet") {
 		t.Errorf("ran %q, want nothing pushed", w.fake.Calls())
-	}
-
-	next := laptopWorld(t)
-	dir = filepath.Join(next.home, ".config", "kit")
-	git := func(args ...string) []string { return append([]string{"-C", dir}, args...) }
-	next.fake.On("git", git("rev-list", "--count", "@{u}..HEAD")...).Prints("1\n")
-	next.fake.On("git", git("remote")...).Prints("origin\n")
-	next.fake.On("git", git("rev-parse", "--absolute-git-dir")...).Prints(gitDir + "\n")
-	next.fake.On("git", git("merge-base", "--is-ancestor", made, "HEAD")...)
-	next.fake.On("git", git("rev-parse", "--verify", "--quiet", "HEAD")...).Prints(made + "\n")
-	out, _, _ = next.run(t, "brew", "add", "jq")
-	if !strings.Contains(out, "kit-config attention nothing changed; 1 commit waiting, not pushed: kit's commit "+made+" went onto another commit than it was made from") {
-		t.Errorf("the next run printed\n%s", out)
-	}
-	for _, cmd := range next.fake.Commands() {
-		if slices.Contains(cmd.Args, "push") || slices.Contains(cmd.Args, "fetch") || slices.Contains(cmd.Args, "rebase") {
-			t.Errorf("the next run ran %s, want nothing brought in or pushed", cmd)
-		}
 	}
 }
 

@@ -148,6 +148,21 @@ func NewExitError(command string, code int, stderr []byte) *ExitError {
 	return &ExitError{Command: command, Code: code, Stderr: lastLine(stderr), FullStderr: string(stderr)}
 }
 
+// Lines are the lines it printed on its standard error that start with
+// one of prefixes, or all of them given none: a program's failure is said
+// on a line of its own, as git's fatal: line, which a warning above it
+// mustn't stand in for.
+func (e *ExitError) Lines(prefixes ...string) []string {
+	var lines []string
+	for line := range strings.Lines(e.FullStderr) {
+		line = strings.TrimSpace(line)
+		if len(prefixes) == 0 || slices.ContainsFunc(prefixes, func(p string) bool { return strings.HasPrefix(line, p) }) {
+			lines = append(lines, line)
+		}
+	}
+	return lines
+}
+
 func (e *ExitError) Error() string {
 	msg := fmt.Sprintf("%s exited %d", e.Command, e.Code)
 	if e.Stderr != "" {

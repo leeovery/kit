@@ -1,7 +1,6 @@
 package gitrepo_test
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"os"
@@ -81,7 +80,9 @@ func checkGitFolder(t *testing.T, name, gitDir, index string, others ...string) 
 // sequence is the commands a test expects git to run, in order, as it
 // scripts them.
 type sequence struct {
-	fake    *runnertest.Fake
+	fake *runnertest.Fake
+	// root is the repository's folder, when it isn't dir's.
+	root    string
 	want    []call
 	scripts map[string]*runnertest.Script
 }
@@ -89,6 +90,9 @@ type sequence struct {
 // expect scripts c, expected next: a command expected before answers again,
 // as scripted now.
 func (s *sequence) expect(c call) *runnertest.Script {
+	if s.root != "" {
+		c.args = slices.Concat([]string{"-C", s.root}, c.args[2:])
+	}
 	s.want = append(s.want, c)
 	key := strings.Join(c.args, "\x00")
 	if script, ok := s.scripts[key]; ok {
@@ -111,41 +115,43 @@ var (
 	headOf   = git("rev-parse", "--verify", "--quiet", "HEAD")
 	stageIn  = git("update-index", "--add", "--remove", "--replace", "-z", "--stdin")
 	stagedIn = git("diff", "--cached", "--name-only", "-z", "--no-renames")
-	commitIn = git("commit", "--quiet", "-m", "kit test")
-	parentOf = git("rev-parse", "--verify", "--quiet", "HEAD^")
+	writeIn  = git("write-tree")
+	signing  = git("config", "--get", "--type=bool", "commit.gpgsign")
 	resetIn  = git("--literal-pathspecs", "reset", "--quiet", "--pathspec-from-file=-", "--pathspec-file-nul")
 )
 
-// lineOf is the command listing HEAD's first-parent line back to onto, each
-// commit with its parents: all of it before the first commit, onto "".
-func lineOf(onto string) []string {
-	if onto == "" {
-		return git("rev-list", "--first-parent", "--parents", "HEAD")
+// tree is the tree git writes of kit's own index.
+const tree = "af9055821923c351c404eaaff97d82a5552a1ad5"
+
+// commitTree is git commit-tree of tree onto parent, none for "", signed
+// when signs, with the tests' message.
+func commitTree(parent string, signs bool) []string {
+	args := []string{"commit-tree", tree}
+	if parent != "" {
+		args = append(args, "-p", parent)
 	}
-	return git("rev-list", "--first-parent", "--parents", onto+"..HEAD")
+	if signs {
+		args = append(args, "-S")
+	}
+	return git(append(args, "-m", "kit test")...)
 }
 
-// line is rev-list's line for commit, with its parent, none for "".
-func line(commit, parent string) string {
-	return strings.TrimSpace(commit+" "+parent) + "\n"
-}
-
-// madeFrom is the command asking whether commit holds kit's own index's
-// files.
-func madeFrom(commit string) call {
-	return call{args: git("diff", "--cached", "--quiet", commit), index: ownIndex}
+// moveHEAD is git update-ref moving HEAD onto made only from was, the
+// last commit, "" before the first.
+func moveHEAD(was string) []string {
+	return git("update-ref", "-m", "kit: kit test", "HEAD", made, was)
 }
 
 // commitCase is a commit of paths, git's answers to it as real git gives
 // them, and what kit has git do: status of the paths; then, holding git's
 // index, in an index of its own of the last commit's, the files it stages
 // as they are on disk (stage) and those it commits as deleted (deleted),
-// what's staged there (staged), and a commit when anything is, made onto
-// parent, the last commit unless another git moved HEAD, found back from
-// HEAD (lineOf) and its files kit's own; then, in a copy of the user's
-// index, the files that take the last commit's entries (reset), the copy
-// then the user's index. Neither stage, deleted nor reset: nothing runs
-// after status.
+// what's staged there (staged), and, when anything is, its tree, a commit
+// of it onto the last commit, signed when git commit would sign it
+// (signs), and HEAD moved onto that from the last commit; then, in a copy
+// of the user's index, the files that take the last commit's entries
+// (reset), the copy then the user's index. Neither stage, deleted nor
+// reset: nothing runs after status.
 type commitCase struct {
 	name                  string
 	paths                 []string
@@ -153,7 +159,7 @@ type commitCase struct {
 	unborn                bool
 	stage, deleted, reset []string
 	staged                string
-	parent                string
+	signs                 bool
 	// err is what Commit's error says: none when "".
 	err string
 	// held, when set, checks the git folder too as each command runs
@@ -194,18 +200,11 @@ func (c commitCase) script(t *testing.T, fake *runnertest.Fake, gitDir string) [
 	}
 	s.expect(call{args: stagedIn, index: ownIndex}).Prints(c.staged).Does(held)
 	if c.staged != "" {
-		s.expect(call{args: commitIn, index: ownIndex}).Does(held)
 		onto := base
 		if c.unborn {
 			onto = ""
 		}
-		s.expect(call{args: lineOf(onto)}).Prints(line(made, cmp.Or(c.parent, onto))).Does(held)
-		if c.parent == "" {
-			s.expect(madeFrom(made)).Does(held)
-		} else {
-			s.expect(call{args: headOf}).Prints(made + "\n").Does(held)
-			s.expect(call{args: parentOf}).Prints(c.parent + "\n").Does(held)
-		}
+		s.commits(onto, c.signs, held)
 	}
 	if c.reset != nil {
 		var lock os.FileInfo
@@ -225,6 +224,20 @@ func (c commitCase) script(t *testing.T, fake *runnertest.Fake, gitDir string) [
 		})
 	}
 	return s.want
+}
+
+// commits scripts a commit of kit's own index onto onto, "" before the
+// first, signed when signs: its tree, the signing setting, the commit, and
+// HEAD moved onto it; each checking as does.
+func (s *sequence) commits(onto string, signs bool, does func()) {
+	s.expect(call{args: writeIn, index: ownIndex}).Prints(tree + "\n").Does(does)
+	if setting := s.expect(call{args: signing}).Does(does); signs {
+		setting.Prints("true\n")
+	} else {
+		setting.Exits(1)
+	}
+	s.expect(call{args: commitTree(onto, signs)}).Prints(made + "\n").Does(does)
+	s.expect(call{args: moveHEAD(onto)}).Does(does)
 }
 
 // checkCopy fails the test unless next, the copy of the user's index git
@@ -628,35 +641,81 @@ func TestCommitSweepsNothingOnceItLetsGo(t *testing.T) {
 	}
 }
 
-// HEAD moved by another git while kit committed, as git reset --soft can
-// while the index is held, leaves a commit that may undo the other's: kit
-// says so, naming both commits and how to take it out, keeping its change
-// (never git revert, which would undo the change on disk too), once the
-// user's index takes the files committed, the error one that's never
-// pushed; and it marks the git folder, so no later run pushes it either.
-func TestCommitWhenHEADMoved(t *testing.T) {
-	const moved = "154906a47f12246099602d1bee6b1c558d3409c9"
-	c := anEdit
-	c.name, c.parent = "HEAD moved", moved
-	c.err = "HEAD moved while kit committed: its commit went onto " + moved + ", not " + base + ", which it was made from, so it may undo what that commit changed, and nothing's pushed while it's in the branch: git reset --soft HEAD~ takes it out, keeping its change, then run kit again"
-	gitDir := gitFolder(t, false)
-	fake := runnertest.New(t)
-	want := c.script(t, fake, gitDir)
-	committed, err := gitrepo.Repo{Dir: dir, Run: fake}.Commit(context.Background(), "kit test", c.paths...)
-	c.check(t, committed, err)
-	if !errors.Is(err, gitrepo.ErrHeadMoved) {
-		t.Errorf("Commit() error = %v, want ErrHeadMoved", err)
-	}
-	checkCalls(t, c.name, fake, gitDir, want)
-	c.checkFolder(t, gitDir, "kit-held")
-	if data, _ := os.ReadFile(filepath.Join(gitDir, "kit-held")); string(data) != made+"\n" {
-		t.Errorf("the git folder marks %q held back, want %s", data, made)
+// kit's commit goes onto the last commit, HEAD moved onto it only from
+// there, so another git that moved HEAD meanwhile, as git reset --soft or
+// a commit can while kit holds the index, has git refuse it: nothing's
+// committed, kit says so, and HEAD and the user's index stay as they were,
+// the commit made left unused. Before the first commit, another git's
+// first commit is refused the same way. What git prints is what real git
+// does.
+func TestCommitWhenHEADMoves(t *testing.T) {
+	const theirs = "154906a47f12246099602d1bee6b1c558d3409c9"
+	for _, c := range []struct {
+		name, onto, refusal string
+	}{
+		{"HEAD moved", base, "fatal: update_ref failed for ref 'HEAD': cannot lock ref 'HEAD': is at " + theirs + " but expected " + base + "\n"},
+		{"another's first commit", "", "fatal: update_ref failed for ref 'HEAD': cannot lock ref 'HEAD': reference already exists\n"},
+	} {
+		gitDir := gitFolder(t, c.onto == "")
+		fake := runnertest.New(t)
+		s := &sequence{fake: fake}
+		s.expect(call{args: statusOf("brew")}).Prints(" M brew\x00")
+		s.expect(call{args: gitDirOf}).Prints(gitDir + "\n")
+		if c.onto == "" {
+			s.expect(call{args: headOf}).Exits(1)
+		} else {
+			s.expect(call{args: headOf}).Prints(base + "\n")
+			s.expect(call{args: git("read-tree", base), index: ownIndex})
+		}
+		s.expect(call{args: stageIn, input: "brew\x00", index: ownIndex})
+		s.expect(call{args: stagedIn, index: ownIndex}).Prints("brew\x00")
+		s.commits(c.onto, false, nil)
+		s.scripts[strings.Join(moveHEAD(c.onto), "\x00")].Exits(128).PrintsToStderr(c.refusal)
+		s.expect(call{args: headOf}).Prints(theirs + "\n")
+		committed, err := gitrepo.Repo{Dir: dir, Run: fake}.Commit(context.Background(), "kit test", "brew")
+		if committed || err == nil || err.Error() != "HEAD moved while kit committed, so nothing was committed: run kit again" {
+			t.Errorf("%s: Commit() = %v, %v; want nothing committed, and why", c.name, committed, err)
+		}
+		checkCalls(t, c.name, fake, gitDir, s.want)
+		index := usersEntries
+		if c.onto == "" {
+			index = ""
+		}
+		checkGitFolder(t, c.name, gitDir, index)
 	}
 }
 
-// Once git has committed, the user's index catches up whatever becomes of
-// the run: a run cancelled then still checks the commit's parent and resets
-// the index.
+// git's signing setting decides whether kit's commit is signed, as it
+// decides git commit's, which git commit-tree doesn't read: signed, it's
+// made with -S, which signs with the program and key git's config names,
+// as git commit does; set false, or not set, it isn't.
+func TestCommitSigns(t *testing.T) {
+	signed := anEdit
+	signed.name, signed.signs = "signed", true
+	signed.run(t)
+
+	gitDir := gitFolder(t, false)
+	fake := runnertest.New(t)
+	s := &sequence{fake: fake}
+	s.expect(call{args: statusOf("brew")}).Prints(" M brew\x00")
+	s.expect(call{args: gitDirOf}).Prints(gitDir + "\n")
+	s.expect(call{args: headOf}).Prints(base + "\n")
+	s.expect(call{args: git("read-tree", base), index: ownIndex})
+	s.expect(call{args: stageIn, input: "brew\x00", index: ownIndex})
+	s.expect(call{args: stagedIn, index: ownIndex}).Prints("brew\x00")
+	s.commits(base, false, nil)
+	s.scripts[strings.Join(signing, "\x00")].Exits(0).Prints("false\n")
+	s.expect(call{args: resetIn, input: "brew\x00", index: nextIndex}).Does(func() {
+		_ = os.WriteFile(filepath.Join(gitDir, nextIndex), []byte(resetEntries), 0o600)
+	})
+	if committed, err := (gitrepo.Repo{Dir: dir, Run: fake}).Commit(context.Background(), "kit test", "brew"); !committed || err != nil {
+		t.Errorf("Commit(), signing set false = %v, %v", committed, err)
+	}
+	checkCalls(t, "signing set false", fake, gitDir, s.want)
+}
+
+// Once HEAD has taken kit's commit, the user's index catches up whatever
+// becomes of the run: a run cancelled then still resets the index.
 func TestCommitFinishesOnceCommitted(t *testing.T) {
 	gitDir := gitFolder(t, false)
 	fake := runnertest.New(t)
@@ -673,20 +732,17 @@ func TestCommitFinishesOnceCommitted(t *testing.T) {
 	anEdit.checkFolder(t, gitDir)
 }
 
-// A run stopped while git commits, once git has made the commit, as while
-// a post-commit hook runs, has committed: kit's commit found back from
-// HEAD, its parent the last one and its files kit's own index's, though
-// the hook committed on top of it; the user's index takes the files
-// committed, on a run never stopped. HEAD where it was, it hasn't; nor when
-// HEAD went onto another's commit, as a hook can make, which git commit
-// then refuses to follow, as real git does.
-func TestCommitStoppedOnceGitCommitted(t *testing.T) {
-	const hook = "5b0c3e1d2a4f6e8b9c7d0a1e3f5b7d9c2e4a6f8b"
-	gitDir := gitFolder(t, false)
-	for _, c := range []struct{ name, line string }{
-		{"stopped once git committed", line(made, base)},
-		{"stopped once a hook committed on top", line(hook, made) + line(made, base)},
-	} {
+// A run stopped as git moves HEAD onto kit's commit has committed exactly
+// when HEAD is kit's commit, as git may have moved it before it stopped:
+// then the user's index takes the files committed, on a run never
+// stopped; HEAD still the last commit, nothing's committed, and the index
+// is left as it was.
+func TestCommitStoppedAsHEADMoves(t *testing.T) {
+	for _, c := range []struct {
+		name, head string
+		moved      bool
+	}{{"HEAD moved", made, true}, {"HEAD where it was", base, false}} {
+		gitDir := gitFolder(t, false)
 		fake := runnertest.New(t)
 		s := &sequence{fake: fake}
 		s.expect(call{args: statusOf("brew")}).Prints(" M brew\x00")
@@ -696,104 +752,34 @@ func TestCommitStoppedOnceGitCommitted(t *testing.T) {
 		s.expect(call{args: stageIn, input: "brew\x00", index: ownIndex})
 		s.expect(call{args: stagedIn, index: ownIndex}).Prints("brew\x00")
 		ctx, cancel := context.WithCancel(context.Background())
-		s.expect(call{args: commitIn, index: ownIndex}).Fails(context.Canceled).Does(cancel)
-		for range 2 {
-			s.expect(call{args: lineOf(base)}).Prints(c.line)
-			s.expect(madeFrom(made))
+		s.commits(base, false, nil)
+		s.scripts[strings.Join(moveHEAD(base), "\x00")].Fails(context.Canceled).Does(cancel)
+		s.expect(call{args: headOf}).Prints(c.head + "\n")
+		if c.moved {
+			s.expect(call{args: resetIn, input: "brew\x00", index: nextIndex}).Does(func() {
+				_ = os.WriteFile(filepath.Join(gitDir, nextIndex), []byte(resetEntries), 0o600)
+			})
 		}
-		s.expect(call{args: resetIn, input: "brew\x00", index: nextIndex}).Does(func() {
-			_ = os.WriteFile(filepath.Join(gitDir, nextIndex), []byte(resetEntries), 0o600)
-		})
 		w := &cancelling{run: fake, cancel: func() {}}
 		committed, err := gitrepo.Repo{Dir: dir, Run: w}.Commit(ctx, "kit test", "brew")
 		cancel()
-		if !committed || err != nil {
-			t.Errorf("Commit(), %s = %v, %v; want committed", c.name, committed, err)
+		if committed != c.moved || (err == nil) != c.moved {
+			t.Errorf("%s: Commit(), stopped = %v, %v; want committed %v", c.name, committed, err, c.moved)
 		}
 		if len(w.dead) != 0 {
 			t.Errorf("%s: ran on the stopped run: %q", c.name, w.dead)
 		}
 		checkCalls(t, c.name, fake, gitDir, s.want)
-		checkGitFolder(t, c.name, gitDir, resetEntries)
-		if err := os.WriteFile(filepath.Join(gitDir, "index"), []byte(usersEntries), 0o600); err != nil {
-			t.Fatal(err)
+		index := usersEntries
+		if c.moved {
+			index = resetEntries
 		}
+		checkGitFolder(t, c.name, gitDir, index)
 	}
-
-	const theirs = "8dcfc6d2dbad007a2413a27223728fd223f83569"
-	fake := runnertest.New(t)
-	s := &sequence{fake: fake}
-	s.expect(call{args: statusOf("brew")}).Prints(" M brew\x00")
-	s.expect(call{args: gitDirOf}).Prints(gitDir + "\n")
-	s.expect(call{args: headOf}).Prints(base + "\n")
-	s.expect(call{args: git("read-tree", base), index: ownIndex})
-	s.expect(call{args: stageIn, input: "brew\x00", index: ownIndex})
-	s.expect(call{args: stagedIn, index: ownIndex}).Prints("brew\x00")
-	s.expect(call{args: commitIn, index: ownIndex}).Exits(128).PrintsToStderr("fatal: cannot lock ref 'HEAD': is at " + theirs + " but expected " + base + "\n")
-	s.expect(call{args: lineOf(base)}).Prints(line(theirs, base))
-	s.expect(madeFrom(theirs)).Exits(1)
-	if committed, err := (gitrepo.Repo{Dir: dir, Run: fake}).Commit(context.Background(), "kit test", "brew"); committed || err == nil || !strings.Contains(err.Error(), "cannot lock ref 'HEAD'") {
-		t.Errorf("Commit(), HEAD moved by a hook = %v, %v; want git's refusal", committed, err)
-	}
-	checkCalls(t, "HEAD moved by a hook", fake, gitDir, s.want)
 }
 
-// A post-commit hook that commits on top of kit's commit leaves it kit's,
-// made onto the last commit: no HEAD moved, nothing held back.
-func TestCommitWithAHookCommittingOnTop(t *testing.T) {
-	const hook = "5b0c3e1d2a4f6e8b9c7d0a1e3f5b7d9c2e4a6f8b"
-	gitDir := gitFolder(t, false)
-	fake := runnertest.New(t)
-	s := &sequence{fake: fake}
-	s.expect(call{args: statusOf("brew")}).Prints(" M brew\x00")
-	s.expect(call{args: gitDirOf}).Prints(gitDir + "\n")
-	s.expect(call{args: headOf}).Prints(base + "\n")
-	s.expect(call{args: git("read-tree", base), index: ownIndex})
-	s.expect(call{args: stageIn, input: "brew\x00", index: ownIndex})
-	s.expect(call{args: stagedIn, index: ownIndex}).Prints("brew\x00")
-	s.expect(call{args: commitIn, index: ownIndex})
-	s.expect(call{args: lineOf(base)}).Prints(line(hook, made) + line(made, base))
-	s.expect(madeFrom(made))
-	s.expect(call{args: resetIn, input: "brew\x00", index: nextIndex}).Does(func() {
-		_ = os.WriteFile(filepath.Join(gitDir, nextIndex), []byte(resetEntries), 0o600)
-	})
-	if committed, err := (gitrepo.Repo{Dir: dir, Run: fake}).Commit(context.Background(), "kit test", "brew"); !committed || err != nil {
-		t.Errorf("Commit(), a hook committing on top = %v, %v; want committed", committed, err)
-	}
-	checkCalls(t, "a hook committing on top", fake, gitDir, s.want)
-	checkGitFolder(t, "a hook committing on top", gitDir, resetEntries)
-}
-
-// A commit kit can't tell is its own, git failing to say whether its files
-// are kit's index's, is held back all the same, as one HEAD moved under,
-// the error saying kit couldn't tell; the user's index still catches up.
-func TestCommitWhenItCantTell(t *testing.T) {
-	gitDir := gitFolder(t, false)
-	fake := runnertest.New(t)
-	s := &sequence{fake: fake}
-	s.expect(call{args: statusOf("brew")}).Prints(" M brew\x00")
-	s.expect(call{args: gitDirOf}).Prints(gitDir + "\n")
-	s.expect(call{args: headOf}).Prints(base + "\n")
-	s.expect(call{args: git("read-tree", base), index: ownIndex})
-	s.expect(call{args: stageIn, input: "brew\x00", index: ownIndex})
-	s.expect(call{args: stagedIn, index: ownIndex}).Prints("brew\x00")
-	s.expect(call{args: commitIn, index: ownIndex})
-	s.expect(call{args: lineOf(base)}).Prints(line(made, base))
-	s.expect(madeFrom(made)).Exits(128).PrintsToStderr("fatal: unable to read tree " + made + "\n")
-	s.expect(call{args: headOf}).Prints(made + "\n")
-	s.expect(call{args: resetIn, input: "brew\x00", index: nextIndex}).Does(func() {
-		_ = os.WriteFile(filepath.Join(gitDir, nextIndex), []byte(resetEntries), 0o600)
-	})
-	committed, err := gitrepo.Repo{Dir: dir, Run: fake}.Commit(context.Background(), "kit test", "brew")
-	if !committed || !errors.Is(err, gitrepo.ErrHeadMoved) || !strings.Contains(err.Error(), "HEAD moved while kit committed, or kit couldn't tell, so it isn't pushed") {
-		t.Errorf("Commit(), unable to tell = %v, %v; want committed, held back", committed, err)
-	}
-	checkCalls(t, "unable to tell", fake, gitDir, s.want)
-	checkGitFolder(t, "unable to tell", gitDir, resetEntries, "kit-held")
-}
-
-// cancelling cancels the run once git commit has run, noting each command
-// run after on a cancelled context.
+// cancelling cancels the run once git moves HEAD onto kit's commit, noting
+// each command run after on a cancelled context.
 type cancelling struct {
 	run    runner.Runner
 	cancel func()
@@ -805,31 +791,22 @@ func (c *cancelling) Run(ctx context.Context, cmd runner.Command) (runner.Result
 		c.dead = append(c.dead, cmd.String())
 	}
 	res, err := c.run.Run(ctx, cmd)
-	if slices.Contains(cmd.Args, "commit") {
+	if slices.Contains(cmd.Args, "update-ref") {
 		c.cancel()
 	}
 	return res, err
 }
 
-// A commit that fails, as a hook or signing does, HEAD where it was, leaves
-// the user's index as it was, and nothing of kit's: a hook that reached for
-// git's own index, which kit holds, says so, never as git says it, a lock
-// to remove. Committed, then the index not caught up, it's committed all
-// the same, the error the index's; and a repository git names no git
-// folder for is an error. What git prints is what real git does.
+// A commit that fails, as signing does, or moving HEAD while another git
+// holds its branch or a hook git runs on a ref's change refuses it, HEAD
+// where it was, leaves the user's index as it was,
+// and nothing of kit's, the error git's. Committed, then the index not
+// caught up, it's committed all the same, the error the index's; and a
+// repository git names no git folder for is an error. What git prints is
+// what real git does.
 func TestCommitFails(t *testing.T) {
 	gitDir := gitFolder(t, false)
-	lock := filepath.Join(gitDir, "index.lock")
-	for _, c := range []struct {
-		name, stderr string
-		exit         int
-		want         string
-	}{
-		{"signing", "error: gpg failed to sign the data:\n(no gpg output)\nfatal: failed to write commit object\n", 128, "fatal: failed to write commit object"},
-		{"a hook reaching for the index", "fatal: Unable to create '" + lock + "': File exists.\n\nAnother git process seems to be running in this repository, or the lock file may be stale\n", 1,
-			"a hook of the commit's failed: it reached for git's own index, which kit holds while it commits, rather than the one git gives hooks (GIT_INDEX_FILE)"},
-	} {
-		fake := runnertest.New(t)
+	staging := func(fake *runnertest.Fake) *sequence {
 		s := &sequence{fake: fake}
 		s.expect(call{args: statusOf("brew")}).Prints(" M brew\x00")
 		s.expect(call{args: gitDirOf}).Prints(gitDir + "\n")
@@ -837,26 +814,40 @@ func TestCommitFails(t *testing.T) {
 		s.expect(call{args: git("read-tree", base), index: ownIndex})
 		s.expect(call{args: stageIn, input: "brew\x00", index: ownIndex})
 		s.expect(call{args: stagedIn, index: ownIndex}).Prints("brew\x00")
-		s.expect(call{args: commitIn, index: ownIndex}).Exits(c.exit).PrintsToStderr(c.stderr)
-		s.expect(call{args: lineOf(base)})
-		if committed, err := (gitrepo.Repo{Dir: dir, Run: fake}).Commit(context.Background(), "kit test", "brew"); committed || err == nil || !strings.Contains(err.Error(), c.want) || strings.Contains(err.Error(), "stale") {
-			t.Errorf("%s: Commit() = %v, %v; want %q", c.name, committed, err, c.want)
+		return s
+	}
+
+	fake := runnertest.New(t)
+	s := staging(fake)
+	s.expect(call{args: writeIn, index: ownIndex}).Prints(tree + "\n")
+	s.expect(call{args: signing}).Prints("true\n")
+	s.expect(call{args: commitTree(base, true)}).Exits(1).PrintsToStderr("error: Couldn't load public key /Users/someone/.ssh/signing.pub: No such file or directory?\n\n")
+	if committed, err := (gitrepo.Repo{Dir: dir, Run: fake}).Commit(context.Background(), "kit test", "brew"); committed || err == nil || !strings.Contains(err.Error(), "Couldn't load public key") {
+		t.Errorf("Commit(), signing failing = %v, %v; want git's error", committed, err)
+	}
+	checkCalls(t, "signing failing", fake, gitDir, s.want)
+	checkGitFolder(t, "signing failing", gitDir, usersEntries)
+
+	branchLock := filepath.Join(gitDir, "refs", "heads", "main.lock")
+	for _, c := range []struct{ name, stderr, says string }{
+		{"the branch locked", "fatal: update_ref failed for ref 'HEAD': cannot lock ref 'HEAD': Unable to create '" + branchLock + "': File exists.\n\nAnother git process seems to be running in this repository, or the lock file may be stale\n", "may be stale"},
+		{"a reference-transaction hook refusing", "no\nfatal: in 'prepared' phase, update aborted by the reference-transaction hook\n", "aborted by the reference-transaction hook"},
+	} {
+		fake = runnertest.New(t)
+		s = staging(fake)
+		s.commits(base, false, nil)
+		s.scripts[strings.Join(moveHEAD(base), "\x00")].Exits(128).PrintsToStderr(c.stderr)
+		s.expect(call{args: headOf}).Prints(base + "\n")
+		if committed, err := (gitrepo.Repo{Dir: dir, Run: fake}).Commit(context.Background(), "kit test", "brew"); committed || err == nil || !strings.Contains(err.Error(), c.says) || strings.Contains(err.Error(), "HEAD moved") {
+			t.Errorf("Commit(), %s = %v, %v; want git's error", c.name, committed, err)
 		}
 		checkCalls(t, c.name, fake, gitDir, s.want)
 		checkGitFolder(t, c.name, gitDir, usersEntries)
 	}
 
-	fake := runnertest.New(t)
-	s := &sequence{fake: fake}
-	s.expect(call{args: statusOf("brew")}).Prints(" M brew\x00")
-	s.expect(call{args: gitDirOf}).Prints(gitDir + "\n")
-	s.expect(call{args: headOf}).Prints(base + "\n")
-	s.expect(call{args: git("read-tree", base), index: ownIndex})
-	s.expect(call{args: stageIn, input: "brew\x00", index: ownIndex})
-	s.expect(call{args: stagedIn, index: ownIndex}).Prints("brew\x00")
-	s.expect(call{args: commitIn, index: ownIndex})
-	s.expect(call{args: lineOf(base)}).Prints(line(made, base))
-	s.expect(madeFrom(made))
+	fake = runnertest.New(t)
+	s = staging(fake)
+	s.commits(base, false, nil)
 	s.expect(call{args: resetIn, input: "brew\x00", index: nextIndex}).Exits(128).PrintsToStderr("fatal: index file corrupt\n")
 	if committed, err := (gitrepo.Repo{Dir: dir, Run: fake}).Commit(context.Background(), "kit test", "brew"); !committed || err == nil || !strings.Contains(err.Error(), "git's index still shows them as they were") {
 		t.Errorf("Commit(), the reset failing = %v, %v; want committed, the index's error", committed, err)

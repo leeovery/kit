@@ -107,8 +107,7 @@ func (c *changes) whoWrote(names []string) []string {
 
 // sync commits the config's changed files with message, and pushes, as the
 // last step. With nothing to commit, it pushes only what was committed
-// before and is waiting, as when that push failed: nothing else would. A
-// commit that went onto another git's, HEAD moved meanwhile, isn't pushed.
+// before and is waiting, as when that push failed: nothing else would.
 func (c *changes) sync(ctx context.Context, message string) {
 	c.step(ctx, syncStep, func(ctx context.Context) check.Result {
 		if len(c.files) == 0 {
@@ -121,8 +120,6 @@ func (c *changes) sync(ctx context.Context, message string) {
 			return check.Result{State: check.Failed, Reason: "couldn't commit " + strings.Join(c.files, ", ") + ": " + err.Error()}
 		case !committed:
 			return c.pushWaiting(ctx)
-		case errors.Is(err, gitrepo.ErrHeadMoved):
-			return check.Result{State: check.Attention, Summary: "committed, not pushed: " + err.Error()}
 		}
 		res := c.push(ctx)
 		if err != nil {

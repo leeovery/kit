@@ -10,32 +10,26 @@ import (
 	"slices"
 	"strings"
 	"time"
-
-	"github.com/leeovery/kit/internal/runner"
 )
-
-// ErrHeadMoved is Commit's error when its commit went onto another commit
-// than the one it was made from, HEAD moved by another git meanwhile: the
-// commit may undo that one's changes, so it's never to be pushed.
-var ErrHeadMoved = errors.New("HEAD moved while kit committed")
 
 // Commit commits paths in the repository with message, each whole as it is
 // on disk: a file edited, new or deleted, staged or not, a rename's two
 // sides, a folder's every file, a file become a folder or a folder a file.
 // Anything else staged is left as it is, the commit made from an index of
-// the last commit's and these alone; hooks and signing run as for any. A
-// file staged as deleted, on disk and ignored, is committed as deleted, as
-// the user staged it. What git can't keep is left out, never failing the
-// rest: an ignored file, an empty folder, a path gone git never kept, a
-// repository nested in this one. It holds git's index from before it reads
-// the last commit till the user's index holds the files committed as
-// committed, as git commit does, so no other git changes either meanwhile;
-// a file added then gone before it was committed (AD) leaves the index
-// too. It refuses while git is part way through a merge, rebase,
-// cherry-pick, revert or am, or a conflict in paths waits to be resolved.
-// It reports whether it committed: with nothing to commit it doesn't, which
-// is no error; an error once it has is the index's, or ErrHeadMoved. A run
-// stopped while git commits, once git has made the commit, has committed.
+// the last commit's and these alone, with git's plumbing: no commit hooks
+// run, and it's signed as git commit would sign it. A file staged as
+// deleted, on disk and ignored, is committed as deleted, as the user staged
+// it. What git can't keep is left out, never failing the rest: an ignored
+// file, an empty folder, a path gone git never kept, a repository nested in
+// this one. It holds git's index from before it reads the last commit till
+// the user's index holds the files committed as committed, as git commit
+// does, so no other git changes either meanwhile; a file added then gone
+// before it was committed (AD) leaves the index too. It refuses while git
+// is part way through a merge, rebase, cherry-pick, revert or am, or a
+// conflict in paths waits to be resolved. It reports whether it committed:
+// with nothing to commit it doesn't, which is no error; nor when another
+// git moved HEAD meanwhile, which is, HEAD and the user's index left as
+// they were. An error once it has is the index's.
 func (r Repo) Commit(ctx context.Context, message string, paths ...string) (bool, error) {
 	if len(paths) == 0 {
 		return false, nil
@@ -73,28 +67,29 @@ func (r Repo) commitLocked(ctx context.Context, lock *indexLock, message string,
 	if err != nil {
 		return false, err
 	}
-	files, err := r.commitFrom(ctx, lock, base, message, p)
+	files, err := r.stage(ctx, lock, base, p)
 	if err != nil {
 		return false, err
 	}
 	committed := len(files) > 0
-	var moved error
 	if committed {
+		if err := r.commitTree(ctx, lock, base, message); err != nil {
+			return false, err
+		}
 		// What follows is the index catching up with a commit made: it's
 		// done whatever becomes of the run.
 		ctx = context.WithoutCancel(ctx)
-		moved = r.checkParent(ctx, lock, base)
 	}
 	if err := r.resetIndex(ctx, lock, slices.Concat(files, p.gone)); err != nil {
-		return committed, errors.Join(moved, fmt.Errorf("git's index still shows them as they were: %w", err))
+		return committed, fmt.Errorf("git's index still shows them as they were: %w", err)
 	}
-	return committed, moved
+	return committed, nil
 }
 
-// commitFrom commits p from an index of base's and p's files alone, kit's
-// own while it holds lock, and returns the files the commit changes: none,
-// and no commit, when none differ from base.
-func (r Repo) commitFrom(ctx context.Context, lock *indexLock, base, message string, p commitPlan) ([]string, error) {
+// stage stages p in an index of base's and p's files alone, kit's own
+// while it holds lock, and returns the files that differ from base there:
+// none when a commit would change nothing.
+func (r Repo) stage(ctx context.Context, lock *indexLock, base string, p commitPlan) ([]string, error) {
 	env := []string{"GIT_INDEX_FILE=" + lock.file(ownIndex)}
 	if base != "" {
 		if _, err := r.gitIn(ctx, env, nil, "read-tree", base); err != nil {
@@ -112,100 +107,58 @@ func (r Repo) commitFrom(ctx context.Context, lock *indexLock, base, message str
 		}
 	}
 	res, err := r.gitIn(ctx, env, nil, "diff", "--cached", "--name-only", "-z", "--no-renames")
-	files := names(res.Stdout)
-	if err != nil || len(files) == 0 {
+	if err != nil {
 		return nil, err
 	}
-	if _, err := r.gitIn(ctx, env, nil, "commit", "--quiet", "-m", message); err != nil {
-		// Made all the same, as when the run's stopped while a post-commit
-		// hook runs. Another git's commit onto base, as a hook can make,
-		// which git commit then refuses to follow, isn't kit's.
-		if made, _ := r.made(context.WithoutCancel(ctx), lock, base); made != "" {
-			return files, nil
-		}
-		return nil, commitFailed(err, lock.path())
-	}
-	return files, nil
+	return names(res.Stdout), nil
 }
 
-// made is kit's commit, made onto base from kit's own index, which lock
-// holds: the commit on HEAD's first-parent line whose parent is base, and
-// whose files are the index's, as a post-commit hook can commit on top.
-// None when there's no such commit, as when another git moved HEAD.
-func (r Repo) made(ctx context.Context, lock *indexLock, base string) (string, error) {
-	line := "HEAD"
+// commitTree commits kit's own index, which lock holds, onto base with
+// message, as git's plumbing does: its tree written, a commit of it made,
+// signed when git commit would sign it (commit.gpgsign), and HEAD moved
+// onto it only from base, so a commit another git made meanwhile is never
+// undone: HEAD moved, nothing's committed, the commit made left unused.
+func (r Repo) commitTree(ctx context.Context, lock *indexLock, base, message string) error {
+	res, err := r.gitIn(ctx, []string{"GIT_INDEX_FILE=" + lock.file(ownIndex)}, nil, "write-tree")
+	if err != nil {
+		return err
+	}
+	args := []string{"commit-tree", strings.TrimSpace(string(res.Stdout))}
 	if base != "" {
-		line = base + "..HEAD"
+		args = append(args, "-p", base)
 	}
-	res, err := r.git(ctx, "rev-list", "--first-parent", "--parents", line)
+	signs, err := r.flag(ctx, "commit.gpgsign")
 	if err != nil {
-		return "", err
+		return err
 	}
-	for rec := range strings.Lines(string(res.Stdout)) {
-		if f := strings.Fields(rec); len(f) > 0 && parentOf(f) == base {
-			env := []string{"GIT_INDEX_FILE=" + lock.file(ownIndex)}
-			_, err := r.gitIn(ctx, env, nil, "diff", "--cached", "--quiet", f[0])
-			if exit, ok := errors.AsType[*runner.ExitError](err); ok && exit.Code == 1 {
-				// Its files aren't the index's: another's commit.
-				return "", nil
-			}
-			if err != nil {
-				return "", err
-			}
-			return f[0], nil
-		}
+	if signs {
+		args = append(args, "-S")
 	}
-	return "", nil
+	if res, err = r.git(ctx, append(args, "-m", message)...); err != nil {
+		return err
+	}
+	made := strings.TrimSpace(string(res.Stdout))
+	subject, _, _ := strings.Cut(message, "\n")
+	// The last commit, base, as HEAD's old value: "" before the first,
+	// which has git refuse should another git have made one meanwhile.
+	if _, err := r.git(ctx, "update-ref", "-m", "kit: "+subject, "HEAD", made, base); err != nil {
+		return r.unmoved(ctx, made, base, err)
+	}
+	return nil
 }
 
-// parentOf is the first parent of the commit rev-list --parents names in
-// f, a commit then its parents: "" for a first commit.
-func parentOf(f []string) string {
-	if len(f) < 2 {
-		return ""
-	}
-	return f[1]
-}
-
-// commitFailed is git commit's error, but for a hook's that reached for
-// git's own index, which kit holds: said so, rather than as git says it, a
-// lock a git that stopped may have left.
-func commitFailed(err error, lock string) error {
-	if exit, ok := errors.AsType[*runner.ExitError](err); ok && strings.Contains(exit.FullStderr, lock+"': File exists") {
-		return errors.New("a hook of the commit's failed: it reached for git's own index, which kit holds while it commits, rather than the one git gives hooks (GIT_INDEX_FILE)")
-	}
-	return err
-}
-
-// checkParent errors unless the commit just made went onto base: another
-// git that moved HEAD meanwhile, as git reset --soft can while the index is
-// held, leaves kit's commit undoing what it changed. It's held back, taken
-// to be HEAD: the git folder's marked, so no later run pushes it (held).
-func (r Repo) checkParent(ctx context.Context, lock *indexLock, base string) error {
-	made, err := r.made(ctx, lock, base)
-	if err == nil && made != "" {
+// unmoved is the error for HEAD not taking made, the commit kit made onto
+// base, as err says: none when it did all the same, the run stopped as git
+// moved it; HEAD moved, when another git moved it off base meanwhile.
+func (r Repo) unmoved(ctx context.Context, made, base string, err error) error {
+	head, headErr := r.commitAt(context.WithoutCancel(ctx), "HEAD")
+	switch {
+	case headErr == nil && head == made:
 		return nil
+	case headErr == nil && head != base:
+		return errors.New("HEAD moved while kit committed, so nothing was committed: run kit again")
 	}
-	head, headErr := r.commitAt(ctx, "HEAD")
-	if headErr == nil && head != "" {
-		headErr = hold(lock.gitDir, head)
-	}
-	if err = errors.Join(err, headErr); err != nil {
-		return fmt.Errorf("%w, or kit couldn't tell, so it isn't pushed: %w", ErrHeadMoved, err)
-	}
-	parent, err := r.commitAt(ctx, "HEAD^")
-	if err != nil {
-		return fmt.Errorf("%w, or kit couldn't tell, so it isn't pushed: %w", ErrHeadMoved, err)
-	}
-	return fmt.Errorf("%w: its commit went onto %s, not %s, which it was made from, so it may undo what that commit changed, and nothing's pushed while it's in the branch: %s", ErrHeadMoved, named(parent), named(base), takeOut(head, head))
-}
-
-// named is commit, or "no commit" for none.
-func named(commit string) string {
-	if commit == "" {
-		return "no commit"
-	}
-	return commit
+	return errors.Join(err, headErr)
 }
 
 // resetIndex has git's index take files as last committed: a copy of it

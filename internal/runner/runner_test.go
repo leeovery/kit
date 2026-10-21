@@ -67,6 +67,23 @@ func TestExitErrorWithoutStderr(t *testing.T) {
 	}
 }
 
+// An exit's lines are those of its standard error that start with one of
+// the prefixes, trimmed, or all of them given none: the line that carries
+// the error, never one above it that only mentions it. What git prints is
+// what real git does when ssh can't reach the remote.
+func TestExitErrorLines(t *testing.T) {
+	err := runner.NewExitError("git fetch --quiet", 128, []byte("ssh: Could not resolve hostname github.com: nodename nor servname provided, or not known\nfatal: Could not read from remote repository.\n\nPlease make sure you have the correct access rights\nand the repository exists.\n"))
+	if got := err.Lines("fatal:", "ssh:"); !slices.Equal(got, []string{"ssh: Could not resolve hostname github.com: nodename nor servname provided, or not known", "fatal: Could not read from remote repository."}) {
+		t.Errorf("Lines(fatal:, ssh:) = %q", got)
+	}
+	if got := err.Lines("error:"); got != nil {
+		t.Errorf("Lines(error:) = %q, want none", got)
+	}
+	if got := err.Lines(); len(got) != 5 || got[2] != "" || got[4] != "and the repository exists." {
+		t.Errorf("Lines() = %q, want every line", got)
+	}
+}
+
 func TestSecretValues(t *testing.T) {
 	ctx := runner.WithSecretEnv(t.Context(), "A=one", "EMPTY=")
 	ctx = runner.WithSecretEnv(ctx, "B=two=three")

@@ -205,20 +205,6 @@ func TestConfigSync(t *testing.T) {
 		t.Errorf("held back by a staged change = %+v", res)
 	}
 
-	// A commit kit held back, as it went onto another commit than it was
-	// made from.
-	if err := os.WriteFile(filepath.Join(gitDir, "kit-held"), []byte(head+"\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	fake = waiting([]time.Time{now().Add(-time.Minute)}, "", "0")
-	fake.On("git", git("merge-base", "--is-ancestor", head, "HEAD")...)
-	fake.On("git", git("rev-parse", "--verify", "--quiet", "HEAD")...).Prints(head + "\n")
-	res = sync(fake).Check(t.Context())
-	if res.State != check.Attention || len(res.Items) != 1 || res.Items[0].ID != "config-sync:held" ||
-		!strings.Contains(res.Items[0].Detail, "git reset --soft HEAD~ takes it out, keeping its change, then run kit again") {
-		t.Errorf("held back by kit's own commit = %+v", res)
-	}
-
 	// No upstream: nothing to push to.
 	fake = runnertest.New(t)
 	fake.On("git", log...).Exits(128).PrintsToStderr("fatal: no upstream configured for branch 'main'")

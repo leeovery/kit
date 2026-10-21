@@ -75,6 +75,19 @@ func TestWithoutTheAutomationPermission(t *testing.T) {
 	}
 }
 
+// What osascript says is on its execution error line: a line the script
+// logged above it, mentioning the permission, is no permission refused.
+// What osascript prints is what it does.
+func TestOsascriptSaysWhyOnItsErrorLine(t *testing.T) {
+	fake := runnertest.New(t)
+	fake.On("osascript", osascript(login.ReadScript)...).Exits(1).
+		PrintsToStderr("System Events said (-1743) Not authorized before\n61:85: execution error: the login item is gone (-2700)\n")
+	_, err := login.New(fake, "/home").Installed(t.Context())
+	if err == nil || !strings.Contains(err.Error(), "the login item is gone (-2700)") {
+		t.Errorf("Installed() error = %v, want osascript's", err)
+	}
+}
+
 // While macOS asks whether the terminal may control System Events, as kit's
 // watch for its windows holds the run's time limits, System Events not
 // answering in time isn't a failure: it's asked again, while the question's

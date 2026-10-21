@@ -432,7 +432,9 @@ func TestAHangWithNoOneToSignInFailsNamingTheFix(t *testing.T) {
 // what mas said or how it ended, never the command, what's left of one kit
 // ended stopped: nothing's done again, and the next app's the check that
 // someone's signed in, then the rest, an app at a time, none of them held
-// up by it. A sign-in not done then fails what's left, with what failed.
+// up by it. A sign-in not done then fails what's left, with what failed;
+// a line above mas's error that only mentions signing in is no sign-in
+// not done.
 func TestAnInstallFailingOtherwiseFailsItAlone(t *testing.T) {
 	fake := runnertest.New(t)
 	fake.On("mas", "list", "--json").Prints("").Then().Prints(installed(497799835))
@@ -459,6 +461,30 @@ func TestAnInstallFailingOtherwiseFailsItAlone(t *testing.T) {
 	want = "couldn't install bear@1091189122, xcode@497799835: [ERROR] 2026/10/16 04:22:49 no app has the id 1091189122; no one's signed in: sign in to the App Store, then try again"
 	if res.Reason != want {
 		t.Errorf("the App Store's apps stand %+v; want them failed, %q", res, want)
+	}
+
+	fake = runnertest.New(t)
+	fake.On("mas", "list", "--json").Prints("").Then().Prints(installed(497799835))
+	fake.On("sudo", "-n", "mas", "install", "1091189122").Exits(1).PrintsToStderr("Warning: the account is not signed in to iCloud\n[ERROR] 2026/10/16 04:22:49 no app has the id 1091189122")
+	fake.On("sudo", "-n", "mas", "install", "497799835")
+	res, _ = storeRun(t, fake, false, declared("bear@1091189122", "xcode@497799835"))
+	want = "couldn't install bear@1091189122: [ERROR] 2026/10/16 04:22:49 no app has the id 1091189122"
+	if res.Reason != want {
+		t.Errorf("the App Store's apps stand %+v; want bear failed alone, %q", res, want)
+	}
+}
+
+// sudo says it hasn't the password on a line of its own: mas saying
+// something like it on its error line is mas's failure, the app's alone.
+// mas's words are made up to show it.
+func TestAPasswordMasMentionsIsntSudos(t *testing.T) {
+	fake := runnertest.New(t)
+	fake.On("mas", "list", "--json").Prints("").Then().Prints(installed(497799835))
+	fake.On("sudo", "-n", "mas", "install", "1091189122").Exits(1).PrintsToStderr("Error: a password is required to download this app\n")
+	fake.On("sudo", "-n", "mas", "install", "497799835")
+	res, _ := storeRun(t, fake, false, declared("bear@1091189122", "xcode@497799835"))
+	if want := "couldn't install bear@1091189122: Error: a password is required to download this app"; res.Reason != want {
+		t.Errorf("the App Store's apps stand %+v; want bear failed alone, %q", res, want)
 	}
 }
 

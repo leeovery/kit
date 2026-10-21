@@ -171,6 +171,23 @@ func TestResolveBeforeTapsAreAdded(t *testing.T) {
 	}
 }
 
+// brew names what it doesn't know on its Error: line: a line above it that
+// only mentions a name, as a warning might, leaves that name asked. The
+// warning's made up to show it; the Error: line is brew's own.
+func TestResolveReadsBrewsErrorLine(t *testing.T) {
+	fake := runnertest.New(t)
+	fake.On("brew", "info", "--json=v2", "--formula", "jq", "mistyped").Exits(1).
+		PrintsToStderr("Warning: a tap once said No available formula with the name \"jq\"\nError: No available formula with the name \"mistyped\".\n")
+	fake.On("brew", "info", "--json=v2", "--formula", "jq").Prints(`{"formulae": [{"name": "jq", "full_name": "jq"}], "casks": []}`)
+	got, err := brew.New(fake).Formulae().Resolve(context.Background(), []string{"jq", "mistyped"})
+	if want := map[string]string{"jq": "jq"}; err != nil || !mapsEqual(got, want) {
+		t.Errorf("Resolve() = %v, %v; want %v", got, err, want)
+	}
+	if n := len(fake.Commands()); n != 2 {
+		t.Errorf("ran %d commands: want brew info twice, the second without mistyped", n)
+	}
+}
+
 func TestResolveOneAtATimeWhenANameIsUnknown(t *testing.T) {
 	fake := runnertest.New(t)
 	fake.On("brew", "info", "--json=v2", "--cask", "tailscale", "no-such-cask").Exits(1).PrintsToStderr(`Error: Cask 'no-such-cask' is unavailable`)

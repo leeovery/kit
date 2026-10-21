@@ -75,6 +75,15 @@ func (r Repo) commitAt(ctx context.Context, rev string) (string, error) {
 	return strings.TrimSpace(string(res.Stdout)), err
 }
 
+// flag is git's boolean setting key: false when it isn't set.
+func (r Repo) flag(ctx context.Context, key string) (bool, error) {
+	res, err := r.git(ctx, "config", "--get", "--type=bool", key)
+	if exit, ok := errors.AsType[*runner.ExitError](err); ok && exit.Code == 1 {
+		return false, nil
+	}
+	return strings.TrimSpace(string(res.Stdout)) == "true", err
+}
+
 // Files are the files git keeps, or would keep, under paths in the
 // repository: tracked, and new ones it doesn't ignore. Each is a path in the
 // repository, once; a tracked file deleted but not yet committed is still

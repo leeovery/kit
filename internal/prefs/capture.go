@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/leeovery/kit/internal/gitrepo"
 	"github.com/leeovery/kit/internal/plist"
 	"github.com/leeovery/kit/internal/runner"
 )
@@ -496,8 +495,8 @@ func (p *Prefs) Capture(ctx context.Context) (Report, error) {
 		report.Errors = append(report.Errors, "history: "+err.Error())
 	}
 	// Nothing's pushed once the commit failed, as one refused during a
-	// merge, or went onto another git's, which it may undo.
-	if err == nil || committed && !errors.Is(err, gitrepo.ErrHeadMoved) {
+	// merge, or as HEAD moved.
+	if err == nil || committed {
 		report.PushError = p.push(ctx, repo)
 	} else {
 		report.PushError = "not pushed: " + err.Error()
