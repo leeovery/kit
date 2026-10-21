@@ -77,7 +77,7 @@ programs. Ever.
     tokens or lead to real state (`HOMEBREW_`, `OP_`, `GH_`, `GITHUB_`, `GIT_`, `SSH_`,
     `CLAUDE_`, `ANTHROPIC_`, tmux's) and proxies';
   - puts only stubs of the programs kit drives on `PATH` (the list is `stubbed`, in
-    `internal/testguard/stubs.go`: brew, mas, sudo, op, agntc, curl, swiftc and the rest);
+    `internal/testguard/stubs.go`: brew, mas, sudo, op, ssh, agntc, curl, swiftc and the rest);
   - lets `http.DefaultTransport`, and transports cloned from it, dial loopback, and unix
     sockets in the temporary directory, alone.
 - **testguard fails the run, even when every test passed,** when:
@@ -101,7 +101,7 @@ programs. Ever.
   - writes into the home directory, but Go's caches, and into kit's real config and state
     directories, wherever the environment puts them;
   - writes into the directories on `PATH` outside the home, such as `/opt/homebrew/bin`;
-  - running the real brew, mas, gh, op, git, claude, composer, Node (so npm), Arq's arqc,
+  - running the real brew, mas, gh, op, git, ssh, claude, composer, Node (so npm), Arq's arqc,
     asimov, prefsync, defaults, tmutil, sudo, launchctl, osascript, open and tmux (Go builds
     the tests, so it's stubbed, not denied).
 - **It unsets the variables testguard clears** before anything starts, as testguard clears them

@@ -376,19 +376,25 @@ the git folder (a name no cleaner of `*.lock` files removes; one removed or repl
 waited, kit locks the file there now), which the kernel lets go of should the run die, so no two
 kits commit there at once; where the git folder's filesystem takes no such lock (NFS without
 locks, some FUSE filesystems), kit commits without it, says so once, and leaves what a stopped
-run left alone, as it can't then tell that run from one at work. Before HEAD moves, kit leaves
-a mark beside the lock (`kit-mark`) naming the commit HEAD's on, the one it's moving onto, and
-the lock by its hash and its file (device and inode, so a lock written later, the same byte for
-byte, isn't taken for it). Holding the commit lock, so no kit's writing, the next commit, pull
-or push deals with what a stopped run left, by facts, never by age, and says what it did: the
-lock still the very file the mark names, it puts it in the index's place when HEAD's on the
-mark's commit, as the stopped run would have ("finished the last run's index"), and removes it
-when HEAD's still on the commit before, nothing committed ("removed the lock on git's index a
-stopped run left, as it had committed nothing"); the lock gone, as when it was removed as git
-advises, and HEAD on the mark's commit, it resets the files that commit changed and the index
-still shows otherwise to the commit's, under git's lock on the index, as kit prepares it
-("repaired the index a stopped run left"); with nothing to repair, or HEAD moved on, the mark's
-cleared. Any other lock it names, with how long since it last changed (its change time: kit's
+run left alone, its mark too, leaving none of its own, as it can't then tell that run from one
+at work. Before HEAD moves, once it's sure it still holds the commit lock's file (one removed or
+replaced meanwhile, it commits nothing), kit leaves a mark beside the lock (`kit-mark`) naming
+the commit HEAD's on, the one it's moving onto, and the lock by its hash and its file (device
+and inode, so a lock written later, the same byte for byte, isn't taken for it); a run removes
+only the mark it left. Where there's a mark, and git isn't part way through one of its
+operations (a rebase stopped on kit's commit is never repaired under it), the next commit, pull
+or push takes the commit lock, so no kit's writing (without a mark, a pull or push never takes
+it, so never waits for a kit at work), and deals with what a stopped run left, by facts, never
+by age, saying what it did: the lock still the very file the mark names, it puts it in the
+index's place when HEAD's on the mark's commit, as the stopped run would have ("finished the
+last run's index"), and removes it when HEAD's on the commit that run started from ("removed the
+lock on git's index a stopped run left; HEAD is where that run started", as when it stopped
+before HEAD moved, or a `git reset --soft` undid its commit); the lock gone, as when it was
+removed as git advises, and HEAD on the mark's commit, it resets to the commit's, under git's
+lock on the index, as kit prepares it, the files that commit changed whose entry in the user's
+index is still the commit before's (or, before the first commit, none), never one the user has
+staged since ("repaired the index a stopped run left"); with nothing to repair, or HEAD moved
+on, the mark's cleared; a repair that fails keeps it, for the next run. Any other lock it names, with how long since it last changed (its change time: kit's
 own lock carries the index's time) and what to do should no git be running, and a lock no
 longer kit's own, as when another git removed it, kit never puts in place or removes. HEAD
 moves onto the commit only from the last commit, so when another git moved HEAD meanwhile, git refuses, and kit, still
@@ -426,7 +432,9 @@ those set, kit refuses. A branch with an upstream is pushed where `git push` sen
 `branch.<name>.pushRemote` or `remote.pushDefault` when set, else its upstream's remote. Pushed
 to another remote than its upstream's, as in a triangular workflow, kit fetches that remote too,
 and refuses when its branch there has commits this Mac hasn't, naming how many, before anything's
-rebased. A push setting that's a URL, or names no remote, is refused (a URL said plainly, never
+rebased. Pulling, with a rebase, from one remote while pushing to another isn't supported: once
+kit has rebased onto the upstream's commits, the other remote's branch holds commits this Mac no
+longer has, and kit refuses, saying so, until they're brought in or pushed over by hand. A push setting that's a URL, or names no remote, is refused (a URL said plainly, never
 shown, as it may carry a token): kit pushes only where a remote's URLs say, which it checks. HEAD
 on no branch is refused. Commits waiting to be pushed are those the branch it's pushed to
 hasn't, the upstream, or that remote's branch of its name when another is set, or, with it not
@@ -619,16 +627,25 @@ id checked before anything's done, in one run and one commit: how an agent carri
 person's decisions.
 
 `kit status` runs every step's check (named steps run with what they need): Homebrew, each
-kind, and the config repository being private on GitHub (`config-private`): every URL kit pushes
-it to (the push URLs of the remote it's pushed to, as `git push` has them) and origin's, which
-it's fetched from, each repository there that isn't private named, its visibility asked through
-`gh`, never inferred. A URL's place is read as git reads it: a URL with a scheme by its host,
-without who it signs in as, its port or a full name's last dot, in lower case; ssh's
-`[user@]host:path` by its host; an ssh host as ssh's config resolves it (`ssh -G`, which reads
-the config alone), as for an alias; `github.com` or any host under it is GitHub. One with no
-remote, or elsewhere, or on this Mac (a local path or a `file://` URL, as private as the Mac)
-isn't public there; one whose place can't be told (a remote helper's, an escaped or bracketed
-host, a repository path that isn't an owner's and a name) fails, never taken for not on GitHub.
+kind, and the config repository being proven private (`config-private`): every URL kit pushes it
+to (the push URLs of the remote it's pushed to, as `git push` has them; git failing to name them
+fails the check) and origin's, which it's fetched from, each place that isn't proven private
+named. Proof is positive, never detection: a URL is proven private only as this Mac's (a local
+path or a `file://` URL), or as a repository on GitHub that `gh` says is private, asked by its
+URL, whatever host `GH_HOST` names. A repository is on GitHub when the host git reaches is
+`github.com` or a host under it, in plain ASCII: a URL's host without who it signs in as, its
+port or a full name's last dot, in lower case; an ssh host as ssh's config resolves it (`ssh -G
+[-p <port>] [<user>@]<host>`, the host given as git gives it, its case and user kept, as `Host`
+patterns are case-sensitive and a `Match user` needs the user; only ssh's answer is lowercased;
+`ssh -G` reads the config alone, connecting nowhere). Anything else is refused, named without
+who it signs in as, with why: a URL git hands to a helper (a scheme outside git's own, `ssh`,
+`git+ssh`, `ssh+git`, `git`, `http`, `https`, `ftp`, `ftps` and `file`, in lower case; a `::`;
+`remote.<name>.vcs`); for ssh, an ssh command set (`core.sshCommand`, `GIT_SSH_COMMAND`,
+`GIT_SSH`) or a proxy in ssh's answer (`proxycommand` or `proxyjump` other than `none`), which can
+take it anywhere, as can a proxy for git's own protocol (`core.gitProxy`, `GIT_PROXY_COMMAND`);
+another host, an IP address, or one not in plain ASCII; a host kit can't read (escaped, in
+brackets, like a flag); a path on GitHub that isn't an owner's repository. With no remote it's
+pushed to or fetched from, it isn't public.
 
 Every command takes `--json` (one document), `--plain` (plain lines, as without a terminal)
 and `--verbose` (commands' output kept whole in the run's log).
@@ -1024,9 +1041,9 @@ the hardware UUID of the Mac the folder belongs to.
   is refused until it takes ownership). It pulls, writes only what changed, removes what's gone
   from the Mac (history keeps it), leaves domains waiting to be restored alone, keeps a domain
   that fails to export, commits once in prefsync's message format, and pushes, only when every
-  URL the push goes to (the push URLs of the remote it's pushed to, as `git push` has them) is a
-  repository private on GitHub (or not on GitHub), read as `config-private` reads it; one whose
-  place can't be told holds the push. A push that fails waits for the next.
+  URL the push goes to (the push URLs of the remote it's pushed to, as `git push` has them) is
+  proven private, as `config-private` proves it; any other holds the push, saying why. A push
+  that fails waits for the next.
 - **`kit prefs restore [<domain>...]`** (`--from`, `--at`, `--as`, `--pending`, `--dry-run`): a
   domain's app found from the installed apps' bundle ids (sub-domains, shared domains, group and
   team prefixes, `[prefs apps]` for the rest); not installed or running, it waits; a sandboxed

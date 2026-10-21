@@ -80,6 +80,11 @@
   (literal "/Library/Developer/CommandLineTools/usr/bin/git")
   (literal "/Applications/Xcode.app/Contents/Developer/usr/bin/git")
   (regex #"/Cellar/git/")
+  ;; ssh, the system's and Homebrew's, which reads the real ssh config,
+  ;; finding the home folder by the user, never HOME, and runs what its
+  ;; Match exec lines say.
+  (literal "/usr/bin/ssh")
+  (regex #"/Cellar/openssh/")
   ;; Claude Code, wherever its installers put it.
   (home-literal "/.local/bin/claude")
   (home-subpath "/.local/share/claude")

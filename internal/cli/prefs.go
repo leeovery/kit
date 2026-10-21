@@ -171,6 +171,7 @@ func (a *app) prefs(r *run) (*prefs.Prefs, error) {
 	p := prefs.New(r.run, r.homeDir, r.stateDir, filepath.Join(r.dataDir, prefsNoun), r.cfg.PrefsRepo, r.machine, lists, a.Now)
 	p.Probes = append(p.Probes[:len(p.Probes)-1], a.TCC)
 	p.AppDirs = a.appFolders(r.homeDir).Dirs
+	p.Getenv = a.Getenv
 	return p, nil
 }
 

@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -23,11 +24,22 @@ type Repo struct {
 	// Sleep waits between tries for git's index while another git holds it:
 	// time.Sleep when nil.
 	Sleep func(time.Duration)
+	// Getenv reads the environment kit runs in, for the ssh and proxy
+	// commands git takes from it: os.Getenv when nil.
+	Getenv func(string) string
 	// onUnlock, when set, is called as a commit lets go of git's index.
 	onUnlock func()
 	// flock, when set, takes the kernel's lock on the file open at fd in
 	// syscall.Flock's place.
 	flock func(fd int) error
+}
+
+// getenv is the environment variable name, as Getenv reads it.
+func (r Repo) getenv(name string) string {
+	if r.Getenv == nil {
+		return os.Getenv(name)
+	}
+	return r.Getenv(name)
 }
 
 func (r Repo) git(ctx context.Context, args ...string) (runner.Result, error) {

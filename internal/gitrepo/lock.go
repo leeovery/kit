@@ -45,8 +45,12 @@ const (
 )
 
 // errLockTaken is why kit left git's lock on the index be as it came to put
-// it in place.
-var errLockTaken = errors.New("kit's lock on git's index was removed or replaced by another git meanwhile, so kit left it be")
+// it in place; errCommitsTaken why it committed nothing, as it came to move
+// HEAD.
+var (
+	errLockTaken    = errors.New("kit's lock on git's index was removed or replaced by another git meanwhile, so kit left it be")
+	errCommitsTaken = errors.New("kit's lock on committing in the repository was removed or replaced meanwhile, so nothing was committed, as another kit may be committing")
+)
 
 // lockCommits takes kit's lock on committing in the repository whose git
 // folder is gitDir, trying for a while if another kit holds it, then
@@ -121,8 +125,14 @@ type indexLock struct {
 	// its place.
 	made fs.FileInfo
 	// sum is the hash of what kit filled it with.
-	sum  string
-	done bool
+	sum string
+	// commits is kit's lock on committing, held: nil without it, where no
+	// mark is left, as no run would read it.
+	commits *os.File
+	// marked is whether this run left its mark (mark), the only one it
+	// removes.
+	marked bool
+	done   bool
 	// unlocked, when set, is called as kit lets go.
 	unlocked func()
 }
@@ -313,14 +323,32 @@ func (l *indexLock) fill(next string, mode fs.FileMode) error {
 
 // mark leaves, before HEAD moves from base onto made, kit's mark of the
 // lock as filled, for a run that finds it left should this one stop
-// (recover).
+// (recover), once it's sure it still holds its lock on committing, so no
+// other kit reads it meanwhile: none without that lock.
 func (l *indexLock) mark(base, made string) error {
+	switch {
+	case l.commits == nil:
+		return nil
+	case !stillAt(l.commits, l.file(commitLock)):
+		return errCommitsTaken
+	}
 	m := mark{base: base, made: made, sum: l.sum, file: fileID(l.made)}
-	return os.WriteFile(l.file(marked), []byte(m.String()), 0o600)
+	if err := os.WriteFile(l.file(marked), []byte(m.String()), 0o600); err != nil {
+		return err
+	}
+	l.marked = true
+	return nil
+}
+
+// unmark removes this run's mark, when it left one.
+func (l *indexLock) unmark() {
+	if l.marked {
+		_ = os.Remove(l.file(marked))
+	}
 }
 
 // commit makes the lock, filled, the index, then sweeps kit's own files
-// away, and its mark; a lock no longer kit's it leaves be.
+// away, and this run's mark; a lock no longer kit's it leaves be.
 func (l *indexLock) commit() error {
 	if err := l.f.Close(); err != nil {
 		return err
@@ -333,14 +361,14 @@ func (l *indexLock) commit() error {
 		return err
 	}
 	l.sweep()
-	_ = os.Remove(l.file(marked))
+	l.unmark()
 	l.letGo()
 	return nil
 }
 
-// release lets go of the lock, the index as it was, kit's own files and its
-// mark swept away, unless commit made the lock the index; a lock no longer
-// kit's it leaves be, and kit's files with it.
+// release lets go of the lock, the index as it was, kit's own files and
+// this run's mark swept away, unless commit made the lock the index; a lock
+// no longer kit's it leaves be, and kit's files with it.
 func (l *indexLock) release() {
 	if l.done {
 		return
@@ -349,7 +377,7 @@ func (l *indexLock) release() {
 	if l.mine() {
 		l.sweep()
 		_ = os.Remove(l.path())
-		_ = os.Remove(l.file(marked))
+		l.unmark()
 	}
 	l.letGo()
 }

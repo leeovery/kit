@@ -51,6 +51,9 @@ func (r Repo) Commit(ctx context.Context, message string, paths ...string) (Outc
 	if err != nil {
 		return Outcome{}, err
 	}
+	if err := underWay(gitDir); err != nil {
+		return Outcome{}, err
+	}
 	commits, err := r.lockCommits(ctx, gitDir)
 	if err != nil {
 		return Outcome{}, err
@@ -68,6 +71,7 @@ func (r Repo) Commit(ctx context.Context, message string, paths ...string) (Outc
 	if err != nil {
 		return out, err
 	}
+	lock.commits = commits
 	defer lock.release()
 	if err := underWay(gitDir); err != nil {
 		return out, err

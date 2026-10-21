@@ -324,7 +324,7 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 		command: command, machine: machine, version: a.Version, sink: sink, face: face, log: log,
 		stateDir: dirs.State, now: now, run: observed, cfg: cfg, homeDir: home, logsDir: dirs.Logs, dataDir: dirs.Data,
 		kindsByName: map[string]kind.Kind{}, lists: map[string]config.List{}, placing: map[string]kind.Placing{},
-		repo: gitrepo.Repo{Dir: dirs.Config, Run: observed}, record: record,
+		repo: gitrepo.Repo{Dir: dirs.Config, Run: observed, Getenv: a.Getenv}, record: record,
 		drifters: map[string]drifter{}, admin: &steps.Admin{},
 	}
 	r.files = &linked.Files{Repo: r.repo, Home: home, StateDir: dirs.State, Scopes: []string{config.Shared, machine}}
@@ -451,7 +451,7 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 	checks = append(checks,
 		quietened(edits, record, now),
 		steps.Disk(observed), steps.Memory(observed), steps.FileEvents(observed), steps.Load(observed, a.Now),
-		steps.ConfigSync(r.repo, a.Now), steps.ConfigPrivate(observed, dirs.Config),
+		steps.ConfigSync(r.repo, a.Now), steps.ConfigPrivate(r.repo),
 	)
 	own, err := cfg.List(config.ChecksKind, machine)
 	if err != nil {

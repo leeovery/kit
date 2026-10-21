@@ -97,14 +97,14 @@ func (s *sequence) head(at string) *runnertest.Script {
 
 // goesOn scripts the rest of the commit of brew, edited, onto HEAD at at,
 // "" before the first, in gitDir, checking it's made with the user's index
-// holding index.
-func (s *sequence) goesOn(t *testing.T, name, gitDir, at, index string) {
+// holding index, and is the script of HEAD's move.
+func (s *sequence) goesOn(t *testing.T, name, gitDir, at, index string) *runnertest.Script {
 	s.head(at).Does(func() {
 		if got := readFile(gitDir, "index"); got != index {
 			t.Errorf("%s: kit committed with the user's index holding %q, want %q", name, got, index)
 		}
 	})
-	s.attempt(gitDir, at, "brew\x00")
+	return s.attempt(gitDir, at, "brew\x00")
 }
 
 // commitBrew has Commit commit brew, edited, with fake as git.
@@ -199,27 +199,64 @@ func TestCommitLocksTheCommitLockThere(t *testing.T) {
 
 // Where the git folder's filesystem takes no kernel lock, kit commits
 // without its own lock, and says so, leaving what a run that stopped left
-// as it is: without that lock, it can't tell that run from one at work.
+// as it is, its mark too: without that lock, it can't tell that run from
+// one at work. It leaves no mark of its own, as no run would read it.
 func TestCommitWithoutKitsOwnLock(t *testing.T) {
+	const left = "- " + stopped + " a-hash 1:2\n"
 	for _, errno := range []syscall.Errno{syscall.ENOTSUP, syscall.EOPNOTSUPP, syscall.ENOLCK} {
 		gitDir := gitFolder(t, false)
-		writeFile(t, gitDir, marked, "- "+stopped+" a-hash 1:2\n")
+		writeFile(t, gitDir, marked, left)
 		fake := runnertest.New(t)
 		s := started(fake, gitDir)
-		s.goesOn(t, errno.Error(), gitDir, base, usersEntries)
+		s.goesOn(t, errno.Error(), gitDir, base, usersEntries).Does(func() {
+			if got := readFile(gitDir, marked); got != left {
+				t.Errorf("%v: HEAD moved with the mark holding %q, want the stopped run's, untouched", errno, got)
+			}
+		})
 		repo := gitrepo.WithFlock(gitrepo.Repo{Dir: dir, Run: fake, Sleep: func(time.Duration) {}}, func(int) error { return errno })
 		out, err := repo.Commit(context.Background(), "kit test", "brew")
 		if !out.Committed || err != nil || !slices.Equal(out.Notes, []string{"committed without kit's own lock, which the git folder's filesystem can't take"}) {
 			t.Errorf("Commit(), the filesystem saying %v = %+v, %v; want committed, and said", errno, out, err)
 		}
 		checkCalls(t, errno.Error(), fake, gitDir, s.want)
+		checkGitFolder(t, errno.Error(), gitDir, resetEntries, marked)
+		if got := readFile(gitDir, marked); got != left {
+			t.Errorf("%v: the mark holds %q once committed, want the stopped run's, untouched", errno, got)
+		}
 	}
+}
+
+// Kit's lock on committing removed or replaced while it commits, as by a
+// cleaner, another kit could take the new one's: kit commits nothing, HEAD
+// left where it was, before its mark's left for that kit to read.
+func TestCommitStopsOnceItsCommitLockIsGone(t *testing.T) {
+	gitDir := gitFolder(t, false)
+	fake := runnertest.New(t)
+	s := editing(fake, gitDir, base)
+	s.expect(call{args: git("read-tree", base), index: ownIndex})
+	s.expect(call{args: stageIn, input: "brew\x00", index: ownIndex})
+	s.expect(call{args: stagedIn, index: ownIndex}).Prints("brew\x00")
+	s.commits(base, false, nil)
+	s.expect(call{args: resetTo(made), input: "brew\x00", index: nextIndex}).Does(func() {
+		writeFile(t, gitDir, nextIndex, resetEntries)
+		path := filepath.Join(gitDir, commitLock)
+		if err := errors.Join(os.WriteFile(path+".new", nil, 0o644), os.Rename(path+".new", path)); err != nil {
+			t.Error(err)
+		}
+	})
+	out, err := commitBrew(fake)
+	if want := "kit's lock on committing in the repository was removed or replaced meanwhile, so nothing was committed, as another kit may be committing"; out.Committed || err == nil || err.Error() != want {
+		t.Errorf("Commit(), the commit lock replaced = %+v, %v; want %q", out, err, want)
+	}
+	checkCalls(t, "the commit lock replaced", fake, gitDir, s.want)
+	checkGitFolder(t, "the commit lock replaced", gitDir, usersEntries)
 }
 
 // A lock a run of kit's left, stopped once it had marked it, is put in the
 // index's place where HEAD's on the commit it was moving onto, as that run
-// would have, and removed where HEAD's still on the one before, that run
-// having committed nothing; the commit then goes on, from that index, and
+// would have, and removed where HEAD's on the one that run started from,
+// as when it stopped before HEAD moved; the commit then goes on, from that
+// index, and
 // says what it did: kit holds its own lock on committing, so no other kit
 // is at work, and the run's mark names the commits, and the lock by its
 // very contents and its file. A lock kit put in place that another git
@@ -236,8 +273,8 @@ func TestCommitDealsWithTheLockAStoppedRunLeft(t *testing.T) {
 		index, note string
 	}{
 		{name: "HEAD moved", base: base, at: stopped, index: left, note: "finished the last run's index"},
-		{name: "HEAD not moved", base: base, at: base, index: usersEntries, note: "removed the lock on git's index a stopped run left, as it had committed nothing"},
-		{name: "before the first commit", unborn: true, note: "removed the lock on git's index a stopped run left, as it had committed nothing"},
+		{name: "HEAD not moved", base: base, at: base, index: usersEntries, note: "removed the lock on git's index a stopped run left; HEAD is where that run started"},
+		{name: "before the first commit", unborn: true, note: "removed the lock on git's index a stopped run left; HEAD is where that run started"},
 		{name: "taken by another git once put in place", base: base, at: stopped, note: "finished the last run's index"},
 	} {
 		gitDir := gitFolder(t, c.unborn)
@@ -343,38 +380,70 @@ func TestCommitLeavesALockReplacedAsItLooks(t *testing.T) {
 	checkGitFolder(t, "replaced as kit looks", gitDir, usersEntries, "index.lock", marked)
 }
 
-// A run of kit's that stopped once HEAD had taken its commit, its lock
+// The objects of the files in the tests' commits: brew's and decl's
+// before the stopped run's commit, and in it, and as the user staged them
+// since.
+const (
+	brewBefore = "1111111111111111111111111111111111111111"
+	brewMade   = "2222222222222222222222222222222222222222"
+	brewTheirs = "3333333333333333333333333333333333333333"
+	declBefore = "4444444444444444444444444444444444444444"
+	declTheirs = "5555555555555555555555555555555555555555"
+	addedMade  = "6666666666666666666666666666666666666666"
+)
+
+// The commands repair runs: the files the stopped run's commit changed,
+// the user's index's entries, and the commit's before it, base's.
+var (
+	committedBy = git("diff-tree", "-r", "--root", "--no-commit-id", "--name-only", "-z", "--no-renames", stopped)
+	indexed     = git("ls-files", "--stage", "-z")
+	baseTree    = git("ls-tree", "-r", "-z", "--full-tree", base)
+)
+
+// entry is a file's entry in git's index, as ls-files --stage prints it,
+// at stage 0; blob, in a tree, as ls-tree prints it.
+func entry(object, path string) string { return "100644 " + object + " 0\t" + path + "\x00" }
+func blob(object, path string) string  { return "100644 blob " + object + "\t" + path + "\x00" }
+
+// A run of kit's that stopped once HEAD had moved onto its commit, its lock
 // then removed as git advises, leaves the user's index showing the files
 // it committed as they were, so a git commit would undo them: kit resets
-// them to the commit's in the user's index, as that run would have, and
-// says so, then goes on. A mark with nothing to repair it clears, saying
-// nothing: HEAD moved on from its commit, or the index up to date with it,
-// as when the run stopped once it had put its lock in place.
+// those whose entry in the user's index is still the commit before's, or,
+// before the first commit, none, to the commit's, as that run would have,
+// and says so, then goes on. A file the user has staged since, differing
+// from both, or in conflict, it leaves be; with nothing to repair, or HEAD
+// moved on from the mark's commit, it clears the mark, saying nothing.
 func TestCommitRepairsTheIndexAStoppedRunLeft(t *testing.T) {
 	const repaired = "the user's entries, the stopped run's files as committed"
-	committedBy := git("diff-tree", "-r", "--root", "--no-commit-id", "--name-only", "-z", "--no-renames", stopped)
-	differ := git("diff-index", "--cached", "--name-only", "-z", "--no-renames", stopped)
 	for _, c := range []struct {
-		name, at, differ string
-		repairs          bool
+		name, from, at string
+		// index is the user's index's entries, and stale the files kit
+		// resets in it: none when "".
+		index, stale string
 	}{
-		{name: "the index as it was", at: stopped, differ: "brew\x00theirs\x00", repairs: true},
-		{name: "the index up to date", at: stopped, differ: "theirs\x00"},
-		{name: "HEAD moved on", at: base},
+		{name: "the index as it was", from: base, at: stopped, index: entry(brewBefore, "brew") + entry(declTheirs, "decl") + entry(declBefore, "other"), stale: "brew\x00added\x00"},
+		{name: "the index up to date", from: base, at: stopped, index: entry(brewMade, "brew") + entry(addedMade, "added")},
+		{name: "staged since", from: base, at: stopped, index: entry(brewTheirs, "brew") + entry(declTheirs, "decl") + entry(addedMade, "added")},
+		{name: "in conflict", from: base, at: stopped, index: "100644 " + brewMade + " 1\tbrew\x00100644 " + brewTheirs + " 2\tbrew\x00100644 " + brewBefore + " 3\tbrew\x00" + entry(addedMade, "added")},
+		{name: "before the first commit", at: stopped, index: entry(declTheirs, "decl"), stale: "brew\x00added\x00"},
+		{name: "HEAD moved on", from: base, at: base},
 	} {
 		gitDir := gitFolder(t, false)
-		writeFile(t, gitDir, marked, "- "+stopped+" a-hash 1:2\n")
+		writeFile(t, gitDir, marked, cmp.Or(c.from, "-")+" "+stopped+" a-hash 1:2\n")
 		fake := runnertest.New(t)
 		s := started(fake, gitDir)
 		s.head(c.at)
-		index := usersEntries
 		if c.at == stopped {
-			s.expect(call{args: committedBy}).Prints("brew\x00decl\x00")
-			s.expect(call{args: differ}).Prints(c.differ)
+			s.expect(call{args: committedBy}).Prints("brew\x00decl\x00added\x00")
+			s.expect(call{args: indexed}).Prints(c.index)
+			if c.from != "" {
+				s.expect(call{args: baseTree}).Prints(blob(brewBefore, "brew") + blob(declBefore, "decl") + blob(declBefore, "other"))
+			}
 		}
-		if c.repairs {
+		index := usersEntries
+		if c.stale != "" {
 			index = repaired
-			s.expect(call{args: resetTo(stopped), input: "brew\x00", index: nextIndex}).Does(func() {
+			s.expect(call{args: resetTo(stopped), input: c.stale, index: nextIndex}).Does(func() {
 				if _, err := os.Lstat(filepath.Join(gitDir, "index.lock")); err != nil {
 					t.Errorf("%s: kit repaired the index without holding it", c.name)
 				}
@@ -385,13 +454,70 @@ func TestCommitRepairsTheIndexAStoppedRunLeft(t *testing.T) {
 		out, err := commitBrew(fake)
 		checkCalls(t, c.name, fake, gitDir, s.want)
 		var want []string
-		if c.repairs {
+		if c.stale != "" {
 			want = []string{"repaired the index a stopped run left"}
 		}
 		if !out.Committed || err != nil || !slices.Equal(out.Notes, want) {
 			t.Errorf("%s: Commit() = %+v, %v; want committed, and %q said", c.name, out, err, want)
 		}
 		checkGitFolder(t, c.name, gitDir, resetEntries)
+	}
+}
+
+// A repair that fails leaves the mark, so the next run tries it again.
+func TestCommitRepairsAgainOnceARepairFailed(t *testing.T) {
+	gitDir := gitFolder(t, false)
+	mark := base + " " + stopped + " a-hash 1:2\n"
+	writeFile(t, gitDir, marked, mark)
+	repairs := func(s *sequence) *runnertest.Script {
+		s.head(stopped)
+		s.expect(call{args: committedBy}).Prints("brew\x00")
+		s.expect(call{args: indexed}).Prints(entry(brewBefore, "brew"))
+		s.expect(call{args: baseTree}).Prints(blob(brewBefore, "brew"))
+		return s.expect(call{args: resetTo(stopped), input: "brew\x00", index: nextIndex})
+	}
+	fake := runnertest.New(t)
+	s := started(fake, gitDir)
+	repairs(s).Exits(128).PrintsToStderr("fatal: index file corrupt\n")
+	if out, err := commitBrew(fake); out.Committed || err == nil || !strings.Contains(err.Error(), "index file corrupt") {
+		t.Errorf("Commit(), the repair failing = %+v, %v; want git's error", out, err)
+	}
+	checkCalls(t, "the repair failing", fake, gitDir, s.want)
+	checkGitFolder(t, "the repair failing", gitDir, usersEntries, marked)
+	if readFile(gitDir, marked) != mark {
+		t.Errorf("the mark holds %q once the repair failed, want it as it was", readFile(gitDir, marked))
+	}
+
+	fake = runnertest.New(t)
+	s = started(fake, gitDir)
+	repairs(s).Does(func() { writeFile(t, gitDir, nextIndex, "repaired") })
+	s.goesOn(t, "repaired again", gitDir, stopped, "repaired")
+	if out, err := commitBrew(fake); !out.Committed || err != nil || !slices.Equal(out.Notes, []string{"repaired the index a stopped run left"}) {
+		t.Errorf("Commit(), repairing again = %+v, %v; want repaired, then committed", out, err)
+	}
+	checkCalls(t, "repaired again", fake, gitDir, s.want)
+	checkGitFolder(t, "repaired again", gitDir, resetEntries)
+}
+
+// While git's part way through one of its operations, as a rebase stopped
+// on the stopped run's commit, kit refuses before it deals with anything a
+// stopped run left, the mark kept for once it's done.
+func TestCommitRecoversNothingWhileGitIsPartWay(t *testing.T) {
+	gitDir := gitFolder(t, false)
+	mark := base + " " + stopped + " a-hash 1:2\n"
+	writeFile(t, gitDir, marked, mark)
+	if err := os.Mkdir(filepath.Join(gitDir, "rebase-merge"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	fake := runnertest.New(t)
+	s := started(fake, gitDir)
+	if out, err := commitBrew(fake); out.Committed || out.Notes != nil || err == nil || !strings.Contains(err.Error(), "a rebase is under way") {
+		t.Errorf("Commit(), mid-rebase = %+v, %v; want refused", out, err)
+	}
+	checkCalls(t, "mid-rebase", fake, gitDir, s.want)
+	checkGitFolder(t, "mid-rebase", gitDir, usersEntries, marked, "rebase-merge")
+	if readFile(gitDir, marked) != mark {
+		t.Errorf("the mark holds %q mid-rebase, want it as it was", readFile(gitDir, marked))
 	}
 }
 

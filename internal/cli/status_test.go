@@ -45,15 +45,18 @@ func laptopWorld(t *testing.T) *world {
 
 // private scripts kit-config's place as its privacy check asks after it,
 // as real git, ssh and gh answer: origin's URL, on GitHub over ssh, the one
-// it's fetched from and pushed to; the host ssh's config resolves
-// github.com to; and the repository, private there.
+// it's fetched from and pushed to, handed to no helper, with no ssh command
+// set; the host ssh's config resolves git@github.com to; and the
+// repository, private there.
 func (w *world) private() {
 	const url = "git@github.com:someone/kit-config.git\n"
 	dir := filepath.Join(w.home, ".config", "kit")
 	w.fake.On("git", "-C", dir, "remote", "get-url", "origin").Prints(url)
 	w.fake.On("git", "-C", dir, "remote", "get-url", "--push", "--all", "origin").Prints(url)
-	w.fake.On("ssh", "-G", "github.com").Prints("user git\nhostname github.com\nport 22\n")
-	w.fake.On("gh", "repo", "view", "someone/kit-config", "--json", "visibility", "--jq", ".visibility").Prints("PRIVATE\n")
+	w.fake.On("git", "-C", dir, "config", "--get", "remote.origin.vcs").Exits(1)
+	w.fake.On("git", "-C", dir, "config", "--get", "core.sshCommand").Exits(1)
+	w.fake.On("ssh", "-G", "git@github.com").Prints("user git\nhostname github.com\nport 22\n")
+	w.fake.On("gh", "repo", "view", "https://github.com/someone/kit-config", "--json", "visibility", "--jq", ".visibility").Prints("PRIVATE\n")
 }
 
 // healthyMac scripts the Mac's checks' commands as a healthy Mac answers
@@ -231,7 +234,7 @@ func TestStatusIsLogged(t *testing.T) {
 		"kit status · laptop · 2 Jan 2026 03:04:05",
 		"! Homebrew formulae",
 		"exit 0        0.0s  brew leaves --installed-on-request\n",
-		"exit 0        0.0s  gh repo view someone/kit-config --json visibility --jq .visibility\n",
+		"exit 0        0.0s  gh repo view https://github.com/someone/kit-config --json visibility --jq .visibility\n",
 		"2 need attention",
 	} {
 		if !strings.Contains(out, want) {

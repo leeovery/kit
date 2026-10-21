@@ -17,6 +17,17 @@ import (
 // ErrNoRemote is returned by Push for a repository with nothing to push to.
 var ErrNoRemote = errors.New("no remote to push to")
 
+// ErrNowhere is in Push's refusal when it can't tell where to push, so
+// pushes nowhere: HEAD on no branch, or which remote not set, or set to
+// what isn't one of the repository's remotes.
+var ErrNowhere = errors.New("nowhere to push to")
+
+// nowhere is one of Push's refusals for want of where to push, as its error
+// says: ErrNowhere.
+type nowhere struct{ error }
+
+func (nowhere) Is(target error) bool { return target == ErrNowhere }
+
 // stashMessage names what Push sets aside while it rebases.
 const stashMessage = "kit: set aside while rebasing onto the remote"
 
@@ -112,6 +123,9 @@ func (r Repo) pull(ctx context.Context, pushing bool) (to string, notes []string
 	}
 	gitDir, err := r.gitDir(ctx)
 	if err != nil {
+		return "", nil, err
+	}
+	if err := underWay(gitDir); err != nil {
 		return "", nil, err
 	}
 	if notes, err = r.recovered(ctx, gitDir); err != nil {
@@ -220,7 +234,7 @@ func (t tracking) from() (string, error) {
 // unset is the refusal for a branch with no upstream, which remote it's
 // pushed to not set.
 func (t tracking) unset() error {
-	return fmt.Errorf("%s has no upstream, and which remote it's pushed to isn't set, so nothing was pushed: git config remote.pushDefault <remote> sets it", t.name())
+	return nowhere{fmt.Errorf("%s has no upstream, and which remote it's pushed to isn't set, so nothing was pushed: git config remote.pushDefault <remote> sets it", t.name())}
 }
 
 // pushedTo is the remote-tracking ref of the branch Push pushes to: the
@@ -239,7 +253,7 @@ func (t tracking) pushedTo() string {
 func (r Repo) tracking(ctx context.Context, remotes []string) (tracking, error) {
 	res, err := r.git(ctx, "symbolic-ref", "-q", "HEAD")
 	if exit, ok := errors.AsType[*runner.ExitError](err); ok && exit.Code == 1 {
-		return tracking{}, errors.New("HEAD isn't on a branch, so nothing was pushed")
+		return tracking{}, nowhere{errors.New("HEAD isn't on a branch, so nothing was pushed")}
 	}
 	if err != nil {
 		return tracking{}, err
@@ -269,9 +283,9 @@ func (r Repo) pushRemote(ctx context.Context, t tracking, remotes []string) (str
 		case slices.Contains(remotes, remote):
 			return remote, nil
 		case strings.ContainsAny(remote, ":/"):
-			return "", fmt.Errorf("%s is a URL, not a remote's name, so nothing was pushed: kit pushes only to one of the repository's remotes, by its name", key)
+			return "", nowhere{fmt.Errorf("%s is a URL, not a remote's name, so nothing was pushed: kit pushes only to one of the repository's remotes, by its name", key)}
 		}
-		return "", fmt.Errorf("%s is %s, not one of the repository's remotes, so nothing was pushed: kit pushes only to a remote by its name", key, remote)
+		return "", nowhere{fmt.Errorf("%s is %s, not one of the repository's remotes, so nothing was pushed: kit pushes only to a remote by its name", key, remote)}
 	}
 	switch {
 	case t.upstream != "":
@@ -350,8 +364,9 @@ func (r Repo) pushable(ctx context.Context, t tracking, from string) error {
 
 // movedOn is the refusal when the branch t's pushed to, on another remote
 // than its upstream's, has commits HEAD hasn't, as when it's been pushed to
-// from elsewhere, or HEAD rebased since: pushing would be refused, or,
-// forced, lose them.
+// from elsewhere, or HEAD rebased since, as kit's pull rebases it onto the
+// upstream: pushing would be refused, or, forced, lose them. Rebasing onto
+// one remote while pushing to another, kit doesn't support.
 func (r Repo) movedOn(ctx context.Context, t tracking) error {
 	ref := t.pushedTo()
 	if t.upstream == "" || ref == t.upstream || ref == "" {
@@ -365,7 +380,7 @@ func (r Repo) movedOn(ctx context.Context, t tracking) error {
 	if err != nil || ahead == 0 {
 		return err
 	}
-	return fmt.Errorf("%s, where %s is pushed, has %s this Mac hasn't, so nothing was pushed: bring them in, or push over them, by hand", short(ref), t.name(), count(ahead, "commit"))
+	return fmt.Errorf("%s, where %s is pushed, has %s this Mac hasn't, so nothing was pushed: kit doesn't rebase onto one remote and push to another; bring them in, or push over them, by hand", short(ref), t.name(), count(ahead, "commit"))
 }
 
 // short is a remote-tracking ref as git names it short, as in origin/main.
@@ -718,19 +733,33 @@ func (r Repo) Waiting(ctx context.Context) ([]time.Time, error) {
 	return made, nil
 }
 
-// PushURLs are where Push pushes: the URLs of the remote the branch is
-// pushed to, as git push has them, its push URLs, else its URL. ErrNoRemote
-// without a remote; an error when which remote isn't set.
-func (r Repo) PushURLs(ctx context.Context) ([]string, error) {
+// PushURLs are where Push pushes: the remote the branch is pushed to, and
+// its URLs, as git push has them, its push URLs, else its URL. ErrNoRemote
+// without a remote; an error that's ErrNowhere when Push can't tell where
+// to push.
+func (r Repo) PushURLs(ctx context.Context) (remote string, urls []string, err error) {
 	t, err := r.tracked(ctx)
 	switch {
 	case err != nil:
-		return nil, err
+		return "", nil, err
 	case t.pushTo == "":
-		return nil, t.unset()
+		return "", nil, t.unset()
 	}
 	res, err := r.git(ctx, "remote", "get-url", "--push", "--all", t.pushTo)
-	return slices.DeleteFunc(strings.Split(string(res.Stdout), "\n"), func(url string) bool { return url == "" }), err
+	if err != nil {
+		return "", nil, err
+	}
+	return t.pushTo, slices.DeleteFunc(strings.Split(string(res.Stdout), "\n"), func(url string) bool { return url == "" }), nil
+}
+
+// URL is the URL the remote called remote is fetched from, as git takes it:
+// "" when there's no such remote, as git says by exiting 2.
+func (r Repo) URL(ctx context.Context, remote string) (string, error) {
+	res, err := r.git(ctx, "remote", "get-url", remote)
+	if exit, ok := errors.AsType[*runner.ExitError](err); ok && exit.Code == 2 {
+		return "", nil
+	}
+	return strings.TrimSpace(string(res.Stdout)), err
 }
 
 // tracked is how the branch HEAD is on stands with its remotes (tracking):

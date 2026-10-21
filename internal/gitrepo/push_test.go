@@ -648,7 +648,7 @@ func TestPushToAnotherRemoteThanItsUpstreams(t *testing.T) {
 	}{
 		{name: "the branch there not moved on", at: upstream, ahead: "0"},
 		{name: "the branch not there"},
-		{name: "the branch moved on", at: upstream, ahead: "2", want: "backup/main, where main is pushed, has 2 commits this Mac hasn't, so nothing was pushed: bring them in, or push over them, by hand"},
+		{name: "the branch moved on", at: upstream, ahead: "2", want: "backup/main, where main is pushed, has 2 commits this Mac hasn't, so nothing was pushed: kit doesn't rebase onto one remote and push to another; bring them in, or push over them, by hand"},
 	} {
 		for _, holding := range []bool{false, true} {
 			fake := runnertest.New(t)
@@ -734,9 +734,10 @@ func TestPushRefusesAPushRemoteThatIsntOne(t *testing.T) {
 	}
 }
 
-// PushURLs are where Push pushes, as git push has them: the push URLs of
-// the remote the branch is pushed to, its upstream's or the one set; an
-// error when that isn't set, ErrNoRemote without a remote.
+// PushURLs are where Push pushes, as git push has them: the remote the
+// branch is pushed to, its upstream's or the one set, and its push URLs, a
+// line each; ErrNowhere when Push can't tell where to push, ErrNoRemote
+// without a remote, and git's error when it can't name the URLs.
 func TestPushURLs(t *testing.T) {
 	const private, public = "git@github.com:someone/prefs.git", "git@github.com:someone/public.git"
 	for _, c := range []struct {
@@ -756,17 +757,66 @@ func TestPushURLs(t *testing.T) {
 		if c.to != "" {
 			s.expect(call{args: git("remote", "get-url", "--push", "--all", c.to)}).Prints(c.urls)
 		}
-		urls, err := gitrepo.Repo{Dir: dir, Run: fake}.PushURLs(context.Background())
-		if !slices.Equal(urls, c.want) || (err == nil) != (c.err == "") || err != nil && !strings.HasPrefix(err.Error(), c.err) {
-			t.Errorf("%s: PushURLs() = %q, %v; want %q, %q", c.name, urls, err, c.want, c.err)
+		remote, urls, err := gitrepo.Repo{Dir: dir, Run: fake}.PushURLs(context.Background())
+		if remote != c.to || !slices.Equal(urls, c.want) || (err == nil) != (c.err == "") || err != nil && (!strings.HasPrefix(err.Error(), c.err) || !errors.Is(err, gitrepo.ErrNowhere)) {
+			t.Errorf("%s: PushURLs() = %q, %q, %v; want %q, %q, %q", c.name, remote, urls, err, c.to, c.want, c.err)
 		}
 		checkCalls(t, c.name, fake, "", s.want)
 	}
 
 	fake := runnertest.New(t)
 	fake.On("git", git("remote")...)
-	if _, err := (gitrepo.Repo{Dir: dir, Run: fake}).PushURLs(context.Background()); !errors.Is(err, gitrepo.ErrNoRemote) {
+	if _, _, err := (gitrepo.Repo{Dir: dir, Run: fake}).PushURLs(context.Background()); !errors.Is(err, gitrepo.ErrNoRemote) {
 		t.Errorf("PushURLs(), no remote = %v, want ErrNoRemote", err)
+	}
+
+	fake = runnertest.New(t)
+	s := &sequence{fake: fake}
+	s.expect(call{args: git("remote")}).Prints("origin\n")
+	s.tracks(tracksOrigin, "", "")
+	s.expect(call{args: git("remote", "get-url", "--push", "--all", "origin")}).Exits(128).PrintsToStderr("fatal: unable to read config file '.git/config': Permission denied\n")
+	if remote, urls, err := (gitrepo.Repo{Dir: dir, Run: fake}).PushURLs(context.Background()); remote != "" || urls != nil || err == nil || errors.Is(err, gitrepo.ErrNowhere) {
+		t.Errorf("PushURLs(), the URLs unread = %q, %q, %v; want git's error", remote, urls, err)
+	}
+	checkCalls(t, "the URLs unread", fake, "", s.want)
+}
+
+// URL is a remote's fetch URL, as git takes it, none without that remote.
+func TestURL(t *testing.T) {
+	fake := runnertest.New(t)
+	fake.On("git", git("remote", "get-url", "origin")...).Prints("git@github.com:someone/kit.git\n")
+	fake.On("git", git("remote", "get-url", "backup")...).Exits(2).PrintsToStderr("error: No such remote 'backup'\n")
+	fake.On("git", git("remote", "get-url", "broken")...).Exits(128).PrintsToStderr("fatal: not a git repository (or any of the parent directories): .git\n")
+	repo := gitrepo.Repo{Dir: dir, Run: fake}
+	for _, c := range []struct{ remote, want, err string }{
+		{"origin", "git@github.com:someone/kit.git", ""},
+		{"backup", "", ""},
+		{"broken", "", "fatal: not a git repository"},
+	} {
+		url, err := repo.URL(context.Background(), c.remote)
+		if url != c.want || (err == nil) != (c.err == "") || err != nil && !strings.Contains(err.Error(), c.err) {
+			t.Errorf("URL(%s) = %q, %v; want %q, %q", c.remote, url, err, c.want, c.err)
+		}
+	}
+}
+
+// Each of Push's refusals for want of where to push is ErrNowhere: HEAD on
+// no branch, a push setting that's a URL or names no remote.
+func TestPushNowhere(t *testing.T) {
+	fake := runnertest.New(t)
+	fake.On("git", git("remote")...).Prints("origin\n")
+	fake.On("git", branchOf...).Exits(1)
+	if _, _, err := (gitrepo.Repo{Dir: dir, Run: fake}).PushURLs(context.Background()); err == nil || err.Error() != "HEAD isn't on a branch, so nothing was pushed" || !errors.Is(err, gitrepo.ErrNowhere) {
+		t.Errorf("PushURLs(), HEAD on no branch = %v, want ErrNowhere", err)
+	}
+	for _, setting := range []string{"git@github.com:someone/fork.git", "fork"} {
+		fake := runnertest.New(t)
+		s := &sequence{fake: fake}
+		s.expect(call{args: git("remote")}).Prints("origin\n")
+		s.tracks(tracksOrigin, setting, "")
+		if _, _, err := (gitrepo.Repo{Dir: dir, Run: fake}).PushURLs(context.Background()); !errors.Is(err, gitrepo.ErrNowhere) {
+			t.Errorf("PushURLs(), pushRemote %s = %v, want ErrNowhere", setting, err)
+		}
 	}
 }
 
@@ -956,4 +1006,91 @@ func TestWaiting(t *testing.T) {
 	if n := (gitrepo.Repo{Dir: dir, Run: fake}).Unpushed(context.Background()); n != 1 {
 		t.Errorf("Unpushed() = %d, want 1", n)
 	}
+}
+
+// Push and Pull deal with what a run of kit's that stopped left, as Commit
+// does, and say what they did: a lock HEAD's moved onto the commit of put in
+// the index's place; the index repaired once the lock was removed, the mark
+// then cleared. With no mark, they never take kit's lock on
+// committing, so never wait for a kit at work, a commit waiting on its
+// signing, say; while git's part way through one of its operations, they
+// leave what's left be, the mark kept.
+func TestPushDealsWithWhatAStoppedRunLeft(t *testing.T) {
+	for _, pull := range []bool{false, true} {
+		gitDir := gitFolder(t, false)
+		leave(t, gitDir, base)
+		fake := runnertest.New(t)
+		s := &sequence{fake: fake}
+		s.expect(call{args: git("remote")}).Prints("origin\n")
+		s.expect(call{args: gitDirOf}).Prints(gitDir + "\n")
+		s.head(stopped)
+		s.expect(call{args: wholeStatus})
+		s.tracks(tracksOrigin, "", "")
+		s.expect(call{args: fetchIt})
+		s.expect(call{args: upstreamAt}).Prints(upstream + "\n")
+		s.expect(call{args: behindOf}).Prints("0\n")
+		if !pull {
+			s.expect(call{args: pushIt})
+		}
+		repo := gitrepo.Repo{Dir: dir, Run: fake}
+		do := repo.Push
+		if pull {
+			do = repo.Pull
+		}
+		notes, err := do(context.Background())
+		if err != nil || !slices.Equal(notes, []string{"finished the last run's index"}) {
+			t.Errorf("pull %v, a stopped run's lock left = %q, %v; want it finished, and said", pull, notes, err)
+		}
+		checkCalls(t, "a stopped run's lock left", fake, gitDir, s.want)
+		checkGitFolder(t, "a stopped run's lock left", gitDir, left)
+	}
+
+	gitDir := gitFolder(t, false)
+	writeFile(t, gitDir, marked, base+" "+stopped+" a-hash 1:2\n")
+	fake := runnertest.New(t)
+	s := &sequence{fake: fake}
+	s.expect(call{args: git("remote")}).Prints("origin\n")
+	s.expect(call{args: gitDirOf}).Prints(gitDir + "\n")
+	s.head(stopped)
+	s.expect(call{args: committedBy}).Prints("brew\x00")
+	s.expect(call{args: indexed}).Prints(entry(brewBefore, "brew"))
+	s.expect(call{args: baseTree}).Prints(blob(brewBefore, "brew"))
+	s.expect(call{args: resetTo(stopped), input: "brew\x00", index: nextIndex}).Does(func() { writeFile(t, gitDir, nextIndex, "repaired") })
+	s.expect(call{args: wholeStatus})
+	s.tracks(tracksOrigin, "", "")
+	s.expect(call{args: fetchIt})
+	s.expect(call{args: upstreamAt}).Prints(upstream + "\n")
+	s.expect(call{args: behindOf}).Prints("0\n")
+	s.expect(call{args: pushIt})
+	if notes, err := (gitrepo.Repo{Dir: dir, Run: fake}).Push(context.Background()); err != nil || !slices.Equal(notes, []string{"repaired the index a stopped run left"}) {
+		t.Errorf("Push(), the index a stopped run left = %q, %v; want it repaired, and said", notes, err)
+	}
+	checkCalls(t, "the index a stopped run left", fake, gitDir, s.want)
+	checkGitFolder(t, "the index a stopped run left", gitDir, "repaired")
+
+	gitDir = t.TempDir()
+	other := lockCommits(t, gitDir)
+	defer func() { _ = other.Close() }()
+	fake = runnertest.New(t)
+	s = pushing(fake, gitDir, "", "0")
+	s.expect(call{args: pushIt})
+	if err := push(t, fake); err != nil {
+		t.Errorf("Push(), another kit committing, no mark = %v; want pushed", err)
+	}
+	checkCalls(t, "another kit committing, no mark", fake, "", s.want)
+
+	gitDir = gitFolder(t, false)
+	leave(t, gitDir, base)
+	if err := os.Mkdir(filepath.Join(gitDir, "rebase-merge"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	fake = runnertest.New(t)
+	s = &sequence{fake: fake}
+	s.expect(call{args: git("remote")}).Prints("origin\n")
+	s.expect(call{args: gitDirOf}).Prints(gitDir + "\n")
+	if notes, err := (gitrepo.Repo{Dir: dir, Run: fake}).Push(context.Background()); notes != nil || err == nil || !strings.Contains(err.Error(), "a rebase is under way") {
+		t.Errorf("Push(), mid-rebase, a stopped run's lock left = %q, %v; want refused, nothing done", notes, err)
+	}
+	checkCalls(t, "mid-rebase", fake, gitDir, s.want)
+	checkGitFolder(t, "mid-rebase", gitDir, usersEntries, "index.lock", marked, "rebase-merge")
 }
