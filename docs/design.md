@@ -370,13 +370,16 @@ whitespace and blank lines first, last or doubled gone). The user's index's next
 made before HEAD moves, written into the lock, so once HEAD has moved all that's left is the
 lock taking the index's place: a run that stops between leaves the lock, never an index from
 which a `git commit` would undo kit's, and should the lock not take its place, kit names the
-`git reset -q -- <files>` that brings the index up to date. A lock so left, the next commit
-puts in the index's place, as the stopped run would have, and says so ("finished the last run's
-index"), once the lock has been left alone for as long as kit waits for git's index and facts
-say it's kit's: HEAD's last move kit's, and that commit's files as committed in the lock but
-not in the user's index, which tells it from a lock a git took since, as `git commit -a`'s
-while its editor's open; any other lock it names, with what to do should no git be running.
-HEAD moves onto the commit only
+`git --literal-pathspecs reset -q -- <files>` that brings the index up to date. A commit holds
+kit's own lock on committing in the repository all the while, a kernel lock on
+`kit-commit.lock` in the git folder, which the kernel lets go of should the run die, so no two
+kits commit there at once; and before HEAD moves, kit leaves a mark beside the lock naming its
+commit and the lock's hash. A lock so left, the next commit puts in the index's place, as the
+stopped run would have, and says so ("finished the last run's index"), when facts say it's
+kit's: holding the commit lock, no kit is writing it; the mark is there; HEAD is the mark's
+commit; and the lock is the very file the mark's hash names. Any other lock it names, with what
+to do should no git be running, and a lock no longer kit's own, as when another git removed it,
+kit never puts in place or removes. HEAD moves onto the commit only
 from the last commit, so when another git moved HEAD meanwhile, git refuses, and kit, still
 holding the index, makes the commit again onto where HEAD is now, a few times at most; then
 nothing's committed, HEAD and the user's index stay as they were, and kit says so, and that
@@ -399,17 +402,21 @@ then push, `--note` the message's end; an untracked file is committed as deleted
 Mac), revert (back to the last commit; a new file to the Bin; an untracked file tracked again,
 as it is) or snooze. kit pulls before it pushes, and pulls the prefs store's clone the same way
 (`kit prefs`): it refuses while git is part way through one of its operations, or a conflict
-waits, as setting work aside would end the one; then it fetches, pruning the remote's branches
-gone from it (a remote out of reach said plainly). An upstream not there on a remote with no
+waits, as setting work aside would end the one; then it fetches the remote it'll use, the
+upstream's, or, with none, the one the branch is pushed to, pruning its branches gone from it
+(a remote out of reach said plainly). An upstream not there on a remote with no
 branches yet, as a new, empty one's, has nothing to bring in, and the branch is pushed to it;
 one gone from a remote that has others, as when it's renamed or deleted there, is refused,
 naming it, as pushing would make it anew. A branch with no upstream follows the remote's branch
 of its name when there is one, made its upstream and caught up with; otherwise it's pushed to
 the remote it's pushed to (`branch.<name>.pushRemote`, then `remote.pushDefault`, then
 `origin`, or the only remote), which becomes its upstream, and with several remotes and none of
-those set, kit refuses. HEAD on no branch is refused. Commits waiting to be pushed are those
-the upstream hasn't, or, with it not there or none, those on none of the remote's branches, so
-a failed first push, or commits made offline, show as waiting. When the remote has commits this
+those set, kit refuses. A branch with an upstream is pushed where `git push` sends it: to
+`branch.<name>.pushRemote` or `remote.pushDefault` when set, else its upstream's remote. HEAD
+on no branch is refused. Commits waiting to be pushed are those the branch it's pushed to
+hasn't, the upstream, or that remote's branch of its name when another is set, or, with it not
+there or none, those on none of that remote's branches, so a failed first push, or commits made
+offline, show as waiting. When the remote has commits this
 Mac hasn't, kit rebases onto them by the commits since the two parted (never git's fork-point,
 which can leave out a commit, so the rebase changes no more than the remote's commits do), so
 two Macs don't fight. Anything not committed is set aside in a stash of kit's own and put back
@@ -993,7 +1000,8 @@ the hardware UUID of the Mac the folder belongs to.
   folder (claimed by the first capture; another Mac, such as a replacement given the same name,
   is refused until it takes ownership). It pulls, writes only what changed, removes what's gone
   from the Mac (history keeps it), leaves domains waiting to be restored alone, keeps a domain
-  that fails to export, commits once in prefsync's message format, and pushes, only to a
+  that fails to export, commits once in prefsync's message format, and pushes, only when every
+  URL the push goes to (the push URLs of the remote it's pushed to, as `git push` has them) is a
   repository private on GitHub (or not on GitHub). A push that fails waits for the next.
 - **`kit prefs restore [<domain>...]`** (`--from`, `--at`, `--as`, `--pending`, `--dry-run`): a
   domain's app found from the installed apps' bundle ids (sub-domains, shared domains, group and

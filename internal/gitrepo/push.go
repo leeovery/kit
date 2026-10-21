@@ -41,10 +41,11 @@ func (r Repo) Pull(ctx context.Context) error {
 }
 
 // Push pulls the remote's changes (Pull), then pushes, nothing when Pull
-// refuses or fails: to the branch's upstream, or, with none, to the same
-// branch of the remote it's pushed to (branch.<name>.pushRemote, then
-// remote.pushDefault, then origin, or the only remote), which becomes its
-// upstream; with several remotes and none of those, it refuses.
+// refuses or fails, to the remote the branch is pushed to, as git push has
+// it: branch.<name>.pushRemote, then remote.pushDefault, then its
+// upstream's remote. With no upstream, it's pushed to the same branch of
+// that remote, origin, or the only remote, which becomes its upstream; with
+// several remotes and none of those, it refuses.
 func (r Repo) Push(ctx context.Context) error {
 	to, err := r.pull(ctx)
 	if err != nil {
@@ -72,7 +73,11 @@ func (r Repo) Holding(ctx context.Context) error {
 	if err != nil || len(remotes) == 0 {
 		return err
 	}
-	c, err := r.catching(ctx, remotes)
+	t, err := r.tracking(ctx, remotes)
+	if err != nil {
+		return err
+	}
+	c, err := r.catching(ctx, t)
 	if err != nil || c.up == "" {
 		return err
 	}
@@ -96,10 +101,18 @@ func (r Repo) pull(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := r.fetch(ctx); err != nil {
+	t, err := r.tracking(ctx, remotes)
+	if err != nil {
 		return "", err
 	}
-	c, err := r.catching(ctx, remotes)
+	from, err := t.from()
+	if err != nil {
+		return "", err
+	}
+	if err := r.fetch(ctx, from); err != nil {
+		return "", err
+	}
+	c, err := r.catching(ctx, t)
 	if err != nil {
 		return "", err
 	}
@@ -139,10 +152,10 @@ func (r Repo) settled(ctx context.Context) (gitDir string, dirty []entry, err er
 	return gitDir, dirty, nil
 }
 
-// fetch brings in the remote's commits, pruning its branches gone from it,
-// so an upstream renamed or deleted there is seen to be gone.
-func (r Repo) fetch(ctx context.Context) error {
-	if _, err := r.git(ctx, "fetch", "--prune", "--quiet"); err != nil {
+// fetch brings in remote's commits, pruning its branches gone from it, so
+// an upstream renamed or deleted there is seen to be gone.
+func (r Repo) fetch(ctx context.Context, remote string) error {
+	if _, err := r.git(ctx, "fetch", "--prune", "--quiet", remote); err != nil {
 		if unreachable(err) {
 			return errors.New("couldn't reach the remote, so nothing was pushed")
 		}
@@ -151,18 +164,48 @@ func (r Repo) fetch(ctx context.Context) error {
 	return nil
 }
 
-// tracking is how the branch HEAD is on stands with its remote, as last
-// fetched: the branch; its upstream, as configured, "" for none, and
-// whether that's there; and the remote, the upstream's, or, with none, the
-// one it's pushed to, "" when that isn't set and there are several.
+// tracking is how the branch HEAD is on stands with its remotes: the
+// branch; its upstream, as configured, "" for none, and the upstream's
+// remote; and the remote it's pushed to (pushRemote), "" when that isn't
+// set and there are several.
 type tracking struct {
-	branch, upstream, remote string
-	there                    bool
+	branch, upstream, remote, pushTo string
 }
 
 // name is the branch's short name, as in main.
 func (t tracking) name() string {
 	return strings.TrimPrefix(t.branch, "refs/heads/")
+}
+
+// from is the remote Pull brings in from: the upstream's, or, with none,
+// the one the branch is pushed to; an error when that isn't set.
+func (t tracking) from() (string, error) {
+	switch {
+	case t.upstream != "":
+		return t.remote, nil
+	case t.pushTo == "":
+		return "", t.unset()
+	}
+	return t.pushTo, nil
+}
+
+// unset is the refusal for a branch with no upstream, which remote it's
+// pushed to not set.
+func (t tracking) unset() error {
+	return fmt.Errorf("%s has no upstream, and which remote it's pushed to isn't set, so nothing was pushed: git config remote.pushDefault <remote> sets it", t.name())
+}
+
+// pushedTo is the remote-tracking ref of the branch Push pushes to: the
+// upstream, when the branch is pushed to the upstream's remote, else the
+// same branch of the remote it's pushed to; "" when that isn't set.
+func (t tracking) pushedTo() string {
+	switch {
+	case t.upstream != "" && t.pushTo == t.remote:
+		return t.upstream
+	case t.pushTo == "":
+		return ""
+	}
+	return "refs/remotes/" + t.pushTo + "/" + t.name()
 }
 
 func (r Repo) tracking(ctx context.Context, remotes []string) (tracking, error) {
@@ -178,25 +221,23 @@ func (r Repo) tracking(ctx context.Context, remotes []string) (tracking, error) 
 		return tracking{}, err
 	}
 	t.upstream, t.remote, _ = strings.Cut(strings.TrimSuffix(string(res.Stdout), "\n"), "\x00")
-	if t.upstream == "" {
-		t.remote, err = r.pushRemote(ctx, t.name(), remotes)
-		return t, err
-	}
-	commit, err := r.commitAt(ctx, t.upstream)
-	t.there = commit != ""
+	t.pushTo, err = r.pushRemote(ctx, t, remotes)
 	return t, err
 }
 
-// pushRemote is the remote the branch name's pushed to, as git push has it
-// with no upstream: branch.<name>.pushRemote, then remote.pushDefault, then
-// origin, or the only remote; "" when none of those is.
-func (r Repo) pushRemote(ctx context.Context, name string, remotes []string) (string, error) {
-	for _, key := range []string{"branch." + name + ".pushRemote", "remote.pushDefault"} {
+// pushRemote is the remote t's branch is pushed to, one of remotes, as git
+// push has it: branch.<name>.pushRemote, then remote.pushDefault, then its
+// upstream's remote, or, with no upstream, origin, or the only remote; ""
+// when none of those is.
+func (r Repo) pushRemote(ctx context.Context, t tracking, remotes []string) (string, error) {
+	for _, key := range []string{"branch." + t.name() + ".pushRemote", "remote.pushDefault"} {
 		if remote, err := r.setting(ctx, key); err != nil || remote != "" {
 			return remote, err
 		}
 	}
 	switch {
+	case t.upstream != "":
+		return t.remote, nil
 	case slices.Contains(remotes, "origin"):
 		return "origin", nil
 	case len(remotes) == 1:
@@ -214,26 +255,27 @@ type catch struct {
 	adopt      bool
 }
 
-// catching is what Pull does with the remote, one of remotes, as the
-// branch HEAD is on stands with it (tracking): an error when HEAD's on
-// none, or it's to be pushed to a remote that isn't set, or its upstream's
-// gone.
-func (r Repo) catching(ctx context.Context, remotes []string) (catch, error) {
-	t, err := r.tracking(ctx, remotes)
-	switch {
-	case err != nil:
+// catching is what Pull does with the remote, as the branch stands with it
+// (t), as last fetched: an error when it's to be pushed to a remote that
+// isn't set, or its upstream's gone.
+func (r Repo) catching(ctx context.Context, t tracking) (catch, error) {
+	if _, err := t.from(); err != nil {
 		return catch{}, err
-	case t.there:
-		return catch{up: t.upstream}, nil
-	case t.upstream != "":
-		return catch{}, r.gone(ctx, t)
-	case t.remote == "":
-		return catch{}, fmt.Errorf("%s has no upstream, and which remote it's pushed to isn't set, so nothing was pushed: git config remote.pushDefault <remote> sets it", t.name())
 	}
-	theirs := "refs/remotes/" + t.remote + "/" + t.name()
+	if t.upstream != "" {
+		commit, err := r.commitAt(ctx, t.upstream)
+		switch {
+		case err != nil:
+			return catch{}, err
+		case commit == "":
+			return catch{}, r.gone(ctx, t)
+		}
+		return catch{up: t.upstream}, nil
+	}
+	theirs := "refs/remotes/" + t.pushTo + "/" + t.name()
 	commit, err := r.commitAt(ctx, theirs)
 	if commit == "" {
-		return catch{pushTo: t.remote}, err
+		return catch{pushTo: t.pushTo}, err
 	}
 	return catch{up: theirs, adopt: true}, err
 }
@@ -569,28 +611,26 @@ func kept(stash string, err error) error {
 }
 
 // Waiting is when each commit waiting to be pushed was made: those the
-// upstream hasn't, or, with none there, those on none of the remote's
-// branches, or any remote's when which isn't set. ErrNoRemote without a
-// remote.
+// branch Push pushes to hasn't (pushedTo), or, with it not there, those on
+// none of that remote's branches, or any remote's when which isn't set.
+// ErrNoRemote without a remote.
 func (r Repo) Waiting(ctx context.Context) ([]time.Time, error) {
-	remotes, err := r.remotes(ctx)
-	switch {
-	case err != nil:
-		return nil, err
-	case len(remotes) == 0:
-		return nil, ErrNoRemote
-	}
-	t, err := r.tracking(ctx, remotes)
+	t, err := r.tracked(ctx)
 	if err != nil {
 		return nil, err
 	}
-	revs := []string{t.upstream + "..HEAD"}
-	if !t.there {
-		onRemote := "--remotes"
-		if t.remote != "" {
-			onRemote += "=" + t.remote
+	revs := []string{"HEAD", "--not", "--remotes"}
+	if t.pushTo != "" {
+		revs[2] += "=" + t.pushTo
+	}
+	if ref := t.pushedTo(); ref != "" {
+		commit, err := r.commitAt(ctx, ref)
+		if err != nil {
+			return nil, err
 		}
-		revs = []string{"HEAD", "--not", onRemote}
+		if commit != "" {
+			revs = []string{ref + "..HEAD"}
+		}
 	}
 	res, err := r.git(ctx, slices.Concat([]string{"log", "--format=%ct"}, revs)...)
 	if err != nil {
@@ -605,6 +645,34 @@ func (r Repo) Waiting(ctx context.Context) ([]time.Time, error) {
 		made = append(made, time.Unix(unix, 0))
 	}
 	return made, nil
+}
+
+// PushURLs are where Push pushes: the URLs of the remote the branch is
+// pushed to, as git push has them, its push URLs, else its URL. ErrNoRemote
+// without a remote; an error when which remote isn't set.
+func (r Repo) PushURLs(ctx context.Context) ([]string, error) {
+	t, err := r.tracked(ctx)
+	switch {
+	case err != nil:
+		return nil, err
+	case t.pushTo == "":
+		return nil, t.unset()
+	}
+	res, err := r.git(ctx, "remote", "get-url", "--push", "--all", t.pushTo)
+	return strings.Fields(string(res.Stdout)), err
+}
+
+// tracked is how the branch HEAD is on stands with its remotes (tracking):
+// ErrNoRemote without a remote.
+func (r Repo) tracked(ctx context.Context) (tracking, error) {
+	remotes, err := r.remotes(ctx)
+	switch {
+	case err != nil:
+		return tracking{}, err
+	case len(remotes) == 0:
+		return tracking{}, ErrNoRemote
+	}
+	return r.tracking(ctx, remotes)
 }
 
 // Unpushed is how many commits are waiting to be pushed (Waiting): none

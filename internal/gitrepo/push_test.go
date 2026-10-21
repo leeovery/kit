@@ -26,7 +26,7 @@ var (
 	rebase      = git("rebase", "--no-fork-point", "--quiet", "refs/remotes/origin/main")
 	abort       = git("rebase", "--abort")
 	pushIt      = git("push", "--quiet")
-	fetchIt     = git("fetch", "--prune", "--quiet")
+	fetchIt     = git("fetch", "--prune", "--quiet", "origin")
 	behindOf    = git("rev-list", "--count", "HEAD..refs/remotes/origin/main")
 )
 
@@ -42,8 +42,12 @@ var (
 	pushDefault  = git("config", "--get", "remote.pushDefault")
 )
 
-// tracksOrigin is git naming origin's main as the branch's upstream.
-const tracksOrigin = "refs/remotes/origin/main\x00origin\n"
+// tracksOrigin is git naming origin's main, upstreamRef, as the branch's
+// upstream.
+const (
+	tracksOrigin = upstreamRef + "\x00origin\n"
+	upstreamRef  = "refs/remotes/origin/main"
+)
 
 // upstream is the commit the tests' upstream, origin's main, is at.
 const upstream = "51cd7f5e2b6cbb1bd2ff3e2d02cd4f1bbd1c7a33"
@@ -75,16 +79,29 @@ func pushingIn(fake *runnertest.Fake, root, gitDir, status, behind string) *sequ
 	return s
 }
 
-// fetches scripts a push as far as the branch's upstream, origin's main:
-// the remote; the git folder, and what's changed and not committed
-// (status, -z); the fetch, the branch, and its upstream.
+// fetches scripts a push as far as the fetch, the branch's upstream
+// origin's main: the remote; the git folder, and what's changed and not
+// committed (status, -z); the branch, its upstream and where it's pushed,
+// and the fetch.
 func (s *sequence) fetches(gitDir, status string) {
 	s.expect(call{args: git("remote")}).Prints("origin\n")
 	s.expect(call{args: gitDirOf}).Prints(gitDir + "\n")
 	s.expect(call{args: wholeStatus}).Prints(status)
+	s.tracks(tracksOrigin, "", "")
 	s.expect(call{args: fetchIt})
+}
+
+// tracks scripts git naming the branch, main, its upstream and the
+// upstream's remote (upstream, -z), and where it's pushed, as set:
+// branch.main.pushRemote (branchSays), then remote.pushDefault
+// (defaultSays), "" for unset, each asked till one is set.
+func (s *sequence) tracks(upstream, branchSays, defaultSays string) {
 	s.expect(call{args: branchOf}).Prints("refs/heads/main\n")
-	s.expect(call{args: upstreamOf}).Prints(tracksOrigin)
+	s.expect(call{args: upstreamOf}).Prints(upstream)
+	names(s.expect(call{args: pushRemoteOf}), branchSays)
+	if branchSays == "" {
+		names(s.expect(call{args: pushDefault}), defaultSays)
+	}
 }
 
 // incoming scripts the remote's changes as git names them: the paths its
@@ -520,6 +537,7 @@ func TestPushFails(t *testing.T) {
 			s.expect(call{args: git("remote")}).Prints("origin\n")
 			s.expect(call{args: gitDirOf}).Prints(t.TempDir() + "\n")
 			s.expect(call{args: wholeStatus})
+			s.tracks(tracksOrigin, "", "")
 			s.expect(call{args: fetchIt}).Exits(128).PrintsToStderr(stderr)
 			return s
 		}
@@ -539,7 +557,6 @@ func TestPushFails(t *testing.T) {
 			s.expect(call{args: git("remote")}).Prints("origin\n")
 			s.expect(call{args: gitDirOf}).Prints(t.TempDir() + "\n")
 			s.expect(call{args: wholeStatus})
-			s.expect(call{args: fetchIt})
 			s.expect(call{args: branchOf}).Exits(1)
 			return s
 		}},
@@ -592,27 +609,77 @@ func TestPushToANewRemote(t *testing.T) {
 	for _, c := range []struct{ name, remotes, pushRemote, pushDefault, to string }{
 		{"origin", "backup\norigin\n", "", "", "origin"},
 		{"the only remote", "backup\n", "", "", "backup"},
-		{"the branch's push remote", "backup\norigin\n", "backup\n", "", "backup"},
-		{"the remotes' push default", "backup\norigin\n", "", "backup\n", "backup"},
+		{"the branch's push remote", "backup\norigin\n", "backup", "", "backup"},
+		{"the remotes' push default", "backup\norigin\n", "", "backup", "backup"},
 	} {
 		fake := runnertest.New(t)
 		s := &sequence{fake: fake}
 		s.expect(call{args: git("remote")}).Prints(c.remotes)
 		s.expect(call{args: gitDirOf}).Prints(t.TempDir() + "\n")
 		s.expect(call{args: wholeStatus})
-		s.expect(call{args: fetchIt})
-		s.expect(call{args: branchOf}).Prints("refs/heads/main\n")
-		s.expect(call{args: upstreamOf}).Prints("\x00\n")
-		names(s.expect(call{args: pushRemoteOf}), strings.TrimSpace(c.pushRemote))
-		if c.pushRemote == "" {
-			names(s.expect(call{args: pushDefault}), strings.TrimSpace(c.pushDefault))
-		}
+		s.tracks("\x00\n", c.pushRemote, c.pushDefault)
+		s.expect(call{args: git("fetch", "--prune", "--quiet", c.to)})
 		s.expect(call{args: git("rev-parse", "--verify", "--quiet", "refs/remotes/"+c.to+"/main")}).Exits(1)
 		s.expect(call{args: git("push", "--quiet", "-u", c.to, "HEAD")})
 		if err := push(t, fake); err != nil {
 			t.Errorf("Push(), no upstream, %s = %v", c.name, err)
 		}
 		checkCalls(t, "no upstream, "+c.name, fake, "", s.want)
+	}
+}
+
+// A branch set to be pushed to another remote than its upstream's, as in a
+// triangular workflow, brings in from its upstream's remote, and is pushed
+// with git push, which sends it to the other.
+func TestPushToAnotherRemoteThanItsUpstreams(t *testing.T) {
+	fake := runnertest.New(t)
+	s := &sequence{fake: fake}
+	s.expect(call{args: git("remote")}).Prints("backup\norigin\n")
+	s.expect(call{args: gitDirOf}).Prints(t.TempDir() + "\n")
+	s.expect(call{args: wholeStatus})
+	s.tracks(tracksOrigin, "", "backup")
+	s.expect(call{args: fetchIt})
+	s.expect(call{args: upstreamAt}).Prints(upstream + "\n")
+	s.expect(call{args: behindOf}).Prints("0\n")
+	s.expect(call{args: pushIt})
+	if err := push(t, fake); err != nil {
+		t.Errorf("Push() = %v", err)
+	}
+	checkCalls(t, "pushed to another remote", fake, "", s.want)
+}
+
+// PushURLs are where Push pushes, as git push has them: the push URLs of
+// the remote the branch is pushed to, its upstream's or the one set; an
+// error when that isn't set, ErrNoRemote without a remote.
+func TestPushURLs(t *testing.T) {
+	const private, public = "git@github.com:someone/prefs.git", "git@github.com:someone/public.git"
+	for _, c := range []struct {
+		name, remotes, upstream, pushDefault, to, urls string
+		want                                           []string
+		err                                            string
+	}{
+		{"the upstream's remote", "origin\n", tracksOrigin, "", "origin", private + "\n", []string{private}, ""},
+		{"the remote set, two push URLs", "backup\norigin\n", tracksOrigin, "backup", "backup", private + "\n" + public + "\n", []string{private, public}, ""},
+		{"no upstream, nor a remote set", "backup\nupstream\n", "\x00\n", "", "", "", nil, "main has no upstream, and which remote it's pushed to isn't set"},
+	} {
+		fake := runnertest.New(t)
+		s := &sequence{fake: fake}
+		s.expect(call{args: git("remote")}).Prints(c.remotes)
+		s.tracks(c.upstream, "", c.pushDefault)
+		if c.to != "" {
+			s.expect(call{args: git("remote", "get-url", "--push", "--all", c.to)}).Prints(c.urls)
+		}
+		urls, err := gitrepo.Repo{Dir: dir, Run: fake}.PushURLs(context.Background())
+		if !slices.Equal(urls, c.want) || (err == nil) != (c.err == "") || err != nil && !strings.HasPrefix(err.Error(), c.err) {
+			t.Errorf("%s: PushURLs() = %q, %v; want %q, %q", c.name, urls, err, c.want, c.err)
+		}
+		checkCalls(t, c.name, fake, "", s.want)
+	}
+
+	fake := runnertest.New(t)
+	fake.On("git", git("remote")...)
+	if _, err := (gitrepo.Repo{Dir: dir, Run: fake}).PushURLs(context.Background()); !errors.Is(err, gitrepo.ErrNoRemote) {
+		t.Errorf("PushURLs(), no remote = %v, want ErrNoRemote", err)
 	}
 }
 
@@ -625,11 +692,8 @@ func TestPushFollowsTheRemotesBranch(t *testing.T) {
 	s.expect(call{args: git("remote")}).Prints("origin\n")
 	s.expect(call{args: gitDirOf}).Prints(t.TempDir() + "\n")
 	s.expect(call{args: wholeStatus})
+	s.tracks("\x00\n", "", "")
 	s.expect(call{args: fetchIt})
-	s.expect(call{args: branchOf}).Prints("refs/heads/main\n")
-	s.expect(call{args: upstreamOf}).Prints("\x00\n")
-	s.expect(call{args: pushRemoteOf}).Exits(1)
-	s.expect(call{args: pushDefault}).Exits(1)
 	s.expect(call{args: upstreamAt}).Prints(upstream + "\n")
 	s.expect(call{args: git("branch", "--quiet", "--set-upstream-to=refs/remotes/origin/main")})
 	s.expect(call{args: behindOf}).Prints("1\n")
@@ -642,27 +706,19 @@ func TestPushFollowsTheRemotesBranch(t *testing.T) {
 	checkCalls(t, "the remote's branch there", fake, "", s.want)
 }
 
-// Push refuses, before anything's brought in, pushing nothing: an upstream
-// gone from a remote that has other branches, as when it's renamed or
-// deleted there, which pushing would make anew; and a branch with no
+// Push refuses, pushing nothing: an upstream gone from a remote that has
+// other branches, as when it's renamed or deleted there, which pushing
+// would make anew; and, before anything's brought in, a branch with no
 // upstream, several remotes and none set to push to. Holding says so too.
 // What git says is what real git does.
 func TestPushRefusesWithNowhereToGo(t *testing.T) {
-	gone := func(s *sequence) {
-		s.expect(call{args: upstreamAt}).Exits(1)
-		s.expect(call{args: branchesOf}).Prints("refs/remotes/origin/HEAD\nrefs/remotes/origin/trunk\n")
-	}
-	unset := func(s *sequence) {
-		s.expect(call{args: pushRemoteOf}).Exits(1)
-		s.expect(call{args: pushDefault}).Exits(1)
-	}
 	for _, c := range []struct {
 		name, remotes, upstream string
-		after                   func(*sequence)
+		gone                    bool
 		want                    string
 	}{
-		{"the upstream gone", "origin\n", tracksOrigin, gone, "main's upstream, origin/main, is gone from origin, as when it's renamed or deleted there, so nothing was pushed: git branch --set-upstream-to=<remote>/<branch> follows the one it's become"},
-		{"no remote set", "backup\nupstream\n", "\x00\n", unset, "main has no upstream, and which remote it's pushed to isn't set, so nothing was pushed: git config remote.pushDefault <remote> sets it"},
+		{"the upstream gone", "origin\n", tracksOrigin, true, "main's upstream, origin/main, is gone from origin, as when it's renamed or deleted there, so nothing was pushed: git branch --set-upstream-to=<remote>/<branch> follows the one it's become"},
+		{"no remote set", "backup\nupstream\n", "\x00\n", false, "main has no upstream, and which remote it's pushed to isn't set, so nothing was pushed: git config remote.pushDefault <remote> sets it"},
 	} {
 		for _, holding := range []bool{false, true} {
 			fake := runnertest.New(t)
@@ -674,12 +730,15 @@ func TestPushRefusesWithNowhereToGo(t *testing.T) {
 			s.expect(call{args: wholeStatus})
 			if holding {
 				s.expect(call{args: git("remote")}).Prints(c.remotes)
-			} else {
-				s.expect(call{args: fetchIt})
 			}
-			s.expect(call{args: branchOf}).Prints("refs/heads/main\n")
-			s.expect(call{args: upstreamOf}).Prints(c.upstream)
-			c.after(s)
+			s.tracks(c.upstream, "", "")
+			if c.gone {
+				if !holding {
+					s.expect(call{args: fetchIt})
+				}
+				s.expect(call{args: upstreamAt}).Exits(1)
+				s.expect(call{args: branchesOf}).Prints("refs/remotes/origin/HEAD\nrefs/remotes/origin/trunk\n")
+			}
 			repo := gitrepo.Repo{Dir: dir, Run: fake}
 			check := repo.Push
 			if holding {
@@ -714,8 +773,7 @@ func TestHolding(t *testing.T) {
 		s.expect(call{args: gitDirOf}).Prints(t.TempDir() + "\n")
 		s.expect(call{args: wholeStatus}).Prints(status)
 		s.expect(call{args: git("remote")}).Prints("origin\n")
-		s.expect(call{args: branchOf}).Prints("refs/heads/main\n")
-		s.expect(call{args: upstreamOf}).Prints(tracksOrigin)
+		s.tracks(tracksOrigin, "", "")
 		s.expect(call{args: upstreamAt}).Prints(upstream + "\n")
 		s.expect(call{args: behindOf}).Prints(behind + "\n")
 		return s
@@ -749,41 +807,36 @@ func TestHolding(t *testing.T) {
 }
 
 // Waiting is when each commit waiting to be pushed was made, and Unpushed
-// how many: those the upstream hasn't; with it set and not there, or none
-// set, those on none of the remote's branches; on none of any remote's,
-// when which isn't set; none without a remote. What git prints is what
-// real git does.
+// how many: those the branch Push pushes to hasn't, the upstream, or, when
+// another remote is set to be pushed to, the same branch of that; with it
+// not there, or no upstream set, those on none of that remote's branches;
+// on none of any remote's, when which isn't set; none without a remote.
+// What git prints is what real git does.
 func TestWaiting(t *testing.T) {
+	const backupAt = "refs/remotes/backup/main"
 	at := time.Unix(1792552092, 0)
 	for _, c := range []struct {
-		name, remotes string
-		tracks        func(*sequence)
-		log           []string
+		name, remotes, upstream, pushDefault string
+		// pushedTo is the remote-tracking ref of the branch it's pushed
+		// to, and there whether it is.
+		pushedTo string
+		there    bool
+		log      []string
 	}{
-		{"the upstream there", "origin\n", func(s *sequence) {
-			s.expect(call{args: upstreamOf}).Prints(tracksOrigin)
-			s.expect(call{args: upstreamAt}).Prints(upstream + "\n")
-		}, []string{"refs/remotes/origin/main..HEAD"}},
-		{"the upstream not there", "origin\n", func(s *sequence) {
-			s.expect(call{args: upstreamOf}).Prints(tracksOrigin)
-			s.expect(call{args: upstreamAt}).Exits(1)
-		}, []string{"HEAD", "--not", "--remotes=origin"}},
-		{"no upstream", "origin\n", func(s *sequence) {
-			s.expect(call{args: upstreamOf}).Prints("\x00\n")
-			s.expect(call{args: pushRemoteOf}).Exits(1)
-			s.expect(call{args: pushDefault}).Exits(1)
-		}, []string{"HEAD", "--not", "--remotes=origin"}},
-		{"no upstream, nor a remote set", "backup\nupstream\n", func(s *sequence) {
-			s.expect(call{args: upstreamOf}).Prints("\x00\n")
-			s.expect(call{args: pushRemoteOf}).Exits(1)
-			s.expect(call{args: pushDefault}).Exits(1)
-		}, []string{"HEAD", "--not", "--remotes"}},
+		{"the upstream there", "origin\n", tracksOrigin, "", upstreamRef, true, []string{upstreamRef + "..HEAD"}},
+		{"the upstream not there", "origin\n", tracksOrigin, "", upstreamRef, false, []string{"HEAD", "--not", "--remotes=origin"}},
+		{"pushed to another remote, its branch there", "backup\norigin\n", tracksOrigin, "backup", backupAt, true, []string{backupAt + "..HEAD"}},
+		{"pushed to another remote, its branch not there", "backup\norigin\n", tracksOrigin, "backup", backupAt, false, []string{"HEAD", "--not", "--remotes=backup"}},
+		{"no upstream", "origin\n", "\x00\n", "", upstreamRef, false, []string{"HEAD", "--not", "--remotes=origin"}},
+		{"no upstream, nor a remote set", "backup\nupstream\n", "\x00\n", "", "", false, []string{"HEAD", "--not", "--remotes"}},
 	} {
 		fake := runnertest.New(t)
 		s := &sequence{fake: fake}
 		s.expect(call{args: git("remote")}).Prints(c.remotes)
-		s.expect(call{args: branchOf}).Prints("refs/heads/main\n")
-		c.tracks(s)
+		s.tracks(c.upstream, "", c.pushDefault)
+		if c.pushedTo != "" {
+			names(s.expect(call{args: git("rev-parse", "--verify", "--quiet", c.pushedTo)}), map[bool]string{true: upstream}[c.there])
+		}
 		s.expect(call{args: git(append([]string{"log", "--format=%ct"}, c.log...)...)}).Prints("1792552092\n1792552000\n")
 		repo := gitrepo.Repo{Dir: dir, Run: fake}
 		if made, err := repo.Waiting(context.Background()); err != nil || !slices.Equal(made, []time.Time{at, time.Unix(1792552000, 0)}) {
@@ -806,6 +859,8 @@ func TestWaiting(t *testing.T) {
 	fake.On("git", git("remote")...).Prints("origin\n")
 	fake.On("git", branchOf...).Prints("refs/heads/main\n")
 	fake.On("git", upstreamOf...).Prints(tracksOrigin)
+	fake.On("git", pushRemoteOf...).Exits(1)
+	fake.On("git", pushDefault...).Exits(1)
 	fake.On("git", upstreamAt...).Prints(upstream + "\n")
 	fake.On("git", git("log", "--format=%ct", "refs/remotes/origin/main..HEAD")...).Prints("1792552092\n")
 	if n := (gitrepo.Repo{Dir: dir, Run: fake}).Unpushed(context.Background()); n != 1 {

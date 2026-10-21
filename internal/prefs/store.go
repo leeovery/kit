@@ -67,19 +67,25 @@ func (p *Prefs) repo() gitrepo.Repo {
 	return gitrepo.Repo{Dir: p.Clone, Run: p.Run, Sleep: p.Sleep}
 }
 
-// push sends the store's commits to its remote, only when that's private
-// on GitHub (or not on GitHub at all): why it didn't, or "" once pushed.
+// push sends the store's commits to its remote, only when every URL Push
+// pushes to is private on GitHub, or not on GitHub at all: why it didn't,
+// or "" once pushed.
 func (p *Prefs) push(ctx context.Context, repo gitrepo.Repo) string {
-	res, err := p.git(ctx, "remote", "get-url", "origin")
-	if err != nil {
-		return "no remote to push to"
-	}
-	name, visibility, err := gitrepo.GitHubVisibility(ctx, p.Run, string(res.Stdout))
+	urls, err := repo.PushURLs(ctx)
 	switch {
+	case errors.Is(err, gitrepo.ErrNoRemote):
+		return "no remote to push to"
 	case err != nil:
 		return err.Error()
-	case name != "" && visibility != "private":
-		return fmt.Sprintf("%s is %s on GitHub: kit pushes apps' settings only to a private repository (gh repo edit %s --visibility private --accept-visibility-change-consequences)", name, visibility, name)
+	}
+	for _, url := range urls {
+		name, visibility, err := gitrepo.GitHubVisibility(ctx, p.Run, url)
+		switch {
+		case err != nil:
+			return err.Error()
+		case name != "" && visibility != "private":
+			return fmt.Sprintf("%s is %s on GitHub: kit pushes apps' settings only to a private repository (gh repo edit %s --visibility private --accept-visibility-change-consequences)", name, visibility, name)
+		}
 	}
 	if err := repo.Push(ctx); err != nil {
 		return err.Error()

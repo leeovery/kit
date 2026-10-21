@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"io"
 	"os"
@@ -275,7 +277,7 @@ func (w *world) expectCommit(t *testing.T, c commit, checks ...func()) {
 	w.fake.On("git", git(slices.Concat([]string{"--literal-pathspecs", "status", "--porcelain", "-z", "--untracked-files=all", "--no-renames", "--"}, c.paths)...)...).Prints(c.status).Does(asked)
 	w.fake.On("git", git("rev-parse", "--absolute-git-dir")...).Prints(gitDir + "\n")
 	if c.left {
-		w.leavesIndex(t, dir, gitDir)
+		w.leavesIndex(t, gitDir)
 	}
 	// The commits HEAD's at as kit tries, each moved off by another git
 	// when moved, the last where HEAD's left.
@@ -322,7 +324,14 @@ func (w *world) expectCommit(t *testing.T, c commit, checks ...func()) {
 		index = ""
 	}
 	t.Cleanup(func() {
-		entries, _ := os.ReadDir(gitDir)
+		var entries []string
+		dir, _ := os.ReadDir(gitDir)
+		for _, e := range dir {
+			// kit's lock on committing, whose file stays.
+			if e.Name() != "kit-commit.lock" {
+				entries = append(entries, e.Name())
+			}
+		}
 		data, _ := os.ReadFile(filepath.Join(gitDir, "index"))
 		switch {
 		case committed.Load() == c.moved:
@@ -338,22 +347,18 @@ func (w *world) expectCommit(t *testing.T, c commit, checks ...func()) {
 // leftIndex is what the index a run of kit's left holds.
 const leftIndex = "the index a run of kit's left"
 
-// leavesIndex leaves in gitDir, the git folder of kit-config at dir, git's
-// lock holding the index a run of kit's left, stopped a minute ago once
-// HEAD had taken its commit of laptop/declarations, and scripts git's
-// answers about it, as real git gives them: HEAD's last move kit's, its
-// commit's file as committed in the lock, but not in the user's index.
-func (w *world) leavesIndex(t *testing.T, dir, gitDir string) {
+// leavesIndex leaves in gitDir, a git folder of kit-config's, git's lock
+// holding the index a run of kit's left, stopped once HEAD had taken its
+// commit, head, and the run's mark: that commit, and the lock's hash.
+func (w *world) leavesIndex(t *testing.T, gitDir string) {
 	t.Helper()
-	lock := filepath.Join(gitDir, "index.lock")
-	stopped := time.Now().Add(-time.Minute)
-	if err := errors.Join(os.WriteFile(lock, []byte(leftIndex), 0o644), os.Chtimes(lock, stopped, stopped)); err != nil {
+	sum := sha256.Sum256([]byte(leftIndex))
+	if err := errors.Join(
+		os.WriteFile(filepath.Join(gitDir, "index.lock"), []byte(leftIndex), 0o644),
+		os.WriteFile(filepath.Join(gitDir, "kit-index.made"), []byte(head+" "+hex.EncodeToString(sum[:])+"\n"), 0o600),
+	); err != nil {
 		t.Fatal(err)
 	}
-	git := func(args ...string) []string { return append([]string{"-C", dir}, args...) }
-	w.fake.On("git", git("log", "--walk-reflogs", "-1", "--no-show-signature", "--format=%gs", "HEAD")...).Prints("kit: kit brew add jq (laptop)\n")
-	w.fake.On("git", git("diff-tree", "-r", "--root", "--no-commit-id", "--name-only", "-z", "--no-renames", "HEAD")...).Prints("laptop/declarations\x00")
-	w.fake.On("git", git("diff-index", "--cached", "--name-only", "-z", "--no-renames", "HEAD")...).Then().Prints("laptop/declarations\x00")
 }
 
 // waiting scripts git's answers as kit asks which of kit-config's commits
@@ -371,13 +376,15 @@ func (w *world) waiting(times string) {
 
 // tracks scripts git's answers as kit asks how kit-config's branch stands
 // with its remote, as real git gives them: main, its upstream origin's
-// main, there.
+// main, there, and no other remote set to push to.
 func (w *world) tracks() {
 	git := func(args ...string) []string {
 		return append([]string{"-C", filepath.Join(w.home, ".config", "kit")}, args...)
 	}
 	w.fake.On("git", git("symbolic-ref", "-q", "HEAD")...).Prints("refs/heads/main\n")
 	w.fake.On("git", git("for-each-ref", "--format=%(upstream)%00%(upstream:remotename)", "refs/heads/main")...).Prints("refs/remotes/origin/main\x00origin\n")
+	w.fake.On("git", git("config", "--get", "branch.main.pushRemote")...).Exits(1)
+	w.fake.On("git", git("config", "--get", "remote.pushDefault")...).Exits(1)
 	w.fake.On("git", git("rev-parse", "--verify", "--quiet", "refs/remotes/origin/main")...).Prints(head + "\n")
 }
 
@@ -393,8 +400,8 @@ func (w *world) expectPush(t *testing.T, gitDir string) {
 	if !w.edited {
 		w.fake.On("git", git("--literal-pathspecs", "status", "--porcelain", "-z", "--untracked-files=all", "--no-renames", "--")...)
 	}
-	w.fake.On("git", git("fetch", "--prune", "--quiet")...)
 	w.tracks()
+	w.fake.On("git", git("fetch", "--prune", "--quiet", "origin")...)
 	w.fake.On("git", git("rev-list", "--count", "HEAD..refs/remotes/origin/main")...).Prints("0\n")
 	w.fake.On("git", git("push", "--quiet")...)
 }

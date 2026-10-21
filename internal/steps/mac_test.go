@@ -153,11 +153,14 @@ func TestConfigSync(t *testing.T) {
 	const head = "0e0bf17a399109574ffb00e33300280a33f81ab7"
 	log := git("log", "--format=%ct", "refs/remotes/origin/main..HEAD")
 	// tracking scripts the branch, main, as git says it stands with its
-	// remote, origin: its upstream origin's main, there.
+	// remote, origin: its upstream origin's main, there, and no other
+	// remote set to push to.
 	tracking := func(fake *runnertest.Fake) {
 		fake.On("git", git("remote")...).Prints("origin\n")
 		fake.On("git", git("symbolic-ref", "-q", "HEAD")...).Prints("refs/heads/main\n")
 		fake.On("git", git("for-each-ref", "--format=%(upstream)%00%(upstream:remotename)", "refs/heads/main")...).Prints("refs/remotes/origin/main\x00origin\n")
+		fake.On("git", git("config", "--get", "branch.main.pushRemote")...).Exits(1)
+		fake.On("git", git("config", "--get", "remote.pushDefault")...).Exits(1)
 		fake.On("git", git("rev-parse", "--verify", "--quiet", "refs/remotes/origin/main")...).Prints(head + "\n")
 	}
 	// waiting scripts the commits waiting, as times, newest first as git log
