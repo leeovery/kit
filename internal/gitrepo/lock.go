@@ -137,8 +137,8 @@ type indexLock struct {
 	done   bool
 	// unlocked, when set, is called as kit lets go.
 	unlocked func()
-	// fsync, when set, syncs a file to the disk in (*os.File).Sync's
-	// place.
+	// fsync, when set, syncs the git folder to the disk in
+	// (*os.File).Sync's place (syncFolder).
 	fsync func(*os.File) error
 }
 

@@ -37,7 +37,8 @@ type Repo struct {
 	// statfs, when set, says what a path's filesystem is in unix.Statfs's
 	// place.
 	statfs func(path string, fs *unix.Statfs_t) error
-	// fsync, when set, syncs a file to the disk in (*os.File).Sync's place.
+	// fsync, when set, syncs the git folder to the disk, once kit's mark is
+	// renamed into it, in (*os.File).Sync's place.
 	fsync func(*os.File) error
 	// seen, when set, is what gh said of each repository's visibility, by
 	// its owner/name (Remembering).

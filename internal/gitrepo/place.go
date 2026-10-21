@@ -1,7 +1,6 @@
 package gitrepo
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -90,16 +89,6 @@ var syncRoots = []syncRoot{
 	{"Desktop", "may sync to iCloud"},
 	{"Documents", "may sync to iCloud"},
 }
-
-// writtenThrough are the folders in a git folder git writes all through:
-// objects, refs and their logs, and worktrees'; the rest it writes at the
-// top, as packed-refs, HEAD and gc's files. unwritten are those kit leaves
-// out, the repository's own: hooks, which a push or fetch never writes,
-// and info, which it writes only by auto-gc (info/refs).
-var (
-	writtenThrough = []string{"objects", "refs", "logs", "worktrees"}
-	unwritten      = []string{"hooks", "info"}
-)
 
 // repoSuffixes are what git adds to a local path, in turn, to find the
 // repository at the other end of a push or fetch (enter_repo): the first
@@ -254,9 +243,9 @@ func read(remote string) (a address, why string) {
 // onThisMac is the place of path, a local path, the repository's folder's
 // unless it's absolute, git going way to the remote called remote in env:
 // this Mac's when git runs its own program at the other end, not one the
-// remote sets (gitsOwn), and every place git writes the repository it
-// finds there (localRepo, written) stays on the Mac (leaves); else
-// unproven, saying why.
+// remote sets (gitsOwn), and the repository it finds there (localRepo)
+// holds no link that can lead git elsewhere (unlinked), and its folders
+// stay on the Mac (leaves); else unproven, saying why.
 func (r Repo) onThisMac(ctx context.Context, remote string, way Way, path string, env []string) (Place, error) {
 	if r.Home == "" {
 		return Place{}, errors.New("kit doesn't know the home folder, to tell a path that syncs off this Mac")
@@ -273,14 +262,14 @@ func (r Repo) onThisMac(ctx context.Context, remote string, way Way, path string
 	if why != "" {
 		return unproven("%s", why)
 	}
-	written, err := written(gitDirs, r.Home)
-	if why, ok := errors.AsType[unprovable](err); ok {
-		return unproven("%s", why)
-	}
+	folders, why, err := unlinked(gitDirs)
 	if err != nil {
 		return Place{}, fmt.Errorf("can't tell where git writes %s: %w", path, err)
 	}
-	for _, p := range written {
+	if why != "" {
+		return unproven("%s", why)
+	}
+	for _, p := range folders {
 		if why, err := r.leaves(p); err != nil || why != "" {
 			return Place{Unproven: why}, err
 		}
@@ -428,166 +417,50 @@ func searchable(path string) bool {
 	return unix.Access(path, unix.X_OK) == nil
 }
 
-// unprovable is why kit can't tell where git writes, as its walk of the
-// repository finds (written): the place unproven, never the check failing.
-type unprovable string
-
-func (u unprovable) Error() string { return string(u) }
-
-// walk is a walk of where git writes in a repository's git folders
-// (written): the home and the git folder it's in, resolved, to tell a
-// folder too wide to walk (tooWide), and the folders it's walked (seen).
-type walk struct {
-	home, gitDir string
-	seen         map[string]bool
-}
-
-// written is every place git writes in gitDirs, git folders, resolved,
-// home the home folder: each folder, and in it, where each entry at its top
-// leads (entry). A walk that can't tell is unprovable.
-func written(gitDirs []string, home string) ([]string, error) {
-	if resolved, err := filepath.EvalSymlinks(home); err == nil {
-		home = resolved
-	}
-	w := walk{home: home, seen: map[string]bool{}}
-	var all []string
+// unlinked is gitDirs, git folders, resolved, as git reaches them, once
+// each; why is why kit can't prove the repository on this Mac: a link in
+// one (linkIn), as git writes through a link wherever it leads; "" for
+// none.
+func unlinked(gitDirs []string) (folders []string, why string, err error) {
 	for _, gitDir := range gitDirs {
 		dir, err := filepath.EvalSymlinks(gitDir)
 		switch {
 		case err != nil:
-			return nil, err
-		case w.seen[dir]:
+			return nil, "", err
+		case slices.Contains(folders, dir):
 			continue
 		}
-		w.seen[dir], w.gitDir = true, dir
-		all = append(all, dir)
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			return nil, err
-		}
-		for _, e := range entries {
-			found, err := w.entry(dir+"/"+e.Name(), e)
-			if err != nil {
-				return nil, err
-			}
-			all = append(all, found...)
+		folders = append(folders, dir)
+		if why, err := linkIn(dir); err != nil || why != "" {
+			return nil, why, err
 		}
 	}
-	return all, nil
+	return folders, "", nil
 }
 
-// entry is where git writes through e, at path, at the top of a git
-// folder: everywhere in one of writtenThrough (throughout); where a link
-// leads (reached), never in it, as git writes there through it; nothing
-// more for the unwritten, or a file or folder of the git folder's own.
-func (w walk) entry(path string, e fs.DirEntry) ([]string, error) {
-	switch {
-	case slices.Contains(unwritten, e.Name()):
-		return nil, nil
-	case slices.Contains(writtenThrough, e.Name()):
-		return w.throughout(path)
-	case e.Type()&fs.ModeSymlink == 0:
-		return nil, nil
-	}
-	place, _, err := reached(path)
-	if place == "" {
-		return nil, err
-	}
-	return []string{place}, err
-}
-
-// throughout is every place under the folder at path git writes, resolved:
-// the folder, and where every link in it leads (reached), and the places
-// under those, once each, by seen. A link that leads nowhere is its place
-// alone, never walked, nor seen, so a link that leads there yet is; a
-// folder too wide to walk (tooWide) is unprovable.
-func (w walk) throughout(path string) ([]string, error) {
-	var all []string
-	for next := []string{path}; len(next) > 0; next = next[1:] {
-		place, there, err := reached(next[0])
+// linkIn is why the git folder dir, resolved, can lead git elsewhere: the
+// first link in it, dangling or not, as WalkDir finds it, never following
+// one, but in its hooks, which git never writes; or a folder in it kit
+// can't read (EACCES, EPERM), which may hold one; "" for neither.
+func linkIn(dir string) (why string, err error) {
+	err = filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
 		switch {
+		case errors.Is(err, fs.ErrPermission):
+			why = fmt.Sprintf("kit can't read %s, to tell whether anything in the repository leads elsewhere", p)
+			return fs.SkipAll
 		case err != nil:
-			return nil, err
-		case place == "":
-			continue
-		case !there:
-			all = append(all, place)
-			continue
-		case w.seen[place]:
-			continue
-		}
-		if why := w.tooWide(next[0], place); why != "" {
-			return nil, unprovable(why)
-		}
-		w.seen[place] = true
-		all = append(all, place)
-		err = filepath.WalkDir(place, func(p string, d fs.DirEntry, err error) error {
-			if err == nil && d.Type()&fs.ModeSymlink != 0 {
-				next = append(next, p)
-			}
 			return err
-		})
-		if err != nil {
-			return nil, err
+		case p == dir+"/hooks" && d.IsDir():
+			return fs.SkipDir
+		case p == dir+"/hooks":
+			return nil
+		case d.Type()&fs.ModeSymlink != 0:
+			why = p + " is a link: kit proves a repository on this Mac only when nothing in it leads elsewhere"
+			return fs.SkipAll
 		}
-	}
-	return all, nil
-}
-
-// tooWide is why kit won't walk the folder place, where link leads: one
-// holding the home's folders that sync, such as / or the home, which it
-// can't walk all of, or holding the git folder, the repository and what's
-// around it; "" for one it walks.
-func (w walk) tooWide(link, place string) string {
-	syncs := slices.ContainsFunc(syncRoots, func(root syncRoot) bool { return holds(place, w.home+"/"+root.path) })
-	switch {
-	case syncs:
-		return fmt.Sprintf("a link in %s leads to %s, which holds folders that sync", filepath.Dir(link), place)
-	case holds(place, w.gitDir):
-		return fmt.Sprintf("a link in %s leads to %s, which holds the repository itself", filepath.Dir(link), place)
-	}
-	return ""
-}
-
-// holds reports whether the folder at outer holds the path inner, or is
-// it, both resolved.
-func holds(outer, inner string) bool {
-	return outer == "/" || inner == outer || strings.HasPrefix(inner, outer+"/")
-}
-
-// reached is where git writes through path, resolved: where it leads,
-// there; or, a link that leads nowhere, the nearest folder on its way
-// there that exists, as git, writing through it, makes the file it names;
-// none, "", for a link through a file, which git can't write through. A
-// loop of links is unprovable.
-func reached(path string) (place string, there bool, err error) {
-	place, err = filepath.EvalSymlinks(path)
-	switch {
-	case err == nil:
-		return place, true, nil
-	case errors.Is(err, unix.ENOTDIR):
-		return "", false, nil
-	case !errors.Is(err, fs.ErrNotExist):
-		// Go's EvalSymlinks says a loop is too many links, in words alone;
-		// the kernel says it's a loop.
-		if _, statErr := os.Stat(path); errors.Is(statErr, unix.ELOOP) {
-			return "", false, unprovable("a loop of links in " + filepath.Dir(path))
-		}
-		return "", false, err
-	}
-	to, err := os.Readlink(path)
-	if err != nil {
-		return "", false, err
-	}
-	if !strings.HasPrefix(to, "/") {
-		to = path[:strings.LastIndex(path, "/")+1] + to
-	}
-	for {
-		to = to[:strings.LastIndex(to, "/")]
-		if place, err := filepath.EvalSymlinks(cmp.Or(to, "/")); !errors.Is(err, fs.ErrNotExist) {
-			return place, false, err
-		}
-	}
+		return nil
+	})
+	return why, err
 }
 
 // leaves is why what git writes at p, resolved, may leave this Mac: it's in
@@ -681,8 +554,8 @@ func (r Repo) sshHost(ctx context.Context, remote string, way Way, a address, en
 	if why := elsewhere(said); why != "" {
 		return "", why, nil
 	}
-	if why, err := r.hostKey(ctx, said); err != nil || why != "" {
-		return "", why, err
+	if why := hostKey(said); why != "" {
+		return "", why, nil
 	}
 	if said["controlpath"] != "" {
 		why, err = r.shared(ctx, a.host, call, said)
@@ -799,113 +672,23 @@ func elsewhere(said map[string]string) string {
 // hostKey is why kit can't trust ssh's proof of the host it reaches, as
 // said, ssh -G's answer, has it: the host's key not checked
 // (stricthostkeychecking no), checked by another name (hostkeyalias),
-// against keys a command gives (knownhostscommand), or taken from DNS
-// (verifyhostkeydns yes), which ssh trusts before its files; or a key
-// taken on first sight (stricthostkeychecking accept-new) for a host whose
-// key ssh doesn't know yet (keyKnown), or where kit can't tell ssh's files
-// of known hosts apart (knownHostsFiles); "" with none.
-func (r Repo) hostKey(ctx context.Context, said map[string]string) (string, error) {
+// against keys a command gives (knownhostscommand), taken from DNS
+// (verifyhostkeydns yes), which ssh trusts before its files, or trusted on
+// first sight (stricthostkeychecking accept-new); "" with none.
+func hostKey(said map[string]string) string {
 	switch {
 	case said["stricthostkeychecking"] == "false":
-		return "ssh's config doesn't check the host's key (stricthostkeychecking), so another host can pass for it", nil
+		return "ssh's config doesn't check the host's key (stricthostkeychecking), so another host can pass for it"
+	case said["stricthostkeychecking"] == "accept-new":
+		return "ssh's config trusts a host's key on first sight (stricthostkeychecking accept-new), so another host can pass for it"
 	case said["hostkeyalias"] != "":
-		return "ssh's config checks the host's key by another name (hostkeyalias), so another host can pass for it", nil
+		return "ssh's config checks the host's key by another name (hostkeyalias), so another host can pass for it"
 	case said["knownhostscommand"] != "":
-		return "ssh's config takes the keys it knows from a command (knownhostscommand), which can give any", nil
+		return "ssh's config takes the keys it knows from a command (knownhostscommand), which can give any"
 	case said["verifyhostkeydns"] == "true":
-		return "ssh's config takes the host's key from DNS (verifyhostkeydns), which another host can answer for", nil
-	case said["stricthostkeychecking"] != "accept-new":
-		return "", nil
+		return "ssh's config takes the host's key from DNS (verifyhostkeydns), which another host can answer for"
 	}
-	files, apart := knownHostsFiles(said["userknownhostsfile"], said["globalknownhostsfile"])
-	if !apart {
-		return "ssh's config takes a host's key on first sight (stricthostkeychecking accept-new), and kit can't tell ssh's known-hosts files apart, as ssh -G prints them, to see whether it knows " + said["hostname"] + "'s key yet", nil
-	}
-	known, err := r.keyKnown(ctx, said, files)
-	if err != nil || known {
-		return "", err
-	}
-	return "ssh's config takes a host's key on first sight (stricthostkeychecking accept-new), and it knows none for " + said["hostname"] + " yet, so another host can pass for it", nil
-}
-
-// keyKnown reports whether ssh knows a key of the host said, ssh -G's
-// answer, names, on its port, as ssh names a host on another port than
-// 22 ([host]:port), in any of files, ssh's files of known hosts, as
-// ssh-keygen finds it (knownIn), -l reading each key, as ssh does, so a
-// line whose key ssh can't read, which ssh skips, isn't found. A file that
-// isn't there, or doesn't hold the host, is no.
-func (r Repo) keyKnown(ctx context.Context, said map[string]string, files []string) (bool, error) {
-	name := said["hostname"]
-	if port := said["port"]; port != "22" {
-		name = "[" + name + "]:" + port
-	}
-	for _, file := range files {
-		res, err := r.Run.Run(ctx, runner.Command{Name: "ssh-keygen", Args: []string{"-l", "-F", name, "-f", file}})
-		if _, no := errors.AsType[*runner.ExitError](err); no {
-			continue
-		}
-		if err != nil {
-			return false, fmt.Errorf("can't tell whether ssh knows %s's key: %w", name, err)
-		}
-		if knownIn(string(res.Stdout)) {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
-// knownHostsFiles is the files of known hosts in lists, as ssh -G prints
-// each, a space between, none alone for no file; apart is false where kit
-// can't tell them apart (tangled).
-func knownHostsFiles(lists ...string) (files []string, apart bool) {
-	for _, list := range lists {
-		if list == "none" {
-			continue
-		}
-		parts := strings.Split(list, " ")
-		if tangled(parts) {
-			return nil, false
-		}
-		files = append(files, parts...)
-	}
-	return files, true
-}
-
-// tangled reports whether kit can't tell apart the paths parts are, as
-// ssh -G prints them, unquoted, a space between: one isn't a path from /,
-// as a relative path, or a path's after its space; or some, joined by
-// spaces, name a path there is, as a path holding " /".
-func tangled(parts []string) bool {
-	for i, part := range parts {
-		if !strings.HasPrefix(part, "/") {
-			return true
-		}
-		for j := i + 2; j <= len(parts); j++ {
-			if _, err := os.Lstat(strings.Join(parts[i:j], " ")); err == nil {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// knownIn reports whether ssh-keygen -l -F's answer finds a key of the host's
-// own: a "# Host <name> found: line <n>" with nothing after, where a
-// certificate authority's (CA), which vouches for any key it signs, or a
-// key revoked (REVOKED), says so.
-func knownIn(answer string) bool {
-	for line := range strings.Lines(answer) {
-		found, ok := strings.CutPrefix(line, "# Host ")
-		if !ok {
-			continue
-		}
-		if _, at, ok := strings.Cut(found, " found: line "); ok {
-			if _, marker, _ := strings.Cut(strings.TrimSpace(at), " "); marker == "" {
-				return true
-			}
-		}
-	}
-	return false
+	return ""
 }
 
 // shared is why kit can't tell where a connection ssh shares takes it, for

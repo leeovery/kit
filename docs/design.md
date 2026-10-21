@@ -667,37 +667,36 @@ Mac's is a local path, the repository's when relative, or a `file://` URL (its p
 host ignored, as git takes them), where git runs its own program at the other end
 (`remote.<name>.receivepack` pushing, `uploadpack` fetching, unset or exactly `git-receive-pack`
 or `git-upload-pack`, or those without their dash, `git receive-pack` and `git upload-pack`: git
-runs a remote's own for a local path too) and everywhere git writes the repository it finds
-there stays on the Mac. git finds it as real git does at the other end
-of a push or fetch: the path's trailing slashes dropped, a leading `~` the `HOME` of git's
+runs a remote's own for a local path too), and the repository it finds there holds no link and
+its folders stay on the Mac. git finds it as real git does at the other end of a push or fetch:
+the path's trailing slashes dropped, a leading `~` the `HOME` of git's
 environment (another user's `~name` is refused), then the path with `/.git`, nothing,
 `.git/.git` and `.git` added in turn, the first that's a file, or a folder git takes for a
 repository (a `HEAD` of `ref:`, any of git's space (space, tab, newline or carriage return,
 never `\v` or `\f`) and a path in `refs/`, a link into `refs/`, or an object's hash,
 and `objects` and `refs` folders, a worktree's in the common folder its `commondir` names), a
 file followed to the git folder its `gitdir: ` line names, no other tried should that be none,
-the file itself no place git writes. Where git writes is the git folder and its common folder:
-all through `objects`, `refs`, `logs` and `worktrees` in each, every link there followed, and
-all through where it leads; and, of what git writes at the top (`packed-refs`, `HEAD`, `index`,
-`config`, `shallow`, `gc.log`, some by auto-gc), where each link there leads, never in it. A
-link that leads nowhere is where git, writing through it, makes the file it names: the nearest
-folder on its way there that exists, never walked, so a link that leads to that folder too still
-is; a link through a file, which git can't write through, is nowhere. A loop of links, or a link
-in those four folders to a folder kit won't walk, one holding the home's folders that sync (`/`,
-the home, its `Library`) or the repository itself, leaves it unproven. Nothing's resolved by
-name, so `..` after a link leads where the link does. Each must be on a filesystem that's local
-(`statfs`'s `MNT_LOCAL`) and
-outside the folders in the
-home whose files may leave the Mac, told by their files, so by any name: `Library/CloudStorage`
-(File Provider's cloud drives, as Dropbox's) and `Library/Mobile Documents` (iCloud Drive),
+the file itself not checked. Links on the way to the repository (the path itself, a folder above
+it) are followed, nothing resolved by name, so `..` after a link leads where the link does. Then
+two rules, and nothing more. No links: its git folder and its common folder (resolved, as git
+reaches them) hold no symbolic link anywhere, dangling or not, wherever it leads, but under
+`hooks`, which git never writes; any other is refused ("<path> is a link: kit proves a
+repository on this Mac only when nothing in it leads elsewhere"), as git writes through a link
+wherever it leads, and so is a folder in them kit can't read (`EACCES`, `EPERM`), which may hold
+one. Each folder checked by identity, once: on a filesystem that's local (`statfs`'s
+`MNT_LOCAL`) and outside the folders in the home whose files may leave the Mac, told by their
+files (`os.SameFile` up the folder's path), never by comparing names, so by any name, case or
+spelling, as `/System/Volumes/Data/Users/…` is `/Users/…`, the home's too:
+`Library/CloudStorage` (File Provider's cloud drives, as Dropbox's) and `Library/Mobile
+Documents` (iCloud Drive),
 which sync off it, and `Desktop` and `Documents`, which iCloud syncs in place when its Desktop &
 Documents is on, said as maybe syncing, never detected. The list is partial: a program such as
 Syncthing syncs any folder, which kit can't tell. What the repository there does with what it's
 given is its own, as a server's is, so kit doesn't check it: its hooks (a `post-receive` that
 mirrors it elsewhere), its config (`core.worktree`, `receive.denyCurrentBranch updateInstead`),
-a filesystem mounted inside it, its `hooks` and `info` folders, which kit doesn't look in (a
-push or fetch writes neither, though the auto-gc after a push can write `info/refs`). A
-repository is on GitHub when the host git reaches is `github.com` or `ssh.github.com`, no other
+a filesystem mounted inside it, its `hooks` folder, which kit doesn't look in, as git never
+writes it, and a file in it hard-linked to one elsewhere. A repository is on GitHub when the
+host git reaches is `github.com` or `ssh.github.com`, no other
 (no other host
 under `github.com`, as `gist.github.com`, holds one git pushes to as owner/name), in plain ASCII,
 reached over https or ssh alone: a URL's host in any case, with a full name's last dot or
@@ -713,21 +712,14 @@ second letter, as git has it; a `Match sessiontype exec` or `Match command …` 
 command elsewhere, so the check asks with it, never without. ssh's variant is git's: the
 environment's `GIT_SSH_VARIANT` over `ssh.variant`, a value git doesn't know, in its case, being
 ssh's own, and `simple` asked with the host and command alone, as git gives no other. ssh's
-proof of the host must stand: its key checked, strictly or by asking, against what ssh knows (a
-key it can't check, it refuses, or asks of a terminal), never taken from DNS unasked
-(`verifyhostkeydns yes`, which `ssh -G` prints as `true`, takes a key from an SSHFP record DNSSEC
-vouches for, before ssh's files, on the resolver's word; `ask` still asks); a key ssh takes on
-first sight (`stricthostkeychecking accept-new`, as a new Mac's first push would) only for a
-host whose own key ssh already knows, `ssh-keygen -l -F <host> -f <file>` finding a line for it
-whose key it reads, as ssh does (a line whose key ssh can't read, which ssh skips, isn't found),
-plain, hashed or a pattern, with no marker after its header (a `@cert-authority` line, marked
-`CA`, vouches for any key it signs, and a `@revoked` one, `REVOKED`, refuses its key alone, so
-ssh takes another on first sight beside either), in one of `userknownhostsfile`'s or
-`globalknownhostsfile`'s files, `[<host>]:<port>` on a port other than 22; `ssh -G` prints those
-files unquoted, a space between, so where a part isn't a path from `/` (a path holding a space,
-or a relative one), or parts joined by spaces name a path there is (one holding ` /`), kit can't
-tell them apart, and it's refused; `none` alone is no file. A `controlpath` is asked of a host
-no config means too, `kit-sentinel.invalid`, as git's call with the user and port ssh resolved:
+proof of the host must stand: its key checked, strictly or by asking (`stricthostkeychecking`
+`yes` or `ask`, the default), against what ssh knows (a key it can't check, it refuses, or asks
+of a terminal), in whatever files ssh keeps, GitHub's keys pinned in one of their own too; never
+trusted on first sight (`stricthostkeychecking accept-new`, refused outright, as which keys ssh
+takes then is more than kit can prove), nor taken from DNS unasked (`verifyhostkeydns yes`,
+which `ssh -G` prints as `true`, takes a key from an SSHFP record DNSSEC vouches for, before
+ssh's files, on the resolver's word; `ask` still asks). A `controlpath` is asked of a host no
+config means too, `kit-sentinel.invalid`, as git's call with the user and port ssh resolved:
 the same path there is one other hosts share,
 where a connection another host has open can carry git's, whatever `controlmaster` says. A path
 shared on purpose between hosts the config names, or an alias whose `HostName` is GitHub's with
@@ -745,19 +737,17 @@ with a port, which git refuses, a proxy in ssh's answer (`proxycommand` or `prox
 than `none`), a host name canonicalized (`canonicalizehostname` other than `false`, which looks
 it up anew), the host's key not checked (`stricthostkeychecking no`, which `ssh -G` prints as
 `false`), checked by another name (`hostkeyalias`) or against keys a command gives
-(`knownhostscommand`) or taken from DNS (`verifyhostkeydns yes`), a key taken on first sight for
-a host ssh doesn't know yet, or where kit can't tell ssh's files of known hosts apart, or a
-`controlpath` other hosts share; for https, `GIT_SSL_NO_VERIFY`, `GIT_SSL_CAINFO`,
-`GIT_SSL_CAPATH`, `SSL_CERT_FILE` or `SSL_CERT_DIR` set,
+(`knownhostscommand`), taken from DNS (`verifyhostkeydns yes`) or trusted on first sight
+(`stricthostkeychecking accept-new`), or a `controlpath` other hosts share; for https,
+`GIT_SSL_NO_VERIFY`, `GIT_SSL_CAINFO`, `GIT_SSL_CAPATH`, `SSL_CERT_FILE` or `SSL_CERT_DIR` set,
 or, for the URL (`git config
 --get-urlmatch`, its user kept and its password left out), `http.sslVerify` false,
 `http.sslCAInfo` or `http.sslCAPath` set, or `http.curloptResolve` other than empty; another
 host, an IP address, or one not in plain ASCII; a host kit can't read (escaped, in brackets,
 like a flag); a path on GitHub that isn't an owner's repository; a local path where git finds no
-repository, whose program at the other end the remote sets, or where git writes on a filesystem
-that isn't local, or in a folder that syncs off the Mac or may, or where kit can't tell where
-git writes (a loop of links, a link to a folder too wide to walk). With no remote it's pushed to
-or fetched from, it isn't public.
+repository, whose program at the other end the remote sets, or whose repository holds a link or
+a folder kit can't read, or a folder on a filesystem that isn't local, or in a folder that syncs
+off the Mac or may. With no remote it's pushed to or fetched from, it isn't public.
 
 Every command takes `--json` (one document), `--plain` (plain lines, as without a terminal)
 and `--verbose` (commands' output kept whole in the run's log).

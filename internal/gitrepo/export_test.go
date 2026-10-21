@@ -27,8 +27,9 @@ func WithStatfs(r Repo, f func(path string, fs *unix.Statfs_t) error) Repo {
 	return r
 }
 
-// WithFsync is r syncing a file to the disk with f, in (*os.File).Sync's
-// place, for a test to say what the filesystem does.
+// WithFsync is r syncing the git folder to the disk, once kit's mark is
+// renamed into it, with f, in (*os.File).Sync's place, for a test to say
+// what the filesystem does.
 func WithFsync(r Repo, f func(*os.File) error) Repo {
 	r.fsync = f
 	return r
