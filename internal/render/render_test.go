@@ -895,7 +895,7 @@ func TestPrettyBootstrapInTheTerminal(t *testing.T) {
 		{Name: "gpg-key", Title: "gpg-key", Area: "Steps", Waits: []string{"secret"}},
 	}
 	face.Emit(event.RunStarted{Time: at, Command: "bootstrap", Machine: "laptop", Steps: steps})
-	face.Emit(event.StepFinished{Step: "boot-github", Result: check.Result{State: check.OK, Summary: "lee · kit-config has laptop"}})
+	face.Emit(event.StepFinished{Step: "boot-github", Result: check.Result{State: check.OK, Summary: "someone · kit-config has laptop"}})
 	face.Emit(event.StepFinished{Step: "boot-access", Result: check.Result{State: check.OK, Summary: "granted to Ghostty"}})
 	face.Emit(event.StepStarted{Step: "1password", Doing: "applying"})
 	face.Emit(event.Doing{Step: "1password", Says: "not signed in", Todo: "sign in with your phone's 1Password, then turn on\nSettings › Developer › Integrate with 1Password CLI"})
@@ -934,7 +934,7 @@ func TestPrettyBootstrapShowsABootStepNotWell(t *testing.T) {
 		{Name: "boot-github", Title: "GitHub", Area: boot.AreaBooted},
 		{Name: "boot-access", Title: "Full Disk Access", Area: boot.AreaBooted},
 	}})
-	face.Emit(event.StepFinished{Step: "boot-github", Result: check.Result{State: check.OK, Summary: "lee"}})
+	face.Emit(event.StepFinished{Step: "boot-github", Result: check.Result{State: check.OK, Summary: "someone"}})
 	face.Emit(event.StepFinished{Step: "boot-access", Result: check.Result{State: check.Attention, Summary: "not granted to Ghostty"}})
 	face.Emit(event.RunFinished{Duration: time.Second, Counts: map[check.State]int{check.OK: 1, check.Attention: 1}})
 	if err := face.Close(); err != nil {
