@@ -37,6 +37,10 @@ var (
 	icon []byte
 )
 
+// compiling is how long the app's compile has: a minute or more on a slow
+// Mac, as a new one in a virtual machine.
+const compiling = 10 * time.Minute
+
 const (
 	executable = "Contents/MacOS/kit"
 	// builtFrom holds the fingerprint of the files the bundle was built
@@ -210,7 +214,7 @@ func (a *App) build(ctx context.Context) error {
 	if err := os.MkdirAll(filepath.Dir(exe), 0o755); err != nil {
 		return fmt.Errorf("make %s: %w", filepath.Dir(exe), err)
 	}
-	if _, err := a.run.Run(ctx, runner.Command{Name: "swiftc", Args: []string{"-O", "-o", exe, src}}); err != nil {
+	if _, err := a.run.Run(ctx, runner.Command{Name: "swiftc", Args: []string{"-O", "-o", exe, src}, Timeout: compiling}); err != nil {
 		return fmt.Errorf("compile %s: %w", Name, err)
 	}
 	if _, err := a.run.Run(ctx, runner.Command{Name: "codesign", Args: []string{"-s", "-", "-f", bundle}}); err != nil {
@@ -239,23 +243,29 @@ func write(path string, data []byte) error {
 // Notify posts a notification under id, replacing any posted under it
 // before: through the app, launched as macOS launches apps, else through
 // osascript, which can't replace or take one away. Once ctx is done, as
-// when it's been taken away while it waited for the app, it posts nothing.
+// when it's been taken away while it waited for the app, it posts nothing;
+// done already, it starts no build either.
 // The app's told when it was posted (--at), as clear is, as macOS can run
 // two launched one after the other in either order, and the first time
 // holds one up while it asks the person to allow them: the app does
 // nothing for one older than the last under its id.
 func (a *App) Notify(ctx context.Context, id, title, body string) {
+	if ctx.Err() != nil {
+		return
+	}
 	args := []string{"notify", "--id", id, "--title", title, "--body", body}
 	if a.activate != "" {
 		args = append(args, "--activate", a.activate)
 	}
 	at := a.stamp()
-	posted := a.Ready(ctx) && ctx.Err() == nil && a.open(ctx, append(args, "--at", at)...) == nil
-	if posted || ctx.Err() != nil {
+	if a.Ready(ctx) && ctx.Err() == nil && a.open(ctx, append(args, "--at", at)...) == nil {
 		return
 	}
 	quote := func(s string) string { return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(s) + `"` }
 	script := "display notification " + quote(body) + " with title " + quote("kit") + " subtitle " + quote(title)
+	if ctx.Err() != nil {
+		return
+	}
 	_, _ = a.run.Run(ctx, runner.Command{Name: "osascript", Args: []string{"-e", script}})
 }
 

@@ -335,14 +335,32 @@ func TestAWaitForTheBuildIsGivenUp(t *testing.T) {
 }
 
 // Taken away before it could be posted, a notification posts nothing, the
-// app ready or not.
+// app ready or not, and starts no build, nor asks whether one can be.
 func TestNotifyOnceItsContextIsDone(t *testing.T) {
 	ctx, stop := context.WithCancel(t.Context())
 	stop()
 	app, fake := built(t)
 	app.Notify(ctx, "dialog", "macOS is asking", "Answer it")
-	macapp.New(fake, t.TempDir(), terminal, clock).Notify(ctx, "dialog", "macOS is asking", "Answer it")
+	dir := filepath.Join(t.TempDir(), "kit")
+	building(t, fake, dir)
+	macapp.New(fake, dir, terminal, clock).Notify(ctx, "dialog", "macOS is asking", "Answer it")
 	if calls := fake.Calls(); len(calls) > 0 {
 		t.Errorf("ran %q, want nothing", calls)
+	}
+}
+
+// The app's compile has ten minutes, as a slow Mac's can take more than the
+// runner's usual two.
+func TestTheCompileHasTenMinutes(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "kit")
+	fake := runnertest.New(t)
+	building(t, fake, dir)
+	if !macapp.New(fake, dir, terminal, clock).Ready(t.Context()) {
+		t.Fatal("the app wasn't built")
+	}
+	for _, c := range fake.Commands() {
+		if c.Name == "swiftc" && c.Timeout != 10*time.Minute {
+			t.Errorf("swiftc's time limit = %s, want 10m", c.Timeout)
+		}
 	}
 }
