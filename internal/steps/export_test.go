@@ -9,3 +9,11 @@ func SetManualPoll(d time.Duration) (restore func()) {
 	manualPoll = d
 	return func() { manualPoll = was }
 }
+
+// NoticesSent waits till the notifications r's cards have given have gone
+// out, for a test.
+func NoticesSent(r *Raise) {
+	if q := r.queue(); q != nil {
+		q.Wait()
+	}
+}

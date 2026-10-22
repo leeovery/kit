@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -94,8 +95,9 @@ func TestApplyNotifiesThroughKitsApp(t *testing.T) {
 		{Name: "swiftc", Args: []string{"-O", "-o", exe, filepath.Join(work, "kit.swift")}},
 		{Name: "codesign", Args: []string{"-s", "-", "-f", filepath.Join(work, "kit.app")}},
 	}
-	notify := runner.Command{Name: "open", Args: []string{"-g", "-n", app, "--args", "notify", "--id", "card:sign-in:sign-in", "--title", "Sign in to the tool", "--body", "Open the tool", "--activate", "com.example.terminal"}}
-	clear := runner.Command{Name: "open", Args: []string{"-g", "-n", app, "--args", "clear", "--id", "card:sign-in:sign-in"}}
+	at := w.now.UnixNano()
+	notify := runner.Command{Name: "open", Args: []string{"-g", "-n", app, "--args", "notify", "--id", "card:sign-in:sign-in", "--title", "Sign in to the tool", "--body", "Open the tool", "--activate", "com.example.terminal", "--at", strconv.FormatInt(at, 10)}}
+	clear := runner.Command{Name: "open", Args: []string{"-g", "-n", app, "--args", "clear", "--id", "card:sign-in:sign-in", "--at", strconv.FormatInt(at+1, 10)}}
 	w.fake.On("xcode-select", "-p")
 	w.fake.On("codesign", built[2].Args...)
 	w.fake.On("swiftc", built[1].Args...).Does(func() {

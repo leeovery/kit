@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/leeovery/kit/internal/macapp"
 	"github.com/leeovery/kit/internal/plist"
@@ -16,6 +17,10 @@ import (
 )
 
 const terminal = "com.example.terminal"
+
+// clock is the time a test's app is told: its notifications and their
+// taking away are sent from 1000 on, in nanoseconds, each after the last.
+func clock() time.Time { return time.Unix(0, 1000) }
 
 // building scripts fake to build the app in dir as kit does: the command
 // line tools found, its executable compiled, and the bundle signed. It
@@ -43,11 +48,11 @@ func building(t *testing.T, fake *runnertest.Fake, dir string) []string {
 func built(t *testing.T) (app *macapp.App, fake *runnertest.Fake) {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), "kit")
-	if !macapp.New(runFor(t, dir), dir, terminal).Ready(t.Context()) {
+	if !macapp.New(runFor(t, dir), dir, terminal, clock).Ready(t.Context()) {
 		t.Fatal("the app wasn't built")
 	}
 	fake = runnertest.New(t)
-	return macapp.New(fake, dir, terminal), fake
+	return macapp.New(fake, dir, terminal, clock), fake
 }
 
 // runFor is a runner that builds the app in dir.
@@ -64,7 +69,7 @@ func TestTheAppIsBuilt(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "kit")
 	fake := runnertest.New(t)
 	want := building(t, fake, dir)
-	app := macapp.New(fake, dir, terminal)
+	app := macapp.New(fake, dir, terminal, clock)
 
 	if !app.Ready(t.Context()) {
 		t.Fatalf("Ready = false, ran %q", fake.Calls())
@@ -133,7 +138,7 @@ func TestTheAppIsRebuilt(t *testing.T) {
 			dir := filepath.Dir(app.Path())
 			fake := runnertest.New(t)
 			want := building(t, fake, dir)
-			if !macapp.New(fake, dir, terminal).Ready(t.Context()) || !reflect.DeepEqual(fake.Calls(), want) {
+			if !macapp.New(fake, dir, terminal, clock).Ready(t.Context()) || !reflect.DeepEqual(fake.Calls(), want) {
 				t.Errorf("ran %q, want it built again: %q", fake.Calls(), want)
 			}
 		})
@@ -148,7 +153,7 @@ func TestABuildIsTriedOnce(t *testing.T) {
 	building(t, fake, dir)
 	fake.On("swiftc", "-O", "-o", filepath.Join(dir, ".kit.app-build", "kit.app", "Contents", "MacOS", "kit"), filepath.Join(dir, ".kit.app-build", "kit.swift")).Exits(1)
 	fake.On("osascript", "-e", `display notification "Open it" with title "kit" subtitle "Sign in"`)
-	app := macapp.New(fake, dir, terminal)
+	app := macapp.New(fake, dir, terminal, clock)
 
 	app.Notify(t.Context(), "card:sign-in", "Sign in", "Open it")
 	app.Notify(t.Context(), "card:sign-in", "Sign in", "Open it")
@@ -174,7 +179,7 @@ func TestWithoutSwift(t *testing.T) {
 	t.Run("no swiftc", func(t *testing.T) {
 		fake := runnertest.New(t)
 		fake.On("osascript", "-e", script)
-		macapp.New(fake, t.TempDir(), terminal).Notify(t.Context(), "dialog", "macOS is asking", "Answer it in the window macOS shows")
+		macapp.New(fake, t.TempDir(), terminal, clock).Notify(t.Context(), "dialog", "macOS is asking", "Answer it in the window macOS shows")
 		if got := fake.Calls(); !reflect.DeepEqual(got, []string{"osascript -e '" + script + "'"}) {
 			t.Errorf("ran %q, want osascript alone", got)
 		}
@@ -185,7 +190,7 @@ func TestWithoutSwift(t *testing.T) {
 		fake.On("swiftc", "--version")
 		fake.On("xcode-select", "-p").Exits(2)
 		fake.On("osascript", "-e", script)
-		app := macapp.New(fake, t.TempDir(), terminal)
+		app := macapp.New(fake, t.TempDir(), terminal, clock)
 		app.Notify(t.Context(), "dialog", "macOS is asking", "Answer it in the window macOS shows")
 		app.Notify(t.Context(), "dialog", "macOS is asking", "Answer it in the window macOS shows")
 		want := []string{"xcode-select -p", "osascript -e '" + script + "'", "xcode-select -p", "osascript -e '" + script + "'"}
@@ -198,11 +203,13 @@ func TestWithoutSwift(t *testing.T) {
 // Through the app, a notification's posted by launching it as macOS
 // launches apps, a new one in the background, with its id, title and body,
 // and the app a click brings forward; clearing takes it away by its id.
+// Each says when it was sent, each after the last though the clock hasn't
+// moved, so the app keeps their order.
 func TestNotifyAndClear(t *testing.T) {
 	app, fake := built(t)
 	open := []string{"-g", "-n", app.Path(), "--args"}
-	notify := append(append([]string(nil), open...), "notify", "--id", "card:sign-in", "--title", "Sign in", "--body", "Open the tool", "--activate", terminal)
-	clear := append(append([]string(nil), open...), "clear", "--id", "card:sign-in")
+	notify := append(append([]string(nil), open...), "notify", "--id", "card:sign-in", "--title", "Sign in", "--body", "Open the tool", "--activate", terminal, "--at", "1000")
+	clear := append(append([]string(nil), open...), "clear", "--id", "card:sign-in", "--at", "1001")
 	fake.On("open", notify...)
 	fake.On("open", clear...)
 
@@ -219,8 +226,8 @@ func TestNotifyAndClear(t *testing.T) {
 func TestNotifyWithNothingToActivate(t *testing.T) {
 	app, _ := built(t)
 	fake := runnertest.New(t)
-	app = macapp.New(fake, filepath.Dir(app.Path()), "")
-	args := []string{"-g", "-n", app.Path(), "--args", "notify", "--id", "dialog", "--title", "macOS is asking", "--body", "Answer it"}
+	app = macapp.New(fake, filepath.Dir(app.Path()), "", clock)
+	args := []string{"-g", "-n", app.Path(), "--args", "notify", "--id", "dialog", "--title", "macOS is asking", "--body", "Answer it", "--at", "1000"}
 	fake.On("open", args...)
 	app.Notify(t.Context(), "dialog", "macOS is asking", "Answer it")
 	if got, want := fake.Calls(), []string{runner.Command{Name: "open", Args: args}.String()}; !reflect.DeepEqual(got, want) {
@@ -232,7 +239,7 @@ func TestNotifyWithNothingToActivate(t *testing.T) {
 // osascript.
 func TestAnAppThatWontOpen(t *testing.T) {
 	app, fake := built(t)
-	fake.On("open", "-g", "-n", app.Path(), "--args", "notify", "--id", "dialog", "--title", "macOS is asking", "--body", "Answer it", "--activate", terminal).Exits(1)
+	fake.On("open", "-g", "-n", app.Path(), "--args", "notify", "--id", "dialog", "--title", "macOS is asking", "--body", "Answer it", "--activate", terminal, "--at", "1000").Exits(1)
 	fake.On("osascript", "-e", `display notification "Answer it" with title "kit" subtitle "macOS is asking"`)
 	app.Notify(t.Context(), "dialog", "macOS is asking", "Answer it")
 	if calls := fake.Calls(); len(calls) != 2 || calls[1] != `osascript -e 'display notification "Answer it" with title "kit" subtitle "macOS is asking"'` {
@@ -244,7 +251,7 @@ func TestAnAppThatWontOpen(t *testing.T) {
 // and nothing's built to try.
 func TestClearWithoutTheApp(t *testing.T) {
 	fake := runnertest.New(t)
-	macapp.New(fake, t.TempDir(), terminal).Clear(t.Context(), "dialog")
+	macapp.New(fake, t.TempDir(), terminal, clock).Clear(t.Context(), "dialog")
 	if calls := fake.Calls(); len(calls) > 0 {
 		t.Errorf("ran %q, want nothing", calls)
 	}
@@ -255,7 +262,7 @@ func TestClearWithoutTheApp(t *testing.T) {
 func TestOsascriptQuotes(t *testing.T) {
 	fake := runnertest.New(t)
 	fake.On("osascript", "-e", `display notification "a \"b\" \\ c" with title "kit" subtitle "Sign in"`)
-	macapp.New(fake, t.TempDir(), terminal).Notify(t.Context(), "x", "Sign in", `a "b" \ c`)
+	macapp.New(fake, t.TempDir(), terminal, clock).Notify(t.Context(), "x", "Sign in", `a "b" \ c`)
 	if calls := fake.Calls(); len(calls) != 1 {
 		t.Errorf("ran %q, want osascript once", calls)
 	}
@@ -280,7 +287,7 @@ func TestPrepareBuildsAside(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	app := macapp.New(fake, dir, terminal)
+	app := macapp.New(fake, dir, terminal, clock)
 
 	app.Prepare()
 	close(release)
@@ -302,7 +309,7 @@ func TestAWaitForTheBuildIsGivenUp(t *testing.T) {
 	fake.On("swiftc", swiftcIn(dir)...).Does(func() { close(compiling) }).Hangs()
 	script := `display notification "Open it" with title "kit" subtitle "Sign in"`
 	fake.On("osascript", "-e", script)
-	app := macapp.New(fake, dir, terminal)
+	app := macapp.New(fake, dir, terminal, clock)
 	app.Prepare()
 	<-compiling
 
@@ -334,7 +341,7 @@ func TestNotifyOnceItsContextIsDone(t *testing.T) {
 	stop()
 	app, fake := built(t)
 	app.Notify(ctx, "dialog", "macOS is asking", "Answer it")
-	macapp.New(fake, t.TempDir(), terminal).Notify(ctx, "dialog", "macOS is asking", "Answer it")
+	macapp.New(fake, t.TempDir(), terminal, clock).Notify(ctx, "dialog", "macOS is asking", "Answer it")
 	if calls := fake.Calls(); len(calls) > 0 {
 		t.Errorf("ran %q, want nothing", calls)
 	}

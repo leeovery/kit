@@ -14,8 +14,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/leeovery/kit/internal/runner"
 )
@@ -66,25 +68,29 @@ type App struct {
 	// activate is the bundle identifier of the app a click on a
 	// notification brings forward: none when "".
 	activate string
+	now      func() time.Time
 	// life is what a build runs in, done once the app's closed.
 	life context.Context
 	end  context.CancelFunc
 
 	// mu guards whether the app's ready; whether a build's been tried, or
-	// the app closed; and built, closed once the build under way has
-	// ended, nil while none is.
+	// the app closed; built, closed once the build under way has ended, nil
+	// while none is; and sent, when the last notification was posted or
+	// taken away.
 	mu    sync.Mutex
 	ready bool
 	tried bool
 	built chan struct{}
+	sent  int64
 }
 
 // New returns kit.app in the data directory dir, run through run; a click
 // on one of its notifications brings forward the app whose bundle
-// identifier is activate, when it's not "".
-func New(run runner.Runner, dir, activate string) *App {
+// identifier is activate, when it's not "". now is the time, which says
+// what order the app's notifications were posted and taken away in.
+func New(run runner.Runner, dir, activate string, now func() time.Time) *App {
 	life, end := context.WithCancel(context.Background())
-	return &App{run: run, dir: dir, activate: activate, life: life, end: end}
+	return &App{run: run, dir: dir, activate: activate, now: now, life: life, end: end}
 }
 
 // Path is where the app's bundle is.
@@ -234,12 +240,17 @@ func write(path string, data []byte) error {
 // before: through the app, launched as macOS launches apps, else through
 // osascript, which can't replace or take one away. Once ctx is done, as
 // when it's been taken away while it waited for the app, it posts nothing.
+// The app's told when it was posted (--at), as clear is, as macOS can run
+// two launched one after the other in either order, and the first time
+// holds one up while it asks the person to allow them: the app does
+// nothing for one older than the last under its id.
 func (a *App) Notify(ctx context.Context, id, title, body string) {
 	args := []string{"notify", "--id", id, "--title", title, "--body", body}
 	if a.activate != "" {
 		args = append(args, "--activate", a.activate)
 	}
-	posted := a.Ready(ctx) && ctx.Err() == nil && a.open(ctx, args...) == nil
+	at := a.stamp()
+	posted := a.Ready(ctx) && ctx.Err() == nil && a.open(ctx, append(args, "--at", at)...) == nil
 	if posted || ctx.Err() != nil {
 		return
 	}
@@ -255,8 +266,17 @@ func (a *App) Clear(ctx context.Context, id string) {
 	ready := a.ready
 	a.mu.Unlock()
 	if ready {
-		_ = a.open(ctx, "clear", "--id", id)
+		_ = a.open(ctx, "clear", "--id", id, "--at", a.stamp())
 	}
+}
+
+// stamp is when a notification is posted or taken away, in nanoseconds,
+// each after the last.
+func (a *App) stamp() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.sent = max(a.now().UnixNano(), a.sent+1)
+	return strconv.FormatInt(a.sent, 10)
 }
 
 // open launches a new instance of the app, in the background, with args.

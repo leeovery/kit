@@ -51,10 +51,10 @@ func (h *held) let(t *testing.T, id string) {
 }
 
 // Notifications go out aside, in order, nothing given waiting for the one
-// going out: one taken away as it's going out has its context done, and
-// is taken away after; one taken away before it's gone out goes out with
-// its context done, so it posts nothing, then the taking away; the rest
-// go out as they were.
+// going out: one taken away as it's going out has its context done, and is
+// taken away after; one taken away before it's gone out never goes out, nor
+// does its taking away, nothing under its id having gone out since the
+// last was taken away; the rest go out as they were.
 func TestNotificationsGoOutInOrder(t *testing.T) {
 	h := newHeld()
 	q := notice.New(h)
@@ -68,10 +68,36 @@ func TestNotificationsGoOutInOrder(t *testing.T) {
 	q.Clear(t.Context(), "c")
 	h.through <- struct{}{}
 	h.let(t, "b")
-	h.let(t, "c")
 	q.Wait()
 
-	want := []string{"notify a | A | first (done)", "clear a", "notify b | B | second", "notify c | C | third (done)", "clear c"}
+	want := []string{"notify a | A | first (done)", "clear a", "notify b | B | second"}
+	if !slices.Equal(h.seen, want) {
+		t.Errorf("passed on %q, want %q", h.seen, want)
+	}
+}
+
+// A taking away goes out only once a notification has gone out under its
+// id since the last was taken away: one posted again, taken away before it
+// went out, has nothing to take away, the first taken away already.
+func TestATakingAwayGoesOutOnlyAfterANotification(t *testing.T) {
+	h := newHeld()
+	q := notice.New(h)
+	q.Clear(t.Context(), "a")
+	q.Notify(t.Context(), "a", "A", "first")
+	h.let(t, "a")
+	q.Wait()
+	q.Clear(t.Context(), "a")
+	q.Wait()
+	q.Notify(t.Context(), "b", "B", "held")
+	if got := <-h.going; got != "b" {
+		t.Fatalf("%s went out, want b", got)
+	}
+	q.Notify(t.Context(), "a", "A", "again")
+	q.Clear(t.Context(), "a")
+	h.through <- struct{}{}
+	q.Wait()
+
+	want := []string{"notify a | A | first", "clear a", "notify b | B | held"}
 	if !slices.Equal(h.seen, want) {
 		t.Errorf("passed on %q, want %q", h.seen, want)
 	}

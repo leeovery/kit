@@ -614,12 +614,12 @@ func (r *Raise) show(ctx context.Context, pl *place, c raised) {
 	}
 	card.Time, card.More = r.Now(), r.moreLocked(pl)
 	r.card, r.shown = card, pl
-	r.Sink.Emit(card)
-	r.mu.Unlock()
 	if q := r.queue(); q != nil && pl.notified == "" {
 		pl.notified = card.Item
 		q.Notify(ctx, noticeID(pl.step, card.Item), card.Title, noticeOf(card))
 	}
+	r.Sink.Emit(card)
+	r.mu.Unlock()
 	if o, ok := c.(opener); ok {
 		r.opening.Go(func() { o.open(ctx) })
 	}

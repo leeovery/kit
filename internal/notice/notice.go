@@ -18,9 +18,10 @@ type Notifier interface {
 
 // Queue passes notifications, and their taking away, to a Notifier, aside
 // and in the order it's given them, so that one is never taken away before
-// it's posted. A notification taken away before it's gone out is passed on
-// with its context done, so it posts nothing; one taken away as it's going
-// out is taken away after.
+// it's posted. A notification taken away before it's gone out never goes
+// out, nor does its taking away, unless another under its id went out
+// since the last was taken away; one taken away as it's going out has its
+// context done, and is taken away after.
 type Queue struct {
 	to Notifier
 
@@ -30,6 +31,9 @@ type Queue struct {
 	waiting []*send
 	sending *send
 	idle    chan struct{}
+	// out are the ids a notification has gone out under since the last
+	// was taken away, which only the queue's worker touches.
+	out map[string]bool
 }
 
 // send is a notification to post, or, clear, one to take away, under id.
@@ -41,7 +45,7 @@ type send struct {
 }
 
 // New returns a queue passing notifications to to.
-func New(to Notifier) *Queue { return &Queue{to: to} }
+func New(to Notifier) *Queue { return &Queue{to: to, out: map[string]bool{}} }
 
 // Notify posts a notification under id, aside: ctx's values go with it,
 // though it goes out whether or not ctx is done by then.
@@ -94,15 +98,21 @@ func (q *Queue) add(s *send) {
 	}
 }
 
-// work passes on what's waiting, in turn, till nothing is.
+// work passes on what's waiting, in turn, till nothing is: a notification
+// taken away already isn't, and a taking away is only once one's gone out.
 func (q *Queue) work() {
 	for s := q.next(); s != nil; s = q.next() {
-		if s.clear {
+		switch {
+		case s.clear && q.out[s.id]:
 			q.to.Clear(s.ctx, s.id)
-			continue
+			delete(q.out, s.id)
+		case !s.clear && s.ctx.Err() == nil:
+			q.out[s.id] = true
+			q.to.Notify(s.ctx, s.id, s.title, s.body)
 		}
-		q.to.Notify(s.ctx, s.id, s.title, s.body)
-		s.cancel()
+		if !s.clear {
+			s.cancel()
+		}
 	}
 }
 

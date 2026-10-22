@@ -189,9 +189,9 @@ func (r *run) close() error {
 // notifier is kit's app, which posts the run's notifications: one a run, a
 // click on one bringing forward the terminal kit runs in, when macOS names
 // it.
-func (r *run) notifier(getenv func(string) string) *macapp.App {
+func (r *run) notifier(getenv func(string) string, now func() time.Time) *macapp.App {
 	if r.notices == nil {
-		r.notices = macapp.New(r.run, r.dataDir, getenv("__CFBundleIdentifier"))
+		r.notices = macapp.New(r.run, r.dataDir, getenv("__CFBundleIdentifier"), now)
 	}
 	return r.notices
 }
@@ -470,7 +470,7 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 	var raise *steps.Raise
 	if slices.Contains(applies, command) && a.pretty(a.Stdout) {
 		desk := hand.New()
-		raise = &steps.Raise{Sink: sink, Now: a.Now, Notify: r.notifier(a.Getenv), Desk: desk}
+		raise = &steps.Raise{Sink: sink, Now: a.Now, Notify: r.notifier(a.Getenv, a.Now), Desk: desk}
 		r.raise = raise
 		if f, ok := face.(*render.Pretty); ok {
 			f.Hands(desk.Answer)
@@ -525,14 +525,14 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 		r.askpass = asks
 	}
 	if a.WatchDialogs && a.pretty(a.Stdout) {
-		r.held, r.unwatch = watchDialogs(a.Runner(path, env), r.notifier(a.Getenv), sink, a.Now)
+		r.held, r.unwatch = watchDialogs(a.Runner(path, env), r.notifier(a.Getenv, a.Now), sink, a.Now)
 	}
 	if asks != nil {
 		dialogs := r.held
 		r.held = func() bool { return asks.Pending() || dialogs != nil && dialogs() }
 	}
 	if raise != nil {
-		r.notifier(a.Getenv).Prepare()
+		r.notifier(a.Getenv, a.Now).Prepare()
 	}
 	return r, nil
 }

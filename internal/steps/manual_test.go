@@ -195,6 +195,8 @@ func (c *card) posted() []string {
 // emitted, the desk the person answers cards on, the programs run, and the
 // notifications posted.
 type card struct {
+	// held is whether its notifications wait to go out (heldCard).
+	held    bool
 	raise   *steps.Raise
 	sink    *events
 	desk    *hand.Desk
@@ -211,7 +213,8 @@ func newCard(t *testing.T) *card {
 }
 
 // cards waits till n cards have gone up, as the events say, a card put up
-// again among them, and returns them.
+// again among them, and returns them, their notifications gone out, unless
+// they're held.
 func (c *card) cards(t *testing.T, n int) []event.NeedsYou {
 	t.Helper()
 	for range 5000 {
@@ -224,6 +227,9 @@ func (c *card) cards(t *testing.T, n int) []event.NeedsYou {
 		}
 		c.sink.mu.Unlock()
 		if len(up) >= n {
+			if !c.held {
+				steps.NoticesSent(c.raise)
+			}
 			return up
 		}
 		time.Sleep(time.Millisecond)
@@ -1104,7 +1110,7 @@ func (h *heldNotices) Notify(ctx context.Context, id, title, body string) {
 func heldCard(t *testing.T) (*card, *heldNotices) {
 	c := newCard(t)
 	h := newHeldNotices()
-	c.notices = &h.notices
+	c.held, c.notices = true, &h.notices
 	c.raise = &steps.Raise{Sink: c.sink, Now: time.Now, Notify: h, Desk: c.desk}
 	return c, h
 }
@@ -1144,9 +1150,10 @@ func TestACardIsAnsweredWhileItsNotificationWaits(t *testing.T) {
 }
 
 // Tab moves on at once, the card up's notification still waiting to go
-// out, and space on the next card, and on the first come back: each card's
-// notifications go out after, in order, each taken away before it went
-// out.
+// out, and space on the next card, and on the first come back. The first
+// notification goes out after, taken away as it went out, so it posts
+// nothing, then is taken away; the rest, taken away before they went out,
+// never go out.
 func TestTabWhileANotificationWaits(t *testing.T) {
 	c, h := heldCard(t)
 	gate := make(chan struct{})
@@ -1174,18 +1181,9 @@ func TestTabWhileANotificationWaits(t *testing.T) {
 	over(t, ran)
 
 	close(h.through)
-	posted := c.posted()
-	for item, title := range map[string]string{"store": "Sign in to the store", "vault": "Sign in to the vault"} {
-		id := "card:" + item + ":" + item
-		notify, clear := "notify "+id+" | "+title+" | kit waits for you to do this (taken away first)", "clear "+id
-		want := []string{notify, clear}
-		if item == "vault" {
-			want = append(want, notify, clear)
-		}
-		got := slices.DeleteFunc(slices.Clone(posted), func(n string) bool { return strings.Fields(n)[1] != id })
-		if !slices.Equal(got, want) {
-			t.Errorf("%s's notifications %q, want %q", item, got, want)
-		}
+	want := []string{"notify card:vault:vault | Sign in to the vault | kit waits for you to do this (taken away first)", "clear card:vault:vault"}
+	if got := c.posted(); !slices.Equal(got, want) {
+		t.Errorf("notifications %q, want %q: the vault's first, going out as it was taken away, then taken away; the rest never going out", got, want)
 	}
 }
 

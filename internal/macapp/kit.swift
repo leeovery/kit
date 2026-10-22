@@ -3,10 +3,16 @@
 // under an id, which a later one replaces, and clear takes away. It quits
 // once it's done: it never lingers.
 //
-//   notify --id <id> --title <title> --body <body> [--activate <bundle id>]
-//   clear --id <id>
+//   notify --id <id> --title <title> --body <body> [--activate <bundle id>] [--at <ns>]
+//   clear --id <id> [--at <ns>]
 //   (no arguments)  launched by macOS for a click on a notification: brings
 //                   forward the app the notification names, then quits
+//
+// --at is when kit sent it. kit sends them in order, but macOS can run two
+// launched one after the other in either order, and the first notify holds
+// while macOS asks the person to allow them: the newest sent under an id is
+// kept, in kit's data folder, beside the app, and one older does nothing,
+// so a notification taken away before it could be posted never is.
 
 import AppKit
 import UserNotifications
@@ -29,6 +35,30 @@ func options(_ words: ArraySlice<String>) -> [String: String] {
     return found
 }
 
+// marks is where the newest sent under each id is kept.
+let marks = Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent("notices", isDirectory: true)
+
+func markFile(_ id: String) -> URL {
+    marks.appendingPathComponent(id.utf8.map { String(format: "%02x", $0) }.joined())
+}
+
+// newest is when the newest notify or clear under id was sent: 0 for none.
+func newest(_ id: String) -> Int64 {
+    guard let text = try? String(contentsOf: markFile(id), encoding: .utf8) else { return 0 }
+    return Int64(text.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
+}
+
+// mark keeps at as the newest sent under id, and reports whether it is:
+// false when a newer one was, as it's sent later.
+func mark(_ id: String, _ at: Int64) -> Bool {
+    if newest(id) > at {
+        return false
+    }
+    try? FileManager.default.createDirectory(at: marks, withIntermediateDirectories: true)
+    try? String(at).write(to: markFile(id), atomically: true, encoding: .utf8)
+    return true
+}
+
 // wait waits for a callback-style API to finish, for seconds at most.
 func wait(_ seconds: Double, _ body: (@escaping () -> Void) -> Void) {
     let done = DispatchSemaphore(value: 0)
@@ -38,6 +68,10 @@ func wait(_ seconds: Double, _ body: (@escaping () -> Void) -> Void) {
 
 func post(_ given: [String: String]) -> Int32 {
     guard let id = given["id"], let title = given["title"] else { return 64 }
+    let at = Int64(given["at"] ?? "") ?? 0
+    if at > 0 && !mark(id, at) {
+        return 0
+    }
     let center = UNUserNotificationCenter.current()
     var allowed = false
     // The first time, macOS asks the person: give them a while to answer.
@@ -48,6 +82,10 @@ func post(_ given: [String: String]) -> Int32 {
         }
     }
     guard allowed else { return 1 }
+    // Taken away while macOS asked: there's nothing to post.
+    if at > 0 && newest(id) > at {
+        return 0
+    }
     let content = UNMutableNotificationContent()
     content.title = title
     content.body = given["body"] ?? ""
@@ -68,6 +106,10 @@ func post(_ given: [String: String]) -> Int32 {
 
 func clear(_ given: [String: String]) -> Int32 {
     guard let id = given["id"] else { return 64 }
+    // One posted after it was sent stays.
+    if let at = Int64(given["at"] ?? ""), !mark(id, at) {
+        return 0
+    }
     let center = UNUserNotificationCenter.current()
     center.removeDeliveredNotifications(withIdentifiers: [id])
     center.removePendingNotificationRequests(withIdentifiers: [id])
