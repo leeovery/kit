@@ -71,8 +71,8 @@ func TestAppsSettingsChoice(t *testing.T) {
 	}
 	fake := runnertest.New(t)
 	configures(fake, clone)
-	fake.On("git", "clone", "--quiet", "git@github.com:someone/prefs.git", clone).Does(func() {
-		if err := os.MkdirAll(filepath.Join(clone, ".git"), 0o700); err != nil {
+	fake.On("git", "clone", "--quiet", "git@github.com:someone/prefs.git", clone+".cloning").Does(func() {
+		if err := os.MkdirAll(filepath.Join(clone+".cloning", ".git"), 0o700); err != nil {
 			t.Error(err)
 		}
 	})

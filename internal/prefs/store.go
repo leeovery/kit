@@ -41,14 +41,8 @@ func (p *Prefs) ensureClone(ctx context.Context) error {
 	_, err := os.Stat(filepath.Join(p.Clone, ".git"))
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
-		if p.Remote == "" {
-			return errors.New("kit.toml names no prefs_repo for apps' settings")
-		}
-		if err := os.MkdirAll(filepath.Dir(p.Clone), 0o700); err != nil {
+		if err := p.clone(ctx); err != nil {
 			return err
-		}
-		if _, err := p.Run.Run(ctx, runner.Command{Name: "git", Args: []string{"clone", "--quiet", p.Remote, p.Clone}, Timeout: cloneTimeout}); err != nil {
-			return fmt.Errorf("clone the prefs repository: %w", err)
 		}
 	case err != nil:
 		return err
@@ -57,6 +51,30 @@ func (p *Prefs) ensureClone(ctx context.Context) error {
 		if _, err := p.git(ctx, "config", kv[0], kv[1]); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// clone clones the store, aside, then puts the clone in its place whole,
+// so that one cut short, by its time limit or the run stopping, leaves none
+// that a later run takes for whole: it clones again.
+func (p *Prefs) clone(ctx context.Context) error {
+	if p.Remote == "" {
+		return errors.New("kit.toml names no prefs_repo for apps' settings")
+	}
+	if err := os.MkdirAll(filepath.Dir(p.Clone), 0o700); err != nil {
+		return err
+	}
+	aside := p.Clone + ".cloning"
+	if err := os.RemoveAll(aside); err != nil {
+		return err
+	}
+	defer func() { _ = os.RemoveAll(aside) }()
+	if _, err := p.Run.Run(ctx, runner.Command{Name: "git", Args: []string{"clone", "--quiet", p.Remote, aside}, Timeout: cloneTimeout}); err != nil {
+		return fmt.Errorf("clone the prefs repository: %w", err)
+	}
+	if err := os.Rename(aside, p.Clone); err != nil {
+		return fmt.Errorf("put the prefs repository's clone in place: %w", err)
 	}
 	return nil
 }

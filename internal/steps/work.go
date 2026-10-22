@@ -15,20 +15,23 @@ import (
 // person's answers say, in the order they came; and readying what the card
 // says. Each, once it's done, comes on out, for the card's loop, which
 // waits on none of them. Halted, as the card comes down, it starts no look
-// and readies nothing more, but does the answers it was given, and what's
-// under way finishes, never cut short, what they come to kept, should one
-// find the card done, for outcome. It ends once it's found the card done,
+// and readies nothing more, but does the answers it was given, and a look
+// or answer under way finishes, never cut short, what they come to kept,
+// should one find the card done, for outcome; readying, which can never
+// find it done, is cut short, its context (readyIn) done, as a store's
+// first clone can take minutes. It ends once it's found the card done,
 // what's left undone.
 type work struct {
-	c      raised
-	now    func() time.Time
-	after  func(time.Duration) <-chan time.Time
-	every  time.Duration
-	out    chan result
-	wake   chan struct{}
-	halted chan struct{}
-	halt   func()
-	over   chan struct{}
+	c       raised
+	now     func() time.Time
+	after   func(time.Duration) <-chan time.Time
+	every   time.Duration
+	out     chan result
+	wake    chan struct{}
+	halted  chan struct{}
+	halt    func()
+	over    chan struct{}
+	readyIn context.Context
 
 	// mu guards what's asked for: the number of the last look asked for, and
 	// whether one's still to start; the answers to do; whether to ready the
@@ -66,11 +69,13 @@ type job struct {
 // working starts c's work, aside, till it's halted, finds c done, or ctx
 // is: looking every manualPoll, as it is now.
 func (r *Raise) working(ctx context.Context, c raised) *work {
-	w := &work{c: c, now: r.Now, after: r.after, every: manualPoll, out: make(chan result), wake: make(chan struct{}, 1), halted: make(chan struct{}), over: make(chan struct{})}
+	readyIn, cut := context.WithCancel(ctx)
+	w := &work{c: c, now: r.Now, after: r.after, every: manualPoll, out: make(chan result), wake: make(chan struct{}, 1), halted: make(chan struct{}), over: make(chan struct{}), readyIn: readyIn}
 	w.halt = sync.OnceFunc(func() {
 		w.mu.Lock()
 		defer w.mu.Unlock()
 		close(w.halted)
+		cut()
 	})
 	r.aside.Go(func() { w.run(ctx) })
 	return w
@@ -150,7 +155,7 @@ func (w *work) do(ctx context.Context, j job) result {
 		done, saw, err := w.c.answer(ctx, j.key, w.now())
 		return result{answered: true, done: done, saw: saw, err: err}
 	case j.ready:
-		card := w.c.(readier).ready(ctx)
+		card := w.c.(readier).ready(w.readyIn)
 		return result{readied: &card}
 	}
 	done, saw := w.c.done(ctx)

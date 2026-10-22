@@ -319,8 +319,9 @@ it waited for, as bringing those apps' settings back; `f` starts afresh, as `kit
 start-fresh` does, saying saving's on and how many still wait to come back). Stopping there
 (`q`'s Stop, between two to-dos as well, as the one up is found done, and while kit does what a
 key says, taken even with another key waiting unread) leaves what's left to do at once, the
-card down and the list stopped, whatever kit's doing aside, and no look begins after: the one
-up done if it was, or if a look under way then, or a key taken by then, left to finish, finds it
+card down and the list stopped, whatever kit's doing aside, and no look begins after, readying
+what the card says cut short (it can never find it done, and a store's first clone cut short
+leaves nothing, the next look cloning again): the one up done if it was, or if a look under way then, or a key taken by then, left to finish, finds it
 done or does it, which the list says after, with any to-do that leaves; with the to-dos it left,
 in that order in the record, the run ending as it stands. The run stopped there, the card comes
 down and the list stops at once too. After the last, kit checks again the steps the

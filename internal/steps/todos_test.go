@@ -661,12 +661,14 @@ func TestARunStoppedWhileAKeyIsDone(t *testing.T) {
 // watched, till it's opened; then saved. Each of its parts first does what
 // the test has it do, if anything: as its check starts (checking), as r is
 // done (bringing), as the card's readied, its r saying the save's date
-// (readying), and as opening the app is settled (settling), cut short
-// should the run have stopped by the time it's done (cut).
+// (readying, given what readying runs in), and as opening the app is
+// settled (settling), cut short should the run have stopped by the time
+// it's done (cut).
 type settings struct {
-	mu                                     sync.Mutex
-	brought, opened, cut                   bool
-	checking, bringing, readying, settling func()
+	mu                           sync.Mutex
+	brought, opened, cut         bool
+	checking, bringing, settling func()
+	readying                     func(ctx context.Context)
 }
 
 func (s *settings) step() engine.Step {
@@ -690,9 +692,12 @@ func (s *settings) step() engine.Step {
 			return check.Result{State: check.OK, Summary: "saved"}
 		},
 		Choice: &engine.Choice{
-			Ready: func(_ context.Context, it check.Item) check.Item {
-				if f := s.part(func() func() { return s.readying }); f != nil {
-					f()
+			Ready: func(ctx context.Context, it check.Item) check.Item {
+				s.mu.Lock()
+				readying := s.readying
+				s.mu.Unlock()
+				if readying != nil {
+					readying(ctx)
 				}
 				if it.ToDo == nil || len(it.ToDo.Keys) == 0 {
 					return it
@@ -804,14 +809,20 @@ func TestAStopWhileAKeyIsDone(t *testing.T) {
 
 // q's Stop acts at once while kit readies what the to-do up says, as the
 // date of the last save, which takes cloning their store on a new Mac: its
-// card's up once its grace is over, saying what it can meanwhile.
+// card's up once its grace is over, saying what it can meanwhile. Stopped
+// there, readying's cut short, as it can never find the to-do done, and the
+// run ends without waiting for it.
 func TestAStopWhileTheCardIsReadied(t *testing.T) {
 	defer steps.SetManualPoll(time.Hour)()
 	c := newCard(t)
 	stopped := c.stopped()
 	s := &settings{}
-	readying, begun, through := held()
-	s.readying = readying
+	begun, cut := make(chan struct{}), make(chan struct{})
+	s.readying = func(ctx context.Context) {
+		close(begun)
+		<-ctx.Done()
+		close(cut)
+	}
 	done := endingWith(t, c, s.step())
 	within(t, begun, "the card was never readied")
 	if up := c.cardsNow(); len(up) > 0 {
@@ -824,8 +835,8 @@ func TestAStopWhileTheCardIsReadied(t *testing.T) {
 	}
 	c.answer(t, steps.ManualName, hand.Stop)
 	within(t, stopped, "the list wasn't stopped while the card was readied")
-	close(through)
 	over(t, done)
+	within(t, cut, "readying the card wasn't cut short as the person stopped")
 	if up := c.cardsNow(); len(up) != 1 {
 		t.Errorf("cards up %+v; want the one, never again once it came down", up)
 	}
@@ -838,7 +849,7 @@ func TestACardReadiedOnceUp(t *testing.T) {
 	c := newCard(t)
 	s := &settings{}
 	readying, begun, through := held()
-	s.readying = readying
+	s.readying = func(context.Context) { readying() }
 	done := endingWith(t, c, s.step())
 	within(t, begun, "the card was never readied")
 	c.waits.waiting(t, steps.DrawAfter, 1)
