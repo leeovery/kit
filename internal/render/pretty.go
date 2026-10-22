@@ -140,11 +140,13 @@ type Pretty struct {
 	// centre, till its step finishes: nil when none is. cards are every one
 	// that came up, by its step and its line, for what's left to do once
 	// the run's done; since, when each not yet done with first came up;
+	// downAt, when each of the to-dos' came down, while kit settles it;
 	// asides, those taken down for another to take their place, whose steps
 	// haven't finished.
 	card   *event.NeedsYou
 	cards  map[string]event.NeedsYou
 	since  map[string]time.Time
+	downAt map[string]time.Time
 	asides map[string]event.NeedsYou
 	// todos are the to-dos at the run's end, as they stand, once they've
 	// started: applying's screen is theirs till the run's done.
@@ -224,7 +226,7 @@ func (p *Pretty) Emit(e event.Event) {
 		p.output, p.command, p.began = map[string][]string{}, map[string]string{}, p.now()
 		p.raw, p.rawSeq = map[string][]rawLine{}, 0
 		p.cut, p.card, p.cards, p.todos = map[string]runningStep{}, nil, map[string]event.NeedsYou{}, nil
-		p.since, p.asides = map[string]time.Time{}, map[string]event.NeedsYou{}
+		p.since, p.downAt, p.asides = map[string]time.Time{}, map[string]time.Time{}, map[string]event.NeedsYou{}
 		p.log = nil
 		p.order.start(e.Steps)
 		p.preparing = ""

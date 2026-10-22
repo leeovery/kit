@@ -1,6 +1,7 @@
 package render
 
 import (
+	"cmp"
 	"fmt"
 	"slices"
 	"strings"
@@ -170,12 +171,12 @@ func (p *Pretty) upSince() time.Time { return p.since[cardID(p.card.Step, p.card
 // takeDown takes e's card down the moment it's done, or the person stopped
 // there, before its step finishes: up, or set aside and done meanwhile, the
 // log says it's done; one of the to-dos at the run's end, its list says how
-// it ended.
+// it ended, how long it took counted to now.
 func (p *Pretty) takeDown(e event.CardDown) {
 	id := cardID(e.Step, e.Item)
 	switch c, aside := p.asides[id]; {
 	case p.card != nil && cardID(p.card.Step, p.card.Item) == id && p.listing(e.Step):
-		p.card = nil
+		p.card, p.downAt[id] = nil, p.stamp(e.Time)
 	case p.card != nil && cardID(p.card.Step, p.card.Item) == id:
 		p.lower(e.Time, nil)
 	case aside:
@@ -203,7 +204,8 @@ func (p *Pretty) listing(step string) bool {
 
 // workThrough is the to-dos at the run's end as they stand now: the log
 // says each newly done, what kit saw when it has words, and how long it
-// took when it came up; one that was up and no longer is, left as the
+// took when it came up, till its card came down, however long kit took to
+// settle it after; one that was up and no longer is, left as the
 // person stopped there, that it's not done. Of one settling, it says
 // nothing till it's settled: what kit finished saying what it saw, or what
 // was under way as they stopped saying whether it's done. The card of the
@@ -228,7 +230,7 @@ func (p *Pretty) workThrough(e event.ToDos) {
 		case t.Done:
 			text := t.Title + ": done"
 			if up {
-				text += ", in " + took(at.Sub(since))
+				text += ", in " + took(cmp.Or(p.downAt[id], at).Sub(since))
 			}
 			parts := []string{look.White(text)}
 			if t.Saw != "" {
@@ -241,6 +243,7 @@ func (p *Pretty) workThrough(e event.ToDos) {
 			continue
 		}
 		delete(p.since, id)
+		delete(p.downAt, id)
 	}
 	if wasUp >= 0 && wasUp != e.Up {
 		id := cardID(e.Step, e.List[wasUp].ID)

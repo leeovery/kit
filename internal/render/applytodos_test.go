@@ -528,9 +528,9 @@ func TestStopBetweenToDos(t *testing.T) {
 
 // A to-do settling says nothing in the log till it's settled: one whose
 // card came down as the person stopped there, its look or key under way
-// left to finish, is then done, how long it took, or not done; one done
-// whose step finishes what it waited for is done once that's finished,
-// with what kit saw then. Never not done, then done.
+// left to finish, is then done, or not done; one done whose step finishes
+// what it waited for is done once that's finished, with what kit saw then.
+// How long it took is till its card came down. Never not done, then done.
 func TestAToDoSettling(t *testing.T) {
 	printer := event.ToDo{Step: "manual", ID: "manual:printer", Title: "Add the printer"}
 	scanner := event.ToDo{Step: "manual", ID: "manual:scanner", Title: "Add the scanner"}
@@ -550,9 +550,9 @@ func TestAToDoSettling(t *testing.T) {
 		settled  event.ToDos
 		want     string
 	}{
-		{"stopped, then found done", stood(30, -1, settlingStopped), stood(32, -1, with(func(t *event.ToDo) { t.Done = true })), "  03:04:37  ● Add the printer: done, in 22.0s"},
+		{"stopped, then found done", stood(30, -1, settlingStopped), stood(32, -1, with(func(t *event.ToDo) { t.Done = true })), "  03:04:37  ● Add the printer: done, in 20.0s"},
 		{"stopped, then not done", stood(30, -1, settlingStopped), stood(32, -1, printer), "  03:04:37  △ Add the printer: not done"},
-		{"done, what it waited for finished", stood(30, 0, settlingDone), stood(34, 0, with(func(t *event.ToDo) { t.Done, t.Saw = true, "3 apps' settings" })), "  03:04:39  ● Add the printer: done, in 24.0s · 3 apps' settings"},
+		{"done, what it waited for finished", stood(30, 0, settlingDone), stood(34, 0, with(func(t *event.ToDo) { t.Done, t.Saw = true, "3 apps' settings" })), "  03:04:39  ● Add the printer: done, in 20.0s · 3 apps' settings"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			events := rowsRun([]event.Step{{Name: "manual", Title: "By hand", Area: "Manual", ByHand: []event.Hand{{Name: "printer", Title: "Add the printer"}, {Name: "scanner", Title: "Add the scanner"}}}},
