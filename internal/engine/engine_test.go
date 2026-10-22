@@ -1104,6 +1104,28 @@ func TestAStepFinishesAway(t *testing.T) {
 	<-ran
 }
 
+// A step that gave its job up, then waits for a thing no step puts in
+// place, takes its job back first, so the run can go quiet and its wait
+// end, the thing not there.
+func TestAStepAwayWaitsForAThingOfNoStep(t *testing.T) {
+	defer engine.SetWaitPoll(time.Hour)()
+	attention := func(context.Context) check.Result { return check.Result{State: check.Attention} }
+	never := engine.Wait{Thing: "tool", Ready: func(context.Context) bool { return false }}
+	var came atomic.Bool
+	p, err := engine.New(engine.Step{Name: "card", Check: attention, Apply: func(ctx context.Context, _ check.Result) error {
+		engine.Release(ctx)
+		came.Store(engine.Await(ctx, never, "waiting for the tool"))
+		return nil
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	applyWithin(t, p, &recorder{}, engine.Options{Jobs: 1})
+	if came.Load() {
+		t.Error("the tool came, though nothing put it in place")
+	}
+}
+
 // A step waiting for another that can't finish till it has, as that one,
 // or one it comes after, needs it, is refused: the run would wait for good.
 func TestNewRefusesStepsWaitingOnEachOther(t *testing.T) {

@@ -1098,11 +1098,13 @@ func (d *dispatch) undone(ctx context.Context, s Step) bool {
 	if len(again) == 0 {
 		return false
 	}
-	defer event.Say(ctx, event.Doing{Says: "applying"})
 	// What's done again waits for a person, s's job given up meanwhile
 	// (Release): s takes it back to go on once each is checked again, so
-	// that its card's down first, whatever s waits for a job.
-	defer jobOf(ctx).back()
+	// that its card's down first, saying it's applying as it waits for one.
+	defer func() {
+		event.Say(ctx, event.Doing{Says: "applying"})
+		jobOf(ctx).back()
+	}()
 	for _, a := range again {
 		event.Say(ctx, event.Doing{Says: "waiting for " + a.asks()})
 		if err := a.Again(d.attributed(event.WithChanging(ctx), a)); err != nil {
@@ -1424,9 +1426,15 @@ func (d *dispatch) await(ctx context.Context, s Step, w Wait, waiting func()) bo
 	if came, settled := d.settled(ctx, s, w, lk); settled {
 		return came
 	}
+	// A thing of no step is waited for till the run goes quiet, which a step
+	// away, waiting for a person, keeps it from: such a step takes its job
+	// back first. One away waiting for a step's thing has no job to give up.
+	j := jobOf(ctx)
+	if w.Step == "" {
+		j.back()
+	}
 	waiting()
-	// A step away already, waiting for a person, has no job to give up.
-	away := jobOf(ctx).isAway()
+	away := j.isAway()
 	d.parked <- parking{step: s.Name, on: w.Step, away: away}
 	if !away {
 		defer d.resume()
