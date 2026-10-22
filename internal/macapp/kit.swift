@@ -54,17 +54,18 @@ func markFile(_ id: String) -> URL {
 
 // Sent is a notify or clear as kit sent it and its mark keeps it: the run
 // that sent it, when, and whether it was a clear. One that says no run, as
-// kit sends when it couldn't number its run, or a mark from before runs
-// were numbered, has run 0.
+// kit sends till it's numbered its run, or a mark from before runs were
+// numbered, has run 0.
 struct Sent {
     var run: Int64
     var at: Int64
     var clear: Bool
 
     // isNewer reports whether it was sent after other: by a later run, or
-    // later in the same run.
+    // later in the same run; by when alone, should either say no run, so
+    // that one from a run not numbered yet is ordered with the rest.
     func isNewer(than other: Sent) -> Bool {
-        run != other.run ? run > other.run : at > other.at
+        run != other.run && run != 0 && other.run != 0 ? run > other.run : at > other.at
     }
 }
 

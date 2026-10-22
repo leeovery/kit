@@ -89,10 +89,12 @@ type App struct {
 	tried bool
 	built chan struct{}
 	sent  int64
-	// runNo is this run's number among those that send notifications, once
-	// it's been taken (numbered): "" when it couldn't be.
-	runNo    string
-	numbered sync.Once
+	// numbering guards runNo, this run's number among those that send
+	// notifications, "" till it's taken; and over, whether the app's
+	// closed, no number taken after.
+	numbering sync.Mutex
+	runNo     string
+	over      bool
 }
 
 // New returns kit.app in the data directory dir, run through run; a click
@@ -134,18 +136,21 @@ func (a *App) Prepare() {
 }
 
 // number is this run's number among those that send notifications: one
-// after the last, kept beside the app, taken the first time it's asked for.
-// The app keeps one run's notifications in order after those of the runs
-// before it, whatever time each was sent at, as a new Mac's clock can go
-// back as it sets its time; and posts none a run sent once it's ended
-// (Close). "" when it can't be kept, the app then keeping their order by
-// time alone.
+// after the last, kept beside the app, taken the first time it can be as
+// it's asked for, as the run starts (Prepare), then as each notification's
+// sent till it is. The app keeps one run's notifications in order after
+// those of the runs before it, whatever time each was sent at, as a new
+// Mac's clock can go back as it sets its time; and posts none a run sent
+// once it's ended (Close). "" till it's taken, the app keeping the order of
+// what's sent meanwhile by time alone.
 func (a *App) number() string {
-	a.numbered.Do(func() {
+	a.numbering.Lock()
+	defer a.numbering.Unlock()
+	if a.runNo == "" && !a.over {
 		if n, err := nextRun(a.dir); err == nil {
 			a.runNo = strconv.FormatInt(n, 10)
 		}
-	})
+	}
 	return a.runNo
 }
 
@@ -271,9 +276,12 @@ func (a *App) Close() {
 	if built != nil {
 		<-built
 	}
-	a.numbered.Do(func() {})
-	if a.runNo != "" {
-		_ = endRun(a.dir, a.runNo)
+	a.numbering.Lock()
+	a.over = true
+	run := a.runNo
+	a.numbering.Unlock()
+	if run != "" {
+		_ = endRun(a.dir, run)
 	}
 }
 

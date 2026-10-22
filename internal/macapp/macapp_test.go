@@ -390,26 +390,29 @@ func TestCloseKeepsTheRunEnded(t *testing.T) {
 
 // With the lock held long, as by an instance of the app while macOS posts a
 // notification, a run starting doesn't wait on it: it goes unnumbered, and
-// what it sends says no run, the app then keeping their order by time
-// alone. Its end, numbered, is kept all the same.
+// what it sends meanwhile says no run, the app keeping its order by time
+// alone; once the lock's let go, the next it sends numbers it. Its end,
+// numbered, is kept with the lock held all the same.
 func TestTheLockHeldLong(t *testing.T) {
 	app, fake := built(t)
 	dir := filepath.Dir(app.Path())
 	held := lockHeld(t, dir)
 	app.Prepare()
-	args := []string{"-g", "-n", app.Path(), "--args", "clear", "--id", "dialog", "--at", "1000"}
-	fake.On("open", args...)
+	unnumbered := []string{"-g", "-n", app.Path(), "--args", "clear", "--id", "dialog", "--at", "1000"}
+	numbered := []string{"-g", "-n", app.Path(), "--args", "clear", "--id", "dialog", "--at", "1001", "--run", "1"}
+	fake.On("open", unnumbered...)
+	fake.On("open", numbered...)
 	app.Clear(t.Context(), "dialog")
-	if got := fake.Calls(); !reflect.DeepEqual(got, []string{runner.Command{Name: "open", Args: args}.String()}) {
-		t.Errorf("ran %q, want a clear saying no run", got)
-	}
 	held()
+	app.Clear(t.Context(), "dialog")
+	want := []string{runner.Command{Name: "open", Args: unnumbered}.String(), runner.Command{Name: "open", Args: numbered}.String()}
+	if got := fake.Calls(); !reflect.DeepEqual(got, want) {
+		t.Errorf("ran %q, want a clear saying no run, then, the lock let go, one saying run 1", got)
+	}
 
-	numbered := macapp.New(runnertest.New(t), dir, terminal, clock)
-	numbered.Prepare()
 	held = lockHeld(t, dir)
 	defer held()
-	numbered.Close()
+	app.Close()
 	if got := read(t, filepath.Join(dir, "notices", "ended")); got != "1\n" {
 		t.Errorf("runs ended = %q, want run 1's end kept without the lock", got)
 	}
