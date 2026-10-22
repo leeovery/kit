@@ -613,16 +613,21 @@ type look struct {
 	quiet         bool
 }
 
-// parking is a step waiting for a thing of the step on, or for on itself.
+// parking is a step giving its job up as it waits for a thing of the step
+// on, or for on itself, or for a person (on ""): away, when it gave it up
+// already, waiting for a person (Release), so has none to give up.
 type parking struct {
 	step, on string
+	away     bool
 }
 
-// outcome is a step done, as its goroutine tells the dispatcher.
+// outcome is a step done, as its goroutine tells the dispatcher: away,
+// when it finished with its job given up, waiting for a person (Release).
 type outcome struct {
 	step   Step
 	result check.Result
 	took   time.Duration
+	away   bool
 }
 
 // run runs steps, jobs at a time: a step waiting for a thing gives its job
@@ -645,10 +650,18 @@ func (d *dispatch) run(ctx context.Context, steps []Step, jobs int) {
 		}
 		select {
 		case o := <-d.finished:
-			running--
+			if o.away {
+				d.mu.Lock()
+				d.away--
+				d.mu.Unlock()
+			} else {
+				running--
+			}
 			d.finish(o.step, o.result, o.took)
 		case p := <-d.parked:
-			running--
+			if !p.away {
+				running--
+			}
 			d.free(p)
 		case granted := <-d.resumed:
 			d.queued = append(d.queued, granted)
@@ -817,13 +830,14 @@ func (d *dispatch) startReady(ctx context.Context, steps []Step, running *int, j
 		progressed = true
 		go func() {
 			began := d.now()
-			res := d.step(d.stepContext(ctx, s), s)
+			j := &job{d: d, step: s.Name}
+			res := d.step(d.stepContext(ctx, s, j), s)
 			// A step the run was stopped in the middle of failed for that,
 			// whatever stopping it broke on the way.
 			if ctx.Err() != nil && res.State == check.Failed {
 				res = stopped()
 			}
-			d.finished <- outcome{step: s, result: res, took: d.now().Sub(began)}
+			d.finished <- outcome{step: s, result: res, took: d.now().Sub(began), away: j.isAway()}
 		}()
 	}
 	return progressed
@@ -834,11 +848,12 @@ func (d *dispatch) startReady(ctx context.Context, steps []Step, running *int, j
 // for partway through applying is waited for as its Later are, what it says
 // may be in place has the steps waiting for its things look again, what it
 // says it's putting in place isn't there for them till it says it is, and
-// what it comes after that it finds wasn't done after all is done again.
-func (d *dispatch) stepContext(ctx context.Context, s Step) context.Context {
+// what it comes after that it finds wasn't done after all is done again. j
+// is its job.
+func (d *dispatch) stepContext(ctx context.Context, s Step, j *job) context.Context {
 	ctx = context.WithValue(d.attributed(ctx, s), dispatchKey{}, d)
 	ctx = context.WithValue(ctx, changedKey{}, func() { d.poke(s.Name) })
-	ctx = context.WithValue(ctx, releaseKey{}, func() func() { return d.release(s) })
+	ctx = context.WithValue(ctx, jobKey{}, j)
 	ctx = context.WithValue(ctx, puttingKey{}, func(things []string) func() { return d.putIn(s.Name, things) })
 	ctx = context.WithValue(ctx, putKey{}, func(thing string) { d.put(s.Name, thing) })
 	ctx = context.WithValue(ctx, undoneKey{}, func(ctx context.Context) bool { return d.undone(ctx, s) })
@@ -1084,6 +1099,10 @@ func (d *dispatch) undone(ctx context.Context, s Step) bool {
 		return false
 	}
 	defer event.Say(ctx, event.Doing{Says: "applying"})
+	// What's done again waits for a person, s's job given up meanwhile
+	// (Release): s takes it back to go on once each is checked again, so
+	// that its card's down first, whatever s waits for a job.
+	defer jobOf(ctx).back()
 	for _, a := range again {
 		event.Say(ctx, event.Doing{Says: "waiting for " + a.asks()})
 		if err := a.Again(d.attributed(event.WithChanging(ctx), a)); err != nil {
@@ -1112,37 +1131,84 @@ func Await(ctx context.Context, w Wait, says string) bool {
 	return w.Ready == nil || w.there(ctx)
 }
 
-type releaseKey struct{}
+type jobKey struct{}
 
 // Release gives up the job of the step ctx is running while it waits for a
 // person, as a step by hand waits for its card's turn and for what it asks
 // to be done: the run starts others meanwhile. It returns what takes a job
 // back, waiting for one before any step not yet started, to be called
-// before the step goes on, or finishes. Outside a run, it does nothing.
+// before the step goes on with more work; a step that finishes without
+// taking it back finishes without waiting for a job, as one whose card is
+// done has nothing more to do. Given up already, it does nothing, and
+// neither does what it returns. Outside a run, it does nothing.
 func Release(ctx context.Context) (back func()) {
-	if release, ok := ctx.Value(releaseKey{}).(func() func()); ok {
-		return release()
-	}
-	return func() {}
+	return jobOf(ctx).release()
 }
 
-// release gives s's job up, as it waits for a person (Release), and
-// returns what takes one back: s is away meanwhile, so the run doesn't go
-// quiet while it waits, as a person may put in place what others wait for;
-// asking for its job back, it's queued, and no longer away.
-func (d *dispatch) release(s Step) (back func()) {
-	d.mu.Lock()
-	d.away++
-	d.mu.Unlock()
-	d.parked <- parking{step: s.Name}
-	return func() {
-		granted := make(chan struct{})
-		d.resumed <- granted
-		d.mu.Lock()
-		d.away--
-		d.mu.Unlock()
-		<-granted
+// jobOf is the job of the step ctx is running: nil outside a run, which
+// has none to give up.
+func jobOf(ctx context.Context) *job {
+	j, _ := ctx.Value(jobKey{}).(*job)
+	return j
+}
+
+// job is a step's job as it runs: away while it's given up for the step to
+// wait for a person (Release).
+type job struct {
+	d    *dispatch
+	step string
+	mu   sync.Mutex
+	away bool
+}
+
+// release gives the job up, as Release does, and returns what takes it
+// back: the step is away meanwhile, so the run doesn't go quiet while it
+// waits, as a person may put in place what others wait for.
+func (j *job) release() (back func()) {
+	if j == nil {
+		return func() {}
 	}
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if j.away {
+		return func() {}
+	}
+	j.away = true
+	j.d.mu.Lock()
+	j.d.away++
+	j.d.mu.Unlock()
+	j.d.parked <- parking{step: j.step}
+	return j.back
+}
+
+// back takes the job back, when it's away: asking for it, the step's
+// queued, and no longer away.
+func (j *job) back() {
+	if j == nil {
+		return
+	}
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if !j.away {
+		return
+	}
+	granted := make(chan struct{})
+	j.d.resumed <- granted
+	j.d.mu.Lock()
+	j.d.away--
+	j.d.mu.Unlock()
+	<-granted
+	j.away = false
+}
+
+// isAway reports whether the job's given up.
+func (j *job) isAway() bool {
+	if j == nil {
+		return false
+	}
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.away
 }
 
 type puttingKey struct{}
@@ -1359,8 +1425,12 @@ func (d *dispatch) await(ctx context.Context, s Step, w Wait, waiting func()) bo
 		return came
 	}
 	waiting()
-	d.parked <- parking{step: s.Name, on: w.Step}
-	defer d.resume()
+	// A step away already, waiting for a person, has no job to give up.
+	away := jobOf(ctx).isAway()
+	d.parked <- parking{step: s.Name, on: w.Step, away: away}
+	if !away {
+		defer d.resume()
+	}
 	tick := time.NewTicker(waitPoll)
 	defer tick.Stop()
 	for {

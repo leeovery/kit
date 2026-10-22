@@ -534,9 +534,10 @@ func over(t *testing.T, ran <-chan engine.Report) engine.Report {
 // notification is posted each time it comes up, and taken away each time
 // it goes down, set aside or done, so only the card up has one: the
 // store's taken away and posted again though its card's set aside and back
-// before its step looks, held looking whether it's done meanwhile.
+// before its step looks, held looking whether it's done, as space on a
+// card kit watches has it look at once.
 func TestCardsComeUpByWhatWaitsOnThem(t *testing.T) {
-	defer steps.SetManualPoll(time.Millisecond)()
+	defer steps.SetManualPoll(time.Hour)()
 	c := newCard(t)
 	gate, looking, looked := make(chan struct{}), make(chan struct{}), make(chan struct{})
 	var hold, signedIn atomic.Bool
@@ -559,6 +560,7 @@ func TestCardsComeUpByWhatWaitsOnThem(t *testing.T) {
 		t.Fatalf("first card = %+v, want the store's, the only one come due", up)
 	}
 	hold.Store(true)
+	c.answer(t, "store", hand.Done)
 	<-looking
 	close(gate)
 	c.cards(t, 2)
@@ -567,6 +569,7 @@ func TestCardsComeUpByWhatWaitsOnThem(t *testing.T) {
 	close(looked)
 	c.cards(t, 3)
 	signedIn.Store(true)
+	c.answer(t, "store", hand.Done)
 	c.cards(t, 4)
 	c.answer(t, "vault", hand.Done)
 	report := over(t, ran)
@@ -1259,5 +1262,216 @@ func TestACardIsAnsweredWhileItsAppOpens(t *testing.T) {
 	c.raise.Wait()
 	if got := c.fake.Calls(); !slices.Equal(got, []string{"open -b com.example.store"}) {
 		t.Errorf("ran %q, want the app opened", got)
+	}
+}
+
+// within waits for ch to close, failing the test as what didn't happen
+// once a few seconds pass.
+func within(t *testing.T, ch <-chan struct{}, what string) {
+	t.Helper()
+	select {
+	case <-ch:
+	case <-time.After(5 * time.Second):
+		t.Fatal(what)
+	}
+}
+
+// A card done while every job is busy finishes its step at once, without
+// waiting for a job, as it has nothing more to do: its card down, as the
+// step's finishing says, and its answers no longer taken, while the step
+// holding the run's one job is still at work.
+func TestACardDoneWithEveryJobBusy(t *testing.T) {
+	c := newCard(t)
+	gate, busy, finished := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	var busyOnce, finishedOnce sync.Once
+	c.sink.on = func(e event.Event) {
+		switch e := e.(type) {
+		case event.StepStarted:
+			if e.Step == "cask" && e.Doing == "applying" {
+				busyOnce.Do(func() { close(busy) })
+			}
+		case event.StepFinished:
+			if e.Step == "store" {
+				finishedOnce.Do(func() { close(finished) })
+			}
+		}
+	}
+	store := steps.OwnManual(c.fake, c.state, steps.ManualStep{Name: "store", Do: "Sign in to the store"}, c.raise)
+	p, err := engine.New(store, gated("cask", gate))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ran := make(chan engine.Report, 1)
+	go func() {
+		report, _ := p.Apply(t.Context(), c.sink, engine.Options{Jobs: 1})
+		ran <- report
+	}()
+	c.cards(t, 1)
+	within(t, busy, "the cask step never took the job the card gave up")
+	if !c.desk.Answer("store", hand.Done) {
+		t.Fatal("the card didn't take space")
+	}
+	within(t, finished, "the card's step never finished while every job was busy")
+	if c.desk.Answer("store", hand.Done) {
+		t.Error("the card's answers were still taken once it was done")
+	}
+	close(gate)
+	if report := over(t, ran); report.Results["store"].State != check.OK {
+		t.Errorf("store %+v, want it done", report.Results["store"])
+	}
+}
+
+// Tab moves on at once while kit looks whether the card up is done, the
+// look under way aside; the card then found done by a look is done.
+func TestTabWhileKitLooks(t *testing.T) {
+	defer steps.SetManualPoll(time.Millisecond)()
+	c := newCard(t)
+	gate, looking, looked := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	var hold, signedIn atomic.Bool
+	vault := steps.OwnManual(c.fake, c.state, steps.ManualStep{Name: "vault", Do: "Sign in to the vault", Done: func(ctx context.Context) bool {
+		if hold.CompareAndSwap(true, false) {
+			close(looking)
+			select {
+			case <-looked:
+			case <-ctx.Done():
+			}
+		}
+		return signedIn.Load()
+	}}, c.raise)
+	vault.Before = []string{"secret"}
+	store := steps.OwnManual(c.fake, c.state, steps.ManualStep{Name: "store", Do: "Sign in to the store"}, c.raise)
+	store.After, store.Before = []string{"cask"}, []string{"apps"}
+	p, err := engine.New(vault, store, gated("cask", gate), fine("apps"), fine("secret"), fine("git", "secret"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ran := running(t, c, p)
+	c.cards(t, 1)
+	hold.Store(true)
+	within(t, looking, "kit never looked whether the vault's card was done")
+	close(gate)
+	c.cards(t, 2)
+	c.answer(t, "vault", hand.Next)
+	if up := c.cards(t, 3)[2]; up.Item != "store" {
+		t.Fatalf("after tab, card = %+v, want the store's, at once", up)
+	}
+	close(looked)
+	c.answer(t, "store", hand.Done)
+	c.cards(t, 4)
+	signedIn.Store(true)
+	if report := over(t, ran); report.Results["vault"].State != check.OK || report.Results["store"].State != check.OK {
+		t.Errorf("vault %+v, store %+v; want both done", report.Results["vault"], report.Results["store"])
+	}
+}
+
+// A choice's key acts at once while kit looks whether its to-do is done,
+// the look under way aside.
+func TestAChoiceWhileKitLooks(t *testing.T) {
+	defer steps.SetManualPoll(time.Millisecond)()
+	c := newCard(t)
+	looking := make(chan struct{})
+	var hold atomic.Bool
+	var mu sync.Mutex
+	brought := false
+	step := engine.Step{
+		Name: "prefs", Title: "App settings", Area: steps.AreaBackups,
+		Check: func(ctx context.Context) check.Result {
+			if hold.CompareAndSwap(true, false) {
+				close(looking)
+				<-ctx.Done()
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if brought {
+				return check.Result{State: check.OK, Summary: "saved"}
+			}
+			return check.Result{State: check.Attention, Summary: "paused", Items: []check.Item{toDoItem("prefs", check.ToDo{
+				Title: "Bring back apps' settings", First: true, Keys: []check.Key{{Key: "r", Does: "brings them back"}},
+			})}}
+		},
+		Choice: &engine.Choice{
+			Answer: func(context.Context, check.Item, string) (string, error) {
+				mu.Lock()
+				defer mu.Unlock()
+				brought = true
+				return "brought back", nil
+			},
+		},
+	}
+	done := make(chan engine.Report, 1)
+	go func() {
+		done <- applied(t, c, atTheEnd(steps.Manual(c.fake, "/home/someone", c.state, config.List{}, c.raise), step))
+	}()
+	c.cards(t, 1)
+	hold.Store(true)
+	within(t, looking, "kit never looked whether the to-do was done")
+	c.answer(t, steps.ManualName, "r")
+	select {
+	case report := <-done:
+		if report.Results["prefs"].State != check.OK {
+			t.Errorf("prefs stands %s, want it done by r", report.Results["prefs"].State)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("r waited behind kit's look")
+	}
+}
+
+// A card raised again by the step it comes before, done while every job is
+// busy, comes down at once, its step checked again and its answers no
+// longer taken: the step that raised it waits for a job to go on with, its
+// card down first.
+func TestACardAgainDoneWithEveryJobBusy(t *testing.T) {
+	c := newCard(t)
+	gate, busy, rechecked := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	var busyOnce sync.Once
+	var finishes atomic.Int32
+	c.sink.on = func(e event.Event) {
+		switch e := e.(type) {
+		case event.StepStarted:
+			if e.Step == "cask" && e.Doing == "applying" {
+				busyOnce.Do(func() { close(busy) })
+			}
+		case event.StepFinished:
+			if e.Step == "appstore" && finishes.Add(1) == 2 {
+				close(rechecked)
+			}
+		}
+	}
+	m := steps.ManualStep{Name: "appstore", Do: "Sign in to the App Store", Before: []string{"mas"}}
+	signIn := steps.OwnManual(c.fake, c.state, m, c.raise)
+	signIn.Before = m.Before
+	var tried atomic.Int32
+	mas := engine.Step{Name: "mas", AlwaysApply: true, Check: func(context.Context) check.Result { return check.Result{State: check.OK} },
+		Apply: func(ctx context.Context, _ check.Result) error {
+			if tried.Add(1) == 1 {
+				engine.Undone(ctx)
+			}
+			return nil
+		}}
+	cask := gated("cask", gate)
+	cask.After = []string{"appstore"}
+	p, err := engine.New(signIn, mas, cask)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ran := make(chan engine.Report, 1)
+	go func() {
+		report, _ := p.Apply(t.Context(), c.sink, engine.Options{Jobs: 1})
+		ran <- report
+	}()
+	c.cards(t, 1)
+	c.answer(t, "appstore", hand.Done)
+	c.cards(t, 2)
+	within(t, busy, "the cask step never took the job the card gave up")
+	if !c.desk.Answer("appstore", hand.Done) {
+		t.Fatal("the card raised again didn't take space")
+	}
+	within(t, rechecked, "the card raised again never came down while every job was busy")
+	if c.desk.Answer("appstore", hand.Done) {
+		t.Error("the card's answers were still taken once it was done")
+	}
+	close(gate)
+	if report := over(t, ran); report.Results["appstore"].State != check.OK || report.Results["mas"].State != check.OK {
+		t.Errorf("appstore %+v, mas %+v; want both done", report.Results["appstore"], report.Results["mas"])
 	}
 }

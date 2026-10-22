@@ -1056,6 +1056,54 @@ func TestAStepWaitingForAPersonGivesItsJobUp(t *testing.T) {
 	engine.Release(t.Context())()
 }
 
+// sinkFunc is a sink that hands each event to the func.
+type sinkFunc func(event.Event)
+
+func (f sinkFunc) Emit(e event.Event) { f(e) }
+
+// A step that gives its job up and finishes without taking it back, as one
+// whose card is done, finishes without waiting for a job, while the step
+// that took it is still at work. Given up again meanwhile, nothing more is
+// given up, and taking that back takes nothing.
+func TestAStepFinishesAway(t *testing.T) {
+	gate, finished := make(chan struct{}), make(chan struct{})
+	attention := func(context.Context) check.Result { return check.Result{State: check.Attention} }
+	busy := make(chan struct{})
+	p, err := engine.New(
+		engine.Step{Name: "card", Check: attention, Apply: func(ctx context.Context, _ check.Result) error {
+			engine.Release(ctx)
+			<-busy
+			engine.Release(ctx)()
+			return nil
+		}},
+		engine.Step{Name: "cask", Check: attention, Apply: func(context.Context, check.Result) error {
+			close(busy)
+			<-gate
+			return nil
+		}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sink := sinkFunc(func(e event.Event) {
+		if f, ok := e.(event.StepFinished); ok && f.Step == "card" {
+			close(finished)
+		}
+	})
+	ran := make(chan engine.Report, 1)
+	go func() {
+		report, _ := p.Apply(t.Context(), sink, engine.Options{Jobs: 1, Command: "apply"})
+		ran <- report
+	}()
+	select {
+	case <-finished:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the step that gave its job up never finished while the other held it")
+	}
+	close(gate)
+	<-ran
+}
+
 // A step waiting for another that can't finish till it has, as that one,
 // or one it comes after, needs it, is refused: the run would wait for good.
 func TestNewRefusesStepsWaitingOnEachOther(t *testing.T) {

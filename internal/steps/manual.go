@@ -364,31 +364,33 @@ var manualPoll = 3 * time.Second
 // up puts c's card up for the step called step whenever it's the card's
 // turn, taking its place in the line as s says, and waits till it's done,
 // the step's job given up meanwhile, for other steps to go on
-// (engine.Release). Each time it wakes it looks at everything afresh
-// (look): the run stopped, it's over; its turn come and its card not up, it
-// looks whether it's done, and if not puts its card up; its card down, its
-// notification goes. Every few seconds, up or set aside, it looks whether
-// it's done; and it takes the person's answers (answered). Done, it leaves
-// the line, the next card's turn coming, unless the person stopped
-// meanwhile (finish). It returns what kit saw as it was done, in words, if
-// it has some; errStopHere when the person stopped where they were;
-// errDoneThenStop when they stopped as it was done.
+// (engine.Release), and not taken back: done, a step with nothing more to do
+// finishes without waiting for a job, and one with more takes it back for
+// that, its card down by then. Each time it wakes it looks at everything
+// afresh (look): the run stopped, it's over; its turn come and its card not
+// up, it looks whether it's done, and if not puts its card up; its card
+// down, its notification goes. Every few seconds, up or set aside, it
+// looks whether it's done, aside (polling), so the person's answers never
+// wait behind a look; and it takes their answers (answered). Done, it
+// leaves the line, the next card's turn coming, unless the person stopped
+// meanwhile (finish), and stops listening. It returns what kit saw as it
+// was done, in words, if it has some; errStopHere when the person stopped
+// where they were; errDoneThenStop when they stopped as it was done.
 func (r *Raise) up(ctx context.Context, step string, c raised, s seat) (string, error) {
-	answers := s.answers
+	answers, down := s.answers, func() {}
 	if answers == nil {
-		listened, down := r.Desk.Listen(step)
-		defer down()
-		answers = listened
+		answers, down = r.Desk.Listen(step)
 	}
-	defer engine.Release(ctx)()
+	engine.Release(ctx)
 	r.Sink.Emit(event.Doing{Time: r.Now(), Step: step, Says: event.Queued})
 	pl := r.join(step, s)
-	defer r.leave(pl)
-	defer r.unnotify(ctx, pl)
-	// Looking every few seconds finds it done by its command or its check,
-	// or marked done elsewhere, as by kit manual done in another window.
-	tick := time.NewTicker(manualPoll)
-	defer tick.Stop()
+	polls := polling(ctx, c)
+	defer func() {
+		r.unnotify(ctx, pl)
+		r.leave(pl)
+		down()
+		polls.stop()
+	}()
 	for {
 		if saw, done, err := r.look(ctx, pl, c); done || err != nil {
 			return finish(answers, saw, err)
@@ -396,16 +398,103 @@ func (r *Raise) up(ctx context.Context, step string, c raised, s seat) (string, 
 		select {
 		case <-ctx.Done():
 		case <-pl.moved:
-		case <-tick.C:
-			if ok, saw := c.done(ctx); ok {
-				return finish(answers, saw, nil)
-			}
+		case saw := <-polls.found:
+			return finish(answers, saw, nil)
 		case a := <-answers:
+			if a == hand.Stop {
+				if saw, done := polls.settle(); done {
+					return saw, errDoneThenStop
+				}
+			}
 			if saw, ok, err := r.answered(ctx, pl, c, a, answers); ok || err != nil {
 				return finish(answers, saw, err)
 			}
 		}
 	}
+}
+
+// looks looks whether a card's done every few seconds, aside, a look at a
+// time, as its command or its check finds it, or marked done elsewhere, as
+// by kit manual done in another window: once it is, what kit saw comes on
+// found.
+type looks struct {
+	found  chan string
+	cancel context.CancelFunc
+	over   chan struct{}
+	// mu guards looking, closed as the look under way ends, not done; nil
+	// while none is.
+	mu      sync.Mutex
+	looking chan struct{}
+}
+
+// polling starts looking whether c's done, as looks does.
+func polling(ctx context.Context, c raised) *looks {
+	ctx, cancel := context.WithCancel(ctx)
+	l := &looks{found: make(chan string), cancel: cancel, over: make(chan struct{})}
+	go func() {
+		defer close(l.over)
+		tick := time.NewTicker(manualPoll)
+		defer tick.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-tick.C:
+			}
+			if l.look(ctx, c) {
+				return
+			}
+		}
+	}()
+	return l
+}
+
+// look looks once, reporting whether c's done: what kit saw goes on found,
+// taken unless the looks have stopped.
+func (l *looks) look(ctx context.Context, c raised) bool {
+	looking := make(chan struct{})
+	l.mu.Lock()
+	l.looking = looking
+	l.mu.Unlock()
+	defer func() {
+		l.mu.Lock()
+		l.looking = nil
+		l.mu.Unlock()
+		close(looking)
+	}()
+	ok, saw := c.done(ctx)
+	if !ok {
+		return false
+	}
+	select {
+	case l.found <- saw:
+	case <-ctx.Done():
+	}
+	return true
+}
+
+// settle waits for the look under way, if one is, as the person stops
+// there, and reports whether it found the card done, and what kit saw: one
+// done as they stopped is done.
+func (l *looks) settle() (string, bool) {
+	l.mu.Lock()
+	looking := l.looking
+	l.mu.Unlock()
+	if looking == nil {
+		return "", false
+	}
+	select {
+	case saw := <-l.found:
+		return saw, true
+	case <-looking:
+		return "", false
+	}
+}
+
+// stop stops looking, a look under way given up, and waits till it has.
+func (l *looks) stop() {
+	l.cancel()
+	<-l.over
 }
 
 // look is pl's card as things stand: the run stopped, its error; its card

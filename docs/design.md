@@ -266,7 +266,15 @@ the Manual area, saying what to do, so `kit status` shows them; what kit can che
 a check that says what to do. While `kit apply` runs at a terminal, one that comes due is raised
 as a card on its screen, front and centre: its title, why it's there, said once (its notes, or,
 for a line with none, kit's words for why the run waits for it), its steps numbered, and a
-notification while it's up (taken away while it's set aside, posted again as it comes back). Its keys work from the moment it's up: its notification, and its app, go aside, the notification in order with its taking away, so one waiting for kit's app to be built (a minute, on a new Mac) holds nothing up, and one taken away before it went out is never posted. `space` says it's done (`enter`
+notification while it's up (taken away while it's set aside, posted again as it comes back). Its
+keys work from the moment it's up: nothing a card does on the side holds them up. Its
+notification, and its app, go aside, the notification in order with its taking away, so one
+waiting for kit's app to be built (a minute, on a new Mac) holds nothing up, and one taken away
+before it went out is never posted; its look every few seconds goes aside too, so a key never
+waits behind a slow command. A card holds none of the run's jobs while it's up, and, done, comes
+down at once, every job busy or not: a step with nothing more to do finishes without waiting for
+one, and one with more (the step a card raised again comes before) waits for a job with the card
+down. `space` says it's done (`enter`
 too, unshown: marked as `kit manual done` marks it; one with a command is looked at at once, as
 it is every few seconds anyway); a card with a command offers no key, kit carrying on by itself
 once it's done. There's no putting a card off: it's done, or the run's stopped. One card is up
