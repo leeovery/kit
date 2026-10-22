@@ -11,10 +11,12 @@
 // --at is when kit sent it. kit sends them in order, but macOS can run two
 // launched one after the other in either order, and the first notify holds
 // while macOS asks the person to allow them: the newest sent under an id is
-// kept, in kit's data folder, beside the app, and one older does nothing,
-// so a notification taken away before it could be posted never is.
+// kept, in kit's data folder, beside the app (kit empties it as a run
+// starts), and one older does nothing, so a notification taken away before
+// it could be posted never is, nor stays posted.
 
 import AppKit
+import CryptoKit
 import UserNotifications
 
 let args = Array(CommandLine.arguments.dropFirst().filter { !$0.hasPrefix("-psn_") })
@@ -35,28 +37,64 @@ func options(_ words: ArraySlice<String>) -> [String: String] {
     return found
 }
 
-// marks is where the newest sent under each id is kept.
+// marks is where the newest sent under each id is kept, a file each, named
+// for the id's hash, so any id fits a file's name.
 let marks = Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent("notices", isDirectory: true)
 
 func markFile(_ id: String) -> URL {
-    marks.appendingPathComponent(id.utf8.map { String(format: "%02x", $0) }.joined())
+    marks.appendingPathComponent(SHA256.hash(data: Data(id.utf8)).map { String(format: "%02x", $0) }.joined())
 }
 
-// newest is when the newest notify or clear under id was sent: 0 for none.
-func newest(_ id: String) -> Int64 {
-    guard let text = try? String(contentsOf: markFile(id), encoding: .utf8) else { return 0 }
-    return Int64(text.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
+// Sent is a notify or clear as its mark keeps it: when kit sent it, and
+// whether it was a clear.
+struct Sent {
+    var at: Int64
+    var clear: Bool
 }
 
-// mark keeps at as the newest sent under id, and reports whether it is:
-// false when a newer one was, as it's sent later.
-func mark(_ id: String, _ at: Int64) -> Bool {
-    if newest(id) > at {
-        return false
-    }
+// locked runs body holding a lock on the marks, so two of the app running
+// at once never read and write them between each other.
+func locked<T>(_ body: () -> T) -> T {
     try? FileManager.default.createDirectory(at: marks, withIntermediateDirectories: true)
-    try? String(at).write(to: markFile(id), atomically: true, encoding: .utf8)
-    return true
+    let fd = open(marks.appendingPathComponent(".lock").path, O_CREAT | O_RDWR, 0o644)
+    if fd >= 0 {
+        flock(fd, LOCK_EX)
+    }
+    defer {
+        if fd >= 0 {
+            flock(fd, LOCK_UN)
+            close(fd)
+        }
+    }
+    return body()
+}
+
+// newest is the newest notify or clear sent under id: at 0 for none.
+func newest(_ id: String) -> Sent {
+    guard let text = try? String(contentsOf: markFile(id), encoding: .utf8) else { return Sent(at: 0, clear: false) }
+    let words = text.split(separator: " ")
+    return Sent(at: words.first.flatMap { Int64($0) } ?? 0, clear: words.dropFirst().first == "clear")
+}
+
+// mark keeps sent as the newest under id, and reports whether it is: false
+// when a newer one was, sent later. Marks never go back.
+func mark(_ id: String, _ sent: Sent) -> Bool {
+    locked {
+        if newest(id).at > sent.at {
+            return false
+        }
+        try? "\(sent.at) \(sent.clear ? "clear" : "notify")".write(to: markFile(id), atomically: true, encoding: .utf8)
+        return true
+    }
+}
+
+// remove takes away what's posted, or waits to be, under id.
+func remove(_ id: String) {
+    let center = UNUserNotificationCenter.current()
+    center.removeDeliveredNotifications(withIdentifiers: [id])
+    center.removePendingNotificationRequests(withIdentifiers: [id])
+    // Removing is asynchronous, and quitting at once can lose it.
+    Thread.sleep(forTimeInterval: 1)
 }
 
 // wait waits for a callback-style API to finish, for seconds at most.
@@ -69,7 +107,7 @@ func wait(_ seconds: Double, _ body: (@escaping () -> Void) -> Void) {
 func post(_ given: [String: String]) -> Int32 {
     guard let id = given["id"], let title = given["title"] else { return 64 }
     let at = Int64(given["at"] ?? "") ?? 0
-    if at > 0 && !mark(id, at) {
+    if at > 0 && !mark(id, Sent(at: at, clear: false)) {
         return 0
     }
     let center = UNUserNotificationCenter.current()
@@ -82,8 +120,8 @@ func post(_ given: [String: String]) -> Int32 {
         }
     }
     guard allowed else { return 1 }
-    // Taken away while macOS asked: there's nothing to post.
-    if at > 0 && newest(id) > at {
+    // Taken away, or posted again, while macOS asked: nothing to post.
+    if at > 0 && locked({ newest(id) }).at > at {
         return 0
     }
     let content = UNMutableNotificationContent()
@@ -101,20 +139,22 @@ func post(_ given: [String: String]) -> Int32 {
             finish()
         }
     }
+    // Taken away as it was posted: the clear, which marks before it
+    // removes, may have found nothing yet.
+    let last = locked { newest(id) }
+    if at > 0 && last.clear && last.at > at {
+        remove(id)
+    }
     return failed ? 1 : 0
 }
 
 func clear(_ given: [String: String]) -> Int32 {
     guard let id = given["id"] else { return 64 }
     // One posted after it was sent stays.
-    if let at = Int64(given["at"] ?? ""), !mark(id, at) {
+    if let at = Int64(given["at"] ?? ""), !mark(id, Sent(at: at, clear: true)) {
         return 0
     }
-    let center = UNUserNotificationCenter.current()
-    center.removeDeliveredNotifications(withIdentifiers: [id])
-    center.removePendingNotificationRequests(withIdentifiers: [id])
-    // Removing is asynchronous, and quitting at once can lose it.
-    Thread.sleep(forTimeInterval: 1)
+    remove(id)
     return 0
 }
 

@@ -296,9 +296,26 @@ func TestPrepareBuildsAside(t *testing.T) {
 	}
 }
 
-// A wait for the build under way is given up once its context is done, as
-// when the notification waiting has been taken away: that notification
-// posts nothing, and the build goes on. Closing the app stops the build and
+// Prepared as a run starts, the app forgets the order of the last run's
+// notifications.
+func TestPrepareForgetsTheLastRunsOrder(t *testing.T) {
+	app, _ := built(t)
+	mark := filepath.Join(filepath.Dir(app.Path()), "notices", "0a1b")
+	if err := os.MkdirAll(filepath.Dir(mark), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(mark, []byte("1000 clear"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	app.Prepare()
+	if _, err := os.Stat(filepath.Dir(mark)); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the last run's order is still kept (%v)", err)
+	}
+}
+
+// A notification waiting for the build under way gives up its wait once its
+// context is done, as when it's been taken away: it posts nothing, through
+// the app or osascript, and the build goes on. Closing the app stops the build and
 // waits till it has; what's posted after goes through osascript, nothing
 // built again.
 func TestAWaitForTheBuildIsGivenUp(t *testing.T) {
@@ -310,15 +327,18 @@ func TestAWaitForTheBuildIsGivenUp(t *testing.T) {
 	script := `display notification "Open it" with title "kit" subtitle "Sign in"`
 	fake.On("osascript", "-e", script)
 	app := macapp.New(fake, dir, terminal, clock)
-	app.Prepare()
-	<-compiling
-
 	ctx, stop := context.WithCancel(t.Context())
+	notified := make(chan struct{})
+	go func() {
+		defer close(notified)
+		app.Notify(ctx, "card:sign-in", "Sign in", "Open it")
+	}()
+	<-compiling
 	stop()
+	<-notified
 	if app.Ready(ctx) {
 		t.Error("Ready = true with the build under way")
 	}
-	app.Notify(ctx, "card:sign-in", "Sign in", "Open it")
 	compiled := []string{"xcode-select -p", runner.Command{Name: "swiftc", Args: swiftcIn(dir)}.String()}
 	if got := fake.Calls(); !reflect.DeepEqual(got, compiled) {
 		t.Errorf("ran %q, want the build alone: nothing posted once its wait was given up", got)

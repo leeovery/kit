@@ -102,9 +102,19 @@ func (a *App) Path() string {
 	return filepath.Join(a.dir, Name)
 }
 
-// Prepare starts building the app aside, when it needs building, so that
-// a notification posted later needn't wait as long for it.
-func (a *App) Prepare() { a.building() }
+// marks is the folder, beside the app, where the app keeps the order of the
+// notifications it's sent (kit.swift).
+const marks = "notices"
+
+// Prepare readies the app as a run starts: the order of the notifications
+// the last run sent forgotten, as each was taken away by its end, and the
+// app's clock may have gone back since, as a new Mac's can before it sets
+// its time; and building it aside, when it needs building, so that a
+// notification posted later needn't wait as long for it.
+func (a *App) Prepare() {
+	_ = os.RemoveAll(filepath.Join(a.dir, marks))
+	a.building()
+}
 
 // Ready reports whether the app's there to post with, building it first
 // when it's missing or was built from other files, or waiting for the
