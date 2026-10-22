@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -142,10 +143,10 @@ func finishes(sink *events) (map[string]int, map[string]check.State) {
 // order: kit's own that come first (apps' settings), then the config's
 // lines not done, in order, then the rest of kit's own, in the run's order;
 // grouped, each group where its first comes, one with none a group of its
-// own. Each goes up as its turn comes, and straight down when its first
-// look finds it done: the list ticks it, with what kit saw. After the last, the
-// steps they held are checked again, in place of how they stood: those
-// they came from, and no other.
+// own. Each found done by its first look as its turn comes never goes up:
+// the list ticks it, with what kit saw. After the last, the steps they held
+// are checked again, in place of how they stood: those they came from, and
+// no other.
 func TestTheToDosInKitsOrder(t *testing.T) {
 	c := newCard(t)
 	for _, f := range []string{"/k", "/s", "/n", "/l"} {
@@ -196,12 +197,8 @@ func TestTheToDosInKitsOrder(t *testing.T) {
 			t.Errorf("%s ended done %v, kit saw %q; want it done, kit having seen %q", e.Title, e.Done, e.Saw, saw)
 		}
 	}
-	var up []string
-	for _, card := range c.cardsNow() {
-		up = append(up, card.Item)
-	}
-	if down := c.downs(); len(up) != len(want) || !slices.Equal(down, up) {
-		t.Errorf("cards went up for %q, and down for %q; want each up as its turn came, and straight down, its first look finding it done", up, down)
+	if up, down := c.cardsNow(), c.downs(); len(up) > 0 || len(down) > 0 {
+		t.Errorf("cards went up %+v, and down for %q; want none, each found done by its first look", up, down)
 	}
 	times, stood := finishes(c.sink)
 	for _, name := range []string{"prefs", "time-machine", "arq"} {
@@ -656,5 +653,351 @@ func TestARunStoppedWhileAKeyIsDone(t *testing.T) {
 	}
 	if !slices.Equal(answering, []string{"", "r"}) {
 		t.Errorf("the card went up answered by %q; want its keys, then r while it worked, and its keys never again", answering)
+	}
+}
+
+// settings is a step as apps' settings are: its check finds them paused, a
+// choice, r bringing them back; then, brought back, an app to open once,
+// watched, till it's opened; then saved. Each of its parts first does what
+// the test has it do, if anything: as its check starts (checking), as r is
+// done (bringing), as the card's readied, its r saying the save's date
+// (readying), and as opening the app is settled (settling), cut short
+// should the run have stopped by the time it's done (cut).
+type settings struct {
+	mu                                     sync.Mutex
+	brought, opened, cut                   bool
+	checking, bringing, readying, settling func()
+}
+
+func (s *settings) step() engine.Step {
+	return engine.Step{
+		Name: "prefs", Title: "App settings", Area: steps.AreaBackups,
+		Check: func(context.Context) check.Result {
+			if f := s.part(func() func() { return s.checking }); f != nil {
+				f()
+			}
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			switch {
+			case !s.brought:
+				return check.Result{State: check.Attention, Summary: "paused", Items: []check.Item{toDoItem("prefs", check.ToDo{
+					Title: "Bring back apps' settings", First: true, Keys: []check.Key{{Key: "r", Does: "brings them back"}},
+				})}}
+			case !s.opened:
+				return check.Result{State: check.Attention, Summary: "1 app to open once", Items: []check.Item{{ID: "prefs:open", Name: "Open Boxed App once and quit it", State: steps.Problem,
+					ToDo: &check.ToDo{Title: "Open Boxed App once and quit it", Watch: "Boxed App has its settings folder", First: true}}}}
+			}
+			return check.Result{State: check.OK, Summary: "saved"}
+		},
+		Choice: &engine.Choice{
+			Ready: func(_ context.Context, it check.Item) check.Item {
+				if f := s.part(func() func() { return s.readying }); f != nil {
+					f()
+				}
+				if it.ToDo == nil || len(it.ToDo.Keys) == 0 {
+					return it
+				}
+				t := *it.ToDo
+				t.Keys = []check.Key{{Key: "r", Does: "brings them back, 15 Oct"}}
+				it.ToDo = &t
+				return it
+			},
+			Answer: func(context.Context, check.Item, string) (string, error) {
+				if f := s.part(func() func() { return s.bringing }); f != nil {
+					f()
+				}
+				s.mu.Lock()
+				defer s.mu.Unlock()
+				s.brought = true
+				return "214 apps' settings", nil
+			},
+			Settle: func(ctx context.Context, it check.Item) string {
+				if f := s.part(func() func() { return s.settling }); f != nil && it.ID == "prefs:open" {
+					f()
+					s.set(func(s *settings) { s.cut = ctx.Err() != nil })
+				}
+				return ""
+			},
+		},
+	}
+}
+
+// part is the part of s get says, as it stands now.
+func (s *settings) part(get func() func()) func() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return get()
+}
+
+// set has s's state, or a part, changed by change.
+func (s *settings) set(change func(s *settings)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	change(s)
+}
+
+// held is a part that, its first time, says it's started (begun), and waits
+// till it's let through (through).
+func held() (part func(), begun, through chan struct{}) {
+	begun, through = make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	return func() {
+		first := false
+		once.Do(func() { first = true })
+		if first {
+			close(begun)
+			<-through
+		}
+	}, begun, through
+}
+
+// endingWith applies other, then the steps by hand at the end, with none of
+// their own, aside, the run's report coming once it ends.
+func endingWith(t *testing.T, c *card, other engine.Step) <-chan engine.Report {
+	done := make(chan engine.Report, 1)
+	go func() {
+		done <- applied(t, c, atTheEnd(steps.Manual(c.fake, "/home/someone", c.state, config.List{}, c.raise), other))
+	}()
+	return done
+}
+
+// stopped closes when the to-dos are emitted stopped, none up, as c's sink
+// sees them.
+func (c *card) stopped() <-chan struct{} {
+	stopped := make(chan struct{})
+	var once sync.Once
+	c.sink.on = func(e event.Event) {
+		if l, ok := e.(event.ToDos); ok && l.Up == -1 {
+			once.Do(func() { close(stopped) })
+		}
+	}
+	return stopped
+}
+
+// q's Stop while kit does what a key said acts at once, however long that
+// takes: the card comes down and the list stops, the key's work left to
+// finish, never cut short; done by it, the list says so after, with the
+// to-do it leaves, left to do.
+func TestAStopWhileAKeyIsDone(t *testing.T) {
+	defer steps.SetManualPoll(time.Hour)()
+	c := newCard(t)
+	stopped := c.stopped()
+	s := &settings{}
+	bringing, begun, through := held()
+	s.bringing = bringing
+	done := endingWith(t, c, s.step())
+	c.cards(t, 1)
+	c.answer(t, steps.ManualName, "r")
+	within(t, begun, "r was never done")
+	c.answer(t, steps.ManualName, hand.Stop)
+	within(t, stopped, "the list wasn't stopped while r was being done")
+	if l := c.lastToDos(); l[0].Done || !slices.Equal(c.downs(), []string{"prefs:none"}) {
+		t.Errorf("stopped, the to-dos stood %+v, cards down %q; want the card down, not done yet", l, c.downs())
+	}
+	close(through)
+	over(t, done)
+	l := c.lastToDos()
+	if len(l) != 2 || !l[0].Done || l[0].Saw != "214 apps' settings" || l[1].ID != "prefs:open" || l[1].Done {
+		t.Errorf("the to-dos ended %+v; want r's done, what it did as what kit saw, the app to open after it, left to do", l)
+	}
+}
+
+// q's Stop acts at once while kit readies what the to-do up says, as the
+// date of the last save, which takes cloning their store on a new Mac: its
+// card's up once its grace is over, saying what it can meanwhile.
+func TestAStopWhileTheCardIsReadied(t *testing.T) {
+	defer steps.SetManualPoll(time.Hour)()
+	c := newCard(t)
+	stopped := c.stopped()
+	s := &settings{}
+	readying, begun, through := held()
+	s.readying = readying
+	done := endingWith(t, c, s.step())
+	within(t, begun, "the card was never readied")
+	if up := c.cardsNow(); len(up) > 0 {
+		t.Fatalf("cards up %+v before the card's grace was over, its look not done", up)
+	}
+	c.waits.waiting(t, steps.DrawAfter, 1)
+	c.waits.end(steps.DrawAfter)
+	if up := c.cards(t, 1)[0]; !slices.Equal(up.Keys, []check.Key{{Key: "r", Does: "brings them back"}}) {
+		t.Errorf("card = %+v, want it up with its keys as they stand", up)
+	}
+	c.answer(t, steps.ManualName, hand.Stop)
+	within(t, stopped, "the list wasn't stopped while the card was readied")
+	close(through)
+	over(t, done)
+	if up := c.cardsNow(); len(up) != 1 {
+		t.Errorf("cards up %+v; want the one, never again once it came down", up)
+	}
+}
+
+// A card readied once it's up, its look being quick and readying it slow,
+// goes up again saying so.
+func TestACardReadiedOnceUp(t *testing.T) {
+	defer steps.SetManualPoll(time.Hour)()
+	c := newCard(t)
+	s := &settings{}
+	readying, begun, through := held()
+	s.readying = readying
+	done := endingWith(t, c, s.step())
+	within(t, begun, "the card was never readied")
+	c.waits.waiting(t, steps.DrawAfter, 1)
+	c.waits.end(steps.DrawAfter)
+	c.cards(t, 1)
+	close(through)
+	if up := c.cards(t, 2)[1]; up.Item != "prefs:none" || !slices.Equal(up.Keys, []check.Key{{Key: "r", Does: "brings them back, 15 Oct"}}) || up.Answering != "" {
+		t.Errorf("readied, the card = %+v; want it up again, its r dated", up)
+	}
+	c.answer(t, steps.ManualName, hand.Stop)
+	over(t, done)
+}
+
+// q's Stop acts at once while kit looks for what a to-do done leaves: the
+// list stops there, the one done kept done, and what the look finds joins
+// it after, left to do.
+func TestAStopWhileKitLooksForWhatFollows(t *testing.T) {
+	defer steps.SetManualPoll(time.Hour)()
+	c := newCard(t)
+	stopped := c.stopped()
+	s := &settings{}
+	checking, begun, through := held()
+	var checks atomic.Int32
+	s.bringing = func() {
+		// After r, its look finding it done, then the look for what follows,
+		// held.
+		s.set(func(s *settings) {
+			s.checking = func() {
+				if checks.Add(1) == 2 {
+					checking()
+				}
+			}
+		})
+	}
+	done := endingWith(t, c, s.step())
+	c.cards(t, 1)
+	c.answer(t, steps.ManualName, "r")
+	within(t, begun, "kit never looked for what bringing them back left")
+	c.answer(t, steps.ManualName, hand.Stop)
+	within(t, stopped, "the list wasn't stopped while kit looked for what followed")
+	if l := c.lastToDos(); len(l) != 1 || !l[0].Done {
+		t.Errorf("stopped, the to-dos stood %+v; want r's done", l)
+	}
+	close(through)
+	over(t, done)
+	if l := c.lastToDos(); len(l) != 2 || !l[0].Done || l[1].ID != "prefs:open" || l[1].Done {
+		t.Errorf("the to-dos ended %+v; want r's done, then the app to open, left to do", l)
+	}
+}
+
+// q's Stop at the to-dos acts at once while the card's notification waits
+// to go out, as one waits for kit's app to be built on a new Mac.
+func TestAStopWhileItsNotificationWaits(t *testing.T) {
+	c, h := heldCard(t)
+	stopped := c.stopped()
+	applied := applying(t, steps.Manual(c.fake, "/home/someone", c.state, printerAndScanner, c.raise))
+	h.posting(t, "card:manual:manual:printer")
+	c.answer(t, steps.ManualName, hand.Stop)
+	within(t, stopped, "the list wasn't stopped while the card's notification waited")
+	if err := ended(t, applied); err != nil {
+		t.Fatal(err)
+	}
+	close(h.through)
+	want := []string{"notify card:manual:manual:printer | Add the printer | kit waits for you to do this (taken away first)", "clear card:manual:manual:printer"}
+	if got := c.posted(); !slices.Equal(got, want) {
+		t.Errorf("notifications %q, want %q", got, want)
+	}
+}
+
+// Once the person's stopped at the to-dos, no look begins, though one's
+// due as they stop: the one up stays as it was.
+func TestNoLookOnceStopped(t *testing.T) {
+	defer steps.SetManualPoll(time.Hour)()
+	for range 20 {
+		c := newCard(t)
+		c.waits = newWaits(time.Hour)
+		c.raise.After = c.waits.after
+		stopped := c.stopped()
+		// Its check, then its look as its turn comes.
+		c.fake.On("test", "-f", "/printer").Exits(1)
+		list := config.List{Entries: []config.Entry{{Name: "printer", Value: `"Add the printer" --test test -f /printer`, Scope: "laptop", Line: 2}}}
+		applied := applying(t, steps.Manual(c.fake, "/home/someone", c.state, list, c.raise))
+		c.cards(t, 1)
+		// The look as its turn came, then the wait for its next.
+		c.waits.waiting(t, time.Hour, 2)
+		c.answer(t, steps.ManualName, hand.Stop)
+		<-stopped
+		c.waits.end(time.Hour)
+		if err := ended(t, applied); err != nil {
+			t.Fatal(err)
+		}
+		c.raise.Wait()
+		if runs := len(c.fake.Commands()); runs != 2 {
+			t.Fatalf("ran %q; want its check and its look as its turn came, and none once stopped", c.fake.Calls())
+		}
+	}
+}
+
+// A key pressed while kit looks whether the to-do's done, that look finding
+// it done, isn't done: the to-do's done, what the look saw as what kit saw.
+func TestAKeyBehindALookThatFindsItDone(t *testing.T) {
+	defer steps.SetManualPoll(time.Millisecond)()
+	c := newCard(t)
+	s := &settings{}
+	checking, begun, through := held()
+	s.bringing = func() { t.Error("r was done though the to-do was found done") }
+	taken := make(chan struct{})
+	var once sync.Once
+	c.sink.on = func(e event.Event) {
+		if up, ok := e.(event.NeedsYou); ok && up.Answering == "r" {
+			once.Do(func() { close(taken) })
+		}
+	}
+	done := endingWith(t, c, s.step())
+	c.cards(t, 1)
+	s.set(func(s *settings) { s.checking = checking })
+	within(t, begun, "kit never looked again whether the to-do was done")
+	c.answer(t, steps.ManualName, "r")
+	within(t, taken, "the card never said it was being answered with r")
+	s.set(func(s *settings) { s.brought, s.opened = true, true })
+	close(through)
+	over(t, done)
+	if l := c.lastToDos(); len(l) != 1 || !l[0].Done || l[0].Saw != "saved" {
+		t.Errorf("the to-dos ended %+v; want it done, kit having seen it saved", l)
+	}
+}
+
+// The run stopped at the to-dos while kit settles what the one up waited
+// for: the list stops at once, its card down, the settling left to finish,
+// never cut short, and waited for as the run ends.
+func TestARunStoppedWhileKitSettles(t *testing.T) {
+	defer steps.SetManualPoll(time.Millisecond)()
+	c := newCard(t)
+	stopped := c.stopped()
+	s := &settings{brought: true}
+	settling, begun, through := held()
+	s.settling = settling
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	p, err := engine.New(atTheEnd(steps.Manual(c.fake, "/home/someone", c.state, config.List{}, c.raise), s.step())...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ran := make(chan engine.Report, 1)
+	go func() {
+		report, _ := p.Apply(ctx, c.sink, engine.Options{Command: "apply", Jobs: 4})
+		ran <- report
+	}()
+	c.cards(t, 1)
+	s.set(func(s *settings) { s.opened = true })
+	within(t, begun, "kit never settled what the to-do waited for")
+	cancel()
+	within(t, stopped, "the list wasn't stopped as the run was, while kit settled")
+	over(t, ran)
+	close(through)
+	c.raise.Wait()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cut {
+		t.Error("settling was cut short as the run stopped")
 	}
 }

@@ -90,7 +90,8 @@ func titles(list logs.Record) []string {
 // At a terminal, the run ends working through what's left for the person,
 // one at a time, in kit's order: apps' settings first, a choice, f starting
 // afresh as kit prefs start-fresh does; the config's line, space saying
-// it's done; Time Machine's disk last, kit seeing it there. After the last,
+// it's done; Time Machine's disk last, kit seeing it there by its turn, so
+// its card never goes up. After the last,
 // the steps they held are checked again, their rows and the record as they
 // stand now.
 func TestApplyWorksThroughTheToDos(t *testing.T) {
@@ -112,6 +113,7 @@ func TestApplyWorksThroughTheToDos(t *testing.T) {
 	if got := titles(lists[0]); !slices.Equal(got, want) || *lists[0].Up != 0 {
 		t.Errorf("the to-dos came up as %q, %d up; want %q, the first up", got, *lists[0].Up, want)
 	}
+	shown := want[:2]
 	last := lists[len(lists)-1]
 	for i, saw := range []string{"saving from now, nothing brought back", "", "last backup 02:34"} {
 		if td := last.ToDos[i]; !td.Done || td.Saw != saw {
@@ -129,11 +131,11 @@ func TestApplyWorksThroughTheToDos(t *testing.T) {
 			answering = append(answering, c.Title+": "+c.Answering)
 		}
 	}
-	if !slices.Equal(asked, want) {
-		t.Errorf("cards went up for %q, want %q, each at its turn", asked, want)
+	if !slices.Equal(asked, shown) {
+		t.Errorf("cards went up for %q, want %q, each at its turn", asked, shown)
 	}
-	if got := downs(records); len(got) != len(want) || got[2] != cards(records)[len(cards(records))-1].Item {
-		t.Errorf("cards came down for %q, want each, Time Machine's last, straight down: its disk was there by its turn, no notification posted", got)
+	if got := downs(records); !slices.Equal(got, []string{"prefs:paused", "manual:sharing"}) {
+		t.Errorf("cards came down for %q, want each that went up, as it was done", got)
 	}
 	if want := []string{"Bring back apps' settings: f"}; !slices.Equal(answering, want) {
 		t.Errorf("cards went up being answered: %q, want %q, its keys not offered while f was done", answering, want)

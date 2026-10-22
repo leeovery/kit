@@ -270,15 +270,20 @@ the Manual area, saying what to do, so `kit status` shows them; what kit can che
 a check that says what to do. While `kit apply` runs at a terminal, one that comes due is raised
 as a card on its screen, front and centre: its title, why it's there, said once (its notes, or,
 for a line with none, kit's words for why the run waits for it), its steps numbered, and a
-notification while it's up, once a look since it went up finds it not done, so one found done as
-it goes up comes straight down with none (taken away while it's set aside, posted again as it
-comes back). It goes up the moment its turn comes, and its keys work from then: nothing a card
-does on the side holds it or them up. Its notification, and its app, go aside, the notification
-in order with its taking away, so one waiting for kit's app to be built (a minute, on a new Mac)
-holds nothing up, and one taken away before it went out is never posted. Whether it's done is
-looked at aside too, as it goes up and every few seconds, one look at a time, a key's own among
-them (the card saying at once that it's taken, as a choice's does), and a look settling what the
-card waited for is never cut short. A card holds none of the run's jobs while it's up, and,
+notification while it's up, once a look finds it not done or it's been up three seconds,
+whichever's first (taken away while it's set aside, posted again as it comes back). Its turn
+come, kit looks at once whether it's done, and it goes up as that look finds it not done, or
+after a quarter of a second, whichever's first, so one found done by then never shows, opens
+nothing and posts nothing. Its keys work from the moment it's up: nothing a card does on the
+side holds it or them up. Whatever takes time goes aside: whether it's done, looked at as its
+turn comes and every few seconds; what a key says; readying what it says, as the date a
+choice's key brings back from (it's up meanwhile saying what it can, then up again saying
+that); and, once it's up, its notification and its app, the notification in order with its
+taking away, so one waiting for kit's app to be built (a minute, on a new Mac) holds nothing up,
+and one taken away before it went out is never posted. A look, a key and readying go one at a
+time, keys in the order pressed, ahead of the next look, the card saying at once that a key's
+taken, as a choice's does; a key behind a look that finds it done isn't done, and a look
+settling what the card waited for is never cut short. A card holds none of the run's jobs while it's up, and,
 done, or found done, comes down that moment, every job busy or not: a step with nothing more to
 do finishes without waiting for one, and one with more (the step a card raised again comes
 before) waits for a job with the card down. `space` says it's done (`enter`
@@ -314,9 +319,11 @@ it waited for, as bringing those apps' settings back; `f` starts afresh, as `kit
 start-fresh` does, saying saving's on and how many still wait to come back). Stopping there
 (`q`'s Stop, between two to-dos as well, as the one up is found done, and while kit does what a
 key says, taken even with another key waiting unread) leaves what's left to do at once, the
-card down and the list stopped, the one up done if it was, or if the look under way then, left
-to finish, finds it done, which the list says after; with the to-dos it left, in that order in
-the record, the run ending as it stands. After the last, kit checks again the steps the
+card down and the list stopped, whatever kit's doing aside, and no look begins after: the one
+up done if it was, or if a look under way then, or a key taken by then, left to finish, finds it
+done or does it, which the list says after, with any to-do that leaves; with the to-dos it left,
+in that order in the record, the run ending as it stands. The run stopped there, the card comes
+down and the list stops at once too. After the last, kit checks again the steps the
 to-dos held, those they came from, so their rows and the record are right, then finishes.
 Without a terminal, nothing's raised: kit's own stay items of their steps. A step a line comes
 before can find, as it applies, that the line wasn't done after all, as the App Store's first

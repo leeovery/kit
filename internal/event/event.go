@@ -200,8 +200,9 @@ func (e NeedsYou) At() time.Time { return e.Time }
 
 // CardDown is the card of a step by hand taken down the moment it's done,
 // or the person stopped there, before anything its step does after: its
-// step and its item, as its NeedsYou had them. A card taken down by the run
-// stopping has none: its step finishing says so.
+// step and its item, as its NeedsYou had them. A card found done before it
+// ever went up has none, nor one taken down by the run stopping: its step
+// finishing says so.
 type CardDown struct {
 	Time time.Time
 	Step string

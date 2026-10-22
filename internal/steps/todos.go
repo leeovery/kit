@@ -56,8 +56,8 @@ func toDoList(ctx context.Context, due []byHand) []toDo {
 // the list's changes and its card name the same to-do.
 type lineToDo struct{ byHand }
 
-func (l lineToDo) card(ctx context.Context) event.NeedsYou {
-	c := l.byHand.card(ctx)
+func (l lineToDo) card() event.NeedsYou {
+	c := l.byHand.card()
 	c.Item = l.item().ID
 	return c
 }
@@ -93,13 +93,22 @@ func (o ownToDo) entry() event.ToDo {
 	return event.ToDo{Step: o.step, ID: o.item.ID, Title: t.Title, Group: t.Group, How: howOf(t.Steps, o.item.Detail)}
 }
 
-// card is what its card says: as its step readies it, when it's a choice;
-// kit telling by itself when it's done, but for a choice, whose keys say.
-func (o ownToDo) card(ctx context.Context) event.NeedsYou {
+// card is what its card says, as its item has it: kit telling by itself
+// when it's done, but for a choice, whose keys say.
+func (o ownToDo) card() event.NeedsYou { return cardOf(o.item) }
+
+// ready is what its card says once its step's readied it, when it's a
+// choice.
+func (o ownToDo) ready(ctx context.Context) event.NeedsYou {
 	it := o.item
 	if c := engine.ChoiceOf(ctx, o.step); c != nil {
 		it = c.Ready(ctx, it)
 	}
+	return cardOf(it)
+}
+
+// cardOf is what the card of it, a to-do of kit's own, says.
+func cardOf(it check.Item) event.NeedsYou {
 	t := it.ToDo
 	return event.NeedsYou{Item: it.ID, Title: t.Title, Group: t.Group, Why: t.Why, Steps: t.Steps, Watch: t.Watch, Keys: t.Keys, Tells: len(t.Keys) == 0}
 }
@@ -173,71 +182,161 @@ func (o ownToDo) answer(ctx context.Context, a hand.Answer, _ time.Time) (bool, 
 // workThrough raises list's to-dos for step one at a time, in order, each
 // till it's done: the list emitted as each comes up, and once they're over;
 // one of kit's own done, those its step's check finds now come next
-// (followUps). The person can stop where they are (hand.Stop), the list
-// emitted stopped at once: what's left stays to do, the one up done if it
-// was done as they stopped, or found done by the look under way then, left
-// to finish, which the list is emitted again to say. Their
+// (followUps), looked for aside. The person can stop where they are
+// (hand.Stop), the list emitted stopped at once, whatever's under way:
+// what's left stays to do, the one up done if it was done as they stopped,
+// or found done by the work its card left under way, left to finish, which
+// the list is emitted again to say, with the to-dos it leaves. Their
 // answers come on one listener for the whole list, so a Stop given between
 // two to-dos is never lost, and anything else given then, for a to-do done
 // with, goes nowhere. Then the steps the to-dos done held are checked again
-// (recheckHeld).
+// (recheckHeld). The run stopped, the list's emitted stopped, and nothing
+// more's done.
 func (r *Raise) workThrough(ctx context.Context, step string, list []toDo) error {
 	if len(list) == 0 {
 		return nil
 	}
 	answers, down := r.Desk.Listen(step)
 	defer down()
-	entries := make([]event.ToDo, len(list))
+	l := &toDos{r: r, step: step, list: list, entries: make([]event.ToDo, len(list))}
 	for i, t := range list {
-		entries[i] = t.entry()
+		l.entries[i] = t.entry()
 	}
-	emit := func(up int) {
-		r.Sink.Emit(event.ToDos{Time: r.Now(), Step: step, List: slices.Clone(entries), Up: up})
+	settling, err := l.through(ctx, answers)
+	l.emit(-1)
+	if err != nil {
+		return err
 	}
-	resolved := map[string]bool{}
-	stoppedAt, late := -1, (*looks)(nil)
-	for i := 0; i < len(list); i++ {
-		emit(i)
-		if stoppedMeanwhile(answers) {
-			break
-		}
-		saw, looking, err := r.up(ctx, step, list[i], seat{held: true, after: len(list) - 1 - i, answers: answers})
-		switch {
-		case err == nil, errors.Is(err, errDoneThenStop):
-			entries[i].Done, entries[i].Saw = true, saw
-			resolved[entries[i].ID] = true
-			for j, t := range followUps(ctx, list[i], list) {
-				list = slices.Insert(list, i+1+j, t)
-				entries = slices.Insert(entries, i+1+j, t.entry())
+	if settling != nil {
+		select {
+		case s := <-settling:
+			if l.take(s) {
+				l.emit(-1)
 			}
-		case errors.Is(err, errStopHere):
-			stoppedAt, late = i, looking
-		default:
-			return err
-		}
-		if err != nil {
-			break
+		case <-ctx.Done():
+			return ctx.Err()
 		}
 	}
-	emit(-1)
-	if late != nil {
-		if saw, done := late.outcome(); done {
-			entries[stoppedAt].Done, entries[stoppedAt].Saw = true, saw
-			resolved[entries[stoppedAt].ID] = true
-			emit(-1)
-		}
-	}
-	recheckHeld(ctx, entries, resolved)
+	recheckHeld(ctx, l.entries)
 	return nil
 }
 
+// toDos are the to-dos at the run's end as they're worked through: each as
+// raised, and as the list says it.
+type toDos struct {
+	r       *Raise
+	step    string
+	list    []toDo
+	entries []event.ToDo
+}
+
+// through raises the to-dos in turn, till they're over or the person stops
+// there, returning what the one up then is still settling to, if anything.
+func (l *toDos) through(ctx context.Context, answers <-chan hand.Answer) (<-chan settled, error) {
+	for i := 0; i < len(l.list); i++ {
+		l.emit(i)
+		if stoppedMeanwhile(answers) {
+			return nil, nil
+		}
+		saw, late, err := l.r.up(ctx, l.step, l.list[i], seat{held: true, after: len(l.list) - 1 - i, answers: answers})
+		if err != nil && !errors.Is(err, errStopHere) {
+			return nil, err
+		}
+		if late == nil {
+			l.done(i, saw)
+		}
+		settling := l.settle(ctx, i, late)
+		if err != nil {
+			return settling, nil
+		}
+		if stopped, err := l.between(ctx, answers, settling); stopped || err != nil {
+			return settling, err
+		}
+	}
+	return nil, nil
+}
+
+// emit says the list as it stands, the one at up up: -1 for none, once
+// they're over or the person stopped.
+func (l *toDos) emit(up int) {
+	l.r.Sink.Emit(event.ToDos{Time: l.r.Now(), Step: l.step, List: slices.Clone(l.entries), Up: up})
+}
+
+// done marks the to-do at i done, kit having seen saw.
+func (l *toDos) done(i int, saw string) {
+	l.entries[i].Done, l.entries[i].Saw = true, saw
+}
+
+// settled is what the to-do at i came to, its card down: whether it's
+// done, what kit saw, and the to-dos its step's check found then, to follow
+// it.
+type settled struct {
+	i    int
+	done bool
+	saw  string
+	more []toDo
+}
+
+// settle is what the to-do at i comes to, aside, its card down: done, or,
+// left with work under way (late), done should that find it so; and, done,
+// the to-dos its step's check finds then that the list hasn't.
+func (l *toDos) settle(ctx context.Context, i int, late *work) <-chan settled {
+	list := slices.Clone(l.list)
+	return aside(l.r, func() settled {
+		s := settled{i: i, done: late == nil}
+		if late != nil {
+			s.saw, s.done = late.outcome(ctx)
+		}
+		if s.done {
+			s.more = followUps(ctx, list[i], list)
+		}
+		return s
+	})
+}
+
+// between waits, a to-do done, for what settling it finds, taking the
+// person's answers meanwhile: a Stop stops the list there, what settling
+// finds taken once it's stopped; anything else, for a to-do done with,
+// goes nowhere. It reports whether they stopped.
+func (l *toDos) between(ctx context.Context, answers <-chan hand.Answer, settling <-chan settled) (stopped bool, err error) {
+	for {
+		select {
+		case s := <-settling:
+			l.take(s)
+			return false, nil
+		case a := <-answers:
+			if a == hand.Stop {
+				return true, nil
+			}
+		case <-ctx.Done():
+			return false, ctx.Err()
+		}
+	}
+}
+
+// take takes what settling a to-do found: done, the list says so, with
+// what kit saw, unless it did already; the to-dos found to follow it come
+// next. It reports whether the list changed.
+func (l *toDos) take(s settled) bool {
+	changed := false
+	if s.done && !l.entries[s.i].Done {
+		l.done(s.i, s.saw)
+		changed = true
+	}
+	for j, t := range s.more {
+		l.list = slices.Insert(l.list, s.i+1+j, t)
+		l.entries = slices.Insert(l.entries, s.i+1+j, t.entry())
+		changed = true
+	}
+	return changed
+}
+
 // recheckHeld checks again the steps the to-dos done held, those they came
-// from, for their rows and the run's record. resolved are the done ones'
-// ids.
-func recheckHeld(ctx context.Context, entries []event.ToDo, resolved map[string]bool) {
+// from, for their rows and the run's record.
+func recheckHeld(ctx context.Context, entries []event.ToDo) {
 	from := map[string]bool{}
 	for _, e := range entries {
-		if resolved[e.ID] {
+		if e.Done {
 			from[e.Step] = true
 		}
 	}

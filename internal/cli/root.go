@@ -36,9 +36,12 @@ type Deps struct {
 	Environ func() []string
 	HomeDir func() (string, error)
 	Now     func() time.Time
-	Stdin   io.Reader
-	Stdout  io.Writer
-	Stderr  io.Writer
+	// After is a wait of d, as time.After: how long a step by hand's card
+	// waits to go up, and to post its notification, and between its looks.
+	After  func(d time.Duration) <-chan time.Time
+	Stdin  io.Reader
+	Stdout io.Writer
+	Stderr io.Writer
 	// Terminal reports whether out is a terminal, as IsTerminal does: the
 	// pretty face shows on one, the plain face elsewhere.
 	Terminal func(out io.Writer) bool
@@ -268,6 +271,7 @@ func Real(version string) Deps {
 		Environ:  os.Environ,
 		HomeDir:  os.UserHomeDir,
 		Now:      time.Now,
+		After:    time.After,
 		Stdin:    os.Stdin,
 		Stdout:   os.Stdout,
 		Stderr:   os.Stderr,

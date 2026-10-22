@@ -83,6 +83,11 @@ type world struct {
 	became [][]string
 }
 
+// after is how long kit waits in the world, as time.After has it: never,
+// so that a step by hand's card goes up, and posts its notification, as a
+// look finds it not done, and is looked at again only as it's answered.
+func (w *world) after(time.Duration) <-chan time.Time { return nil }
+
 // newWorld makes a home holding a config repository of files, by name.
 func newWorld(t *testing.T, files map[string]string) *world {
 	t.Helper()
@@ -132,6 +137,7 @@ func (w *world) run(t *testing.T, args ...string) (stdout, stderr string, status
 		Environ:  func() []string { return w.environ },
 		HomeDir:  func() (string, error) { return w.home, nil },
 		Now:      func() time.Time { return w.now },
+		After:    w.after,
 		Stdin:    strings.NewReader(w.stdin),
 		Stdout:   &out,
 		Stderr:   &errOut,

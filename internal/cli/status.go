@@ -470,7 +470,7 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 	var raise *steps.Raise
 	if slices.Contains(applies, command) && a.pretty(a.Stdout) {
 		desk := hand.New()
-		raise = &steps.Raise{Sink: sink, Now: a.Now, Notify: r.notifier(a.Getenv, a.Now), Desk: desk}
+		raise = &steps.Raise{Sink: sink, Now: a.Now, Notify: r.notifier(a.Getenv, a.Now), Desk: desk, After: a.After}
 		r.raise = raise
 		if f, ok := face.(*render.Pretty); ok {
 			f.Hands(desk.Answer)

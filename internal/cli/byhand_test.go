@@ -174,8 +174,8 @@ func TestApplyPlainRaisesNothing(t *testing.T) {
 
 // At a terminal, the steps by hand with no place of their own come last,
 // once every other step has finished, but a step that comes after them; a
-// step done by the time its card goes up comes straight down, with no
-// notification posted for it.
+// step done by the time its turn comes never goes up, nor posts a
+// notification.
 func TestApplyRaisesTheRestLast(t *testing.T) {
 	w := missingWorld(t)
 	w.writeSection(t, "laptop", "manual", `tool "Install the tool" --test test -d /Applications/Tool.app`+"\n")
@@ -194,9 +194,8 @@ func TestApplyRaisesTheRestLast(t *testing.T) {
 	records := w.lastLog(t)
 	started := slices.IndexFunc(records, func(r logs.Record) bool { return r.Event == "step_started" && r.Step == "manual" })
 	finished := slices.IndexFunc(records, func(r logs.Record) bool { return r.Event == "step_finished" && r.Step == "manual" })
-	up := cards(records)
-	if started < 0 || len(up) != 1 || up[0].Answering != "" || !slices.Equal(downs(records), []string{up[0].Item}) {
-		t.Fatalf("log = %+v, want the steps by hand checked, the tool's card up and straight down, as the tool's in", records)
+	if started < 0 || len(cards(records)) > 0 || len(downs(records)) > 0 {
+		t.Fatalf("log = %+v, want the steps by hand checked, the tool's card never up, as the tool's in", records)
 	}
 	for _, c := range w.fake.Calls() {
 		if strings.HasPrefix(c, "osascript") {
