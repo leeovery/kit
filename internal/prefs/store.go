@@ -13,14 +13,19 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/leeovery/kit/internal/gitrepo"
 	"github.com/leeovery/kit/internal/runner"
 )
 
-// cloneTimeout is how long cloning the store may take.
-const cloneTimeout = 10 * time.Minute
+// cloneTimeout is how long cloning the store may take; cloneRetry how
+// often kit tries again for the lock another kit holds while it clones.
+const (
+	cloneTimeout = 10 * time.Minute
+	cloneRetry   = 100 * time.Millisecond
+)
 
 // gitConfig are the clone's own git settings, keeping the user's global
 // ones out: no commit signing (it would wait on 1Password at night), no
@@ -57,13 +62,28 @@ func (p *Prefs) ensureClone(ctx context.Context) error {
 
 // clone clones the store, aside, then puts the clone in its place whole,
 // so that one cut short, by its time limit or the run stopping, leaves none
-// that a later run takes for whole: it clones again.
+// that a later run takes for whole: it clones again, what that one left
+// cleared first. It holds a lock beside the clone throughout, so no two
+// kits clone at once: one that waited for it finds the clone the other
+// made. A folder in the clone's place that isn't one is refused before
+// anything's downloaded.
 func (p *Prefs) clone(ctx context.Context) error {
 	if p.Remote == "" {
 		return errors.New("kit.toml names no prefs_repo for apps' settings")
 	}
 	if err := os.MkdirAll(filepath.Dir(p.Clone), 0o700); err != nil {
 		return err
+	}
+	unlock, err := p.lockClone(ctx)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	if _, err := os.Stat(filepath.Join(p.Clone, ".git")); err == nil {
+		return nil
+	}
+	if in, err := os.ReadDir(p.Clone); err == nil && len(in) > 0 {
+		return fmt.Errorf("%s isn't a clone of the prefs repository, and isn't empty: move it aside for kit to clone the store there", p.Clone)
 	}
 	aside := p.Clone + ".cloning"
 	if err := os.RemoveAll(aside); err != nil {
@@ -77,6 +97,31 @@ func (p *Prefs) clone(ctx context.Context) error {
 		return fmt.Errorf("put the prefs repository's clone in place: %w", err)
 	}
 	return nil
+}
+
+// lockClone takes the lock on cloning the store, beside the clone, trying
+// again while another kit holds it, till ctx is done: unlock lets it go.
+// Its file's never removed, as a kit waiting for it would go on to lock a
+// file no longer there.
+func (p *Prefs) lockClone(ctx context.Context) (unlock func(), err error) {
+	f, err := os.OpenFile(p.Clone+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("lock the prefs repository's clone: %w", err)
+	}
+	for {
+		err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		switch {
+		case err == nil:
+			return func() { _ = f.Close() }, nil
+		case !errors.Is(err, syscall.EWOULDBLOCK):
+			_ = f.Close()
+			return nil, fmt.Errorf("lock the prefs repository's clone: %w", err)
+		case ctx.Err() != nil:
+			_ = f.Close()
+			return nil, ctx.Err()
+		}
+		p.Sleep(cloneRetry)
+	}
 }
 
 // repo is the store's clone, as git drives it: pulled, committed and
