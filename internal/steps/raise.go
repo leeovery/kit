@@ -194,8 +194,8 @@ func (r *Raise) up(ctx context.Context, step string, c raised, s seat) (saw stri
 // lost it so far (lost): the number of the look asked for as it came (0
 // while it isn't its turn); whether a look begun since found it not done;
 // whether its card's drawn, up on the screen; and the waits for its grace
-// to end, and for its notification. known is whether it's known not done,
-// a look having found it so or its card having been up, which it stays;
+// to end, and for its notification. beenUp is whether its card's been up,
+// which it stays; notDone when the last look to find it not done began;
 // readied whether its card's said all it will; choosing whether it's being
 // answered by one of its keys.
 type raising struct {
@@ -213,7 +213,8 @@ type raising struct {
 	drawn    bool
 	grace    <-chan time.Time
 	due      <-chan time.Time
-	known    bool
+	beenUp   bool
+	notDone  time.Time
 	readied  bool
 	choosing bool
 }
@@ -224,9 +225,9 @@ type raising struct {
 // work comes to, and the person's answers. As its turn comes, a look's
 // asked for at once, and the card goes up when it finds it not done, or
 // once its grace is over, whichever is first, so that one found done
-// first never shows, nor opens anything; one known not done goes up at
-// once. Its notification goes out once it's up and a look's found it not
-// done, or it's been up a while.
+// first never shows, nor opens anything; one that's been up, or a look
+// found not done a moment ago, goes up at once. Its notification goes out
+// once it's up and a look's found it not done, or it's been up a while.
 func (u *raising) wait() (string, error) {
 	for {
 		u.takeTurn()
@@ -253,7 +254,8 @@ func (u *raising) wait() (string, error) {
 // takeTurn takes the card's turn as the line has it now: gone, or gone and
 // back since, what came with it goes, its notification taken away; come, a
 // look's asked for, what it says is readied, unless it has been, and its
-// grace begins, unless it's known not done, when it goes up at once.
+// grace begins, unless it's been up, or a look found it not done a moment
+// ago, when it goes up at once.
 func (u *raising) takeTurn() {
 	has, lost := u.r.state(u.pl)
 	if !has || lost != u.lost {
@@ -263,16 +265,25 @@ func (u *raising) takeTurn() {
 	if !has || u.turn != 0 {
 		return
 	}
-	if !u.known {
+	atOnce := u.beenUp || u.fresh()
+	if !atOnce {
 		u.grace = u.r.after(WaitToGoUp, drawAfter)
 	}
 	u.turn = u.work.look()
 	if !u.readied {
 		u.work.readyCard()
 	}
-	if u.known {
+	if atOnce {
 		u.draw()
 	}
+}
+
+// fresh reports whether a look found the card not done a moment ago, as
+// long ago as its grace is long, or less: one that did longer ago may have
+// been done since, so its grace is waited out, unless its turn's look finds
+// it not done first.
+func (u *raising) fresh() bool {
+	return !u.notDone.IsZero() && u.r.Now().Sub(u.notDone) < drawAfter
 }
 
 // took is what the card's work came to: done, or an answer that failed,
@@ -289,23 +300,25 @@ func (u *raising) took(res result) (over bool, saw string, err error) {
 	case res.answered:
 		u.unanswered()
 	default:
-		u.found(res.asked)
+		u.found(res.asked, res.began)
 	}
 	return false, "", nil
 }
 
-// found is the card known not done, as a look, begun once the look
-// numbered asked had been asked for, found it: its turn come, it goes up,
-// and, the look begun since, its notification's posted. A look begun while
-// it waited its turn has it go up at once when it comes.
-func (u *raising) found(asked int) {
-	u.known = true
-	u.undone = u.undone || u.turn > 0 && asked >= u.turn
+// found is the card not done, as a look found it, begun at began once the
+// look numbered asked had been asked for: its turn come, it goes up, the
+// look begun since, or a moment before (fresh), and, begun since, its
+// notification's posted. A look begun a moment before its turn comes has
+// it go up at once when it does.
+func (u *raising) found(asked int, began time.Time) {
+	u.notDone = began
+	current := u.turn > 0 && asked >= u.turn
+	u.undone = u.undone || current
 	switch {
 	case u.turn == 0:
-	case !u.drawn:
+	case !u.drawn && (current || u.fresh()):
 		u.draw()
-	case u.undone:
+	case u.drawn && u.undone:
 		u.announce()
 	}
 }
@@ -329,7 +342,7 @@ func (u *raising) draw() {
 	if !u.r.show(u.ctx, u.pl, u.card) {
 		return
 	}
-	u.drawn, u.known, u.due = true, true, u.r.after(WaitToNotify, noticeAfter)
+	u.drawn, u.beenUp, u.due = true, true, u.r.after(WaitToNotify, noticeAfter)
 	if o, ok := u.c.(opener); ok {
 		u.r.aside.Go(func() { o.open(u.ctx) })
 	}

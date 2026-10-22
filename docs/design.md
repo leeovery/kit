@@ -274,8 +274,8 @@ notification while it's up, once a look finds it not done or it's been up three 
 whichever's first (taken away while it's set aside, posted again as it comes back). Its turn
 come, kit looks at once whether it's done, and it goes up as that look finds it not done, or
 after a quarter of a second, whichever's first, so one found done by then never shows, opens
-nothing and posts nothing, nor has its row say it waits for you; one known not done already, up
-before or found not done while it waited its turn, goes up at once. Its keys work from the
+nothing and posts nothing, nor has its row say it waits for you; one that's been up, or that a
+look found not done no longer ago than that, goes up at once. Its keys work from the
 moment it's up: nothing a card does on the side holds it or them up. Whatever takes time goes
 aside: whether it's done, looked at as its
 turn comes and every few seconds; what a key says; readying what it says, as the date a

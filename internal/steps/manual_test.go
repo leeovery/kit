@@ -503,31 +503,61 @@ func (c *card) downs() []string {
 	return out
 }
 
-// A card waiting its turn, a look finding it not done meanwhile, goes up at
-// once when its turn comes, its grace never waited out, nor the look its
-// turn asks for, held; its step said it waited its turn as it came due
-// behind the first, which never did, being first.
-func TestACardKnownNotDoneGoesUpAtOnce(t *testing.T) {
-	defer steps.SetManualPoll(5 * time.Millisecond)()
-	c := newCard(t)
-	looked, release := make(chan struct{}), make(chan struct{})
+// clock is the time a test's card is told, moved on by hand (pass).
+type clock struct {
+	mu sync.Mutex
+	at time.Time
+}
+
+func (c *clock) now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.at
+}
+
+func (c *clock) pass(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.at = c.at.Add(d)
+}
+
+// waitingBehind is a card, second, coming due behind another, first, up,
+// its time at's, its app com.example.second; second's looked at as its
+// check, then while it waits, finding it not done, then again, that look
+// held, said by looked, till release, finding it done once done says so.
+// It returns both steps applying.
+func waitingBehind(t *testing.T, c *card, at *clock, done *atomic.Bool) (first, second <-chan error, looked, release chan struct{}) {
+	t.Helper()
+	c.raise.Now = at.now
+	looked, release = make(chan struct{}), make(chan struct{})
 	var looks atomic.Int32
-	own := func(name string, done func(context.Context) bool) engine.Step {
-		return steps.OwnManual(c.fake, c.state, steps.ManualStep{Name: name, Do: "Do " + name, After: []string{"cask"}, Done: done}, c.raise)
+	held := sync.OnceFunc(func() { close(looked) })
+	own := func(name string, m steps.ManualStep) engine.Step {
+		m.Name, m.Do, m.After = name, "Do "+name, []string{"cask"}
+		return steps.OwnManual(c.fake, c.state, m, c.raise)
 	}
-	first := applying(t, own("first", nil))
+	first = applying(t, own("first", steps.ManualStep{}))
 	c.cards(t, 1)
-	// Its check, then a look while it waits; the rest held.
-	second := applying(t, own("second", func(context.Context) bool {
-		switch looks.Add(1) {
-		case 1:
-		case 2:
-			close(looked)
-		default:
+	second = applying(t, own("second", steps.ManualStep{Open: "com.example.second", Done: func(context.Context) bool {
+		if looks.Add(1) > 2 {
+			held()
 			<-release
 		}
-		return false
-	}))
+		return done.Load()
+	}}))
+	return first, second, looked, release
+}
+
+// A card waiting its turn, a look finding it not done a moment before its
+// turn comes, goes up at once when it does, its grace never waited out,
+// nor the look its turn asks for, held; its step said it waited its turn
+// as it came due behind the first, which never did, being first.
+func TestACardFoundNotDoneAMomentAgoGoesUpAtOnce(t *testing.T) {
+	defer steps.SetManualPoll(5 * time.Millisecond)()
+	c := newCard(t)
+	c.fake.On("open", "-b", "com.example.second")
+	var done atomic.Bool
+	first, second, looked, release := waitingBehind(t, c, &clock{at: time.Now()}, &done)
 	within(t, looked, "the second was never looked at while it waited")
 	c.answer(t, "first", hand.Done)
 	if err := ended(t, first); err != nil {
@@ -542,6 +572,33 @@ func TestACardKnownNotDoneGoesUpAtOnce(t *testing.T) {
 	want := []string{"up first 0", "queued second", "up first 1", "up second 0"}
 	if got := c.turns(); !slices.Equal(got, want) {
 		t.Errorf("turns %q, want %q", got, want)
+	}
+}
+
+// A card waiting its turn, found not done by a look longer ago than its
+// grace is long, and done since, isn't taken as not done when its turn
+// comes: its grace begins, and its turn's look finding it done, it never
+// goes up, nor opens its app.
+func TestACardFoundNotDoneLongAgo(t *testing.T) {
+	defer steps.SetManualPoll(5 * time.Millisecond)()
+	c := newCard(t)
+	at := &clock{at: time.Now()}
+	var done atomic.Bool
+	first, second, looked, release := waitingBehind(t, c, at, &done)
+	within(t, looked, "the second was never looked at while it waited")
+	at.pass(time.Second)
+	done.Store(true)
+	c.answer(t, "first", hand.Done)
+	c.waits.waiting(t, steps.WaitToGoUp, 2)
+	close(release)
+	for _, applied := range []<-chan error{first, second} {
+		if err := ended(t, applied); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c.raise.Wait()
+	if got := c.ups(); !slices.Equal(got, []string{"first"}) || len(c.fake.Calls()) > 0 {
+		t.Errorf("cards up %q, ran %q; want the first's alone, the second's app never opened", got, c.fake.Calls())
 	}
 }
 

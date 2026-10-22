@@ -45,12 +45,13 @@ type work struct {
 	late     result
 }
 
-// result is what a card's work came to: a look, begun once the look
-// numbered asked had been asked for, or what an answer did (answered);
-// whether it found the card done, what kit saw, and what went wrong, if
-// anything. Or, readied, what the card says.
+// result is what a card's work came to: a look, begun at began once the
+// look numbered asked had been asked for, or what an answer did
+// (answered); whether it found the card done, what kit saw, and what went
+// wrong, if anything. Or, readied, what the card says.
 type result struct {
 	asked    int
+	began    time.Time
 	answered bool
 	readied  *event.NeedsYou
 	done     bool
@@ -158,8 +159,9 @@ func (w *work) do(ctx context.Context, j job) result {
 		card := w.c.(readier).ready(w.readyIn)
 		return result{readied: &card}
 	}
+	began := w.now()
 	done, saw := w.c.done(ctx)
-	return result{asked: j.asked, done: done, saw: saw}
+	return result{asked: j.asked, began: began, done: done, saw: saw}
 }
 
 // report passes res on to the card's loop: halted first, it's kept
