@@ -7,6 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
+	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -298,10 +301,10 @@ func TestPrepareBuildsAside(t *testing.T) {
 }
 
 // Prepared as a run starts, the app numbers the run, after the last run to
-// send notifications, so that it posts none an earlier run sent: the order
-// of the last run's kept, and the lock it's kept under beside it, never in
-// the folder, as the app's instances can still be using both. Each run's
-// number is taken once, as it starts or as it first sends one.
+// send notifications, so that it keeps each run's after the last's: the
+// order of the last run's kept, and the lock it's kept under beside it,
+// never in the folder, as the app's instances can still be using both.
+// Each run's number is taken once, as it starts or as it first sends one.
 func TestPrepareNumbersTheRun(t *testing.T) {
 	app, _ := built(t)
 	dir := filepath.Dir(app.Path())
@@ -336,6 +339,94 @@ func TestPrepareNumbersTheRun(t *testing.T) {
 	if got := fake.Calls(); !reflect.DeepEqual(got, []string{runner.Command{Name: "open", Args: args}.String()}) {
 		t.Errorf("the next run ran %q, want its clear sent as run 2", got)
 	}
+}
+
+// Closed, a run numbered is kept as ended, after those before it, the last
+// 32 of them, so that the app posts nothing it sent that's still to post:
+// what it sends after says its run all the same. A run never numbered
+// isn't, nor numbered once it's closed.
+func TestCloseKeepsTheRunEnded(t *testing.T) {
+	app, fake := built(t)
+	dir := filepath.Dir(app.Path())
+	ended := filepath.Join(dir, "notices", "ended")
+	var before []string
+	for n := range 32 {
+		before = append(before, strconv.Itoa(1000+n))
+	}
+	if err := os.MkdirAll(filepath.Dir(ended), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ended, []byte(strings.Join(before, "\n")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	app.Prepare()
+	app.Close()
+	if got, want := read(t, ended), strings.Join(append(before[1:], "1"), "\n")+"\n"; got != want {
+		t.Errorf("runs ended = %q, want %q", got, want)
+	}
+	args := []string{"-g", "-n", app.Path(), "--args", "clear", "--id", "dialog", "--at", "1000", "--run", "1"}
+	fake.On("open", args...)
+	app.Clear(t.Context(), "dialog")
+	if got := fake.Calls(); !reflect.DeepEqual(got, []string{runner.Command{Name: "open", Args: args}.String()}) {
+		t.Errorf("ran %q once closed, want its clear sent as run 1", got)
+	}
+
+	fake = runnertest.New(t)
+	never := macapp.New(fake, dir, terminal, clock)
+	if !never.Ready(t.Context()) {
+		t.Fatal("the app built isn't ready")
+	}
+	never.Close()
+	args = []string{"-g", "-n", app.Path(), "--args", "clear", "--id", "dialog", "--at", "1000"}
+	fake.On("open", args...)
+	never.Clear(t.Context(), "dialog")
+	if got := read(t, filepath.Join(dir, "notices", "run")); got != "1\n" {
+		t.Errorf("the last run's number is %q once closed unnumbered, want 1 still", got)
+	}
+	if got := fake.Calls(); !reflect.DeepEqual(got, []string{runner.Command{Name: "open", Args: args}.String()}) {
+		t.Errorf("ran %q, want a clear saying no run", got)
+	}
+}
+
+// With the lock held long, as by an instance of the app while macOS posts a
+// notification, a run starting doesn't wait on it: it goes unnumbered, and
+// what it sends says no run, the app then keeping their order by time
+// alone. Its end, numbered, is kept all the same.
+func TestTheLockHeldLong(t *testing.T) {
+	app, fake := built(t)
+	dir := filepath.Dir(app.Path())
+	held := lockHeld(t, dir)
+	app.Prepare()
+	args := []string{"-g", "-n", app.Path(), "--args", "clear", "--id", "dialog", "--at", "1000"}
+	fake.On("open", args...)
+	app.Clear(t.Context(), "dialog")
+	if got := fake.Calls(); !reflect.DeepEqual(got, []string{runner.Command{Name: "open", Args: args}.String()}) {
+		t.Errorf("ran %q, want a clear saying no run", got)
+	}
+	held()
+
+	numbered := macapp.New(runnertest.New(t), dir, terminal, clock)
+	numbered.Prepare()
+	held = lockHeld(t, dir)
+	defer held()
+	numbered.Close()
+	if got := read(t, filepath.Join(dir, "notices", "ended")); got != "1\n" {
+		t.Errorf("runs ended = %q, want run 1's end kept without the lock", got)
+	}
+}
+
+// lockHeld holds the lock on the app's marks in dir, as an instance of the
+// app would, till what it returns is called.
+func lockHeld(t *testing.T, dir string) (release func()) {
+	t.Helper()
+	f, err := os.OpenFile(filepath.Join(dir, "notices.lock"), os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		t.Fatal(err)
+	}
+	return func() { _ = f.Close() }
 }
 
 // read is the file at path, failing the test should it not read.

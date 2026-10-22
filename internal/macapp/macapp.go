@@ -111,20 +111,23 @@ func (a *App) Path() string {
 
 // Beside the app, it keeps the order of the notifications it's sent
 // (kit.swift): marks, the folder where the newest sent under each id is
-// kept, and the newest run to send any (runs, in it); and the lock that
-// kit and the app's instances read and write them under, beside it, so
-// that no folder going leaves two holding different locks.
+// kept, with, in it, the last run numbered (runs) and the runs ended
+// (ended), the last keptEnded of them; and the lock that kit and the app's
+// instances read and write them under, beside it, so that no folder going
+// leaves two holding different locks.
 const (
-	marks = "notices"
-	runs  = "run"
-	lock  = "notices.lock"
+	marks     = "notices"
+	runs      = "run"
+	ended     = "ended"
+	keptEnded = 32
+	lock      = "notices.lock"
+	lockTries = 50
+	lockRetry = 10 * time.Millisecond
 )
 
 // Prepare readies the app as a run starts: the run numbered, after the
-// last, so that a notification an earlier run left waiting, its instance
-// held up while macOS asks the person to allow them, is never posted once
-// this run has begun; and building the app aside, when it needs building,
-// so that a notification posted later needn't wait as long for it.
+// last; and building the app aside, when it needs building, so that a
+// notification posted later needn't wait as long for it.
 func (a *App) Prepare() {
 	a.number()
 	a.building()
@@ -134,8 +137,9 @@ func (a *App) Prepare() {
 // after the last, kept beside the app, taken the first time it's asked for.
 // The app keeps one run's notifications in order after those of the runs
 // before it, whatever time each was sent at, as a new Mac's clock can go
-// back as it sets its time; and posts none an earlier run sent once a later
-// one's begun. "" when it can't be kept.
+// back as it sets its time; and posts none a run sent once it's ended
+// (Close). "" when it can't be kept, the app then keeping their order by
+// time alone.
 func (a *App) number() string {
 	a.numbered.Do(func() {
 		if n, err := nextRun(a.dir); err == nil {
@@ -146,20 +150,17 @@ func (a *App) number() string {
 }
 
 // nextRun keeps, in dir, the number of the next run to send notifications,
-// one after the last kept there, and returns it.
+// one after the last kept there, and returns it: none, should the lock not
+// be had (lockMarks).
 func nextRun(dir string) (int64, error) {
 	if err := os.MkdirAll(filepath.Join(dir, marks), 0o755); err != nil {
 		return 0, fmt.Errorf("make %s: %w", marks, err)
 	}
-	f, err := os.OpenFile(filepath.Join(dir, lock), os.O_CREATE|os.O_RDWR, 0o644)
+	unlock, err := lockMarks(dir)
 	if err != nil {
-		return 0, fmt.Errorf("open %s: %w", lock, err)
+		return 0, err
 	}
-	defer func() { _ = f.Close() }()
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
-		return 0, fmt.Errorf("lock %s: %w", lock, err)
-	}
-	defer func() { _ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN) }()
+	defer unlock()
 	path := filepath.Join(dir, marks, runs)
 	last, err := os.ReadFile(path)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
@@ -171,6 +172,48 @@ func nextRun(dir string) (int64, error) {
 		return 0, err
 	}
 	return n, nil
+}
+
+// endRun keeps, in dir, that the run numbered run has ended, with the
+// others last ended, so that the app posts nothing it sent: under the lock,
+// unless it can't be had, as an instance of the app holds it long, which
+// risks no more than a run's end going unkept.
+func endRun(dir, run string) error {
+	if unlock, err := lockMarks(dir); err == nil {
+		defer unlock()
+	}
+	path := filepath.Join(dir, marks, ended)
+	data, err := os.ReadFile(path)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("read the runs ended: %w", err)
+	}
+	all := append(strings.Fields(string(data)), run)
+	all = all[max(0, len(all)-keptEnded):]
+	return replace(path, []byte(strings.Join(all, "\n")+"\n"))
+}
+
+// lockMarks takes the lock on the marks in dir, trying a while without
+// waiting on it, as an instance of the app can hold it while macOS posts a
+// notification: unlock lets it go, and an error says it couldn't be had.
+func lockMarks(dir string) (unlock func(), err error) {
+	f, err := os.OpenFile(filepath.Join(dir, lock), os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return nil, fmt.Errorf("open %s: %w", lock, err)
+	}
+	for try := 1; ; try++ {
+		err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		if err == nil {
+			return func() {
+				_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+				_ = f.Close()
+			}, nil
+		}
+		if !errors.Is(err, syscall.EWOULDBLOCK) || try == lockTries {
+			_ = f.Close()
+			return nil, fmt.Errorf("lock %s: %w", lock, err)
+		}
+		time.Sleep(lockRetry)
+	}
 }
 
 // replace writes data to path whole, as a file renamed into its place, so
@@ -217,6 +260,8 @@ func (a *App) Ready(ctx context.Context) bool {
 
 // Close stops a build under way, waiting till it has, and starts no other:
 // what's posted after goes through osascript, unless the app was ready.
+// The run, numbered, is kept as ended, and none of its notifications that
+// the app has yet to post is posted; nor is it numbered once closed.
 func (a *App) Close() {
 	a.mu.Lock()
 	a.tried = true
@@ -225,6 +270,10 @@ func (a *App) Close() {
 	a.end()
 	if built != nil {
 		<-built
+	}
+	a.numbered.Do(func() {})
+	if a.runNo != "" {
+		_ = endRun(a.dir, a.runNo)
 	}
 }
 
@@ -337,7 +386,7 @@ func write(path string, data []byte) error {
 // clear is, as macOS can run two launched one after the other in either
 // order, and the first time holds one up while it asks the person to allow
 // them: the app does nothing for one older than the last under its id, nor
-// for one of a run before the newest.
+// for one of a run that's ended.
 func (a *App) Notify(ctx context.Context, id, title, body string) {
 	if ctx.Err() != nil {
 		return

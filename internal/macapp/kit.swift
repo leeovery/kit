@@ -14,7 +14,8 @@
 // them: the newest sent under an id is kept, in kit's data folder, beside
 // the app, ordered by run, then time, and one older does nothing, so a
 // notification taken away before it could be posted never is, nor stays
-// posted; nor is one posted that a run sent once a later run has begun.
+// posted; nor is one posted that a run sent once it's ended, as kit keeps
+// it, there too. One that says no run is posted whatever runs have ended.
 
 import AppKit
 import CryptoKit
@@ -39,12 +40,12 @@ func options(_ words: ArraySlice<String>) -> [String: String] {
 }
 
 // marks is where the newest sent under each id is kept, a file each, named
-// for the id's hash, so any id fits a file's name; and, in runs, the newest
-// run of kit's to send any. lock is the lock kit and the app take to read
-// and write them, beside the folder, never in it.
+// for the id's hash, so any id fits a file's name; and, in ended, the runs
+// of kit's last ended, one a line. lock is the lock kit and the app take to
+// read and write them, beside the folder, never in it.
 let data = Bundle.main.bundleURL.deletingLastPathComponent()
 let marks = data.appendingPathComponent("notices", isDirectory: true)
-let runs = marks.appendingPathComponent("run")
+let ended = marks.appendingPathComponent("ended")
 let lock = data.appendingPathComponent("notices.lock")
 
 func markFile(_ id: String) -> URL {
@@ -52,9 +53,10 @@ func markFile(_ id: String) -> URL {
 }
 
 // Sent is a notify or clear as kit sent it and its mark keeps it: the run
-// that sent it, when, and whether it was a clear. A mark from before runs
-// were numbered has run 0.
-struct Sent: Equatable {
+// that sent it, when, and whether it was a clear. One that says no run, as
+// kit sends when it couldn't number its run, or a mark from before runs
+// were numbered, has run 0.
+struct Sent {
     var run: Int64
     var at: Int64
     var clear: Bool
@@ -68,29 +70,28 @@ struct Sent: Equatable {
 
 // sent is what kit says of the notify or clear it sent: nil when it says
 // nothing of when, as by hand, so that it's done whatever was sent before.
-// One that says no run is taken as sent before runs were numbered.
 func sent(_ given: [String: String], clear: Bool) -> Sent? {
     guard let at = Int64(given["at"] ?? "") else { return nil }
     return Sent(run: Int64(given["run"] ?? "") ?? 0, at: at, clear: clear)
 }
 
 // locked runs body holding the lock on the marks, so that no two of kit
-// and the app read and write them between each other: nil, body not run,
-// when the lock can't be had.
-func locked<T>(_ body: () -> T) -> T? {
+// and the app read and write them between each other; without it, should
+// it not be had, rather than do nothing.
+func locked<T>(_ body: () -> T) -> T {
     let fd = open(lock.path, O_CREAT | O_RDWR, 0o644)
-    guard fd >= 0 else { return nil }
+    guard fd >= 0 else { return body() }
     defer { close(fd) }
-    guard flock(fd, LOCK_EX) == 0 else { return nil }
+    guard flock(fd, LOCK_EX) == 0 else { return body() }
     defer { flock(fd, LOCK_UN) }
     return body()
 }
 
-// newestRun is the newest run of kit's to send notifications: 0 for none.
-// The lock is held.
-func newestRun() -> Int64 {
-    guard let text = try? String(contentsOf: runs, encoding: .utf8) else { return 0 }
-    return Int64(text.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
+// hasEnded reports whether kit keeps sent's run as ended: never one that
+// said no run. The lock is held.
+func hasEnded(_ sent: Sent) -> Bool {
+    guard sent.run > 0, let text = try? String(contentsOf: ended, encoding: .utf8) else { return false }
+    return text.split(whereSeparator: \.isNewline).contains { Int64($0) == sent.run }
 }
 
 // newest is the newest notify or clear sent under id: run and at 0 for
@@ -107,18 +108,15 @@ func newest(_ id: String) -> Sent {
     }
 }
 
-// mark keeps sent as the newest under id, reporting whether it did: false
-// when one sent after it is, or it couldn't be written. The lock is held.
+// mark keeps sent as the newest under id, reporting whether it is: false
+// when one sent after it is. One that can't be written is gone ahead with,
+// as one sent by hand is. The lock is held.
 func mark(_ id: String, _ sent: Sent) -> Bool {
     if newest(id).isNewer(than: sent) {
         return false
     }
-    do {
-        try FileManager.default.createDirectory(at: marks, withIntermediateDirectories: true)
-        try "\(sent.run) \(sent.at) \(sent.clear ? "clear" : "notify")".write(to: markFile(id), atomically: true, encoding: .utf8)
-    } catch {
-        return false
-    }
+    try? FileManager.default.createDirectory(at: marks, withIntermediateDirectories: true)
+    try? "\(sent.run) \(sent.at) \(sent.clear ? "clear" : "notify")".write(to: markFile(id), atomically: true, encoding: .utf8)
     return true
 }
 
@@ -127,7 +125,11 @@ func remove(_ id: String) {
     let center = UNUserNotificationCenter.current()
     center.removeDeliveredNotifications(withIdentifiers: [id])
     center.removePendingNotificationRequests(withIdentifiers: [id])
-    // Removing is asynchronous, and quitting at once can lose it.
+}
+
+// removed lets what remove started finish before the app quits, which
+// would lose it: removing is asynchronous. Never with the lock held.
+func removed() {
     Thread.sleep(forTimeInterval: 1)
 }
 
@@ -141,9 +143,9 @@ func wait(_ seconds: Double, _ body: (@escaping () -> Void) -> Void) {
 func post(_ given: [String: String]) -> Int32 {
     guard let id = given["id"], let title = given["title"] else { return 64 }
     let mine = sent(given, clear: false)
-    // What a run sent once a later one's begun, or sent before the newest
-    // under its id, isn't posted.
-    if let mine, locked({ mine.run >= newestRun() && mark(id, mine) }) != true {
+    // What a run sent once it's ended, or sent before the newest under its
+    // id, isn't posted.
+    if let mine, !locked({ !hasEnded(mine) && mark(id, mine) }) {
         return 0
     }
     let center = UNUserNotificationCenter.current()
@@ -165,12 +167,13 @@ func post(_ given: [String: String]) -> Int32 {
         content.userInfo = ["activate": activate]
     }
     var failed = false
-    // Posted only while it's still the newest sent under its id, by the
-    // newest run, checked and added under the lock, as a clear marks and
-    // removes under it: taken away, sent again, or a later run begun while
-    // macOS asked, it isn't.
+    // Posted only while it's still the newest sent under its id, and its run
+    // hasn't ended, checked and added under the lock: taken away, sent
+    // again, or its run ended while macOS asked, it isn't. Added under the
+    // lock too, as one id can be sent saying something new (macOS asking
+    // for another thing), which an older one added after would hide.
     let added = locked { () -> Bool in
-        if let mine, mine.run < newestRun() || newest(id) != mine {
+        if let mine, hasEnded(mine) || newest(id).isNewer(than: mine) {
             return false
         }
         wait(30) { finish in
@@ -181,11 +184,15 @@ func post(_ given: [String: String]) -> Int32 {
         }
         return true
     }
-    guard added == true else { return 0 }
+    guard added else { return 0 }
     // macOS can deliver it after a clear sent just after has removed what
     // was there.
-    if let mine, let last = locked({ newest(id) }), last.clear, last.isNewer(than: mine) {
-        remove(id)
+    if let mine {
+        let last = locked { newest(id) }
+        if last.clear && last.isNewer(than: mine) {
+            remove(id)
+            removed()
+        }
     }
     return failed ? 1 : 0
 }
@@ -194,11 +201,15 @@ func clear(_ given: [String: String]) -> Int32 {
     guard let id = given["id"] else { return 64 }
     // Marked and removed under the lock, so that no notify adds between:
     // one sent after it stays.
-    _ = locked {
+    let removing = locked { () -> Bool in
         if let mine = sent(given, clear: true), !mark(id, mine) {
-            return
+            return false
         }
         remove(id)
+        return true
+    }
+    if removing {
+        removed()
     }
     return 0
 }
