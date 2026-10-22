@@ -416,6 +416,13 @@ func (r *run) installed(kindName, thing string) func(context.Context) bool {
 	}
 }
 
+// installs reports whether kit apply installs thing, one of a step's things,
+// as in cask:arq: declared for this Mac, and not off.
+func (r *run) installs(thing string) bool {
+	kindName, name, _ := strings.Cut(thing, ":")
+	return slices.ContainsFunc(r.lists[kindName].Entries, func(e config.Entry) bool { return !e.Off && sameThing(e.Name, name) })
+}
+
 // behind is whether what waits behind thing, a thing of the kind called
 // kindName, as a kind taking turns with it does, has waited enough: once
 // it's installed, or the kind's done with it for now (settled), as when it

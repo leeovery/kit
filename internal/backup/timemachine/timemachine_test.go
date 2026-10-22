@@ -17,6 +17,9 @@ var now = func() time.Time { return time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC
 
 // tmPrefs is Time Machine's settings, as defaults exports them: automatic
 // backups as given, and one destination whose backups are dates.
+// nothingDeclared is a Mac declaring nothing kit installs.
+func nothingDeclared(string) bool { return false }
+
 func tmPrefs(auto string, dates ...time.Time) string {
 	var b strings.Builder
 	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?>
@@ -129,7 +132,7 @@ func TestTimeMachine(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			fake := runnertest.New(t)
 			tt.script(fake)
-			res := steps.Backup(fake, timemachine.Driver{}, now).Check(t.Context())
+			res := steps.Backup(fake, timemachine.Driver{}, now, nothingDeclared).Check(t.Context())
 			var ids []string
 			for _, it := range res.Items {
 				ids = append(ids, it.ID)
@@ -150,7 +153,7 @@ func TestTimeMachine(t *testing.T) {
 	fake.On("defaults", prefs...).Prints(tmPrefs("<true/>", old))
 	fake.On("tmutil", "destinationinfo").Prints(tmConnected)
 	fake.On("tmutil", "status").Prints(tmIdle)
-	res := steps.Backup(fake, timemachine.Driver{}, now).Check(t.Context())
+	res := steps.Backup(fake, timemachine.Driver{}, now, nothingDeclared).Check(t.Context())
 	if len(res.Items) != 1 || res.Items[0].Name != "last backup 5 hours ago" {
 		t.Errorf("stale, the disk connected: %+v", res.Items)
 	}
@@ -161,7 +164,7 @@ func TestTimeMachine(t *testing.T) {
 func TestTimeMachineToDo(t *testing.T) {
 	fake := runnertest.New(t)
 	fake.On("defaults", prefs...).Exits(1).PrintsToStderr("file does not exist")
-	res := steps.Backup(fake, timemachine.Driver{}, now).Check(t.Context())
+	res := steps.Backup(fake, timemachine.Driver{}, now, nothingDeclared).Check(t.Context())
 	want := check.Item{
 		ID: "time-machine:none", Name: "Add a Time Machine disk", State: steps.Problem,
 		Detail: "Plug in your backup disk, then System Settings › General › Time Machine › Add Backup Disk",

@@ -73,10 +73,12 @@ func ReadBackup(name, options string) (BackupTool, error) {
 }
 
 // Backup checks a backup tool's backups, as its driver says they stand:
-// set up, or the person's to set up; then what's wrong, in the tool's
-// words, and how they stand, when the tool's words don't say, from when
-// they last finished.
-func Backup(run runner.Runner, d tool.Driver, now func() time.Time) engine.Step {
+// installed, or how to install it, as installs says whether kit installs
+// what the tool comes as (one of a step's things, as in cask:arq); set up,
+// or the person's to set up; then what's wrong, in the tool's words, and
+// how they stand, when the tool's words don't say, from when they last
+// finished.
+func Backup(run runner.Runner, d tool.Driver, now func() time.Time, installs func(thing string) bool) engine.Step {
 	about := d.About()
 	return engine.Step{
 		Name: about.ID, Title: about.Name, Area: AreaBackups, Row: rowBackups,
@@ -86,6 +88,8 @@ func Backup(run runner.Runner, d tool.Driver, now func() time.Time) engine.Step 
 			switch {
 			case err != nil:
 				return failed(err)
+			case st.Missing:
+				return problem(about.ID, "not installed", [3]string{"missing", about.Name + " isn't installed", installing(about.Package, installs)})
 			case st.NotSetUp:
 				s := about.SetUp
 				return yours(about.ID, "not set up", "none", s.Do, check.ToDo{Title: s.Title, Why: s.Why, Steps: s.Steps, Watch: s.Watch, Group: groupBackups})
@@ -105,6 +109,20 @@ func Backup(run runner.Runner, d tool.Driver, now func() time.Time) engine.Step 
 			return check.Result{State: check.OK, Summary: summary, Glance: glance}
 		},
 	}
+}
+
+// installing is how to install a tool that comes as pkg, one of a step's
+// things, as in cask:arq: kit apply installs it when it's declared
+// (installs); else it's declared, as kit cask add arq does.
+func installing(pkg string, installs func(thing string) bool) string {
+	kindName, item, ok := strings.Cut(pkg, ":")
+	switch {
+	case !ok:
+		return "install it"
+	case installs(pkg):
+		return "kit apply installs it"
+	}
+	return "install it: kit " + kindName + " add " + item
 }
 
 // backupSummary is how a tool's backups stand: in its words, when it has

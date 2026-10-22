@@ -41,6 +41,9 @@ type About struct {
 	// writes that tool's list for it, whether or not the Mac lists that
 	// tool. "" for one keeping its own.
 	Follows string
+	// Package is what installs it, as a line names one of a step's things,
+	// kind:item (cask:arq): "" for one that comes with macOS.
+	Package string
 }
 
 // SetUp is setting a tool up, as a to-do says it: its title, why, its steps
@@ -55,6 +58,10 @@ type SetUp struct {
 
 // Status is how a tool's backups stand on a Mac.
 type Status struct {
+	// Missing is whether it isn't installed, so there's nothing to look
+	// at: kit says how to install it, as what installs it (About.Package)
+	// is declared or not.
+	Missing bool
 	// NotSetUp is whether it's never been set up on the Mac, so there's
 	// nothing to look at: setting it up is the person's (About.SetUp).
 	NotSetUp bool

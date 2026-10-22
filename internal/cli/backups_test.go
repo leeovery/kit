@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/leeovery/kit/internal/runner"
 )
 
 // arqStats is what arqc stats says of one daily plan backed up at last.
@@ -34,6 +36,27 @@ func TestBackupsBringTheirChecks(t *testing.T) {
 	_, errOut, code := w.run(t, "status")
 	if !strings.Contains(errOut, "laptop/declarations:5: kit doesn't know the backup tool time-capsule: one of arq, time-machine") || code != 2 {
 		t.Errorf("kit status printed %q, exit %d", errOut, code)
+	}
+}
+
+// Arq not installed, kit says how to install it as this Mac's config has
+// it: kit apply does, its cask declared for this Mac; else the cask's to be
+// declared.
+func TestArqNotInstalledSaysHow(t *testing.T) {
+	for _, tt := range []struct{ name, casks, do string }{
+		{"its cask declared", "arq\nzoom\n", "kit apply installs it"},
+		{"its cask not declared", "zoom\n", "install it: kit cask add arq"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			w := laptopWorld(t)
+			w.writeSection(t, "laptop", "homebrew casks", tt.casks)
+			w.writeSection(t, "laptop", "backups", "arq\n")
+			w.fake.On(arqc, "stats").Fails(runner.ErrNotFound)
+			out, _, _ := w.run(t, "status", "arq")
+			if !strings.Contains(out, "Arq isn't installed") || !strings.Contains(out, tt.do) {
+				t.Errorf("kit status arq printed\n%s\nwant Arq not installed: %s", out, tt.do)
+			}
+		})
 	}
 }
 

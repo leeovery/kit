@@ -46,7 +46,7 @@ func TestArq(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			fake := runnertest.New(t)
 			fake.On(arq.Arqc, "stats").Prints(tt.out)
-			res := steps.Backup(fake, arq.Driver{}, now).Check(t.Context())
+			res := steps.Backup(fake, arq.Driver{}, now, nothingDeclared).Check(t.Context())
 			var ids []string
 			for _, it := range res.Items {
 				ids = append(ids, it.ID)
@@ -59,11 +59,38 @@ func TestArq(t *testing.T) {
 			}
 		})
 	}
-	fake := runnertest.New(t)
-	fake.On(arq.Arqc, "stats").Fails(runner.ErrNotFound)
-	res := steps.Backup(fake, arq.Driver{}, now).Check(t.Context())
-	if res.State != check.Attention || res.Summary != "not installed" || len(res.Items) != 1 || res.Items[0].ID != "arq:missing" {
-		t.Errorf("not installed = %+v", res)
+}
+
+// nothingDeclared is a Mac declaring nothing kit installs.
+func nothingDeclared(string) bool { return false }
+
+// Arq not installed, kit says so, and how to install it: kit apply does,
+// its cask declared for the Mac; else its cask is to be declared.
+func TestArqNotInstalled(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		declared bool
+		do       string
+	}{
+		{"its cask declared", true, "kit apply installs it"},
+		{"its cask not declared", false, "install it: kit cask add arq"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			fake := runnertest.New(t)
+			fake.On(arq.Arqc, "stats").Fails(runner.ErrNotFound)
+			var asked []string
+			res := steps.Backup(fake, arq.Driver{}, now, func(thing string) bool {
+				asked = append(asked, thing)
+				return tt.declared
+			}).Check(t.Context())
+			want := []check.Item{{ID: "arq:missing", Name: "Arq isn't installed", State: steps.Problem, Detail: tt.do}}
+			if res.State != check.Attention || res.Summary != "not installed" || !reflect.DeepEqual(res.Items, want) {
+				t.Errorf("not installed = %+v, want its item %+v", res, want)
+			}
+			if !slices.Equal(asked, []string{"cask:arq"}) {
+				t.Errorf("asked whether %q is declared, want Arq's cask", asked)
+			}
+		})
 	}
 }
 
@@ -101,7 +128,7 @@ func TestArqNeverSetUp(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			fake := runnertest.New(t)
 			tt.script(fake)
-			res := steps.Backup(fake, arq.Driver{}, now).Check(t.Context())
+			res := steps.Backup(fake, arq.Driver{}, now, nothingDeclared).Check(t.Context())
 			if res.State != check.Attention || res.Summary != tt.text || len(res.Items) != 1 || !reflect.DeepEqual(res.Items[0], tt.item) {
 				t.Errorf("= %+v\nwant %s, %+v", res, tt.text, tt.item)
 			}

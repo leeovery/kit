@@ -70,6 +70,7 @@ func (Driver) About() tool.About {
 			Do:    "Open Arq, sign in to your Arq account, and adopt this Mac's plan",
 		},
 		Follows: timemachine.ID,
+		Package: "cask:arq",
 	}
 }
 
@@ -77,13 +78,14 @@ func (Driver) About() tool.About {
 // backed up within 26 hours. A plan with no schedule ("Manual") isn't
 // expected to run, so it's left out, as a plan kept for its history is. Arq
 // just installed, its licence agreement not yet accepted, or with no plan
-// made, isn't set up, as Time Machine without a backup disk isn't.
+// made, isn't set up, as Time Machine without a backup disk isn't; not
+// installed, it's missing.
 func (Driver) Look(ctx context.Context, run runner.Runner, now time.Time) (tool.Status, error) {
 	res, err := run.Run(ctx, runner.Command{Name: Arqc, Args: []string{"stats"}})
 	var s stats
 	switch {
 	case errors.Is(err, runner.ErrNotFound):
-		return tool.Status{Summary: "not installed", Problems: []tool.Problem{{Key: "missing", What: "Arq isn't installed", Do: "install it: kit cask add arq"}}}, nil
+		return tool.Status{Missing: true}, nil
 	case err != nil && strings.Contains(string(res.Stderr), unlicensed):
 		return tool.Status{NotSetUp: true}, nil
 	case err == nil:

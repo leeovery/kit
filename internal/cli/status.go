@@ -427,7 +427,7 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 	}
 	var checks []engine.Step
 	for _, b := range backups {
-		checks = append(checks, steps.Backup(observed, b.Driver, a.Now))
+		checks = append(checks, steps.Backup(observed, b.Driver, a.Now, r.installs))
 	}
 	var settings []engine.Step
 	if features.on(steps.FeaturePrefs) {

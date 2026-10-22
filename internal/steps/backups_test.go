@@ -51,17 +51,47 @@ func TestParseBackup(t *testing.T) {
 }
 
 // fakeTool is a backup tool whose backups stand as status says, or that
-// can't be looked at, err.
+// can't be looked at, err; installed as pkg says.
 type fakeTool struct {
 	status tool.Status
 	err    error
+	pkg    string
 }
 
 func (f fakeTool) About() tool.About {
-	return tool.About{ID: "vault", Name: "Vault", SetUp: tool.SetUp{
+	return tool.About{ID: "vault", Name: "Vault", Package: f.pkg, SetUp: tool.SetUp{
 		Title: "Set up Vault", Why: "Vault has nowhere to back up to.", Steps: []string{"Open Vault", "Choose a disk"},
 		Watch: "Vault has a disk", Do: "Open Vault, and choose a disk",
 	}}
+}
+
+// nothingDeclared is a Mac declaring nothing kit installs.
+func nothingDeclared(string) bool { return false }
+
+// A backup tool not installed is a problem, saying how to install it, from
+// what installs it: kit apply does, that thing declared for the Mac; else
+// it's declared, with the kind's add; a tool that names nothing that
+// installs it, installed somehow.
+func TestABackupToolMissing(t *testing.T) {
+	for _, tt := range []struct {
+		name, pkg string
+		declared  []string
+		do        string
+	}{
+		{"declared", "cask:vault", []string{"cask:vault"}, "kit apply installs it"},
+		{"not declared", "cask:vault", []string{"cask:other"}, "install it: kit cask add vault"},
+		{"from the App Store, not declared", "mas:vault", nil, "install it: kit mas add vault"},
+		{"nothing installs it", "", nil, "install it"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			declared := func(thing string) bool { return slices.Contains(tt.declared, thing) }
+			res := steps.Backup(runnertest.New(t), fakeTool{status: tool.Status{Missing: true, Summary: "ignored"}, pkg: tt.pkg}, now, declared).Check(t.Context())
+			want := []check.Item{{ID: "vault:missing", Name: "Vault isn't installed", State: steps.Problem, Detail: tt.do}}
+			if res.State != check.Attention || res.Summary != "not installed" || !reflect.DeepEqual(res.Items, want) {
+				t.Errorf("= %+v, want not installed, its item %+v", res, want)
+			}
+		})
+	}
 }
 
 func (f fakeTool) Look(context.Context, runner.Runner, time.Time) (tool.Status, error) {
@@ -97,7 +127,7 @@ func TestBackupStep(t *testing.T) {
 		{"not set up", tool.Status{NotSetUp: true, Summary: "ignored"}, check.Attention, "not set up", "", []string{"vault:none"}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			step := steps.Backup(runnertest.New(t), fakeTool{status: tt.status}, now)
+			step := steps.Backup(runnertest.New(t), fakeTool{status: tt.status}, now, nothingDeclared)
 			res := step.Check(t.Context())
 			var ids []string
 			for _, it := range res.Items {
@@ -114,14 +144,14 @@ func TestBackupStep(t *testing.T) {
 			}
 		})
 	}
-	res := steps.Backup(runnertest.New(t), fakeTool{status: tool.Status{NotSetUp: true}}, now).Check(t.Context())
+	res := steps.Backup(runnertest.New(t), fakeTool{status: tool.Status{NotSetUp: true}}, now, nothingDeclared).Check(t.Context())
 	want := check.Item{ID: "vault:none", Name: "Set up Vault", State: steps.Problem, Detail: "Open Vault, and choose a disk", ToDo: &check.ToDo{
 		Title: "Set up Vault", Why: "Vault has nowhere to back up to.", Steps: []string{"Open Vault", "Choose a disk"}, Watch: "Vault has a disk", Group: "Backups",
 	}}
 	if len(res.Items) != 1 || !reflect.DeepEqual(res.Items[0], want) {
 		t.Errorf("not set up: items = %+v\nwant %+v, %+v", res.Items, want, want.ToDo)
 	}
-	res = steps.Backup(runnertest.New(t), fakeTool{err: errors.New("couldn't read Vault's settings")}, now).Check(t.Context())
+	res = steps.Backup(runnertest.New(t), fakeTool{err: errors.New("couldn't read Vault's settings")}, now, nothingDeclared).Check(t.Context())
 	if res.State != check.Failed || res.Reason != "couldn't read Vault's settings" {
 		t.Errorf("unread: %+v, want failed, saying why", res)
 	}

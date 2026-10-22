@@ -59,7 +59,7 @@ func TestEveryStepHasARow(t *testing.T) {
 		nightly.Check(nil, true, true, state, never),
 	})
 	for _, d := range backup.Tools {
-		made = append(made, steps.Backup(fake, d, never))
+		made = append(made, steps.Backup(fake, d, never, func(string) bool { return false }))
 	}
 	// kit.toml naming a terminal, the boot makes every step it has.
 	booted := (&boot.Boot{Config: configDir}).Booted()

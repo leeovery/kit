@@ -190,7 +190,8 @@ after what isn't a step, and `kit backup remove <tool>` (`--shared`) takes it ou
 config error naming those it has, and `time-machine` or `arq` in `[features]`, where they were
 before, is refused, saying they go in `[backups]` and the `kit backup add` that puts them there
 (`kit feature on|off` of one names `kit backup add|remove`). The driver says
-everything that's the tool's: its name; whether it's set up, and, when it isn't, setting it
+everything that's the tool's: its name; what installs it, as a line names one of a step's things
+(`cask:arq`; nothing for Time Machine, which comes with macOS); whether it's set up, and, when it isn't, setting it
 up as a to-do (its title, why, its steps, what kit watches for, and in a line for `kit
 status`); when its backups last finished, as plans when it has several, and whether one is
 running; what's wrong, in its words, each with a key and what to do; its summary when its
@@ -203,8 +204,9 @@ and its glance ("Time Machine 11:20"). Time Machine: a backup disk, automatic ba
 last backup within 3 hours (the disk away said so) and none stuck in a phase over 3 hours; a
 disk just added, its first backup under way or none tried yet with the disk there, is fine
 for now. Arq, through `arqc stats`: the plans it runs on a schedule (one marked "Manual" isn't
-expected to run), one at least, each backed up within 26 hours; not installed, or its status
-unreadable, says so; its licence agreement not yet accepted, or no plan made, is not set up.
+expected to run), one at least, each backed up within 26 hours; not installed says so, and that
+`kit apply` installs it, its cask declared for the Mac, else `kit cask add arq` (kit's shared
+code says it, from what the driver says installs it and the config); its status unreadable says so; its licence agreement not yet accepted, or no plan made, is not set up.
 
 **Checks.** Steps with a check and no apply, each problem an item with a stable id saying
 what's wrong and what to do: the Mac's (`disk`, `memory`, `file-events`, `load`), always;
