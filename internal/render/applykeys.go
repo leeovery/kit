@@ -367,8 +367,10 @@ func (p *Pretty) footKeys() string {
 	switch {
 	case p.keys.asking:
 		return look.Hints(stoppingKeys...)
-	case p.keys.listen != nil && p.todos != nil:
+	case p.keys.listen != nil && p.todos != nil && p.todos.Up >= 0:
 		return look.Hints(toDoKeys...)
+	case p.keys.listen != nil && p.todos != nil:
+		return look.Hints(toDoOverKeys...)
 	case p.keys.listen != nil && p.cardsWaiting():
 		return look.Hints(cardingKeys...)
 	case p.keys.listen != nil:

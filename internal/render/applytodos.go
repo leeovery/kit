@@ -15,8 +15,13 @@ import (
 // card's is; the state line counts what's left and done. Once they're
 // over, kit carries on by itself, the list ticked, the log the whole side.
 
-// toDoKeys are the keys at the left pane's foot while the to-dos are up.
-var toDoKeys = []look.Key{{Key: "q", Does: "stop here"}}
+// The keys at the left pane's foot while the to-dos have it: q stops there
+// while they're being worked through; once they're over, or stopped there,
+// it stops the run.
+var (
+	toDoKeys     = []look.Key{{Key: "q", Does: "stop here"}}
+	toDoOverKeys = []look.Key{{Key: "q", Does: "stop"}}
+)
 
 // toDoState is the state line while the to-dos are up: how many are left,
 // then how many are done once some are; once they're over, that kit's

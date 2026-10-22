@@ -198,7 +198,9 @@ func TestTheRecordAfterStoppingAtTheToDos(t *testing.T) {
 
 // The left pane lists the to-dos, To do and how many, then each group
 // where its first comes, its name muted after a blank line; done ones the
-// done mark and muted, the one up a pill, the rest white; q at its foot.
+// done mark and muted, the one up a pill, the rest white; q at its foot,
+// stopping there, and, once they're over or stopped there, stopping the
+// run, as q does then.
 // The state line counts what's left, then what's done once some are, and
 // once they're over, that kit's carrying on. The log says each done, how
 // long it took and what kit saw, and nothing of each coming up.
@@ -247,6 +249,15 @@ func TestTheToDosList(t *testing.T) {
 	over := screen(out2.String())
 	if state := lines(over)[3]; !strings.HasSuffix(state, "│  ◐ carrying on") {
 		t.Errorf("all done, the state line is %q", state)
+	}
+	stopped := stoppedAtTheToDos()
+	stopped = stopped[:len(stopped)-2]
+	halted, out3, _ := applyAt(160, 64, since(stopped), stopped)
+	defer func() { _ = halted.Close() }()
+	for name, got := range map[string]string{"all done": over, "stopped there": screen(out3.String())} {
+		if foot := leftFoot(got, 160, 1); foot[0] != "  q stop" {
+			t.Errorf("%s, the left pane's foot is %q, want q to stop the run", name, foot)
+		}
 	}
 	if log := logOf(over, 160); len(log) < 3 || log[len(log)-1] != "  03:41:34  ◐ Checking once more" || log[len(log)-3] != "  03:41:22  ● Time Machine: no backup yet" {
 		t.Errorf("all done, the log is\n%s\nwant the steps they held checked again, kit checking at its foot", strings.Join(log, "\n"))

@@ -27,4 +27,4 @@
                                                     │  03:41:20  ● Set up Arq's backup plan: done, …
                                                     │  03:41:22  ● Time Machine: no backup yet
                                                     │  03:41:22  ● Arq: no recent backup
-  q stop here                                       │  03:41:34  ◐ Checking once more
+  q stop                                            │  03:41:34  ◐ Checking once more
