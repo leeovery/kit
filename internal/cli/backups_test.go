@@ -101,6 +101,34 @@ func TestABackupToolWaitsForWhatItChecks(t *testing.T) {
 	}
 }
 
+// A backup tool waits for what it comes as, declared for this Mac, though
+// its line doesn't say so: applying, Arq's check waits till its cask is in,
+// which installs first.
+func TestABackupToolWaitsForItsPackage(t *testing.T) {
+	w := laptopWorld(t)
+	w.writeSection(t, "laptop", "homebrew casks", "arq\nzoom\n")
+	w.writeSection(t, "laptop", "backups", "arq\n")
+	f := w.fake
+	f.On("brew", "list", "--cask", "--full-name", "-1").Prints("ghostty\nfirefox\n")
+	f.On("brew", "info", "--json=v2", "--cask", "arq", "zoom").Prints(`{"formulae": [], "casks": [{"token": "arq", "full_token": "arq", "artifacts": [{"app": ["Arq.app"]}]}, {"token": "zoom", "full_token": "zoom", "artifacts": [{"app": ["zoom.us.app"]}]}]}`)
+	f.On("sudo", "-n", "true").Exits(1)
+	f.On("brew", "update", "--quiet")
+	f.On("brew", "install", "--cask", "arq").Does(func() {
+		f.On("brew", "list", "--cask", "--full-name", "-1").Prints("ghostty\nfirefox\narq\n")
+	})
+	f.On("brew", "info", "--json=v2", "--cask", "zoom").Prints(`{"formulae": [], "casks": [{"token": "zoom", "full_token": "zoom", "artifacts": [{"app": ["zoom.us.app"]}]}]}`)
+	f.On("brew", "install", "--cask", "zoom")
+	f.On(arqc, "stats").Prints(arqStats(w.now.Add(-2 * time.Hour)))
+
+	out, errOut, _ := w.run(t, "apply")
+	if calls := w.fake.Calls(); !before(calls, "brew install --cask arq", arqc+" stats") {
+		t.Errorf("ran %q: want arq's cask installed, then Arq checked", calls)
+	}
+	if !strings.Contains(out, "arq ok last backup 01:04\n") {
+		t.Errorf("kit apply printed\n%s%s\nwant Arq checked once its cask was in", out, errOut)
+	}
+}
+
 // A backup tool's line can place its check before another step, which then
 // waits for it as kit applies (kit status checks everything at once).
 func TestABackupToolBeforeAnother(t *testing.T) {

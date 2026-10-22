@@ -53,14 +53,21 @@ func backupNames(tools []steps.BackupTool) []string {
 // its line says: after the steps it names, waiting for the things, checking
 // once they're in, as a step of your own does, and before the steps it
 // names. One placed after or before what isn't a step fails, saying so.
+// What the tool comes as (its Package), declared for this Mac, is waited
+// for too, as kit apply installs it.
 func (r *run) placeBackups(all []engine.Step, tools []steps.BackupTool) {
 	names := stepNames(all)
 	for _, b := range tools {
-		i := slices.IndexFunc(all, func(s engine.Step) bool { return s.Name == b.Driver.About().ID })
+		about := b.Driver.About()
+		i := slices.IndexFunc(all, func(s engine.Step) bool { return s.Name == about.ID })
 		if i < 0 {
 			continue
 		}
-		after, waits, before, err := r.place(b.After, b.Before, names)
+		afters := b.After
+		if about.Package != "" && r.declares(about.Package) && !slices.Contains(afters, about.Package) {
+			afters = append(slices.Clone(afters), about.Package)
+		}
+		after, waits, before, err := r.place(afters, b.Before, names)
 		if err != nil {
 			broken(&all[i], fmt.Sprintf("%s: %s", b.Pos, err))
 			continue

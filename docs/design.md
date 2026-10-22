@@ -179,7 +179,8 @@ for the tools they use, and the switches exist because those Macs differ.
 **Backups.** A Mac's `[backups]` section names the backup tools it uses, a line each: the
 tool, then `--after` and `--before` as on any line (`arq --after cask:arq`: as kit applies,
 Arq's check waits till its cask is in, rather than reading "not installed" while the cask
-waits its turn; one placed after or before what isn't a step fails its check, saying so). A
+waits its turn; one placed after or before what isn't a step fails its check, saying so;
+what the tool comes as, declared for the Mac, is waited for whatever its line says). A
 Mac with no `[backups]` has no backup steps; the tools' steps run in kit's order (Time
 Machine, then Arq), whatever the files' order. `kit backup add <tool>` (`--after`, `--before`,
 `--shared`, `--note`) declares one (with `--shared`, for every Mac, taking it out of each Mac's
