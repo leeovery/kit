@@ -297,25 +297,33 @@ func TestAStepsOwnSudoIsGivenThePassword(t *testing.T) {
 }
 
 // keyboard is a terminal's keys as a test presses them, read while kit
-// listens, the terminal in its raw mode meanwhile.
+// listens, the terminal in its raw mode meanwhile. Stopped (done), a press
+// under way gives up, and the keys end once none is (pressing), as
+// ask.Listen ends them.
 type keyboard struct {
-	mu      sync.Mutex
-	keys    chan ask.Key
-	raw     bool
-	started int
+	mu       sync.Mutex
+	keys     chan ask.Key
+	done     chan struct{}
+	pressing sync.WaitGroup
+	raw      bool
+	started  int
 }
 
 func (k *keyboard) listen() (<-chan ask.Key, func()) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
-	keys := make(chan ask.Key)
-	k.keys, k.raw = keys, true
+	keys, done := make(chan ask.Key), make(chan struct{})
+	k.keys, k.done, k.raw = keys, done, true
 	k.started++
 	return keys, sync.OnceFunc(func() {
 		k.mu.Lock()
 		defer k.mu.Unlock()
 		k.raw = false
-		close(keys)
+		close(done)
+		go func() {
+			k.pressing.Wait()
+			close(keys)
+		}()
 	})
 }
 
@@ -331,14 +339,22 @@ func (k *keyboard) state() (raw bool, started int) {
 // before the next is, as a key that does nothing follows the last.
 func (k *keyboard) press(t *testing.T, keys ...ask.Key) {
 	k.mu.Lock()
-	ch, raw := k.keys, k.raw
+	ch, done, raw := k.keys, k.done, k.raw
+	if raw {
+		k.pressing.Add(1)
+	}
 	k.mu.Unlock()
 	if !raw {
 		t.Error("keys pressed while kit isn't reading them")
 		return
 	}
+	defer k.pressing.Done()
 	for _, key := range append(keys, ask.Key{Name: "nothing"}) {
-		ch <- key
+		select {
+		case ch <- key:
+		case <-done:
+			return
+		}
 	}
 }
 
