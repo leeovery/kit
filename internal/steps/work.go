@@ -24,7 +24,7 @@ import (
 type work struct {
 	c       raised
 	now     func() time.Time
-	after   func(time.Duration) <-chan time.Time
+	after   func(Wait, time.Duration) <-chan time.Time
 	every   time.Duration
 	out     chan result
 	wake    chan struct{}
@@ -86,7 +86,7 @@ func (r *Raise) working(ctx context.Context, c raised) *work {
 func (w *work) run(ctx context.Context) {
 	defer close(w.over)
 	for {
-		j, ok := w.next(ctx, w.after(w.every))
+		j, ok := w.next(ctx, w.after(WaitToLook, w.every))
 		if !ok {
 			return
 		}
@@ -163,11 +163,15 @@ func (w *work) do(ctx context.Context, j job) result {
 }
 
 // report passes res on to the card's loop: halted first, it's kept
-// instead, should it have found the card done.
+// instead, should it have found the card done, and an answer's error,
+// which nothing's left to say, the log says.
 func (w *work) report(ctx context.Context, res result) {
 	select {
 	case w.out <- res:
 	case <-w.halted:
+		if res.err != nil {
+			event.Log(ctx, event.Logged{Line: w.c.card().Title + ": " + res.err.Error(), Alert: true})
+		}
 		if res.done {
 			w.mu.Lock()
 			w.late = res

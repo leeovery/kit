@@ -39,9 +39,9 @@ func toDoList(ctx context.Context, due []byHand) []toDo {
 			switch {
 			case it.ToDo == nil:
 			case it.ToDo.First:
-				first = append(first, ownToDo{step: f.Step, item: it})
+				first = append(first, ownOf(ctx, f.Step, it))
 			default:
-				last = append(last, ownToDo{step: f.Step, item: it})
+				last = append(last, ownOf(ctx, f.Step, it))
 			}
 		}
 	}
@@ -89,6 +89,27 @@ type ownToDo struct {
 	item check.Item
 }
 
+// ownOf is the to-do of it, found by step's check: a choice whose step
+// readies it when it has keys and its step readies what they say, else
+// one kit watches, or a choice as it stands.
+func ownOf(ctx context.Context, step string, it check.Item) toDo {
+	o := ownToDo{step: step, item: it}
+	if c := engine.ChoiceOf(ctx, step); len(it.ToDo.Keys) > 0 && c != nil && c.Ready != nil {
+		return choiceToDo{o}
+	}
+	return o
+}
+
+// owned is one of kit's own to-dos, a choice or not.
+type owned interface{ own() ownToDo }
+
+func (o ownToDo) own() ownToDo { return o }
+
+// choiceToDo is one of kit's own to-dos that's a choice its step readies,
+// its card readied as its turn comes, as the date of the save a key brings
+// back.
+type choiceToDo struct{ ownToDo }
+
 func (o ownToDo) entry() event.ToDo {
 	t := o.item.ToDo
 	return event.ToDo{Step: o.step, ID: o.item.ID, Title: t.Title, Group: t.Group, How: howOf(t.Steps, o.item.Detail)}
@@ -98,14 +119,9 @@ func (o ownToDo) entry() event.ToDo {
 // when it's done, but for a choice, whose keys say.
 func (o ownToDo) card() event.NeedsYou { return cardOf(o.item) }
 
-// ready is what its card says once its step's readied it, when it's a
-// choice.
-func (o ownToDo) ready(ctx context.Context) event.NeedsYou {
-	it := o.item
-	if c := engine.ChoiceOf(ctx, o.step); c != nil {
-		it = c.Ready(ctx, it)
-	}
-	return cardOf(it)
+// ready is what its card says once its step's readied it.
+func (c choiceToDo) ready(ctx context.Context) event.NeedsYou {
+	return cardOf(engine.ChoiceOf(ctx, c.step).Ready(ctx, c.item))
 }
 
 // cardOf is what the card of it, a to-do of kit's own, says.
@@ -134,26 +150,28 @@ func (o ownToDo) done(ctx context.Context) (bool, string) {
 // nothing to finish, as for a to-do that isn't kit's own. It's never cut
 // short, as by the run stopping: what t waited for would be half done.
 func finishing(ctx context.Context, t toDo) func() string {
-	o, ok := t.(ownToDo)
+	o, ok := t.(owned)
 	if !ok {
 		return nil
 	}
-	c := engine.ChoiceOf(ctx, o.step)
+	own := o.own()
+	c := engine.ChoiceOf(ctx, own.step)
 	if c == nil || c.Settle == nil {
 		return nil
 	}
-	return func() string { return c.Settle(context.WithoutCancel(ctx), o.item) }
+	return func() string { return c.Settle(context.WithoutCancel(ctx), own.item) }
 }
 
 // followUps are the to-dos t's step's check finds now that list hasn't,
 // as bringing back apps' settings can leave apps to open: none for one
 // that isn't kit's own.
 func followUps(ctx context.Context, t toDo, list []toDo) []toDo {
-	o, ok := t.(ownToDo)
+	o, ok := t.(owned)
 	if !ok {
 		return nil
 	}
-	res, ok := engine.Look(ctx, o.step)
+	step := o.own().step
+	res, ok := engine.Look(ctx, step)
 	if !ok {
 		return nil
 	}
@@ -161,7 +179,7 @@ func followUps(ctx context.Context, t toDo, list []toDo) []toDo {
 	for _, it := range res.Items {
 		listed := slices.ContainsFunc(list, func(t toDo) bool { return t.entry().ID == it.ID })
 		if it.ToDo != nil && !listed {
-			more = append(more, ownToDo{step: o.step, item: it})
+			more = append(more, ownOf(ctx, step, it))
 		}
 	}
 	return more

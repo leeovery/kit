@@ -36,9 +36,10 @@ type Deps struct {
 	Environ func() []string
 	HomeDir func() (string, error)
 	Now     func() time.Time
-	// After is a wait of d, as time.After: how long a step by hand's card
-	// waits to go up, and to post its notification, and between its looks.
-	After  func(d time.Duration) <-chan time.Time
+	// After is a wait of d, for what w says, as time.After: how long a step
+	// by hand's card waits to go up, and to post its notification, and
+	// between its looks.
+	After  func(w steps.Wait, d time.Duration) <-chan time.Time
 	Stdin  io.Reader
 	Stdout io.Writer
 	Stderr io.Writer
@@ -271,7 +272,7 @@ func Real(version string) Deps {
 		Environ:  os.Environ,
 		HomeDir:  os.UserHomeDir,
 		Now:      time.Now,
-		After:    time.After,
+		After:    func(_ steps.Wait, d time.Duration) <-chan time.Time { return time.After(d) },
 		Stdin:    os.Stdin,
 		Stdout:   os.Stdout,
 		Stderr:   os.Stderr,

@@ -8,11 +8,13 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/leeovery/kit/internal/ask"
 	"github.com/leeovery/kit/internal/kind/login"
 	"github.com/leeovery/kit/internal/logs"
 	"github.com/leeovery/kit/internal/runner"
+	"github.com/leeovery/kit/internal/steps"
 )
 
 // lastLog is the run log the world's last run wrote.
@@ -84,6 +86,39 @@ func TestApplyRaisesAStepByHand(t *testing.T) {
 	}
 	if slices.ContainsFunc(w.fake.Calls(), func(c string) bool { return strings.HasPrefix(c, "open ") }) {
 		t.Errorf("ran %q, want nothing opened", w.fake.Calls())
+	}
+}
+
+// A card goes up once its grace is over, though kit's first look at it,
+// as its turn came, is still under way, and its notification's posted once
+// it's been up a while: kit's own waits for both, which time.After ends,
+// end at once here.
+func TestApplyRaisesACardOnceItsGraceIsOver(t *testing.T) {
+	w := signInWorld(t)
+	w.terminal, w.size = true, [2]int{160, 64}
+	w.ended = []steps.Wait{steps.WaitToGoUp, steps.WaitToNotify}
+	kb := &keyboard{}
+	w.listen = kb.listen
+	posted := make(chan struct{})
+	// Its check, then the look as its turn comes, held till it's posted.
+	w.fake.On("test", "-f", "/signed-in").Exits(1).Then().Exits(1).Does(func() {
+		select {
+		case <-posted:
+		case <-time.After(5 * time.Second):
+			t.Error("the card's notification wasn't posted while kit's first look at it was under way")
+		}
+	})
+	w.fake.On("osascript", "-e", `display notification "Open the tool" with title "kit" subtitle "Sign in to the tool"`).Does(func() {
+		close(posted)
+		kb.press(t, ask.Key{Name: "ctrl+c"})
+	})
+	w.fake.On("osascript", "-l", "JavaScript", "-e", login.ReadScript).Prints("[]")
+
+	if _, errOut, code := w.run(t, "apply"); code != 1 {
+		t.Errorf("kit apply, stopped at the card, exit %d (%s), want 1", code, errOut)
+	}
+	if up := cards(w.lastLog(t)); len(up) != 1 || up[0].Item != "sign-in" {
+		t.Errorf("cards logged = %+v, want sign-in's", up)
 	}
 }
 

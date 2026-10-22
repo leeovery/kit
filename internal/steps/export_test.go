@@ -10,13 +10,6 @@ func SetManualPoll(d time.Duration) (restore func()) {
 	return func() { manualPoll = was }
 }
 
-// A card's waits, for a test: how long one whose turn has come waits to go
-// up, and how long one's up before its notification goes out.
-const (
-	DrawAfter   = drawAfter
-	NoticeAfter = noticeAfter
-)
-
 // NoticesSent waits till the notifications r's cards have given have gone
 // out, for a test.
 func NoticesSent(r *Raise) {

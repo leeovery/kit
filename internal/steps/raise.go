@@ -49,10 +49,21 @@ var (
 	errDoneThenStop = fmt.Errorf("done, then %w", errStopHere)
 )
 
-// A card's waits: drawAfter is how long one whose turn has come waits to go
-// up for a look to find it not done, so that one done by then never shows;
-// noticeAfter how long one's up before its notification goes out, should no
-// look have found it not done by then.
+// Wait is what a raised card waits for, each its own, though two can be as
+// long: its grace, how long one whose turn has come waits to go up for a
+// look to find it not done, so that one done by then never shows
+// (WaitToGoUp, drawAfter); how long one's up before its notification goes
+// out, should no look have found it not done by then (WaitToNotify,
+// noticeAfter); and how long till it's looked at again (WaitToLook,
+// manualPoll).
+type Wait int
+
+const (
+	WaitToGoUp Wait = iota
+	WaitToNotify
+	WaitToLook
+)
+
 const (
 	drawAfter   = 250 * time.Millisecond
 	noticeAfter = 3 * time.Second
@@ -70,8 +81,8 @@ var manualPoll = 3 * time.Second
 // takes time goes aside (its work: its looks, its answers and its
 // readying; its app opening; its notifications, through a notice.Queue), so
 // its keys act the moment they're pressed. Wait waits for all of it, as
-// the run ends. After is how long a card waits, as time.After, which it is
-// when nil.
+// the run ends. After is a card's wait of d, for what w says, as
+// time.After, which it is when nil.
 //
 // The cards come due wait in a line, the first's up: in order of how much
 // of the run waits on each (engine.Holding), those holding up as much in
@@ -85,7 +96,7 @@ type Raise struct {
 	Now    func() time.Time
 	Notify notice.Notifier
 	Desk   *hand.Desk
-	After  func(d time.Duration) <-chan time.Time
+	After  func(w Wait, d time.Duration) <-chan time.Time
 
 	notices    *notice.Queue
 	noticesSet sync.Once
@@ -102,18 +113,18 @@ type Raise struct {
 // place is a card's place in Raise's line: its step; how much of the run
 // waits on it; whether it's held, never moved from its turn; how many of
 // its step's own cards follow it; and moved, told each time its turn comes
-// or goes. wentDown is whether its card went down, set aside while up,
-// since its loop last looked, and up the item of the card it last put up,
-// which mu guards: its turn can come back before its loop wakes. notified
-// is the item its notification's for, while it's posted, which only its
-// own loop touches.
+// or goes. lost is how many times its turn's gone, and up the item of the
+// card it last put up, which mu guards: its turn can go and come back
+// before its loop wakes. notified is the item its notification's for,
+// while it's posted, which only its own loop touches, posting it
+// (Raise.announce) and taking it away (Raise.unnotify).
 type place struct {
 	step     string
 	weight   int
 	held     bool
 	after    int
 	moved    chan struct{}
-	wentDown bool
+	lost     int
 	up       string
 	notified string
 }
@@ -161,7 +172,6 @@ func (r *Raise) up(ctx context.Context, step string, c raised, s seat) (saw stri
 		answers, down = r.Desk.Listen(step)
 	}
 	engine.Release(ctx)
-	r.Sink.Emit(event.Doing{Time: r.Now(), Step: step, Says: event.Queued})
 	_, readies := c.(readier)
 	u := &raising{r: r, ctx: ctx, c: c, card: c.card(), readied: !readies, answers: answers}
 	u.card.Step = step
@@ -180,12 +190,14 @@ func (r *Raise) up(ctx context.Context, step string, c raised, s seat) (saw stri
 
 // raising is a card raised, as its loop has it: the Raise and place it has
 // in the line; what it's raised for, and what its card says; where the
-// person's answers come; and its work aside. Then its turn: the number of
-// the look asked for as it came (0 while it isn't its turn); whether a
-// look begun since found it not done; whether its card's drawn, up on the
-// screen; and the waits for its grace to end, and for its notification.
-// readied is whether its card's said all it will; choosing whether it's
-// being answered by one of its keys.
+// person's answers come; and its work aside. Then its turn, as the line's
+// lost it so far (lost): the number of the look asked for as it came (0
+// while it isn't its turn); whether a look begun since found it not done;
+// whether its card's drawn, up on the screen; and the waits for its grace
+// to end, and for its notification. known is whether it's known not done,
+// a look having found it so or its card having been up, which it stays;
+// readied whether its card's said all it will; choosing whether it's being
+// answered by one of its keys.
 type raising struct {
 	r       *Raise
 	ctx     context.Context
@@ -195,11 +207,13 @@ type raising struct {
 	answers <-chan hand.Answer
 	work    *work
 
+	lost     int
 	turn     int
 	undone   bool
 	drawn    bool
 	grace    <-chan time.Time
 	due      <-chan time.Time
+	known    bool
 	readied  bool
 	choosing bool
 }
@@ -210,8 +224,9 @@ type raising struct {
 // work comes to, and the person's answers. As its turn comes, a look's
 // asked for at once, and the card goes up when it finds it not done, or
 // once its grace is over, whichever is first, so that one found done
-// first never shows, nor opens anything; its notification goes out once
-// it's up and a look's found it not done, or it's been up a while.
+// first never shows, nor opens anything; one known not done goes up at
+// once. Its notification goes out once it's up and a look's found it not
+// done, or it's been up a while.
 func (u *raising) wait() (string, error) {
 	for {
 		u.takeTurn()
@@ -235,30 +250,35 @@ func (u *raising) wait() (string, error) {
 	}
 }
 
-// takeTurn takes the card's turn as the line has it now: gone, or its card
-// set aside and its turn back since, what came with it goes, its
-// notification taken away; come, its grace begins, a look's asked for, and
-// what it says is readied, unless it has been.
+// takeTurn takes the card's turn as the line has it now: gone, or gone and
+// back since, what came with it goes, its notification taken away; come, a
+// look's asked for, what it says is readied, unless it has been, and its
+// grace begins, unless it's known not done, when it goes up at once.
 func (u *raising) takeTurn() {
-	has, wentDown := u.r.state(u.pl)
-	if wentDown || !has {
+	has, lost := u.r.state(u.pl)
+	if !has || lost != u.lost {
 		u.r.unnotify(u.ctx, u.pl)
-		u.turn, u.undone, u.drawn, u.grace, u.due = 0, false, false, nil, nil
+		u.lost, u.turn, u.undone, u.drawn, u.grace, u.due = lost, 0, false, false, nil, nil
 	}
-	if has && u.turn == 0 {
-		u.grace = u.r.after(drawAfter)
-		u.turn = u.work.look()
-		if !u.readied {
-			u.work.readyCard()
-		}
+	if !has || u.turn != 0 {
+		return
+	}
+	if !u.known {
+		u.grace = u.r.after(WaitToGoUp, drawAfter)
+	}
+	u.turn = u.work.look()
+	if !u.readied {
+		u.work.readyCard()
+	}
+	if u.known {
+		u.draw()
 	}
 }
 
 // took is what the card's work came to: done, or an answer that failed,
 // ends its wait, as finish says; the card readied, it says so; an answer
-// that didn't do it has the card offer its keys again; a look begun since
-// its turn came that found it not done puts it up, or posts its
-// notification. A look begun before then says nothing of it now.
+// that didn't do it has the card offer its keys again; a look that found
+// it not done, the card's known not done (found).
 func (u *raising) took(res result) (over bool, saw string, err error) {
 	switch {
 	case res.done || res.err != nil:
@@ -267,43 +287,49 @@ func (u *raising) took(res result) (over bool, saw string, err error) {
 	case res.readied != nil:
 		u.ready(*res.readied)
 	case res.answered:
-		if err := u.unanswered(); err != nil {
-			return true, "", err
-		}
-	case u.turn > 0 && res.asked >= u.turn:
-		u.undone = true
-		switch {
-		case u.drawn:
-			u.announce()
-		case u.readied:
-			u.draw()
-		}
+		u.unanswered()
+	default:
+		u.found(res.asked)
 	}
 	return false, "", nil
 }
 
-// ready is what the card says, readied: put up again saying it, when it's
-// up; else put up, should a look have found it not done already.
-func (u *raising) ready(card event.NeedsYou) {
-	card.Step = u.card.Step
-	u.card, u.readied = card, true
+// found is the card known not done, as a look, begun once the look
+// numbered asked had been asked for, found it: its turn come, it goes up,
+// and, the look begun since, its notification's posted. A look begun while
+// it waited its turn has it go up at once when it comes.
+func (u *raising) found(asked int) {
+	u.known = true
+	u.undone = u.undone || u.turn > 0 && asked >= u.turn
 	switch {
-	case u.drawn:
-		u.r.redraw(u.pl, card)
-	case u.undone:
+	case u.turn == 0:
+	case !u.drawn:
 		u.draw()
+	case u.undone:
+		u.announce()
 	}
 }
 
-// draw puts the card up, when it's still its turn: its app opened, the
-// first time, and its notification posted once a look begun since its turn
-// has found it not done, or once it's been up a while.
+// ready is what the card says, readied: put up again saying it, when it's
+// up.
+func (u *raising) ready(card event.NeedsYou) {
+	card.Step = u.card.Step
+	u.card, u.readied = card, true
+	if u.drawn {
+		u.r.redraw(u.pl, card)
+	}
+}
+
+// draw puts the card up, when it's still its turn, saying what it can,
+// readied or not: its app opened, the first time, and its notification
+// posted once a look begun since its turn has found it not done, or once
+// it's been up a while.
 func (u *raising) draw() {
 	u.grace = nil
 	if !u.r.show(u.ctx, u.pl, u.card) {
 		return
 	}
-	u.drawn, u.due = true, u.r.after(noticeAfter)
+	u.drawn, u.known, u.due = true, true, u.r.after(WaitToNotify, noticeAfter)
 	if o, ok := u.c.(opener); ok {
 		u.r.aside.Go(func() { o.open(u.ctx) })
 	}
@@ -338,23 +364,13 @@ func (u *raising) answered(a hand.Answer) error {
 }
 
 // unanswered is the card still to do once its work's done what the person
-// answered: answered by one of its keys, it offers them again, any
-// pressed meanwhile dropped, a key the screen passed on before it showed
-// the card being answered, but a Stop, which stops there; and none once
-// the run's stopped.
-func (u *raising) unanswered() error {
-	if !u.choosing {
-		return nil
+// answered: answered by one of its keys, it offers them again, those
+// pressed meanwhile dropped as they came (answered).
+func (u *raising) unanswered() {
+	if u.choosing {
+		u.choosing = false
+		u.r.answering(u.pl, "")
 	}
-	u.choosing = false
-	switch {
-	case u.ctx.Err() != nil:
-		return u.ctx.Err()
-	case stoppedMeanwhile(u.answers):
-		return errStopHere
-	}
-	u.r.answering(u.pl, "")
-	return nil
 }
 
 // finish is how a card's wait ends, done, what kit saw, or with err: a
@@ -386,21 +402,20 @@ func stoppedMeanwhile(answers <-chan hand.Answer) bool {
 	}
 }
 
-// after is a wait of d, as After has it.
-func (r *Raise) after(d time.Duration) <-chan time.Time {
+// after is a wait of d, for what w says, as After has it.
+func (r *Raise) after(w Wait, d time.Duration) <-chan time.Time {
 	if r.After == nil {
 		return time.After(d)
 	}
-	return r.After(d)
+	return r.After(w, d)
 }
 
-// state is pl's card as the line has it: has, its turn come; wentDown, its
-// card set aside since pl last looked.
-func (r *Raise) state(pl *place) (has, wentDown bool) {
+// state is pl's card as the line has it: has, its turn come; lost, how
+// many times its turn's gone.
+func (r *Raise) state(pl *place) (has bool, lost int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	wentDown, pl.wentDown = pl.wentDown, false
-	return r.hasLocked(pl), wentDown
+	return r.hasLocked(pl), pl.lost
 }
 
 // show puts card up for pl, when it's still pl's turn and the run hasn't
@@ -505,14 +520,18 @@ func noticeOf(card event.NeedsYou) string {
 func (r *Raise) hasLocked(pl *place) bool { return len(r.line) > 0 && r.line[0] == pl }
 
 // join gives a card for step its place in the line, as s says, the card up
-// set aside should it go first.
+// set aside should it go first: its step says it waits its turn, unless
+// it's first, so that one found done before it goes up never says it.
 func (r *Raise) join(step string, s seat) *place {
 	pl := &place{step: step, weight: s.weight, held: s.held, after: s.after, moved: make(chan struct{}, 1)}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	at := r.placeOf(pl)
-	if at == 0 && len(r.line) > 0 {
+	switch {
+	case at == 0 && len(r.line) > 0:
 		r.setAside()
+	case at > 0:
+		r.Sink.Emit(event.Doing{Time: r.Now(), Step: step, Says: event.Queued})
 	}
 	r.line = slices.Insert(r.line, at, pl)
 	r.line[0].poke()
@@ -576,15 +595,15 @@ func (r *Raise) leave(pl *place, down bool) {
 	r.recount()
 }
 
-// setAside has the card whose turn it is lose it, told so; up, its step
-// says again that it waits its turn, before any other card goes up. mu is
-// held.
+// setAside has the card whose turn it is lose it, told so, its step saying
+// it waits its turn, before any other card goes up. mu is held.
 func (r *Raise) setAside() {
 	up := r.line[0]
+	up.lost++
 	if r.shown == up {
-		r.shown, up.wentDown = nil, true
-		r.Sink.Emit(event.Doing{Time: r.Now(), Step: up.step, Says: event.Queued})
+		r.shown = nil
 	}
+	r.Sink.Emit(event.Doing{Time: r.Now(), Step: up.step, Says: event.Queued})
 	up.poke()
 }
 

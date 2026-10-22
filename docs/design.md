@@ -274,15 +274,17 @@ notification while it's up, once a look finds it not done or it's been up three 
 whichever's first (taken away while it's set aside, posted again as it comes back). Its turn
 come, kit looks at once whether it's done, and it goes up as that look finds it not done, or
 after a quarter of a second, whichever's first, so one found done by then never shows, opens
-nothing and posts nothing. Its keys work from the moment it's up: nothing a card does on the
-side holds it or them up. Whatever takes time goes aside: whether it's done, looked at as its
+nothing and posts nothing, nor has its row say it waits for you; one known not done already, up
+before or found not done while it waited its turn, goes up at once. Its keys work from the
+moment it's up: nothing a card does on the side holds it or them up. Whatever takes time goes
+aside: whether it's done, looked at as its
 turn comes and every few seconds; what a key says; readying what it says, as the date a
 choice's key brings back from (it's up meanwhile saying what it can, then up again saying
 that); and, once it's up, its notification and its app, the notification in order with its
 taking away, so one waiting for kit's app to be built (a minute, on a new Mac) holds nothing up,
 and one taken away before it went out is never posted. A look, a key and readying go one at a
 time, keys in the order pressed, ahead of the next look, the card saying at once that a key's
-taken, as a choice's does; a key behind a look that finds it done isn't done, and a look
+taken, as a choice's does; a key behind a look that finds it done isn't done, and
 settling what the card waited for is never cut short. A card holds none of the run's jobs while it's up, and,
 done, or found done, comes down that moment, every job busy or not: a step with nothing more to
 do finishes without waiting for one, and one with more (the step a card raised again comes

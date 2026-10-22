@@ -26,6 +26,7 @@ import (
 	"github.com/leeovery/kit/internal/look"
 	"github.com/leeovery/kit/internal/runner"
 	"github.com/leeovery/kit/internal/runner/runnertest"
+	"github.com/leeovery/kit/internal/steps"
 )
 
 // twoMacs is a kit.toml knowing two Macs.
@@ -81,12 +82,22 @@ type world struct {
 	pick func(lines []ask.Line) (string, error)
 	// became is each command kit became, as its arguments.
 	became [][]string
+	// ended are the waits of a step by hand's card that end at once (after).
+	ended []steps.Wait
 }
 
-// after is how long kit waits in the world, as time.After has it: never,
-// so that a step by hand's card goes up, and posts its notification, as a
-// look finds it not done, and is looked at again only as it's answered.
-func (w *world) after(time.Duration) <-chan time.Time { return nil }
+// after is how long kit waits in the world, as time.After has it: no time
+// at all for a wait in ended; never, for the rest, so that a step by hand's
+// card goes up, and posts its notification, as a look finds it not done,
+// and is looked at again only as it's answered.
+func (w *world) after(wait steps.Wait, _ time.Duration) <-chan time.Time {
+	if !slices.Contains(w.ended, wait) {
+		return nil
+	}
+	end := make(chan time.Time, 1)
+	end <- w.now
+	return end
+}
 
 // newWorld makes a home holding a config repository of files, by name.
 func newWorld(t *testing.T, files map[string]string) *world {

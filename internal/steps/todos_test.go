@@ -238,12 +238,13 @@ func (c *card) waitForList(t *testing.T, n int) event.ToDos {
 	return event.ToDos{}
 }
 
-// A to-do that's a choice goes up with its keys, as its step readies it,
-// kit not telling by itself; a key does what its step says, the card
-// offering none of its keys meanwhile, and, should that do it, it's done,
-// what the step said it did as what kit saw. What goes wrong, the log says,
-// as something to look at, and it stays up, its keys offered again, a key
-// pressed while the first was being done dropped.
+// A to-do that's a choice goes up as its look finds it not done, with its
+// keys, then again with them as its step readies them, kit not telling by
+// itself; a key does what its step says, the card offering none of its
+// keys meanwhile, and, should that do it, it's done, what the step said it
+// did as what kit saw. What goes wrong, the log says, as something to look
+// at, and it stays up, its keys offered again, a key pressed while the
+// first was being done dropped.
 func TestAChoiceToDo(t *testing.T) {
 	defer steps.SetManualPoll(time.Hour)()
 	c := newCard(t)
@@ -292,9 +293,10 @@ func TestAChoiceToDo(t *testing.T) {
 	go func() {
 		done <- applied(t, c, atTheEnd(steps.Manual(c.fake, "/home/someone", c.state, config.List{}, c.raise), step))
 	}()
-	up := c.cards(t, 1)[0]
-	if up.Tells || !slices.Equal(up.Keys, []check.Key{{Key: "r", Does: "brings them back, 15 Oct"}, {Key: "f", Does: "starts afresh"}}) {
-		t.Errorf("card = %+v, want its keys as its step readied them, kit not telling by itself", up)
+	up := c.cards(t, 2)
+	if up[0].Tells || !slices.Equal(up[0].Keys, []check.Key{{Key: "r", Does: "brings them back"}, {Key: "f", Does: "starts afresh"}}) ||
+		!slices.Equal(up[1].Keys, []check.Key{{Key: "r", Does: "brings them back, 15 Oct"}, {Key: "f", Does: "starts afresh"}}) {
+		t.Errorf("cards = %+v, want its keys as they stand, then as its step readied them, kit not telling by itself", up)
 	}
 	c.answer(t, steps.ManualName, "r")
 	alerted := false
@@ -329,8 +331,8 @@ func TestAChoiceToDo(t *testing.T) {
 	for _, card := range c.cardsNow() {
 		shown = append(shown, card.Answering)
 	}
-	if !slices.Equal(shown, []string{"", "r", "", "r"}) {
-		t.Errorf("the card went up answered by %q; want its keys, then r while it worked, its keys again once it failed, then r", shown)
+	if !slices.Equal(shown, []string{"", "", "r", "", "r"}) {
+		t.Errorf("the card went up answered by %q; want its keys, readied, then r while it worked, its keys again once it failed, then r", shown)
 	}
 }
 
@@ -822,9 +824,9 @@ func TestAStopWhileAKeyIsDone(t *testing.T) {
 
 // q's Stop acts at once while kit readies what the to-do up says, as the
 // date of the last save, which takes cloning their store on a new Mac: its
-// card's up once its grace is over, saying what it can meanwhile. Stopped
-// there, readying's cut short, as it can never find the to-do done, and the
-// run ends without waiting for it.
+// card's up as its look finds it not done, saying what it can meanwhile.
+// Stopped there, readying's cut short, as it can never find the to-do done,
+// and the run ends without waiting for it.
 func TestAStopWhileTheCardIsReadied(t *testing.T) {
 	defer steps.SetManualPoll(time.Hour)()
 	c := newCard(t)
@@ -838,11 +840,6 @@ func TestAStopWhileTheCardIsReadied(t *testing.T) {
 	}
 	done := endingWith(t, c, s.step())
 	within(t, begun, "the card was never readied")
-	if up := c.cardsNow(); len(up) > 0 {
-		t.Fatalf("cards up %+v before the card's grace was over, its look not done", up)
-	}
-	c.waits.waiting(t, steps.DrawAfter, 1)
-	c.waits.end(steps.DrawAfter)
 	if up := c.cards(t, 1)[0]; !slices.Equal(up.Keys, []check.Key{{Key: "r", Does: "brings them back"}}) {
 		t.Errorf("card = %+v, want it up with its keys as they stand", up)
 	}
@@ -865,8 +862,6 @@ func TestACardReadiedOnceUp(t *testing.T) {
 	s.readying = func(context.Context) { readying() }
 	done := endingWith(t, c, s.step())
 	within(t, begun, "the card was never readied")
-	c.waits.waiting(t, steps.DrawAfter, 1)
-	c.waits.end(steps.DrawAfter)
 	c.cards(t, 1)
 	close(through)
 	if up := c.cards(t, 2)[1]; up.Item != "prefs:none" || !slices.Equal(up.Keys, []check.Key{{Key: "r", Does: "brings them back, 15 Oct"}}) || up.Answering != "" {
@@ -941,7 +936,7 @@ func TestNoLookOnceStopped(t *testing.T) {
 	defer steps.SetManualPoll(time.Hour)()
 	for range 20 {
 		c := newCard(t)
-		c.waits = newWaits(time.Hour)
+		c.waits = newWaits(steps.WaitToLook)
 		c.raise.After = c.waits.after
 		stopped := c.stopped()
 		// Its check, then its look as its turn comes.
@@ -950,10 +945,10 @@ func TestNoLookOnceStopped(t *testing.T) {
 		applied := applying(t, steps.Manual(c.fake, "/home/someone", c.state, list, c.raise))
 		c.cards(t, 1)
 		// The look as its turn came, then the wait for its next.
-		c.waits.waiting(t, time.Hour, 2)
+		c.waits.waiting(t, steps.WaitToLook, 2)
 		c.answer(t, steps.ManualName, hand.Stop)
 		<-stopped
-		c.waits.end(time.Hour)
+		c.waits.end(steps.WaitToLook)
 		if err := ended(t, applied); err != nil {
 			t.Fatal(err)
 		}

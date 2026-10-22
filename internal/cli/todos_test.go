@@ -123,6 +123,7 @@ func TestApplyWorksThroughTheToDos(t *testing.T) {
 	if *last.Up != -1 {
 		t.Errorf("the last list has %d up, want none", *last.Up)
 	}
+	// A card up again as it's readied, saying the same, is counted once.
 	var asked, answering []string
 	for _, c := range cards(records) {
 		if c.Answering == "" {
@@ -131,6 +132,7 @@ func TestApplyWorksThroughTheToDos(t *testing.T) {
 			answering = append(answering, c.Title+": "+c.Answering)
 		}
 	}
+	asked, answering = slices.Compact(asked), slices.Compact(answering)
 	if !slices.Equal(asked, shown) {
 		t.Errorf("cards went up for %q, want %q, each at its turn", asked, shown)
 	}
