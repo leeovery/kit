@@ -40,6 +40,17 @@ func cards(records []logs.Record) []logs.Record {
 	return up
 }
 
+// downs is the items of the cards taken down, in the order they came down.
+func downs(records []logs.Record) []string {
+	var down []string
+	for _, r := range records {
+		if r.Event == "card_down" {
+			down = append(down, r.Item)
+		}
+	}
+	return down
+}
+
 // signInWorld is a Mac with ripgrep missing, and a step by hand that comes
 // after it: signing in to a tool, in a group, with notes saying why.
 func signInWorld(t *testing.T) *world {
@@ -163,7 +174,8 @@ func TestApplyPlainRaisesNothing(t *testing.T) {
 
 // At a terminal, the steps by hand with no place of their own come last,
 // once every other step has finished, but a step that comes after them; a
-// step done by the time its card would go up doesn't go up.
+// step done by the time its card goes up comes straight down, with no
+// notification posted for it.
 func TestApplyRaisesTheRestLast(t *testing.T) {
 	w := missingWorld(t)
 	w.writeSection(t, "laptop", "manual", `tool "Install the tool" --test test -d /Applications/Tool.app`+"\n")
@@ -182,8 +194,14 @@ func TestApplyRaisesTheRestLast(t *testing.T) {
 	records := w.lastLog(t)
 	started := slices.IndexFunc(records, func(r logs.Record) bool { return r.Event == "step_started" && r.Step == "manual" })
 	finished := slices.IndexFunc(records, func(r logs.Record) bool { return r.Event == "step_finished" && r.Step == "manual" })
-	if started < 0 || len(cards(records)) > 0 {
-		t.Fatalf("log = %+v, want the steps by hand checked, no card up, as the tool's in", records)
+	up := cards(records)
+	if started < 0 || len(up) != 1 || up[0].Answering != "" || !slices.Equal(downs(records), []string{up[0].Item}) {
+		t.Fatalf("log = %+v, want the steps by hand checked, the tool's card up and straight down, as the tool's in", records)
+	}
+	for _, c := range w.fake.Calls() {
+		if strings.HasPrefix(c, "osascript") {
+			t.Errorf("ran %q: want no notification for a card found done as it went up", c)
+		}
 	}
 	for i, r := range records {
 		switch {

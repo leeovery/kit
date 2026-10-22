@@ -179,7 +179,8 @@ func (e Logged) At() time.Time { return e.Time }
 // words, when it says; the keys of a choice, when it's one, and the one
 // it's being answered with, while kit does what that key says (Answering),
 // none of them offered meanwhile; and how many more by hand wait after it.
-// The step finishing, or another NeedsYou for the step, takes it down.
+// Its CardDown, the step finishing, or another NeedsYou for the step, takes
+// it down.
 type NeedsYou struct {
 	Time      time.Time
 	Step      string
@@ -196,6 +197,18 @@ type NeedsYou struct {
 }
 
 func (e NeedsYou) At() time.Time { return e.Time }
+
+// CardDown is the card of a step by hand taken down the moment it's done,
+// or the person stopped there, before anything its step does after: its
+// step and its item, as its NeedsYou had them. A card taken down by the run
+// stopping has none: its step finishing says so.
+type CardDown struct {
+	Time time.Time
+	Step string
+	Item string
+}
+
+func (e CardDown) At() time.Time { return e.Time }
 
 // ToDos are what's left for the person at the Mac to do as applying ends,
 // worked through on its screen one at a time, in kit's order, by the step

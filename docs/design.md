@@ -270,15 +270,18 @@ the Manual area, saying what to do, so `kit status` shows them; what kit can che
 a check that says what to do. While `kit apply` runs at a terminal, one that comes due is raised
 as a card on its screen, front and centre: its title, why it's there, said once (its notes, or,
 for a line with none, kit's words for why the run waits for it), its steps numbered, and a
-notification while it's up (taken away while it's set aside, posted again as it comes back). Its
-keys work from the moment it's up: nothing a card does on the side holds them up. Its
-notification, and its app, go aside, the notification in order with its taking away, so one
-waiting for kit's app to be built (a minute, on a new Mac) holds nothing up, and one taken away
-before it went out is never posted; its look every few seconds goes aside too, so a key never
-waits behind a slow command. A card holds none of the run's jobs while it's up, and, done, comes
-down at once, every job busy or not: a step with nothing more to do finishes without waiting for
-one, and one with more (the step a card raised again comes before) waits for a job with the card
-down. `space` says it's done (`enter`
+notification while it's up, once a look since it went up finds it not done, so one found done as
+it goes up comes straight down with none (taken away while it's set aside, posted again as it
+comes back). It goes up the moment its turn comes, and its keys work from then: nothing a card
+does on the side holds it or them up. Its notification, and its app, go aside, the notification
+in order with its taking away, so one waiting for kit's app to be built (a minute, on a new Mac)
+holds nothing up, and one taken away before it went out is never posted. Whether it's done is
+looked at aside too, as it goes up and every few seconds, one look at a time, a key's own among
+them (the card saying at once that it's taken, as a choice's does), and a look settling what the
+card waited for is never cut short. A card holds none of the run's jobs while it's up, and,
+done, or found done, comes down that moment, every job busy or not: a step with nothing more to
+do finishes without waiting for one, and one with more (the step a card raised again comes
+before) waits for a job with the card down. `space` says it's done (`enter`
 too, unshown: marked as `kit manual done` marks it; one with a command is looked at at once, as
 it is every few seconds anyway); a card with a command offers no key, kit carrying on by itself
 once it's done. There's no putting a card off: it's done, or the run's stopped. One card is up
@@ -310,8 +313,10 @@ the log naming each of those with why; a watched to-do of kit's own, found done,
 it waited for, as bringing those apps' settings back; `f` starts afresh, as `kit prefs
 start-fresh` does, saying saving's on and how many still wait to come back). Stopping there
 (`q`'s Stop, between two to-dos as well, as the one up is found done, and while kit does what a
-key says, taken even with another key waiting unread) leaves what's left to do, the one up done
-if it was, with the to-dos it left, in that order in the record, the run ending as it stands. After the last, kit checks again the steps the
+key says, taken even with another key waiting unread) leaves what's left to do at once, the
+card down and the list stopped, the one up done if it was, or if the look under way then, left
+to finish, finds it done, which the list says after; with the to-dos it left, in that order in
+the record, the run ending as it stands. After the last, kit checks again the steps the
 to-dos held, those they came from, so their rows and the record are right, then finishes.
 Without a terminal, nothing's raised: kit's own stay items of their steps. A step a line comes
 before can find, as it applies, that the line wasn't done after all, as the App Store's first

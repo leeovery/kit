@@ -40,7 +40,8 @@ var ErrNoLogs = errors.New("no runs logged yet")
 type Record struct {
 	Time time.Time `json:"time"`
 	// Event is what happened: run_started, step_started, step_finished,
-	// command, logged, asking, answered, needs_you, to_dos or run_finished.
+	// command, logged, asking, answered, needs_you, card_down, to_dos or
+	// run_finished.
 	Event   string       `json:"event"`
 	Command string       `json:"command,omitempty"`
 	Machine string       `json:"machine,omitempty"`
@@ -194,6 +195,8 @@ func (l *File) record(e event.Event) Record {
 		l.asked = e.Says
 	case event.NeedsYou:
 		r.Event, r.Step, r.Item, r.Title, r.Tells, r.Answering, r.More = "needs_you", e.Step, e.Item, e.Title, e.Tells, e.Answering, e.More
+	case event.CardDown:
+		r.Event, r.Step, r.Item = "card_down", e.Step, e.Item
 	case event.Logged:
 		r.Event, r.Step, r.Line, r.Alert = "logged", e.Step, e.Line, e.Alert
 	case event.ToDos:

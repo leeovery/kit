@@ -142,8 +142,8 @@ func finishes(sink *events) (map[string]int, map[string]check.State) {
 // order: kit's own that come first (apps' settings), then the config's
 // lines not done, in order, then the rest of kit's own, in the run's order;
 // grouped, each group where its first comes, one with none a group of its
-// own. Each is looked at as its turn comes, and goes up only when it isn't
-// done: done, the list ticks it, with what kit saw. After the last, the
+// own. Each goes up as its turn comes, and straight down when its first
+// look finds it done: the list ticks it, with what kit saw. After the last, the
 // steps they held are checked again, in place of how they stood: those
 // they came from, and no other.
 func TestTheToDosInKitsOrder(t *testing.T) {
@@ -196,8 +196,12 @@ func TestTheToDosInKitsOrder(t *testing.T) {
 			t.Errorf("%s ended done %v, kit saw %q; want it done, kit having seen %q", e.Title, e.Done, e.Saw, saw)
 		}
 	}
-	if up := c.cardsNow(); len(up) != 0 {
-		t.Errorf("cards went up for %+v; want none, each done when its turn came", up)
+	var up []string
+	for _, card := range c.cardsNow() {
+		up = append(up, card.Item)
+	}
+	if down := c.downs(); len(up) != len(want) || !slices.Equal(down, up) {
+		t.Errorf("cards went up for %q, and down for %q; want each up as its turn came, and straight down, its first look finding it done", up, down)
 	}
 	times, stood := finishes(c.sink)
 	for _, name := range []string{"prefs", "time-machine", "arq"} {
@@ -519,6 +523,7 @@ func TestStoppingAtTheToDos(t *testing.T) {
 			stuck("time-machine", "Add a Time Machine disk"), stuck("arq", "Set up Arq's backup plan")))
 	}()
 	c.cards(t, 1)
+	c.noticed(t, 1)
 	c.answer(t, steps.ManualName, hand.Stop)
 	report := <-done
 	last := c.waitForList(t, 2)

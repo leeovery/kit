@@ -129,8 +129,11 @@ func TestApplyWorksThroughTheToDos(t *testing.T) {
 			answering = append(answering, c.Title+": "+c.Answering)
 		}
 	}
-	if want := want[:2]; !slices.Equal(asked, want) {
-		t.Errorf("cards went up for %q, want %q: Time Machine's disk was there by its turn", asked, want)
+	if !slices.Equal(asked, want) {
+		t.Errorf("cards went up for %q, want %q, each at its turn", asked, want)
+	}
+	if got := downs(records); len(got) != len(want) || got[2] != cards(records)[len(cards(records))-1].Item {
+		t.Errorf("cards came down for %q, want each, Time Machine's last, straight down: its disk was there by its turn, no notification posted", got)
 	}
 	if want := []string{"Bring back apps' settings: f"}; !slices.Equal(answering, want) {
 		t.Errorf("cards went up being answered: %q, want %q, its keys not offered while f was done", answering, want)

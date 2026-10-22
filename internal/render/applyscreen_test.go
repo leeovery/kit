@@ -874,6 +874,55 @@ func TestApplyingCardDoneWhileSetAside(t *testing.T) {
 	}
 }
 
+// A card is taken down the moment it's done, before its step finishes: the
+// panel's gone and the log says it's done, how long it was up; its step
+// finishing after says nothing more. One set aside and done meanwhile is
+// taken down too, the card up staying up.
+func TestApplyingCardTakenDown(t *testing.T) {
+	steps := []event.Step{
+		{Name: "appstore", Title: "appstore", Area: "Manual", ByHand: []event.Hand{{Name: "appstore", Title: "Sign in to the App Store"}}},
+		{Name: "vault", Title: "vault", Area: "Manual", ByHand: []event.Hand{{Name: "vault", Title: "Sign in to the vault"}}},
+		{Name: "mas", Title: "App Store apps", Area: "Drift", Row: "App Store apps", Waits: []string{"appstore"}},
+		{Name: "secret", Title: "Secrets", Area: "Drift", Row: "Secrets", Waits: []string{"vault"}},
+	}
+	events := rowsRun(steps,
+		event.StepStarted{Time: after(10), Step: "appstore", Doing: "applying"},
+		event.NeedsYou{Time: after(10), Step: "appstore", Item: "appstore", Title: "Sign in to the App Store"},
+		event.StepStarted{Time: after(40), Step: "vault", Doing: "applying"},
+		event.Doing{Time: after(40), Step: "appstore", Says: event.Queued},
+		event.NeedsYou{Time: after(40), Step: "vault", Item: "vault", Title: "Sign in to the vault", More: 1},
+		event.CardDown{Time: after(50), Step: "appstore", Item: "appstore"},
+	)
+	face, out, _ := applyAt(160, 64, 55*time.Second, events)
+	got := screen(out.String())
+	if _, right := panes(got, 160); !strings.Contains(right[1], "Sign in to the vault") {
+		t.Errorf("the panel's title line is %q; want the vault's card still up", right[1])
+	}
+	_ = face.Close()
+
+	events = append(events,
+		event.CardDown{Time: after(60), Step: "vault", Item: "vault"},
+		fine(70, "appstore", "done"),
+		fine(80, "vault", "done"),
+	)
+	face, out, _ = applyAt(160, 64, 65*time.Second, events[:len(events)-2])
+	if _, right := panes(screen(out.String()), 160); strings.HasPrefix(right[1], "  ▲ ") {
+		t.Errorf("taken down, its step not finished, the right pane is\n%s\nwant no card", strings.Join(right, "\n"))
+	}
+	_ = face.Close()
+	face, out, _ = applyAt(160, 64, 85*time.Second, events)
+	defer func() { _ = face.Close() }()
+	want := []string{
+		"  03:04:15  ▲ Sign in to the App Store: waiting for you",
+		"  03:04:45  ▲ Sign in to the vault: waiting for you",
+		"  03:04:55  ● Sign in to the App Store: done, in 40.0s",
+		"  03:05:05  ● Sign in to the vault: done, in 20.0s",
+	}
+	if log := logOf(screen(out.String()), 160); !slices.Equal(log, want) {
+		t.Errorf("the log is\n%s\nwant\n%s", strings.Join(log, "\n"), strings.Join(want, "\n"))
+	}
+}
+
 // A row chosen, the log is its lines alone, a step by hand's in the row of
 // the step it holds up, what's under way its own; the steps by hand at the
 // end are in no row, shown with everything alone.

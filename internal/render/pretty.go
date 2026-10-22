@@ -261,6 +261,9 @@ func (p *Pretty) Emit(e event.Event) {
 	case event.NeedsYou:
 		p.raise(e)
 		p.drawSpinner()
+	case event.CardDown:
+		p.takeDown(e)
+		p.drawSpinner()
 	case event.ToDos:
 		p.workThrough(e)
 		p.drawSpinner()

@@ -116,8 +116,10 @@ func (o ownToDo) done(ctx context.Context) (bool, string) {
 	case slices.ContainsFunc(res.Items, func(it check.Item) bool { return it.ID == o.item.ID }):
 		return false, ""
 	}
+	// Settling is never cut short, as by the card coming down meanwhile:
+	// what it waited for would be half done.
 	if c := engine.ChoiceOf(ctx, o.step); c != nil {
-		if said := c.Settle(ctx, o.item); said != "" {
+		if said := c.Settle(context.WithoutCancel(ctx), o.item); said != "" {
 			return true, said
 		}
 	}
@@ -171,8 +173,10 @@ func (o ownToDo) answer(ctx context.Context, a hand.Answer, _ time.Time) (bool, 
 // workThrough raises list's to-dos for step one at a time, in order, each
 // till it's done: the list emitted as each comes up, and once they're over;
 // one of kit's own done, those its step's check finds now come next
-// (followUps). The person can stop where they are (hand.Stop): what's left
-// stays to do, the one up done if it was done as they stopped. Their
+// (followUps). The person can stop where they are (hand.Stop), the list
+// emitted stopped at once: what's left stays to do, the one up done if it
+// was done as they stopped, or found done by the look under way then, left
+// to finish, which the list is emitted again to say. Their
 // answers come on one listener for the whole list, so a Stop given between
 // two to-dos is never lost, and anything else given then, for a to-do done
 // with, goes nowhere. Then the steps the to-dos done held are checked again
@@ -191,28 +195,38 @@ func (r *Raise) workThrough(ctx context.Context, step string, list []toDo) error
 		r.Sink.Emit(event.ToDos{Time: r.Now(), Step: step, List: slices.Clone(entries), Up: up})
 	}
 	resolved := map[string]bool{}
+	stoppedAt, late := -1, (*looks)(nil)
 	for i := 0; i < len(list); i++ {
 		emit(i)
 		if stoppedMeanwhile(answers) {
 			break
 		}
-		saw, err := r.up(ctx, step, list[i], seat{held: true, after: len(list) - 1 - i, answers: answers})
+		saw, looking, err := r.up(ctx, step, list[i], seat{held: true, after: len(list) - 1 - i, answers: answers})
 		switch {
 		case err == nil, errors.Is(err, errDoneThenStop):
 			entries[i].Done, entries[i].Saw = true, saw
 			resolved[entries[i].ID] = true
-		case !errors.Is(err, errStopHere):
+			for j, t := range followUps(ctx, list[i], list) {
+				list = slices.Insert(list, i+1+j, t)
+				entries = slices.Insert(entries, i+1+j, t.entry())
+			}
+		case errors.Is(err, errStopHere):
+			stoppedAt, late = i, looking
+		default:
 			return err
-		}
-		for j, t := range followUps(ctx, list[i], list) {
-			list = slices.Insert(list, i+1+j, t)
-			entries = slices.Insert(entries, i+1+j, t.entry())
 		}
 		if err != nil {
 			break
 		}
 	}
 	emit(-1)
+	if late != nil {
+		if saw, done := late.outcome(); done {
+			entries[stoppedAt].Done, entries[stoppedAt].Saw = true, saw
+			resolved[entries[stoppedAt].ID] = true
+			emit(-1)
+		}
+	}
 	recheckHeld(ctx, entries, resolved)
 	return nil
 }

@@ -166,6 +166,23 @@ func (p *Pretty) setAside(step string) {
 // upSince is when the card up first came up.
 func (p *Pretty) upSince() time.Time { return p.since[cardID(p.card.Step, p.card.Item)] }
 
+// takeDown takes e's card down the moment it's done, or the person stopped
+// there, before its step finishes: up, or set aside and done meanwhile, the
+// log says it's done; one of the to-dos at the run's end, its list says how
+// it ended.
+func (p *Pretty) takeDown(e event.CardDown) {
+	id := cardID(e.Step, e.Item)
+	switch c, aside := p.asides[id]; {
+	case p.card != nil && cardID(p.card.Step, p.card.Item) == id && p.listing(e.Step):
+		p.card = nil
+	case p.card != nil && cardID(p.card.Step, p.card.Item) == id:
+		p.lower(e.Time, nil)
+	case aside:
+		delete(p.asides, id)
+		p.noteDown(c, e.Time, nil)
+	}
+}
+
 // lowerAside has the log say how the cards down of f's step ended, its
 // step finished, as lower does for the card up: done meanwhile, or left to
 // do.
