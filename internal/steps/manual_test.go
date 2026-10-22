@@ -1022,7 +1022,9 @@ func TestAStopBetweenToDos(t *testing.T) {
 
 // A Done and a Stop given back to back are both taken, the Done first,
 // whether it was taken before the Stop came or still waited: the to-do up
-// kept as done, the next left to do.
+// kept as done, the next left to do. Never is the list said with the
+// printer no longer up and neither done nor settling, which the log would
+// say as not done, though it's done.
 func TestADoneThenAStopBackToBack(t *testing.T) {
 	defer steps.SetManualPoll(time.Hour)()
 	for range 20 {
@@ -1034,7 +1036,13 @@ func TestADoneThenAStopBackToBack(t *testing.T) {
 		if err := ended(t, applied); err != nil {
 			t.Fatal(err)
 		}
-		if todos := c.lastToDos(); !todos[0].Done || todos[1].Done {
+		lists := toDoLists(c.sink)
+		for _, l := range lists {
+			if printer := l.List[0]; l.Up != 0 && !printer.Done && !printer.Settling {
+				t.Fatalf("the list was said %+v, the printer neither up, done nor settling", l)
+			}
+		}
+		if todos := lists[len(lists)-1].List; !todos[0].Done || todos[0].Settling || todos[1].Done {
 			t.Fatalf("the to-dos ended %+v, want the printer's done, the scanner's left", todos)
 		}
 	}

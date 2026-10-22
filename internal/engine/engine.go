@@ -1032,8 +1032,8 @@ func Recheck(ctx context.Context, name string) (check.Result, bool) {
 }
 
 // ChoiceOf is the choice of the run's step called name, for the step ctx is
-// running, each of its parts run as that step's own: nil when it has none,
-// or outside a run.
+// running, each of its parts run as that step's own, Settle nil when it
+// has none: nil when it has none, or outside a run.
 func ChoiceOf(ctx context.Context, name string) *Choice {
 	d, ok := running(ctx)
 	if !ok {
@@ -1050,7 +1050,7 @@ func ChoiceOf(ctx context.Context, name string) *Choice {
 			return c.Ready(d.attributed(event.WithChecking(ctx), s), it)
 		}
 	}
-	settle := func(context.Context, check.Item) string { return "" }
+	var settle func(context.Context, check.Item) string
 	if c.Settle != nil {
 		settle = func(ctx context.Context, it check.Item) string {
 			return c.Settle(d.attributed(event.WithChanging(ctx), s), it)

@@ -2,6 +2,7 @@ package render
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -202,11 +203,14 @@ func (p *Pretty) listing(step string) bool {
 
 // workThrough is the to-dos at the run's end as they stand now: the log
 // says each newly done, what kit saw when it has words, and how long it
-// took when it came up; the one that was up left, as the person stopped
-// there, that it's not done. Its card's down once it's no longer up, when
-// it's still the card up: another card may have come up in its place
-// first. The first time, the log shows every line: the to-dos take the
-// left pane, so there's no row to choose.
+// took when it came up; one that was up and no longer is, left as the
+// person stopped there, that it's not done. Of one settling, it says
+// nothing till it's settled: what kit finished saying what it saw, or what
+// was under way as they stopped saying whether it's done. The card of the
+// one that was up is down once it's no longer up, when it's still the card
+// up: another card may have come up in its place first. The first time,
+// the log shows every line: the to-dos take the left pane, so there's no
+// row to choose.
 func (p *Pretty) workThrough(e event.ToDos) {
 	before, wasUp := p.todos, -1
 	if before == nil {
@@ -216,31 +220,45 @@ func (p *Pretty) workThrough(e event.ToDos) {
 	}
 	at, row := p.stamp(e.Time), p.rowOf(e.Step)
 	for i, t := range e.List {
-		if !t.Done || before != nil && i < len(before.List) && before.List[i].Done {
-			continue
-		}
-		text := t.Title + ": done"
-		if since, up := p.since[cardID(e.Step, t.ID)]; up {
-			text += ", in " + took(at.Sub(since))
-		}
-		parts := []string{look.White(text)}
-		if t.Saw != "" {
-			parts = append(parts, look.Muted(t.Saw))
-		}
-		p.note(at, row, look.Mark(look.Done), look.Says(parts...))
-	}
-	if wasUp >= 0 && wasUp != e.Up {
-		t := e.List[wasUp]
 		id := cardID(e.Step, t.ID)
-		if _, up := p.since[id]; up && !t.Done {
+		since, up := p.since[id]
+		switch {
+		case t.Settling || endSaid(before, t.ID):
+			continue
+		case t.Done:
+			text := t.Title + ": done"
+			if up {
+				text += ", in " + took(at.Sub(since))
+			}
+			parts := []string{look.White(text)}
+			if t.Saw != "" {
+				parts = append(parts, look.Muted(t.Saw))
+			}
+			p.note(at, row, look.Mark(look.Done), look.Says(parts...))
+		case up && i != e.Up:
 			p.note(at, row, look.Mark(look.ToDo), look.White(t.Title+": not done"))
-		}
-		if p.card != nil && cardID(p.card.Step, p.card.Item) == id {
-			p.card = nil
+		default:
+			continue
 		}
 		delete(p.since, id)
 	}
+	if wasUp >= 0 && wasUp != e.Up {
+		id := cardID(e.Step, e.List[wasUp].ID)
+		if p.card != nil && cardID(p.card.Step, p.card.Item) == id {
+			p.card = nil
+		}
+	}
 	p.todos = &e
+}
+
+// endSaid is whether the log said how the to-do with id ended as the to-dos
+// stood before: done, and settled.
+func endSaid(before *event.ToDos, id string) bool {
+	if before == nil {
+		return false
+	}
+	i := slices.IndexFunc(before.List, func(t event.ToDo) bool { return t.ID == id })
+	return i >= 0 && before.List[i].Done && !before.List[i].Settling
 }
 
 // lower takes the card up down, at at, its step finished as finished, if

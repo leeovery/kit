@@ -106,8 +106,8 @@ func TestApplyWorksThroughTheToDos(t *testing.T) {
 	}
 	records := w.lastLog(t)
 	lists := toDoLists(records)
-	if len(lists) != 4 {
-		t.Fatalf("the to-dos were listed %d times, want once as each came up and once over: %+v", len(lists), lists)
+	if len(lists) != 8 {
+		t.Fatalf("the to-dos were listed %d times, want once as each came up, once as each was done, apps' settings once more as what it waited for was settled, and once over: %+v", len(lists), lists)
 	}
 	want := []string{"Bring back apps' settings", "Allow remote users Full Disk Access", "Add a Time Machine disk"}
 	if got := titles(lists[0]); !slices.Equal(got, want) || *lists[0].Up != 0 {

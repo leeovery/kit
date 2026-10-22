@@ -228,11 +228,3 @@ func (w *work) outcome(ctx context.Context) (saw string, done bool) {
 	defer w.mu.Unlock()
 	return w.late.saw, w.late.done
 }
-
-// aside runs f aside, waited for by Wait, and returns where what it comes
-// to comes.
-func aside[T any](r *Raise, f func() T) <-chan T {
-	out := make(chan T, 1)
-	r.aside.Go(func() { out <- f() })
-	return out
-}

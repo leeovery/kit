@@ -227,8 +227,11 @@ func (e ToDos) At() time.Time { return e.Time }
 // ToDo is one of the to-dos at a run's end, as the list has it: the step
 // whose check found it and its item's id; what to do (Title); the group
 // it's in, if any; how to do it, as the record says, its steps or what its
-// item says; and whether it's done, with what kit saw when it was, in
-// words, if it has some.
+// item says; whether it's done, with what kit saw when it was, in words, if
+// it has some; and whether what it came to is still coming (Settling): kit
+// finishing what it waited for, found done, or, the person having stopped
+// there, what was under way still to say whether it's done. The list's
+// emitted again once it's come.
 type ToDo struct {
 	Step, ID string
 	Title    string
@@ -236,6 +239,7 @@ type ToDo struct {
 	How      []string `json:",omitempty"`
 	Done     bool     `json:",omitempty"`
 	Saw      string   `json:",omitempty"`
+	Settling bool     `json:",omitempty"`
 }
 
 // Queued is what a step by hand says, in a Doing, while its card waits its

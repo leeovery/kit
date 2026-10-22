@@ -525,3 +525,57 @@ func TestStopBetweenToDos(t *testing.T) {
 		t.Errorf("Stop between to-dos answered %v, stopped the run %d times; want the to-dos stopped, not the run", got, kb.stops())
 	}
 }
+
+// A to-do settling says nothing in the log till it's settled: one whose
+// card came down as the person stopped there, its look or key under way
+// left to finish, is then done, how long it took, or not done; one done
+// whose step finishes what it waited for is done once that's finished,
+// with what kit saw then. Never not done, then done.
+func TestAToDoSettling(t *testing.T) {
+	printer := event.ToDo{Step: "manual", ID: "manual:printer", Title: "Add the printer"}
+	scanner := event.ToDo{Step: "manual", ID: "manual:scanner", Title: "Add the scanner"}
+	stood := func(sec, up int, first event.ToDo) event.ToDos {
+		return event.ToDos{Time: after(sec), Step: "manual", List: []event.ToDo{first, scanner}, Up: up}
+	}
+	with := func(change func(*event.ToDo)) event.ToDo {
+		t := printer
+		change(&t)
+		return t
+	}
+	settlingStopped := with(func(t *event.ToDo) { t.Settling = true })
+	settlingDone := with(func(t *event.ToDo) { t.Done, t.Settling = true, true })
+	for _, tt := range []struct {
+		name     string
+		settling event.ToDos
+		settled  event.ToDos
+		want     string
+	}{
+		{"stopped, then found done", stood(30, -1, settlingStopped), stood(32, -1, with(func(t *event.ToDo) { t.Done = true })), "  03:04:37  ● Add the printer: done, in 22.0s"},
+		{"stopped, then not done", stood(30, -1, settlingStopped), stood(32, -1, printer), "  03:04:37  △ Add the printer: not done"},
+		{"done, what it waited for finished", stood(30, 0, settlingDone), stood(34, 0, with(func(t *event.ToDo) { t.Done, t.Saw = true, "3 apps' settings" })), "  03:04:39  ● Add the printer: done, in 24.0s · 3 apps' settings"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			events := rowsRun([]event.Step{{Name: "manual", Title: "By hand", Area: "Manual", ByHand: []event.Hand{{Name: "printer", Title: "Add the printer"}, {Name: "scanner", Title: "Add the scanner"}}}},
+				event.StepStarted{Time: after(10), Step: "manual", Doing: "applying"},
+				stood(10, 0, printer),
+				event.NeedsYou{Time: after(10), Step: "manual", Item: "manual:printer", Title: "Add the printer", More: 1},
+				event.CardDown{Time: after(30), Step: "manual", Item: "manual:printer"},
+				tt.settling,
+			)
+			// What the log says of the printer, kit at work at its foot aside.
+			printed := func(out *syncBuffer) []string {
+				return slices.DeleteFunc(logOf(screen(out.String()), 160), func(l string) bool { return !strings.Contains(l, "Add the printer") })
+			}
+			face, out, _ := applyAt(160, 64, 31*time.Second, events)
+			if log := printed(out); len(log) > 0 {
+				t.Errorf("settling, the log says\n%s\nwant nothing said of it yet", strings.Join(log, "\n"))
+			}
+			_ = face.Close()
+			face, out, _ = applyAt(160, 64, 35*time.Second, append(events, tt.settled))
+			defer func() { _ = face.Close() }()
+			if log := printed(out); !slices.Equal(log, []string{tt.want}) {
+				t.Errorf("settled, the log says\n%s\nwant\n%s", strings.Join(log, "\n"), tt.want)
+			}
+		})
+	}
+}

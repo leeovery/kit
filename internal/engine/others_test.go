@@ -219,7 +219,7 @@ func TestNothingsRecheckedOnceTheRunsStopped(t *testing.T) {
 // A step's choice is another step's to use, each part run as its step's
 // own: ready as a check, looking; answering and settling as changing
 // things. A step without one has none; one without Ready leaves a to-do as
-// it is, and one without Settle settles nothing.
+// it is, and one without Settle has none to run.
 func TestAStepsChoiceRunsAsItsOwn(t *testing.T) {
 	var as []string
 	note := func(ctx context.Context, what string) {
@@ -248,14 +248,14 @@ func TestAStepsChoiceRunsAsItsOwn(t *testing.T) {
 		Answer: func(context.Context, check.Item, string) (string, error) { return "", nil },
 	}}
 	var readied check.Item
-	var said, settled, plainSettled string
-	var none, ready bool
+	var said, settled string
+	var none, ready, noSettle bool
 	p, err := engine.New(prefs, plain, engine.Step{Name: "disk", Check: ok("fine")}, lastStep([]string{"prefs", "arq", "disk"}, func(ctx context.Context) {
 		c := engine.ChoiceOf(ctx, "prefs")
 		readied = c.Ready(ctx, check.Item{Name: "brings them back"})
 		said, _ = c.Answer(ctx, readied, "r")
 		settled = c.Settle(ctx, check.Item{ID: "prefs:open"})
-		plainSettled = engine.ChoiceOf(ctx, "arq").Settle(ctx, check.Item{ID: "arq:none"})
+		noSettle = engine.ChoiceOf(ctx, "arq").Settle == nil
 		none = engine.ChoiceOf(ctx, "disk") == nil
 		ready = engine.ChoiceOf(ctx, "arq").Ready(ctx, check.Item{Name: "as it is"}).Name == "as it is"
 	}))
@@ -265,8 +265,8 @@ func TestAStepsChoiceRunsAsItsOwn(t *testing.T) {
 	if _, err := p.Apply(t.Context(), &recorder{}, engine.Options{Jobs: 1}); err != nil {
 		t.Fatal(err)
 	}
-	if readied.Name != "brings them back, 15 Oct" || said != "brought back" || settled != "settled" || plainSettled != "" || !none || !ready {
-		t.Errorf("readied %q, said %q, settled %q, arq settled %q, disk's none %v, arq's left as it is %v", readied.Name, said, settled, plainSettled, none, ready)
+	if readied.Name != "brings them back, 15 Oct" || said != "brought back" || settled != "settled" || !noSettle || !none || !ready {
+		t.Errorf("readied %q, said %q, settled %q, arq's Settle none %v, disk's none %v, arq's left as it is %v", readied.Name, said, settled, noSettle, none, ready)
 	}
 	if !slices.Equal(as, []string{"prefs ready", "prefs answer r changing", "prefs settle prefs:open changing"}) {
 		t.Errorf("the choice ran as %q; want prefs' own, ready looking, answering and settling changing things", as)

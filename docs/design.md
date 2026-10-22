@@ -306,26 +306,31 @@ and nothing skipped: kit's own that come first (bringing back apps' settings, so
 next start with them), then the lines not done, in order, then kit's own the rest (the backups');
 grouped, each group where its first comes (kit's own in Apps and Backups). Each is looked at
 while it's up, a line by its command every few seconds, one of kit's own by its step's check, and
-once done the log says so, how long it took and what kit saw, and the next comes up; `space` says
-one with no command is done; a choice is answered by its keys, none offered while kit does what
-the one pressed says, its words turning in their place, and keys pressed meanwhile dropped
-(apps' settings, whose why says first that bringing them back opens some apps once, and, when
-the config has `[prefs files]`, that settings files come back too: `r` brings them back from
-this Mac's last save, its date said, as `kit prefs restore` does, saying how many came back, how
-many wait for their apps, how many apps to open once (a to-do that comes next, kit's own done
-leading to those its check finds then) and how many are held for `kit prefs restore --pending`,
-the log naming each of those with why; a watched to-do of kit's own, found done, finishing what
-it waited for, as bringing those apps' settings back; `f` starts afresh, as `kit prefs
-start-fresh` does, saying saving's on and how many still wait to come back). Stopping there
-(`q`'s Stop, between two to-dos as well, as the one up is found done, and while kit does what a
-key says, taken even with another key waiting unread) leaves what's left to do at once, the
-card down and the list stopped, whatever kit's doing aside, and no look begins after, readying
-what the card says cut short (it can never find it done, and a store's first clone cut short
-leaves nothing, the next look cloning again): the one up done if it was, or if a look under way then, or a key taken by then, left to finish, finds it
-done or does it, which the list says after, with any to-do that leaves; with the to-dos it left,
-in that order in the record, the run ending as it stands. The run stopped there, the card comes
-down and the list stops at once too. After the last, kit checks again the steps the
-to-dos held, those they came from, so their rows and the record are right, then finishes.
+once done its card comes down and the list ticks it at once, the log saying so, how long it took
+and what kit saw, while kit looks aside for any to-dos it leaves, and the next comes up; `space`
+says one with no command is done; a choice is answered by its keys, none offered while kit does
+what the one pressed says, its words turning in their place, and keys pressed meanwhile dropped,
+what it does never cut short, even by the run stopping, as half of apps' settings brought back
+is worse than none (apps' settings, whose why says first that bringing them back opens some apps
+once, and, when the config has `[prefs files]`, that settings files come back too: `r` brings
+them back from this Mac's last save, its date said, as `kit prefs restore` does, saying how many
+came back, how many wait for their apps, how many apps to open once (a to-do that comes next,
+kit's own done leading to those its check finds then) and how many are held for `kit prefs
+restore --pending`, the log naming each of those with why; a watched to-do of kit's own, found
+done, coming down at once, kit finishing what it waited for aside, as bringing those apps'
+settings back, and the log saying it's done once that's finished, with what it did; `f` starts
+afresh, as `kit prefs start-fresh` does, saying saving's on and how many still wait to come
+back). Stopping there (`q`'s Stop, between two to-dos as well, as the one up is found done, and
+while kit does what a key says, taken even with another key waiting unread) leaves what's left
+to do at once, the card down and the list stopped, whatever kit's doing aside, and no look
+begins after, readying what the card says cut short (it can never find it done, and a store's
+first clone cut short leaves nothing, the next look cloning again): the one up done if it was,
+or if a look under way then, or a key taken by then, left to finish, finds it done or does it,
+which the list says after, with any to-do that leaves, the log saying how it ended only then;
+with the to-dos it left, in that order in the record, the run ending as it stands. The run
+stopped there, the card comes down and the list stops at once too. After the last, kit checks
+again the steps the to-dos held, those they came from, so their rows and the record are right,
+then finishes.
 Without a terminal, nothing's raised: kit's own stay items of their steps. A step a line comes
 before can find, as it applies, that the line wasn't done after all, as the App Store's first
 install finds no one signed in (signing in has no `--test`: mas can't say who's signed in, and
