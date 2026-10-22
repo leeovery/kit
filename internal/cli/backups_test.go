@@ -40,17 +40,21 @@ func TestBackupsBringTheirChecks(t *testing.T) {
 }
 
 // Arq not installed, kit says how to install it as this Mac's config has
-// it: kit apply does, its cask declared for this Mac; else the cask's to be
-// declared.
+// it: kit apply does, its cask declared for this Mac, in its own file or
+// the shared one; its cask in, but not Arq, it's to be installed again;
+// else the cask's to be declared.
 func TestArqNotInstalledSaysHow(t *testing.T) {
-	for _, tt := range []struct{ name, casks, do string }{
-		{"its cask declared", "arq\nzoom\n", "kit apply installs it"},
-		{"its cask not declared", "zoom\n", "install it: kit cask add arq"},
+	for _, tt := range []struct{ name, scope, casks, in, do string }{
+		{"its cask declared", "laptop", "arq\nzoom\n", "", "kit apply installs it"},
+		{"its cask declared for every Mac", "shared", "arq\nghostty\n", "", "kit apply installs it"},
+		{"its cask declared and in", "shared", "arq\nghostty\n", "arq\n", "its cask is in, but not Arq: install it again"},
+		{"its cask not declared", "laptop", "zoom\n", "", "install it: kit cask add arq"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			w := laptopWorld(t)
-			w.writeSection(t, "laptop", "homebrew casks", tt.casks)
+			w.writeSection(t, tt.scope, "homebrew casks", tt.casks)
 			w.writeSection(t, "laptop", "backups", "arq\n")
+			w.fake.On("brew", "list", "--cask", "--full-name", "-1").Prints("ghostty\nfirefox\n" + tt.in)
 			w.fake.On(arqc, "stats").Fails(runner.ErrNotFound)
 			out, _, _ := w.run(t, "status", "arq")
 			if !strings.Contains(out, "Arq isn't installed") || !strings.Contains(out, tt.do) {

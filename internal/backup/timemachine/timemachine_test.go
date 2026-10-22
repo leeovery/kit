@@ -1,6 +1,7 @@
 package timemachine_test
 
 import (
+	"context"
 	"reflect"
 	"slices"
 	"strings"
@@ -15,11 +16,11 @@ import (
 
 var now = func() time.Time { return time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC) }
 
+// nothingDeclared is a Mac declaring nothing kit installs.
+func nothingDeclared(context.Context, string) (declared, installed bool) { return false, false }
+
 // tmPrefs is Time Machine's settings, as defaults exports them: automatic
 // backups as given, and one destination whose backups are dates.
-// nothingDeclared is a Mac declaring nothing kit installs.
-func nothingDeclared(string) bool { return false }
-
 func tmPrefs(auto string, dates ...time.Time) string {
 	var b strings.Builder
 	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?>

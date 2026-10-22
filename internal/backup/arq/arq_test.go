@@ -1,6 +1,7 @@
 package arq_test
 
 import (
+	"context"
 	"reflect"
 	"slices"
 	"testing"
@@ -62,26 +63,28 @@ func TestArq(t *testing.T) {
 }
 
 // nothingDeclared is a Mac declaring nothing kit installs.
-func nothingDeclared(string) bool { return false }
+func nothingDeclared(context.Context, string) (declared, installed bool) { return false, false }
 
 // Arq not installed, kit says so, and how to install it: kit apply does,
-// its cask declared for the Mac; else its cask is to be declared.
+// its cask declared for the Mac; its cask in, but not Arq, it's to be
+// installed again; else its cask is to be declared.
 func TestArqNotInstalled(t *testing.T) {
 	for _, tt := range []struct {
-		name     string
-		declared bool
-		do       string
+		name                string
+		declared, installed bool
+		do                  string
 	}{
-		{"its cask declared", true, "kit apply installs it"},
-		{"its cask not declared", false, "install it: kit cask add arq"},
+		{"its cask declared", true, false, "kit apply installs it"},
+		{"its cask declared and in", true, true, "its cask is in, but not Arq: install it again"},
+		{"its cask not declared", false, false, "install it: kit cask add arq"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			fake := runnertest.New(t)
 			fake.On(arq.Arqc, "stats").Fails(runner.ErrNotFound)
 			var asked []string
-			res := steps.Backup(fake, arq.Driver{}, now, func(thing string) bool {
+			res := steps.Backup(fake, arq.Driver{}, now, func(_ context.Context, thing string) (bool, bool) {
 				asked = append(asked, thing)
-				return tt.declared
+				return tt.declared, tt.installed
 			}).Check(t.Context())
 			want := []check.Item{{ID: "arq:missing", Name: "Arq isn't installed", State: steps.Problem, Detail: tt.do}}
 			if res.State != check.Attention || res.Summary != "not installed" || !reflect.DeepEqual(res.Items, want) {

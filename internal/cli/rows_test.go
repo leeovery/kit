@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -59,7 +60,7 @@ func TestEveryStepHasARow(t *testing.T) {
 		nightly.Check(nil, true, true, state, never),
 	})
 	for _, d := range backup.Tools {
-		made = append(made, steps.Backup(fake, d, never, func(string) bool { return false }))
+		made = append(made, steps.Backup(fake, d, never, func(context.Context, string) (bool, bool) { return false, false }))
 	}
 	// kit.toml naming a terminal, the boot makes every step it has.
 	booted := (&boot.Boot{Config: configDir}).Booted()

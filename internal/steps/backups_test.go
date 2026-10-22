@@ -66,25 +66,29 @@ func (f fakeTool) About() tool.About {
 }
 
 // nothingDeclared is a Mac declaring nothing kit installs.
-func nothingDeclared(string) bool { return false }
+func nothingDeclared(context.Context, string) (declared, installed bool) { return false, false }
 
 // A backup tool not installed is a problem, saying how to install it, from
-// what installs it: kit apply does, that thing declared for the Mac; else
-// it's declared, with the kind's add; a tool that names nothing that
-// installs it, installed somehow.
+// what installs it: kit apply does, that thing declared for the Mac, unless
+// it's in already, when it's installed again; else it's declared, with the
+// kind's add; a tool that names nothing that installs it, installed
+// somehow.
 func TestABackupToolMissing(t *testing.T) {
 	for _, tt := range []struct {
-		name, pkg string
-		declared  []string
-		do        string
+		name, pkg           string
+		declared, installed []string
+		do                  string
 	}{
-		{"declared", "cask:vault", []string{"cask:vault"}, "kit apply installs it"},
-		{"not declared", "cask:vault", []string{"cask:other"}, "install it: kit cask add vault"},
-		{"from the App Store, not declared", "mas:vault", nil, "install it: kit mas add vault"},
-		{"nothing installs it", "", nil, "install it"},
+		{"declared", "cask:vault", []string{"cask:vault"}, nil, "kit apply installs it"},
+		{"declared and in", "cask:vault", []string{"cask:vault"}, []string{"cask:vault"}, "its cask is in, but not Vault: install it again"},
+		{"not declared", "cask:vault", []string{"cask:other"}, nil, "install it: kit cask add vault"},
+		{"from the App Store, not declared", "mas:vault", nil, nil, "install it: kit mas add vault"},
+		{"nothing installs it", "", nil, nil, "install it"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			declared := func(thing string) bool { return slices.Contains(tt.declared, thing) }
+			declared := func(_ context.Context, thing string) (bool, bool) {
+				return slices.Contains(tt.declared, thing), slices.Contains(tt.installed, thing)
+			}
 			res := steps.Backup(runnertest.New(t), fakeTool{status: tool.Status{Missing: true, Summary: "ignored"}, pkg: tt.pkg}, now, declared).Check(t.Context())
 			want := []check.Item{{ID: "vault:missing", Name: "Vault isn't installed", State: steps.Problem, Detail: tt.do}}
 			if res.State != check.Attention || res.Summary != "not installed" || !reflect.DeepEqual(res.Items, want) {

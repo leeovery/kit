@@ -416,11 +416,22 @@ func (r *run) installed(kindName, thing string) func(context.Context) bool {
 	}
 }
 
-// installs reports whether kit apply installs thing, one of a step's things,
-// as in cask:arq: declared for this Mac, and not off.
-func (r *run) installs(thing string) bool {
+// declares reports whether kit apply installs thing, one of a step's
+// things, as in cask:arq: declared for this Mac, and not off.
+func (r *run) declares(thing string) bool {
 	kindName, name, _ := strings.Cut(thing, ":")
 	return slices.ContainsFunc(r.lists[kindName].Entries, func(e config.Entry) bool { return !e.Off && sameThing(e.Name, name) })
+}
+
+// packages is how thing, one of a step's things, as in cask:arq, stands
+// (steps.Packages): declared for this Mac, as declares has it, and, if so,
+// whether its kind finds it installed.
+func (r *run) packages(ctx context.Context, thing string) (declared, installed bool) {
+	if !r.declares(thing) {
+		return false, false
+	}
+	kindName, name, _ := strings.Cut(thing, ":")
+	return true, r.installed(kindName, name)(ctx)
 }
 
 // behind is whether what waits behind thing, a thing of the kind called

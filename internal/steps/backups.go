@@ -72,13 +72,16 @@ func ReadBackup(name, options string) (BackupTool, error) {
 	return b, nil
 }
 
+// Packages says of one of a step's things, as in cask:arq, whether this Mac
+// declares it, and whether it's installed.
+type Packages func(ctx context.Context, thing string) (declared, installed bool)
+
 // Backup checks a backup tool's backups, as its driver says they stand:
-// installed, or how to install it, as installs says whether kit installs
-// what the tool comes as (one of a step's things, as in cask:arq); set up,
-// or the person's to set up; then what's wrong, in the tool's words, and
-// how they stand, when the tool's words don't say, from when they last
-// finished.
-func Backup(run runner.Runner, d tool.Driver, now func() time.Time, installs func(thing string) bool) engine.Step {
+// installed, or how to install it, as packages says what the tool comes as
+// (About.Package) stands; set up, or the person's to set up; then what's
+// wrong, in the tool's words, and how they stand, when the tool's words
+// don't say, from when they last finished.
+func Backup(run runner.Runner, d tool.Driver, now func() time.Time, packages Packages) engine.Step {
 	about := d.About()
 	return engine.Step{
 		Name: about.ID, Title: about.Name, Area: AreaBackups, Row: rowBackups,
@@ -89,7 +92,7 @@ func Backup(run runner.Runner, d tool.Driver, now func() time.Time, installs fun
 			case err != nil:
 				return failed(err)
 			case st.Missing:
-				return problem(about.ID, "not installed", [3]string{"missing", about.Name + " isn't installed", installing(about.Package, installs)})
+				return problem(about.ID, "not installed", [3]string{"missing", about.Name + " isn't installed", installing(ctx, about, packages)})
 			case st.NotSetUp:
 				s := about.SetUp
 				return yours(about.ID, "not set up", "none", s.Do, check.ToDo{Title: s.Title, Why: s.Why, Steps: s.Steps, Watch: s.Watch, Group: groupBackups})
@@ -111,18 +114,23 @@ func Backup(run runner.Runner, d tool.Driver, now func() time.Time, installs fun
 	}
 }
 
-// installing is how to install a tool that comes as pkg, one of a step's
-// things, as in cask:arq: kit apply installs it when it's declared
-// (installs); else it's declared, as kit cask add arq does.
-func installing(pkg string, installs func(thing string) bool) string {
-	kindName, item, ok := strings.Cut(pkg, ":")
-	switch {
-	case !ok:
+// installing is how to install the tool about tells of, missing, as what
+// it comes as (its Package, one of a step's things, as in cask:arq)
+// stands: not declared, it's declared, as kit cask add arq does; declared,
+// kit apply installs it, unless it's installed already, when it's to be
+// installed again.
+func installing(ctx context.Context, about tool.About, packages Packages) string {
+	kindName, item, ok := strings.Cut(about.Package, ":")
+	if !ok {
 		return "install it"
-	case installs(pkg):
-		return "kit apply installs it"
 	}
-	return "install it: kit " + kindName + " add " + item
+	switch declared, installed := packages(ctx, about.Package); {
+	case !declared:
+		return "install it: kit " + kindName + " add " + item
+	case installed:
+		return "its " + kindName + " is in, but not " + about.Name + ": install it again"
+	}
+	return "kit apply installs it"
 }
 
 // backupSummary is how a tool's backups stand: in its words, when it has
