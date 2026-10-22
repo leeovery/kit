@@ -15,6 +15,7 @@ import (
 	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/hand"
+	"github.com/leeovery/kit/internal/notice"
 	"github.com/leeovery/kit/internal/runner"
 	"github.com/leeovery/kit/internal/state"
 )
@@ -283,7 +284,10 @@ var (
 // Raise is how a step by hand that's come due is raised while kit applies
 // at a terminal, where someone can act on it: a card, front and centre, one
 // up at a time, with the steps to do it; and a notification, in case
-// they're away from it. What they answer the card with comes back on Desk.
+// they're away from it. What they answer the card with comes back on Desk,
+// taken at once: the card's notifications go out aside, in order (a
+// notice.Queue), and its app opens aside, so neither holds up the answer.
+// Wait waits for both, as the run ends.
 //
 // The cards come due wait in a line, the first's up: in order of how much
 // of the run waits on each (engine.Holding), those holding up as much in
@@ -295,8 +299,12 @@ var (
 type Raise struct {
 	Sink   event.Sink
 	Now    func() time.Time
-	Notify Notifier
+	Notify notice.Notifier
 	Desk   *hand.Desk
+
+	notices    *notice.Queue
+	noticesSet sync.Once
+	opening    sync.WaitGroup
 
 	// mu guards the line, the first's turn it is; and the card up, and
 	// whose it is (shown), nil while none is.
@@ -347,13 +355,6 @@ type seat struct {
 // how much of the run waits on it.
 func midRun(ctx context.Context, step string) seat {
 	return seat{weight: engine.Holding(ctx, step)}
-}
-
-// Notifier posts notifications, each under an id, replacing any posted
-// under it before, and takes them away.
-type Notifier interface {
-	Notify(ctx context.Context, id, title, body string)
-	Clear(ctx context.Context, id string)
 }
 
 // manualPoll is how often a raised step by hand's command is run, to see
@@ -526,21 +527,41 @@ func (r *Raise) show(ctx context.Context, pl *place, c raised) {
 	r.card, r.shown = card, pl
 	r.Sink.Emit(card)
 	r.mu.Unlock()
-	if r.Notify != nil && pl.notified == "" {
+	if q := r.queue(); q != nil && pl.notified == "" {
 		pl.notified = card.Item
-		r.Notify.Notify(ctx, noticeID(pl.step, card.Item), card.Title, notice(card))
+		q.Notify(ctx, noticeID(pl.step, card.Item), card.Title, noticeOf(card))
 	}
 	if o, ok := c.(opener); ok {
-		o.open(ctx)
+		r.opening.Go(func() { o.open(ctx) })
 	}
 }
 
 // unnotify takes the notification of pl's card away, once it's down: set
 // aside, done, or the run stopped.
 func (r *Raise) unnotify(ctx context.Context, pl *place) {
-	if r.Notify != nil && pl.notified != "" {
-		r.Notify.Clear(context.WithoutCancel(ctx), noticeID(pl.step, pl.notified))
+	if q := r.queue(); q != nil && pl.notified != "" {
+		q.Clear(ctx, noticeID(pl.step, pl.notified))
 		pl.notified = ""
+	}
+}
+
+// queue is where the cards' notifications go out from, through Notify:
+// nil with nothing to post them.
+func (r *Raise) queue() *notice.Queue {
+	r.noticesSet.Do(func() {
+		if r.Notify != nil {
+			r.notices = notice.New(r.Notify)
+		}
+	})
+	return r.notices
+}
+
+// Wait waits till what the cards did aside is done: their apps opened, and
+// their notifications posted and taken away.
+func (r *Raise) Wait() {
+	r.opening.Wait()
+	if q := r.queue(); q != nil {
+		q.Wait()
 	}
 }
 
@@ -549,9 +570,9 @@ func noticeID(step, item string) string {
 	return "card:" + step + ":" + item
 }
 
-// notice is what a card's notification says under its title: its first
+// noticeOf is what a card's notification says under its title: its first
 // step, else that kit waits for it.
-func notice(card event.NeedsYou) string {
+func noticeOf(card event.NeedsYou) string {
 	if len(card.Steps) > 0 {
 		return card.Steps[0]
 	}

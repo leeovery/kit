@@ -2,6 +2,7 @@ package macapp_test
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -257,5 +258,84 @@ func TestOsascriptQuotes(t *testing.T) {
 	macapp.New(fake, t.TempDir(), terminal).Notify(t.Context(), "x", "Sign in", `a "b" \ c`)
 	if calls := fake.Calls(); len(calls) != 1 {
 		t.Errorf("ran %q, want osascript once", calls)
+	}
+}
+
+// swiftcIn is the compile of the app in dir, as building scripts it.
+func swiftcIn(dir string) []string {
+	work := filepath.Join(dir, ".kit.app-build")
+	return []string{"-O", "-o", filepath.Join(work, "kit.app", "Contents", "MacOS", "kit"), filepath.Join(work, "kit.swift")}
+}
+
+// Prepare starts the build aside, returning at once; Ready waits for it.
+func TestPrepareBuildsAside(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "kit")
+	fake := runnertest.New(t)
+	want := building(t, fake, dir)
+	release := make(chan struct{})
+	exe := filepath.Join(dir, ".kit.app-build", "kit.app", "Contents", "MacOS", "kit")
+	fake.On("swiftc", swiftcIn(dir)...).Does(func() {
+		<-release
+		if err := os.WriteFile(exe, []byte("binary"), 0o755); err != nil {
+			t.Error(err)
+		}
+	})
+	app := macapp.New(fake, dir, terminal)
+
+	app.Prepare()
+	close(release)
+	if !app.Ready(t.Context()) || !reflect.DeepEqual(fake.Calls(), want) {
+		t.Errorf("ran %q, want the app built once: %q", fake.Calls(), want)
+	}
+}
+
+// A wait for the build under way is given up once its context is done, as
+// when the notification waiting has been taken away: that notification
+// posts nothing, and the build goes on. Closing the app stops the build and
+// waits till it has; what's posted after goes through osascript, nothing
+// built again.
+func TestAWaitForTheBuildIsGivenUp(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "kit")
+	fake := runnertest.New(t)
+	building(t, fake, dir)
+	compiling := make(chan struct{})
+	fake.On("swiftc", swiftcIn(dir)...).Does(func() { close(compiling) }).Hangs()
+	script := `display notification "Open it" with title "kit" subtitle "Sign in"`
+	fake.On("osascript", "-e", script)
+	app := macapp.New(fake, dir, terminal)
+	app.Prepare()
+	<-compiling
+
+	ctx, stop := context.WithCancel(t.Context())
+	stop()
+	if app.Ready(ctx) {
+		t.Error("Ready = true with the build under way")
+	}
+	app.Notify(ctx, "card:sign-in", "Sign in", "Open it")
+	compiled := []string{"xcode-select -p", runner.Command{Name: "swiftc", Args: swiftcIn(dir)}.String()}
+	if got := fake.Calls(); !reflect.DeepEqual(got, compiled) {
+		t.Errorf("ran %q, want the build alone: nothing posted once its wait was given up", got)
+	}
+
+	app.Close()
+	app.Notify(t.Context(), "card:sign-in", "Sign in", "Open it")
+	if got, want := fake.Calls(), append(compiled, "osascript -e '"+script+"'"); !reflect.DeepEqual(got, want) {
+		t.Errorf("ran %q, want %q", got, want)
+	}
+	if _, err := os.Stat(app.Path()); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("a build stopped was put in place (%v)", err)
+	}
+}
+
+// Taken away before it could be posted, a notification posts nothing, the
+// app ready or not.
+func TestNotifyOnceItsContextIsDone(t *testing.T) {
+	ctx, stop := context.WithCancel(t.Context())
+	stop()
+	app, fake := built(t)
+	app.Notify(ctx, "dialog", "macOS is asking", "Answer it")
+	macapp.New(fake, t.TempDir(), terminal).Notify(ctx, "dialog", "macOS is asking", "Answer it")
+	if calls := fake.Calls(); len(calls) > 0 {
+		t.Errorf("ran %q, want nothing", calls)
 	}
 }

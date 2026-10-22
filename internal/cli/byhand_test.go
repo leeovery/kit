@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/leeovery/kit/internal/ask"
@@ -117,6 +118,34 @@ func TestApplyNotifiesThroughKitsApp(t *testing.T) {
 	want := []string{built[0].String(), built[1].String(), built[2].String(), notify.String(), clear.String()}
 	if !slices.Equal(ran, want) {
 		t.Errorf("ran %q, want %q", ran, want)
+	}
+}
+
+// A run stopped while kit's app is still being built ends without waiting
+// for the build, which it stops, and posts no notification: none waiting
+// for the build goes through osascript in its place.
+func TestApplyEndsWhileKitsAppIsBuilt(t *testing.T) {
+	w := signInWorld(t)
+	w.terminal, w.size = true, [2]int{160, 64}
+	kb := &keyboard{}
+	w.listen = kb.listen
+	work := filepath.Join(w.home, ".local", "share", "kit", ".kit.app-build")
+	w.fake.On("xcode-select", "-p")
+	w.fake.On("swiftc", "-O", "-o", filepath.Join(work, "kit.app", "Contents", "MacOS", "kit"), filepath.Join(work, "kit.swift")).Hangs()
+	var stop sync.Once
+	w.fake.On("test", "-f", "/signed-in").Exits(1).Then().Exits(1).Does(func() {
+		stop.Do(func() { kb.press(t, ask.Key{Name: "ctrl+c"}) })
+	})
+
+	if _, errOut, code := w.run(t, "apply"); code != 1 {
+		t.Errorf("kit apply, stopped at the card, exit %d (%s), want 1", code, errOut)
+	}
+	calls := w.fake.Calls()
+	if !slices.ContainsFunc(calls, func(c string) bool { return strings.HasPrefix(c, "swiftc ") }) {
+		t.Errorf("ran %q, want kit's app being built", calls)
+	}
+	if slices.ContainsFunc(calls, func(c string) bool { return strings.HasPrefix(c, "open ") || strings.HasPrefix(c, "osascript -e") }) {
+		t.Errorf("ran %q, want no notification posted", calls)
 	}
 }
 

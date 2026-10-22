@@ -59,24 +59,32 @@ func fingerprint() []byte {
 }
 
 // App is kit.app, as a run uses it: built, when it needs to be, once a run
-// at most.
+// at most, aside, so that a wait for the build can be given up.
 type App struct {
 	run runner.Runner
 	dir string
 	// activate is the bundle identifier of the app a click on a
 	// notification brings forward: none when "".
 	activate string
+	// life is what a build runs in, done once the app's closed.
+	life context.Context
+	end  context.CancelFunc
 
+	// mu guards whether the app's ready; whether a build's been tried, or
+	// the app closed; and built, closed once the build under way has
+	// ended, nil while none is.
 	mu    sync.Mutex
 	ready bool
 	tried bool
+	built chan struct{}
 }
 
 // New returns kit.app in the data directory dir, run through run; a click
 // on one of its notifications brings forward the app whose bundle
 // identifier is activate, when it's not "".
 func New(run runner.Runner, dir, activate string) *App {
-	return &App{run: run, dir: dir, activate: activate}
+	life, end := context.WithCancel(context.Background())
+	return &App{run: run, dir: dir, activate: activate, life: life, end: end}
 }
 
 // Path is where the app's bundle is.
@@ -84,24 +92,70 @@ func (a *App) Path() string {
 	return filepath.Join(a.dir, Name)
 }
 
+// Prepare starts building the app aside, when it needs building, so that
+// a notification posted later needn't wait as long for it.
+func (a *App) Prepare() { a.building() }
+
 // Ready reports whether the app's there to post with, building it first
-// when it's missing or was built from other files. A build is tried once a
-// run at most; without Swift's compiler and the command line tools, as on a
-// new Mac before they're installed, it isn't tried, and Ready looks again
-// next time.
+// when it's missing or was built from other files, or waiting for the
+// build under way; false once ctx is done, the build going on. A build is
+// tried once a run at most; without Swift's compiler and the command line
+// tools, as on a new Mac before they're installed, it isn't tried, and
+// Ready looks again next time.
 func (a *App) Ready(ctx context.Context) bool {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.ready || a.current() {
-		a.ready = true
-		return true
+	ready, built := a.building()
+	if built == nil {
+		return ready
 	}
-	if a.tried || !a.canBuild(ctx) {
+	select {
+	case <-built:
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		return a.ready
+	case <-ctx.Done():
 		return false
 	}
+}
+
+// Close stops a build under way, waiting till it has, and starts no other:
+// what's posted after goes through osascript, unless the app was ready.
+func (a *App) Close() {
+	a.mu.Lock()
 	a.tried = true
-	a.ready = a.build(ctx) == nil
-	return a.ready
+	built := a.built
+	a.mu.Unlock()
+	a.end()
+	if built != nil {
+		<-built
+	}
+}
+
+// building reports whether the app's ready, else the build under way, if
+// there is one, started now when the app needs building and a build can
+// be tried.
+func (a *App) building() (ready bool, built <-chan struct{}) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	switch {
+	case a.ready || a.current():
+		a.ready = true
+		return true, nil
+	case a.built != nil:
+		return false, a.built
+	case a.tried || !a.canBuild(a.life):
+		return false, nil
+	}
+	a.tried = true
+	done := make(chan struct{})
+	a.built = done
+	go func() {
+		err := a.build(a.life)
+		a.mu.Lock()
+		a.ready, a.built = err == nil, nil
+		a.mu.Unlock()
+		close(done)
+	}()
+	return false, done
 }
 
 // current reports whether the bundle's there, built from the files
@@ -178,13 +232,15 @@ func write(path string, data []byte) error {
 
 // Notify posts a notification under id, replacing any posted under it
 // before: through the app, launched as macOS launches apps, else through
-// osascript, which can't replace or take one away.
+// osascript, which can't replace or take one away. Once ctx is done, as
+// when it's been taken away while it waited for the app, it posts nothing.
 func (a *App) Notify(ctx context.Context, id, title, body string) {
 	args := []string{"notify", "--id", id, "--title", title, "--body", body}
 	if a.activate != "" {
 		args = append(args, "--activate", a.activate)
 	}
-	if a.Ready(ctx) && a.open(ctx, args...) == nil {
+	posted := a.Ready(ctx) && ctx.Err() == nil && a.open(ctx, args...) == nil
+	if posted || ctx.Err() != nil {
 		return
 	}
 	quote := func(s string) string { return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(s) + `"` }

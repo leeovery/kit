@@ -536,7 +536,7 @@ func TestStoppingAtTheToDos(t *testing.T) {
 		t.Errorf("%d cards went up; want the one, then none", n)
 	}
 	want := []string{"notify card:manual:time-machine:none | Add a Time Machine disk | kit waits for you to do this", "clear card:manual:time-machine:none"}
-	if got := c.notices.posted(); !slices.Equal(got, want) {
+	if got := c.posted(); !slices.Equal(got, want) {
 		t.Errorf("notifications %q, want %q", got, want)
 	}
 }

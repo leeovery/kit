@@ -184,6 +184,13 @@ func (n *notices) posted() []string {
 	return slices.Clone(n.seen)
 }
 
+// posted are the notifications posted and taken away, once all given have
+// gone out.
+func (c *card) posted() []string {
+	c.raise.Wait()
+	return c.notices.posted()
+}
+
 // card is a run at a terminal, as steps by hand are raised in it: what's
 // emitted, the desk the person answers cards on, the programs run, and the
 // notifications posted.
@@ -282,7 +289,7 @@ func TestACardGoesUpAndIsDone(t *testing.T) {
 		t.Errorf("after Done, check = %+v, want it marked done", res)
 	}
 	notified := []string{"notify card:sharing:sharing | Turn on sharing | Open System Settings", "clear card:sharing:sharing"}
-	if got := c.notices.posted(); !slices.Equal(got, notified) {
+	if got := c.posted(); !slices.Equal(got, notified) {
 		t.Errorf("notifications %q, want %q", got, notified)
 	}
 }
@@ -413,7 +420,7 @@ func TestACardIsDoneOrStopped(t *testing.T) {
 		t.Errorf("check after = %+v, want it left to do", res)
 	}
 	want := []string{"notify card:sign-in:sign-in | Sign in | kit waits for you to do this", "clear card:sign-in:sign-in"}
-	if got := c.notices.posted(); !slices.Equal(got, want) {
+	if got := c.posted(); !slices.Equal(got, want) {
 		t.Errorf("notifications %q, want %q", got, want)
 	}
 }
@@ -527,12 +534,19 @@ func over(t *testing.T, ran <-chan engine.Report) engine.Report {
 // notification is posted each time it comes up, and taken away each time
 // it goes down, set aside or done, so only the card up has one: the
 // store's taken away and posted again though its card's set aside and back
-// before its step looks, held opening its app meanwhile.
+// before its step looks, held looking whether it's done meanwhile.
 func TestCardsComeUpByWhatWaitsOnThem(t *testing.T) {
+	defer steps.SetManualPoll(time.Millisecond)()
 	c := newCard(t)
-	gate, opened := make(chan struct{}), make(chan struct{})
-	c.fake.On("open", "-b", "com.example.store").Does(func() { <-opened })
-	store := steps.OwnManual(c.fake, c.state, steps.ManualStep{Name: "store", Do: "Sign in to the store", Open: "com.example.store"}, c.raise)
+	gate, looking, looked := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	var hold, signedIn atomic.Bool
+	store := steps.OwnManual(c.fake, c.state, steps.ManualStep{Name: "store", Do: "Sign in to the store", Done: func(context.Context) bool {
+		if hold.CompareAndSwap(true, false) {
+			close(looking)
+			<-looked
+		}
+		return signedIn.Load()
+	}}, c.raise)
 	store.Before = []string{"apps"}
 	vault := steps.OwnManual(c.fake, c.state, steps.ManualStep{Name: "vault", Do: "Sign in to the vault"}, c.raise)
 	vault.After, vault.Before = []string{"cask"}, []string{"secret"}
@@ -544,13 +558,15 @@ func TestCardsComeUpByWhatWaitsOnThem(t *testing.T) {
 	if up := c.cards(t, 1)[0]; up.Item != "store" {
 		t.Fatalf("first card = %+v, want the store's, the only one come due", up)
 	}
+	hold.Store(true)
+	<-looking
 	close(gate)
 	c.cards(t, 2)
 	c.answer(t, "vault", hand.Next)
 	c.turnsSeen(t, 6)
-	close(opened)
+	close(looked)
 	c.cards(t, 3)
-	c.answer(t, "store", hand.Done)
+	signedIn.Store(true)
 	c.cards(t, 4)
 	c.answer(t, "vault", hand.Done)
 	report := over(t, ran)
@@ -565,7 +581,7 @@ func TestCardsComeUpByWhatWaitsOnThem(t *testing.T) {
 	for _, item := range []string{"store", "vault"} {
 		id := "card:" + item + ":" + item
 		var got []string
-		for _, n := range c.notices.posted() {
+		for _, n := range c.posted() {
 			if f := strings.Fields(n); f[1] == id {
 				got = append(got, f[0])
 			}
@@ -953,7 +969,7 @@ func TestTheRestOneCardEach(t *testing.T) {
 		"notify card:manual:manual:app | Install the app | kit waits for you to do this", "clear card:manual:manual:app",
 		"notify card:manual:manual:sign-in | Sign in to the service | Open the service", "clear card:manual:manual:sign-in",
 	}
-	if got := c.notices.posted(); !slices.Equal(got, want) {
+	if got := c.posted(); !slices.Equal(got, want) {
 		t.Errorf("notifications %q, want %q", got, want)
 	}
 }
@@ -1007,15 +1023,15 @@ func TestACardGoesUpAgain(t *testing.T) {
 		"notify card:appstore:appstore | Sign in to the App Store | Open the App Store", "clear card:appstore:appstore",
 		"notify card:appstore:appstore | Sign in to the App Store | Open the App Store", "clear card:appstore:appstore",
 	}
-	if got := c.notices.posted(); !slices.Equal(got, posted) {
+	if got := c.posted(); !slices.Equal(got, posted) {
 		t.Errorf("notifications %q, want %q", got, posted)
 	}
 
 	c = newCard(t)
 	c.fake.On("test", "-f", "/signed-in")
 	tested := steps.OwnManual(c.fake, c.state, steps.ManualStep{Name: "sign-in", Do: "Sign in", Before: []string{"secret"}, Command: &runner.Command{Name: "test", Args: []string{"-f", "/signed-in"}}}, c.raise)
-	if err := tested.Again(t.Context()); err == nil || len(c.notices.posted()) != 0 {
-		t.Errorf("again, its test passing = %v, posted %q; want it refused, nothing raised", err, c.notices.posted())
+	if err := tested.Again(t.Context()); err == nil || len(c.posted()) != 0 {
+		t.Errorf("again, its test passing = %v, posted %q; want it refused, nothing raised", err, c.posted())
 	}
 	if steps.OwnManual(c.fake, c.state, m, nil).Again != nil {
 		t.Error("with no one to act, a step by hand can be done again")
@@ -1055,4 +1071,193 @@ func TestACardBetweenToDosCountsThemAll(t *testing.T) {
 	c.upNow(t, "manual:copier")
 	c.answer(t, steps.ManualName, hand.Done)
 	over(t, ran)
+}
+
+// heldNotices is a Notifier whose notifications each wait to go out till
+// through is closed, as one waits for kit's app to be built on a new Mac:
+// going says which is going out. It notes what it's passed, a notification
+// whose context was done by then, so that it posts nothing, saying so.
+type heldNotices struct {
+	going   chan string
+	through chan struct{}
+	notices
+}
+
+func newHeldNotices() *heldNotices {
+	return &heldNotices{going: make(chan string, 8), through: make(chan struct{})}
+}
+
+func (h *heldNotices) Notify(ctx context.Context, id, title, body string) {
+	h.going <- id
+	<-h.through
+	if ctx.Err() != nil {
+		body += " (taken away first)"
+	}
+	h.notices.Notify(ctx, id, title, body)
+}
+
+// heldCard is a run at a terminal, as newCard has it, whose notifications
+// wait to go out.
+func heldCard(t *testing.T) (*card, *heldNotices) {
+	c := newCard(t)
+	h := newHeldNotices()
+	c.notices = &h.notices
+	c.raise = &steps.Raise{Sink: c.sink, Now: time.Now, Notify: h, Desk: c.desk}
+	return c, h
+}
+
+// posting waits till the notification under id is going out.
+func (h *heldNotices) posting(t *testing.T, id string) {
+	t.Helper()
+	if got := <-h.going; got != id {
+		t.Fatalf("notification %s went out, want %s", got, id)
+	}
+}
+
+// A card takes space at once, its notification still waiting to go out:
+// it's done, and down, before that notification's posted. The notification
+// goes out after, taken away first, so it posts nothing, then is taken
+// away: none is left.
+func TestACardIsAnsweredWhileItsNotificationWaits(t *testing.T) {
+	c, h := heldCard(t)
+	m := steps.ManualStep{Name: "store", Do: "Sign in to the store", Steps: []string{"Open the store"}}
+	step := steps.OwnManual(c.fake, c.state, m, c.raise)
+	applied := applying(t, step)
+	h.posting(t, "card:store:store")
+	if !c.desk.Answer("store", hand.Done) {
+		t.Fatal("the card didn't take space while its notification waited")
+	}
+	if err := ended(t, applied); err != nil {
+		t.Fatal(err)
+	}
+	if res := step.Check(t.Context()); res.State != check.OK {
+		t.Errorf("after space, check = %+v, want it done", res)
+	}
+	close(h.through)
+	want := []string{"notify card:store:store | Sign in to the store | Open the store (taken away first)", "clear card:store:store"}
+	if got := c.posted(); !slices.Equal(got, want) {
+		t.Errorf("notifications %q, want %q", got, want)
+	}
+}
+
+// Tab moves on at once, the card up's notification still waiting to go
+// out, and space on the next card, and on the first come back: each card's
+// notifications go out after, in order, each taken away before it went
+// out.
+func TestTabWhileANotificationWaits(t *testing.T) {
+	c, h := heldCard(t)
+	gate := make(chan struct{})
+	store := steps.OwnManual(c.fake, c.state, steps.ManualStep{Name: "store", Do: "Sign in to the store"}, c.raise)
+	store.After, store.Before = []string{"cask"}, []string{"apps"}
+	vault := steps.OwnManual(c.fake, c.state, steps.ManualStep{Name: "vault", Do: "Sign in to the vault"}, c.raise)
+	vault.Before = []string{"secret"}
+	p, err := engine.New(store, vault, gated("cask", gate), fine("apps"), fine("secret"), fine("git", "secret"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ran := running(t, c, p)
+	h.posting(t, "card:vault:vault")
+	close(gate)
+	c.cards(t, 2)
+	c.answer(t, "vault", hand.Next)
+	if up := c.cards(t, 3)[2]; up.Item != "store" {
+		t.Fatalf("after tab, card = %+v, want the store's", up)
+	}
+	c.answer(t, "store", hand.Done)
+	if up := c.cards(t, 4)[3]; up.Item != "vault" {
+		t.Fatalf("after the store's done, card = %+v, want the vault's back", up)
+	}
+	c.answer(t, "vault", hand.Done)
+	over(t, ran)
+
+	close(h.through)
+	posted := c.posted()
+	for item, title := range map[string]string{"store": "Sign in to the store", "vault": "Sign in to the vault"} {
+		id := "card:" + item + ":" + item
+		notify, clear := "notify "+id+" | "+title+" | kit waits for you to do this (taken away first)", "clear "+id
+		want := []string{notify, clear}
+		if item == "vault" {
+			want = append(want, notify, clear)
+		}
+		got := slices.DeleteFunc(slices.Clone(posted), func(n string) bool { return strings.Fields(n)[1] != id })
+		if !slices.Equal(got, want) {
+			t.Errorf("%s's notifications %q, want %q", item, got, want)
+		}
+	}
+}
+
+// A choice's key acts at once, the to-do's notification still waiting to go
+// out.
+func TestAChoiceWhileItsNotificationWaits(t *testing.T) {
+	c, h := heldCard(t)
+	var mu sync.Mutex
+	brought := false
+	step := engine.Step{
+		Name: "prefs", Title: "App settings", Area: steps.AreaBackups,
+		Check: func(context.Context) check.Result {
+			mu.Lock()
+			defer mu.Unlock()
+			if brought {
+				return check.Result{State: check.OK, Summary: "saved"}
+			}
+			return check.Result{State: check.Attention, Summary: "paused", Items: []check.Item{toDoItem("prefs", check.ToDo{
+				Title: "Bring back apps' settings", First: true, Keys: []check.Key{{Key: "r", Does: "brings them back"}},
+			})}}
+		},
+		Choice: &engine.Choice{
+			Answer: func(context.Context, check.Item, string) (string, error) {
+				mu.Lock()
+				defer mu.Unlock()
+				brought = true
+				return "brought back", nil
+			},
+		},
+	}
+	done := make(chan engine.Report, 1)
+	go func() {
+		done <- applied(t, c, atTheEnd(steps.Manual(c.fake, "/home/someone", c.state, config.List{}, c.raise), step))
+	}()
+	h.posting(t, "card:manual:prefs:none")
+	if !c.desk.Answer(steps.ManualName, "r") {
+		t.Fatal("the to-do didn't take r while its notification waited")
+	}
+	var report engine.Report
+	select {
+	case report = <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the run never ended")
+	}
+	if report.Results["prefs"].State != check.OK {
+		t.Errorf("prefs stands %s, want it done by r", report.Results["prefs"].State)
+	}
+	close(h.through)
+	want := []string{"notify card:manual:prefs:none | Bring back apps' settings | kit waits for you to do this (taken away first)", "clear card:manual:prefs:none"}
+	if got := c.posted(); !slices.Equal(got, want) {
+		t.Errorf("notifications %q, want %q", got, want)
+	}
+}
+
+// A card takes space at once while kit opens its app, the app opening
+// aside.
+func TestACardIsAnsweredWhileItsAppOpens(t *testing.T) {
+	c := newCard(t)
+	opening, opened := make(chan struct{}), make(chan struct{})
+	c.fake.On("open", "-b", "com.example.store").Does(func() {
+		close(opening)
+		<-opened
+	})
+	step := steps.OwnManual(c.fake, c.state, steps.ManualStep{Name: "store", Do: "Sign in to the store", Open: "com.example.store"}, c.raise)
+	applied := applying(t, step)
+	<-opening
+	if !c.desk.Answer("store", hand.Done) {
+		t.Fatal("the card didn't take space while its app opened")
+	}
+	if err := ended(t, applied); err != nil {
+		t.Fatal(err)
+	}
+	close(opened)
+	c.raise.Wait()
+	if got := c.fake.Calls(); !slices.Equal(got, []string{"open -b com.example.store"}) {
+		t.Errorf("ran %q, want the app opened", got)
+	}
 }
