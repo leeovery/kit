@@ -41,13 +41,13 @@ func TestBackupsBringTheirChecks(t *testing.T) {
 
 // Arq not installed, kit says how to install it as this Mac's config has
 // it: kit apply does, its cask declared for this Mac, in its own file or
-// the shared one; its cask in, but not Arq, it's to be installed again;
-// else the cask's to be declared.
+// the shared one; its cask in, but not Arq, it says so plainly; else the
+// cask's to be declared.
 func TestArqNotInstalledSaysHow(t *testing.T) {
 	for _, tt := range []struct{ name, scope, casks, in, do string }{
 		{"its cask declared", "laptop", "arq\nzoom\n", "", "kit apply installs it"},
 		{"its cask declared for every Mac", "shared", "arq\nghostty\n", "", "kit apply installs it"},
-		{"its cask declared and in", "shared", "arq\nghostty\n", "arq\n", "its cask is in, but not Arq: install it again"},
+		{"its cask declared and in", "shared", "arq\nghostty\n", "arq\n", "Arq isn't installed, though its cask is"},
 		{"its cask not declared", "laptop", "zoom\n", "", "install it: kit cask add arq"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {

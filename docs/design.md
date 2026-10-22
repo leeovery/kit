@@ -208,9 +208,9 @@ disk just added, its first backup under way or none tried yet with the disk ther
 for now. Arq, through `arqc stats`: the plans it runs on a schedule (one marked "Manual" isn't
 expected to run), one at least, each backed up within 26 hours; not installed says so, and how
 to install it, as kit's shared code words it from what the driver says installs it and the
-config: `kit apply` installs it, its cask declared for the Mac, or, its cask in, it's to be
-installed again; else `kit cask add arq`. Its status unreadable says so; its licence agreement
-not yet accepted, or no plan made, is not set up.
+config: `kit apply` installs it, its cask declared for the Mac, or, its cask in but not Arq,
+it says that plainly; else `kit cask add arq`. Its status unreadable says so; its licence
+agreement not yet accepted, or no plan made, is not set up.
 
 **Checks.** Steps with a check and no apply, each problem an item with a stable id saying
 what's wrong and what to do: the Mac's (`disk`, `memory`, `file-events`, `load`), always;

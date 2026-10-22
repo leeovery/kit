@@ -92,7 +92,8 @@ func Backup(run runner.Runner, d tool.Driver, now func() time.Time, packages Pac
 			case err != nil:
 				return failed(err)
 			case st.Missing:
-				return problem(about.ID, "not installed", [3]string{"missing", about.Name + " isn't installed", installing(ctx, about, packages)})
+				what, do := missing(ctx, about, packages)
+				return problem(about.ID, "not installed", [3]string{"missing", what, do})
 			case st.NotSetUp:
 				s := about.SetUp
 				return yours(about.ID, "not set up", "none", s.Do, check.ToDo{Title: s.Title, Why: s.Why, Steps: s.Steps, Watch: s.Watch, Group: groupBackups})
@@ -114,23 +115,24 @@ func Backup(run runner.Runner, d tool.Driver, now func() time.Time, packages Pac
 	}
 }
 
-// installing is how to install the tool about tells of, missing, as what
-// it comes as (its Package, one of a step's things, as in cask:arq)
-// stands: not declared, it's declared, as kit cask add arq does; declared,
-// kit apply installs it, unless it's installed already, when it's to be
-// installed again.
-func installing(ctx context.Context, about tool.About, packages Packages) string {
+// missing is what's wrong with the tool about tells of, not installed, and
+// what to do, as what it comes as (its Package, one of a step's things, as
+// in cask:arq) stands: not declared, it's declared, as kit cask add arq
+// does; declared, kit apply installs it; declared and installed, there's
+// nothing for kit to do, so it says so plainly.
+func missing(ctx context.Context, about tool.About, packages Packages) (what, do string) {
+	what = about.Name + " isn't installed"
 	kindName, item, ok := strings.Cut(about.Package, ":")
 	if !ok {
-		return "install it"
+		return what, "install it"
 	}
 	switch declared, installed := packages(ctx, about.Package); {
 	case !declared:
-		return "install it: kit " + kindName + " add " + item
+		return what, "install it: kit " + kindName + " add " + item
 	case installed:
-		return "its " + kindName + " is in, but not " + about.Name + ": install it again"
+		return what + ", though its " + kindName + " is", ""
 	}
-	return "kit apply installs it"
+	return what, "kit apply installs it"
 }
 
 // backupSummary is how a tool's backups stand: in its words, when it has
