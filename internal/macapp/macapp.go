@@ -11,12 +11,15 @@ import (
 	"crypto/sha256"
 	_ "embed"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/leeovery/kit/internal/runner"
@@ -86,6 +89,10 @@ type App struct {
 	tried bool
 	built chan struct{}
 	sent  int64
+	// runNo is this run's number among those that send notifications, once
+	// it's been taken (numbered): "" when it couldn't be.
+	runNo    string
+	numbered sync.Once
 }
 
 // New returns kit.app in the data directory dir, run through run; a click
@@ -102,18 +109,89 @@ func (a *App) Path() string {
 	return filepath.Join(a.dir, Name)
 }
 
-// marks is the folder, beside the app, where the app keeps the order of the
-// notifications it's sent (kit.swift).
-const marks = "notices"
+// Beside the app, it keeps the order of the notifications it's sent
+// (kit.swift): marks, the folder where the newest sent under each id is
+// kept, and the newest run to send any (runs, in it); and the lock that
+// kit and the app's instances read and write them under, beside it, so
+// that no folder going leaves two holding different locks.
+const (
+	marks = "notices"
+	runs  = "run"
+	lock  = "notices.lock"
+)
 
-// Prepare readies the app as a run starts: the order of the notifications
-// the last run sent forgotten, as each was taken away by its end, and the
-// app's clock may have gone back since, as a new Mac's can before it sets
-// its time; and building it aside, when it needs building, so that a
-// notification posted later needn't wait as long for it.
+// Prepare readies the app as a run starts: the run numbered, after the
+// last, so that a notification an earlier run left waiting, its instance
+// held up while macOS asks the person to allow them, is never posted once
+// this run has begun; and building the app aside, when it needs building,
+// so that a notification posted later needn't wait as long for it.
 func (a *App) Prepare() {
-	_ = os.RemoveAll(filepath.Join(a.dir, marks))
+	a.number()
 	a.building()
+}
+
+// number is this run's number among those that send notifications: one
+// after the last, kept beside the app, taken the first time it's asked for.
+// The app keeps one run's notifications in order after those of the runs
+// before it, whatever time each was sent at, as a new Mac's clock can go
+// back as it sets its time; and posts none an earlier run sent once a later
+// one's begun. "" when it can't be kept.
+func (a *App) number() string {
+	a.numbered.Do(func() {
+		if n, err := nextRun(a.dir); err == nil {
+			a.runNo = strconv.FormatInt(n, 10)
+		}
+	})
+	return a.runNo
+}
+
+// nextRun keeps, in dir, the number of the next run to send notifications,
+// one after the last kept there, and returns it.
+func nextRun(dir string) (int64, error) {
+	if err := os.MkdirAll(filepath.Join(dir, marks), 0o755); err != nil {
+		return 0, fmt.Errorf("make %s: %w", marks, err)
+	}
+	f, err := os.OpenFile(filepath.Join(dir, lock), os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return 0, fmt.Errorf("open %s: %w", lock, err)
+	}
+	defer func() { _ = f.Close() }()
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		return 0, fmt.Errorf("lock %s: %w", lock, err)
+	}
+	defer func() { _ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN) }()
+	path := filepath.Join(dir, marks, runs)
+	last, err := os.ReadFile(path)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return 0, fmt.Errorf("read the last run: %w", err)
+	}
+	n, _ := strconv.ParseInt(strings.TrimSpace(string(last)), 10, 64)
+	n++
+	if err := replace(path, []byte(strconv.FormatInt(n, 10)+"\n")); err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
+// replace writes data to path whole, as a file renamed into its place, so
+// that it's never read half written.
+func replace(path string, data []byte) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
+	if err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	defer func() { _ = os.Remove(tmp.Name()) }()
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	return nil
 }
 
 // Ready reports whether the app's there to post with, building it first
@@ -255,10 +333,11 @@ func write(path string, data []byte) error {
 // osascript, which can't replace or take one away. Once ctx is done, as
 // when it's been taken away while it waited for the app, it posts nothing;
 // done already, it starts no build either.
-// The app's told when it was posted (--at), as clear is, as macOS can run
-// two launched one after the other in either order, and the first time
-// holds one up while it asks the person to allow them: the app does
-// nothing for one older than the last under its id.
+// The app's told which run posted it, and when (--run and --at, sent), as
+// clear is, as macOS can run two launched one after the other in either
+// order, and the first time holds one up while it asks the person to allow
+// them: the app does nothing for one older than the last under its id, nor
+// for one of a run before the newest.
 func (a *App) Notify(ctx context.Context, id, title, body string) {
 	if ctx.Err() != nil {
 		return
@@ -268,7 +347,7 @@ func (a *App) Notify(ctx context.Context, id, title, body string) {
 		args = append(args, "--activate", a.activate)
 	}
 	at := a.stamp()
-	if a.Ready(ctx) && ctx.Err() == nil && a.open(ctx, append(args, "--at", at)...) == nil {
+	if a.Ready(ctx) && ctx.Err() == nil && a.open(ctx, append(args, a.sentAt(at)...)...) == nil {
 		return
 	}
 	quote := func(s string) string { return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(s) + `"` }
@@ -286,8 +365,17 @@ func (a *App) Clear(ctx context.Context, id string) {
 	ready := a.ready
 	a.mu.Unlock()
 	if ready {
-		_ = a.open(ctx, "clear", "--id", id, "--at", a.stamp())
+		_ = a.open(ctx, append([]string{"clear", "--id", id}, a.sentAt(a.stamp())...)...)
 	}
+}
+
+// sentAt is what the app's told of when a notification was posted or taken
+// away: at, and by which run, when it's numbered.
+func (a *App) sentAt(at string) []string {
+	if run := a.number(); run != "" {
+		return []string{"--at", at, "--run", run}
+	}
+	return []string{"--at", at}
 }
 
 // stamp is when a notification is posted or taken away, in nanoseconds,

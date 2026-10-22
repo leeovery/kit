@@ -524,15 +524,15 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 		asks = a.askpass(face)
 		r.askpass = asks
 	}
+	if raise != nil {
+		r.notifier(a.Getenv, a.Now).Prepare()
+	}
 	if a.WatchDialogs && a.pretty(a.Stdout) {
 		r.held, r.unwatch = watchDialogs(a.Runner(path, env), r.notifier(a.Getenv, a.Now), sink, a.Now)
 	}
 	if asks != nil {
 		dialogs := r.held
 		r.held = func() bool { return asks.Pending() || dialogs != nil && dialogs() }
-	}
-	if raise != nil {
-		r.notifier(a.Getenv, a.Now).Prepare()
 	}
 	return r, nil
 }

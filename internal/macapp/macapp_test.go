@@ -204,12 +204,13 @@ func TestWithoutSwift(t *testing.T) {
 // launches apps, a new one in the background, with its id, title and body,
 // and the app a click brings forward; clearing takes it away by its id.
 // Each says when it was sent, each after the last though the clock hasn't
-// moved, so the app keeps their order.
+// moved, and by which run, the first to send any here, so the app keeps
+// their order.
 func TestNotifyAndClear(t *testing.T) {
 	app, fake := built(t)
 	open := []string{"-g", "-n", app.Path(), "--args"}
-	notify := append(append([]string(nil), open...), "notify", "--id", "card:sign-in", "--title", "Sign in", "--body", "Open the tool", "--activate", terminal, "--at", "1000")
-	clear := append(append([]string(nil), open...), "clear", "--id", "card:sign-in", "--at", "1001")
+	notify := append(append([]string(nil), open...), "notify", "--id", "card:sign-in", "--title", "Sign in", "--body", "Open the tool", "--activate", terminal, "--at", "1000", "--run", "1")
+	clear := append(append([]string(nil), open...), "clear", "--id", "card:sign-in", "--at", "1001", "--run", "1")
 	fake.On("open", notify...)
 	fake.On("open", clear...)
 
@@ -227,7 +228,7 @@ func TestNotifyWithNothingToActivate(t *testing.T) {
 	app, _ := built(t)
 	fake := runnertest.New(t)
 	app = macapp.New(fake, filepath.Dir(app.Path()), "", clock)
-	args := []string{"-g", "-n", app.Path(), "--args", "notify", "--id", "dialog", "--title", "macOS is asking", "--body", "Answer it", "--at", "1000"}
+	args := []string{"-g", "-n", app.Path(), "--args", "notify", "--id", "dialog", "--title", "macOS is asking", "--body", "Answer it", "--at", "1000", "--run", "1"}
 	fake.On("open", args...)
 	app.Notify(t.Context(), "dialog", "macOS is asking", "Answer it")
 	if got, want := fake.Calls(), []string{runner.Command{Name: "open", Args: args}.String()}; !reflect.DeepEqual(got, want) {
@@ -239,7 +240,7 @@ func TestNotifyWithNothingToActivate(t *testing.T) {
 // osascript.
 func TestAnAppThatWontOpen(t *testing.T) {
 	app, fake := built(t)
-	fake.On("open", "-g", "-n", app.Path(), "--args", "notify", "--id", "dialog", "--title", "macOS is asking", "--body", "Answer it", "--activate", terminal, "--at", "1000").Exits(1)
+	fake.On("open", "-g", "-n", app.Path(), "--args", "notify", "--id", "dialog", "--title", "macOS is asking", "--body", "Answer it", "--activate", terminal, "--at", "1000", "--run", "1").Exits(1)
 	fake.On("osascript", "-e", `display notification "Answer it" with title "kit" subtitle "macOS is asking"`)
 	app.Notify(t.Context(), "dialog", "macOS is asking", "Answer it")
 	if calls := fake.Calls(); len(calls) != 2 || calls[1] != `osascript -e 'display notification "Answer it" with title "kit" subtitle "macOS is asking"'` {
@@ -296,11 +297,15 @@ func TestPrepareBuildsAside(t *testing.T) {
 	}
 }
 
-// Prepared as a run starts, the app forgets the order of the last run's
-// notifications.
-func TestPrepareForgetsTheLastRunsOrder(t *testing.T) {
+// Prepared as a run starts, the app numbers the run, after the last run to
+// send notifications, so that it posts none an earlier run sent: the order
+// of the last run's kept, and the lock it's kept under beside it, never in
+// the folder, as the app's instances can still be using both. Each run's
+// number is taken once, as it starts or as it first sends one.
+func TestPrepareNumbersTheRun(t *testing.T) {
 	app, _ := built(t)
-	mark := filepath.Join(filepath.Dir(app.Path()), "notices", "0a1b")
+	dir := filepath.Dir(app.Path())
+	mark := filepath.Join(dir, "notices", "0a1b")
 	if err := os.MkdirAll(filepath.Dir(mark), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -308,9 +313,39 @@ func TestPrepareForgetsTheLastRunsOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	app.Prepare()
-	if _, err := os.Stat(filepath.Dir(mark)); !errors.Is(err, os.ErrNotExist) {
-		t.Errorf("the last run's order is still kept (%v)", err)
+	app.Prepare()
+	if run := read(t, filepath.Join(dir, "notices", "run")); run != "1\n" {
+		t.Errorf("the run's number is %q, want 1, the first", run)
 	}
+	if got := read(t, mark); got != "1000 clear" {
+		t.Errorf("the last run's order is %q, want it kept", got)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "notices.lock")); err != nil {
+		t.Errorf("no lock beside the order kept: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "notices", ".lock")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("a lock in the folder (%v), want it beside", err)
+	}
+
+	fake := runnertest.New(t)
+	next := macapp.New(fake, dir, terminal, clock)
+	args := []string{"-g", "-n", app.Path(), "--args", "clear", "--id", "dialog", "--at", "1000", "--run", "2"}
+	fake.On("open", args...)
+	next.Prepare()
+	next.Clear(t.Context(), "dialog")
+	if got := fake.Calls(); !reflect.DeepEqual(got, []string{runner.Command{Name: "open", Args: args}.String()}) {
+		t.Errorf("the next run ran %q, want its clear sent as run 2", got)
+	}
+}
+
+// read is the file at path, failing the test should it not read.
+func read(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
 }
 
 // A notification waiting for the build under way gives up its wait once its
