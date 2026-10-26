@@ -27,6 +27,10 @@ func (w *world) app(t *testing.T, dir, name, id string, helpers ...[2]string) st
 	return path
 }
 
+// sandboxedApp is codesign's entitlements of a sandboxed app, as it prints
+// them.
+const sandboxedApp = `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>com.apple.security.app-sandbox</key><true/></dict></plist>`
+
 // closed scripts each app of ids as not running.
 func (w *world) closed(ids ...string) {
 	for _, id := range ids {
@@ -201,7 +205,7 @@ func TestRestoreMakesASandboxedAppsContainer(t *testing.T) {
 	store := filepath.Join(w.clone, "laptop")
 	w.write(t, filepath.Join(store, "domains", "com.example.boxed.plist"), stored(t, map[string]any{"A": true}))
 	app := w.app(t, w.apps, "Boxed", "com.example.boxed")
-	w.fake.On("codesign", "-d", "--entitlements", "-", "--xml", app).Prints("<key>com.apple.security.app-sandbox</key><true/>")
+	w.fake.On("codesign", "-d", "--entitlements", "-", "--xml", app).Prints(sandboxedApp)
 	w.fake.On("open", "-g", "-j", "-b", "com.example.boxed").Does(func() {
 		_ = os.MkdirAll(filepath.Join(w.home, "Library", "Containers", "com.example.boxed"), 0o700)
 	})
@@ -221,6 +225,83 @@ func TestRestoreMakesASandboxedAppsContainer(t *testing.T) {
 	}
 	if want := []string{"Opening Boxed once, for its settings folder"}; !slices.Equal(logged, want) {
 		t.Errorf("the log says %q, want %q", logged, want)
+	}
+}
+
+// entitled is codesign's entitlements of an app declaring sandbox, as it
+// prints them: the app sandbox's key set to it, or none, for "".
+func entitled(sandbox string) string {
+	key := ""
+	if sandbox != "" {
+		key = "<key>com.apple.security.app-sandbox</key><" + sandbox + "/>"
+	}
+	return `<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict>` +
+		key + `<key>com.apple.security.network.client</key><true/></dict></plist>`
+}
+
+// An app is sandboxed only when its entitlements turn the app sandbox on:
+// one declaring it off, as some do, or not at all, or unsigned, has no
+// container to make, and its settings are restored straight to its domain,
+// no app opened, none to open.
+func TestRestoreTakesAnAppAsSandboxedOnlyWhenItsEntitlementIsOn(t *testing.T) {
+	for _, tt := range []struct {
+		name, entitlements string
+		sandboxed          bool
+	}{
+		{"on", entitled("true"), true},
+		{"off", entitled("false"), false},
+		{"not declared", entitled(""), false},
+		{"unsigned", "", false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			w := newWorld(t, prefs.Lists{})
+			w.write(t, filepath.Join(w.clone, "laptop", "domains", "com.example.monitor.plist"), stored(t, map[string]any{"A": true}))
+			app := w.app(t, w.apps, "Monitor", "com.example.monitor")
+			w.fake.On("codesign", "-d", "--entitlements", "-", "--xml", app).Prints(tt.entitlements)
+			w.fake.On("open", "-g", "-j", "-b", "com.example.monitor")
+			w.fake.On("osascript", "-e", `tell application id "com.example.monitor" to quit`)
+			w.closed("com.example.monitor")
+			w.imports(t, "com.example.monitor", "laptop", map[string]any{}, map[string]any{"A": true})
+			w.fake.On("git", "-C", w.clone, "rev-parse", "HEAD").Prints("abc123\n")
+
+			report, err := w.p.Restore(t.Context(), prefs.RestoreOptions{})
+			rec, _ := w.p.Load()
+			switch {
+			case err != nil:
+				t.Fatalf("Restore() error = %v", err)
+			case tt.sandboxed && (len(w.opened()) != 1 || report.ToOpen["com.example.monitor"] == "" || len(w.p.ToOpen(t.Context(), rec)) != 1):
+				t.Errorf("Restore() = %+v, opened %q; want the app opened once for its container, then held to open", report, w.opened())
+			case !tt.sandboxed && (!slices.Equal(report.Restored, []string{"com.example.monitor"}) || len(w.opened()) != 0 || len(report.ToOpen) != 0 || rec.Pending != nil):
+				t.Errorf("Restore() = %+v, opened %q, pending %+v; want its settings restored to its domain, no app opened, nothing held", report, w.opened(), rec.Pending)
+			}
+		})
+	}
+}
+
+// An app held to open that isn't sandboxed, as kit once took an app
+// declaring its sandbox off to be, is no app to open: it never gets a
+// settings folder. The next pass restores its settings to its domain.
+func TestAnAppHeldToOpenThatIsntSandboxedIsRestored(t *testing.T) {
+	w := newWorld(t, prefs.Lists{})
+	writeRecord(t, w.state, `{"on": "restored", "pending": {"from": "laptop", "domains": ["com.example.monitor"],
+		"open": {"com.example.monitor": {"id": "com.example.monitor", "name": "Monitor"}},
+		"why": {"com.example.monitor": "opened once, it still has no settings folder"}}}`)
+	w.write(t, filepath.Join(w.clone, "laptop", "domains", "com.example.monitor.plist"), stored(t, map[string]any{"A": true}))
+	app := w.app(t, w.apps, "Monitor", "com.example.monitor")
+	w.fake.On("codesign", "-d", "--entitlements", "-", "--xml", app).Prints(entitled("false"))
+	w.closed("com.example.monitor")
+	rec, _ := w.p.Load()
+	if got := w.p.ToOpen(t.Context(), rec); len(got) != 0 {
+		t.Errorf("ToOpen() = %+v; want no app to open", got)
+	}
+	w.imports(t, "com.example.monitor", "laptop", map[string]any{}, map[string]any{"A": true})
+	w.fake.On("git", "-C", w.clone, "rev-parse", "HEAD").Prints("abc123\n")
+	report, err := w.p.Restore(t.Context(), prefs.RestoreOptions{Pending: true, Unattended: true})
+	if err != nil || !slices.Equal(report.Restored, []string{"com.example.monitor"}) {
+		t.Errorf("the next pass = %+v, %v; want its settings restored", report, err)
+	}
+	if rec, _ := w.p.Load(); rec.Pending != nil {
+		t.Errorf("pending = %+v, want nothing held", rec.Pending)
 	}
 }
 
@@ -247,7 +328,7 @@ func TestRestoreHoldsAnAppToOpenTillItsFolderIsThere(t *testing.T) {
 		w.write(t, filepath.Join(store, "domains", d+".plist"), stored(t, map[string]any{"A": true}))
 	}
 	app := w.app(t, w.apps, "Boxed App", "com.example.boxed")
-	w.fake.On("codesign", "-d", "--entitlements", "-", "--xml", app).Prints("<key>com.apple.security.app-sandbox</key><true/>")
+	w.fake.On("codesign", "-d", "--entitlements", "-", "--xml", app).Prints(sandboxedApp)
 	w.fake.On("open", "-g", "-j", "-b", "com.example.boxed")
 	w.fake.On("osascript", "-e", `tell application id "com.example.boxed" to quit`)
 	w.closed("com.example.boxed")
@@ -325,7 +406,7 @@ func TestAnAppToOpenStaysTillItsQuit(t *testing.T) {
 		"why": {"com.example.one": "opened once, it still has no settings folder", "com.example.two": "opened once, it still has no settings folder"}}}`)
 	for _, a := range [][2]string{{"One", "com.example.one"}, {"Two", "com.example.two"}} {
 		w.write(t, filepath.Join(store, "domains", a[1]+".plist"), stored(t, map[string]any{"A": true}))
-		w.app(t, w.apps, a[0], a[1])
+		w.fake.On("codesign", "-d", "--entitlements", "-", "--xml", w.app(t, w.apps, a[0], a[1])).Prints(sandboxedApp)
 		w.write(t, filepath.Join(w.home, "Library", "Containers", a[1], ".made"), "")
 	}
 	w.closed("com.example.one")
@@ -355,7 +436,7 @@ func TestTheHourlyPassOpensNothing(t *testing.T) {
 	w.write(t, filepath.Join(store, "domains", "com.example.boxed.plist"), stored(t, map[string]any{"A": true}))
 	writeRecord(t, w.state, `{"on": "restored", "pending": {"from": "laptop", "domains": ["com.example.boxed"], "why": {"com.example.boxed": "not installed"}}}`)
 	app := w.app(t, w.apps, "Boxed App", "com.example.boxed")
-	w.fake.On("codesign", "-d", "--entitlements", "-", "--xml", app).Prints("<key>com.apple.security.app-sandbox</key><true/>")
+	w.fake.On("codesign", "-d", "--entitlements", "-", "--xml", app).Prints(sandboxedApp)
 	w.closed("com.example.boxed")
 	w.fake.On("git", "-C", w.clone, "rev-parse", "HEAD").Prints("abc123\n")
 	report, err := w.p.Restore(t.Context(), prefs.RestoreOptions{Pending: true, Unattended: true})

@@ -193,7 +193,7 @@ func TestTheHourlyPassOpensNoApp(t *testing.T) {
 	w.fake.On("git", "-C", clone, "remote")
 	w.fake.On("git", "-C", clone, "rev-parse", "HEAD").Prints("abc123\n")
 	w.fake.On("osascript", "-e", `application id "com.example.boxed" is running`).Prints("false\n")
-	w.fake.On("codesign", "-d", "--entitlements", "-", "--xml", app).Prints("<key>com.apple.security.app-sandbox</key><true/>")
+	w.fake.On("codesign", "-d", "--entitlements", "-", "--xml", app).Prints(`<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>com.apple.security.app-sandbox</key><true/></dict></plist>`)
 
 	if out, _, _ := w.run(t, "nightly", "retry-pending"); !strings.Contains(out, "retry-pending ok ran\n") {
 		t.Errorf("kit nightly retry-pending printed\n%s", out)

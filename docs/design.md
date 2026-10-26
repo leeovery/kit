@@ -1210,7 +1210,9 @@ the hardware UUID of the Mac the folder belongs to.
 - **`kit prefs restore [<domain>...]`** (`--from`, `--at`, `--as`, `--pending`, `--dry-run`): a
   domain's app found from the installed apps' bundle ids (sub-domains, shared domains, group and
   team prefixes, `[prefs apps]` for the rest); not installed or running, it waits; a sandboxed
-  app launched hidden once to make its container, the run's log naming it as it opens (its own
+  app (its entitlements, as codesign reads them, turning `com.apple.security.app-sandbox` on: an
+  app can declare it off, and has no container) launched hidden once to make its container, the
+  run's log naming it as it opens (its own
   windows, notifications and permission prompts may follow); the stored copy checked, the live
   settings saved, `defaults delete` then `import`, read back and compared. A full restore puts
   back the files that differ (each saved first), writes the pending list, records its commit, and

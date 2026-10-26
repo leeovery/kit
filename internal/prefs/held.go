@@ -149,8 +149,10 @@ func (h held) pending(from string) *Pending {
 }
 
 // ToOpen are the apps the person is to open once and quit, as rec holds
-// them: those installed that have no settings folder yet, or are still
-// running, each once, by name.
+// them: those installed and sandboxed that have no settings folder yet, or
+// are still running, each once, by name. One held that isn't sandboxed, as
+// kit once took an app declaring its sandbox off to be, never gets a
+// folder: its settings come back as any app's, as the next pass tries them.
 func (p *Prefs) ToOpen(ctx context.Context, rec Record) []App {
 	if rec.Pending == nil || len(rec.Pending.Open) == 0 {
 		return nil
@@ -159,7 +161,8 @@ func (p *Prefs) ToOpen(ctx context.Context, rec Record) []App {
 	seen := map[string]bool{}
 	var out []App
 	for _, app := range rec.Pending.Open {
-		if _, ok := installed[app.ID]; seen[app.ID] || !ok {
+		path, ok := installed[app.ID]
+		if seen[app.ID] || !ok || !p.sandboxed(ctx, path) {
 			continue
 		}
 		seen[app.ID] = true

@@ -189,7 +189,7 @@ func TestAppsSettingsAppsToOpen(t *testing.T) {
 	fake.On("git", "-C", clone, "remote")
 	fake.On("git", "-C", clone, "rev-parse", "HEAD").Prints("abc123\n")
 	fake.On("git", "-C", clone, "log", "-1", "--format=%cI", "--", "laptop").Prints("2026-10-04T03:00:00Z\n")
-	fake.On("codesign", "-d", "--entitlements", "-", "--xml", apps["com.example.boxed"]).Prints("<key>com.apple.security.app-sandbox</key><true/>")
+	fake.On("codesign", "-d", "--entitlements", "-", "--xml", apps["com.example.boxed"]).Prints(`<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>com.apple.security.app-sandbox</key><true/></dict></plist>`)
 	fake.On("open", "-g", "-j", "-b", "com.example.boxed")
 	fake.On("osascript", "-e", `tell application id "com.example.boxed" to quit`)
 	for _, id := range []string{"com.example.boxed", "com.example.plain"} {
@@ -287,7 +287,9 @@ func TestAppsSettingsHeldNeverHideCapture(t *testing.T) {
 	if err := os.WriteFile(info, []byte(`<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>com.example.boxed</string></dict></plist>`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	p := prefs.New(runnertest.New(t), t.TempDir(), state, t.TempDir(), "", "laptop", prefs.Lists{}, now)
+	fake := runnertest.New(t)
+	fake.On("codesign", "-d", "--entitlements", "-", "--xml", filepath.Join(appDir, "Boxed App.app")).Prints(`<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>com.apple.security.app-sandbox</key><true/></dict></plist>`)
+	p := prefs.New(fake, t.TempDir(), state, t.TempDir(), "", "laptop", prefs.Lists{}, now)
 	p.AppDirs = []string{appDir}
 	res := steps.Prefs(p, now).Check(t.Context())
 	var ids []string

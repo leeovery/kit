@@ -207,11 +207,7 @@ var (
 // One that won't quit isn't restored, as it would write its defaults back
 // when it did.
 func (p *Prefs) ensureContainer(ctx context.Context, id, app string, open bool) error {
-	if p.hasFolder(id) {
-		return nil
-	}
-	res, _ := p.Run.Run(ctx, runner.Command{Name: "codesign", Args: []string{"-d", "--entitlements", "-", "--xml", app}})
-	if !bytes.Contains(res.Stdout, []byte("com.apple.security.app-sandbox")) {
+	if p.hasFolder(id) || !p.sandboxed(ctx, app) {
 		return nil
 	}
 	if !open {
@@ -242,6 +238,18 @@ func (p *Prefs) ensureContainer(ctx context.Context, id, app string, open bool) 
 		return errNoFolder
 	}
 	return nil
+}
+
+// sandboxed reports whether the app at app is sandboxed: its entitlements,
+// as codesign reads them, turn com.apple.security.app-sandbox on. An app can
+// declare it off, and then macOS makes it no container: its settings are in
+// its domain, as any app's.
+func (p *Prefs) sandboxed(ctx context.Context, app string) bool {
+	res, _ := p.Run.Run(ctx, runner.Command{Name: "codesign", Args: []string{"-d", "--entitlements", "-", "--xml", app}})
+	v, _ := plist.Decode(res.Stdout)
+	entitlements, _ := v.(map[string]any)
+	on, _ := entitlements["com.apple.security.app-sandbox"].(bool)
+	return on
 }
 
 // appName is the app at app by the name its bundle has, as the Finder shows
