@@ -113,7 +113,15 @@ type Misser interface {
 type Blocker interface {
 	// Blocked says, of the things missing (declared names, by their full
 	// names), why each that can't be installed now can't, by declared name.
-	Blocked(ctx context.Context, missing map[string]string, installed []Installed) (map[string]string, error)
+	Blocked(ctx context.Context, missing map[string]string, installed []Installed) (map[string]Block, error)
+}
+
+// Block is why a thing can't be installed now, and whether that's the
+// person's to settle, as an administrator's password not given, rather
+// than something still to come, as the app it's for.
+type Block struct {
+	Why      string
+	NeedsYou bool
 }
 
 // Admin is a kind some of whose installs need an administrator's password,
@@ -1296,7 +1304,7 @@ func Compare(ctx context.Context, k Kind, declared config.List) check.Result {
 			}
 		}
 	}
-	blocked := map[string]string{}
+	blocked := map[string]Block{}
 	if b, ok := k.(Blocker); ok && len(missing) > 0 {
 		var err error
 		if blocked, err = b.Blocked(ctx, fullNames, installed); err != nil {
@@ -1354,8 +1362,8 @@ func Compare(ctx context.Context, k Kind, declared config.List) check.Result {
 	}
 	missingItems := items(k, missing, Missing, "")
 	for i, it := range missingItems {
-		if reason, ok := blocked[it.Name]; ok {
-			missingItems[i].Detail = reason
+		if b, ok := blocked[it.Name]; ok {
+			missingItems[i].Detail, missingItems[i].NeedsYou = b.Why, b.NeedsYou
 		} else {
 			missingItems[i].Action = Install
 		}

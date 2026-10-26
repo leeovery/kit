@@ -46,8 +46,7 @@ func TestApplyInstallsAppsWithThePasswordAskedFirst(t *testing.T) {
 }
 
 // A password sudo doesn't take is asked for again, saying so; one not
-// given leaves what needs it waiting, its row saying so (what waits, the
-// log and kit status say).
+// given leaves what needs it waiting.
 func TestApplyAsksAgainForAPasswordSudoDidntTake(t *testing.T) {
 	w := appWorld(t)
 	w.terminal = true
@@ -67,8 +66,8 @@ func TestApplyAsksAgainForAPasswordSudoDidntTake(t *testing.T) {
 	w.notTyped = ask.ErrCancelled
 	w.expectPassword()
 	out, _, _ := w.run(t, "apply")
-	if !strings.Contains(ansi.Strip(out), "● App Store apps  2 declared, 1 installed") {
-		t.Errorf("kit apply, no password given, printed\n%s\nwant Bear left waiting", ansi.Strip(out))
+	if !strings.Contains(ansi.Strip(out), "bear@1091189122 · needs an administrator's password") {
+		t.Errorf("kit apply, no password given, printed\n%s\nwant Bear waiting", ansi.Strip(out))
 	}
 	for _, c := range w.fake.Calls() {
 		if strings.Contains(c, "mas install") {

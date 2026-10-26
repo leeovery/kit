@@ -176,18 +176,18 @@ func (s *Spotlight) SetAdmin(held func(ctx context.Context) bool) { s.admin = he
 
 // Blocked holds up a folder kit has added already, until a restart, and
 // every folder while kit has no administrator's password.
-func (s *Spotlight) Blocked(ctx context.Context, missing map[string]string, _ []kind.Installed) (map[string]string, error) {
+func (s *Spotlight) Blocked(ctx context.Context, missing map[string]string, _ []kind.Installed) (map[string]kind.Block, error) {
 	rec, err := state.Load[record](s.stateDir, recordName)
 	if err != nil {
 		return nil, err
 	}
-	blocked := map[string]string{}
+	blocked := map[string]kind.Block{}
 	for name := range missing {
 		switch {
 		case slices.Contains(rec.Added, name):
-			blocked[name] = "added to Spotlight's list: it takes effect after a restart; still indexed after one, add it in System Settings › Spotlight › Search Privacy"
+			blocked[name] = kind.Block{Why: "added to Spotlight's list: it takes effect after a restart; still indexed after one, add it in System Settings › Spotlight › Search Privacy"}
 		case s.admin != nil && !s.admin(ctx):
-			blocked[name] = "waiting for an administrator's password: kit apply at a terminal asks for it"
+			blocked[name] = kind.Block{Why: "waiting for an administrator's password: kit apply at a terminal asks for it", NeedsYou: true}
 		}
 	}
 	return blocked, nil

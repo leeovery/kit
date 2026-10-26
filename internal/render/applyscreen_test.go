@@ -1474,8 +1474,8 @@ func TestApplyingCardInASmallWindow(t *testing.T) {
 
 // When the run ends, the screen goes and its record is left in its place,
 // kept to column 80: the wordmark, with what ran, the bar and the tally
-// beside it; then what's to do, what failed, and the rows done, a line
-// each, nothing of theirs that waits under them. A run stopped says so,
+// beside it; then what's to do, what failed, and the rows done, nothing
+// of theirs under them that waits on what's still to come. A run stopped says so,
 // and where to carry on; nothing's red but what failed.
 func TestApplyingLeavesItsRecord(t *testing.T) {
 	for _, tt := range []struct {
@@ -1550,15 +1550,15 @@ func TestApplyingRecordSections(t *testing.T) {
 }
 
 // The record names a step by its row alone when the step's called as its
-// row is; a row done is its line alone, what of its steps is still
-// waiting, a password say, in the log.
+// row is, and a row done keeps under it what of its steps waits on the
+// person, a password say, in the log too.
 func TestApplyingRecordKeepsWhatWaits(t *testing.T) {
 	events := rowsRun(newMac[4:13],
 		fine(10, "homebrew", "4.6.1"),
 		finished(20, "brew", check.Result{State: check.Attention, Summary: "3 declared, all installed", Items: []check.Item{
 			{ID: "brew:ffmpeg", Name: "ffmpeg", State: "extra", Detail: "installed, not declared"}}}),
 		finished(30, "mas", check.Result{State: check.OK, Summary: "2 declared, 1 installed", Items: []check.Item{
-			{ID: "mas:bear", Name: "bear", State: "missing", Quiet: "new", Detail: "needs an administrator's password"}}}),
+			{ID: "mas:bear", Name: "bear", State: "missing", Quiet: "new", Detail: "needs an administrator's password", NeedsYou: true}}}),
 	)
 	face, out, _ := applyAt(160, 64, time.Minute, events)
 	if log := strings.Join(logOf(screen(out.String()), 160), "\n"); !strings.Contains(log, "● App Store apps: 2 declared, 1 installed\n            │ bear · needs an administrator's password") {
@@ -1571,14 +1571,11 @@ func TestApplyingRecordKeepsWhatWaits(t *testing.T) {
 	record := screen(out.String())
 	for _, want := range []string{
 		"\n  NEEDS YOU  1\n  ▲ Homebrew formulae  3 declared, all installed\n  │ ffmpeg · ",
-		"\n  ● App Store apps  2 declared, 1 installed\n",
+		"\n  ● App Store apps  2 declared, 1 installed\n  │ bear · needs an administrator's password\n",
 	} {
 		if !strings.Contains(record, want) {
 			t.Errorf("the record is\n%s\nwant it to hold\n%s", record, want)
 		}
-	}
-	if strings.Contains(record, "bear") {
-		t.Errorf("the record is\n%s\nwant the App Store's row alone", record)
 	}
 }
 

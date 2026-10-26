@@ -595,12 +595,12 @@ func (f formulae) Remove(ctx context.Context, names []string) error {
 // Blocked finds the missing formulae whose names another tap's formula,
 // installed, holds: two formulae of one name share a keg, so can't both be
 // installed.
-func (f formulae) Blocked(_ context.Context, missing map[string]string, installed []kind.Installed) (map[string]string, error) {
-	blocked := make(map[string]string)
+func (f formulae) Blocked(_ context.Context, missing map[string]string, installed []kind.Installed) (map[string]kind.Block, error) {
+	blocked := make(map[string]kind.Block)
 	for name, full := range missing {
 		for _, it := range installed {
 			if it.Name != full && lastPart(it.Name) == lastPart(full) {
-				blocked[name] = "another tap's " + it.Name + " is installed under that name"
+				blocked[name] = kind.Block{Why: "another tap's " + it.Name + " is installed under that name", NeedsYou: true}
 			}
 		}
 	}
@@ -689,8 +689,8 @@ func (c casks) Remove(ctx context.Context, names []string) error {
 // Blocked finds the missing casks that install through a package, which
 // needs an administrator's password, when kit is installing and hasn't got
 // one.
-func (c casks) Blocked(ctx context.Context, missing map[string]string, _ []kind.Installed) (map[string]string, error) {
-	blocked := make(map[string]string)
+func (c casks) Blocked(ctx context.Context, missing map[string]string, _ []kind.Installed) (map[string]kind.Block, error) {
+	blocked := make(map[string]kind.Block)
 	if c.Admin == nil {
 		return blocked, nil
 	}
@@ -705,7 +705,7 @@ func (c casks) Blocked(ctx context.Context, missing map[string]string, _ []kind.
 	}
 	for name, full := range missing {
 		if slices.Contains(needing, full) {
-			blocked[name] = "needs an administrator's password: run kit apply at a terminal"
+			blocked[name] = kind.Block{Why: "needs an administrator's password: run kit apply at a terminal", NeedsYou: true}
 		}
 	}
 	return blocked, nil

@@ -254,11 +254,11 @@ func (m *MCP) Differs(_ context.Context, names []string) (map[string]string, err
 }
 
 // Blocked holds up the project servers whose folders aren't on the Mac.
-func (m *MCP) Blocked(_ context.Context, missing map[string]string, _ []kind.Installed) (map[string]string, error) {
-	blocked := make(map[string]string)
+func (m *MCP) Blocked(_ context.Context, missing map[string]string, _ []kind.Installed) (map[string]kind.Block, error) {
+	blocked := make(map[string]kind.Block)
 	for name := range missing {
 		if s, ok := m.declared[name]; ok && s.Folder != "" && !exists(m.expand(s.Folder)) {
-			blocked[name] = notHere
+			blocked[name] = kind.Block{Why: notHere}
 		}
 	}
 	return blocked, nil

@@ -684,14 +684,14 @@ const adminWait = "waiting for an administrator's password: kit apply at a termi
 
 // Blocked holds up the system settings missing while kit has no
 // administrator's password.
-func (d *Defaults) Blocked(ctx context.Context, missing map[string]string, _ []kind.Installed) (map[string]string, error) {
-	blocked := map[string]string{}
+func (d *Defaults) Blocked(ctx context.Context, missing map[string]string, _ []kind.Installed) (map[string]kind.Block, error) {
+	blocked := map[string]kind.Block{}
 	if d.admin == nil || d.admin(ctx) {
 		return blocked, nil
 	}
 	for name := range missing {
 		if s, err := config.ParseSetting(name); err == nil && system(s.Domain) {
-			blocked[name] = adminWait
+			blocked[name] = kind.Block{Why: adminWait, NeedsYou: true}
 		}
 	}
 	return blocked, nil

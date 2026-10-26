@@ -245,13 +245,13 @@ func (p *Power) SetAdmin(held func(ctx context.Context) bool) { p.admin = held }
 
 // Blocked holds up every setting missing while kit has no administrator's
 // password.
-func (p *Power) Blocked(ctx context.Context, missing map[string]string, _ []kind.Installed) (map[string]string, error) {
-	blocked := map[string]string{}
+func (p *Power) Blocked(ctx context.Context, missing map[string]string, _ []kind.Installed) (map[string]kind.Block, error) {
+	blocked := map[string]kind.Block{}
 	if p.admin == nil || p.admin(ctx) {
 		return blocked, nil
 	}
 	for name := range missing {
-		blocked[name] = "waiting for an administrator's password: kit apply at a terminal asks for it"
+		blocked[name] = kind.Block{Why: "waiting for an administrator's password: kit apply at a terminal asks for it", NeedsYou: true}
 	}
 	return blocked, nil
 }

@@ -314,7 +314,7 @@ func (*Login) Resolve(_ context.Context, names []string) (map[string]string, err
 }
 
 // Blocked holds up the login items whose apps aren't installed.
-func (l *Login) Blocked(ctx context.Context, missing map[string]string, _ []kind.Installed) (map[string]string, error) {
+func (l *Login) Blocked(ctx context.Context, missing map[string]string, _ []kind.Installed) (map[string]kind.Block, error) {
 	names := make([]string, 0, len(missing))
 	for name := range missing {
 		names = append(names, name)
@@ -324,10 +324,10 @@ func (l *Login) Blocked(ctx context.Context, missing map[string]string, _ []kind
 	if err != nil {
 		return nil, err
 	}
-	blocked := make(map[string]string)
+	blocked := make(map[string]kind.Block)
 	for i, app := range apps {
 		if app.Path == "" {
-			blocked[names[i]] = notInstalled
+			blocked[names[i]] = kind.Block{Why: notInstalled}
 		}
 	}
 	return blocked, nil

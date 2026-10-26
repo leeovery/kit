@@ -50,11 +50,13 @@ func (f *fakeKind) Remove(_ context.Context, names []string) error {
 // blockingKind is a fakeKind that says some names can't be installed now.
 type blockingKind struct {
 	*fakeKind
-	reasons map[string]string
+	reasons map[string]kind.Block
 	asked   map[string]string
 }
 
-func (b *blockingKind) Blocked(_ context.Context, missing map[string]string, _ []kind.Installed) (map[string]string, error) {
+var _ kind.Blocker = (*blockingKind)(nil)
+
+func (b *blockingKind) Blocked(_ context.Context, missing map[string]string, _ []kind.Installed) (map[string]kind.Block, error) {
 	b.asked = missing
 	return b.reasons, nil
 }
@@ -280,20 +282,26 @@ func TestStepFailingInstallSaysWhatItSaid(t *testing.T) {
 	}
 }
 
+// A thing blocked is missing, saying why, with nothing to do about it, and
+// marked as the person's to settle when its block is.
 func TestCompareAsksABlockerWhatCantBeInstalled(t *testing.T) {
 	k := &blockingKind{
-		fakeKind: &fakeKind{aliases: map[string]string{"php": "php", "zoom": "zoom"}},
-		reasons:  map[string]string{"php": "another tap's owner/tap/php is installed under that name"},
+		fakeKind: &fakeKind{aliases: map[string]string{"php": "php", "zoom": "zoom", "tool": "tool"}},
+		reasons: map[string]kind.Block{
+			"php":  {Why: "another tap's owner/tap/php is installed under that name", NeedsYou: true},
+			"tool": {Why: "its app isn't installed"},
+		},
 	}
-	got := kind.Compare(context.Background(), k, declared("php", "zoom"))
+	got := kind.Compare(context.Background(), k, declared("php", "tool", "zoom"))
 	want := []check.Item{
-		{ID: "brew:php", Name: "php", State: kind.Missing, Detail: "another tap's owner/tap/php is installed under that name"},
+		{ID: "brew:php", Name: "php", State: kind.Missing, Detail: "another tap's owner/tap/php is installed under that name", NeedsYou: true},
+		{ID: "brew:tool", Name: "tool", State: kind.Missing, Detail: "its app isn't installed"},
 		{ID: "brew:zoom", Name: "zoom", State: kind.Missing, Action: kind.Install},
 	}
 	if !slices.Equal(got.Items, want) {
 		t.Errorf("items = %+v\nwant %+v", got.Items, want)
 	}
-	if fmt.Sprint(k.asked) != fmt.Sprint(map[string]string{"php": "php", "zoom": "zoom"}) {
+	if fmt.Sprint(k.asked) != fmt.Sprint(map[string]string{"php": "php", "tool": "tool", "zoom": "zoom"}) {
 		t.Errorf("the blocker was asked of %v, want the missing names, by full name", k.asked)
 	}
 }
@@ -304,7 +312,7 @@ func TestStepAppliesByInstallingWhatsMissing(t *testing.T) {
 			installed: []kind.Installed{{Name: "jq", Explicit: true}, {Name: "ffmpeg", Explicit: true}},
 			aliases:   map[string]string{"ripgrep": "ripgrep", "php": "php", "go": "go"},
 		},
-		reasons: map[string]string{"php": "held"},
+		reasons: map[string]kind.Block{"php": {Why: "held"}},
 	}
 	s := kind.Step(k, declared("jq", "ripgrep", "php", "go", "typo"))
 	if err := s.Apply(context.Background(), s.Check(context.Background())); err != nil {

@@ -3,6 +3,7 @@ package brew_test
 import (
 	"context"
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -865,8 +866,8 @@ func TestFormulaeBlockedByAnotherTapsName(t *testing.T) {
 	got, err := b.Blocked(context.Background(),
 		map[string]string{"php": "php", "jq": "jq"},
 		[]kind.Installed{{Name: "owner/tap/php", Explicit: true}, {Name: "oniguruma", Needed: true}})
-	want := map[string]string{"php": "another tap's owner/tap/php is installed under that name"}
-	if err != nil || !mapsEqual(got, want) {
+	want := map[string]kind.Block{"php": {Why: "another tap's owner/tap/php is installed under that name", NeedsYou: true}}
+	if err != nil || !maps.Equal(got, want) {
 		t.Errorf("Blocked() = %v, %v; want %v", got, err, want)
 	}
 }
@@ -880,11 +881,11 @@ func TestCasksBlockedWithoutAnAdministrator(t *testing.T) {
 	tests := []struct {
 		name  string
 		admin func(context.Context) bool
-		want  map[string]string
+		want  map[string]kind.Block
 	}{
-		{name: "not installing", admin: nil, want: map[string]string{}},
-		{name: "no password", admin: func(context.Context) bool { return false }, want: map[string]string{"zoom": "needs an administrator's password: run kit apply at a terminal"}},
-		{name: "a password at hand", admin: func(context.Context) bool { return true }, want: map[string]string{}},
+		{name: "not installing", admin: nil, want: map[string]kind.Block{}},
+		{name: "no password", admin: func(context.Context) bool { return false }, want: map[string]kind.Block{"zoom": {Why: "needs an administrator's password: run kit apply at a terminal", NeedsYou: true}}},
+		{name: "a password at hand", admin: func(context.Context) bool { return true }, want: map[string]kind.Block{}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -893,7 +894,7 @@ func TestCasksBlockedWithoutAnAdministrator(t *testing.T) {
 			h := brew.New(fake)
 			h.Admin = tt.admin
 			got, err := h.Casks().(kind.Blocker).Blocked(context.Background(), missing, nil)
-			if err != nil || !mapsEqual(got, tt.want) {
+			if err != nil || !maps.Equal(got, tt.want) {
 				t.Errorf("Blocked() = %v, %v; want %v", got, err, tt.want)
 			}
 		})
@@ -983,7 +984,7 @@ func TestCasksCheckBeforeATapsAdded(t *testing.T) {
 	got := kind.Compare(context.Background(), h.Casks(), config.List{Kind: "cask", Entries: []config.Entry{{Name: "zoom"}, {Name: "owner/tap/tool"}}})
 	want := []check.Item{
 		{ID: "cask:owner/tap/tool", Name: "owner/tap/tool", State: kind.Missing, Action: kind.Install},
-		{ID: "cask:zoom", Name: "zoom", State: kind.Missing, Detail: "needs an administrator's password: run kit apply at a terminal"},
+		{ID: "cask:zoom", Name: "zoom", State: kind.Missing, Detail: "needs an administrator's password: run kit apply at a terminal", NeedsYou: true},
 	}
 	if got.State == check.Failed || !slices.Equal(got.Items, want) {
 		t.Errorf("check = %s %s, items %+v\nwant items %+v", got.State, got.Reason, got.Items, want)

@@ -538,13 +538,13 @@ func (s *AppStore) SetAdmin(held func(ctx context.Context) bool) {
 
 // Blocked holds up every app missing, when kit is installing without an
 // administrator's password.
-func (s *AppStore) Blocked(ctx context.Context, missing map[string]string, _ []kind.Installed) (map[string]string, error) {
-	blocked := make(map[string]string)
+func (s *AppStore) Blocked(ctx context.Context, missing map[string]string, _ []kind.Installed) (map[string]kind.Block, error) {
+	blocked := make(map[string]kind.Block)
 	if s.admin == nil || len(missing) == 0 || s.admin(ctx) {
 		return blocked, nil
 	}
 	for name := range missing {
-		blocked[name] = adminWait
+		blocked[name] = kind.Block{Why: adminWait, NeedsYou: true}
 	}
 	return blocked, nil
 }

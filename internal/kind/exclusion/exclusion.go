@@ -264,14 +264,14 @@ func (x *Exclusions) SetAdmin(held func(ctx context.Context) bool) { x.admin = h
 
 // Blocked holds up every path missing that needs an administrator's
 // password while kit has none.
-func (x *Exclusions) Blocked(ctx context.Context, missing map[string]string, _ []kind.Installed) (map[string]string, error) {
-	blocked := map[string]string{}
+func (x *Exclusions) Blocked(ctx context.Context, missing map[string]string, _ []kind.Installed) (map[string]kind.Block, error) {
+	blocked := map[string]kind.Block{}
 	if x.admin == nil || x.admin(ctx) {
 		return blocked, nil
 	}
 	for name := range missing {
 		if x.asAdmin(name) {
-			blocked[name] = "waiting for an administrator's password: kit apply at a terminal asks for it"
+			blocked[name] = kind.Block{Why: "waiting for an administrator's password: kit apply at a terminal asks for it", NeedsYou: true}
 		}
 	}
 	return blocked, nil
