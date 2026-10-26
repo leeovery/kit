@@ -114,13 +114,13 @@ func (p *Pretty) rowState(name string) look.State {
 	return look.Done
 }
 
-// paneBody is what the right pane shows under its heading: the chosen
-// row's raw view, while it's open; else the log.
-func (p *Pretty) paneBody() []string {
+// paneBody is what the right pane, w wide, shows under its heading: the
+// chosen row's raw view, while it's open; else the log.
+func (p *Pretty) paneBody(w int) []string {
 	if p.keys.raw {
 		return p.rawBody(p.keys.chosen)
 	}
-	return p.logBody(p.keys.chosen)
+	return p.logBody(p.keys.chosen, w)
 }
 
 // paneHeading is the right pane's heading, w wide: the raw view's, the row

@@ -131,15 +131,19 @@ type Row struct {
 	State State
 	Name  string
 	Says  string
+	// Kept is what follows Says, after a dot, kept whole when the line's
+	// cut, the rest cut in its place: how far a thing at work has got after
+	// what it's doing.
+	Kept  string
 	Under []string
 }
 
 // Rows draws rows after indent, what belongs to each under its name, every
-// line cut at w.
+// line cut at w, what each keeps kept.
 func Rows(indent string, w int, rs ...Row) []string {
 	var out []string
 	for _, r := range rs {
-		out = append(out, Cut(line(indent, r), w))
+		out = append(out, CutKeeping(line(indent, r), r.Kept, w))
 		for _, u := range r.Under {
 			out = append(out, Cut(indent+"  "+u, w))
 		}
@@ -152,7 +156,7 @@ func Rows(indent string, w int, rs ...Row) []string {
 func Timeline(indent string, w int, rs ...Row) []string {
 	var out []string
 	for _, r := range rs {
-		out = append(out, Cut(line(indent, r), w))
+		out = append(out, CutKeeping(line(indent, r), r.Kept, w))
 		for _, u := range r.Under {
 			out = append(out, Cut(indent+Dim("│")+" "+u, w))
 		}
@@ -577,6 +581,17 @@ func OneLine(s string) string { return strings.Join(strings.Fields(s), " ") }
 
 // Cut cuts a line to w cells, an ellipsis ending it when it's cut.
 func Cut(s string, w int) string { return ansi.Truncate(s, w, "…") }
+
+// CutKeeping is s, then kept after a dot, cut at w: s cut, so kept stays
+// whole, as how far a thing at work has got after what it's doing. Without
+// kept, it's s cut.
+func CutKeeping(s, kept string, w int) string {
+	if kept == "" {
+		return Cut(s, w)
+	}
+	kept = dot + kept
+	return Cut(s, max(w-ansi.StringWidth(kept), 0)) + kept
+}
 
 // Colours are kit's colours, as the boot's arrival in the terminal turns
 // its noise from amber into them: pink, a purple, a blue, cyan and orange.

@@ -289,23 +289,23 @@ func (p *Pretty) noteDown(c event.NeedsYou, at time.Time, finished *event.StepFi
 	}
 }
 
-// logBody is the log's lines, row's alone, or every one for "": the
-// run's, oldest first, then what's under way.
-func (p *Pretty) logBody(row string) []string {
+// logBody is the log's lines, w wide, row's alone, or every one for "":
+// the run's, oldest first, then what's under way.
+func (p *Pretty) logBody(row string, w int) []string {
 	var out []string
 	for _, l := range p.log {
 		if row == "" || l.row == row {
 			out = append(out, l.lines...)
 		}
 	}
-	return append(out, p.underWay(row)...)
+	return append(out, p.underWay(row, w)...)
 }
 
-// underWay is what's under way, at the log's foot, row's alone, or every
-// step's for "": a line each step applying and at work, in the order they
-// started, what it's doing and how far it's got; the first with the time
-// now.
-func (p *Pretty) underWay(row string) []string {
+// underWay is what's under way, at the log's foot, w wide, row's alone, or
+// every step's for "": a line each step applying and at work, in the order
+// they started, what it's doing and how far it's got, that kept whole when
+// the line's cut; the first with the time now.
+func (p *Pretty) underWay(row string, w int) []string {
 	var out []string
 	for _, r := range p.running {
 		if !r.applying || !p.atWork(r) || row != "" && p.rowOf(r.step) != row {
@@ -315,15 +315,16 @@ func (p *Pretty) underWay(row string) []string {
 		if len(out) == 0 {
 			at = look.Dim(p.now().Format(clockFormat))
 		}
-		out = append(out, "  "+at+"  "+look.Mark(look.Running)+" "+r.doingSays(true, true))
+		says, far := r.doingSays(true, true)
+		out = append(out, look.CutKeeping("  "+at+"  "+look.Mark(look.Running)+" "+says, far, w))
 	}
 	return out
 }
 
 // doingSays is what r says it's doing, cyan, its title after generic words
-// when named is true, and capitalised as a sentence when sentence is; then
-// how far it's got, white, when it counts.
-func (r runningStep) doingSays(named, sentence bool) string {
+// when named is true, and capitalised as a sentence when sentence is; and
+// how far it's got, white, when it counts, else "".
+func (r runningStep) doingSays(named, sentence bool) (says, far string) {
 	doing := r.doing
 	if named && (doing == "applying" || doing == "checking") {
 		doing += " " + r.title
@@ -331,10 +332,10 @@ func (r runningStep) doingSays(named, sentence bool) string {
 	if sentence && doing != "" {
 		doing = strings.ToUpper(doing[:1]) + doing[1:]
 	}
-	if r.of == 0 {
-		return look.Cyan(doing)
+	if r.of > 0 {
+		far = look.White(fmt.Sprintf("%d of %d", r.done, r.of))
 	}
-	return look.Says(look.Cyan(doing), look.White(fmt.Sprintf("%d of %d", r.done, r.of)))
+	return look.Cyan(doing), far
 }
 
 // backFoot is how many of the log's lines its foot takes while it's

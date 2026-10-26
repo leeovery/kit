@@ -187,7 +187,8 @@ func (p *Pretty) rowLook(r applyRow) look.Row {
 	case len(unwell) > 0:
 		row.State, row.Says = look.NeedsYou, p.listRow(unwell[0]).Says
 	case atWork:
-		row.State, row.Says = look.Running, work.doingSays(len(r.steps) > 1, false)
+		row.State = look.Running
+		row.Says, row.Kept = work.doingSays(len(r.steps) > 1, false)
 	case finished < len(r.steps):
 		row.State, row.Says = look.Queued, look.Muted(p.rowWaiting(r, finished))
 	case toDo > 0:

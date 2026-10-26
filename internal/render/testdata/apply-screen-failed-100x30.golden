@@ -11,7 +11,7 @@
   ● Files and shell  all 2 done                     │  03:06:13  + Installed formula-4
   ● Mac settings  all 3 done                        │  03:06:27  + Installed cask-4
   ○ Secrets  waits for Sign in to 1Password         │  03:06:38  + Installed formula-5
-  ◐ Homebrew formulae  installing ffmpeg · 38 of 1… │  03:07:03  + Installed formula-6
+  ◐ Homebrew formulae  installing ffmp… · 38 of 129 │  03:07:03  + Installed formula-6
     ▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮  5m20s                 │  03:07:04  + Installed cask-5
   ✗ Homebrew casks  couldn't install tailscale-app  │  03:07:28  + Installed formula-7
   ○ App Store apps  waiting                         │  03:07:41  + Installed cask-6

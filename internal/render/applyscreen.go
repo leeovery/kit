@@ -188,7 +188,7 @@ func (p *Pretty) screenFrame(w, h int) []string {
 	head := p.header()
 	split := splitAt(w)
 	room := max(h-len(head)-1, 0)
-	left := p.leftPane(split, room)
+	left := p.leftPane(split-1, room)
 	right, rules, logAt := p.rightPane(w-split-1, room)
 	p.keys.split, p.keys.paneAt, p.keys.logAt = split, len(head)+1, len(head)+1+logAt
 	lines := append(head, look.Junction(w, split, "┬"))
@@ -379,8 +379,8 @@ func (p *Pretty) leftPane(w, room int) []string {
 	return append(append(lines, make([]string, max(room-len(lines), 0))...), foot...)
 }
 
-// rowLine is a row's line, w wide: the chosen one's name a pink pill after
-// its mark.
+// rowLine is a row's line, w wide, what it keeps kept whole: the chosen
+// one's name a pink pill after its mark.
 func (p *Pretty) rowLine(row look.Row, w int) string {
 	if row.Name != p.keys.chosen {
 		return look.Rows("  ", w, row)[0]
@@ -389,7 +389,7 @@ func (p *Pretty) rowLine(row look.Row, w int) string {
 	if row.Says != "" {
 		l += " " + row.Says
 	}
-	return look.Cut(l, w)
+	return look.CutKeeping(l, row.Kept, w)
 }
 
 // leftFoot is the left pane's foot, w wide: a blank line and the keys, the
@@ -411,7 +411,7 @@ func (p *Pretty) rightPane(w, room int) (lines []string, rules map[int]bool, log
 	if rule >= 0 {
 		rules[rule] = true
 	}
-	body := p.paneBody()
+	body := p.paneBody(w)
 	start, end, back := p.keys.logWindow(len(body), room-len(top))
 	lines = append(top, body[start:end]...)
 	if back {

@@ -62,6 +62,14 @@ func TestRowsAreCut(t *testing.T) {
 	}
 }
 
+// What a row keeps stays whole when it's cut, what it says cut in its
+// place; one that fits is as it is.
+func TestRowsKeepWhatTheyKeep(t *testing.T) {
+	at := look.Row{State: look.Running, Name: "formulae", Says: look.Cyan("installing imagick@8.2"), Kept: look.White("25 of 128")}
+	same(t, look.Rows("  ", 40, at), "  ◐ formulae  installing im… · 25 of 128")
+	same(t, look.Timeline("  ", 60, at), "  ◐ formulae  installing imagick@8.2 · 25 of 128")
+}
+
 func TestStatesMarks(t *testing.T) {
 	for s, want := range map[look.State]string{look.Done: "●", look.NeedsYou: "▲", look.Failed: "✗", look.Running: "◐", look.Queued: "○", look.Skipped: "–", look.ToDo: "△"} {
 		if got := ansi.Strip(look.Mark(s)); got != want {

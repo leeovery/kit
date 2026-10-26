@@ -391,8 +391,8 @@ const installing = `==> Fetching downloads for: ffmpeg and hello
 // it's updating Homebrew, then it's downloading as each brew install
 // starts, counting those asked for as each is downloaded, then, once brew's
 // begun installing, counts them installed, naming the one brew says it's
-// installing, whatever the order they're declared in; never less far than
-// it's said it got.
+// installing, by its name in its tap, whatever the order they're declared
+// in; never less far than it's said it got.
 func TestApplyingCountsTheFormulae(t *testing.T) {
 	fake := runnertest.New(t)
 	fake.On("brew", "list", "--formula", "--full-name", "-1").Prints("jq\n")
@@ -418,7 +418,7 @@ func TestApplyingCountsTheFormulae(t *testing.T) {
 		{Says: "tapping owner/tap"},
 		{Says: "updating Homebrew"},
 		{Says: "downloading", Of: 3}, {Says: "downloading", Done: 1, Of: 3, Far: half(1)},
-		{Says: "installing owner/tap/tuicr", Of: 3, Far: 0.5}, {Says: "installing", Done: 1, Of: 3, Far: 0.5 + half(1)},
+		{Says: "installing tuicr", Of: 3, Far: 0.5}, {Says: "installing", Done: 1, Of: 3, Far: 0.5 + half(1)},
 		{Says: "downloading", Done: 1, Of: 3, Far: 0.5 + half(1)},
 		{Says: "downloading", Done: 2, Of: 3, Far: 0.5 + half(1)}, {Says: "downloading", Done: 3, Of: 3, Far: 0.5 + half(1)},
 		{Says: "installing ffmpeg", Done: 1, Of: 3, Far: 0.5 + half(1)}, {Says: "installing", Done: 2, Of: 3, Far: 0.5 + half(2)},

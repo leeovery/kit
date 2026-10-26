@@ -1062,8 +1062,8 @@ func (p *progress) announced(line string) (string, bool) {
 	return p.announcer.Installing(line, p.names)
 }
 
-// shown is name as the run's log shows it: by the part its kind shows it
-// by, if it's Shortened.
+// shown is name as the run's log, and what the install says it's doing,
+// show it: by the part its kind shows it by, if it's Shortened.
 func (p *progress) shown(name string) string {
 	if p.shortened == nil {
 		return name
@@ -1156,9 +1156,9 @@ func (p *progress) say() {
 	case p.fetching:
 		event.Say(p.ctx, event.Doing{Says: quiet("downloading"), Done: len(p.fetched), Of: len(p.names), Far: p.farther(float64(len(p.fetched)) / n / 2)})
 	case p.fetcher != nil:
-		event.Say(p.ctx, event.Doing{Says: quiet(strings.TrimSpace("installing " + p.next())), Done: len(p.done), Of: len(p.names), Far: p.farther(0.5 + float64(len(p.done))/n/2)})
+		event.Say(p.ctx, event.Doing{Says: quiet(strings.TrimSpace("installing " + p.shown(p.next()))), Done: len(p.done), Of: len(p.names), Far: p.farther(0.5 + float64(len(p.done))/n/2)})
 	default:
-		event.Say(p.ctx, event.Doing{Says: quiet(strings.TrimSpace("installing " + p.next())), Done: len(p.done), Of: len(p.names)})
+		event.Say(p.ctx, event.Doing{Says: quiet(strings.TrimSpace("installing " + p.shown(p.next()))), Done: len(p.done), Of: len(p.names)})
 	}
 }
 

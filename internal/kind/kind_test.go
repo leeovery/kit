@@ -461,6 +461,34 @@ func TestStepTellsTheLogOfEachThingInstalled(t *testing.T) {
 	}
 }
 
+// What a kind's install says it's installing names the thing as the run's
+// log does: by the part of its name it's shown by, for a kind that's
+// Shortened, as Homebrew's from a tap are by their names in the tap, else
+// by its name.
+func TestStepSaysWhatsInstallingAsTheLogShowsIt(t *testing.T) {
+	prints := []string{"done tap/b", "done z"}
+	for _, tt := range []struct {
+		name string
+		kind kind.Kind
+		b    string
+	}{
+		{"by its name", &countingKind{fakeKind: knowing("tap/b", "z"), prints: prints}, "tap/b"},
+		{"shortened", &shortKind{&countingKind{fakeKind: knowing("tap/b", "z"), prints: prints}}, "b"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var said []string
+			ctx := event.WithSaying(context.Background(), func(d event.Doing) { said = append(said, d.Says) })
+			s := kind.Step(tt.kind, declared("tap/b", "z"))
+			if err := s.Apply(ctx, s.Check(context.Background())); err != nil {
+				t.Fatalf("Apply() error = %v", err)
+			}
+			if len(said) == 0 || said[0] != "installing "+tt.b {
+				t.Errorf("the step said %q; want it to start installing %s", said, tt.b)
+			}
+		})
+	}
+}
+
 // announcingKind is a countingKind whose install says which thing it's
 // installing, each "installing" line naming it.
 type announcingKind struct{ *countingKind }

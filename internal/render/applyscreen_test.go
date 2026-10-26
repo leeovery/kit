@@ -561,6 +561,33 @@ func TestApplyingRowSays(t *testing.T) {
 	}
 }
 
+// A row at work whose words won't fit has what it's doing cut, never how
+// far it's got, on the left and at the log's foot alike, chosen or not.
+func TestApplyingKeepsTheCountWhole(t *testing.T) {
+	tools := []event.Step{{Name: "brew", Title: "Homebrew formulae", Area: "Drift", Row: "Homebrew formulae", Tool: "Homebrew"}}
+	events := rowsRun(tools, append(applying(10, "brew"),
+		event.Doing{Time: after(20), Step: "brew", Says: "installing a-formula-whose-name-goes-on-and-on-past-the-pane", Done: 25, Of: 128})...)
+	for _, tt := range []struct {
+		name string
+		keys func(string, int) []ask.Key
+	}{{"following", nil}, {"chosen", clickRow("Homebrew formulae")}} {
+		t.Run(tt.name, func(t *testing.T) {
+			face, out, kb := applyAt(100, 30, time.Minute, events)
+			defer func() { _ = face.Close() }()
+			if tt.keys != nil {
+				kb.press(t, tt.keys(screen(out.String()), 100)...)
+			}
+			got := screen(out.String())
+			if line := rowLine(t, got, 100, "Homebrew formulae"); !strings.HasSuffix(line, "… · 25 of 128") {
+				t.Errorf("the row is %q; want what it's doing cut, then 25 of 128", line)
+			}
+			if log := logOf(got, 100); len(log) == 0 || !strings.HasSuffix(log[len(log)-1], "… · 25 of 128") {
+				t.Errorf("the log ends %q; want what's under way cut, then 25 of 128", log)
+			}
+		})
+	}
+}
+
 // Without weights, as an older run's log has none, the bar counts each
 // step one: a step finished one, a step at work that counts as far as it's
 // got; the header says the same percentage, and so does the terminal's tab.

@@ -359,7 +359,7 @@ func (p *Pretty) scroll(n, room, by int) {
 func (p *Pretty) logSize() (n, room int) {
 	w, h := p.window()
 	top, _ := p.paneTop(w - splitAt(w) - 1)
-	return len(p.paneBody()), h - len(p.header()) - 1 - len(top)
+	return len(p.paneBody(w - splitAt(w) - 1)), h - len(p.header()) - 1 - len(top)
 }
 
 // footKeys are the keys at the left pane's foot, as it reads them.
