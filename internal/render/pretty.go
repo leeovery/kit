@@ -84,7 +84,11 @@ type Pretty struct {
 	w       io.Writer
 	width   int
 	animate bool
-	start   event.RunStarted
+	// finished is whether the run's ended, its record printed: nothing's
+	// drawn again till another run gets ready, whatever comes late, as a
+	// to-do's work left to finish.
+	finished bool
+	start    event.RunStarted
 	// planned are the steps a run getting ready will run, when known.
 	planned []event.Step
 	whole   bool
@@ -209,6 +213,7 @@ func (p *Pretty) Emit(e event.Event) {
 	p.fit()
 	switch e := e.(type) {
 	case event.Preparing:
+		p.finished = false
 		p.open(e.Command, e.Machine, e.Time, nil)
 		p.preparing = e.Doing
 		if e.Steps != nil {
@@ -225,6 +230,7 @@ func (p *Pretty) Emit(e event.Event) {
 		p.halt()
 		p.drawSpinner()
 	case event.RunStarted:
+		p.finished = false
 		p.start, p.results = e, make(map[string]event.StepFinished, len(e.Steps))
 		p.output, p.command, p.began = map[string][]string{}, map[string]string{}, p.now()
 		p.raw, p.rawSeq = map[string][]rawLine{}, 0
@@ -325,6 +331,7 @@ func (p *Pretty) Emit(e event.Event) {
 		}
 	case event.RunFinished:
 		p.stopSpinner()
+		p.finished = true
 		var last []string
 		switch {
 		case p.byArea() && p.applying():
@@ -679,8 +686,12 @@ func took(d time.Duration) string {
 	return fmt.Sprintf("%dm%02ds", int(d.Minutes()), int(d.Seconds())%60)
 }
 
-// spin starts the spinner, when the face animates and it isn't turning.
+// spin starts the spinner, when the face animates and it isn't turning,
+// nor the run over.
 func (p *Pretty) spin() {
+	if p.finished {
+		return
+	}
 	if !p.animate || p.stop != nil {
 		p.drawSpinner()
 		return
@@ -709,9 +720,10 @@ func (p *Pretty) spin() {
 // drawSpinner draws the live part over the last: on a timeline, the running
 // step's row, and the last lines its commands printed on the line under it;
 // otherwise the loader, the bar, how many steps are done, and which are
-// running. None when nothing runs, or the face doesn't animate.
+// running. None when nothing runs, the face doesn't animate, or the run's
+// over.
 func (p *Pretty) drawSpinner() {
-	if !p.animate || p.aside > 0 {
+	if !p.animate || p.aside > 0 || p.finished {
 		return
 	}
 	p.fit()

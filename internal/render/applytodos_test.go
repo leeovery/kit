@@ -561,6 +561,27 @@ func TestTheToDosOverWhileOneLeftSettles(t *testing.T) {
 	}
 }
 
+// Once the run's over, its record printed, what comes late, as a to-do's
+// work left to finish saying what it did, and the list as that leaves it,
+// writes nothing: the screen never comes back over the record.
+func TestNothingDrawnAfterTheRunEnds(t *testing.T) {
+	events := skippedAt(4, true)
+	face, out, kb := applyAt(160, 64, since(events), events)
+	defer func() { _ = face.Close() }()
+	before := len(out.String())
+	list := slices.Clone(events[len(events)-5].(event.ToDos).List)
+	list[4].Done, list[4].Skipped = true, false
+	face.Emit(event.Logged{Time: after(4000), Step: "manual", Line: "brought back Boxed App's settings"})
+	face.Emit(event.ToDos{Time: after(4001), Step: "manual", List: list, Up: -1})
+	face.Emit(event.Doing{Time: after(4002), Step: "manual", Says: "checking once more"})
+	if late := out.String()[before:]; late != "" {
+		t.Errorf("after the run ended, the face wrote %q; want nothing", late)
+	}
+	if kb.listens() != 1 {
+		t.Errorf("the keys were listened for %d times; want once, for the run, not again after it", kb.listens())
+	}
+}
+
 // toDosAndACard is a run whose to-dos at the end, printer's alone or a
 // scanner's after it, have begun, the printer's up, when the vault's card,
 // which the secrets wait on, comes due and waits after it; then the

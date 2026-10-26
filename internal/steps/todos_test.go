@@ -1306,3 +1306,38 @@ func TestAStoppedToDoSettlesAheadOfOneLeftForLater(t *testing.T) {
 	close(through)
 	over(t, done)
 }
+
+// The run stopped while a to-do left for later still has its work under
+// way, the run ends; that work, never cut short, finishing after, says
+// nothing more of the list, the run's record already its last word.
+func TestWhatsLeftForLaterSaysNothingOnceTheRunsStopped(t *testing.T) {
+	defer steps.SetManualPoll(time.Millisecond)()
+	c := newCard(t)
+	s := &settings{}
+	bringing, begun, through := held()
+	s.bringing = bringing
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	p, err := engine.New(atTheEnd(steps.Manual(c.fake, "/home/someone", c.state, config.List{}, c.raise), s.step())...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ran := make(chan engine.Report, 1)
+	go func() {
+		report, _ := p.Apply(ctx, c.sink, engine.Options{Command: "apply", Jobs: 4})
+		ran <- report
+	}()
+	c.upNow(t, "prefs:none")
+	c.answer(t, steps.ManualName, "r")
+	within(t, begun, "r was never done")
+	c.answer(t, steps.ManualName, hand.Skip)
+	c.listUntil(t, func(l event.ToDos) bool { return l.Up == -1 && l.List[0].Settling })
+	cancel()
+	over(t, ran)
+	lists := len(toDoLists(c.sink))
+	close(through)
+	c.raise.Wait()
+	if after := toDoLists(c.sink)[lists:]; len(after) > 0 {
+		t.Errorf("once the run had ended, the to-dos were emitted %+v; want nothing more", after)
+	}
+}

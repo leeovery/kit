@@ -394,7 +394,7 @@ func (l *toDos) settle(ctx context.Context, i int, t toDo, late *work, finish fu
 // stays to do, skipped, settling till that's over; found done after all,
 // it's done, finished as one done is (finish), with the to-dos to follow
 // it at the list's end, the list having moved on; each change emitted as
-// it comes.
+// it comes, till the run's stopped: it ends with the list as it stood.
 func (l *toDos) leave(ctx context.Context, i int, t toDo, late *work, finish func() string) {
 	l.mu.Lock()
 	l.entries[i].Skipped, l.entries[i].Settling = true, true
@@ -405,7 +405,7 @@ func (l *toDos) leave(ctx context.Context, i int, t toDo, late *work, finish fun
 		defer l.later.Done()
 		for s := range settling {
 			l.mu.Lock()
-			if l.take(s, true) {
+			if l.take(s, true) && ctx.Err() == nil {
 				l.emitNow()
 			}
 			l.mu.Unlock()
