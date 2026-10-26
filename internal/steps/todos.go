@@ -336,10 +336,15 @@ func (l *toDos) emitNow() {
 	l.r.Sink.Emit(event.ToDos{Time: l.r.Now(), Step: l.step, List: slices.Clone(l.entries), Up: l.up})
 }
 
-// finishing is what finishes what t waited for (finishing), once the
-// finish under way, if any, is over.
+// finishing is what finishes what t waited for (finishing), one finish
+// at a time (oneAtATime).
 func (l *toDos) finishing(ctx context.Context, t toDo) func() string {
-	finish := finishing(ctx, t)
+	return l.oneAtATime(finishing(ctx, t))
+}
+
+// oneAtATime is finish, once the finish under way, if any, is over: nil
+// for none.
+func (l *toDos) oneAtATime(finish func() string) func() string {
 	if finish == nil {
 		return nil
 	}

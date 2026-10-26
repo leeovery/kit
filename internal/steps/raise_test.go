@@ -131,3 +131,35 @@ func TestCutAtWord(t *testing.T) {
 		}
 	}
 }
+
+// Kit finishes what one to-do done waited for one at a time: while one
+// finish is under way, none other begins, however they come.
+func TestFinishesOneAtATime(t *testing.T) {
+	l := &toDos{}
+	begun, release := make(chan struct{}), make(chan struct{})
+	first := l.oneAtATime(func() string {
+		close(begun)
+		<-release
+		return "first"
+	})
+	second := l.oneAtATime(func() string { return "second" })
+	go first()
+	<-begun
+	if l.finishes.TryLock() {
+		t.Fatal("the first finish under way, another could begin")
+	}
+	finished := make(chan string, 1)
+	go func() { finished <- second() }()
+	select {
+	case <-finished:
+		t.Fatal("the second finish ended while the first was under way")
+	case <-time.After(10 * time.Millisecond):
+	}
+	close(release)
+	if got := <-finished; got != "second" {
+		t.Errorf("the second finish said %q, want its own words", got)
+	}
+	if l.oneAtATime(nil) != nil {
+		t.Error("no finish to do, there's one")
+	}
+}
