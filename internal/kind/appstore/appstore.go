@@ -544,7 +544,7 @@ func (s *AppStore) Blocked(ctx context.Context, missing map[string]string, _ []k
 		return blocked, nil
 	}
 	for name := range missing {
-		blocked[name] = kind.Block{Why: adminWait, NeedsYou: true}
+		blocked[name] = kind.Block{Why: adminWait}
 	}
 	return blocked, nil
 }

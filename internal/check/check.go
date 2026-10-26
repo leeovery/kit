@@ -50,10 +50,9 @@ type Item struct {
 	// theirs alone to do and applying at a terminal raises it at its end,
 	// with the steps by hand: none for anything else.
 	ToDo *ToDo `json:"to_do,omitempty"`
-	// NeedsYou is whether it waits on the person, for what only they can
-	// give, as an administrator's password, rather than on something still
-	// to come, as an app not installed yet.
-	NeedsYou bool `json:"needs_you,omitempty"`
+	// Later is whether it's known to be still to come, by itself, as a
+	// login item's app not installed yet: nothing for the person to settle.
+	Later bool `json:"later,omitempty"`
 }
 
 // ToDo is something for the person at the Mac to do, as applying raises it

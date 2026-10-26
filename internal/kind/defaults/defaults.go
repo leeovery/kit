@@ -691,7 +691,7 @@ func (d *Defaults) Blocked(ctx context.Context, missing map[string]string, _ []k
 	}
 	for name := range missing {
 		if s, err := config.ParseSetting(name); err == nil && system(s.Domain) {
-			blocked[name] = kind.Block{Why: adminWait, NeedsYou: true}
+			blocked[name] = kind.Block{Why: adminWait}
 		}
 	}
 	return blocked, nil

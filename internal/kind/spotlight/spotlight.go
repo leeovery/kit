@@ -187,7 +187,7 @@ func (s *Spotlight) Blocked(ctx context.Context, missing map[string]string, _ []
 		case slices.Contains(rec.Added, name):
 			blocked[name] = kind.Block{Why: "added to Spotlight's list: it takes effect after a restart; still indexed after one, add it in System Settings › Spotlight › Search Privacy"}
 		case s.admin != nil && !s.admin(ctx):
-			blocked[name] = kind.Block{Why: "waiting for an administrator's password: kit apply at a terminal asks for it", NeedsYou: true}
+			blocked[name] = kind.Block{Why: "waiting for an administrator's password: kit apply at a terminal asks for it"}
 		}
 	}
 	return blocked, nil

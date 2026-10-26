@@ -1044,9 +1044,9 @@ step failed, with the error; the run finishing, with its summary. Faces subscrib
   a row, the bar, what's running and what's wrong, a card or a to-do up in place under them, no
   list. Once applied, its record takes the screen's place: the wordmark with the bar and the
   tally, then what's left to do (the to-dos at the end first, in their order, each its steps as
-  how), what failed, what needs you, and the rows done, under each what of its steps waits on the person (a
-  password not given), never what waits on something still to come (an app not installed
-  yet: `kit status` says it). Commands aimed at one thing (`add`, `remove`, a step named) are a timeline, a row
+  how), what failed, what needs you, and the rows done, under each what of its steps still waits, but for what's
+  known to come by itself (a login item's app not installed yet, a project's folder not there
+  yet, as their kinds mark it: `kit status` says it). Commands aimed at one thing (`add`, `remove`, a step named) are a timeline, a row
   a step as its turn comes, no wordmark. A summary ends a whole-Mac command: what failed,
   needs you or wasn't checked, what's fine, and how long it took. `kit log` shows a run as a
   timeline; kit's help and its errors take the look too (an error is a row, what to run about

@@ -281,15 +281,20 @@ func appliedRun() []event.Event {
 	return append(events, event.RunFinished{Time: after(1471), Duration: 24*time.Minute + 31*time.Second, Counts: map[check.State]int{check.OK: 27, check.Attention: 2, check.Failed: 1}})
 }
 
-// waitingRun is a run all well whose rows have things waiting that don't
-// need the person: Claude's servers for projects whose folders aren't
-// there yet, and login items for apps not installed.
+// waitingRun is a run all well whose rows have things waiting, quiet, new:
+// still to come by themselves, Claude's servers for projects whose folders
+// aren't there yet and login items for apps not installed; and not, a
+// linked file of its own, an edit to kit-config not committed, a folder
+// Spotlight leaves out after a restart, and a formula held for a secret
+// that never came.
 func waitingRun() []event.Event {
-	all := append(slices.Clone(newMac), event.Step{Name: "claude-mcp", Title: "Claude MCP", Area: "Drift", Row: "Developer tools"})
-	waiting := func(step, detail string, names ...string) []check.Item {
+	all := append(slices.Clone(newMac),
+		event.Step{Name: "claude-mcp", Title: "Claude MCP", Area: "Drift", Row: "Developer tools"},
+		event.Step{Name: "spotlight-exclusion", Title: "Spotlight exclusions", Area: "Drift", Row: "Mac settings"})
+	waiting := func(step, state, detail string, later bool, names ...string) []check.Item {
 		var items []check.Item
 		for _, n := range names {
-			items = append(items, check.Item{ID: step + ":" + n, Name: n, State: "missing", Quiet: "new", Detail: detail})
+			items = append(items, check.Item{ID: step + ":" + n, Name: n, State: state, Quiet: "new", Detail: detail, Later: later})
 		}
 		return items
 	}
@@ -298,9 +303,17 @@ func waitingRun() []event.Event {
 		res := check.Result{State: check.OK, Summary: "fine"}
 		switch s.Name {
 		case "claude-mcp":
-			res.Summary, res.Items = "19 declared, 8 installed", waiting("claude-mcp", "no project folder yet", numbered("~/Code/site", 11)...)
+			res.Summary, res.Items = "19 declared, 8 installed", waiting("claude-mcp", "missing", "no project folder yet", true, numbered("~/Code/site", 11)...)
 		case "login-item":
-			res.Summary, res.Items = "5 declared, 2 installed", waiting("login-item", "not installed: install the app, or open the app it comes with", "Tool", "Monitor", "Clipper")
+			res.Summary, res.Items = "5 declared, 2 installed", waiting("login-item", "missing", "not installed: install the app, or open the app it comes with", true, "Tool", "Monitor", "Clipper")
+		case "file":
+			res.Items = waiting("file", "diverged", "a file of its own, different from shared/home/.zshrc", false, "~/.zshrc")
+		case "config":
+			res.Items = waiting("config", "modified", "+2 −1 lines", false, "shared/home/.zshrc")
+		case "spotlight-exclusion":
+			res.Items = waiting("spotlight-exclusion", "missing", "added to Spotlight's list: it takes effect after a restart", false, "~/Code")
+		case "brew":
+			res.Summary, res.Items = "3 declared, 2 installed", waiting("brew", "missing", "needs Secrets, which isn't there yet", false, "owner/private/fetcher")
 		}
 		events = append(events, finished(10+i, s.Name, res))
 	}
@@ -1474,9 +1487,9 @@ func TestApplyingCardInASmallWindow(t *testing.T) {
 
 // When the run ends, the screen goes and its record is left in its place,
 // kept to column 80: the wordmark, with what ran, the bar and the tally
-// beside it; then what's to do, what failed, and the rows done, nothing
-// of theirs under them that waits on what's still to come. A run stopped says so,
-// and where to carry on; nothing's red but what failed.
+// beside it; then what's to do, what failed, and the rows done, with what
+// of theirs still waits under them. A run stopped says so, and where to
+// carry on; nothing's red but what failed.
 func TestApplyingLeavesItsRecord(t *testing.T) {
 	for _, tt := range []struct {
 		golden string
@@ -1549,6 +1562,34 @@ func TestApplyingRecordSections(t *testing.T) {
 	}
 }
 
+// Under a row done, the record keeps what of its steps still waits, but for
+// what's known to be still to come by itself: a linked file of its own, an
+// edit not committed, a folder Spotlight leaves out after a restart, a
+// formula held for a secret that never came stay; Claude's servers for
+// projects not there yet and login items for apps not installed go.
+func TestApplyingRecordLeavesOutOnlyWhatComesLater(t *testing.T) {
+	face, out, _ := applyAt(160, 64, time.Minute, waitingRun())
+	if err := face.Close(); err != nil {
+		t.Fatal(err)
+	}
+	record := screen(out.String())
+	for _, want := range []string{
+		"│ ~/.zshrc · a file of its own",
+		"│ shared/home/.zshrc · +2 −1 lines",
+		"│ ~/Code · added to Spotlight's list",
+		"│ owner/private/fetcher · needs Secrets, which isn't there yet",
+	} {
+		if !strings.Contains(record, want) {
+			t.Errorf("the record is\n%s\nwant it to keep %q", record, want)
+		}
+	}
+	for _, gone := range []string{"no project folder yet", "Monitor"} {
+		if strings.Contains(record, gone) {
+			t.Errorf("the record is\n%s\nwant nothing of %q: it comes by itself", record, gone)
+		}
+	}
+}
+
 // The record names a step by its row alone when the step's called as its
 // row is, and a row done keeps under it what of its steps waits on the
 // person, a password say, in the log too.
@@ -1558,7 +1599,7 @@ func TestApplyingRecordKeepsWhatWaits(t *testing.T) {
 		finished(20, "brew", check.Result{State: check.Attention, Summary: "3 declared, all installed", Items: []check.Item{
 			{ID: "brew:ffmpeg", Name: "ffmpeg", State: "extra", Detail: "installed, not declared"}}}),
 		finished(30, "mas", check.Result{State: check.OK, Summary: "2 declared, 1 installed", Items: []check.Item{
-			{ID: "mas:bear", Name: "bear", State: "missing", Quiet: "new", Detail: "needs an administrator's password", NeedsYou: true}}}),
+			{ID: "mas:bear", Name: "bear", State: "missing", Quiet: "new", Detail: "needs an administrator's password"}}}),
 	)
 	face, out, _ := applyAt(160, 64, time.Minute, events)
 	if log := strings.Join(logOf(screen(out.String()), 160), "\n"); !strings.Contains(log, "● App Store apps: 2 declared, 1 installed\n            │ bear · needs an administrator's password") {

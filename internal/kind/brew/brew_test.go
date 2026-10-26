@@ -866,7 +866,7 @@ func TestFormulaeBlockedByAnotherTapsName(t *testing.T) {
 	got, err := b.Blocked(context.Background(),
 		map[string]string{"php": "php", "jq": "jq"},
 		[]kind.Installed{{Name: "owner/tap/php", Explicit: true}, {Name: "oniguruma", Needed: true}})
-	want := map[string]kind.Block{"php": {Why: "another tap's owner/tap/php is installed under that name", NeedsYou: true}}
+	want := map[string]kind.Block{"php": {Why: "another tap's owner/tap/php is installed under that name"}}
 	if err != nil || !maps.Equal(got, want) {
 		t.Errorf("Blocked() = %v, %v; want %v", got, err, want)
 	}
@@ -884,7 +884,7 @@ func TestCasksBlockedWithoutAnAdministrator(t *testing.T) {
 		want  map[string]kind.Block
 	}{
 		{name: "not installing", admin: nil, want: map[string]kind.Block{}},
-		{name: "no password", admin: func(context.Context) bool { return false }, want: map[string]kind.Block{"zoom": {Why: "needs an administrator's password: run kit apply at a terminal", NeedsYou: true}}},
+		{name: "no password", admin: func(context.Context) bool { return false }, want: map[string]kind.Block{"zoom": {Why: "needs an administrator's password: run kit apply at a terminal"}}},
 		{name: "a password at hand", admin: func(context.Context) bool { return true }, want: map[string]kind.Block{}},
 	}
 	for _, tt := range tests {
@@ -984,7 +984,7 @@ func TestCasksCheckBeforeATapsAdded(t *testing.T) {
 	got := kind.Compare(context.Background(), h.Casks(), config.List{Kind: "cask", Entries: []config.Entry{{Name: "zoom"}, {Name: "owner/tap/tool"}}})
 	want := []check.Item{
 		{ID: "cask:owner/tap/tool", Name: "owner/tap/tool", State: kind.Missing, Action: kind.Install},
-		{ID: "cask:zoom", Name: "zoom", State: kind.Missing, Detail: "needs an administrator's password: run kit apply at a terminal", NeedsYou: true},
+		{ID: "cask:zoom", Name: "zoom", State: kind.Missing, Detail: "needs an administrator's password: run kit apply at a terminal"},
 	}
 	if got.State == check.Failed || !slices.Equal(got.Items, want) {
 		t.Errorf("check = %s %s, items %+v\nwant items %+v", got.State, got.Reason, got.Items, want)

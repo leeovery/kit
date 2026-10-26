@@ -6,13 +6,17 @@
   DONE  12
   ● This Mac  all 6 done
   ● Files and shell  all 2 done
-  ● Mac settings  all 3 done
+  │ ~/.zshrc · a file of its own, different from shared/home/.zshrc
+  ● Mac settings  all 4 done
+  │ ~/Code · added to Spotlight's list: it takes effect after a restart
   ● Secrets  fine
   ● Homebrew formulae  all 2 done
+  │ owner/private/fetcher · needs Secrets, which isn't there yet
   ● Homebrew casks  fine
   ● App Store apps  fine
   ● Developer tools  all 3 done
   ● Git  all 3 done
+  │ shared/home/.zshrc · +2 −1 lines
   ● Login items  5 declared, 2 installed
   ● Your steps  all 3 done
   ● Backups  all 3 done

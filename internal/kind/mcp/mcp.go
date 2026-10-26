@@ -258,7 +258,7 @@ func (m *MCP) Blocked(_ context.Context, missing map[string]string, _ []kind.Ins
 	blocked := make(map[string]kind.Block)
 	for name := range missing {
 		if s, ok := m.declared[name]; ok && s.Folder != "" && !exists(m.expand(s.Folder)) {
-			blocked[name] = kind.Block{Why: notHere}
+			blocked[name] = kind.Block{Why: notHere, Later: true}
 		}
 	}
 	return blocked, nil

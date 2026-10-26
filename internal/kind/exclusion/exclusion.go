@@ -271,7 +271,7 @@ func (x *Exclusions) Blocked(ctx context.Context, missing map[string]string, _ [
 	}
 	for name := range missing {
 		if x.asAdmin(name) {
-			blocked[name] = kind.Block{Why: "waiting for an administrator's password: kit apply at a terminal asks for it", NeedsYou: true}
+			blocked[name] = kind.Block{Why: "waiting for an administrator's password: kit apply at a terminal asks for it"}
 		}
 	}
 	return blocked, nil

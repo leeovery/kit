@@ -327,7 +327,7 @@ func (l *Login) Blocked(ctx context.Context, missing map[string]string, _ []kind
 	blocked := make(map[string]kind.Block)
 	for i, app := range apps {
 		if app.Path == "" {
-			blocked[names[i]] = kind.Block{Why: notInstalled}
+			blocked[names[i]] = kind.Block{Why: notInstalled, Later: true}
 		}
 	}
 	return blocked, nil

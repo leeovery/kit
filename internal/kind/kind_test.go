@@ -283,19 +283,19 @@ func TestStepFailingInstallSaysWhatItSaid(t *testing.T) {
 }
 
 // A thing blocked is missing, saying why, with nothing to do about it, and
-// marked as the person's to settle when its block is.
+// marked as still to come when its block says it is.
 func TestCompareAsksABlockerWhatCantBeInstalled(t *testing.T) {
 	k := &blockingKind{
 		fakeKind: &fakeKind{aliases: map[string]string{"php": "php", "zoom": "zoom", "tool": "tool"}},
 		reasons: map[string]kind.Block{
-			"php":  {Why: "another tap's owner/tap/php is installed under that name", NeedsYou: true},
-			"tool": {Why: "its app isn't installed"},
+			"php":  {Why: "another tap's owner/tap/php is installed under that name"},
+			"tool": {Why: "its app isn't installed", Later: true},
 		},
 	}
 	got := kind.Compare(context.Background(), k, declared("php", "tool", "zoom"))
 	want := []check.Item{
-		{ID: "brew:php", Name: "php", State: kind.Missing, Detail: "another tap's owner/tap/php is installed under that name", NeedsYou: true},
-		{ID: "brew:tool", Name: "tool", State: kind.Missing, Detail: "its app isn't installed"},
+		{ID: "brew:php", Name: "php", State: kind.Missing, Detail: "another tap's owner/tap/php is installed under that name"},
+		{ID: "brew:tool", Name: "tool", State: kind.Missing, Detail: "its app isn't installed", Later: true},
 		{ID: "brew:zoom", Name: "zoom", State: kind.Missing, Action: kind.Install},
 	}
 	if !slices.Equal(got.Items, want) {

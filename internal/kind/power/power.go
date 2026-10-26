@@ -251,7 +251,7 @@ func (p *Power) Blocked(ctx context.Context, missing map[string]string, _ []kind
 		return blocked, nil
 	}
 	for name := range missing {
-		blocked[name] = kind.Block{Why: "waiting for an administrator's password: kit apply at a terminal asks for it", NeedsYou: true}
+		blocked[name] = kind.Block{Why: "waiting for an administrator's password: kit apply at a terminal asks for it"}
 	}
 	return blocked, nil
 }

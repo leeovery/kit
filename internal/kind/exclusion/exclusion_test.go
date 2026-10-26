@@ -112,8 +112,8 @@ func TestExclusions(t *testing.T) {
 		t.Errorf("Unattended() = %q; want the glob's match alone", unattended)
 	}
 	x.SetAdmin(func(context.Context) bool { return false })
-	if blocked, _ := x.Blocked(t.Context(), map[string]string{"/Applications": "/Applications", missing[1]: missing[1]}, nil); len(blocked) != 1 || blocked["/Applications"].Why == "" || !blocked["/Applications"].NeedsYou {
-		t.Errorf("Blocked() = %+v; want the plain path held for the password alone, the person's to give", blocked)
+	if blocked, _ := x.Blocked(t.Context(), map[string]string{"/Applications": "/Applications", missing[1]: missing[1]}, nil); len(blocked) != 1 || blocked["/Applications"].Why == "" {
+		t.Errorf("Blocked() = %+v; want the plain path held for the password alone", blocked)
 	}
 	if err := x.Install(t.Context(), missing); err == nil || !strings.Contains(err.Error(), "/Applications: refused") {
 		t.Errorf("Install() = %v; want the one that failed named, the other done", err)

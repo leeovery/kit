@@ -600,7 +600,7 @@ func (f formulae) Blocked(_ context.Context, missing map[string]string, installe
 	for name, full := range missing {
 		for _, it := range installed {
 			if it.Name != full && lastPart(it.Name) == lastPart(full) {
-				blocked[name] = kind.Block{Why: "another tap's " + it.Name + " is installed under that name", NeedsYou: true}
+				blocked[name] = kind.Block{Why: "another tap's " + it.Name + " is installed under that name"}
 			}
 		}
 	}
@@ -705,7 +705,7 @@ func (c casks) Blocked(ctx context.Context, missing map[string]string, _ []kind.
 	}
 	for name, full := range missing {
 		if slices.Contains(needing, full) {
-			blocked[name] = kind.Block{Why: "needs an administrator's password: run kit apply at a terminal", NeedsYou: true}
+			blocked[name] = kind.Block{Why: "needs an administrator's password: run kit apply at a terminal"}
 		}
 	}
 	return blocked, nil
