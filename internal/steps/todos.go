@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/leeovery/kit/internal/check"
@@ -162,10 +163,10 @@ func finishing(ctx context.Context, t toDo) func() string {
 	return func() string { return c.Settle(context.WithoutCancel(ctx), own.item) }
 }
 
-// followUps are the to-dos t's step's check finds now that list hasn't,
-// as bringing back apps' settings can leave apps to open: none for one
-// that isn't kit's own.
-func followUps(ctx context.Context, t toDo, list []toDo) []toDo {
+// followUps are the to-dos t's step's check finds now, as bringing back
+// apps' settings can leave apps to open: none for one that isn't kit's
+// own. Those listed already, the list leaves (take).
+func followUps(ctx context.Context, t toDo) []toDo {
 	o, ok := t.(owned)
 	if !ok {
 		return nil
@@ -177,8 +178,7 @@ func followUps(ctx context.Context, t toDo, list []toDo) []toDo {
 	}
 	var more []toDo
 	for _, it := range res.Items {
-		listed := slices.ContainsFunc(list, func(t toDo) bool { return t.entry().ID == it.ID })
-		if it.ToDo != nil && !listed {
+		if it.ToDo != nil {
 			more = append(more, ownOf(ctx, step, it))
 		}
 	}
@@ -212,19 +212,21 @@ func (o ownToDo) answer(ctx context.Context, a hand.Answer, _ time.Time) (bool, 
 // workThrough raises list's to-dos for step one at a time, in order, each
 // till it's done or the person leaves it for later (hand.Skip), the next
 // coming up at once: the list emitted as each comes up, as each is done,
-// and once they're over. One left for later stays to do, unless what was
-// under way as they left it finds it done after all (later). Kit finishes what one done waited for (settling) and,
-// one of kit's own, looks for those its step's check finds now, to come
-// next (followUps), aside, the list emitted again as each comes in. The
-// person can stop where they are (hand.Stop), the list emitted stopped at
-// once, whatever's under way: what's left stays to do, the one up done if
-// it was done as they stopped, or settling, its work left under way to
-// finish and say whether it found it done, which the list is emitted again
-// to say, with the to-dos it leaves. Their answers come on one listener for
-// the whole list, so a Stop given between two to-dos is never lost, and
-// anything else given then, for a to-do done with, goes nowhere. Then the
-// steps the to-dos done held are checked again (recheckHeld). The run
-// stopped, the list's emitted stopped, and nothing more's done.
+// and once they're over. One left for later stays to do, settling while
+// what was under way as they left it finishes, which may find it done
+// after all (leave). Kit finishes what one done waited for (settling), one
+// finish at a time, and, one of kit's own, looks for those its step's
+// check finds now, to come next (followUps), aside, the list emitted again
+// as each comes in. The person can stop where they are (hand.Stop), the
+// list emitted stopped at once, whatever's under way: what's left stays to
+// do, the one up done if it was done as they stopped, or settling, its
+// work left under way to finish and say whether it found it done, which
+// the list is emitted again to say, with the to-dos it leaves. Their
+// answers come on one listener for the whole list, so a Stop given
+// between two to-dos is never lost, and anything else given then, for a
+// to-do done with, goes nowhere. Then the steps the to-dos done held are
+// checked again (recheckHeld). The run stopped, the list's emitted
+// stopped, and nothing more's done.
 func (r *Raise) workThrough(ctx context.Context, step string, list []toDo) error {
 	if len(list) == 0 {
 		return nil
@@ -237,9 +239,7 @@ func (r *Raise) workThrough(ctx context.Context, step string, list []toDo) error
 	}
 	settling, err := l.through(ctx, answers)
 	l.emit(-1)
-	if l.awaitLater(ctx) {
-		l.emit(-1)
-	}
+	l.awaitLater(ctx)
 	if err != nil {
 		return err
 	}
@@ -248,47 +248,57 @@ func (r *Raise) workThrough(ctx context.Context, step string, list []toDo) error
 			return err
 		}
 	}
-	recheckHeld(ctx, l.entries)
+	l.mu.Lock()
+	entries := slices.Clone(l.entries)
+	l.mu.Unlock()
+	recheckHeld(ctx, entries)
 	return nil
 }
 
 // toDos are the to-dos at the run's end as they're worked through: each as
-// raised, and as the list says it; and what the work of each left for
-// later was under way with as it was left (later).
+// raised, and as the list says it, and which is up, which what's left for
+// later changes as it comes (mu); one finish at a time (finishes), as two
+// restores of apps' settings would clash; and the work of those left for
+// later still under way (later).
 type toDos struct {
-	r       *Raise
-	step    string
+	r    *Raise
+	step string
+
+	mu      sync.Mutex
 	list    []toDo
 	entries []event.ToDo
-	later   []<-chan settled
+	up      int
+
+	finishes sync.Mutex
+	later    sync.WaitGroup
 }
 
 // through raises the to-dos in turn, till they're over or the person stops
 // there, returning what the one up then is still settling to, if anything.
 // One done, the list says so at once, its card down, settling or not.
 func (l *toDos) through(ctx context.Context, answers <-chan hand.Answer) (<-chan settled, error) {
-	for i := 0; i < len(l.list); i++ {
-		l.takeLater()
-		l.emit(i)
-		if stoppedMeanwhile(answers) {
+	for i := 0; ; i++ {
+		t, after, ok := l.next(i)
+		if !ok || stoppedMeanwhile(answers) {
 			return nil, nil
 		}
-		saw, late, err := l.r.up(ctx, l.step, l.list[i], seat{held: true, after: len(l.list) - 1 - i, answers: answers})
+		saw, late, err := l.r.up(ctx, l.step, t, seat{held: true, after: after, answers: answers})
 		skipped := errors.Is(err, errSkipped)
 		if err != nil && !skipped && !errors.Is(err, errStopHere) {
 			return nil, err
 		}
-		finish := finishing(ctx, l.list[i])
+		finish := l.finishing(ctx, t)
 		if skipped {
-			l.entries[i].Skipped = true
-			l.later = append(l.later, l.settle(ctx, i, late, finish))
+			l.leave(ctx, i, t, late, finish)
 			continue
 		}
+		l.mu.Lock()
 		if late == nil {
-			l.done(i, saw)
+			l.entries[i].Done, l.entries[i].Saw = true, saw
 		}
 		l.entries[i].Settling = late != nil || finish != nil
-		settling := l.settle(ctx, i, late, finish)
+		l.mu.Unlock()
+		settling := l.settle(ctx, i, t, late, finish)
 		if err != nil {
 			return settling, nil
 		}
@@ -297,18 +307,47 @@ func (l *toDos) through(ctx context.Context, answers <-chan hand.Answer) (<-chan
 			return settling, err
 		}
 	}
-	return nil, nil
+}
+
+// next is the to-do at i, up now, the list emitted so, and how many come
+// after it; none once they're over.
+func (l *toDos) next(i int) (t toDo, after int, ok bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if i >= len(l.list) {
+		return nil, 0, false
+	}
+	l.up = i
+	l.emitNow()
+	return l.list[i], len(l.list) - 1 - i, true
 }
 
 // emit says the list as it stands, the one at up up: -1 for none, once
 // they're over or the person stopped.
 func (l *toDos) emit(up int) {
-	l.r.Sink.Emit(event.ToDos{Time: l.r.Now(), Step: l.step, List: slices.Clone(l.entries), Up: up})
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.up = up
+	l.emitNow()
 }
 
-// done marks the to-do at i done, kit having seen saw.
-func (l *toDos) done(i int, saw string) {
-	l.entries[i].Done, l.entries[i].Saw = true, saw
+// emitNow says the list as it stands; l.mu held.
+func (l *toDos) emitNow() {
+	l.r.Sink.Emit(event.ToDos{Time: l.r.Now(), Step: l.step, List: slices.Clone(l.entries), Up: l.up})
+}
+
+// finishing is what finishes what t waited for (finishing), once the
+// finish under way, if any, is over.
+func (l *toDos) finishing(ctx context.Context, t toDo) func() string {
+	finish := finishing(ctx, t)
+	if finish == nil {
+		return nil
+	}
+	return func() string {
+		l.finishes.Lock()
+		defer l.finishes.Unlock()
+		return finish()
+	}
 }
 
 // settled is what the to-do at i came to, its card down: whether it's
@@ -321,13 +360,12 @@ type settled struct {
 	more []toDo
 }
 
-// settle is what the to-do at i comes to, aside, its card down, closed once
-// all's come: first, whether it's done, as it was, or, left with work under
-// way (late), as that finds it, and what finishing what it waited for said
-// (finish, if any); then, done, the to-dos its step's check finds that the
-// list hasn't, if any.
-func (l *toDos) settle(ctx context.Context, i int, late *work, finish func() string) <-chan settled {
-	list := slices.Clone(l.list)
+// settle is what the to-do t, at i, comes to, aside, its card down, closed
+// once all's come: first, whether it's done, as it was, or, left with work
+// under way (late), as that finds it, and what finishing what it waited for
+// said (finish, if any); then, done, the to-dos its step's check finds, if
+// any.
+func (l *toDos) settle(ctx context.Context, i int, t toDo, late *work, finish func() string) <-chan settled {
 	out := make(chan settled, 2)
 	l.r.aside.Go(func() {
 		defer close(out)
@@ -342,11 +380,34 @@ func (l *toDos) settle(ctx context.Context, i int, late *work, finish func() str
 		if !s.done {
 			return
 		}
-		if more := followUps(ctx, list[i], list); len(more) > 0 {
+		if more := followUps(ctx, t); len(more) > 0 {
 			out <- settled{i: i, done: true, more: more}
 		}
 	})
 	return out
+}
+
+// leave leaves the to-do t, at i, for later, its work under way (late): it
+// stays to do, skipped, settling till that's over; found done after all,
+// it's done, finished as one done is (finish), with the to-dos to follow
+// it at the list's end, the list having moved on; each change emitted as
+// it comes.
+func (l *toDos) leave(ctx context.Context, i int, t toDo, late *work, finish func() string) {
+	l.mu.Lock()
+	l.entries[i].Skipped, l.entries[i].Settling = true, true
+	l.mu.Unlock()
+	settling := l.settle(ctx, i, t, late, finish)
+	l.later.Add(1)
+	l.r.aside.Go(func() {
+		defer l.later.Done()
+		for s := range settling {
+			l.mu.Lock()
+			if l.take(s, true) {
+				l.emitNow()
+			}
+			l.mu.Unlock()
+		}
+	})
 }
 
 // between waits for what settling a to-do finds, the list, the one at up
@@ -361,9 +422,12 @@ func (l *toDos) between(ctx context.Context, up int, answers <-chan hand.Answer,
 			if !ok {
 				return false, nil
 			}
-			if l.take(s) {
-				l.emit(up)
+			l.mu.Lock()
+			if l.take(s, false) {
+				l.up = up
+				l.emitNow()
 			}
+			l.mu.Unlock()
 		case a := <-answers:
 			if a == hand.Stop {
 				return true, nil
@@ -374,62 +438,45 @@ func (l *toDos) between(ctx context.Context, up int, answers <-chan hand.Answer,
 	}
 }
 
-// take takes what settling a to-do found: settled, the list says how it
-// ended, done, with what kit saw when it has words, or not; the to-dos
-// found to follow it come next. It reports whether the list changed.
-func (l *toDos) take(s settled) bool {
+// take takes what settling a to-do found, l.mu held: settled, the list
+// says how it ended, done, with what kit saw when it has words, or not;
+// the to-dos found to follow it that the list hasn't come next, or at its
+// end (atEnd). It reports whether the list changed.
+func (l *toDos) take(s settled, atEnd bool) bool {
 	e := &l.entries[s.i]
-	changed := e.Settling || len(s.more) > 0
+	changed := e.Settling
 	e.Settling = false
 	if s.done && (!e.Done || s.saw != "" && s.saw != e.Saw) {
 		e.Done, e.Saw, e.Skipped, changed = true, cmp.Or(s.saw, e.Saw), false, true
 	}
-	for j, t := range s.more {
-		l.list = slices.Insert(l.list, s.i+1+j, t)
-		l.entries = slices.Insert(l.entries, s.i+1+j, t.entry())
+	at := s.i + 1
+	for _, t := range s.more {
+		if slices.ContainsFunc(l.entries, func(e event.ToDo) bool { return e.ID == t.entry().ID }) {
+			continue
+		}
+		if atEnd {
+			at = len(l.list)
+		}
+		l.list = slices.Insert(l.list, at, t)
+		l.entries = slices.Insert(l.entries, at, t.entry())
+		at, changed = at+1, true
 	}
 	return changed
 }
 
-// takeLater takes what the work of each to-do left for later has come to
-// so far, without waiting: found done after all, it's done, with what kit
-// saw. What its step's check finds to follow it comes with the next run,
-// the list having moved on. It reports whether the list changed.
-func (l *toDos) takeLater() bool {
-	changed := false
-	l.later = slices.DeleteFunc(l.later, func(later <-chan settled) bool {
-		for {
-			select {
-			case s, ok := <-later:
-				if !ok {
-					return true
-				}
-				s.more = nil
-				changed = l.take(s) || changed
-			default:
-				return false
-			}
-		}
-	})
-	return changed
-}
-
-// awaitLater waits for what the work of each to-do left for later comes
-// to, taking it (takeLater), and reports whether the list changed. The run
-// stopped, it waits no more.
-func (l *toDos) awaitLater(ctx context.Context) bool {
-	changed := false
-	for _, later := range l.later {
-		for s := range later {
-			s.more = nil
-			changed = l.take(s) || changed
-		}
-		if ctx.Err() != nil {
-			break
-		}
+// awaitLater waits for the work of each to-do left for later to come to
+// what it does, which takes it as it comes (leave). The run stopped, it
+// waits no more.
+func (l *toDos) awaitLater(ctx context.Context) {
+	over := make(chan struct{})
+	go func() {
+		l.later.Wait()
+		close(over)
+	}()
+	select {
+	case <-over:
+	case <-ctx.Done():
 	}
-	l.later = nil
-	return changed
 }
 
 // recheckHeld checks again the steps the to-dos done held, those they came

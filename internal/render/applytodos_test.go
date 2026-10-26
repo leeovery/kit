@@ -480,7 +480,7 @@ func skippedAt(up int, end bool) []event.Event {
 	for i := range up {
 		list[i].Done, list[i].Saw = true, toDoSaw[i]
 	}
-	list[up].Skipped = true
+	list[up].Skipped, list[up].Settling = true, true
 	next := toDoCards[up+1]
 	next.Time, next.Step, next.More = after(sec), "manual", len(list)-2-up
 	events = append(events, event.CardDown{Time: after(sec), Step: "manual", Item: toDoList[up].ID},
@@ -489,6 +489,7 @@ func skippedAt(up int, end bool) []event.Event {
 	if !end {
 		return events
 	}
+	list[up].Settling = false
 	list[up+1].Done, list[up+1].Saw = true, toDoSaw[up+1]
 	return append(events, event.CardDown{Time: after(sec + 30), Step: "manual", Item: toDoList[up+1].ID},
 		event.ToDos{Time: after(sec + 30), Step: "manual", List: slices.Clone(list), Up: -1},
@@ -531,6 +532,32 @@ func TestASkippedToDo(t *testing.T) {
 	record := screen(out2.String())
 	if !strings.Contains(record, "\n  TO DO  1 · kit apply brings them back\n  △ 1  Add a Time Machine disk\n") {
 		t.Errorf("the record is\n%s\nwant Time Machine's disk left to do", record)
+	}
+}
+
+// The to-dos over while one left for later still settles, the state line
+// says kit's finishing it; found done after all, the log says so, and kit's
+// carrying on.
+func TestTheToDosOverWhileOneLeftSettles(t *testing.T) {
+	events := skippedAt(4, false)
+	sec := int(events[len(events)-1].At().Sub(at)/time.Second) + 30
+	list := slices.Clone(events[len(events)-3].(event.ToDos).List)
+	list[5].Done, list[5].Saw = true, toDoSaw[5]
+	events = append(events, event.CardDown{Time: after(sec), Step: "manual", Item: toDoList[5].ID},
+		event.ToDos{Time: after(sec), Step: "manual", List: slices.Clone(list), Up: -1})
+	face, out, _ := applyAt(160, 64, since(events), events)
+	defer func() { _ = face.Close() }()
+	if state := lines(screen(out.String()))[3]; !strings.HasSuffix(state, "│  ◐ finishing Add a Time Machine disk") {
+		t.Errorf("over, one left for later settling, the state line is %q; want what kit's finishing", state)
+	}
+	list[4].Done, list[4].Skipped, list[4].Settling = true, false, false
+	face.Emit(event.ToDos{Time: after(sec + 5), Step: "manual", List: slices.Clone(list), Up: -1})
+	got := screen(out.String())
+	if log := strings.Join(logOf(got, 160), "\n"); !strings.Contains(log, "● Add a Time Machine disk: done") {
+		t.Errorf("the log is\n%s\nwant the one left for later done after all", log)
+	}
+	if state := lines(got)[3]; !strings.HasSuffix(state, "│  ◐ carrying on") {
+		t.Errorf("settled, the state line is %q; want kit carrying on", state)
 	}
 }
 

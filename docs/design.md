@@ -331,8 +331,12 @@ back). No to-do holds the run: every one has `s`, "skips it for now: kit apply b
 takes it down at once, whatever's under way, even a key being done, the next coming up; it
 stays to do, nothing written as though it were done, the list marking it skipped, the log
 saying so and how long it was up, the record counting it among what's left; a look or a key
-under way as it's pressed, left to finish, that finds it done after all, has it done, which the
-list says once it's in. Stopping there (`q`'s Stop, between two to-dos as well, as the one up is found done, and
+under way as it's pressed, left to finish, has it settling meanwhile, and, finding it done after
+all, has it done, which the list says the moment it's in, whatever's up then, the to-dos its
+step's check finds then coming at the list's end (raised this run if the list's still going,
+listed to do if it's over), and the run's end waiting for it, the state line saying what kit's
+finishing. Kit finishes what to-dos done waited for one at a time, as two restores of apps'
+settings would clash. Stopping there (`q`'s Stop, between two to-dos as well, as the one up is found done, and
 while kit does what a key says, taken even with another key waiting unread) leaves what's left
 to do at once, the card down and the list stopped, whatever kit's doing aside, and no look
 begins after, readying what the card says cut short (it can never find it done, and a store's
@@ -1035,7 +1039,8 @@ step failed, with the error; the run finishing, with its summary. Faces subscrib
   followed again, with a step by hand's card above it
   while it's up. In a terminal whose driver says it shows progress on its tab (Ghostty's),
   the run's progress is there too. At the run's end its to-dos take the screen (round 12): the state line counts
-  what's left and what's done, then says kit's carrying on once they're over; the left pane lists
+  what's left and what's done, then, once they're over, what kit's still finishing, or that it's
+  carrying on; the left pane lists
   them, To do and how many, each group's name muted, done ones ticked, the one up a pill, `q`
   stopping there at its foot; on the right the one up is a panel ruled off over the log, as a
   card is: its title and where it is in the list, why, its steps, then how it ends (kit watching,

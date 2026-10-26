@@ -226,6 +226,14 @@ func (p *Pretty) workThrough(e event.ToDos) {
 		id := cardID(e.Step, t.ID)
 		since, up := p.since[id]
 		switch {
+		case t.Skipped && skipSaid(before, t.ID):
+			continue
+		case t.Skipped:
+			text := t.Title + ": skipped"
+			if up {
+				text += ", after " + took(cmp.Or(p.downAt[id], at).Sub(since))
+			}
+			p.note(at, row, look.Mark(look.Skipped), look.Muted(text))
 		case t.Settling || endSaid(before, t.ID):
 			continue
 		case t.Done:
@@ -238,14 +246,6 @@ func (p *Pretty) workThrough(e event.ToDos) {
 				parts = append(parts, look.Muted(t.Saw))
 			}
 			p.note(at, row, look.Mark(look.Done), look.Says(parts...))
-		case t.Skipped && skipSaid(before, t.ID):
-			continue
-		case t.Skipped:
-			text := t.Title + ": skipped"
-			if up {
-				text += ", after " + took(cmp.Or(p.downAt[id], at).Sub(since))
-			}
-			p.note(at, row, look.Mark(look.Skipped), look.Muted(text))
 		case up && i != e.Up:
 			p.note(at, row, look.Mark(look.ToDo), look.White(t.Title+": not done"))
 		default:

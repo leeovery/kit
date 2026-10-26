@@ -26,10 +26,13 @@ var (
 )
 
 // toDoState is the state line while the to-dos are up: how many are left,
-// then how many are done once some are; once they're over, that kit's
-// carrying on.
+// then how many are done once some are; once they're over, what kit's
+// finishing, the first still settling, if any, else that it's carrying on.
 func (p *Pretty) toDoState() string {
 	if p.todos.Up < 0 {
+		if i := slices.IndexFunc(p.todos.List, func(t event.ToDo) bool { return t.Settling }); i >= 0 {
+			return look.Cyan("◐ finishing " + p.todos.List[i].Title)
+		}
 		return look.Cyan("◐ carrying on")
 	}
 	done := 0

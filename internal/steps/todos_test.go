@@ -1180,3 +1180,166 @@ func TestSkippingWhileKitLooks(t *testing.T) {
 		})
 	}
 }
+
+// scannerLine is a step by hand of the config's, which only the person can
+// say is done.
+var scannerLine = config.List{Entries: []config.Entry{{Name: "scanner", Value: `"Add the scanner"`, Scope: "laptop", Line: 3}}}
+
+// r on bringing back apps' settings, then s while that's under way: the
+// to-do's left for later, skipped and settling, the scanner's up at once.
+// The settings brought back while the scanner's up, the list says it's
+// done there and then, and the app it leaves to open comes at the list's
+// end, up once the scanner's done, this run.
+func TestSkippingAChoiceWhileItsKeyIsDone(t *testing.T) {
+	defer steps.SetManualPoll(time.Millisecond)()
+	c := newCard(t)
+	s := &settings{}
+	bringing, begun, through := held()
+	s.bringing = bringing
+	done := make(chan engine.Report, 1)
+	go func() {
+		done <- applied(t, c, atTheEnd(steps.Manual(c.fake, "/home/someone", c.state, scannerLine, c.raise), s.step()))
+	}()
+	c.upNow(t, "prefs:none")
+	c.answer(t, steps.ManualName, "r")
+	within(t, begun, "r was never done")
+	c.answer(t, steps.ManualName, hand.Skip)
+	c.upNow(t, "manual:scanner")
+	c.listUntil(t, func(l event.ToDos) bool { return l.List[0].Skipped && l.List[0].Settling && l.Up == 1 })
+	close(through)
+	l := c.listUntil(t, func(l event.ToDos) bool { return l.List[0].Done })
+	if ids := toDoIDs(l.List); l.Up != 1 || l.List[0].Skipped || l.List[0].Settling || !slices.Equal(ids, []string{"prefs:none", "manual:scanner", "prefs:open"}) {
+		t.Errorf("the settings brought back, the list said %+v, up %d; want it done there and then, the scanner up, the app to open at the end", l.List, l.Up)
+	}
+	c.answer(t, steps.ManualName, hand.Done)
+	c.upNow(t, "prefs:open")
+	s.set(func(s *settings) { s.opened = true })
+	over(t, done)
+	if todos := c.lastToDos(); len(todos) != 3 || !todos[0].Done || !todos[1].Done || !todos[2].Done {
+		t.Errorf("the to-dos ended %+v; want all three done", todos)
+	}
+}
+
+// toDoIDs are list's ids, in order.
+func toDoIDs(list []event.ToDo) []string {
+	ids := make([]string, len(list))
+	for i, t := range list {
+		ids[i] = t.ID
+	}
+	return ids
+}
+
+// The to-dos over while one left for later still has its work under way,
+// the list says so, emitted over with it settling, and the run's end waits
+// for it, the list saying how it ended: done, with the app it leaves to
+// open, not done, as nothing's left to raise it.
+func TestTheEndWaitsForWhatsLeftForLater(t *testing.T) {
+	defer steps.SetManualPoll(time.Millisecond)()
+	c := newCard(t)
+	s := &settings{}
+	bringing, begun, through := held()
+	s.bringing = bringing
+	done := make(chan engine.Report, 1)
+	go func() {
+		done <- applied(t, c, atTheEnd(steps.Manual(c.fake, "/home/someone", c.state, config.List{}, c.raise), s.step()))
+	}()
+	c.upNow(t, "prefs:none")
+	c.answer(t, steps.ManualName, "r")
+	within(t, begun, "r was never done")
+	c.answer(t, steps.ManualName, hand.Skip)
+	c.listUntil(t, func(l event.ToDos) bool { return l.Up == -1 && l.List[0].Skipped && l.List[0].Settling })
+	select {
+	case <-done:
+		t.Fatal("the run ended while what was left for later was under way")
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(through)
+	over(t, done)
+	if todos := c.lastToDos(); !slices.Equal(toDoIDs(todos), []string{"prefs:none", "prefs:open"}) || !todos[0].Done || todos[0].Settling || todos[1].Done {
+		t.Errorf("the to-dos ended %+v; want the settings done, the app to open still to do", todos)
+	}
+}
+
+// Kit finishes what one to-do done waited for one at a time: one left for
+// later found done while the next's finish is under way waits for it.
+func TestFinishesOneAtATime(t *testing.T) {
+	defer steps.SetManualPoll(time.Millisecond)()
+	c := newCard(t)
+	var mu sync.Mutex
+	answered := map[string]bool{}
+	var finished []string
+	inFlight, overlapped, firstIn := 0, false, false
+	answeringFirst, begun, through := held()
+	settlingSecond, settling, settled := held()
+	item := func(id string) check.Item {
+		return check.Item{ID: id, Name: id, State: steps.Problem, ToDo: &check.ToDo{Title: "Do " + id, First: true, Keys: []check.Key{{Key: "r", Does: "does it"}}}}
+	}
+	step := engine.Step{
+		Name: "prefs", Title: "App settings", Area: steps.AreaBackups,
+		Check: func(context.Context) check.Result {
+			mu.Lock()
+			defer mu.Unlock()
+			res := check.Result{State: check.OK, Summary: "fine"}
+			for _, id := range []string{"prefs:first", "prefs:second"} {
+				if !answered[id] {
+					res.State, res.Items = check.Attention, append(res.Items, item(id))
+				}
+			}
+			return res
+		},
+		Choice: &engine.Choice{
+			Answer: func(_ context.Context, it check.Item, _ string) (string, error) {
+				if it.ID == "prefs:first" {
+					answeringFirst()
+				}
+				mu.Lock()
+				defer mu.Unlock()
+				answered[it.ID] = true
+				return "", nil
+			},
+			Settle: func(_ context.Context, it check.Item) string {
+				mu.Lock()
+				inFlight++
+				overlapped = overlapped || inFlight > 1
+				firstIn = firstIn || it.ID == "prefs:first"
+				mu.Unlock()
+				if it.ID == "prefs:second" {
+					settlingSecond()
+				}
+				mu.Lock()
+				defer mu.Unlock()
+				inFlight--
+				finished = append(finished, it.ID)
+				return ""
+			},
+		},
+	}
+	done := make(chan engine.Report, 1)
+	go func() {
+		done <- applied(t, c, atTheEnd(steps.Manual(c.fake, "/home/someone", c.state, config.List{}, c.raise), step))
+	}()
+	c.upNow(t, "prefs:first")
+	c.answer(t, steps.ManualName, "r")
+	within(t, begun, "r was never done for the first")
+	c.answer(t, steps.ManualName, hand.Skip)
+	c.upNow(t, "prefs:second")
+	c.answer(t, steps.ManualName, "r")
+	within(t, settling, "the second's finish never started")
+	close(through)
+	for range 200 {
+		mu.Lock()
+		in := firstIn
+		mu.Unlock()
+		if in {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	close(settled)
+	over(t, done)
+	mu.Lock()
+	defer mu.Unlock()
+	if overlapped || !slices.Equal(finished, []string{"prefs:second", "prefs:first"}) {
+		t.Errorf("finished %q, overlapping %v; want the second's, then the first's, never both at once", finished, overlapped)
+	}
+}
