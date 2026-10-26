@@ -92,3 +92,42 @@ func TestANotificationSaysWhy(t *testing.T) {
 		})
 	}
 }
+
+// A sentence ends at a full stop, question or exclamation mark and a space,
+// never at an abbreviation's.
+func TestFirstSentence(t *testing.T) {
+	for text, want := range map[string]string{
+		"Its driver needs allowing. Then Input Monitoring.":           "Its driver needs allowing.",
+		"Some apps, e.g. Moom, need it. Others don't.":                "Some apps, e.g. Moom, need it.",
+		"One store, i.e. the App Store, signs in. Then kit installs.": "One store, i.e. the App Store, signs in.",
+		"Is it plugged in? Plug it in.":                               "Is it plugged in?",
+		"No stop at all":                                              "No stop at all",
+	} {
+		if got := firstSentence(text); got != want {
+			t.Errorf("firstSentence(%q) = %q, want %q", text, got, want)
+		}
+	}
+}
+
+// Cut, text fits in n characters with its ellipsis, after a whole word: a
+// word that ends where the cut falls is kept.
+func TestCutAtWord(t *testing.T) {
+	for _, tt := range []struct {
+		text string
+		n    int
+		want string
+	}{
+		{"short", 10, "short"},
+		{"exactly ten", 11, "exactly ten"},
+		{"one two three", 8, "one two…"},
+		{"one two three", 9, "one two…"},
+		{"one two three", 7, "one…"},
+		{"one, two three", 6, "one…"},
+		{"abcdefghij", 5, "abcd…"},
+	} {
+		got := cutAtWord(tt.text, tt.n)
+		if got != tt.want || utf8.RuneCountInString(got) > tt.n {
+			t.Errorf("cutAtWord(%q, %d) = %q, want %q, at most %d characters", tt.text, tt.n, got, tt.want, tt.n)
+		}
+	}
+}

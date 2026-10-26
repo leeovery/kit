@@ -545,16 +545,29 @@ func Wrap(text string, width int) []string {
 	return out
 }
 
-// linkWord is a word that's a link, what's around it apart: a URL, or a
-// host, lower case, with a dot and letters after it, then a path, as in
-// github.com/owner/tool/releases. A version, a path on the Mac, an app's
-// bundle and a command aren't.
+// linkWord is a word that may be a link, what's around it apart: a URL, or
+// a host, lower case, then a path, as in github.com/owner/tool/releases.
+// A version, a path on the Mac and a command aren't; a host's is one only
+// as webHost says.
 var linkWord = regexp.MustCompile(`^([("']*)(https?://\S+?|(?:[a-z0-9-]+\.)+[a-z]{2,}/\S*?)([.,;:!?)"']*)$`)
+
+// webTLDs are the last parts of the hosts a bare host and path is a link
+// to: the web's common ones, never app, whose name an app's bundle has.
+var webTLDs = map[string]bool{"com": true, "org": true, "net": true, "io": true, "dev": true, "co": true, "uk": true, "me": true, "sh": true, "ai": true, "so": true, "edu": true, "gov": true, "info": true}
+
+// webHost is whether target, a bare host and path, is on the web: its
+// host's last part one of webTLDs, its first not, as a preferences domain
+// written backwards, com.apple.dock, has it.
+func webHost(target string) bool {
+	host, _, _ := strings.Cut(target, "/")
+	parts := strings.Split(host, ".")
+	return webTLDs[parts[len(parts)-1]] && !webTLDs[parts[0]]
+}
 
 // Linked is text, a line of it, each link in it one the terminal opens
 // when it's clicked (OSC 8), shown as written, a bare host and path opened
-// over https. A link takes no room: what measures and cuts lines looks
-// past it.
+// over https, a closing bracket its own when it opens one. A link takes no
+// room: what measures and cuts lines looks past it.
 func Linked(text string) string {
 	words := strings.Split(text, " ")
 	for i, w := range words {
@@ -562,11 +575,18 @@ func Linked(text string) string {
 		if m == nil {
 			continue
 		}
-		target := m[2]
+		shown, after := m[2], m[3]
+		for strings.HasPrefix(after, ")") && strings.Count(shown, "(") > strings.Count(shown, ")") {
+			shown, after = shown+")", after[1:]
+		}
+		target := shown
 		if !strings.Contains(target, "://") {
+			if !webHost(target) {
+				continue
+			}
 			target = "https://" + target
 		}
-		words[i] = m[1] + lipgloss.NewStyle().Hyperlink(target).Render(m[2]) + m[3]
+		words[i] = m[1] + lipgloss.NewStyle().Hyperlink(target).Render(shown) + after
 	}
 	return strings.Join(words, " ")
 }
@@ -611,13 +631,16 @@ func Cut(s string, w int) string { return ansi.Truncate(s, w, "…") }
 
 // CutKeeping is s, then kept after a dot, cut at w: s cut, so kept stays
 // whole, as how far a thing at work has got after what it's doing. Without
-// kept, it's s cut.
+// kept, it's s cut; with no room for any of s, it's kept, cut.
 func CutKeeping(s, kept string, w int) string {
 	if kept == "" {
 		return Cut(s, w)
 	}
-	kept = dot + kept
-	return Cut(s, max(w-ansi.StringWidth(kept), 0)) + kept
+	room := w - ansi.StringWidth(dot+kept)
+	if room <= 0 {
+		return Cut(kept, w)
+	}
+	return Cut(s, room) + dot + kept
 }
 
 // Colours are kit's colours, as the boot's arrival in the terminal turns

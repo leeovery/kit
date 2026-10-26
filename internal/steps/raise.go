@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/engine"
@@ -556,27 +557,32 @@ func noticeOf(card event.NeedsYou) string {
 // exclamation mark, then a space.
 var sentenceEnd = regexp.MustCompile(`[.?!]\s`)
 
-// firstSentence is text's first sentence, its full stop and all.
+// firstSentence is text's first sentence, its full stop and all: an
+// abbreviation's stops, as e.g.'s, end none.
 func firstSentence(text string) string {
 	text = strings.TrimSpace(text)
-	if at := sentenceEnd.FindStringIndex(text); at != nil {
-		return text[:at[0]+1]
+	for _, at := range sentenceEnd.FindAllStringIndex(text, -1) {
+		if sentence := text[:at[0]+1]; !strings.HasSuffix(sentence, "e.g.") && !strings.HasSuffix(sentence, "i.e.") {
+			return sentence
+		}
 	}
 	return text
 }
 
 // cutAtWord is text, or, longer than n characters, as much of it as fits
-// in n, cut after a whole word, and an ellipsis.
+// in n with an ellipsis, cut after a whole word.
 func cutAtWord(text string, n int) string {
 	runes := []rune(text)
 	if len(runes) <= n {
 		return text
 	}
-	cut := string(runes[:n])
-	if at := strings.LastIndex(cut, " "); at > 0 {
-		cut = cut[:at]
+	cut := string(runes[:max(n-1, 0)])
+	if !unicode.IsSpace(runes[len([]rune(cut))]) {
+		if at := strings.LastIndex(cut, " "); at > 0 {
+			cut = cut[:at]
+		}
 	}
-	return strings.TrimRight(cut, ",;:") + "…"
+	return strings.TrimRight(cut, " ,;:") + "…"
 }
 
 // hasLocked reports whether it's pl's turn. mu is held.

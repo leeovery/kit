@@ -87,6 +87,11 @@ func TestLinked(t *testing.T) {
 		{"Spaceman.app/Contents holds it", "", ""},
 		{"then: kit prefs restore", "", ""},
 		{"Sign in at op://vault/item", "", ""},
+		{"Set com.apple.dock/autohide to true", "", ""},
+		{"Remove spaceman.app/contents first", "", ""},
+		{"See https://en.example.org/wiki/Spaceman_(app) for more", "https://en.example.org/wiki/Spaceman_(app)", "https://en.example.org/wiki/Spaceman_(app)"},
+		{"(see https://example.com/help)", "https://example.com/help", "https://example.com/help"},
+		{"Get it from example.dev/download.", "https://example.dev/download", "example.dev/download"},
 	} {
 		got := look.Linked(tt.text)
 		if w := ansi.StringWidth(got); w != len(tt.text) {
@@ -458,5 +463,27 @@ func TestBootScanner(t *testing.T) {
 	want := []string{"[*   ]", "[ *  ]", "[  * ]", "[   *]", "[  * ]", "[ *  ]", "[*   ]"}
 	if !slices.Equal(got, want) {
 		t.Errorf("scanner %q; want %q", got, want)
+	}
+}
+
+// CutKeeping cuts what comes first, so what's kept stays whole after its
+// dot; too narrow even for that, it's what's kept, cut, and never wider
+// than asked.
+func TestCutKeeping(t *testing.T) {
+	for _, tt := range []struct {
+		w    int
+		want string
+	}{
+		{40, "installing ffmpeg · 38 of 129"},
+		{20, "install… · 38 of 129"},
+		{13, "… · 38 of 129"},
+		{12, "38 of 129"},
+		{9, "38 of 129"},
+		{5, "38 o…"},
+	} {
+		got := ansi.Strip(look.CutKeeping("installing ffmpeg", "38 of 129", tt.w))
+		if got != tt.want || ansi.StringWidth(got) > tt.w {
+			t.Errorf("CutKeeping at %d = %q, want %q, at most %d wide", tt.w, got, tt.want, tt.w)
+		}
 	}
 }
