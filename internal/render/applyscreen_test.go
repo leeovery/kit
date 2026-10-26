@@ -281,6 +281,32 @@ func appliedRun() []event.Event {
 	return append(events, event.RunFinished{Time: after(1471), Duration: 24*time.Minute + 31*time.Second, Counts: map[check.State]int{check.OK: 27, check.Attention: 2, check.Failed: 1}})
 }
 
+// waitingRun is a run all well whose rows have things waiting that don't
+// need the person: Claude's servers for projects whose folders aren't
+// there yet, and login items for apps not installed.
+func waitingRun() []event.Event {
+	all := append(slices.Clone(newMac), event.Step{Name: "claude-mcp", Title: "Claude MCP", Area: "Drift", Row: "Developer tools"})
+	waiting := func(step, detail string, names ...string) []check.Item {
+		var items []check.Item
+		for _, n := range names {
+			items = append(items, check.Item{ID: step + ":" + n, Name: n, State: "missing", Quiet: "new", Detail: detail})
+		}
+		return items
+	}
+	events := []event.Event{event.RunStarted{Time: at, Command: "apply", Machine: "laptop", Steps: all}}
+	for i, s := range all {
+		res := check.Result{State: check.OK, Summary: "fine"}
+		switch s.Name {
+		case "claude-mcp":
+			res.Summary, res.Items = "19 declared, 8 installed", waiting("claude-mcp", "no project folder yet", numbered("~/Code/site", 11)...)
+		case "login-item":
+			res.Summary, res.Items = "5 declared, 2 installed", waiting("login-item", "not installed: install the app, or open the app it comes with", "Tool", "Monitor", "Clipper")
+		}
+		events = append(events, finished(10+i, s.Name, res))
+	}
+	return append(events, event.RunFinished{Time: after(60), Duration: time.Minute, Counts: map[check.State]int{check.OK: len(all)}})
+}
+
 // stoppedRun is waitingOnYou stopped by ctrl+c: what was running cut off,
 // what hadn't started never run, both failing as the engine has them.
 func stoppedRun() []event.Event {
@@ -1343,13 +1369,14 @@ func TestApplyingCardInASmallWindow(t *testing.T) {
 
 // When the run ends, the screen goes and its record is left in its place,
 // kept to column 80: the wordmark, with what ran, the bar and the tally
-// beside it; then what's to do, what failed, and the rows done. A run
-// stopped says so, and where to carry on; nothing's red but what failed.
+// beside it; then what's to do, what failed, and the rows done, a line
+// each, nothing of theirs that waits under them. A run stopped says so,
+// and where to carry on; nothing's red but what failed.
 func TestApplyingLeavesItsRecord(t *testing.T) {
 	for _, tt := range []struct {
 		golden string
 		events func() []event.Event
-	}{{"apply-record.golden", appliedRun}, {"apply-record-stopped.golden", stoppedRun}} {
+	}{{"apply-record.golden", appliedRun}, {"apply-record-stopped.golden", stoppedRun}, {"apply-record-waiting.golden", waitingRun}} {
 		t.Run(tt.golden, func(t *testing.T) {
 			face, out, kb := applyAt(160, 64, time.Minute, tt.events())
 			ended := kb.isRaw()
@@ -1418,8 +1445,8 @@ func TestApplyingRecordSections(t *testing.T) {
 }
 
 // The record names a step by its row alone when the step's called as its
-// row is, and a row done keeps under it what of its steps is still waiting,
-// a password say, in the log too.
+// row is; a row done is its line alone, what of its steps is still
+// waiting, a password say, in the log.
 func TestApplyingRecordKeepsWhatWaits(t *testing.T) {
 	events := rowsRun(newMac[4:13],
 		fine(10, "homebrew", "4.6.1"),
@@ -1439,11 +1466,14 @@ func TestApplyingRecordKeepsWhatWaits(t *testing.T) {
 	record := screen(out.String())
 	for _, want := range []string{
 		"\n  NEEDS YOU  1\n  ▲ Homebrew formulae  3 declared, all installed\n  │ ffmpeg · ",
-		"\n  ● App Store apps  2 declared, 1 installed\n  │ bear · needs an administrator's password\n",
+		"\n  ● App Store apps  2 declared, 1 installed\n",
 	} {
 		if !strings.Contains(record, want) {
 			t.Errorf("the record is\n%s\nwant it to hold\n%s", record, want)
 		}
+	}
+	if strings.Contains(record, "bear") {
+		t.Errorf("the record is\n%s\nwant the App Store's row alone", record)
 	}
 }
 

@@ -511,8 +511,8 @@ func (p *Pretty) notRunSection() []string {
 }
 
 // doneSection is the rows whose steps were all well, a line each, in
-// order, saying what they did; what of theirs is still waiting, for a
-// password say, under it.
+// order, saying what they did, and nothing more: what of theirs still
+// waits needs no one now (what does is to do), and kit status says it.
 func (p *Pretty) doneSection() []string {
 	done := p.rowsDone()
 	if len(done) == 0 {
@@ -520,11 +520,7 @@ func (p *Pretty) doneSection() []string {
 	}
 	out := []string{look.Header("Done", fmt.Sprint(len(done)))}
 	for _, r := range done {
-		row := look.Row{State: look.Done, Name: r.name, Says: p.doneSays(r)}
-		for _, s := range r.steps {
-			row.Under = append(row.Under, p.workRow(p.results[s.Name], s.Part).Under...)
-		}
-		out = append(out, look.Timeline("  ", p.width, row)...)
+		out = append(out, look.Timeline("  ", p.width, look.Row{State: look.Done, Name: r.name, Says: p.doneSays(r)})...)
 	}
 	return out
 }
