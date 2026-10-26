@@ -309,7 +309,8 @@ func (p *Pretty) noteDown(c event.NeedsYou, at time.Time, finished *event.StepFi
 }
 
 // logBody is the log's lines, w wide, row's alone, or every one for "":
-// the run's, oldest first, then what's under way.
+// the run's, oldest first, then what's under way; then, of a row's alone,
+// what's still to run of it (stillToRun).
 func (p *Pretty) logBody(row string, w int) []string {
 	var out []string
 	for _, l := range p.log {
@@ -317,7 +318,75 @@ func (p *Pretty) logBody(row string, w int) []string {
 			out = append(out, l.lines...)
 		}
 	}
-	return append(out, p.underWay(row, w)...)
+	out = append(out, p.underWay(row, w)...)
+	if row == "" {
+		return out
+	}
+	return append(out, p.stillToRun(row, w)...)
+}
+
+// stillToRun are the steps of the row called row that aren't at work and
+// haven't finished, a line each, w wide: the time's column blank, the
+// waiting mark, the step's title, then what it waits for, as its row says
+// it; and, for a command it waits for that kit can tell where from, from
+// where (sourceSays). A step at work has its lines in the log in its place.
+func (p *Pretty) stillToRun(row string, w int) []string {
+	var out []string
+	for _, r := range p.shownRows() {
+		if r.name != row {
+			continue
+		}
+		for _, s := range r.steps {
+			run, running := p.runningOf(s.Name)
+			if _, done := p.results[s.Name]; done || running && p.atWork(run) {
+				continue
+			}
+			says := append([]string{look.Muted(p.waitWords(s))}, p.sourceSays(s)...)
+			l := "  " + strings.Repeat(" ", len(clockFormat)) + "  " + look.Mark(look.Queued) + " " + look.White(p.title(s.Name)) + "  " + look.Says(says...)
+			out = append(out, look.Cut(l, w))
+		}
+	}
+	return out
+}
+
+// sourceSays is where the command s waits for comes from, when kit can tell
+// (event.Step's Sources): its line's note, if it has one, and the step its
+// line is in; then how that step stands (standsAs). Nothing for anything
+// else s waits for.
+func (p *Pretty) sourceSays(s event.Step) []string {
+	r, _ := p.runningOf(s.Name)
+	thing, waiting := strings.CutPrefix(r.doing, "waiting for ")
+	i := slices.IndexFunc(s.Sources, func(src event.Source) bool { return src.Thing == thing })
+	if !waiting || i < 0 {
+		return nil
+	}
+	src := s.Sources[i]
+	from := "from " + p.title(src.Step)
+	if src.Note != "" {
+		from = src.Note + ", " + from
+	}
+	says := []string{look.Muted(from)}
+	if stands := p.standsAs(src.Step); stands != "" {
+		says = append(says, stands)
+	}
+	return says
+}
+
+// standsAs is how the step called name stands, for a step waiting for what
+// it puts in place: at work, as far as it's got, or, not counting, what
+// it's doing; else what it waits for itself; nothing once it's finished.
+func (p *Pretty) standsAs(name string) string {
+	r, running := p.runningOf(name)
+	_, done := p.results[name]
+	switch {
+	case done:
+		return ""
+	case running && p.atWork(r) && r.of > 0:
+		return look.White(fmt.Sprintf("%d of %d", r.done, r.of))
+	case running && p.atWork(r):
+		return look.Cyan(r.doing)
+	}
+	return look.Muted(p.waitWords(p.step(name)))
 }
 
 // underWay is what's under way, at the log's foot, w wide, row's alone, or

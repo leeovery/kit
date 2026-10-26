@@ -91,6 +91,10 @@ type Step struct {
 	// starts, as a kind's lines declared on: its share of the run's bar.
 	// None counts as one.
 	Weight int
+	// Sources are where the things among its Waits that no step in
+	// particular puts in place come from, when kit can tell: what a face
+	// says of them, which orders nothing.
+	Sources []event.Source
 	// AlwaysApply has a run that applies apply it however its check finds
 	// it, as the steps by hand at the run's end are, which raise what the
 	// rest of the run left the person to do as well as their own lines.
@@ -506,7 +510,7 @@ func (s Step) info() event.Step {
 			waits = append(waits, w.Step)
 		}
 	}
-	return event.Step{Name: s.Name, Title: s.title(), Area: s.Area, Part: s.Part, Row: s.Row, Tool: s.Tool, Waiting: s.Waiting, Waits: waits, ByHand: s.ByHand, Did: s.Did, Weight: s.Weight}
+	return event.Step{Name: s.Name, Title: s.title(), Area: s.Area, Part: s.Part, Row: s.Row, Tool: s.Tool, Waiting: s.Waiting, Waits: waits, ByHand: s.ByHand, Did: s.Did, Weight: s.Weight, Sources: s.Sources}
 }
 
 func (p *Pipeline) run(ctx context.Context, sink event.Sink, opts Options, apply bool) (Report, error) {

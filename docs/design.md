@@ -1028,7 +1028,12 @@ step failed, with the error; the run finishing, with its summary. Faces subscrib
   the turn is watched (Homebrew's update, an install, an uninstall, a tap); on the right the
   log,
   every line of the run with its time, or a row's lines alone once it's chosen (tab or a
-  click; esc for all), scrolled back and followed again, with a step by hand's card above it
+  click; esc for all), and after them a line for each of its steps still to run, live, the
+  time's column blank: the waiting mark, its title, what it waits for as the row says, and,
+  for a command a line in the run's lists names (in full or by its last part, the way the face
+  can tell where it comes from, never a promise: see A kind's program), that line's note, its
+  step, and how far that has got or what it waits for itself; a step's line gives way to its
+  log's once it starts. It's scrolled back and followed again, with a step by hand's card above it
   while it's up. In a terminal whose driver says it shows progress on its tab (Ghostty's),
   the run's progress is there too. At the run's end its to-dos take the screen (round 12): the state line counts
   what's left and what's done, then says kit's carrying on once they're over; the left pane lists

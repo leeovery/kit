@@ -634,6 +634,111 @@ func TestApplyingCardsLinkTheirLinks(t *testing.T) {
 	}
 }
 
+// withSteps is events, the run started with steps in place of its own.
+func withSteps(events []event.Event, steps []event.Step) []event.Event {
+	out := slices.Clone(events)
+	for i, e := range out {
+		if start, ok := e.(event.RunStarted); ok {
+			start.Steps = steps
+			out[i] = start
+		}
+	}
+	return out
+}
+
+// secretsWaiting is sixMinutesIn, the secrets waiting for op, which the
+// casks put in place, as kit tells by a cask named as it is, its note
+// saying what it is; the casks at casks of 44.
+func secretsWaiting(casks int) []event.Event {
+	steps := slices.Clone(newMac)
+	for i, s := range steps {
+		if s.Name == "secret" {
+			steps[i].Sources = []event.Source{{Thing: "op", Step: "cask", Note: "1Password's CLI"}}
+		}
+	}
+	return append(withSteps(sixMinutesIn(), steps),
+		event.StepStarted{Time: after(355), Step: "secret", Doing: "waiting for op"},
+		event.Doing{Time: after(356), Step: "cask", Says: "installing slack", Done: casks, Of: 44})
+}
+
+// toolsWaiting is sixMinutesIn with the developer tools as a new Mac has
+// them: GitHub's extensions and Claude's servers done; Composer's packages
+// waiting for composer, which the formulae put in place, they waiting for
+// the casks; npm's not started, waiting for the formulae.
+func toolsWaiting() []event.Event {
+	steps := slices.Clone(newMac)
+	for i, s := range steps {
+		if s.Name == "composer" {
+			steps[i].Sources = []event.Source{{Thing: "composer", Step: "brew"}}
+		}
+	}
+	steps = append(steps, event.Step{Name: "gh-extension", Title: "GitHub extensions", Area: "Drift", Row: "Developer tools"},
+		event.Step{Name: "claude-mcp", Title: "Claude MCP", Area: "Drift", Row: "Developer tools"})
+	return append(withSteps(sixMinutesIn(), steps),
+		fine(352, "gh-extension", "installed github/gh-stack"),
+		fine(353, "claude-mcp", "19 declared, 8 installed"),
+		event.Doing{Time: after(354), Step: "brew", Says: "waiting for Homebrew casks"},
+		event.StepStarted{Time: after(355), Step: "composer", Doing: "waiting for composer"})
+}
+
+// A row chosen whose steps haven't started, or wait, has under its log a
+// line for each still to run: the time's column blank, the waiting mark,
+// its title, what it waits for, as the row says; for a command kit can
+// tell comes from another step's line, that line's note, the step, and how
+// far it's got, or what it waits for itself. Drawn at the sizes round 10
+// drew and the least.
+func TestApplyingRowStillToRun(t *testing.T) {
+	for _, tt := range []struct {
+		name, row string
+		events    func() []event.Event
+	}{
+		{"secrets", "Secrets", func() []event.Event { return secretsWaiting(13) }},
+		{"tools", "Developer tools", toolsWaiting},
+	} {
+		for _, size := range [][2]int{{160, 64}, {100, 30}} {
+			name := fmt.Sprintf("apply-screen-waiting-%s-%dx%d.golden", tt.name, size[0], size[1])
+			t.Run(name, func(t *testing.T) {
+				face, out, kb := applyAt(size[0], size[1], 6*time.Minute, tt.events())
+				defer func() { _ = face.Close() }()
+				kb.press(t, clickRow(tt.row)(screen(out.String()), size[0])...)
+				got := screen(out.String())
+				golden(t, name, got+"\n")
+				for i, l := range lines(got) {
+					if w := ansi.StringWidth(l); w > size[0] {
+						t.Errorf("line %d is %d wide, wider than the window, %d", i, w, size[0])
+					}
+				}
+			})
+		}
+	}
+}
+
+// What a step still to run says moves on as what it waits for does: the
+// casks counting on, its line counts with them; with nothing to tell where
+// its command comes from, it says what it waits for alone; once it starts,
+// its line gives way to its log's.
+func TestApplyingStillToRunMovesOn(t *testing.T) {
+	waiting := func(events []event.Event) []string {
+		face, out, kb := applyAt(160, 64, 6*time.Minute, events)
+		defer func() { _ = face.Close() }()
+		kb.press(t, clickRow("Secrets")(screen(out.String()), 160)...)
+		return logOf(screen(out.String()), 160)
+	}
+	line := "            ○ Secrets  waits for op · 1Password's CLI, from Homebrew casks · "
+	if log := waiting(secretsWaiting(14)); log[len(log)-1] != line+"14 of 44" {
+		t.Errorf("the log ends %q; want %q", log[len(log)-1], line+"14 of 44")
+	}
+	unknown := withSteps(secretsWaiting(14), newMac)
+	if log := waiting(unknown); log[len(log)-1] != "            ○ Secrets  waits for op" {
+		t.Errorf("not knowing where op comes from, the log ends %q; want what it waits for alone", log[len(log)-1])
+	}
+	started := append(secretsWaiting(14), event.StepStarted{Time: after(357), Step: "secret", Doing: "applying"})
+	log := waiting(started)
+	if strings.Contains(strings.Join(log, "\n"), "○ Secrets") || !strings.Contains(log[len(log)-1], "◐ Applying Secrets") {
+		t.Errorf("started, the log is\n%s\nwant its line under way in place of what it waited for", strings.Join(log, "\n"))
+	}
+}
+
 // A row at work whose words won't fit has what it's doing cut, never how
 // far it's got, on the left and at the log's foot alike, chosen or not.
 func TestApplyingKeepsTheCountWhole(t *testing.T) {

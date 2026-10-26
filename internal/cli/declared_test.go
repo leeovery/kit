@@ -2,11 +2,13 @@ package cli_test
 
 import (
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/logs"
 )
 
@@ -259,6 +261,41 @@ func TestApplyWeighsKindsByTheirLines(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A step waiting for a command names where it comes from when kit can tell:
+// a line in the run's lists named as it, in full or by the last part of its
+// name, with the line's note: the one after it, or else those above it. A
+// command no line names has none. Only a run applying waits.
+func TestAWaitedCommandNamesTheLineItComesFrom(t *testing.T) {
+	w := laptopWorld(t)
+	w.writeSection(t, "laptop", "homebrew formulae", "go\n# PHP\n# and its tools\nowner/tap/composer\n# Node\nowner/tap/npm   # the packages manager\n")
+	w.writeSection(t, "laptop", "composer packages", "laravel/valet\n")
+	w.writeSection(t, "laptop", "npm packages", "intelephense\n")
+	// All installed, the run has nothing to do.
+	installed := "go\njq\nowner/tap/tool\nowner/tap/composer\nowner/tap/npm\n"
+	w.fake.On("brew", "tap").Prints("owner/tap\n")
+	w.fake.On("brew", "list", "--formula", "--full-name", "-1").Prints(installed)
+	w.fake.On("brew", "leaves").Prints(installed)
+	w.fake.On("brew", "leaves", "--installed-on-request").Prints(installed)
+	w.fake.On("composer", "global", "show", "--direct", "--format=json").Prints(`{"installed": [{"name": "laravel/valet"}]}`)
+	w.fake.On("npm", "ls", "--global", "--depth=0", "--json").Prints(`{"dependencies": {"intelephense": {}}}`)
+	w.run(t, "apply")
+	got := map[string][]event.Source{}
+	for _, s := range runStarted(t, w).Steps {
+		got[s.Name] = s.Sources
+	}
+	for name, want := range map[string][]event.Source{
+		"composer": {{Thing: "composer", Step: "brew", Note: "PHP and its tools"}},
+		"npm":      {{Thing: "npm", Step: "brew", Note: "the packages manager"}},
+	} {
+		if !reflect.DeepEqual(got[name], want) {
+			t.Errorf("%s's sources are %v; want %v", name, got[name], want)
+		}
+	}
+	if got["brew"] != nil {
+		t.Errorf("the formulae's sources are %v; want none: no line names brew", got["brew"])
 	}
 }
 
