@@ -253,9 +253,23 @@ func (p *Prefs) sandboxed(ctx context.Context, app string) bool {
 }
 
 // appName is the app at app by the name its bundle has, as the Finder shows
-// it.
+// it; a helper inside another app named no more than its bundle id, as
+// Fantastical's is, by the app it's in: Fantastical's helper.
 func appName(app string) string {
-	return strings.TrimSuffix(filepath.Base(app), ".app")
+	name := strings.TrimSuffix(filepath.Base(app), ".app")
+	if outer, ok := insideOf(app); ok && name == apps.BundleID(app) {
+		return appName(outer) + "'s helper"
+	}
+	return name
+}
+
+// insideOf is the app the helper app at app is inside, if it's in one.
+func insideOf(app string) (string, bool) {
+	i := strings.LastIndex(app, ".app/Contents/")
+	if i < 0 {
+		return "", false
+	}
+	return app[:i+len(".app")], true
 }
 
 // restoreDomain replaces a domain's live settings (target's, when testing

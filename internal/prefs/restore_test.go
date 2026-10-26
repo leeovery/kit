@@ -305,6 +305,40 @@ func TestAnAppHeldToOpenThatIsntSandboxedIsRestored(t *testing.T) {
 	}
 }
 
+// A helper inside an app, named no more than its bundle id, as some are,
+// team prefix and all, is named by the app it's in, as the run's log and
+// its to-do say it; one with a name of its own keeps it.
+func TestAHelperIsNamedByItsApp(t *testing.T) {
+	for _, tt := range []struct {
+		helper, want string
+	}{
+		{"ABCDE12345.com.example.cal.helper", "Calendar Pro's helper"},
+		{"Calendar Engine", "Calendar Engine"},
+	} {
+		t.Run(tt.want, func(t *testing.T) {
+			w := newWorld(t, prefs.Lists{})
+			id := "ABCDE12345.com.example.cal.helper"
+			w.write(t, filepath.Join(w.clone, "laptop", "domains", id+".plist"), stored(t, map[string]any{"A": true}))
+			app := w.app(t, w.apps, "Calendar Pro", "com.example.cal", [2]string{tt.helper, id})
+			helper := filepath.Join(app, "Contents", "Library", "LoginItems", tt.helper+".app")
+			w.fake.On("codesign", "-d", "--entitlements", "-", "--xml", helper).Prints(sandboxedApp)
+			w.fake.On("open", "-g", "-j", "-b", id)
+			w.fake.On("osascript", "-e", `tell application id "`+id+`" to quit`)
+			w.closed(id)
+			w.fake.On("git", "-C", w.clone, "rev-parse", "HEAD").Prints("abc123\n")
+			var logged []string
+			ctx := event.WithLogging(t.Context(), func(l event.Logged) { logged = append(logged, l.Line) })
+			report, err := w.p.Restore(ctx, prefs.RestoreOptions{})
+			if err != nil || report.Apps[id].Name != tt.want {
+				t.Errorf("Restore() = %+v, %v; want the app named %s", report, err, tt.want)
+			}
+			if want := []string{"Opening " + tt.want + " once, for its settings folder"}; !slices.Equal(logged, want) {
+				t.Errorf("the log says %q, want %q", logged, want)
+			}
+		})
+	}
+}
+
 // opened is the calls of w's fake that opened an app.
 func (w *world) opened() []string {
 	var out []string
