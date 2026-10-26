@@ -277,6 +277,18 @@ func (l List) Names() []string {
 	return out
 }
 
+// On are the names of the list's things declared on, in order: those kit
+// installs, as none declared off (Entry's Off) is.
+func (l List) On() []string {
+	var out []string
+	for _, e := range l.Entries {
+		if !e.Off {
+			out = append(out, e.Name)
+		}
+	}
+	return out
+}
+
 // Entry is a thing a declarations file declares, and where.
 type Entry struct {
 	// Name is what kit calls it: the name a line declares, or, in a project

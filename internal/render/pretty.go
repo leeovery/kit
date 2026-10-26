@@ -91,6 +91,9 @@ type Pretty struct {
 	results map[string]event.StepFinished
 	order   ordered
 	running []runningStep
+	// thingsDone are how many of their things the run's steps at work have
+	// done, by step, for the bar.
+	thingsDone map[string]*thingsDone
 	// live is how many lines the live part, redrawn in place, takes on
 	// screen: the loader, or a running step's row and what it printed.
 	live int
@@ -227,7 +230,7 @@ func (p *Pretty) Emit(e event.Event) {
 		p.raw, p.rawSeq = map[string][]rawLine{}, 0
 		p.cut, p.card, p.cards, p.todos = map[string]runningStep{}, nil, map[string]event.NeedsYou{}, nil
 		p.since, p.downAt, p.asides = map[string]time.Time{}, map[string]time.Time{}, map[string]event.NeedsYou{}
-		p.log = nil
+		p.log, p.thingsDone = nil, map[string]*thingsDone{}
 		p.order.start(e.Steps)
 		p.preparing = ""
 		p.open(e.Command, e.Machine, e.Time, e.Only)
@@ -253,6 +256,7 @@ func (p *Pretty) Emit(e event.Event) {
 		if e.Says == event.Queued {
 			p.setAside(e.Step)
 		}
+		p.count(e)
 		for i, r := range p.running {
 			if r.step == e.Step {
 				p.running[i].doing, p.running[i].todo = cmp.Or(e.Says, r.doing), e.Todo

@@ -1248,13 +1248,7 @@ func Compare(ctx context.Context, k Kind, declared config.List) check.Result {
 	case err != nil:
 		return failed(k, err)
 	}
-	var on []string
-	for _, e := range declared.Entries {
-		if !e.Off {
-			on = append(on, e.Name)
-		}
-	}
-	if installed, err = withMissed(ctx, k, installed, on); err != nil {
+	if installed, err = withMissed(ctx, k, installed, declared.On()); err != nil {
 		return failed(k, err)
 	}
 	key := keyOf(k)

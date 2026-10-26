@@ -66,6 +66,14 @@ func TestList(t *testing.T) {
 	}
 }
 
+// What a list has on is its names but those declared off, in order.
+func TestListOn(t *testing.T) {
+	l := config.List{Entries: []config.Entry{{Name: "mail"}, {Name: "tablet", Off: true}, {Name: "docs"}}}
+	if got := l.On(); !slices.Equal(got, []string{"mail", "docs"}) {
+		t.Errorf("On() = %q, want mail and docs", got)
+	}
+}
+
 // A command's line is its name, its options and a note; a project folder's
 // section's names carry the folder.
 func TestListCommands(t *testing.T) {

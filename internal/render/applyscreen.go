@@ -230,20 +230,70 @@ func (p *Pretty) header() []string {
 	return append(append([]string{""}, look.Head(line.whole(), bar, p.stateLine())...), "")
 }
 
-// howFar is how far the run's got, of 1, weighted by work: each step one,
-// a finished one whole, a running one that counts as far as it's got.
+// howFar is how far the run's got, of 1, weighted by the things its steps
+// have to do as it started (event.Step's Weight), each step with none one:
+// a finished step its whole weight, whatever it found to do, so the bar
+// never goes back; a step with a weight, the things it's done so far
+// (thingsDone), as far as its weight; one without, at work, as far as it
+// says it's got.
 func (p *Pretty) howFar() float64 {
-	total := len(p.start.Steps)
-	if total == 0 {
-		return 0
-	}
-	got := float64(len(p.results))
-	for _, r := range p.running {
-		if r.of > 0 {
+	var total, got float64
+	for _, s := range p.start.Steps {
+		weight := float64(max(s.Weight, 1))
+		total += weight
+		_, done := p.results[s.Name]
+		r, running := p.runningOf(s.Name)
+		switch {
+		case done:
+			got += weight
+		case s.Weight > 0 && p.thingsDone[s.Name] != nil:
+			got += min(weight, p.thingsDone[s.Name].things())
+		case running && r.of > 0:
 			got += r.howFar()
 		}
 	}
-	return min(got/float64(total), 1)
+	if total == 0 {
+		return 0
+	}
+	return min(got/total, 1)
+}
+
+// thingsDone is how many of its things a step at work has done, as its counts
+// have said: before, those of the counts before the one it's at; at, how
+// far that one, of of, has got, in things.
+type thingsDone struct {
+	before, at float64
+	of         int
+}
+
+// things are how many of its things the step has done.
+func (c thingsDone) things() float64 { return c.before + c.at }
+
+// count notes how far e's step has got, when e counts: a count of more or
+// fewer things than the last, or back nearer its start, is the next, as an
+// install's lines held back come after the rest, and the last is done with.
+// A step that says what it's doing without a count, as while it waits,
+// keeps what it's done.
+func (p *Pretty) count(e event.Doing) {
+	if e.Of <= 0 {
+		return
+	}
+	if p.thingsDone == nil {
+		p.thingsDone = map[string]*thingsDone{}
+	}
+	c := p.thingsDone[e.Step]
+	if c == nil {
+		c = &thingsDone{}
+		p.thingsDone[e.Step] = c
+	}
+	at := float64(min(e.Done, e.Of))
+	if e.Far > 0 {
+		at = min(e.Far, 1) * float64(e.Of)
+	}
+	if e.Of != c.of || at < c.at {
+		c.before += c.at
+	}
+	c.at, c.of = at, e.Of
 }
 
 // stateLine says how the run stands, always whether it needs you: working,

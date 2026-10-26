@@ -2,7 +2,9 @@ package render_test
 
 import (
 	"fmt"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -559,27 +561,151 @@ func TestApplyingRowSays(t *testing.T) {
 	}
 }
 
-// The bar is weighted by work: each step one, a step finished one, a step
-// at work that counts as far as it's got; the header says the same
-// percentage, and so does the terminal's tab.
-func TestApplyingBarIsWeighted(t *testing.T) {
+// Without weights, as an older run's log has none, the bar counts each
+// step one: a step finished one, a step at work that counts as far as it's
+// got; the header says the same percentage, and so does the terminal's tab.
+func TestApplyingBarWithoutWeights(t *testing.T) {
 	steps := []event.Step{{Name: "a", Title: "a", Area: "Steps"}, {Name: "b", Title: "b", Area: "Steps"}, {Name: "c", Title: "c", Area: "Steps"}, {Name: "d", Title: "d", Area: "Steps"}}
+	out := barRun(rowsRun(steps, fine(1, "a", "fine"), event.StepStarted{Step: "b", Doing: "applying"}, event.Doing{Step: "b", Says: "installing", Done: 1, Of: 4})...)
+	head := lines(screen(out))[2]
+	if want := "  ▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮  31% · 0.0s so far"; !strings.HasSuffix(head, want) {
+		t.Errorf("one of four done, one a quarter of the way, the header's bar is %q; want it to end %q", head, want)
+	}
+	if !strings.Contains(out, "\x1b]9;4;1;31\x07") {
+		t.Error("the tab's progress isn't 31%")
+	}
+}
+
+// weighed are a run's steps weighted as kit apply weights them on a new
+// Mac: a step of the user's own and Homebrew, one each; the casks, 44
+// declared; the formulae, 123; a health check, one: 170 in all.
+var weighed = []event.Step{
+	{Name: "fonts", Title: "fonts", Area: "Steps"},
+	{Name: "homebrew", Title: "Homebrew", Area: "Drift", Row: "Homebrew formulae"},
+	{Name: "cask", Title: "Homebrew casks", Area: "Drift", Row: "Homebrew casks", Weight: 44},
+	{Name: "brew", Title: "Homebrew formulae", Area: "Drift", Row: "Homebrew formulae", Weight: 123},
+	{Name: "disk", Title: "Disk space", Area: "Mac"},
+}
+
+// casksAt are the casks at work, done of 44 installed.
+func casksAt(done int) event.Event {
+	return event.Doing{Step: "cask", Says: "installing", Done: done, Of: 44}
+}
+
+// The bar counts each thing the run has to do, as known as it started, one:
+// each step its weight, one for a step with none; a step at work that counts,
+// its weight as far as it's got; a finished step its whole weight, however
+// little it found to do; the header and the tab say the same.
+func TestApplyingBarIsWeighted(t *testing.T) {
+	quick := []event.Event{fine(1, "fonts", "16 installed"), fine(2, "homebrew", "/opt/homebrew"), event.StepStarted{Step: "cask", Doing: "applying"}}
+	for _, tt := range []struct {
+		name   string
+		events []event.Event
+		want   int
+	}{
+		{"casks at 11 of 44", append(slices.Clone(quick), casksAt(11)), 7},
+		{"casks at 22 of 44", append(slices.Clone(quick), casksAt(22)), 14},
+		{"casks all downloaded, half the way", append(slices.Clone(quick), event.Doing{Step: "cask", Says: "downloading", Done: 44, Of: 44, Far: 0.5}), 14},
+		{"casks done, having found less to do", append(slices.Clone(quick), event.Doing{Step: "cask", Says: "installing", Done: 3, Of: 10},
+			finished(9, "cask", check.Result{State: check.OK, Summary: "44 declared, all installed"}), event.StepStarted{Step: "brew", Doing: "applying"}), 27},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			out := barRun(rowsRun(weighed, tt.events...)...)
+			if got := headerPercent(t, out); got != tt.want {
+				t.Errorf("the header's bar says %d%%; want %d%%", got, tt.want)
+			}
+			if tabs := tabPercents(out); len(tabs) == 0 || tabs[len(tabs)-1] != tt.want {
+				t.Errorf("the tab's progress went %v; want it to end at %d", tabs, tt.want)
+			}
+		})
+	}
+}
+
+// The bar never goes back: a big step starting late, its count far bigger
+// than the step at work's, takes nothing off it; nor does a step counting
+// again from nothing, as Homebrew's formulae install the lines other steps
+// wait for first, then the rest, then those held back for a secret, saying
+// what they wait for between; nor a step finishing having found less to do
+// than its weight. What a step's counts have done adds up: the formulae's
+// 4, 50 and 2 are 56 of their 123.
+func TestApplyingBarNeverGoesBack(t *testing.T) {
+	events := []event.Event{fine(1, "fonts", "16 installed"), fine(2, "homebrew", "/opt/homebrew"), event.StepStarted{Step: "cask", Doing: "applying"}}
+	for done := 0; done <= 30; done += 5 {
+		events = append(events, casksAt(done))
+	}
+	formulae := func(says string, done, of int) event.Event {
+		return event.Doing{Step: "brew", Says: says, Done: done, Of: of}
+	}
+	events = append(events,
+		event.StepStarted{Step: "brew", Doing: "applying"},
+		formulae("installing gnupg", 0, 4),
+		casksAt(35),
+		formulae("installing nginx", 4, 4),
+		formulae("updating Homebrew", 0, 0),
+		formulae("installing jq", 0, 115),
+		finished(9, "cask", check.Result{State: check.OK, Summary: "44 declared, all installed"}),
+		formulae("installing ffmpeg", 50, 115),
+		formulae("waiting for TOKEN: 4 to install", 0, 0),
+		formulae("installing private-tool", 0, 4),
+		formulae("installing other-tool", 2, 4),
+	)
+	out := barRun(rowsRun(weighed, events...)...)
+	tabs := tabPercents(out)
+	if len(tabs) < len(events)-3 {
+		t.Fatalf("the tab's progress was set %d times: %v", len(tabs), tabs)
+	}
+	for i := 1; i < len(tabs); i++ {
+		if tabs[i] < tabs[i-1] {
+			t.Errorf("the bar went back from %d%% to %d%%: %v", tabs[i-1], tabs[i], tabs)
+		}
+	}
+	// fonts, Homebrew and the casks, 46, and 56 of the formulae, of 170.
+	if got := headerPercent(t, out); got != 60 {
+		t.Errorf("the header's bar ends at %d%%; want 60%%", got)
+	}
+}
+
+// barRun is events shown at a screen 160 by 64 that shows the run's progress
+// on its tab: what the face wrote.
+func barRun(events ...event.Event) string {
 	var out syncBuffer
 	c := &clock{t: at}
 	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).
 		Sized(func() (int, int) { return 160, 64 }).Clocked(c.now).ShowTabProgress()
 	defer func() { _ = face.Close() }()
-	for _, e := range rowsRun(steps, fine(1, "a", "fine"), event.StepStarted{Step: "b", Doing: "applying"}, event.Doing{Step: "b", Says: "installing", Done: 1, Of: 4}) {
+	for _, e := range events {
 		face.Emit(e)
 	}
 	time.Sleep(300 * time.Millisecond)
-	head := lines(screen(out.String()))[2]
-	if want := "  ▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮  31% · 0.0s so far"; !strings.HasSuffix(head, want) {
-		t.Errorf("one of four done, one a quarter of the way, the header's bar is %q; want it to end %q", head, want)
+	return out.String()
+}
+
+// percent is a percentage as the header says it.
+var percent = regexp.MustCompile(`(\d+)% · `)
+
+// headerPercent is the percentage the header's bar says, in what a face
+// wrote.
+func headerPercent(t *testing.T, out string) int {
+	t.Helper()
+	m := percent.FindStringSubmatch(lines(screen(out))[2])
+	if m == nil {
+		t.Fatalf("the header says no percentage: %q", lines(screen(out))[2])
 	}
-	if !strings.Contains(out.String(), "\x1b]9;4;1;31\x07") {
-		t.Error("the tab's progress isn't 31%")
+	n, _ := strconv.Atoi(m[1])
+	return n
+}
+
+// tabProgress is the terminal's tab told how far the run's got.
+var tabProgress = regexp.MustCompile(`\x1b\]9;4;1;(\d+)\x07`)
+
+// tabPercents are the percentages a face told the tab, in order.
+func tabPercents(out string) []int {
+	var got []int
+	for _, m := range tabProgress.FindAllStringSubmatch(out, -1) {
+		n, _ := strconv.Atoi(m[1])
+		got = append(got, n)
 	}
+	return got
 }
 
 // There's no later during the run (the maintainer, 16 Oct): what's left to do waits

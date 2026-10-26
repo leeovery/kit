@@ -65,6 +65,9 @@ type Step struct {
 	// Did is what it says it did to each thing it put in place, as in
 	// installed, set or synced, when it says.
 	Did string `json:",omitempty"`
+	// Weight is how many things applying it has to do, as known as the run
+	// started: its share of the run's bar. None counts as one.
+	Weight int `json:",omitempty"`
 }
 
 // Hand is a step by hand, as a step that raises it lists it: its line's

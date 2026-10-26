@@ -232,6 +232,36 @@ func TestPlacedAfterHomebrewOrWithoutIt(t *testing.T) {
 	}
 }
 
+// Applying, each kind's step weighs as many things as its lines declared
+// on, for the bar: what it has to do, as far as it's known as the run
+// starts: the formulae shared and the laptop's, 4. Every other step, and
+// every step a run that doesn't apply takes, weighs nothing, counting one.
+func TestApplyWeighsKindsByTheirLines(t *testing.T) {
+	for _, tt := range []struct {
+		command string
+		want    map[string]int
+	}{
+		{"apply", map[string]int{"brew": 4, "cask": 1, "homebrew": 0, "config": 0}},
+		{"status", map[string]int{"brew": 0, "cask": 0, "homebrew": 0, "config": 0}},
+	} {
+		t.Run(tt.command, func(t *testing.T) {
+			w := missingWorld(t)
+			w.fake.On("brew", "update", "--quiet")
+			w.fake.On("brew", "install", "--formula", "ripgrep")
+			w.run(t, tt.command)
+			got := map[string]int{}
+			for _, s := range runStarted(t, w).Steps {
+				got[s.Name] = s.Weight
+			}
+			for name, want := range tt.want {
+				if weight, ok := got[name]; !ok || weight != want {
+					t.Errorf("%s's weight is %d (in the run: %v); want %d", name, weight, ok, want)
+				}
+			}
+		})
+	}
+}
+
 // runStarted is the start of the world's last run, as its log has it.
 func runStarted(t *testing.T, w *world) logs.Record {
 	t.Helper()

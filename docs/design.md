@@ -1001,8 +1001,13 @@ step failed, with the error; the run finishing, with its summary. Faces subscrib
   attention, a row a thing (what's wrong, for how long, what to run), then Packages, Settings,
   Files and Secrets counted (each step's part says which it counts towards) and the config
   repository's row. Applying, in a window of 100 by 30 or more, has a screen of its own (the
-  look's round 10): the wordmark, the bar (each step one, a running one counting as far as it
-  says it has got) and what the run is doing or waiting for you to do; on the left a row for
+  look's round 10): the wordmark, the bar (each thing to do one, as known as the run starts: a
+  kind's step as many as its lines declared on, which finding what's missing would take each
+  kind's check to know, any other step one; a step counting as many as its counts have done, a
+  count of more or fewer things, or back nearer its start, the next after the last; a finished
+  one whole, whatever it found to do, so the bar never goes back; a run's start without weights,
+  as an older log's, each step one, a running one as far as it says it has got) and what the
+  run is doing or waiting for you to do; on the left a row for
   each part of the Mac a person recognises (This Mac, Files and shell, Mac settings, Secrets,
   Homebrew formulae, Homebrew casks, App Store apps, Developer tools, Git, Login items, Your
   steps, Backups), each step in one by its kind or feature, a step by hand in the row it holds

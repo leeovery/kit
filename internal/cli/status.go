@@ -380,6 +380,10 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 			for _, program := range kind.Commands(k) {
 				step.Waits = append(step.Waits, engine.Wait{Thing: program, Ready: func(context.Context) bool { return runner.Has(observed, program) }})
 			}
+			// Each line on, not what's missing of them: finding that is a
+			// kind's check, its listings and brew info's look-ups, a second
+			// or more a kind, before the run could start.
+			step.Weight = len(list.On())
 		}
 		for _, after := range d.After {
 			if slices.Contains(r.kinds, after) {
