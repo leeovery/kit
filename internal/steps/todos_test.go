@@ -1267,3 +1267,42 @@ func TestTheEndWaitsForWhatsLeftForLater(t *testing.T) {
 		t.Errorf("the to-dos ended %+v; want the settings done, the app to open still to do", todos)
 	}
 }
+
+// Stopped at a to-do whose look was under way, while one left for later
+// still has its work under way: the look finding it done, the list says so
+// at once, not once what was left for later is over.
+func TestAStoppedToDoSettlesAheadOfOneLeftForLater(t *testing.T) {
+	defer steps.SetManualPoll(5 * time.Millisecond)()
+	c := newCard(t)
+	s := &settings{}
+	bringing, begun, through := held()
+	s.bringing = bringing
+	looking, carryOn := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	// Its check, its look as it comes up, then its next look, held till
+	// the person's stopped, finding it done.
+	c.fake.On("test", "-f", "/printer").Exits(1).Then().Exits(1).Then().Exits(0).Does(func() {
+		once.Do(func() {
+			close(looking)
+			<-carryOn
+		})
+	})
+	printer := config.List{Entries: []config.Entry{{Name: "printer", Value: `"Add the printer" --test test -f /printer`, Scope: "laptop", Line: 2}}}
+	done := make(chan engine.Report, 1)
+	go func() {
+		done <- applied(t, c, atTheEnd(steps.Manual(c.fake, "/home/someone", c.state, printer, c.raise), s.step()))
+	}()
+	c.upNow(t, "prefs:none")
+	c.answer(t, steps.ManualName, "r")
+	within(t, begun, "r was never done")
+	c.answer(t, steps.ManualName, hand.Skip)
+	within(t, looking, "kit never looked at the printer's to-do")
+	c.answer(t, steps.ManualName, hand.Stop)
+	close(carryOn)
+	l := c.listUntil(t, func(l event.ToDos) bool { return len(l.List) == 2 && l.List[1].Done && !l.List[1].Settling })
+	if !l.List[0].Settling || l.List[0].Done {
+		t.Errorf("the printer's found done, the list said %+v; want what was left for later still settling", l.List)
+	}
+	close(through)
+	over(t, done)
+}

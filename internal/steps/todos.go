@@ -239,14 +239,12 @@ func (r *Raise) workThrough(ctx context.Context, step string, list []toDo) error
 	}
 	settling, err := l.through(ctx, answers)
 	l.emit(-1)
+	if err == nil && settling != nil {
+		_, err = l.between(ctx, -1, nil, settling)
+	}
 	l.awaitLater(ctx)
 	if err != nil {
 		return err
-	}
-	if settling != nil {
-		if _, err := l.between(ctx, -1, nil, settling); err != nil {
-			return err
-		}
 	}
 	l.mu.Lock()
 	entries := slices.Clone(l.entries)
