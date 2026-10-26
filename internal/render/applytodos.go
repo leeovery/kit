@@ -2,8 +2,10 @@ package render
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
+	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/look"
 )
@@ -46,7 +48,8 @@ func (p *Pretty) toDoState() string {
 // toDoPane is the left pane while the to-dos are up, w wide and room lines:
 // To do and how many; then each group, its name muted after a blank line,
 // none for those in no group, its to-dos a line each: done, the done mark
-// and its title muted; the one up, its title a pill; the rest white. The
+// and its title muted; left for later, the skipped mark and its title
+// muted; the one up, its title a pill; the rest white. The
 // keys at its foot. Too many for the room, it starts further down, to keep
 // the one up in sight.
 func (p *Pretty) toDoPane(w, room int) []string {
@@ -64,6 +67,8 @@ func (p *Pretty) toDoPane(w, room int) []string {
 		switch {
 		case t.Done:
 			l = "  " + look.Mark(look.Done) + " " + look.Muted(t.Title)
+		case t.Skipped:
+			l = "  " + look.Mark(look.Skipped) + " " + look.Muted(t.Title)
 		case i == p.todos.Up:
 			l, up = "  "+look.Mark(look.ToDo)+look.Pill(t.Title, look.Done), len(lines)
 		}
@@ -105,27 +110,47 @@ func (p *Pretty) toDoPanel(w int) []string {
 // its margin: a choice being answered, what its key does, turning; a
 // choice, its keys, a line each; one kit tells by itself, that kit's
 // watching, and what for, when it says; else the key that says it's done.
-// Each is wrapped under its own words.
+// Then, whichever it is, the key leaving it for later (skipKey). Each is
+// wrapped under its own words.
 func (p *Pretty) toDoEnds(room int) []string {
 	c := p.card
-	key := func(k, does string) []string { return led(look.Urgent(k), len(k), does, room) }
+	key := func(k look.Key) []string { return led(look.Urgent(k.Key), len(k.Key), k.Does, room) }
 	watching := "kit's watching: it moves on by itself once it's done"
 	if c.Watch != "" {
 		watching = "kit's watching: it moves on once " + c.Watch
 	}
+	var out []string
 	switch {
 	case c.Answering != "":
-		return led(look.Cyan("◐"), 1, answeringWith(*c), room)
+		out = led(look.Cyan("◐"), 1, answeringWith(*c), room)
 	case len(c.Keys) > 0:
-		var out []string
 		for _, k := range c.Keys {
-			out = append(out, key(k.Key, k.Does)...)
+			out = append(out, key(look.Key{Key: k.Key, Does: k.Does})...)
 		}
-		return out
 	case c.Tells:
-		return led(look.Cyan("◐"), 1, watching, room)
+		out = led(look.Cyan("◐"), 1, watching, room)
+	default:
+		out = key(doneKey)
 	}
-	return key(doneKey.Key, doneKey.Does)
+	return append(out, key(skipKey(*c))...)
+}
+
+// skipLetters are the letters the key leaving a to-do for later is from,
+// in order: s, then on round the alphabet, but q, which stops, and r, a
+// row's raw view.
+const skipLetters = "stuvwxyzabcdefghijklmnop"
+
+// skipKey is the key that leaves the to-do c up for later, the next coming
+// up: the first of skipLetters c's own keys haven't.
+func skipKey(c event.NeedsYou) look.Key {
+	letter := skipLetters[:1]
+	for _, l := range skipLetters {
+		if !slices.ContainsFunc(c.Keys, func(own check.Key) bool { return own.Key == string(l) }) {
+			letter = string(l)
+			break
+		}
+	}
+	return look.Key{Key: letter, Does: "skips it for now: kit apply brings it back"}
 }
 
 // led is text after lead, a mark or a key wide cells wide, on the panel's

@@ -6,7 +6,8 @@ import "sync"
 
 // Answer is what the person answers a step by hand with: that it's done,
 // that they're stopping here, that they're moving on to the next card
-// waiting, or, a choice, its key.
+// waiting, that they're leaving the to-do up for later, or, a choice, its
+// key.
 type Answer string
 
 const (
@@ -18,6 +19,9 @@ const (
 	// Next is the person moving on to the next card waiting, the one up
 	// staying to do, to come back.
 	Next Answer = "next"
+	// Skip is the person leaving the to-do up, at the run's end, for later:
+	// it comes down, staying to do, and the next comes up.
+	Skip Answer = "skip"
 )
 
 // Desk passes answers from the screen to the step whose card is up.
@@ -47,11 +51,12 @@ func (d *Desk) Listen(step string) (<-chan Answer, func()) {
 }
 
 // Answer passes a to step's card, when one is up and isn't still taking
-// its last answer: false when nothing takes it. A Stop is never refused
-// while a card's up: it queues behind a Done still waiting, the only sign,
-// for a step kit can't test, that the person did it, so the Done's taken
-// first; any other answer waiting it takes the place of, as stopping is
-// what the person said last.
+// its last answer: false when nothing takes it. A Stop, or a Skip, is never
+// refused while a card's up: it queues behind a Done still waiting, the
+// only sign, for a step kit can't test, that the person did it, so the
+// Done's taken first; any other answer waiting it takes the place of, as
+// it's what the person said last, but a Skip a Stop's, as stopping goes
+// further.
 func (d *Desk) Answer(step string, a Answer) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -59,8 +64,8 @@ func (d *Desk) Answer(step string, a Answer) bool {
 	switch {
 	case !ok:
 		return false
-	case a == Stop:
-		stop(ch)
+	case a == Stop, a == Skip:
+		last(ch, a)
 		return true
 	case len(ch) > 0:
 		return false
@@ -69,19 +74,23 @@ func (d *Desk) Answer(step string, a Answer) bool {
 	return true
 }
 
-// stop puts a Stop on ch, behind a Done waiting there, in place of any
-// other answer waiting: only the card's step takes from ch meanwhile.
-func stop(ch chan Answer) {
-	if len(ch) == cap(ch) {
-		// A Done, then a Stop, waiting already.
-		return
-	}
-	select {
-	case waiting := <-ch:
-		if waiting == Done {
-			ch <- Done
+// last puts a, a Stop or a Skip, on ch, behind a Done waiting there, in
+// place of any other answer waiting, but a Skip a Stop's: only the card's
+// step takes from ch meanwhile.
+func last(ch chan Answer, a Answer) {
+	done, stop := false, a == Stop
+	for len(ch) > 0 {
+		select {
+		case waiting := <-ch:
+			done, stop = done || waiting == Done, stop || waiting == Stop
+		default:
 		}
-	default:
 	}
-	ch <- Stop
+	if done {
+		ch <- Done
+	}
+	if stop {
+		a = Stop
+	}
+	ch <- a
 }

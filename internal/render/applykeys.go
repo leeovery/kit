@@ -104,7 +104,8 @@ const stopIt = 1
 // card up, space and enter say it's done, or, a choice, its keys answer
 // it, and, while another card waits, tab moves on to it instead of
 // choosing a row. With the to-dos at the run's end up, there are no rows to
-// choose, and Stop stops there, what's left staying to do.
+// choose, s (skipKey) leaves the one up for later, and Stop stops there,
+// what's left staying to do.
 func (p *Pretty) Keys(listen func() (<-chan ask.Key, func()), halt func()) *Pretty {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -184,6 +185,7 @@ func (p *Pretty) press(k ask.Key) (halt bool) {
 	case p.keys.asking:
 		return p.answer(k)
 	case p.answerChoice(k):
+	case p.skipToDo(k):
 	case k.Is(" ", "enter"):
 		p.answerCard()
 	case k.Is("q"):
@@ -204,6 +206,17 @@ func (p *Pretty) press(k ask.Key) (halt bool) {
 		p.scrollKey(k)
 	}
 	return false
+}
+
+// skipToDo passes the to-do up's step that the person's leaving it for
+// later, when k is its key for that (skipKey), and reports whether it was:
+// whatever's under way, as a key of its being done.
+func (p *Pretty) skipToDo(k ask.Key) bool {
+	if p.card == nil || p.hands == nil || !p.listing(p.card.Step) || !k.Is(skipKey(*p.card).Key) {
+		return false
+	}
+	p.hands(p.card.Step, hand.Skip)
+	return true
 }
 
 // answerCard passes the card up's step that it's done, when kit can't tell

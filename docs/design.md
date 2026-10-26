@@ -305,8 +305,8 @@ every few seconds: done meanwhile, it's done, the log says so, and what it held 
 on at once. A line with `--before` is a step of its own, raised mid-run once what it comes
 after is in, as the steps it comes before wait for it; the rest, `--after` alone only ordering
 them, come up at the run's end, after every other step, with the to-dos kit's own checks left
-(Checks). That end is a list worked through one to-do at a time, in kit's order, with no choosing
-and nothing skipped: kit's own that come first (bringing back apps' settings, so the apps opened
+(Checks). That end is a list worked through one to-do at a time, in kit's order, with no choosing:
+kit's own that come first (bringing back apps' settings, so the apps opened
 next start with them), then the lines not done, in order, then kit's own the rest (the backups');
 grouped, each group where its first comes (kit's own in Apps and Backups). Each is looked at
 while it's up, a line by its command every few seconds, one of kit's own by its step's check, and
@@ -324,7 +324,13 @@ restore --pending`, the log naming each of those with why; a watched to-do of ki
 done, coming down at once, kit finishing what it waited for aside, as bringing those apps'
 settings back, and the log saying it's done once that's finished, with what it did; `f` starts
 afresh, as `kit prefs start-fresh` does, saying saving's on and how many still wait to come
-back). Stopping there (`q`'s Stop, between two to-dos as well, as the one up is found done, and
+back). No to-do holds the run: every one has `s`, "skips it for now: kit apply brings it back"
+(the first letter after it its own keys haven't, should they have `s`, never `q` or `r`), which
+takes it down at once, whatever's under way, even a key being done, the next coming up; it
+stays to do, nothing written as though it were done, the list marking it skipped, the log
+saying so and how long it was up, the record counting it among what's left; a look or a key
+under way as it's pressed, left to finish, that finds it done after all, has it done, which the
+list says once it's in. Stopping there (`q`'s Stop, between two to-dos as well, as the one up is found done, and
 while kit does what a key says, taken even with another key waiting unread) leaves what's left
 to do at once, the card down and the list stopped, whatever kit's doing aside, and no look
 begins after, readying what the card says cut short (it can never find it done, and a store's

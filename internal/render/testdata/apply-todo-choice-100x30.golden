@@ -18,13 +18,13 @@
   Backups                                           │        save, 15 Oct
   △ Add a Time Machine disk                         │      f starts afresh: nothing back, saving
   △ Set up Arq's backup plan                        │        from now
+                                                    │      s skips it for now: kit apply brings it
+                                                    │        back
                                                     │
                                                     ├───────────────────────────────────────────────
                                                     │
                                                     │  LOG
                                                     │
-                                                    │  03:32:49  ● Load: fine
-                                                    │  03:32:50  ● claude-code: fine
                                                     │  03:32:51  ● fonts: fine
                                                     │  03:32:52  ● mise: fine
   q stop here                                       │  03:32:53  ● Sign in to 1Password: fine

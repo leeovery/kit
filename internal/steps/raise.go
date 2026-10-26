@@ -43,10 +43,12 @@ type opener interface {
 // errStopHere is why a card came down without being done: the person
 // stopped where they were, at the run's to-dos, what's left staying to do.
 // errDoneThenStop, that it was done, and they stopped meanwhile: it's done,
-// and the rest stays to do.
+// and the rest stays to do. errSkipped, that they left the to-do up for
+// later: it stays to do, and the next comes up.
 var (
 	errStopHere     = errors.New("stopped here")
 	errDoneThenStop = fmt.Errorf("done, then %w", errStopHere)
+	errSkipped      = errors.New("left for later")
 )
 
 // Wait is what a raised card waits for, each its own, though two can be as
@@ -161,11 +163,12 @@ func midRun(ctx context.Context, step string) seat {
 // done, a step with nothing more to do finishes without waiting for a job,
 // and one with more takes it back for that, its card down by then. Its
 // card goes up as its turn comes (raising), and comes down the moment it's
-// done or the person stopped there, the next card's turn coming. It returns
-// what kit saw as it was done, in words, if it has some; errStopHere when
-// the person stopped where they were, with its work (late), what's under
-// way left to finish, never cut short, to say whether it found it done
-// (work.outcome); errDoneThenStop when they stopped as it was done.
+// done, the person stopped there or left it for later, the next card's turn
+// coming. It returns what kit saw as it was done, in words, if it has some;
+// errStopHere when the person stopped where they were, or errSkipped when
+// they left it for later, with its work (late), what's under way left to
+// finish, never cut short, to say whether it found it done (work.outcome);
+// errDoneThenStop when they stopped as it was done.
 func (r *Raise) up(ctx context.Context, step string, c raised, s seat) (saw string, late *work, err error) {
 	answers, down := s.answers, func() {}
 	if answers == nil {
@@ -178,11 +181,11 @@ func (r *Raise) up(ctx context.Context, step string, c raised, s seat) (saw stri
 	u.pl, u.work = r.join(step, s), r.working(ctx, c)
 	saw, err = u.wait()
 	down()
-	stopped := errors.Is(err, errStopHere)
-	r.leave(u.pl, err == nil || stopped)
+	left := errors.Is(err, errStopHere) || errors.Is(err, errSkipped)
+	r.leave(u.pl, err == nil || left)
 	r.unnotify(ctx, u.pl)
 	u.work.halt()
-	if !stopped || errors.Is(err, errDoneThenStop) {
+	if !left || errors.Is(err, errDoneThenStop) {
 		return saw, nil, err
 	}
 	return saw, u.work, err
@@ -358,15 +361,20 @@ func (u *raising) announce() {
 }
 
 // answered is what the person's answer does: Stop stops where they are
-// (errStopHere); Next moves on to the next card waiting; the rest are the
-// card's work to do, aside, the card saying at once that it's being
-// answered by a key of its, and offering none of its keys meanwhile. An
-// answer while the card isn't up, or a key while one's being done, isn't
-// one it offered: it goes nowhere.
+// (errStopHere); Skip, a to-do at the run's end up, leaves it for later
+// (errSkipped), whatever's under way; Next moves on to the next card
+// waiting; the rest are the card's work to do, aside, the card saying at
+// once that it's being answered by a key of its, and offering none of its
+// keys meanwhile. An answer while the card isn't up, or a key while one's
+// being done, isn't one it offered: it goes nowhere.
 func (u *raising) answered(a hand.Answer) error {
 	switch {
 	case a == hand.Stop:
 		return errStopHere
+	case a == hand.Skip:
+		if u.drawn && u.pl.held {
+			return errSkipped
+		}
 	case a == hand.Next:
 		u.r.next(u.pl)
 	case u.drawn && !u.choosing:

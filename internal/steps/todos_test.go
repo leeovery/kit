@@ -1061,3 +1061,122 @@ func TestARunStoppedWhileKitSettles(t *testing.T) {
 		t.Error("settling was cut short as the run stopped")
 	}
 }
+
+// skipping are two to-dos at the run's end: the printer's, watched, its
+// look as the test has it; then the scanner's, which only the person can
+// say is done.
+func skipping(look string) config.List {
+	return config.List{Entries: []config.Entry{
+		{Name: "printer", Value: `"Add the printer" --test test -f ` + look, Scope: "laptop", Line: 2},
+		{Name: "scanner", Value: `"Add the scanner"`, Scope: "laptop", Line: 3},
+	}}
+}
+
+// s on a to-do kit watches leaves it for later: its card comes down at
+// once, the next comes up, and it stays to do, skipped, nothing written as
+// though it were done; the step by hand still finds it to do.
+func TestSkippingAWatchedToDo(t *testing.T) {
+	defer steps.SetManualPoll(time.Hour)()
+	c := newCard(t)
+	c.fake.On("test", "-f", "/printer").Exits(1)
+	step := steps.Manual(c.fake, "/home/someone", c.state, skipping("/printer"), c.raise)
+	applied := applying(t, step)
+	c.upNow(t, "manual:printer")
+	c.answer(t, steps.ManualName, hand.Skip)
+	c.upNow(t, "manual:scanner")
+	c.answer(t, steps.ManualName, hand.Done)
+	if err := ended(t, applied); err != nil {
+		t.Fatal(err)
+	}
+	if todos := c.lastToDos(); len(todos) != 2 || todos[0].Done || !todos[0].Skipped || !todos[1].Done || todos[1].Skipped {
+		t.Errorf("the to-dos ended %+v; want the printer's skipped, still to do, the scanner's done", todos)
+	}
+	if downs := c.downs(); !slices.Equal(downs, []string{"manual:printer", "manual:scanner"}) {
+		t.Errorf("cards down %q; want the printer's, then the scanner's", downs)
+	}
+	res := step.Check(t.Context())
+	if !slices.ContainsFunc(res.Items, func(it check.Item) bool { return it.ID == "manual:printer" }) ||
+		slices.ContainsFunc(res.Items, func(it check.Item) bool { return it.ID == "manual:scanner" }) {
+		t.Errorf("the steps by hand stand %+v; want the printer's left to do, the scanner's done", res.Items)
+	}
+}
+
+// s on a choice leaves it for later as on any other: none of its keys is
+// done, and it stays to do, its step not checked again.
+func TestSkippingAChoice(t *testing.T) {
+	defer steps.SetManualPoll(time.Hour)()
+	c := newCard(t)
+	var mu sync.Mutex
+	var pressed []string
+	step := engine.Step{
+		Name: "prefs", Title: "App settings", Area: steps.AreaBackups,
+		Check: func(context.Context) check.Result {
+			return check.Result{State: check.Attention, Summary: "paused", Items: []check.Item{toDoItem("prefs", check.ToDo{
+				Title: "Bring back apps' settings", First: true, Keys: []check.Key{{Key: "r", Does: "brings them back"}},
+			})}}
+		},
+		Choice: &engine.Choice{Answer: func(_ context.Context, _ check.Item, key string) (string, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			pressed = append(pressed, key)
+			return "", nil
+		}},
+	}
+	done := make(chan engine.Report, 1)
+	go func() {
+		done <- applied(t, c, atTheEnd(steps.Manual(c.fake, "/home/someone", c.state, config.List{}, c.raise), step))
+	}()
+	c.upNow(t, "prefs:none")
+	c.answer(t, steps.ManualName, hand.Skip)
+	report := <-done
+	if todos := c.lastToDos(); len(todos) != 1 || todos[0].Done || !todos[0].Skipped {
+		t.Errorf("the to-dos ended %+v; want the choice skipped, still to do", todos)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if times, _ := finishes(c.sink); len(pressed) != 0 || times["prefs"] != 1 || report.Results["prefs"].State != check.Attention {
+		t.Errorf("pressed %q, prefs finished %d times, stands %s; want no key done, nothing checked again, still to do", pressed, times["prefs"], report.Results["prefs"].State)
+	}
+}
+
+// s acts at once, whatever's under way: pressed while kit's look at the
+// to-do up is slow, its card comes down and the next goes up before the
+// look's over. The look over, what it found decides: not done, it's
+// skipped; done, the moment s was pressed, it ends done, not skipped.
+func TestSkippingWhileKitLooks(t *testing.T) {
+	defer steps.SetManualPoll(5 * time.Millisecond)()
+	for _, tt := range []struct {
+		name  string
+		found int
+		done  bool
+	}{{"not done", 1, false}, {"done meanwhile", 0, true}} {
+		t.Run(tt.name, func(t *testing.T) {
+			c := newCard(t)
+			looking, carryOn := make(chan struct{}), make(chan struct{})
+			var once sync.Once
+			// Its check, its look as it comes up, then its next look, held
+			// till the scanner's up, finding it as the test has it.
+			c.fake.On("test", "-f", "/printer").Exits(1).Then().Exits(1).Then().Exits(tt.found).Does(func() {
+				once.Do(func() {
+					close(looking)
+					<-carryOn
+				})
+			})
+			applied := applying(t, steps.Manual(c.fake, "/home/someone", c.state, skipping("/printer"), c.raise))
+			<-looking
+			c.answer(t, steps.ManualName, hand.Skip)
+			c.upNow(t, "manual:scanner")
+			if downs := c.downs(); !slices.Equal(downs, []string{"manual:printer"}) {
+				t.Errorf("cards down %q while kit looked; want the printer's at once", downs)
+			}
+			close(carryOn)
+			c.answer(t, steps.ManualName, hand.Done)
+			if err := ended(t, applied); err != nil {
+				t.Fatal(err)
+			}
+			if todos := c.lastToDos(); len(todos) != 2 || todos[0].Done != tt.done || todos[0].Skipped == tt.done || !todos[1].Done {
+				t.Errorf("the to-dos ended %+v; want the printer's done %v, skipped %v, the scanner's done", todos, tt.done, !tt.done)
+			}
+		})
+	}
+}

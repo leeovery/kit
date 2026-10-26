@@ -16,13 +16,13 @@
   ● Allow Full Disk Access for remote users         │
                                                     │      ◐ kit's watching: it moves on once Time
   Backups                                           │        Machine has a disk
-  △ Add a Time Machine disk                         │
-  △ Set up Arq's backup plan                        ├───────────────────────────────────────────────
+  △ Add a Time Machine disk                         │      s skips it for now: kit apply brings it
+  △ Set up Arq's backup plan                        │        back
+                                                    │
+                                                    ├───────────────────────────────────────────────
                                                     │
                                                     │  LOG
                                                     │
-                                                    │  03:32:51  ● fonts: fine
-                                                    │  03:32:52  ● mise: fine
                                                     │  03:32:53  ● Sign in to 1Password: fine
                                                     │  03:34:45  ● Bring back apps' settings: done,…
                                                     │  03:35:38  ● Open Karabiner-Elements: done, i…

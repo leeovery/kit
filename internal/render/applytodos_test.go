@@ -268,7 +268,8 @@ func TestTheToDosList(t *testing.T) {
 // it is in the list at the right; why, muted and wrapped; its steps
 // numbered, a subheading muted and unnumbered; then how it ends: a
 // choice's keys, a line each; kit watching, and what for, or, for a line
-// whose test tells, that it moves on by itself; else space.
+// whose test tells, that it moves on by itself; else space; and, whichever,
+// s leaving it for later.
 func TestTheToDoPanel(t *testing.T) {
 	for _, tt := range []struct {
 		up   int
@@ -284,6 +285,7 @@ func TestTheToDoPanel(t *testing.T) {
 			"",
 			"      r brings them back from this Mac's last save, 15 Oct",
 			"      f starts afresh: nothing back, saving from now",
+			"      s skips it for now: kit apply brings it back",
 			"",
 			"───────────────────────────────────────────────────────────────────────────────────────────────────",
 			"",
@@ -304,13 +306,14 @@ func TestTheToDoPanel(t *testing.T) {
 			"      4  Privacy & Security › Input Monitoring: turn on Karabiner-Elements",
 			"",
 			"      ◐ kit's watching: it moves on by itself once it's done",
+			"      s skips it for now: kit apply brings it back",
 			"",
 			"───────────────────────────────────────────────────────────────────────────────────────────────────",
 		}},
 		{3, []string{"", "  △ Allow Full Disk Access for remote users" + strings.Repeat(" ", 48) + "4 of 6", "", "      So an SSH session from another Mac can reach everything, which Remote Login alone can't.", "",
-			"      1  System Settings › General › Sharing › Remote Login › ⓘ", "      2  Turn on Allow full disk access for remote users", "", "      space when it's done", ""}},
+			"      1  System Settings › General › Sharing › Remote Login › ⓘ", "      2  Turn on Allow full disk access for remote users", "", "      space when it's done", "      s skips it for now: kit apply brings it back", ""}},
 		{4, []string{"", "  △ Add a Time Machine disk" + strings.Repeat(" ", 64) + "5 of 6", "", "      Time Machine has nowhere to back up to.", "",
-			"      1  Plug in your backup disk", "      2  System Settings › General › Time Machine › Add Backup Disk, and choose it", "", "      ◐ kit's watching: it moves on once Time Machine has a disk", ""}},
+			"      1  Plug in your backup disk", "      2  System Settings › General › Time Machine › Add Backup Disk, and choose it", "", "      ◐ kit's watching: it moves on once Time Machine has a disk", "      s skips it for now: kit apply brings it back", ""}},
 	} {
 		face, out, _ := applyIn(colorprofile.TrueColor, 160, 64, time.Minute, toDosUpTo(tt.up))
 		got := screen(uncoloured(out.String()))
@@ -335,16 +338,17 @@ func TestTheToDoPanel(t *testing.T) {
 }
 
 // While kit does what a choice's key says, its panel offers none of its
-// keys: what that key does, turning, in their place. So does its card in
-// a window too small for the screen.
+// keys: what that key does, turning, in their place, then s, which leaves
+// it for later all the same. So does its card in a window too small for
+// the screen.
 func TestAChoiceBeingAnswered(t *testing.T) {
 	events := answeredWith(toDosUpTo(0), "r")
 	face, out, _ := applyIn(colorprofile.TrueColor, 160, 64, time.Minute, events)
 	defer func() { _ = face.Close() }()
 	_, right := panes(screen(uncoloured(out.String())), 160)
 	ends := slices.Index(right, "      they're back. Settings files come back too.")
-	if ends < 0 || !slices.Equal(right[ends+1:ends+5], []string{"", "      ◐ brings them back from this Mac's last save, 15 Oct", "", strings.Repeat("─", 99)}) {
-		t.Errorf("being answered, the right pane starts\n%s\nwant what r does, turning, and no keys", strings.Join(right[:min(len(right), 14)], "\n"))
+	if ends < 0 || !slices.Equal(right[ends+1:ends+6], []string{"", "      ◐ brings them back from this Mac's last save, 15 Oct", "      s skips it for now: kit apply brings it back", "", strings.Repeat("─", 99)}) {
+		t.Errorf("being answered, the right pane starts\n%s\nwant what r does, turning, none of its keys, and s leaving it for later", strings.Join(right[:min(len(right), 14)], "\n"))
 	}
 	if frame := strings.Join(lastFrame(out.String()), "\n"); !strings.Contains(frame, look.Cyan("◐")+" "+look.White("brings them back from this Mac's last save, 15 Oct")) {
 		t.Error("what r does isn't led by the turning mark")
@@ -385,7 +389,8 @@ func answeredWith(events []event.Event, key string) []event.Event {
 // about is done, and nothing of one it tells about; tab chooses no row, as
 // the to-dos have the left pane, nor moves on from the to-do up, though
 // more come after it; Stop stops there, the run carrying on, but stops the
-// run once they're over.
+// run once they're over; s leaves the one up for later, whatever it is,
+// and while a key of its is being done.
 func TestTheToDosKeys(t *testing.T) {
 	for _, tt := range []struct {
 		name      string
@@ -401,6 +406,11 @@ func TestTheToDosKeys(t *testing.T) {
 		{"kit can't tell", 3, "", []ask.Key{keySpace, keyEnter}, []answered{{"manual", hand.Done}, {"manual", hand.Done}}, 0},
 		{"stop here", 3, "", []ask.Key{keyQ, keyDown, keyEnter}, []answered{{"manual", hand.Stop}}, 0},
 		{"stop once they're over", len(toDoList), "", []ask.Key{keyQ, keyDown, keyEnter}, nil, 1},
+		{"skip one kit tells", 4, "", []ask.Key{{Text: "s"}}, []answered{{"manual", hand.Skip}}, 0},
+		{"skip a choice", 0, "", []ask.Key{{Text: "s"}}, []answered{{"manual", hand.Skip}}, 0},
+		{"skip a choice being answered", 0, "r", []ask.Key{{Text: "s"}}, []answered{{"manual", hand.Skip}}, 0},
+		{"skip one kit can't tell", 3, "", []ask.Key{{Text: "s"}}, []answered{{"manual", hand.Skip}}, 0},
+		{"nothing to skip once they're over", len(toDoList), "", []ask.Key{{Text: "s"}}, nil, 0},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			events := toDosUpTo(tt.up)
@@ -428,6 +438,99 @@ func TestTheToDosKeys(t *testing.T) {
 				t.Errorf("answered %v, stopped the run %d times; want %v, %d", got, kb.stops(), tt.want, tt.stops)
 			}
 		})
+	}
+}
+
+// A to-do whose own keys have s leaves it for later with the first letter
+// after it they haven't, nor q, which stops, nor r: its panel says which.
+func TestTheSkipKeyIsTheToDosOwn(t *testing.T) {
+	events := toDosUpTo(0)
+	card := toDoCards[0]
+	card.Time, card.Step, card.More = after(1800), "manual", len(toDoList)-1
+	card.Keys = []check.Key{{Key: "r", Does: "restores them"}, {Key: "s", Does: "starts afresh"}, {Key: "t", Does: "takes the other Mac's"}}
+	face, out, kb := applyAt(160, 64, time.Minute, append(events, card))
+	defer func() { _ = face.Close() }()
+	var mu sync.Mutex
+	var got []answered
+	face.Hands(func(step string, a hand.Answer) bool {
+		mu.Lock()
+		defer mu.Unlock()
+		got = append(got, answered{step, a})
+		return true
+	})
+	if _, right := panes(screen(out.String()), 160); !slices.Contains(right, "      u skips it for now: kit apply brings it back") {
+		t.Errorf("the panel is\n%s\nwant u to leave it for later", strings.Join(right[:16], "\n"))
+	}
+	kb.press(t, ask.Key{Text: "s"}, ask.Key{Text: "u"})
+	mu.Lock()
+	defer mu.Unlock()
+	if want := []answered{{"manual", "s"}, {"manual", hand.Skip}}; !slices.Equal(got, want) {
+		t.Errorf("answered %v; want s its own, u leaving it for later", got)
+	}
+}
+
+// skippedAt is toDosUpTo the to-do at up, then the person leaving it for
+// later 25 seconds after it came up: its card down, the list saying it's
+// skipped, the next up; then, with end, that one done, the to-dos over,
+// the steps they held checked again and the run finished.
+func skippedAt(up int, end bool) []event.Event {
+	events := toDosUpTo(up)
+	sec := int(events[len(events)-1].At().Sub(at)/time.Second) + 25
+	list := slices.Clone(toDoList)
+	for i := range up {
+		list[i].Done, list[i].Saw = true, toDoSaw[i]
+	}
+	list[up].Skipped = true
+	next := toDoCards[up+1]
+	next.Time, next.Step, next.More = after(sec), "manual", len(list)-2-up
+	events = append(events, event.CardDown{Time: after(sec), Step: "manual", Item: toDoList[up].ID},
+		event.ToDos{Time: after(sec), Step: "manual", List: slices.Clone(list), Up: up + 1},
+		event.Doing{Time: after(sec), Step: "manual", Says: event.Queued}, next)
+	if !end {
+		return events
+	}
+	list[up+1].Done, list[up+1].Saw = true, toDoSaw[up+1]
+	return append(events, event.CardDown{Time: after(sec + 30), Step: "manual", Item: toDoList[up+1].ID},
+		event.ToDos{Time: after(sec + 30), Step: "manual", List: slices.Clone(list), Up: -1},
+		event.StepStarted{Time: after(sec + 31), Step: "arq", Doing: "checking"},
+		finished(sec+32, "arq", check.Result{State: check.OK, Summary: "no recent backup"}),
+		finished(sec+33, "manual", check.Result{State: check.OK, Summary: "all 3 done"}),
+		event.RunFinished{Time: after(sec + 34), Duration: 36 * time.Minute, Counts: map[check.State]int{check.OK: 28, check.Attention: 1}})
+}
+
+// A to-do left for later says so: the log that it's skipped, and how long
+// it was up, once; the list its skipped mark, its title muted, not ticked;
+// the state line counts it among what's left. At the run's end, the record
+// has it among what's left to do.
+func TestASkippedToDo(t *testing.T) {
+	events := skippedAt(4, false)
+	face, out, _ := applyIn(colorprofile.TrueColor, 160, 64, since(events), events)
+	defer func() { _ = face.Close() }()
+	got := screen(uncoloured(out.String()))
+	log := strings.Join(logOf(got, 160), "\n")
+	if want := "  03:38:28  – Add a Time Machine disk: skipped, after 25.0s"; strings.Count(log, want) != 1 {
+		t.Errorf("the log is\n%s\nwant it once to hold %q", log, want)
+	}
+	left, _ := panes(got, 160)
+	if !slices.Contains(left, "  – Add a Time Machine disk") {
+		t.Errorf("the left pane is\n%s\nwant Time Machine's to-do skipped", strings.Join(left, "\n"))
+	}
+	frame := strings.Join(lastFrame(out.String()), "\n")
+	if !strings.Contains(frame, look.Mark(look.Skipped)+" "+look.Muted("Add a Time Machine disk")) {
+		t.Error("the skipped to-do isn't its mark and its title muted")
+	}
+	if state := lines(got)[3]; !strings.HasSuffix(state, "│  △ 2 to do · ● 4 done") {
+		t.Errorf("the state line is %q; want the skipped one among what's left", state)
+	}
+
+	ended := skippedAt(4, true)
+	whole, out2, _ := applyAt(160, 64, since(ended), ended)
+	if err := whole.Close(); err != nil {
+		t.Fatal(err)
+	}
+	record := screen(out2.String())
+	if !strings.Contains(record, "\n  TO DO  1 · kit apply brings them back\n  △ 1  Add a Time Machine disk\n") {
+		t.Errorf("the record is\n%s\nwant Time Machine's disk left to do", record)
 	}
 }
 

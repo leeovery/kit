@@ -1,6 +1,9 @@
 package hand
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 func TestAnswerReachesTheCardUp(t *testing.T) {
 	d := New()
@@ -70,5 +73,40 @@ func TestAStopAfterADoneTaken(t *testing.T) {
 	<-ch
 	if !d.Answer("paper", Stop) || <-ch != Stop || len(ch) != 0 {
 		t.Fatal("want the Stop alone")
+	}
+}
+
+// A Skip is never refused either: it queues behind a Done waiting, takes
+// the place of a key waiting, as what the person said last, and gives way
+// to a Stop, given before it or after, which goes further.
+func TestASkipIsNeverRefused(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		given []Answer
+		want  []Answer
+	}{
+		{"alone", []Answer{Skip}, []Answer{Skip}},
+		{"after a key", []Answer{"r", Skip}, []Answer{Skip}},
+		{"after a Done", []Answer{Done, Skip}, []Answer{Done, Skip}},
+		{"after a Stop", []Answer{Stop, Skip}, []Answer{Stop}},
+		{"then a Stop", []Answer{Done, Skip, Stop}, []Answer{Done, Stop}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			d := New()
+			ch, down := d.Listen("paper")
+			defer down()
+			for _, a := range tt.given {
+				if !d.Answer("paper", a) {
+					t.Fatalf("%v was refused", a)
+				}
+			}
+			var got []Answer
+			for len(ch) > 0 {
+				got = append(got, <-ch)
+			}
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("got %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

@@ -205,7 +205,8 @@ func (p *Pretty) listing(step string) bool {
 // workThrough is the to-dos at the run's end as they stand now: the log
 // says each newly done, what kit saw when it has words, and how long it
 // took when it came up, till its card came down, however long kit took to
-// settle it after; one that was up and no longer is, left as the
+// settle it after; one the person left for later, that it's skipped, and
+// how long it was up, once; one that was up and no longer is, left as the
 // person stopped there, that it's not done. Of one settling, it says
 // nothing till it's settled: what kit finished saying what it saw, or what
 // was under way as they stopped saying whether it's done. The card of the
@@ -237,6 +238,14 @@ func (p *Pretty) workThrough(e event.ToDos) {
 				parts = append(parts, look.Muted(t.Saw))
 			}
 			p.note(at, row, look.Mark(look.Done), look.Says(parts...))
+		case t.Skipped && skipSaid(before, t.ID):
+			continue
+		case t.Skipped:
+			text := t.Title + ": skipped"
+			if up {
+				text += ", after " + took(cmp.Or(p.downAt[id], at).Sub(since))
+			}
+			p.note(at, row, look.Mark(look.Skipped), look.Muted(text))
 		case up && i != e.Up:
 			p.note(at, row, look.Mark(look.ToDo), look.White(t.Title+": not done"))
 		default:
@@ -252,6 +261,16 @@ func (p *Pretty) workThrough(e event.ToDos) {
 		}
 	}
 	p.todos = &e
+}
+
+// skipSaid is whether the log said the to-do with id was left for later as
+// the to-dos stood before.
+func skipSaid(before *event.ToDos, id string) bool {
+	if before == nil {
+		return false
+	}
+	i := slices.IndexFunc(before.List, func(t event.ToDo) bool { return t.ID == id })
+	return i >= 0 && before.List[i].Skipped && !before.List[i].Done
 }
 
 // endSaid is whether the log said how the to-do with id ended as the to-dos

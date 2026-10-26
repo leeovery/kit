@@ -231,7 +231,8 @@ func (e ToDos) At() time.Time { return e.Time }
 // whose check found it and its item's id; what to do (Title); the group
 // it's in, if any; how to do it, as the record says, its steps or what its
 // item says; whether it's done, with what kit saw when it was, in words, if
-// it has some; and whether what it came to is still coming (Settling): kit
+// it has some; whether the person left it for later (Skipped), still to
+// do; and whether what it came to is still coming (Settling): kit
 // finishing what it waited for, found done, or, the person having stopped
 // there, what was under way still to say whether it's done. The list's
 // emitted again once it's come.
@@ -242,6 +243,7 @@ type ToDo struct {
 	How      []string `json:",omitempty"`
 	Done     bool     `json:",omitempty"`
 	Saw      string   `json:",omitempty"`
+	Skipped  bool     `json:",omitempty"`
 	Settling bool     `json:",omitempty"`
 }
 

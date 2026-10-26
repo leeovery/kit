@@ -210,8 +210,10 @@ func (o ownToDo) answer(ctx context.Context, a hand.Answer, _ time.Time) (bool, 
 }
 
 // workThrough raises list's to-dos for step one at a time, in order, each
-// till it's done: the list emitted as each comes up, as each is done, and
-// once they're over. Kit finishes what one done waited for (settling) and,
+// till it's done or the person leaves it for later (hand.Skip), the next
+// coming up at once: the list emitted as each comes up, as each is done,
+// and once they're over. One left for later stays to do, unless what was
+// under way as they left it finds it done after all (later). Kit finishes what one done waited for (settling) and,
 // one of kit's own, looks for those its step's check finds now, to come
 // next (followUps), aside, the list emitted again as each comes in. The
 // person can stop where they are (hand.Stop), the list emitted stopped at
@@ -235,6 +237,9 @@ func (r *Raise) workThrough(ctx context.Context, step string, list []toDo) error
 	}
 	settling, err := l.through(ctx, answers)
 	l.emit(-1)
+	if l.awaitLater(ctx) {
+		l.emit(-1)
+	}
 	if err != nil {
 		return err
 	}
@@ -248,12 +253,14 @@ func (r *Raise) workThrough(ctx context.Context, step string, list []toDo) error
 }
 
 // toDos are the to-dos at the run's end as they're worked through: each as
-// raised, and as the list says it.
+// raised, and as the list says it; and what the work of each left for
+// later was under way with as it was left (later).
 type toDos struct {
 	r       *Raise
 	step    string
 	list    []toDo
 	entries []event.ToDo
+	later   []<-chan settled
 }
 
 // through raises the to-dos in turn, till they're over or the person stops
@@ -261,15 +268,22 @@ type toDos struct {
 // One done, the list says so at once, its card down, settling or not.
 func (l *toDos) through(ctx context.Context, answers <-chan hand.Answer) (<-chan settled, error) {
 	for i := 0; i < len(l.list); i++ {
+		l.takeLater()
 		l.emit(i)
 		if stoppedMeanwhile(answers) {
 			return nil, nil
 		}
 		saw, late, err := l.r.up(ctx, l.step, l.list[i], seat{held: true, after: len(l.list) - 1 - i, answers: answers})
-		if err != nil && !errors.Is(err, errStopHere) {
+		skipped := errors.Is(err, errSkipped)
+		if err != nil && !skipped && !errors.Is(err, errStopHere) {
 			return nil, err
 		}
 		finish := finishing(ctx, l.list[i])
+		if skipped {
+			l.entries[i].Skipped = true
+			l.later = append(l.later, l.settle(ctx, i, late, finish))
+			continue
+		}
 		if late == nil {
 			l.done(i, saw)
 		}
@@ -368,12 +382,53 @@ func (l *toDos) take(s settled) bool {
 	changed := e.Settling || len(s.more) > 0
 	e.Settling = false
 	if s.done && (!e.Done || s.saw != "" && s.saw != e.Saw) {
-		e.Done, e.Saw, changed = true, cmp.Or(s.saw, e.Saw), true
+		e.Done, e.Saw, e.Skipped, changed = true, cmp.Or(s.saw, e.Saw), false, true
 	}
 	for j, t := range s.more {
 		l.list = slices.Insert(l.list, s.i+1+j, t)
 		l.entries = slices.Insert(l.entries, s.i+1+j, t.entry())
 	}
+	return changed
+}
+
+// takeLater takes what the work of each to-do left for later has come to
+// so far, without waiting: found done after all, it's done, with what kit
+// saw. What its step's check finds to follow it comes with the next run,
+// the list having moved on. It reports whether the list changed.
+func (l *toDos) takeLater() bool {
+	changed := false
+	l.later = slices.DeleteFunc(l.later, func(later <-chan settled) bool {
+		for {
+			select {
+			case s, ok := <-later:
+				if !ok {
+					return true
+				}
+				s.more = nil
+				changed = l.take(s) || changed
+			default:
+				return false
+			}
+		}
+	})
+	return changed
+}
+
+// awaitLater waits for what the work of each to-do left for later comes
+// to, taking it (takeLater), and reports whether the list changed. The run
+// stopped, it waits no more.
+func (l *toDos) awaitLater(ctx context.Context) bool {
+	changed := false
+	for _, later := range l.later {
+		for s := range later {
+			s.more = nil
+			changed = l.take(s) || changed
+		}
+		if ctx.Err() != nil {
+			break
+		}
+	}
+	l.later = nil
 	return changed
 }
 
