@@ -68,17 +68,6 @@ type Step struct {
 	// Weight is how many things applying it has to do, as known as the run
 	// started: its share of the run's bar. None counts as one.
 	Weight int `json:",omitempty"`
-	// Sources are where the things it waits for that no step in particular
-	// puts in place, as a command, come from, when kit can tell.
-	Sources []Source `json:",omitempty"`
-}
-
-// Source is where a thing a step waits for comes from: the step whose
-// declared line is named as the thing is, as the formula composer is for
-// the command composer, and that line's note, if it has one.
-type Source struct {
-	Thing, Step string
-	Note        string `json:",omitempty"`
 }
 
 // Hand is a step by hand, as a step that raises it lists it: its line's

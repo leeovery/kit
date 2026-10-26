@@ -1,6 +1,6 @@
 
   █  ▄▀  ▀█▀  ▀▀█▀▀  │  bootstrap · laptop · Fri 2 Jan · 03:04
-  █▀▀▄    █     █    │  ▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮  56% · 6m00s so far
+  █▀▀▄    █     █    │  ▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮  57% · 6m00s so far
   █   █  ▄█▄    █    │  ◐ working · nothing needs you
 
 ────────────────────────────────────────────────────┬───────────────────────────────────────────────
@@ -11,7 +11,8 @@
   ● Files and shell  all 2 done                     │  03:09:58  ● Claude MCP: 19 declared, 8 insta…
   ● Mac settings  all 3 done                        │            ○ npm packages  waits for Homebrew…
   ○ Secrets  waits for Sign in to 1Password         │            ○ Composer packages  waits for com…
-  ○ Homebrew formulae  1 of 2 · waits for Homebrew… │
+  ◐ Homebrew formulae  installing ffmp… · 38 of 129 │
+    ▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮  5m08s                 │
   ◐ Homebrew casks  installing slack · 4 of 42      │
     ▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮  5m30s                 │
   ○ App Store apps  waiting                         │
@@ -20,7 +21,6 @@
   ○ Login items  waits for Homebrew casks           │
   ◐ Your steps  applying claude-code                │
   ○ Backups  1 of 3 · Arq waits for Homebrew casks  │
-                                                    │
                                                     │
                                                     │
                                                     │

@@ -325,11 +325,10 @@ func (p *Pretty) logBody(row string, w int) []string {
 	return append(out, p.stillToRun(row, w)...)
 }
 
-// stillToRun are the steps of the row called row that aren't at work and
-// haven't finished, a line each, w wide: the time's column blank, the
-// waiting mark, the step's title, then what it waits for, as its row says
-// it; and, for a command it waits for that kit can tell where from, from
-// where (sourceSays). A step at work has its lines in the log in its place.
+// stillToRun are the steps of the row called row still to run, a line
+// each, w wide: the time's column blank, the waiting mark, the step's
+// title, then what it waits for, as its row says it. A step that's started
+// is never one: its card, or its lines in the log, are in its place.
 func (p *Pretty) stillToRun(row string, w int) []string {
 	var out []string
 	for _, r := range p.shownRows() {
@@ -337,66 +336,36 @@ func (p *Pretty) stillToRun(row string, w int) []string {
 			continue
 		}
 		for _, s := range r.steps {
-			run, running := p.runningOf(s.Name)
-			if _, done := p.results[s.Name]; done || running && p.atWork(run) {
+			if !p.notStarted(s.Name) {
 				continue
 			}
-			says := append([]string{look.Muted(p.waitWords(s))}, p.sourceSays(s)...)
-			l := "  " + strings.Repeat(" ", len(clockFormat)) + "  " + look.Mark(look.Queued) + " " + look.White(p.title(s.Name)) + "  " + look.Says(says...)
+			l := "  " + strings.Repeat(" ", len(clockFormat)) + "  " + look.Mark(look.Queued) + " " + look.White(p.title(s.Name)) + "  " + look.Muted(p.waitWords(s))
 			out = append(out, look.Cut(l, w))
 		}
 	}
 	return out
 }
 
-// sourceSays is where the command s waits for comes from, when kit can tell
-// (event.Step's Sources): its line's note, if it has one, and the step its
-// line is in; then how that step stands (standsAs). Nothing for anything
-// else s waits for.
-func (p *Pretty) sourceSays(s event.Step) []string {
-	r, _ := p.runningOf(s.Name)
-	thing, waiting := strings.CutPrefix(r.doing, "waiting for ")
-	i := slices.IndexFunc(s.Sources, func(src event.Source) bool { return src.Thing == thing })
-	if !waiting || i < 0 {
-		return nil
+// notStarted is whether the step called name is still to run: not
+// finished, and not running, or running only to wait for a thing another
+// step puts in place.
+func (p *Pretty) notStarted(name string) bool {
+	if _, done := p.results[name]; done {
+		return false
 	}
-	src := s.Sources[i]
-	from := "from " + p.title(src.Step)
-	if src.Note != "" {
-		from = src.Note + ", " + from
-	}
-	says := []string{look.Muted(from)}
-	if stands := p.standsAs(src.Step); stands != "" {
-		says = append(says, stands)
-	}
-	return says
-}
-
-// standsAs is how the step called name stands, for a step waiting for what
-// it puts in place: at work, as far as it's got, or, not counting, what
-// it's doing; else what it waits for itself; nothing once it's finished.
-func (p *Pretty) standsAs(name string) string {
 	r, running := p.runningOf(name)
-	_, done := p.results[name]
-	switch {
-	case done:
-		return ""
-	case running && p.atWork(r) && r.of > 0:
-		return look.White(fmt.Sprintf("%d of %d", r.done, r.of))
-	case running && p.atWork(r):
-		return look.Cyan(r.doing)
-	}
-	return look.Muted(p.waitWords(p.step(name)))
+	return !running || !p.needsYou(r) && strings.HasPrefix(r.doing, "waiting for ")
 }
 
 // underWay is what's under way, at the log's foot, w wide, row's alone, or
 // every step's for "": a line each step applying and at work, in the order
 // they started, what it's doing and how far it's got, that kept whole when
-// the line's cut; the first with the time now.
+// the line's cut; the first with the time now. A row's own has its steps
+// checking too, being neither still to run nor showing anything else.
 func (p *Pretty) underWay(row string, w int) []string {
 	var out []string
 	for _, r := range p.running {
-		if !r.applying || !p.atWork(r) || row != "" && p.rowOf(r.step) != row {
+		if !r.applying && row == "" || !p.atWork(r) || row != "" && p.rowOf(r.step) != row {
 			continue
 		}
 		at := strings.Repeat(" ", len(clockFormat))

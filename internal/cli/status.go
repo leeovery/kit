@@ -1,11 +1,9 @@
 package cli
 
 import (
-	"cmp"
 	"context"
 	"fmt"
 	"os"
-	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -398,9 +396,6 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 		r.drifters[d.Name] = kindDrifter{k: k, list: list, held: func() []kind.Held { return r.placing[d.Name].Held }}
 		needed = withNeeded(needed, d, deps)
 	}
-	for i := range kindSteps {
-		kindSteps[i].Sources = r.sources(kindSteps[i])
-	}
 	// One needing an administrator's password, as installing Homebrew
 	// does, asks for it with the rest.
 	for _, step := range needed {
@@ -775,33 +770,3 @@ func partOf(name string) string {
 
 // groupParts are what each group of kinds' things count towards.
 var groupParts = map[kind.Group]string{kind.Packages: render.PartPackages, kind.Settings: render.PartSettings, kind.Secrets: render.PartSecrets}
-
-// sources are where the commands step waits for come from, as far as kit
-// can tell, for a face to say.
-func (r *run) sources(step engine.Step) []event.Source {
-	var out []event.Source
-	for _, w := range step.Waits {
-		if src, ok := r.provider(w); ok {
-			out = append(out, src)
-		}
-	}
-	return out
-}
-
-// provider is where a command waited for comes from: the first line on in
-// the run's lists named as it, in full or by the last part of its name, as
-// owner/tap/composer is composer; its note, the one after it or else those
-// above it.
-func (r *run) provider(w engine.Wait) (event.Source, bool) {
-	if w.Step != "" {
-		return event.Source{}, false
-	}
-	for _, name := range r.kinds {
-		for _, e := range r.lists[name].Entries {
-			if !e.Off && (e.Name == w.Thing || path.Base(e.Name) == w.Thing) {
-				return event.Source{Thing: w.Thing, Step: name, Note: cmp.Or(e.Note, e.Notes)}, true
-			}
-		}
-	}
-	return event.Source{}, false
-}
