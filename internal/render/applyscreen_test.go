@@ -1,6 +1,7 @@
 package render_test
 
 import (
+	"bytes"
 	"fmt"
 	"regexp"
 	"slices"
@@ -558,6 +559,52 @@ func TestApplyingRowSays(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// spaceman is a step by hand whose why and steps hold a link, a bare host
+// and path, with a version and a path on the Mac that aren't links.
+var spaceman = event.NeedsYou{Time: after(360), Step: "manual", Item: "spaceman", Title: "Install Spaceman",
+	Why:   "Spaceman isn't in Homebrew: its releases are at github.com/example/spaceman/releases, 1.3.1 the latest.",
+	Steps: []string{"Download the latest Spaceman .dmg from github.com/example/spaceman/releases", "Drag Spaceman.app to /Applications"}}
+
+// linkTargets are where the links in what a face wrote go, each time it
+// wrote one.
+var linkTargets = regexp.MustCompile("\x1b]8;;([^\x07\x1b]+)")
+
+// A link in a card's text is one the terminal opens when it's clicked, its
+// text as written, on applying's screen and in a small window alike; it
+// takes no room, every line as wide as without it; nothing else is linked.
+func TestApplyingCardsLinkTheirLinks(t *testing.T) {
+	linked := ansi.SetHyperlink("https://github.com/example/spaceman/releases") + "github.com/example/spaceman/releases" + ansi.ResetHyperlink()
+	for _, size := range [][2]int{{160, 64}, {100, 30}, {80, 40}} {
+		t.Run(fmt.Sprintf("%dx%d", size[0], size[1]), func(t *testing.T) {
+			face, out, _ := applyAt(size[0], size[1], 6*time.Minute, cardUp(spaceman))
+			defer func() { _ = face.Close() }()
+			raw := out.String()
+			if !strings.Contains(raw, linked) {
+				t.Errorf("the card's link isn't one:\n%s", screen(raw))
+			}
+			targets := linkTargets.FindAllStringSubmatch(raw, -1)
+			if len(targets) < 2 {
+				t.Errorf("%d links; want the why's and the step's", len(targets))
+			}
+			for _, m := range targets {
+				if m[1] != "https://github.com/example/spaceman/releases" {
+					t.Errorf("a link to %q; want only the releases linked", m[1])
+				}
+			}
+			for i, l := range lines(screen(raw)) {
+				if w := ansi.StringWidth(l); w > size[0] {
+					t.Errorf("line %d is %d wide, wider than the window, %d", i, w, size[0])
+				}
+			}
+		})
+	}
+	var plain bytes.Buffer
+	show(t, render.NewPlain(&plain), cardUp(spaceman))
+	if !strings.Contains(plain.String(), "github.com/example/spaceman/releases") || strings.Contains(plain.String(), "\x1b]8") {
+		t.Errorf("plain, the card is\n%q\nwant its words, no link", plain.String())
 	}
 }
 

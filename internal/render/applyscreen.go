@@ -463,7 +463,7 @@ func (p *Pretty) panel(w int) []string {
 	out := []string{"", spread(title, look.Says(right...)+"  ", w), ""}
 	room := w - len(panelAt)
 	for _, l := range look.Wrap(p.cardWhy(), room) {
-		out = append(out, panelAt+look.Muted(l))
+		out = append(out, panelAt+look.Muted(look.Linked(l)))
 	}
 	out = append(append(out, ""), panelSteps(c.Steps, room)...)
 	if len(c.Steps) > 0 {
@@ -490,7 +490,7 @@ func panelSteps(steps []string, room int) []string {
 				out = append(out, "")
 			}
 			for _, l := range look.Wrap(s, room) {
-				out = append(out, panelAt+look.Muted(l))
+				out = append(out, panelAt+look.Muted(look.Linked(l)))
 			}
 			continue
 		}
@@ -498,7 +498,7 @@ func panelSteps(steps []string, room int) []string {
 		num := fmt.Sprint(n)
 		lead := look.Urgent(num) + "  "
 		for _, l := range look.Wrap(s, room-len(num)-2) {
-			out = append(out, panelAt+lead+look.White(l))
+			out = append(out, panelAt+lead+look.White(look.Linked(l)))
 			lead = strings.Repeat(" ", len(num)+2)
 		}
 	}

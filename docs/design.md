@@ -269,8 +269,10 @@ Mac (`kit manual done <name>`, `--undo` to unmark). Those not done are items of 
 the Manual area, saying what to do, so `kit status` shows them; what kit can check itself stays
 a check that says what to do. While `kit apply` runs at a terminal, one that comes due is raised
 as a card on its screen, front and centre: its title, why it's there, said once (its notes, or,
-for a line with none, kit's words for why the run waits for it), its steps numbered, and a
-notification while it's up, once a look finds it not done or it's been up three seconds,
+for a line with none, kit's words for why the run waits for it), its steps numbered (a link in
+them, or in its why, one the terminal opens when it's clicked: a URL, or a bare host and path,
+as `github.com/owner/tool/releases`, over https; never a version, a path on the Mac or a
+command), and a notification while it's up, once a look finds it not done or it's been up three seconds,
 whichever's first (taken away while it's set aside, posted again as it comes back). Its turn
 come, kit looks at once whether it's done, and it goes up as that look finds it not done, or
 after a quarter of a second, whichever's first, so one found done by then never shows, opens

@@ -21,6 +21,7 @@ package look
 import (
 	"fmt"
 	"image/color"
+	"regexp"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -462,7 +463,7 @@ func Card(w int, c CardText) []string {
 	room := w - 2 - len(cardUnder)
 	muted := func(text string) {
 		for _, l := range Wrap(text, room) {
-			out = append(out, Cut(cardUnder+Muted(l), w-2))
+			out = append(out, Cut(cardUnder+Muted(Linked(l)), w-2))
 		}
 	}
 	if c.Why != "" {
@@ -479,7 +480,7 @@ func Card(w int, c CardText) []string {
 		num := fmt.Sprint(n)
 		at := Urgent(num) + "  "
 		for _, l := range Wrap(s, room-len(num)-2) {
-			out = append(out, Cut(cardUnder+at+White(l), w-2))
+			out = append(out, Cut(cardUnder+at+White(Linked(l)), w-2))
 			at = strings.Repeat(" ", len(num)+2)
 		}
 		out = append(out, "")
@@ -514,7 +515,7 @@ func Tasks(w int, ts ...Task) []string {
 				at, rest = under, under
 			}
 			for _, l := range Wrap(how, w-len(under)-2) {
-				out = append(out, Cut(at+Muted(l), w))
+				out = append(out, Cut(at+Muted(Linked(l)), w))
 				at = rest
 			}
 		}
@@ -542,6 +543,32 @@ func Wrap(text string, width int) []string {
 		out = append(out, line)
 	}
 	return out
+}
+
+// linkWord is a word that's a link, what's around it apart: a URL, or a
+// host, lower case, with a dot and letters after it, then a path, as in
+// github.com/owner/tool/releases. A version, a path on the Mac, an app's
+// bundle and a command aren't.
+var linkWord = regexp.MustCompile(`^([("']*)(https?://\S+?|(?:[a-z0-9-]+\.)+[a-z]{2,}/\S*?)([.,;:!?)"']*)$`)
+
+// Linked is text, a line of it, each link in it one the terminal opens
+// when it's clicked (OSC 8), shown as written, a bare host and path opened
+// over https. A link takes no room: what measures and cuts lines looks
+// past it.
+func Linked(text string) string {
+	words := strings.Split(text, " ")
+	for i, w := range words {
+		m := linkWord.FindStringSubmatch(w)
+		if m == nil {
+			continue
+		}
+		target := m[2]
+		if !strings.Contains(target, "://") {
+			target = "https://" + target
+		}
+		words[i] = m[1] + lipgloss.NewStyle().Hyperlink(target).Render(m[2]) + m[3]
+	}
+	return strings.Join(words, " ")
 }
 
 // Rule is a line across, along kit's gradient, w wide with the margin.

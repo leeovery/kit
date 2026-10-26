@@ -70,6 +70,41 @@ func TestRowsKeepWhatTheyKeep(t *testing.T) {
 	same(t, look.Timeline("  ", 60, at), "  ◐ formulae  installing imagick@8.2 · 25 of 128")
 }
 
+// A link in a line is one the terminal opens when it's clicked, shown as
+// written: a URL, or a bare host and path, opened over https; what's
+// around it left out of it. It takes no room. A version, a path on the
+// Mac, an app's bundle and a command aren't links.
+func TestLinked(t *testing.T) {
+	for _, tt := range []struct {
+		text, target, shown string
+	}{
+		{"Download the latest Spaceman .dmg from github.com/example/spaceman/releases", "https://github.com/example/spaceman/releases", "github.com/example/spaceman/releases"},
+		{"See https://example.com/help.", "https://example.com/help", "https://example.com/help"},
+		{"(editor.example.com/download)", "https://editor.example.com/download", "editor.example.com/download"},
+		{"Update to 1.3.1 first", "", ""},
+		{"Open ~/Library/Containers/com.example.app", "", ""},
+		{"Drag /Applications/Spaceman.app/Contents away", "", ""},
+		{"Spaceman.app/Contents holds it", "", ""},
+		{"then: kit prefs restore", "", ""},
+		{"Sign in at op://vault/item", "", ""},
+	} {
+		got := look.Linked(tt.text)
+		if w := ansi.StringWidth(got); w != len(tt.text) {
+			t.Errorf("Linked(%q) is %d wide, want %d", tt.text, w, len(tt.text))
+		}
+		if ansi.Strip(got) != tt.text {
+			t.Errorf("Linked(%q) shows %q", tt.text, ansi.Strip(got))
+		}
+		want := tt.text
+		if tt.target != "" {
+			want = strings.Replace(tt.text, tt.shown, ansi.SetHyperlink(tt.target)+tt.shown+ansi.ResetHyperlink(), 1)
+		}
+		if got != want {
+			t.Errorf("Linked(%q) = %q, want %q", tt.text, got, want)
+		}
+	}
+}
+
 func TestStatesMarks(t *testing.T) {
 	for s, want := range map[look.State]string{look.Done: "●", look.NeedsYou: "▲", look.Failed: "✗", look.Running: "◐", look.Queued: "○", look.Skipped: "–", look.ToDo: "△"} {
 		if got := ansi.Strip(look.Mark(s)); got != want {

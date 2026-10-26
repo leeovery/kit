@@ -90,7 +90,7 @@ func (p *Pretty) toDoPanel(w int) []string {
 	room := w - len(panelAt)
 	if c.Why != "" {
 		for _, l := range look.Wrap(c.Why, room) {
-			out = append(out, panelAt+look.Muted(l))
+			out = append(out, panelAt+look.Muted(look.Linked(l)))
 		}
 		out = append(out, "")
 	}
@@ -134,7 +134,7 @@ func led(lead string, wide int, text string, room int) []string {
 	var out []string
 	at := panelAt + lead + " "
 	for _, l := range look.Wrap(text, room-wide-1) {
-		out = append(out, at+look.White(l))
+		out = append(out, at+look.White(look.Linked(l)))
 		at = panelAt + strings.Repeat(" ", wide+1)
 	}
 	return out
