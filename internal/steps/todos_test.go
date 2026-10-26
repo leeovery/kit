@@ -315,6 +315,14 @@ func TestAChoiceToDo(t *testing.T) {
 	if !alerted {
 		t.Fatal("what went wrong with r never reached the log")
 	}
+	// r again once the card offers its keys again: pressed before, while
+	// the first was still being done, it goes nowhere.
+	for range 5000 {
+		if shown := c.cardsNow(); len(shown) == 4 && shown[3].Answering == "" {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
 	c.answer(t, steps.ManualName, "r")
 	report := <-done
 	last := toDoLists(c.sink)
