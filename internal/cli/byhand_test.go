@@ -73,7 +73,7 @@ func TestApplyRaisesAStepByHand(t *testing.T) {
 	w.terminal, w.size = true, [2]int{160, 64}
 	kb := &keyboard{}
 	w.listen = kb.listen
-	w.fake.On("osascript", "-e", `display notification "Open the tool" with title "kit" subtitle "Sign in to the tool"`).Does(func() { kb.press(t, ask.Key{Name: "ctrl+c"}) })
+	w.fake.On("osascript", "-e", `display notification "The tool's commands need it." with title "kit" subtitle "Sign in to the tool"`).Does(func() { kb.press(t, ask.Key{Name: "ctrl+c"}) })
 	// osascript there, the login items are checked too: there are none.
 	w.fake.On("osascript", "-l", "JavaScript", "-e", login.ReadScript).Prints("[]")
 
@@ -108,7 +108,7 @@ func TestApplyRaisesACardOnceItsGraceIsOver(t *testing.T) {
 			t.Error("the card's notification wasn't posted while kit's first look at it was under way")
 		}
 	})
-	w.fake.On("osascript", "-e", `display notification "Open the tool" with title "kit" subtitle "Sign in to the tool"`).Does(func() {
+	w.fake.On("osascript", "-e", `display notification "The tool's commands need it." with title "kit" subtitle "Sign in to the tool"`).Does(func() {
 		close(posted)
 		kb.press(t, ask.Key{Name: "ctrl+c"})
 	})
@@ -143,7 +143,7 @@ func TestApplyNotifiesThroughKitsApp(t *testing.T) {
 		{Name: "codesign", Args: []string{"-s", "-", "-f", filepath.Join(work, "kit.app")}},
 	}
 	at := w.now.UnixNano()
-	notify := runner.Command{Name: "open", Args: []string{"-g", "-n", app, "--args", "notify", "--id", "card:sign-in:sign-in", "--title", "Sign in to the tool", "--body", "Open the tool", "--activate", "com.example.terminal", "--at", strconv.FormatInt(at, 10), "--run", "1"}}
+	notify := runner.Command{Name: "open", Args: []string{"-g", "-n", app, "--args", "notify", "--id", "card:sign-in:sign-in", "--title", "Sign in to the tool", "--body", "The tool's commands need it.", "--activate", "com.example.terminal", "--at", strconv.FormatInt(at, 10), "--run", "1"}}
 	clear := runner.Command{Name: "open", Args: []string{"-g", "-n", app, "--args", "clear", "--id", "card:sign-in:sign-in", "--at", strconv.FormatInt(at+1, 10), "--run", "1"}}
 	w.fake.On("xcode-select", "-p")
 	w.fake.On("codesign", built[2].Args...)

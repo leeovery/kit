@@ -272,7 +272,9 @@ as a card on its screen, front and centre: its title, why it's there, said once 
 for a line with none, kit's words for why the run waits for it), its steps numbered (a link in
 them, or in its why, one the terminal opens when it's clicked: a URL, or a bare host and path,
 as `github.com/owner/tool/releases`, over https; never a version, a path on the Mac or a
-command), and a notification while it's up, once a look finds it not done or it's been up three seconds,
+command), and a notification while it's up (its title, then the first sentence of its why, or, with
+none, its first step that isn't its title, cut after a word past 90 characters; never the title
+twice), once a look finds it not done or it's been up three seconds,
 whichever's first (taken away while it's set aside, posted again as it comes back). Its turn
 come, kit looks at once whether it's done, and it goes up as that look finds it not done, or
 after a quarter of a second, whichever's first, so one found done by then never shows, opens

@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -12,6 +14,7 @@ import (
 	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/hand"
+	"github.com/leeovery/kit/internal/look"
 	"github.com/leeovery/kit/internal/notice"
 )
 
@@ -528,13 +531,52 @@ func noticeID(step, item string) string {
 	return "card:" + step + ":" + item
 }
 
-// noticeOf is what a card's notification says under its title: its first
-// step, else that kit waits for it.
+// noticeAt is the most a card's notification says under its title, in
+// characters: about the two lines macOS shows of a notification's body.
+const noticeAt = 90
+
+// noticeOf is what a card's notification says under its title, never the
+// title again: the first sentence of why the card's there; with no why, its
+// first step that isn't its title nor heads others; else that kit waits for
+// it. One longer than noticeAt is cut at a word.
 func noticeOf(card event.NeedsYou) string {
-	if len(card.Steps) > 0 {
-		return card.Steps[0]
+	said := func(s string) bool {
+		return s != "" && !look.Subheading(s) && !strings.EqualFold(strings.TrimRight(s, ".!?"), strings.TrimRight(card.Title, ".!?"))
+	}
+	if why := firstSentence(card.Why); said(why) {
+		return cutAtWord(why, noticeAt)
+	}
+	if i := slices.IndexFunc(card.Steps, said); i >= 0 {
+		return cutAtWord(card.Steps[i], noticeAt)
 	}
 	return "kit waits for you to do this"
+}
+
+// sentenceEnd is where a sentence ends: its full stop, question or
+// exclamation mark, then a space.
+var sentenceEnd = regexp.MustCompile(`[.?!]\s`)
+
+// firstSentence is text's first sentence, its full stop and all.
+func firstSentence(text string) string {
+	text = strings.TrimSpace(text)
+	if at := sentenceEnd.FindStringIndex(text); at != nil {
+		return text[:at[0]+1]
+	}
+	return text
+}
+
+// cutAtWord is text, or, longer than n characters, as much of it as fits
+// in n, cut after a whole word, and an ellipsis.
+func cutAtWord(text string, n int) string {
+	runes := []rune(text)
+	if len(runes) <= n {
+		return text
+	}
+	cut := string(runes[:n])
+	if at := strings.LastIndex(cut, " "); at > 0 {
+		cut = cut[:at]
+	}
+	return strings.TrimRight(cut, ",;:") + "…"
 }
 
 // hasLocked reports whether it's pl's turn. mu is held.

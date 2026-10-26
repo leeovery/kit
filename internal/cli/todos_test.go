@@ -98,7 +98,7 @@ func TestApplyWorksThroughTheToDos(t *testing.T) {
 	w, kb := toDoWorld(t, false)
 	w.writeSection(t, "laptop", "features", "prefs\n")
 	w.writeSection(t, "laptop", "manual", `sharing "Allow remote users Full Disk Access" --group "System Settings"`+"\n  System Settings › General › Sharing\n")
-	notified(t, w, kb, "Bring back apps' settings", "kit waits for you to do this", ask.Key{Text: "f"})
+	notified(t, w, kb, "Bring back apps' settings", "First, so the apps you open next start with yours.", ask.Key{Text: "f"})
 	notified(t, w, kb, "Allow remote users Full Disk Access", "System Settings › General › Sharing", ask.Key{Text: " "})
 
 	if _, errOut, code := w.run(t, "apply"); code == 2 {

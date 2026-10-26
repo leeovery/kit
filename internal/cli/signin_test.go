@@ -57,7 +57,7 @@ func TestApplyRaisesTheStoresSignIn(t *testing.T) {
 	f := w.fake
 	f.On("op", "whoami").Exits(1)
 	f.On("op", "account", "list", "--format", "json").Prints("[]")
-	f.On("osascript", "-e", `display notification "Scan the QR code 1Password shows with 1Password on your phone" with title "kit" subtitle "Sign in to 1Password"`)
+	f.On("osascript", "-e", `display notification "Your secrets come from 1Password." with title "kit" subtitle "Sign in to 1Password"`)
 	f.On("osascript", "-l", "JavaScript", "-e", login.ReadScript).Prints("[]")
 	f.On("open", "-b", signInApp).Does(func() { kb.press(t, ask.Key{Name: "ctrl+c"}) })
 

@@ -351,7 +351,7 @@ func ended(t *testing.T, applying <-chan error) error {
 // A step by hand of its own, come due at a terminal, goes up as a card: its
 // line's name, what to do, its group, why, its steps, whether kit tells by
 // itself when it's done, and a notification posted: its title what to do,
-// its body the first step; kit opens nothing, and runs nothing. Done, with
+// its body why, its first sentence; kit opens nothing, and runs nothing. Done, with
 // no test, marks it done on this Mac, as kit manual done does, takes its
 // card down, and takes the notification away.
 func TestACardGoesUpAndIsDone(t *testing.T) {
@@ -376,7 +376,7 @@ func TestACardGoesUpAndIsDone(t *testing.T) {
 	if res := step.Check(t.Context()); res.State != check.OK {
 		t.Errorf("after Done, check = %+v, want it marked done", res)
 	}
-	notified := []string{"notify card:sharing:sharing | Turn on sharing | Open System Settings", "clear card:sharing:sharing"}
+	notified := []string{"notify card:sharing:sharing | Turn on sharing | For logging in from elsewhere.", "clear card:sharing:sharing"}
 	if got := c.posted(); !slices.Equal(got, notified) {
 		t.Errorf("notifications %q, want %q", got, notified)
 	}
@@ -1270,8 +1270,8 @@ func TestACardGoesUpAgain(t *testing.T) {
 		t.Errorf("undone %v, the step by hand stands %+v; want it done again", undone, report.Results["appstore"])
 	}
 	posted := []string{
-		"notify card:appstore:appstore | Sign in to the App Store | Open the App Store", "clear card:appstore:appstore",
-		"notify card:appstore:appstore | Sign in to the App Store | Open the App Store", "clear card:appstore:appstore",
+		"notify card:appstore:appstore | Sign in to the App Store | The App Store's apps install once you're signed in.", "clear card:appstore:appstore",
+		"notify card:appstore:appstore | Sign in to the App Store | The App Store's apps install once you're signed in.", "clear card:appstore:appstore",
 	}
 	if got := c.posted(); !slices.Equal(got, posted) {
 		t.Errorf("notifications %q, want %q", got, posted)
