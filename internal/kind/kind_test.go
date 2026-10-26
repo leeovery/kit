@@ -787,7 +787,7 @@ func TestStepSaysDownloadingOnceItsCommandStarts(t *testing.T) {
 }
 
 // A thing said installed ends the downloading, though nothing said the
-// install had begun.
+// install had begun, counting as far as its download and its install.
 func TestStepInstallingWithoutABeginning(t *testing.T) {
 	k := &fetchingKind{countingKind: &countingKind{fakeKind: knowing("a", "b"), prints: []string{"done a"}}}
 	var said []event.Doing
@@ -795,7 +795,7 @@ func TestStepInstallingWithoutABeginning(t *testing.T) {
 	if err := s.Apply(saying(&said), s.Check(context.Background())); err != nil {
 		t.Fatalf("Apply() error = %v", err)
 	}
-	if want := []event.Doing{{Says: "downloading", Of: 2}, {Says: "installing b", Done: 1, Of: 2, Far: 0.5 + half(1, 2)}}; !slices.Equal(said, want) {
+	if want := []event.Doing{{Says: "downloading", Of: 2}, {Says: "installing b", Done: 1, Of: 2, Far: half(2, 2)}}; !slices.Equal(said, want) {
 		t.Errorf("the step said %+v, want %+v", said, want)
 	}
 }

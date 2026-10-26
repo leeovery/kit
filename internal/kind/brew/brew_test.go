@@ -393,7 +393,8 @@ const installing = `==> Fetching downloads for: ffmpeg and hello
 // starts, counting those asked for as each is downloaded, then, once brew's
 // begun installing, counts them installed, naming the one brew says it's
 // installing, by its name in its tap, whatever the order they're declared
-// in; never less far than it's said it got.
+// in; as far as each is, a half for its download, a half for its install,
+// of all three, the tap's first one moving it no further than its share.
 func TestApplyingCountsTheFormulae(t *testing.T) {
 	fake := runnertest.New(t)
 	fake.On("brew", "list", "--formula", "--full-name", "-1").Prints("jq\n")
@@ -414,16 +415,16 @@ func TestApplyingCountsTheFormulae(t *testing.T) {
 	if i := slices.IndexFunc(fake.Commands(), func(c runner.Command) bool { return c.String() == "brew tap owner/tap" }); i < 0 || fake.Commands()[i].Lines == nil {
 		t.Error("the tap, holding Homebrew's turn, isn't watched for going quiet")
 	}
-	half := func(done int) float64 { return float64(done) / 3.0 / 2 }
+	half := func(halves int) float64 { return float64(halves) / 3.0 / 2 }
 	want := []event.Doing{
 		{Says: "tapping owner/tap"},
 		{Says: "updating Homebrew"},
 		{Says: "downloading", Of: 3}, {Says: "downloading", Done: 1, Of: 3, Far: half(1)},
-		{Says: "installing tuicr", Of: 3, Far: 0.5}, {Says: "installing", Done: 1, Of: 3, Far: 0.5 + half(1)},
-		{Says: "downloading", Done: 1, Of: 3, Far: 0.5 + half(1)},
-		{Says: "downloading", Done: 2, Of: 3, Far: 0.5 + half(1)}, {Says: "downloading", Done: 3, Of: 3, Far: 0.5 + half(1)},
-		{Says: "installing ffmpeg", Done: 1, Of: 3, Far: 0.5 + half(1)}, {Says: "installing", Done: 2, Of: 3, Far: 0.5 + half(2)},
-		{Says: "installing hello", Done: 2, Of: 3, Far: 0.5 + half(2)}, {Says: "installing", Done: 3, Of: 3, Far: 0.5 + half(3)},
+		{Says: "installing tuicr", Of: 3, Far: half(1)}, {Says: "installing", Done: 1, Of: 3, Far: half(2)},
+		{Says: "downloading", Done: 1, Of: 3, Far: half(2)},
+		{Says: "downloading", Done: 2, Of: 3, Far: half(3)}, {Says: "downloading", Done: 3, Of: 3, Far: half(4)},
+		{Says: "installing ffmpeg", Done: 1, Of: 3, Far: half(4)}, {Says: "installing", Done: 2, Of: 3, Far: half(5)},
+		{Says: "installing hello", Done: 2, Of: 3, Far: half(5)}, {Says: "installing", Done: 3, Of: 3, Far: half(6)},
 	}
 	if !slices.Equal(said, want) {
 		t.Errorf("applying said %+v\nwant %+v", said, want)

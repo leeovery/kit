@@ -1147,8 +1147,8 @@ func (p *progress) farther(far float64) float64 {
 
 // say says how the install's going: nothing, for a Fetcher's whose command
 // hasn't started; a Fetcher's moving through downloading, then installing,
-// each half the way; quiet, since when it's said nothing. Once lines can
-// come, p.mu must be held.
+// as far as it's got (got); quiet, since when it's said nothing. Once lines
+// can come, p.mu must be held.
 func (p *progress) say() {
 	quiet := func(says string) string {
 		if p.quiet {
@@ -1156,18 +1156,31 @@ func (p *progress) say() {
 		}
 		return says
 	}
-	n := float64(len(p.names))
 	switch {
 	case p.says != "":
 		event.Say(p.ctx, event.Doing{Says: quiet(p.says)})
 	case p.unstarted:
 	case p.fetching:
-		event.Say(p.ctx, event.Doing{Says: quiet("downloading"), Done: len(p.fetched), Of: len(p.names), Far: p.farther(float64(len(p.fetched)) / n / 2)})
+		event.Say(p.ctx, event.Doing{Says: quiet("downloading"), Done: len(p.fetched), Of: len(p.names), Far: p.farther(p.got())})
 	case p.fetcher != nil:
-		event.Say(p.ctx, event.Doing{Says: quiet(strings.TrimSpace("installing " + p.shown(p.next()))), Done: len(p.done), Of: len(p.names), Far: p.farther(0.5 + float64(len(p.done))/n/2)})
+		event.Say(p.ctx, event.Doing{Says: quiet(strings.TrimSpace("installing " + p.shown(p.next()))), Done: len(p.done), Of: len(p.names), Far: p.farther(p.got())})
 	default:
 		event.Say(p.ctx, event.Doing{Says: quiet(strings.TrimSpace("installing " + p.shown(p.next()))), Done: len(p.done), Of: len(p.names)})
 	}
+}
+
+// got is how far a Fetcher's install has got, of 1: half a thing for each
+// downloaded, or installed without its download said, and half for each
+// installed. Each command's things count to the whole, so a first, small
+// batch moves it no further than its share.
+func (p *progress) got() float64 {
+	in := len(p.fetched)
+	for name := range p.done {
+		if !p.fetched[name] {
+			in++
+		}
+	}
+	return float64(in+len(p.done)) / float64(len(p.names)) / 2
 }
 
 // UnattendedApply is k's step's apply as the scheduled run takes it:
