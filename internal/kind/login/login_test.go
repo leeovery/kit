@@ -118,7 +118,7 @@ func TestCompare(t *testing.T) {
 	l.AppDirs = []string{t.TempDir()}
 	got := kind.Compare(t.Context(), l, declared("Com.GetDropbox.Dropbox", "com.manytricks.moom", "com.example.notyet"))
 	want := []check.Item{
-		{ID: "login-item:com.example.notyet", Name: "com.example.notyet", State: kind.Missing, Detail: "not installed: install the app, or open the app it comes with", Later: true},
+		{ID: "login-item:com.example.notyet", Name: "com.example.notyet", State: kind.Missing, Detail: "not installed: install the app, or open the app it comes with"},
 		{ID: "login-item:com.manytricks.moom", Name: "com.manytricks.moom", State: kind.Missing, Action: kind.Install},
 		{ID: "login-item:Gone-Helper", Name: "Gone-Helper", State: kind.Extra},
 		{ID: "login-item:com.stairways.keyboardmaestro.engine", Name: "com.stairways.keyboardmaestro.engine", State: kind.Extra},
@@ -163,7 +163,7 @@ func TestAnAppLaunchServicesDoesntKnowIsLookedFor(t *testing.T) {
 	l.AppDirs = []string{apps, filepath.Join(more, "missing"), more}
 	got := kind.Compare(t.Context(), l, declared("com.example.gone", "com.manytricks.moom", "com.stairways.keyboardmaestro.engine", "dev.example.spaceman"))
 	want := []check.Item{
-		{ID: "login-item:com.example.gone", Name: "com.example.gone", State: kind.Missing, Detail: "not installed: install the app, or open the app it comes with", Later: true},
+		{ID: "login-item:com.example.gone", Name: "com.example.gone", State: kind.Missing, Detail: "not installed: install the app, or open the app it comes with"},
 		{ID: "login-item:com.manytricks.moom", Name: "com.manytricks.moom", State: kind.Missing, Action: kind.Install},
 		{ID: "login-item:com.stairways.keyboardmaestro.engine", Name: "com.stairways.keyboardmaestro.engine", State: kind.Missing, Action: kind.Install},
 		{ID: "login-item:dev.example.spaceman", Name: "dev.example.spaceman", State: kind.Missing, Action: kind.Install},

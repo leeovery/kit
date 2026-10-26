@@ -282,11 +282,11 @@ func appliedRun() []event.Event {
 }
 
 // waitingRun is a run all well whose rows have things waiting, quiet, new:
-// still to come by themselves, Claude's servers for projects whose folders
-// aren't there yet and login items for apps not installed; and not, a
-// linked file of its own, an edit to kit-config not committed, a folder
-// Spotlight leaves out after a restart, and a formula held for a secret
-// that never came.
+// still to come by itself, Claude's servers for projects whose folders
+// aren't there yet; and not, login items for apps not installed, a linked
+// file of its own, an edit to kit-config not committed, a folder Spotlight
+// leaves out after a restart, and a formula held for a secret that never
+// came.
 func waitingRun() []event.Event {
 	all := append(slices.Clone(newMac),
 		event.Step{Name: "claude-mcp", Title: "Claude MCP", Area: "Drift", Row: "Developer tools"},
@@ -305,7 +305,7 @@ func waitingRun() []event.Event {
 		case "claude-mcp":
 			res.Summary, res.Items = "19 declared, 8 installed", waiting("claude-mcp", "missing", "no project folder yet", true, numbered("~/Code/site", 11)...)
 		case "login-item":
-			res.Summary, res.Items = "5 declared, 2 installed", waiting("login-item", "missing", "not installed: install the app, or open the app it comes with", true, "Tool", "Monitor", "Clipper")
+			res.Summary, res.Items = "5 declared, 2 installed", waiting("login-item", "missing", "not installed: install the app, or open the app it comes with", false, "Tool", "Monitor", "Clipper")
 		case "file":
 			res.Items = waiting("file", "diverged", "a file of its own, different from shared/home/.zshrc", false, "~/.zshrc")
 		case "config":
@@ -1543,10 +1543,10 @@ func TestApplyingRecordSections(t *testing.T) {
 }
 
 // Under a row done, the record keeps what of its steps still waits, but for
-// what's known to be still to come by itself: a linked file of its own, an
-// edit not committed, a folder Spotlight leaves out after a restart, a
-// formula held for a secret that never came stay; Claude's servers for
-// projects not there yet and login items for apps not installed go.
+// what's known to be still to come by itself: login items for apps not
+// installed, a linked file of its own, an edit not committed, a folder
+// Spotlight leaves out after a restart, a formula held for a secret that
+// never came stay; Claude's servers for projects not there yet go.
 func TestApplyingRecordLeavesOutOnlyWhatComesLater(t *testing.T) {
 	face, out, _ := applyAt(160, 64, time.Minute, waitingRun())
 	if err := face.Close(); err != nil {
@@ -1558,12 +1558,13 @@ func TestApplyingRecordLeavesOutOnlyWhatComesLater(t *testing.T) {
 		"│ shared/home/.zshrc · +2 −1 lines",
 		"│ ~/Code · added to Spotlight's list",
 		"│ owner/private/fetcher · needs Secrets, which isn't there yet",
+		"│ Monitor · not installed",
 	} {
 		if !strings.Contains(record, want) {
 			t.Errorf("the record is\n%s\nwant it to keep %q", record, want)
 		}
 	}
-	for _, gone := range []string{"no project folder yet", "Monitor"} {
+	for _, gone := range []string{"no project folder yet"} {
 		if strings.Contains(record, gone) {
 			t.Errorf("the record is\n%s\nwant nothing of %q: it comes by itself", record, gone)
 		}

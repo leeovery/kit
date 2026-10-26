@@ -51,7 +51,8 @@ type Item struct {
 	// with the steps by hand: none for anything else.
 	ToDo *ToDo `json:"to_do,omitempty"`
 	// Later is whether it's known to be still to come, by itself, as a
-	// login item's app not installed yet: nothing for the person to settle.
+	// project's MCP server whose folder isn't there yet: nothing for the
+	// person to settle.
 	Later bool `json:"later,omitempty"`
 }
 

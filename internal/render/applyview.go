@@ -512,8 +512,8 @@ func (p *Pretty) notRunSection() []string {
 
 // doneSection is the rows whose steps were all well, a line each, in
 // order, saying what they did; under it what of theirs still waits, but
-// for what's known to be still to come by itself, as a login item's app
-// not installed yet (check.Item's Later): kit status says that.
+// for what's known to be still to come by itself, as a project's server
+// whose folder isn't there yet (check.Item's Later): kit status says that.
 func (p *Pretty) doneSection() []string {
 	done := p.rowsDone()
 	if len(done) == 0 {

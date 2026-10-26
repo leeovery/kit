@@ -117,8 +117,8 @@ type Blocker interface {
 }
 
 // Block is why a thing can't be installed now, and whether it's known to
-// be still to come, by itself, as the app it's for, rather than anything
-// the person might settle.
+// be still to come, by itself, as the project folder it's for, rather than
+// anything the person might settle.
 type Block struct {
 	Why   string
 	Later bool
