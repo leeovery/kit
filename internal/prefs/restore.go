@@ -12,10 +12,8 @@ import (
 	"regexp"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/leeovery/kit/internal/apps"
-	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/plist"
 	"github.com/leeovery/kit/internal/runner"
 )
@@ -25,8 +23,7 @@ import (
 // waits; At, the store as it was then; As, one domain into a scratch
 // domain, testing a restore without touching the app; DryRun, only say
 // what would be done. Unattended, with Pending, is the hourly pass, with no
-// one there: it opens no app, leaving one with no settings folder for the
-// person to open, and leaves what failed otherwise for them to try again.
+// one there: it leaves what failed otherwise for the person to try again.
 type RestoreOptions struct {
 	From       string
 	Domains    []string
@@ -46,9 +43,8 @@ type RestoreReport struct {
 	Restored   []string
 	Files      int
 	// Waiting are the domains left pending, each with why: not installed,
-	// or running. ToOpen, those whose apps the person opens once, each with
-	// why: kit opened them and no settings folder came of it, or, unattended,
-	// kit opens none.
+	// or running. ToOpen, those whose sandboxed apps the person opens once,
+	// for their settings folders, each with why.
 	Waiting, ToOpen map[string]string
 	// Failed are the domains that failed otherwise, each with why;
 	// FilesFailed, the settings files, by their paths from ~ (or /), each
@@ -193,51 +189,18 @@ func (p *Prefs) running(ctx context.Context, id string) bool {
 	return err == nil && strings.TrimSpace(string(res.Stdout)) == "true"
 }
 
-// Why a sandboxed app's container isn't there: kit opened it, and none came
-// of it; or kit may not open it; or, opened, it didn't quit.
-var (
-	errNoFolder  = errors.New("opened once, it still has no settings folder")
-	errNotOpened = errors.New("it has no settings folder till it's opened once")
-	errDidntQuit = errors.New("opened once for its settings folder, but it didn't quit")
-)
+// errNotOpened is why a sandboxed app's settings wait: its container,
+// where it reads them, is there only once it's been opened.
+var errNotOpened = errors.New("it has no settings folder till it's opened once")
 
-// ensureContainer makes a sandboxed app's container, where it reads its
-// settings, which exists only once it has run, when open says it may:
-// launched hidden once, then quit, the run's log naming it as it opens.
-// One that won't quit isn't restored, as it would write its defaults back
-// when it did.
-func (p *Prefs) ensureContainer(ctx context.Context, id, app string, open bool) error {
+// ensureContainer reports whether the app at app, of bundle id id, has
+// where it reads its settings: a sandboxed app's container exists only
+// once it has run, which kit leaves the person to do.
+func (p *Prefs) ensureContainer(ctx context.Context, id, app string) error {
 	if p.hasFolder(id) || !p.sandboxed(ctx, app) {
 		return nil
 	}
-	if !open {
-		return errNotOpened
-	}
-	container := filepath.Join(p.Home, "Library/Containers", id)
-	event.Log(ctx, event.Logged{Line: "Opening " + appName(app) + " once, for its settings folder"})
-	_, _ = p.Run.Run(ctx, runner.Command{Name: "open", Args: []string{"-g", "-j", "-b", id}})
-	for range 40 {
-		if _, err := os.Stat(container); err == nil {
-			break
-		}
-		p.Sleep(500 * time.Millisecond)
-	}
-	_, _ = p.Run.Run(ctx, runner.Command{Name: "osascript", Args: []string{"-e", fmt.Sprintf("tell application id %q to quit", id)}})
-	quit := false
-	for range 20 {
-		if !p.running(ctx, id) {
-			quit = true
-			break
-		}
-		p.Sleep(500 * time.Millisecond)
-	}
-	if !quit {
-		return errDidntQuit
-	}
-	if !p.hasFolder(id) {
-		return errNoFolder
-	}
-	return nil
+	return errNotOpened
 }
 
 // sandboxed reports whether the app at app is sandboxed: its entitlements,
@@ -429,7 +392,7 @@ func (p *Prefs) Restore(ctx context.Context, opts RestoreOptions) (RestoreReport
 			continue
 		}
 		p.restoreOwned(ctx, &report, domain, owners, installed, restoring{
-			stored: filepath.Join(domainsDir, domain+".plist"), saved: saved, open: !opts.Unattended, dryRun: opts.DryRun, containers: containers,
+			stored: filepath.Join(domainsDir, domain+".plist"), saved: saved, dryRun: opts.DryRun, containers: containers,
 		})
 	}
 
@@ -493,19 +456,18 @@ func (r RestoreReport) held(h held, every, files bool) held {
 }
 
 // restoring is how a domain is restored: from its stored copy, the live
-// settings saved first in saved; open, whether its app may be opened once
-// for its settings folder; dryRun, only saying it would be. containers
-// are what making each app's container came to, by bundle id, in this
-// restore, so an app with several domains is opened once.
+// settings saved first in saved; dryRun, only saying it would be.
+// containers are whether each app has its container, by bundle id, in
+// this restore, so an app with several domains is looked at once.
 type restoring struct {
 	stored, saved string
-	open, dryRun  bool
+	dryRun        bool
 	containers    map[string]error
 }
 
 // restoreOwned restores domain, whose apps are owners, of those installed,
-// into report: waiting while one's running; its app to open, or waiting,
-// when its settings folder isn't there; failed, as restoreDomain fails;
+// into report: waiting while one's running; its app to open when its
+// settings folder isn't there; failed, as restoreDomain fails;
 // else restored.
 func (p *Prefs) restoreOwned(ctx context.Context, report *RestoreReport, domain string, owners []string, installed map[string]string, how restoring) {
 	app := func(id string) App { return App{ID: id, Name: appName(installed[id])} }
@@ -520,18 +482,13 @@ func (p *Prefs) restoreOwned(ctx context.Context, report *RestoreReport, domain 
 	for _, id := range owners {
 		err, made := how.containers[id]
 		if !made {
-			err = p.ensureContainer(ctx, id, installed[id], how.open)
+			err = p.ensureContainer(ctx, id, installed[id])
 			how.containers[id] = err
 		}
-		switch {
-		case err == nil:
+		if err == nil {
 			continue
-		case errors.Is(err, errDidntQuit):
-			report.Waiting[domain] = err.Error()
-		default:
-			report.ToOpen[domain] = err.Error()
 		}
-		report.Apps[domain] = app(id)
+		report.ToOpen[domain], report.Apps[domain] = err.Error(), app(id)
 		return
 	}
 	if err := p.restoreDomain(ctx, how.stored, domain, how.saved); err != nil {

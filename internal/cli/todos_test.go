@@ -98,7 +98,7 @@ func TestApplyWorksThroughTheToDos(t *testing.T) {
 	w, kb := toDoWorld(t, false)
 	w.writeSection(t, "laptop", "features", "prefs\n")
 	w.writeSection(t, "laptop", "manual", `sharing "Allow remote users Full Disk Access" --group "System Settings"`+"\n  System Settings › General › Sharing\n")
-	notified(t, w, kb, "Bring back apps' settings", "First, so the apps you open next start with yours.", ask.Key{Text: "f"})
+	notified(t, w, kb, "Restore application settings", "First, so the apps you open next start with yours.", ask.Key{Text: "f"})
 	notified(t, w, kb, "Allow remote users Full Disk Access", "System Settings › General › Sharing", ask.Key{Text: " "})
 
 	if _, errOut, code := w.run(t, "apply"); code == 2 {
@@ -106,16 +106,16 @@ func TestApplyWorksThroughTheToDos(t *testing.T) {
 	}
 	records := w.lastLog(t)
 	lists := toDoLists(records)
-	if len(lists) != 8 {
-		t.Fatalf("the to-dos were listed %d times, want once as each came up, once as each was done, apps' settings once more as what it waited for was settled, and once over: %+v", len(lists), lists)
+	if len(lists) != 7 {
+		t.Fatalf("the to-dos were listed %d times, want once as each came up, once as each was done, and once over: %+v", len(lists), lists)
 	}
-	want := []string{"Bring back apps' settings", "Allow remote users Full Disk Access", "Add a Time Machine disk"}
+	want := []string{"Restore application settings", "Allow remote users Full Disk Access", "Add a Time Machine disk"}
 	if got := titles(lists[0]); !slices.Equal(got, want) || *lists[0].Up != 0 {
 		t.Errorf("the to-dos came up as %q, %d up; want %q, the first up", got, *lists[0].Up, want)
 	}
 	shown := want[:2]
 	last := lists[len(lists)-1]
-	for i, saw := range []string{"saving from now, nothing brought back", "", "last backup 02:34"} {
+	for i, saw := range []string{"saving from now, nothing restored", "", "last backup 02:34"} {
 		if td := last.ToDos[i]; !td.Done || td.Saw != saw {
 			t.Errorf("%s ended %+v; want it done, kit having seen %q", td.Title, td, saw)
 		}
@@ -139,7 +139,7 @@ func TestApplyWorksThroughTheToDos(t *testing.T) {
 	if got := downs(records); !slices.Equal(got, []string{"prefs:paused", "manual:sharing"}) {
 		t.Errorf("cards came down for %q, want each that went up, as it was done", got)
 	}
-	if want := []string{"Bring back apps' settings: f"}; !slices.Equal(answering, want) {
+	if want := []string{"Restore application settings: f"}; !slices.Equal(answering, want) {
 		t.Errorf("cards went up being answered: %q, want %q, its keys not offered while f was done", answering, want)
 	}
 	if got := finishedAs(records, "time-machine"); !slices.Equal(got, []check.State{check.Attention, check.OK}) {

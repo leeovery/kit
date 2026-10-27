@@ -25,7 +25,7 @@ import (
 // kit's own to-dos are its checks' items, in its words, one wording
 // wherever they show: the to-do's title the item's name, how to do it in a
 // line its detail; then why, its steps, what kit watches for and its group;
-// apps' settings a choice, of bringing them back or starting afresh, that
+// apps' settings a choice, of restoring them or starting afresh, that
 // comes first. The backup tools' are their drivers', tested with them.
 func TestKitsOwnToDos(t *testing.T) {
 	state := t.TempDir()
@@ -38,15 +38,15 @@ func TestKitsOwnToDos(t *testing.T) {
 		want check.Item
 	}{
 		{steps.Prefs(settings, now), check.Item{
-			ID: "prefs:paused", Name: "Bring back apps' settings", State: steps.Problem,
+			ID: "prefs:paused", Name: "Restore application settings", State: steps.Problem,
 			Detail: "kit prefs restore, or kit prefs start-fresh",
 			ToDo: &check.ToDo{
-				Title: "Bring back apps' settings",
-				Why:   "First, so the apps you open next start with yours. Bringing them back opens some apps once: their windows, notifications and permission prompts may follow. This Mac saves its own once they're back.",
+				Title: "Restore application settings",
+				Why:   "First, so the apps you open next start with yours. This Mac saves its own once they're restored.",
 				Group: "Apps",
 				Keys: []check.Key{
-					{Key: "r", Does: "brings them back from this Mac's last save"},
-					{Key: "f", Does: "starts afresh: nothing back, saving from now"},
+					{Key: "r", Does: "restores this machine ID's last save"},
+					{Key: "f", Does: "starts afresh: nothing restored, saving from now"},
 				},
 				First: true,
 			}}},
@@ -418,6 +418,126 @@ func TestAToDoLeavesAnother(t *testing.T) {
 	defer mu.Unlock()
 	if !slices.Contains(settled, "prefs:open") || report.Results["prefs"].State != check.OK {
 		t.Errorf("settled %q, prefs stands %s; want the apps to open settled, then prefs ok", settled, report.Results["prefs"].State)
+	}
+}
+
+// sandboxed is a step whose to-do the person says is done, as an app to
+// open and quit: its choice opening the app as its card goes up, counted,
+// and its answers, to Done, failing as long as fail says, then doing it.
+type sandboxed struct {
+	mu      sync.Mutex
+	opened  int
+	answers []string
+	fail    bool
+	done    bool
+}
+
+func (s *sandboxed) step() engine.Step {
+	return engine.Step{
+		Name: "prefs", Title: "App settings", Area: steps.AreaBackups,
+		Check: func(context.Context) check.Result {
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			if s.done {
+				return check.Result{State: check.OK, Summary: "saving from tonight"}
+			}
+			return check.Result{State: check.Attention, Summary: "1 app to open once", Items: []check.Item{toDoItem("prefs", check.ToDo{Title: "Open Boxed App and quit it", SaysDone: true, First: true})}}
+		},
+		Choice: &engine.Choice{
+			Open: func(context.Context, check.Item) {
+				s.mu.Lock()
+				defer s.mu.Unlock()
+				s.opened++
+			},
+			Answer: func(_ context.Context, _ check.Item, key string) (string, error) {
+				s.mu.Lock()
+				defer s.mu.Unlock()
+				s.answers = append(s.answers, key)
+				if s.fail {
+					return "", errors.New("Boxed App is still running")
+				}
+				s.done = true
+				return "1 app's settings", nil
+			},
+		},
+	}
+}
+
+// answered waits till s has had n answers.
+func (s *sandboxed) answered(t *testing.T, n int) {
+	t.Helper()
+	for range 5000 {
+		s.mu.Lock()
+		got := len(s.answers)
+		s.mu.Unlock()
+		if got >= n {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("the to-do never had %d answers", n)
+}
+
+// A to-do the person says is done has space (Done) as its answer, kit not
+// telling by itself, no keys offered: its step's choice opens what it
+// needs as its card goes up, once; Done is its choice's to answer, as
+// "done", which, failing, has the log say why and the card stay up, and,
+// done, takes it down, what it did as what kit saw.
+func TestAToDoThePersonSaysIsDone(t *testing.T) {
+	defer steps.SetManualPoll(time.Hour)()
+	c := newCard(t)
+	s := &sandboxed{fail: true}
+	done := make(chan engine.Report, 1)
+	go func() {
+		done <- applied(t, c, atTheEnd(steps.Manual(c.fake, "/home/someone", c.state, config.List{}, c.raise), s.step()))
+	}()
+	c.upNow(t, "prefs:none")
+	if up := c.cards(t, 1)[0]; up.Tells || len(up.Keys) != 0 {
+		t.Errorf("the card up is %+v; want the person saying it's done, no keys", up)
+	}
+	c.answer(t, steps.ManualName, hand.Done)
+	s.answered(t, 1)
+	s.mu.Lock()
+	s.fail = false
+	s.mu.Unlock()
+	c.answer(t, steps.ManualName, hand.Done)
+	report := <-done
+	if todos := c.lastToDos(); len(todos) != 1 || !todos[0].Done || todos[0].Saw != "1 app's settings" {
+		t.Errorf("the to-dos ended %+v; want it done, kit having seen what its answer did", todos)
+	}
+	c.sink.mu.Lock()
+	alerted := slices.ContainsFunc(c.sink.seen, func(e event.Event) bool {
+		l, ok := e.(event.Logged)
+		return ok && l.Alert && l.Line == "Open Boxed App and quit it: Boxed App is still running"
+	})
+	c.sink.mu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !alerted || !slices.Equal(s.answers, []string{"done", "done"}) || s.opened != 1 || report.Results["prefs"].State != check.OK {
+		t.Errorf("alerted %v, answers %q, opened %d times, prefs stands %s; want the first's failure logged, both answered as done, the app opened once, prefs ok", alerted, s.answers, s.opened, report.Results["prefs"].State)
+	}
+}
+
+// s on a to-do the person says is done leaves it for later, as on any
+// other: nothing answered, and it stays to do.
+func TestSkippingAToDoThePersonSaysIsDone(t *testing.T) {
+	defer steps.SetManualPoll(time.Hour)()
+	c := newCard(t)
+	s := &sandboxed{}
+	done := make(chan engine.Report, 1)
+	go func() {
+		done <- applied(t, c, atTheEnd(steps.Manual(c.fake, "/home/someone", c.state, config.List{}, c.raise), s.step()))
+	}()
+	c.upNow(t, "prefs:none")
+	c.answer(t, steps.ManualName, hand.Skip)
+	report := <-done
+	if todos := c.lastToDos(); len(todos) != 1 || todos[0].Done || !todos[0].Skipped {
+		t.Errorf("the to-dos ended %+v; want it skipped, still to do", todos)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.answers) != 0 || report.Results["prefs"].State != check.Attention {
+		t.Errorf("answers %q, prefs stands %s; want nothing answered, still to do", s.answers, report.Results["prefs"].State)
 	}
 }
 

@@ -49,14 +49,18 @@ func (p *Pretty) toDoState() string {
 }
 
 // toDoPane is the left pane while the to-dos are up, w wide and room lines:
-// To do and how many; then each group, its name muted after a blank line,
+// To do and how many; what they are, and how to work through them
+// (toDoLead); then each group, its name muted after a blank line,
 // none for those in no group, its to-dos a line each: done, the done mark
 // and its title muted; left for later, the skipped mark and its title
 // muted; the one up, its title a pill; the rest white. The
 // keys at its foot. Too many for the room, it starts further down, to keep
 // the one up in sight.
 func (p *Pretty) toDoPane(w, room int) []string {
-	lines := []string{"", look.Header("To do", fmt.Sprint(len(p.todos.List)))}
+	lines := []string{"", look.Header("To do", fmt.Sprint(len(p.todos.List))), ""}
+	for _, l := range look.Wrap(p.toDoLead(), w-2) {
+		lines = append(lines, "  "+look.Muted(l))
+	}
 	up, group := -1, "\x00"
 	for i, t := range p.todos.List {
 		if t.Group != group {
@@ -85,6 +89,17 @@ func (p *Pretty) toDoPane(w, room int) []string {
 	lines = lines[:min(len(lines), room)]
 	p.keys.choices = nil
 	return append(append(lines, make([]string, room-len(lines))...), foot...)
+}
+
+// toDoLead is what the to-dos are, over their list: that kit can't do
+// them, and how to work through them; first, that everything else is done,
+// unless a step failed.
+func (p *Pretty) toDoLead() string {
+	lead := "kit can't do these itself: work through them one at a time, as the card on the right says."
+	if p.failedSteps() == 0 {
+		lead = "Everything else is done. " + lead
+	}
+	return lead
 }
 
 // toDoPanel is the to-do up as the panel over the log has it, w wide: its

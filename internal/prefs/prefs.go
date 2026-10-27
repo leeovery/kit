@@ -17,6 +17,7 @@
 package prefs
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -69,8 +70,8 @@ type Record struct {
 // installed, or were running, or whose restore failed; settings files whose
 // restore failed, by their paths from ~ (or /); and why each waits, by
 // domain or path, where kit knows. Of the domains, Open are those whose
-// apps the person opens once, each with its app, as no settings folder
-// came of kit opening them, or kit opens none unattended; Failed, those
+// sandboxed apps the person opens once, for their settings folders, each
+// with its app; Failed, those
 // whose restore failed otherwise, which only kit prefs restore --pending,
 // run by hand, tries again, as it does the files.
 type Pending struct {
@@ -118,9 +119,8 @@ type Prefs struct {
 	Probes []string
 	// AppDirs are where apps are installed.
 	AppDirs []string
-	// Sleep waits between looks at an app starting or quitting, while
-	// another git holds the store's index, and while another kit clones the
-	// store.
+	// Sleep waits while another git holds the store's index, and while
+	// another kit clones the store.
 	Sleep func(time.Duration)
 }
 
@@ -225,7 +225,14 @@ func (p *Prefs) Hardware(ctx context.Context) (string, error) {
 type Owner struct {
 	Hardware string
 	Model    string
+	Name     string
 	Since    string
+}
+
+// Called is what the owner's called: its name, else its model, else its
+// hardware.
+func (o Owner) Called() string {
+	return cmp.Or(o.Name, o.Model, o.Hardware)
 }
 
 // ownerFile names, in a Mac's folder, the record of its owner.
@@ -248,6 +255,8 @@ func readOwner(store string) (Owner, bool, error) {
 			o.Hardware = v
 		case "model":
 			o.Model = v
+		case "name":
+			o.Name = v
 		case "since":
 			o.Since = v
 		}
@@ -255,18 +264,54 @@ func readOwner(store string) (Owner, bool, error) {
 	return o, o.Hardware != "", nil
 }
 
-// claim records this Mac as the owner of store.
+// claim records this Mac as the owner of store: its hardware, model and
+// name.
 func (p *Prefs) claim(ctx context.Context, store, hardware string) error {
-	model := ""
-	if res, err := p.Run.Run(ctx, runner.Command{Name: "sysctl", Args: []string{"-n", "hw.model"}}); err == nil {
-		model = strings.TrimSpace(string(res.Stdout))
+	var text strings.Builder
+	text.WriteString("hardware " + hardware + "\n")
+	for _, line := range []struct {
+		key string
+		cmd runner.Command
+	}{
+		{"model", runner.Command{Name: "sysctl", Args: []string{"-n", "hw.model"}}},
+		{"name", runner.Command{Name: "scutil", Args: []string{"--get", "ComputerName"}}},
+	} {
+		res, err := p.Run.Run(ctx, line.cmd)
+		if v := strings.TrimSpace(string(res.Stdout)); err == nil && v != "" {
+			text.WriteString(line.key + " " + v + "\n")
+		}
 	}
-	text := "hardware " + hardware + "\n"
-	if model != "" {
-		text += "model " + model + "\n"
+	text.WriteString("since " + p.Now().Format("2006-01-02 15:04") + "\n")
+	return writeIfChanged(filepath.Join(store, ownerFile), []byte(text.String()))
+}
+
+// TakingOver reports whether other hardware owns this Mac's folder in the
+// store's clone, and which: this Mac takes the folder over as it restores
+// or starts afresh (TakeOver).
+func (p *Prefs) TakingOver(ctx context.Context) (Owner, bool, error) {
+	owner, owned, err := readOwner(filepath.Join(p.Clone, p.Mac))
+	if err != nil || !owned {
+		return Owner{}, false, err
 	}
-	text += "since " + p.Now().Format("2006-01-02 15:04") + "\n"
-	return writeIfChanged(filepath.Join(store, ownerFile), []byte(text))
+	hardware, err := p.Hardware(ctx)
+	if err != nil || hardware == owner.Hardware {
+		return Owner{}, false, err
+	}
+	return owner, true, nil
+}
+
+// TakeOver records this Mac as the owner of its folder in the store's
+// clone, when other hardware owns it: the next capture commits and pushes
+// it, and the other Mac's next capture is refused (NotOwnerError).
+func (p *Prefs) TakeOver(ctx context.Context) error {
+	if _, taking, err := p.TakingOver(ctx); err != nil || !taking {
+		return err
+	}
+	hardware, err := p.Hardware(ctx)
+	if err != nil {
+		return err
+	}
+	return p.claim(ctx, filepath.Join(p.Clone, p.Mac), hardware)
 }
 
 // expand is a path with a leading ~/ made the home folder's.

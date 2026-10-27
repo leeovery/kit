@@ -46,6 +46,7 @@ func newWorld(t *testing.T, lists prefs.Lists) *world {
 	w.pulls()
 	w.fake.On("ioreg", "-rd1", "-c", "IOPlatformExpertDevice").Prints(`  "IOPlatformUUID" = "HW-THIS"` + "\n")
 	w.fake.On("sysctl", "-n", "hw.model").Prints("Mac99,1\n")
+	w.fake.On("scutil", "--get", "ComputerName").Prints("Laptop\n")
 	return w
 }
 
@@ -244,7 +245,7 @@ claimed: the folder, for this Mac's hardware`
 		"files/.config/folder/deeper/two.txt":         "2",
 		"files/Library/Tool/App2026.2/options/ui.xml": "<ui/>",
 		"files/.config/.hidden":                       "left alone",
-		"owner":                                       "hardware HW-THIS\nmodel Mac99,1\nsince 2026-10-06 03:00\n",
+		"owner":                                       "hardware HW-THIS\nmodel Mac99,1\nname Laptop\nsince 2026-10-06 03:00\n",
 		".gitignore":                                  ".DS_Store\n.*.tmp\n",
 	} {
 		if got := w.read(t, filepath.Join(store, path)); got != want {

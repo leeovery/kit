@@ -243,18 +243,21 @@ func TestAStepsChoiceRunsAsItsOwn(t *testing.T) {
 			note(ctx, "settle "+it.ID)
 			return "settled"
 		},
+		Open: func(ctx context.Context, it check.Item) { note(ctx, "open "+it.ID) },
 	}}
 	plain := engine.Step{Name: "arq", Check: ok("fine"), Choice: &engine.Choice{
 		Answer: func(context.Context, check.Item, string) (string, error) { return "", nil },
 	}}
 	var readied check.Item
 	var said, settled string
-	var none, noReady, noSettle bool
+	var none, noReady, noSettle, noOpen bool
 	p, err := engine.New(prefs, plain, engine.Step{Name: "disk", Check: ok("fine")}, lastStep([]string{"prefs", "arq", "disk"}, func(ctx context.Context) {
 		c := engine.ChoiceOf(ctx, "prefs")
 		readied = c.Ready(ctx, check.Item{Name: "brings them back"})
 		said, _ = c.Answer(ctx, readied, "r")
 		settled = c.Settle(ctx, check.Item{ID: "prefs:open"})
+		c.Open(ctx, check.Item{ID: "prefs:open"})
+		noOpen = engine.ChoiceOf(ctx, "arq").Open == nil
 		noSettle = engine.ChoiceOf(ctx, "arq").Settle == nil
 		none = engine.ChoiceOf(ctx, "disk") == nil
 		noReady = engine.ChoiceOf(ctx, "arq").Ready == nil
@@ -265,11 +268,11 @@ func TestAStepsChoiceRunsAsItsOwn(t *testing.T) {
 	if _, err := p.Apply(t.Context(), &recorder{}, engine.Options{Jobs: 1}); err != nil {
 		t.Fatal(err)
 	}
-	if readied.Name != "brings them back, 15 Oct" || said != "brought back" || settled != "settled" || !noReady || !noSettle || !none {
-		t.Errorf("readied %q, said %q, settled %q, arq's Ready none %v, its Settle none %v, disk's none %v", readied.Name, said, settled, noReady, noSettle, none)
+	if readied.Name != "brings them back, 15 Oct" || said != "brought back" || settled != "settled" || !noReady || !noSettle || !noOpen || !none {
+		t.Errorf("readied %q, said %q, settled %q, arq's Ready none %v, its Settle none %v, its Open none %v, disk's none %v", readied.Name, said, settled, noReady, noSettle, noOpen, none)
 	}
-	if !slices.Equal(as, []string{"prefs ready", "prefs answer r changing", "prefs settle prefs:open changing"}) {
-		t.Errorf("the choice ran as %q; want prefs' own, ready looking, answering and settling changing things", as)
+	if !slices.Equal(as, []string{"prefs ready", "prefs answer r changing", "prefs settle prefs:open changing", "prefs open prefs:open changing"}) {
+		t.Errorf("the choice ran as %q; want prefs' own, ready looking, answering, settling and opening changing things", as)
 	}
 	if engine.ChoiceOf(t.Context(), "prefs") != nil {
 		t.Error("outside a run, a step's choice was there")

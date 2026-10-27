@@ -7,21 +7,21 @@
                                                             │
   TO DO  6                                                  │  △ Add a Time Machine disk                                                                5 of 6  
                                                             │
-  Apps                                                      │      Time Machine has nowhere to back up to.
-  ● Bring back apps' settings                               │
-  ● Open Karabiner-Elements                                 │      1  Plug in your backup disk
-  ● Open Hammerspoon                                        │      2  System Settings › General › Time Machine › Add Backup Disk, and choose it
+  Everything else is done. kit can't do these itself: work  │      Time Machine has nowhere to back up to.
+  through them one at a time, as the card on the right      │
+  says.                                                     │      1  Plug in your backup disk
+                                                            │      2  System Settings › General › Time Machine › Add Backup Disk, and choose it
+  Apps                                                      │
+  ● Restore application settings                            │      ◐ kit's watching: it moves on once Time Machine has a disk
+  ● Open Karabiner-Elements                                 │      s skips it for now: kit apply brings it back
+  ● Open Hammerspoon                                        │
+                                                            ├───────────────────────────────────────────────────────────────────────────────────────────────────
+  System Settings                                           │
+  ● Allow Full Disk Access for remote users                 │  LOG
                                                             │
-  System Settings                                           │      ◐ kit's watching: it moves on once Time Machine has a disk
-  ● Allow Full Disk Access for remote users                 │      s skips it for now: kit apply brings it back
-                                                            │
-  Backups                                                   ├───────────────────────────────────────────────────────────────────────────────────────────────────
-  △ Add a Time Machine disk                                 │
-  △ Set up Arq's backup plan                                │  LOG
-                                                            │
-                                                            │  03:32:25  ● GitHub: fine
-                                                            │  03:32:26  ● This Mac: fine
-                                                            │  03:32:27  ● Homebrew: fine
+  Backups                                                   │  03:32:25  ● GitHub: fine
+  △ Add a Time Machine disk                                 │  03:32:26  ● This Mac: fine
+  △ Set up Arq's backup plan                                │  03:32:27  ● Homebrew: fine
                                                             │  03:32:28  ● kit-config: fine
                                                             │  03:32:29  ● Homebrew: fine
                                                             │  03:32:30  ● Linked files: fine
@@ -48,7 +48,7 @@
                                                             │  03:32:51  ● fonts: fine
                                                             │  03:32:52  ● mise: fine
                                                             │  03:32:53  ● Sign in to 1Password: fine
-                                                            │  03:34:45  ● Bring back apps' settings: done, in 40.0s · 214 apps' settings, from 15 Oct
+                                                            │  03:34:45  ● Restore application settings: done, in 40.0s · 214 apps' settings, from 15 Oct
                                                             │  03:35:38  ● Open Karabiner-Elements: done, in 53.0s
                                                             │  03:36:44  ● Open Hammerspoon: done, in 1m06s
                                                             │  03:38:03  ● Allow Full Disk Access for remote users: done, in 1m19s

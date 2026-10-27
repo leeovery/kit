@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -22,56 +23,82 @@ const PrefsName = "prefs"
 // as the nightly run captures once a day.
 const prefsEvery = 26 * time.Hour
 
-// The keys of apps' settings' to-do: bring them back, or start afresh.
+// The keys of the settings to-do: restore this machine ID's last save, or
+// start afresh. A digit restores another machine ID's (otherSaves).
 const (
-	keyBringBack = "r"
-	keyAfresh    = "f"
+	keyRestore = "r"
+	keyAfresh  = "f"
 )
 
+// afresh is the settings to-do's key starting afresh.
+var afresh = check.Key{Key: keyAfresh, Does: "starts afresh: nothing restored, saving from now"}
+
 // settingsBack is the to-do of a Mac whose apps' settings are yet to be
-// brought back, or started afresh: first, so the apps opened next start
-// with them. It says up front that bringing them back opens some apps;
-// and, when the config keeps settings files beside the apps' settings,
-// that they come back too.
+// restored, or started afresh: first, so the apps opened next start with
+// them; and, when the config keeps settings files beside the apps'
+// settings, it says they're restored too. Readied, its keys are the saves
+// the store has (restoreKeys).
 func settingsBack(files bool) check.ToDo {
-	why := "First, so the apps you open next start with yours. Bringing them back opens some apps once: their windows, notifications and permission prompts may follow. This Mac saves its own once they're back."
+	why := "First, so the apps you open next start with yours. This Mac saves its own once they're restored."
 	if files {
-		why += " Settings files come back too."
+		why += " Settings files are restored too."
 	}
 	return check.ToDo{
-		Title: "Bring back apps' settings",
+		Title: "Restore application settings",
 		Why:   why,
 		Group: groupApps,
 		Keys: []check.Key{
-			{Key: keyBringBack, Does: "brings them back from this Mac's last save"},
-			{Key: keyAfresh, Does: "starts afresh: nothing back, saving from now"},
+			{Key: keyRestore, Does: "restores this machine ID's last save"},
+			afresh,
 		},
 		First: true,
 	}
 }
 
-// appToOpen is the to-do of an app whose settings wait for its settings
-// folder, which macOS makes only once it's opened, kit having opened it to
-// no effect, or opening none unattended: open it once and quit it. kit
-// watches for the folder, and for it to be quit.
+// restoreKeys are the settings to-do's keys, the store's saves known: r,
+// when this machine ID has a save, its date said; a digit for each other
+// machine ID's (otherSaves), its name and date said; and f.
+func restoreKeys(saves []prefs.Save, mac string, now time.Time) []check.Key {
+	var keys []check.Key
+	if i := slices.IndexFunc(saves, func(s prefs.Save) bool { return s.Mac == mac }); i >= 0 {
+		keys = append(keys, check.Key{Key: keyRestore, Does: "restores this machine ID's last save, " + day(saves[i].At, now)})
+	}
+	for i, s := range otherSaves(saves, mac) {
+		keys = append(keys, check.Key{Key: strconv.Itoa(i + 1), Does: fmt.Sprintf("restores %s's last save (%s)", s.Mac, day(s.At, now))})
+	}
+	return append(keys, afresh)
+}
+
+// otherSaves are the saves of machine IDs other than mac, as the store
+// sorts them, the first nine: a digit's each.
+func otherSaves(saves []prefs.Save, mac string) []prefs.Save {
+	others := slices.DeleteFunc(slices.Clone(saves), func(s prefs.Save) bool { return s.Mac == mac })
+	return others[:min(len(others), 9)]
+}
+
+// appToOpen is the to-do of a sandboxed app whose settings wait for its
+// settings folder, which macOS makes only once it's opened: kit opens it
+// as its card goes up, and the person quits it and says so.
 func appToOpen(app prefs.App) check.ToDo {
 	return check.ToDo{
-		Title: "Open " + app.Name + " once and quit it",
-		Why:   "Its settings come back after: macOS makes its settings folder only once it's opened.",
-		Steps: []string{"Open " + app.Name, "Quit it"},
-		Watch: app.Name + " has its settings folder and is quit",
-		Group: groupApps, First: true,
+		Title:    "Open " + app.Name + " and quit it",
+		Why:      "Its settings go in its own folder, which macOS makes the first time it opens: quit it, then press space.",
+		Group:    groupApps,
+		SaysDone: true,
+		First:    true,
 	}
 }
 
 // Prefs checks apps' settings are being saved: capture switched on, this
 // Mac owning its folder in the store, a capture in the last day without
 // errors, and its commits pushed within a day. It reads kit's record
-// alone: no git, no GitHub. Not switched on, it's a to-do: bring them back
-// from this Mac's last save, as kit prefs restore does, its date said as it
-// comes up; or start afresh, as kit prefs start-fresh does. With apps held
-// for their settings folders, it's a to-do to open them, watched: once
-// they're there, the settings of those not running come back at once.
+// alone: no git, no GitHub. Not switched on, it's a to-do: restore a
+// machine ID's last save, this Mac's or another's, as kit prefs restore
+// does, each save's date said as it comes up; or start afresh, as kit
+// prefs start-fresh does. Either takes this Mac's folder over when other
+// hardware owns it, the card saying so. With sandboxed apps held for their
+// settings folders, it's a to-do for each, one at a time: kit opens the
+// app, and once the person's quit it, restores its settings.
 func Prefs(p *prefs.Prefs, now func() time.Time) engine.Step {
 	return engine.Step{
 		Name: PrefsName, Title: "App settings", Area: AreaBackups,
@@ -80,35 +107,32 @@ func Prefs(p *prefs.Prefs, now func() time.Time) engine.Step {
 				if it.ToDo == nil {
 					return it
 				}
-				last, err := p.LastSave(ctx)
+				saves, err := p.Saves(ctx)
 				if err != nil {
 					return it
 				}
 				t := *it.ToDo
-				t.Keys = slices.Clone(t.Keys)
-				for i, k := range t.Keys {
-					if k.Key == keyBringBack {
-						t.Keys[i].Does += ", " + day(last, now())
-					}
+				t.Keys = restoreKeys(saves, p.Mac, now())
+				if owner, taking, _ := p.TakingOver(ctx); taking {
+					t.Why = fmt.Sprintf("This Mac takes over %s from %s, which stops saving to it. %s", p.Mac, owner.Called(), t.Why)
 				}
 				it.ToDo = &t
 				return it
 			},
-			Answer: func(ctx context.Context, _ check.Item, key string) (string, error) {
-				switch key {
-				case keyBringBack:
-					return bringBack(ctx, p, now)
-				case keyAfresh:
-					return startAfresh(p)
+			Answer: func(ctx context.Context, it check.Item, key string) (string, error) {
+				if id, ok := strings.CutPrefix(it.ID, PrefsName+":"+idOpen+":"); ok {
+					return restoreOpened(ctx, p, id)
 				}
-				return "", fmt.Errorf("%s isn't one of its keys", key)
+				said, err := answerSettings(ctx, p, key, now)
+				if err != nil {
+					return "", err
+				}
+				return said, p.TakeOver(ctx)
 			},
-			Settle: func(ctx context.Context, it check.Item) string {
-				id, ok := strings.CutPrefix(it.ID, PrefsName+":"+idOpen+":")
-				if !ok {
-					return ""
+			Open: func(ctx context.Context, it check.Item) {
+				if id, ok := strings.CutPrefix(it.ID, PrefsName+":"+idOpen+":"); ok {
+					p.Open(ctx, id)
 				}
-				return bringBackOpened(ctx, p, id)
 			},
 		},
 		Check: func(ctx context.Context) check.Result {
@@ -125,6 +149,30 @@ func Prefs(p *prefs.Prefs, now func() time.Time) engine.Step {
 			return withHeld(ctx, p, rec, saving(rec, now))
 		},
 	}
+}
+
+// answerSettings does what key, of the settings to-do, says: r restores
+// this machine ID's last save; a digit, another's (otherSaves); f starts
+// afresh.
+func answerSettings(ctx context.Context, p *prefs.Prefs, key string, now func() time.Time) (string, error) {
+	if key == keyAfresh {
+		return startAfresh(p)
+	}
+	saves, err := p.Saves(ctx)
+	if err != nil {
+		return "", err
+	}
+	if key == keyRestore {
+		if i := slices.IndexFunc(saves, func(s prefs.Save) bool { return s.Mac == p.Mac }); i >= 0 {
+			return restoreSave(ctx, p, saves[i], now)
+		}
+		return "", fmt.Errorf("no settings stored for %s", p.Mac)
+	}
+	others := otherSaves(saves, p.Mac)
+	if n, err := strconv.Atoi(key); err == nil && n >= 1 && n <= len(others) {
+		return restoreSave(ctx, p, others[n-1], now)
+	}
+	return "", fmt.Errorf("%s isn't one of its keys", key)
 }
 
 // saving is how saving apps' settings stands, as rec has it, capture
@@ -148,7 +196,7 @@ func saving(rec prefs.Record, now func() time.Time) check.Result {
 }
 
 // withHeld is res, how saving stands, with what rec holds that needs the
-// person: a to-do for each app to open once and quit; and what failed
+// person: a to-do for each sandboxed app to open and quit; and what failed
 // otherwise, which only kit prefs restore --pending tries again. Saving
 // standing fine, they're what it says.
 func withHeld(ctx context.Context, p *prefs.Prefs, rec prefs.Record, res check.Result) check.Result {
@@ -157,7 +205,7 @@ func withHeld(ctx context.Context, p *prefs.Prefs, rec prefs.Record, res check.R
 	if apps := p.ToOpen(ctx, rec); len(apps) > 0 {
 		for _, app := range apps {
 			t := appToOpen(app)
-			items = append(items, check.Item{ID: PrefsName + ":" + idOpen + ":" + app.ID, Name: t.Title, State: Problem, Detail: "its settings come back once it's quit", ToDo: &t})
+			items = append(items, check.Item{ID: PrefsName + ":" + idOpen + ":" + app.ID, Name: t.Title, State: Problem, Detail: "its settings are restored once it's been opened and quit", ToDo: &t})
 		}
 		says = append(says, fmt.Sprintf("%d %s to open once", len(apps), plural(len(apps), "app", "apps")))
 	}
@@ -186,15 +234,19 @@ func withHeld(ctx context.Context, p *prefs.Prefs, rec prefs.Record, res check.R
 // followed by its app's bundle id.
 const idOpen = "open"
 
-// bringBack brings back apps' settings from this Mac's last save, as kit
-// prefs restore does, saying what it brought back, as in 214 apps'
-// settings, from 15 Oct; how many wait for their apps; how many apps are
-// to be opened once, which a to-do asks for next; and how many are held,
-// having failed otherwise, for kit prefs restore --pending, the log naming
-// each, with why. Saving starts all the same.
-func bringBack(ctx context.Context, p *prefs.Prefs, now func() time.Time) (string, error) {
-	event.Log(ctx, event.Logged{Line: "Bringing back apps' settings from this Mac's last save"})
-	report, err := p.Restore(ctx, prefs.RestoreOptions{})
+// restoreSave restores apps' settings from save, as kit prefs restore
+// does, saying what it restored, as in 214 apps' settings, from 15 Oct; how
+// many wait for their apps; how many apps are to be opened once, which a
+// to-do each asks for next; and how many are held, having failed
+// otherwise, for kit prefs restore --pending, the log naming each, with
+// why. Saving starts all the same.
+func restoreSave(ctx context.Context, p *prefs.Prefs, save prefs.Save, now func() time.Time) (string, error) {
+	whose := save.Mac + "'s"
+	if save.Mac == p.Mac {
+		whose = "this machine ID's"
+	}
+	event.Log(ctx, event.Logged{Line: "Restoring application settings from " + whose + " last save"})
+	report, err := p.Restore(ctx, prefs.RestoreOptions{From: save.Mac})
 	if err != nil {
 		return "", err
 	}
@@ -205,11 +257,7 @@ func bringBack(ctx context.Context, p *prefs.Prefs, now func() time.Time) (strin
 	for _, file := range slices.Sorted(maps.Keys(report.FilesFailed)) {
 		event.Log(ctx, event.Logged{Line: file + " didn't come back: " + report.FilesFailed[file], Alert: true})
 	}
-	said := cameBack(report)
-	if last, err := p.LastSave(ctx); err == nil {
-		said += ", from " + day(last, now())
-	}
-	said += waitingFor(report)
+	said := cameBack(report) + ", from " + day(save.At, now()) + waitingFor(report)
 	if n := appsOf(report.ToOpen, report.Apps); n > 0 {
 		said += fmt.Sprintf("; %d %s to open once", n, plural(n, "app", "apps"))
 	}
@@ -219,21 +267,20 @@ func bringBack(ctx context.Context, p *prefs.Prefs, now func() time.Time) (strin
 	return said, nil
 }
 
-// bringBackOpened brings back the settings of the apps held for their
-// settings folders that have them now and aren't running, opening
-// nothing, as the hourly pass does, once the app of a bundle id, id, has
-// been opened and quit: what it brought back, and how many still wait for
-// their apps; or, the app since removed, that it was.
-func bringBackOpened(ctx context.Context, p *prefs.Prefs, id string) string {
-	if !p.HasApp(id) {
-		return cmp.Or(openedName(p, id), id) + " was removed"
+// restoreOpened restores the settings of the app of a bundle id, id, once
+// the person's opened and quit it, with those of any other app held that
+// can be now, opening nothing, as the hourly pass does: what it restored,
+// and how many still wait for their apps. Still running, or with no
+// settings folder yet, it says so, and restores nothing.
+func restoreOpened(ctx context.Context, p *prefs.Prefs, id string) (string, error) {
+	if err := p.Opened(ctx, id, cmp.Or(openedName(p, id), id)); err != nil {
+		return "", err
 	}
 	report, err := p.Restore(ctx, prefs.RestoreOptions{Pending: true, Unattended: true})
 	if err != nil {
-		event.Log(ctx, event.Logged{Line: "Bring back apps' settings: " + err.Error(), Alert: true})
-		return ""
+		return "", err
 	}
-	return cameBack(report) + waitingFor(report)
+	return cameBack(report) + waitingFor(report), nil
 }
 
 // openedName is the name of the app of a bundle id that's held to be
@@ -243,12 +290,7 @@ func openedName(p *prefs.Prefs, id string) string {
 	if err != nil || rec.Pending == nil {
 		return ""
 	}
-	for _, app := range rec.Pending.Open {
-		if app.ID == id {
-			return app.Name
-		}
-	}
-	return ""
+	return rec.Pending.Open[id].Name
 }
 
 // cameBack is how many domains' settings report brought back, as in 214
@@ -283,7 +325,7 @@ func appsOf(domains map[string]string, apps map[string]prefs.App) int {
 	return len(ids)
 }
 
-// startAfresh switches saving on with nothing brought back, as kit prefs
+// startAfresh switches saving on with nothing restored, as kit prefs
 // start-fresh does, saying so, and how many of an earlier restore's still
 // wait to come back, which saving leaves be. A restore switches saving on
 // itself, so only a record from before it did can have one to tell of.
@@ -295,7 +337,7 @@ func startAfresh(p *prefs.Prefs) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	said := "saving from now, nothing brought back"
+	said := "saving from now, nothing restored"
 	if rec.Restored != nil {
 		said = "saving from now"
 	}

@@ -226,7 +226,7 @@ a name, then `--` and a command, which exits 0 when all's well, or prints what's
 its first line (a minute's timeout), each failing one an item of the `checks` step. Every step has an area (Backups, Jobs, Mac, Drift,
 Config, Checks), which the status document carries. What only the person at the Mac can do
 about a check is a to-do, an item with a title, why, steps, what kit watches for, a group and,
-for a choice, its keys, raised at the end of applying (Steps by hand): bringing back apps'
+for a choice, its keys, raised at the end of applying (Steps by hand): restoring application
 settings (`prefs`, paused), a Time Machine disk to add, Arq's backup plan to set up; titled the
 same wherever the item shows. The rest (disk space, a stale backup, commits that won't push)
 are how the Mac stands, not to-dos. Full Disk Access isn't one: a grant takes effect only once
@@ -308,7 +308,7 @@ on at once. A line with `--before` is a step of its own, raised mid-run once wha
 after is in, as the steps it comes before wait for it; the rest, `--after` alone only ordering
 them, come up at the run's end, after every other step, with the to-dos kit's own checks left
 (Checks). That end is a list worked through one to-do at a time, in kit's order, with no choosing:
-kit's own that come first (bringing back apps' settings, so the apps opened
+kit's own that come first (restoring application settings, so the apps opened
 next start with them), then the lines not done, in order, then kit's own the rest (the backups');
 grouped, each group where its first comes (kit's own in Apps and Backups). Each is looked at
 while it's up, a line by its command every few seconds, one of kit's own by its step's check, and
@@ -317,16 +317,21 @@ and what kit saw, while kit looks aside for any to-dos it leaves, and the next c
 says one with no command is done; a choice is answered by its keys, none offered while kit does
 what the one pressed says, its words turning in their place, and keys pressed meanwhile dropped,
 what it does never cut short, even by the run stopping, as half of apps' settings brought back
-is worse than none (apps' settings, whose why says first that bringing them back opens some apps
-once, and, when the config has `[prefs files]`, that settings files come back too: `r` brings
-them back from this Mac's last save, its date said, as `kit prefs restore` does, saying how many
-came back, how many wait for their apps, how many apps to open once (a to-do that comes next,
-kit's own done leading to those its check finds then) and how many are held for `kit prefs
-restore --pending`, the log naming each of those with why; a watched to-do of kit's own, found
-done, coming down at once, kit finishing what it waited for aside, as bringing those apps'
-settings back, and the log saying it's done once that's finished, with what it did; `f` starts
+is worse than none ("Restore application settings", whose why says, when the config has
+`[prefs files]`, that settings files are restored too: `r`, offered only when this machine ID's
+folder in the store has a save, restores it, its date said, as `kit prefs restore` does; a digit
+for each other machine ID with a save, sorted by name, the first nine, restores that one's ("restores
+studio's last save (26 Oct)"), as `kit prefs restore --from` does, machine-bound settings left out;
+each saying how many came back, how many wait for their apps, how many apps to open once (a
+to-do each, coming next, kit's own done leading to those its check finds then) and how many are
+held for `kit prefs restore --pending`, the log naming each of those with why; `f` starts
 afresh, as `kit prefs start-fresh` does, saying saving's on and how many still wait to come
-back). No to-do holds the run: every one has `s`, "skips it for now: kit apply brings it back"
+back. When other hardware owns this machine ID's folder, the card says once "This Mac takes
+over <id> from <owner>, which stops saving to it" (the owner by its name, else its model, else
+its hardware), and any key then writes this Mac's owner file there, after what the key does:
+the next capture commits and pushes it, and the other Mac's next capture is refused). Over the
+list, the left pane says "kit can't do these itself: work through them one at a time, as the card
+on the right says", after "Everything else is done." unless a step failed. No to-do holds the run: every one has `s`, "skips it for now: kit apply brings it back"
 (the first letter after it its own keys haven't, should they have `s`, never `q` or `r`), which
 takes it down at once, whatever's under way, even a key being done, the next coming up; it
 stays to do, nothing written as though it were done, the list marking it skipped, the log
@@ -1216,7 +1221,8 @@ hidden name). Each Mac saves into its own folder of one git repository, `kit.tom
 for byte: `<mac>/domains/<domain>.plist`, sorted XML as Python's plistlib writes it, the keys that
 change by themselves stripped (window frames, list views, file dialogs, Sparkle's check times);
 `<mac>/files/` mirroring each file's path under the home folder (`_root/` outside it); `<mac>/owner`,
-the hardware UUID of the Mac the folder belongs to.
+the hardware UUID, model and name (`scutil --get ComputerName`) of the Mac the folder belongs
+to.
 
 - **`kit prefs capture`** (nightly, as the `prefs` feature's job): needs capture switched on (a
   full restore, or `kit prefs start-fresh`: a rebuilt Mac never captures defaults over a good
@@ -1232,31 +1238,28 @@ the hardware UUID of the Mac the folder belongs to.
   domain's app found from the installed apps' bundle ids (sub-domains, shared domains, group and
   team prefixes, `[prefs apps]` for the rest); not installed or running, it waits; a sandboxed
   app (its entitlements, as codesign reads them, turning `com.apple.security.app-sandbox` on: an
-  app can declare it off, and has no container) launched hidden once to make its container, the
-  run's log naming it as it opens (its own
-  windows, notifications and permission prompts may follow); the stored copy checked, the live
+  app can declare it off, and has no container) with no container yet waits for the person to
+  open it, kit opening nothing; the stored copy checked, the live
   settings saved, `defaults delete` then `import`, read back and compared. A full restore puts
   back the files that differ (each saved first), writes the pending list, records its commit, and
   switches capture on, failures or not. What it couldn't restore waits on the pending list,
   each with why, and capture leaves it alone: a domain whose app isn't installed or is running;
-  one whose sandboxed app has no settings folder, as none came of kit opening it, for the person
-  to open once (a to-do, below); and a domain or file that failed otherwise, named with why in
-  plain words. kit opens an app at most once, and only in a restore the person started (the
-  run's `r`, or `kit prefs restore` by hand). The hourly pass (`--pending`, unattended) opens
-  none: it brings back a waiting domain once its app is installed, not running and, sandboxed,
-  has its settings folder (one without stays for the person to open), and leaves what failed
-  otherwise alone; `kit prefs restore --pending`, by hand, tries everything waiting, failed or
-  not, opening an app once. From another Mac's folder, or onto other hardware,
+  one whose sandboxed app has no settings folder, for the person to open once (a to-do, below);
+  and a domain or file that failed otherwise, named with why in plain words. The hourly pass
+  (`--pending`, unattended) brings back a waiting domain once its app is installed, not running
+  and, sandboxed, has its settings folder (one without stays for the person to open), and leaves
+  what failed otherwise alone; `kit prefs restore --pending`, by hand, tries everything waiting,
+  failed or not. From another Mac's folder, or onto other hardware,
   `[prefs machine-bound]` stays behind (Tailscale's identity and the like). `--at` unpacks the
   folder as it was then from history.
 - **`kit prefs history`**, **`pending [--clear]`** (what waits, each with why), **`start-fresh`**.
-  An app held for its settings folder is a to-do of its own, watched, titled with the app (`Open
-  <app> once and quit it`): it moves on once the app has its folder and is quit, and its settings
-  come back then, opening nothing. An app to open that's running stays to open till it's quit. What failed
+  A sandboxed app held for its settings folder is a to-do of its own, one at a time (`Open <app>
+  and quit it`): kit opens it in view (`open -b`) as its card goes up, once; `space` restores its
+  settings then and there once it's quit and has its folder, else the log says which it isn't and
+  the card stays; `s` leaves it to the hourly pass. What failed
   otherwise is said by the check, apps' settings and settings files apart, as held for `kit prefs
   restore --pending`, after anything wrong with capture itself. A held
-  file's saved copy stays in the store, on the Mac or not. One restore opens an app once,
-  however many domains it has. `[prefs deny]` leaves
+  file's saved copy stays in the store, on the Mac or not. `[prefs deny]` leaves
   domains out.
 
 ## Open-source hygiene

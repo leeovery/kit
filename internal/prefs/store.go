@@ -255,20 +255,49 @@ func untar(data []byte, dir string) error {
 	}
 }
 
-// LastSave is when this Mac's folder in the store last changed: its last
-// save, as a restore brings it back. The store's cloned first, when this
-// Mac has no clone yet.
-func (p *Prefs) LastSave(ctx context.Context) (time.Time, error) {
+// Save is a Mac's folder in the store, by its name, and when it last
+// changed.
+type Save struct {
+	Mac string
+	At  time.Time
+}
+
+// Saves are the folders in the store with a save, sorted by name, this
+// Mac's too. The store's cloned first, when this Mac has no clone yet.
+func (p *Prefs) Saves(ctx context.Context) ([]Save, error) {
 	if err := p.ensureClone(ctx); err != nil {
-		return time.Time{}, err
+		return nil, err
 	}
-	res, err := p.git(ctx, "log", "-1", "--format=%cI", "--", p.Mac)
+	entries, err := os.ReadDir(p.Clone)
+	if err != nil {
+		return nil, err
+	}
+	var saves []Save
+	for _, e := range entries {
+		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		at, err := p.changed(ctx, e.Name())
+		if err != nil {
+			return nil, err
+		}
+		if !at.IsZero() {
+			saves = append(saves, Save{Mac: e.Name(), At: at})
+		}
+	}
+	return saves, nil
+}
+
+// changed is when a Mac's folder in the store was last committed: never,
+// for one that hasn't been.
+func (p *Prefs) changed(ctx context.Context, mac string) (time.Time, error) {
+	res, err := p.git(ctx, "log", "-1", "--format=%cI", "--", mac)
 	if err != nil {
 		return time.Time{}, err
 	}
 	last := strings.TrimSpace(string(res.Stdout))
 	if last == "" {
-		return time.Time{}, fmt.Errorf("no settings stored for %s", p.Mac)
+		return time.Time{}, nil
 	}
 	return time.Parse(time.RFC3339, last)
 }

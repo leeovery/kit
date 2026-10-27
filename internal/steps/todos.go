@@ -128,7 +128,15 @@ func (c choiceToDo) ready(ctx context.Context) event.NeedsYou {
 // cardOf is what the card of it, a to-do of kit's own, says.
 func cardOf(it check.Item) event.NeedsYou {
 	t := it.ToDo
-	return event.NeedsYou{Item: it.ID, Title: t.Title, Group: t.Group, Why: t.Why, Steps: t.Steps, Watch: t.Watch, Keys: t.Keys, Tells: len(t.Keys) == 0}
+	return event.NeedsYou{Item: it.ID, Title: t.Title, Group: t.Group, Why: t.Why, Steps: t.Steps, Watch: t.Watch, Keys: t.Keys, Tells: len(t.Keys) == 0 && !t.SaysDone}
+}
+
+// open opens what it needs as its card goes up, when its step's choice
+// does (engine.Choice's Open).
+func (o ownToDo) open(ctx context.Context) {
+	if c := engine.ChoiceOf(ctx, o.step); c != nil && c.Open != nil {
+		c.Open(ctx, o.item)
+	}
 }
 
 // done reports whether it's done, as its step's check finds it: the check
@@ -185,20 +193,18 @@ func followUps(ctx context.Context, t toDo) []toDo {
 	return more
 }
 
-// answer is what the person's answer does: a choice's key does what its
-// step says, then kit looks, taking what the step said it did as what it
-// saw, should that have done it; what goes wrong, the log says, and it
-// stays up. Done has kit look at once. What a key does is never cut short,
-// as by the run stopping: bringing apps' settings back half way would be
-// worse than not at all.
+// answer is what the person's answer does: a choice's key, or Done for
+// one the person says is done, does what its step says, then kit looks,
+// taking what the step said it did as what it saw, should that have done
+// it; what goes wrong, the log says, and it stays up. Done otherwise has
+// kit look at once. What a key does is never cut short, as by the run
+// stopping: restoring apps' settings half way would be worse than not at
+// all.
 func (o ownToDo) answer(ctx context.Context, a hand.Answer, _ time.Time) (bool, string, error) {
-	if !slices.ContainsFunc(o.item.ToDo.Keys, func(k check.Key) bool { return hand.Answer(k.Key) == a }) {
+	c := engine.ChoiceOf(ctx, o.step)
+	if c == nil || !o.answers(a) {
 		ok, saw := o.done(ctx)
 		return ok, saw, nil
-	}
-	c := engine.ChoiceOf(ctx, o.step)
-	if c == nil {
-		return false, "", nil
 	}
 	said, err := c.Answer(context.WithoutCancel(ctx), o.item, string(a))
 	if err != nil {
@@ -207,6 +213,16 @@ func (o ownToDo) answer(ctx context.Context, a hand.Answer, _ time.Time) (bool, 
 	}
 	ok, _ := o.done(ctx)
 	return ok, said, nil
+}
+
+// answers reports whether a is for its step's choice to answer: Done, for
+// one the person says is done; else, for a choice, any key, as a choice's
+// keys are what its step readied them to be.
+func (o ownToDo) answers(a hand.Answer) bool {
+	if a == hand.Done {
+		return o.item.ToDo.SaysDone
+	}
+	return len(o.item.ToDo.Keys) > 0
 }
 
 // workThrough raises list's to-dos for step one at a time, in order, each

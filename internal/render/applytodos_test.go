@@ -21,7 +21,7 @@ import (
 // The to-dos at the run's end: kit's own (apps' settings first, the
 // backups last) and the config's lines, in kit's order, grouped.
 var toDoList = []event.ToDo{
-	{Step: "prefs", ID: "prefs:paused", Title: "Bring back apps' settings", Group: "Apps", How: []string{"kit prefs restore, or kit prefs start-fresh"}},
+	{Step: "prefs", ID: "prefs:paused", Title: "Restore application settings", Group: "Apps", How: []string{"kit prefs restore, or kit prefs start-fresh"}},
 	{Step: "manual", ID: "manual:karabiner", Title: "Open Karabiner-Elements", Group: "Apps", How: []string{"Open Karabiner-Elements", "Allow what it asks for"}},
 	{Step: "manual", ID: "manual:hammerspoon", Title: "Open Hammerspoon", Group: "Apps", How: []string{"Open Hammerspoon", "Allow what it asks for"}},
 	{Step: "manual", ID: "manual:sharing", Title: "Allow Full Disk Access for remote users", Group: "System Settings", How: []string{"System Settings › General › Sharing › Remote Login › ⓘ", "Turn on Allow full disk access for remote users"}},
@@ -33,9 +33,13 @@ var toDoList = []event.ToDo{
 // line kit tells about; one it can't, and one with a subheading; kit's own,
 // watched, each saying what for.
 var toDoCards = []event.NeedsYou{
-	{Item: "prefs:paused", Title: "Bring back apps' settings", Group: "Apps",
-		Why:  "First, so the apps you open next start with yours. Bringing them back opens some apps once: their windows, notifications and permission prompts may follow. This Mac saves its own once they're back. Settings files come back too.",
-		Keys: []check.Key{{Key: "r", Does: "brings them back from this Mac's last save, 15 Oct"}, {Key: "f", Does: "starts afresh: nothing back, saving from now"}}},
+	{Item: "prefs:paused", Title: "Restore application settings", Group: "Apps",
+		Why: "This Mac takes over laptop from Studio, which stops saving to it. First, so the apps you open next start with yours. This Mac saves its own once they're restored. Settings files are restored too.",
+		Keys: []check.Key{
+			{Key: "r", Does: "restores this machine ID's last save, 15 Oct"}, {Key: "1", Does: "restores desk's last save (26 Oct)"},
+			{Key: "2", Does: "restores studio's last save (25 Oct)"}, {Key: "3", Does: "restores tower's last save (24 Oct)"},
+			{Key: "f", Does: "starts afresh: nothing restored, saving from now"},
+		}},
 	{Item: "manual:karabiner", Title: "Open Karabiner-Elements", Group: "Apps", Tells: true,
 		Why: "Its key remapping needs its driver and Input Monitoring, which only you can allow. Opened, it asks for both.",
 		Steps: []string{"Open Karabiner-Elements", "Allow what it asks for", "If it doesn't ask, in System Settings:",
@@ -196,8 +200,36 @@ func TestTheRecordAfterStoppingAtTheToDos(t *testing.T) {
 	}
 }
 
-// The left pane lists the to-dos, To do and how many, then each group
-// where its first comes, its name muted after a blank line; done ones the
+// Over the to-dos, the left pane says that kit can't do them, and how to
+// work through them; first, that everything else is done, but when a step
+// failed.
+func TestTheToDosLead(t *testing.T) {
+	failing := toDosUpTo(0)
+	i := slices.IndexFunc(failing, func(e event.Event) bool { f, ok := e.(event.StepFinished); return ok && f.Result.State == check.OK })
+	f := failing[i].(event.StepFinished)
+	f.Result = check.Result{State: check.Failed, Reason: "it broke"}
+	failing[i] = f
+	for _, tt := range []struct {
+		name   string
+		events []event.Event
+		want   []string
+	}{
+		{"all else done", toDosUpTo(0), []string{"  Everything else is done. kit can't do these itself: work", "  through them one at a time, as the card on the right", "  says."}},
+		{"a step failed", failing, []string{"  kit can't do these itself: work through them one at a", "  time, as the card on the right says."}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			face, out, _ := applyIn(colorprofile.TrueColor, 160, 64, time.Minute, tt.events)
+			defer func() { _ = face.Close() }()
+			left, _ := panes(screen(uncoloured(out.String())), 160)
+			if got := left[3 : 3+len(tt.want)]; !slices.Equal(got, tt.want) || left[3+len(tt.want)] != "" {
+				t.Errorf("the left pane's lead is\n%s\nwant\n%s", strings.Join(left[3:3+len(tt.want)+1], "\n"), strings.Join(tt.want, "\n"))
+			}
+		})
+	}
+}
+
+// The left pane lists the to-dos, To do and how many, that everything else
+// is done and kit can't do these, then each group where its first comes, its name muted after a blank line; done ones the
 // done mark and muted, the one up a pill, the rest white; q at its foot,
 // stopping there, and, once they're over or stopped there, stopping the
 // run, as q does then.
@@ -211,7 +243,8 @@ func TestTheToDosList(t *testing.T) {
 	left, _ := panes(got, 160)
 	want := []string{
 		"", "  TO DO  6",
-		"", "  Apps", "  ● Bring back apps' settings", "  ● Open Karabiner-Elements", "  ● Open Hammerspoon",
+		"", "  Everything else is done. kit can't do these itself: work", "  through them one at a time, as the card on the right", "  says.",
+		"", "  Apps", "  ● Restore application settings", "  ● Open Karabiner-Elements", "  ● Open Hammerspoon",
 		"", "  System Settings", "  △ Allow Full Disk Access for remote users",
 		"", "  Backups", "  △ Add a Time Machine disk", "  △ Set up Arq's backup plan",
 	}
@@ -232,7 +265,7 @@ func TestTheToDosList(t *testing.T) {
 	}
 	log := strings.Join(logOf(got, 160), "\n")
 	for _, want := range []string{
-		"  03:34:45  ● Bring back apps' settings: done, in 40.0s · 214 apps' settings, from 15 Oct\n",
+		"  03:34:45  ● Restore application settings: done, in 40.0s · 214 apps' settings, from 15 Oct\n",
 		"  03:35:38  ● Open Karabiner-Elements: done, in 53.0s\n",
 		"  03:36:44  ● Open Hammerspoon: done, in 1m06s\n",
 	} {
@@ -277,14 +310,17 @@ func TestTheToDoPanel(t *testing.T) {
 	}{
 		{0, []string{
 			"",
-			"  △ Bring back apps' settings" + strings.Repeat(" ", 62) + "1 of 6",
+			"  △ Restore application settings" + strings.Repeat(" ", 59) + "1 of 6",
 			"",
-			"      First, so the apps you open next start with yours. Bringing them back opens some apps once:",
-			"      their windows, notifications and permission prompts may follow. This Mac saves its own once",
-			"      they're back. Settings files come back too.",
+			"      This Mac takes over laptop from Studio, which stops saving to it. First, so the apps you open",
+			"      next start with yours. This Mac saves its own once they're restored. Settings files are",
+			"      restored too.",
 			"",
-			"      r brings them back from this Mac's last save, 15 Oct",
-			"      f starts afresh: nothing back, saving from now",
+			"      r restores this machine ID's last save, 15 Oct",
+			"      1 restores desk's last save (26 Oct)",
+			"      2 restores studio's last save (25 Oct)",
+			"      3 restores tower's last save (24 Oct)",
+			"      f starts afresh: nothing restored, saving from now",
 			"      s skips it for now: kit apply brings it back",
 			"",
 			"───────────────────────────────────────────────────────────────────────────────────────────────────",
@@ -332,7 +368,7 @@ func TestTheToDoPanel(t *testing.T) {
 	face, out, _ := applyIn(colorprofile.TrueColor, 160, 64, time.Minute, toDosUpTo(0))
 	defer func() { _ = face.Close() }()
 	frame := strings.Join(lastFrame(out.String()), "\n")
-	if !strings.Contains(frame, look.Urgent("r")+" "+look.White("brings them back from this Mac's last save, 15 Oct")) {
+	if !strings.Contains(frame, look.Urgent("r")+" "+look.White("restores this machine ID's last save, 15 Oct")) {
 		t.Error("a choice's keys aren't styled as a card's keys are")
 	}
 }
@@ -346,16 +382,16 @@ func TestAChoiceBeingAnswered(t *testing.T) {
 	face, out, _ := applyIn(colorprofile.TrueColor, 160, 64, time.Minute, events)
 	defer func() { _ = face.Close() }()
 	_, right := panes(screen(uncoloured(out.String())), 160)
-	ends := slices.Index(right, "      they're back. Settings files come back too.")
-	if ends < 0 || !slices.Equal(right[ends+1:ends+6], []string{"", "      ◐ brings them back from this Mac's last save, 15 Oct", "      s skips it for now: kit apply brings it back", "", strings.Repeat("─", 99)}) {
+	ends := slices.Index(right, "      restored too.")
+	if ends < 0 || !slices.Equal(right[ends+1:ends+6], []string{"", "      ◐ restores this machine ID's last save, 15 Oct", "      s skips it for now: kit apply brings it back", "", strings.Repeat("─", 99)}) {
 		t.Errorf("being answered, the right pane starts\n%s\nwant what r does, turning, none of its keys, and s leaving it for later", strings.Join(right[:min(len(right), 14)], "\n"))
 	}
-	if frame := strings.Join(lastFrame(out.String()), "\n"); !strings.Contains(frame, look.Cyan("◐")+" "+look.White("brings them back from this Mac's last save, 15 Oct")) {
+	if frame := strings.Join(lastFrame(out.String()), "\n"); !strings.Contains(frame, look.Cyan("◐")+" "+look.White("restores this machine ID's last save, 15 Oct")) {
 		t.Error("what r does isn't led by the turning mark")
 	}
 	small, out2, _ := applyAt(99, 40, since(events), events)
 	defer func() { _ = small.Close() }()
-	if got := screen(out2.String()); !strings.Contains(got, "brings them back from this Mac's last save, 15 Oct") || strings.Contains(got, "a bigger window shows the keys") {
+	if got := screen(out2.String()); !strings.Contains(got, "restores this machine ID's last save, 15 Oct") || strings.Contains(got, "a bigger window shows the keys") {
 		t.Errorf("in a small window, being answered, the card shows\n%s\nwant what r does in place of the keys", got)
 	}
 }
@@ -371,7 +407,7 @@ func TestTheToDosInASmallWindow(t *testing.T) {
 		t.Fatal(err)
 	}
 	golden(t, "apply-todo-small.golden", got+"\n")
-	if !strings.Contains(got, "Bring back apps' settings") || !strings.Contains(got, "a bigger window shows the keys to answer it") || strings.Contains(got, "TO DO") {
+	if !strings.Contains(got, "Restore application settings") || !strings.Contains(got, "a bigger window shows the keys to answer it") || strings.Contains(got, "TO DO") {
 		t.Errorf("in a small window, the to-dos show\n%s\nwant the one up as a card, no list", got)
 	}
 }

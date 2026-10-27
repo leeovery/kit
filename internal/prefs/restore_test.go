@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/prefs"
 )
 
@@ -198,33 +197,20 @@ func TestRestoreHoldsAFailedFileAside(t *testing.T) {
 	}
 }
 
-// A sandboxed app's container is made first: launched hidden once, then
-// quit, the run's log naming it as it opens.
-func TestRestoreMakesASandboxedAppsContainer(t *testing.T) {
+// A sandboxed app with its container, as one opened once has, is restored
+// as any app is, nothing opened.
+func TestRestoreRestoresASandboxedAppWithItsContainer(t *testing.T) {
 	w := newWorld(t, prefs.Lists{})
 	store := filepath.Join(w.clone, "laptop")
 	w.write(t, filepath.Join(store, "domains", "com.example.boxed.plist"), stored(t, map[string]any{"A": true}))
-	app := w.app(t, w.apps, "Boxed", "com.example.boxed")
-	w.fake.On("codesign", "-d", "--entitlements", "-", "--xml", app).Prints(sandboxedApp)
-	w.fake.On("open", "-g", "-j", "-b", "com.example.boxed").Does(func() {
-		_ = os.MkdirAll(filepath.Join(w.home, "Library", "Containers", "com.example.boxed"), 0o700)
-	})
-	w.fake.On("osascript", "-e", `tell application id "com.example.boxed" to quit`)
+	w.write(t, filepath.Join(w.home, "Library", "Containers", "com.example.boxed", ".made"), "")
+	w.app(t, w.apps, "Boxed", "com.example.boxed")
 	w.closed("com.example.boxed")
 	w.imports(t, "com.example.boxed", "laptop", map[string]any{}, map[string]any{"A": true})
 	w.fake.On("git", "-C", w.clone, "rev-parse", "HEAD").Prints("abc123\n")
-	var logged []string
-	ctx := event.WithLogging(t.Context(), func(l event.Logged) { logged = append(logged, l.Line) })
-	report, err := w.p.Restore(ctx, prefs.RestoreOptions{})
-	if err != nil || !slices.Equal(report.Restored, []string{"com.example.boxed"}) {
-		t.Errorf("Restore() = %+v, %v", report, err)
-	}
-	calls := strings.Join(w.fake.Calls(), "\n")
-	if strings.Index(calls, "open -g -j -b com.example.boxed") > strings.Index(calls, "defaults import com.example.boxed") {
-		t.Errorf("ran\n%s\nwant the container made before the import", calls)
-	}
-	if want := []string{"Opening Boxed once, for its settings folder"}; !slices.Equal(logged, want) {
-		t.Errorf("the log says %q, want %q", logged, want)
+	report, err := w.p.Restore(t.Context(), prefs.RestoreOptions{})
+	if err != nil || !slices.Equal(report.Restored, []string{"com.example.boxed"}) || len(w.opened()) != 0 {
+		t.Errorf("Restore() = %+v, %v, opened %q; want it restored, nothing opened", report, err, w.opened())
 	}
 }
 
@@ -240,9 +226,10 @@ func entitled(sandbox string) string {
 }
 
 // An app is sandboxed only when its entitlements turn the app sandbox on:
-// one declaring it off, as some do, or not at all, or unsigned, has no
-// container to make, and its settings are restored straight to its domain,
-// no app opened, none to open.
+// one with no container yet is held for the person to open, kit opening
+// nothing; one declaring it off, as some do, or not at all, or unsigned,
+// has no container to wait for, and its settings are restored straight to
+// its domain, none to open.
 func TestRestoreTakesAnAppAsSandboxedOnlyWhenItsEntitlementIsOn(t *testing.T) {
 	for _, tt := range []struct {
 		name, entitlements string
@@ -258,8 +245,6 @@ func TestRestoreTakesAnAppAsSandboxedOnlyWhenItsEntitlementIsOn(t *testing.T) {
 			w.write(t, filepath.Join(w.clone, "laptop", "domains", "com.example.monitor.plist"), stored(t, map[string]any{"A": true}))
 			app := w.app(t, w.apps, "Monitor", "com.example.monitor")
 			w.fake.On("codesign", "-d", "--entitlements", "-", "--xml", app).Prints(tt.entitlements)
-			w.fake.On("open", "-g", "-j", "-b", "com.example.monitor")
-			w.fake.On("osascript", "-e", `tell application id "com.example.monitor" to quit`)
 			w.closed("com.example.monitor")
 			w.imports(t, "com.example.monitor", "laptop", map[string]any{}, map[string]any{"A": true})
 			w.fake.On("git", "-C", w.clone, "rev-parse", "HEAD").Prints("abc123\n")
@@ -269,8 +254,8 @@ func TestRestoreTakesAnAppAsSandboxedOnlyWhenItsEntitlementIsOn(t *testing.T) {
 			switch {
 			case err != nil:
 				t.Fatalf("Restore() error = %v", err)
-			case tt.sandboxed && (len(w.opened()) != 1 || report.ToOpen["com.example.monitor"] == "" || len(w.p.ToOpen(t.Context(), rec)) != 1):
-				t.Errorf("Restore() = %+v, opened %q; want the app opened once for its container, then held to open", report, w.opened())
+			case tt.sandboxed && (len(w.opened()) != 0 || report.ToOpen["com.example.monitor"] == "" || len(w.p.ToOpen(t.Context(), rec)) != 1):
+				t.Errorf("Restore() = %+v, opened %q; want nothing opened, the app held to open", report, w.opened())
 			case !tt.sandboxed && (!slices.Equal(report.Restored, []string{"com.example.monitor"}) || len(w.opened()) != 0 || len(report.ToOpen) != 0 || rec.Pending != nil):
 				t.Errorf("Restore() = %+v, opened %q, pending %+v; want its settings restored to its domain, no app opened, nothing held", report, w.opened(), rec.Pending)
 			}
@@ -306,8 +291,8 @@ func TestAnAppHeldToOpenThatIsntSandboxedIsRestored(t *testing.T) {
 }
 
 // A helper inside an app, named no more than its bundle id, as some are,
-// team prefix and all, is named by the app it's in, as the run's log and
-// its to-do say it; one with a name of its own keeps it.
+// team prefix and all, is named by the app it's in, as its to-do says it;
+// one with a name of its own keeps it.
 func TestAHelperIsNamedByItsApp(t *testing.T) {
 	for _, tt := range []struct {
 		helper, want string
@@ -322,18 +307,11 @@ func TestAHelperIsNamedByItsApp(t *testing.T) {
 			app := w.app(t, w.apps, "Calendar Pro", "com.example.cal", [2]string{tt.helper, id})
 			helper := filepath.Join(app, "Contents", "Library", "LoginItems", tt.helper+".app")
 			w.fake.On("codesign", "-d", "--entitlements", "-", "--xml", helper).Prints(sandboxedApp)
-			w.fake.On("open", "-g", "-j", "-b", id)
-			w.fake.On("osascript", "-e", `tell application id "`+id+`" to quit`)
 			w.closed(id)
 			w.fake.On("git", "-C", w.clone, "rev-parse", "HEAD").Prints("abc123\n")
-			var logged []string
-			ctx := event.WithLogging(t.Context(), func(l event.Logged) { logged = append(logged, l.Line) })
-			report, err := w.p.Restore(ctx, prefs.RestoreOptions{})
+			report, err := w.p.Restore(t.Context(), prefs.RestoreOptions{})
 			if err != nil || report.Apps[id].Name != tt.want {
 				t.Errorf("Restore() = %+v, %v; want the app named %s", report, err, tt.want)
-			}
-			if want := []string{"Opening " + tt.want + " once, for its settings folder"}; !slices.Equal(logged, want) {
-				t.Errorf("the log says %q, want %q", logged, want)
 			}
 		})
 	}
@@ -350,11 +328,11 @@ func (w *world) opened() []string {
 	return out
 }
 
-// A sandboxed app whose settings folder didn't appear when kit opened it,
-// once for all its domains, is held for the person to open once, named,
-// with why; a full restore switches capture on all the same. The hourly pass opens nothing: with no
-// folder yet it leaves the app held, and once the folder's there and the
-// app's closed, it brings its settings back.
+// A sandboxed app with no settings folder is held for the person to open
+// once, for all its domains, named, with why, kit opening nothing; a full
+// restore switches capture on all the same. The hourly pass opens nothing:
+// with no folder yet it leaves the app held, and once the folder's there
+// and the app's closed, it brings its settings back.
 func TestRestoreHoldsAnAppToOpenTillItsFolderIsThere(t *testing.T) {
 	w := newWorld(t, prefs.Lists{})
 	store := filepath.Join(w.clone, "laptop")
@@ -363,41 +341,32 @@ func TestRestoreHoldsAnAppToOpenTillItsFolderIsThere(t *testing.T) {
 	}
 	app := w.app(t, w.apps, "Boxed App", "com.example.boxed")
 	w.fake.On("codesign", "-d", "--entitlements", "-", "--xml", app).Prints(sandboxedApp)
-	w.fake.On("open", "-g", "-j", "-b", "com.example.boxed")
-	w.fake.On("osascript", "-e", `tell application id "com.example.boxed" to quit`)
 	w.closed("com.example.boxed")
 	w.fake.On("git", "-C", w.clone, "rev-parse", "HEAD").Prints("abc123\n")
+	why := "it has no settings folder till it's opened once"
 
 	report, err := w.p.Restore(t.Context(), prefs.RestoreOptions{})
 	boxed := prefs.App{ID: "com.example.boxed", Name: "Boxed App"}
-	if err != nil || len(report.Restored) != 0 || report.ToOpen["com.example.boxed"] != "opened once, it still has no settings folder" || report.Apps["com.example.boxed"] != boxed {
+	if err != nil || len(report.Restored) != 0 || report.ToOpen["com.example.boxed"] != why || report.Apps["com.example.boxed"] != boxed {
 		t.Errorf("Restore() = %+v, %v; want the app to open, named, with why", report, err)
 	}
 	rec, _ := w.p.Load()
-	if rec.On == "" || rec.Pending == nil || !slices.Equal(rec.Pending.Domains, []string{"com.example.boxed", "com.example.boxed.extra", "com.example.later"}) || rec.Pending.Open["com.example.boxed"] != boxed || rec.Pending.Why["com.example.boxed"] != "opened once, it still has no settings folder" {
+	if rec.On == "" || rec.Pending == nil || !slices.Equal(rec.Pending.Domains, []string{"com.example.boxed", "com.example.boxed.extra", "com.example.later"}) || rec.Pending.Open["com.example.boxed"] != boxed || rec.Pending.Why["com.example.boxed"] != why {
 		t.Errorf("record = %+v, pending %+v; want capture on, the app held to open with the one waiting, with why", rec, rec.Pending)
-	}
-	if got := w.opened(); len(got) != 1 {
-		t.Errorf("the restore ran %q; want the app opened once for both its domains", got)
 	}
 	if got := w.p.ToOpen(t.Context(), rec); !slices.Equal(got, []prefs.App{boxed}) {
 		t.Errorf("ToOpen() = %+v, want the app", got)
 	}
-	opens := len(w.opened())
 
 	hourly := prefs.RestoreOptions{Pending: true, Unattended: true}
 	if report, err := w.p.Restore(t.Context(), hourly); err != nil || len(report.Restored) != 0 || len(report.ToOpen) != 2 {
 		t.Errorf("the hourly pass, no folder yet = %+v, %v; want the app left to open", report, err)
 	}
-	if rec, _ := w.p.Load(); rec.Pending.Open["com.example.boxed"] != boxed || rec.Pending.Why["com.example.boxed"] != "opened once, it still has no settings folder" {
+	if rec, _ := w.p.Load(); rec.Pending.Open["com.example.boxed"] != boxed || rec.Pending.Why["com.example.boxed"] != why {
 		t.Errorf("pending = %+v, want the app still held to open", rec.Pending)
 	}
 
 	w.write(t, filepath.Join(w.home, "Library", "Containers", "com.example.boxed", ".made"), "")
-	w.fake.On("osascript", "-e", `application id "com.example.boxed" is running`).Prints("true\n").Then().Prints("false\n")
-	if got := w.p.ToOpen(t.Context(), rec); !slices.Equal(got, []prefs.App{boxed}) {
-		t.Errorf("its folder there, still running, ToOpen() = %+v; want the app till it's quit", got)
-	}
 	w.imports(t, "com.example.boxed", "laptop", map[string]any{}, map[string]any{"A": true})
 	w.imports(t, "com.example.boxed.extra", "laptop", map[string]any{}, map[string]any{"A": true})
 	if report, err := w.p.Restore(t.Context(), hourly); err != nil || !slices.Equal(report.Restored, []string{"com.example.boxed", "com.example.boxed.extra"}) {
@@ -407,8 +376,25 @@ func TestRestoreHoldsAnAppToOpenTillItsFolderIsThere(t *testing.T) {
 	if rec.Pending == nil || !slices.Equal(rec.Pending.Domains, []string{"com.example.later"}) || len(rec.Pending.Open) != 0 || len(w.p.ToOpen(t.Context(), rec)) != 0 {
 		t.Errorf("pending = %+v, want com.example.later left", rec.Pending)
 	}
-	if got := w.opened(); len(got) != opens {
-		t.Errorf("the hourly pass ran %q; want it to open nothing", got[opens:])
+	if got := w.opened(); len(got) != 0 {
+		t.Errorf("the restores ran %q; want them to open nothing", got)
+	}
+}
+
+// The app held to open is ready for its settings once it's been opened
+// and quit: running, or with no settings folder yet, Opened says which.
+func TestOpened(t *testing.T) {
+	w := newWorld(t, prefs.Lists{})
+	w.fake.On("osascript", "-e", `application id "com.example.boxed" is running`).Prints("true\n").Then().Prints("false\n")
+	if err := w.p.Opened(t.Context(), "com.example.boxed", "Boxed App"); err == nil || err.Error() != "Boxed App is still running" {
+		t.Errorf("running, Opened() = %v", err)
+	}
+	if err := w.p.Opened(t.Context(), "com.example.boxed", "Boxed App"); err == nil || err.Error() != "Boxed App has no settings folder yet" {
+		t.Errorf("quit, no folder, Opened() = %v", err)
+	}
+	w.write(t, filepath.Join(w.home, "Library", "Containers", "com.example.boxed", ".made"), "")
+	if err := w.p.Opened(t.Context(), "com.example.boxed", "Boxed App"); err != nil {
+		t.Errorf("quit, its folder there, Opened() = %v", err)
 	}
 }
 
@@ -618,16 +604,61 @@ func TestHistory(t *testing.T) {
 	}
 }
 
-// The last save is when this Mac's folder in the store last changed, as a
-// restore brings it back; with nothing saved for it, there's none.
-func TestLastSave(t *testing.T) {
+// The saves are the store's folders that have been committed, sorted by
+// name, each with when it last changed: this Mac's and the others', not a
+// folder never committed, nor git's own.
+func TestSaves(t *testing.T) {
 	w := newWorld(t, prefs.Lists{})
-	w.fake.On("git", "-C", w.clone, "log", "-1", "--format=%cI", "--", "laptop").Prints("2026-10-15T03:00:12+01:00\n").Then().Prints("")
-	last, err := w.p.LastSave(t.Context())
-	if want := time.Date(2026, 10, 15, 2, 0, 12, 0, time.UTC); err != nil || !last.Equal(want) {
-		t.Errorf("LastSave() = %v, %v; want %v", last, err, want)
+	for _, mac := range []string{"studio", "laptop", "uncommitted"} {
+		if err := os.MkdirAll(filepath.Join(w.clone, mac), 0o700); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if _, err := w.p.LastSave(t.Context()); err == nil || err.Error() != "no settings stored for laptop" {
-		t.Errorf("with nothing saved, LastSave() = %v", err)
+	w.fake.On("git", "-C", w.clone, "log", "-1", "--format=%cI", "--", "laptop").Prints("2026-10-15T03:00:12+01:00\n")
+	w.fake.On("git", "-C", w.clone, "log", "-1", "--format=%cI", "--", "studio").Prints("2026-10-26T03:00:00Z\n")
+	w.fake.On("git", "-C", w.clone, "log", "-1", "--format=%cI", "--", "uncommitted")
+	saves, err := w.p.Saves(t.Context())
+	want := []prefs.Save{{Mac: "laptop", At: time.Date(2026, 10, 15, 2, 0, 12, 0, time.UTC)}, {Mac: "studio", At: time.Date(2026, 10, 26, 3, 0, 0, 0, time.UTC)}}
+	if err != nil || len(saves) != len(want) || saves[0].Mac != want[0].Mac || !saves[0].At.Equal(want[0].At) || saves[1].Mac != want[1].Mac || !saves[1].At.Equal(want[1].At) {
+		t.Errorf("Saves() = %v, %v; want %v", saves, err, want)
+	}
+}
+
+// Other hardware owning this Mac's folder, this Mac takes it over, the
+// owner called by its name, else its model, else its hardware; taking over
+// writes this Mac's owner file, its name in it, in the other's place.
+// Owned by this hardware, or by none, there's nothing to take over.
+func TestTakingOver(t *testing.T) {
+	for _, tt := range []struct {
+		name, owner, called string
+		taking              bool
+	}{
+		{"named", "hardware HW-OLD\nmodel Mac1,1\nname Studio\nsince 2026-09-28 17:00\n", "Studio", true},
+		{"from before names", "hardware HW-OLD\nmodel Mac1,1\nsince 2026-09-28 17:00\n", "Mac1,1", true},
+		{"hardware alone", "hardware HW-OLD\n", "HW-OLD", true},
+		{"this hardware's", "hardware HW-THIS\nmodel Mac99,1\nsince 2026-09-28 17:00\n", "", false},
+		{"no owner", "", "", false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			w := newWorld(t, prefs.Lists{})
+			owner := filepath.Join(w.clone, "laptop", "owner")
+			if tt.owner != "" {
+				w.write(t, owner, tt.owner)
+			}
+			got, taking, err := w.p.TakingOver(t.Context())
+			if err != nil || taking != tt.taking || got.Called() != tt.called {
+				t.Errorf("TakingOver() = %q, %v, %v; want %q, %v", got.Called(), taking, err, tt.called, tt.taking)
+			}
+			if err := w.p.TakeOver(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			want := tt.owner
+			if tt.taking {
+				want = "hardware HW-THIS\nmodel Mac99,1\nname Laptop\nsince 2026-10-06 03:00\n"
+			}
+			if got, _ := os.ReadFile(owner); string(got) != want {
+				t.Errorf("taken over, the owner file says %q, want %q", got, want)
+			}
+		})
 	}
 }

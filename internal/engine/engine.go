@@ -107,15 +107,17 @@ type Step struct {
 
 // Choice is what a step's to-dos do beyond being looked at: Ready is one as
 // it comes up, what it says filled in where that takes looking, as the
-// date of the save a key brings back (optional); Answer does what key
-// says, and says what it did, in kit's words; Settle finishes what one kit
-// watched waited for, once it's found done, as bringing back the settings
-// of the apps it had the person open, and says what it did, if anything
-// (optional).
+// date of the save a key restores (optional); Answer does what key says,
+// one of its keys, or "done" for one the person says is done (SaysDone),
+// and says what it did, in kit's words; Settle finishes what one kit
+// watched waited for, once it's found done, and says what it did, if
+// anything (optional); Open opens what one needs as its card goes up, as
+// the app to open and quit (optional).
 type Choice struct {
 	Ready  func(ctx context.Context, it check.Item) check.Item
 	Answer func(ctx context.Context, it check.Item, key string) (said string, err error)
 	Settle func(ctx context.Context, it check.Item) (said string)
+	Open   func(ctx context.Context, it check.Item)
 }
 
 // Wait is a thing a step is applied after: one of the things another step
@@ -1060,12 +1062,19 @@ func ChoiceOf(ctx context.Context, name string) *Choice {
 			return c.Settle(d.attributed(event.WithChanging(ctx), s), it)
 		}
 	}
+	var open func(context.Context, check.Item)
+	if c.Open != nil {
+		open = func(ctx context.Context, it check.Item) {
+			c.Open(d.attributed(event.WithChanging(ctx), s), it)
+		}
+	}
 	return &Choice{
 		Ready: ready,
 		Answer: func(ctx context.Context, it check.Item, key string) (string, error) {
 			return c.Answer(d.attributed(event.WithChanging(ctx), s), it, key)
 		},
 		Settle: settle,
+		Open:   open,
 	}
 }
 

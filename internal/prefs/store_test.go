@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -36,11 +37,19 @@ func cloned(t *testing.T) (clone string, fake *runnertest.Fake, settings func() 
 	}
 }
 
-// madeIn has a clone made in dir, as git clone makes one.
+// madeIn has a clone made in dir, as git clone makes one, with this Mac's
+// folder.
 func madeIn(t *testing.T, dir string) {
-	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o700); err != nil {
-		t.Error(err)
+	for _, d := range []string{".git", "laptop"} {
+		if err := os.MkdirAll(filepath.Join(dir, d), 0o700); err != nil {
+			t.Error(err)
+		}
 	}
+}
+
+// saved reports whether saves are the clone's: this Mac's last save alone.
+func saved(saves []prefs.Save) bool {
+	return slices.Equal(saves, []prefs.Save{{Mac: "laptop", At: lastSave}})
 }
 
 // clones counts the clones of the store fake ran.
@@ -72,7 +81,7 @@ func TestACloneCutShort(t *testing.T) {
 		<-cloning
 		stop()
 	}()
-	if _, err := p.LastSave(ctx); err == nil {
+	if _, err := p.Saves(ctx); err == nil {
 		t.Fatal("a clone cut short gave a last save")
 	}
 	for _, left := range []string{clone, aside} {
@@ -80,8 +89,8 @@ func TestACloneCutShort(t *testing.T) {
 			t.Errorf("%s is left (%v), want nothing of the clone cut short", left, err)
 		}
 	}
-	if last, err := p.LastSave(t.Context()); err != nil || !last.Equal(lastSave) {
-		t.Errorf("next look: %v, %v; want the store cloned again and its last save", last, err)
+	if saves, err := p.Saves(t.Context()); err != nil || !saved(saves) {
+		t.Errorf("next look: %v, %v; want the store cloned again and its last save", saves, err)
 	}
 	if _, err := os.Stat(filepath.Join(clone, ".git")); err != nil {
 		t.Errorf("the clone isn't in place: %v", err)
@@ -103,8 +112,8 @@ func TestACloneLeftByAKitKilled(t *testing.T) {
 		}
 		madeIn(t, aside)
 	})
-	if last, err := settings().LastSave(t.Context()); err != nil || !last.Equal(lastSave) {
-		t.Errorf("last save %v, %v; want the store cloned and its last save", last, err)
+	if saves, err := settings().Saves(t.Context()); err != nil || !saved(saves) {
+		t.Errorf("saves %v, %v; want the store cloned and its last save", saves, err)
 	}
 	if _, err := os.Stat(filepath.Join(clone, "half")); !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("what the kit killed left is in the clone (%v)", err)
@@ -133,9 +142,9 @@ func TestTwoKitsCloneAtOnce(t *testing.T) {
 	}
 	var wg sync.WaitGroup
 	looks := make([]error, 2)
-	wg.Go(func() { _, looks[0] = first.LastSave(t.Context()) })
+	wg.Go(func() { _, looks[0] = first.Saves(t.Context()) })
 	<-cloning
-	wg.Go(func() { _, looks[1] = second.LastSave(t.Context()) })
+	wg.Go(func() { _, looks[1] = second.Saves(t.Context()) })
 	select {
 	case <-waited:
 	case <-time.After(5 * time.Second):
@@ -161,7 +170,7 @@ func TestAFolderInTheClonesPlace(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(clone, "notes"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, err := settings().LastSave(t.Context())
+	_, err := settings().Saves(t.Context())
 	if err == nil || !strings.Contains(err.Error(), "move it aside") || clones(fake) != 0 {
 		t.Errorf("last save = %v, cloned %d times; want it refused, saying what to do, nothing cloned", err, clones(fake))
 	}

@@ -5,26 +5,26 @@
 
 ────────────────────────────────────────────────────┬───────────────────────────────────────────────
                                                     │
-  TO DO  6                                          │  △ Bring back apps' settings          1 of 6  
+  TO DO  6                                          │  △ Restore application settings       1 of 6  
                                                     │
-  Apps                                              │      First, so the apps you open next start
-  △ Bring back apps' settings                       │      with yours. Bringing them back opens some
-  △ Open Karabiner-Elements                         │      apps once: their windows, notifications
-  △ Open Hammerspoon                                │      and permission prompts may follow. This
-                                                    │      Mac saves its own once they're back.
-  System Settings                                   │      Settings files come back too.
-  △ Allow Full Disk Access for remote users         │
-                                                    │      r brings them back from this Mac's last
-  Backups                                           │        save, 15 Oct
-  △ Add a Time Machine disk                         │      f starts afresh: nothing back, saving
-  △ Set up Arq's backup plan                        │        from now
-                                                    │      s skips it for now: kit apply brings it
-                                                    │        back
+  Everything else is done. kit can't do these       │      This Mac takes over laptop from Studio,
+  itself: work through them one at a time, as the   │      which stops saving to it. First, so the
+  card on the right says.                           │      apps you open next start with yours. This
+                                                    │      Mac saves its own once they're restored.
+  Apps                                              │      Settings files are restored too.
+  △ Restore application settings                    │
+  △ Open Karabiner-Elements                         │      r restores this machine ID's last save,
+  △ Open Hammerspoon                                │        15 Oct
+                                                    │      1 restores desk's last save (26 Oct)
+  System Settings                                   │      2 restores studio's last save (25 Oct)
+  △ Allow Full Disk Access for remote users         │      3 restores tower's last save (24 Oct)
+                                                    │      f starts afresh: nothing restored, saving
+  Backups                                           │        from now
+  △ Add a Time Machine disk                         │      s skips it for now: kit apply brings it
+  △ Set up Arq's backup plan                        │        back
                                                     │
                                                     ├───────────────────────────────────────────────
                                                     │
                                                     │  LOG
                                                     │
-                                                    │  03:32:51  ● fonts: fine
-                                                    │  03:32:52  ● mise: fine
   q stop here                                       │  03:32:53  ● Sign in to 1Password: fine

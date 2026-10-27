@@ -3,11 +3,14 @@ package prefs
 import (
 	"cmp"
 	"context"
+	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+
+	"github.com/leeovery/kit/internal/runner"
 )
 
 // App is an app as kit tells of it: its bundle id, and its name, as its
@@ -49,8 +52,9 @@ func heldIn(p *Pending) held {
 	if p.Failed == nil && p.Open == nil {
 		for d := range h.domains {
 			switch why := h.why[d]; {
-			case why == errNoFolder.Error(), why == errNotOpened.Error():
-				// Its app's found again as the next pass tries it.
+			case why == errNotOpened.Error(), strings.HasPrefix(why, "opened once"):
+				// Its app's found again as the next pass tries it. "opened
+				// once" begins the whys of when kit opened apps itself.
 				h.open[d] = App{}
 			case why != "" && !waits(why):
 				h.failed[d] = true
@@ -60,10 +64,9 @@ func heldIn(p *Pending) held {
 	return h
 }
 
-// waits reports whether why is a wait's: not installed, running, or not
-// quitting once opened.
+// waits reports whether why is a wait's: not installed, or running.
 func waits(why string) bool {
-	return why == "not installed" || running(why) || why == errDidntQuit.Error()
+	return why == "not installed" || running(why)
 }
 
 // running reports whether why is that the app is running.
@@ -88,12 +91,6 @@ func (h held) anyToTry() bool {
 func (p *Prefs) Failures(rec Record) (domains, files int) {
 	h := heldIn(rec.Pending)
 	return len(h.failed), len(h.files)
-}
-
-// HasApp reports whether the app of a bundle id is installed.
-func (p *Prefs) HasApp(id string) bool {
-	_, ok := p.installedApps()[id]
-	return ok
 }
 
 // drop takes name, a domain or a file, off.
@@ -149,10 +146,10 @@ func (h held) pending(from string) *Pending {
 }
 
 // ToOpen are the apps the person is to open once and quit, as rec holds
-// them: those installed and sandboxed that have no settings folder yet, or
-// are still running, each once, by name. One held that isn't sandboxed, as
-// kit once took an app declaring its sandbox off to be, never gets a
-// folder: its settings come back as any app's, as the next pass tries them.
+// them, till their settings are restored: those installed and sandboxed,
+// each once, by name. One held that isn't sandboxed, as kit once took an
+// app declaring its sandbox off to be, never gets a folder: its settings
+// come back as any app's, as the next pass tries them.
 func (p *Prefs) ToOpen(ctx context.Context, rec Record) []App {
 	if rec.Pending == nil || len(rec.Pending.Open) == 0 {
 		return nil
@@ -166,12 +163,29 @@ func (p *Prefs) ToOpen(ctx context.Context, rec Record) []App {
 			continue
 		}
 		seen[app.ID] = true
-		if !p.hasFolder(app.ID) || p.running(ctx, app.ID) {
-			out = append(out, app)
-		}
+		out = append(out, app)
 	}
 	slices.SortFunc(out, func(a, b App) int { return cmp.Compare(a.Name, b.Name) })
 	return out
+}
+
+// Opened reports why the sandboxed app of a bundle id, called name, isn't
+// ready for its settings: still running, or no settings folder yet; nil
+// once it's been opened and quit.
+func (p *Prefs) Opened(ctx context.Context, id, name string) error {
+	switch {
+	case p.running(ctx, id):
+		return fmt.Errorf("%s is still running", name)
+	case !p.hasFolder(id):
+		return fmt.Errorf("%s has no settings folder yet", name)
+	}
+	return nil
+}
+
+// Open opens the app of a bundle id, in view, for the person to quit once
+// macOS has made its settings folder. What opening says, the run's log has.
+func (p *Prefs) Open(ctx context.Context, id string) {
+	_, _ = p.Run.Run(ctx, runner.Command{Name: "open", Args: []string{"-b", id}})
 }
 
 // hasFolder reports whether the sandboxed app of a bundle id has its

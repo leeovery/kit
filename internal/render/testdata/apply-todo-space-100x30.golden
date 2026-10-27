@@ -7,24 +7,24 @@
                                                     │
   TO DO  6                                          │  △ Allow Full Disk Access for remote… 4 of 6  
                                                     │
-  Apps                                              │      So an SSH session from another Mac can
-  ● Bring back apps' settings                       │      reach everything, which Remote Login
-  ● Open Karabiner-Elements                         │      alone can't.
-  ● Open Hammerspoon                                │
-                                                    │      1  System Settings › General › Sharing ›
-  System Settings                                   │         Remote Login › ⓘ
-  △ Allow Full Disk Access for remote users         │      2  Turn on Allow full disk access for
-                                                    │         remote users
-  Backups                                           │
-  △ Add a Time Machine disk                         │      space when it's done
-  △ Set up Arq's backup plan                        │      s skips it for now: kit apply brings it
+  Everything else is done. kit can't do these       │      So an SSH session from another Mac can
+  itself: work through them one at a time, as the   │      reach everything, which Remote Login
+  card on the right says.                           │      alone can't.
+                                                    │
+  Apps                                              │      1  System Settings › General › Sharing ›
+  ● Restore application settings                    │         Remote Login › ⓘ
+  ● Open Karabiner-Elements                         │      2  Turn on Allow full disk access for
+  ● Open Hammerspoon                                │         remote users
+                                                    │
+  System Settings                                   │      space when it's done
+  △ Allow Full Disk Access for remote users         │      s skips it for now: kit apply brings it
                                                     │        back
-                                                    │
-                                                    ├───────────────────────────────────────────────
-                                                    │
+  Backups                                           │
+  △ Add a Time Machine disk                         ├───────────────────────────────────────────────
+  △ Set up Arq's backup plan                        │
                                                     │  LOG
                                                     │
                                                     │  03:32:53  ● Sign in to 1Password: fine
-                                                    │  03:34:45  ● Bring back apps' settings: done,…
+                                                    │  03:34:45  ● Restore application settings: do…
                                                     │  03:35:38  ● Open Karabiner-Elements: done, i…
   q stop here                                       │  03:36:44  ● Open Hammerspoon: done, in 1m06s

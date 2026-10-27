@@ -60,16 +60,19 @@ type Item struct {
 // at its end, one at a time: what to do, its title; why; its steps, in
 // order; what kit watches for to tell it's done, in words, as in "Time
 // Machine has a disk"; the group it's in; the keys of a choice, when it's
-// one; and whether it comes first, before the steps by hand the config
-// declares, rather than after them.
+// one; whether the person says when it's done (space), its step's choice
+// answering that (hand.Done), rather than kit telling by itself; and
+// whether it comes first, before the steps by hand the config declares,
+// rather than after them.
 type ToDo struct {
-	Title string   `json:"title"`
-	Why   string   `json:"why,omitempty"`
-	Steps []string `json:"steps,omitempty"`
-	Watch string   `json:"watch,omitempty"`
-	Group string   `json:"group,omitempty"`
-	Keys  []Key    `json:"keys,omitempty"`
-	First bool     `json:"first,omitempty"`
+	Title    string   `json:"title"`
+	Why      string   `json:"why,omitempty"`
+	Steps    []string `json:"steps,omitempty"`
+	Watch    string   `json:"watch,omitempty"`
+	Group    string   `json:"group,omitempty"`
+	Keys     []Key    `json:"keys,omitempty"`
+	SaysDone bool     `json:"says_done,omitempty"`
+	First    bool     `json:"first,omitempty"`
 }
 
 // Key is a key answering a choice, and what it does.

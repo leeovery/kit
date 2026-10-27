@@ -1,6 +1,7 @@
 package steps_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/leeovery/kit/internal/check"
+	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/prefs"
 	"github.com/leeovery/kit/internal/runner/runnertest"
@@ -57,109 +59,180 @@ func configures(fake *runnertest.Fake, clone string) {
 	}
 }
 
-// Apps' settings' to-do is a choice. As it comes up, r says the date of
-// this Mac's last save, the store cloned first when it isn't, and nothing
-// when there's none to say. r brings them back, as kit prefs restore does,
-// saying how many and from when, and how many wait for their apps; f starts
-// afresh, as kit prefs start-fresh does, saying nothing came back; either
-// switches capture on, so it's done. Nothing to bring back, r says why, and
-// it isn't.
-func TestAppsSettingsChoice(t *testing.T) {
-	state, clone := t.TempDir(), filepath.Join(t.TempDir(), "prefs")
+// settingsStore is a Mac, laptop, whose apps' settings aren't switched
+// on, with no clone of the store, cloning it making one with a folder for
+// each machine ID of saves, an app's settings in it, its last save on the
+// day given; and the settings step on it, its paused to-do as its check
+// finds it.
+func settingsStore(t *testing.T, saves map[string]string) (fake *runnertest.Fake, clone string, step engine.Step, paused check.Item) {
+	t.Helper()
+	state := t.TempDir()
+	clone = filepath.Join(t.TempDir(), "prefs")
 	if err := os.WriteFile(filepath.Join(state, "prefs.json"), []byte(`{}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	fake := runnertest.New(t)
+	fake = runnertest.New(t)
 	configures(fake, clone)
 	fake.On("git", "clone", "--quiet", "git@github.com:someone/prefs.git", clone+".cloning").Does(func() {
 		if err := os.MkdirAll(filepath.Join(clone+".cloning", ".git"), 0o700); err != nil {
 			t.Error(err)
 		}
+		for mac := range saves {
+			storeDomain(t, clone+".cloning", mac, "com.example.app")
+		}
 	})
-	fake.On("git", "-C", clone, "log", "-1", "--format=%cI", "--", "laptop").Prints("2026-10-04T03:00:00Z\n")
+	for mac, day := range saves {
+		fake.On("git", "-C", clone, "log", "-1", "--format=%cI", "--", mac).Prints(day + "T03:00:00Z\n")
+	}
 	fake.On("git", "-C", clone, "remote")
 	fake.On("git", "-C", clone, "rev-parse", "HEAD").Prints("abc123\n")
 	p := prefs.New(fake, t.TempDir(), state, clone, "git@github.com:someone/prefs.git", "laptop", prefs.Lists{}, now)
 	p.Probes, p.AppDirs = nil, []string{t.TempDir()}
-	step := steps.Prefs(p, now)
-	paused := step.Check(t.Context()).Items[0]
+	step = steps.Prefs(p, now)
+	return fake, clone, step, step.Check(t.Context()).Items[0]
+}
 
-	ready := step.Choice.Ready(t.Context(), paused)
-	if got := ready.ToDo.Keys[0].Does; got != "brings them back from this Mac's last save, 4 Oct" || paused.ToDo.Keys[0].Does != "brings them back from this Mac's last save" {
-		t.Errorf("readied, r says %q, and the check's to-do %q; want the date added to a copy", got, paused.ToDo.Keys[0].Does)
+// storeDomain puts a domain in the store's folder of mac.
+func storeDomain(t *testing.T, clone, mac, domain string) {
+	t.Helper()
+	stored := filepath.Join(clone, mac, "domains", domain+".plist")
+	if err := os.MkdirAll(filepath.Dir(stored), 0o700); err != nil {
+		t.Error(err)
 	}
+	if err := os.WriteFile(stored, []byte(`<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict/></plist>`), 0o600); err != nil {
+		t.Error(err)
+	}
+}
+
+// The settings to-do is a choice. As it comes up, the store cloned first
+// when it isn't, r restores this machine ID's last save, its date said,
+// offered only when it has one; a digit restores each other machine ID's,
+// sorted by name, its name and date said, the first nine alone; f starts
+// afresh. With no store to look at, the check's keys stand as they are.
+func TestAppsSettingsKeys(t *testing.T) {
+	others := map[string]string{}
+	for i := range 10 {
+		others[fmt.Sprintf("mac%02d", i)] = "2026-10-26"
+	}
+	for _, tt := range []struct {
+		name  string
+		saves map[string]string
+		want  []check.Key
+	}{
+		{"this machine ID's and others'", map[string]string{"laptop": "2026-10-04", "studio": "2026-10-25", "desk": "2026-10-26"}, []check.Key{
+			{Key: "r", Does: "restores this machine ID's last save, 4 Oct"},
+			{Key: "1", Does: "restores desk's last save (26 Oct)"},
+			{Key: "2", Does: "restores studio's last save (25 Oct)"},
+			{Key: "f", Does: "starts afresh: nothing restored, saving from now"},
+		}},
+		{"others' alone", map[string]string{"studio": "2026-10-25"}, []check.Key{
+			{Key: "1", Does: "restores studio's last save (25 Oct)"},
+			{Key: "f", Does: "starts afresh: nothing restored, saving from now"},
+		}},
+		{"more than nine", others, nil},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, step, paused := settingsStore(t, tt.saves)
+			got := step.Choice.Ready(t.Context(), paused).ToDo.Keys
+			if tt.want == nil {
+				var keys []string
+				for _, k := range got {
+					keys = append(keys, k.Key)
+				}
+				if want := []string{"1", "2", "3", "4", "5", "6", "7", "8", "9", "f"}; !slices.Equal(keys, want) || got[8].Does != "restores mac08's last save (26 Oct)" {
+					t.Errorf("readied, the keys are %v; want the first nine machine IDs' alone", got)
+				}
+				return
+			}
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("readied, the keys are %v\nwant %v", got, tt.want)
+			}
+		})
+	}
+	noStore := steps.Prefs(prefs.New(runnertest.New(t), t.TempDir(), t.TempDir(), t.TempDir(), "", "laptop", prefs.Lists{}, now), now)
+	paused := noStore.Check(t.Context()).Items[0]
+	if ready := noStore.Choice.Ready(t.Context(), paused); !slices.Equal(ready.ToDo.Keys, paused.ToDo.Keys) || paused.ToDo.Keys[0].Does != "restores this machine ID's last save" {
+		t.Errorf("with no store to look at, the keys are %v; want the check's, %v", ready.ToDo.Keys, paused.ToDo.Keys)
+	}
+}
+
+// r restores this machine ID's last save, as kit prefs restore does,
+// saying how many and from when, and how many wait for their apps; with
+// nothing saved, it says why, and capture stays off. A digit restores
+// another machine ID's, the log naming it. f starts afresh, as kit prefs
+// start-fresh does. Each switches capture on, so it's done.
+func TestAppsSettingsChoice(t *testing.T) {
+	_, _, step, paused := settingsStore(t, map[string]string{"studio": "2026-10-25"})
 	if _, err := step.Choice.Answer(t.Context(), paused, "r"); err == nil || err.Error() != "no settings stored for laptop" {
 		t.Errorf("with nothing saved, r = %v; want it to say so", err)
 	}
 	if step.Check(t.Context()).Items[0].ID != "prefs:paused" {
 		t.Error("r failing, capture was switched on")
 	}
-	stored := filepath.Join(clone, "laptop", "domains", "com.example.app.plist")
-	if err := os.MkdirAll(filepath.Dir(stored), 0o700); err != nil {
-		t.Fatal(err)
+	var logged []string
+	ctx := event.WithLogging(t.Context(), func(l event.Logged) { logged = append(logged, l.Line) })
+	said, err := step.Choice.Answer(ctx, paused, "1")
+	if err != nil || said != "no apps' settings, from 25 Oct; 1 waits for its app" {
+		t.Errorf("1 = %q, %v; want how many, from when, and how many wait", said, err)
 	}
-	if err := os.WriteFile(stored, []byte(`<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict/></plist>`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	said, err := step.Choice.Answer(t.Context(), paused, "r")
-	if err != nil || said != "no apps' settings, from 4 Oct; 1 waits for its app" {
-		t.Errorf("r = %q, %v; want how many, from when, and how many wait", said, err)
+	if want := []string{"Restoring application settings from studio's last save"}; !slices.Equal(logged, want) {
+		t.Errorf("the log says %q, want %q", logged, want)
 	}
 	if res := step.Check(t.Context()); res.State != check.OK || res.Summary != "saving from tonight" {
-		t.Errorf("brought back, the check says %+v; want capture switched on, fine for now", res)
+		t.Errorf("restored, the check says %+v; want capture switched on, fine for now", res)
 	}
 
-	fresh := t.TempDir()
-	if err := os.WriteFile(filepath.Join(fresh, "prefs.json"), []byte(`{}`), 0o600); err != nil {
-		t.Fatal(err)
+	_, _, step, paused = settingsStore(t, map[string]string{"laptop": "2026-10-04"})
+	if said, err := step.Choice.Answer(t.Context(), paused, "r"); err != nil || said != "no apps' settings, from 4 Oct; 1 waits for its app" {
+		t.Errorf("r = %q, %v; want how many, from when, and how many wait", said, err)
 	}
-	afresh := steps.Prefs(prefs.New(runnertest.New(t), t.TempDir(), fresh, t.TempDir(), "", "laptop", prefs.Lists{}, now), now)
-	if said, err := afresh.Choice.Answer(t.Context(), paused, "f"); err != nil || said != "saving from now, nothing brought back" {
+
+	_, _, step, paused = settingsStore(t, nil)
+	if said, err := step.Choice.Answer(t.Context(), paused, "f"); err != nil || said != "saving from now, nothing restored" {
 		t.Errorf("f = %q, %v", said, err)
 	}
-	if res := afresh.Check(t.Context()); res.State != check.OK || res.Summary != "saving from tonight" {
+	if res := step.Check(t.Context()); res.State != check.OK || res.Summary != "saving from tonight" {
 		t.Errorf("started afresh, the check says %+v; want capture switched on, fine for now", res)
-	}
-	if ready := afresh.Choice.Ready(t.Context(), paused); ready.ToDo.Keys[0].Does != "brings them back from this Mac's last save" {
-		t.Errorf("with no store to look at, r says %q; want no date", ready.ToDo.Keys[0].Does)
 	}
 }
 
-// Apps' settings' to-do says up front that bringing them back opens some
-// apps, and what may follow; and, only when the config keeps settings
-// files beside the apps' settings, that those come back too. It names no
-// app.
-func TestAppsSettingsWhy(t *testing.T) {
-	opens := "Bringing them back opens some apps once: their windows, notifications and permission prompts may follow."
-	for _, tt := range []struct {
-		name  string
-		files []string
-		too   bool
-	}{{"no settings files", nil, false}, {"settings files", []string{"~/.config/tool/settings.json"}, true}} {
-		t.Run(tt.name, func(t *testing.T) {
-			state := t.TempDir()
-			if err := os.WriteFile(filepath.Join(state, "prefs.json"), []byte(`{}`), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			p := prefs.New(runnertest.New(t), t.TempDir(), state, t.TempDir(), "", "laptop", prefs.Lists{Files: tt.files}, now)
-			why := steps.Prefs(p, now).Check(t.Context()).Items[0].ToDo.Why
-			if !strings.HasPrefix(why, "First, so the apps you open next start with yours. "+opens) {
-				t.Errorf("why = %q; want it to say first that bringing them back opens some apps", why)
-			}
-			if got := strings.HasSuffix(why, " Settings files come back too."); got != tt.too {
-				t.Errorf("why = %q; want settings files said only when the config keeps some", why)
-			}
-		})
+// Other hardware owning this machine ID's folder, the settings to-do says
+// once that this Mac takes it over from that Mac, by its name; any key
+// then writes this Mac's owner file in its place, after what the key does.
+func TestAppsSettingsTakeOver(t *testing.T) {
+	fake, clone, step, paused := settingsStore(t, map[string]string{"laptop": "2026-10-04"})
+	fake.On("ioreg", "-rd1", "-c", "IOPlatformExpertDevice").Prints(`  "IOPlatformUUID" = "HW-THIS"` + "\n")
+	fake.On("sysctl", "-n", "hw.model").Prints("Mac99,1\n")
+	fake.On("scutil", "--get", "ComputerName").Prints("Laptop\n")
+	ready := step.Choice.Ready(t.Context(), paused)
+	owner := filepath.Join(clone, "laptop", "owner")
+	if err := os.WriteFile(owner, []byte("hardware HW-OLD\nmodel Mac1,1\nname Studio\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(ready.ToDo.Why, "takes over") {
+		t.Errorf("with no owner, the why says %q; want nothing taken over", ready.ToDo.Why)
+	}
+	ready = step.Choice.Ready(t.Context(), paused)
+	if want := "This Mac takes over laptop from Studio, which stops saving to it. First, so"; !strings.HasPrefix(ready.ToDo.Why, want) || strings.Count(ready.ToDo.Why, "takes over") != 1 {
+		t.Errorf("owned by other hardware, the why says %q; want it to start %q, once", ready.ToDo.Why, want)
+	}
+	if _, err := step.Choice.Answer(t.Context(), paused, "f"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(owner); string(got) != "hardware HW-THIS\nmodel Mac99,1\nname Laptop\nsince 2026-10-05 12:00\n" {
+		t.Errorf("f pressed, the owner file says %q; want this Mac's", got)
 	}
 }
 
 // r names, in the log, each app whose settings failed otherwise, with why,
 // and says how many apps are to be opened once and how many are held for
-// kit prefs restore --pending; saving switches on all the same. Each app to
-// open is then a to-do, by name, watched: once it has its settings folder
-// and is quit, it's done, and settling it brings its settings back, opening
-// nothing, leaving what failed otherwise alone, which the check goes on
-// saying is held.
+// kit prefs restore --pending, opening none; saving switches on all the
+// same. Each sandboxed app to open is then a to-do, by name, the person
+// saying when it's done: kit opens the app as its card goes up; space,
+// while it's running or has no settings folder, says so and restores
+// nothing; once it's quit with its folder, space restores its settings,
+// leaving what failed otherwise alone, which the check goes on saying is
+// held, and the to-do's gone.
 func TestAppsSettingsAppsToOpen(t *testing.T) {
 	state, clone, home, appDir := t.TempDir(), filepath.Join(t.TempDir(), "prefs"), t.TempDir(), t.TempDir()
 	if err := os.WriteFile(filepath.Join(state, "prefs.json"), []byte(`{}`), 0o600); err != nil {
@@ -190,8 +263,6 @@ func TestAppsSettingsAppsToOpen(t *testing.T) {
 	fake.On("git", "-C", clone, "rev-parse", "HEAD").Prints("abc123\n")
 	fake.On("git", "-C", clone, "log", "-1", "--format=%cI", "--", "laptop").Prints("2026-10-04T03:00:00Z\n")
 	fake.On("codesign", "-d", "--entitlements", "-", "--xml", apps["com.example.boxed"]).Prints(`<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>com.apple.security.app-sandbox</key><true/></dict></plist>`)
-	fake.On("open", "-g", "-j", "-b", "com.example.boxed")
-	fake.On("osascript", "-e", `tell application id "com.example.boxed" to quit`)
 	for _, id := range []string{"com.example.boxed", "com.example.plain"} {
 		fake.On("defaults", "export", id, "-").Exits(1).Then().Prints(theme)
 		fake.On("defaults", "import", id, filepath.Join(clone, "laptop", "domains", id+".plist"))
@@ -212,8 +283,7 @@ func TestAppsSettingsAppsToOpen(t *testing.T) {
 		t.Errorf("r = %q, %v; want how many came back, how many apps to open, and how many held", said, err)
 	}
 	want := []event.Logged{
-		{Line: "Bringing back apps' settings from this Mac's last save"},
-		{Line: "Opening Boxed App once, for its settings folder"},
+		{Line: "Restoring application settings from this machine ID's last save"},
 		{Line: "Stubborn's settings didn't come back: macOS didn't take them", Alert: true},
 	}
 	if !slices.Equal(logged, want) {
@@ -222,34 +292,44 @@ func TestAppsSettingsAppsToOpen(t *testing.T) {
 
 	res := step.Check(t.Context())
 	open := check.ToDo{
-		Title: "Open Boxed App once and quit it", Why: "Its settings come back after: macOS makes its settings folder only once it's opened.",
-		Steps: []string{"Open Boxed App", "Quit it"}, Watch: "Boxed App has its settings folder and is quit", Group: "Apps", First: true,
+		Title: "Open Boxed App and quit it", Why: "Its settings go in its own folder, which macOS makes the first time it opens: quit it, then press space.",
+		Group: "Apps", SaysDone: true, First: true,
 	}
 	held := check.Item{ID: "prefs:held", Name: "1 app's settings didn't come back", State: steps.Problem, Detail: "kit prefs restore --pending tries again; kit prefs pending says why"}
 	if res.State != check.Attention || res.Summary != "1 app to open once; 1 held for kit prefs restore --pending" || len(res.Items) != 2 ||
 		res.Items[0].ID != "prefs:open:com.example.boxed" || !reflect.DeepEqual(*res.Items[0].ToDo, open) || !reflect.DeepEqual(res.Items[1], held) {
-		t.Errorf("with an app to open, the check says %+v; want its to-do, watched, kit not offering keys, and what's held", res)
+		t.Errorf("with an app to open, the check says %+v; want its to-do, the person saying when it's done, and what's held", res)
 	}
 	item := res.Items[0]
-	if said := step.Choice.Settle(t.Context(), paused); said != "" {
-		t.Errorf("settling another to-do said %q, want nothing done", said)
+	if strings.Contains(strings.Join(fake.Calls(), "\n"), "open ") {
+		t.Errorf("restoring ran\n%s\nwant no app opened", strings.Join(fake.Calls(), "\n"))
+	}
+	fake.On("open", "-b", "com.example.boxed")
+	step.Choice.Open(t.Context(), item)
+	step.Choice.Open(t.Context(), paused)
+	if opened := slices.DeleteFunc(fake.Calls(), func(c string) bool { return !strings.HasPrefix(c, "open ") }); !slices.Equal(opened, []string{"open -b com.example.boxed"}) {
+		t.Errorf("its card going up, and another's, ran %q; want the app opened in view, once", opened)
 	}
 
-	write(filepath.Join(home, "Library", "Containers", "com.example.boxed", ".made"), "")
 	fake.On("osascript", "-e", `application id "com.example.boxed" is running`).Prints("true\n").Then().Prints("false\n")
+	if _, err := step.Choice.Answer(t.Context(), item, "done"); err == nil || err.Error() != "Boxed App is still running" {
+		t.Errorf("space while it's running = %v; want it to say so", err)
+	}
+	if _, err := step.Choice.Answer(t.Context(), item, "done"); err == nil || err.Error() != "Boxed App has no settings folder yet" {
+		t.Errorf("space with no settings folder = %v; want it to say so", err)
+	}
 	if res := step.Check(t.Context()); len(res.Items) != 2 {
-		t.Errorf("its folder there, still open, the check says %+v; want the to-do till it's quit", res)
+		t.Errorf("not restored, the check says %+v; want the to-do still there", res)
+	}
+	write(filepath.Join(home, "Library", "Containers", "com.example.boxed", ".made"), "")
+	if said, err := step.Choice.Answer(t.Context(), item, "done"); err != nil || said != "1 app's settings" {
+		t.Errorf("space once it's quit = %q, %v; want its settings restored", said, err)
 	}
 	if res := step.Check(t.Context()); res.Summary != "1 held for kit prefs restore --pending" || len(res.Items) != 1 || res.Items[0].ID != "prefs:held" {
-		t.Errorf("its folder there, quit, the check says %+v; want the to-do gone, what's held still said", res)
+		t.Errorf("restored, the check says %+v; want the to-do gone, what's held still said", res)
 	}
-	opened := strings.Count(strings.Join(fake.Calls(), "\n"), "open -g -j -b")
-	if said := step.Choice.Settle(t.Context(), item); said != "1 app's settings" {
-		t.Errorf("settled, it said %q; want the app's settings back", said)
-	}
-	calls := strings.Join(fake.Calls(), "\n")
-	if strings.Count(calls, "open -g -j -b") != opened || strings.Count(calls, "defaults import com.example.stubborn") != 1 {
-		t.Errorf("settling ran\n%s\nwant nothing opened, and what failed otherwise left alone", calls)
+	if calls := strings.Join(fake.Calls(), "\n"); strings.Count(calls, "defaults import com.example.stubborn") != 1 {
+		t.Errorf("space ran\n%s\nwant what failed otherwise left alone", calls)
 	}
 }
 
@@ -301,12 +381,5 @@ func TestAppsSettingsHeldNeverHideCapture(t *testing.T) {
 	}
 	if held := res.Items[2].Name; held != "1 app's settings and 1 settings file didn't come back" {
 		t.Errorf("what's held is named %q; want what it is, apps' settings and files apart", held)
-	}
-
-	if err := os.RemoveAll(filepath.Join(appDir, "Boxed App.app")); err != nil {
-		t.Fatal(err)
-	}
-	if said := steps.Prefs(p, now).Choice.Settle(t.Context(), res.Items[1]); said != "Boxed App was removed" {
-		t.Errorf("its app removed while its to-do was up, settling it said %q; want that it was removed", said)
 	}
 }
