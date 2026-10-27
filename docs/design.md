@@ -598,6 +598,7 @@ kit list [kind]              What's declared for this Mac: file, note, installed
 kit why <name>               Where it's declared, whether it's installed, what needs it
 kit log                      What the last run did: every check, every command, with timings
 kit machine [<name>]         This Mac's name: shown, or set (one of kit.toml's Macs)
+kit machine add <name>       Add a Mac to kit-config, a copy of another's or empty   [--from] [--description]
 
 What kit manages, a command each:
 kit <kind> add <name>...     Install, and declare for this Mac   [--shared] [--temp] [--note]
@@ -630,6 +631,13 @@ after `kit`: `git-config` (not `git`, read as git's own add), `spotlight-exclusi
 `backup-exclusion` (not `spotlight`, read as adding to it), `login-item`, `defaults` (the lines
 are `defaults write`'s words), `mas` (casks are apps too; package kinds are named after their
 tool).
+
+`kit machine add <name>` adds a Mac to kit-config, for a new Mac to pick as it's set up: its
+`[macs.<name>]` table in `kit.toml`, after the last Mac's, the file's text otherwise as it was,
+and its folder, with `--from <mac>` a copy of that Mac's (every file as it is, steps' scripts
+still executable), else empty but for its `declarations` file; committed and pushed as `kit
+<kind> add` is. It leaves this Mac's name, the primary and the settings store as they are, and
+refuses a name kit.toml knows, one that can't be a Mac's, and `add`.
 
 `kit apply` checks every step and applies each that doesn't stand ok, or has something to
 do, then checks it again: each step then says what it did ("installed: jq"). It never removes

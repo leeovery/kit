@@ -79,7 +79,7 @@ type file struct {
 }
 
 type macFile struct {
-	Description string `toml:"description"`
+	Description string `toml:"description,omitempty"`
 }
 
 // macName is what a Mac's name may be: it names the Mac's own declarations
