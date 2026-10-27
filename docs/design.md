@@ -288,8 +288,7 @@ that); and, once it's up, its notification and its app, the notification in orde
 taking away, so one waiting for kit's app to be built (a minute, on a new Mac) holds nothing up,
 and one taken away before it went out is never posted. A look, a key and readying go one at a
 time, keys in the order pressed, ahead of the next look, the card saying at once that a key's
-taken, as a choice's does; a key behind a look that finds it done isn't done, and
-settling what the card waited for is never cut short. A card holds none of the run's jobs while it's up, and,
+taken, as a choice's does; a key behind a look that finds it done isn't done. A card holds none of the run's jobs while it's up, and,
 done, or found done, comes down that moment, every job busy or not: a step with nothing more to
 do finishes without waiting for one, and one with more (the step a card raised again comes
 before) waits for a job with the card down. `space` says it's done (`enter`
@@ -319,7 +318,7 @@ what the one pressed says, its words turning in their place, and keys pressed me
 what it does never cut short, even by the run stopping, as half of apps' settings brought back
 is worse than none ("Restore application settings", whose why says, when the config has
 `[prefs files]`, that settings files are restored too: `r`, offered only when this machine ID's
-folder in the store has a save, restores it, its date said, as `kit prefs restore` does; a digit
+folder in the store has a save, restores it, its date said ("(26 Oct)"), as `kit prefs restore` does; a digit
 for each other machine ID with a save, sorted by name, the first nine, restores that one's ("restores
 studio's last save (26 Oct)"), as `kit prefs restore --from` does, machine-bound settings left out;
 each saying how many came back, how many wait for their apps, how many apps to open once (a
@@ -1254,7 +1253,7 @@ to.
   folder as it was then from history.
 - **`kit prefs history`**, **`pending [--clear]`** (what waits, each with why), **`start-fresh`**.
   A sandboxed app held for its settings folder is a to-do of its own, one at a time (`Open <app>
-  and quit it`): kit opens it in view (`open -b`) as its card goes up, once; `space` restores its
+  and quit it`): kit opens it in view (`open -b`) as its card goes up, once a run; `space` restores its
   settings then and there once it's quit and has its folder, else the log says which it isn't and
   the card stays; `s` leaves it to the hourly pass. What failed
   otherwise is said by the check, apps' settings and settings files apart, as held for `kit prefs

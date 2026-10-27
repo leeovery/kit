@@ -109,14 +109,11 @@ type Step struct {
 // it comes up, what it says filled in where that takes looking, as the
 // date of the save a key restores (optional); Answer does what key says,
 // one of its keys, or "done" for one the person says is done (SaysDone),
-// and says what it did, in kit's words; Settle finishes what one kit
-// watched waited for, once it's found done, and says what it did, if
-// anything (optional); Open opens what one needs as its card goes up, as
-// the app to open and quit (optional).
+// and says what it did, in kit's words; Open opens what one needs as its
+// card goes up, as the app to open and quit (optional).
 type Choice struct {
 	Ready  func(ctx context.Context, it check.Item) check.Item
 	Answer func(ctx context.Context, it check.Item, key string) (said string, err error)
-	Settle func(ctx context.Context, it check.Item) (said string)
 	Open   func(ctx context.Context, it check.Item)
 }
 
@@ -1038,7 +1035,7 @@ func Recheck(ctx context.Context, name string) (check.Result, bool) {
 }
 
 // ChoiceOf is the choice of the run's step called name, for the step ctx is
-// running, each of its parts run as that step's own, Ready and Settle nil
+// running, each of its parts run as that step's own, Ready and Open nil
 // when it has none: nil when it has none, or outside a run.
 func ChoiceOf(ctx context.Context, name string) *Choice {
 	d, ok := running(ctx)
@@ -1056,12 +1053,6 @@ func ChoiceOf(ctx context.Context, name string) *Choice {
 			return c.Ready(d.attributed(event.WithChecking(ctx), s), it)
 		}
 	}
-	var settle func(context.Context, check.Item) string
-	if c.Settle != nil {
-		settle = func(ctx context.Context, it check.Item) string {
-			return c.Settle(d.attributed(event.WithChanging(ctx), s), it)
-		}
-	}
 	var open func(context.Context, check.Item)
 	if c.Open != nil {
 		open = func(ctx context.Context, it check.Item) {
@@ -1073,8 +1064,7 @@ func ChoiceOf(ctx context.Context, name string) *Choice {
 		Answer: func(ctx context.Context, it check.Item, key string) (string, error) {
 			return c.Answer(d.attributed(event.WithChanging(ctx), s), it, key)
 		},
-		Settle: settle,
-		Open:   open,
+		Open: open,
 	}
 }
 

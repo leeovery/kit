@@ -52,9 +52,8 @@ func heldIn(p *Pending) held {
 	if p.Failed == nil && p.Open == nil {
 		for d := range h.domains {
 			switch why := h.why[d]; {
-			case why == errNotOpened.Error(), strings.HasPrefix(why, "opened once"):
-				// Its app's found again as the next pass tries it. "opened
-				// once" begins the whys of when kit opened apps itself.
+			case why == errNotOpened.Error():
+				// Its app's found again as the next pass tries it.
 				h.open[d] = App{}
 			case why != "" && !waits(why):
 				h.failed[d] = true

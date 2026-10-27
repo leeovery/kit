@@ -13,8 +13,8 @@
                                                     │      Mac saves its own once they're restored.
   Apps                                              │      Settings files are restored too.
   △ Restore application settings                    │
-  △ Open Karabiner-Elements                         │      r restores this machine ID's last save,
-  △ Open Hammerspoon                                │        15 Oct
+  △ Open Karabiner-Elements                         │      r restores this machine ID's last save
+  △ Open Hammerspoon                                │        (15 Oct)
                                                     │      1 restores desk's last save (26 Oct)
   System Settings                                   │      2 restores studio's last save (25 Oct)
   △ Allow Full Disk Access for remote users         │      3 restores tower's last save (24 Oct)

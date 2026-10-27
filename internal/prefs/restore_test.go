@@ -404,7 +404,7 @@ func TestOpened(t *testing.T) {
 func TestAnOlderRecordsFailuresWaitForPendingByHand(t *testing.T) {
 	w := newWorld(t, prefs.Lists{})
 	writeRecord(t, w.state, `{"on": "restored", "pending": {"from": "laptop", "domains": ["com.example.app", "com.example.boxed", "com.example.gone"],
-		"why": {"com.example.app": "import: exit status 1", "com.example.boxed": "opened once, it still has no settings folder", "com.example.gone": "not installed"}}}`)
+		"why": {"com.example.app": "import: exit status 1", "com.example.boxed": "it has no settings folder till it's opened once", "com.example.gone": "not installed"}}}`)
 	rec, _ := w.p.Load()
 	if domains, files := w.p.Failures(rec); domains != 1 || files != 0 {
 		t.Errorf("Failures() = %d, %d; want the one whose why isn't a wait's, nor an app's to open", domains, files)

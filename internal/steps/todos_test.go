@@ -346,14 +346,13 @@ func TestAChoiceToDo(t *testing.T) {
 
 // A to-do of kit's own done, the to-dos its step's check finds then come
 // next, as apps to open once bringing back their settings left: a watched
-// one, kit offering no keys, done once its check finds it gone, settling
-// what it waited for, what that did as what kit saw.
+// one, kit offering no keys, done once its check finds it gone, what the
+// check says as what kit saw.
 func TestAToDoLeavesAnother(t *testing.T) {
 	defer steps.SetManualPoll(5 * time.Millisecond)()
 	c := newCard(t)
 	var mu sync.Mutex
 	brought, opened := false, false
-	var settled []string
 	step := engine.Step{
 		Name: "prefs", Title: "App settings", Area: steps.AreaBackups,
 		Check: func(context.Context) check.Result {
@@ -376,15 +375,6 @@ func TestAToDoLeavesAnother(t *testing.T) {
 				defer mu.Unlock()
 				brought = true
 				return "1 app's settings; 1 app to open once", nil
-			},
-			Settle: func(_ context.Context, it check.Item) string {
-				mu.Lock()
-				defer mu.Unlock()
-				settled = append(settled, it.ID)
-				if it.ID == "prefs:open" {
-					return "1 app's settings"
-				}
-				return ""
 			},
 		},
 	}
@@ -411,13 +401,11 @@ func TestAToDoLeavesAnother(t *testing.T) {
 	report := <-done
 	last := toDoLists(c.sink)
 	l := last[len(last)-1]
-	if len(l.List) != 2 || l.List[1].Title != "Open Boxed App once and quit it" || !l.List[1].Done || l.List[1].Saw != "1 app's settings" {
-		t.Errorf("the to-dos ended %+v; want the apps to open next, done, kit having seen their settings back", l.List)
+	if len(l.List) != 2 || l.List[1].Title != "Open Boxed App once and quit it" || !l.List[1].Done || l.List[1].Saw != "saving from tonight" {
+		t.Errorf("the to-dos ended %+v; want the apps to open next, done, kit having seen what the check says", l.List)
 	}
-	mu.Lock()
-	defer mu.Unlock()
-	if !slices.Contains(settled, "prefs:open") || report.Results["prefs"].State != check.OK {
-		t.Errorf("settled %q, prefs stands %s; want the apps to open settled, then prefs ok", settled, report.Results["prefs"].State)
+	if report.Results["prefs"].State != check.OK {
+		t.Errorf("prefs stands %s; want it ok", report.Results["prefs"].State)
 	}
 }
 
@@ -797,16 +785,13 @@ func TestARunStoppedWhileAKeyIsDone(t *testing.T) {
 // choice, r bringing them back; then, brought back, an app to open once,
 // watched, till it's opened; then saved. Each of its parts first does what
 // the test has it do, if anything: as its check starts (checking), as r is
-// done (bringing), as the card's readied, its r saying the save's date
-// (readying, given what readying runs in), and as opening the app is
-// settled (settling), cut short should the run have stopped by the time
-// it's done (cut), saying what it did (settled).
+// done (bringing), and as the card's readied, its r saying the save's date
+// (readying, given what readying runs in).
 type settings struct {
-	mu                           sync.Mutex
-	brought, opened, cut         bool
-	settled                      string
-	checking, bringing, settling func()
-	readying                     func(ctx context.Context)
+	mu                 sync.Mutex
+	brought, opened    bool
+	checking, bringing func()
+	readying           func(ctx context.Context)
 }
 
 func (s *settings) step() engine.Step {
@@ -853,18 +838,6 @@ func (s *settings) step() engine.Step {
 				defer s.mu.Unlock()
 				s.brought = true
 				return "214 apps' settings", nil
-			},
-			Settle: func(ctx context.Context, it check.Item) string {
-				if it.ID != "prefs:open" {
-					return ""
-				}
-				if f := s.part(func() func() { return s.settling }); f != nil {
-					f()
-				}
-				s.mu.Lock()
-				defer s.mu.Unlock()
-				s.cut = ctx.Err() != nil
-				return s.settled
 			},
 		},
 	}
@@ -1128,66 +1101,6 @@ func (c *card) listUntil(t *testing.T, holds func(event.ToDos) bool) event.ToDos
 	}
 	t.Fatal("the to-dos were never emitted so")
 	return event.ToDos{}
-}
-
-// A watched to-do of kit's own found done comes down at once, the list
-// saying it's done, settling, while kit finishes what it waited for, aside,
-// as bringing back the settings of the app it had the person open; once
-// that's done, the list says what kit saw then.
-func TestAToDoComesDownBeforeKitSettles(t *testing.T) {
-	defer steps.SetManualPoll(time.Millisecond)()
-	c := newCard(t)
-	s := &settings{brought: true, settled: "Boxed App's settings"}
-	settling, begun, through := held()
-	s.settling = settling
-	done := endingWith(t, c, s.step())
-	c.cards(t, 1)
-	s.set(func(s *settings) { s.opened = true })
-	within(t, begun, "kit never settled what the to-do waited for")
-	if l := c.listUntil(t, func(l event.ToDos) bool { return l.List[0].Done }); !l.List[0].Settling || !slices.Equal(c.downs(), []string{"prefs:open"}) {
-		t.Errorf("while kit settled, the list said %+v, cards down %q; want it down, done and settling", l, c.downs())
-	}
-	close(through)
-	over(t, done)
-	if l := c.lastToDos(); !l[0].Done || l[0].Settling || l[0].Saw != "Boxed App's settings" {
-		t.Errorf("the to-dos ended %+v; want it done, what settling did as what kit saw", l)
-	}
-}
-
-// The run stopped at the to-dos while kit settles what the one up waited
-// for: the list stops at once, its card down, the settling left to finish,
-// never cut short, and waited for as the run ends.
-func TestARunStoppedWhileKitSettles(t *testing.T) {
-	defer steps.SetManualPoll(time.Millisecond)()
-	c := newCard(t)
-	stopped := c.stopped()
-	s := &settings{brought: true}
-	settling, begun, through := held()
-	s.settling = settling
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	p, err := engine.New(atTheEnd(steps.Manual(c.fake, "/home/someone", c.state, config.List{}, c.raise), s.step())...)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ran := make(chan engine.Report, 1)
-	go func() {
-		report, _ := p.Apply(ctx, c.sink, engine.Options{Command: "apply", Jobs: 4})
-		ran <- report
-	}()
-	c.cards(t, 1)
-	s.set(func(s *settings) { s.opened = true })
-	within(t, begun, "kit never settled what the to-do waited for")
-	cancel()
-	within(t, stopped, "the list wasn't stopped as the run was, while kit settled")
-	over(t, ran)
-	close(through)
-	c.raise.Wait()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.cut {
-		t.Error("settling was cut short as the run stopped")
-	}
 }
 
 // skipping are two to-dos at the run's end: the printer's, watched, its

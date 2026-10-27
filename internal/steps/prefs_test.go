@@ -120,7 +120,7 @@ func TestAppsSettingsKeys(t *testing.T) {
 		want  []check.Key
 	}{
 		{"this machine ID's and others'", map[string]string{"laptop": "2026-10-04", "studio": "2026-10-25", "desk": "2026-10-26"}, []check.Key{
-			{Key: "r", Does: "restores this machine ID's last save, 4 Oct"},
+			{Key: "r", Does: "restores this machine ID's last save (4 Oct)"},
 			{Key: "1", Does: "restores desk's last save (26 Oct)"},
 			{Key: "2", Does: "restores studio's last save (25 Oct)"},
 			{Key: "f", Does: "starts afresh: nothing restored, saving from now"},
@@ -197,30 +197,54 @@ func TestAppsSettingsChoice(t *testing.T) {
 }
 
 // Other hardware owning this machine ID's folder, the settings to-do says
-// once that this Mac takes it over from that Mac, by its name; any key
-// then writes this Mac's owner file in its place, after what the key does.
+// once that this Mac takes it over from that Mac, by its name; a key then
+// writes this Mac's owner file in its place, after what the key does: r
+// restoring this machine ID's save, or f starting afresh. A key that fails,
+// r with nothing saved for this machine ID, leaves the owner file be.
 func TestAppsSettingsTakeOver(t *testing.T) {
-	fake, clone, step, paused := settingsStore(t, map[string]string{"laptop": "2026-10-04"})
-	fake.On("ioreg", "-rd1", "-c", "IOPlatformExpertDevice").Prints(`  "IOPlatformUUID" = "HW-THIS"` + "\n")
-	fake.On("sysctl", "-n", "hw.model").Prints("Mac99,1\n")
-	fake.On("scutil", "--get", "ComputerName").Prints("Laptop\n")
-	ready := step.Choice.Ready(t.Context(), paused)
-	owner := filepath.Join(clone, "laptop", "owner")
-	if err := os.WriteFile(owner, []byte("hardware HW-OLD\nmodel Mac1,1\nname Studio\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(ready.ToDo.Why, "takes over") {
-		t.Errorf("with no owner, the why says %q; want nothing taken over", ready.ToDo.Why)
-	}
-	ready = step.Choice.Ready(t.Context(), paused)
-	if want := "This Mac takes over laptop from Studio, which stops saving to it. First, so"; !strings.HasPrefix(ready.ToDo.Why, want) || strings.Count(ready.ToDo.Why, "takes over") != 1 {
-		t.Errorf("owned by other hardware, the why says %q; want it to start %q, once", ready.ToDo.Why, want)
-	}
-	if _, err := step.Choice.Answer(t.Context(), paused, "f"); err != nil {
-		t.Fatal(err)
-	}
-	if got, _ := os.ReadFile(owner); string(got) != "hardware HW-THIS\nmodel Mac99,1\nname Laptop\nsince 2026-10-05 12:00\n" {
-		t.Errorf("f pressed, the owner file says %q; want this Mac's", got)
+	old := "hardware HW-OLD\nmodel Mac1,1\nname Studio\n"
+	for _, tt := range []struct {
+		name, key string
+		saves     map[string]string
+		fails     bool
+	}{
+		{"r", "r", map[string]string{"laptop": "2026-10-04"}, false},
+		{"f", "f", map[string]string{"laptop": "2026-10-04"}, false},
+		{"r with nothing saved", "r", map[string]string{"studio": "2026-10-25"}, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			fake, clone, step, paused := settingsStore(t, tt.saves)
+			fake.On("ioreg", "-rd1", "-c", "IOPlatformExpertDevice").Prints(`  "IOPlatformUUID" = "HW-THIS"` + "\n")
+			fake.On("sysctl", "-n", "hw.model").Prints("Mac99,1\n")
+			fake.On("scutil", "--get", "ComputerName").Prints("Laptop\n")
+			if tt.fails {
+				// Its folder there for the owner file alone, never committed.
+				fake.On("git", "-C", clone, "log", "-1", "--format=%cI", "--", "laptop")
+			}
+			ready := step.Choice.Ready(t.Context(), paused)
+			if strings.Contains(ready.ToDo.Why, "takes over") {
+				t.Errorf("with no owner, the why says %q; want nothing taken over", ready.ToDo.Why)
+			}
+			owner := filepath.Join(clone, "laptop", "owner")
+			if err := os.MkdirAll(filepath.Dir(owner), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(owner, []byte(old), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			ready = step.Choice.Ready(t.Context(), paused)
+			if want := "This Mac takes over laptop from Studio, which stops saving to it. First, so"; !strings.HasPrefix(ready.ToDo.Why, want) || strings.Count(ready.ToDo.Why, "takes over") != 1 {
+				t.Errorf("owned by other hardware, the why says %q; want it to start %q, once", ready.ToDo.Why, want)
+			}
+			_, err := step.Choice.Answer(t.Context(), paused, tt.key)
+			want := "hardware HW-THIS\nmodel Mac99,1\nname Laptop\nsince 2026-10-05 12:00\n"
+			if tt.fails {
+				want = old
+			}
+			if got, _ := os.ReadFile(owner); (err != nil) != tt.fails || string(got) != want {
+				t.Errorf("%s pressed, it said %v, and the owner file says %q; want %q", tt.key, err, got, want)
+			}
+		})
 	}
 }
 
@@ -228,7 +252,8 @@ func TestAppsSettingsTakeOver(t *testing.T) {
 // and says how many apps are to be opened once and how many are held for
 // kit prefs restore --pending, opening none; saving switches on all the
 // same. Each sandboxed app to open is then a to-do, by name, the person
-// saying when it's done: kit opens the app as its card goes up; space,
+// saying when it's done: kit opens the app as its card goes up, once a
+// run, however often it goes up; space,
 // while it's running or has no settings folder, says so and restores
 // nothing; once it's quit with its folder, space restores its settings,
 // leaving what failed otherwise alone, which the check goes on saying is
@@ -306,9 +331,10 @@ func TestAppsSettingsAppsToOpen(t *testing.T) {
 	}
 	fake.On("open", "-b", "com.example.boxed")
 	step.Choice.Open(t.Context(), item)
+	step.Choice.Open(t.Context(), item)
 	step.Choice.Open(t.Context(), paused)
 	if opened := slices.DeleteFunc(fake.Calls(), func(c string) bool { return !strings.HasPrefix(c, "open ") }); !slices.Equal(opened, []string{"open -b com.example.boxed"}) {
-		t.Errorf("its card going up, and another's, ran %q; want the app opened in view, once", opened)
+		t.Errorf("its card going up twice, and the settings card once, ran %q; want the app opened in view once, the settings card opening nothing", opened)
 	}
 
 	fake.On("osascript", "-e", `application id "com.example.boxed" is running`).Prints("true\n").Then().Prints("false\n")

@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/leeovery/kit/internal/check"
@@ -61,7 +62,7 @@ func settingsBack(files bool) check.ToDo {
 func restoreKeys(saves []prefs.Save, mac string, now time.Time) []check.Key {
 	var keys []check.Key
 	if i := slices.IndexFunc(saves, func(s prefs.Save) bool { return s.Mac == mac }); i >= 0 {
-		keys = append(keys, check.Key{Key: keyRestore, Does: "restores this machine ID's last save, " + day(saves[i].At, now)})
+		keys = append(keys, check.Key{Key: keyRestore, Does: fmt.Sprintf("restores this machine ID's last save (%s)", day(saves[i].At, now))})
 	}
 	for i, s := range otherSaves(saves, mac) {
 		keys = append(keys, check.Key{Key: strconv.Itoa(i + 1), Does: fmt.Sprintf("restores %s's last save (%s)", s.Mac, day(s.At, now))})
@@ -98,8 +99,10 @@ func appToOpen(app prefs.App) check.ToDo {
 // prefs start-fresh does. Either takes this Mac's folder over when other
 // hardware owns it, the card saying so. With sandboxed apps held for their
 // settings folders, it's a to-do for each, one at a time: kit opens the
-// app, and once the person's quit it, restores its settings.
+// app, once a run, and once the person's quit it, restores its settings.
 func Prefs(p *prefs.Prefs, now func() time.Time) engine.Step {
+	var mu sync.Mutex
+	opened := map[string]bool{}
 	return engine.Step{
 		Name: PrefsName, Title: "App settings", Area: AreaBackups,
 		Choice: &engine.Choice{
@@ -130,7 +133,12 @@ func Prefs(p *prefs.Prefs, now func() time.Time) engine.Step {
 				return said, p.TakeOver(ctx)
 			},
 			Open: func(ctx context.Context, it check.Item) {
-				if id, ok := strings.CutPrefix(it.ID, PrefsName+":"+idOpen+":"); ok {
+				id, ok := strings.CutPrefix(it.ID, PrefsName+":"+idOpen+":")
+				mu.Lock()
+				first := ok && !opened[id]
+				opened[id] = true
+				mu.Unlock()
+				if first {
 					p.Open(ctx, id)
 				}
 			},
@@ -142,7 +150,7 @@ func Prefs(p *prefs.Prefs, now func() time.Time) engine.Step {
 			}
 			switch {
 			case rec.NotOwner != "":
-				return problem(PrefsName, "another Mac owns this Mac's folder in the store", [3]string{"not-owner", rec.NotOwner, "this Mac doesn't capture until it takes ownership (kit takeover, to come)"})
+				return problem(PrefsName, "another Mac owns this Mac's folder in the store", [3]string{"not-owner", rec.NotOwner, "another Mac took this folder over, so this Mac doesn't save to it"})
 			case rec.On == "":
 				return yours(PrefsName, "paused: capture isn't switched on for this Mac", "paused", "kit prefs restore, or kit prefs start-fresh", settingsBack(len(p.Lists.Files) > 0))
 			}
@@ -290,7 +298,12 @@ func openedName(p *prefs.Prefs, id string) string {
 	if err != nil || rec.Pending == nil {
 		return ""
 	}
-	return rec.Pending.Open[id].Name
+	for _, app := range rec.Pending.Open {
+		if app.ID == id {
+			return app.Name
+		}
+	}
+	return ""
 }
 
 // cameBack is how many domains' settings report brought back, as in 214

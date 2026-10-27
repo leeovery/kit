@@ -141,7 +141,6 @@ func (o ownToDo) open(ctx context.Context) {
 
 // done reports whether it's done, as its step's check finds it: the check
 // looked, and found it gone; and, as what kit saw, what the check says.
-// What it waited for is finished after, its card down (finishing).
 func (o ownToDo) done(ctx context.Context) (bool, string) {
 	res, ok := engine.Look(ctx, o.step)
 	switch {
@@ -151,24 +150,6 @@ func (o ownToDo) done(ctx context.Context) (bool, string) {
 		return false, ""
 	}
 	return true, res.Summary
-}
-
-// finishing is what finishes what t waited for, once it's found done, as
-// bringing back the settings of the apps it had the person open, saying
-// what it did, if anything (engine.Choice's Settle): nil when there's
-// nothing to finish, as for a to-do that isn't kit's own. It's never cut
-// short, as by the run stopping: what t waited for would be half done.
-func finishing(ctx context.Context, t toDo) func() string {
-	o, ok := t.(owned)
-	if !ok {
-		return nil
-	}
-	own := o.own()
-	c := engine.ChoiceOf(ctx, own.step)
-	if c == nil || c.Settle == nil {
-		return nil
-	}
-	return func() string { return c.Settle(context.WithoutCancel(ctx), own.item) }
 }
 
 // followUps are the to-dos t's step's check finds now, as bringing back
@@ -230,10 +211,9 @@ func (o ownToDo) answers(a hand.Answer) bool {
 // coming up at once: the list emitted as each comes up, as each is done,
 // and once they're over. One left for later stays to do, settling while
 // what was under way as they left it finishes, which may find it done
-// after all (leave). Kit finishes what one done waited for (settling), one
-// finish at a time, and, one of kit's own, looks for those its step's
-// check finds now, to come next (followUps), aside, the list emitted again
-// as each comes in. The person can stop where they are (hand.Stop), the
+// after all (leave). For one of kit's own done, kit looks for those its
+// step's check finds now, to come next (followUps), aside, the list
+// emitted again as each comes in. The person can stop where they are (hand.Stop), the
 // list emitted stopped at once, whatever's under way: what's left stays to
 // do, the one up done if it was done as they stopped, or settling, its
 // work left under way to finish and say whether it found it done, which
@@ -271,9 +251,8 @@ func (r *Raise) workThrough(ctx context.Context, step string, list []toDo) error
 
 // toDos are the to-dos at the run's end as they're worked through: each as
 // raised, and as the list says it, and which is up, which what's left for
-// later changes as it comes (mu); one finish at a time (finishes), as two
-// restores of apps' settings would clash; and the work of those left for
-// later still under way (later).
+// later changes as it comes (mu); and the work of those left for later
+// still under way (later).
 type toDos struct {
 	r    *Raise
 	step string
@@ -283,8 +262,7 @@ type toDos struct {
 	entries []event.ToDo
 	up      int
 
-	finishes sync.Mutex
-	later    sync.WaitGroup
+	later sync.WaitGroup
 }
 
 // through raises the to-dos in turn, till they're over or the person stops
@@ -301,18 +279,17 @@ func (l *toDos) through(ctx context.Context, answers <-chan hand.Answer) (<-chan
 		if err != nil && !skipped && !errors.Is(err, errStopHere) {
 			return nil, err
 		}
-		finish := l.finishing(ctx, t)
 		if skipped {
-			l.leave(ctx, i, t, late, finish)
+			l.leave(ctx, i, t, late)
 			continue
 		}
 		l.mu.Lock()
 		if late == nil {
 			l.entries[i].Done, l.entries[i].Saw = true, saw
 		}
-		l.entries[i].Settling = late != nil || finish != nil
+		l.entries[i].Settling = late != nil
 		l.mu.Unlock()
-		settling := l.settle(ctx, i, t, late, finish)
+		settling := l.settle(ctx, i, t, late)
 		if err != nil {
 			return settling, nil
 		}
@@ -350,25 +327,6 @@ func (l *toDos) emitNow() {
 	l.r.Sink.Emit(event.ToDos{Time: l.r.Now(), Step: l.step, List: slices.Clone(l.entries), Up: l.up})
 }
 
-// finishing is what finishes what t waited for (finishing), one finish
-// at a time (oneAtATime).
-func (l *toDos) finishing(ctx context.Context, t toDo) func() string {
-	return l.oneAtATime(finishing(ctx, t))
-}
-
-// oneAtATime is finish, once the finish under way, if any, is over: nil
-// for none.
-func (l *toDos) oneAtATime(finish func() string) func() string {
-	if finish == nil {
-		return nil
-	}
-	return func() string {
-		l.finishes.Lock()
-		defer l.finishes.Unlock()
-		return finish()
-	}
-}
-
 // settled is what the to-do at i came to, its card down: whether it's
 // done, and what kit saw, if it has words; or the to-dos its step's check
 // found once it was done, to follow it (more).
@@ -381,19 +339,15 @@ type settled struct {
 
 // settle is what the to-do t, at i, comes to, aside, its card down, closed
 // once all's come: first, whether it's done, as it was, or, left with work
-// under way (late), as that finds it, and what finishing what it waited for
-// said (finish, if any); then, done, the to-dos its step's check finds, if
-// any.
-func (l *toDos) settle(ctx context.Context, i int, t toDo, late *work, finish func() string) <-chan settled {
+// under way (late), as that finds it; then, done, the to-dos its step's
+// check finds, if any.
+func (l *toDos) settle(ctx context.Context, i int, t toDo, late *work) <-chan settled {
 	out := make(chan settled, 2)
 	l.r.aside.Go(func() {
 		defer close(out)
 		s := settled{i: i, done: late == nil}
 		if late != nil {
 			s.saw, s.done = late.outcome(ctx)
-		}
-		if s.done && finish != nil {
-			s.saw = cmp.Or(finish(), s.saw)
 		}
 		out <- s
 		if !s.done {
@@ -408,14 +362,13 @@ func (l *toDos) settle(ctx context.Context, i int, t toDo, late *work, finish fu
 
 // leave leaves the to-do t, at i, for later, its work under way (late): it
 // stays to do, skipped, settling till that's over; found done after all,
-// it's done, finished as one done is (finish), with the to-dos to follow
-// it at the list's end, the list having moved on; each change emitted as
+// it's done, with the to-dos to follow it at the list's end, the list having moved on; each change emitted as
 // it comes, till the run's stopped: it ends with the list as it stood.
-func (l *toDos) leave(ctx context.Context, i int, t toDo, late *work, finish func() string) {
+func (l *toDos) leave(ctx context.Context, i int, t toDo, late *work) {
 	l.mu.Lock()
 	l.entries[i].Skipped, l.entries[i].Settling = true, true
 	l.mu.Unlock()
-	settling := l.settle(ctx, i, t, late, finish)
+	settling := l.settle(ctx, i, t, late)
 	l.later.Add(1)
 	l.r.aside.Go(func() {
 		defer l.later.Done()

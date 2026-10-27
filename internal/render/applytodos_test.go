@@ -36,7 +36,7 @@ var toDoCards = []event.NeedsYou{
 	{Item: "prefs:paused", Title: "Restore application settings", Group: "Apps",
 		Why: "This Mac takes over laptop from Studio, which stops saving to it. First, so the apps you open next start with yours. This Mac saves its own once they're restored. Settings files are restored too.",
 		Keys: []check.Key{
-			{Key: "r", Does: "restores this machine ID's last save, 15 Oct"}, {Key: "1", Does: "restores desk's last save (26 Oct)"},
+			{Key: "r", Does: "restores this machine ID's last save (15 Oct)"}, {Key: "1", Does: "restores desk's last save (26 Oct)"},
 			{Key: "2", Does: "restores studio's last save (25 Oct)"}, {Key: "3", Does: "restores tower's last save (24 Oct)"},
 			{Key: "f", Does: "starts afresh: nothing restored, saving from now"},
 		}},
@@ -316,7 +316,7 @@ func TestTheToDoPanel(t *testing.T) {
 			"      next start with yours. This Mac saves its own once they're restored. Settings files are",
 			"      restored too.",
 			"",
-			"      r restores this machine ID's last save, 15 Oct",
+			"      r restores this machine ID's last save (15 Oct)",
 			"      1 restores desk's last save (26 Oct)",
 			"      2 restores studio's last save (25 Oct)",
 			"      3 restores tower's last save (24 Oct)",
@@ -368,7 +368,7 @@ func TestTheToDoPanel(t *testing.T) {
 	face, out, _ := applyIn(colorprofile.TrueColor, 160, 64, time.Minute, toDosUpTo(0))
 	defer func() { _ = face.Close() }()
 	frame := strings.Join(lastFrame(out.String()), "\n")
-	if !strings.Contains(frame, look.Urgent("r")+" "+look.White("restores this machine ID's last save, 15 Oct")) {
+	if !strings.Contains(frame, look.Urgent("r")+" "+look.White("restores this machine ID's last save (15 Oct)")) {
 		t.Error("a choice's keys aren't styled as a card's keys are")
 	}
 }
@@ -383,15 +383,15 @@ func TestAChoiceBeingAnswered(t *testing.T) {
 	defer func() { _ = face.Close() }()
 	_, right := panes(screen(uncoloured(out.String())), 160)
 	ends := slices.Index(right, "      restored too.")
-	if ends < 0 || !slices.Equal(right[ends+1:ends+6], []string{"", "      ◐ restores this machine ID's last save, 15 Oct", "      s skips it for now: kit apply brings it back", "", strings.Repeat("─", 99)}) {
+	if ends < 0 || !slices.Equal(right[ends+1:ends+6], []string{"", "      ◐ restores this machine ID's last save (15 Oct)", "      s skips it for now: kit apply brings it back", "", strings.Repeat("─", 99)}) {
 		t.Errorf("being answered, the right pane starts\n%s\nwant what r does, turning, none of its keys, and s leaving it for later", strings.Join(right[:min(len(right), 14)], "\n"))
 	}
-	if frame := strings.Join(lastFrame(out.String()), "\n"); !strings.Contains(frame, look.Cyan("◐")+" "+look.White("restores this machine ID's last save, 15 Oct")) {
+	if frame := strings.Join(lastFrame(out.String()), "\n"); !strings.Contains(frame, look.Cyan("◐")+" "+look.White("restores this machine ID's last save (15 Oct)")) {
 		t.Error("what r does isn't led by the turning mark")
 	}
 	small, out2, _ := applyAt(99, 40, since(events), events)
 	defer func() { _ = small.Close() }()
-	if got := screen(out2.String()); !strings.Contains(got, "restores this machine ID's last save, 15 Oct") || strings.Contains(got, "a bigger window shows the keys") {
+	if got := screen(out2.String()); !strings.Contains(got, "restores this machine ID's last save (15 Oct)") || strings.Contains(got, "a bigger window shows the keys") {
 		t.Errorf("in a small window, being answered, the card shows\n%s\nwant what r does in place of the keys", got)
 	}
 }
