@@ -132,7 +132,7 @@ func TestAppsSettingsKeys(t *testing.T) {
 	}
 	noStore := steps.Prefs(prefs.New(runnertest.New(t), t.TempDir(), t.TempDir(), t.TempDir(), "", "laptop", prefs.Lists{}, now), "", now)
 	paused := noStore.Check(t.Context()).Items[0]
-	if ready := noStore.Choice.Ready(t.Context(), paused); !slices.Equal(ready.ToDo.Keys, paused.ToDo.Keys) || paused.ToDo.Keys[0].Does != "restores this machine ID's last save" {
+	if ready := noStore.Choice.Ready(t.Context(), paused); !slices.Equal(ready.ToDo.Keys, paused.ToDo.Keys) || paused.ToDo.Keys[0].Does != "restores the last save" {
 		t.Errorf("with no store to look at, the keys are %v; want the check's, %v", ready.ToDo.Keys, paused.ToDo.Keys)
 	}
 }
@@ -147,6 +147,10 @@ func TestAppsSettingsChoice(t *testing.T) {
 	_, _, step, paused := settingsStore(t, map[string]string{"studio": "2026-10-25"}, "")
 	if _, err := step.Choice.Answer(t.Context(), paused, "r"); err == nil || err.Error() != "no settings stored for laptop" {
 		t.Errorf("with nothing saved, r = %v; want it to say so", err)
+	}
+	_, _, step, paused = settingsStore(t, map[string]string{"studio": "2026-10-25"}, "desk")
+	if _, err := step.Choice.Answer(t.Context(), paused, "r"); err == nil || err.Error() != "no settings stored for laptop or desk" {
+		t.Errorf("with nothing saved for either, r = %v; want it to name both", err)
 	}
 	if _, err := step.Choice.Answer(t.Context(), paused, "1"); err == nil || err.Error() != "1 isn't one of its keys" {
 		t.Errorf("1 = %v; want it no key", err)
@@ -187,7 +191,7 @@ func TestAppsSettingsChoice(t *testing.T) {
 }
 
 // Applied, the settings step starts afresh by itself when the store holds
-// no source, raising no card; with a source, or a store it can't read, it
+// no source, raising no card, the log saying so; with a source, or a store it can't read, it
 // leaves the card be.
 func TestAppsSettingsWithNoSource(t *testing.T) {
 	for _, tt := range []struct {
@@ -201,8 +205,13 @@ func TestAppsSettingsWithNoSource(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			_, _, step, _ := settingsStore(t, tt.saves, tt.from)
-			if err := step.Apply(t.Context(), step.Check(t.Context())); err != nil {
+			var logged []string
+			ctx := event.WithLogging(t.Context(), func(l event.Logged) { logged = append(logged, l.Line) })
+			if err := step.Apply(ctx, step.Check(t.Context())); err != nil {
 				t.Fatalf("apply = %v", err)
+			}
+			if said := []string{"No saved application settings to restore: saving from now, nothing restored"}; slices.Equal(logged, said) != tt.afresh {
+				t.Errorf("the log says %q; want %q only when started afresh", logged, said)
 			}
 			res := step.Check(t.Context())
 			if afresh := res.State == check.OK && res.Summary == "saving from tonight" && !res.ToDo(); afresh != tt.afresh {

@@ -45,7 +45,7 @@ func TestKitsOwnToDos(t *testing.T) {
 				Why:   "First, so the apps you open next start with yours. This Mac saves its own once they're restored.",
 				Group: "Apps",
 				Keys: []check.Key{
-					{Key: "r", Does: "restores this machine ID's last save"},
+					{Key: "r", Does: "restores the last save"},
 					{Key: "f", Does: "starts afresh: nothing restored, saving from now"},
 				},
 				First: true,

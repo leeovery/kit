@@ -15,8 +15,8 @@ import (
 // AddMac adds a Mac named name to the repository: its folder, a copy of
 // from's when from isn't "", else a folder with an empty declarations file,
 // and its table in kit.toml, after the last Mac's, with from and
-// description, if any. It refuses a name that can't be a Mac's or that the config knows, a
-// from it doesn't, and a folder there already.
+// description, if any. It refuses a name that can't be a Mac's or that the
+// config knows, a from it doesn't, and a folder there already.
 func (c *Config) AddMac(name, from, description string) error {
 	switch {
 	case !ValidName(name):

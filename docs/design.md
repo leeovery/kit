@@ -321,12 +321,13 @@ is worse than none ("Restore application settings", whose why says, when the con
 said: this machine ID's last save ("(26 Oct)"), as `kit prefs restore` does; else, with none,
 that of the Mac `kit.toml`'s `from` names ("restores studio's last save (26 Oct) onto this Mac;
 studio keeps its own"), as `kit prefs restore --from` does, machine-bound settings left out.
-With no source in the store, there's no card: applying the step starts afresh by itself (a
-store it can't read leaves the card as it stands). `r` says how many came back, how many wait
-for their apps, how many apps to open once (a to-do each, coming next, kit's own done leading to those its check finds then) and how many are
-held for `kit prefs restore --pending`, the log naming each of those with why; `f` starts
-afresh, as `kit prefs start-fresh` does, saying saving's on and how many still wait to come
-back. When other hardware owns this machine ID's folder, the card says once "This Mac takes
+With no source in the store, there's no card: applying the step starts afresh by itself, the log
+saying so (a store it can't read leaves the card as it stands). `r` says how many came back, how
+many wait for their apps, how many apps to open once (a to-do each, coming next, kit's own done
+leading to those its check finds then) and how many are held for `kit prefs restore --pending`,
+the log naming each of those with why; `f` starts afresh, as `kit prefs start-fresh` does,
+saying saving's on and how many still wait to come back. When other hardware owns this machine
+ID's folder, the card says once "This Mac takes
 over <id> from <owner>, which stops saving to it" (the owner by its name, else its model, else
 its hardware), and any key then writes this Mac's owner file there, after what the key does:
 the next capture commits and pushes it, and the other Mac's next capture is refused). Over the
@@ -637,11 +638,12 @@ tool).
 `[macs.<name>]` table in `kit.toml`, after the last Mac's, the file's text otherwise as it was,
 and its folder, with `--from <mac>` a copy of that Mac's (every file as it is, steps' scripts
 still executable), and `from = "<mac>"` in its table, else empty but for its `declarations`
-file; committed and pushed as `kit <kind> add` is. A `from` naming no Mac counts as none. The
-boot's "This Mac" offers the same: "new" asks the name, then where it starts from, fresh
-(only what every Mac shares) or one of the Macs, whose copy is made as `--from` makes it,
-left uncommitted with the new Mac's table till kit-config's settings are applied. It leaves this Mac's name, the primary and the settings store as they are, and
-refuses a name kit.toml knows, one that can't be a Mac's, and `add`.
+file; committed and pushed as `kit <kind> add` is. It leaves this Mac's name, the primary and
+the settings store as they are, and refuses a name kit.toml knows, one that can't be a Mac's,
+and `add`. A `from` naming no Mac counts as none. The boot's "This Mac" offers the same: "new"
+asks the name, then where it starts from, fresh (only what every Mac shares) or one of the Macs,
+whose copy is made as `--from` makes it, left uncommitted with the new Mac's table till
+kit-config's settings are applied.
 
 `kit apply` checks every step and applies each that doesn't stand ok, or has something to
 do, then checks it again: each step then says what it did ("installed: jq"). It never removes

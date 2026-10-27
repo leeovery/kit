@@ -48,7 +48,7 @@ func settingsBack(files bool) check.ToDo {
 		Why:   why,
 		Group: groupApps,
 		Keys: []check.Key{
-			{Key: keyRestore, Does: "restores this machine ID's last save"},
+			{Key: keyRestore, Does: "restores the last save"},
 			afresh,
 		},
 		First: true,
@@ -168,7 +168,10 @@ func Prefs(p *prefs.Prefs, from string, now func() time.Time) engine.Step {
 			// A store that can't be read leaves the card as it stands.
 			if saves, err := p.Saves(ctx); err == nil {
 				if _, ok := source(saves, p.Mac, from); !ok {
-					_, err = startAfresh(p)
+					said, err := startAfresh(p)
+					if err == nil {
+						event.Log(ctx, event.Logged{Line: "No saved application settings to restore: " + said})
+					}
 					return err
 				}
 			}
@@ -194,7 +197,7 @@ func answerSettings(ctx context.Context, p *prefs.Prefs, from, key string, now f
 		if s, ok := source(saves, p.Mac, from); ok {
 			return restoreSave(ctx, p, s, now)
 		}
-		return "", fmt.Errorf("no settings stored for %s", p.Mac)
+		return "", fmt.Errorf("no settings stored for %s", strings.Join(slices.DeleteFunc([]string{p.Mac, from}, func(m string) bool { return m == "" }), " or "))
 	}
 	return "", fmt.Errorf("%s isn't one of its keys", key)
 }
