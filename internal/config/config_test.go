@@ -148,3 +148,14 @@ func TestPrefsRepo(t *testing.T) {
 		t.Errorf("PrefsRepo = %q", cfg.PrefsRepo)
 	}
 }
+
+// A Mac started as a copy of another says which; one the config doesn't
+// know counts as none.
+func TestFrom(t *testing.T) {
+	cfg := loadRepo(t, map[string]string{config.File: "format = 1\nprimary = \"laptop\"\n\n[macs.laptop]\n\n[macs.studio]\nfrom = \"laptop\"\n\n[macs.mini]\nfrom = \"other\"\n"})
+	for mac, want := range map[string]string{"laptop": "", "studio": "laptop", "mini": ""} {
+		if got := cfg.Macs[mac].From; got != want {
+			t.Errorf("Macs[%s].From = %q, want %q", mac, got, want)
+		}
+	}
+}

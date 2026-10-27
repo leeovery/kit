@@ -316,43 +316,54 @@ func (b *Boot) macStep() engine.Step {
 			if cfg == nil {
 				return errors.New("kit-config hasn't been read")
 			}
-			name, isNew := b.Mac, false
+			name, from := b.Mac, ""
 			if name == "" {
-				macs := cfg.MacNames()
-				answers := make([]Answer, 0, len(macs)+1)
-				for _, m := range macs {
-					answers = append(answers, Answer{Label: m, Does: cfg.Macs[m].Description})
-				}
-				answers = append(answers, Answer{Label: "new", Does: "a Mac kit-config doesn't have yet"})
-				i, err := b.Ask.Choose(ctx, MacStep, "which of your Macs is this?", answers)
-				if err != nil {
+				var err error
+				if name, from, err = b.askMac(ctx, cfg); err != nil {
 					return err
 				}
-				if i < len(macs) {
-					name = macs[i]
-				}
 			}
-			if name == "" || !cfg.Knows(name) {
-				var err error
-				if name == "" {
-					if name, err = b.Ask.Name(ctx, MacStep, "its name, as kit-config will know it"); err != nil {
-						return err
-					}
-				}
-				if !config.ValidName(name) {
-					return fmt.Errorf("%q can't name a Mac: lower case letters, digits and dashes, as in studio", name)
-				}
-				isNew = true
+			if cfg.Knows(name) {
+				return config.WriteMachine(b.State, name)
+			}
+			if !config.ValidName(name) {
+				return fmt.Errorf("%q can't name a Mac: lower case letters, digits and dashes, as in studio", name)
 			}
 			if err := config.WriteMachine(b.State, name); err != nil {
 				return err
 			}
-			if !isNew {
-				return nil
-			}
-			return kitstate.Update(b.State, stateName, func(st *state) { st.NewMac = name })
+			return kitstate.Update(b.State, stateName, func(st *state) { st.NewMac, st.From = name, from })
 		},
 	}
+}
+
+// askMac asks which of cfg's Macs this is, or for a new one's name and
+// which of them, if any, it starts as a copy of: from is "" for none.
+func (b *Boot) askMac(ctx context.Context, cfg *config.Config) (name, from string, err error) {
+	macs := cfg.MacNames()
+	answers := make([]Answer, 0, len(macs)+1)
+	for _, m := range macs {
+		answers = append(answers, Answer{Label: m, Does: cfg.Macs[m].Description})
+	}
+	answers = append(answers, Answer{Label: "new", Does: "a new machine ID, started fresh or from one of your Macs"})
+	i, err := b.Ask.Choose(ctx, MacStep, "which of your Macs is this?", answers)
+	switch {
+	case err != nil:
+		return "", "", err
+	case i < len(macs):
+		return macs[i], "", nil
+	}
+	if name, err = b.Ask.Name(ctx, MacStep, "its name, as kit-config will know it"); err != nil || !config.ValidName(name) || cfg.Knows(name) {
+		return name, "", err
+	}
+	starts := []Answer{{Label: "fresh", Does: "only what every Mac shares"}}
+	for _, m := range macs {
+		starts = append(starts, Answer{Label: m, Does: fmt.Sprintf("a copy of %s's setup and settings to start from; %s itself is left as it is", m, m)})
+	}
+	if i, err = b.Ask.Choose(ctx, MacStep, "where does it start from?", starts); err != nil || i == 0 {
+		return name, "", err
+	}
+	return name, macs[i-1], nil
 }
 
 // and lists names as words do: a, b and c.
@@ -367,12 +378,14 @@ func and(names []string) string {
 }
 
 // state is what a boot keeps between its runs, beside the checks: the
-// config repository it read; a new Mac's name till kit-config has it; the
-// terminal given Full Disk Access, as the person said, before its first
-// launch; and when kit, handed over to, took the boot on there.
+// config repository it read; a new Mac's name till kit-config has it, and
+// the Mac it starts as a copy of, if any; the terminal given Full Disk
+// Access, as the person said, before its first launch; and when kit,
+// handed over to, took the boot on there.
 type state struct {
 	Repo    string    `json:"repo,omitempty"`
 	NewMac  string    `json:"new_mac,omitempty"`
+	From    string    `json:"from,omitempty"`
 	Access  string    `json:"access,omitempty"`
 	Arrived time.Time `json:"arrived,omitzero"`
 }

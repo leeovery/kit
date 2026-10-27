@@ -428,7 +428,8 @@ func (b *Boot) clone(ctx context.Context) error {
 }
 
 // addNewMac adds a new Mac, as chosen, to the clone's kit.toml, unless
-// it's there already.
+// it's there already: a copy of the Mac it starts from, as kit machine add
+// --from makes, when it starts from one.
 func (b *Boot) addNewMac() error {
 	st, err := kitstate.Load[state](b.State, stateName)
 	if err != nil || st.NewMac == "" {
@@ -438,8 +439,11 @@ func (b *Boot) addNewMac() error {
 	if err != nil {
 		return err
 	}
-	if cfg.Knows(st.NewMac) {
+	switch {
+	case cfg.Knows(st.NewMac):
 		return nil
+	case st.From != "":
+		return cfg.AddMac(st.NewMac, st.From, "")
 	}
 	path := filepath.Join(b.Config, config.File)
 	data, err := os.ReadFile(path)

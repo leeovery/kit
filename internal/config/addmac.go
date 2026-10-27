@@ -14,8 +14,8 @@ import (
 
 // AddMac adds a Mac named name to the repository: its folder, a copy of
 // from's when from isn't "", else a folder with an empty declarations file,
-// and its table in kit.toml, after the last Mac's, with description, if
-// any. It refuses a name that can't be a Mac's or that the config knows, a
+// and its table in kit.toml, after the last Mac's, with from and
+// description, if any. It refuses a name that can't be a Mac's or that the config knows, a
 // from it doesn't, and a folder there already.
 func (c *Config) AddMac(name, from, description string) error {
 	switch {
@@ -36,7 +36,7 @@ func (c *Config) AddMac(name, from, description string) error {
 	if err != nil {
 		return fmt.Errorf("read the config: %w", err)
 	}
-	edited, err := withMac(string(data), name, description)
+	edited, err := withMac(string(data), name, from, description)
 	if err != nil {
 		return err
 	}
@@ -57,7 +57,7 @@ func (c *Config) AddMac(name, from, description string) error {
 // withMac is kit.toml's text with a table for the Mac named name after the
 // last Mac's, before any blank lines and comments that end it, the rest as
 // it was.
-func withMac(text, name, description string) (string, error) {
+func withMac(text, name, from, description string) (string, error) {
 	lines := strings.SplitAfter(text, "\n")
 	last := -1
 	for i, line := range lines {
@@ -80,7 +80,7 @@ func withMac(text, name, description string) (string, error) {
 		table.WriteString("\n")
 	}
 	table.WriteString("\n[macs." + name + "]\n")
-	if err := toml.NewEncoder(&table).Encode(macFile{Description: description}); err != nil {
+	if err := toml.NewEncoder(&table).Encode(macFile{Description: description, From: from}); err != nil {
 		return "", fmt.Errorf("write %s's description: %w", name, err)
 	}
 	return strings.Join(lines[:end], "") + table.String() + strings.Join(lines[end:], ""), nil

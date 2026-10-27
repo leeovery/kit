@@ -93,8 +93,9 @@ func TestMachineRefusesAConfigNeedingALaterKit(t *testing.T) {
 }
 
 // Added from another Mac, a Mac's folder is a copy of that one's, every file
-// as it is, and kit.toml gains its table after the last Mac's, comments and
-// all left as they were; this Mac's name stays.
+// as it is, and kit.toml gains its table after the last Mac's, saying where
+// it started from, comments and all left as they were; this Mac's name
+// stays.
 func TestMachineAddCopiesAMac(t *testing.T) {
 	w := laptopWorld(t)
 	w.write(t, filepath.Join(".config", "kit", "kit.toml"), twoMacs+"\n# Kept.\n")
@@ -109,7 +110,7 @@ func TestMachineAddCopiesAMac(t *testing.T) {
 	if code != 0 || !strings.Contains(out, "mini ok added to kit-config, a copy of studio") {
 		t.Fatalf("kit machine add printed\n%s%s exit %d", out, errOut, code)
 	}
-	want := strings.Replace(twoMacs+"\n# Kept.\n", "\n# Kept.", "\n[macs.mini]\ndescription = \"Mac \\\"mini\\\"\"\n\n# Kept.", 1)
+	want := strings.Replace(twoMacs+"\n# Kept.\n", "\n# Kept.", "\n[macs.mini]\ndescription = \"Mac \\\"mini\\\"\"\nfrom = \"studio\"\n\n# Kept.", 1)
 	if got := w.read(t, filepath.Join(".config", "kit", "kit.toml")); got != want {
 		t.Errorf("kit.toml =\n%s\nwant\n%s", got, want)
 	}

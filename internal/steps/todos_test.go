@@ -37,7 +37,7 @@ func TestKitsOwnToDos(t *testing.T) {
 		step engine.Step
 		want check.Item
 	}{
-		{steps.Prefs(settings, now), check.Item{
+		{steps.Prefs(settings, "", now), check.Item{
 			ID: "prefs:paused", Name: "Restore application settings", State: steps.Problem,
 			Detail: "kit prefs restore, or kit prefs start-fresh",
 			ToDo: &check.ToDo{

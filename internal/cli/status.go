@@ -441,7 +441,7 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 			_ = log.Close()
 			return nil, err
 		}
-		settings = []engine.Step{feature(steps.FeaturePrefs, steps.Prefs(p, a.Now)), feature(steps.FeaturePrefs, steps.FullDiskAccess(home))}
+		settings = []engine.Step{feature(steps.FeaturePrefs, steps.Prefs(p, r.cfg.Macs[r.machine].From, a.Now)), feature(steps.FeaturePrefs, steps.FullDiskAccess(home))}
 	}
 	checks = append(checks, settings...)
 	edits := steps.ConfigEdits(r.repo)

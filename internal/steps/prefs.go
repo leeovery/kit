@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"maps"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -24,8 +23,8 @@ const PrefsName = "prefs"
 // as the nightly run captures once a day.
 const prefsEvery = 26 * time.Hour
 
-// The keys of the settings to-do: restore this machine ID's last save, or
-// start afresh. A digit restores another machine ID's (otherSaves).
+// The keys of the settings to-do: restore its source's last save, or
+// start afresh.
 const (
 	keyRestore = "r"
 	keyAfresh  = "f"
@@ -37,8 +36,8 @@ var afresh = check.Key{Key: keyAfresh, Does: "starts afresh: nothing restored, s
 // settingsBack is the to-do of a Mac whose apps' settings are yet to be
 // restored, or started afresh: first, so the apps opened next start with
 // them; and, when the config keeps settings files beside the apps'
-// settings, it says they're restored too. Readied, its keys are the saves
-// the store has (restoreKeys).
+// settings, it says they're restored too. Readied, its keys are its
+// source's save, if any, and f (restoreKeys).
 func settingsBack(files bool) check.ToDo {
 	why := "First, so the apps you open next start with yours. This Mac saves its own once they're restored."
 	if files {
@@ -57,24 +56,28 @@ func settingsBack(files bool) check.ToDo {
 }
 
 // restoreKeys are the settings to-do's keys, the store's saves known: r,
-// when this machine ID has a save, its date said; a digit for each other
-// machine ID's (otherSaves), its name and date said; and f.
-func restoreKeys(saves []prefs.Save, mac string, now time.Time) []check.Key {
-	var keys []check.Key
-	if i := slices.IndexFunc(saves, func(s prefs.Save) bool { return s.Mac == mac }); i >= 0 {
-		keys = append(keys, check.Key{Key: keyRestore, Does: fmt.Sprintf("restores this machine ID's last save (%s)", day(saves[i].At, now))})
+// when there's a source (source), its date said, and f.
+func restoreKeys(saves []prefs.Save, mac, from string, now time.Time) []check.Key {
+	s, ok := source(saves, mac, from)
+	if !ok {
+		return []check.Key{afresh}
 	}
-	for i, s := range otherSaves(saves, mac) {
-		keys = append(keys, check.Key{Key: strconv.Itoa(i + 1), Does: fmt.Sprintf("restores %s's last save (%s)", s.Mac, day(s.At, now))})
+	does := fmt.Sprintf("restores this machine ID's last save (%s)", day(s.At, now))
+	if s.Mac != mac {
+		does = fmt.Sprintf("restores %s's last save (%s) onto this Mac; %s keeps its own", s.Mac, day(s.At, now), s.Mac)
 	}
-	return append(keys, afresh)
+	return []check.Key{{Key: keyRestore, Does: does}, afresh}
 }
 
-// otherSaves are the saves of machine IDs other than mac, as the store
-// sorts them, the first nine: a digit's each.
-func otherSaves(saves []prefs.Save, mac string) []prefs.Save {
-	others := slices.DeleteFunc(slices.Clone(saves), func(s prefs.Save) bool { return s.Mac == mac })
-	return others[:min(len(others), 9)]
+// source is the save the settings to-do restores: this machine ID's own,
+// else that of from, the Mac it started as a copy of; or none.
+func source(saves []prefs.Save, mac, from string) (prefs.Save, bool) {
+	for _, m := range []string{mac, from} {
+		if i := slices.IndexFunc(saves, func(s prefs.Save) bool { return m != "" && s.Mac == m }); i >= 0 {
+			return saves[i], true
+		}
+	}
+	return prefs.Save{}, false
 }
 
 // appToOpen is the to-do of a sandboxed app whose settings wait for its
@@ -93,14 +96,16 @@ func appToOpen(app prefs.App) check.ToDo {
 // Prefs checks apps' settings are being saved: capture switched on, this
 // Mac owning its folder in the store, a capture in the last day without
 // errors, and its commits pushed within a day. It reads kit's record
-// alone: no git, no GitHub. Not switched on, it's a to-do: restore a
-// machine ID's last save, this Mac's or another's, as kit prefs restore
-// does, each save's date said as it comes up; or start afresh, as kit
-// prefs start-fresh does. Either takes this Mac's folder over when other
-// hardware owns it, the card saying so. With sandboxed apps held for their
-// settings folders, it's a to-do for each, one at a time: kit opens the
-// app, once a run, and once the person's quit it, restores its settings.
-func Prefs(p *prefs.Prefs, now func() time.Time) engine.Step {
+// alone: no git, no GitHub. Not switched on, it's a to-do: restore the
+// last save of its source, this machine ID's own or else from's, the Mac
+// it started as a copy of, as kit prefs restore does, its date said as it
+// comes up; or start afresh, as kit prefs start-fresh does. Either takes
+// this Mac's folder over when other hardware owns it, the card saying so.
+// Applied, with no source in the store, it starts afresh by itself. With
+// sandboxed apps held for their settings folders, it's a to-do for each,
+// one at a time: kit opens the app, once a run, and once the person's quit
+// it, restores its settings.
+func Prefs(p *prefs.Prefs, from string, now func() time.Time) engine.Step {
 	var mu sync.Mutex
 	opened := map[string]bool{}
 	return engine.Step{
@@ -115,7 +120,7 @@ func Prefs(p *prefs.Prefs, now func() time.Time) engine.Step {
 					return it
 				}
 				t := *it.ToDo
-				t.Keys = restoreKeys(saves, p.Mac, now())
+				t.Keys = restoreKeys(saves, p.Mac, from, now())
 				if owner, taking, _ := p.TakingOver(ctx); taking {
 					t.Why = fmt.Sprintf("This Mac takes over %s from %s, which stops saving to it. %s", p.Mac, owner.Called(), t.Why)
 				}
@@ -126,7 +131,7 @@ func Prefs(p *prefs.Prefs, now func() time.Time) engine.Step {
 				if id, ok := strings.CutPrefix(it.ID, PrefsName+":"+idOpen+":"); ok {
 					return restoreOpened(ctx, p, id)
 				}
-				said, err := answerSettings(ctx, p, key, now)
+				said, err := answerSettings(ctx, p, from, key, now)
 				if err != nil {
 					return "", err
 				}
@@ -152,33 +157,44 @@ func Prefs(p *prefs.Prefs, now func() time.Time) engine.Step {
 			case rec.NotOwner != "":
 				return problem(PrefsName, "another Mac owns this Mac's folder in the store", [3]string{"not-owner", rec.NotOwner, "another Mac took this folder over, so this Mac doesn't save to it"})
 			case rec.On == "":
-				return yours(PrefsName, "paused: capture isn't switched on for this Mac", "paused", "kit prefs restore, or kit prefs start-fresh", settingsBack(len(p.Lists.Files) > 0))
+				return yours(PrefsName, "paused: capture isn't switched on for this Mac", idPaused, "kit prefs restore, or kit prefs start-fresh", settingsBack(len(p.Lists.Files) > 0))
 			}
 			return withHeld(ctx, p, rec, saving(rec, now))
+		},
+		Apply: func(ctx context.Context, found check.Result) error {
+			if !slices.ContainsFunc(found.Items, func(it check.Item) bool { return it.ID == PrefsName+":"+idPaused }) {
+				return nil
+			}
+			// A store that can't be read leaves the card as it stands.
+			if saves, err := p.Saves(ctx); err == nil {
+				if _, ok := source(saves, p.Mac, from); !ok {
+					_, err = startAfresh(p)
+					return err
+				}
+			}
+			return nil
 		},
 	}
 }
 
+// idPaused is the id, in its step, of the settings to-do.
+const idPaused = "paused"
+
 // answerSettings does what key, of the settings to-do, says: r restores
-// this machine ID's last save; a digit, another's (otherSaves); f starts
-// afresh.
-func answerSettings(ctx context.Context, p *prefs.Prefs, key string, now func() time.Time) (string, error) {
-	if key == keyAfresh {
+// its source's last save (source); f starts afresh.
+func answerSettings(ctx context.Context, p *prefs.Prefs, from, key string, now func() time.Time) (string, error) {
+	switch key {
+	case keyAfresh:
 		return startAfresh(p)
-	}
-	saves, err := p.Saves(ctx)
-	if err != nil {
-		return "", err
-	}
-	if key == keyRestore {
-		if i := slices.IndexFunc(saves, func(s prefs.Save) bool { return s.Mac == p.Mac }); i >= 0 {
-			return restoreSave(ctx, p, saves[i], now)
+	case keyRestore:
+		saves, err := p.Saves(ctx)
+		if err != nil {
+			return "", err
+		}
+		if s, ok := source(saves, p.Mac, from); ok {
+			return restoreSave(ctx, p, s, now)
 		}
 		return "", fmt.Errorf("no settings stored for %s", p.Mac)
-	}
-	others := otherSaves(saves, p.Mac)
-	if n, err := strconv.Atoi(key); err == nil && n >= 1 && n <= len(others) {
-		return restoreSave(ctx, p, others[n-1], now)
 	}
 	return "", fmt.Errorf("%s isn't one of its keys", key)
 }

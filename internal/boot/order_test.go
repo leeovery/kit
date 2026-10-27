@@ -276,24 +276,36 @@ func TestKitConfig(t *testing.T) {
 	}
 }
 
-// A new Mac is added to the clone's kit.toml, uncommitted.
+// A new Mac is added to the clone's kit.toml, uncommitted: started fresh,
+// its table alone; started from another Mac, a copy of that one's folder,
+// its table saying where it started from.
 func TestKitConfigAddsANewMac(t *testing.T) {
-	run := runnertest.New(t)
-	b, _ := newBoot(t, run, GitHub{}, &asker{})
-	read(t, b, map[string]string{config.File: kitToml}, "mini")
-	if err := kitstate.Update(b.State, stateName, func(st *state) { st.NewMac = "mini" }); err != nil {
-		t.Fatal(err)
-	}
-	writeFiles(t, b.Config, map[string]string{".git/HEAD": "ref: refs/heads/main\n", config.File: kitToml})
-	if err := b.configStep().Apply(context.Background(), check.Result{}); err != nil {
-		t.Fatalf("apply = %v", err)
-	}
-	cfg, err := config.Load(b.Config, kinds.ConfigSections())
-	if err != nil || !cfg.Knows("mini") {
-		t.Fatalf("kit.toml after: %v", err)
-	}
-	if res := b.configStep().Check(context.Background()); res.State != check.OK || !strings.HasSuffix(res.Summary, "mini added to kit.toml") {
-		t.Errorf("check = %+v", res)
+	for _, tt := range []struct{ name, from, decl string }{{"fresh", "", ""}, {"from studio", "studio", "[homebrew formulae]\nffmpeg\n"}} {
+		t.Run(tt.name, func(t *testing.T) {
+			run := runnertest.New(t)
+			b, _ := newBoot(t, run, GitHub{}, &asker{})
+			read(t, b, map[string]string{config.File: kitToml}, "mini")
+			if err := kitstate.Update(b.State, stateName, func(st *state) { st.NewMac, st.From = "mini", tt.from }); err != nil {
+				t.Fatal(err)
+			}
+			writeFiles(t, b.Config, map[string]string{".git/HEAD": "ref: refs/heads/main\n", config.File: kitToml, "studio/declarations": "[homebrew formulae]\nffmpeg\n"})
+			if err := b.configStep().Apply(context.Background(), check.Result{}); err != nil {
+				t.Fatalf("apply = %v", err)
+			}
+			cfg, err := config.Load(b.Config, kinds.ConfigSections())
+			if err != nil || !cfg.Knows("mini") || cfg.Macs["mini"].From != tt.from {
+				t.Fatalf("kit.toml after: %+v, %v", cfg, err)
+			}
+			if got, _ := os.ReadFile(filepath.Join(b.Config, "mini", "declarations")); string(got) != tt.decl {
+				t.Errorf("mini/declarations = %q; want %q", got, tt.decl)
+			}
+			if cmds := run.Commands(); len(cmds) > 0 {
+				t.Errorf("ran %s; want nothing committed", cmds)
+			}
+			if res := b.configStep().Check(context.Background()); res.State != check.OK || !strings.HasSuffix(res.Summary, "mini added to kit.toml") {
+				t.Errorf("check = %+v", res)
+			}
+		})
 	}
 }
 

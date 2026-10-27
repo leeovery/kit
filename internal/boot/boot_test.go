@@ -131,6 +131,7 @@ type asker struct {
 	mu      sync.Mutex
 	asked   []string
 	choose  int
+	chooses []int
 	name    string
 	err     error
 	picks   []string
@@ -152,6 +153,13 @@ func (a *asker) Choose(_ context.Context, step, question string, answers []Answe
 		}
 	}
 	a.note(step + ": " + question + " " + strings.Join(labels, ", "))
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if len(a.chooses) > 0 {
+		i := a.chooses[0]
+		a.chooses = a.chooses[1:]
+		return i, a.err
+	}
 	return a.choose, a.err
 }
 
@@ -347,20 +355,27 @@ func TestGitHubRefusesAPublicConfig(t *testing.T) {
 }
 
 // This Mac: one of the config's, chosen, each with its description; or a
-// new one, named, kept as new till kit-config has it; or the one --mac
-// names, with nothing asked.
+// new one, named, then started fresh or from one of the config's Macs, kept
+// as new, with where it starts from, till kit-config has it; or the one
+// --mac names, with nothing asked.
 func TestThisMac(t *testing.T) {
+	const (
+		which = "mac: which of your Macs is this? laptop (MacBook, the primary), studio, new (a new machine ID, started fresh or from one of your Macs)"
+		named = "mac: its name, as kit-config will know it"
+		start = "mac: where does it start from? fresh (only what every Mac shares), laptop (a copy of laptop's setup and settings to start from; laptop itself is left as it is), studio (a copy of studio's setup and settings to start from; studio itself is left as it is)"
+	)
 	for _, tt := range []struct {
-		name   string
-		mac    string
-		ask    *asker
-		want   string
-		asked  []string
-		newMac string
+		name         string
+		mac          string
+		ask          *asker
+		want         string
+		asked        []string
+		newMac, from string
 	}{
-		{"chosen", "", &asker{choose: 1}, "studio", []string{"mac: which of your Macs is this? laptop (MacBook, the primary), studio, new (a Mac kit-config doesn't have yet)"}, ""},
-		{"new", "", &asker{choose: 2, name: "mini"}, "mini", []string{"mac: which of your Macs is this? laptop (MacBook, the primary), studio, new (a Mac kit-config doesn't have yet)", "mac: its name, as kit-config will know it"}, "mini"},
-		{"named", "laptop", &asker{}, "laptop", nil, ""},
+		{"chosen", "", &asker{choose: 1}, "studio", []string{which}, "", ""},
+		{"new, fresh", "", &asker{chooses: []int{2, 0}, name: "mini"}, "mini", []string{which, named, start}, "mini", ""},
+		{"new, from studio", "", &asker{chooses: []int{2, 2}, name: "mini"}, "mini", []string{which, named, start}, "mini", "studio"},
+		{"named", "laptop", &asker{}, "laptop", nil, "", ""},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			b, _ := newBoot(t, runnertest.New(t), GitHub{}, tt.ask)
@@ -384,8 +399,8 @@ func TestThisMac(t *testing.T) {
 			if !slices.Equal(tt.ask.asked, tt.asked) {
 				t.Errorf("asked %q; want %q", tt.ask.asked, tt.asked)
 			}
-			if st, _ := kitstate.Load[state](b.State, stateName); st.NewMac != tt.newMac {
-				t.Errorf("new Mac %q; want %q", st.NewMac, tt.newMac)
+			if st, _ := kitstate.Load[state](b.State, stateName); st.NewMac != tt.newMac || st.From != tt.from {
+				t.Errorf("new Mac %q from %q; want %q from %q", st.NewMac, st.From, tt.newMac, tt.from)
 			}
 			if res := step.Check(context.Background()); res.State != check.OK || res.Summary != tt.want {
 				t.Errorf("check after = %+v", res)

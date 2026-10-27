@@ -1,7 +1,6 @@
 package steps_test
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -41,7 +40,7 @@ func TestPrefs(t *testing.T) {
 				t.Fatal(err)
 			}
 			p := prefs.New(runnertest.New(t), t.TempDir(), state, t.TempDir(), "", "laptop", prefs.Lists{}, now)
-			res := steps.Prefs(p, now).Check(t.Context())
+			res := steps.Prefs(p, "", now).Check(t.Context())
 			if res.State != tt.state || !strings.Contains(res.Summary, tt.text) || (tt.id != "" && (len(res.Items) != 1 || res.Items[0].ID != tt.id)) {
 				t.Errorf("result = %+v", res)
 			}
@@ -62,12 +61,12 @@ func configures(fake *runnertest.Fake, clone string) {
 // settingsStore is a Mac, laptop, whose apps' settings aren't switched
 // on, with no clone of the store, cloning it making one with a folder for
 // each machine ID of saves, an app's settings in it, its last save on the
-// day given; and the settings step on it, its paused to-do as its check
-// finds it.
-func settingsStore(t *testing.T, saves map[string]string) (fake *runnertest.Fake, clone string, step engine.Step, paused check.Item) {
+// day given; and the settings step on it, laptop started as a copy of
+// from, its paused to-do as its check finds it.
+func settingsStore(t *testing.T, saves map[string]string, from string) (fake *runnertest.Fake, p *prefs.Prefs, step engine.Step, paused check.Item) {
 	t.Helper()
 	state := t.TempDir()
-	clone = filepath.Join(t.TempDir(), "prefs")
+	clone := filepath.Join(t.TempDir(), "prefs")
 	if err := os.WriteFile(filepath.Join(state, "prefs.json"), []byte(`{}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -86,10 +85,10 @@ func settingsStore(t *testing.T, saves map[string]string) (fake *runnertest.Fake
 	}
 	fake.On("git", "-C", clone, "remote")
 	fake.On("git", "-C", clone, "rev-parse", "HEAD").Prints("abc123\n")
-	p := prefs.New(fake, t.TempDir(), state, clone, "git@github.com:someone/prefs.git", "laptop", prefs.Lists{}, now)
+	p = prefs.New(fake, t.TempDir(), state, clone, "git@github.com:someone/prefs.git", "laptop", prefs.Lists{}, now)
 	p.Probes, p.AppDirs = nil, []string{t.TempDir()}
-	step = steps.Prefs(p, now)
-	return fake, clone, step, step.Check(t.Context()).Items[0]
+	step = steps.Prefs(p, from, now)
+	return fake, p, step, step.Check(t.Context()).Items[0]
 }
 
 // storeDomain puts a domain in the store's folder of mac.
@@ -104,52 +103,34 @@ func storeDomain(t *testing.T, clone, mac, domain string) {
 	}
 }
 
-// The settings to-do is a choice. As it comes up, the store cloned first
-// when it isn't, r restores this machine ID's last save, its date said,
-// offered only when it has one; a digit restores each other machine ID's,
-// sorted by name, its name and date said, the first nine alone; f starts
-// afresh. With no store to look at, the check's keys stand as they are.
+// The settings to-do is a choice of one source and f. As it comes up, the
+// store cloned first when it isn't, r restores this machine ID's last save,
+// its date said; else, with none, the save of the Mac it started as a copy
+// of, named; with neither, f alone. Other machine IDs' saves are never
+// offered. With no store to look at, the check's keys stand as they are.
 func TestAppsSettingsKeys(t *testing.T) {
-	others := map[string]string{}
-	for i := range 10 {
-		others[fmt.Sprintf("mac%02d", i)] = "2026-10-26"
-	}
+	afresh := check.Key{Key: "f", Does: "starts afresh: nothing restored, saving from now"}
 	for _, tt := range []struct {
-		name  string
-		saves map[string]string
-		want  []check.Key
+		name, from string
+		saves      map[string]string
+		want       []check.Key
 	}{
-		{"this machine ID's and others'", map[string]string{"laptop": "2026-10-04", "studio": "2026-10-25", "desk": "2026-10-26"}, []check.Key{
-			{Key: "r", Does: "restores this machine ID's last save (4 Oct)"},
-			{Key: "1", Does: "restores desk's last save (26 Oct)"},
-			{Key: "2", Does: "restores studio's last save (25 Oct)"},
-			{Key: "f", Does: "starts afresh: nothing restored, saving from now"},
+		{"its own", "studio", map[string]string{"laptop": "2026-10-04", "studio": "2026-10-25", "desk": "2026-10-26"}, []check.Key{
+			{Key: "r", Does: "restores this machine ID's last save (4 Oct)"}, afresh,
 		}},
-		{"others' alone", map[string]string{"studio": "2026-10-25"}, []check.Key{
-			{Key: "1", Does: "restores studio's last save (25 Oct)"},
-			{Key: "f", Does: "starts afresh: nothing restored, saving from now"},
+		{"the Mac it started from", "studio", map[string]string{"studio": "2026-10-25", "desk": "2026-10-26"}, []check.Key{
+			{Key: "r", Does: "restores studio's last save (25 Oct) onto this Mac; studio keeps its own"}, afresh,
 		}},
-		{"more than nine", others, nil},
+		{"others' alone", "", map[string]string{"studio": "2026-10-25"}, []check.Key{afresh}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			_, _, step, paused := settingsStore(t, tt.saves)
-			got := step.Choice.Ready(t.Context(), paused).ToDo.Keys
-			if tt.want == nil {
-				var keys []string
-				for _, k := range got {
-					keys = append(keys, k.Key)
-				}
-				if want := []string{"1", "2", "3", "4", "5", "6", "7", "8", "9", "f"}; !slices.Equal(keys, want) || got[8].Does != "restores mac08's last save (26 Oct)" {
-					t.Errorf("readied, the keys are %v; want the first nine machine IDs' alone", got)
-				}
-				return
-			}
-			if !slices.Equal(got, tt.want) {
+			_, _, step, paused := settingsStore(t, tt.saves, tt.from)
+			if got := step.Choice.Ready(t.Context(), paused).ToDo.Keys; !slices.Equal(got, tt.want) {
 				t.Errorf("readied, the keys are %v\nwant %v", got, tt.want)
 			}
 		})
 	}
-	noStore := steps.Prefs(prefs.New(runnertest.New(t), t.TempDir(), t.TempDir(), t.TempDir(), "", "laptop", prefs.Lists{}, now), now)
+	noStore := steps.Prefs(prefs.New(runnertest.New(t), t.TempDir(), t.TempDir(), t.TempDir(), "", "laptop", prefs.Lists{}, now), "", now)
 	paused := noStore.Check(t.Context()).Items[0]
 	if ready := noStore.Choice.Ready(t.Context(), paused); !slices.Equal(ready.ToDo.Keys, paused.ToDo.Keys) || paused.ToDo.Keys[0].Does != "restores this machine ID's last save" {
 		t.Errorf("with no store to look at, the keys are %v; want the check's, %v", ready.ToDo.Keys, paused.ToDo.Keys)
@@ -157,42 +138,91 @@ func TestAppsSettingsKeys(t *testing.T) {
 }
 
 // r restores this machine ID's last save, as kit prefs restore does,
-// saying how many and from when, and how many wait for their apps; with
-// nothing saved, it says why, and capture stays off. A digit restores
-// another machine ID's, the log naming it. f starts afresh, as kit prefs
-// start-fresh does. Each switches capture on, so it's done.
+// saying how many and from when, and how many wait for their apps; else
+// the Mac's it started from, as kit prefs restore --from does, the log
+// naming it; with neither, it says why, and capture stays off. A digit is
+// no key. f starts afresh, as kit prefs start-fresh does. Each switches
+// capture on, so it's done.
 func TestAppsSettingsChoice(t *testing.T) {
-	_, _, step, paused := settingsStore(t, map[string]string{"studio": "2026-10-25"})
+	_, _, step, paused := settingsStore(t, map[string]string{"studio": "2026-10-25"}, "")
 	if _, err := step.Choice.Answer(t.Context(), paused, "r"); err == nil || err.Error() != "no settings stored for laptop" {
 		t.Errorf("with nothing saved, r = %v; want it to say so", err)
+	}
+	if _, err := step.Choice.Answer(t.Context(), paused, "1"); err == nil || err.Error() != "1 isn't one of its keys" {
+		t.Errorf("1 = %v; want it no key", err)
 	}
 	if step.Check(t.Context()).Items[0].ID != "prefs:paused" {
 		t.Error("r failing, capture was switched on")
 	}
+
+	_, p, step, paused := settingsStore(t, map[string]string{"studio": "2026-10-25"}, "studio")
 	var logged []string
 	ctx := event.WithLogging(t.Context(), func(l event.Logged) { logged = append(logged, l.Line) })
-	said, err := step.Choice.Answer(ctx, paused, "1")
+	said, err := step.Choice.Answer(ctx, paused, "r")
 	if err != nil || said != "no apps' settings, from 25 Oct; 1 waits for its app" {
-		t.Errorf("1 = %q, %v; want how many, from when, and how many wait", said, err)
+		t.Errorf("r = %q, %v; want how many, from when, and how many wait", said, err)
 	}
 	if want := []string{"Restoring application settings from studio's last save"}; !slices.Equal(logged, want) {
 		t.Errorf("the log says %q, want %q", logged, want)
+	}
+	if rec, err := p.Load(); err != nil || rec.Restored == nil || rec.Restored.From != "studio" {
+		t.Errorf("the record = %+v, %v; want restored from studio", rec, err)
 	}
 	if res := step.Check(t.Context()); res.State != check.OK || res.Summary != "saving from tonight" {
 		t.Errorf("restored, the check says %+v; want capture switched on, fine for now", res)
 	}
 
-	_, _, step, paused = settingsStore(t, map[string]string{"laptop": "2026-10-04"})
+	_, _, step, paused = settingsStore(t, map[string]string{"laptop": "2026-10-04", "studio": "2026-10-25"}, "studio")
 	if said, err := step.Choice.Answer(t.Context(), paused, "r"); err != nil || said != "no apps' settings, from 4 Oct; 1 waits for its app" {
 		t.Errorf("r = %q, %v; want how many, from when, and how many wait", said, err)
 	}
 
-	_, _, step, paused = settingsStore(t, nil)
+	_, _, step, paused = settingsStore(t, nil, "")
 	if said, err := step.Choice.Answer(t.Context(), paused, "f"); err != nil || said != "saving from now, nothing restored" {
 		t.Errorf("f = %q, %v", said, err)
 	}
 	if res := step.Check(t.Context()); res.State != check.OK || res.Summary != "saving from tonight" {
 		t.Errorf("started afresh, the check says %+v; want capture switched on, fine for now", res)
+	}
+}
+
+// Applied, the settings step starts afresh by itself when the store holds
+// no source, raising no card; with a source, or a store it can't read, it
+// leaves the card be.
+func TestAppsSettingsWithNoSource(t *testing.T) {
+	for _, tt := range []struct {
+		name, from string
+		saves      map[string]string
+		afresh     bool
+	}{
+		{"no source", "", map[string]string{"studio": "2026-10-25"}, true},
+		{"its own", "", map[string]string{"laptop": "2026-10-04"}, false},
+		{"the Mac it started from", "studio", map[string]string{"studio": "2026-10-25"}, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, step, _ := settingsStore(t, tt.saves, tt.from)
+			if err := step.Apply(t.Context(), step.Check(t.Context())); err != nil {
+				t.Fatalf("apply = %v", err)
+			}
+			res := step.Check(t.Context())
+			if afresh := res.State == check.OK && res.Summary == "saving from tonight" && !res.ToDo(); afresh != tt.afresh {
+				t.Errorf("applied, the check says %+v; want started afresh %v", res, tt.afresh)
+			}
+		})
+	}
+	fake := runnertest.New(t)
+	clone := filepath.Join(t.TempDir(), "prefs")
+	fake.On("git", "clone", "--quiet", "git@github.com:someone/prefs.git", clone+".cloning").Exits(128)
+	state := t.TempDir()
+	if err := os.WriteFile(filepath.Join(state, "prefs.json"), []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	step := steps.Prefs(prefs.New(fake, t.TempDir(), state, clone, "git@github.com:someone/prefs.git", "laptop", prefs.Lists{}, now), "", now)
+	if err := step.Apply(t.Context(), step.Check(t.Context())); err != nil {
+		t.Fatalf("apply with a store it can't read = %v", err)
+	}
+	if res := step.Check(t.Context()); len(res.Items) != 1 || res.Items[0].ID != "prefs:paused" {
+		t.Errorf("with a store it can't read, the check says %+v; want the card still", res)
 	}
 }
 
@@ -213,7 +243,8 @@ func TestAppsSettingsTakeOver(t *testing.T) {
 		{"r with nothing saved", "r", map[string]string{"studio": "2026-10-25"}, true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			fake, clone, step, paused := settingsStore(t, tt.saves)
+			fake, p, step, paused := settingsStore(t, tt.saves, "")
+			clone := p.Clone
 			fake.On("ioreg", "-rd1", "-c", "IOPlatformExpertDevice").Prints(`  "IOPlatformUUID" = "HW-THIS"` + "\n")
 			fake.On("sysctl", "-n", "hw.model").Prints("Mac99,1\n")
 			fake.On("scutil", "--get", "ComputerName").Prints("Laptop\n")
@@ -298,7 +329,7 @@ func TestAppsSettingsAppsToOpen(t *testing.T) {
 	fake.On("defaults", "import", "com.example.stubborn", filepath.Join(clone, "laptop", "domains", "com.example.stubborn.plist")).Exits(1)
 	p := prefs.New(fake, home, state, clone, "git@github.com:someone/prefs.git", "laptop", prefs.Lists{}, now)
 	p.Probes, p.AppDirs, p.Sleep = nil, []string{appDir}, func(time.Duration) {}
-	step := steps.Prefs(p, now)
+	step := steps.Prefs(p, "", now)
 	paused := step.Check(t.Context()).Items[0]
 
 	var logged []event.Logged
@@ -368,7 +399,7 @@ func TestAppsSettingsAfreshAfterAnOlderRestore(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(state, "prefs.json"), []byte(record), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	step := steps.Prefs(prefs.New(runnertest.New(t), t.TempDir(), state, t.TempDir(), "", "laptop", prefs.Lists{}, now), now)
+	step := steps.Prefs(prefs.New(runnertest.New(t), t.TempDir(), state, t.TempDir(), "", "laptop", prefs.Lists{}, now), "", now)
 	paused := step.Check(t.Context()).Items[0]
 	if said, err := step.Choice.Answer(t.Context(), paused, "f"); err != nil || said != "saving from now; 2 still wait to come back" {
 		t.Errorf("f = %q, %v; want saving on, and how many still wait", said, err)
@@ -397,7 +428,7 @@ func TestAppsSettingsHeldNeverHideCapture(t *testing.T) {
 	fake.On("codesign", "-d", "--entitlements", "-", "--xml", filepath.Join(appDir, "Boxed App.app")).Prints(`<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>com.apple.security.app-sandbox</key><true/></dict></plist>`)
 	p := prefs.New(fake, t.TempDir(), state, t.TempDir(), "", "laptop", prefs.Lists{}, now)
 	p.AppDirs = []string{appDir}
-	res := steps.Prefs(p, now).Check(t.Context())
+	res := steps.Prefs(p, "", now).Check(t.Context())
 	var ids []string
 	for _, it := range res.Items {
 		ids = append(ids, it.ID)
