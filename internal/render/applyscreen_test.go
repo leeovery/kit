@@ -573,6 +573,9 @@ func TestApplyingRowSays(t *testing.T) {
 		{"done, one step", "Secrets", "  ● Secrets  24 synced", []event.Event{fine(2, "secret", "24 synced")}, look.Pink("●"), ""},
 		{"done, several", "Your steps", "  ● Your steps  all 3 done", []event.Event{
 			fine(2, "fonts", "16 installed"), fine(3, "mise", "fine"), fine(4, "valet", "fine")}, look.Pink("●"), ""},
+		{"done, several, counting what they declare", "Homebrew formulae", "  ● Homebrew formulae  all 129 done", []event.Event{
+			fine(2, "homebrew", "/opt/homebrew"),
+			finished(3, "brew", check.Result{State: check.OK, Summary: "129 declared, all installed", Counts: map[string]int{"declared": 129, "installed": 129}})}, look.Pink("●"), ""},
 		{"not started", "Your steps", "  ○ Your steps  waiting", nil, look.Cyan("○"), ""},
 	} {
 		t.Run(tt.name, func(t *testing.T) {

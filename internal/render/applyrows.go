@@ -278,23 +278,41 @@ func (p *Pretty) waitWords(s event.Step) string {
 }
 
 // doneSays is what a row whose steps are all well says: its step's own
-// words, when it has one; else that they're all done.
+// words, when it has one; else that the things they see to are all done
+// (things).
 func (p *Pretty) doneSays(r applyRow) string {
 	if len(r.steps) == 1 {
 		return p.listRow(r.steps[0]).Says
 	}
-	return look.Muted(fmt.Sprintf("all %d done", len(r.steps)))
+	return look.Muted(fmt.Sprintf("all %d done", p.things(r)))
+}
+
+// things are how many things r's steps see to, as a row done counts them:
+// what they declare, as their results count it, so Homebrew formulae's
+// are its formulae, not Homebrew and them; else, with nothing declared,
+// its steps, each a thing.
+func (p *Pretty) things(r applyRow) int {
+	n, declares := 0, false
+	for _, s := range r.steps {
+		if declared, ok := p.results[s.Name].Result.Counts["declared"]; ok {
+			n, declares = n+declared, true
+		}
+	}
+	if !declares {
+		return len(r.steps)
+	}
+	return n
 }
 
 // lamps are the run's lights as it stands, or the rows it will run while
-// it's getting ready: a row each, as it stands on the screen, counting its
-// steps once all are done.
+// it's getting ready: a row each, as it stands on the screen, counting the
+// things its steps see to once all are done (things).
 func (p *Pretty) lamps() []look.Lamp {
 	var lamps []look.Lamp
 	for _, r := range p.shownRows() {
 		l := look.Lamp{Name: r.name, State: p.rowLook(r).State}
 		if l.State == look.Done {
-			l.Count = fmt.Sprint(len(r.steps))
+			l.Count = fmt.Sprint(p.things(r))
 		}
 		lamps = append(lamps, l)
 	}
