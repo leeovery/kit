@@ -63,9 +63,10 @@ func heldIn(p *Pending) held {
 	return h
 }
 
-// waits reports whether why is a wait's: not installed, or running.
+// waits reports whether why is a wait's: not installed, running, or a
+// windowless helper's folder not come yet.
 func waits(why string) bool {
-	return why == "not installed" || running(why)
+	return why == "not installed" || running(why) || why == errNoFolderYet.Error()
 }
 
 // running reports whether why is that the app is running.
@@ -148,8 +149,8 @@ func (h held) pending(from string) *Pending {
 // them, till their settings are restored: those installed and sandboxed,
 // each once, by name. One held that isn't sandboxed, as kit once took an
 // app declaring its sandbox off to be, never gets a folder: its settings
-// come back as any app's, as the next pass tries them. A windowless
-// helper's never the person's to open: the next pass opens it again.
+// come back as any app's, as the next pass tries them. Nor is a windowless
+// helper, held so before kit opened them itself: the next pass opens it.
 func (p *Prefs) ToOpen(ctx context.Context, rec Record) []App {
 	if rec.Pending == nil || len(rec.Pending.Open) == 0 {
 		return nil

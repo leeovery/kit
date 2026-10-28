@@ -448,7 +448,7 @@ func TestAnAppToOpenStaysTillItsQuit(t *testing.T) {
 	}
 }
 
-// The hourly pass opens no app, for any reason: a sandboxed app installed
+// The hourly pass opens no app of its own: a sandboxed app installed
 // since, with no settings folder yet, is held for the person to open.
 func TestTheHourlyPassOpensNothing(t *testing.T) {
 	w := newWorld(t, prefs.Lists{})

@@ -1254,11 +1254,14 @@ to.
   app can declare it off, and has no container) with no container yet waits for the person to
   open it, kit opening nothing. A windowless helper (an app inside another's bundle whose
   Info.plist sets `LSUIElement` or `LSBackgroundOnly`, as login items do: no window or Dock icon
-  to quit it by) is the exception, every restore but a dry run readying it itself: quit if
-  running (`quit app id`), and, sandboxed with no container, opened out of view (`open -g`) till
-  its container comes, then quit, each wait bounded (5 s to quit, 15 s for the container); one
-  that won't quit or gets no container in time stays held as before, for the next pass to try
-  again. Menu-bar apps of their own are not helpers: they're the person's to quit. Then the
+  to quit it by) is the exception, every restore but a dry run readying it itself once no app of
+  its own sharing the domain is running: quit if running (`quit app id`), and, sandboxed with no
+  container, opened out of view (`open -g`) till its container comes, then quit, each wait
+  bounded (5 s to quit, 15 s for the container); one kit quit that was running is started again
+  out of view once its settings are back. One that won't quit, or whose container doesn't come
+  in time, waits as an app that's running or not installed does, never as one to open, for the
+  next pass to try again. Menu-bar apps of their own are not helpers: they're the person's to
+  quit. Then the
   stored copy checked, the live
   settings saved, `defaults delete` then `import`, read back and compared. A full restore puts
   back the files that differ (each saved first), writes the pending list, records its commit, and

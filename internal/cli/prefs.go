@@ -61,14 +61,18 @@ opened once, hidden, to make one. Name domains to restore just those, even
 without their app. A full restore switches capture on. What it can't
 restore waits, left alone by capture (kit prefs pending): for its app to be
 installed or quit; for you to open an app once, as no settings folder came
-of kit opening it; or, failed otherwise, for --pending. Never quits an app.
+of kit opening it; or, failed otherwise, for --pending. Never quits an app
+but a helper with no window, inside another app, which it quits, opens
+hidden for its settings folder if need be, and starts again if it was
+running.
 
 --from restores another Mac's settings, leaving out [prefs machine-bound]
 (as onto other hardware); --at the store as it was then (2026-09-28, "3 days
 ago"); --as one domain into a scratch domain, to test without touching the
 app; --pending what's waiting, failed or not, opening an app once for its
 settings folder; --dry-run says what it would do. The hourly pass restores
-what's waiting too, but opens no app and leaves what failed to --pending.`,
+what's waiting too, but opens only such helpers, and leaves what failed to
+--pending.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			opts.Domains = args
 			return a.prepared(cmd, prefsNoun+" restore", func(ctx context.Context, r *run) error {

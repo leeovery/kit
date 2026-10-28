@@ -296,9 +296,10 @@ func restoreSave(ctx context.Context, p *prefs.Prefs, save prefs.Save, now func(
 
 // restoreOpened restores the settings of the app of a bundle id, id, once
 // the person's opened and quit it, with those of any other app held that
-// can be now, opening nothing, as the hourly pass does: what it restored,
-// and how many still wait for their apps. Still running, or with no
-// settings folder yet, it says so, and restores nothing.
+// can be now, opening nothing but a helper with no window, as the hourly
+// pass does: what it restored, and how many still wait for their apps.
+// Still running, or with no settings folder yet, it says so, and restores
+// nothing.
 func restoreOpened(ctx context.Context, p *prefs.Prefs, id string) (string, error) {
 	if err := p.Opened(ctx, id, cmp.Or(openedName(p, id), id)); err != nil {
 		return "", err

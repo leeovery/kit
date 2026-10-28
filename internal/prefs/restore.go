@@ -275,8 +275,9 @@ func (p *Prefs) restoreDomain(ctx context.Context, stored, target, saved string)
 // switches capture on, what it couldn't restore held aside, so capture
 // leaves it be: waiting for its app; its app for the person to open once;
 // or, failed otherwise, for kit prefs restore --pending. Never quits an
-// app but a windowless helper, which it opens and quits itself. From another Mac's folder, or onto other hardware, the settings
-// bound to one Mac are left out.
+// app but a windowless helper, which it opens and quits itself, starting
+// it again if it was running. From another Mac's folder, or onto other
+// hardware, the settings bound to one Mac are left out.
 func (p *Prefs) Restore(ctx context.Context, opts RestoreOptions) (RestoreReport, error) {
 	report := RestoreReport{From: opts.From, DryRun: opts.DryRun, As: opts.As, Waiting: map[string]string{}, ToOpen: map[string]string{}, Failed: map[string]string{}, FilesFailed: map[string]string{}, Apps: map[string]App{}}
 	if report.From == "" {
@@ -375,7 +376,7 @@ func (p *Prefs) Restore(ctx context.Context, opts RestoreOptions) (RestoreReport
 		}
 	}
 
-	installed, containers := p.installedApps(), map[string]error{}
+	installed, containers, restart := p.installedApps(), map[string]error{}, map[string]bool{}
 	for _, domain := range domains {
 		if opts.Unattended && before.failed[domain] {
 			continue
@@ -392,9 +393,10 @@ func (p *Prefs) Restore(ctx context.Context, opts RestoreOptions) (RestoreReport
 			continue
 		}
 		p.restoreOwned(ctx, &report, domain, owners, installed, restoring{
-			stored: filepath.Join(domainsDir, domain+".plist"), saved: saved, dryRun: opts.DryRun, containers: containers,
+			stored: filepath.Join(domainsDir, domain+".plist"), saved: saved, dryRun: opts.DryRun, containers: containers, restart: restart,
 		})
 	}
+	p.restartHelpers(ctx, restart)
 
 	if full || len(files) > 0 {
 		report.Files, report.FilesFailed = p.restoreFiles(filesDir, bound, files, saved, opts.DryRun)
@@ -458,26 +460,36 @@ func (r RestoreReport) held(h held, every, files bool) held {
 // restoring is how a domain is restored: from its stored copy, the live
 // settings saved first in saved; dryRun, only saying it would be.
 // containers are whether each app has its container, by bundle id, in
-// this restore, so an app with several domains is looked at once.
+// this restore, so an app with several domains is looked at once; restart,
+// whether each windowless helper kit quit was running before.
 type restoring struct {
 	stored, saved string
 	dryRun        bool
 	containers    map[string]error
+	restart       map[string]bool
 }
 
 // restoreOwned restores domain, whose apps are owners, of those installed,
-// into report, each windowless helper among them readied first: waiting
-// while one's running; its app to open when its settings folder isn't
-// there; failed, as restoreDomain fails; else restored.
+// into report: waiting while an app of its own is running; then, its
+// windowless helpers readied, while one's running still, or its folder
+// hasn't come; its app to open when its settings folder isn't there;
+// failed, as restoreDomain fails; else restored.
 func (p *Prefs) restoreOwned(ctx context.Context, report *RestoreReport, domain string, owners []string, installed map[string]string, how restoring) {
 	app := func(id string) App { return App{ID: id, Name: appName(installed[id])} }
-	for _, id := range owners {
-		if _, made := how.containers[id]; !made && !how.dryRun && windowless(installed[id]) {
-			how.containers[id] = p.readyHelper(ctx, id, installed[id])
+	runs := func(helpers bool) bool {
+		i := slices.IndexFunc(owners, func(id string) bool { return windowless(installed[id]) == helpers && p.running(ctx, id) })
+		if i >= 0 {
+			report.Waiting[domain], report.Apps[domain] = app(owners[i]).Name+" is running", app(owners[i])
 		}
+		return i >= 0
 	}
-	if i := slices.IndexFunc(owners, func(id string) bool { return p.running(ctx, id) }); i >= 0 {
-		report.Waiting[domain], report.Apps[domain] = app(owners[i]).Name+" is running", app(owners[i])
+	if runs(false) {
+		return
+	}
+	if !how.dryRun {
+		p.readyHelpers(ctx, owners, installed, how)
+	}
+	if runs(true) {
 		return
 	}
 	if how.dryRun {
@@ -493,7 +505,11 @@ func (p *Prefs) restoreOwned(ctx context.Context, report *RestoreReport, domain 
 		if err == nil {
 			continue
 		}
-		report.ToOpen[domain], report.Apps[domain] = err.Error(), app(id)
+		held := report.ToOpen
+		if errors.Is(err, errNoFolderYet) {
+			held = report.Waiting
+		}
+		held[domain], report.Apps[domain] = err.Error(), app(id)
 		return
 	}
 	if err := p.restoreDomain(ctx, how.stored, domain, how.saved); err != nil {
