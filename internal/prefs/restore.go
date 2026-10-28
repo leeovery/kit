@@ -275,7 +275,7 @@ func (p *Prefs) restoreDomain(ctx context.Context, stored, target, saved string)
 // switches capture on, what it couldn't restore held aside, so capture
 // leaves it be: waiting for its app; its app for the person to open once;
 // or, failed otherwise, for kit prefs restore --pending. Never quits an
-// app. From another Mac's folder, or onto other hardware, the settings
+// app but a windowless helper, which it opens and quits itself. From another Mac's folder, or onto other hardware, the settings
 // bound to one Mac are left out.
 func (p *Prefs) Restore(ctx context.Context, opts RestoreOptions) (RestoreReport, error) {
 	report := RestoreReport{From: opts.From, DryRun: opts.DryRun, As: opts.As, Waiting: map[string]string{}, ToOpen: map[string]string{}, Failed: map[string]string{}, FilesFailed: map[string]string{}, Apps: map[string]App{}}
@@ -466,11 +466,16 @@ type restoring struct {
 }
 
 // restoreOwned restores domain, whose apps are owners, of those installed,
-// into report: waiting while one's running; its app to open when its
-// settings folder isn't there; failed, as restoreDomain fails;
-// else restored.
+// into report, each windowless helper among them readied first: waiting
+// while one's running; its app to open when its settings folder isn't
+// there; failed, as restoreDomain fails; else restored.
 func (p *Prefs) restoreOwned(ctx context.Context, report *RestoreReport, domain string, owners []string, installed map[string]string, how restoring) {
 	app := func(id string) App { return App{ID: id, Name: appName(installed[id])} }
+	for _, id := range owners {
+		if _, made := how.containers[id]; !made && !how.dryRun && windowless(installed[id]) {
+			how.containers[id] = p.readyHelper(ctx, id, installed[id])
+		}
+	}
 	if i := slices.IndexFunc(owners, func(id string) bool { return p.running(ctx, id) }); i >= 0 {
 		report.Waiting[domain], report.Apps[domain] = app(owners[i]).Name+" is running", app(owners[i])
 		return

@@ -148,7 +148,8 @@ func (h held) pending(from string) *Pending {
 // them, till their settings are restored: those installed and sandboxed,
 // each once, by name. One held that isn't sandboxed, as kit once took an
 // app declaring its sandbox off to be, never gets a folder: its settings
-// come back as any app's, as the next pass tries them.
+// come back as any app's, as the next pass tries them. A windowless
+// helper's never the person's to open: the next pass opens it again.
 func (p *Prefs) ToOpen(ctx context.Context, rec Record) []App {
 	if rec.Pending == nil || len(rec.Pending.Open) == 0 {
 		return nil
@@ -158,7 +159,7 @@ func (p *Prefs) ToOpen(ctx context.Context, rec Record) []App {
 	var out []App
 	for _, app := range rec.Pending.Open {
 		path, ok := installed[app.ID]
-		if seen[app.ID] || !ok || !p.sandboxed(ctx, path) {
+		if seen[app.ID] || !ok || windowless(path) || !p.sandboxed(ctx, path) {
 			continue
 		}
 		seen[app.ID] = true

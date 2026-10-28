@@ -1252,7 +1252,14 @@ to.
   team prefixes, `[prefs apps]` for the rest); not installed or running, it waits; a sandboxed
   app (its entitlements, as codesign reads them, turning `com.apple.security.app-sandbox` on: an
   app can declare it off, and has no container) with no container yet waits for the person to
-  open it, kit opening nothing; the stored copy checked, the live
+  open it, kit opening nothing. A windowless helper (an app inside another's bundle whose
+  Info.plist sets `LSUIElement` or `LSBackgroundOnly`, as login items do: no window or Dock icon
+  to quit it by) is the exception, every restore but a dry run readying it itself: quit if
+  running (`quit app id`), and, sandboxed with no container, opened out of view (`open -g`) till
+  its container comes, then quit, each wait bounded (5 s to quit, 15 s for the container); one
+  that won't quit or gets no container in time stays held as before, for the next pass to try
+  again. Menu-bar apps of their own are not helpers: they're the person's to quit. Then the
+  stored copy checked, the live
   settings saved, `defaults delete` then `import`, read back and compared. A full restore puts
   back the files that differ (each saved first), writes the pending list, records its commit, and
   switches capture on, failures or not. What it couldn't restore waits on the pending list,
@@ -1269,7 +1276,8 @@ to.
   A sandboxed app held for its settings folder is a to-do of its own, one at a time (`Open <app>
   and quit it`): kit opens it in view (`open -b`) as its card goes up, once a run; `space` restores its
   settings then and there once it's quit and has its folder, else the log says which it isn't and
-  the card stays; `s` leaves it to the hourly pass. What failed
+  the card stays; `s` leaves it to the hourly pass. A windowless helper never gets a card: kit
+  opens and quits it itself, as restore says. What failed
   otherwise is said by the check, apps' settings and settings files apart, as held for `kit prefs
   restore --pending`, after anything wrong with capture itself. A held
   file's saved copy stays in the store, on the Mac or not. `[prefs deny]` leaves
