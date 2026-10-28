@@ -358,7 +358,7 @@ func (b *Boot) askMac(ctx context.Context, cfg *config.Config) (name, from strin
 	}
 	starts := []Answer{{Label: "fresh", Does: "only what every Mac shares"}}
 	for _, m := range macs {
-		starts = append(starts, Answer{Label: m, Does: fmt.Sprintf("a copy of %s's setup and settings to start from; %s itself is left as it is", m, m)})
+		starts = append(starts, Answer{Label: m, Does: fmt.Sprintf("a copy of %s's setup and settings to start from", m)})
 	}
 	if i, err = b.Ask.Choose(ctx, MacStep, "where does it start from?", starts); err != nil || i == 0 {
 		return name, "", err
