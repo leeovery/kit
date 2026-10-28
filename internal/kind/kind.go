@@ -441,6 +441,24 @@ func AdminForgotten(ctx context.Context) bool {
 	return p.Forgotten(ctx)
 }
 
+// AdminAgain runs f, a command through kit's own sudo -n, and once more
+// should sudo have forgotten the password meanwhile, as when the Mac slept
+// or a program cleared it (Composer does, each time it starts), once kit
+// has it again (AdminForgotten).
+func AdminAgain(ctx context.Context, f func() error) error {
+	err := f()
+	if SudoForgot(err) && AdminForgotten(ctx) {
+		return f()
+	}
+	return err
+}
+
+// SudoForgot reports whether err is sudo -n saying it hasn't the password.
+func SudoForgot(err error) bool {
+	exit, ok := errors.AsType[*runner.ExitError](err)
+	return ok && slices.ContainsFunc(exit.Lines("sudo:"), func(line string) bool { return strings.Contains(line, "a password is required") })
+}
+
 // Placed is the step Step is, k's lines installed as placed says, once the
 // run's steps are known: those other steps wait for first, then the rest,
 // once what they wait for has come, the sections held apart

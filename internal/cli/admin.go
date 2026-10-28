@@ -220,11 +220,13 @@ func (h *adminHold) Forgotten(ctx context.Context) bool {
 }
 
 // afterAdmin is apply, a step's whose apply needs an administrator's
-// password, applied once kit has it, should kit be asking for it.
+// password, applied once kit has it, should kit be asking for it, and given
+// it again should sudo forget it (kind.AdminAgain).
 func (r *run) afterAdmin(apply func(context.Context, check.Result) error) func(context.Context, check.Result) error {
 	return func(ctx context.Context, found check.Result) error {
 		if r.hold != nil {
 			r.hold.Wait(ctx)
+			ctx = kind.WithPassword(ctx, r.hold)
 		}
 		return apply(ctx, found)
 	}

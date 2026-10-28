@@ -71,3 +71,31 @@ func TestADesktopShowsOneSource(t *testing.T) {
 		t.Errorf("items = %q, want none", got)
 	}
 }
+
+// regiven is a kind.Password held, sudo having forgotten it, given again
+// once kit finds out.
+type regiven struct{ forgot int }
+
+func (*regiven) Held() bool                { return true }
+func (*regiven) Wait(context.Context) bool { return true }
+func (r *regiven) Forgotten(context.Context) bool {
+	r.forgot++
+	return true
+}
+
+// A setting whose sudo finds the password forgotten, as once Composer's
+// cleared it mid-run, is set once kit's given it again.
+func TestASettingIsSetOnceThePasswordsGivenAgain(t *testing.T) {
+	fake := runnertest.New(t)
+	p := power.New(fake, t.TempDir())
+	if _, err := p.Values(config.List{Entries: []config.Entry{{Name: "all:standby", Value: "0"}}}); err != nil {
+		t.Fatal(err)
+	}
+	p.SetAdmin(func(context.Context) bool { return true })
+	fake.On("sudo", "-n", "pmset", "-a", "standby", "0").Exits(1).PrintsToStderr("sudo: a password is required").Then()
+	pw := &regiven{}
+	err := p.Install(kind.WithPassword(t.Context(), pw), []string{"all:standby"})
+	if want := []string{"sudo -n pmset -a standby 0", "sudo -n pmset -a standby 0"}; err != nil || !slices.Equal(fake.Calls(), want) || pw.forgot != 1 {
+		t.Errorf("Install() = %v, ran %q, kit found out %d times; want it set, %q, once", err, fake.Calls(), pw.forgot, want)
+	}
+}

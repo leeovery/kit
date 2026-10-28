@@ -350,14 +350,14 @@ func (s *AppStore) install(ctx context.Context, name string, signedIn bool) erro
 	}
 	for {
 		var hung bool
-		err := s.again(ctx, func() (err error) {
+		err := kind.AdminAgain(ctx, func() (err error) {
 			hung, err = s.attempt(ctx, name, signedIn)
 			return err
 		})
 		switch {
 		case err == nil:
 			return nil
-		case forgotten(err):
+		case kind.SudoForgot(err):
 			return errors.New(adminWait)
 		case !hung && !signedOut(err):
 			return failed(err)
@@ -409,27 +409,10 @@ func (s *AppStore) stopStray(ctx context.Context, group int, name string) {
 	if err != nil || len(pids) == 0 {
 		return
 	}
-	_ = s.again(ctx, func() error {
+	_ = kind.AdminAgain(ctx, func() error {
 		_, err := s.run.Run(ctx, runner.Command{Name: "sudo", Args: append([]string{"-n", "kill", "-KILL"}, pids...)})
 		return err
 	})
-}
-
-// again runs f, through kit's own sudo -n, and once more should sudo have
-// forgotten the password meanwhile, as when the Mac slept, once kit has it
-// again (kind.AdminForgotten).
-func (s *AppStore) again(ctx context.Context, f func() error) error {
-	err := f()
-	if forgotten(err) && kind.AdminForgotten(ctx) {
-		return f()
-	}
-	return err
-}
-
-// forgotten reports whether err is sudo -n saying it hasn't the password.
-func forgotten(err error) bool {
-	exit, ok := errors.AsType[*runner.ExitError](err)
-	return ok && slices.ContainsFunc(exit.Lines("sudo:"), func(line string) bool { return strings.Contains(line, "a password is required") })
 }
 
 // failed is err, an app's install failing, in kit's words: what mas said,
@@ -480,7 +463,7 @@ func (n *notSignedIn) Unwrap() error { return n.err }
 
 // Remove uninstalls the apps names name, through sudo, as mas needs.
 func (s *AppStore) Remove(ctx context.Context, names []string) error {
-	return s.again(ctx, func() error {
+	return kind.AdminAgain(ctx, func() error {
 		_, err := s.sudo(ctx, "uninstall", names, 0, nil)
 		return err
 	})

@@ -190,10 +190,10 @@ func (x *Exclusions) Install(ctx context.Context, names []string) error {
 	var errs []error
 	for _, ex := range x.excluders {
 		for _, name := range here {
-			errs = append(errs, named(name, ex.Exclude(ctx, x.run, x.full(name), false)))
+			errs = append(errs, named(name, kind.AdminAgain(ctx, func() error { return ex.Exclude(ctx, x.run, x.full(name), false) })))
 		}
 		for _, name := range fixed {
-			errs = append(errs, named(name, ex.Exclude(ctx, x.run, x.full(name), true)))
+			errs = append(errs, named(name, kind.AdminAgain(ctx, func() error { return ex.Exclude(ctx, x.run, x.full(name), true) })))
 		}
 	}
 	return errors.Join(errs...)
@@ -211,7 +211,7 @@ func (x *Exclusions) Remove(ctx context.Context, names []string) error {
 		}
 		for _, name := range names {
 			if path := x.full(name); slices.Contains(kept, path) {
-				errs = append(errs, named(name, ex.Include(ctx, x.run, path)))
+				errs = append(errs, named(name, kind.AdminAgain(ctx, func() error { return ex.Include(ctx, x.run, path) })))
 			}
 		}
 	}

@@ -223,7 +223,11 @@ func (p *Power) Install(ctx context.Context, names []string) error {
 			continue
 		}
 		_, setting, _ := strings.Cut(name, ":")
-		if _, err := p.run.Run(ctx, runner.Command{Name: "sudo", Args: []string{"-n", "pmset", flag(name), setting, value}}); err != nil {
+		err := kind.AdminAgain(ctx, func() error {
+			_, err := p.run.Run(ctx, runner.Command{Name: "sudo", Args: []string{"-n", "pmset", flag(name), setting, value}})
+			return err
+		})
+		if err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", name, err))
 		}
 	}

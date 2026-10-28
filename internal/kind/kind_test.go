@@ -18,6 +18,7 @@ import (
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/runner"
+	"github.com/leeovery/kit/internal/runner/runnertest"
 )
 
 // fakeKind is a kind whose installed things and other names a test gives,
@@ -1465,5 +1466,40 @@ func TestWhatAKindsListMisses(t *testing.T) {
 	}
 	if want := [][]string{{"new", "gone"}, {"new"}}; !slices.EqualFunc(k.asked, want, slices.Equal) {
 		t.Errorf("it was asked about %q, want %q", k.asked, want)
+	}
+}
+
+// A command through sudo -n that finds sudo's forgotten the password, as
+// once Composer's cleared it, runs once more when kit has it again, and
+// only then: not when it hasn't, nor when it failed some other way, nor
+// where kit holds no password for it.
+func TestACommandRunsAgainOnceThePasswordsGivenAgain(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		says   string
+		admin  kind.Password
+		runs   int
+		failed bool
+	}{
+		{name: "given again", says: "sudo: a password is required", admin: &password{given: true, answered: true}, runs: 2},
+		{name: "not given again", says: "sudo: a password is required", admin: &password{answered: true}, runs: 1, failed: true},
+		{name: "no password kept", says: "sudo: a password is required", runs: 1, failed: true},
+		{name: "failed otherwise", says: "pmset: no such setting", admin: &password{given: true, answered: true}, runs: 1, failed: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := runnertest.New(t)
+			fake.On("sudo", "-n", "pmset", "-a", "standby", "0").Exits(1).PrintsToStderr(tc.says).Then()
+			ctx := t.Context()
+			if tc.admin != nil {
+				ctx = kind.WithPassword(ctx, tc.admin)
+			}
+			err := kind.AdminAgain(ctx, func() error {
+				_, err := fake.Run(ctx, runner.Command{Name: "sudo", Args: []string{"-n", "pmset", "-a", "standby", "0"}})
+				return err
+			})
+			if got := len(fake.Calls()); got != tc.runs || (err != nil) != tc.failed {
+				t.Errorf("ran %d times, AdminAgain = %v; want %d runs, failed %v", got, err, tc.runs, tc.failed)
+			}
+		})
 	}
 }

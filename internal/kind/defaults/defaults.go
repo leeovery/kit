@@ -703,12 +703,14 @@ func (d *Defaults) defaults(ctx context.Context, s config.Setting, args ...strin
 	if s.CurrentHost {
 		args = append([]string{"-currentHost"}, args...)
 	}
-	cmd := runner.Command{Name: "defaults", Args: args}
-	if system(s.Domain) {
-		cmd = runner.Command{Name: "sudo", Args: append([]string{"-n", "defaults"}, args...)}
+	if !system(s.Domain) {
+		_, err := d.run.Run(ctx, runner.Command{Name: "defaults", Args: args})
+		return err
 	}
-	_, err := d.run.Run(ctx, cmd)
-	return err
+	return kind.AdminAgain(ctx, func() error {
+		_, err := d.run.Run(ctx, runner.Command{Name: "sudo", Args: append([]string{"-n", "defaults"}, args...)})
+		return err
+	})
 }
 
 // Install writes each declared setting, then has the apps that read their

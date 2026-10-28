@@ -10,6 +10,7 @@ import (
 
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/engine"
+	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/runner"
 )
 
@@ -87,8 +88,10 @@ func TouchIDSudo(run runner.Runner, admin *Admin, file string) engine.Step {
 			if !strings.HasSuffix(content, "\n") {
 				content += "\n"
 			}
-			_, err = run.Run(ctx, runner.Command{Name: "sudo", Args: []string{"-n", "tee", file}, Input: content + touchIDLine + "\n"})
-			return err
+			return kind.AdminAgain(ctx, func() error {
+				_, err := run.Run(ctx, runner.Command{Name: "sudo", Args: []string{"-n", "tee", file}, Input: content + touchIDLine + "\n"})
+				return err
+			})
 		},
 	}
 }
@@ -127,11 +130,18 @@ func service(run runner.Runner, admin *Admin, name, title, label, plist string) 
 			if !admin.ok(ctx) {
 				return errors.New(AdminWait)
 			}
-			if _, err := run.Run(ctx, runner.Command{Name: "sudo", Args: []string{"-n", "launchctl", "enable", "system/" + label}}); err != nil {
+			err := kind.AdminAgain(ctx, func() error {
+				_, err := run.Run(ctx, runner.Command{Name: "sudo", Args: []string{"-n", "launchctl", "enable", "system/" + label}})
+				return err
+			})
+			if err != nil {
 				return fmt.Errorf("turn %s on: %w", title, err)
 			}
 			// Already loaded is no matter: enabled, it's started as needed.
-			_, _ = run.Run(ctx, runner.Command{Name: "sudo", Args: []string{"-n", "launchctl", "bootstrap", "system", plist}})
+			_ = kind.AdminAgain(ctx, func() error {
+				_, err := run.Run(ctx, runner.Command{Name: "sudo", Args: []string{"-n", "launchctl", "bootstrap", "system", plist}})
+				return err
+			})
 			return nil
 		},
 	}

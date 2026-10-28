@@ -134,8 +134,10 @@ func (s *Spotlight) Resolve(_ context.Context, names []string) (map[string]strin
 // remembers it: it takes effect after a restart.
 func (s *Spotlight) Install(ctx context.Context, names []string) error {
 	sudo := func(cmd string) error {
-		_, err := s.run.Run(ctx, runner.Command{Name: "sudo", Args: []string{"-n", plistBuddy, "-c", cmd, VolumeConfiguration}})
-		return err
+		return kind.AdminAgain(ctx, func() error {
+			_, err := s.run.Run(ctx, runner.Command{Name: "sudo", Args: []string{"-n", plistBuddy, "-c", cmd, VolumeConfiguration}})
+			return err
+		})
 	}
 	// The list may not be there yet: adding it again fails, harmlessly.
 	_ = sudo("Add :Exclusions array")
