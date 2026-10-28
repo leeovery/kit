@@ -128,8 +128,8 @@ func (p *Pretty) toDoPanel(w int) []string {
 // its margin: a choice being answered, what its key does, turning; a
 // choice, its keys, a line each; one kit tells by itself, that kit's
 // watching, and what for, when it says; else the key that says it's done.
-// Then, whichever it is, the key leaving it for later (skipKey). Each is
-// wrapped under its own words.
+// Then, but while a choice is being answered, the key leaving it for later
+// (skipKey). Each is wrapped under its own words.
 func (p *Pretty) toDoEnds(room int) []string {
 	c := p.card
 	key := func(k look.Key) []string { return led(look.Urgent(k.Key), len(k.Key), k.Does, room) }
@@ -140,7 +140,7 @@ func (p *Pretty) toDoEnds(room int) []string {
 	var out []string
 	switch {
 	case c.Answering != "":
-		out = led(look.Cyan("◐"), 1, answeringWith(*c), room)
+		return led(look.Cyan("◐"), 1, answeringWith(*c), room)
 	case len(c.Keys) > 0:
 		for _, k := range c.Keys {
 			out = append(out, key(look.Key{Key: k.Key, Does: k.Does})...)

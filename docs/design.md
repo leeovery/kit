@@ -334,7 +334,7 @@ the next capture commits and pushes it, and the other Mac's next capture is refu
 list, the left pane says "kit can't do these itself: work through them one at a time, as the card
 on the right says", after "Everything else is done." unless a step failed. No to-do holds the run: every one has `s`, "skips it for now: kit apply brings it back"
 (the first letter after it its own keys haven't, should they have `s`, never `q` or `r`), which
-takes it down at once, whatever's under way, even a key being done, the next coming up; it
+takes it down at once, whatever's under way but a key being done (then `s` is gone, the choice made), the next coming up; it
 stays to do, nothing written as though it were done, the list marking it skipped, the log
 saying so and how long it was up, the record counting it among what's left; a look or a key
 under way as it's pressed, left to finish, has it settling meanwhile, and, finding it done after

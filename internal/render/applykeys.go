@@ -210,9 +210,9 @@ func (p *Pretty) press(k ask.Key) (halt bool) {
 
 // skipToDo passes the to-do up's step that the person's leaving it for
 // later, when k is its key for that (skipKey), and reports whether it was:
-// whatever's under way, as a key of its being done.
+// whatever's under way, but a choice of its being answered.
 func (p *Pretty) skipToDo(k ask.Key) bool {
-	if p.card == nil || p.hands == nil || !p.listing(p.card.Step) || !k.Is(skipKey(*p.card).Key) {
+	if p.card == nil || p.hands == nil || !p.listing(p.card.Step) || p.card.Answering != "" || !k.Is(skipKey(*p.card).Key) {
 		return false
 	}
 	p.hands(p.card.Step, hand.Skip)

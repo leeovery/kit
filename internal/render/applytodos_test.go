@@ -374,17 +374,16 @@ func TestTheToDoPanel(t *testing.T) {
 }
 
 // While kit does what a choice's key says, its panel offers none of its
-// keys: what that key does, turning, in their place, then s, which leaves
-// it for later all the same. So does its card in a window too small for
-// the screen.
+// keys: what that key does, turning, in their place, and no s, as it's
+// decided. So does its card in a window too small for the screen.
 func TestAChoiceBeingAnswered(t *testing.T) {
 	events := answeredWith(toDosUpTo(0), "r")
 	face, out, _ := applyIn(colorprofile.TrueColor, 160, 64, time.Minute, events)
 	defer func() { _ = face.Close() }()
 	_, right := panes(screen(uncoloured(out.String())), 160)
 	ends := slices.Index(right, "      restored too.")
-	if ends < 0 || !slices.Equal(right[ends+1:ends+6], []string{"", "      ◐ restores this machine ID's last save (15 Oct)", "      s skips it for now: kit apply brings it back", "", strings.Repeat("─", 99)}) {
-		t.Errorf("being answered, the right pane starts\n%s\nwant what r does, turning, none of its keys, and s leaving it for later", strings.Join(right[:min(len(right), 14)], "\n"))
+	if ends < 0 || !slices.Equal(right[ends+1:ends+5], []string{"", "      ◐ restores this machine ID's last save (15 Oct)", "", strings.Repeat("─", 99)}) {
+		t.Errorf("being answered, the right pane starts\n%s\nwant what r does, turning, and none of its keys, s neither", strings.Join(right[:min(len(right), 14)], "\n"))
 	}
 	if frame := strings.Join(lastFrame(out.String()), "\n"); !strings.Contains(frame, look.Cyan("◐")+" "+look.White("restores this machine ID's last save (15 Oct)")) {
 		t.Error("what r does isn't led by the turning mark")
@@ -426,7 +425,7 @@ func answeredWith(events []event.Event, key string) []event.Event {
 // the to-dos have the left pane, nor moves on from the to-do up, though
 // more come after it; Stop stops there, the run carrying on, but stops the
 // run once they're over; s leaves the one up for later, whatever it is,
-// and while a key of its is being done.
+// but not while a key of its is being done.
 func TestTheToDosKeys(t *testing.T) {
 	for _, tt := range []struct {
 		name      string
@@ -444,7 +443,7 @@ func TestTheToDosKeys(t *testing.T) {
 		{"stop once they're over", len(toDoList), "", []ask.Key{keyQ, keyDown, keyEnter}, nil, 1},
 		{"skip one kit tells", 4, "", []ask.Key{{Text: "s"}}, []answered{{"manual", hand.Skip}}, 0},
 		{"skip a choice", 0, "", []ask.Key{{Text: "s"}}, []answered{{"manual", hand.Skip}}, 0},
-		{"skip a choice being answered", 0, "r", []ask.Key{{Text: "s"}}, []answered{{"manual", hand.Skip}}, 0},
+		{"no skip while a choice is being answered", 0, "r", []ask.Key{{Text: "s"}}, nil, 0},
 		{"skip one kit can't tell", 3, "", []ask.Key{{Text: "s"}}, []answered{{"manual", hand.Skip}}, 0},
 		{"nothing to skip once they're over", len(toDoList), "", []ask.Key{{Text: "s"}}, nil, 0},
 	} {
