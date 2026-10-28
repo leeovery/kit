@@ -30,3 +30,25 @@ func TestTouchIDForSudoAsksForThePasswordFirst(t *testing.T) {
 		t.Errorf("ran\n%s\nwant the password asked for, then the line written", calls)
 	}
 }
+
+// A step whose sudo -n finds the password forgotten mid-run, as once
+// Composer's cleared it, is applied once kit's given it again: the step
+// has the run's password to give again (afterAdmin).
+func TestASystemStepRunsAgainOnceThePasswordsGivenAgain(t *testing.T) {
+	w := laptopWorld(t)
+	w.writeSection(t, "laptop", "features", "touch-id-sudo\n")
+	w.terminal = true
+	w.expectPassword()
+	w.fake.On("sudo", "-n", "-v")
+	w.fake.On("sudo", "-n", "tee", w.home+"/etc/sudo_local").Exits(1).PrintsToStderr("sudo: a password is required\n").Then()
+	_, _, code := w.run(t, "apply", "touch-id-sudo")
+	tees := 0
+	for _, call := range w.fake.Calls() {
+		if strings.HasPrefix(call, "sudo -n tee") {
+			tees++
+		}
+	}
+	if code != 0 || tees != 2 {
+		t.Errorf("kit apply exited %d, wrote the line %d times; want it written on the second try (ran %q)", code, tees, w.fake.Calls())
+	}
+}
