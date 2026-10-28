@@ -179,7 +179,7 @@ func (w *walk) rows(width int) ([]string, int) {
 		default:
 			row.State, row.Says = look.Queued, look.Muted(ansi.Strip(q.About.Says))
 		}
-		rows = append(rows, row)
+		rows = append(rows, row.Fit("  ", width))
 		if i == len(w.answers) {
 			asked = len(look.Timeline("  ", width, rows...))
 		}
@@ -203,5 +203,5 @@ func (w *walk) leaves(width int) []string {
 	default:
 		row.State, row.Says = look.Done, look.Pink(strings.ToLower(q.Answers[w.answers[0]].Label))
 	}
-	return append([]string{""}, look.Rows("  ", width, row)...)
+	return append([]string{""}, look.Rows("  ", width, row.Fit("  ", width))...)
 }

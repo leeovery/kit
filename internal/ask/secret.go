@@ -48,7 +48,7 @@ func (f *field) update(k key) bool {
 }
 
 func (f *field) view(width, _ int) []string {
-	row := f.about
+	row := f.about.Fit("  ", width)
 	row.Under = []string{look.Field(len(f.typed))}
 	return append(look.Timeline("  ", width, row), "", look.Keys(look.Key{Key: "enter", Does: "done"}, look.Key{Key: "esc", Does: "cancel"}))
 }

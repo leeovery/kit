@@ -271,6 +271,22 @@ func TestSecretField(t *testing.T) {
 	}
 }
 
+// The field's row says what needs the password whole, however many names
+// it carries: the names give way.
+func TestSecretFieldSaysWhatItNeedsWhole(t *testing.T) {
+	f := &field{about: look.Row{State: look.NeedsYou, Name: "charger:hibernatemode, charger:networkoversleep, charger:womp", Says: look.Orange("need an administrator's password")}}
+	equal(t, "view", plain(f.view(80, 40))[:1], []string{"  ▲ charger:hibernatemode, charger:networkove…  need an administrator's password"})
+}
+
+// A question's row says what's asked whole, and what it leaves the answer
+// whole: a long name gives way.
+func TestQuestionSaysWhatItAsksWhole(t *testing.T) {
+	w := newWalk("", []Question{question("visual-studio-code-insiders-with-a-long-name")})
+	equal(t, "row", plain(w.view(60, 40))[1:2], []string{"  ▲ visual-studio-code-insi…  cask · installed, not declared"})
+	press(w, enter)
+	equal(t, "leaves", plain(w.leaves(40)), []string{"", "  ● visual-studio-code-insiders-…  adopt"})
+}
+
 // Asked at a terminal: drawn under what's on screen, drawn over in place as
 // keys come, then cleared, what it leaves written where it was.
 func TestShow(t *testing.T) {

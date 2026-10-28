@@ -62,6 +62,23 @@ func TestRowsAreCut(t *testing.T) {
 	}
 }
 
+// A row fitted to a line too long for it has its name cut, so what it
+// says, and what it keeps, show whole, until fewer than twelve cells of the
+// name would be left; then the line is cut at its end. A short name is
+// never cut for what it says, and a row that fits is as it is.
+func TestFitCutsTheNameForWhatARowSays(t *testing.T) {
+	names := look.Row{State: look.NeedsYou, Name: "charger:hibernatemode, charger:networkoversleep", Says: look.Orange("need an administrator's password")}
+	fit := func(w int, r look.Row) []string { return look.Rows("  ", w, r.Fit("  ", w)) }
+	same(t, fit(60, names), "  ▲ charger:hibernatemode…  need an administrator's password")
+	same(t, fit(50, names), "  ▲ charger:hib…  need an administrator's password")
+	same(t, fit(49, names), "  ▲ charger:hibernatemode, charger:networkoversl…")
+	same(t, fit(90, names), "  ▲ charger:hibernatemode, charger:networkoversleep  need an administrator's password")
+	same(t, fit(40, look.Row{State: look.Running, Name: "Homebrew formulae", Says: look.Cyan("installing"), Kept: look.White("38 of 129")}),
+		"  ◐ Homebrew fo…  installing · 38 of 129")
+	same(t, fit(30, look.Row{State: look.Failed, Name: "jq", Says: look.Red("couldn't install: no bottle for this macOS")}),
+		"  ✗ jq  couldn't install: no …")
+}
+
 // What a row keeps stays whole when it's cut, what it says cut in its
 // place; one that fits is as it is.
 func TestRowsKeepWhatTheyKeep(t *testing.T) {

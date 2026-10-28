@@ -139,6 +139,28 @@ type Row struct {
 	Under []string
 }
 
+// nameLeast is the fewest cells of a row's name Fit leaves it: fewer can't
+// tell one thing from another.
+const nameLeast = 12
+
+// Fit is r with its name cut, when its line after indent is too long for w,
+// so what it says, and what it keeps, show whole: a question's row, where
+// what it says is what's asked. Its name is cut down to nameLeast cells at
+// the least; past that, r is as it was, its line cut at its end.
+func (r Row) Fit(indent string, w int) Row {
+	if r.Says == "" {
+		return r
+	}
+	if r.Kept != "" {
+		w -= ansi.StringWidth(dot + r.Kept)
+	}
+	left := w - ansi.StringWidth(indent+Mark(r.State)+" "+"  "+r.Says)
+	if left >= min(ansi.StringWidth(r.Name), nameLeast) {
+		r.Name = Cut(r.Name, left)
+	}
+	return r
+}
+
 // Rows draws rows after indent, what belongs to each under its name, every
 // line cut at w, what each keeps kept.
 func Rows(indent string, w int, rs ...Row) []string {
