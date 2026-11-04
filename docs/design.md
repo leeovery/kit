@@ -1117,7 +1117,9 @@ dependency) is new for its first 24 hours: shown, quiet, without needing attenti
 throwaway install that's soon removed never does. kit remembers when it first saw each item,
 the snoozes (7 days) and the temporary installs (quiet for 7 days) in
 `$XDG_STATE_HOME/kit/drift.json`, written whole under a lock; it forgets an item once a check
-of its kind no longer finds it.
+of its kind no longer finds it. What applying was given to act on and left still to act on, as
+a formula whose install ended well but isn't there, is never quiet, whatever its age: its step
+needs attention, and the next apply tries it again.
 
 What's installed comes from four listings run side by side: formulae with full names, leaves,
 leaves installed on request, and casks. kit runs brew in an environment of its own: the

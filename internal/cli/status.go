@@ -3,10 +3,12 @@ package cli
 import (
 	"context"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -692,13 +694,50 @@ func (a *app) configHome() string {
 }
 
 // quietened is step with its items quiet while their time hasn't come, as
-// the drift record says: new for a day, snoozed, or a temporary install.
+// the drift record says: new for a day, snoozed, or a temporary install;
+// but never what applying it was given to act on in the run and left still
+// to act on.
 func quietened(step engine.Step, record drift.Record, now time.Time) engine.Step {
-	checks := step.Check
+	checks, applies := step.Check, step.Apply
+	acted := &tried{}
 	step.Check = func(ctx context.Context) check.Result {
-		return drift.Quieten(checks(ctx), record, now)
+		return drift.Quieten(checks(ctx), record, now, acted.items())
+	}
+	if applies != nil {
+		step.Apply = func(ctx context.Context, found check.Result) error {
+			acted.note(found)
+			return applies(ctx, found)
+		}
 	}
 	return step
+}
+
+// tried are the items applying a step was given to act on, by id.
+type tried struct {
+	mu  sync.Mutex
+	ids map[string]bool
+}
+
+// note notes found's items that applying acts on (check.Item's Action).
+func (t *tried) note(found check.Result) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for _, it := range found.Items {
+		if it.Action == "" {
+			continue
+		}
+		if t.ids == nil {
+			t.ids = map[string]bool{}
+		}
+		t.ids[it.ID] = true
+	}
+}
+
+// items are the items noted, by id.
+func (t *tried) items() map[string]bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return maps.Clone(t.ids)
 }
 
 // face is the face a run shows on: JSON with --json, plain with --plain or

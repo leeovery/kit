@@ -523,13 +523,14 @@ func rowsRun(steps []event.Step, events ...event.Event) []event.Event {
 
 // What a row says is its steps taken together, the first rule that holds:
 // one failed, why, or how many did; a card up for a step by hand holding it
-// up, that it waits for you; one at work, what it's doing and how far it's
-// got, a bar under it when it counts; some waiting, what for, how many are
-// done first, the one waiting named unless it's named as its row is; all
-// finished, how many things are to do at the end, done's mark, as there's
-// nothing to do till then; all well, what
-// its step did, or that all are done; none started, that it's waiting.
-// Each in its state's mark and colour.
+// up, that it waits for you; one needing attention, as when applying left
+// some of what it was to install, what it says; one at work, what it's
+// doing and how far it's got, a bar under it when it counts; some waiting,
+// what for, how many are done first, the one waiting named unless it's
+// named as its row is; all finished, how many things are to do at the end,
+// done's mark, as there's nothing to do till then; all well, what its step
+// did, or that all are done; none started, that it's waiting. Each in its
+// state's mark and colour.
 func TestApplyingRowSays(t *testing.T) {
 	tools := []event.Step{
 		{Name: "homebrew", Title: "Homebrew", Area: "Drift", Row: "Homebrew formulae", Tool: "Homebrew"},
@@ -576,6 +577,15 @@ func TestApplyingRowSays(t *testing.T) {
 		{"done, several, counting what they declare", "Homebrew formulae", "  ● Homebrew formulae  all 129 done", []event.Event{
 			fine(2, "homebrew", "/opt/homebrew"),
 			finished(3, "brew", check.Result{State: check.OK, Summary: "129 declared, all installed", Counts: map[string]int{"declared": 129, "installed": 129}})}, look.Pink("●"), ""},
+		{"needs you, applying having left some", "Homebrew formulae", "  ▲ Homebrew formulae  130 declared, 128 installed", []event.Event{
+			fine(2, "homebrew", "/opt/homebrew"),
+			finished(3, "brew", check.Result{
+				State: check.Attention, Summary: "130 declared, 128 installed", Counts: map[string]int{"declared": 130, "installed": 128, "missing": 2},
+				Items: []check.Item{
+					{ID: "brew:owner/tools/fetcher", Name: "owner/tools/fetcher", State: "missing", Action: "install"},
+					{ID: "brew:owner/tools/viewer", Name: "owner/tools/viewer", State: "missing", Action: "install"},
+				},
+			})}, look.Orange("▲"), ""},
 		{"not started", "Your steps", "  ○ Your steps  waiting", nil, look.Cyan("○"), ""},
 	} {
 		t.Run(tt.name, func(t *testing.T) {

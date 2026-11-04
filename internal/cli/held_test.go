@@ -118,9 +118,11 @@ func TestALinesSectionWaitsForItsSecret(t *testing.T) {
 // A run whose first look at its formulae fails, as one that doesn't answer
 // in time, still installs them: once the check answers, finding them
 // missing, the rest at once, and the section held back once its secret's
-// synced, the secret set for it alone.
+// synced, the secret set for it alone; and the kind stands ok, the drift
+// it finds besides new.
 func TestALinesSectionInstallsOnceAFailedCheckAnswers(t *testing.T) {
 	w := heldWorld(t)
+	w.write(t, ".local/state/kit/drift.json", "{}")
 	w.fake.On("op", "whoami")
 	optest.Holds(w.fake, map[string]string{"op://vault/Item/Section/token": "plain-token-value"})
 	f := w.fake
@@ -136,8 +138,9 @@ func TestALinesSectionInstallsOnceAFailedCheckAnswers(t *testing.T) {
 	if got := tokens(installed(t, w, "ripgrep").Env); got != nil {
 		t.Error("the formulae not held back were installed with TOKEN set")
 	}
-	if !strings.Contains(out, "brew installed owner/private/fetcher, ripgrep\n") && !strings.Contains(out, "brew installed ripgrep, owner/private/fetcher\n") {
-		t.Errorf("kit apply printed\n%s%s\nwant both formulae installed", out, errOut)
+	if !strings.Contains(out, "brew installed owner/private/fetcher, ripgrep\n") && !strings.Contains(out, "brew installed ripgrep, owner/private/fetcher\n") ||
+		!strings.Contains(out, "brew ok 5 declared, all installed\n") {
+		t.Errorf("kit apply printed\n%s%s\nwant both formulae installed, and brew ok", out, errOut)
 	}
 	noSecretKept(t, w, out+errOut)
 }

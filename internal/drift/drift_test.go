@@ -43,7 +43,7 @@ func TestQuieten(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			res := drift.Quieten(check.Result{State: check.Attention, Items: []check.Item{extra(tt.name)}}, r, now)
+			res := drift.Quieten(check.Result{State: check.Attention, Items: []check.Item{extra(tt.name)}}, r, now, nil)
 			it := res.Items[0]
 			if it.Quiet != tt.quiet || !it.Since.Equal(tt.since) {
 				t.Errorf("item = %+v, want quiet %q since %v", it, tt.quiet, tt.since)
@@ -64,13 +64,13 @@ func TestQuietenLeavesOtherResultsAlone(t *testing.T) {
 		{State: check.OK, Summary: "2 declared, all installed"},
 		{State: check.Failed, Reason: "brew leaves exited 1", Items: []check.Item{extra("x")}},
 	} {
-		got := drift.Quieten(res, drift.Record{}, now)
+		got := drift.Quieten(res, drift.Record{}, now, nil)
 		if got.State != res.State || got.Summary != res.Summary || got.Reason != res.Reason {
 			t.Errorf("Quieten(%+v) = %+v, want its state kept", res, got)
 		}
 	}
 	in := check.Result{State: check.Attention, Items: []check.Item{extra("x")}}
-	_ = drift.Quieten(in, drift.Record{}, now)
+	_ = drift.Quieten(in, drift.Record{}, now, nil)
 	if in.Items[0].Quiet != "" {
 		t.Error("Quieten changed the result it was given, want a copy changed")
 	}
@@ -107,9 +107,41 @@ var refused = check.Result{State: check.Attention, Items: []check.Item{{ID: "log
 // A check that couldn't look isn't drift: what it says needs the person at
 // the Mac now, never quiet as new.
 func TestQuietenLeavesWhatsNotAllowedLoud(t *testing.T) {
-	got := drift.Quieten(refused, drift.Record{}, now)
+	got := drift.Quieten(refused, drift.Record{}, now, nil)
 	if got.State != check.Attention || got.Items[0].Quiet != "" {
 		t.Errorf("Quieten() = %+v, want it needing attention, loud", got)
+	}
+}
+
+// What applying was given to act on and left still to act on is never
+// quiet, new or snoozed: its step needs attention, though its check stood
+// ok, unless it failed. What applying wasn't given, or no longer acts on,
+// as a line held back saying why, is quiet as ever.
+func TestQuietenLeavesWhatApplyingLeftLoud(t *testing.T) {
+	missing := func(name, action string) check.Item {
+		return check.Item{ID: "brew:" + name, Name: name, State: "missing", Action: action}
+	}
+	r := drift.Record{Snoozed: map[string]time.Time{"brew:snoozed": now.Add(time.Hour)}}
+	tried := map[string]bool{"brew:left": true, "brew:snoozed": true, "brew:held": true}
+	for _, tt := range []struct {
+		name  string
+		res   check.Result
+		quiet string
+		want  check.State
+	}{
+		{"left, new", check.Result{State: check.Attention, Items: []check.Item{missing("left", "install")}}, "", check.Attention},
+		{"left, snoozed", check.Result{State: check.Attention, Items: []check.Item{missing("snoozed", "install")}}, "", check.Attention},
+		{"left, its check ok", check.Result{State: check.OK, Items: []check.Item{missing("left", "install")}}, "", check.Attention},
+		{"left, its check failed", check.Result{State: check.Failed, Items: []check.Item{missing("left", "install")}}, "", check.Failed},
+		{"held back, saying why", check.Result{State: check.Attention, Items: []check.Item{missing("held", "")}}, drift.New, check.OK},
+		{"not given to act on", check.Result{State: check.Attention, Items: []check.Item{missing("other", "install")}}, drift.New, check.OK},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got := drift.Quieten(tt.res, r, now, tried)
+			if got.Items[0].Quiet != tt.quiet || got.State != tt.want {
+				t.Errorf("Quieten() = %+v, want it %s, its item quiet %q", got, tt.want, tt.quiet)
+			}
+		})
 	}
 }
 

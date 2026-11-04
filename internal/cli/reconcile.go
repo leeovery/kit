@@ -167,7 +167,7 @@ func (a *app) driftItems(ctx context.Context, r *run, only []string) ([]driftIte
 			continue
 		}
 		d := r.drifters[name]
-		res := drift.Quieten(d.check(ctx), r.record, r.now)
+		res := drift.Quieten(d.check(ctx), r.record, r.now, nil)
 		if err := unchecked(name, res); err != nil {
 			return nil, err
 		}

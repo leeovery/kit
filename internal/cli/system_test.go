@@ -40,7 +40,8 @@ func TestASystemStepRunsAgainOnceThePasswordsGivenAgain(t *testing.T) {
 	w.terminal = true
 	w.expectPassword()
 	w.fake.On("sudo", "-n", "-v")
-	w.fake.On("sudo", "-n", "tee", w.home+"/etc/sudo_local").Exits(1).PrintsToStderr("sudo: a password is required\n").Then()
+	w.fake.On("sudo", "-n", "tee", w.home+"/etc/sudo_local").Exits(1).PrintsToStderr("sudo: a password is required\n").
+		Then().Does(func() { w.write(t, "etc/sudo_local", "auth       sufficient     pam_tid.so\n") })
 	_, _, code := w.run(t, "apply", "touch-id-sudo")
 	tees := 0
 	for _, call := range w.fake.Calls() {

@@ -61,6 +61,35 @@ func TestApplyInstallsWhatsMissing(t *testing.T) {
 	}
 }
 
+// Drift first seen is quiet for a day: status finds ripgrep missing, new,
+// and the kind stands ok. An apply whose install of it ends well but leaves
+// it missing leaves its kind needing attention, ripgrep loud whatever its
+// age, while what applying didn't act on, ffmpeg not declared, stays quiet.
+func TestApplyLeavingWhatItInstalledMissingNeedsAttention(t *testing.T) {
+	w := missingWorld(t)
+	w.write(t, ".local/state/kit/drift.json", "{}")
+	out, _, _ := w.run(t, "status")
+	if !strings.Contains(out, "brew ok 4 declared, 3 installed\nbrew missing:new ripgrep (to install)\n") {
+		t.Errorf("kit status printed\n%s\nwant ripgrep missing, new, and brew ok", out)
+	}
+
+	f := w.fake
+	f.On("brew", "list", "--formula", "--full-name", "-1").Prints("go\njq\noniguruma\nowner/tap/tool\nnode@20\nffmpeg\n")
+	f.On("brew", "leaves").Prints("go\njq\nowner/tap/tool\nnode@20\nffmpeg\n")
+	f.On("brew", "leaves", "--installed-on-request").Prints("go\njq\nowner/tap/tool\nffmpeg\n")
+	f.On("brew", "update", "--quiet")
+	f.On("brew", "install", "--formula", "ripgrep")
+	out, errOut, code := w.run(t, "apply")
+	for _, want := range []string{"brew attention 4 declared, 3 installed\n", "brew missing ripgrep (to install)\n", "brew extra:new ffmpeg\n"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("kit apply printed\n%s%s\nwant it to hold %q", out, errOut, want)
+		}
+	}
+	if code != 1 {
+		t.Errorf("exit %d, want 1: ripgrep wasn't installed", code)
+	}
+}
+
 func TestApplyPlanChangesNothing(t *testing.T) {
 	w := missingWorld(t)
 	out, errOut, code := w.run(t, "apply", "--plan")

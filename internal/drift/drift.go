@@ -59,19 +59,23 @@ func Update(stateDir string, change func(*Record)) error {
 // until a time still ahead; temporary, installed so under TemporaryFor ago.
 // A step whose items are all quiet stands ok. One whose check couldn't look,
 // as macOS hasn't let it (check.Result's Refused), isn't drift, so is never
-// quiet.
-func Quieten(res check.Result, r Record, now time.Time) check.Result {
+// quiet. Nor is an item applying the step was given to act on, by id in
+// tried, that's still to act on, whatever its age: applying left it, so the
+// step needs attention.
+func Quieten(res check.Result, r Record, now time.Time, tried map[string]bool) check.Result {
 	if _, refused := res.Refused(); refused || len(res.Items) == 0 {
 		return res
 	}
 	items := slices.Clone(res.Items)
-	loud := false
+	loud, left := false, false
 	for i, it := range items {
 		since, seen := r.FirstSeen[it.ID]
 		if seen {
 			items[i].Since = since
 		}
 		switch {
+		case tried[it.ID] && it.Action != "":
+			loud, left = true, true
 		case r.Snoozed[it.ID].After(now):
 			items[i].Quiet = Snoozed
 		case !r.Temporary[it.ID].IsZero() && now.Sub(r.Temporary[it.ID]) < TemporaryFor:
@@ -83,7 +87,10 @@ func Quieten(res check.Result, r Record, now time.Time) check.Result {
 		}
 	}
 	res.Items = items
-	if res.State == check.Attention && !loud {
+	switch {
+	case res.State == check.OK && left:
+		res.State = check.Attention
+	case res.State == check.Attention && !loud:
 		res.State = check.OK
 	}
 	return res
