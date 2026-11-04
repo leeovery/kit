@@ -88,7 +88,9 @@ func gitSetting(repo gitrepo.Repo, key, what string) engine.Wait {
 // placeNewMac places the step committing a new Mac, when all, the run's
 // steps, have it: after git's settings and own, the steps of the user's
 // own, which can bring what git commits with, as the key it signs with;
-// but for those that come after it, which it can't wait for.
+// but for those that come after it, which it can't wait for. The config's
+// edits are looked at after it, so a run doesn't end listing the files it
+// committed as edits.
 func placeNewMac(all, own []engine.Step) {
 	i := slices.IndexFunc(all, func(s engine.Step) bool { return s.Name == newMacName })
 	if i < 0 {
@@ -112,5 +114,9 @@ func placeNewMac(all, own []engine.Step) {
 	}
 	if len(waits) > 0 {
 		all[i].Waiting = "waiting for " + strings.Join(waits, " and ")
+	}
+	edits := slices.IndexFunc(all, func(s engine.Step) bool { return s.Name == steps.ConfigEditsName })
+	if edits >= 0 && !following(all, steps.ConfigEditsName)[newMacName] {
+		all[edits].After = append(all[edits].After, newMacName)
 	}
 }
