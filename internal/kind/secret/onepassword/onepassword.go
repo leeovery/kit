@@ -41,10 +41,11 @@ const opTimeout = 15 * time.Second
 const signInTimeout = time.Minute
 
 // about is what kit knows of 1Password. A session signed in with a
-// password, over a remote connection, is a variable named for the account.
+// password, over a remote connection, is a variable named for the account;
+// a service account, which signs in with no app, is its token's.
 var about = store.About{
 	ID: "1password", Name: "1Password", Program: program,
-	Env:       []string{"OP_SESSION_*", "OP_ACCOUNT", "OP_BIOMETRIC_UNLOCK_ENABLED"},
+	Env:       []string{"OP_SESSION_*", "OP_ACCOUNT", "OP_SERVICE_ACCOUNT_TOKEN", "OP_BIOMETRIC_UNLOCK_ENABLED"},
 	Ref:       "op://vault/item/field",
 	Item:      "op://vault/item",
 	Field:     "<section>/<field>, as in GitHub/token",

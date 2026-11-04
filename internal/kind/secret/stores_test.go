@@ -363,10 +363,10 @@ func TestEachStoreUsedBringsItsSignIn(t *testing.T) {
 // ending * standing for every variable starting so; the rest aren't.
 func TestEnvPassesOnWhatTheStoresName(t *testing.T) {
 	getenv := func(name string) string {
-		return map[string]string{"FAKE_ACCOUNT": "someone", "OP_ACCOUNT": "my", "HOME": "/Users/someone"}[name]
+		return map[string]string{"FAKE_ACCOUNT": "someone", "OP_ACCOUNT": "my", "OP_SERVICE_ACCOUNT_TOKEN": "ops_x", "HOME": "/Users/someone"}[name]
 	}
 	environ := []string{"FAKE_SESSION_x=token", "OP_SESSION_y=other", "UNRELATED=z"}
-	if got := secret.Env(getenv, environ); !slices.Equal(got, []string{"OP_SESSION_y=other", "OP_ACCOUNT=my"}) {
+	if got := secret.Env(getenv, environ); !slices.Equal(got, []string{"OP_SESSION_y=other", "OP_ACCOUNT=my", "OP_SERVICE_ACCOUNT_TOKEN=ops_x"}) {
 		t.Errorf("Env() = %q, want 1Password's", got)
 	}
 	secret.UseStores(t, &fakeStore{})
