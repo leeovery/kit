@@ -362,7 +362,7 @@ func (b *Boot) askMac(ctx context.Context, cfg *config.Config) (name, from strin
 		if config.ValidName(name) {
 			break
 		}
-		question = fmt.Sprintf("%q can't name a Mac: lower case letters, digits and dashes", name)
+		question = "that can't name a Mac: lower case letters, digits and dashes"
 	}
 	if cfg.Knows(name) {
 		return name, "", nil

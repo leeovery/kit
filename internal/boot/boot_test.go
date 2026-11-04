@@ -370,7 +370,7 @@ func TestThisMac(t *testing.T) {
 	const (
 		which   = "mac: which of your Macs is this? laptop (MacBook, the primary), studio, new (a new machine ID, started fresh or from one of your Macs)"
 		named   = "mac: its name, as kit-config will know it"
-		badName = `mac: "No Good" can't name a Mac: lower case letters, digits and dashes`
+		badName = "mac: that can't name a Mac: lower case letters, digits and dashes"
 		start   = "mac: where does it start from? fresh (only what every Mac shares), laptop (a copy of laptop's setup and settings to start from), studio (a copy of studio's setup and settings to start from)"
 	)
 	for _, tt := range []struct {
