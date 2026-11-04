@@ -15,6 +15,7 @@ import (
 
 	"github.com/leeovery/kit/internal/apps"
 	"github.com/leeovery/kit/internal/askpass"
+	"github.com/leeovery/kit/internal/boot"
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/dialog"
@@ -454,6 +455,15 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 		steps.Disk(observed), steps.Memory(observed), steps.FileEvents(observed), steps.Load(observed, a.Now),
 		steps.ConfigSync(r.repo, a.Now), steps.ConfigPrivate(r.repo),
 	)
+	newMac, err := boot.NewMac(dirs.State)
+	if err != nil {
+		_ = face.Close()
+		_ = log.Close()
+		return nil, err
+	}
+	if newMac == machine {
+		checks = append(checks, newMacStep(r.repo, dirs.State, machine))
+	}
 	own, err := cfg.List(config.ChecksKind, machine)
 	if err != nil {
 		_ = face.Close()
@@ -514,6 +524,7 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 		r.placeBackups(r.steps, backups)
 		r.placeLines(r.steps)
 		r.placeByHand(r.steps)
+		placeNewMac(r.steps, slices.Concat(scripts, byHandOwn))
 		for i, s := range r.steps {
 			if s.Admin && s.Apply != nil {
 				r.steps[i].Apply = r.afterAdmin(s.Apply)
@@ -801,7 +812,7 @@ func partOf(name string) string {
 		return render.PartSettings
 	case linked.StepName:
 		return render.PartFiles
-	case steps.ConfigEditsName, steps.ConfigSyncName, steps.ConfigPrivateName:
+	case steps.ConfigEditsName, steps.ConfigSyncName, steps.ConfigPrivateName, newMacName:
 		return render.PartConfig
 	}
 	return ""

@@ -43,7 +43,7 @@ var rowSteps = map[string][]string{
 		"boot-full-disk-access", "boot-terminal", "disk", "memory", "file-events", "load", "full-disk-access"},
 	rowFiles:    {"file", "path"},
 	rowSettings: {"touch-id-sudo", "remote-login", "file-sharing"},
-	rowGit:      {"config", "config-sync", "config-private"},
+	rowGit:      {"config", "config-sync", "config-private", "new-mac"},
 	rowBackups:  {"prefs", "nightly"},
 }
 

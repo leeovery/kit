@@ -106,17 +106,31 @@ func (c *changes) whoWrote(names []string) []string {
 }
 
 // sync commits the config's changed files with message, and pushes, as the
-// last step. With nothing to commit, it pushes only what was committed
-// before and is waiting, as when that push failed: nothing else would.
+// last step.
 func (c *changes) sync(ctx context.Context, message string) {
 	c.step(ctx, syncStep, func(ctx context.Context) check.Result {
-		if len(c.files) == 0 {
-			return c.pushWaiting(ctx)
-		}
 		slices.Sort(c.files)
-		out, err := c.run.repo.Commit(ctx, message, c.files...)
-		return noted(c.committed(ctx, out.Committed, err), out.Notes)
+		return syncing{repo: c.run.repo, files: c.files, what: strings.Join(c.files, ", ")}.commit(ctx, message)
 	})
+}
+
+// syncing is committing files of the config's, said as what, and pushing
+// them.
+type syncing struct {
+	repo  gitrepo.Repo
+	files []string
+	what  string
+}
+
+// commit commits the files with message, and pushes. With nothing to
+// commit, it pushes only what was committed before and is waiting, as when
+// that push failed: nothing else would.
+func (s syncing) commit(ctx context.Context, message string) check.Result {
+	if len(s.files) == 0 {
+		return s.pushWaiting(ctx)
+	}
+	out, err := s.repo.Commit(ctx, message, s.files...)
+	return noted(s.committed(ctx, out.Committed, err), out.Notes)
 }
 
 // noted is res, sync's step, first saying what else git's side of it did,
@@ -135,16 +149,16 @@ func noted(res check.Result, notes []string) check.Result {
 	return res
 }
 
-// committed is sync's step once the commit's done, as it went: pushed,
-// unless it failed.
-func (c *changes) committed(ctx context.Context, committed bool, err error) check.Result {
+// committed is how syncing stands once the commit's done, as it went:
+// pushed, unless it failed.
+func (s syncing) committed(ctx context.Context, committed bool, err error) check.Result {
 	switch {
 	case !committed && err != nil:
-		return check.Result{State: check.Failed, Reason: "couldn't commit " + strings.Join(c.files, ", ") + ": " + whyNot(err)}
+		return check.Result{State: check.Failed, Reason: "couldn't commit " + s.what + ": " + whyNot(err)}
 	case !committed:
-		return c.pushWaiting(ctx)
+		return s.pushWaiting(ctx)
 	}
-	res := c.push(ctx)
+	res := s.push(ctx)
 	if err != nil {
 		res.State, res.Summary = check.Attention, res.Summary+"; "+err.Error()
 	}
@@ -160,28 +174,28 @@ func whyNot(err error) string {
 	return err.Error()
 }
 
-// push pushes what sync committed.
-func (c *changes) push(ctx context.Context) check.Result {
-	notes, err := c.run.repo.Push(ctx)
+// push pushes what was committed.
+func (s syncing) push(ctx context.Context) check.Result {
+	notes, err := s.repo.Push(ctx)
 	switch {
 	case errors.Is(err, gitrepo.ErrNoRemote):
 		return check.Result{State: check.OK, Summary: "committed; no remote to push to"}
 	case err != nil:
 		return noted(check.Result{State: check.Attention, Summary: "committed, not pushed: " + err.Error()}, notes)
 	}
-	return noted(check.Result{State: check.OK, Summary: "committed and pushed " + strings.Join(c.files, ", ")}, notes)
+	return noted(check.Result{State: check.OK, Summary: "committed and pushed " + s.what}, notes)
 }
 
-// pushWaiting is sync's step with nothing committed: the commits waiting
-// for the upstream pushed, if there are any.
-func (c *changes) pushWaiting(ctx context.Context) check.Result {
+// pushWaiting is how syncing stands with nothing committed: the commits
+// waiting for the upstream pushed, if there are any.
+func (s syncing) pushWaiting(ctx context.Context) check.Result {
 	nothing := check.Result{State: check.OK, Summary: "nothing changed"}
-	n := c.run.repo.Unpushed(ctx)
+	n := s.repo.Unpushed(ctx)
 	if n == 0 {
 		return nothing
 	}
 	waiting := plural(n, "commit") + " waiting"
-	notes, err := c.run.repo.Push(ctx)
+	notes, err := s.repo.Push(ctx)
 	switch {
 	case errors.Is(err, gitrepo.ErrNoRemote):
 		return nothing

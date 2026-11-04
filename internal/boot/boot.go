@@ -389,10 +389,10 @@ func and(names []string) string {
 }
 
 // state is what a boot keeps between its runs, beside the checks: the
-// config repository it read; a new Mac's name till kit-config has it, and
-// the Mac it starts as a copy of, if any; the terminal given Full Disk
-// Access, as the person said, before its first launch; and when kit,
-// handed over to, took the boot on there.
+// config repository it read; a new Mac's name till kit-config has it
+// committed, and the Mac it starts as a copy of, if any; the terminal given
+// Full Disk Access, as the person said, before its first launch; and when
+// kit, handed over to, took the boot on there.
 type state struct {
 	Repo    string    `json:"repo,omitempty"`
 	NewMac  string    `json:"new_mac,omitempty"`
@@ -402,3 +402,17 @@ type state struct {
 }
 
 const stateName = "bootstrap.json"
+
+// NewMac is the new Mac the boot added to kit-config, as its record in
+// stateDir names it, till kit apply has it committed (ForgetNewMac): "" for
+// none.
+func NewMac(stateDir string) (string, error) {
+	st, err := kitstate.Load[state](stateDir, stateName)
+	return st.NewMac, err
+}
+
+// ForgetNewMac forgets the new Mac the boot added to kit-config, and the
+// Mac it started from, once it's committed.
+func ForgetNewMac(stateDir string) error {
+	return kitstate.Update(stateDir, stateName, func(st *state) { st.NewMac, st.From = "", "" })
+}

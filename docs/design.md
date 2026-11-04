@@ -644,8 +644,13 @@ file; committed and pushed as `kit <kind> add` is. It leaves this Mac's name, th
 the settings store as they are, and refuses a name kit.toml knows, one that can't be a Mac's,
 and `add`. A `from` naming no Mac counts as none. The boot's "This Mac" offers the same: "new"
 asks the name, then where it starts from, fresh (only what every Mac shares) or one of the Macs,
-whose copy is made as `--from` makes it, left uncommitted with the new Mac's table till
-kit-config's settings are applied.
+whose copy is made as `--from` makes it, left uncommitted with the new Mac's table, as a new
+Mac's git can't commit yet. `kit apply` commits and pushes those alone, as `kit machine add`
+would, in its `new-mac` step (the Git row): after git's settings and the steps of the user's
+own, which can bring the key git signs with, once git has a name and email, waited for till
+the rest of the run is done. Without them, or with a commit git can't sign yet, it's left for
+the next apply, saying why. Once committed, the boot's record forgets the Mac, and later runs
+have no such step.
 
 `kit apply` checks every step and applies each that doesn't stand ok, or has something to
 do, then checks it again: each step then says what it did ("installed: jq"). It never removes

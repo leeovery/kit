@@ -986,11 +986,11 @@ func (c *cancelling) Run(ctx context.Context, cmd runner.Command) (runner.Result
 	return res, err
 }
 
-// A commit that fails, as signing does, or the user's index's next
-// contents not made, or moving HEAD while another git holds its branch,
-// named, or a hook git runs on a ref's change refuses it, HEAD where it
-// was, leaves the user's index as it was, and nothing of kit's, the error
-// git's. Committed, then the index not put in place, it's committed all the
+// A commit that fails, as signing does (ErrUnsigned), or the user's
+// index's next contents not made, or moving HEAD while another git holds
+// its branch, named, or a hook git runs on a ref's change refuses it, HEAD
+// where it was, leaves the user's index as it was, and nothing of kit's,
+// the error git's. Committed, then the index not put in place, it's committed all the
 // same, the error saying how to bring the index up to date; and a
 // repository git names no git folder for is an error. What git prints is
 // what real git does.
@@ -1004,8 +1004,8 @@ func TestCommitFails(t *testing.T) {
 	s.expect(call{args: writeIn, index: ownIndex}).Prints(tree + "\n")
 	s.expect(call{args: signing}).Prints("true\n")
 	s.expect(call{args: commitTree(base, true)}).Exits(1).PrintsToStderr("error: Couldn't load public key /Users/someone/.ssh/signing.pub: No such file or directory?\n\n")
-	if committed, err := didCommit((gitrepo.Repo{Dir: dir, Run: fake}).Commit(context.Background(), "kit test", "brew")); committed || err == nil || !strings.Contains(err.Error(), "Couldn't load public key") {
-		t.Errorf("Commit(), signing failing = %v, %v; want git's error", committed, err)
+	if committed, err := didCommit((gitrepo.Repo{Dir: dir, Run: fake}).Commit(context.Background(), "kit test", "brew")); committed || !errors.Is(err, gitrepo.ErrUnsigned) || !strings.Contains(err.Error(), "Couldn't load public key") {
+		t.Errorf("Commit(), signing failing = %v, %v; want it unsigned, saying git's error", committed, err)
 	}
 	checkCalls(t, "signing failing", fake, gitDir, s.want)
 	checkGitFolder(t, "signing failing", gitDir, usersEntries)

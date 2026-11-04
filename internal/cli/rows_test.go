@@ -58,6 +58,7 @@ func TestEveryStepHasARow(t *testing.T) {
 		steps.Manual(fake, home, state, config.List{}, nil), steps.OwnManual(fake, state, steps.ManualStep{Name: "sign-in"}, nil),
 		steps.ScriptStep(fake, admin, steps.Script{Name: "fonts"}), steps.BrokenScript(config.Entry{Name: "gpg-key"}, errors.New("unread")),
 		nightly.Check(nil, true, true, state, never),
+		newMacStep(gitrepo.Repo{Dir: configDir, Run: fake}, state, "laptop"),
 	})
 	for _, d := range backup.Tools {
 		made = append(made, steps.Backup(fake, d, never, func(context.Context, string) (bool, bool) { return false, false }))

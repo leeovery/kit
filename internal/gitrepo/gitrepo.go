@@ -109,6 +109,13 @@ func (r Repo) setting(ctx context.Context, args ...string) (string, error) {
 	return strings.TrimSpace(string(res.Stdout)), err
 }
 
+// IsSet reports whether git has a value for key in the settings it reads in
+// the repository: false when it can't tell.
+func (r Repo) IsSet(ctx context.Context, key string) bool {
+	value, err := r.setting(ctx, key)
+	return err == nil && value != ""
+}
+
 // flag is git's boolean setting key: false when it isn't set.
 func (r Repo) flag(ctx context.Context, key string) (bool, error) {
 	value, err := r.setting(ctx, "--type=bool", key)

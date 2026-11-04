@@ -211,14 +211,15 @@ var errNotFound = runner.ErrNotFound
 // is on disk, in an index of its own; staged is what git says is staged
 // there (-z); and the user's index takes the files staged as committed.
 // The commit goes onto head, unless moved, other gits moving HEAD every
-// time kit tries, when nothing's committed or pushed. With left, git's lock
-// holds the index a run of kit's left, stopped once HEAD had taken its
-// commit of laptop/declarations, which kit puts in place first.
+// time kit tries, or, unsigned, git set to sign it and unable to, when
+// nothing's committed or pushed. With left, git's lock holds the index a
+// run of kit's left, stopped once HEAD had taken its commit of
+// laptop/declarations, which kit puts in place first.
 type commit struct {
-	message        string
-	paths, update  []string
-	status, staged string
-	moved, left    bool
+	message               string
+	paths, update         []string
+	status, staged        string
+	moved, unsigned, left bool
 }
 
 // edited is a commit of files, each a file edited and committed whole.
@@ -276,8 +277,9 @@ var theirs = []string{
 // the test unless kit commits, unless what it stages is update and what it
 // hands back to the user's index the files staged, the user's index then
 // the one git made, and unless the status given is so of the files on disk
-// once kit asks, when each of checks runs too. HEAD moved, it fails the
-// test unless kit commits nothing, and leaves the git folder as it was.
+// once kit asks, when each of checks runs too. HEAD moved, or the commit
+// unsigned, it fails the test unless kit commits nothing, and leaves the
+// git folder as it was.
 func (w *world) expectCommit(t *testing.T, c commit, checks ...func()) {
 	t.Helper()
 	dir := filepath.Join(w.home, ".config", "kit")
@@ -316,7 +318,7 @@ func (w *world) expectCommit(t *testing.T, c commit, checks ...func()) {
 	w.fake.On("git", git("update-index", "--add", "--remove", "--replace", "-z", "--stdin")...).Filters(reads("update-index", strings.Join(c.update, "\x00")+"\x00"))
 	w.fake.On("git", git("diff", "--cached", "--name-only", "-z", "--no-renames")...).Prints(c.staged)
 	w.fake.On("git", git("write-tree")...).Prints(tree + "\n")
-	w.fake.On("git", git("config", "--get", "--type=bool", "commit.gpgsign")...).Exits(1)
+	signing := w.fake.On("git", git("config", "--get", "--type=bool", "commit.gpgsign")...).Exits(1)
 	w.fake.On("git", git("ls-files", "--stage", "-z")...).Prints("100644 5e1c309dae7f45e0f39b1bf3ac3cd9db12e7d689 0\tshared/declarations\x00")
 	const reset = "the user's index, kit's files as committed"
 	w.fake.On("git", git("--literal-pathspecs", "reset", "--quiet", "--pathspec-from-file=-", "--pathspec-file-nul", "--end-of-options", made)...).Filters(reads("reset", c.staged)).Does(func() {
@@ -325,6 +327,12 @@ func (w *world) expectCommit(t *testing.T, c commit, checks ...func()) {
 		}
 	})
 	subject, _, _ := strings.Cut(c.message, "\n")
+	if c.unsigned {
+		signing.Exits(0).Prints("true\n")
+		w.fake.On("git", git("read-tree", head)...)
+		w.fake.On("git", git("commit-tree", tree, "-p", head, "-S", "-m", c.message)...).Exits(128).PrintsToStderr("error: gpg failed to sign the data\nfatal: failed to write commit object\n")
+		tried = 0
+	}
 	for i, base := range bases[:tried] {
 		w.fake.On("git", git("read-tree", base)...)
 		w.fake.On("git", git("commit-tree", tree, "-p", base, "-m", c.message)...).Prints(made + "\n")
@@ -335,16 +343,17 @@ func (w *world) expectCommit(t *testing.T, c commit, checks ...func()) {
 		}
 		moveHEAD.Exits(128).PrintsToStderr("fatal: update_ref failed for ref 'HEAD': cannot lock ref 'HEAD': is at " + bases[i+1] + " but expected " + base + "\n").Does(func() { moved.Add(1) })
 	}
-	if !c.moved {
+	committing := !c.moved && !c.unsigned
+	if committing {
 		w.expectPush(t, gitDir)
 	}
 	// The index once kit's done: git's reset of it when kit committed, the
 	// one the stopped run left when it didn't, else none.
 	index := reset
 	switch {
-	case c.moved && c.left:
+	case !committing && c.left:
 		index = leftIndex
-	case c.moved:
+	case !committing:
 		index = ""
 	}
 	t.Cleanup(func() {
@@ -358,8 +367,8 @@ func (w *world) expectCommit(t *testing.T, c commit, checks ...func()) {
 		}
 		data, _ := os.ReadFile(filepath.Join(gitDir, "index"))
 		switch {
-		case committed.Load() == c.moved:
-			t.Errorf("kit committed %q: %v, HEAD moving %v", c.message, committed.Load(), c.moved)
+		case committed.Load() != committing:
+			t.Errorf("kit committed %q: %v, HEAD moving %v, unsigned %v", c.message, committed.Load(), c.moved, c.unsigned)
 		case index == "" && len(entries) != 0:
 			t.Errorf("the git folder holds %v; want it left as it was, empty", entries)
 		case index != "" && (len(entries) != 1 || string(data) != index):

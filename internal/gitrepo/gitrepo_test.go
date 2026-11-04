@@ -126,3 +126,24 @@ func TestIgnored(t *testing.T) {
 		t.Error("Ignored() with git failing: no error")
 	}
 }
+
+// A setting is set when git config --get prints a value for it: unset, as
+// it exits 1, or unreadable, it isn't.
+func TestIsSet(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		prints string
+		exits  int
+		want   bool
+	}{
+		{name: "set", prints: "Someone\n", want: true},
+		{name: "unset", exits: 1},
+		{name: "unreadable", exits: 128},
+	} {
+		fake := runnertest.New(t)
+		fake.On("git", git("config", "--get", "user.name")...).Prints(tt.prints).Exits(tt.exits)
+		if got := (gitrepo.Repo{Dir: dir, Run: fake}).IsSet(context.Background(), "user.name"); got != tt.want {
+			t.Errorf("IsSet(user.name), %s = %v, want %v", tt.name, got, tt.want)
+		}
+	}
+}

@@ -28,7 +28,9 @@ import (
 // is part way through a merge, rebase, cherry-pick, revert or am, or a
 // conflict in paths waits to be resolved. HEAD moved by another git
 // meanwhile, it commits onto where HEAD is now, a few times at most, then
-// gives up (ErrHeadMoving), HEAD and the user's index left as they were.
+// gives up (ErrHeadMoving), HEAD and the user's index left as they were;
+// git unable to sign it, as it's set to, nothing's committed either
+// (ErrUnsigned).
 // What a run of kit's that stopped left it first deals with (recover). It
 // reports what it did: with nothing to commit it doesn't, which is no
 // error. An error once it has is the index's.
@@ -91,6 +93,11 @@ type Outcome struct {
 // ErrHeadMoving is Commit's error when other gits kept moving HEAD while
 // kit committed, so nothing was: the change is left as it is on disk.
 var ErrHeadMoving = errors.New("HEAD kept moving while kit committed, so nothing was committed")
+
+// ErrUnsigned is Commit's error when git, set to sign its commits, made
+// none: it couldn't sign it, as when the key it signs with isn't on the Mac
+// yet. Nothing's committed.
+var ErrUnsigned = errors.New("git couldn't sign the commit")
 
 // swapTries is how many times a commit is made, each anew onto where
 // another git moved HEAD meanwhile, holding the index all the while.
@@ -198,6 +205,9 @@ func (r Repo) commitTree(ctx context.Context, lock *indexLock, base, message str
 		args = append(args, "-S")
 	}
 	if res, err = r.git(ctx, append(args, "-m", message)...); err != nil {
+		if signs {
+			return "", fmt.Errorf("%w: %w", ErrUnsigned, err)
+		}
 		return "", err
 	}
 	return strings.TrimSpace(string(res.Stdout)), nil
