@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/charmbracelet/x/ansi"
@@ -756,7 +757,9 @@ func (f *BootFace) Key(k ask.Key) bool {
 			if len(q.typed) > 0 {
 				q.typed = q.typed[:len(q.typed)-1]
 			}
-		case k.Name == "" && !k.Paste && utf8.RuneCountInString(k.Text) == 1:
+		case k.Name == "" && k.Paste:
+			q.typed = append(q.typed, []rune(strings.Map(dropControl, strings.TrimSpace(k.Text)))...)
+		case k.Name == "" && utf8.RuneCountInString(k.Text) == 1:
 			q.typed = append(q.typed, []rune(k.Text)...)
 		}
 	case secret:
@@ -782,6 +785,15 @@ func (f *BootFace) Key(k ask.Key) bool {
 		}
 	}
 	return false
+}
+
+// dropControl drops r when it's a control character, as a line break
+// inside a paste, which the row would draw raw.
+func dropControl(r rune) rune {
+	if unicode.IsControl(r) {
+		return -1
+	}
+	return r
 }
 
 // answered answers the question being asked, and takes it down.

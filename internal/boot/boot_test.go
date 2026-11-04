@@ -133,6 +133,7 @@ type asker struct {
 	choose  int
 	chooses []int
 	name    string
+	names   []string
 	err     error
 	picks   []string
 	secrets []string
@@ -165,6 +166,13 @@ func (a *asker) Choose(_ context.Context, step, question string, answers []Answe
 
 func (a *asker) Name(_ context.Context, step, question string) (string, error) {
 	a.note(step + ": " + question)
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if len(a.names) > 0 {
+		name := a.names[0]
+		a.names = a.names[1:]
+		return name, a.err
+	}
 	return a.name, a.err
 }
 
@@ -360,9 +368,10 @@ func TestGitHubRefusesAPublicConfig(t *testing.T) {
 // --mac names, with nothing asked.
 func TestThisMac(t *testing.T) {
 	const (
-		which = "mac: which of your Macs is this? laptop (MacBook, the primary), studio, new (a new machine ID, started fresh or from one of your Macs)"
-		named = "mac: its name, as kit-config will know it"
-		start = "mac: where does it start from? fresh (only what every Mac shares), laptop (a copy of laptop's setup and settings to start from), studio (a copy of studio's setup and settings to start from)"
+		which   = "mac: which of your Macs is this? laptop (MacBook, the primary), studio, new (a new machine ID, started fresh or from one of your Macs)"
+		named   = "mac: its name, as kit-config will know it"
+		badName = `mac: "No Good" can't name a Mac: lower case letters, digits and dashes`
+		start   = "mac: where does it start from? fresh (only what every Mac shares), laptop (a copy of laptop's setup and settings to start from), studio (a copy of studio's setup and settings to start from)"
 	)
 	for _, tt := range []struct {
 		name         string
@@ -375,6 +384,7 @@ func TestThisMac(t *testing.T) {
 		{"chosen", "", &asker{choose: 1}, "studio", []string{which}, "", ""},
 		{"new, fresh", "", &asker{chooses: []int{2, 0}, name: "mini"}, "mini", []string{which, named, start}, "mini", ""},
 		{"new, from studio", "", &asker{chooses: []int{2, 2}, name: "mini"}, "mini", []string{which, named, start}, "mini", "studio"},
+		{"new, a name that can't be one, asked again", "", &asker{chooses: []int{2, 0}, names: []string{"No Good"}, name: "mini"}, "mini", []string{which, named, badName, start}, "mini", ""},
 		{"named", "laptop", &asker{}, "laptop", nil, "", ""},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -407,7 +417,8 @@ func TestThisMac(t *testing.T) {
 			}
 		})
 	}
-	b, _ := newBoot(t, runnertest.New(t), GitHub{}, &asker{choose: 2, name: "No Good"})
+	b, _ := newBoot(t, runnertest.New(t), GitHub{}, &asker{})
+	b.Mac = "No Good"
 	_ = os.MkdirAll(b.archive(), 0o700)
 	_ = os.WriteFile(filepath.Join(b.archive(), config.File), []byte(kitToml), 0o600)
 	if err := b.macStep().Apply(context.Background(), check.Result{}); err == nil || !strings.Contains(err.Error(), "can't name a Mac") {

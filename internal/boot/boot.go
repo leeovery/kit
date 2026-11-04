@@ -337,8 +337,9 @@ func (b *Boot) macStep() engine.Step {
 	}
 }
 
-// askMac asks which of cfg's Macs this is, or for a new one's name and
-// which of them, if any, it starts as a copy of: from is "" for none.
+// askMac asks which of cfg's Macs this is, or for a new one's name, asked
+// again till it can name a Mac, and which of them, if any, it starts as a
+// copy of: from is "" for none.
 func (b *Boot) askMac(ctx context.Context, cfg *config.Config) (name, from string, err error) {
 	macs := cfg.MacNames()
 	answers := make([]Answer, 0, len(macs)+1)
@@ -353,8 +354,18 @@ func (b *Boot) askMac(ctx context.Context, cfg *config.Config) (name, from strin
 	case i < len(macs):
 		return macs[i], "", nil
 	}
-	if name, err = b.Ask.Name(ctx, MacStep, "its name, as kit-config will know it"); err != nil || !config.ValidName(name) || cfg.Knows(name) {
-		return name, "", err
+	question := "its name, as kit-config will know it"
+	for {
+		if name, err = b.Ask.Name(ctx, MacStep, question); err != nil {
+			return "", "", err
+		}
+		if config.ValidName(name) {
+			break
+		}
+		question = fmt.Sprintf("%q can't name a Mac: lower case letters, digits and dashes", name)
+	}
+	if cfg.Knows(name) {
+		return name, "", nil
 	}
 	starts := []Answer{{Label: "fresh", Does: "only what every Mac shares"}}
 	for _, m := range macs {

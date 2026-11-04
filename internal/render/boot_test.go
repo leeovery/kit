@@ -155,6 +155,29 @@ func TestBootFaceNeedsYou(t *testing.T) {
 	golden(t, "boot-needs-you.golden", screens.String())
 }
 
+// A name is typed, or pasted, a paste without the space around it and the
+// line breaks in it.
+func TestBootFaceName(t *testing.T) {
+	at := time.Date(2026, 11, 4, 15, 2, 0, 0, time.UTC)
+	f := render.NewBootFace(ask.Terminal{Out: &bytes.Buffer{}}, true, func() time.Time { return at }, nil)
+	f.Show(orderSteps)
+	f.Emit(event.StepStarted{Time: at, Step: "github"})
+	f.Emit(event.StepFinished{Time: at, Step: "github", Result: check.Result{State: check.OK, Summary: "someone"}})
+	f.Emit(event.StepStarted{Time: at, Step: "mac"})
+	named := make(chan string, 1)
+	go func() {
+		name, _ := f.Name(context.Background(), "mac", "its name, as kit-config will know it")
+		named <- name
+	}()
+	waitFor(t, func() bool { return strings.Contains(plainView(f, 40), "its name") })
+	f.Key(ask.Key{Text: " stu\r\ndio\n", Paste: true})
+	f.Key(ask.Key{Text: "2"})
+	f.Key(ask.Key{Name: "enter"})
+	if name := <-named; name != "studio2" {
+		t.Errorf("named %q; want studio2", name)
+	}
+}
+
 // Signing in takes the whole window, the way chosen: with the phone, the QR
 // code and the code; esc goes back, and the other way can be chosen; here,
 // the code to enter in the browser. Signed in, the window's given back.
