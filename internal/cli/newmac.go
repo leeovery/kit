@@ -24,10 +24,11 @@ const newMacName = "new-mac"
 // newMacStep commits and pushes the new Mac the boot added to repo, mac,
 // left uncommitted as git couldn't commit yet: its table in kit.toml and its
 // folder, those alone, as kit machine add commits them. Once they're
-// committed, or there's nothing of them left to commit, the boot's record
-// forgets the Mac, so later runs don't make the step. Applying waits for
-// git's name and email; a commit git can't sign yet, as the key it signs
-// with comes later, is left for the next run.
+// committed and nothing's left to push, the boot's record forgets the Mac,
+// so later runs don't make the step; till then each apply commits or
+// pushes what's left. Applying waits for git's name and email; a commit
+// git can't sign yet, as the key it signs with comes later, is left for
+// the next run, saying what git said.
 func newMacStep(repo gitrepo.Repo, stateDir, mac string) engine.Step {
 	paths := []string{config.File, mac}
 	what := mac + "'s folder"
@@ -56,13 +57,18 @@ func newMacStep(repo gitrepo.Repo, stateDir, mac string) engine.Step {
 		Apply: func(ctx context.Context, _ check.Result) error {
 			out, err := repo.Commit(ctx, commitMessage("add", machineCommand, []string{mac}, mac, ""), paths...)
 			if errors.Is(err, gitrepo.ErrUnsigned) {
-				return engine.NotYet("git couldn't sign the commit yet: the next kit apply commits it")
+				return engine.NotYet(err.Error() + "; the next kit apply tries again")
 			}
+			sync := syncing{repo: repo, files: paths, what: what}
 			res := settled
-			if out.Committed || err != nil {
-				res = noted(syncing{repo: repo, files: paths, what: what}.committed(ctx, out.Committed, err), out.Notes)
+			switch {
+			case out.Committed || err != nil:
+				res = sync.committed(ctx, out.Committed, err)
+			case repo.Unpushed(ctx) > 0:
+				res = sync.pushWaiting(ctx)
 			}
-			if res.State != check.Failed {
+			res = noted(res, out.Notes)
+			if res.State == check.OK {
 				if err := boot.ForgetNewMac(stateDir); err != nil {
 					return err
 				}

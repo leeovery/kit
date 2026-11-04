@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+
+	"github.com/leeovery/kit/internal/runner"
 )
 
 // Commit commits paths in the repository with message, each whole as it is
@@ -96,7 +98,7 @@ var ErrHeadMoving = errors.New("HEAD kept moving while kit committed, so nothing
 
 // ErrUnsigned is Commit's error when git, set to sign its commits, made
 // none: it couldn't sign it, as when the key it signs with isn't on the Mac
-// yet. Nothing's committed.
+// yet, the error saying what git said of it. Nothing's committed.
 var ErrUnsigned = errors.New("git couldn't sign the commit")
 
 // swapTries is how many times a commit is made, each anew onto where
@@ -206,11 +208,29 @@ func (r Repo) commitTree(ctx context.Context, lock *indexLock, base, message str
 	}
 	if res, err = r.git(ctx, append(args, "-m", message)...); err != nil {
 		if signs {
-			return "", fmt.Errorf("%w: %w", ErrUnsigned, err)
+			return "", fmt.Errorf("%w: %s", ErrUnsigned, signingSaid(err))
 		}
 		return "", err
 	}
 	return strings.TrimSpace(string(res.Stdout)), nil
+}
+
+// signingSaid is what git said of failing to sign a commit, err: the error
+// lines its signing program left, above the fatal: line that only says no
+// commit was written; else the last line it printed.
+func signingSaid(err error) string {
+	exit, ok := errors.AsType[*runner.ExitError](err)
+	if !ok {
+		return err.Error()
+	}
+	var said []string
+	for _, line := range exit.Lines("error:") {
+		said = append(said, strings.TrimSpace(strings.TrimPrefix(line, "error:")))
+	}
+	if len(said) == 0 {
+		return exit.Stderr
+	}
+	return strings.Join(said, "; ")
 }
 
 // swap moves HEAD onto made, the commit kit made onto base, only from base,

@@ -99,8 +99,8 @@ func TestApplyLeavesANewMacGitCantCommit(t *testing.T) {
 }
 
 // git set to sign its commits, and unable to sign this one, as the key it
-// signs with comes later, the new Mac's left for the next apply, saying so,
-// without failing: the boot's record keeps it.
+// signs with comes later, the new Mac's left for the next apply, saying
+// what git said, without failing: the boot's record keeps it.
 func TestApplyLeavesANewMacGitCantSign(t *testing.T) {
 	w, _ := newMacWorld(t)
 	w.expectCommit(t, commit{
@@ -111,7 +111,7 @@ func TestApplyLeavesANewMacGitCantSign(t *testing.T) {
 	})
 
 	out, errOut, _ := w.run(t, "apply")
-	if !strings.Contains(out, "new-mac deferred git couldn't sign the commit yet: the next kit apply commits it\n") {
+	if !strings.Contains(out, "new-mac deferred git couldn't sign the commit: gpg failed to sign the data; the next kit apply tries again\n") {
 		t.Errorf("kit apply printed\n%s%s\nwant the new Mac left for the next apply", out, errOut)
 	}
 	if state := w.read(t, bootState); !strings.Contains(state, `"new_mac": "laptop"`) {
@@ -184,5 +184,85 @@ func TestApplyCommitsANewMacAfterYourSteps(t *testing.T) {
 
 	if out, errOut, _ := w.run(t, "apply"); !strings.Contains(out, "new-mac ok committed and pushed laptop's folder\n") {
 		t.Errorf("kit apply printed\n%s%s\nwant laptop's folder committed and pushed", out, errOut)
+	}
+}
+
+// newMacCommit is the commit of newMacWorld's new Mac.
+var newMacCommit = commit{
+	message: "kit machine add laptop (laptop)", paths: []string{"kit.toml", "laptop"},
+	status: " M kit.toml\x00?? laptop/declarations\x00?? laptop/notes\x00",
+	update: []string{"kit.toml", "laptop/declarations", "laptop/notes"},
+	staged: "kit.toml\x00laptop/declarations\x00laptop/notes\x00",
+}
+
+// committedNotPushed scripts git's answers once the new Mac's committed,
+// its commit not yet pushed: only the user's own edit left, nothing of the
+// new Mac's to commit, a commit waiting, and a push of it.
+func (w *world) committedNotPushed(t *testing.T) {
+	t.Helper()
+	dir := filepath.Join(w.home, ".config", "kit")
+	w.edits(t, " M shared/home/.zshrc\x00", "3\t1\tshared/home/.zshrc\x00")
+	w.fake.On("git", "-C", dir, "--literal-pathspecs", "status", "--porcelain", "-z", "--untracked-files=all", "--no-renames", "--", "kit.toml", "laptop")
+	w.waiting("1767312245\n")
+	w.expectPush(t, t.TempDir())
+}
+
+// A push that fails once the new Mac's committed keeps it in the boot's
+// record, and the next apply pushes it, then forgets it.
+func TestApplyPushesANewMacOnceItCan(t *testing.T) {
+	w, _ := newMacWorld(t)
+	w.expectCommit(t, newMacCommit)
+	w.fake.On("git", "-C", filepath.Join(w.home, ".config", "kit"), "push", "--quiet").Exits(128).PrintsToStderr("fatal: unable to access the remote\n")
+
+	out, errOut, _ := w.run(t, "apply")
+	if !strings.Contains(out, "new-mac attention committed, not pushed: ") {
+		t.Errorf("kit apply printed\n%s%s\nwant laptop's folder committed, not pushed", out, errOut)
+	}
+	if state := w.read(t, bootState); !strings.Contains(state, `"new_mac": "laptop"`) {
+		t.Fatalf("the boot's record holds %s; want the new Mac kept till it's pushed", state)
+	}
+
+	w.committedNotPushed(t)
+	out, errOut, _ = w.run(t, "apply")
+	if !strings.Contains(out, "new-mac ok nothing changed; pushed 1 commit waiting\n") {
+		t.Errorf("the next kit apply printed\n%s%s\nwant the commit waiting pushed", out, errOut)
+	}
+	if state := w.read(t, bootState); strings.Contains(state, "laptop") {
+		t.Errorf("the boot's record holds %s; want the new Mac forgotten, pushed", state)
+	}
+}
+
+// A run stopped once the new Mac's commit was made, before its push, leaves
+// it to the next apply, which pushes it, then forgets the Mac.
+func TestApplyPushesANewMacAStoppedRunCommitted(t *testing.T) {
+	w, identified := newMacWorld(t)
+	identified.Store(true)
+	w.committedNotPushed(t)
+
+	out, errOut, _ := w.run(t, "apply")
+	if !strings.Contains(out, "new-mac ok nothing changed; pushed 1 commit waiting\n") {
+		t.Errorf("kit apply printed\n%s%s\nwant the commit waiting pushed", out, errOut)
+	}
+	if !slices.Contains(w.fake.Calls(), "git -C "+filepath.Join(w.home, ".config", "kit")+" push --quiet") {
+		t.Errorf("ran\n%s\nwant the commit pushed", strings.Join(w.fake.Calls(), "\n"))
+	}
+	if state := w.read(t, bootState); strings.Contains(state, "laptop") {
+		t.Errorf("the boot's record holds %s; want the new Mac forgotten, pushed", state)
+	}
+}
+
+// A commit that fails for another reason than signing fails the step,
+// saying git's words, and the boot's record keeps the new Mac.
+func TestApplyKeepsANewMacItCouldntCommit(t *testing.T) {
+	w, _ := newMacWorld(t)
+	w.fake.On("git", "-C", filepath.Join(w.home, ".config", "kit"), "--literal-pathspecs", "status", "--porcelain", "-z", "--untracked-files=all", "--no-renames", "--", "kit.toml", "laptop").
+		Exits(128).PrintsToStderr("fatal: index file corrupt\n")
+
+	out, errOut, _ := w.run(t, "apply")
+	if !strings.Contains(out, "new-mac failed couldn't commit laptop's folder: ") || !strings.Contains(out, "fatal: index file corrupt") {
+		t.Errorf("kit apply printed\n%s%s\nwant the commit failed, saying why", out, errOut)
+	}
+	if state := w.read(t, bootState); !strings.Contains(state, `"new_mac": "laptop"`) {
+		t.Errorf("the boot's record holds %s; want the new Mac kept for the next apply", state)
 	}
 }

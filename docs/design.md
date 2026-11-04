@@ -649,8 +649,8 @@ Mac's git can't commit yet. `kit apply` commits and pushes those alone, as `kit 
 would, in its `new-mac` step (the Git row): after git's settings and the steps of the user's
 own, which can bring the key git signs with, once git has a name and email, waited for till
 the rest of the run is done. Without them, or with a commit git can't sign yet, it's left for
-the next apply, saying why. Once committed, the boot's record forgets the Mac, and later runs
-have no such step.
+the next apply, saying why in git's words. A push that fails is the next apply's to push. Once
+committed and pushed, the boot's record forgets the Mac, and later runs have no such step.
 
 `kit apply` checks every step and applies each that doesn't stand ok, or has something to
 do, then checks it again: each step then says what it did ("installed: jq"). It never removes

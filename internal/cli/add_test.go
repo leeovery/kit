@@ -27,6 +27,22 @@ func TestAddInstallsAndDeclares(t *testing.T) {
 	}
 }
 
+// git unable to sign the commit, the change stays declared and kit-config's
+// step fails, saying what git said of it.
+func TestAddGitCantSign(t *testing.T) {
+	w := laptopWorld(t)
+	w.fake.On("brew", "update", "--quiet")
+	w.fake.On("brew", "install", "--formula", "hello")
+	c := edited("kit brew add hello (laptop)", "laptop/declarations")
+	c.unsigned = true
+	w.expectCommit(t, c)
+
+	out, _, _ := w.run(t, "brew", "add", "hello")
+	if want := "kit-config failed couldn't commit laptop/declarations: git couldn't sign the commit: gpg failed to sign the data\n"; !strings.Contains(out, want) {
+		t.Errorf("kit brew add printed\n%s\nwant it to hold %q", out, want)
+	}
+}
+
 // At a terminal, adding asks nothing: the name goes in its sorted place,
 // and the section stays sorted, an old file's headings read as notes.
 func TestAddAsksNothing(t *testing.T) {

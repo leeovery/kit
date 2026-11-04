@@ -1003,12 +1003,25 @@ func TestCommitFails(t *testing.T) {
 	s.expect(call{args: stagedIn, index: ownIndex}).Prints("brew\x00")
 	s.expect(call{args: writeIn, index: ownIndex}).Prints(tree + "\n")
 	s.expect(call{args: signing}).Prints("true\n")
-	s.expect(call{args: commitTree(base, true)}).Exits(1).PrintsToStderr("error: Couldn't load public key /Users/someone/.ssh/signing.pub: No such file or directory?\n\n")
-	if committed, err := didCommit((gitrepo.Repo{Dir: dir, Run: fake}).Commit(context.Background(), "kit test", "brew")); committed || !errors.Is(err, gitrepo.ErrUnsigned) || !strings.Contains(err.Error(), "Couldn't load public key") {
+	s.expect(call{args: commitTree(base, true)}).Exits(1).PrintsToStderr("error: Couldn't load public key /Users/someone/.ssh/signing.pub: No such file or directory?\n\nfatal: failed to write commit object\n")
+	if committed, err := didCommit((gitrepo.Repo{Dir: dir, Run: fake}).Commit(context.Background(), "kit test", "brew")); committed || !errors.Is(err, gitrepo.ErrUnsigned) || err.Error() != "git couldn't sign the commit: Couldn't load public key /Users/someone/.ssh/signing.pub: No such file or directory?" {
 		t.Errorf("Commit(), signing failing = %v, %v; want it unsigned, saying git's error", committed, err)
 	}
 	checkCalls(t, "signing failing", fake, gitDir, s.want)
 	checkGitFolder(t, "signing failing", gitDir, usersEntries)
+
+	fake = runnertest.New(t)
+	s = editing(fake, gitDir, base)
+	s.expect(call{args: git("read-tree", base), index: ownIndex})
+	s.expect(call{args: stageIn, input: "brew\x00", index: ownIndex})
+	s.expect(call{args: stagedIn, index: ownIndex}).Prints("brew\x00")
+	s.expect(call{args: writeIn, index: ownIndex}).Prints(tree + "\n")
+	s.expect(call{args: signing}).Prints("true\n")
+	s.expect(call{args: commitTree(base, true)}).Exits(128).PrintsToStderr("fatal: failed to write commit object\n")
+	if _, err := (gitrepo.Repo{Dir: dir, Run: fake}).Commit(context.Background(), "kit test", "brew"); !errors.Is(err, gitrepo.ErrUnsigned) || err.Error() != "git couldn't sign the commit: fatal: failed to write commit object" {
+		t.Errorf("Commit(), signing failing without an error line = %v; want it unsigned, saying git's last line", err)
+	}
+	checkGitFolder(t, "signing failing without an error line", gitDir, usersEntries)
 
 	fake = runnertest.New(t)
 	s = editing(fake, gitDir, base)
