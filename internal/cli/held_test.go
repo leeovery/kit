@@ -15,6 +15,16 @@ import (
 // token their releases need.
 const heldSection = "homebrew formulae --secret TOKEN"
 
+// The formulae heldWorld's listings print before kit installs any, as brew
+// list, brew leaves and brew leaves --installed-on-request do; then each
+// with heldAdded, once kit's installed them.
+const (
+	heldListed    = "go\njq\noniguruma\nowner/tap/tool\nnode@20\nffmpeg\n"
+	heldLeaves    = "go\njq\nowner/tap/tool\nnode@20\nffmpeg\n"
+	heldOnRequest = "go\njq\nowner/tap/tool\nffmpeg\n"
+	heldAdded     = "ripgrep\nowner/private/fetcher\n"
+)
+
 // heldWorld is laptopWorld declaring ripgrep, and fetcher in a section held
 // back for TOKEN, a secret declared for the Mac, neither formula installed
 // till kit installs it; fetcher's install prints the token it's given.
@@ -25,10 +35,9 @@ func heldWorld(t *testing.T) *world {
 	w.writeSection(t, "laptop", heldSection, "# Its releases are private.\nowner/private/fetcher\n")
 	w.writeSection(t, "laptop", itemSection, "TOKEN   Section/token\n")
 	f := w.fake
-	before, after := "go\njq\noniguruma\nowner/tap/tool\nnode@20\nffmpeg\n", "ripgrep\nowner/private/fetcher\n"
-	f.On("brew", "list", "--formula", "--full-name", "-1").Prints(before).Then().Prints(before + after)
-	f.On("brew", "leaves").Prints("go\njq\nowner/tap/tool\nnode@20\nffmpeg\n").Then().Prints("go\njq\nowner/tap/tool\nnode@20\nffmpeg\n" + after)
-	f.On("brew", "leaves", "--installed-on-request").Prints("go\njq\nowner/tap/tool\nffmpeg\n").Then().Prints("go\njq\nowner/tap/tool\nffmpeg\n" + after)
+	f.On("brew", "list", "--formula", "--full-name", "-1").Prints(heldListed).Then().Prints(heldListed + heldAdded)
+	f.On("brew", "leaves").Prints(heldLeaves).Then().Prints(heldLeaves + heldAdded)
+	f.On("brew", "leaves", "--installed-on-request").Prints(heldOnRequest).Then().Prints(heldOnRequest + heldAdded)
 	f.On("brew", "tap").Prints("owner/tap\n")
 	f.On("brew", "tap", "owner/private")
 	f.On("brew", "info", "--json=v2", "--formula", "ripgrep").Prints(`{"formulae": [{"name": "ripgrep", "full_name": "ripgrep", "aliases": [], "oldnames": []}], "casks": []}`)
@@ -99,6 +108,33 @@ func TestALinesSectionWaitsForItsSecret(t *testing.T) {
 	}
 	if got := tokens(installed(t, w, "owner/private/fetcher").Env); !slices.Equal(got, []string{"plain-token-value"}) {
 		t.Error("fetcher wasn't installed with TOKEN set to its synced value, once")
+	}
+	if !strings.Contains(out, "brew installed owner/private/fetcher, ripgrep\n") && !strings.Contains(out, "brew installed ripgrep, owner/private/fetcher\n") {
+		t.Errorf("kit apply printed\n%s%s\nwant both formulae installed", out, errOut)
+	}
+	noSecretKept(t, w, out+errOut)
+}
+
+// A run whose first look at its formulae fails, as one that doesn't answer
+// in time, still installs them: once the check answers, finding them
+// missing, the rest at once, and the section held back once its secret's
+// synced, the secret set for it alone.
+func TestALinesSectionInstallsOnceAFailedCheckAnswers(t *testing.T) {
+	w := heldWorld(t)
+	w.fake.On("op", "whoami")
+	optest.Holds(w.fake, map[string]string{"op://vault/Item/Section/token": "plain-token-value"})
+	f := w.fake
+	f.On("brew", "list", "--formula", "--full-name", "-1").Exits(1).PrintsToStderr("Error: couldn't list\n").
+		Then().Prints(heldListed).Then().Prints(heldListed + heldAdded)
+	f.On("brew", "leaves").Prints(heldLeaves).Then().Prints(heldLeaves).Then().Prints(heldLeaves + heldAdded)
+	f.On("brew", "leaves", "--installed-on-request").Prints(heldOnRequest).Then().Prints(heldOnRequest).Then().Prints(heldOnRequest + heldAdded)
+
+	out, errOut, _ := w.run(t, "apply")
+	if got := tokens(installed(t, w, "owner/private/fetcher").Env); !slices.Equal(got, []string{"plain-token-value"}) {
+		t.Error("fetcher wasn't installed with TOKEN set to its synced value, once")
+	}
+	if got := tokens(installed(t, w, "ripgrep").Env); got != nil {
+		t.Error("the formulae not held back were installed with TOKEN set")
 	}
 	if !strings.Contains(out, "brew installed owner/private/fetcher, ripgrep\n") && !strings.Contains(out, "brew installed ripgrep, owner/private/fetcher\n") {
 		t.Errorf("kit apply printed\n%s%s\nwant both formulae installed", out, errOut)

@@ -643,6 +643,71 @@ func TestACheckThatHangsFails(t *testing.T) {
 	}
 }
 
+// A step whose check failed, as one that didn't answer in time, is applied
+// on that, which gives it nothing to act on; then, once its check answers
+// with things to act on, again, on those. One whose check answers with
+// nothing to act on, or fails again, is applied the once.
+func TestAStepWhoseCheckFailedIsAppliedOnWhatItFindsOnceItAnswers(t *testing.T) {
+	jq := check.Item{ID: "brew:jq", Name: "jq", State: "missing", Quiet: "new", Action: "install"}
+	for _, tt := range []struct {
+		name string
+		// answers is what the check finds once it answers, jq not
+		// installed.
+		answers check.Result
+		// given are the items each apply was given to act on, by name.
+		given [][]string
+		want  check.Result
+	}{
+		{"things to act on", check.Result{State: check.OK, Items: []check.Item{jq}}, [][]string{nil, {"jq"}}, check.Result{State: check.OK, Done: []check.Item{jq}}},
+		{"nothing to act on", check.Result{State: check.Attention, Summary: "not done"}, [][]string{nil}, check.Result{State: check.Attention, Summary: "not done"}},
+		{"failing again", check.Result{State: check.Failed, Reason: "brew list exited 1"}, [][]string{nil}, check.Result{State: check.Failed, Reason: "brew list exited 1", Phase: check.Checking}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var tries atomic.Int32
+			var installed atomic.Bool
+			var given [][]string
+			s := engine.Step{
+				Name: "brew",
+				Check: func(ctx context.Context) check.Result {
+					switch {
+					case tries.Add(1) <= 2:
+						<-ctx.Done()
+						return check.Result{State: check.Failed, Reason: ctx.Err().Error()}
+					case installed.Load():
+						return check.Result{State: check.OK}
+					}
+					return tt.answers
+				},
+				Apply: func(_ context.Context, found check.Result) error {
+					var names []string
+					for _, it := range found.Items {
+						if it.Action != "" {
+							names = append(names, it.Name)
+						}
+					}
+					given = append(given, names)
+					installed.Store(slices.Contains(names, "jq"))
+					return nil
+				},
+			}
+			p, err := engine.New(s)
+			if err != nil {
+				t.Fatal(err)
+			}
+			report, err := p.Apply(t.Context(), &recorder{}, engine.Options{CheckWithin: 50 * time.Millisecond})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(given, tt.given) {
+				t.Errorf("applied on %q, want %q", given, tt.given)
+			}
+			if got := report.Results["brew"]; !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("brew = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
 // A step before another is applied first, as though the other named it in
 // its After; one before a step that isn't there is refused.
 func TestBefore(t *testing.T) {

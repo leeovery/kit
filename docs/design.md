@@ -582,7 +582,9 @@ the to-dos its check finds, run as that step's own; and say what it comes after 
 all: each of those steps that can be done again (a step by hand of its own, its card raised again)
 is, in order, as its own, then checked again as above, the step saying meanwhile that it waits for
 it, and carrying on once they stand ok. A run that's stopped (an interrupt) fails the steps it
-hadn't started.
+hadn't started. A step whose check failed, as one that didn't answer in time (30 seconds, tried
+twice), is applied on that, which gives its apply nothing to act on; then, once its check
+answers with things to act on, again, on those.
 
 ## Commands
 

@@ -1355,18 +1355,29 @@ func (d *dispatch) step(ctx context.Context, s Step) check.Result {
 		return check.Result{State: check.Deferred, Reason: missing}
 	}
 	if d.apply && missing == "" && res.State != check.Deferred && (res.State != check.OK || res.Actions() || s.AlwaysApply) && s.Apply != nil && ctx.Err() == nil {
-		d.sink.Emit(event.StepStarted{Time: d.now(), Step: s.Name, Doing: "applying"})
-		before := res
-		if err := applySafely(event.WithChanging(ctx), s, res); err != nil {
-			if IsNotYet(err) {
-				return check.Result{State: check.Deferred, Reason: err.Error()}
-			}
-			return check.Result{State: check.Failed, Reason: Reason(err), Phase: check.Applying}
-		}
-		res = d.check(ctx, s)
-		res.Done = done(before, res)
+		res = d.applied(ctx, s, res)
 	}
 	return withManual(s, res)
+}
+
+// applied applies s on found, what its check found, then checks it again,
+// what applying dealt with in the result's Done. A check that failed, as one
+// that didn't answer in time, gave applying nothing to act on: once the
+// check answers with things to act on, s is applied again, on those.
+func (d *dispatch) applied(ctx context.Context, s Step, found check.Result) check.Result {
+	d.sink.Emit(event.StepStarted{Time: d.now(), Step: s.Name, Doing: "applying"})
+	if err := applySafely(event.WithChanging(ctx), s, found); err != nil {
+		if IsNotYet(err) {
+			return check.Result{State: check.Deferred, Reason: err.Error()}
+		}
+		return check.Result{State: check.Failed, Reason: Reason(err), Phase: check.Applying}
+	}
+	res := d.check(ctx, s)
+	res.Done = slices.Concat(found.Done, done(found, res))
+	if answered := res.State == check.OK || res.State == check.Attention; found.State == check.Failed && answered && res.Actions() && ctx.Err() == nil {
+		return d.applied(ctx, s, res)
+	}
+	return res
 }
 
 // withManual is res, s's check's finding, with what a person must do by
