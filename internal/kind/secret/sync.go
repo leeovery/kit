@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/leeovery/kit/internal/engine"
+	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/kind/secret/store"
 	"github.com/leeovery/kit/internal/runner"
@@ -78,49 +79,6 @@ func (r Report) Summary() string {
 	return text
 }
 
-// heldBack is why a store's secrets aren't synced yet, as it's signed out,
-// or its program isn't there: not yet, as the run reads it (engine.NotYet),
-// rather than failed.
-type heldBack struct{ notYet error }
-
-func (h heldBack) Error() string { return h.notYet.Error() }
-func (h heldBack) Unwrap() error { return h.notYet }
-
-// holdBack is reason a store's secrets aren't synced yet.
-func holdBack(reason string) error { return heldBack{engine.NotYet(reason)} }
-
-// isHeld reports whether err holds a store's secrets back, rather than
-// failing them.
-func isHeld(err error) bool {
-	_, ok := errors.AsType[heldBack](err)
-	return ok
-}
-
-// ready says whether d answers: nil for a session open already, or one it
-// opens, the person approving it (store.Driver.Unlock). Signed out, it's
-// held back, as signedIn says.
-func (s *Secrets) ready(ctx context.Context, d store.Driver) error {
-	switch d.Session(ctx, s.run) {
-	case store.Open:
-		return nil
-	case store.SignedOut:
-		return holdBack(d.About().SignedOut)
-	}
-	if err := d.Unlock(ctx, s.run); err != nil {
-		return errors.New(d.About().NoAnswer)
-	}
-	return nil
-}
-
-// signedIn is nil when d is signed in, asking no one; else its secrets are
-// held back, said at once in d's words.
-func (s *Secrets) signedIn(ctx context.Context, d store.Driver) error {
-	if d.Session(ctx, s.run) == store.SignedOut {
-		return holdBack(d.About().SignedOut)
-	}
-	return nil
-}
-
 // signInName names the step of store d's sign-in (Cards).
 func signInName(d store.Driver) string { return d.About().ID + "-sign-in" }
 
@@ -141,49 +99,34 @@ func (s *Secrets) Cards() []kind.Card {
 	return out
 }
 
-// readAll reads refs from d in as few reads as it can, as a store may have
-// the person approve each: one, when every ref reads. Should that fail,
-// once d answers, they're read in halves, so that a ref that won't read
-// costs the rest nothing. A value that won't read is left out.
-func (s *Secrets) readAll(ctx context.Context, d store.Driver, refs []string) (map[string]string, error) {
-	if len(refs) == 0 {
-		return map[string]string{}, nil
+// readAll reads refs from d in one read, as a store may have the person
+// approve each, waiting for them as long as they take. Only should d name
+// refs it couldn't read (store.Unread) are those left out, each with d's
+// words, and the rest read in one more: any other failure, the person not
+// approving, or not in time, holds every ref back, for the next sync to
+// read again, as reading in pieces would have them approve each.
+func (s *Secrets) readAll(ctx context.Context, d store.Driver, refs []string) (values, unread map[string]string, err error) {
+	values, err = d.ReadMany(ctx, s.run, refs)
+	if err == nil {
+		return values, nil, nil
 	}
-	if values, err := d.ReadMany(ctx, s.run, refs); err == nil {
-		return values, nil
+	named, ok := errors.AsType[store.Unread](err)
+	if !ok || ctx.Err() != nil {
+		return nil, nil, notRead(d)
 	}
-	if err := s.ready(ctx, d); err != nil {
-		return nil, err
+	rest := slices.DeleteFunc(slices.Clone(refs), func(ref string) bool { _, bad := named[ref]; return bad })
+	if len(rest) == 0 {
+		return map[string]string{}, named, nil
 	}
-	values := map[string]string{}
-	s.halves(ctx, d, refs, values)
-	return values, nil
+	if values, err = d.ReadMany(ctx, s.run, rest); err != nil {
+		return nil, named, notRead(d)
+	}
+	return values, named, nil
 }
 
-// halves reads each half of refs from d into values, as readSome does.
-func (s *Secrets) halves(ctx context.Context, d store.Driver, refs []string, values map[string]string) {
-	half := len(refs) / 2
-	s.readSome(ctx, d, refs[:half], values)
-	s.readSome(ctx, d, refs[half:], values)
-}
-
-// readSome reads refs from d into values: one alone; more at once, or,
-// should that fail, in halves.
-func (s *Secrets) readSome(ctx context.Context, d store.Driver, refs []string, values map[string]string) {
-	switch len(refs) {
-	case 0:
-	case 1:
-		if v, err := d.Read(ctx, s.run, refs[0]); err == nil {
-			values[refs[0]] = v
-		}
-	default:
-		got, err := d.ReadMany(ctx, s.run, refs)
-		if err != nil {
-			s.halves(ctx, d, refs, values)
-			return
-		}
-		maps.Copy(values, got)
-	}
+// notRead is why d's secrets are held back when it didn't read them.
+func notRead(d store.Driver) error {
+	return errors.New(d.About().Name + " wasn't approved, or couldn't read them")
 }
 
 // refs are the references of the declared secrets d keeps, each once, in
@@ -205,28 +148,31 @@ func (s *Secrets) refs(d store.Driver) []string {
 // its sign-in, raised at a terminal (Cards). ~/.secrets.zsh is written whole each time (a variable
 // not read keeps its line, so a partial read never shrinks it), each file
 // beside its place then renamed into it. A store signed out, or whose
-// program never comes, holds back its own secrets alone (Report.Held); one
-// that doesn't answer fails its own (Report.Failed). When every store's
-// down and nothing's read, the sync goes no further, saying why in each
-// store's words: not yet when each is held back.
+// program never comes, or that doesn't read them, holds back its own
+// secrets alone (Report.Held); a secret whose reference its store names as
+// one it couldn't read fails (Report.Failed). When every store's down and
+// nothing's read, the sync goes no further, not yet, saying why in each
+// store's words.
 func (s *Secrets) Sync(ctx context.Context) (Report, error) {
 	old, oldOrder, err := s.envLines()
 	if err != nil {
 		return Report{}, err
 	}
-	sy := &syncing{s: s, used: s.used(), old: old, oldOrder: oldOrder, values: map[string]string{}, placed: map[string]bool{}, down: map[string]error{},
+	sy := &syncing{s: s, used: s.used(), old: old, oldOrder: oldOrder, values: map[string]string{}, placed: map[string]bool{}, unread: map[string]string{}, down: map[string]string{},
 		report: Report{Failed: map[string]string{}, Held: map[string]string{}}}
 	var later []store.Driver
 	for _, d := range sy.used {
-		switch {
-		case !runner.Has(s.run, d.About().Program):
+		if !runner.Has(s.run, d.About().Program) {
 			later = append(later, d)
-		case d.Session(ctx, s.run) != store.SignedOut:
-			sy.read(ctx, d)
+			continue
+		}
+		switch session := d.Session(ctx, s.run); {
+		case session != store.SignedOut:
+			sy.read(ctx, d, session)
 		case engine.Takes(ctx, signInName(d)):
 			later = append(later, d)
 		default:
-			sy.down[d.About().ID] = holdBack(d.About().SignedOut)
+			sy.down[d.About().ID] = d.About().SignedOut
 		}
 	}
 	if err := sy.put(ctx); err != nil {
@@ -240,8 +186,9 @@ func (s *Secrets) Sync(ctx context.Context) (Report, error) {
 
 // syncing is a sync as it goes: the stores the secrets are in, what
 // ~/.secrets.zsh held as it began, the values read so far, by reference,
-// the secrets put in place, each store down so far, by its ID, with why,
-// and the report.
+// the secrets put in place, the references their stores named as ones they
+// couldn't read, with the stores' words, each store down so far, by its
+// ID, with why its secrets are held back, and the report.
 type syncing struct {
 	s        *Secrets
 	used     []store.Driver
@@ -249,15 +196,27 @@ type syncing struct {
 	oldOrder []string
 	values   map[string]string
 	placed   map[string]bool
-	down     map[string]error
+	unread   map[string]string
+	down     map[string]string
 	report   Report
 }
 
-// read reads d's secrets' values: d down, when it doesn't answer.
-func (sy *syncing) read(ctx context.Context, d store.Driver) {
-	got, err := sy.s.readAll(ctx, d, sy.s.refs(d))
+// read reads d's secrets' values, d standing as session says: signed in,
+// with no session open, d has the person approve the read, and the step
+// says it's waiting for them. d's down when it doesn't read them.
+func (sy *syncing) read(ctx context.Context, d store.Driver, session store.Session) {
+	refs := sy.s.refs(d)
+	if len(refs) == 0 {
+		return
+	}
+	if session == store.SignedIn {
+		event.Say(ctx, event.Doing{Says: "waiting for your approval in " + d.About().Name})
+		defer event.Say(ctx, event.Doing{Says: "applying"})
+	}
+	got, unread, err := sy.s.readAll(ctx, d, refs)
+	maps.Copy(sy.unread, unread)
 	if err != nil {
-		sy.down[d.About().ID] = err
+		sy.down[d.About().ID] = err.Error()
 		return
 	}
 	maps.Copy(sy.values, got)
@@ -323,21 +282,22 @@ func (sy *syncing) awaited(ctx context.Context, held []store.Driver) string {
 
 // heldBack is why store d's secrets are held back, its wait over without
 // it settling: its program isn't there, or it isn't signed in.
-func (sy *syncing) heldBack(d store.Driver) error {
+func (sy *syncing) heldBack(d store.Driver) string {
 	if program := d.About().Program; !runner.Has(sy.s.run, program) {
-		return holdBack(engine.NotThere([]string{program}))
+		return engine.NotThere([]string{program})
 	}
-	return holdBack(d.About().SignedOut)
+	return d.About().SignedOut
 }
 
 // settle reads store d's secrets and puts them in place, now it's settled:
 // held back when it's still signed out.
 func (sy *syncing) settle(ctx context.Context, d store.Driver) error {
-	if err := sy.s.signedIn(ctx, d); err != nil {
-		sy.down[d.About().ID] = err
+	session := d.Session(ctx, sy.s.run)
+	if session == store.SignedOut {
+		sy.down[d.About().ID] = d.About().SignedOut
 		return nil
 	}
-	sy.read(ctx, d)
+	sy.read(ctx, d, session)
 	return sy.put(ctx)
 }
 
@@ -411,9 +371,10 @@ func (sy *syncing) putFile(sec Secret, value string) {
 	sy.report.Changed += changed
 }
 
-// finish is the report, each secret not put in place held back or failed,
-// as its store's down or not: or why the sync went no further, every store
-// down and nothing read.
+// finish is the report, each secret not put in place failed, in its
+// store's words, when its store named it as one it couldn't read, else held
+// back, its store down: or why the sync went no further, every store down
+// and nothing read.
 func (sy *syncing) finish() (Report, error) {
 	if err := sy.allDown(); err != nil {
 		return sy.report, err
@@ -422,42 +383,33 @@ func (sy *syncing) finish() (Report, error) {
 		if sy.placed[sec.Name] {
 			continue
 		}
-		switch err := sy.down[sec.store.About().ID]; {
-		case err == nil:
-			sy.report.Failed[sec.Name] = sec.store.About().Name + " couldn't read " + sec.Ref
-		case isHeld(err):
-			sy.report.Held[sec.Name] = err.Error()
+		why, unread := sy.unread[sec.Ref]
+		held, down := sy.down[sec.store.About().ID]
+		switch {
+		case unread:
+			sy.report.Failed[sec.Name] = why
+		case down:
+			sy.report.Held[sec.Name] = held
 		default:
-			sy.report.Failed[sec.Name] = err.Error()
+			sy.report.Failed[sec.Name] = sec.store.About().Name + " couldn't read " + sec.Ref
 		}
 	}
 	return sy.report, nil
 }
 
-// allDown is why the sync went no further, when nothing was read and every
-// store used is down alike, each held back or each failing: their reasons
-// together, held back when each is. Nil otherwise, each store's secrets
-// reported as it stands.
+// allDown is why the sync went no further, not yet, when nothing was read,
+// no reference named as one that won't read, and every store used is down:
+// their reasons together. Nil otherwise, each store's secrets reported as
+// it stands.
 func (sy *syncing) allDown() error {
-	if len(sy.values) > 0 || len(sy.used) == 0 || len(sy.down) < len(sy.used) {
+	if len(sy.values) > 0 || len(sy.unread) > 0 || len(sy.used) == 0 || len(sy.down) < len(sy.used) {
 		return nil
 	}
 	said := make([]string, len(sy.used))
-	held := 0
 	for i, d := range sy.used {
-		err := sy.down[d.About().ID]
-		said[i] = err.Error()
-		if isHeld(err) {
-			held++
-		}
+		said[i] = sy.down[d.About().ID]
 	}
-	switch held {
-	case len(said):
-		return holdBack(strings.Join(said, "; "))
-	case 0:
-		return errors.New(strings.Join(said, "; "))
-	}
-	return nil
+	return engine.NotYet(strings.Join(said, "; "))
 }
 
 // header heads ~/.secrets.zsh, naming the stores used, its values' sources.

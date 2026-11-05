@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"iter"
 	"os"
 	"slices"
 	"strings"
@@ -34,11 +35,13 @@ const program = "op"
 // it has hung after a restart and over remote connections.
 const opTimeout = 15 * time.Second
 
-// signInTimeout is how long 1Password's app may wait for a person to
-// approve kit's use of it, a fingerprint at the prompt it shows: for each
-// run of op that reads a value, as each command kit runs is in a session of
-// its own (runner.Exec), and 1Password asks once a session.
-const signInTimeout = time.Minute
+// approvalTimeout ends a run of op that reads a value only once it's hung:
+// 1Password's app has the person approve each such run, a fingerprint at
+// the prompt it shows, as each command kit runs is in a session of its own
+// (runner.Exec) and 1Password asks once a session, and the prompt can come
+// late on a busy Mac. Ended sooner, the read is lost to a person still
+// answering.
+const approvalTimeout = 10 * time.Minute
 
 // about is what kit knows of 1Password. A session signed in with a
 // password, over a remote connection, is a variable named for the account;
@@ -108,18 +111,19 @@ func (Driver) Session(ctx context.Context, run runner.Runner) store.Session {
 	return store.SignedIn
 }
 
-// Unlock has the app open a session, asking for a fingerprint, within a
-// minute: listing the vaults needs one.
+// Unlock has the app open a session, asking for a fingerprint: listing the
+// vaults needs one.
 func (Driver) Unlock(ctx context.Context, run runner.Runner) error {
-	_, err := run.Run(ctx, runner.Command{Name: program, Args: []string{"vault", "list", "--format", "json"}, Timeout: signInTimeout})
+	_, err := run.Run(ctx, runner.Command{Name: program, Args: []string{"vault", "list", "--format", "json"}, Timeout: approvalTimeout})
 	return err
 }
 
-// Read reads a value with op read, without the newline op ends it with.
+// Read reads a value with op read, without the newline op ends it with:
+// store.Unread when op names ref in saying why it couldn't.
 func (Driver) Read(ctx context.Context, run runner.Runner, ref string) (string, error) {
-	res, err := run.Run(ctx, runner.Command{Name: program, Args: []string{"read", ref}, Timeout: signInTimeout, Secret: true})
+	res, err := run.Run(ctx, runner.Command{Name: program, Args: []string{"read", ref}, Timeout: approvalTimeout, Secret: true})
 	if err != nil {
-		return "", errors.New("1Password couldn't read it")
+		return "", unread(err, []string{ref}, "1Password couldn't read it")
 	}
 	return strings.TrimRight(string(res.Stdout), "\n"), nil
 }
@@ -128,31 +132,103 @@ func (Driver) Read(ctx context.Context, run runner.Runner, ref string) (string, 
 // approve each run: a template on its standard input, each ref between
 // lines of a mark no value holds, so that a value of many lines reads back
 // whole, and each value without the newlines it ends with, as Read has it.
-// A ref with a $ or }} in it isn't taken: a template would read it as a
-// variable, or as the reference's end.
-func (Driver) ReadMany(ctx context.Context, run runner.Runner, refs []string) (map[string]string, error) {
+// A ref with a $ or }} in it is read alone, with Read: a template would
+// read it as a variable, or as the reference's end. It fails with
+// store.Unread when op names refs in saying why it couldn't.
+func (d Driver) ReadMany(ctx context.Context, run runner.Runner, refs []string) (map[string]string, error) {
+	plain, awkward := split(refs)
+	values, err := inject(ctx, run, plain)
+	if err != nil {
+		return nil, err
+	}
+	for _, ref := range awkward {
+		if values[ref], err = d.Read(ctx, run, ref); err != nil {
+			return nil, err
+		}
+	}
+	return values, nil
+}
+
+// split is refs a template can take, and those it can't, with a $ or }}.
+func split(refs []string) (plain, awkward []string) {
+	for _, ref := range refs {
+		if strings.Contains(ref, "$") || strings.Contains(ref, "}}") {
+			awkward = append(awkward, ref)
+		} else {
+			plain = append(plain, ref)
+		}
+	}
+	return plain, awkward
+}
+
+// inject reads refs in one run of op inject, as ReadMany says: none, given
+// none.
+func inject(ctx context.Context, run runner.Runner, refs []string) (map[string]string, error) {
+	values := make(map[string]string, len(refs))
+	if len(refs) == 0 {
+		return values, nil
+	}
 	mark := "kit-" + newID()
 	var template strings.Builder
 	for _, ref := range refs {
-		if strings.Contains(ref, "$") || strings.Contains(ref, "}}") {
-			return nil, fmt.Errorf("op inject would read %s otherwise", ref)
-		}
 		template.WriteString(mark + "\n{{ " + ref + " }}\n")
 	}
 	template.WriteString(mark + "\n")
-	res, err := run.Run(ctx, runner.Command{Name: program, Args: []string{"inject"}, Input: template.String(), Timeout: signInTimeout, Secret: true})
+	res, err := run.Run(ctx, runner.Command{Name: program, Args: []string{"inject"}, Input: template.String(), Timeout: approvalTimeout, Secret: true})
 	if err != nil {
-		return nil, errors.New("1Password couldn't read them")
+		return nil, unread(err, refs, "1Password couldn't read them")
 	}
 	parts := strings.Split(string(res.Stdout), mark)
 	if len(parts) != len(refs)+2 {
 		return nil, errors.New("op inject gave back other than its template")
 	}
-	values := make(map[string]string, len(refs))
 	for i, ref := range refs {
 		values[ref] = strings.TrimRight(strings.TrimPrefix(parts[i+1], "\n"), "\n")
 	}
 	return values, nil
+}
+
+// unread is why a read of refs failed with err: store.Unread when op, having
+// run, quoted some of them in its errors, each with the line it's quoted
+// in; else said. A ref is quoted where it's the longest of refs at that
+// place, so that op quoting op://vault/item/token2 doesn't name
+// op://vault/item/token.
+func unread(err error, refs []string, said string) error {
+	exit, ok := errors.AsType[*runner.ExitError](err)
+	if !ok {
+		return errors.New(said)
+	}
+	longest := slices.SortedFunc(slices.Values(refs), func(a, b string) int { return len(b) - len(a) })
+	named := store.Unread{}
+	for line := range strings.Lines(exit.FullStderr) {
+		line = strings.TrimSpace(line)
+		quoted := map[int]bool{}
+		for _, ref := range longest {
+			for at := range quotes(line, ref) {
+				if !quoted[at] {
+					quoted[at] = true
+					named[ref] = line
+				}
+			}
+		}
+	}
+	if len(named) == 0 {
+		return errors.New(said)
+	}
+	return named
+}
+
+// quotes are where ref is in line, each place it starts.
+func quotes(line, ref string) iter.Seq[int] {
+	return func(yield func(int) bool) {
+		for from := 0; ; {
+			i := strings.Index(line[from:], ref)
+			if i < 0 || !yield(from+i) {
+				return
+			}
+			from += i + 1
+		}
+	}
 }
 
 // itemArgs are op's arguments naming item (op://vault/item): the item, and

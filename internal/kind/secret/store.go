@@ -6,13 +6,24 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/kind/secret/store"
 )
 
-// Ready says whether d answers, as a store keeping a value needs: nil once
-// it does; not yet, signed out; or why not, in d's words.
+// Ready says whether d answers, as a store keeping a value needs: nil for a
+// session open already, or one it opens, the person approving it
+// (store.Driver.Unlock); not yet, signed out; or why not, in d's words.
 func (s *Secrets) Ready(ctx context.Context, d store.Driver) error {
-	return s.ready(ctx, d)
+	switch d.Session(ctx, s.run) {
+	case store.Open:
+		return nil
+	case store.SignedOut:
+		return engine.NotYet(d.About().SignedOut)
+	}
+	if err := d.Unlock(ctx, s.run); err != nil {
+		return errors.New(d.About().NoAnswer)
+	}
+	return nil
 }
 
 // Free is nil when d's item keeps nothing at short: else that something's

@@ -27,17 +27,17 @@ import (
 // fakeStore is a secrets store of a kind other than 1Password: a value's
 // reference is vault:<item>/<field>, an item's vault:<item>, or, named, as
 // other, other:<item>/<field> and other:<item>. It holds values, stands as
-// session says, and notes the references each read asks for.
+// session says, and notes the references each read asks for. A read names
+// the references it doesn't hold.
 type fakeStore struct {
 	name    string
 	mu      sync.Mutex
 	session store.Session
 	values  map[string]string
 	reads   [][]string
-	// locked has every read at once fail till Unlock; unlock is what
-	// Unlock gives back.
+	// locked has every read fail, naming nothing, as one the person
+	// doesn't approve.
 	locked bool
-	unlock error
 }
 
 func (f *fakeStore) About() store.About {
@@ -84,12 +84,7 @@ func (f *fakeStore) signIn() {
 	f.session = store.SignedIn
 }
 
-func (f *fakeStore) Unlock(context.Context, runner.Runner) error {
-	if f.unlock == nil {
-		f.locked = false
-	}
-	return f.unlock
-}
+func (f *fakeStore) Unlock(context.Context, runner.Runner) error { return nil }
 
 func (f *fakeStore) Read(ctx context.Context, run runner.Runner, ref string) (string, error) {
 	got, err := f.ReadMany(ctx, run, []string{ref})
@@ -101,13 +96,16 @@ func (f *fakeStore) ReadMany(_ context.Context, _ runner.Runner, refs []string) 
 	if f.locked {
 		return nil, errors.New("not approved")
 	}
-	values := map[string]string{}
+	values, unread := map[string]string{}, store.Unread{}
 	for _, ref := range refs {
 		v, ok := f.values[ref]
 		if !ok {
-			return nil, errors.New("no such value")
+			unread[ref] = "no such value"
 		}
 		values[ref] = v
+	}
+	if len(unread) > 0 {
+		return nil, unread
 	}
 	return values, nil
 }
@@ -227,29 +225,28 @@ func TestAStoreSignedOutHoldsBackItsOwnAlone(t *testing.T) {
 	}
 }
 
-// A store signed in that doesn't answer fails its own secrets, in its
-// words, beside one that syncs; with no store left that answers, the sync
-// goes no further.
-func TestAStoreThatDoesntAnswerFailsItsOwnAlone(t *testing.T) {
-	fake := &fakeStore{session: store.SignedIn, locked: true, unlock: errors.New("dismissed")}
+// A store signed in that doesn't read its secrets, the person not
+// approving, holds back its own alone, in kit's words, read once, beside
+// one that syncs; the next sync reads them once it does.
+func TestAStoreThatDoesntReadHoldsBackItsOwnAlone(t *testing.T) {
+	fake := &fakeStore{session: store.SignedIn, locked: true}
 	s, list, _, home := twoStores(t, fake)
 	res := applying(t, s, list)
-	if res.State != check.Failed || !strings.Contains(res.Reason, "B: Fake Vault doesn't answer") || !strings.Contains(res.Reason, "C: Fake Vault doesn't answer") {
-		t.Errorf("the step finished %+v, want B and C failed in the fake's words", res)
+	if res.State != check.Deferred || res.Reason != "Fake Vault wasn't approved, or couldn't read them" || len(fake.reads) != 1 {
+		t.Errorf("the step finished %+v, the fake read %q: want B and C not done yet, read once", res, fake.reads)
 	}
 	if env, _ := os.ReadFile(filepath.Join(home, ".secrets.zsh")); !strings.Contains(string(env), "export A='a'\n") {
 		t.Errorf("~/.secrets.zsh =\n%s\nwant A synced", env)
 	}
 
-	fake.locked, fake.unlock, fake.values = true, nil, map[string]string{"vault:keys/b": "b", "vault:keys/c": "c"}
+	fake.locked, fake.values = false, map[string]string{"vault:keys/b": "b", "vault:keys/c": "c"}
 	if report, err := s.Sync(t.Context()); err != nil || report.Synced != 3 {
-		t.Errorf("Sync() once it answers = %+v, %v", report, err)
+		t.Errorf("Sync() once it's approved = %+v, %v", report, err)
 	}
 }
 
-// With every store down alike, nothing read, the sync goes no further,
-// saying why in each one's words; with one held back and one failing, each
-// store's secrets are reported as they stand.
+// With every store down, nothing read, the sync goes no further, not yet,
+// saying why in each one's words, whatever holds each back.
 func TestEveryStoreDown(t *testing.T) {
 	fake := &fakeStore{session: store.SignedOut}
 	secret.UseStores(t, onepassword.Driver{}, fake)
@@ -268,10 +265,9 @@ func TestEveryStoreDown(t *testing.T) {
 	if res := applying(t, s, list); res.State != check.Deferred || res.Reason != onePassword.SignedOut+"; Fake Vault is signed out" {
 		t.Errorf("both signed out: the step finished %+v", res)
 	}
-	fake.session, fake.locked, fake.unlock = store.SignedIn, true, errors.New("dismissed")
-	report, err := s.Sync(t.Context())
-	if err != nil || report.Held["A"] != onePassword.SignedOut || report.Failed["B"] != "Fake Vault doesn't answer" {
-		t.Errorf("one held back, one failing: Sync() = %+v, %v", report, err)
+	fake.session, fake.locked = store.SignedIn, true
+	if _, err := s.Sync(t.Context()); !engine.IsNotYet(err) || err.Error() != onePassword.SignedOut+"; Fake Vault wasn't approved, or couldn't read them" {
+		t.Errorf("one signed out, one not approved: Sync() = %v", err)
 	}
 }
 

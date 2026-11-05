@@ -8,6 +8,9 @@ package store
 
 import (
 	"context"
+	"maps"
+	"slices"
+	"strings"
 
 	"github.com/leeovery/kit/internal/runner"
 )
@@ -35,7 +38,8 @@ type Driver interface {
 	// Read reads the value at ref, without the newlines it ends with.
 	Read(ctx context.Context, run runner.Runner, ref string) (string, error)
 	// ReadMany reads the values at refs at once, as Read does each,
-	// failing whole when one won't read.
+	// failing whole when one won't read: with Unread when the store names
+	// those it couldn't.
 	ReadMany(ctx context.Context, run runner.Runner, refs []string) (map[string]string, error)
 	// Field is field short for item, where Store would keep a value, as
 	// Store returns it: an error, in the store's own words (About.Field),
@@ -57,6 +61,18 @@ type Driver interface {
 	Attach(ctx context.Context, run runner.Runner, item, name, path string) (string, error)
 	// Delete deletes the value short names in item.
 	Delete(ctx context.Context, run runner.Runner, item, short string) error
+}
+
+// Unread is a read that failed for the references it names, each with the
+// store's words for why: the rest may read without them.
+type Unread map[string]string
+
+func (u Unread) Error() string {
+	var said []string
+	for _, ref := range slices.Sorted(maps.Keys(u)) {
+		said = append(said, ref+": "+u[ref])
+	}
+	return strings.Join(said, "; ")
 }
 
 // Session is how a store stands on this Mac.

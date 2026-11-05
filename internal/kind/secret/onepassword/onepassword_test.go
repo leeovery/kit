@@ -1,10 +1,18 @@
 package onepassword_test
 
 import (
+	"context"
+	"errors"
+	"fmt"
+	"maps"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/leeovery/kit/internal/kind/secret/onepassword"
+	"github.com/leeovery/kit/internal/kind/secret/onepassword/optest"
+	"github.com/leeovery/kit/internal/kind/secret/store"
 	"github.com/leeovery/kit/internal/runner/runnertest"
 )
 
@@ -95,5 +103,75 @@ func TestStoreInTheLastSectionOfItsLabel(t *testing.T) {
 	cmds := run.Commands()
 	if edit := cmds[len(cmds)-1]; !strings.Contains(edit.Input, `"section":{"id":"s2"}`) {
 		t.Error("Store() didn't put the field in the last GitHub section")
+	}
+}
+
+// A read waits for the person to approve it in 1Password as long as they
+// take: only a run of op that's hung is ended.
+func TestReadsWaitForThePersonsApproval(t *testing.T) {
+	run := runnertest.New(t)
+	optest.Holds(run, map[string]string{"op://vault/item/a": "a", "op://vault/item/b": "b"})
+	d := onepassword.Driver{}
+	if _, err := d.ReadMany(t.Context(), run, []string{"op://vault/item/a", "op://vault/item/b"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Read(t.Context(), run, "op://vault/item/a"); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range run.Commands() {
+		if c.Timeout < 10*time.Minute {
+			t.Errorf("%s ends after %s: want it to wait ten minutes for the person", c, c.Timeout)
+		}
+	}
+}
+
+// A read that fails names, as store.Unread, the references op quotes in its
+// errors, each with the line it quotes it in, and those alone: one that's
+// the start of another quoted isn't named by it. A failure that quotes
+// none, or where op didn't run to the end, names none.
+func TestAReadThatFailsNamesWhatOpQuotes(t *testing.T) {
+	refs := []string{"op://vault/item/token", "op://vault/item/token2", "op://vault/item/other"}
+	d := onepassword.Driver{}
+	for _, c := range []struct {
+		name   string
+		script func(*runnertest.Script)
+		want   store.Unread
+	}{
+		{"one quoted", func(s *runnertest.Script) {
+			s.Exits(1).PrintsToStderr("[ERROR] could not read secret 'op://vault/item/token2': no such field\n")
+		}, store.Unread{"op://vault/item/token2": "[ERROR] could not read secret 'op://vault/item/token2': no such field"}},
+		{"two quoted", func(s *runnertest.Script) {
+			s.Exits(1).PrintsToStderr("first: op://vault/item/token\nthen: op://vault/item/other, gone\n")
+		}, store.Unread{"op://vault/item/token": "first: op://vault/item/token", "op://vault/item/other": "then: op://vault/item/other, gone"}},
+		{"none quoted", func(s *runnertest.Script) { s.Exits(1).PrintsToStderr("authorization prompt dismissed\n") }, nil},
+		{"ended", func(s *runnertest.Script) { s.Fails(fmt.Errorf("op inject: %w", context.DeadlineExceeded)) }, nil},
+	} {
+		run := runnertest.New(t)
+		c.script(run.On("op", "inject"))
+		_, err := d.ReadMany(t.Context(), run, refs)
+		got, named := errors.AsType[store.Unread](err)
+		switch {
+		case err == nil:
+			t.Errorf("%s: ReadMany() didn't fail", c.name)
+		case c.want == nil && named:
+			t.Errorf("%s: ReadMany() named %v, want none", c.name, got)
+		case c.want != nil && !maps.Equal(got, c.want):
+			t.Errorf("%s: ReadMany() = %v, want %v named", c.name, err, c.want)
+		}
+	}
+}
+
+// A reference a template can't take, with a $ or }}, is read alone, with op
+// read, beside the rest's op inject.
+func TestAnAwkwardReferenceIsReadAlone(t *testing.T) {
+	awkward := "op://vault/Item $HOME/field}}"
+	run := runnertest.New(t)
+	optest.Holds(run, map[string]string{"op://vault/item/a": "a", awkward: "awkward"})
+	values, err := (onepassword.Driver{}).ReadMany(t.Context(), run, []string{"op://vault/item/a", awkward})
+	if err != nil || values["op://vault/item/a"] != "a" || values[awkward] != "awkward" {
+		t.Fatalf("ReadMany() = %v, %v", values, err)
+	}
+	if want := []string{"op inject", "op read '" + awkward + "'"}; !slices.Equal(run.Calls(), want) {
+		t.Errorf("ran %q, want %q", run.Calls(), want)
 	}
 }

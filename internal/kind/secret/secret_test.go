@@ -1,6 +1,8 @@
 package secret_test
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,10 +11,13 @@ import (
 	"testing"
 
 	"github.com/leeovery/kit/internal/config"
+	"github.com/leeovery/kit/internal/engine"
+	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/kind/secret"
 	"github.com/leeovery/kit/internal/kind/secret/onepassword"
 	"github.com/leeovery/kit/internal/kind/secret/onepassword/optest"
+	"github.com/leeovery/kit/internal/runner"
 	"github.com/leeovery/kit/internal/runner/runnertest"
 )
 
@@ -175,49 +180,99 @@ func TestSyncReadsEveryValueInOneRunOfOp(t *testing.T) {
 	}
 }
 
-// A reference that won't read fails op inject whole: once 1Password
-// answers, the rest are read in halves, and only what won't read is read
-// alone, keeping its previous value.
-func TestSyncReadsAroundAReferenceThatWontRead(t *testing.T) {
+// signedIn has fake's 1Password signed in, with no session open, so that
+// each run of op that reads a value asks the person to approve it.
+func signedIn(fake *runnertest.Fake) {
+	fake.On("op", "whoami").Exits(1)
+	fake.On("op", "account", "list", "--format", "json").Prints(`[{"url": "my.1password.com"}]`)
+}
+
+// reads are the runs of op that read values, as fake has them.
+func reads(fake *runnertest.Fake) []runner.Command {
+	return slices.DeleteFunc(fake.Commands(), func(c runner.Command) bool {
+		return len(c.Args) == 0 || c.Args[0] != "inject" && c.Args[0] != "read" && c.Args[0] != "vault"
+	})
+}
+
+// While op waits for the person to approve the read, the step says so;
+// with a session open, nothing's asked, and nothing said.
+func TestSyncSaysItsWaitingForApproval(t *testing.T) {
+	for _, open := range []bool{false, true} {
+		fake := runnertest.New(t)
+		s := secret.New(fake, t.TempDir())
+		declare(t, s, [2]string{"ONE", "Section/one"})
+		if open {
+			fake.On("op", "whoami")
+		} else {
+			signedIn(fake)
+		}
+		optest.Holds(fake, map[string]string{item + "/Section/one": "1"})
+		var said []string
+		ctx := event.WithSaying(t.Context(), func(d event.Doing) { said = append(said, d.Says) })
+		if _, err := s.Sync(ctx); err != nil {
+			t.Fatal(err)
+		}
+		want := []string{"waiting for your approval in 1Password", "applying"}
+		if open {
+			want = nil
+		}
+		if !slices.Equal(said, want) {
+			t.Errorf("a session open %v: the step said %q, want %q", open, said, want)
+		}
+	}
+}
+
+// A reference op names in saying why op inject failed is left out, failing
+// in op's words and keeping its previous value, and the rest read in one
+// more run: the person approves two reads, never more.
+func TestSyncLeavesOutAReferenceOpNames(t *testing.T) {
 	home := t.TempDir()
 	fake := runnertest.New(t)
 	s := secret.New(fake, home)
 	declare(t, s,
 		[2]string{"A", "Section/a"},
-		[2]string{"B", "Section/b"},
 		[2]string{"BROKEN", "Section/broken"},
 		[2]string{"D", "Section/d"},
 	)
 	if err := os.WriteFile(filepath.Join(home, ".secrets.zsh"), []byte("export BROKEN='old value'\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	fake.On("op", "whoami").Exits(1)
-	fake.On("op", "account", "list", "--format", "json").Prints(`[{"url": "my.1password.com"}]`)
-	fake.On("op", "vault", "list", "--format", "json").Prints("[]")
-	optest.Holds(fake, map[string]string{item + "/Section/a": "a", item + "/Section/b": "b", item + "/Section/d": "d"})
-	fake.On("op", "read", item+"/Section/broken").Exits(1).PrintsToStderr("not found")
+	signedIn(fake)
+	optest.Holds(fake, map[string]string{item + "/Section/a": "a", item + "/Section/d": "d"})
 	report, err := s.Sync(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.Synced != 3 || len(report.Failed) != 1 || report.Failed["BROKEN"] == "" {
-		t.Errorf("report = %+v", report)
+	if want := "[ERROR] could not read secret " + item + "/Section/broken"; report.Synced != 2 || len(report.Failed) != 1 || report.Failed["BROKEN"] != want || len(report.Held) != 0 {
+		t.Errorf("report = %+v, want BROKEN failed in op's words: %q", report, want)
 	}
-	var reads []string
-	for _, c := range fake.Calls() {
-		if strings.HasPrefix(c, "op read ") || c == "op inject" {
-			reads = append(reads, c)
-		}
-	}
-	want := []string{"op inject", "op inject", "op inject", "op read " + item + "/Section/broken", "op read " + item + "/Section/d"}
-	if !slices.Equal(reads, want) {
-		t.Errorf("read with %q, want %q: all, each half, then the half that failed, each alone", reads, want)
+	got := reads(fake)
+	if len(got) != 2 || got[0].String() != "op inject" || got[1].String() != "op inject" || strings.Contains(got[1].Input, "broken") || strings.Count(got[1].Input, "{{") != 2 {
+		t.Errorf("read with %q: want every value in one op inject, then the rest but BROKEN in one more", fake.Calls())
 	}
 	env, _ := os.ReadFile(filepath.Join(home, ".secrets.zsh"))
 	for _, line := range []string{"export A='a'\n", "export D='d'\n", "export BROKEN='old value'\n"} {
 		if !strings.Contains(string(env), line) {
 			t.Errorf("~/.secrets.zsh =\n%s\nwant a line %q", env, line)
 		}
+	}
+}
+
+// Should the second read fail too, the rest are held back, with no third:
+// the reference op named still fails in its words.
+func TestSyncReadsTheRestOnceMore(t *testing.T) {
+	fake := runnertest.New(t)
+	s := secret.New(fake, t.TempDir())
+	declare(t, s, [2]string{"A", "Section/a"}, [2]string{"BROKEN", "Section/broken"})
+	signedIn(fake)
+	fake.On("op", "inject").Exits(1).PrintsToStderr("[ERROR] could not read secret " + item + "/Section/broken").
+		Then().Exits(1).PrintsToStderr("authorization prompt dismissed")
+	report, err := s.Sync(t.Context())
+	if err != nil || report.Failed["BROKEN"] == "" || report.Held["A"] != onePassword.Name+" wasn't approved, or couldn't read them" {
+		t.Errorf("Sync() = %+v, %v; want BROKEN failed, A held back", report, err)
+	}
+	if n := len(reads(fake)); n != 2 {
+		t.Errorf("read with %q: want two runs of op inject, no more", fake.Calls())
 	}
 }
 
@@ -284,22 +339,34 @@ func TestVariableReadsWhatASyncWrote(t *testing.T) {
 	}
 }
 
-// When the one run of op that reads every value fails for want of the
-// person's approval, the sync asks once more, then gives up, reading
-// nothing alone.
-func TestSyncNeedsOnePasswordToAnswer(t *testing.T) {
-	fake := runnertest.New(t)
-	s := secret.New(fake, t.TempDir())
-	declare(t, s, [2]string{"PLAIN", "Section/plain"}, [2]string{"OTHER", "Section/other"})
-	fake.On("op", "whoami").Exits(1)
-	fake.On("op", "account", "list", "--format", "json").Prints(`[{"url": "my.1password.com"}]`)
-	fake.On("op", "inject").Exits(1).PrintsToStderr("authorization prompt dismissed")
-	fake.On("op", "vault", "list", "--format", "json").Exits(1)
-	if _, err := s.Sync(t.Context()); err == nil || err.Error() != onePassword.NoAnswer {
-		t.Errorf("Sync() = %v", err)
-	}
-	if n := len(fake.Calls()); n != 6 {
-		t.Errorf("ran %q: want no value read alone once 1Password doesn't answer", fake.Calls())
+// When the one run of op that reads every value fails naming no reference,
+// as when the person dismisses 1Password's prompt, or it's ended, hung, or
+// the run's stopped, every secret's held back, not yet, nothing read again,
+// alone or otherwise, and no session opened by asking the person again:
+// the next sync tries one read again.
+func TestSyncHoldsBackWhatOneReadDoesnt(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		script func(s *runnertest.Script, stop func())
+	}{
+		{"dismissed", func(s *runnertest.Script, _ func()) { s.Exits(1).PrintsToStderr("authorization prompt dismissed") }},
+		{"hung", func(s *runnertest.Script, _ func()) { s.Fails(fmt.Errorf("op inject: %w", context.DeadlineExceeded)) }},
+		{"stopped", func(s *runnertest.Script, stop func()) { s.Does(stop).Hangs() }},
+	} {
+		fake := runnertest.New(t)
+		s := secret.New(fake, t.TempDir())
+		declare(t, s, [2]string{"PLAIN", "Section/plain"}, [2]string{"OTHER", "Section/other"})
+		signedIn(fake)
+		ctx, stop := context.WithCancel(t.Context())
+		c.script(fake.On("op", "inject"), stop)
+		_, err := s.Sync(ctx)
+		stop()
+		if err == nil || !engine.IsNotYet(err) || err.Error() != onePassword.Name+" wasn't approved, or couldn't read them" {
+			t.Errorf("%s: Sync() = %v, want both held back", c.name, err)
+		}
+		if want := []string{"op whoami", "op account list --format json", "op inject"}; !slices.Equal(fake.Calls(), want) {
+			t.Errorf("%s: ran %q, want %q: no read but the one", c.name, fake.Calls(), want)
+		}
 	}
 }
 
