@@ -272,7 +272,9 @@ func todoLines(text string, width int) []string {
 func (p *Pretty) workRow(f event.StepFinished, part string) look.Row {
 	row := resultRow(p.title(f.Step), f.Result, part, p.start.Time)
 	if f.Result.State == check.Failed && len(p.output[f.Step]) > 0 {
-		row.Says, row.Under = p.printedFailing(f, part, keptFailing)
+		var printed failing
+		row.Says, printed = p.printedFailing(f, part, keptFailing)
+		row.Under = printed.lines()
 	}
 	did := did(f.Result.Done, p.step(f.Step), f.Result.Summary != "")
 	switch {
@@ -488,9 +490,16 @@ func (p *Pretty) unwellSection(st look.State) []string {
 			row = p.failedRow(p.results[s.Name])
 		}
 		row.Name = p.recordName(s)
-		out = append(out, look.Timeline("  ", p.width, row)...)
+		out = append(out, p.recorded(row)...)
 	}
 	return out
+}
+
+// recorded is a row as the record draws it on its timeline: its line cut,
+// as a glance, what's under it wrapped, never cut, as what's acted on.
+func (p *Pretty) recorded(row look.Row) []string {
+	row.Under = look.Fold("  ", p.width, row.Under...)
+	return look.Timeline("  ", p.width, row)
 }
 
 // notRunSection is the steps that didn't run to their end, a row each
@@ -505,7 +514,7 @@ func (p *Pretty) notRunSection() []string {
 	for _, s := range notRun {
 		row := p.listRow(s)
 		row.Name = p.recordName(s)
-		out = append(out, look.Timeline("  ", p.width, row)...)
+		out = append(out, p.recorded(row)...)
 	}
 	return out
 }
@@ -527,7 +536,7 @@ func (p *Pretty) doneSection() []string {
 			f.Result.Items = slices.DeleteFunc(slices.Clone(f.Result.Items), func(it check.Item) bool { return it.Later })
 			row.Under = append(row.Under, p.workRow(f, s.Part).Under...)
 		}
-		out = append(out, look.Timeline("  ", p.width, row)...)
+		out = append(out, p.recorded(row)...)
 	}
 	return out
 }

@@ -305,7 +305,7 @@ func waitingRun() []event.Event {
 		case "claude-mcp":
 			res.Summary, res.Items = "19 declared, 8 installed", waiting("claude-mcp", "missing", "no project folder yet", true, numbered("~/Code/site", 11)...)
 		case "login-item":
-			res.Summary, res.Items = "5 declared, 2 installed", waiting("login-item", "missing", "not installed: install the app, or open the app it comes with", false, "Tool", "Monitor", "Clipper")
+			res.Summary, res.Items = "5 declared, 2 installed", waiting("login-item", "missing", "not installed: install the app, or open the app it comes with", false, "Tool", "Monitor", "Clipper", "com.example.helper-agent")
 		case "file":
 			res.Items = waiting("file", "diverged", "a file of its own, different from shared/home/.zshrc", false, "~/.zshrc")
 		case "config":
@@ -1539,7 +1539,7 @@ func TestApplyingRecordSections(t *testing.T) {
 			"       → Download it from editor.example.com\n" +
 			"       Once it's downloaded, in Finder:\n" +
 			"       → Drag it to Applications\n\n",
-		"\n  FAILED  1\n  ✗ Homebrew casks  couldn't install tailscale-app\n  │ installer: The install failed. (The Installer encountered an error that cau…\n  │ → kit apply cask\n\n",
+		"\n  FAILED  1\n  ✗ Homebrew casks  couldn't install tailscale-app\n  │ installer: The install failed. (The Installer encountered an error that\n  │ caused the installation to fail.)\n  │ → kit apply cask\n\n",
 		"\n  DONE  9\n  ● This Mac  all 6 done\n  ● Files and shell  all 2 done\n  ● Mac settings  all 3 done\n  ● Secrets  fine\n  ● Homebrew formulae  all 2 done\n  ● App Store apps  fine\n",
 	} {
 		if !strings.Contains(record, want) {
@@ -1559,7 +1559,8 @@ func TestApplyingRecordSections(t *testing.T) {
 // what's known to be still to come by itself: login items for apps not
 // installed, a linked file of its own, an edit not committed, a folder
 // Spotlight leaves out after a restart, a formula held for a secret that
-// never came stay; Claude's servers for projects not there yet go.
+// never came stay, wrapped, never cut, under their row; Claude's servers
+// for projects not there yet go.
 func TestApplyingRecordLeavesOutOnlyWhatComesLater(t *testing.T) {
 	face, out, _ := applyAt(160, 64, time.Minute, waitingRun())
 	if err := face.Close(); err != nil {
@@ -1572,9 +1573,15 @@ func TestApplyingRecordLeavesOutOnlyWhatComesLater(t *testing.T) {
 		"│ ~/Code · added to Spotlight's list",
 		"│ owner/private/fetcher · needs Secrets, which isn't there yet",
 		"│ Monitor · not installed",
+		"  │ com.example.helper-agent · not installed: install the app, or open the app\n  │ it comes with\n",
 	} {
 		if !strings.Contains(record, want) {
 			t.Errorf("the record is\n%s\nwant it to keep %q", record, want)
+		}
+	}
+	for _, l := range lines(record) {
+		if w := ansi.StringWidth(l); w > look.Width {
+			t.Errorf("%q is %d columns, want at most %d", l, w, look.Width)
 		}
 	}
 	for _, gone := range []string{"no project folder yet"} {

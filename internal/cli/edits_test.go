@@ -232,7 +232,7 @@ func TestReconcileAtATerminalShowsAnEditsDiff(t *testing.T) {
 	if want := "shared/home/.zshrc  config · edited, not committed · +3 −1 lines\n\n@@ -1 +1 @@\n-alias a=b\n+alias a=c"; asked != want {
 		t.Errorf("asked %q, want %q", asked, want)
 	}
-	if want := "Adopt|Revert|Snooze|Skip"; strings.Join(offered, "|") != want {
+	if want := "Commit|Revert|Snooze|Skip"; strings.Join(offered, "|") != want {
 		t.Errorf("offered %q", offered)
 	}
 }

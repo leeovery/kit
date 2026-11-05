@@ -79,6 +79,59 @@ func TestFitCutsTheNameForWhatARowSays(t *testing.T) {
 		"  ✗ jq  couldn't install: no …")
 }
 
+// A row stacked is drawn whole: its name wrapped on its line, after a / in
+// a path, what it says wrapped under it, each in its style on every line it
+// goes on to; what belongs to it under that, cut, as Timeline draws it.
+func TestStacked(t *testing.T) {
+	r := look.Row{State: look.Queued, Name: "~/Library/Application Support/Some App/Cache_Data", Says: look.Says(look.Muted("backup-exclusion"), look.Orange("installed, not declared")), Under: look.Output("a line of output past the end")}
+	got := look.Stacked("  ", 30, r)
+	same(t, got,
+		"  ○ ~/Library/Application",
+		"  │ Support/Some App/",
+		"  │ Cache_Data",
+		"  │ backup-exclusion ·",
+		"  │ installed, not declared",
+		"  │ a line of output past the…",
+	)
+	for _, l := range got {
+		if w := ansi.StringWidth(l); w > 30 {
+			t.Errorf("%q is %d wide", ansi.Strip(l), w)
+		}
+	}
+	if !strings.Contains(got[2], look.White("Cache_Data")) || !strings.Contains(got[4], look.Orange("installed, not declared")) {
+		t.Errorf("drew %q; want each line in the style it goes on in", got)
+	}
+	same(t, look.Stacked("  ", 30, look.Row{State: look.Done, Name: "jq", Says: look.Pink("declare")}), "  ● jq", "  │ declare")
+}
+
+// Lines folded to go under a row are never cut: each wraps, its
+// continuation under its own start, or, for what to do, under its words
+// past the arrow; one that fits is as it is.
+func TestFold(t *testing.T) {
+	got := look.Fold("  ", 40,
+		look.Says(look.White("com.example.agent"), look.Muted("not installed: install the app, or open it")),
+		look.Todo(look.Muted("install the app it comes with, or remove it")),
+		look.Muted("fits"),
+	)
+	same(t, got,
+		"com.example.agent · not installed:",
+		"install the app, or open it",
+		"→ install the app it comes with, or",
+		"  remove it",
+		"fits",
+	)
+	for _, l := range got {
+		if w := ansi.StringWidth(l); w > 36 {
+			t.Errorf("%q is %d wide, past the room after the row's prefix", ansi.Strip(l), w)
+		}
+	}
+	same(t, look.Timeline("  ", 40, look.Row{State: look.Done, Name: "Login items", Under: got[:2]}),
+		"  ● Login items",
+		"  │ com.example.agent · not installed:",
+		"  │ install the app, or open it",
+	)
+}
+
 // What a row keeps stays whole when it's cut, what it says cut in its
 // place; one that fits is as it is.
 func TestRowsKeepWhatTheyKeep(t *testing.T) {

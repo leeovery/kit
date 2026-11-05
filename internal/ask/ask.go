@@ -166,25 +166,42 @@ func (w *walk) view(width, height int) []string {
 // rows are the questions' rows on their timeline, and where the question
 // asked ends among them.
 func (w *walk) rows(width int) ([]string, int) {
-	rows := make([]look.Row, 0, len(w.qs))
+	var lines []string
 	asked := 0
 	for i, q := range w.qs {
 		row := q.About
 		row.Under = nil
 		switch {
 		case i < len(w.answers):
-			row.State, row.Says = look.Done, look.Pink(strings.ToLower(q.Answers[w.answers[i]].Label))
+			row.State, row.Says = look.Done, look.Pink(taken(q.Answers[w.answers[i]]))
 		case i == len(w.answers):
 			row.Under = append(append(row.Under, q.More...), look.Answers(q.Answers, w.cursor)...)
 		default:
 			row.State, row.Says = look.Queued, look.Muted(ansi.Strip(q.About.Says))
 		}
-		rows = append(rows, row.Fit("  ", width))
+		lines = append(lines, w.drawn(row, width)...)
 		if i == len(w.answers) {
-			asked = len(look.Timeline("  ", width, rows...))
+			asked = len(lines)
 		}
 	}
-	return look.Timeline("  ", width, rows...), asked
+	return lines, asked
+}
+
+// drawn is a question's row on the timeline: through a walk, whole, each
+// item's name and what it is wrapped, never cut, as what's decided from
+// is; a question asked alone on its line, its name cut so what it says
+// shows.
+func (w *walk) drawn(row look.Row, width int) []string {
+	if w.header != "" {
+		return look.Stacked("  ", width, row)
+	}
+	return look.Timeline("  ", width, row.Fit("  ", width))
+}
+
+// taken is an answer's label as its row says it once it's taken, in
+// lower case but for a name in it, as the Mac's.
+func taken(c look.Choice) string {
+	return strings.ToLower(c.Label[:1]) + c.Label[1:]
 }
 
 // leaves is what a question asked alone leaves: a blank line, then its row
@@ -201,7 +218,7 @@ func (w *walk) leaves(width int) []string {
 	case w.cancelled:
 		row.State, row.Says = look.Skipped, look.Muted("cancelled")
 	default:
-		row.State, row.Says = look.Done, look.Pink(strings.ToLower(q.Answers[w.answers[0]].Label))
+		row.State, row.Says = look.Done, look.Pink(taken(q.Answers[w.answers[0]]))
 	}
 	return append([]string{""}, look.Rows("  ", width, row.Fit("  ", width))...)
 }

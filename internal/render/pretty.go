@@ -469,8 +469,12 @@ func worse(a, b look.State) bool {
 func (p *Pretty) row(f event.StepFinished) look.Row {
 	r := f.Result
 	row := resultRow(p.title(f.Step), r, p.step(f.Step).Part, p.start.Time)
+	row.Under = look.Fold("  ", p.width, row.Under...)
 	if out := p.output[f.Step]; r.State == check.Failed && len(out) > 0 {
-		row.Says, row.Under = p.printedFailing(f, p.step(f.Step).Part, len(out))
+		var printed failing
+		row.Says, printed = p.printedFailing(f, p.step(f.Step).Part, len(out))
+		printed.why, printed.left = look.Fold("  ", p.width, printed.why...), look.Fold("  ", p.width, printed.left...)
+		row.Under = printed.lines()
 	}
 	if f.Step == configStep && r.State == check.OK && r.Summary == "nothing changed" {
 		row.State, row.Says = look.Skipped, look.Muted("nothing to commit")
@@ -481,15 +485,22 @@ func (p *Pretty) row(f event.StepFinished) look.Row {
 	return row
 }
 
+// failing is what's under the row of a step that failed having printed
+// something: why, the lines it printed, and what's left of it.
+type failing struct{ why, printed, left []string }
+
+// lines are what's under the row, in order.
+func (f failing) lines() []string { return slices.Concat(f.why, f.printed, f.left) }
+
 // printedFailing is the words of the row of f, a step that failed having
 // printed something, and what's under it, of part: what went wrong, then
 // the command that printed, dim, on one line; why, then the last kept of
 // the lines it printed, but for the last when it's why said whole (as with
 // a path before it, which a row too narrow for it would cut off), then
 // what's left of it.
-func (p *Pretty) printedFailing(f event.StepFinished, part string, kept int) (says string, under []string) {
+func (p *Pretty) printedFailing(f event.StepFinished, part string, kept int) (string, failing) {
 	head, why := failure(f.Result)
-	says = look.Red(head)
+	says := look.Red(head)
 	if c := p.command[f.Step]; c != "" {
 		says = look.Says(says, look.Dim(look.OneLine(c)))
 	}
@@ -497,7 +508,7 @@ func (p *Pretty) printedFailing(f event.StepFinished, part string, kept int) (sa
 	if why != "" && strings.HasSuffix(out[len(out)-1], why) {
 		out = out[:len(out)-1]
 	}
-	return says, slices.Concat(whyFailed(f.Result), look.Output(out...), whatsLeft(f.Result, part, p.start.Time))
+	return says, failing{why: whyFailed(f.Result), printed: look.Output(out...), left: whatsLeft(f.Result, part, p.start.Time)}
 }
 
 // saying is a result's words as a row says them: the parts of a summary

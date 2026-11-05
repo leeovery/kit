@@ -39,10 +39,20 @@ type shower interface {
 // it.
 type choice struct {
 	action string
-	label  string
+	// title is its label, as the terminal offers it, when the action's
+	// name alone doesn't say it.
+	title string
+	label string
 	// shared is whether it's done for every Mac.
 	shared bool
 }
+
+// The labels of adopting where it declares the thing, and where it commits
+// an edit to the config.
+const (
+	declare = "Declare"
+	commit  = "Commit"
+)
 
 // snoozeChoice is snoozing, offered for every item.
 var snoozeChoice = choice{action: snooze, label: "snooze it for 7 days"}
@@ -63,6 +73,9 @@ func choiceActions(choices []choice) []string {
 type kindDrifter struct {
 	k    kind.Kind
 	list config.List
+	// removing is taking one of its things off the Mac, in its kind's
+	// words.
+	removing kind.Removing
 	// held are its sections holding their lines back, as the run placed
 	// them.
 	held func() []kind.Held
@@ -75,14 +88,14 @@ func (d kindDrifter) check(ctx context.Context) check.Result {
 // choices are what can be done about it.
 func (d kindDrifter) choices(it check.Item) []choice {
 	adopting := []choice{
-		{action: adopt, label: "declare it, for this Mac"},
-		{action: adopt, label: "declare it, for every Mac", shared: true},
+		{action: adopt, title: declare, label: "declare it, for this Mac"},
+		{action: adopt, title: declare, label: "declare it, for every Mac", shared: true},
 	}
 	if _, ownFile := d.k.(kind.Declarer); ownFile {
 		// Declared in a file of its own, which every Mac linking it shares.
-		adopting = []choice{{action: adopt, label: "declare it"}}
+		adopting = []choice{{action: adopt, title: declare, label: "declare it"}}
 	}
-	uninstalling := []choice{{action: remove, label: "uninstall it"}}
+	uninstalling := []choice{{action: remove, title: d.removing.Label, label: d.removing.Does}}
 	if _, reverts := d.k.(kind.Reverter); reverts {
 		// A setting changed on the Mac: put back what it was.
 		uninstalling = []choice{{action: revert, label: "put back what it was"}}
@@ -100,14 +113,14 @@ func (d kindDrifter) choices(it check.Item) []choice {
 		all = append(all, choice{action: undeclare, label: "undeclare it"}, snoozeChoice)
 	case kind.Diverged:
 		all = []choice{
-			{action: adopt, label: "keep the Mac's: declared as it is now"},
+			{action: adopt, title: declare, label: "keep the Mac's: declared as it is now"},
 			{action: revert, label: "put back what's declared"},
 			snoozeChoice,
 		}
 	case kind.Changed:
 		all = []choice{{action: install, label: "set it as declared"}}
 		if _, valued := d.k.(kind.Valued); valued {
-			all = append(all, choice{action: adopt, label: "keep the Mac's: declared as it is now"})
+			all = append(all, choice{action: adopt, title: declare, label: "keep the Mac's: declared as it is now"})
 		}
 		all = append(all, snoozeChoice)
 	default:
@@ -208,7 +221,7 @@ func (d fileDrifter) choices(it check.Item) []choice {
 	switch it.State {
 	case linked.Diverged:
 		return []choice{
-			{action: adopt, label: "keep the Mac's copy: into kit-config, then linked"},
+			{action: adopt, title: "Keep the Mac's", label: "keep the Mac's copy: into kit-config, then linked"},
 			{action: revert, label: "put kit-config's back: the Mac's copy to the Bin"},
 			snoozeChoice,
 		}
@@ -269,14 +282,14 @@ func (d configDrifter) choices(it check.Item) []choice {
 		return []choice{snoozeChoice}
 	}
 	if it.State == steps.ConfigUntracked {
-		return []choice{{action: adopt, label: "commit it: out of kit-config, kept on this Mac"}, {action: revert, label: "undo it: tracked again"}, snoozeChoice}
+		return []choice{{action: adopt, title: commit, label: "commit it: out of kit-config, kept on this Mac"}, {action: revert, label: "undo it: tracked again"}, snoozeChoice}
 	}
 	undo := map[string]string{
 		steps.ConfigEdited:  "undo it: back to the last commit",
 		steps.ConfigAdded:   "undo it: the file to the Bin",
 		steps.ConfigDeleted: "undo it: the file back",
 	}[it.State]
-	return []choice{{action: adopt, label: "commit it, and push"}, {action: revert, label: undo}, snoozeChoice}
+	return []choice{{action: adopt, title: commit, label: "commit it, and push"}, {action: revert, label: undo}, snoozeChoice}
 }
 
 // diffLines is how much of a change's diff a question shows.

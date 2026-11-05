@@ -185,21 +185,53 @@ func TestChooseCancels(t *testing.T) {
 }
 
 // Several questions: the header counting them, those answered with their
-// answer, the one asked with its answers, those to come waiting; q stops,
-// keeping what's answered; they leave nothing.
+// answer, the one asked with its answers, those to come waiting, each
+// item's name on its line and what it is under it; q stops, keeping what's
+// answered; they leave nothing.
 func TestWalk(t *testing.T) {
 	w := newWalk("Reconcile", []Question{question("ffmpeg"), question("zoom"), question("wget")})
 	press(w, enter)
 	equal(t, "view", plain(w.view(80, 40)), []string{
-		"  RECONCILE  2 of 3", "  ● ffmpeg  adopt", "  ▲ zoom  cask · installed, not declared",
-		"  │ ❯ Adopt  declare it", "  │   Remove  uninstall it", "  │   Skip  not now", "  ○ wget  cask · installed, not declared",
+		"  RECONCILE  2 of 3", "  ● ffmpeg", "  │ adopt", "  ▲ zoom", "  │ cask · installed, not declared",
+		"  │ ❯ Adopt  declare it", "  │   Remove  uninstall it", "  │   Skip  not now", "  ○ wget", "  │ cask · installed, not declared",
 		"", "  ↑↓ choose · enter decide · q stop · esc cancel",
 	})
+	kept := newWalk("Reconcile", []Question{{About: look.Row{Name: "~/.zshrc"}, Answers: []look.Choice{{Label: "Keep the Mac's"}}}, question("zoom")})
+	press(kept, enter)
+	if got := plain(kept.view(80, 40))[1:3]; !slices.Equal(got, []string{"  ● ~/.zshrc", "  │ keep the Mac's"}) {
+		t.Errorf("answered: %q; want its label in lower case but for the Mac", got)
+	}
 	if !press(w, down, enter, q) || !w.stopped || !slices.Equal(w.answers, []int{0, 1}) || w.leaves(80) != nil {
 		t.Errorf("stopped: %+v", w)
 	}
 	if w := newWalk("Reconcile", []Question{question("zoom")}); !press(w, esc) || w.leaves(80) != nil {
 		t.Error("a walk of one question, cancelled: want it to leave nothing")
+	}
+}
+
+// Through a walk, nothing of an item is cut, as it's what's decided
+// from: names too long for the line wrap, after a / in a path, and what
+// each is wraps under it, every line within 80 columns.
+func TestWalkWrapsWhatsAsked(t *testing.T) {
+	long := "~/Library/Application Support/Some Long App Name/Default/Service Worker/CacheStorage/Cache_Data"
+	asked := question(long)
+	asked.About.Says = look.Says(look.Muted("backup-exclusion"), look.Orange("installed, not declared"), look.Muted("a detail long enough to go past the end of the line"), look.Muted("under a day"))
+	w := newWalk("Reconcile", []Question{asked, question("~/Library/Application Support/Another App/Default/Service Worker/Cache_Data")})
+	equal(t, "view", plain(w.view(80, 40)), []string{
+		"  RECONCILE  1 of 2",
+		"  ▲ ~/Library/Application Support/Some Long App Name/Default/Service Worker/",
+		"  │ CacheStorage/Cache_Data",
+		"  │ backup-exclusion · installed, not declared · a detail long enough to go past",
+		"  │ the end of the line · under a day",
+		"  │ ❯ Adopt  declare it", "  │   Remove  uninstall it", "  │   Skip  not now",
+		"  ○ ~/Library/Application Support/Another App/Default/Service Worker/Cache_Data",
+		"  │ cask · installed, not declared",
+		"", "  ↑↓ choose · enter decide · q stop · esc cancel",
+	})
+	for _, l := range w.view(80, 40) {
+		if ansi.StringWidth(l) > 80 {
+			t.Errorf("%q is %d columns, past 80", ansi.Strip(l), ansi.StringWidth(l))
+		}
 	}
 }
 

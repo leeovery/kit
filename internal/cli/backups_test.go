@@ -302,3 +302,26 @@ func TestBackupExclusionsWaitForTheirProgram(t *testing.T) {
 		t.Errorf("kit apply printed\n%s%s\nwant the exclusions waiting for tmutil", out, errOut)
 	}
 }
+
+// Reconcile offers a backup exclusion kept out, not declared, in plain
+// words: declaring it, here or everywhere, and stopping excluding it, as a
+// backup exclusion is removed.
+func TestReconcileOffersAnExclusionsChoicesInItsWords(t *testing.T) {
+	w := laptopWorld(t)
+	w.terminal = true
+	w.writeSection(t, "laptop", "backup exclusions", "/Applications\n")
+	w.writeSection(t, "laptop", "backups", "arq\n")
+	w.fake.On(arqc, "stats").Prints(arqStats(w.now.Add(-2 * time.Hour)))
+	w.fake.On("defaults", "export", "/Library/Preferences/com.apple.TimeMachine", "-").Prints("<plist><dict><key>SkipPaths</key><array><string>/Applications</string><string>/Volumes/Old</string></array></dict></plist>")
+	var offered []string
+	w.choose = func(question string, options []string) (int, error) {
+		if strings.HasPrefix(question, "/Volumes/Old  backup-exclusion · installed, not declared") {
+			offered = options
+		}
+		return len(options) - 1, nil
+	}
+	w.run(t, "reconcile", "--all", "backup-exclusion")
+	if want := []string{"Declare", "Declare everywhere", "Stop excluding", "Snooze", "Skip"}; !slices.Equal(offered, want) {
+		t.Errorf("offered %q, want %q", offered, want)
+	}
+}

@@ -195,7 +195,7 @@ func TestReconcileAtATerminalOffersAFilesChoices(t *testing.T) {
 		return 0, nil
 	}
 	w.run(t, "reconcile", "--all", "file")
-	want := []string{"Adopt", "Revert", "Snooze", "Skip"}
+	want := []string{"Keep the Mac's", "Revert", "Snooze", "Skip"}
 	if strings.Join(offered, "|") != strings.Join(want, "|") {
 		t.Errorf("offered %q, want %q", offered, want)
 	}

@@ -31,6 +31,9 @@ type Descriptor struct {
 	Help *Help
 	// Row is the row of applying's screen it sits in, as in Developer tools.
 	Row string
+	// Removing is taking one of its things off the Mac, as kit reconcile
+	// offers it: zero for Uninstalling.
+	Removing Removing
 	// Tool is what its commands run, as the person knows it, when its row's
 	// raw view is that tool's own output, as Homebrew's is: "" for none.
 	Tool string
@@ -48,6 +51,14 @@ type Descriptor struct {
 	// New makes the kind.
 	New func(*Deps) Kind
 }
+
+// Removing is taking one of a kind's things off the Mac, in the kind's own
+// words: its label, a word or two, and what it does.
+type Removing struct{ Label, Does string }
+
+// Uninstalling is removing a package or an app, as most kinds' things are
+// removed.
+var Uninstalling = Removing{Label: "Uninstall", Does: "uninstall it"}
 
 // Group is what a kind's things are: packages, settings, or secrets.
 type Group string

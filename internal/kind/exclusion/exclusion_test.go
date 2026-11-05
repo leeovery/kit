@@ -150,6 +150,20 @@ func TestExclusionsKeptByEach(t *testing.T) {
 	}
 }
 
+// A path kept out that a glob declared matches is kit's own, its folder
+// there or not: one deleted since, by a cache cleaner, is never extra, so
+// reconcile never asks about it. One the glob doesn't match still is.
+func TestExclusionsGlobsFolderGone(t *testing.T) {
+	h := home(t)
+	gone := h + "/Library/Application Support/Gone/GPUCache"
+	keeper := &fakeExcluder{fixed: []string{h + "/.cache", "/Applications", gone, h + "/Library/Application Support/Gone/Other"}}
+	x := exclusion.New(runnertest.New(t), h, []tool.Excluder{keeper})
+	want := []string{"~/Library/Application Support/One/GPUCache missing", "~/Library/Application Support/Two/GPUCache missing", "~/Library/Application Support/Gone/Other extra"}
+	if got := compared(t, x); !slices.Equal(got, want) {
+		t.Errorf("items = %q, want %q: the glob's path with no folder never extra", got, want)
+	}
+}
+
 // The kind runs its excluders' programs, each once, which applying waits
 // for while they aren't on kit's PATH.
 func TestExclusionsCommands(t *testing.T) {

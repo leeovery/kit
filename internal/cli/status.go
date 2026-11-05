@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"maps"
@@ -396,7 +397,7 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 		kindSteps = append(kindSteps, quietened(step, record, now))
 		r.kinds = append(r.kinds, d.Name)
 		r.drift = append(r.drift, d.Name)
-		r.drifters[d.Name] = kindDrifter{k: k, list: list, held: func() []kind.Held { return r.placing[d.Name].Held }}
+		r.drifters[d.Name] = kindDrifter{k: k, list: list, removing: cmp.Or(d.Removing, kind.Uninstalling), held: func() []kind.Held { return r.placing[d.Name].Held }}
 		needed = withNeeded(needed, d, deps)
 	}
 	// One needing an administrator's password, as installing Homebrew

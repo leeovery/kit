@@ -32,6 +32,8 @@ type Exclusions struct {
 	// matched are the paths a glob matched, by name: kept out where they
 	// are; declared every path declared, a glob by its matches.
 	matched, declared map[string]bool
+	// globs are the globs declared, ~ expanded.
+	globs []string
 }
 
 // kindName names the kind.
@@ -48,8 +50,9 @@ var Descriptor = kind.Descriptor{
 		Add:    "Leave folders out of backups, and declare them",
 		Remove: "Put folders back in backups, and undeclare them",
 	},
-	Row: "Mac settings",
-	New: func(d *kind.Deps) kind.Kind { return New(d.Run, d.Home, backup.Excluders(d.Backups)) },
+	Row:      "Mac settings",
+	Removing: kind.Removing{Label: "Stop excluding", Does: "stop excluding it"},
+	New:      func(d *kind.Deps) kind.Kind { return New(d.Run, d.Home, backup.Excluders(d.Backups)) },
 }
 
 // errNoTool is the kind's error on a Mac with no backup tool keeping
@@ -103,7 +106,7 @@ func (x *Exclusions) shown(path string) string {
 func (x *Exclusions) Expand(list config.List) (config.List, error) {
 	out := list
 	out.Entries = nil
-	x.matched, x.declared = map[string]bool{}, map[string]bool{}
+	x.matched, x.declared, x.globs = map[string]bool{}, map[string]bool{}, nil
 	for _, e := range list.Entries {
 		if !strings.ContainsAny(e.Name, "*?[") {
 			out.Entries = append(out.Entries, e)
@@ -114,6 +117,7 @@ func (x *Exclusions) Expand(list config.List) (config.List, error) {
 		if err != nil {
 			return list, fmt.Errorf("%s: %q isn't a pattern kit reads: %w", e.Pos(), e.Name, err)
 		}
+		x.globs = append(x.globs, x.full(e.Name))
 		for _, m := range matches {
 			match := e
 			match.Name = x.shown(m)
@@ -127,7 +131,8 @@ func (x *Exclusions) Expand(list config.List) (config.List, error) {
 
 // Installed lists the paths kept out of the backups: one declared while
 // every excluder keeps it out, and one declared nowhere while any does, so
-// it's seen.
+// it's seen. One a glob matches with no folder there now, as when its
+// folder was deleted, is kit's own and left out: never extra.
 func (x *Exclusions) Installed(ctx context.Context) ([]kind.Installed, error) {
 	if len(x.excluders) == 0 {
 		return nil, errNoTool
@@ -159,11 +164,22 @@ func (x *Exclusions) Installed(ctx context.Context) ([]kind.Installed, error) {
 	}
 	var out []kind.Installed
 	for _, name := range order {
+		if !x.declared[name] && x.globbed(name) {
+			continue
+		}
 		if keepers[name] == len(x.excluders) || !x.declared[name] {
 			out = append(out, kind.Installed{Name: name, Explicit: true})
 		}
 	}
 	return out, nil
+}
+
+// globbed reports whether the path called name matches a glob declared.
+func (x *Exclusions) globbed(name string) bool {
+	return slices.ContainsFunc(x.globs, func(glob string) bool {
+		ok, _ := filepath.Match(glob, x.full(name))
+		return ok
+	})
 }
 
 // Resolve knows every path.

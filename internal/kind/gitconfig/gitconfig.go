@@ -39,7 +39,8 @@ var Descriptor = kind.Descriptor{
 		Add:    "Declare git settings as this Mac has them",
 		Remove: "Unset git settings, and undeclare them",
 	},
-	Row: "Git",
+	Row:      "Git",
+	Removing: kind.Removing{Label: "Unset", Does: "unset it"},
 	// git's settings sign with, and reach GitHub by, the SSH key the
 	// secrets write.
 	After: []string{"secret"},

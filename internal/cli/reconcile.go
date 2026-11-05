@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -312,11 +313,12 @@ func (a *app) askAbout(ctx context.Context, r *run, items []driftItem, opts reco
 	return decisions, nil
 }
 
-// actionLabel is a choice's label: what it does, in a word; adopting for
-// every Mac said apart from adopting for this one.
+// actionLabel is a choice's label: what it does, in a word or two, its
+// title's when it has one, else its action's; one done for every Mac said
+// apart from one done for this.
 func actionLabel(c choice) string {
-	label := strings.ToUpper(c.action[:1]) + c.action[1:]
-	if c.action == adopt && c.shared {
+	label := cmp.Or(c.title, strings.ToUpper(c.action[:1])+c.action[1:])
+	if c.shared {
 		label += " everywhere"
 	}
 	return label

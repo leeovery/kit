@@ -188,18 +188,84 @@ func Timeline(indent string, w int, rs ...Row) []string {
 }
 
 func line(indent string, r Row) string {
-	name := Strong(r.Name)
-	switch r.State {
-	case Queued:
-		name = White(r.Name)
-	case Skipped:
-		name = Muted(r.Name)
-	}
-	l := indent + Mark(r.State) + " " + name
+	l := indent + Mark(r.State) + " " + named(r)
 	if r.Says != "" {
 		l += "  " + r.Says
 	}
 	return l
+}
+
+// named is a row's name, styled as its state has it.
+func named(r Row) string {
+	switch r.State {
+	case Queued:
+		return White(r.Name)
+	case Skipped:
+		return Muted(r.Name)
+	}
+	return Strong(r.Name)
+}
+
+// Stacked is r drawn whole on a timeline, as an item asked about is, so
+// nothing of it is cut: its name on its line, wrapped, what it says on the
+// lines under it, wrapped too, then what belongs to it, as Timeline draws
+// it.
+func Stacked(indent string, w int, r Row) []string {
+	head, under := indent+Mark(r.State)+" ", indent+Dim("│")+" "
+	room := w - ansi.StringWidth(head)
+	var out []string
+	for i, l := range wrap(named(r), room, "") {
+		if i == 0 {
+			out = append(out, head+l)
+		} else {
+			out = append(out, under+l)
+		}
+	}
+	if r.Says != "" {
+		for _, l := range wrap(r.Says, room, "") {
+			out = append(out, under+l)
+		}
+	}
+	for _, u := range r.Under {
+		out = append(out, Cut(under+u, w))
+	}
+	return out
+}
+
+// Fold is lines as they go under a row after indent, w wide, never cut:
+// each wrapped to fit, its continuation under its own start, or, for what
+// to do, under its words past the arrow.
+func Fold(indent string, w int, lines ...string) []string {
+	room := w - ansi.StringWidth(indent) - 2
+	var out []string
+	for _, l := range lines {
+		hang := ""
+		if strings.HasPrefix(ansi.Strip(l), "→ ") {
+			hang = "  "
+		}
+		out = append(out, wrap(l, room, hang)...)
+	}
+	return out
+}
+
+// wrap is s, styled, wrapped to w cells, what follows its first hang
+// cells under them on each line after the first: at spaces, or after a /
+// in a path, a word wider than that broken, its style carried on to the
+// lines it goes on to.
+func wrap(s string, w int, hang string) []string {
+	if ansi.StringWidth(s) <= w {
+		return []string{s}
+	}
+	n := len(hang)
+	lines := strings.Split(lipgloss.Wrap(ansi.TruncateLeft(s, n, ""), max(w-n, 1), "/"), "\n")
+	for i := range lines {
+		if i == 0 {
+			lines[i] = ansi.Truncate(s, n, "") + lines[i]
+		} else {
+			lines[i] = hang + lines[i]
+		}
+	}
+	return lines
 }
 
 // Output is a tool's lines, as it printed them.

@@ -159,8 +159,8 @@ func TestReconcileAtATerminalAsksFirstThenDoesItAll(t *testing.T) {
 	w := laptopWorld(t)
 	w.terminal = true
 	w.choose = answers(t, map[string]string{
-		"ffmpeg  brew":  "Adopt",
-		"node@20  brew": "Remove",
+		"ffmpeg  brew":  "Declare",
+		"node@20  brew": "Uninstall",
 		"firefox  cask": "Skip",
 	})
 	w.fake.On("brew", "uninstall", "--formula", "node@20")

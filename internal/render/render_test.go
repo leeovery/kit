@@ -19,6 +19,7 @@ import (
 	"github.com/leeovery/kit/internal/boot"
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/event"
+	"github.com/leeovery/kit/internal/look"
 	"github.com/leeovery/kit/internal/render"
 )
 
@@ -263,6 +264,48 @@ func TestPrettyStatusSaysWhatsNotAllowed(t *testing.T) {
 		"  ● Settings  9 set\n"
 	if !strings.Contains(out.String(), want) {
 		t.Errorf("printed\n%s\nwant\n%s", out.String(), want)
+	}
+}
+
+// Status's details under a row are what's acted on, so they wrap, never
+// cut, what to do under its words past the arrow; the lines a failed step
+// printed are a log, cut.
+func TestPrettyStatusWrapsDetails(t *testing.T) {
+	var out bytes.Buffer
+	refused := check.Result{State: check.Attention, Summary: "needs your permission", Items: []check.Item{{
+		ID: "login-item:allowed", Name: "macOS hasn't let the terminal control System Events", State: check.NotAllowed,
+		Detail: "System Settings › Privacy & Security › Automation › the terminal › System Events",
+	}}}
+	failed := check.Result{State: check.Failed, Phase: check.Applying, Reason: "couldn't install ripgrap: no formula of that name in any tap Homebrew knows of, nor any cask of that name in them"}
+	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.NoTTY}, 80, false)
+	steps := []event.Step{
+		{Name: "login-item", Title: "macOS login items", Area: "Drift", Row: "Login items", Part: render.PartSettings},
+		{Name: "brew", Title: "Formulae", Area: "Drift", Row: "Homebrew formulae", Tool: "Homebrew", Part: render.PartPackages},
+	}
+	show(t, face, []event.Event{
+		event.RunStarted{Time: at, Command: "status", Machine: "laptop", Steps: steps},
+		event.StepFinished{Time: at, Step: "login-item", Result: refused},
+		event.Output{Step: "brew", Command: "brew install --formula ripgrap", Line: "Warning: No available formula with the name ripgrap, nor any cask of that name either"},
+		event.StepFinished{Time: at, Step: "brew", Result: failed},
+		event.RunFinished{Time: at, Duration: time.Second, Counts: map[check.State]int{check.Failed: 1, check.Attention: 1}},
+	})
+	for _, want := range []string{
+		"  ▲ macOS login items  needs your permission\n" +
+			"    macOS hasn't let the terminal control System Events\n" +
+			"    → System Settings › Privacy & Security › Automation › the terminal › System\n" +
+			"      Events\n",
+		"    no formula of that name in any tap Homebrew knows of, nor any cask of that\n" +
+			"    name in them\n" +
+			"    Warning: No available formula with the name ripgrap, nor any cask of that n…\n",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("printed\n%s\nwant\n%s", out.String(), want)
+		}
+	}
+	for l := range strings.Lines(out.String()) {
+		if w := ansi.StringWidth(strings.TrimSuffix(l, "\n")); w > look.Width {
+			t.Errorf("%q is %d columns, want at most %d", l, w, look.Width)
+		}
 	}
 }
 

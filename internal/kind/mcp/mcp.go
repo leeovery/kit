@@ -93,8 +93,9 @@ var Descriptor = kind.Descriptor{
 			Holder: "Claude Code",
 		},
 	},
-	Row: "Developer tools",
-	New: func(d *kind.Deps) kind.Kind { return New(d.Run, d.Home) },
+	Row:      "Developer tools",
+	Removing: kind.Removing{Label: "Remove from Claude", Does: "remove it from Claude Code"},
+	New:      func(d *kind.Deps) kind.Kind { return New(d.Run, d.Home) },
 }
 
 // New returns Claude Code's MCP servers, driven through run, for the user
