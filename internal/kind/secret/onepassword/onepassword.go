@@ -38,12 +38,29 @@ const program = "op"
 const opTimeout = 15 * time.Second
 
 // approvalTimeout ends a run of op that reads a value only once it's hung:
-// 1Password's app has the person approve each such run, a fingerprint at
-// the prompt it shows, as each command kit runs is in a session of its own
-// (runner.Exec) and 1Password asks once a session, and the prompt can come
-// late on a busy Mac. Ended sooner, the read is lost to a person still
-// answering.
+// 1Password's app may have the person approve it, a fingerprint at the
+// prompt it shows, and the prompt can come late on a busy Mac. Ended
+// sooner, the read is lost to a person still answering.
 const approvalTimeout = 10 * time.Minute
+
+// opRun runs op as c says, in kit's session (runner.Command.SharesSession):
+// 1Password's app asks once a terminal, its approval lasting ten minutes,
+// and a run in a session of its own, without the terminal, is asked again
+// each time, six times for one kit secret add (5 Nov 2026). Signed in with
+// a password, there's no approval to share, and op, its session over, might
+// ask for the password at the terminal: it runs without it.
+func opRun(ctx context.Context, run runner.Runner, c runner.Command) (runner.Result, error) {
+	c.Name = program
+	c.SharesSession = !passworded()
+	return run.Run(ctx, c)
+}
+
+// passworded is whether op is signed in with a password, as over a remote
+// connection: the app's approval turned off, or a session's variable set.
+func passworded() bool {
+	return os.Getenv("OP_BIOMETRIC_UNLOCK_ENABLED") == "false" ||
+		slices.ContainsFunc(os.Environ(), func(kv string) bool { return strings.HasPrefix(kv, "OP_SESSION_") })
+}
 
 // about is what kit knows of 1Password. A session signed in with a
 // password, over a remote connection, is a variable named for the account;
@@ -102,10 +119,10 @@ func (Driver) Short(item, ref string) (string, bool) {
 // one); signed in for an account listed; else signed out, or the CLI isn't
 // on in the app.
 func (Driver) Session(ctx context.Context, run runner.Runner) store.Session {
-	if _, err := run.Run(ctx, runner.Command{Name: program, Args: []string{"whoami"}, Timeout: opTimeout}); err == nil {
+	if _, err := opRun(ctx, run, runner.Command{Args: []string{"whoami"}, Timeout: opTimeout}); err == nil {
 		return store.Open
 	}
-	res, err := run.Run(ctx, runner.Command{Name: program, Args: []string{"account", "list", "--format", "json"}, Timeout: opTimeout})
+	res, err := opRun(ctx, run, runner.Command{Args: []string{"account", "list", "--format", "json"}, Timeout: opTimeout})
 	var accounts []json.RawMessage
 	if err != nil || json.Unmarshal(res.Stdout, &accounts) != nil || len(accounts) == 0 {
 		return store.SignedOut
@@ -116,22 +133,22 @@ func (Driver) Session(ctx context.Context, run runner.Runner) store.Session {
 // Unlock has the app open a session, asking for a fingerprint: listing the
 // vaults needs one.
 func (Driver) Unlock(ctx context.Context, run runner.Runner) error {
-	_, err := run.Run(ctx, runner.Command{Name: program, Args: []string{"vault", "list", "--format", "json"}, Timeout: approvalTimeout})
+	_, err := opRun(ctx, run, runner.Command{Args: []string{"vault", "list", "--format", "json"}, Timeout: approvalTimeout})
 	return err
 }
 
 // Read reads a value with op read, without the newline op ends it with:
 // store.Unread when op names ref in saying why it couldn't.
 func (Driver) Read(ctx context.Context, run runner.Runner, ref string) (string, error) {
-	res, err := run.Run(ctx, runner.Command{Name: program, Args: []string{"read", ref}, Timeout: approvalTimeout, Secret: true})
+	res, err := opRun(ctx, run, runner.Command{Args: []string{"read", ref}, Timeout: approvalTimeout, Secret: true})
 	if err != nil {
 		return "", unread(err, []string{ref})
 	}
 	return strings.TrimRight(string(res.Stdout), "\n"), nil
 }
 
-// ReadMany reads refs in one run of op inject, as 1Password has the person
-// approve each run: a template on its standard input, each ref between
+// ReadMany reads refs in one run of op inject, as 1Password may have the
+// person approve each run: a template on its standard input, each ref between
 // lines of a mark no value holds, so that a value of many lines reads back
 // whole, and each value without the newlines it ends with, as Read has it.
 // A ref with a $ or }} in it is read alone, with Read: a template would
@@ -188,7 +205,7 @@ func inject(ctx context.Context, run runner.Runner, refs []string) (map[string]s
 		template.WriteString(mark + "\n{{ " + ref + " }}\n")
 	}
 	template.WriteString(mark + "\n")
-	res, err := run.Run(ctx, runner.Command{Name: program, Args: []string{"inject"}, Input: template.String(), Timeout: approvalTimeout, Secret: true})
+	res, err := opRun(ctx, run, runner.Command{Args: []string{"inject"}, Input: template.String(), Timeout: approvalTimeout, Secret: true})
 	if err != nil {
 		return nil, unread(err, refs)
 	}
@@ -299,7 +316,7 @@ func (d Driver) Store(ctx context.Context, run runner.Runner, item, field, value
 	if err != nil {
 		return "", err
 	}
-	if _, err := run.Run(ctx, runner.Command{Name: program, Args: slices.Concat([]string{"item", "edit"}, args), Input: string(edited), Timeout: opTimeout, Secret: true}); err != nil {
+	if _, err := opRun(ctx, run, runner.Command{Args: slices.Concat([]string{"item", "edit"}, args), Input: string(edited), Timeout: opTimeout, Secret: true}); err != nil {
 		return "", fmt.Errorf("keep it in 1Password: %w", err)
 	}
 	return short, nil
@@ -329,7 +346,7 @@ func getItem(ctx context.Context, run runner.Runner, item string) ([]string, map
 	if err != nil {
 		return nil, nil, err
 	}
-	res, err := run.Run(ctx, runner.Command{Name: program, Args: slices.Concat([]string{"item", "get"}, args, []string{"--format", "json"}), Timeout: opTimeout, Secret: true})
+	res, err := opRun(ctx, run, runner.Command{Args: slices.Concat([]string{"item", "get"}, args, []string{"--format", "json"}), Timeout: opTimeout, Secret: true})
 	if err != nil {
 		return nil, nil, fmt.Errorf("read the item from 1Password: %w", err)
 	}
@@ -406,7 +423,7 @@ func (d Driver) Attach(ctx context.Context, run runner.Runner, item, name, path 
 	if _, err := os.Stat(path); err != nil {
 		return "", err
 	}
-	if _, err := run.Run(ctx, runner.Command{Name: program, Args: slices.Concat([]string{"item", "edit"}, args, []string{assigned(name) + "[file]=" + path}), Timeout: opTimeout, Secret: true}); err != nil {
+	if _, err := opRun(ctx, run, runner.Command{Args: slices.Concat([]string{"item", "edit"}, args, []string{assigned(name) + "[file]=" + path}), Timeout: opTimeout, Secret: true}); err != nil {
 		return "", fmt.Errorf("attach it in 1Password: %w", err)
 	}
 	return name, nil
@@ -424,7 +441,7 @@ func (Driver) Delete(ctx context.Context, run runner.Runner, item, short string)
 	for i, part := range parts {
 		parts[i] = assigned(part)
 	}
-	if _, err := run.Run(ctx, runner.Command{Name: program, Args: slices.Concat([]string{"item", "edit"}, args, []string{strings.Join(parts, ".") + "[delete]"}), Timeout: opTimeout, Secret: true}); err != nil {
+	if _, err := opRun(ctx, run, runner.Command{Args: slices.Concat([]string{"item", "edit"}, args, []string{strings.Join(parts, ".") + "[delete]"}), Timeout: opTimeout, Secret: true}); err != nil {
 		return fmt.Errorf("delete it from 1Password: %w", err)
 	}
 	return nil

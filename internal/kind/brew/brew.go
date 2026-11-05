@@ -502,13 +502,13 @@ func (h *Homebrew) uninstall(ctx context.Context, kindName string, which, names 
 // it again, mid-run, of brew and of everything after it (formulae make the
 // check too: the third run, 14 Oct); and run in kit's own session, whose
 // sudo has the password, so a Mac with Touch ID for sudo shows no sheet
-// for it (SharesSudo: Homebrew's sudo asks kit, never the terminal).
+// for it (SharesSession: Homebrew's sudo asks kit, never the terminal).
 func (h *Homebrew) sudoed(ctx context.Context, cmd runner.Command) runner.Command {
 	if h.Admin == nil || !h.Admin(ctx) {
 		return cmd
 	}
 	cmd.Env = append(cmd.Env, "HOMEBREW_SUDO_CHECKED=1")
-	cmd.SharesSudo = true
+	cmd.SharesSession = true
 	return cmd
 }
 

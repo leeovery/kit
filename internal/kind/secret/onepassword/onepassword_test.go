@@ -125,6 +125,50 @@ func TestReadsWaitForThePersonsApproval(t *testing.T) {
 	}
 }
 
+// Every run of op shares kit's session, where the person's approval in
+// that terminal holds: once a terminal, not once a run. Signed in with a
+// password, none do, as op might ask for it at the terminal.
+func TestOpSharesKitsSessionUnlessSignedInWithAPassword(t *testing.T) {
+	for _, env := range [][2]string{{"", ""}, {"OP_BIOMETRIC_UNLOCK_ENABLED", "false"}, {"OP_SESSION_my", "token"}} {
+		t.Run(env[0], func(t *testing.T) {
+			if env[0] != "" {
+				t.Setenv(env[0], env[1])
+			}
+			run := runnertest.New(t)
+			optest.Holds(run, map[string]string{"op://vault/item/a": "a"})
+			run.On("op", "item", "get", "Item", "--vault", "vault", "--format", "json").Prints(`{"fields":[]}`)
+			run.On("op", "item", "edit", "Item", "--vault", "vault")
+			run.On("op", "whoami").Exits(1)
+			run.On("op", "account", "list", "--format", "json").Prints(`[{}]`)
+			run.On("op", "vault", "list", "--format", "json").Prints(`[]`)
+			d := onepassword.Driver{}
+			if got := d.Session(t.Context(), run); got != store.SignedIn {
+				t.Fatalf("Session() = %v, want signed in", got)
+			}
+			if err := d.Unlock(t.Context(), run); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := d.ReadMany(t.Context(), run, []string{"op://vault/item/a"}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := d.Read(t.Context(), run, "op://vault/item/a"); err != nil {
+				t.Fatal(err)
+			}
+			if err := d.Free(t.Context(), run, "op://vault/Item", "GitHub/token"); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := d.Store(t.Context(), run, "op://vault/Item", "GitHub/token", "value"); err != nil {
+				t.Fatal(err)
+			}
+			for _, c := range run.Commands() {
+				if c.SharesSession != (env[0] == "") {
+					t.Errorf("%s shares kit's session %v", c, c.SharesSession)
+				}
+			}
+		})
+	}
+}
+
 // A read that fails names, as store.Unread, the references op quotes in its
 // errors, each with the line it quotes it in, and those alone: one that's
 // the start of another quoted isn't named by it. A failure that quotes

@@ -365,14 +365,15 @@ func TestExecRunsKitsOwnSudoInKitsSession(t *testing.T) {
 	}
 }
 
-// A program sharing kit's sudo, as Homebrew does, runs in kit's session, its
-// own process group's leader, where sudo holds the password kit gave it.
-func TestExecRunsWhatSharesSudoInKitsSession(t *testing.T) {
+// A program sharing kit's session, as Homebrew does for sudo, and op for
+// 1Password's approval, runs in kit's session, its own process group's
+// leader, where sudo holds the password kit gave it.
+func TestExecRunsWhatSharesItsSessionInKitsSession(t *testing.T) {
 	r, _ := programs(t, map[string]string{"brew": "echo $$; exec /bin/sleep 10"})
 	for _, shares := range []bool{true, false} {
-		leader, inSession := whereRun(t, r, runner.Command{Name: "brew", Args: []string{"install"}, SharesSudo: shares})
+		leader, inSession := whereRun(t, r, runner.Command{Name: "brew", Args: []string{"install"}, SharesSession: shares})
 		if inSession != shares || leader == shares {
-			t.Errorf("sharing sudo %v: in kit's session %v, leading its own %v", shares, inSession, leader)
+			t.Errorf("sharing its session %v: in kit's session %v, leading its own %v", shares, inSession, leader)
 		}
 	}
 }

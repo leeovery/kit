@@ -972,8 +972,8 @@ func TestInstallsKeepSudosPassword(t *testing.T) {
 			if cmd.Args[0] == "update" {
 				continue
 			}
-			if told := slices.Contains(cmd.Env, "HOMEBREW_SUDO_CHECKED=1"); told != held || cmd.SharesSudo != held {
-				t.Errorf("held %v: %s ran with %q, sharing sudo %v", held, cmd, cmd.Env, cmd.SharesSudo)
+			if told := slices.Contains(cmd.Env, "HOMEBREW_SUDO_CHECKED=1"); told != held || cmd.SharesSession != held {
+				t.Errorf("held %v: %s ran with %q, sharing sudo %v", held, cmd, cmd.Env, cmd.SharesSession)
 			}
 		}
 	}

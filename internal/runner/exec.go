@@ -138,15 +138,15 @@ func (e Exec) start(ctx context.Context, program string, cmd Command) (ran, erro
 // detach has c, the command cmd, run in a process group of its own, ended
 // with everything it started, as os/exec ends the command alone: a child
 // left running would outlive it, holding its output open until waitDelay
-// passed. Unless it's kit's own sudo (ownSudo), or shares it (SharesSudo),
-// it runs in a session of its own too, without kit's terminal: a program
+// passed. Unless it's kit's own sudo (ownSudo), or shares kit's session
+// (SharesSession), it runs in a session of its own too, without kit's terminal: a program
 // that asks there, as a program's own sudo asks for a password, fails at
 // once, where in the background of kit's terminal it would stop, unseen,
 // for good.
 func detach(c *exec.Cmd, cmd Command) *detached {
 	d := &detached{}
 	c.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	if ownSudo(cmd) || cmd.SharesSudo {
+	if ownSudo(cmd) || cmd.SharesSession {
 		c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	}
 	group := func() error { return syscall.Kill(-c.Process.Pid, syscall.SIGKILL) }
