@@ -89,8 +89,8 @@ func TestRestoreFindsEachAppAndWaitsForTheRest(t *testing.T) {
 	if want := []string{"ABCDE12345.com.example.app", "com.example.app", "com.example.app.helper", "com.vendor.updater", "group.com.shared", "io.tailnet.client"}; !slices.Equal(report.Restored, want) {
 		t.Errorf("restored %q, want %q (this Mac's own folder, so its machine-bound settings too)", report.Restored, want)
 	}
-	if report.Waiting["com.example.running"] != "Running is running" || report.Waiting["com.example.missing"] != "not installed" || len(report.Failed) > 0 {
-		t.Errorf("waiting %v, failed %v", report.Waiting, report.Failed)
+	if report.Waiting["com.example.running"] != "Running is running" || report.Kept["com.example.missing"] != "kept till its app is installed" || len(report.Waiting) != 1 || len(report.Failed) > 0 {
+		t.Errorf("waiting %v, kept %v, failed %v; want the running app's waiting, the one not installed kept", report.Waiting, report.Kept, report.Failed)
 	}
 	if report.Files != 1 || w.read(t, filepath.Join(w.home, ".config", "tool", "settings.json")) != "new settings" {
 		t.Errorf("files %d; settings.json = %q", report.Files, w.read(t, filepath.Join(w.home, ".config", "tool", "settings.json")))
@@ -105,7 +105,7 @@ func TestRestoreFindsEachAppAndWaitsForTheRest(t *testing.T) {
 	if rec.On == "" || rec.Restored == nil || rec.Restored.Commit != "abc123" || rec.Pending == nil || !slices.Equal(rec.Pending.Domains, []string{"com.example.missing", "com.example.running"}) {
 		t.Errorf("record = %+v, pending %+v", rec, rec.Pending)
 	}
-	if got, want := report.Summary(), "restored 6 domains and 1 file from laptop; 2 pending (not installed or running); previous settings saved in "+report.Saved; got != want {
+	if got, want := report.Summary(), "restored 6 domains and 1 file from laptop; 1 waiting for their apps; 1 kept for apps not installed; previous settings saved in "+report.Saved; got != want {
 		t.Errorf("Summary() = %q, want %q", got, want)
 	}
 }
@@ -175,12 +175,12 @@ func TestRestoreHoldsAFailedFileAside(t *testing.T) {
 	if err != nil || report.Files != 1 || report.FilesFailed["~/.config/tool/settings.json"] != "it couldn't be put in place" {
 		t.Errorf("Restore() = %+v, %v; want the other file back, this one failed, with why", report, err)
 	}
-	if got := report.Summary(); !strings.HasSuffix(got, "; 1 pending (not installed or running); 1 failed") {
+	if got := report.Summary(); !strings.HasSuffix(got, "; 1 kept for apps not installed; 1 failed") {
 		t.Errorf("Summary() = %q, want the failed file counted", got)
 	}
 	rec, _ := w.p.Load()
 	want := &prefs.Pending{From: "laptop", Domains: []string{"com.example.missing"}, Files: []string{"~/.config/tool/settings.json"},
-		Why: map[string]string{"com.example.missing": "not installed", "~/.config/tool/settings.json": "it couldn't be put in place"}}
+		Why: map[string]string{"com.example.missing": "kept till its app is installed", "~/.config/tool/settings.json": "it couldn't be put in place"}}
 	if rec.On == "" || rec.Restored == nil || !reflect.DeepEqual(rec.Pending, want) {
 		t.Errorf("record = %+v, pending %+v; want capture on, the restore recorded, and pending %+v", rec, rec.Pending, want)
 	}
@@ -192,7 +192,7 @@ func TestRestoreHoldsAFailedFileAside(t *testing.T) {
 	if err != nil || report.Files != 1 || len(report.FilesFailed) != 0 || w.read(t, filepath.Join(w.home, ".config", "tool", "settings.json")) != "saved settings" {
 		t.Errorf("Restore(--pending) = %+v, %v; want the held file put back", report, err)
 	}
-	if rec, _ := w.p.Load(); rec.Pending == nil || len(rec.Pending.Files) != 0 || !reflect.DeepEqual(rec.Pending.Why, map[string]string{"com.example.missing": "not installed"}) {
+	if rec, _ := w.p.Load(); rec.Pending == nil || len(rec.Pending.Files) != 0 || !reflect.DeepEqual(rec.Pending.Why, map[string]string{"com.example.missing": "kept till its app is installed"}) {
 		t.Errorf("pending = %+v, want the file off it, the domain left with why", rec.Pending)
 	}
 }
@@ -526,7 +526,7 @@ func TestRestorePendingDryRunAndScratch(t *testing.T) {
 	w.fake.On("codesign", "-d", "--entitlements", "-", "--xml", app).Prints("")
 
 	report, err := w.p.Restore(t.Context(), prefs.RestoreOptions{Pending: true, DryRun: true})
-	if err != nil || !slices.Equal(report.Restored, []string{"com.example.app"}) || report.Waiting["com.example.later"] != "not installed" {
+	if err != nil || !slices.Equal(report.Restored, []string{"com.example.app"}) || report.Kept["com.example.later"] != "kept till its app is installed" {
 		t.Errorf("Restore(--pending --dry-run) = %+v, %v", report, err)
 	}
 	for _, c := range w.fake.Calls() {

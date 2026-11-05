@@ -59,9 +59,10 @@ installed and not running, then the settings files that differ, the live
 copy of each saved first. A sandboxed app with no settings folder yet is
 opened once, hidden, to make one. Name domains to restore just those, even
 without their app. A full restore switches capture on. What it can't
-restore waits, left alone by capture (kit prefs pending): for its app to be
-installed or quit; for you to open an app once, as no settings folder came
-of kit opening it; or, failed otherwise, for --pending. Never quits an app
+restore is held, left alone by capture (kit prefs pending): kept till its app
+is installed, as kit restores it once it is; waiting for its app to quit; for
+you to open an app once, as no settings folder came of kit opening it; or,
+failed otherwise, for --pending. Never quits an app
 but a helper with no window, inside another app, which it quits, opens
 hidden for its settings folder if need be, and starts again if it was
 running.
@@ -119,12 +120,13 @@ sorted XML, so a diff is the setting that changed.`,
 	var clear bool
 	pending := &cobra.Command{
 		Use:   "pending",
-		Short: "What's waiting to be restored, each with why (--clear: drop it, and capture what's there)",
-		Long: `What's waiting to be restored, each with why: an app not installed or
-running, which the hourly pass brings back once it's installed and quit; an
-app to open once, which it brings back once the app has its settings folder;
-or a restore that failed otherwise, which only kit prefs restore --pending
-tries again. --clear drops it all, so capture saves what's on the Mac.`,
+		Short: "What's held to be restored, each with why (--clear: drop it, and capture what's there)",
+		Long: `What's held to be restored, each with why: kept till its app is installed,
+which kit restores once it installs the app, as the hourly pass does; an app
+running, which the hourly pass brings back once it's quit; an app to open
+once, which it brings back once the app has its settings folder; or a
+restore that failed otherwise, which only kit prefs restore --pending tries
+again. --clear drops it all, so capture saves what's on the Mac.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return a.prepared(cmd, prefsNoun+" pending", func(_ context.Context, r *run) error {
@@ -132,7 +134,7 @@ tries again. --clear drops it all, so capture saves what's on the Mac.`,
 			})
 		},
 	}
-	pending.Flags().BoolVar(&clear, "clear", false, "drop what's waiting, so capture saves what's on the Mac for it")
+	pending.Flags().BoolVar(&clear, "clear", false, "drop what's held, so capture saves what's on the Mac for it")
 	startFresh := &cobra.Command{
 		Use:   "start-fresh",
 		Short: "Switch capture on without restoring: the next capture starts this Mac's store",
@@ -245,7 +247,7 @@ func (a *app) prefsRestore(ctx context.Context, r *run, opts prefs.RestoreOption
 		if err != nil {
 			return check.Result{State: check.Failed, Reason: err.Error()}
 		}
-		if opts.Pending && report.Restored == nil && report.Files == 0 && len(report.Waiting)+len(report.ToOpen) == 0 && report.Failures() == 0 {
+		if opts.Pending && report.Restored == nil && report.Files == 0 && len(report.Waiting)+len(report.Kept)+len(report.ToOpen) == 0 && report.Failures() == 0 {
 			return check.Result{State: check.OK, Summary: "nothing pending"}
 		}
 		res := check.Result{State: check.OK, Summary: report.Summary()}
@@ -259,7 +261,10 @@ func (a *app) prefsRestore(ctx context.Context, r *run, opts prefs.RestoreOption
 			res.Items = append(res.Items, check.Item{ID: "prefs:failed:" + f, Name: f, State: "failed", Detail: report.FilesFailed[f]})
 		}
 		for _, d := range slices.Sorted(maps.Keys(report.Waiting)) {
-			res.Items = append(res.Items, check.Item{ID: "prefs:pending:" + d, Name: d, State: "pending", Detail: report.Waiting[d], Quiet: "until it's installed and closed: kit prefs restore --pending"})
+			res.Items = append(res.Items, check.Item{ID: "prefs:pending:" + d, Name: d, State: "pending", Detail: report.Waiting[d], Quiet: "until it's closed: kit prefs restore --pending"})
+		}
+		for _, d := range slices.Sorted(maps.Keys(report.Kept)) {
+			res.Items = append(res.Items, check.Item{ID: "prefs:kept:" + d, Name: d, State: "kept", Quiet: "restored once its app is installed"})
 		}
 		if report.Failures() > 0 {
 			res.State = check.Attention
@@ -294,10 +299,10 @@ func (a *app) prefsPending(r *run, clear bool) error {
 		return render.WriteJSON(a.Stdout, pending)
 	}
 	if rec.Pending == nil {
-		_, err = fmt.Fprintln(a.Stdout, "Nothing is waiting to be restored.")
+		_, err = fmt.Fprintln(a.Stdout, "Nothing is held to be restored.")
 		return err
 	}
-	if _, err := fmt.Fprintf(a.Stdout, "Waiting to be restored from %s (kit prefs restore --pending):\n", rec.Pending.From); err != nil {
+	if _, err := fmt.Fprintf(a.Stdout, "Held to be restored from %s (kit prefs restore --pending):\n", rec.Pending.From); err != nil {
 		return err
 	}
 	for _, name := range slices.Concat(rec.Pending.Domains, rec.Pending.Files) {

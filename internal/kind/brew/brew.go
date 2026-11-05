@@ -38,6 +38,9 @@ func installTimeout(n int) time.Duration { return 30*time.Minute + time.Duration
 // Homebrew is Homebrew, driven through a runner.
 type Homebrew struct {
 	run runner.Runner
+	// Home is the user's home, where the files a cask leaves are looked
+	// for.
+	Home string
 	// Admin reports whether an administrator's password is at hand, for
 	// installing Homebrew and casks that install through a package: nil
 	// when kit isn't installing, and asks nothing.
@@ -99,6 +102,7 @@ var (
 			Add:    "Install casks, and declare them",
 			Remove: "Uninstall casks, and undeclare them",
 		},
+		Apps:  true,
 		Row:   "Homebrew casks",
 		Tool:  "Homebrew",
 		Needs: []string{StepName},
@@ -115,7 +119,11 @@ var shared = kind.NewKey[*Homebrew]("Homebrew")
 
 // Of is the Homebrew the kinds made from d share.
 func Of(d *kind.Deps) *Homebrew {
-	return kind.Share(d, shared, func() *Homebrew { return New(d.Run) })
+	return kind.Share(d, shared, func() *Homebrew {
+		h := New(d.Run)
+		h.Home = d.Home
+		return h
+	})
 }
 
 // New returns Homebrew, driven through run.
@@ -478,11 +486,12 @@ func named(said string, names []string) (string, bool) {
 }
 
 // uninstall runs brew uninstall of names, the kind named kindName's, with
-// which says what they are, watched for going quiet (kind.Watch), as it
-// holds Homebrew's turn: a kind waiting for it is never quiet itself.
-func (h *Homebrew) uninstall(ctx context.Context, kindName, which string, names []string) error {
+// which saying what they are, and how, watched for going quiet
+// (kind.Watch), as it holds Homebrew's turn: a kind waiting for it is
+// never quiet itself.
+func (h *Homebrew) uninstall(ctx context.Context, kindName string, which, names []string) error {
 	defer h.take(ctx, kindName)()
-	return h.watched(ctx, "uninstalling", h.sudoed(ctx, h.batched(runner.Command{Name: "brew", Args: slices.Concat([]string{"uninstall", which}, names)})))
+	return h.watched(ctx, "uninstalling", h.sudoed(ctx, h.batched(runner.Command{Name: "brew", Args: slices.Concat([]string{"uninstall"}, which, names)})))
 }
 
 // sudoed is cmd, brew installing or uninstalling, when an administrator's
@@ -598,7 +607,7 @@ func (f formulae) Ready(ctx context.Context, names []string) error {
 func (formulae) Shares() []string { return []string{"cask"} }
 
 func (f formulae) Remove(ctx context.Context, names []string) error {
-	return f.uninstall(ctx, f.Name(), "--formula", names)
+	return f.uninstall(ctx, f.Name(), []string{"--formula"}, names)
 }
 
 // Blocked finds the missing formulae whose names another tap's formula,
@@ -692,7 +701,88 @@ func (c casks) Ready(ctx context.Context, names []string) error {
 func (casks) Shares() []string { return []string{"brew"} }
 
 func (c casks) Remove(ctx context.Context, names []string) error {
-	return c.uninstall(ctx, c.Name(), "--cask", names)
+	return c.uninstall(ctx, c.Name(), []string{"--cask"}, names)
+}
+
+// RemoveAll uninstalls names with Homebrew's zap: the files each cask's zap
+// list names, its settings among them, go too.
+func (c casks) RemoveAll(ctx context.Context, names []string) error {
+	return c.uninstall(ctx, c.Name(), []string{"--cask", "--zap"}, names)
+}
+
+// Leaves is what uninstalling the cask name leaves: the app, by the name
+// brew info gives it, and the paths its zap list names (globs, ~ the home)
+// that are on the Mac, of which those in ~/Library/Preferences are its
+// preferences domains.
+func (c casks) Leaves(ctx context.Context, name string) (kind.Leftovers, error) {
+	res, err := c.brew(ctx, "info", "--json=v2", "--cask", name)
+	if err != nil {
+		return kind.Leftovers{}, err
+	}
+	var in info
+	if err := json.Unmarshal(res.Stdout, &in); err != nil {
+		return kind.Leftovers{}, fmt.Errorf("read brew info's answer: %w", err)
+	}
+	if len(in.Casks) == 0 {
+		return kind.Leftovers{}, fmt.Errorf("brew info says nothing of %s", name)
+	}
+	cask := in.Casks[0]
+	left := kind.Leftovers{App: cask.Token}
+	if len(cask.Names) > 0 {
+		left.App = cask.Names[0]
+	}
+	prefs := filepath.Join(c.Home, "Library", "Preferences")
+	for _, path := range c.onTheMac(zapped(cask.Artifacts)) {
+		left.Files = append(left.Files, path)
+		if domain, ok := strings.CutSuffix(filepath.Base(path), ".plist"); ok && filepath.Dir(path) == prefs {
+			left.Domains = append(left.Domains, domain)
+		}
+	}
+	return left, nil
+}
+
+// zapped are the paths a cask's zap list trashes and deletes, as brew info
+// gives them: each a path or a list of them.
+func zapped(artifacts []map[string]json.RawMessage) []string {
+	var paths []string
+	for _, artifact := range artifacts {
+		var zaps []map[string]json.RawMessage
+		if json.Unmarshal(artifact["zap"], &zaps) != nil {
+			continue
+		}
+		for _, zap := range zaps {
+			for _, what := range []string{"trash", "delete"} {
+				paths = append(paths, oneOrMore(zap[what])...)
+			}
+		}
+	}
+	return paths
+}
+
+// oneOrMore is raw, a string or a list of them, as a list.
+func oneOrMore(raw json.RawMessage) []string {
+	var one string
+	if json.Unmarshal(raw, &one) == nil {
+		return []string{one}
+	}
+	var more []string
+	_ = json.Unmarshal(raw, &more)
+	return more
+}
+
+// onTheMac are the paths of patterns, ~ the home, that are on the Mac,
+// sorted, each once.
+func (h *Homebrew) onTheMac(patterns []string) []string {
+	var found []string
+	for _, pattern := range patterns {
+		if rest, ok := strings.CutPrefix(pattern, "~/"); ok {
+			pattern = filepath.Join(h.Home, rest)
+		}
+		matches, _ := filepath.Glob(pattern)
+		found = append(found, matches...)
+	}
+	slices.Sort(found)
+	return slices.Compact(found)
 }
 
 // Blocked finds the missing casks that install through a package, which
@@ -780,6 +870,7 @@ type info struct {
 	} `json:"formulae"`
 	Casks []struct {
 		Token     string                       `json:"token"`
+		Names     []string                     `json:"name"`
 		FullToken string                       `json:"full_token"`
 		OldTokens []string                     `json:"old_tokens"`
 		Artifacts []map[string]json.RawMessage `json:"artifacts"`

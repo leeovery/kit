@@ -59,6 +59,18 @@ func Named(name string) (kind.Descriptor, bool) {
 	return All[i], true
 }
 
+// Apps are the names of the kinds whose things are apps, in the order a
+// run takes them.
+func Apps() []string {
+	var names []string
+	for _, d := range All {
+		if d.Apps {
+			names = append(names, d.Name)
+		}
+	}
+	return names
+}
+
 // Label is the label of the kind called name, as in Homebrew formulae for
 // brew; name itself for a step that isn't a kind's.
 func Label(name string) string {

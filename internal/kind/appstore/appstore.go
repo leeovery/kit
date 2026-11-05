@@ -78,7 +78,8 @@ var Descriptor = kind.Descriptor{
 		Add:    "Install App Store apps, by name or id, and declare them",
 		Remove: "Uninstall App Store apps, and undeclare them",
 	},
-	Row: "App Store apps",
+	Apps: true,
+	Row:  "App Store apps",
 	New: func(d *kind.Deps) kind.Kind {
 		s := New(d.Run)
 		s.AppDirs, s.StateDir = d.AppDirs, d.StateDir
@@ -467,6 +468,26 @@ func (s *AppStore) Remove(ctx context.Context, names []string) error {
 		_, err := s.sudo(ctx, "uninstall", names, 0, nil)
 		return err
 	})
+}
+
+// RemoveAll uninstalls names as Remove does: an App Store app has no list
+// of the files it leaves.
+func (s *AppStore) RemoveAll(ctx context.Context, names []string) error {
+	return s.Remove(ctx, names)
+}
+
+// Leaves is what uninstalling the app name leaves, as far as kit knows: the
+// app, by the name and bundle id mas lists it by.
+func (s *AppStore) Leaves(ctx context.Context, name string) (kind.Leftovers, error) {
+	listed, err := s.apps(ctx, "list", "--json")
+	if err != nil {
+		return kind.Leftovers{}, err
+	}
+	i := slices.IndexFunc(listed, func(a app) bool { return a.ID == id(name) })
+	if i < 0 {
+		return kind.Leftovers{}, fmt.Errorf("mas doesn't list %s", name)
+	}
+	return kind.Leftovers{App: listed[i].Name, Bundle: listed[i].Bundle}, nil
 }
 
 // installedLine is what mas prints as it's installed an app, by its name,

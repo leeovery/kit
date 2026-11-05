@@ -141,6 +141,25 @@ type Dependents interface {
 	NeededBy(ctx context.Context, name string) ([]string, error)
 }
 
+// Leaver is a kind whose things are apps, which uninstalling leaves files
+// and settings of behind, in case they come back.
+type Leaver interface {
+	// Leaves is what uninstalling name, installed, leaves on the Mac.
+	Leaves(ctx context.Context, name string) (Leftovers, error)
+	// RemoveAll uninstalls names with the files they leave.
+	RemoveAll(ctx context.Context, names []string) error
+}
+
+// Leftovers is what uninstalling an app leaves: the app, by its name, and
+// by its bundle id where the kind knows it; the files on the Mac that
+// RemoveAll removes besides; and, of those, its preferences domains, whose
+// settings cfprefsd keeps, as their files go, till they're deleted.
+type Leftovers struct {
+	App, Bundle string
+	Files       []string
+	Domains     []string
+}
+
 // Declarer is a kind declared in a file of its own, where the program
 // that uses the declarations reads them: tmux's plugins, in tmux's config.
 // kit reads the file, and edits it in place.

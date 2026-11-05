@@ -16,6 +16,7 @@ import (
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/kinds"
 	"github.com/leeovery/kit/internal/look"
+	"github.com/leeovery/kit/internal/steps"
 )
 
 // addOptions are adding's flags, and which names wait for an
@@ -52,6 +53,10 @@ func (a *app) add(ctx context.Context, r *run, kindName string, names []string, 
 		}
 	}
 	missing = slices.DeleteFunc(missing, func(name string) bool { return refused[name] != nil })
+	settings, err := a.keptSettings(r, kindName)
+	if err != nil {
+		return err
+	}
 	ctx, held, stop := a.holdAdmin(ctx, r, map[string][]string{kindName: missing})
 	defer stop()
 	opts.waiting = waitingForAdmin(ctx, r, kindName, missing, held)
@@ -61,11 +66,45 @@ func (a *app) add(ctx context.Context, r *run, kindName string, names []string, 
 			if err := refused[name]; err != nil {
 				return check.Result{State: check.Failed, Reason: "couldn't declare: " + err.Error()}
 			}
-			return installAndDeclare(ctx, r, c, k, scope, name, opts, !slices.Contains(missing, name), prepared[name])
+			isIn := !slices.Contains(missing, name)
+			res := installAndDeclare(ctx, r, c, k, scope, name, opts, isIn, prepared[name])
+			if settings != nil && !isIn && res.State == check.OK {
+				res.Summary += settings(ctx)
+			}
+			return res
 		})
 	}
 	c.sync(ctx, commitMessage("add", kindName, c.whoWrote(names), r.machine, opts.note))
 	return c.finish()
+}
+
+// keptSettings is what restores, straight after kit installs apps of the
+// kind called kindName, the settings kit prefs kept for apps not installed
+// whose apps are installed now, before the person first opens them,
+// saying what it did, after a semicolon, or nothing when there were none:
+// nil unless the kind's things are apps and kit prefs is on for this Mac.
+func (a *app) keptSettings(r *run, kindName string) (func(context.Context) string, error) {
+	if d, _ := kinds.Named(kindName); !d.Apps {
+		return nil, nil
+	}
+	features, err := r.features()
+	if err != nil || !features.on(steps.FeaturePrefs) {
+		return nil, err
+	}
+	p, err := a.prefs(r)
+	if err != nil {
+		return nil, err
+	}
+	return func(ctx context.Context) string {
+		report, err := p.RestoreInstalled(ctx)
+		switch {
+		case err != nil:
+			return "; its saved settings weren't restored: " + err.Error()
+		case len(report.Restored) > 0:
+			return "; its saved settings restored"
+		}
+		return ""
+	}, nil
 }
 
 // once is names, each once, in the order first given.

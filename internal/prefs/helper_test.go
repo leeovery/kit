@@ -140,7 +140,7 @@ func TestAWindowlessHelperWithNoFolderWaits(t *testing.T) {
 	if *slept != 15*time.Second {
 		t.Errorf("waited %v for its folder, want 15s", *slept)
 	}
-	if got := report.Summary(); strings.Contains(got, "open") || !strings.Contains(got, "1 pending") {
+	if got := report.Summary(); strings.Contains(got, "open") || !strings.Contains(got, "1 waiting for their apps") {
 		t.Errorf("Summary() = %q, want it pending, nothing to open", got)
 	}
 	rec, _ := w.p.Load()

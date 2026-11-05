@@ -6,6 +6,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -859,6 +860,46 @@ func TestRemove(t *testing.T) {
 		if c.Lines == nil {
 			t.Errorf("%s isn't watched", c)
 		}
+	}
+}
+
+// What a cask leaves is the app, by the name brew info gives it, and the
+// paths its zap list trashes and deletes, each a path or a list, globs
+// and ~ the home, that are on the Mac, sorted; of which those in
+// ~/Library/Preferences are its domains. RemoveAll uninstalls with
+// Homebrew's zap.
+func TestCasksLeaves(t *testing.T) {
+	fake := runnertest.New(t)
+	home := t.TempDir()
+	for _, f := range []string{"Library/Application Support/Example/data", "Library/Caches/com.example.app.ShipIt/cache", "Library/Preferences/com.example.app.plist", "Library/Preferences/ByHost/com.example.app.0000.plist", ".example/config"} {
+		path := filepath.Join(home, f)
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fake.On("brew", "info", "--json=v2", "--cask", "example").Prints(`{"formulae": [], "casks": [{"token": "example", "full_token": "example", "name": ["Example App"],
+		"artifacts": [{"app": ["Example App.app"]}, {"uninstall": [{"delete": "~/.example"}]},
+		{"zap": [{"trash": ["~/Library/Application Support/Example", "~/Library/Caches/com.example.app*", "~/Library/Preferences/com.example.app.plist", "~/Library/Preferences/ByHost/com.example.app.*.plist", "~/Library/Logs/Example"], "delete": "~/.example/config", "rmdir": "~/.example"}]}]}]}`)
+	fake.On("brew", "uninstall", "--cask", "--zap", "example")
+	k := brew.CasksDescriptor.New(&kind.Deps{Run: fake, Home: home}).(kind.Leaver)
+	left, err := k.Leaves(t.Context(), "example")
+	want := kind.Leftovers{App: "Example App", Domains: []string{"com.example.app"}}
+	for _, f := range []string{".example/config", "Library/Application Support/Example", "Library/Caches/com.example.app.ShipIt", "Library/Preferences/ByHost/com.example.app.0000.plist", "Library/Preferences/com.example.app.plist"} {
+		want.Files = append(want.Files, filepath.Join(home, f))
+	}
+	if err != nil || !reflect.DeepEqual(left, want) {
+		t.Errorf("Leaves() = %+v, %v\nwant %+v", left, err, want)
+	}
+	if err := k.RemoveAll(t.Context(), []string{"example"}); err != nil || !slices.Contains(fake.Calls(), "brew uninstall --cask --zap example") {
+		t.Errorf("RemoveAll() = %v, ran %q; want Homebrew's zap", err, fake.Calls())
+	}
+
+	fake.On("brew", "info", "--json=v2", "--cask", "plain").Prints(`{"formulae": [], "casks": [{"token": "plain", "full_token": "plain", "artifacts": [{"app": ["Plain.app"]}]}]}`)
+	if left, err := k.Leaves(t.Context(), "plain"); err != nil || !reflect.DeepEqual(left, kind.Leftovers{App: "plain"}) {
+		t.Errorf("Leaves(no zap list, no name) = %+v, %v; want the cask by its token, leaving nothing", left, err)
 	}
 }
 

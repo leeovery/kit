@@ -91,6 +91,15 @@ It's taken out of this Mac's declarations file; one declared for every Mac
 needs --shared, which takes it out of the shared file, every Mac's list. The
 change is committed and pushed to the config repository.`
 
+// leavesWhat is how removing an app says what becomes of what it leaves.
+const leavesWhat = `
+
+An app leaves its files and settings behind, in case you come back, and kit
+prefs goes on saving its settings. At a terminal, kit asks first whether to
+keep them or remove them: its files from this Mac, and its saved settings
+from kit prefs' store, at the next capture. --zap removes them, and --keep
+keeps them, without asking; without a terminal, they're kept.`
+
 // newKindCommand is kit <kind>: adding and removing d's things, and turning
 // them off and on, when they can be.
 func newKindCommand(a *app, d kind.Descriptor) *cobra.Command {
@@ -119,23 +128,31 @@ reconcile asks.`,
 	add.Flags().BoolVar(&opts.shared, "shared", false, "declare for every Mac, not this one alone")
 	add.Flags().BoolVar(&opts.temp, "temp", false, "install without declaring: quiet for 7 days, then reconcile asks")
 	add.Flags().StringVar(&opts.note, "note", "", "why it's declared, kept after its name")
-	var shared bool
+	var ropts removeOptions
+	long := n.Remove + "." + undeclaredWhere + `
+
+When something installed still needs it, nothing changes, and why is passed
+on.`
+	if d.Apps {
+		long += leavesWhat
+	}
 	remove := &cobra.Command{
 		Use:     "remove <name>...",
 		Aliases: []string{"rm"},
 		Short:   n.Remove,
-		Long: n.Remove + "." + undeclaredWhere + `
-
-When something installed still needs it, nothing changes, and why is passed
-on.`,
-		Args: cobra.MinimumNArgs(1),
+		Long:    long,
+		Args:    cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return a.prepared(cmd, d.Name+" remove", func(ctx context.Context, r *run) error {
-				return a.remove(ctx, r, d.Name, args, shared)
+				return a.remove(ctx, r, d.Name, args, ropts)
 			})
 		},
 	}
-	remove.Flags().BoolVar(&shared, "shared", false, "take it out of the shared file, every Mac's list")
+	remove.Flags().BoolVar(&ropts.shared, "shared", false, "take it out of the shared file, every Mac's list")
+	if d.Apps {
+		remove.Flags().BoolVar(&ropts.zap, "zap", false, "remove its files and its saved settings too, without asking")
+		remove.Flags().BoolVar(&ropts.keep, "keep", false, "keep its files and its saved settings, without asking")
+	}
 	cmd.AddCommand(add, remove)
 	if n.Switch != nil {
 		cmd.AddCommand(switchCommands(a, d)...)
@@ -286,7 +303,7 @@ func newLineRemove(a *app, name string) *cobra.Command {
 		Args:    cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return a.prepared(cmd, name+" remove", func(ctx context.Context, r *run) error {
-				return a.remove(ctx, r, name, args, shared)
+				return a.remove(ctx, r, name, args, removeOptions{shared: shared})
 			})
 		},
 	}

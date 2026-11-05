@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -144,6 +145,25 @@ func TestCompare(t *testing.T) {
 	}
 	if got.State != check.Attention || got.Summary != "4 declared, 2 installed" || !slices.Equal(got.Items, want) {
 		t.Errorf("Compare() = %+v\nwant items %+v", got, want)
+	}
+}
+
+// What an App Store app leaves is the app, by the name and bundle id mas
+// lists it by: it has no list of files. RemoveAll uninstalls it as Remove
+// does.
+func TestLeaves(t *testing.T) {
+	fake := runnertest.New(t)
+	fake.On("mas", "list", "--json").Prints(`{"adamID":123456789,"bundleID":"com.example.notes","name":"Notes Example"}` + "\n")
+	fake.On("sudo", "-n", "mas", "uninstall", "123456789")
+	var k kind.Leaver = appstore.New(fake)
+	if left, err := k.Leaves(t.Context(), "notes-example@123456789"); err != nil || !reflect.DeepEqual(left, kind.Leftovers{App: "Notes Example", Bundle: "com.example.notes"}) {
+		t.Errorf("Leaves() = %+v, %v; want the app by its name and bundle id", left, err)
+	}
+	if _, err := k.Leaves(t.Context(), "other@987654321"); err == nil {
+		t.Error("Leaves(an app mas doesn't list) = nil error, want it to say so")
+	}
+	if err := k.RemoveAll(t.Context(), []string{"notes-example@123456789"}); err != nil || !slices.Contains(fake.Calls(), "sudo -n mas uninstall 123456789") {
+		t.Errorf("RemoveAll() = %v, ran %q; want it uninstalled through sudo", err, fake.Calls())
 	}
 }
 

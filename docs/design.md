@@ -333,7 +333,7 @@ that of the Mac `kit.toml`'s `from` names ("restores studio's last save (26 Oct)
 studio keeps its own"), as `kit prefs restore --from` does, machine-bound settings left out.
 With no source in the store, there's no card: applying the step starts afresh by itself, the log
 saying so (a store it can't read leaves the card as it stands). `r` says how many came back, how
-many wait for their apps, how many apps to open once (a to-do each, coming next, kit's own done
+many wait for their apps to quit, how many are kept for apps not installed, how many apps to open once (a to-do each, coming next, kit's own done
 leading to those its check finds then) and how many are held for `kit prefs restore --pending`,
 the log naming each of those with why; `f` starts afresh, as `kit prefs start-fresh` does,
 saying saving's on and how many still wait to come back. When other hardware owns this machine
@@ -616,7 +616,7 @@ kit machine add <name>       Add a Mac to kit-config, a copy of another's or emp
 
 What kit manages, a command each:
 kit <kind> add <name>...     Install, and declare for this Mac   [--shared] [--temp] [--note]
-kit <kind> remove <name>...  Uninstall, and undeclare            [--shared]
+kit <kind> remove <name>...  Uninstall, and undeclare            [--shared] [--zap] [--keep] (apps)
     (brew, cask, mas, npm, composer, go, gh, tmux, claude-mcp, claude-skill, login-item,
      defaults, power, git-config, backup-exclusion, spotlight-exclusion)
 kit claude-mcp on|off <name>...  Declare Claude's MCP servers on or off, and install or remove them
@@ -696,8 +696,20 @@ its sorted place, or for every Mac with `--shared` (taking it out of each Mac's 
 asks nothing about where. `--temp` installs without declaring: quiet for 7 days, then reconcile
 asks.
 `kit <kind> remove` uninstalls and takes each name out of this Mac's file; one declared for every Mac
-needs `--shared`. Both handle each name on its own (one failing leaves the others), then commit
-the config's changed files, with a message saying what, for which Mac and why, and push to
+needs `--shared`. An app (a cask, an App Store app) leaves its files and settings behind, in case
+it comes back, and kit prefs goes on saving its settings: at a terminal, before anything's
+uninstalled, kit asks once for each app that leaves any, by its name ("<app>'s settings and
+files": `Keep them`, in case you come back, or `Remove them`, its files from this Mac and its saved
+settings from kit-prefs). A cask's files are those its zap list (brew info's) names that are on
+the Mac; removing them uninstalls with Homebrew's zap, and `defaults delete`s each preferences
+domain it removed (`~/Library/Preferences/<domain>.plist`), as cfprefsd keeps a domain whose file
+has gone: the next capture drops it from kit-prefs, whose history keeps it. An App Store app has
+no zap list: it's asked about only when kit prefs holds a domain of its (kit prefs' own owner
+lookup), and removing them deletes those domains. `--zap` and `--keep` answer without asking;
+without a terminal, they're kept, the output saying so and that `--zap` removes them. An app
+leaving nothing is never asked about. The kind knows its app's leftovers (a `Leaver`); kit's
+core never knows Homebrew's zap. Adding and removing both handle each name on its own (one
+failing leaves the others), then commit the config's changed files, with a message saying what, for which Mac and why, and push to
 main, pulling with rebase first. A push that fails leaves the commit, and says so.
 
 **Moving a line.** Every command declaring for every Mac takes the name out of each Mac's own
@@ -1284,17 +1296,22 @@ to.
   stored copy checked, the live
   settings saved, `defaults delete` then `import`, read back and compared. A full restore puts
   back the files that differ (each saved first), writes the pending list, records its commit, and
-  switches capture on, failures or not. What it couldn't restore waits on the pending list,
-  each with why, and capture leaves it alone: a domain whose app isn't installed or is running;
-  one whose sandboxed app has no settings folder, for the person to open once (a to-do, below);
-  and a domain or file that failed otherwise, named with why in plain words. The hourly pass
-  (`--pending`, unattended) brings back a waiting domain once its app is installed, not running
+  switches capture on, failures or not. What it couldn't restore is held on the pending list,
+  each with why, and capture leaves it alone: a domain whose app isn't installed, "kept till its
+  app is installed" (never counted as waiting or as anything to do, no card: many such apps are
+  never coming, the config not installing them; the summary says "12 kept for apps not
+  installed"); one whose app is running; one whose sandboxed app has no settings folder, for the
+  person to open once (a to-do, below); and a domain or file that failed otherwise, named with why
+  in plain words. The hourly pass
+  (`--pending`, unattended) brings back a held domain once its app is installed, not running
   and, sandboxed, has its settings folder (one without stays for the person to open), and leaves
-  what failed otherwise alone; `kit prefs restore --pending`, by hand, tries everything waiting,
+  what failed otherwise alone; so do `kit cask add` and `kit mas add`, straight after an install,
+  when kit prefs is on and a domain kept has its app now, before the app's first opened, and kit
+  apply, its settings step applied after the kinds of apps the run has, whatever its check finds; `kit prefs restore --pending`, by hand, tries everything waiting,
   failed or not. From another Mac's folder, or onto other hardware,
   `[prefs machine-bound]` stays behind (Tailscale's identity and the like). `--at` unpacks the
   folder as it was then from history.
-- **`kit prefs history`**, **`pending [--clear]`** (what waits, each with why), **`start-fresh`**.
+- **`kit prefs history`**, **`pending [--clear]`** (what's held, each with why), **`start-fresh`**.
   A sandboxed app held for its settings folder is a to-do of its own, one at a time (`Open <app>
   and quit it`): kit opens it in view (`open -b`) as its card goes up, once a run; `space` restores its
   settings then and there once it's quit and has its folder, else the log says which it isn't and

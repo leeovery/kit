@@ -101,15 +101,16 @@ func appToOpen(app prefs.App) check.ToDo {
 // it started as a copy of, as kit prefs restore does, its date said as it
 // comes up; or start afresh, as kit prefs start-fresh does. Either takes
 // this Mac's folder over when other hardware owns it, the card saying so.
-// Applied, with no source in the store, it starts afresh by itself. With
-// sandboxed apps held for their settings folders, it's a to-do for each,
-// one at a time: kit opens the app, once a run, and once the person's quit
-// it, restores its settings.
+// Applied, with no source in the store, it starts afresh by itself;
+// switched on, it restores the settings kept for apps a run installed, as
+// the run places it after them. With sandboxed apps held for their
+// settings folders, it's a to-do for each, one at a time: kit opens the
+// app, once a run, and once the person's quit it, restores its settings.
 func Prefs(p *prefs.Prefs, from string, now func() time.Time) engine.Step {
 	var mu sync.Mutex
 	opened := map[string]bool{}
 	return engine.Step{
-		Name: PrefsName, Title: "App settings", Area: AreaBackups,
+		Name: PrefsName, Title: "App settings", Area: AreaBackups, AlwaysApply: true,
 		Choice: &engine.Choice{
 			Ready: func(ctx context.Context, it check.Item) check.Item {
 				if it.ToDo == nil {
@@ -163,6 +164,7 @@ func Prefs(p *prefs.Prefs, from string, now func() time.Time) engine.Step {
 		},
 		Apply: func(ctx context.Context, found check.Result) error {
 			if !slices.ContainsFunc(found.Items, func(it check.Item) bool { return it.ID == PrefsName+":"+idPaused }) {
+				restoreInstalled(ctx, p)
 				return nil
 			}
 			// A store that can't be read leaves the card as it stands.
@@ -261,9 +263,23 @@ func withHeld(ctx context.Context, p *prefs.Prefs, rec prefs.Record, res check.R
 // followed by its app's bundle id.
 const idOpen = "open"
 
+// restoreInstalled restores the settings kept for apps installed since,
+// as kit prefs' hourly pass would, the log saying what came back, or why
+// nothing could: the step stands as saving does.
+func restoreInstalled(ctx context.Context, p *prefs.Prefs) {
+	report, err := p.RestoreInstalled(ctx)
+	switch {
+	case err != nil:
+		event.Log(ctx, event.Logged{Line: "The settings kept for apps now installed weren't restored: " + err.Error(), Alert: true})
+	case len(report.Restored) > 0:
+		event.Log(ctx, event.Logged{Line: "Restored the settings kept for apps now installed: " + cameBack(report)})
+	}
+}
+
 // restoreSave restores apps' settings from save, as kit prefs restore
 // does, saying what it restored, as in 214 apps' settings, from 15 Oct; how
-// many wait for their apps; how many apps are to be opened once, which a
+// many wait for their apps to quit; how many are kept for apps not
+// installed; how many apps are to be opened once, which a
 // to-do each asks for next; and how many are held, having failed
 // otherwise, for kit prefs restore --pending, the log naming each, with
 // why. Saving starts all the same.
@@ -284,7 +300,7 @@ func restoreSave(ctx context.Context, p *prefs.Prefs, save prefs.Save, now func(
 	for _, file := range slices.Sorted(maps.Keys(report.FilesFailed)) {
 		event.Log(ctx, event.Logged{Line: file + " didn't come back: " + report.FilesFailed[file], Alert: true})
 	}
-	said := cameBack(report) + ", from " + day(save.At, now()) + waitingFor(report)
+	said := cameBack(report) + ", from " + day(save.At, now()) + waitingFor(report) + keptFor(report)
 	if n := appsOf(report.ToOpen, report.Apps); n > 0 {
 		said += fmt.Sprintf("; %d %s to open once", n, plural(n, "app", "apps"))
 	}
@@ -339,14 +355,23 @@ func cameBack(report prefs.RestoreReport) string {
 	}
 }
 
-// waitingFor is how many of report's domains wait for their apps, after a
-// semicolon: "" for none.
+// waitingFor is how many of report's domains wait for their apps, running,
+// after a semicolon: "" for none.
 func waitingFor(report prefs.RestoreReport) string {
 	n := len(report.Waiting)
 	if n == 0 {
 		return ""
 	}
 	return fmt.Sprintf("; %d %s", n, plural(n, "waits for its app", "wait for their apps"))
+}
+
+// keptFor is how many of report's domains are kept for apps not installed,
+// after a semicolon: "" for none.
+func keptFor(report prefs.RestoreReport) string {
+	if n := len(report.Kept); n > 0 {
+		return fmt.Sprintf("; %d kept for apps not installed", n)
+	}
+	return ""
 }
 
 // appsOf counts the apps of domains, as apps names them, each once.

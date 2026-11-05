@@ -138,7 +138,8 @@ func TestAppsSettingsKeys(t *testing.T) {
 }
 
 // r restores this machine ID's last save, as kit prefs restore does,
-// saying how many and from when, and how many wait for their apps; else
+// saying how many and from when, and how many are kept for apps not
+// installed; else
 // the Mac's it started from, as kit prefs restore --from does, the log
 // naming it; with neither, it says why, and capture stays off. A digit is
 // no key. f starts afresh, as kit prefs start-fresh does. Each switches
@@ -163,8 +164,8 @@ func TestAppsSettingsChoice(t *testing.T) {
 	var logged []string
 	ctx := event.WithLogging(t.Context(), func(l event.Logged) { logged = append(logged, l.Line) })
 	said, err := step.Choice.Answer(ctx, paused, "r")
-	if err != nil || said != "no apps' settings, from 25 Oct; 1 waits for its app" {
-		t.Errorf("r = %q, %v; want how many, from when, and how many wait", said, err)
+	if err != nil || said != "no apps' settings, from 25 Oct; 1 kept for apps not installed" {
+		t.Errorf("r = %q, %v; want how many, from when, and how many kept", said, err)
 	}
 	if want := []string{"Restoring application settings from studio's last save"}; !slices.Equal(logged, want) {
 		t.Errorf("the log says %q, want %q", logged, want)
@@ -177,8 +178,8 @@ func TestAppsSettingsChoice(t *testing.T) {
 	}
 
 	_, _, step, paused = settingsStore(t, map[string]string{"laptop": "2026-10-04", "studio": "2026-10-25"}, "studio")
-	if said, err := step.Choice.Answer(t.Context(), paused, "r"); err != nil || said != "no apps' settings, from 4 Oct; 1 waits for its app" {
-		t.Errorf("r = %q, %v; want how many, from when, and how many wait", said, err)
+	if said, err := step.Choice.Answer(t.Context(), paused, "r"); err != nil || said != "no apps' settings, from 4 Oct; 1 kept for apps not installed" {
+		t.Errorf("r = %q, %v; want how many, from when, and how many kept", said, err)
 	}
 
 	_, _, step, paused = settingsStore(t, nil, "")
@@ -447,5 +448,66 @@ func TestAppsSettingsHeldNeverHideCapture(t *testing.T) {
 	}
 	if held := res.Items[2].Name; held != "1 app's settings and 1 settings file didn't come back" {
 		t.Errorf("what's held is named %q; want what it is, apps' settings and files apart", held)
+	}
+}
+
+// Settings kept for an app not installed are nothing to do: no card, no
+// item, the step standing as saving does. Applied, as a run applies it
+// whatever it finds, after the apps it installs, it restores those whose
+// apps are installed now, the log saying so; with none, it says nothing.
+func TestAppsSettingsKeptForAppsNotInstalled(t *testing.T) {
+	state, clone, appDir := t.TempDir(), filepath.Join(t.TempDir(), "prefs"), t.TempDir()
+	write := func(path, text string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	recent := now().Add(-2 * time.Hour).Format(time.RFC3339)
+	write(filepath.Join(state, "prefs.json"), `{"on": "restored", "captured": "`+recent+`", "pending": {"from": "laptop", "domains": ["com.example.app", "com.example.gone"],
+		"why": {"com.example.app": "kept till its app is installed", "com.example.gone": "kept till its app is installed"}}}`)
+	write(filepath.Join(clone, ".git", "HEAD"), "")
+	theme := `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>Theme</key><string>dark</string></dict></plist>`
+	for _, d := range []string{"com.example.app", "com.example.gone"} {
+		write(filepath.Join(clone, "laptop", "domains", d+".plist"), theme)
+	}
+	fake := runnertest.New(t)
+	p := prefs.New(fake, t.TempDir(), state, clone, "git@github.com:someone/prefs.git", "laptop", prefs.Lists{}, now)
+	p.Probes, p.AppDirs = nil, []string{appDir}
+	step := steps.Prefs(p, "", now)
+	if !step.AlwaysApply {
+		t.Error("a run applies the step only as its check finds it; want it applied whatever it finds")
+	}
+	var logged []string
+	ctx := event.WithLogging(t.Context(), func(l event.Logged) { logged = append(logged, l.Line) })
+	res := step.Check(t.Context())
+	if res.State != check.OK || res.Summary != "saved 10:00" || len(res.Items) != 0 {
+		t.Errorf("with settings kept for apps not installed, the check says %+v; want saving's standing alone", res)
+	}
+	if err := step.Apply(ctx, res); err != nil || len(logged) != 0 || len(fake.Calls()) != 0 {
+		t.Errorf("applied with no app installed = %v, the log says %q, ran %q; want nothing", err, logged, fake.Calls())
+	}
+
+	app := filepath.Join(appDir, "Example.app")
+	write(filepath.Join(app, "Contents", "Info.plist"), `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>com.example.app</string></dict></plist>`)
+	configures(fake, clone)
+	fake.On("git", "-C", clone, "remote")
+	fake.On("git", "-C", clone, "rev-parse", "HEAD").Prints("abc123\n")
+	fake.On("osascript", "-e", `application id "com.example.app" is running`).Prints("false\n")
+	fake.On("codesign", "-d", "--entitlements", "-", "--xml", app)
+	fake.On("defaults", "export", "com.example.app", "-").Exits(1).Then().Prints(theme)
+	fake.On("defaults", "delete", "com.example.app")
+	fake.On("defaults", "import", "com.example.app", filepath.Join(clone, "laptop", "domains", "com.example.app.plist"))
+	if err := step.Apply(ctx, step.Check(t.Context())); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"Restored the settings kept for apps now installed: 1 app's settings"}; !slices.Equal(logged, want) {
+		t.Errorf("the log says %q, want %q", logged, want)
+	}
+	if rec, _ := p.Load(); rec.Pending == nil || !slices.Equal(rec.Pending.Domains, []string{"com.example.gone"}) {
+		t.Errorf("pending = %+v, want the app's settings off it, the other's kept", rec.Pending)
 	}
 }

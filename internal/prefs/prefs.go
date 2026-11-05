@@ -67,7 +67,7 @@ type Record struct {
 }
 
 // Pending are what waits to be restored: domains whose apps weren't
-// installed, or were running, or whose restore failed; settings files whose
+// installed, kept till they are, or were running, or whose restore failed; settings files whose
 // restore failed, by their paths from ~ (or /); and why each waits, by
 // domain or path, where kit knows. Of the domains, Open are those whose
 // sandboxed apps the person opens once, for their settings folders, each
@@ -141,7 +141,11 @@ func New(run runner.Runner, home, stateDir, clone, remote, mac string, lists Lis
 
 // Load reads the record.
 func (p *Prefs) Load() (Record, error) {
-	return state.Load[Record](p.State, recordName)
+	rec, err := state.Load[Record](p.State, recordName)
+	if rec.Pending != nil {
+		keptAsSuch(rec.Pending.Why)
+	}
+	return rec, err
 }
 
 // update changes the record.

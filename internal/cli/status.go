@@ -444,7 +444,15 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 			_ = log.Close()
 			return nil, err
 		}
-		settings = []engine.Step{feature(steps.FeaturePrefs, steps.Prefs(p, r.cfg.Macs[r.machine].From, a.Now)), feature(steps.FeaturePrefs, steps.FullDiskAccess(home))}
+		saving := steps.Prefs(p, r.cfg.Macs[r.machine].From, a.Now)
+		// Applied after the apps a run installs, it restores the settings
+		// kept for them before they're first opened.
+		for _, apps := range kinds.Apps() {
+			if slices.Contains(r.kinds, apps) {
+				saving.After = append(saving.After, apps)
+			}
+		}
+		settings = []engine.Step{feature(steps.FeaturePrefs, saving), feature(steps.FeaturePrefs, steps.FullDiskAccess(home))}
 	}
 	checks = append(checks, settings...)
 	edits := steps.ConfigEdits(r.repo)

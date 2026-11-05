@@ -30,6 +30,10 @@ type Descriptor struct {
 	// Help is its command, kit <name>, adding and removing its things: nil
 	// for a kind with a command of its own.
 	Help *Help
+	// Apps says its things are apps (Leaver): removing one asks what
+	// becomes of the files and settings it leaves, and the settings kit
+	// prefs kept for one not installed are restored once it is.
+	Apps bool
 	// Row is the row of applying's screen it sits in, as in Developer tools.
 	Row string
 	// Installing and Removing are putting one of its things on the Mac and

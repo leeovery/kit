@@ -428,7 +428,7 @@ func (a *app) removeSecrets(ctx context.Context, r *run, names []string, shared 
 	c := startChanges(r, names)
 	for _, name := range names {
 		c.step(ctx, name, func(ctx context.Context) check.Result {
-			res := removeOne(ctx, r, c, k, name, shared)
+			res := removeOne(ctx, r, c, k, name, shared, nil)
 			if res.State != check.OK || !del {
 				return res
 			}

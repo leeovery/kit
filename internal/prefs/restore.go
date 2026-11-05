@@ -42,10 +42,12 @@ type RestoreReport struct {
 	At, Commit string
 	Restored   []string
 	Files      int
-	// Waiting are the domains left pending, each with why: not installed,
-	// or running. ToOpen, those whose sandboxed apps the person opens once,
-	// for their settings folders, each with why.
-	Waiting, ToOpen map[string]string
+	// Waiting are the domains left pending, each with why: their apps
+	// running, or a windowless helper's folder not come yet. Kept, those
+	// whose apps aren't installed, kept till they are. ToOpen, those whose
+	// sandboxed apps the person opens once, for their settings folders,
+	// each with why.
+	Waiting, Kept, ToOpen map[string]string
 	// Failed are the domains that failed otherwise, each with why;
 	// FilesFailed, the settings files, by their paths from ~ (or /), each
 	// with why.
@@ -85,7 +87,10 @@ func (r RestoreReport) restored() string {
 		s += " as it was at " + r.At
 	}
 	if len(r.Waiting) > 0 {
-		s += fmt.Sprintf("; %d pending (not installed or running)", len(r.Waiting))
+		s += fmt.Sprintf("; %d waiting for their apps", len(r.Waiting))
+	}
+	if len(r.Kept) > 0 {
+		s += fmt.Sprintf("; %d kept for apps not installed", len(r.Kept))
 	}
 	if len(r.ToOpen) > 0 {
 		s += fmt.Sprintf("; %d to open once", len(r.ToOpen))
@@ -273,13 +278,13 @@ func (p *Prefs) restoreDomain(ctx context.Context, stored, target, saved string)
 // whose app is installed and closed (the rest wait, pending), then the
 // settings files that differ, each live copy saved first. A full restore
 // switches capture on, what it couldn't restore held aside, so capture
-// leaves it be: waiting for its app; its app for the person to open once;
-// or, failed otherwise, for kit prefs restore --pending. Never quits an
-// app but a windowless helper, which it opens and quits itself, starting
-// it again if it was running. From another Mac's folder, or onto other
+// leaves it be: kept till its app is installed; waiting for its app to
+// quit; its app for the person to open once; or, failed otherwise, for kit
+// prefs restore --pending. Never quits an app but a windowless helper,
+// which it opens and quits itself, starting it again if it was running. From another Mac's folder, or onto other
 // hardware, the settings bound to one Mac are left out.
 func (p *Prefs) Restore(ctx context.Context, opts RestoreOptions) (RestoreReport, error) {
-	report := RestoreReport{From: opts.From, DryRun: opts.DryRun, As: opts.As, Waiting: map[string]string{}, ToOpen: map[string]string{}, Failed: map[string]string{}, FilesFailed: map[string]string{}, Apps: map[string]App{}}
+	report := RestoreReport{From: opts.From, DryRun: opts.DryRun, As: opts.As, Waiting: map[string]string{}, Kept: map[string]string{}, ToOpen: map[string]string{}, Failed: map[string]string{}, FilesFailed: map[string]string{}, Apps: map[string]App{}}
 	if report.From == "" {
 		report.From = p.Mac
 	}
@@ -386,10 +391,10 @@ func (p *Prefs) Restore(ctx context.Context, opts RestoreOptions) (RestoreReport
 			continue
 		}
 		// A domain named by hand is restored even without an app; pending
-		// ones wait until their app is installed.
+		// ones are kept until their app is installed.
 		owners := p.owningApps(domain, installed)
 		if len(owners) == 0 && (full || opts.Pending) {
-			report.Waiting[domain] = "not installed"
+			report.Kept[domain] = keptWhy
 			continue
 		}
 		p.restoreOwned(ctx, &report, domain, owners, installed, restoring{
@@ -427,7 +432,7 @@ func (r RestoreReport) held(h held, every, files bool) held {
 	for _, d := range r.Restored {
 		h.drop(d)
 	}
-	for d, why := range r.Waiting {
+	for d, why := range r.waits() {
 		app, toOpen := h.open[d]
 		switch {
 		case toOpen && running(why):
@@ -455,6 +460,33 @@ func (r RestoreReport) held(h held, every, files bool) held {
 		}
 	}
 	return h
+}
+
+// waits are the domains r left waiting for their apps, or kept till
+// they're installed, each with why.
+func (r RestoreReport) waits() map[string]string {
+	all := make(map[string]string, len(r.Waiting)+len(r.Kept))
+	maps.Copy(all, r.Waiting)
+	maps.Copy(all, r.Kept)
+	return all
+}
+
+// RestoreInstalled restores what's held for apps installed since, as the
+// hourly pass does, for kit to run straight after it installs apps, before
+// they're first opened: nothing at all, but when capture's on and a
+// domain kept till its app is installed has its app now.
+func (p *Prefs) RestoreInstalled(ctx context.Context) (RestoreReport, error) {
+	rec, err := p.Load()
+	if err != nil || rec.On == "" || rec.Pending == nil {
+		return RestoreReport{}, err
+	}
+	installed := p.installedApps()
+	if !slices.ContainsFunc(rec.Pending.Domains, func(d string) bool {
+		return rec.Pending.Why[d] == keptWhy && len(p.owningApps(d, installed)) > 0
+	}) {
+		return RestoreReport{}, nil
+	}
+	return p.Restore(ctx, RestoreOptions{Pending: true, Unattended: true})
 }
 
 // restoring is how a domain is restored: from its stored copy, the live

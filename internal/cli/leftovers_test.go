@@ -1,0 +1,306 @@
+package cli_test
+
+import (
+	"path/filepath"
+	"slices"
+	"strings"
+	"testing"
+
+	"github.com/charmbracelet/x/ansi"
+)
+
+// exampleInfo is what brew info says of a cask whose zap list names files
+// in the home folder, its preferences among them, and one outside it.
+const exampleInfo = `{"formulae": [], "casks": [{"token": "example-app", "full_token": "example-app", "name": ["Example App"], "old_tokens": [],
+	"artifacts": [{"app": ["Example App.app"]}, {"zap": [{"trash": ["~/Library/Application Support/Example App", "~/Library/Caches/com.example.app*", "~/Library/Preferences/com.example.app.plist"], "delete": "/Library/Example App/none"}]}]}]}`
+
+// leavingWorld is laptopWorld saving apps' settings, with the cask
+// example-app installed and declared, which leaves files on the Mac when
+// files says so.
+func leavingWorld(t *testing.T, files bool) *world {
+	t.Helper()
+	w := laptopWorld(t)
+	w.writeSection(t, "laptop", "features", "prefs\n")
+	w.writeSection(t, "laptop", "homebrew casks", "example-app\n")
+	w.fake.On("brew", "list", "--cask", "--full-name", "-1").Prints("ghostty\nexample-app\n")
+	w.fake.On("brew", "info", "--json=v2", "--cask", "example-app").Prints(exampleInfo)
+	if files {
+		w.write(t, filepath.Join("Library", "Application Support", "Example App", "data"), "data")
+		w.write(t, filepath.Join("Library", "Caches", "com.example.app.ShipIt", "cache"), "cache")
+		w.write(t, filepath.Join("Library", "Preferences", "com.example.app.plist"), "settings")
+	}
+	return w
+}
+
+// ran reports whether the fake ran call.
+func ran(w *world, call string) bool {
+	return slices.Contains(w.fake.Calls(), call)
+}
+
+// Removing a cask whose zap list names files on the Mac asks once, at a
+// terminal, before anything's uninstalled, by the app's name: removing them
+// uninstalls with Homebrew's zap, and deletes its preferences' domain, so
+// the next capture drops it from kit prefs' store; keeping them uninstalls
+// as before.
+func TestRemovingACaskAsksAboutWhatItLeaves(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		answer   int
+		runs     []string
+		runsNone []string
+	}{
+		{"remove them", 1, []string{"brew uninstall --cask --zap example-app", "defaults delete com.example.app"}, []string{"brew uninstall --cask example-app"}},
+		{"keep them", 0, []string{"brew uninstall --cask example-app"}, []string{"brew uninstall --cask --zap example-app", "defaults delete com.example.app"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			w := leavingWorld(t, true)
+			w.terminal = true
+			var labels []string
+			w.choose = func(_ string, options []string) (int, error) {
+				labels = options
+				if ran(w, "brew uninstall --cask example-app") || ran(w, "brew uninstall --cask --zap example-app") {
+					t.Error("asked once it had uninstalled")
+				}
+				return tt.answer, nil
+			}
+			w.fake.On("brew", "uninstall", "--cask", "example-app")
+			w.fake.On("brew", "uninstall", "--cask", "--zap", "example-app")
+			w.fake.On("defaults", "delete", "com.example.app")
+			w.expectSync(t, []string{"laptop/declarations"}, "kit cask remove example-app (laptop)")
+			if _, errOut, code := w.run(t, "cask", "remove", "example-app"); code != 0 {
+				t.Fatalf("kit cask remove exit %d: %s", code, errOut)
+			}
+			if want := []string{"Example App's settings and files"}; !slices.Equal(w.asked, want) {
+				t.Errorf("asked %q, want %q", w.asked, want)
+			}
+			if want := []string{"Keep them", "Remove them"}; !slices.Equal(labels, want) {
+				t.Errorf("offered %q, want %q", labels, want)
+			}
+			for _, call := range tt.runs {
+				if !ran(w, call) {
+					t.Errorf("ran %q, want %s", w.fake.Calls(), call)
+				}
+			}
+			for _, call := range tt.runsNone {
+				if ran(w, call) {
+					t.Errorf("ran %s, want it not run", call)
+				}
+			}
+		})
+	}
+}
+
+// Without a terminal, and without --zap or --keep, what a cask leaves is
+// kept, the output saying so, and that --zap removes it; --zap removes it
+// without asking, --keep keeps it without asking, and not both.
+func TestRemovingACaskWithoutAsking(t *testing.T) {
+	w := leavingWorld(t, true)
+	w.fake.On("brew", "uninstall", "--cask", "example-app")
+	w.expectSync(t, []string{"laptop/declarations"}, "kit cask remove example-app (laptop)")
+	out, errOut, code := w.run(t, "cask", "remove", "example-app")
+	if want := "example-app ok uninstalled, its files kept: --zap removes them; out of laptop\n"; !strings.Contains(out, want) || code != 0 {
+		t.Errorf("kit cask remove printed\n%s%s exit %d; want %q", out, errOut, code, want)
+	}
+
+	w = leavingWorld(t, true)
+	w.fake.On("brew", "uninstall", "--cask", "--zap", "example-app")
+	w.fake.On("defaults", "delete", "com.example.app")
+	w.expectSync(t, []string{"laptop/declarations"}, "kit cask remove example-app (laptop)")
+	out, errOut, code = w.run(t, "cask", "remove", "example-app", "--zap")
+	if want := "example-app ok uninstalled with its files and settings; out of laptop\n"; !strings.Contains(out, want) || code != 0 || !ran(w, "defaults delete com.example.app") {
+		t.Errorf("kit cask remove --zap printed\n%s%s exit %d, ran %q; want %q", out, errOut, code, w.fake.Calls(), want)
+	}
+
+	w = leavingWorld(t, true)
+	w.terminal = true
+	w.fake.On("brew", "uninstall", "--cask", "example-app")
+	w.expectSync(t, []string{"laptop/declarations"}, "kit cask remove example-app (laptop)")
+	if _, errOut, code := w.run(t, "cask", "remove", "example-app", "--keep"); code != 0 || len(w.asked) != 0 || !ran(w, "brew uninstall --cask example-app") {
+		t.Errorf("kit cask remove --keep: exit %d (%s), asked %q, ran %q; want it uninstalled as before, unasked", code, errOut, w.asked, w.fake.Calls())
+	}
+
+	w = leavingWorld(t, true)
+	if _, errOut, code := w.run(t, "cask", "remove", "example-app", "--zap", "--keep"); code != 2 || !strings.Contains(errOut, "--zap or --keep, not both") {
+		t.Errorf("kit cask remove --zap --keep printed %q, exit %d", errOut, code)
+	}
+}
+
+// A cask whose zap list names nothing on the Mac leaves nothing to ask
+// about: it's uninstalled as before.
+func TestRemovingACaskThatLeftNothing(t *testing.T) {
+	w := leavingWorld(t, false)
+	w.terminal = true
+	w.fake.On("brew", "uninstall", "--cask", "example-app")
+	w.expectSync(t, []string{"laptop/declarations"}, "kit cask remove example-app (laptop)")
+	out, errOut, code := w.run(t, "cask", "remove", "example-app")
+	if code != 0 || len(w.asked) != 0 || !strings.Contains(ansi.Strip(out), "example-app  uninstalled · out of laptop") {
+		t.Errorf("kit cask remove printed\n%s%s exit %d, asked %q; want it uninstalled, unasked", ansi.Strip(out), errOut, code, w.asked)
+	}
+}
+
+// notesListed is mas's list of an App Store app, its bundle id and all.
+const notesListed = `{"adamID":123456789,"bundleID":"com.example.notes","name":"Notes Example"}` + "\n"
+
+// notesWorld is laptopWorld saving apps' settings, with an App Store app
+// installed and declared, whose settings kit prefs saved when saved says
+// so, beside another app's.
+func notesWorld(t *testing.T, saved bool) *world {
+	t.Helper()
+	w := laptopWorld(t)
+	w.writeSection(t, "laptop", "features", "prefs\n")
+	w.writeSection(t, "laptop", "app store apps", "notes-example@123456789\n")
+	w.fake.On("mas", "list", "--json").Prints(notesListed)
+	w.write(t, filepath.Join("Applications", "Notes Example.app", "Contents", "Info.plist"),
+		`<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>com.example.notes</string></dict></plist>`)
+	domains := filepath.Join(".local", "share", "kit", "prefs", "laptop", "domains")
+	w.write(t, filepath.Join(domains, "com.example.other.plist"), "settings")
+	if saved {
+		w.write(t, filepath.Join(domains, "com.example.notes.plist"), "settings")
+	}
+	return w
+}
+
+// Removing an App Store app, which has no list of the files it leaves,
+// asks about its settings kit prefs saved, once there are some: removing
+// them deletes their domains, so the next capture drops them.
+func TestRemovingAnAppStoreAppAsksAboutItsSavedSettings(t *testing.T) {
+	w := notesWorld(t, true)
+	w.terminal = true
+	var labels []string
+	w.choose = func(_ string, options []string) (int, error) {
+		labels = options
+		return 1, nil
+	}
+	w.expectPassword()
+	w.fake.On("sudo", "-n", "mas", "uninstall", "123456789")
+	w.fake.On("defaults", "delete", "com.example.notes")
+	w.expectSync(t, []string{"laptop/declarations"}, "kit mas remove notes-example@123456789 (laptop)")
+	if _, errOut, code := w.run(t, "mas", "remove", "notes-example@123456789"); code != 0 {
+		t.Fatalf("kit mas remove exit %d: %s", code, errOut)
+	}
+	if want := []string{"Notes Example's settings"}; !slices.Equal(w.asked, want) || !slices.Equal(labels, []string{"Keep them", "Remove them"}) {
+		t.Errorf("asked %q, offered %q; want %q, keep or remove", w.asked, labels, want)
+	}
+	if !ran(w, "sudo -n mas uninstall 123456789") || !ran(w, "defaults delete com.example.notes") || ran(w, "defaults delete com.example.other") {
+		t.Errorf("ran %q; want the app uninstalled and its settings deleted, the other app's left", w.fake.Calls())
+	}
+
+	w = notesWorld(t, false)
+	w.terminal = true
+	w.expectPassword()
+	w.fake.On("sudo", "-n", "mas", "uninstall", "123456789")
+	w.expectSync(t, []string{"laptop/declarations"}, "kit mas remove notes-example@123456789 (laptop)")
+	if _, errOut, code := w.run(t, "mas", "remove", "notes-example@123456789"); code != 0 || len(w.asked) != 0 {
+		t.Errorf("with no settings saved: exit %d (%s), asked %q; want it uninstalled, unasked", code, errOut, w.asked)
+	}
+}
+
+// keptWorld is laptopWorld saving apps' settings, switched on, with
+// example-app's settings kept till it's installed, and kit prefs' store
+// cloned; installing example-app puts the app in place.
+func keptWorld(t *testing.T) *world {
+	t.Helper()
+	w := laptopWorld(t)
+	w.write(t, filepath.Join(".config", "kit", "kit.toml"), strings.Replace(twoMacs, "primary = \"laptop\"\n", "primary = \"laptop\"\nprefs_repo = \"git@github.com:someone/prefs.git\"\n", 1))
+	w.writeSection(t, "laptop", "features", "prefs\n")
+	w.write(t, filepath.Join(".local", "state", "kit", "prefs.json"), `{"on": "restored", "pending": {"from": "laptop", "domains": ["com.example.app"],
+		"why": {"com.example.app": "kept till its app is installed"}}}`)
+	store := filepath.Join(".local", "share", "kit", "prefs")
+	clone := filepath.Join(w.home, store)
+	w.write(t, filepath.Join(store, ".git", "HEAD"), "")
+	w.write(t, filepath.Join(store, "laptop", "domains", "com.example.app.plist"), exampleSettings)
+	w.fake.On("brew", "info", "--json=v2", "--cask", "example-app").Prints(exampleInfo)
+	w.fake.On("brew", "update", "--quiet")
+	app := filepath.Join(w.home, "Applications", "Example App.app")
+	w.fake.On("brew", "install", "--cask", "example-app").Does(func() {
+		w.write(t, filepath.Join("Applications", "Example App.app", "Contents", "Info.plist"),
+			`<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>com.example.app</string></dict></plist>`)
+	})
+	for _, kv := range [][2]string{{"user.name", "kit"}, {"user.email", "kit@localhost"}, {"commit.gpgsign", "false"}, {"tag.gpgsign", "false"}, {"core.excludesFile", "/dev/null"}, {"core.hooksPath", "/dev/null"}, {"core.autocrlf", "false"}} {
+		w.fake.On("git", "-C", clone, "config", kv[0], kv[1])
+	}
+	w.fake.On("git", "-C", clone, "remote")
+	w.fake.On("git", "-C", clone, "rev-parse", "HEAD").Prints("abc123\n")
+	w.fake.On("osascript", "-e", `application id "com.example.app" is running`).Prints("false\n")
+	w.fake.On("codesign", "-d", "--entitlements", "-", "--xml", app)
+	w.fake.On("defaults", "export", "com.example.app", "-").Exits(1).Then().Prints(exampleSettings)
+	w.fake.On("defaults", "delete", "com.example.app")
+	w.fake.On("defaults", "import", "com.example.app", filepath.Join(clone, "laptop", "domains", "com.example.app.plist"))
+	return w
+}
+
+// exampleSettings are example-app's settings, as kit prefs saved them.
+const exampleSettings = `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>Theme</key><string>dark</string></dict></plist>`
+
+// Installing an app kit prefs kept settings for restores them straight
+// after, before it's first opened, saying so; with none kept for it, it
+// says nothing of settings; with kit prefs off, nothing's looked at.
+func TestAddingAnAppRestoresTheSettingsKeptForIt(t *testing.T) {
+	w := keptWorld(t)
+	w.expectSync(t, []string{"laptop/declarations"}, "kit cask add example-app (laptop)")
+	out, errOut, code := w.run(t, "cask", "add", "example-app")
+	if want := "example-app ok installed; declared in laptop; its saved settings restored\n"; !strings.Contains(out, want) || code != 0 {
+		t.Errorf("kit cask add printed\n%s%s exit %d; want %q", out, errOut, code, want)
+	}
+	if !ran(w, "defaults import com.example.app "+filepath.Join(w.home, ".local", "share", "kit", "prefs", "laptop", "domains", "com.example.app.plist")) {
+		t.Errorf("ran %q, want its settings imported", w.fake.Calls())
+	}
+	if got := w.read(t, filepath.Join(".local", "state", "kit", "prefs.json")); strings.Contains(got, "com.example.app") {
+		t.Errorf("prefs.json says\n%s\nwant nothing held for it", got)
+	}
+
+	w = keptWorld(t)
+	w.write(t, filepath.Join(".local", "state", "kit", "prefs.json"), `{"on": "restored", "pending": {"from": "laptop", "domains": ["com.example.other"],
+		"why": {"com.example.other": "kept till its app is installed"}}}`)
+	w.expectSync(t, []string{"laptop/declarations"}, "kit cask add example-app (laptop)")
+	out, errOut, code = w.run(t, "cask", "add", "example-app")
+	if want := "example-app ok installed; declared in laptop\n"; !strings.Contains(out, want) || code != 0 || ran(w, "osascript -e application id \"com.example.app\" is running") {
+		t.Errorf("with nothing kept for it, kit cask add printed\n%s%s exit %d, ran %q; want %q, and nothing restored", out, errOut, code, w.fake.Calls(), want)
+	}
+
+	w = keptWorld(t)
+	w.writeSection(t, "laptop", "features", "")
+	w.expectSync(t, []string{"laptop/declarations"}, "kit cask add example-app (laptop)")
+	out, errOut, code = w.run(t, "cask", "add", "example-app")
+	if want := "example-app ok installed; declared in laptop\n"; !strings.Contains(out, want) || code != 0 || ran(w, "defaults delete com.example.app") {
+		t.Errorf("with kit prefs off, kit cask add printed\n%s%s exit %d, ran %q; want %q, and nothing restored", out, errOut, code, w.fake.Calls(), want)
+	}
+}
+
+// kit apply restores the settings kept for the apps it installs once
+// they're in, before they're first opened: the settings step's applied
+// after the kinds of apps the run has.
+func TestApplyRestoresTheSettingsKeptForTheAppsItInstalls(t *testing.T) {
+	w := keptWorld(t)
+	w.writeSection(t, "laptop", "homebrew casks", "example-app\n")
+	listed := w.fake.On("brew", "list", "--cask", "--full-name", "-1").Prints("ghostty\n")
+	w.fake.On("brew", "install", "--cask", "example-app").Does(func() {
+		w.write(t, filepath.Join("Applications", "Example App.app", "Contents", "Info.plist"),
+			`<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>com.example.app</string></dict></plist>`)
+		listed.Then().Prints("ghostty\nexample-app\n")
+	})
+	out, errOut, _ := w.run(t, "apply")
+	calls := w.fake.Calls()
+	install, restore := slices.Index(calls, "brew install --cask example-app"), slices.IndexFunc(calls, func(c string) bool { return strings.HasPrefix(c, "defaults import com.example.app ") })
+	if install < 0 || restore < install {
+		t.Errorf("kit apply printed\n%s%s\nran %q; want the app installed, then its settings restored", out, errOut, calls)
+	}
+	for _, s := range runStarted(t, w).Steps {
+		if s.Name == "prefs" && !slices.Equal(s.Waits, []string{"cask"}) {
+			t.Errorf("the settings step waits for %q, want the casks alone, as the run has no App Store apps", s.Waits)
+		}
+	}
+}
+
+// kit prefs restore --pending says what's kept for apps not installed as
+// kept, never as waiting.
+func TestPrefsRestoreSaysWhatsKept(t *testing.T) {
+	w := keptWorld(t)
+	out, errOut, code := w.run(t, "prefs", "restore", "--pending")
+	want := "prefs ok restored 0 domains and 0 files from laptop; 1 kept for apps not installed\n" +
+		"prefs kept:restored once its app is installed com.example.app\n" +
+		"Nothing needs attention\n"
+	if !strings.Contains(out, want) || code != 0 {
+		t.Errorf("kit prefs restore --pending printed\n%s%s exit %d\nwant\n%s", out, errOut, code, want)
+	}
+}

@@ -49,6 +49,7 @@ func heldIn(p *Pending) held {
 	}
 	maps.Copy(h.open, p.Open)
 	maps.Copy(h.why, p.Why)
+	keptAsSuch(h.why)
 	if p.Failed == nil && p.Open == nil {
 		for d := range h.domains {
 			switch why := h.why[d]; {
@@ -63,10 +64,25 @@ func heldIn(p *Pending) held {
 	return h
 }
 
-// waits reports whether why is a wait's: not installed, running, or a
-// windowless helper's folder not come yet.
+// keptWhy is why a domain whose app isn't installed is held: nothing to
+// wait for, as its app may never come, but kept, so capture leaves the
+// saved copy be.
+const keptWhy = "kept till its app is installed"
+
+// keptAsSuch has why, by domain, say kept of a domain a record from before
+// kit kept the settings of apps not installed says waits, "not installed".
+func keptAsSuch(why map[string]string) {
+	for d, w := range why {
+		if w == "not installed" {
+			why[d] = keptWhy
+		}
+	}
+}
+
+// waits reports whether why is a wait's: kept till its app is installed,
+// running, or a windowless helper's folder not come yet.
 func waits(why string) bool {
-	return why == "not installed" || running(why) || why == errNoFolderYet.Error()
+	return why == keptWhy || running(why) || why == errNoFolderYet.Error()
 }
 
 // running reports whether why is that the app is running.
@@ -102,7 +118,8 @@ func (h held) drop(name string) {
 	delete(h.why, name)
 }
 
-// hold puts domain on, as waiting for its app, with why.
+// hold puts domain on, as waiting for its app, or kept till it's
+// installed, with why.
 func (h held) hold(domain, why string) {
 	h.drop(domain)
 	h.domains[domain], h.why[domain] = true, why
