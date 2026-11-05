@@ -269,8 +269,9 @@ func TestPrettyStatusSaysWhatsNotAllowed(t *testing.T) {
 
 // Status's details under a row are what's acted on, so they wrap, never
 // cut, what to do under its words past the arrow, and so do the rows of
-// what needs attention in Config, what to run on its own line; the lines
-// a failed step printed are a log, cut.
+// what needs attention in Config, what to run on its own line, each
+// thing's state in its kind's words, its part's without; the lines a
+// failed step printed are a log, cut.
 func TestPrettyStatusWrapsDetails(t *testing.T) {
 	var out bytes.Buffer
 	refused := check.Result{State: check.Attention, Summary: "needs your permission", Items: []check.Item{{
@@ -289,7 +290,7 @@ func TestPrettyStatusWrapsDetails(t *testing.T) {
 	steps := []event.Step{
 		{Name: "login-item", Title: "macOS login items", Area: "Drift", Row: "Login items", Part: render.PartSettings},
 		{Name: "brew", Title: "Formulae", Area: "Drift", Row: "Homebrew formulae", Tool: "Homebrew", Part: render.PartPackages},
-		{Name: "backup-exclusion", Title: "Backup exclusions", Area: "Drift", Row: "Mac settings", Part: render.PartSettings},
+		{Name: "backup-exclusion", Title: "Backup exclusions", Area: "Drift", Row: "Mac settings", Part: render.PartSettings, Verb: "excluded"},
 		{Name: "defaults", Title: "macOS settings", Area: "Drift", Row: "Mac settings", Part: render.PartSettings},
 	}
 	show(t, face, []event.Event{
@@ -304,7 +305,7 @@ func TestPrettyStatusWrapsDetails(t *testing.T) {
 	for _, want := range []string{
 		"  ▲ ~/Library/Application Support/Some Long App Name/Default/Service Worker/\n" +
 			"    Cache_Data\n" +
-			"    set, not declared · 2 days\n" +
+			"    excluded, not declared · 2 days\n" +
 			"    → kit reconcile\n",
 		"  ▲ com.example.agent\n" +
 			"    declared, not set · not installed: install the app, or open the app it comes\n" +

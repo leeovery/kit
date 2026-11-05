@@ -468,11 +468,11 @@ func worse(a, b look.State) bool {
 // it was applied.
 func (p *Pretty) row(f event.StepFinished) look.Row {
 	r := f.Result
-	row := resultRow(p.title(f.Step), r, p.step(f.Step).Part, p.start.Time)
+	row := resultRow(p.title(f.Step), r, p.step(f.Step), p.start.Time)
 	row.Under = look.Fold("  ", p.width, row.Under...)
 	if out := p.output[f.Step]; r.State == check.Failed && len(out) > 0 {
 		var printed failing
-		row.Says, printed = p.printedFailing(f, p.step(f.Step).Part, len(out))
+		row.Says, printed = p.printedFailing(f, len(out))
 		printed.why, printed.left = look.Fold("  ", p.width, printed.why...), look.Fold("  ", p.width, printed.left...)
 		row.Under = printed.lines()
 	}
@@ -498,7 +498,7 @@ func (f failing) lines() []string { return slices.Concat(f.why, f.printed, f.lef
 // the lines it printed, but for the last when it's why said whole (as with
 // a path before it, which a row too narrow for it would cut off), then
 // what's left of it.
-func (p *Pretty) printedFailing(f event.StepFinished, part string, kept int) (string, failing) {
+func (p *Pretty) printedFailing(f event.StepFinished, kept int) (string, failing) {
 	head, why := failure(f.Result)
 	says := look.Red(head)
 	if c := p.command[f.Step]; c != "" {
@@ -508,7 +508,7 @@ func (p *Pretty) printedFailing(f event.StepFinished, part string, kept int) (st
 	if why != "" && strings.HasSuffix(out[len(out)-1], why) {
 		out = out[:len(out)-1]
 	}
-	return says, failing{why: whyFailed(f.Result), printed: look.Output(out...), left: whatsLeft(f.Result, part, p.start.Time)}
+	return says, failing{why: whyFailed(f.Result), printed: look.Output(out...), left: whatsLeft(f.Result, p.step(f.Step), p.start.Time)}
 }
 
 // saying is a result's words as a row says them: the parts of a summary
@@ -556,7 +556,7 @@ func (p *Pretty) configRows(fs []event.StepFinished) []look.Row {
 		}
 		for _, it := range r.Items {
 			if it.Quiet == "" {
-				rows = append(rows, p.thing(part, it))
+				rows = append(rows, p.thing(p.step(f.Step), it))
 				continue
 			}
 			if quiet[part] == nil {
@@ -604,10 +604,10 @@ func (p *Pretty) configRows(fs []event.StepFinished) []look.Row {
 // quietWords say why things don't need attention yet, after their count.
 var quietWords = map[string]string{"new": "new", "snoozed": "snoozed", "temporary": "for now"}
 
-// thing is a row for something that needs attention, of a part: its name,
+// thing is a row for something that needs attention, of step s: its name,
 // what's wrong, for how long, and what to run about it.
-func (p *Pretty) thing(part string, it check.Item) look.Row {
-	says := []string{look.Orange(wrong(part, it))}
+func (p *Pretty) thing(s event.Step, it check.Item) look.Row {
+	says := []string{look.Orange(wrong(s, it))}
 	if _, drift := driftStates[it.State]; drift && it.Detail != "" {
 		says = append(says, look.Muted(it.Detail))
 	}
@@ -627,10 +627,11 @@ func (p *Pretty) thing(part string, it check.Item) look.Row {
 	return row
 }
 
-// wrong says what's wrong with a thing of a part, in words: installed, not
-// declared; or, of a setting, set, not declared.
-func wrong(part string, it check.Item) string {
-	verb := cmp.Or(map[string]string{PartSettings: "set", PartSecrets: "synced"}[part], "installed")
+// wrong says what's wrong with a thing of step s, in its kind's words:
+// installed, not declared; of a backup exclusion, excluded, not declared;
+// else, of a setting, set, not declared.
+func wrong(s event.Step, it check.Item) string {
+	verb := cmp.Or(s.Verb, map[string]string{PartSettings: "set", PartSecrets: "synced"}[s.Part], "installed")
 	switch it.State {
 	case "extra":
 		return verb + ", not declared"

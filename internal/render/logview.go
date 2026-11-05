@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/leeovery/kit/internal/check"
+	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/logs"
 	"github.com/leeovery/kit/internal/look"
 )
@@ -172,7 +173,7 @@ func LogRun(w io.Writer, width int, records []logs.Record) error {
 		row := look.Row{State: look.Failed, Name: cmp.Or(s.Title, s.Name), Says: look.Red("didn't finish")}
 		why := 0
 		if ok && r.Result != nil {
-			row = resultRow(row.Name, *r.Result, s.Part, run.Time)
+			row = resultRow(row.Name, *r.Result, s, run.Time)
 			why = len(whyFailed(*r.Result))
 		}
 		var under []string
@@ -258,10 +259,10 @@ func said(c logs.Record) string {
 	return look.OneLine(text)
 }
 
-// resultRow is a step's row from its result r, of part, in a run started
+// resultRow is a step's row from its result r, of step s, in a run started
 // at start: its title, and what the result says, its parts after dots;
 // what's left of it, as whatsLeft has it, on the lines under it.
-func resultRow(title string, r check.Result, part string, start time.Time) look.Row {
+func resultRow(title string, r check.Result, s event.Step, start time.Time) look.Row {
 	row := look.Row{State: state(r.State), Name: title}
 	switch r.State {
 	case check.Failed:
@@ -272,7 +273,7 @@ func resultRow(title string, r check.Result, part string, start time.Time) look.
 	default:
 		row.Says = saying(row.State, r.Summary)
 	}
-	row.Under = append(whyFailed(r), whatsLeft(r, part, start)...)
+	row.Under = append(whyFailed(r), whatsLeft(r, s, start)...)
 	return row
 }
 

@@ -70,7 +70,7 @@ func told(style func(string) string, title, says string) string {
 // in the middle of, has no line. A step by hand of its own whose card came
 // up has its card's line, and no other.
 func (p *Pretty) noteFinished(f event.StepFinished) {
-	at, row, title, part := p.stamp(f.Time), p.rowOf(f.Step), p.title(f.Step), p.step(f.Step).Part
+	at, row, title := p.stamp(f.Time), p.rowOf(f.Step), p.title(f.Step)
 	ended := p.ended(f)
 	switch {
 	case p.toldByItsCard(f.Step) && (ended == look.Done || ended == look.ToDo):
@@ -85,14 +85,14 @@ func (p *Pretty) noteFinished(f event.StepFinished) {
 	case look.ToDo:
 		p.note(at, row, look.Mark(p.laterState()), told(look.White, title, p.toDoRow(f).Says))
 	case look.NeedsYou:
-		r := p.workRow(f, part)
+		r := p.workRow(f)
 		p.note(at, row, look.Mark(look.NeedsYou), told(look.White, title, r.Says), r.Under...)
 	case look.Skipped:
 		if !wasStopped(f) {
 			p.note(at, row, look.Mark(look.Skipped), told(look.Muted, title, p.listRow(p.step(f.Step)).Says))
 		}
 	default:
-		r := p.workRow(f, part)
+		r := p.workRow(f)
 		p.note(at, row, look.Mark(look.Done), told(look.White, title, r.Says), r.Under...)
 	}
 }

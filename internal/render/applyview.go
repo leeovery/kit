@@ -68,7 +68,7 @@ func (p *Pretty) applyLive() []string {
 				continue
 			}
 			if f, ok := p.results[s.Name]; ok && !slices.Contains([]look.State{look.Done, look.Skipped, look.ToDo}, p.ended(f)) {
-				row := p.workRow(f, s.Part)
+				row := p.workRow(f)
 				row.Under, row.Whole = nil, true
 				lines := look.Rows("  ", p.width, row)
 				blocks = append(blocks, block{lines: lines, unwell: true})
@@ -212,7 +212,7 @@ func (p *Pretty) listRow(s event.Step) look.Row {
 	case isDone && p.toDo(s.Name):
 		return p.toDoRow(f)
 	case isDone:
-		return p.workRow(f, s.Part)
+		return p.workRow(f)
 	}
 	return look.Row{State: look.Queued, Name: p.title(s.Name), Says: look.Muted(p.waiting(s))}
 }
@@ -270,11 +270,11 @@ func todoLines(text string, width int) []string {
 // first, a few things named, or counted, then what the step says; why a
 // failed step failed, the last lines it printed (printedFailing), then
 // what's left of it, under it.
-func (p *Pretty) workRow(f event.StepFinished, part string) look.Row {
-	row := resultRow(p.title(f.Step), f.Result, part, p.start.Time)
+func (p *Pretty) workRow(f event.StepFinished) look.Row {
+	row := resultRow(p.title(f.Step), f.Result, p.step(f.Step), p.start.Time)
 	if f.Result.State == check.Failed && len(p.output[f.Step]) > 0 {
 		var printed failing
-		row.Says, printed = p.printedFailing(f, part, keptFailing)
+		row.Says, printed = p.printedFailing(f, keptFailing)
 		row.Under = printed.lines()
 	}
 	did := did(f.Result.Done, p.step(f.Step), f.Result.Summary != "")
@@ -323,12 +323,12 @@ func did(done []check.Item, s event.Step, said bool) []string {
 // kindInstall is the action a kind's step takes on a thing missing.
 const kindInstall = "install"
 
-// whatsLeft is what's left to do about a step's result r, of part, in a run
+// whatsLeft is what's left to do about a step's result r, of step s, in a run
 // started at start, as every row of the step has it under it (status, the
 // log, applying's list and its panels): each thing that needs attention, by
 // name, with what to do about it under it when there's something to say, or
 // why it's not done yet; then what to run.
-func whatsLeft(r check.Result, part string, start time.Time) []string {
+func whatsLeft(r check.Result, s event.Step, start time.Time) []string {
 	var lines, hints []string
 	alike := map[string]int{}
 	for _, it := range r.Items {
@@ -343,7 +343,7 @@ func whatsLeft(r check.Result, part string, start time.Time) []string {
 		if key := it.State + "|" + it.Detail; it.Quiet == "" && alike[key] > 3 {
 			if !told[key] {
 				told[key] = true
-				lines = append(lines, look.Says(look.Orange(fmt.Sprintf("%d %s", alike[key], wrong(part, it))), look.Muted(it.Detail)))
+				lines = append(lines, look.Says(look.Orange(fmt.Sprintf("%d %s", alike[key], wrong(s, it))), look.Muted(it.Detail)))
 			}
 			continue
 		}
@@ -354,7 +354,7 @@ func whatsLeft(r check.Result, part string, start time.Time) []string {
 			lines = append(lines, look.Says(look.White(it.Name), look.Muted(it.Detail)))
 		case it.Quiet != "":
 		case IsDrift(it):
-			says := []string{look.Orange(it.Name), look.Muted(wrong(part, it))}
+			says := []string{look.Orange(it.Name), look.Muted(wrong(s, it))}
 			if it.Detail != "" {
 				says = append(says, look.Muted(it.Detail))
 			}
@@ -535,7 +535,7 @@ func (p *Pretty) doneSection() []string {
 		for _, s := range r.steps {
 			f := p.results[s.Name]
 			f.Result.Items = slices.DeleteFunc(slices.Clone(f.Result.Items), func(it check.Item) bool { return it.Later })
-			row.Under = append(row.Under, p.workRow(f, s.Part).Under...)
+			row.Under = append(row.Under, p.workRow(f).Under...)
 		}
 		out = append(out, p.recorded(row)...)
 	}

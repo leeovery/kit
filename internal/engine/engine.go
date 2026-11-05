@@ -46,6 +46,9 @@ type Step struct {
 	// kind's step does; Tool is what its commands run, as the person knows
 	// it, when it says: Homebrew.
 	Row, Tool string
+	// Verb is what one of its things on the Mac as declared is, in its
+	// kind's words, as in excluded: "" for its part's.
+	Verb string
 	// Macs are the Macs it runs on: every Mac when empty.
 	Macs []string
 	// Needs are the steps that must stand ok before it's checked or applied.
@@ -505,7 +508,7 @@ func (s Step) info() event.Step {
 			waits = append(waits, w.Step)
 		}
 	}
-	return event.Step{Name: s.Name, Title: s.title(), Area: s.Area, Part: s.Part, Row: s.Row, Tool: s.Tool, Waiting: s.Waiting, Waits: waits, ByHand: s.ByHand, Did: s.Did, Weight: s.Weight}
+	return event.Step{Name: s.Name, Title: s.title(), Area: s.Area, Part: s.Part, Row: s.Row, Tool: s.Tool, Verb: s.Verb, Waiting: s.Waiting, Waits: waits, ByHand: s.ByHand, Did: s.Did, Weight: s.Weight}
 }
 
 func (p *Pipeline) run(ctx context.Context, sink event.Sink, opts Options, apply bool) (Report, error) {

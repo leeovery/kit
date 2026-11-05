@@ -374,7 +374,7 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 			continue
 		}
 		step := kind.Placed(k, list, func(context.Context) kind.Placing { return r.placed(d.Name) }, d.Needs...)
-		step.Title, step.Area, step.Row, step.Tool = d.Label, steps.AreaDrift, d.Row, d.Tool
+		step.Title, step.Area, step.Row, step.Tool, step.Verb = d.Label, steps.AreaDrift, d.Row, d.Tool, d.Installs().Done
 		if unread != nil {
 			step.Check = func(context.Context) check.Result {
 				return check.Result{State: check.Failed, Reason: unread.Error()}

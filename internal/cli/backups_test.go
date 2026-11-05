@@ -342,3 +342,19 @@ func TestReconcileOffersAnExclusionsChoicesInItsWords(t *testing.T) {
 		}
 	}
 }
+
+// kit status words a backup exclusion's state in its kind's words, as
+// reconcile does: excluded, not declared.
+func TestStatusSaysAnExclusionsStateInItsWords(t *testing.T) {
+	w := laptopWorld(t)
+	w.terminal = true
+	w.writeSection(t, "laptop", "backup exclusions", "/Applications\n")
+	w.writeSection(t, "laptop", "backups", "arq\n")
+	w.fake.On(arqc, "stats").Prints(arqStats(w.now.Add(-2 * time.Hour)))
+	w.fake.On("defaults", "export", "/Library/Preferences/com.apple.TimeMachine", "-").Prints("<plist><dict><key>SkipPaths</key><array><string>/Applications</string><string>/Volumes/Old</string></array></dict></plist>")
+	w.write(t, filepath.Join(".local", "state", "kit", "drift.json"), `{"first_seen": {"backup-exclusion:/Volumes/Old": "2025-12-31T00:00:00Z"}}`)
+	out, errOut, _ := w.run(t, "status")
+	if !strings.Contains(ansi.Strip(out), "▲ /Volumes/Old  excluded, not declared") {
+		t.Errorf("kit status printed\n%s%s\nwant /Volumes/Old excluded, not declared", ansi.Strip(out), errOut)
+	}
+}

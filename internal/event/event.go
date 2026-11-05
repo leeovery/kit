@@ -52,6 +52,9 @@ type Step struct {
 	// Tool is what its commands run, as the person knows it, when it says:
 	// Homebrew.
 	Tool string `json:",omitempty"`
+	// Verb is what one of its things on the Mac as declared is, in its
+	// kind's words, as in excluded: "" for its part's.
+	Verb string `json:",omitempty"`
 	// Waiting is what the step says while it waits its turn, when that's
 	// more than that it's waiting: what it'll need of you, or do.
 	Waiting string `json:",omitempty"`
