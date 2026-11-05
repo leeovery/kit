@@ -400,7 +400,7 @@ func TestAStepSaysWhatItsDoing(t *testing.T) {
 func TestAStepSaysItsApplyingAgain(t *testing.T) {
 	p, _ := engine.New(engine.Step{Name: "secret", Check: func(context.Context) check.Result { return check.Result{State: check.Attention} },
 		Apply: func(ctx context.Context, _ check.Result) error {
-			event.Meanwhile(ctx, "waiting for your approval")()
+			event.Meanwhile(ctx, event.Doing{Says: "waiting for your approval"})()
 			return nil
 		}})
 	rec := &recorder{}

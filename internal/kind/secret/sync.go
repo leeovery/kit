@@ -213,7 +213,8 @@ type syncing struct {
 
 // read reads d's secrets' values, d standing as session says: signed in,
 // with no session open, d has the person approve the read, the step saying
-// it's waiting for them and giving its job up meanwhile. d's down when it
+// it's waiting for them, and what they're to do, and giving its job up
+// meanwhile. d's down when it
 // doesn't read them all.
 func (sy *syncing) read(ctx context.Context, d store.Driver, session store.Session) {
 	refs := sy.s.refs(d)
@@ -221,7 +222,8 @@ func (sy *syncing) read(ctx context.Context, d store.Driver, session store.Sessi
 		return
 	}
 	if session == store.SignedIn {
-		over := event.Meanwhile(ctx, "waiting for your approval in "+d.About().Name)
+		name := d.About().Name
+		over := event.Meanwhile(ctx, event.Doing{Says: "waiting for your approval in " + name, Todo: name + " asks whether kit may read your secrets: approve it"})
 		back := engine.Release(ctx)
 		defer func() {
 			over()

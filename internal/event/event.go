@@ -358,11 +358,12 @@ func WithDoing(ctx context.Context, does string) context.Context {
 	return context.WithValue(ctx, doingKey{}, does)
 }
 
-// Meanwhile has the step ctx is running say says for a while, as while it
-// waits for a person: what it returns has it say again what it's doing
-// (WithDoing). Nothing when ctx isn't a step's.
-func Meanwhile(ctx context.Context, says string) (over func()) {
-	Say(ctx, Doing{Says: says})
+// Meanwhile has the step ctx is running say d for a while, as while it
+// waits for a person, with what they're to do: what it returns has it say
+// again what it's doing (WithDoing), nothing left for them to do. Nothing
+// when ctx isn't a step's.
+func Meanwhile(ctx context.Context, d Doing) (over func()) {
+	Say(ctx, d)
 	return func() {
 		if does, ok := ctx.Value(doingKey{}).(string); ok {
 			Say(ctx, Doing{Says: does})
