@@ -6,6 +6,7 @@
 package onepassword
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -13,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"iter"
+	"maps"
 	"os"
 	"slices"
 	"strings"
@@ -52,7 +54,7 @@ var about = store.About{
 	Ref:       "op://vault/item/field",
 	Item:      "op://vault/item",
 	Field:     "<section>/<field>, as in GitHub/token",
-	NoAnswer:  "1Password doesn't answer: unlock its app, with Settings › Developer › Integrate with 1Password CLI on; over a remote connection, sign in with a password in the shell kit runs from: eval $(OP_BIOMETRIC_UNLOCK_ENABLED=false op signin)",
+	NoAnswer:  "unlock its app, with Settings › Developer › Integrate with 1Password CLI on; over a remote connection, sign in with a password in the shell kit runs from: eval $(OP_BIOMETRIC_UNLOCK_ENABLED=false op signin)",
 	SignedOut: "1Password isn't signed in, or its CLI isn't turned on: sign in to its app, then turn on Settings › Developer › Integrate with 1Password CLI",
 	SignIn: store.SignIn{
 		Title: "Sign in to 1Password",
@@ -123,7 +125,7 @@ func (Driver) Unlock(ctx context.Context, run runner.Runner) error {
 func (Driver) Read(ctx context.Context, run runner.Runner, ref string) (string, error) {
 	res, err := run.Run(ctx, runner.Command{Name: program, Args: []string{"read", ref}, Timeout: approvalTimeout, Secret: true})
 	if err != nil {
-		return "", unread(err, []string{ref}, "1Password couldn't read it")
+		return "", unread(err, []string{ref})
 	}
 	return strings.TrimRight(string(res.Stdout), "\n"), nil
 }
@@ -134,17 +136,29 @@ func (Driver) Read(ctx context.Context, run runner.Runner, ref string) (string, 
 // whole, and each value without the newlines it ends with, as Read has it.
 // A ref with a $ or }} in it is read alone, with Read: a template would
 // read it as a variable, or as the reference's end. It fails with
-// store.Unread when op names refs in saying why it couldn't.
+// store.Unread when op names refs in saying why it couldn't, the values
+// read beside them given back.
 func (d Driver) ReadMany(ctx context.Context, run runner.Runner, refs []string) (map[string]string, error) {
 	plain, awkward := split(refs)
 	values, err := inject(ctx, run, plain)
 	if err != nil {
 		return nil, err
 	}
+	named := store.Unread{}
 	for _, ref := range awkward {
-		if values[ref], err = d.Read(ctx, run, ref); err != nil {
+		v, err := d.Read(ctx, run, ref)
+		bad, isUnread := errors.AsType[store.Unread](err)
+		switch {
+		case err == nil:
+			values[ref] = v
+		case !isUnread:
 			return nil, err
+		default:
+			maps.Copy(named, bad)
 		}
+	}
+	if len(named) > 0 {
+		return values, named
 	}
 	return values, nil
 }
@@ -176,7 +190,7 @@ func inject(ctx context.Context, run runner.Runner, refs []string) (map[string]s
 	template.WriteString(mark + "\n")
 	res, err := run.Run(ctx, runner.Command{Name: program, Args: []string{"inject"}, Input: template.String(), Timeout: approvalTimeout, Secret: true})
 	if err != nil {
-		return nil, unread(err, refs, "1Password couldn't read them")
+		return nil, unread(err, refs)
 	}
 	parts := strings.Split(string(res.Stdout), mark)
 	if len(parts) != len(refs)+2 {
@@ -190,18 +204,23 @@ func inject(ctx context.Context, run runner.Runner, refs []string) (map[string]s
 
 // unread is why a read of refs failed with err: store.Unread when op, having
 // run, quoted some of them in its errors, each with the line it's quoted
-// in; else said. A ref is quoted where it's the longest of refs at that
-// place, so that op quoting op://vault/item/token2 doesn't name
-// op://vault/item/token.
-func unread(err error, refs []string, said string) error {
+// in; else what op said last, or how it ended. A ref is quoted
+// where it's the longest of refs at that place, so that op quoting
+// op://vault/item/token2 doesn't name op://vault/item/token; a line about
+// the person's approval, or the session, names none, as op quotes the
+// reference it was reading in saying it wasn't approved.
+func unread(err error, refs []string) error {
 	exit, ok := errors.AsType[*runner.ExitError](err)
 	if !ok {
-		return errors.New(said)
+		return errors.New("op didn't finish")
 	}
 	longest := slices.SortedFunc(slices.Values(refs), func(a, b string) int { return len(b) - len(a) })
 	named := store.Unread{}
 	for line := range strings.Lines(exit.FullStderr) {
 		line = strings.TrimSpace(line)
+		if aboutApproval(line) {
+			continue
+		}
 		quoted := map[int]bool{}
 		for _, ref := range longest {
 			for at := range quotes(line, ref) {
@@ -213,9 +232,20 @@ func unread(err error, refs []string, said string) error {
 		}
 	}
 	if len(named) == 0 {
-		return errors.New(said)
+		return errors.New(cmp.Or(exit.Stderr, fmt.Sprintf("op exited %d", exit.Code)))
 	}
 	return named
+}
+
+// approval are words of op's errors about the person's approval, or the
+// session, rather than a reference: matched in any case.
+var approval = []string{"initializing client", "authoriz", "dismissed", "sign in", "signed in", "session", "timeout", "timed out"}
+
+// aboutApproval reports whether line, one of op's errors, is about the
+// person's approval, or the session.
+func aboutApproval(line string) bool {
+	line = strings.ToLower(line)
+	return slices.ContainsFunc(approval, func(w string) bool { return strings.Contains(line, w) })
 }
 
 // quotes are where ref is in line, each place it starts.

@@ -395,6 +395,29 @@ func TestAStepSaysWhatItsDoing(t *testing.T) {
 	}
 }
 
+// What a step says for a while as it applies, as while it waits for a
+// person, is over with its saying it's applying again.
+func TestAStepSaysItsApplyingAgain(t *testing.T) {
+	p, _ := engine.New(engine.Step{Name: "secret", Check: func(context.Context) check.Result { return check.Result{State: check.Attention} },
+		Apply: func(ctx context.Context, _ check.Result) error {
+			event.Meanwhile(ctx, "waiting for your approval")()
+			return nil
+		}})
+	rec := &recorder{}
+	if _, err := p.Apply(t.Context(), rec, engine.Options{Jobs: 1}); err != nil {
+		t.Fatal(err)
+	}
+	var said []string
+	for _, e := range rec.events {
+		if d, ok := e.(event.Doing); ok {
+			said = append(said, d.Says)
+		}
+	}
+	if want := []string{"waiting for your approval", "applying"}; !slices.Equal(said, want) {
+		t.Errorf("the step said %q, want %q", said, want)
+	}
+}
+
 // What a step tells the run's log is emitted as its, at the time it tells
 // it.
 func TestAStepTellsTheRunsLog(t *testing.T) {

@@ -1366,7 +1366,7 @@ func (d *dispatch) step(ctx context.Context, s Step) check.Result {
 // check answers with things to act on, s is applied again, on those.
 func (d *dispatch) applied(ctx context.Context, s Step, found check.Result) check.Result {
 	d.sink.Emit(event.StepStarted{Time: d.now(), Step: s.Name, Doing: "applying"})
-	if err := applySafely(event.WithChanging(ctx), s, found); err != nil {
+	if err := applySafely(event.WithDoing(event.WithChanging(ctx), "applying"), s, found); err != nil {
 		if IsNotYet(err) {
 			return check.Result{State: check.Deferred, Reason: err.Error()}
 		}

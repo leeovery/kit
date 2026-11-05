@@ -144,6 +144,15 @@ func TestAReadThatFailsNamesWhatOpQuotes(t *testing.T) {
 			s.Exits(1).PrintsToStderr("first: op://vault/item/token\nthen: op://vault/item/other, gone\n")
 		}, store.Unread{"op://vault/item/token": "first: op://vault/item/token", "op://vault/item/other": "then: op://vault/item/other, gone"}},
 		{"none quoted", func(s *runnertest.Script) { s.Exits(1).PrintsToStderr("authorization prompt dismissed\n") }, nil},
+		{"quoted, not approved", func(s *runnertest.Script) {
+			s.Exits(1).PrintsToStderr("[ERROR] 2026/11/05 05:52:13 could not read secret 'op://vault/item/token': error initializing client: authorization prompt dismissed, please try again\n")
+		}, nil},
+		{"quoted, not in time", func(s *runnertest.Script) {
+			s.Exits(1).PrintsToStderr("[ERROR] 2026/11/05 05:52:13 could not read secret 'op://vault/item/other': error initializing client: authorization timeout\n")
+		}, nil},
+		{"quoted, signed out", func(s *runnertest.Script) {
+			s.Exits(1).PrintsToStderr("[ERROR] op://vault/item/other: You are not currently signed in. Please run `op signin --help` for instructions\n")
+		}, nil},
 		{"ended", func(s *runnertest.Script) { s.Fails(fmt.Errorf("op inject: %w", context.DeadlineExceeded)) }, nil},
 	} {
 		run := runnertest.New(t)
@@ -173,5 +182,32 @@ func TestAnAwkwardReferenceIsReadAlone(t *testing.T) {
 	}
 	if want := []string{"op inject", "op read '" + awkward + "'"}; !slices.Equal(run.Calls(), want) {
 		t.Errorf("ran %q, want %q", run.Calls(), want)
+	}
+}
+
+// op read quotes the reference in saying the person didn't approve it:
+// that names none, and says what op said.
+func TestAReadNotApprovedNamesNone(t *testing.T) {
+	said := "[ERROR] 2026/11/05 05:52:13 could not read secret 'op://vault/item/a': error initializing client: authorization prompt dismissed, please try again"
+	run := runnertest.New(t)
+	run.On("op", "read", "op://vault/item/a").Exits(1).PrintsToStderr(said + "\n")
+	_, err := (onepassword.Driver{}).Read(t.Context(), run, "op://vault/item/a")
+	if _, named := errors.AsType[store.Unread](err); named || err == nil || err.Error() != said {
+		t.Errorf("Read() = %v, want op's words, naming nothing", err)
+	}
+}
+
+// A reference read alone, as a template can't take it, that op names as
+// one it couldn't read fails alone: what op inject read is given back
+// beside it.
+func TestAnAwkwardReferenceThatWontReadKeepsTheRest(t *testing.T) {
+	awkward := "op://vault/Item $HOME/field}}"
+	run := runnertest.New(t)
+	optest.Holds(run, map[string]string{"op://vault/item/a": "a"})
+	run.On("op", "read", awkward).Exits(1).PrintsToStderr("[ERROR] could not read secret '" + awkward + "': no such field\n")
+	values, err := (onepassword.Driver{}).ReadMany(t.Context(), run, []string{"op://vault/item/a", awkward})
+	named, ok := errors.AsType[store.Unread](err)
+	if !ok || len(named) != 1 || named[awkward] == "" || values["op://vault/item/a"] != "a" {
+		t.Errorf("ReadMany() = %v, %v; want a read, the awkward one named", values, err)
 	}
 }

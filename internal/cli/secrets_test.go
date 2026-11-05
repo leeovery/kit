@@ -50,6 +50,22 @@ func TestSecretsSync(t *testing.T) {
 	}
 }
 
+// kit secret sync's step says it's waiting for your approval in 1Password
+// while op asks, then that it's syncing again.
+func TestSecretsSyncSaysItsWaitingForApproval(t *testing.T) {
+	w := secretsWorld(t)
+	w.terminal = true
+	w.fake.On("op", "whoami").Exits(1)
+	w.fake.On("op", "account", "list", "--format", "json").Prints(`[{"url": "my.1password.com"}]`)
+	optest.Holds(w.fake, map[string]string{"op://vault/Item/Section/token": "the value"})
+	out, _, code := w.run(t, "secret", "sync")
+	out = ansi.Strip(out)
+	waiting := strings.Index(out, "waiting for your approval in 1Password")
+	if code != 0 || waiting < 0 || !strings.Contains(out[waiting:], "syncing") {
+		t.Errorf("kit secret sync printed\n%s\nexit %d: want the step waiting for approval, then syncing again", out, code)
+	}
+}
+
 func TestAPasswordSignInsSessionReachesOnePassword(t *testing.T) {
 	w := laptopWorld(t)
 	w.environ = []string{"OP_SESSION_abc=session-token", "UNRELATED=x"}

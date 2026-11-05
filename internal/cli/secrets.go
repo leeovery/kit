@@ -150,7 +150,11 @@ func (a *app) secretsSync(ctx context.Context, r *run) error {
 	r.sink.Emit(event.RunStarted{Time: r.now, Command: r.command, Machine: r.machine, Version: r.version, Steps: []event.Step{{Name: secret.Descriptor.Name, Title: secret.Descriptor.Label, Area: "Drift", Row: secret.Descriptor.Row}}})
 	started := time.Now()
 	r.sink.Emit(event.StepStarted{Time: started, Step: secretKind, Doing: "syncing"})
-	report, err := k.Sync(event.WithStep(ctx, secretKind))
+	ctx = event.WithSaying(event.WithStep(ctx, secretKind), func(e event.Doing) {
+		e.Time, e.Step = time.Now(), secretKind
+		r.sink.Emit(e)
+	})
+	report, err := k.Sync(event.WithDoing(ctx, "syncing"))
 	res := check.Result{State: check.OK, Summary: report.Summary()}
 	switch {
 	case err != nil:

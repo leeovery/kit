@@ -38,8 +38,9 @@ type Driver interface {
 	// Read reads the value at ref, without the newlines it ends with.
 	Read(ctx context.Context, run runner.Runner, ref string) (string, error)
 	// ReadMany reads the values at refs at once, as Read does each,
-	// failing whole when one won't read: with Unread when the store names
-	// those it couldn't.
+	// failing whole when one won't read, saying why in the store's words:
+	// with Unread when it names those it couldn't, the values it read
+	// beside them given back.
 	ReadMany(ctx context.Context, run runner.Runner, refs []string) (map[string]string, error)
 	// Field is field short for item, where Store would keep a value, as
 	// Store returns it: an error, in the store's own words (About.Field),

@@ -21,7 +21,7 @@ func (s *Secrets) Ready(ctx context.Context, d store.Driver) error {
 		return engine.NotYet(d.About().SignedOut)
 	}
 	if err := d.Unlock(ctx, s.run); err != nil {
-		return errors.New(d.About().NoAnswer)
+		return errors.New(d.About().Name + " doesn't answer: " + d.About().NoAnswer)
 	}
 	return nil
 }
@@ -35,10 +35,15 @@ func (s *Secrets) Free(ctx context.Context, d store.Driver, item, short string) 
 // Reads is nil when ref, in full, reads from d: else why not, the value
 // never shown.
 func (s *Secrets) Reads(ctx context.Context, d store.Driver, ref string) error {
-	if _, err := d.Read(ctx, s.run, ref); err != nil {
-		return fmt.Errorf("%s doesn't read from %s: %w", ref, d.About().Name, err)
+	_, err := d.Read(ctx, s.run, ref)
+	if err == nil {
+		return nil
 	}
-	return nil
+	why := err.Error()
+	if unread, ok := errors.AsType[store.Unread](err); ok {
+		why = unread[ref]
+	}
+	return fmt.Errorf("%s doesn't read from %s: %s", ref, d.About().Name, why)
 }
 
 // Store keeps value in d's item, where field says, in d's words: its

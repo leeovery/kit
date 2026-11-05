@@ -102,31 +102,41 @@ func (s *Secrets) Cards() []kind.Card {
 // readAll reads refs from d in one read, as a store may have the person
 // approve each, waiting for them as long as they take. Only should d name
 // refs it couldn't read (store.Unread) are those left out, each with d's
-// words, and the rest read in one more: any other failure, the person not
-// approving, or not in time, holds every ref back, for the next sync to
-// read again, as reading in pieces would have them approve each.
+// words, and the rest read in one more, no further: any other failure, the
+// person not approving, or not in time, holds back every ref not read, for
+// the next sync to read again, as reading in pieces would have them
+// approve each.
 func (s *Secrets) readAll(ctx context.Context, d store.Driver, refs []string) (values, unread map[string]string, err error) {
-	values, err = d.ReadMany(ctx, s.run, refs)
-	if err == nil {
-		return values, nil, nil
+	values, unread = map[string]string{}, map[string]string{}
+	rest := refs
+	for range 2 {
+		got, err := d.ReadMany(ctx, s.run, rest)
+		maps.Copy(values, got)
+		named, isUnread := errors.AsType[store.Unread](err)
+		maps.Copy(unread, named)
+		if err != nil && (!isUnread || ctx.Err() != nil) {
+			return values, unread, notRead(d, err.Error())
+		}
+		rest = slices.DeleteFunc(slices.Clone(rest), func(ref string) bool {
+			_, read := values[ref]
+			_, bad := unread[ref]
+			return read || bad
+		})
+		if len(rest) == 0 {
+			return values, unread, nil
+		}
 	}
-	named, ok := errors.AsType[store.Unread](err)
-	if !ok || ctx.Err() != nil {
-		return nil, nil, notRead(d)
-	}
-	rest := slices.DeleteFunc(slices.Clone(refs), func(ref string) bool { _, bad := named[ref]; return bad })
-	if len(rest) == 0 {
-		return map[string]string{}, named, nil
-	}
-	if values, err = d.ReadMany(ctx, s.run, rest); err != nil {
-		return nil, named, notRead(d)
-	}
-	return values, named, nil
+	return values, unread, notRead(d, "")
 }
 
-// notRead is why d's secrets are held back when it didn't read them.
-func notRead(d store.Driver) error {
-	return errors.New(d.About().Name + " wasn't approved, or couldn't read them")
+// notRead is why d's secrets are held back when it didn't read them: what
+// it said, when it said something, and how to have it answer.
+func notRead(d store.Driver, said string) error {
+	why := d.About().Name + " wasn't approved, or couldn't read them"
+	if said != "" {
+		why += ": " + said
+	}
+	return errors.New(why + "; " + d.About().NoAnswer)
 }
 
 // refs are the references of the declared secrets d keeps, each once, in
@@ -202,24 +212,28 @@ type syncing struct {
 }
 
 // read reads d's secrets' values, d standing as session says: signed in,
-// with no session open, d has the person approve the read, and the step
-// says it's waiting for them. d's down when it doesn't read them.
+// with no session open, d has the person approve the read, the step saying
+// it's waiting for them and giving its job up meanwhile. d's down when it
+// doesn't read them all.
 func (sy *syncing) read(ctx context.Context, d store.Driver, session store.Session) {
 	refs := sy.s.refs(d)
 	if len(refs) == 0 {
 		return
 	}
 	if session == store.SignedIn {
-		event.Say(ctx, event.Doing{Says: "waiting for your approval in " + d.About().Name})
-		defer event.Say(ctx, event.Doing{Says: "applying"})
+		over := event.Meanwhile(ctx, "waiting for your approval in "+d.About().Name)
+		back := engine.Release(ctx)
+		defer func() {
+			over()
+			back()
+		}()
 	}
 	got, unread, err := sy.s.readAll(ctx, d, refs)
+	maps.Copy(sy.values, got)
 	maps.Copy(sy.unread, unread)
 	if err != nil {
 		sy.down[d.About().ID] = err.Error()
-		return
 	}
-	maps.Copy(sy.values, got)
 }
 
 // awaitStores waits, partway through applying, for the stores held at

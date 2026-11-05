@@ -44,12 +44,12 @@ func (f *fakeStore) About() store.About {
 	if f.name != "" {
 		title := "The " + f.name + " store"
 		return store.About{ID: f.name, Name: title, Program: f.name, Ref: f.name + ":item/field", Item: f.name + ":item", Field: "<field>",
-			NoAnswer: title + " doesn't answer", SignedOut: title + " is signed out", SignIn: store.SignIn{Title: "Sign in to " + title}}
+			NoAnswer: "unlock " + title, SignedOut: title + " is signed out", SignIn: store.SignIn{Title: "Sign in to " + title}}
 	}
 	return store.About{
 		ID: "fake", Name: "Fake Vault", Program: "fakevault", Env: []string{"FAKE_ACCOUNT", "FAKE_SESSION_*"},
 		Ref: "vault:item/field", Item: "vault:item", Field: "<field>",
-		NoAnswer: "Fake Vault doesn't answer", SignedOut: "Fake Vault is signed out",
+		NoAnswer: "unlock Fake Vault", SignedOut: "Fake Vault is signed out",
 		SignIn: store.SignIn{Title: "Sign in to Fake Vault", Steps: []string{"Open Fake Vault", "Sign in"}, App: "com.example.fakevault", AppName: "Fake Vault"},
 	}
 }
@@ -232,7 +232,7 @@ func TestAStoreThatDoesntReadHoldsBackItsOwnAlone(t *testing.T) {
 	fake := &fakeStore{session: store.SignedIn, locked: true}
 	s, list, _, home := twoStores(t, fake)
 	res := applying(t, s, list)
-	if res.State != check.Deferred || res.Reason != "Fake Vault wasn't approved, or couldn't read them" || len(fake.reads) != 1 {
+	if res.State != check.Deferred || res.Reason != "Fake Vault wasn't approved, or couldn't read them: not approved; unlock Fake Vault" || len(fake.reads) != 1 {
 		t.Errorf("the step finished %+v, the fake read %q: want B and C not done yet, read once", res, fake.reads)
 	}
 	if env, _ := os.ReadFile(filepath.Join(home, ".secrets.zsh")); !strings.Contains(string(env), "export A='a'\n") {
@@ -266,7 +266,7 @@ func TestEveryStoreDown(t *testing.T) {
 		t.Errorf("both signed out: the step finished %+v", res)
 	}
 	fake.session, fake.locked = store.SignedIn, true
-	if _, err := s.Sync(t.Context()); !engine.IsNotYet(err) || err.Error() != onePassword.SignedOut+"; Fake Vault wasn't approved, or couldn't read them" {
+	if _, err := s.Sync(t.Context()); !engine.IsNotYet(err) || err.Error() != onePassword.SignedOut+"; Fake Vault wasn't approved, or couldn't read them: not approved; unlock Fake Vault" {
 		t.Errorf("one signed out, one not approved: Sync() = %v", err)
 	}
 }

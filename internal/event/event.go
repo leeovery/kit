@@ -352,6 +352,26 @@ func Say(ctx context.Context, d Doing) {
 
 type sayingKey struct{}
 
+// WithDoing returns ctx for a step doing does, as it says as it starts:
+// what it says again once what it says meanwhile is over (Meanwhile).
+func WithDoing(ctx context.Context, does string) context.Context {
+	return context.WithValue(ctx, doingKey{}, does)
+}
+
+// Meanwhile has the step ctx is running say says for a while, as while it
+// waits for a person: what it returns has it say again what it's doing
+// (WithDoing). Nothing when ctx isn't a step's.
+func Meanwhile(ctx context.Context, says string) (over func()) {
+	Say(ctx, Doing{Says: says})
+	return func() {
+		if does, ok := ctx.Value(doingKey{}).(string); ok {
+			Say(ctx, Doing{Says: does})
+		}
+	}
+}
+
+type doingKey struct{}
+
 // WithLogging returns ctx for running a step that tells the run's log what
 // it did, in lines of kit's own: each line is given to log.
 func WithLogging(ctx context.Context, log func(Logged)) context.Context {
