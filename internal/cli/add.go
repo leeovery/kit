@@ -201,12 +201,13 @@ func installAndDeclare(ctx context.Context, r *run, c *changes, k kind.Kind, sco
 			return check.Result{State: check.Failed, Reason: "couldn't declare: " + err.Error()}
 		}
 	}
-	verb := "already installed"
+	installs := descriptorOf(k).Installs()
+	verb := "already " + installs.Done
 	if !isIn {
 		if err := r.installAdding(event.WithChanging(ctx), k, name, p); err != nil {
-			return check.Result{State: check.Failed, Reason: "couldn't install: " + engine.Reason(err)}
+			return check.Result{State: check.Failed, Reason: couldnt(installs) + engine.Reason(err)}
 		}
-		verb = "installed"
+		verb = installs.Done
 	}
 	if len(p.mine) > 0 {
 		return check.Result{State: check.OK, Summary: verb + "; declared already, in " + p.mine[0].Scope}

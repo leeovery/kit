@@ -11,6 +11,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/x/ansi"
 
@@ -187,21 +189,26 @@ func (w *walk) rows(width int) ([]string, int) {
 	return lines, asked
 }
 
-// drawn is a question's row on the timeline: through a walk, whole, each
-// item's name and what it is wrapped, never cut, as what's decided from
-// is; a question asked alone on its line, its name cut so what it says
-// shows.
+// drawn is a question's row on the timeline, never cut, as what's decided
+// from isn't: through a walk, each item's name on its line and what it is
+// under it; a question asked alone on its line, stacked so when it's too
+// long for it.
 func (w *walk) drawn(row look.Row, width int) []string {
 	if w.header != "" {
 		return look.Stacked("  ", width, row)
 	}
-	return look.Timeline("  ", width, row.Fit("  ", width))
+	row.Whole = true
+	return look.Timeline("  ", width, row)
 }
 
 // taken is an answer's label as its row says it once it's taken, in
 // lower case but for a name in it, as the Mac's.
 func taken(c look.Choice) string {
-	return strings.ToLower(c.Label[:1]) + c.Label[1:]
+	first, size := utf8.DecodeRuneInString(c.Label)
+	if size == 0 {
+		return ""
+	}
+	return string(unicode.ToLower(first)) + c.Label[size:]
 }
 
 // leaves is what a question asked alone leaves: a blank line, then its row
@@ -220,5 +227,6 @@ func (w *walk) leaves(width int) []string {
 	default:
 		row.State, row.Says = look.Done, look.Pink(taken(q.Answers[w.answers[0]]))
 	}
-	return append([]string{""}, look.Rows("  ", width, row.Fit("  ", width))...)
+	row.Whole = true
+	return append([]string{""}, look.Rows("  ", width, row)...)
 }

@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/leeovery/kit/internal/runner"
 )
 
@@ -305,23 +307,38 @@ func TestBackupExclusionsWaitForTheirProgram(t *testing.T) {
 
 // Reconcile offers a backup exclusion kept out, not declared, in plain
 // words: declaring it, here or everywhere, and stopping excluding it, as a
-// backup exclusion is removed.
+// backup exclusion is removed; one declared, not kept out, excluding it; doing that says so as it's done, and once
+// it's done.
 func TestReconcileOffersAnExclusionsChoicesInItsWords(t *testing.T) {
 	w := laptopWorld(t)
 	w.terminal = true
-	w.writeSection(t, "laptop", "backup exclusions", "/Applications\n")
+	w.writeSection(t, "laptop", "backup exclusions", "/Applications\n/Volumes/New\n")
 	w.writeSection(t, "laptop", "backups", "arq\n")
 	w.fake.On(arqc, "stats").Prints(arqStats(w.now.Add(-2 * time.Hour)))
 	w.fake.On("defaults", "export", "/Library/Preferences/com.apple.TimeMachine", "-").Prints("<plist><dict><key>SkipPaths</key><array><string>/Applications</string><string>/Volumes/Old</string></array></dict></plist>")
-	var offered []string
+	var offered, missing []string
 	w.choose = func(question string, options []string) (int, error) {
-		if strings.HasPrefix(question, "/Volumes/Old  backup-exclusion · installed, not declared") {
+		if strings.HasPrefix(question, "/Volumes/New  backup-exclusion · declared, not excluded") {
+			missing = options
+		}
+		if strings.HasPrefix(question, "/Volumes/Old  backup-exclusion · excluded, not declared") {
 			offered = options
+			return slices.Index(options, "Stop excluding"), nil
 		}
 		return len(options) - 1, nil
 	}
-	w.run(t, "reconcile", "--all", "backup-exclusion")
+	w.expectPassword()
+	w.fake.On("sudo", "-n", "tmutil", "removeexclusion", "-p", "/Volumes/Old")
+	out, errOut, _ := w.run(t, "reconcile", "--all", "backup-exclusion")
 	if want := []string{"Declare", "Declare everywhere", "Stop excluding", "Snooze", "Skip"}; !slices.Equal(offered, want) {
 		t.Errorf("offered %q, want %q", offered, want)
+	}
+	if want := []string{"Exclude", "Undeclare", "Snooze", "Skip"}; !slices.Equal(missing, want) {
+		t.Errorf("offered %q for one missing, want %q", missing, want)
+	}
+	for _, want := range []string{"◐ /Volumes/Old  stopping excluding", "● /Volumes/Old  no longer excluded"} {
+		if !strings.Contains(ansi.Strip(out), want) {
+			t.Errorf("kit reconcile printed\n%s%s\nwant %q", ansi.Strip(out), errOut, want)
+		}
 	}
 }

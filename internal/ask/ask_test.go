@@ -304,19 +304,24 @@ func TestSecretField(t *testing.T) {
 }
 
 // The field's row says what needs the password whole, however many names
-// it carries: the names give way.
+// it carries: too long for its line, the names wrap on theirs, what's
+// needed under them.
 func TestSecretFieldSaysWhatItNeedsWhole(t *testing.T) {
 	f := &field{about: look.Row{State: look.NeedsYou, Name: "charger:hibernatemode, charger:networkoversleep, charger:womp", Says: look.Orange("need an administrator's password")}}
-	equal(t, "view", plain(f.view(80, 40))[:1], []string{"  ▲ charger:hibernatemode, charger:networkove…  need an administrator's password"})
+	equal(t, "view", plain(f.view(80, 40))[:3], []string{"  ▲ charger:hibernatemode, charger:networkoversleep, charger:womp", "  │ need an administrator's password", "  │ ❯  "})
 }
 
-// A question's row says what's asked whole, and what it leaves the answer
-// whole: a long name gives way.
+// A question asked alone is never cut, nor what it leaves: one that fits
+// is on its line; too long for it, its name and what's asked stack,
+// wrapped.
 func TestQuestionSaysWhatItAsksWhole(t *testing.T) {
 	w := newWalk("", []Question{question("visual-studio-code-insiders-with-a-long-name")})
-	equal(t, "row", plain(w.view(60, 40))[1:2], []string{"  ▲ visual-studio-code-insi…  cask · installed, not declared"})
+	equal(t, "row", plain(w.view(60, 40))[1:3], []string{"  ▲ visual-studio-code-insiders-with-a-long-name", "  │ cask · installed, not declared"})
 	press(w, enter)
-	equal(t, "leaves", plain(w.leaves(40)), []string{"", "  ● visual-studio-code-insiders-…  adopt"})
+	equal(t, "leaves", plain(w.leaves(40)), []string{"", "  ● visual-studio-code-insiders-with-a-", "    long-name", "    adopt"})
+	short := newWalk("", []Question{question("zoom")})
+	press(short, enter)
+	equal(t, "a short one's leaves", plain(short.leaves(40)), []string{"", "  ● zoom  adopt"})
 }
 
 // Asked at a terminal: drawn under what's on screen, drawn over in place as
@@ -457,4 +462,14 @@ func (b *syncBuffer) String() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.buf.String()
+}
+
+// An answer taken is its label with its first letter lowered, whatever
+// the letter, the rest as it was; an empty label stays empty.
+func TestTaken(t *testing.T) {
+	for label, want := range map[string]string{"Keep the Mac's": "keep the Mac's", "Écrire": "écrire", "": ""} {
+		if got := taken(look.Choice{Label: label}); got != want {
+			t.Errorf("taken(%q) = %q, want %q", label, got, want)
+		}
+	}
 }

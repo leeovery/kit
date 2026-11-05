@@ -268,8 +268,9 @@ func TestPrettyStatusSaysWhatsNotAllowed(t *testing.T) {
 }
 
 // Status's details under a row are what's acted on, so they wrap, never
-// cut, what to do under its words past the arrow; the lines a failed step
-// printed are a log, cut.
+// cut, what to do under its words past the arrow, and so do the rows of
+// what needs attention in Config, what to run on its own line; the lines
+// a failed step printed are a log, cut.
 func TestPrettyStatusWrapsDetails(t *testing.T) {
 	var out bytes.Buffer
 	refused := check.Result{State: check.Attention, Summary: "needs your permission", Items: []check.Item{{
@@ -277,19 +278,38 @@ func TestPrettyStatusWrapsDetails(t *testing.T) {
 		Detail: "System Settings › Privacy & Security › Automation › the terminal › System Events",
 	}}}
 	failed := check.Result{State: check.Failed, Phase: check.Applying, Reason: "couldn't install ripgrap: no formula of that name in any tap Homebrew knows of, nor any cask of that name in them"}
+	since := at.Add(-48 * time.Hour)
+	drifted := check.Result{State: check.Attention, Summary: "2 declared, 1 excluded", Items: []check.Item{
+		{ID: "backup-exclusion:long", Name: "~/Library/Application Support/Some Long App Name/Default/Service Worker/Cache_Data", State: "extra", Since: since},
+	}}
+	unset := check.Result{State: check.Attention, Summary: "3 declared, 2 set", Items: []check.Item{
+		{ID: "defaults:agent", Name: "com.example.agent", State: "missing", Detail: "not installed: install the app, or open the app it comes with", Since: since},
+	}}
 	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.NoTTY}, 80, false)
 	steps := []event.Step{
 		{Name: "login-item", Title: "macOS login items", Area: "Drift", Row: "Login items", Part: render.PartSettings},
 		{Name: "brew", Title: "Formulae", Area: "Drift", Row: "Homebrew formulae", Tool: "Homebrew", Part: render.PartPackages},
+		{Name: "backup-exclusion", Title: "Backup exclusions", Area: "Drift", Row: "Mac settings", Part: render.PartSettings},
+		{Name: "defaults", Title: "macOS settings", Area: "Drift", Row: "Mac settings", Part: render.PartSettings},
 	}
 	show(t, face, []event.Event{
 		event.RunStarted{Time: at, Command: "status", Machine: "laptop", Steps: steps},
+		event.StepFinished{Time: at, Step: "backup-exclusion", Result: drifted},
+		event.StepFinished{Time: at, Step: "defaults", Result: unset},
 		event.StepFinished{Time: at, Step: "login-item", Result: refused},
 		event.Output{Step: "brew", Command: "brew install --formula ripgrap", Line: "Warning: No available formula with the name ripgrap, nor any cask of that name either"},
 		event.StepFinished{Time: at, Step: "brew", Result: failed},
-		event.RunFinished{Time: at, Duration: time.Second, Counts: map[check.State]int{check.Failed: 1, check.Attention: 1}},
+		event.RunFinished{Time: at, Duration: time.Second, Counts: map[check.State]int{check.Failed: 1, check.Attention: 3}},
 	})
 	for _, want := range []string{
+		"  ▲ ~/Library/Application Support/Some Long App Name/Default/Service Worker/\n" +
+			"    Cache_Data\n" +
+			"    set, not declared · 2 days\n" +
+			"    → kit reconcile\n",
+		"  ▲ com.example.agent\n" +
+			"    declared, not set · not installed: install the app, or open the app it comes\n" +
+			"    with · 2 days\n" +
+			"    → kit apply\n",
 		"  ▲ macOS login items  needs your permission\n" +
 			"    macOS hasn't let the terminal control System Events\n" +
 			"    → System Settings › Privacy & Security › Automation › the terminal › System\n" +
@@ -716,6 +736,28 @@ func TestPrettyApplyingNow(t *testing.T) {
 	if got != want {
 		t.Errorf("once applied, the screen is\n%s\nwant\n%s", got, want)
 	}
+}
+
+// In applying's live part, a step that finished unwell is its row, never
+// cut: too long for its line, its name and what went wrong wrap, and the
+// room counts its lines.
+func TestPrettyApplyingWrapsWhatsUnwell(t *testing.T) {
+	var out syncBuffer
+	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).Sized(func() (int, int) { return 80, 20 })
+	steps := []event.Step{
+		{Name: "long", Title: "A step of your own with a name long enough to need a line of its own", Area: "Drift"},
+		{Name: "next", Title: "Next", Area: "Drift"},
+	}
+	face.Emit(event.RunStarted{Time: at, Command: "apply", Machine: "laptop", Steps: steps})
+	face.Emit(event.StepFinished{Step: "long", Result: check.Result{State: check.Failed, Reason: "couldn't apply: it broke"}})
+	face.Emit(event.StepStarted{Step: "next", Doing: "applying"})
+	time.Sleep(300 * time.Millisecond)
+	got := screen(out.String())
+	want := "  ✗ A step of your own with a name long enough to need a line of its own\n    couldn't apply\n  ◐ Next  applying"
+	if !strings.Contains(got, want) {
+		t.Errorf("the live part is\n%s\nwant it to hold\n%s", got, want)
+	}
+	_ = face.Close()
 }
 
 // Applying's live part is never taller than the terminal: on a short one,

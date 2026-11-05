@@ -115,8 +115,9 @@ var Descriptor = kind.Descriptor{
 		Add:    "Add login items, by app, and declare them",
 		Remove: "Remove login items, and undeclare them",
 	},
-	Row:      "Login items",
-	Removing: kind.Removing{Label: "Stop opening", Does: "stop opening it at login"},
+	Row:        "Login items",
+	Installing: kind.Words{Label: "Open at login", Does: "open it at login", Doing: "adding", Done: "added to login items"},
+	Removing:   kind.Words{Label: "Stop opening", Does: "stop opening it at login", Doing: "stopping", Done: "removed from login items"},
 	// Login items open the apps the casks and the App Store install.
 	After: []string{"cask", "mas"},
 	New:   func(d *kind.Deps) kind.Kind { return New(d.Run, d.Home) },

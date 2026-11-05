@@ -67,13 +67,14 @@ const kindName = "secret"
 // Descriptor is secrets' kind, as kit's shared code knows it: kit secret is
 // a command of its own.
 var Descriptor = kind.Descriptor{
-	Name:     kindName,
-	Label:    "Secrets",
-	Group:    kind.Secrets,
-	Section:  &config.Section{Kind: kindName, Header: "secrets", Form: config.Secrets, Sorted: true, Items: checkItem, Line: checkLine, Says: lineSays},
-	Row:      "Secrets",
-	Removing: kind.Removing{Label: "Delete", Does: "delete it from this Mac: its store keeps it"},
-	New:      func(d *kind.Deps) kind.Kind { return New(d.Run, d.Home) },
+	Name:       kindName,
+	Label:      "Secrets",
+	Group:      kind.Secrets,
+	Section:    &config.Section{Kind: kindName, Header: "secrets", Form: config.Secrets, Sorted: true, Items: checkItem, Line: checkLine, Says: lineSays},
+	Row:        "Secrets",
+	Installing: kind.Words{Label: "Sync", Does: "sync it", Doing: "syncing", Done: "synced"},
+	Removing:   kind.Words{Label: "Delete", Does: "delete it from this Mac: its store keeps it", Doing: "deleting", Done: "deleted"},
+	New:        func(d *kind.Deps) kind.Kind { return New(d.Run, d.Home) },
 }
 
 // New returns the secrets of the user whose home is home, in the stores kit

@@ -1,6 +1,7 @@
 package kind
 
 import (
+	"cmp"
 	"sync"
 
 	"github.com/leeovery/kit/internal/config"
@@ -31,9 +32,10 @@ type Descriptor struct {
 	Help *Help
 	// Row is the row of applying's screen it sits in, as in Developer tools.
 	Row string
-	// Removing is taking one of its things off the Mac, as kit reconcile
-	// offers it: zero for Uninstalling.
-	Removing Removing
+	// Installing and Removing are putting one of its things on the Mac and
+	// taking one off, in its own words: zero for InstallWords and
+	// UninstallWords.
+	Installing, Removing Words
 	// Tool is what its commands run, as the person knows it, when its row's
 	// raw view is that tool's own output, as Homebrew's is: "" for none.
 	Tool string
@@ -52,13 +54,24 @@ type Descriptor struct {
 	New func(*Deps) Kind
 }
 
-// Removing is taking one of a kind's things off the Mac, in the kind's own
-// words: its label, a word or two, and what it does.
-type Removing struct{ Label, Does string }
+// Words are doing something to a thing, as kit says it: its label, a word
+// or two, as a choice offers it; what it does, as the choice says; what
+// it's called while it's done; and once it's done, as a result says.
+type Words struct{ Label, Does, Doing, Done string }
 
-// Uninstalling is removing a package or an app, as most kinds' things are
-// removed.
-var Uninstalling = Removing{Label: "Uninstall", Does: "uninstall it"}
+// InstallWords and UninstallWords are installing and uninstalling a
+// package or an app, as most kinds' things are put on the Mac and taken
+// off.
+var (
+	InstallWords   = Words{Label: "Install", Does: "install it", Doing: "installing", Done: "installed"}
+	UninstallWords = Words{Label: "Uninstall", Does: "uninstall it", Doing: "uninstalling", Done: "uninstalled"}
+)
+
+// Installs is putting one of its things on the Mac, in its words.
+func (d Descriptor) Installs() Words { return cmp.Or(d.Installing, InstallWords) }
+
+// Removes is taking one of its things off the Mac, in its words.
+func (d Descriptor) Removes() Words { return cmp.Or(d.Removing, UninstallWords) }
 
 // Group is what a kind's things are: packages, settings, or secrets.
 type Group string

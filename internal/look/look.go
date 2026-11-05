@@ -137,51 +137,35 @@ type Row struct {
 	// what it's doing.
 	Kept  string
 	Under []string
-}
-
-// nameLeast is the fewest cells of a row's name Fit leaves it: fewer can't
-// tell one thing from another.
-const nameLeast = 12
-
-// Fit is r with its name cut, when its line after indent is too long for w,
-// so what it says, and what it keeps, show whole: a question's row, where
-// what it says is what's asked. Its name is cut down to nameLeast cells at
-// the least; past that, r is as it was, its line cut at its end.
-func (r Row) Fit(indent string, w int) Row {
-	if r.Says == "" {
-		return r
-	}
-	if r.Kept != "" {
-		w -= ansi.StringWidth(dot + r.Kept)
-	}
-	left := w - ansi.StringWidth(indent+Mark(r.State)+" "+"  "+r.Says)
-	if left >= min(ansi.StringWidth(r.Name), nameLeast) {
-		r.Name = Cut(r.Name, left)
-	}
-	return r
+	// Whole is whether its line is never cut, as what's decided or acted
+	// on isn't: too long for it, its name goes on its own line, and what it
+	// says on the lines under it, each wrapped.
+	Whole bool
 }
 
 // Rows draws rows after indent, what belongs to each under its name, every
-// line cut at w, what each keeps kept.
+// line cut at w, what each keeps kept, but a whole row's line, wrapped.
 func Rows(indent string, w int, rs ...Row) []string {
-	var out []string
-	for _, r := range rs {
-		out = append(out, CutKeeping(line(indent, r), r.Kept, w))
-		for _, u := range r.Under {
-			out = append(out, Cut(indent+"  "+u, w))
-		}
-	}
-	return out
+	return drawRows(indent, indent+"  ", w, rs)
 }
 
 // Timeline draws rows on a line: each row's mark a point on it, and what
 // belongs to the row on the line too, its words where the names are.
 func Timeline(indent string, w int, rs ...Row) []string {
+	return drawRows(indent, indent+Dim("│")+" ", w, rs)
+}
+
+// drawRows draws rows after indent, what belongs to each after under.
+func drawRows(indent, under string, w int, rs []Row) []string {
 	var out []string
 	for _, r := range rs {
-		out = append(out, CutKeeping(line(indent, r), r.Kept, w))
+		if l := line(indent, r); !r.Whole || ansi.StringWidth(l) <= w {
+			out = append(out, CutKeeping(l, r.Kept, w))
+		} else {
+			out = append(out, stack(indent, under, w, r)...)
+		}
 		for _, u := range r.Under {
-			out = append(out, Cut(indent+Dim("│")+" "+u, w))
+			out = append(out, Cut(under+u, w))
 		}
 	}
 	return out
@@ -211,7 +195,19 @@ func named(r Row) string {
 // lines under it, wrapped too, then what belongs to it, as Timeline draws
 // it.
 func Stacked(indent string, w int, r Row) []string {
-	head, under := indent+Mark(r.State)+" ", indent+Dim("│")+" "
+	under := indent + Dim("│") + " "
+	out := stack(indent, under, w, r)
+	for _, u := range r.Under {
+		out = append(out, Cut(under+u, w))
+	}
+	return out
+}
+
+// stack is r's line stacked after indent, w wide: its mark and its name,
+// wrapped, then what it says, and what it keeps, wrapped on the lines
+// after under.
+func stack(indent, under string, w int, r Row) []string {
+	head := indent + Mark(r.State) + " "
 	room := w - ansi.StringWidth(head)
 	var out []string
 	for i, l := range wrap(named(r), room, "") {
@@ -221,32 +217,49 @@ func Stacked(indent string, w int, r Row) []string {
 			out = append(out, under+l)
 		}
 	}
-	if r.Says != "" {
-		for _, l := range wrap(r.Says, room, "") {
+	says := r.Says
+	if r.Kept != "" {
+		says = Says(says, r.Kept)
+	}
+	if says != "" {
+		for _, l := range wrap(says, room, "") {
 			out = append(out, under+l)
 		}
-	}
-	for _, u := range r.Under {
-		out = append(out, Cut(under+u, w))
 	}
 	return out
 }
 
 // Fold is lines as they go under a row after indent, w wide, never cut:
 // each wrapped to fit, its continuation under its own start, or, for what
-// to do, under its words past the arrow.
+// to do, under its words past the arrow; but one of kit's commands to run,
+// which is cut in the middle, as Squeeze cuts it, to stay one command.
 func Fold(indent string, w int, lines ...string) []string {
 	room := w - ansi.StringWidth(indent) - 2
 	var out []string
 	for _, l := range lines {
-		hang := ""
-		if strings.HasPrefix(ansi.Strip(l), "→ ") {
-			hang = "  "
+		plain := ansi.Strip(l)
+		command, isCommand := strings.CutPrefix(plain, "→ kit ")
+		switch {
+		case ansi.StringWidth(plain) <= room:
+			out = append(out, l)
+		case isCommand:
+			out = append(out, Todo(Cmd(Squeeze("kit "+command, room-2))))
+		case strings.HasPrefix(plain, "→ "):
+			out = append(out, wrap(l, room, "  ")...)
+		default:
+			out = append(out, wrap(l, room, "")...)
 		}
-		out = append(out, wrap(l, room, hang)...)
 	}
 	return out
 }
+
+// Wrapping keeps a dot between a row's parts with the words either side of
+// it, so no line ends or starts with one: its spaces are swapped for
+// unbreaking ones while text's wrapped, and back.
+var (
+	unbreaking = strings.NewReplacer(dot, Dim("\u00a0·\u00a0"))
+	breaking   = strings.NewReplacer("\u00a0", " ")
+)
 
 // wrap is s, styled, wrapped to w cells, what follows its first hang
 // cells under them on each line after the first: at spaces, or after a /
@@ -257,12 +270,14 @@ func wrap(s string, w int, hang string) []string {
 		return []string{s}
 	}
 	n := len(hang)
-	lines := strings.Split(lipgloss.Wrap(ansi.TruncateLeft(s, n, ""), max(w-n, 1), "/"), "\n")
-	for i := range lines {
+	body := unbreaking.Replace(ansi.TruncateLeft(s, n, ""))
+	lines := strings.Split(lipgloss.Wrap(body, max(w-n, 1), "/"), "\n")
+	for i, l := range lines {
+		l = breaking.Replace(l)
 		if i == 0 {
-			lines[i] = ansi.Truncate(s, n, "") + lines[i]
+			lines[i] = ansi.Truncate(s, n, "") + l
 		} else {
-			lines[i] = hang + lines[i]
+			lines[i] = hang + l
 		}
 	}
 	return lines
@@ -588,15 +603,21 @@ type Task struct {
 }
 
 // Tasks are things left to do, as a run's record ends with them, w wide:
-// each the to-do mark, its number and its title, then how to do it under
-// the title, each line what to do, muted, wrapped under its own words; a
-// subheading among them muted, without the arrow.
+// each the to-do mark, its number and its title, wrapped under itself,
+// then how to do it under the title, each line what to do, muted, wrapped
+// under its own words; a subheading among them muted, without the arrow.
 func Tasks(w int, ts ...Task) []string {
 	var out []string
 	for i, t := range ts {
 		lead := "  " + Mark(ToDo) + " " + White(fmt.Sprint(i+1)) + "  "
-		out = append(out, Cut(lead+Strong(t.Title), w))
 		under := strings.Repeat(" ", ansi.StringWidth(lead))
+		for j, l := range wrap(Strong(t.Title), w-len(under), "") {
+			if j == 0 {
+				out = append(out, lead+l)
+			} else {
+				out = append(out, under+l)
+			}
+		}
 		for _, how := range t.How {
 			at, rest := under+Todo(""), under+"  "
 			if Subheading(how) {

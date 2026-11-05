@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -286,7 +285,7 @@ func (a *app) askAbout(ctx context.Context, r *run, items []driftItem, opts reco
 		cs := dr.choices(it.Item)
 		answers := make([]look.Choice, 0, len(cs)+1)
 		for _, c := range cs {
-			answers = append(answers, look.Choice{Label: actionLabel(c), Does: c.label})
+			answers = append(answers, look.Choice{Label: actionLabel(c), Does: c.words.Does})
 		}
 		answers = append(answers, look.Choice{Label: "Skip", Does: "not now"})
 		q := ask.Question{About: look.Row{State: look.NeedsYou, Name: it.Name, Says: describe(it, dr, r.now)}, Answers: answers}
@@ -313,11 +312,10 @@ func (a *app) askAbout(ctx context.Context, r *run, items []driftItem, opts reco
 	return decisions, nil
 }
 
-// actionLabel is a choice's label: what it does, in a word or two, its
-// title's when it has one, else its action's; one done for every Mac said
-// apart from one done for this.
+// actionLabel is a choice's label: what it does, in a word or two; one
+// done for every Mac said apart from one done for this.
 func actionLabel(c choice) string {
-	label := cmp.Or(c.title, strings.ToUpper(c.action[:1])+c.action[1:])
+	label := c.words.Label
 	if c.shared {
 		label += " everywhere"
 	}
@@ -382,7 +380,7 @@ func (a *app) carryOut(ctx context.Context, r *run, decisions []decision, note s
 	doings := make(map[string]string, len(decisions))
 	for i, d := range decisions {
 		steps[i] = event.Step{Name: d.item.ID, Title: d.item.Name}
-		doings[d.item.ID] = map[string]string{adopt: "adopting", remove: "removing", install: "installing", undeclare: "undeclaring", snooze: "snoozing", revert: "putting back"}[d.action]
+		doings[d.item.ID] = doingOf(r.drifters[d.item.Kind].choices(d.item.Item), d.action, d.shared)
 	}
 	c := startChangesOf(r, steps, doings)
 	for _, d := range decisions {

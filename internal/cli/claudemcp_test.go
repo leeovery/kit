@@ -70,7 +70,7 @@ func TestReconcileAdoptsAndRemovesMCPServers(t *testing.T) {
 	w := mcpWorld(t)
 	w.expectSync(t, []string{"laptop/declarations"}, "kit reconcile (laptop): adopt claude-mcp:stray: a helper")
 	out, errOut, code := w.run(t, "reconcile", "claude-mcp:stray", "--adopt", "--note", "a helper")
-	if code != 0 || !strings.Contains(out, "claude-mcp:stray ok already installed; declared in laptop\n") {
+	if code != 0 || !strings.Contains(out, "claude-mcp:stray ok already added to Claude Code; declared in laptop\n") {
 		t.Fatalf("kit reconcile --adopt printed\n%s%s exit %d", out, errOut, code)
 	}
 	if got := w.readSection(t, "laptop", "claude mcp"); got != mcpLines+"stray -- stray-mcp   # a helper\n" {
@@ -79,7 +79,7 @@ func TestReconcileAdoptsAndRemovesMCPServers(t *testing.T) {
 
 	w.fake.On("claude", "mcp", "remove", "-s", "local", "tracker")
 	out, errOut, code = w.run(t, "reconcile", "claude-mcp:~/Code/other:tracker", "--remove")
-	if code != 0 || !strings.Contains(out, "uninstalled; it wasn't declared") {
+	if code != 0 || !strings.Contains(out, "removed from Claude Code; it wasn't declared") {
 		t.Fatalf("kit reconcile --remove printed\n%s%s exit %d", out, errOut, code)
 	}
 	for _, c := range w.fake.Commands() {

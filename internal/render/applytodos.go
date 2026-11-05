@@ -51,8 +51,8 @@ func (p *Pretty) toDoState() string {
 // toDoPane is the left pane while the to-dos are up, w wide and room lines:
 // To do and how many; what they are, and how to work through them
 // (toDoLead); then each group, its name muted after a blank line,
-// none for those in no group, its to-dos a line each: done, the done mark
-// and its title muted; left for later, the skipped mark and its title
+// none for those in no group, its to-dos each its title, wrapped under
+// itself: done, the done mark and its title muted; left for later, the skipped mark and its title
 // muted; the one up, its title a pill; the rest white. The
 // keys at its foot. Too many for the room, it starts further down, to keep
 // the one up in sight.
@@ -70,16 +70,21 @@ func (p *Pretty) toDoPane(w, room int) []string {
 				lines = append(lines, "  "+look.Muted(group))
 			}
 		}
-		l := "  " + look.Mark(look.ToDo) + " " + look.White(t.Title)
+		mark, style := look.Mark(look.ToDo)+" ", look.White
 		switch {
 		case t.Done:
-			l = "  " + look.Mark(look.Done) + " " + look.Muted(t.Title)
+			mark, style = look.Mark(look.Done)+" ", look.Muted
 		case t.Skipped:
-			l = "  " + look.Mark(look.Skipped) + " " + look.Muted(t.Title)
+			mark, style = look.Mark(look.Skipped)+" ", look.Muted
 		case i == p.todos.Up:
-			l, up = "  "+look.Mark(look.ToDo)+look.Pill(t.Title, look.Done), len(lines)
+			mark, style, up = look.Mark(look.ToDo), func(s string) string { return look.Pill(s, look.Done) }, len(lines)
 		}
-		lines = append(lines, look.Cut(l, w))
+		for j, part := range look.Wrap(t.Title, w-6) {
+			if j > 0 {
+				mark = "  "
+			}
+			lines = append(lines, look.Cut("  "+mark+style(part), w))
+		}
 	}
 	foot := p.leftFoot(w)
 	room = max(room-len(foot), 0)

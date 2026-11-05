@@ -765,3 +765,27 @@ func TestAToDoSettling(t *testing.T) {
 		})
 	}
 }
+
+// A to-do's title too long for the list wraps under itself, never cut.
+func TestALongToDoWraps(t *testing.T) {
+	list := slices.Clone(toDoList)
+	list[3].Title = "Allow Full Disk Access for remote users, and for every other way in that this Mac has"
+	events := append(toDosBegin(), event.ToDos{Time: after(1800), Step: "manual", List: list, Up: 0})
+	face, out, _ := applyIn(colorprofile.TrueColor, 160, 64, time.Minute, events)
+	defer func() { _ = face.Close() }()
+	left, _ := panes(screen(uncoloured(out.String())), 160)
+	at := slices.IndexFunc(left, func(l string) bool { return strings.HasPrefix(l, "  △ Allow Full Disk Access") })
+	if at < 0 || strings.Contains(strings.Join(left, "\n"), "…") {
+		t.Fatalf("the left pane is\n%s\nwant the long title whole", strings.Join(left, "\n"))
+	}
+	title := strings.TrimPrefix(left[at], "  △ ")
+	for _, l := range left[at+1:] {
+		if !strings.HasPrefix(l, "    ") || strings.TrimSpace(l) == "" {
+			break
+		}
+		title += " " + strings.TrimSpace(l)
+	}
+	if title != list[3].Title {
+		t.Errorf("the left pane is\n%s\nwant %q wrapped under itself", strings.Join(left, "\n"), list[3].Title)
+	}
+}

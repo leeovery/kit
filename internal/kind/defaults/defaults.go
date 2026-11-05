@@ -134,8 +134,10 @@ var Descriptor = kind.Descriptor{
 		Add:    "Declare macOS settings as this Mac has them",
 		Remove: "Unset macOS settings, macOS's default coming back, and undeclare them",
 	},
-	Row: "Mac settings",
-	New: func(d *kind.Deps) kind.Kind { return New(d.Run, d.StateDir) },
+	Row:        "Mac settings",
+	Installing: kind.Words{Label: "Set", Does: "set it", Doing: "setting", Done: "set"},
+	Removing:   kind.Words{Label: "Unset", Does: "unset it: macOS's default back", Doing: "unsetting", Done: "unset"},
+	New:        func(d *kind.Deps) kind.Kind { return New(d.Run, d.StateDir) },
 }
 
 // New returns macOS settings, driven through run, with kit's records in

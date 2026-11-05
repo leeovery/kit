@@ -618,9 +618,9 @@ func (p *Pretty) thing(part string, it check.Item) look.Row {
 	if it.Action != "" || it.State == "missing" {
 		hint = "kit apply"
 	}
-	row := look.Row{State: look.NeedsYou, Name: it.Name, Says: look.Says(append(says, look.Todo(look.Cmd(hint)))...)}
+	row := look.Row{State: look.NeedsYou, Name: it.Name, Says: look.Says(append(says, look.Todo(look.Cmd(hint)))...), Whole: true}
 	// What to run is never cut off: when the row is too long for it, it
-	// goes on the line under it.
+	// goes on the line under it, and the rest, still too long, wraps.
 	if ansi.StringWidth(look.Rows("  ", 1<<16, row)[0]) > p.width {
 		row.Says, row.Under = look.Says(says...), []string{look.Todo(look.Cmd(hint))}
 	}

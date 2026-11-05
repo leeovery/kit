@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"cmp"
 	"context"
 	"fmt"
 	"maps"
@@ -349,7 +348,7 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 	}
 	if len(shellPath) > 0 {
 		step := steps.PathFile(shellPath, filepath.Join(dirs.State, steps.PathFileName))
-		addSetup(step, applyDrifter{step: step, label: "write it"})
+		addSetup(step, applyDrifter{step: step, words: kind.Words{Label: "Write", Does: "write it", Doing: "writing"}})
 	}
 	// kindSteps are the kinds' steps; needed, the steps they need that are
 	// their own, as Homebrew's.
@@ -397,7 +396,7 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 		kindSteps = append(kindSteps, quietened(step, record, now))
 		r.kinds = append(r.kinds, d.Name)
 		r.drift = append(r.drift, d.Name)
-		r.drifters[d.Name] = kindDrifter{k: k, list: list, removing: cmp.Or(d.Removing, kind.Uninstalling), held: func() []kind.Held { return r.placing[d.Name].Held }}
+		r.drifters[d.Name] = kindDrifter{k: k, list: list, installing: d.Installs(), removing: d.Removes(), held: func() []kind.Held { return r.placing[d.Name].Held }}
 		needed = withNeeded(needed, d, deps)
 	}
 	// One needing an administrator's password, as installing Homebrew
@@ -430,7 +429,7 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 	} {
 		if features.on(system.name) {
 			step := feature(system.name, system.step())
-			addSetup(step, applyDrifter{step: step, label: "turn it on"})
+			addSetup(step, applyDrifter{step: step, words: kind.Words{Label: "Turn on", Does: "turn it on", Doing: "turning on"}})
 		}
 	}
 	var checks []engine.Step

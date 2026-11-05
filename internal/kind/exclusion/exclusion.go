@@ -50,9 +50,10 @@ var Descriptor = kind.Descriptor{
 		Add:    "Leave folders out of backups, and declare them",
 		Remove: "Put folders back in backups, and undeclare them",
 	},
-	Row:      "Mac settings",
-	Removing: kind.Removing{Label: "Stop excluding", Does: "stop excluding it"},
-	New:      func(d *kind.Deps) kind.Kind { return New(d.Run, d.Home, backup.Excluders(d.Backups)) },
+	Row:        "Mac settings",
+	Installing: kind.Words{Label: "Exclude", Does: "exclude it", Doing: "excluding", Done: "excluded"},
+	Removing:   kind.Words{Label: "Stop excluding", Does: "stop excluding it", Doing: "stopping excluding", Done: "no longer excluded"},
+	New:        func(d *kind.Deps) kind.Kind { return New(d.Run, d.Home, backup.Excluders(d.Backups)) },
 }
 
 // errNoTool is the kind's error on a Mac with no backup tool keeping

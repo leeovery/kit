@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"github.com/leeovery/kit/internal/check"
@@ -9,6 +10,7 @@ import (
 	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/kind"
+	"github.com/leeovery/kit/internal/kinds"
 )
 
 func (a *app) remove(ctx context.Context, r *run, kindName string, names []string, shared bool) error {
@@ -46,12 +48,9 @@ func removeDeclared(ctx context.Context, r *run, c *changes, k kind.Kind, d kind
 	if err != nil {
 		return check.Result{State: check.Failed, Reason: err.Error()}
 	}
-	verb := "wasn't installed"
-	if isIn {
-		if err := k.Remove(event.WithChanging(ctx), []string{name}); err != nil {
-			return check.Result{State: check.Failed, Reason: "couldn't uninstall: " + engine.Reason(err)}
-		}
-		verb = "uninstalled"
+	verb, err := takeOff(ctx, k, name, isIn)
+	if err != nil {
+		return check.Result{State: check.Failed, Reason: err.Error()}
 	}
 	where, err := r.where(k.Name(), name)
 	if err != nil {
@@ -66,6 +65,30 @@ func removeDeclared(ctx context.Context, r *run, c *changes, k kind.Kind, d kind
 	}
 	r.changedFile(c, file)
 	return check.Result{State: check.OK, Summary: verb + "; out of " + r.files.Tilde(file)}
+}
+
+// takeOff takes name off the Mac, when it's on it (isIn), and says so in
+// its kind's words: uninstalled, or wasn't installed.
+func takeOff(ctx context.Context, k kind.Kind, name string, isIn bool) (string, error) {
+	d := descriptorOf(k)
+	if !isIn {
+		return "wasn't " + d.Installs().Done, nil
+	}
+	if err := k.Remove(event.WithChanging(ctx), []string{name}); err != nil {
+		return "", errors.New(couldnt(d.Removes()) + engine.Reason(err))
+	}
+	return d.Removes().Done, nil
+}
+
+// descriptorOf is the descriptor of k's kind.
+func descriptorOf(k kind.Kind) kind.Descriptor {
+	d, _ := kinds.Named(k.Name())
+	return d
+}
+
+// couldnt heads why doing w failed, as in "couldn't uninstall: ".
+func couldnt(w kind.Words) string {
+	return "couldn't " + strings.ToLower(w.Label[:1]) + w.Label[1:] + ": "
 }
 
 // removeOne uninstalls name, when it's installed, and takes it out of this
@@ -92,12 +115,9 @@ func removeOne(ctx context.Context, r *run, c *changes, k kind.Kind, name string
 	if err != nil {
 		return check.Result{State: check.Failed, Reason: err.Error()}
 	}
-	verb := "wasn't installed"
-	if isIn {
-		if err := k.Remove(event.WithChanging(ctx), []string{name}); err != nil {
-			return check.Result{State: check.Failed, Reason: "couldn't uninstall: " + engine.Reason(err)}
-		}
-		verb = "uninstalled"
+	verb, err := takeOff(ctx, k, name, isIn)
+	if err != nil {
+		return check.Result{State: check.Failed, Reason: err.Error()}
 	}
 	var from []string
 	for _, scope := range []string{own, sharedScope} {

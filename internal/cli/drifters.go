@@ -39,23 +39,45 @@ type shower interface {
 // it.
 type choice struct {
 	action string
-	// title is its label, as the terminal offers it, when the action's
-	// name alone doesn't say it.
-	title string
-	label string
+	// words are what it's called: its label, what it does, and what it's
+	// called while it's done.
+	words kind.Words
 	// shared is whether it's done for every Mac.
 	shared bool
 }
 
-// The labels of adopting where it declares the thing, and where it commits
-// an edit to the config.
-const (
-	declare = "Declare"
-	commit  = "Commit"
+// The words of the choices more than one drifter offers.
+var (
+	declaring   = kind.Words{Label: "Declare", Doing: "declaring"}
+	keepingMacs = kind.Words{Label: "Keep the Mac's", Does: "declared as it is now", Doing: "declaring"}
+	committing  = kind.Words{Label: "Commit", Doing: "committing"}
+	reverting   = kind.Words{Label: "Revert", Doing: "putting back"}
+	undoing     = kind.Words{Label: "Undo", Doing: "undoing"}
 )
 
+// does is words saying what the choice does, as does says.
+func does(w kind.Words, does string) kind.Words {
+	w.Does = does
+	return w
+}
+
 // snoozeChoice is snoozing, offered for every item.
-var snoozeChoice = choice{action: snooze, label: "snooze it for 7 days"}
+var snoozeChoice = choice{action: snooze, words: kind.Words{Label: "Snooze", Does: "snooze it for 7 days", Doing: "snoozing"}}
+
+// doingOf is what the choice among choices that's action is called while
+// it's done: the one for every Mac, with shared, where there are two.
+func doingOf(choices []choice, action string, shared bool) string {
+	doing := ""
+	for _, c := range choices {
+		switch {
+		case c.action == action && c.shared == shared:
+			return c.words.Doing
+		case c.action == action && doing == "":
+			doing = c.words.Doing
+		}
+	}
+	return doing
+}
 
 // choiceActions are choices' actions, each once, in order.
 func choiceActions(choices []choice) []string {
@@ -73,9 +95,9 @@ func choiceActions(choices []choice) []string {
 type kindDrifter struct {
 	k    kind.Kind
 	list config.List
-	// removing is taking one of its things off the Mac, in its kind's
-	// words.
-	removing kind.Removing
+	// installing and removing are putting one of its things on the Mac
+	// and taking one off, in its kind's words.
+	installing, removing kind.Words
 	// held are its sections holding their lines back, as the run placed
 	// them.
 	held func() []kind.Held
@@ -88,17 +110,17 @@ func (d kindDrifter) check(ctx context.Context) check.Result {
 // choices are what can be done about it.
 func (d kindDrifter) choices(it check.Item) []choice {
 	adopting := []choice{
-		{action: adopt, title: declare, label: "declare it, for this Mac"},
-		{action: adopt, title: declare, label: "declare it, for every Mac", shared: true},
+		{action: adopt, words: does(declaring, "declare it, for this Mac")},
+		{action: adopt, words: does(declaring, "declare it, for every Mac"), shared: true},
 	}
 	if _, ownFile := d.k.(kind.Declarer); ownFile {
 		// Declared in a file of its own, which every Mac linking it shares.
-		adopting = []choice{{action: adopt, title: declare, label: "declare it"}}
+		adopting = []choice{{action: adopt, words: does(declaring, "declare it")}}
 	}
-	uninstalling := []choice{{action: remove, title: d.removing.Label, label: d.removing.Does}}
+	uninstalling := []choice{{action: remove, words: d.removing}}
 	if _, reverts := d.k.(kind.Reverter); reverts {
 		// A setting changed on the Mac: put back what it was.
-		uninstalling = []choice{{action: revert, label: "put back what it was"}}
+		uninstalling = []choice{{action: revert, words: does(reverting, "put back what it was")}}
 	}
 	var all []choice
 	switch it.State {
@@ -108,19 +130,19 @@ func (d kindDrifter) choices(it check.Item) []choice {
 		all = append(append(uninstalling, adopting...), snoozeChoice)
 	case kind.Missing:
 		if it.Action == kind.Install {
-			all = append(all, choice{action: install, label: "install it"})
+			all = append(all, choice{action: install, words: d.installing})
 		}
-		all = append(all, choice{action: undeclare, label: "undeclare it"}, snoozeChoice)
+		all = append(all, choice{action: undeclare, words: kind.Words{Label: "Undeclare", Does: "undeclare it", Doing: "undeclaring"}}, snoozeChoice)
 	case kind.Diverged:
 		all = []choice{
-			{action: adopt, title: declare, label: "keep the Mac's: declared as it is now"},
-			{action: revert, label: "put back what's declared"},
+			{action: adopt, words: keepingMacs},
+			{action: revert, words: does(reverting, "put back what's declared")},
 			snoozeChoice,
 		}
 	case kind.Changed:
-		all = []choice{{action: install, label: "set it as declared"}}
+		all = []choice{{action: install, words: kind.Words{Label: "Set as declared", Does: "set it as declared", Doing: "setting"}}}
 		if _, valued := d.k.(kind.Valued); valued {
-			all = append(all, choice{action: adopt, title: declare, label: "keep the Mac's: declared as it is now"})
+			all = append(all, choice{action: adopt, words: keepingMacs})
 		}
 		all = append(all, snoozeChoice)
 	default:
@@ -134,8 +156,8 @@ func (d kindDrifter) describe(it check.Item) string {
 		return "changed on this Mac, not declared"
 	}
 	return map[string]string{
-		kind.Extra:            "installed, not declared",
-		kind.Missing:          "declared, not installed",
+		kind.Extra:            d.installing.Done + ", not declared",
+		kind.Missing:          "declared, not " + d.installing.Done,
 		kind.UnusedDependency: "installed for something since removed, needed by nothing",
 		kind.Diverged:         "changed on this Mac from what's declared",
 		kind.Changed:          "set otherwise than declared",
@@ -168,9 +190,9 @@ func (d kindDrifter) settle(ctx context.Context, r *run, c *changes, dec decisio
 		return removeOne(ctx, r, c, d.k, dec.item.Name, dec.shared)
 	case install:
 		if err := kind.InstallDeclared(event.WithChanging(ctx), d.k, d.list, d.held(), []string{dec.item.Name}); err != nil {
-			return check.Result{State: check.Failed, Reason: "couldn't install: " + engine.Reason(err)}
+			return check.Result{State: check.Failed, Reason: couldnt(d.installing) + engine.Reason(err)}
 		}
-		return check.Result{State: check.OK, Summary: "installed"}
+		return check.Result{State: check.OK, Summary: d.installing.Done}
 	}
 	return check.Result{State: check.Failed, Reason: "nothing to do: " + dec.action}
 }
@@ -221,14 +243,14 @@ func (d fileDrifter) choices(it check.Item) []choice {
 	switch it.State {
 	case linked.Diverged:
 		return []choice{
-			{action: adopt, title: "Keep the Mac's", label: "keep the Mac's copy: into kit-config, then linked"},
-			{action: revert, label: "put kit-config's back: the Mac's copy to the Bin"},
+			{action: adopt, words: does(keepingMacs, "its copy into kit-config, then linked")},
+			{action: revert, words: does(reverting, "put kit-config's back: the Mac's copy to the Bin")},
 			snoozeChoice,
 		}
 	case linked.Dead:
-		return []choice{{action: remove, label: "remove the dead link"}, snoozeChoice}
+		return []choice{{action: remove, words: kind.Words{Label: "Remove", Does: "remove the dead link", Doing: "removing"}}, snoozeChoice}
 	}
-	return []choice{{action: install, label: "link it"}, snoozeChoice}
+	return []choice{{action: install, words: kind.Words{Label: "Link", Does: "link it", Doing: "linking"}}, snoozeChoice}
 }
 
 func (d fileDrifter) describe(it check.Item) string {
@@ -282,14 +304,14 @@ func (d configDrifter) choices(it check.Item) []choice {
 		return []choice{snoozeChoice}
 	}
 	if it.State == steps.ConfigUntracked {
-		return []choice{{action: adopt, title: commit, label: "commit it: out of kit-config, kept on this Mac"}, {action: revert, label: "undo it: tracked again"}, snoozeChoice}
+		return []choice{{action: adopt, words: does(committing, "commit it: out of kit-config, kept on this Mac")}, {action: revert, words: does(undoing, "undo it: tracked again")}, snoozeChoice}
 	}
 	undo := map[string]string{
 		steps.ConfigEdited:  "undo it: back to the last commit",
 		steps.ConfigAdded:   "undo it: the file to the Bin",
 		steps.ConfigDeleted: "undo it: the file back",
 	}[it.State]
-	return []choice{{action: adopt, title: commit, label: "commit it, and push"}, {action: revert, label: undo}, snoozeChoice}
+	return []choice{{action: adopt, words: does(committing, "commit it, and push")}, {action: revert, words: does(undoing, undo)}, snoozeChoice}
 }
 
 // diffLines is how much of a change's diff a question shows.
@@ -359,8 +381,8 @@ func (d configDrifter) undo(ctx context.Context, it check.Item) check.Result {
 // or remove: the shell's PATH, Oh My Zsh.
 type applyDrifter struct {
 	step engine.Step
-	// label is applying, as a terminal offers it.
-	label string
+	// words are applying, as a terminal offers it.
+	words kind.Words
 }
 
 func (d applyDrifter) check(ctx context.Context) check.Result {
@@ -368,7 +390,7 @@ func (d applyDrifter) check(ctx context.Context) check.Result {
 }
 
 func (d applyDrifter) choices(check.Item) []choice {
-	return []choice{{action: install, label: d.label}, snoozeChoice}
+	return []choice{{action: install, words: d.words}, snoozeChoice}
 }
 
 func (d applyDrifter) describe(check.Item) string {

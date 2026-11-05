@@ -35,7 +35,7 @@ func (p *Pretty) height() int {
 // then what's happening and what's wrong: macOS asking something first,
 // then the card up for you; then, in the views' order, each step running,
 // with the last lines its commands printed; each waiting on you, with what
-// to do; each finished unwell, a line each. What finished well, what's
+// to do; each finished unwell, its row, wrapped when it's too long. What finished well, what's
 // left to do, and what's still to start, the bar and the lights count: the
 // whole list is applying's last word. It's never taller than the
 // terminal: when what finished unwell won't all fit, the last are counted.
@@ -69,15 +69,16 @@ func (p *Pretty) applyLive() []string {
 			}
 			if f, ok := p.results[s.Name]; ok && !slices.Contains([]look.State{look.Done, look.Skipped, look.ToDo}, p.ended(f)) {
 				row := p.workRow(f, s.Part)
-				row.Under = nil
-				blocks = append(blocks, block{lines: look.Rows("  ", p.width, row), unwell: true})
-				unwell++
+				row.Under, row.Whole = nil, true
+				lines := look.Rows("  ", p.width, row)
+				blocks = append(blocks, block{lines: lines, unwell: true})
+				unwell += len(lines)
 			}
 		}
 	}
 	room := max(p.height()-1-len(top), 3)
 	// What finished unwell has the room what's running leaves, a line kept
-	// to count the rest, when they won't all fit.
+	// to count the rest, from the first that won't fit, when they won't all.
 	fits := room - kept
 	if kept+unwell > room {
 		fits--
@@ -88,9 +89,9 @@ func (p *Pretty) applyLive() []string {
 		switch {
 		case !b.unwell:
 			list = append(list, b.lines...)
-		case fits > 0:
+		case left == 0 && fits >= len(b.lines):
 			list = append(list, b.lines...)
-			fits--
+			fits -= len(b.lines)
 		default:
 			if left == 0 {
 				at = len(list)

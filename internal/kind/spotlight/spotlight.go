@@ -66,8 +66,10 @@ var Descriptor = kind.Descriptor{
 		Add:    "Leave folders out of Spotlight, and declare them",
 		Remove: "Undeclare Spotlight's exclusions (System Settings takes a folder off its list)",
 	},
-	Row: "Mac settings",
-	New: func(d *kind.Deps) kind.Kind { return New(d.Run, d.Home, d.StateDir) },
+	Row:        "Mac settings",
+	Installing: kind.Words{Label: "Exclude", Does: "leave it out of Spotlight", Doing: "excluding", Done: "excluded"},
+	Removing:   kind.Words{Label: "Stop excluding", Does: "stop excluding it", Doing: "stopping excluding", Done: "no longer excluded"},
+	New:        func(d *kind.Deps) kind.Kind { return New(d.Run, d.Home, d.StateDir) },
 }
 
 // New returns the Spotlight exclusions of the user whose home is home.

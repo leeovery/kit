@@ -63,3 +63,25 @@ func TestApplyLeavesASettingChangedOnTheMac(t *testing.T) {
 		}
 	}
 }
+
+// At a terminal, a git setting's choices are in git's words: one changed on
+// the Mac kept as the Mac has it, or put back; one git has, not declared,
+// declared or unset.
+func TestReconcileOffersAGitSettingsChoicesInItsWords(t *testing.T) {
+	w := gitWorld(t)
+	w.terminal = true
+	offered := map[string][]string{}
+	w.choose = func(question string, options []string) (int, error) {
+		offered[strings.Fields(question)[0]] = options
+		return len(options) - 1, nil
+	}
+	w.run(t, "reconcile", "--all", "git-config")
+	for name, want := range map[string]string{
+		"core.editor": "Keep the Mac's|Revert|Snooze|Skip",
+		"delta.pager": "Declare|Declare everywhere|Unset|Snooze|Skip",
+	} {
+		if got := strings.Join(offered[name], "|"); got != want {
+			t.Errorf("offered %q for %s, want %q", got, name, want)
+		}
+	}
+}

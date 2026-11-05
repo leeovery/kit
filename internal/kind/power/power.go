@@ -54,8 +54,10 @@ var Descriptor = kind.Descriptor{
 		Add:    "Declare power settings as this Mac has them",
 		Remove: "Undeclare power settings, leaving their values",
 	},
-	Row: "Mac settings",
-	New: func(d *kind.Deps) kind.Kind { return New(d.Run, d.StateDir) },
+	Row:        "Mac settings",
+	Installing: kind.Words{Label: "Set", Does: "set it", Doing: "setting", Done: "set"},
+	Removing:   kind.Words{Label: "Leave as it is", Does: "leave it as it is", Doing: "leaving", Done: "left as it is"},
+	New:        func(d *kind.Deps) kind.Kind { return New(d.Run, d.StateDir) },
 }
 
 // New returns the power settings, run through run, with kit's records in

@@ -62,35 +62,45 @@ func TestRowsAreCut(t *testing.T) {
 	}
 }
 
-// A row fitted to a line too long for it has its name cut, so what it
-// says, and what it keeps, show whole, until fewer than twelve cells of the
-// name would be left; then the line is cut at its end. A short name is
-// never cut for what it says, and a row that fits is as it is.
-func TestFitCutsTheNameForWhatARowSays(t *testing.T) {
-	names := look.Row{State: look.NeedsYou, Name: "charger:hibernatemode, charger:networkoversleep", Says: look.Orange("need an administrator's password")}
-	fit := func(w int, r look.Row) []string { return look.Rows("  ", w, r.Fit("  ", w)) }
-	same(t, fit(60, names), "  ▲ charger:hibernatemode…  need an administrator's password")
-	same(t, fit(50, names), "  ▲ charger:hib…  need an administrator's password")
-	same(t, fit(49, names), "  ▲ charger:hibernatemode, charger:networkoversl…")
-	same(t, fit(90, names), "  ▲ charger:hibernatemode, charger:networkoversleep  need an administrator's password")
-	same(t, fit(40, look.Row{State: look.Running, Name: "Homebrew formulae", Says: look.Cyan("installing"), Kept: look.White("38 of 129")}),
-		"  ◐ Homebrew fo…  installing · 38 of 129")
-	same(t, fit(30, look.Row{State: look.Failed, Name: "jq", Says: look.Red("couldn't install: no bottle for this macOS")}),
-		"  ✗ jq  couldn't install: no …")
+// A whole row is never cut: one that fits is as it is; one too long for
+// its line has its name on its own line, wrapped, and what it says, with
+// what it keeps, wrapped under it, on a timeline's line in a timeline;
+// what belongs to it goes under that.
+func TestWholeRowsWrap(t *testing.T) {
+	names := look.Row{State: look.NeedsYou, Name: "charger:hibernatemode, charger:networkoversleep", Says: look.Orange("need an administrator's password"), Whole: true}
+	same(t, look.Rows("  ", 90, names), "  ▲ charger:hibernatemode, charger:networkoversleep  need an administrator's password")
+	same(t, look.Rows("  ", 40, names),
+		"  ▲ charger:hibernatemode,",
+		"    charger:networkoversleep",
+		"    need an administrator's password",
+	)
+	at := look.Row{State: look.Running, Name: "Homebrew formulae", Says: look.Cyan("installing"), Kept: look.White("38 of 129"), Under: look.Output("==> a line printed, cut at the end"), Whole: true}
+	got := look.Timeline("  ", 30, at)
+	same(t, got,
+		"  ◐ Homebrew formulae",
+		"  │ installing · 38 of 129",
+		"  │ ==> a line printed, cut a…",
+	)
+	for _, l := range got {
+		if w := ansi.StringWidth(l); w > 30 {
+			t.Errorf("%q is %d wide", ansi.Strip(l), w)
+		}
+	}
 }
 
 // A row stacked is drawn whole: its name wrapped on its line, after a / in
 // a path, what it says wrapped under it, each in its style on every line it
-// goes on to; what belongs to it under that, cut, as Timeline draws it.
+// goes on to, no line ending or starting with a dot; what belongs to it
+// under that, cut, as Timeline draws it.
 func TestStacked(t *testing.T) {
-	r := look.Row{State: look.Queued, Name: "~/Library/Application Support/Some App/Cache_Data", Says: look.Says(look.Muted("backup-exclusion"), look.Orange("installed, not declared")), Under: look.Output("a line of output past the end")}
+	r := look.Row{State: look.Queued, Name: "~/Library/Application Support/Some App/Cache_Data", Says: look.Says(look.Muted("exclusion"), look.Orange("installed, not declared")), Under: look.Output("a line of output past the end")}
 	got := look.Stacked("  ", 30, r)
 	same(t, got,
 		"  ○ ~/Library/Application",
 		"  │ Support/Some App/",
 		"  │ Cache_Data",
-		"  │ backup-exclusion ·",
-		"  │ installed, not declared",
+		"  │ exclusion · installed, not",
+		"  │ declared",
 		"  │ a line of output past the…",
 	)
 	for _, l := range got {
@@ -98,20 +108,28 @@ func TestStacked(t *testing.T) {
 			t.Errorf("%q is %d wide", ansi.Strip(l), w)
 		}
 	}
-	if !strings.Contains(got[2], look.White("Cache_Data")) || !strings.Contains(got[4], look.Orange("installed, not declared")) {
+	if !strings.Contains(got[2], look.White("Cache_Data")) || !strings.Contains(got[4], look.Orange("declared")) {
 		t.Errorf("drew %q; want each line in the style it goes on in", got)
 	}
 	same(t, look.Stacked("  ", 30, look.Row{State: look.Done, Name: "jq", Says: look.Pink("declare")}), "  ● jq", "  │ declare")
+	same(t, look.Stacked("  ", 30, look.Row{State: look.Done, Name: "a-hyphenated-name-far-too-long", Says: look.Says(look.Muted("brew"), look.Muted("installed"))}),
+		"  ● a-hyphenated-name-far-too-",
+		"  │ long",
+		"  │ brew · installed",
+	)
 }
 
 // Lines folded to go under a row are never cut: each wraps, its
 // continuation under its own start, or, for what to do, under its words
-// past the arrow; one that fits is as it is.
+// past the arrow, a dot never ending or starting a line; one that fits is
+// as it is; one of kit's commands is cut in the middle, one command still.
 func TestFold(t *testing.T) {
 	got := look.Fold("  ", 40,
 		look.Says(look.White("com.example.agent"), look.Muted("not installed: install the app, or open it")),
 		look.Todo(look.Muted("install the app it comes with, or remove it")),
 		look.Muted("fits"),
+		look.Says(look.Orange("a-name"), look.Muted("installed"), look.Muted("2 days"), look.Muted("then more")),
+		look.Todo(look.Cmd("kit apply a-step-with-a-very-long-name-indeed")),
 	)
 	same(t, got,
 		"com.example.agent · not installed:",
@@ -119,12 +137,19 @@ func TestFold(t *testing.T) {
 		"→ install the app it comes with, or",
 		"  remove it",
 		"fits",
+		"a-name · installed · 2 days · then",
+		"more",
+		"→ kit apply a-s…ery-long-name-indeed",
 	)
 	for _, l := range got {
 		if w := ansi.StringWidth(l); w > 36 {
 			t.Errorf("%q is %d wide, past the room after the row's prefix", ansi.Strip(l), w)
 		}
 	}
+	same(t, look.Fold("  ", 30, look.Says(look.Orange("a-name"), look.Muted("installed"), look.Muted("2 days"))),
+		"a-name · installed · 2",
+		"days",
+	)
 	same(t, look.Timeline("  ", 40, look.Row{State: look.Done, Name: "Login items", Under: got[:2]}),
 		"  ● Login items",
 		"  │ com.example.agent · not installed:",
@@ -335,7 +360,8 @@ func TestTasks(t *testing.T) {
 		"       → Download it from paper.example.com",
 		"       If it won't open, in System Settings:",
 		"       → Drag it to Applications",
-		"  △ 3  A title far too long for a list fifty cell…",
+		"  △ 3  A title far too long for a list fifty cells",
+		"       wide",
 	)
 	if got[5] != "       "+look.Muted("If it won't open, in System Settings:") {
 		t.Errorf("a subheading's line is %q; want it muted, without the arrow", got[5])
