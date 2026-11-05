@@ -177,7 +177,7 @@ func (w *walk) rows(width int) ([]string, int) {
 		case i < len(w.answers):
 			row.State, row.Says = look.Done, look.Pink(taken(q.Answers[w.answers[i]]))
 		case i == len(w.answers):
-			row.Under = append(append(row.Under, q.More...), look.Answers(q.Answers, w.cursor)...)
+			row.Under = append(append(row.Under, look.Fold("  ", width, q.More...)...), look.Answers(q.Answers, w.cursor)...)
 		default:
 			row.State, row.Says = look.Queued, look.Muted(ansi.Strip(q.About.Says))
 		}

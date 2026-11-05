@@ -57,8 +57,8 @@ func TestEveryKindIsComplete(t *testing.T) {
 		if _, switches := made.(kind.Switcher); switches != helped {
 			t.Errorf("%s: its things switch off and on %v, its help has on and off %v: want both or neither", k.Name, switches, helped)
 		}
-		if _, leaves := made.(kind.Leaver); leaves != k.Apps {
-			t.Errorf("%s: it says what its things leave %v, its things are apps %v: want both or neither", k.Name, leaves, k.Apps)
+		if _, leaves := made.(kind.Leaver); leaves != k.Apps || k.Apps != (k.Help != nil && k.Help.Leaves != "" && k.Help.Takes != "") {
+			t.Errorf("%s: it says what its things leave %v, its things are apps %v, its help %+v: want all or none", k.Name, leaves, k.Apps, k.Help)
 		}
 		if helped && (k.Help.Switch.On == "" || k.Help.Switch.Off == "" || k.Help.Switch.Holder == "") {
 			t.Errorf("%s's switches' help = %+v: want on, off and what holds its things", k.Name, *k.Help.Switch)

@@ -83,6 +83,9 @@ func (r RestoreReport) restored() string {
 		verb = "would restore"
 	}
 	s := fmt.Sprintf("%s %s and %s from %s", verb, plural(len(r.Restored), "domain"), plural(r.Files, "file"), r.From)
+	if len(r.Restored)+r.Files == 0 {
+		s = "nothing to restore from " + r.From
+	}
 	if r.At != "" {
 		s += " as it was at " + r.At
 	}
@@ -306,7 +309,7 @@ func (p *Prefs) Restore(ctx context.Context, opts RestoreOptions) (RestoreReport
 		if rec.Pending == nil || len(rec.Pending.Domains)+len(rec.Pending.Files) == 0 {
 			return report, nil
 		}
-		if opts.Unattended && !before.anyToTry() {
+		if opts.Unattended && !before.anyToTry(p.owned()) {
 			return report, nil
 		}
 		report.From, named = rec.Pending.From, slices.Clone(rec.Pending.Domains)
@@ -472,7 +475,7 @@ func (r RestoreReport) waits() map[string]string {
 }
 
 // RestoreInstalled restores what's held for apps installed since, as the
-// hourly pass does, for kit to run straight after it installs apps, before
+// hourly pass does, for kit apply to run once it's installed apps, before
 // they're first opened: nothing at all, but when capture's on and a
 // domain kept till its app is installed has its app now.
 func (p *Prefs) RestoreInstalled(ctx context.Context) (RestoreReport, error) {
@@ -480,13 +483,55 @@ func (p *Prefs) RestoreInstalled(ctx context.Context) (RestoreReport, error) {
 	if err != nil || rec.On == "" || rec.Pending == nil {
 		return RestoreReport{}, err
 	}
-	installed := p.installedApps()
-	if !slices.ContainsFunc(rec.Pending.Domains, func(d string) bool {
-		return rec.Pending.Why[d] == keptWhy && len(p.owningApps(d, installed)) > 0
-	}) {
+	if len(p.keptFor(rec.Pending, nil)) == 0 {
 		return RestoreReport{}, nil
 	}
 	return p.Restore(ctx, RestoreOptions{Pending: true, Unattended: true})
+}
+
+// RestoreKept restores the domains kept till their apps were installed
+// that belong to the apps of ids, installed since, alone, for kit to run
+// straight after it installs them, before they're first opened: nothing at
+// all, but when capture's on and one has a domain kept. The rest held stay
+// as they are.
+func (p *Prefs) RestoreKept(ctx context.Context, ids []string) (RestoreReport, error) {
+	rec, err := p.Load()
+	if err != nil || rec.On == "" || rec.Pending == nil || len(ids) == 0 {
+		return RestoreReport{}, err
+	}
+	domains := p.keptFor(rec.Pending, ids)
+	if len(domains) == 0 {
+		return RestoreReport{}, nil
+	}
+	return p.Restore(ctx, RestoreOptions{From: rec.Pending.From, Domains: domains})
+}
+
+// keptFor are the domains held kept till their apps are installed whose
+// apps are installed now: of the apps of ids alone, given any.
+func (p *Prefs) keptFor(held *Pending, ids []string) []string {
+	installed := p.installedApps()
+	var domains []string
+	for _, d := range held.Domains {
+		if held.Why[d] != keptWhy {
+			continue
+		}
+		owners := p.owningApps(d, installed)
+		if len(owners) > 0 && (ids == nil || slices.ContainsFunc(owners, func(id string) bool { return slices.Contains(ids, id) })) {
+			domains = append(domains, d)
+		}
+	}
+	return domains
+}
+
+// owned reports whether an installed app uses a domain.
+func (p *Prefs) owned() func(domain string) bool {
+	installed := p.installedApps()
+	return func(d string) bool { return len(p.owningApps(d, installed)) > 0 }
+}
+
+// Apps are the bundle ids of the apps installed, sorted.
+func (p *Prefs) Apps() []string {
+	return slices.Sorted(maps.Keys(p.installedApps()))
 }
 
 // restoring is how a domain is restored: from its stored copy, the live

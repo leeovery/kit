@@ -385,7 +385,8 @@ func appsOf(domains map[string]string, apps map[string]prefs.App) int {
 
 // startAfresh switches saving on with nothing restored, as kit prefs
 // start-fresh does, saying so, and how many of an earlier restore's still
-// wait to come back, which saving leaves be. A restore switches saving on
+// wait to come back, and are kept for apps not installed, which saving
+// leaves be. A restore switches saving on
 // itself, so only a record from before it did can have one to tell of.
 func startAfresh(p *prefs.Prefs) (string, error) {
 	if err := p.StartFresh(); err != nil {
@@ -400,8 +401,13 @@ func startAfresh(p *prefs.Prefs) (string, error) {
 		said = "saving from now"
 	}
 	if rec.Pending != nil {
-		n := len(rec.Pending.Domains) + len(rec.Pending.Files)
-		said += fmt.Sprintf("; %d still %s to come back", n, plural(n, "waits", "wait"))
+		kept := rec.Pending.Kept()
+		if n := len(rec.Pending.Domains) + len(rec.Pending.Files) - kept; n > 0 {
+			said += fmt.Sprintf("; %d still %s to come back", n, plural(n, "waits", "wait"))
+		}
+		if kept > 0 {
+			said += fmt.Sprintf("; %d kept for apps not installed", kept)
+		}
 	}
 	return said, nil
 }

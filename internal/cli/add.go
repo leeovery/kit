@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/kinds"
 	"github.com/leeovery/kit/internal/look"
+	"github.com/leeovery/kit/internal/prefs"
 	"github.com/leeovery/kit/internal/steps"
 )
 
@@ -67,23 +69,24 @@ func (a *app) add(ctx context.Context, r *run, kindName string, names []string, 
 				return check.Result{State: check.Failed, Reason: "couldn't declare: " + err.Error()}
 			}
 			isIn := !slices.Contains(missing, name)
-			res := installAndDeclare(ctx, r, c, k, scope, name, opts, isIn, prepared[name])
-			if settings != nil && !isIn && res.State == check.OK {
-				res.Summary += settings(ctx)
+			install := func() check.Result { return installAndDeclare(ctx, r, c, k, scope, name, opts, isIn, prepared[name]) }
+			if settings == nil || isIn {
+				return install()
 			}
-			return res
+			return settings(ctx, install)
 		})
 	}
 	c.sync(ctx, commitMessage("add", kindName, c.whoWrote(names), r.machine, opts.note))
 	return c.finish()
 }
 
-// keptSettings is what restores, straight after kit installs apps of the
-// kind called kindName, the settings kit prefs kept for apps not installed
-// whose apps are installed now, before the person first opens them,
-// saying what it did, after a semicolon, or nothing when there were none:
-// nil unless the kind's things are apps and kit prefs is on for this Mac.
-func (a *app) keptSettings(r *run, kindName string) (func(context.Context) string, error) {
+// keptSettings is what installs an app of the kind called kindName, as
+// install does, then restores the settings kit prefs kept for it alone,
+// till it was installed, before the person first opens it, saying what
+// became of them, after a semicolon, or nothing when there were none: nil
+// unless the kind's things are apps and kit prefs is on for this Mac. The
+// app is the one that wasn't there before the install.
+func (a *app) keptSettings(r *run, kindName string) (func(context.Context, func() check.Result) check.Result, error) {
 	if d, _ := kinds.Named(kindName); !d.Apps {
 		return nil, nil
 	}
@@ -95,16 +98,35 @@ func (a *app) keptSettings(r *run, kindName string) (func(context.Context) strin
 	if err != nil {
 		return nil, err
 	}
-	return func(ctx context.Context) string {
-		report, err := p.RestoreInstalled(ctx)
-		switch {
-		case err != nil:
-			return "; its saved settings weren't restored: " + err.Error()
-		case len(report.Restored) > 0:
-			return "; its saved settings restored"
+	return func(ctx context.Context, install func() check.Result) check.Result {
+		before := p.Apps()
+		res := install()
+		if res.State != check.OK {
+			return res
 		}
-		return ""
+		added := slices.DeleteFunc(p.Apps(), func(id string) bool { return slices.Contains(before, id) })
+		report, err := p.RestoreKept(ctx, added)
+		res.Summary += keptSaid(report, err)
+		return res
 	}, nil
+}
+
+// keptSaid is what became of the settings kept for an app just installed,
+// as report, or err, says, after a semicolon: "" when none were kept.
+func keptSaid(report prefs.RestoreReport, err error) string {
+	switch {
+	case err != nil:
+		return "; its saved settings weren't restored: " + err.Error()
+	case len(report.Failed) > 0:
+		return "; its saved settings didn't come back: " + report.Failed[slices.Sorted(maps.Keys(report.Failed))[0]]
+	case len(report.ToOpen) > 0:
+		return "; its saved settings come back once it's been opened and quit"
+	case len(report.Waiting) > 0:
+		return "; its saved settings come back once it's quit"
+	case len(report.Restored) > 0:
+		return "; its saved settings restored"
+	}
+	return ""
 }
 
 // once is names, each once, in the order first given.

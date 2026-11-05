@@ -210,8 +210,9 @@ type Report struct {
 	changes        []change
 	Removed        []string
 	// Pending counts the domains and settings files left alone, waiting to
-	// be restored.
-	Pending int
+	// be restored; Kept, the domains left alone, kept till their apps are
+	// installed.
+	Pending, Kept int
 	// Errors are what couldn't be saved, each with why: kept as stored.
 	Errors []string
 	// Claimed is whether this capture claimed the folder for this Mac.
@@ -267,6 +268,9 @@ func (r Report) Summary() string {
 	}
 	if r.Pending > 0 {
 		s += fmt.Sprintf("; %d pending restore", r.Pending)
+	}
+	if r.Kept > 0 {
+		s += fmt.Sprintf("; %d kept for apps not installed", r.Kept)
 	}
 	s = withNotes(s, r.Notes)
 	if len(r.Errors) > 0 {
@@ -408,6 +412,10 @@ func (p *Prefs) Capture(ctx context.Context) (Report, error) {
 		}
 	}
 	report.Pending = len(protected) + len(heldFiles)
+	if rec.Pending != nil && rec.Pending.From == p.Mac {
+		report.Kept = rec.Pending.Kept()
+		report.Pending -= report.Kept
+	}
 	// What stays stored: domains captured now, ones that failed to export
 	// (still there, unreadable this time) and pending ones. A domain that
 	// exports empty counts as gone: macOS lists a deleted domain for a

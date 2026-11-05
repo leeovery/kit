@@ -91,14 +91,32 @@ func running(why string) bool {
 }
 
 // anyToTry reports whether h holds anything an unattended pass might bring
-// back: a domain that didn't fail otherwise.
-func (h held) anyToTry() bool {
+// back: a domain that didn't fail otherwise, and, kept till its app is
+// installed, has an app now (owned).
+func (h held) anyToTry(owned func(domain string) bool) bool {
 	for d := range h.domains {
-		if !h.failed[d] {
+		if !h.failed[d] && (h.why[d] != keptWhy || owned(d)) {
 			return true
 		}
 	}
 	return false
+}
+
+// Kept counts the domains p keeps till their apps are installed.
+func (p *Pending) Kept() int {
+	n := 0
+	for _, d := range p.Domains {
+		if p.Why[d] == keptWhy {
+			n++
+		}
+	}
+	return n
+}
+
+// Running reports whether why, a domain's left waiting for, is that its
+// app is running, rather than a windowless helper's folder not come yet.
+func Running(why string) bool {
+	return running(why)
 }
 
 // Failures counts what rec holds that failed otherwise, domains and

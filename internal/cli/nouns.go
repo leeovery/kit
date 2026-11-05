@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -10,6 +11,7 @@ import (
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/kinds"
 	"github.com/leeovery/kit/internal/linked"
+	"github.com/leeovery/kit/internal/look"
 	"github.com/leeovery/kit/internal/redact"
 )
 
@@ -91,14 +93,14 @@ It's taken out of this Mac's declarations file; one declared for every Mac
 needs --shared, which takes it out of the shared file, every Mac's list. The
 change is committed and pushed to the config repository.`
 
-// leavesWhat is how removing an app says what becomes of what it leaves.
-const leavesWhat = `
-
-An app leaves its files and settings behind, in case you come back, and kit
-prefs goes on saving its settings. At a terminal, kit asks first whether to
-keep them or remove them: its files from this Mac, and its saved settings
-from kit prefs' store, at the next capture. --zap removes them, and --keep
-keeps them, without asking; without a terminal, they're kept.`
+// leavesWhat is how removing an app, of the kind whose command's help is
+// h, says what becomes of what it leaves.
+func leavesWhat(h *kind.Help) string {
+	text := fmt.Sprintf("An app leaves %s behind, in case you come back, and kit prefs goes on saving its settings. "+
+		"At a terminal, kit asks first whether to keep them or remove them: %s. "+
+		"--zap removes them, and --keep keeps them, without asking; without a terminal, they're kept.", h.Leaves, h.Takes)
+	return "\n\n" + strings.Join(look.Wrap(text, 78), "\n")
+}
 
 // newKindCommand is kit <kind>: adding and removing d's things, and turning
 // them off and on, when they can be.
@@ -134,7 +136,7 @@ reconcile asks.`,
 When something installed still needs it, nothing changes, and why is passed
 on.`
 	if d.Apps {
-		long += leavesWhat
+		long += leavesWhat(n)
 	}
 	remove := &cobra.Command{
 		Use:     "remove <name>...",
@@ -150,8 +152,8 @@ on.`
 	}
 	remove.Flags().BoolVar(&ropts.shared, "shared", false, "take it out of the shared file, every Mac's list")
 	if d.Apps {
-		remove.Flags().BoolVar(&ropts.zap, "zap", false, "remove its files and its saved settings too, without asking")
-		remove.Flags().BoolVar(&ropts.keep, "keep", false, "keep its files and its saved settings, without asking")
+		remove.Flags().BoolVar(&ropts.zap, "zap", false, "remove "+n.Leaves+" too, without asking")
+		remove.Flags().BoolVar(&ropts.keep, "keep", false, "keep "+n.Leaves+", without asking")
 	}
 	cmd.AddCommand(add, remove)
 	if n.Switch != nil {

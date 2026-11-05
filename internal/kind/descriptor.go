@@ -90,6 +90,10 @@ const (
 // what adding and removing do.
 type Help struct {
 	What, Add, Remove string
+	// Leaves is, for a kind whose things are apps, what one leaves behind
+	// when it's uninstalled, and Takes what removing that takes: "" for
+	// another kind.
+	Leaves, Takes string
 	// Switch is, for a kind whose things can be declared off and kept
 	// (Switcher), its commands turning them off and on: nil for none.
 	Switch *SwitchHelp

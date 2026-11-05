@@ -101,6 +101,8 @@ var (
 			What:   "Homebrew's casks",
 			Add:    "Install casks, and declare them",
 			Remove: "Uninstall casks, and undeclare them",
+			Leaves: "its files and settings",
+			Takes:  "the files its cask's zap list names, from this Mac, and its saved settings from kit prefs' store, at the next capture",
 		},
 		Apps:  true,
 		Row:   "Homebrew casks",

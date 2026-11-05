@@ -698,16 +698,22 @@ asks.
 `kit <kind> remove` uninstalls and takes each name out of this Mac's file; one declared for every Mac
 needs `--shared`. An app (a cask, an App Store app) leaves its files and settings behind, in case
 it comes back, and kit prefs goes on saving its settings: at a terminal, before anything's
-uninstalled, kit asks once for each app that leaves any, by its name ("<app>'s settings and
+uninstalled, kit asks once for each app that leaves any and that removing would uninstall (not
+one refused, as declared for every Mac without `--shared`), by its name ("<app>'s settings and
 files": `Keep them`, in case you come back, or `Remove them`, its files from this Mac and its saved
-settings from kit-prefs). A cask's files are those its zap list (brew info's) names that are on
-the Mac; removing them uninstalls with Homebrew's zap, and `defaults delete`s each preferences
-domain it removed (`~/Library/Preferences/<domain>.plist`), as cfprefsd keeps a domain whose file
-has gone: the next capture drops it from kit-prefs, whose history keeps it. An App Store app has
-no zap list: it's asked about only when kit prefs holds a domain of its (kit prefs' own owner
-lookup), and removing them deletes those domains. `--zap` and `--keep` answer without asking;
-without a terminal, they're kept, the output saying so and that `--zap` removes them. An app
-leaving nothing is never asked about. The kind knows its app's leftovers (a `Leaver`); kit's
+settings from kit-prefs), listing under it, wrapped, exactly what removing takes. A cask's files
+are those its zap list (brew info's) names that are on the Mac, a shared vendor folder or another
+app's settings included when its globs say so, which is why they're listed; removing them
+uninstalls with Homebrew's zap, then `defaults delete`s each preferences domain it removed
+(`~/Library/Preferences/<domain>.plist`) that no installed app uses (kit prefs' owner lookup), as
+cfprefsd keeps a domain whose file has gone: the next capture drops it from kit-prefs, whose
+history keeps it. An App Store app has no zap list: it's asked about only when kit prefs holds a
+domain that's its alone (never one it shares with another app, as a vendor's or its group's), and
+removing them deletes those domains, while the app's still there, then uninstalls it. Settings
+that can't be taken off the pending list leave it undeclared all the same, the summary saying
+so. `--zap` and `--keep` answer without asking, and never together; without a terminal, they're
+kept, the output saying so and that `--zap` removes them. An app leaving nothing is never asked
+about; `--zap` on one not installed says it had nothing to remove. The kind knows its app's leftovers (a `Leaver`); kit's
 core never knows Homebrew's zap. Adding and removing both handle each name on its own (one
 failing leaves the others), then commit the config's changed files, with a message saying what, for which Mac and why, and push to
 main, pulling with rebase first. A push that fails leaves the commit, and says so.
@@ -1305,9 +1311,13 @@ to.
   in plain words. The hourly pass
   (`--pending`, unattended) brings back a held domain once its app is installed, not running
   and, sandboxed, has its settings folder (one without stays for the person to open), and leaves
-  what failed otherwise alone; so do `kit cask add` and `kit mas add`, straight after an install,
-  when kit prefs is on and a domain kept has its app now, before the app's first opened, and kit
-  apply, its settings step applied after the kinds of apps the run has, whatever its check finds; `kit prefs restore --pending`, by hand, tries everything waiting,
+  what failed otherwise alone, and does nothing at all, not even a pull, while nothing held could
+  come back (all of it kept for apps still not installed, or failed). `kit cask add` and `kit mas
+  add`, straight after an install, when kit prefs is on, restore the domains kept for that app
+  alone (the app that wasn't there before the install), before it's first opened, saying what
+  became of them (restored; to come back once it's been opened and quit, or once it's quit); kit
+  apply, its settings step applied after the kinds of apps the run has, whatever its check finds,
+  runs the hourly pass's restore once a domain kept has its app; `kit prefs restore --pending`, by hand, tries everything waiting,
   failed or not. From another Mac's folder, or onto other hardware,
   `[prefs machine-bound]` stays behind (Tailscale's identity and the like). `--at` unpacks the
   folder as it was then from history.

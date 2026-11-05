@@ -77,6 +77,8 @@ var Descriptor = kind.Descriptor{
 		What:   "App Store apps",
 		Add:    "Install App Store apps, by name or id, and declare them",
 		Remove: "Uninstall App Store apps, and undeclare them",
+		Leaves: "its settings",
+		Takes:  "its saved settings, from this Mac and, at the next capture, from kit prefs' store",
 	},
 	Apps: true,
 	Row:  "App Store apps",

@@ -12,21 +12,33 @@ import (
 )
 
 // The domains saved for an app are those of this Mac's folder whose app it
-// is, as a restore finds it: its bundle id, a sub-domain of it, or one
-// [prefs apps] says is its; never another app's.
+// is alone, as a restore finds it: its bundle id, a sub-domain of it, or
+// one [prefs apps] says is its; never another app's, nor one it shares
+// with others, as a vendor's domain, or its group's, its apps share.
 func TestSavedFor(t *testing.T) {
 	w := newWorld(t, prefs.Lists{Apps: [][2]string{{"com.vendor.updater", "com.example.app"}}})
-	for _, d := range []string{"com.example.app", "com.example.app.helper", "com.vendor.updater", "com.other.app"} {
+	for _, d := range []string{"com.example.app", "com.example.app.helper", "com.vendor.updater", "com.other.app", "com.example", "group.com.example"} {
 		w.write(t, filepath.Join(w.clone, "laptop", "domains", d+".plist"), stored(t, map[string]any{"A": true}))
 	}
 	w.write(t, filepath.Join(w.clone, "studio", "domains", "com.example.app.extra.plist"), stored(t, map[string]any{"A": true}))
 	w.app(t, w.apps, "Example", "com.example.app")
 	w.app(t, w.apps, "Other", "com.other.app")
+	w.app(t, w.apps, "Example Two", "com.example.two")
 	if got, want := w.p.SavedFor("com.example.app"), []string{"com.example.app", "com.example.app.helper", "com.vendor.updater"}; !slices.Equal(got, want) {
 		t.Errorf("SavedFor() = %q, want %q", got, want)
 	}
 	if got := w.p.SavedFor("com.absent.app"); len(got) != 0 {
 		t.Errorf("SavedFor(an app with nothing saved) = %q, want none", got)
+	}
+}
+
+// Unowned are the domains no installed app uses: an app's own, once it's
+// gone, never one another app installed still uses.
+func TestUnowned(t *testing.T) {
+	w := newWorld(t, prefs.Lists{})
+	w.app(t, w.apps, "Stable", "com.vendor.stable")
+	if got := w.p.Unowned([]string{"com.vendor.nightly", "com.vendor.stable", "com.vendor.stable.helper"}); !slices.Equal(got, []string{"com.vendor.nightly"}) {
+		t.Errorf("Unowned() = %q, want the nightly's alone", got)
 	}
 }
 
@@ -120,5 +132,57 @@ func TestRestoreInstalled(t *testing.T) {
 		if strings.HasPrefix(c, "defaults import com.example.running") {
 			t.Errorf("ran %s, while its app runs", c)
 		}
+	}
+}
+
+// Straight after kit installs an app, the domains kept for it alone come
+// back: another app's kept, its app installed too, and one held as its app
+// runs, are left as they are, and nothing of theirs is run.
+func TestRestoreKept(t *testing.T) {
+	w := newWorld(t, prefs.Lists{})
+	store := filepath.Join(w.clone, "studio")
+	for _, d := range []string{"com.example.app", "com.example.other", "com.example.running"} {
+		w.write(t, filepath.Join(store, "domains", d+".plist"), stored(t, map[string]any{"A": true}))
+	}
+	writeRecord(t, w.state, `{"on": "restored", "pending": {"from": "studio", "domains": ["com.example.app", "com.example.other", "com.example.running"],
+		"why": {"com.example.app": "kept till its app is installed", "com.example.other": "kept till its app is installed", "com.example.running": "Running is running"}}}`)
+	if report, err := w.p.RestoreKept(t.Context(), []string{"com.example.app"}); err != nil || len(report.Restored) != 0 || len(w.fake.Calls()) != 0 {
+		t.Errorf("RestoreKept(before it's installed) = %+v, %v, ran %q; want nothing", report, err, w.fake.Calls())
+	}
+	app := w.app(t, w.apps, "Example", "com.example.app")
+	w.app(t, w.apps, "Other", "com.example.other")
+	w.app(t, w.apps, "Running", "com.example.running")
+	w.closed("com.example.app")
+	w.fake.On("codesign", "-d", "--entitlements", "-", "--xml", app)
+	w.imports(t, "com.example.app", "studio", map[string]any{}, map[string]any{"A": true})
+	w.fake.On("git", "-C", w.clone, "rev-parse", "HEAD").Prints("abc123\n")
+	if report, err := w.p.RestoreKept(t.Context(), []string{"com.example.app"}); err != nil || !slices.Equal(report.Restored, []string{"com.example.app"}) {
+		t.Errorf("RestoreKept() = %+v, %v; want the app's settings back", report, err)
+	}
+	for _, c := range w.fake.Calls() {
+		if strings.Contains(c, "com.example.other") || strings.Contains(c, "com.example.running") {
+			t.Errorf("ran %s; want the other apps' left be", c)
+		}
+	}
+	if rec, _ := w.p.Load(); rec.Pending == nil || !slices.Equal(rec.Pending.Domains, []string{"com.example.other", "com.example.running"}) || rec.Pending.From != "studio" {
+		t.Errorf("pending = %+v, want the others held still, from studio", rec.Pending)
+	}
+}
+
+// The hourly pass, with nothing held but settings kept for apps still not
+// installed, does nothing at all: no pull of the store.
+func TestTheHourlyPassLeavesKeptSettingsBe(t *testing.T) {
+	w := newWorld(t, prefs.Lists{})
+	writeRecord(t, w.state, `{"on": "restored", "pending": {"from": "laptop", "domains": ["com.example.gone"], "why": {"com.example.gone": "kept till its app is installed"}}}`)
+	if report, err := w.p.Restore(t.Context(), prefs.RestoreOptions{Pending: true, Unattended: true}); err != nil || len(w.fake.Calls()) != 0 {
+		t.Errorf("the hourly pass = %+v, %v, ran %q; want nothing run", report, err, w.fake.Calls())
+	}
+}
+
+// A domain waits for its app to quit, or for a windowless helper's folder:
+// Running tells which.
+func TestRunning(t *testing.T) {
+	if !prefs.Running("Example is running") || prefs.Running("its settings folder hasn't come yet") || prefs.Running("kept till its app is installed") {
+		t.Error("Running() mistook why a domain waits")
 	}
 }

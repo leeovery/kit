@@ -235,6 +235,20 @@ func TestWalkWrapsWhatsAsked(t *testing.T) {
 	}
 }
 
+// What more there is to see of a question is never cut: a line too wide
+// wraps, its words where they were; one that fits is as it is.
+func TestQuestionsMoreWraps(t *testing.T) {
+	q := question("example-app")
+	q.More = []string{"~/Library/Application Support/Example App/Some Folder With A Long Name/And Deeper Still", "~/.example   kept"}
+	w := newWalk("", []Question{q})
+	equal(t, "view", plain(w.view(60, 40))[1:5], []string{
+		"  ▲ example-app  cask · installed, not declared",
+		"  │ ~/Library/Application Support/Example App/Some Folder",
+		"  │ With A Long Name/And Deeper Still",
+		"  │ ~/.example   kept",
+	})
+}
+
 // More questions than the terminal holds: the question asked stays in view,
 // those above it cut from the top.
 func TestWalkKeepsTheQuestionInView(t *testing.T) {

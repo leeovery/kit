@@ -416,6 +416,22 @@ func TestAppsSettingsAfreshAfterAnOlderRestore(t *testing.T) {
 	}
 }
 
+// f says what an earlier restore kept for apps not installed apart from
+// what still waits to come back.
+func TestAppsSettingsAfreshSaysWhatsKept(t *testing.T) {
+	state := t.TempDir()
+	record := `{"restored": {"from": "laptop", "at": "2026-10-04T03:00:00Z"}, "pending": {"from": "laptop", "domains": ["com.example.app", "com.example.gone"], "files": ["~/.config/tool/settings.json"],
+		"why": {"com.example.gone": "kept till its app is installed"}}}`
+	if err := os.WriteFile(filepath.Join(state, "prefs.json"), []byte(record), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	step := steps.Prefs(prefs.New(runnertest.New(t), t.TempDir(), state, t.TempDir(), "", "laptop", prefs.Lists{}, now), "", now)
+	paused := step.Check(t.Context()).Items[0]
+	if said, err := step.Choice.Answer(t.Context(), paused, "f"); err != nil || said != "saving from now; 2 still wait to come back; 1 kept for apps not installed" {
+		t.Errorf("f = %q, %v; want what waits and what's kept apart", said, err)
+	}
+}
+
 // With apps to open and settings held after failing, what's wrong with
 // capture itself still comes first: they're said beside it, never in its
 // place.
