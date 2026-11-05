@@ -148,6 +148,12 @@ func TestDeclare(t *testing.T) {
 			after: "[manual]\nalpha \"Do alpha\"\n  its step\nbeta \"Do beta\"\n\n[checks]\ndisk -- df -h\n",
 		},
 		{
+			name:   "a package in the section held for the secret it needs, as SecretHold says it",
+			before: "[homebrew formulae]\njq\n\n[homebrew formulae --secret TOKEN]\nowner/private/fetcher\n",
+			kind:   "brew", entry: config.Entry{Name: "owner/private/archiver", Hold: config.SecretHold("TOKEN")},
+			after: "[homebrew formulae]\njq\n\n[homebrew formulae --secret TOKEN]\nowner/private/archiver\nowner/private/fetcher\n",
+		},
+		{
 			name:   "a section holding lines back made, after its kind's own",
 			before: "[homebrew formulae]\njq\n\n[homebrew casks]\nghostty\n",
 			kind:   "brew", entry: config.Entry{Name: "owner/private/fetcher", Hold: "--secret TOKEN"},

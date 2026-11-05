@@ -748,19 +748,26 @@ func (h *Homebrew) NeedsAdmin(ctx context.Context, casks []string) ([]string, er
 }
 
 // info is what brew info --json=v2 says of formulae and casks, as far as
-// the names each goes by.
+// the names each goes by, what a cask installs, and where each downloads
+// from.
 type info struct {
 	Formulae []struct {
 		Name     string   `json:"name"`
 		FullName string   `json:"full_name"`
 		Aliases  []string `json:"aliases"`
 		Oldnames []string `json:"oldnames"`
+		URLs     struct {
+			Stable struct {
+				URL string `json:"url"`
+			} `json:"stable"`
+		} `json:"urls"`
 	} `json:"formulae"`
 	Casks []struct {
 		Token     string                       `json:"token"`
 		FullToken string                       `json:"full_token"`
 		OldTokens []string                     `json:"old_tokens"`
 		Artifacts []map[string]json.RawMessage `json:"artifacts"`
+		URL       string                       `json:"url"`
 	} `json:"casks"`
 }
 

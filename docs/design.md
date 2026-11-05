@@ -136,7 +136,14 @@ those comments, as nothing written by hand goes without being asked.
   finished without it, or when the run's stopped: without it, the section's lines stay
   missing, saying what isn't there. Otherwise they're the list's like any other: checked,
   listed, sorted, removed from whichever section holds them, a section going once empty
-  (but a kind's last, as above).
+  (but a kind's last, as above). Adding or adopting a thing whose install its kind says
+  needs a secret (Homebrew's: a tap's package, not one of Homebrew's own, whose download,
+  asked for once without a token, answers as a private one does, needing
+  `HOMEBREW_GITHUB_API_TOKEN`) declares it in its kind's section held for that secret, made
+  when there's none, saying so; refused, before anything's installed, while the secret isn't
+  declared for every Mac the line reaches. The add's own install has the secret set as
+  applying would, once it's in place. A check that can't be made, as without the network,
+  declares the line plainly, saying so.
 - **What's waited for goes first:** a thing a step names (`--after cask:firefox`) is
   installed ahead of the rest of its list, as one command, then the rest as one; where kinds
   share a tool's lock (Homebrew's formulae and casks), neither's rest begins till the other's

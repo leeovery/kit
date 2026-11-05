@@ -270,6 +270,13 @@ func TestListHeldLines(t *testing.T) {
 	}
 }
 
+// A section held for a secret, as SecretHold says it, needs that secret.
+func TestSecretHold(t *testing.T) {
+	if got := (config.Entry{Hold: config.SecretHold("~/.npmrc")}).Secrets(); !slices.Equal(got, []string{"~/.npmrc"}) {
+		t.Errorf("Secrets() = %q, want ~/.npmrc", got)
+	}
+}
+
 func TestListWithoutFiles(t *testing.T) {
 	got, err := loadRepo(t, map[string]string{}).List("brew", "laptop")
 	if err != nil || len(got.Entries) != 0 || got.Declared {

@@ -357,6 +357,10 @@ func (e Entry) After() []string { return holdOption(e.Hold, afterOption) }
 // says, each by what it fills.
 func (e Entry) Secrets() []string { return holdOption(e.Hold, secretOption) }
 
+// SecretHold is the Hold of a list's section whose lines need the secret
+// that fills name, as its header says it.
+func SecretHold(name string) string { return secretOption + " " + Quote(name) }
+
 // The options of a section holding its lines back, and --before, a line's.
 const (
 	afterOption  = "--after"

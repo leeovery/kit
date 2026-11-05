@@ -171,6 +171,17 @@ type Describer interface {
 	Describe(ctx context.Context, name string) string
 }
 
+// Private is a kind some of whose things install only with a secret, as a
+// Homebrew package whose download is private needs a GitHub token: adding
+// one declares it in its kind's section held for that secret, so a new Mac
+// installs it once the secret's synced, with it set.
+type Private interface {
+	// NeedsSecret is the secret installing name needs, by what it fills,
+	// and why, in the kind's words: "" for none. An error says it couldn't
+	// tell, as without the network.
+	NeedsSecret(ctx context.Context, name string) (secret, why string, err error)
+}
+
 // Differ is a kind whose things can be installed otherwise than they're
 // declared: an MCP server whose definition has changed.
 type Differ interface {

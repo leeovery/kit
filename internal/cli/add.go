@@ -154,10 +154,12 @@ func addOne(ctx context.Context, r *run, c *changes, k kind.Kind, scope, name st
 
 // adding is what adding a name declares, settled before it's installed:
 // where it's declared already, if it is; and the line it declares, judged,
-// unless its value's read from it installed and it isn't yet (ready).
+// unless its value's read from it installed and it isn't yet (ready), with
+// what declaring it says of the section it's held in (addedLine).
 type adding struct {
 	mine  []config.Entry
 	line  config.Entry
+	said  string
 	ready bool
 }
 
@@ -177,7 +179,7 @@ func prepareAdding(ctx context.Context, r *run, k kind.Kind, scope, name string,
 	if len(mine) > 0 || opts.temp || declarer || valued && !isIn {
 		return p, nil
 	}
-	if p.line, err = addedLine(ctx, k, name, opts); err != nil {
+	if p.line, p.said, err = addedLine(ctx, r, k, scope, name, opts); err != nil {
 		return p, err
 	}
 	p.ready = true
@@ -193,7 +195,7 @@ func installAndDeclare(ctx context.Context, r *run, c *changes, k kind.Kind, sco
 		if opts.waiting[name] {
 			return check.Result{State: check.Failed, Reason: fmt.Sprintf(adminWait, kindName+" add")}
 		}
-		if err := k.Install(event.WithChanging(ctx), []string{name}); err != nil {
+		if err := r.installAdding(event.WithChanging(ctx), k, name, p); err != nil {
 			return check.Result{State: check.Failed, Reason: "couldn't install: " + engine.Reason(err)}
 		}
 		verb = "installed"
@@ -212,10 +214,10 @@ func installAndDeclare(ctx context.Context, r *run, c *changes, k kind.Kind, sco
 		r.changedFile(c, file)
 		return check.Result{State: check.OK, Summary: verb + "; declared in " + r.files.Tilde(file)}
 	}
-	line := p.line
+	line, held := p.line, p.said
 	if !p.ready {
 		var err error
-		if line, err = addedLine(ctx, k, name, opts); err != nil {
+		if line, held, err = addedLine(ctx, r, k, scope, name, opts); err != nil {
 			return check.Result{State: check.Failed, Reason: verb + ", but couldn't declare: " + err.Error()}
 		}
 	}
@@ -223,7 +225,31 @@ func installAndDeclare(ctx context.Context, r *run, c *changes, k kind.Kind, sco
 	if err != nil {
 		return check.Result{State: check.Failed, Reason: verb + ", but couldn't declare: " + err.Error()}
 	}
-	return check.Result{State: check.OK, Summary: fmt.Sprintf("%s; declared in %s%s", verb, scope, said)}
+	return check.Result{State: check.OK, Summary: fmt.Sprintf("%s; declared in %s%s%s", verb, scope, said, held)}
+}
+
+// installAdding installs name, of k, which adding declares as p says: held
+// in a section for secrets, as declared or to be, it's installed as kit
+// apply installs that section's lines, once they're in place, with them
+// set from kit's own secrets.
+func (r *run) installAdding(ctx context.Context, k kind.Kind, name string, p adding) error {
+	line := p.line
+	if len(p.mine) > 0 {
+		line = p.mine[0]
+	}
+	secrets := line.Secrets()
+	if len(secrets) == 0 {
+		return k.Install(ctx, []string{name})
+	}
+	waits, env, err := r.needing(secrets)
+	if err != nil {
+		return err
+	}
+	list := r.lists[k.Name()]
+	if !slices.Contains(list.Names(), name) {
+		list.Entries = append(slices.Clone(list.Entries), config.Entry{Name: name, Hold: line.Hold})
+	}
+	return kind.InstallDeclared(ctx, k, list, []kind.Held{{Hold: line.Hold, Waits: waits, Env: env}}, []string{name})
 }
 
 // temporarily marks name, installed, as not declared for now: quiet for 7
@@ -252,10 +278,12 @@ func temporarily(ctx context.Context, r *run, c *changes, k kind.Kind, scope, na
 	return check.Result{State: check.OK, Summary: summary}
 }
 
-// addedLine is the line adding name declares: its value, for a kind whose
-// lines have one, as it's installed; the note given, after what the kind
-// says it is, or that alone as the note kit makes up (DefaultNote).
-func addedLine(ctx context.Context, k kind.Kind, name string, opts addOptions) (config.Entry, error) {
+// addedLine is the line adding name declares in scope's declarations: its
+// value, for a kind whose lines have one, as it's installed; the note
+// given, after what the kind says it is, or that alone as the note kit
+// makes up (DefaultNote); and its section, held for a secret its install
+// needs (heldFor), with what declaring it says of that.
+func addedLine(ctx context.Context, r *run, k kind.Kind, scope, name string, opts addOptions) (config.Entry, string, error) {
 	e := config.Entry{Name: name, Note: opts.note}
 	if d, ok := k.(kind.Describer); ok {
 		if what := d.Describe(ctx, name); what != "" && opts.note != "" {
@@ -267,10 +295,63 @@ func addedLine(ctx context.Context, k kind.Kind, name string, opts addOptions) (
 	if v, ok := k.(kind.Valued); ok {
 		var err error
 		if e.Value, err = v.Value(ctx, name); err != nil {
-			return e, err
+			return e, "", err
 		}
 	}
-	return e, nil
+	var said string
+	var err error
+	e.Hold, said, err = r.heldFor(ctx, k, scope, name)
+	return e, said, err
+}
+
+// heldFor is the Hold of the section a line declaring name, of k, goes in,
+// in scope's declarations: held for the secret k says its install needs
+// (kind.Private), which every Mac the line reaches must declare; else
+// none. said is what declaring it says of that, or that k couldn't tell,
+// the line then declared as it is.
+func (r *run) heldFor(ctx context.Context, k kind.Kind, scope, name string) (hold, said string, err error) {
+	p, ok := k.(kind.Private)
+	if !ok {
+		return "", "", nil
+	}
+	secret, why, err := p.NeedsSecret(ctx, name)
+	switch {
+	case err != nil:
+		return "", "; couldn't check whether it needs a secret: " + engine.Reason(err), nil
+	case secret == "":
+		return "", "", nil
+	}
+	without, err := r.undeclaring(scope, secret)
+	switch {
+	case err != nil:
+		return "", "", err
+	case scope == config.Shared && len(without) > 0:
+		return "", "", fmt.Errorf("%s, so it needs %s, which no [secrets] section declares for %s: declare it for every Mac first (kit secret add %s --shared)", why, secret, strings.Join(without, " and "), secret)
+	case len(without) > 0:
+		return "", "", fmt.Errorf("%s, so it needs %s, which no [secrets] section declares: declare it first (kit secret add %s)", why, secret, secret)
+	}
+	return config.SecretHold(secret), "; held for " + secret + ": " + why, nil
+}
+
+// undeclaring are the Macs a line in scope's declarations reaches whose
+// secrets don't declare the one that fills name: this Mac, or, for the
+// shared declarations, any.
+func (r *run) undeclaring(scope, name string) ([]string, error) {
+	macs := []string{r.machine}
+	if scope == config.Shared {
+		macs = r.cfg.MacNames()
+	}
+	var without []string
+	for _, mac := range macs {
+		list, err := r.cfg.List(secretKind, mac)
+		if err != nil {
+			return nil, err
+		}
+		if !slices.Contains(list.Names(), name) {
+			without = append(without, mac)
+		}
+	}
+	return without, nil
 }
 
 // notInstalled are which of names k doesn't find installed.
