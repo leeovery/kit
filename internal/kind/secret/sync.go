@@ -214,8 +214,7 @@ type syncing struct {
 // read reads d's secrets' values, d standing as session says: signed in,
 // with no session open, d has the person approve the read, the step saying
 // it's waiting for them, and what they're to do, and giving its job up
-// meanwhile. d's down when it
-// doesn't read them all.
+// meanwhile. d's down when it doesn't read them all.
 func (sy *syncing) read(ctx context.Context, d store.Driver, session store.Session) {
 	refs := sy.s.refs(d)
 	if len(refs) == 0 {
