@@ -176,10 +176,20 @@ type Describer interface {
 // one declares it in its kind's section held for that secret, so a new Mac
 // installs it once the secret's synced, with it set.
 type Private interface {
-	// NeedsSecret is the secret installing name needs, by what it fills,
-	// and why, in the kind's words: "" for none. An error says it couldn't
-	// tell, as without the network.
-	NeedsSecret(ctx context.Context, name string) (secret, why string, err error)
+	// NeedsSecret is what installing name needs, saying what it's doing
+	// as it finds out. An error says it couldn't tell, as without the
+	// network; the Need's Undo is there with it.
+	NeedsSecret(ctx context.Context, name string) (Need, error)
+}
+
+// Need is what installing a thing needs, as a Private kind finds it.
+type Need struct {
+	// Secret is the secret it needs, by what it fills: "" for none. Why is
+	// why, in the kind's words.
+	Secret, Why string
+	// Undo puts back what finding out changed on the Mac, as a tap added to
+	// look in, for an add refused: nil when it changed nothing.
+	Undo func(ctx context.Context) error
 }
 
 // Differ is a kind whose things can be installed otherwise than they're

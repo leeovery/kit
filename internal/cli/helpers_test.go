@@ -84,6 +84,9 @@ type world struct {
 	became [][]string
 	// ended are the waits of a step by hand's card that end at once (after).
 	ended []steps.Wait
+	// ctx, when set, is what kit runs in, for a test to stop it; else the
+	// test's own.
+	ctx context.Context
 }
 
 // after is how long kit waits in the world, as time.After has it: no time
@@ -198,7 +201,11 @@ func (w *world) run(t *testing.T, args ...string) (stdout, stderr string, status
 			return nil
 		},
 	})
-	status = cli.Execute(t.Context(), root, args)
+	ctx := w.ctx
+	if ctx == nil {
+		ctx = t.Context()
+	}
+	status = cli.Execute(ctx, root, args)
 	return out.String(), errOut.String(), status
 }
 

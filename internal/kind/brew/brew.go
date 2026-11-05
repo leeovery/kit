@@ -241,9 +241,16 @@ func SSHConfig() (string, error) {
 }
 
 // ready taps the taps names, the kind named kindName's, are from that
-// aren't tapped yet, each as one command, saying so: in Homebrew's turn to
-// change things.
+// aren't tapped yet (tap).
 func (h *Homebrew) ready(ctx context.Context, kindName string, names []string) error {
+	_, err := h.tap(ctx, kindName, names)
+	return err
+}
+
+// tap taps the taps names, the kind named kindName's, are from that aren't
+// tapped yet, each as one command, saying so: in Homebrew's turn to change
+// things. added are those it tapped.
+func (h *Homebrew) tap(ctx context.Context, kindName string, names []string) (added []string, err error) {
 	var taps []string
 	for _, name := range names {
 		if parts := strings.Split(name, "/"); len(parts) == 3 && !slices.Contains(taps, parts[0]+"/"+parts[1]) {
@@ -251,26 +258,28 @@ func (h *Homebrew) ready(ctx context.Context, kindName string, names []string) e
 		}
 	}
 	if len(taps) == 0 {
-		return nil
+		return nil, nil
 	}
 	tapped, err := h.lines(ctx, "tap")
 	if err != nil {
-		return err
+		return nil, err
 	}
 	taps = slices.DeleteFunc(taps, func(tap string) bool {
 		return slices.ContainsFunc(tapped, func(had string) bool { return strings.EqualFold(had, tap) })
 	})
 	if len(taps) == 0 {
-		return nil
+		return nil, nil
 	}
 	defer h.take(ctx, kindName)()
 	var errs []error
 	for _, tap := range taps {
 		if err := h.watched(ctx, "tapping "+tap, h.batched(runner.Command{Name: "brew", Args: []string{"tap", tap}})); err != nil {
 			errs = append(errs, fmt.Errorf("couldn't tap %s: %w", tap, err))
+			continue
 		}
+		added = append(added, tap)
 	}
-	return errors.Join(errs...)
+	return added, errors.Join(errs...)
 }
 
 // watched runs cmd, a brew command that counts nothing, as a tap or an
@@ -761,6 +770,13 @@ type info struct {
 				URL string `json:"url"`
 			} `json:"stable"`
 		} `json:"urls"`
+		Bottle struct {
+			Stable struct {
+				Files map[string]struct {
+					URL string `json:"url"`
+				} `json:"files"`
+			} `json:"stable"`
+		} `json:"bottle"`
 	} `json:"formulae"`
 	Casks []struct {
 		Token     string                       `json:"token"`

@@ -35,6 +35,16 @@ func laptopWorld(t *testing.T) *world {
 	f.On("brew", "leaves").Prints("go\njq\nowner/tap/tool\nnode@20\nffmpeg\n")
 	f.On("brew", "leaves", "--installed-on-request").Prints("go\njq\nowner/tap/tool\nffmpeg\n")
 	f.On("brew", "list", "--cask", "--full-name", "-1").Prints("ghostty\nfirefox\n")
+	// Homebrew's own that tests add, by their names alone, as brew info
+	// describes them: none of a tap, so no download's asked after; and a
+	// name it doesn't know.
+	f.On("brew", "info", "--json=v2", "--formula", "nosuch").Exits(1).PrintsToStderr(`Error: No available formula with the name "nosuch".` + "\n")
+	for _, name := range []string{"ffmpeg", "go", "golangci-lint", "hello", "jq", "ripgrep"} {
+		f.On("brew", "info", "--json=v2", "--formula", name).Prints(`{"formulae": [{"name": "` + name + `", "full_name": "` + name + `", "aliases": [], "oldnames": []}], "casks": []}`)
+	}
+	for _, name := range []string{"firefox", "ghostty"} {
+		f.On("brew", "info", "--json=v2", "--cask", name).Prints(`{"formulae": [], "casks": [{"token": "` + name + `", "full_token": "` + name + `", "old_tokens": [], "artifacts": [{"app": ["App.app"]}]}]}`)
+	}
 	w.private()
 	// gh is installed, for the config's check, with an extension: the config
 	// has no section of them, so kit doesn't look.

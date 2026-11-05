@@ -60,7 +60,10 @@ func (c *changes) step(ctx context.Context, name string, do func(ctx context.Con
 	started := time.Now()
 	c.run.sink.Emit(event.StepStarted{Time: started, Step: name, Doing: c.doing(name)})
 	c.current = name
-	res := do(event.WithStep(ctx, name))
+	res := do(event.WithSaying(event.WithStep(ctx, name), func(d event.Doing) {
+		d.Time, d.Step = time.Now(), name
+		c.run.sink.Emit(d)
+	}))
 	c.current = ""
 	c.results = append(c.results, res)
 	c.run.sink.Emit(event.StepFinished{Time: time.Now(), Step: name, Result: res, Duration: time.Since(started)})
