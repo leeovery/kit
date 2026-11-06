@@ -2,6 +2,7 @@ package cli_test
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -74,6 +75,33 @@ func TestLogShowsTheLastRun(t *testing.T) {
 	}
 	if strings.Contains(out, "\x1b[") {
 		t.Errorf("kit log --json printed escapes: %q", out)
+	}
+}
+
+// kit log shows the last run, never a newer log with no run in it, as kit
+// list's, kit why's and a change's are, which kit agent order doesn't even
+// keep.
+func TestLogShowsTheLastRunNotALogWithNoRun(t *testing.T) {
+	w := placesWorld(t)
+	when := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	path := w.logRun(t, when, event.RunStarted{Time: when, Command: "status", Machine: "laptop"})
+	w.now = when.Add(time.Hour)
+	if _, _, status := w.run(t, "secret", "places"); status != 0 {
+		t.Fatalf("kit secret places exit %d", status)
+	}
+	w.writeSection(t, "laptop", "steps", `alone "stands alone"`+"\n")
+	w.now = when.Add(2 * time.Hour)
+	if out, errOut, status := w.run(t, "agent", "order", "alone"); status != 0 {
+		t.Fatalf("kit agent order printed\n%s%s\nexit %d", out, errOut, status)
+	}
+	entries, err := os.ReadDir(filepath.Dir(path))
+	if err != nil || len(entries) != 2 || slices.ContainsFunc(entries, func(e os.DirEntry) bool { return strings.Contains(e.Name(), "agent") }) {
+		t.Errorf("logs = %v, %v: want the run's and secret places', none of kit agent order's", entries, err)
+	}
+	out, _, status := w.run(t, "log", "--json")
+	var doc struct{ Log string }
+	if err := json.Unmarshal([]byte(out), &doc); err != nil || status != 0 || doc.Log != path {
+		t.Errorf("kit log --json printed\n%s\nexit %d, want the run's log, %s", out, status, path)
 	}
 }
 

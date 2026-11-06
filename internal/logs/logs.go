@@ -230,7 +230,8 @@ func (l *File) Close() error {
 	return nil
 }
 
-// Latest is the newest run log in dir: names sort by when, the newest last.
+// Latest is the newest run's log in dir: names sort by when, the newest
+// last. A log with no start, as kit list's, isn't a run (Runs).
 func Latest(dir string) (string, error) {
 	entries, err := os.ReadDir(dir)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -239,16 +240,16 @@ func Latest(dir string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("read the logs directory: %w", err)
 	}
-	latest := ""
-	for _, e := range entries {
-		if e.Type().IsRegular() && strings.HasSuffix(e.Name(), ext) && e.Name() > latest {
-			latest = e.Name()
+	for _, e := range slices.Backward(entries) {
+		if !e.Type().IsRegular() || !strings.HasSuffix(e.Name(), ext) {
+			continue
+		}
+		path := filepath.Join(dir, e.Name())
+		if _, ok := readRun(path); ok {
+			return path, nil
 		}
 	}
-	if latest == "" {
-		return "", ErrNoLogs
-	}
-	return filepath.Join(dir, latest), nil
+	return "", ErrNoLogs
 }
 
 // Read reads the run log at path.

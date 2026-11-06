@@ -2,6 +2,7 @@ package cli_test
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -187,5 +188,21 @@ func TestAgentIsLastOfThisMacsCommands(t *testing.T) {
 	lines := strings.Split(mac, "\n")
 	if last := strings.Fields(lines[len(lines)-1]); last[0] != "agent" || !strings.Contains(mac, "Instructions for an agent changing this Mac's set-up through kit") {
 		t.Errorf("kit's help lists this Mac's commands as\n%s\nwant kit agent last", mac)
+	}
+}
+
+// What kit agent couldn't find out it says, every problem of it.
+func TestAgentSaysEveryProblem(t *testing.T) {
+	w := newWorld(t, map[string]string{"kit.toml": twoMacs, "shared/declarations": "[no such section]\n"})
+	if err := os.MkdirAll(filepath.Join(w.home, ".local", "state", "kit", "machine"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	out, _, code := w.run(t, "agent", "--json")
+	var doc struct{ Problem string }
+	if err := json.Unmarshal([]byte(out), &doc); err != nil || code != 0 {
+		t.Fatalf("kit agent --json printed\n%s\nexit %d: %v", out, code, err)
+	}
+	if !strings.HasPrefix(doc.Problem, "read this Mac's name: ") || !strings.Contains(doc.Problem, "; shared/declarations:1: kit doesn't know the section [no such section]") {
+		t.Errorf("problem = %q, want this Mac's name unread, and the shared file's section", doc.Problem)
 	}
 }

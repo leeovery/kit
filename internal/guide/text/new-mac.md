@@ -11,8 +11,9 @@ the administrator's password once, then installs Homebrew, the terminal
 kit.toml names and kit-config, and links its files. It carries on in that
 terminal with the whole of `kit apply`.
 
-So when `kit apply` starts: Homebrew is there, gh is signed in to GitHub,
-kit-config is cloned, and nothing else of the person's is.
+So when `kit apply` starts: Homebrew and the terminal are there, gh is
+signed in to GitHub, kit-config is cloned and its files linked, and nothing
+else of the person's is.
 
 ## The run
 
@@ -28,8 +29,8 @@ kit-config is cloned, and nothing else of the person's is.
 
 A step waiting for one of another step's things (`--after cask:firefox`)
 starts once that thing is in, or once its step has finished, failed or
-not: a wait never hangs the run, so a step can still find what it needs
-missing, and its check says so (exit 3).
+not: a wait never hangs the run. A thing that didn't come leaves the step
+unapplied.
 
 Partway through:
 
@@ -41,15 +42,18 @@ Partway through:
   the start.
 - Apps' settings are restored once every cask and App Store app is in.
 
-A step whose check exits 3 isn't applied in that run: the person runs
-`kit apply` again later, and it's applied then. Better a step that comes
-after what it needs than one that waits for a second run.
+Name what a step needs (`--after`, `--secret`) so it's there in the first
+run. A step whose check exits 3 isn't applied for the rest of that run: the
+person runs `kit apply` again later, and it's applied then. Exit 3 is only
+the safety net. A check that needs one of its own secrets says not
+done (exit 1) when it hasn't synced yet, never 3: kit waits for it inside
+apply.
 
 ## What isn't there
 
-- No app has been opened. Its first launch is slow, may show onboarding
-  or macOS's question about apps from the internet, and it may not answer
-  a URL, AppleScript or its command line for a while.
+- Most apps have never been opened. A first launch is slow, may show
+  onboarding or macOS's question about apps from the internet, and the app
+  may not answer a URL, AppleScript or its command line for a while.
 - No setting has been restored till the prefs step runs, near the end.
 - No secret has synced till the password manager's card is answered.
 - No repository is cloned but kit-config, no tool is signed in but gh, and

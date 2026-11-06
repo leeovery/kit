@@ -11,12 +11,14 @@ declarations file (every Mac's with `--shared`) and writes its folder,
 `<mac>/steps/<name>/` (`shared/steps/<name>/`), with `run` in it, a template
 to fill in. The line in `[steps]` reads as the command wrote it:
 
+    [steps]
     name "what it does" --after cask:firefox --secret TOKEN --sudo
 
-- `--after` a step it's applied after, by its name as `kit status` shows
-  it, or one of a step's things, as in cask:firefox: it waits till that
-  thing is installed, or its step has finished. A kind this Mac doesn't
-  use is no wait at all.
+- `--after` a step it's applied after, by its name as kit status shows it,
+  or one of a step's things, as in cask:firefox: it waits till that thing
+  is installed, or its step has finished. A step of kit's kinds that this
+  Mac doesn't use is no wait at all; any other step this Mac's run hasn't,
+  as prefs without kit prefs on, fails the step at once, saying so.
 - `--before` a step that's applied after it.
 - `--secret` a secret it needs, by what it fills, declared in a secrets
   section: its apply waits till the secret has synced, and runs with it set
@@ -32,15 +34,18 @@ The folder's other files are its data. `run` must stay executable.
 
 ## How kit runs it
 
-- `run check`, in its folder, with nothing on its input, for at most a
-  minute: exit 0 when it's done, 1 when it isn't, 3 when it can't be done
-  yet. Its first line says how it stands, as `kit status` shows it. Any
-  other exit, or a check that doesn't answer, is a failure.
+- `run check`, in its folder, with nothing on its input: exit 0 when it's
+  done, 1 when it isn't, 3 when it can't be done yet. Its first line says
+  how it stands, as kit status shows it. Any other exit is a failure, and
+  so is a check that doesn't answer in 30 seconds, tried twice.
 - When it isn't done, `run apply`, for at most 15 minutes, then `run check`
   again: the step is done only when that check says so. When apply fails,
   its last line says why.
-- A check that exits 3 isn't applied in that run, and isn't failed: the
-  next run tries again. Say what's missing in its first line.
+- A check that exits 3 isn't failed, and isn't applied for the rest of
+  that run: the next run tries again, so on a new Mac it waits for a
+  second run. It's the safety net for what can't be named; name what it
+  needs instead, with `--after` and `--secret`. Say what's missing in its
+  first line.
 
 A check runs on every `kit status` and in every nightly run: it changes
 nothing, opens nothing and asks no one. One that must go online says so in
@@ -52,19 +57,21 @@ Its environment is kit's, never your shell's: HOME, the PATH kit-config's
 `[paths]` makes (then the system's), USER, LOGNAME, SHELL, TMPDIR, LANG,
 LC_ALL, SSH_AUTH_SOCK, the secrets store's own variables, Homebrew told not
 to update itself, git told not to ask for a password, and the secrets it
-names that are variables. A token in your shell is not there: declare it
-with `kit secret add`, and name it with `--secret`.
+names that are variables. A token in your shell is not there: name it with
+`--secret`, once it's declared with `kit secret add`.
 
 On a new Mac its check can run before its secrets have synced, without
 them; kit holds its apply till they're in place. So a check that needs a
 secret it hasn't got says not done (exit 1), never 3, or the step isn't
 applied in that run.
 
-What it names with `--after` is there when it runs; nothing else is
-promised. A command it runs from a package is a thing to name, as in
-brew:jq. An app it drives is a cask or App Store app to name, and prefs,
-so that the app's settings are restored first (`--after prefs`, where kit
-prefs is on).
+What it names with `--after` has finished by the time it runs, whether or
+not it succeeded; a thing it names is installed, or the step isn't applied.
+Nothing else is promised. A command it runs from a package is a thing to
+name, as in brew:jq. An app it drives is a cask or App Store app to name,
+and prefs, so that the app's settings are restored first (`--after prefs`).
+That fails the step on a Mac without kit prefs on, so a step declared for
+every Mac with it needs prefs on in every Mac.
 
 `#!/bin/bash` is macOS's bash 3.2 on a new Mac: no mapfile, no associative
 arrays, no `${var,,}`. For a newer one, name Homebrew's (`--after brew:bash`)
@@ -94,4 +101,10 @@ kit's PATH.
 after), then `kit status <name>` shows its check. On this Mac what it comes
 after is done already, so that proves less than it seems:
 `kit agent order <name>` says what a new Mac's run has done by then.
+
+From your shell, without a terminal, kit has no administrator's password
+to give: a step declared with it, or one after a cask that installs through
+a package, waits. Ask the person to run `kit apply <name>` at a terminal;
+never drop the flag, or use sudo -n, to make it pass.
+
 `kit step remove <name>` undeclares it and removes its folder.

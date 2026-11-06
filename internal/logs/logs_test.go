@@ -175,11 +175,18 @@ func TestLatest(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		l.Emit(event.RunStarted{Time: when, Command: "status"})
 		_ = l.Close()
 	}
+	// A log with no start, as kit list's, newer than every run, isn't one.
+	l, err := logs.Open(dir, at.Add(2*time.Hour), "list", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = l.Close()
 	got, err := logs.Latest(dir)
 	if err != nil || filepath.Base(got) != "2026-01-02T040405.678-status.jsonl" {
-		t.Errorf("Latest() = %s, %v, want the newest", got, err)
+		t.Errorf("Latest() = %s, %v, want the newest run", got, err)
 	}
 }
 
@@ -201,6 +208,7 @@ func TestFileLeavesOutLinesAsTheyCome(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	f.Emit(event.RunStarted{Command: "status"})
 	f.Emit(event.Output{Step: "brew", Line: "==> Pouring jq"})
 	if err := f.Close(); err != nil {
 		t.Fatal(err)
@@ -210,8 +218,8 @@ func TestFileLeavesOutLinesAsTheyCome(t *testing.T) {
 		t.Fatal(err)
 	}
 	records, err := logs.Read(path)
-	if err != nil || len(records) != 0 {
-		t.Errorf("logged %+v, %v; want nothing", records, err)
+	if err != nil || len(records) != 1 || records[0].Event != "run_started" {
+		t.Errorf("logged %+v, %v; want the run's start alone", records, err)
 	}
 }
 

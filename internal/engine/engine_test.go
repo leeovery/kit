@@ -1671,9 +1671,10 @@ func TestAFailedApplySaysWhatTheCommandSaid(t *testing.T) {
 
 // What's ahead of a step is what a run has in place by the time it applies:
 // what it needs and comes after, whole, and what was ahead of those, with
-// what they waited for partway; the things of steps it waits for, and what
-// was ahead of those steps; but never its own partway waits, unless it
-// waits for them first, nor a thing of a step ahead whole.
+// what they waited for partway; the things of steps it waits for, what was
+// ahead of those steps, and what those things wait for; the things no step
+// puts in place, last; but never its own partway waits, unless it waits for
+// them first, nor a thing of a step ahead whole.
 func TestAhead(t *testing.T) {
 	there := func(context.Context) bool { return true }
 	thing := func(step, name string) engine.Wait { return engine.Wait{Step: step, Thing: name, Ready: there} }
@@ -1682,43 +1683,67 @@ func TestAhead(t *testing.T) {
 		{Name: "sign-in", Check: ok("")},
 		{Name: "secret", Later: []engine.Wait{{Step: "sign-in"}}, Check: ok("")},
 		{Name: "cask", Needs: []string{"homebrew"}, Check: ok("")},
+		{Name: "npm", Waits: []engine.Wait{{Thing: "npm", Ready: there}}, Check: ok("")},
 		{Name: "prefs", After: []string{"cask"}, Check: ok("")},
 		{Name: "git", After: []string{"secret"}, Check: ok("")},
 		{Name: "uses-app", Waits: []engine.Wait{thing("cask", "app")}, Check: ok("")},
 		{Name: "drives-app", After: []string{"prefs"}, Waits: []engine.Wait{thing("cask", "app")}, Check: ok("")},
 		{Name: "early", Before: []string{"uses-app"}, Check: ok("")},
 		{Name: "token", Later: []engine.Wait{thing("secret", "TOKEN")}, Check: ok("")},
+		{Name: "after-npm", After: []string{"npm"}, Check: ok("")},
+		{Name: "private", Waits: []engine.Wait{thing("cask", "private")}, Check: ok("")},
 		{Name: "alone", Check: ok("")},
 	}
 	p, err := engine.New(run...)
 	if err != nil {
 		t.Fatal(err)
 	}
+	holds := engine.Holds{
+		First: func(step string) []engine.Wait {
+			if step == "token" {
+				return []engine.Wait{thing("secret", "TOKEN")}
+			}
+			return nil
+		},
+		Gates: func(step, name string) []engine.Wait {
+			switch {
+			case step == "secret":
+				return []engine.Wait{{Step: "sign-in"}}
+			case step == "cask" && name == "private":
+				return []engine.Wait{thing("secret", "TOKEN")}
+			}
+			return nil
+		},
+	}
 	shown := func(ahead []engine.Wait) []string {
 		var out []string
 		for _, w := range ahead {
-			out = append(out, strings.TrimSuffix(w.Step+":"+w.Thing, ":"))
+			out = append(out, strings.Trim(w.Step+":"+w.Thing, ":"))
 		}
 		return out
 	}
 	tests := []struct {
-		step string
-		also []engine.Wait
-		want []string
+		target engine.Wait
+		holds  engine.Holds
+		want   []string
 	}{
-		{step: "alone"},
-		{step: "cask", want: []string{"homebrew"}},
-		{step: "prefs", want: []string{"homebrew", "cask"}},
-		{step: "git", want: []string{"sign-in", "secret"}},
-		{step: "secret"},
-		{step: "uses-app", want: []string{"homebrew", "cask:app", "early"}},
-		{step: "drives-app", want: []string{"homebrew", "cask", "prefs"}},
-		{step: "token"},
-		{step: "token", also: []engine.Wait{thing("secret", "TOKEN")}, want: []string{"secret:TOKEN"}},
+		{target: engine.Wait{Step: "alone"}, holds: holds},
+		{target: engine.Wait{Step: "cask"}, holds: holds, want: []string{"homebrew"}},
+		{target: engine.Wait{Step: "prefs"}, holds: holds, want: []string{"homebrew", "cask"}},
+		{target: engine.Wait{Step: "git"}, holds: holds, want: []string{"sign-in", "secret"}},
+		{target: engine.Wait{Step: "secret"}, holds: holds},
+		{target: engine.Wait{Step: "uses-app"}, holds: holds, want: []string{"homebrew", "cask:app", "early"}},
+		{target: engine.Wait{Step: "drives-app"}, holds: holds, want: []string{"homebrew", "cask", "prefs"}},
+		{target: engine.Wait{Step: "token"}, want: nil},
+		{target: engine.Wait{Step: "token"}, holds: holds, want: []string{"sign-in", "secret:TOKEN"}},
+		{target: engine.Wait{Step: "secret", Thing: "TOKEN"}, holds: holds, want: []string{"sign-in"}},
+		{target: engine.Wait{Step: "private"}, holds: holds, want: []string{"homebrew", "sign-in", "secret:TOKEN", "cask:private"}},
+		{target: engine.Wait{Step: "npm"}, holds: holds, want: []string{"npm"}},
+		{target: engine.Wait{Step: "after-npm"}, holds: holds, want: []string{"npm", "npm"}},
 	}
 	for _, tt := range tests {
-		if got := shown(p.Ahead(tt.step, tt.also...)); !slices.Equal(got, tt.want) {
-			t.Errorf("ahead of %s (also %d) = %q, want %q", tt.step, len(tt.also), got, tt.want)
+		if got := shown(p.Ahead(tt.target, tt.holds)); !slices.Equal(got, tt.want) {
+			t.Errorf("ahead of %s = %q, want %q", strings.Trim(tt.target.Step+":"+tt.target.Thing, ":"), got, tt.want)
 		}
 	}
 }

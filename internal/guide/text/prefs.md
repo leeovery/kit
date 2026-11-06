@@ -38,16 +38,17 @@ is held, and `kit prefs pending` lists it:
 ## On a new Mac
 
 The prefs step restores every app's settings once every cask and App Store
-app is installed, near the end of the run, before anyone has opened them.
+app is installed, near the end of the run, before most have been opened.
 So, on a new Mac:
 
 - An app opened before then, by a step, a login item or a person, leaves
   its restore waiting till it quits.
 - A step that opens, drives or configures an app comes after prefs:
   `--after prefs`. It then finds the app installed and its settings
-  restored, but still never opened: its first launch is slow, and may
+  restored, but likely never opened: its first launch is slow, and may
   show onboarding or macOS's question about apps downloaded from the
-  internet.
+  internet. `--after prefs` fails the step on a Mac without kit prefs on,
+  so a step declared for every Mac with it needs prefs on in every Mac.
 - A step that changes an app's settings itself, rather than leaving them
   to prefs, may have them overwritten by the restore unless it comes
   after prefs.

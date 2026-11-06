@@ -376,45 +376,71 @@ func (p *Pipeline) Steps() []Step {
 	return slices.Clone(p.steps)
 }
 
-// Ahead is what a run has in place by the time the step called name
-// applies, in pipeline order: each step it needs or comes after, finished,
-// as a Wait naming the step alone; each of a step's things it waits for, as
-// a Wait naming both; and, in turn, what was ahead of each of those, and
-// what each step finished waited for partway through applying (Later). Its
-// own Later, which don't order it, aren't among them, but for also: those
-// it waits for before it applies anything, as a step of your own waits for
-// its secrets. A thing of a step ahead whole isn't named.
-func (p *Pipeline) Ahead(name string, also ...Wait) []Wait {
+// Holds are what a step, or one of its things, waits for beyond its place
+// in the run's order, as Ahead takes them: First, what the step called
+// step waits for before it applies anything, as a step of your own waits
+// for its secrets, where other steps wait partway (Later); Gates, what a
+// thing of the step called step waits for, as a secret its store's
+// sign-in, or a line its held section's waits. Either may be nil.
+type Holds struct {
+	First func(step string) []Wait
+	Gates func(step, thing string) []Wait
+}
+
+// Ahead is what a run has in place by the time target applies, a step or
+// one of a step's things, in pipeline order: each step it needs or comes
+// after, finished, as a Wait naming the step alone; each of a step's things
+// it waits for, as a Wait naming both; and, in turn, what was ahead of each
+// of those, what each step finished waited for partway through applying
+// (Later), and what each thing waits for (holds' Gates). A step's own
+// Later, which don't order it, aren't among them, but for holds' First.
+// Last come the things no step puts in place it waits for, as a program
+// on kit's PATH, each a Wait naming the thing alone. A thing of a step
+// ahead whole isn't named.
+func (p *Pipeline) Ahead(target Wait, holds Holds) []Wait {
 	byName := make(map[string]Step, len(p.steps))
 	for _, s := range p.steps {
 		byName[s.Name] = s
 	}
 	whole := map[string]bool{}
 	things := map[string][]string{}
+	var loose []string
 	led := map[string]bool{}
-	var lead, wait func(w Wait)
+	var lead func(step string)
+	var wait func(w Wait)
+	gated := func(step, thing string) {
+		if holds.Gates != nil {
+			for _, g := range holds.Gates(step, thing) {
+				wait(g)
+			}
+		}
+	}
 	wait = func(w Wait) {
 		switch {
 		case w.Step == "":
+			if !slices.Contains(loose, w.Thing) {
+				loose = append(loose, w.Thing)
+			}
 		case w.Thing != "":
 			if !slices.Contains(things[w.Step], w.Thing) {
 				things[w.Step] = append(things[w.Step], w.Thing)
+				lead(w.Step)
+				gated(w.Step, w.Thing)
 			}
-			lead(w)
 		case !whole[w.Step]:
 			whole[w.Step] = true
-			lead(w)
+			lead(w.Step)
 			for _, later := range byName[w.Step].Later {
 				wait(later)
 			}
 		}
 	}
-	lead = func(w Wait) {
-		if led[w.Step] {
+	lead = func(step string) {
+		if led[step] {
 			return
 		}
-		led[w.Step] = true
-		s := byName[w.Step]
+		led[step] = true
+		s := byName[step]
 		for _, n := range slices.Concat(s.Needs, s.After) {
 			wait(Wait{Step: n})
 		}
@@ -422,21 +448,31 @@ func (p *Pipeline) Ahead(name string, also ...Wait) []Wait {
 			wait(w)
 		}
 	}
-	lead(Wait{Step: name})
-	for _, w := range also {
-		wait(w)
+	lead(target.Step)
+	switch {
+	case target.Thing != "":
+		gated(target.Step, target.Thing)
+	case holds.First != nil:
+		for _, w := range holds.First(target.Step) {
+			wait(w)
+		}
 	}
 	var ahead []Wait
 	for _, s := range p.steps {
 		switch {
-		case s.Name == name:
-		case whole[s.Name]:
+		case s.Name == target.Step && target.Thing == "":
+		case whole[s.Name] && s.Name != target.Step:
 			ahead = append(ahead, Wait{Step: s.Name})
 		default:
 			for _, thing := range things[s.Name] {
-				ahead = append(ahead, Wait{Step: s.Name, Thing: thing})
+				if s.Name != target.Step || thing != target.Thing {
+					ahead = append(ahead, Wait{Step: s.Name, Thing: thing})
+				}
 			}
 		}
+	}
+	for _, thing := range loose {
+		ahead = append(ahead, Wait{Thing: thing})
 	}
 	return ahead
 }

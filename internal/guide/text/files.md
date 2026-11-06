@@ -37,8 +37,10 @@ writes it on each Mac (see `kit agent secrets`).
 
 ## On a new Mac
 
-Linked files are made near the start of the run, but in no order with
-anything else. A step that reads one names it: `--after file`.
+The boot links kit-config's files, before kit apply starts, so a new Mac
+has them from the first step. In kit apply, the file step checks them
+again, in no order with anything else. On this Mac, a file just added is
+linked by `kit file add` itself.
 
 What a linked file expects (a program, a plugin folder, another file) is
 a package, a step or another linked file of its own: a file that works

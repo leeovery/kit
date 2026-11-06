@@ -138,9 +138,9 @@ func guideText() string {
 	lines = append(lines, look.Wrap("Each goes deeper than the guide, as `kit agent steps` does; a topic is found by the start of its name.", agentWidth-2)...)
 	lines = append(lines, "")
 	for _, t := range guide.Topics {
-		lines = append(lines, hanging("- "+t.Name+": ", t.About)...)
+		lines = append(lines, bullet(t.Name+": "+t.About)...)
 	}
-	lines = append(lines, hanging("- order: ", "`kit agent order <name>` says where a step, or a thing as in cask:firefox, falls in a new Mac's run.")...)
+	lines = append(lines, bullet("order: `kit agent order <name>` says where a step, or a thing as in cask:firefox, falls in a new Mac's run.")...)
 	return guide.Main() + "\n" + strings.Join(lines, "\n") + "\n\n" + guide.Checking()
 }
 
@@ -163,14 +163,16 @@ func (a *app) agentFacts(ctx context.Context) agentFacts {
 		f.Macs = append(f.Macs, agentMac{Name: name, Description: cfg.Macs[name].Description})
 	}
 	var mac string
+	var problems []string
 	if f.Machine, err = config.ReadMachine(dirs.State); err != nil {
-		f.Problem = err.Error()
+		problems = append(problems, err.Error())
 	} else if cfg.Knows(f.Machine) {
 		mac, f.Folder = f.Machine, f.Machine+"/"
 	}
 	if f.Secrets, err = secretsPlaces(cfg, mac); err != nil {
-		f.Problem = err.Error()
+		problems = append(problems, err.Error())
 	}
+	f.Problem = strings.Join(problems, "; ")
 	f.Repository = a.configRepository(ctx, cfg, dirs.Config, mac)
 	return f
 }
@@ -258,6 +260,21 @@ func hanging(lead, text string) []string {
 			continue
 		}
 		wrapped[i] = strings.Repeat(" ", len(lead)) + wrapped[i]
+	}
+	return wrapped
+}
+
+// bullet is text as an item of a list, as the guide writes them: wrapped
+// within kit agent's width, after a dash, its lines after the first
+// indented under its text.
+func bullet(text string) []string {
+	wrapped := look.Wrap(text, agentWidth-2)
+	for i := range wrapped {
+		lead := "  "
+		if i == 0 {
+			lead = "- "
+		}
+		wrapped[i] = lead + wrapped[i]
 	}
 	return wrapped
 }

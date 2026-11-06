@@ -83,10 +83,12 @@ type run struct {
 	version  string
 	pipeline *engine.Pipeline
 	// steps are the pipeline's steps, as given it.
-	steps    []engine.Step
-	sink     event.Sink
-	face     render.Face
-	log      *logs.File
+	steps []engine.Step
+	sink  event.Sink
+	face  render.Face
+	// log is the run's log: none, that logs nothing, for what isn't a run,
+	// as kit agent order isn't.
+	log      render.Face
 	stateDir string
 	// kinds are the kinds the run checks, by name, in pipeline order: their
 	// items are drift. A kind is checked only while the config has its
@@ -282,6 +284,7 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 // build readies a run as prepare does, shown on face, its steps those of a
 // run at a terminal when atTerminal says so, as kit apply's steps by hand
 // raised as cards are, but starting nothing a run at one starts (start).
+// Without a logName, it keeps no log.
 func (a *app) build(command, logName string, face render.Face, atTerminal bool) (*run, error) {
 	dirs, err := a.dirs()
 	if err != nil {
@@ -314,9 +317,11 @@ func (a *app) build(command, logName string, face render.Face, atTerminal bool) 
 		return nil, err
 	}
 	now := a.Now()
-	log, err := logs.Open(dirs.Logs, now, logName, a.verbose)
-	if err != nil {
-		return nil, err
+	log := render.Tee()
+	if logName != "" {
+		if log, err = logs.Open(dirs.Logs, now, logName, a.verbose); err != nil {
+			return nil, err
+		}
 	}
 	sink := event.NewFanout(face, log)
 	// Everything the run starts can ask it for an administrator's password,

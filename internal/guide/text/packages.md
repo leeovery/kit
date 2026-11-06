@@ -27,10 +27,12 @@ right above a line are its notes too. `--temp` installs without declaring,
 for a throwaway: it's quiet for 7 days, then `kit reconcile` asks.
 
 `kit brew remove jq` uninstalls and undeclares. When something installed
-still needs it, nothing changes, and kit says why. Removing an app (a cask
-or an App Store app) asks whether to keep its files and settings, at a
-terminal; `--keep` keeps them and `--zap` removes them without asking.
-Ask the person before you remove anything.
+still needs it, nothing changes, and kit says why. Ask the person before
+you remove anything.
+
+Removing an app, as `kit cask remove` does, asks at a terminal whether to
+keep its files and settings; `--keep` keeps them and `--zap` removes them,
+without asking.
 
 What's installed but not declared, or declared but not installed, is drift:
 `kit status` lists it, quiet for its first day, and `kit reconcile` settles
@@ -63,9 +65,10 @@ commit it, when a package needs something kit installs first.
   whatever installs it.
 - App Store apps need someone signed in to the App Store.
 - Login items come after the casks and App Store apps.
-- An app kit installs is never opened by the install: its first launch is
-  still to come. Its settings are restored after every cask and App Store
-  app is in (see `kit agent prefs`).
+- kit doesn't open an app it installs, though a few installers do, and the
+  password manager's sign-in card opens that app: an app's first launch is
+  likely still to come. Its settings are restored after every cask and App
+  Store app is in (see `kit agent prefs`).
 - A package's own set-up beyond installing it (a sign-in, a licence, a
   plugin it fetches) isn't the install's: it's a step of your own or a step
   done by hand, ordered after the package (`--after cask:<name>`).

@@ -7,27 +7,37 @@ import (
 	"testing"
 )
 
-// orderWorld is laptopWorld with apps' settings on, a secret, and steps of
-// the user's own: one placed nowhere, one after a cask, one after apps'
-// settings, and one needing the secret.
+// orderWorld is laptopWorld with apps' settings on, a secret, a cask held
+// for it, npm packages, a step done by hand, and steps of the user's own:
+// one placed nowhere, one after a cask, one after apps' settings, one
+// needing the secret, one after the held cask, one after a cask this Mac
+// doesn't declare, one after what isn't a step, and one after npm's.
 func orderWorld(t *testing.T) *world {
 	t.Helper()
 	w := laptopWorld(t)
 	w.writeSection(t, "laptop", "features", "prefs\n")
 	w.writeSection(t, "laptop", "secrets", "TOKEN op://vault/item/token\n")
+	w.writeSection(t, "laptop", "homebrew casks --secret TOKEN", "private-app\n")
+	w.writeSection(t, "laptop", "npm packages", "typescript\n")
+	w.writeSection(t, "laptop", "manual", `by-hand "Do a thing by hand"`+"\n")
 	w.writeSection(t, "laptop", "steps", `alone "stands alone"
 uses-app "drives an app" --after cask:ghostty
 after-settings "drives an app, its settings restored" --after prefs
 needs-token "uses a token" --secret TOKEN
+uses-private "uses a private app" --after cask:private-app
+typo "names a cask not declared" --after cask:ghostie
+broken "comes after nothing" --after nothere
+after-npm "after npm's packages" --after npm
 `)
 	return w
 }
 
 // placed is kit agent order --json's document.
 type placed struct {
-	Schema                           int
-	Machine, Name, Step, Thing       string
-	Before, After, Unordered, Absent []struct {
+	Schema                            int
+	Machine, Name, Step, Thing, Never string
+	RaisedBy                          string `json:"raised_by"`
+	Before, After, Unordered, Absent  []struct {
 		Step, Thing, Says string
 	}
 }
@@ -44,10 +54,14 @@ func (w *world) order(t *testing.T, name string) placed {
 	return doc
 }
 
-// names are spots' names, as kit names a step or a step's thing.
+// names are spots' names, as kit agent order names them.
 func names(spots []struct{ Step, Thing, Says string }) []string {
 	var out []string
 	for _, s := range spots {
+		if s.Step == "" {
+			out = append(out, s.Thing+" (on PATH)")
+			continue
+		}
 		out = append(out, strings.TrimSuffix(s.Step+":"+s.Thing, ":"))
 	}
 	return out
@@ -62,13 +76,14 @@ func TestOrderOfAStepPlacedNowhere(t *testing.T) {
 	want := `alone on a new Mac
 
 Before it
-  nothing kit installs: it can be among the first
+  nothing: it can be among the first
 
 After it
   manual  steps done by hand, at the end, once the rest is done
 
 In no order with it: either may come first
-  secret  Secrets, every one synced, once Sign in to 1Password is done
+  secret  Secrets: each synced unless it fails, once Sign in to 1Password is
+          done
   prefs   apps' settings restored, once Homebrew casks are installed
 `
 	if code != 0 || out != want {
@@ -85,16 +100,19 @@ func TestOrderOfAStepAfterACask(t *testing.T) {
 	want := `uses-app on a new Mac
 
 Before it
-  homebrew      Homebrew, done
-  cask:ghostty  installed, never opened; its settings restored by prefs, which
-                may come before or after it
+  homebrew        Homebrew, finished
+  cask:ghostty    installed, likely never opened yet; its settings restored by
+                  prefs, which may come before or after it
+  brew (on PATH)  a program, waited for till it's on kit's PATH, whatever
+                  installs it
 
 After it
-  manual        steps done by hand, at the end, once the rest is done
+  manual          steps done by hand, at the end, once the rest is done
 
 In no order with it: either may come first
-  secret        Secrets, every one synced, once Sign in to 1Password is done
-  prefs         apps' settings restored, once Homebrew casks are installed
+  secret          Secrets: each synced unless it fails, once Sign in to
+                  1Password is done
+  prefs           apps' settings restored, once Homebrew casks are installed
 `
 	if code != 0 || out != want {
 		t.Errorf("kit agent order uses-app printed\n%s\nexit %d, want\n%s", out, code, want)
@@ -105,10 +123,10 @@ In no order with it: either may come first
 // restored before it.
 func TestOrderOfAStepAfterAppsSettings(t *testing.T) {
 	doc := orderWorld(t).order(t, "after-settings")
-	if got, want := names(doc.Before), []string{"homebrew", "cask", "prefs"}; !slices.Equal(got, want) {
+	if got, want := names(doc.Before), []string{"homebrew", "cask", "secret:TOKEN", "prefs", "1password-sign-in", "brew (on PATH)"}; !slices.Equal(got, want) {
 		t.Errorf("before it = %q, want %q", got, want)
 	}
-	if says := doc.Before[1].Says; says != "Homebrew casks, every one installed, never opened; their settings restored by prefs, before it" {
+	if says := doc.Before[1].Says; says != "Homebrew casks: each installed unless it fails; likely never opened yet; their settings restored by prefs, before it" {
 		t.Errorf("the casks before it say %q", says)
 	}
 	if got := names(doc.Unordered); !slices.Equal(got, []string{"secret"}) {
@@ -120,8 +138,8 @@ func TestOrderOfAStepAfterAppsSettings(t *testing.T) {
 // the rest of the secrets are in no order with it, which it says.
 func TestOrderOfAStepNeedingASecret(t *testing.T) {
 	doc := orderWorld(t).order(t, "needs-token")
-	if got := names(doc.Before); !slices.Equal(got, []string{"secret:TOKEN"}) || doc.Before[0].Says != "synced" {
-		t.Errorf("before it = %+v, want TOKEN synced", doc.Before)
+	if got := names(doc.Before); !slices.Equal(got, []string{"secret:TOKEN", "1password-sign-in"}) || doc.Before[0].Says != "synced" {
+		t.Errorf("before it = %+v, want TOKEN synced, after the password manager's sign-in", doc.Before)
 	}
 	if got := names(doc.Unordered); !slices.Equal(got, []string{"secret", "prefs"}) || !strings.HasSuffix(doc.Unordered[0].Says, "; only those listed before it are sure to come first") {
 		t.Errorf("in no order with it = %+v, want the rest of the secrets, and apps' settings", doc.Unordered)
@@ -135,8 +153,8 @@ func TestOrderOfAThing(t *testing.T) {
 	if doc.Name != "cask:ghostty" || doc.Step != "cask" || doc.Thing != "ghostty" || doc.Machine != "laptop" || doc.Schema != 1 {
 		t.Errorf("document = %+v", doc)
 	}
-	if got := names(doc.Before); !slices.Equal(got, []string{"homebrew"}) {
-		t.Errorf("before it = %q, want Homebrew", got)
+	if got := names(doc.Before); !slices.Equal(got, []string{"homebrew", "brew (on PATH)"}) {
+		t.Errorf("before it = %q, want Homebrew, and brew on kit's PATH", got)
 	}
 	if got, want := names(doc.After), []string{"prefs", "uses-app", "after-settings", "manual"}; !slices.Equal(got, want) {
 		t.Errorf("after it = %q, want %q", got, want)
@@ -162,7 +180,7 @@ Not in this Mac's run
 // A name the run hasn't is an error saying what it has, as kit status says.
 func TestOrderOfWhatIsntThere(t *testing.T) {
 	tests := []struct{ name, want string }{
-		{"nosuch", "kit: no step named nosuch on this Mac: one of homebrew, path, brew, cask, secret, prefs,"},
+		{"nosuch", "kit: no step named nosuch on this Mac: one of homebrew, path, brew, cask, npm, secret, prefs,"},
 		{"cask:nosuch", "kit: cask:nosuch isn't declared for this Mac, or is declared off: kit list cask lists what is\n"},
 		{"homebrew:jq", "kit: homebrew has no things of its own: name a step, or a kind's thing, as in cask:firefox\n"},
 	}
@@ -171,5 +189,80 @@ func TestOrderOfWhatIsntThere(t *testing.T) {
 		if code != 2 || !strings.HasPrefix(errOut, tt.want) {
 			t.Errorf("kit agent order %s printed\n%s\nexit %d, want exit 2 and\n%s", tt.name, errOut, code, tt.want)
 		}
+	}
+}
+
+// The password manager's sign-in comes before any secret syncs: before a
+// secret, before the secrets' sync, and so before what waits for either.
+func TestOrderPlacesTheSignInBeforeTheSecrets(t *testing.T) {
+	if doc := orderWorld(t).order(t, "secret:TOKEN"); !slices.Equal(names(doc.Before), []string{"1password-sign-in"}) {
+		t.Errorf("before secret:TOKEN = %q, want the password manager's sign-in", names(doc.Before))
+	}
+	if doc := orderWorld(t).order(t, "secret"); !slices.Equal(names(doc.Before), []string{"1password-sign-in"}) {
+		t.Errorf("before the secrets' sync = %q, want the password manager's sign-in", names(doc.Before))
+	}
+	doc := orderWorld(t).order(t, "1password-sign-in")
+	if got := names(doc.After); !slices.Contains(got, "secret") || !slices.Contains(got, "needs-token") || len(doc.Unordered) != 0 {
+		t.Errorf("after the sign-in = %q, in no order %q: want the secrets' sync and what needs a secret after it", got, names(doc.Unordered))
+	}
+}
+
+// A step after a cask held for a secret has that secret, and the sign-in
+// before it, in place first, as the cask is.
+func TestOrderOfAStepAfterAHeldThing(t *testing.T) {
+	doc := orderWorld(t).order(t, "uses-private")
+	if got, want := names(doc.Before), []string{"homebrew", "cask:private-app", "secret:TOKEN", "1password-sign-in", "brew (on PATH)"}; !slices.Equal(got, want) {
+		t.Errorf("before it = %q, want %q", got, want)
+	}
+}
+
+// A kind waits for its program on kit's PATH, whatever installs it: it's
+// not among the first.
+func TestOrderOfAKindWaitingForItsProgram(t *testing.T) {
+	w := orderWorld(t)
+	out, _, code := w.run(t, "agent", "order", "npm")
+	want := "Before it\n  npm (on PATH)  a program, waited for till it's on kit's PATH, whatever\n                 installs it\n"
+	if code != 0 || !strings.Contains(out, want) || strings.Contains(out, "among the first") {
+		t.Errorf("kit agent order npm printed\n%s\nexit %d, want it to say\n%s", out, code, want)
+	}
+	if doc := w.order(t, "after-npm"); !slices.Equal(names(doc.Before), []string{"npm", "npm (on PATH)"}) {
+		t.Errorf("before a step after npm = %q, want npm's packages and npm on kit's PATH", names(doc.Before))
+	}
+}
+
+// A step after a thing this Mac doesn't declare never applies: kit never
+// installs that thing, so the step waits for it every run.
+func TestOrderOfAStepAfterAThingNotDeclared(t *testing.T) {
+	doc := orderWorld(t).order(t, "typo")
+	if doc.Never != "it waits for cask:ghostie, which isn't declared for this Mac, so it's never installed" {
+		t.Errorf("never = %q", doc.Never)
+	}
+	i := slices.Index(names(doc.Before), "cask:ghostie")
+	if i < 0 || doc.Before[i].Says != "not declared for this Mac: never installed" {
+		t.Errorf("before it = %+v, want cask:ghostie never installed", doc.Before)
+	}
+}
+
+// A step whose line is wrong fails at once, and kit agent order says why,
+// and nothing about where it falls.
+func TestOrderOfABrokenStep(t *testing.T) {
+	out, _, code := orderWorld(t).run(t, "agent", "order", "broken")
+	said := strings.Join(strings.Fields(out), " ")
+	if code != 0 || !strings.HasPrefix(said, "broken on a new Mac It fails at once, and never applies: laptop/declarations:") || !strings.HasSuffix(said, ": it comes after nothere, which isn't a step") || strings.Contains(out, "Before it") {
+		t.Errorf("kit agent order broken printed\n%s\nexit %d, want it to say it fails, and why", out, code)
+	}
+}
+
+// A step done by hand that nothing comes after is raised with the rest, at
+// the end, and placed as they are.
+func TestOrderOfAStepDoneByHandAtTheEnd(t *testing.T) {
+	w := orderWorld(t)
+	doc := w.order(t, "by-hand")
+	if doc.Step != "manual" || doc.RaisedBy != "manual" || len(doc.After) != 0 || !slices.Contains(names(doc.Before), "alone") {
+		t.Errorf("document = %+v, want it placed as manual, after the rest", doc)
+	}
+	out, _, _ := w.run(t, "agent", "order", "by-hand")
+	if heading := "by-hand on a new Mac: a step done by hand, raised with the rest by manual\n"; !strings.HasPrefix(out, heading) {
+		t.Errorf("kit agent order by-hand printed\n%s\nwant it to open\n%s", out, heading)
 	}
 }

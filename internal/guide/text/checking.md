@@ -4,7 +4,9 @@
   `kit status` alone checks the whole Mac: exit 0 when nothing needs
   attention.
 - `kit apply <name>`: applies that step, with the steps it needs; not the
-  ones it comes after, which a new Mac's run applies first.
+  ones it comes after, which a new Mac's run applies first. What needs an
+  administrator's password waits without a terminal: the person runs that
+  at one.
 - `kit apply --plan`: says what applying would do, and does nothing.
 - `kit agent order <name>`: what a new Mac's run has done by the time a
   step, or a thing as in cask:firefox, applies, and what comes after it.

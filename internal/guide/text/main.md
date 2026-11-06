@@ -94,12 +94,15 @@ extension's files in place passed its check while the app had never been
 told of the extension. What can't be checked cheaply is checked by the
 nearest proof, and the script says so.
 
-A check runs on every `kit status`: it changes nothing, and it's quick (kit
-gives it a minute). One that has to go online says so in its script.
+A check runs on every `kit status`: it changes nothing, and it's quick. kit
+gives it 30 seconds, tries it once more, then fails it. One that has to go
+online says so in its script.
 
 Declare a step with `--sudo` when its apply needs an administrator: kit asks
-for the password once a run, and gives it to sudo when sudo asks. `sudo -n`
-never asks, so it goes without.
+for the password once a run, at a terminal, and gives it to sudo when sudo
+asks. Without a terminal, as in your shell, there's no password to give, so
+such a step waits: the person runs it at a terminal. Never drop `--sudo`, or
+use `sudo -n`, to make one pass.
 
 ### What a step can rely on
 
@@ -110,11 +113,19 @@ function from a shell is there. It runs in its folder, with nothing on its
 input.
 
 What it names: `--after` for each thing kit installs that it uses (a step,
-or a step's thing, as in cask:firefox), and `--secret` for each secret.
-Nothing else is promised to be there when it runs.
+or a step's thing, as in cask:firefox), and `--secret` for each secret. A
+step it comes after has finished by then, whether or not it succeeded; a
+thing it comes after is installed, or the step isn't applied. Nothing else
+is promised to be there when it runs.
 
-Without what it needs, its check exits 3, naming it, and kit doesn't apply
-it till then. That's never a failure.
+Naming what it needs is how a step gets it on a new Mac. Exit 3 is only the
+safety net: a step whose check exits 3 isn't applied for the rest of that
+run, so a new Mac needs a second run for it. Use it for what can't be named.
+
+Its secrets are waited for inside apply, after the check: on a new Mac the
+check can run before a `--secret` value has synced. A check that needs one
+it hasn't got says not done (exit 1), never 3, or the step isn't applied in
+that run.
 
 A script that starts `#!/bin/bash` runs macOS's own bash, 3.2, on a new
 Mac: no mapfile, no associative arrays, no `${var,,}`.
@@ -125,6 +136,10 @@ Mac: no mapfile, no associative arrays, no `${var,,}`.
 fill in its check and its apply. Then run `kit apply <name>`, and
 `kit status <name>` to see its check say done.
 
+A step added with `kit step add --sudo`, or one after a cask that installs
+through a package, waits without a terminal: ask the person to run
+`kit apply <name>` at one.
+
 Then think it through on a new Mac, as the next section says, with
 `kit agent order <name>`.
 
@@ -132,9 +147,10 @@ Then think it through on a new Mac, as the next section says, with
 
 ### How its run goes
 
-The boot comes first: GitHub's sign-in on the phone, which Mac it is,
-Homebrew, kit-config cloned, and the terminal kit-config names. Then
-`kit apply` runs everything kit-config declares for that Mac.
+The boot comes first: GitHub's sign-in on the phone, which Mac it is, the
+administrator's password, Homebrew, the terminal kit-config names, then
+kit-config cloned and its files linked. Then `kit apply` runs everything
+kit-config declares for that Mac, in that terminal.
 
 kit apply orders what's declared by `--after` and `--before`, and by kit's
 own order (Homebrew before its formulae, apps' settings after the apps).
@@ -157,15 +173,25 @@ Mac when one comes up.
 
 ### What's different from this Mac
 
-Nothing else is there yet: no app opened, no setting restored, no secret
+Nothing else is there yet: no app used, no setting restored, no secret
 synced, no repository cloned, no tool signed in, but what a step's
 `--after` and `--secret` bring.
 
-An app just installed has never been opened. Its first launch is slow, may
-show onboarding or macOS's "downloaded from the internet" question, and it
-may not answer a URL, AppleScript or its own command line for a while.
-Drive an app only after its settings are restored (`--after prefs`, where
-kit prefs is on), and try again for a while, not once.
+An app just installed has likely never been opened: kit doesn't open it,
+though a few installers do, as does the password manager's sign-in card. Its
+first launch is slow, may show onboarding or macOS's "downloaded from the
+internet" question, and it may not answer a URL, AppleScript or its own
+command line for a while. Drive an app only after its settings are restored
+(`--after prefs`), and try again for a while, not once. `--after prefs`
+fails the step on a Mac without kit prefs on, so a step declared for every
+Mac with it needs prefs on in every Mac.
+
+An app whose first launch needs a person (onboarding, a sign-in) can't be
+retried into working. Add a step done by hand for it (`kit manual add`),
+its line ordered after the app and before your step:
+
+    [manual]
+    app-set-up "Finish the app's set-up" --after cask:app --before uses-app
 
 An app opened before its settings are restored leaves its restore waiting
 till it quits.
@@ -182,7 +208,8 @@ network or an app time, minutes not seconds.
 Answer each of these for the change:
 
 - What does it need that a blank Mac won't have at that point?
-- Is each named (`--after`, `--secret`, `--sudo`) or checked (exit 3)?
+- Is each named (`--after`, `--secret`, `--sudo`)? Exit 3 is the safety
+  net for what can't be, and leaves the step for the next run.
 - Does it open or drive an app? Then it comes after prefs, and retries.
 - Does it lean on a shell, a cache or a file only this Mac has?
 - Does its check prove the outcome?
@@ -190,6 +217,8 @@ Answer each of these for the change:
 - Is it this Mac's, or every Mac's?
 
 Run `kit apply <name>` and `kit status <name>` here: its check says done.
+What needs an administrator's password waits without a terminal: the person
+runs that at one.
 `kit agent order <name>` says what a new Mac's run has done by the time it
 applies, and what comes after it.
 
