@@ -376,6 +376,71 @@ func (p *Pipeline) Steps() []Step {
 	return slices.Clone(p.steps)
 }
 
+// Ahead is what a run has in place by the time the step called name
+// applies, in pipeline order: each step it needs or comes after, finished,
+// as a Wait naming the step alone; each of a step's things it waits for, as
+// a Wait naming both; and, in turn, what was ahead of each of those, and
+// what each step finished waited for partway through applying (Later). Its
+// own Later, which don't order it, aren't among them, but for also: those
+// it waits for before it applies anything, as a step of your own waits for
+// its secrets. A thing of a step ahead whole isn't named.
+func (p *Pipeline) Ahead(name string, also ...Wait) []Wait {
+	byName := make(map[string]Step, len(p.steps))
+	for _, s := range p.steps {
+		byName[s.Name] = s
+	}
+	whole := map[string]bool{}
+	things := map[string][]string{}
+	led := map[string]bool{}
+	var lead, wait func(w Wait)
+	wait = func(w Wait) {
+		switch {
+		case w.Step == "":
+		case w.Thing != "":
+			if !slices.Contains(things[w.Step], w.Thing) {
+				things[w.Step] = append(things[w.Step], w.Thing)
+			}
+			lead(w)
+		case !whole[w.Step]:
+			whole[w.Step] = true
+			lead(w)
+			for _, later := range byName[w.Step].Later {
+				wait(later)
+			}
+		}
+	}
+	lead = func(w Wait) {
+		if led[w.Step] {
+			return
+		}
+		led[w.Step] = true
+		s := byName[w.Step]
+		for _, n := range slices.Concat(s.Needs, s.After) {
+			wait(Wait{Step: n})
+		}
+		for _, w := range s.Waits {
+			wait(w)
+		}
+	}
+	lead(Wait{Step: name})
+	for _, w := range also {
+		wait(w)
+	}
+	var ahead []Wait
+	for _, s := range p.steps {
+		switch {
+		case s.Name == name:
+		case whole[s.Name]:
+			ahead = append(ahead, Wait{Step: s.Name})
+		default:
+			for _, thing := range things[s.Name] {
+				ahead = append(ahead, Wait{Step: s.Name, Thing: thing})
+			}
+		}
+	}
+	return ahead
+}
+
 func allOf(names []string, in map[string]bool) bool {
 	for _, n := range names {
 		if !in[n] {

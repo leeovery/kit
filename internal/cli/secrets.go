@@ -194,16 +194,9 @@ type place struct {
 // secretPlaces lists the blocks secrets are declared in, for this Mac: as
 // one document with --json, else a row each.
 func (a *app) secretPlaces(r *run) error {
-	found, err := r.cfg.Places(secretKind, r.machine)
+	places, err := secretsPlaces(r.cfg, r.machine)
 	if err != nil {
 		return err
-	}
-	places := make([]place, len(found))
-	for i, p := range found {
-		places[i] = place{Name: p.As, Item: p.Item, Scope: p.Scope, File: config.DeclFile(p.Scope), Line: p.Line, Secrets: p.Count}
-		if d, err := secret.ItemStore(p.Item); p.Item != "" && err == nil {
-			places[i].Store = d.About().Name
-		}
 	}
 	if a.json {
 		return render.WriteJSON(a.Stdout, struct {
@@ -222,9 +215,32 @@ func (a *app) secretPlaces(r *run) error {
 	}
 	lines := make([]string, len(places))
 	for i, p := range places {
-		lines[i] = p.title() + "  " + strings.Join(p.says(), " · ")
+		lines[i] = p.line()
 	}
 	return writeLines(out, lines)
+}
+
+// secretsPlaces are the blocks secrets are declared in for the Mac called
+// machine, in cfg: the shared file's, then its own.
+func secretsPlaces(cfg *config.Config, machine string) ([]place, error) {
+	found, err := cfg.Places(secretKind, machine)
+	if err != nil {
+		return nil, err
+	}
+	places := make([]place, len(found))
+	for i, p := range found {
+		places[i] = place{Name: p.As, Item: p.Item, Scope: p.Scope, File: config.DeclFile(p.Scope), Line: p.Line, Secrets: p.Count}
+		if d, err := secret.ItemStore(p.Item); p.Item != "" && err == nil {
+			places[i].Store = d.About().Name
+		}
+	}
+	return places, nil
+}
+
+// line is a block as a plain line lists it: its title, and what's said of
+// it after.
+func (p place) line() string {
+	return p.title() + "  " + strings.Join(p.says(), " · ")
 }
 
 // placeRows are places as rows: each by its name, or its item, its store,

@@ -129,6 +129,9 @@ type run struct {
 	raise   *steps.Raise
 	now     time.Time
 	run     runner.Runner
+	// path and env are kit's own PATH and the environment it runs programs
+	// in.
+	path, env []string
 	// homeDir is the user's home, logsDir where kit's logs go, and dataDir
 	// kit's data folder.
 	homeDir, logsDir, dataDir string
@@ -268,6 +271,18 @@ func (a *app) prepare(command, logName string) (*run, error) {
 
 // prepareWith readies a run as prepare does, shown on face.
 func (a *app) prepareWith(command, logName string, face render.Face) (*run, error) {
+	r, err := a.build(command, logName, face, a.pretty(a.Stdout))
+	if err != nil {
+		return nil, err
+	}
+	a.start(r, face)
+	return r, nil
+}
+
+// build readies a run as prepare does, shown on face, its steps those of a
+// run at a terminal when atTerminal says so, as kit apply's steps by hand
+// raised as cards are, but starting nothing a run at one starts (start).
+func (a *app) build(command, logName string, face render.Face, atTerminal bool) (*run, error) {
 	dirs, err := a.dirs()
 	if err != nil {
 		return nil, err
@@ -306,21 +321,21 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 	sink := event.NewFanout(face, log)
 	// Everything the run starts can ask it for an administrator's password,
 	// at a terminal, once the run is ready (askpass).
-	var asks *askpass.Server
+	var r *run
 	env := childEnv(a.Getenv, a.Environ(), home, path)
 	exec := runner.WithEnv(a.Runner(path, env), func() []string {
-		if asks == nil {
+		if r == nil || r.askpass == nil {
 			return nil
 		}
-		return asks.Env()
+		return r.askpass.Env()
 	})
 	observed := runner.Observed(exec, func(ctx context.Context, rep runner.Report) { sink.Emit(event.Command(ctx, rep)) }, a.Now)
 	observed = runner.Streamed(observed, event.Changing, func(ctx context.Context, cmd runner.Command, line string) {
 		sink.Emit(event.Output{Time: a.Now(), Step: event.StepOf(ctx), Command: redact.Text(cmd.String()), Line: redact.Text(line, runner.SecretValues(ctx)...)})
 	})
-	r := &run{
+	r = &run{
 		command: command, machine: machine, version: a.Version, sink: sink, face: face, log: log,
-		stateDir: dirs.State, now: now, run: observed, cfg: cfg, homeDir: home, logsDir: dirs.Logs, dataDir: dirs.Data,
+		stateDir: dirs.State, now: now, run: observed, path: path, env: env, cfg: cfg, homeDir: home, logsDir: dirs.Logs, dataDir: dirs.Data,
 		kindsByName: map[string]kind.Kind{}, lists: map[string]config.List{}, placing: map[string]kind.Placing{},
 		repo: gitrepo.Repo{Dir: dirs.Config, Run: observed, Home: home}, record: record,
 		drifters: map[string]drifter{}, admin: &steps.Admin{},
@@ -492,7 +507,7 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 	// own, once everything else has finished, with what the run left the
 	// person to do, so that step's there whether or not any are declared.
 	var raise *steps.Raise
-	if slices.Contains(applies, command) && a.pretty(a.Stdout) {
+	if slices.Contains(applies, command) && atTerminal {
 		desk := hand.New()
 		raise = &steps.Raise{Sink: sink, Now: a.Now, Notify: r.notifier(a.Getenv, a.Now), Desk: desk, After: a.After}
 		r.raise = raise
@@ -545,21 +560,26 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 		_ = log.Close()
 		return nil, err
 	}
-	if a.pretty(a.Stdout) && !slices.Contains(readOnly, command) {
-		asks = a.askpass(face)
-		r.askpass = asks
+	return r, nil
+}
+
+// start starts what a run at a terminal starts, shown on face: answering
+// what its programs ask for an administrator's password, its cards'
+// notifications, and watching macOS asking the person at the Mac.
+func (a *app) start(r *run, face render.Face) {
+	if a.pretty(a.Stdout) && !slices.Contains(readOnly, r.command) {
+		r.askpass = a.askpass(face)
 	}
-	if raise != nil {
+	if r.raise != nil {
 		r.notifier(a.Getenv, a.Now).Prepare()
 	}
 	if a.WatchDialogs && a.pretty(a.Stdout) {
-		r.held, r.unwatch = watchDialogs(a.Runner(path, env), r.notifier(a.Getenv, a.Now), sink, a.Now)
+		r.held, r.unwatch = watchDialogs(a.Runner(r.path, r.env), r.notifier(a.Getenv, a.Now), r.sink, a.Now)
 	}
-	if asks != nil {
+	if asks := r.askpass; asks != nil {
 		dialogs := r.held
 		r.held = func() bool { return asks.Pending() || dialogs != nil && dialogs() }
 	}
-	return r, nil
 }
 
 // withNeeded is needed, the steps the run's kinds need that are their own,
