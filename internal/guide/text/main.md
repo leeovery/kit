@@ -187,8 +187,10 @@ fails the step on a Mac without kit prefs on, so a step declared for every
 Mac with it needs prefs on in every Mac.
 
 An app whose first launch needs a person (onboarding, a sign-in) can't be
-retried into working. Add a step done by hand for it (`kit manual add`),
-its line ordered after the app and before your step:
+retried into working. Add a step done by hand for it with
+`kit manual add`, which can't order it: then, in the declarations file,
+order its line after the app and before your step, by hand, and commit
+that edit (rule 3):
 
     [manual]
     app-set-up "Finish the app's set-up" --after cask:app --before uses-app

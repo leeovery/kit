@@ -387,6 +387,16 @@ type Holds struct {
 	Gates func(step, thing string) []Wait
 }
 
+// Prior is one of what's ahead of a step (Ahead): a step, one of a step's
+// things, or a thing no step puts in place, as Wait names them; and
+// Through, when it's ahead only through a step the one placed comes after,
+// which has finished then but may not have succeeded: that step's name, or
+// "" when it's sure to be in place, or the one placed isn't applied.
+type Prior struct {
+	Wait
+	Through string
+}
+
 // Ahead is what a run has in place by the time target applies, a step or
 // one of a step's things, in pipeline order: each step it needs or comes
 // after, finished, as a Wait naming the step alone; each of a step's things
@@ -396,83 +406,92 @@ type Holds struct {
 // Later, which don't order it, aren't among them, but for holds' First.
 // Last come the things no step puts in place it waits for, as a program
 // on kit's PATH, each a Wait naming the thing alone. A thing of a step
-// ahead whole isn't named.
-func (p *Pipeline) Ahead(target Wait, holds Holds) []Wait {
+// ahead whole isn't named, unless it's surer. What a step it comes after
+// waited for is ahead through that step (Prior's Through); what a step it
+// needs waited for is as sure as that step, which stood ok.
+func (p *Pipeline) Ahead(target Wait, holds Holds) []Prior {
 	byName := make(map[string]Step, len(p.steps))
 	for _, s := range p.steps {
 		byName[s.Name] = s
 	}
-	whole := map[string]bool{}
-	things := map[string][]string{}
-	var loose []string
-	led := map[string]bool{}
-	var lead func(step string)
-	var wait func(w Wait)
-	gated := func(step, thing string) {
-		if holds.Gates != nil {
-			for _, g := range holds.Gates(step, thing) {
-				wait(g)
-			}
+	type key struct{ step, thing string }
+	// own is how sure a step or thing is to be in place, kids how sure what
+	// it waited for is: "" for sure, else the step it's through.
+	type sureness struct{ own, kids string }
+	seen := map[key]sureness{}
+	var found []key
+	surer := func(was, now string) string {
+		if was == "" || now == "" {
+			return ""
 		}
+		return was
 	}
-	wait = func(w Wait) {
-		switch {
-		case w.Step == "":
-			if !slices.Contains(loose, w.Thing) {
-				loose = append(loose, w.Thing)
-			}
-		case w.Thing != "":
-			if !slices.Contains(things[w.Step], w.Thing) {
-				things[w.Step] = append(things[w.Step], w.Thing)
-				lead(w.Step)
-				gated(w.Step, w.Thing)
-			}
-		case !whole[w.Step]:
-			whole[w.Step] = true
-			lead(w.Step)
-			for _, later := range byName[w.Step].Later {
-				wait(later)
-			}
-		}
-	}
-	lead = func(step string) {
-		if led[step] {
-			return
-		}
-		led[step] = true
+	var visit func(k key, own, kids string)
+	// lead visits what's ahead of the step called step, as sure as kids.
+	lead := func(step, kids string, extra []Wait) {
 		s := byName[step]
-		for _, n := range slices.Concat(s.Needs, s.After) {
-			wait(Wait{Step: n})
+		for _, n := range s.Needs {
+			visit(key{n, ""}, kids, kids)
 		}
-		for _, w := range s.Waits {
-			wait(w)
+		for _, n := range s.After {
+			visit(key{n, ""}, kids, cmp.Or(kids, n))
+		}
+		for _, w := range slices.Concat(s.Waits, extra) {
+			visit(key{w.Step, w.Thing}, kids, kids)
 		}
 	}
-	lead(target.Step)
+	gates := func(step, thing string) []Wait {
+		if holds.Gates == nil {
+			return nil
+		}
+		return holds.Gates(step, thing)
+	}
+	visit = func(k key, own, kids string) {
+		if was, ok := seen[k]; ok {
+			own, kids = surer(was.own, own), surer(was.kids, kids)
+			if own == was.own && kids == was.kids {
+				return
+			}
+		}
+		if _, ok := seen[k]; !ok {
+			found = append(found, k)
+		}
+		seen[k] = sureness{own, kids}
+		switch {
+		case k.step == "":
+		case k.thing != "":
+			lead(k.step, kids, gates(k.step, k.thing))
+		default:
+			lead(k.step, kids, byName[k.step].Later)
+		}
+	}
 	switch {
 	case target.Thing != "":
-		gated(target.Step, target.Thing)
+		lead(target.Step, "", gates(target.Step, target.Thing))
 	case holds.First != nil:
-		for _, w := range holds.First(target.Step) {
-			wait(w)
-		}
+		lead(target.Step, "", holds.First(target.Step))
+	default:
+		lead(target.Step, "", nil)
 	}
-	var ahead []Wait
+	var ahead []Prior
 	for _, s := range p.steps {
-		switch {
-		case s.Name == target.Step && target.Thing == "":
-		case whole[s.Name] && s.Name != target.Step:
-			ahead = append(ahead, Wait{Step: s.Name})
-		default:
-			for _, thing := range things[s.Name] {
-				if s.Name != target.Step || thing != target.Thing {
-					ahead = append(ahead, Wait{Step: s.Name, Thing: thing})
-				}
+		whole, isWhole := seen[key{s.Name, ""}]
+		isWhole = isWhole && s.Name != target.Step
+		if isWhole {
+			ahead = append(ahead, Prior{Step: s.Name, Through: whole.own})
+		}
+		for _, k := range found {
+			// A thing of a step ahead whole is named only when it's surer.
+			named := !isWhole || whole.own != "" && seen[k].own == ""
+			if named && k.step == s.Name && k.thing != "" && k != (key{target.Step, target.Thing}) && (s.Name != target.Step || target.Thing != "") {
+				ahead = append(ahead, Prior{Step: k.step, Thing: k.thing, Through: seen[k].own})
 			}
 		}
 	}
-	for _, thing := range loose {
-		ahead = append(ahead, Wait{Thing: thing})
+	for _, k := range found {
+		if k.step == "" {
+			ahead = append(ahead, Prior{Thing: k.thing, Through: seen[k].own})
+		}
 	}
 	return ahead
 }

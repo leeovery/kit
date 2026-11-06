@@ -49,11 +49,14 @@ document.`,
 }
 
 // spot is a step, one of a step's things, or a thing no step puts in place,
-// as a program on kit's PATH, in a run's order, and what's said of it there.
+// as a program on kit's PATH, in a run's order, and what's said of it there;
+// and, when it's before the one placed only through a step that one comes
+// after, which may not have succeeded, that step (engine.Prior's Through).
 type spot struct {
-	Step  string `json:"step,omitempty"`
-	Thing string `json:"thing,omitempty"`
-	Says  string `json:"says"`
+	Step    string `json:"step,omitempty"`
+	Thing   string `json:"thing,omitempty"`
+	Says    string `json:"says"`
+	Through string `json:"through,omitempty"`
 }
 
 // name is the spot as kit names it: the step, or its thing, as in
@@ -224,14 +227,14 @@ func (r *run) heldFor(kindName, thing string) []engine.Wait {
 
 // covers reports whether ahead, what's in place by the time a step applies,
 // has the step or thing being placed.
-func (o *ordering) covers(ahead []engine.Wait) bool {
-	return slices.ContainsFunc(ahead, func(w engine.Wait) bool {
+func (o *ordering) covers(ahead []engine.Prior) bool {
+	return slices.ContainsFunc(ahead, func(w engine.Prior) bool {
 		return w.Step == o.target.Step && (w.Thing == "" || o.target.Thing != "" && sameThing(w.Thing, o.target.Thing))
 	})
 }
 
 // aheadOf is what's in place by the time the step called name applies.
-func (o *ordering) aheadOf(name string) []engine.Wait {
+func (o *ordering) aheadOf(name string) []engine.Prior {
 	return o.pipeline.Ahead(engine.Wait{Step: name}, o.holds)
 }
 
@@ -246,10 +249,18 @@ func (o *ordering) place(ctx context.Context) placing {
 	ahead := o.pipeline.Ahead(o.target, o.holds)
 	settings := o.where(steps.PrefsName, ahead)
 	for _, w := range ahead {
-		if p.Never == "" && o.never(w) {
+		// Only what it waits for itself, not what a step it comes after
+		// waited for, keeps it from applying.
+		if p.Never == "" && w.Through == "" && o.never(w.Wait) {
 			p.Never = "it waits for " + spot{Step: w.Step, Thing: w.Thing}.name() + ", which isn't declared for this Mac, so it's never installed"
 		}
-		p.Before = append(p.Before, spot{Step: w.Step, Thing: w.Thing, Says: o.saidBefore(w, settings)})
+		// A step ahead has finished, however it went; a thing ahead only
+		// through a step it comes after may not be there.
+		says := o.saidBefore(w.Wait, settings)
+		if w.Through != "" && (w.Thing != "" || w.Step == "") {
+			says += " (through " + w.Through + ": may not be there)"
+		}
+		p.Before = append(p.Before, spot{Step: w.Step, Thing: w.Thing, Says: says, Through: w.Through})
 	}
 	for _, s := range o.steps {
 		if s.Name != o.target.Step && o.covers(o.aheadOf(s.Name)) {
@@ -262,7 +273,7 @@ func (o *ordering) place(ctx context.Context) placing {
 			p.Absent = append(p.Absent, spot{Step: always.step, Says: always.absent})
 		case inNoOrder:
 			says := o.said(o.byName[always.step])
-			if slices.ContainsFunc(ahead, func(w engine.Wait) bool { return w.Step == always.step }) {
+			if slices.ContainsFunc(ahead, func(w engine.Prior) bool { return w.Step == always.step }) {
 				says += "; only those listed before it are sure to come first"
 			}
 			p.Unordered = append(p.Unordered, spot{Step: always.step, Says: says})
@@ -304,15 +315,16 @@ const (
 )
 
 // where is where the step called name falls against the step or thing
-// placed, ahead being what's ahead of that.
-func (o *ordering) where(name string, ahead []engine.Wait) falls {
+// placed, ahead being what's ahead of that. A step ahead only through
+// another has finished all the same.
+func (o *ordering) where(name string, ahead []engine.Prior) falls {
 	_, ok := o.byName[name]
 	switch {
 	case !ok:
 		return notInRun
 	case name == o.target.Step:
 		return isIt
-	case slices.ContainsFunc(ahead, func(w engine.Wait) bool { return w.Step == name && w.Thing == "" }):
+	case slices.ContainsFunc(ahead, func(w engine.Prior) bool { return w.Step == name && w.Thing == "" }):
 		return comesBefore
 	case o.covers(o.aheadOf(name)):
 		return comesAfter

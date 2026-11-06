@@ -37,10 +37,12 @@ type placed struct {
 	Schema                            int
 	Machine, Name, Step, Thing, Never string
 	RaisedBy                          string `json:"raised_by"`
-	Before, After, Unordered, Absent  []struct {
-		Step, Thing, Says string
-	}
+	Before, After, Unordered, Absent  []spot
 }
+
+// spot is a step or thing in kit agent order --json's lists; Through names
+// the step it's ahead only through.
+type spot struct{ Step, Thing, Says, Through string }
 
 // order runs kit agent order --json for name in w, failing the test unless
 // it's placed.
@@ -55,7 +57,7 @@ func (w *world) order(t *testing.T, name string) placed {
 }
 
 // names are spots' names, as kit agent order names them.
-func names(spots []struct{ Step, Thing, Says string }) []string {
+func names(spots []spot) []string {
 	var out []string
 	for _, s := range spots {
 		if s.Step == "" {
@@ -128,6 +130,12 @@ func TestOrderOfAStepAfterAppsSettings(t *testing.T) {
 	}
 	if says := doc.Before[1].Says; says != "Homebrew casks: each installed unless it fails; likely never opened yet; their settings restored by prefs, before it" {
 		t.Errorf("the casks before it say %q", says)
+	}
+	if token := doc.Before[2]; token.Through != "prefs" || token.Says != "synced (through prefs: may not be there)" {
+		t.Errorf("the secret before it, through prefs, = %+v, want it said to be through prefs", token)
+	}
+	if doc.Before[3].Through != "" {
+		t.Errorf("prefs before it = %+v, want it sure, a step it comes after itself", doc.Before[3])
 	}
 	if got := names(doc.Unordered); !slices.Equal(got, []string{"secret"}) {
 		t.Errorf("in no order with it = %q, want the secrets' sync alone", got)
@@ -264,5 +272,31 @@ func TestOrderOfAStepDoneByHandAtTheEnd(t *testing.T) {
 	out, _, _ := w.run(t, "agent", "order", "by-hand")
 	if heading := "by-hand on a new Mac: a step done by hand, raised with the rest by manual\n"; !strings.HasPrefix(out, heading) {
 		t.Errorf("kit agent order by-hand printed\n%s\nwant it to open\n%s", out, heading)
+	}
+}
+
+// Only what a step waits for itself keeps it from applying: a step it comes
+// after has only to finish, so what that step waited for, never installed,
+// is said to be through it, and doesn't stop this one; nor does what a held
+// section of a kind it comes after waits for.
+func TestOrderOfAStepAfterOneThatNeverApplies(t *testing.T) {
+	w := orderWorld(t)
+	w.writeSection(t, "laptop", "homebrew casks --after brew:nosuch", "held-app\n")
+	w.writeSection(t, "laptop", "steps", `first "after a cask not declared" --after cask:ghostie
+then "after first" --after first
+after-casks "after every cask" --after cask
+`)
+	doc := w.order(t, "then")
+	i := slices.Index(names(doc.Before), "cask:ghostie")
+	if doc.Never != "" || i < 0 || doc.Before[i].Through != "first" || doc.Before[i].Says != "not declared for this Mac: never installed (through first: may not be there)" {
+		t.Errorf("never = %q, before it = %+v: want it to apply, cask:ghostie only through first", doc.Never, doc.Before)
+	}
+	if doc := w.order(t, "first"); doc.Never == "" {
+		t.Errorf("first's never is empty, want it never applying: it waits for cask:ghostie itself")
+	}
+	doc = w.order(t, "after-casks")
+	i = slices.Index(names(doc.Before), "brew:nosuch")
+	if doc.Never != "" || i < 0 || doc.Before[i].Through != "cask" {
+		t.Errorf("never = %q, before it = %+v: want it to apply, brew:nosuch only through cask", doc.Never, doc.Before)
 	}
 }
