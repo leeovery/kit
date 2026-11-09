@@ -161,7 +161,7 @@ func (o owner) under(p string) (text string, covers bool) {
 	if o.glob {
 		return "/" + oneStar(rest), false
 	}
-	return "/" + escape(rest), false
+	return "/" + Escape(rest), false
 }
 
 // part reports whether pattern, a part of o's path, matches name, the same
@@ -184,9 +184,9 @@ func oneStar(pattern string) string {
 	return pattern
 }
 
-// escape is p, a path as it is, as rsync matches it as itself: when it holds
+// Escape is p, a path as it is, as rsync matches it as itself: when it holds
 // *, ? or [, which rsync would take as a pattern, those and \ escaped.
-func escape(p string) string {
+func Escape(p string) string {
 	if !wildmatch.HasWildcards(p) {
 		return p
 	}
