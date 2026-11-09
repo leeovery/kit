@@ -73,14 +73,20 @@ func TestFieldsAndAttachments(t *testing.T) {
 }
 
 // Free asks 1Password whether an item keeps something where a value would
-// go, a field of a section or an attachment, the item's own or a
-// section's, changing nothing.
+// go, changing nothing, as op read would find it, so kit never makes a
+// name op could read two ways: a name alone is taken by a field or an
+// attachment of that name in any section, or none; a section's and a name
+// by one in that section, by its label or id; each in any case.
 func TestFree(t *testing.T) {
 	run := runnertest.New(t)
 	run.On("op", "item", "get", "Item", "--vault", "vault", "--format", "json").
 		Prints(`{"sections":[{"id":"s1","label":"GitHub"}],"fields":[{"label":"token","section":{"id":"s1"}},{"label":"loose"}],"files":[{"name":"key.pem"},{"name":"id.pem","section":{"id":"s1","label":"GitHub"}},{"name":"loose.pem","section":{"id":"add more"}}]}`)
 	d := onepassword.Driver{}
-	for short, free := range map[string]bool{"GitHub/token": false, "GitHub/other": true, "Other/token": true, "key.pem": false, "other.pem": true, "GitHub/id.pem": false, "github/ID.PEM": false, "Other/id.pem": true, "id.pem": true, "loose.pem": false} {
+	for short, free := range map[string]bool{
+		"GitHub/token": false, "github/TOKEN": false, "s1/token": false, "GitHub/other": true, "Other/token": true,
+		"token": false, "LOOSE": false, "other": true,
+		"key.pem": false, "other.pem": true, "GitHub/id.pem": false, "github/ID.PEM": false, "Other/id.pem": true, "id.pem": false, "loose.pem": false,
+	} {
 		if err := d.Free(t.Context(), run, "op://vault/Item", short); (err == nil) != free {
 			t.Errorf("Free(%s) = %v, want free %v", short, err, free)
 		}
@@ -368,30 +374,40 @@ func folders(t *testing.T, run *runnertest.Fake) {
 	}
 }
 
-// ReadFile finds an attachment as op read does: its name or its section's
-// in any case, or by id. A name with no / is the item's own alone: a field
-// of that name stays a field beside a section's attachment of it.
+// ReadFile finds an attachment as op read does: a name alone finds one in
+// any section, or none; a section's and a name, one in that section; each
+// by its name or id, in any case. A reference op would find a field and an
+// attachment at fails alone, as which it reads is unknown.
 func TestReadFileFindsAnAttachmentAsOpDoes(t *testing.T) {
 	run := runnertest.New(t)
 	optest.Holds(run, map[string]string{
 		"op://vault/Item/npmrc":        "\xffbin",
+		"op://vault/Item/connections":  "\xffconnections\n\n",
 		"op://vault/Item/keys/id.pem":  "a\n\n",
-		"op://vault/Item/file2":        "by id\n\n",
+		"op://vault/Item/file3":        "by id\n\n",
 		"op://vault/Item/s-Keys/other": "\xffother",
-		"op://vault/Item/password":     "pw\n\n",
+		"op://vault/Item/Keys/token":   "\xfftoken",
+		"op://vault/Item/Login/token":  "tok\n\n",
+		"op://vault/Item/token":        "either",
 	})
-	optest.Attaches(run, "op://vault/Item", "npmrc", "Keys/id.pem", "byid", "Keys/other", "Keys/password")
+	optest.Keeps(run, "op://vault/Item", []string{"Login/token"}, []string{"npmrc", "TablePlus/connections", "Keys/id.pem", "byid", "Keys/other", "Keys/token"})
 	d := onepassword.Driver{}
 	for ref, want := range map[string]string{
 		"op://vault/Item/NPMRC":        "\xffbin",
+		"op://vault/Item/connections":  "\xffconnections\n\n",
 		"op://vault/Item/keys/id.pem":  "a\n\n",
-		"op://vault/Item/file2":        "by id\n\n",
+		"op://vault/Item/file3":        "by id\n\n",
 		"op://vault/Item/s-Keys/other": "\xffother",
-		"op://vault/Item/password":     "pw\n",
+		"op://vault/Item/Keys/token":   "\xfftoken",
+		"op://vault/Item/Login/token":  "tok\n",
 	} {
 		if got, err := d.ReadFile(t.Context(), run, ref); err != nil || got != want {
 			t.Errorf("ReadFile(%s) = %q, %v; want %q", ref, got, err, want)
 		}
+	}
+	_, err := d.ReadFile(t.Context(), run, "op://vault/Item/token")
+	if named, ok := errors.AsType[store.Unread](err); !ok || named["op://vault/Item/token"] != "op://vault/Item/token names both a field and a file in op://vault/Item: give its section, or rename one" {
+		t.Errorf("ReadFile() of a name of both = %v; want it failed alone, saying so", err)
 	}
 	folders(t, run)
 }
@@ -402,7 +418,7 @@ func TestReadFileThatFails(t *testing.T) {
 	for name, script := range map[string]func(*runnertest.Script){
 		"exits non-zero":     func(s *runnertest.Script) { s.Exits(1).PrintsToStderr("[ERROR] something went wrong") },
 		"writes nothing":     func(*runnertest.Script) {},
-		"writes, then fails": func(s *runnertest.Script) { s.Writes("--out-file", "part").Exits(1) },
+		"writes, then fails": func(s *runnertest.Script) { s.WritesPartly("--out-file", "part").Exits(1) },
 	} {
 		t.Run(name, func(t *testing.T) {
 			run := runnertest.New(t)

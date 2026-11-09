@@ -66,17 +66,29 @@ func held(values map[string]string, ref string) (string, bool) {
 }
 
 // Attaches scripts fake's op item get of item, op://vault/item, as
-// 1Password keeping attachments of names in it, each the item's own, or a
-// section's as Section/name, and no fields.
+// 1Password keeping attachments of names in it, and no fields (Keeps).
 func Attaches(fake *runnertest.Fake, item string, names ...string) {
+	Keeps(fake, item, nil, names)
+}
+
+// Keeps scripts fake's op item get of item, op://vault/item, as 1Password
+// keeping fields and attachments of names in it, each the item's own, or
+// a section's as Section/name.
+func Keeps(fake *runnertest.Fake, item string, fields, files []string) {
 	vault, title, _ := strings.Cut(strings.TrimPrefix(item, "op://"), "/")
-	files := make([]map[string]any, len(names))
+	doc, _ := json.Marshal(map[string]any{"title": title, "fields": listed("field", "label", fields), "files": listed("file", "name", files)})
+	fake.On("op", "item", "get", title, "--vault", vault, "--format", "json").Prints(string(doc))
+}
+
+// listed are names as op item get lists an item's fields or files, each
+// with an id of kind, its name under key, and its section's id and label.
+func listed(kind, key string, names []string) []map[string]any {
+	out := make([]map[string]any, len(names))
 	for i, name := range names {
-		files[i] = map[string]any{"id": fmt.Sprint("file", i), "name": name}
+		out[i] = map[string]any{"id": fmt.Sprint(kind, i), key: name}
 		if section, own, ok := strings.Cut(name, "/"); ok {
-			files[i]["name"], files[i]["section"] = own, map[string]string{"id": "s-" + section, "label": section}
+			out[i][key], out[i]["section"] = own, map[string]string{"id": "s-" + section, "label": section}
 		}
 	}
-	doc, _ := json.Marshal(map[string]any{"title": title, "fields": []any{}, "files": files})
-	fake.On("op", "item", "get", title, "--vault", vault, "--format", "json").Prints(string(doc))
+	return out
 }

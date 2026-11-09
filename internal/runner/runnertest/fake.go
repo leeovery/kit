@@ -76,6 +76,7 @@ type answer struct {
 	duration time.Duration
 	does     func()
 	writes   map[string]string
+	partly   bool
 	filter   func(input string) (string, error)
 	asks     int
 	late     bool
@@ -130,6 +131,13 @@ func (s *Script) Writes(flag, content string) *Script {
 	}
 	a.writes[flag] = content
 	return s
+}
+
+// WritesPartly has the command write content as Writes does, but whatever
+// it exits with, as a program that fails partway leaves what it wrote.
+func (s *Script) WritesPartly(flag, content string) *Script {
+	s.last().partly = true
+	return s.Writes(flag, content)
 }
 
 // Filters has the command print what f makes of what it reads on its
@@ -265,7 +273,7 @@ func (f *Fake) Run(ctx context.Context, cmd runner.Command) (runner.Result, erro
 		<-ctx.Done()
 		return runner.Result{ExitCode: -1, Group: a.group}, fmt.Errorf("%s: %w", cmd, ctx.Err())
 	}
-	if exit == 0 {
+	if exit == 0 || a.partly {
 		f.write(cmd, a.writes)
 	}
 	res := runner.Result{Stdout: []byte(stdout), Stderr: []byte(stderr), ExitCode: exit, Duration: a.duration, Group: a.group}

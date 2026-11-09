@@ -193,18 +193,25 @@ func readOut(ctx context.Context, run runner.Runner, ref string) (string, error)
 }
 
 // isAttachment reports whether ref, a value's, is one of its item's
-// attachments, the item's own or a section's, as op item get lists them and
-// op read finds them (hasFile).
+// attachments, as op item get lists them and op read finds them (has):
+// store.Unread when it finds a field there too, as which op reads is
+// unknown.
 func isAttachment(ctx context.Context, run runner.Runner, ref string) (bool, error) {
 	parts, _ := path(ref)
 	if len(parts) != 3 && len(parts) != 4 {
 		return false, nil
 	}
-	_, doc, err := getItem(ctx, run, scheme+parts[0]+"/"+parts[1])
+	item := scheme + parts[0] + "/" + parts[1]
+	_, doc, err := getItem(ctx, run, item)
 	if err != nil {
 		return false, err
 	}
-	return hasFile(doc, strings.Join(parts[2:], "/")), nil
+	short := strings.Join(parts[2:], "/")
+	file := hasFile(doc, short)
+	if file && hasField(doc, short) {
+		return false, store.Unread{ref: fmt.Sprintf("%s names both a field and a file in %s: give its section, or rename one", ref, item)}
+	}
+	return file, nil
 }
 
 // ReadMany reads refs in one run of op inject, as 1Password may have the
@@ -418,69 +425,68 @@ func getItem(ctx context.Context, run runner.Runner, item string) ([]string, map
 	return args, doc, nil
 }
 
-// sectionOf is the id of the item's section labelled section, the last
-// when several are: "" for none.
+// sectionOf is the id of the item's section called section, by its label
+// or id, in any case, the last when several are: "" for none.
 func sectionOf(doc map[string]any, section string) string {
 	sections, _ := doc["sections"].([]any)
 	id := ""
 	for _, sc := range sections {
-		if m, _ := sc.(map[string]any); m["label"] == section {
+		if m, _ := sc.(map[string]any); names(m, "label", section) {
 			id, _ = m["id"].(string)
 		}
 	}
 	return id
 }
 
-// holds reports whether the item keeps something at short: a field of its
-// section, as in GitHub/token, or an attachment, by its name, its section's
-// first when it's in one.
+// holds reports whether op read would find something of the item at
+// short: a field or an attachment (has).
 func holds(doc map[string]any, short string) bool {
 	return hasFile(doc, short) || hasField(doc, short)
 }
 
-// hasFile reports whether the item keeps an attachment at short: the
-// item's own, outside every section with a label, by its name, or a
-// section's, as in GitHub/key.pem, each part a name or an id in any case,
-// as op read finds them.
-func hasFile(doc map[string]any, short string) bool {
+// hasFile reports whether op read would find an attachment of the item at
+// short (has).
+func hasFile(doc map[string]any, short string) bool { return has(doc, "files", "name", short) }
+
+// hasField reports whether op read would find a field of the item at short
+// (has).
+func hasField(doc map[string]any, short string) bool { return has(doc, "fields", "label", short) }
+
+// has reports whether the item's list (its files, or its fields), each
+// called by key, has one at short as op read finds them (tried, 9 Nov
+// 2026): a name alone finds one in any section, or none; a section's name
+// and its, as in GitHub/key.pem, one in that section alone; each part a
+// name or an id, in any case.
+func has(doc map[string]any, list, key, short string) bool {
 	section, name, inSection := strings.Cut(short, "/")
 	if !inSection {
 		name = short
 	}
-	files, _ := doc["files"].([]any)
-	return slices.ContainsFunc(files, func(f any) bool {
-		m, _ := f.(map[string]any)
-		sec, _ := m["section"].(map[string]any)
-		if inSection {
-			return names(m, "name", name) && names(sec, "label", section)
-		}
-		label, _ := sec["label"].(string)
-		return names(m, "name", name) && label == ""
+	items, _ := doc[list].([]any)
+	return slices.ContainsFunc(items, func(it any) bool {
+		m, _ := it.(map[string]any)
+		return names(m, key, name) && (!inSection || inSectionCalled(doc, m, section))
 	})
 }
 
-// names reports whether m, a file or section of an item, is called name: by
-// its key (a name, a label) or its id, in any case.
+// inSectionCalled reports whether m, a field or file of the item, is in its
+// section called section, by its label or id, in any case: as m names the
+// section, or the item's sections do.
+func inSectionCalled(doc, m map[string]any, section string) bool {
+	sec, _ := m["section"].(map[string]any)
+	if names(sec, "label", section) {
+		return true
+	}
+	id, _ := sec["id"].(string)
+	return id != "" && sectionOf(doc, section) == id
+}
+
+// names reports whether m, a field, file or section of an item, is called
+// name: by its key (a label, a name) or its id, in any case.
 func names(m map[string]any, key, name string) bool {
 	called, _ := m[key].(string)
 	id, _ := m["id"].(string)
 	return strings.EqualFold(called, name) || id != "" && strings.EqualFold(id, name)
-}
-
-// hasField reports whether the item keeps a field of a section at short,
-// as in GitHub/token.
-func hasField(doc map[string]any, short string) bool {
-	section, label, isField := strings.Cut(short, "/")
-	if !isField {
-		return false
-	}
-	id := sectionOf(doc, section)
-	fields, _ := doc["fields"].([]any)
-	return id != "" && slices.ContainsFunc(fields, func(f any) bool {
-		m, _ := f.(map[string]any)
-		sec, _ := m["section"].(map[string]any)
-		return m["label"] == label && sec["id"] == id
-	})
 }
 
 // Field is field, a section's name and a field's, as in GitHub/token.
