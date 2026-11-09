@@ -3,6 +3,7 @@ package oldmac
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -12,6 +13,11 @@ import (
 // lookTimeout ends a look that's taken longer: walking a listed folder of a
 // million files takes under a minute.
 const lookTimeout = 10 * time.Minute
+
+// checkoutDepth is how far below a folder marked left out of the backups a
+// git checkout is looked for: a worktree in it (1), or in a folder of its
+// own in it (2), as a repository by owner.
+const checkoutDepth = 2
 
 // excludedAttr is the extended attribute marking what Time Machine and Arq
 // leave out of their backups, as Asimov marks dependency folders and apps
@@ -53,12 +59,13 @@ func (l Listed) Patterns() []string {
 // go, each answer ending in a NUL: a file (a link, as rsync copies one, is
 // one), a folder, or none; and after a folder, what in it is marked left out
 // of the backups, each from ./. find never looks inside what's marked, so a
-// folder copied whole is copied whole. One that holds git checkouts (a
-// folder in it with a .git, as agents' worktrees) isn't said, so it's copied
-// whole, its dependency folders and all, and works on the new Mac at once.
-// The listed path itself is never judged: it's listed to be restored. A
-// folder find can't read is left as it is: it's copied, so rsync says what's
-// wrong.
+// folder copied whole is copied whole. One that holds a git checkout (a .git
+// in it, or in a folder up to checkoutDepth below it, hidden ones too, as
+// agents' worktrees; or a .git of its own) isn't said, so it's copied whole,
+// its dependency folders and all, and works on the new Mac at once: only
+// that deep, so a marked node_modules is never walked whole. The listed path
+// itself is never judged: it's listed to be restored. A folder find can't
+// read is left as it is: it's copied, so rsync says what's wrong.
 func lookScript(paths []string) string {
 	lines := []string{
 		`cd "$HOME" || exit 1`,
@@ -66,7 +73,7 @@ func lookScript(paths []string) string {
 		`  if [ -L "$1" ]; then printf '%s\0' file`,
 		`  elif [ -d "$1" ]; then`,
 		`    printf '%s\0' folder`,
-		`    (cd -- "$1" && find . -mindepth 1 -xattrname ` + excludedAttr + ` -prune ! -exec sh -c 'for c in "$1"/*/.git; do [ -e "$c" ] && exit 0; done; exit 1' sh {} \; -print0) 2>/dev/null`,
+		`    (cd -- "$1" && find . -mindepth 1 -xattrname ` + excludedAttr + ` -prune ! -exec sh -c '[ -n "$(find "$1" -maxdepth ` + strconv.Itoa(checkoutDepth+1) + ` -name .git -print -quit)" ]' sh {} \; -print0) 2>/dev/null`,
 		`  elif [ -e "$1" ]; then printf '%s\0' file`,
 		`  else printf '%s\0' none; fi`,
 		`}`,
@@ -86,14 +93,14 @@ func (m *Mac) Look(ctx context.Context, paths []string) (map[string]Listed, erro
 	}
 	for _, p := range paths {
 		if !strings.HasPrefix(p, "~/") {
-			return nil, fmt.Errorf("look at %s on %s: the path isn't from ~", p, m.Name)
+			return nil, fmt.Errorf("look at %s on %s: the path isn't from ~", p, printable(m.Name))
 		}
 	}
 	res, err := m.run.Run(ctx, remote(m.opts, m.Host, lookScript(paths), lookTimeout))
 	if err != nil {
-		return nil, fmt.Errorf("look at the listed paths on %s: %w", m.Name, sshFailed(err))
+		return nil, fmt.Errorf("look at the listed paths on %s: %w", printable(m.Name), sshFailed(err))
 	}
-	return readLook(paths, string(res.Stdout), m.Name)
+	return readLook(paths, string(res.Stdout), printable(m.Name))
 }
 
 // readLook reads what lookScript printed, out, of paths on the Mac called
@@ -107,6 +114,11 @@ func readLook(paths []string, out, name string) (map[string]Listed, error) {
 	}
 	for _, answer := range answers {
 		if skip, ok := strings.CutPrefix(answer, "./"); ok && i >= 0 {
+			// A name with a line break in it can't be one of rsync's rules:
+			// it's copied, the safe side.
+			if strings.ContainsAny(skip, "\r\n") {
+				continue
+			}
 			l := listed[paths[i]]
 			l.Skips = append(l.Skips, skip)
 			listed[paths[i]] = l

@@ -68,7 +68,7 @@ func says(t *testing.T, kit string) string {
 	if kit != "" {
 		out += "kit=" + kit + "\n"
 	}
-	return out + "documents=read\n" + rsyncSays(t, "rsync-version.txt")
+	return out + "protected=read Documents\n" + rsyncSays(t, "rsync-version.txt")
 }
 
 // browsing is dns-sd -B's output finding names, each on interface 13.
@@ -316,7 +316,7 @@ func TestFindsWithTheSSHOptionsExact(t *testing.T) {
 				t.Fatal(err)
 			}
 			ssh := fake.Commands()[2]
-			want := slices.Concat(tt.wantOpts(f.StateDir), []string{laptopAt, "/bin/sh -c " + shellQuote(probeScript)})
+			want := slices.Concat(tt.wantOpts(f.StateDir), []string{"--", laptopAt, "/bin/sh -c " + shellQuote(probeScript(RemoteRsync))})
 			if !slices.Equal(ssh.Args, want) {
 				t.Errorf("ssh's arguments = %q\nwant %q", ssh.Args, want)
 			}
@@ -347,9 +347,15 @@ func TestChecksTheOldMac(t *testing.T) {
 		want string
 	}{
 		{"all as it should be", func(good string) string { return good }, ""},
-		{"no ~/Documents to read", func(good string) string {
-			return strings.Replace(good, "documents=read", "documents=none", 1)
+		{"none of the protected folders to read", func(good string) string {
+			return strings.Replace(good, "protected=read Documents", "protected=none", 1)
 		}, ""},
+		{"no full disk access, ~/Desktop tried", func(good string) string {
+			return strings.Replace(good, "protected=read Documents", "protected=denied Desktop", 1)
+		}, strings.Replace(fda, "~/Documents", "~/Desktop", 1)},
+		{"control characters said without them", func(good string) string {
+			return strings.Replace(good, "user=someone", "user=\x1b[31mother\a", 1)
+		}, "laptop's user is [31mother, and this Mac's someone: they must be the same, as Claude keys its sessions by their full paths"},
 		{"another user", func(good string) string {
 			return strings.Replace(good, "user=someone", "user=other", 1)
 		}, "laptop's user is other, and this Mac's someone: they must be the same, as Claude keys its sessions by their full paths"},
@@ -366,11 +372,11 @@ func TestChecksTheOldMac(t *testing.T) {
 			return strings.Replace(good, "version 3.5.2", "version 3.2.3", 1)
 		}, "laptop's rsync, /opt/homebrew/bin/rsync, can't copy: it's rsync 3.2.3, not rsync 3.2.4 or later: brew install rsync there"},
 		{"no full disk access", func(good string) string {
-			return strings.Replace(good, "documents=read", "documents=denied", 1)
+			return strings.Replace(good, "protected=read Documents", "protected=denied Documents", 1)
 		}, fda},
 		{"everything wrong, each said", func(good string) string {
 			good = strings.Replace(good, "user=someone", "user=other", 1)
-			return strings.Replace(good[:strings.Index(good, "rsync=")], "documents=read", "documents=denied", 1)
+			return strings.Replace(good[:strings.Index(good, "rsync=")], "protected=read Documents", "protected=denied Documents", 1)
 		}, "laptop's user is other, and this Mac's someone: they must be the same, as Claude keys its sessions by their full paths\n" +
 			"laptop's rsync, /opt/homebrew/bin/rsync, can't copy: it isn't installed: brew install rsync there\n" + fda},
 	}
@@ -423,6 +429,233 @@ func TestRemoteFailuresSaid(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := sshFailed(tt.err).Error(); got != tt.want {
 				t.Errorf("sshFailed() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFindsTheNameTrimmed(t *testing.T) {
+	fake := runnertest.New(t)
+	browses(fake, browsing(laptop))
+	resolves(fake, laptop, reaching(laptop, laptopAt, 22))
+	asked(fake, laptopAt).Prints(strings.Replace(says(t, "laptop"), "kit=laptop", "kit= laptop \t", 1))
+
+	if m, err := finder(t, fake).Find(t.Context(), "laptop"); err != nil || m.Name != "laptop" {
+		t.Errorf("Find() = %v, %v, want laptop", m, err)
+	}
+}
+
+func TestFindsNeverAHostThatsAnOption(t *testing.T) {
+	const evil = "Someone’s Printer"
+	fake := runnertest.New(t)
+	browses(fake, browsing(evil))
+	// As dns-sd says it, its name ending in a dot, which kit drops.
+	evilAt := strings.TrimSuffix("-oProxyCommand=touch${IFS}/tmp/x.local.", ".")
+	resolves(fake, evil, reaching(evil, evilAt, 22))
+
+	_, err := finder(t, fake).Find(t.Context(), "laptop")
+	want := `laptop doesn't answer over SSH: Someone’s Printer names its host "` + evilAt + `", which isn't a host name kit reaches: letters, digits, - and ., not starting with -`
+	if !errors.Is(err, ErrNoAnswer) || err.Error() != want {
+		t.Errorf("Find() = %v\nwant %q", err, want)
+	}
+	for _, call := range fake.Calls() {
+		if strings.HasPrefix(call, "ssh") {
+			t.Errorf("ran %s", call)
+		}
+	}
+}
+
+func TestFindsWithoutWithdrawnMacs(t *testing.T) {
+	const renamed = "Someone’s MacBook Pro (2)"
+	fake := runnertest.New(t)
+	gone := strings.Replace(browsing(renamed), "  Add  ", "  Rmv  ", 1)
+	browses(fake, browsing(laptop, renamed)+gone[strings.Index(gone, "21:"):])
+	resolves(fake, laptop, reaching(laptop, laptopAt, 22))
+	asked(fake, laptopAt).Prints(says(t, "laptop"))
+
+	if _, err := finder(t, fake).Find(t.Context(), "laptop"); err != nil {
+		t.Fatal(err)
+	}
+	for _, call := range fake.Calls() {
+		if strings.Contains(call, "(2)") {
+			t.Errorf("ran %s: a withdrawn Mac isn't asked", call)
+		}
+	}
+}
+
+func TestFindsOneMacUnderTwoNames(t *testing.T) {
+	const renamed = "Someone’s MacBook Pro (2)"
+	fake := runnertest.New(t)
+	browses(fake, browsing(laptop, renamed))
+	resolves(fake, laptop, reaching(laptop, laptopAt, 22))
+	shouted := strings.ToUpper(laptopAt)
+	resolves(fake, renamed, reaching(renamed, shouted, 22))
+	asked(fake, laptopAt).Prints(says(t, "laptop"))
+	asked(fake, shouted).Prints(says(t, "laptop"))
+
+	m, err := finder(t, fake).Find(t.Context(), "laptop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Host != laptopAt {
+		t.Errorf("Find() = %s, want %s", m.Host, laptopAt)
+	}
+}
+
+func TestFindsNamesWithoutControlCharacters(t *testing.T) {
+	const odd = "Someone’s \x1b]0;owned\a Mac"
+	fake := runnertest.New(t)
+	browses(fake, browsing(odd))
+	resolves(fake, odd, reaching(odd, miniAt, 22))
+	asked(fake, miniAt).Prints(says(t, "stu\x1b[2Jdio"))
+
+	_, err := finder(t, fake).Find(t.Context(), "laptop")
+	if want := "laptop doesn't answer over SSH: Someone’s ]0;owned Mac answered, but it's stu[2Jdio"; err == nil || err.Error() != want {
+		t.Errorf("Find() = %q, want %q", err, want)
+	}
+}
+
+// hostKey is a host key as a .pub file holds it.
+const hostKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl root@laptop"
+
+func TestFindsThePinnedMac(t *testing.T) {
+	fake := runnertest.New(t)
+	browses(fake, browsing(laptop, mini))
+	resolves(fake, laptop, reaching(laptop, laptopAt, 22))
+	resolves(fake, mini, reaching(mini, miniAt, 22))
+	asked(fake, laptopAt).Prints(says(t, "laptop"))
+	asked(fake, miniAt).PrintsToStderr("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @\nHost key for laptop has changed and you have requested strict checking.\nHost key verification failed.\n").Exits(255)
+	f := finder(t, fake)
+	f.HostKey = hostKey
+
+	m, err := f.Find(t.Context(), "laptop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(f.StateDir, "restore", "pinned_host")
+	wantOpts := []string{"-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=yes", "-o", "UserKnownHostsFile=" + file, "-o", "GlobalKnownHostsFile=/dev/null", "-o", "HostKeyAlias=laptop", "-o", "LogLevel=ERROR"}
+	for _, c := range fake.Commands() {
+		if c.Name == "ssh" && !slices.Equal(c.Args[:len(wantOpts)], wantOpts) {
+			t.Errorf("ssh's options = %q\nwant %q", c.Args, wantOpts)
+		}
+	}
+	if want := "ssh " + strings.Join(wantOpts, " "); m.Shell() != want {
+		t.Errorf("Shell() = %s\nwant %s", m.Shell(), want)
+	}
+	data, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "laptop ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl\n"; string(data) != want {
+		t.Errorf("the pinned key's file = %q, want %q", data, want)
+	}
+}
+
+func TestFindsAnImpostorByItsHostKey(t *testing.T) {
+	fake := runnertest.New(t)
+	browses(fake, browsing(mini))
+	resolves(fake, mini, reaching(mini, miniAt, 22))
+	asked(fake, miniAt).PrintsToStderr("Host key for laptop has changed and you have requested strict checking.\nHost key verification failed.\n").Exits(255)
+	f := finder(t, fake)
+	f.HostKey = hostKey
+
+	_, err := f.Find(t.Context(), "laptop")
+	want := "laptop doesn't answer over SSH: Someone’s Mac mini isn't laptop: its host key doesn't match the one kit-config records"
+	if !errors.Is(err, ErrNoAnswer) || err.Error() != want {
+		t.Errorf("Find() = %v\nwant %q", err, want)
+	}
+}
+
+func TestPinsOnlyAKey(t *testing.T) {
+	tests := []struct{ name, key, want string }{
+		{"a .pub file's", hostKey, "laptop ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl\n"},
+		{"a known-hosts line's", "laptop.example.com,192.0.2.7 ecdsa-sha2-nistp256 AAAAE2VjZHNh", "laptop ecdsa-sha2-nistp256 AAAAE2VjZHNh\n"},
+		{"no type", "AAAAC3NzaC1lZDI1NTE5", ""},
+		{"not base64", "ssh-ed25519 not*base64", ""},
+		{"nothing", " ", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := pinLine("laptop", tt.key)
+			if got != tt.want || (err == nil) != (tt.want != "") {
+				t.Errorf("pinLine() = %q, %v, want %q", got, err, tt.want)
+			}
+		})
+	}
+}
+
+func TestPinsOnlyToAPlainName(t *testing.T) {
+	f := finder(t, runnertest.New(t))
+	f.HostKey = hostKey
+	if _, err := f.Find(t.Context(), "-oProxyCommand=x"); err == nil {
+		t.Error("Find() = nil, want a name that's no plain name refused")
+	}
+}
+
+// A real shell runs the probe on a home folder made for it, ssh a stand-in
+// that runs its command through sh as the old Mac's shell would, rsync a
+// stand-in at a path with a space.
+func TestProbesForRealThroughTheShell(t *testing.T) {
+	tests := []struct {
+		name      string
+		folders   []string
+		locked    string
+		state     string
+		protected string
+	}{
+		{"~/Documents read", []string{"Documents", "Desktop"}, "", "", "read Documents"},
+		{"~/Documents locked", []string{"Documents"}, "Documents", "", "denied Documents"},
+		{"no ~/Documents, ~/Desktop locked", []string{"Desktop", "Downloads"}, "Desktop", "", "denied Desktop"},
+		{"no ~/Documents or ~/Desktop", []string{"Downloads"}, "", "", "read Downloads"},
+		{"none of them", nil, "", "", "none"},
+		{"kit's state where XDG_STATE_HOME says", []string{"Documents"}, "", "elsewhere", "read Documents"},
+		{"a relative XDG_STATE_HOME ignored", []string{"Documents"}, "", "relative", "read Documents"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			homeDir := t.TempDir()
+			for _, f := range tt.folders {
+				if err := os.Mkdir(filepath.Join(homeDir, f), 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tt.locked != "" {
+				locked := filepath.Join(homeDir, tt.locked)
+				if err := os.Chmod(locked, 0); err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = os.Chmod(locked, 0o700) })
+			}
+			state, env := filepath.Join(homeDir, ".local", "state"), []string{}
+			switch tt.state {
+			case "elsewhere":
+				state = filepath.Join(homeDir, "elsewhere")
+				env = append(env, "XDG_STATE_HOME="+state)
+			case "relative":
+				env = append(env, "XDG_STATE_HOME=elsewhere")
+			}
+			if err := os.MkdirAll(filepath.Join(state, "kit"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(state, "kit", "machine"), []byte("laptop\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			rsync := filepath.Join(t.TempDir(), "brew bin", "rsync")
+			if err := os.MkdirAll(filepath.Dir(rsync), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(rsync, []byte("#!/bin/sh\necho 'rsync  version 3.5.2  protocol version 33'\necho '    xattrs, crtimes'\n"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+
+			res, err := shellThrough(t, homeDir, env...).Run(t.Context(), remote(nil, laptopAt, probeScript(rsync), probeTimeout))
+			if err != nil {
+				t.Fatal(err)
+			}
+			p := readProbe(string(res.Stdout))
+			got := []string{p.one(keyKit), p.one(keyHome), p.one(keyProtected), rsyncThere(p[keyRsync]).Version}
+			if want := []string{"laptop", homeDir, tt.protected, "3.5.2"}; !slices.Equal(got, want) || p.one(keyUser) == "" {
+				t.Errorf("probed %q (user %q), want %q", got, p.one(keyUser), want)
 			}
 		})
 	}

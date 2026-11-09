@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -44,6 +45,11 @@ var ErrNoAnswer = errors.New("doesn't answer over SSH")
 type Finder struct {
 	Run      runner.Runner
 	StateDir string
+	// HostKey is the host key the Mac looked for must present, a public key
+	// as a known-hosts line or a .pub file has it: when it's given, a Mac
+	// presenting another isn't it, whatever it says its name is; else each
+	// Mac's key is taken on first sight.
+	HostKey string
 	// Browse and Resolve are how long Bonjour's listened to for the Macs
 	// offering Remote Login, and for where one answers: browseFor and
 	// resolveFor when 0.
@@ -60,8 +66,9 @@ type Mac struct {
 	User, Home string
 	// Rsync is Homebrew's rsync there.
 	Rsync restore.Found
-	// documents is whether SSH may read ~/Documents there.
-	documents string
+	// protected is whether SSH may read the first protected folder there,
+	// as the probe says it, and the folder.
+	protected, folder string
 
 	run  runner.Runner
 	opts []string
@@ -75,20 +82,23 @@ type candidate struct {
 	why      error
 }
 
-// Find finds the Mac whose kit name is from. None answering as from is an
+// Find finds the Mac whose kit name is from: with a HostKey, the one
+// presenting it, as a Mac's name is only its own say. One Mac offering
+// Remote Login under two names counts once. None answering as from is an
 // error, ErrNoAnswer, saying of each Mac found why it isn't.
 func (f Finder) Find(ctx context.Context, from string) (*Mac, error) {
+	pin, err := f.pin(from)
+	if err != nil {
+		return nil, err
+	}
 	names, err := f.browse(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if err := os.MkdirAll(filepath.Dir(KnownHosts(f.StateDir)), 0o700); err != nil {
-		return nil, fmt.Errorf("make kit's known-hosts folder: %w", err)
-	}
 	found := make([]candidate, len(names))
 	var wg sync.WaitGroup
 	for i, name := range names {
-		wg.Go(func() { found[i] = f.ask(ctx, name) })
+		wg.Go(func() { found[i] = f.ask(ctx, name, from, pin) })
 	}
 	wg.Wait()
 	if ctx.Err() != nil {
@@ -96,7 +106,7 @@ func (f Finder) Find(ctx context.Context, from string) (*Mac, error) {
 	}
 	var macs []*Mac
 	for _, c := range found {
-		if c.mac != nil && c.mac.Name == from {
+		if c.mac != nil && c.mac.Name == from && !slices.ContainsFunc(macs, c.mac.same) {
 			macs = append(macs, c.mac)
 		}
 	}
@@ -113,26 +123,59 @@ func (f Finder) Find(ctx context.Context, from string) (*Mac, error) {
 	return nil, fmt.Errorf("more than one Mac answers as %s, %s: turn off Remote Login on all but the old Mac", from, strings.Join(hosts, " and "))
 }
 
-// ask is the Mac offering Remote Login as name, asked its kit name.
-func (f Finder) ask(ctx context.Context, name string) candidate {
+// pin readies the Mac called from's host key, when one's given, in a
+// known-hosts file of its own: its path, else "", each Mac's key then
+// taken on first sight into kit's own known-hosts file.
+func (f Finder) pin(from string) (string, error) {
+	if err := os.MkdirAll(filepath.Dir(KnownHosts(f.StateDir)), 0o700); err != nil {
+		return "", fmt.Errorf("make kit's known-hosts folder: %w", err)
+	}
+	if f.HostKey == "" {
+		return "", nil
+	}
+	if !plainName.MatchString(from) {
+		return "", fmt.Errorf("pin %q's host key: a name to pin a key to is letters, digits, - and ., not starting with -", from)
+	}
+	line, err := pinLine(from, f.HostKey)
+	if err != nil {
+		return "", err
+	}
+	path := pinned(f.StateDir)
+	if err := os.WriteFile(path, []byte(line), 0o600); err != nil {
+		return "", fmt.Errorf("pin %s's host key: %w", from, err)
+	}
+	return path, nil
+}
+
+// ask is the Mac offering Remote Login as name, asked its kit name, its
+// host key the one pinned, in the file pin, for from, when there is one.
+func (f Finder) ask(ctx context.Context, name, from, pin string) candidate {
 	c := candidate{instance: name}
 	a, ok, err := f.resolve(ctx, name)
-	if !ok && err == nil {
-		err = errNoAnswer
-	}
-	if err != nil {
+	switch {
+	case err != nil:
 		c.why = err
 		return c
+	case !ok:
+		c.why = errNoAnswer
+		return c
+	case !plainName.MatchString(a.host):
+		c.why = fmt.Errorf("names its host %q, which isn't a host name kit reaches: letters, digits, - and ., not starting with -", a.host)
+		return c
 	}
-	opts := sshOptions(KnownHosts(f.StateDir), a.port)
+	opts := sshOptions(KnownHosts(f.StateDir), pin, from, a.port)
 	p, err := f.probe(ctx, opts, a.host)
+	if _, key := errors.AsType[*hostKeyError](err); key && pin != "" {
+		err = fmt.Errorf("isn't %s: its host key doesn't match the one kit-config records", from)
+	}
 	if err != nil {
 		c.why = err
 		return c
 	}
+	protected, folder, _ := strings.Cut(p.one(keyProtected), " ")
 	m := &Mac{
-		Name: p.one(keyKit), Instance: name, Host: a.host, Port: a.port,
-		User: p.one(keyUser), Home: p.one(keyHome), documents: p.one(keyDocuments),
+		Name: strings.TrimSpace(p.one(keyKit)), Instance: name, Host: a.host, Port: a.port,
+		User: p.one(keyUser), Home: p.one(keyHome), protected: protected, folder: folder,
 		Rsync: rsyncThere(p[keyRsync]), run: f.Run, opts: opts,
 	}
 	if m.Name == "" {
@@ -141,6 +184,13 @@ func (f Finder) ask(ctx context.Context, name string) candidate {
 	}
 	c.mac = m
 	return c
+}
+
+// same reports whether m and other are the same Mac, at one host: a Mac
+// can offer Remote Login under two names, its old one still cached after
+// it's renamed.
+func (m *Mac) same(other *Mac) bool {
+	return strings.EqualFold(m.Host, other.Host) && m.Port == other.Port
 }
 
 // rsyncThere is what Homebrew's rsync on a Mac said of itself, its
@@ -165,25 +215,28 @@ func notFound(from string, found []candidate) error {
 			whys[i] = fmt.Sprintf("%s %s", c.instance, c.why)
 		}
 	}
-	return fmt.Errorf("%s %w: %s", from, ErrNoAnswer, strings.Join(whys, "; "))
+	return fmt.Errorf("%s %w: %s", from, ErrNoAnswer, printable(strings.Join(whys, "; ")))
 }
 
 // Check says what stops m being copied from, to a Mac where the person is
 // user, at home: nil when nothing does. Its user and home must be the
 // same, as Claude keys its transcripts by their full paths; its rsync, rsync
-// 3, as kit's copy needs; and SSH must be able to read ~/Documents there.
+// 3, as kit's copy needs; and SSH must be able to read the folders only
+// full disk access opens, ~/Documents, else ~/Desktop, else ~/Downloads.
+// What the Mac said of itself is said without control characters.
 func (m *Mac) Check(user, home string) error {
 	var errs []error
+	name := printable(m.Name)
 	if m.User != user {
-		errs = append(errs, fmt.Errorf("%s's user is %s, and this Mac's %s: they must be the same, as Claude keys its sessions by their full paths", m.Name, m.User, user))
+		errs = append(errs, fmt.Errorf("%s's user is %s, and this Mac's %s: they must be the same, as Claude keys its sessions by their full paths", name, printable(m.User), user))
 	} else if m.Home != home {
-		errs = append(errs, fmt.Errorf("%s's home folder is %s, and this Mac's %s: they must be the same, as Claude keys its sessions by their full paths", m.Name, m.Home, home))
+		errs = append(errs, fmt.Errorf("%s's home folder is %s, and this Mac's %s: they must be the same, as Claude keys its sessions by their full paths", name, printable(m.Home), home))
 	}
 	if !m.Rsync.Usable {
-		errs = append(errs, fmt.Errorf("%s's rsync, %s, can't copy: %s: brew install rsync there", m.Name, RemoteRsync, m.Rsync.Why))
+		errs = append(errs, fmt.Errorf("%s's rsync, %s, can't copy: %s: brew install rsync there", name, RemoteRsync, printable(m.Rsync.Why)))
 	}
-	if m.documents == documentsDenied {
-		errs = append(errs, fmt.Errorf("SSH can't read ~/Documents on %s: turn on Allow full disk access for remote users there, in System Settings › General › Sharing › Remote Login › ⓘ", m.Name))
+	if m.protected == protectedDenied {
+		errs = append(errs, fmt.Errorf("SSH can't read ~/%s on %s: turn on Allow full disk access for remote users there, in System Settings › General › Sharing › Remote Login › ⓘ", printable(m.folder), name))
 	}
 	return errors.Join(errs...)
 }

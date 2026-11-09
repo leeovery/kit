@@ -32,16 +32,22 @@ var (
 )
 
 // browse is the names of the Macs Bonjour finds offering Remote Login in
-// so long, but this Mac, each once, sorted.
+// so long, but this Mac, each once, sorted: one withdrawn from every
+// interface it was offered on (Rmv) is gone.
 func (f Finder) browse(ctx context.Context) ([]string, error) {
-	var names, own []string
+	on := map[string][]string{}
+	own := map[string]bool{}
 	lines := func(line string) bool {
 		m := browsed.FindStringSubmatch(line)
-		if m != nil && m[1] == "Add" {
-			names = append(names, m[3])
-			if m[2] == strconv.Itoa(loopback) {
-				own = append(own, m[3])
-			}
+		if m == nil {
+			return false
+		}
+		added, iface, name := m[1] == "Add", m[2], m[3]
+		if added {
+			on[name] = append(on[name], iface)
+			own[name] = own[name] || iface == strconv.Itoa(loopback)
+		} else if i := slices.Index(on[name], iface); i >= 0 {
+			on[name] = slices.Delete(on[name], i, i+1)
 		}
 		return false
 	}
@@ -49,9 +55,14 @@ func (f Finder) browse(ctx context.Context) ([]string, error) {
 	if err := f.listen(ctx, cmp.Or(f.Browse, browseFor), args, lines); err != nil {
 		return nil, fmt.Errorf("look for Macs offering Remote Login: %w", err)
 	}
-	names = slices.DeleteFunc(names, func(n string) bool { return slices.Contains(own, n) })
+	var names []string
+	for name, ifaces := range on {
+		if len(ifaces) > 0 && !own[name] {
+			names = append(names, name)
+		}
+	}
 	slices.Sort(names)
-	return slices.Compact(names), nil
+	return names, nil
 }
 
 // address is where a Mac offering Remote Login under a name answers.

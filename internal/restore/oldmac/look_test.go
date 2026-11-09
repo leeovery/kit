@@ -27,7 +27,7 @@ func looked(fake *runnertest.Fake, host string) *runnertest.Script {
 
 // macThrough is laptop, at laptopAt, reached through run.
 func macThrough(run runner.Runner) *Mac {
-	return &Mac{Name: "laptop", Host: laptopAt, Port: 22, User: user, Home: home, run: run, opts: sshOptions("/state/restore/known_hosts", 22)}
+	return &Mac{Name: "laptop", Host: laptopAt, Port: 22, User: user, Home: home, run: run, opts: sshOptions("/state/restore/known_hosts", "", "laptop", 22)}
 }
 
 func TestLooksInOneGo(t *testing.T) {
@@ -52,7 +52,7 @@ func TestLooksInOneGo(t *testing.T) {
 		t.Fatalf("ran %d commands, want one: %q", len(calls), fake.Calls())
 	}
 	args := calls[0].Args
-	if wantOpts := slices.Concat(sshOptions("/state/restore/known_hosts", 22), []string{laptopAt}); !slices.Equal(args[:len(args)-1], wantOpts) {
+	if wantOpts := slices.Concat(sshOptions("/state/restore/known_hosts", "", "laptop", 22), []string{"--", laptopAt}); !slices.Equal(args[:len(args)-1], wantOpts) {
 		t.Errorf("ssh's arguments = %q, want %q and the command", args[:len(args)-1], wantOpts)
 	}
 	quoted := `look '\''Library/Application Support/Claude'\''`
@@ -90,6 +90,15 @@ func TestLooksRefusingAnswersItCantRead(t *testing.T) {
 	}
 }
 
+func TestLooksPastNamesNoRuleCanHold(t *testing.T) {
+	fake := runnertest.New(t)
+	looked(fake, laptopAt).Prints("folder\x00./app/node_modules\x00./odd\nname\x00./odd\rname\x00")
+	got, err := macThrough(fake).Look(t.Context(), []string{"~/Code"})
+	if want := (Listed{Kind: Folder, Skips: []string{"app/node_modules"}}); err != nil || !reflect.DeepEqual(got["~/Code"], want) {
+		t.Errorf("Look() = %v, %v, want %v", got, err, want)
+	}
+}
+
 func TestLooksRefusingAPathNotFromHome(t *testing.T) {
 	_, err := macThrough(runnertest.New(t)).Look(t.Context(), []string{"/Users/someone/Code"})
 	if err == nil {
@@ -114,10 +123,23 @@ func TestPatternsAreEscaped(t *testing.T) {
 	}
 }
 
+// shellThrough is the real runner, its ssh a stand-in that runs its command
+// through sh as the old Mac's shell would, in home, with env.
+func shellThrough(t *testing.T, home string, env ...string) runner.Runner {
+	t.Helper()
+	bin := t.TempDir()
+	stub := "#!/bin/sh\nfor a; do last=$a; done\nexec /bin/sh -c \"$last\"\n"
+	if err := os.WriteFile(filepath.Join(bin, "ssh"), []byte(stub), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return runner.Exec{Path: []string{bin}, Env: slices.Concat([]string{"PATH=" + bin + ":/usr/bin:/bin", "HOME=" + home}, env), Now: time.Now}
+}
+
 // A real shell, find and sh, run the look on a home folder made for it, ssh
 // a stand-in that runs its command through sh as the old Mac's shell would:
-// what's marked left out of backups is skipped, but a folder holding git
-// checkouts, and the listed path itself; quoting holds through both shells.
+// what's marked left out of backups is skipped, but a folder holding a git
+// checkout (in it, or two folders down, hidden or not, or its own), and the
+// listed path itself; quoting holds through both shells.
 func TestLooksForRealThroughTheShell(t *testing.T) {
 	homeDir := t.TempDir()
 	marked := func(rel string) string {
@@ -141,6 +163,11 @@ func TestLooksForRealThroughTheShell(t *testing.T) {
 		"Code/app/.claude/worktrees/feature/.git",
 		"Code/app/.claude/worktrees/feature/node_modules/kept/index.js",
 		"Code/app/main.go",
+		"Code/selfrepo/.git/HEAD",
+		"Code/selfrepo/node_modules/kept/index.js",
+		"Code/deep/org/repo/.git",
+		"Code/hidden/.wt/.git",
+		"Code/tooDeep/a/b/c/.git",
 		"Code/empty/.claude/worktrees/.keep",
 		"Code/web [x]/vendor/it's/autoload.php",
 		"Code/notes.txt",
@@ -154,6 +181,7 @@ func TestLooksForRealThroughTheShell(t *testing.T) {
 	for _, m := range []string{
 		"Code/app/node_modules", "Code/app/.claude/worktrees", "Code/app/.claude/worktrees/feature/node_modules",
 		"Code/empty/.claude/worktrees", "Code/web [x]/vendor", "Code/notes.txt",
+		"Code/selfrepo", "Code/deep", "Code/hidden", "Code/tooDeep",
 		"Library/Application Support/Claude/Cache", "Listed",
 	} {
 		marked(m)
@@ -162,14 +190,7 @@ func TestLooksForRealThroughTheShell(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	bin := t.TempDir()
-	stub := "#!/bin/sh\nfor a; do last=$a; done\nexec /bin/sh -c \"$last\"\n"
-	if err := os.WriteFile(filepath.Join(bin, "ssh"), []byte(stub), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	run := runner.Exec{Path: []string{bin}, Env: []string{"PATH=" + bin + ":/usr/bin:/bin", "HOME=" + homeDir}, Now: time.Now}
-
-	got, err := macThrough(run).Look(t.Context(), []string{"~/Code", "~/Library/Application Support/Claude", "~/Listed", "~/.zsh_history", "~/Link", "~/Gone"})
+	got, err := macThrough(shellThrough(t, homeDir)).Look(t.Context(), []string{"~/Code", "~/Library/Application Support/Claude", "~/Listed", "~/.zsh_history", "~/Link", "~/Gone"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +198,7 @@ func TestLooksForRealThroughTheShell(t *testing.T) {
 		slices.Sort(l.Skips)
 	}
 	want := map[string]Listed{
-		"~/Code":                               {Kind: Folder, Skips: []string{"app/node_modules", "empty/.claude/worktrees", "notes.txt", "web [x]/vendor"}},
+		"~/Code":                               {Kind: Folder, Skips: []string{"app/node_modules", "empty/.claude/worktrees", "notes.txt", "tooDeep", "web [x]/vendor"}},
 		"~/Library/Application Support/Claude": {Kind: Folder, Skips: []string{"Cache"}},
 		"~/Listed":                             {Kind: Folder},
 		"~/.zsh_history":                       {Kind: File},
