@@ -93,13 +93,14 @@ func TestReinstallRetryFailingAgain(t *testing.T) {
 
 // The reinstall comes after the restore, whose projects it installs; after
 // the secrets, which write what private packages need; and after the kinds
-// of packages, Homebrew's casks and npm's here, which install the tools it
-// runs. A step of the user's own can come before it, as one putting a tool
-// in place, or after it. kit agent order places it, as a new Mac started from this one would
+// that install the tools it runs, Homebrew's casks and npm's here; never
+// after the App Store's, whose sign-in is by hand. A step of the user's own
+// can come before it, as one putting a tool in place, or after it. kit agent order places it, as a new Mac started from this one would
 // have it, the restore settled here or not.
 func TestReinstallComesAfterTheRestoreAndTheSecrets(t *testing.T) {
 	for _, settled := range []bool{false, true} {
 		w := restoreWorld(t)
+		w.writeSection(t, "laptop", "app store apps", "xcode@497799835\n")
 		w.writeSection(t, "laptop", "steps", `alone "stands alone"
 tool-first "puts a tool in place" --before reinstall
 uses-deps "uses the projects" --after reinstall
@@ -113,6 +114,9 @@ uses-deps "uses the projects" --after reinstall
 			if !slices.Contains(before, want) {
 				t.Errorf("settled %v: before the reinstall = %q; want %s", settled, before, want)
 			}
+		}
+		if slices.Contains(before, "mas") || !slices.Contains(names(w.order(t, "mas").Unordered), "reinstall") {
+			t.Errorf("settled %v: before the reinstall = %q; want the App Store's apps in no order with it", settled, before)
 		}
 		if before := names(w.order(t, "uses-deps").Before); !slices.Contains(before, "reinstall") {
 			t.Errorf("settled %v: before uses-deps = %q; want the reinstall", settled, before)

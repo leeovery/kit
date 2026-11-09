@@ -12,8 +12,12 @@ import (
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/kind"
+	"github.com/leeovery/kit/internal/kind/brew"
+	"github.com/leeovery/kit/internal/kind/composer"
+	"github.com/leeovery/kit/internal/kind/ghext"
+	"github.com/leeovery/kit/internal/kind/gotool"
+	"github.com/leeovery/kit/internal/kind/npm"
 	"github.com/leeovery/kit/internal/kind/secret"
-	"github.com/leeovery/kit/internal/kinds"
 	"github.com/leeovery/kit/internal/reinstall"
 	"github.com/leeovery/kit/internal/restore"
 	"github.com/leeovery/kit/internal/steps"
@@ -145,8 +149,8 @@ func (a *app) restoreStep(r *run, dirs config.Dirs, prefsOn bool) (*engine.Step,
 // restoring saying the data restore's in the run, as on a new Mac's first,
 // before anything's recorded; for kit agent order, wherever the restore
 // is. Failed installs run again when kit apply names it. It comes after
-// the restore; the secrets, which write what private packages need; and
-// every kind of packages the run has, which install the tools it runs.
+// the restore, and the kinds that install the tools it runs and the
+// secrets private packages need (reinstallAfter).
 func (a *app) reinstallStep(r *run, dirs config.Dirs, restoring bool) (*engine.Step, error) {
 	on, err := steps.ReinstallOn(dirs.State, restoring)
 	if err != nil {
@@ -160,9 +164,18 @@ func (a *app) reinstallStep(r *run, dirs config.Dirs, restoring bool) (*engine.S
 		step.After = append(step.After, steps.RestoreName)
 	}
 	for _, name := range r.kinds {
-		if d, ok := kinds.Named(name); ok && (d.Group == kind.Packages || name == secret.Descriptor.Name) {
+		if slices.Contains(reinstallAfter, name) {
 			step.After = append(step.After, name)
 		}
 	}
 	return &step, nil
+}
+
+// reinstallAfter are the kinds the reinstall comes after, those the run
+// has: the kinds that install the tools projects use, and the secrets,
+// which write what private packages need. Never the App Store's, whose
+// sign-in is by hand, nor login items.
+var reinstallAfter = []string{
+	brew.FormulaeDescriptor.Name, brew.CasksDescriptor.Name, npm.Descriptor.Name, composer.Descriptor.Name,
+	gotool.Descriptor.Name, ghext.Descriptor.Name, secret.Descriptor.Name,
 }
