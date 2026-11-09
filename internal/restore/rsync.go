@@ -20,14 +20,11 @@ import (
 // Application Support's have.
 var minRsync = []int{3, 2, 4}
 
-// partialDir is the folder, in each folder copied into, that keeps what's
-// been copied of a file not finished, for a copy run again to carry on from:
-// rsync's own name for it, which rsync leaves out of what it copies.
-const partialDir = ".rsync-partial"
-
-// ioTimeout ends a copy that's sent and received nothing for so long, as an
-// SSH connection gone quiet (rsync's --timeout, its exit 30): the runner's
-// own timeout can't tell a long copy from a stuck one.
+// ioTimeout ends a copy over SSH that's sent and received nothing for so
+// long, as a connection gone quiet (rsync's --timeout, its exit 30): the
+// runner's own timeout can't tell a long copy from a stuck one. Never on
+// this Mac: rsync is silent while it checksums a file, keepalives or not
+// (proven with 3.5.2), and a slow backup disk can take longer over one.
 const ioTimeout = 10 * time.Minute
 
 // mostRecopied is how many of the paths the second pass copied again it
@@ -43,20 +40,22 @@ const vanished = 24
 var ErrVanished = errors.New("files vanished from the source as they were copied")
 
 // exitSays is what each of rsync's exits means, in its manual's words, and
-// its own for those its manual leaves out.
+// its own for those its manual leaves out (124 on).
 var exitSays = map[int]string{
 	1:   "syntax or usage error",
 	2:   "protocol incompatibility",
-	3:   "errors selecting input/output files, dirs",
+	3:   "errors selecting input/output files, directories",
 	4:   "requested action not supported",
 	5:   "error starting client-server protocol",
-	6:   "daemon unable to append to log-file",
 	10:  "error in socket I/O",
 	11:  "error in file I/O",
 	12:  "error in rsync protocol data stream",
 	13:  "errors with program diagnostics",
 	14:  "error in IPC code",
-	20:  "received SIGUSR1 or SIGINT",
+	15:  "sibling process crashed",
+	16:  "sibling process was killed by a signal",
+	19:  "received SIGUSR1",
+	20:  "received SIGINT, SIGTERM, or SIGHUP",
 	21:  "some error returned by waitpid()",
 	22:  "error allocating core memory buffers",
 	23:  "partial transfer due to error",
@@ -71,16 +70,20 @@ var exitSays = map[int]string{
 	255: "unexplained error",
 }
 
+// capabilities are what the copy needs rsync built with: extended
+// attributes, and creation dates.
+var capabilities = []string{"xattrs", "crtimes"}
+
 var (
 	rsyncVersion = regexp.MustCompile(`^rsync\s+version\s+v?(\d+)\.(\d+)\.(\d+)`)
 	// progressLine is rsync's --info=progress2 line: bytes copied, the
 	// percent of all it knows of, the rate and the time left; at the end of a
 	// file, how many it's copied (xfr#) and how many it's still to check.
-	progressLine = regexp.MustCompile(`^\s*([\d,.]+)\s+(\d+)%\s+\S+\s+\S+(?:\s+\(xfr#(\d+), [a-z]+-chk=\d+/\d+\))?\s*$`)
+	progressLine = regexp.MustCompile(`^\s*([\d,.]+)B?\s+(\d+)%\s+\S+\s+\S+(?:\s+\(xfr#(\d+), [a-z]+-chk=\d+/\d+\))?\s*$`)
 	statFiles    = regexp.MustCompile(`(?m)^Number of regular files transferred: ([\d,.]+)\s*$`)
 	statBytes    = regexp.MustCompile(`(?m)^Total transferred file size: ([\d,.]+) bytes\s*$`)
 	// itemized is a line of --itemize-changes: the update (> received, c
-	// created, h hard-linked, . unchanged but for attributes), the kind of
+	// made, h hard-linked, . unchanged but for attributes), the kind of
 	// thing, nine attribute columns, then the path.
 	itemized = regexp.MustCompile(`^([<>ch.*])([fdLDS])\S{9} (.+)$`)
 )
@@ -107,8 +110,8 @@ type Found struct {
 }
 
 // Find finds the rsync on kit's PATH, and whether it's one that can copy:
-// rsync 3, at least minRsync, never macOS's own, openrsync, which keeps no
-// extended attributes.
+// rsync 3, at least minRsync, built with its capabilities; never macOS's
+// own, openrsync, which keeps no extended attributes.
 func (r Rsync) Find(ctx context.Context) (Found, error) {
 	res, err := r.run.Run(ctx, runner.Command{Name: "rsync", Args: []string{"--version"}})
 	if errors.Is(err, runner.ErrNotFound) {
@@ -137,6 +140,15 @@ func found(out string) Found {
 	version := strings.Join(m[1:], ".")
 	if parts[0] != 3 || slices.Compare(parts, minRsync) < 0 {
 		return Found{Version: version, Why: fmt.Sprintf("it's rsync %s, not rsync %d.%d.%d or later", version, minRsync[0], minRsync[1], minRsync[2])}
+	}
+	words := strings.FieldsFunc(out, func(r rune) bool { return r == ',' || r == '\n' })
+	for i, w := range words {
+		words[i] = strings.TrimSpace(w)
+	}
+	for _, want := range capabilities {
+		if !slices.Contains(words, want) {
+			return Found{Version: version, Why: fmt.Sprintf("it's rsync %s, built without %s", version, want)}
+		}
 	}
 	return Found{Version: version, Usable: true}
 }
@@ -167,6 +179,11 @@ type Copy struct {
 	// (--exclude-from), one starting with / anchored at the folder copied:
 	// "" for none.
 	Filter string
+	// Partial is a folder, absolute, in kit's state, that keeps what's been
+	// copied of a file not finished, for a copy run again to carry on from,
+	// never left in the person's folders; rsync makes it, not the folders
+	// it's in. The step clears it once the path's done.
+	Partial string
 }
 
 // Stats is what a copy comes to: how many files, and how many bytes of
@@ -195,9 +212,10 @@ type Recopied struct {
 }
 
 // Size is what copying c would copy: files and bytes, from a dry run, for
-// the free space it needs.
+// the free space it needs. It makes nothing.
 func (r Rsync) Size(ctx context.Context, c Copy) (Stats, error) {
-	return stated(r.rsync(ctx, c, nil, "--dry-run", "--stats"))
+	res, err := r.rsync(ctx, c, runner.Command{}, "--dry-run", "--stats")
+	return stated(res.Stdout, err)
 }
 
 // Copy copies c, telling progress how far it's got as rsync says, and
@@ -206,15 +224,17 @@ func (r Rsync) Size(ctx context.Context, c Copy) (Stats, error) {
 // ErrVanished, and it still returns what it copied.
 func (r Rsync) Copy(ctx context.Context, c Copy, progress func(Progress)) (Stats, error) {
 	var read progressReader
+	var stats statsReader
 	lines := func(line string) {
+		stats.line(line)
 		if p, ok := read.line(line); ok && progress != nil {
 			progress(p)
 		}
 	}
-	// The names of the files copied end each progress line with a new line:
-	// the runner gives a line a carriage return draws again only as it ends,
-	// and progress2 alone ends none till the copy's done.
-	return stated(r.rsync(ctx, c, lines, "--info=name1,progress2", "--stats"))
+	// Its output, a line for each thing copied, is read as it comes, not
+	// kept: a home's millions of files would be a gigabyte.
+	_, err := r.rsync(ctx, c, runner.Command{Lines: lines, Redraws: true, LinesOnly: true}, "--info=name1,progress2", "--stats")
+	return stated(stats.text(), err)
 }
 
 // Compare is the second pass: it compares every file of c's copy with its
@@ -222,42 +242,40 @@ func (r Rsync) Copy(ctx context.Context, c Copy, progress func(Progress)) (Stats
 // and which. Files vanished from the source as it compared fail it with
 // ErrVanished, and it still says what it copied.
 func (r Rsync) Compare(ctx context.Context, c Copy) (Recopied, error) {
-	res, err := r.rsync(ctx, c, nil, "--checksum", "--itemize-changes")
+	res, err := r.rsync(ctx, c, runner.Command{}, "--checksum", "--itemize-changes")
 	if err != nil && !errors.Is(err, ErrVanished) {
 		return Recopied{}, err
 	}
 	return recopied(res.Stdout), err
 }
 
-// rsync runs rsync on c with options, giving its lines to lines, once c's
-// destination has its parent folder: rsync makes the folder copied into, but
-// not the folders it's in.
-func (r Rsync) rsync(ctx context.Context, c Copy, lines func(string), options ...string) (runner.Result, error) {
+// rsync runs rsync on c with options, as cmd, which says how to read what it
+// prints.
+func (r Rsync) rsync(ctx context.Context, c Copy, cmd runner.Command, options ...string) (runner.Result, error) {
 	args, err := c.args(options)
 	if err != nil {
 		return runner.Result{}, err
 	}
-	if err := os.MkdirAll(filepath.Dir(filepath.Clean(c.To)), 0o755); err != nil {
-		return runner.Result{}, fmt.Errorf("make the folder %s is copied into: %w", c.To, err)
-	}
-	res, err := r.run.Run(ctx, runner.Command{Name: "rsync", Args: args, Timeout: runner.Unlimited, Lines: lines})
+	cmd.Name, cmd.Args, cmd.Timeout = "rsync", args, runner.Unlimited
+	res, err := r.run.Run(ctx, cmd)
 	return res, failed(err)
 }
 
 // args are rsync's arguments for c, with options: archive (which, run by
-// anyone but root, keeps no owners), extended attributes and hard links;
-// never ACLs, as Time Machine's deny adding files to the folders it marks;
-// never deleting.
+// anyone but root, keeps no owners), extended attributes, hard links and
+// creation dates; never ACLs, as Time Machine's deny adding files to the
+// folders it marks; never deleting. --mkpath makes the folders To is in,
+// but not in a dry run.
 func (c Copy) args(options []string) ([]string, error) {
 	if err := c.check(); err != nil {
 		return nil, err
 	}
-	args := []string{"--archive", "--xattrs", "--hard-links", "--partial-dir=" + partialDir, fmt.Sprintf("--timeout=%d", int(ioTimeout.Seconds()))}
+	args := []string{"--archive", "--xattrs", "--hard-links", "--crtimes", "--mkpath", "--partial-dir=" + filepath.Clean(c.Partial)}
 	if c.Filter != "" {
 		args = append(args, "--exclude-from="+c.Filter)
 	}
 	if c.From.Host != "" {
-		args = append(args, "--rsh="+c.From.Shell, "--rsync-path="+c.From.Rsync)
+		args = append(args, fmt.Sprintf("--timeout=%d", int(ioTimeout.Seconds())), "--rsh="+c.From.Shell, "--rsync-path="+c.From.Rsync)
 	}
 	args = append(args, options...)
 	from, to := filepath.Clean(c.From.Path), filepath.Clean(c.To)
@@ -280,12 +298,43 @@ func (c Copy) check() error {
 		return fmt.Errorf("copy from %q: the path isn't absolute", c.From.Path)
 	case !filepath.IsAbs(c.To):
 		return fmt.Errorf("copy to %q: the path isn't absolute", c.To)
-	case c.From.Host == "":
+	case !filepath.IsAbs(c.Partial):
+		return fmt.Errorf("copy to %s: the folder for files not finished, %q, isn't absolute", c.To, c.Partial)
+	}
+	if err := c.From.check(); err != nil {
+		return err
+	}
+	if c.File {
+		return c.checkFile()
+	}
+	return nil
+}
+
+// checkFile says what's wrong with c, a file, if anything: a folder copied
+// as a file would be copied into itself again, a folder down, each run. A
+// source on another Mac is the caller's to know.
+func (c Copy) checkFile() error {
+	paths := []string{c.To}
+	if c.From.Host == "" {
+		paths = append(paths, c.From.Path)
+	}
+	for _, p := range paths {
+		if info, err := os.Stat(p); err == nil && info.IsDir() {
+			return fmt.Errorf("copy %s as a file: it's a folder", p)
+		}
+	}
+	return nil
+}
+
+// check says what's wrong with s, if anything.
+func (s Source) check() error {
+	switch {
+	case s.Host == "":
 		return nil
-	case strings.HasPrefix(c.From.Host, "-"):
-		return fmt.Errorf("copy from %q: that's no host", c.From.Host)
-	case c.From.Shell == "" || c.From.Rsync == "":
-		return fmt.Errorf("copy from %s: a copy over SSH needs its shell and the host's rsync", c.From.Host)
+	case strings.HasPrefix(s.Host, "-"):
+		return fmt.Errorf("copy from %q: that's no host", s.Host)
+	case s.Shell == "" || s.Rsync == "":
+		return fmt.Errorf("copy from %s: a copy over SSH needs its shell and the host's rsync", s.Host)
 	}
 	return nil
 }
@@ -349,35 +398,59 @@ func failed(err error) error {
 }
 
 // progressReader reads progress from a copy's lines, keeping how many files
-// it's copied, which rsync says only as each ends.
+// it's copied, which rsync says only as each ends, and what it last said,
+// which rsync draws again as it ends.
 type progressReader struct {
-	files int
+	last Progress
 }
 
-// line is the progress line says, if it's a progress line.
+// line is the progress line says, if it's a progress line, and new.
 func (p *progressReader) line(line string) (Progress, bool) {
 	m := progressLine.FindStringSubmatch(line)
 	if m == nil {
 		return Progress{}, false
 	}
+	now := Progress{Bytes: number(m[1]), Files: p.last.Files}
+	now.Percent, _ = strconv.Atoi(m[2])
 	if m[3] != "" {
-		p.files, _ = strconv.Atoi(m[3])
+		now.Files, _ = strconv.Atoi(m[3])
 	}
-	percent, _ := strconv.Atoi(m[2])
-	return Progress{Bytes: number(m[1]), Percent: percent, Files: p.files}, true
+	if now == p.last {
+		return Progress{}, false
+	}
+	p.last = now
+	return now, true
 }
 
-// stated is what the statistics of a run of rsync's that ended in err say
-// it copied, or would: none, when it failed but for files vanished.
-func stated(res runner.Result, err error) (Stats, error) {
+// stated is what the statistics a run of rsync's printed, out, say it
+// copied, or would, when it ended in err: none, when it failed but for files
+// vanished.
+func stated(out []byte, err error) (Stats, error) {
 	if err != nil && !errors.Is(err, ErrVanished) {
 		return Stats{}, err
 	}
-	stats, statsErr := statsOf(res.Stdout)
+	stats, statsErr := statsOf(out)
 	if statsErr != nil {
 		return Stats{}, statsErr
 	}
 	return stats, err
+}
+
+// statsReader keeps a copy's statistics, of all its lines: those from their
+// first on.
+type statsReader struct {
+	lines []string
+}
+
+func (s *statsReader) line(line string) {
+	if len(s.lines) > 0 || strings.HasPrefix(line, "Number of files:") {
+		s.lines = append(s.lines, line)
+	}
+}
+
+// text is the statistics, as rsync printed them.
+func (s *statsReader) text() []byte {
+	return []byte(strings.Join(s.lines, "\n"))
 }
 
 // statsOf is what rsync's --stats says it copied, or would.
@@ -390,19 +463,17 @@ func statsOf(out []byte) (Stats, error) {
 }
 
 // recopied is what the second pass, itemizing its changes, copied again: a
-// file received, or a link or other thing made, but not a folder made, or
-// attributes alone set.
+// file received, or a link, folder or other thing made; not attributes
+// alone set. A folder made counts: an empty one the copy missed is
+// something lost.
 func recopied(out []byte) Recopied {
 	var r Recopied
 	for line := range strings.Lines(string(out)) {
 		m := itemized.FindStringSubmatch(strings.TrimRight(line, "\n"))
-		if m == nil {
+		if m == nil || !strings.Contains(">ch", m[1]) {
 			continue
 		}
 		update, kind, path := m[1], m[2], m[3]
-		if !copiedAgain(update, kind) {
-			continue
-		}
 		switch {
 		case update == "h":
 			path, _, _ = strings.Cut(path, " => ")
@@ -415,18 +486,6 @@ func recopied(out []byte) Recopied {
 		}
 	}
 	return r
-}
-
-// copiedAgain reports whether an item itemized as update, of kind, was
-// copied again.
-func copiedAgain(update, kind string) bool {
-	switch update {
-	case ">":
-		return true
-	case "c", "h":
-		return kind != "d"
-	}
-	return false
 }
 
 // number is the number rsync printed as s, its thousands separated by

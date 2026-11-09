@@ -10,16 +10,22 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/leeovery/kit/internal/runner"
 	"github.com/leeovery/kit/internal/runner/runnertest"
 )
 
-// rsync 3 isn't on the Mac the tests were written on, so the fixtures in
-// testdata are rsync 3.4's output as its manual documents it: --version,
-// --info=name1,progress2 with --stats, a dry run's --stats, and
-// --itemize-changes. Each progress line is as the runner gives it, the last
-// a carriage return drew before a new line ended it.
+// The fixtures in testdata are rsync 3.5.2's own output, captured from real
+// runs in a scratch folder, renamed /Volumes/Scratch/restore: --version
+// (and macOS's openrsync's); a copy's --info=name1,progress2 --stats, its
+// carriage returns kept (copy.raw, and vanished.raw, a 200 MB file copied
+// slowly while a later file was deleted); a dry run's --stats (size.raw);
+// a second pass's --itemize-changes (compare.raw, after a file's contents
+// were changed, others' times, permissions and attributes, and a file, a
+// link, a hard link and an empty folder deleted); and its standard error
+// as it exited 23, 24, 30, 35, 127 and 255 (127 and 255 through a stand-in
+// for ssh, its own line its words).
 
 func fixture(t *testing.T, name string) string {
 	t.Helper()
@@ -30,8 +36,17 @@ func fixture(t *testing.T, name string) string {
 	return string(data)
 }
 
+// partial is the folder for files not finished that every copy in these
+// tests is given.
+const partial = "/Users/someone/.local/state/kit/restore/partial"
+
 // base are the options of every copy, dry run and second pass.
-var base = []string{"--archive", "--xattrs", "--hard-links", "--partial-dir=.rsync-partial", "--timeout=600"}
+var base = []string{"--archive", "--xattrs", "--hard-links", "--crtimes", "--mkpath", "--partial-dir=" + partial}
+
+// local is a copy of the folder at path on a snapshot to to.
+func local(path, to string) Copy {
+	return Copy{From: Source{Path: "/Volumes/snapshot" + path}, To: to, Partial: partial}
+}
 
 // ops are the three ways rsync is run on a copy, with the options each adds.
 var ops = []struct {
@@ -53,17 +68,51 @@ var ops = []struct {
 	}},
 }
 
+// prints has the fake's rsync, run with anything, print stdout.
+func prints(t *testing.T, stdout string) *runnertest.Fake {
+	fake := runnertest.New(t)
+	fake.OnMatch("rsync", func([]string) bool { return true }).Prints(stdout)
+	return fake
+}
+
+// realRsync is the real runner, with an rsync on its PATH that prints the
+// fixture stdout as it is, carriage returns and all, and the fixture stderr
+// on its standard error, then exits exit: what rsync printed, through the
+// runner's own reading of it.
+func realRsync(t *testing.T, stdout, stderr string, exit int) Rsync {
+	t.Helper()
+	dir := t.TempDir()
+	script := "#!/bin/sh\n"
+	for _, out := range []struct{ name, to string }{{stdout, ""}, {stderr, " >&2"}} {
+		if out.name == "" {
+			continue
+		}
+		path, err := filepath.Abs(filepath.Join("testdata", out.name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		script += fmt.Sprintf("/bin/cat '%s'%s\n", path, out.to)
+	}
+	script += fmt.Sprintf("exit %d\n", exit)
+	if err := os.WriteFile(filepath.Join(dir, "rsync"), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return NewRsync(runner.Exec{Path: []string{dir}, Env: []string{"PATH=" + dir}, Now: time.Now})
+}
+
 func TestFindsRsync3(t *testing.T) {
 	tests := []struct {
 		name   string
 		prints string
 		want   Found
 	}{
-		{"Homebrew's", fixture(t, "rsync-version.txt"), Found{Version: "3.4.1", Usable: true}},
-		{"the oldest that copies", "rsync  version 3.2.4  protocol version 31\n", Found{Version: "3.2.4", Usable: true}},
+		{"Homebrew's", fixture(t, "rsync-version.txt"), Found{Version: "3.5.2", Usable: true}},
+		{"the oldest that copies", "rsync  version 3.2.4  protocol version 31\nCapabilities:\n    xattrs, crtimes\n", Found{Version: "3.2.4", Usable: true}},
 		{"macOS's own", fixture(t, "openrsync-version.txt"), Found{Why: "it's macOS's own, openrsync, not rsync 3"}},
-		{"too old", "rsync  version 3.2.3  protocol version 31\n", Found{Version: "3.2.3", Why: "it's rsync 3.2.3, not rsync 3.2.4 or later"}},
+		{"too old", "rsync  version 3.2.3  protocol version 31\nCapabilities:\n    xattrs, crtimes\n", Found{Version: "3.2.3", Why: "it's rsync 3.2.3, not rsync 3.2.4 or later"}},
 		{"macOS's old one", "rsync  version 2.6.9  protocol version 29\n", Found{Version: "2.6.9", Why: "it's rsync 2.6.9, not rsync 3.2.4 or later"}},
+		{"without creation dates", "rsync  version 3.5.2  protocol version 33\nCapabilities:\n    hardlinks, ACLs,\n    xattrs, no crtimes\n", Found{Version: "3.5.2", Why: "it's rsync 3.5.2, built without crtimes"}},
+		{"without extended attributes", "rsync  version 3.5.2  protocol version 33\nCapabilities:\n    no xattrs, crtimes\n", Found{Version: "3.5.2", Why: "it's rsync 3.5.2, built without xattrs"}},
 		{"something else", "copier 1.0\n", Found{Why: `it says it's "copier 1.0", not rsync 3`}},
 	}
 	for _, tt := range tests {
@@ -100,13 +149,16 @@ func TestFindFailsWhenRsyncDoes(t *testing.T) {
 
 // A folder's contents are copied into its place, the filter anchored at it;
 // a file is copied as its place; over SSH, through the shell given, with
-// the host's rsync. Each has the folder it's copied into made first.
+// the host's rsync, ended if it goes quiet. rsync makes the folders its
+// place is in (--mkpath); the driver makes nothing.
 func TestCopyArguments(t *testing.T) {
 	const (
 		filter = "/Users/someone/.local/state/kit/restore/Code.filter"
 		shell  = "ssh -i /Users/someone/.ssh/id_kit -o UserKnownHostsFile=/Users/someone/.local/state/kit/known_hosts"
 		remote = "/opt/homebrew/bin/rsync"
+		app    = "/Users/someone/Library/Application Support/Claude/claude-code-sessions"
 	)
+	overSSH := []string{"--timeout=600", "--rsh=" + shell, "--rsync-path=" + remote}
 	tests := []struct {
 		name     string
 		copy     func(home string) Copy
@@ -116,7 +168,9 @@ func TestCopyArguments(t *testing.T) {
 		{
 			name: "a folder",
 			copy: func(home string) Copy {
-				return Copy{From: Source{Path: "/Volumes/snapshot/Users/someone/Code"}, To: home + "/Code", Filter: filter}
+				c := local("/Users/someone/Code", home+"/Code")
+				c.Filter = filter
+				return c
 			},
 			args: []string{"--exclude-from=" + filter},
 			from: func(string) string { return "/Volumes/snapshot/Users/someone/Code/" },
@@ -124,16 +178,16 @@ func TestCopyArguments(t *testing.T) {
 		},
 		{
 			name: "a folder written with its slash",
-			copy: func(home string) Copy {
-				return Copy{From: Source{Path: "/Volumes/snapshot/Users/someone/Code/"}, To: home + "/Code/"}
-			},
+			copy: func(home string) Copy { return local("/Users/someone/Code/", home+"/Code/") },
 			from: func(string) string { return "/Volumes/snapshot/Users/someone/Code/" },
 			to:   func(home string) string { return home + "/Code/" },
 		},
 		{
 			name: "a file",
 			copy: func(home string) Copy {
-				return Copy{From: Source{Path: "/Volumes/snapshot/Users/someone/.zsh_history"}, To: home + "/.zsh_history", File: true}
+				c := local("/Users/someone/.zsh_history", home+"/.zsh_history")
+				c.File = true
+				return c
 			},
 			from: func(string) string { return "/Volumes/snapshot/Users/someone/.zsh_history" },
 			to:   func(home string) string { return home + "/.zsh_history" },
@@ -141,30 +195,26 @@ func TestCopyArguments(t *testing.T) {
 		{
 			name: "a folder deep in the home",
 			copy: func(home string) Copy {
-				return Copy{From: Source{Path: "/Volumes/snapshot/Users/someone/Library/Application Support/Claude/claude-code-sessions"}, To: home + "/Library/Application Support/Claude/claude-code-sessions"}
+				return local(app, home+"/Library/Application Support/Claude/claude-code-sessions")
 			},
-			from: func(string) string {
-				return "/Volumes/snapshot/Users/someone/Library/Application Support/Claude/claude-code-sessions/"
-			},
-			to: func(home string) string { return home + "/Library/Application Support/Claude/claude-code-sessions/" },
+			from: func(string) string { return "/Volumes/snapshot" + app + "/" },
+			to:   func(home string) string { return home + "/Library/Application Support/Claude/claude-code-sessions/" },
 		},
 		{
 			name: "a folder over SSH",
 			copy: func(home string) Copy {
-				return Copy{From: Source{Path: "/Users/someone/Library/Application Support/Claude/claude-code-sessions", Host: "laptop", Shell: shell, Rsync: remote}, To: home + "/Library/Application Support/Claude/claude-code-sessions", Filter: filter}
+				return Copy{From: Source{Path: app, Host: "laptop", Shell: shell, Rsync: remote}, To: home + "/Library/Application Support/Claude/claude-code-sessions", Filter: filter, Partial: partial}
 			},
-			args: []string{"--exclude-from=" + filter, "--rsh=" + shell, "--rsync-path=" + remote},
-			from: func(string) string {
-				return "laptop:/Users/someone/Library/Application Support/Claude/claude-code-sessions/"
-			},
-			to: func(home string) string { return home + "/Library/Application Support/Claude/claude-code-sessions/" },
+			args: append([]string{"--exclude-from=" + filter}, overSSH...),
+			from: func(string) string { return "laptop:" + app + "/" },
+			to:   func(home string) string { return home + "/Library/Application Support/Claude/claude-code-sessions/" },
 		},
 		{
 			name: "a file over SSH",
 			copy: func(home string) Copy {
-				return Copy{From: Source{Path: "/Users/someone/.zsh_history", Host: "laptop", Shell: shell, Rsync: remote}, To: home + "/.zsh_history", File: true}
+				return Copy{From: Source{Path: "/Users/someone/.zsh_history", Host: "laptop", Shell: shell, Rsync: remote}, To: home + "/.zsh_history", File: true, Partial: partial}
 			},
-			args: []string{"--rsh=" + shell, "--rsync-path=" + remote},
+			args: overSSH,
 			from: func(string) string { return "laptop:/Users/someone/.zsh_history" },
 			to:   func(home string) string { return home + "/.zsh_history" },
 		},
@@ -172,18 +222,22 @@ func TestCopyArguments(t *testing.T) {
 	for _, tt := range tests {
 		for _, op := range ops {
 			t.Run(tt.name+", "+op.name, func(t *testing.T) {
-				home := t.TempDir()
+				home := filepath.Join(t.TempDir(), "home")
 				c := tt.copy(home)
 				fake := runnertest.New(t)
-				fake.On("rsync", slices.Concat(base, tt.args, op.options, []string{tt.from(home), tt.to(home)})...).Prints(fixture(t, "copy.txt"))
+				fake.On("rsync", slices.Concat(base, tt.args, op.options, []string{tt.from(home), tt.to(home)})...).Prints(fixture(t, "copy.raw"))
 				if err := op.run(t.Context(), NewRsync(fake), c); err != nil {
 					t.Fatal(err)
 				}
-				if cmd := fake.Commands()[0]; cmd.Timeout != runner.Unlimited {
-					t.Errorf("timeout = %v, want none: a copy takes as long as it takes, rsync's own --timeout ending one gone quiet", cmd.Timeout)
+				cmd := fake.Commands()[0]
+				if cmd.Timeout != runner.Unlimited {
+					t.Errorf("timeout = %v, want none: a copy takes as long as it takes", cmd.Timeout)
 				}
-				if info, err := os.Stat(filepath.Dir(filepath.Clean(c.To))); err != nil || !info.IsDir() {
-					t.Errorf("the folder %s is copied into isn't there: %v", c.To, err)
+				if streamed := op.name == "copy"; cmd.Redraws != streamed || cmd.LinesOnly != streamed {
+					t.Errorf("redraws, lines only = %t, %t; want %t: a copy's progress given as it's drawn, its output not kept", cmd.Redraws, cmd.LinesOnly, streamed)
+				}
+				if _, err := os.Stat(home); !errors.Is(err, os.ErrNotExist) {
+					t.Errorf("the driver made %s, or can't tell: %v; want rsync to make what it needs", home, err)
 				}
 			})
 		}
@@ -195,13 +249,14 @@ func TestCopyArguments(t *testing.T) {
 // anything.
 func TestCopiesNeverCarryACLsOrDelete(t *testing.T) {
 	home := t.TempDir()
+	file := local("/Users/someone/.zsh_history", home+"/.zsh_history")
+	file.File = true
 	copies := []Copy{
-		{From: Source{Path: "/Volumes/snapshot/Users/someone/Code"}, To: home + "/Code", Filter: "/tmp/filter"},
-		{From: Source{Path: "/Volumes/snapshot/Users/someone/.zsh_history"}, To: home + "/.zsh_history", File: true},
-		{From: Source{Path: "/Users/someone/Code", Host: "laptop", Shell: "ssh", Rsync: "/opt/homebrew/bin/rsync"}, To: home + "/Code"},
+		local("/Users/someone/Code", home+"/Code"),
+		file,
+		{From: Source{Path: "/Users/someone/Code", Host: "laptop", Shell: "ssh", Rsync: "/opt/homebrew/bin/rsync"}, To: home + "/Code", Partial: partial},
 	}
-	fake := runnertest.New(t)
-	fake.OnMatch("rsync", func([]string) bool { return true }).Prints(fixture(t, "copy.txt"))
+	fake := prints(t, fixture(t, "copy.raw"))
 	for _, c := range copies {
 		for _, op := range ops {
 			if err := op.run(t.Context(), NewRsync(fake), c); err != nil {
@@ -219,19 +274,49 @@ func TestCopiesNeverCarryACLsOrDelete(t *testing.T) {
 	}
 }
 
+// Only over SSH is a copy that goes quiet ended: on this Mac, rsync says
+// nothing while it checksums a file, which on a slow disk can take longer
+// than any limit.
+func TestOnlyACopyOverSSHTimesOut(t *testing.T) {
+	home := t.TempDir()
+	fake := prints(t, fixture(t, "copy.raw"))
+	for _, c := range []Copy{local("/Users/someone/Code", home+"/Code"), {From: Source{Path: "/Users/someone/Code", Host: "laptop", Shell: "ssh", Rsync: "/opt/homebrew/bin/rsync"}, To: home + "/Code", Partial: partial}} {
+		for _, op := range ops {
+			if err := op.run(t.Context(), NewRsync(fake), c); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	for _, cmd := range fake.Commands() {
+		overSSH := slices.ContainsFunc(cmd.Args, func(a string) bool { return strings.HasPrefix(a, "--rsh=") })
+		if timesOut := slices.ContainsFunc(cmd.Args, func(a string) bool { return strings.HasPrefix(a, "--timeout") }); timesOut != overSSH {
+			t.Errorf("%s: times out %t, want %t", cmd, timesOut, overSSH)
+		}
+	}
+}
+
 func TestCopyRefuses(t *testing.T) {
 	home := t.TempDir()
+	folder := filepath.Join(home, "Code")
+	if err := os.Mkdir(folder, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	remote := Source{Path: "/Users/someone/Code", Host: "laptop", Shell: "ssh", Rsync: "/opt/homebrew/bin/rsync"}
 	tests := []struct {
 		name string
 		copy Copy
 		want string
 	}{
-		{"a relative source", Copy{From: Source{Path: "Code"}, To: home + "/Code"}, "the path isn't absolute"},
-		{"a relative destination", Copy{From: Source{Path: "/Volumes/snapshot/Code"}, To: "Code"}, "the path isn't absolute"},
-		{"a home to expand", Copy{From: Source{Path: "~/Code", Host: "laptop", Shell: "ssh", Rsync: "/opt/homebrew/bin/rsync"}, To: home + "/Code"}, "the path isn't absolute"},
-		{"no shell over SSH", Copy{From: Source{Path: "/Users/someone/Code", Host: "laptop", Rsync: "/opt/homebrew/bin/rsync"}, To: home + "/Code"}, "needs its shell and the host's rsync"},
-		{"no rsync over SSH", Copy{From: Source{Path: "/Users/someone/Code", Host: "laptop", Shell: "ssh"}, To: home + "/Code"}, "needs its shell and the host's rsync"},
-		{"an option for a host", Copy{From: Source{Path: "/Users/someone/Code", Host: "-oProxyCommand=sh", Shell: "ssh", Rsync: "/opt/homebrew/bin/rsync"}, To: home + "/Code"}, "that's no host"},
+		{"a relative source", Copy{From: Source{Path: "Code"}, To: home + "/Code", Partial: partial}, "the path isn't absolute"},
+		{"a relative destination", Copy{From: Source{Path: "/Volumes/snapshot/Code"}, To: "Code", Partial: partial}, "the path isn't absolute"},
+		{"a home to expand", Copy{From: Source{Path: "~/Code", Host: "laptop", Shell: "ssh", Rsync: "/opt/homebrew/bin/rsync"}, To: home + "/Code", Partial: partial}, "the path isn't absolute"},
+		{"no folder for files not finished", Copy{From: Source{Path: "/Volumes/snapshot/Code"}, To: home + "/Code"}, "isn't absolute"},
+		{"a relative folder for files not finished", Copy{From: Source{Path: "/Volumes/snapshot/Code"}, To: home + "/Code", Partial: ".rsync-partial"}, "isn't absolute"},
+		{"no shell over SSH", Copy{From: Source{Path: "/Users/someone/Code", Host: "laptop", Rsync: "/opt/homebrew/bin/rsync"}, To: home + "/Code", Partial: partial}, "needs its shell and the host's rsync"},
+		{"no rsync over SSH", Copy{From: Source{Path: "/Users/someone/Code", Host: "laptop", Shell: "ssh"}, To: home + "/Code", Partial: partial}, "needs its shell and the host's rsync"},
+		{"an option for a host", Copy{From: Source{Path: "/Users/someone/Code", Host: "-oProxyCommand=sh", Shell: "ssh", Rsync: "/opt/homebrew/bin/rsync"}, To: home + "/Code", Partial: partial}, "that's no host"},
+		{"a folder here as a file", Copy{From: Source{Path: folder}, To: home + "/elsewhere", File: true, Partial: partial}, "it's a folder"},
+		{"a file onto a folder", Copy{From: remote, To: folder, File: true, Partial: partial}, "it's a folder"},
 	}
 	for _, tt := range tests {
 		for _, op := range ops {
@@ -248,29 +333,31 @@ func TestCopyRefuses(t *testing.T) {
 	}
 }
 
+// What rsync prints, through the runner's own reading of it, gives the copy's
+// progress as rsync draws it, part way through a file included, and its
+// statistics, though none of its output is kept.
 func TestCopySaysHowFarItsGot(t *testing.T) {
-	home := t.TempDir()
-	fake := runnertest.New(t)
-	fake.OnMatch("rsync", func([]string) bool { return true }).Prints(fixture(t, "copy.txt"))
 	var got []Progress
-	stats, err := NewRsync(fake).Copy(t.Context(), Copy{From: Source{Path: "/Volumes/snapshot/Users/someone/Code"}, To: home + "/Code"}, func(p Progress) {
+	stats, err := realRsync(t, "copy.raw", "", 0).Copy(t.Context(), local("/Users/someone/Code", t.TempDir()+"/Code"), func(p Progress) {
 		got = append(got, p)
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := []Progress{
-		{Bytes: 32768, Percent: 0, Files: 1},
-		{Bytes: 12345678, Percent: 24, Files: 2},
-		// Part way through a file, rsync says nothing of the files: the
-		// count so far stands.
-		{Bytes: 20000000, Percent: 39, Files: 2},
-		{Bytes: 51234567, Percent: 100, Files: 3},
+		// Part way through the first file, before rsync says it's copied.
+		{Bytes: 32768, Percent: 0, Files: 0},
+		{Bytes: 50000000, Percent: 98, Files: 1},
+		{Bytes: 50300000, Percent: 98, Files: 2},
+		{Bytes: 50600000, Percent: 99, Files: 3},
+		{Bytes: 50900000, Percent: 99, Files: 4},
+		// Drawn four times as it ends: said once.
+		{Bytes: 50900003, Percent: 100, Files: 5},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("progress = %+v, want %+v", got, want)
 	}
-	if want := (Stats{Files: 3, Bytes: 51234567}); stats != want {
+	if want := (Stats{Files: 5, Bytes: 50900003}); stats != want {
 		t.Errorf("Copy() = %+v, want %+v", stats, want)
 	}
 }
@@ -281,15 +368,12 @@ func TestSizeSaysWhatsToCome(t *testing.T) {
 		prints string
 		want   Stats
 	}{
-		{"commas", fixture(t, "dry-run.txt"), Stats{Files: 12345, Bytes: 9876543210}},
+		{"commas", fixture(t, "size.raw"), Stats{Files: 5, Bytes: 50900003}},
 		{"points, where decimals take commas", "Number of regular files transferred: 1.234\nTotal transferred file size: 5.678.901 bytes\n", Stats{Files: 1234, Bytes: 5678901}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			home := t.TempDir()
-			fake := runnertest.New(t)
-			fake.OnMatch("rsync", func([]string) bool { return true }).Prints(tt.prints)
-			got, err := NewRsync(fake).Size(t.Context(), Copy{From: Source{Path: "/Volumes/snapshot/Users/someone/Code"}, To: home + "/Code"})
+			got, err := NewRsync(prints(t, tt.prints)).Size(t.Context(), local("/Users/someone/Code", t.TempDir()+"/Code"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -300,18 +384,20 @@ func TestSizeSaysWhatsToCome(t *testing.T) {
 	}
 }
 
-func TestSizeFailsWithoutStatistics(t *testing.T) {
-	home := t.TempDir()
-	fake := runnertest.New(t)
-	fake.OnMatch("rsync", func([]string) bool { return true }).Prints("sent 12 bytes  received 34 bytes\n")
-	if _, err := NewRsync(fake).Size(t.Context(), Copy{From: Source{Path: "/Volumes/snapshot/Code"}, To: home + "/Code"}); err == nil {
-		t.Error("Size() = nil, want an error: rsync said nothing of the files")
+func TestStatisticsMissingFail(t *testing.T) {
+	for _, op := range ops[:2] {
+		t.Run(op.name, func(t *testing.T) {
+			fake := prints(t, "sent 12 bytes  received 34 bytes\n")
+			if err := op.run(t.Context(), NewRsync(fake), local("/Code", t.TempDir()+"/Code")); err == nil {
+				t.Error("error = nil, want one: rsync said nothing of the files")
+			}
+		})
 	}
 }
 
-// The second pass counts what it copied again, a file received or a link
-// made, and names the first of them; attributes set, or a folder made, are
-// no copy.
+// The second pass counts what it copied again, a file received, or a link
+// or folder made, and names the first of them; attributes alone set are no
+// copy.
 func TestCompareCountsWhatItCopiedAgain(t *testing.T) {
 	many := strings.Builder{}
 	var manyPaths []string
@@ -325,16 +411,13 @@ func TestCompareCountsWhatItCopiedAgain(t *testing.T) {
 		want   Recopied
 	}{
 		{"nothing", "", Recopied{}},
-		{"attributes alone", ".d..t...... ./\n.f....og... notes/b.md\n", Recopied{}},
-		{"some", fixture(t, "compare.txt"), Recopied{Count: 5, Paths: []string{"notes/a.md", "notes/lost.md", "current", "notes/copy.md", "notes/d -> e.md"}}},
+		{"attributes alone", ".d..t...... ./\n.f...p..... notes/b.md\n.f........x notes/c.md\n.f..t...n.. photos/big.raw\n", Recopied{}},
+		{"some", fixture(t, "compare.raw"), Recopied{Count: 6, Paths: []string{"current", "empty/", "notes/a.md", "notes/d -> e.md", "notes/lost.md", "notes/copy.md"}}},
 		{"more than it names", many.String(), Recopied{Count: mostRecopied + 5, Paths: manyPaths[:mostRecopied]}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			home := t.TempDir()
-			fake := runnertest.New(t)
-			fake.OnMatch("rsync", func([]string) bool { return true }).Prints(tt.prints)
-			got, err := NewRsync(fake).Compare(t.Context(), Copy{From: Source{Path: "/Volumes/snapshot/Users/someone/Code"}, To: home + "/Code"})
+			got, err := NewRsync(prints(t, tt.prints)).Compare(t.Context(), local("/Users/someone/Code", t.TempDir()+"/Code"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -347,62 +430,26 @@ func TestCompareCountsWhatItCopiedAgain(t *testing.T) {
 
 func TestRsyncsExitsInItsWords(t *testing.T) {
 	tests := []struct {
-		name   string
 		code   int
 		stderr string
 		want   string
 	}{
-		{
-			name: "a partial transfer",
-			code: 23,
-			stderr: `rsync: [sender] send_files failed to open "/Volumes/snapshot/Users/someone/Code/locked.db": Permission denied (13)
-rsync: [receiver] mkstemp "/Users/someone/Code/.locked.db.Xa1b2c" failed: Permission denied (13)
-rsync error: some files/attrs were not transferred (see previous errors) (code 23) at main.c(1338) [sender=3.4.1]
-`,
-			want: `rsync exited 23, partial transfer due to error: rsync: [sender] send_files failed to open "/Volumes/snapshot/Users/someone/Code/locked.db": Permission denied (13) (and 1 more)`,
-		},
-		{
-			name: "a timeout",
-			code: 30,
-			stderr: `[receiver] io timeout after 600 seconds -- exiting
-rsync error: timeout in data send/receive (code 30) at io.c(197) [receiver=3.4.1]
-`,
-			want: "rsync exited 30, timeout in data send/receive: [receiver] io timeout after 600 seconds -- exiting",
-		},
-		{
-			name:   "a connection's timeout",
-			code:   35,
-			stderr: "rsync error: timeout waiting for daemon connection (code 35) at socket.c(278) [sender=3.4.1]\n",
-			want:   "rsync exited 35, timeout waiting for daemon connection: rsync error: timeout waiting for daemon connection (code 35) at socket.c(278) [sender=3.4.1]",
-		},
-		{
-			name: "no SSH",
-			code: 255,
-			stderr: `ssh: connect to host laptop port 22: Connection refused
-rsync: connection unexpectedly closed (0 bytes received so far) [Receiver]
-rsync error: unexplained error (code 255) at io.c(232) [Receiver=3.4.1]
-`,
-			want: "rsync exited 255, unexplained error: ssh: connect to host laptop port 22: Connection refused (and 1 more)",
-		},
-		{
-			name:   "no rsync on the host",
-			code:   127,
-			stderr: "zsh:1: no such file or directory: /opt/homebrew/bin/rsync\nrsync: connection unexpectedly closed (0 bytes received so far) [Receiver]\nrsync error: remote command not found (code 127) at io.c(232) [Receiver=3.4.1]\n",
-			want:   "rsync exited 127, remote command not found: zsh:1: no such file or directory: /opt/homebrew/bin/rsync (and 1 more)",
-		},
-		{
-			name: "an exit it doesn't explain",
-			code: 99,
-			want: "rsync exited 99, an exit rsync doesn't explain",
-		},
+		{23, fixture(t, "exit23.stderr"), `rsync exited 23, partial transfer due to error: rsync: [sender] get_xattr_names: llistxattr("/Volumes/Scratch/restore/e23/src/./locked",1024) failed: Permission denied (13)`},
+		{30, fixture(t, "exit30.stderr"), "rsync exited 30, timeout in data send/receive: [Receiver] io timeout after 1 seconds -- exiting (and 1 more)"},
+		{35, fixture(t, "exit35.stderr"), "rsync exited 35, timeout waiting for daemon connection: rsync error: timeout waiting for daemon connection (code 35) at socket.c(437) [Receiver=3.5.2]"},
+		{127, fixture(t, "exit127.stderr"), "rsync exited 127, remote command not found: /bin/sh: /nonexistent/rsync: No such file or directory (and 1 more)"},
+		{255, fixture(t, "exit255.stderr"), "rsync exited 255, unexplained error: ssh: connect to host laptop port 22: Connection refused (and 1 more)"},
+		{15, "", "rsync exited 15, sibling process crashed"},
+		{16, "", "rsync exited 16, sibling process was killed by a signal"},
+		{19, "", "rsync exited 19, received SIGUSR1"},
+		{99, "", "rsync exited 99, an exit rsync doesn't explain"},
 	}
 	for _, tt := range tests {
 		for _, op := range ops {
-			t.Run(tt.name+", "+op.name, func(t *testing.T) {
-				home := t.TempDir()
+			t.Run(fmt.Sprintf("%d, %s", tt.code, op.name), func(t *testing.T) {
 				fake := runnertest.New(t)
 				fake.OnMatch("rsync", func([]string) bool { return true }).Exits(tt.code).PrintsToStderr(tt.stderr)
-				err := op.run(t.Context(), NewRsync(fake), Copy{From: Source{Path: "/Volumes/snapshot/Users/someone/Code"}, To: home + "/Code"})
+				err := op.run(t.Context(), NewRsync(fake), local("/Users/someone/Code", t.TempDir()+"/Code"))
 				if err == nil || err.Error() != tt.want {
 					t.Fatalf("error = %v, want %s", err, tt.want)
 				}
@@ -425,34 +472,40 @@ rsync error: unexplained error (code 255) at io.c(232) [Receiver=3.4.1]
 // own, ErrVanished, with what was copied all the same: from a Mac in use,
 // no failure.
 func TestFilesVanishedAreAnErrorOfTheirOwn(t *testing.T) {
-	const stderr = `file has vanished: "/Users/someone/.claude/projects/p/s.jsonl.tmp"
-rsync warning: some files vanished before they could be transferred (code 24) at main.c(1338) [sender=3.4.1]
-`
-	const want = `rsync exited 24, partial transfer due to vanished source files: file has vanished: "/Users/someone/.claude/projects/p/s.jsonl.tmp"`
-	c := Copy{From: Source{Path: "/Users/someone/.claude", Host: "laptop", Shell: "ssh", Rsync: "/opt/homebrew/bin/rsync"}, To: t.TempDir() + "/.claude"}
-	vanishes := func(prints string) Rsync {
-		fake := runnertest.New(t)
-		fake.OnMatch("rsync", func([]string) bool { return true }).Exits(24).Prints(prints).PrintsToStderr(stderr)
-		return NewRsync(fake)
-	}
+	const want = `rsync exited 24, partial transfer due to vanished source files: file has vanished: "/Volumes/Scratch/restore/e24/src/z/session.tmp"`
+	c := Copy{From: Source{Path: "/Users/someone/.claude", Host: "laptop", Shell: "ssh", Rsync: "/opt/homebrew/bin/rsync"}, To: t.TempDir() + "/.claude", Partial: partial}
 	check := func(op string, err error) {
 		t.Helper()
 		if !errors.Is(err, ErrVanished) || err.Error() != want {
 			t.Errorf("%s: error = %v, want ErrVanished, saying %s", op, err, want)
 		}
 	}
+	vanishes := func(prints string) Rsync {
+		fake := runnertest.New(t)
+		fake.OnMatch("rsync", func([]string) bool { return true }).Exits(24).Prints(prints).PrintsToStderr(fixture(t, "vanished.stderr"))
+		return NewRsync(fake)
+	}
 
-	size, err := vanishes(fixture(t, "dry-run.txt")).Size(t.Context(), c)
+	size, err := vanishes(fixture(t, "size.raw")).Size(t.Context(), c)
 	check("Size", err)
-	if want := (Stats{Files: 12345, Bytes: 9876543210}); size != want {
+	if want := (Stats{Files: 5, Bytes: 50900003}); size != want {
 		t.Errorf("Size() = %+v, want %+v", size, want)
 	}
-	copied, err := vanishes(fixture(t, "copy.txt")).Copy(t.Context(), c, nil)
+	var progress []Progress
+	copied, err := realRsync(t, "vanished.raw", "vanished.stderr", 24).Copy(t.Context(), c, func(p Progress) { progress = append(progress, p) })
 	check("Copy", err)
-	if want := (Stats{Files: 3, Bytes: 51234567}); copied != want {
+	if want := (Stats{Files: 3, Bytes: 209715210}); copied != want {
 		t.Errorf("Copy() = %+v, want %+v", copied, want)
 	}
-	again, err := vanishes(">f.st...... projects/p/s.jsonl\n").Compare(t.Context(), c)
+	wantProgress := []Progress{
+		{32768, 0, 0}, {22413312, 10, 0}, {42598400, 20, 0}, {57704448, 27, 0}, {81494016, 38, 0},
+		{98861056, 47, 0}, {133824512, 63, 0}, {159809536, 76, 0}, {194805760, 92, 0},
+		{209715200, 99, 1}, {209715205, 99, 2}, {209715210, 100, 3},
+	}
+	if !reflect.DeepEqual(progress, wantProgress) {
+		t.Errorf("progress = %+v, want %+v, each drawn part way through the file", progress, wantProgress)
+	}
+	again, err := vanishes(">fc........ projects/p/s.jsonl\n").Compare(t.Context(), c)
 	check("Compare", err)
 	if want := (Recopied{Count: 1, Paths: []string{"projects/p/s.jsonl"}}); !reflect.DeepEqual(again, want) {
 		t.Errorf("Compare() = %+v, want %+v", again, want)
@@ -463,7 +516,7 @@ rsync warning: some files vanished before they could be transferred (code 24) at
 func TestCopyThatDoesntRun(t *testing.T) {
 	fake := runnertest.New(t)
 	fake.OnMatch("rsync", func([]string) bool { return true }).Fails(context.Canceled)
-	_, err := NewRsync(fake).Copy(t.Context(), Copy{From: Source{Path: "/Volumes/snapshot/Code"}, To: t.TempDir() + "/Code"}, nil)
+	_, err := NewRsync(fake).Copy(t.Context(), local("/Code", t.TempDir()+"/Code"), nil)
 	if !errors.Is(err, context.Canceled) || errors.Is(err, ErrVanished) {
 		t.Errorf("Copy() = %v, want the run's own error", err)
 	}
