@@ -30,8 +30,18 @@ administrator's password (a cask that installs through a package, an App
 Store app): at a terminal, kit asks for it once, as it starts, for as long
 as it takes, the rest applying meanwhile; without one, those installs wait.
 Exits 0 when nothing needs attention after applying, 1 when something does,
-and 2 when kit couldn't apply.`,
+and 2 when kit couldn't apply.
+
+On a Mac started from another (from, in kit.toml), the data restore copies
+the paths [restore] lists from that Mac. --restore-from restores them from a
+backup instead, on any Mac: Time Machine's, on a disk attached, or Arq's.
+--at picks Time Machine's backup: the latest at or before a date, as
+2026-11-08 (by the end of that day), or a time, as "2026-11-08 14:30" (by the
+end of that minute); the latest when not given.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if _, err := a.restoring.chosen(); err != nil {
+				return err
+			}
 			command, logName := "apply", "apply"
 			if plan {
 				command, logName = "apply --plan", "apply-plan"
@@ -79,6 +89,9 @@ and 2 when kit couldn't apply.`,
 		},
 	}
 	cmd.Flags().BoolVar(&plan, "plan", false, "say what applying would do, and do nothing")
+	a.restoring.at.now = a.Now
+	cmd.Flags().Var(&a.restoring.from, "restore-from", "restore [restore]'s paths from a backup")
+	cmd.Flags().Var(&a.restoring.at, "at", "with time-machine, the latest backup by that date or time")
 	return cmd
 }
 

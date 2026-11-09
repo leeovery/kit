@@ -408,11 +408,6 @@ func (a *app) build(command, logName string, face render.Face, atTerminal bool) 
 			// or more a kind, before the run could start.
 			step.Weight = len(list.On())
 		}
-		for _, after := range d.After {
-			if slices.Contains(r.kinds, after) {
-				step.After = append(step.After, after)
-			}
-		}
 		kindSteps = append(kindSteps, quietened(step, record, now))
 		r.kinds = append(r.kinds, d.Name)
 		r.drift = append(r.drift, d.Name)
@@ -475,6 +470,15 @@ func (a *app) build(command, logName string, face render.Face, atTerminal bool) 
 		settings = []engine.Step{feature(steps.FeaturePrefs, saving), feature(steps.FeaturePrefs, steps.FullDiskAccess(home))}
 	}
 	checks = append(checks, settings...)
+	restoring, err := a.restoreStep(r, dirs, features.on(steps.FeaturePrefs))
+	if err != nil {
+		_ = face.Close()
+		_ = log.Close()
+		return nil, err
+	}
+	if restoring != nil {
+		checks = append(checks, *restoring)
+	}
 	edits := steps.ConfigEdits(r.repo)
 	r.drift = append(r.drift, steps.ConfigEditsName)
 	r.drifters[steps.ConfigEditsName] = configDrifter{repo: r.repo, home: home, step: edits}
@@ -548,6 +552,7 @@ func (a *app) build(command, logName string, face render.Face, atTerminal bool) 
 	}
 	if err == nil {
 		r.steps = slices.Concat(base, scripts, byHandOwn)
+		r.placeKinds(r.steps)
 		r.placeFeatures(r.steps, features, featured)
 		r.placeBackups(r.steps, backups)
 		r.placeLines(r.steps)

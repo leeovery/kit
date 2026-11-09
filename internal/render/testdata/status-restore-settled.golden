@@ -1,0 +1,11 @@
+
+  █  ▄▀  ▀█▀  ▀▀█▀▀  │  status
+  █▀▀▄    █     █    │  studio
+  █   █  ▄█▄    █    │  Fri 2 Jan · 03:04
+
+  BACKUPS
+  ● Time Machine  latest backup 14:19
+  ● Data restore  4 declared, 3 restored, 1 not restored
+    ~/.local/state/newtool · kit apply --restore-from time-machine|arq brings it
+
+  1 fine · 3.0s

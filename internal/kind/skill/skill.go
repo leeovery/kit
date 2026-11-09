@@ -50,8 +50,9 @@ var Descriptor = kind.Descriptor{
 		Add:    "Install Claude skills with agntc, as owner/repo and the skill or pack in it, and declare them",
 		Remove: "Remove Claude skills with agntc, and undeclare them",
 	},
-	Row: "Developer tools",
-	New: func(d *kind.Deps) kind.Kind { return New(d.Run, d.Home) },
+	Row:   "Developer tools",
+	After: []string{config.RestoreKind},
+	New:   func(d *kind.Deps) kind.Kind { return New(d.Run, d.Home) },
 }
 
 // New returns agntc's installs for every project, driven through run, for

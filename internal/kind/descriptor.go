@@ -48,7 +48,8 @@ type Descriptor struct {
 	Needs []string
 	// After are the kinds it's applied after, when the run has them, as
 	// what they put in place is its own data: login items after the apps
-	// they open.
+	// they open; or kit's own steps, as the data restore, whose folders it
+	// writes into.
 	After []string
 	// Setup makes the steps the kind needs that are its own, as Homebrew's
 	// installs Homebrew for its formulae and casks: in a run only with a

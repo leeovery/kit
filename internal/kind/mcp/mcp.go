@@ -94,6 +94,7 @@ var Descriptor = kind.Descriptor{
 		},
 	},
 	Row:        "Developer tools",
+	After:      []string{config.RestoreKind},
 	Installing: kind.Words{Label: "Add to Claude Code", Does: "add it to Claude Code", Doing: "adding", Done: "added to Claude Code"},
 	Removing:   kind.Words{Label: "Remove from Claude Code", Does: "remove it from Claude Code", Doing: "removing", Done: "removed from Claude Code"},
 	New:        func(d *kind.Deps) kind.Kind { return New(d.Run, d.Home) },

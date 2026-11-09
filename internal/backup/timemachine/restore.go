@@ -394,7 +394,7 @@ func snapshots(ctx context.Context, run runner.Runner, device string) ([]Point, 
 		snap, _ := s.(map[string]any)
 		name, _ := snap["SnapshotName"].(string)
 		xid, _ := snap["SnapshotXID"].(int64)
-		if t, ok := taken(name); ok {
+		if t, ok := Taken(name); ok {
 			tm = append(tm, made{Point{Name: name, Time: t}, xid})
 		}
 	}
@@ -406,12 +406,12 @@ func snapshots(ctx context.Context, run runner.Runner, device string) ([]Point, 
 	return out, nil
 }
 
-// taken is when the snapshot name was taken, and whether it's Time
+// Taken is when the snapshot called name was taken, and whether it's Time
 // Machine's. The date in its name is the backed-up Mac's local time
 // (checked: a snapshot named 12:02:16 in June is 11:02:16 UTC in Time
 // Machine's own record), so it's read as this Mac's, the old one's
 // stand-in.
-func taken(name string) (time.Time, bool) {
+func Taken(name string) (time.Time, bool) {
 	date, ok := strings.CutPrefix(name, snapshotPrefix)
 	if !ok {
 		return time.Time{}, false

@@ -123,6 +123,12 @@ type app struct {
 	// underHome is whether kit runs from its home's menu, under the home's
 	// wordmark: its own heading leaves the wordmark out.
 	underHome bool
+	// restoring are kit apply's flags naming the data restore's source;
+	// newMacRun has the run a new Mac's started from this one, as kit agent
+	// order places steps, the data restore in it wherever [restore] has
+	// lines.
+	restoring restoreFlags
+	newMacRun bool
 	// unwinds put back what the faces kit shows have taken of the
 	// terminal, should kit panic.
 	unwinds []func()

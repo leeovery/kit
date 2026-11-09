@@ -23,7 +23,8 @@ func deps(t *testing.T) *kind.Deps {
 // Every kind says all kit's shared code asks of it: its names, its group
 // and row, how it's made, its section unless it's declared in a file of its
 // own, its command's help, whether its things are apps, saying what they
-// leave, and the steps it needs, made by its own setup.
+// leave, the steps it needs, made by its own setup, and what it comes
+// after: kinds before it, or the data restore.
 func TestEveryKindIsComplete(t *testing.T) {
 	d := deps(t)
 	groups := []kind.Group{kind.Packages, kind.Settings, kind.Secrets}
@@ -73,8 +74,8 @@ func TestEveryKindIsComplete(t *testing.T) {
 			t.Errorf("%s needs %v, and its setup makes %v: want the same", k.Name, k.Needs, setup)
 		}
 		for _, after := range k.After {
-			if j := slices.IndexFunc(kinds.All, func(o kind.Descriptor) bool { return o.Name == after }); j < 0 || j > i {
-				t.Errorf("%s comes after %s, which isn't a kind before it in the run", k.Name, after)
+			if j := slices.IndexFunc(kinds.All, func(o kind.Descriptor) bool { return o.Name == after }); after != config.RestoreKind && (j < 0 || j > i) {
+				t.Errorf("%s comes after %s, which is neither a kind before it in the run nor the data restore", k.Name, after)
 			}
 		}
 	}
