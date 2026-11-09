@@ -23,10 +23,11 @@ const (
 	// VerdictRestore is a path absent, or holding nothing but kit's.
 	VerdictRestore Verdict = "restore"
 	// VerdictSetAside is a path holding what isn't kit's, all of it written
-	// since this Mac's set-up began: set aside, then restored.
+	// in set-up's window: set aside, then restored.
 	VerdictSetAside Verdict = "set-aside"
-	// VerdictHere is a path recorded here, or holding anything older that
-	// isn't kit's, with no record: never touched.
+	// VerdictHere is a path recorded here, or, with no record, holding
+	// anything that isn't kit's written outside set-up's window: never
+	// touched.
 	VerdictHere Verdict = "here"
 )
 
@@ -40,10 +41,13 @@ type Judgement struct {
 
 // Judge judges f's line's path, in the home folder home: by its record in
 // rec first; else by what it holds that isn't kit's, as f leaves out, and
-// when this Mac's set-up began, began, a file's time its modification time.
-// began is zero when nothing records it, as on a Mac in use, where nothing
-// counts as written during set-up. Judging moves nothing, and stops at the
-// first file that's neither kit's nor written since.
+// set-up's window, a file's time its modification time. The window opens
+// when this Mac's set-up began, began, and closes when the restore first
+// settled (rec's Settled): it's shut on a Mac in use, nothing recording
+// began, and for good once the restore has settled, so a path listed later
+// is never set aside. Whether to restore one absent then is the caller's.
+// Judging moves nothing, and stops at the first file that's neither kit's
+// nor written in the window.
 func Judge(home string, f *Filter, rec Record, began time.Time) (Judgement, error) {
 	j := Judgement{Path: f.Line.Path}
 	switch rec.Paths[j.Path].State {
@@ -56,6 +60,9 @@ func Judge(home string, f *Filter, rec Record, began time.Time) (Judgement, erro
 	case Copying, Checking, Held:
 		j.Verdict = VerdictResume
 		return j, nil
+	}
+	if !rec.Settled.IsZero() {
+		began = time.Time{}
 	}
 	written, older, err := f.holds(home, began)
 	switch {
@@ -132,7 +139,7 @@ func before(info fs.FileInfo, began time.Time) bool {
 // a time.
 const asideFolder = "restore/set-aside"
 
-// SetAside moves what j found written in its path since set-up began into
+// SetAside moves what j found written in its path in set-up's window into
 // kit's state folder, stateDir: under restore/set-aside and the time, now,
 // each keeping its path from the home folder, home. It records what it
 // moved, and where, even when it fails partway. A file gone since j was

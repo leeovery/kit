@@ -65,7 +65,7 @@ func TestParseLineRefuses(t *testing.T) {
 }
 
 // A list's lines read in order; a path is restored by one line, so one
-// that's another's, or in another's, is refused, naming both.
+// that's another's, or in another's, case aside, is refused, naming both.
 func TestLines(t *testing.T) {
 	list := config.List{Entries: []config.Entry{entry(2, "~/Code", ""), entry(3, "~/.claude", "--skip cache"), entry(4, "~/.claude-other", "")}}
 	got, err := Lines(list)
@@ -84,6 +84,8 @@ func TestLines(t *testing.T) {
 		{[]config.Entry{entry(2, "~/.claude", ""), entry(5, "~/.claude/projects", "")}, "laptop/declarations:5: ~/.claude/projects and ~/.claude (laptop/declarations:2) overlap"},
 		{[]config.Entry{entry(2, "~/.claude/projects", ""), entry(5, "~/.claude", "")}, "laptop/declarations:5: ~/.claude and ~/.claude/projects (laptop/declarations:2) overlap"},
 		{[]config.Entry{entry(2, "~/Code", ""), entry(5, "~/Code/", "")}, "laptop/declarations:5: ~/Code and ~/Code (laptop/declarations:2) overlap"},
+		{[]config.Entry{entry(2, "~/Code", ""), entry(5, "~/code", "")}, "laptop/declarations:5: ~/code and ~/Code (laptop/declarations:2) overlap"},
+		{[]config.Entry{entry(2, "~/.Claude", ""), entry(5, "~/.claude/projects", "")}, "laptop/declarations:5: ~/.claude/projects and ~/.Claude (laptop/declarations:2) overlap"},
 		{[]config.Entry{entry(2, "~/Code", ""), entry(5, "~/Docs", "--skip /x")}, "laptop/declarations:5: --skip /x"},
 	} {
 		if _, err := Lines(config.List{Entries: tt.entries}); err == nil || !strings.Contains(err.Error(), tt.want) {

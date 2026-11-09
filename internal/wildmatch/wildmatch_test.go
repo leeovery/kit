@@ -1,13 +1,17 @@
-package restore
+package wildmatch_test
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/leeovery/kit/internal/wildmatch"
+)
 
 // Patterns match as rsync's wildmatch.c has them: * never past a /, **
 // across them, though never as no folder between two /s; ? one character
 // but /; classes with ranges, ! or ^ against them, ] first as itself, and
 // named classes; \ the next character as itself; a class never a /, and one
 // left open nothing.
-func TestWildmatch(t *testing.T) {
+func TestMatch(t *testing.T) {
 	for _, tt := range []struct {
 		pattern, text string
 		want          bool
@@ -58,41 +62,8 @@ func TestWildmatch(t *testing.T) {
 		{"abc", "abcd", false},
 		{"abcd", "abc", false},
 	} {
-		if got := wildmatch(tt.pattern, tt.text); got != tt.want {
-			t.Errorf("wildmatch(%q, %q) = %v; want %v", tt.pattern, tt.text, got, tt.want)
-		}
-	}
-}
-
-// A rule matches as rsync's rule_matches has it: one starting / the whole
-// path from the transfer's root, one without a / the path's last part; one
-// ending / folders alone; one ending /*** a folder and all in it; one
-// without *, ? or [ as it is, its \ and all.
-func TestRuleMatches(t *testing.T) {
-	for _, tt := range []struct {
-		rule, name string
-		dir, want  bool
-	}{
-		{"/cache", "cache", true, true},
-		{"/cache", "cache", false, true},
-		{"/cache", "a/cache", true, false},
-		{"/cache/", "cache", true, true},
-		{"/cache/", "cache", false, false},
-		{"/projects/*/memory", "projects/site/memory", true, true},
-		{"/projects/*/memory", "projects/a/b/memory", true, false},
-		{"/logs/***", "logs", true, true},
-		{"/logs/***", "logs", false, false},
-		{"/logs/***", "logs/a/b", false, true},
-		{".DS_Store", ".DS_Store", false, true},
-		{".DS_Store", "a/b/.DS_Store", false, true},
-		{".DS_Store", "a/.DS_Store.old", false, false},
-		{`/a\*b`, "a*b", false, true},
-		{`/a\*b`, "axb", false, false},
-		{`/a\b`, `a\b`, false, true},
-		{"/", "a", true, false},
-	} {
-		if got := newRule(tt.rule).matches(tt.name, tt.dir); got != tt.want {
-			t.Errorf("rule %q matches %q (folder %v) = %v; want %v", tt.rule, tt.name, tt.dir, got, tt.want)
+		if got := wildmatch.Match(tt.pattern, tt.text); got != tt.want {
+			t.Errorf("Match(%q, %q) = %v; want %v", tt.pattern, tt.text, got, tt.want)
 		}
 	}
 }

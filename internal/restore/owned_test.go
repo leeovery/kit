@@ -10,6 +10,7 @@ import (
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/gitrepo"
 	"github.com/leeovery/kit/internal/kind"
+	"github.com/leeovery/kit/internal/kind/secret"
 	"github.com/leeovery/kit/internal/kind/skill"
 	"github.com/leeovery/kit/internal/kinds"
 	"github.com/leeovery/kit/internal/linked"
@@ -29,8 +30,9 @@ description = "Mac Studio"
 
 // What's kit's on a Mac is read from what it declares for it, the shared
 // file's and its own: the files linked; [prefs files], while prefs is on;
-// the folders the kinds installing into the home folder name; [backup
-// exclusions]; and kit's own folders. Paths given in full in the home
+// what the kinds installing into the home folder name, Claude's skills'
+// folders and the files secrets fill; [backup exclusions]; and kit's own
+// folders. Paths given in full in the home
 // folder are from ~; those outside it go.
 func TestReadOwned(t *testing.T) {
 	home := t.TempDir()
@@ -38,7 +40,7 @@ func TestReadOwned(t *testing.T) {
 	files := map[string]string{
 		config.File:                     kitToml,
 		"shared/declarations":           "[backup exclusions]\n/Applications\n~/.cache\n~/Library/Application Support/*/GPUCache\n\n[prefs files]\n~/.claude/settings.json\n",
-		"laptop/declarations":           "[claude skills]\nacme/tools\nacme/tools/review\n\n[backup exclusions]\n" + home + "/Library/Caches\n\n[prefs files]\n~/.claude/projects/*/memory\n/Library/Preferences/x.plist\n",
+		"laptop/declarations":           "[claude skills]\nacme/tools\nacme/tools/review\n\n[secrets]\nTOKEN op://vault/Item/token\n~/.config/tool/credentials.json op://vault/Item/credentials\n\n[backup exclusions]\n" + home + "/Library/Caches\n\n[prefs files]\n~/.claude/projects/*/memory\n/Library/Preferences/x.plist\n",
 		"shared/home/.zshrc":            "",
 		"laptop/home/.claude/CLAUDE.md": "",
 	}
@@ -66,12 +68,12 @@ func TestReadOwned(t *testing.T) {
 		Config: cfg, Name: "laptop", Home: home, Dirs: dirs,
 		Linked: &linked.Files{Repo: gitrepo.Repo{Dir: repo, Run: fake}, Home: home, StateDir: dirs.State, Scopes: []string{config.Shared, "laptop"}},
 		Prefs:  true,
-		Kinds:  []kind.Kind{skill.New(fake, home)},
+		Kinds:  []kind.Kind{skill.New(fake, home), secret.New(fake, home)},
 	}
 	want := restore.Owned{
 		Linked:    []string{"~/.claude/CLAUDE.md", "~/.zshrc"},
 		Prefs:     []string{"~/.claude/settings.json", "~/.claude/projects/*/memory"},
-		Installed: []string{"~/.claude/skills/review"},
+		Installed: []string{"~/.claude/skills/review", "~/.config/tool/credentials.json", "~/.secrets.zsh"},
 		Excluded:  []string{"~/.cache", "~/Library/Application Support/*/GPUCache", "~/Library/Caches"},
 		Own:       []string{"~/.config/kit", "~/.local/state/kit", "~/.local/share/kit", "~/Library/Logs/kit"},
 	}

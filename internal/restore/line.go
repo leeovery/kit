@@ -110,7 +110,9 @@ func checkSkip(skip string) error {
 	return nil
 }
 
-// within reports whether p, a path from ~, is dir or in it.
+// within reports whether p, a path from ~, is dir or in it, case aside, as
+// macOS's file system takes a path.
 func within(p, dir string) bool {
+	p, dir = strings.ToLower(p), strings.ToLower(dir)
 	return p == dir || strings.HasPrefix(p, dir+"/")
 }

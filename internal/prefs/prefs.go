@@ -31,6 +31,7 @@ import (
 
 	"github.com/leeovery/kit/internal/runner"
 	"github.com/leeovery/kit/internal/state"
+	"github.com/leeovery/kit/internal/wildmatch"
 )
 
 // recordName names kit's record of capture and restore on this Mac.
@@ -393,9 +394,10 @@ func hasMagic(path string) bool {
 	return strings.ContainsAny(path, "*?[")
 }
 
-// glob is the paths a pattern matches, sorted, as Python's glob.glob finds
-// them: a wildcard never matches a name starting with a dot unless the
-// pattern's part starts with one.
+// glob is the paths a pattern matches, sorted, each part of the pattern
+// matching a name in a folder as rsync matches one (wildmatch), so a data
+// restore reads the pattern as prefs does: a wildcard matches a name
+// starting with a dot too, and [^...] is a class's complement.
 func glob(pattern string) []string {
 	parts := strings.Split(pattern, "/")
 	found := []string{"/"}
@@ -419,10 +421,7 @@ func glob(pattern string) []string {
 				continue
 			}
 			for _, e := range entries {
-				if strings.HasPrefix(e.Name(), ".") && !strings.HasPrefix(part, ".") {
-					continue
-				}
-				if fnmatch(e.Name(), part) {
+				if wildmatch.Match(part, e.Name()) {
 					next = append(next, filepath.Join(dir, e.Name()))
 				}
 			}

@@ -24,9 +24,9 @@ var zshHistory = Line{Path: "~/.zsh_history", Pos: "laptop/declarations:5"}
 
 // A path is judged by its record first: done, here, or under way, whatever
 // it holds. Else by what it holds, kit's aside: nothing, to restore; only
-// files set-up wrote, to set aside, then restore; anything older, here. A
-// Mac with no record of its set-up's start is in use: whatever it holds is
-// here.
+// files set-up wrote, from the moment it began, to set aside, then restore;
+// anything older, here. A Mac with no record of its set-up's start is in
+// use: whatever it holds is here.
 func TestJudge(t *testing.T) {
 	kits := map[string]time.Time{
 		"CLAUDE.md": earlier, "skills/kit/SKILL.md": earlier, "skills/review/SKILL.md": later,
@@ -67,6 +67,8 @@ func TestJudge(t *testing.T) {
 		{"a file set-up wrote", zshHistory, map[string]time.Time{"~/.zsh_history": later}, "", setUp, VerdictSetAside, []string{"~/.zsh_history"}},
 		{"an older file", zshHistory, map[string]time.Time{"~/.zsh_history": earlier}, "", setUp, VerdictHere, nil},
 		{"an absent file", zshHistory, nil, "", setUp, VerdictRestore, nil},
+		{"a file written as set-up began", zshHistory, map[string]time.Time{"~/.zsh_history": setUp}, "", setUp, VerdictSetAside, []string{"~/.zsh_history"}},
+		{"a file written just before set-up began", zshHistory, map[string]time.Time{"~/.zsh_history": setUp.Add(-time.Nanosecond)}, "", setUp, VerdictHere, nil},
 		{"a file, recorded done", zshHistory, map[string]time.Time{"~/.zsh_history": later}, Done, setUp, VerdictDone, nil},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -90,6 +92,58 @@ func TestJudge(t *testing.T) {
 			got, err := Judge(home, f, rec, tt.began)
 			want := Judgement{Path: tt.line.Path, Verdict: tt.want, New: tt.new}
 			if err != nil || !reflect.DeepEqual(got, want) {
+				t.Errorf("Judge() = %+v, %v; want %+v", got, err, want)
+			}
+		})
+	}
+}
+
+// Set-up's window closes for good once the restore first settles: a path
+// listed after that, its files all newer than set-up's start, is here, never
+// set aside, as on a Mac in use; one holding nothing but kit's, or absent,
+// is the caller's to restore or not. Till the restore settles, the window
+// stays open, however long after set-up.
+func TestJudgeOnceTheRestoreHasSettled(t *testing.T) {
+	began := time.Date(2026, 10, 21, 9, 0, 0, 0, time.UTC)
+	tool := Line{Path: "~/.local/share/tool", Pos: "laptop/declarations:8"}
+	for _, tt := range []struct {
+		name    string
+		files   map[string]time.Time
+		settled bool
+		want    Verdict
+		new     []string
+	}{
+		{"a tool's month-old data, listed after the restore settled", map[string]time.Time{"ledger.db": began.Add(48 * time.Hour), "logs/today.log": began.Add(30 * 24 * time.Hour)}, true, VerdictHere, nil},
+		{"the same, the restore not settled yet", map[string]time.Time{"ledger.db": began.Add(48 * time.Hour), "logs/today.log": began.Add(30 * 24 * time.Hour)}, false, VerdictSetAside, []string{"~/.local/share/tool/ledger.db", "~/.local/share/tool/logs/today.log"}},
+		{"a file written as set-up began, after the restore settled", map[string]time.Time{"ledger.db": began}, true, VerdictHere, nil},
+		{"nothing but Finder's, after the restore settled", map[string]time.Time{".DS_Store": began.Add(time.Hour)}, true, VerdictRestore, nil},
+		{"absent, after the restore settled", nil, true, VerdictRestore, nil},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			home, stateDir := t.TempDir(), t.TempDir()
+			for rel, when := range tt.files {
+				write(t, filepath.Join(home, ".local/share/tool", rel), when)
+			}
+			if tt.settled {
+				for _, at := range []time.Time{began.Add(24 * time.Hour), began.Add(25 * time.Hour)} {
+					if err := Settle(stateDir, at); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			rec, err := LoadRecord(stateDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if want := map[bool]time.Time{true: began.Add(24 * time.Hour)}[tt.settled]; !rec.Settled.Equal(want) {
+				t.Errorf("settled at %v; want %v, the first", rec.Settled, want)
+			}
+			f, err := NewFilter(tool, owned)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := Judge(home, f, rec, began)
+			if want := (Judgement{Path: tool.Path, Verdict: tt.want, New: tt.new}); err != nil || !reflect.DeepEqual(got, want) {
 				t.Errorf("Judge() = %+v, %v; want %+v", got, err, want)
 			}
 		})

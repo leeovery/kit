@@ -315,6 +315,25 @@ func (s *Secrets) Variable(name string) (value string, ok bool, err error) {
 	return value, true, nil
 }
 
+// HomePaths are the files the secrets named fill, each by its path as
+// declared, and ~/.secrets.zsh when one's a variable: kit writes them all
+// from the secrets' stores.
+func (s *Secrets) HomePaths(names []string) []string {
+	var paths []string
+	env := false
+	for _, name := range names {
+		if (Secret{Name: name}).IsFile() {
+			paths = append(paths, name)
+		} else {
+			env = true
+		}
+	}
+	if env {
+		paths = append(paths, "~/"+EnvFile)
+	}
+	return paths
+}
+
 // Resolve knows every secret.
 func (s *Secrets) Resolve(_ context.Context, names []string) (map[string]string, error) {
 	out := make(map[string]string, len(names))

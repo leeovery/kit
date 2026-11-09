@@ -66,6 +66,20 @@ func TestLinesRead(t *testing.T) {
 	}
 }
 
+// The files secrets fill are kit's in the home folder, each by its path as
+// declared, and so is ~/.secrets.zsh, which kit writes the variables into,
+// while one's declared: a data restore never carries them.
+func TestHomePaths(t *testing.T) {
+	var homed kind.Homed = secret.New(runnertest.New(t), t.TempDir())
+	got := homed.HomePaths([]string{"~/.config/tool/credentials.json", "TOKEN", "/etc/tool.key", "OTHER"})
+	if want := []string{"~/.config/tool/credentials.json", "/etc/tool.key", "~/.secrets.zsh"}; !slices.Equal(got, want) {
+		t.Errorf("HomePaths() = %q; want %q", got, want)
+	}
+	if got := homed.HomePaths([]string{"~/.npmrc"}); !slices.Equal(got, []string{"~/.npmrc"}) {
+		t.Errorf("HomePaths(a file alone) = %q; want it alone", got)
+	}
+}
+
 func TestCheckingReadsWhatsInPlace(t *testing.T) {
 	home := t.TempDir()
 	fake := runnertest.New(t)

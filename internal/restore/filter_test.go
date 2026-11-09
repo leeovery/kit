@@ -63,7 +63,7 @@ func TestFilterRefusesKitsOwnPaths(t *testing.T) {
 		"~/.zshrc":                         "kit links ~/.zshrc",
 		"~/.claude/settings.json":          "prefs saves ~/.claude/settings.json",
 		"~/.claude/projects/site/memory/a": "prefs saves ~/.claude/projects/*/memory",
-		"~/.claude/skills/review":          "kit installs ~/.claude/skills/review",
+		"~/.claude/skills/review":          "kit puts ~/.claude/skills/review in place",
 		"~/.cache/go":                      "the backups leave out ~/.cache",
 		"~/.config/kit":                    "kit keeps its own files in ~/.config/kit",
 	} {
@@ -113,11 +113,11 @@ func TestFilterExcludes(t *testing.T) {
 	}
 }
 
-// What the copy carries, rsync reading the filter as written, anchored at
-// the listed folder its transfer is rooted at, is what the judgement counts
-// as the folder's own, the matcher reading the same rules from the home
-// folder: a tree walked both ways finds the same files.
-func TestFilterAndMatcherAgree(t *testing.T) {
+// The filter as written is the matcher's own rules, none lost or changed
+// in the writing: walking a tree with the rules read back from the file
+// finds the files the judgement counts as the folder's own. That rsync reads
+// the file so is TestMatcherAgreesWithRsync's.
+func TestWrittenFilterIsTheMatchersRules(t *testing.T) {
 	home := t.TempDir()
 	files := []string{
 		"CLAUDE.md", "odd[1].md", "oddx.md", "history.jsonl", ".DS_Store",
@@ -127,9 +127,8 @@ func TestFilterAndMatcherAgree(t *testing.T) {
 		"statsig/x", "cache/a/b", "plugins/one/x", "plugins/list.json",
 		"logs/a/b.log", "logs/b.log", "logs/a/b.txt", "downloads/x", "settings.json", "settings.json.bak",
 	}
-	began := time.Date(2026, 11, 20, 9, 0, 0, 0, time.UTC)
 	for _, f := range files {
-		write(t, filepath.Join(home, ".claude", f), began.Add(time.Hour))
+		write(t, filepath.Join(home, ".claude", f), later)
 	}
 	f, err := NewFilter(claude, owned)
 	if err != nil {
@@ -139,25 +138,17 @@ func TestFilterAndMatcherAgree(t *testing.T) {
 	if err := f.Write(file); err != nil {
 		t.Fatal(err)
 	}
-	copied := rsyncCopies(t, filepath.Join(home, ".claude"), file)
-	written, older, err := f.holds(home, began)
-	if err != nil || older {
-		t.Fatalf("holds() = %v, older %v", err, older)
-	}
-	counted := make([]string, len(written))
-	for i, w := range written {
-		counted[i] = strings.TrimPrefix(w, "~/.claude/")
-	}
+	readBack := walkWithRules(t, filepath.Join(home, ".claude"), file)
+	counted := counts(t, f, home, "~/.claude/")
 	want := []string{"history.jsonl", "logs/a/b.txt", "logs/b.log", "oddx.md", "projects/memory", "projects/site/session.jsonl", "settings.json.bak", "skills/kit/notes.md", "skills/mine/SKILL.md", "teams/a/config.json"}
-	if !slices.Equal(copied, want) || !slices.Equal(counted, want) {
-		t.Errorf("rsync would copy %q\nthe judgement counts %q\nwant both %q", copied, counted, want)
+	if !slices.Equal(readBack, want) || !slices.Equal(counted, want) {
+		t.Errorf("the rules read back leave %q\nthe judgement counts %q\nwant both %q", readBack, counted, want)
 	}
 }
 
-// rsyncCopies are the files under root rsync copies with the rules in the
-// filter file as written, read as rsync reads them: a folder a rule leaves
-// out is never looked in.
-func rsyncCopies(t *testing.T, root, filter string) []string {
+// walkWithRules are the files under root the rules in the filter file
+// leave in, a folder one leaves out never looked in, as rsync does.
+func walkWithRules(t *testing.T, root, filter string) []string {
 	t.Helper()
 	var rules []rule
 	for line := range strings.Lines(read(t, filter)) {
@@ -167,7 +158,7 @@ func rsyncCopies(t *testing.T, root, filter string) []string {
 		}
 		rules = append(rules, newRule(text))
 	}
-	var copied []string
+	var in []string
 	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil || p == root {
 			return err
@@ -180,12 +171,106 @@ func rsyncCopies(t *testing.T, root, filter string) []string {
 			return nil
 		}
 		if !d.IsDir() {
-			copied = append(copied, rel)
+			in = append(in, rel)
 		}
 		return nil
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	return in
+}
+
+// counts are the files the judgement counts as f's line's path's own, in
+// home, each from the path (prefix): all of them, each written in set-up's
+// window.
+func counts(t *testing.T, f *Filter, home, prefix string) []string {
+	t.Helper()
+	written, older, err := f.holds(home, time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC))
+	if err != nil || older {
+		t.Fatalf("holds() = %v, older %v", err, older)
+	}
+	out := make([]string, len(written))
+	for i, w := range written {
+		out[i] = strings.TrimPrefix(w, prefix)
+	}
+	return out
+}
+
+// The tree the real rsync ran on, by hand, with filter-fixture.rules: its
+// files, and links to folders by their targets, under ~/Some App.
+var (
+	fixtureFiles = []string{
+		"notes [x].md", "notes x.md", ".hidden", ".DS_Store", "sub/.localized", "sub/y.bak", "x.bak", ".config/settings.json",
+		"projects/site one/memory/a.md", "projects/site one/session.jsonl", "projects/.dot/memory/b.md", "projects/memory",
+		"skills/review/SKILL.md", "skills/mine/SKILL.md", "Cache Data/blob", "logs/a/b.log", "logs/b.log", "logs/a/b.txt",
+		"tmp/x", "tmpfile", "cache/123abc", "cache/abc", "deep/er/most/x", "deep/er/other", "media",
+	}
+	fixtureLinks = map[string]string{"shortcut": "projects", "linkdir": "deep"}
+	fixtureLine  = Line{Path: "~/Some App", Skips: []string{"logs/**/*.log", "tmp/***", "cache/[[:digit:]]*", "deep/er/most", "media/", "shortcut/", "*.bak"}, Pos: "laptop/declarations:6"}
+	fixtureOwned = Owned{
+		Linked:    []string{"~/Some App/notes [x].md", "~/.zshrc"},
+		Prefs:     []string{"~/Some App/projects/*/memory"},
+		Installed: []string{"~/Some App/skills/review"},
+		Excluded:  []string{"~/Some App/Cache Data"},
+		Own:       []string{"~/.config/kit"},
+	}
+)
+
+// The matcher agrees with the real rsync: the filter kit writes for the
+// fixture is the one rsync 3.5.2 ran with, and the files rsync copied with
+// it (rsync -a -n -i, its output in testdata) are those the judgement counts
+// as the path's own. The fixture holds names with spaces, dot files and
+// folders, a linked file's [x] escaped, prefs' */memory matching a dot
+// folder, a skip of a nested folder, **, ***, a named class, a skip of a
+// folder that's a file here, and links to folders, which a folder's rule
+// never matches.
+func TestMatcherAgreesWithRsync(t *testing.T) {
+	home := t.TempDir()
+	root := filepath.Join(home, "Some App")
+	for _, f := range fixtureFiles {
+		write(t, filepath.Join(root, f), later)
+	}
+	for link, target := range fixtureLinks {
+		if err := os.Symlink(target, filepath.Join(root, link)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f, err := NewFilter(fixtureLine, fixtureOwned)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(t.TempDir(), "filter")
+	if err := f.Write(file); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := read(t, file), read(t, filepath.Join("testdata", "filter-fixture.rules")); got != want {
+		t.Fatalf("the filter =\n%s\nrsync ran with\n%s", got, want)
+	}
+	copied := rsyncCopied(t, filepath.Join("testdata", "filter-fixture.rsync-3.5.2.txt"))
+	counted := counts(t, f, home, "~/Some App/")
+	slices.Sort(copied)
+	slices.Sort(counted)
+	if !slices.Equal(counted, copied) {
+		t.Errorf("the judgement counts %q\nrsync copied %q", counted, copied)
+	}
+}
+
+// rsyncCopied are the files and links rsync's itemized output says it
+// copied: its folders, and lines that aren't an item's, left out.
+func rsyncCopied(t *testing.T, path string) []string {
+	t.Helper()
+	var copied []string
+	for line := range strings.Lines(read(t, path)) {
+		code, name, _ := strings.Cut(strings.TrimSuffix(line, "\n"), " ")
+		switch {
+		case len(code) != 11:
+		case code[1] == 'f':
+			copied = append(copied, name)
+		case code[1] == 'L':
+			name, _, _ = strings.Cut(name, " -> ")
+			copied = append(copied, name)
+		}
 	}
 	return copied
 }
@@ -211,4 +296,36 @@ func read(t *testing.T, path string) string {
 		t.Fatal(err)
 	}
 	return string(data)
+}
+
+// A rule matches as rsync's rule_matches has it: one starting / the whole
+// path from the transfer's root, one without a / the path's last part; one
+// ending / folders alone; one ending /*** a folder and all in it; one
+// without *, ? or [ as it is, its \ and all.
+func TestRuleMatches(t *testing.T) {
+	for _, tt := range []struct {
+		rule, name string
+		dir, want  bool
+	}{
+		{"/cache", "cache", true, true},
+		{"/cache", "cache", false, true},
+		{"/cache", "a/cache", true, false},
+		{"/cache/", "cache", true, true},
+		{"/cache/", "cache", false, false},
+		{"/projects/*/memory", "projects/site/memory", true, true},
+		{"/projects/*/memory", "projects/a/b/memory", true, false},
+		{"/logs/***", "logs", true, true},
+		{"/logs/***", "logs", false, false},
+		{"/logs/***", "logs/a/b", false, true},
+		{".DS_Store", ".DS_Store", false, true},
+		{".DS_Store", "a/b/.DS_Store", false, true},
+		{".DS_Store", "a/.DS_Store.old", false, false},
+		{`/a\*b`, "a*b", false, true},
+		{`/a\*b`, "axb", false, false},
+		{`/a\b`, `a\b`, false, true},
+	} {
+		if got := newRule(tt.rule).matches(tt.name, tt.dir); got != tt.want {
+			t.Errorf("rule %q matches %q (folder %v) = %v; want %v", tt.rule, tt.name, tt.dir, got, tt.want)
+		}
+	}
 }

@@ -240,11 +240,12 @@ type Expander interface {
 }
 
 // Homed is a kind whose things are installed as files in the home folder,
-// as agntc installs Claude's skills as folders in ~/.claude/skills: kit
-// puts them there itself, so a data restore never carries them.
+// as agntc installs Claude's skills as folders in ~/.claude/skills, or
+// secrets fill files: kit puts them there itself, so a data restore never
+// carries them.
 type Homed interface {
-	// HomePaths are the paths in the home folder installing names makes,
-	// each from ~, a file or a folder: none for a name that doesn't say.
+	// HomePaths are the paths installing names makes, a file or a folder
+	// each, from ~ or in full: none for a name that doesn't say.
 	HomePaths(names []string) []string
 }
 

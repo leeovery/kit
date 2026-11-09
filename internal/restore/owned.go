@@ -10,6 +10,7 @@ import (
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/kind/exclusion"
 	"github.com/leeovery/kit/internal/linked"
+	"github.com/leeovery/kit/internal/wildmatch"
 )
 
 // Owned are the paths in the home folder that are kit's, each from ~: what
@@ -22,7 +23,8 @@ type Owned struct {
 	// Prefs are what prefs saves, while it's on for the Mac: [prefs files],
 	// each a file, a folder (everything in it) or a glob.
 	Prefs []string
-	// Installed are what kinds install into the home folder (kind.Homed).
+	// Installed are what kinds put in the home folder (kind.Homed):
+	// Claude's skills, the files secrets fill.
 	Installed []string
 	// Excluded are what the backups leave out: [backup exclusions], each a
 	// path or a glob.
@@ -134,7 +136,7 @@ func (o Owned) owners() []owner {
 	}
 	add(o.Linked, false, "kit links %s")
 	add(o.Prefs, true, "prefs saves %s")
-	add(o.Installed, false, "kit installs %s")
+	add(o.Installed, false, "kit puts %s in place")
 	add(o.Excluded, true, "the backups leave out %s")
 	add(o.Own, false, "kit keeps its own files in %s")
 	return out
@@ -166,7 +168,7 @@ func (o owner) under(p string) (text string, covers bool) {
 // * never meets a /.
 func (o owner) part(pattern, name string) bool {
 	if o.glob && hasMagic(pattern) {
-		return wildmatch(oneStar(pattern), name)
+		return wildmatch.Match(oneStar(pattern), name)
 	}
 	return pattern == name
 }

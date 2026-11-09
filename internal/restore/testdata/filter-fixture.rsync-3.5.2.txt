@@ -1,0 +1,31 @@
+# rsync 3.5.2, protocol 33 (Homebrew), run by hand on filter-fixture.rules and TestMatcherAgreesWithRsync's tree:
+# rsync -a -n -i --exclude-from=filter-fixture.rules 'src/Some App/' 'dest/Some App/'
+created directory dest/Some App
+cd+++++++++ ./
+>f+++++++++ .hidden
+cL+++++++++ linkdir -> deep
+>f+++++++++ media
+>f+++++++++ notes x.md
+cL+++++++++ shortcut -> projects
+>f+++++++++ tmpfile
+cd+++++++++ .config/
+>f+++++++++ .config/settings.json
+cd+++++++++ cache/
+>f+++++++++ cache/abc
+cd+++++++++ deep/
+cd+++++++++ deep/er/
+>f+++++++++ deep/er/other
+cd+++++++++ logs/
+>f+++++++++ logs/b.log
+cd+++++++++ logs/a/
+>f+++++++++ logs/a/b.txt
+cd+++++++++ projects/
+>f+++++++++ projects/memory
+cd+++++++++ projects/.dot/
+cd+++++++++ projects/site one/
+>f+++++++++ projects/site one/session.jsonl
+cd+++++++++ skills/
+cd+++++++++ skills/mine/
+>f+++++++++ skills/mine/SKILL.md
+cd+++++++++ sub/
+>f+++++++++ sub/y.bak

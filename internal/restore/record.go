@@ -10,11 +10,13 @@ import (
 const recordName = "restore.json"
 
 // Record is the restore's record on this Mac: the source the run chose, so
-// a run again resumes from it; and each listed path's restore, by its
-// line's path.
+// a run again resumes from it; each listed path's restore, by its line's
+// path; and when the restore first settled, every listed path done or here,
+// which closes set-up's window: nothing is set aside after it.
 type Record struct {
-	From  Origin          `json:"from,omitzero"`
-	Paths map[string]Path `json:"paths,omitempty"`
+	From    Origin          `json:"from,omitzero"`
+	Paths   map[string]Path `json:"paths,omitempty"`
+	Settled time.Time       `json:"settled,omitzero"`
 }
 
 // Origin is where a restore copies from: Kind, the old Mac over SSH, its
@@ -88,6 +90,17 @@ func LoadRecord(stateDir string) (Record, error) {
 // UpdateRecord changes the restore's record in stateDir, under its lock.
 func UpdateRecord(stateDir string, change func(*Record)) error {
 	return state.Update(stateDir, recordName, change)
+}
+
+// Settle records that the restore has settled on this Mac, at now, every
+// listed path done or here: once, the first time, so set-up's window stays
+// closed whatever's listed later.
+func Settle(stateDir string, now time.Time) error {
+	return UpdateRecord(stateDir, func(r *Record) {
+		if r.Settled.IsZero() {
+			r.Settled = now
+		}
+	})
 }
 
 // Change changes the record of the listed path path, an empty one if

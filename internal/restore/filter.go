@@ -5,6 +5,8 @@ import (
 	"os"
 	"slices"
 	"strings"
+
+	"github.com/leeovery/kit/internal/wildmatch"
 )
 
 // Filter is what restoring a line's path leaves out: what's kit's in it,
@@ -126,5 +128,5 @@ func (r rule) matches(name string, dir bool) bool {
 	if !r.wild {
 		return name == r.pattern
 	}
-	return wildmatch(r.pattern, name)
+	return wildmatch.Match(r.pattern, name)
 }

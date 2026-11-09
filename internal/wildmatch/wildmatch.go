@@ -1,4 +1,7 @@
-package restore
+// Package wildmatch matches a pattern against a path as rsync does, so kit
+// reads a pattern one way wherever it takes one: rsync's filter rules, and
+// the globs of the paths prefs saves.
+package wildmatch
 
 import "strings"
 
@@ -12,12 +15,12 @@ const (
 	abortToStarStar
 )
 
-// wildmatch reports whether text matches pattern as rsync matches one: *
+// Match reports whether text matches pattern as rsync matches one: *
 // any run of characters but /, ** any run at all, ? any character but /,
 // [...] one of a class ([!...] or [^...] none of it; ranges and [:alpha:]
 // and the like in it), and \ the next character as itself. It's rsync's
 // wildmatch.c, a byte at a time, as rsync matches in the C locale.
-func wildmatch(pattern, text string) bool {
+func Match(pattern, text string) bool {
 	return dowild(pattern, text) == matched
 }
 

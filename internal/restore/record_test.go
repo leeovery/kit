@@ -30,6 +30,7 @@ func TestRecordRoundTrip(t *testing.T) {
 			"~/Documents":     {State: Copying, From: Origin{Kind: FromMac, Detail: "192.0.2.10"}, Started: start},
 			"~/.config/valet": {State: Held},
 		},
+		Settled: start.Add(3 * time.Hour),
 	}
 	if err := UpdateRecord(dir, func(r *Record) { *r = want }); err != nil {
 		t.Fatal(err)
@@ -39,7 +40,7 @@ func TestRecordRoundTrip(t *testing.T) {
 		t.Errorf("LoadRecord() = %+v, %v\nwant %+v", got, err, want)
 	}
 	text := read(t, filepath.Join(dir, "restore.json"))
-	for _, key := range []string{`"from"`, `"kind": "time-machine"`, `"state": "done"`, `"second"`, `"set_aside"`, `"started"`, `"finished"`} {
+	for _, key := range []string{`"from"`, `"kind": "time-machine"`, `"state": "done"`, `"second"`, `"set_aside"`, `"started"`, `"finished"`, `"settled"`} {
 		if !strings.Contains(text, key) {
 			t.Errorf("restore.json has no %s:\n%s", key, text)
 		}

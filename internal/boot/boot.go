@@ -103,6 +103,9 @@ type Boot struct {
 	// HandedOver is whether this is the boot handed over to the terminal,
 	// started by the boot before it.
 	HandedOver bool
+	// Started is when this boot started: a new Mac it starts from another
+	// records it as when its set-up began. Zero records nothing.
+	Started time.Time
 
 	mu    sync.Mutex
 	token string
@@ -332,7 +335,12 @@ func (b *Boot) macStep() engine.Step {
 			if err := config.WriteMachine(b.State, name); err != nil {
 				return err
 			}
-			return kitstate.Update(b.State, stateName, func(st *state) { st.NewMac, st.From = name, from })
+			return kitstate.Update(b.State, stateName, func(st *state) {
+				st.NewMac, st.From = name, from
+				if from != "" && st.Began.IsZero() {
+					st.Began = b.Started
+				}
+			})
 		},
 	}
 }
@@ -392,7 +400,8 @@ func and(names []string) string {
 // config repository it read; a new Mac's name till kit-config has it
 // committed, and the Mac it starts as a copy of, if any; the terminal given
 // Full Disk Access, as the person said, before its first launch; when kit,
-// handed over to, took the boot on there; and when this Mac's set-up began.
+// handed over to, took the boot on there; and, for a new Mac it started
+// from another, when its set-up began: the start of the boot that added it.
 type state struct {
 	Repo    string    `json:"repo,omitempty"`
 	NewMac  string    `json:"new_mac,omitempty"`
@@ -404,23 +413,9 @@ type state struct {
 
 const stateName = "bootstrap.json"
 
-// Begin records that this Mac's set-up begins now, as the boot starts on a
-// Mac kit hasn't named: once, never on a Mac kit has named, which it may
-// have set up before, or which is in use.
-func (b *Boot) Begin() error {
-	mac, err := config.ReadMachine(b.State)
-	if err != nil || mac != "" {
-		return err
-	}
-	return kitstate.Update(b.State, stateName, func(st *state) {
-		if st.Began.IsZero() {
-			st.Began = b.Now()
-		}
-	})
-}
-
 // Began is when this Mac's set-up began, as the boot recorded it in
-// stateDir: zero when it didn't, as on a Mac set up otherwise, or in use.
+// stateDir for a new Mac it started from another: zero for any other, as a
+// Mac in use, one given a name kit-config has, or one started fresh.
 func Began(stateDir string) (time.Time, error) {
 	st, err := kitstate.Load[state](stateDir, stateName)
 	return st.Began, err
