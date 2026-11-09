@@ -126,11 +126,12 @@ func (r Rsync) Find(ctx context.Context) (Found, error) {
 	if err != nil {
 		return Found{}, fmt.Errorf("ask rsync its version: %w", err)
 	}
-	return found(string(res.Stdout)), nil
+	return ReadVersion(string(res.Stdout)), nil
 }
 
-// found is what rsync --version's output says of the rsync that printed it.
-func found(out string) Found {
+// ReadVersion is what rsync --version's output, out, says of the rsync that
+// printed it.
+func ReadVersion(out string) Found {
 	first, _, _ := strings.Cut(strings.TrimSpace(out), "\n")
 	if strings.HasPrefix(first, "openrsync") {
 		return Found{Why: "it's macOS's own, openrsync, not rsync 3"}
