@@ -244,7 +244,8 @@ the terminal restarts, so kit couldn't watch for it.
 
 **Adding a secret:** `kit secret add <name>` takes its value typed (unshown), on standard
 input (`--stdin`, how an agent passes one, never on a command line), from a file (`--from`,
-kept as an attachment), or as an existing reference (`--ref`, nothing stored: its line goes in
+kept as an attachment, named as the file is or as `--field` says, in a section as
+`<section>/<name>`), or as an existing reference (`--ref`, nothing stored: its line goes in
 the file's block for its item, short, when the file has one, else in the plain `[secrets]`, in
 full). A new value goes where it's told, never by default: `--in <name>`, a block by the name
 its header gives it (`--as`), or `--item` and an item, in full; with neither it's refused,

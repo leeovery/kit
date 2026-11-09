@@ -525,6 +525,38 @@ func TestASecretFilesAttachmentNamedWithAPeriod(t *testing.T) {
 	}
 }
 
+// --field puts a file from --from in a section of the item, as
+// Section/name, its line declaring it so, as a field's does; it syncs from
+// there, and is deleted from there.
+func TestASecretFileInASection(t *testing.T) {
+	w := secretsWorld(t)
+	from := filepath.Join(t.TempDir(), "id.pem")
+	if err := os.WriteFile(from, []byte("key\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f := w.fake
+	f.On("op", "whoami")
+	f.On("op", "item", "get", "Item", "--vault", "vault", "--format", "json").Prints(`{"id":"abc","title":"Item","sections":[{"id":"s1","label":"Keys"}],"files":[{"id":"x","name":"id.pem"}]}`).
+		Then().Prints(`{"id":"abc","title":"Item","sections":[{"id":"s1","label":"Keys"}],"files":[{"id":"x","name":"id.pem"},{"id":"y","name":"id.pem","section":{"id":"s1","label":"Keys"}}]}`)
+	f.On("op", "item", "edit", "Item", "--vault", "vault", `Keys.id\.pem[file]=`+from)
+	optest.Holds(f, map[string]string{"op://vault/Item/Keys/id.pem": "key\n", "op://vault/Item/Section/token": "the value"})
+	w.expectSync(t, []string{"laptop/declarations"}, "kit secret add ~/.ssh/id.pem (laptop)")
+	if out, _, code := w.run(t, "secret", "add", "~/.ssh/id.pem", "--from", from, "--field", "Keys/id.pem", "--item", "op://vault/Item"); code != 0 {
+		t.Fatalf("kit secret add printed\n%s exit %d", out, code)
+	}
+	if got := w.read(t, ".config/kit/laptop/declarations"); !strings.Contains(got, "\n~/.ssh/id.pem Keys/id.pem\n") {
+		t.Errorf("the declarations read\n%s\nwant the file's line, short for its section", got)
+	}
+	if got := w.read(t, ".ssh/id.pem"); got != "key\n" {
+		t.Errorf("the file holds %q", got)
+	}
+	f.On("op", "item", "edit", "Item", "--vault", "vault", `Keys.id\.pem[delete]`)
+	w.expectSync(t, []string{"laptop/declarations"}, "kit secret remove ~/.ssh/id.pem (laptop)")
+	if out, _, code := w.run(t, "secret", "remove", "~/.ssh/id.pem", "--delete-value"); code != 0 || !strings.Contains(out, "its value deleted from 1Password") {
+		t.Errorf("kit secret remove printed\n%s exit %d", out, code)
+	}
+}
+
 // A file kept from --from lands as it was, byte for byte, bytes that aren't
 // UTF-8 and the newlines it ends with too, and add checks it does: a file
 // synced otherwise, its attachment taken for a field's text once read back,

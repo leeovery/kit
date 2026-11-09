@@ -38,7 +38,8 @@ which the shell sources), or a file's path.
 
 Its value is typed, unshown, at a terminal; or comes on standard input
 (--stdin, how an agent passes one, never on a command line); or from a file
-(--from, kept as an attachment); or is in a store already (--ref and where
+(--from, kept as an attachment, named as the file is, or as --field says,
+in a section as Section/name); or is in a store already (--ref and where
 it's kept, in full: nothing is stored).
 
 A new value goes where you say, nowhere by default: --in and a block's name,

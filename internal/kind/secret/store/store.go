@@ -52,8 +52,9 @@ type Driver interface {
 	// when it isn't where one can go. It asks the store nothing.
 	Field(field string) (string, error)
 	// Attachment is name short for item, where Attach would keep a file, as
-	// Attach returns it: an error when it isn't an attachment's name. It
-	// asks the store nothing.
+	// Attach returns it, at the item's top or in a section, as the store
+	// has them: an error when it isn't an attachment's name. It asks the
+	// store nothing.
 	Attachment(name string) (string, error)
 	// Free is nil when item keeps nothing at short, where Field or
 	// Attachment says a value would go: else that something's there

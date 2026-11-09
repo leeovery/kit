@@ -195,17 +195,17 @@ func readOut(ctx context.Context, run runner.Runner, ref string) (string, error)
 }
 
 // isAttachment reports whether ref, a value's, is one of its item's
-// attachments, as op item get lists them.
+// attachments, the item's own or a section's, as op item get lists them.
 func isAttachment(ctx context.Context, run runner.Runner, ref string) (bool, error) {
 	parts, _ := path(ref)
-	if len(parts) != 3 {
+	if len(parts) != 3 && len(parts) != 4 {
 		return false, nil
 	}
 	_, doc, err := getItem(ctx, run, scheme+parts[0]+"/"+parts[1])
 	if err != nil {
 		return false, err
 	}
-	return holds(doc, parts[2]), nil
+	return hasFile(doc, strings.Join(parts[2:], "/")), nil
 }
 
 // ReadMany reads refs in one run of op inject, as 1Password may have the
@@ -433,12 +433,33 @@ func sectionOf(doc map[string]any, section string) string {
 }
 
 // holds reports whether the item keeps something at short: a field of its
-// section, as in GitHub/token, or an attachment, by its name.
+// section, as in GitHub/token, or an attachment, by its name, its section's
+// first when it's in one.
 func holds(doc map[string]any, short string) bool {
+	return hasFile(doc, short) || hasField(doc, short)
+}
+
+// hasFile reports whether the item keeps an attachment at short: by its
+// name, or a section's name and its, as in GitHub/key.pem.
+func hasFile(doc map[string]any, short string) bool {
+	section, name, inSection := strings.Cut(short, "/")
+	if !inSection {
+		name = short
+	}
+	files, _ := doc["files"].([]any)
+	return slices.ContainsFunc(files, func(f any) bool {
+		m, _ := f.(map[string]any)
+		sec, _ := m["section"].(map[string]any)
+		return m["name"] == name && (!inSection || sec["label"] == section)
+	})
+}
+
+// hasField reports whether the item keeps a field of a section at short,
+// as in GitHub/token.
+func hasField(doc map[string]any, short string) bool {
 	section, label, isField := strings.Cut(short, "/")
 	if !isField {
-		files, _ := doc["files"].([]any)
-		return slices.ContainsFunc(files, func(f any) bool { m, _ := f.(map[string]any); return m["name"] == short })
+		return false
 	}
 	id := sectionOf(doc, section)
 	fields, _ := doc["fields"].([]any)
@@ -458,12 +479,13 @@ func (Driver) Field(field string) (string, error) {
 	return field, nil
 }
 
-// Attachment is name, an attachment's, with no /.
-func (Driver) Attachment(name string) (string, error) {
-	if name == "" || strings.Contains(name, "/") {
-		return "", fmt.Errorf("%q isn't an attachment's name: no /", name)
+// Attachment is name, an attachment's: its name alone, with no /, or a
+// section's name and its, as a field's are.
+func (d Driver) Attachment(name string) (string, error) {
+	if _, err := d.Field(name); err == nil || name != "" && !strings.Contains(name, "/") {
+		return name, nil
 	}
-	return name, nil
+	return "", fmt.Errorf("%q isn't an attachment's name: a name with no /, or a section's and a name, as in GitHub/key.pem", name)
 }
 
 // assigned is a field's or attachment's name as op's assignments take it:
@@ -473,7 +495,19 @@ func assigned(name string) string {
 	return strings.NewReplacer(`\`, `\\`, ".", `\.`, "=", `\=`).Replace(name)
 }
 
-// Attach keeps the file at path in item as an attachment named name.
+// assignment is short, a field or attachment of an item, as op's
+// assignments name it: a section's name, then its own, as section.name; an
+// item's own alone.
+func assignment(short string) string {
+	parts := strings.Split(short, "/")
+	for i, part := range parts {
+		parts[i] = assigned(part)
+	}
+	return strings.Join(parts, ".")
+}
+
+// Attach keeps the file at path in item as an attachment named name, in a
+// section when name gives one (Attachment).
 func (d Driver) Attach(ctx context.Context, run runner.Runner, item, name, path string) (string, error) {
 	if _, err := d.Attachment(name); err != nil {
 		return "", err
@@ -485,7 +519,7 @@ func (d Driver) Attach(ctx context.Context, run runner.Runner, item, name, path 
 	if _, err := os.Stat(path); err != nil {
 		return "", err
 	}
-	if _, err := opRun(ctx, run, runner.Command{Args: slices.Concat([]string{"item", "edit"}, args, []string{assigned(name) + "[file]=" + path}), Timeout: opTimeout, Secret: true}); err != nil {
+	if _, err := opRun(ctx, run, runner.Command{Args: slices.Concat([]string{"item", "edit"}, args, []string{assignment(name) + "[file]=" + path}), Timeout: opTimeout, Secret: true}); err != nil {
 		return "", fmt.Errorf("attach it in 1Password: %w", err)
 	}
 	return name, nil
@@ -497,13 +531,7 @@ func (Driver) Delete(ctx context.Context, run runner.Runner, item, short string)
 	if err != nil {
 		return err
 	}
-	// A section's name, then a field's, as section.field; an attachment's
-	// alone.
-	parts := strings.Split(short, "/")
-	for i, part := range parts {
-		parts[i] = assigned(part)
-	}
-	if _, err := opRun(ctx, run, runner.Command{Args: slices.Concat([]string{"item", "edit"}, args, []string{strings.Join(parts, ".") + "[delete]"}), Timeout: opTimeout, Secret: true}); err != nil {
+	if _, err := opRun(ctx, run, runner.Command{Args: slices.Concat([]string{"item", "edit"}, args, []string{assignment(short) + "[delete]"}), Timeout: opTimeout, Secret: true}); err != nil {
 		return fmt.Errorf("delete it from 1Password: %w", err)
 	}
 	return nil

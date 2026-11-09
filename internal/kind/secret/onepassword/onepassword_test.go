@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"maps"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -55,7 +56,8 @@ func TestReferences(t *testing.T) {
 }
 
 // A field is a section's name and a field's, an attachment a name with no
-// /: each checked without asking 1Password, as Store and Attach take them.
+// /, or a section's name and its: each checked without asking 1Password, as
+// Store and Attach take them.
 func TestFieldsAndAttachments(t *testing.T) {
 	d := onepassword.Driver{}
 	for field, ok := range map[string]bool{"GitHub/token": true, "nosection": false, "/token": false, "GitHub/": false, "op://vault/item/x": false, "a/b/c": false} {
@@ -63,7 +65,7 @@ func TestFieldsAndAttachments(t *testing.T) {
 			t.Errorf("Field(%q) = %q, %v", field, short, err)
 		}
 	}
-	for name, ok := range map[string]bool{"token.json": true, "": false, "dir/token.json": false} {
+	for name, ok := range map[string]bool{"token.json": true, "Section/token.json": true, "": false, "a/b/c": false, "/token.json": false, "Section/": false} {
 		if short, err := d.Attachment(name); (err == nil) != ok || ok && short != name {
 			t.Errorf("Attachment(%q) = %q, %v", name, short, err)
 		}
@@ -71,13 +73,14 @@ func TestFieldsAndAttachments(t *testing.T) {
 }
 
 // Free asks 1Password whether an item keeps something where a value would
-// go, a field of a section or an attachment, changing nothing.
+// go, a field of a section or an attachment, the item's own or a
+// section's, changing nothing.
 func TestFree(t *testing.T) {
 	run := runnertest.New(t)
 	run.On("op", "item", "get", "Item", "--vault", "vault", "--format", "json").
-		Prints(`{"sections":[{"id":"s1","label":"GitHub"}],"fields":[{"label":"token","section":{"id":"s1"}},{"label":"loose"}],"files":[{"name":"key.pem"}]}`)
+		Prints(`{"sections":[{"id":"s1","label":"GitHub"}],"fields":[{"label":"token","section":{"id":"s1"}},{"label":"loose"}],"files":[{"name":"key.pem"},{"name":"id.pem","section":{"id":"s1","label":"GitHub"}}]}`)
 	d := onepassword.Driver{}
-	for short, free := range map[string]bool{"GitHub/token": false, "GitHub/other": true, "Other/token": true, "key.pem": false, "other.pem": true} {
+	for short, free := range map[string]bool{"GitHub/token": false, "GitHub/other": true, "Other/token": true, "key.pem": false, "other.pem": true, "GitHub/id.pem": false, "Other/id.pem": true} {
 		if err := d.Free(t.Context(), run, "op://vault/Item", short); (err == nil) != free {
 			t.Errorf("Free(%s) = %v, want free %v", short, err, free)
 		}
@@ -277,12 +280,12 @@ func TestReadTakesOffTheNewlineOpAdds(t *testing.T) {
 	}
 }
 
-// ReadFile reads an attachment byte for byte with op read --out-file,
-// into a folder of its own, removed after, never through a pipe, which
-// can't tell a final newline of its own from op's, nor op inject, which
-// turns each byte that isn't UTF-8 into U+FFFD; a field's text it ends with
-// one newline, in place of those it ends with, asking the item what it
-// keeps only when the reference could be either.
+// ReadFile reads an attachment, the item's own or a section's, byte for
+// byte with op read --out-file, into a folder of its own, removed after,
+// never through a pipe, which can't tell a final newline of its own from
+// op's, nor op inject, which turns each byte that isn't UTF-8 into U+FFFD;
+// a field's text it ends with one newline, in place of those it ends with,
+// the item saying which each is.
 func TestReadFile(t *testing.T) {
 	blob := "\xff\xfe\x00kit\xc3\x28\x80\n\n"
 	run := runnertest.New(t)
@@ -291,24 +294,26 @@ func TestReadFile(t *testing.T) {
 		"op://vault/Item/text":          "one line\n",
 		"op://vault/Item/loose":         "loose\n\n",
 		"op://vault/Item/Section/field": "field",
+		"op://vault/Item/Section/key":   "key\n",
 	})
-	optest.Attaches(run, "op://vault/Item", "blob", "text")
+	optest.Attaches(run, "op://vault/Item", "blob", "text", "Section/key", "Other/field")
 	d := onepassword.Driver{}
 	for ref, want := range map[string]string{
 		"op://vault/Item/blob":          blob,
 		"op://vault/Item/text":          "one line\n",
 		"op://vault/Item/loose":         "loose\n",
 		"op://vault/Item/Section/field": "field\n",
+		"op://vault/Item/Section/key":   "key\n",
 	} {
 		if got, err := d.ReadFile(t.Context(), run, ref); err != nil || got != want {
 			t.Errorf("ReadFile(%s) = %q, %v; want %q", ref, got, err, want)
 		}
 	}
 	calls := strings.Join(run.Calls(), "\n")
-	if got := strings.Count(calls, "op item get"); got != 3 {
-		t.Errorf("ran %q: want the item asked of the three references that could be an attachment", run.Calls())
+	if got := strings.Count(calls, "op item get"); got != 5 {
+		t.Errorf("ran %q: want the item asked of each reference", run.Calls())
 	}
-	if got := strings.Count(calls, "--out-file"); got != 2 || strings.Contains(calls, "op inject") {
+	if got := strings.Count(calls, "--out-file"); got != 3 || strings.Contains(calls, "op inject") {
 		t.Errorf("ran %q: want each attachment read with --out-file, and no op inject", run.Calls())
 	}
 	for _, c := range run.Commands() {
@@ -325,5 +330,31 @@ func TestReadFile(t *testing.T) {
 	values, err := d.ReadMany(t.Context(), run, []string{"op://vault/Item/blob"})
 	if err != nil || values["op://vault/Item/blob"] == blob {
 		t.Errorf("ReadMany() of bytes that aren't UTF-8 = %v: want them turned into U+FFFD, as op inject does", err)
+	}
+}
+
+// An attachment goes in a section as op's assignments name one, section
+// then name, each escaped, and is deleted the same way; the item's own goes
+// by its name alone.
+func TestAttachAndDeleteInASection(t *testing.T) {
+	from := filepath.Join(t.TempDir(), "id.pem")
+	if err := os.WriteFile(from, []byte("key\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	run := runnertest.New(t)
+	run.On("op", "item", "edit", "Item", "--vault", "vault", `Git\.Hub.id\.pem[file]=`+from)
+	run.On("op", "item", "edit", "Item", "--vault", "vault", `id\.pem[file]=`+from)
+	run.On("op", "item", "edit", "Item", "--vault", "vault", `Git\.Hub.id\.pem[delete]`)
+	d := onepassword.Driver{}
+	for _, name := range []string{"Git.Hub/id.pem", "id.pem"} {
+		if short, err := d.Attach(t.Context(), run, "op://vault/Item", name, from); err != nil || short != name {
+			t.Errorf("Attach(%s) = %q, %v", name, short, err)
+		}
+	}
+	if err := d.Delete(t.Context(), run, "op://vault/Item", "Git.Hub/id.pem"); err != nil {
+		t.Errorf("Delete() = %v", err)
+	}
+	if _, err := d.Attach(t.Context(), run, "op://vault/Item", "a/b/c", from); err == nil {
+		t.Error("Attach() of a name with two /s didn't fail")
 	}
 }

@@ -501,6 +501,7 @@ func TestVariableReadsWhatASyncWrote(t *testing.T) {
 	awkward := `it's $HOME, ''a ` + "`date`" + `, a \ and "quotes" # not a note'`
 	fake.On("op", "whoami")
 	optest.Holds(fake, map[string]string{item + "/Section/plain": "plain value", item + "/Section/awkward": awkward})
+	optest.Attaches(fake, item)
 	if _, err := s.Sync(t.Context()); err != nil {
 		t.Fatal(err)
 	}

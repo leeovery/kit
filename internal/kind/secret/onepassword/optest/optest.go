@@ -47,12 +47,16 @@ func Holds(fake *runnertest.Fake, values map[string]string) {
 }
 
 // Attaches scripts fake's op item get of item, op://vault/item, as
-// 1Password keeping attachments of names in it, and no fields.
+// 1Password keeping attachments of names in it, each the item's own, or a
+// section's as Section/name, and no fields.
 func Attaches(fake *runnertest.Fake, item string, names ...string) {
 	vault, title, _ := strings.Cut(strings.TrimPrefix(item, "op://"), "/")
-	files := make([]map[string]string, len(names))
+	files := make([]map[string]any, len(names))
 	for i, name := range names {
-		files[i] = map[string]string{"id": fmt.Sprint("file", i), "name": name}
+		files[i] = map[string]any{"id": fmt.Sprint("file", i), "name": name}
+		if section, own, ok := strings.Cut(name, "/"); ok {
+			files[i]["name"], files[i]["section"] = own, map[string]string{"id": "s-" + section, "label": section}
+		}
 	}
 	doc, _ := json.Marshal(map[string]any{"title": title, "fields": []any{}, "files": files})
 	fake.On("op", "item", "get", title, "--vault", vault, "--format", "json").Prints(string(doc))
