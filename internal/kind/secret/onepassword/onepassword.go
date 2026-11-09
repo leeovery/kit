@@ -34,14 +34,16 @@ const scheme = "op://"
 // program is 1Password's CLI.
 const program = "op"
 
-// opTimeout is how long 1Password may take to answer, or to read a value:
-// it has hung after a restart and over remote connections.
+// opTimeout is how long 1Password may take to answer what needs no
+// approval (who's signed in, the accounts): it has hung after a restart and
+// over remote connections.
 const opTimeout = 15 * time.Second
 
-// approvalTimeout ends a run of op that reads a value only once it's hung:
-// 1Password's app may have the person approve it, a fingerprint at the
-// prompt it shows, and the prompt can come late on a busy Mac. Ended
-// sooner, the read is lost to a person still answering.
+// approvalTimeout ends a run of op that touches an item, reading, getting or
+// editing it, only once it's hung: 1Password's app may have the person
+// approve it, a fingerprint at the prompt it shows, once the last approval
+// has lapsed, and the prompt can come late on a busy Mac. Ended sooner, the
+// run is lost to a person still answering (9 Nov: a delete gave up at 15s).
 const approvalTimeout = 10 * time.Minute
 
 // opRun runs op as c says, in kit's session (runner.Command.SharesSession):
@@ -384,7 +386,7 @@ func (d Driver) Store(ctx context.Context, run runner.Runner, item, field, value
 	if err != nil {
 		return "", err
 	}
-	if _, err := opRun(ctx, run, runner.Command{Args: slices.Concat([]string{"item", "edit"}, args), Input: string(edited), Timeout: opTimeout, Secret: true}); err != nil {
+	if _, err := opRun(ctx, run, runner.Command{Args: slices.Concat([]string{"item", "edit"}, args), Input: string(edited), Timeout: approvalTimeout, Secret: true}); err != nil {
 		return "", fmt.Errorf("keep it in 1Password: %w", err)
 	}
 	return short, nil
@@ -414,7 +416,7 @@ func getItem(ctx context.Context, run runner.Runner, item string) ([]string, map
 	if err != nil {
 		return nil, nil, err
 	}
-	res, err := opRun(ctx, run, runner.Command{Args: slices.Concat([]string{"item", "get"}, args, []string{"--format", "json"}), Timeout: opTimeout, Secret: true})
+	res, err := opRun(ctx, run, runner.Command{Args: slices.Concat([]string{"item", "get"}, args, []string{"--format", "json"}), Timeout: approvalTimeout, Secret: true})
 	if err != nil {
 		return nil, nil, fmt.Errorf("read the item from 1Password: %w", err)
 	}
@@ -538,7 +540,7 @@ func (d Driver) Attach(ctx context.Context, run runner.Runner, item, name, path 
 	if _, err := os.Stat(path); err != nil {
 		return "", err
 	}
-	if _, err := opRun(ctx, run, runner.Command{Args: slices.Concat([]string{"item", "edit"}, args, []string{assignment(name) + "[file]=" + path}), Timeout: opTimeout, Secret: true}); err != nil {
+	if _, err := opRun(ctx, run, runner.Command{Args: slices.Concat([]string{"item", "edit"}, args, []string{assignment(name) + "[file]=" + path}), Timeout: approvalTimeout, Secret: true}); err != nil {
 		return "", fmt.Errorf("attach it in 1Password: %w", err)
 	}
 	return name, nil
@@ -550,7 +552,7 @@ func (Driver) Delete(ctx context.Context, run runner.Runner, item, short string)
 	if err != nil {
 		return err
 	}
-	if _, err := opRun(ctx, run, runner.Command{Args: slices.Concat([]string{"item", "edit"}, args, []string{assignment(short) + "[delete]"}), Timeout: opTimeout, Secret: true}); err != nil {
+	if _, err := opRun(ctx, run, runner.Command{Args: slices.Concat([]string{"item", "edit"}, args, []string{assignment(short) + "[delete]"}), Timeout: approvalTimeout, Secret: true}); err != nil {
 		return fmt.Errorf("delete it from 1Password: %w", err)
 	}
 	return nil
