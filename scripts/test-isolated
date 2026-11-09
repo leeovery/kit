@@ -354,6 +354,10 @@ self_check() {
 	denies_running umount /sbin/umount || status=1
 	denies_running dns-sd /usr/bin/dns-sd || status=1
 	denies_running_every rsync /usr/bin/rsync /opt/homebrew/bin/rsync /usr/local/bin/rsync -- --version || status=1
+	denies_running pnpm "$(installed pnpm)" --version || status=1
+	denies_running yarn "$(installed yarn)" --version || status=1
+	denies_running bun "$(installed bun)" --version || status=1
+	denies_running uv "$(installed uv)" --version || status=1
 	starts_clean || status=1
 	return "$status"
 }

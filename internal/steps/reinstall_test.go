@@ -1,0 +1,567 @@
+package steps_test
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/leeovery/kit/internal/check"
+	"github.com/leeovery/kit/internal/engine"
+	"github.com/leeovery/kit/internal/event"
+	"github.com/leeovery/kit/internal/reinstall"
+	"github.com/leeovery/kit/internal/restore"
+	"github.com/leeovery/kit/internal/runner"
+	"github.com/leeovery/kit/internal/runner/runnertest"
+	"github.com/leeovery/kit/internal/steps"
+)
+
+// restoredMac is a home folder and kit's state, for the reinstall: the
+// restore's record saying which paths it's done.
+type restoredMac struct {
+	home, state string
+}
+
+func newRestoredMac(t *testing.T) restoredMac {
+	t.Helper()
+	return restoredMac{home: t.TempDir(), state: t.TempDir()}
+}
+
+// restored records paths, from ~, as the restore has them, in state.
+func (m restoredMac) restored(t *testing.T, s restore.State, paths ...string) {
+	t.Helper()
+	err := restore.UpdateRecord(m.state, func(r *restore.Record) {
+		for _, p := range paths {
+			r.Change(p, func(p *restore.Path) { p.State = s })
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// files makes each of files, from ~, its folders with it: a folder when it
+// ends in a slash, else an empty file.
+func (m restoredMac) files(t *testing.T, files ...string) {
+	t.Helper()
+	for _, f := range files {
+		path := filepath.Join(m.home, strings.TrimPrefix(f, "~/"))
+		if strings.HasSuffix(f, "/") {
+			if err := os.MkdirAll(path, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// write writes content to the file at path, from ~.
+func (m restoredMac) write(t *testing.T, path, content string) {
+	t.Helper()
+	m.files(t, path)
+	if err := os.WriteFile(filepath.Join(m.home, strings.TrimPrefix(path, "~/")), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func (m restoredMac) step(run runner.Runner, now func() time.Time) engine.Step {
+	return steps.Reinstall(reinstall.Reinstaller{Run: run, Home: m.home, StateDir: m.state, Now: now})
+}
+
+func (m restoredMac) record(t *testing.T) reinstall.Record {
+	t.Helper()
+	_, rec, err := reinstall.Records(m.state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rec
+}
+
+// reinstalled checks step, applies it when its check says to, and checks it
+// again, as a run that applies does.
+func reinstalled(t *testing.T, ctx context.Context, step engine.Step) check.Result {
+	t.Helper()
+	res := step.Check(ctx)
+	if res.State == check.Attention {
+		if err := step.Apply(ctx, res); err != nil {
+			t.Fatalf("Apply() = %v", err)
+		}
+		res = step.Check(ctx)
+	}
+	return res
+}
+
+func stillClock() time.Time { return time.Date(2026, 11, 20, 9, 0, 0, 0, time.UTC) }
+
+// Each lockfile has its tool's install run in its folder, installing just
+// what the lockfile says; a folder's JavaScript packages install with one
+// tool; Terraform's, Swift's, Go's and Cargo's lockfiles are left alone.
+func TestReinstallRunsEachLockfilesTool(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		files []string
+		yarn  string
+		want  []string
+	}{
+		{name: "composer", files: []string{"composer.json", "composer.lock"}, want: []string{"composer install --no-interaction"}},
+		{name: "npm", files: []string{"package-lock.json"}, want: []string{"npm ci"}},
+		{name: "pnpm", files: []string{"pnpm-lock.yaml"}, want: []string{"pnpm install --frozen-lockfile"}},
+		{name: "bun's text lockfile", files: []string{"bun.lock"}, want: []string{"bun install --frozen-lockfile"}},
+		{name: "bun's binary lockfile", files: []string{"bun.lockb"}, want: []string{"bun install --frozen-lockfile"}},
+		{name: "yarn 1", yarn: "# yarn lockfile v1\n\n\nleft-pad@^1.3.0:\n  version \"1.3.0\"\n", want: []string{"yarn install --frozen-lockfile"}},
+		{name: "uv", files: []string{"uv.lock"}, want: []string{"uv sync --frozen"}},
+		{name: "composer and npm", files: []string{"composer.lock", "package-lock.json"}, want: []string{"composer install --no-interaction", "npm ci"}},
+		{name: "a stray npm lockfile beside yarn's", files: []string{"package-lock.json"}, yarn: "# yarn lockfile v1\n", want: []string{"yarn install --frozen-lockfile"}},
+		{name: "left alone", files: []string{".terraform.lock.hcl", "go.sum", "Package.resolved", "Cargo.lock"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newRestoredMac(t)
+			for _, f := range tc.files {
+				m.files(t, "~/Code/app/"+f)
+			}
+			if tc.yarn != "" {
+				m.write(t, "~/Code/app/yarn.lock", tc.yarn)
+			}
+			m.restored(t, restore.Done, "~/Code")
+			fake := runnertest.New(t)
+			for _, cmd := range tc.want {
+				words := strings.Fields(cmd)
+				fake.On(words[0], words[1:]...)
+			}
+			res := reinstalled(t, t.Context(), m.step(fake, stillClock))
+			if got := fake.Calls(); !slices.Equal(got, tc.want) {
+				t.Errorf("ran %q, want %q", got, tc.want)
+			}
+			for _, cmd := range fake.Commands() {
+				if want := filepath.Join(m.home, "Code", "app"); cmd.Dir != want {
+					t.Errorf("%s ran in %s, want %s", cmd, cmd.Dir, want)
+				}
+			}
+			if res.State != check.OK {
+				t.Errorf("then the check = %+v, want ok", res)
+			}
+		})
+	}
+}
+
+// A project whose tool isn't installed is listed, waiting for it, not
+// failed; once the tool is installed, its install runs.
+func TestReinstallWaitsForAMissingTool(t *testing.T) {
+	m := newRestoredMac(t)
+	m.files(t, "~/Code/app/pnpm-lock.yaml", "~/Code/site/package-lock.json")
+	m.restored(t, restore.Done, "~/Code")
+	fake := runnertest.New(t)
+	fake.On("npm", "ci")
+	step := m.step(fake, stillClock)
+
+	res := reinstalled(t, t.Context(), step)
+	if res.State != check.OK || res.Summary != "1 installed; 1 waits for pnpm" {
+		t.Errorf("check = %s %q, want ok, saying pnpm's missing", res.State, res.Summary)
+	}
+	want := []check.Item{{ID: "reinstall:~/Code/app:pnpm", Name: "~/Code/app", State: "no-tool", Detail: "pnpm isn't installed", Quiet: "waiting"}}
+	if !slices.Equal(res.Items, want) {
+		t.Errorf("items = %+v, want %+v", res.Items, want)
+	}
+
+	fake.On("pnpm", "install", "--frozen-lockfile")
+	if res := step.Check(t.Context()); res.State != check.Attention || res.Summary != "1 to install" {
+		t.Errorf("pnpm installed, check = %s %q, want its install to run", res.State, res.Summary)
+	}
+	res = reinstalled(t, t.Context(), step)
+	if res.State != check.OK || res.Summary != "2 installed" || len(res.Items) != 0 {
+		t.Errorf("then check = %+v, want both installed", res)
+	}
+	if got := fake.Calls(); !slices.Equal(got, []string{"npm ci", "pnpm install --frozen-lockfile"}) {
+		t.Errorf("ran %q", got)
+	}
+}
+
+// A project whose dependency folder is already there, copied whole or
+// installed by hand, counts as done: nothing runs.
+func TestReinstallCountsDependenciesThereAsDone(t *testing.T) {
+	m := newRestoredMac(t)
+	m.files(t,
+		"~/Code/app/composer.json", "~/Code/app/composer.lock", "~/Code/app/vendor/autoload.php",
+		"~/Code/site/package-lock.json", "~/Code/site/node_modules/",
+		"~/Code/tool/uv.lock", "~/Code/tool/.venv/",
+	)
+	m.restored(t, restore.Done, "~/Code")
+	fake := runnertest.New(t)
+	res := reinstalled(t, t.Context(), m.step(fake, stillClock))
+	if calls := fake.Calls(); len(calls) != 0 {
+		t.Errorf("ran %q, want nothing", calls)
+	}
+	if res.State != check.OK || res.Summary != "3 installed" {
+		t.Errorf("check = %s %q, want 3 installed", res.State, res.Summary)
+	}
+	for _, in := range m.record(t).Installs {
+		if in.Outcome != reinstall.There {
+			t.Errorf("%s (%s) recorded %q, want there", in.Dir, in.Tool, in.Outcome)
+		}
+	}
+}
+
+// The search finds main checkouts, linked worktrees beside them, and the
+// projects nested in them with lockfiles of their own, however deep, to
+// its limit for safety; never a submodule, a dependency folder (vendor
+// whatever it holds), or a hidden one, agents' worktrees with them.
+func TestReinstallFindsProjects(t *testing.T) {
+	m := newRestoredMac(t)
+	m.files(t,
+		"~/Code/app/.git/HEAD", "~/Code/app/package-lock.json",
+		"~/Code/app/packages/web/pnpm-lock.yaml",
+		"~/Code/app/packages/api/package.json",
+		"~/Code/app/node_modules/dep/package-lock.json",
+		"~/Code/app/.claude/worktrees/feature/package-lock.json",
+		"~/Code/shop/composer.json", "~/Code/shop/composer.lock",
+		"~/Code/shop/vendor/team/lib/composer.lock",
+		"~/Code/tool/uv.lock", "~/Code/tool/.venv/lib/uv.lock",
+		"~/Code/legacy/vendor/lib/package-lock.json",
+		"~/Code/team/a/b/c/package-lock.json",
+		"~/Code/team/a/b/c/d/package-lock.json",
+		"~/Code/org/team/repo/javascript/apps/web/pnpm-lock.yaml",
+		"~/Code/org/team/repo/projects/agent/uv.lock",
+		"~/Code/1/2/3/4/5/6/7/8/9/10/11/12/package-lock.json",
+		"~/Code/1/2/3/4/5/6/7/8/9/10/11/12/13/package-lock.json",
+		"~/Code/app-feature/package-lock.json",
+		"~/Code/app/modules/theme/package-lock.json",
+	)
+	m.write(t, "~/Code/app-feature/.git", "gitdir: /Users/someone/Code/app/.git/worktrees/app-feature\n")
+	m.write(t, "~/Code/app/modules/theme/.git", "gitdir: ../../.git/modules/theme\n")
+	m.restored(t, restore.Done, "~/Code")
+	fake := runnertest.New(t)
+	fake.On("npm", "ci")
+	fake.On("pnpm", "install", "--frozen-lockfile")
+	fake.On("composer", "install", "--no-interaction")
+	fake.On("uv", "sync", "--frozen")
+	reinstalled(t, t.Context(), m.step(fake, stillClock))
+
+	var got []string
+	for _, in := range m.record(t).Installs {
+		got = append(got, in.Dir+" "+in.Tool)
+	}
+	slices.Sort(got)
+	want := []string{
+		"~/Code/1/2/3/4/5/6/7/8/9/10/11/12 npm",
+		"~/Code/app npm",
+		"~/Code/app-feature npm",
+		"~/Code/app/packages/web pnpm",
+		"~/Code/org/team/repo/javascript/apps/web pnpm",
+		"~/Code/org/team/repo/projects/agent uv",
+		"~/Code/shop composer",
+		"~/Code/team/a/b/c npm",
+		"~/Code/team/a/b/c/d npm",
+		"~/Code/tool uv",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("found\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// The check reads the records: nothing restored, it's deferred; a path the
+// restore's done is searched once, and the step's ok once each install has
+// an outcome; a path not done, or here already, is never searched; a
+// restored file holds no projects.
+func TestReinstallCheck(t *testing.T) {
+	m := newRestoredMac(t)
+	m.files(t, "~/Code/app/package-lock.json", "~/Documents/site/package-lock.json", "~/Notes/site/package-lock.json", "~/.zsh_history")
+	fake := runnertest.New(t)
+	fake.On("npm", "ci")
+	step := m.step(fake, stillClock)
+
+	if res := step.Check(t.Context()); res.State != check.Deferred || res.Reason != "waits for the restore" {
+		t.Errorf("before the restore, check = %+v, want it deferred", res)
+	}
+	m.restored(t, restore.Done, "~/Code", "~/.zsh_history")
+	m.restored(t, restore.Held, "~/Documents")
+	m.restored(t, restore.Here, "~/Notes")
+	if res := step.Check(t.Context()); res.State != check.Attention || res.Summary != "projects to find in ~/.zsh_history, ~/Code" {
+		t.Errorf("restored, check = %s %q, want the paths to search", res.State, res.Summary)
+	}
+	if res := reinstalled(t, t.Context(), step); res.State != check.OK || res.Summary != "1 installed" {
+		t.Errorf("applied, check = %s %q, want ok", res.State, res.Summary)
+	}
+	rec := m.record(t)
+	if want := []reinstall.Install{{Dir: "~/Code/app", Tool: "npm", Started: true, Outcome: reinstall.Installed}}; !slices.Equal(rec.Installs, want) {
+		t.Errorf("recorded %+v, want %+v", rec.Installs, want)
+	}
+	if want := []string{"~/.zsh_history", "~/Code"}; !slices.Equal(rec.Searched, want) {
+		t.Errorf("searched %q, want %q", rec.Searched, want)
+	}
+
+	m.files(t, "~/Code/later/package-lock.json")
+	if res := step.Check(t.Context()); res.State != check.OK {
+		t.Errorf("a project added since: check = %+v, want ok, ~/Code never searched again", res)
+	}
+	m.restored(t, restore.Done, "~/Documents")
+	res := reinstalled(t, t.Context(), step)
+	if res.State != check.OK || res.Summary != "2 installed" {
+		t.Errorf("~/Documents restored, check = %s %q, want its project installed too", res.State, res.Summary)
+	}
+	if got := fake.Calls(); len(got) != 2 {
+		t.Errorf("ran %q, want npm ci twice", got)
+	}
+}
+
+// Nothing among what's restored holds a project: the step says so.
+func TestReinstallWithNoProjects(t *testing.T) {
+	m := newRestoredMac(t)
+	m.files(t, "~/Documents/letter.txt")
+	m.restored(t, restore.Done, "~/Documents")
+	res := reinstalled(t, t.Context(), m.step(runnertest.New(t), stillClock))
+	if res.State != check.OK || res.Summary != "no projects restored" {
+		t.Errorf("check = %s %q, want no projects", res.State, res.Summary)
+	}
+}
+
+// The step is there once the restore's done a path not yet searched, or
+// projects were found; or while a restore in the run is yet to settle.
+func TestReinstallOn(t *testing.T) {
+	on := func(m restoredMac, restoring bool) bool {
+		t.Helper()
+		got, err := steps.ReinstallOn(m.state, restoring)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	m := newRestoredMac(t)
+	if on(m, false) || !on(m, true) {
+		t.Error("without the restore's record, want it there only with the restore in the run")
+	}
+	m.restored(t, restore.Done, "~/Documents")
+	if !on(m, false) {
+		t.Error("a path restored, not yet searched: want it there")
+	}
+	reinstalled(t, t.Context(), m.step(runnertest.New(t), stillClock))
+	if on(m, false) {
+		t.Error("searched, no projects: want it gone")
+	}
+	if err := restore.Settle(m.state, stillClock()); err != nil {
+		t.Fatal(err)
+	}
+	if on(m, true) {
+		t.Error("the restore settled, no projects: want it gone, the restore in the run or not")
+	}
+	m.files(t, "~/Code/app/uv.lock")
+	m.restored(t, restore.Done, "~/Code")
+	reinstalled(t, t.Context(), m.step(runnertest.New(t), stillClock))
+	if !on(m, false) {
+		t.Error("a project found: want it there")
+	}
+}
+
+// Four installs run at once, never more; a folder's run one after another.
+func TestReinstallRunsFourAtOnce(t *testing.T) {
+	m := newRestoredMac(t)
+	for _, p := range []string{"a", "b", "c", "d", "e", "f"} {
+		m.files(t, "~/Code/"+p+"/package-lock.json")
+	}
+	m.files(t, "~/Code/a/composer.lock")
+	m.restored(t, restore.Done, "~/Code")
+
+	var mu sync.Mutex
+	running, most := 0, 0
+	four := make(chan struct{})
+	var once sync.Once
+	busy := func() {
+		mu.Lock()
+		running++
+		most = max(most, running)
+		if running == 4 {
+			once.Do(func() { close(four) })
+		}
+		mu.Unlock()
+		select {
+		case <-four:
+		case <-time.After(5 * time.Second):
+			t.Error("never four installs at once")
+		}
+		mu.Lock()
+		running--
+		mu.Unlock()
+	}
+	fake := runnertest.New(t)
+	fake.On("npm", "ci").Does(busy)
+	fake.On("composer", "install", "--no-interaction").Does(busy)
+	res := reinstalled(t, t.Context(), m.step(fake, stillClock))
+	if most != 4 {
+		t.Errorf("at most %d at once, want 4", most)
+	}
+	if res.Summary != "7 installed" {
+		t.Errorf("check says %q, want all 7 installed", res.Summary)
+	}
+}
+
+// A failed install is recorded with the last line it said, the run's log
+// told, and named by the check, which stands ok: it's never tried again.
+func TestReinstallNamesFailures(t *testing.T) {
+	m := newRestoredMac(t)
+	m.files(t, "~/Code/app/package-lock.json", "~/Code/shop/composer.lock")
+	m.restored(t, restore.Done, "~/Code")
+	fake := runnertest.New(t)
+	fake.On("npm", "ci").PrintsToStderr("npm warn deprecated\nnpm error 404 Not Found - @team/private\n").Exits(1)
+	fake.On("composer", "install", "--no-interaction")
+	var mu sync.Mutex
+	var logged []event.Logged
+	ctx := event.WithLogging(t.Context(), func(l event.Logged) {
+		mu.Lock()
+		defer mu.Unlock()
+		logged = append(logged, l)
+	})
+	step := m.step(fake, stillClock)
+
+	res := reinstalled(t, ctx, step)
+	if res.State != check.OK || res.Summary != "1 installed; 1 failed" {
+		t.Errorf("check = %s %q, want ok, the failure counted", res.State, res.Summary)
+	}
+	want := []check.Item{{ID: "reinstall:~/Code/app:npm", Name: "~/Code/app", State: "failed", Detail: "npm: npm error 404 Not Found - @team/private", Quiet: "left"}}
+	if !slices.Equal(res.Items, want) {
+		t.Errorf("items = %+v, want %+v", res.Items, want)
+	}
+	if len(logged) != 1 || !logged[0].Alert || logged[0].Line != "~/Code/app's dependencies didn't install (npm): npm error 404 Not Found - @team/private" {
+		t.Errorf("logged %+v", logged)
+	}
+	reinstalled(t, ctx, step)
+	if got := fake.Calls(); len(got) != 2 {
+		t.Errorf("ran %q, want the failure never tried again", got)
+	}
+}
+
+// The step says how many installs are done, of how many, at most every
+// second, and when they're all done; installers' output is never shown as
+// the step's.
+func TestReinstallSaysHowFarItsGot(t *testing.T) {
+	m := newRestoredMac(t)
+	for _, p := range []string{"a", "b", "c"} {
+		m.files(t, "~/Code/"+p+"/package-lock.json")
+	}
+	m.restored(t, restore.Done, "~/Code")
+	fake := runnertest.New(t)
+	fake.On("npm", "ci").Prints("added 214 packages\n")
+	watched := &changingRunner{Runner: fake}
+	var mu sync.Mutex
+	var said []string
+	ctx := event.WithChanging(event.WithSaying(t.Context(), func(d event.Doing) {
+		mu.Lock()
+		defer mu.Unlock()
+		said = append(said, d.Says+" "+strings.Repeat("|", d.Done)+"/"+strings.Repeat("|", d.Of))
+	}))
+	reinstalled(t, ctx, m.step(watched, stillClock))
+	if want := []string{"installing /|||", "installing |||/|||"}; !slices.Equal(said, want) {
+		t.Errorf("said %q, want the start and the end alone, the clock still", said)
+	}
+	if watched.changing {
+		t.Error("an install ran as the step's changing things, its output shown")
+	}
+}
+
+// changingRunner notes whether a command ran as a step's changing things,
+// what it prints shown as it comes.
+type changingRunner struct {
+	runner.Runner
+	mu       sync.Mutex
+	changing bool
+}
+
+func (c *changingRunner) Has(name string) bool { return runner.Has(c.Runner, name) }
+
+func (c *changingRunner) Run(ctx context.Context, cmd runner.Command) (runner.Result, error) {
+	c.mu.Lock()
+	c.changing = c.changing || event.Changing(ctx)
+	c.mu.Unlock()
+	return c.Runner.Run(ctx, cmd)
+}
+
+// An install the run's stop cut short, its dependency folder begun, records
+// no outcome: it runs again, never taken as there.
+func TestReinstallCutShortRunsAgain(t *testing.T) {
+	m := newRestoredMac(t)
+	m.files(t, "~/Code/app/package-lock.json")
+	m.restored(t, restore.Done, "~/Code")
+	fake := runnertest.New(t)
+	fake.On("npm", "ci").Does(func() { m.files(t, "~/Code/app/node_modules/half/") }).Hangs().Then()
+	step := m.step(fake, stillClock)
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	if err := step.Apply(ctx, step.Check(ctx)); err == nil {
+		t.Error("Apply() cut short = nil, want the stop")
+	}
+	if res := step.Check(t.Context()); res.State != check.Attention || res.Summary != "1 to install" {
+		t.Errorf("then check = %s %q, want it still to install", res.State, res.Summary)
+	}
+	if res := reinstalled(t, t.Context(), step); res.State != check.OK || res.Summary != "1 installed" {
+		t.Errorf("applied again, check = %s %q, want it installed", res.State, res.Summary)
+	}
+	if got := fake.Calls(); len(got) != 2 {
+		t.Errorf("ran %q, want npm ci again", got)
+	}
+	if rec := m.record(t); rec.Installs[0].Outcome != reinstall.Installed {
+		t.Errorf("recorded %+v, want installed", rec.Installs)
+	}
+}
+
+// A failure runs again only when the run names the step.
+func TestReinstallRetriesFailuresWhenNamed(t *testing.T) {
+	m := newRestoredMac(t)
+	m.files(t, "~/Code/app/package-lock.json")
+	m.restored(t, restore.Done, "~/Code")
+	fake := runnertest.New(t)
+	fake.On("npm", "ci").PrintsToStderr("npm error network timeout\n").Exits(1).Then()
+	reinstalled(t, t.Context(), m.step(fake, stillClock))
+	if res := reinstalled(t, t.Context(), m.step(fake, stillClock)); res.Summary != "0 installed; 1 failed" || len(fake.Calls()) != 1 {
+		t.Errorf("unnamed, check says %q having run %q, want the failure left", res.Summary, fake.Calls())
+	}
+	named := steps.Reinstall(reinstall.Reinstaller{Run: fake, Home: m.home, StateDir: m.state, Now: stillClock, Retry: true})
+	if res := named.Check(t.Context()); res.State != check.Attention || res.Summary != "1 to install" {
+		t.Errorf("named, check = %s %q, want the failure to run again", res.State, res.Summary)
+	}
+	if res := reinstalled(t, t.Context(), named); res.Summary != "1 installed" || len(fake.Calls()) != 2 {
+		t.Errorf("named, check says %q having run %q, want it installed", res.Summary, fake.Calls())
+	}
+}
+
+// A project whose lockfile is Yarn 2's or later's is the person's to
+// install: Homebrew's yarn can't run the project's own, which the backups
+// leave out.
+func TestReinstallLeavesModernYarnToYou(t *testing.T) {
+	m := newRestoredMac(t)
+	m.write(t, "~/Code/app/yarn.lock", "# This file is generated by running \"yarn install\" inside your project.\n# Manual changes might be lost - proceed with caution!\n\n__metadata:\n  version: 8\n")
+	m.files(t, "~/Code/app/.pnp.cjs")
+	m.restored(t, restore.Done, "~/Code")
+	fake := runnertest.New(t)
+	fake.On("yarn", "install", "--frozen-lockfile")
+	res := reinstalled(t, t.Context(), m.step(fake, stillClock))
+	if calls := fake.Calls(); len(calls) != 0 {
+		t.Errorf("ran %q, want nothing", calls)
+	}
+	if res.State != check.OK || res.Summary != "0 installed; 1 for you to install" {
+		t.Errorf("check = %s %q", res.State, res.Summary)
+	}
+	want := []check.Item{{ID: "reinstall:~/Code/app:yarn", Name: "~/Code/app", State: "yours", Detail: "Yarn 2 or later: run yarn install in its folder", Quiet: "yours"}}
+	if !slices.Equal(res.Items, want) {
+		t.Errorf("items = %+v, want %+v", res.Items, want)
+	}
+}
+
+// Without a clock, the step tells the time itself.
+func TestReinstallWithoutAClock(t *testing.T) {
+	m := newRestoredMac(t)
+	m.files(t, "~/Code/app/package-lock.json")
+	m.restored(t, restore.Done, "~/Code")
+	fake := runnertest.New(t)
+	fake.On("npm", "ci")
+	if res := reinstalled(t, t.Context(), m.step(fake, nil)); res.Summary != "1 installed" {
+		t.Errorf("check says %q", res.Summary)
+	}
+}

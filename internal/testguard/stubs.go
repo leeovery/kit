@@ -17,7 +17,7 @@ import (
 // (rsync), download (curl), read the real ssh config, running what its Match
 // exec lines say (ssh, which finds the home folder by the user, never HOME),
 // and build and sign kit's app (swiftc, codesign).
-var stubbed = []string{"agntc", "brew", "claude", "codesign", "composer", "curl", "defaults", "diskutil", "dns-sd", "gh", "git", "go", "ioreg", "killall", "launchctl", "mas", "mdfind", "mdutil", "mount", "mount_apfs", "npm", "op", "open", "osascript", "pmset", "rsync", "ssh", "sudo", "swiftc", "sysctl", "systemsetup", "tmutil", "tmux", "umount"}
+var stubbed = []string{"agntc", "brew", "bun", "claude", "codesign", "composer", "curl", "defaults", "diskutil", "dns-sd", "gh", "git", "go", "ioreg", "killall", "launchctl", "mas", "mdfind", "mdutil", "mount", "mount_apfs", "npm", "op", "open", "osascript", "pmset", "pnpm", "rsync", "ssh", "sudo", "swiftc", "sysctl", "systemsetup", "tmutil", "tmux", "umount", "uv", "yarn"}
 
 // stubs is a directory of stand-ins for the stubbed programs. Each run of one
 // adds a line to the record, its name and arguments, and fails.
