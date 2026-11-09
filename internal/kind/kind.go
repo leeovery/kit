@@ -239,6 +239,15 @@ type Expander interface {
 	Expand(list config.List) (config.List, error)
 }
 
+// Homed is a kind whose things are installed as files in the home folder,
+// as agntc installs Claude's skills as folders in ~/.claude/skills: kit
+// puts them there itself, so a data restore never carries them.
+type Homed interface {
+	// HomePaths are the paths in the home folder installing names makes,
+	// each from ~, a file or a folder: none for a name that doesn't say.
+	HomePaths(names []string) []string
+}
+
 // Unattended is a kind some of whose things kit's scheduled run may install
 // by itself, with no one there: cheap, safe, never removing anything.
 type Unattended interface {

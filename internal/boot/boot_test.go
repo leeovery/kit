@@ -426,6 +426,39 @@ func TestThisMac(t *testing.T) {
 	}
 }
 
+// The boot records when this Mac's set-up began as it first starts on a Mac
+// kit hasn't named, and never again; on a Mac kit has named, it records
+// nothing, as that Mac may be in use.
+func TestBeginRecordsWhenSetUpBegan(t *testing.T) {
+	first := time.Date(2026, 11, 20, 9, 0, 0, 0, time.UTC)
+	b, _ := newBoot(t, runnertest.New(t), GitHub{}, &asker{})
+	b.Now = func() time.Time { return first }
+	if began, err := Began(b.State); err != nil || !began.IsZero() {
+		t.Errorf("Began() before = %v, %v; want zero", began, err)
+	}
+	if err := b.Begin(); err != nil {
+		t.Fatal(err)
+	}
+	b.Now = func() time.Time { return first.Add(time.Hour) }
+	if err := b.Begin(); err != nil {
+		t.Fatal(err)
+	}
+	if began, err := Began(b.State); err != nil || !began.Equal(first) {
+		t.Errorf("Began() = %v, %v; want the first start, %v", began, err, first)
+	}
+
+	named, _ := newBoot(t, runnertest.New(t), GitHub{}, &asker{})
+	if err := config.WriteMachine(named.State, "laptop"); err != nil {
+		t.Fatal(err)
+	}
+	if err := named.Begin(); err != nil {
+		t.Fatal(err)
+	}
+	if began, err := Began(named.State); err != nil || !began.IsZero() {
+		t.Errorf("on a named Mac, Began() = %v, %v; want zero", began, err)
+	}
+}
+
 // The self-test: the chip, memory, the disk, macOS, the network.
 func TestSelfTest(t *testing.T) {
 	gh := &gitHub{}

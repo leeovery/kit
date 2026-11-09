@@ -118,6 +118,25 @@ func (*Skills) Key(name string) string {
 	return name
 }
 
+// skillsFolder is where agntc installs Claude's skills for every project, a
+// folder each, named as the skill is.
+const skillsFolder = "~/.claude/skills/"
+
+// HomePaths are the folders the skills named install into: the skill a
+// name after its repo names, as in github/gh-stack/gh-stack, has a folder
+// of that name. What a pack, or a repo alone, installs only the repo says,
+// so it names none.
+func (s *Skills) HomePaths(names []string) []string {
+	var paths []string
+	for _, name := range names {
+		parts := strings.Split(s.Key(name), "/")
+		if len(parts) == 3 && !slices.Contains(parts, "") {
+			paths = append(paths, skillsFolder+parts[2])
+		}
+	}
+	return paths
+}
+
 // Resolve takes every name as agntc's key for an install: one that isn't
 // fails to install.
 func (*Skills) Resolve(_ context.Context, names []string) (map[string]string, error) {

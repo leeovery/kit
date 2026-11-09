@@ -158,6 +158,10 @@ func (a *app) bootstrap(ctx context.Context, mac, repo string, handedOver bool) 
 	if asks != nil {
 		b.Keep = asks.Keep
 	}
+	if err := b.Begin(); err != nil {
+		_ = face.Close()
+		return err
+	}
 
 	// The splash plays while the self-test runs; enter at its end starts the
 	// boot, and the boot log takes its place.

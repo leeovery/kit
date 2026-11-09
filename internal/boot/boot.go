@@ -391,17 +391,40 @@ func and(names []string) string {
 // state is what a boot keeps between its runs, beside the checks: the
 // config repository it read; a new Mac's name till kit-config has it
 // committed, and the Mac it starts as a copy of, if any; the terminal given
-// Full Disk Access, as the person said, before its first launch; and when
-// kit, handed over to, took the boot on there.
+// Full Disk Access, as the person said, before its first launch; when kit,
+// handed over to, took the boot on there; and when this Mac's set-up began.
 type state struct {
 	Repo    string    `json:"repo,omitempty"`
 	NewMac  string    `json:"new_mac,omitempty"`
 	From    string    `json:"from,omitempty"`
 	Access  string    `json:"access,omitempty"`
 	Arrived time.Time `json:"arrived,omitzero"`
+	Began   time.Time `json:"began,omitzero"`
 }
 
 const stateName = "bootstrap.json"
+
+// Begin records that this Mac's set-up begins now, as the boot starts on a
+// Mac kit hasn't named: once, never on a Mac kit has named, which it may
+// have set up before, or which is in use.
+func (b *Boot) Begin() error {
+	mac, err := config.ReadMachine(b.State)
+	if err != nil || mac != "" {
+		return err
+	}
+	return kitstate.Update(b.State, stateName, func(st *state) {
+		if st.Began.IsZero() {
+			st.Began = b.Now()
+		}
+	})
+}
+
+// Began is when this Mac's set-up began, as the boot recorded it in
+// stateDir: zero when it didn't, as on a Mac set up otherwise, or in use.
+func Began(stateDir string) (time.Time, error) {
+	st, err := kitstate.Load[state](stateDir, stateName)
+	return st.Began, err
+}
 
 // NewMac is the new Mac the boot added to kit-config, as its record in
 // stateDir names it, till kit apply has it committed (ForgetNewMac): "" for

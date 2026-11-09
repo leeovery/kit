@@ -470,3 +470,34 @@ func TestListPrefsSections(t *testing.T) {
 		t.Errorf("[prefs apps] entry = %+v", e)
 	}
 }
+
+// A restore line is a path, spaces and all, up to its first -- after a space
+// or tab, then its options as a shell splits them, then its note: a # after
+// a space in the path starts the note, though one in quotes among the
+// options doesn't. The shared file's lines come first, then the Mac's.
+func TestListRestoreSection(t *testing.T) {
+	cfg := loadRepo(t, map[string]string{
+		"shared/declarations": "[restore]\n~/Documents\n",
+		"laptop/declarations": "[restore]\n# Claude's own\n" +
+			"~/.claude --skip cache --skip 'plugins/*'   # less its caches\n" +
+			"~/Library/Application Support/Some App\t--skip \"a #b\"\n" +
+			"~/.zsh_history   # the shell's -- all of it\n",
+	})
+	got, err := cfg.List(config.RestoreKind, "laptop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []config.Entry{
+		{Name: "~/Documents", Scope: "shared", Section: "restore", Line: 2},
+		{Name: "~/.claude", Value: "--skip cache --skip 'plugins/*'", Scope: "laptop", Section: "restore", Line: 3, Note: "less its caches", Notes: "Claude's own"},
+		{Name: "~/Library/Application Support/Some App", Value: `--skip "a #b"`, Scope: "laptop", Section: "restore", Line: 4},
+		{Name: "~/.zsh_history", Scope: "laptop", Section: "restore", Line: 5, Note: "the shell's -- all of it"},
+	}
+	if !reflect.DeepEqual(got.Entries, want) || !got.Declared {
+		t.Errorf("List() = %+v\nwant %+v", got.Entries, want)
+	}
+	cfg = loadRepo(t, map[string]string{"laptop/declarations": "[restore]\n~/Code --skip 'vendor\n"})
+	if _, err := cfg.List(config.RestoreKind, "laptop"); err == nil || !strings.Contains(err.Error(), "laptop/declarations:2: a quote isn't closed") {
+		t.Errorf("a quote left open: List() error = %v", err)
+	}
+}

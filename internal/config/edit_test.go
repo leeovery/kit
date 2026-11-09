@@ -763,6 +763,41 @@ func TestDeclareAPathGoesLast(t *testing.T) {
 	}
 }
 
+// A restore line goes last in its section, which goes in its place among
+// the file's: its path, then its options, then its note. One whose path or
+// options wouldn't read back as they are is refused.
+func TestDeclareARestoreLine(t *testing.T) {
+	cfg := loadRepo(t, map[string]string{"laptop/declarations": "[prefs files]\n~/.config/app/settings.json\n\n[steps]\ntool \"Install it\"\n"})
+	for _, e := range []config.Entry{
+		{Name: "~/Code"},
+		{Name: "~/Library/Application Support/Some App", Value: "--skip 'Cache Data'", Note: "its sessions"},
+	} {
+		if err := cfg.Declare(config.RestoreKind, "laptop", e); err != nil {
+			t.Fatalf("Declare(%s) = %v", e.Name, err)
+		}
+	}
+	want := "[prefs files]\n~/.config/app/settings.json\n\n[restore]\n~/Code\n~/Library/Application Support/Some App --skip 'Cache Data'   # its sessions\n\n[steps]\ntool \"Install it\"\n"
+	if got := readFile(t, cfg, "laptop/declarations"); got != want {
+		t.Errorf("laptop = %q, want %q", got, want)
+	}
+	for name, e := range map[string]config.Entry{
+		"a path holding --":          {Name: "~/a --b"},
+		"a path holding a note":      {Name: "~/a #b"},
+		"options not starting --":    {Name: "~/a", Value: "b"},
+		"options holding a note":     {Name: "~/a", Value: "--skip b # c"},
+		"options with a quote open":  {Name: "~/a", Value: "--skip 'b"},
+		"no path":                    {Name: "", Value: "--skip b"},
+		"a path already in the file": {Name: "~/Code"},
+	} {
+		if err := cfg.Declare(config.RestoreKind, "laptop", e); err == nil {
+			t.Errorf("%s: Declare() = nil error", name)
+		}
+	}
+	if got := readFile(t, cfg, "laptop/declarations"); got != want {
+		t.Errorf("laptop = %q after refusals, want it as it was", got)
+	}
+}
+
 // Undeclaring a section's last line keeps the section when it still holds
 // comments of its own, header and comments, which read back as a section
 // declaring nothing; one without goes.
@@ -824,6 +859,7 @@ func TestReadingsTellLinesApart(t *testing.T) {
 		"a secret kept elsewhere":             {"secrets", "TOKEN op://vault/Item/token", "secret", config.Entry{Name: "TOKEN", Value: "op://vault/Other/token"}},
 		"a formula held for another":          {"homebrew formulae --after cask:x", "go", "brew", config.Entry{Name: "go", Hold: "--after cask:y"}},
 		"a step by hand's steps, given apart": {"manual", "sign-in \"Sign in\"\n  Open the app", config.ManualKind, config.Entry{Name: "sign-in", Value: `"Sign in"`, Steps: []string{"Open it"}}},
+		"a restored path skipping otherwise":  {"restore", "~/Code --skip vendor", config.RestoreKind, config.Entry{Name: "~/Code", Value: "--skip 'vendor/*'"}},
 	} {
 		cfg := loadRepo(t, map[string]string{"laptop/declarations": "[" + c.section + "]\n" + c.line + "\n"})
 		err := cfg.CheckDeclareShared(c.kind, c.e, []string{"laptop"})
@@ -844,6 +880,22 @@ func TestCarriedOptionsAreASet(t *testing.T) {
 		t.Fatalf("DeclareShared() = %v", err)
 	}
 	if got := readFile(t, cfg, "shared/declarations"); got != "[manual]\nsign-in \"Sign in\" --after a --after b\n" {
+		t.Errorf("shared/declarations = %q", got)
+	}
+}
+
+// A restore line's skips compare as a set: two Macs' lines skipping the
+// same, in another order and quoted otherwise, move into the shared file as
+// one.
+func TestRestoreSkipsAreASet(t *testing.T) {
+	cfg := loadRepo(t, map[string]string{
+		"laptop/declarations": "[restore]\n~/Code --skip a --skip 'b/*'\n",
+		"studio/declarations": "[restore]\n~/Code --skip b/* --skip a\n",
+	})
+	if _, _, err := cfg.DeclareShared(config.RestoreKind, config.Entry{Name: "~/Code", Value: "--skip a --skip 'b/*'"}, []string{"laptop", "studio"}); err != nil {
+		t.Fatalf("DeclareShared() = %v", err)
+	}
+	if got := readFile(t, cfg, "shared/declarations"); got != "[restore]\n~/Code --skip a --skip 'b/*'\n" {
 		t.Errorf("shared/declarations = %q", got)
 	}
 }
