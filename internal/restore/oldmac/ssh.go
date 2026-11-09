@@ -52,7 +52,9 @@ var keyTypes = []string{"ssh-", "ecdsa-", "sk-"}
 // patterns before them and a comment after left out), under alias.
 func pinLine(alias, key string) (string, error) {
 	fields := strings.Fields(key)
-	if len(fields) >= 3 && !isKeyType(fields[0]) {
+	// A known-hosts line's host patterns come before its type, where a .pub
+	// file's key does: either's host can look like a type.
+	if len(fields) >= 3 && isKeyType(fields[1]) {
 		fields = fields[1:]
 	}
 	if len(fields) < 2 || !isKeyType(fields[0]) {
@@ -73,8 +75,9 @@ func isKeyType(field string) bool {
 // asked, as there's no one to answer it; only ssh's errors said, so its
 // notice of a host key added never stands in for rsync's reason; and the
 // Mac's host key either the one pinned, in the file pinnedHosts, under
-// alias (the old Mac's kit name), and no other file's; or, with no
-// pinnedHosts, taken on first sight into kit's own file, knownHosts.
+// alias (the old Mac's kit name), and nowhere else's (no other file, no
+// command of the person's config, no DNS); or, with no pinnedHosts, taken
+// on first sight into kit's own file, knownHosts.
 func sshOptions(knownHosts, pinnedHosts, alias string, port int) []string {
 	opts := []string{"-o", "BatchMode=yes", "-o", "ConnectTimeout=" + strconv.Itoa(connectTimeout)}
 	if pinnedHosts != "" {
@@ -82,6 +85,8 @@ func sshOptions(knownHosts, pinnedHosts, alias string, port int) []string {
 			"-o", "StrictHostKeyChecking=yes",
 			"-o", "UserKnownHostsFile="+sshValue(pinnedHosts),
 			"-o", "GlobalKnownHostsFile=/dev/null",
+			"-o", "KnownHostsCommand=none",
+			"-o", "VerifyHostKeyDNS=no",
 			"-o", "HostKeyAlias="+alias)
 	} else {
 		opts = append(opts,
@@ -97,12 +102,26 @@ func sshOptions(knownHosts, pinnedHosts, alias string, port int) []string {
 
 // sshValue is v as ssh reads an option's value: one holding a space in
 // double quotes, as ssh splits UserKnownHostsFile's at spaces into several
-// files.
+// files. v never holds what checkStateDir refuses.
 func sshValue(v string) string {
 	if !strings.ContainsAny(v, " \t") {
 		return v
 	}
-	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(v) + `"`
+	return `"` + v + `"`
+}
+
+// unsafeInPath are what a path in ssh's options can't hold: ssh expands %
+// and ${…} in a known-hosts file's path, rsync can't split --rsh round a
+// ', and " and \ would need quoting of their own.
+const unsafeInPath = `%$'"\`
+
+// checkStateDir says why kit's state folder, dir, can't hold the files
+// ssh's options name: nil when it can.
+func checkStateDir(dir string) error {
+	if strings.ContainsAny(dir, unsafeInPath) {
+		return fmt.Errorf("kit's state folder, %s, holds one of %s, which ssh's options can't name: copying from the old Mac needs it without them", dir, unsafeInPath)
+	}
+	return nil
 }
 
 // remote is ssh running script, a /bin/sh script, on host through opts:
@@ -167,7 +186,15 @@ const (
 	keyKit       = "kit"
 	keyProtected = "protected"
 	keyRsync     = "rsync"
+	keyHostKey   = "hostkey"
 )
+
+// hostKeys are a Mac's SSH host keys' public halves, in sshDir, as patterns,
+// the one tried first first.
+var hostKeys = []string{"ssh_host_ed25519_key.pub", "ssh_host_*_key.pub"}
+
+// sshDir is where macOS keeps its SSH host keys.
+const sshDir = "/etc/ssh"
 
 // protected are the folders in the home folder SSH may read only with
 // Remote Login's full disk access, the first there the one tried.
@@ -185,10 +212,16 @@ const (
 // probeScript asks a Mac, in one go: who SSH reaches it as, and their home
 // folder; its kit name, as config.ReadMachine reads it, from kit's state
 // where config.Locate puts it; whether SSH may read the first of the
-// protected folders there, which needs Remote Login's full disk access; and
-// the version of its rsync, the one at rsync. Each answer's a line,
-// key=value, as the person's shell can print lines of its own.
-func probeScript(rsync string) string {
+// protected folders there, which needs Remote Login's full disk access;
+// the version of its rsync, the one at rsync; and its SSH host key, the
+// first of hostKeys in keys, anyone may read, its type and key. Each
+// answer's a line, key=value, as the person's shell can print lines of its
+// own.
+func probeScript(rsync, keys string) string {
+	globs := make([]string, len(hostKeys))
+	for i, k := range hostKeys {
+		globs[i] = shellQuote(keys) + "/" + k
+	}
 	return strings.Join([]string{
 		`d=${XDG_STATE_HOME:-}`,
 		`case $d in /*) ;; *) d=$HOME/.local/state ;; esac`,
@@ -205,6 +238,9 @@ func probeScript(rsync string) string {
 		`echo "` + keyProtected + `=$p"`,
 		`r=` + shellQuote(rsync),
 		`if [ -x "$r" ]; then "$r" --version 2>&1 | sed 's/^/` + keyRsync + `=/'; fi`,
+		`for k in ` + strings.Join(globs, " ") + `; do`,
+		`  if [ -r "$k" ]; then echo "` + keyHostKey + `=$(cut -d ' ' -f 1,2 "$k")"; break; fi`,
+		`done`,
 	}, "\n")
 }
 
@@ -233,7 +269,7 @@ func (p probed) one(key string) string {
 
 // probe asks the Mac at host, through opts, what probeScript does.
 func (f Finder) probe(ctx context.Context, opts []string, host string) (probed, error) {
-	res, err := f.Run.Run(ctx, remote(opts, host, probeScript(RemoteRsync), probeTimeout))
+	res, err := f.Run.Run(ctx, remote(opts, host, probeScript(RemoteRsync, sshDir), probeTimeout))
 	if err != nil {
 		return nil, sshFailed(err)
 	}

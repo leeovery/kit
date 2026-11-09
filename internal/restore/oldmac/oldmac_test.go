@@ -60,15 +60,22 @@ func rsyncSays(t *testing.T, name string) string {
 	return b.String()
 }
 
+// The SSH host keys of two Macs, their types and keys.
+const (
+	laptopKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl"
+	otherKey  = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC7"
+)
+
 // says is the probe's answer from a Mac called kit whose ~/Documents SSH
-// reads, with Homebrew's rsync 3.5.2: "" for a Mac without kit.
+// reads, with Homebrew's rsync 3.5.2 and laptopKey: "" for a Mac without
+// kit.
 func says(t *testing.T, kit string) string {
 	t.Helper()
 	out := "user=" + user + "\nhome=" + home + "\n"
 	if kit != "" {
 		out += "kit=" + kit + "\n"
 	}
-	return out + "protected=read Documents\n" + rsyncSays(t, "rsync-version.txt")
+	return out + "protected=read Documents\n" + rsyncSays(t, "rsync-version.txt") + "hostkey=" + laptopKey + "\n"
 }
 
 // browsing is dns-sd -B's output finding names, each on interface 13.
@@ -232,7 +239,7 @@ func TestFindsTwoMacsOfOneNameAnError(t *testing.T) {
 	resolves(fake, laptop, reaching(laptop, laptopAt, 22))
 	resolves(fake, mini, reaching(mini, miniAt, 22))
 	asked(fake, laptopAt).Prints(says(t, "laptop"))
-	asked(fake, miniAt).Prints(says(t, "laptop"))
+	asked(fake, miniAt).Prints(strings.Replace(says(t, "laptop"), laptopKey, otherKey, 1))
 
 	_, err := finder(t, fake).Find(t.Context(), "laptop")
 	if errors.Is(err, ErrNoAnswer) || err == nil || !strings.Contains(err.Error(), "more than one Mac answers as laptop, "+miniAt+" and "+laptopAt) {
@@ -316,7 +323,7 @@ func TestFindsWithTheSSHOptionsExact(t *testing.T) {
 				t.Fatal(err)
 			}
 			ssh := fake.Commands()[2]
-			want := slices.Concat(tt.wantOpts(f.StateDir), []string{"--", laptopAt, "/bin/sh -c " + shellQuote(probeScript(RemoteRsync))})
+			want := slices.Concat(tt.wantOpts(f.StateDir), []string{"--", laptopAt, "/bin/sh -c " + shellQuote(probeScript(RemoteRsync, sshDir))})
 			if !slices.Equal(ssh.Args, want) {
 				t.Errorf("ssh's arguments = %q\nwant %q", ssh.Args, want)
 			}
@@ -485,20 +492,46 @@ func TestFindsWithoutWithdrawnMacs(t *testing.T) {
 
 func TestFindsOneMacUnderTwoNames(t *testing.T) {
 	const renamed = "Someone’s MacBook Pro (2)"
-	fake := runnertest.New(t)
-	browses(fake, browsing(laptop, renamed))
-	resolves(fake, laptop, reaching(laptop, laptopAt, 22))
-	shouted := strings.ToUpper(laptopAt)
-	resolves(fake, renamed, reaching(renamed, shouted, 22))
-	asked(fake, laptopAt).Prints(says(t, "laptop"))
-	asked(fake, shouted).Prints(says(t, "laptop"))
-
-	m, err := finder(t, fake).Find(t.Context(), "laptop")
-	if err != nil {
-		t.Fatal(err)
+	// On a clash of names macOS renames a Mac and its host, while its old
+	// name, still cached, reaches it too.
+	renamedAt := strings.TrimSuffix("Someones-MacBook-Pro-2.local.", ".")
+	tests := []struct {
+		name, at, key string
+	}{
+		{"renamed: another host, the same key", renamedAt, laptopKey},
+		{"no key read: the same host", strings.ToUpper(laptopAt), ""},
 	}
-	if m.Host != laptopAt {
-		t.Errorf("Find() = %s, want %s", m.Host, laptopAt)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fake := runnertest.New(t)
+			browses(fake, browsing(laptop, renamed))
+			resolves(fake, laptop, reaching(laptop, laptopAt, 22))
+			resolves(fake, renamed, reaching(renamed, tt.at, 22))
+			answer := strings.Replace(says(t, "laptop"), laptopKey, tt.key, 1)
+			asked(fake, laptopAt).Prints(answer)
+			asked(fake, tt.at).Prints(answer)
+
+			m, err := finder(t, fake).Find(t.Context(), "laptop")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if m.Host != laptopAt || m.HostKey != tt.key {
+				t.Errorf("Find() = %s with %q, want %s with %q", m.Host, m.HostKey, laptopAt, tt.key)
+			}
+		})
+	}
+}
+
+func TestFindsRefusingAStateFolderSSHCantName(t *testing.T) {
+	for _, odd := range []string{"100%", "$HOME", "it's", `say "kit"`, `back\slash`} {
+		t.Run(odd, func(t *testing.T) {
+			f := finder(t, runnertest.New(t))
+			f.StateDir = filepath.Join(f.StateDir, odd)
+			_, err := f.Find(t.Context(), "laptop")
+			if err == nil || !strings.Contains(err.Error(), "kit's state folder, "+f.StateDir+",") {
+				t.Errorf("Find() = %v, want the state folder refused, named", err)
+			}
+		})
 	}
 }
 
@@ -533,7 +566,7 @@ func TestFindsThePinnedMac(t *testing.T) {
 		t.Fatal(err)
 	}
 	file := filepath.Join(f.StateDir, "restore", "pinned_host")
-	wantOpts := []string{"-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=yes", "-o", "UserKnownHostsFile=" + file, "-o", "GlobalKnownHostsFile=/dev/null", "-o", "HostKeyAlias=laptop", "-o", "LogLevel=ERROR"}
+	wantOpts := []string{"-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=yes", "-o", "UserKnownHostsFile=" + file, "-o", "GlobalKnownHostsFile=/dev/null", "-o", "KnownHostsCommand=none", "-o", "VerifyHostKeyDNS=no", "-o", "HostKeyAlias=laptop", "-o", "LogLevel=ERROR"}
 	for _, c := range fake.Commands() {
 		if c.Name == "ssh" && !slices.Equal(c.Args[:len(wantOpts)], wantOpts) {
 			t.Errorf("ssh's options = %q\nwant %q", c.Args, wantOpts)
@@ -570,6 +603,8 @@ func TestPinsOnlyAKey(t *testing.T) {
 	tests := []struct{ name, key, want string }{
 		{"a .pub file's", hostKey, "laptop ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl\n"},
 		{"a known-hosts line's", "laptop.example.com,192.0.2.7 ecdsa-sha2-nistp256 AAAAE2VjZHNh", "laptop ecdsa-sha2-nistp256 AAAAE2VjZHNh\n"},
+		{"a known-hosts line's, its host like a type", "ssh-gateway.example.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5", "laptop ssh-ed25519 AAAAC3NzaC1lZDI1NTE5\n"},
+		{"a .pub file's, its comment like a type", "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5 ssh-key", "laptop ssh-ed25519 AAAAC3NzaC1lZDI1NTE5\n"},
 		{"no type", "AAAAC3NzaC1lZDI1NTE5", ""},
 		{"not base64", "ssh-ed25519 not*base64", ""},
 		{"nothing", " ", ""},
@@ -596,20 +631,24 @@ func TestPinsOnlyToAPlainName(t *testing.T) {
 // that runs its command through sh as the old Mac's shell would, rsync a
 // stand-in at a path with a space.
 func TestProbesForRealThroughTheShell(t *testing.T) {
+	ed25519, rsa := "ssh_host_ed25519_key.pub", "ssh_host_rsa_key.pub"
 	tests := []struct {
 		name      string
 		folders   []string
 		locked    string
 		state     string
 		protected string
+		// keys are the host keys there, and key the one it says.
+		keys []string
+		key  string
 	}{
-		{"~/Documents read", []string{"Documents", "Desktop"}, "", "", "read Documents"},
-		{"~/Documents locked", []string{"Documents"}, "Documents", "", "denied Documents"},
-		{"no ~/Documents, ~/Desktop locked", []string{"Desktop", "Downloads"}, "Desktop", "", "denied Desktop"},
-		{"no ~/Documents or ~/Desktop", []string{"Downloads"}, "", "", "read Downloads"},
-		{"none of them", nil, "", "", "none"},
-		{"kit's state where XDG_STATE_HOME says", []string{"Documents"}, "", "elsewhere", "read Documents"},
-		{"a relative XDG_STATE_HOME ignored", []string{"Documents"}, "", "relative", "read Documents"},
+		{"~/Documents read", []string{"Documents", "Desktop"}, "", "", "read Documents", []string{ed25519, rsa}, laptopKey},
+		{"~/Documents locked", []string{"Documents"}, "Documents", "", "denied Documents", []string{rsa}, otherKey},
+		{"no ~/Documents, ~/Desktop locked", []string{"Desktop", "Downloads"}, "Desktop", "", "denied Desktop", nil, ""},
+		{"no ~/Documents or ~/Desktop", []string{"Downloads"}, "", "", "read Downloads", []string{ed25519}, laptopKey},
+		{"none of them", nil, "", "", "none", []string{ed25519}, laptopKey},
+		{"kit's state where XDG_STATE_HOME says", []string{"Documents"}, "", "elsewhere", "read Documents", []string{ed25519}, laptopKey},
+		{"a relative XDG_STATE_HOME ignored", []string{"Documents"}, "", "relative", "read Documents", []string{ed25519}, laptopKey},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -648,13 +687,24 @@ func TestProbesForRealThroughTheShell(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			res, err := shellThrough(t, homeDir, env...).Run(t.Context(), remote(nil, laptopAt, probeScript(rsync), probeTimeout))
+			keys := filepath.Join(t.TempDir(), "etc ssh")
+			if err := os.Mkdir(keys, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			for _, k := range tt.keys {
+				key := map[string]string{ed25519: laptopKey, rsa: otherKey}[k]
+				if err := os.WriteFile(filepath.Join(keys, k), []byte(key+" root@laptop\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			res, err := shellThrough(t, homeDir, env...).Run(t.Context(), remote(nil, laptopAt, probeScript(rsync, keys), probeTimeout))
 			if err != nil {
 				t.Fatal(err)
 			}
 			p := readProbe(string(res.Stdout))
-			got := []string{p.one(keyKit), p.one(keyHome), p.one(keyProtected), rsyncThere(p[keyRsync]).Version}
-			if want := []string{"laptop", homeDir, tt.protected, "3.5.2"}; !slices.Equal(got, want) || p.one(keyUser) == "" {
+			got := []string{p.one(keyKit), p.one(keyHome), p.one(keyProtected), rsyncThere(p[keyRsync]).Version, p.one(keyHostKey)}
+			if want := []string{"laptop", homeDir, tt.protected, "3.5.2", tt.key}; !slices.Equal(got, want) || p.one(keyUser) == "" {
 				t.Errorf("probed %q (user %q), want %q", got, p.one(keyUser), want)
 			}
 		})

@@ -66,6 +66,9 @@ type Mac struct {
 	User, Home string
 	// Rsync is Homebrew's rsync there.
 	Rsync restore.Found
+	// HostKey is its SSH host key, its type and key, as it says it: "" when
+	// it couldn't read one.
+	HostKey string
 	// protected is whether SSH may read the first protected folder there,
 	// as the probe says it, and the folder.
 	protected, folder string
@@ -84,9 +87,13 @@ type candidate struct {
 
 // Find finds the Mac whose kit name is from: with a HostKey, the one
 // presenting it, as a Mac's name is only its own say. One Mac offering
-// Remote Login under two names counts once. None answering as from is an
-// error, ErrNoAnswer, saying of each Mac found why it isn't.
+// Remote Login under two names, as when it's renamed, counts once. None
+// answering as from is an error, ErrNoAnswer, saying of each Mac found why
+// it isn't.
 func (f Finder) Find(ctx context.Context, from string) (*Mac, error) {
+	if err := checkStateDir(f.StateDir); err != nil {
+		return nil, err
+	}
 	pin, err := f.pin(from)
 	if err != nil {
 		return nil, err
@@ -176,7 +183,7 @@ func (f Finder) ask(ctx context.Context, name, from, pin string) candidate {
 	m := &Mac{
 		Name: strings.TrimSpace(p.one(keyKit)), Instance: name, Host: a.host, Port: a.port,
 		User: p.one(keyUser), Home: p.one(keyHome), protected: protected, folder: folder,
-		Rsync: rsyncThere(p[keyRsync]), run: f.Run, opts: opts,
+		Rsync: rsyncThere(p[keyRsync]), HostKey: p.one(keyHostKey), run: f.Run, opts: opts,
 	}
 	if m.Name == "" {
 		c.why = errors.New("has no kit")
@@ -186,10 +193,14 @@ func (f Finder) ask(ctx context.Context, name, from, pin string) candidate {
 	return c
 }
 
-// same reports whether m and other are the same Mac, at one host: a Mac
-// can offer Remote Login under two names, its old one still cached after
-// it's renamed.
+// same reports whether m and other are the same Mac: by their host keys,
+// as a Mac renamed for a clash of names offers Remote Login under its new
+// name and host while its old ones, still cached, reach it too; else, a
+// key unread, by their host.
 func (m *Mac) same(other *Mac) bool {
+	if m.HostKey != "" && other.HostKey != "" {
+		return m.HostKey == other.HostKey
+	}
 	return strings.EqualFold(m.Host, other.Host) && m.Port == other.Port
 }
 
