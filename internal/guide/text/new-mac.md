@@ -49,6 +49,45 @@ the safety net. A check that needs one of its own secrets says not
 done (exit 1) when it hasn't synced yet, never 3: kit waits for it inside
 apply.
 
+## The person's data
+
+A Mac started from another (the boot's "start from a Mac", or
+`kit machine add --from`) carries its `[restore]` list in its copied
+declarations, and its data restore brings those paths across: code,
+history, ledgers, tools' state. Nothing else of the old Mac's comes: kit
+rebuilds the rest from kit-config.
+
+- From where: the Mac it started from, over the local network, while it
+  answers; else its Time Machine disk, attached, or Arq's backup, which the
+  person restores in Arq for kit to put in place
+  (`kit apply --restore-from time-machine|arq`).
+- When: once Homebrew's rsync is installed and, copying from the old Mac,
+  the secrets have synced. Claude Code's MCP servers and skills, the
+  reinstall, and a step declared `--after restore` wait for it; nothing
+  else does, so a step of your own that writes into a listed folder must
+  say `--after restore`. Linked files and apps' settings don't wait: the
+  copy leaves them out. It runs beside the rest, so the long copy holds up
+  nothing quick.
+- What it leaves out: what kit links, prefs saves or a kind puts in place
+  (Claude Code's skills, the files secrets fill), which kit brings itself;
+  kit's own folders; what the backups leave out (`[backup exclusions]`,
+  and, from the old Mac, folders marked excluded from backups, though one
+  holding git checkouts is copied whole); Finder's .DS_Store and .localized
+  files; and what its line's `--skip` names.
+- What it never touches: a path already holding files from before the
+  set-up, never merged into. What the set-up itself wrote there, as a
+  shell's history, is set aside in kit's state first.
+- Then the reinstall: each restored project's dependencies are installed
+  again from its lockfile (Composer, npm, pnpm, Yarn, Bun, uv), in main
+  checkouts and the person's own worktrees, never agents' or submodules.
+  Yarn Berry projects are the person's to install; Go, Cargo, Swift and
+  Terraform are left alone. `kit apply reinstall` tries those that failed
+  again.
+
+A Mac without a `from`, or a line added on a Mac in use, restores nothing
+unless `kit apply --restore-from time-machine|arq` says so, and then only
+while the path is absent or empty: one holding data is never touched.
+
 ## What isn't there
 
 - Most apps have never been opened. A first launch is slow, may show
@@ -56,9 +95,11 @@ apply.
   may not answer a URL, AppleScript or its command line for a while.
 - No setting has been restored till the prefs step runs, near the end.
 - No secret has synced till the password manager's card is answered.
-- No repository is cloned but kit-config, no tool is signed in but gh, and
-  no cache is warm: Homebrew downloads everything afresh.
-- No file is there that a person made by hand on the old Mac.
+- No repository is there but kit-config till the data restore brings the
+  person's projects, no tool is signed in but gh, and no cache is warm:
+  Homebrew downloads everything afresh.
+- No file made by hand on the old Mac is there, but what `[restore]` lists,
+  once the restore has brought it.
 - Your shell isn't there: steps run in kit's environment.
 
 The Mac is busy, dozens of installs at once, and the network is shared:

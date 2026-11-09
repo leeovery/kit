@@ -54,17 +54,22 @@ Take the first that fits, in this order:
    Claude Code's MCP servers and skills (`kit --help` lists them all).
 2. A setting: macOS's (`kit defaults add`), power (`kit power add`), git's
    (`kit git-config add`).
-3. A linked file: `kit file add` moves a file into kit-config and links it
-   back, for a file that only you write.
-4. Captured settings: kit prefs saves apps' preferences and the settings
-   files kit-config's `[prefs files]` names, and restores them on a new Mac.
-5. A secret: `kit secret add`, into the shell's environment or a file.
-6. A step done by hand: `kit manual add`, for what only a person can do.
-7. A step of your own: `kit step add`, a script, the last resort.
+3. A file the person writes, a config or a script: a linked file.
+   `kit file add` moves it into kit-config and links it back. Never a file
+   its program replaces when it saves: the program would put a copy where
+   the link was, and the link is lost. That's an app's settings, item 5.
+4. A secret: `kit secret add`, into the shell's environment or a file.
+5. An app's settings, how it behaves: kit prefs saves apps' preferences and
+   the settings files kit-config's `[prefs files]` names, and restores them
+   on a new Mac.
+6. The person's data: code, history, ledgers, a tool's state. The restore
+   list, `[restore]`: `kit restore add`.
+7. A step done by hand: `kit manual add`, for what only a person can do.
+8. A step of your own: `kit step add`, a script, the last resort.
 
-A file its program replaces when it saves is captured by prefs, never
-linked: the program would put a copy where the link was, and the link is
-lost.
+A file or folder that's none of 3 to 6 is nothing of kit's: kit rebuilds
+it, as apps, packages and tools, or it's a cache. Every path in the home
+folder has one owner, and a folder that mixes them keeps each path's own.
 
 What macOS makes a person approve, such as a privacy permission, a driver or
 a sign-in, is a step done by hand: kit says what to do, and a command checks
@@ -74,6 +79,19 @@ A Homebrew package downloaded from a private repository needs a token.
 `kit brew add` and `kit cask add` check the download, and put the line in
 its section held for that secret, as in `[homebrew casks --secret TOKEN]`,
 by themselves; a new Mac installs it once the secret has synced.
+
+### The person's data
+
+When you build a tool that keeps data, add its folder then, with
+`kit restore add ~/.local/state/<tool>`: a new Mac started from this one
+brings it across. Adding it copies nothing here.
+
+The restore leaves out by itself what kit links, prefs saves or a kind puts
+in place, kit's own folders and what the backups leave out, so none of
+those is ever a `--skip`. A path that's one of those, or in one, is
+refused, as is one another line holds or is in. `--skip` is for what in a
+listed folder is neither the person's data nor kit's, such as a tool's own
+credentials in its state folder, which its own setup makes again.
 
 ## Steps of your own
 
@@ -166,6 +184,14 @@ secret, and a step declared with `--secret`.
 Apps' settings are restored once every cask and App Store app is installed,
 near the end of the run.
 
+On a Mac started from another, the data restore brings across the paths
+`[restore]` lists, from that Mac, else a backup of it, once Homebrew's rsync
+is in and, from the old Mac, the secrets have synced. Claude Code's MCP
+servers and skills, the reinstall of restored projects' dependencies, and a
+step declared `--after restore` wait for it; nothing else does. A step of
+your own that writes into a listed folder must say `--after restore`.
+Linked files and apps' settings don't wait: the copy leaves them out.
+
 Nothing waits on a step done by hand unless its line names what waits, with
 `--before`: then it comes up as a card partway through, once what it comes
 after is done. The rest come up at the end. The person may not be at the
@@ -198,9 +224,10 @@ that edit (rule 3):
 An app opened before its settings are restored leaves its restore waiting
 till it quits.
 
-Homebrew's download cache, a shell's tokens, a clone in your projects
-folder, a file made by hand: none of them is on a new Mac. A try that
-passed because of one proves nothing.
+Homebrew's download cache, a shell's tokens, a file made by hand: none of
+them is on a new Mac. What `[restore]` lists, your projects among them, is
+there only once the data restore has brought it. A try that passed because
+of one proves nothing.
 
 A new Mac is busy, with dozens of installs at once: give what waits on the
 network or an app time, minutes not seconds.
