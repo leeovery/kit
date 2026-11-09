@@ -3,6 +3,7 @@
 package optest
 
 import (
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
@@ -14,9 +15,10 @@ import (
 var reference = regexp.MustCompile(`\{\{(.+?)\}\}`)
 
 // Holds scripts fake's op as 1Password holding values, each by its
-// reference, answers it: op read, each value ended by a newline; op inject,
-// each reference in the template it reads replaced by its value, and failing
-// whole for a reference it doesn't hold.
+// reference, answers it: op read, each value's bytes ended by a newline, as
+// op gives them through a pipe; op inject, each reference in the template
+// it reads replaced by its value, each byte that isn't UTF-8 turned into
+// U+FFFD, as op's does, and failing whole for a reference it doesn't hold.
 func Holds(fake *runnertest.Fake, values map[string]string) {
 	for ref, value := range values {
 		fake.On("op", "read", ref).Prints(value + "\n")
@@ -34,6 +36,18 @@ func Holds(fake *runnertest.Fake, values map[string]string) {
 		if len(missing) > 0 {
 			return "", fmt.Errorf("[ERROR] could not read secret %s", strings.Join(missing, ", "))
 		}
-		return out, nil
+		return string([]rune(out)), nil
 	})
+}
+
+// Attaches scripts fake's op item get of item, op://vault/item, as
+// 1Password keeping attachments of names in it, and no fields.
+func Attaches(fake *runnertest.Fake, item string, names ...string) {
+	vault, title, _ := strings.Cut(strings.TrimPrefix(item, "op://"), "/")
+	files := make([]map[string]string, len(names))
+	for i, name := range names {
+		files[i] = map[string]string{"id": fmt.Sprint("file", i), "name": name}
+	}
+	doc, _ := json.Marshal(map[string]any{"title": title, "fields": []any{}, "files": files})
+	fake.On("op", "item", "get", title, "--vault", vault, "--format", "json").Prints(string(doc))
 }

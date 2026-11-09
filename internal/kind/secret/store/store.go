@@ -35,13 +35,17 @@ type Driver interface {
 	// Unlock opens a session, as reading a value needs, the person
 	// approving it as the store asks them to: nil once it answers.
 	Unlock(ctx context.Context, run runner.Runner) error
-	// Read reads the value at ref, without the newlines it ends with.
+	// Read reads the value at ref, exactly as the store keeps it.
 	Read(ctx context.Context, run runner.Runner, ref string) (string, error)
-	// ReadMany reads the values at refs at once, as Read does each,
-	// failing whole when one won't read, saying why in the store's words:
-	// with Unread when it names those it couldn't, the values it read
-	// beside them given back.
+	// ReadMany reads the values at refs at once, as Read does each, a value
+	// of text alone read whole: failing whole when one won't read, saying
+	// why in the store's words, with Unread when it names those it
+	// couldn't, the values it read beside them given back.
 	ReadMany(ctx context.Context, run runner.Runner, refs []string) (map[string]string, error)
+	// ReadFile reads the value at ref as a file holds it: a file the store
+	// keeps, an attachment, byte for byte; a field's text ended by one
+	// newline, in place of any it ends with. It fails as Read does.
+	ReadFile(ctx context.Context, run runner.Runner, ref string) (string, error)
 	// Field is field short for item, where Store would keep a value, as
 	// Store returns it: an error, in the store's own words (About.Field),
 	// when it isn't where one can go. It asks the store nothing.

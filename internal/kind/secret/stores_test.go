@@ -91,6 +91,10 @@ func (f *fakeStore) Read(ctx context.Context, run runner.Runner, ref string) (st
 	return got[ref], err
 }
 
+func (f *fakeStore) ReadFile(ctx context.Context, run runner.Runner, ref string) (string, error) {
+	return f.Read(ctx, run, ref)
+}
+
 func (f *fakeStore) ReadMany(_ context.Context, _ runner.Runner, refs []string) (map[string]string, error) {
 	f.reads = append(f.reads, refs)
 	if f.locked {

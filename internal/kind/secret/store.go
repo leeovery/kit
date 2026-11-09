@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/kind/secret/store"
@@ -63,14 +62,14 @@ func (s *Secrets) Delete(ctx context.Context, d store.Driver, item, short string
 	return d.Delete(ctx, s.run, item, short)
 }
 
-// ReadBack reads ref, in full, from d and compares it with want, never
-// showing either.
+// ReadBack reads ref, in full, from d and compares it with want, byte for
+// byte, never showing either.
 func (s *Secrets) ReadBack(ctx context.Context, d store.Driver, ref, want string) error {
 	got, err := d.Read(ctx, s.run, ref)
 	if err != nil {
 		return err
 	}
-	if got != strings.TrimRight(want, "\n") {
+	if got != want {
 		return errors.New(d.About().Name + " gave back a different value")
 	}
 	return nil

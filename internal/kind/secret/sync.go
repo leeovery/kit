@@ -100,14 +100,17 @@ func (s *Secrets) Cards() []kind.Card {
 }
 
 // readAll reads refs from d in one read, as a store may have the person
-// approve each, waiting for them as long as they take. Only should d name
-// refs it couldn't read (store.Unread) are those left out, each with d's
-// words, and the rest read in one more, no further: any other failure, the
-// person not approving, or not in time, holds back every ref not read, for
-// the next sync to read again, as reading in pieces would have them
-// approve each.
+// approve each, waiting for them as long as they take: none, given none.
+// Only should d name refs it couldn't read (store.Unread) are those left
+// out, each with d's words, and the rest read in one more, no further: any
+// other failure, the person not approving, or not in time, holds back
+// every ref not read, for the next sync to read again, as reading in
+// pieces would have them approve each.
 func (s *Secrets) readAll(ctx context.Context, d store.Driver, refs []string) (values, unread map[string]string, err error) {
 	values, unread = map[string]string{}, map[string]string{}
+	if len(refs) == 0 {
+		return values, unread, nil
+	}
 	rest := refs
 	for range 2 {
 		got, err := d.ReadMany(ctx, s.run, rest)
@@ -129,6 +132,27 @@ func (s *Secrets) readAll(ctx context.Context, d store.Driver, refs []string) (v
 	return values, unread, notRead(d, "")
 }
 
+// readFiles reads refs from d as files hold them, each alone, as a file's
+// bytes may not read whole beside others (store.Driver.ReadFile): as
+// readAll has them, those d names as ones it couldn't read left out, each
+// with d's words, and any other failure holding back every ref not read.
+func (s *Secrets) readFiles(ctx context.Context, d store.Driver, refs []string) (contents, unread map[string]string, err error) {
+	contents, unread = map[string]string{}, map[string]string{}
+	for _, ref := range refs {
+		got, err := d.ReadFile(ctx, s.run, ref)
+		named, isUnread := errors.AsType[store.Unread](err)
+		switch {
+		case err == nil:
+			contents[ref] = got
+		case isUnread && ctx.Err() == nil:
+			maps.Copy(unread, named)
+		default:
+			return contents, unread, notRead(d, err.Error())
+		}
+	}
+	return contents, unread, nil
+}
+
 // notRead is why d's secrets are held back when it didn't read them: what
 // it said, when it said something, and how to have it answer.
 func notRead(d store.Driver, said string) error {
@@ -140,11 +164,11 @@ func notRead(d store.Driver, said string) error {
 }
 
 // refs are the references of the declared secrets d keeps, each once, in
-// turn.
-func (s *Secrets) refs(d store.Driver) []string {
+// turn: the files', or the variables'.
+func (s *Secrets) refs(d store.Driver, files bool) []string {
 	var refs []string
 	for _, sec := range s.declared {
-		if sameStore(sec.store, d) && !slices.Contains(refs, sec.Ref) {
+		if sameStore(sec.store, d) && sec.IsFile() == files && !slices.Contains(refs, sec.Ref) {
 			refs = append(refs, sec.Ref)
 		}
 	}
@@ -155,8 +179,10 @@ func (s *Secrets) refs(d store.Driver) []string {
 // first the secrets of the stores ready now, signed in with their programs
 // on kit's PATH; then, waiting for the rest together, each other's as soon
 // as what it waits for has come, in a run that applies: its program, and
-// its sign-in, raised at a terminal (Cards). ~/.secrets.zsh is written whole each time (a variable
-// not read keeps its line, so a partial read never shrinks it), each file
+// its sign-in, raised at a terminal (Cards). ~/.secrets.zsh is written
+// whole each time, each value without the newlines it ends with (a
+// variable not read keeps its line, so a partial read never shrinks it);
+// each file as its store reads it as a file (store.Driver.ReadFile),
 // beside its place then renamed into it. A store signed out, or whose
 // program never comes, or that doesn't read them, holds back its own
 // secrets alone (Report.Held); a secret whose reference its store names as
@@ -168,7 +194,7 @@ func (s *Secrets) Sync(ctx context.Context) (Report, error) {
 	if err != nil {
 		return Report{}, err
 	}
-	sy := &syncing{s: s, used: s.used(), old: old, oldOrder: oldOrder, values: map[string]string{}, placed: map[string]bool{}, unread: map[string]string{}, down: map[string]string{},
+	sy := &syncing{s: s, used: s.used(), old: old, oldOrder: oldOrder, values: map[string]string{}, files: map[string]string{}, placed: map[string]bool{}, unread: map[string]string{}, down: map[string]string{},
 		report: Report{Failed: map[string]string{}, Held: map[string]string{}}}
 	var later []store.Driver
 	for _, d := range sy.used {
@@ -195,16 +221,18 @@ func (s *Secrets) Sync(ctx context.Context) (Report, error) {
 }
 
 // syncing is a sync as it goes: the stores the secrets are in, what
-// ~/.secrets.zsh held as it began, the values read so far, by reference,
-// the secrets put in place, the references their stores named as ones they
-// couldn't read, with the stores' words, each store down so far, by its
-// ID, with why its secrets are held back, and the report.
+// ~/.secrets.zsh held as it began, the variables' values and the files'
+// contents read so far, each by reference, the secrets put in place, the
+// references their stores named as ones they couldn't read, with the
+// stores' words, each store down so far, by its ID, with why its secrets
+// are held back, and the report.
 type syncing struct {
 	s        *Secrets
 	used     []store.Driver
 	old      map[string]string
 	oldOrder []string
 	values   map[string]string
+	files    map[string]string
 	placed   map[string]bool
 	unread   map[string]string
 	down     map[string]string
@@ -216,8 +244,8 @@ type syncing struct {
 // it's waiting for them, and what they're to do, and giving its job up
 // meanwhile. d's down when it doesn't read them all.
 func (sy *syncing) read(ctx context.Context, d store.Driver, session store.Session) {
-	refs := sy.s.refs(d)
-	if len(refs) == 0 {
+	refs, files := sy.s.refs(d, false), sy.s.refs(d, true)
+	if len(refs)+len(files) == 0 {
 		return
 	}
 	if session == store.SignedIn {
@@ -232,6 +260,11 @@ func (sy *syncing) read(ctx context.Context, d store.Driver, session store.Sessi
 	got, unread, err := sy.s.readAll(ctx, d, refs)
 	maps.Copy(sy.values, got)
 	maps.Copy(sy.unread, unread)
+	if err == nil {
+		got, unread, err = sy.s.readFiles(ctx, d, files)
+		maps.Copy(sy.files, got)
+		maps.Copy(sy.unread, unread)
+	}
 	if err != nil {
 		sy.down[d.About().ID] = err.Error()
 	}
@@ -327,7 +360,7 @@ func finished(ctx context.Context, name string) bool {
 func (sy *syncing) put(ctx context.Context) error {
 	fresh := false
 	for _, sec := range sy.s.declared {
-		_, read := sy.values[sec.Ref]
+		_, read := sy.value(sec)
 		fresh = fresh || read && !sy.placed[sec.Name]
 	}
 	if !fresh {
@@ -335,7 +368,7 @@ func (sy *syncing) put(ctx context.Context) error {
 	}
 	var env []string
 	for _, sec := range sy.s.declared {
-		v, ok := sy.values[sec.Ref]
+		v, ok := sy.value(sec)
 		switch {
 		case !ok:
 			if line, kept := sy.old[sec.Name]; kept && !sec.IsFile() {
@@ -344,7 +377,7 @@ func (sy *syncing) put(ctx context.Context) error {
 		case sec.IsFile():
 			sy.putFile(sec, v)
 		default:
-			line := "export " + sec.Name + "=" + quote(v)
+			line := "export " + sec.Name + "=" + quote(strings.TrimRight(v, "\n"))
 			if sec.Note != "" {
 				line += "   # " + sec.Note
 			}
@@ -371,13 +404,24 @@ func (sy *syncing) put(ctx context.Context) error {
 	return nil
 }
 
-// putFile puts a file secret's value in place, once.
-func (sy *syncing) putFile(sec Secret, value string) {
+// value is what's been read for sec, and whether it has: a file's
+// contents, or a variable's value.
+func (sy *syncing) value(sec Secret) (string, bool) {
+	read := sy.values
+	if sec.IsFile() {
+		read = sy.files
+	}
+	v, ok := read[sec.Ref]
+	return v, ok
+}
+
+// putFile puts a file secret's contents in place, once.
+func (sy *syncing) putFile(sec Secret, contents string) {
 	if sy.placed[sec.Name] {
 		return
 	}
 	sy.placed[sec.Name] = true
-	changed, err := sy.s.writeFile(sec, value)
+	changed, err := sy.s.writeFile(sec, contents)
 	if err != nil {
 		sy.report.Failed[sec.Name] = err.Error()
 		return
@@ -417,7 +461,7 @@ func (sy *syncing) finish() (Report, error) {
 // their reasons together. Nil otherwise, each store's secrets reported as
 // it stands.
 func (sy *syncing) allDown() error {
-	if len(sy.values) > 0 || len(sy.unread) > 0 || len(sy.used) == 0 || len(sy.down) < len(sy.used) {
+	if len(sy.values) > 0 || len(sy.files) > 0 || len(sy.unread) > 0 || len(sy.used) == 0 || len(sy.down) < len(sy.used) {
 		return nil
 	}
 	said := make([]string, len(sy.used))
@@ -440,11 +484,11 @@ func header(used []store.Driver) string {
 	return "# " + from + ": kit-config's secrets sections. kit apply\n# and kit secret sync rewrite it whole; change a secret in its store, or with kit.\n"
 }
 
-// writeFile puts a file secret's value in place, with its mode, ended by a
-// newline: 1 when it changed, else 0.
-func (s *Secrets) writeFile(sec Secret, value string) (int, error) {
+// writeFile puts a file secret's contents in place, with its mode: 1 when
+// it changed, else 0.
+func (s *Secrets) writeFile(sec Secret, contents string) (int, error) {
 	path := s.path(sec)
-	if old, err := os.ReadFile(path); err == nil && string(old) == value+"\n" {
+	if old, err := os.ReadFile(path); err == nil && string(old) == contents {
 		if info, err := os.Stat(path); err == nil && info.Mode().Perm() == sec.Mode {
 			return 0, nil
 		}
@@ -452,5 +496,5 @@ func (s *Secrets) writeFile(sec Secret, value string) (int, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return 0, err
 	}
-	return 1, writeFile(path, value+"\n", sec.Mode)
+	return 1, writeFile(path, contents, sec.Mode)
 }

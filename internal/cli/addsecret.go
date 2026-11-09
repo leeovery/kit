@@ -49,7 +49,8 @@ func (r *run) secrets() (*secret.Secrets, error) {
 
 // addSecret keeps a secret's value in its store (unless it's there
 // already, --ref), reads it back to compare, declares the secret, and
-// syncs, values never shown: one secret at a time. A new value goes where
+// syncs, a file from --from compared with the file synced, byte for byte,
+// values never shown: one secret at a time. A new value goes where
 // it's told, the block named (--in) or the item (--item), and its line in
 // the file's block for that item, made when there's none; a reference in an
 // item a block of the file is for goes in that block, short, and any other
@@ -113,6 +114,11 @@ func (a *app) addSecret(ctx context.Context, r *run, names []string, opts addOpt
 			return check.Result{State: check.Failed, Reason: "declared, but couldn't sync it: " + report.Failed[e.Name]}
 		case report.Held[e.Name] != "":
 			return check.Result{State: check.Failed, Reason: "declared, but couldn't sync it yet: " + report.Held[e.Name]}
+		}
+		if so.from != "" && (secret.Secret{Name: e.Name}).IsFile() {
+			if err := k.FileHolds(e.Name, value); err != nil {
+				return check.Result{State: check.Failed, Reason: "stored and declared, but checked against " + so.from + ": " + err.Error()}
+			}
 		}
 		summary := "declared in " + at.scope + said + ", synced"
 		if so.ref == "" {

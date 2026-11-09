@@ -137,24 +137,57 @@ func (Driver) Unlock(ctx context.Context, run runner.Runner) error {
 	return err
 }
 
-// Read reads a value with op read, without the newline op ends it with:
-// store.Unread when op names ref in saying why it couldn't.
+// Read reads a value with op read, through a pipe, which gives its bytes
+// exactly and one newline after them, taken off: store.Unread when op names
+// ref in saying why it couldn't.
 func (Driver) Read(ctx context.Context, run runner.Runner, ref string) (string, error) {
 	res, err := opRun(ctx, run, runner.Command{Args: []string{"read", ref}, Timeout: approvalTimeout, Secret: true})
 	if err != nil {
 		return "", unread(err, []string{ref})
 	}
-	return strings.TrimRight(string(res.Stdout), "\n"), nil
+	return strings.TrimSuffix(string(res.Stdout), "\n"), nil
+}
+
+// ReadFile reads a value as a file holds it, with Read, never op inject,
+// which turns each byte that isn't UTF-8 into U+FFFD: an attachment's bytes
+// exactly; a field's text ended by one newline, in place of any it ends
+// with. A value of a section's field is a field's; one of an item's own,
+// op://vault/item/name, an attachment's when the item has one of that name.
+func (d Driver) ReadFile(ctx context.Context, run runner.Runner, ref string) (string, error) {
+	value, err := d.Read(ctx, run, ref)
+	if err != nil {
+		return "", err
+	}
+	attached, err := isAttachment(ctx, run, ref)
+	if err != nil || attached {
+		return value, err
+	}
+	return strings.TrimRight(value, "\n") + "\n", nil
+}
+
+// isAttachment reports whether ref, a value's, is one of its item's
+// attachments, as op item get lists them.
+func isAttachment(ctx context.Context, run runner.Runner, ref string) (bool, error) {
+	parts, _ := path(ref)
+	if len(parts) != 3 {
+		return false, nil
+	}
+	_, doc, err := getItem(ctx, run, scheme+parts[0]+"/"+parts[1])
+	if err != nil {
+		return false, err
+	}
+	return holds(doc, parts[2]), nil
 }
 
 // ReadMany reads refs in one run of op inject, as 1Password may have the
 // person approve each run: a template on its standard input, each ref between
 // lines of a mark no value holds, so that a value of many lines reads back
-// whole, and each value without the newlines it ends with, as Read has it.
-// A ref with a $ or }} in it is read alone, with Read: a template would
-// read it as a variable, or as the reference's end. It fails with
-// store.Unread when op names refs in saying why it couldn't, the values
-// read beside them given back.
+// whole, and each value exactly, as Read has it. op inject is a text
+// template, so a value that isn't UTF-8, as a file may be, doesn't read
+// back whole: ReadFile reads those. A ref with a $ or }} in it is read
+// alone, with Read: a template would read it as a variable, or as the
+// reference's end. It fails with store.Unread when op names refs in saying
+// why it couldn't, the values read beside them given back.
 func (d Driver) ReadMany(ctx context.Context, run runner.Runner, refs []string) (map[string]string, error) {
 	plain, awkward := split(refs)
 	values, err := inject(ctx, run, plain)
@@ -214,7 +247,7 @@ func inject(ctx context.Context, run runner.Runner, refs []string) (map[string]s
 		return nil, errors.New("op inject gave back other than its template")
 	}
 	for i, ref := range refs {
-		values[ref] = strings.TrimRight(strings.TrimPrefix(parts[i+1], "\n"), "\n")
+		values[ref] = strings.TrimSuffix(strings.TrimPrefix(parts[i+1], "\n"), "\n")
 	}
 	return values, nil
 }

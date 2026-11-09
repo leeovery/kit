@@ -507,7 +507,8 @@ func TestASecretFilesAttachmentNamedWithAPeriod(t *testing.T) {
 	}
 	f := w.fake
 	f.On("op", "whoami")
-	f.On("op", "item", "get", "Item", "--vault", "vault", "--format", "json").Prints(`{"id":"abc","title":"Item","files":[{"id":"x","name":"other.json"}]}`)
+	f.On("op", "item", "get", "Item", "--vault", "vault", "--format", "json").Prints(`{"id":"abc","title":"Item","files":[{"id":"x","name":"other.json"}]}`).
+		Then().Prints(`{"id":"abc","title":"Item","files":[{"id":"x","name":"other.json"},{"id":"y","name":"token.json"}]}`)
 	f.On("op", "item", "edit", "Item", "--vault", "vault", `token\.json[file]=`+from)
 	optest.Holds(f, map[string]string{"op://vault/Item/token.json": `{"token":"x"}` + "\n", "op://vault/Item/Section/token": "the value"})
 	w.expectSync(t, []string{"laptop/declarations"}, "kit secret add ~/.config/tool/token.json (laptop)")
@@ -521,6 +522,41 @@ func TestASecretFilesAttachmentNamedWithAPeriod(t *testing.T) {
 	w.expectSync(t, []string{"laptop/declarations"}, "kit secret remove ~/.config/tool/token.json (laptop)")
 	if out, _, code := w.run(t, "secret", "remove", "~/.config/tool/token.json", "--delete-value"); code != 0 || !strings.Contains(out, "its value deleted from 1Password") {
 		t.Errorf("kit secret remove printed\n%s exit %d", out, code)
+	}
+}
+
+// A file kept from --from lands as it was, byte for byte, bytes that aren't
+// UTF-8 and the newlines it ends with too, and add checks it does: a file
+// synced otherwise, its attachment taken for a field's text, fails the add.
+func TestASecretFromAFileSyncsByteForByte(t *testing.T) {
+	blob := "\xff\xfe\x00kit\xc3\x28\x80\n\n"
+	for name, attached := range map[string]bool{"attached": true, "taken for a field": false} {
+		t.Run(name, func(t *testing.T) {
+			w := secretsWorld(t)
+			from := filepath.Join(t.TempDir(), "blob")
+			if err := os.WriteFile(from, []byte(blob), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			f := w.fake
+			f.On("op", "whoami")
+			get := f.On("op", "item", "get", "Item", "--vault", "vault", "--format", "json").Prints(`{"id":"abc","title":"Item","files":[]}`)
+			if attached {
+				get.Then().Prints(`{"id":"abc","title":"Item","files":[{"id":"x","name":"blob"}]}`)
+			}
+			f.On("op", "item", "edit", "Item", "--vault", "vault", "blob[file]="+from)
+			optest.Holds(f, map[string]string{"op://vault/Item/blob": blob, "op://vault/Item/Section/token": "the value"})
+			w.expectSync(t, []string{"laptop/declarations"}, "kit secret add ~/.config/tool/blob (laptop)")
+			out, _, code := w.run(t, "secret", "add", "~/.config/tool/blob", "--from", from, "--item", "op://vault/Item")
+			if attached {
+				if code != 0 || w.read(t, ".config/tool/blob") != blob {
+					t.Errorf("kit secret add printed\n%s exit %d; want the file synced byte for byte", out, code)
+				}
+				return
+			}
+			if want := "stored and declared, but checked against " + from + ": the file synced differs from it"; code == 0 || !strings.Contains(out, want) {
+				t.Errorf("kit secret add printed\n%s exit %d; want it failed, saying %q", out, code, want)
+			}
+		})
 	}
 }
 

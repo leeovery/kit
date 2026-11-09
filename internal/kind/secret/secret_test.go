@@ -118,6 +118,7 @@ func TestSyncPutsEachInPlace(t *testing.T) {
 		item + "/key-file":        "line one\nline two\n",
 		"op://vault/Other/field":  "elsewhere",
 	})
+	optest.Attaches(fake, item, "key-file")
 	report, err := s.Sync(t.Context())
 	if err != nil {
 		t.Fatal(err)
@@ -154,10 +155,11 @@ func TestSyncPutsEachInPlace(t *testing.T) {
 	}
 }
 
-// Each run of op that reads a value has the person approve it, as each is
-// in a session of its own: a sync reads every value in one, op inject, its
+// A sync reads every variable's value in one run of op, op inject, its
 // references on its standard input and its output kept from the log, after
-// asking, of no one, whether 1Password is signed in.
+// asking, of no one, whether 1Password is signed in; a file's is read
+// alone, with op read, never through op inject's template, and its item
+// asked whether it's an attachment.
 func TestSyncReadsEveryValueInOneRunOfOp(t *testing.T) {
 	fake := runnertest.New(t)
 	s := secret.New(fake, t.TempDir())
@@ -170,16 +172,71 @@ func TestSyncReadsEveryValueInOneRunOfOp(t *testing.T) {
 	fake.On("op", "whoami").Exits(1).PrintsToStderr("account is not signed in")
 	fake.On("op", "account", "list", "--format", "json").Prints(`[{"url": "my.1password.com"}]`)
 	optest.Holds(fake, map[string]string{item + "/Section/one": "1", item + "/Section/two": "2", "op://vault/Key Item/private key": "-----BEGIN KEY-----\nabc\n-----END KEY-----"})
+	optest.Attaches(fake, "op://vault/Key Item")
 	if report, err := s.Sync(t.Context()); err != nil || report.Synced != 4 {
 		t.Fatalf("Sync() = %+v, %v", report, err)
 	}
-	want := []string{"op whoami", "op account list --format json", "op inject"}
+	want := []string{"op whoami", "op account list --format json", "op inject", "op read 'op://vault/Key Item/private key'", "op item get 'Key Item' --vault vault --format json"}
 	if got := fake.Calls(); !slices.Equal(got, want) {
-		t.Errorf("ran %q, want %q: one run of op reading the values", got, want)
+		t.Errorf("ran %q, want %q: one run of op reading the variables, the file read alone", got, want)
 	}
 	inject := fake.Commands()[2]
-	if !inject.Secret || strings.Count(inject.Input, "{{") != 3 || !strings.Contains(inject.Input, "{{ op://vault/Key Item/private key }}") {
-		t.Errorf("op inject read %q (secret: %v): want each reference once, its output kept from the log", inject.Input, inject.Secret)
+	if !inject.Secret || strings.Count(inject.Input, "{{") != 2 || strings.Contains(inject.Input, "Key Item") {
+		t.Errorf("op inject read %q (secret: %v): want each variable's reference once, the file's not, its output kept from the log", inject.Input, inject.Secret)
+	}
+	if !fake.Commands()[3].Secret {
+		t.Error("op read's output isn't kept from the log")
+	}
+}
+
+// A file kept as an attachment lands byte for byte, whatever it holds:
+// bytes that aren't UTF-8, which op inject would turn into U+FFFD, and the
+// newlines it ends with. A field's text in a file ends with one newline,
+// and a variable's value with none, as they always have.
+func TestSyncWritesAnAttachmentByteForByte(t *testing.T) {
+	home := t.TempDir()
+	fake := runnertest.New(t)
+	s := secret.New(fake, home)
+	declare(t, s,
+		[2]string{"~/.config/tool/blob", "blob.bin"},
+		[2]string{"~/.config/tool/text", "Section/text"},
+		[2]string{"TEXT", "Section/text"},
+	)
+	blob := "\xff\xfe\x00kit\xc3\x28\x80\n\n"
+	fake.On("op", "whoami")
+	optest.Holds(fake, map[string]string{item + "/blob.bin": blob, item + "/Section/text": "a field\n\n"})
+	optest.Attaches(fake, item, "blob.bin")
+	if report, err := s.Sync(t.Context()); err != nil || report.Synced != 3 || len(report.Failed) != 0 {
+		t.Fatalf("Sync() = %+v, %v", report, err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(home, ".config/tool/blob")); string(got) != blob {
+		t.Errorf("the attachment's file holds %d bytes, want its %d exactly", len(got), len(blob))
+	}
+	if got, _ := os.ReadFile(filepath.Join(home, ".config/tool/text")); string(got) != "a field\n" {
+		t.Errorf("the field's file holds %q, want its text ended by one newline", got)
+	}
+	if got, ok, err := s.Variable("TEXT"); err != nil || !ok || got != "a field" {
+		t.Errorf("Variable(TEXT) = %q, %v, %v; want the field's text without its newlines", got, ok, err)
+	}
+	if report, err := s.Sync(t.Context()); err != nil || report.Changed != 0 {
+		t.Errorf("a second sync = %+v, %v; want nothing changed", report, err)
+	}
+}
+
+// ReadBack compares the value read back with the one stored byte for byte:
+// a newline more or less is a different value.
+func TestReadBackComparesExactly(t *testing.T) {
+	fake := runnertest.New(t)
+	s := secret.New(fake, t.TempDir())
+	optest.Holds(fake, map[string]string{item + "/blob": "line\n\n"})
+	d := onepassword.Driver{}
+	if err := s.ReadBack(t.Context(), d, item+"/blob", "line\n\n"); err != nil {
+		t.Errorf("ReadBack() of the value stored = %v", err)
+	}
+	for _, want := range []string{"line\n", "line\n\n\n"} {
+		if err := s.ReadBack(t.Context(), d, item+"/blob", want); err == nil || err.Error() != "1Password gave back a different value" {
+			t.Errorf("ReadBack() of %q = %v; want a different value", want, err)
+		}
 	}
 }
 
