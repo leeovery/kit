@@ -313,7 +313,9 @@ func TestReinstallCheck(t *testing.T) {
 	}
 }
 
-// Nothing among what's restored holds a project: the step says so.
+// Nothing among what's restored holds a project: the step says so. Nor
+// does a restore that settled restoring nothing, every path here already
+// or not in its source: the step's fine, nothing to wait for.
 func TestReinstallWithNoProjects(t *testing.T) {
 	m := newRestoredMac(t)
 	m.files(t, "~/Documents/letter.txt")
@@ -321,6 +323,20 @@ func TestReinstallWithNoProjects(t *testing.T) {
 	res := reinstalled(t, t.Context(), m.step(runnertest.New(t), stillClock))
 	if res.State != check.OK || res.Summary != "no projects restored" {
 		t.Errorf("check = %s %q, want no projects", res.State, res.Summary)
+	}
+
+	m = newRestoredMac(t)
+	m.restored(t, restore.Here, "~/Code")
+	m.restored(t, restore.NotThere, "~/.local/state/tool")
+	step := m.step(runnertest.New(t), stillClock)
+	if res := step.Check(t.Context()); res.State != check.Deferred {
+		t.Errorf("before the restore settles, check = %s %q, want it deferred", res.State, res.Summary)
+	}
+	if err := restore.Settle(m.state, stillClock()); err != nil {
+		t.Fatal(err)
+	}
+	if res := step.Check(t.Context()); res.State != check.OK || res.Summary != "nothing restored" {
+		t.Errorf("settled, nothing restored, check = %s %q %s, want ok, nothing restored", res.State, res.Summary, res.Reason)
 	}
 }
 
@@ -528,6 +544,24 @@ func TestReinstallRetriesFailuresWhenNamed(t *testing.T) {
 	}
 	if res := reinstalled(t, t.Context(), named); res.Summary != "1 installed" || len(fake.Calls()) != 2 {
 		t.Errorf("named, check says %q having run %q, want it installed", res.Summary, fake.Calls())
+	}
+}
+
+// A failure retried, the run naming the step, that fails again stands as
+// failed, with what it said, as a run not naming it has it: tried once a
+// run, never left to install.
+func TestReinstallRetryFailingAgain(t *testing.T) {
+	m := newRestoredMac(t)
+	m.files(t, "~/Code/app/package-lock.json")
+	m.restored(t, restore.Done, "~/Code")
+	fake := runnertest.New(t)
+	fake.On("npm", "ci").PrintsToStderr("npm error network timeout\n").Exits(1).Then().PrintsToStderr("npm error 404 Not Found - @team/private\n").Exits(1)
+	reinstalled(t, t.Context(), m.step(fake, stillClock))
+	named := steps.Reinstall(reinstall.Reinstaller{Run: fake, Home: m.home, StateDir: m.state, Now: stillClock, Retry: true})
+	res := reinstalled(t, t.Context(), named)
+	want := []check.Item{{ID: "reinstall:~/Code/app:npm", Name: "~/Code/app", State: "failed", Detail: "npm: npm error 404 Not Found - @team/private", Quiet: "left"}}
+	if res.State != check.OK || res.Summary != "0 installed; 1 failed" || !slices.Equal(res.Items, want) || len(fake.Calls()) != 2 {
+		t.Errorf("retried, check = %s %q %+v, having run %q; want it failed again, %+v", res.State, res.Summary, res.Items, fake.Calls(), want)
 	}
 }
 

@@ -101,7 +101,8 @@ func TestApplyingShowsTheDataRestore(t *testing.T) {
 
 // kit status shows the data restore with Backups: each path to restore,
 // declared, not restored, what's to come after it, and what to run; once
-// it's settled, fine, what would bring a path listed since.
+// it's settled, fine, what would bring a path its source hadn't, or one
+// listed since.
 func TestStatusShowsTheDataRestore(t *testing.T) {
 	backups := []event.Step{
 		{Name: "time-machine", Title: "Time Machine", Area: "Backups", Row: "Backups"},
@@ -111,12 +112,14 @@ func TestStatusShowsTheDataRestore(t *testing.T) {
 		golden string
 		result check.Result
 	}{
-		{"status-restore.golden", check.Result{State: check.Attention, Summary: "4 declared, 1 here already, 3 to restore", Items: []check.Item{
+		{"status-restore.golden", check.Result{State: check.Attention, Summary: "5 declared, 1 here already, 4 to restore", Items: []check.Item{
 			{ID: "restore:~/Code", Name: "~/Code", State: "missing", Detail: "part-way from Time Machine's backup of 8 Nov 2026 14:19", Action: "restore"},
 			{ID: "restore:~/.claude", Name: "~/.claude", State: "missing", Action: "restore"},
 			{ID: "restore:~/.zsh_history", Name: "~/.zsh_history", State: "missing", Detail: "set-up's copy set aside first", Action: "restore"},
+			{ID: "restore:~/Documents", Name: "~/Documents", State: "missing", Detail: "2 files differed from Time Machine's backup of 8 Nov 2026 14:19, copied again; compared again next run", Action: "restore"},
 		}}},
-		{"status-restore-settled.golden", check.Result{State: check.OK, Summary: "4 declared, 3 restored, 1 not restored", Items: []check.Item{
+		{"status-restore-settled.golden", check.Result{State: check.OK, Summary: "5 declared, 3 restored, 2 not restored", Items: []check.Item{
+			{ID: "restore:~/.config/tool", Name: "~/.config/tool", State: "not restored", Detail: "Time Machine's backup of 8 Nov 2026 14:19 hadn't it; kit apply --restore-from time-machine|arq brings it from another", Quiet: "not in its source"},
 			{ID: "restore:~/.local/state/newtool", Name: "~/.local/state/newtool", State: "not restored", Detail: "kit apply --restore-from time-machine|arq brings it", Quiet: "listed since the restore settled"},
 		}}},
 	} {

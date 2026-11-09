@@ -80,8 +80,9 @@ type Restoring struct {
 // kit's in them left out. Its check reads the record and what each path
 // holds, contacting no source: fine once each is restored, or here, holding
 // files of its own before anything was restored to it; else each says
-// what's to come. On a Mac whose restore has settled, a line added since,
-// its path absent, waits for kit apply to name a source.
+// what's to come. A path its source hadn't, or, on a Mac whose restore has
+// settled, a line added since, its path absent, waits for kit apply to
+// name a source.
 //
 // Applying, it judges each path, records here what's here, and opens the
 // source: kit apply's flags', else the one the restore began from, so a
@@ -89,15 +90,16 @@ type Restoring struct {
 // started from. Flags naming another source than a path part-way came
 // from are refused, unless that source has gone, as a backup thinned away
 // has: the flags' then stands in for it, the paths carrying on from it,
-// the record and the log saying so. With room for the copies, each path is
-// copied, in order, what set-up wrote in it set aside first, then compared
-// with its source: from a backup, a file found differing fails the path;
-// from a live Mac, what changed as it was copied is copied again, and
-// counted. The record says where each path stands throughout, and, done,
-// what it holds, so a run stopped resumes; the restore settles once every
-// path is restored or here. The source is closed however applying ends.
-// Applied whenever kit apply runs, it records what it finds even when
-// there's nothing to copy.
+// the record and the log saying so. A path the source hasn't, nothing
+// copied to it, is recorded not there. With room for the copies, each path
+// is judged again as its turn comes, then copied, what set-up wrote in it
+// set aside first, then compared with its source: from a backup, a file
+// found differing fails the path; from a live Mac, what changed as it was
+// copied is copied again, and counted. The record says where each path
+// stands throughout, and, done, what it holds, so a run stopped resumes;
+// the restore settles once it's finished with every path. The source is
+// closed however applying ends. Applied whenever kit apply runs, it
+// records what it finds even when there's nothing to copy.
 func Restore(r Restoring) engine.Step {
 	return engine.Step{
 		Name: RestoreName, Title: "Data restore", Area: AreaBackups, Row: rowBackups, Verb: "restored", AlwaysApply: true,
@@ -164,9 +166,9 @@ func (r Restoring) paths() []string {
 
 // waitsForFlag reports whether j's path, absent and never restored, waits
 // for kit apply to name a source: on a Mac whose restore has settled, as a
-// line added since has it.
+// line added since has it; or its source found without it.
 func (r Restoring) waitsForFlag(j restore.Judgement, rec restore.Record) bool {
-	return j.Verdict == restore.VerdictRestore && !rec.Settled.IsZero() && r.Flag.Kind == ""
+	return j.Verdict == restore.VerdictRestore && r.Flag.Kind == "" && (!rec.Settled.IsZero() || rec.Paths[j.Path].State == restore.NotThere)
 }
 
 // result is how the restore stands, js judged: an item for each path to
@@ -182,8 +184,7 @@ func (r Restoring) result(js []judged, rec restore.Record) check.Result {
 		case j.Verdict == restore.VerdictHere:
 			here++
 		case r.waitsForFlag(j.Judgement, rec):
-			waiting = append(waiting, check.Item{ID: RestoreName + ":" + j.Path, Name: j.Path, State: notRestored,
-				Detail: "kit apply --restore-from time-machine|arq brings it", Quiet: "listed since the restore settled"})
+			waiting = append(waiting, awaitingSource(j.Path, rec.Paths[j.Path]))
 		default:
 			items = append(items, toRestore(j.Judgement, rec))
 		}
@@ -197,8 +198,19 @@ func (r Restoring) result(js []judged, rec restore.Record) check.Result {
 }
 
 // notRestored is the state of a listed path never restored, on a Mac whose
-// restore has settled.
+// restore has settled, or its source found without it.
 const notRestored = "not restored"
+
+// awaitingSource is the quiet item of path, absent, never restored, p its
+// record, waiting for kit apply to name a source: its source found without
+// it, or listed since the restore settled.
+func awaitingSource(path string, p restore.Path) check.Item {
+	it := check.Item{ID: RestoreName + ":" + path, Name: path, State: notRestored, Detail: "kit apply --restore-from time-machine|arq brings it", Quiet: "listed since the restore settled"}
+	if p.State == restore.NotThere {
+		it.Detail, it.Quiet = p.From.Says()+" hadn't it; kit apply --restore-from time-machine|arq brings it from another", "not in its source"
+	}
+	return it
+}
 
 // restoreSummary says how the restore stands: of declared paths, how many
 // are restored, here already, to restore and not restored, by those words.
@@ -230,9 +242,13 @@ func toRestore(j restore.Judgement, rec restore.Record) check.Item {
 		}
 		it.Detail = fmt.Sprintf("%d %s set-up wrote in it set aside first", len(j.New), plural(len(j.New), "file", "files"))
 	case restore.VerdictResume:
-		it.Detail = "part-way from " + p.From.Says()
-		if p.State == restore.Checking {
+		switch {
+		case p.State == restore.Checking && p.Second != nil:
+			it.Detail = fmt.Sprintf("%d %s differed from %s, copied again; compared again next run", p.Second.Copied, plural(p.Second.Copied, "file", "files"), p.From.Says())
+		case p.State == restore.Checking:
 			it.Detail = "copied from " + p.From.Says() + ", not yet compared with it"
+		default:
+			it.Detail = "part-way from " + p.From.Says()
 		}
 	}
 	return it
@@ -277,14 +293,14 @@ func (r Restoring) recordHere(ctx context.Context, path string, rec restore.Reco
 	return err
 }
 
-// settle settles the restore, once every listed path is restored or here.
+// settle settles the restore, once it's finished with every listed path.
 func (r Restoring) settle() error {
 	rec, err := restore.LoadRecord(r.StateDir)
 	if err != nil {
 		return err
 	}
 	for _, path := range r.paths() {
-		if s := rec.Paths[path].State; s != restore.Done && s != restore.Here {
+		if !rec.Finished(path) {
 			return nil
 		}
 	}
@@ -401,24 +417,44 @@ type copying struct {
 
 // plan readies the copy of each of todo's paths from src, its rules
 // written for rsync, and finds what it comes to; a path that can't be
-// copied is left out, its error among errs.
+// copied is left out, its error among errs. A path src hasn't, nothing
+// copied to it yet, is recorded not there, as the old Mac never made it:
+// the restore's done with it.
 func (r Restoring) plan(ctx context.Context, src *restore.Opened, todo []judged) (copies []copying, errs error) {
 	for _, j := range todo {
 		c, err := r.planOne(ctx, src, j)
-		if err != nil {
+		switch {
+		case errors.Is(err, errNotThere) && j.Verdict != restore.VerdictResume:
+			errs = errors.Join(errs, r.recordNotThere(ctx, j.Path, src.Origin))
+		case errors.Is(err, errNotThere):
+			errs = errors.Join(errs, fmt.Errorf("couldn't restore %s: %s hasn't it", j.Path, src.Origin.Says()))
+		case err != nil:
 			errs = errors.Join(errs, fmt.Errorf("couldn't restore %s: %w", j.Path, err))
-			continue
+		default:
+			copies = append(copies, c)
 		}
-		copies = append(copies, c)
 	}
 	return copies, errs
 }
 
-// planOne readies the copy of j's path from src.
+// errNotThere is a path its source hasn't.
+var errNotThere = errors.New("not in the source")
+
+// recordNotThere records path not there, from, its source, saying so.
+func (r Restoring) recordNotThere(ctx context.Context, path string, from restore.Origin) error {
+	err := r.change(path, func(p *restore.Path) { p.State, p.From = restore.NotThere, from })
+	if err == nil {
+		event.Log(ctx, event.Logged{Line: fmt.Sprintf("Nothing to restore in %s: %s hasn't it", path, from.Says())})
+	}
+	return err
+}
+
+// planOne readies the copy of j's path from src: errNotThere when src
+// hasn't it.
 func (r Restoring) planOne(ctx context.Context, src *restore.Opened, j judged) (copying, error) {
 	info, err := src.Stat(j.Path)
 	if errors.Is(err, fs.ErrNotExist) {
-		return copying{}, fmt.Errorf("%s hasn't it", src.Origin.Says())
+		return copying{}, errNotThere
 	}
 	if err != nil {
 		return copying{}, err
@@ -460,18 +496,32 @@ func (r Restoring) room(copies []copying) error {
 	return nil
 }
 
-// restoreOne restores c's path from src, the record saying where it stands
-// throughout: what set-up wrote set aside; copying; checking; done, with
-// what it came to, once its second pass has passed. Its partial files go
-// once it's done.
+// restoreOne restores c's path from src, judged again first, as what it
+// holds can change while the paths before it copy: holding older files
+// now, it's here, left as it is; else what set-up has written in it by now
+// is set aside. The record says where it stands throughout: copying;
+// checking, and, a second pass that found differences, how many; done,
+// with what it holds, once its second pass has passed. Its partial files
+// go once it's done.
 func (r Restoring) restoreOne(ctx context.Context, src *restore.Opened, c copying, p *progress) error {
 	failed := func(err error) error { return fmt.Errorf("couldn't restore %s: %w", c.Path, err) }
-	if c.Verdict == restore.VerdictSetAside {
-		if err := r.setAside(ctx, c.Judgement); err != nil {
+	rec, err := restore.LoadRecord(r.StateDir)
+	if err != nil {
+		return failed(err)
+	}
+	j, err := restore.Judge(r.Home, c.filter, rec, r.Began)
+	if err != nil {
+		return failed(err)
+	}
+	switch j.Verdict {
+	case restore.VerdictHere:
+		return r.recordHere(ctx, c.Path, rec)
+	case restore.VerdictSetAside:
+		if err := r.setAside(ctx, j); err != nil {
 			return failed(err)
 		}
 	}
-	err := r.change(c.Path, func(rp *restore.Path) {
+	err = r.change(c.Path, func(rp *restore.Path) {
 		rp.State, rp.From = restore.Copying, src.Origin
 		if rp.Started.IsZero() {
 			rp.Started = r.Now()
@@ -494,7 +544,8 @@ func (r Restoring) restoreOne(ctx context.Context, src *restore.Opened, c copyin
 		return failed(fmt.Errorf("its second pass: %w", err))
 	}
 	if !src.Live && again.Count > 0 {
-		return failed(fmt.Errorf("its second pass found %d %s differing from %s: %s", again.Count, plural(again.Count, "file", "files"), src.Origin.Says(), recopied(again)))
+		differs := fmt.Errorf("its second pass found %d %s differing from %s: %s", again.Count, plural(again.Count, "file", "files"), src.Origin.Says(), recopied(again))
+		return failed(errors.Join(differs, r.change(c.Path, func(rp *restore.Path) { rp.Second = &restore.Pass{Copied: again.Count} })))
 	}
 	err = r.change(c.Path, func(rp *restore.Path) {
 		rp.State, rp.Files, rp.Bytes, rp.Finished = restore.Done, stats.TotalFiles, stats.TotalBytes, r.Now()

@@ -6,6 +6,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"sync/atomic"
 
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/engine"
@@ -33,11 +34,20 @@ func ReinstallOn(stateDir string, restoring bool) (bool, error) {
 // restore has done for projects, once, then runs the installs with no
 // outcome, and those whose tool has come since. Its check reads the records
 // alone: ok once every install has an outcome, those that failed or wait
-// for their tool named, never a problem; nothing restored yet, deferred.
-// Failed installs run again only with r's Retry, which the caller sets
-// when the run names the step. The caller places it after the restore, and
-// after the secrets, which write what private packages need.
+// for their tool named, never a problem; ok too once the restore has
+// settled with nothing restored to search; else, nothing restored yet,
+// deferred. Failed installs run again only with r's Retry, which the
+// caller sets when the run names the step: once a run, so those failing
+// again stand as failed. The caller places it after the restore, after the
+// secrets, which write what private packages need, and after the kinds
+// that install the tools the installs run.
 func Reinstall(r reinstall.Reinstaller) engine.Step {
+	var retried atomic.Bool
+	toRun := func(rec reinstall.Record) []reinstall.Install {
+		again := r
+		again.Retry = r.Retry && !retried.Load()
+		return again.ToRun(rec)
+	}
 	return engine.Step{
 		Name: ReinstallName, Title: "Dependencies", Area: AreaBackups, Row: rowBackups,
 		Check: func(context.Context) check.Result {
@@ -45,12 +55,14 @@ func Reinstall(r reinstall.Reinstaller) engine.Step {
 			if err != nil {
 				return failed(err)
 			}
-			paths, todo := reinstall.Unsearched(restored, rec), r.ToRun(rec)
+			paths, todo := reinstall.Unsearched(restored, rec), toRun(rec)
 			switch {
 			case len(paths) > 0 || len(todo) > 0:
 				return check.Result{State: check.Attention, Summary: toReinstall(paths, len(todo))}
-			case len(rec.Searched) == 0:
+			case len(rec.Searched) == 0 && restored.Settled.IsZero():
 				return check.Result{State: check.Deferred, Reason: "waits for the restore"}
+			case len(rec.Searched) == 0:
+				return check.Result{State: check.OK, Summary: "nothing restored"}
 			case len(rec.Installs) == 0:
 				return check.Result{State: check.OK, Summary: "no projects restored"}
 			}
@@ -64,7 +76,9 @@ func Reinstall(r reinstall.Reinstaller) engine.Step {
 			if err != nil {
 				return err
 			}
-			return r.Install(ctx, r.ToRun(rec))
+			todo := toRun(rec)
+			retried.Store(true)
+			return r.Install(ctx, todo)
 		},
 	}
 }

@@ -111,9 +111,9 @@ func TestApplyRestoresFromTheBackupNamed(t *testing.T) {
 	}
 }
 
-// --restore-from names a backup kit knows, and --at a date or a time, with
-// Time Machine's alone: anything else is an error naming the flag, before
-// anything runs.
+// --restore-from names a backup kit knows, for the paths [restore] lists,
+// and --at a date or a time, with Time Machine's alone: anything else is an
+// error naming the flag, before anything runs.
 func TestApplyRestoreFlags(t *testing.T) {
 	for _, tt := range []struct {
 		args []string
@@ -124,6 +124,7 @@ func TestApplyRestoreFlags(t *testing.T) {
 		{[]string{"--restore-from", "time-machine", "--at", "2026-11-08T14:30"}, `invalid argument "2026-11-08T14:30" for "--at" flag`},
 		{[]string{"--at", "2026-11-08"}, "--at picks a Time Machine backup: give it with --restore-from time-machine"},
 		{[]string{"--restore-from", "arq", "--at", "2026-11-08"}, "--at picks a Time Machine backup: give it with --restore-from time-machine"},
+		{[]string{"--restore-from", "time-machine"}, "--restore-from restores the paths [restore] lists, and none are listed for laptop"},
 	} {
 		t.Run(strings.Join(tt.args, " "), func(t *testing.T) {
 			w := laptopWorld(t)

@@ -102,6 +102,7 @@ func TestRecordPartWay(t *testing.T) {
 		{"held, not started", "~/Code", Path{State: Held}, false},
 		{"done", "~/Code", Path{State: Done, Started: started}, false},
 		{"here", "~/Code", Path{State: Here}, false},
+		{"not in its source", "~/Code", Path{State: NotThere}, false},
 		{"no longer listed", "~/Music", Path{State: Copying, Started: started}, false},
 	} {
 		rec := Record{Paths: map[string]Path{tt.path: tt.p}}
@@ -111,5 +112,19 @@ func TestRecordPartWay(t *testing.T) {
 	}
 	if (Record{}).PartWay(listed) {
 		t.Error("with no record, PartWay() = true")
+	}
+}
+
+// The restore is done with a path restored, here, or not in its source;
+// not with one under way, held, or with no record.
+func TestRecordFinished(t *testing.T) {
+	rec := Record{Paths: map[string]Path{
+		"~/a": {State: Done}, "~/b": {State: Here}, "~/c": {State: NotThere},
+		"~/d": {State: Copying}, "~/e": {State: Checking}, "~/f": {State: Held},
+	}}
+	for path, want := range map[string]bool{"~/a": true, "~/b": true, "~/c": true, "~/d": false, "~/e": false, "~/f": false, "~/g": false} {
+		if got := rec.Finished(path); got != want {
+			t.Errorf("Finished(%s) = %v, want %v", path, got, want)
+		}
 	}
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/kind/secret"
+	"github.com/leeovery/kit/internal/kinds"
 	"github.com/leeovery/kit/internal/reinstall"
 	"github.com/leeovery/kit/internal/restore"
 	"github.com/leeovery/kit/internal/steps"
@@ -90,17 +91,23 @@ func (a *restoreAt) Set(v string) error {
 // flags'; or a path's restore part-way, which carries on from where it
 // began whatever the flags; or, for kit agent order, a new Mac's run
 // started from this one, whose lines it carries. Lines that don't read
-// make a step whose check says why.
+// make a step whose check says why; flags naming a source for no lines are
+// an error.
 func (a *app) restoreStep(r *run, dirs config.Dirs, prefsOn bool) (*engine.Step, error) {
 	list, err := r.cfg.List(config.RestoreKind, r.machine)
-	if err != nil || len(list.Entries) == 0 {
-		return nil, err
-	}
-	from := r.cfg.Macs[r.machine].From
-	flag, err := a.restoring.chosen()
 	if err != nil {
 		return nil, err
 	}
+	flag, err := a.restoring.chosen()
+	switch {
+	case err != nil:
+		return nil, err
+	case len(list.Entries) == 0 && flag.Kind != "":
+		return nil, usageError{fmt.Errorf("--restore-from restores the paths [restore] lists, and none are listed for %s", r.machine)}
+	case len(list.Entries) == 0:
+		return nil, nil
+	}
+	from := r.cfg.Macs[r.machine].From
 	lines, unread := restore.Lines(list)
 	rec, err := restore.LoadRecord(dirs.State)
 	if err != nil {
@@ -138,7 +145,8 @@ func (a *app) restoreStep(r *run, dirs config.Dirs, prefsOn bool) (*engine.Step,
 // restoring saying the data restore's in the run, as on a new Mac's first,
 // before anything's recorded; for kit agent order, wherever the restore
 // is. Failed installs run again when kit apply names it. It comes after
-// the restore, and the secrets, which write what private packages need.
+// the restore; the secrets, which write what private packages need; and
+// every kind of packages the run has, which install the tools it runs.
 func (a *app) reinstallStep(r *run, dirs config.Dirs, restoring bool) (*engine.Step, error) {
 	on, err := steps.ReinstallOn(dirs.State, restoring)
 	if err != nil {
@@ -151,8 +159,10 @@ func (a *app) reinstallStep(r *run, dirs config.Dirs, restoring bool) (*engine.S
 	if restoring {
 		step.After = append(step.After, steps.RestoreName)
 	}
-	if slices.Contains(r.kinds, secret.Descriptor.Name) {
-		step.After = append(step.After, secret.Descriptor.Name)
+	for _, name := range r.kinds {
+		if d, ok := kinds.Named(name); ok && (d.Group == kind.Packages || name == secret.Descriptor.Name) {
+			step.After = append(step.After, name)
+		}
 	}
 	return &step, nil
 }

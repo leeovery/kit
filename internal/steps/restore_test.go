@@ -466,8 +466,9 @@ func TestRestoreWithNothingToCopy(t *testing.T) {
 
 // The second pass compares each copy with its source. From a backup,
 // nothing changes, so a file it copies again fails its path, naming it:
-// the path stays checking, to compare again, while the rest go on, and the
-// restore doesn't settle. From the old Mac in use, files change as they're
+// the path stays checking, to compare again, its pass's finding recorded
+// and the check saying so, while the rest go on, and the restore doesn't
+// settle. From the old Mac in use, files change as they're
 // copied: those it copies again are counted, the path restored.
 func TestRestoreSecondPass(t *testing.T) {
 	itemized := ">f.st...... Code/a\n>f+++++++++ Code/b\n.d..t...... Code/\n"
@@ -484,8 +485,11 @@ func TestRestoreSecondPass(t *testing.T) {
 		t.Errorf("apply = %v; want %q", err, want)
 	}
 	rec := c.record()
-	if rec.Paths["~/Code"].State != restore.Checking || rec.Paths["~/Documents"].State != restore.Done || !rec.Settled.IsZero() || c.src.closes != 1 {
-		t.Errorf("the record = %+v, closed %d times; want ~/Code checking, ~/Documents done, not settled, the source closed", rec, c.src.closes)
+	if code := rec.Paths["~/Code"]; code.State != restore.Checking || code.Second == nil || code.Second.Copied != 2 || rec.Paths["~/Documents"].State != restore.Done || !rec.Settled.IsZero() || c.src.closes != 1 {
+		t.Errorf("the record = %+v, closed %d times; want ~/Code checking, its pass finding 2, ~/Documents done, not settled, the source closed", rec, c.src.closes)
+	}
+	if res := c.step().Check(t.Context()); len(res.Items) != 1 || res.Items[0].Detail != "2 files differed from Time Machine's backup of 8 Nov 2026 14:19, copied again; compared again next run" {
+		t.Errorf("after the pass, the check = %+v", res.Items)
 	}
 
 	c = newRestoring(t, "~/Code")
@@ -676,19 +680,20 @@ func TestRestoreNeedsRoom(t *testing.T) {
 	}
 }
 
-// A path the source hasn't fails alone, naming the source; the rest are
-// restored. A source that can't be opened fails the restore, saying why.
+// A path part-way that the source hasn't fails alone, naming the source;
+// the rest are restored. A source that can't be opened fails the restore,
+// saying why.
 func TestRestoreSourceShortcomings(t *testing.T) {
 	c := newRestoring(t, "~/Code", "~/.local/state/newtool")
-	c.r.Flag = steps.RestoreFrom{Kind: restore.FromTimeMachine}
+	c.change("~/.local/state/newtool", func(p *restore.Path) { p.State, p.From, p.Started = restore.Copying, c.src.origin, duringIt })
 	write(t, c.old, "~/Code/a", beforeIt)
 	c.copies("~/Code", 1, 1_000)
 	err := c.apply(t.Context())
 	if want := "couldn't restore ~/.local/state/newtool: Time Machine's backup of 8 Nov 2026 14:19 hasn't it"; err == nil || err.Error() != want {
 		t.Errorf("apply = %v; want %q", err, want)
 	}
-	if rec := c.record(); rec.Paths["~/Code"].State != restore.Done || rec.Paths["~/.local/state/newtool"].State != "" {
-		t.Errorf("the record = %+v; want ~/Code restored, the other untouched", rec.Paths)
+	if rec := c.record(); rec.Paths["~/Code"].State != restore.Done || rec.Paths["~/.local/state/newtool"].State != restore.Copying || !rec.Settled.IsZero() {
+		t.Errorf("the record = %+v; want ~/Code restored, the other still part-way, not settled", rec.Paths)
 	}
 
 	c = newRestoring(t, "~/Code")
@@ -696,6 +701,152 @@ func TestRestoreSourceShortcomings(t *testing.T) {
 	c.r.Flag = steps.RestoreFrom{Kind: restore.FromTimeMachine}
 	if err := c.apply(t.Context()); err == nil || err.Error() != "couldn't restore: no Time Machine backup found: no Time Machine disk is attached" {
 		t.Errorf("with no disk, apply = %v", err)
+	}
+}
+
+// A listed path the source hasn't, nothing copied to it yet, as a tool's
+// folder the old Mac never made, is no failure: it's recorded not there,
+// from that source, the log saying so, and the restore settles; the check
+// is fine, a quiet item saying what would bring it, and a run again leaves
+// it be. Set-up's window is shut to it: written there weeks later, it's
+// here, left as it is, even by kit apply naming a source that has it,
+// nothing set aside, nothing copied. Still absent, such a source brings
+// it, as a line added after the restore settled.
+func TestRestoreAPathTheSourceHadnt(t *testing.T) {
+	quiet := check.Item{ID: "restore:~/.local/state/newtool", Name: "~/.local/state/newtool", State: "not restored",
+		Detail: "Time Machine's backup of 8 Nov 2026 14:19 hadn't it; kit apply --restore-from time-machine|arq brings it from another", Quiet: "not in its source"}
+	hadnt := func(t *testing.T) *restoring {
+		t.Helper()
+		c := newRestoring(t, "~/Code", "~/.local/state/newtool")
+		write(t, c.old, "~/Code/a", beforeIt)
+		c.copies("~/Code", 1, 1_000)
+		if err := c.apply(t.Context()); err != nil {
+			t.Fatalf("apply = %v", err)
+		}
+		rec := c.record()
+		if tool := rec.Paths["~/.local/state/newtool"]; tool.State != restore.NotThere || tool.From != c.src.origin || rec.Settled.IsZero() {
+			t.Fatalf("the record = %+v; want ~/.local/state/newtool not there, from the backup, settled", rec)
+		}
+		if want := "Nothing to restore in ~/.local/state/newtool: Time Machine's backup of 8 Nov 2026 14:19 hasn't it"; !slices.Contains(c.logged, want) {
+			t.Errorf("the log says %q, want %q", c.logged, want)
+		}
+		if res := c.step().Check(t.Context()); res.State != check.OK || res.Summary != "2 declared, 1 restored, 1 not restored" || !reflect.DeepEqual(res.Items, []check.Item{quiet}) {
+			t.Errorf("the check = %s %q %+v; want fine, %+v", res.State, res.Summary, res.Items, quiet)
+		}
+		c.src.asked = nil
+		if err := c.apply(t.Context()); err != nil || len(c.src.asked) > 0 {
+			t.Errorf("a run again = %v, asking for %+v; want nothing opened", err, c.src.asked)
+		}
+		return c
+	}
+
+	t.Run("written there since", func(t *testing.T) {
+		c := hadnt(t)
+		write(t, c.home, "~/.local/state/newtool/ledger.db", duringIt.Add(30*24*time.Hour))
+		write(t, c.old, "~/.local/state/newtool/ledger.db", beforeIt)
+		c.r.Flag = steps.RestoreFrom{Kind: restore.FromTimeMachine}
+		ran := len(c.fake.Calls())
+		if err := c.apply(t.Context()); err != nil {
+			t.Fatalf("with --restore-from, apply = %v", err)
+		}
+		tool := c.record().Paths["~/.local/state/newtool"]
+		if tool.State != restore.Here || len(tool.SetAside) > 0 || len(c.fake.Calls()) > ran {
+			t.Errorf("with --restore-from, ~/.local/state/newtool = %+v, rsync running %q; want it here, nothing set aside or copied", tool, c.fake.Calls()[ran:])
+		}
+		if got, err := os.ReadFile(filepath.Join(c.home, ".local/state/newtool/ledger.db")); err != nil || string(got) != "~/.local/state/newtool/ledger.db" {
+			t.Errorf("the tool's ledger.db = %q, %v; want it as it was", got, err)
+		}
+	})
+	t.Run("the restore not settled", func(t *testing.T) {
+		c := newRestoring(t, "~/Code", "~/.local/state/newtool")
+		write(t, c.old, "~/Code/a", beforeIt)
+		c.on(sizing, "~/Code").Prints(stats(1, 1_000))
+		c.on(copyingOp, "~/Code").Exits(23)
+		for range 2 {
+			if err := c.apply(t.Context()); err == nil {
+				t.Fatal("~/Code failing, apply succeeded")
+			}
+		}
+		res := c.step().Check(t.Context())
+		if rec := c.record(); !rec.Settled.IsZero() || len(res.Items) != 2 || res.Items[0].Name != "~/Code" || res.Items[1] != quiet {
+			t.Errorf("~/Code failing, the check = %+v, settled %v; want ~/Code to restore, then %+v", res.Items, rec.Settled, quiet)
+		}
+		said := 0
+		for _, l := range c.logged {
+			if strings.HasPrefix(l, "Nothing to restore in ~/.local/state/newtool") {
+				said++
+			}
+		}
+		if said != 1 {
+			t.Errorf("the log says %q; want ~/.local/state/newtool found not there once, the run again leaving it be", c.logged)
+		}
+	})
+	t.Run("still absent", func(t *testing.T) {
+		c := hadnt(t)
+		write(t, c.old, "~/.local/state/newtool/ledger.db", beforeIt)
+		c.copies("~/.local/state/newtool", 1, 1_000)
+		c.r.Flag = steps.RestoreFrom{Kind: restore.FromTimeMachine}
+		if err := c.apply(t.Context()); err != nil {
+			t.Fatalf("with --restore-from, apply = %v", err)
+		}
+		if tool := c.record().Paths["~/.local/state/newtool"]; tool.State != restore.Done {
+			t.Errorf("with --restore-from, ~/.local/state/newtool = %+v; want it restored", tool)
+		}
+	})
+}
+
+// Each path is judged again as its turn comes, as the paths before it can
+// copy for hours: one absent at the start that set-up has written in
+// since, as Claude's session folders, has that set aside first; one whose
+// set-up's files were found at the start has those written since set aside
+// with them; one that's come to hold older files, as copied in by hand, is
+// here, left as it is, never copied into.
+func TestRestoreJudgesEachPathAgain(t *testing.T) {
+	c := newRestoring(t, "~/Code", "~/.claude", "~/Documents", "~/Music")
+	c.r.Flag = steps.RestoreFrom{Kind: restore.FromTimeMachine}
+	for _, p := range []string{"~/Code/a", "~/.claude/settings.json", "~/Documents/d", "~/Music/m.mp3"} {
+		write(t, c.old, p, beforeIt)
+	}
+	write(t, c.home, "~/Documents/early.txt", duringIt)
+	for _, p := range []string{"~/Code", "~/.claude", "~/Documents", "~/Music"} {
+		c.copies(p, 1, 1_000)
+	}
+	c.on(copyingOp, "~/Code").Prints(stats(1, 1_000)).Does(func() {
+		write(t, c.home, "~/.claude/projects/session.jsonl", duringIt.Add(2*time.Hour))
+		write(t, c.home, "~/Documents/later.txt", duringIt.Add(2*time.Hour))
+		write(t, c.home, "~/Music/old.mp3", beforeIt)
+	})
+	if err := c.apply(t.Context()); err != nil {
+		t.Fatalf("apply = %v", err)
+	}
+	if want := []string{
+		sizing + " ~/Code", sizing + " ~/.claude", sizing + " ~/Documents", sizing + " ~/Music",
+		copyingOp + " ~/Code", comparing + " ~/Code",
+		copyingOp + " ~/.claude", comparing + " ~/.claude",
+		copyingOp + " ~/Documents", comparing + " ~/Documents",
+	}; !slices.Equal(c.ran(), want) {
+		t.Errorf("rsync ran\n%q\nwant\n%q", c.ran(), want)
+	}
+	rec := c.record()
+	aside := func(path string) []string {
+		var paths []string
+		for _, a := range rec.Paths[path].SetAside {
+			paths = append(paths, a.Paths...)
+		}
+		slices.Sort(paths)
+		return paths
+	}
+	if got := aside("~/.claude"); rec.Paths["~/.claude"].State != restore.Done || !slices.Equal(got, []string{"~/.claude/projects/session.jsonl"}) {
+		t.Errorf("~/.claude = %+v, set aside %q; want restored, the session set aside first", rec.Paths["~/.claude"], got)
+	}
+	if got := aside("~/Documents"); rec.Paths["~/Documents"].State != restore.Done || !slices.Equal(got, []string{"~/Documents/early.txt", "~/Documents/later.txt"}) {
+		t.Errorf("~/Documents = %+v, set aside %q; want restored, both of set-up's files set aside first", rec.Paths["~/Documents"], got)
+	}
+	if music := rec.Paths["~/Music"]; music.State != restore.Here || len(music.SetAside) > 0 || rec.Settled.IsZero() {
+		t.Errorf("~/Music = %+v, settled %v; want it here, nothing set aside, the restore settled", music, rec.Settled)
+	}
+	if !slices.Contains(c.logged, "Left ~/Music as it is: it held files of its own") {
+		t.Errorf("the log says %q; want ~/Music left as it is", c.logged)
 	}
 }
 

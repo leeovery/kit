@@ -39,9 +39,11 @@ backup instead, on any Mac: Time Machine's, on a disk attached, or Arq's.
 2026-11-08 (by the end of that day), or a time, as "2026-11-08 14:30" (by the
 end of that minute); the latest when not given. A restore stopped part-way
 carries on from where it began, flags or not; should that backup have gone
-from the disk, --restore-from time-machine carries on from another. The
-projects it restores have their dependencies installed again: kit apply
-reinstall tries those that failed again.`,
+from the disk, --restore-from time-machine carries on from another. A path
+the source hasn't is left out: --restore-from brings it later from one that
+has it, while it's still absent. The projects restored have their
+dependencies installed again: kit apply reinstall tries those that failed
+again.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if _, err := a.restoring.chosen(); err != nil {
 				return err

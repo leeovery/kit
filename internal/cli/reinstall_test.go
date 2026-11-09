@@ -76,10 +76,26 @@ func TestReinstallRetriesWhenNamed(t *testing.T) {
 	}
 }
 
-// The reinstall comes after the restore, whose projects it installs, and
-// after the secrets, which write what private packages need; a step of the
-// user's own can come before it, as one putting a tool in place, or after
-// it. kit agent order places it, as a new Mac started from this one would
+// A retry that fails again says so, with what it said, never that there's
+// one to install.
+func TestReinstallRetryFailingAgain(t *testing.T) {
+	w := laptopWorld(t)
+	w.write(t, reinstallRecord, `{"searched": ["~/Code"], "installs": [{"dir": "~/Code/app", "tool": "npm", "started": true, "outcome": "failed", "error": "npm ERR! code E404"}]}`)
+	w.fake.On("npm", "ci").PrintsToStderr("npm error 404 Not Found - @team/private\n").Exits(1)
+	out, errOut, _ := w.run(t, "apply", "reinstall")
+	if want := "reinstall ok 0 installed; 1 failed\n"; !strings.Contains(out, want) || strings.Contains(out, "to install") {
+		t.Errorf("kit apply reinstall printed\n%s%s\nwant it holding %q", out, errOut, want)
+	}
+	if got := w.read(t, reinstallRecord); !strings.Contains(got, "npm error 404 Not Found - @team/private") {
+		t.Errorf("the reinstall's record = %s; want the retry's failure", got)
+	}
+}
+
+// The reinstall comes after the restore, whose projects it installs; after
+// the secrets, which write what private packages need; and after the kinds
+// of packages, Homebrew's casks and npm's here, which install the tools it
+// runs. A step of the user's own can come before it, as one putting a tool
+// in place, or after it. kit agent order places it, as a new Mac started from this one would
 // have it, the restore settled here or not.
 func TestReinstallComesAfterTheRestoreAndTheSecrets(t *testing.T) {
 	for _, settled := range []bool{false, true} {
@@ -93,7 +109,7 @@ uses-deps "uses the projects" --after reinstall
 			w.write(t, reinstallRecord, `{"searched": ["~/Code"]}`)
 		}
 		before := names(w.order(t, "reinstall").Before)
-		for _, want := range []string{"restore", "secret", "tool-first"} {
+		for _, want := range []string{"restore", "secret", "cask", "npm", "tool-first"} {
 			if !slices.Contains(before, want) {
 				t.Errorf("settled %v: before the reinstall = %q; want %s", settled, before, want)
 			}

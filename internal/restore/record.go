@@ -13,8 +13,8 @@ const recordName = "restore.json"
 // Record is the restore's record on this Mac: the source the run chose, so
 // a run again resumes from it; its first run, whose paths alone are ever set
 // aside; each listed path's restore, by its line's path; and when the
-// restore first settled, every listed path done or here, which closes
-// set-up's window: nothing is set aside after it.
+// restore first settled, every listed path finished with (Finished), which
+// closes set-up's window: nothing is set aside after it.
 type Record struct {
 	From    Origin          `json:"from,omitzero"`
 	First   Run             `json:"first,omitzero"`
@@ -60,6 +60,11 @@ const (
 	// Held is its restore held back, waiting for its source, nothing yet
 	// copied: judged again each run, as a path with no record.
 	Held State = "held"
+	// NotThere is a path its source hadn't, its From, nothing copied: done
+	// with, as the old Mac never made it, set-up's window shut to it; judged
+	// again each run, as a line added after the restore settled is, holding
+	// anything here, else waiting for kit apply to name a source.
+	NotThere State = "not-there"
 )
 
 // Path is a listed path's restore: how it stands; where it came from; the
@@ -114,7 +119,7 @@ func (p Path) started() bool {
 // and not finished: a run carries it on, whatever kit apply's flags say.
 func (r Record) PartWay(lines []Line) bool {
 	for _, l := range lines {
-		if p := r.Paths[l.Path]; p.State != Done && p.State != Here && p.started() {
+		if !r.Finished(l.Path) && r.Paths[l.Path].started() {
 			return true
 		}
 	}
@@ -122,9 +127,17 @@ func (r Record) PartWay(lines []Line) bool {
 }
 
 // mayAside is whether the listed path path may be set aside: one the
-// restore's first run listed, before the restore settled.
+// restore's first run listed, before the restore settled, its source yet to
+// be found without it.
 func (r Record) mayAside(path string) bool {
-	return r.Settled.IsZero() && slices.Contains(r.First.Paths, path)
+	return r.Settled.IsZero() && slices.Contains(r.First.Paths, path) && r.Paths[path].State != NotThere
+}
+
+// Finished reports whether the restore is done with the listed path path:
+// restored, here, or not in its source.
+func (r Record) Finished(path string) bool {
+	s := r.Paths[path].State
+	return s == Done || s == Here || s == NotThere
 }
 
 // RecordFirstRun records the restore's first run on this Mac, at now,
@@ -139,7 +152,7 @@ func RecordFirstRun(stateDir string, now time.Time, paths []string) error {
 }
 
 // Settle records that the restore has settled on this Mac, at now, every
-// listed path done or here: once, the first time, so set-up's window stays
+// listed path finished with: once, the first time, so set-up's window stays
 // closed.
 func Settle(stateDir string, now time.Time) error {
 	return UpdateRecord(stateDir, func(r *Record) {

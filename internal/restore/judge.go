@@ -40,14 +40,15 @@ type Judgement struct {
 }
 
 // Judge judges f's line's path, in the home folder home: by its record in
-// rec first, done, here, or its copy started; else, with no record or held,
-// by what it holds that isn't kit's, as f leaves out, and set-up's window, a
-// file's time its modification time. The window opens when this Mac's
-// set-up began, began, and closes when the restore first settled (rec's
-// Settled), and it's open only to the paths the restore's first run listed
-// (rec's First), before their copies start: it's shut on a Mac in use,
-// nothing recording began, and to a line added after the first run, which
-// is here if it holds anything that isn't kit's. Whether to restore one
+// rec first, done, here, or its copy started; else, with no record, held,
+// or not in its source, by what it holds that isn't kit's, as f leaves out,
+// and set-up's window, a file's time its modification time. The window
+// opens when this Mac's set-up began, began, and closes when the restore
+// first settled (rec's Settled), and it's open only to the paths the
+// restore's first run listed (rec's First), before their copies start or
+// their source is found without them: it's shut on a Mac in use, nothing
+// recording began, and to a line added after the first run, which is here
+// if it holds anything that isn't kit's. Whether to restore one
 // absent then is the caller's. Judging moves nothing, and stops at the first
 // file that's neither kit's nor written in the window.
 func Judge(home string, f *Filter, rec Record, began time.Time) (Judgement, error) {

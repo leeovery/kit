@@ -215,6 +215,42 @@ func TestJudgeOnceTheRestoreHasSettled(t *testing.T) {
 	}
 }
 
+// A path its source hadn't has set-up's window shut to it, the restore
+// settled or not: written there since, as by a tool run weeks later, it's
+// here, never set aside; absent, or holding nothing but kit's, it's the
+// caller's to restore or not.
+func TestJudgeAPathItsSourceHadnt(t *testing.T) {
+	tool := Line{Path: "~/.local/share/tool", Pos: "laptop/declarations:8"}
+	for _, tt := range []struct {
+		name  string
+		files map[string]time.Time
+		want  Verdict
+	}{
+		{"written since", map[string]time.Time{"ledger.db": later.Add(30 * 24 * time.Hour)}, VerdictHere},
+		{"nothing but Finder's", map[string]time.Time{".DS_Store": later}, VerdictRestore},
+		{"absent", nil, VerdictRestore},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			home := t.TempDir()
+			for rel, when := range tt.files {
+				write(t, filepath.Join(home, ".local/share/tool", rel), when)
+			}
+			rec := firstRun(tool.Path)
+			rec.Change(tool.Path, func(p *Path) {
+				p.State, p.From = NotThere, Origin{Kind: FromTimeMachine, Detail: "com.apple.TimeMachine.2026-11-19-030000.backup"}
+			})
+			f, err := NewFilter(tool, owned)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := Judge(home, f, rec, setUp)
+			if want := (Judgement{Path: tool.Path, Verdict: tt.want}); err != nil || !reflect.DeepEqual(got, want) {
+				t.Errorf("Judge() = %+v, %v; want %+v", got, err, want)
+			}
+		})
+	}
+}
+
 // A path that can't be read can't be judged: the judgement fails, saying
 // which.
 func TestJudgeFailsOnWhatItCantRead(t *testing.T) {

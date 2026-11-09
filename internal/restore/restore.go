@@ -4,7 +4,8 @@
 // links, what prefs saves, what kinds install, what the backups leave out,
 // kit's own folders) is never copied, and never counts as the path's holding
 // anything: kit puts it there itself. Each path is judged before any copy,
-// by its record, else by what it holds: restored once, resumed, restored
-// after what set-up wrote into it is set aside, or, holding older files,
-// left as it is, here, for good.
+// and again as its copy's turn comes, by its record, else by what it holds:
+// restored once, resumed, restored after what set-up wrote into it is set
+// aside, or, holding older files, left as it is, here, for good. A path its
+// source hasn't is done with, not there, till a source that has it is named.
 package restore
