@@ -348,6 +348,12 @@ self_check() {
 	# open with nothing to open says how it's used.
 	denies_running open /usr/bin/open || status=1
 	denies_running tmux "$(installed tmux)" -V || status=1
+	# Each of these with nothing to do says how it's used.
+	denies_running diskutil /usr/sbin/diskutil || status=1
+	denies_running mount_apfs /sbin/mount_apfs || status=1
+	denies_running umount /sbin/umount || status=1
+	denies_running dns-sd /usr/bin/dns-sd || status=1
+	denies_running_every rsync /usr/bin/rsync /opt/homebrew/bin/rsync -- --version || status=1
 	starts_clean || status=1
 	return "$status"
 }

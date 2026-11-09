@@ -205,6 +205,21 @@ func TestFakeHangs(t *testing.T) {
 	}
 }
 
+// Asked, the fake gives each line a carriage return ends too, and keeps
+// none of the command's output, Lines alone given it, as a real runner.
+func TestFakeGivesRedrawsAndKeepsOnlyLinesWhenAsked(t *testing.T) {
+	fake := runnertest.New(t)
+	fake.On("rsync").Prints("a/big\n\r 10%\r 50%\r\nb\n").PrintsToStderr("careful\n")
+	var heard []string
+	res, err := fake.Run(t.Context(), runner.Command{Name: "rsync", Redraws: true, LinesOnly: true, Lines: func(line string) { heard = append(heard, line) }})
+	if want := []string{"a/big", " 10%", " 50%", "b", "careful"}; err != nil || !slices.Equal(heard, want) {
+		t.Errorf("Run() = %v, giving %q; want %q", err, heard, want)
+	}
+	if len(res.Stdout) != 0 || string(res.Stderr) != "careful\n" {
+		t.Errorf("Run() = %q, %q; want no output kept, its errors kept", res.Stdout, res.Stderr)
+	}
+}
+
 // The fake says a command runs in its Env, the command's own variables
 // over it, then those the context sets, as a real runner.
 func TestFakeSaysTheEnvironmentACommandRunsIn(t *testing.T) {

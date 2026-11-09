@@ -64,6 +64,14 @@ type Command struct {
 	// its errors, as it prints them: a line a carriage return starts again
 	// is given as it ends. Never for an interactive command.
 	Lines func(line string)
+	// Redraws, with Lines, has Lines given each line a carriage return ends
+	// too, as a progress bar draws it, not only the one a new line ends: how
+	// far it's got, as it goes, rather than once it's done.
+	Redraws bool
+	// LinesOnly, with Lines, keeps none of what it prints on its standard
+	// output, Lines alone given it: for a command that prints more than is
+	// worth keeping, as a copy naming millions of files.
+	LinesOnly bool
 	// SharesSession runs it in kit's own session, its terminal's, as kit's
 	// own sudo runs, for a program whose approval holds for a terminal: the
 	// sudo Homebrew runs finds the password kit gave sudo, no asking again,

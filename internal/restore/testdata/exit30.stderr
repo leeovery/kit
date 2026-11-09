@@ -1,0 +1,4 @@
+[Receiver] io timeout after 1 seconds -- exiting
+rsync error: timeout in data send/receive (code 30) at io.c(266) [Receiver=3.5.2]
+rsync: [sender] write error: Broken pipe (32)
+rsync error: timeout in data send/receive (code 30) at io.c(967) [sender=3.5.2]

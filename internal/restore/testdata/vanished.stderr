@@ -1,0 +1,3 @@
+
+file has vanished: "/Volumes/Scratch/restore/e24/src/z/session.tmp"
+rsync warning: some files vanished before they could be transferred (code 24) at main.c(1416) [sender=3.5.2]
