@@ -78,9 +78,9 @@ func TestFieldsAndAttachments(t *testing.T) {
 func TestFree(t *testing.T) {
 	run := runnertest.New(t)
 	run.On("op", "item", "get", "Item", "--vault", "vault", "--format", "json").
-		Prints(`{"sections":[{"id":"s1","label":"GitHub"}],"fields":[{"label":"token","section":{"id":"s1"}},{"label":"loose"}],"files":[{"name":"key.pem"},{"name":"id.pem","section":{"id":"s1","label":"GitHub"}}]}`)
+		Prints(`{"sections":[{"id":"s1","label":"GitHub"}],"fields":[{"label":"token","section":{"id":"s1"}},{"label":"loose"}],"files":[{"name":"key.pem"},{"name":"id.pem","section":{"id":"s1","label":"GitHub"}},{"name":"loose.pem","section":{"id":"add more"}}]}`)
 	d := onepassword.Driver{}
-	for short, free := range map[string]bool{"GitHub/token": false, "GitHub/other": true, "Other/token": true, "key.pem": false, "other.pem": true, "GitHub/id.pem": false, "Other/id.pem": true} {
+	for short, free := range map[string]bool{"GitHub/token": false, "GitHub/other": true, "Other/token": true, "key.pem": false, "other.pem": true, "GitHub/id.pem": false, "github/ID.PEM": false, "Other/id.pem": true, "id.pem": true, "loose.pem": false} {
 		if err := d.Free(t.Context(), run, "op://vault/Item", short); (err == nil) != free {
 			t.Errorf("Free(%s) = %v, want free %v", short, err, free)
 		}
@@ -316,17 +316,7 @@ func TestReadFile(t *testing.T) {
 	if got := strings.Count(calls, "--out-file"); got != 3 || strings.Contains(calls, "op inject") {
 		t.Errorf("ran %q: want each attachment read with --out-file, and no op inject", run.Calls())
 	}
-	for _, c := range run.Commands() {
-		if !slices.Contains(c.Args, "--out-file") {
-			continue
-		}
-		if !c.Secret || c.Dir == "" {
-			t.Errorf("%s ran in %q, secret %v: want a folder of its own, its output kept from the log", c, c.Dir, c.Secret)
-		}
-		if _, err := os.Stat(c.Dir); !errors.Is(err, fs.ErrNotExist) {
-			t.Errorf("%s left its folder: %v", c, err)
-		}
-	}
+	folders(t, run)
 	values, err := d.ReadMany(t.Context(), run, []string{"op://vault/Item/blob"})
 	if err != nil || values["op://vault/Item/blob"] == blob {
 		t.Errorf("ReadMany() of bytes that aren't UTF-8 = %v: want them turned into U+FFFD, as op inject does", err)
@@ -356,5 +346,75 @@ func TestAttachAndDeleteInASection(t *testing.T) {
 	}
 	if _, err := d.Attach(t.Context(), run, "op://vault/Item", "a/b/c", from); err == nil {
 		t.Error("Attach() of a name with two /s didn't fail")
+	}
+}
+
+// folders checks the runs of op read --out-file on run: each into a folder
+// of its own, its output kept from the log, the folder gone after.
+func folders(t *testing.T, run *runnertest.Fake) {
+	t.Helper()
+	for _, c := range run.Commands() {
+		i := slices.Index(c.Args, "--out-file")
+		if i < 0 {
+			continue
+		}
+		path := c.Args[i+1]
+		if !c.Secret || !filepath.IsAbs(path) || filepath.Dir(path) == filepath.Clean(os.TempDir()) {
+			t.Errorf("%s: want an absolute path in a folder of its own, its output kept from the log (secret %v)", c, c.Secret)
+		}
+		if _, err := os.Stat(filepath.Dir(path)); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("%s left its folder: %v", c, err)
+		}
+	}
+}
+
+// ReadFile finds an attachment as op read does: its name or its section's
+// in any case, or by id. A name with no / is the item's own alone: a field
+// of that name stays a field beside a section's attachment of it.
+func TestReadFileFindsAnAttachmentAsOpDoes(t *testing.T) {
+	run := runnertest.New(t)
+	optest.Holds(run, map[string]string{
+		"op://vault/Item/npmrc":        "\xffbin",
+		"op://vault/Item/keys/id.pem":  "a\n\n",
+		"op://vault/Item/file2":        "by id\n\n",
+		"op://vault/Item/s-Keys/other": "\xffother",
+		"op://vault/Item/password":     "pw\n\n",
+	})
+	optest.Attaches(run, "op://vault/Item", "npmrc", "Keys/id.pem", "byid", "Keys/other", "Keys/password")
+	d := onepassword.Driver{}
+	for ref, want := range map[string]string{
+		"op://vault/Item/NPMRC":        "\xffbin",
+		"op://vault/Item/keys/id.pem":  "a\n\n",
+		"op://vault/Item/file2":        "by id\n\n",
+		"op://vault/Item/s-Keys/other": "\xffother",
+		"op://vault/Item/password":     "pw\n",
+	} {
+		if got, err := d.ReadFile(t.Context(), run, ref); err != nil || got != want {
+			t.Errorf("ReadFile(%s) = %q, %v; want %q", ref, got, err, want)
+		}
+	}
+	folders(t, run)
+}
+
+// op read --out-file that fails, or ends without writing the file, fails
+// the read, its folder removed all the same.
+func TestReadFileThatFails(t *testing.T) {
+	for name, script := range map[string]func(*runnertest.Script){
+		"exits non-zero":     func(s *runnertest.Script) { s.Exits(1).PrintsToStderr("[ERROR] something went wrong") },
+		"writes nothing":     func(*runnertest.Script) {},
+		"writes, then fails": func(s *runnertest.Script) { s.Writes("--out-file", "part").Exits(1) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			run := runnertest.New(t)
+			optest.Holds(run, map[string]string{"op://vault/Item/file": "bytes"})
+			optest.Attaches(run, "op://vault/Item", "file")
+			script(run.OnMatch("op", func(args []string) bool { return slices.Contains(args, "--out-file") }))
+			if got, err := (onepassword.Driver{}).ReadFile(t.Context(), run, "op://vault/Item/file"); err == nil || got != "" {
+				t.Errorf("ReadFile() = %q, %v; want it failed", got, err)
+			} else if name == "writes nothing" && !strings.HasPrefix(err.Error(), "op read wrote no file") {
+				t.Errorf("ReadFile() = %v; want that op wrote no file", err)
+			}
+			folders(t, run)
+		})
 	}
 }

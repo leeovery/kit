@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -144,16 +145,24 @@ func TestFakeDoesWhatItsTold(t *testing.T) {
 	}
 }
 
-// A command scripted to write a file writes it in the folder it runs in.
+// A command scripted to write a file writes it at the path after its flag,
+// a relative one in the folder it runs in, and only when it succeeds; one
+// scripted by a match answers any arguments the match accepts.
 func TestFakeWritesAFile(t *testing.T) {
 	fake := runnertest.New(t)
 	dir := t.TempDir()
-	fake.On("op", "read", "--out-file", "value", "op://vault/item/file").Writes("value", "\xff\n")
-	if _, err := fake.Run(t.Context(), runner.Command{Name: "op", Args: []string{"read", "--out-file", "value", "op://vault/item/file"}, Dir: dir}); err != nil {
-		t.Fatal(err)
+	read := func(args []string) bool { return len(args) == 4 && args[0] == "read" && args[1] == "--out-file" }
+	fake.OnMatch("op", read).Writes("--out-file", "\xff\n").Then().Writes("--out-file", "late").Exits(1)
+	for _, path := range []string{filepath.Join(dir, "a"), "b"} {
+		if _, err := fake.Run(t.Context(), runner.Command{Name: "op", Args: []string{"read", "--out-file", path, "op://vault/item/file"}, Dir: dir}); err != nil && path != "b" {
+			t.Fatal(err)
+		}
 	}
-	if got, err := os.ReadFile(filepath.Join(dir, "value")); err != nil || string(got) != "\xff\n" {
+	if got, err := os.ReadFile(filepath.Join(dir, "a")); err != nil || string(got) != "\xff\n" {
 		t.Errorf("the file holds %q, %v", got, err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "b")); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("a command that failed wrote its file: %v", err)
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -246,6 +247,51 @@ func TestReadBackComparesExactly(t *testing.T) {
 		if err := s.ReadBackFile(t.Context(), d, item+"/file", want); err == nil || err.Error() != "1Password gave back a different value" {
 			t.Errorf("ReadBackFile() of %q = %v; want a different value", want, err)
 		}
+	}
+}
+
+// A file op won't read holds back the store's files not read yet, each
+// keeping its file as it was, those read before it put in place; one op
+// names as one it couldn't read fails alone.
+func TestSyncOfFilesThatFailsPartway(t *testing.T) {
+	for name, c := range map[string]struct {
+		said                 string
+		wantFailed, wantHeld []string
+	}{
+		"op fails":       {"[ERROR] something went wrong", nil, []string{"~/b", "~/c"}},
+		"op names the b": {"[ERROR] could not read secret '" + item + "/b': no such file", []string{"~/b"}, nil},
+	} {
+		t.Run(name, func(t *testing.T) {
+			home := t.TempDir()
+			fake := runnertest.New(t)
+			s := secret.New(fake, home)
+			declare(t, s, [2]string{"~/a", "a"}, [2]string{"~/b", "b"}, [2]string{"~/c", "c"})
+			for _, f := range []string{"b", "c"} {
+				if err := os.WriteFile(filepath.Join(home, f), []byte("old "+f), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			fake.On("op", "whoami")
+			optest.Holds(fake, map[string]string{item + "/a": "new a", item + "/b": "new b", item + "/c": "new c"})
+			optest.Attaches(fake, item, "a", "b", "c")
+			fake.On("op", "read", item+"/b").Exits(1).PrintsToStderr(c.said)
+			report, err := s.Sync(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(slices.Sorted(maps.Keys(report.Failed)), c.wantFailed) || !slices.Equal(slices.Sorted(maps.Keys(report.Held)), c.wantHeld) {
+				t.Errorf("Sync() failed %v and held %v; want %v and %v", report.Failed, report.Held, c.wantFailed, c.wantHeld)
+			}
+			want := map[string]string{"a": "new a", "b": "old b", "c": "old c"}
+			if c.wantHeld == nil {
+				want["c"] = "new c"
+			}
+			for f, w := range want {
+				if got, _ := os.ReadFile(filepath.Join(home, f)); string(got) != w {
+					t.Errorf("~/%s holds %q, want %q", f, got, w)
+				}
+			}
+		})
 	}
 }
 

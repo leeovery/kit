@@ -47,10 +47,20 @@ func (f *Fake) On(name string, args ...string) *Script {
 	return s
 }
 
+// OnMatch scripts the answer to the program name run with any args match
+// accepts, as On does: for a command whose arguments vary from run to run,
+// as a path made for it, or that its program reads loosely.
+func (f *Fake) OnMatch(name string, match func(args []string) bool) *Script {
+	s := f.On(name)
+	s.match = match
+	return s
+}
+
 // Script is the scripted answers to a command: the first to its first run,
 // the next to its next, and the last to every run after.
 type Script struct {
 	argv    []string
+	match   func(args []string) bool
 	answers []*answer
 	runs    int
 	// answered are what the command was given when it asked.
@@ -109,14 +119,16 @@ func (s *Script) Does(f func()) *Script {
 	return s
 }
 
-// Writes has the command write content to the file name, in the folder it
-// runs in (runner.Command's Dir), as op read --out-file writes a value.
-func (s *Script) Writes(name, content string) *Script {
+// Writes has the command write content to the file the argument after flag
+// names, as op read --out-file <path> writes a value: only when it
+// succeeds. A relative path is in the folder it runs in (runner.Command's
+// Dir).
+func (s *Script) Writes(flag, content string) *Script {
 	a := s.last()
 	if a.writes == nil {
 		a.writes = map[string]string{}
 	}
-	a.writes[name] = content
+	a.writes[flag] = content
 	return s
 }
 
@@ -239,11 +251,6 @@ func (f *Fake) Run(ctx context.Context, cmd runner.Command) (runner.Result, erro
 	if a.does != nil {
 		a.does()
 	}
-	for name, content := range a.writes {
-		if err := os.WriteFile(filepath.Join(cmd.Dir, name), []byte(content), 0o600); err != nil {
-			f.t.Errorf("runnertest: %s couldn't write %s: %v", cmd, name, err)
-		}
-	}
 	stdout, stderr, exit := a.output(cmd.Input)
 	if cmd.Lines != nil && !cmd.Interactive {
 		for _, text := range []string{stdout, stderr} {
@@ -258,11 +265,33 @@ func (f *Fake) Run(ctx context.Context, cmd runner.Command) (runner.Result, erro
 		<-ctx.Done()
 		return runner.Result{ExitCode: -1, Group: a.group}, fmt.Errorf("%s: %w", cmd, ctx.Err())
 	}
+	if exit == 0 {
+		f.write(cmd, a.writes)
+	}
 	res := runner.Result{Stdout: []byte(stdout), Stderr: []byte(stderr), ExitCode: exit, Duration: a.duration, Group: a.group}
 	if exit != 0 {
 		return res, runner.NewExitError(cmd.String(), exit, res.Stderr)
 	}
 	return res, nil
+}
+
+// write writes each file of writes, by the flag before its path in cmd's
+// arguments, as Writes says.
+func (f *Fake) write(cmd runner.Command, writes map[string]string) {
+	for flag, content := range writes {
+		i := slices.Index(cmd.Args, flag)
+		if i < 0 || i+1 >= len(cmd.Args) {
+			f.t.Errorf("runnertest: %s has no path after %s to write", cmd, flag)
+			continue
+		}
+		path := cmd.Args[i+1]
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(cmd.Dir, path)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			f.t.Errorf("runnertest: %s couldn't write %s: %v", cmd, path, err)
+		}
+	}
 }
 
 // output is what the run prints, and exits with, given input.
@@ -281,7 +310,7 @@ func (a *answer) output(input string) (stdout, stderr string, exit int) {
 func (f *Fake) script(cmd runner.Command) *Script {
 	argv := slices.Concat([]string{cmd.Name}, cmd.Args)
 	for _, s := range slices.Backward(f.scripts) {
-		if slices.Equal(s.argv, argv) {
+		if s.match != nil && s.argv[0] == cmd.Name && s.match(cmd.Args) || s.match == nil && slices.Equal(s.argv, argv) {
 			return s
 		}
 	}

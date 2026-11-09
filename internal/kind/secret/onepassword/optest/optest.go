@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/leeovery/kit/internal/runner/runnertest"
@@ -15,9 +16,9 @@ import (
 var reference = regexp.MustCompile(`\{\{(.+?)\}\}`)
 
 // Holds scripts fake's op as 1Password holding values, each by its
-// reference, answers it, as op's does: op read, each value ended by a
-// newline unless it ends with one already, or its bytes exactly in the file
-// --out-file names, in the folder op runs in; op inject, each reference in
+// reference, answers it, as op's does, a reference in any case: op read,
+// each value ended by a newline unless it ends with one already, or its
+// bytes exactly in the file --out-file names; op inject, each reference in
 // the template it reads replaced by its value, each byte that isn't UTF-8
 // turned into U+FFFD, and failing whole for a reference it doesn't hold.
 func Holds(fake *runnertest.Fake, values map[string]string) {
@@ -26,14 +27,18 @@ func Holds(fake *runnertest.Fake, values map[string]string) {
 		if !strings.HasSuffix(piped, "\n") {
 			piped += "\n"
 		}
-		fake.On("op", "read", ref).Prints(piped)
-		fake.On("op", "read", "--force", "--file-mode", "0600", "--out-file", "value", ref).Writes("value", value)
+		fake.OnMatch("op", func(args []string) bool {
+			return len(args) == 2 && args[0] == "read" && strings.EqualFold(args[1], ref)
+		}).Prints(piped)
+		fake.OnMatch("op", func(args []string) bool {
+			return len(args) == 7 && slices.Equal(args[:5], toFile) && strings.EqualFold(args[6], ref)
+		}).Writes("--out-file", value)
 	}
 	fake.On("op", "inject").Filters(func(template string) (string, error) {
 		var missing []string
 		out := reference.ReplaceAllStringFunc(template, func(braced string) string {
 			ref := strings.TrimSpace(reference.FindStringSubmatch(braced)[1])
-			value, ok := values[ref]
+			value, ok := held(values, ref)
 			if !ok {
 				missing = append(missing, ref)
 			}
@@ -44,6 +49,20 @@ func Holds(fake *runnertest.Fake, values map[string]string) {
 		}
 		return string([]rune(out)), nil
 	})
+}
+
+// toFile starts op read's arguments as kit reads a value into a file, its
+// path and the reference after them.
+var toFile = []string{"read", "--force", "--file-mode", "0600", "--out-file"}
+
+// held is the value of values op finds by ref, in any case.
+func held(values map[string]string, ref string) (string, bool) {
+	for r, v := range values {
+		if strings.EqualFold(r, ref) {
+			return v, true
+		}
+	}
+	return "", false
 }
 
 // Attaches scripts fake's op item get of item, op://vault/item, as

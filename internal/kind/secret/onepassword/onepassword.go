@@ -172,9 +172,6 @@ func (d Driver) ReadFile(ctx context.Context, run runner.Runner, ref string) (st
 	return strings.TrimRight(value, "\n") + "\n", nil
 }
 
-// outFile is the file op read --out-file writes, in a folder of its own.
-const outFile = "value"
-
 // readOut reads ref's bytes exactly with op read --out-file, into a folder
 // only the person can read, made for it and removed after.
 func readOut(ctx context.Context, run runner.Runner, ref string) (string, error) {
@@ -183,11 +180,12 @@ func readOut(ctx context.Context, run runner.Runner, ref string) (string, error)
 		return "", err
 	}
 	defer func() { _ = os.RemoveAll(dir) }()
-	args := []string{"read", "--force", "--file-mode", "0600", "--out-file", outFile, ref}
-	if _, err := opRun(ctx, run, runner.Command{Args: args, Dir: dir, Timeout: approvalTimeout, Secret: true}); err != nil {
+	out := filepath.Join(dir, "value")
+	args := []string{"read", "--force", "--file-mode", "0600", "--out-file", out, ref}
+	if _, err := opRun(ctx, run, runner.Command{Args: args, Timeout: approvalTimeout, Secret: true}); err != nil {
 		return "", unread(err, []string{ref})
 	}
-	data, err := os.ReadFile(filepath.Join(dir, outFile))
+	data, err := os.ReadFile(out)
 	if err != nil {
 		return "", fmt.Errorf("op read wrote no file: %w", err)
 	}
@@ -195,7 +193,8 @@ func readOut(ctx context.Context, run runner.Runner, ref string) (string, error)
 }
 
 // isAttachment reports whether ref, a value's, is one of its item's
-// attachments, the item's own or a section's, as op item get lists them.
+// attachments, the item's own or a section's, as op item get lists them and
+// op read finds them (hasFile).
 func isAttachment(ctx context.Context, run runner.Runner, ref string) (bool, error) {
 	parts, _ := path(ref)
 	if len(parts) != 3 && len(parts) != 4 {
@@ -211,11 +210,11 @@ func isAttachment(ctx context.Context, run runner.Runner, ref string) (bool, err
 // ReadMany reads refs in one run of op inject, as 1Password may have the
 // person approve each run: a template on its standard input, each ref between
 // lines of a mark no value holds, so that a value of many lines reads back
-// whole, and each value exactly, as kept. op inject is a text
+// whole, each exactly as op inject gives it. op inject is a text
 // template, so a value that isn't UTF-8, as a file may be, doesn't read
 // back whole: ReadFile reads those. A ref with a $ or }} in it is read
-// alone, with Read: a template would read it as a variable, or as the
-// reference's end. It fails with store.Unread when op names refs in saying
+// alone, with Read, as Read gives it, its final newline lost: a template
+// would read it as a variable, or as the reference's end. It fails with store.Unread when op names refs in saying
 // why it couldn't, the values read beside them given back.
 func (d Driver) ReadMany(ctx context.Context, run runner.Runner, refs []string) (map[string]string, error) {
 	plain, awkward := split(refs)
@@ -439,8 +438,10 @@ func holds(doc map[string]any, short string) bool {
 	return hasFile(doc, short) || hasField(doc, short)
 }
 
-// hasFile reports whether the item keeps an attachment at short: by its
-// name, or a section's name and its, as in GitHub/key.pem.
+// hasFile reports whether the item keeps an attachment at short: the
+// item's own, outside every section with a label, by its name, or a
+// section's, as in GitHub/key.pem, each part a name or an id in any case,
+// as op read finds them.
 func hasFile(doc map[string]any, short string) bool {
 	section, name, inSection := strings.Cut(short, "/")
 	if !inSection {
@@ -450,8 +451,20 @@ func hasFile(doc map[string]any, short string) bool {
 	return slices.ContainsFunc(files, func(f any) bool {
 		m, _ := f.(map[string]any)
 		sec, _ := m["section"].(map[string]any)
-		return m["name"] == name && (!inSection || sec["label"] == section)
+		if inSection {
+			return names(m, "name", name) && names(sec, "label", section)
+		}
+		label, _ := sec["label"].(string)
+		return names(m, "name", name) && label == ""
 	})
+}
+
+// names reports whether m, a file or section of an item, is called name: by
+// its key (a name, a label) or its id, in any case.
+func names(m map[string]any, key, name string) bool {
+	called, _ := m[key].(string)
+	id, _ := m["id"].(string)
+	return strings.EqualFold(called, name) || id != "" && strings.EqualFold(id, name)
 }
 
 // hasField reports whether the item keeps a field of a section at short,
