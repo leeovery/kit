@@ -1,6 +1,7 @@
 package timemachine
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -65,15 +66,19 @@ type Snapshot struct {
 
 // Find finds the backups, on the disks attached, holding a home folder for
 // user, each checked by opening its latest snapshot at mountPoint, an empty
-// folder, and closing it again: a locked volume can't be read, and is left
-// out. None is an error, ErrNoBackup, saying what was looked at.
+// folder, and closing it again. A volume that can't be read, locked or
+// failing, is passed over, the rest returned; none is an error, ErrNoBackup,
+// saying why for each volume looked at. A failure to unmount, or one of the
+// mount point's, fails it. Any of Time Machine's snapshots mounted at
+// mountPoint is taken as an earlier run's and unmounted (Open), so no two
+// callers may use one mount point at once.
 func Find(ctx context.Context, run runner.Runner, user, mountPoint string) ([]Candidate, error) {
 	volumes, err := backupVolumes(ctx, run)
 	if err != nil {
 		return nil, err
 	}
 	if len(volumes) == 0 {
-		return nil, fmt.Errorf("%w: no Time Machine disk is attached", ErrNoBackup)
+		return nil, noBackupVolume(ctx, run)
 	}
 	var found []Candidate
 	var passed []string
@@ -95,32 +100,81 @@ func Find(ctx context.Context, run runner.Runner, user, mountPoint string) ([]Ca
 }
 
 // holding is v as a candidate holding user's home folder, or why it isn't
-// one.
+// one: an error is one that isn't v's own, as an unmount's.
 func holding(ctx context.Context, run runner.Runner, v volume, user, mountPoint string) (Candidate, string, error) {
 	if v.locked {
 		return Candidate{}, "locked: unlock it with its password in Disk Utility", nil
 	}
 	points, err := snapshots(ctx, run, v.device)
 	if err != nil {
-		return Candidate{}, "", err
+		return Candidate{}, err.Error(), nil
 	}
 	if len(points) == 0 {
 		return Candidate{}, "no backups", nil
 	}
 	c := Candidate{Volume: v.name, Device: v.device, Snapshots: points}
 	latest := points[len(points)-1]
-	s, err := Open(ctx, run, c, latest, user, mountPoint)
-	if _, missing := errors.AsType[*noHomeError](err); missing {
-		return Candidate{}, "not in its latest backup, " + day(latest.Time), nil
-	}
+	s, failed, err := mount(ctx, run, c, latest, mountPoint)
 	if err != nil {
 		return Candidate{}, "", err
 	}
-	return c, "", s.Close(ctx)
+	if failed != nil {
+		return Candidate{}, failed.Error(), nil
+	}
+	_, missing := s.home(user)
+	if err := s.Close(ctx); err != nil {
+		return Candidate{}, "", err
+	}
+	if _, ok := errors.AsType[*noHomeError](missing); ok {
+		return Candidate{}, "not in its latest backup, " + day(latest.Time), nil
+	}
+	if missing != nil {
+		return Candidate{}, missing.Error(), nil
+	}
+	return c, "", nil
+}
+
+// noBackupVolume is the error for disks holding no backup volume: saying
+// so, unless one holds Time Machine's backups of before APFS, which kit
+// doesn't read.
+func noBackupVolume(ctx context.Context, run runner.Runner) error {
+	older, err := olderBackups(ctx, run)
+	if err != nil {
+		return err
+	}
+	if len(older) > 0 {
+		return fmt.Errorf("%w: %s holds Time Machine's backups of before macOS 11 (Backups.backupdb), and only APFS backups are read", ErrNoBackup, strings.Join(older, ", "))
+	}
+	return fmt.Errorf("%w: no Time Machine disk is attached", ErrNoBackup)
+}
+
+// olderBackups are the mounted disks, by name, holding Time Machine's
+// backups as it kept them before APFS: a Backups.backupdb folder.
+func olderBackups(ctx context.Context, run runner.Runner) ([]string, error) {
+	listed, err := diskutil(ctx, run, "list", "-plist")
+	if err != nil {
+		return nil, err
+	}
+	disks, _ := listed["AllDisksAndPartitions"].([]any)
+	var out []string
+	for _, d := range disks {
+		disk, _ := d.(map[string]any)
+		partitions, _ := disk["Partitions"].([]any)
+		for _, p := range append([]any{disk}, partitions...) {
+			part, _ := p.(map[string]any)
+			at, _ := part["MountPoint"].(string)
+			if info, err := os.Stat(filepath.Join(at, "Backups.backupdb")); at != "" && err == nil && info.IsDir() {
+				name, _ := part["VolumeName"].(string)
+				out = append(out, cmp.Or(name, at))
+			}
+		}
+	}
+	return out, nil
 }
 
 // Pick is the latest of c's snapshots, or, at given, the latest taken at or
-// before it: one before them all is an error naming the earliest.
+// before it: one before them all is an error naming the earliest. A time
+// in the hour the clocks go back is ambiguous, as the names' times are.
 func (c Candidate) Pick(at time.Time) (Point, error) {
 	if len(c.Snapshots) == 0 {
 		return Point{}, fmt.Errorf("%s holds no backups", c.Volume)
@@ -138,19 +192,14 @@ func (c Candidate) Pick(at time.Time) (Point, error) {
 
 // Open mounts p, one of c's snapshots, read-only and hidden at mountPoint,
 // an empty folder, made if it's missing, and finds user's home folder in
-// it. What an earlier run left mounted there is used, when it's p, or
-// unmounted; anything else there is an error, never mounted over. When
-// anything after the mount fails, it's unmounted again.
+// it. What an earlier run left mounted there is used, when it's p, or,
+// when it's any other of Time Machine's snapshots, unmounted: so no two
+// callers may use one mount point at once. Anything else there is an
+// error, never mounted over. When anything after the mount fails, it's
+// unmounted again.
 func Open(ctx context.Context, run runner.Runner, c Candidate, p Point, user, mountPoint string) (*Snapshot, error) {
-	if err := os.MkdirAll(mountPoint, 0o700); err != nil {
-		return nil, fmt.Errorf("make the folder to mount Time Machine's backup at: %w", err)
-	}
-	at, err := filepath.EvalSymlinks(mountPoint)
-	if err != nil {
-		return nil, fmt.Errorf("find the folder to mount Time Machine's backup at: %w", err)
-	}
-	s := &Snapshot{Volume: c.Volume, Device: c.Device, Name: p.Name, Time: p.Time, run: run, mount: at}
-	if err := s.mountHere(ctx); err != nil {
+	s, failed, err := mount(ctx, run, c, p, mountPoint)
+	if err = cmp.Or(err, failed); err != nil {
 		return nil, err
 	}
 	home, err := s.home(user)
@@ -161,35 +210,57 @@ func Open(ctx context.Context, run runner.Runner, c Candidate, p Point, user, mo
 	return s, nil
 }
 
-// mountHere mounts s at its folder, unless an earlier run left it there:
-// a stale snapshot of another is unmounted first.
-func (s *Snapshot) mountHere(ctx context.Context) error {
+// mount mounts p, one of c's snapshots, at mountPoint, as Open does: failed
+// is mount_apfs's failure, the backup's own; err is any other, the mount
+// point's.
+func mount(ctx context.Context, run runner.Runner, c Candidate, p Point, mountPoint string) (s *Snapshot, failed, err error) {
+	if err := os.MkdirAll(mountPoint, 0o700); err != nil {
+		return nil, nil, fmt.Errorf("make the folder to mount Time Machine's backup at: %w", err)
+	}
+	at, err := filepath.EvalSymlinks(mountPoint)
+	if err != nil {
+		return nil, nil, fmt.Errorf("find the folder to mount Time Machine's backup at: %w", err)
+	}
+	s = &Snapshot{Volume: c.Volume, Device: c.Device, Name: p.Name, Time: p.Time, run: run, mount: at}
+	here, err := s.cleared(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	if here {
+		return s, nil, nil
+	}
+	_, err = run.Run(ctx, runner.Command{Name: "mount_apfs", Args: []string{"-o", "rdonly,nobrowse", "-s", s.Name, "/dev/" + s.Device, s.mount}})
+	if err != nil {
+		return nil, fmt.Errorf("mount the backup of %s from %s: %w", day(s.Time), s.Volume, err), nil
+	}
+	return s, nil, nil
+}
+
+// cleared readies s's folder for its mount: here is whether an earlier run
+// left s mounted there; a stale snapshot of another is unmounted.
+func (s *Snapshot) cleared(ctx context.Context) (here bool, err error) {
 	from, mounted, err := mountedAt(ctx, s.run, s.mount)
 	if err != nil {
-		return err
+		return false, err
 	}
 	switch {
 	case mounted && from == s.source():
-		return nil
+		return true, nil
 	case mounted && strings.HasPrefix(from, snapshotPrefix):
 		if err := unmount(ctx, s.run, s.mount); err != nil {
-			return fmt.Errorf("unmount the backup an earlier run left: %w", err)
+			return false, fmt.Errorf("unmount the backup an earlier run left: %w", err)
 		}
 	case mounted:
-		return fmt.Errorf("%s is mounted at %s, where kit mounts Time Machine's backups", from, s.mount)
+		return false, fmt.Errorf("%s is mounted at %s, where kit mounts Time Machine's backups", from, s.mount)
 	}
 	entries, err := os.ReadDir(s.mount)
 	if err != nil {
-		return fmt.Errorf("read the folder to mount Time Machine's backup at: %w", err)
+		return false, fmt.Errorf("read the folder to mount Time Machine's backup at: %w", err)
 	}
 	if len(entries) > 0 {
-		return fmt.Errorf("%s isn't empty, so Time Machine's backup can't be mounted there", s.mount)
+		return false, fmt.Errorf("%s isn't empty, so Time Machine's backup can't be mounted there", s.mount)
 	}
-	_, err = s.run.Run(ctx, runner.Command{Name: "mount_apfs", Args: []string{"-o", "rdonly,nobrowse", "-s", s.Name, "/dev/" + s.Device, s.mount}})
-	if err != nil {
-		return fmt.Errorf("mount the backup of %s from %s: %w", day(s.Time), s.Volume, err)
-	}
-	return nil
+	return false, nil
 }
 
 // source is s as the mount table names what's mounted from it.
@@ -199,20 +270,36 @@ func (s *Snapshot) source() string {
 
 // home is user's home folder in s, mounted: in the folder of the
 // backup's date, in the folder of the volume it backed up, whose name is
-// the old Mac's, as Macintosh HD - Data. It must be there, and readable.
+// the old Mac's, as Macintosh HD - Data. Where several volumes' folders
+// hold one, as a clone's can, a Data volume's (named "… - Data") is the
+// Mac's; failing that, which is the Mac's can't be told. It must be
+// readable.
 func (s *Snapshot) home(user string) (string, error) {
 	backup := filepath.Join(s.mount, strings.TrimPrefix(s.Name, snapshotPrefix))
 	entries, err := os.ReadDir(backup)
 	if err != nil {
 		return "", fmt.Errorf("read the backup of %s: %w", day(s.Time), err)
 	}
+	var holders []string
 	for _, e := range entries {
-		home := filepath.Join(backup, e.Name(), "Users", user)
-		if info, err := os.Stat(home); err == nil && info.IsDir() {
-			return home, readable(home)
+		if info, err := os.Stat(filepath.Join(backup, e.Name(), "Users", user)); err == nil && info.IsDir() {
+			holders = append(holders, e.Name())
 		}
 	}
-	return "", &noHomeError{backup: s.Time, volume: s.Volume, user: user}
+	data := slices.DeleteFunc(slices.Clone(holders), func(f string) bool { return !strings.HasSuffix(f, " - Data") })
+	var folder string
+	switch {
+	case len(holders) == 0:
+		return "", &noHomeError{backup: s.Time, volume: s.Volume, user: user}
+	case len(holders) == 1:
+		folder = holders[0]
+	case len(data) == 1:
+		folder = data[0]
+	default:
+		return "", fmt.Errorf("the backup of %s on %s holds /Users/%s in more than one volume's folder, which is the Mac's can't be told: %s", day(s.Time), s.Volume, user, strings.Join(holders, ", "))
+	}
+	home := filepath.Join(backup, folder, "Users", user)
+	return home, readable(home)
 }
 
 // readable is an error when the folder at path can't be read.
@@ -290,22 +377,32 @@ func backupVolumes(ctx context.Context, run runner.Runner) ([]volume, error) {
 }
 
 // snapshots are Time Machine's snapshots on the volume at device, oldest
-// first.
+// first: in the order they were made (their transaction ids), as their
+// names' times aren't when the clocks go back, an hour repeating.
 func snapshots(ctx context.Context, run runner.Runner, device string) ([]Point, error) {
 	listed, err := diskutil(ctx, run, "apfs", "listSnapshots", "-plist", device)
 	if err != nil {
 		return nil, err
 	}
 	all, _ := listed["Snapshots"].([]any)
-	var out []Point
+	type made struct {
+		Point
+		xid int64
+	}
+	var tm []made
 	for _, s := range all {
 		snap, _ := s.(map[string]any)
 		name, _ := snap["SnapshotName"].(string)
+		xid, _ := snap["SnapshotXID"].(int64)
 		if t, ok := taken(name); ok {
-			out = append(out, Point{Name: name, Time: t})
+			tm = append(tm, made{Point{Name: name, Time: t}, xid})
 		}
 	}
-	slices.SortFunc(out, func(a, b Point) int { return a.Time.Compare(b.Time) })
+	slices.SortStableFunc(tm, func(a, b made) int { return cmp.Compare(a.xid, b.xid) })
+	out := make([]Point, 0, len(tm))
+	for _, m := range tm {
+		out = append(out, m.Point)
+	}
 	return out, nil
 }
 
