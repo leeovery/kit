@@ -20,15 +20,17 @@ import (
 // tool is a package manager a restored project's dependencies reinstall
 // with: its program; its lockfiles, any one of which in a folder makes the
 // folder's dependencies its; what in the folder, there, says they're
-// installed; its arguments in the folder, installing just what the lockfile
-// says, scripts and all; and whether it installs the folder's JavaScript
-// packages, which one tool alone does.
+// installed; its arguments, installing just what the lockfile says,
+// scripts and all; whether it installs the folder's JavaScript packages,
+// which one tool alone does; and, when it can't install a folder's, what the
+// person's to do instead (yours), "" when it can.
 type tool struct {
 	program   string
 	lockfiles []string
 	installed []string
-	args      func(dir string) []string
+	args      []string
 	js        bool
+	yours     func(dir string) string
 }
 
 // tools are the package managers reinstalling runs, in the order a
@@ -37,26 +39,23 @@ type tool struct {
 // another's than the other way round. Terraform's, Swift's, Go's and
 // Cargo's are left alone: each fetches what it needs as it builds.
 var tools = []tool{
-	{program: "composer", lockfiles: []string{"composer.lock"}, installed: []string{"vendor"}, args: always("install", "--no-interaction")},
-	{program: "pnpm", lockfiles: []string{"pnpm-lock.yaml"}, installed: []string{"node_modules"}, args: always("install", "--frozen-lockfile"), js: true},
-	{program: "bun", lockfiles: []string{"bun.lock", "bun.lockb"}, installed: []string{"node_modules"}, args: always("install", "--frozen-lockfile"), js: true},
-	{program: "yarn", lockfiles: []string{"yarn.lock"}, installed: []string{"node_modules", ".pnp.cjs"}, args: yarnArgs, js: true},
-	{program: "npm", lockfiles: []string{"package-lock.json"}, installed: []string{"node_modules"}, args: always("ci"), js: true},
-	{program: "uv", lockfiles: []string{"uv.lock"}, installed: []string{".venv"}, args: always("sync", "--frozen")},
+	{program: "composer", lockfiles: []string{"composer.lock"}, installed: []string{"vendor"}, args: []string{"install", "--no-interaction"}},
+	{program: "pnpm", lockfiles: []string{"pnpm-lock.yaml"}, installed: []string{"node_modules"}, args: []string{"install", "--frozen-lockfile"}, js: true},
+	{program: "bun", lockfiles: []string{"bun.lock", "bun.lockb"}, installed: []string{"node_modules"}, args: []string{"install", "--frozen-lockfile"}, js: true},
+	{program: "yarn", lockfiles: []string{"yarn.lock"}, installed: []string{"node_modules"}, args: []string{"install", "--frozen-lockfile"}, js: true, yours: modernYarnYours},
+	{program: "npm", lockfiles: []string{"package-lock.json"}, installed: []string{"node_modules"}, args: []string{"ci"}, js: true},
+	{program: "uv", lockfiles: []string{"uv.lock"}, installed: []string{".venv"}, args: []string{"sync", "--frozen"}},
 }
 
-// always is a tool's arguments, the same in every folder.
-func always(args ...string) func(string) []string {
-	return func(string) []string { return args }
-}
-
-// yarnArgs are yarn's arguments in dir: Yarn 2 and later, whose lockfile
-// starts with its metadata, take --immutable; Yarn 1 --frozen-lockfile.
-func yarnArgs(dir string) []string {
+// modernYarnYours is what the person's to do in dir when its yarn.lock is
+// Yarn 2's or later's: Homebrew's yarn is Yarn 1, which runs the project's
+// own Yarn from .yarn/releases, a folder the backups leave out, as they do
+// all of .yarn beside a .yarnrc.yml.
+func modernYarnYours(dir string) string {
 	if modernYarn(filepath.Join(dir, "yarn.lock")) {
-		return []string{"install", "--immutable"}
+		return "Yarn 2 or later: run yarn install in its folder"
 	}
-	return []string{"install", "--frozen-lockfile"}
+	return ""
 }
 
 // modernYarn reports whether the yarn.lock at path is Yarn 2's or later's,
@@ -90,18 +89,25 @@ func (t tool) installedIn(dir string) bool {
 	})
 }
 
-// searchDepth is how many folders down from a restored folder projects are
-// looked for, as in ~/Code/team/app/packages/web.
-const searchDepth = 4
+// searchDepth is how many folders down from a restored folder the search
+// goes at most: a limit for safety alone, as passing over dependency and
+// hidden folders is what keeps it short, and projects sit deep, as in
+// ~/Code/team/app/projects/agent or …/javascript/apps/web.
+const searchDepth = 12
 
-// Find finds the projects in path, a path the restore's done, from
-// ~, in the home folder home, and the install each lockfile in them asks
-// for, each folder from ~. A folder whose .git is a file is a linked
-// worktree, or a submodule, and is passed over, all in it; nor does the
-// search go into a dependency folder (node_modules; vendor beside a
-// composer.json) or a hidden one (.git, .venv, tools' caches). A project
-// nested in another, as a monorepo's package, is one of its own only when
-// it holds a lockfile of its own. A path that's a file holds none.
+// Find finds the projects in path, a path the restore's done, from ~, in
+// the home folder home, and the install each lockfile in them asks for,
+// each folder from ~. Each is judged as it's found, never later, as an
+// install stopped part-way leaves its dependency folder begun: one whose
+// dependency folder is there already, copied whole or installed by hand,
+// is There; one its tool can't install, the person's (Yours). Linked
+// worktrees are projects as main checkouts are; submodules, whose .git is
+// a file pointing into another's .git/modules, are passed over, all in
+// them; nor does the search go into a dependency folder (node_modules,
+// vendor) or a hidden one (.git, .venv, agents' worktrees in
+// .claude/worktrees, tools' caches). A project nested in another, as a
+// monorepo's package, is one of its own only when it holds a lockfile of
+// its own. A path that's a file holds none.
 func Find(home, path string) ([]Install, error) {
 	root := filepath.Join(home, strings.TrimPrefix(path, "~/"))
 	if info, err := os.Stat(root); err != nil || !info.IsDir() {
@@ -111,16 +117,30 @@ func Find(home, path string) ([]Install, error) {
 	err := search(root, 0, func(dir string, beside map[string]fs.DirEntry) {
 		rel, _ := filepath.Rel(home, dir)
 		for _, t := range toolsFor(beside) {
-			found = append(found, Install{Dir: "~/" + filepath.ToSlash(rel), Tool: t.program})
+			found = append(found, judged(t, dir, Install{Dir: "~/" + filepath.ToSlash(rel), Tool: t.program}))
 		}
 	})
 	return found, err
 }
 
+// judged is in, of t in dir, as it's found: There, its dependencies there;
+// Yours, when t can't install them, saying what to do; else to run.
+func judged(t tool, dir string, in Install) Install {
+	switch {
+	case t.installedIn(dir):
+		in.Outcome = There
+	case t.yours != nil:
+		if do := t.yours(dir); do != "" {
+			in.Outcome, in.Error = Yours, do
+		}
+	}
+	return in
+}
+
 // search visits dir, searchDepth folders down at most, depth from where the
-// search started, then each folder in it the search goes into, as
-// findInstalls says: visit is given each folder and what's in it, by name.
-// A folder in it that can't be read is passed over.
+// search started, then each folder in it the search goes into, as Find
+// says: visit is given each folder and what's in it, by name. A folder in
+// it that can't be read is passed over.
 func search(dir string, depth int, visit func(dir string, beside map[string]fs.DirEntry)) error {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -133,7 +153,7 @@ func search(dir string, depth int, visit func(dir string, beside map[string]fs.D
 	for _, e := range entries {
 		beside[e.Name()] = e
 	}
-	if git, ok := beside[".git"]; ok && !git.IsDir() {
+	if git, ok := beside[".git"]; ok && !git.IsDir() && submodule(filepath.Join(dir, ".git")) {
 		return nil
 	}
 	visit(dir, beside)
@@ -141,7 +161,7 @@ func search(dir string, depth int, visit func(dir string, beside map[string]fs.D
 		return nil
 	}
 	for _, e := range entries {
-		if e.IsDir() && !passedOver(e.Name(), beside) {
+		if e.IsDir() && !passedOver(e.Name()) {
 			if err := search(filepath.Join(dir, e.Name()), depth+1, visit); err != nil {
 				return err
 			}
@@ -150,17 +170,19 @@ func search(dir string, depth int, visit func(dir string, beside map[string]fs.D
 	return nil
 }
 
-// passedOver reports whether the search doesn't go into the folder name,
-// beside what's with it: a hidden folder, or one of dependencies.
-func passedOver(name string, beside map[string]fs.DirEntry) bool {
-	switch {
-	case strings.HasPrefix(name, "."), name == "node_modules":
-		return true
-	case name == "vendor":
-		_, composer := beside["composer.json"]
-		return composer
-	}
-	return false
+// submodule reports whether the .git file at path is a submodule's: its
+// gitdir in another repository's .git/modules, where a linked worktree's
+// is in its .git/worktrees.
+func submodule(path string) bool {
+	data, err := os.ReadFile(path)
+	return err == nil && strings.Contains(string(data), "/.git/modules/")
+}
+
+// passedOver reports whether the search doesn't go into the folder name: a
+// hidden folder, or one of dependencies, installed or, as Go's vendor,
+// committed, which holds others' projects, never the person's.
+func passedOver(name string) bool {
+	return strings.HasPrefix(name, ".") || name == "node_modules" || name == "vendor"
 }
 
 // toolsFor are the tools a folder's lockfiles, among what's beside, ask

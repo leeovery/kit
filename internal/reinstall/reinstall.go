@@ -32,12 +32,15 @@ const (
 type Outcome string
 
 const (
-	// Installed is its dependencies installed; There, found there already,
-	// a folder copied whole or installed by hand.
+	// Installed is its dependencies installed; There, found there already
+	// as the search found it, a folder copied whole or installed by hand.
 	Installed Outcome = "installed"
 	There     Outcome = "there"
-	// Failed is its install failed: never tried again, as some old
-	// projects never install.
+	// Yours is its install the person's to do, as its tool can't, its
+	// Error saying what to do.
+	Yours Outcome = "yours"
+	// Failed is its install failed: tried again only when a run names the
+	// step (Reinstaller's Retry), as some old projects never install.
 	Failed Outcome = "failed"
 	// NoTool is its tool not installed: tried again once it is.
 	NoTool Outcome = "no-tool"
@@ -52,11 +55,14 @@ type Record struct {
 }
 
 // Install is a project's dependencies to install: its folder, from ~; the
-// tool its lockfile is for, by its program; how it came out, none till it's
-// run; and, failed, the last line it said.
+// tool its lockfile is for, by its program; whether it's been started, so
+// one stopped part-way, its dependency folder begun, runs again; how it came
+// out, none till it's run; and, failed, the last line it said, or, the
+// person's, what to do.
 type Install struct {
 	Dir     string  `json:"dir"`
 	Tool    string  `json:"tool"`
+	Started bool    `json:"started,omitempty"`
 	Outcome Outcome `json:"outcome,omitempty"`
 	Error   string  `json:"error,omitempty"`
 }
@@ -93,20 +99,25 @@ func Unsearched(restored restore.Record, rec Record) []string {
 
 // Reinstaller reinstalls the dependencies of the projects the restore
 // brought back, in the home folder Home, running each install with Run, its
-// record in StateDir, kit's state.
+// record in StateDir, kit's state; Now its clock, time.Now when nil. With
+// Retry, as when a run names the step, failed installs run again.
 type Reinstaller struct {
 	Run      runner.Runner
 	Home     string
 	StateDir string
 	Now      func() time.Time
+	Retry    bool
 }
 
-// ToRun are rec's installs to run: those with no outcome, and those whose
-// tool has come since.
+// ToRun are rec's installs to run: those with no outcome, started or not;
+// those whose tool has come since; and, with Retry, those that failed.
 func (r Reinstaller) ToRun(rec Record) []Install {
 	var todo []Install
 	for _, in := range rec.Installs {
-		if in.Outcome == "" || in.Outcome == NoTool && runner.Has(r.Run, in.Tool) {
+		switch {
+		case in.Outcome == "",
+			in.Outcome == NoTool && runner.Has(r.Run, in.Tool),
+			in.Outcome == Failed && r.Retry:
 			todo = append(todo, in)
 		}
 	}
@@ -144,12 +155,16 @@ func (r Reinstaller) Search() error {
 // Install runs todo, AtOnce folders at a time, a folder's installs one
 // after another, recording each outcome as it comes, and having the step
 // ctx is running say, every sayEvery at most, how many of them are done.
-// An install the run's stop cut short records nothing, so it runs again.
+// An install the run's stop cut short records no outcome, so it runs again.
 func (r Reinstaller) Install(ctx context.Context, todo []Install) error {
 	if len(todo) == 0 {
 		return nil
 	}
-	c := &counting{ctx: ctx, of: len(todo), now: r.Now}
+	now := r.Now
+	if now == nil {
+		now = time.Now
+	}
+	c := &counting{ctx: ctx, of: len(todo), now: now}
 	c.say()
 	var mu sync.Mutex
 	var errs []error
@@ -162,11 +177,14 @@ func (r Reinstaller) Install(ctx context.Context, todo []Install) error {
 					if ctx.Err() != nil {
 						break
 					}
-					in = r.install(ctx, in)
+					in, err := r.install(ctx, in)
 					if ctx.Err() != nil {
 						break
 					}
-					if err := r.record(in); err != nil {
+					if err == nil {
+						err = r.record(in)
+					}
+					if err != nil {
 						mu.Lock()
 						errs = append(errs, err)
 						mu.Unlock()
@@ -184,33 +202,34 @@ func (r Reinstaller) Install(ctx context.Context, todo []Install) error {
 	return errors.Join(append(errs, ctx.Err())...)
 }
 
-// install runs in, saying how it came out: there already, its tool
-// missing, installed, or failed with the last line it said, the run's log
-// told.
-func (r Reinstaller) install(ctx context.Context, in Install) Install {
-	in.Error = ""
+// install runs in, recorded as started first, saying how it came out: its
+// tool missing, installed, or failed with the last line it said, the run's
+// log told. What's in its folder is never judged here: the search did that.
+func (r Reinstaller) install(ctx context.Context, in Install) (Install, error) {
+	in.Outcome, in.Error = "", ""
 	t, ok := toolNamed(in.Tool)
 	if !ok {
 		in.Outcome, in.Error = Failed, in.Tool+" isn't a tool kit reinstalls with"
-		return in
+		return in, nil
+	}
+	if !runner.Has(r.Run, t.program) {
+		in.Outcome = NoTool
+		return in, nil
+	}
+	in.Started = true
+	if err := r.record(in); err != nil {
+		return in, err
 	}
 	dir := filepath.Join(r.Home, strings.TrimPrefix(in.Dir, "~/"))
-	switch {
-	case t.installedIn(dir):
-		in.Outcome = There
-	case !runner.Has(r.Run, t.program):
-		in.Outcome = NoTool
-	default:
-		// Run as a check's commands are, so what an installer prints stays
-		// in the log, never shown as the step's output.
-		_, err := r.Run.Run(event.WithChecking(ctx), runner.Command{Name: t.program, Args: t.args(dir), Dir: dir, Timeout: installTimeout})
-		in.Outcome = Installed
-		if err != nil {
-			in.Outcome, in.Error = Failed, engine.Reason(err)
-			event.Log(ctx, event.Logged{Line: fmt.Sprintf("%s's dependencies didn't install (%s): %s", in.Dir, in.Tool, in.Error), Alert: true})
-		}
+	// Run as a check's commands are, so what an installer prints stays in
+	// the log, never shown as the step's output.
+	_, err := r.Run.Run(event.WithChecking(ctx), runner.Command{Name: t.program, Args: t.args, Dir: dir, Timeout: installTimeout})
+	in.Outcome = Installed
+	if err != nil {
+		in.Outcome, in.Error = Failed, engine.Reason(err)
+		event.Log(ctx, event.Logged{Line: fmt.Sprintf("%s's dependencies didn't install (%s): %s", in.Dir, in.Tool, in.Error), Alert: true})
 	}
-	return in
+	return in, nil
 }
 
 // record records in's outcome.

@@ -34,8 +34,9 @@ func ReinstallOn(stateDir string, restoring bool) (bool, error) {
 // outcome, and those whose tool has come since. Its check reads the records
 // alone: ok once every install has an outcome, those that failed or wait
 // for their tool named, never a problem; nothing restored yet, deferred.
-// The caller places it after the restore, and after the secrets, which
-// write what private packages need.
+// Failed installs run again only with r's Retry, which the caller sets
+// when the run names the step. The caller places it after the restore, and
+// after the secrets, which write what private packages need.
 func Reinstall(r reinstall.Reinstaller) engine.Step {
 	return engine.Step{
 		Name: ReinstallName, Title: "Dependencies", Area: AreaBackups,
@@ -82,25 +83,30 @@ func toReinstall(paths []string, todo int) string {
 }
 
 // The items of the installs left, as check.Item's Quiet has it: failed,
-// left as they are; and waiting for their tool.
+// left as they are; waiting for their tool; and the person's to do.
 const (
 	quietLeft    = "left"
 	quietWaiting = "waiting"
+	quietYours   = "yours"
 )
 
 // reinstalled is how rec's installs stand, each with an outcome: how many
-// are in place, failed, and wait for each tool; and an item each for those
-// failed, with the last line it said, and those waiting.
+// are in place, failed, the person's, and wait for each tool; and an item
+// each for those failed, with the last line it said, those the person's,
+// saying what to do, and those waiting.
 func reinstalled(rec reinstall.Record) check.Result {
 	res := check.Result{State: check.OK}
 	waiting := map[string]int{}
-	placed, failures := 0, 0
+	placed, failures, yours := 0, 0, 0
 	for _, in := range rec.Installs {
 		item := check.Item{ID: ReinstallName + ":" + in.Dir + ":" + in.Tool, Name: in.Dir, State: string(in.Outcome)}
 		switch in.Outcome {
 		case reinstall.Failed:
 			failures++
 			item.Detail, item.Quiet = in.Tool+": "+in.Error, quietLeft
+		case reinstall.Yours:
+			yours++
+			item.Detail, item.Quiet = in.Error, quietYours
 		case reinstall.NoTool:
 			waiting[in.Tool]++
 			item.Detail, item.Quiet = in.Tool+" isn't installed", quietWaiting
@@ -113,6 +119,9 @@ func reinstalled(rec reinstall.Record) check.Result {
 	says := []string{fmt.Sprintf("%d installed", placed)}
 	if failures > 0 {
 		says = append(says, fmt.Sprintf("%d failed", failures))
+	}
+	if yours > 0 {
+		says = append(says, fmt.Sprintf("%d for you to install", yours))
 	}
 	for _, t := range slices.Sorted(maps.Keys(waiting)) {
 		says = append(says, fmt.Sprintf("%d %s for %s", waiting[t], plural(waiting[t], "waits", "wait"), t))
