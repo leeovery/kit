@@ -1351,16 +1351,19 @@ refuses a line the restore would refuse, before writing anything, and copies not
   restore never carries, and never counts toward a path's holding anything, what kit links,
   what prefs saves (while it's on for the Mac), what a kind puts in place, kit's own folders and
   what the backups leave out; nor Finder's `.DS_Store` and `.localized`. kit works that out,
-  never a `--skip`. A line whose path is one of those, or in one, is refused, as are two lines
-  where one is or holds the other, case aside. The list decides what's carried by itself, not
+  never a `--skip`, which is for what in a listed folder is neither the person's data nor kit's
+  (a tool's own credentials, made again by its own setup). A line whose path is one of those,
+  or in one, is refused, as are two lines where one is or holds the other, case aside, however
+  either is spelt. The list decides what's carried by itself, not
   what's safe: Time Machine and Arq hold the whole home folder, so a path missing from it costs
   a copy when noticed, never data, and there's no drift watch over data. An agent building a
   tool that keeps data adds its line then (`kit agent`'s guide asks the question).
 - **When.** On a Mac started from another (`from` in kit.toml, written by the boot's "start
   from a Mac" or `kit machine add --from`), whose copied declarations carry the list, nothing
   asked. A fresh Mac, one rebuilt under its own name, or a Mac in use given a new line restores
-  nothing unless `kit apply --restore-from time-machine|arq` says so; `--at` picks Time
-  Machine's backup, the latest at or before a date or time.
+  nothing unless `kit apply --restore-from time-machine|arq` says so, and then only a path
+  absent or holding nothing but kit's: one holding data is here, never touched; `--at` picks
+  Time Machine's backup, the latest at or before a date or time.
 - **Sources, best first.** The old Mac, over SSH on the local network, while it answers
   (found among the Macs offering SSH, confirmed by its kit name, logged into with the key kit's
   secrets write); its Time Machine disk, the backup's snapshot mounted read-only; Arq, restored

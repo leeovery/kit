@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -40,14 +41,19 @@ func newRestoreCommand(a *app) *cobra.Command {
 		Short: "Declare a path of data a new Mac carries across (--shared: every Mac)",
 		Long: `Declare a path in the home folder, a folder or a file, as data a new Mac
 carries across: code, history, ledgers, a tool's state. A new Mac started
-from this one restores it from this Mac, else from a backup of it. --skip
-names what in it to leave out, relative to it, a path or a pattern as rsync
-takes one, as often as wanted. What kit links, prefs saves or a kind puts in
-place is left out by itself, never a --skip; a path that's one of those, or
-in one, or one another line holds or is in, is refused.
+from this one restores it from this Mac, else from a backup of it.
 
-Adding a line copies nothing: on a Mac in use, a path added later is
-restored only by kit apply --restore-from time-machine|arq.` + declaredWhere,
+What kit links, prefs saves or a kind puts in place, kit's own folders and
+what the backups leave out are left out by themselves, never a --skip; a
+path that's one of those, or in one, or one another line holds or is in, is
+refused. --skip names what in it is neither the person's data nor kit's, as
+a tool's credentials its own setup makes again: relative to the path, a path
+or a pattern as rsync takes one, as often as wanted.
+
+Adding a line copies nothing. On a Mac in use, a path added later is
+restored only by kit apply --restore-from time-machine|arq, and only while
+it's absent or empty: one holding data counts as here, and is never
+touched.` + declaredWhere,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return a.prepared(cmd, config.RestoreKind+" add", func(ctx context.Context, r *run) error {
@@ -124,17 +130,50 @@ func (a *app) removeRestore(ctx context.Context, r *run, names []string, shared 
 	c := startChanges(r, paths)
 	for _, p := range paths {
 		c.step(ctx, p, func(context.Context) check.Result {
-			return c.undeclare(config.RestoreKind, p, shared, restoreList)
+			written, err := r.restoreWritten(p)
+			switch {
+			case err != nil:
+				return failed(err)
+			case len(written) == 0:
+				return check.Result{State: check.Failed, Reason: p + " isn't on this Mac's " + restoreList}
+			}
+			said := make([]string, 0, len(written))
+			for _, name := range written {
+				res := c.undeclare(config.RestoreKind, name, shared, restoreList)
+				if res.State != check.OK {
+					return res
+				}
+				said = append(said, res.Summary)
+			}
+			return check.Result{State: check.OK, Summary: strings.Join(said, "; ")}
 		})
 	}
 	c.sync(ctx, commitMessage("remove", config.RestoreKind, paths, r.machine, ""))
 	return c.finish()
 }
 
+// restoreWritten are the paths of this Mac's [restore] lines, the shared
+// file's first, as written, that are p, a path from ~ and cleaned, however
+// they're spelt, as in ~/Code/.
+func (r *run) restoreWritten(p string) ([]string, error) {
+	list, err := r.cfg.List(config.RestoreKind, r.machine)
+	if err != nil {
+		return nil, err
+	}
+	var written []string
+	for _, e := range list.Entries {
+		line, err := restore.ReadLine(e.Name, "")
+		if (e.Name == p || err == nil && line.Path == p) && !slices.Contains(written, e.Name) {
+			written = append(written, e.Name)
+		}
+	}
+	return written, nil
+}
+
 // restoreFits says why line, declared in scope's file, would be refused by
 // the restore of a Mac it's for, every Mac for the shared file: nil when it
 // wouldn't. Each Mac's [restore] lines must read, none of them line's path,
-// in it or holding it, but one of that path itself, which declaring
+// in it or holding it, but one written as line's path is, which declaring
 // judges; and the path mustn't be kit's on the Mac.
 func (r *run) restoreFits(ctx context.Context, scope string, line restore.Line) error {
 	macs := []string{scope}
@@ -164,8 +203,15 @@ func (r *run) restoreFitsOn(ctx context.Context, mac string, line restore.Line) 
 	if err != nil {
 		return err
 	}
-	for _, other := range lines {
-		if other.Path != line.Path && overlaps(other.Path, line.Path) {
+	// Lines reads a line of each entry, in turn.
+	for i, other := range lines {
+		written := list.Entries[i].Name
+		switch {
+		case written == line.Path:
+			continue
+		case other.Path == line.Path:
+			return fmt.Errorf("%s: %s is listed already, as %s (%s)", line.Pos, line.Path, written, other.Pos)
+		case overlaps(other.Path, line.Path):
 			return fmt.Errorf("%s: %s and %s (%s) overlap: a path is restored by one line", line.Pos, line.Path, other.Path, other.Pos)
 		}
 	}

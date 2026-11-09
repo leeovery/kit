@@ -62,20 +62,31 @@ rebuilds the rest from kit-config.
   person restores in Arq for kit to put in place
   (`kit apply --restore-from time-machine|arq`).
 - When: once Homebrew's rsync is installed and, copying from the old Mac,
-  the secrets have synced; before what writes into those folders. Claude
-  Code's MCP servers and skills come after it, as does a step declared
-  `--after restore`. It runs beside the rest, so the long copy holds up
+  the secrets have synced. Claude Code's MCP servers and skills, the
+  reinstall, and a step declared `--after restore` wait for it; nothing
+  else does, so a step of your own that writes into a listed folder must
+  say `--after restore`. Linked files and apps' settings don't wait: the
+  copy leaves them out. It runs beside the rest, so the long copy holds up
   nothing quick.
-- What it leaves: whatever kit links, prefs saves or a kind puts in place,
-  which kit brings itself. A path already holding files from before the
-  set-up is never touched, nor merged into; what the set-up itself wrote
-  there, as a shell's history, is set aside in kit's state first.
-- Then the reinstall: each restored project with a lockfile has its
-  dependencies installed again. `kit apply reinstall` tries those that
-  failed again.
+- What it leaves out: what kit links, prefs saves or a kind puts in place
+  (Claude Code's skills, the files secrets fill), which kit brings itself;
+  kit's own folders; what the backups leave out (`[backup exclusions]`,
+  and, from the old Mac, folders marked excluded from backups, though one
+  holding git checkouts is copied whole); Finder's .DS_Store and .localized
+  files; and what its line's `--skip` names.
+- What it never touches: a path already holding files from before the
+  set-up, never merged into. What the set-up itself wrote there, as a
+  shell's history, is set aside in kit's state first.
+- Then the reinstall: each restored project's dependencies are installed
+  again from its lockfile (Composer, npm, pnpm, Yarn, Bun, uv), in main
+  checkouts and the person's own worktrees, never agents' or submodules.
+  Yarn Berry projects are the person's to install; Go, Cargo, Swift and
+  Terraform are left alone. `kit apply reinstall` tries those that failed
+  again.
 
 A Mac without a `from`, or a line added on a Mac in use, restores nothing
-unless `kit apply --restore-from time-machine|arq` says so.
+unless `kit apply --restore-from time-machine|arq` says so, and then only
+while the path is absent or empty: one holding data is never touched.
 
 ## What isn't there
 

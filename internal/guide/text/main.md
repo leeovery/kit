@@ -54,17 +54,22 @@ Take the first that fits, in this order:
    Claude Code's MCP servers and skills (`kit --help` lists them all).
 2. A setting: macOS's (`kit defaults add`), power (`kit power add`), git's
    (`kit git-config add`).
-3. A linked file: `kit file add` moves a file into kit-config and links it
-   back, for a file that only you write.
-4. Captured settings: kit prefs saves apps' preferences and the settings
-   files kit-config's `[prefs files]` names, and restores them on a new Mac.
-5. A secret: `kit secret add`, into the shell's environment or a file.
-6. A step done by hand: `kit manual add`, for what only a person can do.
-7. A step of your own: `kit step add`, a script, the last resort.
+3. A file the person writes, a config or a script: a linked file.
+   `kit file add` moves it into kit-config and links it back. Never a file
+   its program replaces when it saves: the program would put a copy where
+   the link was, and the link is lost. That's an app's settings, item 5.
+4. A secret: `kit secret add`, into the shell's environment or a file.
+5. An app's settings, how it behaves: kit prefs saves apps' preferences and
+   the settings files kit-config's `[prefs files]` names, and restores them
+   on a new Mac.
+6. The person's data: code, history, ledgers, a tool's state. The restore
+   list, `[restore]`: `kit restore add`.
+7. A step done by hand: `kit manual add`, for what only a person can do.
+8. A step of your own: `kit step add`, a script, the last resort.
 
-A file its program replaces when it saves is captured by prefs, never
-linked: the program would put a copy where the link was, and the link is
-lost.
+A file or folder that's none of 3 to 6 is nothing of kit's: kit rebuilds
+it, as apps, packages and tools, or it's a cache. Every path in the home
+folder has one owner, and a folder that mixes them keeps each path's own.
 
 What macOS makes a person approve, such as a privacy permission, a driver or
 a sign-in, is a step done by hand: kit says what to do, and a command checks
@@ -75,28 +80,18 @@ A Homebrew package downloaded from a private repository needs a token.
 its section held for that secret, as in `[homebrew casks --secret TOKEN]`,
 by themselves; a new Mac installs it once the secret has synced.
 
-## Where a file belongs
-
-Every path in the home folder has one owner. For a file or a folder, ask in
-this order, and take the first that fits:
-
-1. Does the person write it, as a config or a script? A linked file in
-   kit-config: `kit file add`.
-2. Is it a secret? kit's secrets: `kit secret add`.
-3. Is it an app's settings, how it behaves? prefs: kit prefs saves apps'
-   preferences, and `[prefs files]` names settings files.
-4. Is it the person's data: code, history, ledgers, a tool's state? The
-   restore list, `[restore]`: `kit restore add`.
-5. Else nothing: kit rebuilds it (apps, packages, tools), or it's a cache.
+### The person's data
 
 When you build a tool that keeps data, add its folder then, with
 `kit restore add ~/.local/state/<tool>`: a new Mac started from this one
 brings it across. Adding it copies nothing here.
 
-In a folder that mixes them, each path keeps its own owner: the restore
-leaves out what kit links, prefs saves or a kind puts in place, by itself,
-so it's never a `--skip`. A path that's one of those is refused, as is one
-another line holds or is in.
+The restore leaves out by itself what kit links, prefs saves or a kind puts
+in place, kit's own folders and what the backups leave out, so none of
+those is ever a `--skip`. A path that's one of those, or in one, is
+refused, as is one another line holds or is in. `--skip` is for what in a
+listed folder is neither the person's data nor kit's, such as a tool's own
+credentials in its state folder, which its own setup makes again.
 
 ## Steps of your own
 
@@ -191,10 +186,11 @@ near the end of the run.
 
 On a Mac started from another, the data restore brings across the paths
 `[restore]` lists, from that Mac, else a backup of it, once Homebrew's rsync
-is in and, from the old Mac, the secrets have synced. What kit puts in those
-folders (Claude Code's MCP servers and skills) comes after it, as does a
-step declared `--after restore`; then the reinstall installs each restored
-project's dependencies.
+is in and, from the old Mac, the secrets have synced. Claude Code's MCP
+servers and skills, the reinstall of restored projects' dependencies, and a
+step declared `--after restore` wait for it; nothing else does. A step of
+your own that writes into a listed folder must say `--after restore`.
+Linked files and apps' settings don't wait: the copy leaves them out.
 
 Nothing waits on a step done by hand unless its line names what waits, with
 `--before`: then it comes up as a card partway through, once what it comes
