@@ -15,13 +15,19 @@ import (
 var reference = regexp.MustCompile(`\{\{(.+?)\}\}`)
 
 // Holds scripts fake's op as 1Password holding values, each by its
-// reference, answers it: op read, each value's bytes ended by a newline, as
-// op gives them through a pipe; op inject, each reference in the template
-// it reads replaced by its value, each byte that isn't UTF-8 turned into
-// U+FFFD, as op's does, and failing whole for a reference it doesn't hold.
+// reference, answers it, as op's does: op read, each value ended by a
+// newline unless it ends with one already, or its bytes exactly in the file
+// --out-file names, in the folder op runs in; op inject, each reference in
+// the template it reads replaced by its value, each byte that isn't UTF-8
+// turned into U+FFFD, and failing whole for a reference it doesn't hold.
 func Holds(fake *runnertest.Fake, values map[string]string) {
 	for ref, value := range values {
-		fake.On("op", "read", ref).Prints(value + "\n")
+		piped := value
+		if !strings.HasSuffix(piped, "\n") {
+			piped += "\n"
+		}
+		fake.On("op", "read", ref).Prints(piped)
+		fake.On("op", "read", "--force", "--file-mode", "0600", "--out-file", "value", ref).Writes("value", value)
 	}
 	fake.On("op", "inject").Filters(func(template string) (string, error) {
 		var missing []string

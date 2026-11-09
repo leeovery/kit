@@ -90,7 +90,11 @@ func (a *app) addSecret(ctx context.Context, r *run, names []string, opts addOpt
 			return check.Result{State: check.Failed, Reason: fmt.Sprintf("kept in %s, but as %s, not %s, where kit checked it could go: nothing declared", d.About().Name, d.Join(item, kept), d.Join(item, at.short))}
 		}
 		if so.ref == "" {
-			if err := k.ReadBack(ctx, d, d.Join(item, at.short), value); err != nil {
+			readBack := k.ReadBack
+			if so.from != "" {
+				readBack = k.ReadBackFile
+			}
+			if err := readBack(ctx, d, d.Join(item, at.short), value); err != nil {
 				return check.Result{State: check.Failed, Reason: "stored, but reading it back failed: " + err.Error()}
 			}
 		}

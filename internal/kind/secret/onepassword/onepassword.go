@@ -16,6 +16,7 @@ import (
 	"iter"
 	"maps"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -137,9 +138,12 @@ func (Driver) Unlock(ctx context.Context, run runner.Runner) error {
 	return err
 }
 
-// Read reads a value with op read, through a pipe, which gives its bytes
-// exactly and one newline after them, taken off: store.Unread when op names
-// ref in saying why it couldn't.
+// Read reads a value with op read, through a pipe, without the newline op
+// ends it with: store.Unread when op names ref in saying why it couldn't.
+// op adds that newline only to a value that doesn't end with one already
+// (tried, 9 Nov 2026), so a value that does reads without its own: through
+// the pipe, "a" and "a\n" are one. A file's bytes read whole only with
+// --out-file (ReadFile).
 func (Driver) Read(ctx context.Context, run runner.Runner, ref string) (string, error) {
 	res, err := opRun(ctx, run, runner.Command{Args: []string{"read", ref}, Timeout: approvalTimeout, Secret: true})
 	if err != nil {
@@ -148,21 +152,46 @@ func (Driver) Read(ctx context.Context, run runner.Runner, ref string) (string, 
 	return strings.TrimSuffix(string(res.Stdout), "\n"), nil
 }
 
-// ReadFile reads a value as a file holds it, with Read, never op inject,
-// which turns each byte that isn't UTF-8 into U+FFFD: an attachment's bytes
-// exactly; a field's text ended by one newline, in place of any it ends
-// with. A value of a section's field is a field's; one of an item's own,
-// op://vault/item/name, an attachment's when the item has one of that name.
+// ReadFile reads a value as a file holds it, never with op inject, which
+// turns each byte that isn't UTF-8 into U+FFFD: an attachment's bytes
+// exactly, with op read --out-file; a field's text, with Read, ended by one
+// newline in place of any it ends with. Read first, so op names ref should
+// it not read; then the item says whether it's an attachment.
 func (d Driver) ReadFile(ctx context.Context, run runner.Runner, ref string) (string, error) {
 	value, err := d.Read(ctx, run, ref)
 	if err != nil {
 		return "", err
 	}
 	attached, err := isAttachment(ctx, run, ref)
-	if err != nil || attached {
-		return value, err
+	switch {
+	case err != nil:
+		return "", err
+	case attached:
+		return readOut(ctx, run, ref)
 	}
 	return strings.TrimRight(value, "\n") + "\n", nil
+}
+
+// outFile is the file op read --out-file writes, in a folder of its own.
+const outFile = "value"
+
+// readOut reads ref's bytes exactly with op read --out-file, into a folder
+// only the person can read, made for it and removed after.
+func readOut(ctx context.Context, run runner.Runner, ref string) (string, error) {
+	dir, err := os.MkdirTemp("", "kit-secret-")
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+	args := []string{"read", "--force", "--file-mode", "0600", "--out-file", outFile, ref}
+	if _, err := opRun(ctx, run, runner.Command{Args: args, Dir: dir, Timeout: approvalTimeout, Secret: true}); err != nil {
+		return "", unread(err, []string{ref})
+	}
+	data, err := os.ReadFile(filepath.Join(dir, outFile))
+	if err != nil {
+		return "", fmt.Errorf("op read wrote no file: %w", err)
+	}
+	return string(data), nil
 }
 
 // isAttachment reports whether ref, a value's, is one of its item's
@@ -182,7 +211,7 @@ func isAttachment(ctx context.Context, run runner.Runner, ref string) (bool, err
 // ReadMany reads refs in one run of op inject, as 1Password may have the
 // person approve each run: a template on its standard input, each ref between
 // lines of a mark no value holds, so that a value of many lines reads back
-// whole, and each value exactly, as Read has it. op inject is a text
+// whole, and each value exactly, as kept. op inject is a text
 // template, so a value that isn't UTF-8, as a file may be, doesn't read
 // back whole: ReadFile reads those. A ref with a $ or }} in it is read
 // alone, with Read: a template would read it as a variable, or as the

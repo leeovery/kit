@@ -35,7 +35,8 @@ type Driver interface {
 	// Unlock opens a session, as reading a value needs, the person
 	// approving it as the store asks them to: nil once it answers.
 	Unlock(ctx context.Context, run runner.Runner) error
-	// Read reads the value at ref, exactly as the store keeps it.
+	// Read reads the value at ref, a field's text, as the store gives it
+	// back: a file's bytes read whole with ReadFile alone.
 	Read(ctx context.Context, run runner.Runner, ref string) (string, error)
 	// ReadMany reads the values at refs at once, as Read does each, a value
 	// of text alone read whole: failing whole when one won't read, saying

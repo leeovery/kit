@@ -191,7 +191,7 @@ func TestSyncReadsEveryValueInOneRunOfOp(t *testing.T) {
 
 // A file kept as an attachment lands byte for byte, whatever it holds:
 // bytes that aren't UTF-8, which op inject would turn into U+FFFD, and the
-// newlines it ends with. A field's text in a file ends with one newline,
+// newlines it ends with, one or several. A field's text in a file ends with one newline,
 // and a variable's value with none, as they always have.
 func TestSyncWritesAnAttachmentByteForByte(t *testing.T) {
 	home := t.TempDir()
@@ -199,18 +199,22 @@ func TestSyncWritesAnAttachmentByteForByte(t *testing.T) {
 	s := secret.New(fake, home)
 	declare(t, s,
 		[2]string{"~/.config/tool/blob", "blob.bin"},
+		[2]string{"~/.config/tool/rc", "rc"},
 		[2]string{"~/.config/tool/text", "Section/text"},
 		[2]string{"TEXT", "Section/text"},
 	)
 	blob := "\xff\xfe\x00kit\xc3\x28\x80\n\n"
 	fake.On("op", "whoami")
-	optest.Holds(fake, map[string]string{item + "/blob.bin": blob, item + "/Section/text": "a field\n\n"})
-	optest.Attaches(fake, item, "blob.bin")
-	if report, err := s.Sync(t.Context()); err != nil || report.Synced != 3 || len(report.Failed) != 0 {
+	optest.Holds(fake, map[string]string{item + "/blob.bin": blob, item + "/rc": "key=value\n", item + "/Section/text": "a field\n\n"})
+	optest.Attaches(fake, item, "blob.bin", "rc")
+	if report, err := s.Sync(t.Context()); err != nil || report.Synced != 4 || len(report.Failed) != 0 {
 		t.Fatalf("Sync() = %+v, %v", report, err)
 	}
 	if got, _ := os.ReadFile(filepath.Join(home, ".config/tool/blob")); string(got) != blob {
 		t.Errorf("the attachment's file holds %d bytes, want its %d exactly", len(got), len(blob))
+	}
+	if got, _ := os.ReadFile(filepath.Join(home, ".config/tool/rc")); string(got) != "key=value\n" {
+		t.Errorf("the text attachment's file holds %q, want it with its one final newline", got)
 	}
 	if got, _ := os.ReadFile(filepath.Join(home, ".config/tool/text")); string(got) != "a field\n" {
 		t.Errorf("the field's file holds %q, want its text ended by one newline", got)
@@ -223,19 +227,24 @@ func TestSyncWritesAnAttachmentByteForByte(t *testing.T) {
 	}
 }
 
-// ReadBack compares the value read back with the one stored byte for byte:
-// a newline more or less is a different value.
+// ReadBack compares the value read back with the one stored byte for byte,
+// and ReadBackFile a file's, as it's read as a file: a newline more or less
+// is a different file.
 func TestReadBackComparesExactly(t *testing.T) {
 	fake := runnertest.New(t)
 	s := secret.New(fake, t.TempDir())
-	optest.Holds(fake, map[string]string{item + "/blob": "line\n\n"})
+	optest.Holds(fake, map[string]string{item + "/Section/field": "value", item + "/file": "line\n"})
+	optest.Attaches(fake, item, "file")
 	d := onepassword.Driver{}
-	if err := s.ReadBack(t.Context(), d, item+"/blob", "line\n\n"); err != nil {
+	if err := s.ReadBack(t.Context(), d, item+"/Section/field", "value"); err != nil {
 		t.Errorf("ReadBack() of the value stored = %v", err)
 	}
-	for _, want := range []string{"line\n", "line\n\n\n"} {
-		if err := s.ReadBack(t.Context(), d, item+"/blob", want); err == nil || err.Error() != "1Password gave back a different value" {
-			t.Errorf("ReadBack() of %q = %v; want a different value", want, err)
+	if err := s.ReadBackFile(t.Context(), d, item+"/file", "line\n"); err != nil {
+		t.Errorf("ReadBackFile() of the file stored = %v", err)
+	}
+	for _, want := range []string{"line", "line\n\n"} {
+		if err := s.ReadBackFile(t.Context(), d, item+"/file", want); err == nil || err.Error() != "1Password gave back a different value" {
+			t.Errorf("ReadBackFile() of %q = %v; want a different value", want, err)
 		}
 	}
 }

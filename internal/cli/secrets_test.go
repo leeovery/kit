@@ -527,7 +527,8 @@ func TestASecretFilesAttachmentNamedWithAPeriod(t *testing.T) {
 
 // A file kept from --from lands as it was, byte for byte, bytes that aren't
 // UTF-8 and the newlines it ends with too, and add checks it does: a file
-// synced otherwise, its attachment taken for a field's text, fails the add.
+// synced otherwise, its attachment taken for a field's text once read back,
+// fails the add.
 func TestASecretFromAFileSyncsByteForByte(t *testing.T) {
 	blob := "\xff\xfe\x00kit\xc3\x28\x80\n\n"
 	for name, attached := range map[string]bool{"attached": true, "taken for a field": false} {
@@ -540,8 +541,9 @@ func TestASecretFromAFileSyncsByteForByte(t *testing.T) {
 			f := w.fake
 			f.On("op", "whoami")
 			get := f.On("op", "item", "get", "Item", "--vault", "vault", "--format", "json").Prints(`{"id":"abc","title":"Item","files":[]}`)
-			if attached {
-				get.Then().Prints(`{"id":"abc","title":"Item","files":[{"id":"x","name":"blob"}]}`)
+			get.Then().Prints(`{"id":"abc","title":"Item","files":[{"id":"x","name":"blob"}]}`)
+			if !attached {
+				get.Then().Prints(`{"id":"abc","title":"Item","files":[]}`)
 			}
 			f.On("op", "item", "edit", "Item", "--vault", "vault", "blob[file]="+from)
 			optest.Holds(f, map[string]string{"op://vault/Item/blob": blob, "op://vault/Item/Section/token": "the value"})

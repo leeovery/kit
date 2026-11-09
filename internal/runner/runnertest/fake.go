@@ -7,6 +7,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -63,6 +65,7 @@ type answer struct {
 	err      error
 	duration time.Duration
 	does     func()
+	writes   map[string]string
 	filter   func(input string) (string, error)
 	asks     int
 	late     bool
@@ -103,6 +106,17 @@ func (s *Script) Fails(err error) *Script {
 // on the Mac: a file it writes, say.
 func (s *Script) Does(f func()) *Script {
 	s.last().does = f
+	return s
+}
+
+// Writes has the command write content to the file name, in the folder it
+// runs in (runner.Command's Dir), as op read --out-file writes a value.
+func (s *Script) Writes(name, content string) *Script {
+	a := s.last()
+	if a.writes == nil {
+		a.writes = map[string]string{}
+	}
+	a.writes[name] = content
 	return s
 }
 
@@ -224,6 +238,11 @@ func (f *Fake) Run(ctx context.Context, cmd runner.Command) (runner.Result, erro
 	}
 	if a.does != nil {
 		a.does()
+	}
+	for name, content := range a.writes {
+		if err := os.WriteFile(filepath.Join(cmd.Dir, name), []byte(content), 0o600); err != nil {
+			f.t.Errorf("runnertest: %s couldn't write %s: %v", cmd, name, err)
+		}
 	}
 	stdout, stderr, exit := a.output(cmd.Input)
 	if cmd.Lines != nil && !cmd.Interactive {

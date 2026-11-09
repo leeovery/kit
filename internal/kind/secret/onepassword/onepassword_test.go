@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"maps"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -256,40 +258,45 @@ func TestAnAwkwardReferenceThatWontReadKeepsTheRest(t *testing.T) {
 	}
 }
 
-// op read, through a pipe, gives a value's bytes and one newline after
-// them: Read takes that one off, and no other; ReadMany reads the same.
-func TestReadTakesOffTheOneNewlineOpAdds(t *testing.T) {
+// op read, through a pipe, ends a value with a newline unless it ends with
+// one already: Read takes that newline off, so a value ending with its own
+// reads without it, the pipe telling the two apart no further. op inject
+// gives the value exactly.
+func TestReadTakesOffTheNewlineOpAdds(t *testing.T) {
 	run := runnertest.New(t)
-	optest.Holds(run, map[string]string{"op://vault/item/a": "a\n\n", "op://vault/item/b": "b"})
+	optest.Holds(run, map[string]string{"op://vault/item/a": "a", "op://vault/item/b": "b\n"})
 	d := onepassword.Driver{}
-	for ref, want := range map[string]string{"op://vault/item/a": "a\n\n", "op://vault/item/b": "b"} {
+	for ref, want := range map[string]string{"op://vault/item/a": "a", "op://vault/item/b": "b"} {
 		if got, err := d.Read(t.Context(), run, ref); err != nil || got != want {
 			t.Errorf("Read(%s) = %q, %v; want %q", ref, got, err, want)
 		}
 	}
 	values, err := d.ReadMany(t.Context(), run, []string{"op://vault/item/a", "op://vault/item/b"})
-	if err != nil || values["op://vault/item/a"] != "a\n\n" || values["op://vault/item/b"] != "b" {
+	if err != nil || values["op://vault/item/a"] != "a" || values["op://vault/item/b"] != "b\n" {
 		t.Errorf("ReadMany() = %q, %v; want each value exactly", values, err)
 	}
 }
 
-// ReadFile reads an attachment byte for byte with op read, never op inject,
-// which turns each byte that isn't UTF-8 into U+FFFD; a field's text, a
-// section's or the item's own, it ends with one newline, in place of those
-// it ends with, asking the item what it keeps only when the reference
-// could be either.
+// ReadFile reads an attachment byte for byte with op read --out-file,
+// into a folder of its own, removed after, never through a pipe, which
+// can't tell a final newline of its own from op's, nor op inject, which
+// turns each byte that isn't UTF-8 into U+FFFD; a field's text it ends with
+// one newline, in place of those it ends with, asking the item what it
+// keeps only when the reference could be either.
 func TestReadFile(t *testing.T) {
 	blob := "\xff\xfe\x00kit\xc3\x28\x80\n\n"
 	run := runnertest.New(t)
 	optest.Holds(run, map[string]string{
 		"op://vault/Item/blob":          blob,
+		"op://vault/Item/text":          "one line\n",
 		"op://vault/Item/loose":         "loose\n\n",
 		"op://vault/Item/Section/field": "field",
 	})
-	optest.Attaches(run, "op://vault/Item", "blob")
+	optest.Attaches(run, "op://vault/Item", "blob", "text")
 	d := onepassword.Driver{}
 	for ref, want := range map[string]string{
 		"op://vault/Item/blob":          blob,
+		"op://vault/Item/text":          "one line\n",
 		"op://vault/Item/loose":         "loose\n",
 		"op://vault/Item/Section/field": "field\n",
 	} {
@@ -297,11 +304,23 @@ func TestReadFile(t *testing.T) {
 			t.Errorf("ReadFile(%s) = %q, %v; want %q", ref, got, err, want)
 		}
 	}
-	if got := strings.Count(strings.Join(run.Calls(), "\n"), "op item get"); got != 2 {
-		t.Errorf("ran %q: want the item asked of the two references that could be an attachment", run.Calls())
+	calls := strings.Join(run.Calls(), "\n")
+	if got := strings.Count(calls, "op item get"); got != 3 {
+		t.Errorf("ran %q: want the item asked of the three references that could be an attachment", run.Calls())
 	}
-	if slices.Contains(run.Calls(), "op inject") {
-		t.Errorf("ran %q: want no op inject", run.Calls())
+	if got := strings.Count(calls, "--out-file"); got != 2 || strings.Contains(calls, "op inject") {
+		t.Errorf("ran %q: want each attachment read with --out-file, and no op inject", run.Calls())
+	}
+	for _, c := range run.Commands() {
+		if !slices.Contains(c.Args, "--out-file") {
+			continue
+		}
+		if !c.Secret || c.Dir == "" {
+			t.Errorf("%s ran in %q, secret %v: want a folder of its own, its output kept from the log", c, c.Dir, c.Secret)
+		}
+		if _, err := os.Stat(c.Dir); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("%s left its folder: %v", c, err)
+		}
 	}
 	values, err := d.ReadMany(t.Context(), run, []string{"op://vault/Item/blob"})
 	if err != nil || values["op://vault/Item/blob"] == blob {

@@ -7,6 +7,7 @@ import (
 
 	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/kind/secret/store"
+	"github.com/leeovery/kit/internal/runner"
 )
 
 // Ready says whether d answers, as a store keeping a value needs: nil for a
@@ -65,12 +66,25 @@ func (s *Secrets) Delete(ctx context.Context, d store.Driver, item, short string
 // ReadBack reads ref, in full, from d and compares it with want, byte for
 // byte, never showing either.
 func (s *Secrets) ReadBack(ctx context.Context, d store.Driver, ref, want string) error {
-	got, err := d.Read(ctx, s.run, ref)
+	return s.readBack(ctx, d.Read, ref, want, d.About().Name)
+}
+
+// ReadBackFile reads ref, in full, from d as a file holds it
+// (store.Driver.ReadFile), and compares it with want, a file's contents,
+// as ReadBack does.
+func (s *Secrets) ReadBackFile(ctx context.Context, d store.Driver, ref, want string) error {
+	return s.readBack(ctx, d.ReadFile, ref, want, d.About().Name)
+}
+
+// readBack reads ref with read, from the store called name, and compares
+// it with want, byte for byte, never showing either.
+func (s *Secrets) readBack(ctx context.Context, read func(context.Context, runner.Runner, string) (string, error), ref, want, name string) error {
+	got, err := read(ctx, s.run, ref)
 	if err != nil {
 		return err
 	}
 	if got != want {
-		return errors.New(d.About().Name + " gave back a different value")
+		return errors.New(name + " gave back a different value")
 	}
 	return nil
 }

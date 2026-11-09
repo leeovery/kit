@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"sync"
 	"testing"
@@ -139,6 +141,19 @@ func TestFakeDoesWhatItsTold(t *testing.T) {
 	fake.On("claude", "plugin", "marketplace", "add", "x/y").Does(func() { ran++ })
 	if _, err := fake.Run(t.Context(), runner.Command{Name: "claude", Args: []string{"plugin", "marketplace", "add", "x/y"}}); err != nil || ran != 1 {
 		t.Errorf("Run() = %v, ran %d times; want it done once", err, ran)
+	}
+}
+
+// A command scripted to write a file writes it in the folder it runs in.
+func TestFakeWritesAFile(t *testing.T) {
+	fake := runnertest.New(t)
+	dir := t.TempDir()
+	fake.On("op", "read", "--out-file", "value", "op://vault/item/file").Writes("value", "\xff\n")
+	if _, err := fake.Run(t.Context(), runner.Command{Name: "op", Args: []string{"read", "--out-file", "value", "op://vault/item/file"}, Dir: dir}); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(filepath.Join(dir, "value")); err != nil || string(got) != "\xff\n" {
+		t.Errorf("the file holds %q, %v", got, err)
 	}
 }
 
