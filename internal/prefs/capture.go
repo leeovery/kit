@@ -14,6 +14,7 @@ import (
 
 	"github.com/leeovery/kit/internal/plist"
 	"github.com/leeovery/kit/internal/runner"
+	"github.com/leeovery/kit/internal/wildmatch"
 )
 
 // volatilePrefixes and volatileKeys are the keys that change by themselves:
@@ -104,7 +105,7 @@ func (p *Prefs) settingsFiles() []string {
 	for _, entry := range p.Lists.Files {
 		expanded := p.expand(entry)
 		roots := []string{expanded}
-		if hasMagic(expanded) {
+		if wildmatch.HasWildcards(expanded) {
 			roots = glob(expanded)
 		}
 		for _, root := range roots {

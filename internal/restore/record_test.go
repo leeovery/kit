@@ -18,12 +18,13 @@ func TestRecordRoundTrip(t *testing.T) {
 	snapshot := Origin{Kind: FromTimeMachine, Detail: "com.apple.TimeMachine.2026-11-19-030000.backup"}
 	start := time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC)
 	want := Record{
-		From: snapshot,
+		From:  snapshot,
+		First: Run{Time: start, Paths: []string{"~/Code", "~/.zsh_history", "~/Documents", "~/.config/valet"}},
 		Paths: map[string]Path{
 			"~/Code": {
 				State: Done, From: snapshot, Files: 80301, Bytes: 36 << 30,
 				Started: start, Finished: start.Add(2 * time.Hour),
-				Second:   &Pass{Copied: 3, Differences: 0},
+				Second:   &Pass{Copied: 3},
 				SetAside: []Aside{{Time: start, Dir: "/Users/someone/.local/state/kit/restore/set-aside/20261120-100000", Paths: []string{"~/Code/notes.md"}}},
 			},
 			"~/.zsh_history":  {State: Here},
@@ -40,13 +41,33 @@ func TestRecordRoundTrip(t *testing.T) {
 		t.Errorf("LoadRecord() = %+v, %v\nwant %+v", got, err, want)
 	}
 	text := read(t, filepath.Join(dir, "restore.json"))
-	for _, key := range []string{`"from"`, `"kind": "time-machine"`, `"state": "done"`, `"second"`, `"set_aside"`, `"started"`, `"finished"`, `"settled"`} {
+	for _, key := range []string{`"from"`, `"kind": "time-machine"`, `"state": "done"`, `"second"`, `"set_aside"`, `"first"`, `"started"`, `"finished"`, `"settled"`} {
 		if !strings.Contains(text, key) {
 			t.Errorf("restore.json has no %s:\n%s", key, text)
 		}
 	}
 	if strings.Contains(text, `"bytes": 0`) || strings.Count(text, `"finished"`) != 1 {
 		t.Errorf("restore.json holds empty parts:\n%s", text)
+	}
+}
+
+// The restore's first run is recorded once: a run after it, listing more,
+// leaves it as it was.
+func TestRecordFirstRun(t *testing.T) {
+	dir := t.TempDir()
+	first := time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC)
+	paths := []string{"~/Code", "~/.zsh_history"}
+	if err := RecordFirstRun(dir, first, paths); err != nil {
+		t.Fatal(err)
+	}
+	paths[0] = "~/Documents"
+	if err := RecordFirstRun(dir, first.Add(time.Hour), []string{"~/Code", "~/.zsh_history", "~/.local/state/newtool"}); err != nil {
+		t.Fatal(err)
+	}
+	rec, err := LoadRecord(dir)
+	want := Run{Time: first, Paths: []string{"~/Code", "~/.zsh_history"}}
+	if err != nil || !reflect.DeepEqual(rec.First, want) {
+		t.Errorf("first run = %+v, %v; want %+v", rec.First, err, want)
 	}
 }
 

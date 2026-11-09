@@ -433,6 +433,55 @@ func TestThisMac(t *testing.T) {
 	}
 }
 
+// A Mac added to kit-config ahead, started from another (kit machine add
+// --from), records its set-up's start, the boot's, however the boot's told
+// its name: chosen, typed as a new one, or given. Not on a Mac kit had named
+// before this boot, nor for a Mac started fresh; a start recorded already
+// stays.
+func TestBeganForAMacAddedAhead(t *testing.T) {
+	const ahead = "format = 1\nprimary = \"laptop\"\n[macs.laptop]\n[macs.studio]\nfrom = \"laptop\"\n"
+	started := time.Date(2026, 11, 20, 9, 0, 0, 0, time.UTC)
+	earlier := started.Add(-time.Hour)
+	for _, tt := range []struct {
+		name   string
+		mac    string
+		ask    *asker
+		named  string
+		before time.Time
+		want   time.Time
+	}{
+		{"chosen", "", &asker{choose: 1}, "", time.Time{}, started},
+		{"typed as a new one", "", &asker{chooses: []int{2}, name: "studio"}, "", time.Time{}, started},
+		{"given", "studio", &asker{}, "", time.Time{}, started},
+		{"given, on a Mac kit named before", "studio", &asker{}, "old", time.Time{}, time.Time{}},
+		{"given, its start recorded by an earlier boot", "studio", &asker{}, "", earlier, earlier},
+		{"a Mac started fresh, chosen", "", &asker{choose: 0}, "", time.Time{}, time.Time{}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			b, _ := newBoot(t, runnertest.New(t), GitHub{}, tt.ask)
+			b.Mac, b.Started = tt.mac, started
+			writeFiles(t, b.archive(), map[string]string{config.File: ahead})
+			if tt.named != "" {
+				if err := config.WriteMachine(b.State, tt.named); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := kitstate.Update(b.State, stateName, func(st *state) { st.Began = tt.before }); err != nil {
+				t.Fatal(err)
+			}
+			if err := b.macStep().Apply(context.Background(), check.Result{}); err != nil {
+				t.Fatalf("apply = %v", err)
+			}
+			if began, err := Began(b.State); err != nil || !began.Equal(tt.want) {
+				t.Errorf("Began() = %v, %v; want %v", began, err, tt.want)
+			}
+			if st, _ := kitstate.Load[state](b.State, stateName); st.NewMac != "" || st.From != "" {
+				t.Errorf("new Mac %q from %q; want none: kit-config has it", st.NewMac, st.From)
+			}
+		})
+	}
+}
+
 // The self-test: the chip, memory, the disk, macOS, the network.
 func TestSelfTest(t *testing.T) {
 	gh := &gitHub{}

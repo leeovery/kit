@@ -1,6 +1,7 @@
 package restore
 
 import (
+	"slices"
 	"time"
 
 	"github.com/leeovery/kit/internal/state"
@@ -10,13 +11,22 @@ import (
 const recordName = "restore.json"
 
 // Record is the restore's record on this Mac: the source the run chose, so
-// a run again resumes from it; each listed path's restore, by its line's
-// path; and when the restore first settled, every listed path done or here,
-// which closes set-up's window: nothing is set aside after it.
+// a run again resumes from it; its first run, whose paths alone are ever set
+// aside; each listed path's restore, by its line's path; and when the
+// restore first settled, every listed path done or here, which closes
+// set-up's window: nothing is set aside after it.
 type Record struct {
 	From    Origin          `json:"from,omitzero"`
+	First   Run             `json:"first,omitzero"`
 	Paths   map[string]Path `json:"paths,omitempty"`
 	Settled time.Time       `json:"settled,omitzero"`
+}
+
+// Run is a run of the restore: when, and the listed paths it judged, by
+// their lines' paths.
+type Run struct {
+	Time  time.Time `json:"time"`
+	Paths []string  `json:"paths,omitempty"`
 }
 
 // Origin is where a restore copies from: Kind, the old Mac over SSH, its
@@ -44,20 +54,22 @@ const (
 	Checking State = "checking"
 	// Done is restored: never restored again.
 	Done State = "done"
-	// Here is a path found holding files of its own, older than this Mac's
-	// set-up, before anything was restored: never touched.
+	// Here is a path found holding files of its own, before anything was
+	// restored to it: never touched.
 	Here State = "here"
-	// Held is its restore held back, waiting for its source.
+	// Held is its restore held back, waiting for its source, nothing yet
+	// copied: judged again each run, as a path with no record.
 	Held State = "held"
 )
 
 // Path is a listed path's restore: how it stands; where it came from; the
-// files and bytes copied; when it started and finished; its second pass;
-// and what was set aside to make way for it.
+// files and bytes copied; when its copy first started and when it finished;
+// its second pass; and what was set aside to make way for it. A path whose
+// copy has started resumes till done, never judged again.
 type Path struct {
 	State    State     `json:"state,omitempty"`
 	From     Origin    `json:"from,omitzero"`
-	Files    int64     `json:"files,omitempty"`
+	Files    int       `json:"files,omitempty"`
 	Bytes    int64     `json:"bytes,omitempty"`
 	Started  time.Time `json:"started,omitzero"`
 	Finished time.Time `json:"finished,omitzero"`
@@ -65,12 +77,11 @@ type Path struct {
 	SetAside []Aside   `json:"set_aside,omitempty"`
 }
 
-// Pass is a second pass's result: the files it copied again, changed at a
-// live source since the first; and the differences it found between the
-// copy and its source.
+// Pass is a second pass's result: how many files it copied again, found
+// different from their source, changed there since the copy or copied
+// wrong.
 type Pass struct {
-	Copied      int64 `json:"copied"`
-	Differences int64 `json:"differences"`
+	Copied int `json:"copied"`
 }
 
 // Aside is what was set aside from a listed path, and when: its files, each
@@ -92,9 +103,32 @@ func UpdateRecord(stateDir string, change func(*Record)) error {
 	return state.Update(stateDir, recordName, change)
 }
 
+// started is whether p's copy has ever started: under way now, or held
+// since.
+func (p Path) started() bool {
+	return p.State == Copying || p.State == Checking || !p.Started.IsZero()
+}
+
+// mayAside is whether the listed path path may be set aside: one the
+// restore's first run listed, before the restore settled.
+func (r Record) mayAside(path string) bool {
+	return r.Settled.IsZero() && slices.Contains(r.First.Paths, path)
+}
+
+// RecordFirstRun records the restore's first run on this Mac, at now,
+// judging paths, its lines' paths: once, the first time, so a line added
+// after it is never set aside. The step calls it before it first judges.
+func RecordFirstRun(stateDir string, now time.Time, paths []string) error {
+	return UpdateRecord(stateDir, func(r *Record) {
+		if r.First.Time.IsZero() {
+			r.First = Run{Time: now, Paths: slices.Clone(paths)}
+		}
+	})
+}
+
 // Settle records that the restore has settled on this Mac, at now, every
 // listed path done or here: once, the first time, so set-up's window stays
-// closed whatever's listed later.
+// closed.
 func Settle(stateDir string, now time.Time) error {
 	return UpdateRecord(stateDir, func(r *Record) {
 		if r.Settled.IsZero() {

@@ -353,7 +353,7 @@ self_check() {
 	denies_running mount_apfs /sbin/mount_apfs || status=1
 	denies_running umount /sbin/umount || status=1
 	denies_running dns-sd /usr/bin/dns-sd || status=1
-	denies_running_every rsync /usr/bin/rsync /opt/homebrew/bin/rsync -- --version || status=1
+	denies_running_every rsync /usr/bin/rsync /opt/homebrew/bin/rsync /usr/local/bin/rsync -- --version || status=1
 	starts_clean || status=1
 	return "$status"
 }

@@ -23,9 +23,10 @@ var owned = Owned{
 // claude is a line restoring ~/.claude, less what its skips name.
 var claude = Line{Path: "~/.claude", Skips: []string{"cache", "plugins/*", "logs/**/*.log", "downloads/"}, Pos: "laptop/declarations:4"}
 
-// A line's filter is a rule for each of kit's paths in its path, anchored at
-// the path itself, as rsync copies a folder's contents into its place (/cache
-// for ~/.claude/cache): a path as it is, its wildcards escaped; a glob as its
+// A line's filter is a rule for each of kit's paths in its path, case
+// aside, in the path's own case, anchored at the line's path itself, as
+// rsync copies a folder's contents into its place (/cache for
+// ~/.claude/cache): a path as it is, its wildcards escaped; a glob as its
 // readers take one, * never past a /. Then its skips, as written, anchored
 // too; then Finder's files, wherever they are. What's elsewhere has no rule,
 // so a listed file's filter has nothing of kit's.
@@ -38,6 +39,8 @@ func TestFilterWritesRsyncsRules(t *testing.T) {
 			"- /cache\n- /plugins/*\n- /logs/**/*.log\n- /downloads/\n- .DS_Store\n- .localized\n"},
 		{Line{Path: "~/Library/Application Support/Tool"}, "- /*20[0-9][0-9].[0-9]/options\n- /GPUCache\n- .DS_Store\n- .localized\n"},
 		{Line{Path: "~/Library/Application Support/Other"}, "- /GPUCache\n- .DS_Store\n- .localized\n"},
+		{Line{Path: "~/library/application support/other"}, "- /GPUCache\n- .DS_Store\n- .localized\n"},
+		{Line{Path: "~/.Claude/Projects"}, "- /*/memory\n- .DS_Store\n- .localized\n"},
 		{Line{Path: "~/.claude/projects"}, "- /*/memory\n- .DS_Store\n- .localized\n"},
 		{Line{Path: "~/.local"}, "- /state/kit\n- .DS_Store\n- .localized\n"},
 		{Line{Path: "~/.zsh_history"}, "- .DS_Store\n- .localized\n"},
@@ -56,8 +59,8 @@ func TestFilterWritesRsyncsRules(t *testing.T) {
 	}
 }
 
-// A line whose path is kit's, or in one of kit's, is refused, naming the
-// line and the owner: the restore never carries it.
+// A line whose path is kit's, or in one of kit's, case aside, is refused,
+// naming the line and the owner: the restore never carries it.
 func TestFilterRefusesKitsOwnPaths(t *testing.T) {
 	for path, want := range map[string]string{
 		"~/.zshrc":                         "kit links ~/.zshrc",
@@ -66,6 +69,9 @@ func TestFilterRefusesKitsOwnPaths(t *testing.T) {
 		"~/.claude/skills/review":          "kit puts ~/.claude/skills/review in place",
 		"~/.cache/go":                      "the backups leave out ~/.cache",
 		"~/.config/kit":                    "kit keeps its own files in ~/.config/kit",
+		"~/.ZSHRC":                         "kit links ~/.zshrc",
+		"~/.Claude/Projects/site/Memory":   "prefs saves ~/.claude/projects/*/memory",
+		"~/.claude/Skills/Review":          "kit puts ~/.claude/skills/review in place",
 	} {
 		_, err := NewFilter(Line{Path: path, Pos: "laptop/declarations:9"}, owned)
 		if err == nil || err.Error() != "laptop/declarations:9: the restore never carries "+path+": "+want {

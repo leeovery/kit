@@ -106,7 +106,7 @@ func newRule(text string) rule {
 	if len(r.pattern) > 1 {
 		r.pattern, r.folders = strings.CutSuffix(r.pattern, "/")
 	}
-	r.wild = hasMagic(r.pattern)
+	r.wild = wildmatch.HasWildcards(r.pattern)
 	r.wild3 = r.wild && strings.HasSuffix(r.pattern, "***")
 	r.pattern, r.anchored = strings.CutPrefix(r.pattern, "/")
 	return r

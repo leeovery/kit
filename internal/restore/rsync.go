@@ -264,13 +264,15 @@ func (r Rsync) rsync(ctx context.Context, c Copy, cmd runner.Command, options ..
 // args are rsync's arguments for c, with options: archive (which, run by
 // anyone but root, keeps no owners), extended attributes, hard links and
 // creation dates; never ACLs, as Time Machine's deny adding files to the
-// folders it marks; never deleting. --mkpath makes the folders To is in,
-// but not in a dry run.
+// folders it marks; never deleting; never replacing a file newer here than
+// at the source (--update), so what the person's written since a copy began
+// outlives the copy run again and its second pass. --mkpath makes the
+// folders To is in, but not in a dry run.
 func (c Copy) args(options []string) ([]string, error) {
 	if err := c.check(); err != nil {
 		return nil, err
 	}
-	args := []string{"--archive", "--xattrs", "--hard-links", "--crtimes", "--mkpath", "--partial-dir=" + filepath.Clean(c.Partial)}
+	args := []string{"--archive", "--xattrs", "--hard-links", "--crtimes", "--mkpath", "--update", "--partial-dir=" + filepath.Clean(c.Partial)}
 	if c.Filter != "" {
 		args = append(args, "--exclude-from="+c.Filter)
 	}

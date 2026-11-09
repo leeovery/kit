@@ -389,11 +389,6 @@ func translate(pattern string) *regexp.Regexp {
 	return re
 }
 
-// hasMagic reports whether a path is a glob: it holds *, ? or [.
-func hasMagic(path string) bool {
-	return strings.ContainsAny(path, "*?[")
-}
-
 // glob is the paths a pattern matches, sorted, each part of the pattern
 // matching a name in a folder as rsync matches one (wildmatch), so a data
 // restore reads the pattern as prefs does: a wildcard matches a name
@@ -410,7 +405,7 @@ func glob(pattern string) []string {
 		}
 		var next []string
 		for _, dir := range found {
-			if !hasMagic(part) {
+			if !wildmatch.HasWildcards(part) {
 				if _, err := os.Lstat(filepath.Join(dir, part)); err == nil {
 					next = append(next, filepath.Join(dir, part))
 				}

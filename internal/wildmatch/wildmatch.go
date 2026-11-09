@@ -24,6 +24,13 @@ func Match(pattern, text string) bool {
 	return dowild(pattern, text) == matched
 }
 
+// HasWildcards reports whether s holds what rsync takes as a wildcard, so
+// it reads s as a pattern, not a name: *, ? or [. Without one, a \ in it is
+// itself.
+func HasWildcards(s string) bool {
+	return strings.ContainsAny(s, "*?[")
+}
+
 // dowild is how p, a pattern, matches text, as rsync's dowild says.
 func dowild(p, text string) int {
 	for len(p) > 0 {

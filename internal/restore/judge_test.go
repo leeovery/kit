@@ -22,11 +22,16 @@ var (
 // zshHistory is a line restoring a file.
 var zshHistory = Line{Path: "~/.zsh_history", Pos: "laptop/declarations:5"}
 
+// firstRun is a test Mac's restore's first run, listing its paths.
+func firstRun(paths ...string) Record {
+	return Record{First: Run{Time: setUp.Add(time.Hour), Paths: paths}}
+}
+
 // A path is judged by its record first: done, here, or under way, whatever
-// it holds. Else by what it holds, kit's aside: nothing, to restore; only
-// files set-up wrote, from the moment it began, to set aside, then restore;
-// anything older, here. A Mac with no record of its set-up's start is in
-// use: whatever it holds is here.
+// it holds. Else, with no record or held, by what it holds, kit's aside:
+// nothing, to restore; only files set-up wrote, from the moment it began, to
+// set aside, then restore; anything older, here. A Mac with no record of its
+// set-up's start is in use: whatever it holds is here.
 func TestJudge(t *testing.T) {
 	kits := map[string]time.Time{
 		"CLAUDE.md": earlier, "skills/kit/SKILL.md": earlier, "skills/review/SKILL.md": later,
@@ -56,7 +61,9 @@ func TestJudge(t *testing.T) {
 		{"recorded here, since emptied", claude, nil, Here, setUp, VerdictHere, nil},
 		{"copying", claude, with(map[string]time.Time{"history.jsonl": earlier}), Copying, setUp, VerdictResume, nil},
 		{"checking", claude, with(map[string]time.Time{"history.jsonl": earlier}), Checking, setUp, VerdictResume, nil},
-		{"held", claude, nil, Held, setUp, VerdictResume, nil},
+		{"held, nothing there", claude, nil, Held, setUp, VerdictRestore, nil},
+		{"held, holding files set-up wrote", claude, with(map[string]time.Time{"history.jsonl": later}), Held, setUp, VerdictSetAside, []string{"~/.claude/history.jsonl"}},
+		{"held, holding an older file", claude, with(map[string]time.Time{"history.jsonl": earlier}), Held, setUp, VerdictHere, nil},
 		{"absent", claude, nil, "", setUp, VerdictRestore, nil},
 		{"folders alone", claude, map[string]time.Time{}, "", setUp, VerdictRestore, nil},
 		{"nothing but kit's, old and new", claude, with(nil), "", setUp, VerdictRestore, nil},
@@ -85,7 +92,7 @@ func TestJudge(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			var rec Record
+			rec := firstRun(claude.Path, zshHistory.Path)
 			if tt.recorded != "" {
 				rec.Change(tt.line.Path, func(p *Path) { p.State = tt.recorded })
 			}
@@ -98,11 +105,66 @@ func TestJudge(t *testing.T) {
 	}
 }
 
+// Only a path the restore's first run listed is ever set aside, and only
+// till its copy starts: a line added after the first run, its files all
+// newer than set-up's start, is here, as on a Mac in use; one holding
+// nothing but kit's, or absent, is the caller's to restore or not. A path
+// held since the first run, untouched, is judged again on each run; one
+// whose copy started, then held, resumes. With no first run recorded,
+// nothing's set aside.
+func TestJudgeSetsAsideOnlyWhatTheFirstRunListed(t *testing.T) {
+	code := Line{Path: "~/Code", Pos: "laptop/declarations:4"}
+	tool := Line{Path: "~/.local/state/newtool", Pos: "laptop/declarations:9"}
+	month := setUp.Add(30 * 24 * time.Hour)
+	held := func(p *Path) { p.State = Held }
+	heldOnceCopying := func(p *Path) { p.State, p.Started = Held, setUp.Add(2*time.Hour) }
+	for _, tt := range []struct {
+		name   string
+		line   Line
+		files  map[string]time.Time
+		first  bool
+		record func(*Path)
+		want   Verdict
+		new    []string
+	}{
+		{"a line added a month after set-up began, its tool's fresh data", tool, map[string]time.Time{"~/.local/state/newtool/state.db": month}, true, nil, VerdictHere, nil},
+		{"a line added since, nothing but Finder's", tool, map[string]time.Time{"~/.local/state/newtool/.DS_Store": month}, true, nil, VerdictRestore, nil},
+		{"a line added since, absent", tool, nil, true, nil, VerdictRestore, nil},
+		{"held since the first run, holding set-up's files", code, map[string]time.Time{"~/Code/site/notes.md": later, "~/Code/tool/main.go": month}, true, held, VerdictSetAside, []string{"~/Code/site/notes.md", "~/Code/tool/main.go"}},
+		{"held since the first run, holding an older file", code, map[string]time.Time{"~/Code/site/notes.md": earlier}, true, held, VerdictHere, nil},
+		{"held since the first run, nothing there", code, nil, true, held, VerdictRestore, nil},
+		{"held once its copy started", code, map[string]time.Time{"~/Code/site/notes.md": later}, true, heldOnceCopying, VerdictResume, nil},
+		{"no first run recorded, holding set-up's files", code, map[string]time.Time{"~/Code/site/notes.md": later}, false, nil, VerdictHere, nil},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			home := t.TempDir()
+			for path, when := range tt.files {
+				write(t, filepath.Join(home, path[2:]), when)
+			}
+			var rec Record
+			if tt.first {
+				rec = firstRun(code.Path)
+			}
+			if tt.record != nil {
+				rec.Change(tt.line.Path, tt.record)
+			}
+			f, err := NewFilter(tt.line, owned)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := Judge(home, f, rec, setUp)
+			if want := (Judgement{Path: tt.line.Path, Verdict: tt.want, New: tt.new}); err != nil || !reflect.DeepEqual(got, want) {
+				t.Errorf("Judge() = %+v, %v; want %+v", got, err, want)
+			}
+		})
+	}
+}
+
 // Set-up's window closes for good once the restore first settles: a path
-// listed after that, its files all newer than set-up's start, is here, never
-// set aside, as on a Mac in use; one holding nothing but kit's, or absent,
-// is the caller's to restore or not. Till the restore settles, the window
-// stays open, however long after set-up.
+// the first run listed, its files all newer than set-up's start, is here
+// then, never set aside, as on a Mac in use; one holding nothing but kit's,
+// or absent, is the caller's to restore or not. Till the restore settles,
+// the window stays open, however long after set-up.
 func TestJudgeOnceTheRestoreHasSettled(t *testing.T) {
 	began := time.Date(2026, 10, 21, 9, 0, 0, 0, time.UTC)
 	tool := Line{Path: "~/.local/share/tool", Pos: "laptop/declarations:8"}
@@ -123,6 +185,9 @@ func TestJudgeOnceTheRestoreHasSettled(t *testing.T) {
 			home, stateDir := t.TempDir(), t.TempDir()
 			for rel, when := range tt.files {
 				write(t, filepath.Join(home, ".local/share/tool", rel), when)
+			}
+			if err := RecordFirstRun(stateDir, began.Add(time.Hour), []string{tool.Path}); err != nil {
+				t.Fatal(err)
 			}
 			if tt.settled {
 				for _, at := range []time.Time{began.Add(24 * time.Hour), began.Add(25 * time.Hour)} {
@@ -182,7 +247,7 @@ func TestSetAside(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	j, err := Judge(home, f, Record{}, setUp)
+	j, err := Judge(home, f, firstRun(claude.Path), setUp)
 	if err != nil || j.Verdict != VerdictSetAside {
 		t.Fatalf("Judge() = %+v, %v", j, err)
 	}

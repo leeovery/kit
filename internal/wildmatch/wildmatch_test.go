@@ -67,3 +67,25 @@ func TestMatch(t *testing.T) {
 		}
 	}
 }
+
+// A pattern is one when it holds *, ? or [, as rsync reads one; a \ alone
+// doesn't make one.
+func TestHasWildcards(t *testing.T) {
+	for _, tt := range []struct {
+		s    string
+		want bool
+	}{
+		{"*.log", true},
+		{"x?", true},
+		{"[ab]", true},
+		{"a/**", true},
+		{"memory", false},
+		{`back\slash`, false},
+		{"Application Support/a]b", false},
+		{"", false},
+	} {
+		if got := wildmatch.HasWildcards(tt.s); got != tt.want {
+			t.Errorf("HasWildcards(%q) = %t, want %t", tt.s, got, tt.want)
+		}
+	}
+}

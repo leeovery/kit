@@ -319,28 +319,36 @@ func (b *Boot) macStep() engine.Step {
 			if cfg == nil {
 				return errors.New("kit-config hasn't been read")
 			}
+			named, err := config.ReadMachine(b.State)
+			if err != nil {
+				return err
+			}
 			name, from := b.Mac, ""
 			if name == "" {
-				var err error
 				if name, from, err = b.askMac(ctx, cfg); err != nil {
 					return err
 				}
 			}
-			if cfg.Knows(name) {
-				return config.WriteMachine(b.State, name)
-			}
-			if !config.ValidName(name) {
+			known := cfg.Knows(name)
+			switch {
+			case known:
+				from = cfg.Macs[name].From
+			case !config.ValidName(name):
 				return fmt.Errorf("%q can't name a Mac: lower case letters, digits and dashes, as in studio", name)
 			}
-			if err := config.WriteMachine(b.State, name); err != nil {
-				return err
-			}
-			return kitstate.Update(b.State, stateName, func(st *state) {
-				st.NewMac, st.From = name, from
-				if from != "" && st.Began.IsZero() {
+			// Recorded before the name: a boot stopped between the two finds
+			// this Mac unnamed still, not named with nothing to say why.
+			if err := kitstate.Update(b.State, stateName, func(st *state) {
+				if !known {
+					st.NewMac, st.From = name, from
+				}
+				if from != "" && named == "" && st.Began.IsZero() {
 					st.Began = b.Started
 				}
-			})
+			}); err != nil {
+				return err
+			}
+			return config.WriteMachine(b.State, name)
 		},
 	}
 }
@@ -400,8 +408,9 @@ func and(names []string) string {
 // config repository it read; a new Mac's name till kit-config has it
 // committed, and the Mac it starts as a copy of, if any; the terminal given
 // Full Disk Access, as the person said, before its first launch; when kit,
-// handed over to, took the boot on there; and, for a new Mac it started
-// from another, when its set-up began: the start of the boot that added it.
+// handed over to, took the boot on there; and, for a Mac started from
+// another, when its set-up began: the start of the boot that named it, on a
+// Mac kit had no name for.
 type state struct {
 	Repo    string    `json:"repo,omitempty"`
 	NewMac  string    `json:"new_mac,omitempty"`
@@ -414,8 +423,9 @@ type state struct {
 const stateName = "bootstrap.json"
 
 // Began is when this Mac's set-up began, as the boot recorded it in
-// stateDir for a new Mac it started from another: zero for any other, as a
-// Mac in use, one given a name kit-config has, or one started fresh.
+// stateDir for a Mac started from another, as the boot named it or as
+// kit-config has it (kit machine add --from), on a Mac kit had no name for:
+// zero for any other, as a Mac in use or one started fresh.
 func Began(stateDir string) (time.Time, error) {
 	st, err := kitstate.Load[state](stateDir, stateName)
 	return st.Began, err

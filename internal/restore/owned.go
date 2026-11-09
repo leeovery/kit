@@ -131,7 +131,7 @@ func (o Owned) owners() []owner {
 				continue
 			}
 			p = "~/" + rest
-			out = append(out, owner{path: p, glob: globs && hasMagic(p), why: fmt.Sprintf(why, p)})
+			out = append(out, owner{path: p, glob: globs && wildmatch.HasWildcards(p), why: fmt.Sprintf(why, p)})
 		}
 	}
 	add(o.Linked, false, "kit links %s")
@@ -143,8 +143,9 @@ func (o Owned) owners() []owner {
 }
 
 // under is the rule, anchored at p, a line's path, leaving out what o names
-// in it: "" when o names nothing in it. covers is whether o is p or holds
-// it, so the whole of p is kit's.
+// in it, in o's own case: "" when o names nothing in it. covers is whether
+// o is p or holds it, so the whole of p is kit's. A line's path and o's are
+// matched case aside.
 func (o owner) under(p string) (text string, covers bool) {
 	lineParts := strings.Split(strings.TrimPrefix(p, "~/"), "/")
 	parts := strings.Split(strings.TrimPrefix(o.path, "~/"), "/")
@@ -164,19 +165,14 @@ func (o owner) under(p string) (text string, covers bool) {
 }
 
 // part reports whether pattern, a part of o's path, matches name, the same
-// part of a line's: a glob's part as its readers match one, alone, where a
-// * never meets a /.
+// part of a line's, case aside, as macOS's file system takes a name: a
+// glob's part as its readers match one, alone, where a * never meets a /.
 func (o owner) part(pattern, name string) bool {
-	if o.glob && hasMagic(pattern) {
+	pattern, name = strings.ToLower(pattern), strings.ToLower(name)
+	if o.glob && wildmatch.HasWildcards(pattern) {
 		return wildmatch.Match(oneStar(pattern), name)
 	}
 	return pattern == name
-}
-
-// hasMagic reports whether p holds what rsync and kit's globs take as a
-// pattern: *, ? or [.
-func hasMagic(p string) bool {
-	return strings.ContainsAny(p, "*?[")
 }
 
 // oneStar is pattern with each run of * a single one: a glob kit reads
@@ -191,7 +187,7 @@ func oneStar(pattern string) string {
 // escape is p, a path as it is, as rsync matches it as itself: when it holds
 // *, ? or [, which rsync would take as a pattern, those and \ escaped.
 func escape(p string) string {
-	if !hasMagic(p) {
+	if !wildmatch.HasWildcards(p) {
 		return p
 	}
 	return strings.NewReplacer(`\`, `\\`, `*`, `\*`, `?`, `\?`, `[`, `\[`).Replace(p)

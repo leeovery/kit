@@ -41,7 +41,7 @@ func fixture(t *testing.T, name string) string {
 const partial = "/Users/someone/.local/state/kit/restore/partial"
 
 // base are the options of every copy, dry run and second pass.
-var base = []string{"--archive", "--xattrs", "--hard-links", "--crtimes", "--mkpath", "--partial-dir=" + partial}
+var base = []string{"--archive", "--xattrs", "--hard-links", "--crtimes", "--mkpath", "--update", "--partial-dir=" + partial}
 
 // local is a copy of the folder at path on a snapshot to to.
 func local(path, to string) Copy {
@@ -245,9 +245,10 @@ func TestCopyArguments(t *testing.T) {
 }
 
 // No copy carries ACLs, as Time Machine marks the folders it backs up with
-// one denying files added, which a copy then can't finish; and none deletes
-// anything.
-func TestCopiesNeverCarryACLsOrDelete(t *testing.T) {
+// one denying files added, which a copy then can't finish; none deletes
+// anything; and none replaces a file newer here than at its source, so the
+// person's edits outlive a copy run again and the second pass.
+func TestCopiesNeverCarryACLsDeleteOrReplaceNewerFiles(t *testing.T) {
 	home := t.TempDir()
 	file := local("/Users/someone/.zsh_history", home+"/.zsh_history")
 	file.File = true
@@ -270,6 +271,9 @@ func TestCopiesNeverCarryACLsOrDelete(t *testing.T) {
 			if arg == "--acls" || short && strings.Contains(arg, "A") || strings.HasPrefix(arg, "--del") || strings.HasPrefix(arg, "--remove-source") {
 				t.Errorf("%s: %s, which carries ACLs or deletes", cmd, arg)
 			}
+		}
+		if !slices.Contains(cmd.Args, "--update") {
+			t.Errorf("%s: no --update, so it replaces files newer here than at the source", cmd)
 		}
 	}
 }

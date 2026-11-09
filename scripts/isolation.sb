@@ -118,8 +118,9 @@
   (literal "/System/Library/Filesystems/apfs.fs/Contents/Resources/mount_apfs")
   (literal "/sbin/umount")
   (literal "/usr/bin/dns-sd")
-  ;; rsync: the system's, openrsync, and Homebrew's, linked into its Cellar.
+  ;; rsync: the system's, openrsync, or Homebrew's, linked into its Cellar.
   (literal "/usr/bin/rsync")
+  (literal "/usr/local/bin/rsync")
   (literal "/opt/homebrew/bin/rsync")
   (regex #"/Cellar/rsync/")
   ;; tmux: the system's, or Homebrew's, linked into its Cellar.
