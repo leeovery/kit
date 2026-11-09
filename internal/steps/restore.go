@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -17,6 +16,7 @@ import (
 	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/restore"
+	"github.com/leeovery/kit/internal/runner"
 )
 
 // RestoreName names the data restore's step, as its section is named.
@@ -68,7 +68,17 @@ type Restoring struct {
 	// Machine's backup at a time, chosen saying whether kit apply's flags
 	// named it (restore.Sources' For).
 	Sources func(o restore.Origin, at time.Time, chosen bool) restore.Opener
-	Rsync   restore.Rsync
+	// Disks finds the Time Machine disks attached, which the card raised
+	// when the old Mac doesn't answer offers (restore.Sources' Disks).
+	Disks func(ctx context.Context) (restore.Disks, error)
+	// Raise raises the restore's cards while kit applies at a terminal: nil
+	// without one, where there's no one to answer them.
+	Raise *Raise
+	// Run runs what Arq's card opens, Arq; ArqAwait are what that card
+	// waits for before it goes up, Arq installed.
+	Run      runner.Runner
+	ArqAwait []engine.Wait
+	Rsync    restore.Rsync
 	// Space is how much is free on the volume path is on, and its size, in
 	// bytes (boot.Space).
 	Space func(path string) (free, size uint64, err error)
@@ -279,18 +289,19 @@ func (r Restoring) apply(ctx context.Context, _ check.Result) error {
 	return errors.Join(err, r.settle())
 }
 
-// recordHere records path here, for good, unless the record says so.
+// recordHere records path here, for good, unless the record says so: its
+// holding folder of Arq's, if it had one, goes.
 func (r Restoring) recordHere(ctx context.Context, path string, rec restore.Record) error {
 	if rec.Paths[path].State == restore.Here {
 		return nil
 	}
-	err := restore.UpdateRecord(r.StateDir, func(rec *restore.Record) {
-		rec.Change(path, func(p *restore.Path) { p.State = restore.Here })
-	})
-	if err == nil {
-		event.Log(ctx, event.Logged{Line: "Left " + path + " as it is: it held files of its own"})
+	var held int
+	err := r.change(path, func(p *restore.Path) { p.State, held, p.Holding = restore.Here, p.Holding, 0 })
+	if err != nil {
+		return err
 	}
-	return err
+	event.Log(ctx, event.Logged{Line: "Left " + path + " as it is: it held files of its own"})
+	return r.letGo(path, held, true)
 }
 
 // settle settles the restore, once it's finished with every listed path.
@@ -315,8 +326,7 @@ func (r Restoring) restoreAll(ctx context.Context, rec restore.Record, todo []ju
 	if err != nil {
 		return err
 	}
-	event.Say(ctx, event.Doing{Says: "opening " + want.Says()})
-	src, err := r.Sources(want, at, r.Flag.Kind != "").Open(ctx)
+	src, err := r.open(ctx, want, at, todo)
 	if err != nil {
 		return fmt.Errorf("couldn't restore: %w", err)
 	}
@@ -327,9 +337,13 @@ func (r Restoring) restoreAll(ctx context.Context, rec restore.Record, todo []ju
 	if err := r.recordSource(ctx, todo, src); err != nil {
 		return err
 	}
-	copies, errs := r.plan(ctx, src, todo)
-	if err := r.room(copies); err != nil {
-		return errors.Join(errs, err)
+	seen, err := lookAt(ctx, src, todo)
+	if err != nil {
+		return fmt.Errorf("couldn't restore: %w", err)
+	}
+	copies, errs := r.plan(ctx, src, todo, seen)
+	if err := r.room(src, copies); err != nil {
+		return errors.Join(errs, fmt.Errorf("couldn't restore: %w", err))
 	}
 	p := newProgress(ctx, r.Now, copies)
 	for _, c := range copies {
@@ -342,21 +356,30 @@ func (r Restoring) restoreAll(ctx context.Context, rec restore.Record, todo []ju
 	return errs
 }
 
+// lookAt is what's at each of todo's paths at src, a source on another
+// Mac, by path, in one look: nil for a source on this Mac, whose paths are
+// each looked at as they're planned (Stat).
+func lookAt(ctx context.Context, src *restore.Opened, todo []judged) (map[string]restore.There, error) {
+	if src.Look == nil {
+		return nil, nil
+	}
+	paths := make([]string, len(todo))
+	for i, j := range todo {
+		paths[i] = j.Path
+	}
+	event.Say(ctx, event.Doing{Says: "looking at the listed paths on " + src.Origin.Says()})
+	return src.Look(ctx, paths)
+}
+
 // source is where the restore copies from, and, for Time Machine's
-// backups, the time picking one: kit apply's flags' source, from where
-// todo's paths part-way came, should they agree; else from there, never a
+// backups, the time picking one: kit apply's flags' source, from where the
+// listed paths part-way came, should they agree; else from there, never a
 // newer backup mid-restore; else the record's, the source the last run
 // chose, so a run again resumes from it; else the Mac this one started
-// from. Flags naming another kind of source than a path part-way came
-// from are an error naming it.
+// from. Flags naming another kind of source than one of todo's paths
+// part-way came from are an error naming it.
 func (r Restoring) source(rec restore.Record, todo []judged) (restore.Origin, time.Time, error) {
-	var resuming restore.Origin
-	for _, j := range todo {
-		if j.Verdict == restore.VerdictResume {
-			resuming = rec.Paths[j.Path].From
-			break
-		}
-	}
+	resuming, _ := rec.Resuming(r.Lines)
 	switch {
 	case r.Flag.Kind != "":
 		if resuming.Kind == r.Flag.Kind {
@@ -369,6 +392,19 @@ func (r Restoring) source(rec restore.Record, todo []judged) (restore.Origin, ti
 		return rec.From, time.Time{}, nil
 	}
 	return restore.Origin{Kind: restore.FromMac, Detail: r.From}, time.Time{}, nil
+}
+
+// OverSSH reports whether the restore copies from a Mac over SSH, as
+// things stand: the one this one started from, kit apply's flags naming no
+// source, and no listed path part-way from, nor the last run's source,
+// another; or the one a listed path's part-way from.
+func (r Restoring) OverSSH() (bool, error) {
+	rec, err := restore.LoadRecord(r.StateDir)
+	if err != nil {
+		return false, err
+	}
+	from, _, err := r.source(rec, nil)
+	return from.Kind == restore.FromMac && from.Detail != "", err
 }
 
 // partWay is an error naming the first of todo's paths whose copy is
@@ -415,14 +451,15 @@ type copying struct {
 	size restore.Stats
 }
 
-// plan readies the copy of each of todo's paths from src, its rules
-// written for rsync, and finds what it comes to; a path that can't be
-// copied is left out, its error among errs. A path src hasn't, nothing
-// copied to it yet, is recorded not there, as the old Mac never made it:
-// the restore's done with it.
-func (r Restoring) plan(ctx context.Context, src *restore.Opened, todo []judged) (copies []copying, errs error) {
+// plan readies the copy of each of todo's paths from src, what's at each
+// as seen says, else as src's Stat finds it, its rules written for rsync,
+// and finds what it comes to; a path that can't be copied is left out, its
+// error among errs. A path src hasn't, nothing copied to it yet, is
+// recorded not there, as the old Mac never made it: the restore's done
+// with it.
+func (r Restoring) plan(ctx context.Context, src *restore.Opened, todo []judged, seen map[string]restore.There) (copies []copying, errs error) {
 	for _, j := range todo {
-		c, err := r.planOne(ctx, src, j)
+		c, err := r.planOne(ctx, src, j, seen)
 		switch {
 		case errors.Is(err, errNotThere) && j.Verdict != restore.VerdictResume:
 			errs = errors.Join(errs, r.recordNotThere(ctx, j.Path, src.Origin))
@@ -440,25 +477,49 @@ func (r Restoring) plan(ctx context.Context, src *restore.Opened, todo []judged)
 // errNotThere is a path its source hasn't.
 var errNotThere = errors.New("not in the source")
 
-// recordNotThere records path not there, from, its source, saying so.
+// recordNotThere records path not there, from, its source, saying so:
+// its holding folder of Arq's, empty, goes.
 func (r Restoring) recordNotThere(ctx context.Context, path string, from restore.Origin) error {
-	err := r.change(path, func(p *restore.Path) { p.State, p.From = restore.NotThere, from })
-	if err == nil {
-		event.Log(ctx, event.Logged{Line: fmt.Sprintf("Nothing to restore in %s: %s hasn't it", path, from.Says())})
+	var held int
+	err := r.change(path, func(p *restore.Path) {
+		p.State, p.From, held, p.Holding = restore.NotThere, from, p.Holding, 0
+	})
+	if err != nil {
+		return err
 	}
-	return err
+	event.Log(ctx, event.Logged{Line: fmt.Sprintf("Nothing to restore in %s: %s hasn't it", path, from.Says())})
+	return r.letGo(path, held, false)
 }
 
-// planOne readies the copy of j's path from src: errNotThere when src
-// hasn't it.
-func (r Restoring) planOne(ctx context.Context, src *restore.Opened, j judged) (copying, error) {
-	info, err := src.Stat(j.Path)
-	if errors.Is(err, fs.ErrNotExist) {
+// letGo deletes path's holding folder, numbered n, of Arq's, if it had one,
+// as the restore's done with it: whole, with Arq's restore of it in it, or
+// only should it hold nothing.
+func (r Restoring) letGo(path string, n int, whole bool) error {
+	if n == 0 {
+		return nil
+	}
+	hold := restore.Holding(r.StateDir, n)
+	if held, err := restore.Holds(hold, path); !whole && (err != nil || held) {
+		return nil
+	}
+	return os.RemoveAll(hold)
+}
+
+// planOne readies the copy of j's path from src, what's there as seen says,
+// else as src's Stat finds it: errNotThere when src hasn't it.
+func (r Restoring) planOne(ctx context.Context, src *restore.Opened, j judged, seen map[string]restore.There) (copying, error) {
+	there, err := thereAt(src, seen, j.Path)
+	switch {
+	case err != nil:
+		return copying{}, err
+	case there.Kind == restore.Missing:
 		return copying{}, errNotThere
 	}
+	f, err := j.filter.With(there.Skips)
 	if err != nil {
 		return copying{}, err
 	}
+	j.filter = f
 	filter := j.line.FilterFile(r.StateDir)
 	if err := os.MkdirAll(filepath.Dir(filter), 0o700); err != nil {
 		return copying{}, err
@@ -467,7 +528,7 @@ func (r Restoring) planOne(ctx context.Context, src *restore.Opened, j judged) (
 		return copying{}, err
 	}
 	c := copying{judged: j, copy: restore.Copy{
-		From: src.Source(j.Path), To: filepath.Join(r.Home, strings.TrimPrefix(j.Path, "~/")), File: !info.IsDir(),
+		From: src.Source(j.Path), To: filepath.Join(r.Home, strings.TrimPrefix(j.Path, "~/")), File: there.Kind == restore.File,
 		Filter: filter, Partial: j.line.Partial(r.StateDir),
 	}}
 	event.Say(ctx, event.Doing{Says: "measuring " + j.Path})
@@ -475,23 +536,40 @@ func (r Restoring) planOne(ctx context.Context, src *restore.Opened, j judged) (
 	return c, err
 }
 
-// room is an error unless the home folder's volume has room for copies,
-// and a margin.
-func (r Restoring) room(copies []copying) error {
-	var total int64
+// thereAt is what's at path at src: as seen, the look at a source on
+// another Mac, says, when there's one; else as src's Stat finds it.
+func thereAt(src *restore.Opened, seen map[string]restore.There, path string) (restore.There, error) {
+	if seen != nil {
+		return seen[path], nil
+	}
+	return src.Stat(path)
+}
+
+// room is an error unless the home folder's volume has room for copies
+// from src, and a margin: for them all, as each copy stays; or, from a
+// source each of whose paths goes once it's restored (Frees), already
+// taking its room on the disk, for the largest, as each goes before the
+// next is copied.
+func (r Restoring) room(src *restore.Opened, copies []copying) error {
+	var total, largest int64
 	for _, c := range copies {
 		total += c.size.Bytes
+		largest = max(largest, c.size.Bytes)
 	}
 	if total == 0 {
 		return nil
 	}
-	need := total + max(total/roomShare, roomLeast)
+	copied, says := total, "to copy"
+	if src.Frees {
+		copied, says = largest, "copied at most at once, as each holding folder goes once it's restored,"
+	}
+	need := copied + max(copied/roomShare, roomLeast)
 	free, _, err := r.Space(r.Home)
 	if err != nil {
-		return fmt.Errorf("couldn't restore: find the free space: %w", err)
+		return fmt.Errorf("find the free space: %w", err)
 	}
 	if int64(free) < need {
-		return fmt.Errorf("couldn't restore: %s to copy needs %s free, with a margin, and the disk has %s", size(total), size(need), size(int64(free)))
+		return fmt.Errorf("%s %s needs %s free, with a margin, and the disk has %s", size(copied), says, size(need), size(int64(free)))
 	}
 	return nil
 }
@@ -513,10 +591,17 @@ func (r Restoring) restoreOne(ctx context.Context, src *restore.Opened, c copyin
 	if err != nil {
 		return failed(err)
 	}
-	switch j.Verdict {
-	case restore.VerdictHere:
+	if j.Verdict == restore.VerdictHere {
 		return r.recordHere(ctx, c.Path, rec)
-	case restore.VerdictSetAside:
+	}
+	// What came before it may not have freed its room, as a path failing
+	// keeps its holding folder.
+	if src.Frees {
+		if err := r.room(src, []copying{c}); err != nil {
+			return failed(err)
+		}
+	}
+	if j.Verdict == restore.VerdictSetAside {
 		if err := r.setAside(ctx, j); err != nil {
 			return failed(err)
 		}
@@ -547,9 +632,10 @@ func (r Restoring) restoreOne(ctx context.Context, src *restore.Opened, c copyin
 		differs := fmt.Errorf("its second pass found %d %s differing from %s: %s", again.Count, plural(again.Count, "file", "files"), src.Origin.Says(), recopied(again))
 		return failed(errors.Join(differs, r.change(c.Path, func(rp *restore.Path) { rp.Second = &restore.Pass{Copied: again.Count} })))
 	}
+	var held int
 	err = r.change(c.Path, func(rp *restore.Path) {
 		rp.State, rp.Files, rp.Bytes, rp.Finished = restore.Done, stats.TotalFiles, stats.TotalBytes, r.Now()
-		rp.Second = &restore.Pass{Copied: again.Count}
+		rp.Second, held, rp.Holding = &restore.Pass{Copied: again.Count}, rp.Holding, 0
 	})
 	if err != nil {
 		return failed(err)
@@ -559,7 +645,7 @@ func (r Restoring) restoreOne(ctx context.Context, src *restore.Opened, c copyin
 		line += fmt.Sprintf("; %d copied again, changed as they were copied", again.Count)
 	}
 	event.Log(ctx, event.Logged{Line: line})
-	if err := os.RemoveAll(c.copy.Partial); err != nil {
+	if err := errors.Join(os.RemoveAll(c.copy.Partial), r.letGo(c.Path, held, true)); err != nil {
 		return failed(err)
 	}
 	return nil
@@ -582,11 +668,7 @@ func (r Restoring) setAside(ctx context.Context, j restore.Judgement) error {
 		return err
 	}
 	if asides := rec.Paths[j.Path].SetAside; len(asides) > 0 {
-		dir := asides[len(asides)-1].Dir
-		if rest, ok := strings.CutPrefix(dir, r.Home+"/"); ok {
-			dir = "~/" + rest
-		}
-		event.Log(ctx, event.Logged{Line: fmt.Sprintf("Set aside what set-up wrote in %s, into %s", j.Path, dir)})
+		event.Log(ctx, event.Logged{Line: fmt.Sprintf("Set aside what set-up wrote in %s, into %s", j.Path, r.tilde(asides[len(asides)-1].Dir))})
 	}
 	return nil
 }

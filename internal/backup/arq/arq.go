@@ -25,6 +25,9 @@ const ID = "arq"
 // Arqc is Arq's command, inside its app.
 const Arqc = "/Applications/Arq.app/Contents/Resources/arqc"
 
+// Bundle is Arq's app's bundle id, as its Info.plist has it (Arq 7).
+const Bundle = "com.haystacksoftware.Arq"
+
 // every is how often a plan backs up at least, as bin/health had it.
 const every = 26 * time.Hour
 

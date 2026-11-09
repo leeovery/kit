@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/leeovery/kit/internal/ask"
-	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/hand"
 	"github.com/leeovery/kit/internal/look"
 )
@@ -64,20 +63,6 @@ var doneKey = look.Key{Key: "space", Does: "when it's done"}
 // nextKey is the key the card up shows moving on to the next card
 // waiting, while one is: the card left stays to do, and comes back.
 var nextKey = look.Key{Key: "tab", Does: "next card, this one comes back"}
-
-// cardKeys are the keys card c shows answering it: none when kit tells by
-// itself that it's done; and the key moving on to the next card, while one
-// waits.
-func cardKeys(c event.NeedsYou) []look.Key {
-	var keys []look.Key
-	if !c.Tells {
-		keys = append(keys, doneKey)
-	}
-	if c.More > 0 {
-		keys = append(keys, nextKey)
-	}
-	return keys
-}
 
 // wheelLines are how many lines a turn of the mouse's wheel scrolls the
 // log.

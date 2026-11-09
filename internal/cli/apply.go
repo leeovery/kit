@@ -33,11 +33,14 @@ Exits 0 when nothing needs attention after applying, 1 when something does,
 and 2 when kit couldn't apply.
 
 On a Mac started from another (from, in kit.toml), the data restore copies
-the paths [restore] lists from that Mac. --restore-from restores them from a
-backup instead, on any Mac: Time Machine's, on a disk attached, or Arq's.
---at picks Time Machine's backup: the latest at or before a date, as
-2026-11-08 (by the end of that day), or a time, as "2026-11-08 14:30" (by the
-end of that minute); the latest when not given. A restore stopped part-way
+the paths [restore] lists from that Mac, over SSH; should it not answer, a
+card asks for its Time Machine disk, Arq, or trying it again (without a
+terminal, it fails: --restore-from answers it). --restore-from restores them
+from a backup instead, on any Mac: Time Machine's, on a disk attached, or
+Arq's, by hand in its app, a card saying what to restore where. --at picks
+the backup: the latest at or before a date, as 2026-11-08 (by the end of
+that day), or a time, as "2026-11-08 14:30" (by the end of that minute); the
+latest when not given. A restore stopped part-way
 carries on from where it began, flags or not; should that backup have gone
 from the disk, --restore-from time-machine carries on from another. A path
 the source hasn't is left out: --restore-from brings it later from one that
@@ -98,7 +101,7 @@ again.`,
 	cmd.Flags().BoolVar(&plan, "plan", false, "say what applying would do, and do nothing")
 	a.restoring.at.now = a.Now
 	cmd.Flags().Var(&a.restoring.from, "restore-from", "restore [restore]'s paths from a backup")
-	cmd.Flags().Var(&a.restoring.at, "at", "with time-machine, the latest backup by that date or time")
+	cmd.Flags().Var(&a.restoring.at, "at", "with --restore-from, the latest backup by that date or time")
 	return cmd
 }
 

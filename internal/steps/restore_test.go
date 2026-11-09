@@ -45,17 +45,23 @@ type opened struct {
 
 // fakeSource is a source to restore from, the old Mac's home folder in a
 // folder of its own: live, as the old Mac in use, or a backup's; as
-// opened, the origin it's recorded by, and the one gone it stands in for.
-// It notes each time it's asked for, and closed.
+// opened, the origin it's recorded by, and the one gone it stands in for;
+// for the old Mac, what its look says is at each listed path (look). Its
+// first opens fail as fails says, in turn, and every one as err does. It
+// notes each time it's asked for, opened, looked at, and closed.
 type fakeSource struct {
 	home             string
 	origin, replaces restore.Origin
 	live             bool
+	look             map[string]restore.There
+	fails            []error
 	err              error
 
 	mu     sync.Mutex
 	asked  []opened
+	tries  int
 	opens  int
+	looked [][]string
 	closes int
 }
 
@@ -69,16 +75,31 @@ func (f *fakeSource) For(o restore.Origin, at time.Time, chosen bool) restore.Op
 func (f *fakeSource) Open(context.Context) (*restore.Opened, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.tries++
+	if len(f.fails) > 0 {
+		err := f.fails[0]
+		f.fails = f.fails[1:]
+		return nil, err
+	}
 	if f.err != nil {
 		return nil, f.err
 	}
 	f.opens++
-	return &restore.Opened{Home: f.home, Live: f.live, Origin: f.origin, Replaces: f.replaces, Close: func(context.Context) error {
+	o := &restore.Opened{Home: f.home, Live: f.live, Origin: f.origin, Replaces: f.replaces, Close: func(context.Context) error {
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		f.closes++
 		return nil
-	}}, nil
+	}}
+	if f.look != nil {
+		o.Look = func(_ context.Context, paths []string) (map[string]restore.There, error) {
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			f.looked = append(f.looked, paths)
+			return f.look, nil
+		}
+	}
+	return o, nil
 }
 
 // ticking is a clock that moves on every so far each time it's read, from
@@ -207,7 +228,11 @@ const (
 
 // on scripts rsync's run op on path, from ~, as from the source.
 func (c *restoring) on(op, path string) *runnertest.Script {
-	from := filepath.Join(c.old, strings.TrimPrefix(path, "~/"))
+	return c.onFrom(op, filepath.Join(c.old, strings.TrimPrefix(path, "~/")))
+}
+
+// onFrom scripts rsync's run op copying from, a path in full.
+func (c *restoring) onFrom(op, from string) *runnertest.Script {
 	return c.fake.OnMatch("rsync", func(args []string) bool {
 		return slices.Contains(args, op) && strings.TrimSuffix(args[len(args)-2], "/") == from
 	})
@@ -237,15 +262,27 @@ func (c *restoring) copies(path string, files int, bytes int64) {
 // files and bytes, the path holding totalFiles and totalBytes, the rest
 // copied already.
 func (c *restoring) carriesOn(path string, files int, bytes int64, totalFiles int, totalBytes int64) {
-	c.on(sizing, path).Prints(statsOf(files, bytes, totalFiles, totalBytes))
+	c.carriesOnFrom(filepath.Join(c.old, strings.TrimPrefix(path, "~/")), path, files, bytes, totalFiles, totalBytes)
+}
+
+// copiesFrom scripts path's whole restore, as copies does, copying from
+// from, a path in full.
+func (c *restoring) copiesFrom(from, path string, files int, bytes int64) {
+	c.carriesOnFrom(from, path, files, bytes, files, bytes)
+}
+
+// carriesOnFrom scripts path's restore, as carriesOn does, copying from
+// from, a path in full.
+func (c *restoring) carriesOnFrom(from, path string, files int, bytes int64, totalFiles int, totalBytes int64) {
+	c.onFrom(sizing, from).Prints(statsOf(files, bytes, totalFiles, totalBytes))
 	var out strings.Builder
 	for i := range files {
 		fmt.Fprintf(&out, "%s/file-%d\n", strings.TrimPrefix(path, "~/"), i)
 		fmt.Fprintf(&out, "%d %d%% 1.00MB/s 0:00:01 (xfr#%d, to-chk=%d/%d)\r", bytes*int64(i+1)/int64(files), 100*(i+1)/files, i+1, files-i-1, files)
 	}
 	out.WriteString("\n" + statsOf(files, bytes, totalFiles, totalBytes))
-	c.on(copyingOp, path).Prints(out.String())
-	c.on(comparing, path)
+	c.onFrom(copyingOp, from).Prints(out.String())
+	c.onFrom(comparing, from)
 }
 
 // ran are rsync's runs, in order: each its op and the path it's on, from ~.

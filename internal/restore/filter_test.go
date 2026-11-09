@@ -80,6 +80,39 @@ func TestFilterRefusesKitsOwnPaths(t *testing.T) {
 	}
 }
 
+// A filter with skips found at the source, the old Mac's backups leaving
+// them out, leaves them out too, each anchored at the line's path as a
+// --skip is, one it has already once; the filter it came from is left as
+// it is. One that isn't a line is refused, naming the line.
+func TestFilterWith(t *testing.T) {
+	f, err := NewFilter(Line{Path: "~/Code", Skips: []string{"tmp"}, Pos: "laptop/declarations:3"}, Owned{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	with, err := f.With([]string{"app/node_modules", `web \[x]/vendor`, "tmp"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for filter, want := range map[*Filter]string{
+		f:    "- /tmp\n- .DS_Store\n- .localized\n",
+		with: "- /tmp\n- .DS_Store\n- .localized\n- /app/node_modules\n- /web \\[x]/vendor\n",
+	} {
+		file := filepath.Join(t.TempDir(), "filter")
+		if err := filter.Write(file); err != nil {
+			t.Fatal(err)
+		}
+		if got := read(t, file); got != want {
+			t.Errorf("the filter =\n%s\nwant\n%s", got, want)
+		}
+	}
+	if !with.Excludes("app/node_modules/x/index.js", false) || !with.Excludes("web [x]/vendor", true) || with.Excludes("app/main.go", false) {
+		t.Error("the filter with the skips doesn't leave out what they name, alone")
+	}
+	if _, err := f.With([]string{"odd\nname"}); err == nil || !strings.HasPrefix(err.Error(), "laptop/declarations:3: ") {
+		t.Errorf("With a name holding a line break = %v; want it refused, naming the line", err)
+	}
+}
+
 // What a filter leaves out is what a rule matches, or anything in a folder
 // one matches.
 func TestFilterExcludes(t *testing.T) {

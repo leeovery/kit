@@ -64,39 +64,59 @@ type Snapshot struct {
 	closed bool
 }
 
+// Passed is a backup volume passed over as holding no backup of the home
+// folder looked for: its name, why, and whether it's locked, which why
+// says too.
+type Passed struct {
+	Volume, Why string
+	Locked      bool
+}
+
 // Find finds the backups, on the disks attached, holding a home folder for
-// user, each checked by opening its latest snapshot at mountPoint, an empty
-// folder, and closing it again. A volume that can't be read, locked or
-// failing, is passed over, the rest returned; none is an error, ErrNoBackup,
-// saying why for each volume looked at. A failure to unmount, or one of the
-// mount point's, fails it. Any of Time Machine's snapshots mounted at
-// mountPoint is taken as an earlier run's and unmounted (Open), so no two
-// callers may use one mount point at once.
+// user, as Look does: none is an error, ErrNoBackup, saying why for each
+// volume looked at.
 func Find(ctx context.Context, run runner.Runner, user, mountPoint string) ([]Candidate, error) {
-	volumes, err := backupVolumes(ctx, run)
-	if err != nil {
+	found, passed, err := Look(ctx, run, user, mountPoint)
+	switch {
+	case err != nil:
 		return nil, err
-	}
-	if len(volumes) == 0 {
+	case len(found) > 0:
+		return found, nil
+	case len(passed) == 0:
 		return nil, noBackupVolume(ctx, run)
 	}
-	var found []Candidate
-	var passed []string
+	whys := make([]string, len(passed))
+	for i, p := range passed {
+		whys[i] = p.Volume + ", " + p.Why
+	}
+	return nil, fmt.Errorf("%w for /Users/%s: %s", ErrNoBackup, user, strings.Join(whys, "; "))
+}
+
+// Look looks for the backups, on the disks attached, holding a home folder
+// for user, each checked by opening its latest snapshot at mountPoint, an
+// empty folder, and closing it again: those found, and those passed over,
+// each in the order diskutil lists them. A volume that can't be read,
+// locked or failing, is passed over, saying why. A failure to unmount, or
+// one of the mount point's, fails it. Any of Time Machine's snapshots
+// mounted at mountPoint is taken as an earlier run's and unmounted (Open),
+// so no two callers may use one mount point at once.
+func Look(ctx context.Context, run runner.Runner, user, mountPoint string) (found []Candidate, passed []Passed, err error) {
+	volumes, err := backupVolumes(ctx, run)
+	if err != nil {
+		return nil, nil, err
+	}
 	for _, v := range volumes {
 		c, why, err := holding(ctx, run, v, user, mountPoint)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if why != "" {
-			passed = append(passed, v.name+", "+why)
+			passed = append(passed, Passed{Volume: v.name, Why: why, Locked: v.locked})
 			continue
 		}
 		found = append(found, c)
 	}
-	if len(found) == 0 {
-		return nil, fmt.Errorf("%w for /Users/%s: %s", ErrNoBackup, user, strings.Join(passed, "; "))
-	}
-	return found, nil
+	return found, passed, nil
 }
 
 // holding is v as a candidate holding user's home folder, or why it isn't

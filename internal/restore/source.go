@@ -16,7 +16,7 @@ import (
 )
 
 // Opener is where a restore copies from, to open as it starts: the old Mac
-// over SSH, its Time Machine disk, or the folder Arq restored into.
+// over SSH, its Time Machine disk, or the folders Arq restored into.
 type Opener interface {
 	Open(ctx context.Context) (*Opened, error)
 }
@@ -25,13 +25,24 @@ type Opener interface {
 type Opened struct {
 	// Home is the old Mac's home folder there, absolute.
 	Home string
+	// Folders are where the listed paths are there, by path, when they
+	// aren't in Home, as in the folders Arq restored each into.
+	Folders map[string]string
 	// Host, Shell and Rsync reach the old Mac over SSH, as Source has them:
 	// Host "" for a source on this Mac.
 	Host, Shell, Rsync string
+	// Look says what's at each of the listed paths on the old Mac, and what
+	// in each its backups leave out, by path, in one go, as each look over
+	// SSH costs a connection: nil for a source on this Mac, where Stat
+	// looks.
+	Look func(ctx context.Context, paths []string) (map[string]There, error)
 	// Live is whether what's there can change as it's copied, as on the old
 	// Mac in use: the second pass copies again what changed, and counts it,
 	// where a backup's must find nothing.
 	Live bool
+	// Frees is whether a path's copy there goes once the path's restored,
+	// freeing its room on this Mac's disk, as Arq's holding folders do.
+	Frees bool
 	// Origin is what the record keeps of it; Replaces, the source asked
 	// for, gone, that it stands in for, as a later backup of Time Machine's
 	// does for one thinned away mid-restore: zero for none.
@@ -41,18 +52,55 @@ type Opened struct {
 	Close func(ctx context.Context) error
 }
 
+// Kind is what's at a listed path at a source.
+type Kind int
+
+const (
+	Missing Kind = iota
+	File
+	Folder
+)
+
+// There is what's at a listed path at a source, and what in it the source
+// leaves out, each as a line's --skip has it: relative to the path, escaped
+// where rsync would take it as a pattern.
+type There struct {
+	Kind  Kind
+	Skips []string
+}
+
 // Source is path, a line's, from ~, there, as rsync copies from it.
 func (o *Opened) Source(path string) Source {
+	if at, ok := o.Folders[path]; ok {
+		return Source{Path: at}
+	}
 	return Source{Path: filepath.Join(o.Home, strings.TrimPrefix(path, "~/")), Host: o.Host, Shell: o.Shell, Rsync: o.Rsync}
 }
 
 // Stat says what's at path, a line's, from ~, there, as os.Lstat does: a
-// folder, a file, or nothing (fs.ErrNotExist).
-func (o *Opened) Stat(path string) (fs.FileInfo, error) {
+// folder, a file (a link, as rsync copies one, is one), or nothing. A
+// holding folder of Arq's with something else in it is an error saying so
+// (Holds). A source on another Mac is Look's to look at.
+func (o *Opened) Stat(path string) (There, error) {
 	if o.Host != "" {
-		return nil, errors.New("looking at a path on another Mac isn't built yet")
+		return There{}, errors.New("a path on another Mac is looked at through Look")
 	}
-	return os.Lstat(o.Source(path).Path)
+	at := o.Source(path).Path
+	if _, ok := o.Folders[path]; ok {
+		if held, err := Holds(filepath.Dir(at), path); err != nil || !held {
+			return There{Kind: Missing}, err
+		}
+	}
+	info, err := os.Lstat(at)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return There{Kind: Missing}, nil
+	case err != nil:
+		return There{}, err
+	case info.IsDir():
+		return There{Kind: Folder}, nil
+	}
+	return There{Kind: File}, nil
 }
 
 // Says is o as kit names it: Time Machine's backup of 8 Nov 2026 14:19, the
@@ -81,31 +129,72 @@ func (o Origin) Says() string {
 const dayLayout = "2 Jan 2006 15:04"
 
 // Sources are the restore's sources, opened through Run, for the user
-// called User, Time Machine's backups mounted at MountPoint.
+// called User, Time Machine's backups mounted at MountPoint; the old Mac
+// as Mac opens the one called from.
 type Sources struct {
 	Run              runner.Runner
 	User, MountPoint string
+	Mac              func(from string) Opener
 }
 
 // For is the source o names, to open: Time Machine's backups, as
 // TimeMachine has them, o's snapshot the one the restore began from, at
-// picking one, chosen saying whether kit apply's flags named them. Arq's
-// restore and the old Mac over SSH aren't built yet: opening either says
-// so.
+// picking one, chosen saying whether kit apply's flags named them; or the
+// old Mac, as Mac has it. Arq's restore is by hand, through the restore's
+// card, never opened here.
 func (s Sources) For(o Origin, at time.Time, chosen bool) Opener {
 	switch o.Kind {
 	case FromTimeMachine:
 		return TimeMachine{Run: s.Run, User: s.User, MountPoint: s.MountPoint, At: at, Snapshot: o.Detail, Chosen: chosen}
 	case FromArq:
-		return notBuilt("restoring through Arq isn't built yet")
+		return unopened("Arq's restore is by hand, through the restore's card")
 	}
-	return notBuilt(fmt.Sprintf("copying from %s over SSH isn't built yet: kit apply --restore-from time-machine restores from its Time Machine disk", o.Says()))
+	return s.Mac(o.Detail)
 }
 
-// notBuilt is a source kit can't copy from yet, saying so as it's opened.
-type notBuilt string
+// unopened is a source that can't be opened, saying why as it's tried.
+type unopened string
 
-func (n notBuilt) Open(context.Context) (*Opened, error) { return nil, errors.New(string(n)) }
+func (u unopened) Open(context.Context) (*Opened, error) { return nil, errors.New(string(u)) }
+
+// Disk is a Time Machine disk attached holding the person's backups, by its
+// volume's name, to open: its latest backup.
+type Disk struct {
+	Name string
+	Opener
+}
+
+// Disks are the Time Machine disks attached for the restore to fall back
+// on: those holding the person's backups, each to open, in the order
+// diskutil lists them; and those locked, by name, which can't be read till
+// they're unlocked.
+type Disks struct {
+	Found  []Disk
+	Locked []string
+}
+
+// Disks finds the Time Machine disks attached for the restore to fall back
+// on. Two of one name are told apart by their devices.
+func (s Sources) Disks(ctx context.Context) (Disks, error) {
+	found, passed, err := timemachine.Look(ctx, s.Run, s.User, s.MountPoint)
+	if err != nil {
+		return Disks{}, err
+	}
+	var d Disks
+	for _, c := range found {
+		name := c.Volume
+		if slices.ContainsFunc(found, func(o timemachine.Candidate) bool { return o.Volume == c.Volume && o.Device != c.Device }) {
+			name = fmt.Sprintf("%s (%s)", c.Volume, c.Device)
+		}
+		d.Found = append(d.Found, Disk{Name: name, Opener: TimeMachine{Run: s.Run, User: s.User, MountPoint: s.MountPoint, Device: c.Device}})
+	}
+	for _, p := range passed {
+		if p.Locked {
+			d.Locked = append(d.Locked, p.Volume)
+		}
+	}
+	return d, nil
+}
 
 // TimeMachine is the old Mac's backups on a Time Machine disk attached to
 // this one, the home folder of the user called User in them, mounted
@@ -114,29 +203,26 @@ func (n notBuilt) Open(context.Context) (*Opened, error) { return nil, errors.Ne
 // the latest. Snapshot gone from the disk is an error saying how to carry
 // on from another; with Chosen, as when kit apply's flags name Time
 // Machine's backups again, the latest at or before At stands in for it.
+// Device, when the person chose one of several disks, is the one to open.
 type TimeMachine struct {
 	Run              runner.Runner
 	User, MountPoint string
 	At               time.Time
 	Snapshot         string
 	Chosen           bool
+	Device           string
 }
 
-// Open mounts the backup to copy from. Backups on more than one disk are
-// an error naming them: which is the old Mac's can't be told.
+// Open mounts the backup to copy from.
 func (t TimeMachine) Open(ctx context.Context) (*Opened, error) {
 	found, err := timemachine.Find(ctx, t.Run, t.User, t.MountPoint)
 	if err != nil {
 		return nil, err
 	}
-	if len(found) > 1 {
-		disks := make([]string, len(found))
-		for i, c := range found {
-			disks[i] = fmt.Sprintf("%s (%s)", c.Volume, c.Device)
-		}
-		return nil, fmt.Errorf("backups of /Users/%s are on more than one Time Machine disk, %s: attach the old Mac's alone", t.User, strings.Join(disks, " and "))
+	c, err := t.disk(found)
+	if err != nil {
+		return nil, err
 	}
-	c := found[0]
 	p, gone, err := t.pick(c)
 	if err != nil {
 		return nil, err
@@ -150,6 +236,33 @@ func (t TimeMachine) Open(ctx context.Context) (*Opened, error) {
 		o.Replaces = Origin{Kind: FromTimeMachine, Detail: t.Snapshot}
 	}
 	return o, nil
+}
+
+// disk is the one of found, the disks holding backups of t's User, to open:
+// t's Device; else the one alone; else, a restore resuming, the one alone
+// holding its Snapshot. More than one is an error naming them: which is
+// the old Mac's can't be told.
+func (t TimeMachine) disk(found []timemachine.Candidate) (timemachine.Candidate, error) {
+	switch {
+	case t.Device != "":
+		if i := slices.IndexFunc(found, func(c timemachine.Candidate) bool { return c.Device == t.Device }); i >= 0 {
+			return found[i], nil
+		}
+		return timemachine.Candidate{}, fmt.Errorf("the Time Machine disk chosen, %s, no longer holds backups of /Users/%s: is it still attached?", t.Device, t.User)
+	case len(found) == 1:
+		return found[0], nil
+	}
+	holding := slices.DeleteFunc(slices.Clone(found), func(c timemachine.Candidate) bool {
+		return !slices.ContainsFunc(c.Snapshots, func(p timemachine.Point) bool { return p.Name == t.Snapshot })
+	})
+	if t.Snapshot != "" && len(holding) == 1 {
+		return holding[0], nil
+	}
+	disks := make([]string, len(found))
+	for i, c := range found {
+		disks[i] = fmt.Sprintf("%s (%s)", c.Volume, c.Device)
+	}
+	return timemachine.Candidate{}, fmt.Errorf("backups of /Users/%s are on more than one Time Machine disk, %s: attach the old Mac's alone", t.User, strings.Join(disks, " and "))
 }
 
 // pick is the one of c's snapshots to open, as t says, and whether it

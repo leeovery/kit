@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/leeovery/kit/internal/backup/arq"
 	"github.com/leeovery/kit/internal/boot"
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/engine"
@@ -20,6 +21,7 @@ import (
 	"github.com/leeovery/kit/internal/kind/secret"
 	"github.com/leeovery/kit/internal/reinstall"
 	"github.com/leeovery/kit/internal/restore"
+	"github.com/leeovery/kit/internal/restore/oldmac"
 	"github.com/leeovery/kit/internal/steps"
 )
 
@@ -30,11 +32,10 @@ type restoreFlags struct {
 	at   restoreAt
 }
 
-// chosen is the source the flags name, checked: --at only with Time
-// Machine's backups.
+// chosen is the source the flags name, checked: --at only with a backup's.
 func (f restoreFlags) chosen() (steps.RestoreFrom, error) {
-	if !f.at.at.IsZero() && f.from != restore.FromTimeMachine {
-		return steps.RestoreFrom{}, usageError{fmt.Errorf("--at picks a Time Machine backup: give it with --restore-from %s", restore.FromTimeMachine)}
+	if !f.at.at.IsZero() && f.from == "" {
+		return steps.RestoreFrom{}, usageError{fmt.Errorf("--at picks a backup: give it with --restore-from %s", strings.Join(restoreSources, " or "))}
 	}
 	return steps.RestoreFrom{Kind: string(f.from), At: f.at.at}, nil
 }
@@ -96,7 +97,8 @@ func (a *restoreAt) Set(v string) error {
 // began whatever the flags; or, for kit agent order, a new Mac's run
 // started from this one, whose lines it carries. Lines that don't read
 // make a step whose check says why; flags naming a source for no lines are
-// an error.
+// an error. Copying from the old Mac over SSH, with the key kit's secrets
+// write, it comes after them.
 func (a *app) restoreStep(r *run, dirs config.Dirs, prefsOn bool) (*engine.Step, error) {
 	list, err := r.cfg.List(config.RestoreKind, r.machine)
 	if err != nil {
@@ -134,15 +136,34 @@ func (a *app) restoreStep(r *run, dirs config.Dirs, prefsOn bool) (*engine.Step,
 		homed[i] = r.kindsByName[name]
 	}
 	mac := restore.Mac{Config: r.cfg, Name: r.machine, Home: r.homeDir, Dirs: dirs, Linked: r.files, Prefs: prefsOn, Kinds: homed}
-	sources := restore.Sources{Run: r.run, User: filepath.Base(r.homeDir), MountPoint: restore.MountPoint(dirs.State)}
-	step := steps.Restore(steps.Restoring{
+	user := filepath.Base(r.homeDir)
+	sources := restore.Sources{Run: r.run, User: user, MountPoint: restore.MountPoint(dirs.State), Mac: func(from string) restore.Opener {
+		return oldmac.Source{Finder: oldmac.Finder{Run: r.run, StateDir: dirs.State, HostKey: hostKey(from)}, From: from, User: user, Home: r.homeDir}
+	}}
+	folders := a.appFolders(r.homeDir)
+	restoring := steps.Restoring{
 		Lines: lines,
 		Owned: func(ctx context.Context) (restore.Owned, error) { return restore.ReadOwned(ctx, mac) },
 		Home:  r.homeDir, StateDir: dirs.State, Began: began, From: from, Flag: flag,
-		Sources: sources.For, Rsync: restore.NewRsync(r.run), Space: boot.Space, Now: a.Now,
-	})
+		Sources: sources.For, Disks: sources.Disks, Raise: r.raise, Run: r.run,
+		ArqAwait: []engine.Wait{{Thing: "Arq", Ready: func(context.Context) bool { return folders.Has(arq.Bundle) }}},
+		Rsync:    restore.NewRsync(r.run), Space: boot.Space, Now: a.Now,
+	}
+	overSSH, err := restoring.OverSSH()
+	if err != nil {
+		return nil, err
+	}
+	step := steps.Restore(restoring)
+	if (overSSH || a.newMacRun && flag.Kind == "") && slices.Contains(r.kinds, secret.Descriptor.Name) {
+		step.After = append(step.After, secret.Descriptor.Name)
+	}
 	return &step, nil
 }
+
+// hostKey is the SSH host key the Mac called from must present to be
+// restored from, as kit-config records it: "" while it records none, each
+// Mac's key then taken on first sight into kit's own known-hosts file.
+func hostKey(string) string { return "" }
 
 // reinstallStep is the step reinstalling the dependencies of the projects
 // the restore brought back, when the Mac has one (steps.ReinstallOn),

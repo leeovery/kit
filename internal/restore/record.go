@@ -69,9 +69,10 @@ const (
 
 // Path is a listed path's restore: how it stands; where it came from; the
 // files it holds, restored, and their bytes, however many runs copied them;
-// when its copy first started and when it finished; its second pass; and
-// what was set aside to make way for it. A path whose copy has started
-// resumes till done, never judged again.
+// when its copy first started and when it finished; its second pass; what
+// was set aside to make way for it; and, while it's restored through Arq,
+// the number of its holding folder (Holding). A path whose copy has
+// started resumes till done, never judged again.
 type Path struct {
 	State    State     `json:"state,omitempty"`
 	From     Origin    `json:"from,omitzero"`
@@ -81,6 +82,7 @@ type Path struct {
 	Finished time.Time `json:"finished,omitzero"`
 	Second   *Pass     `json:"second,omitempty"`
 	SetAside []Aside   `json:"set_aside,omitempty"`
+	Holding  int       `json:"holding,omitempty"`
 }
 
 // Pass is a second pass's result: how many files it copied again, found
@@ -118,12 +120,19 @@ func (p Path) started() bool {
 // PartWay reports whether the restore of any of lines' paths has started
 // and not finished: a run carries it on, whatever kit apply's flags say.
 func (r Record) PartWay(lines []Line) bool {
+	_, ok := r.Resuming(lines)
+	return ok
+}
+
+// Resuming is where the first of lines' paths whose restore has started
+// and not finished came from: ok false when there's none.
+func (r Record) Resuming(lines []Line) (from Origin, ok bool) {
 	for _, l := range lines {
-		if !r.Finished(l.Path) && r.Paths[l.Path].started() {
-			return true
+		if p := r.Paths[l.Path]; !r.Finished(l.Path) && p.started() {
+			return p.From, true
 		}
 	}
-	return false
+	return Origin{}, false
 }
 
 // mayAside is whether the listed path path may be set aside: one the

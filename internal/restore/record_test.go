@@ -115,6 +115,24 @@ func TestRecordPartWay(t *testing.T) {
 	}
 }
 
+// Resuming is where the first listed path part-way came from, in the
+// lines' order: none when none is.
+func TestRecordResuming(t *testing.T) {
+	started := time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC)
+	tm, arq := Origin{Kind: FromTimeMachine, Detail: "snapshot"}, Origin{Kind: FromArq, Detail: "/hold"}
+	rec := Record{Paths: map[string]Path{
+		"~/Code":      {State: Done, From: tm, Started: started},
+		"~/Documents": {State: Copying, From: arq, Started: started},
+		"~/Music":     {State: Checking, From: tm, Started: started},
+	}}
+	if from, ok := rec.Resuming([]Line{{Path: "~/Code"}, {Path: "~/Documents"}, {Path: "~/Music"}}); !ok || from != arq {
+		t.Errorf("Resuming() = %+v, %v; want Arq's", from, ok)
+	}
+	if from, ok := rec.Resuming([]Line{{Path: "~/Code"}}); ok {
+		t.Errorf("with ~/Code alone, done, Resuming() = %+v; want none", from)
+	}
+}
+
 // The restore is done with a path restored, here, or not in its source;
 // not with one under way, held, or with no record.
 func TestRecordFinished(t *testing.T) {

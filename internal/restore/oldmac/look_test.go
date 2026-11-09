@@ -11,6 +11,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"github.com/leeovery/kit/internal/restore"
 	"github.com/leeovery/kit/internal/runner"
 	"github.com/leeovery/kit/internal/runner/runnertest"
 )
@@ -39,10 +40,10 @@ func TestLooksInOneGo(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]Listed{
-		"~/Code":                               {Kind: Folder, Skips: []string{"app/node_modules", "web [x]/vendor"}},
-		"~/Library/Application Support/Claude": {Kind: Folder},
-		"~/.zsh_history":                       {Kind: File},
-		"~/Gone":                               {Kind: Missing},
+		"~/Code":                               {Kind: restore.Folder, Skips: []string{"app/node_modules", "web [x]/vendor"}},
+		"~/Library/Application Support/Claude": {Kind: restore.Folder},
+		"~/.zsh_history":                       {Kind: restore.File},
+		"~/Gone":                               {Kind: restore.Missing},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Look() = %v\nwant %v", got, want)
@@ -94,7 +95,7 @@ func TestLooksPastNamesNoRuleCanHold(t *testing.T) {
 	fake := runnertest.New(t)
 	looked(fake, laptopAt).Prints("folder\x00./app/node_modules\x00./odd\nname\x00./odd\rname\x00")
 	got, err := macThrough(fake).Look(t.Context(), []string{"~/Code"})
-	if want := (Listed{Kind: Folder, Skips: []string{"app/node_modules"}}); err != nil || !reflect.DeepEqual(got["~/Code"], want) {
+	if want := (Listed{Kind: restore.Folder, Skips: []string{"app/node_modules"}}); err != nil || !reflect.DeepEqual(got["~/Code"], want) {
 		t.Errorf("Look() = %v, %v, want %v", got, err, want)
 	}
 }
@@ -116,7 +117,7 @@ func TestLooksSayingSSHsFailure(t *testing.T) {
 }
 
 func TestPatternsAreEscaped(t *testing.T) {
-	l := Listed{Kind: Folder, Skips: []string{"app/node_modules", "web [x]/vendor", "a*b?/cache"}}
+	l := Listed{Kind: restore.Folder, Skips: []string{"app/node_modules", "web [x]/vendor", "a*b?/cache"}}
 	want := []string{"app/node_modules", `web \[x]/vendor`, `a\*b\?/cache`}
 	if got := l.Patterns(); !slices.Equal(got, want) {
 		t.Errorf("Patterns() = %q, want %q", got, want)
@@ -198,12 +199,12 @@ func TestLooksForRealThroughTheShell(t *testing.T) {
 		slices.Sort(l.Skips)
 	}
 	want := map[string]Listed{
-		"~/Code":                               {Kind: Folder, Skips: []string{"app/node_modules", "empty/.claude/worktrees", "notes.txt", "tooDeep", "web [x]/vendor"}},
-		"~/Library/Application Support/Claude": {Kind: Folder, Skips: []string{"Cache"}},
-		"~/Listed":                             {Kind: Folder},
-		"~/.zsh_history":                       {Kind: File},
-		"~/Link":                               {Kind: File},
-		"~/Gone":                               {Kind: Missing},
+		"~/Code":                               {Kind: restore.Folder, Skips: []string{"app/node_modules", "empty/.claude/worktrees", "notes.txt", "tooDeep", "web [x]/vendor"}},
+		"~/Library/Application Support/Claude": {Kind: restore.Folder, Skips: []string{"Cache"}},
+		"~/Listed":                             {Kind: restore.Folder},
+		"~/.zsh_history":                       {Kind: restore.File},
+		"~/Link":                               {Kind: restore.File},
+		"~/Gone":                               {Kind: restore.Missing},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Look() = %v\nwant %v", got, want)

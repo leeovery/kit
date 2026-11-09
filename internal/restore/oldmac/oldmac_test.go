@@ -334,7 +334,10 @@ func TestFindsWithTheSSHOptionsExact(t *testing.T) {
 			if err := opened.Close(t.Context()); err != nil {
 				t.Errorf("Close() = %v", err)
 			}
-			opened.Close = nil
+			if opened.Look == nil {
+				t.Error("Opened() looks at nothing")
+			}
+			opened.Close, opened.Look = nil, nil
 			wantOpened := &restore.Opened{
 				Home: home, Host: laptopAt, Shell: tt.wantShell(f.StateDir), Rsync: "/opt/homebrew/bin/rsync", Live: true,
 				Origin: restore.Origin{Kind: restore.FromMac, Detail: "laptop"},

@@ -259,11 +259,34 @@ func (m *Mac) Shell() string {
 }
 
 // Opened is m opened to restore from: live, as it's in use while it's
-// copied; nothing to close.
+// copied; what's at the listed paths there looked at through Look; nothing
+// to close.
 func (m *Mac) Opened() *restore.Opened {
 	return &restore.Opened{
-		Home: m.Home, Host: m.Host, Shell: m.Shell(), Rsync: RemoteRsync, Live: true,
+		Home: m.Home, Host: m.Host, Shell: m.Shell(), Rsync: RemoteRsync, Look: m.there, Live: true,
 		Origin: restore.Origin{Kind: restore.FromMac, Detail: m.Name},
 		Close:  func(context.Context) error { return nil },
 	}
+}
+
+// Source is the Mac called From, to restore from to this Mac, where the
+// person is User, at Home: found as it's opened (Find), checked (Check), and
+// opened (Opened).
+type Source struct {
+	Finder           Finder
+	From, User, Home string
+}
+
+// Open finds the Mac to restore from, and opens it, once nothing stops it
+// being copied from: none answering is an error, ErrNoAnswer, saying why
+// of each found; what stops it, Check's, each naming its fix.
+func (s Source) Open(ctx context.Context) (*restore.Opened, error) {
+	m, err := s.Finder.Find(ctx, s.From)
+	if err != nil {
+		return nil, err
+	}
+	if err := m.Check(s.User, s.Home); err != nil {
+		return nil, err
+	}
+	return m.Opened(), nil
 }

@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/leeovery/kit/internal/logs"
 )
 
 // startedFrom has kit.toml say the test's Mac, laptop, started from
@@ -86,34 +88,111 @@ func TestRestorePartWayShows(t *testing.T) {
 	}
 }
 
+// rsync3 has kit's PATH find rsync 3 in w, as the restore waits for.
+func (w *world) rsync3() {
+	w.fake.On("rsync", "--version").Prints("rsync  version 3.4.1  protocol version 32\nCapabilities:\n    xattrs, crtimes\n")
+}
+
 // kit apply --restore-from has a Mac restore its [restore] paths from a
-// backup, started from another or not: from Time Machine's, on a disk
-// attached, once rsync 3 is on kit's PATH; with no disk, the step fails
-// saying so. Arq's isn't built yet.
+// backup, started from another or not, once rsync 3 is on kit's PATH: from
+// Time Machine's, on a disk attached, with none the step failing saying
+// so; Arq's, by hand, without a terminal the step failing saying what to
+// restore where in Arq, --at picking its backup as Time Machine's.
 func TestApplyRestoresFromTheBackupNamed(t *testing.T) {
 	for _, tt := range []struct {
-		source, says string
+		args []string
+		says string
 	}{
-		{"time-machine", "no Time Machine disk is attached"},
-		{"arq", "restoring through Arq isn't built yet"},
+		{[]string{"--restore-from", "time-machine"}, "no Time Machine disk is attached"},
+		{[]string{"--restore-from", "arq"}, "restoring through Arq is by hand: in Arq, restore ~/Code into ~/.local/state/kit/restore/arq/1, then run kit apply again"},
+		{[]string{"--restore-from", "arq", "--at", "2026-11-08"}, "restoring through Arq is by hand"},
 	} {
-		t.Run(tt.source, func(t *testing.T) {
+		t.Run(strings.Join(tt.args, " "), func(t *testing.T) {
 			w := laptopWorld(t)
 			w.writeSection(t, "laptop", "restore", "~/Code\n")
-			w.fake.On("rsync", "--version").Prints("rsync  version 3.4.1  protocol version 32\nCapabilities:\n    xattrs, crtimes\n")
+			w.rsync3()
 			w.fake.On("diskutil", "apfs", "list", "-plist").Prints(`<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>Containers</key><array/></dict></plist>`)
 			w.fake.On("diskutil", "list", "-plist").Prints(`<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>AllDisksAndPartitions</key><array/></dict></plist>`)
-			out, errOut, code := w.run(t, "apply", "restore", "--restore-from", tt.source)
+			out, errOut, code := w.run(t, append([]string{"apply", "restore"}, tt.args...)...)
 			if code == 0 || !strings.Contains(out, tt.says) {
-				t.Errorf("kit apply restore --restore-from %s printed\n%s%s\nexit %d; want it failing, saying %q", tt.source, out, errOut, code, tt.says)
+				t.Errorf("kit apply restore %s printed\n%s%s\nexit %d; want it failing, saying %q", strings.Join(tt.args, " "), out, errOut, code, tt.says)
+			}
+		})
+	}
+}
+
+// Started from another Mac, the restore copies from it over SSH, finding
+// it through Bonjour: without a terminal, there's no card to ask where
+// else to restore from when it doesn't answer, so the step fails, saying
+// why and the flag that answers it.
+func TestApplyRestoreWithoutATerminalNamesTheFlag(t *testing.T) {
+	w := laptopWorld(t)
+	w.writeSection(t, "laptop", "restore", "~/Code\n")
+	w.startedFrom(t)
+	w.rsync3()
+	w.fake.On("dns-sd", "-B", "_ssh._tcp", "local.").Prints("Browsing for _ssh._tcp.local.\n")
+	out, errOut, code := w.run(t, "apply", "restore")
+	if want := "restore failed couldn't restore: studio doesn't answer over SSH: no Mac on the network offers Remote Login: kit apply --restore-from time-machine|arq restores from a backup instead\n"; code == 0 || !strings.Contains(out, want) {
+		t.Errorf("kit apply restore printed\n%s%s\nexit %d; want it failing, saying\n%s", out, errOut, code, want)
+	}
+}
+
+// restoreWaits are the steps the data restore waits for in kit apply's run
+// with args, planned, as the run's log has them.
+func (w *world) restoreWaits(t *testing.T, args ...string) []string {
+	t.Helper()
+	out, errOut, _ := w.run(t, append([]string{"apply", "--plan"}, args...)...)
+	found, _ := filepath.Glob(filepath.Join(w.home, "Library", "Logs", "kit", "*apply-plan.jsonl"))
+	if len(found) != 1 {
+		t.Fatalf("kit apply --plan printed\n%s%s\nand left %d logs, want one", out, errOut, len(found))
+	}
+	records, err := logs.Read(found[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range records {
+		for _, s := range r.Steps {
+			if s.Name == "restore" {
+				return s.Waits
+			}
+		}
+	}
+	t.Fatalf("kit apply --plan printed\n%s%s\nwith no restore", out, errOut)
+	return nil
+}
+
+// The restore comes after the secrets only when it copies from the Mac
+// this one started from, over SSH, with the key they write: not from a
+// backup kit apply's flags name, nor one a path's part-way from.
+func TestRestoreAfterTheSecretsOnlyFromTheOldMac(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		args   []string
+		record string
+		want   bool
+	}{
+		{"from the old Mac", nil, "", true},
+		{"from a backup named", []string{"--restore-from", "time-machine"}, "", false},
+		{"part-way from a backup", nil, partWay, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			w := laptopWorld(t)
+			w.writeSection(t, "laptop", "restore", "~/Code\n")
+			w.writeSection(t, "laptop", "secrets", "TOKEN op://vault/item/token\n")
+			w.startedFrom(t)
+			if tt.record != "" {
+				w.write(t, restoreRecord, tt.record)
+			}
+			if got := slices.Contains(w.restoreWaits(t, tt.args...), "secret"); got != tt.want {
+				t.Errorf("the restore waits for the secrets: %v, want %v", got, tt.want)
 			}
 		})
 	}
 }
 
 // --restore-from names a backup kit knows, for the paths [restore] lists,
-// and --at a date or a time, with Time Machine's alone: anything else is an
-// error naming the flag, before anything runs.
+// and --at a date or a time, with it alone: anything else is an error
+// naming the flag, before anything runs.
 func TestApplyRestoreFlags(t *testing.T) {
 	for _, tt := range []struct {
 		args []string
@@ -122,8 +201,7 @@ func TestApplyRestoreFlags(t *testing.T) {
 		{[]string{"--restore-from", "dropbox"}, `invalid argument "dropbox" for "--restore-from" flag: "dropbox" isn't a source: time-machine or arq`},
 		{[]string{"--restore-from", "time-machine", "--at", "yesterday"}, `invalid argument "yesterday" for "--at" flag: "yesterday" isn't a date, as 2026-11-08, or a time, as "2026-11-08 14:30"`},
 		{[]string{"--restore-from", "time-machine", "--at", "2026-11-08T14:30"}, `invalid argument "2026-11-08T14:30" for "--at" flag`},
-		{[]string{"--at", "2026-11-08"}, "--at picks a Time Machine backup: give it with --restore-from time-machine"},
-		{[]string{"--restore-from", "arq", "--at", "2026-11-08"}, "--at picks a Time Machine backup: give it with --restore-from time-machine"},
+		{[]string{"--at", "2026-11-08"}, "--at picks a backup: give it with --restore-from time-machine or arq"},
 		{[]string{"--restore-from", "time-machine"}, "--restore-from restores the paths [restore] lists, and none are listed for laptop"},
 	} {
 		t.Run(strings.Join(tt.args, " "), func(t *testing.T) {
@@ -159,7 +237,8 @@ before-it "comes before it" --before restore
 // Claude's MCP servers, added in a project's folder, and Claude's skills,
 // in Claude's folder; so do the user's own steps that say so; one placed
 // before it, before it. kit agent order places it, as a new Mac started
-// from this one would have it, whether or not this one did.
+// from this one would have it, whether or not this one did: copying from
+// this Mac over SSH, after the secrets.
 func TestRestoreComesBeforeWhatWritesIntoItsPaths(t *testing.T) {
 	for _, from := range []bool{true, false} {
 		w := restoreWorld(t)
@@ -173,6 +252,9 @@ func TestRestoreComesBeforeWhatWritesIntoItsPaths(t *testing.T) {
 		}
 		if after := names(w.order(t, "before-it").After); !slices.Contains(after, "restore") {
 			t.Errorf("started from another %v: after before-it = %q; want the restore", from, after)
+		}
+		if before := names(w.order(t, "restore").Before); !slices.Contains(before, "secret") {
+			t.Errorf("started from another %v: before the restore = %q; want the secrets", from, before)
 		}
 		doc := w.order(t, "alone")
 		i := slices.IndexFunc(doc.Unordered, func(s spot) bool { return s.Step == "restore" })

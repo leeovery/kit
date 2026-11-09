@@ -327,6 +327,42 @@ func TestFindSeveral(t *testing.T) {
 	m.leftNothing(t)
 }
 
+// Look says what Find does, and what it passed over, saying why, each
+// locked one said so; none found is no error, nor no disk at all.
+func TestLookSaysWhatItPassedOver(t *testing.T) {
+	m := newMac(t)
+	m.On("diskutil", apfsList...).Prints(apfsListOf(
+		backupVolume{name: "Backups", device: "disk7s2"},
+		backupVolume{name: "Vault", device: "disk7s3", locked: true},
+		backupVolume{name: "Empty", device: "disk7s4"},
+	))
+	m.On("diskutil", listSnapshots("disk7s2")...).Prints(snapshotsOf(made(latestOnDisk)...))
+	m.On("diskutil", listSnapshots("disk7s4")...).Prints(snapshotsOf())
+	m.disk("disk7s2", latestOnDisk, map[string][]string{dataFolder: {"someone"}})
+
+	found, passed, err := timemachine.Look(context.Background(), m, "someone", m.mp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(found) != 1 || found[0].Volume != "Backups" {
+		t.Errorf("found %+v; want Backups", found)
+	}
+	want := []timemachine.Passed{
+		{Volume: "Vault", Why: "locked: unlock it with its password in Disk Utility", Locked: true},
+		{Volume: "Empty", Why: "no backups"},
+	}
+	if !reflect.DeepEqual(passed, want) {
+		t.Errorf("passed over\n%+v\nwant\n%+v", passed, want)
+	}
+	m.leftNothing(t)
+
+	none := newMac(t)
+	none.On("diskutil", apfsList...).Prints(apfsListOf())
+	if found, passed, err := timemachine.Look(context.Background(), none, "someone", none.mp); err != nil || len(found)+len(passed) > 0 {
+		t.Errorf("with no disk, Look() = %+v, %+v, %v; want nothing, no error", found, passed, err)
+	}
+}
+
 // Snapshots are in the order they were made, not their names' times: when
 // the clocks go back, an hour's names come again, and a later snapshot's
 // name is earlier.

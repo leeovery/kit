@@ -1,6 +1,7 @@
 package restore
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"maps"
@@ -34,6 +35,25 @@ type tmMac struct {
 // snapshots, oldest first.
 func newTMMac(t *testing.T, volumes map[string][]string) *tmMac {
 	t.Helper()
+	var vs []tmVolume
+	for _, name := range slices.Sorted(maps.Keys(volumes)) {
+		vs = append(vs, tmVolume{name: name, snapshots: volumes[name]})
+	}
+	return newTMDisks(t, vs...)
+}
+
+// tmVolume is a backup volume on a disk attached: its name, its snapshots,
+// oldest first, and whether it's locked.
+type tmVolume struct {
+	name      string
+	snapshots []string
+	locked    bool
+}
+
+// newTMDisks is a Mac with the backup volumes given, in order, on devices
+// disk7s2, disk8s2 and on.
+func newTMDisks(t *testing.T, volumes ...tmVolume) *tmMac {
+	t.Helper()
 	dir, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -49,12 +69,12 @@ func newTMMac(t *testing.T, volumes map[string][]string) *tmMac {
 	})
 	var list strings.Builder
 	list.WriteString(`<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>Containers</key><array>`)
-	for i, name := range slices.Sorted(maps.Keys(volumes)) {
+	for i, v := range volumes {
 		device := fmt.Sprintf("disk%ds2", 7+i)
-		fmt.Fprintf(&list, `<dict><key>Volumes</key><array><dict><key>DeviceIdentifier</key><string>%s</string><key>Locked</key><false/><key>Name</key><string>%s</string><key>Roles</key><array><string>Backup</string></array></dict></array></dict>`, device, name)
+		fmt.Fprintf(&list, `<dict><key>Volumes</key><array><dict><key>DeviceIdentifier</key><string>%s</string><key>Locked</key><%t/><key>Name</key><string>%s</string><key>Roles</key><array><string>Backup</string></array></dict></array></dict>`, device, v.locked, v.name)
 		var snaps strings.Builder
 		snaps.WriteString(`<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>Snapshots</key><array>`)
-		for j, s := range volumes[name] {
+		for j, s := range v.snapshots {
 			fmt.Fprintf(&snaps, `<dict><key>SnapshotName</key><string>%s</string><key>SnapshotXID</key><integer>%d</integer></dict>`, s, 100+j)
 			m.On("mount_apfs", "-o", "rdonly,nobrowse", "-s", s, "/dev/"+device, m.mp).Does(func() {
 				home := filepath.Join(m.mp, strings.TrimPrefix(s, "com.apple.TimeMachine."), "Macintosh HD - Data", "Users", "someone")
@@ -161,6 +181,68 @@ func TestTimeMachineRefuses(t *testing.T) {
 	}
 }
 
+// Resuming, the disk holding the snapshot the restore began from is the
+// one opened, whatever other disks hold the person's backups; the disk the
+// person chose, by its device, is the one opened, its latest backup, and
+// one no longer attached is an error saying so.
+func TestTimeMachineOpensTheDiskChosen(t *testing.T) {
+	first, second, third := snapshot(2026, 11, 1, 9, 0), snapshot(2026, 11, 7, 9, 0), snapshot(2026, 11, 8, 14, 19)
+	disks := func(t *testing.T) *tmMac {
+		return newTMDisks(t, tmVolume{name: "Backups of laptop", snapshots: []string{first, second}}, tmVolume{name: "Backups of studio", snapshots: []string{third}})
+	}
+	m := disks(t)
+	src, err := TimeMachine{Run: m, User: "someone", MountPoint: m.mp, Snapshot: first}.Open(t.Context())
+	if err != nil || src.Origin.Detail != first || src.Home != m.home(first) {
+		t.Errorf("resuming from %s, opened %+v, %v", first, src, err)
+	} else if err := src.Close(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	m = disks(t)
+	src, err = TimeMachine{Run: m, User: "someone", MountPoint: m.mp, Device: "disk8s2"}.Open(t.Context())
+	if err != nil || src.Origin.Detail != third {
+		t.Errorf("with disk8s2 chosen, opened %+v, %v; want its latest, %s", src, err, third)
+	} else if err := src.Close(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	m = disks(t)
+	_, err = TimeMachine{Run: m, User: "someone", MountPoint: m.mp, Device: "disk9s2"}.Open(t.Context())
+	if want := "the Time Machine disk chosen, disk9s2, no longer holds backups of /Users/someone: is it still attached?"; err == nil || err.Error() != want {
+		t.Errorf("with disk9s2 chosen, Open() = %v; want %q", err, want)
+	}
+}
+
+// The disks the restore can fall back on are those holding the person's
+// backups, each by its name, two of one name told apart by their devices,
+// each opening its latest backup; and those locked, by name, which can't
+// be read till they're unlocked. Those holding none of theirs aren't
+// among them.
+func TestSourcesDisks(t *testing.T) {
+	latest, other := snapshot(2026, 11, 8, 14, 19), snapshot(2026, 11, 2, 9, 0)
+	m := newTMDisks(t,
+		tmVolume{name: "Backups", snapshots: []string{latest}},
+		tmVolume{name: "Vault", locked: true},
+		tmVolume{name: "Backups", snapshots: []string{other}},
+		tmVolume{name: "Empty"},
+	)
+	disks, err := Sources{Run: m, User: "someone", MountPoint: m.mp}.Disks(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, d := range disks.Found {
+		names = append(names, d.Name)
+	}
+	if want := []string{"Backups (disk7s2)", "Backups (disk9s2)"}; !slices.Equal(names, want) || !slices.Equal(disks.Locked, []string{"Vault"}) {
+		t.Errorf("Disks() found %q, locked %q; want %q, and Vault locked", names, disks.Locked, want)
+	}
+	src, err := disks.Found[1].Open(t.Context())
+	if err != nil || src.Origin.Detail != other {
+		t.Errorf("opening the second, %+v, %v; want its latest, %s", src, err, other)
+	} else if err := src.Close(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // With no backup to read, Find's own words say why: a disk to attach, or
 // one to unlock in Disk Utility.
 func TestTimeMachineSaysWhyThereIsNone(t *testing.T) {
@@ -172,20 +254,25 @@ func TestTimeMachineSaysWhyThereIsNone(t *testing.T) {
 	}
 }
 
-// Arq's restore, and the old Mac over SSH, aren't built yet: opening
-// either says so, the old Mac's pointing at its Time Machine disk.
-func TestSourcesNotBuilt(t *testing.T) {
-	s := Sources{Run: runnertest.New(t), User: "someone", MountPoint: t.TempDir()}
-	for _, tt := range []struct {
-		origin Origin
-		want   string
-	}{
-		{Origin{Kind: FromArq}, "restoring through Arq isn't built yet"},
-		{Origin{Kind: FromMac, Detail: "laptop"}, "copying from laptop over SSH isn't built yet: kit apply --restore-from time-machine restores from its Time Machine disk"},
-	} {
-		if _, err := s.For(tt.origin, time.Time{}, true).Open(t.Context()); err == nil || err.Error() != tt.want {
-			t.Errorf("opening %+v: %v; want %q", tt.origin, err, tt.want)
-		}
+// openerOf is a source that opens as opened says.
+type openerOf func() (*Opened, error)
+
+func (o openerOf) Open(context.Context) (*Opened, error) { return o() }
+
+// The old Mac is opened as Sources' Mac has it, by its name; Arq's restore
+// is the restore's card's, by hand, never opened here.
+func TestSourcesForTheOldMacAndArq(t *testing.T) {
+	var asked []string
+	laptop := &Opened{Host: "192.0.2.1", Origin: Origin{Kind: FromMac, Detail: "laptop"}}
+	s := Sources{Run: runnertest.New(t), User: "someone", MountPoint: t.TempDir(), Mac: func(from string) Opener {
+		asked = append(asked, from)
+		return openerOf(func() (*Opened, error) { return laptop, nil })
+	}}
+	if got, err := s.For(Origin{Kind: FromMac, Detail: "laptop"}, time.Time{}, false).Open(t.Context()); err != nil || got != laptop || !slices.Equal(asked, []string{"laptop"}) {
+		t.Errorf("opening the old Mac = %+v, %v, asking for %q; want laptop", got, err, asked)
+	}
+	if _, err := s.For(Origin{Kind: FromArq}, time.Time{}, true).Open(t.Context()); err == nil || err.Error() != "Arq's restore is by hand, through the restore's card" {
+		t.Errorf("opening Arq's restore: %v; want it refused", err)
 	}
 }
 

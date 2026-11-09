@@ -24,23 +24,14 @@ const checkoutDepth = 2
 // their caches.
 const excludedAttr = "com.apple.metadata:com_apple_backup_excludeItem"
 
-// Kind is what's at a listed path on the old Mac.
-type Kind int
-
-const (
-	Missing Kind = iota
-	File
-	Folder
-)
-
 // What lookScript says is at each path, ahead of what's skipped in it.
-var kindSays = map[string]Kind{"none": Missing, "file": File, "folder": Folder}
+var kindSays = map[string]restore.Kind{"none": restore.Missing, "file": restore.File, "folder": restore.Folder}
 
 // Listed is what's at a listed path on the old Mac, and, for a folder, what
 // in it the old Mac's backups leave out, and so the restore: each relative
 // to it, as it is.
 type Listed struct {
-	Kind  Kind
+	Kind  restore.Kind
 	Skips []string
 }
 
@@ -82,6 +73,20 @@ func lookScript(paths []string) string {
 		lines = append(lines, "look "+shellQuote(strings.TrimPrefix(p, "~/")))
 	}
 	return strings.Join(lines, "\n")
+}
+
+// there is what Look says is at each of paths, as the restore has it, the
+// skips as its filter takes them (Patterns).
+func (m *Mac) there(ctx context.Context, paths []string) (map[string]restore.There, error) {
+	listed, err := m.Look(ctx, paths)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]restore.There, len(listed))
+	for p, l := range listed {
+		out[p] = restore.There{Kind: l.Kind, Skips: l.Patterns()}
+	}
+	return out, nil
 }
 
 // Look says what's at each of paths, each from ~, on m, and what in each

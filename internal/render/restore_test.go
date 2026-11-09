@@ -3,13 +3,18 @@ package render_test
 import (
 	"bytes"
 	"fmt"
+	"slices"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/charmbracelet/colorprofile"
 
+	"github.com/leeovery/kit/internal/ask"
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/event"
+	"github.com/leeovery/kit/internal/hand"
 	"github.com/leeovery/kit/internal/render"
 )
 
@@ -97,6 +102,98 @@ func TestApplyingShowsTheDataRestore(t *testing.T) {
 		}
 		golden(t, "apply-record-restore.golden", screen(out.String())+"\n")
 	})
+}
+
+// laptopSilent is the card the data restore raises in its row when the Mac
+// it copies from, laptop, doesn't answer: why, a disk locked, and where
+// else to restore from, a key each.
+var laptopSilent = event.NeedsYou{Time: after(70), Step: "restore", Item: "restore:source", Title: "laptop doesn't answer over SSH",
+	Why: "Someone’s MacBook Pro refused this Mac's key, which the old Mac's ~/.ssh/authorized_keys must hold. The Time Machine disk Vault is locked: unlock it in Disk Utility, then try again.",
+	Keys: []check.Key{
+		{Key: "t", Does: "restores from the Time Machine disk Backups of laptop"},
+		{Key: "a", Does: "restores through Arq, by hand"},
+		{Key: "enter", Does: "tries laptop again"},
+	}}
+
+// askingWhereFrom is the run with the data restore asking where to restore
+// from, laptop not answering: Homebrew's formulae done, the restore's card
+// up in its row.
+func askingWhereFrom() []event.Event {
+	events := []event.Event{event.RunStarted{Time: at, Command: "bootstrap", Machine: "studio", Steps: restoringMac},
+		fine(2, "homebrew", "/opt/homebrew"),
+		fine(5, "time-machine", "no backup disk yet"),
+		fine(6, "prefs", "saving from tonight"),
+	}
+	events = append(events, applying(10, "brew")...)
+	events = append(events, installed("brew", 11, 20, "rsync", "jq")...)
+	events = append(events, fine(60, "brew", "2 declared, all installed"))
+	events = append(events, applying(61, "restore")...)
+	return append(events,
+		event.Doing{Time: after(61), Step: "restore", Says: "looking for laptop"},
+		event.Doing{Time: after(65), Step: "restore", Says: "looking for Time Machine disks"},
+		laptopSilent,
+	)
+}
+
+// The data restore's card, up mid-run in its row, offers its choices as
+// the run's end does a to-do's: each key, what it does, a line each, never
+// "space when it's done". In a small window, its card says a bigger window
+// shows the keys.
+func TestApplyingShowsTheRestoresChoices(t *testing.T) {
+	took := 80 * time.Second
+	for _, size := range [][2]int{{100, 30}, {160, 64}} {
+		name := fmt.Sprintf("apply-screen-restore-card-%dx%d.golden", size[0], size[1])
+		t.Run(name, func(t *testing.T) {
+			face, out, _ := applyAt(size[0], size[1], took, askingWhereFrom())
+			defer func() { _ = face.Close() }()
+			golden(t, name, screen(out.String())+"\n")
+		})
+	}
+	t.Run("apply-restore-card-small.golden", func(t *testing.T) {
+		face, out, _ := applyAt(99, 40, took, askingWhereFrom())
+		got := turned(screen(out.String()))
+		if err := face.Close(); err != nil {
+			t.Fatal(err)
+		}
+		golden(t, "apply-restore-card-small.golden", got+"\n")
+	})
+}
+
+// A mid-run card's choice being answered says what its key does, turning,
+// in place of its keys.
+func TestApplyingShowsTheRestoresChoiceAnswered(t *testing.T) {
+	card := laptopSilent
+	card.Time, card.Answering = after(75), "t"
+	face, out, _ := applyAt(160, 64, 80*time.Second, append(askingWhereFrom(), card))
+	defer func() { _ = face.Close() }()
+	_, right := panes(screen(out.String()), 160)
+	if !slices.Contains(right, "      ◐ restores from the Time Machine disk Backups of laptop") || slices.Contains(right, "      a restores through Arq, by hand") {
+		t.Errorf("answered with t, the panel is\n%s\nwant what t does, turning, alone", strings.Join(right[:14], "\n"))
+	}
+}
+
+// A mid-run card's keys answer it, passing each to its step; space, not
+// one of them, answers nothing, as kit can't take it as done; tab, with no
+// card waiting after it, chooses a row.
+func TestApplyingAnswersTheRestoresChoices(t *testing.T) {
+	face, _, kb := applyAt(160, 64, 80*time.Second, askingWhereFrom())
+	defer func() { _ = face.Close() }()
+	var mu sync.Mutex
+	var got []hand.Answer
+	face.Hands(func(step string, a hand.Answer) bool {
+		mu.Lock()
+		defer mu.Unlock()
+		if step == "restore" {
+			got = append(got, a)
+		}
+		return true
+	})
+	kb.press(t, ask.Key{Name: "tab"}, ask.Key{Text: " "}, ask.Key{Text: "t"}, ask.Key{Text: "a"}, ask.Key{Name: "enter"})
+	mu.Lock()
+	defer mu.Unlock()
+	if want := []hand.Answer{"t", "a", "enter"}; !slices.Equal(got, want) {
+		t.Errorf("tab, space, t, a and enter answered %q; want %q", got, want)
+	}
 }
 
 // kit status shows the data restore with Backups: each path to restore,

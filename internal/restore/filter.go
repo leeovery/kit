@@ -37,18 +37,44 @@ func NewFilter(line Line, owned Owned) (*Filter, error) {
 			texts = append(texts, text)
 		}
 	}
-	for _, skip := range line.Skips {
-		texts = append(texts, "/"+skip)
+	if err := f.add(slices.Concat(texts, anchored(line.Skips), finder)); err != nil {
+		return nil, err
 	}
-	for _, text := range slices.Concat(texts, finder) {
+	return f, nil
+}
+
+// With is f leaving out skips too, each in f's line's path as a line's
+// --skip names it: relative to the path, escaped where rsync would take it
+// as a pattern. f is left as it is.
+func (f *Filter) With(skips []string) (*Filter, error) {
+	with := &Filter{Line: f.Line, rules: slices.Clone(f.rules)}
+	if err := with.add(anchored(skips)); err != nil {
+		return nil, err
+	}
+	return with, nil
+}
+
+// anchored are skips, each in a line's path, as rules anchored at it.
+func anchored(skips []string) []string {
+	texts := make([]string, len(skips))
+	for i, skip := range skips {
+		texts[i] = "/" + skip
+	}
+	return texts
+}
+
+// add adds a rule for each of texts f hasn't already: one that isn't a
+// line is an error naming f's line.
+func (f *Filter) add(texts []string) error {
+	for _, text := range texts {
 		if strings.ContainsAny(text, "\r\n") {
-			return nil, fmt.Errorf("%s: %q, in %s, can't be one of rsync's rules: a rule is a line", line.Pos, text, line.Path)
+			return fmt.Errorf("%s: %q, in %s, can't be one of rsync's rules: a rule is a line", f.Line.Pos, text, f.Line.Path)
 		}
 		if !slices.ContainsFunc(f.rules, func(r rule) bool { return r.text == text }) {
 			f.rules = append(f.rules, newRule(text))
 		}
 	}
-	return f, nil
+	return nil
 }
 
 // Write writes f's rules into the file at path, for rsync's --exclude-from:
