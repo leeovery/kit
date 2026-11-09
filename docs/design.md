@@ -173,7 +173,7 @@ those comments, as nothing written by hand goes without being asked.
   or bundle id. Declaring a login item writes the app's name as the note.
 
 **Features.** Each piece of kit stands alone, and is on when it's declared: a list by having
-entries (the kinds, later the folders to restore), a piece with nothing to list by a switch
+entries (the kinds, `[restore]`), a piece with nothing to list by a switch
 in a Mac's `[features]` section (`prefs`, `touch-id-sudo`, `remote-login`,
 `file-sharing`), so
 turning one off loses nothing that isn't its own. Built-ins are generic and lasting; what's
@@ -606,7 +606,7 @@ kit                          At a terminal, kit's menu, at once: what to run nex
 
 This Mac:
 kit status [step...]         How this Mac stands against the config: what needs attention
-kit apply [step...] [--plan] Install what's declared and missing (--plan: say what, do nothing)
+kit apply [step...] [--plan] Install what's declared and missing (--plan: say what, do nothing)   [--restore-from time-machine|arq] [--at]
 kit reconcile [<kind>...] [<id>...]  Settle drift: adopt, remove, install, undeclare or snooze
 kit nightly [job...]         Run the scheduled jobs due, then every check (the hourly launch)   [--plan]
 kit list [kind]              What's declared for this Mac: file, note, installed or not
@@ -625,6 +625,7 @@ kit feature on|off <name>... Switch features on or off for this Mac   [--shared]
 kit backup add|remove <tool> The backup tools this Mac uses, each checked   [--after] [--before] [--shared]
 kit file add|remove <path>...    Files linked into the home folder from kit-config
 kit path add|remove <dir>...     Directories on the PATH
+kit restore add <path>; kit restore remove <path>...  The person's data a new Mac carries across   [--skip] [--note] [--shared]
 kit secret add <name>        Keep a secret in its store, declare it, sync it   [--stdin] [--from] [--ref] [--in] [--item] [--field] [--mode] [--shared]
 kit secret remove <name>...  Take it off the Mac, undeclare it     [--keep-value] [--delete-value] [--shared]
 kit secret sync              Read every secret from its store, and put each in place
@@ -1332,6 +1333,73 @@ to.
   restore --pending`, after anything wrong with capture itself. A held
   file's saved copy stays in the store, on the Mac or not. `[prefs deny]` leaves
   domains out.
+
+## Data restore (`[restore]`)
+
+The person's data, which only backups hold, back on a new Mac. A Mac's `[restore]` lists it, a
+path in the home folder a line, a folder or a file, with `--skip` naming what in it to leave out
+(relative to it, a path or a pattern as rsync takes one); on when it has lines. Only what's
+listed is carried, never the old Mac whole: kit rebuilds the rest. `kit restore add` and `kit
+restore remove` change the list, committing and pushing as every list's commands do; add
+refuses a line the restore would refuse, before writing anything, and copies nothing.
+
+- **One owner per path.** Every path in the home folder has one owner, chosen by who writes it
+  and what it is, asked in order: what the person writes is a linked file; a credential, kit's
+  secrets; an app's settings, how it behaves, prefs; the person's data (code, history, ledgers,
+  a tool's state), the restore list; anything else, nothing, rebuilt by kit or a cache. So no
+  two mechanisms hold one file. In a folder that mixes them each path keeps its owner: the
+  restore never carries, and never counts toward a path's holding anything, what kit links,
+  what prefs saves (while it's on for the Mac), what a kind puts in place, kit's own folders and
+  what the backups leave out; nor Finder's `.DS_Store` and `.localized`. kit works that out,
+  never a `--skip`. A line whose path is one of those, or in one, is refused, as are two lines
+  where one is or holds the other, case aside. The list decides what's carried by itself, not
+  what's safe: Time Machine and Arq hold the whole home folder, so a path missing from it costs
+  a copy when noticed, never data, and there's no drift watch over data. An agent building a
+  tool that keeps data adds its line then (`kit agent`'s guide asks the question).
+- **When.** On a Mac started from another (`from` in kit.toml, written by the boot's "start
+  from a Mac" or `kit machine add --from`), whose copied declarations carry the list, nothing
+  asked. A fresh Mac, one rebuilt under its own name, or a Mac in use given a new line restores
+  nothing unless `kit apply --restore-from time-machine|arq` says so; `--at` picks Time
+  Machine's backup, the latest at or before a date or time.
+- **Sources, best first.** The old Mac, over SSH on the local network, while it answers
+  (found among the Macs offering SSH, confirmed by its kit name, logged into with the key kit's
+  secrets write); its Time Machine disk, the backup's snapshot mounted read-only; Arq, restored
+  by the person in Arq's app into a holding folder kit names, then put in place by kit and
+  compared as from Time Machine, the holding folder deleted after. When the old Mac doesn't
+  answer, a card offers its Time Machine disk, Arq, or trying again, and what comes after the
+  restore waits. A restore stopped part-way carries on from the source it began from.
+- **The copy.** Homebrew's rsync, rsync 3 on both Macs (macOS's own keeps no extended
+  attributes), keeping attributes, permissions and dates; never `--delete`, and `--update`, so a
+  file edited on the new Mac is never replaced by the old copy. From the old Mac it leaves out
+  what the backups leave out (folders marked excluded, `[backup exclusions]`), but a marked
+  folder holding git checkouts, agents' worktrees, is copied whole. Needs: the source
+  reachable, free space for the copy, the same username (tools key their data by full path).
+  Then a second pass comparing checksums: from a backup it must find nothing; from a live Mac
+  what changed during the copy is copied again, and counted. rsync's own errors fail the step.
+- **The judgement, per path, before its copy.** Recorded done: never restored again. Absent,
+  or holding only what's kit's: restored. Holding anything older than this Mac's set-up: here,
+  never touched, never merged into. Holding only what the set-up itself wrote (a shell's
+  history, from the Terminal the boot runs in), on a path the restore's first run listed,
+  before its copy starts: that's set aside into kit's state, its path kept, and the path is
+  restored. The set-up's window opens as the boot starts (recorded only for a Mac with a
+  `from`) and closes once the restore first settles, every path done or here; a line added
+  later never moves a Mac's data. A path its source hasn't waits, judged afresh each run.
+- **The record**, in kit's state: the source chosen, so a run again resumes from it; the first
+  run's paths; each path's state as it goes (copying, checking, done, here, waiting for its
+  source), with its source, snapshot or time, counts, when, and the second pass's result; and
+  when the restore first settled.
+- **Order.** The restore waits for Homebrew's rsync and, copying from the old Mac, the secrets;
+  what writes into listed paths (Claude Code's MCP servers and skills), steps declared
+  `--after restore` and the reinstall come after it. Linked files and prefs needn't wait, as
+  it never carries what's theirs. Everything else runs alongside, so the long copy blocks
+  nothing quick.
+- **The reinstall** (the `reinstall` step), after the restore, the kinds that install projects'
+  tools, and the secrets: each project kit restored has its dependencies installed again from
+  its lockfile (Composer, npm, pnpm, Yarn, Bun, uv), in main checkouts and the person's own
+  worktrees beside them, never agents' (in `.claude/worktrees`, copied whole) or submodules. A
+  project whose tool isn't installed is listed, not failed; one that fails is named, and tried
+  again only when the run names the step (`kit apply reinstall`). Yarn Berry projects are the
+  person's to install; Terraform, Swift, Go and Cargo are left alone.
 
 ## Open-source hygiene
 

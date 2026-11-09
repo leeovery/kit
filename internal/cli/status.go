@@ -691,7 +691,13 @@ func (r *run) isAdminStep(name string) bool {
 // features are the features switched on for this Mac: the shared file's,
 // then its own. One kit doesn't know is refused, saying where.
 func (r *run) features() (featuresOn, error) {
-	list, err := r.cfg.List(config.FeaturesKind, r.machine)
+	return r.featuresOf(r.machine)
+}
+
+// featuresOf are the features switched on for mac, as features are for
+// this Mac.
+func (r *run) featuresOf(mac string) (featuresOn, error) {
+	list, err := r.cfg.List(config.FeaturesKind, mac)
 	if err != nil {
 		return nil, err
 	}

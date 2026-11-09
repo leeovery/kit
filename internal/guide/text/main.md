@@ -75,6 +75,29 @@ A Homebrew package downloaded from a private repository needs a token.
 its section held for that secret, as in `[homebrew casks --secret TOKEN]`,
 by themselves; a new Mac installs it once the secret has synced.
 
+## Where a file belongs
+
+Every path in the home folder has one owner. For a file or a folder, ask in
+this order, and take the first that fits:
+
+1. Does the person write it, as a config or a script? A linked file in
+   kit-config: `kit file add`.
+2. Is it a secret? kit's secrets: `kit secret add`.
+3. Is it an app's settings, how it behaves? prefs: kit prefs saves apps'
+   preferences, and `[prefs files]` names settings files.
+4. Is it the person's data: code, history, ledgers, a tool's state? The
+   restore list, `[restore]`: `kit restore add`.
+5. Else nothing: kit rebuilds it (apps, packages, tools), or it's a cache.
+
+When you build a tool that keeps data, add its folder then, with
+`kit restore add ~/.local/state/<tool>`: a new Mac started from this one
+brings it across. Adding it copies nothing here.
+
+In a folder that mixes them, each path keeps its own owner: the restore
+leaves out what kit links, prefs saves or a kind puts in place, by itself,
+so it's never a `--skip`. A path that's one of those is refused, as is one
+another line holds or is in.
+
 ## Steps of your own
 
 ### The contract
@@ -166,6 +189,13 @@ secret, and a step declared with `--secret`.
 Apps' settings are restored once every cask and App Store app is installed,
 near the end of the run.
 
+On a Mac started from another, the data restore brings across the paths
+`[restore]` lists, from that Mac, else a backup of it, once Homebrew's rsync
+is in and, from the old Mac, the secrets have synced. What kit puts in those
+folders (Claude Code's MCP servers and skills) comes after it, as does a
+step declared `--after restore`; then the reinstall installs each restored
+project's dependencies.
+
 Nothing waits on a step done by hand unless its line names what waits, with
 `--before`: then it comes up as a card partway through, once what it comes
 after is done. The rest come up at the end. The person may not be at the
@@ -198,9 +228,10 @@ that edit (rule 3):
 An app opened before its settings are restored leaves its restore waiting
 till it quits.
 
-Homebrew's download cache, a shell's tokens, a clone in your projects
-folder, a file made by hand: none of them is on a new Mac. A try that
-passed because of one proves nothing.
+Homebrew's download cache, a shell's tokens, a file made by hand: none of
+them is on a new Mac. What `[restore]` lists, your projects among them, is
+there only once the data restore has brought it. A try that passed because
+of one proves nothing.
 
 A new Mac is busy, with dozens of installs at once: give what waits on the
 network or an app time, minutes not seconds.
