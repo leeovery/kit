@@ -1,0 +1,10 @@
+.d..t...... ./
+.d..t...... notes/
+>fc.t...... notes/a.md
+>f+++++++++ notes/lost.md
+cd+++++++++ photos/new/
+cL+++++++++ current -> photos/big.raw
+hf+++++++++ notes/copy.md => notes/a.md
+.f....og... notes/b.md
+.f.......x. notes/c.md
+>f..t...... notes/d -> e.md
