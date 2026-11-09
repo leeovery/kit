@@ -79,31 +79,42 @@ func (m *tmMac) home(s string) string {
 
 // Time Machine's backup is opened at the mount point: the latest by
 // default; the latest at or before At; the snapshot a restore began from,
-// resuming, by name; At winning over it. Opened, it's the old home folder
-// in the snapshot, recorded by the snapshot's name, and closing it
-// unmounts it.
+// resuming, by name, kit apply's flags naming Time Machine or not; At
+// winning over it. That snapshot gone, with kit apply's flags naming Time
+// Machine, the latest, or the latest at or before At, stands in for it,
+// saying so. Opened, it's the old home folder in the snapshot, recorded by
+// the snapshot's name, and closing it unmounts it.
 func TestTimeMachineOpens(t *testing.T) {
 	here := time.Now().Location()
-	first, second, third := snapshot(2026, 11, 1, 9, 0), snapshot(2026, 11, 7, 9, 0), snapshot(2026, 11, 8, 14, 19)
+	gone, first, second, third := snapshot(2026, 10, 1, 9, 0), snapshot(2026, 11, 1, 9, 0), snapshot(2026, 11, 7, 9, 0), snapshot(2026, 11, 8, 14, 19)
+	byTheSeventh := time.Date(2026, 11, 7, 23, 59, 0, 0, here)
 	for _, tt := range []struct {
 		name     string
 		at       time.Time
 		snapshot string
+		chosen   bool
 		want     string
+		replaces string
 	}{
-		{"the latest", time.Time{}, "", third},
-		{"at a time", time.Date(2026, 11, 7, 23, 59, 0, 0, here), "", second},
-		{"resumed", time.Time{}, first, first},
-		{"at a time, resuming", time.Date(2026, 11, 7, 23, 59, 0, 0, here), first, second},
+		{"the latest", time.Time{}, "", false, third, ""},
+		{"at a time", byTheSeventh, "", true, second, ""},
+		{"resumed", time.Time{}, first, false, first, ""},
+		{"resumed, named again", time.Time{}, first, true, first, ""},
+		{"at a time, resuming", byTheSeventh, first, true, second, ""},
+		{"gone, named again", time.Time{}, gone, true, third, gone},
+		{"gone, named again at a time", byTheSeventh, gone, true, second, gone},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			m := newTMMac(t, map[string][]string{"Backups of laptop": {first, second, third}})
-			src, err := Sources{Run: m, User: "someone", MountPoint: m.mp}.For(Origin{Kind: FromTimeMachine, Detail: tt.snapshot}, tt.at).Open(t.Context())
+			src, err := Sources{Run: m, User: "someone", MountPoint: m.mp}.For(Origin{Kind: FromTimeMachine, Detail: tt.snapshot}, tt.at, tt.chosen).Open(t.Context())
 			if err != nil {
 				t.Fatal(err)
 			}
 			if src.Home != m.home(tt.want) || src.Origin != (Origin{Kind: FromTimeMachine, Detail: tt.want}) || src.Live || src.Host != "" {
 				t.Errorf("opened %+v; want %s's home, by its name, not live", src, tt.want)
+			}
+			if want := (Origin{Kind: FromTimeMachine, Detail: tt.replaces}); tt.replaces == "" && src.Replaces != (Origin{}) || tt.replaces != "" && src.Replaces != want {
+				t.Errorf("opened %+v, standing in for %+v; want it standing in for %q", src.Origin, src.Replaces, tt.replaces)
 			}
 			if got := src.Source("~/Code").Path; got != filepath.Join(m.home(tt.want), "Code") {
 				t.Errorf("~/Code is at %s in the backup", got)
@@ -117,8 +128,9 @@ func TestTimeMachineOpens(t *testing.T) {
 
 // Backups on more than one disk can't be told apart: which is the old
 // Mac's is the person's to say, by attaching it alone. A snapshot a
-// restore began from that's gone is an error naming it; so is a time
-// before every backup.
+// restore began from that's gone, kit apply's flags not naming Time
+// Machine, is an error naming it, and saying how to carry on from another;
+// a time before every backup is an error too.
 func TestTimeMachineRefuses(t *testing.T) {
 	here := time.Now().Location()
 	first := snapshot(2026, 11, 1, 9, 0)
@@ -132,13 +144,13 @@ func TestTimeMachineRefuses(t *testing.T) {
 		{"two disks", map[string][]string{"Backups of laptop": {first}, "Backups of studio": {first}}, time.Time{}, "",
 			"backups of /Users/someone are on more than one Time Machine disk, Backups of laptop (disk7s2) and Backups of studio (disk8s2): attach the old Mac's alone"},
 		{"the snapshot gone", map[string][]string{"Backups of laptop": {first}}, time.Time{}, snapshot(2026, 10, 1, 9, 0),
-			"Time Machine's backup of 1 Oct 2026 09:00, which the restore began from, isn't on Backups of laptop any more"},
+			"Time Machine's backup of 1 Oct 2026 09:00, which the restore began from, isn't on Backups of laptop any more: kit apply --restore-from time-machine carries on from the latest backup there, or the one --at picks"},
 		{"before them all", map[string][]string{"Backups of laptop": {first}}, time.Date(2026, 10, 1, 0, 0, 0, 0, here), "",
 			"Backups of laptop holds no backup from 1 Oct 2026 00:00 or before: its earliest is 1 Nov 2026 09:00"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			m := newTMMac(t, tt.volumes)
-			src, err := Sources{Run: m, User: "someone", MountPoint: m.mp}.For(Origin{Kind: FromTimeMachine, Detail: tt.snapshot}, tt.at).Open(t.Context())
+			src, err := Sources{Run: m, User: "someone", MountPoint: m.mp}.For(Origin{Kind: FromTimeMachine, Detail: tt.snapshot}, tt.at, !tt.at.IsZero()).Open(t.Context())
 			if err == nil || err.Error() != tt.want {
 				t.Errorf("Open() = %+v, %v; want %q", src, err, tt.want)
 			}
@@ -154,7 +166,7 @@ func TestTimeMachineRefuses(t *testing.T) {
 func TestTimeMachineSaysWhyThereIsNone(t *testing.T) {
 	m := runnertest.New(t)
 	m.On("diskutil", "apfs", "list", "-plist").Prints(`<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>Containers</key><array><dict><key>Volumes</key><array><dict><key>DeviceIdentifier</key><string>disk7s2</string><key>Locked</key><true/><key>Name</key><string>Backups of laptop</string><key>Roles</key><array><string>Backup</string></array></dict></array></dict></array></dict></plist>`)
-	_, err := Sources{Run: m, User: "someone", MountPoint: t.TempDir()}.For(Origin{Kind: FromTimeMachine}, time.Time{}).Open(t.Context())
+	_, err := Sources{Run: m, User: "someone", MountPoint: t.TempDir()}.For(Origin{Kind: FromTimeMachine}, time.Time{}, false).Open(t.Context())
 	if !errors.Is(err, timemachine.ErrNoBackup) || !strings.Contains(err.Error(), "unlock it with its password in Disk Utility") {
 		t.Errorf("Open() = %v; want no backup, saying to unlock it in Disk Utility", err)
 	}
@@ -171,7 +183,7 @@ func TestSourcesNotBuilt(t *testing.T) {
 		{Origin{Kind: FromArq}, "restoring through Arq isn't built yet"},
 		{Origin{Kind: FromMac, Detail: "laptop"}, "copying from laptop over SSH isn't built yet: kit apply --restore-from time-machine restores from its Time Machine disk"},
 	} {
-		if _, err := s.For(tt.origin, time.Time{}).Open(t.Context()); err == nil || err.Error() != tt.want {
+		if _, err := s.For(tt.origin, time.Time{}, true).Open(t.Context()); err == nil || err.Error() != tt.want {
 			t.Errorf("opening %+v: %v; want %q", tt.origin, err, tt.want)
 		}
 	}

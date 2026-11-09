@@ -83,3 +83,33 @@ func TestRecordChange(t *testing.T) {
 		t.Errorf("Paths = %+v; want %+v", rec.Paths, want)
 	}
 }
+
+// A restore is part-way while one of the listed paths has started and not
+// finished: copying, checking, or held since it started; never one done or
+// here, never one not yet started, never a path no longer listed.
+func TestRecordPartWay(t *testing.T) {
+	started := time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC)
+	listed := []Line{{Path: "~/Code"}, {Path: "~/Documents"}}
+	for _, tt := range []struct {
+		name string
+		path string
+		p    Path
+		want bool
+	}{
+		{"copying", "~/Code", Path{State: Copying, Started: started}, true},
+		{"checking", "~/Documents", Path{State: Checking, Started: started}, true},
+		{"held since it started", "~/Code", Path{State: Held, Started: started}, true},
+		{"held, not started", "~/Code", Path{State: Held}, false},
+		{"done", "~/Code", Path{State: Done, Started: started}, false},
+		{"here", "~/Code", Path{State: Here}, false},
+		{"no longer listed", "~/Music", Path{State: Copying, Started: started}, false},
+	} {
+		rec := Record{Paths: map[string]Path{tt.path: tt.p}}
+		if got := rec.PartWay(listed); got != tt.want {
+			t.Errorf("%s: PartWay() = %v, want %v", tt.name, got, tt.want)
+		}
+	}
+	if (Record{}).PartWay(listed) {
+		t.Error("with no record, PartWay() = true")
+	}
+}

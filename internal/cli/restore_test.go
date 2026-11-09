@@ -2,6 +2,7 @@ package cli_test
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -29,19 +30,31 @@ func (w *world) statusSteps(t *testing.T) []string {
 	return ids
 }
 
+// restoreRecord is the restore's record, in kit's state directory.
+var restoreRecord = filepath.Join(".local", "state", "kit", "restore.json")
+
+// partWay is a restore's record with ~/Code's copy part-way, from Time
+// Machine's backup.
+const partWay = `{"paths": {"~/Code": {"state": "copying", "from": {"kind": "time-machine", "detail": "com.apple.TimeMachine.2026-11-08-141900.backup"}, "started": "2026-11-20T10:00:00Z"}}}`
+
 // The data restore is a step of a Mac that lists paths in [restore] and
-// started from another, as kit.toml says; on a Mac without either, it's
-// none: a fresh Mac, or one in use.
+// started from another, as kit.toml says; or of one whose record has a
+// listed path's restore part-way, which carries on from where it began,
+// kit apply naming no source. On a Mac without either, it's none: a fresh
+// Mac, or one in use, its restore done.
 func TestRestoreIsThereOnlyForAMacStartedFromAnother(t *testing.T) {
 	for _, tt := range []struct {
-		name          string
-		lines, from   bool
-		want          bool
-		checkedPrints string
+		name        string
+		lines, from bool
+		record      string
+		want        bool
 	}{
-		{"listing paths, started from another", true, true, true, "1 declared, 1 to restore"},
-		{"listing paths, started afresh", true, false, false, ""},
-		{"listing nothing, started from another", false, true, false, ""},
+		{"listing paths, started from another", true, true, "", true},
+		{"listing paths, started afresh", true, false, "", false},
+		{"listing nothing, started from another", false, true, "", false},
+		{"listing paths, one part-way", true, false, partWay, true},
+		{"listing paths, its restore done", true, false, `{"paths": {"~/Code": {"state": "done", "started": "2026-11-20T10:00:00Z"}}}`, false},
+		{"listing nothing, one part-way", false, false, partWay, false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			w := laptopWorld(t)
@@ -51,10 +64,25 @@ func TestRestoreIsThereOnlyForAMacStartedFromAnother(t *testing.T) {
 			if tt.from {
 				w.startedFrom(t)
 			}
+			if tt.record != "" {
+				w.write(t, restoreRecord, tt.record)
+			}
 			if got := slices.Contains(w.statusSteps(t), "restore"); got != tt.want {
 				t.Errorf("kit status has the restore: %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+// A restore part-way on a Mac in use shows in kit status as it stands,
+// saying where it's from.
+func TestRestorePartWayShows(t *testing.T) {
+	w := laptopWorld(t)
+	w.writeSection(t, "laptop", "restore", "~/Code\n")
+	w.write(t, restoreRecord, partWay)
+	out, _, _ := w.run(t, "status", "restore")
+	if want := "restore attention 1 declared, 1 to restore\nrestore missing ~/Code (part-way from Time Machine's backup of 8 Nov 2026 14:19) (to restore)\n"; !strings.Contains(out, want) {
+		t.Errorf("kit status restore printed\n%s\nwant it holding\n%s", out, want)
 	}
 }
 
@@ -153,13 +181,16 @@ func TestRestoreComesBeforeWhatWritesIntoItsPaths(t *testing.T) {
 	}
 }
 
-// A step of the user's own placed after the restore, or before it, on a
-// Mac that restores nothing is placed without it, and runs all the same,
-// never failing; a thing of the restore's, which has none, is no step.
+// A step of the user's own placed after the restore or the reinstall, or
+// before either, on a Mac that restores nothing is placed without it, and
+// runs all the same, never failing; a thing of the restore's, which has
+// none, is no step.
 func TestAfterTheRestoreWithoutOne(t *testing.T) {
 	w := orderWorld(t)
 	w.writeSection(t, "laptop", "steps", `uses-code "uses the code" --after restore
 before-it "comes before it" --before restore
+uses-deps "uses the projects" --after reinstall
+tool-first "puts a tool in place" --before reinstall
 typo "names a thing of the restore's" --after restore:code
 `)
 	fails := func(name string) string {
@@ -170,10 +201,10 @@ typo "names a thing of the restore's" --after restore:code
 		}
 		return doc.Fails
 	}
-	for _, name := range []string{"uses-code", "before-it"} {
+	for _, name := range []string{"uses-code", "before-it", "uses-deps", "tool-first"} {
 		doc := w.order(t, name)
-		if all := names(slices.Concat(doc.Before, doc.After, doc.Unordered, doc.Absent)); slices.Contains(all, "restore") || fails(name) != "" {
-			t.Errorf("kit agent order %s placed it among %q, failing %q; want it placed, the restore nowhere", name, all, fails(name))
+		if all := names(slices.Concat(doc.Before, doc.After, doc.Unordered, doc.Absent)); slices.Contains(all, "restore") || slices.Contains(all, "reinstall") || fails(name) != "" {
+			t.Errorf("kit agent order %s placed it among %q, failing %q; want it placed, the restore and the reinstall nowhere", name, all, fails(name))
 		}
 	}
 	if got := fails("typo"); !strings.HasSuffix(got, ": it comes after restore:code, which isn't a step") {

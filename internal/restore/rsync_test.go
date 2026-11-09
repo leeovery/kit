@@ -361,19 +361,27 @@ func TestCopySaysHowFarItsGot(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("progress = %+v, want %+v", got, want)
 	}
-	if want := (Stats{Files: 5, Bytes: 50900003}); stats != want {
+	if want := (Stats{Files: 5, Bytes: 50900003, TotalFiles: 5, TotalBytes: 50900003}); stats != want {
 		t.Errorf("Copy() = %+v, want %+v", stats, want)
 	}
 }
 
+// rsync's statistics say what it copies, or would, and what the set it
+// copies from holds, copied or there already: its regular files, never its
+// folders or links, and their bytes.
 func TestSizeSaysWhatsToCome(t *testing.T) {
 	tests := []struct {
 		name   string
 		prints string
 		want   Stats
 	}{
-		{"commas", fixture(t, "size.raw"), Stats{Files: 5, Bytes: 50900003}},
-		{"points, where decimals take commas", "Number of regular files transferred: 1.234\nTotal transferred file size: 5.678.901 bytes\n", Stats{Files: 1234, Bytes: 5678901}},
+		{"commas", fixture(t, "size.raw"), Stats{Files: 5, Bytes: 50900003, TotalFiles: 5, TotalBytes: 50900003}},
+		{"points, where decimals take commas", "Number of files: 1.240 (reg: 1.234, dir: 6)\nNumber of regular files transferred: 1.234\nTotal file size: 5.678.901 bytes\nTotal transferred file size: 5.678.901 bytes\n",
+			Stats{Files: 1234, Bytes: 5678901, TotalFiles: 1234, TotalBytes: 5678901}},
+		{"part copied already", "Number of files: 12,031 (reg: 10,512, dir: 1,402, link: 117)\nNumber of regular files transferred: 2,040\nTotal file size: 9,120,004,113 bytes\nTotal transferred file size: 1,016,330 bytes\n",
+			Stats{Files: 2040, Bytes: 1016330, TotalFiles: 10512, TotalBytes: 9120004113}},
+		{"folders alone", "Number of files: 3 (dir: 3)\nNumber of regular files transferred: 0\nTotal file size: 0 bytes\nTotal transferred file size: 0 bytes\n", Stats{}},
+		{"nothing", "Number of files: 0\nNumber of regular files transferred: 0\nTotal file size: 0 bytes\nTotal transferred file size: 0 bytes\n", Stats{}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -388,14 +396,21 @@ func TestSizeSaysWhatsToCome(t *testing.T) {
 	}
 }
 
+// Statistics that don't say what was copied, or what the set holds, fail
+// the copy and its size.
 func TestStatisticsMissingFail(t *testing.T) {
-	for _, op := range ops[:2] {
-		t.Run(op.name, func(t *testing.T) {
-			fake := prints(t, "sent 12 bytes  received 34 bytes\n")
-			if err := op.run(t.Context(), NewRsync(fake), local("/Code", t.TempDir()+"/Code")); err == nil {
-				t.Error("error = nil, want one: rsync said nothing of the files")
-			}
-		})
+	for _, said := range []string{
+		"sent 12 bytes  received 34 bytes\n",
+		"Number of regular files transferred: 5\nTotal transferred file size: 50,900,003 bytes\n",
+	} {
+		for _, op := range ops[:2] {
+			t.Run(op.name, func(t *testing.T) {
+				fake := prints(t, said)
+				if err := op.run(t.Context(), NewRsync(fake), local("/Code", t.TempDir()+"/Code")); err == nil {
+					t.Errorf("rsync saying %q, error = nil, want one: it said nothing of the files", said)
+				}
+			})
+		}
 	}
 }
 
@@ -492,13 +507,13 @@ func TestFilesVanishedAreAnErrorOfTheirOwn(t *testing.T) {
 
 	size, err := vanishes(fixture(t, "size.raw")).Size(t.Context(), c)
 	check("Size", err)
-	if want := (Stats{Files: 5, Bytes: 50900003}); size != want {
+	if want := (Stats{Files: 5, Bytes: 50900003, TotalFiles: 5, TotalBytes: 50900003}); size != want {
 		t.Errorf("Size() = %+v, want %+v", size, want)
 	}
 	var progress []Progress
 	copied, err := realRsync(t, "vanished.raw", "vanished.stderr", 24).Copy(t.Context(), c, func(p Progress) { progress = append(progress, p) })
 	check("Copy", err)
-	if want := (Stats{Files: 3, Bytes: 209715210}); copied != want {
+	if want := (Stats{Files: 3, Bytes: 209715210, TotalFiles: 3, TotalBytes: 209715210}); copied != want {
 		t.Errorf("Copy() = %+v, want %+v", copied, want)
 	}
 	wantProgress := []Progress{

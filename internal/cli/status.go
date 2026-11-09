@@ -479,6 +479,15 @@ func (a *app) build(command, logName string, face render.Face, atTerminal bool) 
 	if restoring != nil {
 		checks = append(checks, *restoring)
 	}
+	reinstalling, err := a.reinstallStep(r, dirs, restoring != nil)
+	if err != nil {
+		_ = face.Close()
+		_ = log.Close()
+		return nil, err
+	}
+	if reinstalling != nil {
+		checks = append(checks, *reinstalling)
+	}
 	edits := steps.ConfigEdits(r.repo)
 	r.drift = append(r.drift, steps.ConfigEditsName)
 	r.drifters[steps.ConfigEditsName] = configDrifter{repo: r.repo, home: home, step: edits}

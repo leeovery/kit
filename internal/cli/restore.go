@@ -12,6 +12,8 @@ import (
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/kind"
+	"github.com/leeovery/kit/internal/kind/secret"
+	"github.com/leeovery/kit/internal/reinstall"
 	"github.com/leeovery/kit/internal/restore"
 	"github.com/leeovery/kit/internal/steps"
 )
@@ -85,12 +87,13 @@ func (a *restoreAt) Set(v string) error {
 
 // restoreStep is the data restore's step, when the Mac has one: [restore]
 // lines, and a source for them, the Mac it started from or kit apply's
-// flags'; or, for kit agent order, a new Mac's run started from this one,
-// whose lines it carries. Lines that don't read make a step whose check
-// says why.
+// flags'; or a path's restore part-way, which carries on from where it
+// began whatever the flags; or, for kit agent order, a new Mac's run
+// started from this one, whose lines it carries. Lines that don't read
+// make a step whose check says why.
 func (a *app) restoreStep(r *run, dirs config.Dirs, prefsOn bool) (*engine.Step, error) {
 	list, err := r.cfg.List(config.RestoreKind, r.machine)
-	if err != nil {
+	if err != nil || len(list.Entries) == 0 {
 		return nil, err
 	}
 	from := r.cfg.Macs[r.machine].From
@@ -98,13 +101,17 @@ func (a *app) restoreStep(r *run, dirs config.Dirs, prefsOn bool) (*engine.Step,
 	if err != nil {
 		return nil, err
 	}
-	if len(list.Entries) == 0 || from == "" && flag.Kind == "" && !a.newMacRun {
+	lines, unread := restore.Lines(list)
+	rec, err := restore.LoadRecord(dirs.State)
+	if err != nil {
+		return nil, err
+	}
+	if from == "" && flag.Kind == "" && !a.newMacRun && !rec.PartWay(lines) {
 		return nil, nil
 	}
-	lines, err := restore.Lines(list)
-	if err != nil {
+	if unread != nil {
 		step := steps.Restore(steps.Restoring{})
-		broken(&step, err.Error())
+		broken(&step, unread.Error())
 		return &step, nil
 	}
 	began, err := boot.Began(dirs.State)
@@ -123,5 +130,29 @@ func (a *app) restoreStep(r *run, dirs config.Dirs, prefsOn bool) (*engine.Step,
 		Home:  r.homeDir, StateDir: dirs.State, Began: began, From: from, Flag: flag,
 		Sources: sources.For, Rsync: restore.NewRsync(r.run), Space: boot.Space, Now: a.Now,
 	})
+	return &step, nil
+}
+
+// reinstallStep is the step reinstalling the dependencies of the projects
+// the restore brought back, when the Mac has one (steps.ReinstallOn),
+// restoring saying the data restore's in the run, as on a new Mac's first,
+// before anything's recorded; for kit agent order, wherever the restore
+// is. Failed installs run again when kit apply names it. It comes after
+// the restore, and the secrets, which write what private packages need.
+func (a *app) reinstallStep(r *run, dirs config.Dirs, restoring bool) (*engine.Step, error) {
+	on, err := steps.ReinstallOn(dirs.State, restoring)
+	if err != nil {
+		return nil, err
+	}
+	if !on && (!restoring || !a.newMacRun) {
+		return nil, nil
+	}
+	step := steps.Reinstall(reinstall.Reinstaller{Run: r.run, Home: r.homeDir, StateDir: dirs.State, Now: a.Now, Retry: slices.Contains(a.named, steps.ReinstallName)})
+	if restoring {
+		step.After = append(step.After, steps.RestoreName)
+	}
+	if slices.Contains(r.kinds, secret.Descriptor.Name) {
+		step.After = append(step.After, secret.Descriptor.Name)
+	}
 	return &step, nil
 }

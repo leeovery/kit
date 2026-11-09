@@ -190,8 +190,8 @@ func (r *run) placeScript(s *steps.Script, names map[string]bool) ([]engine.Wait
 
 // place checks what a line's step comes after and before are among names,
 // the run's steps, or kinds this Mac doesn't use and the steps they need,
-// or the data restore, there only on a Mac restoring its data, which it's
-// then placed without; it returns the steps it comes after, a wait for each
+// or kit's steps there only on a Mac restoring its data (sometimes), which
+// it's then placed without; it returns the steps it comes after, a wait for each
 // of a kind's things it comes after, as in cask:firefox, and the steps it
 // comes before. An error says what isn't a step or a kind.
 func (r *run) place(after, before []string, names map[string]bool) (ordered []string, waits []engine.Wait, ahead []string, err error) {
@@ -203,7 +203,7 @@ func (r *run) place(after, before []string, names map[string]bool) (ordered []st
 			waits = append(waits, engine.Wait{Step: kindName, Thing: thing, Ready: r.installed(kindName, thing)})
 		case names[a]:
 			ordered = append(ordered, a)
-		case a == steps.RestoreName:
+		case slices.Contains(sometimes, a):
 		case !ofKinds(kindName):
 			wrong = append(wrong, "it comes after "+a+", which isn't a step")
 		}
@@ -212,7 +212,7 @@ func (r *run) place(after, before []string, names map[string]bool) (ordered []st
 		switch {
 		case names[b]:
 			ahead = append(ahead, b)
-		case b == steps.RestoreName:
+		case slices.Contains(sometimes, b):
 		case !ofKinds(b):
 			wrong = append(wrong, "it comes before "+b+", which isn't a step")
 		}
@@ -222,6 +222,10 @@ func (r *run) place(after, before []string, names map[string]bool) (ordered []st
 	}
 	return ordered, waits, ahead, nil
 }
+
+// sometimes are kit's own steps a run has only on a Mac restoring its data:
+// the data restore, and the reinstall of the projects it brings back.
+var sometimes = []string{steps.RestoreName, steps.ReinstallName}
 
 // ofKinds reports whether the step called name is a kind's, or one a kind
 // needs, whether or not this run has it.

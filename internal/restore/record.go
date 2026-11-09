@@ -63,9 +63,10 @@ const (
 )
 
 // Path is a listed path's restore: how it stands; where it came from; the
-// files and bytes copied; when its copy first started and when it finished;
-// its second pass; and what was set aside to make way for it. A path whose
-// copy has started resumes till done, never judged again.
+// files it holds, restored, and their bytes, however many runs copied them;
+// when its copy first started and when it finished; its second pass; and
+// what was set aside to make way for it. A path whose copy has started
+// resumes till done, never judged again.
 type Path struct {
 	State    State     `json:"state,omitempty"`
 	From     Origin    `json:"from,omitzero"`
@@ -107,6 +108,17 @@ func UpdateRecord(stateDir string, change func(*Record)) error {
 // since.
 func (p Path) started() bool {
 	return p.State == Copying || p.State == Checking || !p.Started.IsZero()
+}
+
+// PartWay reports whether the restore of any of lines' paths has started
+// and not finished: a run carries it on, whatever kit apply's flags say.
+func (r Record) PartWay(lines []Line) bool {
+	for _, l := range lines {
+		if p := r.Paths[l.Path]; p.State != Done && p.State != Here && p.started() {
+			return true
+		}
+	}
+	return false
 }
 
 // mayAside is whether the listed path path may be set aside: one the

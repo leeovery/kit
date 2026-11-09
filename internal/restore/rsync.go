@@ -82,6 +82,12 @@ var (
 	progressLine = regexp.MustCompile(`^\s*([\d,.]+)B?\s+(\d+)%\s+\S+\s+\S+(?:\s+\(xfr#(\d+), [a-z]+-chk=\d+/\d+\))?\s*$`)
 	statFiles    = regexp.MustCompile(`(?m)^Number of regular files transferred: ([\d,.]+)\s*$`)
 	statBytes    = regexp.MustCompile(`(?m)^Total transferred file size: ([\d,.]+) bytes\s*$`)
+	// statTotalFiles is how many files the set holds, and, when it holds
+	// any, how many of each sort, a sort it holds none of left out: regular
+	// files (statRegular), folders (dir), links (link).
+	statTotalFiles = regexp.MustCompile(`(?m)^Number of files: .*$`)
+	statRegular    = regexp.MustCompile(`\breg: ([\d,.]+)`)
+	statTotalBytes = regexp.MustCompile(`(?m)^Total file size: ([\d,.]+) bytes\s*$`)
 	// itemized is a line of --itemize-changes: the update (> received, c
 	// made, h hard-linked, . unchanged but for attributes), the kind of
 	// thing, nine attribute columns, then the path.
@@ -186,11 +192,15 @@ type Copy struct {
 	Partial string
 }
 
-// Stats is what a copy comes to: how many files, and how many bytes of
-// them.
+// Stats is what a copy comes to: how many files it copies, or would, and
+// how many bytes of them; and how many the path holds once copied, as the
+// source has them, copied or there already, and their bytes. Files are
+// regular files, never folders or links.
 type Stats struct {
-	Files int
-	Bytes int64
+	Files      int
+	Bytes      int64
+	TotalFiles int
+	TotalBytes int64
 }
 
 // Progress is how far a copy has got, as rsync says it.
@@ -455,13 +465,19 @@ func (s *statsReader) text() []byte {
 	return []byte(strings.Join(s.lines, "\n"))
 }
 
-// statsOf is what rsync's --stats says it copied, or would.
+// statsOf is what rsync's --stats says it copied, or would, and what the
+// set it copied from holds.
 func statsOf(out []byte) (Stats, error) {
 	files, bytes := statFiles.FindSubmatch(out), statBytes.FindSubmatch(out)
-	if files == nil || bytes == nil {
+	totalFiles, totalBytes := statTotalFiles.Find(out), statTotalBytes.FindSubmatch(out)
+	if files == nil || bytes == nil || totalFiles == nil || totalBytes == nil {
 		return Stats{}, errors.New("rsync's statistics say nothing of the files it copied")
 	}
-	return Stats{Files: int(number(string(files[1]))), Bytes: number(string(bytes[1]))}, nil
+	stats := Stats{Files: int(number(string(files[1]))), Bytes: number(string(bytes[1])), TotalBytes: number(string(totalBytes[1]))}
+	if regular := statRegular.FindSubmatch(totalFiles); regular != nil {
+		stats.TotalFiles = int(number(string(regular[1])))
+	}
+	return stats, nil
 }
 
 // recopied is what the second pass, itemizing its changes, copied again: a

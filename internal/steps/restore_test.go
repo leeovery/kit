@@ -35,21 +35,23 @@ const (
 	snapshotY = "com.apple.TimeMachine.2026-11-01-090000.backup"
 )
 
-// opened is a restore's source as it's asked for, and what opening it does.
+// opened is a restore's source as it's asked for: its origin, the time
+// picking Time Machine's backup, and whether kit apply's flags named it.
 type opened struct {
 	origin restore.Origin
 	at     time.Time
+	chosen bool
 }
 
 // fakeSource is a source to restore from, the old Mac's home folder in a
 // folder of its own: live, as the old Mac in use, or a backup's; as
-// opened, the origin it's recorded by. It notes each time it's asked for,
-// and closed.
+// opened, the origin it's recorded by, and the one gone it stands in for.
+// It notes each time it's asked for, and closed.
 type fakeSource struct {
-	home   string
-	origin restore.Origin
-	live   bool
-	err    error
+	home             string
+	origin, replaces restore.Origin
+	live             bool
+	err              error
 
 	mu     sync.Mutex
 	asked  []opened
@@ -57,10 +59,10 @@ type fakeSource struct {
 	closes int
 }
 
-func (f *fakeSource) For(o restore.Origin, at time.Time) restore.Opener {
+func (f *fakeSource) For(o restore.Origin, at time.Time, chosen bool) restore.Opener {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.asked = append(f.asked, opened{o, at})
+	f.asked = append(f.asked, opened{o, at, chosen})
 	return f
 }
 
@@ -71,7 +73,7 @@ func (f *fakeSource) Open(context.Context) (*restore.Opened, error) {
 		return nil, f.err
 	}
 	f.opens++
-	return &restore.Opened{Home: f.home, Live: f.live, Origin: f.origin, Close: func(context.Context) error {
+	return &restore.Opened{Home: f.home, Live: f.live, Origin: f.origin, Replaces: f.replaces, Close: func(context.Context) error {
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		f.closes++
@@ -211,22 +213,37 @@ func (c *restoring) on(op, path string) *runnertest.Script {
 	})
 }
 
-// stats is rsync's --stats for files and bytes.
+// stats is rsync's --stats for files and bytes copied, of a path holding
+// those alone.
 func stats(files int, bytes int64) string {
-	return fmt.Sprintf("Number of files: %d\nNumber of regular files transferred: %d\nTotal transferred file size: %d bytes\n", files, files, bytes)
+	return statsOf(files, bytes, files, bytes)
+}
+
+// statsOf is rsync's --stats for files and bytes copied, of a path holding
+// totalFiles and totalBytes.
+func statsOf(files int, bytes int64, totalFiles int, totalBytes int64) string {
+	return fmt.Sprintf("Number of files: %d (reg: %d, dir: 1)\nNumber of regular files transferred: %d\nTotal file size: %d bytes\nTotal transferred file size: %d bytes\n",
+		totalFiles+1, totalFiles, files, totalBytes, bytes)
 }
 
 // copies scripts path's whole restore from the source: its size, a copy of
 // files and bytes, each file's name and how far the copy's got, then its
 // statistics, and a second pass that finds nothing.
 func (c *restoring) copies(path string, files int, bytes int64) {
-	c.on(sizing, path).Prints(stats(files, bytes))
+	c.carriesOn(path, files, bytes, files, bytes)
+}
+
+// carriesOn scripts path's restore from the source, as copies does, of
+// files and bytes, the path holding totalFiles and totalBytes, the rest
+// copied already.
+func (c *restoring) carriesOn(path string, files int, bytes int64, totalFiles int, totalBytes int64) {
+	c.on(sizing, path).Prints(statsOf(files, bytes, totalFiles, totalBytes))
 	var out strings.Builder
 	for i := range files {
 		fmt.Fprintf(&out, "%s/file-%d\n", strings.TrimPrefix(path, "~/"), i)
 		fmt.Fprintf(&out, "%d %d%% 1.00MB/s 0:00:01 (xfr#%d, to-chk=%d/%d)\r", bytes*int64(i+1)/int64(files), 100*(i+1)/files, i+1, files-i-1, files)
 	}
-	out.WriteString("\n" + stats(files, bytes))
+	out.WriteString("\n" + statsOf(files, bytes, totalFiles, totalBytes))
 	c.on(copyingOp, path).Prints(out.String())
 	c.on(comparing, path)
 }
@@ -377,7 +394,7 @@ func TestRestoreFromABackup(t *testing.T) {
 	}; !slices.Equal(c.ran(), want) {
 		t.Errorf("rsync ran\n%q\nwant\n%q", c.ran(), want)
 	}
-	if want := []opened{{restore.Origin{Kind: restore.FromTimeMachine}, time.Time{}}}; !reflect.DeepEqual(c.src.asked, want) || c.src.opens != 1 || c.src.closes != 1 {
+	if want := []opened{{restore.Origin{Kind: restore.FromTimeMachine}, time.Time{}, true}}; !reflect.DeepEqual(c.src.asked, want) || c.src.opens != 1 || c.src.closes != 1 {
 		t.Errorf("the source was asked for %+v, opened %d and closed %d times; want %+v, once each", c.src.asked, c.src.opens, c.src.closes, want)
 	}
 	copied := c.fake.Commands()[2].Args
@@ -490,7 +507,8 @@ func TestRestoreSecondPass(t *testing.T) {
 // Stopped part-way, as by Ctrl-C, the record says the path's copy is under
 // way, from that backup, and the source is closed. The check says so, and a
 // run again carries on from the same backup, by its name, never a newer
-// one, kit apply naming no source.
+// one, kit apply naming no source, or naming Time Machine; done, the record
+// and the log say what the path holds, not what the run again copied.
 func TestRestoreResumesFromTheSameBackup(t *testing.T) {
 	c := newRestoring(t, "~/Code")
 	c.r.Flag = steps.RestoreFrom{Kind: restore.FromTimeMachine}
@@ -512,15 +530,18 @@ func TestRestoreResumesFromTheSameBackup(t *testing.T) {
 
 	c.r.Flag = steps.RestoreFrom{}
 	c.src.asked = nil
-	c.copies("~/Code", 1, 1_000)
+	c.carriesOn("~/Code", 1, 1_000, 2, 2_000)
 	if err := c.apply(t.Context()); err != nil {
 		t.Fatalf("again, apply = %v", err)
 	}
-	if want := []opened{{c.src.origin, time.Time{}}}; !reflect.DeepEqual(c.src.asked, want) {
+	if want := []opened{{c.src.origin, time.Time{}, false}}; !reflect.DeepEqual(c.src.asked, want) {
 		t.Errorf("again, the source asked for = %+v, want %+v", c.src.asked, want)
 	}
-	if again := c.record().Paths["~/Code"]; again.State != restore.Done || !again.Started.Equal(code.Started) {
-		t.Errorf("again, ~/Code's record = %+v; want restored, started as it first was", again)
+	if again := c.record().Paths["~/Code"]; again.State != restore.Done || !again.Started.Equal(code.Started) || again.Files != 2 || again.Bytes != 2_000 {
+		t.Errorf("again, ~/Code's record = %+v; want restored, holding 2 files of 2 kB, started as it first was", again)
+	}
+	if want := "Restored ~/Code: 2 files, 2 kB"; !slices.Contains(c.logged, want) {
+		t.Errorf("again, the log says %q; want %q", c.logged, want)
 	}
 
 	c = newRestoring(t, "~/Code")
@@ -531,15 +552,15 @@ func TestRestoreResumesFromTheSameBackup(t *testing.T) {
 	if err := c.apply(t.Context()); err != nil {
 		t.Fatalf("with --restore-from time-machine, apply = %v", err)
 	}
-	if want := []opened{{c.src.origin, time.Time{}}}; !reflect.DeepEqual(c.src.asked, want) {
+	if want := []opened{{c.src.origin, time.Time{}, true}}; !reflect.DeepEqual(c.src.asked, want) {
 		t.Errorf("with --restore-from time-machine, the source asked for = %+v, want the same backup, %+v", c.src.asked, want)
 	}
 }
 
 // kit apply's flags naming another source than a path part-way came from
 // are an error naming the path and where it came from, the source never
-// opened; naming another of Time Machine's backups, by --at, too, once
-// it's opened, and closed.
+// opened; naming another of Time Machine's backups, by --at, while the one
+// it came from is still there, too, once it's opened, and closed.
 func TestRestoreRefusesAnotherSourceMidway(t *testing.T) {
 	c := newRestoring(t, "~/Documents", "~/Code")
 	c.change("~/Code", func(p *restore.Path) { p.State, p.From, p.Started = restore.Copying, c.src.origin, duringIt })
@@ -559,8 +580,59 @@ func TestRestoreRefusesAnotherSourceMidway(t *testing.T) {
 	if err := c.apply(t.Context()); err == nil || err.Error() != want {
 		t.Errorf("--at, apply = %v; want %q", err, want)
 	}
-	if asked := []opened{{restore.Origin{Kind: restore.FromTimeMachine, Detail: snapshotX}, at}}; !reflect.DeepEqual(c.src.asked, asked) || c.src.closes != 1 || len(c.fake.Calls()) > 0 {
+	if asked := []opened{{restore.Origin{Kind: restore.FromTimeMachine, Detail: snapshotX}, at, true}}; !reflect.DeepEqual(c.src.asked, asked) || c.src.closes != 1 || len(c.fake.Calls()) > 0 {
 		t.Errorf("--at, the source asked for %+v, closed %d times, rsync ran %q", c.src.asked, c.src.closes, c.fake.Calls())
+	}
+}
+
+// The backup a restore began from gone, as Time Machine thins old ones,
+// kit apply naming Time Machine has the backup it opens stand in for it:
+// every path part-way from the one gone carries on from the new one,
+// recorded so at once, so a run again, naming no source, carries on from it
+// too; and the log says so. Naming no source, the one gone is asked for
+// as it was, not chosen, which refuses (restore.TimeMachine).
+func TestRestoreCarriesOnFromAnotherBackup(t *testing.T) {
+	gone := restore.Origin{Kind: restore.FromTimeMachine, Detail: snapshotY}
+	c := newRestoring(t, "~/Code", "~/Documents")
+	for _, p := range []string{"~/Code", "~/Documents"} {
+		c.change(p, func(p *restore.Path) { p.State, p.From, p.Started = restore.Copying, gone, duringIt })
+	}
+	c.src.err = errors.New("the backup the restore began from isn't on Backups of laptop any more")
+	if err := c.apply(t.Context()); err == nil || !strings.HasSuffix(err.Error(), "isn't on Backups of laptop any more") {
+		t.Errorf("naming no source, apply = %v; want the source's refusal", err)
+	}
+	if want := []opened{{gone, time.Time{}, false}}; !reflect.DeepEqual(c.src.asked, want) {
+		t.Errorf("naming no source, the source asked for = %+v, want %+v", c.src.asked, want)
+	}
+
+	c.src.err, c.src.asked, c.src.replaces = nil, nil, gone
+	c.r.Flag = steps.RestoreFrom{Kind: restore.FromTimeMachine}
+	write(t, c.old, "~/Code/a", beforeIt)
+	write(t, c.old, "~/Documents/d", beforeIt)
+	c.on(sizing, "~/Code").Prints(stats(1, 1_000))
+	c.on(sizing, "~/Documents").Prints(stats(1, 1_000))
+	ctx, stop := context.WithCancel(t.Context())
+	defer stop()
+	c.on(copyingOp, "~/Code").Does(stop).Hangs()
+	if err := c.apply(ctx); err == nil {
+		t.Fatal("stopped, apply succeeded")
+	}
+	if want := []opened{{gone, time.Time{}, true}}; !reflect.DeepEqual(c.src.asked, want) {
+		t.Errorf("with --restore-from time-machine, the source asked for = %+v, want %+v", c.src.asked, want)
+	}
+	rec := c.record()
+	if rec.From != c.src.origin || rec.Paths["~/Code"].From != c.src.origin || rec.Paths["~/Documents"].From != c.src.origin {
+		t.Errorf("the record = %+v; want it, ~/Code and ~/Documents from %+v", rec, c.src.origin)
+	}
+	if want := "Carrying on from Time Machine's backup of 8 Nov 2026 14:19: Time Machine's backup of 1 Nov 2026 09:00, which the restore began from, has gone"; !slices.Equal(c.logged, []string{want}) {
+		t.Errorf("the log says %q; want %q", c.logged, want)
+	}
+
+	c.r.Flag, c.src.asked, c.src.replaces = steps.RestoreFrom{}, nil, restore.Origin{}
+	c.src.err = errors.New("not attached")
+	_ = c.apply(t.Context())
+	if want := []opened{{c.src.origin, time.Time{}, false}}; !reflect.DeepEqual(c.src.asked, want) {
+		t.Errorf("a run again, the source asked for = %+v, want %+v", c.src.asked, want)
 	}
 }
 
@@ -633,7 +705,7 @@ func TestRestoreChoosesItsSource(t *testing.T) {
 	c := newRestoring(t, "~/Code")
 	c.src.err = errors.New("not built")
 	_ = c.apply(t.Context())
-	if want := []opened{{restore.Origin{Kind: restore.FromMac, Detail: "laptop"}, time.Time{}}}; !reflect.DeepEqual(c.src.asked, want) {
+	if want := []opened{{restore.Origin{Kind: restore.FromMac, Detail: "laptop"}, time.Time{}, false}}; !reflect.DeepEqual(c.src.asked, want) {
 		t.Errorf("the source asked for = %+v, want %+v", c.src.asked, want)
 	}
 
@@ -643,7 +715,7 @@ func TestRestoreChoosesItsSource(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = c.apply(t.Context())
-	if want := []opened{{restore.Origin{Kind: restore.FromTimeMachine, Detail: snapshotY}, time.Time{}}}; !reflect.DeepEqual(c.src.asked, want) {
+	if want := []opened{{restore.Origin{Kind: restore.FromTimeMachine, Detail: snapshotY}, time.Time{}, false}}; !reflect.DeepEqual(c.src.asked, want) {
 		t.Errorf("with the record's, the source asked for = %+v, want %+v", c.src.asked, want)
 	}
 }

@@ -39,7 +39,7 @@ func ReinstallOn(stateDir string, restoring bool) (bool, error) {
 // after the secrets, which write what private packages need.
 func Reinstall(r reinstall.Reinstaller) engine.Step {
 	return engine.Step{
-		Name: ReinstallName, Title: "Dependencies", Area: AreaBackups,
+		Name: ReinstallName, Title: "Dependencies", Area: AreaBackups, Row: rowBackups,
 		Check: func(context.Context) check.Result {
 			restored, rec, err := reinstall.Records(r.StateDir)
 			if err != nil {

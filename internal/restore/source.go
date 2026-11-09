@@ -32,8 +32,10 @@ type Opened struct {
 	// Mac in use: the second pass copies again what changed, and counts it,
 	// where a backup's must find nothing.
 	Live bool
-	// Origin is what the record keeps of it.
-	Origin Origin
+	// Origin is what the record keeps of it; Replaces, the source asked
+	// for, gone, that it stands in for, as a later backup of Time Machine's
+	// does for one thinned away mid-restore: zero for none.
+	Origin, Replaces Origin
 	// Close closes it, as a snapshot's unmounted: even with ctx done, so
 	// nothing's left open when kit's stopped.
 	Close func(ctx context.Context) error
@@ -85,14 +87,15 @@ type Sources struct {
 	User, MountPoint string
 }
 
-// For is the source o names, to open: Time Machine's backups, the latest
-// taken at or before at, else, at zero, the snapshot o names, as a restore
-// resumed has it, else the latest. Arq's restore and the old Mac over SSH
-// aren't built yet: opening either says so.
-func (s Sources) For(o Origin, at time.Time) Opener {
+// For is the source o names, to open: Time Machine's backups, as
+// TimeMachine has them, o's snapshot the one the restore began from, at
+// picking one, chosen saying whether kit apply's flags named them. Arq's
+// restore and the old Mac over SSH aren't built yet: opening either says
+// so.
+func (s Sources) For(o Origin, at time.Time, chosen bool) Opener {
 	switch o.Kind {
 	case FromTimeMachine:
-		return TimeMachine{Run: s.Run, User: s.User, MountPoint: s.MountPoint, At: at, Snapshot: o.Detail}
+		return TimeMachine{Run: s.Run, User: s.User, MountPoint: s.MountPoint, At: at, Snapshot: o.Detail, Chosen: chosen}
 	case FromArq:
 		return notBuilt("restoring through Arq isn't built yet")
 	}
@@ -107,12 +110,16 @@ func (n notBuilt) Open(context.Context) (*Opened, error) { return nil, errors.Ne
 // TimeMachine is the old Mac's backups on a Time Machine disk attached to
 // this one, the home folder of the user called User in them, mounted
 // read-only at MountPoint, an empty folder: the latest at or before At,
-// else the snapshot called Snapshot, else the latest.
+// else the snapshot called Snapshot, the one a restore began from, else
+// the latest. Snapshot gone from the disk is an error saying how to carry
+// on from another; with Chosen, as when kit apply's flags name Time
+// Machine's backups again, the latest at or before At stands in for it.
 type TimeMachine struct {
 	Run              runner.Runner
 	User, MountPoint string
 	At               time.Time
 	Snapshot         string
+	Chosen           bool
 }
 
 // Open mounts the backup to copy from. Backups on more than one disk are
@@ -130,7 +137,7 @@ func (t TimeMachine) Open(ctx context.Context) (*Opened, error) {
 		return nil, fmt.Errorf("backups of /Users/%s are on more than one Time Machine disk, %s: attach the old Mac's alone", t.User, strings.Join(disks, " and "))
 	}
 	c := found[0]
-	p, err := t.pick(c)
+	p, gone, err := t.pick(c)
 	if err != nil {
 		return nil, err
 	}
@@ -138,18 +145,29 @@ func (t TimeMachine) Open(ctx context.Context) (*Opened, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Opened{Home: s.Home, Origin: Origin{Kind: FromTimeMachine, Detail: p.Name}, Close: s.Close}, nil
+	o := &Opened{Home: s.Home, Origin: Origin{Kind: FromTimeMachine, Detail: p.Name}, Close: s.Close}
+	if gone {
+		o.Replaces = Origin{Kind: FromTimeMachine, Detail: t.Snapshot}
+	}
+	return o, nil
 }
 
-// pick is the one of c's snapshots to open, as t says.
-func (t TimeMachine) pick(c timemachine.Candidate) (timemachine.Point, error) {
-	if !t.At.IsZero() || t.Snapshot == "" {
-		return c.Pick(t.At)
+// pick is the one of c's snapshots to open, as t says, and whether it
+// stands in for t's Snapshot, gone.
+func (t TimeMachine) pick(c timemachine.Candidate) (timemachine.Point, bool, error) {
+	i := slices.IndexFunc(c.Snapshots, func(p timemachine.Point) bool { return p.Name == t.Snapshot })
+	switch {
+	case t.Snapshot == "", !t.At.IsZero() && i >= 0:
+		p, err := c.Pick(t.At)
+		return p, false, err
+	case i >= 0:
+		return c.Snapshots[i], false, nil
+	case t.Chosen:
+		p, err := c.Pick(t.At)
+		return p, true, err
 	}
-	if i := slices.IndexFunc(c.Snapshots, func(p timemachine.Point) bool { return p.Name == t.Snapshot }); i >= 0 {
-		return c.Snapshots[i], nil
-	}
-	return timemachine.Point{}, fmt.Errorf("%s, which the restore began from, isn't on %s any more", Origin{Kind: FromTimeMachine, Detail: t.Snapshot}.Says(), c.Volume)
+	return timemachine.Point{}, false, fmt.Errorf("%s, which the restore began from, isn't on %s any more: kit apply --restore-from %s carries on from the latest backup there, or the one --at picks",
+		Origin{Kind: FromTimeMachine, Detail: t.Snapshot}.Says(), c.Volume, FromTimeMachine)
 }
 
 // The restore's own folders in kit's state, beside what it sets aside:

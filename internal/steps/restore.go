@@ -65,8 +65,9 @@ type Restoring struct {
 	// Flag is the source kit apply's flags name.
 	Flag RestoreFrom
 	// Sources is the source an origin names, to open, picking Time
-	// Machine's backup at a time (restore.Sources' For).
-	Sources func(o restore.Origin, at time.Time) restore.Opener
+	// Machine's backup at a time, chosen saying whether kit apply's flags
+	// named it (restore.Sources' For).
+	Sources func(o restore.Origin, at time.Time, chosen bool) restore.Opener
 	Rsync   restore.Rsync
 	// Space is how much is free on the volume path is on, and its size, in
 	// bytes (boot.Space).
@@ -85,14 +86,18 @@ type Restoring struct {
 // Applying, it judges each path, records here what's here, and opens the
 // source: kit apply's flags', else the one the restore began from, so a
 // run again resumes from it, never a newer backup, else the Mac this one
-// started from. With room for the copies, each path is copied, in order,
-// what set-up wrote in it set aside first, then compared with its source:
-// from a backup, a file found differing fails the path; from a live Mac,
-// what changed as it was copied is copied again, and counted. The record
-// says where each path stands throughout, so a run stopped resumes; the
-// restore settles once every path is restored or here. The source is
-// closed however applying ends. Applied whenever kit apply runs, it
-// records what it finds even when there's nothing to copy.
+// started from. Flags naming another source than a path part-way came
+// from are refused, unless that source has gone, as a backup thinned away
+// has: the flags' then stands in for it, the paths carrying on from it,
+// the record and the log saying so. With room for the copies, each path is
+// copied, in order, what set-up wrote in it set aside first, then compared
+// with its source: from a backup, a file found differing fails the path;
+// from a live Mac, what changed as it was copied is copied again, and
+// counted. The record says where each path stands throughout, and, done,
+// what it holds, so a run stopped resumes; the restore settles once every
+// path is restored or here. The source is closed however applying ends.
+// Applied whenever kit apply runs, it records what it finds even when
+// there's nothing to copy.
 func Restore(r Restoring) engine.Step {
 	return engine.Step{
 		Name: RestoreName, Title: "Data restore", Area: AreaBackups, Row: rowBackups, Verb: "restored", AlwaysApply: true,
@@ -295,15 +300,15 @@ func (r Restoring) restoreAll(ctx context.Context, rec restore.Record, todo []ju
 		return err
 	}
 	event.Say(ctx, event.Doing{Says: "opening " + want.Says()})
-	src, err := r.Sources(want, at).Open(ctx)
+	src, err := r.Sources(want, at, r.Flag.Kind != "").Open(ctx)
 	if err != nil {
 		return fmt.Errorf("couldn't restore: %w", err)
 	}
 	defer func() { err = errors.Join(err, src.Close(ctx)) }()
-	if err := partWay(rec, todo, src.Origin); err != nil {
+	if err := partWay(rec, todo, src.Origin, src.Replaces); err != nil {
 		return err
 	}
-	if err := restore.UpdateRecord(r.StateDir, func(rec *restore.Record) { rec.From = src.Origin }); err != nil {
+	if err := r.recordSource(ctx, todo, src); err != nil {
 		return err
 	}
 	copies, errs := r.plan(ctx, src, todo)
@@ -341,7 +346,7 @@ func (r Restoring) source(rec restore.Record, todo []judged) (restore.Origin, ti
 		if resuming.Kind == r.Flag.Kind {
 			return resuming, r.Flag.At, nil
 		}
-		return restore.Origin{Kind: r.Flag.Kind}, r.Flag.At, partWay(rec, todo, restore.Origin{Kind: r.Flag.Kind})
+		return restore.Origin{Kind: r.Flag.Kind}, r.Flag.At, partWay(rec, todo, restore.Origin{Kind: r.Flag.Kind}, restore.Origin{})
 	case resuming.Kind != "":
 		return resuming, time.Time{}, nil
 	case rec.From.Kind != "":
@@ -352,16 +357,39 @@ func (r Restoring) source(rec restore.Record, todo []judged) (restore.Origin, ti
 
 // partWay is an error naming the first of todo's paths whose copy is
 // part-way from somewhere other than from: a kind of source, or, its
-// detail given, the very one.
-func partWay(rec restore.Record, todo []judged, from restore.Origin) error {
+// detail given, the very one, or the one it stands in for, gone.
+func partWay(rec restore.Record, todo []judged, from, standsIn restore.Origin) error {
 	for _, j := range todo {
 		was := rec.Paths[j.Path].From
-		if j.Verdict != restore.VerdictResume || was.Kind == from.Kind && (from.Detail == "" || was.Detail == from.Detail) {
+		if j.Verdict != restore.VerdictResume || was.Kind == from.Kind && (from.Detail == "" || was.Detail == from.Detail || was == standsIn) {
 			continue
 		}
 		return fmt.Errorf("couldn't restore: %s is part-way from %s, not %s: kit apply without --restore-from or --at carries on from there", j.Path, was.Says(), from.Says())
 	}
 	return nil
+}
+
+// recordSource records src as the source the restore copies from; and,
+// when it stands in for one gone, as the source of todo's paths part-way
+// from that one, so a run again carries on from it, saying so.
+func (r Restoring) recordSource(ctx context.Context, todo []judged, src *restore.Opened) error {
+	moved := false
+	err := restore.UpdateRecord(r.StateDir, func(rec *restore.Record) {
+		rec.From = src.Origin
+		if src.Replaces == (restore.Origin{}) {
+			return
+		}
+		for _, j := range todo {
+			if j.Verdict == restore.VerdictResume && rec.Paths[j.Path].From == src.Replaces {
+				rec.Change(j.Path, func(p *restore.Path) { p.From = src.Origin })
+				moved = true
+			}
+		}
+	})
+	if err == nil && moved {
+		event.Log(ctx, event.Logged{Line: fmt.Sprintf("Carrying on from %s: %s, which the restore began from, has gone", src.Origin.Says(), src.Replaces.Says())})
+	}
+	return err
 }
 
 // copying is a path to copy: its judgement, the copy, and what it comes to.
@@ -469,13 +497,13 @@ func (r Restoring) restoreOne(ctx context.Context, src *restore.Opened, c copyin
 		return failed(fmt.Errorf("its second pass found %d %s differing from %s: %s", again.Count, plural(again.Count, "file", "files"), src.Origin.Says(), recopied(again)))
 	}
 	err = r.change(c.Path, func(rp *restore.Path) {
-		rp.State, rp.Files, rp.Bytes, rp.Finished = restore.Done, stats.Files, stats.Bytes, r.Now()
+		rp.State, rp.Files, rp.Bytes, rp.Finished = restore.Done, stats.TotalFiles, stats.TotalBytes, r.Now()
 		rp.Second = &restore.Pass{Copied: again.Count}
 	})
 	if err != nil {
 		return failed(err)
 	}
-	line := fmt.Sprintf("Restored %s: %d %s, %s", c.Path, stats.Files, plural(stats.Files, "file", "files"), size(stats.Bytes))
+	line := fmt.Sprintf("Restored %s: %d %s, %s", c.Path, stats.TotalFiles, plural(stats.TotalFiles, "file", "files"), size(stats.TotalBytes))
 	if again.Count > 0 {
 		line += fmt.Sprintf("; %d copied again, changed as they were copied", again.Count)
 	}
