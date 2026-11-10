@@ -503,6 +503,17 @@ func (a *app) build(command, logName string, face render.Face, atTerminal bool) 
 	if reinstalling != nil {
 		checks = append(checks, *reinstalling)
 	}
+	if restoring == nil {
+		settling, err := a.settleStep(r, dirs)
+		if err != nil {
+			_ = face.Close()
+			_ = log.Close()
+			return nil, err
+		}
+		if settling != nil {
+			checks = append(checks, *settling)
+		}
+	}
 	edits := steps.ConfigEdits(r.repo)
 	r.drift = append(r.drift, steps.ConfigEditsName)
 	r.drifters[steps.ConfigEditsName] = configDrifter{repo: r.repo, home: home, step: edits}

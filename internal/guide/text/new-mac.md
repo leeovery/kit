@@ -51,27 +51,35 @@ apply.
 
 ## The person's data
 
-A Mac started from another (the boot's "start from a Mac", or
-`kit machine add --from`) carries its `[restore]` list in its copied
-declarations, and its data restore brings those paths across: code,
-history, ledgers, tools' state. Nothing else of the old Mac's comes: kit
-rebuilds the rest from kit-config.
+The boot is the one trigger for the data restore, which brings the paths
+`[restore]` lists back: code, history, ledgers, tools' state. Nothing else
+comes: kit rebuilds the rest from kit-config. It runs on a Mac the boot has
+just named, in one of two cases:
 
-- From where: the Mac it started from, over the local network, while it
-  answers, known by the SSH host key kit-config records for it (`host_key`
-  in kit.toml, which `kit apply` on that Mac records with its remote-login
-  feature on; without it, the old Mac isn't looked for); else its Time
-  Machine disk, attached, or Arq's backup, which the person restores in
-  Arq for kit to put in place
+- A Mac started from another (the boot's "start from a Mac", or
+  `kit machine add --from`), which carries its `[restore]` list in its
+  copied declarations: from the Mac it started from, over the local
+  network, while it answers, known by the SSH host key kit-config records
+  for it (`host_key` in kit.toml, which `kit apply` on that Mac records with
+  its remote-login feature on; without it, the old Mac isn't looked for);
+  else its Time Machine disk, attached, or Arq's backup, which the person
+  restores in Arq for kit to put in place
   (`kit apply --restore-from time-machine|arq`; `mac` goes back to the old
   Mac).
+- A Mac clean-installed under its own name (the boot naming a Mac
+  kit-config has, with no `from`): from its own backups, a card asking at
+  once for its Time Machine disk or Arq, or to restore nothing, the answer
+  for a Mac already in use, or one starting afresh.
+
 - When: once Homebrew's rsync is installed and, copying from the old Mac,
   the secrets have synced. Claude Code's MCP servers and skills, the
   reinstall, and a step declared `--after restore` wait for it; nothing
   else does, so a step of your own that writes into a listed folder must
   say `--after restore`. Linked files and apps' settings don't wait: the
   copy leaves them out. It runs beside the rest, so the long copy holds up
-  nothing quick.
+  nothing quick. Once it's done, it leaves `kit apply` and `kit status`. A
+  Mac whose `[restore]` lists nothing at the boot is done at its first
+  `kit apply`.
 - What it leaves out: what kit links, prefs saves or a kind puts in place
   (Claude Code's skills, the files secrets fill), which kit brings itself;
   kit's own folders; what the backups leave out (`[backup exclusions]`,
@@ -88,10 +96,12 @@ rebuilds the rest from kit-config.
   Terraform are left alone. `kit apply reinstall` tries those that failed
   again.
 
-A Mac without a `from`, or a line added on a Mac in use, restores nothing
-unless `kit apply --restore-from` says so (`time-machine` or `arq`; `mac`
-too, on a Mac with a `from`), and then only while the path is absent or
-empty: one holding data is never touched.
+A new Mac started fresh, a Mac in use (whatever its `from`), a line added
+once the restore's done, or one restored nothing on the card, restores
+nothing unless
+`kit apply --restore-from` says so (`time-machine` or `arq`; `mac` too, on
+a Mac with a `from`), and then only while the path is absent or empty: one
+holding data is never touched.
 
 ## What isn't there
 

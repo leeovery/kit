@@ -98,14 +98,16 @@ func (a *restoreAt) Set(v string) error {
 }
 
 // restoreStep is the data restore's step, when the Mac has one: [restore]
-// lines, and a source for them, the Mac it started from or kit apply's
-// flags'; or a path's restore part-way, which carries on, from where it
-// began or the source the flags name; or, for kit agent order, a new
-// Mac's run started from this one, whose lines it carries. Lines that
-// don't read make a step whose check says why; flags naming a source for
-// no lines, or the old Mac for a Mac started from none, are an error.
-// Copying from the old Mac over SSH, with the key kit's secrets write, it
-// comes after them.
+// lines, and either the Mac in set-up, the boot having named it a Mac
+// started from another or one clean-installed under its own name
+// (boot.Began), its restore yet to settle; or kit apply's flags naming a
+// source; or a path's restore part-way, which carries on, from where it
+// began or the source the flags name; or, for kit agent order, a new Mac's
+// run started from this one, whose lines it carries. A Mac in use, or one
+// whose restore has settled, has none. Lines that don't read make a step
+// whose check says why; flags naming a source for no lines, or the old Mac
+// for a Mac started from none, are an error. Copying from the old Mac over
+// SSH, with the key kit's secrets write, it comes after them.
 func (a *app) restoreStep(r *run, dirs config.Dirs, prefsOn bool) (*engine.Step, error) {
 	list, err := r.cfg.List(config.RestoreKind, r.machine)
 	if err != nil {
@@ -125,21 +127,17 @@ func (a *app) restoreStep(r *run, dirs config.Dirs, prefsOn bool) (*engine.Step,
 		return nil, usageError{fmt.Errorf("--restore-from mac copies from the Mac %s started from (from, in kit.toml), and it names none", r.machine)}
 	}
 	lines, unread := restore.Lines(list)
-	rec, err := restore.LoadRecord(dirs.State)
+	began, rec, settingUp, err := setUp(dirs.State)
 	if err != nil {
 		return nil, err
 	}
-	if from == "" && flag.Kind == "" && !a.newMacRun && !rec.PartWay(lines) {
+	if !settingUp && flag.Kind == "" && !a.newMacRun && !rec.PartWay(lines) {
 		return nil, nil
 	}
 	if unread != nil {
 		step := steps.Restore(steps.Restoring{})
 		broken(&step, unread.Error())
 		return &step, nil
-	}
-	began, err := boot.Began(dirs.State)
-	if err != nil {
-		return nil, err
 	}
 	homed := make([]kind.Kind, len(r.allKinds))
 	for i, name := range r.allKinds {
@@ -157,7 +155,7 @@ func (a *app) restoreStep(r *run, dirs config.Dirs, prefsOn bool) (*engine.Step,
 	restoring := steps.Restoring{
 		Lines: lines,
 		Owned: func(ctx context.Context) (restore.Owned, error) { return restore.ReadOwned(ctx, mac) },
-		Home:  r.homeDir, StateDir: dirs.State, Began: began, From: from, Flag: flag,
+		Home:  r.homeDir, StateDir: dirs.State, Began: began, Mac: r.machine, From: from, Flag: flag,
 		Sources: sources.For, Disks: sources.Disks, Raise: r.raise, Run: r.run,
 		ArqAwait: []engine.Wait{{Thing: "Arq", Ready: func(context.Context) bool { return folders.Has(arq.Bundle) }}},
 		Rsync:    restore.NewRsync(r.run), Space: boot.Space, Now: a.Now,
@@ -170,6 +168,38 @@ func (a *app) restoreStep(r *run, dirs config.Dirs, prefsOn bool) (*engine.Step,
 	if (overSSH || a.newMacRun && flag.Kind == "") && slices.Contains(r.kinds, secret.Descriptor.Name) {
 		step.After = append(step.After, secret.Descriptor.Name)
 	}
+	return &step, nil
+}
+
+// setUp is when this Mac's set-up began (boot.Began) and the restore's
+// record, read from kit's state, stateDir; open is whether set-up's window
+// is open: set-up begun, the restore yet to settle.
+func setUp(stateDir string) (began time.Time, rec restore.Record, open bool, err error) {
+	if rec, err = restore.LoadRecord(stateDir); err != nil {
+		return time.Time{}, rec, false, err
+	}
+	if began, err = boot.Began(stateDir); err != nil {
+		return time.Time{}, rec, false, err
+	}
+	return began, rec, !began.IsZero() && rec.Settled.IsZero(), nil
+}
+
+// settleStep is the data restore's step on a Mac in set-up whose [restore]
+// lists nothing (steps.RestoreNothing), which closes set-up's window, so a
+// line added later never finds it open: nil on any other. Never for kit
+// agent order, which places steps as a new Mac's run would: that run's step
+// would copy nothing, so nothing waits on it, and this Mac's own set-up is
+// none of its business.
+func (a *app) settleStep(r *run, dirs config.Dirs) (*engine.Step, error) {
+	list, err := r.cfg.List(config.RestoreKind, r.machine)
+	if err != nil || len(list.Entries) > 0 || a.newMacRun {
+		return nil, err
+	}
+	_, _, open, err := setUp(dirs.State)
+	if err != nil || !open {
+		return nil, err
+	}
+	step := steps.RestoreNothing(dirs.State, a.Now)
 	return &step, nil
 }
 

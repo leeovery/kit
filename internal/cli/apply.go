@@ -32,12 +32,16 @@ as it takes, the rest applying meanwhile; without one, those installs wait.
 Exits 0 when nothing needs attention after applying, 1 when something does,
 and 2 when kit couldn't apply.
 
-On a Mac started from another (from, in kit.toml), the data restore copies
-the paths [restore] lists from that Mac, over SSH; should it not answer, a
-card asks for its Time Machine disk, Arq, or trying it again (without a
-terminal, it fails: --restore-from answers it). --restore-from restores them
-from a backup instead, on any Mac: Time Machine's, on a disk attached, or
-Arq's, by hand in its app, a card saying what to restore where; and
+On a Mac the boot has just set up, the data restore brings the paths
+[restore] lists back, till it's done: on a Mac started from another (from,
+in kit.toml), from that Mac, over SSH; should it not answer, a card asks for
+its Time Machine disk, Arq, or trying it again. On a Mac clean-installed
+under its own name, from its own backups: a card asks for its Time Machine
+disk, Arq, or nothing, for a Mac in use already or starting afresh. Without
+a terminal, there's no card, and it fails: --restore-from answers it. A Mac
+in use restores nothing unless --restore-from says so: it restores them
+from a backup, on any Mac, done or not: Time Machine's, on a disk attached,
+or Arq's, by hand in its app, a card saying what to restore where; and
 --restore-from mac goes back to the old Mac. --at picks the backup: the
 latest at or before a date, as 2026-11-08 (by the end of that day), or a
 time, as "2026-11-08 14:30" (by the end of that minute); the latest when

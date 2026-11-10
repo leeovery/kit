@@ -2,6 +2,7 @@ package cli_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -39,24 +40,40 @@ var restoreRecord = filepath.Join(".local", "state", "kit", "restore.json")
 // Machine's backup.
 const partWay = `{"paths": {"~/Code": {"state": "copying", "from": {"kind": "time-machine", "detail": "com.apple.TimeMachine.2026-11-08-141900.backup"}, "started": "2026-11-20T10:00:00Z"}}}`
 
-// The data restore is a step of a Mac that lists paths in [restore] and
-// started from another, as kit.toml says; or of one whose record has a
-// listed path's restore part-way, which carries on from where it began,
-// kit apply naming no source. On a Mac without either, it's none: a fresh
-// Mac, or one in use, its restore done.
-func TestRestoreIsThereOnlyForAMacStartedFromAnother(t *testing.T) {
+// settingUp has the boot's record say the test's Mac's set-up began, as
+// the boot that named it records for a Mac started from another, or one
+// kit-config has, clean-installed under its own name.
+func (w *world) settingUp(t *testing.T) {
+	t.Helper()
+	w.write(t, bootState, `{"began": "2026-11-20T09:00:00Z"}`)
+}
+
+// settled is a restore's record with ~/Code done and the restore settled.
+const settled = `{"paths": {"~/Code": {"state": "done", "started": "2026-11-20T10:00:00Z"}}, "settled": "2026-11-20T12:00:00Z"}`
+
+// The data restore is a step of a Mac in set-up, the boot having named it,
+// started from another or not, till the restore settles, listing paths in
+// [restore] or not; or of one whose record has a listed path's restore
+// part-way, which carries on from where it began, kit apply naming no
+// source. On a Mac without either, it's none: a fresh Mac, one in use,
+// started from another or not, or one whose restore has settled.
+func TestRestoreIsThereInSetUp(t *testing.T) {
 	for _, tt := range []struct {
-		name        string
-		lines, from bool
-		record      string
-		want        bool
+		name                 string
+		lines, from, inSetUp bool
+		record               string
+		want                 bool
 	}{
-		{"listing paths, started from another", true, true, "", true},
-		{"listing paths, started afresh", true, false, "", false},
-		{"listing nothing, started from another", false, true, "", false},
-		{"listing paths, one part-way", true, false, partWay, true},
-		{"listing paths, its restore done", true, false, `{"paths": {"~/Code": {"state": "done", "started": "2026-11-20T10:00:00Z"}}}`, false},
-		{"listing nothing, one part-way", false, false, partWay, false},
+		{"in set-up, started from another", true, true, true, "", true},
+		{"in set-up, clean-installed under its own name", true, false, true, "", true},
+		{"in use, started from another", true, true, false, "", false},
+		{"in use, started from none", true, false, false, "", false},
+		{"in set-up, listing nothing", false, true, true, "", true},
+		{"in set-up, its restore settled", true, false, true, settled, false},
+		{"in set-up from another, its restore settled", true, true, true, settled, false},
+		{"in use, one part-way", true, false, false, partWay, true},
+		{"in use, its restore done", true, false, false, `{"paths": {"~/Code": {"state": "done", "started": "2026-11-20T10:00:00Z"}}}`, false},
+		{"in use, listing nothing, one part-way", false, false, false, partWay, false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			w := laptopWorld(t)
@@ -66,6 +83,9 @@ func TestRestoreIsThereOnlyForAMacStartedFromAnother(t *testing.T) {
 			if tt.from {
 				w.startedFrom(t)
 			}
+			if tt.inSetUp {
+				w.settingUp(t)
+			}
 			if tt.record != "" {
 				w.write(t, restoreRecord, tt.record)
 			}
@@ -73,6 +93,32 @@ func TestRestoreIsThereOnlyForAMacStartedFromAnother(t *testing.T) {
 				t.Errorf("kit status has the restore: %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+// A Mac whose boot named it with nothing in [restore] closes set-up at its
+// first kit apply, the restore settling with nothing listed, and no
+// reinstall: so a line added later never finds set-up's window open. The
+// restore is gone from the Mac then, kit status showing none; kit apply
+// --restore-from brings it back, leaving a path holding what was written
+// since the boot as it is, never setting it aside.
+func TestSetUpClosesWithNothingListed(t *testing.T) {
+	w := laptopWorld(t)
+	w.write(t, bootState, `{"began": "2020-01-01T00:00:00Z"}`)
+	if got := w.statusSteps(t); !slices.Contains(got, "restore") || slices.Contains(got, "reinstall") {
+		t.Fatalf("in set-up, listing nothing, kit status has %q; want the restore, no reinstall", got)
+	}
+	if out, errOut, code := w.run(t, "apply", "restore"); code != 0 || !strings.Contains(w.read(t, restoreRecord), `"settled"`) {
+		t.Fatalf("kit apply restore printed\n%s%s\nexit %d, the record %s; want it settled", out, errOut, code, w.read(t, restoreRecord))
+	}
+	w.writeSection(t, "laptop", "restore", "~/Code\n")
+	w.write(t, "Code/since-the-boot", "work")
+	if slices.Contains(w.statusSteps(t), "restore") {
+		t.Error("a line added since, kit status has the restore; want none")
+	}
+	out, _, _ := w.run(t, "apply", "--plan", "restore", "--restore-from", "time-machine")
+	if want := "restore ok 1 declared, all here already\n"; !strings.Contains(out, want) {
+		t.Errorf("kit apply --plan restore --restore-from time-machine printed\n%s\nwant it holding %q", out, want)
 	}
 }
 
@@ -94,22 +140,31 @@ func (w *world) rsync3() {
 }
 
 // kit apply --restore-from has a Mac restore its [restore] paths from a
-// backup, started from another or not, once rsync 3 is on kit's PATH: from
-// Time Machine's, on a disk attached, with none the step failing saying
-// so; Arq's, by hand, without a terminal the step failing saying what to
-// restore where in Arq, --at picking its backup as Time Machine's.
+// backup, started from another or not, in set-up or in use, its restore
+// settled or never begun, once rsync 3 is on kit's PATH: from Time
+// Machine's, on a disk attached, with none the step failing saying so;
+// Arq's, by hand, without a terminal the step failing saying what to
+// restore where in Arq, --at picking its backup as Time Machine's. On a
+// Mac whose restore settled, it restores a line listed since.
 func TestApplyRestoresFromTheBackupNamed(t *testing.T) {
 	for _, tt := range []struct {
-		args []string
-		says string
+		args    []string
+		settled bool
+		says    string
 	}{
-		{[]string{"--restore-from", "time-machine"}, "no Time Machine disk is attached"},
-		{[]string{"--restore-from", "arq"}, "restoring through Arq is by hand: in Arq, restore ~/Code into ~/.local/state/kit/restore/arq/1, then run kit apply again"},
-		{[]string{"--restore-from", "arq", "--at", "2026-11-08"}, "restoring through Arq is by hand"},
+		{[]string{"--restore-from", "time-machine"}, false, "no Time Machine disk is attached"},
+		{[]string{"--restore-from", "arq"}, false, "restoring through Arq is by hand: in Arq, restore ~/Code into ~/.local/state/kit/restore/arq/1, then run kit apply again"},
+		{[]string{"--restore-from", "arq", "--at", "2026-11-08"}, false, "restoring through Arq is by hand"},
+		{[]string{"--restore-from", "time-machine"}, true, "no Time Machine disk is attached: kit apply --restore-from time-machine|arq restores ~/Notes from another source, or kit restore remove ~/Notes drops its line"},
 	} {
-		t.Run(strings.Join(tt.args, " "), func(t *testing.T) {
+		t.Run(fmt.Sprintf("%s, settled %v", strings.Join(tt.args, " "), tt.settled), func(t *testing.T) {
 			w := laptopWorld(t)
 			w.writeSection(t, "laptop", "restore", "~/Code\n")
+			if tt.settled {
+				w.settingUp(t)
+				w.writeSection(t, "laptop", "restore", "~/Code\n~/Notes\n")
+				w.write(t, restoreRecord, settled)
+			}
 			w.rsync3()
 			w.fake.On("diskutil", "apfs", "list", "-plist").Prints(`<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>Containers</key><array/></dict></plist>`)
 			w.fake.On("diskutil", "list", "-plist").Prints(`<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>AllDisksAndPartitions</key><array/></dict></plist>`)
@@ -125,7 +180,10 @@ func TestApplyRestoresFromTheBackupNamed(t *testing.T) {
 // it through Bonjour, as the Mac presenting the host key kit-config records
 // for it; with none recorded, it isn't looked for. Without a terminal,
 // there's no card to ask where else to restore from, so the step fails,
-// saying why and the flag that answers it.
+// saying why and the flag that answers it. A Mac clean-installed under its
+// own name restores from its own backups, never looking for a Mac:
+// without a terminal, there's no card to choose them on, so it fails
+// likewise.
 func TestApplyRestoreWithoutATerminalNamesTheFlag(t *testing.T) {
 	const ways = ": kit apply --restore-from time-machine|arq restores ~/Code from another source, or kit restore remove ~/Code drops its line\n"
 	for _, tt := range []struct {
@@ -140,6 +198,7 @@ func TestApplyRestoreWithoutATerminalNamesTheFlag(t *testing.T) {
 			w := laptopWorld(t)
 			w.writeSection(t, "laptop", "restore", "~/Code\n")
 			w.startedFrom(t)
+			w.settingUp(t)
 			if tt.recorded {
 				w.write(t, ".config/kit/kit.toml", w.read(t, ".config/kit/kit.toml")+"host_key = \"ssh-rsa ZmFrZSByc2EgaG9zdCBrZXk=\"\n")
 			}
@@ -154,6 +213,21 @@ func TestApplyRestoreWithoutATerminalNamesTheFlag(t *testing.T) {
 			}
 		})
 	}
+	t.Run("clean-installed under its own name", func(t *testing.T) {
+		w := laptopWorld(t)
+		w.writeSection(t, "laptop", "restore", "~/Code\n")
+		w.settingUp(t)
+		w.rsync3()
+		out, errOut, code := w.run(t, "apply", "restore")
+		want := "restore failed couldn't restore: laptop restores from its own backups, as it started from no other Mac, and which of them is asked at a terminal" +
+			": kit apply --restore-from time-machine|arq restores ~/Code from the backup it names, or kit restore remove ~/Code drops its line\n"
+		if code == 0 || !strings.Contains(out, want) {
+			t.Errorf("kit apply restore printed\n%s%s\nexit %d; want it failing, saying\n%s", out, errOut, code, want)
+		}
+		if calls := w.fake.Calls(); slices.ContainsFunc(calls, func(c string) bool { return strings.HasPrefix(c, "dns-sd") || strings.HasPrefix(c, "ssh") }) {
+			t.Errorf("kit apply ran %q; want no Mac looked for", calls)
+		}
+	})
 }
 
 // restoreWaits are the steps the data restore waits for in kit apply's run
@@ -202,6 +276,7 @@ func TestRestoreAfterTheSecretsOnlyFromTheOldMac(t *testing.T) {
 			w.writeSection(t, "laptop", "restore", "~/Code\n")
 			w.writeSection(t, "laptop", "secrets", "TOKEN op://vault/item/token\n")
 			w.startedFrom(t)
+			w.settingUp(t)
 			if tt.record != "" {
 				w.write(t, restoreRecord, tt.record)
 			}

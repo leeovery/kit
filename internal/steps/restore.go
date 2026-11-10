@@ -63,8 +63,9 @@ type Restoring struct {
 	// Began is when this Mac's set-up began (boot.Began): zero for a Mac in
 	// use.
 	Began time.Time
-	// From is the Mac this one started from, as kit.toml says: "" for none.
-	From string
+	// Mac is this Mac's name, and From the Mac it started from, as kit.toml
+	// says: "" for none.
+	Mac, From string
 	// Flag is the source kit apply's flags name.
 	Flag RestoreFrom
 	// Sources is the source an origin names, to open, picking Time
@@ -89,11 +90,11 @@ type Restoring struct {
 }
 
 // Restore is the data restore: the paths the Mac's [restore] lines list,
-// carried from the Mac it started from, or from a backup of it, what's
-// kit's in them left out. Its check reads the record and what each path
-// holds, contacting no source: fine once each is restored, or here, holding
-// files of its own before anything was restored to it; else each says
-// what's to come. A path its source hadn't, or, on a Mac whose restore has
+// carried from the Mac it started from, or from a backup of it, or, started
+// from none, from its own backups, what's kit's in them left out. Its check
+// reads the record and what each path holds, contacting no source: fine
+// once each is restored, or here, holding files of its own before anything
+// was restored to it; else each says what's to come. A path its source hadn't, or, on a Mac whose restore has
 // settled, a line added since, its path absent, waits for kit apply to
 // name a source.
 //
@@ -105,7 +106,8 @@ type Restoring struct {
 // saying so. The flags naming none, a path part-way carries on from the
 // one it began from, never a newer backup; the rest copy from the first
 // such path's, should there be one, else the one a copy last began from,
-// so a run again resumes from it, else the Mac this one started from.
+// so a run again resumes from it, else the Mac this one started from, or,
+// started from none, the one of its own backups the person chooses.
 // Arq's restore, by hand, comes last, taking in the
 // paths the card sends to it, so its card goes up once a run. A path a
 // source hasn't, nothing copied to it, is recorded not there; part-way, it
@@ -137,6 +139,23 @@ func Restore(r Restoring) engine.Step {
 			return r.result(js, rec)
 		},
 		Apply: r.apply,
+	}
+}
+
+// RestoreNothing is the data restore on a Mac in set-up whose [restore]
+// lists nothing, kit's state in stateDir: fine, nothing listed; applied, it
+// records the restore's first run, listing nothing, and settles it, closing
+// set-up's window, so a line added later waits for kit apply to name a
+// source, never setting aside what was written since set-up began.
+func RestoreNothing(stateDir string, now func() time.Time) engine.Step {
+	return engine.Step{
+		Name: RestoreName, Title: "Data restore", Area: AreaBackups, Row: rowBackups, Verb: "restored", AlwaysApply: true,
+		Check: func(context.Context) check.Result {
+			return check.Result{State: check.OK, Summary: "nothing listed", Counts: map[string]int{"declared": 0}}
+		},
+		Apply: func(context.Context, check.Result) error {
+			return errors.Join(restore.RecordFirstRun(stateDir, now(), nil), restore.Settle(stateDir, now()))
+		},
 	}
 }
 
@@ -247,7 +266,10 @@ const notRestored = "not restored"
 // it, or listed since the restore settled.
 func (r Restoring) awaitingSource(path string, p restore.Path) check.Item {
 	it := check.Item{ID: RestoreName + ":" + path, Name: path, State: notRestored, Detail: r.bringsIt("") + " brings it", Quiet: "listed since the restore settled"}
-	if p.State == restore.NotThere {
+	switch {
+	case p.State == restore.NotThere && p.From == ownBackups:
+		it.Detail, it.Quiet = "nothing restored, as asked; "+r.bringsIt("")+" brings it", "nothing restored, as asked"
+	case p.State == restore.NotThere:
 		it.Detail, it.Quiet = p.From.Says()+" hadn't it; "+r.bringsIt(p.From.Kind)+" brings it from another", "not in its source"
 	}
 	return it
@@ -385,8 +407,12 @@ func (r Restoring) restoreAll(ctx context.Context, rec restore.Record, todo []ju
 }
 
 // errToArq is the old Mac not answering, the person choosing Arq on its
-// card.
-var errToArq = errors.New("restoring through Arq instead")
+// card; errNothing, the person choosing on the own-backups card to restore
+// nothing.
+var (
+	errToArq   = errors.New("restoring through Arq instead")
+	errNothing = errors.New("restoring nothing")
+)
 
 // toArq is sources, those still to restore from, with todo, the paths of
 // an old Mac the person chose Arq for on its card: in Arq's restore still
@@ -402,12 +428,15 @@ func toArq(sources []sourced, todo []judged) []sourced {
 
 // restoreFrom restores s's paths from its source, opened once, and closed
 // however it ends: each path in turn, one failing leaving the rest to go
-// on, till kit's stopped.
+// on, till kit's stopped. The person choosing on the own-backups card to
+// restore nothing, none is (keepAsIs).
 func (r Restoring) restoreFrom(ctx context.Context, s sourced) (err error) {
-	src, todo, failed, err := r.open(ctx, s)
+	src, todo, failed, err := r.open(ctx, &s)
 	switch {
 	case errors.Is(err, errToArq):
 		return err
+	case errors.Is(err, errNothing):
+		return r.keepAsIs(ctx, s.todo)
 	case err != nil:
 		return r.unopened(ctx, s, err)
 	}
@@ -498,22 +527,28 @@ func arqLast(s sourced) int {
 	return 0
 }
 
+// ownBackups is the source of a Mac started from no other, clean-installed
+// under its own name: its own backups, the one to copy from chosen on a
+// card (ownBackup). Never recorded: the record keeps the backup chosen.
+var ownBackups = restore.Origin{}
+
 // mainSource is where the restore copies a path that isn't part-way from:
 // kit apply's flags' source, a path part-way from one of its kind's should
 // there be one, so never a newer backup mid-restore; the flags naming none,
 // where the first part-way path came from, else where a copy last began
 // from, so a run again resumes from it; else, or the flags naming it, the
-// Mac this one started from.
+// Mac this one started from, or, started from none, its own backups.
 func (r Restoring) mainSource(rec restore.Record) sourced {
 	if resuming, ok := rec.Resuming(r.Lines, r.Flag.Kind); ok {
 		return sourced{want: resuming, at: r.Flag.At}
 	}
-	oldMac := restore.Origin{Kind: restore.FromMac, Detail: r.From}
 	switch {
 	case r.Flag.Kind == "" && rec.From.Kind != "":
 		return sourced{want: rec.From}
+	case r.Flag.Kind == "" && r.From == "":
+		return sourced{want: ownBackups}
 	case r.Flag.Kind == "", r.Flag.Kind == restore.FromMac:
-		return sourced{want: oldMac}
+		return sourced{want: restore.Origin{Kind: restore.FromMac, Detail: r.From}}
 	}
 	return sourced{want: restore.Origin{Kind: r.Flag.Kind}, at: r.Flag.At}
 }
@@ -544,14 +579,19 @@ func (r Restoring) unopened(ctx context.Context, s sourced, err error) error {
 }
 
 // waysOut are the ways on for paths whose source, of kind, hasn't them or
-// won't open: kit apply's flags naming another restores them from it, or
-// kit restore remove drops the line of one not wanted.
+// won't open: kit apply's flags naming another restores them from it, or,
+// for this Mac's own backups (ownBackups), the backup they name; or kit
+// restore remove drops the line of one not wanted.
 func (r Restoring) waysOut(kind string, paths []string) string {
 	drop := "kit restore remove " + paths[0] + " drops its line"
 	if len(paths) > 1 {
 		drop = "kit restore remove drops the line of any not wanted"
 	}
-	return fmt.Sprintf("%s restores %s from another source, or %s", r.bringsIt(kind), strings.Join(paths, " and "), drop)
+	from := "another source"
+	if kind == ownBackups.Kind {
+		from = "the backup it names"
+	}
+	return fmt.Sprintf("%s restores %s from %s, or %s", r.bringsIt(kind), strings.Join(paths, " and "), from, drop)
 }
 
 // copying is a path to copy: its judgement, the copy, and what it comes to.
@@ -595,16 +635,40 @@ func (r Restoring) hasntIt(ctx context.Context, j judged, from restore.Origin) e
 	return r.recordNotThere(ctx, j.Path, from)
 }
 
-// recordNotThere records path not there, from, its source, saying so:
-// its holding folder of Arq's, empty, goes.
+// recordNotThere records path not there, from, its source, saying so.
 func (r Restoring) recordNotThere(ctx context.Context, path string, from restore.Origin) error {
+	if err := r.markNotThere(path, from, false); err != nil {
+		return err
+	}
+	event.Log(ctx, event.Logged{Line: fmt.Sprintf("Nothing to restore in %s: %s hasn't it", path, from.Says())})
+	return nil
+}
+
+// keepAsIs records each of todo's paths not there, from no source, as the
+// person chose on the own-backups card, saying so: nothing copied, nothing
+// set aside, and each holding folder of Arq's let go whole, as nothing is to
+// come from it, the restore then settling, closing set-up's window; kit
+// apply --restore-from brings any of them later, Arq's afresh.
+func (r Restoring) keepAsIs(ctx context.Context, todo []judged) error {
+	var err error
+	for _, j := range todo {
+		err = errors.Join(err, r.markNotThere(j.Path, ownBackups, true))
+	}
+	if err == nil {
+		event.Log(ctx, event.Logged{Line: "Restored nothing, as asked: " + r.Mac + " keeps what it has"})
+	}
+	return err
+}
+
+// markNotThere records path not there, from, its source: its holding
+// folder of Arq's goes, whole, or only should it hold nothing (letGo).
+func (r Restoring) markNotThere(path string, from restore.Origin, whole bool) error {
 	var held int
 	err := r.change(path, func(p *restore.Path) { p.State, p.From, held = restore.NotThere, from, p.Holding })
 	if err != nil {
 		return err
 	}
-	event.Log(ctx, event.Logged{Line: fmt.Sprintf("Nothing to restore in %s: %s hasn't it", path, from.Says())})
-	return r.letGo(path, held, false)
+	return r.letGo(path, held, whole)
 }
 
 // letGo deletes path's holding folder, numbered n, of Arq's, if it had one,

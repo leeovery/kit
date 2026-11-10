@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -280,6 +281,236 @@ func TestRestoreWithoutATerminalNamesTheFlag(t *testing.T) {
 	err := c.apply(t.Context())
 	if want := "couldn't restore: " + errSilent.Error() + ": kit apply --restore-from time-machine|arq restores ~/Code from another source, or kit restore remove ~/Code drops its line"; err == nil || err.Error() != want {
 		t.Errorf("apply = %v\nwant %q", err, want)
+	}
+}
+
+// rebuilt has c's Mac, studio, clean-installed under its own name: started
+// from no other Mac, in set-up; the old Mac never asked for.
+func (c *restoring) rebuilt(t *testing.T) {
+	c.r.Mac, c.r.From = "studio", ""
+	c.r.Sources = func(o restore.Origin, _ time.Time, _ bool) restore.Opener {
+		t.Errorf("asked for %+v; want a backup chosen on the card", o)
+		return c.src
+	}
+}
+
+// ownWhy is what the own-backups card says first, of studio.
+const ownWhy = "kit set this Mac up as studio, with no other Mac to start from, as after a clean install, so its data can come from its own backups. Is studio in use already, or starting afresh? Then restore nothing."
+
+// keepIt is the own-backups card's key restoring nothing, of studio.
+var keepIt = check.Key{Key: "n", Does: "restores nothing: studio keeps what it has"}
+
+// A Mac clean-installed under its own name restores from its own backups:
+// the card goes up at once, offering the Time Machine disk holding the
+// person's backups, Arq, by hand, or nothing, never a Mac to try; the disk
+// chosen is opened, copied from and recorded, per path, as the copy
+// begins. With no disk to choose, it says so, and can look again; Arq
+// chosen, Arq's card names this Mac's backup.
+func TestRestoreRebuiltAsksForItsOwnBackups(t *testing.T) {
+	c := newRestoring(t, "~/Code")
+	c.rebuilt(t)
+	d, disk := c.disk("Backups of studio", snapshotX)
+	k := c.atTerminal(t, restore.Disks{Found: []restore.Disk{d}})
+	write(t, c.old, "~/Code/a", beforeIt)
+	c.copies("~/Code", 1, 1_000)
+	applied := c.applying(t)
+	card := up(t, k, 1)[0]
+	want := event.NeedsYou{Time: card.Time, Step: "restore", Item: "restore:source", Title: "Restore studio's data from its backups?",
+		Why: ownWhy,
+		Keys: []check.Key{
+			{Key: "t", Does: "restores from the Time Machine disk Backups of studio"},
+			{Key: "a", Does: "restores through Arq, by hand"},
+			keepIt,
+		}}
+	if !reflect.DeepEqual(card, want) {
+		t.Errorf("the card = %+v\nwant %+v", card, want)
+	}
+	k.answer(t, "restore", "t")
+	if err := ended(t, applied); err != nil {
+		t.Fatalf("apply = %v", err)
+	}
+	if rec := c.record(); disk.opens != 1 || rec.From != disk.origin || rec.Paths["~/Code"].State != restore.Done || rec.Paths["~/Code"].From != disk.origin || rec.Settled.IsZero() {
+		t.Errorf("the disk opened %d times, the record = %+v; want ~/Code restored from it, settled", disk.opens, rec)
+	}
+	if slices.ContainsFunc(c.doing, func(d said) bool {
+		return strings.HasPrefix(d.Says, "looking for ") && d.Says != "looking for Time Machine disks"
+	}) {
+		t.Errorf("the restore said %+v; want no Mac looked for", c.doing)
+	}
+
+	c = newRestoring(t, "~/Code")
+	c.rebuilt(t)
+	d, disk = c.disk("Backups of studio", snapshotX)
+	k = c.atTerminal(t, restore.Disks{})
+	looks := 0
+	c.r.Disks = func(context.Context) (restore.Disks, error) {
+		if looks++; looks > 1 {
+			return restore.Disks{Found: []restore.Disk{d}}, nil
+		}
+		return restore.Disks{}, nil
+	}
+	write(t, c.old, "~/Code/a", beforeIt)
+	c.copies("~/Code", 1, 1_000)
+	applied = c.applying(t)
+	card = up(t, k, 1)[0]
+	if want := []check.Key{{Key: "a", Does: "restores through Arq, by hand"}, keepIt, {Key: "enter", Does: "looks for Time Machine disks again"}}; !reflect.DeepEqual(card.Keys, want) ||
+		card.Why != ownWhy+" No Time Machine disk holding your backups is attached: attach it, then try again." {
+		t.Errorf("with no disk, the card says %q, offering %+v", card.Why, card.Keys)
+	}
+	k.answer(t, "restore", "enter")
+	if again := up(t, k, 2)[1]; len(again.Keys) != 3 || again.Keys[0].Key != "t" {
+		t.Errorf("looked again, the card offers %+v; want the disk attached since, Arq and nothing", again.Keys)
+	}
+	k.answer(t, "restore", "t")
+	if err := ended(t, applied); err != nil || disk.opens != 1 || c.record().From != disk.origin {
+		t.Errorf("apply = %v, the disk opened %d times; want ~/Code restored from it", err, disk.opens)
+	}
+
+	c = newRestoring(t, "~/Code")
+	c.rebuilt(t)
+	k = c.atTerminal(t, restore.Disks{})
+	applied = c.applying(t)
+	up(t, k, 1)
+	k.answer(t, "restore", "a")
+	if card := up(t, k, 2)[1]; card.Item != "restore:arq" || card.Steps[0] != "Open this Mac's backup in Arq, its latest backup" {
+		t.Errorf("after Arq's chosen, the card = %+v; want Arq's, of this Mac's backup", card)
+	}
+	write(t, c.arqHold(1), "~/Code/a", beforeIt)
+	c.copiesFrom(filepath.Join(c.arqHold(1), "Code"), "~/Code", 1, 1_000)
+	k.answer(t, "restore", hand.Done)
+	if err := ended(t, applied); err != nil || c.record().Paths["~/Code"].From.Kind != restore.FromArq {
+		t.Errorf("apply = %v, the record = %+v; want ~/Code restored through Arq", err, c.record())
+	}
+}
+
+// On the own-backups card, the person can restore nothing, as on a Mac in
+// use brought onto kit by its boot, or one starting afresh: each path is
+// recorded not restored, nothing copied and nothing set aside, what set-up
+// wrote kept, and the restore settles, closing set-up's window. kit apply
+// --restore-from brings back a path still absent later, from the backup it
+// names, leaving one holding files as it is.
+func TestRestoreRebuiltRestoresNothing(t *testing.T) {
+	c := newRestoring(t, "~/Code", "~/Notes")
+	c.rebuilt(t)
+	d, disk := c.disk("Backups of studio", snapshotX)
+	k := c.atTerminal(t, restore.Disks{Found: []restore.Disk{d}})
+	write(t, c.home, "~/Code/new", duringIt)
+	applied := c.applying(t)
+	up(t, k, 1)
+	k.answer(t, "restore", "n")
+	if err := ended(t, applied); err != nil {
+		t.Fatalf("apply = %v", err)
+	}
+	rec := c.record()
+	for _, p := range []string{"~/Code", "~/Notes"} {
+		if got := rec.Paths[p]; got.State != restore.NotThere || got.From != (restore.Origin{}) || !got.Started.IsZero() || len(got.SetAside) > 0 {
+			t.Errorf("%s's record = %+v; want not there, from no source, never started, nothing set aside", p, got)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(c.home, "Code", "new")); err != nil || rec.Settled.IsZero() || disk.opens != 0 || len(c.fake.Calls()) > 0 {
+		t.Errorf("what set-up wrote: %v; settled %v; the disk opened %d times; ran %q; want it kept, settled, nothing opened or run", err, rec.Settled, disk.opens, c.fake.Calls())
+	}
+	if want := "Restored nothing, as asked: studio keeps what it has"; !slices.Contains(c.logged, want) {
+		t.Errorf("the log says %q, want %q", c.logged, want)
+	}
+	want := []check.Item{{ID: "restore:~/Notes", Name: "~/Notes", State: "not restored", Detail: "nothing restored, as asked; kit apply --restore-from time-machine|arq brings it", Quiet: "nothing restored, as asked"}}
+	if res := c.step().Check(t.Context()); !reflect.DeepEqual(res.Items, want) {
+		t.Errorf("after restoring nothing, the check's items = %+v\nwant %+v", res.Items, want)
+	}
+
+	c.r.Sources, c.r.Flag = c.src.For, steps.RestoreFrom{Kind: restore.FromTimeMachine}
+	write(t, c.old, "~/Notes/n", beforeIt)
+	c.copies("~/Notes", 1, 1_000)
+	if err := ended(t, c.applying(t)); err != nil {
+		t.Fatalf("with --restore-from time-machine, apply = %v", err)
+	}
+	if rec := c.record(); rec.Paths["~/Notes"].State != restore.Done || rec.Paths["~/Code"].State != restore.Here || len(up(t, k, 1)) != 1 {
+		t.Errorf("with --restore-from time-machine, the record = %+v; want ~/Notes restored, ~/Code left as it is, no card", rec.Paths)
+	}
+}
+
+// Restoring nothing lets go of what Arq restored into a holding folder for
+// a run stopped before it was copied: nothing comes from it, the folder
+// gone and its number with it, so kit apply --restore-from arq later asks
+// for Arq's restore afresh, never copying the stale one.
+func TestRestoreNothingLetsArqsHoldingGo(t *testing.T) {
+	c := newRestoring(t, "~/Code")
+	c.rebuilt(t)
+	k := c.atTerminal(t, restore.Disks{})
+	ctx, stop := context.WithCancel(t.Context())
+	defer stop()
+	step := c.step()
+	found := step.Check(ctx)
+	stopped := make(chan error, 1)
+	go func() { stopped <- step.Apply(c.ctx(ctx), found) }()
+	up(t, k, 1)
+	k.answer(t, "restore", "a")
+	up(t, k, 2)
+	write(t, c.arqHold(1), "~/Code/a", beforeIt)
+	stop()
+	if err := ended(t, stopped); err == nil {
+		t.Fatal("stopped at Arq's card, apply = nil; want it stopped")
+	}
+
+	applied := c.applying(t)
+	up(t, k, 3)
+	k.answer(t, "restore", "n")
+	if err := ended(t, applied); err != nil {
+		t.Fatalf("restoring nothing, apply = %v", err)
+	}
+	if p := c.record().Paths["~/Code"]; p.State != restore.NotThere || p.Holding != 0 {
+		t.Errorf("~/Code's record = %+v; want not there, no holding folder", p)
+	}
+	if _, err := os.Stat(c.arqHold(1)); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the holding folder: %v; want it gone", err)
+	}
+
+	c.r.Flag = steps.RestoreFrom{Kind: restore.FromArq}
+	applied = c.applying(t)
+	if card := up(t, k, 4)[3]; card.Item != "restore:arq" || card.Steps[2] != "~/Code → …/arq/1" {
+		t.Errorf("with --restore-from arq, the card = %+v; want Arq's, asking for ~/Code afresh", card)
+	}
+	write(t, c.arqHold(1), "~/Code/a", beforeIt)
+	c.copiesFrom(filepath.Join(c.arqHold(1), "Code"), "~/Code", 1, 1_000)
+	k.answer(t, "restore", hand.Done)
+	if err := ended(t, applied); err != nil || c.record().Paths["~/Code"].State != restore.Done {
+		t.Errorf("apply = %v, ~/Code's record = %+v; want it restored through Arq", err, c.record().Paths["~/Code"])
+	}
+}
+
+// A Time Machine disk chosen on the own-backups card that won't open fails
+// the restore, the ways on named as for Time Machine's, the source chosen.
+func TestRestoreRebuiltDiskWontOpen(t *testing.T) {
+	c := newRestoring(t, "~/Code")
+	c.rebuilt(t)
+	d, disk := c.disk("Backups of studio", snapshotX)
+	disk.err = errors.New("mount the backup of 8 Nov 2026 14:19 from Backups of studio: exit status 1")
+	k := c.atTerminal(t, restore.Disks{Found: []restore.Disk{d}})
+	applied := c.applying(t)
+	up(t, k, 1)
+	k.answer(t, "restore", "t")
+	err := ended(t, applied)
+	if want := "couldn't restore: " + disk.err.Error() + ": kit apply --restore-from time-machine|arq restores ~/Code from another source, or kit restore remove ~/Code drops its line"; err == nil || err.Error() != want {
+		t.Errorf("apply = %v\nwant %q", err, want)
+	}
+}
+
+// Without a terminal, a Mac clean-installed under its own name can't choose
+// its backup: the restore fails, looking for no disk and no Mac, naming
+// the flag that answers it.
+func TestRestoreRebuiltWithoutATerminalNamesTheFlag(t *testing.T) {
+	c := newRestoring(t, "~/Code")
+	c.rebuilt(t)
+	c.r.Disks = func(context.Context) (restore.Disks, error) {
+		t.Error("looked for Time Machine disks with no one to offer them to")
+		return restore.Disks{}, nil
+	}
+	err := c.apply(t.Context())
+	if want := "couldn't restore: studio restores from its own backups, as it started from no other Mac, and which of them is asked at a terminal: kit apply --restore-from time-machine|arq restores ~/Code from the backup it names, or kit restore remove ~/Code drops its line"; err == nil || err.Error() != want {
+		t.Errorf("apply = %v\nwant %q", err, want)
+	}
+	if rec := c.record(); rec.From != (restore.Origin{}) || rec.Paths["~/Code"].State != "" {
+		t.Errorf("the record = %+v; want no source recorded", rec)
 	}
 }
 
