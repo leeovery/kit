@@ -127,15 +127,10 @@ func (a *app) restoreStep(r *run, dirs config.Dirs, prefsOn bool) (*engine.Step,
 		return nil, usageError{fmt.Errorf("--restore-from mac copies from the Mac %s started from (from, in kit.toml), and it names none", r.machine)}
 	}
 	lines, unread := restore.Lines(list)
-	rec, err := restore.LoadRecord(dirs.State)
+	began, rec, settingUp, err := setUp(dirs.State)
 	if err != nil {
 		return nil, err
 	}
-	began, err := boot.Began(dirs.State)
-	if err != nil {
-		return nil, err
-	}
-	settingUp := !began.IsZero() && rec.Settled.IsZero()
 	if !settingUp && flag.Kind == "" && !a.newMacRun && !rec.PartWay(lines) {
 		return nil, nil
 	}
@@ -173,6 +168,36 @@ func (a *app) restoreStep(r *run, dirs config.Dirs, prefsOn bool) (*engine.Step,
 	if (overSSH || a.newMacRun && flag.Kind == "") && slices.Contains(r.kinds, secret.Descriptor.Name) {
 		step.After = append(step.After, secret.Descriptor.Name)
 	}
+	return &step, nil
+}
+
+// setUp is when this Mac's set-up began (boot.Began) and the restore's
+// record, read from kit's state, stateDir; open is whether set-up's window
+// is open: set-up begun, the restore yet to settle.
+func setUp(stateDir string) (began time.Time, rec restore.Record, open bool, err error) {
+	if rec, err = restore.LoadRecord(stateDir); err != nil {
+		return time.Time{}, rec, false, err
+	}
+	if began, err = boot.Began(stateDir); err != nil {
+		return time.Time{}, rec, false, err
+	}
+	return began, rec, !began.IsZero() && rec.Settled.IsZero(), nil
+}
+
+// settleStep is the data restore's step on a Mac in set-up whose [restore]
+// lists nothing (steps.RestoreNothing), which closes set-up's window, so a
+// line added later never finds it open: nil on any other, and for kit
+// agent order, whose new Mac's run would list nothing either.
+func (a *app) settleStep(r *run, dirs config.Dirs) (*engine.Step, error) {
+	list, err := r.cfg.List(config.RestoreKind, r.machine)
+	if err != nil || len(list.Entries) > 0 || a.newMacRun {
+		return nil, err
+	}
+	_, _, open, err := setUp(dirs.State)
+	if err != nil || !open {
+		return nil, err
+	}
+	step := steps.RestoreNothing(dirs.State, a.Now)
 	return &step, nil
 }
 

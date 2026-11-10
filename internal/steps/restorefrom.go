@@ -33,14 +33,16 @@ const (
 )
 
 // The cards' keys: on the source card, Time Machine's disk, when there's
-// one alone (by number, when there are more), Arq, by hand, and the old
-// Mac, or the disks, again; on the lacking card, looking again
-// (keyAgain), and the backup hasn't those holding nothing.
+// one alone (by number, when there are more), Arq, by hand, the old Mac,
+// or the disks, again, and, for this Mac's own backups, restoring nothing;
+// on the lacking card, looking again (keyAgain), and the backup hasn't
+// those holding nothing.
 const (
-	keyDisk  = "t"
-	keyArq   = "a"
-	keyAgain = "enter"
-	keyHasnt = "n"
+	keyDisk    = "t"
+	keyArq     = "a"
+	keyAgain   = "enter"
+	keyNothing = "n"
+	keyHasnt   = "n"
 )
 
 // mostDisks is how many Time Machine disks the source card offers, a
@@ -53,36 +55,39 @@ const mostDisks = 9
 // should the old Mac not answer, or kit-config record no host key for it,
 // the source the person chooses on a card instead (instead), standing in
 // for it, or the old Mac again, for as long as they try. Arq chosen is
-// errToArq: its paths join Arq's restore.
-func (r Restoring) open(ctx context.Context, s sourced) (src *restore.Opened, todo []judged, failed, err error) {
+// errToArq: its paths join Arq's restore. The backup chosen for this Mac's
+// own backups becomes s's source (opener).
+func (r Restoring) open(ctx context.Context, s *sourced) (src *restore.Opened, todo []judged, failed, err error) {
 	if s.want.Kind == restore.FromArq {
 		return r.arq(ctx, s.at, s.todo)
 	}
-	opener, err := r.opener(ctx, &s)
+	opener, err := r.opener(ctx, s)
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	want := s.want
 	for {
-		event.Say(ctx, event.Doing{Says: opening(s.want)})
+		event.Say(ctx, event.Doing{Says: opening(want)})
 		src, err := opener.Open(ctx)
 		if !errors.Is(err, oldmac.ErrNoAnswer) && !errors.Is(err, oldmac.ErrNoHostKey) {
 			return src, s.todo, nil, err
 		}
-		f, err := r.instead(ctx, s.want, err)
+		f, err := r.instead(ctx, want, err)
 		switch {
 		case err != nil:
 			return nil, nil, nil, err
 		case f.arq:
 			return nil, nil, nil, errToArq
 		case f.disk != nil:
-			s.want, opener = restore.Origin{Kind: restore.FromTimeMachine}, f.disk
+			want, opener = restore.Origin{Kind: restore.FromTimeMachine}, f.disk
 		}
 	}
 }
 
 // opener is what s's source opens through, as Sources has it: but for this
 // Mac's own backups (ownBackups), the one the person chooses on a card
-// (ownBackup), s's source then that. Arq chosen is errToArq.
+// (ownBackup), s's source then that. Arq chosen is errToArq; nothing,
+// errNothing.
 func (r Restoring) opener(ctx context.Context, s *sourced) (restore.Opener, error) {
 	if s.want != ownBackups {
 		return r.Sources(s.want, s.at, r.Flag.Kind != ""), nil
@@ -93,6 +98,8 @@ func (r Restoring) opener(ctx context.Context, s *sourced) (restore.Opener, erro
 		return nil, err
 	case f.arq:
 		return nil, errToArq
+	case f.nothing:
+		return nil, errNothing
 	}
 	s.want = restore.Origin{Kind: restore.FromTimeMachine}
 	return f.disk, nil
@@ -108,11 +115,12 @@ func opening(o restore.Origin) string {
 }
 
 // fallback is what the person chose on the source card: a Time Machine
-// disk (disk), Arq's restore by hand (arq), or, neither, the old Mac, or
-// the disks, again.
+// disk (disk), Arq's restore by hand (arq), restoring nothing (nothing),
+// or, none, the old Mac, or the disks, again.
 type fallback struct {
-	disk restore.Opener
-	arq  bool
+	disk    restore.Opener
+	arq     bool
+	nothing bool
 }
 
 // instead asks, on a card in the restore's row, where to restore from, the
@@ -130,7 +138,7 @@ func (r Restoring) instead(ctx context.Context, mac restore.Origin, why error) (
 	}
 	event.Say(ctx, event.Doing{Says: "looking for Time Machine disks"})
 	disks, lookErr := r.Disks(ctx)
-	keys, does := choices(disks, "tries "+mac.Says()+" again")
+	keys, does := choices(disks, choice{keyAgain, "tries " + mac.Says() + " again", fallback{}})
 	c := &ownCard{says: sourceCard(why, disks, lookErr, keys)}
 	if err := r.ask(ctx, c); err != nil {
 		return fallback{}, err
@@ -141,7 +149,8 @@ func (r Restoring) instead(ctx context.Context, mac restore.Origin, why error) (
 // ownBackup asks, on a card in the restore's row, which of this Mac's own
 // backups to restore from, it having started from no other Mac: one of the
 // Time Machine disks attached holding the person's backups, or Arq's
-// restore by hand. While there's no disk to choose, or one's locked, it can
+// restore by hand; or to restore nothing, as for a Mac in use, or one
+// started afresh. While there's no disk to choose, or one's locked, it can
 // look for them again. Without a terminal there's no one to ask: the error
 // says so, and the restore's names kit apply's flag that answers it
 // (unopened).
@@ -152,16 +161,16 @@ func (r Restoring) ownBackup(ctx context.Context) (fallback, error) {
 	for {
 		event.Say(ctx, event.Doing{Says: "looking for Time Machine disks"})
 		disks, lookErr := r.Disks(ctx)
-		again := ""
+		more := []choice{{keyNothing, "restores nothing: " + r.Mac + " keeps what it has", fallback{nothing: true}}}
 		if len(disks.Found) == 0 || len(disks.Locked) > 0 {
-			again = "looks for Time Machine disks again"
+			more = append(more, choice{keyAgain, "looks for Time Machine disks again", fallback{}})
 		}
-		keys, does := choices(disks, again)
+		keys, does := choices(disks, more...)
 		c := &ownCard{says: r.ownBackupCard(disks, lookErr, keys)}
 		if err := r.ask(ctx, c); err != nil {
 			return fallback{}, err
 		}
-		if f := does[c.chosen()]; f.disk != nil || f.arq {
+		if f := does[c.chosen()]; f.disk != nil || f.arq || f.nothing {
 			return f, nil
 		}
 	}
@@ -177,11 +186,17 @@ func (r Restoring) ask(ctx context.Context, c *ownCard) error {
 	return err
 }
 
+// choice is a key on the source card, what it says it does, and what it
+// chooses.
+type choice struct {
+	key, does string
+	chooses   fallback
+}
+
 // choices are the source card's keys, and what each chooses: each Time
 // Machine disk holding the person's backups, t for one alone, else by its
-// number, mostDisks at most; Arq, by hand; and, as again says, the old Mac
-// or the disks again, unless again is "".
-func choices(disks restore.Disks, again string) ([]check.Key, map[hand.Answer]fallback) {
+// number, mostDisks at most; Arq, by hand; then more, as the old Mac again.
+func choices(disks restore.Disks, more ...choice) ([]check.Key, map[hand.Answer]fallback) {
 	var keys []check.Key
 	does := map[hand.Answer]fallback{}
 	add := func(key, says string, f fallback) {
@@ -196,8 +211,8 @@ func choices(disks restore.Disks, again string) ([]check.Key, map[hand.Answer]fa
 		add(key, "restores from the Time Machine disk "+d.Name, fallback{disk: d})
 	}
 	add(keyArq, "restores through Arq, by hand", fallback{arq: true})
-	if again != "" {
-		add(keyAgain, again, fallback{})
+	for _, c := range more {
+		add(c.key, c.does, c.chooses)
 	}
 	return keys, does
 }
@@ -219,8 +234,11 @@ func sourceCard(why error, disks restore.Disks, lookErr error, keys []check.Key)
 // ownBackupCard is the card asking which of this Mac's own backups to
 // restore from, with keys, as sourceCard is for the old Mac.
 func (r Restoring) ownBackupCard(disks restore.Disks, lookErr error, keys []check.Key) event.NeedsYou {
-	says := append([]string{"It started from no other Mac, so its data comes from its own backups."}, disksSay(disks, lookErr)...)
-	return event.NeedsYou{Item: itemSource, Title: "Restore " + r.Mac + "'s data from its backups", Why: strings.Join(says, " "), Keys: keys}
+	says := append([]string{
+		"kit set this Mac up as " + r.Mac + ", with no other Mac to start from, as after a clean install, so its data can come from its own backups.",
+		"Is " + r.Mac + " in use already, or starting afresh? Then restore nothing.",
+	}, disksSay(disks, lookErr)...)
+	return event.NeedsYou{Item: itemSource, Title: "Restore " + r.Mac + "'s data from its backups?", Why: strings.Join(says, " "), Keys: keys}
 }
 
 // disksSay says, of the Time Machine disks, why kit couldn't look for them

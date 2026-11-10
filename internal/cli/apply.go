@@ -37,12 +37,12 @@ On a Mac the boot has just set up, the data restore brings the paths
 in kit.toml), from that Mac, over SSH; should it not answer, a card asks for
 its Time Machine disk, Arq, or trying it again. On a Mac clean-installed
 under its own name, from its own backups: a card asks for its Time Machine
-disk or Arq. Without a terminal, there's no card, and it fails:
---restore-from answers it. A Mac in use restores nothing unless
---restore-from says so: it restores them from a backup, on any Mac, done or
-not: Time Machine's, on a disk attached, or Arq's, by hand in its app, a
-card saying what to restore where; and --restore-from mac goes back to the
-old Mac. --at picks the backup: the
+disk, Arq, or nothing, for a Mac in use already or starting afresh. Without
+a terminal, there's no card, and it fails: --restore-from answers it. A Mac
+in use restores nothing unless --restore-from says so: it restores them
+from a backup, on any Mac, done or not: Time Machine's, on a disk attached,
+or Arq's, by hand in its app, a card saying what to restore where; and
+--restore-from mac goes back to the old Mac. --at picks the backup: the
 latest at or before a date, as 2026-11-08 (by the end of that day), or a
 time, as "2026-11-08 14:30" (by the end of that minute); the latest when
 not given. A restore stopped part-way carries on from where it began; the

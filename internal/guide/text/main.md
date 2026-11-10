@@ -188,7 +188,8 @@ On a Mac the boot has just set up, the data restore brings back the paths
 `[restore]` lists, once Homebrew's rsync is in: on a Mac started from
 another, from that Mac, known by the SSH host key kit-config records for
 it, once the secrets have synced, else a backup of it; on a Mac
-clean-installed under its own name, from its own backups. Claude Code's MCP
+clean-installed under its own name, from its own backups, or nothing, as
+the person says on its card. Claude Code's MCP
 servers and skills, the reinstall of restored projects' dependencies, and a
 step declared `--after restore` wait for it; nothing else does. A step of
 your own that writes into a listed folder must say `--after restore`.

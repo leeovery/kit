@@ -51,9 +51,9 @@ func (w *world) settingUp(t *testing.T) {
 // settled is a restore's record with ~/Code done and the restore settled.
 const settled = `{"paths": {"~/Code": {"state": "done", "started": "2026-11-20T10:00:00Z"}}, "settled": "2026-11-20T12:00:00Z"}`
 
-// The data restore is a step of a Mac that lists paths in [restore] in
-// set-up, the boot having named it, started from another or not, till the
-// restore settles; or of one whose record has a listed path's restore
+// The data restore is a step of a Mac in set-up, the boot having named it,
+// started from another or not, till the restore settles, listing paths in
+// [restore] or not; or of one whose record has a listed path's restore
 // part-way, which carries on from where it began, kit apply naming no
 // source. On a Mac without either, it's none: a fresh Mac, one in use,
 // started from another or not, or one whose restore has settled.
@@ -68,7 +68,7 @@ func TestRestoreIsThereInSetUp(t *testing.T) {
 		{"in set-up, clean-installed under its own name", true, false, true, "", true},
 		{"in use, started from another", true, true, false, "", false},
 		{"in use, started from none", true, false, false, "", false},
-		{"in set-up, listing nothing", false, true, true, "", false},
+		{"in set-up, listing nothing", false, true, true, "", true},
 		{"in set-up, its restore settled", true, false, true, settled, false},
 		{"in set-up from another, its restore settled", true, true, true, settled, false},
 		{"in use, one part-way", true, false, false, partWay, true},
@@ -93,6 +93,32 @@ func TestRestoreIsThereInSetUp(t *testing.T) {
 				t.Errorf("kit status has the restore: %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+// A Mac whose boot named it with nothing in [restore] closes set-up at its
+// first kit apply, the restore settling with nothing listed, and no
+// reinstall: so a line added later never finds set-up's window open. The
+// restore is gone from the Mac then, kit status showing none; kit apply
+// --restore-from brings it back, leaving a path holding what was written
+// since the boot as it is, never setting it aside.
+func TestSetUpClosesWithNothingListed(t *testing.T) {
+	w := laptopWorld(t)
+	w.write(t, bootState, `{"began": "2020-01-01T00:00:00Z"}`)
+	if got := w.statusSteps(t); !slices.Contains(got, "restore") || slices.Contains(got, "reinstall") {
+		t.Fatalf("in set-up, listing nothing, kit status has %q; want the restore, no reinstall", got)
+	}
+	if out, errOut, code := w.run(t, "apply", "restore"); code != 0 || !strings.Contains(w.read(t, restoreRecord), `"settled"`) {
+		t.Fatalf("kit apply restore printed\n%s%s\nexit %d, the record %s; want it settled", out, errOut, code, w.read(t, restoreRecord))
+	}
+	w.writeSection(t, "laptop", "restore", "~/Code\n")
+	w.write(t, "Code/since-the-boot", "work")
+	if slices.Contains(w.statusSteps(t), "restore") {
+		t.Error("a line added since, kit status has the restore; want none")
+	}
+	out, _, _ := w.run(t, "apply", "--plan", "restore", "--restore-from", "time-machine")
+	if want := "restore ok 1 declared, all here already\n"; !strings.Contains(out, want) {
+		t.Errorf("kit apply --plan restore --restore-from time-machine printed\n%s\nwant it holding %q", out, want)
 	}
 }
 
@@ -129,7 +155,7 @@ func TestApplyRestoresFromTheBackupNamed(t *testing.T) {
 		{[]string{"--restore-from", "time-machine"}, false, "no Time Machine disk is attached"},
 		{[]string{"--restore-from", "arq"}, false, "restoring through Arq is by hand: in Arq, restore ~/Code into ~/.local/state/kit/restore/arq/1, then run kit apply again"},
 		{[]string{"--restore-from", "arq", "--at", "2026-11-08"}, false, "restoring through Arq is by hand"},
-		{[]string{"--restore-from", "time-machine"}, true, "no Time Machine disk is attached"},
+		{[]string{"--restore-from", "time-machine"}, true, "no Time Machine disk is attached: kit apply --restore-from time-machine|arq restores ~/Notes from another source, or kit restore remove ~/Notes drops its line"},
 	} {
 		t.Run(fmt.Sprintf("%s, settled %v", strings.Join(tt.args, " "), tt.settled), func(t *testing.T) {
 			w := laptopWorld(t)

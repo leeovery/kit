@@ -1381,16 +1381,22 @@ refuses a line the restore would refuse, before writing anything, and copies not
   list, copied from that Mac, else its backups; or a Mac clean-installed under its own name
   (the boot naming a Mac kit-config already has, with no `from`), restored from its own
   backups, there being no old Mac: the card asks at once for its Time Machine disk or Arq,
-  with no Mac looked for. A new Mac with nothing to come from (a new name, no `from`) restores
+  with no Mac looked for, or to restore nothing, the answer for a Mac in use brought onto kit
+  by its boot under its own name, or one starting afresh, which the boot can't tell from a
+  clean install (each path recorded not restored, never begun, nothing set aside, and the
+  restore settles). A new Mac with nothing to come from (a new name, no `from`) restores
   nothing, and a Mac in use, which never runs the boot, restores nothing, whatever its `from`
   says. A Mac rebuilt under its own name while its `from` is still in kit-config restores from
-  that Mac. Once the restore settles it leaves `kit apply` and `kit status`, no row, as the
-  reinstall does, coming back only for a path part-way or `--restore-from`. That flag is an
-  override, on any Mac: a particular backup or date, a change of source part-way, a line added
-  later (`time-machine` or `arq`; `mac`, the Mac in `from`, on a Mac that has one), and then
-  only a path absent or holding nothing but kit's: one holding data is here, never touched,
-  though one recorded here is restored once it's absent again; `--at` picks the backup, the
-  latest at or before a date or time.
+  that Mac. A Mac in set-up whose `[restore]` lists nothing still has the step, fine with
+  nothing listed, which settles at its first `kit apply`: set-up's window closes whatever the
+  list holds, so a line added later waits for `--restore-from`, never setting aside what was
+  written since the boot. Once the restore settles it leaves `kit apply` and `kit status`, no
+  row, as the reinstall does, coming back only for a path part-way or `--restore-from`. That
+  flag is an override, on any Mac: a particular backup or date, a change of source part-way, a
+  line added later or one restored nothing (`time-machine` or `arq`; `mac`, the Mac in `from`,
+  on a Mac that has one), and then only a path absent or holding nothing but kit's: one
+  holding data is here, never touched, though one recorded here is restored once it's absent
+  again; `--at` picks the backup, the latest at or before a date or time.
 - **Sources, best first.** The old Mac, over SSH on the local network, while it answers
   (found among the Macs offering SSH, confirmed by its kit name and by the host key kit-config
   records for it, `host_key`, ssh trusting that key alone, never one on first sight: a Mac
@@ -1403,11 +1409,12 @@ refuses a line the restore would refuse, before writing anything, and copies not
   which first fetches kit-config and takes the old Mac's host key from the remote's kit.toml,
   merging nothing, as `kit apply` on it may have recorded it, or a new one, since the run began;
   without a terminal, the failure says to run `kit apply` on it, then here. A Mac rebuilt
-  under its own name has no old Mac: its card offers its own Time Machine disk or Arq alone,
-  looking for the disks again while there's none to choose or one's locked, and Arq's card
-  names this Mac's backup; without a terminal it fails, naming `kit apply --restore-from
-  time-machine|arq`. A Time Machine disk is the person's while its latest backup holds a home
-  folder of the same username, whichever Mac took it. What comes after the restore waits. A path stopped part-way carries on from the source it began from, each from
+  under its own name has no old Mac: its card offers its own Time Machine disk, Arq, or
+  restoring nothing, looking for the disks again while there's none to choose or one's
+  locked, and Arq's card names this Mac's backup; without a terminal it fails, naming `kit
+  apply --restore-from time-machine|arq`. A Time Machine disk is the person's while its latest
+  backup holds a home folder of the same username, whichever Mac took it. What comes after the
+  restore waits. A path stopped part-way carries on from the source it began from, each from
   its own; but the source the person names, by `--restore-from` (and `--at`) or on the card,
   stands in for every path part-way in that run, whatever it began from, each carrying on from
   it as its own copy begins (`--update` never copies over newer work, and the second pass
