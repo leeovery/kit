@@ -98,12 +98,13 @@ func (a *restoreAt) Set(v string) error {
 
 // restoreStep is the data restore's step, when the Mac has one: [restore]
 // lines, and a source for them, the Mac it started from or kit apply's
-// flags'; or a path's restore part-way, which carries on from where it
-// began whatever the flags; or, for kit agent order, a new Mac's run
-// started from this one, whose lines it carries. Lines that don't read
-// make a step whose check says why; flags naming a source for no lines, or
-// the old Mac for a Mac started from none, are an error. Copying from the
-// old Mac over SSH, with the key kit's secrets write, it comes after them.
+// flags'; or a path's restore part-way, which carries on, from where it
+// began or the source the flags name; or, for kit agent order, a new
+// Mac's run started from this one, whose lines it carries. Lines that
+// don't read make a step whose check says why; flags naming a source for
+// no lines, or the old Mac for a Mac started from none, are an error.
+// Copying from the old Mac over SSH, with the key kit's secrets write, it
+// comes after them.
 func (a *app) restoreStep(r *run, dirs config.Dirs, prefsOn bool) (*engine.Step, error) {
 	list, err := r.cfg.List(config.RestoreKind, r.machine)
 	if err != nil {

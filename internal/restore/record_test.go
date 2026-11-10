@@ -144,8 +144,9 @@ func TestRecordBegin(t *testing.T) {
 }
 
 // A file kept by a copy, newer here, may be set aside only in set-up's
-// window, on a Mac whose set-up began; and, its path's copy begun before,
-// only for a copy from the source it began from.
+// window, on a Mac whose set-up began, and only before its path's copy
+// first began, from whatever source: never resumed, nor recorded not
+// there.
 func TestRecordMaySetAside(t *testing.T) {
 	began := time.Date(2026, 11, 20, 9, 0, 0, 0, time.UTC)
 	laptop, tm := Origin{Kind: FromMac, Detail: "laptop"}, Origin{Kind: FromTimeMachine, Detail: "snapshot"}
@@ -159,15 +160,16 @@ func TestRecordMaySetAside(t *testing.T) {
 		want  bool
 	}{
 		{"its first copy", open, began, "~/.zsh_history", Path{}, true},
-		{"resumed from the same source", open, began, "~/.zsh_history", Path{State: Copying, From: tm, Started: began}, true},
-		{"resumed from another, standing in", open, began, "~/.zsh_history", Path{State: Checking, From: laptop, Started: began}, false},
+		{"resumed", open, began, "~/.zsh_history", Path{State: Copying, From: tm, Started: began}, false},
+		{"resumed, checking", open, began, "~/.zsh_history", Path{State: Checking, From: laptop, Started: began}, false},
+		{"not there", open, began, "~/.zsh_history", Path{State: NotThere, From: laptop}, false},
 		{"a Mac in use", open, time.Time{}, "~/.zsh_history", Path{}, false},
 		{"a line added after the first run", open, began, "~/.newtool", Path{}, false},
 		{"the restore settled", Record{First: open.First, Settled: began.Add(time.Hour)}, began, "~/.zsh_history", Path{}, false},
 	} {
 		rec := tt.rec
 		rec.Paths = map[string]Path{tt.path: tt.p}
-		if got := rec.MaySetAside(tt.path, tm, tt.began); got != tt.want {
+		if got := rec.MaySetAside(tt.path, tt.began); got != tt.want {
 			t.Errorf("%s: MaySetAside() = %v, want %v", tt.name, got, tt.want)
 		}
 	}

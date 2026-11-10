@@ -41,11 +41,11 @@ Arq's, by hand in its app, a card saying what to restore where; and
 --restore-from mac goes back to the old Mac. --at picks the backup: the
 latest at or before a date, as 2026-11-08 (by the end of that day), or a
 time, as "2026-11-08 14:30" (by the end of that minute); the latest when
-not given. A restore stopped part-way carries on from where it began, flags
-or not; a backup named, or chosen on the card, carries on in place of the
-old Mac, and should a backup have gone from the disk, --restore-from
-time-machine carries on from another. A path the source hasn't is left out:
---restore-from brings it later from one that has it, while it's still
+not given. A restore stopped part-way carries on from where it began; the
+source named, or chosen on the card, carries it on in that one's place,
+whatever it was, as --restore-from time-machine does from another backup
+should the one it began from have gone. A path the source hasn't is left
+out: --restore-from brings it later from one that has it, while it's still
 absent, as it does a path left as it was, holding files of its own, once
 it's absent. The projects restored have their dependencies installed again:
 kit apply reinstall tries those that failed again.`,

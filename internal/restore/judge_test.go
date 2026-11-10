@@ -311,6 +311,34 @@ func TestSetAside(t *testing.T) {
 	}
 }
 
+// Two set-asides of a path in one second, as one as it's judged and another
+// as a newer file's found, each go into a folder of their own: neither
+// replaces what the other set aside.
+func TestSetAsideTwiceInASecond(t *testing.T) {
+	home, stateDir := t.TempDir(), t.TempDir()
+	now := setUp.Add(time.Hour)
+	j := Judgement{Path: "~/.zsh_history", Verdict: VerdictSetAside, New: []string{"~/.zsh_history"}}
+	written := []string{"set-up's first", "set-up's second"}
+	for i, at := range []time.Time{now, now.Add(500 * time.Millisecond)} {
+		if err := os.WriteFile(filepath.Join(home, ".zsh_history"), []byte(written[i]), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := SetAside(stateDir, home, j, at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rec, err := LoadRecord(stateDir)
+	asides := rec.Paths["~/.zsh_history"].SetAside
+	if err != nil || len(asides) != 2 || asides[0].Dir == asides[1].Dir {
+		t.Fatalf("the record = %+v, %v; want two set-asides, each in its own folder", asides, err)
+	}
+	for i, a := range asides {
+		if got := read(t, filepath.Join(a.Dir, ".zsh_history")); got != written[i] {
+			t.Errorf("set-aside %d holds %q, want %q", i, got, written[i])
+		}
+	}
+}
+
 // Setting aside that fails partway records what it moved, and says what
 // failed; one that moved nothing records nothing.
 func TestSetAsideFailsPartway(t *testing.T) {
@@ -319,10 +347,14 @@ func TestSetAsideFailsPartway(t *testing.T) {
 	write(t, filepath.Join(home, ".claude", "sub", "b"), later)
 	now := setUp.Add(time.Hour)
 	dir := filepath.Join(stateDir, "restore", "set-aside", "20261120-100000")
-	write(t, filepath.Join(dir, ".claude", "sub"), now)
+	sub := filepath.Join(home, ".claude", "sub")
+	if err := os.Chmod(sub, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(sub, 0o700) })
 	j := Judgement{Path: "~/.claude", Verdict: VerdictSetAside, New: []string{"~/.claude/a", "~/.claude/sub/b"}}
 	if err := SetAside(stateDir, home, j, now); err == nil {
-		t.Fatal("SetAside() = nil error, with a file where a folder goes")
+		t.Fatal("SetAside() = nil error, with a file that can't be moved")
 	}
 	rec, err := LoadRecord(stateDir)
 	want := []Aside{{Time: now, Dir: dir, Paths: []string{"~/.claude/a"}}}

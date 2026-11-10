@@ -101,8 +101,8 @@ func (m *tmMac) home(s string) string {
 // default; the latest at or before At; the snapshot a restore began from,
 // resuming, by name, kit apply's flags naming Time Machine or not; At
 // winning over it. That snapshot gone, with kit apply's flags naming Time
-// Machine, the latest, or the latest at or before At, stands in for it,
-// saying so. Opened, it's the old home folder in the snapshot, recorded by
+// Machine, the latest, or the latest at or before At, stands in for it.
+// Opened, it's the old home folder in the snapshot, recorded by
 // the snapshot's name, and closing it unmounts it.
 func TestTimeMachineOpens(t *testing.T) {
 	here := time.Now().Location()
@@ -114,15 +114,14 @@ func TestTimeMachineOpens(t *testing.T) {
 		snapshot string
 		chosen   bool
 		want     string
-		replaces string
 	}{
-		{"the latest", time.Time{}, "", false, third, ""},
-		{"at a time", byTheSeventh, "", true, second, ""},
-		{"resumed", time.Time{}, first, false, first, ""},
-		{"resumed, named again", time.Time{}, first, true, first, ""},
-		{"at a time, resuming", byTheSeventh, first, true, second, ""},
-		{"gone, named again", time.Time{}, gone, true, third, gone},
-		{"gone, named again at a time", byTheSeventh, gone, true, second, gone},
+		{"the latest", time.Time{}, "", false, third},
+		{"at a time", byTheSeventh, "", true, second},
+		{"resumed", time.Time{}, first, false, first},
+		{"resumed, named again", time.Time{}, first, true, first},
+		{"at a time, resuming", byTheSeventh, first, true, second},
+		{"gone, named again", time.Time{}, gone, true, third},
+		{"gone, named again at a time", byTheSeventh, gone, true, second},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			m := newTMMac(t, map[string][]string{"Backups of laptop": {first, second, third}})
@@ -132,9 +131,6 @@ func TestTimeMachineOpens(t *testing.T) {
 			}
 			if src.Home != m.home(tt.want) || src.Origin != (Origin{Kind: FromTimeMachine, Detail: tt.want}) || src.Live || src.Host != "" {
 				t.Errorf("opened %+v; want %s's home, by its name, not live", src, tt.want)
-			}
-			if want := (Origin{Kind: FromTimeMachine, Detail: tt.replaces}); tt.replaces == "" && src.Replaces != (Origin{}) || tt.replaces != "" && src.Replaces != want {
-				t.Errorf("opened %+v, standing in for %+v; want it standing in for %q", src.Origin, src.Replaces, tt.replaces)
 			}
 			if got := src.Source("~/Code").Path; got != filepath.Join(m.home(tt.want), "Code") {
 				t.Errorf("~/Code is at %s in the backup", got)
@@ -164,7 +160,7 @@ func TestTimeMachineRefuses(t *testing.T) {
 		{"two disks", map[string][]string{"Backups of laptop": {first}, "Backups of studio": {first}}, time.Time{}, "",
 			"backups of /Users/someone are on more than one Time Machine disk, Backups of laptop (disk7s2) and Backups of studio (disk8s2): attach the old Mac's alone"},
 		{"the snapshot gone", map[string][]string{"Backups of laptop": {first}}, time.Time{}, snapshot(2026, 10, 1, 9, 0),
-			"Time Machine's backup of 1 Oct 2026 09:00, which the restore began from, isn't on Backups of laptop any more: kit apply --restore-from time-machine carries on from the latest backup there, or the one --at picks"},
+			"Time Machine's backup of 1 Oct 2026 09:00, which the restore began from, isn't on Backups of laptop any more"},
 		{"before them all", map[string][]string{"Backups of laptop": {first}}, time.Date(2026, 10, 1, 0, 0, 0, 0, here), "",
 			"Backups of laptop holds no backup from 1 Oct 2026 00:00 or before: its earliest is 1 Nov 2026 09:00"},
 	} {

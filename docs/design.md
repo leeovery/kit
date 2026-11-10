@@ -1372,15 +1372,19 @@ refuses a line the restore would refuse, before writing anything, and copies not
   compared as from Time Machine, the holding folder deleted after. When the old Mac doesn't
   answer, a card offers its Time Machine disk, Arq, or trying again, and what comes after the
   restore waits. A path stopped part-way carries on from the source it began from, each from
-  its own; but a backup named by `--restore-from`, or chosen on the card, stands in for the old
-  Mac a path's part-way from, the path carrying on from it as its own copy begins (`--update`
-  keeps the newer files the live copy brought), the record and the log saying so: one the
-  backup hasn't fails, keeping the old Mac, to finish from there. A path a source hasn't is
-  recorded not there only if its copy never began; part-way, it fails. A holding folder of
-  Arq's still empty once the person says Arq's done is never a path the backup hasn't: the card
-  comes back naming it, to look again, or for the person to say the backup hasn't it; one
-  holding another path stays on the card till it's moved into its own, or emptied. Without a
-  terminal, those paths fail, saying what to restore where, and the rest are copied.
+  its own; but the source the person names, by `--restore-from` (and `--at`) or on the card,
+  stands in for every path part-way in that run, whatever it began from, each carrying on from
+  it as its own copy begins (`--update` never copies over newer work, and the second pass
+  passes over a newer file kept), the record and the log saying so: one it hasn't fails,
+  keeping the source it began from. A path a source hasn't is recorded not there only if its
+  copy never began; part-way, it fails, as it does when its source won't open, naming the ways
+  on: another source, by `--restore-from`, or `kit restore remove` dropping its line. Arq's
+  restore comes last in a run, taking in the paths sent to it on the card, so its card goes up
+  once. A holding folder of Arq's still empty once the person says Arq's done is never a path
+  the backup hasn't: the card comes back naming it, to look again, or for the person to say the
+  backup hasn't it, those still empty as they say so looked at again; one holding another path
+  stays on the card till it's moved into its own, or emptied, and one kept keeps its number.
+  Without a terminal, those paths fail, saying what to restore where, and the rest are copied.
 - **The copy.** Homebrew's rsync, rsync 3 on both Macs (macOS's own keeps no extended
   attributes), keeping attributes, permissions and dates; never `--delete`, and `--update`, so a
   file edited on the new Mac is never replaced by the old copy. From the old Mac it leaves out
@@ -1389,16 +1393,16 @@ refuses a line the restore would refuse, before writing anything, and copies not
   reachable, free space for the copy, the same username (tools key their data by full path).
   Then a second pass comparing checksums: from a backup it must find nothing; from a live Mac
   what changed during the copy is copied again, and counted. A listed file the copy kept as
-  newer here (rsync says so) is set aside and copied again, once, before the second pass, only
-  when the set-up wrote it in its window, as a shell's history written as it's restored, and
-  no copy from another source could have put it there; any other is kept, as newer work always
-  is. rsync's own errors fail the step.
+  newer here (rsync says so), as a shell's history written as it's restored, is set aside and
+  copied again, once, before the second pass, by the judgement's rule: only a line the
+  restore's first run listed, in the set-up's window, before its copy first started, never one
+  resumed; any other is kept, as newer work always is. rsync's own errors fail the step.
 - **The judgement, per path, before its copy.** Recorded done: never restored again. Absent,
   or holding only what's kit's: restored. Holding anything older than this Mac's set-up: here,
   never touched, never merged into. Holding only what the set-up itself wrote (a shell's
   history, from the Terminal the boot runs in), on a path the restore's first run listed,
-  before its copy starts: that's set aside into kit's state, its path kept, and the path is
-  restored. The set-up's window opens as the boot starts (recorded only for a Mac with a
+  before its copy starts: that's set aside into kit's state, its path kept, a folder for each
+  setting aside, and the path is restored. The set-up's window opens as the boot starts (recorded only for a Mac with a
   `from`) and closes once the restore first settles, every path done or here; a line added
   later never moves a Mac's data. A path its source hasn't waits, judged afresh each run.
 - **The record**, in kit's state: the source a copy last started from, so a run again resumes

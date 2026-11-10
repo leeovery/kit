@@ -243,7 +243,7 @@ func (r Rsync) Copy(ctx context.Context, c Copy, progress func(Progress)) (Stats
 	newer := false
 	lines := func(line string) {
 		stats.line(line)
-		newer = newer || c.File && line == filepath.Base(c.To)+" is newer"
+		newer = newer || c.File && strings.HasSuffix(line, " is newer")
 		if p, ok := read.line(line); ok && progress != nil {
 			progress(p)
 		}

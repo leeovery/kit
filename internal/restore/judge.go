@@ -143,14 +143,20 @@ func before(info fs.FileInfo, began time.Time) bool {
 const asideFolder = "restore/set-aside"
 
 // SetAside moves what j found written in its path in set-up's window into
-// kit's state folder, stateDir: under restore/set-aside and the time, now,
-// each keeping its path from the home folder, home. It records what it
-// moved, and where, even when it fails partway. A file gone since j was
-// judged is passed over. It's applying's to call: judging moves nothing.
+// kit's state folder, stateDir: into a folder of its own under
+// restore/set-aside, named by the time, now (asideDir), each keeping its
+// path from the home folder, home. It records what it moved, and where,
+// even when it fails partway. A file gone since j was judged is passed
+// over. It's applying's to call: judging moves nothing.
 func SetAside(stateDir, home string, j Judgement, now time.Time) error {
-	dir := filepath.Join(stateDir, asideFolder, now.Format("20060102-150405"))
+	if len(j.New) == 0 {
+		return nil
+	}
+	dir, err := asideDir(stateDir, now)
+	if err != nil {
+		return fmt.Errorf("set aside what's in %s: %w", j.Path, err)
+	}
 	var moved []string
-	var err error
 	for _, p := range j.New {
 		rel := strings.TrimPrefix(p, "~/")
 		dst := filepath.Join(dir, rel)
@@ -177,4 +183,24 @@ func SetAside(stateDir, home string, j Judgement, now time.Time) error {
 	return errors.Join(err, UpdateRecord(stateDir, func(r *Record) {
 		r.Change(j.Path, func(p *Path) { p.SetAside = append(p.SetAside, aside) })
 	}))
+}
+
+// asideDir makes the folder, in kit's state folder, stateDir, that a
+// set-aside at now moves into: named by the time, to the second, and, one
+// of that second there already, a number after it, so a set-aside never
+// replaces what another set aside.
+func asideDir(stateDir string, now time.Time) (string, error) {
+	named := filepath.Join(stateDir, asideFolder, now.Format("20060102-150405"))
+	if err := os.MkdirAll(filepath.Dir(named), 0o700); err != nil {
+		return "", err
+	}
+	for n := 1; ; n++ {
+		dir := named
+		if n > 1 {
+			dir = fmt.Sprintf("%s-%d", named, n)
+		}
+		if err := os.Mkdir(dir, 0o700); !errors.Is(err, fs.ErrExist) {
+			return dir, err
+		}
+	}
 }

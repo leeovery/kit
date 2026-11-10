@@ -142,15 +142,13 @@ func (r Record) mayAside(path string) bool {
 }
 
 // MaySetAside reports whether a file at the listed path path, newer than
-// its copy from from, so kept by it, may be set aside for that copy, as
-// written here by set-up since it began, began: in set-up's window (zero on
-// a Mac in use, which has none), as the judge has it (mayAside); and,
-// should the path's copy have begun before, only from the source it began
-// from, as a copy from another, the old Mac a backup stands in for, may
-// have put it there. r is the record from before from's copy began.
-func (r Record) MaySetAside(path string, from Origin, began time.Time) bool {
-	p := r.Paths[path]
-	return !began.IsZero() && r.mayAside(path) && (!p.started() || p.From == from)
+// its copy, so kept by it, may be set aside for that copy, as written here
+// by set-up since it began, began: in set-up's window (zero on a Mac in
+// use, which has none), as the judge has it (mayAside), and only before
+// the path's copy first began, from any source, as a copy begun may have
+// put it there. r is the record from before this run's copy began.
+func (r Record) MaySetAside(path string, began time.Time) bool {
+	return !began.IsZero() && r.mayAside(path) && !r.Paths[path].started()
 }
 
 // Finished reports whether the restore is done with the listed path path:

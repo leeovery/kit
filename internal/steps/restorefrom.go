@@ -1,7 +1,6 @@
 package steps
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -52,19 +51,16 @@ const mostDisks = 9
 // (failed): Arq's restore, by hand (arq); else as Sources has it, and,
 // should the old Mac not answer, the source the person chooses on a card
 // instead (instead), standing in for it, or the old Mac again, for as long
-// as they try.
+// as they try. Arq chosen is errToArq: its paths join Arq's restore.
 func (r Restoring) open(ctx context.Context, s sourced) (src *restore.Opened, todo []judged, failed, err error) {
 	if s.want.Kind == restore.FromArq {
-		return r.arq(ctx, s.at, s.standsIn, s.todo)
+		return r.arq(ctx, s.at, s.todo)
 	}
 	opener := r.Sources(s.want, s.at, r.Flag.Kind != "")
 	for {
 		event.Say(ctx, event.Doing{Says: opening(s.want)})
 		src, err := opener.Open(ctx)
 		if !errors.Is(err, oldmac.ErrNoAnswer) {
-			if err == nil && src.Replaces == (restore.Origin{}) {
-				src.Replaces = s.standsIn
-			}
 			return src, s.todo, nil, err
 		}
 		f, err := r.instead(ctx, s.want, err)
@@ -72,9 +68,9 @@ func (r Restoring) open(ctx context.Context, s sourced) (src *restore.Opened, to
 		case err != nil:
 			return nil, nil, nil, err
 		case f.arq:
-			return r.arq(ctx, time.Time{}, s.want, s.todo)
+			return nil, nil, nil, errToArq
 		case f.disk != nil:
-			s.want, s.standsIn, opener = restore.Origin{Kind: restore.FromTimeMachine}, s.want, f.disk
+			s.want, opener = restore.Origin{Kind: restore.FromTimeMachine}, f.disk
 		}
 	}
 }
@@ -99,11 +95,11 @@ type fallback struct {
 // old Mac, mac, not answering, as why says: one of the Time Machine disks
 // attached holding the person's backups, Arq's restore by hand, or the old
 // Mac again; the disks it couldn't look for, it says why, offering the
-// rest. Without a terminal there's no one to ask: why is an error, naming
-// kit apply's flag that answers it.
+// rest. Without a terminal there's no one to ask: why is the error, which
+// names kit apply's flag that answers it (unopened).
 func (r Restoring) instead(ctx context.Context, mac restore.Origin, why error) (fallback, error) {
 	if r.Raise == nil {
-		return fallback{}, fmt.Errorf("%w: kit apply --restore-from time-machine|arq restores from a backup instead", why)
+		return fallback{}, why
 	}
 	event.Say(ctx, event.Doing{Says: "looking for Time Machine disks"})
 	disks, lookErr := r.Disks(ctx)
@@ -212,9 +208,8 @@ func lacking(paths []string, holds map[string]string) ([]lack, error) {
 	return out, nil
 }
 
-// arq opens Arq's restore, by hand, of todo's paths, standing in for
-// standsIn, should paths be part-way from it, and returns it with what of
-// todo's paths are left to copy, and why the rest couldn't be (failed):
+// arq opens Arq's restore, by hand, of todo's paths, and returns it with
+// what of them are left to copy, and why the rest couldn't be (failed):
 // each restored by the person in Arq's app, from the old Mac's backup,
 // at's or its latest, into a holding folder kit makes for it
 // (restore.Hold), for kit to copy from. A card asks for those whose
@@ -224,7 +219,7 @@ func lacking(paths []string, holds map[string]string) ([]lack, error) {
 // still be restoring it, or have put it in another's: the person says so
 // (hasnt). Without a terminal there's no card: those paths fail, each
 // saying what it would ask, and the rest are copied.
-func (r Restoring) arq(ctx context.Context, at time.Time, standsIn restore.Origin, todo []judged) (src *restore.Opened, left []judged, failed, err error) {
+func (r Restoring) arq(ctx context.Context, at time.Time, todo []judged) (src *restore.Opened, left []judged, failed, err error) {
 	holds, err := restore.Hold(r.StateDir, pathsOf(todo))
 	if err != nil {
 		return nil, nil, nil, err
@@ -245,7 +240,7 @@ func (r Restoring) arq(ctx context.Context, at time.Time, standsIn restore.Origi
 		if err := awaitAll(ctx, r.ArqAwait); err != nil {
 			return nil, nil, nil, err
 		}
-		if err := r.ask(ctx, &ownCard{says: r.arqCard(at, standsIn, asks, holds), run: r.Run, app: arq.Bundle}); err != nil {
+		if err := r.ask(ctx, &ownCard{says: r.arqCard(at, asks, holds), run: r.Run, app: arq.Bundle}); err != nil {
 			return nil, nil, nil, err
 		}
 		if a.Lacks, err = r.hasnt(ctx, asks, holds); err != nil {
@@ -256,7 +251,6 @@ func (r Restoring) arq(ctx context.Context, at time.Time, standsIn restore.Origi
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	src.Replaces = standsIn
 	return src, todo, failed, nil
 }
 
@@ -264,9 +258,10 @@ func (r Restoring) arq(ctx context.Context, at time.Time, standsIn restore.Origi
 // backup hasn't, as the person says: while any's holding folder, as holds
 // has it, doesn't hold it, a card says which, and what each holds instead,
 // asking to look again, or, of those holding nothing, whether the backup
-// hasn't them. One holding something else stays on the card till it's
-// moved into its own, or emptied. What the restore does with those it
-// hasn't is plan's (hasntIt).
+// hasn't them, those still holding nothing as they say so, looked at
+// again, so one Arq filled while the card was up is copied. One holding
+// something else stays on the card till it's moved into its own, or
+// emptied. What the restore does with those it hasn't is plan's (hasntIt).
 func (r Restoring) hasnt(ctx context.Context, asked []string, holds map[string]string) ([]string, error) {
 	var hasnt []string
 	for {
@@ -281,6 +276,9 @@ func (r Restoring) hasnt(ctx context.Context, asked []string, holds map[string]s
 		asked = pathsOf(lacks)
 		if c.chosen() != keyHasnt {
 			continue
+		}
+		if lacks, err = lacking(asked, holds); err != nil {
+			return nil, err
 		}
 		for _, l := range lacks {
 			if len(l.instead) == 0 {
@@ -319,14 +317,14 @@ func lackingCard(lacks []lack, holds map[string]string) event.NeedsYou {
 
 // arqCard is Arq's card, asking the person to restore asks, each into its
 // holding folder, as holds has them, from the backup at at, or its latest,
-// of the old Mac, as whoseBackup says, standsIn's should it name one.
-func (r Restoring) arqCard(at time.Time, standsIn restore.Origin, asks []string, holds map[string]string) event.NeedsYou {
+// of the old Mac, as whoseBackup says.
+func (r Restoring) arqCard(at time.Time, asks []string, holds map[string]string) event.NeedsYou {
 	backup := "its latest backup"
 	if !at.IsZero() {
 		backup = "its last backup at or before " + at.Format("2 Jan 2006 15:04")
 	}
 	steps := []string{
-		"Open " + r.whoseBackup(standsIn) + " backup in Arq, " + backup,
+		"Open " + r.whoseBackup() + " backup in Arq, " + backup,
 		"Restore each of these into its holding folder, in " + r.tilde(restore.ArqFolder(r.StateDir)) + ":",
 	}
 	for _, p := range asks {
@@ -338,12 +336,11 @@ func (r Restoring) arqCard(at time.Time, standsIn restore.Origin, asks []string,
 	}
 }
 
-// whoseBackup is whose backup Arq restores from: the old Mac's, the one
-// mac names, a path's part-way from, else the one this Mac started from;
-// or, started from none, this Mac's own.
-func (r Restoring) whoseBackup(mac restore.Origin) string {
-	if name := cmp.Or(mac.Detail, r.From); name != "" {
-		return name + "'s"
+// whoseBackup is whose backup Arq restores from: the Mac this one started
+// from's; or, started from none, this Mac's own.
+func (r Restoring) whoseBackup() string {
+	if r.From != "" {
+		return r.From + "'s"
 	}
 	return "this Mac's"
 }

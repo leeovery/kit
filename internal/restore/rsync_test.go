@@ -282,7 +282,9 @@ func TestCopiesNeverCarryACLsDeleteOrReplaceNewerFiles(t *testing.T) {
 
 // A file the copy kept, newer here than at the source, as --update keeps
 // it, is said so, as rsync 3.5.2 says it under --info=skip1 (copy-newer.raw,
-// a file's copy over one written since); a file copied, or a folder, isn't.
+// a file's copy over one written since), its name as rsync writes it,
+// escaped (copy-newer-escaped.raw, the same of a file with a newline in its
+// name); a file copied, or a folder, isn't.
 func TestCopySaysAFileWasKeptAsNewer(t *testing.T) {
 	file := Copy{From: Source{Path: "/Volumes/snapshot/Users/someone/.zsh_history"}, To: t.TempDir() + "/.zsh_history", Partial: partial, File: true}
 	folder := local("/Users/someone/Code", t.TempDir()+"/Code")
@@ -293,6 +295,7 @@ func TestCopySaysAFileWasKeptAsNewer(t *testing.T) {
 		newer   bool
 	}{
 		{"a file kept", file, "copy-newer.raw", true},
+		{"a file kept, its name escaped", Copy{From: Source{Path: "/Volumes/snapshot/Users/someone/nl\nname"}, To: t.TempDir() + "/nl\nname", Partial: partial, File: true}, "copy-newer-escaped.raw", true},
 		{"a file copied", file, "copy.raw", false},
 		{"a folder", folder, "copy-newer.raw", false},
 	} {
