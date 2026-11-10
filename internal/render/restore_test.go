@@ -164,9 +164,9 @@ func TestApplyingShowsTheRestoresChoices(t *testing.T) {
 // each.
 func TestApplyingShowsWhatArqsRestoreLacks(t *testing.T) {
 	lacking := event.NeedsYou{Time: after(75), Step: "restore", Item: "restore:arq-lacking", Title: "Arq's restore isn't all there",
-		Why:   "Should Arq still be restoring, let it finish; should a path be in another's holding folder, move it into its own. Then look again.",
+		Why:   "Should Arq still be restoring, let it finish. Should a holding folder hold something else, move it into its own, or empty it. Then look again.",
 		Steps: []string{"~/Code: …/arq/1 holds .claude, not Code", "~/.claude: …/arq/2 holds nothing yet"},
-		Keys:  []check.Key{{Key: "enter", Does: "looks again"}, {Key: "n", Does: "says the backup hasn't these, restoring the rest"}},
+		Keys:  []check.Key{{Key: "enter", Does: "looks again"}, {Key: "n", Does: "says the backup hasn't those holding nothing, restoring the rest"}},
 	}
 	face, out, _ := applyAt(100, 30, 80*time.Second, append(askingWhereFrom(), lacking))
 	defer func() { _ = face.Close() }()

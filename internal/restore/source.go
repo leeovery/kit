@@ -26,8 +26,11 @@ type Opened struct {
 	// Home is the old Mac's home folder there, absolute.
 	Home string
 	// Folders are where the listed paths are there, by path, when they
-	// aren't in Home, as in the folders Arq restored each into.
+	// aren't in Home, as in the folders Arq restored each into; Lacks, the
+	// paths it hasn't, as the person says of Arq's backup, whatever's in
+	// their folders.
 	Folders map[string]string
+	Lacks   []string
 	// Host, Shell and Rsync reach the old Mac over SSH, as Source has them:
 	// Host "" for a source on this Mac.
 	Host, Shell, Rsync string
@@ -78,13 +81,16 @@ func (o *Opened) Source(path string) Source {
 }
 
 // Stat says what's at path, a line's, from ~, there, as os.Lstat does: a
-// folder, a file (a link, as rsync copies one, is one), or nothing. A
-// holding folder of Arq's not holding path is an error saying what it
-// holds, never nothing there (heldIn). A source on another Mac is Look's
-// to look at.
+// folder, a file (a link, as rsync copies one, is one), or nothing, as for
+// one it Lacks. A holding folder of Arq's not holding path is an error
+// saying what it holds, never nothing there (heldIn). A source on another
+// Mac is Look's to look at.
 func (o *Opened) Stat(path string) (There, error) {
 	if o.Host != "" {
 		return There{}, errors.New("a path on another Mac is looked at through Look")
+	}
+	if slices.Contains(o.Lacks, path) {
+		return There{Kind: Missing}, nil
 	}
 	at := o.Source(path).Path
 	if _, ok := o.Folders[path]; ok {

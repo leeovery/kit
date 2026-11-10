@@ -114,12 +114,14 @@ func heldIn(hold, p string) error {
 }
 
 // Arq is the listed paths Arq restored, each into its holding folder, by
-// path (Hold), to open as a source: in kit's state, stateDir, Home the home
+// path (Hold), to open as a source: in kit's state, StateDir, Home the home
 // folder; never changing as it's copied, as a backup's restore; each
 // path's holding folder going once it's restored, so its room's freed.
+// Lacks are the paths the person says Arq's backup hasn't.
 type Arq struct {
 	StateDir, Home string
 	Holds          map[string]string
+	Lacks          []string
 }
 
 // Origin is what the record keeps of Arq's restore: the folder holding its
@@ -139,7 +141,7 @@ func (a Arq) Open(context.Context) (*Opened, error) {
 		folders[p] = Restored(hold, p)
 	}
 	return &Opened{
-		Folders: folders, Frees: true, Origin: a.Origin(),
+		Folders: folders, Lacks: a.Lacks, Frees: true, Origin: a.Origin(),
 		Close: func(context.Context) error { return nil },
 	}, nil
 }

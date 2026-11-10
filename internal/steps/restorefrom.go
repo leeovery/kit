@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"path"
 	"path/filepath"
 	"slices"
@@ -36,7 +35,7 @@ const (
 // The cards' keys: on the source card, Time Machine's disk, when there's
 // one alone (by number, when there are more), Arq, by hand, and the old
 // Mac again; on the lacking card, looking again (keyAgain), and the
-// backup hasn't them.
+// backup hasn't those holding nothing.
 const (
 	keyDisk  = "t"
 	keyArq   = "a"
@@ -48,14 +47,15 @@ const (
 // number key each.
 const mostDisks = 9
 
-// open opens s's source, the one the restore copies from, and returns it
-// with what of todo's paths are left to copy: Arq's restore, by hand (arq);
-// else as Sources has it, and, should the old Mac not answer, the source
-// the person chooses on a card instead (instead), standing in for it, or
-// the old Mac again, for as long as they try.
-func (r Restoring) open(ctx context.Context, rec restore.Record, s sourced, todo []judged) (*restore.Opened, []judged, error) {
+// open opens s's source, the one its paths are copied from, and returns it
+// with what of them are left to copy, and why the rest couldn't be
+// (failed): Arq's restore, by hand (arq); else as Sources has it, and,
+// should the old Mac not answer, the source the person chooses on a card
+// instead (instead), standing in for it, or the old Mac again, for as long
+// as they try.
+func (r Restoring) open(ctx context.Context, s sourced) (src *restore.Opened, todo []judged, failed, err error) {
 	if s.want.Kind == restore.FromArq {
-		return r.arq(ctx, s.at, s.standsIn, todo)
+		return r.arq(ctx, s.at, s.standsIn, s.todo)
 	}
 	opener := r.Sources(s.want, s.at, r.Flag.Kind != "")
 	for {
@@ -65,19 +65,16 @@ func (r Restoring) open(ctx context.Context, rec restore.Record, s sourced, todo
 			if err == nil && src.Replaces == (restore.Origin{}) {
 				src.Replaces = s.standsIn
 			}
-			return src, todo, err
+			return src, s.todo, nil, err
 		}
 		f, err := r.instead(ctx, s.want, err)
 		switch {
 		case err != nil:
-			return nil, nil, err
+			return nil, nil, nil, err
 		case f.arq:
-			if err := partWay(rec, todo, restore.Origin{Kind: restore.FromArq}, s.want); err != nil {
-				return nil, nil, err
-			}
-			return r.arq(ctx, time.Time{}, s.want, todo)
+			return r.arq(ctx, time.Time{}, s.want, s.todo)
 		case f.disk != nil:
-			s, opener = sourced{want: restore.Origin{Kind: restore.FromTimeMachine}, standsIn: s.want}, f.disk
+			s.want, s.standsIn, opener = restore.Origin{Kind: restore.FromTimeMachine}, s.want, f.disk
 		}
 	}
 }
@@ -197,6 +194,8 @@ type lack struct {
 	instead []string
 }
 
+func (l lack) pathOf() string { return l.path }
+
 // lacking are those of paths whose holding folders, as holds has them,
 // don't hold Arq's restore of them (restore.Holds).
 func lacking(paths []string, holds map[string]string) ([]lack, error) {
@@ -213,110 +212,108 @@ func lacking(paths []string, holds map[string]string) ([]lack, error) {
 	return out, nil
 }
 
-// lacked are lacks' paths.
-func lacked(lacks []lack) []string {
-	paths := make([]string, len(lacks))
-	for i, l := range lacks {
-		paths[i] = l.path
-	}
-	return paths
-}
-
 // arq opens Arq's restore, by hand, of todo's paths, standing in for
 // standsIn, should paths be part-way from it, and returns it with what of
-// todo's paths are left to copy: each restored by the person in Arq's app,
-// from the old Mac's backup, at's or its latest, into a holding folder kit
-// makes for it (restore.Hold), for kit to copy from. A card asks for those
-// whose holding folders don't hold them yet, once Arq's installed
-// (ArqAwait), opening it; once the person says it's done, a holding folder
-// still not holding its path is never taken as one the backup hadn't, as
-// Arq may still be restoring it, or have put it in another's: the person
-// says so (hasnt). Without a terminal there's no card: an error says what
-// it would ask.
-func (r Restoring) arq(ctx context.Context, at time.Time, standsIn restore.Origin, todo []judged) (*restore.Opened, []judged, error) {
-	paths := make([]string, len(todo))
-	for i, j := range todo {
-		paths[i] = j.Path
-	}
-	holds, err := restore.Hold(r.StateDir, paths)
+// todo's paths are left to copy, and why the rest couldn't be (failed):
+// each restored by the person in Arq's app, from the old Mac's backup,
+// at's or its latest, into a holding folder kit makes for it
+// (restore.Hold), for kit to copy from. A card asks for those whose
+// holding folders don't hold them yet, once Arq's installed (ArqAwait),
+// opening it; once the person says it's done, a holding folder still not
+// holding its path is never taken as one the backup hadn't, as Arq may
+// still be restoring it, or have put it in another's: the person says so
+// (hasnt). Without a terminal there's no card: those paths fail, each
+// saying what it would ask, and the rest are copied.
+func (r Restoring) arq(ctx context.Context, at time.Time, standsIn restore.Origin, todo []judged) (src *restore.Opened, left []judged, failed, err error) {
+	holds, err := restore.Hold(r.StateDir, pathsOf(todo))
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	lacks, err := lacking(paths, holds)
+	lacks, err := lacking(pathsOf(todo), holds)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	a := restore.Arq{StateDir: r.StateDir, Home: r.Home, Holds: holds}
-	if len(lacks) > 0 {
-		if r.Raise == nil {
-			return nil, nil, fmt.Errorf("restoring through Arq is by hand: in Arq, restore %s, then run kit apply again; at a terminal, it asks for them", r.into(lacks, holds))
+	a, asks := restore.Arq{StateDir: r.StateDir, Home: r.Home, Holds: holds}, pathsOf(lacks)
+	switch {
+	case len(lacks) == 0:
+	case r.Raise == nil:
+		for _, l := range lacks {
+			failed = errors.Join(failed, fmt.Errorf("couldn't restore %s: restoring through Arq is by hand: in Arq, restore %s, then run kit apply again; at a terminal, it asks for it", l.path, r.into(l, holds)))
 		}
+		todo = slices.DeleteFunc(slices.Clone(todo), func(j judged) bool { return slices.Contains(asks, j.Path) })
+	default:
 		if err := awaitAll(ctx, r.ArqAwait); err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
-		if err := r.ask(ctx, &ownCard{says: r.arqCard(at, standsIn, lacked(lacks), holds), run: r.Run, app: arq.Bundle}); err != nil {
-			return nil, nil, err
+		if err := r.ask(ctx, &ownCard{says: r.arqCard(at, standsIn, asks, holds), run: r.Run, app: arq.Bundle}); err != nil {
+			return nil, nil, nil, err
 		}
-		gone, err := r.hasnt(ctx, lacked(lacks), a)
-		if err != nil {
-			return nil, nil, err
-		}
-		todo = slices.DeleteFunc(todo, func(j judged) bool { return slices.Contains(gone, j.Path) })
-		for _, p := range gone {
-			delete(a.Holds, p)
+		if a.Lacks, err = r.hasnt(ctx, asks, holds); err != nil {
+			return nil, nil, nil, err
 		}
 	}
-	src, err := a.Open(ctx)
-	if err == nil {
-		src.Replaces = standsIn
+	src, err = a.Open(ctx)
+	if err != nil {
+		return nil, nil, nil, err
 	}
-	return src, todo, err
+	src.Replaces = standsIn
+	return src, todo, failed, nil
 }
 
 // hasnt are those of asked, the paths Arq's card asked for, that Arq's
-// backup hasn't, as the person says: while any's holding folder, as a has
-// it, doesn't hold it, a card says which, and what each holds instead,
-// asking to look again, or whether the backup hasn't them, which records
-// them not there, from a, their holding folders deleted.
-func (r Restoring) hasnt(ctx context.Context, asked []string, a restore.Arq) ([]string, error) {
+// backup hasn't, as the person says: while any's holding folder, as holds
+// has it, doesn't hold it, a card says which, and what each holds instead,
+// asking to look again, or, of those holding nothing, whether the backup
+// hasn't them. One holding something else stays on the card till it's
+// moved into its own, or emptied. What the restore does with those it
+// hasn't is plan's (hasntIt).
+func (r Restoring) hasnt(ctx context.Context, asked []string, holds map[string]string) ([]string, error) {
+	var hasnt []string
 	for {
-		lacks, err := lacking(asked, a.Holds)
+		lacks, err := lacking(asked, holds)
 		if err != nil || len(lacks) == 0 {
-			return nil, err
+			return hasnt, err
 		}
-		c := &ownCard{says: lackingCard(lacks, a.Holds)}
+		c := &ownCard{says: lackingCard(lacks, holds)}
 		if err := r.ask(ctx, c); err != nil {
 			return nil, err
 		}
-		asked = lacked(lacks)
+		asked = pathsOf(lacks)
 		if c.chosen() != keyHasnt {
 			continue
 		}
-		var errs error
-		for _, p := range asked {
-			errs = errors.Join(errs, r.recordNotThere(ctx, p, a.Origin()), os.RemoveAll(a.Holds[p]))
+		for _, l := range lacks {
+			if len(l.instead) == 0 {
+				hasnt = append(hasnt, l.path)
+			}
 		}
-		return asked, errs
+		asked = slices.DeleteFunc(asked, func(p string) bool { return slices.Contains(hasnt, p) })
 	}
 }
 
 // lackingCard is the card saying which of Arq's holding folders, as holds
 // has them, don't hold their paths, once the person says Arq's restored
-// them all, and what each holds instead: to look again, or say the backup
-// hasn't them.
+// them all, and what each holds instead: to look again, or, of those
+// holding nothing, say the backup hasn't them. One holding something else
+// is never said to be one the backup hasn't: it's to move into its own.
 func lackingCard(lacks []lack, holds map[string]string) event.NeedsYou {
 	steps := make([]string, len(lacks))
+	keys := []check.Key{{Key: keyAgain, Does: "looks again"}}
+	empty := false
 	for i, l := range lacks {
 		hold := "…/arq/" + filepath.Base(holds[l.path])
 		steps[i] = l.path + ": " + hold + " holds nothing yet"
 		if len(l.instead) > 0 {
 			steps[i] = fmt.Sprintf("%s: %s holds %s, not %s", l.path, hold, strings.Join(l.instead, ", "), path.Base(l.path))
 		}
+		empty = empty || len(l.instead) == 0
+	}
+	if empty {
+		keys = append(keys, check.Key{Key: keyHasnt, Does: "says the backup hasn't those holding nothing, restoring the rest"})
 	}
 	return event.NeedsYou{
-		Item: itemLacking, Title: "Arq's restore isn't all there", Steps: steps,
-		Why:  "Should Arq still be restoring, let it finish; should a path be in another's holding folder, move it into its own. Then look again.",
-		Keys: []check.Key{{Key: keyAgain, Does: "looks again"}, {Key: keyHasnt, Does: "says the backup hasn't these, restoring the rest"}},
+		Item: itemLacking, Title: "Arq's restore isn't all there", Steps: steps, Keys: keys,
+		Why: "Should Arq still be restoring, let it finish. Should a holding folder hold something else, move it into its own, or empty it. Then look again.",
 	}
 }
 
@@ -351,17 +348,14 @@ func (r Restoring) whoseBackup(mac restore.Origin) string {
 	return "this Mac's"
 }
 
-// into says where each of lacks is restored into, as holds has them: a
-// holding folder each, and what it holds instead, if anything.
-func (r Restoring) into(lacks []lack, holds map[string]string) string {
-	each := make([]string, len(lacks))
-	for i, l := range lacks {
-		each[i] = l.path + " into " + r.tilde(holds[l.path])
-		if len(l.instead) > 0 {
-			each[i] += " (holding " + strings.Join(l.instead, ", ") + " instead)"
-		}
+// into says where l's path is restored into, as holds has it: its holding
+// folder, and what it holds instead, if anything.
+func (r Restoring) into(l lack, holds map[string]string) string {
+	into := l.path + " into " + r.tilde(holds[l.path])
+	if len(l.instead) > 0 {
+		into += " (holding " + strings.Join(l.instead, ", ") + " instead)"
 	}
-	return strings.Join(each, ", ")
+	return into
 }
 
 // tilde is path, from ~ when it's in the home folder.

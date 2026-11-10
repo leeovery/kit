@@ -118,15 +118,16 @@ func (p Path) started() bool {
 // PartWay reports whether the restore of any of lines' paths has started
 // and not finished: a run carries it on, whatever kit apply's flags say.
 func (r Record) PartWay(lines []Line) bool {
-	_, ok := r.Resuming(lines)
+	_, ok := r.Resuming(lines, "")
 	return ok
 }
 
 // Resuming is where the first of lines' paths whose restore has started
-// and not finished came from: ok false when there's none.
-func (r Record) Resuming(lines []Line) (from Origin, ok bool) {
+// and not finished came from, a source of kind, any for "": ok false when
+// there's none.
+func (r Record) Resuming(lines []Line, kind string) (from Origin, ok bool) {
 	for _, l := range lines {
-		if p := r.Paths[l.Path]; !r.Finished(l.Path) && p.started() {
+		if p := r.Paths[l.Path]; !r.Finished(l.Path) && p.started() && (kind == "" || p.From.Kind == kind) {
 			return p.From, true
 		}
 	}
@@ -140,6 +141,18 @@ func (r Record) mayAside(path string) bool {
 	return r.Settled.IsZero() && slices.Contains(r.First.Paths, path) && r.Paths[path].State != NotThere
 }
 
+// MaySetAside reports whether a file at the listed path path, newer than
+// its copy from from, so kept by it, may be set aside for that copy, as
+// written here by set-up since it began, began: in set-up's window (zero on
+// a Mac in use, which has none), as the judge has it (mayAside); and,
+// should the path's copy have begun before, only from the source it began
+// from, as a copy from another, the old Mac a backup stands in for, may
+// have put it there. r is the record from before from's copy began.
+func (r Record) MaySetAside(path string, from Origin, began time.Time) bool {
+	p := r.Paths[path]
+	return !began.IsZero() && r.mayAside(path) && (!p.started() || p.From == from)
+}
+
 // Finished reports whether the restore is done with the listed path path:
 // restored, here, or not in its source.
 func (r Record) Finished(path string) bool {
@@ -147,24 +160,25 @@ func (r Record) Finished(path string) bool {
 	return s == Done || s == Here || s == NotThere
 }
 
-// Begin records from as the source the restore copies from, as a copy
-// from it starts, so a run again resumes from it: only then, so a source
-// opened and copied nothing from is never kept. Should from stand in for
-// replaces, a source gone or passed over, it's recorded as the source of
-// every path part-way from that one, reporting whether there were any.
-func (r *Record) Begin(from, replaces Origin) (moved bool) {
+// Begin records the copy of the listed path path from from under way, as
+// it begins, at now: from its source, and the restore's, so a run again
+// resumes from it. Only then, and only path's: a source opened that copied
+// nothing is never kept, and a path part-way from a source another stood
+// in for, but hasn't, keeps the one it began from, for a run to finish it
+// from there. It returns where path's copy was part-way from before, if
+// it was.
+func (r *Record) Begin(path string, from Origin, now time.Time) (was Origin) {
 	r.From = from
-	if replaces == (Origin{}) {
-		return false
-	}
-	for path, p := range r.Paths {
-		if p.From == replaces && p.started() && !r.Finished(path) {
-			p.From = from
-			r.Paths[path] = p
-			moved = true
+	r.Change(path, func(p *Path) {
+		if p.started() {
+			was = p.From
 		}
-	}
-	return moved
+		p.State, p.From = Copying, from
+		if p.Started.IsZero() {
+			p.Started = now
+		}
+	})
+	return was
 }
 
 // RecordFirstRun records the restore's first run on this Mac, at now,

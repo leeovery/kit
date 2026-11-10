@@ -115,41 +115,66 @@ func TestRecordPartWay(t *testing.T) {
 	}
 }
 
-// A copy starting records its source as the run's; standing in for
-// another, gone or passed over, it becomes the source of every path
-// part-way from that one, reported, but not of one finished, nor one that
-// never started.
+// A copy beginning records its source as the path's and the run's, and
+// when it first started, saying where the path was part-way from before:
+// only that path, so another part-way from the source it stands in for,
+// not begun, keeps its own.
 func TestRecordBegin(t *testing.T) {
-	started := time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC)
+	started, now := time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC), time.Date(2026, 11, 21, 10, 0, 0, 0, time.UTC)
 	laptop, tm := Origin{Kind: FromMac, Detail: "laptop"}, Origin{Kind: FromTimeMachine, Detail: "snapshot"}
-	fresh := func() Record {
-		return Record{Paths: map[string]Path{
-			"~/Code":      {State: Copying, From: laptop, Started: started},
-			"~/Documents": {State: Checking, From: laptop, Started: started},
-			"~/Music":     {State: Done, From: laptop, Started: started},
-			"~/Gone":      {State: NotThere, From: laptop},
-		}}
+	rec := Record{Paths: map[string]Path{
+		"~/Code":      {State: Copying, From: laptop, Started: started},
+		"~/Documents": {State: Checking, From: laptop, Started: started},
+		"~/Gone":      {State: NotThere, From: laptop},
+	}}
+	if was := rec.Begin("~/Code", tm, now); was != laptop {
+		t.Errorf("Begin(~/Code) = %+v, want it part-way from laptop before", was)
 	}
-	rec := fresh()
-	if moved := rec.Begin(tm, Origin{}); moved || rec.From != tm || rec.Paths["~/Code"].From != laptop {
-		t.Errorf("standing in for none, Begin() = %v, the record %+v; want its source recorded, nothing moved", moved, rec)
+	if was := rec.Begin("~/Gone", tm, now); was != (Origin{}) {
+		t.Errorf("Begin(~/Gone), never begun, = %+v, want none", was)
 	}
-	rec = fresh()
-	if moved := rec.Begin(tm, laptop); !moved || rec.From != tm {
-		t.Errorf("standing in for laptop, Begin() = %v, from %+v; want it moved, from Time Machine", moved, rec.From)
+	want := map[string]Path{
+		"~/Code":      {State: Copying, From: tm, Started: started},
+		"~/Documents": {State: Checking, From: laptop, Started: started},
+		"~/Gone":      {State: Copying, From: tm, Started: now},
 	}
-	for path, want := range map[string]Origin{"~/Code": tm, "~/Documents": tm, "~/Music": laptop, "~/Gone": laptop} {
-		if got := rec.Paths[path].From; got != want {
-			t.Errorf("standing in for laptop, %s is from %+v, want %+v", path, got, want)
-		}
-	}
-	if moved := rec.Begin(tm, laptop); moved {
-		t.Error("begun again, Begin() reported paths moved")
+	if rec.From != tm || !reflect.DeepEqual(rec.Paths, want) {
+		t.Errorf("begun, the record = %+v\nwant from %+v, paths %+v", rec, tm, want)
 	}
 }
 
-// Resuming is where the first listed path part-way came from, in the
-// lines' order: none when none is.
+// A file kept by a copy, newer here, may be set aside only in set-up's
+// window, on a Mac whose set-up began; and, its path's copy begun before,
+// only for a copy from the source it began from.
+func TestRecordMaySetAside(t *testing.T) {
+	began := time.Date(2026, 11, 20, 9, 0, 0, 0, time.UTC)
+	laptop, tm := Origin{Kind: FromMac, Detail: "laptop"}, Origin{Kind: FromTimeMachine, Detail: "snapshot"}
+	open := Record{First: Run{Time: began, Paths: []string{"~/.zsh_history"}}}
+	for _, tt := range []struct {
+		name  string
+		rec   Record
+		began time.Time
+		path  string
+		p     Path
+		want  bool
+	}{
+		{"its first copy", open, began, "~/.zsh_history", Path{}, true},
+		{"resumed from the same source", open, began, "~/.zsh_history", Path{State: Copying, From: tm, Started: began}, true},
+		{"resumed from another, standing in", open, began, "~/.zsh_history", Path{State: Checking, From: laptop, Started: began}, false},
+		{"a Mac in use", open, time.Time{}, "~/.zsh_history", Path{}, false},
+		{"a line added after the first run", open, began, "~/.newtool", Path{}, false},
+		{"the restore settled", Record{First: open.First, Settled: began.Add(time.Hour)}, began, "~/.zsh_history", Path{}, false},
+	} {
+		rec := tt.rec
+		rec.Paths = map[string]Path{tt.path: tt.p}
+		if got := rec.MaySetAside(tt.path, tm, tt.began); got != tt.want {
+			t.Errorf("%s: MaySetAside() = %v, want %v", tt.name, got, tt.want)
+		}
+	}
+}
+
+// Resuming is where the first listed path part-way came from, of a kind if
+// asked, in the lines' order: none when none is.
 func TestRecordResuming(t *testing.T) {
 	started := time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC)
 	tm, arq := Origin{Kind: FromTimeMachine, Detail: "snapshot"}, Origin{Kind: FromArq, Detail: "/hold"}
@@ -158,10 +183,13 @@ func TestRecordResuming(t *testing.T) {
 		"~/Documents": {State: Copying, From: arq, Started: started},
 		"~/Music":     {State: Checking, From: tm, Started: started},
 	}}
-	if from, ok := rec.Resuming([]Line{{Path: "~/Code"}, {Path: "~/Documents"}, {Path: "~/Music"}}); !ok || from != arq {
+	if from, ok := rec.Resuming([]Line{{Path: "~/Code"}, {Path: "~/Documents"}, {Path: "~/Music"}}, ""); !ok || from != arq {
 		t.Errorf("Resuming() = %+v, %v; want Arq's", from, ok)
 	}
-	if from, ok := rec.Resuming([]Line{{Path: "~/Code"}}); ok {
+	if from, ok := rec.Resuming([]Line{{Path: "~/Code"}, {Path: "~/Documents"}, {Path: "~/Music"}}, FromTimeMachine); !ok || from != tm {
+		t.Errorf("of Time Machine's, Resuming() = %+v, %v; want Time Machine's", from, ok)
+	}
+	if from, ok := rec.Resuming([]Line{{Path: "~/Code"}}, ""); ok {
 		t.Errorf("with ~/Code alone, done, Resuming() = %+v; want none", from)
 	}
 }

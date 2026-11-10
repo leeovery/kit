@@ -1371,13 +1371,16 @@ refuses a line the restore would refuse, before writing anything, and copies not
   by the person in Arq's app into a holding folder kit names, then put in place by kit and
   compared as from Time Machine, the holding folder deleted after. When the old Mac doesn't
   answer, a card offers its Time Machine disk, Arq, or trying again, and what comes after the
-  restore waits. A restore stopped part-way carries on from the source it began from; but a
-  backup named by `--restore-from`, or chosen on the card, stands in for the old Mac a path's
-  part-way from, the path carrying on from it (`--update` keeps the newer files the live copy
-  brought), the record and the log saying so. A holding folder of Arq's still empty once the
-  person says Arq's done, or holding another path, is never a path the backup hasn't: the card
-  comes back naming it, to look again, and only the person saying the backup hasn't it records
-  it not there.
+  restore waits. A path stopped part-way carries on from the source it began from, each from
+  its own; but a backup named by `--restore-from`, or chosen on the card, stands in for the old
+  Mac a path's part-way from, the path carrying on from it as its own copy begins (`--update`
+  keeps the newer files the live copy brought), the record and the log saying so: one the
+  backup hasn't fails, keeping the old Mac, to finish from there. A path a source hasn't is
+  recorded not there only if its copy never began; part-way, it fails. A holding folder of
+  Arq's still empty once the person says Arq's done is never a path the backup hasn't: the card
+  comes back naming it, to look again, or for the person to say the backup hasn't it; one
+  holding another path stays on the card till it's moved into its own, or emptied. Without a
+  terminal, those paths fail, saying what to restore where, and the rest are copied.
 - **The copy.** Homebrew's rsync, rsync 3 on both Macs (macOS's own keeps no extended
   attributes), keeping attributes, permissions and dates; never `--delete`, and `--update`, so a
   file edited on the new Mac is never replaced by the old copy. From the old Mac it leaves out
@@ -1385,9 +1388,11 @@ refuses a line the restore would refuse, before writing anything, and copies not
   folder holding git checkouts, agents' worktrees, is copied whole. Needs: the source
   reachable, free space for the copy, the same username (tools key their data by full path).
   Then a second pass comparing checksums: from a backup it must find nothing; from a live Mac
-  what changed during the copy is copied again, and counted. A listed file the copy kept, newer
-  here and differing, as a shell's history written as it's restored, is set aside and copied
-  again, once, before the second pass. rsync's own errors fail the step.
+  what changed during the copy is copied again, and counted. A listed file the copy kept as
+  newer here (rsync says so) is set aside and copied again, once, before the second pass, only
+  when the set-up wrote it in its window, as a shell's history written as it's restored, and
+  no copy from another source could have put it there; any other is kept, as newer work always
+  is. rsync's own errors fail the step.
 - **The judgement, per path, before its copy.** Recorded done: never restored again. Absent,
   or holding only what's kit's: restored. Holding anything older than this Mac's set-up: here,
   never touched, never merged into. Holding only what the set-up itself wrote (a shell's
@@ -1398,9 +1403,10 @@ refuses a line the restore would refuse, before writing anything, and copies not
   later never moves a Mac's data. A path its source hasn't waits, judged afresh each run.
 - **The record**, in kit's state: the source a copy last started from, so a run again resumes
   from it (recorded only as a copy starts, so a source chosen that copied nothing is never
-  kept); the first run's paths; each path's state as it goes (copying, checking, done, here,
-  waiting for its source, its holding folder of Arq's), with its source, snapshot or time,
-  counts, when, and the second pass's result; and when the restore first settled.
+  kept), and each path's own, changed only as its own copy begins; the first run's paths; each
+  path's state as it goes (copying, checking, done, here, waiting for its source, its holding
+  folder of Arq's), with its source, snapshot or time, counts, when, and the second pass's
+  result; and when the restore first settled.
 - **Order.** The restore waits for Homebrew's rsync and, copying from the old Mac, the secrets;
   what writes into listed paths (Claude Code's MCP servers and skills), steps declared
   `--after restore` and the reinstall come after it. Linked files and prefs needn't wait, as

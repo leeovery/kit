@@ -91,7 +91,7 @@ func TestHolds(t *testing.T) {
 // it's restored. What's at each is what's there, a folder or a file; a
 // holding folder still empty, or holding something else, is an error
 // saying so, never a path its source hasn't, as Arq may still be restoring
-// it.
+// it; only a path the person says Arq's backup hasn't is nothing there.
 func TestArqOpens(t *testing.T) {
 	home := t.TempDir()
 	state := filepath.Join(home, ".local", "state", "kit")
@@ -102,7 +102,7 @@ func TestArqOpens(t *testing.T) {
 	write(t, filepath.Join(holds["~/Code"], "Code", "main.go"), time.Now())
 	write(t, filepath.Join(holds["~/.zsh_history"], ".zsh_history"), time.Now())
 	write(t, filepath.Join(holds["~/Music"], "song.mp3"), time.Now())
-	src, err := Arq{StateDir: state, Home: home, Holds: holds}.Open(t.Context())
+	src, err := Arq{StateDir: state, Home: home, Holds: holds, Lacks: []string{"~/Gone"}}.Open(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +112,7 @@ func TestArqOpens(t *testing.T) {
 	if got := src.Source("~/Code"); got != (Source{Path: filepath.Join(state, "restore", "arq", "1", "Code")}) {
 		t.Errorf("~/Code is at %+v", got)
 	}
-	for path, want := range map[string]Kind{"~/Code": Folder, "~/.zsh_history": File} {
+	for path, want := range map[string]Kind{"~/Code": Folder, "~/.zsh_history": File, "~/Gone": Missing} {
 		if got, err := src.Stat(path); err != nil || got.Kind != want {
 			t.Errorf("Stat(%s) = %+v, %v; want %v", path, got, err, want)
 		}

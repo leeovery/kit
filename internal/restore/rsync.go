@@ -196,12 +196,14 @@ type Copy struct {
 // Stats is what a copy comes to: how many files it copies, or would, and
 // how many bytes of them; and how many the path holds once copied, as the
 // source has them, copied or there already, and their bytes. Files are
-// regular files, never folders or links.
+// regular files, never folders or links. Newer is, of a file copied, whether
+// the one here was kept, newer than the source's, as --update keeps it.
 type Stats struct {
 	Files      int
 	Bytes      int64
 	TotalFiles int
 	TotalBytes int64
+	Newer      bool
 }
 
 // Progress is how far a copy has got, as rsync says it.
@@ -230,22 +232,28 @@ func (r Rsync) Size(ctx context.Context, c Copy) (Stats, error) {
 }
 
 // Copy copies c, telling progress how far it's got as rsync says, and
-// returns what it copied. A copy stopped part way carries on from where it
-// was, run again. Files vanished from the source as it copied fail it with
+// returns what it copied, and, a file, whether it kept the one here, newer,
+// as rsync says it skipped it (its --info=skip1, as in ".zsh_history is
+// newer"). A copy stopped part way carries on from where it was, run
+// again. Files vanished from the source as it copied fail it with
 // ErrVanished, and it still returns what it copied.
 func (r Rsync) Copy(ctx context.Context, c Copy, progress func(Progress)) (Stats, error) {
 	var read progressReader
 	var stats statsReader
+	newer := false
 	lines := func(line string) {
 		stats.line(line)
+		newer = newer || c.File && line == filepath.Base(c.To)+" is newer"
 		if p, ok := read.line(line); ok && progress != nil {
 			progress(p)
 		}
 	}
 	// Its output, a line for each thing copied, is read as it comes, not
 	// kept: a home's millions of files would be a gigabyte.
-	_, err := r.rsync(ctx, c, runner.Command{Lines: lines, Redraws: true, LinesOnly: true}, "--info=name1,progress2", "--stats")
-	return stated(stats.text(), err)
+	_, err := r.rsync(ctx, c, runner.Command{Lines: lines, Redraws: true, LinesOnly: true}, "--info=name1,progress2,skip1", "--stats")
+	s, err := stated(stats.text(), err)
+	s.Newer = newer
+	return s, err
 }
 
 // Compare is the second pass: it compares every file of c's copy with its
@@ -260,26 +268,10 @@ func (r Rsync) Compare(ctx context.Context, c Copy) (Recopied, error) {
 	return recopied(res.Stdout), err
 }
 
-// Differs reports whether c's file here differs from its source, by
-// checksum, as a copy that replaced it whatever its time would find: after
-// c's copy, a file newer here than at the source, which --update kept. It
-// makes nothing.
-func (r Rsync) Differs(ctx context.Context, c Copy) (bool, error) {
-	args, err := c.args(false, []string{"--dry-run", "--checksum", "--itemize-changes"})
-	if err != nil {
-		return false, err
-	}
-	res, err := r.run.Run(ctx, runner.Command{Name: "rsync", Args: args, Timeout: runner.Unlimited})
-	if err := failed(err); err != nil {
-		return false, err
-	}
-	return recopied(res.Stdout).Count > 0, nil
-}
-
 // rsync runs rsync on c with options, as cmd, which says how to read what it
-// prints: never replacing a file newer here than at the source.
+// prints.
 func (r Rsync) rsync(ctx context.Context, c Copy, cmd runner.Command, options ...string) (runner.Result, error) {
-	args, err := c.args(true, options)
+	args, err := c.args(options)
 	if err != nil {
 		return runner.Result{}, err
 	}
@@ -291,20 +283,15 @@ func (r Rsync) rsync(ctx context.Context, c Copy, cmd runner.Command, options ..
 // args are rsync's arguments for c, with options: archive (which, run by
 // anyone but root, keeps no owners), extended attributes, hard links and
 // creation dates; never ACLs, as Time Machine's deny adding files to the
-// folders it marks; never deleting; with update, never replacing a file
-// newer here than at the source (--update), so what the person's written
-// since a copy began outlives the copy run again and its second pass, as
-// every run that copies has. --mkpath makes the folders To is in, but not
-// in a dry run.
-func (c Copy) args(update bool, options []string) ([]string, error) {
+// folders it marks; never deleting; never replacing a file newer here than
+// at the source (--update), so what the person's written since a copy began
+// outlives the copy run again and its second pass. --mkpath makes the
+// folders To is in, but not in a dry run.
+func (c Copy) args(options []string) ([]string, error) {
 	if err := c.check(); err != nil {
 		return nil, err
 	}
-	args := []string{"--archive", "--xattrs", "--hard-links", "--crtimes", "--mkpath"}
-	if update {
-		args = append(args, "--update")
-	}
-	args = append(args, "--partial-dir="+filepath.Clean(c.Partial))
+	args := []string{"--archive", "--xattrs", "--hard-links", "--crtimes", "--mkpath", "--update", "--partial-dir=" + filepath.Clean(c.Partial)}
 	if c.Filter != "" {
 		args = append(args, "--exclude-from="+c.Filter)
 	}

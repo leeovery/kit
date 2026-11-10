@@ -20,7 +20,9 @@ import (
 // runs in a scratch folder, renamed /Volumes/Scratch/restore: --version
 // (and macOS's openrsync's); a copy's --info=name1,progress2 --stats, its
 // carriage returns kept (copy.raw, and vanished.raw, a 200 MB file copied
-// slowly while a later file was deleted); a dry run's --stats (size.raw);
+// slowly while a later file was deleted; copy-newer.raw, with skip1, a
+// file's copy over one newer there, which --update kept); a dry run's
+// --stats (size.raw);
 // a second pass's --itemize-changes (compare.raw, after a file's contents
 // were changed, others' times, permissions and attributes, and a file, a
 // link, a hard link and an empty folder deleted); and its standard error
@@ -58,7 +60,7 @@ var ops = []struct {
 		_, err := r.Size(ctx, c)
 		return err
 	}},
-	{"copy", []string{"--info=name1,progress2", "--stats"}, func(ctx context.Context, r Rsync, c Copy) error {
+	{"copy", []string{"--info=name1,progress2,skip1", "--stats"}, func(ctx context.Context, r Rsync, c Copy) error {
 		_, err := r.Copy(ctx, c, nil)
 		return err
 	}},
@@ -278,32 +280,26 @@ func TestCopiesNeverCarryACLsDeleteOrReplaceNewerFiles(t *testing.T) {
 	}
 }
 
-// Whether a file here differs from its source is a dry run by checksum
-// without --update, as only that sees a file newer here, which a copy
-// kept: its contents differing count; its time alone doesn't. The lines are
-// rsync 3.5.2's, for a file newer here, then one only touched since.
-func TestDiffersLooksPastUpdate(t *testing.T) {
-	home := t.TempDir()
-	file := local("/Users/someone/.zsh_history", home+"/.zsh_history")
-	file.File = true
+// A file the copy kept, newer here than at the source, as --update keeps
+// it, is said so, as rsync 3.5.2 says it under --info=skip1 (copy-newer.raw,
+// a file's copy over one written since); a file copied, or a folder, isn't.
+func TestCopySaysAFileWasKeptAsNewer(t *testing.T) {
+	file := Copy{From: Source{Path: "/Volumes/snapshot/Users/someone/.zsh_history"}, To: t.TempDir() + "/.zsh_history", Partial: partial, File: true}
+	folder := local("/Users/someone/Code", t.TempDir()+"/Code")
 	for _, tt := range []struct {
-		name, prints string
-		want         bool
+		name    string
+		c       Copy
+		fixture string
+		newer   bool
 	}{
-		{"its contents newer here", ">fcst...n.. .zsh_history\n", true},
-		{"only touched here", ".f..t...n.. .zsh_history\n", false},
-		{"the same", "", false},
+		{"a file kept", file, "copy-newer.raw", true},
+		{"a file copied", file, "copy.raw", false},
+		{"a folder", folder, "copy-newer.raw", false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			fake := prints(t, tt.prints)
-			got, err := NewRsync(fake).Differs(t.Context(), file)
-			if err != nil || got != tt.want {
-				t.Errorf("Differs() = %v, %v; want %v", got, err, tt.want)
-			}
-			want := slices.Concat([]string{"--archive", "--xattrs", "--hard-links", "--crtimes", "--mkpath", "--partial-dir=" + partial},
-				[]string{"--dry-run", "--checksum", "--itemize-changes", "/Volumes/snapshot/Users/someone/.zsh_history", home + "/.zsh_history"})
-			if got := fake.Commands()[0].Args; !slices.Equal(got, want) {
-				t.Errorf("rsync's arguments = %q\nwant %q", got, want)
+			stats, err := realRsync(t, tt.fixture, "", 0).Copy(t.Context(), tt.c, nil)
+			if err != nil || stats.Newer != tt.newer {
+				t.Errorf("Copy() = %+v, %v; want newer %v", stats, err, tt.newer)
 			}
 		})
 	}
