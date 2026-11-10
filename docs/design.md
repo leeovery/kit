@@ -1377,8 +1377,9 @@ refuses a line the restore would refuse, before writing anything, and copies not
   it as its own copy begins (`--update` never copies over newer work, and the second pass
   passes over a newer file kept), the record and the log saying so: one it hasn't fails,
   keeping the source it began from. A path a source hasn't is recorded not there only if its
-  copy never began; part-way, it fails, as it does when its source won't open, naming the ways
-  on: another source, by `--restore-from`, or `kit restore remove` dropping its line. Arq's
+  copy never began; part-way, it fails, naming the ways on: another source, by
+  `--restore-from`, or `kit restore remove` dropping its line, as a source that won't open
+  names them for every path it was to restore (a wait, or kit stopped, names none). Arq's
   restore comes last in a run, taking in the paths sent to it on the card, so its card goes up
   once. A holding folder of Arq's still empty once the person says Arq's done is never a path
   the backup hasn't: the card comes back naming it, to look again, or for the person to say the

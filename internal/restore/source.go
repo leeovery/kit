@@ -143,7 +143,7 @@ type Sources struct {
 }
 
 // For is the source o names, to open: Time Machine's backups, as
-// TimeMachine has them, o's snapshot the one the restore began from, at
+// TimeMachine has them, o's snapshot the one the restore copied from, at
 // picking one, chosen saying whether kit apply's flags named them; or the
 // old Mac, as Mac has it. Arq's restore is by hand, through the restore's
 // card, never opened here.
@@ -204,7 +204,7 @@ func (s Sources) Disks(ctx context.Context) (Disks, error) {
 // TimeMachine is the old Mac's backups on a Time Machine disk attached to
 // this one, the home folder of the user called User in them, mounted
 // read-only at MountPoint, an empty folder: the latest at or before At,
-// else the snapshot called Snapshot, the one a restore began from, else
+// else the snapshot called Snapshot, the one a restore copied from, else
 // the latest. Snapshot gone from the disk is an error saying so; with
 // Chosen, as when kit apply's flags name Time Machine's backups again, the
 // latest at or before At stands in for it.
@@ -275,7 +275,7 @@ func (t TimeMachine) pick(c timemachine.Candidate) (timemachine.Point, error) {
 	case t.Snapshot == "", i >= 0, t.Chosen:
 		return c.Pick(t.At)
 	}
-	return timemachine.Point{}, fmt.Errorf("%s, which the restore began from, isn't on %s any more", Origin{Kind: FromTimeMachine, Detail: t.Snapshot}.Says(), c.Volume)
+	return timemachine.Point{}, fmt.Errorf("%s, which the restore copied from, isn't on %s any more", Origin{Kind: FromTimeMachine, Detail: t.Snapshot}.Says(), c.Volume)
 }
 
 // The restore's own folders in kit's state, beside what it sets aside:

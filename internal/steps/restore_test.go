@@ -653,9 +653,9 @@ func TestRestoreCarriesOnFromAnotherBackup(t *testing.T) {
 	for _, p := range []string{"~/Code", "~/Documents"} {
 		c.change(p, func(p *restore.Path) { p.State, p.From, p.Started = restore.Copying, gone, duringIt })
 	}
-	c.src.err = errors.New("Time Machine's backup of 1 Nov 2026 09:00, which the restore began from, isn't on Backups of laptop any more")
-	want := "couldn't restore: Time Machine's backup of 1 Nov 2026 09:00, which the restore began from, isn't on Backups of laptop any more: " +
-		"kit apply --restore-from mac|time-machine|arq carries on ~/Code and ~/Documents from another source, or kit restore remove ~/Code ~/Documents drops their lines"
+	c.src.err = errors.New("Time Machine's backup of 1 Nov 2026 09:00, which the restore copied from, isn't on Backups of laptop any more")
+	want := "couldn't restore: Time Machine's backup of 1 Nov 2026 09:00, which the restore copied from, isn't on Backups of laptop any more: " +
+		"kit apply --restore-from mac|time-machine|arq restores ~/Code and ~/Documents from another source, or kit restore remove drops the line of any not wanted"
 	if err := c.apply(t.Context()); err == nil || err.Error() != want {
 		t.Errorf("naming no source, apply = %v\nwant %q", err, want)
 	}
@@ -691,6 +691,27 @@ func TestRestoreCarriesOnFromAnotherBackup(t *testing.T) {
 	_ = c.apply(t.Context())
 	if want := []opened{{c.src.origin, time.Time{}, false}, {gone, time.Time{}, false}}; !reflect.DeepEqual(c.src.asked, want) {
 		t.Errorf("a run again, the source asked for = %+v, want %+v", c.src.asked, want)
+	}
+}
+
+// A source that won't open names the ways on for each path it was to
+// restore, begun or not: the backup a copy last began from thinned away, a
+// path yet to begin from it fails, saying so.
+func TestRestoreNamesTheWaysOnForAPathYetToBegin(t *testing.T) {
+	gone := restore.Origin{Kind: restore.FromTimeMachine, Detail: snapshotY}
+	c := newRestoring(t, "~/Code", "~/Documents")
+	if err := restore.UpdateRecord(c.state, func(r *restore.Record) { r.From = gone }); err != nil {
+		t.Fatal(err)
+	}
+	c.change("~/Code", func(p *restore.Path) { p.State, p.From, p.Started, p.Finished = restore.Done, gone, duringIt, duringIt })
+	c.src.err = errors.New("Time Machine's backup of 1 Nov 2026 09:00, which the restore copied from, isn't on Backups of laptop any more")
+	want := "couldn't restore: Time Machine's backup of 1 Nov 2026 09:00, which the restore copied from, isn't on Backups of laptop any more: " +
+		"kit apply --restore-from mac|time-machine|arq restores ~/Documents from another source, or kit restore remove ~/Documents drops its line"
+	if err := c.apply(t.Context()); err == nil || err.Error() != want {
+		t.Errorf("apply = %v\nwant %q", err, want)
+	}
+	if asked := []opened{{gone, time.Time{}, false}}; !reflect.DeepEqual(c.src.asked, asked) {
+		t.Errorf("the source asked for %+v, want %+v", c.src.asked, asked)
 	}
 }
 
@@ -736,7 +757,7 @@ func TestRestoreNeedsRoom(t *testing.T) {
 
 // A path part-way that the source hasn't fails alone, naming the source
 // and the ways on; the rest are restored. A source that can't be opened
-// fails the restore, saying why.
+// fails the restore, saying why, and the ways on.
 func TestRestoreSourceShortcomings(t *testing.T) {
 	c := newRestoring(t, "~/Code", "~/.local/state/newtool")
 	c.change("~/.local/state/newtool", func(p *restore.Path) { p.State, p.From, p.Started = restore.Copying, c.src.origin, duringIt })
@@ -744,7 +765,7 @@ func TestRestoreSourceShortcomings(t *testing.T) {
 	c.copies("~/Code", 1, 1_000)
 	err := c.apply(t.Context())
 	if want := "couldn't restore ~/.local/state/newtool: Time Machine's backup of 8 Nov 2026 14:19 hasn't it: " +
-		"kit apply --restore-from mac|time-machine|arq carries on ~/.local/state/newtool from another source, or kit restore remove ~/.local/state/newtool drops its line"; err == nil || err.Error() != want {
+		"kit apply --restore-from mac|time-machine|arq restores ~/.local/state/newtool from another source, or kit restore remove ~/.local/state/newtool drops its line"; err == nil || err.Error() != want {
 		t.Errorf("apply = %v; want %q", err, want)
 	}
 	if rec := c.record(); rec.Paths["~/Code"].State != restore.Done || rec.Paths["~/.local/state/newtool"].State != restore.Copying || !rec.Settled.IsZero() {
@@ -754,7 +775,9 @@ func TestRestoreSourceShortcomings(t *testing.T) {
 	c = newRestoring(t, "~/Code")
 	c.src.err = errors.New("no Time Machine backup found: no Time Machine disk is attached")
 	c.r.Flag = steps.RestoreFrom{Kind: restore.FromTimeMachine}
-	if err := c.apply(t.Context()); err == nil || err.Error() != "couldn't restore: no Time Machine backup found: no Time Machine disk is attached" {
+	want := "couldn't restore: no Time Machine backup found: no Time Machine disk is attached: " +
+		"kit apply --restore-from mac|time-machine|arq restores ~/Code from another source, or kit restore remove ~/Code drops its line"
+	if err := c.apply(t.Context()); err == nil || err.Error() != want {
 		t.Errorf("with no disk, apply = %v", err)
 	}
 }

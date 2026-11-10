@@ -135,14 +135,15 @@ func TestRestoreFromTheOldMac(t *testing.T) {
 }
 
 // What stops the old Mac being copied from, as Check finds it, fails the
-// restore with its own fix: it answers, so there's no card.
+// restore with its own fix, and the ways on: it answers, so there's no
+// card.
 func TestRestoreFromTheOldMacFailsOnWhatStopsIt(t *testing.T) {
 	c := newRestoring(t, "~/Code")
 	c.fromLaptop()
 	c.src.err = errors.New("SSH can't read ~/Documents on laptop: turn on Allow full disk access for remote users there, in System Settings › General › Sharing › Remote Login › ⓘ")
 	k := c.atTerminal(t, restore.Disks{})
 	err := ended(t, c.applying(t))
-	if want := "couldn't restore: " + c.src.err.Error(); err == nil || err.Error() != want {
+	if want := "couldn't restore: " + c.src.err.Error() + ": kit apply --restore-from time-machine|arq restores ~/Code from another source, or kit restore remove ~/Code drops its line"; err == nil || err.Error() != want {
 		t.Errorf("apply = %v; want %q", err, want)
 	}
 	if cards := raised(k); len(cards) > 0 || c.src.tries != 1 {
@@ -277,7 +278,7 @@ func TestRestoreWithoutATerminalNamesTheFlag(t *testing.T) {
 		return restore.Disks{}, nil
 	}
 	err := c.apply(t.Context())
-	if want := "couldn't restore: " + errSilent.Error() + ": kit apply --restore-from time-machine|arq restores from a backup instead"; err == nil || err.Error() != want {
+	if want := "couldn't restore: " + errSilent.Error() + ": kit apply --restore-from time-machine|arq restores ~/Code from another source, or kit restore remove ~/Code drops its line"; err == nil || err.Error() != want {
 		t.Errorf("apply = %v\nwant %q", err, want)
 	}
 }
@@ -422,7 +423,8 @@ func TestRestoreThroughArqLooksAgain(t *testing.T) {
 // next, the backup it names the latest; kit apply's flags naming Arq with
 // --at, Arq's card names the backup by that date or time; on a Mac started
 // from none, the backup it names is this Mac's own. Its card waits for Arq
-// to be installed: without it, the restore isn't yet, asking nothing.
+// to be installed: without it, the restore isn't yet, asking nothing, and
+// naming no ways on, as it waits.
 func TestRestoreThroughArqChosenOrNamed(t *testing.T) {
 	restored := func(c *restoring, k *card, applied <-chan error) error {
 		t.Helper()
@@ -471,8 +473,8 @@ func TestRestoreThroughArqChosenOrNamed(t *testing.T) {
 	c.r.Flag = steps.RestoreFrom{Kind: restore.FromArq}
 	k = c.atTerminal(t, restore.Disks{})
 	c.r.ArqAwait = []engine.Wait{{Thing: "Arq", Ready: func(context.Context) bool { return false }}}
-	if err := ended(t, c.applying(t)); !engine.IsNotYet(err) || !strings.Contains(err.Error(), "Arq") || len(raised(k)) > 0 {
-		t.Errorf("without Arq, apply = %v, raising %d cards; want it not yet, waiting for Arq, no card", err, len(raised(k)))
+	if err := ended(t, c.applying(t)); !engine.IsNotYet(err) || !strings.Contains(err.Error(), "Arq") || strings.Contains(err.Error(), "kit restore remove") || len(raised(k)) > 0 {
+		t.Errorf("without Arq, apply = %v, raising %d cards; want it not yet, waiting for Arq, naming no ways on, no card", err, len(raised(k)))
 	}
 }
 
@@ -796,14 +798,15 @@ func TestRestoreRecordsItsSourceOnceACopyStarts(t *testing.T) {
 
 // A path part-way from a Time Machine disk gone for good fails each run
 // naming no source, with the paths of its source yet to begin, the error
-// naming the ways on; kit apply --restore-from mac carries it on from the
-// old Mac, the log saying so, and copies the rest too.
+// naming the ways on for every one; kit apply --restore-from mac carries
+// it on from the old Mac, the log saying so, and copies the rest too.
 func TestRestoreFlagsCarryOnFromADiskGone(t *testing.T) {
 	tm := restore.Origin{Kind: restore.FromTimeMachine, Detail: snapshotX}
 	c := newRestoring(t, "~/Code", "~/Documents")
 	c.change("~/Code", func(p *restore.Path) { p.State, p.From, p.Started = restore.Copying, tm, duringIt })
 	c.src.err = errors.New("no Time Machine disk holding backups of /Users/someone is attached")
-	want := "couldn't restore: no Time Machine disk holding backups of /Users/someone is attached: kit apply --restore-from mac|time-machine|arq carries on ~/Code from another source, or kit restore remove ~/Code drops its line"
+	want := "couldn't restore: no Time Machine disk holding backups of /Users/someone is attached: " +
+		"kit apply --restore-from mac|time-machine|arq restores ~/Code and ~/Documents from another source, or kit restore remove drops the line of any not wanted"
 	if err := c.apply(t.Context()); err == nil || err.Error() != want {
 		t.Errorf("naming no source, apply = %v\nwant %q", err, want)
 	}
@@ -860,6 +863,26 @@ func TestRestoreFlagsStandInForEveryPathPartWay(t *testing.T) {
 		if want := "Carrying on " + p + " from Time Machine's backup of 8 Nov 2026 14:19 in place of " + was + ", which its restore began from"; !slices.Contains(c.logged, want) {
 			t.Errorf("the log says %q; want %q", c.logged, want)
 		}
+	}
+}
+
+// Stopped while the card asks where to restore from, the restore fails,
+// naming no ways on: no source failed to open.
+func TestRestoreStoppedAtTheCardNamesNoWaysOn(t *testing.T) {
+	c := newRestoring(t, "~/Code")
+	c.fromLaptop()
+	c.src.fails = []error{errSilent}
+	k := c.atTerminal(t, restore.Disks{})
+	ctx, stop := context.WithCancel(t.Context())
+	defer stop()
+	step := c.step()
+	found := step.Check(ctx)
+	applied := make(chan error, 1)
+	go func() { applied <- step.Apply(c.ctx(ctx), found) }()
+	up(t, k, 1)
+	stop()
+	if err := ended(t, applied); err == nil || strings.Contains(err.Error(), "kit restore remove") {
+		t.Errorf("stopped, apply = %v; want it failing, naming no ways on", err)
 	}
 }
 
@@ -983,7 +1006,7 @@ func TestRestoreThroughArqHasntAPartWayPath(t *testing.T) {
 	k.answer(t, "restore", "n")
 	err := ended(t, applied)
 	if want := "couldn't restore ~/Documents: Arq's restore in " + filepath.Join(c.state, "restore", "arq") + " hasn't it: " +
-		"kit apply --restore-from mac|time-machine|arq carries on ~/Documents from another source, or kit restore remove ~/Documents drops its line"; err == nil || err.Error() != want {
+		"kit apply --restore-from mac|time-machine|arq restores ~/Documents from another source, or kit restore remove ~/Documents drops its line"; err == nil || err.Error() != want {
 		t.Errorf("apply = %v; want %q", err, want)
 	}
 	rec := c.record()

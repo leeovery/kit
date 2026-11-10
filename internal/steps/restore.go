@@ -18,7 +18,6 @@ import (
 	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/restore"
-	"github.com/leeovery/kit/internal/restore/oldmac"
 	"github.com/leeovery/kit/internal/runner"
 )
 
@@ -104,14 +103,15 @@ type Restoring struct {
 // chosen on the card does for the old Mac not answering, each path
 // carrying on from it once its own copy begins, the record and the log
 // saying so. The flags naming none, a path part-way carries on from the
-// one it began from, never a newer backup; the rest copy from the one a
-// copy last began from, so a run again resumes from it, else the Mac this
-// one started from. Arq's restore, by hand, comes last, taking in the
+// one it began from, never a newer backup; the rest copy from the first
+// such path's, should there be one, else the one a copy last began from,
+// so a run again resumes from it, else the Mac this one started from.
+// Arq's restore, by hand, comes last, taking in the
 // paths the card sends to it, so its card goes up once a run. A path a
 // source hasn't, nothing copied to it, is recorded not there; part-way, it
-// fails, keeping the source it began from, as it does should that source
-// not open, the error naming the ways on: another source, or its line
-// dropped. With room for the copies, each path is judged again as its
+// fails, keeping the source it began from, the error naming the ways on:
+// another source, or its line dropped, as one for a source that won't open
+// names them for all its paths. With room for the copies, each path is judged again as its
 // turn comes, then copied, what set-up wrote in it set aside first, then
 // compared with its source: from a backup, a file found differing fails
 // the path; from a live Mac, what changed as it was copied is copied
@@ -409,7 +409,7 @@ func (r Restoring) restoreFrom(ctx context.Context, s sourced) (err error) {
 	case errors.Is(err, errToArq):
 		return err
 	case err != nil:
-		return r.unopened(s, err)
+		return r.unopened(ctx, s, err)
 	}
 	defer func() { err = errors.Join(err, src.Close(ctx)) }()
 	seen, err := lookAt(ctx, src, todo)
@@ -531,36 +531,27 @@ func (r Restoring) OverSSH() (bool, error) {
 	return overSSH(r.mainSource(rec).want) || r.Flag.Kind == "" && partWay && overSSH(was), nil
 }
 
-// unopened is the error of s's source not opening, as err says: naming,
-// for those of its paths part-way, the ways on (waysOut); else, the old
-// Mac not answering, kit apply's flags restoring from a backup instead.
-func (r Restoring) unopened(s sourced, err error) error {
-	switch paths := partWay(s.todo); {
-	case len(paths) > 0:
-		return fmt.Errorf("couldn't restore: %w: %s", err, r.waysOut(s.want.Kind, paths))
-	case errors.Is(err, oldmac.ErrNoAnswer):
-		return fmt.Errorf("couldn't restore: %w: %s restores from a backup instead", err, r.bringsIt(restore.FromMac))
+// unopened is the error of s's source not opening, as err says, naming the
+// ways on for every one of its paths (waysOut): but not when kit's been
+// stopped, ctx done, nor for a source not ready yet, as Arq not installed,
+// which the step waits for.
+func (r Restoring) unopened(ctx context.Context, s sourced, err error) error {
+	err = fmt.Errorf("couldn't restore: %w", err)
+	if ctx.Err() != nil || engine.IsNotYet(err) {
+		return err
 	}
-	return fmt.Errorf("couldn't restore: %w", err)
+	return fmt.Errorf("%w: %s", err, r.waysOut(s.want.Kind, pathsOf(s.todo)))
 }
 
-// partWay are those of todo's paths whose copy is part-way.
-func partWay(todo []judged) []string {
-	var paths []string
-	for _, j := range todo {
-		if j.Verdict == restore.VerdictResume {
-			paths = append(paths, j.Path)
-		}
-	}
-	return paths
-}
-
-// waysOut are the ways on for paths, part-way, whose source, of kind,
-// hasn't them or won't open: kit apply's flags naming another carries them
-// on from it, or kit restore remove drops their lines.
+// waysOut are the ways on for paths whose source, of kind, hasn't them or
+// won't open: kit apply's flags naming another restores them from it, or
+// kit restore remove drops the line of one not wanted.
 func (r Restoring) waysOut(kind string, paths []string) string {
-	return fmt.Sprintf("%s carries on %s from another source, or kit restore remove %s drops %s",
-		r.bringsIt(kind), strings.Join(paths, " and "), strings.Join(paths, " "), plural(len(paths), "its line", "their lines"))
+	drop := "kit restore remove " + paths[0] + " drops its line"
+	if len(paths) > 1 {
+		drop = "kit restore remove drops the line of any not wanted"
+	}
+	return fmt.Sprintf("%s restores %s from another source, or %s", r.bringsIt(kind), strings.Join(paths, " and "), drop)
 }
 
 // copying is a path to copy: its judgement, the copy, and what it comes to.

@@ -160,7 +160,7 @@ func TestTimeMachineRefuses(t *testing.T) {
 		{"two disks", map[string][]string{"Backups of laptop": {first}, "Backups of studio": {first}}, time.Time{}, "",
 			"backups of /Users/someone are on more than one Time Machine disk, Backups of laptop (disk7s2) and Backups of studio (disk8s2): attach the old Mac's alone"},
 		{"the snapshot gone", map[string][]string{"Backups of laptop": {first}}, time.Time{}, snapshot(2026, 10, 1, 9, 0),
-			"Time Machine's backup of 1 Oct 2026 09:00, which the restore began from, isn't on Backups of laptop any more"},
+			"Time Machine's backup of 1 Oct 2026 09:00, which the restore copied from, isn't on Backups of laptop any more"},
 		{"before them all", map[string][]string{"Backups of laptop": {first}}, time.Date(2026, 10, 1, 0, 0, 0, 0, here), "",
 			"Backups of laptop holds no backup from 1 Oct 2026 00:00 or before: its earliest is 1 Nov 2026 09:00"},
 	} {

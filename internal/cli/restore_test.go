@@ -132,7 +132,7 @@ func TestApplyRestoreWithoutATerminalNamesTheFlag(t *testing.T) {
 	w.rsync3()
 	w.fake.On("dns-sd", "-B", "_ssh._tcp", "local.").Prints("Browsing for _ssh._tcp.local.\n")
 	out, errOut, code := w.run(t, "apply", "restore")
-	if want := "restore failed couldn't restore: studio doesn't answer over SSH: no Mac on the network offers Remote Login: kit apply --restore-from time-machine|arq restores from a backup instead\n"; code == 0 || !strings.Contains(out, want) {
+	if want := "restore failed couldn't restore: studio doesn't answer over SSH: no Mac on the network offers Remote Login: kit apply --restore-from time-machine|arq restores ~/Code from another source, or kit restore remove ~/Code drops its line\n"; code == 0 || !strings.Contains(out, want) {
 		t.Errorf("kit apply restore printed\n%s%s\nexit %d; want it failing, saying\n%s", out, errOut, code, want)
 	}
 }
