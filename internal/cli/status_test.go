@@ -101,6 +101,7 @@ brew extra ffmpeg
 brew unused-dependency node@20
 cask attention 1 declared, all installed
 cask extra firefox
+host-key ok in kit-config
 config ok all committed
 disk ok 48% free
 memory ok 0.3 GB swap, pressure normal
@@ -140,7 +141,7 @@ func TestStatusJSON(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &doc); err != nil || code != 1 {
 		t.Fatalf("kit status --json printed %q, exit %d: %v", out, code, err)
 	}
-	if doc.Schema != 1 || doc.Kit != "0.1.0" || doc.Machine != "laptop" || !doc.Attention || len(doc.Steps) != 11 {
+	if doc.Schema != 1 || doc.Kit != "0.1.0" || doc.Machine != "laptop" || !doc.Attention || len(doc.Steps) != 12 {
 		t.Fatalf("document = %+v", doc)
 	}
 	brew := doc.Steps[2]

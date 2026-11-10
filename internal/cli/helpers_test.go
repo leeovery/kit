@@ -29,12 +29,17 @@ import (
 	"github.com/leeovery/kit/internal/steps"
 )
 
-// twoMacs is a kit.toml knowing two Macs.
+// hostKey is the test Mac's SSH host key, plainly no real one: the one
+// twoMacs records for laptop, and the world's Mac presents.
+const hostKey = "ssh-ed25519 ZmFrZSBlZDI1NTE5IGhvc3Qga2V5"
+
+// twoMacs is a kit.toml knowing two Macs, laptop's host key recorded.
 const twoMacs = `format = 1
 primary = "laptop"
 
 [macs.laptop]
 description = "MacBook Pro"
+host_key = "` + hostKey + `"
 
 [macs.studio]
 description = "Mac Studio"
@@ -112,6 +117,7 @@ func newWorld(t *testing.T, files map[string]string) *world {
 	// Every commit of kit-config's pushed: a sync committing nothing finds
 	// none waiting.
 	w.waiting("")
+	w.write(t, filepath.Join("etc", "ssh", "ssh_host_ed25519_key.pub"), hostKey+" root@laptop\n")
 	for name, content := range files {
 		w.write(t, filepath.Join(".config", "kit", name), content)
 	}
@@ -165,6 +171,7 @@ func (w *world) run(t *testing.T, args ...string) (stdout, stderr string, status
 			return w.fake
 		},
 		SudoLocal: filepath.Join(w.home, "etc", "sudo_local"),
+		SSHDir:    filepath.Join(w.home, "etc", "ssh"),
 		TCC:       filepath.Join(w.home, "TCC.db"),
 		Choose: func(_ context.Context, q ask.Question) (int, error) {
 			return w.answer(t, q)

@@ -85,18 +85,37 @@ func gitSetting(repo gitrepo.Repo, key, what string) engine.Wait {
 	return engine.Wait{Thing: what, Ready: func(ctx context.Context) bool { return repo.IsSet(ctx, key) }}
 }
 
-// placeNewMac places the step committing a new Mac, when all, the run's
-// steps, have it: after git's settings and own, the steps of the user's
-// own, which can bring what git commits with, as the key it signs with;
-// but for those that come after it, which it can't wait for. The config's
-// edits are looked at after it, so a run doesn't end listing the files it
-// committed as edits.
-func placeNewMac(all, own []engine.Step) {
-	i := slices.IndexFunc(all, func(s engine.Step) bool { return s.Name == newMacName })
-	if i < 0 {
-		return
+// commitSteps are the steps of kit apply's that commit to kit-config, in
+// the order they come: the new Mac the boot added, then its host key, both
+// in kit.toml.
+var commitSteps = []string{newMacName, steps.HostKeyName}
+
+// placeCommits places the steps committing to kit-config (commitSteps), those
+// all, the run's steps, have: each after git's settings and own, the steps
+// of the user's own, which can bring what git commits with, as the key it
+// signs with, but for those that come after it, which it can't wait for;
+// and after the one before it. The config's edits are looked at after them,
+// so a run doesn't end listing the files they committed as edits.
+func placeCommits(all, own []engine.Step) {
+	before := ""
+	for _, name := range commitSteps {
+		i := slices.IndexFunc(all, func(s engine.Step) bool { return s.Name == name })
+		if i < 0 {
+			continue
+		}
+		placeCommit(all, own, i)
+		if before != "" && !following(all, name)[before] {
+			all[i].After = append(all[i].After, before)
+		}
+		before = name
 	}
-	later := following(all, newMacName)
+}
+
+// placeCommit places all[i], a step committing to kit-config, as
+// placeCommits says.
+func placeCommit(all, own []engine.Step, i int) {
+	name := all[i].Name
+	later := following(all, name)
 	var waits []string
 	if git := gitconfig.Descriptor.Name; stepNames(all)[git] && !later[git] {
 		all[i].After = append(all[i].After, git)
@@ -116,7 +135,7 @@ func placeNewMac(all, own []engine.Step) {
 		all[i].Waiting = "waiting for " + strings.Join(waits, " and ")
 	}
 	edits := slices.IndexFunc(all, func(s engine.Step) bool { return s.Name == steps.ConfigEditsName })
-	if edits >= 0 && !following(all, steps.ConfigEditsName)[newMacName] {
-		all[edits].After = append(all[edits].After, newMacName)
+	if edits >= 0 && !following(all, steps.ConfigEditsName)[name] {
+		all[edits].After = append(all[edits].After, name)
 	}
 }

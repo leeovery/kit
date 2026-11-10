@@ -122,18 +122,37 @@ func TestApplyRestoresFromTheBackupNamed(t *testing.T) {
 }
 
 // Started from another Mac, the restore copies from it over SSH, finding
-// it through Bonjour: without a terminal, there's no card to ask where
-// else to restore from when it doesn't answer, so the step fails, saying
-// why and the flag that answers it.
+// it through Bonjour, as the Mac presenting the host key kit-config records
+// for it; with none recorded, it isn't looked for. Without a terminal,
+// there's no card to ask where else to restore from, so the step fails,
+// saying why and the flag that answers it.
 func TestApplyRestoreWithoutATerminalNamesTheFlag(t *testing.T) {
-	w := laptopWorld(t)
-	w.writeSection(t, "laptop", "restore", "~/Code\n")
-	w.startedFrom(t)
-	w.rsync3()
-	w.fake.On("dns-sd", "-B", "_ssh._tcp", "local.").Prints("Browsing for _ssh._tcp.local.\n")
-	out, errOut, code := w.run(t, "apply", "restore")
-	if want := "restore failed couldn't restore: studio doesn't answer over SSH: no Mac on the network offers Remote Login: kit apply --restore-from time-machine|arq restores ~/Code from another source, or kit restore remove ~/Code drops its line\n"; code == 0 || !strings.Contains(out, want) {
-		t.Errorf("kit apply restore printed\n%s%s\nexit %d; want it failing, saying\n%s", out, errOut, code, want)
+	const ways = ": kit apply --restore-from time-machine|arq restores ~/Code from another source, or kit restore remove ~/Code drops its line\n"
+	for _, tt := range []struct {
+		name     string
+		recorded bool
+		why      string
+	}{
+		{"its host key recorded", true, "studio doesn't answer over SSH: no Mac on the network offers Remote Login"},
+		{"no host key recorded", false, "studio can't be restored from: studio's SSH host key isn't in kit-config: kit apply on studio records it"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			w := laptopWorld(t)
+			w.writeSection(t, "laptop", "restore", "~/Code\n")
+			w.startedFrom(t)
+			if tt.recorded {
+				w.write(t, ".config/kit/kit.toml", w.read(t, ".config/kit/kit.toml")+"host_key = \"ssh-rsa ZmFrZSByc2EgaG9zdCBrZXk=\"\n")
+			}
+			w.rsync3()
+			w.fake.On("dns-sd", "-B", "_ssh._tcp", "local.").Prints("Browsing for _ssh._tcp.local.\n")
+			out, errOut, code := w.run(t, "apply", "restore")
+			if want := "restore failed couldn't restore: " + tt.why + ways; code == 0 || !strings.Contains(out, want) {
+				t.Errorf("kit apply restore printed\n%s%s\nexit %d; want it failing, saying\n%s", out, errOut, code, want)
+			}
+			if browsed := slices.Contains(w.fake.Calls(), "dns-sd -B _ssh._tcp local."); browsed != tt.recorded {
+				t.Errorf("looked for Macs on the network: %v, want %v", browsed, tt.recorded)
+			}
+		})
 	}
 }
 

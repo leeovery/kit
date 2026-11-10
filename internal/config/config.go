@@ -62,11 +62,14 @@ type Config struct {
 const DefaultNightlyAt = 3 * time.Hour
 
 // Mac is a Mac the config repository knows: From is the Mac it started as
-// a copy of, "" when none or one the config doesn't know.
+// a copy of, "" when none or one the config doesn't know; HostKey, its SSH
+// host key, its type then the key, as a Mac it's restored to must find it
+// presenting: "" until its kit apply records it.
 type Mac struct {
 	Name        string
 	Description string
 	From        string
+	HostKey     string
 }
 
 // file is kit.toml as written.
@@ -83,6 +86,7 @@ type file struct {
 type macFile struct {
 	Description string `toml:"description,omitempty"`
 	From        string `toml:"from,omitempty"`
+	HostKey     string `toml:"host_key,omitempty"`
 }
 
 // macName is what a Mac's name may be: it names the Mac's own declarations
@@ -155,7 +159,7 @@ func Load(dir string, kinds []Section) (*Config, error) {
 		case name == Shared:
 			return nil, fmt.Errorf("%s: a Mac can't be called %s: that's the file every Mac reads", File, Shared)
 		}
-		cfg.Macs[name] = Mac{Name: name, Description: m.Description, From: m.From}
+		cfg.Macs[name] = Mac{Name: name, Description: m.Description, From: m.From, HostKey: strings.TrimSpace(m.HostKey)}
 	}
 	for name, m := range cfg.Macs {
 		if !cfg.Knows(m.From) {

@@ -11,6 +11,7 @@ import (
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/kind"
+	"github.com/leeovery/kit/internal/restore/oldmac"
 	"github.com/leeovery/kit/internal/runner"
 )
 
@@ -142,6 +143,71 @@ func service(run runner.Runner, admin *Admin, name, title, label, plist string) 
 				_, err := run.Run(ctx, runner.Command{Name: "sudo", Args: []string{"-n", "launchctl", "bootstrap", "system", plist}})
 				return err
 			})
+			return nil
+		},
+	}
+}
+
+// HostKeyName names the step recording this Mac's SSH host key in
+// kit-config.
+const HostKeyName = "host-key"
+
+// HostKeying is the step recording this Mac's SSH host key in kit-config,
+// for a Mac restored from it to know it by.
+type HostKeying struct {
+	// Dir is where the Mac keeps its host keys: oldmac.SSHDir.
+	Dir string
+	// Recorded is the host key kit-config records for this Mac: "" for none.
+	Recorded string
+	// Record records key as this Mac's in kit-config, committing and
+	// pushing it, and says how that went.
+	Record func(ctx context.Context, key string) (check.Result, error)
+}
+
+// hostKeyMade is when there's a host key to record.
+const hostKeyMade = "macOS makes it the first time Remote Login starts"
+
+// HostKey checks kit-config records this Mac's SSH host key, the one its
+// Remote Login presents, as oldmac reads it; applying records it, as a
+// Mac set up again gets a new key, and the new one is right.
+func HostKey(h HostKeying) engine.Step {
+	// done is what recording did, which the check after it says.
+	var done *check.Result
+	return engine.Step{
+		Name: HostKeyName, Title: "SSH host key", Area: AreaConfig,
+		Check: func(context.Context) check.Result {
+			if done != nil {
+				return *done
+			}
+			own, err := oldmac.HostKey(h.Dir)
+			if err != nil {
+				return failed(err)
+			}
+			// One recorded that isn't a key is never this Mac's.
+			recorded, _ := oldmac.PublicKey(h.Recorded)
+			switch {
+			case own == "":
+				return problem(HostKeyName, "none yet", [3]string{"none", "no SSH host key yet", hostKeyMade + "; kit apply records it then"})
+			case h.Recorded == "":
+				return problem(HostKeyName, "not in kit-config", [3]string{"unrecorded", "SSH host key not in kit-config", "kit apply records it"})
+			case recorded != own:
+				return problem(HostKeyName, "not kit-config's", [3]string{"differs", "SSH host key not the one kit-config records", "kit apply records this Mac's: a Mac set up again has a new one"})
+			}
+			return check.Result{State: check.OK, Summary: "in kit-config"}
+		},
+		Apply: func(ctx context.Context, _ check.Result) error {
+			own, err := oldmac.HostKey(h.Dir)
+			switch {
+			case err != nil:
+				return err
+			case own == "":
+				return engine.NotYet("this Mac has no SSH host key yet: " + hostKeyMade + "; the next kit apply records it")
+			}
+			res, err := h.Record(ctx, own)
+			if err != nil {
+				return err
+			}
+			done = &res
 			return nil
 		},
 	}
