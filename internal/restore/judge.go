@@ -40,8 +40,8 @@ type Judgement struct {
 }
 
 // Judge judges f's line's path, in the home folder home: by its record in
-// rec first, done, here, or its copy started; else, with no record, held,
-// or not in its source, by what it holds that isn't kit's, as f leaves out,
+// rec first, done, here, or its copy started; else, with no record, or not
+// in its source, by what it holds that isn't kit's, as f leaves out,
 // and set-up's window, a file's time its modification time. The window
 // opens when this Mac's set-up began, began, and closes when the restore
 // first settled (rec's Settled), and it's open only to the paths the

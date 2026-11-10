@@ -118,7 +118,7 @@ func TestRestoreFromTheOldMac(t *testing.T) {
 		t.Errorf("~/Code's rules = %q, %v; want the old Mac's skips anchored at it", rules, err)
 	}
 	for _, cmd := range c.fake.Commands() {
-		if from := cmd.Args[len(cmd.Args)-2]; slices.Contains(cmd.Args, copyingOp) && strings.HasSuffix(from, ".zsh_history") && (strings.HasSuffix(from, "/") || cmd.Args[len(cmd.Args)-1] != filepath.Join(c.home, ".zsh_history")) {
+		if from := cmd.Args[len(cmd.Args)-2]; opOf(cmd.Args) == copyingOp && strings.HasSuffix(from, ".zsh_history") && (strings.HasSuffix(from, "/") || cmd.Args[len(cmd.Args)-1] != filepath.Join(c.home, ".zsh_history")) {
 			t.Errorf("~/.zsh_history was copied as a folder: %q", cmd.Args)
 		}
 	}
@@ -287,16 +287,24 @@ func (c *restoring) arqHold(n int) string {
 	return filepath.Join(c.state, "restore", "arq", fmt.Sprint(n))
 }
 
+// stateAtHome has c's kit state in its home folder, as kit's is.
+func (c *restoring) stateAtHome() {
+	c.state = filepath.Join(c.home, ".local", "state", "kit")
+	c.r.StateDir = c.state
+}
+
 // Restored through Arq, by hand: a card goes up in the restore's row, once
 // Arq's installed, opening Arq, asking the person to restore each listed
 // path from the old Mac's latest backup into a holding folder of its own
-// that kit makes, numbered; once they say it's done, kit copies each from
-// where Arq put it, in its holding folder under its own name, as from a
-// backup, and deletes the holding folder once the path's restored. One
-// still empty is a path Arq's backup hadn't: not there, its folder gone
-// too.
+// that kit makes, numbered, said from ~; once they say it's done, kit
+// copies each from where Arq put it, in its holding folder under its own
+// name, as from a backup, and deletes the holding folder once the path's
+// restored. One still empty is never taken as a path the backup hadn't: a
+// card says so, and only the person saying the backup hasn't it records it
+// not there, from Arq's restore, its folder gone too, the rest restored.
 func TestRestoreThroughArq(t *testing.T) {
 	c := newRestoring(t, "~/Code", "~/.zsh_history", "~/Gone")
+	c.stateAtHome()
 	c.r.Flag = steps.RestoreFrom{Kind: restore.FromArq}
 	k := c.atTerminal(t, restore.Disks{})
 	c.r.ArqAwait = []engine.Wait{{Thing: "Arq", Ready: func(context.Context) bool { return true }}}
@@ -309,7 +317,7 @@ func TestRestoreThroughArq(t *testing.T) {
 		Why: "kit can't restore from Arq itself. Once Arq has finished restoring them all, kit copies each into place, then deletes its holding folder.",
 		Steps: []string{
 			"Open laptop's backup in Arq, its latest backup",
-			"Restore each of these into its holding folder, in " + filepath.Join(c.state, "restore", "arq") + ":",
+			"Restore each of these into its holding folder, in ~/.local/state/kit/restore/arq:",
 			"~/Code → …/arq/1", "~/.zsh_history → …/arq/2", "~/Gone → …/arq/3",
 		}}
 	if !reflect.DeepEqual(card, want) {
@@ -323,6 +331,19 @@ func TestRestoreThroughArq(t *testing.T) {
 	write(t, c.arqHold(1), "~/Code/main.go", beforeIt)
 	write(t, c.arqHold(2), "~/.zsh_history", beforeIt)
 	k.answer(t, "restore", hand.Done)
+
+	lack := up(t, k, 2)[1]
+	if want := (event.NeedsYou{Time: lack.Time, Step: "restore", Item: "restore:arq-lacking", Title: "Arq's restore isn't all there",
+		Why:   "Should Arq still be restoring, let it finish; should a path be in another's holding folder, move it into its own. Then look again.",
+		Steps: []string{"~/Gone: …/arq/3 holds nothing yet"},
+		Keys:  []check.Key{{Key: "enter", Does: "looks again"}, {Key: "n", Does: "says the backup hasn't these, restoring the rest"}},
+	}); !reflect.DeepEqual(lack, want) {
+		t.Errorf("once done, the card = %+v\nwant %+v", lack, want)
+	}
+	if rec := c.record(); rec.Paths["~/Gone"].State == restore.NotThere || len(c.fake.Calls()) > 0 {
+		t.Errorf("before the person says, ~/Gone is %+v, rsync ran %q; want nothing recorded, nothing copied", rec.Paths["~/Gone"], c.fake.Calls())
+	}
+	k.answer(t, "restore", "n")
 	if err := ended(t, applied); err != nil {
 		t.Fatalf("apply = %v", err)
 	}
@@ -330,31 +351,86 @@ func TestRestoreThroughArq(t *testing.T) {
 	if calls := k.fake.Calls(); !slices.Equal(calls, []string{"open -b com.haystacksoftware.Arq"}) {
 		t.Errorf("as its card went up, ran %q; want Arq opened", calls)
 	}
-	arq := restore.Origin{Kind: restore.FromArq, Detail: filepath.Join(c.state, "restore", "arq")}
+	arq := restore.Origin{Kind: restore.FromArq, Detail: "~/.local/state/kit/restore/arq"}
 	rec := c.record()
 	code, history, gone := rec.Paths["~/Code"], rec.Paths["~/.zsh_history"], rec.Paths["~/Gone"]
 	if rec.From != arq || code.State != restore.Done || code.From != arq || code.Holding != 0 || history.State != restore.Done || gone.State != restore.NotThere || gone.From != arq || gone.Holding != 0 || rec.Settled.IsZero() {
 		t.Errorf("the record = %+v; want both restored from Arq's restore, ~/Gone not there, their holding folders let go, settled", rec)
 	}
 	for _, cmd := range c.fake.Commands() {
-		if slices.Contains(cmd.Args, copyingOp) && strings.HasSuffix(cmd.Args[len(cmd.Args)-1], "Code/") && cmd.Args[len(cmd.Args)-2] != filepath.Join(c.arqHold(1), "Code")+"/" {
+		if opOf(cmd.Args) == copyingOp && strings.HasSuffix(cmd.Args[len(cmd.Args)-1], "Code/") && cmd.Args[len(cmd.Args)-2] != filepath.Join(c.arqHold(1), "Code")+"/" {
 			t.Errorf("~/Code was copied from %s", cmd.Args[len(cmd.Args)-2])
 		}
 	}
 	if entries, err := os.ReadDir(filepath.Join(c.state, "restore", "arq")); err != nil || len(entries) > 0 {
 		t.Errorf("Arq's holding folders hold %v, %v; want each gone", entries, err)
 	}
-	if want := "Nothing to restore in ~/Gone: Arq's restore in " + arq.Detail + " hasn't it"; !slices.Contains(c.logged, want) {
+	if want := "Nothing to restore in ~/Gone: Arq's restore in ~/.local/state/kit/restore/arq hasn't it"; !slices.Contains(c.logged, want) {
 		t.Errorf("the log says %q, want %q", c.logged, want)
+	}
+	c.r.Flag = steps.RestoreFrom{}
+	if res := c.step().Check(t.Context()); len(res.Items) != 1 || res.Items[0].Detail != "Arq's restore in ~/.local/state/kit/restore/arq hadn't it; kit apply --restore-from mac|time-machine|arq brings it from another" {
+		t.Errorf("the check's items = %+v; want ~/Gone's, its source said from ~", res.Items)
+	}
+}
+
+// Said done while Arq's still restoring, or with a path in another's
+// holding folder, the restore records nothing not there: its card says
+// which holding folders don't hold their paths, and what each holds
+// instead; looking again once they do, each is copied.
+func TestRestoreThroughArqLooksAgain(t *testing.T) {
+	c := newRestoring(t, "~/Code", "~/.claude", "~/.zsh_history")
+	c.r.Flag = steps.RestoreFrom{Kind: restore.FromArq}
+	k := c.atTerminal(t, restore.Disks{})
+	c.copiesFrom(filepath.Join(c.arqHold(1), "Code"), "~/Code", 1, 1_000)
+	c.copiesFrom(filepath.Join(c.arqHold(2), ".claude"), "~/.claude", 1, 1_000)
+	c.copiesFrom(filepath.Join(c.arqHold(3), ".zsh_history"), "~/.zsh_history", 1, 100)
+	applied := c.applying(t)
+	up(t, k, 1)
+	write(t, c.arqHold(1), "~/.claude/history.jsonl", beforeIt)
+	write(t, c.arqHold(2), "~/Code/main.go", beforeIt)
+	k.answer(t, "restore", hand.Done)
+
+	lack := up(t, k, 2)[1]
+	if want := []string{"~/Code: …/arq/1 holds .claude, not Code", "~/.claude: …/arq/2 holds Code, not .claude", "~/.zsh_history: …/arq/3 holds nothing yet"}; !slices.Equal(lack.Steps, want) {
+		t.Errorf("said done early, the card's steps = %q\nwant %q", lack.Steps, want)
+	}
+	if err := os.Rename(filepath.Join(c.arqHold(1), ".claude"), filepath.Join(c.arqHold(2), ".claude")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(c.arqHold(2), "Code"), filepath.Join(c.arqHold(1), "Code")); err != nil {
+		t.Fatal(err)
+	}
+	k.answer(t, "restore", "enter")
+	if lack := up(t, k, 3)[2]; !slices.Equal(lack.Steps, []string{"~/.zsh_history: …/arq/3 holds nothing yet"}) {
+		t.Errorf("looked again, the card's steps = %q; want ~/.zsh_history's alone", lack.Steps)
+	}
+	write(t, c.arqHold(3), "~/.zsh_history", beforeIt)
+	k.answer(t, "restore", "enter")
+	if err := ended(t, applied); err != nil {
+		t.Fatalf("apply = %v", err)
+	}
+	rec := c.record()
+	for _, p := range []string{"~/Code", "~/.claude", "~/.zsh_history"} {
+		if rec.Paths[p].State != restore.Done {
+			t.Errorf("%s's record = %+v; want it restored", p, rec.Paths[p])
+		}
 	}
 }
 
 // The old Mac not answering, Arq chosen on the card has Arq's card go up
 // next, the backup it names the latest; kit apply's flags naming Arq with
-// --at, Arq's card names the backup by that date or time. Its card waits
-// for Arq to be installed: without it, the restore isn't yet, asking
-// nothing.
+// --at, Arq's card names the backup by that date or time; on a Mac started
+// from none, the backup it names is this Mac's own. Its card waits for Arq
+// to be installed: without it, the restore isn't yet, asking nothing.
 func TestRestoreThroughArqChosenOrNamed(t *testing.T) {
+	restored := func(c *restoring, k *card, applied <-chan error) error {
+		t.Helper()
+		write(t, c.arqHold(1), "~/Code/a", beforeIt)
+		c.copiesFrom(filepath.Join(c.arqHold(1), "Code"), "~/Code", 1, 1_000)
+		k.answer(t, "restore", hand.Done)
+		return ended(t, applied)
+	}
 	c := newRestoring(t, "~/Code")
 	c.fromLaptop()
 	c.src.fails = []error{errSilent}
@@ -365,8 +441,7 @@ func TestRestoreThroughArqChosenOrNamed(t *testing.T) {
 	if card := up(t, k, 2)[1]; card.Item != "restore:arq" || card.Steps[0] != "Open laptop's backup in Arq, its latest backup" {
 		t.Errorf("after Arq's chosen, the card = %+v; want Arq's, of the latest backup", card)
 	}
-	k.answer(t, "restore", hand.Done)
-	if err := ended(t, applied); err != nil || c.record().From.Kind != restore.FromArq {
+	if err := restored(c, k, applied); err != nil || c.record().From.Kind != restore.FromArq {
 		t.Errorf("apply = %v, the record from %+v; want Arq's restore", err, c.record().From)
 	}
 
@@ -377,8 +452,18 @@ func TestRestoreThroughArqChosenOrNamed(t *testing.T) {
 	if card := up(t, k, 1)[0]; card.Steps[0] != "Open laptop's backup in Arq, its last backup at or before 8 Nov 2026 23:59" {
 		t.Errorf("with --at, Arq's card's first step = %q", card.Steps[0])
 	}
-	k.answer(t, "restore", hand.Done)
-	if err := ended(t, applied); err != nil {
+	if err := restored(c, k, applied); err != nil {
+		t.Fatal(err)
+	}
+
+	c = newRestoring(t, "~/Code")
+	c.r.From, c.r.Flag = "", steps.RestoreFrom{Kind: restore.FromArq}
+	k = c.atTerminal(t, restore.Disks{})
+	applied = c.applying(t)
+	if card := up(t, k, 1)[0]; card.Steps[0] != "Open this Mac's backup in Arq, its latest backup" {
+		t.Errorf("on a Mac started from none, Arq's card's first step = %q", card.Steps[0])
+	}
+	if err := restored(c, k, applied); err != nil {
 		t.Fatal(err)
 	}
 
@@ -434,7 +519,8 @@ func TestRestoreThroughArqResumes(t *testing.T) {
 // what to restore where in Arq, each holding folder made. Restored there by
 // hand, a run again copies them, asking nothing. A holding folder holding
 // something else than its path, as a folder's contents restored without
-// it, fails that path, saying where it should be, the folder kept.
+// it, is asked for again, saying what it holds, the folder kept, never
+// recorded not there.
 func TestRestoreThroughArqWithoutATerminal(t *testing.T) {
 	c := newRestoring(t, "~/Code", "~/.zsh_history")
 	c.r.Flag = steps.RestoreFrom{Kind: restore.FromArq}
@@ -454,7 +540,7 @@ func TestRestoreThroughArqWithoutATerminal(t *testing.T) {
 	c.r.Flag = steps.RestoreFrom{Kind: restore.FromArq}
 	write(t, c.arqHold(1), "~/app/main.go", beforeIt)
 	err = c.apply(t.Context())
-	if want := fmt.Sprintf("couldn't restore ~/Code: %s holds app, not Code: restore ~/Code itself into it, as Arq puts a folder in the one it's given", c.arqHold(1)); err == nil || err.Error() != want {
+	if want := fmt.Sprintf("couldn't restore: restoring through Arq is by hand: in Arq, restore ~/Code into %s (holding app instead), then run kit apply again; at a terminal, it asks for them", c.arqHold(1)); err == nil || err.Error() != want {
 		t.Errorf("with Code's contents alone in its holding folder, apply = %v\nwant %q", err, want)
 	}
 	if _, err := os.Stat(filepath.Join(c.arqHold(1), "app", "main.go")); err != nil || c.record().Paths["~/Code"].State == restore.NotThere {
@@ -539,5 +625,185 @@ func TestRestoreOverSSH(t *testing.T) {
 				t.Errorf("OverSSH() = %v, %v; want %v", got, err, tt.want)
 			}
 		})
+	}
+}
+
+// A backup stands in for the old Mac a path's part-way from: named by kit
+// apply's flags, or chosen on the card when it doesn't answer, Time
+// Machine's or Arq's, never refused. Once a copy starts, every path
+// part-way from the old Mac carries on from the backup, --update keeping
+// the newer files the live copy brought, the record and the log saying so;
+// stopped before one does, nothing's recorded, so a run again tries the
+// old Mac.
+func TestRestoreBackupStandsInForTheOldMac(t *testing.T) {
+	partWay := func(t *testing.T) *restoring {
+		c := newRestoring(t, "~/Code", "~/Documents")
+		for _, p := range []string{"~/Code", "~/Documents"} {
+			c.change(p, func(p *restore.Path) { p.State, p.From, p.Started = restore.Copying, laptop, duringIt })
+		}
+		write(t, c.old, "~/Code/a", beforeIt)
+		write(t, c.old, "~/Documents/d", beforeIt)
+		return c
+	}
+	carriedOn := func(t *testing.T, c *restoring, from restore.Origin) {
+		t.Helper()
+		rec := c.record()
+		if rec.From != from || rec.Paths["~/Code"].From != from || rec.Paths["~/Documents"].From != from || rec.Paths["~/Code"].State != restore.Done {
+			t.Errorf("the record = %+v; want both carried on from %+v", rec, from)
+		}
+		if want := "Carrying on from " + from.Says() + " in place of laptop, which the restore began from"; !slices.Contains(c.logged, want) {
+			t.Errorf("the log says %q; want %q", c.logged, want)
+		}
+	}
+
+	t.Run("named by the flags", func(t *testing.T) {
+		c := partWay(t)
+		c.r.Flag = steps.RestoreFrom{Kind: restore.FromTimeMachine}
+		c.copies("~/Code", 1, 1_000)
+		c.copies("~/Documents", 1, 1_000)
+		if err := c.apply(t.Context()); err != nil {
+			t.Fatalf("apply = %v", err)
+		}
+		if want := []opened{{restore.Origin{Kind: restore.FromTimeMachine}, time.Time{}, true}}; !reflect.DeepEqual(c.src.asked, want) {
+			t.Errorf("the source asked for %+v, want %+v", c.src.asked, want)
+		}
+		carriedOn(t, c, c.src.origin)
+	})
+	t.Run("its disk chosen on the card", func(t *testing.T) {
+		c := partWay(t)
+		c.fromLaptop()
+		c.src.fails = []error{errSilent}
+		d, disk := c.disk("Backups of laptop", snapshotX)
+		k := c.atTerminal(t, restore.Disks{Found: []restore.Disk{d}})
+		c.copies("~/Code", 1, 1_000)
+		c.copies("~/Documents", 1, 1_000)
+		applied := c.applying(t)
+		up(t, k, 1)
+		k.answer(t, "restore", "t")
+		if err := ended(t, applied); err != nil {
+			t.Fatalf("apply = %v", err)
+		}
+		carriedOn(t, c, disk.origin)
+	})
+	t.Run("Arq chosen on the card", func(t *testing.T) {
+		c := partWay(t)
+		c.fromLaptop()
+		c.src.fails = []error{errSilent}
+		k := c.atTerminal(t, restore.Disks{})
+		applied := c.applying(t)
+		up(t, k, 1)
+		k.answer(t, "restore", "a")
+		if card := up(t, k, 2)[1]; card.Item != "restore:arq" {
+			t.Fatalf("after Arq's chosen, the card = %+v; want Arq's", card)
+		}
+		write(t, c.arqHold(1), "~/Code/a", beforeIt)
+		write(t, c.arqHold(2), "~/Documents/d", beforeIt)
+		c.copiesFrom(filepath.Join(c.arqHold(1), "Code"), "~/Code", 1, 1_000)
+		c.copiesFrom(filepath.Join(c.arqHold(2), "Documents"), "~/Documents", 1, 1_000)
+		k.answer(t, "restore", hand.Done)
+		if err := ended(t, applied); err != nil {
+			t.Fatalf("apply = %v", err)
+		}
+		carriedOn(t, c, restore.Origin{Kind: restore.FromArq, Detail: filepath.Join(c.state, "restore", "arq")})
+	})
+	t.Run("stopped before a copy", func(t *testing.T) {
+		c := partWay(t)
+		c.r.Flag = steps.RestoreFrom{Kind: restore.FromTimeMachine}
+		c.on(sizing, "~/Code").Exits(23)
+		c.on(sizing, "~/Documents").Exits(23)
+		if err := c.apply(t.Context()); err == nil {
+			t.Fatal("sizing failing, apply succeeded")
+		}
+		rec := c.record()
+		if rec.From != (restore.Origin{}) || rec.Paths["~/Code"].From != laptop || slices.ContainsFunc(c.logged, func(l string) bool { return strings.HasPrefix(l, "Carrying on") }) {
+			t.Errorf("the record = %+v, the log %q; want nothing carried on, no source recorded", rec, c.logged)
+		}
+		c.r.Flag, c.src.asked, c.src.err = steps.RestoreFrom{}, nil, errors.New("not answering")
+		_ = c.apply(t.Context())
+		if want := []opened{{laptop, time.Time{}, false}}; !reflect.DeepEqual(c.src.asked, want) {
+			t.Errorf("a run again asked for %+v, want laptop, %+v", c.src.asked, want)
+		}
+	})
+}
+
+// The run's source is recorded only once a copy from it starts: the old
+// Mac asleep, a disk chosen on the card, then the run stopped before any
+// copy, a run again tries the old Mac. kit apply --restore-from mac goes
+// back to it after a backup was copied from, as trying it again on the
+// card does; but never for a path part-way from a backup.
+func TestRestoreRecordsItsSourceOnceACopyStarts(t *testing.T) {
+	c := newRestoring(t, "~/Code")
+	c.fromLaptop()
+	c.src.fails = []error{errSilent}
+	d, _ := c.disk("Backups of laptop", snapshotX)
+	k := c.atTerminal(t, restore.Disks{Found: []restore.Disk{d}})
+	write(t, c.old, "~/Code/a", beforeIt)
+	c.on(sizing, "~/Code").Exits(23)
+	applied := c.applying(t)
+	up(t, k, 1)
+	k.answer(t, "restore", "t")
+	if err := ended(t, applied); err == nil {
+		t.Fatal("sizing failing, apply succeeded")
+	}
+	if rec := c.record(); rec.From != (restore.Origin{}) {
+		t.Errorf("nothing copied, the record's source = %+v; want none", rec.From)
+	}
+	c.src.asked = nil
+	c.copies("~/Code", 1, 1_000)
+	if err := ended(t, c.applying(t)); err != nil {
+		t.Fatalf("a run again, apply = %v", err)
+	}
+	if want := []opened{{laptop, time.Time{}, false}}; !reflect.DeepEqual(c.src.asked, want) || c.record().From != laptop {
+		t.Errorf("a run again asked for %+v, recording %+v; want laptop", c.src.asked, c.record().From)
+	}
+
+	tm := restore.Origin{Kind: restore.FromTimeMachine, Detail: snapshotX}
+	c = newRestoring(t, "~/Code", "~/Documents")
+	c.fromLaptop()
+	if err := restore.UpdateRecord(c.state, func(r *restore.Record) { r.From = tm }); err != nil {
+		t.Fatal(err)
+	}
+	c.r.Flag = steps.RestoreFrom{Kind: restore.FromMac}
+	write(t, c.old, "~/Code/a", beforeIt)
+	write(t, c.old, "~/Documents/d", beforeIt)
+	c.copies("~/Code", 1, 1_000)
+	c.copies("~/Documents", 1, 1_000)
+	if err := c.apply(t.Context()); err != nil {
+		t.Fatalf("--restore-from mac, apply = %v", err)
+	}
+	if want := []opened{{laptop, time.Time{}, true}}; !reflect.DeepEqual(c.src.asked, want) || c.record().From != laptop {
+		t.Errorf("--restore-from mac asked for %+v, recording %+v; want laptop", c.src.asked, c.record().From)
+	}
+
+	c = newRestoring(t, "~/Code")
+	c.change("~/Code", func(p *restore.Path) { p.State, p.From, p.Started = restore.Copying, tm, duringIt })
+	c.r.Flag = steps.RestoreFrom{Kind: restore.FromMac}
+	want := "couldn't restore: ~/Code is part-way from Time Machine's backup of 8 Nov 2026 14:19, not laptop: kit apply without --restore-from or --at carries on from there"
+	if err := c.apply(t.Context()); err == nil || err.Error() != want || len(c.src.asked) > 0 {
+		t.Errorf("part-way from a backup, --restore-from mac = %v, asking for %+v; want %q", err, c.src.asked, want)
+	}
+}
+
+// Should kit not manage to look for Time Machine disks, the card still goes
+// up, saying why, offering Arq and trying again.
+func TestRestoreAsksWithoutTheDisks(t *testing.T) {
+	c := newRestoring(t, "~/Code")
+	c.fromLaptop()
+	c.src.fails = []error{errSilent}
+	k := c.atTerminal(t, restore.Disks{})
+	c.r.Disks = func(context.Context) (restore.Disks, error) {
+		return restore.Disks{}, errors.New("list the disks: diskutil exited 1")
+	}
+	write(t, c.old, "~/Code/a", beforeIt)
+	c.copies("~/Code", 1, 1_000)
+	applied := c.applying(t)
+	card := up(t, k, 1)[0]
+	if want := []check.Key{{Key: "a", Does: "restores through Arq, by hand"}, {Key: "enter", Does: "tries laptop again"}}; !reflect.DeepEqual(card.Keys, want) ||
+		!strings.HasSuffix(card.Why, " kit couldn't look for Time Machine disks: list the disks: diskutil exited 1.") {
+		t.Errorf("the card says %q, offering %+v", card.Why, card.Keys)
+	}
+	k.answer(t, "restore", "enter")
+	if err := ended(t, applied); err != nil {
+		t.Errorf("tried again, apply = %v", err)
 	}
 }

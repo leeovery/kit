@@ -51,9 +51,9 @@ a tool's credentials its own setup makes again: relative to the path, a path
 or a pattern as rsync takes one, as often as wanted.
 
 Adding a line copies nothing. On a Mac in use, a path added later is
-restored only by kit apply --restore-from time-machine|arq, and only while
-it's absent or empty: one holding data counts as here, and is never
-touched.` + declaredWhere,
+restored only by kit apply --restore-from, from the old Mac or a backup, and
+only while it's absent or empty: one holding data counts as here, and is
+never touched.` + declaredWhere,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return a.prepared(cmd, config.RestoreKind+" add", func(ctx context.Context, r *run) error {
@@ -211,7 +211,7 @@ func (r *run) restoreFitsOn(ctx context.Context, mac string, line restore.Line) 
 			continue
 		case other.Path == line.Path:
 			return fmt.Errorf("%s: %s is listed already, as %s (%s)", line.Pos, line.Path, written, other.Pos)
-		case overlaps(other.Path, line.Path):
+		case restore.Within(other.Path, line.Path) || restore.Within(line.Path, other.Path):
 			return fmt.Errorf("%s: %s and %s (%s) overlap: a path is restored by one line", line.Pos, line.Path, other.Path, other.Pos)
 		}
 	}
@@ -240,12 +240,4 @@ func (r *run) restoreMac(mac string, prefs bool) restore.Mac {
 	}
 	dirs := config.Dirs{Config: r.repo.Dir, State: r.stateDir, Logs: r.logsDir, Data: r.dataDir}
 	return restore.Mac{Config: r.cfg, Name: mac, Home: r.homeDir, Dirs: dirs, Linked: files, Prefs: prefs, Kinds: kinds}
-}
-
-// overlaps reports whether a and b, paths from ~, are one path, or one is
-// in the other, case aside, as macOS's file system takes a path and the
-// restore reads its lines.
-func overlaps(a, b string) bool {
-	a, b = strings.ToLower(a), strings.ToLower(b)
-	return a == b || strings.HasPrefix(a, b+"/") || strings.HasPrefix(b, a+"/")
 }

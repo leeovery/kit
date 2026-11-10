@@ -34,7 +34,7 @@ func Lines(list config.List) ([]Line, error) {
 			return nil, err
 		}
 		for _, other := range lines {
-			if within(l.Path, other.Path) || within(other.Path, l.Path) {
+			if Within(l.Path, other.Path) || Within(other.Path, l.Path) {
 				return nil, fmt.Errorf("%s: %s and %s (%s) overlap: a path is restored by one line", l.Pos, l.Path, other.Path, other.Pos)
 			}
 		}
@@ -110,9 +110,9 @@ func checkSkip(skip string) error {
 	return nil
 }
 
-// within reports whether p, a path from ~, is dir or in it, case aside, as
+// Within reports whether p, a path from ~, is dir or in it, case aside, as
 // macOS's file system takes a path.
-func within(p, dir string) bool {
+func Within(p, dir string) bool {
 	p, dir = strings.ToLower(p), strings.ToLower(dir)
 	return p == dir || strings.HasPrefix(p, dir+"/")
 }

@@ -28,8 +28,8 @@ func TestRecordRoundTrip(t *testing.T) {
 				SetAside: []Aside{{Time: start, Dir: "/Users/someone/.local/state/kit/restore/set-aside/20261120-100000", Paths: []string{"~/Code/notes.md"}}},
 			},
 			"~/.zsh_history":  {State: Here},
-			"~/Documents":     {State: Copying, From: Origin{Kind: FromMac, Detail: "192.0.2.10"}, Started: start},
-			"~/.config/valet": {State: Held},
+			"~/Documents":     {State: Copying, From: Origin{Kind: FromMac, Detail: "laptop"}, Started: start},
+			"~/.config/valet": {Holding: 2},
 		},
 		Settled: start.Add(3 * time.Hour),
 	}
@@ -41,7 +41,7 @@ func TestRecordRoundTrip(t *testing.T) {
 		t.Errorf("LoadRecord() = %+v, %v\nwant %+v", got, err, want)
 	}
 	text := read(t, filepath.Join(dir, "restore.json"))
-	for _, key := range []string{`"from"`, `"kind": "time-machine"`, `"state": "done"`, `"second"`, `"set_aside"`, `"first"`, `"started"`, `"finished"`, `"settled"`} {
+	for _, key := range []string{`"from"`, `"kind": "time-machine"`, `"state": "done"`, `"second"`, `"set_aside"`, `"first"`, `"started"`, `"finished"`, `"settled"`, `"holding": 2`} {
 		if !strings.Contains(text, key) {
 			t.Errorf("restore.json has no %s:\n%s", key, text)
 		}
@@ -85,7 +85,7 @@ func TestRecordChange(t *testing.T) {
 }
 
 // A restore is part-way while one of the listed paths has started and not
-// finished: copying, checking, or held since it started; never one done or
+// finished: copying, checking, or begun by a run before; never one done or
 // here, never one not yet started, never a path no longer listed.
 func TestRecordPartWay(t *testing.T) {
 	started := time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC)
@@ -98,8 +98,8 @@ func TestRecordPartWay(t *testing.T) {
 	}{
 		{"copying", "~/Code", Path{State: Copying, Started: started}, true},
 		{"checking", "~/Documents", Path{State: Checking, Started: started}, true},
-		{"held since it started", "~/Code", Path{State: Held, Started: started}, true},
-		{"held, not started", "~/Code", Path{State: Held}, false},
+		{"begun by a run before", "~/Code", Path{Started: started}, true},
+		{"its holding folder made, not started", "~/Code", Path{Holding: 1}, false},
 		{"done", "~/Code", Path{State: Done, Started: started}, false},
 		{"here", "~/Code", Path{State: Here}, false},
 		{"not in its source", "~/Code", Path{State: NotThere}, false},
@@ -112,6 +112,39 @@ func TestRecordPartWay(t *testing.T) {
 	}
 	if (Record{}).PartWay(listed) {
 		t.Error("with no record, PartWay() = true")
+	}
+}
+
+// A copy starting records its source as the run's; standing in for
+// another, gone or passed over, it becomes the source of every path
+// part-way from that one, reported, but not of one finished, nor one that
+// never started.
+func TestRecordBegin(t *testing.T) {
+	started := time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC)
+	laptop, tm := Origin{Kind: FromMac, Detail: "laptop"}, Origin{Kind: FromTimeMachine, Detail: "snapshot"}
+	fresh := func() Record {
+		return Record{Paths: map[string]Path{
+			"~/Code":      {State: Copying, From: laptop, Started: started},
+			"~/Documents": {State: Checking, From: laptop, Started: started},
+			"~/Music":     {State: Done, From: laptop, Started: started},
+			"~/Gone":      {State: NotThere, From: laptop},
+		}}
+	}
+	rec := fresh()
+	if moved := rec.Begin(tm, Origin{}); moved || rec.From != tm || rec.Paths["~/Code"].From != laptop {
+		t.Errorf("standing in for none, Begin() = %v, the record %+v; want its source recorded, nothing moved", moved, rec)
+	}
+	rec = fresh()
+	if moved := rec.Begin(tm, laptop); !moved || rec.From != tm {
+		t.Errorf("standing in for laptop, Begin() = %v, from %+v; want it moved, from Time Machine", moved, rec.From)
+	}
+	for path, want := range map[string]Origin{"~/Code": tm, "~/Documents": tm, "~/Music": laptop, "~/Gone": laptop} {
+		if got := rec.Paths[path].From; got != want {
+			t.Errorf("standing in for laptop, %s is from %+v, want %+v", path, got, want)
+		}
+	}
+	if moved := rec.Begin(tm, laptop); moved {
+		t.Error("begun again, Begin() reported paths moved")
 	}
 }
 
@@ -134,11 +167,11 @@ func TestRecordResuming(t *testing.T) {
 }
 
 // The restore is done with a path restored, here, or not in its source;
-// not with one under way, held, or with no record.
+// not with one under way, its holding folder made, or with no record.
 func TestRecordFinished(t *testing.T) {
 	rec := Record{Paths: map[string]Path{
 		"~/a": {State: Done}, "~/b": {State: Here}, "~/c": {State: NotThere},
-		"~/d": {State: Copying}, "~/e": {State: Checking}, "~/f": {State: Held},
+		"~/d": {State: Copying}, "~/e": {State: Checking}, "~/f": {Holding: 1},
 	}}
 	for path, want := range map[string]bool{"~/a": true, "~/b": true, "~/c": true, "~/d": false, "~/e": false, "~/f": false, "~/g": false} {
 		if got := rec.Finished(path); got != want {

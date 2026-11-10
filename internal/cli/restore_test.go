@@ -162,8 +162,9 @@ func (w *world) restoreWaits(t *testing.T, args ...string) []string {
 }
 
 // The restore comes after the secrets only when it copies from the Mac
-// this one started from, over SSH, with the key they write: not from a
-// backup kit apply's flags name, nor one a path's part-way from.
+// this one started from, over SSH, with the key they write, as kit apply's
+// flags can name it: not from a backup they name, nor one a path's
+// part-way from.
 func TestRestoreAfterTheSecretsOnlyFromTheOldMac(t *testing.T) {
 	for _, tt := range []struct {
 		name   string
@@ -173,6 +174,8 @@ func TestRestoreAfterTheSecretsOnlyFromTheOldMac(t *testing.T) {
 	}{
 		{"from the old Mac", nil, "", true},
 		{"from a backup named", []string{"--restore-from", "time-machine"}, "", false},
+		{"from the old Mac named, after a backup", []string{"--restore-from", "mac"}, `{"from": {"kind": "time-machine", "detail": "com.apple.TimeMachine.2026-11-08-141900.backup"}}`, true},
+		{"after a backup", nil, `{"from": {"kind": "time-machine", "detail": "com.apple.TimeMachine.2026-11-08-141900.backup"}}`, false},
 		{"part-way from a backup", nil, partWay, false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -190,22 +193,29 @@ func TestRestoreAfterTheSecretsOnlyFromTheOldMac(t *testing.T) {
 	}
 }
 
-// --restore-from names a backup kit knows, for the paths [restore] lists,
-// and --at a date or a time, with it alone: anything else is an error
-// naming the flag, before anything runs.
+// --restore-from names a source kit knows, for the paths [restore] lists,
+// the old Mac only for a Mac started from one; and --at a date or a time,
+// with a backup's alone: anything else is an error naming the flag, before
+// anything runs.
 func TestApplyRestoreFlags(t *testing.T) {
 	for _, tt := range []struct {
-		args []string
-		want string
+		args  []string
+		lines string
+		want  string
 	}{
-		{[]string{"--restore-from", "dropbox"}, `invalid argument "dropbox" for "--restore-from" flag: "dropbox" isn't a source: time-machine or arq`},
-		{[]string{"--restore-from", "time-machine", "--at", "yesterday"}, `invalid argument "yesterday" for "--at" flag: "yesterday" isn't a date, as 2026-11-08, or a time, as "2026-11-08 14:30"`},
-		{[]string{"--restore-from", "time-machine", "--at", "2026-11-08T14:30"}, `invalid argument "2026-11-08T14:30" for "--at" flag`},
-		{[]string{"--at", "2026-11-08"}, "--at picks a backup: give it with --restore-from time-machine or arq"},
-		{[]string{"--restore-from", "time-machine"}, "--restore-from restores the paths [restore] lists, and none are listed for laptop"},
+		{[]string{"--restore-from", "dropbox"}, "", `invalid argument "dropbox" for "--restore-from" flag: "dropbox" isn't a source: mac, time-machine or arq`},
+		{[]string{"--restore-from", "time-machine", "--at", "yesterday"}, "", `invalid argument "yesterday" for "--at" flag: "yesterday" isn't a date, as 2026-11-08, or a time, as "2026-11-08 14:30"`},
+		{[]string{"--restore-from", "time-machine", "--at", "2026-11-08T14:30"}, "", `invalid argument "2026-11-08T14:30" for "--at" flag`},
+		{[]string{"--at", "2026-11-08"}, "", "--at picks a backup: give it with --restore-from time-machine or arq"},
+		{[]string{"--restore-from", "mac", "--at", "2026-11-08"}, "", "--at picks a backup: give it with --restore-from time-machine or arq"},
+		{[]string{"--restore-from", "time-machine"}, "", "--restore-from restores the paths [restore] lists, and none are listed for laptop"},
+		{[]string{"--restore-from", "mac"}, "~/Code\n", "--restore-from mac copies from the Mac laptop started from (from, in kit.toml), and it names none"},
 	} {
 		t.Run(strings.Join(tt.args, " "), func(t *testing.T) {
 			w := laptopWorld(t)
+			if tt.lines != "" {
+				w.writeSection(t, "laptop", "restore", tt.lines)
+			}
 			_, errOut, code := w.run(t, append([]string{"apply"}, tt.args...)...)
 			if code != 2 || !strings.Contains(errOut, tt.want) {
 				t.Errorf("kit apply %s printed %q, exit %d; want exit 2 saying %q", strings.Join(tt.args, " "), errOut, code, tt.want)

@@ -26,7 +26,7 @@ import (
 )
 
 // restoreFlags are kit apply's flags naming the data restore's source:
-// --restore-from, and --at, picking Time Machine's backup.
+// --restore-from, and --at, picking the backup.
 type restoreFlags struct {
 	from restoreSource
 	at   restoreAt
@@ -34,14 +34,18 @@ type restoreFlags struct {
 
 // chosen is the source the flags name, checked: --at only with a backup's.
 func (f restoreFlags) chosen() (steps.RestoreFrom, error) {
-	if !f.at.at.IsZero() && f.from == "" {
-		return steps.RestoreFrom{}, usageError{fmt.Errorf("--at picks a backup: give it with --restore-from %s", strings.Join(restoreSources, " or "))}
+	if !f.at.at.IsZero() && !slices.Contains(backupSources, string(f.from)) {
+		return steps.RestoreFrom{}, usageError{fmt.Errorf("--at picks a backup: give it with --restore-from %s", strings.Join(backupSources, " or "))}
 	}
 	return steps.RestoreFrom{Kind: string(f.from), At: f.at.at}, nil
 }
 
-// restoreSources are the sources --restore-from can name.
-var restoreSources = []string{restore.FromTimeMachine, restore.FromArq}
+// restoreSources are the sources --restore-from can name: the Mac this one
+// started from, and the backups (backupSources).
+var (
+	backupSources  = []string{restore.FromTimeMachine, restore.FromArq}
+	restoreSources = slices.Concat([]string{restore.FromMac}, backupSources)
+)
 
 // restoreSource is --restore-from's value.
 type restoreSource string
@@ -52,7 +56,8 @@ func (s *restoreSource) Type() string { return strings.Join(restoreSources, "|")
 
 func (s *restoreSource) Set(v string) error {
 	if !slices.Contains(restoreSources, v) {
-		return fmt.Errorf("%q isn't a source: %s", v, strings.Join(restoreSources, " or "))
+		last := len(restoreSources) - 1
+		return fmt.Errorf("%q isn't a source: %s or %s", v, strings.Join(restoreSources[:last], ", "), restoreSources[last])
 	}
 	*s = restoreSource(v)
 	return nil
@@ -96,9 +101,9 @@ func (a *restoreAt) Set(v string) error {
 // flags'; or a path's restore part-way, which carries on from where it
 // began whatever the flags; or, for kit agent order, a new Mac's run
 // started from this one, whose lines it carries. Lines that don't read
-// make a step whose check says why; flags naming a source for no lines are
-// an error. Copying from the old Mac over SSH, with the key kit's secrets
-// write, it comes after them.
+// make a step whose check says why; flags naming a source for no lines, or
+// the old Mac for a Mac started from none, are an error. Copying from the
+// old Mac over SSH, with the key kit's secrets write, it comes after them.
 func (a *app) restoreStep(r *run, dirs config.Dirs, prefsOn bool) (*engine.Step, error) {
 	list, err := r.cfg.List(config.RestoreKind, r.machine)
 	if err != nil {
@@ -114,6 +119,9 @@ func (a *app) restoreStep(r *run, dirs config.Dirs, prefsOn bool) (*engine.Step,
 		return nil, nil
 	}
 	from := r.cfg.Macs[r.machine].From
+	if flag.Kind == restore.FromMac && from == "" {
+		return nil, usageError{fmt.Errorf("--restore-from mac copies from the Mac %s started from (from, in kit.toml), and it names none", r.machine)}
+	}
 	lines, unread := restore.Lines(list)
 	rec, err := restore.LoadRecord(dirs.State)
 	if err != nil {

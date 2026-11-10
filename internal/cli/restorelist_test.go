@@ -167,7 +167,7 @@ func TestRestoreRemove(t *testing.T) {
 // restores one, and that it never touches one holding data.
 func TestRestoreAddHelpSaysItCopiesNothing(t *testing.T) {
 	out, _, _ := laptopWorld(t).run(t, "restore", "add", "--help")
-	if !strings.Contains(out, "Adding a line copies nothing. On a Mac in use, a path added later is\nrestored only by kit apply --restore-from time-machine|arq, and only while\nit's absent or empty: one holding data counts as here, and is never\ntouched.") {
+	if !strings.Contains(out, "Adding a line copies nothing. On a Mac in use, a path added later is\nrestored only by kit apply --restore-from, from the old Mac or a backup, and\nonly while it's absent or empty: one holding data counts as here, and is\nnever touched.") {
 		t.Errorf("kit restore add --help printed\n%s", out)
 	}
 }

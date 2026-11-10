@@ -1,0 +1,30 @@
+
+  █  ▄▀  ▀█▀  ▀▀█▀▀  │  bootstrap · studio · Fri 2 Jan · 03:04
+  █▀▀▄    █     █    │  ▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮  66% · 1m20s so far
+  █   █  ▄█▄    █    │  ▲ waiting for you · Arq's restore isn't all there
+
+────────────────────────────────────────────────────┬───────────────────────────────────────────────
+                                                    │
+  ≡ Everything                                      │  ▲ Arq's restore isn't all the… waiting 5.0s  
+                                                    │
+  ● Homebrew formulae  all 2 done                   │      Should Arq still be restoring, let it
+  ○ Developer tools  waits for Data restore         │      finish; should a path be in another's
+  ▲ Backups  waits for you: Arq's restore isn't al… │      holding folder, move it into its own.
+                                                    │      Then look again.
+                                                    │
+                                                    │      1  ~/Code: …/arq/1 holds .claude, not
+                                                    │         Code
+                                                    │      2  ~/.claude: …/arq/2 holds nothing yet
+                                                    │
+                                                    │      enter looks again
+                                                    │      n says the backup hasn't these, restoring
+                                                    │        the rest
+                                                    │
+                                                    ├───────────────────────────────────────────────
+                                                    │
+                                                    │  LOG
+                                                    │
+                                                    │  03:04:36  + Installed jq
+                                                    │  03:05:05  ● Homebrew formulae: 2 declared, a…
+                                                    │  03:05:15  ▲ laptop doesn't answer over SSH: …
+  tab next row · ↑↓ scroll · q stop                 │  03:05:20  ▲ Arq's restore isn't all there: w…

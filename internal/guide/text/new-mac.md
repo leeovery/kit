@@ -60,7 +60,8 @@ rebuilds the rest from kit-config.
 - From where: the Mac it started from, over the local network, while it
   answers; else its Time Machine disk, attached, or Arq's backup, which the
   person restores in Arq for kit to put in place
-  (`kit apply --restore-from time-machine|arq`).
+  (`kit apply --restore-from time-machine|arq`; `mac` goes back to the old
+  Mac).
 - When: once Homebrew's rsync is installed and, copying from the old Mac,
   the secrets have synced. Claude Code's MCP servers and skills, the
   reinstall, and a step declared `--after restore` wait for it; nothing
@@ -85,8 +86,9 @@ rebuilds the rest from kit-config.
   again.
 
 A Mac without a `from`, or a line added on a Mac in use, restores nothing
-unless `kit apply --restore-from time-machine|arq` says so, and then only
-while the path is absent or empty: one holding data is never touched.
+unless `kit apply --restore-from` says so (`time-machine` or `arq`; `mac`
+too, on a Mac with a `from`), and then only while the path is absent or
+empty: one holding data is never touched.
 
 ## What isn't there
 

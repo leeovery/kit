@@ -283,7 +283,7 @@ func TestReinstallCheck(t *testing.T) {
 		t.Errorf("before the restore, check = %+v, want it deferred", res)
 	}
 	m.restored(t, restore.Done, "~/Code", "~/.zsh_history")
-	m.restored(t, restore.Held, "~/Documents")
+	m.restored(t, restore.Copying, "~/Documents")
 	m.restored(t, restore.Here, "~/Notes")
 	if res := step.Check(t.Context()); res.State != check.Attention || res.Summary != "projects to find in ~/.zsh_history, ~/Code" {
 		t.Errorf("restored, check = %s %q, want the paths to search", res.State, res.Summary)

@@ -159,6 +159,20 @@ func TestApplyingShowsTheRestoresChoices(t *testing.T) {
 	})
 }
 
+// The card saying what of Arq's restore isn't in its holding folders, once
+// the person says it's done, lists each, numbered, then its choices, a line
+// each.
+func TestApplyingShowsWhatArqsRestoreLacks(t *testing.T) {
+	lacking := event.NeedsYou{Time: after(75), Step: "restore", Item: "restore:arq-lacking", Title: "Arq's restore isn't all there",
+		Why:   "Should Arq still be restoring, let it finish; should a path be in another's holding folder, move it into its own. Then look again.",
+		Steps: []string{"~/Code: …/arq/1 holds .claude, not Code", "~/.claude: …/arq/2 holds nothing yet"},
+		Keys:  []check.Key{{Key: "enter", Does: "looks again"}, {Key: "n", Does: "says the backup hasn't these, restoring the rest"}},
+	}
+	face, out, _ := applyAt(100, 30, 80*time.Second, append(askingWhereFrom(), lacking))
+	defer func() { _ = face.Close() }()
+	golden(t, "apply-screen-restore-lacking-100x30.golden", screen(out.String())+"\n")
+}
+
 // A mid-run card's choice being answered says what its key does, turning,
 // in place of its keys.
 func TestApplyingShowsTheRestoresChoiceAnswered(t *testing.T) {

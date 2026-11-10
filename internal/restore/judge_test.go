@@ -28,7 +28,7 @@ func firstRun(paths ...string) Record {
 }
 
 // A path is judged by its record first: done, here, or under way, whatever
-// it holds. Else, with no record or held, by what it holds, kit's aside:
+// it holds. Else, with no record, by what it holds, kit's aside:
 // nothing, to restore; only files set-up wrote, from the moment it began, to
 // set aside, then restore; anything older, here. A Mac with no record of its
 // set-up's start is in use: whatever it holds is here.
@@ -61,9 +61,6 @@ func TestJudge(t *testing.T) {
 		{"recorded here, since emptied", claude, nil, Here, setUp, VerdictHere, nil},
 		{"copying", claude, with(map[string]time.Time{"history.jsonl": earlier}), Copying, setUp, VerdictResume, nil},
 		{"checking", claude, with(map[string]time.Time{"history.jsonl": earlier}), Checking, setUp, VerdictResume, nil},
-		{"held, nothing there", claude, nil, Held, setUp, VerdictRestore, nil},
-		{"held, holding files set-up wrote", claude, with(map[string]time.Time{"history.jsonl": later}), Held, setUp, VerdictSetAside, []string{"~/.claude/history.jsonl"}},
-		{"held, holding an older file", claude, with(map[string]time.Time{"history.jsonl": earlier}), Held, setUp, VerdictHere, nil},
 		{"absent", claude, nil, "", setUp, VerdictRestore, nil},
 		{"folders alone", claude, map[string]time.Time{}, "", setUp, VerdictRestore, nil},
 		{"nothing but kit's, old and new", claude, with(nil), "", setUp, VerdictRestore, nil},
@@ -109,15 +106,15 @@ func TestJudge(t *testing.T) {
 // till its copy starts: a line added after the first run, its files all
 // newer than set-up's start, is here, as on a Mac in use; one holding
 // nothing but kit's, or absent, is the caller's to restore or not. A path
-// held since the first run, untouched, is judged again on each run; one
-// whose copy started, then held, resumes. With no first run recorded,
-// nothing's set aside.
+// whose holding folder of Arq's was made since the first run, nothing
+// copied, is judged again on each run; one whose copy a run before began
+// resumes. With no first run recorded, nothing's set aside.
 func TestJudgeSetsAsideOnlyWhatTheFirstRunListed(t *testing.T) {
 	code := Line{Path: "~/Code", Pos: "laptop/declarations:4"}
 	tool := Line{Path: "~/.local/state/newtool", Pos: "laptop/declarations:9"}
 	month := setUp.Add(30 * 24 * time.Hour)
-	held := func(p *Path) { p.State = Held }
-	heldOnceCopying := func(p *Path) { p.State, p.Started = Held, setUp.Add(2*time.Hour) }
+	holding := func(p *Path) { p.Holding = 1 }
+	begun := func(p *Path) { p.Holding, p.Started = 1, setUp.Add(2*time.Hour) }
 	for _, tt := range []struct {
 		name   string
 		line   Line
@@ -130,10 +127,10 @@ func TestJudgeSetsAsideOnlyWhatTheFirstRunListed(t *testing.T) {
 		{"a line added a month after set-up began, its tool's fresh data", tool, map[string]time.Time{"~/.local/state/newtool/state.db": month}, true, nil, VerdictHere, nil},
 		{"a line added since, nothing but Finder's", tool, map[string]time.Time{"~/.local/state/newtool/.DS_Store": month}, true, nil, VerdictRestore, nil},
 		{"a line added since, absent", tool, nil, true, nil, VerdictRestore, nil},
-		{"held since the first run, holding set-up's files", code, map[string]time.Time{"~/Code/site/notes.md": later, "~/Code/tool/main.go": month}, true, held, VerdictSetAside, []string{"~/Code/site/notes.md", "~/Code/tool/main.go"}},
-		{"held since the first run, holding an older file", code, map[string]time.Time{"~/Code/site/notes.md": earlier}, true, held, VerdictHere, nil},
-		{"held since the first run, nothing there", code, nil, true, held, VerdictRestore, nil},
-		{"held once its copy started", code, map[string]time.Time{"~/Code/site/notes.md": later}, true, heldOnceCopying, VerdictResume, nil},
+		{"its holding folder made, holding set-up's files", code, map[string]time.Time{"~/Code/site/notes.md": later, "~/Code/tool/main.go": month}, true, holding, VerdictSetAside, []string{"~/Code/site/notes.md", "~/Code/tool/main.go"}},
+		{"its holding folder made, holding an older file", code, map[string]time.Time{"~/Code/site/notes.md": earlier}, true, holding, VerdictHere, nil},
+		{"its holding folder made, nothing there", code, nil, true, holding, VerdictRestore, nil},
+		{"its copy begun by a run before", code, map[string]time.Time{"~/Code/site/notes.md": later}, true, begun, VerdictResume, nil},
 		{"no first run recorded, holding set-up's files", code, map[string]time.Time{"~/Code/site/notes.md": later}, false, nil, VerdictHere, nil},
 	} {
 		t.Run(tt.name, func(t *testing.T) {

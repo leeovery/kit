@@ -39,8 +39,8 @@ func TestLooksInOneGo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]Listed{
-		"~/Code":                               {Kind: restore.Folder, Skips: []string{"app/node_modules", "web [x]/vendor"}},
+	want := map[string]restore.There{
+		"~/Code":                               {Kind: restore.Folder, Skips: []string{"app/node_modules", `web \[x]/vendor`}},
 		"~/Library/Application Support/Claude": {Kind: restore.Folder},
 		"~/.zsh_history":                       {Kind: restore.File},
 		"~/Gone":                               {Kind: restore.Missing},
@@ -95,7 +95,7 @@ func TestLooksPastNamesNoRuleCanHold(t *testing.T) {
 	fake := runnertest.New(t)
 	looked(fake, laptopAt).Prints("folder\x00./app/node_modules\x00./odd\nname\x00./odd\rname\x00")
 	got, err := macThrough(fake).Look(t.Context(), []string{"~/Code"})
-	if want := (Listed{Kind: restore.Folder, Skips: []string{"app/node_modules"}}); err != nil || !reflect.DeepEqual(got["~/Code"], want) {
+	if want := (restore.There{Kind: restore.Folder, Skips: []string{"app/node_modules"}}); err != nil || !reflect.DeepEqual(got["~/Code"], want) {
 		t.Errorf("Look() = %v, %v, want %v", got, err, want)
 	}
 }
@@ -116,11 +116,15 @@ func TestLooksSayingSSHsFailure(t *testing.T) {
 	}
 }
 
-func TestPatternsAreEscaped(t *testing.T) {
-	l := Listed{Kind: restore.Folder, Skips: []string{"app/node_modules", "web [x]/vendor", "a*b?/cache"}}
+// What's skipped is said as a line's skips are, escaped where rsync would
+// take it as a pattern.
+func TestLookEscapesWhatsSkipped(t *testing.T) {
+	fake := runnertest.New(t)
+	looked(fake, laptopAt).Prints("folder\x00./app/node_modules\x00./web [x]/vendor\x00./a*b?/cache\x00")
+	got, err := macThrough(fake).Look(t.Context(), []string{"~/Code"})
 	want := []string{"app/node_modules", `web \[x]/vendor`, `a\*b\?/cache`}
-	if got := l.Patterns(); !slices.Equal(got, want) {
-		t.Errorf("Patterns() = %q, want %q", got, want)
+	if err != nil || !slices.Equal(got["~/Code"].Skips, want) {
+		t.Errorf("Look() = %+v, %v; want ~/Code skipping %q", got, err, want)
 	}
 }
 
@@ -198,8 +202,8 @@ func TestLooksForRealThroughTheShell(t *testing.T) {
 	for _, l := range got {
 		slices.Sort(l.Skips)
 	}
-	want := map[string]Listed{
-		"~/Code":                               {Kind: restore.Folder, Skips: []string{"app/node_modules", "empty/.claude/worktrees", "notes.txt", "tooDeep", "web [x]/vendor"}},
+	want := map[string]restore.There{
+		"~/Code":                               {Kind: restore.Folder, Skips: []string{"app/node_modules", "empty/.claude/worktrees", "notes.txt", "tooDeep", `web \[x]/vendor`}},
 		"~/Library/Application Support/Claude": {Kind: restore.Folder, Skips: []string{"Cache"}},
 		"~/Listed":                             {Kind: restore.Folder},
 		"~/.zsh_history":                       {Kind: restore.File},

@@ -278,6 +278,37 @@ func TestCopiesNeverCarryACLsDeleteOrReplaceNewerFiles(t *testing.T) {
 	}
 }
 
+// Whether a file here differs from its source is a dry run by checksum
+// without --update, as only that sees a file newer here, which a copy
+// kept: its contents differing count; its time alone doesn't. The lines are
+// rsync 3.5.2's, for a file newer here, then one only touched since.
+func TestDiffersLooksPastUpdate(t *testing.T) {
+	home := t.TempDir()
+	file := local("/Users/someone/.zsh_history", home+"/.zsh_history")
+	file.File = true
+	for _, tt := range []struct {
+		name, prints string
+		want         bool
+	}{
+		{"its contents newer here", ">fcst...n.. .zsh_history\n", true},
+		{"only touched here", ".f..t...n.. .zsh_history\n", false},
+		{"the same", "", false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			fake := prints(t, tt.prints)
+			got, err := NewRsync(fake).Differs(t.Context(), file)
+			if err != nil || got != tt.want {
+				t.Errorf("Differs() = %v, %v; want %v", got, err, tt.want)
+			}
+			want := slices.Concat([]string{"--archive", "--xattrs", "--hard-links", "--crtimes", "--mkpath", "--partial-dir=" + partial},
+				[]string{"--dry-run", "--checksum", "--itemize-changes", "/Volumes/snapshot/Users/someone/.zsh_history", home + "/.zsh_history"})
+			if got := fake.Commands()[0].Args; !slices.Equal(got, want) {
+				t.Errorf("rsync's arguments = %q\nwant %q", got, want)
+			}
+		})
+	}
+}
+
 // Only over SSH is a copy that goes quiet ended: on this Mac, rsync says
 // nothing while it checksums a file, which on a slow disk can take longer
 // than any limit.

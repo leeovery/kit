@@ -263,7 +263,7 @@ func (m *Mac) Shell() string {
 // to close.
 func (m *Mac) Opened() *restore.Opened {
 	return &restore.Opened{
-		Home: m.Home, Host: m.Host, Shell: m.Shell(), Rsync: RemoteRsync, Look: m.there, Live: true,
+		Home: m.Home, Host: m.Host, Shell: m.Shell(), Rsync: RemoteRsync, Look: m.Look, Live: true,
 		Origin: restore.Origin{Kind: restore.FromMac, Detail: m.Name},
 		Close:  func(context.Context) error { return nil },
 	}

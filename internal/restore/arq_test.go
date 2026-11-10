@@ -3,6 +3,7 @@ package restore
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 )
@@ -51,46 +52,49 @@ func TestHoldNumbersEachPathsHoldingFolder(t *testing.T) {
 }
 
 // A holding folder holds Arq's restore of its path once the path's in it
-// under its own name, as Arq puts a folder in the one it's given; empty,
-// missing, or with Finder's files alone, it holds nothing; anything else
-// in it is an error saying where it should be.
+// under its own name, as Arq puts a folder in the one it's given; else it
+// says what it holds instead, Finder's files aside: nothing, empty or
+// missing; another's path; or a folder's contents restored without it.
 func TestHolds(t *testing.T) {
 	for _, tt := range []struct {
 		name, path string
 		files      []string
 		held       bool
-		err        string
+		instead    []string
 	}{
-		{"a folder restored", "~/Code", []string{"Code/app/main.go"}, true, ""},
-		{"a file restored", "~/.zsh_history", []string{".zsh_history"}, true, ""},
-		{"empty", "~/Code", nil, false, ""},
-		{"Finder's files", "~/Code", []string{".DS_Store"}, false, ""},
-		{"its contents alone", "~/Code", []string{"app/main.go", "site/index.php"}, false, "HOLD holds app, site, not Code: restore ~/Code itself into it, as Arq puts a folder in the one it's given"},
+		{"a folder restored", "~/Code", []string{"Code/app/main.go"}, true, nil},
+		{"a file restored", "~/.zsh_history", []string{".zsh_history"}, true, nil},
+		{"empty", "~/Code", nil, false, nil},
+		{"Finder's files", "~/Code", []string{".DS_Store"}, false, nil},
+		{"another path's", "~/Code", []string{".claude/history.jsonl"}, false, []string{".claude"}},
+		{"its contents alone", "~/Code", []string{"app/main.go", "site/index.php"}, false, []string{"app", "site"}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			hold := t.TempDir()
 			for _, f := range tt.files {
 				write(t, filepath.Join(hold, f), time.Now())
 			}
-			held, err := Holds(hold, tt.path)
-			if held != tt.held || tt.err == "" && err != nil || tt.err != "" && (err == nil || err.Error() != filepathed(tt.err, hold)) {
-				t.Errorf("Holds() = %v, %v; want %v, %q", held, err, tt.held, tt.err)
+			held, instead, err := Holds(hold, tt.path)
+			if err != nil || held != tt.held || !slices.Equal(instead, tt.instead) {
+				t.Errorf("Holds() = %v, %q, %v; want %v, %q", held, instead, err, tt.held, tt.instead)
 			}
 		})
 	}
-	if held, err := Holds(filepath.Join(t.TempDir(), "gone"), "~/Code"); held || err != nil {
-		t.Errorf("for a holding folder that isn't there, Holds() = %v, %v; want nothing held", held, err)
+	if held, instead, err := Holds(filepath.Join(t.TempDir(), "gone"), "~/Code"); held || instead != nil || err != nil {
+		t.Errorf("for a holding folder that isn't there, Holds() = %v, %q, %v; want nothing held", held, instead, err)
 	}
 }
 
 // Arq's restore opens as a source of its holding folders: each path where
-// Arq put it in its folder; recorded as Arq's, in kit's state; never
-// changing as it's copied; each path's holding folder going once it's
-// restored. What's at each is what's there: a folder, a file, nothing for
-// a holding folder still empty, and an error for one holding something
-// else.
+// Arq put it in its folder; recorded as Arq's, in kit's state, said from ~;
+// never changing as it's copied; each path's holding folder going once
+// it's restored. What's at each is what's there, a folder or a file; a
+// holding folder still empty, or holding something else, is an error
+// saying so, never a path its source hasn't, as Arq may still be restoring
+// it.
 func TestArqOpens(t *testing.T) {
-	state := t.TempDir()
+	home := t.TempDir()
+	state := filepath.Join(home, ".local", "state", "kit")
 	holds, err := Hold(state, []string{"~/Code", "~/.zsh_history", "~/Documents", "~/Music"})
 	if err != nil {
 		t.Fatal(err)
@@ -98,30 +102,30 @@ func TestArqOpens(t *testing.T) {
 	write(t, filepath.Join(holds["~/Code"], "Code", "main.go"), time.Now())
 	write(t, filepath.Join(holds["~/.zsh_history"], ".zsh_history"), time.Now())
 	write(t, filepath.Join(holds["~/Music"], "song.mp3"), time.Now())
-	src, err := Arq{StateDir: state, Holds: holds}.Open(t.Context())
+	src, err := Arq{StateDir: state, Home: home, Holds: holds}.Open(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if src.Live || !src.Frees || src.Origin != (Origin{Kind: FromArq, Detail: ArqFolder(state)}) || src.Host != "" {
-		t.Errorf("opened %+v; want Arq's, from kit's state, freeing its room, not live", src)
+	if src.Live || !src.Frees || src.Origin != (Origin{Kind: FromArq, Detail: "~/.local/state/kit/restore/arq"}) || src.Host != "" {
+		t.Errorf("opened %+v; want Arq's, from kit's state, from ~, freeing its room, not live", src)
 	}
 	if got := src.Source("~/Code"); got != (Source{Path: filepath.Join(state, "restore", "arq", "1", "Code")}) {
 		t.Errorf("~/Code is at %+v", got)
 	}
-	for path, want := range map[string]Kind{"~/Code": Folder, "~/.zsh_history": File, "~/Documents": Missing} {
+	for path, want := range map[string]Kind{"~/Code": Folder, "~/.zsh_history": File} {
 		if got, err := src.Stat(path); err != nil || got.Kind != want {
 			t.Errorf("Stat(%s) = %+v, %v; want %v", path, got, err, want)
 		}
 	}
-	if _, err := src.Stat("~/Music"); err == nil {
-		t.Error("Stat(~/Music), its holding folder holding a song alone, found no error")
+	for path, want := range map[string]string{
+		"~/Documents": holds["~/Documents"] + " holds nothing: Arq's restore of ~/Documents isn't in it",
+		"~/Music":     holds["~/Music"] + " holds song.mp3, not Music: restore ~/Music itself into it, as Arq puts a folder in the one it's given",
+	} {
+		if got, err := src.Stat(path); err == nil || err.Error() != want {
+			t.Errorf("Stat(%s) = %+v, %v; want %q", path, got, err, want)
+		}
 	}
 	if err := src.Close(t.Context()); err != nil {
 		t.Errorf("Close() = %v", err)
 	}
-}
-
-// filepathed is s, HOLD in it standing for hold.
-func filepathed(s, hold string) string {
-	return filepath.Clean(hold) + s[len("HOLD"):]
 }

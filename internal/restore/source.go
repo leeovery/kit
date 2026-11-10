@@ -79,16 +79,17 @@ func (o *Opened) Source(path string) Source {
 
 // Stat says what's at path, a line's, from ~, there, as os.Lstat does: a
 // folder, a file (a link, as rsync copies one, is one), or nothing. A
-// holding folder of Arq's with something else in it is an error saying so
-// (Holds). A source on another Mac is Look's to look at.
+// holding folder of Arq's not holding path is an error saying what it
+// holds, never nothing there (heldIn). A source on another Mac is Look's
+// to look at.
 func (o *Opened) Stat(path string) (There, error) {
 	if o.Host != "" {
 		return There{}, errors.New("a path on another Mac is looked at through Look")
 	}
 	at := o.Source(path).Path
 	if _, ok := o.Folders[path]; ok {
-		if held, err := Holds(filepath.Dir(at), path); err != nil || !held {
-			return There{Kind: Missing}, err
+		if err := heldIn(filepath.Dir(at), path); err != nil {
+			return There{}, err
 		}
 	}
 	info, err := os.Lstat(at)

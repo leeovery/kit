@@ -35,9 +35,9 @@ func TestSourceOpensTheOldMac(t *testing.T) {
 	}
 	want := map[string]restore.There{
 		"~/Code":                               {Kind: restore.Folder, Skips: []string{"app/node_modules", `web \[x]/vendor`}},
-		"~/Library/Application Support/Claude": {Kind: restore.Folder, Skips: []string{}},
-		"~/.zsh_history":                       {Kind: restore.File, Skips: []string{}},
-		"~/Gone":                               {Kind: restore.Missing, Skips: []string{}},
+		"~/Library/Application Support/Claude": {Kind: restore.Folder},
+		"~/.zsh_history":                       {Kind: restore.File},
+		"~/Gone":                               {Kind: restore.Missing},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Look() = %+v\nwant %+v", got, want)

@@ -219,12 +219,30 @@ func (c *restoring) change(path string, change func(*restore.Path)) {
 	}
 }
 
-// rsync's three runs, by the option that sets each apart.
+// rsync's runs on a path: sizing its copy, the copy, its second pass, and,
+// for a file, the look at whether the one here differs.
 const (
-	sizing    = "--dry-run"
-	copyingOp = "--info=name1,progress2"
-	comparing = "--checksum"
+	sizing    = "sizing"
+	copyingOp = "copying"
+	comparing = "comparing"
+	differing = "differing"
 )
+
+// opOf is which of rsync's runs args are, by the options that set each
+// apart: the look alone runs without --update.
+func opOf(args []string) string {
+	switch {
+	case !slices.Contains(args, "--update"):
+		return differing
+	case slices.Contains(args, "--info=name1,progress2"):
+		return copyingOp
+	case slices.Contains(args, "--dry-run"):
+		return sizing
+	case slices.Contains(args, "--checksum"):
+		return comparing
+	}
+	return "?"
+}
 
 // on scripts rsync's run op on path, from ~, as from the source.
 func (c *restoring) on(op, path string) *runnertest.Script {
@@ -234,7 +252,7 @@ func (c *restoring) on(op, path string) *runnertest.Script {
 // onFrom scripts rsync's run op copying from, a path in full.
 func (c *restoring) onFrom(op, from string) *runnertest.Script {
 	return c.fake.OnMatch("rsync", func(args []string) bool {
-		return slices.Contains(args, op) && strings.TrimSuffix(args[len(args)-2], "/") == from
+		return opOf(args) == op && strings.TrimSuffix(args[len(args)-2], "/") == from
 	})
 }
 
@@ -253,7 +271,8 @@ func statsOf(files int, bytes int64, totalFiles int, totalBytes int64) string {
 
 // copies scripts path's whole restore from the source: its size, a copy of
 // files and bytes, each file's name and how far the copy's got, then its
-// statistics, and a second pass that finds nothing.
+// statistics, a file here no different, and a second pass that finds
+// nothing.
 func (c *restoring) copies(path string, files int, bytes int64) {
 	c.carriesOn(path, files, bytes, files, bytes)
 }
@@ -282,6 +301,7 @@ func (c *restoring) carriesOnFrom(from, path string, files int, bytes int64, tot
 	}
 	out.WriteString("\n" + statsOf(files, bytes, totalFiles, totalBytes))
 	c.onFrom(copyingOp, from).Prints(out.String())
+	c.onFrom(differing, from)
 	c.onFrom(comparing, from)
 }
 
@@ -292,14 +312,8 @@ func (c *restoring) ran() []string {
 		if cmd.Name != "rsync" {
 			continue
 		}
-		op := "?"
-		for _, o := range []string{sizing, copyingOp, comparing} {
-			if slices.Contains(cmd.Args, o) {
-				op = o
-			}
-		}
 		from := strings.TrimSuffix(cmd.Args[len(cmd.Args)-2], "/")
-		out = append(out, op+" ~/"+strings.TrimPrefix(from, c.old+"/"))
+		out = append(out, opOf(cmd.Args)+" ~/"+strings.TrimPrefix(from, c.old+"/"))
 	}
 	return out
 }
@@ -378,7 +392,8 @@ func TestRestoreChecks(t *testing.T) {
 
 // Once the restore has settled, a line added since, its path absent, isn't
 // one to nag about: fine, each such path a quiet item saying what would
-// bring it; until kit apply names a source, when it's to restore.
+// bring it, the old Mac among them for a Mac started from one; until kit
+// apply names a source, when it's to restore.
 func TestRestoreSettledWaitsForAFlag(t *testing.T) {
 	c := newRestoring(t, "~/Code", "~/.local/state/newtool", "~/.cache/x")
 	c.change("~/Code", func(p *restore.Path) { p.State = restore.Done })
@@ -386,12 +401,17 @@ func TestRestoreSettledWaitsForAFlag(t *testing.T) {
 		t.Fatal(err)
 	}
 	res := c.step().Check(t.Context())
-	quiet := func(path string) check.Item {
-		return check.Item{ID: "restore:" + path, Name: path, State: "not restored", Detail: "kit apply --restore-from time-machine|arq brings it", Quiet: "listed since the restore settled"}
+	quiet := func(path, flag string) check.Item {
+		return check.Item{ID: "restore:" + path, Name: path, State: "not restored", Detail: "kit apply --restore-from " + flag + " brings it", Quiet: "listed since the restore settled"}
 	}
-	if want := []check.Item{quiet("~/.local/state/newtool"), quiet("~/.cache/x")}; res.State != check.OK || res.Summary != "3 declared, 1 restored, 2 not restored" || !reflect.DeepEqual(res.Items, want) {
+	if want := []check.Item{quiet("~/.local/state/newtool", "mac|time-machine|arq"), quiet("~/.cache/x", "mac|time-machine|arq")}; res.State != check.OK || res.Summary != "3 declared, 1 restored, 2 not restored" || !reflect.DeepEqual(res.Items, want) {
 		t.Errorf("settled, the check = %s %q %+v; want fine, %+v", res.State, res.Summary, res.Items, want)
 	}
+	c.r.From = ""
+	if res := c.step().Check(t.Context()); len(res.Items) != 2 || res.Items[0] != quiet("~/.local/state/newtool", "time-machine|arq") {
+		t.Errorf("on a Mac started from none, the check's items = %+v; want backups alone named", res.Items)
+	}
+	c.r.From = "laptop"
 	if err := c.apply(t.Context()); err != nil || len(c.src.asked) > 0 {
 		t.Errorf("settled, applying = %v, asking for %+v; want nothing restored", err, c.src.asked)
 	}
@@ -427,7 +447,7 @@ func TestRestoreFromABackup(t *testing.T) {
 	if want := []string{
 		sizing + " ~/Code", sizing + " ~/.zsh_history",
 		copyingOp + " ~/Code", comparing + " ~/Code",
-		copyingOp + " ~/.zsh_history", comparing + " ~/.zsh_history",
+		copyingOp + " ~/.zsh_history", differing + " ~/.zsh_history", comparing + " ~/.zsh_history",
 	}; !slices.Equal(c.ran(), want) {
 		t.Errorf("rsync ran\n%q\nwant\n%q", c.ran(), want)
 	}
@@ -751,7 +771,7 @@ func TestRestoreSourceShortcomings(t *testing.T) {
 // it, as a line added after the restore settled.
 func TestRestoreAPathTheSourceHadnt(t *testing.T) {
 	quiet := check.Item{ID: "restore:~/.local/state/newtool", Name: "~/.local/state/newtool", State: "not restored",
-		Detail: "Time Machine's backup of 8 Nov 2026 14:19 hadn't it; kit apply --restore-from time-machine|arq brings it from another", Quiet: "not in its source"}
+		Detail: "Time Machine's backup of 8 Nov 2026 14:19 hadn't it; kit apply --restore-from mac|time-machine|arq brings it from another", Quiet: "not in its source"}
 	hadnt := func(t *testing.T) *restoring {
 		t.Helper()
 		c := newRestoring(t, "~/Code", "~/.local/state/newtool")
@@ -982,5 +1002,80 @@ func TestRestoreFilesVanishing(t *testing.T) {
 				t.Errorf("apply = %v, ~/Code %s; want %s, failing %v", err, got, tt.want, !tt.live)
 			}
 		})
+	}
+}
+
+// A listed file written here as it's restored, between its judging and its
+// copy, newer than its source, is kept by the copy, as --update keeps any
+// newer file, and its second pass sees nothing: so once copied, a file
+// that differs from its source is set aside, saying so, and copied again,
+// once, before it's compared and recorded; a path resumed alike.
+func TestRestoreCopiesOverAFileWrittenAsItWasRestored(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		before func(c *restoring)
+	}{
+		{"its first copy", func(*restoring) {}},
+		{"resumed", func(c *restoring) {
+			c.change("~/.zsh_history", func(p *restore.Path) { p.State, p.From, p.Started = restore.Copying, c.src.origin, duringIt })
+		}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			c := newRestoring(t, "~/.zsh_history")
+			c.r.Flag = steps.RestoreFrom{Kind: restore.FromTimeMachine}
+			tt.before(c)
+			write(t, c.old, "~/.zsh_history", beforeIt)
+			c.copies("~/.zsh_history", 1, 100)
+			c.on(copyingOp, "~/.zsh_history").Prints(stats(1, 100)).Does(func() { write(t, c.home, "~/.zsh_history", duringIt.Add(48*time.Hour)) }).Then().Prints(stats(1, 100))
+			c.on(differing, "~/.zsh_history").Prints(">fcst...n.. .zsh_history\n")
+			if err := c.apply(t.Context()); err != nil {
+				t.Fatalf("apply = %v", err)
+			}
+			if want := []string{"sizing ~/.zsh_history", "copying ~/.zsh_history", "differing ~/.zsh_history", "copying ~/.zsh_history", "comparing ~/.zsh_history"}; !slices.Equal(c.ran(), want) {
+				t.Errorf("rsync ran %q\nwant %q", c.ran(), want)
+			}
+			history := c.record().Paths["~/.zsh_history"]
+			if history.State != restore.Done || len(history.SetAside) != 1 || !slices.Equal(history.SetAside[0].Paths, []string{"~/.zsh_history"}) {
+				t.Fatalf("~/.zsh_history's record = %+v; want it restored, the one written here set aside", history)
+			}
+			aside := history.SetAside[0].Dir
+			if got, err := os.ReadFile(filepath.Join(aside, ".zsh_history")); err != nil || string(got) != "~/.zsh_history" {
+				t.Errorf("the one written here, set aside = %q, %v", got, err)
+			}
+			if want := "Set aside ~/.zsh_history, written here as it was restored, into " + aside; !slices.Contains(c.logged, want) {
+				t.Errorf("the log says %q, want %q", c.logged, want)
+			}
+		})
+	}
+}
+
+// A path recorded here, holding files of its own, is never touched: unless
+// kit apply names a source and it's absent now, or holds nothing but kit's,
+// when it's restored, so one lost since can be brought back.
+func TestRestoreBringsBackAPathRecordedHere(t *testing.T) {
+	c := newRestoring(t, "~/Code", "~/Documents")
+	c.r.Began = time.Time{}
+	for _, p := range []string{"~/Code", "~/Documents"} {
+		c.change(p, func(p *restore.Path) { p.State = restore.Here })
+	}
+	write(t, c.home, "~/Documents/kept", beforeIt)
+	write(t, c.old, "~/Code/a", beforeIt)
+	if err := c.apply(t.Context()); err != nil || len(c.src.asked) > 0 {
+		t.Errorf("naming no source, apply = %v, asking for %+v; want nothing restored", err, c.src.asked)
+	}
+	c.r.Flag = steps.RestoreFrom{Kind: restore.FromTimeMachine}
+	if res := c.step().Check(t.Context()); len(res.Items) != 1 || res.Items[0].Name != "~/Code" {
+		t.Errorf("with --restore-from, the check's items = %+v; want ~/Code's alone", res.Items)
+	}
+	c.copies("~/Code", 1, 1_000)
+	if err := c.apply(t.Context()); err != nil {
+		t.Fatalf("with --restore-from, apply = %v", err)
+	}
+	rec := c.record()
+	if rec.Paths["~/Code"].State != restore.Done || rec.Paths["~/Documents"].State != restore.Here {
+		t.Errorf("the record = %+v; want ~/Code restored, ~/Documents here, untouched", rec.Paths)
+	}
+	if want := []string{"sizing ~/Code", "copying ~/Code", "comparing ~/Code"}; !slices.Equal(c.ran(), want) {
+		t.Errorf("rsync ran %q, want %q", c.ran(), want)
 	}
 }

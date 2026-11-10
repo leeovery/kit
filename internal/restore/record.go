@@ -30,8 +30,9 @@ type Run struct {
 }
 
 // Origin is where a restore copies from: Kind, the old Mac over SSH, its
-// Time Machine disk, or Arq; and Detail, the old Mac's host, the snapshot's
-// name, or the folder Arq restored into.
+// Time Machine disk, or Arq; and Detail, the old Mac's kit name, the
+// snapshot's name, or the folder holding Arq's restores, from ~ when it's
+// in the home folder.
 type Origin struct {
 	Kind   string `json:"kind"`
 	Detail string `json:"detail,omitempty"`
@@ -57,9 +58,6 @@ const (
 	// Here is a path found holding files of its own, before anything was
 	// restored to it: never touched.
 	Here State = "here"
-	// Held is its restore held back, waiting for its source, nothing yet
-	// copied: judged again each run, as a path with no record.
-	Held State = "held"
 	// NotThere is a path its source hadn't, its From, nothing copied: done
 	// with, as the old Mac never made it, set-up's window shut to it; judged
 	// again each run, as a line added after the restore settled is, holding
@@ -111,8 +109,8 @@ func UpdateRecord(stateDir string, change func(*Record)) error {
 	return state.Update(stateDir, recordName, change)
 }
 
-// started is whether p's copy has ever started: under way now, or held
-// since.
+// started is whether p's copy has ever started: under way now, or begun
+// by a run before.
 func (p Path) started() bool {
 	return p.State == Copying || p.State == Checking || !p.Started.IsZero()
 }
@@ -147,6 +145,26 @@ func (r Record) mayAside(path string) bool {
 func (r Record) Finished(path string) bool {
 	s := r.Paths[path].State
 	return s == Done || s == Here || s == NotThere
+}
+
+// Begin records from as the source the restore copies from, as a copy
+// from it starts, so a run again resumes from it: only then, so a source
+// opened and copied nothing from is never kept. Should from stand in for
+// replaces, a source gone or passed over, it's recorded as the source of
+// every path part-way from that one, reporting whether there were any.
+func (r *Record) Begin(from, replaces Origin) (moved bool) {
+	r.From = from
+	if replaces == (Origin{}) {
+		return false
+	}
+	for path, p := range r.Paths {
+		if p.From == replaces && p.started() && !r.Finished(path) {
+			p.From = from
+			r.Paths[path] = p
+			moved = true
+		}
+	}
+	return moved
 }
 
 // RecordFirstRun records the restore's first run on this Mac, at now,
