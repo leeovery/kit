@@ -1388,7 +1388,9 @@ refuses a line the restore would refuse, before writing anything, and copies not
   Without a terminal, those paths fail, saying what to restore where, and the rest are copied.
 - **The copy.** Homebrew's rsync, rsync 3 on both Macs (macOS's own keeps no extended
   attributes), keeping attributes, permissions and dates; never `--delete`, and `--update`, so a
-  file edited on the new Mac is never replaced by the old copy. From the old Mac it leaves out
+  file edited on the new Mac is never replaced by the old copy. Sockets, pipes and devices are
+  never copied: they're a running program's, never data, and a live old Mac's state folders hold
+  them (switchboard's and Valet's sockets). From the old Mac it leaves out
   what the backups leave out (folders marked excluded, `[backup exclusions]`), but a marked
   folder holding git checkouts, agents' worktrees, is copied whole. Needs: the source
   reachable, free space for the copy, the same username (tools key their data by full path).

@@ -25,7 +25,9 @@ import (
 // --stats (size.raw);
 // a second pass's --itemize-changes (compare.raw, after a file's contents
 // were changed, others' times, permissions and attributes, and a file, a
-// link, a hard link and an empty folder deleted); and its standard error
+// link, a hard link and an empty folder deleted; compare-skipping.raw,
+// with --no-specials and --no-devices, past a socket and a pipe, a file's
+// contents changed); and its standard error
 // as it exited 23, 24, 30, 35, 127 and 255 (127 and 255 through a stand-in
 // for ssh, its own line its words).
 
@@ -43,7 +45,7 @@ func fixture(t *testing.T, name string) string {
 const partial = "/Users/someone/.local/state/kit/restore/partial"
 
 // base are the options of every copy, dry run and second pass.
-var base = []string{"--archive", "--xattrs", "--hard-links", "--crtimes", "--mkpath", "--update", "--partial-dir=" + partial}
+var base = []string{"--archive", "--no-specials", "--no-devices", "--xattrs", "--hard-links", "--crtimes", "--mkpath", "--update", "--partial-dir=" + partial}
 
 // local is a copy of the folder at path on a snapshot to to.
 func local(path, to string) Copy {
@@ -462,6 +464,7 @@ func TestCompareCountsWhatItCopiedAgain(t *testing.T) {
 		{"nothing", "", Recopied{}},
 		{"attributes alone", ".d..t...... ./\n.f...p..... notes/b.md\n.f........x notes/c.md\n.f..t...n.. photos/big.raw\n", Recopied{}},
 		{"some", fixture(t, "compare.raw"), Recopied{Count: 6, Paths: []string{"current", "empty/", "notes/a.md", "notes/d -> e.md", "notes/lost.md", "notes/copy.md"}}},
+		{"past what isn't a file", fixture(t, "compare-skipping.raw"), Recopied{Count: 1, Paths: []string{"a.txt"}}},
 		{"more than it names", many.String(), Recopied{Count: mostRecopied + 5, Paths: manyPaths[:mostRecopied]}},
 	}
 	for _, tt := range tests {
