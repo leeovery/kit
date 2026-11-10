@@ -1,6 +1,7 @@
 package gitrepo
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -780,4 +781,30 @@ func (r Repo) tracked(ctx context.Context) (tracking, error) {
 func (r Repo) Unpushed(ctx context.Context) int {
 	made, _ := r.Waiting(ctx)
 	return len(made)
+}
+
+// Fetched is the file at path, from the repository's top, as the remote
+// Pull brings in from has it on the branch's upstream, fetched now:
+// nothing merged, the working tree and the branch left as they are.
+func (r Repo) Fetched(ctx context.Context, path string) ([]byte, error) {
+	t, err := r.tracked(ctx)
+	if err != nil {
+		return nil, err
+	}
+	remote, err := t.from()
+	if err != nil {
+		return nil, err
+	}
+	if _, err := r.git(ctx, "fetch", "--prune", "--quiet", remote); err != nil {
+		if unreachable(err) {
+			return nil, fmt.Errorf("couldn't reach %s", remote)
+		}
+		return nil, fmt.Errorf("couldn't fetch %s: %w", remote, err)
+	}
+	ref := cmp.Or(t.upstream, "refs/remotes/"+remote+"/"+t.name())
+	res, err := r.git(ctx, "show", ref+":"+path)
+	if err != nil {
+		return nil, fmt.Errorf("read %s as %s has it: %w", path, remote, err)
+	}
+	return res.Stdout, nil
 }

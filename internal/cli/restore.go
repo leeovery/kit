@@ -12,6 +12,7 @@ import (
 	"github.com/leeovery/kit/internal/boot"
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/engine"
+	"github.com/leeovery/kit/internal/gitrepo"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/kind/brew"
 	"github.com/leeovery/kit/internal/kind/composer"
@@ -147,7 +148,10 @@ func (a *app) restoreStep(r *run, dirs config.Dirs, prefsOn bool) (*engine.Step,
 	mac := restore.Mac{Config: r.cfg, Name: r.machine, Home: r.homeDir, Dirs: dirs, Linked: r.files, Prefs: prefsOn, Kinds: homed}
 	user := filepath.Base(r.homeDir)
 	sources := restore.Sources{Run: r.run, User: user, MountPoint: restore.MountPoint(dirs.State), Mac: func(from string) restore.Opener {
-		return oldmac.Source{Finder: oldmac.Finder{Run: r.run, StateDir: dirs.State, HostKey: hostKey(from)}, From: from, User: user, Home: r.homeDir}
+		return &oldmac.Source{
+			Finder: oldmac.Finder{Run: r.run, StateDir: dirs.State, HostKey: r.cfg.Macs[from].HostKey}, From: from, User: user, Home: r.homeDir,
+			HostKey: func(ctx context.Context) (string, error) { return fetchedHostKey(ctx, r.repo, from) },
+		}
 	}}
 	folders := a.appFolders(r.homeDir)
 	restoring := steps.Restoring{
@@ -169,10 +173,16 @@ func (a *app) restoreStep(r *run, dirs config.Dirs, prefsOn bool) (*engine.Step,
 	return &step, nil
 }
 
-// hostKey is the SSH host key the Mac called from must present to be
-// restored from, as kit-config records it: "" while it records none, each
-// Mac's key then taken on first sight into kit's own known-hosts file.
-func hostKey(string) string { return "" }
+// fetchedHostKey is the host key kit-config's remote records for the Mac
+// called from, fetched now, as kit apply on that Mac may have recorded it
+// since this run began: nothing merged here.
+func fetchedHostKey(ctx context.Context, repo gitrepo.Repo, from string) (string, error) {
+	data, err := repo.Fetched(ctx, config.File)
+	if err != nil {
+		return "", err
+	}
+	return config.HostKeyIn(data, from)
+}
 
 // reinstallStep is the step reinstalling the dependencies of the projects
 // the restore brought back, when the Mac has one (steps.ReinstallOn),

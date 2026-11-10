@@ -71,7 +71,8 @@ func names(spots []spot) []string {
 
 // A step placed nowhere has nothing before it, and the secrets' sync and
 // apps' settings' restore are in no order with it: either may come first,
-// which it says plainly.
+// which it says plainly. The host key's record, committed to kit-config,
+// comes after it, as it may bring the key git signs with.
 func TestOrderOfAStepPlacedNowhere(t *testing.T) {
 	w := orderWorld(t)
 	out, _, code := w.run(t, "agent", "order", "alone")
@@ -81,12 +82,14 @@ Before it
   nothing: it can be among the first
 
 After it
-  manual  steps done by hand, at the end, once the rest is done
+  host-key  SSH host key
+  config    kit-config edits
+  manual    steps done by hand, at the end, once the rest is done
 
 In no order with it: either may come first
-  secret  Secrets: each synced unless it fails, once Sign in to 1Password is
-          done
-  prefs   apps' settings restored, once Homebrew casks are installed
+  secret    Secrets: each synced unless it fails, once Sign in to 1Password is
+            done
+  prefs     apps' settings restored, once Homebrew casks are installed
 `
 	if code != 0 || out != want {
 		t.Errorf("kit agent order alone printed\n%s\nexit %d, want\n%s", out, code, want)
@@ -109,6 +112,8 @@ Before it
                   installs it
 
 After it
+  host-key        SSH host key
+  config          kit-config edits
   manual          steps done by hand, at the end, once the rest is done
 
 In no order with it: either may come first
@@ -164,7 +169,7 @@ func TestOrderOfAThing(t *testing.T) {
 	if got := names(doc.Before); !slices.Equal(got, []string{"homebrew", "brew (on PATH)"}) {
 		t.Errorf("before it = %q, want Homebrew, and brew on kit's PATH", got)
 	}
-	if got, want := names(doc.After), []string{"prefs", "uses-app", "after-settings", "manual"}; !slices.Equal(got, want) {
+	if got, want := names(doc.After), []string{"prefs", "uses-app", "after-settings", "host-key", "config", "manual"}; !slices.Equal(got, want) {
 		t.Errorf("after it = %q, want %q", got, want)
 	}
 }
@@ -177,8 +182,8 @@ func TestOrderSaysWhatsNotInTheRun(t *testing.T) {
 	out, _, code := w.run(t, "agent", "order", "alone")
 	want := `
 Not in this Mac's run
-  secret  no secrets are declared for this Mac
-  prefs   kit prefs isn't on for this Mac, so no app's settings are restored
+  secret    no secrets are declared for this Mac
+  prefs     kit prefs isn't on for this Mac, so no app's settings are restored
 `
 	if code != 0 || !strings.HasSuffix(out, want) {
 		t.Errorf("kit agent order alone printed\n%s\nexit %d, want it to end\n%s", out, code, want)

@@ -507,7 +507,7 @@ func (a *app) build(command, logName string, face render.Face, atTerminal bool) 
 	r.drift = append(r.drift, steps.ConfigEditsName)
 	r.drifters[steps.ConfigEditsName] = configDrifter{repo: r.repo, home: home, step: edits}
 	checks = append(checks,
-		quietened(edits, record, now),
+		r.hostKeyStep(a.SSHDir, a.SSHAddress, dirs.State, features.on(steps.FeatureRemoteLogin)), quietened(edits, record, now),
 		steps.Disk(observed), steps.Memory(observed), steps.FileEvents(observed), steps.Load(observed, a.Now),
 		steps.ConfigSync(r.repo, a.Now), steps.ConfigPrivate(r.repo),
 	)
@@ -567,7 +567,7 @@ func (a *app) build(command, logName string, face render.Face, atTerminal bool) 
 		r.placeBackups(r.steps, backups)
 		r.placeLines(r.steps)
 		r.placeByHand(r.steps)
-		placeNewMac(r.steps, slices.Concat(scripts, byHandOwn))
+		placeCommits(r.steps, slices.Concat(scripts, byHandOwn))
 		for i, s := range r.steps {
 			if s.Admin && s.Apply != nil {
 				r.steps[i].Apply = r.afterAdmin(s.Apply)
@@ -866,7 +866,7 @@ func partOf(name string) string {
 		return render.PartSettings
 	case linked.StepName:
 		return render.PartFiles
-	case steps.ConfigEditsName, steps.ConfigSyncName, steps.ConfigPrivateName, newMacName:
+	case steps.ConfigEditsName, steps.ConfigSyncName, steps.ConfigPrivateName, newMacName, steps.HostKeyName:
 		return render.PartConfig
 	}
 	return ""

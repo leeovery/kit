@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -68,13 +69,7 @@ func withMac(text, name, from, description string) (string, error) {
 	if last < 0 {
 		return "", fmt.Errorf("%s has no [macs.<name>] table to add %s after", File, name)
 	}
-	end := last + 1
-	for end < len(lines) && !strings.HasPrefix(strings.TrimSpace(lines[end]), "[") {
-		end++
-	}
-	for end > last+1 && (strings.TrimSpace(lines[end-1]) == "" || strings.HasPrefix(strings.TrimSpace(lines[end-1]), "#")) {
-		end--
-	}
+	end := tableEnd(lines, last)
 	var table bytes.Buffer
 	if !strings.HasSuffix(lines[end-1], "\n") {
 		table.WriteString("\n")
@@ -84,6 +79,92 @@ func withMac(text, name, from, description string) (string, error) {
 		return "", fmt.Errorf("write %s's description: %w", name, err)
 	}
 	return strings.Join(lines[:end], "") + table.String() + strings.Join(lines[end:], ""), nil
+}
+
+// tableEnd is where the table whose header is lines[header] ends: after
+// its last setting, the blank lines and comments before the next table's
+// header left out.
+func tableEnd(lines []string, header int) int {
+	end := header + 1
+	for end < len(lines) && !strings.HasPrefix(strings.TrimSpace(lines[end]), "[") {
+		end++
+	}
+	for end > header+1 && (strings.TrimSpace(lines[end-1]) == "" || strings.HasPrefix(strings.TrimSpace(lines[end-1]), "#")) {
+		end--
+	}
+	return end
+}
+
+// SetHostKey records key as the SSH host key of the Mac named name, in its
+// table in kit.toml: its host_key set where it is, else added after the
+// table's last setting, the rest as it was. The Config as loaded is left as
+// it is, as AddMac leaves it.
+func (c *Config) SetHostKey(name, key string) error {
+	if !c.Knows(name) {
+		return fmt.Errorf("no Mac named %s in %s: one of %s", name, File, c.macList())
+	}
+	path := filepath.Join(c.Dir, File)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read the config: %w", err)
+	}
+	edited, err := withHostKey(string(data), name, key)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(path, []byte(edited), 0o644); err != nil {
+		return fmt.Errorf("record %s's host key: %w", name, err)
+	}
+	return nil
+}
+
+// withHostKey is kit.toml's text with key as the host_key of the Mac named
+// name, read back to be sure that's what it says.
+func withHostKey(text, name, key string) (string, error) {
+	lines := strings.SplitAfter(text, "\n")
+	header := slices.IndexFunc(lines, func(line string) bool { return tableName(line) == "macs."+name })
+	if header < 0 {
+		return "", fmt.Errorf("%s has no [macs.%s] table to record its host key in", File, name)
+	}
+	var setting bytes.Buffer
+	if err := toml.NewEncoder(&setting).Encode(macFile{HostKey: key}); err != nil {
+		return "", fmt.Errorf("write %s's host key: %w", name, err)
+	}
+	end := tableEnd(lines, header)
+	if at := slices.IndexFunc(lines[header+1:end], isHostKey); at >= 0 {
+		lines[header+1+at] = setting.String()
+	} else {
+		if !strings.HasSuffix(lines[end-1], "\n") {
+			lines[end-1] += "\n"
+		}
+		lines = slices.Insert(lines, end, setting.String())
+	}
+	edited := strings.Join(lines, "")
+	var f file
+	if _, err := toml.Decode(edited, &f); err != nil {
+		return "", fmt.Errorf("couldn't record %s's host key in %s: %w", name, File, err)
+	}
+	if f.Macs[name].HostKey != key {
+		return "", fmt.Errorf("couldn't record %s's host key in %s: its [macs.%s] table isn't one kit can write to", name, File, name)
+	}
+	return edited, nil
+}
+
+// tableName is the name of the table whose header line is, as macs.laptop
+// is [macs.laptop]'s: "" for a line that's no table's header.
+func tableName(line string) string {
+	text, _, _ := strings.Cut(line, "#")
+	text = strings.TrimSpace(text)
+	if !strings.HasPrefix(text, "[") || strings.HasPrefix(text, "[[") || !strings.HasSuffix(text, "]") {
+		return ""
+	}
+	return strings.TrimSpace(text[1 : len(text)-1])
+}
+
+// isHostKey reports whether line sets host_key.
+func isHostKey(line string) bool {
+	key, _, ok := strings.Cut(line, "=")
+	return ok && strings.TrimSpace(key) == "host_key"
 }
 
 // copyTree copies the folder from to to, which isn't there: every file as

@@ -109,9 +109,10 @@ func asked(fake *runnertest.Fake, host string) *runnertest.Script {
 	})
 }
 
-// finder is a Finder through fake, its state in a folder of its own.
+// finder is a Finder through fake, its state in a folder of its own,
+// looking for the Mac presenting laptopKey.
 func finder(t *testing.T, fake *runnertest.Fake) Finder {
-	return Finder{Run: fake, StateDir: t.TempDir()}
+	return Finder{Run: fake, StateDir: t.TempDir(), HostKey: laptopKey}
 }
 
 // refused is ssh's exit when the Mac refuses the key.
@@ -140,8 +141,8 @@ func TestFindsTheMacByItsKitName(t *testing.T) {
 	if err := m.Check(user, home); err != nil {
 		t.Errorf("Check() = %v, want nil", err)
 	}
-	if info, err := os.Stat(filepath.Dir(KnownHosts(f.StateDir))); err != nil || !info.IsDir() {
-		t.Errorf("kit's known-hosts folder isn't made: %v", err)
+	if data, err := os.ReadFile(filepath.Join(f.StateDir, "restore", "pinned_host")); err != nil || string(data) != "laptop "+laptopKey+"\n" {
+		t.Errorf("the pinned key's file = %q, %v; want laptop's key", data, err)
 	}
 }
 
@@ -225,10 +226,10 @@ func TestFindsSSHsOwnReason(t *testing.T) {
 	fake := runnertest.New(t)
 	browses(fake, browsing(mini))
 	resolves(fake, mini, reaching(mini, miniAt, 22))
-	asked(fake, miniAt).PrintsToStderr("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @\nHost key verification failed.\n").Exits(255)
+	asked(fake, miniAt).PrintsToStderr("kex_exchange_identification: Connection closed by remote host\n").Exits(255)
 
 	_, err := finder(t, fake).Find(t.Context(), "laptop")
-	if want := "laptop doesn't answer over SSH: Someone’s Mac mini couldn't be reached over SSH: Host key verification failed."; err == nil || err.Error() != want {
+	if want := "laptop doesn't answer over SSH: Someone’s Mac mini couldn't be reached over SSH: kex_exchange_identification: Connection closed by remote host"; err == nil || err.Error() != want {
 		t.Errorf("Find() = %v, want %q", err, want)
 	}
 }
@@ -283,6 +284,10 @@ func TestFindsWhereAMacAnswersOnceItSays(t *testing.T) {
 }
 
 func TestFindsWithTheSSHOptionsExact(t *testing.T) {
+	pinned := func(file string) []string {
+		return []string{"-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=yes", "-o", "UserKnownHostsFile=" + file, "-o", "GlobalKnownHostsFile=/dev/null", "-o", "KnownHostsCommand=none", "-o", "VerifyHostKeyDNS=no", "-o", "HostKeyAlias=laptop", "-o", "LogLevel=ERROR"}
+	}
+	const rest = "-o GlobalKnownHostsFile=/dev/null -o KnownHostsCommand=none -o VerifyHostKeyDNS=no -o HostKeyAlias=laptop -o LogLevel=ERROR"
 	tests := []struct {
 		name      string
 		state     string
@@ -292,20 +297,16 @@ func TestFindsWithTheSSHOptionsExact(t *testing.T) {
 	}{
 		{
 			"the usual", "state", 22,
-			func(s string) []string {
-				return []string{"-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=accept-new", "-o", "UserKnownHostsFile=" + s + "/restore/known_hosts", "-o", "LogLevel=ERROR"}
-			},
+			func(s string) []string { return pinned(s + "/restore/pinned_host") },
 			func(s string) string {
-				return "ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=" + s + "/restore/known_hosts -o LogLevel=ERROR"
+				return "ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=yes -o UserKnownHostsFile=" + s + "/restore/pinned_host " + rest
 			},
 		},
 		{
 			"another port, a state folder with a space", "kit state", 2222,
-			func(s string) []string {
-				return []string{"-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=accept-new", "-o", `UserKnownHostsFile="` + s + `/restore/known_hosts"`, "-o", "LogLevel=ERROR", "-p", "2222"}
-			},
+			func(s string) []string { return append(pinned(`"`+s+`/restore/pinned_host"`), "-p", "2222") },
 			func(s string) string {
-				return `ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new -o 'UserKnownHostsFile="` + s + `/restore/known_hosts"' -o LogLevel=ERROR -p 2222`
+				return `ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=yes -o 'UserKnownHostsFile="` + s + `/restore/pinned_host"' ` + rest + " -p 2222"
 			},
 		},
 	}
@@ -323,7 +324,7 @@ func TestFindsWithTheSSHOptionsExact(t *testing.T) {
 				t.Fatal(err)
 			}
 			ssh := fake.Commands()[2]
-			want := slices.Concat(tt.wantOpts(f.StateDir), []string{"--", laptopAt, "/bin/sh -c " + shellQuote(probeScript(RemoteRsync, sshDir))})
+			want := slices.Concat(tt.wantOpts(f.StateDir), []string{"--", laptopAt, "/bin/sh -c " + shellQuote(probeScript(RemoteRsync, SSHDir))})
 			if !slices.Equal(ssh.Args, want) {
 				t.Errorf("ssh's arguments = %q\nwant %q", ssh.Args, want)
 			}
@@ -416,9 +417,20 @@ func TestReadsTheProbeAmongTheShellsOwnLines(t *testing.T) {
 	}
 }
 
-func TestKnownHostsAreKits(t *testing.T) {
-	if got, want := KnownHosts("/Users/someone/.local/state/kit"), "/Users/someone/.local/state/kit/restore/known_hosts"; got != want {
-		t.Errorf("KnownHosts() = %s, want %s", got, want)
+// With no host key to look for, no Mac is looked for: a Mac's name is
+// only its own say. The error says how kit-config comes to record it.
+func TestFindsNothingWithoutAHostKey(t *testing.T) {
+	fake := runnertest.New(t)
+	f := finder(t, fake)
+	f.HostKey = ""
+
+	_, err := f.Find(t.Context(), "laptop")
+	want := "laptop can't be restored from: laptop's SSH host key isn't in kit-config: kit apply on laptop records it"
+	if !errors.Is(err, ErrNoHostKey) || errors.Is(err, ErrNoAnswer) || err.Error() != want {
+		t.Errorf("Find() = %v\nwant ErrNoHostKey, %q", err, want)
+	}
+	if calls := fake.Calls(); len(calls) > 0 {
+		t.Errorf("ran %q; want nothing", calls)
 	}
 }
 
@@ -596,7 +608,7 @@ func TestFindsAnImpostorByItsHostKey(t *testing.T) {
 	f.HostKey = hostKey
 
 	_, err := f.Find(t.Context(), "laptop")
-	want := "laptop doesn't answer over SSH: Someone’s Mac mini isn't laptop: its host key doesn't match the one kit-config records"
+	want := "laptop doesn't answer over SSH: Someone’s Mac mini isn't laptop: its host key doesn't match the one kit-config records (kit apply on laptop records a new one)"
 	if !errors.Is(err, ErrNoAnswer) || err.Error() != want {
 		t.Errorf("Find() = %v\nwant %q", err, want)
 	}
@@ -712,4 +724,56 @@ func TestProbesForRealThroughTheShell(t *testing.T) {
 			}
 		})
 	}
+}
+
+// This Mac's own host key is the one another Mac's probe would say: its
+// ed25519 key, else the first other it may read, without the comment; none
+// while macOS hasn't made them.
+func TestReadsThisMacsHostKey(t *testing.T) {
+	const (
+		ed25519 = "ssh-ed25519 ZmFrZSBlZDI1NTE5IGhvc3Qga2V5"
+		ecdsa   = "ecdsa-sha2-nistp256 ZmFrZSBlY2RzYSBob3N0IGtleQ=="
+		rsa     = "ssh-rsa ZmFrZSByc2EgaG9zdCBrZXk="
+	)
+	tests := []struct {
+		name       string
+		keys       map[string]string
+		unreadable string
+		want       string
+	}{
+		{"ed25519 first", map[string]string{"ssh_host_ecdsa_key.pub": ecdsa, "ssh_host_ed25519_key.pub": ed25519, "ssh_host_rsa_key.pub": rsa}, "", ed25519},
+		{"else the first other", map[string]string{"ssh_host_ecdsa_key.pub": ecdsa, "ssh_host_rsa_key.pub": rsa}, "", ecdsa},
+		{"one unreadable passed over", map[string]string{"ssh_host_ed25519_key.pub": ed25519, "ssh_host_rsa_key.pub": rsa}, "ssh_host_ed25519_key.pub", rsa},
+		{"none yet", nil, "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			for name, key := range tt.keys {
+				if err := os.WriteFile(filepath.Join(dir, name), []byte(key+" root@laptop\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(dir, strings.TrimSuffix(name, ".pub")), []byte("private"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tt.unreadable != "" {
+				if err := os.Chmod(filepath.Join(dir, tt.unreadable), 0); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if got, err := HostKey(dir); err != nil || got != tt.want {
+				t.Errorf("HostKey() = %q, %v; want %q", got, err, tt.want)
+			}
+		})
+	}
+	t.Run("not a key", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "ssh_host_ed25519_key.pub"), []byte("garbled\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := HostKey(dir); err == nil {
+			t.Error("HostKey() = nil error; want the file that isn't a key refused")
+		}
+	})
 }

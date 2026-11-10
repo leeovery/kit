@@ -1,6 +1,7 @@
 package oldmac
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"strings"
@@ -20,7 +21,7 @@ func TestSourceOpensTheOldMac(t *testing.T) {
 	resolves(fake, laptop, reaching(laptop, laptopAt, 22))
 	asked(fake, laptopAt).Prints(says(t, "laptop"))
 	looked(fake, laptopAt).Prints("folder\x00./app/node_modules\x00./web [x]/vendor\x00folder\x00file\x00none\x00")
-	src := Source{Finder: finder(t, fake), From: "laptop", User: user, Home: home}
+	src := &Source{Finder: finder(t, fake), From: "laptop", User: user, Home: home}
 
 	opened, err := src.Open(t.Context())
 	if err != nil {
@@ -53,7 +54,7 @@ func TestSourceSaysWhyItCantOpen(t *testing.T) {
 		browses(fake, browsing(mini))
 		resolves(fake, mini, reaching(mini, miniAt, 22))
 		refused(asked(fake, miniAt))
-		_, err := Source{Finder: finder(t, fake), From: "laptop", User: user, Home: home}.Open(t.Context())
+		_, err := (&Source{Finder: finder(t, fake), From: "laptop", User: user, Home: home}).Open(t.Context())
 		if want := "laptop doesn't answer over SSH: " + mini + " " + errRefusedKey.Error(); !errors.Is(err, ErrNoAnswer) || err.Error() != want {
 			t.Errorf("Open() = %v; want ErrNoAnswer, %q", err, want)
 		}
@@ -63,9 +64,55 @@ func TestSourceSaysWhyItCantOpen(t *testing.T) {
 		browses(fake, browsing(laptop))
 		resolves(fake, laptop, reaching(laptop, laptopAt, 22))
 		asked(fake, laptopAt).Prints(strings.Replace(says(t, "laptop"), "protected=read", "protected=denied", 1))
-		_, err := Source{Finder: finder(t, fake), From: "laptop", User: user, Home: home}.Open(t.Context())
+		_, err := (&Source{Finder: finder(t, fake), From: "laptop", User: user, Home: home}).Open(t.Context())
 		if err == nil || errors.Is(err, ErrNoAnswer) || !strings.Contains(err.Error(), "turn on Allow full disk access for remote users there") {
 			t.Errorf("Open() = %v; want Check's error, naming its fix", err)
 		}
 	})
+}
+
+// Tried again, the old Mac is looked for by the host key kit-config's
+// remote records for it now, as kit apply on it may have recorded it since
+// the run began: never on the first try, which takes the run's. One kit
+// can't fetch is ErrNoHostKey, saying why, for the card to offer again.
+func TestSourceTriedAgainFetchesTheHostKey(t *testing.T) {
+	fake := runnertest.New(t)
+	browses(fake, browsing(laptop))
+	resolves(fake, laptop, reaching(laptop, laptopAt, 22))
+	asked(fake, laptopAt).Prints(says(t, "laptop"))
+	f := finder(t, fake)
+	f.HostKey = ""
+	fetched := []error{errors.New("couldn't reach origin"), nil}
+	fetches := 0
+	src := &Source{Finder: f, From: "laptop", User: user, Home: home, HostKey: func(context.Context) (string, error) {
+		err := fetched[fetches]
+		fetches++
+		return laptopKey, err
+	}}
+
+	if _, err := src.Open(t.Context()); !errors.Is(err, ErrNoHostKey) || fetches != 0 {
+		t.Fatalf("Open() = %v, fetched %d times; want ErrNoHostKey, the run's key, none fetched", err, fetches)
+	}
+	_, err := src.Open(t.Context())
+	if want := "laptop can't be restored from: kit couldn't fetch its SSH host key from kit-config: couldn't reach origin"; !errors.Is(err, ErrNoHostKey) || err.Error() != want {
+		t.Fatalf("Open() again, offline = %v; want %q", err, want)
+	}
+	if opened, err := src.Open(t.Context()); err != nil || opened.Host != laptopAt {
+		t.Errorf("Open() again = %+v, %v; want laptop, found by the key fetched", opened, err)
+	}
+}
+
+// A host key in kit-config that isn't one is as none: ErrNoHostKey, saying
+// so, and no Mac looked for.
+func TestFindsNothingWithAKeyThatIsntOne(t *testing.T) {
+	fake := runnertest.New(t)
+	f := finder(t, fake)
+	f.HostKey = "ssh-ed25519 not*base64"
+	_, err := f.Find(t.Context(), "laptop")
+	if want := "laptop can't be restored from: laptop's SSH host key in kit-config isn't a valid key: kit apply on laptop records it"; !errors.Is(err, ErrNoHostKey) || err.Error() != want {
+		t.Errorf("Find() = %v\nwant %q", err, want)
+	}
+	if calls := fake.Calls(); len(calls) > 0 {
+		t.Errorf("ran %q; want nothing", calls)
+	}
 }

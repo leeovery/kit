@@ -185,8 +185,9 @@ Apps' settings are restored once every cask and App Store app is installed,
 near the end of the run.
 
 On a Mac started from another, the data restore brings across the paths
-`[restore]` lists, from that Mac, else a backup of it, once Homebrew's rsync
-is in and, from the old Mac, the secrets have synced. Claude Code's MCP
+`[restore]` lists, from that Mac, known by the SSH host key kit-config
+records for it, else a backup of it, once Homebrew's rsync is in and, from
+the old Mac, the secrets have synced. Claude Code's MCP
 servers and skills, the reinstall of restored projects' dependencies, and a
 step declared `--after restore` wait for it; nothing else does. A step of
 your own that writes into a listed folder must say `--after restore`.

@@ -28,7 +28,7 @@ func looked(fake *runnertest.Fake, host string) *runnertest.Script {
 
 // macThrough is laptop, at laptopAt, reached through run.
 func macThrough(run runner.Runner) *Mac {
-	return &Mac{Name: "laptop", Host: laptopAt, Port: 22, User: user, Home: home, run: run, opts: sshOptions("/state/restore/known_hosts", "", "laptop", 22)}
+	return &Mac{Name: "laptop", Host: laptopAt, Port: 22, User: user, Home: home, run: run, opts: sshOptions("/state/restore/pinned_host", "laptop", 22)}
 }
 
 func TestLooksInOneGo(t *testing.T) {
@@ -53,7 +53,7 @@ func TestLooksInOneGo(t *testing.T) {
 		t.Fatalf("ran %d commands, want one: %q", len(calls), fake.Calls())
 	}
 	args := calls[0].Args
-	if wantOpts := slices.Concat(sshOptions("/state/restore/known_hosts", "", "laptop", 22), []string{"--", laptopAt}); !slices.Equal(args[:len(args)-1], wantOpts) {
+	if wantOpts := slices.Concat(sshOptions("/state/restore/pinned_host", "laptop", 22), []string{"--", laptopAt}); !slices.Equal(args[:len(args)-1], wantOpts) {
 		t.Errorf("ssh's arguments = %q, want %q and the command", args[:len(args)-1], wantOpts)
 	}
 	quoted := `look '\''Library/Application Support/Claude'\''`

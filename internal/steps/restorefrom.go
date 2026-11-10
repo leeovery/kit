@@ -49,9 +49,10 @@ const mostDisks = 9
 // open opens s's source, the one its paths are copied from, and returns it
 // with what of them are left to copy, and why the rest couldn't be
 // (failed): Arq's restore, by hand (arq); else as Sources has it, and,
-// should the old Mac not answer, the source the person chooses on a card
-// instead (instead), standing in for it, or the old Mac again, for as long
-// as they try. Arq chosen is errToArq: its paths join Arq's restore.
+// should the old Mac not answer, or kit-config record no host key for it,
+// the source the person chooses on a card instead (instead), standing in
+// for it, or the old Mac again, for as long as they try. Arq chosen is
+// errToArq: its paths join Arq's restore.
 func (r Restoring) open(ctx context.Context, s sourced) (src *restore.Opened, todo []judged, failed, err error) {
 	if s.want.Kind == restore.FromArq {
 		return r.arq(ctx, s.at, s.todo)
@@ -60,7 +61,7 @@ func (r Restoring) open(ctx context.Context, s sourced) (src *restore.Opened, to
 	for {
 		event.Say(ctx, event.Doing{Says: opening(s.want)})
 		src, err := opener.Open(ctx)
-		if !errors.Is(err, oldmac.ErrNoAnswer) {
+		if !errors.Is(err, oldmac.ErrNoAnswer) && !errors.Is(err, oldmac.ErrNoHostKey) {
 			return src, s.todo, nil, err
 		}
 		f, err := r.instead(ctx, s.want, err)
@@ -92,13 +93,16 @@ type fallback struct {
 }
 
 // instead asks, on a card in the restore's row, where to restore from, the
-// old Mac, mac, not answering, as why says: one of the Time Machine disks
-// attached holding the person's backups, Arq's restore by hand, or the old
-// Mac again; the disks it couldn't look for, it says why, offering the
-// rest. Without a terminal there's no one to ask: why is the error, which
+// old Mac, mac, not answering or its host key not recorded, as why says:
+// one of the Time Machine disks attached holding the person's backups,
+// Arq's restore by hand, or the old Mac again; the disks it couldn't look
+// for, it says why, offering the rest. Without a terminal there's no one to ask: why is the error, which
 // names kit apply's flag that answers it (unopened).
 func (r Restoring) instead(ctx context.Context, mac restore.Origin, why error) (fallback, error) {
 	if r.Raise == nil {
+		if errors.Is(why, oldmac.ErrNoHostKey) {
+			why = fmt.Errorf("%w, then kit apply here", why)
+		}
 		return fallback{}, why
 	}
 	event.Say(ctx, event.Doing{Says: "looking for Time Machine disks"})

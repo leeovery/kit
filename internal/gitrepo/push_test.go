@@ -1092,3 +1092,30 @@ func TestPushDealsWithWhatAStoppedRunLeft(t *testing.T) {
 	checkCalls(t, "mid-rebase", fake, gitDir, s.want)
 	checkGitFolder(t, "mid-rebase", gitDir, usersEntries, "index.lock", marked, "rebase-merge")
 }
+
+// Fetched fetches the remote the branch brings in from and reads a file as
+// its upstream has it, merging nothing; a remote it can't reach says so.
+func TestFetched(t *testing.T) {
+	fake := runnertest.New(t)
+	s := &sequence{fake: fake}
+	s.expect(call{args: git("remote")}).Prints("origin\n")
+	s.tracks(tracksOrigin, "", "")
+	s.expect(call{args: git("fetch", "--prune", "--quiet", "origin")})
+	s.expect(call{args: git("show", upstreamRef+":kit.toml")}).Prints("format = 1\n")
+	got, err := gitrepo.Repo{Dir: dir, Run: fake}.Fetched(context.Background(), "kit.toml")
+	if err != nil || string(got) != "format = 1\n" {
+		t.Errorf("Fetched() = %q, %v; want the upstream's kit.toml", got, err)
+	}
+	checkCalls(t, "fetched", fake, "", s.want)
+
+	fake = runnertest.New(t)
+	fake.On("git", git("remote")...).Prints("origin\n")
+	fake.On("git", branchOf...).Prints("refs/heads/main\n")
+	fake.On("git", upstreamOf...).Prints(tracksOrigin)
+	fake.On("git", pushRemoteOf...).Exits(1)
+	fake.On("git", pushDefault...).Exits(1)
+	fake.On("git", git("fetch", "--prune", "--quiet", "origin")...).Exits(128).PrintsToStderr("fatal: unable to access 'https://github.com/someone/kit-config.git/': Could not resolve host: github.com\n")
+	if _, err := (gitrepo.Repo{Dir: dir, Run: fake}).Fetched(context.Background(), "kit.toml"); err == nil || err.Error() != "couldn't reach origin" {
+		t.Errorf("Fetched(), offline = %v; want origin unreachable", err)
+	}
+}

@@ -5,6 +5,8 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -20,19 +22,10 @@ import (
 // the same network, one that's there answers in well under it.
 const connectTimeout = 5
 
-// knownHostsFile is kit's own known-hosts file, in its state: the host keys
-// of the Macs it's reached to restore from, each taken on first sight. The
-// person's own is never read or written. pinnedFile holds the one host key
-// the old Mac must present, when kit's given it, under the Mac's kit name.
-const (
-	knownHostsFile = "restore/known_hosts"
-	pinnedFile     = "restore/pinned_host"
-)
-
-// KnownHosts is kit's own known-hosts file in its state, stateDir.
-func KnownHosts(stateDir string) string {
-	return filepath.Join(stateDir, filepath.FromSlash(knownHostsFile))
-}
+// pinnedFile is kit's own known-hosts file, in its state, holding the one
+// host key the old Mac must present, kit-config's, under the Mac's kit
+// name. The person's own is never read or written.
+const pinnedFile = "restore/pinned_host"
 
 // pinned is the file, in kit's state, stateDir, holding the old Mac's
 // pinned host key.
@@ -47,10 +40,10 @@ var plainName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9.-]*$`)
 // keyTypes start the types of key a known-hosts line can hold.
 var keyTypes = []string{"ssh-", "ecdsa-", "sk-"}
 
-// pinLine is the known-hosts line holding key, a public key as a
-// known-hosts line or a .pub file has it (its type, then the key, the host
-// patterns before them and a comment after left out), under alias.
-func pinLine(alias, key string) (string, error) {
+// PublicKey is key, a public key as a known-hosts line or a .pub file has
+// it, as its type, then the key: the host patterns before them and a
+// comment after left out.
+func PublicKey(key string) (string, error) {
 	fields := strings.Fields(key)
 	// A known-hosts line's host patterns come before its type, where a .pub
 	// file's key does: either's host can look like a type.
@@ -58,12 +51,22 @@ func pinLine(alias, key string) (string, error) {
 		fields = fields[1:]
 	}
 	if len(fields) < 2 || !isKeyType(fields[0]) {
-		return "", fmt.Errorf("the old Mac's host key, %q, isn't a public key, its type then the key, as ssh-ed25519 AAAA…", key)
+		return "", fmt.Errorf("%q isn't a public key, its type then the key, as ssh-ed25519 AAAA…", key)
 	}
 	if _, err := base64.StdEncoding.DecodeString(fields[1]); err != nil {
-		return "", fmt.Errorf("the old Mac's host key, %q, isn't a public key: %w", key, err)
+		return "", fmt.Errorf("%q isn't a public key: %w", key, err)
 	}
-	return alias + " " + fields[0] + " " + fields[1] + "\n", nil
+	return fields[0] + " " + fields[1], nil
+}
+
+// pinLine is the known-hosts line holding key, as PublicKey has it, under
+// alias.
+func pinLine(alias, key string) (string, error) {
+	public, err := PublicKey(key)
+	if err != nil {
+		return "", fmt.Errorf("%s's SSH host key in kit-config: %w", alias, err)
+	}
+	return alias + " " + public + "\n", nil
 }
 
 // isKeyType reports whether field is a type of key.
@@ -72,28 +75,21 @@ func isKeyType(field string) bool {
 }
 
 // sshOptions are ssh's options reaching a Mac at port: never a question
-// asked, as there's no one to answer it; only ssh's errors said, so its
-// notice of a host key added never stands in for rsync's reason; and the
-// Mac's host key either the one pinned, in the file pinnedHosts, under
-// alias (the old Mac's kit name), and nowhere else's (no other file, no
-// command of the person's config, no DNS); or, with no pinnedHosts, taken
-// on first sight into kit's own file, knownHosts.
-func sshOptions(knownHosts, pinnedHosts, alias string, port int) []string {
-	opts := []string{"-o", "BatchMode=yes", "-o", "ConnectTimeout=" + strconv.Itoa(connectTimeout)}
-	if pinnedHosts != "" {
-		opts = append(opts,
-			"-o", "StrictHostKeyChecking=yes",
-			"-o", "UserKnownHostsFile="+sshValue(pinnedHosts),
-			"-o", "GlobalKnownHostsFile=/dev/null",
-			"-o", "KnownHostsCommand=none",
-			"-o", "VerifyHostKeyDNS=no",
-			"-o", "HostKeyAlias="+alias)
-	} else {
-		opts = append(opts,
-			"-o", "StrictHostKeyChecking=accept-new",
-			"-o", "UserKnownHostsFile="+sshValue(knownHosts))
+// asked, as there's no one to answer it; only ssh's errors said; and the
+// Mac's host key the one pinned, in the file pinnedHosts, under alias (the
+// old Mac's kit name), and nowhere else's (no other file, no command of the
+// person's config, no DNS).
+func sshOptions(pinnedHosts, alias string, port int) []string {
+	opts := []string{
+		"-o", "BatchMode=yes", "-o", "ConnectTimeout=" + strconv.Itoa(connectTimeout),
+		"-o", "StrictHostKeyChecking=yes",
+		"-o", "UserKnownHostsFile=" + sshValue(pinnedHosts),
+		"-o", "GlobalKnownHostsFile=/dev/null",
+		"-o", "KnownHostsCommand=none",
+		"-o", "VerifyHostKeyDNS=no",
+		"-o", "HostKeyAlias=" + alias,
+		"-o", "LogLevel=ERROR",
 	}
-	opts = append(opts, "-o", "LogLevel=ERROR")
 	if port != 0 && port != 22 {
 		opts = append(opts, "-p", strconv.Itoa(port))
 	}
@@ -150,7 +146,7 @@ var errRefusedKey = errors.New("refused this Mac's key, which the old Mac's ~/.s
 var errNoAnswer = errors.New("didn't answer")
 
 // hostKeyError is a Mac presenting a host key ssh won't trust: another than
-// the one kit took on first sight, or than the one pinned.
+// the one pinned.
 type hostKeyError struct{ said string }
 
 func (e *hostKeyError) Error() string { return "couldn't be reached over SSH: " + e.said }
@@ -189,12 +185,40 @@ const (
 	keyHostKey   = "hostkey"
 )
 
-// hostKeys are a Mac's SSH host keys' public halves, in sshDir, as patterns,
+// hostKeys are a Mac's SSH host keys' public halves, in SSHDir, as patterns,
 // the one tried first first.
 var hostKeys = []string{"ssh_host_ed25519_key.pub", "ssh_host_*_key.pub"}
 
-// sshDir is where macOS keeps its SSH host keys.
-const sshDir = "/etc/ssh"
+// SSHDir is where macOS keeps its SSH host keys.
+const SSHDir = "/etc/ssh"
+
+// HostKey is this Mac's own SSH host key, as the probe says another's: the
+// first of hostKeys in dir (SSHDir) anyone may read, as PublicKey has it;
+// "" when there's none, as macOS makes them only once Remote Login first
+// starts.
+func HostKey(dir string) (string, error) {
+	for _, pattern := range hostKeys {
+		found, err := filepath.Glob(filepath.Join(dir, pattern))
+		if err != nil {
+			return "", err
+		}
+		for _, path := range found {
+			data, err := os.ReadFile(path)
+			if errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrPermission) {
+				continue
+			}
+			if err != nil {
+				return "", fmt.Errorf("read this Mac's SSH host key: %w", err)
+			}
+			key, err := PublicKey(string(data))
+			if err != nil {
+				return "", fmt.Errorf("this Mac's SSH host key, in %s: %w", path, err)
+			}
+			return key, nil
+		}
+	}
+	return "", nil
+}
 
 // protected are the folders in the home folder SSH may read only with
 // Remote Login's full disk access, the first there the one tried.
@@ -269,7 +293,7 @@ func (p probed) one(key string) string {
 
 // probe asks the Mac at host, through opts, what probeScript does.
 func (f Finder) probe(ctx context.Context, opts []string, host string) (probed, error) {
-	res, err := f.Run.Run(ctx, remote(opts, host, probeScript(RemoteRsync, sshDir), probeTimeout))
+	res, err := f.Run.Run(ctx, remote(opts, host, probeScript(RemoteRsync, SSHDir), probeTimeout))
 	if err != nil {
 		return nil, sshFailed(err)
 	}
