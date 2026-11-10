@@ -342,7 +342,7 @@ func (b *Boot) macStep() engine.Step {
 				if !known {
 					st.NewMac, st.From = name, from
 				}
-				if from != "" && named == "" && st.Began.IsZero() {
+				if (known || from != "") && named == "" && st.Began.IsZero() {
 					st.Began = b.Started
 				}
 			}); err != nil {
@@ -409,8 +409,8 @@ func and(names []string) string {
 // committed, and the Mac it starts as a copy of, if any; the terminal given
 // Full Disk Access, as the person said, before its first launch; when kit,
 // handed over to, took the boot on there; and, for a Mac started from
-// another, when its set-up began: the start of the boot that named it, on a
-// Mac kit had no name for.
+// another or one kit-config has, clean-installed, when its set-up began: the
+// start of the boot that named it, on a Mac kit had no name for.
 type state struct {
 	Repo    string    `json:"repo,omitempty"`
 	NewMac  string    `json:"new_mac,omitempty"`
@@ -423,9 +423,10 @@ type state struct {
 const stateName = "bootstrap.json"
 
 // Began is when this Mac's set-up began, as the boot recorded it in
-// stateDir for a Mac started from another, as the boot named it or as
-// kit-config has it (kit machine add --from), on a Mac kit had no name for:
-// zero for any other, as a Mac in use or one started fresh.
+// stateDir, on a Mac kit had no name for: one started from another, as the
+// boot named it or as kit-config has it (kit machine add --from); or one
+// kit-config has, clean-installed under its own name. Zero for any other,
+// as a Mac in use or a new one started fresh.
 func Began(stateDir string) (time.Time, error) {
 	st, err := kitstate.Load[state](stateDir, stateName)
 	return st.Began, err

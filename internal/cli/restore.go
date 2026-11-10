@@ -98,14 +98,16 @@ func (a *restoreAt) Set(v string) error {
 }
 
 // restoreStep is the data restore's step, when the Mac has one: [restore]
-// lines, and a source for them, the Mac it started from or kit apply's
-// flags'; or a path's restore part-way, which carries on, from where it
-// began or the source the flags name; or, for kit agent order, a new
-// Mac's run started from this one, whose lines it carries. Lines that
-// don't read make a step whose check says why; flags naming a source for
-// no lines, or the old Mac for a Mac started from none, are an error.
-// Copying from the old Mac over SSH, with the key kit's secrets write, it
-// comes after them.
+// lines, and either the Mac in set-up, the boot having named it a Mac
+// started from another or one clean-installed under its own name
+// (boot.Began), its restore yet to settle; or kit apply's flags naming a
+// source; or a path's restore part-way, which carries on, from where it
+// began or the source the flags name; or, for kit agent order, a new Mac's
+// run started from this one, whose lines it carries. A Mac in use, or one
+// whose restore has settled, has none. Lines that don't read make a step
+// whose check says why; flags naming a source for no lines, or the old Mac
+// for a Mac started from none, are an error. Copying from the old Mac over
+// SSH, with the key kit's secrets write, it comes after them.
 func (a *app) restoreStep(r *run, dirs config.Dirs, prefsOn bool) (*engine.Step, error) {
 	list, err := r.cfg.List(config.RestoreKind, r.machine)
 	if err != nil {
@@ -129,17 +131,18 @@ func (a *app) restoreStep(r *run, dirs config.Dirs, prefsOn bool) (*engine.Step,
 	if err != nil {
 		return nil, err
 	}
-	if from == "" && flag.Kind == "" && !a.newMacRun && !rec.PartWay(lines) {
+	began, err := boot.Began(dirs.State)
+	if err != nil {
+		return nil, err
+	}
+	settingUp := !began.IsZero() && rec.Settled.IsZero()
+	if !settingUp && flag.Kind == "" && !a.newMacRun && !rec.PartWay(lines) {
 		return nil, nil
 	}
 	if unread != nil {
 		step := steps.Restore(steps.Restoring{})
 		broken(&step, unread.Error())
 		return &step, nil
-	}
-	began, err := boot.Began(dirs.State)
-	if err != nil {
-		return nil, err
 	}
 	homed := make([]kind.Kind, len(r.allKinds))
 	for i, name := range r.allKinds {
@@ -157,7 +160,7 @@ func (a *app) restoreStep(r *run, dirs config.Dirs, prefsOn bool) (*engine.Step,
 	restoring := steps.Restoring{
 		Lines: lines,
 		Owned: func(ctx context.Context) (restore.Owned, error) { return restore.ReadOwned(ctx, mac) },
-		Home:  r.homeDir, StateDir: dirs.State, Began: began, From: from, Flag: flag,
+		Home:  r.homeDir, StateDir: dirs.State, Began: began, Mac: r.machine, From: from, Flag: flag,
 		Sources: sources.For, Disks: sources.Disks, Raise: r.raise, Run: r.run,
 		ArqAwait: []engine.Wait{{Thing: "Arq", Ready: func(context.Context) bool { return folders.Has(arq.Bundle) }}},
 		Rsync:    restore.NewRsync(r.run), Space: boot.Space, Now: a.Now,

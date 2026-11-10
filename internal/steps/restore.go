@@ -63,8 +63,9 @@ type Restoring struct {
 	// Began is when this Mac's set-up began (boot.Began): zero for a Mac in
 	// use.
 	Began time.Time
-	// From is the Mac this one started from, as kit.toml says: "" for none.
-	From string
+	// Mac is this Mac's name, and From the Mac it started from, as kit.toml
+	// says: "" for none.
+	Mac, From string
 	// Flag is the source kit apply's flags name.
 	Flag RestoreFrom
 	// Sources is the source an origin names, to open, picking Time
@@ -89,8 +90,8 @@ type Restoring struct {
 }
 
 // Restore is the data restore: the paths the Mac's [restore] lines list,
-// carried from the Mac it started from, or from a backup of it, what's
-// kit's in them left out. Its check reads the record and what each path
+// carried from the Mac it started from, or from a backup of it, or, started
+// from none, from its own backups, what's kit's in them left out. Its check reads the record and what each path
 // holds, contacting no source: fine once each is restored, or here, holding
 // files of its own before anything was restored to it; else each says
 // what's to come. A path its source hadn't, or, on a Mac whose restore has
@@ -105,7 +106,8 @@ type Restoring struct {
 // saying so. The flags naming none, a path part-way carries on from the
 // one it began from, never a newer backup; the rest copy from the first
 // such path's, should there be one, else the one a copy last began from,
-// so a run again resumes from it, else the Mac this one started from.
+// so a run again resumes from it, else the Mac this one started from, or,
+// started from none, the one of its own backups the person chooses.
 // Arq's restore, by hand, comes last, taking in the
 // paths the card sends to it, so its card goes up once a run. A path a
 // source hasn't, nothing copied to it, is recorded not there; part-way, it
@@ -498,22 +500,28 @@ func arqLast(s sourced) int {
 	return 0
 }
 
+// ownBackups is the source of a Mac started from no other, clean-installed
+// under its own name: its own backups, the one to copy from chosen on a
+// card (ownBackup). Never recorded: the record keeps the backup chosen.
+var ownBackups = restore.Origin{}
+
 // mainSource is where the restore copies a path that isn't part-way from:
 // kit apply's flags' source, a path part-way from one of its kind's should
 // there be one, so never a newer backup mid-restore; the flags naming none,
 // where the first part-way path came from, else where a copy last began
 // from, so a run again resumes from it; else, or the flags naming it, the
-// Mac this one started from.
+// Mac this one started from, or, started from none, its own backups.
 func (r Restoring) mainSource(rec restore.Record) sourced {
 	if resuming, ok := rec.Resuming(r.Lines, r.Flag.Kind); ok {
 		return sourced{want: resuming, at: r.Flag.At}
 	}
-	oldMac := restore.Origin{Kind: restore.FromMac, Detail: r.From}
 	switch {
 	case r.Flag.Kind == "" && rec.From.Kind != "":
 		return sourced{want: rec.From}
+	case r.Flag.Kind == "" && r.From == "":
+		return sourced{want: ownBackups}
 	case r.Flag.Kind == "", r.Flag.Kind == restore.FromMac:
-		return sourced{want: oldMac}
+		return sourced{want: restore.Origin{Kind: restore.FromMac, Detail: r.From}}
 	}
 	return sourced{want: restore.Origin{Kind: r.Flag.Kind}, at: r.Flag.At}
 }
@@ -544,14 +552,19 @@ func (r Restoring) unopened(ctx context.Context, s sourced, err error) error {
 }
 
 // waysOut are the ways on for paths whose source, of kind, hasn't them or
-// won't open: kit apply's flags naming another restores them from it, or
-// kit restore remove drops the line of one not wanted.
+// won't open: kit apply's flags naming another restores them from it, or,
+// for this Mac's own backups (ownBackups), the backup they name; or kit
+// restore remove drops the line of one not wanted.
 func (r Restoring) waysOut(kind string, paths []string) string {
 	drop := "kit restore remove " + paths[0] + " drops its line"
 	if len(paths) > 1 {
 		drop = "kit restore remove drops the line of any not wanted"
 	}
-	return fmt.Sprintf("%s restores %s from another source, or %s", r.bringsIt(kind), strings.Join(paths, " and "), drop)
+	from := "another source"
+	if kind == ownBackups.Kind {
+		from = "the backup it names"
+	}
+	return fmt.Sprintf("%s restores %s from %s, or %s", r.bringsIt(kind), strings.Join(paths, " and "), from, drop)
 }
 
 // copying is a path to copy: its judgement, the copy, and what it comes to.

@@ -23,8 +23,9 @@ import (
 )
 
 // The data restore's cards, in its row: the one asking where to restore
-// from when the old Mac doesn't answer; Arq's, a step by hand; and the one
-// saying what of Arq's restore isn't in its holding folders.
+// from, when the old Mac doesn't answer or there's none; Arq's, a step by
+// hand; and the one saying what of Arq's restore isn't in its holding
+// folders.
 const (
 	itemSource  = RestoreName + ":source"
 	itemArq     = RestoreName + ":arq"
@@ -33,8 +34,8 @@ const (
 
 // The cards' keys: on the source card, Time Machine's disk, when there's
 // one alone (by number, when there are more), Arq, by hand, and the old
-// Mac again; on the lacking card, looking again (keyAgain), and the
-// backup hasn't those holding nothing.
+// Mac, or the disks, again; on the lacking card, looking again
+// (keyAgain), and the backup hasn't those holding nothing.
 const (
 	keyDisk  = "t"
 	keyArq   = "a"
@@ -48,7 +49,7 @@ const mostDisks = 9
 
 // open opens s's source, the one its paths are copied from, and returns it
 // with what of them are left to copy, and why the rest couldn't be
-// (failed): Arq's restore, by hand (arq); else as Sources has it, and,
+// (failed): Arq's restore, by hand (arq); else as opener has it, and,
 // should the old Mac not answer, or kit-config record no host key for it,
 // the source the person chooses on a card instead (instead), standing in
 // for it, or the old Mac again, for as long as they try. Arq chosen is
@@ -57,7 +58,10 @@ func (r Restoring) open(ctx context.Context, s sourced) (src *restore.Opened, to
 	if s.want.Kind == restore.FromArq {
 		return r.arq(ctx, s.at, s.todo)
 	}
-	opener := r.Sources(s.want, s.at, r.Flag.Kind != "")
+	opener, err := r.opener(ctx, &s)
+	if err != nil {
+		return nil, nil, nil, err
+	}
 	for {
 		event.Say(ctx, event.Doing{Says: opening(s.want)})
 		src, err := opener.Open(ctx)
@@ -76,6 +80,24 @@ func (r Restoring) open(ctx context.Context, s sourced) (src *restore.Opened, to
 	}
 }
 
+// opener is what s's source opens through, as Sources has it: but for this
+// Mac's own backups (ownBackups), the one the person chooses on a card
+// (ownBackup), s's source then that. Arq chosen is errToArq.
+func (r Restoring) opener(ctx context.Context, s *sourced) (restore.Opener, error) {
+	if s.want != ownBackups {
+		return r.Sources(s.want, s.at, r.Flag.Kind != ""), nil
+	}
+	f, err := r.ownBackup(ctx)
+	switch {
+	case err != nil:
+		return nil, err
+	case f.arq:
+		return nil, errToArq
+	}
+	s.want = restore.Origin{Kind: restore.FromTimeMachine}
+	return f.disk, nil
+}
+
 // opening is what the restore says as it opens o: looking for the old Mac
 // on the network, or opening a backup.
 func opening(o restore.Origin) string {
@@ -86,7 +108,8 @@ func opening(o restore.Origin) string {
 }
 
 // fallback is what the person chose on the source card: a Time Machine
-// disk (disk), Arq's restore by hand (arq), or, neither, the old Mac again.
+// disk (disk), Arq's restore by hand (arq), or, neither, the old Mac, or
+// the disks, again.
 type fallback struct {
 	disk restore.Opener
 	arq  bool
@@ -107,12 +130,41 @@ func (r Restoring) instead(ctx context.Context, mac restore.Origin, why error) (
 	}
 	event.Say(ctx, event.Doing{Says: "looking for Time Machine disks"})
 	disks, lookErr := r.Disks(ctx)
-	keys, does := choices(mac.Says(), disks)
+	keys, does := choices(disks, "tries "+mac.Says()+" again")
 	c := &ownCard{says: sourceCard(why, disks, lookErr, keys)}
 	if err := r.ask(ctx, c); err != nil {
 		return fallback{}, err
 	}
 	return does[c.chosen()], nil
+}
+
+// ownBackup asks, on a card in the restore's row, which of this Mac's own
+// backups to restore from, it having started from no other Mac: one of the
+// Time Machine disks attached holding the person's backups, or Arq's
+// restore by hand. While there's no disk to choose, or one's locked, it can
+// look for them again. Without a terminal there's no one to ask: the error
+// says so, and the restore's names kit apply's flag that answers it
+// (unopened).
+func (r Restoring) ownBackup(ctx context.Context) (fallback, error) {
+	if r.Raise == nil {
+		return fallback{}, fmt.Errorf("%s restores from its own backups, as it started from no other Mac, and which of them is asked at a terminal", r.Mac)
+	}
+	for {
+		event.Say(ctx, event.Doing{Says: "looking for Time Machine disks"})
+		disks, lookErr := r.Disks(ctx)
+		again := ""
+		if len(disks.Found) == 0 || len(disks.Locked) > 0 {
+			again = "looks for Time Machine disks again"
+		}
+		keys, does := choices(disks, again)
+		c := &ownCard{says: r.ownBackupCard(disks, lookErr, keys)}
+		if err := r.ask(ctx, c); err != nil {
+			return fallback{}, err
+		}
+		if f := does[c.chosen()]; f.disk != nil || f.arq {
+			return f, nil
+		}
+	}
 }
 
 // ask raises c in the restore's row and waits till the person's answered
@@ -127,9 +179,9 @@ func (r Restoring) ask(ctx context.Context, c *ownCard) error {
 
 // choices are the source card's keys, and what each chooses: each Time
 // Machine disk holding the person's backups, t for one alone, else by its
-// number, mostDisks at most; Arq, by hand; and the old Mac, called name,
-// again.
-func choices(name string, disks restore.Disks) ([]check.Key, map[hand.Answer]fallback) {
+// number, mostDisks at most; Arq, by hand; and, as again says, the old Mac
+// or the disks again, unless again is "".
+func choices(disks restore.Disks, again string) ([]check.Key, map[hand.Answer]fallback) {
 	var keys []check.Key
 	does := map[hand.Answer]fallback{}
 	add := func(key, says string, f fallback) {
@@ -144,7 +196,9 @@ func choices(name string, disks restore.Disks) ([]check.Key, map[hand.Answer]fal
 		add(key, "restores from the Time Machine disk "+d.Name, fallback{disk: d})
 	}
 	add(keyArq, "restores through Arq, by hand", fallback{arq: true})
-	add(keyAgain, "tries "+name+" again", fallback{})
+	if again != "" {
+		add(keyAgain, again, fallback{})
+	}
 	return keys, does
 }
 
@@ -158,18 +212,32 @@ func sourceCard(why error, disks restore.Disks, lookErr error, keys []check.Key)
 	if !ok {
 		title, reasons = "The old Mac doesn't answer", why.Error()
 	}
-	says := []string{sentence(reasons)}
+	says := append([]string{sentence(reasons)}, disksSay(disks, lookErr)...)
+	return event.NeedsYou{Item: itemSource, Title: title, Why: strings.Join(says, " "), Keys: keys}
+}
+
+// ownBackupCard is the card asking which of this Mac's own backups to
+// restore from, with keys, as sourceCard is for the old Mac.
+func (r Restoring) ownBackupCard(disks restore.Disks, lookErr error, keys []check.Key) event.NeedsYou {
+	says := append([]string{"It started from no other Mac, so its data comes from its own backups."}, disksSay(disks, lookErr)...)
+	return event.NeedsYou{Item: itemSource, Title: "Restore " + r.Mac + "'s data from its backups", Why: strings.Join(says, " "), Keys: keys}
+}
+
+// disksSay says, of the Time Machine disks, why kit couldn't look for them
+// (lookErr), those locked, or that there's none, and what to do: nothing
+// once there's one to choose and none locked.
+func disksSay(disks restore.Disks, lookErr error) []string {
 	switch {
 	case lookErr != nil:
-		says = append(says, sentence("kit couldn't look for Time Machine disks: "+lookErr.Error()))
+		return []string{sentence("kit couldn't look for Time Machine disks: " + lookErr.Error())}
 	case len(disks.Locked) == 1:
-		says = append(says, "The Time Machine disk "+disks.Locked[0]+" is locked: unlock it in Disk Utility, then try again.")
+		return []string{"The Time Machine disk " + disks.Locked[0] + " is locked: unlock it in Disk Utility, then try again."}
 	case len(disks.Locked) > 1:
-		says = append(says, "The Time Machine disks "+strings.Join(disks.Locked, " and ")+" are locked: unlock them in Disk Utility, then try again.")
+		return []string{"The Time Machine disks " + strings.Join(disks.Locked, " and ") + " are locked: unlock them in Disk Utility, then try again."}
 	case len(disks.Found) == 0:
-		says = append(says, "No Time Machine disk holding your backups is attached: attach it, then try again.")
+		return []string{"No Time Machine disk holding your backups is attached: attach it, then try again."}
 	}
-	return event.NeedsYou{Item: itemSource, Title: title, Why: strings.Join(says, " "), Keys: keys}
+	return nil
 }
 
 // sentence is s as a sentence: its first letter a capital, but for kit's

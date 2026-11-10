@@ -11,18 +11,18 @@ import (
 var reinstallRecord = filepath.Join(".local", "state", "kit", "reinstall.json")
 
 // The reinstall is a step of a Mac whose run has the data restore, yet to
-// settle, as a new Mac's first does before anything's recorded; or whose
+// settle, as a Mac in set-up's first does before anything's recorded; or whose
 // restore has done a path not yet searched for projects, or whose projects
 // have been found, the restore in the run or not. On a Mac without any of
 // these, it's none.
 func TestReinstallIsThereWithWhatTheRestoreBrings(t *testing.T) {
 	for _, tt := range []struct {
 		name                string
-		from                bool
+		inSetUp             bool
 		restored, reinstall string
 		want                bool
 	}{
-		{"restoring, started from another", true, "", "", true},
+		{"restoring, in set-up", true, "", "", true},
 		{"restoring, settled", true, `{"settled": "2026-11-20T12:00:00Z"}`, `{"searched": ["~/Code"]}`, false},
 		{"a path done, not searched", false, `{"paths": {"~/Code": {"state": "done"}}, "settled": "2026-11-20T12:00:00Z"}`, "", true},
 		{"projects found", false, "", `{"searched": ["~/Code"], "installs": [{"dir": "~/Code/app", "tool": "npm", "outcome": "installed"}]}`, true},
@@ -31,8 +31,8 @@ func TestReinstallIsThereWithWhatTheRestoreBrings(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			w := laptopWorld(t)
 			w.writeSection(t, "laptop", "restore", "~/Code\n")
-			if tt.from {
-				w.startedFrom(t)
+			if tt.inSetUp {
+				w.settingUp(t)
 			}
 			if tt.restored != "" {
 				w.write(t, restoreRecord, tt.restored)
