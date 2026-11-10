@@ -186,8 +186,10 @@ func setUp(stateDir string) (began time.Time, rec restore.Record, open bool, err
 
 // settleStep is the data restore's step on a Mac in set-up whose [restore]
 // lists nothing (steps.RestoreNothing), which closes set-up's window, so a
-// line added later never finds it open: nil on any other, and for kit
-// agent order, whose new Mac's run would list nothing either.
+// line added later never finds it open: nil on any other. Never for kit
+// agent order, which places steps as a new Mac's run would: that run's step
+// would copy nothing, so nothing waits on it, and this Mac's own set-up is
+// none of its business.
 func (a *app) settleStep(r *run, dirs config.Dirs) (*engine.Step, error) {
 	list, err := r.cfg.List(config.RestoreKind, r.machine)
 	if err != nil || len(list.Entries) > 0 || a.newMacRun {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -412,6 +413,10 @@ func TestRestoreRebuiltRestoresNothing(t *testing.T) {
 	if want := "Restored nothing, as asked: studio keeps what it has"; !slices.Contains(c.logged, want) {
 		t.Errorf("the log says %q, want %q", c.logged, want)
 	}
+	want := []check.Item{{ID: "restore:~/Notes", Name: "~/Notes", State: "not restored", Detail: "nothing restored, as asked; kit apply --restore-from time-machine|arq brings it", Quiet: "nothing restored, as asked"}}
+	if res := c.step().Check(t.Context()); !reflect.DeepEqual(res.Items, want) {
+		t.Errorf("after restoring nothing, the check's items = %+v\nwant %+v", res.Items, want)
+	}
 
 	c.r.Sources, c.r.Flag = c.src.For, steps.RestoreFrom{Kind: restore.FromTimeMachine}
 	write(t, c.old, "~/Notes/n", beforeIt)
@@ -421,6 +426,55 @@ func TestRestoreRebuiltRestoresNothing(t *testing.T) {
 	}
 	if rec := c.record(); rec.Paths["~/Notes"].State != restore.Done || rec.Paths["~/Code"].State != restore.Here || len(up(t, k, 1)) != 1 {
 		t.Errorf("with --restore-from time-machine, the record = %+v; want ~/Notes restored, ~/Code left as it is, no card", rec.Paths)
+	}
+}
+
+// Restoring nothing lets go of what Arq restored into a holding folder for
+// a run stopped before it was copied: nothing comes from it, the folder
+// gone and its number with it, so kit apply --restore-from arq later asks
+// for Arq's restore afresh, never copying the stale one.
+func TestRestoreNothingLetsArqsHoldingGo(t *testing.T) {
+	c := newRestoring(t, "~/Code")
+	c.rebuilt(t)
+	k := c.atTerminal(t, restore.Disks{})
+	ctx, stop := context.WithCancel(t.Context())
+	defer stop()
+	step := c.step()
+	found := step.Check(ctx)
+	stopped := make(chan error, 1)
+	go func() { stopped <- step.Apply(c.ctx(ctx), found) }()
+	up(t, k, 1)
+	k.answer(t, "restore", "a")
+	up(t, k, 2)
+	write(t, c.arqHold(1), "~/Code/a", beforeIt)
+	stop()
+	if err := ended(t, stopped); err == nil {
+		t.Fatal("stopped at Arq's card, apply = nil; want it stopped")
+	}
+
+	applied := c.applying(t)
+	up(t, k, 3)
+	k.answer(t, "restore", "n")
+	if err := ended(t, applied); err != nil {
+		t.Fatalf("restoring nothing, apply = %v", err)
+	}
+	if p := c.record().Paths["~/Code"]; p.State != restore.NotThere || p.Holding != 0 {
+		t.Errorf("~/Code's record = %+v; want not there, no holding folder", p)
+	}
+	if _, err := os.Stat(c.arqHold(1)); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the holding folder: %v; want it gone", err)
+	}
+
+	c.r.Flag = steps.RestoreFrom{Kind: restore.FromArq}
+	applied = c.applying(t)
+	if card := up(t, k, 4)[3]; card.Item != "restore:arq" || card.Steps[2] != "~/Code → …/arq/1" {
+		t.Errorf("with --restore-from arq, the card = %+v; want Arq's, asking for ~/Code afresh", card)
+	}
+	write(t, c.arqHold(1), "~/Code/a", beforeIt)
+	c.copiesFrom(filepath.Join(c.arqHold(1), "Code"), "~/Code", 1, 1_000)
+	k.answer(t, "restore", hand.Done)
+	if err := ended(t, applied); err != nil || c.record().Paths["~/Code"].State != restore.Done {
+		t.Errorf("apply = %v, ~/Code's record = %+v; want it restored through Arq", err, c.record().Paths["~/Code"])
 	}
 }
 

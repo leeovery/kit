@@ -637,7 +637,7 @@ func (r Restoring) hasntIt(ctx context.Context, j judged, from restore.Origin) e
 
 // recordNotThere records path not there, from, its source, saying so.
 func (r Restoring) recordNotThere(ctx context.Context, path string, from restore.Origin) error {
-	if err := r.markNotThere(path, from); err != nil {
+	if err := r.markNotThere(path, from, false); err != nil {
 		return err
 	}
 	event.Log(ctx, event.Logged{Line: fmt.Sprintf("Nothing to restore in %s: %s hasn't it", path, from.Says())})
@@ -646,12 +646,13 @@ func (r Restoring) recordNotThere(ctx context.Context, path string, from restore
 
 // keepAsIs records each of todo's paths not there, from no source, as the
 // person chose on the own-backups card, saying so: nothing copied, nothing
-// set aside, the restore then settling, closing set-up's window; kit apply
-// --restore-from brings any of them later.
+// set aside, and each holding folder of Arq's let go whole, as nothing is to
+// come from it, the restore then settling, closing set-up's window; kit
+// apply --restore-from brings any of them later, Arq's afresh.
 func (r Restoring) keepAsIs(ctx context.Context, todo []judged) error {
 	var err error
 	for _, j := range todo {
-		err = errors.Join(err, r.markNotThere(j.Path, ownBackups))
+		err = errors.Join(err, r.markNotThere(j.Path, ownBackups, true))
 	}
 	if err == nil {
 		event.Log(ctx, event.Logged{Line: "Restored nothing, as asked: " + r.Mac + " keeps what it has"})
@@ -660,14 +661,14 @@ func (r Restoring) keepAsIs(ctx context.Context, todo []judged) error {
 }
 
 // markNotThere records path not there, from, its source: its holding
-// folder of Arq's, empty, goes.
-func (r Restoring) markNotThere(path string, from restore.Origin) error {
+// folder of Arq's goes, whole, or only should it hold nothing (letGo).
+func (r Restoring) markNotThere(path string, from restore.Origin, whole bool) error {
 	var held int
 	err := r.change(path, func(p *restore.Path) { p.State, p.From, held = restore.NotThere, from, p.Holding })
 	if err != nil {
 		return err
 	}
-	return r.letGo(path, held, false)
+	return r.letGo(path, held, whole)
 }
 
 // letGo deletes path's holding folder, numbered n, of Arq's, if it had one,
