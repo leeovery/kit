@@ -101,7 +101,7 @@ brew extra ffmpeg
 brew unused-dependency node@20
 cask attention 1 declared, all installed
 cask extra firefox
-host-key ok in kit-config
+host-key ok Remote Login is off: no host key to record
 config ok all committed
 disk ok 48% free
 memory ok 0.3 GB swap, pressure normal

@@ -666,13 +666,18 @@ committed and pushed, the boot's record forgets the Mac, and later runs have no 
 
 Every Mac's SSH host key is recorded in its table, `host_key`, its type then the key (a host
 key is public), for a Mac restored from it to know it by (Data restore). The `host-key` step
-(the Git row), on every Mac, checks this Mac's own, the first of `/etc/ssh`'s
-`ssh_host_ed25519_key.pub`, then the rest, anyone may read, against kit.toml's: ok when they
-match; not recorded, or another (a Mac set up again under its name has a new key, which is
-right), it needs attention, and `kit apply` records it, committing and pushing kit.toml, placed
-as `new-mac` is, after it; a commit git can't sign yet puts kit.toml back as it was, for the
-next apply. macOS makes the keys only once Remote Login first starts: till then there's none to
-record, and the next apply records it.
+(the Git row), on every Mac, is ok and quiet while its `remote-login` feature is off: there's
+no key to record. With it on, after Remote Login's step, it checks this Mac's own key, the
+first of `/etc/ssh`'s `ssh_host_ed25519_key.pub`, then the rest, anyone may read, against
+kit.toml's: ok when they match; not recorded, or another (a Mac set up again under its name
+has a new key, which is right), it needs attention, and `kit apply` records it, committing and
+pushing kit.toml, placed as `new-mac` is, after it. macOS makes the keys at Remote Login's first
+connection (`ssh.plist` is inetd-style: `sshd-keygen-wrapper` runs for each one), so with none
+yet apply connects to port 22 on this Mac once, reading the banner, logging into nothing, then
+records the key. It waits for the next apply, saying why, while kit.toml has edits not
+committed, as recording commits kit.toml whole: the person's, for `kit reconcile`; this Mac's
+table as the boot left it, for `new-mac`, which commits it first in a run. A commit git can't
+sign yet puts kit.toml back as it was, for the next apply.
 
 `kit apply` checks every step and applies each that doesn't stand ok, or has something to
 do, then checks it again: each step then says what it did ("installed: jq"). It never removes
@@ -1383,9 +1388,12 @@ refuses a line the restore would refuse, before writing anything, and copies not
   secrets write); its Time Machine disk, the backup's snapshot mounted read-only; Arq, restored
   by the person in Arq's app into a holding folder kit names, then put in place by kit and
   compared as from Time Machine, the holding folder deleted after. When the old Mac doesn't
-  answer, or kit-config records no host key for it (it isn't looked for: `kit apply` on it
-  records it), a card offers its Time Machine disk, Arq, or trying again, and what comes after the
-  restore waits. A path stopped part-way carries on from the source it began from, each from
+  answer, or kit-config records no host key for it, or one that isn't a key (it isn't looked
+  for: `kit apply` on it records it), a card offers its Time Machine disk, Arq, or trying again,
+  which first fetches kit-config and takes the old Mac's host key from the remote's kit.toml,
+  merging nothing, as `kit apply` on it may have recorded it, or a new one, since the run began;
+  without a terminal, the failure says to run `kit apply` on it, then here. What comes after
+  the restore waits. A path stopped part-way carries on from the source it began from, each from
   its own; but the source the person names, by `--restore-from` (and `--at`) or on the card,
   stands in for every path part-way in that run, whatever it began from, each carrying on from
   it as its own copy begins (`--update` never copies over newer work, and the second pass

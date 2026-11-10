@@ -24,11 +24,12 @@ const laptopAt = "laptop.example.com"
 
 // onTheNetwork has c restore from laptop as kit finds it on the network,
 // the Mac it looks for the one presenting key, kit-config's host key for
-// it ("" for none): one Mac offers Remote Login, answering at laptopAt.
-func (c *restoring) onTheNetwork(key string) {
-	c.r.Sources = func(restore.Origin, time.Time, bool) restore.Opener {
-		return oldmac.Source{Finder: oldmac.Finder{Run: c.fake, StateDir: c.state, HostKey: key}, From: "laptop", User: "someone", Home: c.home}
-	}
+// it ("" for none), and, tried again, fetched, the one kit-config's remote
+// records then: one Mac offers Remote Login, answering at laptopAt.
+func (c *restoring) onTheNetwork(key, fetched string) {
+	src := &oldmac.Source{Finder: oldmac.Finder{Run: c.fake, StateDir: c.state, HostKey: key}, From: "laptop", User: "someone", Home: c.home,
+		HostKey: func(context.Context) (string, error) { return fetched, nil }}
+	c.r.Sources = func(restore.Origin, time.Time, bool) restore.Opener { return src }
 	c.fake.On("dns-sd", "-B", "_ssh._tcp", "local.").Prints("Browsing for _ssh._tcp.local.\nTimestamp     A/R    Flags  if Domain               Service Type         Instance Name\n" +
 		"21:38:59.104  Add        3  13 local.               _ssh._tcp.           Laptop\n")
 	c.fake.On("dns-sd", "-L", "Laptop", "_ssh._tcp", "local.").Prints("Lookup Laptop._ssh._tcp.local.\n" +
@@ -60,7 +61,7 @@ const pinnedKey = "ssh-ed25519 ZmFrZSBlZDI1NTE5IGhvc3Qga2V5"
 // Mac's kit name, for the probe, the look and the copy; it's copied from.
 func TestRestoreFromTheOldMacPinned(t *testing.T) {
 	c := newRestoring(t, "~/.zsh_history")
-	c.onTheNetwork(pinnedKey)
+	c.onTheNetwork(pinnedKey, pinnedKey)
 	c.probed().Prints(c.laptopSays(pinnedKey))
 	c.fake.OnMatch("ssh", func(args []string) bool { return strings.Contains(args[len(args)-1], "\nlook ") }).Prints("file\x00")
 	c.copiesFrom(laptopAt+":"+filepath.Join(c.home, ".zsh_history"), "~/.zsh_history", 1, 1_000)
@@ -101,11 +102,11 @@ func TestRestoreFromTheOldMacPinned(t *testing.T) {
 // ways on.
 func TestRestoreRefusesAnotherHostKey(t *testing.T) {
 	c := newRestoring(t, "~/.zsh_history")
-	c.onTheNetwork(pinnedKey)
+	c.onTheNetwork(pinnedKey, pinnedKey)
 	c.probed().PrintsToStderr("Host key for laptop has changed and you have requested strict checking.\nHost key verification failed.\n").Exits(255)
 
 	err := c.apply(t.Context())
-	want := "couldn't restore: laptop doesn't answer over SSH: Laptop isn't laptop: its host key doesn't match the one kit-config records: " +
+	want := "couldn't restore: laptop doesn't answer over SSH: Laptop isn't laptop: its host key doesn't match the one kit-config records (kit apply on laptop records a new one): " +
 		"kit apply --restore-from time-machine|arq restores ~/.zsh_history from another source, or kit restore remove ~/.zsh_history drops its line"
 	if err == nil || err.Error() != want {
 		t.Errorf("apply = %v\nwant %q", err, want)
@@ -121,7 +122,7 @@ func TestRestoreRefusesAnotherHostKey(t *testing.T) {
 // trying again.
 func TestRestoreWithoutTheOldMacsHostKeyAsks(t *testing.T) {
 	c := newRestoring(t, "~/.zsh_history")
-	c.onTheNetwork("")
+	c.onTheNetwork("", "")
 	k := c.atTerminal(t, restore.Disks{})
 	step := c.step()
 	ctx, stop := context.WithCancel(t.Context())
@@ -145,5 +146,63 @@ func TestRestoreWithoutTheOldMacsHostKeyAsks(t *testing.T) {
 	}
 	if calls := c.fake.Calls(); slices.ContainsFunc(calls, func(call string) bool { return strings.HasPrefix(call, "dns-sd") || strings.HasPrefix(call, "ssh") }) {
 		t.Errorf("ran %q; want no Mac looked for", calls)
+	}
+}
+
+// newKey is the old Mac's host key once it's set up again, plainly no real
+// one.
+const newKey = "ssh-ed25519 ZmFrZSBuZXcgaG9zdCBrZXk="
+
+// Tried again from the card, the old Mac is looked for by the host key
+// kit-config's remote records for it then, as kit apply on it records it
+// meanwhile: none recorded when the run began, or the key it had before
+// it was set up again; found by the new one, it's copied from.
+func TestRestoreTriedAgainTakesTheHostKeyRecordedSince(t *testing.T) {
+	for _, tt := range []struct {
+		name, key, title string
+	}{
+		{"none recorded", "", "laptop can't be restored from"},
+		{"set up again", pinnedKey, "laptop doesn't answer over SSH"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			c := newRestoring(t, "~/.zsh_history")
+			c.onTheNetwork(tt.key, newKey)
+			probe := c.probed()
+			if tt.key != "" {
+				probe.PrintsToStderr("Host key verification failed.\n").Exits(255).Then()
+			}
+			probe.Prints(c.laptopSays(newKey))
+			c.fake.OnMatch("ssh", func(args []string) bool { return strings.Contains(args[len(args)-1], "\nlook ") }).Prints("file\x00")
+			c.copiesFrom(laptopAt+":"+filepath.Join(c.home, ".zsh_history"), "~/.zsh_history", 1, 1_000)
+			k := c.atTerminal(t, restore.Disks{})
+			applied := c.applying(t)
+
+			if card := up(t, k, 1)[0]; card.Title != tt.title {
+				t.Errorf("the card's title = %q, want %q", card.Title, tt.title)
+			}
+			k.answer(t, "restore", "enter")
+			if err := ended(t, applied); err != nil {
+				t.Fatalf("apply = %v", err)
+			}
+			if rec := c.record(); rec.Paths["~/.zsh_history"].State != restore.Done {
+				t.Errorf("the record = %+v; want ~/.zsh_history restored", rec)
+			}
+			if data, err := os.ReadFile(filepath.Join(c.state, "restore", "pinned_host")); err != nil || string(data) != "laptop "+newKey+"\n" {
+				t.Errorf("the pinned key's file = %q, %v; want the key fetched", data, err)
+			}
+		})
+	}
+}
+
+// Without a terminal, no host key recorded for the old Mac fails the
+// restore, naming the way on: kit apply on it, then here.
+func TestRestoreWithoutTheOldMacsHostKeyNamesTheWayOn(t *testing.T) {
+	c := newRestoring(t, "~/.zsh_history")
+	c.onTheNetwork("", "")
+	err := c.apply(t.Context())
+	want := "couldn't restore: laptop can't be restored from: laptop's SSH host key isn't in kit-config: kit apply on laptop records it, then kit apply here: " +
+		"kit apply --restore-from time-machine|arq restores ~/.zsh_history from another source, or kit restore remove ~/.zsh_history drops its line"
+	if err == nil || err.Error() != want {
+		t.Errorf("apply = %v\nwant %q", err, want)
 	}
 }

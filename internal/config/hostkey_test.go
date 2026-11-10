@@ -96,3 +96,17 @@ func TestSetHostKeyRefuses(t *testing.T) {
 		})
 	}
 }
+
+// A kit.toml's text, as a remote has it, gives a Mac's host key as Load
+// does: none for a Mac without one, or one it doesn't know.
+func TestHostKeyIn(t *testing.T) {
+	text := []byte(twoMacs + "host_key = \" " + fakeKey + " \"\n")
+	for _, tt := range []struct{ mac, want string }{{"studio", fakeKey}, {"laptop", ""}, {"other", ""}} {
+		if got, err := config.HostKeyIn(text, tt.mac); err != nil || got != tt.want {
+			t.Errorf("HostKeyIn(%s) = %q, %v; want %q", tt.mac, got, err, tt.want)
+		}
+	}
+	if _, err := config.HostKeyIn([]byte("format = \n"), "laptop"); err == nil {
+		t.Error("HostKeyIn() of a kit.toml that isn't TOML = nil error")
+	}
+}

@@ -59,9 +59,10 @@ rebuilds the rest from kit-config.
 
 - From where: the Mac it started from, over the local network, while it
   answers, known by the SSH host key kit-config records for it (`host_key`
-  in kit.toml, which `kit apply` on that Mac records; without it, the old
-  Mac isn't looked for); else its Time Machine disk, attached, or Arq's
-  backup, which the person restores in Arq for kit to put in place
+  in kit.toml, which `kit apply` on that Mac records with its remote-login
+  feature on; without it, the old Mac isn't looked for); else its Time
+  Machine disk, attached, or Arq's backup, which the person restores in
+  Arq for kit to put in place
   (`kit apply --restore-from time-machine|arq`; `mac` goes back to the old
   Mac).
 - When: once Homebrew's rsync is installed and, copying from the old Mac,

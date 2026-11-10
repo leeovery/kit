@@ -142,6 +142,9 @@ func (f Finder) pin(from string) (string, error) {
 	if f.HostKey == "" {
 		return "", fmt.Errorf("%s %w: %s's SSH host key isn't in kit-config: kit apply on %s records it", from, ErrNoHostKey, from, from)
 	}
+	if _, err := PublicKey(f.HostKey); err != nil {
+		return "", fmt.Errorf("%s %w: %s's SSH host key in kit-config isn't a valid key: kit apply on %s records it", from, ErrNoHostKey, from, from)
+	}
 	path := pinned(f.StateDir)
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return "", fmt.Errorf("make kit's known-hosts folder: %w", err)
@@ -178,7 +181,7 @@ func (f Finder) ask(ctx context.Context, name, from, pin string) candidate {
 	opts := sshOptions(pin, from, a.port)
 	p, err := f.probe(ctx, opts, a.host)
 	if _, key := errors.AsType[*hostKeyError](err); key {
-		err = fmt.Errorf("isn't %s: its host key doesn't match the one kit-config records", from)
+		err = fmt.Errorf("isn't %s: its host key doesn't match the one kit-config records (kit apply on %s records a new one)", from, from)
 	}
 	if err != nil {
 		c.why = err
@@ -280,13 +283,28 @@ func (m *Mac) Opened() *restore.Opened {
 type Source struct {
 	Finder           Finder
 	From, User, Home string
+	// HostKey is the host key kit-config's remote records for From now,
+	// looked for each time the Mac's tried again, as it may have been
+	// recorded there since the run began: kit apply on the old Mac records
+	// it. Without it, the Finder's is kept.
+	HostKey func(ctx context.Context) (string, error)
+	tried   bool
 }
 
 // Open finds the Mac to restore from, and opens it, once nothing stops it
 // being copied from: none answering is an error, ErrNoAnswer, saying why
-// of each found; no host key to look for, ErrNoHostKey; what stops it,
-// Check's, each naming its fix.
-func (s Source) Open(ctx context.Context) (*restore.Opened, error) {
+// of each found; no host key to look for, or none to be had from
+// kit-config's remote, ErrNoHostKey; what stops it, Check's, each naming
+// its fix.
+func (s *Source) Open(ctx context.Context) (*restore.Opened, error) {
+	if s.tried && s.HostKey != nil {
+		key, err := s.HostKey(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("%s %w: kit couldn't fetch its SSH host key from kit-config: %w", s.From, ErrNoHostKey, err)
+		}
+		s.Finder.HostKey = key
+	}
+	s.tried = true
 	m, err := s.Finder.Find(ctx, s.From)
 	if err != nil {
 		return nil, err

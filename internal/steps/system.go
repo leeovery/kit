@@ -1,12 +1,15 @@
 package steps
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
 	"io/fs"
+	"net"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/engine"
@@ -152,11 +155,18 @@ func service(run runner.Runner, admin *Admin, name, title, label, plist string) 
 // kit-config.
 const HostKeyName = "host-key"
 
+// SSHAddress is where this Mac's Remote Login answers.
+const SSHAddress = "127.0.0.1:22"
+
 // HostKeying is the step recording this Mac's SSH host key in kit-config,
 // for a Mac restored from it to know it by.
 type HostKeying struct {
-	// Dir is where the Mac keeps its host keys: oldmac.SSHDir.
-	Dir string
+	// RemoteLogin is whether the Mac's Remote Login feature is on: off,
+	// there's no host key to record.
+	RemoteLogin bool
+	// Dir is where the Mac keeps its host keys: oldmac.SSHDir. Address is
+	// where its Remote Login answers: SSHAddress.
+	Dir, Address string
 	// Recorded is the host key kit-config records for this Mac: "" for none.
 	Recorded string
 	// Record records key as this Mac's in kit-config, committing and
@@ -164,51 +174,96 @@ type HostKeying struct {
 	Record func(ctx context.Context, key string) (check.Result, error)
 }
 
-// hostKeyMade is when there's a host key to record.
-const hostKeyMade = "macOS makes it the first time Remote Login starts"
+// wakeFor is how long Remote Login has to answer, making the host keys.
+const wakeFor = 30 * time.Second
 
 // HostKey checks kit-config records this Mac's SSH host key, the one its
-// Remote Login presents, as oldmac reads it; applying records it, as a
-// Mac set up again gets a new key, and the new one is right.
+// Remote Login presents, as oldmac reads it, while the Remote Login feature
+// is on; applying records it, as a Mac set up again gets a new key, and
+// the new one is right. With no key yet, applying has Remote Login answer
+// once, which makes them (wake), then records it.
 func HostKey(h HostKeying) engine.Step {
 	// done is what recording did, which the check after it says.
 	var done *check.Result
-	return engine.Step{
-		Name: HostKeyName, Title: "SSH host key", Area: AreaConfig,
-		Check: func(context.Context) check.Result {
-			if done != nil {
-				return *done
-			}
-			own, err := oldmac.HostKey(h.Dir)
-			if err != nil {
-				return failed(err)
-			}
-			// One recorded that isn't a key is never this Mac's.
-			recorded, _ := oldmac.PublicKey(h.Recorded)
-			switch {
-			case own == "":
-				return problem(HostKeyName, "none yet", [3]string{"none", "no SSH host key yet", hostKeyMade + "; kit apply records it then"})
-			case h.Recorded == "":
-				return problem(HostKeyName, "not in kit-config", [3]string{"unrecorded", "SSH host key not in kit-config", "kit apply records it"})
-			case recorded != own:
-				return problem(HostKeyName, "not kit-config's", [3]string{"differs", "SSH host key not the one kit-config records", "kit apply records this Mac's: a Mac set up again has a new one"})
-			}
-			return check.Result{State: check.OK, Summary: "in kit-config"}
-		},
-		Apply: func(ctx context.Context, _ check.Result) error {
-			own, err := oldmac.HostKey(h.Dir)
-			switch {
-			case err != nil:
-				return err
-			case own == "":
-				return engine.NotYet("this Mac has no SSH host key yet: " + hostKeyMade + "; the next kit apply records it")
-			}
-			res, err := h.Record(ctx, own)
-			if err != nil {
-				return err
-			}
-			done = &res
-			return nil
-		},
+	step := engine.Step{Name: HostKeyName, Title: "SSH host key", Area: AreaConfig}
+	if !h.RemoteLogin {
+		step.Check = func(context.Context) check.Result {
+			return check.Result{State: check.OK, Summary: "Remote Login is off: no host key to record"}
+		}
+		return step
 	}
+	step.Check = func(context.Context) check.Result {
+		if done != nil {
+			return *done
+		}
+		own, err := oldmac.HostKey(h.Dir)
+		if err != nil {
+			return failed(err)
+		}
+		// One recorded that isn't a key is never this Mac's.
+		recorded, _ := oldmac.PublicKey(h.Recorded)
+		switch {
+		case own == "":
+			return problem(HostKeyName, "none yet", [3]string{"none", "no SSH host key yet", "macOS makes it at Remote Login's first connection: kit apply connects once, then records it"})
+		case h.Recorded == "":
+			return problem(HostKeyName, "not in kit-config", [3]string{"unrecorded", "SSH host key not in kit-config", "kit apply records it"})
+		case recorded != own:
+			return problem(HostKeyName, "not kit-config's", [3]string{"differs", "SSH host key not the one kit-config records", "kit apply records this Mac's: a Mac set up again has a new one"})
+		}
+		return check.Result{State: check.OK, Summary: "in kit-config"}
+	}
+	step.Apply = func(ctx context.Context, _ check.Result) error {
+		own, err := h.made(ctx)
+		if err != nil {
+			return err
+		}
+		res, err := h.Record(ctx, own)
+		if err != nil {
+			return err
+		}
+		done = &res
+		return nil
+	}
+	return step
+}
+
+// made is this Mac's host key, Remote Login woken to make it when there's
+// none yet.
+func (h HostKeying) made(ctx context.Context) (string, error) {
+	own, err := oldmac.HostKey(h.Dir)
+	if err != nil || own != "" {
+		return own, err
+	}
+	if err := wake(ctx, h.Address); err != nil {
+		return "", engine.NotYet(fmt.Sprintf("this Mac has no SSH host key yet, and Remote Login didn't answer at %s to make one: %v; the next kit apply tries again", h.Address, err))
+	}
+	if own, err = oldmac.HostKey(h.Dir); err == nil && own == "" {
+		err = engine.NotYet("this Mac has no SSH host key, even once Remote Login answered; the next kit apply tries again")
+	}
+	return own, err
+}
+
+// wake has Remote Login answer once at addr, reading its banner, logging
+// into nothing. ssh.plist is inetd-style: launchd runs sshd-keygen-wrapper
+// for each connection, which makes any host key missing before it starts
+// sshd, so once sshd says its banner the keys are there.
+func wake(ctx context.Context, addr string) error {
+	ctx, cancel := context.WithTimeout(ctx, wakeFor)
+	defer cancel()
+	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", addr)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = conn.Close() }()
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = conn.SetReadDeadline(deadline)
+	}
+	banner, err := bufio.NewReader(conn).ReadString('\n')
+	switch {
+	case err != nil:
+		return fmt.Errorf("no banner: %w", err)
+	case !strings.HasPrefix(banner, "SSH-"):
+		return fmt.Errorf("it answered %q, not as SSH", strings.TrimSpace(banner))
+	}
+	return nil
 }

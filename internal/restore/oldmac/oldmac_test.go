@@ -608,7 +608,7 @@ func TestFindsAnImpostorByItsHostKey(t *testing.T) {
 	f.HostKey = hostKey
 
 	_, err := f.Find(t.Context(), "laptop")
-	want := "laptop doesn't answer over SSH: Someone’s Mac mini isn't laptop: its host key doesn't match the one kit-config records"
+	want := "laptop doesn't answer over SSH: Someone’s Mac mini isn't laptop: its host key doesn't match the one kit-config records (kit apply on laptop records a new one)"
 	if !errors.Is(err, ErrNoAnswer) || err.Error() != want {
 		t.Errorf("Find() = %v\nwant %q", err, want)
 	}

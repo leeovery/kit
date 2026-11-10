@@ -179,6 +179,16 @@ func Load(dir string, kinds []Section) (*Config, error) {
 	return cfg, nil
 }
 
+// HostKeyIn is the host key a kit.toml, data, records for the Mac named
+// mac, as Load reads it: "" for none.
+func HostKeyIn(data []byte, mac string) (string, error) {
+	var f file
+	if _, err := toml.Decode(string(data), &f); err != nil {
+		return "", fmt.Errorf("%s: %w", File, err)
+	}
+	return strings.TrimSpace(f.Macs[mac].HostKey), nil
+}
+
 // Knows reports whether the config knows a Mac named name.
 func (c *Config) Knows(name string) bool {
 	_, ok := c.Macs[name]

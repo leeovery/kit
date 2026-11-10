@@ -100,6 +100,9 @@ type fallback struct {
 // names kit apply's flag that answers it (unopened).
 func (r Restoring) instead(ctx context.Context, mac restore.Origin, why error) (fallback, error) {
 	if r.Raise == nil {
+		if errors.Is(why, oldmac.ErrNoHostKey) {
+			why = fmt.Errorf("%w, then kit apply here", why)
+		}
 		return fallback{}, why
 	}
 	event.Say(ctx, event.Doing{Says: "looking for Time Machine disks"})

@@ -92,6 +92,8 @@ type world struct {
 	// ctx, when set, is what kit runs in, for a test to stop it; else the
 	// test's own.
 	ctx context.Context
+	// sshAt is where the Mac's Remote Login answers, when a test has it.
+	sshAt string
 }
 
 // after is how long kit waits in the world, as time.After has it: no time
@@ -172,7 +174,9 @@ func (w *world) run(t *testing.T, args ...string) (stdout, stderr string, status
 		},
 		SudoLocal: filepath.Join(w.home, "etc", "sudo_local"),
 		SSHDir:    filepath.Join(w.home, "etc", "ssh"),
-		TCC:       filepath.Join(w.home, "TCC.db"),
+		// Nothing listens there: a test waking Remote Login says where.
+		SSHAddress: cmp.Or(w.sshAt, "127.0.0.1:1"),
+		TCC:        filepath.Join(w.home, "TCC.db"),
 		Choose: func(_ context.Context, q ask.Question) (int, error) {
 			return w.answer(t, q)
 		},

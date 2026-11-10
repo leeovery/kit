@@ -22,7 +22,6 @@ import (
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/kinds"
 	"github.com/leeovery/kit/internal/look"
-	"github.com/leeovery/kit/internal/restore/oldmac"
 	"github.com/leeovery/kit/internal/runner"
 	"github.com/leeovery/kit/internal/steps"
 )
@@ -84,8 +83,9 @@ type Deps struct {
 	// feature checks: /etc/pam.d/sudo_local.
 	SudoLocal string
 	// SSHDir is where the Mac keeps its SSH host keys, which the host-key
-	// step reads: /etc/ssh.
-	SSHDir string
+	// step reads, and SSHAddress where its Remote Login answers, which the
+	// step wakes to make them: /etc/ssh and 127.0.0.1:22 when "".
+	SSHDir, SSHAddress string
 	// TCC is macOS's database of privacy grants, readable only with Full
 	// Disk Access: one of what prefs probes for it.
 	TCC string
@@ -321,7 +321,6 @@ func Real(version string) Deps {
 		},
 		WatchDialogs: true,
 		SudoLocal:    steps.SudoLocal,
-		SSHDir:       oldmac.SSHDir,
 		TCC:          "/Library/Application Support/com.apple.TCC/TCC.db",
 		AppDirs:      []string{"/Applications"},
 	}

@@ -507,7 +507,7 @@ func (a *app) build(command, logName string, face render.Face, atTerminal bool) 
 	r.drift = append(r.drift, steps.ConfigEditsName)
 	r.drifters[steps.ConfigEditsName] = configDrifter{repo: r.repo, home: home, step: edits}
 	checks = append(checks,
-		r.hostKeyStep(a.SSHDir), quietened(edits, record, now),
+		r.hostKeyStep(a.SSHDir, a.SSHAddress, dirs.State, features.on(steps.FeatureRemoteLogin)), quietened(edits, record, now),
 		steps.Disk(observed), steps.Memory(observed), steps.FileEvents(observed), steps.Load(observed, a.Now),
 		steps.ConfigSync(r.repo, a.Now), steps.ConfigPrivate(r.repo),
 	)

@@ -134,7 +134,7 @@ func TestApplyRestoreWithoutATerminalNamesTheFlag(t *testing.T) {
 		why      string
 	}{
 		{"its host key recorded", true, "studio doesn't answer over SSH: no Mac on the network offers Remote Login"},
-		{"no host key recorded", false, "studio can't be restored from: studio's SSH host key isn't in kit-config: kit apply on studio records it"},
+		{"no host key recorded", false, "studio can't be restored from: studio's SSH host key isn't in kit-config: kit apply on studio records it, then kit apply here"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			w := laptopWorld(t)
