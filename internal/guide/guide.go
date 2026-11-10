@@ -27,7 +27,7 @@ var Topics = []Topic{
 	{"files", "Linked files, what never to link, and the PATH"},
 	{"settings", "Settings: macOS's, power, git's, exclusions and features"},
 	{"prefs", "Apps' settings: what kit prefs keeps, and restoring them"},
-	{"new-mac", "A new Mac: the boot, the run's order, what isn't there"},
+	{"new-mac", "A new Mac: the boot, the run's order, its data, what isn't there"},
 }
 
 // Main is the guide, read in one go: kit and kit-config, steps of your own,

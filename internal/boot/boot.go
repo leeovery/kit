@@ -103,6 +103,9 @@ type Boot struct {
 	// HandedOver is whether this is the boot handed over to the terminal,
 	// started by the boot before it.
 	HandedOver bool
+	// Started is when this boot started: a new Mac it starts from another
+	// records it as when its set-up began. Zero records nothing.
+	Started time.Time
 
 	mu    sync.Mutex
 	token string
@@ -316,23 +319,36 @@ func (b *Boot) macStep() engine.Step {
 			if cfg == nil {
 				return errors.New("kit-config hasn't been read")
 			}
+			named, err := config.ReadMachine(b.State)
+			if err != nil {
+				return err
+			}
 			name, from := b.Mac, ""
 			if name == "" {
-				var err error
 				if name, from, err = b.askMac(ctx, cfg); err != nil {
 					return err
 				}
 			}
-			if cfg.Knows(name) {
-				return config.WriteMachine(b.State, name)
-			}
-			if !config.ValidName(name) {
+			known := cfg.Knows(name)
+			switch {
+			case known:
+				from = cfg.Macs[name].From
+			case !config.ValidName(name):
 				return fmt.Errorf("%q can't name a Mac: lower case letters, digits and dashes, as in studio", name)
 			}
-			if err := config.WriteMachine(b.State, name); err != nil {
+			// Recorded before the name: a boot stopped between the two finds
+			// this Mac unnamed still, not named with nothing to say why.
+			if err := kitstate.Update(b.State, stateName, func(st *state) {
+				if !known {
+					st.NewMac, st.From = name, from
+				}
+				if from != "" && named == "" && st.Began.IsZero() {
+					st.Began = b.Started
+				}
+			}); err != nil {
 				return err
 			}
-			return kitstate.Update(b.State, stateName, func(st *state) { st.NewMac, st.From = name, from })
+			return config.WriteMachine(b.State, name)
 		},
 	}
 }
@@ -391,17 +407,29 @@ func and(names []string) string {
 // state is what a boot keeps between its runs, beside the checks: the
 // config repository it read; a new Mac's name till kit-config has it
 // committed, and the Mac it starts as a copy of, if any; the terminal given
-// Full Disk Access, as the person said, before its first launch; and when
-// kit, handed over to, took the boot on there.
+// Full Disk Access, as the person said, before its first launch; when kit,
+// handed over to, took the boot on there; and, for a Mac started from
+// another, when its set-up began: the start of the boot that named it, on a
+// Mac kit had no name for.
 type state struct {
 	Repo    string    `json:"repo,omitempty"`
 	NewMac  string    `json:"new_mac,omitempty"`
 	From    string    `json:"from,omitempty"`
 	Access  string    `json:"access,omitempty"`
 	Arrived time.Time `json:"arrived,omitzero"`
+	Began   time.Time `json:"began,omitzero"`
 }
 
 const stateName = "bootstrap.json"
+
+// Began is when this Mac's set-up began, as the boot recorded it in
+// stateDir for a Mac started from another, as the boot named it or as
+// kit-config has it (kit machine add --from), on a Mac kit had no name for:
+// zero for any other, as a Mac in use or one started fresh.
+func Began(stateDir string) (time.Time, error) {
+	st, err := kitstate.Load[state](stateDir, stateName)
+	return st.Began, err
+}
 
 // NewMac is the new Mac the boot added to kit-config, as its record in
 // stateDir names it, till kit apply has it committed (ForgetNewMac): "" for

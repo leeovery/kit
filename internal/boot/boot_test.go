@@ -365,7 +365,9 @@ func TestGitHubRefusesAPublicConfig(t *testing.T) {
 // This Mac: one of the config's, chosen, each with its description; or a
 // new one, named, then started fresh or from one of the config's Macs, kept
 // as new, with where it starts from, till kit-config has it; or the one
-// --mac names, with nothing asked.
+// --mac names, with nothing asked. A new Mac started from another records
+// the boot's start as when its set-up began; no other records it, as a Mac
+// given a name kit-config has may be in use.
 func TestThisMac(t *testing.T) {
 	const (
 		which   = "mac: which of your Macs is this? laptop (MacBook, the primary), studio, new (a new machine ID, started fresh or from one of your Macs)"
@@ -380,16 +382,18 @@ func TestThisMac(t *testing.T) {
 		want         string
 		asked        []string
 		newMac, from string
+		began        bool
 	}{
-		{"chosen", "", &asker{choose: 1}, "studio", []string{which}, "", ""},
-		{"new, fresh", "", &asker{chooses: []int{2, 0}, name: "mini"}, "mini", []string{which, named, start}, "mini", ""},
-		{"new, from studio", "", &asker{chooses: []int{2, 2}, name: "mini"}, "mini", []string{which, named, start}, "mini", "studio"},
-		{"new, a name that can't be one, asked again", "", &asker{chooses: []int{2, 0}, names: []string{"No Good"}, name: "mini"}, "mini", []string{which, named, badName, start}, "mini", ""},
-		{"named", "laptop", &asker{}, "laptop", nil, "", ""},
+		{"chosen", "", &asker{choose: 1}, "studio", []string{which}, "", "", false},
+		{"new, fresh", "", &asker{chooses: []int{2, 0}, name: "mini"}, "mini", []string{which, named, start}, "mini", "", false},
+		{"new, from studio", "", &asker{chooses: []int{2, 2}, name: "mini"}, "mini", []string{which, named, start}, "mini", "studio", true},
+		{"new, a name that can't be one, asked again", "", &asker{chooses: []int{2, 0}, names: []string{"No Good"}, name: "mini"}, "mini", []string{which, named, badName, start}, "mini", "", false},
+		{"named", "laptop", &asker{}, "laptop", nil, "", "", false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			b, _ := newBoot(t, runnertest.New(t), GitHub{}, tt.ask)
 			b.Mac = tt.mac
+			b.Started = time.Date(2026, 11, 20, 9, 0, 0, 0, time.UTC)
 			if err := os.MkdirAll(b.archive(), 0o700); err != nil {
 				t.Fatal(err)
 			}
@@ -412,6 +416,9 @@ func TestThisMac(t *testing.T) {
 			if st, _ := kitstate.Load[state](b.State, stateName); st.NewMac != tt.newMac || st.From != tt.from {
 				t.Errorf("new Mac %q from %q; want %q from %q", st.NewMac, st.From, tt.newMac, tt.from)
 			}
+			if began, err := Began(b.State); err != nil || began.Equal(b.Started) != tt.began || !tt.began && !began.IsZero() {
+				t.Errorf("Began() = %v, %v; want the boot's start recorded %v", began, err, tt.began)
+			}
 			if res := step.Check(context.Background()); res.State != check.OK || res.Summary != tt.want {
 				t.Errorf("check after = %+v", res)
 			}
@@ -423,6 +430,55 @@ func TestThisMac(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(b.archive(), config.File), []byte(kitToml), 0o600)
 	if err := b.macStep().Apply(context.Background(), check.Result{}); err == nil || !strings.Contains(err.Error(), "can't name a Mac") {
 		t.Errorf("a bad name: %v", err)
+	}
+}
+
+// A Mac added to kit-config ahead, started from another (kit machine add
+// --from), records its set-up's start, the boot's, however the boot's told
+// its name: chosen, typed as a new one, or given. Not on a Mac kit had named
+// before this boot, nor for a Mac started fresh; a start recorded already
+// stays.
+func TestBeganForAMacAddedAhead(t *testing.T) {
+	const ahead = "format = 1\nprimary = \"laptop\"\n[macs.laptop]\n[macs.studio]\nfrom = \"laptop\"\n"
+	started := time.Date(2026, 11, 20, 9, 0, 0, 0, time.UTC)
+	earlier := started.Add(-time.Hour)
+	for _, tt := range []struct {
+		name   string
+		mac    string
+		ask    *asker
+		named  string
+		before time.Time
+		want   time.Time
+	}{
+		{"chosen", "", &asker{choose: 1}, "", time.Time{}, started},
+		{"typed as a new one", "", &asker{chooses: []int{2}, name: "studio"}, "", time.Time{}, started},
+		{"given", "studio", &asker{}, "", time.Time{}, started},
+		{"given, on a Mac kit named before", "studio", &asker{}, "old", time.Time{}, time.Time{}},
+		{"given, its start recorded by an earlier boot", "studio", &asker{}, "", earlier, earlier},
+		{"a Mac started fresh, chosen", "", &asker{choose: 0}, "", time.Time{}, time.Time{}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			b, _ := newBoot(t, runnertest.New(t), GitHub{}, tt.ask)
+			b.Mac, b.Started = tt.mac, started
+			writeFiles(t, b.archive(), map[string]string{config.File: ahead})
+			if tt.named != "" {
+				if err := config.WriteMachine(b.State, tt.named); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := kitstate.Update(b.State, stateName, func(st *state) { st.Began = tt.before }); err != nil {
+				t.Fatal(err)
+			}
+			if err := b.macStep().Apply(context.Background(), check.Result{}); err != nil {
+				t.Fatalf("apply = %v", err)
+			}
+			if began, err := Began(b.State); err != nil || !began.Equal(tt.want) {
+				t.Errorf("Began() = %v, %v; want %v", began, err, tt.want)
+			}
+			if st, _ := kitstate.Load[state](b.State, stateName); st.NewMac != "" || st.From != "" {
+				t.Errorf("new Mac %q from %q; want none: kit-config has it", st.NewMac, st.From)
+			}
+		})
 	}
 }
 

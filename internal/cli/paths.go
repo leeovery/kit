@@ -46,33 +46,42 @@ func (a *app) removePaths(ctx context.Context, r *run, dirs []string, shared boo
 	c := startChanges(r, dirs)
 	for _, dir := range dirs {
 		c.step(ctx, dir, func(context.Context) check.Result {
-			where, err := r.cfg.Where(config.PathsKind, dir)
-			if err != nil {
-				return check.Result{State: check.Failed, Reason: err.Error()}
-			}
-			var from []string
-			for _, e := range where {
-				switch {
-				case e.Scope == config.Shared && !shared:
-					return check.Result{State: check.Failed, Reason: "on every Mac's PATH, in " + e.Pos() + ": --shared takes it out of every Mac's"}
-				case e.Scope != config.Shared && e.Scope != r.machine:
-					continue
-				}
-				if err := r.cfg.Undeclare(config.PathsKind, e.Scope, dir); err != nil {
-					return check.Result{State: check.Failed, Reason: err.Error()}
-				}
-				c.changed(config.DeclFile(e.Scope))
-				from = append(from, e.Scope)
-			}
-			if len(from) == 0 {
-				return check.Result{State: check.Failed, Reason: dir + " isn't on this Mac's PATH"}
-			}
-			return check.Result{State: check.OK, Summary: "out of " + strings.Join(from, " and ")}
+			return c.undeclare(config.PathsKind, dir, shared, "PATH")
 		})
 	}
 	a.writeShellPath(ctx, r, c)
 	c.sync(ctx, commitMessage("remove", pathsKind, dirs, r.machine, ""))
 	return c.finish()
+}
+
+// undeclare takes name out of the section of the kind called kindName,
+// this Mac's (and the shared one's, with shared), as a step of c: list
+// names what the section is, as in PATH, to say where name isn't. One
+// declared for every Mac, without shared, is refused, saying so.
+func (c *changes) undeclare(kindName, name string, shared bool, list string) check.Result {
+	r := c.run
+	where, err := r.cfg.Where(kindName, name)
+	if err != nil {
+		return failed(err)
+	}
+	var from []string
+	for _, e := range where {
+		switch {
+		case e.Scope == config.Shared && !shared:
+			return check.Result{State: check.Failed, Reason: "on every Mac's " + list + ", in " + e.Pos() + ": --shared takes it out of every Mac's"}
+		case e.Scope != config.Shared && e.Scope != r.machine:
+			continue
+		}
+		if err := r.cfg.Undeclare(kindName, e.Scope, name); err != nil {
+			return failed(err)
+		}
+		c.changed(config.DeclFile(e.Scope))
+		from = append(from, e.Scope)
+	}
+	if len(from) == 0 {
+		return check.Result{State: check.Failed, Reason: name + " isn't on this Mac's " + list}
+	}
+	return check.Result{State: check.OK, Summary: "out of " + strings.Join(from, " and ")}
 }
 
 // writeShellPath writes the shell's PATH as the paths sections now say, as

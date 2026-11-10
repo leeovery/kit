@@ -1,0 +1,2 @@
+rsync: [sender] get_xattr_names: llistxattr("/Volumes/Scratch/restore/e23/src/./locked",1024) failed: Permission denied (13)
+rsync error: some files/attrs were not transferred (see previous errors) (code 23) at main.c(1416) [sender=3.5.2]

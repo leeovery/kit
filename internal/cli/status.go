@@ -408,11 +408,6 @@ func (a *app) build(command, logName string, face render.Face, atTerminal bool) 
 			// or more a kind, before the run could start.
 			step.Weight = len(list.On())
 		}
-		for _, after := range d.After {
-			if slices.Contains(r.kinds, after) {
-				step.After = append(step.After, after)
-			}
-		}
 		kindSteps = append(kindSteps, quietened(step, record, now))
 		r.kinds = append(r.kinds, d.Name)
 		r.drift = append(r.drift, d.Name)
@@ -475,6 +470,39 @@ func (a *app) build(command, logName string, face render.Face, atTerminal bool) 
 		settings = []engine.Step{feature(steps.FeaturePrefs, saving), feature(steps.FeaturePrefs, steps.FullDiskAccess(home))}
 	}
 	checks = append(checks, settings...)
+	// A step by hand that comes due while kit applies at a terminal is
+	// raised there, a card, and waited on: the rest, with no place of their
+	// own, once everything else has finished, with what the run left the
+	// person to do, so that step's there whether or not any are declared.
+	// The data restore raises its own.
+	var raise *steps.Raise
+	if slices.Contains(applies, command) && atTerminal {
+		desk := hand.New()
+		raise = &steps.Raise{Sink: sink, Now: a.Now, Notify: r.notifier(a.Getenv, a.Now), Desk: desk, After: a.After}
+		r.raise = raise
+		if f, ok := face.(*render.Pretty); ok {
+			f.Hands(desk.Answer)
+		}
+		r.byHandLast = true
+	}
+	restoring, err := a.restoreStep(r, dirs, features.on(steps.FeaturePrefs))
+	if err != nil {
+		_ = face.Close()
+		_ = log.Close()
+		return nil, err
+	}
+	if restoring != nil {
+		checks = append(checks, *restoring)
+	}
+	reinstalling, err := a.reinstallStep(r, dirs, restoring != nil)
+	if err != nil {
+		_ = face.Close()
+		_ = log.Close()
+		return nil, err
+	}
+	if reinstalling != nil {
+		checks = append(checks, *reinstalling)
+	}
 	edits := steps.ConfigEdits(r.repo)
 	r.drift = append(r.drift, steps.ConfigEditsName)
 	r.drifters[steps.ConfigEditsName] = configDrifter{repo: r.repo, home: home, step: edits}
@@ -507,20 +535,6 @@ func (a *app) build(command, logName string, face render.Face, atTerminal bool) 
 		_ = log.Close()
 		return nil, err
 	}
-	// A step by hand that comes due while kit applies at a terminal is
-	// raised there, a card, and waited on: the rest, with no place of their
-	// own, once everything else has finished, with what the run left the
-	// person to do, so that step's there whether or not any are declared.
-	var raise *steps.Raise
-	if slices.Contains(applies, command) && atTerminal {
-		desk := hand.New()
-		raise = &steps.Raise{Sink: sink, Now: a.Now, Notify: r.notifier(a.Getenv, a.Now), Desk: desk, After: a.After}
-		r.raise = raise
-		if f, ok := face.(*render.Pretty); ok {
-			f.Hands(desk.Answer)
-		}
-		r.byHandLast = true
-	}
 	plain, ordered := steps.SplitManual(home, byHand)
 	if len(plain.Entries) > 0 || raise != nil {
 		checks = append(checks, steps.Manual(observed, home, dirs.State, plain, raise))
@@ -548,6 +562,7 @@ func (a *app) build(command, logName string, face render.Face, atTerminal bool) 
 	}
 	if err == nil {
 		r.steps = slices.Concat(base, scripts, byHandOwn)
+		r.placeKinds(r.steps)
 		r.placeFeatures(r.steps, features, featured)
 		r.placeBackups(r.steps, backups)
 		r.placeLines(r.steps)
@@ -677,7 +692,13 @@ func (r *run) isAdminStep(name string) bool {
 // features are the features switched on for this Mac: the shared file's,
 // then its own. One kit doesn't know is refused, saying where.
 func (r *run) features() (featuresOn, error) {
-	list, err := r.cfg.List(config.FeaturesKind, r.machine)
+	return r.featuresOf(r.machine)
+}
+
+// featuresOf are the features switched on for mac, as features are for
+// this Mac.
+func (r *run) featuresOf(mac string) (featuresOn, error) {
+	list, err := r.cfg.List(config.FeaturesKind, mac)
 	if err != nil {
 		return nil, err
 	}

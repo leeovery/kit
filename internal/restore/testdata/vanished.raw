@@ -1,0 +1,26 @@
+created directory e24/dst
+./
+a/
+a/big
+         32,768B   0%       0B/s    0:00:00       22,413,312B  10%   22.2MB/s    0:00:08       42,598,400B  20%   21.1MB/s    0:00:07       57,704,448B  27%   19.1MB/s    0:00:07       81,494,016B  38%   20.3MB/s    0:00:06       98,861,056B  47%   19.0MB/s    0:00:05      133,824,512B  63%   22.7MB/s    0:00:03      159,809,536B  76%   25.4MB/s    0:00:01      194,805,760B  92%   28.2MB/s    0:00:00      209,715,200B  99%   24.3MB/s    0:00:08 (xfr#1, to-chk=2/6)    209,715,200B  99%   24.3MB/s    0:00:08 (xfr#1, to-chk=2/6)
+z/
+z/kept.jsonl
+    209,715,205B  99%   24.3MB/s    0:00:08 (xfr#2, to-chk=1/6)    209,715,210B 100%   24.3MB/s    0:00:08 (xfr#3, to-chk=0/6)    209,715,210B 100%   24.3MB/s    0:00:08 (xfr#3, to-chk=0/6)
+
+Number of files: 6 (reg: 3, dir: 3)
+Number of created files: 6 (reg: 3, dir: 3)
+Number of deleted files: 0
+Number of regular files transferred: 3
+Total file size: 209,715,210 bytes
+Total transferred file size: 209,715,210 bytes
+Literal data: 209,715,205 bytes
+Number of 4 KiB logical blocks touched: 51,201
+Matched data: 0 bytes
+File list size: 0
+File list generation time: 0.006 seconds
+File list transfer time: 0.000 seconds
+Total bytes sent: 209,766,753
+Total bytes received: 124
+
+sent 209,766,753 bytes  received 124 bytes  24,678,456.12 bytes/sec
+total size is 209,715,210  speedup is 1.00

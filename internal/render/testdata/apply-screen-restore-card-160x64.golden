@@ -1,0 +1,64 @@
+
+  █  ▄▀  ▀█▀  ▀▀█▀▀  │  bootstrap · studio · Fri 2 Jan · 03:04
+  █▀▀▄    █     █    │  ▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮  66% · 1m20s so far
+  █   █  ▄█▄    █    │  ▲ waiting for you · laptop doesn't answer over SSH
+
+────────────────────────────────────────────────────────────┬───────────────────────────────────────────────────────────────────────────────────────────────────
+                                                            │
+  ≡ Everything                                              │  ▲ laptop doesn't answer over SSH                                                  waiting 10.0s  
+                                                            │
+  ● Homebrew formulae  all 2 done                           │      Someone’s MacBook Pro refused this Mac's key, which the old Mac's ~/.ssh/authorized_keys must
+  ○ Developer tools  waits for Data restore                 │      hold. The Time Machine disk Vault is locked: unlock it in Disk Utility, then try again.
+  ▲ Backups  waits for you: laptop doesn't answer over SSH  │
+                                                            │      t restores from the Time Machine disk Backups of laptop
+                                                            │      a restores through Arq, by hand
+                                                            │      enter tries laptop again
+                                                            │
+                                                            ├───────────────────────────────────────────────────────────────────────────────────────────────────
+                                                            │
+                                                            │  LOG
+                                                            │
+                                                            │  03:04:07  ● Homebrew: /opt/homebrew
+                                                            │  03:04:10  ● Time Machine: no backup disk yet
+                                                            │  03:04:11  ● App settings: saving from tonight
+                                                            │  03:04:16  + Installed rsync
+                                                            │  03:04:36  + Installed jq
+                                                            │  03:05:05  ● Homebrew formulae: 2 declared, all installed
+                                                            │  03:05:15  ▲ laptop doesn't answer over SSH: waiting for you
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+                                                            │
+  tab next row · ↑↓ scroll · q stop                         │

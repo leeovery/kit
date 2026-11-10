@@ -50,6 +50,8 @@ func splitBody(f Form, lines []string) body {
 			kind = stepLine
 		case f == Commands || f == Settings || f == Secrets || f == Options:
 			name, _, _, _ = splitCommand(line)
+		case f == PathOptions:
+			name, _, _, _ = splitPathOptions(line)
 		case f == Defaults:
 			name = defaultsName(line)
 		case f == Power:
@@ -449,7 +451,7 @@ func (c *Config) declaring(kind, scope string, e Entry, from ...string) (section
 	case len(b.entries(0, len(b.lines))) == 0:
 		b.afterOwnComments(block)
 		s.body = b.lines
-	case d.form == Paths:
+	case d.form == Paths || d.form == PathOptions:
 		b.insert(b.lastEntryEnd(0, len(b.lines)), block...)
 		s.body = b.lines
 	default:
@@ -629,6 +631,14 @@ func entryText(d sectionDef, name string, e Entry) (string, error) {
 	case Paths:
 		if err := checkDir(name); err != nil {
 			return "", err
+		}
+	case PathOptions:
+		value := strings.TrimSpace(e.Value)
+		if value != "" {
+			line += " " + value
+		}
+		if path, options, _, err := splitPathOptions(line); name == "" || err != nil || path != name || options != value {
+			return "", fmt.Errorf("%q isn't a path then its options: a path holds no -- or # after a space, and its options start with --", line)
 		}
 	case Defaults:
 		text, err := defaultsText(name, e.Value)

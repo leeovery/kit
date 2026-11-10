@@ -1,0 +1,5 @@
+Lookup Someone’s MacBook Pro._ssh._tcp.local.
+DATE: ---Mon 09 Nov 2026---
+21:39:08.624  ...STARTING...
+21:39:08.624  Someone’s\032MacBook\032Pro._ssh._tcp.local. can be reached at Someones-MacBook-Pro.local.:22 (interface 13) Flags: 1
+21:39:08.624  Someone’s\032MacBook\032Pro._ssh._tcp.local. can be reached at Someones-MacBook-Pro.local.:22 (interface 13)

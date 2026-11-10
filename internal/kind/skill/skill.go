@@ -50,8 +50,9 @@ var Descriptor = kind.Descriptor{
 		Add:    "Install Claude skills with agntc, as owner/repo and the skill or pack in it, and declare them",
 		Remove: "Remove Claude skills with agntc, and undeclare them",
 	},
-	Row: "Developer tools",
-	New: func(d *kind.Deps) kind.Kind { return New(d.Run, d.Home) },
+	Row:   "Developer tools",
+	After: []string{config.RestoreKind},
+	New:   func(d *kind.Deps) kind.Kind { return New(d.Run, d.Home) },
 }
 
 // New returns agntc's installs for every project, driven through run, for
@@ -116,6 +117,25 @@ func (s *Skills) Installed(context.Context) ([]kind.Installed, error) {
 func (*Skills) Key(name string) string {
 	name, _, _ = strings.Cut(name, "@")
 	return name
+}
+
+// skillsFolder is where agntc installs Claude's skills for every project, a
+// folder each, named as the skill is.
+const skillsFolder = "~/.claude/skills/"
+
+// HomePaths are the folders the skills named install into: the skill a
+// name after its repo names, as in github/gh-stack/gh-stack, has a folder
+// of that name. What a pack, or a repo alone, installs only the repo says,
+// so it names none.
+func (s *Skills) HomePaths(names []string) []string {
+	var paths []string
+	for _, name := range names {
+		parts := strings.Split(s.Key(name), "/")
+		if len(parts) == 3 && !slices.Contains(parts, "") {
+			paths = append(paths, skillsFolder+parts[2])
+		}
+	}
+	return paths
 }
 
 // Resolve takes every name as agntc's key for an install: one that isn't

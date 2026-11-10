@@ -529,22 +529,58 @@ func TestCaptureFinishesTheIndexAStoppedCaptureLeft(t *testing.T) {
 	}
 }
 
-// Python's fnmatch and glob, as prefsync matched: a wildcard matches a
-// slash too in a pattern, and never a hidden name in a glob.
+// The live config's wildcard patterns, JetBrains' versioned folders and
+// Claude's memory, match the names they meet as they did before a glob was
+// read rsync's way.
+func TestLivePatternsMatchAsBefore(t *testing.T) {
+	w := newWorld(t, prefs.Lists{})
+	jetbrains, projects := "Library/Application Support/JetBrains", ".claude/projects"
+	for _, path := range []string{
+		jetbrains + "/PhpStorm2026.2/options/ide.general.xml",
+		jetbrains + "/WebStorm2025.3/options/editor.xml",
+		jetbrains + "/PhpStorm2026.2-backup/options/editor.xml",
+		jetbrains + "/Toolbox/options/settings.xml",
+		jetbrains + "/consentOptions/accepted",
+		projects + "/-Users-someone-Code-site/memory/MEMORY.md",
+		projects + "/-Users-someone--config/memory/notes.md",
+		projects + "/-Users-someone-Code-site--claude-worktrees-fix/memory/MEMORY.md",
+		projects + "/-Users-someone-Code-site/session.jsonl",
+	} {
+		w.write(t, filepath.Join(w.home, path), "x")
+	}
+	for pattern, matched := range map[string][]string{
+		jetbrains + "/*20[0-9][0-9].[0-9]/options": {jetbrains + "/PhpStorm2026.2/options", jetbrains + "/WebStorm2025.3/options"},
+		projects + "/*/memory":                     {projects + "/-Users-someone--config/memory", projects + "/-Users-someone-Code-site--claude-worktrees-fix/memory", projects + "/-Users-someone-Code-site/memory"},
+	} {
+		want := make([]string, len(matched))
+		for i, m := range matched {
+			want[i] = filepath.Join(w.home, m)
+		}
+		slices.Sort(want)
+		if got := prefs.Glob(filepath.Join(w.home, pattern)); !slices.Equal(got, want) {
+			t.Errorf("Glob(~/%s) = %q\nwant %q", pattern, got, want)
+		}
+	}
+}
+
+// A domain's pattern matches as Python's fnmatch, as prefsync matched: a
+// wildcard matches a slash too, [!...] a class's complement. A file's glob
+// matches each part as rsync does, as a data restore reads it: a wildcard
+// matches a hidden name too, and [^...] is a class's complement.
 func TestPatterns(t *testing.T) {
-	w := newWorld(t, prefs.Lists{Files: []string{"~/Tool/*20[0-9][0-9].[0-9]/opts"}, Deny: []string{"jetbrains.*.csat", "a.[!b].c"}})
+	w := newWorld(t, prefs.Lists{Files: []string{"~/Tool/*20[0-9][0-9].[0-9]/opts", "~/Other/[^x]*/conf"}, Deny: []string{"jetbrains.*.csat", "a.[!b].c"}})
 	writeRecord(t, w.state, `{"on": "started fresh"}`)
-	for _, dir := range []string{"Tool/App2026.2/opts/x", "Tool/.App2026.3/opts/x", "Tool/App26.2/opts/x"} {
+	for _, dir := range []string{"Tool/App2026.2/opts/x", "Tool/.App2026.3/opts/x", "Tool/App26.2/opts/x", "Other/abc/conf", "Other/xyz/conf"} {
 		w.write(t, filepath.Join(w.home, dir), "x")
 	}
 	w.fake.On("defaults", "domains").Prints("jetbrains.ps.262.csat, jetbrains.csat, a.x.c, a.b.c\n")
 	w.exports(t, "jetbrains.csat", map[string]any{"a": true})
 	w.exports(t, "a.b.c", map[string]any{"a": true})
-	w.pushes(t, "Capture 2026-10-06 03:00: 3 new\n\nnew: a.b.c\nnew: jetbrains.csat\nnew: ~/Tool/App2026.2/opts/x\nclaimed: the folder, for this Mac's hardware",
-		"?? laptop/.gitignore\x00?? laptop/domains/a.b.c.plist\x00?? laptop/domains/jetbrains.csat.plist\x00?? laptop/files/Tool/App2026.2/opts/x\x00?? laptop/owner\x00",
-		[]string{"laptop/.gitignore", "laptop/domains/a.b.c.plist", "laptop/domains/jetbrains.csat.plist", "laptop/files/Tool/App2026.2/opts/x", "laptop/owner"},
-		"laptop/.gitignore\x00laptop/domains/a.b.c.plist\x00laptop/domains/jetbrains.csat.plist\x00laptop/files/Tool/App2026.2/opts/x\x00laptop/owner\x00")
-	if report, err := w.p.Capture(t.Context()); err != nil || report.Domains != 2 || report.Files != 1 {
+	files := []string{"laptop/files/Other/abc/conf", "laptop/files/Tool/.App2026.3/opts/x", "laptop/files/Tool/App2026.2/opts/x"}
+	paths := slices.Concat([]string{"laptop/.gitignore", "laptop/domains/a.b.c.plist", "laptop/domains/jetbrains.csat.plist"}, files, []string{"laptop/owner"})
+	w.pushes(t, "Capture 2026-10-06 03:00: 5 new\n\nnew: a.b.c\nnew: jetbrains.csat\nnew: ~/Tool/.App2026.3/opts/x\nnew: ~/Tool/App2026.2/opts/x\nnew: ~/Other/abc/conf\nclaimed: the folder, for this Mac's hardware",
+		"?? "+strings.Join(paths, "\x00?? ")+"\x00", paths, strings.Join(paths, "\x00")+"\x00")
+	if report, err := w.p.Capture(t.Context()); err != nil || report.Domains != 2 || report.Files != 3 {
 		t.Errorf("Capture() = %+v, %v", report, err)
 	}
 }

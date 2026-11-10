@@ -112,6 +112,17 @@ func TestInstallFails(t *testing.T) {
 	}
 }
 
+// A skill named after its repo installs a folder of its name in
+// ~/.claude/skills, its version aside; a pack, or a repo alone, installs
+// what only the repo says, so it names none.
+func TestHomePaths(t *testing.T) {
+	var homed kind.Homed = skill.New(runnertest.New(t), home(t, ""))
+	got := homed.HomePaths([]string{"github/gh-stack/gh-stack@^0.2", "acme/tools", "acme/skills/packs/go", "acme/tools/review"})
+	if want := []string{"~/.claude/skills/gh-stack", "~/.claude/skills/review"}; !slices.Equal(got, want) {
+		t.Errorf("HomePaths() = %q; want %q", got, want)
+	}
+}
+
 func TestRemove(t *testing.T) {
 	fake := runnertest.New(t)
 	fake.On("agntc", "remove", "-g", "github/gh-stack/gh-stack", "-y", "--json").Prints(`{"ok": true}`)

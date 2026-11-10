@@ -8,12 +8,48 @@ import (
 // splitComment splits a line into what's before its comment and the comment:
 // a # at the line's start, or after a space or tab. Both are trimmed.
 func splitComment(line string) (text, comment string) {
-	for i, r := range line {
-		if r == '#' && (i == 0 || line[i-1] == ' ' || line[i-1] == '\t') {
-			return strings.TrimSpace(line[:i]), strings.TrimSpace(line[i+1:])
-		}
+	if i := commentAt(line); i >= 0 {
+		return strings.TrimSpace(line[:i]), strings.TrimSpace(line[i+1:])
 	}
 	return strings.TrimSpace(line), ""
+}
+
+// commentAt is where line's comment starts: its first # at the line's
+// start, or after a space or tab; -1 when it has none.
+func commentAt(line string) int {
+	for i, r := range line {
+		if r == '#' && (i == 0 || line[i-1] == ' ' || line[i-1] == '\t') {
+			return i
+		}
+	}
+	return -1
+}
+
+// splitPathOptions splits a line of a path and its options into the path,
+// up to the first -- after a space or tab; its options, from there; and its
+// note: a comment in the path, as splitComment finds one, or a # starting a
+// word among the options outside quotes.
+func splitPathOptions(line string) (path, options, note string, err error) {
+	end := optionsAt(line)
+	if i := commentAt(line[:end]); i >= 0 {
+		return strings.TrimSpace(line[:i]), "", strings.TrimSpace(line[i+1:]), nil
+	}
+	options, note = splitNote(line[end:])
+	if _, err := Words(options); err != nil {
+		return "", "", "", err
+	}
+	return strings.TrimSpace(line[:end]), options, note, nil
+}
+
+// optionsAt is where line's options start: its first -- after a space or
+// tab; its length when it has none.
+func optionsAt(line string) int {
+	for i := 1; i+1 < len(line); i++ {
+		if line[i] == '-' && line[i+1] == '-' && (line[i-1] == ' ' || line[i-1] == '\t') {
+			return i
+		}
+	}
+	return len(line)
 }
 
 // splitCommand splits a command's line into its name, its options and its

@@ -66,6 +66,11 @@ const (
 	PrefsMachineBoundKind = "prefs-machine-bound"
 )
 
+// RestoreKind names the section of what a new Mac's data restore carries
+// from the Mac it started from: a path in the home folder a line, a folder
+// or a file, and what in it to leave out.
+const RestoreKind = "restore"
+
 // FeaturesKind names the section of the pieces switched on for a Mac, by
 // name: the parts with nothing to list, such as apps' settings.
 const FeaturesKind = "features"
@@ -105,6 +110,10 @@ const (
 	// Options: a name, then its options, if it has any, its words as a
 	// shell splits them, then an optional note.
 	Options
+	// PathOptions: a path, spaces and all, up to the first -- after a
+	// space or tab, then its options, its words as a shell splits them,
+	// then an optional note.
+	PathOptions
 )
 
 // Section is a kind's section of a declarations file, as the kind says:
@@ -208,6 +217,7 @@ var (
 		{header: "prefs deny", kind: PrefsDenyKind, form: Paths},
 		{header: "prefs apps", kind: PrefsAppsKind, form: Settings},
 		{header: "prefs machine-bound", kind: PrefsMachineBoundKind, form: Paths},
+		{header: "restore", kind: RestoreKind, form: PathOptions},
 		{header: "steps", kind: StepsKind, form: Commands},
 		{header: "manual", kind: ManualKind, form: Commands, steps: true, carries: []string{afterOption, beforeOption}},
 		{header: "checks", kind: ChecksKind, form: Commands},
@@ -707,6 +717,12 @@ func (s *section) entry(line string) (Entry, error) {
 		e.Name, e.Note = text, note
 	case Paths:
 		e.Name, e.Note = splitComment(line)
+	case PathOptions:
+		path, options, note, err := splitPathOptions(line)
+		if err != nil {
+			return e, err
+		}
+		e.Name, e.Value, e.Note = path, options, note
 	case Commands, Settings, Secrets, Options:
 		name, value, note, err := splitCommand(line)
 		if err != nil {

@@ -781,6 +781,7 @@ func TestCardsComeUpByWhatWaitsOnThem(t *testing.T) {
 	signedIn.Store(true)
 	c.answer(t, "store", hand.Done)
 	c.cards(t, 4)
+	c.noticed(t, 4)
 	c.answer(t, "vault", hand.Done)
 	report := over(t, ran)
 

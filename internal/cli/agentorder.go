@@ -26,15 +26,16 @@ func newOrderCommand(a *app) *cobra.Command {
 		Long: `Say where a step, or one of a step's things as in cask:firefox, falls in
 a whole kit apply of this Mac's config, as on a new Mac: what the run has
 done by the time it applies, and what comes after it, from the steps kit
-apply builds and the order it keeps. The secrets' sync and the restore of
-apps' settings are always placed: before it, after it, or in no order with
-it, when either may come first. A step done by hand that's raised with the
-rest at the end is placed as they are. --json gives the same as one
-document.`,
+apply builds and the order it keeps. The secrets' sync, the restore of
+apps' settings and, where [restore] lists paths, the data restore and the
+reinstall of the projects it brings back are always placed: before it,
+after it, or in no order with it, when either may come first. A step done by hand that's raised with the rest at the end is placed
+as they are. --json gives the same as one document.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// The steps of kit apply at a terminal, as a new Mac's is, with
 			// nothing a run at one starts started, nothing shown and no log.
+			a.newMacRun = true
 			r, err := a.build("apply", "", render.Tee(), true)
 			if err != nil {
 				return err
@@ -91,11 +92,15 @@ type placing struct {
 }
 
 // alwaysPlaced are the steps kit agent order always places, as what a step
-// on a new Mac most often assumes is done: the secrets' sync, and the
-// restore of apps' settings. Each with why a run hasn't it, when it hasn't.
+// on a new Mac most often assumes is done: the secrets' sync, the restore of
+// apps' settings, the data restore, and the reinstall of the projects it
+// brings back. Each with why a run hasn't it, when it hasn't, and that's
+// worth saying: "" for a step most Macs haven't.
 var alwaysPlaced = []struct{ step, absent string }{
 	{secret.Descriptor.Name, "no secrets are declared for this Mac"},
 	{steps.PrefsName, "kit prefs isn't on for this Mac, so no app's settings are restored"},
+	{steps.RestoreName, ""},
+	{steps.ReinstallName, ""},
 }
 
 // order says where name, a step or one of a step's things, falls in r's
@@ -270,7 +275,9 @@ func (o *ordering) place(ctx context.Context) placing {
 	for _, always := range alwaysPlaced {
 		switch o.where(always.step, ahead) {
 		case notInRun:
-			p.Absent = append(p.Absent, spot{Step: always.step, Says: always.absent})
+			if always.absent != "" {
+				p.Absent = append(p.Absent, spot{Step: always.step, Says: always.absent})
+			}
 		case inNoOrder:
 			says := o.said(o.byName[always.step])
 			if slices.ContainsFunc(ahead, func(w engine.Prior) bool { return w.Step == always.step }) {
@@ -353,7 +360,7 @@ func (o *ordering) saidBefore(w engine.Wait, settings falls) string {
 	switch {
 	case isApps(s.Name):
 		says += "; likely never opened yet; " + restored(settings, "their")
-	case !isKind && s.Area != steps.AreaManual && s.Name != steps.PrefsName:
+	case !isKind && s.Area != steps.AreaManual && !slices.Contains([]string{steps.PrefsName, steps.RestoreName, steps.ReinstallName}, s.Name):
 		says += ", finished"
 	}
 	return says
@@ -374,6 +381,10 @@ func (o *ordering) said(s engine.Step) string {
 			return "apps' settings restored"
 		}
 		return "apps' settings restored, once " + inWords(apps, "and") + " are installed"
+	case s.Name == steps.RestoreName:
+		return "[restore]'s paths restored from the Mac it started from, or a backup, where they're not here already"
+	case s.Name == steps.ReinstallName:
+		return "the restored projects' dependencies installed again, by their lockfiles, where their tools are installed"
 	case len(s.ByHand) == 1 && s.ByHand[0].Name == s.Name:
 		return s.ByHand[0].Title + ", done by hand"
 	case s.Name == steps.ManualName:

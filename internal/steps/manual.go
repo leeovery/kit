@@ -215,9 +215,13 @@ func (b byHand) open(ctx context.Context) {
 	if b.Open == "" || b.opened == nil {
 		return
 	}
-	b.opened.Do(func() {
-		_, _ = b.run.Run(ctx, runner.Command{Name: "open", Args: []string{"-b", b.Open}})
-	})
+	b.opened.Do(func() { openApp(ctx, b.run, b.Open) })
+}
+
+// openApp opens the app whose bundle id is id, through run: what opening
+// says, the run's log has.
+func openApp(ctx context.Context, run runner.Runner, id string) {
+	_, _ = run.Run(ctx, runner.Command{Name: "open", Args: []string{"-b", id}})
 }
 
 // done reports whether it's done, as isDone does; kit has no words for it.

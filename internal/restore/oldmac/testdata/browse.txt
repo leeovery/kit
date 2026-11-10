@@ -1,0 +1,12 @@
+Browsing for _ssh._tcp.local.
+DATE: ---Mon 09 Nov 2026---
+21:38:59.101  ...STARTING...
+Timestamp     A/R    Flags  if Domain               Service Type         Instance Name
+21:38:59.104  Add        3  17 local.               _ssh._tcp.           Someone’s Mac Studio
+21:38:59.104  Add        3   1 local.               _ssh._tcp.           Someone’s Mac Studio
+21:38:59.104  Add        3  26 local.               _ssh._tcp.           Someone’s Mac Studio
+21:38:59.104  Add        3  13 local.               _ssh._tcp.           Someone’s Mac Studio
+21:38:59.104  Add        3  13 local.               _ssh._tcp.           Someone’s MacBook Pro
+21:38:59.104  Add        3  15 local.               _ssh._tcp.           Someone’s MacBook Pro
+21:38:59.104  Add        3  13 local.               _ssh._tcp.           Someone’s Mac mini
+21:38:59.104  Add        2  15 local.               _ssh._tcp.           Someone’s Mac mini

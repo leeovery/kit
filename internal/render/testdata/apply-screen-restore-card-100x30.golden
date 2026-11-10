@@ -1,0 +1,30 @@
+
+  █  ▄▀  ▀█▀  ▀▀█▀▀  │  bootstrap · studio · Fri 2 Jan · 03:04
+  █▀▀▄    █     █    │  ▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮  66% · 1m20s so far
+  █   █  ▄█▄    █    │  ▲ waiting for you · laptop doesn't answer over SSH
+
+────────────────────────────────────────────────────┬───────────────────────────────────────────────
+                                                    │
+  ≡ Everything                                      │  ▲ laptop doesn't answer over… waiting 10.0s  
+                                                    │
+  ● Homebrew formulae  all 2 done                   │      Someone’s MacBook Pro refused this Mac's
+  ○ Developer tools  waits for Data restore         │      key, which the old Mac's
+  ▲ Backups  waits for you: laptop doesn't answer … │      ~/.ssh/authorized_keys must hold. The
+                                                    │      Time Machine disk Vault is locked: unlock
+                                                    │      it in Disk Utility, then try again.
+                                                    │
+                                                    │      t restores from the Time Machine disk
+                                                    │        Backups of laptop
+                                                    │      a restores through Arq, by hand
+                                                    │      enter tries laptop again
+                                                    │
+                                                    ├───────────────────────────────────────────────
+                                                    │
+                                                    │  LOG
+                                                    │
+                                                    │  03:04:10  ● Time Machine: no backup disk yet
+                                                    │  03:04:11  ● App settings: saving from tonight
+                                                    │  03:04:16  + Installed rsync
+                                                    │  03:04:36  + Installed jq
+                                                    │  03:05:05  ● Homebrew formulae: 2 declared, a…
+  tab next row · ↑↓ scroll · q stop                 │  03:05:15  ▲ laptop doesn't answer over SSH: …

@@ -1,0 +1,17 @@
+
+  █  ▄▀  ▀█▀  ▀▀█▀▀  │  status
+  █▀▀▄    █     █    │  studio
+  █   █  ▄█▄    █    │  Fri 2 Jan · 03:04
+
+  BACKUPS
+  ● Time Machine  latest backup 14:19
+  ▲ Data restore  5 declared, 1 here already, 4 to restore
+    ~/Code · declared, not restored · part-way from Time Machine's backup of 8
+    Nov 2026 14:19
+    ~/.claude · declared, not restored
+    ~/.zsh_history · declared, not restored · set-up's copy set aside first
+    ~/Documents · declared, not restored · 2 files differed from Time Machine's
+    backup of 8 Nov 2026 14:19, copied again; compared again next run
+    → kit apply
+
+  1 needs you · 1 fine · 3.0s

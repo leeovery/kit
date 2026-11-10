@@ -1,0 +1,13 @@
+
+  █  ▄▀  ▀█▀  ▀▀█▀▀  │  status
+  █▀▀▄    █     █    │  studio
+  █   █  ▄█▄    █    │  Fri 2 Jan · 03:04
+
+  BACKUPS
+  ● Time Machine  latest backup 14:19
+  ● Data restore  5 declared, 3 restored, 2 not restored
+    ~/.config/tool · Time Machine's backup of 8 Nov 2026 14:19 hadn't it; kit
+    apply --restore-from time-machine|arq brings it from another
+    ~/.local/state/newtool · kit apply --restore-from time-machine|arq brings it
+
+  1 fine · 3.0s

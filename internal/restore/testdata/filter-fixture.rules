@@ -1,0 +1,13 @@
+- /notes \[x].md
+- /projects/*/memory
+- /skills/review
+- /Cache Data
+- /logs/**/*.log
+- /tmp/***
+- /cache/[[:digit:]]*
+- /deep/er/most
+- /media/
+- /shortcut/
+- /*.bak
+- .DS_Store
+- .localized

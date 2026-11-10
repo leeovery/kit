@@ -122,8 +122,11 @@ func (e Exec) start(ctx context.Context, program string, cmd Command) (ran, erro
 	c.Stdout, c.Stderr = &out, &errOut
 	if cmd.Lines != nil {
 		l := &lines{each: cmd.Lines}
-		stdout, stderr := l.stream(), l.stream()
+		stdout, stderr := l.stream(cmd.Redraws), l.stream(cmd.Redraws)
 		c.Stdout, c.Stderr = io.MultiWriter(&out, stdout), io.MultiWriter(&errOut, stderr)
+		if cmd.LinesOnly {
+			c.Stdout = stdout
+		}
 		defer func() {
 			stdout.end()
 			stderr.end()
@@ -322,17 +325,19 @@ type lines struct {
 	each func(string)
 }
 
-func (l *lines) stream() *lineStream { return &lineStream{lines: l} }
+func (l *lines) stream(redraws bool) *lineStream { return &lineStream{lines: l, redraws: redraws} }
 
 // lineStream is one of a command's streams, split into lines: a carriage
 // return starts the line again, as a progress bar redraws it, but before a
 // new line only ends it, as a terminal has it. returned is whether the last
 // byte written was a carriage return: what comes next, in this write or the
-// next, says which.
+// next, says which. redraws has each line a carriage return ends given too,
+// as Command's Redraws says.
 type lineStream struct {
 	lines    *lines
 	line     []byte
 	returned bool
+	redraws  bool
 }
 
 func (s *lineStream) Write(p []byte) (int, error) {
@@ -347,6 +352,9 @@ func (s *lineStream) Write(p []byte) (int, error) {
 		case '\n':
 			s.give()
 		case '\r':
+			if s.redraws {
+				s.give()
+			}
 		default:
 			s.line = append(s.line, b)
 		}

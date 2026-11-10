@@ -262,11 +262,12 @@ func (f *Fake) Run(ctx context.Context, cmd runner.Command) (runner.Result, erro
 	stdout, stderr, exit := a.output(cmd.Input)
 	if cmd.Lines != nil && !cmd.Interactive {
 		for _, text := range []string{stdout, stderr} {
-			for line := range strings.Lines(text) {
-				if line = strings.TrimRight(line, "\n"); strings.TrimSpace(line) != "" {
-					cmd.Lines(line)
-				}
+			for _, line := range given(cmd, text) {
+				cmd.Lines(line)
 			}
+		}
+		if cmd.LinesOnly {
+			stdout = ""
 		}
 	}
 	if a.hangs {
@@ -281,6 +282,25 @@ func (f *Fake) Run(ctx context.Context, cmd runner.Command) (runner.Result, erro
 		return res, runner.NewExitError(cmd.String(), exit, res.Stderr)
 	}
 	return res, nil
+}
+
+// given are the lines of text cmd's Lines is given: each a new line ends,
+// and, with Redraws, each a carriage return ends too, as a real runner gives
+// them; never a blank one.
+func given(cmd runner.Command, text string) []string {
+	var lines []string
+	for line := range strings.Lines(text) {
+		drawn := []string{strings.TrimRight(line, "\n")}
+		if cmd.Redraws {
+			drawn = strings.Split(drawn[0], "\r")
+		}
+		for _, l := range drawn {
+			if strings.TrimSpace(l) != "" {
+				lines = append(lines, l)
+			}
+		}
+	}
+	return lines
 }
 
 // write writes each file of writes, by the flag before its path in cmd's

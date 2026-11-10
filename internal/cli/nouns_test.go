@@ -46,7 +46,7 @@ func TestHelpAtATerminal(t *testing.T) {
 		"  THIS MAC\n  status  how this Mac stands against its config\n",
 		"  PACKAGES  each takes add and remove\n  brew · cask · mas",
 		"  SETTINGS  each takes add and remove\n  git-config · defaults · power",
-		"  FILES, SECRETS AND FEATURES\n  file · path · secret · prefs · feature · backup\n",
+		"  FILES, SECRETS AND FEATURES\n  file · path · secret · prefs · feature · backup · restore\n",
 		"  YOUR OWN  each takes add and remove\n  check · hourly · manual · step\n",
 		"  FLAGS\n  --json  print one JSON document, for scripts and agents\n"} {
 		i := strings.Index(out[at:], want)

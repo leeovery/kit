@@ -484,6 +484,38 @@ func TestExecGivesLinesAsATerminalShowsThem(t *testing.T) {
 	}
 }
 
+// Asked, each line a carriage return ends is given too, as a progress bar
+// draws it, as it's drawn; a carriage return then a new line ends a line
+// once.
+func TestExecGivesRedrawnLinesWhenAsked(t *testing.T) {
+	r, _ := programs(t, map[string]string{"copy": `printf 'ended\r\n'; printf '\r10%%'; /bin/sleep 0.2; printf '\r50%%'; /bin/sleep 0.2; printf '\n'; printf 'drawn\r'; printf 'redrawn\n'`})
+	var got []string
+	if _, err := r.Run(t.Context(), runner.Command{Name: "copy", Redraws: true, Lines: func(line string) { got = append(got, line) }}); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"ended", "10%", "50%", "drawn", "redrawn"}; !slices.Equal(got, want) {
+		t.Errorf("lines = %q, want %q", got, want)
+	}
+}
+
+// Asked, what a command prints on its output is given to Lines alone, none
+// of it kept; what it prints on its errors is kept as ever.
+func TestExecKeepsOnlyLinesWhenAsked(t *testing.T) {
+	r, _ := programs(t, map[string]string{"copy": `echo one; echo two; echo careful >&2`})
+	var got []string
+	res, err := r.Run(t.Context(), runner.Command{Name: "copy", LinesOnly: true, Lines: func(line string) { got = append(got, line) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	slices.Sort(got)
+	if want := []string{"careful", "one", "two"}; !slices.Equal(got, want) {
+		t.Errorf("lines = %q, want %q", got, want)
+	}
+	if len(res.Stdout) != 0 || string(res.Stderr) != "careful\n" {
+		t.Errorf("Run() = %q, %q; want no output kept, its errors kept", res.Stdout, res.Stderr)
+	}
+}
+
 // What's streamed is only what's wanted: never a secret's lines, nor an
 // interactive command's.
 func TestStreamedGivesWhatsWanted(t *testing.T) {

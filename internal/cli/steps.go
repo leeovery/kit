@@ -190,10 +190,11 @@ func (r *run) placeScript(s *steps.Script, names map[string]bool) ([]engine.Wait
 
 // place checks what a line's step comes after and before are among names,
 // the run's steps, or kinds this Mac doesn't use and the steps they need,
-// which it's then placed without; it returns the steps it comes after, a
-// wait for each of a kind's things it comes after, as in cask:firefox,
-// and the steps it comes before. An error says what isn't a step or a kind.
-func (r *run) place(after, before []string, names map[string]bool) (steps []string, waits []engine.Wait, ahead []string, err error) {
+// or kit's steps there only on a Mac restoring its data (sometimes), which
+// it's then placed without; it returns the steps it comes after, a wait for each
+// of a kind's things it comes after, as in cask:firefox, and the steps it
+// comes before. An error says what isn't a step or a kind.
+func (r *run) place(after, before []string, names map[string]bool) (ordered []string, waits []engine.Wait, ahead []string, err error) {
 	var wrong []string
 	for _, a := range after {
 		kindName, thing, isThing := strings.Cut(a, ":")
@@ -201,7 +202,8 @@ func (r *run) place(after, before []string, names map[string]bool) (steps []stri
 		case isThing && names[kindName] && r.kindsByName[kindName] != nil:
 			waits = append(waits, engine.Wait{Step: kindName, Thing: thing, Ready: r.installed(kindName, thing)})
 		case names[a]:
-			steps = append(steps, a)
+			ordered = append(ordered, a)
+		case slices.Contains(sometimes, a):
 		case !ofKinds(kindName):
 			wrong = append(wrong, "it comes after "+a+", which isn't a step")
 		}
@@ -210,21 +212,47 @@ func (r *run) place(after, before []string, names map[string]bool) (steps []stri
 		switch {
 		case names[b]:
 			ahead = append(ahead, b)
+		case slices.Contains(sometimes, b):
 		case !ofKinds(b):
 			wrong = append(wrong, "it comes before "+b+", which isn't a step")
 		}
 	}
 	if len(wrong) > 0 {
-		return steps, waits, ahead, errors.New(strings.Join(wrong, "; "))
+		return ordered, waits, ahead, errors.New(strings.Join(wrong, "; "))
 	}
-	return steps, waits, ahead, nil
+	return ordered, waits, ahead, nil
 }
+
+// sometimes are kit's own steps a run has only on a Mac restoring its data:
+// the data restore, and the reinstall of the projects it brings back.
+var sometimes = []string{steps.RestoreName, steps.ReinstallName}
 
 // ofKinds reports whether the step called name is a kind's, or one a kind
 // needs, whether or not this run has it.
 func ofKinds(name string) bool {
 	_, ok := kinds.Of(name)
 	return ok
+}
+
+// placeKinds places each kind's step among all, the run's steps, after
+// the kinds and steps its descriptor names (kind.Descriptor's After), those
+// the run has.
+func (r *run) placeKinds(all []engine.Step) {
+	names := make(map[string]bool, len(all))
+	for _, s := range all {
+		names[s.Name] = true
+	}
+	for i, s := range all {
+		d, ok := kinds.Named(s.Name)
+		if !ok || !slices.Contains(r.kinds, s.Name) {
+			continue
+		}
+		for _, after := range d.After {
+			if names[after] && !slices.Contains(all[i].After, after) {
+				all[i].After = append(all[i].After, after)
+			}
+		}
+	}
 }
 
 // placeFeatures places the steps of each feature whose section says what it

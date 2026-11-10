@@ -75,6 +75,12 @@
   ;; Composer, as Homebrew installs it, and Node (so npm), as mise does.
   (regex #"/Cellar/composer/")
   (home-subpath "/.local/share/mise/installs/node")
+  ;; The package managers a restored project's dependencies reinstall
+  ;; with, as Homebrew installs them.
+  (regex #"/Cellar/pnpm/")
+  (regex #"/Cellar/yarn/")
+  (regex #"/Cellar/bun/")
+  (regex #"/Cellar/uv/")
   ;; git: the system's, the command-line tools', Xcode's and Homebrew's.
   (literal "/usr/bin/git")
   (literal "/Library/Developer/CommandLineTools/usr/bin/git")
@@ -113,6 +119,16 @@
   (literal "/usr/bin/mdfind")
   (literal "/usr/sbin/diskutil")
   (literal "/usr/libexec/PlistBuddy")
+  ;; Mounting a snapshot and unmounting it (/sbin/mount_apfs links to
+  ;; apfs.fs's), and looking for Macs on the network.
+  (literal "/System/Library/Filesystems/apfs.fs/Contents/Resources/mount_apfs")
+  (literal "/sbin/umount")
+  (literal "/usr/bin/dns-sd")
+  ;; rsync: the system's, openrsync, or Homebrew's, linked into its Cellar.
+  (literal "/usr/bin/rsync")
+  (literal "/usr/local/bin/rsync")
+  (literal "/opt/homebrew/bin/rsync")
+  (regex #"/Cellar/rsync/")
   ;; tmux: the system's, or Homebrew's, linked into its Cellar.
   (literal "/usr/bin/tmux")
   (literal "/usr/local/bin/tmux")

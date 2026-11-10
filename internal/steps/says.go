@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/leeovery/kit/internal/config"
+	"github.com/leeovery/kit/internal/restore"
 	"github.com/leeovery/kit/internal/runner"
 )
 
@@ -18,6 +19,7 @@ var Readings = []config.Section{
 	{Kind: config.HourlyKind, Says: ownSays},
 	{Kind: config.NightlyKind, Says: ownSays},
 	{Kind: config.BackupsKind, Says: backupSays},
+	{Kind: config.RestoreKind, Says: restoreSays},
 }
 
 // scriptSays is what a [steps] line says: what it does; each step it comes
@@ -68,6 +70,16 @@ func backupSays(e config.Entry) ([]string, error) {
 		return nil, err
 	}
 	return slices.Concat(options("--after", b.After), options("--before", b.Before)), nil
+}
+
+// restoreSays is what a [restore] line says: each thing in its path it
+// leaves out.
+func restoreSays(e config.Entry) ([]string, error) {
+	l, err := restore.ReadLine(e.Name, e.Value)
+	if err != nil {
+		return nil, err
+	}
+	return options("--skip", l.Skips), nil
 }
 
 // options are flag and each of values, a part each.

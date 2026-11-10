@@ -30,8 +30,30 @@ administrator's password (a cask that installs through a package, an App
 Store app): at a terminal, kit asks for it once, as it starts, for as long
 as it takes, the rest applying meanwhile; without one, those installs wait.
 Exits 0 when nothing needs attention after applying, 1 when something does,
-and 2 when kit couldn't apply.`,
+and 2 when kit couldn't apply.
+
+On a Mac started from another (from, in kit.toml), the data restore copies
+the paths [restore] lists from that Mac, over SSH; should it not answer, a
+card asks for its Time Machine disk, Arq, or trying it again (without a
+terminal, it fails: --restore-from answers it). --restore-from restores them
+from a backup instead, on any Mac: Time Machine's, on a disk attached, or
+Arq's, by hand in its app, a card saying what to restore where; and
+--restore-from mac goes back to the old Mac. --at picks the backup: the
+latest at or before a date, as 2026-11-08 (by the end of that day), or a
+time, as "2026-11-08 14:30" (by the end of that minute); the latest when
+not given. A restore stopped part-way carries on from where it began; the
+source named, or chosen on the card, carries it on in that one's place,
+whatever it was, as --restore-from time-machine does from another backup
+should the one it began from have gone. A path the source hasn't is left
+out: --restore-from brings it later from one that has it, while it's still
+absent, as it does a path left as it was, holding files of its own, once
+it's absent. The projects restored have their dependencies installed again:
+kit apply reinstall tries those that failed again.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if _, err := a.restoring.chosen(); err != nil {
+				return err
+			}
+			a.named = args
 			command, logName := "apply", "apply"
 			if plan {
 				command, logName = "apply --plan", "apply-plan"
@@ -79,6 +101,9 @@ and 2 when kit couldn't apply.`,
 		},
 	}
 	cmd.Flags().BoolVar(&plan, "plan", false, "say what applying would do, and do nothing")
+	a.restoring.at.now = a.Now
+	cmd.Flags().Var(&a.restoring.from, "restore-from", "restore [restore]'s paths from the old Mac or a backup")
+	cmd.Flags().Var(&a.restoring.at, "at", "with --restore-from, the latest backup by that date or time")
 	return cmd
 }
 

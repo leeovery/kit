@@ -1,0 +1,9 @@
+cL+++++++++ current -> photos/big.raw
+cd+++++++++ empty/
+>fc........ notes/a.md
+.f...p..... notes/b.md
+.f........x notes/c.md
+>fcs....... notes/d -> e.md
+>f+++++++++ notes/lost.md
+.f..t...n.. photos/big.raw
+hf+++++++++ notes/copy.md => notes/a.md
