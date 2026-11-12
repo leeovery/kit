@@ -137,13 +137,22 @@ func shellQuote(s string) string {
 const sshExit = 255
 
 // unreachable are ssh's words for a Mac that isn't there to answer.
-var unreachable = []string{"Connection refused", "Operation timed out", "Connection timed out", "No route to host", "Host is down", "Could not resolve hostname", "Network is unreachable"}
+var unreachable = []string{"Connection refused", "Operation timed out", "Connection timed out", "Host is down", "Could not resolve hostname", "Network is unreachable"}
 
 // errRefusedKey is a Mac answering but refusing this Mac's key.
 var errRefusedKey = errors.New("refused this Mac's key, which the old Mac's ~/.ssh/authorized_keys must hold")
 
 // errNoAnswer is a Mac not answering SSH.
 var errNoAnswer = errors.New("didn't answer")
+
+// noRoute is ssh's words for a Mac it has no route to: as when macOS hasn't
+// let the app kit's running in find devices on local networks, which it
+// asks of the first ssh run there, failing every connection till it's
+// allowed. ssh run over SSH is never asked.
+const noRoute = "No route to host"
+
+// errNoRoute is a Mac ssh has no route to.
+var errNoRoute = errors.New("didn't answer: no route to it")
 
 // hostKeyError is a Mac presenting a host key ssh won't trust: another than
 // the one pinned.
@@ -152,7 +161,8 @@ type hostKeyError struct{ said string }
 func (e *hostKeyError) Error() string { return "couldn't be reached over SSH: " + e.said }
 
 // sshFailed is err, from ssh's run, as what it means: errRefusedKey,
-// errNoAnswer, or ssh's own words, else what the command there said.
+// errNoRoute, errNoAnswer, or ssh's own words, else what the command there
+// said.
 func sshFailed(err error) error {
 	exit, ok := errors.AsType[*runner.ExitError](err)
 	if !ok {
@@ -165,6 +175,8 @@ func sshFailed(err error) error {
 	switch {
 	case slices.ContainsFunc(lines, func(l string) bool { return strings.Contains(l, "Permission denied") }):
 		return errRefusedKey
+	case slices.ContainsFunc(lines, func(l string) bool { return strings.Contains(l, noRoute) }):
+		return errNoRoute
 	case slices.ContainsFunc(lines, func(l string) bool {
 		return slices.ContainsFunc(unreachable, func(u string) bool { return strings.Contains(l, u) })
 	}):

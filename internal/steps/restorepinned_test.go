@@ -25,8 +25,9 @@ const laptopAt = "laptop.example.com"
 // onTheNetwork has c restore from laptop as kit finds it on the network,
 // the Mac it looks for the one presenting key, kit-config's host key for
 // it ("" for none), and, tried again, fetched, the one kit-config's remote
-// records then: one Mac offers Remote Login, answering at laptopAt.
-func (c *restoring) onTheNetwork(key, fetched string) {
+// records then: one Mac offers Remote Login, answering at laptopAt. It
+// returns the old Mac's source, as the restore opens it.
+func (c *restoring) onTheNetwork(key, fetched string) *oldmac.Source {
 	src := &oldmac.Source{Finder: oldmac.Finder{Run: c.fake, StateDir: c.state, HostKey: key}, From: "laptop", User: "someone", Home: c.home,
 		HostKey: func(context.Context) (string, error) { return fetched, nil }}
 	c.r.Sources = func(restore.Origin, time.Time, bool) restore.Opener { return src }
@@ -34,6 +35,7 @@ func (c *restoring) onTheNetwork(key, fetched string) {
 		"21:38:59.104  Add        3  13 local.               _ssh._tcp.           Laptop\n")
 	c.fake.On("dns-sd", "-L", "Laptop", "_ssh._tcp", "local.").Prints("Lookup Laptop._ssh._tcp.local.\n" +
 		"21:39:08.624  Laptop._ssh._tcp.local. can be reached at " + laptopAt + ".:22 (interface 13) Flags: 1\n")
+	return src
 }
 
 // probed scripts ssh's probe of the old Mac: what it asks it, as it
@@ -146,6 +148,38 @@ func TestRestoreWithoutTheOldMacsHostKeyAsks(t *testing.T) {
 	}
 	if calls := c.fake.Calls(); slices.ContainsFunc(calls, func(call string) bool { return strings.HasPrefix(call, "dns-sd") || strings.HasPrefix(call, "ssh") }) {
 		t.Errorf("ran %q; want no Mac looked for", calls)
+	}
+}
+
+// ssh having no route to the old Mac, as till macOS lets the terminal find
+// devices on local networks, the card says so, naming the terminal: choose
+// Allow, then try again, or turn it on in System Settings.
+func TestRestoreSaysTheLocalNetworkMayBeAsked(t *testing.T) {
+	c := newRestoring(t, "~/.zsh_history")
+	c.onTheNetwork(pinnedKey, pinnedKey).Finder.Terminal = "Ghostty"
+	c.probed().PrintsToStderr("ssh: connect to host " + laptopAt + " port 22: No route to host\n").Exits(255)
+	k := c.atTerminal(t, restore.Disks{})
+	step := c.step()
+	ctx, stop := context.WithCancel(t.Context())
+	found := step.Check(ctx)
+	done := make(chan error, 1)
+	go func() { done <- step.Apply(c.ctx(ctx), found) }()
+
+	card := up(t, k, 1)[0]
+	want := event.NeedsYou{Time: card.Time, Step: "restore", Item: "restore:source", Title: "laptop doesn't answer over SSH",
+		Why: "Laptop didn't answer: macOS may be asking whether Ghostty can find devices on local networks: choose Allow, then try again, or, " +
+			"if Don't Allow was chosen, turn on Ghostty in System Settings › Privacy & Security › Local Network. " +
+			"No Time Machine disk holding your backups is attached: attach it, then try again.",
+		Keys: []check.Key{
+			{Key: "a", Does: "restores through Arq, by hand"},
+			{Key: "enter", Does: "tries laptop again"},
+		}}
+	if !reflect.DeepEqual(card, want) {
+		t.Errorf("the card = %+v\nwant %+v", card, want)
+	}
+	stop()
+	if err := ended(t, done); !errors.Is(err, context.Canceled) {
+		t.Errorf("apply = %v; want it stopped with the run", err)
 	}
 }
 
