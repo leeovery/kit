@@ -40,9 +40,13 @@ type placed struct {
 	Before, After, Unordered, Absent  []spot
 }
 
-// spot is a step or thing in kit agent order --json's lists; Through names
-// the step it's ahead only through.
-type spot struct{ Step, Thing, Says, Through string }
+// spot is a step or thing in kit agent order --json's lists; App says a
+// thing of no step is an app; Through names the step it's ahead only
+// through.
+type spot struct {
+	Step, Thing, Says, Through string
+	App                        bool
+}
 
 // order runs kit agent order --json for name in w, failing the test unless
 // it's placed.
@@ -60,11 +64,14 @@ func (w *world) order(t *testing.T, name string) placed {
 func names(spots []spot) []string {
 	var out []string
 	for _, s := range spots {
-		if s.Step == "" {
+		switch {
+		case s.Step == "" && s.App:
+			out = append(out, s.Thing+" (app)")
+		case s.Step == "":
 			out = append(out, s.Thing+" (on PATH)")
-			continue
+		default:
+			out = append(out, strings.TrimSuffix(s.Step+":"+s.Thing, ":"))
 		}
-		out = append(out, strings.TrimSuffix(s.Step+":"+s.Thing, ":"))
 	}
 	return out
 }
@@ -217,6 +224,23 @@ func TestOrderPlacesTheSignInBeforeTheSecrets(t *testing.T) {
 	doc := orderWorld(t).order(t, "1password-sign-in")
 	if got := names(doc.After); !slices.Contains(got, "secret") || !slices.Contains(got, "needs-token") || len(doc.Unordered) != 0 {
 		t.Errorf("after the sign-in = %q, in no order %q: want the secrets' sync and what needs a secret after it", got, names(doc.Unordered))
+	}
+}
+
+// The password manager's sign-in waits for its program on kit's PATH and
+// its app installed, whatever installs them: it's not among the first.
+func TestOrderOfTheSignInWaitsForItsProgramAndApp(t *testing.T) {
+	w := orderWorld(t)
+	doc := w.order(t, "1password-sign-in")
+	if got, want := names(doc.Before), []string{"op (on PATH)", "1Password (app)"}; !slices.Equal(got, want) {
+		t.Fatalf("before the sign-in = %q, want %q", got, want)
+	}
+	if says := doc.Before[1].Says; says != "an app, waited for till it's installed, whatever installs it" {
+		t.Errorf("1Password before it says %q", says)
+	}
+	out, _, code := w.run(t, "agent", "order", "1password-sign-in")
+	if code != 0 || strings.Contains(out, "among the first") || !strings.Contains(out, "\nBefore it\n  op (on PATH) ") || !strings.Contains(out, "\n  1Password (app) ") {
+		t.Errorf("kit agent order 1password-sign-in printed\n%s\nexit %d, want op and 1Password before it", out, code)
 	}
 }
 
