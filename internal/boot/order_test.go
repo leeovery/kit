@@ -235,6 +235,27 @@ func TestApps(t *testing.T) {
 	}
 }
 
+// Applied after a check that failed, finding nothing, the apps step installs
+// what's missing all the same; with nothing missing, it runs nothing, never
+// brew install --cask with no casks.
+func TestAppsAfterAFailedCheck(t *testing.T) {
+	run := runnertest.New(t)
+	b, _ := newBoot(t, run, GitHub{}, &asker{})
+	read(t, b, map[string]string{config.File: appsToml}, "laptop")
+	run.On("brew", "install", "--cask", "ghostty").Does(func() { bundle(t, b, "Ghostty.app", "1.3.1") })
+	step := b.appsStep(b.apps(b.config()))
+	failed := check.Result{State: check.Failed, Reason: "didn't answer"}
+	if err := step.Apply(context.Background(), failed); err != nil {
+		t.Fatalf("apply, Ghostty missing = %v", err)
+	}
+	if err := step.Apply(context.Background(), failed); err != nil {
+		t.Fatalf("apply, Ghostty there = %v", err)
+	}
+	if got, want := run.Calls(), []string{"brew install --cask ghostty"}; !slices.Equal(got, want) {
+		t.Errorf("ran %q, want %q: Ghostty installed once, then nothing", got, want)
+	}
+}
+
 // kit-config cloned through GitHub's CLI, installed and handed the
 // sign-in, which kit's keychain item gives up; git signing in through it
 // for that repository alone; then its files linked.

@@ -256,7 +256,8 @@ func (b *Boot) apps(cfg *config.Config) []app {
 }
 
 // appsStep installs the apps kit.toml names, before the rest of the Mac:
-// done when each is in the Applications folder.
+// done when each is in the Applications folder. It installs those missing
+// as it applies, whatever its check found, and runs nothing when none is.
 func (b *Boot) appsStep(wanted []app) engine.Step {
 	return engine.Step{
 		Name: AppsStep, Title: "Apps",
@@ -277,10 +278,15 @@ func (b *Boot) appsStep(wanted []app) engine.Step {
 			}
 			return check.Result{State: check.OK, Summary: strings.Join(have, " · ")}
 		},
-		Apply: func(ctx context.Context, found check.Result) error {
+		Apply: func(ctx context.Context, _ check.Result) error {
 			var casks []string
-			for _, it := range found.Items {
-				casks = append(casks, it.Name)
+			for _, a := range wanted {
+				if _, ok := b.version(a.bundle); !ok {
+					casks = append(casks, a.cask)
+				}
+			}
+			if len(casks) == 0 {
+				return nil
 			}
 			b.doing(AppsStep, "installing")
 			_, err := b.Run.Run(ctx, runner.Command{Name: "brew", Args: slices.Concat([]string{"install", "--cask"}, casks), Timeout: 30 * time.Minute})
