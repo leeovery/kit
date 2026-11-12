@@ -167,7 +167,7 @@ func TestRestoreSaysTheLocalNetworkMayBeAsked(t *testing.T) {
 
 	card := up(t, k, 1)[0]
 	want := event.NeedsYou{Time: card.Time, Step: "restore", Item: "restore:source", Title: "laptop doesn't answer over SSH",
-		Why: "Laptop didn't answer: macOS may be asking whether Ghostty may find devices on local networks: choose Allow, then try again, or, " +
+		Why: "Laptop didn't answer: macOS may be asking whether Ghostty can find devices on local networks: choose Allow, then try again, or, " +
 			"if Don't Allow was chosen, turn on Ghostty in System Settings › Privacy & Security › Local Network. " +
 			"No Time Machine disk holding your backups is attached: attach it, then try again.",
 		Keys: []check.Key{

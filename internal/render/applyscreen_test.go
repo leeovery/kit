@@ -19,6 +19,7 @@ import (
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/hand"
+	"github.com/leeovery/kit/internal/kind/secret/onepassword"
 	"github.com/leeovery/kit/internal/look"
 	"github.com/leeovery/kit/internal/render"
 )
@@ -146,16 +147,11 @@ func sixMinutesInWith(formulae, casks int) []event.Event {
 }
 
 // signIn is 1Password's sign-in come up, a step by hand the secrets wait
-// for: why, as its notes say; its steps, a subheading among them; and kit
-// tells by itself once it's done.
-var signIn = event.NeedsYou{Time: after(345), Step: "1password", Item: "1password", Title: "Sign in to 1Password",
-	Why: "Every secret kit puts in place comes from 1Password, so it needs the app signed in and its command line turned on.",
-	Steps: []string{
-		"Scan the QR code 1Password shows with 1Password on your phone",
-		"Settings › Developer › turn on Integrate with 1Password CLI",
-		"If kit still waits with both done:",
-		"Quit 1Password and open it again",
-	}, Tells: true}
+// for: why, as its notes say; its title and steps, a subheading among
+// them, its driver's own; and kit tells by itself once it's done.
+var signIn = event.NeedsYou{Time: after(345), Step: "1password", Item: "1password", Title: onepassword.Driver{}.About().SignIn.Title,
+	Why:   "Every secret kit puts in place comes from 1Password, so it needs the app signed in and its command line turned on.",
+	Steps: onepassword.Driver{}.About().SignIn.Steps, Tells: true}
 
 // cardUp is sixMinutesIn with card come up for its step, applying.
 func cardUp(card event.NeedsYou) []event.Event {

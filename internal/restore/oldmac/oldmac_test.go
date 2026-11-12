@@ -248,28 +248,79 @@ func TestFindsOnlyTheKeyRefused(t *testing.T) {
 }
 
 // A Mac Bonjour found that ssh has no route to is said as macOS asking
-// whether the app kit's running in may find devices on local networks,
+// whether the app kit's running in can find devices on local networks,
 // which it asks of the first ssh run there, failing every connection till
 // it's allowed: that app named, or, unknown, said as Unnamed.
 func TestFindsNoRouteAsTheLocalNetworkAsked(t *testing.T) {
-	for _, tt := range []struct{ terminal, named string }{{"Ghostty", "Ghostty"}, {"", apps.Unnamed}} {
+	for _, tt := range []struct{ terminal, named string }{
+		{"Ghostty", "Ghostty"},
+		{"", apps.Unnamed},
+	} {
 		t.Run(tt.named, func(t *testing.T) {
 			fake := runnertest.New(t)
 			browses(fake, browsing(laptop))
 			resolves(fake, laptop, reaching(laptop, laptopAt, 22))
-			asked(fake, laptopAt).PrintsToStderr("ssh: connect to host " + laptopAt + " port 22: No route to host\n").Exits(255)
+			noRouteTo(asked(fake, laptopAt), laptopAt)
 			f := finder(t, fake)
 			f.Terminal = tt.terminal
 
 			_, err := f.Find(t.Context(), "laptop")
 			want := "laptop doesn't answer over SSH: Someone’s MacBook Pro didn't answer: macOS may be asking whether " + tt.named +
-				" may find devices on local networks: choose Allow, then try again, or, if Don't Allow was chosen, turn on " + tt.named +
+				" can find devices on local networks: choose Allow, then try again, or, if Don't Allow was chosen, turn on " + tt.named +
 				" in System Settings › Privacy & Security › Local Network"
 			if !errors.Is(err, ErrNoAnswer) || err.Error() != want {
 				t.Errorf("Find() = %v\nwant ErrNoAnswer, %q", err, want)
 			}
 		})
 	}
+}
+
+// Being allowed on the local network is the app's, so the Macs ssh has no
+// route to are said together, after the rest, what macOS may be asking said
+// once.
+func TestFindsNoRouteSaidOnceForEveryMac(t *testing.T) {
+	const imac = "Someone’s iMac"
+	imacAt := strings.TrimSuffix("Someones-iMac.local.", ".")
+	fake := runnertest.New(t)
+	browses(fake, browsing(laptop, imac, mini))
+	resolves(fake, laptop, reaching(laptop, laptopAt, 22))
+	resolves(fake, imac, reaching(imac, imacAt, 22))
+	resolves(fake, mini, reaching(mini, miniAt, 22))
+	noRouteTo(asked(fake, laptopAt), laptopAt)
+	asked(fake, imacAt).Prints(says(t, "studio"))
+	noRouteTo(asked(fake, miniAt), miniAt)
+	f := finder(t, fake)
+	f.Terminal = "Ghostty"
+
+	_, err := f.Find(t.Context(), "laptop")
+	want := "laptop doesn't answer over SSH: Someone’s iMac answered, but it's studio; " +
+		"Someone’s Mac mini and Someone’s MacBook Pro didn't answer: macOS may be asking whether Ghostty" +
+		" can find devices on local networks: choose Allow, then try again, or, if Don't Allow was chosen, turn on Ghostty" +
+		" in System Settings › Privacy & Security › Local Network"
+	if !errors.Is(err, ErrNoAnswer) || err.Error() != want {
+		t.Errorf("Find() = %v\nwant ErrNoAnswer, %q", err, want)
+	}
+}
+
+// Run over SSH, where macOS never asks, a Mac ssh has no route to is said
+// plainly not to answer.
+func TestFindsNoRouteOverSSHPlainly(t *testing.T) {
+	fake := runnertest.New(t)
+	browses(fake, browsing(laptop))
+	resolves(fake, laptop, reaching(laptop, laptopAt, 22))
+	noRouteTo(asked(fake, laptopAt), laptopAt)
+	f := finder(t, fake)
+	f.Terminal, f.OverSSH = "Ghostty", true
+
+	_, err := f.Find(t.Context(), "laptop")
+	if want := "laptop doesn't answer over SSH: Someone’s MacBook Pro didn't answer"; !errors.Is(err, ErrNoAnswer) || err.Error() != want {
+		t.Errorf("Find() = %v\nwant ErrNoAnswer, %q", err, want)
+	}
+}
+
+// noRouteTo is ssh's exit when it has no route to the Mac at host.
+func noRouteTo(s *runnertest.Script, host string) {
+	s.PrintsToStderr("ssh: connect to host " + host + " port 22: No route to host\n").Exits(255)
 }
 
 func TestFindsSSHsOwnReason(t *testing.T) {

@@ -60,9 +60,12 @@ type Finder struct {
 	// one, none is looked for (ErrNoHostKey).
 	HostKey string
 	// Terminal is the app kit's running in, as macOS names it asking
-	// whether it may find devices on local networks (apps.RunningIn):
+	// whether it can find devices on local networks (apps.RunningIn):
 	// apps.Unnamed when "".
 	Terminal string
+	// OverSSH is kit running in an SSH session, where macOS never asks
+	// that, so a Mac ssh has no route to is said plainly not to answer.
+	OverSSH bool
 	// Browse and Resolve are how long Bonjour's listened to for the Macs
 	// offering Remote Login, and for where one answers: browseFor and
 	// resolveFor when 0.
@@ -132,7 +135,7 @@ func (f Finder) Find(ctx context.Context, from string) (*Mac, error) {
 	}
 	switch len(macs) {
 	case 0:
-		return nil, notFound(from, found)
+		return nil, f.notFound(from, found)
 	case 1:
 		return macs[0], nil
 	}
@@ -190,8 +193,8 @@ func (f Finder) ask(ctx context.Context, name, from, pin string) candidate {
 	if _, key := errors.AsType[*hostKeyError](err); key {
 		err = fmt.Errorf("isn't %s: its host key doesn't match the one kit-config records (kit apply on %s records a new one)", from, from)
 	}
-	if errors.Is(err, errNoRoute) {
-		err = f.localNetwork()
+	if f.OverSSH && errors.Is(err, errNoRoute) {
+		err = errNoAnswer
 	}
 	if err != nil {
 		c.why = err
@@ -211,12 +214,14 @@ func (f Finder) ask(ctx context.Context, name, from, pin string) candidate {
 	return c
 }
 
-// localNetwork is a Mac Bonjour found that ssh has no route to: as when
-// macOS is asking whether the app kit's running in may find devices on
-// local networks, or was told it may not.
-func (f Finder) localNetwork() error {
+// localNetwork is why the Macs Bonjour found, called unrouted, that ssh
+// has no route to, didn't answer: as when macOS is asking whether the app
+// kit's running in can find devices on local networks, or was told it
+// can't. It's the app's to be allowed, so it's said once for them all.
+func (f Finder) localNetwork(unrouted []string) error {
 	app := cmp.Or(f.Terminal, apps.Unnamed)
-	return fmt.Errorf("%s: macOS may be asking whether %s may find devices on local networks: choose Allow, then try again, or, if Don't Allow was chosen, turn on %s in System Settings › Privacy & Security › Local Network", errNoAnswer, app, app)
+	return fmt.Errorf("%s %w: macOS may be asking whether %s can find devices on local networks: choose Allow, then try again, or, if Don't Allow was chosen, turn on %s in System Settings › Privacy & Security › Local Network",
+		strings.Join(unrouted, " and "), errNoAnswer, app, app)
 }
 
 // same reports whether m and other are the same Mac: by their host keys,
@@ -239,18 +244,25 @@ func rsyncThere(lines []string) restore.Found {
 	return restore.ReadVersion(strings.Join(lines, "\n"))
 }
 
-// notFound is the error for no Mac answering as from, of those found.
-func notFound(from string, found []candidate) error {
+// notFound is the error for no Mac answering as from, of those found:
+// those ssh has no route to said together, last (localNetwork).
+func (f Finder) notFound(from string, found []candidate) error {
 	if len(found) == 0 {
 		return fmt.Errorf("%s %w: no Mac on the network offers Remote Login", from, ErrNoAnswer)
 	}
-	whys := make([]string, len(found))
-	for i, c := range found {
-		if c.mac != nil {
-			whys[i] = fmt.Sprintf("%s answered, but it's %s", c.instance, c.mac.Name)
-		} else {
-			whys[i] = fmt.Sprintf("%s %s", c.instance, c.why)
+	var whys, unrouted []string
+	for _, c := range found {
+		switch {
+		case c.mac != nil:
+			whys = append(whys, fmt.Sprintf("%s answered, but it's %s", c.instance, c.mac.Name))
+		case errors.Is(c.why, errNoRoute):
+			unrouted = append(unrouted, c.instance)
+		default:
+			whys = append(whys, fmt.Sprintf("%s %s", c.instance, c.why))
 		}
+	}
+	if len(unrouted) > 0 {
+		whys = append(whys, f.localNetwork(unrouted).Error())
 	}
 	return fmt.Errorf("%s %w: %s", from, ErrNoAnswer, printable(strings.Join(whys, "; ")))
 }

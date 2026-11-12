@@ -75,7 +75,7 @@ var about = store.About{
 	Item:      "op://vault/item",
 	Field:     "<section>/<field>, as in GitHub/token",
 	NoAnswer:  "unlock its app, with Settings › Developer › Integrate with 1Password CLI on; over a remote connection, sign in with a password in the shell kit runs from: eval $(OP_BIOMETRIC_UNLOCK_ENABLED=false op signin)",
-	SignedOut: "1Password isn't signed in, or its CLI isn't turned on: sign in to its app, then turn on Settings › Developer › Integrate with 1Password CLI; both done, quit 1Password and open it again",
+	SignedOut: "1Password isn't signed in, or its CLI isn't turned on: sign in to its app, then turn on Settings › Developer › Integrate with 1Password CLI; if kit still waits with both done, quit 1Password and open it again",
 	SignIn: store.SignIn{
 		Title: "Sign in to 1Password",
 		Steps: []string{

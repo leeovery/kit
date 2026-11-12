@@ -74,7 +74,12 @@ func TestRunning(t *testing.T) {
 func TestRunningIn(t *testing.T) {
 	for _, tt := range []struct {
 		program, want string
-	}{{"Apple_Terminal", "Terminal"}, {"ghostty", "Ghostty"}, {"vscode", apps.Unnamed}, {"", apps.Unnamed}} {
+	}{
+		{"Apple_Terminal", "Terminal"},
+		{"ghostty", "Ghostty"},
+		{"vscode", apps.Unnamed},
+		{"", apps.Unnamed},
+	} {
 		if got := apps.RunningIn(func(name string) string { return map[string]string{"TERM_PROGRAM": tt.program}[name] }); got != tt.want {
 			t.Errorf("RunningIn() in %q = %q, want %q", tt.program, got, tt.want)
 		}
