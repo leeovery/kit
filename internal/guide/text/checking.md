@@ -13,6 +13,11 @@
 - `kit why <name>`: where a package is declared, whether it's installed,
   and what needs it. `kit list` lists everything declared for this Mac.
 - `kit log`: past runs, every check and command, with timings.
+- The hourly run: launchd opens kit.app on the hour, and kit.app runs
+  `kit nightly`, the jobs due, then every check. It tells no one what it
+  finds: read it in `kit status` (`kit status nightly` says when it last
+  ran), `kit log`, and `report.txt` in kit's logs folder. `kit apply`
+  installs it, and asks the person to give kit.app Full Disk Access.
 - `kit reconcile`: settles what differs from the config, and commits or
   undoes edits made by hand in kit-config.
 

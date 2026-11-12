@@ -1,12 +1,13 @@
 // Package macapp is kit's own Mac app, kit.app: what posts kit's
 // notifications, under kit's name and icon, each replacing or taking away
-// the one posted before under its id. kit builds it from the files it
-// embeds, the first time a run needs it and again once they've changed;
-// until it can, a notification goes through osascript instead, never lost.
+// the one posted before under its id; and what the hourly launch opens to
+// run kit nightly, so that Full Disk Access is the app's. kit builds it
+// from the files it embeds, the first time a run needs it and again once
+// they've changed; until it can, a notification goes through osascript
+// instead, never lost.
 package macapp
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	_ "embed"
@@ -57,14 +58,26 @@ var files = map[string][]byte{
 	"Contents/Resources/AppIcon.icns": icon,
 }
 
-// fingerprint is the fingerprint of the files the app is built from.
-func fingerprint() []byte {
+// Fingerprint is the fingerprint of the files kit builds the app from:
+// a build from other files is another app, to macOS, which grants Full
+// Disk Access to an app as it's signed.
+func Fingerprint() string {
 	h := sha256.New()
 	for _, part := range [][]byte{source, infoPlist, icon} {
 		h.Write(fmt.Appendf(nil, "%d\n", len(part)))
 		h.Write(part)
 	}
-	return []byte(hex.EncodeToString(h.Sum(nil)) + "\n")
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// Built is the fingerprint of the files the app in the data directory dir
+// was built from: "" when there's none.
+func Built(dir string) string {
+	data, err := os.ReadFile(filepath.Join(dir, Name, builtFrom))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
 }
 
 // App is kit.app, as a run uses it: built, when it needs to be, once a run
@@ -292,7 +305,7 @@ func (a *App) building() (ready bool, built <-chan struct{}) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	switch {
-	case a.ready || a.current():
+	case a.ready || a.Current():
 		a.ready = true
 		return true, nil
 	case a.built != nil:
@@ -313,14 +326,13 @@ func (a *App) building() (ready bool, built <-chan struct{}) {
 	return false, done
 }
 
-// current reports whether the bundle's there, built from the files
+// Current reports whether the bundle's there, built from the files
 // embedded.
-func (a *App) current() bool {
-	built, err := os.ReadFile(filepath.Join(a.Path(), builtFrom))
-	if err != nil || !bytes.Equal(built, fingerprint()) {
+func (a *App) Current() bool {
+	if Built(a.dir) != Fingerprint() {
 		return false
 	}
-	_, err = os.Stat(filepath.Join(a.Path(), executable))
+	_, err := os.Stat(filepath.Join(a.Path(), executable))
 	return err == nil
 }
 
@@ -346,7 +358,7 @@ func (a *App) build(ctx context.Context) error {
 	defer func() { _ = os.RemoveAll(work) }()
 	bundle := filepath.Join(work, Name)
 	src := filepath.Join(work, "kit.swift")
-	writes := map[string][]byte{src: source, filepath.Join(bundle, builtFrom): fingerprint()}
+	writes := map[string][]byte{src: source, filepath.Join(bundle, builtFrom): []byte(Fingerprint() + "\n")}
 	for path, data := range files {
 		writes[filepath.Join(bundle, path)] = data
 	}

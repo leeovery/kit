@@ -47,7 +47,7 @@ The folder's other files are its data. `run` must stay executable.
   needs instead, with `--after` and `--secret`. Say what's missing in its
   first line.
 
-A check runs on every `kit status` and in every nightly run: it changes
+A check runs on every `kit status` and in every hourly run: it changes
 nothing, opens nothing and asks no one. One that must go online says so in
 a comment.
 

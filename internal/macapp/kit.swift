@@ -1,10 +1,13 @@
 // kit.app: kit's own app, so its notifications come from kit, with its name
 // and icon. Alerts (Info.plist), so they stay till dismissed; each posted
-// under an id, which a later one replaces, and clear takes away. It quits
-// once it's done: it never lingers.
+// under an id, which a later one replaces, and clear takes away. And what
+// the hourly launch opens to run kit nightly, as its child, so that Full
+// Disk Access is the app's. It quits once it's done: it never lingers.
 //
 //   notify --id <id> --title <title> --body <body> [--activate <bundle id>] [--at <ns> [--run <n>]]
 //   clear --id <id> [--at <ns> [--run <n>]]
+//   nightly <kit>   runs <kit> nightly --scheduled, waits for it, and exits
+//                   as it did; it posts nothing
 //   (no arguments)  launched by macOS for a click on a notification: brings
 //                   forward the app the notification names, then quits
 //
@@ -215,6 +218,19 @@ func clear(_ given: [String: String]) -> Int32 {
     return 0
 }
 
+// nightly runs the kit at the path given as the hourly launch has it, as
+// the app's child, which macOS holds the app responsible for: what it reads
+// is under the app's Full Disk Access.
+func nightly(_ words: ArraySlice<String>) -> Int32 {
+    guard let kit = words.first else { return 64 }
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: kit)
+    process.arguments = ["nightly", "--scheduled"]
+    do { try process.run() } catch { return 127 }
+    process.waitUntilExit()
+    return process.terminationStatus
+}
+
 func activate(_ bundle: String) {
     guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundle) else { return }
     let configuration = NSWorkspace.OpenConfiguration()
@@ -238,6 +254,7 @@ final class Delegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterD
             switch command {
             case "notify": exit(post(given))
             case "clear": exit(clear(given))
+            case "nightly": exit(nightly(args.dropFirst()))
             default: exit(64)
             }
         }

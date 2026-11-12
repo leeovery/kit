@@ -9,18 +9,16 @@ import (
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/hand"
-	"github.com/leeovery/kit/internal/runner"
 )
 
 // ownCard is a card of kit's own a step raises mid-run, as the data
 // restore's are, which kit can't tell done by itself: a choice, answered by
 // one of its keys, which it keeps (chosen); or, with no keys, done once the
-// person says so. One with an app (app, by bundle id) opens it, once, as it
-// first goes up.
+// person says so. One that shows the person something (show), as an app to
+// do it in, shows it, once, as it first goes up.
 type ownCard struct {
 	says event.NeedsYou
-	run  runner.Runner
-	app  string
+	show func(ctx context.Context)
 
 	opened sync.Once
 	mu     sync.Mutex
@@ -49,8 +47,8 @@ func (c *ownCard) answer(_ context.Context, a hand.Answer, _ time.Time) (bool, s
 }
 
 func (c *ownCard) open(ctx context.Context) {
-	if c.app != "" {
-		c.opened.Do(func() { openApp(ctx, c.run, c.app) })
+	if c.show != nil {
+		c.opened.Do(func() { c.show(ctx) })
 	}
 }
 

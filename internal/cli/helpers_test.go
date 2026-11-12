@@ -24,6 +24,8 @@ import (
 	"github.com/leeovery/kit/internal/cli"
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/look"
+	"github.com/leeovery/kit/internal/macapp"
+	"github.com/leeovery/kit/internal/nightly"
 	"github.com/leeovery/kit/internal/runner"
 	"github.com/leeovery/kit/internal/runner/runnertest"
 	"github.com/leeovery/kit/internal/steps"
@@ -94,6 +96,8 @@ type world struct {
 	ctx context.Context
 	// sshAt is where the Mac's Remote Login answers, when a test has it.
 	sshAt string
+	// self is where kit runs from, when a test moves it: kitPath else.
+	self string
 }
 
 // after is how long kit waits in the world, as time.After has it: no time
@@ -120,10 +124,69 @@ func newWorld(t *testing.T, files map[string]string) *world {
 	// none waiting.
 	w.waiting("")
 	w.write(t, filepath.Join("etc", "ssh", "ssh_host_ed25519_key.pub"), hostKey+" root@laptop\n")
+	w.scheduled(t)
 	for name, content := range files {
 		w.write(t, filepath.Join(".config", "kit", name), content)
 	}
 	return w
+}
+
+// kitPath is where the test's kit runs from: the kit the hourly launch runs.
+const kitPath = "/opt/homebrew/bin/kit"
+
+// launchAgent is the hourly launch's file, from the home.
+var launchAgent = filepath.Join("Library", "LaunchAgents", steps.LaunchLabel+".plist")
+
+// launchService is the hourly launch's service, as launchctl names it.
+var launchService = fmt.Sprintf("gui/%d/%s", os.Getuid(), steps.LaunchLabel)
+
+// kitApp is kit.app, in kit's data folder, from the home.
+var kitApp = filepath.Join(".local", "share", "kit", "kit.app")
+
+// scheduled has the world's Mac run kit by itself, as kit apply leaves a
+// Mac: kit.app built from this kit's files and given Full Disk Access, the
+// hourly launch in place and loaded, and an hourly run now.
+func (w *world) scheduled(t *testing.T) {
+	t.Helper()
+	w.write(t, filepath.Join(kitApp, "Contents", "Resources", "built-from"), macapp.Fingerprint()+"\n")
+	w.write(t, filepath.Join(kitApp, "Contents", "MacOS", "kit"), "")
+	agent, err := steps.LaunchAgent(filepath.Join(w.home, kitApp), kitPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.write(t, launchAgent, string(agent))
+	w.fake.On("launchctl", "print", launchService).Prints(steps.LaunchLabel + " = {\n}\n")
+	w.ranHourly(t)
+	if err := nightly.Update(w.stateDir(), func(r *nightly.Record) {
+		r.Access = nightly.Access{At: w.now, App: macapp.Fingerprint(), Granted: true}
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// withoutKitApp takes kit.app away, as on a Mac kit can't build it on yet,
+// without Swift's compiler: a card's notification goes through osascript,
+// unless the test has kit build it.
+func (w *world) withoutKitApp(t *testing.T) {
+	t.Helper()
+	if err := os.RemoveAll(filepath.Join(w.home, kitApp)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// ranHourly records an hourly run now, as the hourly launch's would.
+func (w *world) ranHourly(t *testing.T) {
+	t.Helper()
+	if err := nightly.Update(w.stateDir(), func(r *nightly.Record) {
+		r.Hourly = nightly.Run{Started: w.now, Finished: w.now}
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// stateDir is kit's state folder in the world.
+func (w *world) stateDir() string {
+	return filepath.Join(w.home, ".local", "state", "kit")
 }
 
 // write writes a file at path, from the home, making its directories.
@@ -172,6 +235,7 @@ func (w *world) run(t *testing.T, args ...string) (stdout, stderr string, status
 			w.fake.Env = slices.Concat(env, w.added)
 			return w.fake
 		},
+		Self:      func() (string, error) { return cmp.Or(w.self, kitPath), nil },
 		SudoLocal: filepath.Join(w.home, "etc", "sudo_local"),
 		SSHDir:    filepath.Join(w.home, "etc", "ssh"),
 		// Nothing listens there: a test waking Remote Login says where.

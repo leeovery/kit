@@ -79,6 +79,9 @@ type Deps struct {
 	// Shell has kit become the person's login shell, as a terminal starts
 	// it: it replaces this process, and returns only when it can't.
 	Shell func() error
+	// Self is the path kit runs from, as os.Executable finds it: the kit the
+	// hourly launch runs.
+	Self func() (string, error)
 	// SudoLocal is sudo's file of local settings, which the touch-id-sudo
 	// feature checks: /etc/pam.d/sudo_local.
 	SudoLocal string
@@ -319,6 +322,7 @@ func Real(version string) Deps {
 		Shell: func() error {
 			return runner.BecomeLoginShell(cmp.Or(os.Getenv("SHELL"), "/bin/zsh"), askpass.Without(os.Environ()))
 		},
+		Self:         os.Executable,
 		WatchDialogs: true,
 		SudoLocal:    steps.SudoLocal,
 		TCC:          "/Library/Application Support/com.apple.TCC/TCC.db",

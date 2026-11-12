@@ -20,6 +20,7 @@ import (
 	"github.com/leeovery/kit/internal/runner"
 	"github.com/leeovery/kit/internal/runner/runnertest"
 	kitstate "github.com/leeovery/kit/internal/state"
+	"github.com/leeovery/kit/internal/steps"
 )
 
 const appsToml = "format = 1\nprimary = \"laptop\"\nterminal = \"ghostty\"\n[macs.laptop]\n[macs.studio]\n"
@@ -314,7 +315,7 @@ func TestKitConfigAddsANewMac(t *testing.T) {
 // it's the grant itself that's checked.
 func TestFullDiskAccess(t *testing.T) {
 	run := runnertest.New(t)
-	run.On("open", accessSettings)
+	run.On("open", steps.AccessSettings)
 	ask := &asker{picks: []string{"enter"}}
 	b, _ := newBoot(t, run, GitHub{}, ask)
 	read(t, b, map[string]string{config.File: appsToml}, "laptop")

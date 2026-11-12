@@ -122,8 +122,23 @@ func TestTheAppBuiltIsKept(t *testing.T) {
 	}
 }
 
-// An app built from other files, as an older kit's, or one cut short, is
-// built again.
+// Built, the app says which files it was built from, the files kit embeds:
+// a build from other files is another app to macOS, which grants Full Disk
+// Access to an app as it's signed.
+func TestTheAppSaysWhatItWasBuiltFrom(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "kit")
+	if got := macapp.Built(dir); got != "" {
+		t.Errorf("Built() with no app = %q, want none", got)
+	}
+	app, _ := built(t)
+	dir = filepath.Dir(app.Path())
+	if got := macapp.Built(dir); got != macapp.Fingerprint() || len(got) != 64 || !app.Current() {
+		t.Errorf("Built() = %q, Current %v; want the fingerprint of the files kit embeds, %q", got, app.Current(), macapp.Fingerprint())
+	}
+}
+
+// An app built from other files, as an older kit's, or one cut short, isn't
+// current, and is built again.
 func TestTheAppIsRebuilt(t *testing.T) {
 	for name, change := range map[string]func(bundle string) error{
 		"built from other files": func(bundle string) error {
@@ -137,6 +152,9 @@ func TestTheAppIsRebuilt(t *testing.T) {
 			app, _ := built(t)
 			if err := change(app.Path()); err != nil {
 				t.Fatal(err)
+			}
+			if app.Current() {
+				t.Error("Current = true, want the app not current")
 			}
 			dir := filepath.Dir(app.Path())
 			fake := runnertest.New(t)

@@ -559,9 +559,14 @@ func (a *app) build(command, logName string, face render.Face, atTerminal bool) 
 		_ = log.Close()
 		return nil, err
 	}
-	if jobs := slices.Concat(hourly, daily); len(jobs) > 0 {
-		checks = append(checks, nightly.Check(jobs, len(hourly) > 0, len(daily) > 0, dirs.State, a.Now))
+	scheduling, err := r.schedulingSteps(a, dirs, raise)
+	if err != nil {
+		_ = face.Close()
+		_ = log.Close()
+		return nil, err
 	}
+	checks = append(checks, scheduling...)
+	checks = append(checks, nightly.Check(slices.Concat(hourly, daily), len(daily) > 0, dirs.State, a.Now))
 	base := slices.Concat(needed, setup, kindSteps, checks)
 	for i := range base {
 		base[i].Part = partOf(base[i].Name)
@@ -592,6 +597,28 @@ func (a *app) build(command, logName string, face render.Face, atTerminal bool) 
 		return nil, err
 	}
 	return r, nil
+}
+
+// schedulingSteps are the steps that have kit run by itself, on every Mac:
+// the hourly launch, opening kit.app to run this kit nightly; and, after
+// it, the step by hand giving kit.app Full Disk Access, raised at a
+// terminal (raise).
+func (r *run) schedulingSteps(a *app, dirs config.Dirs, raise *steps.Raise) ([]engine.Step, error) {
+	self, err := a.Self()
+	if err != nil {
+		return nil, fmt.Errorf("find kit: %w", err)
+	}
+	app := r.notifier(a.Getenv, a.Now)
+	launch := steps.HourlyLaunch(steps.Launching{
+		Run: r.run, Dir: filepath.Join(r.homeDir, "Library", "LaunchAgents"), Domain: fmt.Sprintf("gui/%d", os.Getuid()),
+		Kit: self, App: app, StateDir: dirs.State, Now: a.Now,
+	})
+	access := steps.AppAccess(steps.AppAccessing{
+		Run: r.run, App: app.Path(), Built: func() string { return macapp.Built(dirs.Data) },
+		StateDir: dirs.State, Raise: raise, Now: a.Now,
+	})
+	access.After = []string{steps.LaunchName}
+	return []engine.Step{launch, access}, nil
 }
 
 // start starts what a run at a terminal starts, shown on face: answering

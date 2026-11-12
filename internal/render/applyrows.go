@@ -44,7 +44,7 @@ var rowSteps = map[string][]string{
 	rowFiles:    {"file", "path"},
 	rowSettings: {"touch-id-sudo", "remote-login", "file-sharing"},
 	rowGit:      {"config", "config-sync", "config-private", "new-mac"},
-	rowBackups:  {"prefs", "nightly"},
+	rowBackups:  {"prefs", steps.LaunchName, "nightly"},
 }
 
 // rowNamed is the row of each of kit's own steps, by its name.

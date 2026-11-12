@@ -18,6 +18,7 @@ import (
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/kind"
+	"github.com/leeovery/kit/internal/macapp"
 	"github.com/leeovery/kit/internal/nightly"
 	"github.com/leeovery/kit/internal/prefs"
 	"github.com/leeovery/kit/internal/render"
@@ -27,12 +28,11 @@ import (
 // jobTimeout is how long a job of the user's own may run.
 const jobTimeout = time.Hour
 
-// reportFile is the report kit nightly leaves, in kit's logs folder, for a
-// notification's click to open.
+// reportFile is the report kit nightly leaves, in kit's logs folder.
 const reportFile = "report.txt"
 
 func newNightlyCommand(a *app) *cobra.Command {
-	var plan, alerts bool
+	var plan, scheduled bool
 	cmd := &cobra.Command{
 		Use:         "nightly [job...]",
 		Short:       "Run the scheduled jobs that are due, then every check: what the hourly launch runs",
@@ -44,57 +44,54 @@ it's been missed, as by a Mac asleep then. The jobs run in order, each after
 the one before, and one that fails never stops the others; the checks follow.
 Nothing is installed or removed.
 
+kit apply installs the hourly launch: launchd opens kit.app on the hour, and
+kit.app runs kit nightly, so that Full Disk Access is kit.app's. Its runs
+notify no one: what they find is in kit status, the log, and the report each
+run leaves in kit's logs folder (report.txt).
+
 Name jobs to run only those, now. --plan says what's due, and runs nothing.
 kit nightly add and kit nightly remove declare and undeclare nightly jobs (so
-no job is named add or remove).
-
-Each run leaves its report, kit status's plain lines, in kit's logs folder
-(report.txt). --alerts prints, in place of the run, what to notify about, as
-JSON, for the app that runs kit hourly: each problem at once, an alert each,
-and the drift that needs attention as one digest, changing at most once a
-day; an alert's id stays the same while it's the same problem.`,
+no job is named add or remove).`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			command, logName := "nightly", "nightly"
 			if plan {
 				command, logName = "nightly --plan", "nightly-plan"
 			}
 			var report bytes.Buffer
-			collector := &render.Collector{}
-			faces := []render.Face{render.NewPlain(&report), collector}
-			if !alerts {
-				faces = append(faces, a.face())
-			}
-			r, err := a.prepareWith(command, logName, render.Tee(faces...))
+			r, err := a.prepareWith(command, logName, render.Tee(render.NewPlain(&report), a.face()))
 			if err != nil {
 				return err
 			}
-			err = a.nightly(cmd.Context(), r, args, plan)
+			if scheduled {
+				err = recordAccess(r)
+			}
+			if err == nil {
+				err = a.nightly(cmd.Context(), r, args, plan)
+			}
 			if closeErr := r.close(); err == nil {
 				err = closeErr
 			}
 			if writeErr := writeAtomic(filepath.Join(r.logsDir, reportFile), report.Bytes()); writeErr != nil && err == nil {
 				err = writeErr
 			}
-			if alerts {
-				list, alertsErr := nightly.Alerts(collector.Document(), r.stateDir, a.Now())
-				if alertsErr != nil {
-					return alertsErr
-				}
-				if list == nil {
-					list = []nightly.Alert{}
-				}
-				if printErr := render.WriteJSON(a.Stdout, list); printErr != nil {
-					return printErr
-				}
-			}
 			return err
 		},
 	}
 	cmd.Flags().BoolVar(&plan, "plan", false, "say what's due, and run nothing")
-	cmd.Flags().BoolVar(&alerts, "alerts", false, "print what to notify about, as JSON, for the hourly launch's app")
+	// kit.app's: what its run finds of Full Disk Access is the app's.
+	cmd.Flags().BoolVar(&scheduled, "scheduled", false, "run by the hourly launch, through kit.app")
+	_ = cmd.Flags().MarkHidden("scheduled")
 	// Nightly jobs are declared here too: add and remove, never a job's name.
 	cmd.AddCommand(newLineAdd(a, config.NightlyKind, "Declare a nightly job"), newLineRemove(a, config.NightlyKind))
 	return cmd
+}
+
+// recordAccess records whether the kit.app in kit's data folder has Full
+// Disk Access, as this run, its child, finds by reading what only that
+// shows.
+func recordAccess(r *run) error {
+	found := nightly.Access{At: r.now, App: macapp.Built(r.dataDir), Granted: steps.HasFullDiskAccess(r.homeDir)}
+	return nightly.Update(r.stateDir, func(rec *nightly.Record) { rec.Access = found })
 }
 
 // writeAtomic writes data to path, whole or not at all, making its folder.
