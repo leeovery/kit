@@ -182,6 +182,33 @@ func TestParseSwallowsTerminalReplies(t *testing.T) {
 	}
 }
 
+// Escape then ] or P, typed fast or as Alt+], starts as a reply would, but
+// a reply is printable text: a control after it, or more than any reply
+// has, makes it escape and what was typed, each key as it comes, never
+// held.
+func TestParseTakesWhatIsntAReplyAsKeys(t *testing.T) {
+	var keys, rest []key
+	var pending []byte
+	for _, read := range []string{"\x1b]", "q", "\r", "\x03", "\x1b", "\x1b[A"} {
+		rest, pending = parse(append(pending, read...))
+		keys = append(keys, rest...)
+	}
+	want := []key{{name: "esc"}, {text: "]"}, {text: "q"}, {name: "enter"}, {name: "ctrl+c"}, {name: "esc"}, {name: "up"}}
+	if !slices.Equal(keys, want) || len(pending) != 0 {
+		t.Errorf("escape, ], q, enter, Ctrl+C, escape, up, a read at a time = %+v, rest %q; want %+v", keys, pending, want)
+	}
+	for _, sent := range []string{"\x1bP\x1b[A", "\x1b]a\x1bb"} {
+		if keys, _ := parse([]byte(sent)); len(keys) == 0 || keys[0] != (key{name: "esc"}) {
+			t.Errorf("parse(%q) = %+v; want escape first", sent, keys)
+		}
+	}
+	long := "\x1b]" + strings.Repeat("a", 600)
+	keys, pending = parse([]byte(long))
+	if len(keys) != 602 || keys[0] != (key{name: "esc"}) || keys[1] != (key{text: "]"}) || len(pending) != 0 {
+		t.Errorf("an unended reply of 600 = %d keys, first %+v, rest %d bytes; want escape, ], then each a", len(keys), keys[:min(2, len(keys))], len(pending))
+	}
+}
+
 // One question: a blank line, its row, its answers under it, the cursor
 // moving among them, round from the last to the first and back; taken, it
 // leaves its row with the answer.
