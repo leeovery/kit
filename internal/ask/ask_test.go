@@ -150,6 +150,38 @@ func TestParseMouse(t *testing.T) {
 	}
 }
 
+// The terminal's replies to kit's questions of it, come late among the
+// keys: its background's colour, an OSC ended by BEL or by ESC \, a DCS,
+// and its device attributes; none is a key, its ESC not escape and its
+// letters not text, the keys around it kept; a reply cut short is kept
+// for the rest.
+func TestParseSwallowsTerminalReplies(t *testing.T) {
+	for _, tt := range []struct {
+		name, sent string
+		want       []key
+	}{
+		{"the background, ended by BEL", "\x1b]11;rgb:1e1e/1e1e/2e2e\x07", nil},
+		{"the background, ended by ST", "\x1b]11;rgb:1e1e/1e1e/2e2e\x1b\\", nil},
+		{"a DCS", "\x1bP1$r0m\x1b\\", nil},
+		{"the device attributes", "\x1b[?1;2c", nil},
+		{"replies among keys", "j\x1b]11;rgb:0/0/0\x07\x1b[?62;22ck\r", []key{{text: "j"}, {text: "k"}, {name: "enter"}}},
+		{"escape after a reply", "\x1b]11;rgb:0/0/0\x1b\\\x1b", []key{{name: "esc"}}},
+	} {
+		if keys, rest := parse([]byte(tt.sent)); !slices.Equal(keys, tt.want) || len(rest) != 0 {
+			t.Errorf("%s: parse(%q) = %+v, rest %q; want %+v", tt.name, tt.sent, keys, rest, tt.want)
+		}
+	}
+	for _, cut := range []string{"\x1b]11;rgb:1e1e/1e", "\x1b]11;rgb:0/0/0\x1b", "\x1bP1$r"} {
+		if keys, rest := parse([]byte(cut)); len(keys) != 0 || string(rest) != cut {
+			t.Errorf("a reply cut short, %q: %+v, rest %q; want it kept", cut, keys, rest)
+		}
+	}
+	_, rest := parse([]byte("\x1b]11;rgb:0/0/0"))
+	if keys, rest := parse(append(rest, "\x07q"...)); !slices.Equal(keys, []key{{text: "q"}}) || len(rest) != 0 {
+		t.Errorf("a reply in two reads, then q: %+v, rest %q; want q alone", keys, rest)
+	}
+}
+
 // One question: a blank line, its row, its answers under it, the cursor
 // moving among them, round from the last to the first and back; taken, it
 // leaves its row with the answer.

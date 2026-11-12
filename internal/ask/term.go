@@ -243,7 +243,8 @@ func (k key) exported() Key {
 // form sends them, page up and down, enter, tab and shift+tab, escape
 // alone, Ctrl+C, backspace, a paste whole, text, the window's focus coming
 // and going, and the mouse's clicks and wheel; other controls and
-// sequences, the mouse's other reports among them, are dropped.
+// sequences, the mouse's other reports and the terminal's replies among
+// them, are dropped.
 func parse(b []byte) (keys []key, rest []byte) {
 	for len(b) > 0 {
 		switch {
@@ -276,6 +277,15 @@ func parse(b []byte) (keys []key, rest []byte) {
 				keys = append(keys, k)
 			}
 			b = b[i+1:]
+		case b[0] == 0x1b && (b[1] == ']' || b[1] == 'P'):
+			// A terminal's reply to kit's question of it, an OSC (its
+			// background's colour) or a DCS, late enough to come in with
+			// the keys: never a key, its ESC least of all.
+			end := stringEnd(b)
+			if end < 0 {
+				return keys, b
+			}
+			b = b[end:]
 		case b[0] == 0x1b:
 			keys, b = append(keys, key{name: "esc"}), b[1:]
 		case b[0] == '\r' || b[0] == '\n':
@@ -297,6 +307,20 @@ func parse(b []byte) (keys []key, rest []byte) {
 		}
 	}
 	return keys, nil
+}
+
+// stringEnd is where the OSC or DCS b starts with ends, past the BEL or
+// the ESC \ that ends it, or -1 while it's still coming.
+func stringEnd(b []byte) int {
+	for i := 2; i < len(b); i++ {
+		switch {
+		case b[i] == 0x07:
+			return i + 1
+		case b[i] == 0x1b && i+1 < len(b) && b[i+1] == '\\':
+			return i + 2
+		}
+	}
+	return -1
 }
 
 // sequence is the key a control sequence is, intro its [ or O, params
