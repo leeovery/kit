@@ -151,10 +151,10 @@ func sixMinutesInWith(formulae, casks int) []event.Event {
 var signIn = event.NeedsYou{Time: after(345), Step: "1password", Item: "1password", Title: "Sign in to 1Password",
 	Why: "Every secret kit puts in place comes from 1Password, so it needs the app signed in and its command line turned on.",
 	Steps: []string{
-		"Open 1Password",
-		"Scan the QR code it shows with the 1Password app on your phone",
-		"If it doesn't ask, in 1Password:",
+		"Scan the QR code 1Password shows with 1Password on your phone",
 		"Settings › Developer › turn on Integrate with 1Password CLI",
+		"If kit still waits with both done:",
+		"Quit 1Password and open it again",
 	}, Tells: true}
 
 // cardUp is sixMinutesIn with card come up for its step, applying.
@@ -1317,11 +1317,11 @@ func TestApplyingPanel(t *testing.T) {
 		"      Every secret kit puts in place comes from 1Password, so it needs the app signed in and its",
 		"      command line turned on.",
 		"",
-		"      1  Open 1Password",
-		"      2  Scan the QR code it shows with the 1Password app on your phone",
+		"      1  Scan the QR code 1Password shows with 1Password on your phone",
+		"      2  Settings › Developer › turn on Integrate with 1Password CLI",
 		"",
-		"      If it doesn't ask, in 1Password:",
-		"      3  Settings › Developer › turn on Integrate with 1Password CLI",
+		"      If kit still waits with both done:",
+		"      3  Quit 1Password and open it again",
 		"",
 		"      kit carries on by itself once it's done",
 		"",
@@ -1339,7 +1339,7 @@ func TestApplyingPanel(t *testing.T) {
 		t.Errorf("the state line is %q; want it waiting for you, the card's title", state)
 	}
 	frame := strings.Join(lastFrame(out.String()), "\n")
-	for _, styled := range []string{look.Orange("▲") + " " + look.Urgent("Sign in to 1Password"), look.Urgent("1") + "  ", look.Muted("command line turned on."), look.Muted("If it doesn't ask, in 1Password:"), look.Orange("▲ waiting for you")} {
+	for _, styled := range []string{look.Orange("▲") + " " + look.Urgent("Sign in to 1Password"), look.Urgent("1") + "  ", look.Muted("command line turned on."), look.Muted("If kit still waits with both done:"), look.Orange("▲ waiting for you")} {
 		if !strings.Contains(frame, styled) {
 			t.Errorf("the screen has no %q, styled as it should be", ansi.Strip(styled))
 		}
@@ -1455,8 +1455,8 @@ func TestApplyingCardInASmallWindow(t *testing.T) {
 	}{
 		{paper, "a bigger window shows the keys to answer it", nil},
 		{signIn, "kit carries on by itself once it's done", []string{
-			"Sign in to 1Password", "Every secret kit puts in place", "1  Open 1Password", "2  Scan the QR code",
-			"\n       If it doesn't ask, in 1Password:\n       3  Settings › Developer",
+			"Sign in to 1Password", "Every secret kit puts in place", "1  Scan the QR code", "2  Settings › Developer",
+			"\n       If kit still waits with both done:\n       3  Quit 1Password",
 		}},
 	} {
 		var narrow syncBuffer
