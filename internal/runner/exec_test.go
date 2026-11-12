@@ -229,13 +229,16 @@ func TestExecEndsACommandWhenItsContextIsDone(t *testing.T) {
 
 // A command ended, at its time limit or as the run stops, is sent SIGTERM
 // first, it and what it started, for it to clean up, as git takes its lock
-// away; one that ignores it is killed, with what it started, once it's had
-// a moment; and what it started that ignores it is killed once the
+// away, even what it started that outlives it, its output elsewhere; one
+// that ignores it is killed, with what it started, once it's had a moment;
+// and what it started that ignores it is killed then too, though the
 // command's gone.
 func TestExecEndsACommandWithSIGTERMFirst(t *testing.T) {
 	dir := t.TempDir()
 	lock, child, left := filepath.Join(dir, "index.lock"), filepath.Join(dir, "child"), filepath.Join(dir, "left")
+	inner := filepath.Join(dir, "inner.lock")
 	r, _ := programs(t, map[string]string{
+		"wraps":    `/bin/sh -c 'trap "/bin/sleep 0.05; /bin/rm -f \"\$1\"; exit 143" TERM; : > "$1"; while :; do /bin/sleep 0.1; done' - "$1" > /dev/null 2>&1 & until [ -e "$1" ]; do :; done; echo ready; wait`,
 		"tidy":     `: > "$1"; trap '/bin/rm -f "$1"; exit 143' TERM; echo ready; while :; do /bin/sleep 0.1; done`,
 		"stubborn": `trap '' TERM; /bin/sleep 30 & echo $! > "$1"; echo ready; wait`,
 		"leaves":   `/bin/sh -c 'trap "" TERM; echo $$ > "$1"; exec /bin/sleep 30' - "$1" > /dev/null 2>&1 & until [ -s "$1" ]; do :; done; echo ready; wait`,
@@ -254,9 +257,34 @@ func TestExecEndsACommandWithSIGTERMFirst(t *testing.T) {
 		t.Errorf("what it started, ignoring SIGTERM, still runs (%d), want its group killed", pid)
 	}
 
+	endOnceReady(t, r, "wraps", inner)
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		if _, err := os.Stat(inner); errors.Is(err, os.ErrNotExist) {
+			break
+		}
+	}
+	if _, err := os.Stat(inner); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the lock what it started holds is left (%v): want it given its SIGTERM's grace, though the command's gone", err)
+	}
+
 	endOnceReady(t, r, "leaves", left)
-	if pid, runs := stillRuns(t, left, 500*time.Millisecond); runs {
-		t.Errorf("what it left, ignoring SIGTERM, still runs (%d), want it killed as the command went", pid)
+	// Its grace, then a moment for launchd to reap it.
+	if pid, runs := stillRuns(t, left, 4*time.Second); runs {
+		t.Errorf("what it left, ignoring SIGTERM, still runs (%d), want it killed once its grace is up", pid)
+	}
+}
+
+// A command that exits by itself, a child it left holding its output, has
+// that output waited for as long as any command's, no longer: the grace
+// kit gives a command it ends isn't added to it.
+func TestExecWaitsForTheOutputOfACommandThatExits(t *testing.T) {
+	r, _ := programs(t, map[string]string{"exits": "/bin/sleep 8 & exit 0"})
+	start := time.Now()
+	if _, err := r.Run(t.Context(), runner.Command{Name: "exits"}); err == nil {
+		t.Error("Run() = nil, want its output's wait to have run out")
+	}
+	if took := time.Since(start); took > 6500*time.Millisecond {
+		t.Errorf("Run() took %v, want the output waited for 5s", took)
 	}
 }
 
