@@ -467,7 +467,11 @@ func (a *app) build(command, logName string, face render.Face, atTerminal bool) 
 				saving.After = append(saving.After, apps)
 			}
 		}
-		settings = []engine.Step{feature(steps.FeaturePrefs, saving), feature(steps.FeaturePrefs, steps.FullDiskAccess(home))}
+		settings = []engine.Step{feature(steps.FeaturePrefs, saving)}
+		// The terminal's grant: kit-app-access looks after kit.app's.
+		if !a.scheduled {
+			settings = append(settings, feature(steps.FeaturePrefs, steps.FullDiskAccess(home)))
+		}
 	}
 	checks = append(checks, settings...)
 	// A step by hand that comes due while kit applies at a terminal is
@@ -600,7 +604,8 @@ func (a *app) build(command, logName string, face render.Face, atTerminal bool) 
 }
 
 // schedulingSteps are the steps that have kit run by itself, on every Mac:
-// the hourly launch, opening kit.app to run this kit nightly; and, after
+// the hourly launch, opening kit.app to run the kit on kit's PATH nightly,
+// when it's this one (steps.LaunchKit); and, after
 // it, the step by hand giving kit.app Full Disk Access, raised at a
 // terminal (raise).
 func (r *run) schedulingSteps(a *app, dirs config.Dirs, raise *steps.Raise) ([]engine.Step, error) {
@@ -608,10 +613,11 @@ func (r *run) schedulingSteps(a *app, dirs config.Dirs, raise *steps.Raise) ([]e
 	if err != nil {
 		return nil, fmt.Errorf("find kit: %w", err)
 	}
+	kit, why := steps.LaunchKit(self, r.path, os.TempDir())
 	app := r.notifier(a.Getenv, a.Now)
 	launch := steps.HourlyLaunch(steps.Launching{
 		Run: r.run, Dir: filepath.Join(r.homeDir, "Library", "LaunchAgents"), Domain: fmt.Sprintf("gui/%d", os.Getuid()),
-		Kit: self, App: app, StateDir: dirs.State, Now: a.Now,
+		Kit: kit, Why: why, App: app, StateDir: dirs.State, Now: a.Now,
 	})
 	access := steps.AppAccess(steps.AppAccessing{
 		Run: r.run, App: app.Path(), Built: func() string { return macapp.Built(dirs.Data) },

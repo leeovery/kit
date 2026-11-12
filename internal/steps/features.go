@@ -22,42 +22,39 @@ var Features = []string{FeatureFileSharing, FeaturePrefs, FeatureRemoteLogin, Fe
 // Access, relative to the home.
 var fullDiskAccessProbes = []string{"Library/Safari", "Library/Mail", "Library/Messages"}
 
-// FullDiskAccess checks kit can read what only Full Disk Access shows, as
-// settings capture needs: run by the hourly launch's app, the app's grant
-// (lost when it's rebuilt unsigned); run at a terminal, the terminal's.
+// FullDiskAccessName names the step checking the terminal's Full Disk
+// Access.
+const FullDiskAccessName = "full-disk-access"
+
+// FullDiskAccess checks the terminal kit runs in can read what only Full
+// Disk Access shows, as a capture or a restore of apps' settings run there
+// needs. Not in the hourly launch's runs: kit.app's grant is AppAccess's.
 func FullDiskAccess(home string) engine.Step {
 	return engine.Step{
-		Name: "full-disk-access", Title: "Full Disk Access", Area: AreaBackups,
+		Name: FullDiskAccessName, Title: "Full Disk Access", Area: AreaBackups,
 		Check: func(context.Context) check.Result {
-			switch granted, there := probeAccess(home); {
+			switch granted, found := ProbeFullDiskAccess(home); {
 			case granted:
 				return check.Result{State: check.OK, Summary: "granted"}
-			case !there:
+			case !found:
 				return check.Result{State: check.OK, Summary: "nothing protected to read"}
 			}
-			return problem("full-disk-access", "not granted", [3]string{"denied", "kit can't read what only Full Disk Access shows, so settings capture will fail", "System Settings › Privacy & Security › Full Disk Access: add the app (or terminal) kit runs in"})
+			return problem(FullDiskAccessName, "not granted", [3]string{"denied", "the terminal kit runs in can't read what only Full Disk Access shows, so a capture or restore of apps' settings here fails", "System Settings › Privacy & Security › Full Disk Access: add the terminal kit runs in"})
 		},
 	}
 }
 
-// HasFullDiskAccess reports whether kit can read what only Full Disk Access
-// shows, in home: so, too, with none of it there to read.
-func HasFullDiskAccess(home string) bool {
-	granted, there := probeAccess(home)
-	return granted || !there
-}
-
-// probeAccess reports whether any of what only Full Disk Access shows, in
-// home, reads, and whether any of it's there to.
-func probeAccess(home string) (granted, there bool) {
+// ProbeFullDiskAccess reports whether what only Full Disk Access shows, in
+// home, reads, and whether any of it was found there to read.
+func ProbeFullDiskAccess(home string) (granted, found bool) {
 	for _, probe := range fullDiskAccessProbes {
 		_, err := os.ReadDir(filepath.Join(home, probe))
 		switch {
 		case err == nil:
 			return true, true
 		case errors.Is(err, fs.ErrPermission):
-			there = true
+			found = true
 		}
 	}
-	return false, there
+	return false, found
 }

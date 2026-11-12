@@ -355,7 +355,8 @@ const gitignore = ".DS_Store\n.*.tmp\n"
 // Capture saves the Mac's settings into its folder in the store, writing
 // only what changed and removing what's gone from the Mac, then commits and
 // pushes. It needs Full Disk Access, capture switched on, and this Mac to
-// own the folder (claiming it when no Mac has). A domain or file that
+// own the folder (claiming it when no Mac has). One capture at a time: it
+// waits for one under way (lockCapture). A domain or file that
 // fails to read is kept as stored, and the rest go on; domains waiting to
 // be restored are left alone.
 func (p *Prefs) Capture(ctx context.Context) (Report, error) {
@@ -370,6 +371,11 @@ func (p *Prefs) Capture(ctx context.Context) (Report, error) {
 	if !p.HasFullDiskAccess() {
 		return report, errNoAccess
 	}
+	unlock, err := p.lockCapture(ctx)
+	if err != nil {
+		return report, err
+	}
+	defer unlock()
 	if err := p.ensureClone(ctx); err != nil {
 		return report, err
 	}

@@ -59,7 +59,7 @@ func TestApplyInstallsTheHourlyLaunch(t *testing.T) {
 	if !strings.Contains(out, "hourly-launch ok hourly, through kit.app\n") {
 		t.Errorf("kit apply hourly-launch printed\n%s%s\nwant it installed", out, errOut)
 	}
-	want, err := steps.LaunchAgent(filepath.Join(w.home, kitApp), kitPath)
+	want, err := steps.LaunchAgent(filepath.Join(w.home, kitApp), filepath.Join(w.home, kitPath))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,20 +76,25 @@ func TestApplyInstallsTheHourlyLaunch(t *testing.T) {
 	}
 }
 
-// A kit at a new path, as Homebrew's after a release, has the launch written
-// again, for it, and loaded again.
-func TestApplyMovesTheHourlyLaunchToANewKit(t *testing.T) {
+// An agent running another kit, as one moved since, is written again for
+// the kit on kit's PATH, the one running, and loaded again.
+func TestApplyMovesTheHourlyLaunchToTheKitOnPath(t *testing.T) {
 	w := laptopWorld(t)
-	w.self = "/Users/someone/.local/bin/kit"
-	agent := filepath.Join(w.home, launchAgent)
+	old := filepath.Join(w.home, "old", "kit")
+	w.write(t, filepath.Join("old", "kit"), "")
+	agent, err := steps.LaunchAgent(filepath.Join(w.home, kitApp), old)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.write(t, launchAgent, string(agent))
 	w.fake.On("launchctl", "bootout", launchService)
-	w.fake.On("launchctl", "bootstrap", strings.TrimSuffix(launchService, "/"+steps.LaunchLabel), agent)
-	if out, _, _ := w.run(t, "status", "hourly-launch"); !strings.Contains(out, "hourly-launch attention not this kit's\n") {
+	w.fake.On("launchctl", "bootstrap", strings.TrimSuffix(launchService, "/"+steps.LaunchLabel), filepath.Join(w.home, launchAgent))
+	if out, _, _ := w.run(t, "status", "hourly-launch"); !strings.Contains(out, "hourly-launch attention runs another kit ("+old+")\n") {
 		t.Errorf("kit status hourly-launch printed\n%s\nwant the launch another kit's", out)
 	}
 	w.run(t, "apply", "hourly-launch")
-	if got := w.read(t, launchAgent); !strings.Contains(got, "<string>/Users/someone/.local/bin/kit</string>") {
-		t.Errorf("the agent =\n%s\nwant it running the kit that applied", got)
+	if got := w.read(t, launchAgent); !strings.Contains(got, "<string>"+filepath.Join(w.home, kitPath)+"</string>") {
+		t.Errorf("the agent =\n%s\nwant it running the kit on kit's PATH", got)
 	}
 	calls := w.fake.Calls()
 	bootout := slices.Index(calls, "launchctl bootout "+launchService)
@@ -99,18 +104,65 @@ func TestApplyMovesTheHourlyLaunchToANewKit(t *testing.T) {
 	}
 }
 
+// A kit that isn't the one on kit's PATH, as a build of kit's own, leaves
+// the launch as it stands: its check looks at the agent there, and kit
+// apply writes nothing, saying why.
+func TestAnotherKitLeavesTheHourlyLaunch(t *testing.T) {
+	w := laptopWorld(t)
+	w.self = filepath.Join(w.home, "Code", "kit", "kit")
+	w.write(t, filepath.Join("Code", "kit", "kit"), "a build")
+	if out, _, _ := w.run(t, "status", "hourly-launch"); !strings.Contains(out, "hourly-launch ok hourly, through kit.app\n") {
+		t.Errorf("kit status hourly-launch printed\n%s\nwant the launch in place, as the agent stands", out)
+	}
+
+	if err := os.Remove(filepath.Join(w.home, launchAgent)); err != nil {
+		t.Fatal(err)
+	}
+	out, _, _ := w.run(t, "apply", "hourly-launch")
+	if want := "hourly-launch deferred this kit, " + w.self + ", isn't the one on kit's PATH, " + filepath.Join(w.home, kitPath) + ": the hourly launch is left for that kit's apply\n"; !strings.Contains(out, want) {
+		t.Errorf("kit apply hourly-launch printed\n%s\nwant it to hold %q", out, want)
+	}
+	if w.read(t, launchAgent) != "" || slices.ContainsFunc(w.fake.Calls(), func(c string) bool { return strings.HasPrefix(c, "launchctl bootstrap") }) {
+		t.Errorf("wrote the agent or loaded it (ran %q); want it left", w.fake.Calls())
+	}
+}
+
+// Only the hourly launch's runs record the hourly run: one by hand runs the
+// same, and never hides a launch that's stopped.
+func TestOnlyTheLaunchRecordsTheHourlyRun(t *testing.T) {
+	w := laptopWorld(t)
+	w.now = w.now.Add(3 * time.Hour)
+	w.run(t, "nightly")
+	if out, _, _ := w.run(t, "status", "nightly"); !strings.Contains(out, "nightly problem the hourly run last ran 3 hours ago") {
+		t.Errorf("after kit nightly by hand, kit status nightly printed\n%s\nwant the launch's last run still the last", out)
+	}
+	w.run(t, "nightly", "--scheduled")
+	if out, _, _ := w.run(t, "status", "nightly"); !strings.Contains(out, "nightly ok last ran: hourly 06:04") {
+		t.Errorf("after the launch's run, kit status nightly printed\n%s\nwant it recorded", out)
+	}
+}
+
 // The hourly run, kit.app's child, records whether kit.app has Full Disk
 // Access, by reading what only that shows: denied, kit status says so, and
-// the step by hand giving it is to do again.
+// the step by hand giving it is to do again. With none of it on the Mac to
+// read, it records nothing.
 func TestTheHourlyRunRecordsKitAppsAccess(t *testing.T) {
-	w := laptopWorld(t)
+	w := unscheduled(t)
+	w.run(t, "nightly", "--scheduled")
+	if rec, err := nightly.Load(w.stateDir()); err != nil || !rec.Access.At.IsZero() {
+		t.Errorf("recorded %+v (%v), with nothing protected to read; want nothing", rec.Access, err)
+	}
+
+	safari := filepath.Join(w.home, "Library", "Safari")
+	if err := os.MkdirAll(safari, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	w.run(t, "nightly", "--scheduled")
 	if out, _, _ := w.run(t, "status", "kit-app-access"); !strings.Contains(out, "kit-app-access ok granted\n") {
 		t.Errorf("kit status printed\n%s\nwant kit.app's access granted", out)
 	}
 
-	safari := filepath.Join(w.home, "Library", "Safari")
-	if err := os.MkdirAll(safari, 0o000); err != nil {
+	if err := os.Chmod(safari, 0o000); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(safari, 0o700) })
@@ -123,6 +175,19 @@ func TestTheHourlyRunRecordsKitAppsAccess(t *testing.T) {
 	out, _, code := w.run(t, "status", "kit-app-access")
 	if !strings.Contains(out, "kit-app-access attention not granted: the hourly run at 04:04 couldn't read what it protects\n") || code != 1 {
 		t.Errorf("kit status printed\n%s exit %d; want kit.app's access not granted", out, code)
+	}
+}
+
+// The launch's runs leave the terminal's Full Disk Access out: kit.app's is
+// kit-app-access's. A run at a terminal checks it.
+func TestTheLaunchsRunsLeaveTheTerminalsAccessOut(t *testing.T) {
+	w := laptopWorld(t)
+	w.writeSection(t, "laptop", "features", "prefs\n")
+	if out, _, _ := w.run(t, "nightly", "--scheduled"); strings.Contains(out, "full-disk-access") || !strings.Contains(out, "kit-app-access ") {
+		t.Errorf("the launch's run printed\n%s\nwant the terminal's Full Disk Access left out", out)
+	}
+	if out, _, _ := w.run(t, "status", "full-disk-access"); !strings.Contains(out, "full-disk-access ok") {
+		t.Errorf("kit status printed\n%s\nwant the terminal's Full Disk Access checked", out)
 	}
 }
 

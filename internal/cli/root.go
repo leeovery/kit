@@ -138,6 +138,10 @@ type app struct {
 	restoring restoreFlags
 	newMacRun bool
 	named     []string
+	// scheduled is whether the run is the hourly launch's, kit nightly
+	// --scheduled, kit.app's child: what it finds of Full Disk Access is
+	// kit.app's, not a terminal's.
+	scheduled bool
 	// unwinds put back what the faces kit shows have taken of the
 	// terminal, should kit panic.
 	unwinds []func()

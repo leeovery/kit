@@ -6,8 +6,9 @@
 //
 //   notify --id <id> --title <title> --body <body> [--activate <bundle id>] [--at <ns> [--run <n>]]
 //   clear --id <id> [--at <ns> [--run <n>]]
-//   nightly <kit>   runs <kit> nightly --scheduled, waits for it, and exits
-//                   as it did; it posts nothing
+//   nightly <kit>   runs <kit> nightly --scheduled, waits for it, and quits;
+//                   it posts nothing. open -W exits 0 whatever the run did,
+//                   so nothing reads how it ended: kit's run log has it
 //   (no arguments)  launched by macOS for a click on a notification: brings
 //                   forward the app the notification names, then quits
 //

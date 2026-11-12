@@ -121,3 +121,30 @@ func TestAppAccessWaitsForKitApp(t *testing.T) {
 		t.Errorf("Apply() = %v, want not yet", err)
 	}
 }
+
+// Its card is up mid-run, not one of the to-dos at the run's end: skipping
+// leaves it up, nothing recorded, till the person says it's done.
+func TestAppAccessCardSkipped(t *testing.T) {
+	c := newCard(t)
+	c.fake.On("open", steps.AccessSettings)
+	c.fake.On("open", "-R", kitAppPath)
+	step := appAccess(t, c.fake, c.state, "build-1", nightly.Access{}, c.raise)
+	applied := applying(t, step)
+	c.cards(t, 1)
+	c.answer(t, "kit-app-access", hand.Skip)
+	select {
+	case err := <-applied:
+		t.Fatalf("skipped, applying ended (%v); want the card still up", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	if res := step.Check(t.Context()); res.State == check.OK {
+		t.Errorf("skipped, check = %+v, want it still to do", res)
+	}
+	c.answer(t, "kit-app-access", hand.Done)
+	if err := ended(t, applied); err != nil {
+		t.Fatal(err)
+	}
+	if res := step.Check(t.Context()); res.State != check.OK {
+		t.Errorf("once done, check = %+v", res)
+	}
+}

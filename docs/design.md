@@ -231,7 +231,7 @@ hours, or the hourly launch loaded within them, its first run to come; the night
 stuck over six, each job's last outcome; never run on a schedule, its launch never loaded, is a problem, `kit apply`
 installing it); with its feature, `prefs` (apps' settings saved: capture switched on, this Mac owning its folder, a capture
 in the last day without errors, pushed within a day; read from kit's record alone) with
-`full-disk-access` (what capture needs); and the user's own, in a `[checks]`
+`full-disk-access` (the terminal's grant, what a capture there needs); and the user's own, in a `[checks]`
 section, a line each:
 a name, then `--` and a command, which exits 0 when all's well, or prints what's wrong on
 its first line (a minute's timeout), each failing one an item of the `checks` step. Every step has an area (Backups, Jobs, Mac, Drift,
@@ -922,22 +922,34 @@ posts are a run's at a terminal: a card waiting, and macOS asking.
 
 **The hourly launch** (slice 16) is a built-in step on every Mac, `hourly-launch`, nothing
 declared: a launch agent, `com.leeovery.kit.nightly` in `~/Library/LaunchAgents`, has launchd
-run `open -W -g -n` on kit.app every hour on the hour, with `nightly` and the path of the kit
-`kit apply` ran from, as it was run (Homebrew's link, not its versioned folder); kit.app runs
-`kit nightly --scheduled` as its child, waits, and exits as it did. macOS holds kit.app
-responsible for its child, so Full Disk Access is kit.app's, kept across kit's updates as kit.app
-is rebuilt only when its own files change (the dotfiles' Nightly.app did the same). Its check:
-the agent says that, for this kit and kit.app, kit.app is built from this kit's files, and
-launchd has it loaded (`launchctl print gui/<uid>/…`); `kit apply` builds kit.app, writes the
-agent, loads it (`launchctl bootstrap`, after `bootout` when it was loaded and changed), and
-records when, the first run being up to an hour off. A kit run from a new path writes it again.
+run `open -W -g -n` on kit.app every hour on the hour, with `nightly` and the kit on kit's PATH,
+named as it's found there (Homebrew's link, not its versioned folder); kit.app runs `kit
+nightly --scheduled` as its child, waits, and quits (`open -W` exits 0 whatever the run did, so
+nothing reads how it ended: kit's run log has it). macOS holds kit.app responsible for its
+child, so Full Disk Access is kit.app's, kept across kit's updates as kit.app is rebuilt only
+when its own files change (the dotfiles' Nightly.app did the same). The agent names that kit
+only when it's the kit running: a kit run from elsewhere (`go run`'s, a worktree's, a build in
+a temporary folder, or any other kit than the one on PATH) leaves the agent as it stands, its
+check looking at the kit the agent names, and `kit apply` saying why it left it. Its check: the
+agent says that, for the kit and kit.app, the kit it names is there, kit.app is built from this
+kit's files, and launchd has it loaded (`launchctl print gui/<uid>/…`); `kit apply` builds
+kit.app, writes the agent, loads it (`launchctl bootstrap`, after `bootout` when it was loaded
+and changed, asked once more a second later should launchd refuse, as it can while the old job
+is torn down), and records when, the first run being up to an hour off. Only the launch's runs
+record the hourly run: `kit nightly` by hand records the nightly run, when it's due, never the
+hourly one, so it never hides a launch that's stopped.
+
 After it, `kit-app-access` gives kit.app Full Disk Access, a step by hand: a card in `kit apply`
 at a terminal, System Settings opened at the list and Finder at kit.app, for the drag (as the
 boot's for the terminal), done as the person says. Each scheduled run records whether kit.app
-could read what only Full Disk Access shows, with the fingerprint of the files kit.app was built
-from; the step is done while the last word, the run's or the person's, is granted for the
-kit.app there, so one rebuilt from other files (another app to macOS, its grant gone) or found
-without it needs the card again, and `kit status` says so.
+could read what only Full Disk Access shows (nothing, with none of it on the Mac to read), with
+the fingerprint of the files kit.app was built from; the step is done while the last word, the
+run's or the person's, is granted for the kit.app there, so one rebuilt from other files
+(another app to macOS, its grant gone) or found without it needs the card again, and `kit
+status` says so. `full-disk-access`, with the `prefs` feature, is the terminal's grant alone,
+for a capture or restore run there; the launch's runs leave it out. A capture holds a lock
+beside the store's clone for its whole run, so two (the launch's and one by hand) never write
+the store at once: the second waits, up to 30 minutes.
 
 Later: `share`, `edit`, `update`, `secrets`, `prefs`,
 `bootstrap`, `takeover`, `retire`, `decisions`, `decide`, `fleet`.

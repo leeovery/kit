@@ -1,8 +1,10 @@
 package prefs_test
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -582,5 +584,76 @@ func TestPatterns(t *testing.T) {
 		"?? "+strings.Join(paths, "\x00?? ")+"\x00", paths, strings.Join(paths, "\x00")+"\x00")
 	if report, err := w.p.Capture(t.Context()); err != nil || report.Domains != 2 || report.Files != 3 {
 		t.Errorf("Capture() = %+v, %v", report, err)
+	}
+}
+
+// holdLock takes the lock in the file at path, as another kit's capture
+// would: closing what it returns lets it go.
+func holdLock(t *testing.T, path string) *os.File {
+	t.Helper()
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = f.Close() })
+	return f
+}
+
+// lockFree reports whether no one holds the lock in the file at path.
+func lockFree(path string) bool {
+	f, err := os.OpenFile(path, os.O_RDWR, 0o600)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = f.Close() }()
+	return syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB) == nil
+}
+
+// Two captures never write the store at once, as the hourly launch's and
+// one by hand: one waits while another holds the store's lock, running
+// nothing, and holds it itself throughout its run.
+func TestCapturesTakeTurns(t *testing.T) {
+	w := newWorld(t, prefs.Lists{})
+	writeRecord(t, w.state, `{"on": "restored from laptop"}`)
+	w.write(t, filepath.Join(w.clone, "laptop", "owner"), "hardware HW-OLD\nmodel Mac1,1\nsince 2026-09-28 17:00\n")
+	lock := w.clone + ".capture.lock"
+	other := holdLock(t, lock)
+	waited := 0
+	w.p.Sleep = func(time.Duration) {
+		waited++
+		if waited == 1 {
+			if calls := w.fake.Calls(); len(calls) > 0 {
+				t.Errorf("ran %q while another capture held the store", calls)
+			}
+			_ = other.Close()
+		}
+	}
+	held := false
+	w.fake.On("ioreg", "-rd1", "-c", "IOPlatformExpertDevice").Prints(`  "IOPlatformUUID" = "HW-THIS"` + "\n").Does(func() { held = !lockFree(lock) })
+
+	var notOwner prefs.NotOwnerError
+	if _, err := w.p.Capture(t.Context()); !asNotOwner(err, &notOwner) {
+		t.Fatalf("Capture() = %v, want it to run once the other's done", err)
+	}
+	if waited == 0 || !held {
+		t.Errorf("waited %d times, held the lock while it ran: %v; want it to wait, then hold it", waited, held)
+	}
+	if !lockFree(lock) {
+		t.Error("the store's lock is still held once the capture's done")
+	}
+}
+
+// A capture stopped while it waits for another runs nothing.
+func TestACaptureStoppedWhileItWaits(t *testing.T) {
+	w := newWorld(t, prefs.Lists{})
+	writeRecord(t, w.state, `{"on": "started fresh"}`)
+	holdLock(t, w.clone+".capture.lock")
+	ctx, cancel := context.WithCancel(t.Context())
+	w.p.Sleep = func(time.Duration) { cancel() }
+	if _, err := w.p.Capture(ctx); !errors.Is(err, context.Canceled) || len(w.fake.Calls()) > 0 {
+		t.Errorf("Capture() = %v, ran %q; want it stopped, nothing run", err, w.fake.Calls())
 	}
 }

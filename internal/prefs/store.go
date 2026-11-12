@@ -21,7 +21,7 @@ import (
 )
 
 // cloneTimeout is how long cloning the store may take; cloneRetry how
-// often kit tries again for the lock another kit holds while it clones.
+// often kit tries again for a lock on the store another kit holds.
 const (
 	cloneTimeout = 10 * time.Minute
 	cloneRetry   = 100 * time.Millisecond
@@ -101,12 +101,44 @@ func (p *Prefs) clone(ctx context.Context) error {
 
 // lockClone takes the lock on cloning the store, beside the clone, trying
 // again while another kit holds it, till ctx is done: unlock lets it go.
-// Its file's never removed, as a kit waiting for it would go on to lock a
-// file no longer there.
 func (p *Prefs) lockClone(ctx context.Context) (unlock func(), err error) {
-	f, err := os.OpenFile(p.Clone+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	unlock, err = p.lock(ctx, p.Clone+".lock")
+	if err != nil && ctx.Err() == nil {
+		err = fmt.Errorf("lock the prefs repository's clone: %w", err)
+	}
+	return unlock, err
+}
+
+// captureWait is how long a capture waits for one under way to finish.
+const captureWait = 30 * time.Minute
+
+// lockCapture takes the lock on capturing into the store, beside the
+// clone, so that no two captures, as the hourly launch's and one by hand,
+// write the store at once: waiting for one under way, till ctx is done or
+// for captureWait at most. unlock lets it go.
+func (p *Prefs) lockCapture(ctx context.Context) (unlock func(), err error) {
+	if err := os.MkdirAll(filepath.Dir(p.Clone), 0o700); err != nil {
+		return nil, err
+	}
+	waiting, cancel := context.WithTimeout(ctx, captureWait)
+	defer cancel()
+	unlock, err = p.lock(waiting, p.Clone+".capture.lock")
+	switch {
+	case err == nil, ctx.Err() != nil:
+		return unlock, err
+	case waiting.Err() != nil:
+		return nil, fmt.Errorf("another capture still held the store after %d minutes: this one didn't run", int(captureWait.Minutes()))
+	}
+	return nil, fmt.Errorf("lock the store for capture: %w", err)
+}
+
+// lock takes the lock in the file at path, trying again while another kit
+// holds it, till ctx is done: unlock lets it go. Its file's never removed,
+// as a kit waiting for it would go on to lock a file no longer there.
+func (p *Prefs) lock(ctx context.Context, path string) (unlock func(), err error) {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
-		return nil, fmt.Errorf("lock the prefs repository's clone: %w", err)
+		return nil, err
 	}
 	for {
 		err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
@@ -115,7 +147,7 @@ func (p *Prefs) lockClone(ctx context.Context) (unlock func(), err error) {
 			return func() { _ = f.Close() }, nil
 		case !errors.Is(err, syscall.EWOULDBLOCK):
 			_ = f.Close()
-			return nil, fmt.Errorf("lock the prefs repository's clone: %w", err)
+			return nil, err
 		case ctx.Err() != nil:
 			_ = f.Close()
 			return nil, ctx.Err()

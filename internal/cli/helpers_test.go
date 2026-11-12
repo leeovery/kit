@@ -131,8 +131,9 @@ func newWorld(t *testing.T, files map[string]string) *world {
 	return w
 }
 
-// kitPath is where the test's kit runs from: the kit the hourly launch runs.
-const kitPath = "/opt/homebrew/bin/kit"
+// kitPath is where the world's kit is, from the home: on kit's PATH, the
+// kit that runs, unless a test moves it, and the one the hourly launch runs.
+var kitPath = filepath.Join(".local", "bin", "kit")
 
 // launchAgent is the hourly launch's file, from the home.
 var launchAgent = filepath.Join("Library", "LaunchAgents", steps.LaunchLabel+".plist")
@@ -150,7 +151,11 @@ func (w *world) scheduled(t *testing.T) {
 	t.Helper()
 	w.write(t, filepath.Join(kitApp, "Contents", "Resources", "built-from"), macapp.Fingerprint()+"\n")
 	w.write(t, filepath.Join(kitApp, "Contents", "MacOS", "kit"), "")
-	agent, err := steps.LaunchAgent(filepath.Join(w.home, kitApp), kitPath)
+	w.write(t, kitPath, "")
+	if err := os.Chmod(filepath.Join(w.home, kitPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	agent, err := steps.LaunchAgent(filepath.Join(w.home, kitApp), filepath.Join(w.home, kitPath))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +240,7 @@ func (w *world) run(t *testing.T, args ...string) (stdout, stderr string, status
 			w.fake.Env = slices.Concat(env, w.added)
 			return w.fake
 		},
-		Self:      func() (string, error) { return cmp.Or(w.self, kitPath), nil },
+		Self:      func() (string, error) { return cmp.Or(w.self, filepath.Join(w.home, kitPath)), nil },
 		SudoLocal: filepath.Join(w.home, "etc", "sudo_local"),
 		SSHDir:    filepath.Join(w.home, "etc", "ssh"),
 		// Nothing listens there: a test waking Remote Login says where.

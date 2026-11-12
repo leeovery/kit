@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -17,6 +16,7 @@ import (
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/engine"
+	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/macapp"
 	"github.com/leeovery/kit/internal/nightly"
@@ -57,21 +57,20 @@ no job is named add or remove).`,
 			if plan {
 				command, logName = "nightly --plan", "nightly-plan"
 			}
+			a.scheduled = scheduled
 			var report bytes.Buffer
 			r, err := a.prepareWith(command, logName, render.Tee(render.NewPlain(&report), a.face()))
 			if err != nil {
 				return err
 			}
 			if scheduled {
-				err = recordAccess(r)
+				recordAccess(r)
 			}
-			if err == nil {
-				err = a.nightly(cmd.Context(), r, args, plan)
-			}
+			err = a.nightly(cmd.Context(), r, args, plan)
 			if closeErr := r.close(); err == nil {
 				err = closeErr
 			}
-			if writeErr := writeAtomic(filepath.Join(r.logsDir, reportFile), report.Bytes()); writeErr != nil && err == nil {
+			if writeErr := steps.WriteWhole(filepath.Join(r.logsDir, reportFile), report.Bytes(), 0o700); writeErr != nil && err == nil {
 				err = writeErr
 			}
 			return err
@@ -88,33 +87,23 @@ no job is named add or remove).`,
 
 // recordAccess records whether the kit.app in kit's data folder has Full
 // Disk Access, as this run, its child, finds by reading what only that
-// shows.
-func recordAccess(r *run) error {
-	found := nightly.Access{At: r.now, App: macapp.Built(r.dataDir), Granted: steps.HasFullDiskAccess(r.homeDir)}
-	return nightly.Update(r.stateDir, func(rec *nightly.Record) { rec.Access = found })
+// shows: nothing, with none of that on the Mac to read. Unrecorded, the run
+// goes on, its log saying why.
+func recordAccess(r *run) {
+	granted, found := steps.ProbeFullDiskAccess(r.homeDir)
+	if !found {
+		return
+	}
+	access := nightly.Access{At: r.now, App: macapp.Built(r.dataDir), Granted: granted}
+	if err := nightly.Update(r.stateDir, func(rec *nightly.Record) { rec.Access = access }); err != nil {
+		r.sink.Emit(event.Logged{Time: r.now, Line: "kit.app's Full Disk Access went unrecorded: " + err.Error(), Alert: true})
+	}
 }
 
-// writeAtomic writes data to path, whole or not at all, making its folder.
-func writeAtomic(path string, data []byte) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
-	if err != nil {
-		return err
-	}
-	defer func() { _ = os.Remove(tmp.Name()) }()
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), path)
-}
-
-// nightly runs the jobs due, or those named, then every check.
+// nightly runs the jobs due, or those named, then every check. A run of
+// them all records the nightly run, when it's due; the hourly launch's
+// (a.scheduled) records the hourly run too, so that one by hand never
+// hides a launch that's stopped.
 func (a *app) nightly(ctx context.Context, r *run, names []string, plan bool) error {
 	hourly, daily, err := a.jobs(r)
 	if err != nil {
@@ -148,11 +137,14 @@ func (a *app) nightly(ctx context.Context, r *run, names []string, plan bool) er
 	if err != nil {
 		return err
 	}
-	scheduled := len(names) == 0 && !plan
-	if scheduled {
+	all := len(names) == 0 && !plan
+	hourlyRun, fullRun := all && a.scheduled, all && full
+	if hourlyRun || fullRun {
 		if err := nightly.Update(r.stateDir, func(rec *nightly.Record) {
-			rec.Hourly = nightly.Run{Started: r.now}
-			if full {
+			if hourlyRun {
+				rec.Hourly = nightly.Run{Started: r.now}
+			}
+			if fullRun {
 				rec.Full = nightly.Run{Started: r.now}
 			}
 		}); err != nil {
@@ -168,11 +160,13 @@ func (a *app) nightly(ctx context.Context, r *run, names []string, plan bool) er
 	if err != nil {
 		return err
 	}
-	if scheduled {
+	if hourlyRun || fullRun {
 		finished := a.Now()
 		if err := nightly.Update(r.stateDir, func(rec *nightly.Record) {
-			rec.Hourly.Finished = finished
-			if full {
+			if hourlyRun {
+				rec.Hourly.Finished = finished
+			}
+			if fullRun {
 				rec.Full.Finished = finished
 			}
 		}); err != nil {
