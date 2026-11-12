@@ -267,6 +267,36 @@ func TestInstallUpdatesOnceThenInstallsEachTapsFirst(t *testing.T) {
 	}
 }
 
+// Readying names taps the taps they're from that aren't tapped yet, but
+// never Homebrew's own, core and cask, whose names brew finds tapped or
+// not: a full name in one taps nothing.
+func TestReadyNeverTapsHomebrewsOwn(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		kind  func(*brew.Homebrew) kind.Kind
+		names []string
+	}{
+		{"formulae", (*brew.Homebrew).Formulae, []string{"jq", "homebrew/core/composer", "Homebrew/Core/php", "owner/tap/tool"}},
+		{"casks", (*brew.Homebrew).Casks, []string{"ghostty", "homebrew/cask/firefox", "owner/tap/tool"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			fake := runnertest.New(t)
+			fake.On("brew", "tap")
+			fake.On("brew", "tap", "owner/tap")
+			if err := tt.kind(brew.New(fake)).(kind.Readier).Ready(t.Context(), tt.names); err != nil {
+				t.Fatal(err)
+			}
+			if got, want := fake.Calls(), []string{"brew tap", "brew tap owner/tap"}; !slices.Equal(got, want) {
+				t.Errorf("ran %q, want %q: owner/tap tapped alone", got, want)
+			}
+		})
+	}
+	fake := runnertest.New(t)
+	if err := brew.New(fake).Formulae().(kind.Readier).Ready(t.Context(), []string{"homebrew/core/composer", "jq"}); err != nil || len(fake.Calls()) != 0 {
+		t.Errorf("Ready() of Homebrew's own = %v, ran %q; want nothing run", err, fake.Calls())
+	}
+}
+
 // A tap that fails, as one Homebrew refuses, fails its own names alone:
 // the rest, Homebrew's own and another tap's, still go in, formulae or
 // casks, and the failure names what didn't.
