@@ -363,8 +363,8 @@ func TestExecSaysTheGroupACommandRanIn(t *testing.T) {
 // it was stopped: here each as its last line's read, once it's exited.
 func TestExecSaysAnExitKitDidntCause(t *testing.T) {
 	r, _ := programs(t, map[string]string{"fails": "echo bye; exit 3"})
-	slowly := func(string) { time.Sleep(time.Second) }
-	res, err := r.Run(t.Context(), runner.Command{Name: "fails", Timeout: 500 * time.Millisecond, Lines: slowly})
+	slowly := func(string) { time.Sleep(3 * time.Second) }
+	res, err := r.Run(t.Context(), runner.Command{Name: "fails", Timeout: 2 * time.Second, Lines: slowly})
 	if exit, ok := errors.AsType[*runner.ExitError](err); !ok || exit.Code != 3 || res.ExitCode != 3 {
 		t.Errorf("Run(), its limit up = exit %d, %v; want exit 3", res.ExitCode, err)
 	}
