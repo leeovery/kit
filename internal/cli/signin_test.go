@@ -50,6 +50,7 @@ func finished(records []logs.Record, step string) (check.Result, bool) {
 // up.
 func TestApplyRaisesTheStoresSignIn(t *testing.T) {
 	w := secretsWorld(t)
+	w.withoutKitApp(t)
 	w.installApp(t, "1Password", signInApp)
 	w.terminal, w.size = true, [2]int{160, 64}
 	kb := &keyboard{}

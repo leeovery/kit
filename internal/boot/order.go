@@ -455,9 +455,6 @@ func (b *Boot) files() (*linked.Files, error) {
 	}, nil
 }
 
-// accessSettings is System Settings, opened at Full Disk Access's list.
-const accessSettings = "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_AllFiles"
-
 // accessStep has the person give the terminal Full Disk Access before it
 // first opens, as an app takes it up only when it starts: System Settings
 // is opened at the list, and Finder at the app, to drag in. From Terminal
@@ -484,7 +481,7 @@ func (b *Boot) accessStep(t apps.Terminal) engine.Step {
 			if b.in(t) {
 				return errors.New(found.Reason)
 			}
-			_, _ = b.Run.Run(ctx, runner.Command{Name: "open", Args: []string{accessSettings}})
+			_, _ = b.Run.Run(ctx, runner.Command{Name: "open", Args: []string{steps.AccessSettings}})
 			_, _ = b.Run.Run(ctx, runner.Command{Name: "open", Args: []string{"-R", app}})
 			todo := fmt.Sprintf("System Settings is open at Full Disk Access, and Finder at Applications: drag %s into the list, then press enter", t.Title)
 			if _, err := b.Ask.Wait(ctx, AccessStep, "for "+t.Title+", before it first opens", todo, []Key{{Key: "enter", Does: "done"}}); err != nil {

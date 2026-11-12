@@ -330,7 +330,7 @@ func (r Restoring) arq(ctx context.Context, at time.Time, todo []judged) (src *r
 		if err := awaitAll(ctx, r.ArqAwait); err != nil {
 			return nil, nil, nil, err
 		}
-		if err := r.ask(ctx, &ownCard{says: r.arqCard(at, asks, holds), run: r.Run, app: arq.Bundle}); err != nil {
+		if err := r.ask(ctx, &ownCard{says: r.arqCard(at, asks, holds), show: func(ctx context.Context) { openApp(ctx, r.Run, arq.Bundle) }}); err != nil {
 			return nil, nil, nil, err
 		}
 		if a.Lacks, err = r.hasnt(ctx, asks, holds); err != nil {

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/leeovery/kit/internal/check"
@@ -49,18 +48,7 @@ func PathFile(dirs []string, file string) engine.Step {
 			return check.Result{State: check.Attention, Summary: "not as [paths] says", Items: []check.Item{it}}
 		},
 		Apply: func(context.Context, check.Result) error {
-			if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
-				return err
-			}
-			tmp := file + ".kit-new"
-			if err := os.WriteFile(tmp, []byte(want), 0o644); err != nil {
-				return err
-			}
-			if err := os.Rename(tmp, file); err != nil {
-				_ = os.Remove(tmp)
-				return err
-			}
-			return nil
+			return WriteWhole(file, []byte(want), 0o700)
 		},
 	}
 }

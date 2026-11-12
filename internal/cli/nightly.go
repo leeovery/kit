@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -17,7 +16,9 @@ import (
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/engine"
+	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/kind"
+	"github.com/leeovery/kit/internal/macapp"
 	"github.com/leeovery/kit/internal/nightly"
 	"github.com/leeovery/kit/internal/prefs"
 	"github.com/leeovery/kit/internal/render"
@@ -27,12 +28,11 @@ import (
 // jobTimeout is how long a job of the user's own may run.
 const jobTimeout = time.Hour
 
-// reportFile is the report kit nightly leaves, in kit's logs folder, for a
-// notification's click to open.
+// reportFile is the report kit nightly leaves, in kit's logs folder.
 const reportFile = "report.txt"
 
 func newNightlyCommand(a *app) *cobra.Command {
-	var plan, alerts bool
+	var plan, scheduled bool
 	cmd := &cobra.Command{
 		Use:         "nightly [job...]",
 		Short:       "Run the scheduled jobs that are due, then every check: what the hourly launch runs",
@@ -44,80 +44,66 @@ it's been missed, as by a Mac asleep then. The jobs run in order, each after
 the one before, and one that fails never stops the others; the checks follow.
 Nothing is installed or removed.
 
+kit apply installs the hourly launch: launchd opens kit.app on the hour, and
+kit.app runs kit nightly, so that Full Disk Access is kit.app's. Its runs
+notify no one: what they find is in kit status, the log, and the report each
+run leaves in kit's logs folder (report.txt).
+
 Name jobs to run only those, now. --plan says what's due, and runs nothing.
 kit nightly add and kit nightly remove declare and undeclare nightly jobs (so
-no job is named add or remove).
-
-Each run leaves its report, kit status's plain lines, in kit's logs folder
-(report.txt). --alerts prints, in place of the run, what to notify about, as
-JSON, for the app that runs kit hourly: each problem at once, an alert each,
-and the drift that needs attention as one digest, changing at most once a
-day; an alert's id stays the same while it's the same problem.`,
+no job is named add or remove).`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			command, logName := "nightly", "nightly"
 			if plan {
 				command, logName = "nightly --plan", "nightly-plan"
 			}
+			a.scheduled = scheduled
 			var report bytes.Buffer
-			collector := &render.Collector{}
-			faces := []render.Face{render.NewPlain(&report), collector}
-			if !alerts {
-				faces = append(faces, a.face())
-			}
-			r, err := a.prepareWith(command, logName, render.Tee(faces...))
+			r, err := a.prepareWith(command, logName, render.Tee(render.NewPlain(&report), a.face()))
 			if err != nil {
 				return err
+			}
+			if scheduled {
+				recordAccess(r)
 			}
 			err = a.nightly(cmd.Context(), r, args, plan)
 			if closeErr := r.close(); err == nil {
 				err = closeErr
 			}
-			if writeErr := writeAtomic(filepath.Join(r.logsDir, reportFile), report.Bytes()); writeErr != nil && err == nil {
+			if writeErr := steps.WriteWhole(filepath.Join(r.logsDir, reportFile), report.Bytes(), 0o700); writeErr != nil && err == nil {
 				err = writeErr
-			}
-			if alerts {
-				list, alertsErr := nightly.Alerts(collector.Document(), r.stateDir, a.Now())
-				if alertsErr != nil {
-					return alertsErr
-				}
-				if list == nil {
-					list = []nightly.Alert{}
-				}
-				if printErr := render.WriteJSON(a.Stdout, list); printErr != nil {
-					return printErr
-				}
 			}
 			return err
 		},
 	}
 	cmd.Flags().BoolVar(&plan, "plan", false, "say what's due, and run nothing")
-	cmd.Flags().BoolVar(&alerts, "alerts", false, "print what to notify about, as JSON, for the hourly launch's app")
+	// kit.app's: what its run finds of Full Disk Access is the app's.
+	cmd.Flags().BoolVar(&scheduled, "scheduled", false, "run by the hourly launch, through kit.app")
+	_ = cmd.Flags().MarkHidden("scheduled")
 	// Nightly jobs are declared here too: add and remove, never a job's name.
 	cmd.AddCommand(newLineAdd(a, config.NightlyKind, "Declare a nightly job"), newLineRemove(a, config.NightlyKind))
 	return cmd
 }
 
-// writeAtomic writes data to path, whole or not at all, making its folder.
-func writeAtomic(path string, data []byte) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
+// recordAccess records whether the kit.app in kit's data folder has Full
+// Disk Access, as this run, its child, finds by reading what only that
+// shows: nothing, with none of that on the Mac to read. Unrecorded, the run
+// goes on, its log saying why.
+func recordAccess(r *run) {
+	granted, found := steps.ProbeFullDiskAccess(r.homeDir)
+	if !found {
+		return
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
-	if err != nil {
-		return err
+	access := nightly.Access{At: r.now, App: macapp.Built(r.dataDir), Granted: granted}
+	if err := nightly.Update(r.stateDir, func(rec *nightly.Record) { rec.Access = access }); err != nil {
+		r.sink.Emit(event.Logged{Time: r.now, Line: "kit.app's Full Disk Access went unrecorded: " + err.Error(), Alert: true})
 	}
-	defer func() { _ = os.Remove(tmp.Name()) }()
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), path)
 }
 
-// nightly runs the jobs due, or those named, then every check.
+// nightly runs the jobs due, or those named, then every check. A run of
+// them all records the nightly run, when it's due; the hourly launch's
+// (a.scheduled) records the hourly run too, so that one by hand never
+// hides a launch that's stopped.
 func (a *app) nightly(ctx context.Context, r *run, names []string, plan bool) error {
 	hourly, daily, err := a.jobs(r)
 	if err != nil {
@@ -151,11 +137,14 @@ func (a *app) nightly(ctx context.Context, r *run, names []string, plan bool) er
 	if err != nil {
 		return err
 	}
-	scheduled := len(names) == 0 && !plan
-	if scheduled {
+	all := len(names) == 0 && !plan
+	hourlyRun, fullRun := all && a.scheduled, all && full
+	if hourlyRun || fullRun {
 		if err := nightly.Update(r.stateDir, func(rec *nightly.Record) {
-			rec.Hourly = nightly.Run{Started: r.now}
-			if full {
+			if hourlyRun {
+				rec.Hourly = nightly.Run{Started: r.now}
+			}
+			if fullRun {
 				rec.Full = nightly.Run{Started: r.now}
 			}
 		}); err != nil {
@@ -171,11 +160,13 @@ func (a *app) nightly(ctx context.Context, r *run, names []string, plan bool) er
 	if err != nil {
 		return err
 	}
-	if scheduled {
+	if hourlyRun || fullRun {
 		finished := a.Now()
 		if err := nightly.Update(r.stateDir, func(rec *nightly.Record) {
-			rec.Hourly.Finished = finished
-			if full {
+			if hourlyRun {
+				rec.Hourly.Finished = finished
+			}
+			if fullRun {
 				rec.Full.Finished = finished
 			}
 		}); err != nil {

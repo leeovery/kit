@@ -227,10 +227,11 @@ what's wrong and what to do: the Mac's (`disk`, `memory`, `file-events`, `load`)
 the backup tools' a Mac lists in `[backups]` (`time-machine`, `arq`: each runs on its own
 schedule, and kit checks it did, only the plans Arq is scheduled to run; Backups above); the config repository's
 (`config-sync`: commits that won't push; `config-private`); the scheduled runs' (`nightly`: the hourly run within two
-hours, the nightly one finished within 26 and none stuck over six, each job's last outcome;
-quiet until `kit nightly` has run on a schedule); with its feature, `prefs` (apps' settings saved: capture switched on, this Mac owning its folder, a capture
+hours, or the hourly launch loaded within them, its first run to come; the nightly one finished within 26 and none
+stuck over six, each job's last outcome; never run on a schedule, its launch never loaded, is a problem, `kit apply`
+installing it); with its feature, `prefs` (apps' settings saved: capture switched on, this Mac owning its folder, a capture
 in the last day without errors, pushed within a day; read from kit's record alone) with
-`full-disk-access` (what capture needs); and the user's own, in a `[checks]`
+`full-disk-access` (the terminal's grant, what a capture there needs); and the user's own, in a `[checks]`
 section, a line each:
 a name, then `--` and a command, which exits 0 when all's well, or prints what's wrong on
 its first line (a minute's timeout), each failing one an item of the `checks` step. Every step has an area (Backups, Jobs, Mac, Drift,
@@ -914,12 +915,41 @@ when the nightly run falls due (`nightly_at` in `kit.toml`, 03:00 unless it says
 first run after it's been missed, as by a Mac asleep then. Each job's outcome is kept in kit's
 state (`nightly.json`). It installs and removes nothing. `--plan` says what's due; naming jobs
 runs those, now. Each run leaves its report (`report.txt` in kit's logs folder, `kit status`'s
-plain lines) for a notification's click. `--alerts` prints, in place of the run, what the
-hourly launch's app should notify about, as JSON (`[{id, title, body}]`): each problem a check
-found, and each step that failed or was deferred, at once; the drift that needs attention as
-one digest, its id naming the list, changing at most once a day and gone when nothing's
-left (kept in kit's state, `alerts.json`); a job's own failure is the runs check's, not
-twice.
+plain lines), for reading later. Its runs notify no one (the maintainer, 12 Nov 2026:
+"record it so that you have access to the knowledge, but I don't want to be told"): what
+they find is in `kit status`, bare `kit`, the report and the log. The notifications kit
+posts are a run's at a terminal: a card waiting, and macOS asking.
+
+**The hourly launch** (slice 16) is a built-in step on every Mac, `hourly-launch`, nothing
+declared: a launch agent, `com.leeovery.kit.nightly` in `~/Library/LaunchAgents`, has launchd
+run `open -W -g -n` on kit.app every hour on the hour, with `nightly` and the kit on kit's PATH,
+named as it's found there (Homebrew's link, not its versioned folder); kit.app runs `kit
+nightly --scheduled` as its child, waits, and quits (`open -W` exits 0 whatever the run did, so
+nothing reads how it ended: kit's run log has it). macOS holds kit.app responsible for its
+child, so Full Disk Access is kit.app's, kept across kit's updates as kit.app is rebuilt only
+when its own files change (the dotfiles' Nightly.app did the same). The agent names that kit
+only when it's the kit running: a kit run from elsewhere (`go run`'s, a worktree's, a build in
+a temporary folder, or any other kit than the one on PATH) leaves the agent as it stands, its
+check looking at the kit the agent names, and `kit apply` saying why it left it. Its check: the
+agent says that, for the kit and kit.app, the kit it names is there, kit.app is built from this
+kit's files, and launchd has it loaded (`launchctl print gui/<uid>/…`); `kit apply` builds
+kit.app, writes the agent, loads it (`launchctl bootstrap`, after `bootout` when it was loaded
+and changed, asked once more a second later should launchd refuse, as it can while the old job
+is torn down), and records when, the first run being up to an hour off. Only the launch's runs
+record the hourly run: `kit nightly` by hand records the nightly run, when it's due, never the
+hourly one, so it never hides a launch that's stopped.
+
+After it, `kit-app-access` gives kit.app Full Disk Access, a step by hand: a card in `kit apply`
+at a terminal, System Settings opened at the list and Finder at kit.app, for the drag (as the
+boot's for the terminal), done as the person says. Each scheduled run records whether kit.app
+could read what only Full Disk Access shows (nothing, with none of it on the Mac to read), with
+the fingerprint of the files kit.app was built from; the step is done while the last word, the
+run's or the person's, is granted for the kit.app there, so one rebuilt from other files
+(another app to macOS, its grant gone) or found without it needs the card again, and `kit
+status` says so. `full-disk-access`, with the `prefs` feature, is the terminal's grant alone,
+for a capture or restore run there; the launch's runs leave it out. A capture holds a lock
+beside the store's clone for its whole run, so two (the launch's and one by hand) never write
+the store at once: the second waits, up to 30 minutes.
 
 Later: `share`, `edit`, `update`, `secrets`, `prefs`,
 `bootstrap`, `takeover`, `retire`, `decisions`, `decide`, `fleet`.
@@ -1262,7 +1292,8 @@ own (#38); the scan made to see untracked files (#39); bare `kit` (#40).
 **8. `kit nightly` — built.** Jobs of the user's own (`[hourly]`, `[nightly]`), the nightly
 record and its rule, `kit nightly`; Arq checked by its own schedules (#41); the Scratch
 clean-up and settings capture (#42); the checks on the runs, Scratch and Full Disk Access
-(#43); `--alerts`, drift's daily digest and the report (#44).
+(#43); `--alerts`, drift's daily digest and the report (#44): the alerts and the digest taken
+out in slice 16, as kit's runs notify no one.
 
 **9. Steps — built.** A folder per Mac in the config repository; linked files; the
 config repository's own edits settled by `kit reconcile`; the shell and PATH, git, macOS

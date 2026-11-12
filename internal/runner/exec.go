@@ -41,7 +41,7 @@ type Exec struct {
 }
 
 func (e Exec) Run(ctx context.Context, cmd Command) (Result, error) {
-	program, err := e.find(cmd.Name)
+	program, err := e.Find(cmd.Name)
 	if err != nil {
 		return Result{ExitCode: -1}, err
 	}
@@ -292,12 +292,12 @@ func (e Exec) Environ(ctx context.Context, cmd Command) ([]string, bool) {
 
 // Has reports whether the program name is on Path, or is a path to one.
 func (e Exec) Has(name string) bool {
-	_, err := e.find(name)
+	_, err := e.Find(name)
 	return err == nil
 }
 
-// find finds the program name on Path, or checks a path to it.
-func (e Exec) find(name string) (string, error) {
+// Find finds the program name on Path, or checks a path to it.
+func (e Exec) Find(name string) (string, error) {
 	if strings.Contains(name, "/") {
 		if executable(name) {
 			return name, nil

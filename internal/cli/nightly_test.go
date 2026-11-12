@@ -1,7 +1,6 @@
 package cli_test
 
 import (
-	"encoding/json"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -107,34 +106,22 @@ func TestNightlyBuiltInJobs(t *testing.T) {
 	}
 }
 
-// --alerts prints what to notify about, in place of the run; every run
-// leaves its report.
-func TestNightlyAlertsAndReport(t *testing.T) {
+// Every run leaves its report, kit status's plain lines, for reading later:
+// it notifies no one.
+func TestNightlyLeavesItsReport(t *testing.T) {
 	w := jobsWorld(t)
-	out, _, _ := w.run(t, "nightly", "--alerts")
-	var alerts []struct{ ID, Title, Body string }
-	if err := json.Unmarshal([]byte(out), &alerts); err != nil {
-		t.Fatalf("kit nightly --alerts printed %q: %v", out, err)
+	w.run(t, "nightly")
+	report := w.read(t, filepath.Join("Library", "Logs", "kit", "report.txt"))
+	if !strings.HasPrefix(report, "kit nightly · laptop\n") || !strings.Contains(report, "nightly:tidy failed the archive disk isn't connected\n") || !strings.Contains(report, "disk ok 48% free\n") {
+		t.Errorf("report.txt =\n%s", report)
 	}
-	ids := map[string]string{}
-	for _, a := range alerts {
-		ids[a.ID] = a.Body
-	}
-	if ids["nightly:nightly:tidy"] != "tidy failed: the archive disk isn't connected" {
-		t.Errorf("alerts = %+v, want tidy's failure", alerts)
-	}
-	var digest string
-	for id, body := range ids {
-		if strings.HasPrefix(id, "drift-") {
-			digest = body
+	for _, c := range w.fake.Calls() {
+		if strings.HasPrefix(c, "open ") || strings.HasPrefix(c, "osascript -e") {
+			t.Errorf("kit nightly ran %q; want no notification", c)
 		}
 	}
-	if !strings.Contains(digest, "3 things differ from the config: brew ffmpeg, brew node@20, cask firefox") {
-		t.Errorf("drift digest = %q", digest)
-	}
-	report := w.read(t, filepath.Join("Library", "Logs", "kit", "report.txt"))
-	if !strings.HasPrefix(report, "kit nightly · laptop\n") || !strings.Contains(report, "disk ok 48% free\n") {
-		t.Errorf("report.txt =\n%s", report)
+	if _, errOut, code := w.run(t, "nightly", "--alerts"); code != 2 || !strings.Contains(errOut, "unknown flag: --alerts") {
+		t.Errorf("kit nightly --alerts printed %q, exit %d; want it gone", errOut, code)
 	}
 }
 

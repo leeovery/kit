@@ -32,6 +32,7 @@ const timeMachinePrefs = `<?xml version="1.0" encoding="UTF-8"?>
 func toDoWorld(t *testing.T, never bool) (*world, *keyboard) {
 	t.Helper()
 	w := laptopWorld(t)
+	w.withoutKitApp(t)
 	w.writeSection(t, "laptop", "backups", "time-machine\n")
 	tm := w.fake.On("defaults", "export", "/Library/Preferences/com.apple.TimeMachine", "-").Exits(1).PrintsToStderr("file does not exist")
 	if !never {

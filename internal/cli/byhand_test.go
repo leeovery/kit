@@ -54,10 +54,12 @@ func downs(records []logs.Record) []string {
 }
 
 // signInWorld is a Mac with ripgrep missing, and a step by hand that comes
-// after it: signing in to a tool, in a group, with notes saying why.
+// after it: signing in to a tool, in a group, with notes saying why; kit.app
+// not built.
 func signInWorld(t *testing.T) *world {
 	t.Helper()
 	w := missingWorld(t)
+	w.withoutKitApp(t)
 	w.writeSection(t, "laptop", "manual", "# The tool's commands need it.\n"+`sign-in "Sign in to the tool" --after brew --before gh --group "First things" --test test -f /signed-in`+"\n  Open the tool\n  Sign in\n")
 	w.fake.On("brew", "update", "--quiet")
 	w.fake.On("brew", "install", "--formula", "ripgrep")

@@ -467,7 +467,11 @@ func (a *app) build(command, logName string, face render.Face, atTerminal bool) 
 				saving.After = append(saving.After, apps)
 			}
 		}
-		settings = []engine.Step{feature(steps.FeaturePrefs, saving), feature(steps.FeaturePrefs, steps.FullDiskAccess(home))}
+		settings = []engine.Step{feature(steps.FeaturePrefs, saving)}
+		// The terminal's grant: kit-app-access looks after kit.app's.
+		if !a.scheduled {
+			settings = append(settings, feature(steps.FeaturePrefs, steps.FullDiskAccess(home)))
+		}
 	}
 	checks = append(checks, settings...)
 	// A step by hand that comes due while kit applies at a terminal is
@@ -559,9 +563,14 @@ func (a *app) build(command, logName string, face render.Face, atTerminal bool) 
 		_ = log.Close()
 		return nil, err
 	}
-	if jobs := slices.Concat(hourly, daily); len(jobs) > 0 {
-		checks = append(checks, nightly.Check(jobs, len(hourly) > 0, len(daily) > 0, dirs.State, a.Now))
+	scheduling, err := r.schedulingSteps(a, dirs, raise)
+	if err != nil {
+		_ = face.Close()
+		_ = log.Close()
+		return nil, err
 	}
+	checks = append(checks, scheduling...)
+	checks = append(checks, nightly.Check(slices.Concat(hourly, daily), len(daily) > 0, dirs.State, a.Now))
 	base := slices.Concat(needed, setup, kindSteps, checks)
 	for i := range base {
 		base[i].Part = partOf(base[i].Name)
@@ -592,6 +601,30 @@ func (a *app) build(command, logName string, face render.Face, atTerminal bool) 
 		return nil, err
 	}
 	return r, nil
+}
+
+// schedulingSteps are the steps that have kit run by itself, on every Mac:
+// the hourly launch, opening kit.app to run the kit on kit's PATH nightly,
+// when it's this one (steps.LaunchKit); and, after
+// it, the step by hand giving kit.app Full Disk Access, raised at a
+// terminal (raise).
+func (r *run) schedulingSteps(a *app, dirs config.Dirs, raise *steps.Raise) ([]engine.Step, error) {
+	self, err := a.Self()
+	if err != nil {
+		return nil, fmt.Errorf("find kit: %w", err)
+	}
+	kit, why := steps.LaunchKit(self, r.path, os.TempDir())
+	app := r.notifier(a.Getenv, a.Now)
+	launch := steps.HourlyLaunch(steps.Launching{
+		Run: r.run, Dir: filepath.Join(r.homeDir, "Library", "LaunchAgents"), Domain: fmt.Sprintf("gui/%d", os.Getuid()),
+		Kit: kit, Why: why, App: app, StateDir: dirs.State, Now: a.Now,
+	})
+	access := steps.AppAccess(steps.AppAccessing{
+		Run: r.run, App: app.Path(), Built: func() string { return macapp.Built(dirs.Data) },
+		StateDir: dirs.State, Raise: raise, Now: a.Now,
+	})
+	access.After = []string{steps.LaunchName}
+	return []engine.Step{launch, access}, nil
 }
 
 // start starts what a run at a terminal starts, shown on face: answering

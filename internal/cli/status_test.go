@@ -109,6 +109,9 @@ file-events ok fseventsd using 0.1 GB
 load ok load 1.9 on 10 cores
 config-sync ok pushed
 config-private ok private on GitHub (someone/kit-config)
+hourly-launch ok hourly, through kit.app
+kit-app-access ok granted
+nightly ok last ran: hourly 03:04
 2 need attention
 `
 	if out != want || errOut != "" || status != 1 {
@@ -141,7 +144,7 @@ func TestStatusJSON(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &doc); err != nil || code != 1 {
 		t.Fatalf("kit status --json printed %q, exit %d: %v", out, code, err)
 	}
-	if doc.Schema != 1 || doc.Kit != "0.1.0" || doc.Machine != "laptop" || !doc.Attention || len(doc.Steps) != 12 {
+	if doc.Schema != 1 || doc.Kit != "0.1.0" || doc.Machine != "laptop" || !doc.Attention || len(doc.Steps) != 15 {
 		t.Fatalf("document = %+v", doc)
 	}
 	brew := doc.Steps[2]
@@ -306,10 +309,12 @@ func TestStatusQuietensNewDrift(t *testing.T) {
 	}
 
 	w.now = w.now.Add(23 * time.Hour)
+	w.ranHourly(t)
 	if _, _, code := w.run(t, "status"); code != 0 {
 		t.Errorf("kit status a day less an hour later: exit %d, want 0", code)
 	}
 	w.now = w.now.Add(2 * time.Hour)
+	w.ranHourly(t)
 	out, _, code = w.run(t, "status")
 	if !strings.Contains(out, "brew extra ffmpeg\n") || code != 1 {
 		t.Errorf("kit status over a day later printed\n%s exit %d; want ffmpeg needing attention, exit 1", out, code)

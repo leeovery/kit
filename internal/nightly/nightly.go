@@ -1,7 +1,8 @@
 // Package nightly is kit's scheduled work: jobs run every hour, and in the
 // nightly run, once a day; what kit remembers of each run; and the steps
 // that run the jobs, in order, each recording its outcome. The hourly launch
-// runs kit nightly, which runs what's due, then every check.
+// opens kit.app, which runs kit nightly, which runs what's due, then every
+// check.
 package nightly
 
 import (
@@ -32,6 +33,19 @@ type Outcome struct {
 	Said string `json:"said,omitempty"`
 }
 
+// Access is whether kit.app has Full Disk Access, as last found: by a
+// scheduled run, reading what only it shows, or by the person saying
+// they've given it.
+type Access struct {
+	At time.Time `json:"at"`
+	// App is the fingerprint of the kit.app it's about: one built from
+	// other files is another app to macOS, and has none till it's given.
+	App     string `json:"app"`
+	Granted bool   `json:"granted"`
+	// Given is whether it's the person's word, not a run's finding.
+	Given bool `json:"given,omitempty"`
+}
+
 // Record is what kit remembers of its runs.
 type Record struct {
 	// Full is the last nightly run, and Hourly the last hourly one.
@@ -39,6 +53,11 @@ type Record struct {
 	Hourly Run `json:"hourly"`
 	// Jobs are each job's last outcome, by job.
 	Jobs map[string]Outcome `json:"jobs,omitempty"`
+	// Scheduled is when the hourly launch was last loaded: its first run
+	// comes on the hour after.
+	Scheduled time.Time `json:"scheduled,omitzero"`
+	// Access is kit.app's Full Disk Access, as last found.
+	Access Access `json:"access,omitzero"`
 }
 
 // Load reads the record in the state directory: an empty one when there's

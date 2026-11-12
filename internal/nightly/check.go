@@ -23,10 +23,11 @@ const (
 
 // Check is the step checking kit's scheduled runs happen, and their jobs
 // go well, as kit's record of them says: an hourly run in the last two
-// hours, when there are hourly jobs; a nightly run finished in the last 26,
-// and none stuck, when there are nightly ones; and each job's last outcome.
-// Until kit nightly has run on a schedule, it says so, and nothing's due.
-func Check(jobs []Job, hourly bool, nightly bool, stateDir string, now func() time.Time) engine.Step {
+// hours, or the hourly launch loaded in them, its first run to come; a
+// nightly run finished in the last 26, and none stuck, when there are
+// nightly jobs; and each job's last outcome. Never run on a schedule, and
+// the launch never loaded, is a problem: kit apply installs it.
+func Check(jobs []Job, nightly bool, stateDir string, now func() time.Time) engine.Step {
 	return engine.Step{
 		Name: CheckName, Title: "Scheduled runs", Area: Area,
 		Check: func(context.Context) check.Result {
@@ -40,11 +41,18 @@ func Check(jobs []Job, hourly bool, nightly bool, stateDir string, now func() ti
 			}
 			var glance []string
 			t := now()
-			if hourly && !rec.Hourly.Started.IsZero() {
-				last := slices.MaxFunc([]time.Time{rec.Hourly.Started, rec.Hourly.Finished}, time.Time.Compare)
-				if t.Sub(last) > hourlyWithin {
-					add("hourly", "the hourly run last ran "+ago(last, t), "the hourly launch may have stopped: check it's loaded")
-				}
+			last := slices.MaxFunc([]time.Time{rec.Hourly.Started, rec.Hourly.Finished}, time.Time.Compare)
+			since := slices.MaxFunc([]time.Time{last, rec.Scheduled}, time.Time.Compare)
+			switch {
+			case since.IsZero():
+				add("never", "kit has never run on a schedule", "kit apply installs the hourly launch")
+			case t.Sub(since) <= hourlyWithin:
+			case last.IsZero():
+				add("hourly", "no hourly run since its launch was loaded "+ago(since, t), stopped)
+			default:
+				add("hourly", "the hourly run last ran "+ago(last, t), stopped)
+			}
+			if !last.IsZero() {
 				glance = append(glance, "hourly "+last.In(t.Location()).Format("15:04"))
 			}
 			if nightly && !rec.Full.Started.IsZero() {
@@ -54,7 +62,7 @@ func Check(jobs []Job, hourly bool, nightly bool, stateDir string, now func() ti
 						add("stuck", "the nightly run from "+rec.Full.Started.In(t.Location()).Format("2 Jan 15:04")+" never finished", "kit log shows where it stopped; a job may have hung")
 					}
 				case t.Sub(rec.Full.Finished) > fullWithin:
-					add("stale", "the nightly run last finished "+ago(rec.Full.Finished, t), "the hourly launch may have stopped: check it's loaded")
+					add("stale", "the nightly run last finished "+ago(rec.Full.Finished, t), stopped)
 				}
 				glance = append(glance, "nightly "+rec.Full.Started.In(t.Location()).Format("15:04"))
 			}
@@ -63,20 +71,23 @@ func Check(jobs []Job, hourly bool, nightly bool, stateDir string, now func() ti
 					add(j.Name, j.Title+" failed: "+o.Said, "kit nightly "+j.Title+" runs it again; kit log shows its last run")
 				}
 			}
-			summary := "not run on a schedule yet"
-			if len(glance) > 0 {
+			summary := "never run on a schedule"
+			switch {
+			case len(glance) > 0:
 				summary = "last ran: " + strings.Join(glance, " · ")
+			case len(problems) == 0:
+				summary = "its first run comes on the hour"
 			}
 			if len(problems) > 0 {
 				return check.Result{State: check.Attention, Summary: summary, Items: problems}
 			}
-			if len(glance) == 0 {
-				return check.Result{State: check.OK, Summary: summary, Glance: summary}
-			}
-			return check.Result{State: check.OK, Summary: summary, Glance: strings.Join(glance, " · ")}
+			return check.Result{State: check.OK, Summary: summary, Glance: strings.TrimPrefix(summary, "last ran: ")}
 		},
 	}
 }
+
+// stopped is what to do when the scheduled runs have stopped.
+const stopped = "kit apply puts the hourly launch back in place; kit log shows the last run"
 
 // ago says how long ago t was, from now, roughly.
 func ago(t, now time.Time) string {
