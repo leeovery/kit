@@ -22,10 +22,10 @@ var sshService = []string{"_ssh._tcp", "local."}
 const loopback = 1
 
 var (
-	// browsed is a line of dns-sd -B: when, Add or Rmv, its flags, the
-	// interface, the domain, the service and the instance's name, which can
-	// hold spaces.
-	browsed = regexp.MustCompile(`^\S+\s+(Add|Rmv)\s+\d+\s+(\d+)\s+\S+\s+\S+\s+(.+?)\s*$`)
+	// browsed is a line of dns-sd -B: when (its hour padded with a space
+	// before ten), Add or Rmv, its flags, the interface, the domain, the
+	// service and the instance's name, which can hold spaces.
+	browsed = regexp.MustCompile(`^\s*\S+\s+(Add|Rmv)\s+\d+\s+(\d+)\s+\S+\s+\S+\s+(.+?)\s*$`)
 	// reached is dns-sd -L's answer: the host the instance is on, its name
 	// ending in a dot, and the port.
 	reached = regexp.MustCompile(`can be reached at (\S+?)\.?:(\d+) `)

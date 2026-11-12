@@ -164,6 +164,30 @@ func TestFindsNeverThisMac(t *testing.T) {
 	}
 }
 
+// dns-sd pads the hour with a space before ten in the morning (seen on a
+// test Mac at 05:46, 12 Nov), so its lines start with one.
+func TestFindsTheMacBeforeTenInTheMorning(t *testing.T) {
+	fake := runnertest.New(t)
+	browses(fake, fixture(t, "testdata/browse-morning.txt"))
+	resolves(fake, laptop, fixture(t, "testdata/resolve.txt"))
+	resolves(fake, mini, reaching(mini, miniAt, 22))
+	asked(fake, laptopAt).Prints(says(t, "laptop"))
+	asked(fake, miniAt).Prints(says(t, "server"))
+
+	m, err := finder(t, fake).Find(t.Context(), "laptop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Instance != laptop {
+		t.Errorf("Find() found %q, want %q", m.Instance, laptop)
+	}
+	for _, call := range fake.Calls() {
+		if strings.Contains(call, thisMac) {
+			t.Errorf("ran %s: this Mac, seen on lo0, is never asked", call)
+		}
+	}
+}
+
 func TestFindsNoneSayingWhyOfEach(t *testing.T) {
 	const pro, air, mac = "Someone’s Mac Pro", "Someone’s MacBook Air", "Someone’s iMac"
 	proAt, macAt := strings.TrimSuffix("Someones-Mac-Pro.local.", "."), strings.TrimSuffix("Someones-iMac.local.", ".")
