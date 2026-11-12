@@ -141,55 +141,61 @@ func (e Exec) start(ctx context.Context, program string, cmd Command) (ran, erro
 // detach has c, the command cmd, run in a process group of its own, ended
 // with everything it started, as os/exec ends the command alone: a child
 // left running would outlive it, holding its output open until waitDelay
-// passed. Unless it's kit's own sudo (ownSudo), or shares kit's session
+// passed. Ended, the group's sent SIGTERM, for what it runs to clean up, as
+// git takes its lock files away; and killed once that's been ignored for
+// endGrace, or once the command's exited, for what it started that's left.
+// Unless it's kit's own sudo (ownSudo), or shares kit's session
 // (SharesSession), it runs in a session of its own too, without kit's terminal: a program
 // that asks there, as a program's own sudo asks for a password, fails at
 // once, where in the background of kit's terminal it would stop, unseen,
 // for good.
 func detach(c *exec.Cmd, cmd Command) *detached {
-	d := &detached{}
 	c.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if ownSudo(cmd) || cmd.SharesSession {
 		c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	}
-	group := func() error { return syscall.Kill(-c.Process.Pid, syscall.SIGKILL) }
-	c.Cancel = func() error {
-		d.ended.Store(true)
-		return group()
+	d := &detached{kill: func() error { return syscall.Kill(-c.Process.Pid, syscall.SIGKILL) }}
+	term := func() error { return syscall.Kill(-c.Process.Pid, syscall.SIGTERM) }
+	grace := endGrace
+	if ownSudo(cmd) {
+		// What kit's sudo runs runs as root, which kit can't signal: killed,
+		// sudo would end alone, and leave it running. sudo passes SIGTERM
+		// on to it, given as long as kit waits for a command's output once
+		// ended.
+		term = func() error { return c.Process.Signal(syscall.SIGTERM) }
+		grace = waitDelay
 	}
-	c.WaitDelay = waitDelay
-	if !ownSudo(cmd) {
-		return d
-	}
-	// What kit's sudo runs runs as root, which kit can't signal: SIGKILL
-	// would end sudo alone, and leave it running. sudo passes SIGTERM on to
-	// it; the group's killed only once that's been ignored for waitDelay,
-	// before os/exec gives up on its output.
 	c.Cancel = func() error {
 		d.ended.Store(true)
 		d.mu.Lock()
 		defer d.mu.Unlock()
-		d.fallback = time.AfterFunc(waitDelay, func() { _ = group() })
-		return c.Process.Signal(syscall.SIGTERM)
+		d.fallback = time.AfterFunc(grace, func() { _ = d.kill() })
+		return term()
 	}
-	c.WaitDelay = 2 * waitDelay
+	c.WaitDelay = grace + waitDelay
 	return d
 }
 
-// detached is a command detach readied: whether kit ended it, and the
-// fallback that kills its group, for kit's own sudo.
+// endGrace is how long a command kit ends has to end itself, once sent
+// SIGTERM, before its group's killed.
+const endGrace = 2 * time.Second
+
+// detached is a command detach readied: whether kit ended it, the fallback
+// that kills its group once it's been ended a while, and what kills it.
 type detached struct {
 	ended    atomic.Bool
 	mu       sync.Mutex
 	fallback *time.Timer
+	kill     func() error
 }
 
-// stop stops the fallback, once the command's ended.
+// stop stops the fallback, once the command's exited, and kills what's
+// left of its group, should kit have ended it.
 func (d *detached) stop() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if d.fallback != nil {
-		d.fallback.Stop()
+	if d.fallback != nil && d.fallback.Stop() {
+		_ = d.kill()
 	}
 }
 

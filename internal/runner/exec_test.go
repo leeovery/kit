@@ -227,6 +227,74 @@ func TestExecEndsACommandWhenItsContextIsDone(t *testing.T) {
 	}
 }
 
+// A command ended, at its time limit or as the run stops, is sent SIGTERM
+// first, it and what it started, for it to clean up, as git takes its lock
+// away; one that ignores it is killed, with what it started, once it's had
+// a moment; and what it started that ignores it is killed once the
+// command's gone.
+func TestExecEndsACommandWithSIGTERMFirst(t *testing.T) {
+	dir := t.TempDir()
+	lock, child, left := filepath.Join(dir, "index.lock"), filepath.Join(dir, "child"), filepath.Join(dir, "left")
+	r, _ := programs(t, map[string]string{
+		"tidy":     `: > "$1"; trap '/bin/rm -f "$1"; exit 143' TERM; echo ready; while :; do /bin/sleep 0.1; done`,
+		"stubborn": `trap '' TERM; /bin/sleep 30 & echo $! > "$1"; echo ready; wait`,
+		"leaves":   `/bin/sh -c 'trap "" TERM; echo $$ > "$1"; exec /bin/sleep 30' - "$1" > /dev/null 2>&1 & until [ -s "$1" ]; do :; done; echo ready; wait`,
+	})
+	if took := endOnceReady(t, r, "tidy", lock); took > time.Second {
+		t.Errorf("tidy took %v to end, want it ended at once", took)
+	}
+	if _, err := os.Stat(lock); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the lock is left (%v): want SIGTERM, and the lock taken away", err)
+	}
+
+	if took := endOnceReady(t, r, "stubborn", child); took > 4*time.Second {
+		t.Errorf("a command ignoring SIGTERM took %v to end, want it killed after a moment", took)
+	}
+	if pid, runs := stillRuns(t, child, 2*time.Second); runs {
+		t.Errorf("what it started, ignoring SIGTERM, still runs (%d), want its group killed", pid)
+	}
+
+	endOnceReady(t, r, "leaves", left)
+	if pid, runs := stillRuns(t, left, 500*time.Millisecond); runs {
+		t.Errorf("what it left, ignoring SIGTERM, still runs (%d), want it killed as the command went", pid)
+	}
+}
+
+// endOnceReady runs the program called name in r, ending it once it says
+// it's ready: how long it took to end then.
+func endOnceReady(t *testing.T, r runner.Exec, name string, args ...string) time.Duration {
+	t.Helper()
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	var ended time.Time
+	ready := func(line string) {
+		if line == "ready" {
+			ended = time.Now()
+			cancel()
+		}
+	}
+	if _, err := r.Run(ctx, runner.Command{Name: name, Args: args, Lines: ready}); !errors.Is(err, context.Canceled) {
+		t.Errorf("Run(%s) = %v, want it ended", name, err)
+	}
+	return time.Since(ended)
+}
+
+// stillRuns reports whether the process whose pid is in file still runs,
+// once given as long as within to go, and its pid.
+func stillRuns(t *testing.T, file string, within time.Duration) (int, bool) {
+	t.Helper()
+	data, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, _ := strconv.Atoi(strings.TrimSpace(string(data)))
+	// Killed, it's there till launchd reaps it, which can take a moment.
+	for deadline := time.Now().Add(within); pid != 0 && syscall.Kill(pid, 0) == nil && time.Now().Before(deadline); {
+		time.Sleep(20 * time.Millisecond)
+	}
+	return pid, pid == 0 || syscall.Kill(pid, 0) == nil
+}
+
 // kit's own sudo, once ended, is sent SIGTERM, which sudo passes on to
 // what it runs as root, and which kit can't signal itself; ignored, as long
 // as kit waits for a command's output once ended, the group's killed.
@@ -237,39 +305,18 @@ func TestExecEndsKitsOwnSudoThroughSudo(t *testing.T) {
 		"sudo":     `/bin/sleep 30 & pid=$!; trap 'echo relayed > "$2"; kill $pid; exit 143' TERM; echo ready; wait`,
 		"stubborn": `trap '' TERM; /bin/sleep 30 & echo $! > "$2"; echo ready; wait`,
 	})
-	// endOnceReady runs sudo, ending it once it's ready.
-	endOnceReady := func(arg string) {
-		ctx, cancel := context.WithCancel(t.Context())
-		defer cancel()
-		ready := func(line string) {
-			if line == "ready" {
-				cancel()
-			}
-		}
-		if _, err := r.Run(ctx, runner.Command{Name: "sudo", Args: []string{"-n", arg}, Lines: ready}); !errors.Is(err, context.Canceled) {
-			t.Errorf("Run() = %v, want it ended", err)
-		}
+	if took := endOnceReady(t, r, "sudo", "-n", relayed); took > 3*time.Second {
+		t.Errorf("sudo wasn't ended at once (%v)", took)
 	}
-	start := time.Now()
-	endOnceReady(relayed)
-	if _, err := os.Stat(relayed); err != nil || time.Since(start) > 3*time.Second {
-		t.Errorf("sudo wasn't sent SIGTERM to pass on (%v), or wasn't ended at once (%v)", err, time.Since(start))
+	if _, err := os.Stat(relayed); err != nil {
+		t.Errorf("sudo wasn't sent SIGTERM to pass on (%v)", err)
 	}
 
 	if err := os.Rename(filepath.Join(r.Path[0], "stubborn"), filepath.Join(r.Path[0], "sudo")); err != nil {
 		t.Fatal(err)
 	}
-	endOnceReady(child)
-	data, err := os.ReadFile(child)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pid, _ := strconv.Atoi(strings.TrimSpace(string(data)))
-	// Killed, it's there till launchd reaps it, which can take a moment.
-	for deadline := time.Now().Add(2 * time.Second); pid != 0 && syscall.Kill(pid, 0) == nil && time.Now().Before(deadline); {
-		time.Sleep(20 * time.Millisecond)
-	}
-	if pid == 0 || syscall.Kill(pid, 0) == nil {
+	endOnceReady(t, r, "sudo", "-n", child)
+	if pid, runs := stillRuns(t, child, 2*time.Second); runs {
 		t.Errorf("what sudo ran, ignoring SIGTERM, still runs (%d), want its group killed", pid)
 	}
 }
