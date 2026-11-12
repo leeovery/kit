@@ -259,12 +259,12 @@ func (h *Homebrew) ready(ctx context.Context, kindName string, names []string) e
 
 // tap taps the taps names, the kind named kindName's, are from that aren't
 // tapped yet, each as one command, saying so: in Homebrew's turn to change
-// things. added are those it tapped.
+// things; never Homebrew's own (tapOf). added are those it tapped.
 func (h *Homebrew) tap(ctx context.Context, kindName string, names []string) (added []string, err error) {
 	var taps []string
 	for _, name := range names {
-		if parts := strings.Split(name, "/"); len(parts) == 3 && !slices.Contains(taps, parts[0]+"/"+parts[1]) {
-			taps = append(taps, parts[0]+"/"+parts[1])
+		if tap, ok := tapOf(name); ok && !slices.Contains(taps, tap) {
+			taps = append(taps, tap)
 		}
 	}
 	if len(taps) == 0 {

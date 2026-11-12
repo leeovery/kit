@@ -50,20 +50,26 @@ as they are. --json gives the same as one document.`,
 }
 
 // spot is a step, one of a step's things, or a thing no step puts in place,
-// as a program on kit's PATH, in a run's order, and what's said of it there;
-// and, when it's before the one placed only through a step that one comes
-// after, which may not have succeeded, that step (engine.Prior's Through).
+// as a program on kit's PATH, or an app installed (App), in a run's order,
+// and what's said of it there; and, when it's before the one placed only
+// through a step that one comes after, which may not have succeeded, that
+// step (engine.Prior's Through).
 type spot struct {
 	Step    string `json:"step,omitempty"`
 	Thing   string `json:"thing,omitempty"`
+	App     bool   `json:"app,omitempty"`
 	Says    string `json:"says"`
 	Through string `json:"through,omitempty"`
 }
 
 // name is the spot as kit names it: the step, or its thing, as in
-// cask:firefox; a thing of no step, as a program on kit's PATH is.
+// cask:firefox; a thing of no step, as a program on kit's PATH is, or an
+// app.
 func (s spot) name() string {
-	if s.Step == "" {
+	switch {
+	case s.Step == "" && s.App:
+		return s.Thing + " (app)"
+	case s.Step == "":
 		return s.Thing + " (on PATH)"
 	}
 	return strings.TrimSuffix(s.Step+":"+s.Thing, ":")
@@ -122,8 +128,9 @@ func (a *app) order(ctx context.Context, r *run, name string) error {
 // ordering is a run's steps, ordered, and what's being placed among them:
 // its name, as given, and the step or thing it is (target), or, for a step
 // done by hand raised with the rest at the end, the step raising them; what
-// the steps and things wait for beyond the run's order (holds); and whether
-// the run installs a thing (declares).
+// the steps and things wait for beyond the run's order (holds), and which
+// of the things no step puts in place are apps; and whether the run
+// installs a thing (declares).
 type ordering struct {
 	pipeline *engine.Pipeline
 	steps    []engine.Step
@@ -132,6 +139,7 @@ type ordering struct {
 	target   engine.Wait
 	raisedBy string
 	holds    engine.Holds
+	apps     map[string]bool
 	declares func(thing string) bool
 }
 
@@ -144,7 +152,7 @@ func newOrdering(r *run, name string) (*ordering, error) {
 	for _, s := range o.steps {
 		o.byName[s.Name] = s
 	}
-	o.holds = r.holds(o.byName)
+	o.holds, o.apps = r.holds(o.byName)
 	kindName, thing, isThing := strings.Cut(name, ":")
 	_, isStep := o.byName[name]
 	switch {
@@ -186,18 +194,28 @@ func (r *run) raisedAtTheEnd(name string) bool {
 // holds are what the run's steps, byName, and their things wait for beyond
 // its order (engine.Holds): a step of your own, its secrets, before it
 // applies; a kind whose things wait for steps by hand (kind.Carded), as
-// secrets their store's sign-in, those steps, before any of them; and a line
-// held back, its section's waits.
-func (r *run) holds(byName map[string]engine.Step) engine.Holds {
-	cards := map[string][]engine.Wait{}
+// secrets their store's sign-in, those steps, before any of them; such a
+// step by hand, its program on kit's PATH and its app installed, before
+// it's raised (cardSteps); and a line held back, its section's waits. Apps
+// are those apps, by name.
+func (r *run) holds(byName map[string]engine.Step) (holds engine.Holds, apps map[string]bool) {
+	cards, awaits, apps := map[string][]engine.Wait{}, map[string][]engine.Wait{}, map[string]bool{}
 	for _, name := range r.kinds {
 		carded, ok := r.kindsByName[name].(kind.Carded)
 		if !ok {
 			continue
 		}
 		for _, c := range carded.Cards() {
-			if _, ok := byName[c.Name]; ok {
-				cards[name] = append(cards[name], engine.Wait{Step: c.Name})
+			if _, ok := byName[c.Name]; !ok {
+				continue
+			}
+			cards[name] = append(cards[name], engine.Wait{Step: c.Name})
+			if c.Program != "" {
+				awaits[c.Name] = append(awaits[c.Name], engine.Wait{Thing: c.Program})
+			}
+			if c.App != "" {
+				awaits[c.Name] = append(awaits[c.Name], engine.Wait{Thing: c.AppName})
+				apps[c.AppName] = true
 			}
 		}
 	}
@@ -206,12 +224,12 @@ func (r *run) holds(byName map[string]engine.Step) engine.Holds {
 			if byName[step].Area == steps.AreaSteps {
 				return byName[step].Later
 			}
-			return cards[step]
+			return slices.Concat(cards[step], awaits[step])
 		},
 		Gates: func(step, thing string) []engine.Wait {
 			return slices.Concat(cards[step], r.heldFor(step, thing))
 		},
-	}
+	}, apps
 }
 
 // heldFor are the waits of the section of the kind called kindName that
@@ -265,7 +283,7 @@ func (o *ordering) place(ctx context.Context) placing {
 		if w.Through != "" && (w.Thing != "" || w.Step == "") {
 			says += " (through " + w.Through + ": may not be there)"
 		}
-		p.Before = append(p.Before, spot{Step: w.Step, Thing: w.Thing, Says: says, Through: w.Through})
+		p.Before = append(p.Before, spot{Step: w.Step, Thing: w.Thing, App: w.Step == "" && o.apps[w.Thing], Says: says, Through: w.Through})
 	}
 	for _, s := range o.steps {
 		if s.Name != o.target.Step && o.covers(o.aheadOf(s.Name)) {
@@ -346,6 +364,8 @@ func (o *ordering) where(name string, ahead []engine.Prior) falls {
 func (o *ordering) saidBefore(w engine.Wait, settings falls) string {
 	s := o.byName[w.Step]
 	switch {
+	case w.Step == "" && o.apps[w.Thing]:
+		return "an app, waited for till it's installed, whatever installs it"
 	case w.Step == "":
 		return "a program, waited for till it's on kit's PATH, whatever installs it"
 	case o.never(w):

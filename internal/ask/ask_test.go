@@ -150,6 +150,65 @@ func TestParseMouse(t *testing.T) {
 	}
 }
 
+// The terminal's replies to kit's questions of it, come late among the
+// keys: its background's colour, an OSC ended by BEL or by ESC \, a DCS,
+// and its device attributes; none is a key, its ESC not escape and its
+// letters not text, the keys around it kept; a reply cut short is kept
+// for the rest.
+func TestParseSwallowsTerminalReplies(t *testing.T) {
+	for _, tt := range []struct {
+		name, sent string
+		want       []key
+	}{
+		{"the background, ended by BEL", "\x1b]11;rgb:1e1e/1e1e/2e2e\x07", nil},
+		{"the background, ended by ST", "\x1b]11;rgb:1e1e/1e1e/2e2e\x1b\\", nil},
+		{"a DCS", "\x1bP1$r0m\x1b\\", nil},
+		{"the device attributes", "\x1b[?1;2c", nil},
+		{"replies among keys", "j\x1b]11;rgb:0/0/0\x07\x1b[?62;22ck\r", []key{{text: "j"}, {text: "k"}, {name: "enter"}}},
+		{"escape after a reply", "\x1b]11;rgb:0/0/0\x1b\\\x1b", []key{{name: "esc"}}},
+	} {
+		if keys, rest := parse([]byte(tt.sent)); !slices.Equal(keys, tt.want) || len(rest) != 0 {
+			t.Errorf("%s: parse(%q) = %+v, rest %q; want %+v", tt.name, tt.sent, keys, rest, tt.want)
+		}
+	}
+	for _, cut := range []string{"\x1b]11;rgb:1e1e/1e", "\x1b]11;rgb:0/0/0\x1b", "\x1bP1$r"} {
+		if keys, rest := parse([]byte(cut)); len(keys) != 0 || string(rest) != cut {
+			t.Errorf("a reply cut short, %q: %+v, rest %q; want it kept", cut, keys, rest)
+		}
+	}
+	_, rest := parse([]byte("\x1b]11;rgb:0/0/0"))
+	if keys, rest := parse(append(rest, "\x07q"...)); !slices.Equal(keys, []key{{text: "q"}}) || len(rest) != 0 {
+		t.Errorf("a reply in two reads, then q: %+v, rest %q; want q alone", keys, rest)
+	}
+}
+
+// Escape then ] or P, typed fast or as Alt+], starts as a reply would, but
+// a reply is printable text: a control after it, or more than any reply
+// has, makes it escape and what was typed, each key as it comes, never
+// held.
+func TestParseTakesWhatIsntAReplyAsKeys(t *testing.T) {
+	var keys, rest []key
+	var pending []byte
+	for _, read := range []string{"\x1b]", "q", "\r", "\x03", "\x1b", "\x1b[A"} {
+		rest, pending = parse(append(pending, read...))
+		keys = append(keys, rest...)
+	}
+	want := []key{{name: "esc"}, {text: "]"}, {text: "q"}, {name: "enter"}, {name: "ctrl+c"}, {name: "esc"}, {name: "up"}}
+	if !slices.Equal(keys, want) || len(pending) != 0 {
+		t.Errorf("escape, ], q, enter, Ctrl+C, escape, up, a read at a time = %+v, rest %q; want %+v", keys, pending, want)
+	}
+	for _, sent := range []string{"\x1bP\x1b[A", "\x1b]a\x1bb"} {
+		if keys, _ := parse([]byte(sent)); len(keys) == 0 || keys[0] != (key{name: "esc"}) {
+			t.Errorf("parse(%q) = %+v; want escape first", sent, keys)
+		}
+	}
+	long := "\x1b]" + strings.Repeat("a", 600)
+	keys, pending = parse([]byte(long))
+	if len(keys) != 602 || keys[0] != (key{name: "esc"}) || keys[1] != (key{text: "]"}) || len(pending) != 0 {
+		t.Errorf("an unended reply of 600 = %d keys, first %+v, rest %d bytes; want escape, ], then each a", len(keys), keys[:min(2, len(keys))], len(pending))
+	}
+}
+
 // One question: a blank line, its row, its answers under it, the cursor
 // moving among them, round from the last to the first and back; taken, it
 // leaves its row with the answer.

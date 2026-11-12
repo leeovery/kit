@@ -114,6 +114,9 @@ type Boot struct {
 	// triedTouchID whether turning Touch ID on was tried, which macOS can
 	// refuse.
 	held, triedTouchID bool
+	// fetched is whether the boot's copy of the config repository was
+	// fetched this run.
+	fetched bool
 }
 
 // SignIn is signing in, the boot's first steps, which read the config
@@ -164,7 +167,9 @@ func (b *Boot) repo(login string) string {
 
 // gitHubStep signs in to GitHub, on the phone, and reads the config
 // repository: done when GitHub takes the sign-in kit holds, and the config
-// repository is there to read.
+// repository is there to read, cloned or its copy fetched by this boot, or
+// by the boot that handed over: a copy an earlier boot left is fetched
+// again, as kit-config may have changed since.
 func (b *Boot) gitHubStep() engine.Step {
 	return engine.Step{
 		Name: GitHubStep, Title: "GitHub", Area: AreaSignIn,
@@ -183,7 +188,7 @@ func (b *Boot) gitHubStep() engine.Step {
 			}
 			b.hold(token, login)
 			cfg := b.config()
-			if cfg == nil {
+			if cfg == nil || !b.cloned() && !b.HandedOver && !b.isFetched() {
 				return check.Result{State: check.Attention, Summary: login + " · kit-config not read yet"}
 			}
 			return check.Result{State: check.OK, Summary: login + " · kit-config has " + and(cfg.MacNames())}
@@ -215,9 +220,18 @@ func (b *Boot) gitHubStep() engine.Step {
 			if err := b.GitHub.fetch(ctx, token, repo, b.archive()); err != nil {
 				return fmt.Errorf("read %s: %w", repo, err)
 			}
+			b.mu.Lock()
+			b.fetched = true
+			b.mu.Unlock()
 			return kitstate.Update(b.State, stateName, func(st *state) { st.Repo = repo })
 		},
 	}
+}
+
+func (b *Boot) isFetched() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.fetched
 }
 
 // signIn signs in to GitHub through its device flow, the way chosen first:

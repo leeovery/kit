@@ -242,7 +242,7 @@ func TestGitHubSignsInAndReads(t *testing.T) {
 	var waits []time.Duration
 	api.Wait = func(_ context.Context, d time.Duration) error { waits = append(waits, d); return nil }
 	run := runnertest.New(t)
-	find := run.On("security", "find-generic-password", "-s", keychainItem, "-w").Exits(44)
+	run.On("security", "find-generic-password", "-s", keychainItem, "-w").Exits(44)
 	run.On("security", "-i")
 	b, s := newBoot(t, run, api, &asker{picks: []string{"enter"}})
 	step := b.gitHubStep()
@@ -282,12 +282,63 @@ func TestGitHubSignsInAndReads(t *testing.T) {
 		t.Errorf("state = %+v", st)
 	}
 
-	// Checked again, from the keychain, as a boot started again would be.
-	find.Prints("gho_secret\n").Exits(0)
-	b2, _ := newBoot(t, run, api, &asker{})
-	b2.State, b2.Data, b2.Config = b.State, b.Data, b.Config
-	if res := b2.gitHubStep().Check(context.Background()); res.State != check.OK || res.Summary != "someone · kit-config has laptop and studio" {
+	if res := step.Check(context.Background()); res.State != check.OK || res.Summary != "someone · kit-config has laptop and studio" {
 		t.Errorf("check after = %+v", res)
+	}
+}
+
+// A boot started again, signed in from the keychain, fetches kit-config
+// again rather than read the copy an earlier boot left, as it may have
+// changed since: a Mac added there is among this boot's. The boot handed
+// over to reads the copy the boot before it fetched, and once kit-config's
+// cloned, the clone is what's read.
+func TestGitHubFetchesAgainOnEachBoot(t *testing.T) {
+	files := map[string]string{config.File: kitToml, "laptop/declarations": "", "studio/declarations": ""}
+	gh := &gitHub{token: "gho_secret", repo: "someone/kit-config", archive: archive(t, files)}
+	api := gh.serve(t)
+	run := runnertest.New(t)
+	run.On("security", "find-generic-password", "-s", keychainItem, "-w").Prints("gho_secret\n")
+	first, _ := newBoot(t, run, api, &asker{})
+	step := first.gitHubStep()
+	_ = step.Check(context.Background())
+	if err := step.Apply(context.Background(), check.Result{}); err != nil {
+		t.Fatalf("the first boot's apply = %v", err)
+	}
+
+	files[config.File], files["spare/declarations"] = kitToml+"[macs.spare]\n", ""
+	gh.archive = archive(t, files)
+	again, _ := newBoot(t, run, api, &asker{})
+	again.State, again.Data, again.Config = first.State, first.Data, first.Config
+	step = again.gitHubStep()
+	if res := step.Check(context.Background()); res.State != check.Attention || res.Summary != "someone · kit-config not read yet" {
+		t.Fatalf("a boot started again, before = %+v; want kit-config read again", res)
+	}
+	if err := step.Apply(context.Background(), check.Result{}); err != nil {
+		t.Fatalf("a boot started again, apply = %v", err)
+	}
+	if res := step.Check(context.Background()); res.State != check.OK || res.Summary != "someone · kit-config has laptop, spare and studio" {
+		t.Errorf("a boot started again, after = %+v; want kit-config as it is now", res)
+	}
+
+	handedOver, _ := newBoot(t, run, api, &asker{})
+	handedOver.State, handedOver.Data, handedOver.Config, handedOver.HandedOver = first.State, first.Data, first.Config, true
+	if res := handedOver.gitHubStep().Check(context.Background()); res.State != check.OK {
+		t.Errorf("the boot handed over to = %+v; want the copy just fetched read", res)
+	}
+
+	cloned, _ := newBoot(t, run, api, &asker{})
+	cloned.State, cloned.Data = first.State, first.Data
+	for name, body := range map[string]string{".git/HEAD": "", config.File: kitToml, "laptop/declarations": "", "studio/declarations": ""} {
+		path := filepath.Join(cloned.Config, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if res := cloned.gitHubStep().Check(context.Background()); res.State != check.OK || res.Summary != "someone · kit-config has laptop and studio" {
+		t.Errorf("a boot with kit-config cloned = %+v; want the clone read", res)
 	}
 }
 
