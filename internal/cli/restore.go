@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/leeovery/kit/internal/apps"
 	"github.com/leeovery/kit/internal/backup/arq"
 	"github.com/leeovery/kit/internal/boot"
 	"github.com/leeovery/kit/internal/config"
@@ -147,7 +148,7 @@ func (a *app) restoreStep(r *run, dirs config.Dirs, prefsOn bool) (*engine.Step,
 	user := filepath.Base(r.homeDir)
 	sources := restore.Sources{Run: r.run, User: user, MountPoint: restore.MountPoint(dirs.State), Mac: func(from string) restore.Opener {
 		return &oldmac.Source{
-			Finder: oldmac.Finder{Run: r.run, StateDir: dirs.State, HostKey: r.cfg.Macs[from].HostKey}, From: from, User: user, Home: r.homeDir,
+			Finder: oldmac.Finder{Run: r.run, StateDir: dirs.State, HostKey: r.cfg.Macs[from].HostKey, Terminal: apps.RunningIn(a.Getenv)}, From: from, User: user, Home: r.homeDir,
 			HostKey: func(ctx context.Context) (string, error) { return fetchedHostKey(ctx, r.repo, from) },
 		}
 	}}

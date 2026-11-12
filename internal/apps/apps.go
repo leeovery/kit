@@ -65,6 +65,24 @@ func Running(getenv func(string) string) (Terminal, bool) {
 	return Terminal{}, false
 }
 
+// Unnamed is the app kit's running in, said when RunningIn can't name it.
+const Unnamed = "your terminal"
+
+// RunningIn is the app kit's running in, by its name, as macOS names it
+// asking for what it may do, as what getenv says TERM_PROGRAM is: Unnamed
+// for one kit doesn't know. macOS's own Terminal, where every boot starts,
+// isn't among Terminals: those are what kit.toml can name to hand over to,
+// which macOS's never is.
+func RunningIn(getenv func(string) string) string {
+	if getenv("TERM_PROGRAM") == "Apple_Terminal" {
+		return "Terminal"
+	}
+	if t, ok := Running(getenv); ok {
+		return t.Title
+	}
+	return Unnamed
+}
+
 // Open opens a window of the terminal, from the Applications folder at dir.
 func (t Terminal) Open(ctx context.Context, run runner.Runner, dir string, w Window) error {
 	return t.Driver.Open(ctx, run, filepath.Join(dir, t.Bundle), w)

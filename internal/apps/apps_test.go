@@ -69,6 +69,18 @@ func TestRunning(t *testing.T) {
 	}
 }
 
+// The app kit's running in is named as macOS names it: macOS's own
+// Terminal, one kit knows by its title, and any other as Unnamed.
+func TestRunningIn(t *testing.T) {
+	for _, tt := range []struct {
+		program, want string
+	}{{"Apple_Terminal", "Terminal"}, {"ghostty", "Ghostty"}, {"vscode", apps.Unnamed}, {"", apps.Unnamed}} {
+		if got := apps.RunningIn(func(name string) string { return map[string]string{"TERM_PROGRAM": tt.program}[name] }); got != tt.want {
+			t.Errorf("RunningIn() in %q = %q, want %q", tt.program, got, tt.want)
+		}
+	}
+}
+
 // Every app kit knows is known by the name it's under, with its cask and
 // bundle, a terminal with how to tell kit's running in it and a driver.
 func TestKnown(t *testing.T) {

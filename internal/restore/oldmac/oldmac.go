@@ -8,6 +8,7 @@
 package oldmac
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -18,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/leeovery/kit/internal/apps"
 	"github.com/leeovery/kit/internal/restore"
 	"github.com/leeovery/kit/internal/runner"
 )
@@ -37,8 +39,9 @@ const (
 
 // ErrNoAnswer is in the error of a search that found no Mac answering over
 // SSH as the one wanted: off, asleep, away, refusing this Mac's key,
-// presenting another host key than kit-config's, or not offering Remote
-// Login.
+// presenting another host key than kit-config's, not offering Remote
+// Login, or out of reach till macOS lets the terminal find devices on
+// local networks.
 var ErrNoAnswer = errors.New("doesn't answer over SSH")
 
 // ErrNoHostKey is in the error of a search for a Mac whose host key
@@ -56,6 +59,10 @@ type Finder struct {
 	// presenting another isn't it, whatever it says its name is. Without
 	// one, none is looked for (ErrNoHostKey).
 	HostKey string
+	// Terminal is the app kit's running in, as macOS names it asking
+	// whether it may find devices on local networks (apps.RunningIn):
+	// apps.Unnamed when "".
+	Terminal string
 	// Browse and Resolve are how long Bonjour's listened to for the Macs
 	// offering Remote Login, and for where one answers: browseFor and
 	// resolveFor when 0.
@@ -183,6 +190,9 @@ func (f Finder) ask(ctx context.Context, name, from, pin string) candidate {
 	if _, key := errors.AsType[*hostKeyError](err); key {
 		err = fmt.Errorf("isn't %s: its host key doesn't match the one kit-config records (kit apply on %s records a new one)", from, from)
 	}
+	if errors.Is(err, errNoRoute) {
+		err = f.localNetwork()
+	}
 	if err != nil {
 		c.why = err
 		return c
@@ -199,6 +209,14 @@ func (f Finder) ask(ctx context.Context, name, from, pin string) candidate {
 	}
 	c.mac = m
 	return c
+}
+
+// localNetwork is a Mac Bonjour found that ssh has no route to: as when
+// macOS is asking whether the app kit's running in may find devices on
+// local networks, or was told it may not.
+func (f Finder) localNetwork() error {
+	app := cmp.Or(f.Terminal, apps.Unnamed)
+	return fmt.Errorf("%s: macOS may be asking whether %s may find devices on local networks: choose Allow, then try again, or, if Don't Allow was chosen, turn on %s in System Settings › Privacy & Security › Local Network", errNoAnswer, app, app)
 }
 
 // same reports whether m and other are the same Mac: by their host keys,

@@ -73,20 +73,6 @@ func (b *Boot) in(t apps.Terminal) bool {
 	return ok && running.Name == t.Name
 }
 
-// runningIn is the app kit's running in, by its name, as macOS names it
-// asking for what it may do. macOS's own Terminal, where every boot starts,
-// isn't among the terminals kit knows: those are what kit.toml can name to
-// hand over to, which macOS's never is.
-func (b *Boot) runningIn() string {
-	if b.Getenv("TERM_PROGRAM") == "Apple_Terminal" {
-		return "Terminal"
-	}
-	if t, ok := apps.Running(b.Getenv); ok {
-		return t.Title
-	}
-	return "your terminal"
-}
-
 // Held reports whether sudo has the password, given this run.
 func (b *Boot) Held() bool {
 	b.mu.Lock()
@@ -152,7 +138,7 @@ func (b *Boot) passwordStep() engine.Step {
 			b.triedTouchID = true
 			b.mu.Unlock()
 			b.Sink.Emit(event.Doing{Time: b.Now(), Step: PasswordStep, Says: "turning Touch ID on for sudo",
-				Todo: fmt.Sprintf("macOS asks whether %s may administer your computer: choose Allow", b.runningIn())})
+				Todo: fmt.Sprintf("macOS asks whether %s may administer your computer: choose Allow", apps.RunningIn(b.Getenv))})
 			step := steps.TouchIDSudo(b.Run, &steps.Admin{Held: func(context.Context) bool { return b.Held() }}, b.SudoLocal)
 			// Refused, it's left off: kit apply asks again.
 			_ = step.Apply(ctx, step.Check(ctx))

@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/leeovery/kit/internal/apps"
 	"github.com/leeovery/kit/internal/restore"
 	"github.com/leeovery/kit/internal/runner"
 	"github.com/leeovery/kit/internal/runner/runnertest"
@@ -246,6 +247,31 @@ func TestFindsOnlyTheKeyRefused(t *testing.T) {
 	}
 }
 
+// A Mac Bonjour found that ssh has no route to is said as macOS asking
+// whether the app kit's running in may find devices on local networks,
+// which it asks of the first ssh run there, failing every connection till
+// it's allowed: that app named, or, unknown, said as Unnamed.
+func TestFindsNoRouteAsTheLocalNetworkAsked(t *testing.T) {
+	for _, tt := range []struct{ terminal, named string }{{"Ghostty", "Ghostty"}, {"", apps.Unnamed}} {
+		t.Run(tt.named, func(t *testing.T) {
+			fake := runnertest.New(t)
+			browses(fake, browsing(laptop))
+			resolves(fake, laptop, reaching(laptop, laptopAt, 22))
+			asked(fake, laptopAt).PrintsToStderr("ssh: connect to host " + laptopAt + " port 22: No route to host\n").Exits(255)
+			f := finder(t, fake)
+			f.Terminal = tt.terminal
+
+			_, err := f.Find(t.Context(), "laptop")
+			want := "laptop doesn't answer over SSH: Someone’s MacBook Pro didn't answer: macOS may be asking whether " + tt.named +
+				" may find devices on local networks: choose Allow, then try again, or, if Don't Allow was chosen, turn on " + tt.named +
+				" in System Settings › Privacy & Security › Local Network"
+			if !errors.Is(err, ErrNoAnswer) || err.Error() != want {
+				t.Errorf("Find() = %v\nwant ErrNoAnswer, %q", err, want)
+			}
+		})
+	}
+}
+
 func TestFindsSSHsOwnReason(t *testing.T) {
 	fake := runnertest.New(t)
 	browses(fake, browsing(mini))
@@ -466,7 +492,8 @@ func TestRemoteFailuresSaid(t *testing.T) {
 	}{
 		{"the key refused", runner.NewExitError("ssh", 255, []byte("someone@host: Permission denied (publickey).\n")), errRefusedKey.Error()},
 		{"refused", runner.NewExitError("ssh", 255, []byte("ssh: connect to host h port 22: Connection refused\n")), "didn't answer"},
-		{"no route", runner.NewExitError("ssh", 255, []byte("ssh: connect to host h port 22: No route to host\n")), "didn't answer"},
+		{"no route", runner.NewExitError("ssh", 255, []byte("ssh: connect to host h port 22: No route to host\n")), errNoRoute.Error()},
+		{"down", runner.NewExitError("ssh", 255, []byte("ssh: connect to host h port 22: Host is down\n")), "didn't answer"},
 		{"no such host", runner.NewExitError("ssh", 255, []byte("ssh: Could not resolve hostname h: nodename nor servname provided, or not known\n")), "didn't answer"},
 		{"the command there", runner.NewExitError("ssh", 2, []byte("sh: line 1: find: command not found\n")), "failed to answer, exit 2: sh: line 1: find: command not found"},
 		{"not an exit", errors.New("boom"), "boom"},
