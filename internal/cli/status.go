@@ -346,8 +346,8 @@ func (a *app) build(command, logName string, face render.Face, atTerminal bool) 
 		drifters: map[string]drifter{}, admin: &steps.Admin{},
 	}
 	r.files = &linked.Files{Repo: r.repo, Home: home, StateDir: dirs.State, Scopes: []string{config.Shared, machine}}
-	// setup are the steps that set up the home folder: its linked files,
-	// the shell's PATH, Oh My Zsh.
+	// setup are the steps that set up the home folder, its linked files and
+	// the shell's PATH, and the features that turn on parts of macOS.
 	var setup []engine.Step
 	addSetup := func(step engine.Step, d drifter) {
 		setup = append(setup, quietened(step, record, now))

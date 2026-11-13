@@ -10,9 +10,10 @@ import (
 	"github.com/leeovery/kit/internal/event"
 )
 
-// Plain is the face without a terminal: the same words as Pretty, a line
-// each, no colour, no animation. Each step's lines start with its name, so
-// they read with grep. It never asks anything.
+// Plain is the face without a terminal: each step as it finishes, its
+// state and what it found, then what it did and its items, a line each, no
+// colour, no animation; what you're to do as it comes. Each step's lines
+// start with its name, so they read with grep. It never asks anything.
 type Plain struct {
 	mu    sync.Mutex
 	w     io.Writer
