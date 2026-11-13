@@ -247,6 +247,41 @@ func TestDecodeRefusesWhatIsntOne(t *testing.T) {
 	}
 }
 
+// A value macOS's own reader refuses is refused, never read as something
+// else: an element a property list doesn't have, a key where a value
+// should be, data that isn't base64, and a date not to the second, ending
+// Z, as plutil -lint showed.
+func TestReadValueRefusesWhatMacOSRefuses(t *testing.T) {
+	for _, text := range []string{
+		`<array><string>a</string><strng>b</strng></array>`,
+		`<dict><key>a</key><foo/><key>b</key></dict>`,
+		`<array><key>a</key></array>`,
+		`<dict><key>a</key><key>b</key></dict>`,
+		`<key>a</key>`,
+		`<data>QUJD!!</data>`,
+		`<date>2026-01-01T00:00:00Zjunk</date>`,
+		`<date>2026-01-01Z</date>`,
+		`<date>2026-01-01T00:00Z</date>`,
+		`<date>2026-02-30T00:00:00Z</date>`,
+	} {
+		if v, err := plist.ReadValue(text); err == nil {
+			t.Errorf("ReadValue(%s) = %#v, want it refused", text, v)
+		}
+	}
+}
+
+// Whitespace around data's base64, and around a date, is passed over, as
+// macOS passes it over.
+func TestReadValueTakesWhitespaceAround(t *testing.T) {
+	if v, err := plist.ReadValue("<data>\n\tQUJD\n\tRA==\n</data>"); err != nil || string(v.(plist.Data)) != "ABCD" {
+		t.Errorf("ReadValue(data) = %#v, %v", v, err)
+	}
+	want := time.Date(2026, 1, 1, 12, 30, 5, 0, time.UTC)
+	if v, err := plist.ReadValue("<date> 2026-01-01T12:30:05Z\n</date>"); err != nil || v != want {
+		t.Errorf("ReadValue(date) = %#v, %v", v, err)
+	}
+}
+
 // A binary property list, as an app's Info.plist may be: made with
 // plistlib, made-up values.
 func TestDecodeReadsBinary(t *testing.T) {

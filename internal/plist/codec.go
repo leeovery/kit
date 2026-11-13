@@ -29,7 +29,10 @@ type UID uint64
 
 // Decode reads a property list, XML or binary, exactly: a string as it is,
 // whitespace and all; an integer as int64, or uint64 past int64's range; a
-// real as float64; data as Data; a date as a UTC time.
+// real as float64; data as Data; a date as a UTC time. XML is read as
+// strictly as macOS reads it: an element a property list doesn't have, a
+// key where a value should be, data that isn't base64 and a date not given
+// to the second, ending Z, are refused.
 func Decode(data []byte) (any, error) {
 	if bytes.HasPrefix(data, []byte("bplist00")) {
 		v, err := decodeBinary(data)
@@ -70,13 +73,21 @@ func decodeXML(data []byte) (any, error) {
 	}
 }
 
+// nextValue reads the next value, as nextItem does, refusing a key.
+func nextValue(d *xml.Decoder) (any, error) {
+	v, err := nextItem(d)
+	if k, ok := v.(key); ok && err == nil {
+		return nil, fmt.Errorf("the key %q where a value should be", string(k))
+	}
+	return v, err
+}
+
 // key is a dict's key, told apart from a string value.
 type key string
 
-// nextValue reads the next value, skipping text, comments and elements a
-// property list doesn't have; at the end of the enclosing element it
-// returns errEnd.
-func nextValue(d *xml.Decoder) (any, error) {
+// nextItem reads the next value or key, skipping text and comments; at the
+// end of the enclosing element it returns errEnd.
+func nextItem(d *xml.Decoder) (any, error) {
 	for {
 		tok, err := d.Token()
 		if err != nil {
@@ -86,39 +97,35 @@ func nextValue(d *xml.Decoder) (any, error) {
 		case xml.EndElement:
 			return nil, errEnd
 		case xml.StartElement:
-			v, known, err := element(d, t)
-			if err != nil || known {
-				return v, err
-			}
+			return element(d, t)
 		}
 	}
 }
 
-// element reads the value start begins; known is false for an element a
-// property list doesn't have, which is skipped.
-func element(d *xml.Decoder, start xml.StartElement) (v any, known bool, err error) {
+// element reads the value, or the key, start begins.
+func element(d *xml.Decoder, start xml.StartElement) (any, error) {
 	name := start.Name.Local
 	switch name {
 	case "dict":
 		m := map[string]any{}
 		for {
-			k, err := nextValue(d)
+			k, err := nextItem(d)
 			if errors.Is(err, errEnd) {
-				return m, true, nil
+				return m, nil
 			}
 			if err != nil {
-				return nil, true, err
+				return nil, err
 			}
 			s, ok := k.(key)
 			if !ok {
-				return nil, true, errors.New("a dict's value without its key")
+				return nil, errors.New("a dict's value without its key")
 			}
 			v, err := nextValue(d)
 			if errors.Is(err, errEnd) {
-				return nil, true, fmt.Errorf("no value for the key %q", string(s))
+				return nil, fmt.Errorf("no value for the key %q", string(s))
 			}
 			if err != nil {
-				return nil, true, err
+				return nil, err
 			}
 			m[string(s)] = v
 		}
@@ -127,24 +134,23 @@ func element(d *xml.Decoder, start xml.StartElement) (v any, known bool, err err
 		for {
 			v, err := nextValue(d)
 			if errors.Is(err, errEnd) {
-				return a, true, nil
+				return a, nil
 			}
 			if err != nil {
-				return nil, true, err
+				return nil, err
 			}
 			a = append(a, v)
 		}
 	case "true", "false":
-		return name == "true", true, d.Skip()
+		return name == "true", d.Skip()
 	case "key", "string", "integer", "real", "data", "date":
 		text, err := leafText(d)
 		if err != nil {
-			return nil, true, err
+			return nil, err
 		}
-		v, err := leaf(name, text)
-		return v, true, err
+		return leaf(name, text)
 	}
-	return nil, false, d.Skip()
+	return nil, fmt.Errorf("<%s>, which a property list doesn't have", name)
 }
 
 // leafText is the text of the element just begun, to its end.
@@ -166,11 +172,10 @@ func leafText(d *xml.Decoder) (string, error) {
 	}
 }
 
-// dateText is a property list's date: a year, then as much of the rest as
-// it gives, then Z.
-var dateText = regexp.MustCompile(`^(\d{4})(?:-(\d\d)(?:-(\d\d)(?:T(\d\d)(?::(\d\d)(?::(\d\d))?)?)?)?)?Z`)
+// dateText is a property list's date, to the second, in UTC.
+var dateText = regexp.MustCompile(`^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$`)
 
-// leaf reads a value element's text, as Python's plistlib does.
+// leaf reads a value element's text.
 func leaf(name, text string) (any, error) {
 	switch name {
 	case "key":
@@ -186,30 +191,15 @@ func leaf(name, text string) (any, error) {
 		}
 		return f, nil
 	case "data":
-		clean := strings.Map(func(r rune) rune {
-			if r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '+' || r == '/' || r == '=' {
-				return r
-			}
-			return -1
-		}, text)
-		b, err := base64.StdEncoding.DecodeString(clean)
+		b, err := base64.StdEncoding.DecodeString(strings.Join(strings.Fields(text), ""))
 		if err != nil {
 			return nil, fmt.Errorf("data that isn't base64: %w", err)
 		}
 		return Data(b), nil
 	}
-	m := dateText.FindStringSubmatch(text)
-	if m == nil || m[3] == "" {
-		return nil, fmt.Errorf("%q isn't a date", text)
-	}
-	var n [6]int
-	for i := range n {
-		if m[i+1] != "" {
-			n[i], _ = strconv.Atoi(m[i+1])
-		}
-	}
-	t := time.Date(n[0], time.Month(n[1]), n[2], n[3], n[4], n[5], 0, time.UTC)
-	if t.Month() != time.Month(n[1]) || t.Day() != n[2] || n[3] > 23 || n[4] > 59 || n[5] > 59 {
+	date := strings.TrimSpace(text)
+	t, err := time.Parse("2006-01-02T15:04:05Z", date)
+	if !dateText.MatchString(date) || err != nil {
 		return nil, fmt.Errorf("%q isn't a date", text)
 	}
 	return t, nil

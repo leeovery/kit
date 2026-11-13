@@ -330,7 +330,7 @@ func (p *Prefs) expand(path string) string {
 }
 
 // matches reports whether value matches any of patterns, as rsync matches
-// one (wildmatch).
+// one (wildmatch): * stops at a /, and ** crosses folders.
 func matches(value string, patterns []string) bool {
 	return slices.ContainsFunc(patterns, func(p string) bool { return wildmatch.Match(p, value) })
 }

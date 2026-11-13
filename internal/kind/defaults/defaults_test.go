@@ -173,7 +173,7 @@ func TestThisHostsAndTheSystemsSettings(t *testing.T) {
 
 func TestDeclaredValuesRead(t *testing.T) {
 	d := defaults.New(runnertest.New(t), t.TempDir())
-	for _, value := range []string{"-bool maybe", "-int sixty", `-dict-add "<integer>sixty</integer>"`, "<foo/>", "'<dict><key>a</key><bar/></dict>'", "<date>2026-01-01T00:00:00.5Z</date>"} {
+	for _, value := range []string{"-bool maybe", "-int sixty", `-dict-add "<integer>sixty</integer>"`, "<foo/>", "'<dict><key>a</key><bar/></dict>'", "<date>2026-01-01T00:00:00.5Z</date>", "<array><string>a</string><strng>b</strng></array>", "<data>QUJD!!</data>", "<date>2026-01-01Z</date>"} {
 		list := config.List{Entries: []config.Entry{{Name: "com.apple.dock:x:y", Value: value, Scope: "shared", Line: 2}}}
 		if !strings.HasPrefix(value, "-dict-add") {
 			list.Entries[0].Name = "com.apple.dock:x"
