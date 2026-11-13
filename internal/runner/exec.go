@@ -27,17 +27,38 @@ const waitDelay = 5 * time.Second
 // Exec is the runner that runs real programs: each found on Path, kit's own,
 // and run in Env alone, never the environment kit inherited, the command's
 // own variables over it, then those its context sets (WithSecretEnv); and
-// without kit's terminal, but an interactive one and kit's own sudo
-// (detach).
+// without kit's terminal, but kit's own sudo (detach).
 type Exec struct {
 	Path []string
 	Env  []string
 	Now  func() time.Time
-	// Stdin, Stdout and Stderr are kit's terminal, which an interactive
-	// command runs at.
-	Stdin  io.Reader
-	Stdout io.Writer
-	Stderr io.Writer
+	// clock keeps the time of what it runs: the real clock when nil, as
+	// it is but in tests, which can't wait as long as kit gives a command.
+	clock *clock
+}
+
+// clock is what Exec keeps a command's time by.
+type clock struct {
+	// limit is ctx, ended once timeout has passed.
+	limit func(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc)
+	// after calls f once d has passed, unless stop is called first.
+	after func(d time.Duration, f func()) (stop func() bool)
+	// wait is how long a command's output is waited for (waitDelay).
+	wait time.Duration
+}
+
+var realClock = clock{
+	limit: hold.WithTimeout,
+	after: func(d time.Duration, f func()) func() bool { return time.AfterFunc(d, f).Stop },
+	wait:  waitDelay,
+}
+
+// timed is the clock e keeps a command's time by.
+func (e Exec) timed() *clock {
+	if e.clock == nil {
+		return &realClock
+	}
+	return e.clock
 }
 
 func (e Exec) Run(ctx context.Context, cmd Command) (Result, error) {
@@ -46,7 +67,7 @@ func (e Exec) Run(ctx context.Context, cmd Command) (Result, error) {
 		return Result{ExitCode: -1}, err
 	}
 	stopping := ctx
-	ctx, cancel := limited(ctx, cmd.Timeout)
+	ctx, cancel := e.timed().limited(ctx, cmd.Timeout)
 	defer cancel()
 	started := e.Now()
 	r, err := e.start(ctx, program, cmd)
@@ -93,11 +114,11 @@ func done(c *exec.Cmd, d *detached, stdout, stderr []byte) ran {
 }
 
 // limited is ctx for a command given timeout, as Command's Timeout says.
-func limited(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+func (k *clock) limited(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
 	if timeout == Unlimited {
 		return context.WithCancel(ctx)
 	}
-	return hold.WithTimeout(ctx, cmp.Or(timeout, DefaultTimeout))
+	return k.limit(ctx, cmp.Or(timeout, DefaultTimeout))
 }
 
 // start runs program as cmd says.
@@ -106,14 +127,7 @@ func (e Exec) start(ctx context.Context, program string, cmd Command) (ran, erro
 	c.Env, _ = e.Environ(ctx, cmd)
 	c.Dir = cmd.Dir
 	if cmd.Answer != nil {
-		return converse(ctx, c, cmd)
-	}
-	if cmd.Interactive {
-		// In kit's own process group, as the terminal's foreground group is
-		// the only one that may read from it.
-		c.Stdin, c.Stdout, c.Stderr = e.Stdin, e.Stdout, e.Stderr
-		c.WaitDelay = waitDelay
-		return ran{}, c.Run()
+		return converse(ctx, c, cmd, e.timed())
 	}
 	if cmd.Input != "" {
 		c.Stdin = strings.NewReader(cmd.Input)
@@ -132,7 +146,7 @@ func (e Exec) start(ctx context.Context, program string, cmd Command) (ran, erro
 			stderr.end()
 		}()
 	}
-	d := detach(c, cmd)
+	d := detach(c, cmd, e.timed())
 	defer d.stop()
 	err := c.Start()
 	if err == nil {
@@ -153,17 +167,17 @@ func running(c *exec.Cmd, cmd Command) (exited func()) {
 }
 
 // detach has c, the command cmd, run in a process group of its own, ended
-// with everything it started, as os/exec ends the command alone: a child
-// left running would outlive it, holding its output open until waitDelay
-// passed. Ended, the group's sent SIGTERM, for what it runs to clean up, as
-// git takes its lock files away, the command's own children included,
-// whether or not it's exited; and what's left of it is killed endGrace
-// after. Unless it's kit's own sudo (ownSudo), or shares kit's session
-// (SharesSession), it runs in a session of its own too, without kit's terminal: a program
-// that asks there, as a program's own sudo asks for a password, fails at
-// once, where in the background of kit's terminal it would stop, unseen,
-// for good.
-func detach(c *exec.Cmd, cmd Command) *detached {
+// with everything it started, as os/exec ends the command alone, by the
+// clock k: a child left running would outlive it, holding its output open
+// until waitDelay passed. Ended, the group's sent SIGTERM, for what it runs
+// to clean up, as git takes its lock files away, the command's own children
+// included, whether or not it's exited; and what's left of it is killed
+// endGrace after. Unless it's kit's own sudo (ownSudo), or shares kit's
+// session (SharesSession), it runs in a session of its own too, without
+// kit's terminal: a program that asks there, as a program's own sudo asks
+// for a password, fails at once, where in the background of kit's terminal
+// it would stop, unseen, for good.
+func detach(c *exec.Cmd, cmd Command, k *clock) *detached {
 	c.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if ownSudo(cmd) || cmd.SharesSession {
 		c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -171,21 +185,21 @@ func detach(c *exec.Cmd, cmd Command) *detached {
 	d := &detached{group: func(sig syscall.Signal) error { return syscall.Kill(-c.Process.Pid, sig) }}
 	term := func() error { return d.group(syscall.SIGTERM) }
 	grace := endGrace
-	c.WaitDelay = waitDelay
+	c.WaitDelay = k.wait
 	if ownSudo(cmd) {
 		// What kit's sudo runs runs as root, which kit can't signal: killed,
 		// sudo would end alone, and leave it running. sudo passes SIGTERM
 		// on to it, given as long as kit waits for a command's output once
 		// ended.
 		term = func() error { return c.Process.Signal(syscall.SIGTERM) }
-		grace = waitDelay
-		c.WaitDelay = 2 * waitDelay
+		grace = k.wait
+		c.WaitDelay = 2 * k.wait
 	}
 	c.Cancel = func() error {
 		d.ended.Store(true)
 		d.mu.Lock()
 		defer d.mu.Unlock()
-		d.fallback = time.AfterFunc(grace, func() { _ = d.group(syscall.SIGKILL) })
+		d.stopFallback = k.after(grace, func() { _ = d.group(syscall.SIGKILL) })
 		return term()
 	}
 	return d
@@ -195,14 +209,14 @@ func detach(c *exec.Cmd, cmd Command) *detached {
 // end themselves, once sent SIGTERM, before what's left is killed.
 const endGrace = 2 * time.Second
 
-// detached is a command detach readied: whether kit ended it, the fallback
-// that kills what's left of its group once it's been ended a while, and
-// what signals that group.
+// detached is a command detach readied: whether kit ended it, what stops
+// the fallback that kills what's left of its group once it's been ended a
+// while, and what signals that group.
 type detached struct {
-	ended    atomic.Bool
-	mu       sync.Mutex
-	fallback *time.Timer
-	group    func(syscall.Signal) error
+	ended        atomic.Bool
+	mu           sync.Mutex
+	stopFallback func() bool
+	group        func(syscall.Signal) error
 }
 
 // stop stops the fallback once the command's exited, when nothing's left
@@ -210,8 +224,8 @@ type detached struct {
 func (d *detached) stop() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if d.fallback != nil && errors.Is(d.group(0), syscall.ESRCH) {
-		d.fallback.Stop()
+	if d.stopFallback != nil && errors.Is(d.group(0), syscall.ESRCH) {
+		d.stopFallback()
 	}
 }
 
@@ -224,10 +238,10 @@ func ownSudo(cmd Command) bool {
 	return filepath.Base(cmd.Name) == "sudo" && len(cmd.Args) > 0 && slices.Contains([]string{"-n", "-S", "-A"}, cmd.Args[0])
 }
 
-// converse runs c, the command cmd, detached, answering what it asks on its
-// standard error, as cmd says, on its standard input; what it printed, its
-// prompts taken out.
-func converse(ctx context.Context, c *exec.Cmd, cmd Command) (ran, error) {
+// converse runs c, the command cmd, detached by the clock k, answering
+// what it asks on its standard error, as cmd says, on its standard input;
+// what it printed, its prompts taken out.
+func converse(ctx context.Context, c *exec.Cmd, cmd Command, k *clock) (ran, error) {
 	in, err := c.StdinPipe()
 	if err != nil {
 		return ran{}, err
@@ -238,7 +252,7 @@ func converse(ctx context.Context, c *exec.Cmd, cmd Command) (ran, error) {
 	}
 	var out bytes.Buffer
 	c.Stdout = &out
-	d := detach(c, cmd)
+	d := detach(c, cmd, k)
 	defer d.stop()
 	if err := c.Start(); err != nil {
 		return ran{}, err

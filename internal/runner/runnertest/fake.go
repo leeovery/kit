@@ -13,7 +13,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/leeovery/kit/internal/runner"
 )
@@ -69,19 +68,18 @@ type Script struct {
 
 // answer is what one run of a command does.
 type answer struct {
-	stdout   string
-	stderr   string
-	exit     int
-	err      error
-	duration time.Duration
-	does     func()
-	writes   map[string]string
-	partly   bool
-	filter   func(input string) (string, error)
-	asks     int
-	late     bool
-	hangs    bool
-	group    int
+	stdout string
+	stderr string
+	exit   int
+	err    error
+	does   func()
+	writes map[string]string
+	partly bool
+	filter func(input string) (string, error)
+	asks   int
+	late   bool
+	hangs  bool
+	group  int
 }
 
 func (s *Script) last() *answer {
@@ -145,12 +143,6 @@ func (s *Script) WritesPartly(flag, content string) *Script {
 // prints the error on its standard error instead, and exits 1.
 func (s *Script) Filters(f func(input string) (string, error)) *Script {
 	s.last().filter = f
-	return s
-}
-
-// Takes has the command report it took d.
-func (s *Script) Takes(d time.Duration) *Script {
-	s.last().duration = d
 	return s
 }
 
@@ -260,7 +252,7 @@ func (f *Fake) Run(ctx context.Context, cmd runner.Command) (runner.Result, erro
 		a.does()
 	}
 	stdout, stderr, exit := a.output(cmd.Input)
-	if cmd.Lines != nil && !cmd.Interactive {
+	if cmd.Lines != nil {
 		for _, text := range []string{stdout, stderr} {
 			for _, line := range given(cmd, text) {
 				cmd.Lines(line)
@@ -277,7 +269,7 @@ func (f *Fake) Run(ctx context.Context, cmd runner.Command) (runner.Result, erro
 	if exit == 0 || a.partly {
 		f.write(cmd, a.writes)
 	}
-	res := runner.Result{Stdout: []byte(stdout), Stderr: []byte(stderr), ExitCode: exit, Duration: a.duration, Group: a.group}
+	res := runner.Result{Stdout: []byte(stdout), Stderr: []byte(stderr), ExitCode: exit, Group: a.group}
 	if exit != 0 {
 		return res, runner.NewExitError(cmd.String(), exit, res.Stderr)
 	}
