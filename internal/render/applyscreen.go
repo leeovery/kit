@@ -446,8 +446,9 @@ const panelAt = "      "
 
 // panel is the card up, as the panel over the log has it, w wide: its
 // title, orange, how many more wait after it and how long it's waited at
-// the right, as far as there's room; why it's there (cardWhy); its steps
-// (panelSteps); then how it ends (cardEnds).
+// the right, as far as there's room; why it's there (cardWhy); then
+// panelBody's, ending with that kit carries on by itself, when it tells,
+// and, while another card waits, the key moving on to it.
 func (p *Pretty) panel(w int) []string {
 	c := p.card
 	var right []string
@@ -459,43 +460,50 @@ func (p *Pretty) panel(w int) []string {
 	for len(right) > 1 && ansi.StringWidth(title)+ansi.StringWidth(look.Says(right...))+3 > w {
 		right = right[:len(right)-1]
 	}
-	out := []string{"", spread(title, look.Says(right...)+"  ", w), ""}
-	room := w - len(panelAt)
-	for _, l := range look.Wrap(p.cardWhy(), room) {
-		out = append(out, panelAt+look.Muted(look.Linked(l)))
+	var then []look.Key
+	if c.More > 0 {
+		then = append(then, nextKey)
 	}
-	out = append(append(out, ""), panelSteps(c.Steps, room)...)
+	tells := []string{panelAt + look.White("kit carries on by itself once it's done")}
+	return panelBody(w, spread(title, look.Says(right...)+"  ", w), p.cardWhy(), *c, tells, then...)
+}
+
+// panelBody is a panel over the log, w wide, under its title: why, muted
+// and wrapped, when there's a why; card c's steps (panelSteps); then how it
+// ends: a choice being answered, what its key does, turning; a choice, its
+// keys, a line each; one kit tells by itself, tells; else the key that says
+// it's done. Then, but while a choice is being answered, the keys in then.
+// Each is wrapped under its own words.
+func panelBody(w int, title, why string, c event.NeedsYou, tells []string, then ...look.Key) []string {
+	out := []string{"", title, ""}
+	room := w - len(panelAt)
+	if why != "" {
+		for _, l := range look.Wrap(why, room) {
+			out = append(out, panelAt+look.Muted(look.Linked(l)))
+		}
+		out = append(out, "")
+	}
+	out = append(out, panelSteps(c.Steps, room)...)
 	if len(c.Steps) > 0 {
 		out = append(out, "")
 	}
-	return append(append(out, cardEnds(*c, room)...), "")
-}
-
-// cardEnds is how card c, up mid-run, ends, as its panel says it, room
-// wide after its margin, as a to-do's does at the run's end (toDoEnds): a
-// choice being answered, what its key does, turning; a choice, its keys, a
-// line each; one kit tells by itself, that it carries on by itself once
-// it's done; else the key that says it's done. Then, while another card
-// waits, the key moving on to it. Each is wrapped under its own words.
-func cardEnds(c event.NeedsYou, room int) []string {
 	key := func(k look.Key) []string { return led(look.Urgent(k.Key), len(k.Key), k.Does, room) }
-	var out []string
 	switch {
 	case c.Answering != "":
-		return led(look.Cyan("◐"), 1, answeringWith(c), room)
+		return append(append(out, led(look.Cyan("◐"), 1, answeringWith(c), room)...), "")
 	case len(c.Keys) > 0:
 		for _, k := range c.Keys {
 			out = append(out, key(look.Key{Key: k.Key, Does: k.Does})...)
 		}
 	case c.Tells:
-		out = append(out, panelAt+look.White("kit carries on by itself once it's done"))
+		out = append(out, tells...)
 	default:
-		out = key(doneKey)
+		out = append(out, key(doneKey)...)
 	}
-	if c.More > 0 {
-		out = append(out, key(nextKey)...)
+	for _, k := range then {
+		out = append(out, key(k)...)
 	}
-	return out
+	return append(out, "")
 }
 
 // panelSteps are a card's steps as its panel has them, room wide after
