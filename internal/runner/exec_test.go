@@ -456,6 +456,22 @@ func TestExecEndsKitsOwnSudoThroughSudo(t *testing.T) {
 	}
 }
 
+// kit's own sudo, its time limit up, exits with a code of its own, passing
+// on the SIGTERM kit sent it: kit having ended it, it says it was ended,
+// not how it exited.
+func TestExecSaysKitEndedItsOwnSudo(t *testing.T) {
+	r, _ := programs(t, map[string]string{"sudo": `trap 'exit 143' TERM; echo ready; while :; do /bin/sleep 0.1; done`})
+	r, clock := timed(r, 2*time.Second)
+	_, err := r.Run(t.Context(), runner.Command{Name: "sudo", Args: []string{"-n", "true"}, Lines: func(line string) {
+		if line == "ready" {
+			clock.up()
+		}
+	}})
+	if _, exited := errors.AsType[*runner.ExitError](err); exited || !errors.Is(err, context.Canceled) {
+		t.Errorf("Run() = %v; want it ended, its limit up", err)
+	}
+}
+
 // A command kit runs detached says the process group it ran in, its own.
 func TestExecSaysTheGroupACommandRanIn(t *testing.T) {
 	r, _ := programs(t, map[string]string{"group": "echo $$"})

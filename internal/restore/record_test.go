@@ -82,6 +82,16 @@ func TestRecordPartWay(t *testing.T) {
 	}
 }
 
+// A copy beginning of a path never begun, as one its source hadn't, says
+// it was part-way from nowhere, whatever source the record names for it.
+func TestRecordBeginsAPathNeverBegun(t *testing.T) {
+	laptop, tm := Origin{Kind: FromMac, Detail: "laptop"}, Origin{Kind: FromTimeMachine, Detail: "snapshot"}
+	rec := Record{Paths: map[string]Path{"~/Gone": {State: NotThere, From: laptop}}}
+	if was := rec.Begin("~/Gone", tm, time.Date(2026, 11, 21, 10, 0, 0, 0, time.UTC)); was != (Origin{}) {
+		t.Errorf("Begin(~/Gone), never begun, = %+v, want none", was)
+	}
+}
+
 // Resuming is where the first listed path part-way came from, of a kind if
 // asked, in the lines' order: none when none is.
 func TestRecordResuming(t *testing.T) {
