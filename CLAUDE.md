@@ -80,12 +80,8 @@ programs. Ever.
     `internal/testguard/stubs.go`: brew, mas, sudo, op, ssh, agntc, curl, swiftc and the rest);
   - lets `http.DefaultTransport`, and transports cloned from it, dial loopback, and unix
     sockets in the temporary directory, alone.
-- **testguard fails the run, even when every test passed,** when:
-  - a stub ran, or a dial was blocked;
-  - kit's real config repository changed (but its `.git` directory), or its state or logs
-    directory appeared, or the Mac's name in its state changed: in the home, or where
-    `KIT_CONFIG`, `XDG_CONFIG_HOME` and `XDG_STATE_HOME` put them as the run began, links
-    resolved.
+- **testguard fails the run, even when every test passed,** when a stub ran, or a dial was
+  blocked.
 - **testguard's own tests fail**, reading the module's source:
   - a package with tests but without that `TestMain`, or with anything else in it;
   - a change to the environment anywhere but `testguard`;

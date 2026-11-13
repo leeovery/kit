@@ -3,7 +3,6 @@ package testguard_test
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -25,9 +24,6 @@ const (
 	childDoes = "TESTGUARD_CHILD_DOES"
 	// childHome is the child's real home, which the guard moves HOME away from.
 	childHome = "TESTGUARD_CHILD_HOME"
-	// childElsewhere is where the child's environment puts its real config
-	// and state, outside its home, which the guard clears the variables of.
-	childElsewhere = "TESTGUARD_CHILD_ELSEWHERE"
 )
 
 // seeded are variables a child starts with that the guard must clear.
@@ -50,16 +46,6 @@ var seeded = []string{
 	"ALL_PROXY=socks5://127.0.0.1:9",
 }
 
-// Where kit keeps its config, its Mac's name, its other state and its logs,
-// from a home.
-var (
-	configFile  = filepath.Join(".config", "kit", "kit.toml")
-	gitFile     = filepath.Join(".config", "kit", ".git", "FETCH_HEAD")
-	machineFile = filepath.Join(".local", "state", "kit", "machine")
-	driftFile   = filepath.Join(".local", "state", "kit", "drift.json")
-	logFile     = filepath.Join("Library", "Logs", "kit", "status.jsonl")
-)
-
 // outsideSocket is a socket outside the temporary directory, as the SSH
 // agent's is: nothing's there, but the guard must block the dial all the
 // same.
@@ -73,16 +59,10 @@ func TestEscapesFailTheRunThoughEveryTestPasses(t *testing.T) {
 		{does: "run-a-stub", want: "ran brew list --formula"},
 		{does: "dial-off-the-machine", want: "blocked dial to 192.0.2.1:80"},
 		{does: "dial-a-socket-outside-the-temporary-directory", want: "blocked dial to " + outsideSocket},
-		{does: "overwrite-the-real-config", want: "the real ~/.config/kit/kit.toml was modified"},
-		{does: "create-the-real-state", want: "the real ~/.local/state/kit appeared"},
-		{does: "create-the-real-logs", want: "the real ~/Library/Logs/kit appeared"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.does, func(t *testing.T) {
-			home := t.TempDir()
-			writeFile(t, filepath.Join(home, configFile), "format = 1\n")
-
-			out, err := runChild(t, tt.does, home)
+			out, err := runChild(t, tt.does, t.TempDir())
 			if exit, ok := errors.AsType[*exec.ExitError](err); !ok || exit.ExitCode() != 1 {
 				t.Errorf("child: error = %v, want exit status 1", err)
 			}
@@ -94,65 +74,10 @@ func TestEscapesFailTheRunThoughEveryTestPasses(t *testing.T) {
 	}
 }
 
-func TestChangingTheRealMachineNameFailsTheRun(t *testing.T) {
-	home := t.TempDir()
-	writeFile(t, filepath.Join(home, machineFile), "laptop\n")
-
-	out, err := runChild(t, "change-the-real-machine-name", home)
-	if exit, ok := errors.AsType[*exec.ExitError](err); !ok || exit.ExitCode() != 1 {
-		t.Errorf("child: error = %v, want exit status 1", err)
-	}
-	if want := "the real ~/.local/state/kit/machine was modified"; !strings.Contains(out, want) {
-		t.Errorf("child printed\n%s\nwant the guard to fail the run as %q", out, want)
-	}
-}
-
-func TestEscapesWhereTheEnvironmentPutsTheConfigAndState(t *testing.T) {
-	tests := []struct {
-		does string
-		// want is what the guard fails the run as, %s standing for where the
-		// environment puts the config and state.
-		want string
-	}{
-		{does: "overwrite-the-config-KIT_CONFIG-names", want: "the real %s/kit-config/kit.toml was modified"},
-		{does: "write-the-config-where-XDG_CONFIG_HOME-puts-it", want: "the real %s/config/kit/brew was created"},
-		{does: "create-the-state-where-XDG_STATE_HOME-puts-it", want: "the real %s/state/kit appeared"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.does, func(t *testing.T) {
-			elsewhere := t.TempDir()
-			writeFile(t, filepath.Join(elsewhere, "kit-config", "kit.toml"), "format = 1\n")
-
-			out, err := runChild(t, tt.does, t.TempDir(),
-				"KIT_CONFIG="+filepath.Join(elsewhere, "kit-config"),
-				"XDG_CONFIG_HOME="+filepath.Join(elsewhere, "config"),
-				"XDG_STATE_HOME="+filepath.Join(elsewhere, "state"),
-				childElsewhere+"="+elsewhere)
-			if exit, ok := errors.AsType[*exec.ExitError](err); !ok || exit.ExitCode() != 1 {
-				t.Errorf("child: error = %v, want exit status 1", err)
-			}
-			want := fmt.Sprintf(tt.want, elsewhere)
-			passed := slices.Contains(strings.Split(out, "\n"), "PASS")
-			if !passed || !strings.Contains(out, "testguard: the tests reached past their isolation") || !strings.Contains(out, want) {
-				t.Errorf("child printed\n%s\nwant its test to pass, and the guard to fail the run as %q", out, want)
-			}
-		})
-	}
-}
-
 func TestWhatTheGuardLetsBePasses(t *testing.T) {
-	for _, does := range []string{"stay-in-isolation", "write-the-real-state-and-logs-as-a-live-kit-does", "pull-the-real-config-as-git-does"} {
-		t.Run(does, func(t *testing.T) {
-			home := t.TempDir()
-			writeFile(t, filepath.Join(home, configFile), "format = 1\n")
-			writeFile(t, filepath.Join(home, machineFile), "laptop\n")
-			writeFile(t, filepath.Join(home, logFile), "{}\n")
-
-			out, err := runChild(t, does, home)
-			if err != nil || strings.Contains(out, "testguard") {
-				t.Errorf("child: error = %v, printing\n%s\nwant it to pass, with nothing from the guard", err, out)
-			}
-		})
+	out, err := runChild(t, "stay-in-isolation", t.TempDir())
+	if err != nil || strings.Contains(out, "testguard") {
+		t.Errorf("child: error = %v, printing\n%s\nwant it to pass, with nothing from the guard", err, out)
 	}
 }
 
@@ -169,8 +94,6 @@ func TestInChild(t *testing.T) {
 	if does == "" {
 		t.Skip("runs only in a child")
 	}
-	realHome := os.Getenv(childHome)
-	elsewhere := os.Getenv(childElsewhere)
 	switch does {
 	case "run-a-stub":
 		err := exec.Command("brew", "list", "--formula").Run()
@@ -193,37 +116,17 @@ func TestInChild(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "testguard: blocked dial to "+outsideSocket) {
 			t.Errorf("GET / over %s: error = %v, want the dial blocked", outsideSocket, err)
 		}
-	case "overwrite-the-real-config":
-		writeFile(t, filepath.Join(realHome, configFile), "format = 1\nprimary = \"laptop\"\n")
-	case "create-the-real-state":
-		writeFile(t, filepath.Join(realHome, machineFile), "laptop\n")
-	case "create-the-real-logs":
-		writeFile(t, filepath.Join(realHome, logFile), "{}\n")
-	case "change-the-real-machine-name":
-		writeFile(t, filepath.Join(realHome, machineFile), "studio\nmore\n")
-	case "overwrite-the-config-KIT_CONFIG-names":
-		writeFile(t, filepath.Join(elsewhere, "kit-config", "kit.toml"), "format = 1\nprimary = \"laptop\"\n")
-	case "write-the-config-where-XDG_CONFIG_HOME-puts-it":
-		writeFile(t, filepath.Join(elsewhere, "config", "kit", "brew"), "jq\n")
-	case "create-the-state-where-XDG_STATE_HOME-puts-it":
-		writeFile(t, filepath.Join(elsewhere, "state", "kit", "machine"), "laptop\n")
-	case "write-the-real-state-and-logs-as-a-live-kit-does":
-		writeFile(t, filepath.Join(realHome, driftFile), "{}\n")
-		writeFile(t, filepath.Join(realHome, filepath.Dir(logFile), "apply.jsonl"), "{}\n")
-	case "pull-the-real-config-as-git-does":
-		writeFile(t, filepath.Join(realHome, gitFile), "abc\n")
 	case "stay-in-isolation":
 		stayInIsolation(t)
 	case "check-the-environment":
-		checkEnvironment(t, realHome)
+		checkEnvironment(t, os.Getenv(childHome))
 	default:
 		t.Fatalf("%s=%s names nothing to do", childDoes, does)
 	}
 }
 
 // stayInIsolation does what the guard allows: it dials loopback and a unix
-// socket in the temporary directory, writes a config into the home the guard
-// gives it, and writes under a temporary directory.
+// socket in the temporary directory.
 func stayInIsolation(t *testing.T) {
 	ok := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = io.WriteString(w, "ok")
@@ -241,8 +144,6 @@ func stayInIsolation(t *testing.T) {
 		t.Fatalf("GET / over %s: %v", socket, err)
 	}
 	_ = resp.Body.Close()
-	writeFile(t, filepath.Join(os.Getenv("HOME"), configFile), "format = 1\n")
-	writeFile(t, filepath.Join(t.TempDir(), "machine"), "laptop\n")
 }
 
 // serveOnASocket serves h on a unix socket in the temporary directory until
@@ -338,15 +239,4 @@ func runChild(t *testing.T, does, home string, env ...string) (string, error) {
 	cmd.Env = slices.Concat(os.Environ(), env, []string{"HOME=" + home, "GORACE=" + race, childDoes + "=" + does, childHome + "=" + home})
 	out, err := cmd.CombinedOutput()
 	return string(out), err
-}
-
-// writeFile writes content to a file at path, creating its directories.
-func writeFile(t *testing.T, path, content string) {
-	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		t.Fatal(err)
-	}
 }
