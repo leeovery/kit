@@ -196,14 +196,15 @@ type Copy struct {
 // Stats is what a copy comes to: how many files it copies, or would, and
 // how many bytes of them; and how many the path holds once copied, as the
 // source has them, copied or there already, and their bytes. Files are
-// regular files, never folders or links. Newer is, of a file copied, whether
-// the one here was kept, newer than the source's, as --update keeps it.
+// regular files, never folders or links. Newer are the files whose copy
+// here was kept, newer than the source's, as --update keeps it: each from
+// the folder copied, or, a file copied, its name.
 type Stats struct {
 	Files      int
 	Bytes      int64
 	TotalFiles int
 	TotalBytes int64
-	Newer      bool
+	Newer      []string
 }
 
 // Progress is how far a copy has got, as rsync says it.
@@ -232,18 +233,20 @@ func (r Rsync) Size(ctx context.Context, c Copy) (Stats, error) {
 }
 
 // Copy copies c, telling progress how far it's got as rsync says, and
-// returns what it copied, and, a file, whether it kept the one here, newer,
-// as rsync says it skipped it (its --info=skip1, as in ".zsh_history is
-// newer"). A copy stopped part way carries on from where it was, run
-// again. Files vanished from the source as it copied fail it with
-// ErrVanished, and it still returns what it copied.
+// returns what it copied, and the files it kept here, newer, as rsync says
+// it skipped each (its --info=skip1, as in ".zsh_history is newer"). A copy
+// stopped part way carries on from where it was, run again. Files vanished
+// from the source as it copied fail it with ErrVanished, and it still
+// returns what it copied.
 func (r Rsync) Copy(ctx context.Context, c Copy, progress func(Progress)) (Stats, error) {
 	var read progressReader
 	var stats statsReader
-	newer := false
+	var newer []string
 	lines := func(line string) {
 		stats.line(line)
-		newer = newer || c.File && strings.HasSuffix(line, " is newer")
+		if name, ok := strings.CutSuffix(line, " is newer"); ok {
+			newer = append(newer, unescaped(name))
+		}
 		if p, ok := read.line(line); ok && progress != nil {
 			progress(p)
 		}
@@ -254,6 +257,35 @@ func (r Rsync) Copy(ctx context.Context, c Copy, progress func(Progress)) (Stats
 	s, err := stated(stats.text(), err)
 	s.Newer = newer
 	return s, err
+}
+
+// escapeLen is how long a byte rsync escapes is in what it writes: \#ooo,
+// in octal.
+const escapeLen = len(`\#ooo`)
+
+// unescaped is name as rsync writes it, each byte it escaped put back:
+// those it can't print, as a newline, and the \ starting what would read
+// as one.
+func unescaped(name string) string {
+	var b strings.Builder
+	for i := 0; i < len(name); i++ {
+		if c, ok := escaped(name[i:]); ok {
+			b.WriteByte(c)
+			i += escapeLen - 1
+			continue
+		}
+		b.WriteByte(name[i])
+	}
+	return b.String()
+}
+
+// escaped is the byte s starts with, escaped, if it does.
+func escaped(s string) (byte, bool) {
+	if len(s) < escapeLen || !strings.HasPrefix(s, `\#`) {
+		return 0, false
+	}
+	n, err := strconv.ParseUint(s[2:escapeLen], 8, 8)
+	return byte(n), err == nil
 }
 
 // Compare is the second pass: it compares every file of c's copy with its

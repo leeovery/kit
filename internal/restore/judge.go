@@ -118,27 +118,28 @@ const asideFolder = "restore/set-aside"
 
 // SetAside moves everything f's line's path, in the home folder home,
 // holds that isn't kit's, as f leaves out, into kit's state folder,
-// stateDir (setAside). It's applying's to call: judging moves nothing.
-func SetAside(stateDir, home string, f *Filter, now time.Time) error {
+// stateDir (SetAsideFiles). It's applying's to call: judging moves nothing.
+func SetAside(stateDir, home string, f *Filter, now time.Time) (Aside, error) {
 	held, err := f.holds(home, true)
 	if err != nil {
-		return err
+		return Aside{}, err
 	}
-	return setAside(stateDir, home, f.Line.Path, held, now)
+	return SetAsideFiles(stateDir, home, f.Line.Path, held, now)
 }
 
-// setAside moves files, each from ~, of the listed path path, into kit's
-// state folder, stateDir: into a folder of its own under restore/set-aside,
-// named by the time, now (asideDir), each keeping its path from the home
-// folder, home. It records what it moved, and where, even when it fails
-// partway. A file gone since it was found is passed over.
-func setAside(stateDir, home, path string, files []string, now time.Time) error {
+// SetAsideFiles moves files, each from ~, of the listed path path, into
+// kit's state folder, stateDir: into a folder of its own under
+// restore/set-aside, named by the time, now (asideDir), each keeping its
+// path from the home folder, home. It records what it moved, and where,
+// even when it fails partway, and returns it, nothing when it moved
+// nothing. A file gone since it was found is passed over.
+func SetAsideFiles(stateDir, home, path string, files []string, now time.Time) (Aside, error) {
 	if len(files) == 0 {
-		return nil
+		return Aside{}, nil
 	}
 	dir, err := asideDir(stateDir, now)
 	if err != nil {
-		return fmt.Errorf("set aside what's in %s: %w", path, err)
+		return Aside{}, fmt.Errorf("set aside what's in %s: %w", path, err)
 	}
 	var moved []string
 	for _, p := range files {
@@ -161,10 +162,10 @@ func setAside(stateDir, home, path string, files []string, now time.Time) error 
 		err = fmt.Errorf("set aside what's in %s: %w", path, err)
 	}
 	if len(moved) == 0 {
-		return err
+		return Aside{}, err
 	}
 	aside := Aside{Time: now, Dir: dir, Paths: moved}
-	return errors.Join(err, UpdateRecord(stateDir, func(r *Record) {
+	return aside, errors.Join(err, UpdateRecord(stateDir, func(r *Record) {
 		r.Change(path, func(p *Path) { p.SetAside = append(p.SetAside, aside) })
 	}))
 }

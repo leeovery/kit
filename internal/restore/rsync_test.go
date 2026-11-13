@@ -282,29 +282,32 @@ func TestCopiesNeverCarryACLsDeleteOrReplaceNewerFiles(t *testing.T) {
 	}
 }
 
-// A file the copy kept, newer here than at the source, as --update keeps
-// it, is said so, as rsync 3.5.2 says it under --info=skip1 (copy-newer.raw,
-// a file's copy over one written since), its name as rsync writes it,
-// escaped (copy-newer-escaped.raw, the same of a file with a newline in its
-// name); a file copied, or a folder, isn't.
-func TestCopySaysAFileWasKeptAsNewer(t *testing.T) {
+// The files the copy kept, newer here than at the source, as --update
+// keeps them, are named as rsync 3.5.2 says each under --info=skip1
+// (copy-newer.raw, a file's copy over one written since), its name put
+// back as it was where rsync escapes it (copy-newer-escaped.raw, the same
+// of a file with a newline in its name): a file's by its name; a folder's
+// each from the folder, in the words the file's say them. A copy keeping
+// none names none.
+func TestCopySaysWhatItKeptAsNewer(t *testing.T) {
 	file := Copy{From: Source{Path: "/Volumes/snapshot/Users/someone/.zsh_history"}, To: t.TempDir() + "/.zsh_history", Partial: partial, File: true}
-	folder := local("/Users/someone/Code", t.TempDir()+"/Code")
+	folder := local("/Users/someone/.claude", t.TempDir()+"/.claude")
 	for _, tt := range []struct {
-		name    string
-		c       Copy
-		fixture string
-		newer   bool
+		name  string
+		c     Copy
+		rsync Rsync
+		newer []string
 	}{
-		{"a file kept", file, "copy-newer.raw", true},
-		{"a file kept, its name escaped", Copy{From: Source{Path: "/Volumes/snapshot/Users/someone/nl\nname"}, To: t.TempDir() + "/nl\nname", Partial: partial, File: true}, "copy-newer-escaped.raw", true},
-		{"a file copied", file, "copy.raw", false},
-		{"a folder", folder, "copy-newer.raw", false},
+		{"a file kept", file, realRsync(t, "copy-newer.raw", "", 0), []string{".zsh_history"}},
+		{"a file kept, its name escaped", Copy{From: Source{Path: "/Volumes/snapshot/Users/someone/nl\nname"}, To: t.TempDir() + "/nl\nname", Partial: partial, File: true}, realRsync(t, "copy-newer-escaped.raw", "", 0), []string{"nl\nname"}},
+		{"a file copied", file, realRsync(t, "copy.raw", "", 0), nil},
+		{"files in a folder kept", folder, NewRsync(prints(t, "history.jsonl is newer\nprojects/site/a b.jsonl is newer\nodd\\#012name is newer\nback\\#134#123slash is newer\nprojects/site/copied.jsonl\n"+fixture(t, "size.raw"))),
+			[]string{"history.jsonl", "projects/site/a b.jsonl", "odd\nname", `back\#123slash`}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			stats, err := realRsync(t, tt.fixture, "", 0).Copy(t.Context(), tt.c, nil)
-			if err != nil || stats.Newer != tt.newer {
-				t.Errorf("Copy() = %+v, %v; want newer %v", stats, err, tt.newer)
+			stats, err := tt.rsync.Copy(t.Context(), tt.c, nil)
+			if err != nil || !slices.Equal(stats.Newer, tt.newer) {
+				t.Errorf("Copy() kept %q as newer, %v; want %q", stats.Newer, err, tt.newer)
 			}
 		})
 	}
@@ -393,7 +396,7 @@ func TestCopySaysHowFarItsGot(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("progress = %+v, want %+v", got, want)
 	}
-	if want := (Stats{Files: 5, Bytes: 50900003, TotalFiles: 5, TotalBytes: 50900003}); stats != want {
+	if want := (Stats{Files: 5, Bytes: 50900003, TotalFiles: 5, TotalBytes: 50900003}); !reflect.DeepEqual(stats, want) {
 		t.Errorf("Copy() = %+v, want %+v", stats, want)
 	}
 }
@@ -421,7 +424,7 @@ func TestSizeSaysWhatsToCome(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got != tt.want {
+			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("Size() = %+v, want %+v", got, tt.want)
 			}
 		})
@@ -540,13 +543,13 @@ func TestFilesVanishedAreAnErrorOfTheirOwn(t *testing.T) {
 
 	size, err := vanishes(fixture(t, "size.raw")).Size(t.Context(), c)
 	check("Size", err)
-	if want := (Stats{Files: 5, Bytes: 50900003, TotalFiles: 5, TotalBytes: 50900003}); size != want {
+	if want := (Stats{Files: 5, Bytes: 50900003, TotalFiles: 5, TotalBytes: 50900003}); !reflect.DeepEqual(size, want) {
 		t.Errorf("Size() = %+v, want %+v", size, want)
 	}
 	var progress []Progress
 	copied, err := realRsync(t, "vanished.raw", "vanished.stderr", 24).Copy(t.Context(), c, func(p Progress) { progress = append(progress, p) })
 	check("Copy", err)
-	if want := (Stats{Files: 3, Bytes: 209715210, TotalFiles: 3, TotalBytes: 209715210}); copied != want {
+	if want := (Stats{Files: 3, Bytes: 209715210, TotalFiles: 3, TotalBytes: 209715210}); !reflect.DeepEqual(copied, want) {
 		t.Errorf("Copy() = %+v, want %+v", copied, want)
 	}
 	wantProgress := []Progress{

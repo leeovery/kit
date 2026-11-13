@@ -212,6 +212,20 @@ func (c *restoring) record() restore.Record {
 	return rec
 }
 
+// firstRun records the restore's first run as listing paths, from ~, and,
+// settled, the restore settled since, as an earlier run left them.
+func (c *restoring) firstRun(settled bool, paths ...string) {
+	c.t.Helper()
+	if err := restore.UpdateRecord(c.state, func(r *restore.Record) {
+		r.First = restore.Run{Time: duringIt, Paths: paths}
+		if settled {
+			r.Settled = duringIt
+		}
+	}); err != nil {
+		c.t.Fatal(err)
+	}
+}
+
 // change changes the record of path, as an earlier run left it.
 func (c *restoring) change(path string, change func(*restore.Path)) {
 	c.t.Helper()
@@ -1132,17 +1146,21 @@ func TestRestoreFilesVanishing(t *testing.T) {
 // window, as a shell sharing its history with every tab writes it between
 // the file's setting aside and its copy, before the file's copy first
 // began, it's set aside, saying so, and copied again, once, before it's
-// compared, the old Mac's copy in place. Any other is kept, saying so,
-// never over newer work: on a Mac in use; outside the window, as a line
-// listed after the restore settled; or once the file's copy has begun,
-// from any source, as resumed, or under a backup standing in for the old
-// Mac, whose own copy it may be. A file the copy replaced, as one a live
+// compared, the old Mac's copy in place; kept again by that copy, it's
+// kept, saying so. Any other is kept, saying so, never over newer work, as
+// MaySetAside has it: on a Mac in use; once the restore has settled; a
+// line listed after its first run; a path its source was found without
+// before; or once the file's copy has begun, from any source, as resumed
+// under a backup standing in for the old Mac it began from. A file the copy replaced, as one a live
 // source changed, is no newer here: nothing's set aside.
 func TestRestoreANewerFileHere(t *testing.T) {
 	newer := ".zsh_history is newer\n" + stats(1, 100)
 	kept := "Kept ~/.zsh_history as it is: it's newer here than in Time Machine's backup of 8 Nov 2026 14:19"
+	written := func(c *restoring) func() {
+		return func() { write(c.t, c.home, "~/.zsh_history", duringIt.Add(48*time.Hour)) }
+	}
 	writtenAsRestored := func(c *restoring) {
-		c.on(copyingOp, "~/.zsh_history").Prints(newer).Does(func() { write(c.t, c.home, "~/.zsh_history", duringIt.Add(48*time.Hour)) }).Then().Prints(stats(1, 100)).Does(func() {
+		c.on(copyingOp, "~/.zsh_history").Prints(newer).Does(written(c)).Then().Prints(stats(1, 100)).Does(func() {
 			if err := os.WriteFile(filepath.Join(c.home, ".zsh_history"), []byte("the old Mac's"), 0o600); err != nil {
 				c.t.Error(err)
 			}
@@ -1151,39 +1169,41 @@ func TestRestoreANewerFileHere(t *testing.T) {
 	for _, tt := range []struct {
 		name    string
 		prepare func(c *restoring)
+		copies  int
 		aside   bool
+		oldMacs bool
 		log     string
 	}{
-		{"written as it was restored, in set-up", writtenAsRestored, true, "Set aside ~/.zsh_history, written here as it was restored, into "},
+		{"written as it was restored, in set-up", writtenAsRestored, 2, true, true, "Set aside ~/.zsh_history, written here as it was restored, into "},
+		{"written again as it was copied again, in set-up", func(c *restoring) {
+			c.on(copyingOp, "~/.zsh_history").Prints(newer).Does(written(c)).Then().Prints(newer).Does(written(c))
+		}, 2, true, false, kept},
 		{"written as it was restored, on a Mac in use", func(c *restoring) {
 			c.r.SetUp = false
 			writtenAsRestored(c)
-		}, false, kept},
-		{"resumed from the same source", func(c *restoring) {
-			c.change("~/.zsh_history", func(p *restore.Path) { p.State, p.From, p.Started = restore.Copying, c.src.origin, duringIt })
-			write(c.t, c.home, "~/.zsh_history", duringIt.Add(48*time.Hour))
-			c.on(copyingOp, "~/.zsh_history").Prints(newer)
-		}, false, kept},
-		{"listed after the restore settled", func(c *restoring) {
-			if err := restore.UpdateRecord(c.state, func(r *restore.Record) {
-				r.First, r.Settled = restore.Run{Time: duringIt, Paths: []string{"~/Code"}}, duringIt
-			}); err != nil {
-				c.t.Fatal(err)
-			}
-			c.change("~/.zsh_history", func(p *restore.Path) { p.State, p.From, p.Started = restore.Copying, c.src.origin, duringIt })
-			write(c.t, c.home, "~/.zsh_history", duringIt.Add(30*24*time.Hour))
-			c.on(copyingOp, "~/.zsh_history").Prints(newer)
-		}, false, kept},
-		{"a backup standing in for the old Mac", func(c *restoring) {
+		}, 1, false, false, kept},
+		{"the restore settled", func(c *restoring) {
+			c.firstRun(true, "~/.zsh_history")
+			writtenAsRestored(c)
+		}, 1, false, false, kept},
+		{"listed after the first run", func(c *restoring) {
+			c.firstRun(false, "~/Code")
+			writtenAsRestored(c)
+		}, 1, false, false, kept},
+		{"its source found without it before", func(c *restoring) {
+			c.change("~/.zsh_history", func(p *restore.Path) { p.State, p.From = restore.NotThere, c.src.origin })
+			writtenAsRestored(c)
+		}, 1, false, false, kept},
+		{"resumed, a backup standing in for the old Mac it began from", func(c *restoring) {
 			c.change("~/.zsh_history", func(p *restore.Path) { p.State, p.From, p.Started = restore.Checking, laptop, duringIt })
 			write(c.t, c.home, "~/.zsh_history", duringIt)
 			c.on(copyingOp, "~/.zsh_history").Prints(newer)
-		}, false, kept},
+		}, 1, false, false, kept},
 		{"a live source changing", func(c *restoring) {
 			c.fromLaptop()
 			c.r.Flag = steps.RestoreFrom{}
 			c.on(comparing, "~/.zsh_history").Prints(">f.st...... .zsh_history\n")
-		}, false, "Restored ~/.zsh_history: 1 file, 1 kB; 1 copied again, changed as they were copied"},
+		}, 1, false, false, "Restored ~/.zsh_history: 1 file, 1 kB; 1 copied again, changed as they were copied"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			c := newRestoring(t, "~/.zsh_history")
@@ -1195,25 +1215,96 @@ func TestRestoreANewerFileHere(t *testing.T) {
 				t.Fatalf("apply = %v", err)
 			}
 			history := c.record().Paths["~/.zsh_history"]
-			ran := []string{"sizing ~/.zsh_history", "copying ~/.zsh_history", "comparing ~/.zsh_history"}
-			if tt.aside {
-				ran = slices.Insert(ran, 2, "copying ~/.zsh_history")
+			ran := []string{"sizing ~/.zsh_history"}
+			for range tt.copies {
+				ran = append(ran, "copying ~/.zsh_history")
 			}
-			if !slices.Equal(c.ran(), ran) {
+			if ran = append(ran, "comparing ~/.zsh_history"); !slices.Equal(c.ran(), ran) {
 				t.Errorf("rsync ran %q\nwant %q", c.ran(), ran)
 			}
-			if aside := len(history.SetAside) > 0; history.State != restore.Done || aside != tt.aside || aside && !slices.Equal(history.SetAside[0].Paths, []string{"~/.zsh_history"}) {
-				t.Errorf("~/.zsh_history's record = %+v; want it restored, set aside %v", history, tt.aside)
+			if aside := len(history.SetAside) > 0; history.State != restore.Done || aside != tt.aside || aside && (len(history.SetAside) != 1 || !slices.Equal(history.SetAside[0].Paths, []string{"~/.zsh_history"})) {
+				t.Errorf("~/.zsh_history's record = %+v; want it restored, set aside once %v", history, tt.aside)
 			}
 			if !slices.ContainsFunc(c.logged, func(l string) bool { return strings.HasPrefix(l, tt.log) }) {
 				t.Errorf("the log says %q, want %q", c.logged, tt.log)
 			}
 			got, err := os.ReadFile(filepath.Join(c.home, ".zsh_history"))
 			switch {
-			case tt.aside && string(got) != "the old Mac's":
+			case tt.oldMacs && string(got) != "the old Mac's":
 				t.Errorf("~/.zsh_history = %q, %v; want the old Mac's, copied again", got, err)
-			case !tt.aside && tt.name != "a live source changing" && err != nil:
-				t.Errorf("the file here, kept, is gone: %v", err)
+			case tt.name != "a live source changing" && err != nil:
+				t.Errorf("the file here is gone: %v", err)
+			}
+		})
+	}
+}
+
+// Files in a listed folder the copy kept, newer here than at its source, as
+// Claude Code writes its history, or a tool its state, between the
+// folder's setting aside and the copy reaching them: in set-up's window,
+// before the folder's copy first began, exactly those are set aside,
+// saying how many, each by the name rsync gives it, escaped or not, and
+// the folder copied again, once, the old Mac's in their place, the rest of
+// what the copy put there staying. Out of it, as on a Mac in use, they're
+// kept, saying how many.
+func TestRestoreNewerFilesInAFolder(t *testing.T) {
+	newer := []string{"~/.claude/history.jsonl", "~/.claude/projects/site/odd\nname"}
+	copied := "~/.claude/projects/site/copied.jsonl"
+	said := "history.jsonl is newer\nprojects/site/odd\\#012name is newer\nprojects/site/copied.jsonl\n" + statsOf(1, 100, 3, 300)
+	for _, tt := range []struct {
+		name  string
+		setUp bool
+		log   string
+	}{
+		{"in set-up", true, "Set aside 2 files in ~/.claude, written here as they were restored, into "},
+		{"on a Mac in use", false, "Kept 2 files in ~/.claude as they are: newer here than in Time Machine's backup of 8 Nov 2026 14:19"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			c := newRestoring(t, "~/.claude")
+			c.r.SetUp, c.r.Flag = tt.setUp, steps.RestoreFrom{Kind: restore.FromTimeMachine}
+			for _, p := range append(slices.Clone(newer), copied) {
+				write(t, c.old, p, beforeIt)
+			}
+			c.copies("~/.claude", 3, 300)
+			c.on(copyingOp, "~/.claude").Prints(said).Does(func() {
+				for _, p := range append(slices.Clone(newer), copied) {
+					write(t, c.home, p, duringIt.Add(48*time.Hour))
+				}
+			}).Then().Prints(statsOf(2, 200, 3, 300)).Does(func() {
+				for _, p := range newer {
+					if err := os.WriteFile(filepath.Join(c.home, strings.TrimPrefix(p, "~/")), []byte("the old Mac's"), 0o600); err != nil {
+						t.Error(err)
+					}
+				}
+			})
+			if err := c.apply(t.Context()); err != nil {
+				t.Fatalf("apply = %v", err)
+			}
+			claude := c.record().Paths["~/.claude"]
+			ran := []string{"sizing ~/.claude", "copying ~/.claude", "comparing ~/.claude"}
+			if tt.setUp {
+				ran = slices.Insert(ran, 2, "copying ~/.claude")
+			}
+			if !slices.Equal(c.ran(), ran) {
+				t.Errorf("rsync ran %q\nwant %q", c.ran(), ran)
+			}
+			switch {
+			case claude.State != restore.Done:
+				t.Errorf("~/.claude's record = %+v; want it restored", claude)
+			case tt.setUp && (len(claude.SetAside) != 1 || !slices.Equal(claude.SetAside[0].Paths, newer)):
+				t.Errorf("~/.claude set aside %+v; want exactly %q", claude.SetAside, newer)
+			case !tt.setUp && len(claude.SetAside) > 0:
+				t.Errorf("~/.claude set aside %+v; want nothing", claude.SetAside)
+			}
+			if !slices.ContainsFunc(c.logged, func(l string) bool { return strings.HasPrefix(l, tt.log) }) {
+				t.Errorf("the log says %q, want %q", c.logged, tt.log)
+			}
+			want := map[bool]string{true: "the old Mac's", false: newer[0]}[tt.setUp]
+			if got, err := os.ReadFile(filepath.Join(c.home, ".claude", "history.jsonl")); err != nil || string(got) != want {
+				t.Errorf("~/.claude/history.jsonl = %q, %v; want %q", got, err, want)
+			}
+			if _, err := os.Stat(filepath.Join(c.home, strings.TrimPrefix(copied, "~/"))); err != nil {
+				t.Errorf("%s, the copy's, isn't in place: %v", copied, err)
 			}
 		})
 	}

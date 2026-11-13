@@ -1470,11 +1470,12 @@ refuses a line the restore would refuse, before writing anything, and copies not
   folder holding git checkouts, agents' worktrees, is copied whole. Needs: the source
   reachable, free space for the copy, the same username (tools key their data by full path).
   Then a second pass comparing checksums: from a backup it must find nothing; from a live Mac
-  what changed during the copy is copied again, and counted. A listed file the copy kept as
-  newer here (rsync says so), as a shell's history every tab writes, between its setting aside
-  and its copy, is set aside and copied again, once, before the second pass: only in set-up's
-  window, before its copy first started, never one resumed; any other is kept, as newer work
-  always is. rsync's own errors fail the step.
+  what changed during the copy is copied again, and counted. Files the copy kept as newer here
+  (rsync names each), as a shell's history every tab writes, or a tool's state, between a
+  path's setting aside and the copy reaching them, are set aside, those alone, and the path
+  copied again, once, before the second pass: only in set-up's window, before its copy first
+  started, never one resumed; any other is kept, as newer work always is, the log saying so.
+  rsync's own errors fail the step.
 - **The judgement, per path, before its copy.** Recorded done: never restored again; its copy
   begun: carried on, never judged again, what's in it the copy's. Absent, or holding only
   what's kit's: restored. Holding anything else in set-up's window, whatever its age (a

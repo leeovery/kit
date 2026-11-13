@@ -281,15 +281,15 @@ func TestJudgeLooksNoFurtherThanTheFirstFile(t *testing.T) {
 	if j, err := Judge(home, f, firstRun(claude.Path), true); err != nil || j.Verdict != VerdictSetAside {
 		t.Errorf("Judge() = %+v, %v; want it set aside, nothing past ~/.claude/a read", j, err)
 	}
-	if err := SetAside(t.TempDir(), home, f, later); err == nil || !errors.Is(err, fs.ErrPermission) {
+	if _, err := SetAside(t.TempDir(), home, f, later); err == nil || !errors.Is(err, fs.ErrPermission) {
 		t.Errorf("SetAside() = %v; want it failing to read ~/.claude/b", err)
 	}
 }
 
 // Setting aside moves all a path holds into kit's state, however old, each
 // file keeping its path from the home folder, kit's own left in place; the
-// record says what went where. Then the path holds nothing but kit's, so
-// it's restored.
+// record says what went where, as setting aside returns it. Then the path
+// holds nothing but kit's, so it's restored.
 func TestSetAside(t *testing.T) {
 	home, stateDir := t.TempDir(), t.TempDir()
 	for path, when := range map[string]time.Time{".claude/CLAUDE.md": earlier, ".claude/history.jsonl": earlier, ".claude/todos/a.json": later} {
@@ -303,7 +303,8 @@ func TestSetAside(t *testing.T) {
 		t.Fatalf("Judge() = %+v, %v", j, err)
 	}
 	now := boot.Add(2 * time.Hour)
-	if err := SetAside(stateDir, home, f, now); err != nil {
+	aside, err := SetAside(stateDir, home, f, now)
+	if err != nil {
 		t.Fatal(err)
 	}
 	dir := filepath.Join(stateDir, "restore", "set-aside", "20261120-110000")
@@ -320,8 +321,8 @@ func TestSetAside(t *testing.T) {
 	}
 	rec, err := LoadRecord(stateDir)
 	want := []Aside{{Time: now, Dir: dir, Paths: []string{"~/.claude/history.jsonl", "~/.claude/todos/a.json"}}}
-	if err != nil || !reflect.DeepEqual(rec.Paths["~/.claude"].SetAside, want) {
-		t.Errorf("record = %+v, %v; want set aside %+v", rec, err, want)
+	if err != nil || !reflect.DeepEqual(rec.Paths["~/.claude"].SetAside, want) || !reflect.DeepEqual(aside, want[0]) {
+		t.Errorf("record = %+v, %v, returned %+v; want set aside %+v", rec, err, aside, want)
 	}
 	if j, err := Judge(home, f, rec, true); err != nil || j.Verdict != VerdictRestore {
 		t.Errorf("Judge() after = %+v, %v; want it restored", j, err)
@@ -343,7 +344,7 @@ func TestSetAsideTwiceInASecond(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(home, ".zsh_history"), []byte(written[i]), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if err := SetAside(stateDir, home, f, at); err != nil {
+		if _, err := SetAside(stateDir, home, f, at); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -359,9 +360,9 @@ func TestSetAsideTwiceInASecond(t *testing.T) {
 	}
 }
 
-// Setting aside that fails partway records what it moved, and says what
-// failed; a file gone since it was found is passed over, and one that
-// moved nothing records nothing.
+// Setting aside that fails partway records what it moved, and returns it,
+// and says what failed; a file gone since it was found is passed over, and
+// one that moved nothing records nothing and returns nothing.
 func TestSetAsideFailsPartway(t *testing.T) {
 	home, stateDir := t.TempDir(), t.TempDir()
 	write(t, filepath.Join(home, ".claude", "a"), later)
@@ -373,18 +374,19 @@ func TestSetAsideFailsPartway(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(sub, 0o700) })
-	if err := setAside(stateDir, home, "~/.claude", []string{"~/.claude/a", "~/.claude/sub/b"}, now); err == nil {
-		t.Fatal("SetAside() = nil error, with a file that can't be moved")
+	aside, err := SetAsideFiles(stateDir, home, "~/.claude", []string{"~/.claude/a", "~/.claude/sub/b"}, now)
+	if err == nil {
+		t.Fatal("SetAsideFiles() = nil error, with a file that can't be moved")
 	}
 	rec, err := LoadRecord(stateDir)
 	want := []Aside{{Time: now, Dir: dir, Paths: []string{"~/.claude/a"}}}
-	if err != nil || !reflect.DeepEqual(rec.Paths["~/.claude"].SetAside, want) {
-		t.Errorf("record = %+v, %v; want set aside %+v", rec, err, want)
+	if err != nil || !reflect.DeepEqual(rec.Paths["~/.claude"].SetAside, want) || !reflect.DeepEqual(aside, want[0]) {
+		t.Errorf("record = %+v, %v, returned %+v; want set aside %+v", rec, err, aside, want)
 	}
 
 	stateDir = t.TempDir()
-	if err := setAside(stateDir, home, "~/.claude", []string{"~/.claude/gone"}, now); err != nil {
-		t.Fatal(err)
+	if aside, err := SetAsideFiles(stateDir, home, "~/.claude", []string{"~/.claude/gone"}, now); err != nil || len(aside.Paths) > 0 {
+		t.Fatalf("SetAsideFiles() = %+v, %v; want nothing moved", aside, err)
 	}
 	if _, err := os.Stat(filepath.Join(stateDir, "restore.json")); !os.IsNotExist(err) {
 		t.Errorf("a set-aside that moved nothing wrote a record: %v", err)
