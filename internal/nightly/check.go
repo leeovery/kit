@@ -68,7 +68,7 @@ func Check(jobs []Job, nightly bool, stateDir string, now func() time.Time) engi
 			}
 			for _, j := range jobs {
 				if o, ok := rec.Jobs[j.Name]; ok && !o.OK {
-					add(j.Name, j.Title+" failed: "+o.Said, "kit nightly "+j.Title+" runs it again; kit log shows its last run")
+					add(j.Name, j.Title+" failed: "+o.Said, "kit nightly "+j.Name+" runs it again; kit log shows its last run")
 				}
 			}
 			summary := "never run on a schedule"

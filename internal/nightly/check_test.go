@@ -82,13 +82,17 @@ func TestCheckSays(t *testing.T) {
 		{"its first run to come", nightly.Record{Scheduled: at(5, 11, 30)}, "its first run comes on the hour", ""},
 		{"loaded, never run", nightly.Record{Scheduled: at(5, 9, 0)}, "never run on a schedule", "no hourly run since its launch was loaded 3 hours ago (kit apply puts the hourly launch back in place; kit log shows the last run)"},
 		{"stopped", nightly.Record{Hourly: nightly.Run{Started: at(5, 8, 0), Finished: at(5, 8, 2)}}, "last ran: hourly 08:02", "the hourly run last ran 3 hours ago (kit apply puts the hourly launch back in place; kit log shows the last run)"},
+		{"a job failed, run again by its name", nightly.Record{
+			Hourly: nightly.Run{Started: at(5, 11, 0), Finished: at(5, 11, 2)},
+			Jobs:   map[string]nightly.Outcome{"tidy-up": {At: at(5, 11, 1), Said: "the disk isn't connected"}},
+		}, "last ran: hourly 11:02", "Tidy up failed: the disk isn't connected (kit nightly tidy-up runs it again; kit log shows its last run)"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := t.TempDir()
 			if err := nightly.Update(dir, func(r *nightly.Record) { *r = tt.rec }); err != nil {
 				t.Fatal(err)
 			}
-			res := nightly.Check(nil, false, dir, func() time.Time { return now }).Check(context.Background())
+			res := nightly.Check([]nightly.Job{{Name: "tidy-up", Title: "Tidy up"}}, false, dir, func() time.Time { return now }).Check(context.Background())
 			var item string
 			for _, it := range res.Items {
 				item = it.Name + " (" + it.Detail + ")"
