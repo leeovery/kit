@@ -50,6 +50,16 @@ func descends(pid, ancestor int) bool {
 	return false
 }
 
+// name is pid's name, that of the file it runs, links resolved: "" when it
+// can't be found.
+func name(pid int) string {
+	p, err := unix.SysctlKinfoProc("kern.proc.pid", pid)
+	if err != nil {
+		return ""
+	}
+	return unix.ByteSliceToString(p.Proc.P_comm[:])
+}
+
 // isSudo is whether pid is the real sudo (runsAsSudo).
 func isSudo(pid int) bool {
 	p, err := unix.SysctlKinfoProc("kern.proc.pid", pid)
@@ -58,9 +68,11 @@ func isSudo(pid int) bool {
 
 // runsAsSudo is whether p is sudo, running as root: its name, that of the
 // file it runs, links resolved, sudo's, and its effective user root, as
-// sudo's setuid has it. Only root can make a file that runs as root, so
-// nothing a user runs is both. Not its path: x/sys has proc_pidpath only as
-// a direct syscall, which macOS doesn't support.
+// sudo's setuid has it, while it asks: proven on macOS 26.7, 13 Nov 2026,
+// the helper sudo -A ran finding its parent /usr/bin/sudo, effective user
+// root. Only root can make a file that runs as root, so nothing a user runs
+// is both. Not its path: x/sys has proc_pidpath only as a direct syscall,
+// which macOS doesn't support.
 func runsAsSudo(p *unix.KinfoProc) bool {
 	return unix.ByteSliceToString(p.Proc.P_comm[:]) == "sudo" && p.Eproc.Ucred.Uid == 0
 }

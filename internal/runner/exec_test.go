@@ -41,6 +41,28 @@ func TestExecRunsAProgramFoundOnItsPath(t *testing.T) {
 	}
 }
 
+// A command told it's running is told its process, as it runs, and told
+// once, after, that it's exited.
+func TestExecTellsACommandItsRunning(t *testing.T) {
+	r, dir := programs(t, map[string]string{"own": `echo $$ > "$1"`})
+	said := filepath.Join(dir, "pid")
+	var events []string
+	res, err := r.Run(t.Context(), runner.Command{Name: "own", Args: []string{said}, Running: func(pid int) func() {
+		events = append(events, "running "+strconv.Itoa(pid))
+		return func() { events = append(events, "exited") }
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, err := os.ReadFile(said)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"running " + strings.TrimSpace(string(pid)), "exited"}; !slices.Equal(events, want) || strconv.Itoa(res.Group) != strings.TrimSpace(string(pid)) {
+		t.Errorf("told %q, its group %d; want %q", events, res.Group, want)
+	}
+}
+
 func TestExecReportsAFailingExit(t *testing.T) {
 	r, _ := programs(t, map[string]string{"fail": "echo partial; echo 'first' >&2; echo 'Error: no such formula' >&2; exit 3"})
 
@@ -105,13 +127,16 @@ func TestExecRunsInItsOwnEnvironmentAndDirectory(t *testing.T) {
 }
 
 // The environment a runner says a command runs in is the one the program
-// sees, through every wrapper: Exec's, a WithEnv's variables over it, the
+// sees, through every wrapper: Exec's, a Prepared's variables over it, the
 // command's own over those, then its context's; a variable nothing sets,
 // unset.
 func TestExecSaysTheEnvironmentACommandRunsIn(t *testing.T) {
 	exec, _ := programs(t, map[string]string{"show": "/usr/bin/env"})
 	exec.Env = append(exec.Env, "TOKEN=the runner's", "ADDED=the runner's")
-	added := runner.WithEnv(exec, func(runner.Command) []string { return []string{"ADDED=added", "OTHER=added"} })
+	added := runner.Prepared(exec, func(cmd runner.Command) runner.Command {
+		cmd.Env = append([]string{"ADDED=added", "OTHER=added"}, cmd.Env...)
+		return cmd
+	})
 	r := runner.Streamed(runner.Observed(added, func(context.Context, runner.Report) {}, time.Now), func(context.Context) bool { return true }, func(context.Context, runner.Command, string) {})
 	ctx := runner.WithSecretEnv(t.Context(), "TOKEN=the context's")
 	cmd := runner.Command{Name: "show", Env: []string{"OTHER=the command's"}}

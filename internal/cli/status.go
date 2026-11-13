@@ -328,7 +328,7 @@ func (a *app) build(command, logName string, face render.Face, atTerminal bool) 
 	// password, at a terminal, once the run is ready (askpass).
 	var r *run
 	env := childEnv(a.Getenv, a.Environ(), home, path)
-	exec := runner.WithEnv(a.Runner(path, env), askpassEnv(func() *askpass.Server {
+	exec := runner.Prepared(a.Runner(path, env), askpassFor(func() *askpass.Server {
 		if r == nil {
 			return nil
 		}
@@ -713,16 +713,20 @@ func (a *app) askpass(face render.Face) *askpass.Server {
 	return s
 }
 
-// askpassEnv is what a command is given for its sudo to ask the run for an
-// administrator's password, through asks, once it's started: only a command
-// whose sudo asks so (runner.Command's SudoAsks), never everything the run
-// starts, as an npm package's install script.
-func askpassEnv(asks func() *askpass.Server) func(cmd runner.Command) []string {
-	return func(cmd runner.Command) []string {
-		if s := asks(); s != nil && cmd.SudoAsks {
-			return s.Env()
+// askpassFor gives a command what has its sudo ask the run for an
+// administrator's password, through asks, once it's started: the helper,
+// and its process noted as running, for what's asked from beneath it to be
+// answered. Only a command whose sudo asks so (runner.Command's SudoAsks),
+// never everything the run starts, as an npm package's install script.
+func askpassFor(asks func() *askpass.Server) func(cmd runner.Command) runner.Command {
+	return func(cmd runner.Command) runner.Command {
+		s := asks()
+		if s == nil || !cmd.SudoAsks {
+			return cmd
 		}
-		return nil
+		cmd.Env = append(s.Env(), cmd.Env...)
+		cmd.Running = s.Running
+		return cmd
 	}
 }
 

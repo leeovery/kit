@@ -3,9 +3,9 @@
 // of the run's own, beside a socket the run answers on. sudo runs kit
 // through the link, with its prompt, as sudo -A does, and plain sudo
 // without a terminal (Env); kit, run so, asks the run over the socket and
-// prints the answer, for sudo to read. Only the real sudo, run by a
-// program the run started, may ask, and the password is never on a command
-// line, in a file or in the log.
+// prints the answer, for sudo to read. Only kit's helper, run by the real
+// sudo, run by a command the run gave the helper (Running), may ask, and
+// the password is never on a command line, in a file or in the log.
 package askpass
 
 import (
@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"os"
 	"path/filepath"
@@ -53,6 +54,9 @@ type Server struct {
 
 	mu       sync.Mutex
 	password string
+	// running are the processes of the commands running that were given
+	// the helper.
+	running map[int]bool
 	// sudos are how each sudo that asked, by its process, has been
 	// answered.
 	sudos map[int]*answered
@@ -80,7 +84,7 @@ func start(base, self string, ask Asker, sudo func(pid int) bool) (*Server, erro
 	if err != nil {
 		return nil, fmt.Errorf("make a directory for asking: %w", err)
 	}
-	s := &Server{dir: dir, ask: ask, sudo: sudo, sudos: map[int]*answered{}}
+	s := &Server{dir: dir, ask: ask, sudo: sudo, sudos: map[int]*answered{}, running: map[int]bool{}}
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	if err := os.Symlink(self, s.Helper()); err != nil {
 		_ = os.RemoveAll(dir)
@@ -106,6 +110,28 @@ func (s *Server) Helper() string {
 // there's no display.
 func (s *Server) Env() []string {
 	return []string{"SUDO_ASKPASS=" + s.Helper(), "DISPLAY="}
+}
+
+// Running notes pid, the process of a command given the helper, as
+// running: what's asked from beneath it is answered, till it's exited.
+func (s *Server) Running(pid int) (exited func()) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.running[pid] = true
+	return func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		delete(s.running, pid)
+	}
+}
+
+// beneath reports whether pid descends from a command running that was
+// given the helper.
+func (s *Server) beneath(pid int) bool {
+	s.mu.Lock()
+	running := slices.Collect(maps.Keys(s.running))
+	s.mu.Unlock()
+	return slices.ContainsFunc(running, func(r int) bool { return descends(pid, r) })
 }
 
 // Without is environ without what Env adds, for what outlives the run, as
@@ -146,9 +172,10 @@ func (s *Server) serve() {
 	}
 }
 
-// answer answers an asking through the helper, run by the real sudo, from
-// a program the run started; anything else, as a program connecting to ask
-// for itself, it closes on.
+// answer answers an asking through kit's helper, run by the real sudo,
+// beneath a command running that was given the helper; anything else, as a
+// program connecting to ask for itself, or beneath any other command, it
+// closes on.
 func (s *Server) answer(c net.Conn) {
 	defer func() { _ = c.Close() }()
 	uc, ok := c.(*net.UnixConn)
@@ -156,7 +183,7 @@ func (s *Server) answer(c net.Conn) {
 		return
 	}
 	helper, err := peer(uc)
-	if err != nil || !descends(helper, os.Getpid()) {
+	if err != nil || name(helper) != name(os.Getpid()) || !s.beneath(helper) {
 		return
 	}
 	sudo := parent(helper)

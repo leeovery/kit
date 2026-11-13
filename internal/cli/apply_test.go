@@ -163,12 +163,16 @@ func TestApplyAtATerminalAsksForThePasswordUpFront(t *testing.T) {
 	}
 	// What it installs can ask kit for the password (sudo -A, through kit's
 	// helper), and Homebrew keeps the one given (its check of sudo, which
-	// would have sudo forget it, is done); nothing else the run starts is
-	// given the helper.
+	// would have sudo forget it, is done), its process noted for what asks
+	// from beneath it to be answered; nothing else the run starts is given
+	// the helper.
 	for _, cmd := range w.fake.Commands() {
 		askpass := slices.ContainsFunc(cmd.Env, func(kv string) bool {
 			return strings.HasPrefix(kv, "SUDO_ASKPASS=") && strings.HasSuffix(kv, "/kit-askpass")
 		})
+		if askpass != (cmd.Running != nil) {
+			t.Errorf("%s ran given the helper %v, noted running %v; want both or neither", cmd, askpass, cmd.Running != nil)
+		}
 		if cmd.String() != "brew install --cask zoom" {
 			if askpass {
 				t.Errorf("%s ran with %q; want it without kit's helper", cmd, cmd.Env)

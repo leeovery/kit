@@ -16,3 +16,5 @@ func parent(int) int { return 0 }
 func descends(int, int) bool { return false }
 
 func isSudo(int) bool { return false }
+
+func name(int) string { return "" }

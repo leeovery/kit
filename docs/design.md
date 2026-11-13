@@ -709,8 +709,9 @@ which sudo, having no terminal, won't), and is given the password kept, so a ste
 `--sudo` uses plain `sudo`; `sudo -n` never asks, so goes without. Only the programs whose sudo
 asks are given the way to ask: Homebrew installing and uninstalling, its installer, and a step
 declared `--sudo` applying; never everything a run starts, as an npm package's install script.
-And kit answers only the real sudo: its helper run by sudo itself, running as root, never a
-program that connects to ask for itself. The person's asked one thing at a time: a program's
+And kit answers only its helper, run by the real sudo (running as root), beneath one of those
+commands while it runs: never a program that connects to ask for itself, nor a sudo run beneath
+anything else. The person's asked one thing at a time: a program's
 sudo waits for kit's own question, the run's time limits waiting with it; the run's end gives
 up a question still waiting.
 

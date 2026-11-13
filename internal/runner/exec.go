@@ -134,8 +134,22 @@ func (e Exec) start(ctx context.Context, program string, cmd Command) (ran, erro
 	}
 	d := detach(c, cmd)
 	defer d.stop()
-	err := c.Run()
+	err := c.Start()
+	if err == nil {
+		exited := running(c, cmd)
+		err = c.Wait()
+		exited()
+	}
 	return done(c, d, out.Bytes(), errOut.Bytes()), err
+}
+
+// running tells cmd, its process c started, that it's running (Running):
+// what it returns tells it it's exited.
+func running(c *exec.Cmd, cmd Command) (exited func()) {
+	if cmd.Running == nil {
+		return func() {}
+	}
+	return cmd.Running(c.Process.Pid)
 }
 
 // detach has c, the command cmd, run in a process group of its own, ended
@@ -229,6 +243,7 @@ func converse(ctx context.Context, c *exec.Cmd, cmd Command) (ran, error) {
 	if err := c.Start(); err != nil {
 		return ran{}, err
 	}
+	defer running(c, cmd)()
 	prompt := []byte(cmd.Asks)
 	var said, pending []byte
 	var answerErr error
