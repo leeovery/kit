@@ -218,6 +218,28 @@ func TestScriptStepWaitsForThePassword(t *testing.T) {
 	if err := steps.ScriptStep(fake, admin, s).Apply(t.Context(), notDone()); err != nil {
 		t.Errorf("with the password, Apply() = %v", err)
 	}
+	for _, cmd := range fake.Commands() {
+		if cmd.SudoAsks != (cmd.Args[0] == "apply") {
+			t.Errorf("%s ran with its sudo asking the run %v; want only apply's", cmd, cmd.SudoAsks)
+		}
+	}
+}
+
+// A step not declared --sudo never has its sudo ask the run.
+func TestScriptStepWithoutSudoNeverAsks(t *testing.T) {
+	s := script(t, steps.Script{Does: "Installs the tool"})
+	run := filepath.Join(s.Dir, "run")
+	fake := runnertest.New(t)
+	fake.On(run, "check")
+	fake.On(run, "apply")
+	if err := steps.ScriptStep(fake, &steps.Admin{}, s).Apply(t.Context(), notDone()); err != nil {
+		t.Fatal(err)
+	}
+	for _, cmd := range fake.Commands() {
+		if cmd.SudoAsks {
+			t.Errorf("%s ran with its sudo asking the run", cmd)
+		}
+	}
 }
 
 // needing is s needing TOKEN, which ready says is in place, its value as

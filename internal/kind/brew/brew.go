@@ -20,6 +20,7 @@ import (
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/engine"
+	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/hold"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/runner"
@@ -51,7 +52,6 @@ type Homebrew struct {
 	update struct {
 		mu   sync.Mutex
 		done bool
-		err  error
 	}
 	// changing is held while brew installs or uninstalls: formulae's and
 	// casks' steps run side by side, and two of Homebrew changing things at
@@ -179,7 +179,7 @@ func Install(ctx context.Context, run runner.Runner) error {
 	if _, err := run.Run(ctx, runner.Command{Name: "curl", Args: []string{"-fsSL", "--retry", "2", "-o", script, installer}}); err != nil {
 		return fmt.Errorf("download Homebrew's installer: %w", err)
 	}
-	if _, err := run.Run(ctx, runner.Command{Name: "/bin/bash", Args: []string{script}, Env: []string{"NONINTERACTIVE=1"}, Timeout: installerTimeout}); err != nil {
+	if _, err := run.Run(ctx, runner.Command{Name: "/bin/bash", Args: []string{script}, Env: []string{"NONINTERACTIVE=1"}, Timeout: installerTimeout, SudoAsks: true}); err != nil {
 		return fmt.Errorf("install Homebrew: %w", err)
 	}
 	return nil
@@ -307,23 +307,28 @@ func (h *Homebrew) watched(ctx context.Context, says string, cmd runner.Command)
 // updated brings Homebrew's formulae up to date, once a run, before the
 // first install: an install from stale formulae can fail. The step
 // installing says it's updating Homebrew, or, while another kind's install
-// updates it, that it waits for that (kind.Waiting).
-func (h *Homebrew) updated(ctx context.Context) error {
+// updates it, that it waits for that (kind.Waiting). An update that fails,
+// as it does when any one tap can't be fetched, is logged, and the installs
+// go on from the formulae Homebrew has.
+func (h *Homebrew) updated(ctx context.Context) {
 	if !h.update.mu.TryLock() {
 		resume := kind.Waiting(ctx, "Homebrew's update")
 		h.update.mu.Lock()
 		resume()
 	}
 	defer h.update.mu.Unlock()
-	if !h.update.done {
-		resume := kind.Saying(ctx, "updating Homebrew")
-		h.updating.Lock()
-		_, h.update.err = h.run.Run(ctx, h.batched(runner.Command{Name: "brew", Args: []string{"update", "--quiet"}}))
-		h.updating.Unlock()
-		h.update.done = true
-		resume()
+	if h.update.done {
+		return
 	}
-	return h.update.err
+	resume := kind.Saying(ctx, "updating Homebrew")
+	h.updating.Lock()
+	_, err := h.run.Run(ctx, h.batched(runner.Command{Name: "brew", Args: []string{"update", "--quiet"}}))
+	h.updating.Unlock()
+	h.update.done = true
+	resume()
+	if err != nil {
+		event.Log(ctx, event.Logged{Line: "Homebrew didn't update, so it installs from the formulae it has: " + err.Error(), Alert: true})
+	}
 }
 
 // install runs brew install, after brew update, of names, the kind named
@@ -334,9 +339,7 @@ func (h *Homebrew) updated(ctx context.Context) error {
 // as a dependency (a tap's php, wanted, and Homebrew's, which composer
 // needs a php of, share a keg). Then Homebrew's own, in one go.
 func (h *Homebrew) install(ctx context.Context, kindName, which string, names []string) error {
-	if err := h.updated(ctx); err != nil {
-		return err
-	}
+	h.updated(ctx)
 	defer h.take(ctx, kindName)()
 	var errs []error
 	for _, batch := range byTap(names) {
@@ -496,14 +499,16 @@ func (h *Homebrew) uninstall(ctx context.Context, kindName string, which, names 
 	return h.watched(ctx, "uninstalling", h.sudoed(ctx, h.batched(runner.Command{Name: "brew", Args: slices.Concat([]string{"uninstall"}, which, names)})))
 }
 
-// sudoed is cmd, brew installing or uninstalling, when an administrator's
-// password is at hand for the run: told its check of sudo is done, as that
-// check makes sudo forget the password it was given, so sudo would ask for
-// it again, mid-run, of brew and of everything after it (formulae make the
-// check too: the third run, 14 Oct); and run in kit's own session, whose
+// sudoed is cmd, brew installing or uninstalling, its sudo asking the run
+// for an administrator's password (SudoAsks); when the password is at hand
+// for the run, told too that its check of sudo is done, as that check makes
+// sudo forget the password it was given, so sudo would ask for it again,
+// mid-run, of brew and of everything after it (formulae make the check
+// too: the third run, 14 Oct); and run in kit's own session, whose
 // sudo has the password, so a Mac with Touch ID for sudo shows no sheet
 // for it (SharesSession: Homebrew's sudo asks kit, never the terminal).
 func (h *Homebrew) sudoed(ctx context.Context, cmd runner.Command) runner.Command {
+	cmd.SudoAsks = true
 	if h.Admin == nil || !h.Admin(ctx) {
 		return cmd
 	}
@@ -792,7 +797,7 @@ func (h *Homebrew) onTheMac(patterns []string) []string {
 // one.
 func (c casks) Blocked(ctx context.Context, missing map[string]string, _ []kind.Installed) (map[string]kind.Block, error) {
 	blocked := make(map[string]kind.Block)
-	if c.Admin == nil {
+	if c.Admin == nil || len(missing) == 0 || c.Admin(ctx) {
 		return blocked, nil
 	}
 	var fulls []string
@@ -801,7 +806,7 @@ func (c casks) Blocked(ctx context.Context, missing map[string]string, _ []kind.
 	}
 	slices.Sort(fulls)
 	needing, err := c.NeedsAdmin(ctx, fulls)
-	if err != nil || len(needing) == 0 || c.Admin(ctx) {
+	if err != nil {
 		return blocked, err
 	}
 	for name, full := range missing {
@@ -812,10 +817,10 @@ func (c casks) Blocked(ctx context.Context, missing map[string]string, _ []kind.
 	return blocked, nil
 }
 
-// NeedsAdmin finds which of casks, by full name, install through a package
-// or an installer, which ask for an administrator's password. A cask in a
-// tap not added yet isn't one: brew info won't describe it till brew install
-// adds its tap, so there's no knowing before.
+// NeedsAdmin finds which of casks, by the names given, install through a
+// package or an installer, which ask for an administrator's password. A cask
+// in a tap not added yet isn't one: brew info won't describe it till brew
+// install adds its tap, so there's no knowing before.
 func (h *Homebrew) NeedsAdmin(ctx context.Context, casks []string) ([]string, error) {
 	if len(casks) == 0 {
 		return nil, nil
@@ -832,17 +837,20 @@ func (h *Homebrew) NeedsAdmin(ctx context.Context, casks []string) ([]string, er
 	if err := json.Unmarshal(res.Stdout, &in); err != nil {
 		return nil, fmt.Errorf("read brew info's answer: %w", err)
 	}
-	var needing []string
+	asks := map[string]bool{}
 	for _, c := range in.Casks {
-		for _, artifact := range c.Artifacts {
-			if _, pkg := artifact["pkg"]; pkg {
-				needing = append(needing, c.FullToken)
-				break
-			}
-			if _, installer := artifact["installer"]; installer {
-				needing = append(needing, c.FullToken)
-				break
-			}
+		asks[c.FullToken] = slices.ContainsFunc(c.Artifacts, func(artifact map[string]json.RawMessage) bool {
+			_, pkg := artifact["pkg"]
+			_, installer := artifact["installer"]
+			return pkg || installer
+		})
+	}
+	goesBy := in.goesBy()
+	var needing []string
+	for _, name := range casks {
+		// Homebrew's names are lower case, and it takes a name in any case.
+		if asks[goesBy[strings.ToLower(name)]] {
+			needing = append(needing, name)
 		}
 	}
 	return needing, nil
@@ -983,6 +991,19 @@ func lookUp(ctx context.Context, h *Homebrew, which string, names []string) (map
 	if err := json.Unmarshal(res.Stdout, &in); err != nil {
 		return nil, fmt.Errorf("read brew info's answer: %w", err)
 	}
+	goesBy := in.goesBy()
+	resolved := make(map[string]string, len(names))
+	for _, name := range names {
+		if full, ok := goesBy[name]; ok {
+			resolved[name] = full
+		}
+	}
+	return resolved, nil
+}
+
+// goesBy maps every name brew info says each formula and cask goes by to
+// its full name.
+func (in info) goesBy() map[string]string {
 	goesBy := make(map[string]string)
 	for _, f := range in.Formulae {
 		for _, n := range slices.Concat([]string{f.Name, "homebrew/core/" + f.Name}, f.Aliases, f.Oldnames) {
@@ -996,13 +1017,7 @@ func lookUp(ctx context.Context, h *Homebrew, which string, names []string) (map
 			goesBy[inTap(c.FullToken, n)] = c.FullToken
 		}
 	}
-	resolved := make(map[string]string, len(names))
-	for _, name := range names {
-		if full, ok := goesBy[name]; ok {
-			resolved[name] = full
-		}
-	}
-	return resolved, nil
+	return goesBy
 }
 
 // inTap is name in the tap fullName is from, as in owner/tap/tool@2 for the

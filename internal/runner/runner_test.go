@@ -105,7 +105,10 @@ type only struct{ runner.Runner }
 // wrapped in any other: never an environment without what it adds.
 func TestEnvironOfARunnerThatCantSay(t *testing.T) {
 	r := only{runnertest.New(t)}
-	wrapped := runner.WithEnv(runner.Observed(r, func(context.Context, runner.Report) {}, time.Now), func() []string { return []string{"A=1"} })
+	wrapped := runner.Prepared(runner.Observed(r, func(context.Context, runner.Report) {}, time.Now), func(cmd runner.Command) runner.Command {
+		cmd.Env = append(cmd.Env, "A=1")
+		return cmd
+	})
 	for name, r := range map[string]runner.Runner{"alone": r, "wrapped": wrapped} {
 		if env, ok := runner.Environ(t.Context(), r, runner.Command{Name: "git"}); ok || env != nil {
 			t.Errorf("%s: Environ() = %q, %t; want it unknown", name, env, ok)

@@ -3,6 +3,7 @@ package ask
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"slices"
 	"strconv"
@@ -544,6 +545,19 @@ func TestLiveGivesTheWholeScreenBack(t *testing.T) {
 	}
 	if s := out.String(); strings.LastIndex(s, altOff) < strings.LastIndex(s, altOn) {
 		t.Errorf("stopped, Live left %q; want the terminal's own screen back", s)
+	}
+}
+
+// Asking for a secret gives up as its context ends, nothing typed: the run
+// that asked can end while it waits.
+func TestSecretGivesUpAsItsContextEnds(t *testing.T) {
+	in, keys := io.Pipe()
+	defer func() { _ = keys.Close() }()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	got, err := Secret(ctx, Terminal{In: in, Out: io.Discard, Size: func() (int, int) { return 80, 24 }}, look.Row{Name: "sudo"})
+	if got != "" || !errors.Is(err, context.Canceled) {
+		t.Errorf("Secret() = %q, %v; want nothing, cancelled", got, err)
 	}
 }
 

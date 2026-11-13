@@ -2,10 +2,12 @@ package mcp_test
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/leeovery/kit/internal/check"
@@ -186,5 +188,59 @@ func TestValue(t *testing.T) {
 	}
 	if _, err := m.Value(t.Context(), "nosuch"); err == nil {
 		t.Error("Value() of a server not installed = nil error")
+	}
+}
+
+// A project server's folder is written as kit writes it, ~ for the home and
+// no trailing slash, the one spelling the config's lookups match: any other
+// is refused, saying how to write it.
+func TestValuesRefuseAFolderNotAsKitWritesIt(t *testing.T) {
+	home := t.TempDir()
+	for name, want := range map[string]string{
+		home + "/Code/site:pages": "laptop:2: " + home + "/Code/site:pages: write its folder as ~/Code/site",
+		"~/Code/site/:pages":      "laptop:2: ~/Code/site/:pages: write its folder as ~/Code/site",
+	} {
+		_, err := mcp.New(runnertest.New(t), home).Values(config.List{Entries: []config.Entry{{Name: name, Value: "--transport http https://pages.example.com/mcp", File: "laptop", Line: 2}}})
+		if err == nil || err.Error() != want {
+			t.Errorf("Values(%s) error = %v, want %q", name, err, want)
+		}
+	}
+}
+
+// ~/.claude.json read as Claude Code writes it is read again, afresh: a
+// server only the half-written file held isn't taken as installed.
+func TestReadAgainAfresh(t *testing.T) {
+	home := t.TempDir()
+	path := filepath.Join(home, ".claude.json")
+	if err := syscall.Mkfifo(path, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	next := filepath.Join(home, "next.json")
+	if err := os.WriteFile(next, []byte(`{"mcpServers": {"docs": {"type": "http", "url": "https://docs.example.com/mcp"}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// The first read gets the half-written file through the pipe, opened
+	// as the read begins; the file in its place by then is the next read's.
+	written := make(chan error, 1)
+	go func() {
+		f, err := os.OpenFile(path, os.O_WRONLY, 0)
+		if err != nil {
+			written <- err
+			return
+		}
+		err = errors.Join(os.Rename(next, path), func() error {
+			_, err := f.WriteString(`{"mcpServers": {"gone": {"type": "http", "url": "https://gone.example.com/mcp"}}} {"mcp`)
+			return err
+		}(), f.Close())
+		written <- err
+	}()
+	fake := runnertest.New(t)
+	fake.On("claude", "--version")
+	installed, err := mcp.New(fake, home).Installed(t.Context())
+	if err := <-written; err != nil {
+		t.Fatal(err)
+	}
+	if err != nil || len(installed) != 1 || installed[0].Name != "docs" {
+		t.Errorf("Installed() = %+v, %v; want docs alone", installed, err)
 	}
 }

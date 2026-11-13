@@ -80,6 +80,16 @@ type Command struct {
 	// as Homebrew's sudo, which asks kit (SUDO_ASKPASS, -A), and op, which
 	// asks in 1Password's app.
 	SharesSession bool
+	// SudoAsks is whether the sudo it runs asks kit's run for an
+	// administrator's password, through kit's helper (SUDO_ASKPASS), as
+	// Homebrew's installs do: only such a command is given the way to ask,
+	// as whatever it runs can ask that way.
+	SudoAsks bool
+	// Running, when set, is told the process's id once it's started, and
+	// what it returns is called once it's exited: for what asks kit
+	// meanwhile to be known as started by it (askpass). Never told of an
+	// interactive command.
+	Running func(pid int) (exited func())
 }
 
 // String is the command as a shell would take it, each argument quoted
@@ -291,35 +301,27 @@ func SecretValues(ctx context.Context) []string {
 	return values
 }
 
-// WithEnv returns r with env's variables, as they stand when a command
-// runs, added to each command's environment.
-func WithEnv(r Runner, env func() []string) Runner {
-	return withEnv{runner: r, env: env}
+// Prepared returns r with each command prepared by prepare as it runs, as
+// a run adds what some of its commands need.
+func Prepared(r Runner, prepare func(cmd Command) Command) Runner {
+	return prepared{runner: r, prepare: prepare}
 }
 
-type withEnv struct {
-	runner Runner
-	env    func() []string
+type prepared struct {
+	runner  Runner
+	prepare func(cmd Command) Command
 }
 
-func (w withEnv) Has(name string) bool {
-	return Has(w.runner, name)
+func (p prepared) Has(name string) bool {
+	return Has(p.runner, name)
 }
 
-func (w withEnv) Environ(ctx context.Context, cmd Command) ([]string, bool) {
-	return Environ(ctx, w.runner, w.with(cmd))
+func (p prepared) Environ(ctx context.Context, cmd Command) ([]string, bool) {
+	return Environ(ctx, p.runner, p.prepare(cmd))
 }
 
-func (w withEnv) Run(ctx context.Context, cmd Command) (Result, error) {
-	return w.runner.Run(ctx, w.with(cmd))
-}
-
-// with is cmd with env's variables added, its own over them.
-func (w withEnv) with(cmd Command) Command {
-	if env := w.env(); len(env) > 0 {
-		cmd.Env = append(slices.Clone(env), cmd.Env...)
-	}
-	return cmd
+func (p prepared) Run(ctx context.Context, cmd Command) (Result, error) {
+	return p.runner.Run(ctx, p.prepare(cmd))
 }
 
 // Streamed returns r with each line printed by a command run in a context

@@ -140,12 +140,7 @@ func (a *app) bootstrap(ctx context.Context, mac, repo string, handedOver bool) 
 	if err == nil {
 		defer func() { _ = asks.Close() }()
 	}
-	exec := runner.WithEnv(a.Runner(bootPath, childEnv(a.Getenv, a.Environ(), home, bootPath)), func() []string {
-		if asks == nil {
-			return nil
-		}
-		return asks.Env()
-	})
+	exec := runner.Prepared(a.Runner(bootPath, childEnv(a.Getenv, a.Environ(), home, bootPath)), askpassFor(func() *askpass.Server { return asks }))
 	observed := runner.Observed(exec, func(ctx context.Context, rep runner.Report) { sink.Emit(event.Command(ctx, rep)) }, a.Now)
 	observed = runner.Streamed(observed, event.Changing, func(ctx context.Context, cmd runner.Command, line string) {
 		sink.Emit(event.Output{Time: a.Now(), Step: event.StepOf(ctx), Command: redact.Text(cmd.String()), Line: redact.Text(line)})

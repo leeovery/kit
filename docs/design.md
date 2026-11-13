@@ -706,8 +706,19 @@ password only for the session it was given in, and is ended through sudo, which 
 on to what it runs as root (its process group killed only once that's been ignored for five
 seconds). A program's own sudo asks kit instead (`SUDO_ASKPASS`, and `DISPLAY` set, without
 which sudo, having no terminal, won't), and is given the password kept, so a step declared
-`--sudo` uses plain `sudo`; `sudo -n` never asks, so goes without. The person's asked one thing
-at a time: a program's sudo waits for kit's own question, the run's time limits waiting with it.
+`--sudo` uses plain `sudo`; `sudo -n` never asks, so goes without. Only the programs whose sudo
+asks are given the way to ask: Homebrew installing and uninstalling, its installer, and a step
+declared `--sudo` applying; never everything a run starts, as an npm package's install script.
+A step's script waits for its sudo: one left running in the background (`sudo … &`) is cut off
+from the script when it exits, and refused. kit answers only its helper, run by the real sudo
+(running as root), beneath one of those commands while it runs, a program named as kit is: that
+stops a program asking for itself, or running sudo with kit's helper from outside one of those
+commands. It can't stop a program that rewrites what kit or Homebrew later run, as the helper's
+link in the user's own folder: nothing the user owns is guarded from the user's own programs.
+A command stays noted till its output closes, a moment after it exits, a window left as too
+unlikely to guard. The person's asked one thing at a time: a program's sudo waits for kit's own
+question, the run's time limits waiting with it; the run's end gives up a question still
+waiting.
 
 `kit <kind> add` installs each name, unless it's installed, and declares it in this Mac's file, in
 its sorted place, or for every Mac with `--shared` (taking it out of each Mac's own file); it

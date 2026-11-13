@@ -5,11 +5,13 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"testing"
 	"time"
 
+	"github.com/leeovery/kit/internal/runner"
 	"github.com/leeovery/kit/internal/testguard"
 )
 
@@ -21,6 +23,10 @@ func (s *Server) kept() string {
 	defer s.mu.Unlock()
 	return s.password
 }
+
+// bySudo is the helper here taken as run by sudo: the helper is this test
+// itself, and its parent stands for sudo.
+func bySudo(pid int) bool { return pid == os.Getppid() }
 
 // ask is the helper asking, as sudo runs it: what it was given, or its
 // error.
@@ -38,19 +44,20 @@ func ask(t *testing.T, s *Server) (string, error) {
 func TestAnswersASudo(t *testing.T) {
 	var asked []int
 	notGiven := false
-	s, err := Start("", "/usr/bin/true", func(_ context.Context, n int) (string, error) {
+	s, err := start("", "/usr/bin/true", func(_ context.Context, n int) (string, error) {
 		asked = append(asked, n)
 		if notGiven {
 			return "", errors.New("cancelled")
 		}
 		return "typed" + strconv.Itoa(n), nil
-	})
+	}, namedAsKit, bySudo)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if target, err := os.Readlink(s.Helper()); err != nil || target != "/usr/bin/true" {
 		t.Errorf("the helper links to %q, %v; want kit", target, err)
 	}
+	defer s.Running(os.Getpid())()
 	s.Keep("hunter2")
 	for _, want := range []string{"hunter2\n", "typed0\n", "typed1\n"} {
 		if got, err := ask(t, s); got != want || err != nil {
@@ -73,6 +80,116 @@ func TestAnswersASudo(t *testing.T) {
 	}
 	if _, err := ask(t, s); err == nil {
 		t.Error("asked after the run ended: want an error")
+	}
+}
+
+// A program that connects to ask for itself, not through the helper run by
+// sudo, is refused: the person isn't asked, and nothing's given, however
+// the run holds the password.
+func TestRefusesAnAskerNotSudos(t *testing.T) {
+	asked := false
+	s, err := Start("", "/usr/bin/true", func(context.Context, int) (string, error) {
+		asked = true
+		return "typed", nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	defer s.Running(os.Getpid())()
+	s.Keep("hunter2")
+	if got, err := ask(t, s); got != "" || err == nil || asked {
+		t.Errorf("asked by a program, not sudo: %q, %v, the person asked %v; want nothing given", got, err, asked)
+	}
+}
+
+// Only what's asked from beneath a command running that was given the
+// helper is answered: not beneath none, sudo or not, nor once that command
+// has exited.
+func TestAnswersOnlyBeneathACommandRunning(t *testing.T) {
+	s, err := start("", "/usr/bin/true", func(context.Context, int) (string, error) {
+		return "", errors.New("the person was asked")
+	}, namedAsKit, bySudo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	s.Keep("hunter2")
+	if got, err := ask(t, s); got != "" || err == nil {
+		t.Errorf("beneath no command running: %q, %v; want nothing given", got, err)
+	}
+	exited := s.Running(os.Getpid())
+	if got, err := ask(t, s); got != "hunter2\n" || err != nil {
+		t.Errorf("beneath a command running: %q, %v; want the password kept", got, err)
+	}
+	exited()
+	if got, err := ask(t, s); got != "" || err == nil {
+		t.Errorf("beneath a command that's exited: %q, %v; want nothing given", got, err)
+	}
+}
+
+// A program not named as kit is refused, however it's run: nc connecting
+// from beneath a command running, its parent taken as sudo; the same
+// connection, taken as kit's, is answered.
+func TestRefusesAProgramNotNamedAsKit(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		kit  func(int) bool
+		want string
+	}{
+		{"named as nc is", namedAsKit, ""},
+		{"taken as kit's", func(int) bool { return true }, "hunter2\n"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			s, err := start("", "/usr/bin/true", func(context.Context, int) (string, error) {
+				return "", errors.New("the person was asked")
+			}, tt.kit, func(int) bool { return true })
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = s.Close() })
+			defer s.Running(os.Getpid())()
+			s.Keep("hunter2")
+			r := runner.Exec{Now: time.Now}
+			res, err := r.Run(t.Context(), runner.Command{Name: "/bin/sh", Args: []string{"-c", `printf 'Password:\n' | /usr/bin/nc -U "$1"`, "sh", filepath.Join(s.dir, socketName)}})
+			if got := string(res.Stdout); got != tt.want {
+				t.Errorf("nc was given %q (%v); want %q", got, err, tt.want)
+			}
+		})
+	}
+}
+
+// The run's end gives up asking the person for a sudo still waiting for
+// their answer: Close doesn't wait for it, and the helper's given nothing.
+func TestCloseGivesUpAsking(t *testing.T) {
+	asking := make(chan struct{})
+	s, err := start("", "/usr/bin/true", func(ctx context.Context, _ int) (string, error) {
+		close(asking)
+		<-ctx.Done()
+		return "", ctx.Err()
+	}, namedAsKit, bySudo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Running(os.Getpid())()
+	given := make(chan error, 1)
+	go func() {
+		_, err := ask(t, s)
+		given <- err
+	}()
+	<-asking
+	closed := make(chan error, 1)
+	go func() { closed <- s.Close() }()
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Error(err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Close is waiting for the person's answer")
+	}
+	if err := <-given; err == nil {
+		t.Error("the helper was answered after the run ended: want nothing given")
 	}
 }
 
@@ -158,14 +275,15 @@ func TestEnvHasSudoAskTheRun(t *testing.T) {
 // given it, the person asked nothing more.
 func TestAsksOneThingAtATime(t *testing.T) {
 	asking := make(chan struct{}, 2)
-	s, err := Start("", "/usr/bin/true", func(context.Context, int) (string, error) {
+	s, err := start("", "/usr/bin/true", func(context.Context, int) (string, error) {
 		asking <- struct{}{}
 		return "", errors.New("the person was asked twice")
-	})
+	}, namedAsKit, bySudo)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = s.Close() })
+	defer s.Running(os.Getpid())()
 	up, answer, turned := make(chan struct{}), make(chan struct{}), make(chan struct{})
 	go func() {
 		defer close(turned)

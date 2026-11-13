@@ -146,7 +146,7 @@ func orderedBy(flag string, words []string, i int) (string, error) {
 func ScriptStep(run runner.Runner, admin *Admin, s Script) engine.Step {
 	script := filepath.Join(s.Dir, ScriptName)
 	command := func(verb string, timeout time.Duration) runner.Command {
-		return runner.Command{Name: script, Args: []string{verb}, Dir: s.Dir, Timeout: timeout}
+		return runner.Command{Name: script, Args: []string{verb}, Dir: s.Dir, Timeout: timeout, SudoAsks: s.Admin && verb == "apply"}
 	}
 	checks := func(ctx context.Context) check.Result {
 		if err := runnable(script, s.Folder+"/"+ScriptName); err != nil {

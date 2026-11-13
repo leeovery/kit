@@ -129,6 +129,9 @@ func (m *MCP) Values(list config.List) (config.List, error) {
 			return list, fmt.Errorf("%s: %s: %s holds a key in plain text: keep the key as a secret (kit secret add VAR), and name it here as ${VAR}", e.Pos(), e.Name, strings.Join(plain, " and "))
 		}
 		folder, name := splitID(e.Name)
+		if want := m.folder(folder); want != folder {
+			return list, fmt.Errorf("%s: %s: write its folder as %s", e.Pos(), e.Name, want)
+		}
 		m.declared[e.Name] = Server{Folder: folder, Name: name, Definition: def, Off: isOff}
 		out.Entries[i].Off = isOff
 	}
@@ -181,16 +184,20 @@ func (m *MCP) Installed(context.Context) ([]kind.Installed, error) {
 	return installed, nil
 }
 
+// claudeJSON is what kit reads of ~/.claude.json: the user scope's servers,
+// and each project's.
+type claudeJSON struct {
+	MCPServers map[string]map[string]any `json:"mcpServers"`
+	Projects   map[string]struct {
+		MCPServers map[string]map[string]any `json:"mcpServers"`
+	} `json:"projects"`
+}
+
 // installed reads the servers installed from ~/.claude.json: the user
 // scope's, and each project's, in order of their ids.
 func (m *MCP) installed() ([]Server, error) {
 	path := filepath.Join(m.home, ".claude.json")
-	var file struct {
-		MCPServers map[string]map[string]any `json:"mcpServers"`
-		Projects   map[string]struct {
-			MCPServers map[string]map[string]any `json:"mcpServers"`
-		} `json:"projects"`
-	}
+	var file claudeJSON
 	for tries := 0; ; tries++ {
 		data, err := os.ReadFile(path)
 		if errors.Is(err, fs.ErrNotExist) {
@@ -199,6 +206,7 @@ func (m *MCP) installed() ([]Server, error) {
 		if err != nil {
 			return nil, fmt.Errorf("read ~/.claude.json: %w", err)
 		}
+		file = claudeJSON{}
 		err = decode(data, &file)
 		if err == nil {
 			break
@@ -215,7 +223,7 @@ func (m *MCP) installed() ([]Server, error) {
 	}
 	for path, project := range file.Projects {
 		for name, def := range project.MCPServers {
-			servers = append(servers, Server{Folder: m.shown(path), Name: name, Definition: def})
+			servers = append(servers, Server{Folder: m.folder(path), Name: name, Definition: def})
 		}
 	}
 	slices.SortFunc(servers, func(a, b Server) int { return strings.Compare(a.ID(), b.ID()) })
@@ -321,8 +329,13 @@ func (m *MCP) claude(ctx context.Context, s Server, verb string, args ...string)
 	return err
 }
 
-// shown is a path as written in the config: ~ for the home.
-func (m *MCP) shown(path string) string {
+// folder is a project folder as kit names it, however it's written: its
+// path cleaned, with ~ for the home. "" stays "", a user-level server's.
+func (m *MCP) folder(written string) string {
+	if written == "" {
+		return ""
+	}
+	path := filepath.Clean(m.expand(written))
 	if rest, ok := strings.CutPrefix(path, m.home+"/"); ok {
 		return "~/" + rest
 	}

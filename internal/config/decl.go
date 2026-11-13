@@ -550,6 +550,16 @@ func matchHeader(defs []sectionDef, text string) (d sectionDef, arg, opts string
 	return sectionDef{}, "", "", false
 }
 
+// folderAdvice is how to write folder, a project folder's header, as kit
+// writes it: cleaned, when that's still a folder a header takes.
+func folderAdvice(folder string) string {
+	clean := filepath.Clean(folder)
+	if strings.HasPrefix(clean, "~/") || strings.HasPrefix(clean, "/") {
+		return "write its folder as " + clean
+	}
+	return "name a project folder, as in ~/Code/site"
+}
+
 // parseFile splits scope's declarations file into its sections, those defs
 // define, and checks every line reads as its section's lines do: a section
 // kit doesn't know, or one twice, is refused.
@@ -576,6 +586,9 @@ func parseFile(defs []sectionDef, scope, content string) (*declFile, error) {
 		d, arg, opts, ok := matchHeader(defs, m[1])
 		if !ok {
 			return nil, fmt.Errorf("%s:%d: kit doesn't know the section [%s]", name, i+1, m[1])
+		}
+		if d.folders && arg != "" && filepath.Clean(arg) != arg {
+			return nil, fmt.Errorf("%s:%d: [%s]: %s", name, i+1, m[1], folderAdvice(arg))
 		}
 		cur = &section{def: d, arg: arg, header: line, start: i + 1}
 		if err := f.readOptions(cur, opts); err != nil {
