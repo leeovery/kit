@@ -98,16 +98,24 @@ func (s *Spotlight) full(name string) string {
 }
 
 // indexed reports whether Spotlight has anything in folder in its index,
-// by name, which it indexes for every file whatever its kind: nothing found
-// means it's kept out, or holds nothing yet, with nothing to keep out till
-// it does.
+// by its name, which it gives every file whatever its kind (a query of
+// kMDItemFSName matches nothing): nothing found means it's kept out, or
+// holds nothing yet, with nothing to keep out till it does. A count that
+// runs out of time is of a folder indexed, as one not yet kept out is,
+// whole, till a restart.
 func (s *Spotlight) indexed(ctx context.Context, folder string) (bool, error) {
-	res, err := s.run.Run(ctx, runner.Command{Name: "mdfind", Args: []string{"-onlyin", folder, "-count", `kMDItemFSName == "*"`}, Timeout: probeTimeout})
-	if err != nil {
+	res, err := s.run.Run(ctx, runner.Command{Name: "mdfind", Args: []string{"-onlyin", folder, "-count", `kMDItemDisplayName == "*"`}, Timeout: probeTimeout})
+	switch {
+	case errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil:
+		return true, nil
+	case err != nil:
 		return false, err
 	}
 	n, err := strconv.Atoi(strings.TrimSpace(string(res.Stdout)))
-	return err == nil && n > 0, nil
+	if err != nil {
+		return false, fmt.Errorf("mdfind counted %q, not a number", strings.TrimSpace(string(res.Stdout)))
+	}
+	return n > 0, nil
 }
 
 // Installed lists the declared folders Spotlight keeps out of its index,
