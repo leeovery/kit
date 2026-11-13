@@ -27,9 +27,7 @@ import (
 	"github.com/leeovery/kit/internal/kinds"
 	"github.com/leeovery/kit/internal/logs"
 	"github.com/leeovery/kit/internal/look"
-	"github.com/leeovery/kit/internal/redact"
 	"github.com/leeovery/kit/internal/render"
-	"github.com/leeovery/kit/internal/runner"
 )
 
 // bootPath is the PATH a new Mac's boot runs with, before kit-config gives
@@ -140,11 +138,7 @@ func (a *app) bootstrap(ctx context.Context, mac, repo string, handedOver bool) 
 	if err == nil {
 		defer func() { _ = asks.Close() }()
 	}
-	exec := runner.Prepared(a.Runner(bootPath, childEnv(a.Getenv, home, bootPath)), askpassFor(func() *askpass.Server { return asks }))
-	observed := runner.Observed(exec, func(ctx context.Context, rep runner.Report) { sink.Emit(event.Command(ctx, rep)) }, a.Now)
-	observed = runner.Streamed(observed, event.Changing, func(ctx context.Context, cmd runner.Command, line string) {
-		sink.Emit(event.Output{Time: a.Now(), Step: event.StepOf(ctx), Command: redact.Text(cmd.String()), Line: redact.Text(line)})
-	})
+	observed := a.commands(bootPath, childEnv(a.Getenv, home, bootPath), sink, func() *askpass.Server { return asks })
 	b := &boot.Boot{
 		Run: observed, Sink: sink, Ask: asker, GitHub: boot.NewGitHub(&http.Client{Timeout: time.Minute}), Now: a.Now,
 		State: dirs.State, Data: dirs.Data, Config: dirs.Config, Kinds: kinds.ConfigSections(), Repo: repo, Mac: mac, Getenv: a.Getenv,

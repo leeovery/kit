@@ -335,15 +335,11 @@ func (a *app) build(command, logName string, face render.Face, atTerminal bool) 
 	// password, at a terminal, once the run is ready (askpass).
 	var r *run
 	env := childEnv(a.Getenv, home, path)
-	exec := runner.Prepared(a.Runner(path, env), askpassFor(func() *askpass.Server {
+	observed := a.commands(path, env, sink, func() *askpass.Server {
 		if r == nil {
 			return nil
 		}
 		return r.askpass
-	}))
-	observed := runner.Observed(exec, func(ctx context.Context, rep runner.Report) { sink.Emit(event.Command(ctx, rep)) }, a.Now)
-	observed = runner.Streamed(observed, event.Changing, func(ctx context.Context, cmd runner.Command, line string) {
-		sink.Emit(event.Output{Time: a.Now(), Step: event.StepOf(ctx), Command: redact.Text(cmd.String()), Line: redact.Text(line, runner.SecretValues(ctx)...)})
 	})
 	r = &run{
 		command: command, machine: machine, version: a.Version, sink: sink, face: face, log: log,
@@ -692,6 +688,18 @@ func (a *app) askpass(face render.Face) *askpass.Server {
 		return nil
 	}
 	return s
+}
+
+// commands is the runner a run's commands go through: on path, with env;
+// a command whose sudo asks given what asks has for it (askpassFor); each
+// reported to sink, and its output streamed there, redacted, the values of
+// the secrets it was given too.
+func (a *app) commands(path, env []string, sink event.Sink, asks func() *askpass.Server) runner.Runner {
+	exec := runner.Prepared(a.Runner(path, env), askpassFor(asks))
+	observed := runner.Observed(exec, func(ctx context.Context, rep runner.Report) { sink.Emit(event.Command(ctx, rep)) }, a.Now)
+	return runner.Streamed(observed, event.Changing, func(ctx context.Context, cmd runner.Command, line string) {
+		sink.Emit(event.Output{Time: a.Now(), Step: event.StepOf(ctx), Command: redact.Text(cmd.String()), Line: redact.Text(line, runner.SecretValues(ctx)...)})
+	})
 }
 
 // askpassFor gives a command what has its sudo ask the run for an
