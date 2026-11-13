@@ -48,7 +48,7 @@ var Descriptor = kind.Descriptor{
 	Name:    kindName,
 	Label:   "Power settings",
 	Group:   kind.Settings,
-	Section: &config.Section{Kind: kindName, Header: "power settings", Form: config.Power, Sorted: true, Says: lineSays, FromMac: true},
+	Section: config.Section{Kind: kindName, Header: "power settings", Form: config.Power, Sorted: true, Says: lineSays, FromMac: true},
 	Help: &kind.Help{
 		What:   "Power settings, in pmset's form",
 		Add:    "Declare power settings as this Mac has them",
@@ -159,15 +159,6 @@ func (p *Power) Installed(ctx context.Context) ([]kind.Installed, error) {
 		p.seen = maps.Clone(rec.Seen)
 	})
 	return out, err
-}
-
-// Resolve knows every setting.
-func (p *Power) Resolve(_ context.Context, names []string) (map[string]string, error) {
-	out := make(map[string]string, len(names))
-	for _, name := range names {
-		out[name] = name
-	}
-	return out, nil
 }
 
 // Differs says how each declared setting changed since kit saw it as

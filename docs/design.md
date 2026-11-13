@@ -25,10 +25,10 @@ which hears about every Mac's problems. A Mac's name is settled first, before an
 read, and kept in kit's state; a replacement Mac can take an old one's name.
 
 **Kinds.** A kind is a list of things of one sort. Built: Homebrew formulae (`brew`) and casks
-(`cask`), App Store apps (`mas`), npm and Composer global packages (`npm`, `composer`), Go tools
-(`go`), GitHub CLI extensions (`gh`), tmux plugins (`tmux`), login items (`login-item`), Claude
-Code's MCP servers (`claude-mcp`), Claude's skills for every project (`claude-skill`, installed
-by agntc), git's settings (`git-config`) and
+(`cask`), App Store apps (`mas`), npm and Composer global packages (`npm`, `composer`), GitHub
+CLI extensions (`gh`), login items (`login-item`), Claude Code's MCP servers (`claude-mcp`),
+Claude's skills for every project (`claude-skill`, installed by agntc), git's settings
+(`git-config`) and
 macOS settings (`defaults`), power settings (`power`), the backup and Spotlight exclusions
 (`backup-exclusion`, `spotlight-exclusion`), and secrets (`secret`).
 Not Claude Code's plugins: its user settings (`~/.claude/settings.json`) declare them, and
@@ -66,9 +66,8 @@ empty one: an empty section says to look after the kind with nothing of it decla
 so what's installed is drift `kit reconcile` offers, and, with its program not installed,
 it's fine without waiting for it. With no section, kit doesn't look at the kind at all,
 its program installed or not (`kit list` of it refuses), and the drift record forgets what
-it held of it; tmux's plugins, declared in tmux's config,
-are looked after while it declares one or starts TPM. A step a kind needs, as Homebrew's
-for its formulae and casks, is in the run only with a kind needing it. `kit <kind> add`
+it held of it. A step a kind needs, as Homebrew's for its formulae and casks, is in the run
+only with a kind needing it. `kit <kind> add`
 writes the section when there's none, `--temp` too, so reconcile asks once the
 throwaway's time is up; removing a kind's last thing leaves its section as it was, header
 and all, empty, when it's the last declaring the kind for the Mac (a Mac's own, the shared
@@ -82,9 +81,7 @@ those comments, as nothing written by hand goes without being asked.
 | `mas` | `xcode@497799835`: the name, then the id | `mas list`, which reads Spotlight's index; with a declared app missing from it, an app in the Applications folders carrying the App Store's receipt that it doesn't list yet, its id looked up by its bundle id (`mas lookup --bundle`), once, what the store said kept in kit's state (that it hasn't the app, for a day); a wait for an app and `kit mas add|remove` go by the same | `mas install` (an app at a time, the first the check that someone's signed in), `mas uninstall`, through sudo |
 | `npm` | `typescript@5` (a version optional) | `npm ls --global` | `npm install --global`, `npm uninstall --global` |
 | `composer` | `laravel/valet:^4.0` (a constraint optional) | `composer global show --direct` | `composer global require`, `composer global remove` |
-| `go` | `golang.org/x/tools/cmd/goimports` (`@version` optional) | the programs in Go's bin folder, by the package each was built from | `go install`; removing deletes the program |
 | `gh` | `owner/gh-extension` | `gh extension list` | `gh extension install`, `gh extension remove` |
-| `tmux` | `set -g @plugin` lines in tmux's config | the folders in TPM's plugin folder | cloned as TPM does; removing deletes the folder |
 | `login-item` | the app's bundle id, `com.example.app` | System Events' login items | System Events (JavaScript for Automation) |
 | `claude-mcp` | a name, then `claude mcp add`'s options; a project's in `[claude mcp <folder>]` | `~/.claude.json`, read directly | `claude mcp add-json`, `claude mcp remove` (a project's in local scope, in its folder) |
 | `claude-skill` | `[claude skills]`: agntc's key for an install, a GitHub repo and what in it, `github/gh-stack/gh-stack` (the skill of that name; a path, the pack there; the repo alone when it's one skill or pack), `@version` or a range optional | agntc's record, `~/.agntc/manifest.json`, read directly (`agntc list` asks every repo what's newer) | `agntc add -g` (`--all` for a repo alone, `--skill` for a name, else `--pack`), `agntc remove -g -y`; `--json` for agntc's own words when one fails |
@@ -117,9 +114,8 @@ those comments, as nothing written by hand goes without being asked.
   it needs, or, with nothing declared, fine.
   Where a kind's command comes from isn't kit's to know: while kit applies (not `kit
   status`, not the nightly run), a kind whose command isn't on kit's PATH yet (npm's `npm`,
-  each secrets store's, as 1Password's `op`, MCP's `claude`; none for tmux's plugins, read
-  from its config and cloned with git) waits for it before its check, saying so, looking
-  again as installs end, till it's there or nothing still at work in the run could bring it,
+  each secrets store's, as 1Password's `op`, MCP's `claude`) waits for it before its check,
+  saying so, looking again as installs end, till it's there or nothing still at work in the run could bring it,
   then stands deferred, saying it isn't there yet. The config's waits order the rest (the
   secrets after the sign-in, `--before secret`; npm after mise, `--before npm`). Two orders stay, being kit's
   own data: git's settings after the secrets they sign with, login items after the casks
@@ -152,12 +148,6 @@ those comments, as nothing written by hand goes without being asked.
   share a tool's lock (Homebrew's formulae and casks), neither's rest begins till the other's
   waited-for things are in, or their step has finished. A wait looks again whenever an
   install ends or counts a thing done, and otherwise every 30 seconds.
-- **A kind declared in a file of its own** (tmux's plugins, in tmux's config, where the
-  plugin manager reads them): kit reads it and edits it in place, through a link to the
-  file it leads to. `kit tmux add` and adopting add a plugin's line after the last one (before
-  the line that starts the plugin manager, for the first); `kit tmux remove` and undeclaring
-  take it out. When the file is in the config repository (a linked file), the change is
-  committed with the rest.
 - **MCP servers** are a line each: the server's name, then `claude mcp add`'s options
   (`--transport http <url> --header "…"`, or `--env K=V -- <command> <args>`), or JSON for
   what they can't say; kit's own `--off` first declares a server off: never installed, and
@@ -619,7 +609,7 @@ kit machine add <name>       Add a Mac to kit-config, a copy of another's or emp
 What kit manages, a command each:
 kit <kind> add <name>...     Install, and declare for this Mac   [--shared] [--temp] [--note]
 kit <kind> remove <name>...  Uninstall, and undeclare            [--shared] [--zap] [--keep] (apps)
-    (brew, cask, mas, npm, composer, go, gh, tmux, claude-mcp, claude-skill, login-item,
+    (brew, cask, mas, npm, composer, gh, claude-mcp, claude-skill, login-item,
      defaults, power, git-config, backup-exclusion, spotlight-exclusion)
 kit claude-mcp on|off <name>...  Declare Claude's MCP servers on or off, and install or remove them
 kit feature on|off <name>... Switch features on or off for this Mac   [--shared]
@@ -1020,7 +1010,7 @@ pages --transport http https://pages.example.com/mcp
 The sections, in the order kit writes them: `features` (the switches), `backups` (the backup
 tools, a line each, with `--after` and `--before`), `paths` (kit's PATH, in order, `~` expands; the
 shared file's, then the Mac's), `homebrew formulae`, `homebrew casks`, `app store apps`,
-`npm packages`, `composer packages`, `go tools`, `github extensions`, `macos login items`,
+`npm packages`, `composer packages`, `github extensions`, `macos login items`,
 `claude mcp` (and `claude mcp <folder>`), `steps` (the steps of the user's own), `manual`, `checks`, `hourly`, `nightly`
 (jobs of the user's own: a name, then `--` and a command, `~/` expanding in any word). A section kit doesn't know is refused, never
 skipped; so is a line before any section, a section twice, or a file named for a Mac
@@ -1239,7 +1229,7 @@ output.
 | `internal/runner` | The one place a process starts: kit's PATH, a clean environment, timeouts, output captured, each command reported as an event. `runner/runnertest` is the fake |
 | `internal/engine` | Steps, ordering by needs, running checks side by side, deferral, failure isolation, the summary |
 | `internal/kind` | The kind interface, the descriptor each kind gives of itself, and the comparison that makes a kind a step |
-| `internal/kind/<kind>` | A kind each, with its descriptor: `brew` (Homebrew's formulae and casks), `appstore`, `npm`, `composer`, `gotool`, `ghext`, `tmux`, `login`, `mcp`, `skill`, `secret`, `gitconfig`, `defaults`, `power`, `exclusion`, `spotlight` |
+| `internal/kind/<kind>` | A kind each, with its descriptor: `brew` (Homebrew's formulae and casks), `appstore`, `devtool` (npm's and Composer's global packages and the GitHub CLI's extensions, one table each), `login`, `mcp`, `skill`, `secret`, `gitconfig`, `defaults`, `power`, `exclusion`, `spotlight` |
 | `internal/kinds` | The list of kinds, in the run's order: what the rest of kit reads them from |
 | `internal/status` | The status document behind `kit status` and `--json` |
 | `internal/testguard` | Every package's `TestMain`: keeps tests off the real system (see Test isolation in `CLAUDE.md`) |
@@ -1284,8 +1274,8 @@ a terminal and by id; `kit list` and `kit why` (#12–#19).
 
 **3. The other kinds — built.** Every kind through one table; a step can come after another
 while applying, and a check can defer its own step; the administrator's password up front for
-any kind; App Store apps; npm and Composer packages; Go tools and GitHub CLI extensions; tmux
-plugins; login items (#21–#26).
+any kind; App Store apps; npm and Composer packages; GitHub CLI extensions; login items
+(#21–#26); Go tools and tmux plugins, cut in slice 18 as unused.
 
 **4. Claude Code's MCP servers — built.** The `claude-mcp` kind, user-level and per
 project; `kit claude-mcp on|off`; reconcile by kind (#30–#32).

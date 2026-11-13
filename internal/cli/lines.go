@@ -106,6 +106,19 @@ func quoteAll(words []string) string {
 	return strings.Join(quoted, " ")
 }
 
+// removeStepFolders removes the folders of the step of your own called
+// name, in each of scopes, noting each changed.
+func removeStepFolders(c *changes, scopes []string, name string) error {
+	for _, scope := range scopes {
+		folder := config.StepFolder(scope, name)
+		if err := os.RemoveAll(filepath.Join(c.run.cfg.Dir, folder)); err != nil {
+			return err
+		}
+		c.changed(folder)
+	}
+	return nil
+}
+
 // removeLines takes checks, jobs, steps by hand or steps of your own out of
 // this Mac's declarations, and the shared ones with shared: a step of your
 // own's folder with it.
@@ -114,30 +127,14 @@ func (a *app) removeLines(ctx context.Context, r *run, name string, names []stri
 	c := startChanges(r, names)
 	for _, n := range names {
 		c.step(ctx, n, func(context.Context) check.Result {
-			where, err := r.cfg.Where(kind, n)
+			from, err := c.undeclareHere(kind, n, shared)
+			if kind == config.StepsKind {
+				if folderErr := removeStepFolders(c, from, n); err == nil {
+					err = folderErr
+				}
+			}
 			if err != nil {
 				return check.Result{State: check.Failed, Reason: err.Error()}
-			}
-			var from []string
-			for _, e := range where {
-				switch {
-				case e.Scope == config.Shared && !shared:
-					return check.Result{State: check.Failed, Reason: fmt.Sprintf("declared for every Mac, in %s: --shared takes it out of every Mac's", e.Pos())}
-				case e.Scope != config.Shared && e.Scope != r.machine:
-					continue
-				}
-				if err := r.cfg.Undeclare(kind, e.Scope, n); err != nil {
-					return check.Result{State: check.Failed, Reason: err.Error()}
-				}
-				c.changed(config.DeclFile(e.Scope))
-				if kind == config.StepsKind {
-					folder := config.StepFolder(e.Scope, n)
-					if err := os.RemoveAll(filepath.Join(r.cfg.Dir, folder)); err != nil {
-						return check.Result{State: check.Failed, Reason: err.Error()}
-					}
-					c.changed(folder)
-				}
-				from = append(from, e.Scope)
 			}
 			if len(from) == 0 {
 				return check.Result{State: check.Failed, Reason: n + " isn't declared for this Mac"}

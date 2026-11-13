@@ -60,24 +60,12 @@ func (a *app) removePaths(ctx context.Context, r *run, dirs []string, shared boo
 // names what the section is, as in PATH, to say where name isn't. One
 // declared for every Mac, without shared, is refused, saying so.
 func (c *changes) undeclare(kindName, name string, shared bool, list string) check.Result {
-	r := c.run
-	where, err := r.cfg.Where(kindName, name)
+	from, err := c.undeclareHere(kindName, name, shared)
+	if refused, ok := errors.AsType[*everyMacError](err); ok {
+		return check.Result{State: check.Failed, Reason: "on every Mac's " + list + ", in " + refused.at.Pos() + ": --shared takes it out of every Mac's"}
+	}
 	if err != nil {
 		return failed(err)
-	}
-	var from []string
-	for _, e := range where {
-		switch {
-		case e.Scope == config.Shared && !shared:
-			return check.Result{State: check.Failed, Reason: "on every Mac's " + list + ", in " + e.Pos() + ": --shared takes it out of every Mac's"}
-		case e.Scope != config.Shared && e.Scope != r.machine:
-			continue
-		}
-		if err := r.cfg.Undeclare(kindName, e.Scope, name); err != nil {
-			return failed(err)
-		}
-		c.changed(config.DeclFile(e.Scope))
-		from = append(from, e.Scope)
 	}
 	if len(from) == 0 {
 		return check.Result{State: check.Failed, Reason: name + " isn't on this Mac's " + list}

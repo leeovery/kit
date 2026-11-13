@@ -283,8 +283,15 @@ func (a *app) prepareWith(command, logName string, face render.Face) (*run, erro
 // build readies a run as prepare does, shown on face, its steps those of a
 // run at a terminal when atTerminal says so, as kit apply's steps by hand
 // raised as cards are, but starting nothing a run at one starts (start).
-// Without a logName, it keeps no log.
-func (a *app) build(command, logName string, face render.Face, atTerminal bool) (*run, error) {
+// Without a logName, it keeps no log. Failing, it closes face.
+func (a *app) build(command, logName string, face render.Face, atTerminal bool) (_ *run, err error) {
+	log := render.Tee()
+	defer func() {
+		if err != nil {
+			_ = face.Close()
+			_ = log.Close()
+		}
+	}()
 	dirs, err := a.dirs()
 	if err != nil {
 		return nil, err
@@ -316,11 +323,12 @@ func (a *app) build(command, logName string, face render.Face, atTerminal bool) 
 		return nil, err
 	}
 	now := a.Now()
-	log := render.Tee()
 	if logName != "" {
-		if log, err = logs.Open(dirs.Logs, now, logName, a.verbose); err != nil {
+		file, err := logs.Open(dirs.Logs, now, logName, a.verbose)
+		if err != nil {
 			return nil, err
 		}
+		log = file
 	}
 	sink := event.NewFanout(face, log)
 	// What the run starts whose sudo asks can ask it for an administrator's
@@ -361,8 +369,6 @@ func (a *app) build(command, logName string, face render.Face, atTerminal bool) 
 	}
 	shellPath, err := cfg.ShellPath(home, machine)
 	if err != nil {
-		_ = face.Close()
-		_ = log.Close()
 		return nil, err
 	}
 	if len(shellPath) > 0 {
@@ -374,8 +380,6 @@ func (a *app) build(command, logName string, face render.Face, atTerminal bool) 
 	var kindSteps, needed []engine.Step
 	backups, err := r.backups()
 	if err != nil {
-		_ = face.Close()
-		_ = log.Close()
 		return nil, err
 	}
 	deps := &kind.Deps{Run: observed, Home: home, ConfigHome: a.configHome(), StateDir: dirs.State, Backups: backupNames(backups), AppDirs: a.appFolders(home).Dirs}
@@ -383,8 +387,6 @@ func (a *app) build(command, logName string, face render.Face, atTerminal bool) 
 		k := d.New(deps)
 		list, unread, err := declared(cfg, k, machine)
 		if err != nil {
-			_ = face.Close()
-			_ = log.Close()
 			return nil, err
 		}
 		r.allKinds = append(r.allKinds, d.Name)
@@ -422,8 +424,6 @@ func (a *app) build(command, logName string, face render.Face, atTerminal bool) 
 	}
 	features, err := r.features()
 	if err != nil {
-		_ = face.Close()
-		_ = log.Close()
 		return nil, err
 	}
 	// featured is the feature each of the features' steps is for, by the
@@ -454,8 +454,6 @@ func (a *app) build(command, logName string, face render.Face, atTerminal bool) 
 	if features.on(steps.FeaturePrefs) {
 		p, err := a.prefs(r)
 		if err != nil {
-			_ = face.Close()
-			_ = log.Close()
 			return nil, err
 		}
 		saving := steps.Prefs(p, r.cfg.Macs[r.machine].From, a.Now)
@@ -492,8 +490,6 @@ func (a *app) build(command, logName string, face render.Face, atTerminal bool) 
 	}
 	restoring, err := a.restoreStep(r, dirs, features.on(steps.FeaturePrefs))
 	if err != nil {
-		_ = face.Close()
-		_ = log.Close()
 		return nil, err
 	}
 	if restoring != nil {
@@ -501,8 +497,6 @@ func (a *app) build(command, logName string, face render.Face, atTerminal bool) 
 	}
 	reinstalling, err := a.reinstallStep(r, dirs, restoring != nil)
 	if err != nil {
-		_ = face.Close()
-		_ = log.Close()
 		return nil, err
 	}
 	if reinstalling != nil {
@@ -511,8 +505,6 @@ func (a *app) build(command, logName string, face render.Face, atTerminal bool) 
 	if restoring == nil {
 		settling, err := a.settleStep(r, dirs)
 		if err != nil {
-			_ = face.Close()
-			_ = log.Close()
 			return nil, err
 		}
 		if settling != nil {
@@ -529,8 +521,6 @@ func (a *app) build(command, logName string, face render.Face, atTerminal bool) 
 	)
 	newMac, err := boot.NewMac(dirs.State)
 	if err != nil {
-		_ = face.Close()
-		_ = log.Close()
 		return nil, err
 	}
 	if newMac == machine {
@@ -538,8 +528,6 @@ func (a *app) build(command, logName string, face render.Face, atTerminal bool) 
 	}
 	own, err := cfg.List(config.ChecksKind, machine)
 	if err != nil {
-		_ = face.Close()
-		_ = log.Close()
 		return nil, err
 	}
 	if len(own.Entries) > 0 {
@@ -547,8 +535,6 @@ func (a *app) build(command, logName string, face render.Face, atTerminal bool) 
 	}
 	byHand, err := cfg.List(config.ManualKind, machine)
 	if err != nil {
-		_ = face.Close()
-		_ = log.Close()
 		return nil, err
 	}
 	plain, ordered := steps.SplitManual(home, byHand)
@@ -560,14 +546,10 @@ func (a *app) build(command, logName string, face render.Face, atTerminal bool) 
 	}
 	hourly, daily, err := a.jobs(r)
 	if err != nil {
-		_ = face.Close()
-		_ = log.Close()
 		return nil, err
 	}
 	scheduling, err := r.schedulingSteps(a, dirs, raise)
 	if err != nil {
-		_ = face.Close()
-		_ = log.Close()
 		return nil, err
 	}
 	checks = append(checks, scheduling...)
@@ -597,8 +579,6 @@ func (a *app) build(command, logName string, face render.Face, atTerminal bool) 
 		r.pipeline, err = engine.New(r.steps...)
 	}
 	if err != nil {
-		_ = face.Close()
-		_ = log.Close()
 		return nil, err
 	}
 	return r, nil
@@ -788,15 +768,9 @@ func (f featuresOn) on(name string) bool {
 }
 
 // declared is what k declares for the Mac named mac: its sections in cfg,
-// their values read by a kind whose lines carry them; or, for a kind
-// declared outside the config repository, what its own file says. What
-// doesn't read is unread: the kind's check fails, saying so, rather than
-// kit.
+// their values read by a kind whose lines carry them. What doesn't read is
+// unread: the kind's check fails, saying so, rather than kit.
 func declared(cfg *config.Config, k kind.Kind, mac string) (list config.List, unread, err error) {
-	if d, ok := k.(kind.Declarer); ok {
-		list, unread = d.Declared()
-		return list, unread, nil
-	}
 	if list, err = cfg.List(k.Name(), mac); err != nil {
 		return list, nil, err
 	}

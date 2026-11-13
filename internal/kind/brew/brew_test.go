@@ -117,7 +117,7 @@ func TestResolveAtOnce(t *testing.T) {
 	fake := runnertest.New(t)
 	fake.On("brew", "tap").Prints("oven-sh/bun\n")
 	fake.On("brew", "info", "--json=v2", "--formula", "python", "homebrew/core/jq", "oven-sh/bun/bun").Prints(fixture(t, "info-formulae.json"))
-	got, err := brew.New(fake).Formulae().Resolve(context.Background(), []string{"python", "homebrew/core/jq", "oven-sh/bun/bun"})
+	got, err := kind.Resolve(context.Background(), brew.New(fake).Formulae(), []string{"python", "homebrew/core/jq", "oven-sh/bun/bun"})
 	want := map[string]string{"python": "python@3.14", "homebrew/core/jq": "jq", "oven-sh/bun/bun": "oven-sh/bun/bun"}
 	if err != nil || !mapsEqual(got, want) {
 		t.Errorf("Resolve() = %v, %v; want %v", got, err, want)
@@ -131,7 +131,7 @@ func TestResolveATapsOtherNames(t *testing.T) {
 	fake.On("brew", append([]string{"info", "--json=v2", "--formula"}, names...)...).Prints(`{"formulae": [
 		{"name": "tool", "full_name": "owner/tap/tool", "aliases": ["tool@2"], "oldnames": ["old-tool"]}
 	], "casks": []}`)
-	got, err := brew.New(fake).Formulae().Resolve(context.Background(), names)
+	got, err := kind.Resolve(context.Background(), brew.New(fake).Formulae(), names)
 	want := map[string]string{"owner/tap/tool@2": "owner/tap/tool", "owner/tap/tool": "owner/tap/tool", "tool@2": "owner/tap/tool", "owner/tap/old-tool": "owner/tap/tool"}
 	if err != nil || !mapsEqual(got, want) {
 		t.Errorf("Resolve() = %v, %v; want %v", got, err, want)
@@ -140,7 +140,7 @@ func TestResolveATapsOtherNames(t *testing.T) {
 	fake.On("brew", "info", "--json=v2", "--cask", "owner/tap/old-app").Prints(`{"formulae": [], "casks": [
 		{"token": "app", "full_token": "owner/tap/app", "old_tokens": ["old-app"]}
 	]}`)
-	got, err = brew.New(fake).Casks().Resolve(context.Background(), []string{"owner/tap/old-app"})
+	got, err = kind.Resolve(context.Background(), brew.New(fake).Casks(), []string{"owner/tap/old-app"})
 	if want := map[string]string{"owner/tap/old-app": "owner/tap/app"}; err != nil || !mapsEqual(got, want) {
 		t.Errorf("Resolve() of a tap cask's old token = %v, %v; want %v", got, err, want)
 	}
@@ -155,7 +155,7 @@ func TestResolveBeforeTapsAreAdded(t *testing.T) {
 	fake.On("brew", "tap")
 	fake.On("brew", "info", "--json=v2", "--formula", "jq", "mistyped").Exits(1).PrintsToStderr(`Error: No available formula with the name "mistyped".`)
 	fake.On("brew", "info", "--json=v2", "--formula", "jq").Prints(`{"formulae": [{"name": "jq", "full_name": "jq"}], "casks": []}`)
-	got, err := brew.New(fake).Formulae().Resolve(context.Background(), []string{"leeovery/tools/portal", "jq", "shivammathur/php/php@8.4", "mistyped"})
+	got, err := kind.Resolve(context.Background(), brew.New(fake).Formulae(), []string{"leeovery/tools/portal", "jq", "shivammathur/php/php@8.4", "mistyped"})
 	want := map[string]string{"leeovery/tools/portal": "leeovery/tools/portal", "shivammathur/php/php@8.4": "shivammathur/php/php@8.4", "jq": "jq"}
 	if err != nil || !mapsEqual(got, want) {
 		t.Errorf("Resolve() = %v, %v; want %v", got, err, want)
@@ -167,7 +167,7 @@ func TestResolveBeforeTapsAreAdded(t *testing.T) {
 	casks := runnertest.New(t)
 	casks.On("brew", "tap").Prints("homebrew/cask\n")
 	casks.On("brew", "info", "--json=v2", "--cask", "1password").Prints(`{"formulae": [], "casks": [{"token": "1password", "full_token": "1password"}]}`)
-	got, err = brew.New(casks).Casks().Resolve(context.Background(), []string{"1password", "1password/tap/1password-cli"})
+	got, err = kind.Resolve(context.Background(), brew.New(casks).Casks(), []string{"1password", "1password/tap/1password-cli"})
 	if want := map[string]string{"1password": "1password", "1password/tap/1password-cli": "1password/tap/1password-cli"}; err != nil || !mapsEqual(got, want) {
 		t.Errorf("Resolve() of a tap's cask before its tap's added = %v, %v; want %v", got, err, want)
 	}
@@ -181,7 +181,7 @@ func TestResolveReadsBrewsErrorLine(t *testing.T) {
 	fake.On("brew", "info", "--json=v2", "--formula", "jq", "mistyped").Exits(1).
 		PrintsToStderr("Warning: a tap once said No available formula with the name \"jq\"\nError: No available formula with the name \"mistyped\".\n")
 	fake.On("brew", "info", "--json=v2", "--formula", "jq").Prints(`{"formulae": [{"name": "jq", "full_name": "jq"}], "casks": []}`)
-	got, err := brew.New(fake).Formulae().Resolve(context.Background(), []string{"jq", "mistyped"})
+	got, err := kind.Resolve(context.Background(), brew.New(fake).Formulae(), []string{"jq", "mistyped"})
 	if want := map[string]string{"jq": "jq"}; err != nil || !mapsEqual(got, want) {
 		t.Errorf("Resolve() = %v, %v; want %v", got, err, want)
 	}
@@ -199,7 +199,7 @@ func TestResolveOneAtATimeWhenANameIsUnknown(t *testing.T) {
 	fake.On("brew", "info", "--json=v2", "--cask", "tailscale").Prints(fixture(t, "info-casks.json"))
 	fake.On("brew", "info", "--json=v2", "--cask", "no-such-cask").Exits(1).PrintsToStderr("Error: Cask 'no-such-cask' is unavailable: No Cask with this name exists.\n")
 
-	got, err := brew.New(fake).Casks().Resolve(context.Background(), []string{"tailscale", "no-such-cask"})
+	got, err := kind.Resolve(context.Background(), brew.New(fake).Casks(), []string{"tailscale", "no-such-cask"})
 	if want := map[string]string{"tailscale": "tailscale-app"}; err != nil || !mapsEqual(got, want) {
 		t.Errorf("Resolve() = %v, %v; want %v, the unknown name left out", got, err, want)
 	}
@@ -208,11 +208,11 @@ func TestResolveOneAtATimeWhenANameIsUnknown(t *testing.T) {
 func TestResolveFailsWhenBrewCant(t *testing.T) {
 	fake := runnertest.New(t)
 	fake.On("brew", "info", "--json=v2", "--formula", "jq").Fails(context.Canceled)
-	if _, err := brew.New(fake).Formulae().Resolve(context.Background(), []string{"jq"}); !errors.Is(err, context.Canceled) {
+	if _, err := kind.Resolve(context.Background(), brew.New(fake).Formulae(), []string{"jq"}); !errors.Is(err, context.Canceled) {
 		t.Errorf("Resolve() error = %v, want it passed on", err)
 	}
 	fake.On("brew", "info", "--json=v2", "--formula", "jq").Prints("not json")
-	if _, err := brew.New(fake).Formulae().Resolve(context.Background(), []string{"jq"}); err == nil || !strings.Contains(err.Error(), "read brew info's answer") {
+	if _, err := kind.Resolve(context.Background(), brew.New(fake).Formulae(), []string{"jq"}); err == nil || !strings.Contains(err.Error(), "read brew info's answer") {
 		t.Errorf("Resolve() of a garbled answer: error = %v", err)
 	}
 }

@@ -80,7 +80,7 @@ var (
 		Name:    formulaeName,
 		Label:   "Homebrew formulae",
 		Group:   kind.Packages,
-		Section: &config.Section{Kind: formulaeName, Header: "homebrew formulae", Form: config.Names, Sorted: true, Held: true},
+		Section: config.Section{Kind: formulaeName, Header: "homebrew formulae", Form: config.Names, Sorted: true, Held: true},
 		Help: &kind.Help{
 			What:   "Homebrew's formulae",
 			Add:    "Install formulae, and declare them",
@@ -96,7 +96,7 @@ var (
 		Name:    casksName,
 		Label:   "Homebrew casks",
 		Group:   kind.Packages,
-		Section: &config.Section{Kind: casksName, Header: "homebrew casks", Form: config.Names, Sorted: true, Held: true},
+		Section: config.Section{Kind: casksName, Header: "homebrew casks", Form: config.Names, Sorted: true, Held: true},
 		Help: &kind.Help{
 			What:   "Homebrew's casks",
 			Add:    "Install casks, and declare them",
@@ -538,6 +538,11 @@ func (h *Homebrew) lines(ctx context.Context, args ...string) ([]string, error) 
 }
 
 type formulae struct{ *Homebrew }
+
+var (
+	_ kind.Resolver = formulae{}
+	_ kind.Resolver = casks{}
+)
 
 func (formulae) Name() string    { return formulaeName }
 func (formulae) Program() string { return "brew" }

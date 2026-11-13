@@ -697,13 +697,13 @@ func TestDeclareSharedSaysWhatItWroteWhenAWriteFails(t *testing.T) {
 // then the Mac's taken out one after another left it.
 func TestDeclareSharedDropsASectionItEmpties(t *testing.T) {
 	cfg := loadRepo(t, map[string]string{
-		"shared/declarations": "[go tools]\nx\n",
-		"laptop/declarations": "[homebrew formulae]\ngo\n\n[go tools]\ny\n",
+		"shared/declarations": "[npm packages]\nx\n",
+		"laptop/declarations": "[homebrew formulae]\ngo\n\n[npm packages]\ny\n",
 	})
 	if _, _, err := cfg.DeclareShared("brew", config.Entry{Name: "go"}, []string{"laptop"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := readFile(t, cfg, "laptop/declarations"); got != "[go tools]\ny\n" {
+	if got := readFile(t, cfg, "laptop/declarations"); got != "[npm packages]\ny\n" {
 		t.Errorf("laptop = %q, want its emptied section gone", got)
 	}
 }

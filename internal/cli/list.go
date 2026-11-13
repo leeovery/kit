@@ -27,8 +27,7 @@ const listSchema = 2
 type listed struct {
 	Kind string `json:"kind"`
 	Name string `json:"name"`
-	// Scope is whose declarations declare it, shared or a Mac's: none for a
-	// thing declared in a file of its own.
+	// Scope is whose declarations declare it, shared or a Mac's.
 	Scope string `json:"scope,omitempty"`
 	// File is the file declaring it, as in laptop/declarations.
 	File      string `json:"file"`
@@ -37,14 +36,6 @@ type listed struct {
 	Installed bool   `json:"installed"`
 	// Off is whether it's declared, but not to be installed.
 	Off bool `json:"off,omitempty"`
-}
-
-// where is whose declarations declare it, or the file of its own that does.
-func (l listed) where() string {
-	if l.Scope != "" {
-		return l.Scope
-	}
-	return l.File
 }
 
 func newListCommand(a *app) *cobra.Command {
@@ -125,7 +116,7 @@ func (a *app) list(ctx context.Context, r *run, args []string) error {
 	var b strings.Builder
 	fmt.Fprintf(&b, "kit list · %s\n", r.machine)
 	for _, e := range entries {
-		line := strings.TrimRight(fmt.Sprintf("%-*s  %-*s  %s", kindWidth, e.Kind, nameWidth, e.Name, e.where()), " ")
+		line := strings.TrimRight(fmt.Sprintf("%-*s  %-*s  %s", kindWidth, e.Kind, nameWidth, e.Name, e.Scope), " ")
 		switch {
 		case e.Off:
 			line += "  (off)"
@@ -201,7 +192,7 @@ func (a *app) why(ctx context.Context, r *run, name string) error {
 	}
 	for _, kindName := range r.allKinds {
 		k := r.kindsByName[kindName]
-		declared, err := r.where(kindName, name)
+		declared, err := r.cfg.Where(kindName, name)
 		if err != nil {
 			return err
 		}
@@ -217,9 +208,8 @@ func (a *app) why(ctx context.Context, r *run, name string) error {
 			continue
 		}
 		w := why{Kind: kindName, Step: kinds.Label(k.Name()), Declared: declared, Installed: isIn}
-		_, outside := k.(kind.Declarer)
 		w.ForThisMac = slices.ContainsFunc(declared, func(e config.Entry) bool {
-			return outside || e.Scope == config.Shared || e.Scope == r.machine
+			return e.Scope == config.Shared || e.Scope == r.machine
 		})
 		if d, ok := k.(kind.Dependents); ok && isIn {
 			if w.NeededBy, err = d.NeededBy(ctx, name); err != nil {

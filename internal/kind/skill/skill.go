@@ -44,7 +44,7 @@ var Descriptor = kind.Descriptor{
 	Name:    kindName,
 	Label:   "Claude skills",
 	Group:   kind.Packages,
-	Section: &config.Section{Kind: kindName, Header: "claude skills", Form: config.Names, Sorted: true, Held: true},
+	Section: config.Section{Kind: kindName, Header: "claude skills", Form: config.Names, Sorted: true, Held: true},
 	Help: &kind.Help{
 		What:   "Claude's skills for every project, installed by agntc",
 		Add:    "Install Claude skills with agntc, as owner/repo and the skill or pack in it, and declare them",
@@ -136,16 +136,6 @@ func (s *Skills) HomePaths(names []string) []string {
 		}
 	}
 	return paths
-}
-
-// Resolve takes every name as agntc's key for an install: one that isn't
-// fails to install.
-func (*Skills) Resolve(_ context.Context, names []string) (map[string]string, error) {
-	resolved := make(map[string]string, len(names))
-	for _, name := range names {
-		resolved[name] = name
-	}
-	return resolved, nil
 }
 
 // Install installs each named, one at a time, as agntc takes one source at

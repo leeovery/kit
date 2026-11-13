@@ -293,19 +293,3 @@ func TestApplyAndNightlyLeaveAKindWithoutASection(t *testing.T) {
 		})
 	}
 }
-
-// tmux's plugins, with no plugin and no TPM in tmux's config, are left out
-// of a run; TPM started, they're looked after.
-func TestTmuxWithoutPluginsOrTPMIsLeftOut(t *testing.T) {
-	w := laptopWorld(t)
-	w.write(t, ".tmux.conf", "set -g mouse on\n")
-	out, _, _ := w.run(t, "status")
-	if strings.Contains(out, "\ntmux ") {
-		t.Errorf("kit status printed\n%s\nwant no tmux", out)
-	}
-	w.write(t, ".tmux.conf", "set -g mouse on\nrun '~/.tmux/plugins/tpm/tpm'\n")
-	out, _, _ = w.run(t, "status")
-	if !strings.Contains(out, "\ntmux ok") {
-		t.Errorf("kit status printed\n%s\nwant tmux looked after, TPM started", out)
-	}
-}

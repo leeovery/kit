@@ -50,8 +50,8 @@ applies on a new Mac (the last section) before it's committed.
 Take the first that fits, in this order:
 
 1. A package of a kind kit has: Homebrew formulae and casks, App Store
-   apps, npm, Composer, Go tools, GitHub CLI extensions, login items,
-   Claude Code's MCP servers and skills (`kit --help` lists them all).
+   apps, npm, Composer, GitHub CLI extensions, login items, Claude Code's
+   MCP servers and skills (`kit --help` lists them all).
 2. A setting: macOS's (`kit defaults add`), power (`kit power add`), git's
    (`kit git-config add`).
 3. A file the person writes, a config or a script: a linked file.

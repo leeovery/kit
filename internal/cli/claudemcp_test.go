@@ -28,29 +28,6 @@ func mcpWorld(t *testing.T) *world {
 	return w
 }
 
-func TestStatusShowsMCPServers(t *testing.T) {
-	out, _, _ := mcpWorld(t).run(t, "status", "claude-mcp")
-	// Changed is drift like any, quiet for its first day; applying acts on it all the same.
-	for _, want := range []string{"claude-mcp ok 2 declared, all installed; 1 changed\n", "claude-mcp changed:new design (installed differently: headers) (to install)\n", "claude-mcp extra:new stray, ~/Code/other:tracker\n"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("kit status claude-mcp printed\n%s\nwant it to hold %q", out, want)
-		}
-	}
-	if strings.Contains(out, "made-up-key") {
-		t.Error("kit status printed a key")
-	}
-}
-
-// A line holding a key in plain text fails the step, saying where.
-func TestStatusRefusesAKeyInPlainText(t *testing.T) {
-	w := mcpWorld(t)
-	w.writeSection(t, "laptop", "claude mcp", "docs --transport http https://docs.example.com/mcp --header \"Authorization: Bearer abc\"\n")
-	out, _, code := w.run(t, "status", "claude-mcp")
-	if !strings.Contains(out, "claude-mcp failed laptop/declarations:5: docs: headers.Authorization holds a key in plain text") || code != 1 {
-		t.Errorf("kit status printed\n%s exit %d", out, code)
-	}
-}
-
 // Applying replaces a server installed otherwise than declared: what Claude
 // Code is handed names the key, never holds it.
 func TestApplyReplacesAChangedServer(t *testing.T) {

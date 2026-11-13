@@ -1,4 +1,4 @@
-package tmux_test
+package devtool_test
 
 import (
 	"os"

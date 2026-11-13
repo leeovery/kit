@@ -70,7 +70,7 @@ var Descriptor = kind.Descriptor{
 	Name:       kindName,
 	Label:      "Secrets",
 	Group:      kind.Secrets,
-	Section:    &config.Section{Kind: kindName, Header: "secrets", Form: config.Secrets, Sorted: true, Items: checkItem, Line: checkLine, Says: lineSays},
+	Section:    config.Section{Kind: kindName, Header: "secrets", Form: config.Secrets, Sorted: true, Items: checkItem, Line: checkLine, Says: lineSays},
 	Row:        "Secrets",
 	Installing: kind.Words{Label: "Sync", Does: "sync it", Doing: "syncing", Done: "synced"},
 	Removing:   kind.Words{Label: "Delete", Does: "delete it from this Mac: its store keeps it", Doing: "deleting", Done: "deleted"},
@@ -332,15 +332,6 @@ func (s *Secrets) HomePaths(names []string) []string {
 		paths = append(paths, "~/"+EnvFile)
 	}
 	return paths
-}
-
-// Resolve knows every secret.
-func (s *Secrets) Resolve(_ context.Context, names []string) (map[string]string, error) {
-	out := make(map[string]string, len(names))
-	for _, name := range names {
-		out[name] = name
-	}
-	return out, nil
 }
 
 // Value can't say where a secret found on the Mac is kept.

@@ -10,13 +10,10 @@ installs: `kit --help` lists the kinds under Packages.
 | mas | `[app store apps]` | an App Store app, by name or id |
 | npm | `[npm packages]` | a global npm package |
 | composer | `[composer packages]` | a global Composer package |
-| go | `[go tools]` | a module path |
 | gh | `[github extensions]` | owner/repo |
 | login-item | `[macos login items]` | an app |
 | claude-mcp | `[claude mcp]` | a server Claude Code has |
 | claude-skill | `[claude skills]` | owner/repo and the skill in it |
-
-tmux's plugins are declared in tmux's own config, which kit reads.
 
 ## Adding and removing
 
@@ -61,8 +58,8 @@ commit it, when a package needs something kit installs first.
 
 - Homebrew is installed by the boot; its formulae and casks are much of a
   new Mac's run.
-- npm, Composer and Go tools wait till their program is on kit's PATH,
-  whatever installs it.
+- npm and Composer wait till their program is on kit's PATH, whatever
+  installs it.
 - App Store apps need someone signed in to the App Store.
 - Login items come after the casks and App Store apps.
 - kit doesn't open an app it installs, though a few installers do, and the

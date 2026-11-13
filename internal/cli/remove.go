@@ -72,18 +72,14 @@ func (a *app) remove(ctx context.Context, r *run, kindName string, names []strin
 type uninstaller func(ctx context.Context) (string, error)
 
 // everyMac is why removing what's declared for every Mac is refused
-// without --shared, the shared file's scope said.
-const everyMac = "declared for every Mac, in %s: --shared takes it out of every Mac's list"
+// without --shared.
+const everyMac = "declared for every Mac, in " + config.Shared + ": --shared takes it out of every Mac's list"
 
-// declaredIn says whether name, of the kind called kindName, is declared
-// in this Mac's file, and in the shared one.
-func declaredIn(r *run, kindName, name string) (own, shared bool, err error) {
-	where, err := r.where(kindName, name)
-	for _, e := range where {
-		own = own || e.Scope == r.scope(false)
-		shared = shared || e.Scope == r.scope(true)
-	}
-	return own, shared, err
+// declaredShared says whether name, of the kind called kindName, is
+// declared in the shared file.
+func declaredShared(r *run, kindName, name string) (bool, error) {
+	where, err := r.cfg.Where(kindName, name)
+	return slices.ContainsFunc(where, func(e config.Entry) bool { return e.Scope == config.Shared }), err
 }
 
 // leftovers settles, before anything's uninstalled, what becomes of the
@@ -111,7 +107,7 @@ func (a *app) leftovers(ctx context.Context, r *run, k kind.Kind, names []string
 	}
 	how := map[string]uninstaller{}
 	for _, name := range names {
-		if _, shared, err := declaredIn(r, k.Name(), name); err != nil || shared && !opts.shared {
+		if shared, err := declaredShared(r, k.Name(), name); err != nil || shared && !opts.shared {
 			// Refused, as removeOne says, it's nothing to ask about.
 			continue
 		}
@@ -257,32 +253,6 @@ func (lo leftover) kept() string {
 	return "its saved settings kept: --zap removes them"
 }
 
-// removeDeclared uninstalls name, a thing of a kind declared in a file of
-// its own, when it's installed, and takes it out of that file.
-func removeDeclared(ctx context.Context, r *run, c *changes, k kind.Kind, d kind.Declarer, name string) check.Result {
-	isIn, err := installed(ctx, k, name)
-	if err != nil {
-		return check.Result{State: check.Failed, Reason: err.Error()}
-	}
-	verb, err := takeOff(ctx, k, name, isIn, nil)
-	if err != nil {
-		return check.Result{State: check.Failed, Reason: err.Error()}
-	}
-	where, err := r.where(k.Name(), name)
-	if err != nil {
-		return check.Result{State: check.Failed, Reason: err.Error()}
-	}
-	if len(where) == 0 {
-		return check.Result{State: check.OK, Summary: verb + "; it wasn't declared"}
-	}
-	file, err := d.Undeclare(name)
-	if err != nil {
-		return check.Result{State: check.Failed, Reason: verb + ", but couldn't undeclare: " + err.Error()}
-	}
-	r.changedFile(c, file)
-	return check.Result{State: check.OK, Summary: verb + "; out of " + r.files.Tilde(file)}
-}
-
 // takeOff takes name off the Mac, when it's on it (isIn), as how does, or,
 // nil, as its kind does, and says so in its kind's words: uninstalled, or
 // wasn't installed.
@@ -323,16 +293,12 @@ func couldnt(w kind.Words) string {
 // shared.
 func removeOne(ctx context.Context, r *run, c *changes, k kind.Kind, name string, shared bool, how uninstaller) check.Result {
 	kindName := k.Name()
-	if d, ok := k.(kind.Declarer); ok {
-		return removeDeclared(ctx, r, c, k, d, name)
-	}
-	own, sharedScope := r.scope(false), r.scope(true)
-	inOwn, inShared, err := declaredIn(r, kindName, name)
+	inShared, err := declaredShared(r, kindName, name)
 	if err != nil {
 		return check.Result{State: check.Failed, Reason: err.Error()}
 	}
 	if inShared && !shared {
-		return check.Result{State: check.Failed, Reason: fmt.Sprintf(everyMac, sharedScope)}
+		return check.Result{State: check.Failed, Reason: everyMac}
 	}
 	isIn, err := installed(ctx, k, name)
 	if err != nil {
@@ -342,16 +308,9 @@ func removeOne(ctx context.Context, r *run, c *changes, k kind.Kind, name string
 	if err != nil {
 		return check.Result{State: check.Failed, Reason: err.Error()}
 	}
-	var from []string
-	for _, scope := range []string{own, sharedScope} {
-		if scope == own && !inOwn || scope == sharedScope && !inShared {
-			continue
-		}
-		if err := r.cfg.Undeclare(kindName, scope, name); err != nil {
-			return check.Result{State: check.Failed, Reason: verb + ", but couldn't undeclare: " + err.Error()}
-		}
-		c.changed(config.DeclFile(scope))
-		from = append(from, scope)
+	from, err := c.undeclareHere(kindName, name, shared)
+	if err != nil {
+		return check.Result{State: check.Failed, Reason: verb + ", but couldn't undeclare: " + err.Error()}
 	}
 	switch {
 	case len(from) > 0:

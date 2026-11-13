@@ -3,8 +3,8 @@
 Set up a Mac from a config repository, and keep it that way.
 
 kit reads a private config repository that declares what each of your Macs should have
-(Homebrew formulae and casks, App Store apps, npm, Composer and Go tools, GitHub CLI
-extensions, tmux plugins and login items; settings and secrets to come), and
+(Homebrew formulae and casks, App Store apps, npm and Composer packages, GitHub CLI
+extensions and login items; settings and secrets to come), and
 tells you where a Mac differs. It's pretty at a terminal, plain without one, and `--json`
 for scripts and agents, so an agent can drive it with the same commands you run.
 

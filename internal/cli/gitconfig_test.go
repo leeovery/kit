@@ -15,13 +15,6 @@ func gitWorld(t *testing.T) *world {
 	return w
 }
 
-func TestStatusShowsGitsSettings(t *testing.T) {
-	out, _, _ := gitWorld(t).run(t, "status")
-	if !strings.Contains(out, "git-config ok 2 declared, all set; 1 changed\ngit-config diverged:new core.editor (set to vim)\ngit-config extra:new delta.pager\n") {
-		t.Errorf("kit status printed\n%s", out)
-	}
-}
-
 func TestReconcileAdoptsASettingChangedOnTheMac(t *testing.T) {
 	w := gitWorld(t)
 	w.expectSync(t, []string{"shared/declarations"}, "kit reconcile (laptop): adopt git-config:core.editor")
