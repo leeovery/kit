@@ -31,6 +31,7 @@ import (
 
 	"github.com/leeovery/kit/internal/runner"
 	"github.com/leeovery/kit/internal/state"
+	"github.com/leeovery/kit/internal/tilde"
 	"github.com/leeovery/kit/internal/whole"
 	"github.com/leeovery/kit/internal/wildmatch"
 )
@@ -322,13 +323,10 @@ func (p *Prefs) TakeOver(ctx context.Context) error {
 
 // expand is a path with a leading ~/ made the home folder's.
 func (p *Prefs) expand(path string) string {
-	if rest, ok := strings.CutPrefix(path, "~/"); ok {
-		return filepath.Join(p.Home, rest)
-	}
 	if path == "~" {
 		return p.Home
 	}
-	return path
+	return tilde.Expand(p.Home, path)
 }
 
 // matches reports whether value matches any of patterns, as rsync matches

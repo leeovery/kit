@@ -21,6 +21,7 @@ import (
 	"github.com/leeovery/kit/internal/hold"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/runner"
+	"github.com/leeovery/kit/internal/tilde"
 )
 
 // The scripts kit runs, exported for tests to script osascript's answers.
@@ -381,7 +382,7 @@ func (l *Login) Find(ctx context.Context, typed string) ([]kind.Found, error) {
 	wanted := typed
 	switch {
 	case strings.HasPrefix(typed, "~/"):
-		wanted = filepath.Join(l.home, typed[2:])
+		wanted = tilde.Expand(l.home, typed)
 	case strings.HasPrefix(typed, "/"):
 	case strings.Contains(typed, ".") && !strings.ContainsAny(typed, " /"):
 	default:

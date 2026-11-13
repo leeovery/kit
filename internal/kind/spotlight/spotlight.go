@@ -11,7 +11,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -21,6 +20,7 @@ import (
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/runner"
 	"github.com/leeovery/kit/internal/state"
+	"github.com/leeovery/kit/internal/tilde"
 )
 
 // VolumeConfiguration is Spotlight's settings for the data volume, whose
@@ -90,13 +90,6 @@ func (s *Spotlight) Expand(list config.List) (config.List, error) {
 	return list, nil
 }
 
-func (s *Spotlight) full(name string) string {
-	if rest, ok := strings.CutPrefix(name, "~/"); ok {
-		return filepath.Join(s.home, rest)
-	}
-	return name
-}
-
 // indexed reports whether Spotlight has anything in folder in its index,
 // by its name, which it gives every file whatever its kind (a query of
 // kMDItemFSName matches nothing): nothing found means it's kept out, or
@@ -124,7 +117,7 @@ func (s *Spotlight) Installed(ctx context.Context) ([]kind.Installed, error) {
 	var out []kind.Installed
 	var waiting []string
 	for _, name := range s.declared {
-		on, err := s.indexed(ctx, s.full(name))
+		on, err := s.indexed(ctx, tilde.Expand(s.home, name))
 		if err != nil {
 			return nil, fmt.Errorf("ask Spotlight about %s: %w", name, err)
 		}
@@ -162,7 +155,7 @@ func (s *Spotlight) Install(ctx context.Context, names []string) error {
 	var errs []error
 	var added []string
 	for _, name := range names {
-		if err := sudo("Add :Exclusions: string " + s.full(name)); err != nil {
+		if err := sudo("Add :Exclusions: string " + tilde.Expand(s.home, name)); err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", name, err))
 			continue
 		}

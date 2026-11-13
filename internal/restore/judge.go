@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/leeovery/kit/internal/tilde"
 )
 
 // Verdict is what the restore does about a listed path, judged before any
@@ -75,7 +77,7 @@ func Judge(home string, f *Filter, rec Record, setUp bool) (Judgement, error) {
 // from ~: all of it, or, all false, the first found alone, which is enough
 // to say it holds anything. Folders alone aren't anything held.
 func (f *Filter) holds(home string, all bool) ([]string, error) {
-	root := filepath.Join(home, strings.TrimPrefix(f.Line.Path, "~/"))
+	root := tilde.Expand(home, f.Line.Path)
 	info, err := os.Lstat(root)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):

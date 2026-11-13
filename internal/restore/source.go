@@ -13,6 +13,7 @@ import (
 
 	"github.com/leeovery/kit/internal/backup/timemachine"
 	"github.com/leeovery/kit/internal/runner"
+	"github.com/leeovery/kit/internal/tilde"
 )
 
 // Opener is where a restore copies from, to open as it starts: the old Mac
@@ -75,7 +76,7 @@ func (o *Opened) Source(path string) Source {
 	if at, ok := o.Folders[path]; ok {
 		return Source{Path: at}
 	}
-	return Source{Path: filepath.Join(o.Home, strings.TrimPrefix(path, "~/")), Host: o.Host, Shell: o.Shell, Rsync: o.Rsync}
+	return Source{Path: tilde.Expand(o.Home, path), Host: o.Host, Shell: o.Shell, Rsync: o.Rsync}
 }
 
 // Stat says what's at path, a line's, from ~, there, as os.Lstat does: a

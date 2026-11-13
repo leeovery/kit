@@ -19,6 +19,7 @@ import (
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/restore"
 	"github.com/leeovery/kit/internal/runner"
+	"github.com/leeovery/kit/internal/tilde"
 )
 
 // RestoreName names the data restore's step, as its section is named.
@@ -708,7 +709,7 @@ func (r Restoring) planOne(ctx context.Context, src *restore.Opened, j judged, s
 		return copying{}, err
 	}
 	c := copying{judged: j, copy: restore.Copy{
-		From: src.Source(j.Path), To: filepath.Join(r.Home, strings.TrimPrefix(j.Path, "~/")), File: there.Kind == restore.File,
+		From: src.Source(j.Path), To: tilde.Expand(r.Home, j.Path), File: there.Kind == restore.File,
 		Filter: filter, Partial: j.line.Partial(r.StateDir),
 	}}
 	event.Say(ctx, event.Doing{Says: "measuring " + j.Path})
@@ -923,7 +924,7 @@ func copyFailed(src *restore.Opened, err error) bool {
 // and where, aside, if anything was.
 func (r Restoring) saidAside(ctx context.Context, what string, aside restore.Aside) {
 	if len(aside.Paths) > 0 {
-		event.Log(ctx, event.Logged{Line: fmt.Sprintf("Set aside %s, into %s", what, r.tilde(aside.Dir))})
+		event.Log(ctx, event.Logged{Line: fmt.Sprintf("Set aside %s, into %s", what, tilde.Shown(r.Home, aside.Dir))})
 	}
 }
 

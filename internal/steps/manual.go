@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -17,6 +16,7 @@ import (
 	"github.com/leeovery/kit/internal/hand"
 	"github.com/leeovery/kit/internal/runner"
 	"github.com/leeovery/kit/internal/state"
+	"github.com/leeovery/kit/internal/tilde"
 )
 
 // ManualName names the step of what a person does by hand.
@@ -113,9 +113,7 @@ func ParseManual(home string, e config.Entry) (ManualStep, error) {
 		return m, nil
 	}
 	for i, w := range cmd {
-		if rest, ok := strings.CutPrefix(w, "~/"); ok {
-			cmd[i] = filepath.Join(home, rest)
-		}
+		cmd[i] = tilde.Expand(home, w)
 	}
 	m.Command = &runner.Command{Name: cmd[0], Args: cmd[1:], Timeout: ownTimeout}
 	return m, nil

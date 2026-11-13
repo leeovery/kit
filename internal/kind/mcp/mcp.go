@@ -25,6 +25,7 @@ import (
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/runner"
+	"github.com/leeovery/kit/internal/tilde"
 )
 
 // notHere is why a project's server waits: said of one, or of several.
@@ -259,7 +260,7 @@ func (m *MCP) Differs(_ context.Context, names []string) (map[string]string, err
 func (m *MCP) Blocked(_ context.Context, missing map[string]string, _ []kind.Installed) (map[string]kind.Block, error) {
 	blocked := make(map[string]kind.Block)
 	for name := range missing {
-		if s, ok := m.declared[name]; ok && s.Folder != "" && !exists(m.expand(s.Folder)) {
+		if s, ok := m.declared[name]; ok && s.Folder != "" && !exists(tilde.Expand(m.home, s.Folder)) {
 			blocked[name] = kind.Block{Why: notHere, Later: true}
 		}
 	}
@@ -313,7 +314,7 @@ func (m *MCP) claude(ctx context.Context, s Server, verb string, args ...string)
 	scope := "user"
 	cmd := runner.Command{Name: m.Program()}
 	if s.Folder != "" {
-		scope, cmd.Dir = "local", m.expand(s.Folder)
+		scope, cmd.Dir = "local", tilde.Expand(m.home, s.Folder)
 	}
 	cmd.Args = slices.Concat([]string{"mcp", verb, "-s", scope}, args)
 	_, err := m.run.Run(ctx, cmd)
@@ -326,19 +327,7 @@ func (m *MCP) folder(written string) string {
 	if written == "" {
 		return ""
 	}
-	path := filepath.Clean(m.expand(written))
-	if rest, ok := strings.CutPrefix(path, m.home+"/"); ok {
-		return "~/" + rest
-	}
-	return path
-}
-
-// expand is a folder as written, with ~ for the home, as a path.
-func (m *MCP) expand(folder string) string {
-	if rest, ok := strings.CutPrefix(folder, "~/"); ok {
-		return filepath.Join(m.home, rest)
-	}
-	return folder
+	return tilde.Shown(m.home, filepath.Clean(tilde.Expand(m.home, written)))
 }
 
 func exists(path string) bool {

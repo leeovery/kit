@@ -14,6 +14,7 @@ import (
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/linked"
 	"github.com/leeovery/kit/internal/steps"
+	"github.com/leeovery/kit/internal/tilde"
 )
 
 // drifter is a step whose items are drift, which kit reconcile settles: a
@@ -272,7 +273,7 @@ func (d fileDrifter) settle(ctx context.Context, r *run, c *changes, dec decisio
 		if err != nil {
 			return check.Result{State: check.Failed, Reason: err.Error()}
 		}
-		return check.Result{State: check.OK, Summary: fmt.Sprintf("linked to kit-config's; the Mac's copy is in the Bin (%s)", d.files.Tilde(binned))}
+		return check.Result{State: check.OK, Summary: fmt.Sprintf("linked to kit-config's; the Mac's copy is in the Bin (%s)", tilde.Shown(d.files.Home, binned))}
 	case install, remove:
 		if err := d.files.Apply(ctx, check.Result{Items: []check.Item{dec.item.Item}}); err != nil {
 			return check.Result{State: check.Failed, Reason: err.Error()}

@@ -16,6 +16,7 @@ import (
 	"github.com/leeovery/kit/internal/apps"
 	"github.com/leeovery/kit/internal/plist"
 	"github.com/leeovery/kit/internal/runner"
+	"github.com/leeovery/kit/internal/tilde"
 	"github.com/leeovery/kit/internal/whole"
 	"github.com/leeovery/kit/internal/wildmatch"
 )
@@ -648,7 +649,7 @@ func (p *Prefs) restoreFiles(files string, bound []string, only map[string]bool,
 	n, failed := 0, map[string]string{}
 	for _, stored := range storedFiles(files) {
 		target := p.livePath(files, stored)
-		name := p.tilde(target)
+		name := tilde.Shown(p.Home, target)
 		if matches(target, expanded) || only != nil && !only[name] {
 			continue
 		}

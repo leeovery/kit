@@ -21,6 +21,7 @@ import (
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/runner"
+	"github.com/leeovery/kit/internal/tilde"
 )
 
 // Exclusions is the backup exclusions, kept out by excluders.
@@ -85,22 +86,6 @@ func (x *Exclusions) Commands() []string {
 // Verb says a path as declared is excluded.
 func (x *Exclusions) Verb() string { return "excluded" }
 
-// full is a path as declared, ~ expanded.
-func (x *Exclusions) full(name string) string {
-	if rest, ok := strings.CutPrefix(name, "~/"); ok {
-		return filepath.Join(x.home, rest)
-	}
-	return name
-}
-
-// shown is a full path as kit shows it, ~ for the home folder.
-func (x *Exclusions) shown(path string) string {
-	if rest, ok := strings.CutPrefix(path, x.home+"/"); ok {
-		return "~/" + rest
-	}
-	return path
-}
-
 // Expand replaces each glob with what matches it now; a plain path stands
 // for itself, there or not, as a fixed exclusion holds before its folder
 // exists.
@@ -114,14 +99,15 @@ func (x *Exclusions) Expand(list config.List) (config.List, error) {
 			x.declared[e.Name] = true
 			continue
 		}
-		matches, err := filepath.Glob(x.full(e.Name))
+		glob := tilde.Expand(x.home, e.Name)
+		matches, err := filepath.Glob(glob)
 		if err != nil {
 			return list, fmt.Errorf("%s: %q isn't a pattern kit reads: %w", e.Pos(), e.Name, err)
 		}
-		x.globs = append(x.globs, x.full(e.Name))
+		x.globs = append(x.globs, glob)
 		for _, m := range matches {
 			match := e
-			match.Name = x.shown(m)
+			match.Name = tilde.Shown(x.home, m)
 			out.Entries = append(out.Entries, match)
 			x.matched[match.Name] = true
 			x.declared[match.Name] = true
@@ -140,7 +126,7 @@ func (x *Exclusions) Installed(ctx context.Context) ([]kind.Installed, error) {
 	}
 	var here []string
 	for name := range x.matched {
-		here = append(here, x.full(name))
+		here = append(here, tilde.Expand(x.home, name))
 	}
 	slices.Sort(here)
 	var order []string
@@ -152,7 +138,7 @@ func (x *Exclusions) Installed(ctx context.Context) ([]kind.Installed, error) {
 		}
 		seen := map[string]bool{}
 		for _, p := range paths {
-			name := x.shown(p)
+			name := tilde.Shown(x.home, p)
 			if seen[name] {
 				continue
 			}
@@ -178,7 +164,7 @@ func (x *Exclusions) Installed(ctx context.Context) ([]kind.Installed, error) {
 // globbed reports whether the path called name matches a glob declared.
 func (x *Exclusions) globbed(name string) bool {
 	return slices.ContainsFunc(x.globs, func(glob string) bool {
-		ok, _ := filepath.Match(glob, x.full(name))
+		ok, _ := filepath.Match(glob, tilde.Expand(x.home, name))
 		return ok
 	})
 }
@@ -198,10 +184,10 @@ func (x *Exclusions) Install(ctx context.Context, names []string) error {
 	var errs []error
 	for _, ex := range x.excluders {
 		for _, name := range here {
-			errs = append(errs, named(name, kind.AdminAgain(ctx, func() error { return ex.Exclude(ctx, x.run, x.full(name), false) })))
+			errs = append(errs, named(name, kind.AdminAgain(ctx, func() error { return ex.Exclude(ctx, x.run, tilde.Expand(x.home, name), false) })))
 		}
 		for _, name := range fixed {
-			errs = append(errs, named(name, kind.AdminAgain(ctx, func() error { return ex.Exclude(ctx, x.run, x.full(name), true) })))
+			errs = append(errs, named(name, kind.AdminAgain(ctx, func() error { return ex.Exclude(ctx, x.run, tilde.Expand(x.home, name), true) })))
 		}
 	}
 	return errors.Join(errs...)
@@ -218,7 +204,7 @@ func (x *Exclusions) Remove(ctx context.Context, names []string) error {
 			continue
 		}
 		for _, name := range names {
-			if path := x.full(name); slices.Contains(kept, path) {
+			if path := tilde.Expand(x.home, name); slices.Contains(kept, path) {
 				errs = append(errs, named(name, kind.AdminAgain(ctx, func() error { return ex.Include(ctx, x.run, path) })))
 			}
 		}

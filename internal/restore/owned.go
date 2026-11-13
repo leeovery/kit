@@ -10,6 +10,7 @@ import (
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/kind/exclusion"
 	"github.com/leeovery/kit/internal/linked"
+	"github.com/leeovery/kit/internal/tilde"
 	"github.com/leeovery/kit/internal/wildmatch"
 )
 
@@ -100,10 +101,7 @@ func (m Mac) names(kind string) ([]string, error) {
 func (m Mac) inHome(paths []string) []string {
 	var out []string
 	for _, p := range paths {
-		if rest, ok := strings.CutPrefix(p, m.Home+"/"); ok && m.Home != "" {
-			p = "~/" + rest
-		}
-		if strings.HasPrefix(p, "~/") {
+		if p = tilde.Shown(m.Home, p); strings.HasPrefix(p, "~/") {
 			out = append(out, p)
 		}
 	}

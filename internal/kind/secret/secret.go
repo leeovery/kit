@@ -29,6 +29,7 @@ import (
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/kind/secret/store"
 	"github.com/leeovery/kit/internal/runner"
+	"github.com/leeovery/kit/internal/tilde"
 	"github.com/leeovery/kit/internal/whole"
 )
 
@@ -219,10 +220,7 @@ func place(sec *Secret, e config.Entry, ref string) error {
 
 // path is a file secret's full path.
 func (s *Secrets) path(sec Secret) string {
-	if rest, ok := strings.CutPrefix(sec.Name, "~/"); ok {
-		return filepath.Join(s.home, rest)
-	}
-	return sec.Name
+	return tilde.Expand(s.home, sec.Name)
 }
 
 // FileHolds is nil when the file the secret name fills holds want, byte

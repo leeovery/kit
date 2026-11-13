@@ -14,6 +14,7 @@ import (
 
 	"github.com/leeovery/kit/internal/plist"
 	"github.com/leeovery/kit/internal/runner"
+	"github.com/leeovery/kit/internal/tilde"
 	"github.com/leeovery/kit/internal/wildmatch"
 )
 
@@ -473,7 +474,7 @@ func (p *Prefs) Capture(ctx context.Context) (Report, error) {
 	for _, source := range sources {
 		stored := p.storedPath(filesDir, source)
 		wanted[stored] = true
-		if heldFiles[p.tilde(source)] {
+		if heldFiles[tilde.Shown(p.Home, source)] {
 			continue
 		}
 		data, err := os.ReadFile(source)
@@ -487,7 +488,7 @@ func (p *Prefs) Capture(ctx context.Context) (Report, error) {
 		}
 		report.Files++
 		if what != "" {
-			report.changes = append(report.changes, change{what, p.tilde(source)})
+			report.changes = append(report.changes, change{what, tilde.Shown(p.Home, source)})
 		}
 	}
 
@@ -548,12 +549,4 @@ func (p *Prefs) Capture(ctx context.Context) (Report, error) {
 		}
 		r.PushError = report.PushError
 	})
-}
-
-// tilde is a path with the home folder shown as ~.
-func (p *Prefs) tilde(path string) string {
-	if rest, ok := strings.CutPrefix(path, p.Home+"/"); ok {
-		return "~/" + rest
-	}
-	return path
 }
