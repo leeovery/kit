@@ -224,6 +224,22 @@ func TestConfigSync(t *testing.T) {
 	if state, text, _ := checked(t, sync(fake)); state != check.OK || text != "nothing to push to" {
 		t.Errorf("no remote = %s %q, want ok, nothing to push to", state, text)
 	}
+
+	// HEAD on no branch: kit can't tell where to push, a problem.
+	fake = runnertest.New(t)
+	fake.On("git", git("remote")...).Prints("origin\n")
+	fake.On("git", git("symbolic-ref", "-q", "HEAD")...).Exits(1)
+	res = sync(fake).Check(t.Context())
+	if res.State != check.Attention || len(res.Items) != 1 || res.Items[0].ID != "config-sync:nowhere" || res.Items[0].Detail != "HEAD isn't on a branch, so kit pushes nothing" {
+		t.Errorf("HEAD on no branch = %+v, want the problem, saying why", res)
+	}
+
+	// git failing is no "nothing to push to": the check fails.
+	fake = runnertest.New(t)
+	fake.On("git", git("remote")...).Exits(128)
+	if state, _, _ := checked(t, sync(fake)); state != check.Failed {
+		t.Errorf("git failing = %s, want failed", state)
+	}
 }
 
 // kit-config's edits, its files on disk that differ from the last commit,

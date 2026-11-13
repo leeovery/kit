@@ -2,6 +2,7 @@ package steps
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"time"
@@ -20,15 +21,21 @@ const syncWithin = time.Hour
 const ConfigSyncName = "config-sync"
 
 // ConfigSync checks the config repository has no commit unpushed for over
-// an hour, nor any kit holds back, saying why (gitrepo's Holding). Edits
+// an hour, nor any kit holds back, saying why (gitrepo's Holding), nor
+// stands where kit can't tell where to push (gitrepo's ErrNowhere). Edits
 // not committed are drift (ConfigEdits), not a problem.
 func ConfigSync(repo gitrepo.Repo, now func() time.Time) engine.Step {
 	return engine.Step{
 		Name: ConfigSyncName, Title: "Sync", Area: AreaConfig,
 		Check: func(ctx context.Context) check.Result {
 			made, err := repo.Waiting(ctx)
-			if err != nil {
+			switch {
+			case errors.Is(err, gitrepo.ErrNoRemote):
 				return check.Result{State: check.OK, Summary: "nothing to push to", Glance: "nothing to push to"}
+			case errors.Is(err, gitrepo.ErrNowhere):
+				return problem(ConfigSyncName, "nowhere to push to", [3]string{"nowhere", "kit can't tell where to push", err.Error()})
+			case err != nil:
+				return failed(err)
 			}
 			if len(made) == 0 {
 				return check.Result{State: check.OK, Summary: "pushed", Glance: "pushed"}

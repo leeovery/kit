@@ -67,7 +67,7 @@ func AppAccess(a AppAccessing) engine.Step {
 				return check.Result{State: check.OK, Summary: said}
 			}
 			return check.Result{State: check.Attention, Summary: said, Items: []check.Item{{
-				ID: AppAccessName + ":" + AppAccessName, Name: appAccessTitle, State: check.ByHand, Detail: "kit apply at a terminal asks for it",
+				ID: AppAccessName + ":" + AppAccessName, Name: appAccessTitle, State: check.ByHand, Detail: "a whole kit apply at a terminal asks for it",
 			}}}
 		},
 	}

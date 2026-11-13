@@ -730,10 +730,10 @@ func (p *Pretty) spin() {
 }
 
 // drawSpinner draws the live part over the last: on a timeline, the running
-// step's row, and the last lines its commands printed on the line under it;
-// otherwise the loader, the bar, how many steps are done, and which are
-// running. None when nothing runs, the face doesn't animate, or the run's
-// over.
+// step's row, what you're to do or the last lines its commands printed
+// under it; otherwise the loader, the bar, how many steps are done, and
+// which are running. None when nothing runs, the face doesn't animate, or
+// the run's over.
 func (p *Pretty) drawSpinner() {
 	if !p.animate || p.aside > 0 || p.finished {
 		return
@@ -766,11 +766,8 @@ func (p *Pretty) drawSpinner() {
 	text := "  " + mark + " " + look.Bar(done, len(p.running), total, look.Done) + "  " + look.Says(look.White(fmt.Sprintf("%d of %d", done, total)), look.Muted(doing(p.running)))
 	lines := []string{text}
 	if !p.byArea() {
-		r := p.running[0]
-		lines = []string{"  " + mark + " " + look.Strong(r.title) + "  " + p.workSays(r)}
-		for _, l := range lastOf(p.output[r.step], keptRunning) {
-			lines = append(lines, "  "+look.Dim("│")+" "+look.Muted(l))
-		}
+		lines = look.Timeline("  ", p.width, p.runningRow(p.running[0], p.width))
+		lines[0] = strings.Replace(lines[0], look.Mark(look.Running), mark, 1)
 	}
 	p.drawLive(append(lines, p.askingLines(p.width)...))
 }

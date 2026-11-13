@@ -506,7 +506,7 @@ func TestRestoreRebuiltWithoutATerminalNamesTheFlag(t *testing.T) {
 		return restore.Disks{}, nil
 	}
 	err := c.apply(t.Context())
-	if want := "couldn't restore: studio restores from its own backups, as it started from no other Mac, and which of them is asked at a terminal: kit apply --restore-from time-machine|arq restores ~/Code from the backup it names, or kit restore remove ~/Code drops its line"; err == nil || err.Error() != want {
+	if want := "couldn't restore: studio restores from its own backups, as it started from no other Mac, and which of them a whole kit apply at a terminal asks: kit apply --restore-from time-machine|arq restores ~/Code from the backup it names, or kit restore remove ~/Code drops its line"; err == nil || err.Error() != want {
 		t.Errorf("apply = %v\nwant %q", err, want)
 	}
 	if rec := c.record(); rec.From != (restore.Origin{}) || rec.Paths["~/Code"].State != "" {
@@ -761,8 +761,8 @@ func TestRestoreThroughArqWithoutATerminal(t *testing.T) {
 	c.copiesFrom(filepath.Join(c.arqHold(2), ".zsh_history"), "~/.zsh_history", 1, 100)
 	err := c.apply(t.Context())
 	want := []string{
-		fmt.Sprintf("couldn't restore ~/Code: restoring through Arq is by hand: in Arq, restore ~/Code into %s, then run kit apply again; at a terminal, it asks for it", c.arqHold(1)),
-		fmt.Sprintf("couldn't restore ~/Documents: restoring through Arq is by hand: in Arq, restore ~/Documents into %s (holding app instead), then run kit apply again; at a terminal, it asks for it", c.arqHold(3)),
+		fmt.Sprintf("couldn't restore ~/Code: restoring through Arq is by hand: in Arq, restore ~/Code into %s, then run kit apply again; a whole kit apply at a terminal asks for it", c.arqHold(1)),
+		fmt.Sprintf("couldn't restore ~/Documents: restoring through Arq is by hand: in Arq, restore ~/Documents into %s (holding app instead), then run kit apply again; a whole kit apply at a terminal asks for it", c.arqHold(3)),
 	}
 	if err == nil || err.Error() != strings.Join(want, "\n") {
 		t.Errorf("apply = %v\nwant %q", err, want)

@@ -499,9 +499,12 @@ func (s *settled) has(kindName, thing string) bool {
 }
 
 // sameThing reports whether name is thing, by its full name, or a tap's
-// thing by its own.
+// thing by its own, where one of them is named by its own alone.
 func sameThing(name, thing string) bool {
-	return name == thing || name[strings.LastIndex(name, "/")+1:] == thing[strings.LastIndex(thing, "/")+1:]
+	if strings.Contains(name, "/") == strings.Contains(thing, "/") {
+		return name == thing
+	}
+	return name[strings.LastIndex(name, "/")+1:] == thing[strings.LastIndex(thing, "/")+1:]
 }
 
 // stepOptions are kit step add's options.

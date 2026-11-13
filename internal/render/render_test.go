@@ -682,6 +682,26 @@ func TestPrettyShowsWhatACommandPrints(t *testing.T) {
 	}
 }
 
+// On a timeline, a step waiting on you says what you're to do under its
+// row while it runs, as the plain face does.
+func TestPrettyTimelineShowsWhatYoureToDo(t *testing.T) {
+	var out syncBuffer
+	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true)
+	face.Emit(event.RunStarted{Command: "secret sync", Machine: "laptop", Steps: []event.Step{{Name: "secret", Title: "secret"}}})
+	face.Emit(event.StepStarted{Step: "secret", Doing: "syncing"})
+	face.Emit(event.Doing{Step: "secret", Says: "waiting for 1Password", Todo: "1Password asks whether kit may read your secrets: approve it"})
+	time.Sleep(300 * time.Millisecond)
+	want := "\n  ▲ secret  waiting for 1Password\n  │ → 1Password asks whether kit may read your secrets: approve it"
+	if got := screen(out.String()); got != want {
+		t.Errorf("while 1Password asks, the screen is\n%s\nwant\n%s", got, want)
+	}
+	face.Emit(event.StepFinished{Step: "secret", Result: check.Result{State: check.OK, Summary: "2 synced"}})
+	face.Emit(event.RunFinished{Counts: map[check.State]int{check.OK: 1}})
+	if err := face.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // While applying, its live part is under the wordmark: the rows' lights,
 // the bar, and what's happening and what's wrong, not what finished well
 // or hasn't started; at the end, its record in their place, the wordmark
@@ -709,7 +729,7 @@ func TestPrettyApplyingNow(t *testing.T) {
 	face.Emit(event.Output{Step: "brew", Command: "brew install --formula jq", Line: "==> Pouring jq"})
 	time.Sleep(300 * time.Millisecond)
 	got := turned(screen(out.String()))
-	if want := "  ◐ HOMEBREW FORMULAE  ○ HOMEBREW CASKS  ○ YOUR STEPS  ● BACKUPS 1\n\n  ▮▮▮▮  1 of 4 · 1 running · "; !strings.Contains(got, want) {
+	if want := "  ◐ HOMEBREW FORMULAE  ○ HOMEBREW CASKS  ○ YOUR STEPS  ● BACKUPS 1\n\n  ▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮  1 of 4 · 1 running · "; !strings.Contains(got, want) {
 		t.Errorf("while applying, the screen is\n%s\nwant it to hold\n%s", got, want)
 	}
 	if want := "s\n\n  ◐ Formulae  applying · brew install --formula jq\n  │ ==> Pouring jq"; !strings.HasSuffix(got, want) {
@@ -839,7 +859,7 @@ func TestPrettyLightsSayAtOnce(t *testing.T) {
 	face.Emit(event.StepStarted{Step: "brew", Doing: "applying"})
 	face.Emit(event.StepFinished{Step: "cask", Result: check.Result{State: check.Failed, Reason: "couldn't install: it broke"}})
 	got := turned(screen(out.String()))
-	if want := "  ◐ HOMEBREW FORMULAE   ✗ HOMEBREW CASKS   ○ YOUR STEPS  ○ BACKUPS\n\n  ▮▮▮▮  1 of 4 · 1 failed · 1 running · "; !strings.Contains(got, want) {
+	if want := "  ◐ HOMEBREW FORMULAE   ✗ HOMEBREW CASKS   ○ YOUR STEPS  ○ BACKUPS\n\n  ▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮  1 of 4 · 1 failed · 1 running · "; !strings.Contains(got, want) {
 		t.Errorf("with Homebrew casks failed and formulae running, the screen is\n%s\nwant it to hold\n%s", got, want)
 	}
 	for _, s := range []string{"arq", "brew", "fonts"} {
@@ -988,7 +1008,7 @@ func TestPrettyBootstrapInTheTerminal(t *testing.T) {
 	face.Emit(event.StepStarted{Step: "cask", Doing: "applying"})
 	time.Sleep(300 * time.Millisecond)
 	got := turned(screen(out.String()))
-	for _, want := range []string{"│  bootstrap\n", "  ● THIS MAC 2   ▲ SECRETS   ◐ HOMEBREW CASKS  ○ YOUR STEPS\n\n  ▮▮▮▮▮▮  2 of 6 · 1 running · 1 needs you",
+	for _, want := range []string{"│  bootstrap\n", "  ● THIS MAC 2   ▲ SECRETS   ◐ HOMEBREW CASKS  ○ YOUR STEPS\n\n  ▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮  2 of 6 · 1 running · 1 needs you",
 		"s\n\n  ◐ Casks  applying\n  ▲ 1Password  not signed in\n  │ → sign in with your phone's 1Password, then turn on\n  │   Settings › Developer › Integrate with 1Password CLI"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("waiting on you, the screen is\n%s\nwant it to hold\n%s", got, want)

@@ -378,7 +378,8 @@ func (d configDrifter) undo(ctx context.Context, it check.Item) check.Result {
 }
 
 // applyDrifter is drift the step's apply settles, with nothing to declare
-// or remove: the shell's PATH, Oh My Zsh.
+// or remove: the shell's PATH, and the features that turn on parts of
+// macOS.
 type applyDrifter struct {
 	step engine.Step
 	// words are applying, as a terminal offers it.

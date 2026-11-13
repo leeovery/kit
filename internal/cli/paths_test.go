@@ -1,6 +1,8 @@
 package cli_test
 
 import (
+	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -85,5 +87,20 @@ func TestSharedTakesTheNameOutOfTheMacs(t *testing.T) {
 	}
 	if out, _, code := w.run(t, "path", "add", "~/go/bin"); code == 0 || !strings.Contains(out, "~/go/bin is in the shared declarations already (shared/declarations), for every Mac") {
 		t.Errorf("kit path add of a shared path printed\n%s exit %d", out, code)
+	}
+}
+
+// kit path add's --json has the shell's PATH written as a step: one that
+// failed is attention, as kit's exit says.
+func TestAddPathJSONSaysTheShellsPathFailed(t *testing.T) {
+	w := laptopWorld(t)
+	path := filepath.Join(w.home, ".local/state/kit/path")
+	if err := errors.Join(os.Remove(path), os.Mkdir(path, 0o700)); err != nil {
+		t.Fatal(err)
+	}
+	w.expectSync(t, []string{"laptop/declarations"}, "kit path add ~/tools/bin (laptop)")
+	out, _, code := w.run(t, "path", "add", "~/tools/bin", "--json")
+	if code != 1 || !strings.Contains(out, `"attention": true`) || !strings.Contains(out, `"id": "path",`) {
+		t.Errorf("kit path add --json, the PATH not written, printed\n%s exit %d; want the path step failed, attention", out, code)
 	}
 }
