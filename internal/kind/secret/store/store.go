@@ -103,10 +103,6 @@ type About struct {
 	// Program is the program it's driven with, which kit waits for on its
 	// PATH.
 	Program string
-	// Env are the variables of kit's environment its program needs passed
-	// on to what kit runs, by name: one ending * stands for every variable
-	// starting so.
-	Env []string
 	// Ref, Item and Field are how its references read, as kit's words show
 	// them: a value's in full, an item's, and where a value goes in an item
 	// (Store), its form and an example.

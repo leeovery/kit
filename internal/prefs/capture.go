@@ -99,7 +99,8 @@ func normalised(m map[string]any) ([]byte, error) {
 }
 
 // settingsFiles are the files [prefs files] names: each file, and every file
-// under each folder (.DS_Store left out); an entry with *, ? or [ is a glob.
+// under each folder (those the store's ignore file leaves out left out:
+// ignored); an entry with *, ? or [ is a glob.
 func (p *Prefs) settingsFiles() []string {
 	var out []string
 	for _, entry := range p.Lists.Files {
@@ -142,7 +143,7 @@ func walk(dir string) []string {
 		switch {
 		case isDir:
 			dirs = append(dirs, path)
-		case e.Name() != ".DS_Store":
+		case !ignored(e.Name()):
 			files = append(files, path)
 		}
 	}
@@ -170,18 +171,24 @@ func (p *Prefs) livePath(files, stored string) string {
 	return filepath.Join(p.Home, rel)
 }
 
-// storedFiles are the files in the store's files folder, sorted, those
-// whose names start with a dot left out (prefsync's rule).
+// storedFiles are the files in the store's files folder, sorted, those its
+// ignore file leaves out (gitignore) left out.
 func storedFiles(files string) []string {
 	var out []string
 	_ = filepath.WalkDir(files, func(path string, d fs.DirEntry, err error) error {
-		if err == nil && !d.IsDir() && !strings.HasPrefix(d.Name(), ".") {
+		if err == nil && !d.IsDir() && !ignored(d.Name()) {
 			out = append(out, path)
 		}
 		return nil
 	})
 	slices.Sort(out)
 	return out
+}
+
+// ignored reports whether a file called name is one the store's ignore file
+// leaves out (gitignore).
+func ignored(name string) bool {
+	return name == ".DS_Store" || strings.HasPrefix(name, ".") && strings.HasSuffix(name, ".tmp")
 }
 
 // pruneEmpty removes the folders left empty under root, deepest first, but

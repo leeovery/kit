@@ -47,7 +47,7 @@ func (c *Config) AddMac(name, from, description string) error {
 		err = os.WriteFile(filepath.Join(c.Dir, DeclFile(name)), nil, 0o644)
 	}
 	if err == nil {
-		err = os.WriteFile(filepath.Join(c.Dir, File), []byte(edited), 0o644)
+		err = writeAtomic(filepath.Join(c.Dir, File), []byte(edited))
 	}
 	if err != nil {
 		return errors.Join(fmt.Errorf("add %s: %w", name, err), os.RemoveAll(dir))
@@ -112,7 +112,7 @@ func (c *Config) SetHostKey(name, key string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(path, []byte(edited), 0o644); err != nil {
+	if err := writeAtomic(path, []byte(edited)); err != nil {
 		return fmt.Errorf("record %s's host key: %w", name, err)
 	}
 	return nil

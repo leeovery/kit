@@ -62,7 +62,7 @@ without their app. A full restore switches capture on. What it can't
 restore is held, left alone by capture (kit prefs pending): kept till its app
 is installed, as kit restores it once it is; waiting for its app to quit; for
 you to open an app once, as no settings folder came of kit opening it; or,
-failed otherwise, for --pending. Never quits an app
+failed otherwise, in a full restore, for --pending. Never quits an app
 but a helper with no window, inside another app, which it quits, opens
 hidden for its settings folder if need be, and starts again if it was
 running.

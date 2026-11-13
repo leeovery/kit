@@ -188,7 +188,7 @@ func (a *app) configRepository(ctx context.Context, cfg *config.Config, dir, mac
 	if err != nil {
 		return ""
 	}
-	repo := gitrepo.Repo{Dir: dir, Run: a.Runner(path, childEnv(a.Getenv, a.Environ(), home, path)), Home: home}
+	repo := gitrepo.Repo{Dir: dir, Run: a.Runner(path, childEnv(a.Getenv, home, path)), Home: home}
 	url, err := repo.URL(ctx, "origin")
 	if err != nil || url == "" {
 		return ""

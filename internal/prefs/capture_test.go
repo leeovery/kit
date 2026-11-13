@@ -187,11 +187,13 @@ func TestCaptureSavesWhatChanged(t *testing.T) {
 	w.write(t, filepath.Join(store, "domains", "com.example.empty.plist"), "settings since emptied")
 	w.write(t, filepath.Join(store, "domains", "com.example.broken.plist"), "unreadable this time")
 	w.write(t, filepath.Join(store, "files", ".config", "dropped.json"), "no longer listed")
-	w.write(t, filepath.Join(store, "files", ".config", ".hidden"), "left alone")
+	w.write(t, filepath.Join(store, "files", ".config", ".hidden"), "no longer listed, a dot-file")
+	w.write(t, filepath.Join(store, "files", ".config", "folder", ".gone.txt.tmp"), "capture's, half written")
 	w.write(t, filepath.Join(w.home, ".config", "tool", "settings.json"), `{"a": 1}`)
 	w.write(t, filepath.Join(w.home, ".config", "folder", "one.txt"), "1")
 	w.write(t, filepath.Join(w.home, ".config", "folder", "deeper", "two.txt"), "2")
 	w.write(t, filepath.Join(w.home, ".config", "folder", ".DS_Store"), "Finder's")
+	w.write(t, filepath.Join(w.home, ".config", "folder", ".editor.tmp"), "an app's, half written")
 	w.write(t, filepath.Join(w.home, "Library", "Tool", "App2026.2", "options", "ui.xml"), "<ui/>")
 	w.write(t, filepath.Join(w.home, "Library", "Tool", "App2026.1", "options", "ui.xml"), "<old/>")
 	w.write(t, filepath.Join(w.home, "Library", "Tool", "Cache", "options", "ui.xml"), "not a version")
@@ -202,7 +204,7 @@ func TestCaptureSavesWhatChanged(t *testing.T) {
 	w.fake.On("defaults", "export", "com.example.broken", "-").Exits(1).PrintsToStderr("couldn't read it")
 	w.exports(t, "com.example.same", map[string]any{"Size": int64(3)})
 	w.write(t, filepath.Join(store, "domains", "com.example.same.plist"), stored(t, map[string]any{"Size": int64(3)}))
-	message := `Capture 2026-10-06 03:00: 6 new, 3 removed
+	message := `Capture 2026-10-06 03:00: 6 new, 4 removed
 
 new: com.example.app
 new: ~/.config/tool/settings.json
@@ -212,19 +214,20 @@ new: ~/Library/Tool/App2026.1/options/ui.xml
 new: ~/Library/Tool/App2026.2/options/ui.xml
 removed: domains/com.example.empty.plist
 removed: domains/com.example.gone.plist
+removed: files/.config/.hidden
 removed: files/.config/dropped.json
 claimed: the folder, for this Mac's hardware`
 	// The store's files from before were committed then.
 	w.pushes(t, message,
-		" D laptop/domains/com.example.empty.plist\x00 D laptop/domains/com.example.gone.plist\x00 D laptop/files/.config/dropped.json\x00"+
+		" D laptop/domains/com.example.empty.plist\x00 D laptop/domains/com.example.gone.plist\x00 D laptop/files/.config/.hidden\x00 D laptop/files/.config/dropped.json\x00"+
 			"?? laptop/.gitignore\x00?? laptop/domains/com.example.app.plist\x00?? laptop/files/.config/folder/deeper/two.txt\x00?? laptop/files/.config/folder/one.txt\x00"+
 			"?? laptop/files/.config/tool/settings.json\x00?? laptop/files/Library/Tool/App2026.1/options/ui.xml\x00?? laptop/files/Library/Tool/App2026.2/options/ui.xml\x00?? laptop/owner\x00",
 		[]string{
-			"laptop/domains/com.example.empty.plist", "laptop/domains/com.example.gone.plist", "laptop/files/.config/dropped.json",
+			"laptop/domains/com.example.empty.plist", "laptop/domains/com.example.gone.plist", "laptop/files/.config/.hidden", "laptop/files/.config/dropped.json",
 			"laptop/.gitignore", "laptop/domains/com.example.app.plist", "laptop/files/.config/folder/deeper/two.txt", "laptop/files/.config/folder/one.txt",
 			"laptop/files/.config/tool/settings.json", "laptop/files/Library/Tool/App2026.1/options/ui.xml", "laptop/files/Library/Tool/App2026.2/options/ui.xml", "laptop/owner",
 		},
-		"laptop/.gitignore\x00laptop/domains/com.example.app.plist\x00laptop/domains/com.example.empty.plist\x00laptop/domains/com.example.gone.plist\x00laptop/files/.config/dropped.json\x00"+
+		"laptop/.gitignore\x00laptop/domains/com.example.app.plist\x00laptop/domains/com.example.empty.plist\x00laptop/domains/com.example.gone.plist\x00laptop/files/.config/.hidden\x00laptop/files/.config/dropped.json\x00"+
 			"laptop/files/.config/folder/deeper/two.txt\x00laptop/files/.config/folder/one.txt\x00laptop/files/.config/tool/settings.json\x00"+
 			"laptop/files/Library/Tool/App2026.1/options/ui.xml\x00laptop/files/Library/Tool/App2026.2/options/ui.xml\x00laptop/owner\x00")
 
@@ -235,7 +238,7 @@ claimed: the folder, for this Mac's hardware`
 	if !report.Committed {
 		t.Error("the capture wasn't committed")
 	}
-	if got, want := report.Summary(), "2 domains, 1 changed (1 new); 5 files, 5 changed (5 new); 3 removed; 3 pending restore; 1 kept for apps not installed; 1 errors"; got != want {
+	if got, want := report.Summary(), "2 domains, 1 changed (1 new); 5 files, 5 changed (5 new); 4 removed; 3 pending restore; 1 kept for apps not installed; 1 errors"; got != want {
 		t.Errorf("Summary() = %q, want %q", got, want)
 	}
 	if got := w.read(t, filepath.Join(store, "domains", "com.example.app.plist")); got != stored(t, map[string]any{"Theme": "dark"}) {
@@ -250,7 +253,7 @@ claimed: the folder, for this Mac's hardware`
 		"files/.config/tool/settings.json":            `{"a": 1}`,
 		"files/.config/folder/deeper/two.txt":         "2",
 		"files/Library/Tool/App2026.2/options/ui.xml": "<ui/>",
-		"files/.config/.hidden":                       "left alone",
+		"files/.config/folder/.gone.txt.tmp":          "capture's, half written",
 		"owner":                                       "hardware HW-THIS\nmodel Mac99,1\nname Laptop\nsince 2026-10-06 03:00\n",
 		".gitignore":                                  ".DS_Store\n.*.tmp\n",
 	} {
@@ -258,7 +261,7 @@ claimed: the folder, for this Mac's hardware`
 			t.Errorf("%s = %q, want %q", path, got, want)
 		}
 	}
-	for _, gone := range []string{"domains/com.example.gone.plist", "domains/com.example.empty.plist", "files/.config/dropped.json", "files/.config/folder/.DS_Store", "files/Library/Tool/Cache"} {
+	for _, gone := range []string{"domains/com.example.gone.plist", "domains/com.example.empty.plist", "files/.config/dropped.json", "files/.config/.hidden", "files/.config/folder/.DS_Store", "files/.config/folder/.editor.tmp", "files/Library/Tool/Cache"} {
 		if _, err := os.Stat(filepath.Join(store, gone)); !os.IsNotExist(err) {
 			t.Errorf("%s is there, want it gone", gone)
 		}

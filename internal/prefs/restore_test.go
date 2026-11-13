@@ -61,6 +61,7 @@ func TestRestoreFindsEachAppAndWaitsForTheRest(t *testing.T) {
 	w.write(t, filepath.Join(store, "files", ".config", "tool", "settings.json"), "new settings")
 	w.write(t, filepath.Join(store, "files", ".config", "tool", "same.json"), "same")
 	w.write(t, filepath.Join(store, "files", ".config", "tool", "local.json"), "this Mac's")
+	w.write(t, filepath.Join(store, "files", ".config", "tool", ".hidden"), "a dot-file's settings")
 	w.write(t, filepath.Join(w.home, ".config", "tool", "settings.json"), "old settings")
 	w.write(t, filepath.Join(w.home, ".config", "tool", "same.json"), "same")
 	w.write(t, filepath.Join(w.home, ".config", "tool", "local.json"), "this Mac's")
@@ -92,7 +93,7 @@ func TestRestoreFindsEachAppAndWaitsForTheRest(t *testing.T) {
 	if report.Waiting["com.example.running"] != "Running is running" || report.Kept["com.example.missing"] != "kept till its app is installed" || len(report.Waiting) != 1 || len(report.Failed) > 0 {
 		t.Errorf("waiting %v, kept %v, failed %v; want the running app's waiting, the one not installed kept", report.Waiting, report.Kept, report.Failed)
 	}
-	if report.Files != 1 || w.read(t, filepath.Join(w.home, ".config", "tool", "settings.json")) != "new settings" {
+	if report.Files != 2 || w.read(t, filepath.Join(w.home, ".config", "tool", "settings.json")) != "new settings" || w.read(t, filepath.Join(w.home, ".config", "tool", ".hidden")) != "a dot-file's settings" {
 		t.Errorf("files %d; settings.json = %q", report.Files, w.read(t, filepath.Join(w.home, ".config", "tool", "settings.json")))
 	}
 	if got := w.read(t, filepath.Join(report.Saved, "files", ".config", "tool", "settings.json")); got != "old settings" {
@@ -105,7 +106,7 @@ func TestRestoreFindsEachAppAndWaitsForTheRest(t *testing.T) {
 	if rec.On == "" || rec.Restored == nil || rec.Restored.Commit != "abc123" || rec.Pending == nil || !slices.Equal(rec.Pending.Domains, []string{"com.example.missing", "com.example.running"}) {
 		t.Errorf("record = %+v, pending %+v", rec, rec.Pending)
 	}
-	if got, want := report.Summary(), "restored 6 domains and 1 file from laptop; 1 waiting for their apps; 1 kept for apps not installed; previous settings saved in "+report.Saved; got != want {
+	if got, want := report.Summary(), "restored 6 domains and 2 files from laptop; 1 waiting for their apps; 1 kept for apps not installed; previous settings saved in "+report.Saved; got != want {
 		t.Errorf("Summary() = %q, want %q", got, want)
 	}
 }
@@ -154,6 +155,67 @@ func TestRestoreNamedDomains(t *testing.T) {
 	}
 	if _, err := w.p.Restore(t.Context(), prefs.RestoreOptions{Domains: []string{"com.example.absent"}}); err == nil || !strings.Contains(err.Error(), "not in the store: com.example.absent") {
 		t.Errorf("Restore(absent) = %v", err)
+	}
+}
+
+// Domains named that wait for their apps, running, or to be opened once,
+// are held, as a full restore holds them, so the next capture leaves their
+// stored copies be, even gone from the Mac; one that failed otherwise isn't.
+func TestANamedRestoreHoldsWhatWaits(t *testing.T) {
+	w := newWorld(t, prefs.Lists{})
+	writeRecord(t, w.state, `{"on": "started fresh"}`)
+	store := filepath.Join(w.clone, "laptop")
+	theme := stored(t, map[string]any{"Theme": "dark"})
+	for _, d := range []string{"com.example.running", "com.example.boxed", "com.example.stubborn"} {
+		w.write(t, filepath.Join(store, "domains", d+".plist"), theme)
+	}
+	w.app(t, w.apps, "Running", "com.example.running")
+	w.fake.On("osascript", "-e", `application id "com.example.running" is running`).Prints("true\n")
+	boxed := w.app(t, w.apps, "Boxed", "com.example.boxed")
+	w.closed("com.example.boxed")
+	w.fake.On("codesign", "-d", "--entitlements", "-", "--xml", boxed).Prints(sandboxedApp)
+	w.imports(t, "com.example.stubborn", "laptop", map[string]any{"Theme": "light"}, map[string]any{"Theme": "light"})
+	w.fake.On("git", "-C", w.clone, "rev-parse", "HEAD").Prints("abc123\n")
+	report, err := w.p.Restore(t.Context(), prefs.RestoreOptions{Domains: []string{"com.example.running", "com.example.boxed", "com.example.stubborn"}})
+	if err != nil || report.Waiting["com.example.running"] == "" || report.ToOpen["com.example.boxed"] == "" || report.Failed["com.example.stubborn"] == "" {
+		t.Fatalf("Restore() = %+v, %v; want one waiting, one to open, one failed", report, err)
+	}
+	rec, _ := w.p.Load()
+	if rec.Pending == nil || rec.Pending.From != "laptop" || !slices.Equal(rec.Pending.Domains, []string{"com.example.boxed", "com.example.running"}) || rec.Pending.Open["com.example.boxed"].ID != "com.example.boxed" {
+		t.Fatalf("pending = %+v; want the running app's and the one to open held, the failed one not", rec.Pending)
+	}
+
+	w.fake.On("defaults", "domains").Prints("com.example.other, com.example.stubborn\n")
+	w.exports(t, "com.example.other", map[string]any{"Theme": "dark"})
+	w.pushes(t, "Capture 2026-10-06 03:00: 1 changed, 1 new\n\nnew: com.example.other\nchanged: com.example.stubborn\nclaimed: the folder, for this Mac's hardware",
+		"?? laptop/.gitignore\x00?? laptop/domains/com.example.other.plist\x00 M laptop/domains/com.example.stubborn.plist\x00?? laptop/owner\x00",
+		[]string{"laptop/.gitignore", "laptop/domains/com.example.other.plist", "laptop/domains/com.example.stubborn.plist", "laptop/owner"},
+		"laptop/.gitignore\x00laptop/domains/com.example.other.plist\x00laptop/domains/com.example.stubborn.plist\x00laptop/owner\x00")
+	if _, err := w.p.Capture(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range []string{"com.example.running", "com.example.boxed"} {
+		if got := w.read(t, filepath.Join(store, "domains", d+".plist")); got != theme {
+			t.Errorf("after a capture, %s's stored copy = %q; want it kept, held, though gone from the Mac", d, got)
+		}
+	}
+}
+
+// A domain whose live settings can't be read, to save them first, fails
+// before they're deleted: nothing's lost should the import then fail.
+func TestRestoreNeverDeletesWhatItCouldntSave(t *testing.T) {
+	w := newWorld(t, prefs.Lists{})
+	w.write(t, filepath.Join(w.clone, "laptop", "domains", "com.example.app.plist"), stored(t, map[string]any{"A": true}))
+	w.fake.On("defaults", "export", "com.example.app", "-").Exits(1)
+	w.fake.On("git", "-C", w.clone, "rev-parse", "HEAD").Prints("abc123\n")
+	report, err := w.p.Restore(t.Context(), prefs.RestoreOptions{Domains: []string{"com.example.app"}})
+	if err != nil || report.Failed["com.example.app"] != "its live settings couldn't be read, to save them first" {
+		t.Errorf("Restore() = %+v, %v; want it failed, saying why", report, err)
+	}
+	for _, c := range w.fake.Calls() {
+		if strings.HasPrefix(c, "defaults delete") || strings.HasPrefix(c, "defaults import") {
+			t.Errorf("ran %s: want nothing deleted or imported", c)
+		}
 	}
 }
 
@@ -544,7 +606,7 @@ func TestRestorePendingDryRunAndScratch(t *testing.T) {
 		t.Errorf("pending = %+v, want com.example.later left", rec.Pending)
 	}
 
-	w.fake.On("defaults", "export", "scratch.test", "-").Exits(1)
+	w.exports(t, "scratch.test", map[string]any{})
 	w.fake.On("defaults", "delete", "scratch.test")
 	w.fake.On("defaults", "import", "scratch.test", filepath.Join(store, "domains", "com.example.later.plist")).Does(func() {
 		w.exports(t, "scratch.test", map[string]any{"A": true})

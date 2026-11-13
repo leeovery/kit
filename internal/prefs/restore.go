@@ -256,7 +256,11 @@ func (p *Prefs) restoreDomain(ctx context.Context, stored, target, saved string)
 	if err != nil || len(wanted) == 0 {
 		return errors.New("its saved copy is empty")
 	}
-	if current, err := p.export(ctx, target); err == nil && len(current) > 0 {
+	current, err := p.export(ctx, target)
+	if err != nil {
+		return errors.New("its live settings couldn't be read, to save them first")
+	}
+	if len(current) > 0 {
 		backup, err := plist.Encode(current)
 		if err == nil {
 			err = writeIfChanged(filepath.Join(saved, target+".plist"), backup)
@@ -283,7 +287,10 @@ func (p *Prefs) restoreDomain(ctx context.Context, stored, target, saved string)
 // switches capture on, what it couldn't restore held aside, so capture
 // leaves it be: kept till its app is installed; waiting for its app to
 // quit; its app for the person to open once; or, failed otherwise, for kit
-// prefs restore --pending. Never quits an app but a windowless helper,
+// prefs restore --pending. Domains named are held as they wait, kept, or
+// their apps to open, as a full restore holds them, what failed otherwise
+// failing alone, unless held already; but from another Mac than the one
+// what's held is from. Never quits an app but a windowless helper,
 // which it opens and quits itself, starting it again if it was running. From another Mac's folder, or onto other
 // hardware, the settings bound to one Mac are left out.
 func (p *Prefs) Restore(ctx context.Context, opts RestoreOptions) (RestoreReport, error) {
@@ -417,21 +424,22 @@ func (p *Prefs) Restore(ctx context.Context, opts RestoreOptions) (RestoreReport
 	return report, p.update(func(r *Record) {
 		switch {
 		case full:
-			r.Pending = report.held(heldIn(nil), true, true).pending(report.From)
+			r.Pending = report.held(heldIn(nil), true, true, true).pending(report.From)
 			r.Restored = &Restored{From: report.From, Commit: commit, At: p.Now()}
 			r.On, r.OnAt = "restored from "+report.From+" "+p.Now().Format("2006-01-02 15:04"), p.Now()
-		case r.Pending != nil && r.Pending.From == report.From:
-			r.Pending = report.held(heldIn(r.Pending), false, files != nil).pending(report.From)
+		case r.Pending == nil || r.Pending.From == report.From:
+			r.Pending = report.held(heldIn(r.Pending), !opts.Pending, false, files != nil).pending(report.From)
 		}
 	})
 }
 
 // held is what h holds once this restore's done: what it restored taken
-// off; what it couldn't, of what h held, or, every, of all it tried, put on
-// as it found it, but an app to open that's running, open still, as it
-// stays to be quit; and, when it tried them (files), the settings files that
-// failed in place of those held.
-func (r RestoreReport) held(h held, every, files bool) held {
+// off; what it couldn't, of what h held, put on as it found it, as is, of
+// all it tried, what waits, is kept, or has its app to open, when waits
+// says, and what failed otherwise, when failed says; but an app to open
+// that's running, open still, as it stays to be quit; and, when it tried
+// them (files), the settings files that failed in place of those held.
+func (r RestoreReport) held(h held, waits, failed, files bool) held {
 	for _, d := range r.Restored {
 		h.drop(d)
 	}
@@ -440,17 +448,17 @@ func (r RestoreReport) held(h held, every, files bool) held {
 		switch {
 		case toOpen && running(why):
 			h.toOpen(d, app, why)
-		case every || h.domains[d]:
+		case waits || h.domains[d]:
 			h.hold(d, why)
 		}
 	}
 	for d, why := range r.ToOpen {
-		if every || h.domains[d] {
+		if waits || h.domains[d] {
 			h.toOpen(d, r.Apps[d], why)
 		}
 	}
 	for d, why := range r.Failed {
-		if every || h.domains[d] {
+		if failed || h.domains[d] {
 			h.fail(d, why)
 		}
 	}

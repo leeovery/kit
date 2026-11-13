@@ -289,6 +289,10 @@ func TestAppsSettingsTakeOver(t *testing.T) {
 	}
 }
 
+// noSettings is what defaults exports of a domain with none, as one not on
+// the Mac.
+const noSettings = `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict/></plist>`
+
 // r names, in the log, each app whose settings failed otherwise, with why,
 // and says how many apps are to be opened once and how many are held for
 // kit prefs restore --pending, opening none; saving switches on all the
@@ -330,12 +334,12 @@ func TestAppsSettingsAppsToOpen(t *testing.T) {
 	fake.On("git", "-C", clone, "log", "-1", "--format=%cI", "--", "laptop").Prints("2026-10-04T03:00:00Z\n")
 	fake.On("codesign", "-d", "--entitlements", "-", "--xml", apps["com.example.boxed"]).Prints(`<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>com.apple.security.app-sandbox</key><true/></dict></plist>`)
 	for _, id := range []string{"com.example.boxed", "com.example.plain"} {
-		fake.On("defaults", "export", id, "-").Exits(1).Then().Prints(theme)
+		fake.On("defaults", "export", id, "-").Prints(noSettings).Then().Prints(theme)
 		fake.On("defaults", "import", id, filepath.Join(clone, "laptop", "domains", id+".plist"))
 	}
 	fake.On("codesign", "-d", "--entitlements", "-", "--xml", apps["com.example.plain"])
 	fake.On("codesign", "-d", "--entitlements", "-", "--xml", apps["com.example.stubborn"])
-	fake.On("defaults", "export", "com.example.stubborn", "-").Exits(1)
+	fake.On("defaults", "export", "com.example.stubborn", "-").Prints(noSettings)
 	fake.On("defaults", "import", "com.example.stubborn", filepath.Join(clone, "laptop", "domains", "com.example.stubborn.plist")).Exits(1)
 	p := prefs.New(fake, home, state, clone, "git@github.com:someone/prefs.git", "laptop", prefs.Lists{}, now)
 	p.Probes, p.AppDirs, p.Sleep = nil, []string{appDir}, func(time.Duration) {}
@@ -514,7 +518,7 @@ func TestAppsSettingsKeptForAppsNotInstalled(t *testing.T) {
 	fake.On("git", "-C", clone, "rev-parse", "HEAD").Prints("abc123\n")
 	fake.On("osascript", "-e", `application id "com.example.app" is running`).Prints("false\n")
 	fake.On("codesign", "-d", "--entitlements", "-", "--xml", app)
-	fake.On("defaults", "export", "com.example.app", "-").Exits(1).Then().Prints(theme)
+	fake.On("defaults", "export", "com.example.app", "-").Prints(noSettings).Then().Prints(theme)
 	fake.On("defaults", "delete", "com.example.app")
 	fake.On("defaults", "import", "com.example.app", filepath.Join(clone, "laptop", "domains", "com.example.app.plist"))
 	if err := step.Apply(ctx, step.Check(t.Context())); err != nil {
