@@ -61,6 +61,7 @@ func TestRestoreFindsEachAppAndWaitsForTheRest(t *testing.T) {
 	w.write(t, filepath.Join(store, "files", ".config", "tool", "settings.json"), "new settings")
 	w.write(t, filepath.Join(store, "files", ".config", "tool", "same.json"), "same")
 	w.write(t, filepath.Join(store, "files", ".config", "tool", "local.json"), "this Mac's")
+	w.write(t, filepath.Join(store, "files", ".config", "tool", ".hidden"), "a dot-file's settings")
 	w.write(t, filepath.Join(w.home, ".config", "tool", "settings.json"), "old settings")
 	w.write(t, filepath.Join(w.home, ".config", "tool", "same.json"), "same")
 	w.write(t, filepath.Join(w.home, ".config", "tool", "local.json"), "this Mac's")
@@ -92,7 +93,7 @@ func TestRestoreFindsEachAppAndWaitsForTheRest(t *testing.T) {
 	if report.Waiting["com.example.running"] != "Running is running" || report.Kept["com.example.missing"] != "kept till its app is installed" || len(report.Waiting) != 1 || len(report.Failed) > 0 {
 		t.Errorf("waiting %v, kept %v, failed %v; want the running app's waiting, the one not installed kept", report.Waiting, report.Kept, report.Failed)
 	}
-	if report.Files != 1 || w.read(t, filepath.Join(w.home, ".config", "tool", "settings.json")) != "new settings" {
+	if report.Files != 2 || w.read(t, filepath.Join(w.home, ".config", "tool", "settings.json")) != "new settings" || w.read(t, filepath.Join(w.home, ".config", "tool", ".hidden")) != "a dot-file's settings" {
 		t.Errorf("files %d; settings.json = %q", report.Files, w.read(t, filepath.Join(w.home, ".config", "tool", "settings.json")))
 	}
 	if got := w.read(t, filepath.Join(report.Saved, "files", ".config", "tool", "settings.json")); got != "old settings" {
@@ -105,7 +106,7 @@ func TestRestoreFindsEachAppAndWaitsForTheRest(t *testing.T) {
 	if rec.On == "" || rec.Restored == nil || rec.Restored.Commit != "abc123" || rec.Pending == nil || !slices.Equal(rec.Pending.Domains, []string{"com.example.missing", "com.example.running"}) {
 		t.Errorf("record = %+v, pending %+v", rec, rec.Pending)
 	}
-	if got, want := report.Summary(), "restored 6 domains and 1 file from laptop; 1 waiting for their apps; 1 kept for apps not installed; previous settings saved in "+report.Saved; got != want {
+	if got, want := report.Summary(), "restored 6 domains and 2 files from laptop; 1 waiting for their apps; 1 kept for apps not installed; previous settings saved in "+report.Saved; got != want {
 		t.Errorf("Summary() = %q, want %q", got, want)
 	}
 }
@@ -154,6 +155,24 @@ func TestRestoreNamedDomains(t *testing.T) {
 	}
 	if _, err := w.p.Restore(t.Context(), prefs.RestoreOptions{Domains: []string{"com.example.absent"}}); err == nil || !strings.Contains(err.Error(), "not in the store: com.example.absent") {
 		t.Errorf("Restore(absent) = %v", err)
+	}
+}
+
+// A domain whose live settings can't be read, to save them first, fails
+// before they're deleted: nothing's lost should the import then fail.
+func TestRestoreNeverDeletesWhatItCouldntSave(t *testing.T) {
+	w := newWorld(t, prefs.Lists{})
+	w.write(t, filepath.Join(w.clone, "laptop", "domains", "com.example.app.plist"), stored(t, map[string]any{"A": true}))
+	w.fake.On("defaults", "export", "com.example.app", "-").Exits(1)
+	w.fake.On("git", "-C", w.clone, "rev-parse", "HEAD").Prints("abc123\n")
+	report, err := w.p.Restore(t.Context(), prefs.RestoreOptions{Domains: []string{"com.example.app"}})
+	if err != nil || report.Failed["com.example.app"] != "its live settings couldn't be read, to save them first" {
+		t.Errorf("Restore() = %+v, %v; want it failed, saying why", report, err)
+	}
+	for _, c := range w.fake.Calls() {
+		if strings.HasPrefix(c, "defaults delete") || strings.HasPrefix(c, "defaults import") {
+			t.Errorf("ran %s: want nothing deleted or imported", c)
+		}
 	}
 }
 
@@ -544,7 +563,7 @@ func TestRestorePendingDryRunAndScratch(t *testing.T) {
 		t.Errorf("pending = %+v, want com.example.later left", rec.Pending)
 	}
 
-	w.fake.On("defaults", "export", "scratch.test", "-").Exits(1)
+	w.exports(t, "scratch.test", map[string]any{})
 	w.fake.On("defaults", "delete", "scratch.test")
 	w.fake.On("defaults", "import", "scratch.test", filepath.Join(store, "domains", "com.example.later.plist")).Does(func() {
 		w.exports(t, "scratch.test", map[string]any{"A": true})

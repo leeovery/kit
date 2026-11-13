@@ -256,7 +256,11 @@ func (p *Prefs) restoreDomain(ctx context.Context, stored, target, saved string)
 	if err != nil || len(wanted) == 0 {
 		return errors.New("its saved copy is empty")
 	}
-	if current, err := p.export(ctx, target); err == nil && len(current) > 0 {
+	current, err := p.export(ctx, target)
+	if err != nil {
+		return errors.New("its live settings couldn't be read, to save them first")
+	}
+	if len(current) > 0 {
 		backup, err := plist.Encode(current)
 		if err == nil {
 			err = writeIfChanged(filepath.Join(saved, target+".plist"), backup)

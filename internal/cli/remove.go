@@ -16,6 +16,7 @@ import (
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/kinds"
 	"github.com/leeovery/kit/internal/look"
+	"github.com/leeovery/kit/internal/prefs"
 	"github.com/leeovery/kit/internal/steps"
 )
 
@@ -133,7 +134,7 @@ func (a *app) leftovers(ctx context.Context, r *run, k kind.Kind, names []string
 			how[name] = func(ctx context.Context) (string, error) {
 				forgot := p.Forget(ctx, lo.saved)
 				if err := l.RemoveAll(ctx, []string{name}); err != nil {
-					return "", err
+					return "", putBack(ctx, p, lo.saved, err)
 				}
 				forgot = cmp.Or(forgot, p.Forget(ctx, p.Unowned(lo.zapped)))
 				if forgot != nil {
@@ -151,6 +152,20 @@ func (a *app) leftovers(ctx context.Context, r *run, k kind.Kind, names []string
 		}
 	}
 	return how, nil
+}
+
+// putBack restores the saved settings' domains deleted before an uninstall
+// that failed, the app still there, so the next capture doesn't take them
+// out of the store: failed, the uninstall's error says how to.
+func putBack(ctx context.Context, p *prefs.Prefs, domains []string, failed error) error {
+	if len(domains) == 0 {
+		return failed
+	}
+	report, err := p.Restore(ctx, prefs.RestoreOptions{Domains: domains})
+	if err != nil || len(report.Restored) < len(domains) {
+		return fmt.Errorf("%w; its settings were deleted first: kit prefs restore %s puts them back", failed, strings.Join(domains, " "))
+	}
+	return failed
 }
 
 // zapping settles whether what lo is left is removed: as zap says, else, at
