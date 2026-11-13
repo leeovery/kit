@@ -373,6 +373,25 @@ func TestPrettyKeepsToItsWidth(t *testing.T) {
 	}
 }
 
+// Left to itself, as kit leaves it, the spinner turns by the clock: a
+// frame on, then halted as the face closes.
+func TestPrettySpinsByItself(t *testing.T) {
+	var out syncBuffer
+	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true)
+	face.Emit(event.RunStarted{Command: "status", Machine: "laptop", Steps: []event.Step{{Name: "brew", Title: "Formulae", Area: "Drift", Row: "Homebrew formulae"}}})
+	face.Emit(event.StepStarted{Step: "brew"})
+	deadline := time.Now().Add(5 * time.Second)
+	for !strings.Contains(out.String(), "◓") {
+		if time.Now().After(deadline) {
+			t.Fatalf("the spinner never turned: %q", out.String())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err := face.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestPrettySpinsWhileStepsRun(t *testing.T) {
 	var out bytes.Buffer
 	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.NoTTY}, 80, true).Turned()

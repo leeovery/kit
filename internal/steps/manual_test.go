@@ -1401,7 +1401,7 @@ func twoCards(t *testing.T, c *card, gate <-chan struct{}, vaultDone, storeDone 
 	store.After, store.Before = []string{"cask"}, []string{"apps"}
 	vault := steps.OwnManual(c.fake, c.state, steps.ManualStep{Name: "vault", Do: "Sign in to the vault", Done: vaultDone}, c.raise)
 	vault.Before = []string{"secret"}
-	p, err := engine.New(store, vault, gated("cask", gate), fine("apps"), fine("secret"), fine("git", "secret"))
+	p, err := engine.New(vault, store, gated("cask", gate), fine("apps"), fine("secret"), fine("git", "secret"))
 	if err != nil {
 		t.Fatal(err)
 	}

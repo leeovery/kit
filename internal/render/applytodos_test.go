@@ -146,26 +146,21 @@ func TestTheToDosHaveTheScreen(t *testing.T) {
 		name  string
 		up    int
 		least bool
-	}{{"choice", 0, true}, {"watched", 4, false}, {"space", 3, true}, {"carrying-on", len(toDoList), false}} {
+	}{{"choice", 0, true}, {"watched", 4, true}, {"space", 3, true}, {"carrying-on", len(toDoList), false}} {
 		for _, size := range [][2]int{{160, 64}, {100, 30}} {
-			name := fmt.Sprintf("apply-todo-%s-%dx%d.golden", tt.name, size[0], size[1])
+			name, pinned := fmt.Sprintf("apply-todo-%s-%dx%d", tt.name, size[0], size[1]), size[0] == 160 || tt.least
+			if pinned {
+				name += ".golden"
+			}
 			t.Run(name, func(t *testing.T) {
 				events := toDosUpTo(tt.up)
 				face, out, _ := applyAt(size[0], size[1], since(events), events)
 				defer func() { _ = face.Close() }()
 				got := screen(out.String())
-				if size[0] == 160 || tt.least {
+				if pinned {
 					golden(t, name, got+"\n")
 				}
-				ls := lines(got)
-				if len(ls) != size[1] {
-					t.Errorf("the screen is %d lines, want %d", len(ls), size[1])
-				}
-				for i, l := range ls {
-					if w := ansi.StringWidth(l); w > size[0] {
-						t.Errorf("line %d is %d wide, wider than the window, %d", i, w, size[0])
-					}
-				}
+				fits(t, got, size)
 			})
 		}
 	}

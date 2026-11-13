@@ -422,12 +422,15 @@ func TestApplyingHasAScreenOfItsOwn(t *testing.T) {
 		{"cards", cardsWaiting, nil, true},
 		{"row", sixMinutesIn, clickRow("Homebrew casks"), false},
 		{"scrolled", func() []event.Event { return sixMinutesInWith(40, 12) }, pressing(keyUp, keyUp, keyUp, keyUp, keyUp), true},
-		{"failed", casksFailed, nil, false},
+		{"failed", casksFailed, nil, true},
 		{"row-printed", printing, clickRow("Homebrew formulae"), false},
 		{"raw", printing, func(screen string, w int) []ask.Key { return append(clickRow("Homebrew formulae")(screen, w), keyR) }, false},
 	} {
 		for _, size := range [][2]int{{160, 64}, {100, 30}} {
-			name := fmt.Sprintf("apply-screen-%s-%dx%d.golden", tt.name, size[0], size[1])
+			name, pinned := fmt.Sprintf("apply-screen-%s-%dx%d", tt.name, size[0], size[1]), size[0] == 160 || tt.least
+			if pinned {
+				name += ".golden"
+			}
 			t.Run(name, func(t *testing.T) {
 				face, out, kb := applyAt(size[0], size[1], took, tt.events())
 				defer func() { _ = face.Close() }()
@@ -435,18 +438,11 @@ func TestApplyingHasAScreenOfItsOwn(t *testing.T) {
 					kb.press(t, tt.keys(screen(out.String()), size[0])...)
 				}
 				got := screen(out.String())
-				if size[0] == 160 || tt.least {
+				if pinned {
 					golden(t, name, got+"\n")
 				}
+				fits(t, got, size)
 				ls := lines(got)
-				if len(ls) != size[1] {
-					t.Errorf("the screen is %d lines, want %d", len(ls), size[1])
-				}
-				for i, l := range ls {
-					if w := ansi.StringWidth(l); w > size[0] {
-						t.Errorf("line %d is %d wide, wider than the window, %d", i, w, size[0])
-					}
-				}
 				if rule := []rune(ls[headLines-1]); len(rule) != size[0] || rule[split(size[0])] != '┬' || strings.Trim(string(rule), "─┬") != "" {
 					t.Errorf("under the header is %q; want a rule across, ┬ at column %d", ls[headLines-1], split(size[0]))
 				}
@@ -689,7 +685,7 @@ func toolsWaiting() []event.Event {
 // A row chosen whose steps haven't started, or only wait, has under its
 // log a line for each still to run: the time's column blank, the waiting
 // mark, its title, what it waits for, as the row says. Drawn at the size
-// round 10 drew.
+// round 10 drew, and fitting the least the screen takes.
 func TestApplyingRowStillToRun(t *testing.T) {
 	for _, tt := range []struct {
 		name, row string
@@ -698,13 +694,37 @@ func TestApplyingRowStillToRun(t *testing.T) {
 		{"secrets", "Secrets", secretsWaiting},
 		{"tools", "Developer tools", toolsWaiting},
 	} {
-		name := fmt.Sprintf("apply-screen-waiting-%s-160x64.golden", tt.name)
-		t.Run(name, func(t *testing.T) {
-			face, out, kb := applyAt(160, 64, 6*time.Minute, tt.events())
-			defer func() { _ = face.Close() }()
-			kb.press(t, clickRow(tt.row)(screen(out.String()), 160)...)
-			golden(t, name, screen(out.String())+"\n")
-		})
+		for _, size := range [][2]int{{160, 64}, {100, 30}} {
+			name := fmt.Sprintf("apply-screen-waiting-%s-%dx%d", tt.name, size[0], size[1])
+			if size[0] == 160 {
+				name += ".golden"
+			}
+			t.Run(name, func(t *testing.T) {
+				face, out, kb := applyAt(size[0], size[1], 6*time.Minute, tt.events())
+				defer func() { _ = face.Close() }()
+				kb.press(t, clickRow(tt.row)(screen(out.String()), size[0])...)
+				got := screen(out.String())
+				if size[0] == 160 {
+					golden(t, name, got+"\n")
+				}
+				fits(t, got, size)
+			})
+		}
+	}
+}
+
+// fits fails t when screen isn't the window's size: as many lines as it's
+// high, none wider than it is wide.
+func fits(t *testing.T, screen string, size [2]int) {
+	t.Helper()
+	ls := lines(screen)
+	if len(ls) != size[1] {
+		t.Errorf("the screen is %d lines, want %d", len(ls), size[1])
+	}
+	for i, l := range ls {
+		if w := ansi.StringWidth(l); w > size[0] {
+			t.Errorf("line %d is %d wide, wider than the window, %d", i, w, size[0])
+		}
 	}
 }
 
