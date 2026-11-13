@@ -568,10 +568,10 @@ func TestLivePatternsMatchAsBefore(t *testing.T) {
 	}
 }
 
-// A domain's pattern matches as Python's fnmatch, as prefsync matched: a
-// wildcard matches a slash too, [!...] a class's complement. A file's glob
-// matches each part as rsync does, as a data restore reads it: a wildcard
-// matches a hidden name too, and [^...] is a class's complement.
+// A domain's pattern matches as rsync's does, [!...] a class's complement.
+// A file's glob matches each part as rsync does, as a data restore reads
+// it: a wildcard matches a hidden name too, and [^...] is a class's
+// complement.
 func TestPatterns(t *testing.T) {
 	w := newWorld(t, prefs.Lists{Files: []string{"~/Tool/*20[0-9][0-9].[0-9]/opts", "~/Other/[^x]*/conf"}, Deny: []string{"jetbrains.*.csat", "a.[!b].c"}})
 	writeRecord(t, w.state, `{"on": "started fresh"}`)

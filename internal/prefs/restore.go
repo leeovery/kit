@@ -16,6 +16,7 @@ import (
 	"github.com/leeovery/kit/internal/apps"
 	"github.com/leeovery/kit/internal/plist"
 	"github.com/leeovery/kit/internal/runner"
+	"github.com/leeovery/kit/internal/wildmatch"
 )
 
 // RestoreOptions are what to restore: everything from this Mac's folder
@@ -154,7 +155,7 @@ var groupPrefix = regexp.MustCompile(`^(group\.|[A-Z0-9]{10}\.)`)
 // container's or team's prefix is looked past.
 func (p *Prefs) owningApps(domain string, apps map[string]string) []string {
 	for _, pair := range p.Lists.Apps {
-		if fnmatch(domain, pair[0]) {
+		if wildmatch.Match(pair[0], domain) {
 			if _, ok := apps[pair[1]]; ok {
 				return []string{pair[1]}
 			}

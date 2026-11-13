@@ -330,63 +330,10 @@ func (p *Prefs) expand(path string) string {
 	return path
 }
 
-// matches reports whether value matches any of patterns, as Python's
-// fnmatch does: * and ? match any character, a slash too; [...] a class,
-// [!...] its complement.
+// matches reports whether value matches any of patterns, as rsync matches
+// one (wildmatch).
 func matches(value string, patterns []string) bool {
-	return slices.ContainsFunc(patterns, func(p string) bool { return fnmatch(value, p) })
-}
-
-func fnmatch(value, pattern string) bool {
-	return translate(pattern).MatchString(value)
-}
-
-// translate is a glob pattern as a regular expression matching the whole
-// value, as Python's fnmatch.translate makes it.
-func translate(pattern string) *regexp.Regexp {
-	var b strings.Builder
-	b.WriteString("^(?s:")
-	rs := []rune(pattern)
-	for i := 0; i < len(rs); i++ {
-		switch c := rs[i]; c {
-		case '*':
-			b.WriteString(".*")
-		case '?':
-			b.WriteString(".")
-		case '[':
-			j := i + 1
-			if j < len(rs) && rs[j] == '!' {
-				j++
-			}
-			if j < len(rs) && rs[j] == ']' {
-				j++
-			}
-			for j < len(rs) && rs[j] != ']' {
-				j++
-			}
-			if j >= len(rs) {
-				b.WriteString(`\[`)
-				continue
-			}
-			class := string(rs[i+1 : j])
-			class = strings.ReplaceAll(class, `\`, `\\`)
-			if strings.HasPrefix(class, "!") {
-				class = "^" + class[1:]
-			} else if strings.HasPrefix(class, "^") {
-				class = `\` + class
-			}
-			b.WriteString("[" + class + "]")
-			i = j
-		default:
-			b.WriteString(regexp.QuoteMeta(string(c)))
-		}
-	}
-	b.WriteString(")$")
-	re, err := regexp.Compile(b.String())
-	if err != nil {
-		return regexp.MustCompile(`^` + regexp.QuoteMeta(pattern) + `$`)
-	}
-	return re
+	return slices.ContainsFunc(patterns, func(p string) bool { return wildmatch.Match(p, value) })
 }
 
 // glob is the paths a pattern matches, sorted, each part of the pattern
