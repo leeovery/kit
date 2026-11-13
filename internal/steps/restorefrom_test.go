@@ -384,31 +384,40 @@ func TestRestoreRebuiltAsksForItsOwnBackups(t *testing.T) {
 }
 
 // On the own-backups card, the person can restore nothing, as on a Mac in
-// use brought onto kit by its boot, or one starting afresh: each path is
-// recorded not restored, nothing copied and nothing set aside, what set-up
-// wrote kept, and the restore settles, closing set-up's window. kit apply
+// use brought onto kit by its boot, or one starting afresh, the card saying
+// which listed paths' files a backup would set aside: each path is
+// recorded not restored, nothing copied and nothing set aside, what's there
+// kept, and the restore settles, closing set-up's window. kit apply
 // --restore-from brings back a path still absent later, from the backup it
 // names, leaving one holding files as it is.
 func TestRestoreRebuiltRestoresNothing(t *testing.T) {
-	c := newRestoring(t, "~/Code", "~/Notes")
+	c := newRestoring(t, "~/Code", "~/Notes", "~/Music")
 	c.rebuilt(t)
 	d, disk := c.disk("Backups of studio", snapshotX)
 	k := c.atTerminal(t, restore.Disks{Found: []restore.Disk{d}})
 	write(t, c.home, "~/Code/new", duringIt)
+	write(t, c.home, "~/Music/old", beforeIt)
 	applied := c.applying(t)
-	up(t, k, 1)
+	if card := up(t, k, 1)[0]; card.Why != ownWhy+" Choosing a backup sets aside what ~/Code and ~/Music hold now, moving it into kit's state, and copies the backup's in instead." {
+		t.Errorf("the card says %q; want it naming what a backup would set aside", card.Why)
+	}
 	k.answer(t, "restore", "n")
 	if err := ended(t, applied); err != nil {
 		t.Fatalf("apply = %v", err)
 	}
 	rec := c.record()
-	for _, p := range []string{"~/Code", "~/Notes"} {
+	for _, p := range []string{"~/Code", "~/Notes", "~/Music"} {
 		if got := rec.Paths[p]; got.State != restore.NotThere || got.From != (restore.Origin{}) || !got.Started.IsZero() || len(got.SetAside) > 0 {
 			t.Errorf("%s's record = %+v; want not there, from no source, never started, nothing set aside", p, got)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(c.home, "Code", "new")); err != nil || rec.Settled.IsZero() || disk.opens != 0 || len(c.fake.Calls()) > 0 {
-		t.Errorf("what set-up wrote: %v; settled %v; the disk opened %d times; ran %q; want it kept, settled, nothing opened or run", err, rec.Settled, disk.opens, c.fake.Calls())
+	for _, p := range []string{"Code/new", "Music/old"} {
+		if _, err := os.Stat(filepath.Join(c.home, p)); err != nil {
+			t.Errorf("~/%s, there before: %v; want it kept", p, err)
+		}
+	}
+	if rec.Settled.IsZero() || disk.opens != 0 || len(c.fake.Calls()) > 0 {
+		t.Errorf("settled %v; the disk opened %d times; ran %q; want it settled, nothing opened or run", rec.Settled, disk.opens, c.fake.Calls())
 	}
 	if want := "Restored nothing, as asked: studio keeps what it has"; !slices.Contains(c.logged, want) {
 		t.Errorf("the log says %q, want %q", c.logged, want)

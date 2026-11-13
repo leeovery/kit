@@ -92,7 +92,7 @@ func (r Restoring) opener(ctx context.Context, s *sourced) (restore.Opener, erro
 	if s.want != ownBackups {
 		return r.Sources(s.want, s.at, r.Flag.Kind != ""), nil
 	}
-	f, err := r.ownBackup(ctx)
+	f, err := r.ownBackup(ctx, toSetAside(s.todo))
 	switch {
 	case err != nil:
 		return nil, err
@@ -150,11 +150,12 @@ func (r Restoring) instead(ctx context.Context, mac restore.Origin, why error) (
 // backups to restore from, it having started from no other Mac: one of the
 // Time Machine disks attached holding the person's backups, or Arq's
 // restore by hand; or to restore nothing, as for a Mac in use, or one
-// started afresh. While there's no disk to choose, or one's locked, it can
-// look for them again. Without a terminal there's no one to ask: the error
-// says so, and the restore's names kit apply's flag that answers it
-// (unopened).
-func (r Restoring) ownBackup(ctx context.Context) (fallback, error) {
+// started afresh, the card naming the listed paths whose files a backup
+// would set aside (aside). While there's no disk to choose, or one's
+// locked, it can look for them again. Without a terminal there's no one to
+// ask: the error says so, and the restore's names kit apply's flag that
+// answers it (unopened).
+func (r Restoring) ownBackup(ctx context.Context, aside []string) (fallback, error) {
 	if r.Raise == nil {
 		return fallback{}, fmt.Errorf("%s restores from its own backups, as it started from no other Mac, and which of them is asked at a terminal", r.Mac)
 	}
@@ -166,7 +167,7 @@ func (r Restoring) ownBackup(ctx context.Context) (fallback, error) {
 			more = append(more, choice{keyAgain, "looks for Time Machine disks again", fallback{}})
 		}
 		keys, does := choices(disks, more...)
-		c := &ownCard{says: r.ownBackupCard(disks, lookErr, keys)}
+		c := &ownCard{says: r.ownBackupCard(disks, lookErr, keys, aside)}
 		if err := r.ask(ctx, c); err != nil {
 			return fallback{}, err
 		}
@@ -232,13 +233,30 @@ func sourceCard(why error, disks restore.Disks, lookErr error, keys []check.Key)
 }
 
 // ownBackupCard is the card asking which of this Mac's own backups to
-// restore from, with keys, as sourceCard is for the old Mac.
-func (r Restoring) ownBackupCard(disks restore.Disks, lookErr error, keys []check.Key) event.NeedsYou {
-	says := append([]string{
+// restore from, with keys, as sourceCard is for the old Mac: saying what a
+// backup chosen would set aside, the files of aside, listed paths.
+func (r Restoring) ownBackupCard(disks restore.Disks, lookErr error, keys []check.Key, aside []string) event.NeedsYou {
+	says := []string{
 		"kit set this Mac up as " + r.Mac + ", with no other Mac to start from, as after a clean install, so its data can come from its own backups.",
 		"Is " + r.Mac + " in use already, or starting afresh? Then restore nothing.",
-	}, disksSay(disks, lookErr)...)
+	}
+	if len(aside) > 0 {
+		says = append(says, fmt.Sprintf("Choosing a backup sets aside what %s %s now, moving it into kit's state, and copies the backup's in instead.", strings.Join(aside, " and "), plural(len(aside), "holds", "hold")))
+	}
+	says = append(says, disksSay(disks, lookErr)...)
 	return event.NeedsYou{Item: itemSource, Title: "Restore " + r.Mac + "'s data from its backups?", Why: strings.Join(says, " "), Keys: keys}
+}
+
+// toSetAside are those of todo's paths holding files a copy would set
+// aside first.
+func toSetAside(todo []judged) []string {
+	var paths []string
+	for _, j := range todo {
+		if j.Verdict == restore.VerdictSetAside {
+			paths = append(paths, j.Path)
+		}
+	}
+	return paths
 }
 
 // disksSay says, of the Time Machine disks, why kit couldn't look for them
