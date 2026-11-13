@@ -892,8 +892,9 @@ or a file outside `objects` hard-linked, or, pushed to, writes its work tree
 `core.alternateRefsCommand`, a hook git runs for a push, configured or in its `hooks`). With no
 remote it's pushed to or fetched from, it isn't public.
 
-Every command takes `--json` (one document), `--plain` (plain lines, as without a terminal)
-and `--verbose` (commands' output kept whole in the run's log).
+Every command takes `--plain` (plain lines, as without a terminal) and `--verbose` (commands'
+output kept whole in the run's log), and every one but `kit agent`, whose text is what agents
+read, `--json` (one document).
 
 Exit statuses: 0 when all's well, 1 when something needs attention (a Mac with no name yet,
 drift), 2 when kit couldn't do its job (no config repository, a config error, an unknown

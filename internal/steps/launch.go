@@ -199,7 +199,7 @@ func HourlyLaunch(l Launching) engine.Step {
 			changed := !bytes.Equal(have, want)
 			if changed {
 				// The folder as macOS makes it.
-				if err := WriteWhole(file, want, 0o755); err != nil {
+				if err := writeWhole(file, want, 0o755); err != nil {
 					return err
 				}
 			}
@@ -241,9 +241,9 @@ func (l Launching) load(ctx context.Context, file string) error {
 	return nil
 }
 
-// WriteWhole writes data to path, whole or not at all, as a file renamed
+// writeWhole writes data to path, whole or not at all, as a file renamed
 // into its place, making its folder with dirMode.
-func WriteWhole(path string, data []byte, dirMode os.FileMode) error {
+func writeWhole(path string, data []byte, dirMode os.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(path), dirMode); err != nil {
 		return err
 	}

@@ -123,6 +123,20 @@ func TestAgentTopics(t *testing.T) {
 	}
 }
 
+// kit agent, its topics and kit agent order print the text agents read,
+// and refuse --json, as a usage error, rather than print text in its place.
+func TestAgentRefusesJSON(t *testing.T) {
+	for _, args := range [][]string{{"agent"}, {"agent", "prefs"}, {"agent", "order", "alone"}} {
+		w := laptopWorld(t)
+		w.writeSection(t, "laptop", "steps", `alone "stands alone"`+"\n")
+		out, errOut, code := w.run(t, append(args, "--json")...)
+		want := "kit: kit " + strings.Join(args[:min(len(args), 2)], " ") + " prints text; it takes no --json\n"
+		if code != 2 || out != "" || errOut != want {
+			t.Errorf("kit %s --json printed %q, %q, exit %d; want exit 2 and %q", strings.Join(args, " "), out, errOut, code, want)
+		}
+	}
+}
+
 // kit agent is the last of the commands about this Mac in kit's help.
 func TestAgentIsLastOfThisMacsCommands(t *testing.T) {
 	w := newWorld(t, nil)

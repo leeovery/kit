@@ -28,13 +28,16 @@ func newAgentCommand(a *app) *cobra.Command {
 set-up through kit: this config's facts, then how to change kit-config so
 that what works on this Mac works on a new one too, then the topics that go
 deeper and the commands that check a change. It's plain text, at a terminal
-or not.
+or not, and takes no --json.
 
 kit agent and a topic goes into that topic, found by the start of its name.
 kit agent order <name> says where a step, or a thing as in cask:firefox,
 falls in a new Mac's run.`,
 		Args: topicArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := a.textOnly(cmd); err != nil {
+				return err
+			}
 			return a.agentGuide(cmd.Context())
 		},
 	}
@@ -43,6 +46,15 @@ falls in a new Mac's run.`,
 	}
 	cmd.AddCommand(newOrderCommand(a))
 	return cmd
+}
+
+// textOnly refuses --json for cmd, kit agent or one of its own, which print
+// the text agents read alone.
+func (a *app) textOnly(cmd *cobra.Command) error {
+	if a.json {
+		return usageError{fmt.Errorf("%s prints text; it takes no --json", cmd.CommandPath())}
+	}
+	return nil
 }
 
 // orderTopic is kit agent order's name, among the topics.
@@ -75,7 +87,10 @@ func newTopicCommand(a *app, t guide.Topic) *cobra.Command {
 		Use:   t.Name,
 		Short: t.About,
 		Args:  cobra.NoArgs,
-		RunE: func(*cobra.Command, []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := a.textOnly(cmd); err != nil {
+				return err
+			}
 			_, err := io.WriteString(a.Stdout, t.Text())
 			return err
 		},

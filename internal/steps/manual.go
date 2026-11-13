@@ -199,8 +199,8 @@ func (b byHand) item() check.Item {
 	return it
 }
 
-// card is what its card says: its line's name, what to do, its group, why,
-// its steps, and whether kit tells by itself when it's done.
+// card is what its card says: its line's name, what to do, why, its steps,
+// and whether kit tells by itself when it's done.
 func (b byHand) card() event.NeedsYou {
 	return event.NeedsYou{Item: b.Name, Title: b.Do, Why: b.Why, Steps: b.Steps, Tells: b.watched()}
 }

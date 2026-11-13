@@ -33,6 +33,9 @@ after it, or in no order with it, when either may come first. A step done
 by hand that's raised with the rest at the end is placed as they are.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := a.textOnly(cmd); err != nil {
+				return err
+			}
 			// The steps of kit apply at a terminal, as a new Mac's is, with
 			// nothing a run at one starts started, nothing shown and no log.
 			a.newMacRun = true

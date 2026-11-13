@@ -501,8 +501,7 @@ type Options struct {
 	Command string
 	Machine string
 	Version string
-	// Only are the steps to run, with what they need: every step that runs
-	// on the Mac when empty.
+	// Only are the steps to run, with what they need: every step when empty.
 	Only []string
 	// Jobs is how many steps run side by side: DefaultJobs when 0.
 	Jobs int

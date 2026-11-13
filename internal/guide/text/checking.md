@@ -21,4 +21,5 @@
 - `kit reconcile`: settles what differs from the config, and commits or
   undoes edits made by hand in kit-config.
 
-Every command takes `--json`, for one JSON document to read.
+Every command but `kit agent` takes `--json`, for one JSON document to
+read.
