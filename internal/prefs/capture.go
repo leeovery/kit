@@ -12,8 +12,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/leeovery/kit/internal/look"
 	"github.com/leeovery/kit/internal/plist"
 	"github.com/leeovery/kit/internal/runner"
+	"github.com/leeovery/kit/internal/tilde"
 	"github.com/leeovery/kit/internal/wildmatch"
 )
 
@@ -270,7 +272,7 @@ func (r Report) Summary() string {
 		}
 		return s
 	}
-	s := fmt.Sprintf("%s, %s; %s, %s", plural(r.Domains, "domain"), counts(false), plural(r.Files, "file"), counts(true))
+	s := fmt.Sprintf("%d %s, %s; %d %s, %s", r.Domains, look.Plural(r.Domains, "domain", "domains"), counts(false), r.Files, look.Plural(r.Files, "file", "files"), counts(true))
 	if len(r.Removed) > 0 {
 		s += fmt.Sprintf("; %d removed", len(r.Removed))
 	}
@@ -473,7 +475,7 @@ func (p *Prefs) Capture(ctx context.Context) (Report, error) {
 	for _, source := range sources {
 		stored := p.storedPath(filesDir, source)
 		wanted[stored] = true
-		if heldFiles[p.tilde(source)] {
+		if heldFiles[tilde.Shown(p.Home, source)] {
 			continue
 		}
 		data, err := os.ReadFile(source)
@@ -487,7 +489,7 @@ func (p *Prefs) Capture(ctx context.Context) (Report, error) {
 		}
 		report.Files++
 		if what != "" {
-			report.changes = append(report.changes, change{what, p.tilde(source)})
+			report.changes = append(report.changes, change{what, tilde.Shown(p.Home, source)})
 		}
 	}
 
@@ -548,12 +550,4 @@ func (p *Prefs) Capture(ctx context.Context) (Report, error) {
 		}
 		r.PushError = report.PushError
 	})
-}
-
-// tilde is a path with the home folder shown as ~.
-func (p *Prefs) tilde(path string) string {
-	if rest, ok := strings.CutPrefix(path, p.Home+"/"); ok {
-		return "~/" + rest
-	}
-	return path
 }

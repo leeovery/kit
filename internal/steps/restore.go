@@ -17,8 +17,10 @@ import (
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/event"
+	"github.com/leeovery/kit/internal/look"
 	"github.com/leeovery/kit/internal/restore"
 	"github.com/leeovery/kit/internal/runner"
+	"github.com/leeovery/kit/internal/tilde"
 )
 
 // RestoreName names the data restore's step, as its section is named.
@@ -315,7 +317,7 @@ func toRestore(j restore.Judgement, rec restore.Record) check.Item {
 	case restore.VerdictResume:
 		switch {
 		case p.State == restore.Checking && p.Second != nil:
-			it.Detail = fmt.Sprintf("%d %s differed from %s, copied again; compared again next run", p.Second.Copied, plural(p.Second.Copied, "file", "files"), p.From.Says())
+			it.Detail = fmt.Sprintf("%d %s differed from %s, copied again; compared again next run", p.Second.Copied, look.Plural(p.Second.Copied, "file", "files"), p.From.Says())
 		case p.State == restore.Checking:
 			it.Detail = "copied from " + p.From.Says() + ", not yet compared with it"
 		default:
@@ -708,7 +710,7 @@ func (r Restoring) planOne(ctx context.Context, src *restore.Opened, j judged, s
 		return copying{}, err
 	}
 	c := copying{judged: j, copy: restore.Copy{
-		From: src.Source(j.Path), To: filepath.Join(r.Home, strings.TrimPrefix(j.Path, "~/")), File: there.Kind == restore.File,
+		From: src.Source(j.Path), To: tilde.Expand(r.Home, j.Path), File: there.Kind == restore.File,
 		Filter: filter, Partial: j.line.Partial(r.StateDir),
 	}}
 	event.Say(ctx, event.Doing{Says: "measuring " + j.Path})
@@ -811,7 +813,7 @@ func (r Restoring) restoreOne(ctx context.Context, src *restore.Opened, c copyin
 		return failed(fmt.Errorf("its second pass: %w", err))
 	}
 	if !src.Live && again.Count > 0 {
-		differs := fmt.Errorf("its second pass found %d %s differing from %s: %s", again.Count, plural(again.Count, "file", "files"), src.Origin.Says(), recopied(again))
+		differs := fmt.Errorf("its second pass found %d %s differing from %s: %s", again.Count, look.Plural(again.Count, "file", "files"), src.Origin.Says(), recopied(again))
 		return failed(errors.Join(differs, r.change(c.Path, func(rp *restore.Path) { rp.Second = &restore.Pass{Copied: again.Count} })))
 	}
 	var held int
@@ -822,7 +824,7 @@ func (r Restoring) restoreOne(ctx context.Context, src *restore.Opened, c copyin
 	if err != nil {
 		return failed(err)
 	}
-	line := fmt.Sprintf("Restored %s: %d %s, %s", c.Path, stats.TotalFiles, plural(stats.TotalFiles, "file", "files"), size(stats.TotalBytes))
+	line := fmt.Sprintf("Restored %s: %d %s, %s", c.Path, stats.TotalFiles, look.Plural(stats.TotalFiles, "file", "files"), size(stats.TotalBytes))
 	if again.Count > 0 {
 		line += fmt.Sprintf("; %d copied again, changed as they were copied", again.Count)
 	}
@@ -897,7 +899,7 @@ func writtenHere(c copying, n int) string {
 	if c.copy.File {
 		return c.Path + ", written here as it was restored"
 	}
-	return fmt.Sprintf("%d %s in %s, written here as %s restored", n, plural(n, "file", "files"), c.Path, plural(n, "it was", "they were"))
+	return fmt.Sprintf("%d %s in %s, written here as %s restored", n, look.Plural(n, "file", "files"), c.Path, look.Plural(n, "it was", "they were"))
 }
 
 // keptNewer says, of c's path, that its copy from src kept the files rsync
@@ -908,7 +910,7 @@ func keptNewer(ctx context.Context, src *restore.Opened, c copying, newer []stri
 	case c.copy.File:
 		event.Log(ctx, event.Logged{Line: fmt.Sprintf("Kept %s as it is: it's newer here than in %s", c.Path, src.Origin.Says())})
 	default:
-		event.Log(ctx, event.Logged{Line: fmt.Sprintf("Kept %d %s in %s as %s: newer here than in %s", n, plural(n, "file", "files"), c.Path, plural(n, "it is", "they are"), src.Origin.Says())})
+		event.Log(ctx, event.Logged{Line: fmt.Sprintf("Kept %d %s in %s as %s: newer here than in %s", n, look.Plural(n, "file", "files"), c.Path, look.Plural(n, "it is", "they are"), src.Origin.Says())})
 	}
 }
 
@@ -923,7 +925,7 @@ func copyFailed(src *restore.Opened, err error) bool {
 // and where, aside, if anything was.
 func (r Restoring) saidAside(ctx context.Context, what string, aside restore.Aside) {
 	if len(aside.Paths) > 0 {
-		event.Log(ctx, event.Logged{Line: fmt.Sprintf("Set aside %s, into %s", what, r.tilde(aside.Dir))})
+		event.Log(ctx, event.Logged{Line: fmt.Sprintf("Set aside %s, into %s", what, tilde.Shown(r.Home, aside.Dir))})
 	}
 }
 

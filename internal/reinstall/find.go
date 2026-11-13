@@ -15,6 +15,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+
+	"github.com/leeovery/kit/internal/tilde"
 )
 
 // tool is a package manager a restored project's dependencies reinstall
@@ -109,7 +111,7 @@ const searchDepth = 12
 // monorepo's package, is one of its own only when it holds a lockfile of
 // its own. A path that's a file holds none.
 func Find(home, path string) ([]Install, error) {
-	root := filepath.Join(home, strings.TrimPrefix(path, "~/"))
+	root := tilde.Expand(home, path)
 	if info, err := os.Stat(root); err != nil || !info.IsDir() {
 		return nil, nil
 	}

@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+
+	"github.com/leeovery/kit/internal/whole"
 )
 
 // noteGap is what separates an entry from the note after it.
@@ -823,34 +825,14 @@ func (c *Config) write(f *declFile, check func(back *declFile) error) error {
 	return writeAtomic(path, []byte(content))
 }
 
-// writeAtomic writes data to path whole or not at all: beside it, synced,
-// then renamed into place, keeping the mode of what was there.
+// writeAtomic writes data to path whole or not at all, synced, keeping the
+// mode of what was there.
 func writeAtomic(path string, data []byte) error {
 	mode := os.FileMode(0o644)
 	if info, err := os.Stat(path); err == nil {
 		mode = info.Mode().Perm()
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
-	if err != nil {
-		return fmt.Errorf("write %s: %w", filepath.Base(path), err)
-	}
-	defer func() { _ = os.Remove(tmp.Name()) }()
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("write %s: %w", filepath.Base(path), err)
-	}
-	if err := tmp.Chmod(mode); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("write %s: %w", filepath.Base(path), err)
-	}
-	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("write %s: %w", filepath.Base(path), err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("write %s: %w", filepath.Base(path), err)
-	}
-	if err := os.Rename(tmp.Name(), path); err != nil {
+	if err := whole.Synced(path, data, mode); err != nil {
 		return fmt.Errorf("write %s: %w", filepath.Base(path), err)
 	}
 	return nil

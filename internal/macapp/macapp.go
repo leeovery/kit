@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/leeovery/kit/internal/runner"
+	"github.com/leeovery/kit/internal/whole"
 )
 
 // BundleID is the app's bundle identifier.
@@ -237,19 +238,7 @@ func lockMarks(dir string) (unlock func(), err error) {
 // replace writes data to path whole, as a file renamed into its place, so
 // that it's never read half written.
 func replace(path string, data []byte) error {
-	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
-	if err != nil {
-		return fmt.Errorf("write %s: %w", path, err)
-	}
-	defer func() { _ = os.Remove(tmp.Name()) }()
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("write %s: %w", path, err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("write %s: %w", path, err)
-	}
-	if err := os.Rename(tmp.Name(), path); err != nil {
+	if err := whole.Write(path, data, 0o600); err != nil {
 		return fmt.Errorf("write %s: %w", path, err)
 	}
 	return nil

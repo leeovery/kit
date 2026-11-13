@@ -272,7 +272,7 @@ func (p place) says() []string {
 	if p.Name != "" {
 		says = append(says, p.Item)
 	}
-	return append(says, p.Scope, plural(p.Secrets, "secret"))
+	return append(says, p.Scope, fmt.Sprintf("%d %s", p.Secrets, look.Plural(p.Secrets, "secret", "secrets")))
 }
 
 // writeLines writes lines to out, each ended by a newline.

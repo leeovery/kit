@@ -21,6 +21,7 @@ import (
 	"github.com/leeovery/kit/internal/look"
 	"github.com/leeovery/kit/internal/restore"
 	"github.com/leeovery/kit/internal/restore/oldmac"
+	"github.com/leeovery/kit/internal/tilde"
 )
 
 // The data restore's cards, in its row: the one asking where to restore
@@ -243,7 +244,7 @@ func (r Restoring) ownBackupCard(disks restore.Disks, lookErr error, keys []chec
 		"Is " + r.Mac + " in use already, or starting afresh? Then restore nothing.",
 	}
 	if len(aside) > 0 {
-		says = append(says, fmt.Sprintf("Choosing a backup sets aside what %s %s now, moving it into kit's state, and copies the backup's in instead.", look.InWords(aside), plural(len(aside), "holds", "hold")))
+		says = append(says, fmt.Sprintf("Choosing a backup sets aside what %s %s now, moving it into kit's state, and copies the backup's in instead.", look.InWords(aside), look.Plural(len(aside), "holds", "hold")))
 	}
 	says = append(says, disksSay(disks, lookErr)...)
 	return event.NeedsYou{Item: itemSource, Title: "Restore " + r.Mac + "'s data from its backups?", Why: strings.Join(says, " "), Keys: keys}
@@ -435,7 +436,7 @@ func (r Restoring) arqCard(at time.Time, asks []string, holds map[string]string)
 	}
 	steps := []string{
 		"Open " + r.whoseBackup() + " backup in Arq, " + backup,
-		"Restore each of these into its holding folder, in " + r.tilde(restore.ArqFolder(r.StateDir)) + ":",
+		"Restore each of these into its holding folder, in " + tilde.Shown(r.Home, restore.ArqFolder(r.StateDir)) + ":",
 	}
 	for _, p := range asks {
 		steps = append(steps, p+" → …/arq/"+filepath.Base(holds[p]))
@@ -458,17 +459,9 @@ func (r Restoring) whoseBackup() string {
 // into says where l's path is restored into, as holds has it: its holding
 // folder, and what it holds instead, if anything.
 func (r Restoring) into(l lack, holds map[string]string) string {
-	into := l.path + " into " + r.tilde(holds[l.path])
+	into := l.path + " into " + tilde.Shown(r.Home, holds[l.path])
 	if len(l.instead) > 0 {
 		into += " (holding " + strings.Join(l.instead, ", ") + " instead)"
 	}
 	return into
-}
-
-// tilde is path, from ~ when it's in the home folder.
-func (r Restoring) tilde(path string) string {
-	if rest, ok := strings.CutPrefix(path, r.Home+"/"); ok {
-		return "~/" + rest
-	}
-	return path
 }

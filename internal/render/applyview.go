@@ -171,7 +171,7 @@ func (p *Pretty) progress() (bar, counts string) {
 		parts = append(parts, look.Cyan(fmt.Sprintf("%d running", working)))
 	}
 	if needs > 0 {
-		parts = append(parts, look.Orange(fmt.Sprintf("%d %s you", needs, plural(needs, "needs", "need"))))
+		parts = append(parts, look.Orange(fmt.Sprintf("%d %s you", needs, look.Plural(needs, "needs", "need"))))
 	}
 	if later > 0 {
 		parts = append(parts, look.White(fmt.Sprintf("%d to do", later)))
@@ -460,7 +460,7 @@ func (p *Pretty) tally(e event.RunFinished) string {
 		parts = append(parts, look.Red(fmt.Sprintf("%d failed", n)))
 	}
 	if n := len(p.unwell(look.NeedsYou)); n > 0 {
-		parts = append(parts, look.Orange(fmt.Sprintf("%d %s you", n, plural(n, "needs", "need"))))
+		parts = append(parts, look.Orange(fmt.Sprintf("%d %s you", n, look.Plural(n, "needs", "need"))))
 	}
 	parts = append(parts, look.White(fmt.Sprintf("%d fine", len(p.rowsDone()))), look.Muted(took(e.Duration)))
 	return look.Says(parts...)

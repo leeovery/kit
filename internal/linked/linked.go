@@ -20,6 +20,8 @@ import (
 	"github.com/leeovery/kit/internal/gitrepo"
 	"github.com/leeovery/kit/internal/runner"
 	"github.com/leeovery/kit/internal/state"
+	"github.com/leeovery/kit/internal/tilde"
+	"github.com/leeovery/kit/internal/whole"
 )
 
 // StepName names the step, and its items' kind, as in file:~/.zshrc.
@@ -216,9 +218,9 @@ func (f *Files) state(l Link) (check.Item, bool) {
 		case target == l.Src:
 			return f.privacy(l, it)
 		case same(l.Src, l.Dst):
-			it.State, it.Detail, it.Action = Changed, "linked to "+f.Tilde(target)+", the same file", ActionLink
+			it.State, it.Detail, it.Action = Changed, "linked to "+tilde.Shown(f.Home, target)+", the same file", ActionLink
 		default:
-			it.State, it.Detail = Diverged, "linked to "+f.Tilde(target)+", which differs"
+			it.State, it.Detail = Diverged, "linked to "+tilde.Shown(f.Home, target)+", which differs"
 		}
 	case info.Mode().IsRegular():
 		if same(l.Src, l.Dst) {
@@ -302,7 +304,7 @@ func (f *Files) dead(links []Link) ([]check.Item, error) {
 		if declared[dst] || !f.deadLink(dst) {
 			continue
 		}
-		name := f.Tilde(dst)
+		name := tilde.Shown(f.Home, dst)
 		items = append(items, check.Item{ID: StepName + ":" + name, Name: name, State: Dead, Detail: "its file in kit-config has gone", Action: ActionUnlink})
 	}
 	return items, nil
@@ -341,7 +343,7 @@ func (f *Files) Apply(ctx context.Context, found check.Result) error {
 				errs = append(errs, fmt.Errorf("%s: %w", it.Name, err))
 			}
 		case ActionUnlink:
-			dst := f.untilde(it.Name)
+			dst := tilde.Expand(f.Home, it.Name)
 			if !f.deadLink(dst) {
 				continue
 			}
@@ -439,7 +441,7 @@ func (f *Files) Adopt(ctx context.Context, name string) (Link, error) {
 	if err != nil {
 		return l, err
 	}
-	if err := writeFile(l.Src, data, info.Mode().Perm()); err != nil {
+	if err := whole.Write(l.Src, data, info.Mode().Perm()); err != nil {
 		return l, err
 	}
 	return l, f.link(l)
@@ -478,9 +480,9 @@ func (f *Files) Add(ctx context.Context, path, scope string) ([]Link, []string, 
 	switch {
 	case info.Mode()&fs.ModeSymlink != 0:
 		if target, _ := os.Readlink(path); strings.HasPrefix(resolve(path, target), f.Repo.Dir+"/") {
-			return nil, nil, fmt.Errorf("%s is linked already", f.Tilde(path))
+			return nil, nil, fmt.Errorf("%s is linked already", tilde.Shown(f.Home, path))
 		}
-		return nil, nil, fmt.Errorf("%s is a link: add the file it leads to", f.Tilde(path))
+		return nil, nil, fmt.Errorf("%s is a link: add the file it leads to", tilde.Shown(f.Home, path))
 	case info.IsDir():
 		if files, err = f.filesIn(path); err != nil {
 			return nil, nil, err
@@ -488,7 +490,7 @@ func (f *Files) Add(ctx context.Context, path, scope string) ([]Link, []string, 
 	case info.Mode().IsRegular():
 		files = []string{path}
 	default:
-		return nil, nil, fmt.Errorf("%s isn't a file", f.Tilde(path))
+		return nil, nil, fmt.Errorf("%s isn't a file", tilde.Shown(f.Home, path))
 	}
 	declared, err := f.Declared(ctx)
 	if err != nil {
@@ -523,7 +525,7 @@ func (f *Files) Add(ctx context.Context, path, scope string) ([]Link, []string, 
 		if err := os.MkdirAll(filepath.Dir(l.Src), 0o755); err != nil {
 			return nil, nil, err
 		}
-		if err := writeFile(l.Src, data, info.Mode().Perm()); err != nil {
+		if err := whole.Write(l.Src, data, info.Mode().Perm()); err != nil {
 			return nil, nil, err
 		}
 		if err := f.link(l); err != nil {
@@ -546,14 +548,14 @@ func (f *Files) filesIn(path string) ([]string, error) {
 		case p == f.Repo.Dir:
 			return filepath.SkipDir
 		case d.Name() == ".git":
-			return fmt.Errorf("%s is a repository of its own (.git), which kit-config can't keep", f.Tilde(filepath.Dir(p)))
+			return fmt.Errorf("%s is a repository of its own (.git), which kit-config can't keep", tilde.Shown(f.Home, filepath.Dir(p)))
 		case d.Type().IsRegular() && d.Name() != ".DS_Store":
 			files = append(files, p)
 		}
 		return nil
 	})
 	if err == nil && len(files) == 0 {
-		err = fmt.Errorf("%s has no files of its own to add", f.Tilde(path))
+		err = fmt.Errorf("%s has no files of its own to add", tilde.Shown(f.Home, path))
 	}
 	return files, err
 }
@@ -582,11 +584,11 @@ func (f *Files) keptByGit(ctx context.Context, path, scope string, folder bool, 
 		return nil, nil, fmt.Errorf("couldn't ask git whether it ignores them: %w", err)
 	}
 	if rule, ok := ignored[itself]; ok {
-		in := f.Tilde(rule.Source)
+		in := tilde.Shown(f.Home, rule.Source)
 		if !filepath.IsAbs(rule.Source) {
 			in = "kit-config's " + rule.Source
 		}
-		return nil, nil, fmt.Errorf("git ignores %s, by %s in %s, line %d: kit-config can't keep it", f.Tilde(path), rule.Pattern, in, rule.Line)
+		return nil, nil, fmt.Errorf("git ignores %s, by %s in %s, line %d: kit-config can't keep it", tilde.Shown(f.Home, path), rule.Pattern, in, rule.Line)
 	}
 	var kept []Link
 	var left []string
@@ -598,7 +600,7 @@ func (f *Files) keptByGit(ctx context.Context, path, scope string, folder bool, 
 		kept = append(kept, l)
 	}
 	if len(kept) == 0 {
-		return nil, nil, fmt.Errorf("git ignores every file in %s: kit-config can't keep them", f.Tilde(path))
+		return nil, nil, fmt.Errorf("git ignores every file in %s: kit-config can't keep them", tilde.Shown(f.Home, path))
 	}
 	return kept, left, nil
 }
@@ -622,7 +624,7 @@ func (f *Files) Remove(ctx context.Context, name string) (Link, error) {
 	if err != nil {
 		return l, err
 	}
-	if err := writeFile(l.Dst, data, info.Mode().Perm()); err != nil {
+	if err := whole.Write(l.Dst, data, info.Mode().Perm()); err != nil {
 		return l, err
 	}
 	if err := os.Remove(l.Src); err != nil {
@@ -639,24 +641,6 @@ func (f *Files) Remove(ctx context.Context, name string) (Link, error) {
 		return l, err
 	}
 	return l, f.remember(links)
-}
-
-// writeFile writes data to path whole or not at all, with mode: beside it,
-// then renamed into place, replacing a file or a link.
-func writeFile(path string, data []byte, mode os.FileMode) error {
-	tmp := path + ".kit-new"
-	if err := os.WriteFile(tmp, data, mode); err != nil {
-		return err
-	}
-	if err := os.Chmod(tmp, mode); err != nil {
-		_ = os.Remove(tmp)
-		return err
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
-		return err
-	}
-	return nil
 }
 
 // ToBin moves path into the Bin, under a name of its own there: where it
@@ -694,20 +678,4 @@ func resolve(link, target string) string {
 		return target
 	}
 	return filepath.Join(filepath.Dir(link), target)
-}
-
-// Tilde is path as it's shown, ~ for the home folder.
-func (f *Files) Tilde(path string) string {
-	if rest, ok := strings.CutPrefix(path, f.Home+"/"); ok {
-		return "~/" + rest
-	}
-	return path
-}
-
-// untilde is a path shown with ~ in full.
-func (f *Files) untilde(name string) string {
-	if rest, ok := strings.CutPrefix(name, "~/"); ok {
-		return filepath.Join(f.Home, rest)
-	}
-	return name
 }

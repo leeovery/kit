@@ -19,6 +19,7 @@ import (
 	"github.com/leeovery/kit/internal/look"
 	"github.com/leeovery/kit/internal/prefs"
 	"github.com/leeovery/kit/internal/steps"
+	"github.com/leeovery/kit/internal/tilde"
 )
 
 // removeOptions are removing's flags: --shared; and, for apps, --zap and
@@ -118,7 +119,7 @@ func (a *app) leftovers(ctx context.Context, r *run, k kind.Kind, names []string
 		}
 		lo := leftover{app: cmp.Or(left.App, name), done: descriptorOf(k).Removes().Done, zapped: left.Domains, saving: features.on(steps.FeaturePrefs)}
 		for _, f := range left.Files {
-			lo.files = append(lo.files, r.files.Tilde(f))
+			lo.files = append(lo.files, tilde.Shown(r.homeDir, f))
 		}
 		if left.Bundle != "" && lo.saving {
 			lo.saved = p.SavedFor(left.Bundle)

@@ -31,6 +31,8 @@ import (
 
 	"github.com/leeovery/kit/internal/runner"
 	"github.com/leeovery/kit/internal/state"
+	"github.com/leeovery/kit/internal/tilde"
+	"github.com/leeovery/kit/internal/whole"
 	"github.com/leeovery/kit/internal/wildmatch"
 )
 
@@ -118,7 +120,8 @@ type Prefs struct {
 	// Probes are what only Full Disk Access can read: some folders in the
 	// home, and the TCC database.
 	Probes []string
-	// AppDirs are where apps are installed.
+	// AppDirs are the folders apps are installed in, which New leaves to
+	// its caller.
 	AppDirs []string
 	// Sleep waits while another git holds the store's index, and while
 	// another kit clones the store.
@@ -135,8 +138,7 @@ func New(run runner.Runner, home, stateDir, clone, remote, mac string, lists Lis
 			filepath.Join(home, "Library/Safari"), filepath.Join(home, "Library/Mail"), filepath.Join(home, "Library/Messages"),
 			"/Library/Application Support/com.apple.TCC/TCC.db",
 		},
-		AppDirs: []string{"/Applications", filepath.Join(home, "Applications")},
-		Sleep:   time.Sleep,
+		Sleep: time.Sleep,
 	}
 }
 
@@ -317,72 +319,16 @@ func (p *Prefs) TakeOver(ctx context.Context) error {
 
 // expand is a path with a leading ~/ made the home folder's.
 func (p *Prefs) expand(path string) string {
-	if rest, ok := strings.CutPrefix(path, "~/"); ok {
-		return filepath.Join(p.Home, rest)
-	}
 	if path == "~" {
 		return p.Home
 	}
-	return path
+	return tilde.Expand(p.Home, path)
 }
 
-// matches reports whether value matches any of patterns, as Python's
-// fnmatch does: * and ? match any character, a slash too; [...] a class,
-// [!...] its complement.
+// matches reports whether value matches any of patterns, as rsync matches
+// one (wildmatch): * stops at a /, and ** crosses folders.
 func matches(value string, patterns []string) bool {
-	return slices.ContainsFunc(patterns, func(p string) bool { return fnmatch(value, p) })
-}
-
-func fnmatch(value, pattern string) bool {
-	return translate(pattern).MatchString(value)
-}
-
-// translate is a glob pattern as a regular expression matching the whole
-// value, as Python's fnmatch.translate makes it.
-func translate(pattern string) *regexp.Regexp {
-	var b strings.Builder
-	b.WriteString("^(?s:")
-	rs := []rune(pattern)
-	for i := 0; i < len(rs); i++ {
-		switch c := rs[i]; c {
-		case '*':
-			b.WriteString(".*")
-		case '?':
-			b.WriteString(".")
-		case '[':
-			j := i + 1
-			if j < len(rs) && rs[j] == '!' {
-				j++
-			}
-			if j < len(rs) && rs[j] == ']' {
-				j++
-			}
-			for j < len(rs) && rs[j] != ']' {
-				j++
-			}
-			if j >= len(rs) {
-				b.WriteString(`\[`)
-				continue
-			}
-			class := string(rs[i+1 : j])
-			class = strings.ReplaceAll(class, `\`, `\\`)
-			if strings.HasPrefix(class, "!") {
-				class = "^" + class[1:]
-			} else if strings.HasPrefix(class, "^") {
-				class = `\` + class
-			}
-			b.WriteString("[" + class + "]")
-			i = j
-		default:
-			b.WriteString(regexp.QuoteMeta(string(c)))
-		}
-	}
-	b.WriteString(")$")
-	re, err := regexp.Compile(b.String())
-	if err != nil {
-		return regexp.MustCompile(`^` + regexp.QuoteMeta(pattern) + `$`)
-	}
-	return re
+	return slices.ContainsFunc(patterns, func(p string) bool { return wildmatch.Match(p, value) })
 }
 
 // glob is the paths a pattern matches, sorted, each part of the pattern
@@ -446,21 +392,7 @@ func write(path string, data []byte) (string, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return "", err
 	}
-	tmp := filepath.Join(filepath.Dir(path), "."+filepath.Base(path)+".tmp")
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return "", err
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
-		return "", err
-	}
-	return what, nil
-}
-
-// plural is n and a word, made plural unless n is 1.
-func plural(n int, word string) string {
-	if n == 1 {
-		return fmt.Sprintf("%d %s", n, word)
-	}
-	return fmt.Sprintf("%d %ss", n, word)
+	// Its name beside path ends .tmp, which the store's ignore file leaves
+	// out.
+	return what, whole.Write(path, data, 0o600)
 }

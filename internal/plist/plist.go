@@ -6,9 +6,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/xml"
-	"errors"
 	"fmt"
-	"io"
 	"maps"
 	"math"
 	"slices"
@@ -19,127 +17,6 @@ import (
 
 // Data is a property list's data value: its bytes.
 type Data []byte
-
-// Read reads an XML property list into maps, slices, strings, integers
-// (int64), reals (float64), booleans, times and Data.
-func Read(text string) (any, error) {
-	d := xml.NewDecoder(strings.NewReader(text))
-	d.Strict = false
-	for {
-		tok, err := d.Token()
-		if err != nil {
-			return nil, fmt.Errorf("read the property list: %w", err)
-		}
-		if start, ok := tok.(xml.StartElement); ok && start.Name.Local == "plist" {
-			return plistValue(d)
-		}
-	}
-}
-
-// plistValue reads the next value in the property list, skipping what isn't
-// one; at the end of an enclosing element it returns io.EOF.
-func plistValue(d *xml.Decoder) (any, error) {
-	for {
-		tok, err := d.Token()
-		if err != nil {
-			return nil, err
-		}
-		switch t := tok.(type) {
-		case xml.EndElement:
-			return nil, io.EOF
-		case xml.StartElement:
-			return plistElement(d, t)
-		}
-	}
-}
-
-func plistElement(d *xml.Decoder, start xml.StartElement) (any, error) {
-	// A string's text, or a key's, is kept exactly, spaces and all, as
-	// defaults write keeps it; a number's, a date's or data's, trimmed.
-	exact := func() (string, error) {
-		var s string
-		err := d.DecodeElement(&s, &start)
-		return s, err
-	}
-	text := func() (string, error) {
-		s, err := exact()
-		return strings.TrimSpace(s), err
-	}
-	switch start.Name.Local {
-	case "dict":
-		m := make(map[string]any)
-		for {
-			key, err := plistValue(d)
-			if errors.Is(err, io.EOF) {
-				return m, nil
-			}
-			if err != nil {
-				return nil, err
-			}
-			k, ok := key.(plistKey)
-			if !ok {
-				return nil, errors.New("read the property list: a dict's value without a key")
-			}
-			v, err := plistValue(d)
-			if err != nil {
-				return nil, err
-			}
-			m[string(k)] = v
-		}
-	case "array":
-		var a []any
-		for {
-			v, err := plistValue(d)
-			if errors.Is(err, io.EOF) {
-				return a, nil
-			}
-			if err != nil {
-				return nil, err
-			}
-			a = append(a, v)
-		}
-	case "key":
-		s, err := exact()
-		return plistKey(s), err
-	case "string":
-		return exact()
-	case "integer":
-		s, err := text()
-		if err != nil {
-			return nil, err
-		}
-		return strconv.ParseInt(s, 10, 64)
-	case "real":
-		s, err := text()
-		if err != nil {
-			return nil, err
-		}
-		return strconv.ParseFloat(s, 64)
-	case "data":
-		s, err := text()
-		if err != nil {
-			return nil, err
-		}
-		b, err := base64.StdEncoding.DecodeString(strings.Join(strings.Fields(s), ""))
-		return Data(b), err
-	case "date":
-		s, err := text()
-		if err != nil {
-			return nil, err
-		}
-		return time.Parse(time.RFC3339, s)
-	case "true", "false":
-		if err := d.Skip(); err != nil {
-			return nil, err
-		}
-		return start.Name.Local == "true", nil
-	default:
-		return nil, d.Skip()
-	}
-}
-
-// plistKey is a dict's key, told apart from a string value.
-type plistKey string
 
 // Equal reports whether a and b are the same value: a boolean and the
 // integer 1 or 0 count the same, as macOS reads either, and an integer and
@@ -211,7 +88,7 @@ func writeXML(b *strings.Builder, v any) {
 		} else {
 			b.WriteString("<false/>")
 		}
-	case int64:
+	case int64, uint64:
 		fmt.Fprintf(b, "<integer>%d</integer>", x)
 	case float64:
 		fmt.Fprintf(b, "<real>%s</real>", strconv.FormatFloat(x, 'g', -1, 64))
@@ -240,5 +117,5 @@ func writeXML(b *strings.Builder, v any) {
 // ReadValue reads one value given as XML, as defaults write takes it: an
 // element such as <dict>…</dict>, alone.
 func ReadValue(text string) (any, error) {
-	return Read("<plist>" + text + "</plist>")
+	return Decode([]byte("<plist>" + text + "</plist>"))
 }

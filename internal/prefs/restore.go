@@ -14,8 +14,12 @@ import (
 	"strings"
 
 	"github.com/leeovery/kit/internal/apps"
+	"github.com/leeovery/kit/internal/look"
 	"github.com/leeovery/kit/internal/plist"
 	"github.com/leeovery/kit/internal/runner"
+	"github.com/leeovery/kit/internal/tilde"
+	"github.com/leeovery/kit/internal/whole"
+	"github.com/leeovery/kit/internal/wildmatch"
 )
 
 // RestoreOptions are what to restore: everything from this Mac's folder
@@ -82,7 +86,7 @@ func (r RestoreReport) restored() string {
 	if r.DryRun {
 		verb = "would restore"
 	}
-	s := fmt.Sprintf("%s %s and %s from %s", verb, plural(len(r.Restored), "domain"), plural(r.Files, "file"), r.From)
+	s := fmt.Sprintf("%s %d %s and %d %s from %s", verb, len(r.Restored), look.Plural(len(r.Restored), "domain", "domains"), r.Files, look.Plural(r.Files, "file", "files"), r.From)
 	if len(r.Restored)+r.Files == 0 {
 		s = "nothing to restore from " + r.From
 	}
@@ -112,31 +116,16 @@ func (r RestoreReport) Failures() int {
 	return len(r.Failed) + len(r.FilesFailed)
 }
 
-// helperDirs are where apps keep helper apps with their own preferences.
-var helperDirs = []string{"Contents/MacOS", "Contents/Library/LoginItems", "Contents/Helpers"}
-
 // installedApps are the apps installed, by bundle id: in each app folder and
 // a folder below, and the helper apps inside them (Keyboard Maestro's
 // Engine, login items). The first found of a bundle id is kept.
 func (p *Prefs) installedApps() map[string]string {
 	byID := map[string]string{}
-	for _, base := range p.AppDirs {
-		var found []string
-		for _, pattern := range []string{"*.app", "*/*.app"} {
-			m, _ := filepath.Glob(filepath.Join(base, pattern))
-			found = append(found, m...)
-		}
-		for _, app := range found {
-			bundles := []string{app}
-			for _, d := range helperDirs {
-				h, _ := filepath.Glob(filepath.Join(app, d, "*.app"))
-				bundles = append(bundles, h...)
-			}
-			for _, b := range bundles {
-				if id := apps.BundleID(b); id != "" {
-					if _, seen := byID[id]; !seen {
-						byID[id] = b
-					}
+	for _, app := range apps.Installed(p.AppDirs) {
+		for _, b := range apps.WithHelpers(app) {
+			if id := apps.BundleID(b); id != "" {
+				if _, seen := byID[id]; !seen {
+					byID[id] = b
 				}
 			}
 		}
@@ -154,7 +143,7 @@ var groupPrefix = regexp.MustCompile(`^(group\.|[A-Z0-9]{10}\.)`)
 // container's or team's prefix is looked past.
 func (p *Prefs) owningApps(domain string, apps map[string]string) []string {
 	for _, pair := range p.Lists.Apps {
-		if fnmatch(domain, pair[0]) {
+		if wildmatch.Match(pair[0], domain) {
 			if _, ok := apps[pair[1]]; ok {
 				return []string{pair[1]}
 			}
@@ -646,7 +635,7 @@ func (p *Prefs) restoreFiles(files string, bound []string, only map[string]bool,
 	n, failed := 0, map[string]string{}
 	for _, stored := range storedFiles(files) {
 		target := p.livePath(files, stored)
-		name := p.tilde(target)
+		name := tilde.Shown(p.Home, target)
 		if matches(target, expanded) || only != nil && !only[name] {
 			continue
 		}
@@ -688,12 +677,7 @@ func (p *Prefs) restoreFile(files, stored, target, saved string, dryRun bool) (b
 	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
 		return false, errors.New("it couldn't be put in place")
 	}
-	tmp := filepath.Join(filepath.Dir(target), "."+filepath.Base(target)+".kit")
-	if err := os.WriteFile(tmp, want, mode); err != nil {
-		return false, errors.New("it couldn't be put in place")
-	}
-	if err := os.Rename(tmp, target); err != nil {
-		_ = os.Remove(tmp)
+	if err := whole.Write(target, want, mode); err != nil {
 		return false, errors.New("it couldn't be put in place")
 	}
 	return true, nil

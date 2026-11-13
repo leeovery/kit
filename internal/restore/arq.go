@@ -11,6 +11,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/leeovery/kit/internal/tilde"
 )
 
 // arqFolder is where in kit's state the person restores the listed paths
@@ -127,11 +129,7 @@ type Arq struct {
 // Origin is what the record keeps of Arq's restore: the folder holding its
 // holding folders, from ~ when it's in the home folder.
 func (a Arq) Origin() Origin {
-	dir := ArqFolder(a.StateDir)
-	if rest, ok := strings.CutPrefix(dir, a.Home+"/"); ok && a.Home != "" {
-		dir = "~/" + rest
-	}
-	return Origin{Kind: FromArq, Detail: dir}
+	return Origin{Kind: FromArq, Detail: tilde.Shown(a.Home, ArqFolder(a.StateDir))}
 }
 
 // Open opens Arq's restore: nothing to close.

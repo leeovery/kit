@@ -29,6 +29,8 @@ import (
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/kind/secret/store"
 	"github.com/leeovery/kit/internal/runner"
+	"github.com/leeovery/kit/internal/tilde"
+	"github.com/leeovery/kit/internal/whole"
 )
 
 // EnvFile is the file of environment variables kit writes, under the home
@@ -218,10 +220,7 @@ func place(sec *Secret, e config.Entry, ref string) error {
 
 // path is a file secret's full path.
 func (s *Secrets) path(sec Secret) string {
-	if rest, ok := strings.CutPrefix(sec.Name, "~/"); ok {
-		return filepath.Join(s.home, rest)
-	}
-	return sec.Name
+	return tilde.Expand(s.home, sec.Name)
 }
 
 // FileHolds is nil when the file the secret name fills holds want, byte
@@ -379,7 +378,7 @@ func (s *Secrets) dropEnv(drop map[string]bool) error {
 		}
 		kept = append(kept, line)
 	}
-	return writeFile(path, strings.Join(kept, ""), 0o600)
+	return whole.Write(path, []byte(strings.Join(kept, "")), 0o600)
 }
 
 // cutShort reports whether line, an export, leaves a single quote open, as
@@ -434,29 +433,6 @@ func unquote(text string) (string, bool) {
 		return "", false
 	}
 	return value.String(), true
-}
-
-// writeFile writes data to path whole or not at all, with mode: beside it,
-// mode set before anything's written, then renamed into place.
-func writeFile(path, data string, mode os.FileMode) error {
-	f, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".kit-*")
-	if err != nil {
-		return err
-	}
-	tmp := f.Name()
-	defer func() { _ = os.Remove(tmp) }()
-	if err := f.Chmod(mode); err != nil {
-		_ = f.Close()
-		return err
-	}
-	if _, err := f.WriteString(data); err != nil {
-		_ = f.Close()
-		return err
-	}
-	if err := f.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
 }
 
 var _ interface {

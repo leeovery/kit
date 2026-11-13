@@ -4,9 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"slices"
-	"strings"
 	"sync"
 	"time"
 
@@ -15,6 +13,7 @@ import (
 	"github.com/leeovery/kit/internal/restore"
 	"github.com/leeovery/kit/internal/runner"
 	"github.com/leeovery/kit/internal/state"
+	"github.com/leeovery/kit/internal/tilde"
 )
 
 // recordName names the reinstall's record, in kit's state.
@@ -220,7 +219,7 @@ func (r Reinstaller) install(ctx context.Context, in Install) (Install, error) {
 	if err := r.record(in); err != nil {
 		return in, err
 	}
-	dir := filepath.Join(r.Home, strings.TrimPrefix(in.Dir, "~/"))
+	dir := tilde.Expand(r.Home, in.Dir)
 	// Run as a check's commands are, so what an installer prints stays in
 	// the log, never shown as the step's output.
 	_, err := r.Run.Run(event.WithChecking(ctx), runner.Command{Name: t.program, Args: t.args, Dir: dir, Timeout: installTimeout})

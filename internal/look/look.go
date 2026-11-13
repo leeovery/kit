@@ -85,6 +85,14 @@ func InWords(names []string) string {
 	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
 }
 
+// Plural is the word a count of n takes: one when n is 1, else many.
+func Plural(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
+}
+
 // State is how a thing stands, as its mark shows it.
 type State int
 

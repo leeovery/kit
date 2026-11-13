@@ -449,7 +449,7 @@ func diskutil(ctx context.Context, run runner.Runner, args ...string) (map[strin
 	if err != nil {
 		return nil, err
 	}
-	v, err := plist.Read(out)
+	v, err := plist.Decode([]byte(out))
 	listed, _ := v.(map[string]any)
 	if err != nil || listed == nil {
 		return nil, fmt.Errorf("couldn't read what diskutil %s printed", strings.Join(args, " "))

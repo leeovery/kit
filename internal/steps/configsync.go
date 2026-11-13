@@ -10,6 +10,7 @@ import (
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/gitrepo"
+	"github.com/leeovery/kit/internal/look"
 )
 
 // syncWithin is how long a commit may wait unpushed: kit pushes its own
@@ -40,7 +41,7 @@ func ConfigSync(repo gitrepo.Repo, now func() time.Time) engine.Step {
 			if len(made) == 0 {
 				return check.Result{State: check.OK, Summary: "pushed", Glance: "pushed"}
 			}
-			waiting := fmt.Sprintf("%d %s not pushed", len(made), plural(len(made), "commit", "commits"))
+			waiting := fmt.Sprintf("%d %s not pushed", len(made), look.Plural(len(made), "commit", "commits"))
 			if held := repo.Holding(ctx); held != nil {
 				return problem(ConfigSyncName, "pushes held back", [3]string{"held", waiting, held.Error()})
 			}
@@ -85,7 +86,7 @@ func ConfigEdits(repo gitrepo.Repo) engine.Step {
 			}
 			if n := len(res.Items); n > 0 {
 				res.State = check.Attention
-				res.Summary = fmt.Sprintf("%d %s not committed", n, plural(n, "file", "files"))
+				res.Summary = fmt.Sprintf("%d %s not committed", n, look.Plural(n, "file", "files"))
 			}
 			return res
 		},
@@ -103,12 +104,4 @@ func editDetail(c gitrepo.Change) string {
 		return "kit-config can't keep it"
 	}
 	return fmt.Sprintf("+%d −%d lines", c.Added, c.Removed)
-}
-
-// plural is one or many, as n says.
-func plural(n int, one, many string) string {
-	if n == 1 {
-		return one
-	}
-	return many
 }

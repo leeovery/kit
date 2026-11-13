@@ -1,6 +1,7 @@
 package plist_test
 
 import (
+	"math"
 	"testing"
 
 	"github.com/leeovery/kit/internal/plist"
@@ -17,17 +18,6 @@ const doc = `<?xml version="1.0" encoding="UTF-8"?>
 	<key>list</key><array><string>x</string><integer>2</integer></array>
 </dict>
 </plist>`
-
-func TestReadKeepsEachType(t *testing.T) {
-	v, err := plist.Read(doc)
-	if err != nil {
-		t.Fatal(err)
-	}
-	m := v.(map[string]any)
-	if m["size"] != int64(60) || m["speed"] != 0.5 || m["on"] != true || m["name"] != "a & b" || string(m["blob"].(plist.Data)) != "hi" {
-		t.Errorf("read %#v", m)
-	}
-}
 
 func TestEqual(t *testing.T) {
 	for _, c := range []struct {
@@ -53,7 +43,7 @@ func TestEqual(t *testing.T) {
 }
 
 func TestXMLReadsBack(t *testing.T) {
-	v, _ := plist.Read(doc)
+	v, _ := plist.Decode([]byte(doc))
 	text := plist.XML(v)
 	if want := `<dict><key>blob</key><data>aGk=</data><key>list</key><array><string>x</string><integer>2</integer></array><key>name</key><string>a &amp; b</string><key>on</key><true/><key>size</key><integer>60</integer><key>speed</key><real>0.5</real></dict>`; text != want {
 		t.Errorf("XML() = %s", text)
@@ -64,14 +54,10 @@ func TestXMLReadsBack(t *testing.T) {
 	}
 }
 
-// A string's text, and a key's, read exactly, spaces and all, as defaults
-// write keeps them; a number's trimmed.
-func TestReadKeepsAStringsSpaces(t *testing.T) {
-	v, err := plist.Read(`<plist><dict><key> x</key><string> a </string><key>n</key><integer> 5 </integer></dict></plist>`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if m := v.(map[string]any); m[" x"] != " a " || m["n"] != int64(5) {
-		t.Errorf("read %#v", m)
+// An integer past int64's range, which Decode reads as uint64, is written
+// as the integer it is.
+func TestXMLWritesAnIntegerPastInt64(t *testing.T) {
+	if got := plist.XML(uint64(math.MaxUint64)); got != "<integer>18446744073709551615</integer>" {
+		t.Errorf("XML() = %s", got)
 	}
 }

@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+
+	"github.com/leeovery/kit/internal/whole"
 )
 
 // Load reads the record in the file named name in dir into a T: a zero T
@@ -58,19 +60,7 @@ func Update[T any](dir, name string, change func(*T)) error {
 	if err != nil {
 		return fmt.Errorf("write the %s record: %w", what, err)
 	}
-	tmp, err := os.CreateTemp(dir, name+".*")
-	if err != nil {
-		return fmt.Errorf("write the %s record: %w", what, err)
-	}
-	defer func() { _ = os.Remove(tmp.Name()) }()
-	if _, err := tmp.Write(append(data, '\n')); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("write the %s record: %w", what, err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("write the %s record: %w", what, err)
-	}
-	if err := os.Rename(tmp.Name(), filepath.Join(dir, name)); err != nil {
+	if err := whole.Write(filepath.Join(dir, name), append(data, '\n'), 0o600); err != nil {
 		return fmt.Errorf("write the %s record: %w", what, err)
 	}
 	return nil

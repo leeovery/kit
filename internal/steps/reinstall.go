@@ -10,6 +10,7 @@ import (
 
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/engine"
+	"github.com/leeovery/kit/internal/look"
 	"github.com/leeovery/kit/internal/reinstall"
 )
 
@@ -138,7 +139,7 @@ func reinstalled(rec reinstall.Record) check.Result {
 		says = append(says, fmt.Sprintf("%d for you to install", yours))
 	}
 	for _, t := range slices.Sorted(maps.Keys(waiting)) {
-		says = append(says, fmt.Sprintf("%d %s for %s", waiting[t], plural(waiting[t], "waits", "wait"), t))
+		says = append(says, fmt.Sprintf("%d %s for %s", waiting[t], look.Plural(waiting[t], "waits", "wait"), t))
 	}
 	res.Summary = strings.Join(says, "; ")
 	return res

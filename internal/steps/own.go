@@ -12,6 +12,7 @@ import (
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/runner"
+	"github.com/leeovery/kit/internal/tilde"
 )
 
 // OwnName names the step of the user's own checks.
@@ -66,9 +67,7 @@ func OwnCommand(home, value string, timeout time.Duration) (runner.Command, erro
 	}
 	words = words[1:]
 	for i, w := range words {
-		if rest, ok := strings.CutPrefix(w, "~/"); ok {
-			words[i] = filepath.Join(home, rest)
-		}
+		words[i] = tilde.Expand(home, w)
 	}
 	return runner.Command{Name: words[0], Args: words[1:], Timeout: timeout}, nil
 }

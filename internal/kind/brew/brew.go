@@ -24,6 +24,7 @@ import (
 	"github.com/leeovery/kit/internal/hold"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/runner"
+	"github.com/leeovery/kit/internal/tilde"
 )
 
 // StepName is the name of the step that checks Homebrew is there, which
@@ -787,10 +788,7 @@ func oneOrMore(raw json.RawMessage) []string {
 func (h *Homebrew) onTheMac(patterns []string) []string {
 	var found []string
 	for _, pattern := range patterns {
-		if rest, ok := strings.CutPrefix(pattern, "~/"); ok {
-			pattern = filepath.Join(h.Home, rest)
-		}
-		matches, _ := filepath.Glob(pattern)
+		matches, _ := filepath.Glob(tilde.Expand(h.Home, pattern))
 		found = append(found, matches...)
 	}
 	slices.Sort(found)

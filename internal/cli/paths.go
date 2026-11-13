@@ -10,6 +10,7 @@ import (
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/steps"
+	"github.com/leeovery/kit/internal/tilde"
 )
 
 // pathsKind names the paths section, and its command.
@@ -102,8 +103,8 @@ func (a *app) writeShellPath(ctx context.Context, r *run, c *changes) {
 func (r *run) tildePaths(dirs []string) []string {
 	out := make([]string, len(dirs))
 	for i, dir := range dirs {
-		if rest, ok := strings.CutPrefix(filepath.Clean(dir), r.homeDir+"/"); ok && filepath.IsAbs(dir) {
-			dir = "~/" + rest
+		if shown := tilde.Shown(r.homeDir, filepath.Clean(dir)); filepath.IsAbs(dir) && strings.HasPrefix(shown, "~/") {
+			dir = shown
 		}
 		out[i] = dir
 	}

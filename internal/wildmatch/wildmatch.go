@@ -1,6 +1,6 @@
 // Package wildmatch matches a pattern against a path as rsync does, so kit
-// reads a pattern one way wherever it takes one: rsync's filter rules, and
-// the globs of the paths prefs saves.
+// reads a pattern one way wherever it takes one: rsync's filter rules, the
+// globs of the paths prefs saves, and its lists of domains.
 package wildmatch
 
 import "strings"

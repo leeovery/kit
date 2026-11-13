@@ -10,6 +10,7 @@ import (
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/linked"
+	"github.com/leeovery/kit/internal/tilde"
 )
 
 // addFiles moves each file at paths, or every file in a folder, into
@@ -84,14 +85,11 @@ func (a *app) removeFiles(ctx context.Context, r *run, paths []string, shared bo
 // home folder.
 func (r *run) filePaths(paths []string) (full, shown []string, err error) {
 	for _, p := range paths {
-		if rest, ok := strings.CutPrefix(p, "~/"); ok {
-			p = filepath.Join(r.homeDir, rest)
-		}
-		if p, err = filepath.Abs(p); err != nil {
+		if p, err = filepath.Abs(tilde.Expand(r.homeDir, p)); err != nil {
 			return nil, nil, err
 		}
 		full = append(full, p)
-		shown = append(shown, r.files.Tilde(p))
+		shown = append(shown, tilde.Shown(r.homeDir, p))
 	}
 	return full, shown, nil
 }

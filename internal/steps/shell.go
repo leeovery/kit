@@ -10,6 +10,7 @@ import (
 
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/engine"
+	"github.com/leeovery/kit/internal/look"
 )
 
 // What applying the shell's steps does about an item.
@@ -41,7 +42,7 @@ func PathFile(dirs []string, file string) engine.Step {
 			case err != nil:
 				return failed(err)
 			case string(data) == want:
-				return check.Result{State: check.OK, Summary: fmt.Sprintf("%d %s", len(dirs), plural(len(dirs), "directory", "directories"))}
+				return check.Result{State: check.OK, Summary: fmt.Sprintf("%d %s", len(dirs), look.Plural(len(dirs), "directory", "directories"))}
 			default:
 				it.State, it.Detail = "changed", "[paths] has changed since kit wrote it"
 			}
