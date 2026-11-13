@@ -46,9 +46,9 @@ const adminWait = "needs an administrator's password: run kit apply at a termina
 // and kit didn't get it again.
 var errAdminWait = errors.New(adminWait)
 
-// passwordRefused is why an install failed when kit asked for the
-// administrator's password and didn't get it.
-const passwordRefused = "the administrator's password was refused"
+// passwordNotGiven is why an install failed when kit asked for the
+// administrator's password and didn't get it: wrong, or not given at all.
+const passwordNotGiven = "the administrator's password wasn't given"
 
 // most is how many of a search's apps are offered.
 const most = 8
@@ -339,7 +339,7 @@ func (s *AppStore) Install(ctx context.Context, names []string) error {
 		}
 		if !kind.AwaitAdmin(ctx) {
 			if ctx.Err() == nil {
-				errs = append(errs, errors.New(passwordRefused))
+				errs = append(errs, errors.New(passwordNotGiven))
 			}
 			break
 		}

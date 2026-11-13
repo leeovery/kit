@@ -518,7 +518,7 @@ func TestEachAppWaitsForThePassword(t *testing.T) {
 	pw := &answers{true, true, false}
 	s := kind.Placed(appstore.New(fake), declared("bear@1091189122", "xcode@497799835"), func(context.Context) kind.Placing { return kind.Placing{Admin: pw} })
 	err := s.Apply(t.Context(), s.Check(t.Context()))
-	if want := "couldn't install xcode@497799835: the administrator's password was refused"; err == nil || err.Error() != want {
+	if want := "couldn't install xcode@497799835: the administrator's password wasn't given"; err == nil || err.Error() != want {
 		t.Errorf("Apply = %v; want %q", err, want)
 	}
 	if want := []string{"mas list --json", "sudo -n mas install 1091189122", "mas list --json"}; !slices.Equal(fake.Calls(), want) {
