@@ -393,11 +393,15 @@ func TestSyncGivesUpItsJobWhileItWaitsForApproval(t *testing.T) {
 // A variable's value of many lines fails, keeping its previous value, and
 // saying nothing of it: ~/.secrets.zsh holds each variable on a line of its
 // own, so the rest sync and the file still sources. A line cut short by such
-// a value, as kit once wrote, is dropped rather than kept.
+// a value, as kit once wrote, is dropped, whether its variable's declared or
+// not; a line in another form, as dotsetup wrote or one by hand, is kept as
+// it is.
 func TestSyncRefusesAVariableOfManyLines(t *testing.T) {
-	for _, c := range []struct{ name, old, want string }{
-		{"kept", "export MANY='old value'\n", "old value"},
-		{"cut short", "export MANY='line one\nline two'\n", ""},
+	for _, c := range []struct{ name, old, want, wantOld string }{
+		{"kit's", "export MANY='old value'   # it's a note\nexport OLD='it'\\''s kept'\n", "old value", "it's kept"},
+		{"cut short", "export MANY='line one\nline two'\nexport OLD='half\nof it'\n", "", ""},
+		{"dotsetup's", "export MANY=\"old value\"  # it's a label\nexport OLD=\"it's kept\"\n", "old value", "it's kept"},
+		{"by hand", "export MANY=old\\ value\nexport OLD=kept\n", "old value", "kept"},
 	} {
 		home := t.TempDir()
 		fake := runnertest.New(t)
@@ -415,8 +419,8 @@ func TestSyncRefusesAVariableOfManyLines(t *testing.T) {
 		if err != nil || strings.Contains(report.Error(), "secret one") || strings.Contains(report.Error(), "secret two") {
 			t.Errorf("%s: the report says %q: want nothing of the value", c.name, report.Error())
 		}
-		out, err := exec.Command("/bin/zsh", "-f", "-c", `source "$1" && printf '%s|%s|%s' "$A" "$MANY" "$Z"`, "zsh", filepath.Join(home, ".secrets.zsh")).CombinedOutput()
-		if want := "a|" + c.want + "|z"; err != nil || string(out) != want {
+		out, err := exec.Command("/bin/zsh", "-f", "-c", `source "$1" && printf '%s|%s|%s|%s' "$A" "$MANY" "$Z" "$OLD"`, "zsh", filepath.Join(home, ".secrets.zsh")).CombinedOutput()
+		if want := "a|" + c.want + "|z|" + c.wantOld; err != nil || string(out) != want {
 			t.Errorf("%s: zsh read back %q, %v; want %q", c.name, out, err, want)
 		}
 	}

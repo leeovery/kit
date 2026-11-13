@@ -182,8 +182,8 @@ func (s *Secrets) refs(d store.Driver, files bool) []string {
 // its sign-in, raised at a terminal (Cards). ~/.secrets.zsh is written
 // whole each time, each value without the newlines it ends with (a
 // variable not read keeps its line, so a partial read never shrinks it, but
-// for a line that doesn't read as kit writes one, cut short by a value of
-// many lines kit once wrote); a variable's value holding a line break fails,
+// for a line cut short by a value of many lines kit once wrote); a
+// variable's value holding a line break fails,
 // as ~/.secrets.zsh holds each on a line of its own; each file as its store
 // reads it as a file (store.Driver.ReadFile), beside its place then renamed
 // into it. A store signed out, or whose program never comes, or that
@@ -388,10 +388,8 @@ func (sy *syncing) put(ctx context.Context) error {
 		v, ok := sy.value(sec)
 		switch {
 		case !ok:
-			if line, kept := sy.old[sec.Name]; kept && !sec.IsFile() {
-				if _, whole := envValue(sec.Name, line); whole {
-					env = append(env, line)
-				}
+			if line, kept := sy.old[sec.Name]; kept && !sec.IsFile() && !cutShort(line) {
+				env = append(env, line)
 			}
 		case sec.IsFile():
 			sy.putFile(sec, v)
@@ -412,7 +410,7 @@ func (sy *syncing) put(ctx context.Context) error {
 	}
 	// A variable no line declares stays: taking it out is kit reconcile's.
 	for _, name := range sy.oldOrder {
-		if !slices.ContainsFunc(sy.s.declared, func(sec Secret) bool { return sec.Name == name }) {
+		if !slices.ContainsFunc(sy.s.declared, func(sec Secret) bool { return sec.Name == name }) && !cutShort(sy.old[name]) {
 			env = append(env, sy.old[name])
 		}
 	}

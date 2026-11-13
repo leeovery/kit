@@ -309,7 +309,7 @@ func (s *Secrets) Variable(name string) (value string, ok bool, err error) {
 	if !ok {
 		return "", false, nil
 	}
-	if value, ok = envValue(name, line); !ok {
+	if value, ok = unquote(strings.TrimPrefix(line, "export "+name+"=")); !ok {
 		return "", false, fmt.Errorf("~/%s holds %s otherwise than kit writes it: run kit secret sync", EnvFile, name)
 	}
 	return value, true, nil
@@ -391,10 +391,28 @@ func (s *Secrets) dropEnv(drop map[string]bool) error {
 	return writeFile(path, strings.Join(kept, ""), 0o600)
 }
 
-// envValue is the value line exports for the variable name, as kit wrote
-// it: false when line doesn't read as kit writes one.
-func envValue(name, line string) (string, bool) {
-	return unquote(strings.TrimPrefix(line, "export "+name+"="))
+// cutShort reports whether line, an export, leaves a single quote open, as
+// one kit once wrote of a value of many lines does: the rest of the value,
+// on the lines after it, gone. Its value's first word alone is read, as the
+// shell reads it, so a note after it never counts, and one with a double
+// quote, a form kit never writes (dotsetup's, or one by hand), is never cut
+// short.
+func cutShort(line string) bool {
+	_, value, _ := strings.Cut(line, "=")
+	quoted := false
+	for i := 0; i < len(value); i++ {
+		switch c := value[i]; {
+		case quoted:
+			quoted = c != '\''
+		case c == '\'':
+			quoted = true
+		case c == '\\':
+			i++
+		case c == ' ' || c == '\t' || c == '"':
+			return false
+		}
+	}
+	return quoted
 }
 
 // quote is a value as zsh reads it back exactly, sourced: in single quotes,
