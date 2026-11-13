@@ -245,7 +245,7 @@ const (
 // apart.
 func opOf(args []string) string {
 	switch {
-	case slices.Contains(args, "--info=name1,progress2,skip1"):
+	case slices.Contains(args, "--info=progress2,skip1"):
 		return copyingOp
 	case slices.Contains(args, "--dry-run"):
 		return sizing
@@ -281,7 +281,7 @@ func statsOf(files int, bytes int64, totalFiles int, totalBytes int64) string {
 }
 
 // copies scripts path's whole restore from the source: its size, a copy of
-// files and bytes, each file's name and how far the copy's got, then its
+// files and bytes, how far it's got as each file ends, then its
 // statistics, and a second pass that finds nothing.
 func (c *restoring) copies(path string, files int, bytes int64) {
 	c.carriesOn(path, files, bytes, files, bytes)
@@ -291,22 +291,21 @@ func (c *restoring) copies(path string, files int, bytes int64) {
 // files and bytes, the path holding totalFiles and totalBytes, the rest
 // copied already.
 func (c *restoring) carriesOn(path string, files int, bytes int64, totalFiles int, totalBytes int64) {
-	c.carriesOnFrom(filepath.Join(c.old, strings.TrimPrefix(path, "~/")), path, files, bytes, totalFiles, totalBytes)
+	c.carriesOnFrom(filepath.Join(c.old, strings.TrimPrefix(path, "~/")), files, bytes, totalFiles, totalBytes)
 }
 
-// copiesFrom scripts path's whole restore, as copies does, copying from
+// copiesFrom scripts a path's whole restore, as copies does, copying from
 // from, a path in full.
-func (c *restoring) copiesFrom(from, path string, files int, bytes int64) {
-	c.carriesOnFrom(from, path, files, bytes, files, bytes)
+func (c *restoring) copiesFrom(from string, files int, bytes int64) {
+	c.carriesOnFrom(from, files, bytes, files, bytes)
 }
 
-// carriesOnFrom scripts path's restore, as carriesOn does, copying from
+// carriesOnFrom scripts a path's restore, as carriesOn does, copying from
 // from, a path in full.
-func (c *restoring) carriesOnFrom(from, path string, files int, bytes int64, totalFiles int, totalBytes int64) {
+func (c *restoring) carriesOnFrom(from string, files int, bytes int64, totalFiles int, totalBytes int64) {
 	c.onFrom(sizing, from).Prints(statsOf(files, bytes, totalFiles, totalBytes))
 	var out strings.Builder
 	for i := range files {
-		fmt.Fprintf(&out, "%s/file-%d\n", strings.TrimPrefix(path, "~/"), i)
 		fmt.Fprintf(&out, "%d %d%% 1.00MB/s 0:00:01 (xfr#%d, to-chk=%d/%d)\r", bytes*int64(i+1)/int64(files), 100*(i+1)/files, i+1, files-i-1, files)
 	}
 	out.WriteString("\n" + statsOf(files, bytes, totalFiles, totalBytes))
@@ -1241,36 +1240,50 @@ func TestRestoreANewerFileHere(t *testing.T) {
 
 // Files in a listed folder the copy kept, newer here than at its source, as
 // Claude Code writes its history, or a tool its state, between the
-// folder's setting aside and the copy reaching them: in set-up's window,
-// before the folder's copy first began, exactly those are set aside,
-// saying how many, each by the name rsync gives it, escaped or not, and
-// the folder copied again, once, the old Mac's in their place, the rest of
-// what the copy put there staying. Out of it, as on a Mac in use, they're
-// kept, saying how many.
+// folder's setting aside and the copy reaching them, as rsync 3.5.2 names
+// them (copy-newer-folder.raw, a real run's): in set-up's window, before
+// the folder's copy first began, exactly those are set aside, saying how
+// many, each by the name rsync gives it, escaped or not, and those alone
+// copied again, once, named on rsync's standard input, the old Mac's in
+// their place, the rest of what the copy put there staying, and the
+// folder's record what the copy came to, not the copy again; the copy
+// again says nothing of its progress, the copy's said already. A name
+// reaching out of the folder, which rsync never gives, is passed over. Out
+// of the window, as on a Mac in use, they're kept, saying how many.
 func TestRestoreNewerFilesInAFolder(t *testing.T) {
-	newer := []string{"~/.claude/history.jsonl", "~/.claude/projects/site/odd\nname"}
-	copied := "~/.claude/projects/site/copied.jsonl"
-	said := "history.jsonl is newer\nprojects/site/odd\\#012name is newer\nprojects/site/copied.jsonl\n" + statsOf(1, 100, 3, 300)
+	names := []string{"history.jsonl", `projects/site/back\#123slash`, "projects/site/odd\nname", "projects/site/session.jsonl"}
+	var newer []string
+	for _, name := range names {
+		newer = append(newer, "~/.claude/"+name)
+	}
+	copied := []string{"~/.claude/projects/site/copied.jsonl", "~/.claude/projects/site/x is newer"}
 	for _, tt := range []struct {
 		name  string
 		setUp bool
+		out   string
 		log   string
 	}{
-		{"in set-up", true, "Set aside 2 files in ~/.claude, written here as they were restored, into "},
-		{"on a Mac in use", false, "Kept 2 files in ~/.claude as they are: newer here than in Time Machine's backup of 8 Nov 2026 14:19"},
+		{"in set-up", true, "", "Set aside 4 files in ~/.claude, written here as they were restored, into "},
+		{"in set-up, a name reaching out of the folder", true, "../outside is newer\n", "Set aside 4 files in ~/.claude, written here as they were restored, into "},
+		{"on a Mac in use", false, "", "Kept 4 files in ~/.claude as they are: newer here than in Time Machine's backup of 8 Nov 2026 14:19"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			c := newRestoring(t, "~/.claude")
 			c.r.SetUp, c.r.Flag = tt.setUp, steps.RestoreFrom{Kind: restore.FromTimeMachine}
-			for _, p := range append(slices.Clone(newer), copied) {
+			for _, p := range slices.Concat(newer, copied) {
 				write(t, c.old, p, beforeIt)
 			}
-			c.copies("~/.claude", 3, 300)
-			c.on(copyingOp, "~/.claude").Prints(said).Does(func() {
-				for _, p := range append(slices.Clone(newer), copied) {
+			write(t, c.home, "~/outside", beforeIt)
+			c.copies("~/.claude", 6, 65)
+			var said int
+			c.on(copyingOp, "~/.claude").Prints(tt.out + rsyncSaid(t, "copy-newer-folder.raw")).Does(func() {
+				for _, p := range slices.Concat(newer, copied) {
 					write(t, c.home, p, duringIt.Add(48*time.Hour))
 				}
-			}).Then().Prints(statsOf(2, 200, 3, 300)).Does(func() {
+			}).Then().Prints(rsyncSaid(t, "copy-again.raw")).Does(func() {
+				c.mu.Lock()
+				said = len(c.doing)
+				c.mu.Unlock()
 				for _, p := range newer {
 					if err := os.WriteFile(filepath.Join(c.home, strings.TrimPrefix(p, "~/")), []byte("the old Mac's"), 0o600); err != nil {
 						t.Error(err)
@@ -1289,12 +1302,21 @@ func TestRestoreNewerFilesInAFolder(t *testing.T) {
 				t.Errorf("rsync ran %q\nwant %q", c.ran(), ran)
 			}
 			switch {
-			case claude.State != restore.Done:
-				t.Errorf("~/.claude's record = %+v; want it restored", claude)
+			case claude.State != restore.Done || claude.Files != 6 || claude.Bytes != 65:
+				t.Errorf("~/.claude's record = %+v; want it restored, holding the copy's 6 files, 65 bytes", claude)
 			case tt.setUp && (len(claude.SetAside) != 1 || !slices.Equal(claude.SetAside[0].Paths, newer)):
 				t.Errorf("~/.claude set aside %+v; want exactly %q", claude.SetAside, newer)
 			case !tt.setUp && len(claude.SetAside) > 0:
 				t.Errorf("~/.claude set aside %+v; want nothing", claude.SetAside)
+			}
+			if tt.setUp {
+				again := c.fake.Commands()[2]
+				if want := strings.Join(names, "\x00"); !slices.Contains(again.Args, "--files-from=-") || again.Input != want {
+					t.Errorf("copied again with %q, given %q; want those set aside alone, %q", again.Args, again.Input, want)
+				}
+				if c.doing[said].Says != "comparing ~/.claude" {
+					t.Errorf("as it copied again, said %+v; want nothing till it compares", c.doing[said:])
+				}
 			}
 			if !slices.ContainsFunc(c.logged, func(l string) bool { return strings.HasPrefix(l, tt.log) }) {
 				t.Errorf("the log says %q, want %q", c.logged, tt.log)
@@ -1303,11 +1325,24 @@ func TestRestoreNewerFilesInAFolder(t *testing.T) {
 			if got, err := os.ReadFile(filepath.Join(c.home, ".claude", "history.jsonl")); err != nil || string(got) != want {
 				t.Errorf("~/.claude/history.jsonl = %q, %v; want %q", got, err, want)
 			}
-			if _, err := os.Stat(filepath.Join(c.home, strings.TrimPrefix(copied, "~/"))); err != nil {
-				t.Errorf("%s, the copy's, isn't in place: %v", copied, err)
+			for _, p := range append(copied, "~/outside") {
+				if _, err := os.Stat(filepath.Join(c.home, strings.TrimPrefix(p, "~/"))); err != nil {
+					t.Errorf("%s isn't in place: %v", p, err)
+				}
 			}
 		})
 	}
+}
+
+// rsyncSaid is what rsync 3.5.2 printed in a real run, as the rsync
+// driver's tests have it: name, of their testdata.
+func rsyncSaid(t *testing.T, name string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join("..", "restore", "testdata", name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
 }
 
 // A path recorded here, holding files of its own, is never touched: unless

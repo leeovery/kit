@@ -798,7 +798,7 @@ func (r Restoring) restoreOne(ctx context.Context, src *restore.Opened, c copyin
 		return failed(err)
 	}
 	if len(stats.Newer) > 0 {
-		if stats, err = r.newerHere(ctx, src, c, rec, stats, p); err != nil {
+		if err := r.newerHere(ctx, src, c, rec, stats.Newer); err != nil {
 			return failed(err)
 		}
 	}
@@ -845,44 +845,50 @@ func (r Restoring) begin(ctx context.Context, src *restore.Opened, path string) 
 }
 
 // newerHere is what becomes of the files of c's path its copy from src
-// kept, newer here, as --update keeps them and stats says: in set-up's
-// window before the path's copy first began (restore.Record's MaySetAside,
-// rec the record from before this run's copy began), as a shell sharing its
-// history with every tab writes it, or a tool its state, between the path's
-// setting aside and the copy reaching them, they're set aside, saying so,
-// and the path copied again, once; else they're kept, saying so, as newer
-// work always is, as are any the copy again keeps. It returns what the copy
-// came to, the second's if there was one.
-func (r Restoring) newerHere(ctx context.Context, src *restore.Opened, c copying, rec restore.Record, stats restore.Stats, p *progress) (restore.Stats, error) {
-	if !rec.MaySetAside(c.Path, r.SetUp) {
-		keptNewer(ctx, src, c, stats.Newer)
-		return stats, nil
+// kept, newer here, as --update keeps them and rsync names them, newer: in
+// set-up's window before the path's copy first began (restore.Record's
+// MaySetAside, rec the record from before this run's copy began), as a
+// shell sharing its history with every tab writes it, or a tool its state,
+// between the path's setting aside and the copy reaching them, they're set
+// aside, saying so, and copied again, those alone, once, saying nothing of
+// its progress, which would set the copy's back; else they're kept, saying
+// so, as newer work always is, as are any the copy again keeps.
+func (r Restoring) newerHere(ctx context.Context, src *restore.Opened, c copying, rec restore.Record, newer []string) error {
+	again, files := newerIn(c, newer)
+	if len(files) == 0 || !rec.MaySetAside(c.Path, r.SetUp) {
+		keptNewer(ctx, src, c, newer)
+		return nil
 	}
-	files := newerIn(c, stats.Newer)
 	aside, err := restore.SetAsideFiles(r.StateDir, r.Home, c.Path, files, r.Now())
 	r.saidAside(ctx, writtenHere(c, len(files)), aside)
 	if err != nil {
-		return stats, err
+		return err
 	}
-	again, err := r.Rsync.Copy(quietly(ctx), c.copy, p.copied)
+	stats, err := r.Rsync.Copy(quietly(ctx), again, nil)
 	if copyFailed(src, err) {
-		return stats, err
+		return err
 	}
-	keptNewer(ctx, src, c, again.Newer)
-	return again, nil
+	keptNewer(ctx, src, c, stats.Newer)
+	return nil
 }
 
-// newerIn are the files of c's path, each from ~, that its copy kept as
-// newer, as rsync names them, newer: the path itself, a file's.
-func newerIn(c copying, newer []string) []string {
-	if c.copy.File {
-		return []string{c.Path}
+// newerIn is the copy again of the files of c's path its copy kept as
+// newer, as rsync names them, newer, and those files, each from ~: a file's,
+// its copy, of the file itself; a folder's, of those rsync names in it
+// alone, never one whose name would reach out of it.
+func newerIn(c copying, newer []string) (restore.Copy, []string) {
+	again := c.copy
+	if again.File {
+		return again, []string{c.Path}
 	}
-	files := make([]string, len(newer))
-	for i, name := range newer {
-		files[i] = c.Path + "/" + name
+	var files []string
+	for _, name := range newer {
+		if filepath.IsLocal(name) {
+			again.Only = append(again.Only, name)
+			files = append(files, c.Path+"/"+name)
+		}
 	}
-	return files
+	return again, files
 }
 
 // writtenHere says what of c's path its copy kept, newer here, n files, as

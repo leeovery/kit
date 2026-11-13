@@ -191,6 +191,9 @@ type Copy struct {
 	// never left in the person's folders; rsync makes it, not the folders
 	// it's in. The step clears it once the path's done.
 	Partial string
+	// Only are the files of a folder copied that are copied alone, each
+	// named from the folder: all it holds when none.
+	Only []string
 }
 
 // Stats is what a copy comes to: how many files it copies, or would, and
@@ -234,7 +237,9 @@ func (r Rsync) Size(ctx context.Context, c Copy) (Stats, error) {
 
 // Copy copies c, telling progress how far it's got as rsync says, and
 // returns what it copied, and the files it kept here, newer, as rsync says
-// it skipped each (its --info=skip1, as in ".zsh_history is newer"). A copy
+// it skipped each (its --info=skip1, as in ".zsh_history is newer"). It
+// has rsync name no file it copies (name1), as one copied named "x is
+// newer" would read as kept. A copy
 // stopped part way carries on from where it was, run again. Files vanished
 // from the source as it copied fail it with ErrVanished, and it still
 // returns what it copied.
@@ -251,9 +256,9 @@ func (r Rsync) Copy(ctx context.Context, c Copy, progress func(Progress)) (Stats
 			progress(p)
 		}
 	}
-	// Its output, a line for each thing copied, is read as it comes, not
+	// Its output, a line for each file copied, is read as it comes, not
 	// kept: a home's millions of files would be a gigabyte.
-	_, err := r.rsync(ctx, c, runner.Command{Lines: lines, Redraws: true, LinesOnly: true}, "--info=name1,progress2,skip1", "--stats")
+	_, err := r.rsync(ctx, c, runner.Command{Lines: lines, Redraws: true, LinesOnly: true}, "--info=progress2,skip1", "--stats")
 	s, err := stated(stats.text(), err)
 	s.Newer = newer
 	return s, err
@@ -307,7 +312,7 @@ func (r Rsync) rsync(ctx context.Context, c Copy, cmd runner.Command, options ..
 	if err != nil {
 		return runner.Result{}, err
 	}
-	cmd.Name, cmd.Args, cmd.Timeout = "rsync", args, runner.Unlimited
+	cmd.Name, cmd.Args, cmd.Timeout, cmd.Input = "rsync", args, runner.Unlimited, strings.Join(c.Only, "\x00")
 	res, err := r.run.Run(ctx, cmd)
 	return res, failed(err)
 }
@@ -316,11 +321,14 @@ func (r Rsync) rsync(ctx context.Context, c Copy, cmd runner.Command, options ..
 // anyone but root, keeps no owners), extended attributes, hard links and
 // creation dates; never sockets, pipes or devices, a running program's,
 // never data, which a live old Mac's state folders hold (rsync says it
-// skips each, a line the passes' readers pass over); never ACLs, as Time Machine's deny adding files to the
-// folders it marks; never deleting; never replacing a file newer here than
-// at the source (--update), so what the person's written since a copy began
-// outlives the copy run again and its second pass. --mkpath makes the
-// folders To is in, but not in a dry run.
+// skips each, a line the passes' readers pass over); never ACLs, as Time
+// Machine's deny adding files to the folders it marks; never deleting;
+// never replacing a file newer here than at the source (--update), so what
+// the person's written since a copy began outlives the copy run again and
+// its second pass. --mkpath makes the folders To is in, but not in a dry
+// run. Only's names are given on rsync's standard input, set apart by
+// NULs, as a name can hold a newline: --files-from implies --relative, so
+// each lands under To by the name it has from the folder.
 func (c Copy) args(options []string) ([]string, error) {
 	if err := c.check(); err != nil {
 		return nil, err
@@ -328,6 +336,9 @@ func (c Copy) args(options []string) ([]string, error) {
 	args := []string{"--archive", "--no-specials", "--no-devices", "--xattrs", "--hard-links", "--crtimes", "--mkpath", "--update", "--partial-dir=" + filepath.Clean(c.Partial)}
 	if c.Filter != "" {
 		args = append(args, "--exclude-from="+c.Filter)
+	}
+	if len(c.Only) > 0 {
+		args = append(args, "--from0", "--files-from=-")
 	}
 	if c.From.Host != "" {
 		args = append(args, fmt.Sprintf("--timeout=%d", int(ioTimeout.Seconds())), "--rsh="+c.From.Shell, "--rsync-path="+c.From.Rsync)

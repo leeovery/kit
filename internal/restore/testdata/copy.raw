@@ -1,15 +1,4 @@
-big
-         32,768B   0%       0B/s    0:00:00       50,000,000B  98%    160MB/s    0:00:00 (xfr#1, to-chk=6/8)
-sub/
-sub/f1
-     50,300,000B  98%    159MB/s    0:00:00 (xfr#2, to-chk=3/8)
-sub/f2
-     50,600,000B  99%    158MB/s    0:00:00 (xfr#3, to-chk=2/8)
-sub/f3
-     50,900,000B  99%    157MB/s    0:00:00 (xfr#4, to-chk=1/8)
-with space/
-with space/a b.txt
-     50,900,003B 100%    157MB/s    0:00:00 (xfr#5, to-chk=0/8)     50,900,003B 100%    157MB/s    0:00:00 (xfr#5, to-chk=0/8)     50,900,003B 100%    157MB/s    0:00:00 (xfr#5, to-chk=0/8)     50,900,003B 100%    157MB/s    0:00:00 (xfr#5, to-chk=0/8)
+         32,768B   0%       0B/s    0:00:00       50,000,000B  98%   91.2MB/s    0:00:00 (xfr#1, to-chk=6/8)     50,300,000B  98%   87.0MB/s    0:00:00 (xfr#2, to-chk=3/8)     50,600,000B  99%   87.2MB/s    0:00:00 (xfr#3, to-chk=2/8)     50,900,000B  99%   87.6MB/s    0:00:00 (xfr#4, to-chk=1/8)     50,900,003B 100%   87.6MB/s    0:00:00 (xfr#5, to-chk=0/8)     50,900,003B 100%   87.6MB/s    0:00:00 (xfr#5, to-chk=0/8)     50,900,003B 100%   87.4MB/s    0:00:00 (xfr#5, to-chk=0/8)     50,900,003B 100%   87.4MB/s    0:00:00 (xfr#5, to-chk=0/8)
 
 Number of files: 8 (reg: 5, dir: 3)
 Number of created files: 7 (reg: 5, dir: 2)
@@ -23,8 +12,8 @@ Matched data: 0 bytes
 File list size: 0
 File list generation time: 0.003 seconds
 File list transfer time: 0.000 seconds
-Total bytes sent: 50,912,902
+Total bytes sent: 50,912,909
 Total bytes received: 130
 
-sent 50,912,902 bytes  received 130 bytes  33,942,021.33 bytes/sec
+sent 50,912,909 bytes  received 130 bytes  33,942,026.00 bytes/sec
 total size is 50,900,003  speedup is 1.00

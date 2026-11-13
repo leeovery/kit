@@ -18,11 +18,16 @@ import (
 
 // The fixtures in testdata are rsync 3.5.2's own output, captured from real
 // runs in a scratch folder, renamed /Volumes/Scratch/restore: --version
-// (and macOS's openrsync's); a copy's --info=name1,progress2 --stats, its
-// carriage returns kept (copy.raw, and vanished.raw, a 200 MB file copied
-// slowly while a later file was deleted; copy-newer.raw, with skip1, a
-// file's copy over one newer there, which --update kept); a dry run's
-// --stats (size.raw);
+// (and macOS's openrsync's); a copy's --info=progress2,skip1 --stats, its
+// carriage returns kept (copy.raw; vanished.raw, a 200 MB file copied
+// slowly, its bandwidth limited, while a later file was deleted;
+// copy-newer.raw, a file's copy over one newer there, which --update kept,
+// and copy-newer-escaped.raw, the same of a file with a newline in its
+// name; copy-newer-folder.raw, a folder's, four files in it newer there,
+// two named with what rsync escapes, a newline and a backslash, and a file
+// named "x is newer" copied; copy-again.raw, the same folder's copy again,
+// of those four alone, set aside, named on its standard input with --from0
+// --files-from=-); a dry run's --stats (size.raw);
 // a second pass's --itemize-changes (compare.raw, after a file's contents
 // were changed, others' times, permissions and attributes, and a file, a
 // link, a hard link and an empty folder deleted; compare-skipping.raw,
@@ -62,7 +67,7 @@ var ops = []struct {
 		_, err := r.Size(ctx, c)
 		return err
 	}},
-	{"copy", []string{"--info=name1,progress2,skip1", "--stats"}, func(ctx context.Context, r Rsync, c Copy) error {
+	{"copy", []string{"--info=progress2,skip1", "--stats"}, func(ctx context.Context, r Rsync, c Copy) error {
 		_, err := r.Copy(ctx, c, nil)
 		return err
 	}},
@@ -152,7 +157,9 @@ func TestFindFailsWhenRsyncDoes(t *testing.T) {
 }
 
 // A folder's contents are copied into its place, the filter anchored at it;
-// a file is copied as its place; over SSH, through the shell given, with
+// a file is copied as its place; files of a folder copied alone are named
+// on rsync's standard input, set apart by NULs, as a name can hold a
+// newline, and nothing else is; over SSH, through the shell given, with
 // the host's rsync, ended if it goes quiet. rsync makes the folders its
 // place is in (--mkpath); the driver makes nothing.
 func TestCopyArguments(t *testing.T) {
@@ -168,6 +175,7 @@ func TestCopyArguments(t *testing.T) {
 		copy     func(home string) Copy
 		args     []string
 		from, to func(home string) string
+		input    string
 	}{
 		{
 			name: "a folder",
@@ -185,6 +193,18 @@ func TestCopyArguments(t *testing.T) {
 			copy: func(home string) Copy { return local("/Users/someone/Code/", home+"/Code/") },
 			from: func(string) string { return "/Volumes/snapshot/Users/someone/Code/" },
 			to:   func(home string) string { return home + "/Code/" },
+		},
+		{
+			name: "files of a folder alone",
+			copy: func(home string) Copy {
+				c := local("/Users/someone/.claude", home+"/.claude")
+				c.Only = []string{"history.jsonl", "projects/site/odd\nname"}
+				return c
+			},
+			args:  []string{"--from0", "--files-from=-"},
+			from:  func(string) string { return "/Volumes/snapshot/Users/someone/.claude/" },
+			to:    func(home string) string { return home + "/.claude/" },
+			input: "history.jsonl\x00projects/site/odd\nname",
 		},
 		{
 			name: "a file",
@@ -234,6 +254,9 @@ func TestCopyArguments(t *testing.T) {
 					t.Fatal(err)
 				}
 				cmd := fake.Commands()[0]
+				if cmd.Input != tt.input {
+					t.Errorf("input = %q, want %q", cmd.Input, tt.input)
+				}
 				if cmd.Timeout != runner.Unlimited {
 					t.Errorf("timeout = %v, want none: a copy takes as long as it takes", cmd.Timeout)
 				}
@@ -283,12 +306,11 @@ func TestCopiesNeverCarryACLsDeleteOrReplaceNewerFiles(t *testing.T) {
 }
 
 // The files the copy kept, newer here than at the source, as --update
-// keeps them, are named as rsync 3.5.2 says each under --info=skip1
-// (copy-newer.raw, a file's copy over one written since), its name put
-// back as it was where rsync escapes it (copy-newer-escaped.raw, the same
-// of a file with a newline in its name): a file's by its name; a folder's
-// each from the folder, in the words the file's say them. A copy keeping
-// none names none.
+// keeps them, are named as rsync 3.5.2 says each under --info=skip1, its
+// name put back as it was where rsync escapes it: a file's by its name
+// (copy-newer.raw, copy-newer-escaped.raw); a folder's each from the folder
+// (copy-newer-folder.raw), never a file copied, though named "x is newer".
+// A copy keeping none names none.
 func TestCopySaysWhatItKeptAsNewer(t *testing.T) {
 	file := Copy{From: Source{Path: "/Volumes/snapshot/Users/someone/.zsh_history"}, To: t.TempDir() + "/.zsh_history", Partial: partial, File: true}
 	folder := local("/Users/someone/.claude", t.TempDir()+"/.claude")
@@ -301,8 +323,9 @@ func TestCopySaysWhatItKeptAsNewer(t *testing.T) {
 		{"a file kept", file, realRsync(t, "copy-newer.raw", "", 0), []string{".zsh_history"}},
 		{"a file kept, its name escaped", Copy{From: Source{Path: "/Volumes/snapshot/Users/someone/nl\nname"}, To: t.TempDir() + "/nl\nname", Partial: partial, File: true}, realRsync(t, "copy-newer-escaped.raw", "", 0), []string{"nl\nname"}},
 		{"a file copied", file, realRsync(t, "copy.raw", "", 0), nil},
-		{"files in a folder kept", folder, NewRsync(prints(t, "history.jsonl is newer\nprojects/site/a b.jsonl is newer\nodd\\#012name is newer\nback\\#134#123slash is newer\nprojects/site/copied.jsonl\n"+fixture(t, "size.raw"))),
-			[]string{"history.jsonl", "projects/site/a b.jsonl", "odd\nname", `back\#123slash`}},
+		{"files in a folder kept", folder, realRsync(t, "copy-newer-folder.raw", "", 0),
+			[]string{"history.jsonl", `projects/site/back\#123slash`, "projects/site/odd\nname", "projects/site/session.jsonl"}},
+		{"files in a folder copied again", folder, realRsync(t, "copy-again.raw", "", 0), nil},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			stats, err := tt.rsync.Copy(t.Context(), tt.c, nil)
@@ -553,8 +576,8 @@ func TestFilesVanishedAreAnErrorOfTheirOwn(t *testing.T) {
 		t.Errorf("Copy() = %+v, want %+v", copied, want)
 	}
 	wantProgress := []Progress{
-		{32768, 0, 0}, {22413312, 10, 0}, {42598400, 20, 0}, {57704448, 27, 0}, {81494016, 38, 0},
-		{98861056, 47, 0}, {133824512, 63, 0}, {159809536, 76, 0}, {194805760, 92, 0},
+		{32768, 0, 0}, {23855104, 11, 0}, {48824320, 23, 0}, {74711040, 35, 0}, {100401152, 47, 0},
+		{124944384, 59, 0}, {150896640, 71, 0}, {174292992, 83, 0}, {200245248, 95, 0},
 		{209715200, 99, 1}, {209715205, 99, 2}, {209715210, 100, 3},
 	}
 	if !reflect.DeepEqual(progress, wantProgress) {

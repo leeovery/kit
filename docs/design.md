@@ -1472,8 +1472,8 @@ refuses a line the restore would refuse, before writing anything, and copies not
   Then a second pass comparing checksums: from a backup it must find nothing; from a live Mac
   what changed during the copy is copied again, and counted. Files the copy kept as newer here
   (rsync names each), as a shell's history every tab writes, or a tool's state, between a
-  path's setting aside and the copy reaching them, are set aside, those alone, and the path
-  copied again, once, before the second pass: only in set-up's window, before its copy first
+  path's setting aside and the copy reaching them, are set aside and copied again, those
+  alone, once, before the second pass: only in set-up's window, before its copy first
   started, never one resumed; any other is kept, as newer work always is, the log saying so.
   rsync's own errors fail the step.
 - **The judgement, per path, before its copy.** Recorded done: never restored again; its copy
