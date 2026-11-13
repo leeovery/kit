@@ -20,6 +20,7 @@ import (
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/engine"
+	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/hold"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/runner"
@@ -51,7 +52,6 @@ type Homebrew struct {
 	update struct {
 		mu   sync.Mutex
 		done bool
-		err  error
 	}
 	// changing is held while brew installs or uninstalls: formulae's and
 	// casks' steps run side by side, and two of Homebrew changing things at
@@ -307,23 +307,28 @@ func (h *Homebrew) watched(ctx context.Context, says string, cmd runner.Command)
 // updated brings Homebrew's formulae up to date, once a run, before the
 // first install: an install from stale formulae can fail. The step
 // installing says it's updating Homebrew, or, while another kind's install
-// updates it, that it waits for that (kind.Waiting).
-func (h *Homebrew) updated(ctx context.Context) error {
+// updates it, that it waits for that (kind.Waiting). An update that fails,
+// as it does when any one tap can't be fetched, is logged, and the installs
+// go on from the formulae Homebrew has.
+func (h *Homebrew) updated(ctx context.Context) {
 	if !h.update.mu.TryLock() {
 		resume := kind.Waiting(ctx, "Homebrew's update")
 		h.update.mu.Lock()
 		resume()
 	}
 	defer h.update.mu.Unlock()
-	if !h.update.done {
-		resume := kind.Saying(ctx, "updating Homebrew")
-		h.updating.Lock()
-		_, h.update.err = h.run.Run(ctx, h.batched(runner.Command{Name: "brew", Args: []string{"update", "--quiet"}}))
-		h.updating.Unlock()
-		h.update.done = true
-		resume()
+	if h.update.done {
+		return
 	}
-	return h.update.err
+	resume := kind.Saying(ctx, "updating Homebrew")
+	h.updating.Lock()
+	_, err := h.run.Run(ctx, h.batched(runner.Command{Name: "brew", Args: []string{"update", "--quiet"}}))
+	h.updating.Unlock()
+	h.update.done = true
+	resume()
+	if err != nil {
+		event.Log(ctx, event.Logged{Line: "Homebrew didn't update, so it installs from the formulae it has: " + err.Error(), Alert: true})
+	}
 }
 
 // install runs brew install, after brew update, of names, the kind named
@@ -334,9 +339,7 @@ func (h *Homebrew) updated(ctx context.Context) error {
 // as a dependency (a tap's php, wanted, and Homebrew's, which composer
 // needs a php of, share a keg). Then Homebrew's own, in one go.
 func (h *Homebrew) install(ctx context.Context, kindName, which string, names []string) error {
-	if err := h.updated(ctx); err != nil {
-		return err
-	}
+	h.updated(ctx)
 	defer h.take(ctx, kindName)()
 	var errs []error
 	for _, batch := range byTap(names) {

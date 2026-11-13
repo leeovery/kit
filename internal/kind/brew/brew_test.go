@@ -342,11 +342,24 @@ func TestATapThatFailsFailsItsOwnAlone(t *testing.T) {
 	}
 }
 
-func TestInstallFailsWhenUpdateDoes(t *testing.T) {
+// An update that fails, as it does when one tap can't be fetched, is
+// logged as an alert, once, and every install still goes in.
+func TestInstallGoesOnWhenUpdateFails(t *testing.T) {
 	fake := runnertest.New(t)
-	fake.On("brew", "update", "--quiet").Exits(1).PrintsToStderr("Error: no network")
-	if err := brew.New(fake).Formulae().Install(context.Background(), []string{"jq"}); err == nil || !strings.Contains(err.Error(), "brew update --quiet exited 1") {
-		t.Errorf("Install() error = %v, want update's", err)
+	fake.On("brew", "update", "--quiet").Exits(1).PrintsToStderr("Error: Fetching /opt/homebrew/Library/Taps/owner/homebrew-private failed!")
+	fake.On("brew", "install", "--formula", "jq")
+	fake.On("brew", "install", "--cask", "ghostty")
+	var logged []event.Logged
+	ctx := event.WithLogging(t.Context(), func(l event.Logged) { logged = append(logged, l) })
+	h := brew.New(fake)
+	if err := h.Formulae().Install(ctx, []string{"jq"}); err != nil {
+		t.Errorf("formulae: Install() error = %v, want it installed", err)
+	}
+	if err := h.Casks().Install(ctx, []string{"ghostty"}); err != nil {
+		t.Errorf("casks: Install() error = %v, want it installed", err)
+	}
+	if len(logged) != 1 || !logged[0].Alert || !strings.Contains(logged[0].Line, "homebrew-private failed") {
+		t.Errorf("logged %+v, want the update's failure once, an alert", logged)
 	}
 }
 
