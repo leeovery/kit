@@ -18,6 +18,7 @@ import (
 	"github.com/leeovery/kit/internal/nightly"
 	"github.com/leeovery/kit/internal/plist"
 	"github.com/leeovery/kit/internal/runner"
+	"github.com/leeovery/kit/internal/whole"
 )
 
 // LaunchName names the step installing the hourly launch.
@@ -241,26 +242,11 @@ func (l Launching) load(ctx context.Context, file string) error {
 	return nil
 }
 
-// WriteWhole writes data to path, whole or not at all, as a file renamed
-// into its place, making its folder with dirMode.
+// WriteWhole writes data to path whole or not at all, mode 0644, making
+// its folder with dirMode.
 func WriteWhole(path string, data []byte, dirMode os.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(path), dirMode); err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
-	if err != nil {
-		return err
-	}
-	defer func() { _ = os.Remove(tmp.Name()) }()
-	_, err = tmp.Write(data)
-	if err == nil {
-		err = tmp.Chmod(0o644)
-	}
-	if closeErr := tmp.Close(); err == nil {
-		err = closeErr
-	}
-	if err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), path)
+	return whole.Write(path, data, 0o644)
 }

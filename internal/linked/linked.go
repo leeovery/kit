@@ -20,6 +20,7 @@ import (
 	"github.com/leeovery/kit/internal/gitrepo"
 	"github.com/leeovery/kit/internal/runner"
 	"github.com/leeovery/kit/internal/state"
+	"github.com/leeovery/kit/internal/whole"
 )
 
 // StepName names the step, and its items' kind, as in file:~/.zshrc.
@@ -439,7 +440,7 @@ func (f *Files) Adopt(ctx context.Context, name string) (Link, error) {
 	if err != nil {
 		return l, err
 	}
-	if err := writeFile(l.Src, data, info.Mode().Perm()); err != nil {
+	if err := whole.Write(l.Src, data, info.Mode().Perm()); err != nil {
 		return l, err
 	}
 	return l, f.link(l)
@@ -523,7 +524,7 @@ func (f *Files) Add(ctx context.Context, path, scope string) ([]Link, []string, 
 		if err := os.MkdirAll(filepath.Dir(l.Src), 0o755); err != nil {
 			return nil, nil, err
 		}
-		if err := writeFile(l.Src, data, info.Mode().Perm()); err != nil {
+		if err := whole.Write(l.Src, data, info.Mode().Perm()); err != nil {
 			return nil, nil, err
 		}
 		if err := f.link(l); err != nil {
@@ -622,7 +623,7 @@ func (f *Files) Remove(ctx context.Context, name string) (Link, error) {
 	if err != nil {
 		return l, err
 	}
-	if err := writeFile(l.Dst, data, info.Mode().Perm()); err != nil {
+	if err := whole.Write(l.Dst, data, info.Mode().Perm()); err != nil {
 		return l, err
 	}
 	if err := os.Remove(l.Src); err != nil {
@@ -639,24 +640,6 @@ func (f *Files) Remove(ctx context.Context, name string) (Link, error) {
 		return l, err
 	}
 	return l, f.remember(links)
-}
-
-// writeFile writes data to path whole or not at all, with mode: beside it,
-// then renamed into place, replacing a file or a link.
-func writeFile(path string, data []byte, mode os.FileMode) error {
-	tmp := path + ".kit-new"
-	if err := os.WriteFile(tmp, data, mode); err != nil {
-		return err
-	}
-	if err := os.Chmod(tmp, mode); err != nil {
-		_ = os.Remove(tmp)
-		return err
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
-		return err
-	}
-	return nil
 }
 
 // ToBin moves path into the Bin, under a name of its own there: where it

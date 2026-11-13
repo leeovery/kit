@@ -31,6 +31,7 @@ import (
 
 	"github.com/leeovery/kit/internal/runner"
 	"github.com/leeovery/kit/internal/state"
+	"github.com/leeovery/kit/internal/whole"
 	"github.com/leeovery/kit/internal/wildmatch"
 )
 
@@ -397,15 +398,9 @@ func write(path string, data []byte) (string, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return "", err
 	}
-	tmp := filepath.Join(filepath.Dir(path), "."+filepath.Base(path)+".tmp")
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return "", err
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
-		return "", err
-	}
-	return what, nil
+	// Its name beside path ends .tmp, which the store's ignore file leaves
+	// out.
+	return what, whole.Write(path, data, 0o600)
 }
 
 // plural is n and a word, made plural unless n is 1.

@@ -15,6 +15,7 @@ import (
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/kind/secret/store"
 	"github.com/leeovery/kit/internal/runner"
+	"github.com/leeovery/kit/internal/whole"
 )
 
 // Install syncs every secret: those missing, and the rest, in one sitting.
@@ -414,7 +415,7 @@ func (sy *syncing) put(ctx context.Context) error {
 			env = append(env, sy.old[name])
 		}
 	}
-	if err := writeFile(filepath.Join(sy.s.home, EnvFile), header(sy.used)+strings.Join(env, "\n")+"\n", 0o600); err != nil {
+	if err := whole.Write(filepath.Join(sy.s.home, EnvFile), []byte(header(sy.used)+strings.Join(env, "\n")+"\n"), 0o600); err != nil {
 		return err
 	}
 	engine.Changed(ctx)
@@ -513,5 +514,5 @@ func (s *Secrets) writeFile(sec Secret, contents string) (int, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return 0, err
 	}
-	return 1, writeFile(path, contents, sec.Mode)
+	return 1, whole.Write(path, []byte(contents), sec.Mode)
 }

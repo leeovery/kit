@@ -16,6 +16,7 @@ import (
 	"github.com/leeovery/kit/internal/apps"
 	"github.com/leeovery/kit/internal/plist"
 	"github.com/leeovery/kit/internal/runner"
+	"github.com/leeovery/kit/internal/whole"
 	"github.com/leeovery/kit/internal/wildmatch"
 )
 
@@ -689,12 +690,7 @@ func (p *Prefs) restoreFile(files, stored, target, saved string, dryRun bool) (b
 	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
 		return false, errors.New("it couldn't be put in place")
 	}
-	tmp := filepath.Join(filepath.Dir(target), "."+filepath.Base(target)+".kit")
-	if err := os.WriteFile(tmp, want, mode); err != nil {
-		return false, errors.New("it couldn't be put in place")
-	}
-	if err := os.Rename(tmp, target); err != nil {
-		_ = os.Remove(tmp)
+	if err := whole.Write(target, want, mode); err != nil {
 		return false, errors.New("it couldn't be put in place")
 	}
 	return true, nil

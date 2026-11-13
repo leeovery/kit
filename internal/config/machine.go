@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/leeovery/kit/internal/whole"
 )
 
 // machineFile holds this Mac's name, in the state directory.
@@ -31,23 +33,7 @@ func WriteMachine(stateDir, name string) error {
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {
 		return fmt.Errorf("make the state directory: %w", err)
 	}
-	tmp, err := os.CreateTemp(stateDir, machineFile+".*")
-	if err != nil {
-		return fmt.Errorf("record this Mac's name: %w", err)
-	}
-	defer func() { _ = os.Remove(tmp.Name()) }()
-	if _, err := tmp.WriteString(name + "\n"); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("record this Mac's name: %w", err)
-	}
-	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("record this Mac's name: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("record this Mac's name: %w", err)
-	}
-	if err := os.Rename(tmp.Name(), filepath.Join(stateDir, machineFile)); err != nil {
+	if err := whole.Synced(filepath.Join(stateDir, machineFile), []byte(name+"\n"), 0o600); err != nil {
 		return fmt.Errorf("record this Mac's name: %w", err)
 	}
 	return nil
