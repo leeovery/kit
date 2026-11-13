@@ -1,6 +1,7 @@
 package ask
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -8,6 +9,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 	"unicode/utf8"
 
 	"github.com/charmbracelet/x/term"
@@ -195,22 +197,42 @@ func (t Terminal) keys() (<-chan key, func()) {
 		}
 	}
 	keys, done := make(chan key), make(chan struct{})
+	reads := reading(in, done)
 	go func() {
 		defer close(keys)
-		buf := make([]byte, 1024)
-		var pending []byte
-		for {
-			n, err := in.Read(buf)
-			var ks []key
-			ks, pending = parse(append(pending, buf[:n]...))
+		send := func(ks ...key) bool {
 			for _, k := range ks {
 				select {
 				case keys <- k:
 				case <-done:
-					return
+					return false
 				}
 			}
-			if err != nil {
+			return true
+		}
+		var pending []byte
+		for {
+			var lone <-chan time.Time
+			if string(pending) == "\x1b" {
+				lone = time.After(escapeWait)
+			}
+			select {
+			case b, ok := <-reads:
+				if !ok {
+					if string(pending) == "\x1b" {
+						send(key{name: "esc"})
+					}
+					return
+				}
+				var ks []key
+				if ks, pending = parse(append(pending, b...)); !send(ks...) {
+					return
+				}
+			case <-lone:
+				if pending = nil; !send(key{name: "esc"}) {
+					return
+				}
+			case <-done:
 				return
 			}
 		}
@@ -221,6 +243,34 @@ func (t Terminal) keys() (<-chan key, func()) {
 			cancel()
 		}
 	}
+}
+
+// escapeWait is how long an escape read alone waits for the rest of a
+// sequence, as an arrow split across two reads over a slow connection,
+// before it's escape.
+const escapeWait = 50 * time.Millisecond
+
+// reading is what's read from in, a read at a time, till it fails or done.
+func reading(in io.Reader, done <-chan struct{}) <-chan []byte {
+	reads := make(chan []byte)
+	go func() {
+		defer close(reads)
+		buf := make([]byte, 1024)
+		for {
+			n, err := in.Read(buf)
+			if n > 0 {
+				select {
+				case reads <- bytes.Clone(buf[:n]):
+				case <-done:
+					return
+				}
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+	return reads
 }
 
 // key is a key pressed: its name, as up, down, enter, tab, esc, ctrl+c or
@@ -239,7 +289,8 @@ func (k key) exported() Key {
 }
 
 // parse turns what the terminal sent into keys, and returns what's left of
-// a paste or a sequence still coming: the arrows, home and end, as either
+// a paste or a sequence still coming, an escape last among them, as it may
+// start one: the arrows, home and end, as either
 // form sends them, page up and down, enter, tab and shift+tab, escape
 // alone, Ctrl+C, backspace, a paste whole, text, the window's focus coming
 // and going, and the mouse's clicks and wheel; other controls and
@@ -264,7 +315,7 @@ func parse(b []byte) (keys []key, rest []byte) {
 			}
 			b = b[6:]
 		case b[0] == 0x1b && len(b) == 1:
-			keys, b = append(keys, key{name: "esc"}), nil
+			return keys, b
 		case b[0] == 0x1b && (b[1] == '[' || b[1] == 'O'):
 			i := 2
 			for i < len(b) && (b[i] < 0x40 || b[i] > 0x7e) {
