@@ -324,16 +324,16 @@ func (a *app) build(command, logName string, face render.Face, atTerminal bool) 
 		}
 	}
 	sink := event.NewFanout(face, log)
-	// Everything the run starts can ask it for an administrator's password,
-	// at a terminal, once the run is ready (askpass).
+	// What the run starts whose sudo asks can ask it for an administrator's
+	// password, at a terminal, once the run is ready (askpass).
 	var r *run
 	env := childEnv(a.Getenv, a.Environ(), home, path)
-	exec := runner.WithEnv(a.Runner(path, env), func() []string {
-		if r == nil || r.askpass == nil {
+	exec := runner.WithEnv(a.Runner(path, env), askpassEnv(func() *askpass.Server {
+		if r == nil {
 			return nil
 		}
-		return r.askpass.Env()
-	})
+		return r.askpass
+	}))
 	observed := runner.Observed(exec, func(ctx context.Context, rep runner.Report) { sink.Emit(event.Command(ctx, rep)) }, a.Now)
 	observed = runner.Streamed(observed, event.Changing, func(ctx context.Context, cmd runner.Command, line string) {
 		sink.Emit(event.Output{Time: a.Now(), Step: event.StepOf(ctx), Command: redact.Text(cmd.String()), Line: redact.Text(line, runner.SecretValues(ctx)...)})
@@ -711,6 +711,19 @@ func (a *app) askpass(face render.Face) *askpass.Server {
 		return nil
 	}
 	return s
+}
+
+// askpassEnv is what a command is given for its sudo to ask the run for an
+// administrator's password, through asks, once it's started: only a command
+// whose sudo asks so (runner.Command's SudoAsks), never everything the run
+// starts, as an npm package's install script.
+func askpassEnv(asks func() *askpass.Server) func(cmd runner.Command) []string {
+	return func(cmd runner.Command) []string {
+		if s := asks(); s != nil && cmd.SudoAsks {
+			return s.Env()
+		}
+		return nil
+	}
 }
 
 // placed is how the kind called name's lines install, as the run places

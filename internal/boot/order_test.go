@@ -234,6 +234,11 @@ func TestApps(t *testing.T) {
 	if res := step.Check(context.Background()); res.State != check.OK || res.Summary != "Ghostty 1.3.1" {
 		t.Errorf("check after = %+v", res)
 	}
+	for _, cmd := range run.Commands() {
+		if cmd.Name == "brew" && !cmd.SudoAsks {
+			t.Errorf("%s ran without its sudo asking the boot for the password", cmd)
+		}
+	}
 }
 
 // Applied after a check that failed, finding nothing, the apps step installs

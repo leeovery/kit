@@ -105,11 +105,40 @@ type only struct{ runner.Runner }
 // wrapped in any other: never an environment without what it adds.
 func TestEnvironOfARunnerThatCantSay(t *testing.T) {
 	r := only{runnertest.New(t)}
-	wrapped := runner.WithEnv(runner.Observed(r, func(context.Context, runner.Report) {}, time.Now), func() []string { return []string{"A=1"} })
+	wrapped := runner.WithEnv(runner.Observed(r, func(context.Context, runner.Report) {}, time.Now), func(runner.Command) []string { return []string{"A=1"} })
 	for name, r := range map[string]runner.Runner{"alone": r, "wrapped": wrapped} {
 		if env, ok := runner.Environ(t.Context(), r, runner.Command{Name: "git"}); ok || env != nil {
 			t.Errorf("%s: Environ() = %q, %t; want it unknown", name, env, ok)
 		}
+	}
+}
+
+// What WithEnv adds is chosen for each command, as it runs: the command's
+// own variables win.
+func TestWithEnvChoosesByTheCommand(t *testing.T) {
+	fake := runnertest.New(t)
+	fake.On("brew", "install", "zoom")
+	fake.On("brew", "update")
+	r := runner.WithEnv(fake, func(cmd runner.Command) []string {
+		if !cmd.SudoAsks {
+			return nil
+		}
+		return []string{"SUDO_ASKPASS=/helper", "A=added"}
+	})
+	for _, cmd := range []runner.Command{
+		{Name: "brew", Args: []string{"install", "zoom"}, Env: []string{"A=own"}, SudoAsks: true},
+		{Name: "brew", Args: []string{"update"}, Env: []string{"A=own"}},
+	} {
+		if _, err := r.Run(t.Context(), cmd); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := fake.Commands()
+	if want := []string{"SUDO_ASKPASS=/helper", "A=added", "A=own"}; !slices.Equal(got[0].Env, want) {
+		t.Errorf("%s ran with %q, want %q", got[0], got[0].Env, want)
+	}
+	if want := []string{"A=own"}; !slices.Equal(got[1].Env, want) {
+		t.Errorf("%s ran with %q, want %q", got[1], got[1].Env, want)
 	}
 }
 

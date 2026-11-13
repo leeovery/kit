@@ -289,7 +289,7 @@ func (b *Boot) appsStep(wanted []app) engine.Step {
 				return nil
 			}
 			b.doing(AppsStep, "installing")
-			_, err := b.Run.Run(ctx, runner.Command{Name: "brew", Args: slices.Concat([]string{"install", "--cask"}, casks), Timeout: 30 * time.Minute})
+			_, err := b.Run.Run(ctx, runner.Command{Name: "brew", Args: slices.Concat([]string{"install", "--cask"}, casks), Timeout: 30 * time.Minute, SudoAsks: true})
 			return err
 		},
 	}
@@ -398,7 +398,7 @@ func (b *Boot) clone(ctx context.Context) error {
 	}
 	if !runner.Has(b.Run, "gh") {
 		b.doing(ConfigStep, "installing GitHub's CLI")
-		if _, err := b.Run.Run(ctx, runner.Command{Name: "brew", Args: []string{"install", "--formula", "gh"}, Timeout: 15 * time.Minute}); err != nil {
+		if _, err := b.Run.Run(ctx, runner.Command{Name: "brew", Args: []string{"install", "--formula", "gh"}, Timeout: 15 * time.Minute, SudoAsks: true}); err != nil {
 			return fmt.Errorf("install GitHub's CLI: %w", err)
 		}
 	}

@@ -993,7 +993,8 @@ func TestCasksBlockedWithoutAnAdministrator(t *testing.T) {
 // With an administrator's password at hand for the run, brew, installing
 // or removing formulae or casks, is told its check of sudo is done, which
 // would have sudo forget it, and runs in kit's session, whose sudo has it;
-// without, brew checks as it would, in a session of its own.
+// without, brew checks as it would, in a session of its own. Either way,
+// its sudo asks the run for the password, and the update's doesn't.
 func TestInstallsKeepSudosPassword(t *testing.T) {
 	for _, held := range []bool{true, false} {
 		fake := runnertest.New(t)
@@ -1016,6 +1017,9 @@ func TestInstallsKeepSudosPassword(t *testing.T) {
 			}
 		}
 		for _, cmd := range fake.Commands() {
+			if cmd.SudoAsks != (cmd.Args[0] != "update") {
+				t.Errorf("held %v: %s ran with its sudo asking the run %v", held, cmd, cmd.SudoAsks)
+			}
 			if cmd.Args[0] == "update" {
 				continue
 			}
@@ -1186,8 +1190,8 @@ func TestTheHomebrewStepInstalls(t *testing.T) {
 		t.Fatalf("Apply() = %v", err)
 	}
 	run := fake.Commands()[len(fake.Commands())-1]
-	if !slices.Contains(run.Env, "NONINTERACTIVE=1") || run.Timeout < 30*time.Minute {
-		t.Errorf("the installer ran with %q, timeout %s; want it unattended, with time for the Xcode tools", run.Env, run.Timeout)
+	if !slices.Contains(run.Env, "NONINTERACTIVE=1") || run.Timeout < 30*time.Minute || !run.SudoAsks {
+		t.Errorf("the installer ran with %q, timeout %s, its sudo asking the run %v; want it unattended, with time for the Xcode tools, asking", run.Env, run.Timeout, run.SudoAsks)
 	}
 }
 

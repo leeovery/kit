@@ -80,6 +80,11 @@ type Command struct {
 	// as Homebrew's sudo, which asks kit (SUDO_ASKPASS, -A), and op, which
 	// asks in 1Password's app.
 	SharesSession bool
+	// SudoAsks is whether the sudo it runs asks kit's run for an
+	// administrator's password, through kit's helper (SUDO_ASKPASS), as
+	// Homebrew's installs do: only such a command is given the way to ask,
+	// as whatever it runs can ask that way.
+	SudoAsks bool
 }
 
 // String is the command as a shell would take it, each argument quoted
@@ -291,15 +296,15 @@ func SecretValues(ctx context.Context) []string {
 	return values
 }
 
-// WithEnv returns r with env's variables, as they stand when a command
-// runs, added to each command's environment.
-func WithEnv(r Runner, env func() []string) Runner {
+// WithEnv returns r with env's variables for each command, as they stand
+// when it runs, added to its environment.
+func WithEnv(r Runner, env func(cmd Command) []string) Runner {
 	return withEnv{runner: r, env: env}
 }
 
 type withEnv struct {
 	runner Runner
-	env    func() []string
+	env    func(cmd Command) []string
 }
 
 func (w withEnv) Has(name string) bool {
@@ -316,7 +321,7 @@ func (w withEnv) Run(ctx context.Context, cmd Command) (Result, error) {
 
 // with is cmd with env's variables added, its own over them.
 func (w withEnv) with(cmd Command) Command {
-	if env := w.env(); len(env) > 0 {
+	if env := w.env(cmd); len(env) > 0 {
 		cmd.Env = append(slices.Clone(env), cmd.Env...)
 	}
 	return cmd

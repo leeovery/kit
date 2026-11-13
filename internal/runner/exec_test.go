@@ -111,7 +111,7 @@ func TestExecRunsInItsOwnEnvironmentAndDirectory(t *testing.T) {
 func TestExecSaysTheEnvironmentACommandRunsIn(t *testing.T) {
 	exec, _ := programs(t, map[string]string{"show": "/usr/bin/env"})
 	exec.Env = append(exec.Env, "TOKEN=the runner's", "ADDED=the runner's")
-	added := runner.WithEnv(exec, func() []string { return []string{"ADDED=added", "OTHER=added"} })
+	added := runner.WithEnv(exec, func(runner.Command) []string { return []string{"ADDED=added", "OTHER=added"} })
 	r := runner.Streamed(runner.Observed(added, func(context.Context, runner.Report) {}, time.Now), func(context.Context) bool { return true }, func(context.Context, runner.Command, string) {})
 	ctx := runner.WithSecretEnv(t.Context(), "TOKEN=the context's")
 	cmd := runner.Command{Name: "show", Env: []string{"OTHER=the command's"}}

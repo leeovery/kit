@@ -179,7 +179,7 @@ func Install(ctx context.Context, run runner.Runner) error {
 	if _, err := run.Run(ctx, runner.Command{Name: "curl", Args: []string{"-fsSL", "--retry", "2", "-o", script, installer}}); err != nil {
 		return fmt.Errorf("download Homebrew's installer: %w", err)
 	}
-	if _, err := run.Run(ctx, runner.Command{Name: "/bin/bash", Args: []string{script}, Env: []string{"NONINTERACTIVE=1"}, Timeout: installerTimeout}); err != nil {
+	if _, err := run.Run(ctx, runner.Command{Name: "/bin/bash", Args: []string{script}, Env: []string{"NONINTERACTIVE=1"}, Timeout: installerTimeout, SudoAsks: true}); err != nil {
 		return fmt.Errorf("install Homebrew: %w", err)
 	}
 	return nil
@@ -499,14 +499,16 @@ func (h *Homebrew) uninstall(ctx context.Context, kindName string, which, names 
 	return h.watched(ctx, "uninstalling", h.sudoed(ctx, h.batched(runner.Command{Name: "brew", Args: slices.Concat([]string{"uninstall"}, which, names)})))
 }
 
-// sudoed is cmd, brew installing or uninstalling, when an administrator's
-// password is at hand for the run: told its check of sudo is done, as that
-// check makes sudo forget the password it was given, so sudo would ask for
-// it again, mid-run, of brew and of everything after it (formulae make the
-// check too: the third run, 14 Oct); and run in kit's own session, whose
+// sudoed is cmd, brew installing or uninstalling, its sudo asking the run
+// for an administrator's password (SudoAsks); when the password is at hand
+// for the run, told too that its check of sudo is done, as that check makes
+// sudo forget the password it was given, so sudo would ask for it again,
+// mid-run, of brew and of everything after it (formulae make the check
+// too: the third run, 14 Oct); and run in kit's own session, whose
 // sudo has the password, so a Mac with Touch ID for sudo shows no sheet
 // for it (SharesSession: Homebrew's sudo asks kit, never the terminal).
 func (h *Homebrew) sudoed(ctx context.Context, cmd runner.Command) runner.Command {
+	cmd.SudoAsks = true
 	if h.Admin == nil || !h.Admin(ctx) {
 		return cmd
 	}
