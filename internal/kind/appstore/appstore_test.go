@@ -509,17 +509,19 @@ func TestAPasswordMasMentionsIsntSudos(t *testing.T) {
 }
 
 // Each app waits for the password, should kit be asking for it again, as
-// once sudo's forgotten it: refused, the rest aren't tried.
+// once sudo's forgotten it: refused, the rest aren't tried, and fail,
+// saying so.
 func TestEachAppWaitsForThePassword(t *testing.T) {
 	fake := runnertest.New(t)
-	fake.On("mas", "list", "--json").Prints("")
+	fake.On("mas", "list", "--json").Prints("").Then().Prints(`{"adamID":1091189122,"name":"Bear"}` + "\n")
 	fake.On("sudo", "-n", "mas", "install", "1091189122")
 	pw := &answers{true, true, false}
 	s := kind.Placed(appstore.New(fake), declared("bear@1091189122", "xcode@497799835"), func(context.Context) kind.Placing { return kind.Placing{Admin: pw} })
-	if err := s.Apply(t.Context(), s.Check(t.Context())); err != nil {
-		t.Fatal(err)
+	err := s.Apply(t.Context(), s.Check(t.Context()))
+	if want := "couldn't install xcode@497799835: the administrator's password was refused"; err == nil || err.Error() != want {
+		t.Errorf("Apply = %v; want %q", err, want)
 	}
-	if want := []string{"mas list --json", "sudo -n mas install 1091189122"}; !slices.Equal(fake.Calls(), want) {
+	if want := []string{"mas list --json", "sudo -n mas install 1091189122", "mas list --json"}; !slices.Equal(fake.Calls(), want) {
 		t.Errorf("ran %q, want Bear installed, Xcode not tried once the password was refused", fake.Calls())
 	}
 }

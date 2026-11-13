@@ -42,6 +42,14 @@ var firstWord = 5 * time.Minute
 // adminWait is why an install waits, without an administrator's password.
 const adminWait = "needs an administrator's password: run kit apply at a terminal"
 
+// errAdminWait is an install's error once sudo's forgotten the password
+// and kit didn't get it again.
+var errAdminWait = errors.New(adminWait)
+
+// passwordRefused is why an install failed when kit asked for the
+// administrator's password and didn't get it.
+const passwordRefused = "the administrator's password was refused"
+
 // most is how many of a search's apps are offered.
 const most = 8
 
@@ -320,16 +328,23 @@ func (*AppStore) Resolve(_ context.Context, names []string) (map[string]string, 
 // install, one at a time, so one that fails or hangs holds none of the rest
 // up, each once kit has the password, should it be asking for it again
 // (kind.AwaitAdmin): till one's in, each is the check that someone's signed
-// in to the App Store (install). No one signed in, the rest aren't tried.
+// in to the App Store (install). No one signed in, or the password not
+// given, the rest aren't tried.
 func (s *AppStore) Install(ctx context.Context, names []string) error {
 	var errs []error
 	signedIn := false
 	for _, name := range names {
-		if ctx.Err() != nil || !kind.AwaitAdmin(ctx) {
+		if ctx.Err() != nil {
+			break
+		}
+		if !kind.AwaitAdmin(ctx) {
+			if ctx.Err() == nil {
+				errs = append(errs, errors.New(passwordRefused))
+			}
 			break
 		}
 		err := s.install(ctx, name, signedIn)
-		if _, out := errors.AsType[*notSignedIn](err); out {
+		if _, out := errors.AsType[*notSignedIn](err); out || errors.Is(err, errAdminWait) {
 			return kind.Joined(append(errs, err))
 		}
 		if err != nil {
@@ -361,7 +376,7 @@ func (s *AppStore) install(ctx context.Context, name string, signedIn bool) erro
 		case err == nil:
 			return nil
 		case kind.SudoForgot(err):
-			return errors.New(adminWait)
+			return errAdminWait
 		case !hung && !signedOut(err):
 			return failed(err)
 		}
