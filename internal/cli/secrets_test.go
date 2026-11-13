@@ -67,12 +67,14 @@ func TestSecretsSyncSaysItsWaitingForApproval(t *testing.T) {
 }
 
 // 1Password's variables in kit's environment, a password's session or a
-// service account's token, reach no program kit runs: op's driver passes
-// them to op alone.
+// service account's token, reach no program kit runs, however kit reads
+// its environment: op's driver passes them to op alone.
 func TestOnePasswordsVariablesReachNoOtherProgram(t *testing.T) {
 	w := laptopWorld(t)
+	t.Setenv("OP_SESSION_abc", "session-token")
+	t.Setenv("OP_SERVICE_ACCOUNT_TOKEN", "ops_x")
 	w.environ = []string{"OP_SESSION_abc=session-token", "OP_SERVICE_ACCOUNT_TOKEN=ops_x"}
-	w.env["OP_SERVICE_ACCOUNT_TOKEN"] = "ops_x"
+	w.env["OP_SESSION_abc"], w.env["OP_SERVICE_ACCOUNT_TOKEN"] = "session-token", "ops_x"
 	w.run(t, "status")
 	if slices.ContainsFunc(w.childEnv, func(kv string) bool { return strings.HasPrefix(kv, "OP_") }) {
 		t.Errorf("programs get %q", w.childEnv)
