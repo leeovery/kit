@@ -169,7 +169,10 @@ type Pretty struct {
 	hands func(step string, a hand.Answer) bool
 	// out is what's being written, sent to the terminal whole at the end of
 	// an event or a turn of the spinner, for the terminal to show at once.
-	out     strings.Builder
+	out strings.Builder
+	// turning are the spinner's turns, and what stops them coming; stop
+	// stops the spinner, which closes stopped once it has.
+	turning func() (<-chan time.Time, func())
 	stop    chan struct{}
 	stopped chan struct{}
 	err     error
@@ -179,7 +182,13 @@ type Pretty struct {
 // wide: its lines go no wider than kit's look allows. It animates while
 // steps run when animate is true.
 func NewPretty(w io.Writer, width int, animate bool) *Pretty {
-	return &Pretty{w: w, width: min(max(width, 40), look.Width), animate: animate, now: time.Now}
+	return &Pretty{w: w, width: min(max(width, 40), look.Width), animate: animate, now: time.Now, turning: everySpin}
+}
+
+// everySpin are the spinner's turns, one each spinEvery.
+func everySpin() (<-chan time.Time, func()) {
+	tick := time.NewTicker(spinEvery)
+	return tick.C, tick.Stop
 }
 
 // fit takes the terminal's width as it is now, for what's drawn next: a
@@ -711,22 +720,27 @@ func (p *Pretty) spin() {
 	p.stop, p.stopped = make(chan struct{}), make(chan struct{})
 	go func(stop, stopped chan struct{}) {
 		defer close(stopped)
-		tick := time.NewTicker(spinEvery)
-		defer tick.Stop()
+		ticks, done := p.turning()
+		defer done()
 		for {
 			select {
 			case <-stop:
 				return
-			case <-tick.C:
+			case <-ticks:
 				p.mu.Lock()
-				p.frame++
-				p.drawSpinner()
-				p.flush()
+				p.turn()
 				p.mu.Unlock()
 			}
 		}
 	}(p.stop, p.stopped)
 	p.drawSpinner()
+}
+
+// turn is a turn of the spinner: its next frame, drawn and shown at once.
+func (p *Pretty) turn() {
+	p.frame++
+	p.drawSpinner()
+	p.flush()
 }
 
 // drawSpinner draws the live part over the last: on a timeline, the running

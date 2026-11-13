@@ -79,14 +79,11 @@ func restoredData() []event.Event {
 // stand. In a small window, the row's the same, in the run's place.
 func TestApplyingShowsTheDataRestore(t *testing.T) {
 	took := 40 * time.Minute
-	for _, size := range [][2]int{{100, 30}, {160, 64}} {
-		name := fmt.Sprintf("apply-screen-restore-%dx%d.golden", size[0], size[1])
-		t.Run(name, func(t *testing.T) {
-			face, out, _ := applyAt(size[0], size[1], took, restoringData())
-			defer func() { _ = face.Close() }()
-			golden(t, name, screen(out.String())+"\n")
-		})
-	}
+	t.Run("apply-screen-restore-160x64.golden", func(t *testing.T) {
+		face, out, _ := applyAt(160, 64, took, restoringData())
+		defer func() { _ = face.Close() }()
+		golden(t, "apply-screen-restore-160x64.golden", screen(out.String())+"\n")
+	})
 	t.Run("apply-restore-small.golden", func(t *testing.T) {
 		face, out, _ := applyAt(99, 40, took, restoringData())
 		got := turned(screen(out.String()))

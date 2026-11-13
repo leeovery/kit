@@ -375,12 +375,12 @@ func TestPrettyKeepsToItsWidth(t *testing.T) {
 
 func TestPrettySpinsWhileStepsRun(t *testing.T) {
 	var out bytes.Buffer
-	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.NoTTY}, 80, true)
+	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.NoTTY}, 80, true).Turned()
 	steps := []event.Step{{Name: "brew", Title: "Formulae", Area: "Drift", Row: "Homebrew formulae", Tool: "Homebrew", Part: render.PartPackages}, {Name: "cask", Title: "Casks", Area: "Drift", Row: "Homebrew casks", Tool: "Homebrew", Part: render.PartPackages}}
 	face.Emit(event.RunStarted{Command: "status", Machine: "laptop", Steps: steps})
 	face.Emit(event.StepStarted{Step: "brew"})
 	face.Emit(event.StepStarted{Step: "cask"})
-	time.Sleep(200 * time.Millisecond)
+	face.Turn()
 	face.Emit(event.StepFinished{Step: "brew", Result: check.Result{State: check.OK, Summary: "2 declared, all installed"}})
 	face.Emit(event.StepFinished{Step: "cask", Result: check.Result{State: check.OK, Summary: "1 declared, all installed"}})
 	face.Emit(event.RunFinished{Counts: map[check.State]int{check.OK: 2}})
@@ -656,14 +656,14 @@ func turned(screen string) string {
 // away; failed, they stay.
 func TestPrettyShowsWhatACommandPrints(t *testing.T) {
 	var out syncBuffer
-	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true)
+	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).Turned()
 	face.Emit(event.RunStarted{Command: "brew add", Machine: "laptop", Steps: []event.Step{{Name: "jq", Title: "jq"}, {Name: "ripgrap", Title: "ripgrap"}}})
 	face.Emit(event.StepStarted{Step: "jq", Doing: "changing"})
 	for i := range 7 {
 		face.Emit(event.Output{Step: "jq", Command: "brew install --formula jq", Line: fmt.Sprintf("==> line %d", i+1)})
 	}
 	// What a command prints is drawn at the spinner's next turn, at most.
-	time.Sleep(300 * time.Millisecond)
+	face.Turn()
 	want := "\n  ◐ jq  changing · brew install --formula jq\n  │ ==> line 3\n  │ ==> line 4\n  │ ==> line 5\n  │ ==> line 6\n  │ ==> line 7"
 	if got := turned(screen(out.String())); got != want {
 		t.Errorf("while jq installs, the screen is\n%s\nwant\n%s", got, want)
@@ -686,11 +686,11 @@ func TestPrettyShowsWhatACommandPrints(t *testing.T) {
 // row while it runs, as the plain face does.
 func TestPrettyTimelineShowsWhatYoureToDo(t *testing.T) {
 	var out syncBuffer
-	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true)
+	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).Turned()
 	face.Emit(event.RunStarted{Command: "secret sync", Machine: "laptop", Steps: []event.Step{{Name: "secret", Title: "secret"}}})
 	face.Emit(event.StepStarted{Step: "secret", Doing: "syncing"})
 	face.Emit(event.Doing{Step: "secret", Says: "waiting for 1Password", Todo: "1Password asks whether kit may read your secrets: approve it"})
-	time.Sleep(300 * time.Millisecond)
+	face.Turn()
 	want := "\n  ▲ secret  waiting for 1Password\n  │ → 1Password asks whether kit may read your secrets: approve it"
 	if got := screen(out.String()); got != want {
 		t.Errorf("while 1Password asks, the screen is\n%s\nwant\n%s", got, want)
@@ -708,7 +708,7 @@ func TestPrettyTimelineShowsWhatYoureToDo(t *testing.T) {
 // once: what ran, the bar and the tally beside it, then the rows done.
 func TestPrettyApplyingNow(t *testing.T) {
 	var out syncBuffer
-	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).Sized(func() (int, int) { return 80, 40 })
+	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).Turned().Sized(func() (int, int) { return 80, 40 })
 	steps := []event.Step{
 		{Name: "time-machine", Title: "Time Machine", Area: "Backups"},
 		{Name: "brew", Title: "Formulae", Area: "Drift", Row: "Homebrew formulae", Tool: "Homebrew", Part: render.PartPackages},
@@ -727,7 +727,7 @@ func TestPrettyApplyingNow(t *testing.T) {
 	face.Emit(event.StepFinished{Step: "time-machine", Result: check.Result{State: check.OK, Summary: "last backup 02:35"}})
 	face.Emit(event.StepStarted{Step: "brew", Doing: "applying"})
 	face.Emit(event.Output{Step: "brew", Command: "brew install --formula jq", Line: "==> Pouring jq"})
-	time.Sleep(300 * time.Millisecond)
+	face.Turn()
 	got := turned(screen(out.String()))
 	if want := "  ◐ HOMEBREW FORMULAE  ○ HOMEBREW CASKS  ○ YOUR STEPS  ● BACKUPS 1\n\n  ▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮  1 of 4 · 1 running · "; !strings.Contains(got, want) {
 		t.Errorf("while applying, the screen is\n%s\nwant it to hold\n%s", got, want)
@@ -764,7 +764,7 @@ func TestPrettyApplyingNow(t *testing.T) {
 // room counts its lines.
 func TestPrettyApplyingWrapsWhatsUnwell(t *testing.T) {
 	var out syncBuffer
-	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).Sized(func() (int, int) { return 80, 20 })
+	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).Turned().Sized(func() (int, int) { return 80, 20 })
 	steps := []event.Step{
 		{Name: "long", Title: "A step of your own with a name long enough to need a line of its own", Area: "Drift"},
 		{Name: "next", Title: "Next", Area: "Drift"},
@@ -772,7 +772,7 @@ func TestPrettyApplyingWrapsWhatsUnwell(t *testing.T) {
 	face.Emit(event.RunStarted{Time: at, Command: "apply", Machine: "laptop", Steps: steps})
 	face.Emit(event.StepFinished{Step: "long", Result: check.Result{State: check.Failed, Reason: "couldn't apply: it broke"}})
 	face.Emit(event.StepStarted{Step: "next", Doing: "applying"})
-	time.Sleep(300 * time.Millisecond)
+	face.Turn()
 	got := screen(out.String())
 	want := "  ✗ A step of your own with a name long enough to need a line of its own\n    couldn't apply\n  ◐ Next  applying"
 	if !strings.Contains(got, want) {
@@ -787,7 +787,7 @@ func TestPrettyApplyingWrapsWhatsUnwell(t *testing.T) {
 // stays; once applied, the record lists every step that failed.
 func TestPrettyApplyingFitsTheTerminal(t *testing.T) {
 	var out syncBuffer
-	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).Sized(func() (int, int) { return 80, 12 })
+	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).Turned().Sized(func() (int, int) { return 80, 12 })
 	var steps []event.Step
 	for i := range 20 {
 		steps = append(steps, event.Step{Name: fmt.Sprintf("s%02d", i), Title: fmt.Sprintf("Step %02d", i), Area: "Drift"})
@@ -797,7 +797,7 @@ func TestPrettyApplyingFitsTheTerminal(t *testing.T) {
 		face.Emit(event.StepFinished{Step: fmt.Sprintf("s%02d", i), Result: check.Result{State: check.Failed, Reason: "couldn't apply: it broke"}})
 	}
 	face.Emit(event.StepStarted{Step: "s14", Doing: "applying"})
-	time.Sleep(300 * time.Millisecond)
+	face.Turn()
 	got := screen(out.String())
 	// The blank line before the live part is the run's, printed.
 	live := strings.Split(strings.TrimRight(got, "\n"), "\n")[1:]
@@ -820,7 +820,7 @@ func TestPrettyApplyingFitsTheTerminal(t *testing.T) {
 // what it's asking and what to do; answered, it goes.
 func TestPrettyApplyingWhileMacOSAsks(t *testing.T) {
 	var out syncBuffer
-	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).Sized(func() (int, int) { return 80, 40 })
+	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).Turned().Sized(func() (int, int) { return 80, 40 })
 	steps := []event.Step{{Name: "1password", Title: "1password", Area: "Manual"}, {Name: "cask", Title: "Homebrew casks", Area: "Drift", Row: "Homebrew casks", Tool: "Homebrew"}}
 	face.Emit(event.RunStarted{Time: at, Command: "apply", Machine: "laptop", Steps: steps})
 	face.Emit(event.StepStarted{Step: "cask", Doing: "applying"})
@@ -847,7 +847,7 @@ func TestPrettyApplyingWhileMacOSAsks(t *testing.T) {
 // another's thing isn't counted running, nor lights its row.
 func TestPrettyLightsSayAtOnce(t *testing.T) {
 	var out syncBuffer
-	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).Sized(func() (int, int) { return 80, 40 })
+	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).Turned().Sized(func() (int, int) { return 80, 40 })
 	steps := []event.Step{
 		{Name: "arq", Title: "Arq", Area: "Backups"},
 		{Name: "brew", Title: "Homebrew formulae", Area: "Drift", Row: "Homebrew formulae", Tool: "Homebrew"},
@@ -876,7 +876,7 @@ func TestPrettyLightsSayAtOnce(t *testing.T) {
 func TestPrettyFollowsTheTerminalsWidth(t *testing.T) {
 	var out syncBuffer
 	width := 45
-	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, width, true).Sized(func() (int, int) { return 80, 40 })
+	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, width, true).Turned().Sized(func() (int, int) { return 80, 40 })
 	steps := []event.Step{
 		{Name: "time-machine", Title: "Time Machine", Area: "Backups"},
 		{Name: "brew", Title: "Homebrew formulae", Area: "Drift", Row: "Homebrew formulae", Tool: "Homebrew"},
@@ -902,7 +902,7 @@ func TestPrettyFollowsTheTerminalsWidth(t *testing.T) {
 // as it ends: the live part hides it again.
 func TestPrettyHidesTheCursorAfterAQuestion(t *testing.T) {
 	var out syncBuffer
-	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).Sized(func() (int, int) { return 80, 40 })
+	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).Turned().Sized(func() (int, int) { return 80, 40 })
 	steps := []event.Step{{Name: "brew", Title: "Homebrew formulae", Area: "Drift", Row: "Homebrew formulae", Tool: "Homebrew"}}
 	face.Emit(event.Preparing{Time: at, Command: "apply", Machine: "laptop", Doing: "checking what will need an administrator's password", Steps: steps})
 	face.Emit(event.Preparing{Time: at, Command: "apply", Machine: "laptop"})
@@ -928,19 +928,19 @@ func TestPrettyHidesTheCursorAfterAQuestion(t *testing.T) {
 // the question left the cursor, over the question.
 func TestPrettyHoldsStillForAQuestion(t *testing.T) {
 	var out syncBuffer
-	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).Sized(func() (int, int) { return 80, 40 })
+	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).Turned().Sized(func() (int, int) { return 80, 40 })
 	steps := []event.Step{{Name: "brew", Title: "Homebrew formulae", Area: "Drift", Row: "Homebrew formulae", Tool: "Homebrew"}}
 	face.Emit(event.Preparing{Time: at, Command: "apply", Machine: "laptop", Doing: "checking what will need an administrator's password", Steps: steps})
 	face.Emit(event.Preparing{Time: at, Command: "apply", Machine: "laptop"})
 	asked := out.String()
-	time.Sleep(400 * time.Millisecond)
+	face.Turn()
 	if drawn := strings.TrimPrefix(out.String(), asked); drawn != "" {
 		t.Errorf("while the question was up, the face drew %q; want nothing", drawn)
 	}
 	face.Emit(event.RunStarted{Time: at, Command: "apply", Machine: "laptop", Steps: steps})
 	face.Emit(event.StepStarted{Step: "brew", Doing: "applying"})
 	before := out.String()
-	time.Sleep(400 * time.Millisecond)
+	face.Turn()
 	if out.String() == before {
 		t.Error("once the run started, the spinner didn't turn again")
 	}
@@ -957,7 +957,7 @@ func TestPrettyHoldsStillForAQuestion(t *testing.T) {
 // then, once it's answered, the run as it stands.
 func TestPrettyHoldsStillWhileTheRunGoesOn(t *testing.T) {
 	var out syncBuffer
-	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).Sized(func() (int, int) { return 80, 40 })
+	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).Turned().Sized(func() (int, int) { return 80, 40 })
 	steps := []event.Step{{Name: "brew", Title: "Homebrew formulae", Area: "Drift"}}
 	face.Emit(event.Preparing{Time: at, Command: "apply", Machine: "laptop", Doing: "checking what will need an administrator's password", Steps: steps})
 	face.Emit(event.Preparing{Time: at, Command: "apply", Machine: "laptop"})
@@ -971,7 +971,7 @@ func TestPrettyHoldsStillWhileTheRunGoesOn(t *testing.T) {
 	aside := face.StepAside()
 	aside()
 	aside()
-	time.Sleep(400 * time.Millisecond)
+	face.Turn()
 	if drawn := strings.TrimPrefix(out.String(), asked); drawn != "" {
 		t.Errorf("while the question was up, the face drew %q; want nothing", drawn)
 	}
@@ -991,7 +991,7 @@ func TestPrettyHoldsStillWhileTheRunGoesOn(t *testing.T) {
 // light of the row it holds up asking.
 func TestPrettyBootstrapInTheTerminal(t *testing.T) {
 	var out syncBuffer
-	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).Sized(func() (int, int) { return 80, 40 })
+	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).Turned().Sized(func() (int, int) { return 80, 40 })
 	steps := []event.Step{
 		{Name: "boot-github", Title: "GitHub", Area: boot.AreaBooted},
 		{Name: "boot-access", Title: "Full Disk Access", Area: boot.AreaBooted, Waits: []string{"boot-github"}},
@@ -1006,7 +1006,7 @@ func TestPrettyBootstrapInTheTerminal(t *testing.T) {
 	face.Emit(event.StepStarted{Step: "1password", Doing: "applying"})
 	face.Emit(event.Doing{Step: "1password", Says: "not signed in", Todo: "sign in with your phone's 1Password, then turn on\nSettings › Developer › Integrate with 1Password CLI"})
 	face.Emit(event.StepStarted{Step: "cask", Doing: "applying"})
-	time.Sleep(300 * time.Millisecond)
+	face.Turn()
 	got := turned(screen(out.String()))
 	for _, want := range []string{"│  bootstrap\n", "  ● THIS MAC 2   ▲ SECRETS   ◐ HOMEBREW CASKS  ○ YOUR STEPS\n\n  ▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮  2 of 6 · 1 running · 1 needs you",
 		"s\n\n  ◐ Casks  applying\n  ▲ 1Password  not signed in\n  │ → sign in with your phone's 1Password, then turn on\n  │   Settings › Developer › Integrate with 1Password CLI"} {
@@ -1035,7 +1035,7 @@ func TestPrettyBootstrapInTheTerminal(t *testing.T) {
 // record's steps needing you, named by its row and by itself.
 func TestPrettyBootstrapShowsABootStepNotWell(t *testing.T) {
 	var out syncBuffer
-	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).Sized(func() (int, int) { return 80, 40 })
+	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).Turned().Sized(func() (int, int) { return 80, 40 })
 	face.Emit(event.RunStarted{Time: at, Command: "bootstrap", Machine: "laptop", Steps: []event.Step{
 		{Name: "boot-github", Title: "GitHub", Area: boot.AreaBooted},
 		{Name: "boot-access", Title: "Full Disk Access", Area: boot.AreaBooted},

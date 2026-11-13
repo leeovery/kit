@@ -137,7 +137,7 @@ func TestApplyingRawView(t *testing.T) {
 		t.Errorf("r, the raw view is\n%s\nwant\n%s", strings.Join(raw, "\n"), strings.Join(formulaeRaw, "\n"))
 	}
 	face.Emit(event.Output{Time: after(380), Step: "brew", Command: "brew install", Line: "🍺  /opt/homebrew/Cellar/ffmpeg/7.1: 285 files"})
-	time.Sleep(300 * time.Millisecond)
+	face.Turn()
 	if raw := rawShown(shows(), 160); len(raw) != 3 || raw[2] != "  03:10:25  │ 🍺  /opt/homebrew/Cellar/ffmpeg/7.1: 285 files" {
 		t.Errorf("a line came while the raw view was open, it is\n%s\nwant it at its foot", strings.Join(raw, "\n"))
 	}
