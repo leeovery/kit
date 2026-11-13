@@ -1479,8 +1479,8 @@ func TestAStepWaitsForAThingOfNoStepWhileOthersWork(t *testing.T) {
 
 // A wait for a thing no step in particular puts in place ends once nothing
 // at work in the run could put it there: the step isn't applied, deferred,
-// saying what isn't there, unless it stands ok. Steps each waiting so both
-// end.
+// saying what isn't there, unless it stands ok, or its check failed for a
+// reason of its own. Steps each waiting so both end.
 func TestAWaitForAThingOfNoStepEndsOnceTheRunsQuiet(t *testing.T) {
 	defer engine.SetWaitPoll(time.Hour)()
 	never := func(context.Context) bool { return false }
@@ -1491,6 +1491,7 @@ func TestAWaitForAThingOfNoStepEndsOnceTheRunsQuiet(t *testing.T) {
 	}{
 		{"not done", check.Result{State: check.Attention}, check.Result{State: check.Deferred, Reason: "needs npm, which isn't there yet"}},
 		{"done anyway", check.Result{State: check.OK, Items: []check.Item{{ID: "npm:quiet", Action: "remove"}}}, check.Result{State: check.OK}},
+		{"its check failed", check.Result{State: check.Failed, Reason: "couldn't read the list"}, check.Result{State: check.Failed, Reason: "couldn't read the list"}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			var applied atomic.Bool
