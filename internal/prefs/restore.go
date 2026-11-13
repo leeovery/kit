@@ -116,31 +116,16 @@ func (r RestoreReport) Failures() int {
 	return len(r.Failed) + len(r.FilesFailed)
 }
 
-// helperDirs are where apps keep helper apps with their own preferences.
-var helperDirs = []string{"Contents/MacOS", "Contents/Library/LoginItems", "Contents/Helpers"}
-
 // installedApps are the apps installed, by bundle id: in each app folder and
 // a folder below, and the helper apps inside them (Keyboard Maestro's
 // Engine, login items). The first found of a bundle id is kept.
 func (p *Prefs) installedApps() map[string]string {
 	byID := map[string]string{}
-	for _, base := range p.AppDirs {
-		var found []string
-		for _, pattern := range []string{"*.app", "*/*.app"} {
-			m, _ := filepath.Glob(filepath.Join(base, pattern))
-			found = append(found, m...)
-		}
-		for _, app := range found {
-			bundles := []string{app}
-			for _, d := range helperDirs {
-				h, _ := filepath.Glob(filepath.Join(app, d, "*.app"))
-				bundles = append(bundles, h...)
-			}
-			for _, b := range bundles {
-				if id := apps.BundleID(b); id != "" {
-					if _, seen := byID[id]; !seen {
-						byID[id] = b
-					}
+	for _, app := range apps.Installed(p.AppDirs) {
+		for _, b := range apps.WithHelpers(app) {
+			if id := apps.BundleID(b); id != "" {
+				if _, seen := byID[id]; !seen {
+					byID[id] = b
 				}
 			}
 		}

@@ -278,8 +278,7 @@ func (s *AppStore) Missed(ctx context.Context, names []string) ([]kind.Installed
 func (s *AppStore) received() []string {
 	var bundles []string
 	for _, dir := range s.AppDirs {
-		paths, _ := filepath.Glob(filepath.Join(dir, "*.app"))
-		for _, path := range paths {
+		for _, path := range apps.In(dir) {
 			if _, err := os.Stat(filepath.Join(path, "Contents", "_MASReceipt", "receipt")); err != nil {
 				continue
 			}

@@ -34,7 +34,7 @@ type bundle struct {
 func (f *Folders) Has(id string) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	for _, app := range f.apps() {
+	for _, app := range Installed(f.Dirs) {
 		if f.idOf(app) == id {
 			return true
 		}
@@ -42,22 +42,51 @@ func (f *Folders) Has(id string) bool {
 	return false
 }
 
-// apps are the apps in the folders, and in the folders below them, a link
-// to a folder followed, by path.
-func (f *Folders) apps() []string {
+// In are the apps in dir, by path, in name order: none when it can't be
+// read.
+func In(dir string) []string {
+	entries, _ := os.ReadDir(dir)
 	var found []string
-	for _, dir := range f.Dirs {
+	for _, e := range entries {
+		if filepath.Ext(e.Name()) == ".app" {
+			found = append(found, filepath.Join(dir, e.Name()))
+		}
+	}
+	return found
+}
+
+// Installed are the apps in dirs, by path: each folder's own, then those
+// in each folder inside it, as Utilities holds them, a link to a folder
+// followed.
+func Installed(dirs []string) []string {
+	var found []string
+	for _, dir := range dirs {
 		entries, _ := os.ReadDir(dir)
+		var below []string
 		for _, e := range entries {
 			path := filepath.Join(dir, e.Name())
 			switch {
 			case filepath.Ext(e.Name()) == ".app":
 				found = append(found, path)
 			case isDir(path, e):
-				below, _ := filepath.Glob(filepath.Join(path, "*.app"))
-				found = append(found, below...)
+				below = append(below, In(path)...)
 			}
 		}
+		found = append(found, below...)
+	}
+	return found
+}
+
+// helperDirs are the folders inside an app where the apps that come with
+// it are: helpers and login items, with settings of their own.
+var helperDirs = []string{"Contents/MacOS", "Contents/Library/LoginItems", "Contents/Helpers"}
+
+// WithHelpers is app, then the apps inside it that come with it (Keyboard
+// Maestro's Engine, login items).
+func WithHelpers(app string) []string {
+	found := []string{app}
+	for _, dir := range helperDirs {
+		found = append(found, In(filepath.Join(app, dir))...)
 	}
 	return found
 }

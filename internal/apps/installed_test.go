@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -91,5 +92,29 @@ func TestFolders(t *testing.T) {
 	}
 	if got := apps.BundleID(filepath.Join(one, "Missing.app")); got != "" {
 		t.Errorf("BundleID() of no app = %q", got)
+	}
+}
+
+// A folder's own apps come first, then those in the folders inside it, so
+// the first of a bundle id found is the one installed at the top; an app's
+// helpers come after it.
+func TestInstalledInOrder(t *testing.T) {
+	dir := t.TempDir()
+	for _, app := range []string{"B.app", "A Folder/Inside.app", "C.app/Contents/Library/LoginItems/Login.app", "C.app/Contents/Resources/Not A Helper.app"} {
+		if err := os.MkdirAll(filepath.Join(dir, app), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	at := func(names ...string) []string {
+		for i, n := range names {
+			names[i] = filepath.Join(dir, n)
+		}
+		return names
+	}
+	if got, want := apps.Installed([]string{dir}), at("B.app", "C.app", "A Folder/Inside.app"); !slices.Equal(got, want) {
+		t.Errorf("Installed() = %q, want %q", got, want)
+	}
+	if got, want := apps.WithHelpers(filepath.Join(dir, "C.app")), at("C.app", "C.app/Contents/Library/LoginItems/Login.app"); !slices.Equal(got, want) {
+		t.Errorf("WithHelpers() = %q, want %q", got, want)
 	}
 }

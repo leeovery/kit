@@ -17,6 +17,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/leeovery/kit/internal/apps"
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/hold"
 	"github.com/leeovery/kit/internal/kind"
@@ -85,11 +86,6 @@ const DeleteScript = `function run(argv) {
 // installed, or, a helper an app puts in place when it's first opened, as
 // Figma's agent, that app hasn't been opened.
 const notInstalled = "not installed: install the app, or open the app it comes with"
-
-// helperDirs are the folders inside an app where the apps that come with
-// it live, as a helper that opens at login: Keyboard Maestro's engine, in
-// Contents/MacOS.
-var helperDirs = []string{"Contents/MacOS", "Contents/Library/LoginItems", "Contents/Helpers"}
 
 // Login is the login items, driven through a runner.
 type Login struct {
@@ -233,41 +229,26 @@ func (l *Login) identify(ctx context.Context, wanted []string) ([]item, error) {
 }
 
 // lookFor finds the apps in AppDirs, and the apps inside each that come
-// with it (helperDirs), by bundle id, as Key has it: each read from its
-// bundle, in one run of the script, the first of an id found kept.
+// with it (apps.WithHelpers), by bundle id, as Key has it: each read from
+// its bundle, in one run of the script, the first of an id found kept.
 func (l *Login) lookFor(ctx context.Context) (map[string]item, error) {
 	var paths []string
 	for _, dir := range l.AppDirs {
-		for _, app := range appsIn(dir) {
-			paths = append(paths, app)
-			for _, sub := range helperDirs {
-				paths = append(paths, appsIn(filepath.Join(app, sub))...)
-			}
+		for _, app := range apps.In(dir) {
+			paths = append(paths, apps.WithHelpers(app)...)
 		}
 	}
-	apps, err := l.ask(ctx, paths)
+	asked, err := l.ask(ctx, paths)
 	if err != nil {
 		return nil, err
 	}
-	found := make(map[string]item, len(apps))
-	for _, app := range apps {
+	found := make(map[string]item, len(asked))
+	for _, app := range asked {
 		if _, seen := found[l.Key(app.ID)]; app.ID != "" && !seen {
 			found[l.Key(app.ID)] = app
 		}
 	}
 	return found, nil
-}
-
-// appsIn are the apps in dir, by path: none when it can't be read.
-func appsIn(dir string) []string {
-	entries, _ := os.ReadDir(dir)
-	var apps []string
-	for _, e := range entries {
-		if strings.HasSuffix(e.Name(), ".app") {
-			apps = append(apps, filepath.Join(dir, e.Name()))
-		}
-	}
-	return apps
 }
 
 // ask asks the script of the apps wanted names, by path or bundle id, in

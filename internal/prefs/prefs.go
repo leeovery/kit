@@ -120,7 +120,8 @@ type Prefs struct {
 	// Probes are what only Full Disk Access can read: some folders in the
 	// home, and the TCC database.
 	Probes []string
-	// AppDirs are where apps are installed.
+	// AppDirs are the folders apps are installed in, which New leaves to
+	// its caller.
 	AppDirs []string
 	// Sleep waits while another git holds the store's index, and while
 	// another kit clones the store.
@@ -137,8 +138,7 @@ func New(run runner.Runner, home, stateDir, clone, remote, mac string, lists Lis
 			filepath.Join(home, "Library/Safari"), filepath.Join(home, "Library/Mail"), filepath.Join(home, "Library/Messages"),
 			"/Library/Application Support/com.apple.TCC/TCC.db",
 		},
-		AppDirs: []string{"/Applications", filepath.Join(home, "Applications")},
-		Sleep:   time.Sleep,
+		Sleep: time.Sleep,
 	}
 }
 
