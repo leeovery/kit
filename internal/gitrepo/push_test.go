@@ -554,7 +554,7 @@ func TestPushFails(t *testing.T) {
 		{"offline, the port closed", "couldn't reach the remote, so nothing was pushed", fetchFails("ssh: connect to host 127.0.0.1 port 1: Connection refused\nfatal: Could not read from remote repository.\n\nPlease make sure you have the correct access rights\nand the repository exists.\n")},
 		{"offline, the host silent", "couldn't reach the remote, so nothing was pushed", fetchFails("Connection timed out during banner exchange\nConnection to 127.0.0.1 port 52223 timed out\nfatal: Could not read from remote repository.\n\nPlease make sure you have the correct access rights\nand the repository exists.\n")},
 		{"a transport's own line", "couldn't bring in the remote's changes, so nothing was pushed", fetchFails("mirror: Connection refused by the first mirror, its repository gone\nfatal: Could not read from remote repository.\n\nPlease make sure you have the correct access rights\nand the repository exists.\n")},
-		{"HEAD on no branch", "HEAD isn't on a branch, so nothing was pushed", func(fake *runnertest.Fake) *sequence {
+		{"HEAD on no branch", "HEAD isn't on a branch, so kit pushes nothing", func(fake *runnertest.Fake) *sequence {
 			s := &sequence{fake: fake}
 			s.expect(call{args: git("remote")}).Prints("origin\n")
 			s.expect(call{args: gitDirOf}).Prints(t.TempDir() + "\n")
@@ -714,12 +714,12 @@ func TestPushToAnotherRemoteThanItsUpstreams(t *testing.T) {
 // never shown, as it may carry a token.
 func TestPushRefusesAPushRemoteThatIsntOne(t *testing.T) {
 	for _, c := range []struct{ name, branchSays, defaultSays, want string }{
-		{"a URL", "git@github.com:someone/fork.git", "", "branch.main.pushRemote is a URL, not a remote's name, so nothing was pushed: kit pushes only to one of the repository's remotes, by its name"},
+		{"a URL", "git@github.com:someone/fork.git", "", "branch.main.pushRemote is a URL, not a remote's name, so kit pushes nothing: kit pushes only to one of the repository's remotes, by its name"},
 		// Split at its @, which the personal-data scan would take for an
 		// email address's.
-		{"a URL with a token", "", "https://x-access-token:secret@" + "github.com/someone/fork", "remote.pushDefault is a URL, not a remote's name, so nothing was pushed: kit pushes only to one of the repository's remotes, by its name"},
-		{"a local path", "", "../fork", "remote.pushDefault is a URL, not a remote's name, so nothing was pushed: kit pushes only to one of the repository's remotes, by its name"},
-		{"no remote", "fork", "", "branch.main.pushRemote is fork, not one of the repository's remotes, so nothing was pushed: kit pushes only to a remote by its name"},
+		{"a URL with a token", "", "https://x-access-token:secret@" + "github.com/someone/fork", "remote.pushDefault is a URL, not a remote's name, so kit pushes nothing: kit pushes only to one of the repository's remotes, by its name"},
+		{"a local path", "", "../fork", "remote.pushDefault is a URL, not a remote's name, so kit pushes nothing: kit pushes only to one of the repository's remotes, by its name"},
+		{"no remote", "fork", "", "branch.main.pushRemote is fork, not one of the repository's remotes, so kit pushes nothing: kit pushes only to a remote by its name"},
 	} {
 		fake := runnertest.New(t)
 		s := &sequence{fake: fake}
@@ -806,7 +806,7 @@ func TestPushNowhere(t *testing.T) {
 	fake := runnertest.New(t)
 	fake.On("git", git("remote")...).Prints("origin\n")
 	fake.On("git", branchOf...).Exits(1)
-	if _, _, err := (gitrepo.Repo{Dir: dir, Run: fake}).PushURLs(context.Background()); err == nil || err.Error() != "HEAD isn't on a branch, so nothing was pushed" || !errors.Is(err, gitrepo.ErrNowhere) {
+	if _, _, err := (gitrepo.Repo{Dir: dir, Run: fake}).PushURLs(context.Background()); err == nil || err.Error() != "HEAD isn't on a branch, so kit pushes nothing" || !errors.Is(err, gitrepo.ErrNowhere) {
 		t.Errorf("PushURLs(), HEAD on no branch = %v, want ErrNowhere", err)
 	}
 	for _, setting := range []string{"git@github.com:someone/fork.git", "fork"} {
@@ -855,7 +855,7 @@ func TestPushRefusesWithNowhereToGo(t *testing.T) {
 		want                    string
 	}{
 		{"the upstream gone", "origin\n", tracksOrigin, true, "main's upstream, origin/main, is gone from origin, as when it's renamed or deleted there, so nothing was pushed: git branch --set-upstream-to=<remote>/<branch> follows the one it's become"},
-		{"no remote set", "backup\nupstream\n", "\x00\n", false, "main has no upstream, and which remote it's pushed to isn't set, so nothing was pushed: git config remote.pushDefault <remote> sets it"},
+		{"no remote set", "backup\nupstream\n", "\x00\n", false, "main has no upstream, and which remote it's pushed to isn't set, so kit pushes nothing: git config remote.pushDefault <remote> sets it"},
 	} {
 		for _, holding := range []bool{false, true} {
 			fake := runnertest.New(t)

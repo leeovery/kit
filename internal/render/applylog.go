@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/x/ansi"
 
@@ -387,7 +389,8 @@ func (r runningStep) doingSays(named, sentence bool) (says, far string) {
 		doing += " " + r.title
 	}
 	if sentence && doing != "" {
-		doing = strings.ToUpper(doing[:1]) + doing[1:]
+		first, n := utf8.DecodeRuneInString(doing)
+		doing = string(unicode.ToUpper(first)) + doing[n:]
 	}
 	if r.of > 0 {
 		far = look.White(fmt.Sprintf("%d of %d", r.done, r.of))

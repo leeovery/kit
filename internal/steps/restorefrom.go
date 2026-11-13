@@ -127,8 +127,9 @@ type fallback struct {
 // old Mac, mac, not answering or its host key not recorded, as why says:
 // one of the Time Machine disks attached holding the person's backups,
 // Arq's restore by hand, or the old Mac again; the disks it couldn't look
-// for, it says why, offering the rest. Without a terminal there's no one to ask: why is the error, which
-// names kit apply's flag that answers it (unopened).
+// for, it says why, offering the rest. Without a whole kit apply at a
+// terminal there's no one to ask: why is the error, which names kit
+// apply's flag that answers it (unopened).
 func (r Restoring) instead(ctx context.Context, mac restore.Origin, why error) (fallback, error) {
 	if r.Raise == nil {
 		if errors.Is(why, oldmac.ErrNoHostKey) {
@@ -152,12 +153,12 @@ func (r Restoring) instead(ctx context.Context, mac restore.Origin, why error) (
 // restore by hand; or to restore nothing, as for a Mac in use, or one
 // started afresh, the card naming the listed paths whose files a backup
 // would set aside (aside). While there's no disk to choose, or one's
-// locked, it can look for them again. Without a terminal there's no one to
-// ask: the error says so, and the restore's names kit apply's flag that
-// answers it (unopened).
+// locked, it can look for them again. Without a whole kit apply at a
+// terminal there's no one to ask: the error says so, and the restore's
+// names kit apply's flag that answers it (unopened).
 func (r Restoring) ownBackup(ctx context.Context, aside []string) (fallback, error) {
 	if r.Raise == nil {
-		return fallback{}, fmt.Errorf("%s restores from its own backups, as it started from no other Mac, and which of them is asked at a terminal", r.Mac)
+		return fallback{}, fmt.Errorf("%s restores from its own backups, as it started from no other Mac, and which of them a whole kit apply at a terminal asks", r.Mac)
 	}
 	for {
 		event.Say(ctx, event.Doing{Says: "looking for Time Machine disks"})
@@ -341,7 +342,7 @@ func (r Restoring) arq(ctx context.Context, at time.Time, todo []judged) (src *r
 	case len(lacks) == 0:
 	case r.Raise == nil:
 		for _, l := range lacks {
-			failed = errors.Join(failed, fmt.Errorf("couldn't restore %s: restoring through Arq is by hand: in Arq, restore %s, then run kit apply again; at a terminal, it asks for it", l.path, r.into(l, holds)))
+			failed = errors.Join(failed, fmt.Errorf("couldn't restore %s: restoring through Arq is by hand: in Arq, restore %s, then run kit apply again; a whole kit apply at a terminal asks for it", l.path, r.into(l, holds)))
 		}
 		todo = slices.DeleteFunc(slices.Clone(todo), func(j judged) bool { return slices.Contains(asks, j.Path) })
 	default:

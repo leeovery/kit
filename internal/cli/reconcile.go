@@ -218,8 +218,6 @@ func flagList(choices []string) string {
 // past is an action as done, as reconcile says it.
 func past(action string) string {
 	switch action {
-	case snooze, undeclare:
-		return action + "d"
 	case adopt, install, revert:
 		return action + "ed"
 	}
@@ -349,10 +347,8 @@ func age(d time.Duration) string {
 // carryOut does what was decided, an item at a time, then commits and
 // pushes the config's changes.
 func (a *app) carryOut(ctx context.Context, r *run, decisions []decision, note string) error {
-	names := make([]string, len(decisions))
 	what := make([]string, len(decisions))
 	for i, d := range decisions {
-		names[i] = d.item.ID
 		what[i] = d.action + " " + d.item.ID
 	}
 	// What will need an administrator's password, installing or

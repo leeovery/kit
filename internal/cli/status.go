@@ -346,8 +346,8 @@ func (a *app) build(command, logName string, face render.Face, atTerminal bool) 
 		drifters: map[string]drifter{}, admin: &steps.Admin{},
 	}
 	r.files = &linked.Files{Repo: r.repo, Home: home, StateDir: dirs.State, Scopes: []string{config.Shared, machine}}
-	// setup are the steps that set up the home folder: its linked files,
-	// the shell's PATH, Oh My Zsh.
+	// setup are the steps that set up the home folder, its linked files and
+	// the shell's PATH, and the features that turn on parts of macOS.
 	var setup []engine.Step
 	addSetup := func(step engine.Step, d drifter) {
 		setup = append(setup, quietened(step, record, now))
@@ -478,9 +478,11 @@ func (a *app) build(command, logName string, face render.Face, atTerminal bool) 
 	// raised there, a card, and waited on: the rest, with no place of their
 	// own, once everything else has finished, with what the run left the
 	// person to do, so that step's there whether or not any are declared.
-	// The data restore raises its own.
+	// The data restore raises its own. A run naming its steps shows a
+	// timeline, with no card to answer: it raises nothing, leaving the
+	// steps by hand to kit manual done and the rest to a whole kit apply.
 	var raise *steps.Raise
-	if slices.Contains(applies, command) && atTerminal {
+	if slices.Contains(applies, command) && atTerminal && len(a.named) == 0 {
 		desk := hand.New()
 		raise = &steps.Raise{Sink: sink, Now: a.Now, Notify: r.notifier(a.Getenv, a.Now), Desk: desk, After: a.After}
 		r.raise = raise

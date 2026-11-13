@@ -219,7 +219,7 @@ func TestApplyRestoreWithoutATerminalNamesTheFlag(t *testing.T) {
 		w.settingUp(t)
 		w.rsync3()
 		out, errOut, code := w.run(t, "apply", "restore")
-		want := "restore failed couldn't restore: laptop restores from its own backups, as it started from no other Mac, and which of them is asked at a terminal" +
+		want := "restore failed couldn't restore: laptop restores from its own backups, as it started from no other Mac, and which of them a whole kit apply at a terminal asks" +
 			": kit apply --restore-from time-machine|arq restores ~/Code from the backup it names, or kit restore remove ~/Code drops its line\n"
 		if code == 0 || !strings.Contains(out, want) {
 			t.Errorf("kit apply restore printed\n%s%s\nexit %d; want it failing, saying\n%s", out, errOut, code, want)

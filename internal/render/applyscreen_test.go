@@ -726,6 +726,7 @@ func TestApplyingStillToRunIsWhatHasntStarted(t *testing.T) {
 		{"waiting", nil, waiting, true},
 		{"checking", []event.Event{event.StepStarted{Time: after(357), Step: "secret", Doing: "checking"}}, "◐ Checking Secrets", false},
 		{"applying", []event.Event{event.StepStarted{Time: after(357), Step: "secret", Doing: "applying"}}, "◐ Applying Secrets", false},
+		{"doing what starts with a letter of more than a byte", []event.Event{event.StepStarted{Time: after(357), Step: "secret", Doing: "équipping"}}, "◐ Équipping", false},
 		{"its card up", []event.Event{event.NeedsYou{Time: after(357), Step: "secret", Item: "secret", Title: "Turn on 1Password's command line", Steps: []string{"Open 1Password's settings"}}}, "", false},
 		{"its turn to come", []event.Event{event.Doing{Time: after(357), Step: "secret", Says: event.Queued}}, "", false},
 	} {
@@ -1401,6 +1402,18 @@ func TestApplyingStateLine(t *testing.T) {
 	time.Sleep(300 * time.Millisecond)
 	if state := lines(screen(out.String()))[3]; !strings.HasSuffix(state, "│  ◐ working · nothing needs you · 1 failed") {
 		t.Errorf("macOS answered, the state line is %q", state)
+	}
+}
+
+// In a small window, the bar's last lit cell is red once a step has failed,
+// as the record's is.
+func TestApplyingSmallBarSaysAFailure(t *testing.T) {
+	steps := []event.Step{{Name: "a", Title: "a", Area: "Steps"}, {Name: "b", Title: "b", Area: "Steps"}}
+	face, out, _ := applyIn(colorprofile.TrueColor, 99, 40, time.Minute, rowsRun(steps, append(applying(1, "b"),
+		finished(2, "a", check.Result{State: check.Failed, Reason: "broke"}))...))
+	defer func() { _ = face.Close() }()
+	if !strings.Contains(out.String(), look.Words(look.Failed, "▮")) {
+		t.Errorf("with a failed, the small window's bar has no red cell:\n%s", uncoloured(out.String()))
 	}
 }
 

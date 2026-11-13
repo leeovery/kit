@@ -1,6 +1,7 @@
 package cli_test
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"slices"
@@ -248,5 +249,27 @@ func TestApplyRaisesTheRestLast(t *testing.T) {
 		case r.Step != "tidy" && i > started:
 			t.Errorf("%s finished after the steps by hand started, want them last", r.Step)
 		}
+	}
+}
+
+// A run naming its steps, at a terminal, raises nothing either: its face is
+// a timeline, with no card to answer, so the step by hand stands not done,
+// for kit manual done.
+func TestApplyNamedRaisesNothing(t *testing.T) {
+	w := signInWorld(t)
+	w.terminal, w.size = true, [2]int{160, 64}
+	kb := &keyboard{}
+	w.listen = kb.listen
+	w.fake.On("osascript", "-l", "JavaScript", "-e", login.ReadScript).Prints("[]")
+
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	w.ctx = ctx
+
+	if _, errOut, code := w.run(t, "apply", "sign-in"); ctx.Err() != nil || code != 1 {
+		t.Errorf("kit apply sign-in exit %d (%s), stopped: %v; want 1 at once, the step by hand not done", code, errOut, ctx.Err())
+	}
+	if up := cards(w.lastLog(t)); len(up) > 0 {
+		t.Errorf("cards logged = %+v, want none", up)
 	}
 }

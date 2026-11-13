@@ -1474,7 +1474,11 @@ func (d *dispatch) step(ctx context.Context, s Step) check.Result {
 	}
 	d.sink.Emit(event.StepStarted{Time: d.now(), Step: s.Name, Doing: "checking"})
 	res := d.check(ctx, s)
-	if missing != "" && res.State != check.OK {
+	switch {
+	case missing != "" && res.State == check.Failed:
+		res.Reason = missing + "; " + res.Reason
+		return res
+	case missing != "" && res.State != check.OK:
 		return check.Result{State: check.Deferred, Reason: missing}
 	}
 	if d.apply && missing == "" && res.State != check.Deferred && (res.State != check.OK || res.Actions() || s.AlwaysApply) && s.Apply != nil && ctx.Err() == nil {

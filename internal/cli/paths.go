@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/leeovery/kit/internal/check"
@@ -23,7 +24,7 @@ func (a *app) addPaths(ctx context.Context, r *run, dirs []string, opts addOptio
 	}
 	scope := r.scope(opts.shared)
 	dirs = r.tildePaths(dirs)
-	c := startChanges(r, dirs)
+	c := pathChanges(r, dirs)
 	for _, dir := range dirs {
 		c.step(ctx, dir, func(context.Context) check.Result {
 			said, err := c.declare(config.PathsKind, scope, config.Entry{Name: dir, Note: opts.note})
@@ -43,7 +44,7 @@ func (a *app) addPaths(ctx context.Context, r *run, dirs []string, opts addOptio
 // commits and pushes.
 func (a *app) removePaths(ctx context.Context, r *run, dirs []string, shared bool) error {
 	dirs = r.tildePaths(dirs)
-	c := startChanges(r, dirs)
+	c := pathChanges(r, dirs)
 	for _, dir := range dirs {
 		c.step(ctx, dir, func(context.Context) check.Result {
 			return c.undeclare(config.PathsKind, dir, shared, "PATH")
@@ -84,10 +85,19 @@ func (c *changes) undeclare(kindName, name string, shared bool, list string) che
 	return check.Result{State: check.OK, Summary: "out of " + strings.Join(from, " and ")}
 }
 
+// pathChanges starts a run of r's command over dirs, then the shell's PATH
+// written (writeShellPath).
+func pathChanges(r *run, dirs []string) *changes {
+	return startChanges(r, append(slices.Clone(dirs), shellPathStep))
+}
+
+// shellPathStep names the step writing the shell's PATH.
+const shellPathStep = "path"
+
 // writeShellPath writes the shell's PATH as the paths sections now say, as
 // a step of c.
 func (a *app) writeShellPath(ctx context.Context, r *run, c *changes) {
-	c.step(ctx, "path", func(ctx context.Context) check.Result {
+	c.step(ctx, shellPathStep, func(ctx context.Context) check.Result {
 		dirs, err := r.cfg.ShellPath(r.homeDir, r.machine)
 		if err != nil {
 			return check.Result{State: check.Failed, Reason: err.Error()}

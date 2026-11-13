@@ -147,9 +147,10 @@ func (p *Pretty) busy() (working, needs int) {
 	return working, needs
 }
 
-// progress is the run's bar, and the counts after it: how many of how many
-// steps are done, what failed, what's running, what needs you, what's left
-// to do, and how long it's taken.
+// progress is the run's bar, how far it's got (howFar), its last cell in
+// the colour the run stands in (endedAs), and the counts after it: how many
+// of how many steps are done, what failed, what's running, what needs you,
+// what's left to do, and how long it's taken.
 func (p *Pretty) progress() (bar, counts string) {
 	working, needs := p.busy()
 	failed, later := 0, 0
@@ -176,7 +177,7 @@ func (p *Pretty) progress() (bar, counts string) {
 		parts = append(parts, look.White(fmt.Sprintf("%d to do", later)))
 	}
 	parts = append(parts, look.Muted(took(p.now().Sub(p.began))))
-	return look.Bar(done, working, total, look.Done), look.Says(parts...)
+	return look.Progress(p.howFar(), recordBar, p.endedAs()), look.Says(parts...)
 }
 
 // failedRow is a failed step's row in applying's record: what applying did,

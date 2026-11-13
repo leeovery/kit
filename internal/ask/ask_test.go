@@ -62,10 +62,13 @@ func equal(t *testing.T, what string, got, want []string) {
 // when it comes in parts; other sequences dropped, and one cut short kept
 // for the rest.
 func TestParse(t *testing.T) {
-	keys, rest := parse([]byte("\x1b[A\x1bOB\rjé\x03\x7f\x1b[3~\x1b[200~ab\ncd\x1b[201~\x1b"))
-	want := []key{{name: "up"}, {name: "down"}, {name: "enter"}, {text: "j"}, {text: "é"}, {name: "ctrl+c"}, {name: "backspace"}, {text: "ab\ncd", paste: true}, {name: "esc"}}
+	keys, rest := parse([]byte("\x1b[A\x1bOB\rjé\x03\x7f\x1b[3~\x1b[200~ab\ncd\x1b[201~\x1b\r"))
+	want := []key{{name: "up"}, {name: "down"}, {name: "enter"}, {text: "j"}, {text: "é"}, {name: "ctrl+c"}, {name: "backspace"}, {text: "ab\ncd", paste: true}, {name: "esc"}, {name: "enter"}}
 	if !slices.Equal(keys, want) || len(rest) != 0 {
 		t.Errorf("parse = %+v, rest %q; want %+v", keys, rest, want)
+	}
+	if keys, rest = parse([]byte("q\x1b")); !slices.Equal(keys, []key{{text: "q"}}) || string(rest) != "\x1b" {
+		t.Errorf("an escape last: %+v, rest %q; want it kept, as it may start a sequence", keys, rest)
 	}
 	keys, rest = parse([]byte("x\x1b[200~par"))
 	if !slices.Equal(keys, []key{{text: "x"}}) || string(rest) != "\x1b[200~par" {
@@ -165,7 +168,7 @@ func TestParseSwallowsTerminalReplies(t *testing.T) {
 		{"a DCS", "\x1bP1$r0m\x1b\\", nil},
 		{"the device attributes", "\x1b[?1;2c", nil},
 		{"replies among keys", "j\x1b]11;rgb:0/0/0\x07\x1b[?62;22ck\r", []key{{text: "j"}, {text: "k"}, {name: "enter"}}},
-		{"escape after a reply", "\x1b]11;rgb:0/0/0\x1b\\\x1b", []key{{name: "esc"}}},
+		{"escape after a reply", "\x1b]11;rgb:0/0/0\x1b\\\x1b\r", []key{{name: "esc"}, {name: "enter"}}},
 	} {
 		if keys, rest := parse([]byte(tt.sent)); !slices.Equal(keys, tt.want) || len(rest) != 0 {
 			t.Errorf("%s: parse(%q) = %+v, rest %q; want %+v", tt.name, tt.sent, keys, rest, tt.want)
@@ -488,6 +491,31 @@ func TestListen(t *testing.T) {
 	stop()
 	if k, ok := <-keys; ok {
 		t.Errorf("after stop, Listen gave %+v; want its keys ended", k)
+	}
+}
+
+// An arrow split across two reads, as over a slow connection, is the
+// arrow, not escape and then text; an escape read alone, with nothing after
+// it for a moment, is escape, as it is when the keys end.
+func TestKeysWaitForTheRestOfAnEscape(t *testing.T) {
+	in, typing := io.Pipe()
+	keys, stop := Terminal{In: in}.keys()
+	defer stop()
+	go func() {
+		for _, read := range []string{"\x1b", "[A"} {
+			_, _ = typing.Write([]byte(read))
+		}
+		_, _ = typing.Write([]byte("\x1b"))
+		time.Sleep(2 * escapeWait)
+		_, _ = typing.Write([]byte("q\x1b"))
+		_ = typing.Close()
+	}()
+	var got []key
+	for k := range keys {
+		got = append(got, k)
+	}
+	if want := []key{{name: "up"}, {name: "esc"}, {text: "q"}, {name: "esc"}}; !slices.Equal(got, want) {
+		t.Errorf("keys = %+v, want %+v", got, want)
 	}
 }
 
