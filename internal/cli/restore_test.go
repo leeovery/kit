@@ -40,12 +40,12 @@ var restoreRecord = filepath.Join(".local", "state", "kit", "restore.json")
 // Machine's backup.
 const partWay = `{"paths": {"~/Code": {"state": "copying", "from": {"kind": "time-machine", "detail": "com.apple.TimeMachine.2026-11-08-141900.backup"}, "started": "2026-11-20T10:00:00Z"}}}`
 
-// settingUp has the boot's record say the test's Mac's set-up began, as
-// the boot that named it records for a Mac started from another, or one
+// settingUp has the boot's record say it set the test's Mac up, as the
+// boot that named it records for a Mac started from another, or one
 // kit-config has, clean-installed under its own name.
 func (w *world) settingUp(t *testing.T) {
 	t.Helper()
-	w.write(t, bootState, `{"began": "2026-11-20T09:00:00Z"}`)
+	w.write(t, bootState, `{"set_up": true}`)
 }
 
 // settled is a restore's record with ~/Code done and the restore settled.
@@ -104,7 +104,7 @@ func TestRestoreIsThereInSetUp(t *testing.T) {
 // since the boot as it is, never setting it aside.
 func TestSetUpClosesWithNothingListed(t *testing.T) {
 	w := laptopWorld(t)
-	w.write(t, bootState, `{"began": "2020-01-01T00:00:00Z"}`)
+	w.settingUp(t)
 	if got := w.statusSteps(t); !slices.Contains(got, "restore") || slices.Contains(got, "reinstall") {
 		t.Fatalf("in set-up, listing nothing, kit status has %q; want the restore, no reinstall", got)
 	}

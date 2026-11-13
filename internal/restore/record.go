@@ -141,16 +141,6 @@ func (r Record) mayAside(path string) bool {
 	return r.Settled.IsZero() && slices.Contains(r.First.Paths, path) && r.Paths[path].State != NotThere
 }
 
-// MaySetAside reports whether a file at the listed path path, newer than
-// its copy, so kept by it, may be set aside for that copy, as written here
-// by set-up since it began, began: in set-up's window (zero on a Mac in
-// use, which has none), as the judge has it (mayAside), and only before
-// the path's copy first began, from any source, as a copy begun may have
-// put it there. r is the record from before this run's copy began.
-func (r Record) MaySetAside(path string, began time.Time) bool {
-	return !began.IsZero() && r.mayAside(path) && !r.Paths[path].started()
-}
-
 // Finished reports whether the restore is done with the listed path path:
 // restored, here, or not in its source.
 func (r Record) Finished(path string) bool {

@@ -60,9 +60,9 @@ type Restoring struct {
 	Owned func(ctx context.Context) (restore.Owned, error)
 	// Home is the home folder, and StateDir kit's state.
 	Home, StateDir string
-	// Began is when this Mac's set-up began (boot.Began): zero for a Mac in
-	// use.
-	Began time.Time
+	// SetUp is whether the boot set this Mac up (boot.SetUp): false for a
+	// Mac in use.
+	SetUp bool
 	// Mac is this Mac's name, and From the Mac it started from, as kit.toml
 	// says: "" for none.
 	Mac, From string
@@ -113,17 +113,16 @@ type Restoring struct {
 // source hasn't, nothing copied to it, is recorded not there; part-way, it
 // fails, keeping the source it began from, the error naming the ways on:
 // another source, or its line dropped, as one for a source that won't open
-// names them for all its paths. With room for the copies, each path is judged again as its
-// turn comes, then copied, what set-up wrote in it set aside first, then
-// compared with its source: from a backup, a file found differing fails
-// the path; from a live Mac, what changed as it was copied is copied
-// again, and counted. A file the copy kept, newer here, written by set-up
-// in its window before the path's copy first began, is set aside and
-// copied again; any other is kept. The record says where each path stands
-// throughout, and, done, what it holds, so a run stopped resumes; the
-// restore settles once it's finished with every path. Each source is
-// closed however applying ends. Applied whenever kit apply runs, it
-// records what it finds even when there's nothing to copy.
+// names them for all its paths. With room for the copies, each path is
+// judged again as its turn comes, then copied, what set-up found in it set
+// aside first, then compared with its source: from a backup, a file found
+// differing fails the path; from a live Mac, what changed as it was copied
+// is copied again, and counted. A file the copy kept, newer here, is kept,
+// saying so. The record says where each path stands throughout, and, done,
+// what it holds, so a run stopped resumes; the restore settles once it's
+// finished with every path. Each source is closed however applying ends.
+// Applied whenever kit apply runs, it records what it finds even when
+// there's nothing to copy.
 func Restore(r Restoring) engine.Step {
 	return engine.Step{
 		Name: RestoreName, Title: "Data restore", Area: AreaBackups, Row: rowBackups, Verb: "restored", AlwaysApply: true,
@@ -201,14 +200,14 @@ func (r Restoring) judged(ctx context.Context) ([]judged, restore.Record, error)
 // nothing but kit's, is restored, so one lost since it was recorded can be
 // brought back.
 func (r Restoring) judge(f *restore.Filter, rec restore.Record) (restore.Judgement, error) {
-	j, err := restore.Judge(r.Home, f, rec, r.Began)
+	j, err := restore.Judge(r.Home, f, rec, r.SetUp)
 	if err != nil || j.Verdict != restore.VerdictHere || r.Flag.Kind == "" || rec.Paths[j.Path].State != restore.Here {
 		return j, err
 	}
 	afresh := rec
 	afresh.Paths = maps.Clone(rec.Paths)
 	delete(afresh.Paths, j.Path)
-	again, err := restore.Judge(r.Home, f, afresh, r.Began)
+	again, err := restore.Judge(r.Home, f, afresh, r.SetUp)
 	if err != nil || again.Verdict != restore.VerdictRestore {
 		return j, err
 	}
@@ -759,11 +758,10 @@ func (r Restoring) room(src *restore.Opened, copies []copying) error {
 }
 
 // restoreOne restores c's path from src, judged again first, as what it
-// holds can change while the paths before it copy: holding older files
-// now, it's here, left as it is; else what set-up has written in it by now
-// is set aside. A file the copy kept, newer here, is set aside and copied
-// again, or kept, as newerHere has it. The record says where it stands
-// throughout: copying, from src from then (restore.Record's Begin);
+// holds can change while the paths before it copy: here now, it's left as
+// it is; else, in set-up's window, all it holds by now is set aside. A file
+// the copy kept, newer here, is kept, saying so. The record says where it
+// stands throughout: copying, from src from then (restore.Record's Begin);
 // checking, and, a second pass that found differences, how many; done,
 // with what it holds, once its second pass has passed. Its partial files
 // go once it's done.
@@ -801,9 +799,7 @@ func (r Restoring) restoreOne(ctx context.Context, src *restore.Opened, c copyin
 		return failed(err)
 	}
 	if stats.Newer {
-		if stats, err = r.newerHere(ctx, src, c, rec, stats, p); err != nil {
-			return failed(err)
-		}
+		event.Log(ctx, event.Logged{Line: fmt.Sprintf("Kept %s as it is: it's newer here than in %s", c.Path, src.Origin.Says())})
 	}
 	if err := r.change(c.Path, func(rp *restore.Path) { rp.State = restore.Checking }); err != nil {
 		return failed(err)
@@ -845,28 +841,6 @@ func (r Restoring) begin(ctx context.Context, src *restore.Opened, path string) 
 		event.Log(ctx, event.Logged{Line: fmt.Sprintf("Carrying on %s from %s in place of %s, which its restore began from", path, src.Origin.Says(), was.Says())})
 	}
 	return err
-}
-
-// newerHere is what becomes of c's file, its copy from src, as stats says,
-// having kept the one here, newer, as --update keeps it: written by set-up
-// in its window, before the path's copy first began (restore.Record's
-// MaySetAside, rec the record from before this run's copy began), it's set
-// aside, saying so, and copied again, once; else it's kept, saying so, as
-// newer work always is. It returns what the copy came to, the second's if
-// there was one.
-func (r Restoring) newerHere(ctx context.Context, src *restore.Opened, c copying, rec restore.Record, stats restore.Stats, p *progress) (restore.Stats, error) {
-	if !rec.MaySetAside(c.Path, r.Began) {
-		event.Log(ctx, event.Logged{Line: fmt.Sprintf("Kept %s as it is: it's newer here than in %s", c.Path, src.Origin.Says())})
-		return stats, nil
-	}
-	if err := r.setAside(ctx, restore.Judgement{Path: c.Path, Verdict: restore.VerdictSetAside, New: []string{c.Path}}, c.Path+", written here as it was restored"); err != nil {
-		return stats, err
-	}
-	again, err := r.Rsync.Copy(quietly(ctx), c.copy, p.copied)
-	if copyFailed(src, err) {
-		return stats, err
-	}
-	return again, nil
 }
 
 // copyFailed reports whether err fails a copy from src: any error but

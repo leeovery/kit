@@ -103,9 +103,6 @@ type Boot struct {
 	// HandedOver is whether this is the boot handed over to the terminal,
 	// started by the boot before it.
 	HandedOver bool
-	// Started is when this boot started: a new Mac it starts from another
-	// records it as when its set-up began. Zero records nothing.
-	Started time.Time
 
 	mu    sync.Mutex
 	token string
@@ -356,8 +353,8 @@ func (b *Boot) macStep() engine.Step {
 				if !known {
 					st.NewMac, st.From = name, from
 				}
-				if (known || from != "") && named == "" && st.Began.IsZero() {
-					st.Began = b.Started
+				if (known || from != "") && named == "" {
+					st.SetUp = true
 				}
 			}); err != nil {
 				return err
@@ -422,28 +419,28 @@ func and(names []string) string {
 // config repository it read; a new Mac's name till kit-config has it
 // committed, and the Mac it starts as a copy of, if any; the terminal given
 // Full Disk Access, as the person said, before its first launch; when kit,
-// handed over to, took the boot on there; and, for a Mac started from
-// another or one kit-config has, clean-installed, when its set-up began: the
-// start of the boot that named it, on a Mac kit had no name for.
+// handed over to, took the boot on there; and whether the boot set this
+// Mac up, naming it, on a Mac kit had no name for, one started from
+// another or one kit-config has, clean-installed.
 type state struct {
 	Repo    string    `json:"repo,omitempty"`
 	NewMac  string    `json:"new_mac,omitempty"`
 	From    string    `json:"from,omitempty"`
 	Access  string    `json:"access,omitempty"`
 	Arrived time.Time `json:"arrived,omitzero"`
-	Began   time.Time `json:"began,omitzero"`
+	SetUp   bool      `json:"set_up,omitempty"`
 }
 
 const stateName = "bootstrap.json"
 
-// Began is when this Mac's set-up began, as the boot recorded it in
-// stateDir, on a Mac kit had no name for: one started from another, as the
-// boot named it or as kit-config has it (kit machine add --from); or one
-// kit-config has, clean-installed under its own name. Zero for any other,
-// as a Mac in use or a new one started fresh.
-func Began(stateDir string) (time.Time, error) {
+// SetUp reports whether the boot set this Mac up, as it recorded in
+// stateDir, naming a Mac kit had no name for: one started from another, as
+// the boot named it or as kit-config has it (kit machine add --from); or
+// one kit-config has, clean-installed under its own name. False for any
+// other, as a Mac in use or a new one started fresh.
+func SetUp(stateDir string) (bool, error) {
 	st, err := kitstate.Load[state](stateDir, stateName)
-	return st.Began, err
+	return st.SetUp, err
 }
 
 // NewMac is the new Mac the boot added to kit-config, as its record in

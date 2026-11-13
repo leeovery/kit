@@ -11,12 +11,13 @@ import (
 	"time"
 )
 
-// setUp is when a test Mac's set-up began; earlier and later, when files were
-// written before it and since.
+// boot is when a test Mac's boot ran; earlier and later, when files were
+// written before it and since. The judgement reads no file's time: they're
+// there to show none counts.
 var (
-	setUp   = time.Date(2026, 11, 20, 9, 0, 0, 0, time.UTC)
-	earlier = setUp.Add(-24 * time.Hour)
-	later   = setUp.Add(time.Hour)
+	boot    = time.Date(2026, 11, 20, 9, 0, 0, 0, time.UTC)
+	earlier = boot.Add(-24 * time.Hour)
+	later   = boot.Add(time.Hour)
 )
 
 // zshHistory is a line restoring a file.
@@ -24,14 +25,14 @@ var zshHistory = Line{Path: "~/.zsh_history", Pos: "laptop/declarations:5"}
 
 // firstRun is a test Mac's restore's first run, listing its paths.
 func firstRun(paths ...string) Record {
-	return Record{First: Run{Time: setUp.Add(time.Hour), Paths: paths}}
+	return Record{First: Run{Time: boot.Add(time.Hour), Paths: paths}}
 }
 
 // A path is judged by its record first: done, here, or under way, whatever
-// it holds. Else, with no record, by what it holds, kit's aside:
-// nothing, to restore; only files set-up wrote, from the moment it began, to
-// set aside, then restore; anything older, here. A Mac with no record of its
-// set-up's start is in use: whatever it holds is here.
+// it holds. Else, with no record, by what it holds, kit's aside: nothing,
+// to restore; anything, on a Mac the boot set up, all of it to set aside,
+// then restore, however old, as a shell's history a Terminal wrote before
+// the boot; on a Mac in use, here.
 func TestJudge(t *testing.T) {
 	kits := map[string]time.Time{
 		"CLAUDE.md": earlier, "skills/kit/SKILL.md": earlier, "skills/review/SKILL.md": later,
@@ -53,27 +54,26 @@ func TestJudge(t *testing.T) {
 		line     Line
 		files    map[string]time.Time
 		recorded State
-		began    time.Time
+		setUp    bool
 		want     Verdict
 		new      []string
 	}{
-		{"recorded done, holding older files", claude, with(map[string]time.Time{"history.jsonl": earlier}), Done, setUp, VerdictDone, nil},
-		{"recorded here, since emptied", claude, nil, Here, setUp, VerdictHere, nil},
-		{"copying", claude, with(map[string]time.Time{"history.jsonl": earlier}), Copying, setUp, VerdictResume, nil},
-		{"checking", claude, with(map[string]time.Time{"history.jsonl": earlier}), Checking, setUp, VerdictResume, nil},
-		{"absent", claude, nil, "", setUp, VerdictRestore, nil},
-		{"folders alone", claude, map[string]time.Time{}, "", setUp, VerdictRestore, nil},
-		{"nothing but kit's, old and new", claude, with(nil), "", setUp, VerdictRestore, nil},
-		{"kit's, and files set-up wrote", claude, with(map[string]time.Time{"history.jsonl": later, "projects/site/a.jsonl": later}), "", setUp, VerdictSetAside, []string{"~/.claude/history.jsonl", "~/.claude/projects/site/a.jsonl"}},
-		{"kit's, a file set-up wrote and an older one", claude, with(map[string]time.Time{"history.jsonl": later, "projects/site/a.jsonl": earlier}), "", setUp, VerdictHere, nil},
-		{"a Mac in use", claude, with(map[string]time.Time{"history.jsonl": later}), "", time.Time{}, VerdictHere, nil},
-		{"a Mac in use, nothing but kit's", claude, with(nil), "", time.Time{}, VerdictRestore, nil},
-		{"a file set-up wrote", zshHistory, map[string]time.Time{"~/.zsh_history": later}, "", setUp, VerdictSetAside, []string{"~/.zsh_history"}},
-		{"an older file", zshHistory, map[string]time.Time{"~/.zsh_history": earlier}, "", setUp, VerdictHere, nil},
-		{"an absent file", zshHistory, nil, "", setUp, VerdictRestore, nil},
-		{"a file written as set-up began", zshHistory, map[string]time.Time{"~/.zsh_history": setUp}, "", setUp, VerdictSetAside, []string{"~/.zsh_history"}},
-		{"a file written just before set-up began", zshHistory, map[string]time.Time{"~/.zsh_history": setUp.Add(-time.Nanosecond)}, "", setUp, VerdictHere, nil},
-		{"a file, recorded done", zshHistory, map[string]time.Time{"~/.zsh_history": later}, Done, setUp, VerdictDone, nil},
+		{"recorded done, holding files", claude, with(map[string]time.Time{"history.jsonl": earlier}), Done, true, VerdictDone, nil},
+		{"recorded here, since emptied", claude, nil, Here, true, VerdictHere, nil},
+		{"copying", claude, with(map[string]time.Time{"history.jsonl": earlier}), Copying, true, VerdictResume, nil},
+		{"checking", claude, with(map[string]time.Time{"history.jsonl": earlier}), Checking, true, VerdictResume, nil},
+		{"absent", claude, nil, "", true, VerdictRestore, nil},
+		{"folders alone", claude, map[string]time.Time{}, "", true, VerdictRestore, nil},
+		{"nothing but kit's, old and new", claude, with(nil), "", true, VerdictRestore, nil},
+		{"kit's, and files written since the boot", claude, with(map[string]time.Time{"history.jsonl": later, "projects/site/a.jsonl": later}), "", true, VerdictSetAside, []string{"~/.claude/history.jsonl", "~/.claude/projects/site/a.jsonl"}},
+		{"kit's, and files older than the boot", claude, with(map[string]time.Time{"history.jsonl": later, "projects/site/a.jsonl": earlier}), "", true, VerdictSetAside, []string{"~/.claude/history.jsonl", "~/.claude/projects/site/a.jsonl"}},
+		{"a Mac in use", claude, with(map[string]time.Time{"history.jsonl": later}), "", false, VerdictHere, nil},
+		{"a Mac in use, nothing but kit's", claude, with(nil), "", false, VerdictRestore, nil},
+		{"a file written since the boot", zshHistory, map[string]time.Time{"~/.zsh_history": later}, "", true, VerdictSetAside, []string{"~/.zsh_history"}},
+		{"a file older than the boot, a shell's history from a Terminal before it", zshHistory, map[string]time.Time{"~/.zsh_history": earlier}, "", true, VerdictSetAside, []string{"~/.zsh_history"}},
+		{"a file on a Mac in use", zshHistory, map[string]time.Time{"~/.zsh_history": later}, "", false, VerdictHere, nil},
+		{"an absent file", zshHistory, nil, "", true, VerdictRestore, nil},
+		{"a file, recorded done", zshHistory, map[string]time.Time{"~/.zsh_history": later}, Done, true, VerdictDone, nil},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			home := t.TempDir()
@@ -93,7 +93,7 @@ func TestJudge(t *testing.T) {
 			if tt.recorded != "" {
 				rec.Change(tt.line.Path, func(p *Path) { p.State = tt.recorded })
 			}
-			got, err := Judge(home, f, rec, tt.began)
+			got, err := Judge(home, f, rec, tt.setUp)
 			want := Judgement{Path: tt.line.Path, Verdict: tt.want, New: tt.new}
 			if err != nil || !reflect.DeepEqual(got, want) {
 				t.Errorf("Judge() = %+v, %v; want %+v", got, err, want)
@@ -103,18 +103,19 @@ func TestJudge(t *testing.T) {
 }
 
 // Only a path the restore's first run listed is ever set aside, and only
-// till its copy starts: a line added after the first run, its files all
-// newer than set-up's start, is here, as on a Mac in use; one holding
+// till its copy starts: a line added after the first run, holding anything
+// that isn't kit's, however new, is here, as on a Mac in use; one holding
 // nothing but kit's, or absent, is the caller's to restore or not. A path
 // whose holding folder of Arq's was made since the first run, nothing
 // copied, is judged again on each run; one whose copy a run before began
-// resumes. With no first run recorded, nothing's set aside.
+// resumes, what's in it the copy's, never set aside. With no first run
+// recorded, nothing's set aside.
 func TestJudgeSetsAsideOnlyWhatTheFirstRunListed(t *testing.T) {
 	code := Line{Path: "~/Code", Pos: "laptop/declarations:4"}
 	tool := Line{Path: "~/.local/state/newtool", Pos: "laptop/declarations:9"}
-	month := setUp.Add(30 * 24 * time.Hour)
+	month := boot.Add(30 * 24 * time.Hour)
 	holding := func(p *Path) { p.Holding = 1 }
-	begun := func(p *Path) { p.Holding, p.Started = 1, setUp.Add(2*time.Hour) }
+	begun := func(p *Path) { p.Holding, p.Started = 1, boot.Add(2*time.Hour) }
 	for _, tt := range []struct {
 		name   string
 		line   Line
@@ -124,14 +125,13 @@ func TestJudgeSetsAsideOnlyWhatTheFirstRunListed(t *testing.T) {
 		want   Verdict
 		new    []string
 	}{
-		{"a line added a month after set-up began, its tool's fresh data", tool, map[string]time.Time{"~/.local/state/newtool/state.db": month}, true, nil, VerdictHere, nil},
+		{"a line added a month after the boot, its tool's fresh data", tool, map[string]time.Time{"~/.local/state/newtool/state.db": month}, true, nil, VerdictHere, nil},
 		{"a line added since, nothing but Finder's", tool, map[string]time.Time{"~/.local/state/newtool/.DS_Store": month}, true, nil, VerdictRestore, nil},
 		{"a line added since, absent", tool, nil, true, nil, VerdictRestore, nil},
-		{"its holding folder made, holding set-up's files", code, map[string]time.Time{"~/Code/site/notes.md": later, "~/Code/tool/main.go": month}, true, holding, VerdictSetAside, []string{"~/Code/site/notes.md", "~/Code/tool/main.go"}},
-		{"its holding folder made, holding an older file", code, map[string]time.Time{"~/Code/site/notes.md": earlier}, true, holding, VerdictHere, nil},
+		{"its holding folder made, holding files", code, map[string]time.Time{"~/Code/site/notes.md": earlier, "~/Code/tool/main.go": month}, true, holding, VerdictSetAside, []string{"~/Code/site/notes.md", "~/Code/tool/main.go"}},
 		{"its holding folder made, nothing there", code, nil, true, holding, VerdictRestore, nil},
-		{"its copy begun by a run before", code, map[string]time.Time{"~/Code/site/notes.md": later}, true, begun, VerdictResume, nil},
-		{"no first run recorded, holding set-up's files", code, map[string]time.Time{"~/Code/site/notes.md": later}, false, nil, VerdictHere, nil},
+		{"its copy begun by a run before", code, map[string]time.Time{"~/Code/site/notes.md": earlier}, true, begun, VerdictResume, nil},
+		{"no first run recorded, holding files", code, map[string]time.Time{"~/Code/site/notes.md": later}, false, nil, VerdictHere, nil},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			home := t.TempDir()
@@ -149,7 +149,7 @@ func TestJudgeSetsAsideOnlyWhatTheFirstRunListed(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			got, err := Judge(home, f, rec, setUp)
+			got, err := Judge(home, f, rec, true)
 			if want := (Judgement{Path: tt.line.Path, Verdict: tt.want, New: tt.new}); err != nil || !reflect.DeepEqual(got, want) {
 				t.Errorf("Judge() = %+v, %v; want %+v", got, err, want)
 			}
@@ -158,12 +158,11 @@ func TestJudgeSetsAsideOnlyWhatTheFirstRunListed(t *testing.T) {
 }
 
 // Set-up's window closes for good once the restore first settles: a path
-// the first run listed, its files all newer than set-up's start, is here
-// then, never set aside, as on a Mac in use; one holding nothing but kit's,
-// or absent, is the caller's to restore or not. Till the restore settles,
-// the window stays open, however long after set-up.
+// the first run listed, holding anything that isn't kit's, is here then,
+// never set aside, as on a Mac in use; one holding nothing but kit's, or
+// absent, is the caller's to restore or not. Till the restore settles, the
+// window stays open, however long after the boot.
 func TestJudgeOnceTheRestoreHasSettled(t *testing.T) {
-	began := time.Date(2026, 10, 21, 9, 0, 0, 0, time.UTC)
 	tool := Line{Path: "~/.local/share/tool", Pos: "laptop/declarations:8"}
 	for _, tt := range []struct {
 		name    string
@@ -172,10 +171,9 @@ func TestJudgeOnceTheRestoreHasSettled(t *testing.T) {
 		want    Verdict
 		new     []string
 	}{
-		{"a tool's month-old data, listed after the restore settled", map[string]time.Time{"ledger.db": began.Add(48 * time.Hour), "logs/today.log": began.Add(30 * 24 * time.Hour)}, true, VerdictHere, nil},
-		{"the same, the restore not settled yet", map[string]time.Time{"ledger.db": began.Add(48 * time.Hour), "logs/today.log": began.Add(30 * 24 * time.Hour)}, false, VerdictSetAside, []string{"~/.local/share/tool/ledger.db", "~/.local/share/tool/logs/today.log"}},
-		{"a file written as set-up began, after the restore settled", map[string]time.Time{"ledger.db": began}, true, VerdictHere, nil},
-		{"nothing but Finder's, after the restore settled", map[string]time.Time{".DS_Store": began.Add(time.Hour)}, true, VerdictRestore, nil},
+		{"a tool's month-old data, listed after the restore settled", map[string]time.Time{"ledger.db": boot.Add(48 * time.Hour), "logs/today.log": boot.Add(30 * 24 * time.Hour)}, true, VerdictHere, nil},
+		{"the same, the restore not settled yet", map[string]time.Time{"ledger.db": boot.Add(48 * time.Hour), "logs/today.log": boot.Add(30 * 24 * time.Hour)}, false, VerdictSetAside, []string{"~/.local/share/tool/ledger.db", "~/.local/share/tool/logs/today.log"}},
+		{"nothing but Finder's, after the restore settled", map[string]time.Time{".DS_Store": boot.Add(time.Hour)}, true, VerdictRestore, nil},
 		{"absent, after the restore settled", nil, true, VerdictRestore, nil},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -183,11 +181,11 @@ func TestJudgeOnceTheRestoreHasSettled(t *testing.T) {
 			for rel, when := range tt.files {
 				write(t, filepath.Join(home, ".local/share/tool", rel), when)
 			}
-			if err := RecordFirstRun(stateDir, began.Add(time.Hour), []string{tool.Path}); err != nil {
+			if err := RecordFirstRun(stateDir, boot.Add(time.Hour), []string{tool.Path}); err != nil {
 				t.Fatal(err)
 			}
 			if tt.settled {
-				for _, at := range []time.Time{began.Add(24 * time.Hour), began.Add(25 * time.Hour)} {
+				for _, at := range []time.Time{boot.Add(24 * time.Hour), boot.Add(25 * time.Hour)} {
 					if err := Settle(stateDir, at); err != nil {
 						t.Fatal(err)
 					}
@@ -197,14 +195,14 @@ func TestJudgeOnceTheRestoreHasSettled(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if want := map[bool]time.Time{true: began.Add(24 * time.Hour)}[tt.settled]; !rec.Settled.Equal(want) {
+			if want := map[bool]time.Time{true: boot.Add(24 * time.Hour)}[tt.settled]; !rec.Settled.Equal(want) {
 				t.Errorf("settled at %v; want %v, the first", rec.Settled, want)
 			}
 			f, err := NewFilter(tool, owned)
 			if err != nil {
 				t.Fatal(err)
 			}
-			got, err := Judge(home, f, rec, began)
+			got, err := Judge(home, f, rec, true)
 			if want := (Judgement{Path: tool.Path, Verdict: tt.want, New: tt.new}); err != nil || !reflect.DeepEqual(got, want) {
 				t.Errorf("Judge() = %+v, %v; want %+v", got, err, want)
 			}
@@ -240,7 +238,7 @@ func TestJudgeAPathItsSourceHadnt(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			got, err := Judge(home, f, rec, setUp)
+			got, err := Judge(home, f, rec, true)
 			if want := (Judgement{Path: tool.Path, Verdict: tt.want}); err != nil || !reflect.DeepEqual(got, want) {
 				t.Errorf("Judge() = %+v, %v; want %+v", got, err, want)
 			}
@@ -262,30 +260,30 @@ func TestJudgeFailsOnWhatItCantRead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Judge(home, f, Record{}, setUp); err == nil || !strings.HasPrefix(err.Error(), "read ~/.claude: ") || !errors.Is(err, fs.ErrPermission) {
+	if _, err := Judge(home, f, Record{}, true); err == nil || !strings.HasPrefix(err.Error(), "read ~/.claude: ") || !errors.Is(err, fs.ErrPermission) {
 		t.Errorf("Judge() = %v; want it failing to read ~/.claude", err)
 	}
 }
 
-// Setting aside moves what set-up wrote into kit's state, each file keeping
-// its path from the home folder, kit's own left in place; the record says
-// what went where. A file gone since it was judged is passed over; then the
+// Setting aside moves what's in a path into kit's state, however old, each
+// file keeping its path from the home folder, kit's own left in place; the
+// record says what went where. A file gone since it was judged is passed over; then the
 // path holds nothing but kit's, so it's restored.
 func TestSetAside(t *testing.T) {
 	home, stateDir := t.TempDir(), t.TempDir()
-	for path, when := range map[string]time.Time{".claude/CLAUDE.md": earlier, ".claude/history.jsonl": later, ".claude/todos/a.json": later} {
+	for path, when := range map[string]time.Time{".claude/CLAUDE.md": earlier, ".claude/history.jsonl": earlier, ".claude/todos/a.json": later} {
 		write(t, filepath.Join(home, path), when)
 	}
 	f, err := NewFilter(claude, owned)
 	if err != nil {
 		t.Fatal(err)
 	}
-	j, err := Judge(home, f, firstRun(claude.Path), setUp)
+	j, err := Judge(home, f, firstRun(claude.Path), true)
 	if err != nil || j.Verdict != VerdictSetAside {
 		t.Fatalf("Judge() = %+v, %v", j, err)
 	}
 	j.New = append(j.New, "~/.claude/gone")
-	now := setUp.Add(2 * time.Hour)
+	now := boot.Add(2 * time.Hour)
 	if err := SetAside(stateDir, home, j, now); err != nil {
 		t.Fatal(err)
 	}
@@ -306,17 +304,17 @@ func TestSetAside(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(rec.Paths["~/.claude"].SetAside, want) {
 		t.Errorf("record = %+v, %v; want set aside %+v", rec, err, want)
 	}
-	if j, err := Judge(home, f, rec, setUp); err != nil || j.Verdict != VerdictRestore {
+	if j, err := Judge(home, f, rec, true); err != nil || j.Verdict != VerdictRestore {
 		t.Errorf("Judge() after = %+v, %v; want it restored", j, err)
 	}
 }
 
-// Two set-asides of a path in one second, as one as it's judged and another
-// as a newer file's found, each go into a folder of their own: neither
-// replaces what the other set aside.
+// Two set-asides in one second, as of two small paths copied one after the
+// other, each go into a folder of their own: neither replaces what the
+// other set aside.
 func TestSetAsideTwiceInASecond(t *testing.T) {
 	home, stateDir := t.TempDir(), t.TempDir()
-	now := setUp.Add(time.Hour)
+	now := boot.Add(time.Hour)
 	j := Judgement{Path: "~/.zsh_history", Verdict: VerdictSetAside, New: []string{"~/.zsh_history"}}
 	written := []string{"set-up's first", "set-up's second"}
 	for i, at := range []time.Time{now, now.Add(500 * time.Millisecond)} {
@@ -345,7 +343,7 @@ func TestSetAsideFailsPartway(t *testing.T) {
 	home, stateDir := t.TempDir(), t.TempDir()
 	write(t, filepath.Join(home, ".claude", "a"), later)
 	write(t, filepath.Join(home, ".claude", "sub", "b"), later)
-	now := setUp.Add(time.Hour)
+	now := boot.Add(time.Hour)
 	dir := filepath.Join(stateDir, "restore", "set-aside", "20261120-100000")
 	sub := filepath.Join(home, ".claude", "sub")
 	if err := os.Chmod(sub, 0o500); err != nil {
