@@ -106,14 +106,14 @@ func TestNightlyBuiltInJobs(t *testing.T) {
 	}
 }
 
-// Every run leaves its report, kit status's plain lines, for reading later:
-// it notifies no one.
-func TestNightlyLeavesItsReport(t *testing.T) {
+// What a run finds is kept in its log, for reading later: it notifies no
+// one.
+func TestNightlyNotifiesNoOne(t *testing.T) {
 	w := jobsWorld(t)
 	w.run(t, "nightly")
-	report := w.read(t, filepath.Join("Library", "Logs", "kit", "report.txt"))
-	if !strings.HasPrefix(report, "kit nightly · laptop\n") || !strings.Contains(report, "nightly:tidy failed the archive disk isn't connected\n") || !strings.Contains(report, "disk ok 48% free\n") {
-		t.Errorf("report.txt =\n%s", report)
+	out, _, _ := w.run(t, "log")
+	if !strings.HasPrefix(out, "kit nightly · laptop · ") || !strings.Contains(out, "the archive disk isn't connected\n") || !strings.Contains(out, "48% free\n") {
+		t.Errorf("kit log printed\n%s\nwant the nightly run, what it found", out)
 	}
 	for _, c := range w.fake.Calls() {
 		if strings.HasPrefix(c, "open ") || strings.HasPrefix(c, "osascript -e") {

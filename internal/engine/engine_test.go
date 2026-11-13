@@ -238,27 +238,11 @@ func TestARunsEvents(t *testing.T) {
 	}
 }
 
-func TestStepsRunOnlyOnTheirMacs(t *testing.T) {
-	p, err := engine.New(
-		engine.Step{Name: "brew", Check: ok("")},
-		engine.Step{Name: "plex", Macs: []string{"studio"}, Check: ok("")},
-		engine.Step{Name: "xcode", Macs: []string{"laptop", "studio"}, Check: ok("")},
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	report, _ := p.Check(t.Context(), &recorder{}, engine.Options{Machine: "laptop"})
-	if got := names(report.Steps); !slices.Equal(got, []string{"brew", "xcode"}) {
-		t.Errorf("steps on laptop = %q, want brew and xcode", got)
-	}
-}
-
 func TestOnlyRunsTheStepsNamedAndWhatTheyNeed(t *testing.T) {
 	p, err := engine.New(
 		engine.Step{Name: "homebrew", Check: ok("")},
 		engine.Step{Name: "brew", Needs: []string{"homebrew"}, Check: ok("")},
 		engine.Step{Name: "cask", Needs: []string{"homebrew"}, Check: ok("")},
-		engine.Step{Name: "plex", Macs: []string{"studio"}, Check: ok("")},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -269,7 +253,7 @@ func TestOnlyRunsTheStepsNamedAndWhatTheyNeed(t *testing.T) {
 	}
 	_, err = p.Check(t.Context(), &recorder{}, engine.Options{Machine: "laptop", Only: []string{"plex"}})
 	if err == nil || err.Error() != "no step named plex on this Mac: one of homebrew, brew, cask" {
-		t.Errorf("only plex on laptop: error = %v, want it refused", err)
+		t.Errorf("only plex: error = %v, want it refused", err)
 	}
 }
 
@@ -491,11 +475,11 @@ func TestApply(t *testing.T) {
 	}
 	fine := engine.Step{Name: "fine", Check: ok("already"), Apply: func(context.Context, check.Result) error { applied = append(applied, "fine"); return nil }}
 	after := engine.Step{Name: "after", Needs: []string{"broken"}, Check: ok(""), Apply: func(context.Context, check.Result) error { applied = append(applied, "after"); return nil }}
-	manual := engine.Step{Name: "fda", Title: "Full Disk Access", Manual: "add Ghostty to Full Disk Access", Check: func(context.Context) check.Result {
+	fda := engine.Step{Name: "fda", Title: "Full Disk Access", Check: func(context.Context) check.Result {
 		return check.Result{State: check.Attention, Summary: "not granted"}
 	}}
 
-	p, err := engine.New(brew, broken, fine, after, manual)
+	p, err := engine.New(brew, broken, fine, after, fda)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -516,8 +500,8 @@ func TestApply(t *testing.T) {
 	if got := report.Results["after"]; got.State != check.Deferred || got.Reason != "needs Broken" {
 		t.Errorf("after = %+v, want it deferred", got)
 	}
-	if got := report.Results["fda"]; got.State != check.Attention || len(got.Items) != 1 || got.Items[0] != (check.Item{ID: "fda:manual", Name: "add Ghostty to Full Disk Access", State: "manual"}) {
-		t.Errorf("fda = %+v, want what to do by hand as an item", got)
+	if got := report.Results["fda"]; got.State != check.Attention {
+		t.Errorf("fda = %+v, want it needing attention, nothing to apply", got)
 	}
 	var doing []string
 	for _, e := range rec.events {

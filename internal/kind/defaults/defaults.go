@@ -42,17 +42,6 @@ type record struct {
 	// Baseline is each watched setting's value as kit last accepted it, as
 	// XML, by name.
 	Baseline map[string]string `json:"baseline,omitempty"`
-	// Exact are the watched settings whose baseline kit knows it read
-	// exactly, a string's outer spaces and a key's kept, by name: each it
-	// took, or found the same; none in a record from before it read them
-	// so. Not under "exact", a bool in an earlier build's record.
-	Exact map[string]bool `json:"exact_settings,omitempty"`
-}
-
-// take makes v the baseline of the watched setting name, read exactly.
-func (r *record) take(name, v string) {
-	r.Baseline[name] = v
-	r.Exact[name] = true
 }
 
 // Watched are Apple's domains whose settings kit watches for changes, as
@@ -378,9 +367,6 @@ func (d *Defaults) Installed(ctx context.Context) ([]kind.Installed, error) {
 		if rec.Baseline == nil {
 			rec.Baseline = map[string]string{}
 		}
-		if rec.Exact == nil {
-			rec.Exact = map[string]bool{}
-		}
 		for _, name := range slices.Sorted(maps.Keys(d.declared)) {
 			dv := d.declared[name]
 			v, set := l.actual(dv.setting)
@@ -437,9 +423,7 @@ func (d *Defaults) changed(l look, rec *record) []string {
 		now := d.watchedSettings(id, l.domains[id])
 		if !rec.Domains[id] {
 			rec.Domains[id] = true
-			for name, v := range now {
-				rec.take(name, v)
-			}
+			maps.Copy(rec.Baseline, now)
 			continue
 		}
 		names = append(names, d.changedIn(id, now, rec)...)
@@ -449,26 +433,18 @@ func (d *Defaults) changed(l look, rec *record) []string {
 }
 
 // changedIn are the watched settings of the domain id, now as now has them,
-// changed since kit took their values, and not declared. A baseline found
-// the same is known exact; one kit took before it read a string's outer
-// spaces and a key's exactly, reading the same that way, is taken again,
-// exactly, once.
+// changed since kit took their values, and not declared.
 func (d *Defaults) changedIn(id string, now map[string]string, rec *record) []string {
 	var names []string
 	for name, was := range rec.Baseline {
 		if !strings.HasPrefix(name, id+":") {
 			continue
 		}
-		switch is := now[name]; {
+		switch {
 		case isNoiseSetting(name):
 			// Taken before kit knew it for noise.
 			delete(rec.Baseline, name)
-			delete(rec.Exact, name)
-		case is == was:
-			rec.Exact[name] = true
-		case !rec.Exact[name] && takenTrimmed(was, is):
-			rec.take(name, is)
-		case !d.isDeclared(name):
+		case now[name] != was && !d.isDeclared(name):
 			names = append(names, name)
 		}
 	}
@@ -485,51 +461,6 @@ func (d *Defaults) changedIn(id string, now map[string]string, rec *record) []st
 func isNoiseSetting(name string) bool {
 	s, err := config.ParseSetting(name)
 	return err == nil && isNoise(s.Domain, firstKey(s.Key))
-}
-
-// takenTrimmed reports whether was, a value kit took before it read a
-// string's outer spaces and a key's exactly, is is read that way: its XML,
-// each string and key trimmed, the same. Two keys the same once trimmed
-// never are.
-func takenTrimmed(was, is string) bool {
-	v, err := plist.ReadValue(is)
-	if err != nil {
-		return false
-	}
-	t, ok := trimmed(v)
-	return ok && plist.XML(t) == was
-}
-
-// trimmed is v as kit read it before it kept a string's outer spaces and a
-// key's: each trimmed. It's not, when two of a dict's keys are the same
-// once trimmed.
-func trimmed(v any) (any, bool) {
-	switch x := v.(type) {
-	case string:
-		return strings.TrimSpace(x), true
-	case []any:
-		out := make([]any, len(x))
-		for i, item := range x {
-			t, ok := trimmed(item)
-			if !ok {
-				return nil, false
-			}
-			out[i] = t
-		}
-		return out, true
-	case map[string]any:
-		out := make(map[string]any, len(x))
-		for k, item := range x {
-			t, ok := trimmed(item)
-			k = strings.TrimSpace(k)
-			if _, twice := out[k]; twice || !ok {
-				return nil, false
-			}
-			out[k] = t
-		}
-		return out, true
-	}
-	return v, true
 }
 
 // firstKey is a setting's key, without a dict entry's key after it.

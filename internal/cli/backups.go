@@ -87,33 +87,6 @@ func stepNames(all []engine.Step) map[string]bool {
 	return names
 }
 
-// notAFeature is the error of naming a backup tool as a feature, as it
-// goes in [backups] now, saying the command, kit backup and its words, that
-// does what was meant: nil for any other name.
-func notAFeature(name string, words ...string) error {
-	if _, ok := backup.Named(name); !ok {
-		return nil
-	}
-	return fmt.Errorf("%s is a backup tool, so it goes in [backups] now, not [features]: kit %s %s", name, backupCommand, strings.Join(words, " "))
-}
-
-// movedToBackups is the error of a [features] line naming a backup tool,
-// saying where it is and the command declaring it in [backups], as its
-// section had it: nil for any other.
-func movedToBackups(e config.Entry) error {
-	words := []string{"add", e.Name}
-	for _, after := range e.After() {
-		words = append(words, "--after", config.Quote(after))
-	}
-	if e.Scope == config.Shared {
-		words = append(words, "--shared")
-	}
-	if err := notAFeature(e.Name, words...); err != nil {
-		return fmt.Errorf("%s: %w, once you've removed this line", e.Pos(), err)
-	}
-	return nil
-}
-
 // backupOptions are kit backup add's options.
 type backupOptions struct {
 	after, before []string

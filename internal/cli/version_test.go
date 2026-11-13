@@ -3,11 +3,9 @@ package cli_test
 import "testing"
 
 func TestVersion(t *testing.T) {
-	for _, args := range [][]string{{"version"}, {"--version"}} {
-		out, errOut, status := newWorld(t, nil).run(t, args...)
-		if out != "kit version 0.1.0\n" || errOut != "" || status != 0 {
-			t.Errorf("kit %v printed %q, %q, exit %d; want the version", args, out, errOut, status)
-		}
+	out, errOut, status := newWorld(t, nil).run(t, "--version")
+	if out != "kit version 0.1.0\n" || errOut != "" || status != 0 {
+		t.Errorf("kit --version printed %q, %q, exit %d; want the version", out, errOut, status)
 	}
 }
 

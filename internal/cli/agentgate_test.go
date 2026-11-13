@@ -1,7 +1,6 @@
 package cli_test
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -25,12 +24,12 @@ import (
 func guideTexts(t *testing.T) map[string]string {
 	t.Helper()
 	w := newWorld(t, nil)
-	out, _, code := w.run(t, "agent", "--json")
-	var doc struct{ Guide string }
-	if err := json.Unmarshal([]byte(out), &doc); err != nil || code != 0 {
-		t.Fatalf("kit agent --json printed\n%s\nexit %d: %v", out, code, err)
+	out, _, code := w.run(t, "agent")
+	at := strings.Index(out, guide.Main())
+	if at < 0 || code != 0 {
+		t.Fatalf("kit agent printed\n%s\nexit %d, want the guide", out, code)
 	}
-	texts := map[string]string{"kit agent": doc.Guide}
+	texts := map[string]string{"kit agent": out[at:]}
 	for _, topic := range guide.Topics {
 		texts["kit agent "+topic.Name] = topic.Text()
 	}

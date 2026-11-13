@@ -460,23 +460,6 @@ func TestOpened(t *testing.T) {
 	}
 }
 
-// A record from before kit sorted what it held has its failed domains among
-// those waiting: one whose why isn't a wait's is taken as failed, so the
-// hourly pass, with nothing else to try, does nothing at all.
-func TestAnOlderRecordsFailuresWaitForPendingByHand(t *testing.T) {
-	w := newWorld(t, prefs.Lists{})
-	writeRecord(t, w.state, `{"on": "restored", "pending": {"from": "laptop", "domains": ["com.example.app", "com.example.boxed", "com.example.gone"],
-		"why": {"com.example.app": "import: exit status 1", "com.example.boxed": "it has no settings folder till it's opened once", "com.example.gone": "not installed"}}}`)
-	rec, _ := w.p.Load()
-	if domains, files := w.p.Failures(rec); domains != 1 || files != 0 {
-		t.Errorf("Failures() = %d, %d; want the one whose why isn't a wait's, nor an app's to open", domains, files)
-	}
-	writeRecord(t, w.state, `{"on": "restored", "pending": {"from": "laptop", "domains": ["com.example.app"], "why": {"com.example.app": "import: exit status 1"}}}`)
-	if _, err := w.p.Restore(t.Context(), prefs.RestoreOptions{Pending: true, Unattended: true}); err != nil || len(w.fake.Calls()) != 0 {
-		t.Errorf("the hourly pass = %v, ran %q; want nothing done", err, w.fake.Calls())
-	}
-}
-
 // An app held to open that's running still stays to open, with its why,
 // till it's quit, though another's settings come back on the same pass, as
 // when its to-do, or another app's, settles while it's open.
@@ -516,7 +499,7 @@ func TestTheHourlyPassOpensNothing(t *testing.T) {
 	w := newWorld(t, prefs.Lists{})
 	store := filepath.Join(w.clone, "laptop")
 	w.write(t, filepath.Join(store, "domains", "com.example.boxed.plist"), stored(t, map[string]any{"A": true}))
-	writeRecord(t, w.state, `{"on": "restored", "pending": {"from": "laptop", "domains": ["com.example.boxed"], "why": {"com.example.boxed": "not installed"}}}`)
+	writeRecord(t, w.state, `{"on": "restored", "pending": {"from": "laptop", "domains": ["com.example.boxed"], "why": {"com.example.boxed": "kept till its app is installed"}}}`)
 	app := w.app(t, w.apps, "Boxed App", "com.example.boxed")
 	w.fake.On("codesign", "-d", "--entitlements", "-", "--xml", app).Prints(sandboxedApp)
 	w.closed("com.example.boxed")

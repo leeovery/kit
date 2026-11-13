@@ -49,8 +49,6 @@ type Step struct {
 	// Verb is what one of its things on the Mac as declared is, in its
 	// kind's words, as in excluded: "" for its part's.
 	Verb string
-	// Macs are the Macs it runs on: every Mac when empty.
-	Macs []string
 	// Needs are the steps that must stand ok before it's checked or applied.
 	Needs []string
 	// After are steps it's applied after, whether or not they stand ok, as
@@ -79,9 +77,6 @@ type Step struct {
 	// Apply does what the step is for, given what its check found: safe to
 	// repeat. Optional.
 	Apply func(ctx context.Context, found check.Result) error
-	// Manual is what a person must do when the step can't be automated,
-	// shown while its check fails. Optional.
-	Manual string
 	// Admin is whether applying it needs an administrator's password, which
 	// the command settles before anything is applied.
 	Admin bool
@@ -225,11 +220,6 @@ func (s Step) asks() string {
 		return s.ByHand[0].Title
 	}
 	return s.title()
-}
-
-// runsOn reports whether the step runs on the Mac named mac.
-func (s Step) runsOn(mac string) bool {
-	return len(s.Macs) == 0 || slices.Contains(s.Macs, mac)
 }
 
 // Pipeline is the steps, in an order that puts each after what it needs.
@@ -555,15 +545,10 @@ func (p *Pipeline) Apply(ctx context.Context, sink event.Sink, opts Options) (Re
 	return p.run(ctx, sink, opts, true)
 }
 
-// selected are the steps a run takes: those that run on the Mac and opts
-// select, with what they need, in pipeline order.
+// selected are the steps a run takes: those opts select, with what they
+// need, in pipeline order.
 func (p *Pipeline) selected(opts Options) ([]Step, error) {
-	var on []Step
-	for _, s := range p.steps {
-		if s.runsOn(opts.Machine) {
-			on = append(on, s)
-		}
-	}
+	on := slices.Clone(p.steps)
 	if len(opts.Only) == 0 {
 		return on, nil
 	}
@@ -1145,7 +1130,7 @@ func Recheck(ctx context.Context, name string) (check.Result, bool) {
 	}
 	d.sink.Emit(event.StepStarted{Time: d.now(), Step: name, Doing: "checking"})
 	began := d.now()
-	res := orFailed(withManual(s, d.check(d.attributed(event.WithChecking(ctx), s), s)))
+	res := orFailed(d.check(d.attributed(event.WithChecking(ctx), s), s))
 	if ctx.Err() != nil {
 		return check.Result{}, false
 	}
@@ -1484,7 +1469,7 @@ func (d *dispatch) step(ctx context.Context, s Step) check.Result {
 	if d.apply && missing == "" && res.State != check.Deferred && (res.State != check.OK || res.Actions() || s.AlwaysApply) && s.Apply != nil && ctx.Err() == nil {
 		res = d.applied(ctx, s, res)
 	}
-	return withManual(s, res)
+	return res
 }
 
 // applied applies s on found, what its check found, then checks it again,
@@ -1503,15 +1488,6 @@ func (d *dispatch) applied(ctx context.Context, s Step, found check.Result) chec
 	res.Done = slices.Concat(found.Done, done(found, res))
 	if answered := res.State == check.OK || res.State == check.Attention; found.State == check.Failed && answered && res.Actions() && ctx.Err() == nil {
 		return d.applied(ctx, s, res)
-	}
-	return res
-}
-
-// withManual is res, s's check's finding, with what a person must do by
-// hand an item while s needs attention.
-func withManual(s Step, res check.Result) check.Result {
-	if res.State == check.Attention && s.Manual != "" {
-		res.Items = append(res.Items, check.Item{ID: s.Name + ":manual", Name: s.Manual, State: "manual"})
 	}
 	return res
 }

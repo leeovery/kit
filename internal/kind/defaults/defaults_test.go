@@ -2,7 +2,6 @@ package defaults_test
 
 import (
 	"encoding/json"
-	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -12,7 +11,6 @@ import (
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/kind/defaults"
-	"github.com/leeovery/kit/internal/plist"
 	"github.com/leeovery/kit/internal/runner/runnertest"
 )
 
@@ -217,79 +215,48 @@ func TestNoiseKitTookBeforeKnowingItIsForgotten(t *testing.T) {
 	}
 }
 
-// A value kit took before it read a string's outer spaces and a key's
-// exactly, unmarked in its record (an earlier build's, holding "exact" as
-// a bool, read all the same), is unchanged while it reads the same
-// that way, compared as XML, and is taken again as it is: once, the
-// baseline then marked exact. Any other change shows, as every change does
-// to a baseline marked: a number or a boolean changed, even by a little or
-// for one macOS reads the same; a key beside one it's the same as once
-// trimmed; a value taken exactly with its spaces, now without. A change
-// that shows leaves the baseline as it was marked.
-func TestAValueTakenTrimmedIsTakenAgainExactly(t *testing.T) {
-	cases := []struct {
-		name, was, now string
-		absorbed       bool
-	}{
-		{"a string gaining a newline", "<string>Dark</string>", "<string>Dark\n</string>", true},
-		{"a string gaining a space", "<string>omw</string>", "<string>omw </string>", true},
-		{"an array's string gaining a space", "<array><string>x</string></array>", "<array><string>x </string></array>", true},
-		{"a dict's key gaining a space", "<dict><key>a</key><string>x</string></dict>", "<dict><key> a</key><string>x</string></dict>", true},
-		{"an integer changed", "<integer>1760000000</integer>", "<integer>1760001000</integer>", false},
-		{"1 become true", "<integer>1</integer>", "<true/>", false},
-		{"0 become false", "<integer>0</integer>", "<false/>", false},
-		{"a real changed a little", "<real>0.5</real>", "<real>0.5000001</real>", false},
-		{"a key beside one the same once trimmed", "<dict><key>a</key><string>x</string></dict>", "<dict><key>a</key><string>x</string><key> a</key><string>x</string></dict>", false},
-		{"a value taken with its spaces, now without", "<string>Light&#xA;</string>", "<string>Light</string>", false},
+// Any change to a baseline shows, compared as XML, and leaves the baseline
+// as it was: a string's outer spaces or a key's; a number or a boolean
+// changed, even by a little or for one macOS reads the same; a key beside
+// one it's the same as once trimmed.
+func TestEveryChangeToABaselineShows(t *testing.T) {
+	cases := []struct{ name, was, now string }{
+		{"a string gaining a newline", "<string>Dark</string>", "<string>Dark\n</string>"},
+		{"a string gaining a space", "<string>omw</string>", "<string>omw </string>"},
+		{"an array's string gaining a space", "<array><string>x</string></array>", "<array><string>x </string></array>"},
+		{"a dict's key gaining a space", "<dict><key>a</key><string>x</string></dict>", "<dict><key> a</key><string>x</string></dict>"},
+		{"an integer changed", "<integer>1760000000</integer>", "<integer>1760001000</integer>"},
+		{"1 become true", "<integer>1</integer>", "<true/>"},
+		{"0 become false", "<integer>0</integer>", "<false/>"},
+		{"a real changed a little", "<real>0.5</real>", "<real>0.5000001</real>"},
+		{"a key beside one the same once trimmed", "<dict><key>a</key><string>x</string></dict>", "<dict><key>a</key><string>x</string><key> a</key><string>x</string></dict>"},
+		{"a value with its spaces, now without", "<string>Light&#xA;</string>", "<string>Light</string>"},
 	}
-	for _, marked := range []bool{false, true} {
-		for _, c := range cases {
-			// A dict's keys are read in no set order: each, many times.
-			for range 20 {
-				m := newMac(t)
-				list := m.declare()
-				record := map[string]any{"domains": map[string]bool{"NSGlobalDomain": true}, "baseline": map[string]string{"NSGlobalDomain:K": c.was}}
-				if marked {
-					record["exact_settings"] = map[string]bool{"NSGlobalDomain:K": true}
-				} else {
-					// As an earlier build wrote it, which marks nothing.
-					record["exact"] = true
-				}
-				data, err := json.Marshal(record)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if err := os.WriteFile(filepath.Join(m.state, "settings.json"), data, 0o600); err != nil {
-					t.Fatal(err)
-				}
-				m.set("NSGlobalDomain", "<key>K</key>"+c.now)
-				want, baseline := []string{"NSGlobalDomain:K extra"}, c.was
-				if c.absorbed && !marked {
-					want = nil
-					v, err := plist.Read("<plist>" + c.now + "</plist>")
-					if err != nil {
-						t.Fatal(err)
-					}
-					baseline = plist.XML(v)
-				}
-				if got := m.items(list); !slices.Equal(got, want) {
-					t.Fatalf("%s, marked %v: items = %q, want %q", c.name, marked, got, want)
-				}
-				rec := m.record()
-				if exact := marked || c.absorbed; rec.Baseline["NSGlobalDomain:K"] != baseline || rec.Exact["NSGlobalDomain:K"] != exact {
-					t.Fatalf("%s, marked %v: record = %+v; want the baseline %q, marked exact %v", c.name, marked, rec, baseline, exact)
-				}
+	for _, c := range cases {
+		// A dict's keys are read in no set order: each, many times.
+		for range 20 {
+			m := newMac(t)
+			list := m.declare()
+			record, err := json.Marshal(map[string]any{"domains": map[string]bool{"NSGlobalDomain": true}, "baseline": map[string]string{"NSGlobalDomain:K": c.was}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(m.state, "settings.json"), record, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			m.set("NSGlobalDomain", "<key>K</key>"+c.now)
+			if got, want := m.items(list), []string{"NSGlobalDomain:K extra"}; !slices.Equal(got, want) {
+				t.Fatalf("%s: items = %q, want %q", c.name, got, want)
+			}
+			if rec := m.record(); rec.Baseline["NSGlobalDomain:K"] != c.was {
+				t.Fatalf("%s: record = %+v; want the baseline %q", c.name, rec, c.was)
 			}
 		}
 	}
 }
 
 // record is kit's record of the watched settings' baselines.
-func (m *mac) record() (rec struct {
-	Baseline map[string]string
-	Exact    map[string]bool `json:"exact_settings"`
-},
-) {
+func (m *mac) record() (rec struct{ Baseline map[string]string }) {
 	m.t.Helper()
 	data, err := os.ReadFile(filepath.Join(m.state, "settings.json"))
 	if err == nil {
@@ -299,37 +266,6 @@ func (m *mac) record() (rec struct {
 		m.t.Fatal(err)
 	}
 	return rec
-}
-
-// Each baseline is marked exact as kit finds it so, or takes it: one of a
-// domain kit doesn't read in a pass, as one no longer declared, stays
-// unmarked, so a value it took trimmed reads the same when the domain is
-// read again, and is taken again then; one it takes now, of a domain it's
-// never watched, is marked.
-func TestEachBaselineIsMarkedExactOnItsOwn(t *testing.T) {
-	m := newMac(t)
-	record := `{"domains": {"NSGlobalDomain": true, "com.example.app": true}, "baseline": {"NSGlobalDomain:K": "<string>x</string>", "com.example.app:K": "<string>Dark</string>"}}`
-	if err := os.WriteFile(filepath.Join(m.state, "settings.json"), []byte(record), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	m.set("NSGlobalDomain", "<key>K</key><string>x</string>")
-	m.set("com.apple.dock", "<key>tilesize</key><integer>48</integer>")
-	if got := m.items(m.declare()); got != nil {
-		t.Fatalf("items = %q, want none", got)
-	}
-	rec := m.record()
-	if want := map[string]bool{"NSGlobalDomain:K": true, "com.apple.dock:tilesize": true}; !maps.Equal(rec.Exact, want) {
-		t.Errorf("marked exact %v, want %v: the global domain's found the same, the Dock's taken, the app's not read", rec.Exact, want)
-	}
-
-	list := m.declare("com.example.app:Theme", "-string Dark")
-	m.set("com.example.app", "<key>Theme</key><string>Dark</string><key>K</key><string>Dark </string>")
-	if got := m.items(list); got != nil {
-		t.Errorf("items = %q, want the app's value taken trimmed taken again", got)
-	}
-	if rec := m.record(); rec.Baseline["com.example.app:K"] != "<string>Dark </string>" || !rec.Exact["com.example.app:K"] {
-		t.Errorf("record = %+v, want the app's value taken again, exactly, marked", rec)
-	}
 }
 
 // Finder's own bookkeeping of the toolbar buttons sync apps add never shows

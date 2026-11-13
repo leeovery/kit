@@ -361,7 +361,7 @@ func TestRestoreComesBeforeWhatWritesIntoItsPaths(t *testing.T) {
 			t.Errorf("started from another %v: before the restore = %q; want the secrets", from, before)
 		}
 		doc := w.order(t, "alone")
-		i := slices.IndexFunc(doc.Unordered, func(s spot) bool { return s.Step == "restore" })
+		i := slices.IndexFunc(doc.Unordered, func(s spot) bool { return s.Name == "restore" })
 		if i < 0 || doc.Unordered[i].Says != "[restore]'s paths restored from the Mac it started from, or a backup, where they're not here already" {
 			t.Errorf("started from another %v: in no order with alone = %+v; want the restore, saying what it does", from, doc.Unordered)
 		}
@@ -380,21 +380,13 @@ uses-deps "uses the projects" --after reinstall
 tool-first "puts a tool in place" --before reinstall
 typo "names a thing of the restore's" --after restore:code
 `)
-	fails := func(name string) string {
-		out, _, _ := w.run(t, "agent", "order", name, "--json")
-		var doc struct{ Fails string }
-		if err := json.Unmarshal([]byte(out), &doc); err != nil {
-			t.Fatalf("kit agent order %s --json printed\n%s", name, out)
-		}
-		return doc.Fails
-	}
 	for _, name := range []string{"uses-code", "before-it", "uses-deps", "tool-first"} {
 		doc := w.order(t, name)
-		if all := names(slices.Concat(doc.Before, doc.After, doc.Unordered, doc.Absent)); slices.Contains(all, "restore") || slices.Contains(all, "reinstall") || fails(name) != "" {
-			t.Errorf("kit agent order %s placed it among %q, failing %q; want it placed, the restore and the reinstall nowhere", name, all, fails(name))
+		if all := names(slices.Concat(doc.Before, doc.After, doc.Unordered, doc.Absent)); slices.Contains(all, "restore") || slices.Contains(all, "reinstall") || doc.Fails != "" {
+			t.Errorf("kit agent order %s placed it among %q, failing %q; want it placed, the restore and the reinstall nowhere", name, all, doc.Fails)
 		}
 	}
-	if got := fails("typo"); !strings.HasSuffix(got, ": it comes after restore:code, which isn't a step") {
+	if got := w.order(t, "typo").Fails; !strings.HasSuffix(got, ": it comes after restore:code, which isn't a step") {
 		t.Errorf("kit agent order typo fails %q; want it failing, restore:code no step", got)
 	}
 }

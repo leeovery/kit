@@ -13,11 +13,7 @@ import (
 	"github.com/leeovery/kit/internal/gitrepo"
 	"github.com/leeovery/kit/internal/guide"
 	"github.com/leeovery/kit/internal/look"
-	"github.com/leeovery/kit/internal/render"
 )
-
-// agentSchema is the version of kit agent's documents, --json's.
-const agentSchema = 1
 
 // agentWidth is how wide kit agent's lines go, at most: the guide's files
 // are wrapped within it, and what kit agent adds to them is wrapped to it.
@@ -32,7 +28,7 @@ func newAgentCommand(a *app) *cobra.Command {
 set-up through kit: this config's facts, then how to change kit-config so
 that what works on this Mac works on a new one too, then the topics that go
 deeper and the commands that check a change. It's plain text, at a terminal
-or not; --json gives the facts as fields and the guide as text.
+or not.
 
 kit agent and a topic goes into that topic, found by the start of its name.
 kit agent order <name> says where a step, or a thing as in cask:firefox,
@@ -80,14 +76,6 @@ func newTopicCommand(a *app, t guide.Topic) *cobra.Command {
 		Short: t.About,
 		Args:  cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {
-			if a.json {
-				return render.WriteJSON(a.Stdout, struct {
-					Schema int    `json:"schema"`
-					Topic  string `json:"topic"`
-					About  string `json:"about"`
-					Text   string `json:"text"`
-				}{agentSchema, t.Name, t.About, t.Text()})
-			}
 			_, err := io.WriteString(a.Stdout, t.Text())
 			return err
 		},
@@ -98,36 +86,29 @@ func newTopicCommand(a *app, t guide.Topic) *cobra.Command {
 // version; kit-config's folder and its repository, or why it can't be read
 // (Unread), which leaves the rest out; this Mac's name and folder, the
 // config's Macs, and the blocks secrets are declared in, for this Mac; and
-// what else couldn't be found out, if anything. Guide is what follows them.
+// what else couldn't be found out, if anything.
 type agentFacts struct {
-	Schema     int        `json:"schema"`
-	Version    string     `json:"version"`
-	Config     string     `json:"config,omitempty"`
-	Unread     string     `json:"unread,omitempty"`
-	Problem    string     `json:"problem,omitempty"`
-	Repository string     `json:"repository,omitempty"`
-	Machine    string     `json:"machine,omitempty"`
-	Folder     string     `json:"folder,omitempty"`
-	Macs       []agentMac `json:"macs,omitempty"`
-	Secrets    []place    `json:"secrets,omitempty"`
-	Guide      string     `json:"guide"`
+	Version    string
+	Config     string
+	Unread     string
+	Problem    string
+	Repository string
+	Machine    string
+	Folder     string
+	Macs       []agentMac
+	Secrets    []place
 }
 
 // agentMac is one of the config's Macs, as kit agent lists them.
 type agentMac struct {
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
+	Name        string
+	Description string
 }
 
-// agentGuide prints the guide, this config's facts first: as one document
-// with --json, else as plain text, at a terminal or not.
+// agentGuide prints the guide, this config's facts first, as plain text, at
+// a terminal or not.
 func (a *app) agentGuide(ctx context.Context) error {
-	f := a.agentFacts(ctx)
-	f.Guide = guideText()
-	if a.json {
-		return render.WriteJSON(a.Stdout, f)
-	}
-	_, err := io.WriteString(a.Stdout, strings.Join(f.lines(), "\n")+"\n\n"+f.Guide)
+	_, err := io.WriteString(a.Stdout, strings.Join(a.agentFacts(ctx).lines(), "\n")+"\n\n"+guideText())
 	return err
 }
 
@@ -147,7 +128,7 @@ func guideText() string {
 // agentFacts finds this config's facts. What it can't find, it says, and
 // leaves out what follows from it: the guide is printed anyway.
 func (a *app) agentFacts(ctx context.Context) agentFacts {
-	f := agentFacts{Schema: agentSchema, Version: a.Version}
+	f := agentFacts{Version: a.Version}
 	dirs, err := a.dirs()
 	if err != nil {
 		f.Unread = err.Error()

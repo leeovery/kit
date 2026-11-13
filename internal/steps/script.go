@@ -111,8 +111,6 @@ func ParseScript(configDir string, e config.Entry) (Script, error) {
 			}
 			i++
 			s.Secrets = append(s.Secrets, words[i])
-		case "--needs", "--admin":
-			return s, fmt.Errorf("%s is %s now", w, map[string]string{"--needs": "--after", "--admin": "--sudo"}[w])
 		default:
 			return s, fmt.Errorf("%q isn't one of a step's options: --after, --before, --secret and --sudo", w)
 		}

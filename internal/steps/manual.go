@@ -97,14 +97,10 @@ func ParseManual(home string, e config.Entry) (ManualStep, error) {
 				return m, err
 			}
 			i++
-		case "--open":
-			return m, errors.New(`--open is gone: a step by hand of yours opens nothing, so say what to open in a step, a line indented under it, as in "Open Firefox"`)
 		case "--test":
 			if cmd = words[i+1:]; len(cmd) == 0 {
 				return m, errors.New("--test needs the command saying whether it's done after it")
 			}
-		case "--":
-			return m, errors.New("the command saying whether it's done comes after --test now")
 		default:
 			return m, fmt.Errorf("%q isn't one of a step by hand's options: --after, --before, --group and --test", w)
 		}
@@ -136,7 +132,7 @@ func groupOf(had string, words []string, i int) (string, error) {
 
 // hand is the step by hand m is, as the step raising it lists it.
 func (m ManualStep) hand() event.Hand {
-	return event.Hand{Name: m.Name, Title: m.Do, Group: m.Group, Why: m.Why}
+	return event.Hand{Name: m.Name, Title: m.Do}
 }
 
 // hands are the steps by hand list's lines are, in order: but those that
@@ -206,7 +202,7 @@ func (b byHand) item() check.Item {
 // card is what its card says: its line's name, what to do, its group, why,
 // its steps, and whether kit tells by itself when it's done.
 func (b byHand) card() event.NeedsYou {
-	return event.NeedsYou{Item: b.Name, Title: b.Do, Group: b.Group, Why: b.Why, Steps: b.Steps, Tells: b.watched()}
+	return event.NeedsYou{Item: b.Name, Title: b.Do, Why: b.Why, Steps: b.Steps, Tells: b.watched()}
 }
 
 // open opens its app, once, as its card comes up: nothing for one with

@@ -82,8 +82,6 @@ func healthyMac(w *world) {
 	f := w.fake
 	f.On("/bin/df", "-P", "-k", "/System/Volumes/Data").Prints("Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/disk3s5 1000000000 0 480000000 52% /System/Volumes/Data\n")
 	f.On("sysctl", "-n", "kern.memorystatus_vm_pressure_level", "vm.swapusage").Prints("1\ntotal = 2048.00M  used = 307.20M  free = 1740.80M  (encrypted)\n")
-	f.On("pgrep", "-x", "fseventsd").Prints("412\n")
-	f.On("top", "-l", "1", "-pid", "412", "-stats", "mem").Prints("MEM\n102M\n")
 	f.On("sysctl", "-n", "vm.loadavg", "hw.ncpu", "kern.boottime").Prints("{ 2.10 2.00 1.90 }\n10\n{ sec = 1767312245, usec = 0 } Fri Jan  2 00:04:05 2026\n")
 	dir := filepath.Join(w.home, ".config", "kit")
 	f.On("git", "-C", dir, "--literal-pathspecs", "status", "--porcelain", "-z", "--untracked-files=all", "--no-renames", "--")
@@ -105,7 +103,6 @@ host-key ok Remote Login is off: no host key to record
 config ok all committed
 disk ok 48% free
 memory ok 0.3 GB swap, pressure normal
-file-events ok fseventsd using 0.1 GB
 load ok load 1.9 on 10 cores
 config-sync ok pushed
 config-private ok private on GitHub (someone/kit-config)
@@ -144,7 +141,7 @@ func TestStatusJSON(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &doc); err != nil || code != 1 {
 		t.Fatalf("kit status --json printed %q, exit %d: %v", out, code, err)
 	}
-	if doc.Schema != 1 || doc.Kit != "0.1.0" || doc.Machine != "laptop" || !doc.Attention || len(doc.Steps) != 15 {
+	if doc.Schema != 1 || doc.Kit != "0.1.0" || doc.Machine != "laptop" || !doc.Attention || len(doc.Steps) != 14 {
 		t.Fatalf("document = %+v", doc)
 	}
 	brew := doc.Steps[2]

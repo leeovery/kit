@@ -56,7 +56,7 @@ type AppAccessing struct {
 func AppAccess(a AppAccessing) engine.Step {
 	step := engine.Step{
 		Name: AppAccessName, Title: AppAccessName, Area: AreaManual,
-		ByHand: []event.Hand{{Name: AppAccessName, Title: appAccessTitle, Why: appAccessWhy}},
+		ByHand: []event.Hand{{Name: AppAccessName, Title: appAccessTitle}},
 		Check: func(context.Context) check.Result {
 			rec, err := nightly.Load(a.StateDir)
 			if err != nil {

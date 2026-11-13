@@ -1,7 +1,6 @@
 package cli_test
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -81,44 +80,6 @@ func TestAgentIsTheSameAtATerminal(t *testing.T) {
 	}
 }
 
-// kit agent --json is the facts as fields, and the guide as text, in one
-// document.
-func TestAgentJSON(t *testing.T) {
-	w := placesWorld(t)
-	out, _, code := w.run(t, "agent", "--json")
-	var doc struct {
-		Schema     int    `json:"schema"`
-		Version    string `json:"version"`
-		Config     string `json:"config"`
-		Repository string `json:"repository"`
-		Machine    string `json:"machine"`
-		Folder     string `json:"folder"`
-		Macs       []struct {
-			Name, Description string
-		} `json:"macs"`
-		Secrets []struct {
-			Name, Store, Item, Scope string
-			Secrets                  int
-		} `json:"secrets"`
-		Guide string `json:"guide"`
-	}
-	if err := json.Unmarshal([]byte(out), &doc); err != nil || code != 0 {
-		t.Fatalf("kit agent --json printed\n%s\nexit %d: %v", out, code, err)
-	}
-	if doc.Schema != 1 || doc.Version != "0.1.0" || doc.Config != filepath.Join(w.home, ".config", "kit") || doc.Repository != "github.com:someone/kit-config.git" || doc.Machine != "laptop" || doc.Folder != "laptop/" {
-		t.Errorf("document = %+v", doc)
-	}
-	if len(doc.Macs) != 2 || doc.Macs[1].Name != "studio" || doc.Macs[1].Description != "Mac Studio" {
-		t.Errorf("macs = %+v, want laptop and studio, each with what it is", doc.Macs)
-	}
-	if len(doc.Secrets) != 3 || doc.Secrets[0].Name != "tokens" || doc.Secrets[0].Store != "1Password" || doc.Secrets[0].Secrets != 2 {
-		t.Errorf("secrets = %+v, want the blocks kit secret places lists", doc.Secrets)
-	}
-	if !strings.HasPrefix(doc.Guide, guide.Main()) || !strings.HasSuffix(doc.Guide, guide.Checking()) {
-		t.Errorf("guide = %q, want the guide as kit agent prints it", doc.Guide)
-	}
-}
-
 // A topic is found by the start of its name, as kit's commands are; one no
 // topic's name starts with, or more than one's does, is an error naming the
 // topics.
@@ -162,23 +123,6 @@ func TestAgentTopics(t *testing.T) {
 	}
 }
 
-// A topic's --json is its name, what it's about, and its text.
-func TestAgentTopicJSON(t *testing.T) {
-	w := newWorld(t, nil)
-	out, _, code := w.run(t, "agent", "prefs", "--json")
-	var doc struct {
-		Schema             int
-		Topic, About, Text string
-	}
-	if err := json.Unmarshal([]byte(out), &doc); err != nil || code != 0 {
-		t.Fatalf("kit agent prefs --json printed\n%s\nexit %d: %v", out, code, err)
-	}
-	prefs := guide.Topics[5]
-	if doc.Schema != 1 || doc.Topic != "prefs" || doc.About != prefs.About || doc.Text != prefs.Text() {
-		t.Errorf("document = %+v", doc)
-	}
-}
-
 // kit agent is the last of the commands about this Mac in kit's help.
 func TestAgentIsLastOfThisMacsCommands(t *testing.T) {
 	w := newWorld(t, nil)
@@ -197,12 +141,10 @@ func TestAgentSaysEveryProblem(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(w.home, ".local", "state", "kit", "machine"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	out, _, code := w.run(t, "agent", "--json")
-	var doc struct{ Problem string }
-	if err := json.Unmarshal([]byte(out), &doc); err != nil || code != 0 {
-		t.Fatalf("kit agent --json printed\n%s\nexit %d: %v", out, code, err)
-	}
-	if !strings.HasPrefix(doc.Problem, "read this Mac's name: ") || !strings.Contains(doc.Problem, "; shared/declarations:1: kit doesn't know the section [no such section]") {
-		t.Errorf("problem = %q, want this Mac's name unread, and the shared file's section", doc.Problem)
+	out, _, code := w.run(t, "agent")
+	facts, _, _ := strings.Cut(out, guide.Main())
+	said := strings.Join(strings.Fields(facts), " ")
+	if code != 0 || !strings.Contains(said, " problem read this Mac's name: ") || !strings.Contains(said, "; shared/declarations:1: kit doesn't know the section [no such section] kit 0.1.0") {
+		t.Errorf("kit agent printed\n%s\nexit %d, want this Mac's name unread, and the shared file's section, as its problem", facts, code)
 	}
 }

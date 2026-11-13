@@ -1,7 +1,6 @@
 package cli_test
 
 import (
-	"encoding/json"
 	"slices"
 	"strings"
 	"testing"
@@ -32,30 +31,51 @@ after-npm "after npm's packages" --after npm
 	return w
 }
 
-// placed is kit agent order --json's document.
+// placed is what kit agent order prints: its heading, why the step fails
+// at once or never applies, if it does, and its sections' rows.
 type placed struct {
-	Schema                            int
-	Machine, Name, Step, Thing, Never string
-	RaisedBy                          string `json:"raised_by"`
-	Before, After, Unordered, Absent  []spot
+	Heading, Fails, Never            string
+	Before, After, Unordered, Absent []spot
 }
 
-// spot is a step or thing in kit agent order --json's lists; App says a
-// thing of no step is an app; Through names the step it's ahead only
-// through.
-type spot struct {
-	Step, Thing, Says, Through string
-	App                        bool
-}
+// spot is a row of one of kit agent order's sections: what it names, and
+// what it says of it.
+type spot struct{ Name, Says string }
 
-// order runs kit agent order --json for name in w, failing the test unless
-// it's placed.
+// order runs kit agent order for name in w and reads what it prints,
+// failing the test unless it's placed.
 func (w *world) order(t *testing.T, name string) placed {
 	t.Helper()
-	out, errOut, code := w.run(t, "agent", "order", name, "--json")
-	var doc placed
-	if err := json.Unmarshal([]byte(out), &doc); err != nil || code != 0 {
-		t.Fatalf("kit agent order %s --json printed\n%s%s\nexit %d: %v", name, out, errOut, code, err)
+	out, errOut, code := w.run(t, "agent", "order", name)
+	if code != 0 {
+		t.Fatalf("kit agent order %s printed\n%s%s\nexit %d", name, out, errOut, code)
+	}
+	blocks := strings.Split(strings.TrimSuffix(out, "\n"), "\n\n")
+	doc := placed{Heading: strings.Join(strings.Fields(blocks[0]), " ")}
+	sections := map[string]*[]spot{"Before it": &doc.Before, "After it": &doc.After, "In no order with it: either may come first": &doc.Unordered, "Not in this Mac's run": &doc.Absent}
+	for _, block := range blocks[1:] {
+		title, rows, _ := strings.Cut(block, "\n")
+		said := strings.Join(strings.Fields(block), " ")
+		if fails, ok := strings.CutPrefix(said, "It fails at once, and never applies: "); ok {
+			doc.Fails = fails
+			continue
+		}
+		if never, ok := strings.CutPrefix(said, "It never applies: "); ok {
+			doc.Never = strings.TrimSuffix(never, ".")
+			continue
+		}
+		into := sections[title]
+		if into == nil {
+			t.Fatalf("kit agent order %s printed a section %q", name, title)
+		}
+		for row := range strings.SplitSeq(rows, "\n") {
+			if strings.HasPrefix(row, "   ") {
+				last := &(*into)[len(*into)-1]
+				last.Says += " " + strings.TrimSpace(row)
+			} else if named, says, ok := strings.Cut(row[2:], "  "); ok {
+				*into = append(*into, spot{Name: named, Says: strings.TrimSpace(says)})
+			}
+		}
 	}
 	return doc
 }
@@ -64,14 +84,7 @@ func (w *world) order(t *testing.T, name string) placed {
 func names(spots []spot) []string {
 	var out []string
 	for _, s := range spots {
-		switch {
-		case s.Step == "" && s.App:
-			out = append(out, s.Thing+" (app)")
-		case s.Step == "":
-			out = append(out, s.Thing+" (on PATH)")
-		default:
-			out = append(out, strings.TrimSuffix(s.Step+":"+s.Thing, ":"))
-		}
+		out = append(out, s.Name)
 	}
 	return out
 }
@@ -143,11 +156,11 @@ func TestOrderOfAStepAfterAppsSettings(t *testing.T) {
 	if says := doc.Before[1].Says; says != "Homebrew casks: each installed unless it fails; likely never opened yet; their settings restored by prefs, before it" {
 		t.Errorf("the casks before it say %q", says)
 	}
-	if token := doc.Before[2]; token.Through != "prefs" || token.Says != "synced (through prefs: may not be there)" {
+	if token := doc.Before[2]; token.Says != "synced (through prefs: may not be there)" {
 		t.Errorf("the secret before it, through prefs, = %+v, want it said to be through prefs", token)
 	}
-	if doc.Before[3].Through != "" {
-		t.Errorf("prefs before it = %+v, want it sure, a step it comes after itself", doc.Before[3])
+	if says := doc.Before[3].Says; strings.Contains(says, "through") {
+		t.Errorf("prefs before it says %q, want it sure, a step it comes after itself", says)
 	}
 	if got := names(doc.Unordered); !slices.Equal(got, []string{"secret"}) {
 		t.Errorf("in no order with it = %q, want the secrets' sync alone", got)
@@ -170,8 +183,8 @@ func TestOrderOfAStepNeedingASecret(t *testing.T) {
 // after it, as what waits for the whole kind is.
 func TestOrderOfAThing(t *testing.T) {
 	doc := orderWorld(t).order(t, "cask:ghostty")
-	if doc.Name != "cask:ghostty" || doc.Step != "cask" || doc.Thing != "ghostty" || doc.Machine != "laptop" || doc.Schema != 1 {
-		t.Errorf("document = %+v", doc)
+	if doc.Heading != "cask:ghostty on a new Mac" {
+		t.Errorf("heading = %q", doc.Heading)
 	}
 	if got := names(doc.Before); !slices.Equal(got, []string{"homebrew", "brew (on PATH)"}) {
 		t.Errorf("before it = %q, want Homebrew, and brew on kit's PATH", got)
@@ -295,12 +308,11 @@ func TestOrderOfABrokenStep(t *testing.T) {
 func TestOrderOfAStepDoneByHandAtTheEnd(t *testing.T) {
 	w := orderWorld(t)
 	doc := w.order(t, "by-hand")
-	if doc.Step != "manual" || doc.RaisedBy != "manual" || len(doc.After) != 0 || !slices.Contains(names(doc.Before), "alone") {
-		t.Errorf("document = %+v, want it placed as manual, after the rest", doc)
+	if heading := "by-hand on a new Mac: a step done by hand, raised with the rest by manual"; doc.Heading != heading {
+		t.Errorf("heading = %q, want %q", doc.Heading, heading)
 	}
-	out, _, _ := w.run(t, "agent", "order", "by-hand")
-	if heading := "by-hand on a new Mac: a step done by hand, raised with the rest by manual\n"; !strings.HasPrefix(out, heading) {
-		t.Errorf("kit agent order by-hand printed\n%s\nwant it to open\n%s", out, heading)
+	if len(doc.After) != 0 || !slices.Contains(names(doc.Before), "alone") {
+		t.Errorf("before it = %q, after it = %q: want it placed as manual, after the rest", names(doc.Before), names(doc.After))
 	}
 }
 
@@ -317,7 +329,7 @@ after-casks "after every cask" --after cask
 `)
 	doc := w.order(t, "then")
 	i := slices.Index(names(doc.Before), "cask:ghostie")
-	if doc.Never != "" || i < 0 || doc.Before[i].Through != "first" || doc.Before[i].Says != "not declared for this Mac: never installed (through first: may not be there)" {
+	if doc.Never != "" || i < 0 || doc.Before[i].Says != "not declared for this Mac: never installed (through first: may not be there)" {
 		t.Errorf("never = %q, before it = %+v: want it to apply, cask:ghostie only through first", doc.Never, doc.Before)
 	}
 	if doc := w.order(t, "first"); doc.Never == "" {
@@ -325,7 +337,7 @@ after-casks "after every cask" --after cask
 	}
 	doc = w.order(t, "after-casks")
 	i = slices.Index(names(doc.Before), "brew:nosuch")
-	if doc.Never != "" || i < 0 || doc.Before[i].Through != "cask" {
+	if doc.Never != "" || i < 0 || !strings.HasSuffix(doc.Before[i].Says, " (through cask: may not be there)") {
 		t.Errorf("never = %q, before it = %+v: want it to apply, brew:nosuch only through cask", doc.Never, doc.Before)
 	}
 }
