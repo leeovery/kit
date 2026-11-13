@@ -1,0 +1,23 @@
+history.jsonl is newer
+projects/site/back\#134#123slash is newer
+projects/site/odd\#012name is newer
+projects/site/session.jsonl is newer
+              0B   0%       0B/s    0:00:00 (xfr#0, to-chk=6/9)              0B   0%       0B/s    0:00:00 (xfr#0, to-chk=5/9)              7B  10%       0B/s    0:00:00                7B  10%       0B/s    0:00:00 (xfr#1, to-chk=3/9)             14B  21%   7.00KB/s    0:00:00 (xfr#2, to-chk=0/9)             14B  21%   7.00KB/s    0:00:00 (xfr#2, to-chk=0/9)
+
+Number of files: 9 (reg: 6, dir: 3)
+Number of created files: 2 (reg: 2)
+Number of deleted files: 0
+Number of regular files transferred: 2
+Total file size: 65 bytes
+Total transferred file size: 14 bytes
+Literal data: 14 bytes
+Number of 4 KiB logical blocks touched: 2
+Matched data: 0 bytes
+File list size: 0
+File list generation time: 0.004 seconds
+File list transfer time: 0.000 seconds
+Total bytes sent: 415
+Total bytes received: 204
+
+sent 415 bytes  received 204 bytes  1,238.00 bytes/sec
+total size is 65  speedup is 0.11

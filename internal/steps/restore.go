@@ -60,9 +60,9 @@ type Restoring struct {
 	Owned func(ctx context.Context) (restore.Owned, error)
 	// Home is the home folder, and StateDir kit's state.
 	Home, StateDir string
-	// Began is when this Mac's set-up began (boot.Began): zero for a Mac in
-	// use.
-	Began time.Time
+	// SetUp is whether the boot set this Mac up (boot.SetUp): false for a
+	// Mac in use.
+	SetUp bool
 	// Mac is this Mac's name, and From the Mac it started from, as kit.toml
 	// says: "" for none.
 	Mac, From string
@@ -113,12 +113,12 @@ type Restoring struct {
 // source hasn't, nothing copied to it, is recorded not there; part-way, it
 // fails, keeping the source it began from, the error naming the ways on:
 // another source, or its line dropped, as one for a source that won't open
-// names them for all its paths. With room for the copies, each path is judged again as its
-// turn comes, then copied, what set-up wrote in it set aside first, then
-// compared with its source: from a backup, a file found differing fails
-// the path; from a live Mac, what changed as it was copied is copied
-// again, and counted. A file the copy kept, newer here, written by set-up
-// in its window before the path's copy first began, is set aside and
+// names them for all its paths. With room for the copies, each path is
+// judged again as its turn comes, then copied, what set-up found in it set
+// aside first, then compared with its source: from a backup, a file found
+// differing fails the path; from a live Mac, what changed as it was copied
+// is copied again, and counted. A file the copy kept, newer here, in
+// set-up's window before the path's copy first began, is set aside and
 // copied again; any other is kept. The record says where each path stands
 // throughout, and, done, what it holds, so a run stopped resumes; the
 // restore settles once it's finished with every path. Each source is
@@ -201,14 +201,14 @@ func (r Restoring) judged(ctx context.Context) ([]judged, restore.Record, error)
 // nothing but kit's, is restored, so one lost since it was recorded can be
 // brought back.
 func (r Restoring) judge(f *restore.Filter, rec restore.Record) (restore.Judgement, error) {
-	j, err := restore.Judge(r.Home, f, rec, r.Began)
+	j, err := restore.Judge(r.Home, f, rec, r.SetUp)
 	if err != nil || j.Verdict != restore.VerdictHere || r.Flag.Kind == "" || rec.Paths[j.Path].State != restore.Here {
 		return j, err
 	}
 	afresh := rec
 	afresh.Paths = maps.Clone(rec.Paths)
 	delete(afresh.Paths, j.Path)
-	again, err := restore.Judge(r.Home, f, afresh, r.Began)
+	again, err := restore.Judge(r.Home, f, afresh, r.SetUp)
 	if err != nil || again.Verdict != restore.VerdictRestore {
 		return j, err
 	}
@@ -305,17 +305,13 @@ func restoreSummary(declared int, counts map[string]int) string {
 	return strings.Join(parts, ", ")
 }
 
-// toRestore is the item of j's path, to restore: what set-up wrote in it
-// set aside first, or its copy resumed, saying so.
+// toRestore is the item of j's path, to restore: what's there set aside
+// first, or its copy resumed, saying so.
 func toRestore(j restore.Judgement, rec restore.Record) check.Item {
 	it := check.Item{ID: RestoreName + ":" + j.Path, Name: j.Path, State: "missing", Action: ActionRestore}
 	switch p := rec.Paths[j.Path]; j.Verdict {
 	case restore.VerdictSetAside:
-		if len(j.New) == 1 && j.New[0] == j.Path {
-			it.Detail = "set-up's copy set aside first"
-			break
-		}
-		it.Detail = fmt.Sprintf("%d %s set-up wrote in it set aside first", len(j.New), plural(len(j.New), "file", "files"))
+		it.Detail = "what's here set aside first"
 	case restore.VerdictResume:
 		switch {
 		case p.State == restore.Checking && p.Second != nil:
@@ -759,14 +755,13 @@ func (r Restoring) room(src *restore.Opened, copies []copying) error {
 }
 
 // restoreOne restores c's path from src, judged again first, as what it
-// holds can change while the paths before it copy: holding older files
-// now, it's here, left as it is; else what set-up has written in it by now
-// is set aside. A file the copy kept, newer here, is set aside and copied
-// again, or kept, as newerHere has it. The record says where it stands
-// throughout: copying, from src from then (restore.Record's Begin);
-// checking, and, a second pass that found differences, how many; done,
-// with what it holds, once its second pass has passed. Its partial files
-// go once it's done.
+// holds can change while the paths before it copy: here now, it's left as
+// it is; else, in set-up's window, all it holds by now is set aside. A file
+// the copy kept, newer here, is set aside and copied again, or kept, as
+// newerHere has it. The record says where it stands throughout: copying,
+// from src from then (restore.Record's Begin); checking, and, a second
+// pass that found differences, how many; done, with what it holds, once
+// its second pass has passed. Its partial files go once it's done.
 func (r Restoring) restoreOne(ctx context.Context, src *restore.Opened, c copying, p *progress) error {
 	failed := func(err error) error { return fmt.Errorf("couldn't restore %s: %w", c.Path, err) }
 	rec, err := restore.LoadRecord(r.StateDir)
@@ -788,7 +783,9 @@ func (r Restoring) restoreOne(ctx context.Context, src *restore.Opened, c copyin
 		}
 	}
 	if j.Verdict == restore.VerdictSetAside {
-		if err := r.setAside(ctx, j, "what set-up wrote in "+j.Path); err != nil {
+		aside, err := restore.SetAside(r.StateDir, r.Home, c.filter, r.Now())
+		r.saidAside(ctx, "what was in "+c.Path, aside)
+		if err != nil {
 			return failed(err)
 		}
 	}
@@ -800,8 +797,8 @@ func (r Restoring) restoreOne(ctx context.Context, src *restore.Opened, c copyin
 	if copyFailed(src, err) {
 		return failed(err)
 	}
-	if stats.Newer {
-		if stats, err = r.newerHere(ctx, src, c, rec, stats, p); err != nil {
+	if len(stats.Newer) > 0 {
+		if err := r.newerHere(ctx, src, c, rec, stats.Newer); err != nil {
 			return failed(err)
 		}
 	}
@@ -847,26 +844,72 @@ func (r Restoring) begin(ctx context.Context, src *restore.Opened, path string) 
 	return err
 }
 
-// newerHere is what becomes of c's file, its copy from src, as stats says,
-// having kept the one here, newer, as --update keeps it: written by set-up
-// in its window, before the path's copy first began (restore.Record's
-// MaySetAside, rec the record from before this run's copy began), it's set
-// aside, saying so, and copied again, once; else it's kept, saying so, as
-// newer work always is. It returns what the copy came to, the second's if
-// there was one.
-func (r Restoring) newerHere(ctx context.Context, src *restore.Opened, c copying, rec restore.Record, stats restore.Stats, p *progress) (restore.Stats, error) {
-	if !rec.MaySetAside(c.Path, r.Began) {
-		event.Log(ctx, event.Logged{Line: fmt.Sprintf("Kept %s as it is: it's newer here than in %s", c.Path, src.Origin.Says())})
-		return stats, nil
+// newerHere is what becomes of the files of c's path its copy from src
+// kept, newer here, as --update keeps them and rsync names them, newer: in
+// set-up's window before the path's copy first began (restore.Record's
+// MaySetAside, rec the record from before this run's copy began), as a
+// shell sharing its history with every tab writes it, or a tool its state,
+// between the path's setting aside and the copy reaching them, they're set
+// aside, saying so, and copied again, those alone, once, saying nothing of
+// its progress, which would set the copy's back; else they're kept, saying
+// so, as newer work always is, as are any the copy again keeps.
+func (r Restoring) newerHere(ctx context.Context, src *restore.Opened, c copying, rec restore.Record, newer []string) error {
+	again, files := newerIn(c, newer)
+	if len(files) == 0 || !rec.MaySetAside(c.Path, r.SetUp) {
+		keptNewer(ctx, src, c, newer)
+		return nil
 	}
-	if err := r.setAside(ctx, restore.Judgement{Path: c.Path, Verdict: restore.VerdictSetAside, New: []string{c.Path}}, c.Path+", written here as it was restored"); err != nil {
-		return stats, err
+	aside, err := restore.SetAsideFiles(r.StateDir, r.Home, c.Path, files, r.Now())
+	r.saidAside(ctx, writtenHere(c, len(files)), aside)
+	if err != nil {
+		return err
 	}
-	again, err := r.Rsync.Copy(quietly(ctx), c.copy, p.copied)
+	stats, err := r.Rsync.Copy(quietly(ctx), again, nil)
 	if copyFailed(src, err) {
-		return stats, err
+		return err
 	}
-	return again, nil
+	keptNewer(ctx, src, c, stats.Newer)
+	return nil
+}
+
+// newerIn is the copy again of the files of c's path its copy kept as
+// newer, as rsync names them, newer, and those files, each from ~: a file's,
+// its copy, of the file itself; a folder's, of those rsync names in it
+// alone, never one whose name would reach out of it.
+func newerIn(c copying, newer []string) (restore.Copy, []string) {
+	again := c.copy
+	if again.File {
+		return again, []string{c.Path}
+	}
+	var files []string
+	for _, name := range newer {
+		if filepath.IsLocal(name) {
+			again.Only = append(again.Only, name)
+			files = append(files, c.Path+"/"+name)
+		}
+	}
+	return again, files
+}
+
+// writtenHere says what of c's path its copy kept, newer here, n files, as
+// set aside: the file itself, or how many in the folder.
+func writtenHere(c copying, n int) string {
+	if c.copy.File {
+		return c.Path + ", written here as it was restored"
+	}
+	return fmt.Sprintf("%d %s in %s, written here as %s restored", n, plural(n, "file", "files"), c.Path, plural(n, "it was", "they were"))
+}
+
+// keptNewer says, of c's path, that its copy from src kept the files rsync
+// names newer, newer here, if any.
+func keptNewer(ctx context.Context, src *restore.Opened, c copying, newer []string) {
+	switch n := len(newer); {
+	case n == 0:
+	case c.copy.File:
+		event.Log(ctx, event.Logged{Line: fmt.Sprintf("Kept %s as it is: it's newer here than in %s", c.Path, src.Origin.Says())})
+	default:
+		event.Log(ctx, event.Logged{Line: fmt.Sprintf("Kept %d %s in %s as %s: newer here than in %s", n, plural(n, "file", "files"), c.Path, plural(n, "it is", "they are"), src.Origin.Says())})
+	}
 }
 
 // copyFailed reports whether err fails a copy from src: any error but
@@ -876,20 +919,12 @@ func copyFailed(src *restore.Opened, err error) bool {
 	return err != nil && (!src.Live || !errors.Is(err, restore.ErrVanished))
 }
 
-// setAside sets aside what j found in its path, saying what, as in "what
-// set-up wrote in ~/Code", and where.
-func (r Restoring) setAside(ctx context.Context, j restore.Judgement, what string) error {
-	if err := restore.SetAside(r.StateDir, r.Home, j, r.Now()); err != nil {
-		return err
+// saidAside says what was set aside, what, as in "what was in ~/Code",
+// and where, aside, if anything was.
+func (r Restoring) saidAside(ctx context.Context, what string, aside restore.Aside) {
+	if len(aside.Paths) > 0 {
+		event.Log(ctx, event.Logged{Line: fmt.Sprintf("Set aside %s, into %s", what, r.tilde(aside.Dir))})
 	}
-	rec, err := restore.LoadRecord(r.StateDir)
-	if err != nil {
-		return err
-	}
-	if asides := rec.Paths[j.Path].SetAside; len(asides) > 0 {
-		event.Log(ctx, event.Logged{Line: fmt.Sprintf("Set aside %s, into %s", what, r.tilde(asides[len(asides)-1].Dir))})
-	}
-	return nil
 }
 
 // change changes the record of the listed path path.

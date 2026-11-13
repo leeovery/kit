@@ -542,19 +542,11 @@ func (p *Pretty) cardWhy() string {
 	}
 	switch {
 	case len(held) > 0:
-		return "The run waits for this, for " + inWords(held) + "."
+		return "The run waits for this, for " + look.InWords(held) + "."
 	case p.card.Step == steps.ManualName:
 		return "The rest is done: this is what's left."
 	}
 	return "Nothing waits for this: the rest of the run carries on meanwhile."
-}
-
-// inWords are names in a sentence: a, b and c.
-func inWords(names []string) string {
-	if len(names) < 2 {
-		return strings.Join(names, "")
-	}
-	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
 }
 
 // spread is left, then right at the end of a line w wide: left cut to keep

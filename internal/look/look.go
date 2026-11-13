@@ -77,6 +77,14 @@ var dot = Dim(" · ")
 // Says joins what a row says, its extras after a dim dot.
 func Says(parts ...string) string { return strings.Join(parts, dot) }
 
+// InWords is names in a sentence: a, b and c.
+func InWords(names []string) string {
+	if len(names) < 2 {
+		return strings.Join(names, "")
+	}
+	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
+}
+
 // State is how a thing stands, as its mark shows it.
 type State int
 

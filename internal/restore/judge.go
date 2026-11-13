@@ -22,8 +22,8 @@ const (
 	VerdictResume Verdict = "resume"
 	// VerdictRestore is a path absent, or holding nothing but kit's.
 	VerdictRestore Verdict = "restore"
-	// VerdictSetAside is a path the restore's first run listed, holding what
-	// isn't kit's, all of it written in set-up's window: set aside, then
+	// VerdictSetAside is a path in set-up's window, holding what isn't
+	// kit's, whatever its age: all of that set aside (SetAside), then
 	// restored.
 	VerdictSetAside Verdict = "set-aside"
 	// VerdictHere is a path recorded here, or holding anything that isn't
@@ -31,27 +31,20 @@ const (
 	VerdictHere Verdict = "here"
 )
 
-// Judgement is a listed path's verdict and, for one to set aside, what:
-// the files in it that aren't kit's, each from ~.
+// Judgement is a listed path's verdict.
 type Judgement struct {
 	Path    string
 	Verdict Verdict
-	New     []string
 }
 
 // Judge judges f's line's path, in the home folder home: by its record in
 // rec first, done, here, or its copy started; else, with no record, or not
-// in its source, by what it holds that isn't kit's, as f leaves out,
-// and set-up's window, a file's time its modification time. The window
-// opens when this Mac's set-up began, began, and closes when the restore
-// first settled (rec's Settled), and it's open only to the paths the
-// restore's first run listed (rec's First), before their copies start or
-// their source is found without them: it's shut on a Mac in use, nothing
-// recording began, and to a line added after the first run, which is here
-// if it holds anything that isn't kit's. Whether to restore one
-// absent then is the caller's. Judging moves nothing, and stops at the first
-// file that's neither kit's nor written in the window.
-func Judge(home string, f *Filter, rec Record, began time.Time) (Judgement, error) {
+// in its source, by whether it holds anything that isn't kit's, as f leaves
+// out, looking no further than the first: holding any in set-up's window
+// (rec's MaySetAside), it's to set aside, whatever its age; out of it, it's
+// here. Whether to restore a path absent, or holding nothing but kit's, is
+// the caller's. Judging moves nothing.
+func Judge(home string, f *Filter, rec Record, setUp bool) (Judgement, error) {
 	j := Judgement{Path: f.Line.Path}
 	switch p := rec.Paths[j.Path]; {
 	case p.State == Done:
@@ -64,40 +57,35 @@ func Judge(home string, f *Filter, rec Record, began time.Time) (Judgement, erro
 		j.Verdict = VerdictResume
 		return j, nil
 	}
-	if !rec.mayAside(j.Path) {
-		began = time.Time{}
-	}
-	written, older, err := f.holds(home, began)
+	held, err := f.holds(home, false)
 	switch {
 	case err != nil:
 		return j, err
-	case older:
-		j.Verdict = VerdictHere
-	case len(written) > 0:
-		j.Verdict, j.New = VerdictSetAside, written
-	default:
+	case len(held) == 0:
 		j.Verdict = VerdictRestore
+	case rec.MaySetAside(j.Path, setUp):
+		j.Verdict = VerdictSetAside
+	default:
+		j.Verdict = VerdictHere
 	}
 	return j, nil
 }
 
-// holds finds what f's line's path, in home, holds that isn't kit's:
-// whether any of it is older than began, stopping at the first that is;
-// else all of it, each from ~. Folders alone aren't anything held.
-func (f *Filter) holds(home string, began time.Time) (written []string, older bool, err error) {
+// holds is what f's line's path, in home, holds that isn't kit's, each
+// from ~: all of it, or, all false, the first found alone, which is enough
+// to say it holds anything. Folders alone aren't anything held.
+func (f *Filter) holds(home string, all bool) ([]string, error) {
 	root := filepath.Join(home, strings.TrimPrefix(f.Line.Path, "~/"))
 	info, err := os.Lstat(root)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
-		return nil, false, nil
+		return nil, nil
 	case err != nil:
-		return nil, false, fmt.Errorf("read %s: %w", f.Line.Path, err)
+		return nil, fmt.Errorf("read %s: %w", f.Line.Path, err)
 	case !info.IsDir():
-		if before(info, began) {
-			return nil, true, nil
-		}
-		return []string{f.Line.Path}, false, nil
+		return []string{f.Line.Path}, nil
 	}
+	var held []string
 	err = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -112,52 +100,49 @@ func (f *Filter) holds(home string, began time.Time) (written []string, older bo
 		case dir || f.Excludes(rel, dir):
 			return nil
 		}
-		info, err := d.Info()
-		if err != nil {
-			return err
-		}
-		if before(info, began) {
-			older = true
+		held = append(held, f.Line.Path+"/"+rel)
+		if !all {
 			return filepath.SkipAll
 		}
-		written = append(written, f.Line.Path+"/"+rel)
 		return nil
 	})
 	if err != nil {
-		return nil, false, fmt.Errorf("read %s: %w", f.Line.Path, err)
+		return nil, fmt.Errorf("read %s: %w", f.Line.Path, err)
 	}
-	if older {
-		return nil, true, nil
-	}
-	return written, false, nil
-}
-
-// before reports whether info's file was last written before began: always,
-// when began is zero.
-func before(info fs.FileInfo, began time.Time) bool {
-	return began.IsZero() || info.ModTime().Before(began)
+	return held, nil
 }
 
 // asideFolder is where in kit's state a restore sets files aside, a folder
 // a time.
 const asideFolder = "restore/set-aside"
 
-// SetAside moves what j found written in its path in set-up's window into
+// SetAside moves everything f's line's path, in the home folder home,
+// holds that isn't kit's, as f leaves out, into kit's state folder,
+// stateDir (SetAsideFiles). It's applying's to call: judging moves nothing.
+func SetAside(stateDir, home string, f *Filter, now time.Time) (Aside, error) {
+	held, err := f.holds(home, true)
+	if err != nil {
+		return Aside{}, err
+	}
+	return SetAsideFiles(stateDir, home, f.Line.Path, held, now)
+}
+
+// SetAsideFiles moves files, each from ~, of the listed path path, into
 // kit's state folder, stateDir: into a folder of its own under
 // restore/set-aside, named by the time, now (asideDir), each keeping its
 // path from the home folder, home. It records what it moved, and where,
-// even when it fails partway. A file gone since j was judged is passed
-// over. It's applying's to call: judging moves nothing.
-func SetAside(stateDir, home string, j Judgement, now time.Time) error {
-	if len(j.New) == 0 {
-		return nil
+// even when it fails partway, and returns it, nothing when it moved
+// nothing. A file gone since it was found is passed over.
+func SetAsideFiles(stateDir, home, path string, files []string, now time.Time) (Aside, error) {
+	if len(files) == 0 {
+		return Aside{}, nil
 	}
 	dir, err := asideDir(stateDir, now)
 	if err != nil {
-		return fmt.Errorf("set aside what's in %s: %w", j.Path, err)
+		return Aside{}, fmt.Errorf("set aside what's in %s: %w", path, err)
 	}
 	var moved []string
-	for _, p := range j.New {
+	for _, p := range files {
 		rel := strings.TrimPrefix(p, "~/")
 		dst := filepath.Join(dir, rel)
 		if err = os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
@@ -174,14 +159,14 @@ func SetAside(stateDir, home string, j Judgement, now time.Time) error {
 		moved = append(moved, p)
 	}
 	if err != nil {
-		err = fmt.Errorf("set aside what's in %s: %w", j.Path, err)
+		err = fmt.Errorf("set aside what's in %s: %w", path, err)
 	}
 	if len(moved) == 0 {
-		return err
+		return Aside{}, err
 	}
 	aside := Aside{Time: now, Dir: dir, Paths: moved}
-	return errors.Join(err, UpdateRecord(stateDir, func(r *Record) {
-		r.Change(j.Path, func(p *Path) { p.SetAside = append(p.SetAside, aside) })
+	return aside, errors.Join(err, UpdateRecord(stateDir, func(r *Record) {
+		r.Change(path, func(p *Path) { p.SetAside = append(p.SetAside, aside) })
 	}))
 }
 

@@ -5,7 +5,8 @@
 // kit's own folders) is never copied, and never counts as the path's holding
 // anything: kit puts it there itself. Each path is judged before any copy,
 // and again as its copy's turn comes, by its record, else by what it holds:
-// restored once, resumed, restored after what set-up wrote into it is set
-// aside, or, holding older files, left as it is, here, for good. A path its
-// source hasn't is done with, not there, till a source that has it is named.
+// restored once, resumed, restored after what it holds is set aside on a
+// Mac in set-up, or, holding files of its own, left as it is, here, for
+// good. A path its source hasn't is done with, not there, till a source
+// that has it is named.
 package restore

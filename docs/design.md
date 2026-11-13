@@ -1423,7 +1423,7 @@ refuses a line the restore would refuse, before writing anything, and copies not
   a copy when noticed, never data, and there's no drift watch over data. An agent building a
   tool that keeps data adds its line then (`kit agent`'s guide asks the question).
 - **When: the boot is the one trigger.** A restore starts only on a Mac the boot has just
-  named, on a Mac kit had no name for (a new install), which records when its set-up began,
+  named, on a Mac kit had no name for (a new install), which records that it set the Mac up,
   in one of two cases: a new Mac started from another (`from` in kit.toml, written by the
   boot's "start from a Mac" or `kit machine add --from`), whose copied declarations carry the
   list, copied from that Mac, else its backups; or a Mac clean-installed under its own name
@@ -1432,13 +1432,14 @@ refuses a line the restore would refuse, before writing anything, and copies not
   with no Mac looked for, or to restore nothing, the answer for a Mac in use brought onto kit
   by its boot under its own name, or one starting afresh, which the boot can't tell from a
   clean install (each path recorded not restored, never begun, nothing set aside, and the
-  restore settles). A new Mac with nothing to come from (a new name, no `from`) restores
+  restore settles); the card names the listed paths whose files a backup would set aside. A
+  new Mac with nothing to come from (a new name, no `from`) restores
   nothing, and a Mac in use, which never runs the boot, restores nothing, whatever its `from`
   says. A Mac rebuilt under its own name while its `from` is still in kit-config restores from
   that Mac. A Mac in set-up whose `[restore]` lists nothing still has the step, fine with
   nothing listed, which settles at its first `kit apply`: set-up's window closes whatever the
-  list holds, so a line added later waits for `--restore-from`, never setting aside what was
-  written since the boot. Once the restore settles it leaves `kit apply` and `kit status`, no
+  list holds, so a line added later waits for `--restore-from`, never setting aside what's
+  there. Once the restore settles it leaves `kit apply` and `kit status`, no
   row, as the reinstall does, coming back only for a path part-way or `--restore-from`. That
   flag is an override, on any Mac: a particular backup or date, a change of source part-way, a
   line added later or one restored nothing (`time-machine` or `arq`; `mac`, the Mac in `from`,
@@ -1486,20 +1487,23 @@ refuses a line the restore would refuse, before writing anything, and copies not
   folder holding git checkouts, agents' worktrees, is copied whole. Needs: the source
   reachable, free space for the copy, the same username (tools key their data by full path).
   Then a second pass comparing checksums: from a backup it must find nothing; from a live Mac
-  what changed during the copy is copied again, and counted. A listed file the copy kept as
-  newer here (rsync says so), as a shell's history written as it's restored, is set aside and
-  copied again, once, before the second pass, by the judgement's rule: only a line the
-  restore's first run listed, in the set-up's window, before its copy first started, never one
-  resumed; any other is kept, as newer work always is. rsync's own errors fail the step.
-- **The judgement, per path, before its copy.** Recorded done: never restored again. Absent,
-  or holding only what's kit's: restored. Holding anything older than this Mac's set-up: here,
-  never touched, never merged into. Holding only what the set-up itself wrote (a shell's
-  history, from the Terminal the boot runs in), on a path the restore's first run listed,
-  before its copy starts: that's set aside into kit's state, its path kept, a folder for each
-  setting aside, and the path is restored. The set-up's window opens as the boot starts
-  (recorded only for a Mac it names that has a `from`, or that kit-config has) and closes once
-  the restore first settles, every path done or here; a line added
-  later never moves a Mac's data. A path its source hasn't waits, judged afresh each run.
+  what changed during the copy is copied again, and counted. Files the copy kept as newer here
+  (rsync names each), as a shell's history every tab writes, or a tool's state, between a
+  path's setting aside and the copy reaching them, are set aside and copied again, those
+  alone, once, before the second pass: only in set-up's window, before its copy first
+  started, never one resumed; any other is kept, as newer work always is, the log saying so.
+  rsync's own errors fail the step.
+- **The judgement, per path, before its copy.** Recorded done: never restored again; its copy
+  begun: carried on, never judged again, what's in it the copy's. Absent, or holding only
+  what's kit's: restored. Holding anything else in set-up's window, whatever its age (a
+  shell's history from a Terminal opened before the boot, a download): all of it is set aside
+  into kit's state, its path kept, a folder for each setting aside, never deleted, and the
+  path is restored. Out of the window: here, never touched, never merged into. The window is
+  the Mac's state, never its files' times: open from the boot naming a Mac that has a `from`,
+  or that kit-config has, till the restore first settles, every path done or here, and only to
+  the paths the restore's first run listed, before their copies start; a Mac in use has none,
+  and a line added later never moves a Mac's data. A path its source hasn't waits, judged
+  afresh each run.
 - **The record**, in kit's state: the source a copy last started from, so a run again resumes
   from it (recorded only as a copy starts, so a source chosen that copied nothing is never
   kept), and each path's own, changed only as its own copy begins; the first run's paths; each

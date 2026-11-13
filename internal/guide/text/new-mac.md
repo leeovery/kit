@@ -86,9 +86,11 @@ just named, in one of two cases:
   and, from the old Mac, folders marked excluded from backups, though one
   holding git checkouts is copied whole); Finder's .DS_Store and .localized
   files; and what its line's `--skip` names.
-- What it never touches: a path already holding files from before the
-  set-up, never merged into. What the set-up itself wrote there, as a
-  shell's history, is set aside in kit's state first.
+- What it never touches: on a Mac in use, or for a line added once the
+  restore's begun, a path holding files of its own, never merged into. On
+  a Mac in set-up, whatever a listed path holds before its copy, however
+  old, as a shell's history, is set aside in kit's state first, never
+  deleted.
 - Then the reinstall: each restored project's dependencies are installed
   again from its lockfile (Composer, npm, pnpm, Yarn, Bun, uv), in main
   checkouts and the person's own worktrees, never agents' or submodules.

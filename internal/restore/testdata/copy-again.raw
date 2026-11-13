@@ -1,0 +1,19 @@
+             22B  43%       0B/s    0:00:00               22B  43%       0B/s    0:00:00 (xfr#1, to-chk=5/6)             31B  60%   9.00KB/s    0:00:00 (xfr#2, to-chk=2/6)             39B  76%   17.0KB/s    0:00:00 (xfr#3, to-chk=1/6)             51B 100%   29.0KB/s    0:00:00 (xfr#4, to-chk=0/6)             51B 100%   29.0KB/s    0:00:00 (xfr#4, to-chk=0/6)             51B 100%   14.5KB/s    0:00:00 (xfr#4, to-chk=0/6)             51B 100%   14.5KB/s    0:00:00 (xfr#4, to-chk=0/6)
+
+Number of files: 6 (reg: 4, dir: 2)
+Number of created files: 4 (reg: 4)
+Number of deleted files: 0
+Number of regular files transferred: 4
+Total file size: 51 bytes
+Total transferred file size: 51 bytes
+Literal data: 51 bytes
+Number of 4 KiB logical blocks touched: 4
+Matched data: 0 bytes
+File list size: 0
+File list generation time: 0.005 seconds
+File list transfer time: 0.000 seconds
+Total bytes sent: 468
+Total bytes received: 96
+
+sent 468 bytes  received 96 bytes  1,128.00 bytes/sec
+total size is 51  speedup is 0.09

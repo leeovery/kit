@@ -66,7 +66,7 @@ func TestRestoreFromTheOldMacPinned(t *testing.T) {
 	c.onTheNetwork(pinnedKey, pinnedKey)
 	c.probed().Prints(c.laptopSays(pinnedKey))
 	c.fake.OnMatch("ssh", func(args []string) bool { return strings.Contains(args[len(args)-1], "\nlook ") }).Prints("file\x00")
-	c.copiesFrom(laptopAt+":"+filepath.Join(c.home, ".zsh_history"), "~/.zsh_history", 1, 1_000)
+	c.copiesFrom(laptopAt+":"+filepath.Join(c.home, ".zsh_history"), 1, 1_000)
 
 	if err := c.apply(t.Context()); err != nil {
 		t.Fatalf("apply = %v", err)
@@ -207,7 +207,7 @@ func TestRestoreTriedAgainTakesTheHostKeyRecordedSince(t *testing.T) {
 			}
 			probe.Prints(c.laptopSays(newKey))
 			c.fake.OnMatch("ssh", func(args []string) bool { return strings.Contains(args[len(args)-1], "\nlook ") }).Prints("file\x00")
-			c.copiesFrom(laptopAt+":"+filepath.Join(c.home, ".zsh_history"), "~/.zsh_history", 1, 1_000)
+			c.copiesFrom(laptopAt+":"+filepath.Join(c.home, ".zsh_history"), 1, 1_000)
 			k := c.atTerminal(t, restore.Disks{})
 			applied := c.applying(t)
 

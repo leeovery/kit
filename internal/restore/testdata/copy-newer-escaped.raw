@@ -11,10 +11,10 @@ Literal data: 0 bytes
 Number of 4 KiB logical blocks touched: 0
 Matched data: 0 bytes
 File list size: 0
-File list generation time: 0.001 seconds
+File list generation time: 0.003 seconds
 File list transfer time: 0.000 seconds
-Total bytes sent: 58
+Total bytes sent: 100
 Total bytes received: 33
 
-sent 58 bytes  received 33 bytes  182.00 bytes/sec
+sent 100 bytes  received 33 bytes  266.00 bytes/sec
 total size is 2  speedup is 0.02

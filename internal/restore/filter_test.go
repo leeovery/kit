@@ -221,16 +221,15 @@ func walkWithRules(t *testing.T, root, filter string) []string {
 }
 
 // counts are the files the judgement counts as f's line's path's own, in
-// home, each from the path (prefix): all of them, each written in set-up's
-// window.
+// home, each from the path (prefix): all of them.
 func counts(t *testing.T, f *Filter, home, prefix string) []string {
 	t.Helper()
-	written, older, err := f.holds(home, time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC))
-	if err != nil || older {
-		t.Fatalf("holds() = %v, older %v", err, older)
+	held, err := f.holds(home, true)
+	if err != nil {
+		t.Fatalf("holds() = %v", err)
 	}
-	out := make([]string, len(written))
-	for i, w := range written {
+	out := make([]string, len(held))
+	for i, w := range held {
 		out[i] = strings.TrimPrefix(w, prefix)
 	}
 	return out
