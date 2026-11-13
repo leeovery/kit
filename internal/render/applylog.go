@@ -416,6 +416,6 @@ func (k screenKeys) logWindow(n, room int) (start, end int, back bool) {
 // backLine is the log's foot while it's scrolled back, below lines after
 // what it shows.
 func backLine(below int) string {
-	return "  " + look.Says(look.Cyan("↓")+" "+look.White(fmt.Sprintf("%d new %s", below, plural(below, "line", "lines"))),
+	return "  " + look.Says(look.Cyan("↓")+" "+look.White(fmt.Sprintf("%d new %s", below, look.Plural(below, "line", "lines"))),
 		look.Strong("end")+" "+look.Muted("or scroll down to follow again"))
 }

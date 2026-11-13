@@ -19,6 +19,7 @@ import (
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/kind/brew"
 	"github.com/leeovery/kit/internal/linked"
+	"github.com/leeovery/kit/internal/look"
 	"github.com/leeovery/kit/internal/plist"
 	"github.com/leeovery/kit/internal/runner"
 	kitstate "github.com/leeovery/kit/internal/state"
@@ -339,14 +340,14 @@ func (b *Boot) configStep() engine.Step {
 			if found.State == check.Failed || found.State == check.Deferred {
 				return found
 			}
-			says := []string{"cloned", plural(found.Counts["linked"], "file linked", "files linked")}
+			says := []string{"cloned", fmt.Sprintf("%d %s", found.Counts["linked"], look.Plural(found.Counts["linked"], "file linked", "files linked"))}
 			for _, it := range found.Items {
 				if it.Action != "" {
 					return check.Result{State: check.Attention, Summary: "cloned · files to link", Items: found.Items}
 				}
 			}
 			if n := found.Counts[linked.Diverged]; n > 0 {
-				says = append(says, plural(n, "differs: kit reconcile settles it", "differ: kit reconcile settles them"))
+				says = append(says, fmt.Sprintf("%d %s", n, look.Plural(n, "differs: kit reconcile settles it", "differ: kit reconcile settles them")))
 			}
 			if st, _ := kitstate.Load[state](b.State, stateName); st.NewMac != "" {
 				if cfg, err := config.Load(b.Config, b.Kinds); err == nil && cfg.Knows(st.NewMac) {
@@ -535,12 +536,4 @@ func (b *Boot) handOverStep(t apps.Terminal) engine.Step {
 			}
 		},
 	}
-}
-
-// plural is n of something, one or many.
-func plural(n int, one, many string) string {
-	if n == 1 {
-		return "1 " + one
-	}
-	return fmt.Sprintf("%d %s", n, many)
 }

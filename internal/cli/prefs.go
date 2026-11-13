@@ -14,6 +14,7 @@ import (
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/event"
+	"github.com/leeovery/kit/internal/look"
 	"github.com/leeovery/kit/internal/prefs"
 	"github.com/leeovery/kit/internal/render"
 	"github.com/leeovery/kit/internal/steps"
@@ -296,7 +297,7 @@ func (a *app) prefsPending(r *run, clear bool) error {
 		if err != nil {
 			return err
 		}
-		_, err = fmt.Fprintf(a.Stdout, "Cleared %s: capture saves what's on the Mac for them now.\n", plural(n, "pending setting"))
+		_, err = fmt.Fprintf(a.Stdout, "Cleared %d %s: capture saves what's on the Mac for them now.\n", n, look.Plural(n, "pending setting", "pending settings"))
 		return err
 	}
 	rec, err := p.Load()
@@ -327,12 +328,4 @@ func (a *app) prefsPending(r *run, clear bool) error {
 		}
 	}
 	return nil
-}
-
-// plural is n and a word, made plural unless n is 1.
-func plural(n int, word string) string {
-	if n == 1 {
-		return fmt.Sprintf("%d %s", n, word)
-	}
-	return fmt.Sprintf("%d %ss", n, word)
 }

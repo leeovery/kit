@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/leeovery/kit/internal/apps"
+	"github.com/leeovery/kit/internal/look"
 	"github.com/leeovery/kit/internal/plist"
 	"github.com/leeovery/kit/internal/runner"
 	"github.com/leeovery/kit/internal/tilde"
@@ -85,7 +86,7 @@ func (r RestoreReport) restored() string {
 	if r.DryRun {
 		verb = "would restore"
 	}
-	s := fmt.Sprintf("%s %s and %s from %s", verb, plural(len(r.Restored), "domain"), plural(r.Files, "file"), r.From)
+	s := fmt.Sprintf("%s %d %s and %d %s from %s", verb, len(r.Restored), look.Plural(len(r.Restored), "domain", "domains"), r.Files, look.Plural(r.Files, "file", "files"), r.From)
 	if len(r.Restored)+r.Files == 0 {
 		s = "nothing to restore from " + r.From
 	}

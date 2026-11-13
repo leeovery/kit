@@ -9,6 +9,7 @@ import (
 
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/event"
+	"github.com/leeovery/kit/internal/look"
 )
 
 // Face shows a run's events, and finishes once the run has.
@@ -130,7 +131,7 @@ func past(action string) string {
 func summary(counts map[check.State]int) string {
 	var parts []string
 	if n := counts[check.Attention]; n > 0 {
-		parts = append(parts, fmt.Sprintf("%d %s attention", n, plural(n, "needs", "need")))
+		parts = append(parts, fmt.Sprintf("%d %s attention", n, look.Plural(n, "needs", "need")))
 	}
 	if n := counts[check.Failed]; n > 0 {
 		parts = append(parts, fmt.Sprintf("%d couldn't be checked", n))
@@ -142,13 +143,6 @@ func summary(counts map[check.State]int) string {
 		return "Nothing needs attention"
 	}
 	return strings.Join(parts, ", ")
-}
-
-func plural(n int, one, many string) string {
-	if n == 1 {
-		return one
-	}
-	return many
 }
 
 // what is what a result says, for its step's line: its summary, or why it

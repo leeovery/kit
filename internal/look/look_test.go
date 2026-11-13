@@ -223,6 +223,15 @@ func TestInWords(t *testing.T) {
 	}
 }
 
+// A count of one takes the word for one; none, or more, the word for many.
+func TestPlural(t *testing.T) {
+	for n, want := range map[int]string{0: "files", 1: "file", 2: "files"} {
+		if got := look.Plural(n, "file", "files"); got != want {
+			t.Errorf("Plural(%d) = %q, want %q", n, got, want)
+		}
+	}
+}
+
 func TestStatesMarks(t *testing.T) {
 	for s, want := range map[look.State]string{look.Done: "●", look.NeedsYou: "▲", look.Failed: "✗", look.Running: "◐", look.Queued: "○", look.Skipped: "–", look.ToDo: "△"} {
 		if got := ansi.Strip(look.Mark(s)); got != want {

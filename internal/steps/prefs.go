@@ -13,6 +13,7 @@ import (
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/event"
+	"github.com/leeovery/kit/internal/look"
 	"github.com/leeovery/kit/internal/prefs"
 )
 
@@ -236,15 +237,15 @@ func withHeld(ctx context.Context, p *prefs.Prefs, rec prefs.Record, res check.R
 			t := appToOpen(app)
 			items = append(items, check.Item{ID: PrefsName + ":" + idOpen + ":" + app.ID, Name: t.Title, State: Problem, Detail: "its settings are restored once it's been opened and quit", ToDo: &t})
 		}
-		says = append(says, fmt.Sprintf("%d %s to open once", len(apps), plural(len(apps), "app", "apps")))
+		says = append(says, fmt.Sprintf("%d %s to open once", len(apps), look.Plural(len(apps), "app", "apps")))
 	}
 	if domains, files := p.Failures(rec); domains+files > 0 {
 		var what []string
 		if domains > 0 {
-			what = append(what, fmt.Sprintf("%d %s", domains, plural(domains, "app's settings", "apps' settings")))
+			what = append(what, fmt.Sprintf("%d %s", domains, look.Plural(domains, "app's settings", "apps' settings")))
 		}
 		if files > 0 {
-			what = append(what, fmt.Sprintf("%d %s", files, plural(files, "settings file", "settings files")))
+			what = append(what, fmt.Sprintf("%d %s", files, look.Plural(files, "settings file", "settings files")))
 		}
 		items = append(items, check.Item{ID: PrefsName + ":held", Name: strings.Join(what, " and ") + " didn't come back", State: Problem, Detail: "kit prefs restore --pending tries again; kit prefs pending says why"})
 		says = append(says, fmt.Sprintf("%d held for kit prefs restore --pending", domains+files))
@@ -302,7 +303,7 @@ func restoreSave(ctx context.Context, p *prefs.Prefs, save prefs.Save, now func(
 	}
 	said := cameBack(report) + ", from " + day(save.At, now()) + waitingFor(report) + keptFor(report)
 	if n := appsOf(report.ToOpen, report.Apps); n > 0 {
-		said += fmt.Sprintf("; %d %s to open once", n, plural(n, "app", "apps"))
+		said += fmt.Sprintf("; %d %s to open once", n, look.Plural(n, "app", "apps"))
 	}
 	if n := report.Failures(); n > 0 {
 		said += fmt.Sprintf("; %d held for kit prefs restore --pending", n)
@@ -362,7 +363,7 @@ func waitingFor(report prefs.RestoreReport) string {
 	if n == 0 {
 		return ""
 	}
-	return fmt.Sprintf("; %d %s", n, plural(n, "waits for its app", "wait for their apps"))
+	return fmt.Sprintf("; %d %s", n, look.Plural(n, "waits for its app", "wait for their apps"))
 }
 
 // keptFor is how many of report's domains are kept for apps not installed,
@@ -403,7 +404,7 @@ func startAfresh(p *prefs.Prefs) (string, error) {
 	if rec.Pending != nil {
 		kept := rec.Pending.Kept()
 		if n := len(rec.Pending.Domains) + len(rec.Pending.Files) - kept; n > 0 {
-			said += fmt.Sprintf("; %d still %s to come back", n, plural(n, "waits", "wait"))
+			said += fmt.Sprintf("; %d still %s to come back", n, look.Plural(n, "waits", "wait"))
 		}
 		if kept > 0 {
 			said += fmt.Sprintf("; %d kept for apps not installed", kept)

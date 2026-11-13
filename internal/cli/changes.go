@@ -13,6 +13,7 @@ import (
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/gitrepo"
 	"github.com/leeovery/kit/internal/kind"
+	"github.com/leeovery/kit/internal/look"
 	"github.com/leeovery/kit/internal/runner"
 )
 
@@ -197,7 +198,7 @@ func (s syncing) pushWaiting(ctx context.Context) check.Result {
 	if n == 0 {
 		return nothing
 	}
-	waiting := plural(n, "commit") + " waiting"
+	waiting := fmt.Sprintf("%d %s waiting", n, look.Plural(n, "commit", "commits"))
 	notes, err := s.repo.Push(ctx)
 	switch {
 	case errors.Is(err, gitrepo.ErrNoRemote):

@@ -400,11 +400,3 @@ func write(path string, data []byte) (string, error) {
 	// out.
 	return what, whole.Write(path, data, 0o600)
 }
-
-// plural is n and a word, made plural unless n is 1.
-func plural(n int, word string) string {
-	if n == 1 {
-		return fmt.Sprintf("%d %s", n, word)
-	}
-	return fmt.Sprintf("%d %ss", n, word)
-}

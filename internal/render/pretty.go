@@ -690,7 +690,7 @@ func tally(counts map[check.State]int) []string {
 		parts = append(parts, look.Red(fmt.Sprintf("%d failed", n)))
 	}
 	if n := counts[check.Attention]; n > 0 {
-		parts = append(parts, look.Orange(fmt.Sprintf("%d %s you", n, plural(n, "needs", "need"))))
+		parts = append(parts, look.Orange(fmt.Sprintf("%d %s you", n, look.Plural(n, "needs", "need"))))
 	}
 	if n := counts[check.Deferred]; n > 0 {
 		parts = append(parts, look.Muted(fmt.Sprintf("%d not checked", n)))
