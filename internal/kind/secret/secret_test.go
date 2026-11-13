@@ -390,6 +390,38 @@ func TestSyncGivesUpItsJobWhileItWaitsForApproval(t *testing.T) {
 	}
 }
 
+// A variable's value of many lines fails, keeping its previous value, and
+// saying nothing of it: ~/.secrets.zsh holds each variable on a line of its
+// own, so the rest sync and the file still sources. A line cut short by such
+// a value, as kit once wrote, is dropped rather than kept.
+func TestSyncRefusesAVariableOfManyLines(t *testing.T) {
+	for _, c := range []struct{ name, old, want string }{
+		{"kept", "export MANY='old value'\n", "old value"},
+		{"cut short", "export MANY='line one\nline two'\n", ""},
+	} {
+		home := t.TempDir()
+		fake := runnertest.New(t)
+		s := secret.New(fake, home)
+		declare(t, s, [2]string{"A", "Section/a"}, [2]string{"MANY", "Section/many"}, [2]string{"Z", "Section/z"})
+		if err := os.WriteFile(filepath.Join(home, ".secrets.zsh"), []byte(c.old), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		fake.On("op", "whoami")
+		optest.Holds(fake, map[string]string{item + "/Section/a": "a", item + "/Section/many": "secret one\nsecret two\n", item + "/Section/z": "z"})
+		report, err := s.Sync(t.Context())
+		if err != nil || report.Synced != 2 || len(report.Failed) != 1 || report.Failed["MANY"] != "a variable is one line: declare it as a file" {
+			t.Errorf("%s: Sync() = %+v, %v; want A and Z synced, MANY failed", c.name, report, err)
+		}
+		if err != nil || strings.Contains(report.Error(), "secret one") || strings.Contains(report.Error(), "secret two") {
+			t.Errorf("%s: the report says %q: want nothing of the value", c.name, report.Error())
+		}
+		out, err := exec.Command("/bin/zsh", "-f", "-c", `source "$1" && printf '%s|%s|%s' "$A" "$MANY" "$Z"`, "zsh", filepath.Join(home, ".secrets.zsh")).CombinedOutput()
+		if want := "a|" + c.want + "|z"; err != nil || string(out) != want {
+			t.Errorf("%s: zsh read back %q, %v; want %q", c.name, out, err, want)
+		}
+	}
+}
+
 // A reference op names in saying why op inject failed is left out, failing
 // in op's words and keeping its previous value, and the rest read in one
 // more run: the person approves two reads, never more.

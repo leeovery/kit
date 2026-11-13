@@ -181,14 +181,16 @@ func (s *Secrets) refs(d store.Driver, files bool) []string {
 // as what it waits for has come, in a run that applies: its program, and
 // its sign-in, raised at a terminal (Cards). ~/.secrets.zsh is written
 // whole each time, each value without the newlines it ends with (a
-// variable not read keeps its line, so a partial read never shrinks it);
-// each file as its store reads it as a file (store.Driver.ReadFile),
-// beside its place then renamed into it. A store signed out, or whose
-// program never comes, or that doesn't read them, holds back its own
-// secrets alone (Report.Held); a secret whose reference its store names as
-// one it couldn't read fails (Report.Failed). When every store's down and
-// nothing's read, the sync goes no further, not yet, saying why in each
-// store's words.
+// variable not read keeps its line, so a partial read never shrinks it, but
+// for a line that doesn't read as kit writes one, cut short by a value of
+// many lines kit once wrote); a variable's value holding a line break fails,
+// as ~/.secrets.zsh holds each on a line of its own; each file as its store
+// reads it as a file (store.Driver.ReadFile), beside its place then renamed
+// into it. A store signed out, or whose program never comes, or that
+// doesn't read them, holds back its own secrets alone (Report.Held); a
+// secret whose reference its store names as one it couldn't read fails
+// (Report.Failed). When every store's down and nothing's read, the sync
+// goes no further, not yet, saying why in each store's words.
 func (s *Secrets) Sync(ctx context.Context) (Report, error) {
 	old, oldOrder, err := s.envLines()
 	if err != nil {
@@ -260,6 +262,7 @@ func (sy *syncing) read(ctx context.Context, d store.Driver, session store.Sessi
 	got, unread, err := sy.s.readAll(ctx, d, refs)
 	maps.Copy(sy.values, got)
 	maps.Copy(sy.unread, unread)
+	sy.refuseLines()
 	if err == nil {
 		got, unread, err = sy.s.readFiles(ctx, d, files)
 		maps.Copy(sy.files, got)
@@ -267,6 +270,20 @@ func (sy *syncing) read(ctx context.Context, d store.Driver, session store.Sessi
 	}
 	if err != nil {
 		sy.down[d.About().ID] = err.Error()
+	}
+}
+
+// oneLine is why a variable whose value holds a line break isn't synced.
+const oneLine = "a variable is one line: declare it as a file"
+
+// refuseLines takes each variable's value read holding a line break, but
+// those it ends with, out of what's been read, as one its store couldn't.
+func (sy *syncing) refuseLines() {
+	for ref, v := range sy.values {
+		if strings.Contains(strings.TrimRight(v, "\n"), "\n") {
+			delete(sy.values, ref)
+			sy.unread[ref] = oneLine
+		}
 	}
 }
 
@@ -372,7 +389,9 @@ func (sy *syncing) put(ctx context.Context) error {
 		switch {
 		case !ok:
 			if line, kept := sy.old[sec.Name]; kept && !sec.IsFile() {
-				env = append(env, line)
+				if _, whole := envValue(sec.Name, line); whole {
+					env = append(env, line)
+				}
 			}
 		case sec.IsFile():
 			sy.putFile(sec, v)

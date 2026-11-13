@@ -309,7 +309,7 @@ func (s *Secrets) Variable(name string) (value string, ok bool, err error) {
 	if !ok {
 		return "", false, nil
 	}
-	if value, ok = unquote(strings.TrimPrefix(line, "export "+name+"=")); !ok {
+	if value, ok = envValue(name, line); !ok {
 		return "", false, fmt.Errorf("~/%s holds %s otherwise than kit writes it: run kit secret sync", EnvFile, name)
 	}
 	return value, true, nil
@@ -389,6 +389,12 @@ func (s *Secrets) dropEnv(drop map[string]bool) error {
 		kept = append(kept, line)
 	}
 	return writeFile(path, strings.Join(kept, ""), 0o600)
+}
+
+// envValue is the value line exports for the variable name, as kit wrote
+// it: false when line doesn't read as kit writes one.
+func envValue(name, line string) (string, bool) {
+	return unquote(strings.TrimPrefix(line, "export "+name+"="))
 }
 
 // quote is a value as zsh reads it back exactly, sourced: in single quotes,
