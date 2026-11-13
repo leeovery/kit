@@ -795,7 +795,7 @@ func (h *Homebrew) onTheMac(patterns []string) []string {
 // one.
 func (c casks) Blocked(ctx context.Context, missing map[string]string, _ []kind.Installed) (map[string]kind.Block, error) {
 	blocked := make(map[string]kind.Block)
-	if c.Admin == nil {
+	if c.Admin == nil || len(missing) == 0 || c.Admin(ctx) {
 		return blocked, nil
 	}
 	var fulls []string
@@ -804,7 +804,7 @@ func (c casks) Blocked(ctx context.Context, missing map[string]string, _ []kind.
 	}
 	slices.Sort(fulls)
 	needing, err := c.NeedsAdmin(ctx, fulls)
-	if err != nil || len(needing) == 0 || c.Admin(ctx) {
+	if err != nil {
 		return blocked, err
 	}
 	for name, full := range missing {
@@ -815,10 +815,10 @@ func (c casks) Blocked(ctx context.Context, missing map[string]string, _ []kind.
 	return blocked, nil
 }
 
-// NeedsAdmin finds which of casks, by full name, install through a package
-// or an installer, which ask for an administrator's password. A cask in a
-// tap not added yet isn't one: brew info won't describe it till brew install
-// adds its tap, so there's no knowing before.
+// NeedsAdmin finds which of casks, by the names given, install through a
+// package or an installer, which ask for an administrator's password. A cask
+// in a tap not added yet isn't one: brew info won't describe it till brew
+// install adds its tap, so there's no knowing before.
 func (h *Homebrew) NeedsAdmin(ctx context.Context, casks []string) ([]string, error) {
 	if len(casks) == 0 {
 		return nil, nil
@@ -835,17 +835,20 @@ func (h *Homebrew) NeedsAdmin(ctx context.Context, casks []string) ([]string, er
 	if err := json.Unmarshal(res.Stdout, &in); err != nil {
 		return nil, fmt.Errorf("read brew info's answer: %w", err)
 	}
-	var needing []string
+	asks := map[string]bool{}
 	for _, c := range in.Casks {
-		for _, artifact := range c.Artifacts {
-			if _, pkg := artifact["pkg"]; pkg {
-				needing = append(needing, c.FullToken)
-				break
-			}
-			if _, installer := artifact["installer"]; installer {
-				needing = append(needing, c.FullToken)
-				break
-			}
+		asks[c.FullToken] = slices.ContainsFunc(c.Artifacts, func(artifact map[string]json.RawMessage) bool {
+			_, pkg := artifact["pkg"]
+			_, installer := artifact["installer"]
+			return pkg || installer
+		})
+	}
+	goesBy := in.goesBy()
+	var needing []string
+	for _, name := range casks {
+		// Homebrew's names are lower case, and it takes a name in any case.
+		if asks[goesBy[strings.ToLower(name)]] {
+			needing = append(needing, name)
 		}
 	}
 	return needing, nil
@@ -986,6 +989,19 @@ func lookUp(ctx context.Context, h *Homebrew, which string, names []string) (map
 	if err := json.Unmarshal(res.Stdout, &in); err != nil {
 		return nil, fmt.Errorf("read brew info's answer: %w", err)
 	}
+	goesBy := in.goesBy()
+	resolved := make(map[string]string, len(names))
+	for _, name := range names {
+		if full, ok := goesBy[name]; ok {
+			resolved[name] = full
+		}
+	}
+	return resolved, nil
+}
+
+// goesBy maps every name brew info says each formula and cask goes by to
+// its full name.
+func (in info) goesBy() map[string]string {
 	goesBy := make(map[string]string)
 	for _, f := range in.Formulae {
 		for _, n := range slices.Concat([]string{f.Name, "homebrew/core/" + f.Name}, f.Aliases, f.Oldnames) {
@@ -999,13 +1015,7 @@ func lookUp(ctx context.Context, h *Homebrew, which string, names []string) (map
 			goesBy[inTap(c.FullToken, n)] = c.FullToken
 		}
 	}
-	resolved := make(map[string]string, len(names))
-	for _, name := range names {
-		if full, ok := goesBy[name]; ok {
-			resolved[name] = full
-		}
-	}
-	return resolved, nil
+	return goesBy
 }
 
 // inTap is name in the tap fullName is from, as in owner/tap/tool@2 for the

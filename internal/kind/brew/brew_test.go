@@ -964,12 +964,13 @@ func TestCasksBlockedWithoutAnAdministrator(t *testing.T) {
 	]}`
 	missing := map[string]string{"zoom": "zoom", "ghostty": "ghostty"}
 	tests := []struct {
-		name  string
-		admin func(context.Context) bool
-		want  map[string]kind.Block
+		name    string
+		admin   func(context.Context) bool
+		want    map[string]kind.Block
+		looksUp bool
 	}{
 		{name: "not installing", admin: nil, want: map[string]kind.Block{}},
-		{name: "no password", admin: func(context.Context) bool { return false }, want: map[string]kind.Block{"zoom": {Why: "needs an administrator's password: run kit apply at a terminal"}}},
+		{name: "no password", admin: func(context.Context) bool { return false }, want: map[string]kind.Block{"zoom": {Why: "needs an administrator's password: run kit apply at a terminal"}}, looksUp: true},
 		{name: "a password at hand", admin: func(context.Context) bool { return true }, want: map[string]kind.Block{}},
 	}
 	for _, tt := range tests {
@@ -981,6 +982,9 @@ func TestCasksBlockedWithoutAnAdministrator(t *testing.T) {
 			got, err := h.Casks().(kind.Blocker).Blocked(context.Background(), missing, nil)
 			if err != nil || !maps.Equal(got, tt.want) {
 				t.Errorf("Blocked() = %v, %v; want %v", got, err, tt.want)
+			}
+			if asked := len(fake.Calls()) > 0; asked != tt.looksUp {
+				t.Errorf("ran %q; want brew info run %v", fake.Calls(), tt.looksUp)
 			}
 		})
 	}
@@ -1022,16 +1026,19 @@ func TestInstallsKeepSudosPassword(t *testing.T) {
 	}
 }
 
+// The casks that ask for an administrator's password are named as they
+// were given: by an old name, or in another case, as declared, not as
+// Homebrew renames them.
 func TestNeedsAdmin(t *testing.T) {
 	fake := runnertest.New(t)
 	fake.On("brew", "tap").Prints("owner/tap\n")
-	fake.On("brew", "info", "--json=v2", "--cask", "zoom", "ghostty", "owner/tap/tool").Prints(`{"formulae": [], "casks": [
+	fake.On("brew", "info", "--json=v2", "--cask", "Zoom", "ghostty", "owner/tap/old-tool").Prints(`{"formulae": [], "casks": [
 		{"token": "zoom", "full_token": "zoom", "artifacts": [{"pkg": ["x.pkg"]}]},
 		{"token": "ghostty", "full_token": "ghostty", "artifacts": [{"app": ["Ghostty.app"]}]},
-		{"token": "tool", "full_token": "owner/tap/tool", "artifacts": [{"installer": [{"script": "install.sh"}]}]}
+		{"token": "tool", "full_token": "owner/tap/tool", "old_tokens": ["old-tool"], "artifacts": [{"installer": [{"script": "install.sh"}]}]}
 	]}`)
-	got, err := brew.New(fake).NeedsAdmin(context.Background(), []string{"zoom", "ghostty", "owner/tap/tool"})
-	if want := []string{"zoom", "owner/tap/tool"}; err != nil || !slices.Equal(got, want) {
+	got, err := brew.New(fake).NeedsAdmin(context.Background(), []string{"Zoom", "ghostty", "owner/tap/old-tool"})
+	if want := []string{"Zoom", "owner/tap/old-tool"}; err != nil || !slices.Equal(got, want) {
 		t.Errorf("NeedsAdmin() = %q, %v; want %q", got, err, want)
 	}
 	if got, err := brew.New(runnertest.New(t)).NeedsAdmin(context.Background(), nil); err != nil || got != nil {
