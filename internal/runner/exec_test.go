@@ -1,7 +1,6 @@
 package runner_test
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -9,6 +8,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -27,6 +28,75 @@ func programs(t *testing.T, scripts map[string]string) (runner.Exec, string) {
 		}
 	}
 	return runner.Exec{Path: []string{dir}, Env: []string{"PATH=" + dir, "KIT_TEST=given"}, Now: time.Now}, dir
+}
+
+// clock keeps a command's time for Exec only as the test says: its time
+// limit is up, and the grace kit gives it once ended over, when the test
+// ends them, never by themselves.
+type clock struct {
+	mu     sync.Mutex
+	limits []context.CancelFunc
+	graces chan grace
+}
+
+// grace is a grace kit gave a command it ended: how long, and what ends it
+// now, unless kit's stopped it.
+type grace struct {
+	took time.Duration
+	over func()
+}
+
+// timed is r keeping time by a clock of the test's, its commands' output
+// waited for wait.
+func timed(r runner.Exec, wait time.Duration) (runner.Exec, *clock) {
+	c := &clock{graces: make(chan grace, 8)}
+	return runner.Timed(r, c.limit, c.after, wait), c
+}
+
+func (c *clock) limit(ctx context.Context, _ time.Duration) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(ctx)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.limits = append(c.limits, cancel)
+	return ctx, cancel
+}
+
+// up has every time limit given so far run out.
+func (c *clock) up() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, cancel := range c.limits {
+		cancel()
+	}
+}
+
+func (c *clock) after(d time.Duration, f func()) func() bool {
+	const pending, stopped, over = 0, 1, 2
+	var state atomic.Int32
+	c.graces <- grace{took: d, over: func() {
+		if state.CompareAndSwap(pending, over) {
+			f()
+		}
+	}}
+	return func() bool { return state.CompareAndSwap(pending, stopped) }
+}
+
+// given is the next grace kit gave a command it ended, failing the test
+// unless it's as long as want: one that ends nothing, given none. It's
+// called from the goroutine reading a command's output, too, so never
+// ends the test.
+func (c *clock) given(t *testing.T, want time.Duration) grace {
+	t.Helper()
+	select {
+	case g := <-c.graces:
+		if g.took != want {
+			t.Errorf("given a grace of %v, want %v", g.took, want)
+		}
+		return g
+	case <-time.After(5 * time.Second):
+		t.Error("given no grace")
+		return grace{over: func() {}}
+	}
 }
 
 func TestExecRunsAProgramFoundOnItsPath(t *testing.T) {
@@ -255,7 +325,7 @@ func TestExecEndsACommandWhenItsContextIsDone(t *testing.T) {
 // A command ended, at its time limit or as the run stops, is sent SIGTERM
 // first, it and what it started, for it to clean up, as git takes its lock
 // away, even what it started that outlives it, its output elsewhere; one
-// that ignores it is killed, with what it started, once it's had a moment;
+// that ignores it is killed, with what it started, once its grace is up;
 // and what it started that ignores it is killed then too, though the
 // command's gone.
 func TestExecEndsACommandWithSIGTERMFirst(t *testing.T) {
@@ -268,21 +338,21 @@ func TestExecEndsACommandWithSIGTERMFirst(t *testing.T) {
 		"stubborn": `trap '' TERM; /bin/sleep 30 & echo $! > "$1"; echo ready; wait`,
 		"leaves":   `/bin/sh -c 'trap "" TERM; echo $$ > "$1"; exec /bin/sleep 30' - "$1" > /dev/null 2>&1 & until [ -s "$1" ]; do :; done; echo ready; wait`,
 	})
-	if took := endOnceReady(t, r, "tidy", lock); took > time.Second {
+	r, clock := timed(r, 2*time.Second)
+	if took := endOnceReady(t, r, nil, "tidy", lock); took > time.Second {
 		t.Errorf("tidy took %v to end, want it ended at once", took)
 	}
 	if _, err := os.Stat(lock); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("the lock is left (%v): want SIGTERM, and the lock taken away", err)
 	}
+	clock.given(t, 2*time.Second)
 
-	if took := endOnceReady(t, r, "stubborn", child); took > 4*time.Second {
-		t.Errorf("a command ignoring SIGTERM took %v to end, want it killed after a moment", took)
-	}
+	endOnceReady(t, r, func() { clock.given(t, 2*time.Second).over() }, "stubborn", child)
 	if pid, runs := stillRuns(t, child, 2*time.Second); runs {
 		t.Errorf("what it started, ignoring SIGTERM, still runs (%d), want its group killed", pid)
 	}
 
-	endOnceReady(t, r, "wraps", inner)
+	endOnceReady(t, r, nil, "wraps", inner)
 	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
 		if _, err := os.Stat(inner); errors.Is(err, os.ErrNotExist) {
 			break
@@ -291,10 +361,11 @@ func TestExecEndsACommandWithSIGTERMFirst(t *testing.T) {
 	if _, err := os.Stat(inner); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("the lock what it started holds is left (%v): want it given its SIGTERM's grace, though the command's gone", err)
 	}
+	clock.given(t, 2*time.Second)
 
-	endOnceReady(t, r, "leaves", left)
-	// Its grace, then a moment for launchd to reap it.
-	if pid, runs := stillRuns(t, left, 4*time.Second); runs {
+	endOnceReady(t, r, nil, "leaves", left)
+	clock.given(t, 2*time.Second).over()
+	if pid, runs := stillRuns(t, left, 2*time.Second); runs {
 		t.Errorf("what it left, ignoring SIGTERM, still runs (%d), want it killed once its grace is up", pid)
 	}
 }
@@ -303,33 +374,40 @@ func TestExecEndsACommandWithSIGTERMFirst(t *testing.T) {
 // that output waited for as long as any command's, no longer: the grace
 // kit gives a command it ends isn't added to it.
 func TestExecWaitsForTheOutputOfACommandThatExits(t *testing.T) {
-	r, _ := programs(t, map[string]string{"exits": "/bin/sleep 8 & exit 0"})
+	r, _ := programs(t, map[string]string{"exits": "/bin/sleep 5 & exit 0"})
+	const wait = 500 * time.Millisecond
+	r, _ = timed(r, wait)
 	start := time.Now()
 	if _, err := r.Run(t.Context(), runner.Command{Name: "exits"}); err == nil {
 		t.Error("Run() = nil, want its output's wait to have run out")
 	}
-	if took := time.Since(start); took > 6500*time.Millisecond {
-		t.Errorf("Run() took %v, want the output waited for 5s", took)
+	// With the grace, 2s, added, it would take longer.
+	if took := time.Since(start); took < wait || took > wait+time.Second {
+		t.Errorf("Run() took %v, want the output waited for %v", took, wait)
 	}
 }
 
 // endOnceReady runs the program called name in r, ending it once it says
-// it's ready: how long it took to end then.
-func endOnceReady(t *testing.T, r runner.Exec, name string, args ...string) time.Duration {
+// it's ready, then calling ended, when given, before it's read anything
+// more: how long it took to end then.
+func endOnceReady(t *testing.T, r runner.Exec, ended func(), name string, args ...string) time.Duration {
 	t.Helper()
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	var ended time.Time
+	var at time.Time
 	ready := func(line string) {
 		if line == "ready" {
-			ended = time.Now()
+			at = time.Now()
 			cancel()
+			if ended != nil {
+				ended()
+			}
 		}
 	}
 	if _, err := r.Run(ctx, runner.Command{Name: name, Args: args, Lines: ready}); !errors.Is(err, context.Canceled) {
 		t.Errorf("Run(%s) = %v, want it ended", name, err)
 	}
-	return time.Since(ended)
+	return time.Since(at)
 }
 
 // stillRuns reports whether the process whose pid is in file still runs,
@@ -358,19 +436,39 @@ func TestExecEndsKitsOwnSudoThroughSudo(t *testing.T) {
 		"sudo":     `/bin/sleep 30 & pid=$!; trap 'echo relayed > "$2"; kill $pid; exit 143' TERM; echo ready; wait`,
 		"stubborn": `trap '' TERM; /bin/sleep 30 & echo $! > "$2"; echo ready; wait`,
 	})
-	if took := endOnceReady(t, r, "sudo", "-n", relayed); took > 3*time.Second {
+	// Unlike any other command's grace, 2s.
+	const wait = 3 * time.Second
+	r, clock := timed(r, wait)
+	if took := endOnceReady(t, r, nil, "sudo", "-n", relayed); took > wait {
 		t.Errorf("sudo wasn't ended at once (%v)", took)
 	}
 	if _, err := os.Stat(relayed); err != nil {
 		t.Errorf("sudo wasn't sent SIGTERM to pass on (%v)", err)
 	}
+	clock.given(t, wait)
 
 	if err := os.Rename(filepath.Join(r.Path[0], "stubborn"), filepath.Join(r.Path[0], "sudo")); err != nil {
 		t.Fatal(err)
 	}
-	endOnceReady(t, r, "sudo", "-n", child)
+	endOnceReady(t, r, func() { clock.given(t, wait).over() }, "sudo", "-n", child)
 	if pid, runs := stillRuns(t, child, 2*time.Second); runs {
 		t.Errorf("what sudo ran, ignoring SIGTERM, still runs (%d), want its group killed", pid)
+	}
+}
+
+// kit's own sudo, its time limit up, exits with a code of its own, passing
+// on the SIGTERM kit sent it: kit having ended it, it says it was ended,
+// not how it exited.
+func TestExecSaysKitEndedItsOwnSudo(t *testing.T) {
+	r, _ := programs(t, map[string]string{"sudo": `trap 'exit 143' TERM; echo ready; while :; do /bin/sleep 0.1; done`})
+	r, clock := timed(r, 2*time.Second)
+	_, err := r.Run(t.Context(), runner.Command{Name: "sudo", Args: []string{"-n", "true"}, Lines: func(line string) {
+		if line == "ready" {
+			clock.up()
+		}
+	}})
+	if _, exited := errors.AsType[*runner.ExitError](err); exited || !errors.Is(err, context.Canceled) {
+		t.Errorf("Run() = %v; want it ended, its limit up", err)
 	}
 }
 
@@ -387,19 +485,15 @@ func TestExecSaysTheGroupACommandRanIn(t *testing.T) {
 // having ended it, says how it exited; one that does as the run stops says
 // it was stopped: here each as its last line's read, once it's exited.
 func TestExecSaysAnExitKitDidntCause(t *testing.T) {
-	r, _ := programs(t, map[string]string{"fails": "echo bye; exit 3"})
-	slowly := func(string) { time.Sleep(3 * time.Second) }
-	res, err := r.Run(t.Context(), runner.Command{Name: "fails", Timeout: 2 * time.Second, Lines: slowly})
+	r, _ := programs(t, map[string]string{"fails": "printf bye; exit 3"})
+	r, clock := timed(r, 2*time.Second)
+	res, err := r.Run(t.Context(), runner.Command{Name: "fails", Lines: func(string) { clock.up() }})
 	if exit, ok := errors.AsType[*runner.ExitError](err); !ok || exit.Code != 3 || res.ExitCode != 3 {
 		t.Errorf("Run(), its limit up = exit %d, %v; want exit 3", res.ExitCode, err)
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	stopping := func(line string) {
-		slowly(line)
-		cancel()
-	}
-	if _, err := r.Run(ctx, runner.Command{Name: "fails", Lines: stopping}); !errors.Is(err, context.Canceled) {
+	if _, err := r.Run(ctx, runner.Command{Name: "fails", Lines: func(string) { cancel() }}); !errors.Is(err, context.Canceled) {
 		t.Errorf("Run(), the run stopping = %v; want it stopped", err)
 	}
 }
@@ -478,10 +572,10 @@ func TestExecRunsWhatSharesItsSessionInKitsSession(t *testing.T) {
 	}
 }
 
-// Nothing kit runs has kit's terminal, but an interactive command and kit's
-// own sudo: each leads a session of its own, so a program that asks at a
-// terminal, as a program's own sudo does, fails at once, where in the
-// background of kit's terminal it would stop, unseen, for good.
+// Nothing kit runs has kit's terminal, but kit's own sudo: each leads a
+// session of its own, so a program that asks at a terminal, as a program's
+// own sudo does, fails at once, where in the background of kit's terminal
+// it would stop, unseen, for good.
 func TestExecRunsACommandWithoutKitsTerminal(t *testing.T) {
 	r, _ := programs(t, map[string]string{"alone": "echo $$; " + terminalCheck + "; exec /bin/sleep 10"})
 	ctx, cancel := context.WithCancel(t.Context())
@@ -534,20 +628,6 @@ func TestExecAnswersACommandWithoutKitsTerminal(t *testing.T) {
 		if !tc.kits && string(res.Stdout) != "none\ngiven\n" {
 			t.Errorf("%s printed %q, want no terminal to ask at", tc.cmd, res.Stdout)
 		}
-	}
-}
-
-func TestExecRunsAnInteractiveCommandAtTheTerminal(t *testing.T) {
-	r, _ := programs(t, map[string]string{"asks": `read answer; echo "got $answer"; echo "to stderr" >&2`})
-	var out, errOut bytes.Buffer
-	r.Stdin, r.Stdout, r.Stderr = strings.NewReader("yes\n"), &out, &errOut
-
-	res, err := r.Run(t.Context(), runner.Command{Name: "asks", Interactive: true})
-	if err != nil {
-		t.Fatalf("Run() error = %v", err)
-	}
-	if out.String() != "got yes\n" || errOut.String() != "to stderr\n" || len(res.Stdout) != 0 {
-		t.Errorf("the terminal got %q and %q, the result %q; want everything at the terminal, nothing captured", out.String(), errOut.String(), res.Stdout)
 	}
 }
 
@@ -616,8 +696,7 @@ func TestExecKeepsOnlyLinesWhenAsked(t *testing.T) {
 	}
 }
 
-// What's streamed is only what's wanted: never a secret's lines, nor an
-// interactive command's.
+// What's streamed is only what's wanted: never a secret's lines.
 func TestStreamedGivesWhatsWanted(t *testing.T) {
 	r, _ := programs(t, map[string]string{"say": "echo said"})
 	var got []string

@@ -299,7 +299,7 @@ func Real(version string) Deps {
 		Width:    TerminalWidth,
 		Height:   TerminalHeight,
 		Runner: func(path, env []string) runner.Runner {
-			return runner.Exec{Path: path, Env: env, Now: time.Now, Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr}
+			return runner.Exec{Path: path, Env: env, Now: time.Now}
 		},
 		Choose: func(ctx context.Context, q ask.Question) (int, error) {
 			return ask.Choose(ctx, terminal(), q)

@@ -41,10 +41,6 @@ type Command struct {
 	// Timeout ends it if it runs longer: DefaultTimeout when 0, never when
 	// Unlimited.
 	Timeout time.Duration
-	// Interactive runs it at kit's own terminal, reading from it and writing
-	// to it directly, for a program that asks a person something, such as
-	// sudo its password; nothing it prints is captured.
-	Interactive bool
 	// Secret is whether what it prints is a secret, as a secrets store's
 	// values are: kept from every report, the log included.
 	Secret bool
@@ -62,7 +58,7 @@ type Command struct {
 	Answer func(ctx context.Context, asked int) (string, error)
 	// Lines, when set, is given each line the command prints, its output and
 	// its errors, as it prints them: a line a carriage return starts again
-	// is given as it ends. Never for an interactive command.
+	// is given as it ends.
 	Lines func(line string)
 	// Redraws, with Lines, has Lines given each line a carriage return ends
 	// too, as a progress bar draws it, not only the one a new line ends: how
@@ -87,8 +83,7 @@ type Command struct {
 	SudoAsks bool
 	// Running, when set, is told the process's id once it's started, and
 	// what it returns is called once it's exited: for what asks kit
-	// meanwhile to be known as started by it (askpass). Never told of an
-	// interactive command.
+	// meanwhile to be known as started by it (askpass).
 	Running func(pid int) (exited func())
 }
 
@@ -125,7 +120,7 @@ type Result struct {
 	Duration time.Duration
 	// Group is the process group it ran in, its own, as kit runs a command
 	// detached: what it left running is found in it. None for one that
-	// didn't start, or ran at kit's terminal.
+	// didn't start.
 	Group int
 }
 
@@ -326,8 +321,7 @@ func (p prepared) Run(ctx context.Context, cmd Command) (Result, error) {
 
 // Streamed returns r with each line printed by a command run in a context
 // want wants given to lines as it comes, with that context: never a
-// secret's, or an interactive command's, which prints to the terminal
-// itself.
+// secret's.
 func Streamed(r Runner, want func(ctx context.Context) bool, lines func(ctx context.Context, cmd Command, line string)) Runner {
 	return streamed{runner: r, want: want, lines: lines}
 }
@@ -347,7 +341,7 @@ func (s streamed) Environ(ctx context.Context, cmd Command) ([]string, bool) {
 }
 
 func (s streamed) Run(ctx context.Context, cmd Command) (Result, error) {
-	if !cmd.Secret && !cmd.Interactive && s.want(ctx) {
+	if !cmd.Secret && s.want(ctx) {
 		given := cmd.Lines
 		cmd.Lines = func(line string) {
 			if given != nil {

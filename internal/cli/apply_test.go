@@ -117,7 +117,7 @@ func TestApplyWithoutATerminalNeverPrompts(t *testing.T) {
 		t.Errorf("kit apply printed\n%s exit %d (%s); want zoom waiting, exit 1", out, code, errOut)
 	}
 	for _, cmd := range w.fake.Commands() {
-		if cmd.Interactive || slices.Equal(cmd.Args, []string{"-v"}) || slices.Contains(cmd.Args, "--cask") && cmd.Args[0] == "install" {
+		if slices.Equal(cmd.Args, []string{"-v"}) || slices.Contains(cmd.Args, "--cask") && cmd.Args[0] == "install" {
 			t.Errorf("ran %s, want nothing asked and nothing installed for zoom", cmd)
 		}
 		// git's run in the C locale, as kit reads what it says.

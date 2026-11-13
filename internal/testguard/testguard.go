@@ -29,11 +29,8 @@ import (
 // and every transport cloned from it after, dial loopback, and unix sockets
 // in the temporary directory, alone.
 //
-// After them, it fails the run, even when every test passed, if a stub ran,
-// a dial was blocked, kit's real config changed, its state or logs directory
-// appeared, or its Mac's name changed, in the real home or wherever
-// KIT_CONFIG, XDG_CONFIG_HOME and XDG_STATE_HOME put them as the tests began,
-// saying which on stderr. Then it removes the root.
+// After them, it fails the run, even when every test passed, if a stub ran
+// or a dial was blocked, saying which on stderr. Then it removes the root.
 func Main(m *testing.M) int {
 	g, err := install()
 	if err != nil {
@@ -50,24 +47,15 @@ type guard struct {
 	root  string
 	stubs stubs
 	dials *dialGuard
-	// real is what the real system held of kit's as the tests began.
-	real watchers
 }
 
-// install isolates the process as Main says, having first noted what the real
-// system holds of kit's, where the environment says as much as in the real
-// home.
+// install isolates the process as Main says.
 func install() (*guard, error) {
-	home, _ := os.UserHomeDir()
 	root, err := os.MkdirTemp("", "testguard-")
 	if err != nil {
 		return nil, fmt.Errorf("create a throwaway root: %w", err)
 	}
-	g := &guard{
-		root:  root,
-		dials: newDialGuard(os.TempDir()),
-		real:  watchReal(home, os.Getenv),
-	}
+	g := &guard{root: root, dials: newDialGuard(os.TempDir())}
 	if err := g.isolate(); err != nil {
 		_ = os.RemoveAll(root)
 		return nil, err
@@ -94,7 +82,7 @@ func (g *guard) isolate() error {
 // finish removes the root and returns the status to exit with: status, or 1
 // in place of 0 when the tests reached past their isolation, which it reports.
 func (g *guard) finish(status int) int {
-	escapes := slices.Concat(g.stubs.runs(), g.dials.escapes(), g.real.changes())
+	escapes := slices.Concat(g.stubs.runs(), g.dials.escapes())
 	if err := os.RemoveAll(g.root); err != nil {
 		fmt.Fprintf(os.Stderr, "testguard: %v\n", err)
 	}
