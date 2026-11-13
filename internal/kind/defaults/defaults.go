@@ -20,7 +20,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/kind"
@@ -247,44 +246,9 @@ func readDeclared(e config.Entry) (declaredValue, error) {
 		if err != nil {
 			return dv, fmt.Errorf("its XML doesn't read: %w", err)
 		}
-		if err := writable(v); err != nil {
-			return dv, err
-		}
 		dv.value = v
 	}
 	return dv, nil
-}
-
-// writable says why defaults write wouldn't take v, read from a line's XML:
-// nil when it would. Nothing it knows (an element defaults has no type for),
-// a date with an offset, +00:00 too, and one finer than the second, it
-// refuses: it takes a date only as 2026-01-01T00:00:00Z.
-func writable(v any) error {
-	switch x := v.(type) {
-	case nil:
-		return errors.New("its XML holds something defaults write doesn't take: a value is a dict, array, string, integer, real, date, data, true or false")
-	case time.Time:
-		// A date read with an offset is never in time.UTC, whatever the offset.
-		if x.Location() != time.UTC {
-			return fmt.Errorf("its date, %s, has an offset, which defaults write doesn't take: the same time is %s", x.Format("2006-01-02T15:04:05.999999999-07:00"), x.UTC().Format(time.RFC3339Nano))
-		}
-		if x.Nanosecond() != 0 {
-			return fmt.Errorf("its date, %s, is finer than the second, which defaults write doesn't take", x.Format(time.RFC3339Nano))
-		}
-	case map[string]any:
-		for _, item := range x {
-			if err := writable(item); err != nil {
-				return err
-			}
-		}
-	case []any:
-		for _, item := range x {
-			if err := writable(item); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
 }
 
 // domainID names a domain as exported: currentHost: first for one of this
@@ -306,7 +270,7 @@ func (d *Defaults) export(ctx context.Context, currentHost bool, domain string) 
 	if err != nil {
 		return nil, err
 	}
-	v, err := plist.Read(string(res.Stdout))
+	v, err := plist.Decode(res.Stdout)
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", domainID(currentHost, domain), err)
 	}

@@ -186,15 +186,15 @@ func TestDeclaredValuesRead(t *testing.T) {
 
 // defaults write takes a date only to the second, in UTC, ending Z: one
 // with an offset, +00:00 too, or finer than the second, it can't parse, as
-// macOS's own defaults showed.
+// macOS's own defaults showed, so a line holding one is refused.
 func TestADateDefaultsWriteTakes(t *testing.T) {
 	d := defaults.New(runnertest.New(t), t.TempDir())
 	for value, want := range map[string]string{
 		"<date>2026-01-01T00:00:00Z</date>":      "",
-		"<date>2026-01-01T00:00:00+01:00</date>": "its date, 2026-01-01T00:00:00+01:00, has an offset, which defaults write doesn't take: the same time is 2025-12-31T23:00:00Z",
-		"<date>2026-01-01T00:00:00+00:00</date>": "its date, 2026-01-01T00:00:00+00:00, has an offset",
-		"<date>2026-01-01T00:00:00-05:00</date>": "its date, 2026-01-01T00:00:00-05:00, has an offset",
-		"<date>2026-01-01T00:00:00.5Z</date>":    "its date, 2026-01-01T00:00:00.5Z, is finer than the second",
+		"<date>2026-01-01T00:00:00+01:00</date>": `"2026-01-01T00:00:00+01:00" isn't a date`,
+		"<date>2026-01-01T00:00:00+00:00</date>": `"2026-01-01T00:00:00+00:00" isn't a date`,
+		"<date>2026-01-01T00:00:00-05:00</date>": `"2026-01-01T00:00:00-05:00" isn't a date`,
+		"<date>2026-01-01T00:00:00.5Z</date>":    `"2026-01-01T00:00:00.5Z" isn't a date`,
 	} {
 		_, err := d.Values(config.List{Entries: []config.Entry{{Name: "com.apple.dock:x", Value: value, Scope: "shared", Line: 2}}})
 		if want == "" && err != nil || want != "" && (err == nil || !strings.Contains(err.Error(), want)) {
@@ -266,7 +266,7 @@ func TestAValueTakenTrimmedIsTakenAgainExactly(t *testing.T) {
 				want, baseline := []string{"NSGlobalDomain:K extra"}, c.was
 				if c.absorbed && !marked {
 					want = nil
-					v, err := plist.Read("<plist>" + c.now + "</plist>")
+					v, err := plist.ReadValue(c.now)
 					if err != nil {
 						t.Fatal(err)
 					}

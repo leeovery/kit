@@ -149,7 +149,7 @@ func settings(ctx context.Context, run runner.Runner) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	v, err := plist.Read(out)
+	v, err := plist.Decode([]byte(out))
 	prefs, _ := v.(map[string]any)
 	if err != nil || prefs == nil {
 		return nil, errors.New("couldn't read Time Machine's settings")
