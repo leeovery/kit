@@ -190,7 +190,7 @@ status is the report, every check.`,
 		root.AddCommand(cmd)
 	}
 	root.AddCommand(nounCommands(a)...)
-	root.AddCommand(newVersionCommand(), newSplashCommand(a))
+	root.AddCommand(newSplashCommand(a))
 	return root
 }
 

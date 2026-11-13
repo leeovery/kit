@@ -30,9 +30,7 @@ type held struct {
 	why                    map[string]string
 }
 
-// heldIn is what p holds: nothing, for none. A record from before kit
-// sorted what it held has its failed domains among those waiting: those
-// whose why isn't a wait's.
+// heldIn is what p holds: nothing, for none.
 func heldIn(p *Pending) held {
 	h := held{domains: map[string]bool{}, files: map[string]bool{}, failed: map[string]bool{}, open: map[string]App{}, why: map[string]string{}}
 	if p == nil {
@@ -49,18 +47,6 @@ func heldIn(p *Pending) held {
 	}
 	maps.Copy(h.open, p.Open)
 	maps.Copy(h.why, p.Why)
-	keptAsSuch(h.why)
-	if p.Failed == nil && p.Open == nil {
-		for d := range h.domains {
-			switch why := h.why[d]; {
-			case why == errNotOpened.Error():
-				// Its app's found again as the next pass tries it.
-				h.open[d] = App{}
-			case why != "" && !waits(why):
-				h.failed[d] = true
-			}
-		}
-	}
 	return h
 }
 
@@ -68,22 +54,6 @@ func heldIn(p *Pending) held {
 // wait for, as its app may never come, but kept, so capture leaves the
 // saved copy be.
 const keptWhy = "kept till its app is installed"
-
-// keptAsSuch has why, by domain, say kept of a domain a record from before
-// kit kept the settings of apps not installed says waits, "not installed".
-func keptAsSuch(why map[string]string) {
-	for d, w := range why {
-		if w == "not installed" {
-			why[d] = keptWhy
-		}
-	}
-}
-
-// waits reports whether why is a wait's: kept till its app is installed,
-// running, or a windowless helper's folder not come yet.
-func waits(why string) bool {
-	return why == keptWhy || running(why) || why == errNoFolderYet.Error()
-}
 
 // running reports whether why is that the app is running.
 func running(why string) bool {

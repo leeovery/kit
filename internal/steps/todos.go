@@ -128,7 +128,7 @@ func (c choiceToDo) ready(ctx context.Context) event.NeedsYou {
 // cardOf is what the card of it, a to-do of kit's own, says.
 func cardOf(it check.Item) event.NeedsYou {
 	t := it.ToDo
-	return event.NeedsYou{Item: it.ID, Title: t.Title, Group: t.Group, Why: t.Why, Steps: t.Steps, Watch: t.Watch, Keys: t.Keys, Tells: len(t.Keys) == 0 && !t.SaysDone}
+	return event.NeedsYou{Item: it.ID, Title: t.Title, Why: t.Why, Steps: t.Steps, Watch: t.Watch, Keys: t.Keys, Tells: len(t.Keys) == 0 && !t.SaysDone}
 }
 
 // open opens what it needs as its card goes up, when its step's choice

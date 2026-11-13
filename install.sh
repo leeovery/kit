@@ -61,6 +61,6 @@ mkdir -p "$bin"
 mv "$tmp/kit" "$bin/kit"
 
 size=$(wc -c <"$bin/kit" | awk '{ printf "%.1f", $1 / 1000000 }')
-version=$("$bin/kit" version | sed 's/^kit version /kit /')
+version=$("$bin/kit" --version | sed 's/^kit version /kit /')
 printf '%s for %s · %s MB · %s\n' "$version" "$arch" "$size" "$checked"
 exec "$bin/kit" bootstrap

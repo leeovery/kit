@@ -213,7 +213,7 @@ it says that plainly; else `kit cask add arq`. Its status unreadable says so; it
 agreement not yet accepted, or no plan made, is not set up.
 
 **Checks.** Steps with a check and no apply, each problem an item with a stable id saying
-what's wrong and what to do: the Mac's (`disk`, `memory`, `file-events`, `load`), always;
+what's wrong and what to do: the Mac's (`disk`, `memory`, `load`), always;
 the backup tools' a Mac lists in `[backups]` (`time-machine`, `arq`: each runs on its own
 schedule, and kit checks it did, only the plans Arq is scheduled to run; Backups above); the config repository's
 (`config-sync`: commits that won't push; `config-private`); the scheduled runs' (`nightly`: the hourly run within two
@@ -266,7 +266,7 @@ notes: why it's there, one paragraph. The lines indented under it are its steps,
 order, which kit keeps with it, notes and all; a step ending with a colon heads the steps after
 it, as in `If it doesn't ask, in System Settings:`, shown muted and unnumbered, the numbering
 carrying on across it. kit opens nothing for a step by hand: its steps say what to open, and the
-person does it (`--open` is refused, saying so). One with no command is done once marked on this
+person does it. One with no command is done once marked on this
 Mac (`kit manual done <name>`, `--undo` to unmark). Those not done are items of their step, in
 the Manual area, saying what to do, so `kit status` shows them; what kit can check itself stays
 a check that says what to do. While `kit apply` runs at a terminal, one that comes due is raised
@@ -625,7 +625,6 @@ kit prefs capture|restore|history|pending|start-fresh   Apps' settings, saved to
 kit check|hourly add <name> -- <command>, kit nightly add <name> -- <command>   Your own checks and jobs
 kit manual add <name> "<what to do>" [-- <command>]; kit manual done <name>...  Steps by hand   [--group]
 kit step add <name> "<what it does>"; kit step remove <name>...  Steps of your own   [--after] [--before] [--secret] [--sudo] [--shared]
-kit version                  As --version
 ```
 
 The command shape (the maintainer, 6 Oct): a command about one kind of thing names it first, then what to
@@ -893,8 +892,9 @@ or a file outside `objects` hard-linked, or, pushed to, writes its work tree
 `core.alternateRefsCommand`, a hook git runs for a push, configured or in its `hooks`). With no
 remote it's pushed to or fetched from, it isn't public.
 
-Every command takes `--json` (one document), `--plain` (plain lines, as without a terminal)
-and `--verbose` (commands' output kept whole in the run's log).
+Every command takes `--plain` (plain lines, as without a terminal) and `--verbose` (commands'
+output kept whole in the run's log), and every one but `kit agent`, whose text is what agents
+read, `--json` (one document).
 
 Exit statuses: 0 when all's well, 1 when something needs attention (a Mac with no name yet,
 drift), 2 when kit couldn't do its job (no config repository, a config error, an unknown
@@ -917,10 +917,9 @@ their apps are installed and closed and have their settings folders, opening non
 when the nightly run falls due (`nightly_at` in `kit.toml`, 03:00 unless it says), or on the
 first run after it's been missed, as by a Mac asleep then. Each job's outcome is kept in kit's
 state (`nightly.json`). It installs and removes nothing. `--plan` says what's due; naming jobs
-runs those, now. Each run leaves its report (`report.txt` in kit's logs folder, `kit status`'s
-plain lines), for reading later. Its runs notify no one (the maintainer, 12 Nov 2026:
-"record it so that you have access to the knowledge, but I don't want to be told"): what
-they find is in `kit status`, bare `kit`, the report and the log. The notifications kit
+runs those, now. Its runs notify no one (the maintainer, 12 Nov 2026: "record it so that you
+have access to the knowledge, but I don't want to be told"): what they find is in `kit status`,
+bare `kit` and the log. The notifications kit
 posts are a run's at a terminal: a card waiting, and macOS asking.
 
 **The hourly launch** (slice 16) is a built-in step on every Mac, `hourly-launch`, nothing

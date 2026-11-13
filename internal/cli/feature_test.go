@@ -7,9 +7,7 @@ import (
 
 // A feature switched on brings its steps into the run; one kit doesn't
 // know is refused, saying where and naming those it has, as scratch and
-// oh-my-zsh are now kit has them no longer; a backup tool is refused as a
-// feature, saying where it goes now and the command declaring it there, as
-// its section had it.
+// oh-my-zsh are now kit has them no longer.
 func TestFeaturesBringTheirSteps(t *testing.T) {
 	w := laptopWorld(t)
 	w.writeSection(t, "laptop", "features", "remote-login\n")
@@ -22,9 +20,6 @@ func TestFeaturesBringTheirSteps(t *testing.T) {
 		{"laptop", "features", "time-capsule\n", "laptop/declarations:5: kit doesn't know the feature time-capsule"},
 		{"laptop", "features", "scratch\n", "laptop/declarations:5: kit doesn't know the feature scratch: one of file-sharing, prefs, remote-login, touch-id-sudo\n"},
 		{"shared", "features", "oh-my-zsh\n", "kit doesn't know the feature oh-my-zsh: one of file-sharing, prefs, remote-login, touch-id-sudo\n"},
-		{"laptop", "features", "time-machine\n", "laptop/declarations:5: time-machine is a backup tool, so it goes in [backups] now, not [features]: kit backup add time-machine, once you've removed this line"},
-		{"laptop", "features --after cask:arq", "arq\n", "laptop/declarations:5: arq is a backup tool, so it goes in [backups] now, not [features]: kit backup add arq --after cask:arq, once you've removed this line"},
-		{"shared", "features --after cask:arq", "arq\n", "arq is a backup tool, so it goes in [backups] now, not [features]: kit backup add arq --after cask:arq --shared, once you've removed this line"},
 	} {
 		w := laptopWorld(t)
 		w.writeSection(t, tt.scope, tt.header, tt.line)
@@ -55,12 +50,6 @@ func TestFeatureOnAndOff(t *testing.T) {
 		if _, errOut, code := w.run(t, "feature", "on", name); !strings.Contains(errOut, "kit doesn't know the feature "+name+": one of file-sharing, prefs, remote-login, touch-id-sudo\n") || code != 2 {
 			t.Errorf("kit feature on %s printed %q, exit %d", name, errOut, code)
 		}
-	}
-	if _, errOut, code := w.run(t, "feature", "on", "time-machine"); !strings.Contains(errOut, "time-machine is a backup tool, so it goes in [backups] now, not [features]: kit backup add time-machine\n") || code != 2 {
-		t.Errorf("kit feature on time-machine printed %q, exit %d", errOut, code)
-	}
-	if _, errOut, code := w.run(t, "feature", "off", "arq", "--shared"); !strings.Contains(errOut, "arq is a backup tool, so it goes in [backups] now, not [features]: kit backup remove arq --shared\n") || code != 2 {
-		t.Errorf("kit feature off arq --shared printed %q, exit %d", errOut, code)
 	}
 }
 

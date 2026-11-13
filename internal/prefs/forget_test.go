@@ -74,20 +74,6 @@ func TestForgetWithNothingHeld(t *testing.T) {
 	}
 }
 
-// A record from before kit kept the settings of apps not installed says
-// they're "not installed": they're read as kept, never as failed.
-func TestARecordFromBeforeReadsAsKept(t *testing.T) {
-	w := newWorld(t, prefs.Lists{})
-	writeRecord(t, w.state, `{"on": "restored", "pending": {"from": "laptop", "domains": ["com.example.gone"], "why": {"com.example.gone": "not installed"}}}`)
-	rec, err := w.p.Load()
-	if err != nil || rec.Pending == nil || rec.Pending.Why["com.example.gone"] != "kept till its app is installed" {
-		t.Errorf("Load() = %+v, %v; want it kept", rec.Pending, err)
-	}
-	if domains, files := w.p.Failures(rec); domains+files != 0 {
-		t.Errorf("Failures() = %d, %d; want none", domains, files)
-	}
-}
-
 // Straight after kit installs apps, the settings kept for those now
 // installed come back, as the hourly pass would bring them: nothing's run
 // at all while capture's off, or while none kept has its app; one held as

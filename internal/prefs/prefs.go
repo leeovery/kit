@@ -142,11 +142,7 @@ func New(run runner.Runner, home, stateDir, clone, remote, mac string, lists Lis
 
 // Load reads the record.
 func (p *Prefs) Load() (Record, error) {
-	rec, err := state.Load[Record](p.State, recordName)
-	if rec.Pending != nil {
-		keptAsSuch(rec.Pending.Why)
-	}
-	return rec, err
+	return state.Load[Record](p.State, recordName)
 }
 
 // update changes the record.

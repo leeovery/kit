@@ -2,7 +2,6 @@ package nightly
 
 import (
 	"context"
-	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -48,9 +47,9 @@ func Check(jobs []Job, nightly bool, stateDir string, now func() time.Time) engi
 				add("never", "kit has never run on a schedule", "kit apply installs the hourly launch")
 			case t.Sub(since) <= hourlyWithin:
 			case last.IsZero():
-				add("hourly", "no hourly run since its launch was loaded "+ago(since, t), stopped)
+				add("hourly", "no hourly run since its launch was loaded "+check.Ago(since, t), stopped)
 			default:
-				add("hourly", "the hourly run last ran "+ago(last, t), stopped)
+				add("hourly", "the hourly run last ran "+check.Ago(last, t), stopped)
 			}
 			if !last.IsZero() {
 				glance = append(glance, "hourly "+last.In(t.Location()).Format("15:04"))
@@ -62,7 +61,7 @@ func Check(jobs []Job, nightly bool, stateDir string, now func() time.Time) engi
 						add("stuck", "the nightly run from "+rec.Full.Started.In(t.Location()).Format("2 Jan 15:04")+" never finished", "kit log shows where it stopped; a job may have hung")
 					}
 				case t.Sub(rec.Full.Finished) > fullWithin:
-					add("stale", "the nightly run last finished "+ago(rec.Full.Finished, t), stopped)
+					add("stale", "the nightly run last finished "+check.Ago(rec.Full.Finished, t), stopped)
 				}
 				glance = append(glance, "nightly "+rec.Full.Started.In(t.Location()).Format("15:04"))
 			}
@@ -88,13 +87,3 @@ func Check(jobs []Job, nightly bool, stateDir string, now func() time.Time) engi
 
 // stopped is what to do when the scheduled runs have stopped.
 const stopped = "kit apply puts the hourly launch back in place; kit log shows the last run"
-
-// ago says how long ago t was, from now, roughly.
-func ago(t, now time.Time) string {
-	switch d := now.Sub(t); {
-	case d < 48*time.Hour:
-		return fmt.Sprintf("%d hours ago", int(d.Hours()))
-	default:
-		return fmt.Sprintf("%d days ago", int(d.Hours()/24))
-	}
-}

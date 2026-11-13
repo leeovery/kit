@@ -31,8 +31,6 @@ func TestParseScript(t *testing.T) {
 		{value: `"Does" --before --sudo`, wrong: "--before needs a step's name after it"},
 		{value: `"Does" --before cask:1password`, wrong: "--before a step"},
 		{value: `"Does" --after cask:`, wrong: "one of its things as in cask:firefox"},
-		{value: `"Does" --needs secret`, wrong: "--needs is --after now"},
-		{value: `"Does" --admin`, wrong: "--admin is --sudo now"},
 		{value: `"Does`, wrong: "a quote isn't closed"},
 	} {
 		got, err := steps.ParseScript("/config", config.Entry{Name: "tool", Value: tc.value, Scope: "laptop"})

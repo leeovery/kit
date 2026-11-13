@@ -29,10 +29,13 @@ done by the time it applies, and what comes after it, from the steps kit
 apply builds and the order it keeps. The secrets' sync, the restore of
 apps' settings and, where [restore] lists paths, the data restore and the
 reinstall of the projects it brings back are always placed: before it,
-after it, or in no order with it, when either may come first. A step done by hand that's raised with the rest at the end is placed
-as they are. --json gives the same as one document.`,
+after it, or in no order with it, when either may come first. A step done
+by hand that's raised with the rest at the end is placed as they are.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := a.textOnly(cmd); err != nil {
+				return err
+			}
 			// The steps of kit apply at a terminal, as a new Mac's is, with
 			// nothing a run at one starts started, nothing shown and no log.
 			a.newMacRun = true
@@ -51,15 +54,12 @@ as they are. --json gives the same as one document.`,
 
 // spot is a step, one of a step's things, or a thing no step puts in place,
 // as a program on kit's PATH, or an app installed (App), in a run's order,
-// and what's said of it there; and, when it's before the one placed only
-// through a step that one comes after, which may not have succeeded, that
-// step (engine.Prior's Through).
+// and what's said of it there.
 type spot struct {
-	Step    string `json:"step,omitempty"`
-	Thing   string `json:"thing,omitempty"`
-	App     bool   `json:"app,omitempty"`
-	Says    string `json:"says"`
-	Through string `json:"through,omitempty"`
+	Step  string
+	Thing string
+	App   bool
+	Says  string
 }
 
 // name is the spot as kit names it: the step, or its thing, as in
@@ -83,18 +83,14 @@ func (s spot) name() string {
 // it fails at once, when its line is wrong; Never why it never applies,
 // when it waits for what never comes.
 type placing struct {
-	Schema    int    `json:"schema"`
-	Machine   string `json:"machine"`
-	Name      string `json:"name"`
-	Step      string `json:"step"`
-	Thing     string `json:"thing,omitempty"`
-	RaisedBy  string `json:"raised_by,omitempty"`
-	Fails     string `json:"fails,omitempty"`
-	Never     string `json:"never,omitempty"`
-	Before    []spot `json:"before"`
-	After     []spot `json:"after"`
-	Unordered []spot `json:"unordered"`
-	Absent    []spot `json:"absent,omitempty"`
+	Name      string
+	RaisedBy  string
+	Fails     string
+	Never     string
+	Before    []spot
+	After     []spot
+	Unordered []spot
+	Absent    []spot
 }
 
 // alwaysPlaced are the steps kit agent order always places, as what a step
@@ -110,18 +106,13 @@ var alwaysPlaced = []struct{ step, absent string }{
 }
 
 // order says where name, a step or one of a step's things, falls in r's
-// run: as one document with --json, else as plain text.
+// run, as plain text.
 func (a *app) order(ctx context.Context, r *run, name string) error {
 	o, err := newOrdering(r, name)
 	if err != nil {
 		return err
 	}
-	p := o.place(ctx)
-	p.Machine = r.machine
-	if a.json {
-		return render.WriteJSON(a.Stdout, p)
-	}
-	_, err = io.WriteString(a.Stdout, strings.Join(p.lines(), "\n")+"\n")
+	_, err = io.WriteString(a.Stdout, strings.Join(o.place(ctx).lines(), "\n")+"\n")
 	return err
 }
 
@@ -265,7 +256,7 @@ func (o *ordering) aheadOf(name string) []engine.Prior {
 // lead-up has it, and the steps always placed, wherever they fall; or, for
 // a step whose line is wrong, why it fails.
 func (o *ordering) place(ctx context.Context) placing {
-	p := placing{Schema: agentSchema, Name: o.name, Step: o.target.Step, Thing: o.target.Thing, RaisedBy: o.raisedBy, Before: []spot{}, After: []spot{}, Unordered: []spot{}}
+	p := placing{Name: o.name, RaisedBy: o.raisedBy}
 	if p.Fails = o.fails(ctx); p.Fails != "" {
 		return p
 	}
@@ -283,7 +274,7 @@ func (o *ordering) place(ctx context.Context) placing {
 		if w.Through != "" && (w.Thing != "" || w.Step == "") {
 			says += " (through " + w.Through + ": may not be there)"
 		}
-		p.Before = append(p.Before, spot{Step: w.Step, Thing: w.Thing, App: w.Step == "" && o.apps[w.Thing], Says: says, Through: w.Through})
+		p.Before = append(p.Before, spot{Step: w.Step, Thing: w.Thing, App: w.Step == "" && o.apps[w.Thing], Says: says})
 	}
 	for _, s := range o.steps {
 		if s.Name != o.target.Step && o.covers(o.aheadOf(s.Name)) {

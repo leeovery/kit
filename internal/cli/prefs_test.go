@@ -32,11 +32,11 @@ func TestPrefsCommands(t *testing.T) {
 
 // kit prefs pending lists what's held, domains then settings files, each
 // with why where the record says: a domain whose app isn't installed kept
-// till it is, as a record from before kit kept them says too.
+// till it is.
 func TestPrefsPendingSaysWhy(t *testing.T) {
 	w := laptopWorld(t)
 	w.write(t, ".local/state/kit/prefs.json", `{"pending": {"from": "laptop", "domains": ["com.example.app", "com.example.old"], "files": ["~/.config/tool/settings.json"],
-		"why": {"com.example.app": "not installed", "~/.config/tool/settings.json": "it couldn't be put in place"}}}`)
+		"why": {"com.example.app": "kept till its app is installed", "~/.config/tool/settings.json": "it couldn't be put in place"}}}`)
 	want := "Held to be restored from laptop (kit prefs restore --pending):\n" +
 		"  com.example.app: kept till its app is installed\n" +
 		"  com.example.old\n" +

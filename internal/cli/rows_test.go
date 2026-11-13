@@ -54,7 +54,7 @@ func TestEveryStepHasARow(t *testing.T) {
 		steps.TouchIDSudo(fake, admin, ""), steps.RemoteLogin(fake, admin), steps.FileSharing(fake, admin),
 		steps.Prefs(nil, "", never), steps.FullDiskAccess(home), steps.Restore(steps.Restoring{}), steps.Reinstall(reinstall.Reinstaller{}),
 		steps.ConfigEdits(gitrepo.Repo{}), steps.ConfigSync(gitrepo.Repo{Run: fake}, never), steps.ConfigPrivate(gitrepo.Repo{Run: fake}),
-		steps.Disk(fake), steps.Memory(fake), steps.FileEvents(fake), steps.Load(fake, never),
+		steps.Disk(fake), steps.Memory(fake), steps.Load(fake, never),
 		steps.Own(fake, home, config.List{}),
 		steps.Manual(fake, home, state, config.List{}, nil), steps.OwnManual(fake, state, steps.ManualStep{Name: "sign-in"}, nil),
 		steps.ScriptStep(fake, admin, steps.Script{Name: "fonts"}), steps.BrokenScript(config.Entry{Name: "gpg-key"}, errors.New("unread")),

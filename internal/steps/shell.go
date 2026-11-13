@@ -48,7 +48,7 @@ func PathFile(dirs []string, file string) engine.Step {
 			return check.Result{State: check.Attention, Summary: "not as [paths] says", Items: []check.Item{it}}
 		},
 		Apply: func(context.Context, check.Result) error {
-			return WriteWhole(file, []byte(want), 0o700)
+			return writeWhole(file, []byte(want), 0o700)
 		},
 	}
 }

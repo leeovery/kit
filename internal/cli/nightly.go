@@ -1,12 +1,10 @@
 package cli
 
 import (
-	"bytes"
 	"cmp"
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -21,15 +19,11 @@ import (
 	"github.com/leeovery/kit/internal/macapp"
 	"github.com/leeovery/kit/internal/nightly"
 	"github.com/leeovery/kit/internal/prefs"
-	"github.com/leeovery/kit/internal/render"
 	"github.com/leeovery/kit/internal/steps"
 )
 
 // jobTimeout is how long a job of the user's own may run.
 const jobTimeout = time.Hour
-
-// reportFile is the report kit nightly leaves, in kit's logs folder.
-const reportFile = "report.txt"
 
 func newNightlyCommand(a *app) *cobra.Command {
 	var plan, scheduled bool
@@ -46,8 +40,7 @@ Nothing is installed or removed.
 
 kit apply installs the hourly launch: launchd opens kit.app on the hour, and
 kit.app runs kit nightly, so that Full Disk Access is kit.app's. Its runs
-notify no one: what they find is in kit status, the log, and the report each
-run leaves in kit's logs folder (report.txt).
+notify no one: what they find is in kit status and the log.
 
 Name jobs to run only those, now. --plan says what's due, and runs nothing.
 kit nightly add and kit nightly remove declare and undeclare nightly jobs (so
@@ -58,8 +51,7 @@ no job is named add or remove).`,
 				command, logName = "nightly --plan", "nightly-plan"
 			}
 			a.scheduled = scheduled
-			var report bytes.Buffer
-			r, err := a.prepareWith(command, logName, render.Tee(render.NewPlain(&report), a.face()))
+			r, err := a.prepare(command, logName)
 			if err != nil {
 				return err
 			}
@@ -69,9 +61,6 @@ no job is named add or remove).`,
 			err = a.nightly(cmd.Context(), r, args, plan)
 			if closeErr := r.close(); err == nil {
 				err = closeErr
-			}
-			if writeErr := steps.WriteWhole(filepath.Join(r.logsDir, reportFile), report.Bytes(), 0o700); writeErr != nil && err == nil {
-				err = writeErr
 			}
 			return err
 		},

@@ -89,35 +89,6 @@ func TestMemory(t *testing.T) {
 	}
 }
 
-func TestFileEvents(t *testing.T) {
-	top := func(mem string) string {
-		return "Processes: 812 total\nLoad Avg: 2.1\n\nMEM\n" + mem + "\n"
-	}
-	for _, tt := range []struct {
-		top   string
-		state check.State
-		text  string
-		ids   []string
-	}{
-		{top("212M"), check.OK, "fseventsd using 0.2 GB", nil},
-		{top("57G+"), check.Attention, "fseventsd using 57.0 GB", []string{"file-events:fseventsd"}},
-		{"nothing\n", check.Failed, "couldn't read top's answer", nil},
-	} {
-		fake := runnertest.New(t)
-		fake.On("pgrep", "-x", "fseventsd").Prints("412\n")
-		fake.On("top", "-l", "1", "-pid", "412", "-stats", "mem").Prints(tt.top)
-		state, text, ids := checked(t, steps.FileEvents(fake))
-		if state != tt.state || text != tt.text || !slices.Equal(ids, tt.ids) {
-			t.Errorf("file events with %q = %s %q %q; want %s %q %q", tt.top, state, text, ids, tt.state, tt.text, tt.ids)
-		}
-	}
-	fake := runnertest.New(t)
-	fake.On("pgrep", "-x", "fseventsd").Exits(1)
-	if state, text, _ := checked(t, steps.FileEvents(fake)); state != check.OK || text != "fseventsd isn't running" {
-		t.Errorf("without fseventsd = %s %q", state, text)
-	}
-}
-
 // A high load is a problem, but not in the half hour after the Mac starts.
 func TestLoad(t *testing.T) {
 	booted := func(ago time.Duration) string {

@@ -57,13 +57,11 @@ func TestManualLinesRead(t *testing.T) {
 	for value, want := range map[string]string{
 		`--test test -d x`:                      "what to do comes after the name",
 		`"Do it" test -d x`:                     `"test" isn't one of a step by hand's options: --after, --before, --group and --test`,
-		`"Do it" --open "System Settings"`:      `--open is gone: a step by hand of yours opens nothing, so say what to open in a step, a line indented under it, as in "Open Firefox"`,
 		`"Do it" --group`:                       `--group needs the group's name after it, as in --group "First things"`,
 		`"Do it" --group --test true`:           "--group needs the group's name after it",
 		`"Do it" --group ""`:                    "--group needs the group's name after it",
 		`"Do it" --group One --group Two`:       "--group is there twice: a step by hand is in one group",
 		`"Do it" --test`:                        "--test needs the command",
-		`"Do it" -- test -d x`:                  "comes after --test now",
 		`"Do it" --after`:                       "--after needs a step's name after it",
 		`"Do it" --before cask:1password`:       "--before a step",
 		`"Do it" --after cask: --test true`:     "one of its things as in cask:firefox",
@@ -129,7 +127,7 @@ func TestTheStepsByHandAreListed(t *testing.T) {
 		t.Fatalf("the run began with %+v, want its start, with both steps", sink.seen[0])
 	}
 	want := map[string][]event.Hand{
-		steps.ManualName: {{Name: "sign-in", Title: "Sign in to the service"}, {Name: "backups", Title: "Turn backups on", Group: "Mac", Why: "Nothing's backed up till then."}},
+		steps.ManualName: {{Name: "sign-in", Title: "Sign in to the service"}, {Name: "backups", Title: "Turn backups on"}},
 		"licence":        {{Name: "licence", Title: "Enter the app's licence"}},
 	}
 	for _, s := range start.Steps {
@@ -361,7 +359,7 @@ func TestACardGoesUpAndIsDone(t *testing.T) {
 	applied := applying(t, step)
 
 	up := c.cards(t, 1)[0]
-	want := event.NeedsYou{Time: up.Time, Step: "sharing", Item: "sharing", Title: "Turn on sharing", Group: "Mac", Why: "For logging in from elsewhere.", Steps: m.Steps}
+	want := event.NeedsYou{Time: up.Time, Step: "sharing", Item: "sharing", Title: "Turn on sharing", Why: "For logging in from elsewhere.", Steps: m.Steps}
 	if !reflect.DeepEqual(up, want) || len(c.fake.Calls()) != 0 {
 		t.Errorf("card = %+v, ran %q; want %+v, nothing run", up, c.fake.Calls(), want)
 	}

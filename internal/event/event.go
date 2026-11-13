@@ -74,12 +74,9 @@ type Step struct {
 }
 
 // Hand is a step by hand, as a step that raises it lists it: its line's
-// name, as its NeedsYou's Item; what to do, as its Title; the group it's
-// in, if any; and why, as the notes above its line say.
+// name, as its NeedsYou's Item; and what to do, as its Title.
 type Hand struct {
 	Name, Title string
-	Group       string `json:",omitempty"`
-	Why         string `json:",omitempty"`
 }
 
 // Preparing is kit getting a run ready, before it starts, as applying works
@@ -178,8 +175,8 @@ func (e Logged) At() time.Time { return e.Time }
 
 // NeedsYou is a step by hand come up for the person at the Mac, front and
 // centre on applying's screen, or one of the to-dos at its end: its line's
-// name, or the to-do's item's id (Item); what to do (Title); the group
-// it's in, if any; why, as the notes above its line say; its steps, in
+// name, or the to-do's item's id (Item); what to do (Title); why, as the
+// notes above its line say; its steps, in
 // order; whether kit tells by itself when it's done (the line's --test, or
 // a to-do's check), else the person says so, and what kit watches for, in
 // words, when it says; the keys of a choice, when it's one, and the one
@@ -192,7 +189,6 @@ type NeedsYou struct {
 	Step      string
 	Item      string
 	Title     string
-	Group     string      `json:",omitempty"`
 	Why       string      `json:",omitempty"`
 	Steps     []string    `json:",omitempty"`
 	Tells     bool        `json:",omitempty"`

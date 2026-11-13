@@ -267,11 +267,7 @@ func (n *askingNotice) end(ctx context.Context) {
 // Mac's name, settled before anything reads a Mac's own files, kit's own
 // PATH, the runner, the faces and the log, and the pipeline.
 func (a *app) prepare(command, logName string) (*run, error) {
-	return a.prepareWith(command, logName, a.face())
-}
-
-// prepareWith readies a run as prepare does, shown on face.
-func (a *app) prepareWith(command, logName string, face render.Face) (*run, error) {
+	face := a.face()
 	r, err := a.build(command, logName, face, a.pretty(a.Stdout))
 	if err != nil {
 		return nil, err
@@ -516,7 +512,7 @@ func (a *app) build(command, logName string, face render.Face, atTerminal bool) 
 	r.drifters[steps.ConfigEditsName] = configDrifter{repo: r.repo, home: home, step: edits}
 	checks = append(checks,
 		r.hostKeyStep(a.SSHDir, a.SSHAddress, dirs.State, features.on(steps.FeatureRemoteLogin)), quietened(edits, record, now),
-		steps.Disk(observed), steps.Memory(observed), steps.FileEvents(observed), steps.Load(observed, a.Now),
+		steps.Disk(observed), steps.Memory(observed), steps.Load(observed, a.Now),
 		steps.ConfigSync(r.repo, a.Now), steps.ConfigPrivate(r.repo),
 	)
 	newMac, err := boot.NewMac(dirs.State)
@@ -746,9 +742,6 @@ func (r *run) featuresOf(mac string) (featuresOn, error) {
 	}
 	on := make(featuresOn, len(list.Entries))
 	for _, e := range list.Entries {
-		if err := movedToBackups(e); err != nil {
-			return nil, err
-		}
 		if !slices.Contains(steps.Features, e.Name) {
 			return nil, fmt.Errorf("%s: kit doesn't know the feature %s: one of %s", e.Pos(), e.Name, strings.Join(steps.Features, ", "))
 		}

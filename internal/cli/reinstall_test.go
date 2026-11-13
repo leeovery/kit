@@ -122,7 +122,7 @@ uses-deps "uses the projects" --after reinstall
 			t.Errorf("settled %v: before uses-deps = %q; want the reinstall", settled, before)
 		}
 		doc := w.order(t, "alone")
-		i := slices.IndexFunc(doc.Unordered, func(s spot) bool { return s.Step == "reinstall" })
+		i := slices.IndexFunc(doc.Unordered, func(s spot) bool { return s.Name == "reinstall" })
 		if i < 0 || doc.Unordered[i].Says != "the restored projects' dependencies installed again, by their lockfiles, where their tools are installed" {
 			t.Errorf("settled %v: in no order with alone = %+v; want the reinstall, saying what it does", settled, doc.Unordered)
 		}

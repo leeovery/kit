@@ -34,7 +34,6 @@ const Problem = check.Problem
 const (
 	diskFreeBelow   = 10   // per cent of the startup disk
 	swapAbove       = 16.0 // GB
-	fseventsdAbove  = 4.0  // GB
 	loadPerCore     = 4.0  // the 15-minute load average, per core
 	loadGraceOnBoot = 30 * time.Minute
 )
@@ -142,45 +141,6 @@ func Memory(run runner.Runner) engine.Step {
 				return problem("memory", summary, problems...)
 			}
 			return check.Result{State: check.OK, Summary: summary, Glance: fmt.Sprintf("%.1f GB swap", swap)}
-		},
-	}
-}
-
-var topMem = regexp.MustCompile(`(?m)^\s*([\d.]+)([BKMGT])\+?\s*$`)
-
-// FileEvents checks fseventsd, the file-events daemon, hasn't bloated: its
-// footprint, compressed memory and all, as top counts it.
-func FileEvents(run runner.Runner) engine.Step {
-	return engine.Step{
-		Name: "file-events", Title: "File events", Area: AreaMac,
-		Check: func(ctx context.Context) check.Result {
-			out, err := output(ctx, run, "pgrep", "-x", "fseventsd")
-			if _, exited := errors.AsType[*runner.ExitError](err); exited {
-				return check.Result{State: check.OK, Summary: "fseventsd isn't running"}
-			}
-			if err != nil {
-				return failed(err)
-			}
-			pid := strings.Fields(out)
-			if len(pid) == 0 {
-				return check.Result{State: check.OK, Summary: "fseventsd isn't running"}
-			}
-			out, err = output(ctx, run, "top", "-l", "1", "-pid", pid[0], "-stats", "mem")
-			if err != nil {
-				return failed(err)
-			}
-			sizes := topMem.FindAllStringSubmatch(out, -1)
-			if len(sizes) == 0 {
-				return failed(errors.New("couldn't read top's answer"))
-			}
-			last := sizes[len(sizes)-1]
-			value, _ := strconv.ParseFloat(last[1], 64)
-			gb := value * map[string]float64{"B": 1.0 / (1 << 30), "K": 1.0 / (1 << 20), "M": 1.0 / 1024, "G": 1, "T": 1024}[last[2]]
-			summary := fmt.Sprintf("fseventsd using %.1f GB", gb)
-			if gb > fseventsdAbove {
-				return problem("file-events", summary, [3]string{"fseventsd", fmt.Sprintf("fseventsd is using %.0f GB, as before the 27 Sep 2026 slowdown", gb), "sudo killall fseventsd (it restarts); then find what's flooding file events"})
-			}
-			return check.Result{State: check.OK, Summary: summary}
 		},
 	}
 }
