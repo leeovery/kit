@@ -3,9 +3,10 @@
 // of the run's own, beside a socket the run answers on. sudo runs kit
 // through the link, with its prompt, as sudo -A does, and plain sudo
 // without a terminal (Env); kit, run so, asks the run over the socket and
-// prints the answer, for sudo to read. Only kit's helper, run by the real
-// sudo, run by a command the run gave the helper (Running), may ask, and
-// the password is never on a command line, in a file or in the log.
+// prints the answer, for sudo to read. Only the helper, run by the real
+// sudo, beneath a command the run gave the helper while it runs (Running),
+// is answered, and the password is never on a command line, in a file or
+// in the log.
 package askpass
 
 import (
@@ -41,9 +42,10 @@ type Server struct {
 	dir string
 	ln  net.Listener
 	ask Asker
-	// sudo reports whether a process is the real sudo.
-	sudo func(pid int) bool
-	wg   sync.WaitGroup
+	// kit and sudo report whether a process is named as kit is
+	// (namedAsKit), and whether it's the real sudo (isSudo).
+	kit, sudo func(pid int) bool
+	wg        sync.WaitGroup
 	// ctx is what the person's asked in, cancelled as the run ends.
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -75,16 +77,17 @@ type answered struct {
 // else, and when that sudo asks again, as it does when a password's wrong,
 // with what ask gets from them.
 func Start(base, self string, ask Asker) (*Server, error) {
-	return start(base, self, ask, isSudo)
+	return start(base, self, ask, namedAsKit, isSudo)
 }
 
-// start is Start, a process taken as the real sudo as sudo says.
-func start(base, self string, ask Asker, sudo func(pid int) bool) (*Server, error) {
+// start is Start, a process taken as named as kit as kit says, and as the
+// real sudo as sudo says.
+func start(base, self string, ask Asker, kit, sudo func(pid int) bool) (*Server, error) {
 	dir, err := os.MkdirTemp(base, "kit-askpass-")
 	if err != nil {
 		return nil, fmt.Errorf("make a directory for asking: %w", err)
 	}
-	s := &Server{dir: dir, ask: ask, sudo: sudo, sudos: map[int]*answered{}, running: map[int]bool{}}
+	s := &Server{dir: dir, ask: ask, kit: kit, sudo: sudo, sudos: map[int]*answered{}, running: map[int]bool{}}
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	if err := os.Symlink(self, s.Helper()); err != nil {
 		_ = os.RemoveAll(dir)
@@ -123,6 +126,11 @@ func (s *Server) Running(pid int) (exited func()) {
 		defer s.mu.Unlock()
 		delete(s.running, pid)
 	}
+}
+
+// namedAsKit is whether pid is named as kit is.
+func namedAsKit(pid int) bool {
+	return name(pid) == name(os.Getpid())
 }
 
 // beneath reports whether pid descends from a command running that was
@@ -172,10 +180,17 @@ func (s *Server) serve() {
 	}
 }
 
-// answer answers an asking through kit's helper, run by the real sudo,
-// beneath a command running that was given the helper; anything else, as a
-// program connecting to ask for itself, or beneath any other command, it
-// closes on.
+// answer answers an asking through the helper, run by the real sudo,
+// beneath a command running that was given the helper; anything else it
+// closes on. That stops a program asking for itself, and one running sudo
+// with the helper from outside such a command; the name, kit's, is a cheap
+// filter that refuses another askpass helper beneath one. What it can't
+// stop is a program that rewrites what kit or Homebrew later run, as the
+// helper's link, in a folder of the user's: nothing the user owns can be
+// guarded from the user's own programs. A command's process stays noted
+// till its output closes, up to waitDelay after it's exited: a process
+// taking its id meanwhile could ask, which is left as too unlikely to
+// guard.
 func (s *Server) answer(c net.Conn) {
 	defer func() { _ = c.Close() }()
 	uc, ok := c.(*net.UnixConn)
@@ -183,7 +198,7 @@ func (s *Server) answer(c net.Conn) {
 		return
 	}
 	helper, err := peer(uc)
-	if err != nil || name(helper) != name(os.Getpid()) || !s.beneath(helper) {
+	if err != nil || !s.kit(helper) || !s.beneath(helper) {
 		return
 	}
 	sudo := parent(helper)

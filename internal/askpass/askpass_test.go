@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
-	"strings"
 	"testing"
 	"time"
 
@@ -51,7 +50,7 @@ func TestAnswersASudo(t *testing.T) {
 			return "", errors.New("cancelled")
 		}
 		return "typed" + strconv.Itoa(n), nil
-	}, bySudo)
+	}, namedAsKit, bySudo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +109,7 @@ func TestRefusesAnAskerNotSudos(t *testing.T) {
 func TestAnswersOnlyBeneathACommandRunning(t *testing.T) {
 	s, err := start("", "/usr/bin/true", func(context.Context, int) (string, error) {
 		return "", errors.New("the person was asked")
-	}, bySudo)
+	}, namedAsKit, bySudo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,22 +128,34 @@ func TestAnswersOnlyBeneathACommandRunning(t *testing.T) {
 	}
 }
 
-// A program other than kit's helper is refused, however it's run: nc
-// connecting from beneath a command running, its parent taken as sudo.
-func TestRefusesAnythingButTheHelper(t *testing.T) {
-	s, err := start("", "/usr/bin/true", func(context.Context, int) (string, error) {
-		return "", errors.New("the person was asked")
-	}, func(int) bool { return true })
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = s.Close() })
-	defer s.Running(os.Getpid())()
-	s.Keep("hunter2")
-	r := runner.Exec{Now: time.Now}
-	res, err := r.Run(t.Context(), runner.Command{Name: "/bin/sh", Args: []string{"-c", `printf 'Password:\n' | /usr/bin/nc -U "$1"`, "sh", filepath.Join(s.dir, socketName)}})
-	if strings.Contains(string(res.Stdout), "hunter2") {
-		t.Errorf("nc was given %q (%v); want nothing", res.Stdout, err)
+// A program not named as kit is refused, however it's run: nc connecting
+// from beneath a command running, its parent taken as sudo; the same
+// connection, taken as kit's, is answered.
+func TestRefusesAProgramNotNamedAsKit(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		kit  func(int) bool
+		want string
+	}{
+		{"named as nc is", namedAsKit, ""},
+		{"taken as kit's", func(int) bool { return true }, "hunter2\n"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			s, err := start("", "/usr/bin/true", func(context.Context, int) (string, error) {
+				return "", errors.New("the person was asked")
+			}, tt.kit, func(int) bool { return true })
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = s.Close() })
+			defer s.Running(os.Getpid())()
+			s.Keep("hunter2")
+			r := runner.Exec{Now: time.Now}
+			res, err := r.Run(t.Context(), runner.Command{Name: "/bin/sh", Args: []string{"-c", `printf 'Password:\n' | /usr/bin/nc -U "$1"`, "sh", filepath.Join(s.dir, socketName)}})
+			if got := string(res.Stdout); got != tt.want {
+				t.Errorf("nc was given %q (%v); want %q", got, err, tt.want)
+			}
+		})
 	}
 }
 
@@ -156,7 +167,7 @@ func TestCloseGivesUpAsking(t *testing.T) {
 		close(asking)
 		<-ctx.Done()
 		return "", ctx.Err()
-	}, bySudo)
+	}, namedAsKit, bySudo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -267,7 +278,7 @@ func TestAsksOneThingAtATime(t *testing.T) {
 	s, err := start("", "/usr/bin/true", func(context.Context, int) (string, error) {
 		asking <- struct{}{}
 		return "", errors.New("the person was asked twice")
-	}, bySudo)
+	}, namedAsKit, bySudo)
 	if err != nil {
 		t.Fatal(err)
 	}
