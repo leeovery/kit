@@ -18,6 +18,7 @@ import (
 	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/hand"
+	"github.com/leeovery/kit/internal/look"
 	"github.com/leeovery/kit/internal/restore"
 	"github.com/leeovery/kit/internal/restore/oldmac"
 )
@@ -242,7 +243,7 @@ func (r Restoring) ownBackupCard(disks restore.Disks, lookErr error, keys []chec
 		"Is " + r.Mac + " in use already, or starting afresh? Then restore nothing.",
 	}
 	if len(aside) > 0 {
-		says = append(says, fmt.Sprintf("Choosing a backup sets aside what %s %s now, moving it into kit's state, and copies the backup's in instead.", strings.Join(aside, " and "), plural(len(aside), "holds", "hold")))
+		says = append(says, fmt.Sprintf("Choosing a backup sets aside what %s %s now, moving it into kit's state, and copies the backup's in instead.", look.InWords(aside), plural(len(aside), "holds", "hold")))
 	}
 	says = append(says, disksSay(disks, lookErr)...)
 	return event.NeedsYou{Item: itemSource, Title: "Restore " + r.Mac + "'s data from its backups?", Why: strings.Join(says, " "), Keys: keys}

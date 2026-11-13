@@ -391,14 +391,16 @@ func TestRestoreRebuiltAsksForItsOwnBackups(t *testing.T) {
 // --restore-from brings back a path still absent later, from the backup it
 // names, leaving one holding files as it is.
 func TestRestoreRebuiltRestoresNothing(t *testing.T) {
-	c := newRestoring(t, "~/Code", "~/Notes", "~/Music")
+	c := newRestoring(t, "~/Code", "~/Notes", "~/Music", "~/.zsh_history")
 	c.rebuilt(t)
 	d, disk := c.disk("Backups of studio", snapshotX)
 	k := c.atTerminal(t, restore.Disks{Found: []restore.Disk{d}})
-	write(t, c.home, "~/Code/new", duringIt)
-	write(t, c.home, "~/Music/old", beforeIt)
+	held := []string{"~/Code/new", "~/Music/old", "~/.zsh_history"}
+	for _, p := range held {
+		write(t, c.home, p, beforeIt)
+	}
 	applied := c.applying(t)
-	if card := up(t, k, 1)[0]; card.Why != ownWhy+" Choosing a backup sets aside what ~/Code and ~/Music hold now, moving it into kit's state, and copies the backup's in instead." {
+	if card := up(t, k, 1)[0]; card.Why != ownWhy+" Choosing a backup sets aside what ~/Code, ~/Music and ~/.zsh_history hold now, moving it into kit's state, and copies the backup's in instead." {
 		t.Errorf("the card says %q; want it naming what a backup would set aside", card.Why)
 	}
 	k.answer(t, "restore", "n")
@@ -406,14 +408,14 @@ func TestRestoreRebuiltRestoresNothing(t *testing.T) {
 		t.Fatalf("apply = %v", err)
 	}
 	rec := c.record()
-	for _, p := range []string{"~/Code", "~/Notes", "~/Music"} {
+	for _, p := range []string{"~/Code", "~/Notes", "~/Music", "~/.zsh_history"} {
 		if got := rec.Paths[p]; got.State != restore.NotThere || got.From != (restore.Origin{}) || !got.Started.IsZero() || len(got.SetAside) > 0 {
 			t.Errorf("%s's record = %+v; want not there, from no source, never started, nothing set aside", p, got)
 		}
 	}
-	for _, p := range []string{"Code/new", "Music/old"} {
-		if _, err := os.Stat(filepath.Join(c.home, p)); err != nil {
-			t.Errorf("~/%s, there before: %v; want it kept", p, err)
+	for _, p := range held {
+		if _, err := os.Stat(filepath.Join(c.home, strings.TrimPrefix(p, "~/"))); err != nil {
+			t.Errorf("%s, there before: %v; want it kept", p, err)
 		}
 	}
 	if rec.Settled.IsZero() || disk.opens != 0 || len(c.fake.Calls()) > 0 {

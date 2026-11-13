@@ -20,6 +20,7 @@ import (
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/event"
+	"github.com/leeovery/kit/internal/look"
 	"github.com/leeovery/kit/internal/runner"
 	kitstate "github.com/leeovery/kit/internal/state"
 )
@@ -404,15 +405,12 @@ func (b *Boot) askMac(ctx context.Context, cfg *config.Config) (name, from strin
 	return name, macs[i-1], nil
 }
 
-// and lists names as words do: a, b and c.
+// and lists names as words do: a, b and c; none, no Macs.
 func and(names []string) string {
-	switch len(names) {
-	case 0:
+	if len(names) == 0 {
 		return "no Macs"
-	case 1:
-		return names[0]
 	}
-	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
+	return look.InWords(names)
 }
 
 // state is what a boot keeps between its runs, beside the checks: the

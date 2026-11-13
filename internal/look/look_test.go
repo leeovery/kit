@@ -205,6 +205,24 @@ func TestLinked(t *testing.T) {
 	}
 }
 
+// Names in a sentence: one alone, two joined by "and", more by commas, the
+// last by "and".
+func TestInWords(t *testing.T) {
+	for _, tt := range []struct {
+		names []string
+		want  string
+	}{
+		{nil, ""},
+		{[]string{"~/Code"}, "~/Code"},
+		{[]string{"~/Code", "~/Notes"}, "~/Code and ~/Notes"},
+		{[]string{"~/Code", "~/.claude", "~/Notes"}, "~/Code, ~/.claude and ~/Notes"},
+	} {
+		if got := look.InWords(tt.names); got != tt.want {
+			t.Errorf("InWords(%q) = %q, want %q", tt.names, got, tt.want)
+		}
+	}
+}
+
 func TestStatesMarks(t *testing.T) {
 	for s, want := range map[look.State]string{look.Done: "●", look.NeedsYou: "▲", look.Failed: "✗", look.Running: "◐", look.Queued: "○", look.Skipped: "–", look.ToDo: "△"} {
 		if got := ansi.Strip(look.Mark(s)); got != want {

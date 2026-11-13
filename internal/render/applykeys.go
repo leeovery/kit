@@ -386,7 +386,7 @@ func (p *Pretty) stopQuestion(w int) []string {
 	case 1:
 		says = look.Muted(names[0] + " stops where it is")
 	default:
-		says = look.Muted(inWords(names) + " stop where they are")
+		says = look.Muted(look.InWords(names) + " stop where they are")
 	}
 	return look.Timeline("  ", w, look.Row{State: look.NeedsYou, Name: "Stop applying?", Says: says, Under: look.Answers(stopAnswers, p.keys.choice)})
 }
