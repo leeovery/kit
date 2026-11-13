@@ -479,7 +479,8 @@ func (a *app) build(command, logName string, face render.Face, atTerminal bool) 
 	// own, once everything else has finished, with what the run left the
 	// person to do, so that step's there whether or not any are declared.
 	// The data restore raises its own. A run naming its steps shows a
-	// timeline, with no card to answer: it leaves them to kit manual done.
+	// timeline, with no card to answer: it raises nothing, leaving the
+	// steps by hand to kit manual done and the rest to a whole kit apply.
 	var raise *steps.Raise
 	if slices.Contains(applies, command) && atTerminal && len(a.named) == 0 {
 		desk := hand.New()
