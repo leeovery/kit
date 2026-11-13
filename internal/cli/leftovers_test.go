@@ -222,16 +222,18 @@ func TestRemovingAnAppStoreAppAsksAboutItsSavedSettings(t *testing.T) {
 }
 
 // An uninstall that fails once its saved settings were deleted, the app
-// still there, puts them back from kit prefs' store, so the next capture
-// keeps them; failing that, it says how to.
+// still there, puts them back from kit prefs' store; with the app running,
+// they're held till it's quit, so the next capture keeps them, and it says
+// so; failing otherwise, it says how to put them back.
 func TestRemovingAnAppThatFailsToUninstallPutsItsSettingsBack(t *testing.T) {
 	for _, tt := range []struct {
-		name    string
-		imports int
-		want    string
+		name             string
+		running, imports int
+		says             string
 	}{
-		{"put back", 0, "kit prefs restore"},
-		{"not put back", 1, "its settings were deleted first: kit prefs restore com.example.notes puts them back"},
+		{"put back", 0, 0, ""},
+		{"running", 1, 0, "couldn't uninstall: sudo exited 1; its settings, deleted first, come back once it's quit"},
+		{"not put back", 0, 1, "couldn't uninstall: sudo exited 1; its settings were deleted first: kit prefs restore com.example.notes puts them back"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			w := notesWorld(t, true)
@@ -248,18 +250,22 @@ func TestRemovingAnAppThatFailsToUninstallPutsItsSettingsBack(t *testing.T) {
 			w.expectPassword()
 			w.fake.On("sudo", "-n", "mas", "uninstall", "123456789").Exits(1)
 			w.fake.On("defaults", "delete", "com.example.notes")
-			w.fake.On("osascript", "-e", `application id "com.example.notes" is running`).Prints("false\n")
+			w.fake.On("osascript", "-e", `application id "com.example.notes" is running`).Prints([]string{"false\n", "true\n"}[tt.running])
 			w.fake.On("codesign", "-d", "--entitlements", "-", "--xml", filepath.Join(w.home, "Applications", "Notes Example.app"))
 			w.fake.On("defaults", "export", "com.example.notes", "-").Prints(noSettings).Then().Prints(exampleSettings)
 			w.fake.On("defaults", "import", "com.example.notes", saved).Exits(tt.imports)
 			out, errOut, code := w.run(t, "mas", "remove", "notes-example@123456789", "--zap")
+			printed := ansi.Strip(out + errOut)
 			calls := w.fake.Calls()
 			failed, imported := slices.Index(calls, "sudo -n mas uninstall 123456789"), slices.Index(calls, "defaults import com.example.notes "+saved)
-			if code == 0 || failed < 0 || imported < failed {
-				t.Errorf("kit mas remove --zap printed\n%s%s exit %d, ran %q; want it failed, then its settings imported back", out, errOut, code, calls)
+			if code == 0 || failed < 0 || (imported < failed) != (tt.running == 1) {
+				t.Errorf("kit mas remove --zap printed\n%s exit %d, ran %q; want it failed, then its settings imported back unless it's running", printed, code, calls)
 			}
-			if said := strings.Contains(ansi.Strip(out+errOut), tt.want); said != (tt.imports != 0) {
-				t.Errorf("kit mas remove --zap printed\n%s%s; want %q said only when they weren't put back", out, errOut, tt.want)
+			if tt.says == "" && strings.Contains(printed, "its settings") || tt.says != "" && !strings.Contains(printed, tt.says) {
+				t.Errorf("kit mas remove --zap printed\n%s\nwant %q", printed, tt.says)
+			}
+			if held := strings.Contains(w.read(t, filepath.Join(".local", "state", "kit", "prefs.json")), "com.example.notes"); held != (tt.running == 1) {
+				t.Errorf("its settings held to be restored: %v; want them held only while it's running", held)
 			}
 		})
 	}
@@ -410,6 +416,23 @@ func TestPrefsRestoreSaysWhatsKept(t *testing.T) {
 		"Nothing needs attention\n"
 	if !strings.Contains(out, want) || code != 0 {
 		t.Errorf("kit prefs restore --pending printed\n%s%s exit %d\nwant\n%s", out, errOut, code, want)
+	}
+}
+
+// kit prefs restore of a domain whose app is running holds it till the app's
+// quit, as a full restore does, so capture leaves its stored copy be.
+func TestPrefsRestoreOfADomainHoldsItWhileItsAppRuns(t *testing.T) {
+	w := keptWorld(t)
+	w.write(t, filepath.Join(".local", "state", "kit", "prefs.json"), `{"on": "restored"}`)
+	w.write(t, filepath.Join("Applications", "Example App.app", "Contents", "Info.plist"),
+		`<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>com.example.app</string></dict></plist>`)
+	w.fake.On("osascript", "-e", `application id "com.example.app" is running`).Prints("true\n")
+	out, errOut, code := w.run(t, "prefs", "restore", "com.example.app")
+	if !strings.Contains(out, "com.example.app") || code != 0 || ran(w, "defaults delete com.example.app") {
+		t.Errorf("kit prefs restore printed\n%s%s exit %d, ran %q; want it waiting, nothing deleted", out, errOut, code, w.fake.Calls())
+	}
+	if got := w.read(t, filepath.Join(".local", "state", "kit", "prefs.json")); !strings.Contains(got, `"com.example.app": "Example App is running"`) {
+		t.Errorf("prefs.json says\n%s\nwant it held till its app's quit", got)
 	}
 }
 

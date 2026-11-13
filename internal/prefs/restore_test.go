@@ -158,6 +158,49 @@ func TestRestoreNamedDomains(t *testing.T) {
 	}
 }
 
+// Domains named that wait for their apps, running, or to be opened once,
+// are held, as a full restore holds them, so the next capture leaves their
+// stored copies be, even gone from the Mac; one that failed otherwise isn't.
+func TestANamedRestoreHoldsWhatWaits(t *testing.T) {
+	w := newWorld(t, prefs.Lists{})
+	writeRecord(t, w.state, `{"on": "started fresh"}`)
+	store := filepath.Join(w.clone, "laptop")
+	theme := stored(t, map[string]any{"Theme": "dark"})
+	for _, d := range []string{"com.example.running", "com.example.boxed", "com.example.stubborn"} {
+		w.write(t, filepath.Join(store, "domains", d+".plist"), theme)
+	}
+	w.app(t, w.apps, "Running", "com.example.running")
+	w.fake.On("osascript", "-e", `application id "com.example.running" is running`).Prints("true\n")
+	boxed := w.app(t, w.apps, "Boxed", "com.example.boxed")
+	w.closed("com.example.boxed")
+	w.fake.On("codesign", "-d", "--entitlements", "-", "--xml", boxed).Prints(sandboxedApp)
+	w.imports(t, "com.example.stubborn", "laptop", map[string]any{"Theme": "light"}, map[string]any{"Theme": "light"})
+	w.fake.On("git", "-C", w.clone, "rev-parse", "HEAD").Prints("abc123\n")
+	report, err := w.p.Restore(t.Context(), prefs.RestoreOptions{Domains: []string{"com.example.running", "com.example.boxed", "com.example.stubborn"}})
+	if err != nil || report.Waiting["com.example.running"] == "" || report.ToOpen["com.example.boxed"] == "" || report.Failed["com.example.stubborn"] == "" {
+		t.Fatalf("Restore() = %+v, %v; want one waiting, one to open, one failed", report, err)
+	}
+	rec, _ := w.p.Load()
+	if rec.Pending == nil || rec.Pending.From != "laptop" || !slices.Equal(rec.Pending.Domains, []string{"com.example.boxed", "com.example.running"}) || rec.Pending.Open["com.example.boxed"].ID != "com.example.boxed" {
+		t.Fatalf("pending = %+v; want the running app's and the one to open held, the failed one not", rec.Pending)
+	}
+
+	w.fake.On("defaults", "domains").Prints("com.example.other, com.example.stubborn\n")
+	w.exports(t, "com.example.other", map[string]any{"Theme": "dark"})
+	w.pushes(t, "Capture 2026-10-06 03:00: 1 changed, 1 new\n\nnew: com.example.other\nchanged: com.example.stubborn\nclaimed: the folder, for this Mac's hardware",
+		"?? laptop/.gitignore\x00?? laptop/domains/com.example.other.plist\x00 M laptop/domains/com.example.stubborn.plist\x00?? laptop/owner\x00",
+		[]string{"laptop/.gitignore", "laptop/domains/com.example.other.plist", "laptop/domains/com.example.stubborn.plist", "laptop/owner"},
+		"laptop/.gitignore\x00laptop/domains/com.example.other.plist\x00laptop/domains/com.example.stubborn.plist\x00laptop/owner\x00")
+	if _, err := w.p.Capture(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range []string{"com.example.running", "com.example.boxed"} {
+		if got := w.read(t, filepath.Join(store, "domains", d+".plist")); got != theme {
+			t.Errorf("after a capture, %s's stored copy = %q; want it kept, held, though gone from the Mac", d, got)
+		}
+	}
+}
+
 // A domain whose live settings can't be read, to save them first, fails
 // before they're deleted: nothing's lost should the import then fail.
 func TestRestoreNeverDeletesWhatItCouldntSave(t *testing.T) {

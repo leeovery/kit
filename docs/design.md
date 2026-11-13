@@ -727,7 +727,9 @@ uninstalls with Homebrew's zap, then `defaults delete`s each preferences domain 
 cfprefsd keeps a domain whose file has gone: the next capture drops it from kit-prefs, whose
 history keeps it. An App Store app has no zap list: it's asked about only when kit prefs holds a
 domain that's its alone (never one it shares with another app, as a vendor's or its group's), and
-removing them deletes those domains, while the app's still there, then uninstalls it. Settings
+removing them deletes those domains, while the app's still there, then uninstalls it; should the
+uninstall fail, they're restored (`kit prefs restore <domains>`), held till the app's quit, or
+opened once, as a restore of domains named holds them, the error saying so. Settings
 that can't be taken off the pending list leave it undeclared all the same, the summary saying
 so. `--zap` and `--keep` answer without asking, and never together; without a terminal, they're
 kept, the output saying so and that `--zap` removes them. An app leaving nothing is never asked
@@ -1358,7 +1360,10 @@ to.
   never coming, the config not installing them; the summary says "12 kept for apps not
   installed"); one whose app is running; one whose sandboxed app has no settings folder, for the
   person to open once (a to-do, below); and a domain or file that failed otherwise, named with why
-  in plain words. The hourly pass
+  in plain words. A restore of domains named holds those it couldn't restore as a full one does,
+  those waiting for their apps or for the person to open one, while those that failed otherwise
+  fail alone, unless held already; but not when what's held is from another Mac than the one
+  restored from. The hourly pass
   (`--pending`, unattended) brings back a held domain once its app is installed, not running
   and, sandboxed, has its settings folder (one without stays for the person to open), and leaves
   what failed otherwise alone, and does nothing at all, not even a pull, while nothing held could

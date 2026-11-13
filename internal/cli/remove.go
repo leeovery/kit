@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
@@ -156,14 +157,25 @@ func (a *app) leftovers(ctx context.Context, r *run, k kind.Kind, names []string
 
 // putBack restores the saved settings' domains deleted before an uninstall
 // that failed, the app still there, so the next capture doesn't take them
-// out of the store: failed, the uninstall's error says how to.
+// out of the store, the uninstall's error saying what became of them: held
+// to come back once the app's quit, or opened and quit, as the restore
+// holds them; or, failed, how to put them back.
 func putBack(ctx context.Context, p *prefs.Prefs, domains []string, failed error) error {
 	if len(domains) == 0 {
 		return failed
 	}
 	report, err := p.Restore(ctx, prefs.RestoreOptions{Domains: domains})
-	if err != nil || len(report.Restored) < len(domains) {
-		return fmt.Errorf("%w; its settings were deleted first: kit prefs restore %s puts them back", failed, strings.Join(domains, " "))
+	lost := domains
+	if err == nil {
+		lost = slices.Sorted(maps.Keys(report.Failed))
+	}
+	switch {
+	case len(lost) > 0:
+		return fmt.Errorf("%w; its settings were deleted first: kit prefs restore %s puts them back", failed, strings.Join(lost, " "))
+	case len(report.ToOpen) > 0:
+		return fmt.Errorf("%w; its settings, deleted first, come back once it's been opened and quit", failed)
+	case len(report.Waiting) > 0:
+		return fmt.Errorf("%w; its settings, deleted first, come back once it's quit", failed)
 	}
 	return failed
 }
