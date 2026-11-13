@@ -71,6 +71,35 @@ func TestSetHostKey(t *testing.T) {
 	}
 }
 
+// Adding a Mac and recording its host key write kit.toml beside it, then
+// put it in place whole, never in place: a reader of the one there never
+// sees it half written.
+func TestKitTomlIsWrittenWhole(t *testing.T) {
+	for name, write := range map[string]func(*config.Config) error{
+		"AddMac":     func(c *config.Config) error { return c.AddMac("studio", "", "") },
+		"SetHostKey": func(c *config.Config) error { return c.SetHostKey("laptop", fakeKey) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			const toml = "format = 1\nprimary = \"laptop\"\n\n[macs.laptop]\n"
+			dir := writeRepo(t, map[string]string{config.File: toml})
+			cfg, err := config.Load(dir, kinds.Sections())
+			if err != nil {
+				t.Fatal(err)
+			}
+			held := filepath.Join(t.TempDir(), "held")
+			if err := os.Link(filepath.Join(dir, config.File), held); err != nil {
+				t.Fatal(err)
+			}
+			if err := write(cfg); err != nil {
+				t.Fatal(err)
+			}
+			if data, _ := os.ReadFile(held); string(data) != toml {
+				t.Errorf("the kit.toml there before reads\n%s\nwant it as it was: the new one put in its place", data)
+			}
+		})
+	}
+}
+
 // A Mac kit.toml doesn't know, or one without a table of its own to write
 // in, is refused, kit.toml left as it was.
 func TestSetHostKeyRefuses(t *testing.T) {
