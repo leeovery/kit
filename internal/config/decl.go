@@ -577,6 +577,9 @@ func parseFile(defs []sectionDef, scope, content string) (*declFile, error) {
 		if !ok {
 			return nil, fmt.Errorf("%s:%d: kit doesn't know the section [%s]", name, i+1, m[1])
 		}
+		if d.folders && arg != "" && filepath.Clean(arg) != arg {
+			return nil, fmt.Errorf("%s:%d: [%s]: write its folder as %s", name, i+1, m[1], filepath.Clean(arg))
+		}
 		cur = &section{def: d, arg: arg, header: line, start: i + 1}
 		if err := f.readOptions(cur, opts); err != nil {
 			return nil, fmt.Errorf("%s:%d: [%s]: %w", name, i+1, m[1], err)

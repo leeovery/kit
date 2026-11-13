@@ -129,9 +129,11 @@ func (m *MCP) Values(list config.List) (config.List, error) {
 			return list, fmt.Errorf("%s: %s: %s holds a key in plain text: keep the key as a secret (kit secret add VAR), and name it here as ${VAR}", e.Pos(), e.Name, strings.Join(plain, " and "))
 		}
 		folder, name := splitID(e.Name)
-		s := Server{Folder: m.folder(folder), Name: name, Definition: def, Off: isOff}
-		m.declared[s.ID()] = s
-		out.Entries[i].Name, out.Entries[i].Off = s.ID(), isOff
+		if want := m.folder(folder); want != folder {
+			return list, fmt.Errorf("%s: %s: write its folder as %s", e.Pos(), e.Name, want)
+		}
+		m.declared[e.Name] = Server{Folder: folder, Name: name, Definition: def, Off: isOff}
+		out.Entries[i].Off = isOff
 	}
 	return out, nil
 }

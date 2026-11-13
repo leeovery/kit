@@ -321,6 +321,7 @@ func TestListRefuses(t *testing.T) {
 		{name: "a # without a space before it", files: map[string]string{"shared/declarations": "[homebrew formulae]\njq#fast\n"}, want: `"jq#fast" isn't a name`},
 		{name: "a constraint alone", files: map[string]string{"shared/declarations": "[homebrew formulae]\n^4.0\n"}, want: `"^4.0" isn't a name`},
 		{name: "a command with nothing after its name", files: map[string]string{"laptop/declarations": "[claude mcp]\ndocs\n"}, want: "laptop/declarations:2: docs has nothing after its name"},
+		{name: "a project folder's header not as kit writes it", files: map[string]string{"laptop/declarations": "[claude mcp ~/Code/site/]\ndocs --transport http https://docs.example.com/mcp\n"}, want: "laptop/declarations:1: [claude mcp ~/Code/site/]: write its folder as ~/Code/site"},
 		{name: "a quote left open", files: map[string]string{"laptop/declarations": "[claude mcp]\ndocs --header \"X: y\n"}, want: "laptop/declarations:2: a quote isn't closed"},
 		{name: "a secret in two items' sections", files: map[string]string{"laptop/declarations": "[secrets op://vault/A]\nX a/b\n\n[secrets op://vault/B]\nX c/d\n"}, want: "laptop/declarations:5: X is in [secrets op://vault/A] at line 2 too"},
 		{name: "a secrets section for what isn't an item", files: map[string]string{"laptop/declarations": "[secrets op://vault/item/field]\nX a/b\n"}, want: `laptop/declarations:1: [secrets op://vault/item/field]: "op://vault/item/field" isn't an item's reference kit knows: 1Password's, as in op://vault/item`},

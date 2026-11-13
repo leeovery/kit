@@ -191,31 +191,18 @@ func TestValue(t *testing.T) {
 	}
 }
 
-// A project folder is named as kit names it however its section's header
-// writes it, inside the home or with a trailing slash: its servers are
-// those installed there.
-func TestFoldersAsWritten(t *testing.T) {
-	home := world(t)
-	fake := runnertest.New(t)
-	fake.On("claude", "--version")
-	m := mcp.New(fake, home)
-	list, err := m.Values(config.List{Kind: "claude-mcp", Entries: []config.Entry{
-		{Name: home + "/Code/site:pages", Value: "--transport http https://pages.example.com/mcp", File: "laptop", Line: 2},
-		{Name: "~/Code/other/:docs", Value: "--transport http https://docs.example.com/mcp", File: "laptop", Line: 3},
-	}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var names []string
-	for _, e := range list.Entries {
-		names = append(names, e.Name)
-	}
-	if want := []string{"~/Code/site:pages", "~/Code/other:docs"}; !slices.Equal(names, want) {
-		t.Errorf("Values() names %q, want %q", names, want)
-	}
-	for _, it := range kind.Compare(t.Context(), m, list).Items {
-		if strings.Contains(it.Name, ":pages") || strings.Contains(it.Name, ":docs") {
-			t.Errorf("%s is %s, want it installed as declared", it.Name, it.State)
+// A project server's folder is written as kit writes it, ~ for the home and
+// no trailing slash, the one spelling the config's lookups match: any other
+// is refused, saying how to write it.
+func TestValuesRefuseAFolderNotAsKitWritesIt(t *testing.T) {
+	home := t.TempDir()
+	for name, want := range map[string]string{
+		home + "/Code/site:pages": "laptop:2: " + home + "/Code/site:pages: write its folder as ~/Code/site",
+		"~/Code/site/:pages":      "laptop:2: ~/Code/site/:pages: write its folder as ~/Code/site",
+	} {
+		_, err := mcp.New(runnertest.New(t), home).Values(config.List{Entries: []config.Entry{{Name: name, Value: "--transport http https://pages.example.com/mcp", File: "laptop", Line: 2}}})
+		if err == nil || err.Error() != want {
+			t.Errorf("Values(%s) error = %v, want %q", name, err, want)
 		}
 	}
 }
