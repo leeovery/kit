@@ -108,54 +108,19 @@ func (p *Pretty) toDoLead() string {
 }
 
 // toDoPanel is the to-do up as the panel over the log has it, w wide: its
-// title, bold, and where it is in the list at the right; why it's there,
-// muted and wrapped; its steps (panelSteps); then how it ends (toDoEnds).
+// title, bold, and where it is in the list at the right; then panelBody's,
+// ending with that kit's watching, and what for, when it tells by itself
+// and says, and the key leaving it for later (skipKey).
 func (p *Pretty) toDoPanel(w int) []string {
 	c := p.card
 	title := "  " + look.Mark(look.ToDo) + " " + look.Strong(c.Title)
 	at := look.Muted(fmt.Sprintf("%d of %d", p.todos.Up+1, len(p.todos.List)))
-	out := []string{"", spread(title, at+"  ", w), ""}
-	room := w - len(panelAt)
-	if c.Why != "" {
-		for _, l := range look.Wrap(c.Why, room) {
-			out = append(out, panelAt+look.Muted(look.Linked(l)))
-		}
-		out = append(out, "")
-	}
-	out = append(out, panelSteps(c.Steps, room)...)
-	if len(c.Steps) > 0 {
-		out = append(out, "")
-	}
-	return append(append(out, p.toDoEnds(room)...), "")
-}
-
-// toDoEnds is how the to-do up ends, as its panel says it, room wide after
-// its margin: a choice being answered, what its key does, turning; a
-// choice, its keys, a line each; one kit tells by itself, that kit's
-// watching, and what for, when it says; else the key that says it's done.
-// Then, but while a choice is being answered, the key leaving it for later
-// (skipKey). Each is wrapped under its own words.
-func (p *Pretty) toDoEnds(room int) []string {
-	c := p.card
-	key := func(k look.Key) []string { return led(look.Urgent(k.Key), len(k.Key), k.Does, room) }
 	watching := "kit's watching: it moves on by itself once it's done"
 	if c.Watch != "" {
 		watching = "kit's watching: it moves on once " + c.Watch
 	}
-	var out []string
-	switch {
-	case c.Answering != "":
-		return led(look.Cyan("◐"), 1, answeringWith(*c), room)
-	case len(c.Keys) > 0:
-		for _, k := range c.Keys {
-			out = append(out, key(look.Key{Key: k.Key, Does: k.Does})...)
-		}
-	case c.Tells:
-		out = led(look.Cyan("◐"), 1, watching, room)
-	default:
-		out = key(doneKey)
-	}
-	return append(out, key(skipKey(*c))...)
+	room := w - len(panelAt)
+	return panelBody(w, spread(title, at+"  ", w), c.Why, *c, led(look.Cyan("◐"), 1, watching, room), skipKey(*c))
 }
 
 // skipLetters are the letters the key leaving a to-do for later is from,

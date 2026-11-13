@@ -1391,6 +1391,54 @@ func TestACardIsAnsweredWhileItsNotificationWaits(t *testing.T) {
 	}
 }
 
+// twoCards runs two steps by hand, raised on c: the vault's, which the
+// secrets wait for, and the store's, which comes due once gate's closed,
+// Homebrew's casks done, and which the apps wait for. vaultDone and
+// storeDone tell whether each is done; nil, kit can't tell.
+func twoCards(t *testing.T, c *card, gate <-chan struct{}, vaultDone, storeDone func(context.Context) bool) <-chan engine.Report {
+	t.Helper()
+	store := steps.OwnManual(c.fake, c.state, steps.ManualStep{Name: "store", Do: "Sign in to the store", Done: storeDone}, c.raise)
+	store.After, store.Before = []string{"cask"}, []string{"apps"}
+	vault := steps.OwnManual(c.fake, c.state, steps.ManualStep{Name: "vault", Do: "Sign in to the vault", Done: vaultDone}, c.raise)
+	vault.Before = []string{"secret"}
+	p, err := engine.New(vault, store, gated("cask", gate), fine("apps"), fine("secret"), fine("git", "secret"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return running(t, c, p)
+}
+
+// bringBack is the App settings step, left to do at the run's end till its
+// to-do's key r brings its settings back: looking runs first each time kit
+// looks whether it's done, answering as r is done.
+func bringBack(looking, answering func()) engine.Step {
+	var mu sync.Mutex
+	brought := false
+	return engine.Step{
+		Name: "prefs", Title: "App settings", Area: steps.AreaBackups,
+		Check: func(context.Context) check.Result {
+			looking()
+			mu.Lock()
+			defer mu.Unlock()
+			if brought {
+				return check.Result{State: check.OK, Summary: "saved"}
+			}
+			return check.Result{State: check.Attention, Summary: "paused", Items: []check.Item{toDoItem("prefs", check.ToDo{
+				Title: "Bring back apps' settings", First: true, Keys: []check.Key{{Key: "r", Does: "brings them back"}},
+			})}}
+		},
+		Choice: &engine.Choice{
+			Answer: func(context.Context, check.Item, string) (string, error) {
+				answering()
+				mu.Lock()
+				defer mu.Unlock()
+				brought = true
+				return "brought back", nil
+			},
+		},
+	}
+}
+
 // Tab moves on at once, the card up's notification still waiting to go
 // out, and space on the next card, and on the first come back. The first
 // notification goes out after, taken away as it went out, so it posts
@@ -1399,15 +1447,7 @@ func TestACardIsAnsweredWhileItsNotificationWaits(t *testing.T) {
 func TestTabWhileANotificationWaits(t *testing.T) {
 	c, h := heldCard(t)
 	gate := make(chan struct{})
-	store := steps.OwnManual(c.fake, c.state, steps.ManualStep{Name: "store", Do: "Sign in to the store"}, c.raise)
-	store.After, store.Before = []string{"cask"}, []string{"apps"}
-	vault := steps.OwnManual(c.fake, c.state, steps.ManualStep{Name: "vault", Do: "Sign in to the vault"}, c.raise)
-	vault.Before = []string{"secret"}
-	p, err := engine.New(store, vault, gated("cask", gate), fine("apps"), fine("secret"), fine("git", "secret"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	ran := running(t, c, p)
+	ran := twoCards(t, c, gate, nil, nil)
 	h.posting(t, "card:vault:vault")
 	close(gate)
 	c.cards(t, 2)
@@ -1433,29 +1473,7 @@ func TestTabWhileANotificationWaits(t *testing.T) {
 // out.
 func TestAChoiceWhileItsNotificationWaits(t *testing.T) {
 	c, h := heldCard(t)
-	var mu sync.Mutex
-	brought := false
-	step := engine.Step{
-		Name: "prefs", Title: "App settings", Area: steps.AreaBackups,
-		Check: func(context.Context) check.Result {
-			mu.Lock()
-			defer mu.Unlock()
-			if brought {
-				return check.Result{State: check.OK, Summary: "saved"}
-			}
-			return check.Result{State: check.Attention, Summary: "paused", Items: []check.Item{toDoItem("prefs", check.ToDo{
-				Title: "Bring back apps' settings", First: true, Keys: []check.Key{{Key: "r", Does: "brings them back"}},
-			})}}
-		},
-		Choice: &engine.Choice{
-			Answer: func(context.Context, check.Item, string) (string, error) {
-				mu.Lock()
-				defer mu.Unlock()
-				brought = true
-				return "brought back", nil
-			},
-		},
-	}
+	step := bringBack(func() {}, func() {})
 	done := make(chan engine.Report, 1)
 	go func() {
 		done <- applied(t, c, atTheEnd(steps.Manual(c.fake, "/home/someone", c.state, config.List{}, c.raise), step))
@@ -1596,15 +1614,7 @@ func TestTabWhileKitLooks(t *testing.T) {
 	c := newCard(t)
 	gate := make(chan struct{})
 	vaultLook, storeLook := newSlowLook(), newSlowLook()
-	vault := steps.OwnManual(c.fake, c.state, steps.ManualStep{Name: "vault", Do: "Sign in to the vault", Done: vaultLook.done}, c.raise)
-	vault.Before = []string{"secret"}
-	store := steps.OwnManual(c.fake, c.state, steps.ManualStep{Name: "store", Do: "Sign in to the store", Done: storeLook.done}, c.raise)
-	store.After, store.Before = []string{"cask"}, []string{"apps"}
-	p, err := engine.New(vault, store, gated("cask", gate), fine("apps"), fine("secret"), fine("git", "secret"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	ran := running(t, c, p)
+	ran := twoCards(t, c, gate, vaultLook.done, storeLook.done)
 	c.cards(t, 1)
 	close(gate)
 	c.cards(t, 2)
@@ -1644,37 +1654,17 @@ func TestAChoiceWhileKitLooks(t *testing.T) {
 			takenOnce.Do(func() { close(taken) })
 		}
 	}
-	var mu sync.Mutex
-	brought := false
-	step := engine.Step{
-		Name: "prefs", Title: "App settings", Area: steps.AreaBackups,
-		Check: func(ctx context.Context) check.Result {
-			if hold.CompareAndSwap(true, false) {
-				close(looking)
-				<-looked
-				lookOver.Store(true)
-			}
-			mu.Lock()
-			defer mu.Unlock()
-			if brought {
-				return check.Result{State: check.OK, Summary: "saved"}
-			}
-			return check.Result{State: check.Attention, Summary: "paused", Items: []check.Item{toDoItem("prefs", check.ToDo{
-				Title: "Bring back apps' settings", First: true, Keys: []check.Key{{Key: "r", Does: "brings them back"}},
-			})}}
-		},
-		Choice: &engine.Choice{
-			Answer: func(context.Context, check.Item, string) (string, error) {
-				if !lookOver.Load() {
-					t.Error("r was done while kit's look was under way")
-				}
-				mu.Lock()
-				defer mu.Unlock()
-				brought = true
-				return "brought back", nil
-			},
-		},
-	}
+	step := bringBack(func() {
+		if hold.CompareAndSwap(true, false) {
+			close(looking)
+			<-looked
+			lookOver.Store(true)
+		}
+	}, func() {
+		if !lookOver.Load() {
+			t.Error("r was done while kit's look was under way")
+		}
+	})
 	done := make(chan engine.Report, 1)
 	go func() {
 		done <- applied(t, c, atTheEnd(steps.Manual(c.fake, "/home/someone", c.state, config.List{}, c.raise), step))

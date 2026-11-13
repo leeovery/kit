@@ -75,7 +75,7 @@ func Cmd(s string) string { return White(s) }
 var dot = Dim(" · ")
 
 // Says joins what a row says, its extras after a dim dot.
-func Says(parts ...string) string { return strings.Join(parts, dot) }
+func Says(parts ...string) string { return kit.Says(parts...) }
 
 // InWords is names in a sentence: a, b and c.
 func InWords(names []string) string {
@@ -292,18 +292,10 @@ func wrap(s string, w int, hang string) []string {
 }
 
 // Output is a tool's lines, as it printed them.
-func Output(lines ...string) []string {
-	out := make([]string, len(lines))
-	for i, l := range lines {
-		out[i] = Muted(l)
-	}
-	return out
-}
+func Output(lines ...string) []string { return kit.Output(lines...) }
 
 // Todo is what to do: an arrow, then words, commands in them white.
-func Todo(parts ...string) string { return Muted("→ ") + strings.Join(parts, dot) }
-
-func cursor() string { return fg(pink).Bold(true).Render("❯") }
+func Todo(parts ...string) string { return kit.todo(parts...) }
 
 // Pill is words made a tag: dark bold text on a state's colour, pink for
 // done or chosen.
@@ -320,9 +312,7 @@ func Pill(text string, s State) string {
 
 // Field is a typed answer: a pink ❯, a dot for each character typed,
 // hidden, and a pink cursor.
-func Field(typed int) string {
-	return cursor() + " " + White(strings.Repeat("•", typed)) + lipgloss.NewStyle().Foreground(dark).Background(pink).Render(" ")
-}
+func Field(typed int) string { return kit.Field(typed) }
 
 // Choice is one answer to a question: its label, what it does, and the
 // command it runs, when it runs one.
@@ -333,44 +323,17 @@ type Choice struct {
 // Answers are a question's choices: the cursor in the marks' column, the
 // chosen one's label a pill, its words where the others' are; what each does
 // two spaces after it.
-func Answers(cs []Choice, chosen int) []string {
-	out := make([]string, len(cs))
-	for i, c := range cs {
-		var l string
-		if i == chosen {
-			l = cursor() + Pill(c.Label, Done)
-			if c.Does != "" {
-				l += " " + White(c.Does)
-			}
-		} else {
-			l = "  " + Strong(c.Label)
-			if c.Does != "" {
-				l += "  " + Muted(c.Does)
-			}
-		}
-		if c.Cmd != "" {
-			l += dot + Dim(c.Cmd)
-		}
-		out[i] = l
-	}
-	return out
-}
+func Answers(cs []Choice, chosen int) []string { return kit.Answers(cs, chosen) }
 
 // Chosen is something chosen from a list: the cursor in the marks'
 // column, and the thing a pill, its words where the others' are.
-func Chosen(text string) string { return cursor() + Pill(text, Done) }
+func Chosen(text string) string { return kit.cursor.Render("❯") + Pill(text, Done) }
 
 // Key is a key and what it does, as Keys lists them.
 type Key struct{ Key, Does string }
 
 // Keys are the keys at the foot of a screen.
-func Keys(ks ...Key) string {
-	parts := make([]string, len(ks))
-	for i, k := range ks {
-		parts[i] = White(k.Key) + " " + Muted(k.Does)
-	}
-	return "  " + strings.Join(parts, dot)
-}
+func Keys(ks ...Key) string { return kit.Keys(ks...) }
 
 // Hints are the keys a screen reads, dim, on a line of their own: there
 // to be found, not read.
@@ -383,13 +346,7 @@ func Hints(ks ...Key) string {
 }
 
 // Header is a block's label in pink capitals, and a note two spaces on.
-func Header(label, note string) string {
-	s := "  " + fg(pink).Bold(true).Render(strings.ToUpper(label))
-	if note != "" {
-		s += "  " + Muted(note)
-	}
-	return s
-}
+func Header(label, note string) string { return kit.header(label, note) }
 
 // Block is a report's block: its header, then its rows.
 func Block(label string, w int, rs ...Row) []string {
@@ -408,26 +365,11 @@ var wordmark = []string{
 
 // Head is the wordmark, along kit's gradient, with lines stacked beside it
 // after a dim rule: what ran, the Mac and when.
-func Head(beside ...string) []string {
-	out := make([]string, len(wordmark))
-	for r, k := range wordmark {
-		l := "  " + along(k, 0, ansi.StringWidth(k)) + "  " + Dim("│")
-		if r < len(beside) {
-			l += "  " + beside[r]
-		}
-		out[r] = l
-	}
-	return out
-}
+func Head(beside ...string) []string { return kit.Head(beside...) }
 
 // Meta is what Head stacks beside the wordmark: what ran, when there's a
 // command, then the Mac and when.
-func Meta(what, mac, when string) []string {
-	if what == "" {
-		return []string{Strong(mac), Muted(when)}
-	}
-	return []string{Strong(what), Muted(mac), Muted(when)}
-}
+func Meta(what, mac, when string) []string { return kit.Meta(what, mac, when) }
 
 // Lamp is one of a run's lights: a row, how it stands, and a count once
 // it's done.
@@ -706,12 +648,6 @@ func Linked(text string) string {
 		words[i] = m[1] + lipgloss.NewStyle().Hyperlink(target).Render(shown) + after
 	}
 	return strings.Join(words, " ")
-}
-
-// Rule is a line across, along kit's gradient, w wide with the margin.
-func Rule(w int) string {
-	n := max(w-2, 1)
-	return "  " + along(strings.Repeat("─", n), 0, n)
 }
 
 // Ran is a command a step ran: the command as kit ran it, then how it ended

@@ -136,31 +136,31 @@ func since(events []event.Event) time.Duration {
 }
 
 // The to-dos at the run's end have applying's screen, as round 12 has it,
-// at the size it drew and at the least the screen takes: opened with the
-// choice first; kit watching for one of its own; one only the person can
-// say is done; all done, kit carrying on.
+// at the size it drew, and at the least the screen takes where that says
+// something of its own, as a key's words wrapped, or a title cut to keep
+// where it is in the list: opened with the choice first; kit watching for
+// one of its own; one only the person can say is done; all done, kit
+// carrying on. Every one fits both.
 func TestTheToDosHaveTheScreen(t *testing.T) {
 	for _, tt := range []struct {
-		name string
-		up   int
-	}{{"choice", 0}, {"watched", 4}, {"space", 3}, {"carrying-on", len(toDoList)}} {
+		name  string
+		up    int
+		least bool
+	}{{"choice", 0, true}, {"watched", 4, true}, {"space", 3, true}, {"carrying-on", len(toDoList), false}} {
 		for _, size := range [][2]int{{160, 64}, {100, 30}} {
-			name := fmt.Sprintf("apply-todo-%s-%dx%d.golden", tt.name, size[0], size[1])
+			name, pinned := fmt.Sprintf("apply-todo-%s-%dx%d", tt.name, size[0], size[1]), size[0] == 160 || tt.least
+			if pinned {
+				name += ".golden"
+			}
 			t.Run(name, func(t *testing.T) {
 				events := toDosUpTo(tt.up)
 				face, out, _ := applyAt(size[0], size[1], since(events), events)
 				defer func() { _ = face.Close() }()
 				got := screen(out.String())
-				golden(t, name, got+"\n")
-				ls := lines(got)
-				if len(ls) != size[1] {
-					t.Errorf("the screen is %d lines, want %d", len(ls), size[1])
+				if pinned {
+					golden(t, name, got+"\n")
 				}
-				for i, l := range ls {
-					if w := ansi.StringWidth(l); w > size[0] {
-						t.Errorf("line %d is %d wide, wider than the window, %d", i, w, size[0])
-					}
-				}
+				fits(t, got, size)
 			})
 		}
 	}
@@ -170,33 +170,28 @@ func TestTheToDosHaveTheScreen(t *testing.T) {
 // To do lists what's left in kit's order, each by its title, its steps as
 // how; the run wasn't stopped, so the record's head says how it ended.
 func TestTheRecordAfterStoppingAtTheToDos(t *testing.T) {
-	for _, size := range [][2]int{{160, 64}, {100, 30}} {
-		name := fmt.Sprintf("apply-todo-record-%dx%d.golden", size[0], size[1])
-		t.Run(name, func(t *testing.T) {
-			face, out, _ := applyAt(size[0], size[1], time.Minute, stoppedAtTheToDos())
-			if err := face.Close(); err != nil {
-				t.Fatal(err)
-			}
-			got := screen(out.String())
-			golden(t, name, got+"\n")
-			for _, want := range []string{
-				"│  2 to do · ",
-				"\n  TO DO  2 · kit apply brings them back\n" +
-					"  △ 1  Add a Time Machine disk\n" +
-					"       → Plug in your backup disk\n" +
-					"       → System Settings › General › Time Machine › Add Backup Disk, and choose\n" +
-					"         it\n" +
-					"  △ 2  Set up Arq's backup plan\n" +
-					"       → Open Arq\n",
-			} {
-				if !strings.Contains(got, want) {
-					t.Errorf("the record is\n%s\nwant it to hold\n%s", got, want)
-				}
-			}
-			if strings.Contains(got, "stopped") || strings.Contains(got, "DIDN'T RUN") {
-				t.Errorf("the record is\n%s\nwant it to end as the run did, not stopped", got)
-			}
-		})
+	face, out, _ := applyAt(160, 64, time.Minute, stoppedAtTheToDos())
+	if err := face.Close(); err != nil {
+		t.Fatal(err)
+	}
+	got := screen(out.String())
+	golden(t, "apply-todo-record-160x64.golden", got+"\n")
+	for _, want := range []string{
+		"│  2 to do · ",
+		"\n  TO DO  2 · kit apply brings them back\n" +
+			"  △ 1  Add a Time Machine disk\n" +
+			"       → Plug in your backup disk\n" +
+			"       → System Settings › General › Time Machine › Add Backup Disk, and choose\n" +
+			"         it\n" +
+			"  △ 2  Set up Arq's backup plan\n" +
+			"       → Open Arq\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the record is\n%s\nwant it to hold\n%s", got, want)
+		}
+	}
+	if strings.Contains(got, "stopped") || strings.Contains(got, "DIDN'T RUN") {
+		t.Errorf("the record is\n%s\nwant it to end as the run did, not stopped", got)
 	}
 }
 
@@ -587,6 +582,7 @@ func TestTheToDosOverWhileOneLeftSettles(t *testing.T) {
 	}
 	list[4].Done, list[4].Skipped, list[4].Settling = true, false, false
 	face.Emit(event.ToDos{Time: after(sec + 5), Step: "manual", List: slices.Clone(list), Up: -1})
+	face.Turn()
 	got := screen(out.String())
 	if log := strings.Join(logOf(got, 160), "\n"); !strings.Contains(log, "● Add a Time Machine disk: done") {
 		t.Errorf("the log is\n%s\nwant the one left for later done after all", log)

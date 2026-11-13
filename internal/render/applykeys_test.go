@@ -185,7 +185,7 @@ func TestApplyingAsksBeforeStopping(t *testing.T) {
 		t.Errorf("q, the left pane's foot is\n%s\nwant\n%s", strings.Join(f, "\n"), strings.Join(asking, "\n"))
 	}
 	face.Emit(event.Logged{Time: after(380), Step: "brew", Line: "Installed jq"})
-	time.Sleep(300 * time.Millisecond)
+	face.Turn()
 	if got := screen(out.String()); !strings.Contains(strings.Join(logOf(got, 160), "\n"), "Installed jq") || !slices.Equal(leftFoot(got, 160, 6), asking) {
 		t.Errorf("asking, the screen is\n%s\nwant the run going on, the question asked", got)
 	}
@@ -322,7 +322,7 @@ func TestApplyingScrollsTheLog(t *testing.T) {
 	for i := range 5 {
 		face.Emit(event.Logged{Time: after(400 + i), Step: "brew", Line: "Installed jq"})
 	}
-	time.Sleep(300 * time.Millisecond)
+	face.Turn()
 	if now, right := shows(); now[0] != top || !strings.Contains(right[len(right)-1], "new lines") {
 		t.Errorf("scrolled back, five lines came, the log starts %q; want it where it was, %q", now[0], top)
 	}
@@ -506,7 +506,7 @@ func TestApplyingReportsTheMouse(t *testing.T) {
 		})
 	}
 	var out syncBuffer
-	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).Sized(func() (int, int) { return 160, 64 })
+	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).Turned().Sized(func() (int, int) { return 160, 64 })
 	for _, e := range sixMinutesIn() {
 		face.Emit(e)
 	}
@@ -520,7 +520,7 @@ func TestApplyingReportsTheMouse(t *testing.T) {
 // terminal's interrupt.
 func TestApplyingWithoutKeys(t *testing.T) {
 	var out syncBuffer
-	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).Sized(func() (int, int) { return 160, 64 })
+	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).Turned().Sized(func() (int, int) { return 160, 64 })
 	for _, e := range sixMinutesIn() {
 		face.Emit(e)
 	}
@@ -544,7 +544,7 @@ func TestApplyingUnwinds(t *testing.T) {
 	if !strings.HasSuffix(raw, focusOff+mouseOff+"\x1b[?1049l\x1b[?25h") || kb.isRaw() {
 		t.Errorf("unwound, the face ended %q, raw: %v; want the focus and the mouse no longer reported, the terminal's own screen and the cursor back, not raw", raw[max(len(raw)-40, 0):], kb.isRaw())
 	}
-	time.Sleep(300 * time.Millisecond)
+	face.Turn()
 	if out.String() != raw {
 		t.Error("unwound, the face drew again")
 	}

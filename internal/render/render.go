@@ -9,7 +9,6 @@ import (
 
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/event"
-	"github.com/leeovery/kit/internal/status"
 )
 
 // Face shows a run's events, and finishes once the run has.
@@ -187,12 +186,3 @@ func (t tee) Close() error {
 	}
 	return first
 }
-
-// Collector is a face that shows nothing, and keeps the run's status
-// document for whoever needs it once the run's done.
-type Collector struct {
-	status.Builder
-}
-
-// Close does nothing: the document is the collector's to give.
-func (*Collector) Close() error { return nil }

@@ -224,7 +224,7 @@ func applyClocked(profile colorprofile.Profile, w, h int, took time.Duration, ev
 	out := &syncBuffer{}
 	c := &clock{t: at}
 	kb := &keyboard{out: out}
-	face := render.NewPretty(&colorprofile.Writer{Forward: out, Profile: profile}, 80, true).
+	face := render.NewPretty(&colorprofile.Writer{Forward: out, Profile: profile}, 80, true).Turned().
 		Sized(func() (int, int) { return w, h }).Clocked(c.now).Keys(kb.listen, kb.halt)
 	for _, e := range events {
 		if t := e.At(); !t.IsZero() {
@@ -233,7 +233,7 @@ func applyClocked(profile colorprofile.Profile, w, h int, took time.Duration, ev
 		face.Emit(e)
 	}
 	c.set(at.Add(took))
-	time.Sleep(300 * time.Millisecond)
+	face.Turn()
 	return face, out, kb, c
 }
 
@@ -404,28 +404,33 @@ func pressing(keys ...ask.Key) func(string, int) []ask.Key {
 // the window's whole size: the header, the bar and how the run stands
 // beside the wordmark; a rule across with a junction where the panes part;
 // the rows at the left, the log at the right. Each is drawn as round 10
-// has it, at the size round 10 drew and at the least the screen takes:
-// following the log, a card up, a card up with another waiting, a row
-// chosen, scrolled back, a step
-// failed, a row chosen that's printed something, and its raw view.
+// has it, at the size round 10 drew, and at the least the screen takes
+// where that says something of its own, as a panel's words wrapped or cut
+// to keep what's at their right: following the log, a card up, a card up
+// with another waiting, a row chosen, scrolled back, a step failed, a row
+// chosen that's printed something, and its raw view. Every one fits both.
 func TestApplyingHasAScreenOfItsOwn(t *testing.T) {
 	took := 6*time.Minute + 12*time.Second
 	for _, tt := range []struct {
 		name   string
 		events func() []event.Event
 		keys   func(screen string, w int) []ask.Key
+		least  bool
 	}{
-		{"following", sixMinutesIn, nil},
-		{"card", waitingOnYou, nil},
-		{"cards", cardsWaiting, nil},
-		{"row", sixMinutesIn, clickRow("Homebrew casks")},
-		{"scrolled", func() []event.Event { return sixMinutesInWith(40, 12) }, pressing(keyUp, keyUp, keyUp, keyUp, keyUp)},
-		{"failed", casksFailed, nil},
-		{"row-printed", printing, clickRow("Homebrew formulae")},
-		{"raw", printing, func(screen string, w int) []ask.Key { return append(clickRow("Homebrew formulae")(screen, w), keyR) }},
+		{"following", sixMinutesIn, nil, true},
+		{"card", waitingOnYou, nil, true},
+		{"cards", cardsWaiting, nil, true},
+		{"row", sixMinutesIn, clickRow("Homebrew casks"), false},
+		{"scrolled", func() []event.Event { return sixMinutesInWith(40, 12) }, pressing(keyUp, keyUp, keyUp, keyUp, keyUp), true},
+		{"failed", casksFailed, nil, true},
+		{"row-printed", printing, clickRow("Homebrew formulae"), false},
+		{"raw", printing, func(screen string, w int) []ask.Key { return append(clickRow("Homebrew formulae")(screen, w), keyR) }, false},
 	} {
 		for _, size := range [][2]int{{160, 64}, {100, 30}} {
-			name := fmt.Sprintf("apply-screen-%s-%dx%d.golden", tt.name, size[0], size[1])
+			name, pinned := fmt.Sprintf("apply-screen-%s-%dx%d", tt.name, size[0], size[1]), size[0] == 160 || tt.least
+			if pinned {
+				name += ".golden"
+			}
 			t.Run(name, func(t *testing.T) {
 				face, out, kb := applyAt(size[0], size[1], took, tt.events())
 				defer func() { _ = face.Close() }()
@@ -433,16 +438,11 @@ func TestApplyingHasAScreenOfItsOwn(t *testing.T) {
 					kb.press(t, tt.keys(screen(out.String()), size[0])...)
 				}
 				got := screen(out.String())
-				golden(t, name, got+"\n")
+				if pinned {
+					golden(t, name, got+"\n")
+				}
+				fits(t, got, size)
 				ls := lines(got)
-				if len(ls) != size[1] {
-					t.Errorf("the screen is %d lines, want %d", len(ls), size[1])
-				}
-				for i, l := range ls {
-					if w := ansi.StringWidth(l); w > size[0] {
-						t.Errorf("line %d is %d wide, wider than the window, %d", i, w, size[0])
-					}
-				}
 				if rule := []rune(ls[headLines-1]); len(rule) != size[0] || rule[split(size[0])] != '┬' || strings.Trim(string(rule), "─┬") != "" {
 					t.Errorf("under the header is %q; want a rule across, ┬ at column %d", ls[headLines-1], split(size[0]))
 				}
@@ -684,8 +684,8 @@ func toolsWaiting() []event.Event {
 
 // A row chosen whose steps haven't started, or only wait, has under its
 // log a line for each still to run: the time's column blank, the waiting
-// mark, its title, what it waits for, as the row says. Drawn at the sizes
-// round 10 drew and the least.
+// mark, its title, what it waits for, as the row says. Drawn at the size
+// round 10 drew, and fitting the least the screen takes.
 func TestApplyingRowStillToRun(t *testing.T) {
 	for _, tt := range []struct {
 		name, row string
@@ -695,19 +695,35 @@ func TestApplyingRowStillToRun(t *testing.T) {
 		{"tools", "Developer tools", toolsWaiting},
 	} {
 		for _, size := range [][2]int{{160, 64}, {100, 30}} {
-			name := fmt.Sprintf("apply-screen-waiting-%s-%dx%d.golden", tt.name, size[0], size[1])
+			name := fmt.Sprintf("apply-screen-waiting-%s-%dx%d", tt.name, size[0], size[1])
+			if size[0] == 160 {
+				name += ".golden"
+			}
 			t.Run(name, func(t *testing.T) {
 				face, out, kb := applyAt(size[0], size[1], 6*time.Minute, tt.events())
 				defer func() { _ = face.Close() }()
 				kb.press(t, clickRow(tt.row)(screen(out.String()), size[0])...)
 				got := screen(out.String())
-				golden(t, name, got+"\n")
-				for i, l := range lines(got) {
-					if w := ansi.StringWidth(l); w > size[0] {
-						t.Errorf("line %d is %d wide, wider than the window, %d", i, w, size[0])
-					}
+				if size[0] == 160 {
+					golden(t, name, got+"\n")
 				}
+				fits(t, got, size)
 			})
+		}
+	}
+}
+
+// fits fails t when screen isn't the window's size: as many lines as it's
+// high, none wider than it is wide.
+func fits(t *testing.T, screen string, size [2]int) {
+	t.Helper()
+	ls := lines(screen)
+	if len(ls) != size[1] {
+		t.Errorf("the screen is %d lines, want %d", len(ls), size[1])
+	}
+	for i, l := range ls {
+		if w := ansi.StringWidth(l); w > size[0] {
+			t.Errorf("line %d is %d wide, wider than the window, %d", i, w, size[0])
 		}
 	}
 }
@@ -878,13 +894,13 @@ func TestApplyingBarNeverGoesBack(t *testing.T) {
 func barRun(events ...event.Event) string {
 	var out syncBuffer
 	c := &clock{t: at}
-	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).
+	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).Turned().
 		Sized(func() (int, int) { return 160, 64 }).Clocked(c.now).ShowTabProgress()
 	defer func() { _ = face.Close() }()
 	for _, e := range events {
 		face.Emit(e)
 	}
-	time.Sleep(300 * time.Millisecond)
+	face.Turn()
 	return out.String()
 }
 
@@ -1059,11 +1075,11 @@ func TestApplyingCardsWhySaidOnce(t *testing.T) {
 			}
 
 			var narrow syncBuffer
-			small := render.NewPretty(&colorprofile.Writer{Forward: &narrow, Profile: colorprofile.Ascii}, 80, true).Sized(func() (int, int) { return 80, 40 })
+			small := render.NewPretty(&colorprofile.Writer{Forward: &narrow, Profile: colorprofile.Ascii}, 80, true).Turned().Sized(func() (int, int) { return 80, 40 })
 			for _, e := range events {
 				small.Emit(e)
 			}
-			time.Sleep(300 * time.Millisecond)
+			small.Turn()
 			live := turned(screen(narrow.String()))
 			if err := small.Close(); err != nil {
 				t.Fatal(err)
@@ -1342,7 +1358,7 @@ func TestApplyingPanel(t *testing.T) {
 		}
 	}
 	face.Emit(finished(400, "1password", check.Result{State: check.OK, Summary: "done"}))
-	time.Sleep(300 * time.Millisecond)
+	face.Turn()
 	got = screen(uncoloured(out.String()))
 	if _, right := panes(got, 160); right[1] != "  LOG" || strings.Contains(lines(got)[3], "waiting for you") {
 		t.Errorf("the card done, the screen is\n%s\nwant the panel gone, the log with the whole side", got)
@@ -1399,7 +1415,7 @@ func TestApplyingStateLine(t *testing.T) {
 		t.Errorf("macOS asking, the state line is %q", state)
 	}
 	face.Emit(event.Asking{Time: after(359)})
-	time.Sleep(300 * time.Millisecond)
+	face.Turn()
 	if state := lines(screen(out.String()))[3]; !strings.HasSuffix(state, "│  ◐ working · nothing needs you · 1 failed") {
 		t.Errorf("macOS answered, the state line is %q", state)
 	}
@@ -1426,7 +1442,7 @@ func TestApplyingScreenNeedsTheRoom(t *testing.T) {
 		screen bool
 	}{{99, 64, false}, {100, 64, true}, {160, 29, false}, {160, 30, true}, {100, 30, true}} {
 		var out syncBuffer
-		face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).Sized(func() (int, int) { return tt.w, tt.h })
+		face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).Turned().Sized(func() (int, int) { return tt.w, tt.h })
 		for _, e := range sixMinutesIn()[:12] {
 			face.Emit(e)
 		}
@@ -1469,11 +1485,11 @@ func TestApplyingCardInASmallWindow(t *testing.T) {
 		}},
 	} {
 		var narrow syncBuffer
-		small := render.NewPretty(&colorprofile.Writer{Forward: &narrow, Profile: colorprofile.Ascii}, 80, true).Sized(func() (int, int) { return 80, 40 })
+		small := render.NewPretty(&colorprofile.Writer{Forward: &narrow, Profile: colorprofile.Ascii}, 80, true).Turned().Sized(func() (int, int) { return 80, 40 })
 		for _, e := range cardUp(tt.card) {
 			small.Emit(e)
 		}
-		time.Sleep(300 * time.Millisecond)
+		small.Turn()
 		live := turned(screen(narrow.String()))
 		if !strings.Contains(live, tt.card.Title) || !strings.Contains(live, tt.want) {
 			t.Errorf("%s in a small window:\n%s\nwant its card, saying %q", tt.card.Title, live, tt.want)
@@ -1641,7 +1657,7 @@ func TestApplyingGivesTheScreenBack(t *testing.T) {
 	var mu sync.Mutex
 	width := 160
 	kb := &keyboard{out: &out}
-	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).Sized(func() (int, int) {
+	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, 80, true).Turned().Sized(func() (int, int) {
 		mu.Lock()
 		defer mu.Unlock()
 		return width, 64
@@ -1650,12 +1666,12 @@ func TestApplyingGivesTheScreenBack(t *testing.T) {
 		mu.Lock()
 		width = w
 		mu.Unlock()
-		time.Sleep(300 * time.Millisecond)
+		face.Turn()
 	}
 	for _, e := range sixMinutesIn() {
 		face.Emit(e)
 	}
-	time.Sleep(300 * time.Millisecond)
+	face.Turn()
 	onScreen := func() bool { return strings.Contains(screen(out.String()), "≡") }
 	mouse := func() bool { return mouseReported(out.String()) }
 	if !onScreen() || !mouse() || !kb.isRaw() {

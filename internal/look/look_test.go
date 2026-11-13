@@ -475,12 +475,6 @@ func TestRanOnOneLine(t *testing.T) {
 	}
 }
 
-func TestRule(t *testing.T) {
-	if got := ansi.Strip(look.Rule(10)); got != "  ────────" {
-		t.Errorf("Rule(10) = %q", got)
-	}
-}
-
 // The boot's log: a state's bracket in the mark's place, the name, then what
 // it says; what belongs to a line under its name; the wordmark plain, with
 // what's running, the Mac and when beside it.
