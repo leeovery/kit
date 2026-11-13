@@ -140,7 +140,7 @@ func (a *app) bootstrap(ctx context.Context, mac, repo string, handedOver bool) 
 	if err == nil {
 		defer func() { _ = asks.Close() }()
 	}
-	exec := runner.WithEnv(a.Runner(bootPath, childEnv(a.Getenv, a.Environ(), home, bootPath)), func() []string {
+	exec := runner.WithEnv(a.Runner(bootPath, childEnv(a.Getenv, home, bootPath)), func() []string {
 		if asks == nil {
 			return nil
 		}

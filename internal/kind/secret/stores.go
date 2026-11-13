@@ -101,25 +101,3 @@ func ValueStore(ref string) (store.Driver, error) {
 // Items says how the stores' items' references read, as in 1Password's,
 // op://vault/item.
 func Items() string { return stores().items() }
-
-// Env are the variables of environ, kit's environment, that the stores'
-// programs need passed on to what kit runs, as each store names them
-// (store.About.Env), each as name=value: a name's value as getenv has it,
-// and every variable a name ending * starts.
-func Env(getenv func(string) string, environ []string) []string {
-	var env []string
-	for _, d := range Stores {
-		for _, name := range d.About().Env {
-			if prefix, ok := strings.CutSuffix(name, "*"); ok {
-				for _, kv := range environ {
-					if strings.HasPrefix(kv, prefix) {
-						env = append(env, kv)
-					}
-				}
-			} else if v := getenv(name); v != "" {
-				env = append(env, name+"="+v)
-			}
-		}
-	}
-	return env
-}

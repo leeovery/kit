@@ -51,11 +51,19 @@ const approvalTimeout = 10 * time.Minute
 // and a run in a session of its own, without the terminal, is asked again
 // each time, six times for one kit secret add (5 Nov 2026). Signed in with
 // a password, there's no approval to share, and op, its session over, might
-// ask for the password at the terminal: it runs without it.
+// ask for the password at the terminal: it runs without it. op alone gets
+// kit's own variables of op's, a password's session or a service account's
+// token among them: kit runs every other program without them.
 func opRun(ctx context.Context, run runner.Runner, c runner.Command) (runner.Result, error) {
 	c.Name = program
 	c.SharesSession = !passworded()
+	c.Env = slices.Concat(opEnv(), c.Env)
 	return run.Run(ctx, c)
+}
+
+// opEnv are kit's own variables of op's, each as name=value.
+func opEnv() []string {
+	return slices.DeleteFunc(os.Environ(), func(kv string) bool { return !strings.HasPrefix(kv, "OP_") })
 }
 
 // passworded is whether op is signed in with a password, as over a remote
@@ -65,12 +73,9 @@ func passworded() bool {
 		slices.ContainsFunc(os.Environ(), func(kv string) bool { return strings.HasPrefix(kv, "OP_SESSION_") })
 }
 
-// about is what kit knows of 1Password. A session signed in with a
-// password, over a remote connection, is a variable named for the account;
-// a service account, which signs in with no app, is its token's.
+// about is what kit knows of 1Password.
 var about = store.About{
 	ID: "1password", Name: "1Password", Program: program,
-	Env:       []string{"OP_SESSION_*", "OP_ACCOUNT", "OP_SERVICE_ACCOUNT_TOKEN", "OP_BIOMETRIC_UNLOCK_ENABLED"},
 	Ref:       "op://vault/item/field",
 	Item:      "op://vault/item",
 	Field:     "<section>/<field>, as in GitHub/token",

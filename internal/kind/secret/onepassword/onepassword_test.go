@@ -180,6 +180,29 @@ func TestOpSharesKitsSessionUnlessSignedInWithAPassword(t *testing.T) {
 	}
 }
 
+// op gets kit's own variables of op's, a password's session or a service
+// account's token, as kit runs no other program with them.
+func TestOpGetsKitsOwnVariablesOfOps(t *testing.T) {
+	t.Setenv("OP_SESSION_my", "session-token")
+	t.Setenv("OP_SERVICE_ACCOUNT_TOKEN", "ops_x")
+	run := runnertest.New(t)
+	run.On("op", "whoami")
+	optest.Holds(run, map[string]string{"op://vault/item/a": "a"})
+	d := onepassword.Driver{}
+	if got := d.Session(t.Context(), run); got != store.Open {
+		t.Fatalf("Session() = %v, want open", got)
+	}
+	if _, err := d.ReadMany(t.Context(), run, []string{"op://vault/item/a"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range run.Commands() {
+		if !slices.Contains(c.Env, "OP_SESSION_my=session-token") || !slices.Contains(c.Env, "OP_SERVICE_ACCOUNT_TOKEN=ops_x") ||
+			slices.ContainsFunc(c.Env, func(kv string) bool { return !strings.HasPrefix(kv, "OP_") }) {
+			t.Errorf("%s ran with %q: want kit's variables of op's, and no other", c, c.Env)
+		}
+	}
+}
+
 // A read that fails names, as store.Unread, the references op quotes in its
 // errors, each with the line it quotes it in, and those alone: one that's
 // the start of another quoted isn't named by it. A failure that quotes

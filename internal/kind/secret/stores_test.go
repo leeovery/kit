@@ -47,7 +47,7 @@ func (f *fakeStore) About() store.About {
 			NoAnswer: "unlock " + title, SignedOut: title + " is signed out", SignIn: store.SignIn{Title: "Sign in to " + title}}
 	}
 	return store.About{
-		ID: "fake", Name: "Fake Vault", Program: "fakevault", Env: []string{"FAKE_ACCOUNT", "FAKE_SESSION_*"},
+		ID: "fake", Name: "Fake Vault", Program: "fakevault",
 		Ref: "vault:item/field", Item: "vault:item", Field: "<field>",
 		NoAnswer: "unlock Fake Vault", SignedOut: "Fake Vault is signed out",
 		SignIn: store.SignIn{Title: "Sign in to Fake Vault", Steps: []string{"Open Fake Vault", "Sign in"}, App: "com.example.fakevault", AppName: "Fake Vault"},
@@ -357,22 +357,6 @@ func TestEachStoreUsedBringsItsSignIn(t *testing.T) {
 		t.Errorf("Program() = %q, want the one store's", got)
 	}
 	var _ kind.Carded = s
-}
-
-// The variables each store names are passed on to what kit runs, a name
-// ending * standing for every variable starting so; the rest aren't.
-func TestEnvPassesOnWhatTheStoresName(t *testing.T) {
-	getenv := func(name string) string {
-		return map[string]string{"FAKE_ACCOUNT": "someone", "OP_ACCOUNT": "my", "OP_SERVICE_ACCOUNT_TOKEN": "ops_x", "HOME": "/Users/someone"}[name]
-	}
-	environ := []string{"FAKE_SESSION_x=token", "OP_SESSION_y=other", "UNRELATED=z"}
-	if got := secret.Env(getenv, environ); !slices.Equal(got, []string{"OP_SESSION_y=other", "OP_ACCOUNT=my", "OP_SERVICE_ACCOUNT_TOKEN=ops_x"}) {
-		t.Errorf("Env() = %q, want 1Password's", got)
-	}
-	secret.UseStores(t, &fakeStore{})
-	if got, want := secret.Env(getenv, environ), []string{"FAKE_ACCOUNT=someone", "FAKE_SESSION_x=token"}; !slices.Equal(got, want) {
-		t.Errorf("Env() = %q, want %q", got, want)
-	}
 }
 
 // Stores held at first are waited for together: one whose sign-in is done

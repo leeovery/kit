@@ -25,7 +25,6 @@ import (
 	"github.com/leeovery/kit/internal/gitrepo"
 	"github.com/leeovery/kit/internal/hand"
 	"github.com/leeovery/kit/internal/kind"
-	"github.com/leeovery/kit/internal/kind/secret"
 	"github.com/leeovery/kit/internal/kinds"
 	"github.com/leeovery/kit/internal/linked"
 	"github.com/leeovery/kit/internal/logs"
@@ -327,7 +326,7 @@ func (a *app) build(command, logName string, face render.Face, atTerminal bool) 
 	// Everything the run starts can ask it for an administrator's password,
 	// at a terminal, once the run is ready (askpass).
 	var r *run
-	env := childEnv(a.Getenv, a.Environ(), home, path)
+	env := childEnv(a.Getenv, home, path)
 	exec := runner.WithEnv(a.Runner(path, env), func() []string {
 		if r == nil || r.askpass == nil {
 			return nil
@@ -883,17 +882,17 @@ func (a *app) stoppable(ctx context.Context, face render.Face) (context.Context,
 
 // childEnv is the environment kit runs programs in, never the one it
 // inherited whole: who and where the user is, the SSH agent (git signs and
-// pushes through it), kit's own PATH, what the secrets stores' programs need
-// (secret.Env), Homebrew kept from updating itself, nagging or colouring its
-// output on its own, and git from asking for a password mid-run.
-func childEnv(getenv func(string) string, environ []string, home string, path []string) []string {
+// pushes through it), kit's own PATH, Homebrew kept from updating itself,
+// nagging or colouring its output on its own, and git from asking for a
+// password mid-run. A secrets store's driver passes its program what it
+// needs of kit's own.
+func childEnv(getenv func(string) string, home string, path []string) []string {
 	env := []string{"HOME=" + home, "PATH=" + strings.Join(path, ":")}
 	for _, name := range []string{"USER", "LOGNAME", "SHELL", "TMPDIR", "LANG", "LC_ALL", "SSH_AUTH_SOCK"} {
 		if v := getenv(name); v != "" {
 			env = append(env, name+"="+v)
 		}
 	}
-	env = append(env, secret.Env(getenv, environ)...)
 	return append(env, "HOMEBREW_NO_AUTO_UPDATE=1", "HOMEBREW_NO_ANALYTICS=1", "HOMEBREW_NO_ENV_HINTS=1", "HOMEBREW_NO_COLOR=1", "GIT_TERMINAL_PROMPT=0")
 }
 
