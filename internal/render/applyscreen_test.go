@@ -1405,6 +1405,18 @@ func TestApplyingStateLine(t *testing.T) {
 	}
 }
 
+// In a small window, the bar's last lit cell is red once a step has failed,
+// as the record's is.
+func TestApplyingSmallBarSaysAFailure(t *testing.T) {
+	steps := []event.Step{{Name: "a", Title: "a", Area: "Steps"}, {Name: "b", Title: "b", Area: "Steps"}}
+	face, out, _ := applyIn(colorprofile.TrueColor, 99, 40, time.Minute, rowsRun(steps, append(applying(1, "b"),
+		finished(2, "a", check.Result{State: check.Failed, Reason: "broke"}))...))
+	defer func() { _ = face.Close() }()
+	if !strings.Contains(out.String(), look.Words(look.Failed, "▮")) {
+		t.Errorf("with a failed, the small window's bar has no red cell:\n%s", uncoloured(out.String()))
+	}
+}
+
 // A window too small for the screen keeps the run in place under its
 // heading, as before, the rows' lights at its top; the screen takes a
 // window 100 by 30 or more.
