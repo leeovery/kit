@@ -143,13 +143,14 @@ func TestTimeMachineOpens(t *testing.T) {
 }
 
 // Backups on more than one disk can't be told apart: which is the old
-// Mac's is the person's to say, by attaching it alone. A snapshot a
+// Mac's is the person's to say, by attaching it alone, the error naming
+// each by when its latest backup was taken. A snapshot a
 // restore began from that's gone, kit apply's flags not naming Time
 // Machine, is an error naming it, and saying how to carry on from another;
 // a time before every backup is an error too.
 func TestTimeMachineRefuses(t *testing.T) {
 	here := time.Now().Location()
-	first := snapshot(2026, 11, 1, 9, 0)
+	first, latest := snapshot(2026, 11, 1, 9, 0), snapshot(2026, 11, 8, 14, 19)
 	for _, tt := range []struct {
 		name     string
 		volumes  map[string][]string
@@ -157,8 +158,8 @@ func TestTimeMachineRefuses(t *testing.T) {
 		snapshot string
 		want     string
 	}{
-		{"two disks", map[string][]string{"Backups of laptop": {first}, "Backups of studio": {first}}, time.Time{}, "",
-			"backups of /Users/someone are on more than one Time Machine disk, Backups of laptop (disk7s2) and Backups of studio (disk8s2): attach the old Mac's alone"},
+		{"two disks", map[string][]string{"Backups of laptop": {first, latest}, "Backups of studio": {first}}, time.Time{}, "",
+			"backups of /Users/someone are on more than one Time Machine disk, Backups of laptop (latest backup 8 Nov 2026 14:19) and Backups of studio (latest backup 1 Nov 2026 09:00): attach the old Mac's alone"},
 		{"the snapshot gone", map[string][]string{"Backups of laptop": {first}}, time.Time{}, snapshot(2026, 10, 1, 9, 0),
 			"Time Machine's backup of 1 Oct 2026 09:00, which the restore copied from, isn't on Backups of laptop any more"},
 		{"before them all", map[string][]string{"Backups of laptop": {first}}, time.Date(2026, 10, 1, 0, 0, 0, 0, here), "",
@@ -208,10 +209,11 @@ func TestTimeMachineOpensTheDiskChosen(t *testing.T) {
 }
 
 // The disks the restore can fall back on are those holding the person's
-// backups, each by its name, two of one name told apart by their devices,
-// each opening its latest backup; and those locked, by name, which can't
-// be read till they're unlocked. Those holding none of theirs aren't
-// among them.
+// backups, each by its name and when its latest backup was taken, as two
+// Macs' volumes on one disk are told apart, two of one name by their
+// devices too, each opening its latest backup; and those locked, by name,
+// which can't be read till they're unlocked. Those holding none of theirs
+// aren't among them.
 func TestSourcesDisks(t *testing.T) {
 	latest, other := snapshot(2026, 11, 8, 14, 19), snapshot(2026, 11, 2, 9, 0)
 	m := newTMDisks(t,
@@ -228,7 +230,7 @@ func TestSourcesDisks(t *testing.T) {
 	for _, d := range disks.Found {
 		names = append(names, d.Name)
 	}
-	if want := []string{"Backups (disk7s2)", "Backups (disk9s2)"}; !slices.Equal(names, want) || !slices.Equal(disks.Locked, []string{"Vault"}) {
+	if want := []string{"Backups (disk7s2, latest backup 8 Nov 2026 14:19)", "Backups (disk9s2, latest backup 2 Nov 2026 09:00)"}; !slices.Equal(names, want) || !slices.Equal(disks.Locked, []string{"Vault"}) {
 		t.Errorf("Disks() found %q, locked %q; want %q, and Vault locked", names, disks.Locked, want)
 	}
 	src, err := disks.Found[1].Open(t.Context())

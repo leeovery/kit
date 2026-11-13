@@ -162,8 +162,8 @@ type unopened string
 
 func (u unopened) Open(context.Context) (*Opened, error) { return nil, errors.New(string(u)) }
 
-// Disk is a Time Machine disk attached holding the person's backups, by its
-// volume's name, to open: its latest backup.
+// Disk is a Time Machine disk attached holding the person's backups, as kit
+// names it among the others (label), to open: its latest backup.
 type Disk struct {
 	Name string
 	Opener
@@ -179,7 +179,7 @@ type Disks struct {
 }
 
 // Disks finds the Time Machine disks attached for the restore to fall back
-// on. Two of one name are told apart by their devices.
+// on, each named as label has it.
 func (s Sources) Disks(ctx context.Context) (Disks, error) {
 	found, passed, err := timemachine.Look(ctx, s.Run, s.User, s.MountPoint)
 	if err != nil {
@@ -187,11 +187,7 @@ func (s Sources) Disks(ctx context.Context) (Disks, error) {
 	}
 	var d Disks
 	for _, c := range found {
-		name := c.Volume
-		if slices.ContainsFunc(found, func(o timemachine.Candidate) bool { return o.Volume == c.Volume && o.Device != c.Device }) {
-			name = fmt.Sprintf("%s (%s)", c.Volume, c.Device)
-		}
-		d.Found = append(d.Found, Disk{Name: name, Opener: TimeMachine{Run: s.Run, User: s.User, MountPoint: s.MountPoint, Device: c.Device}})
+		d.Found = append(d.Found, Disk{Name: label(c, found), Opener: TimeMachine{Run: s.Run, User: s.User, MountPoint: s.MountPoint, Device: c.Device}})
 	}
 	for _, p := range passed {
 		if p.Locked {
@@ -261,9 +257,22 @@ func (t TimeMachine) disk(found []timemachine.Candidate) (timemachine.Candidate,
 	}
 	disks := make([]string, len(found))
 	for i, c := range found {
-		disks[i] = fmt.Sprintf("%s (%s)", c.Volume, c.Device)
+		disks[i] = label(c, found)
 	}
 	return timemachine.Candidate{}, fmt.Errorf("backups of /Users/%s are on more than one Time Machine disk, %s: attach the old Mac's alone", t.User, strings.Join(disks, " and "))
+}
+
+// label is c as kit names it among found, the disks holding the person's
+// backups, each holding one at least, as timemachine.Look finds them: its
+// volume's name; its device, should another have that name; and when its
+// latest backup was taken, as two Macs backing up to one disk, a volume
+// each, are told apart by little else.
+func label(c timemachine.Candidate, found []timemachine.Candidate) string {
+	latest := "latest backup " + c.Snapshots[len(c.Snapshots)-1].Time.Format(dayLayout)
+	if slices.ContainsFunc(found, func(o timemachine.Candidate) bool { return o.Volume == c.Volume && o.Device != c.Device }) {
+		return fmt.Sprintf("%s (%s, %s)", c.Volume, c.Device, latest)
+	}
+	return fmt.Sprintf("%s (%s)", c.Volume, latest)
 }
 
 // pick is the one of c's snapshots to open, as t says.
