@@ -726,6 +726,7 @@ func TestApplyingStillToRunIsWhatHasntStarted(t *testing.T) {
 		{"waiting", nil, waiting, true},
 		{"checking", []event.Event{event.StepStarted{Time: after(357), Step: "secret", Doing: "checking"}}, "◐ Checking Secrets", false},
 		{"applying", []event.Event{event.StepStarted{Time: after(357), Step: "secret", Doing: "applying"}}, "◐ Applying Secrets", false},
+		{"doing what starts with a letter of more than a byte", []event.Event{event.StepStarted{Time: after(357), Step: "secret", Doing: "équipping"}}, "◐ Équipping", false},
 		{"its card up", []event.Event{event.NeedsYou{Time: after(357), Step: "secret", Item: "secret", Title: "Turn on 1Password's command line", Steps: []string{"Open 1Password's settings"}}}, "", false},
 		{"its turn to come", []event.Event{event.Doing{Time: after(357), Step: "secret", Says: event.Queued}}, "", false},
 	} {
