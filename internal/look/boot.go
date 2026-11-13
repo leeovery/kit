@@ -14,11 +14,9 @@ import (
 // brackets, dots and what's still to fill; red only for a failure. A boot
 // log's brackets take the marks' place, and the wordmark has no gradient.
 type Boot struct {
-	full, mid, dim color.Color
+	palette
 	// hot is the splash's scan line: amber, hotter.
 	hot color.Color
-	// on is a reversed tag's text, on amber.
-	on color.Color
 	// dark is whether the terminal's background is dark.
 	dark bool
 	// frame turns what's at work: a light bouncing in its brackets.
@@ -41,31 +39,37 @@ var scanner = []int{0, 1, 2, 3, 2, 1}
 // on either.
 func NewBoot(dark bool) Boot {
 	if dark {
-		return Boot{full: lipgloss.Color("#FFB000"), mid: lipgloss.Color("#C18A0F"), dim: lipgloss.Color("#7A5E1F"), hot: lipgloss.Color("#FFDB8C"), on: lipgloss.Color("#212734"), dark: true}
+		return newBoot(lipgloss.Color("#FFB000"), lipgloss.Color("#C18A0F"), lipgloss.Color("#7A5E1F"), lipgloss.Color("#FFDB8C"), lipgloss.Color("#212734"), true)
 	}
-	return Boot{full: lipgloss.Color("#8F5300"), mid: lipgloss.Color("#A86400"), dim: lipgloss.Color("#C9A26A"), hot: lipgloss.Color("#5C3500"), on: lipgloss.Color("#FFFFFF")}
+	return newBoot(lipgloss.Color("#8F5300"), lipgloss.Color("#A86400"), lipgloss.Color("#C9A26A"), lipgloss.Color("#5C3500"), lipgloss.Color("#FFFFFF"), false)
+}
+
+// newBoot is the boot's look in its three strengths of amber, full, mid and
+// dim, with hot its scan line and on a reversed tag's text, on amber.
+func newBoot(full, mid, dimmed, hot, on color.Color, dark bool) Boot {
+	rev := lipgloss.NewStyle().Foreground(on).Background(full).Bold(true)
+	return Boot{
+		name: fg(full).Bold(true), key: fg(full), says: fg(mid), dim: fg(dimmed), label: fg(mid),
+		cursor: fg(full), chosen: rev, field: rev, wordmark: func(k string) string { return fg(full).Render(k) },
+		hot: hot, dark: dark,
+	}
 }
 
 // Full is what's live: a key, a step at work, what needs you.
-func (b Boot) Full(s string) string { return fg(b.full).Render(s) }
+func (b Boot) Full(s string) string { return b.key.Render(s) }
 
 // Strong is a name.
-func (b Boot) Strong(s string) string { return fg(b.full).Bold(true).Render(s) }
+func (b Boot) Strong(s string) string { return b.name.Render(s) }
 
 // Mid is what a line says.
-func (b Boot) Mid(s string) string { return fg(b.mid).Render(s) }
+func (b Boot) Mid(s string) string { return b.says.Render(s) }
 
 // Dim is a bracket, a dot, what's still to fill.
-func (b Boot) Dim(s string) string { return fg(b.dim).Render(s) }
+func (b Boot) Dim(s string) string { return b.dim.Render(s) }
 
 // Rev is words reversed out of amber, as a code to type, or a tag that
 // needs you.
-func (b Boot) Rev(s string) string {
-	return lipgloss.NewStyle().Foreground(b.on).Background(b.full).Bold(true).Render(s)
-}
-
-// Says joins what a line says, its extras after a dim dot.
-func (b Boot) Says(parts ...string) string { return strings.Join(parts, b.Dim(" · ")) }
+func (b Boot) Rev(s string) string { return b.chosen.Render(s) }
 
 // Tag is a state's bracket: OK done, ** working, blank waiting, -- not
 // here, !! reversed for needs you, FAIL red.
@@ -125,36 +129,7 @@ func (b Boot) Rows(w int, rs ...Row) []string {
 }
 
 // Header is a block's label: capitals, mid.
-func (b Boot) Header(label string) string { return "  " + b.Mid(strings.ToUpper(label)) }
-
-// Keys are the keys at the foot.
-func (b Boot) Keys(ks ...Key) string {
-	parts := make([]string, len(ks))
-	for i, k := range ks {
-		parts[i] = b.Full(k.Key) + " " + b.Mid(k.Does)
-	}
-	return "  " + strings.Join(parts, b.Dim(" · "))
-}
-
-// Head is the wordmark before colour, with lines stacked beside it after a
-// dim rule: what's running, the Mac and when.
-func (b Boot) Head(beside ...string) []string {
-	out := make([]string, len(wordmark))
-	for r, k := range wordmark {
-		l := "  " + b.Full(k) + "  " + b.Dim("│")
-		if r < len(beside) {
-			l += "  " + beside[r]
-		}
-		out[r] = l
-	}
-	return out
-}
-
-// Meta is what Head stacks beside the wordmark: what's running, the Mac and
-// when.
-func (b Boot) Meta(what, mac, when string) []string {
-	return []string{b.Strong(what), b.Mid(mac), b.Mid(when)}
-}
+func (b Boot) Header(label string) string { return b.header(label, "") }
 
 // bootBarWidth is the boot's bar, in cells.
 const bootBarWidth = 40
@@ -169,43 +144,8 @@ func (b Boot) Bar(done, of int) string {
 	return b.Full(strings.Repeat("█", lit)) + b.Dim(strings.Repeat("░", bootBarWidth-lit))
 }
 
-// Answers are a question's choices, under its line: the cursor before the
-// chosen one, its label reversed, what each does two spaces after it.
-func (b Boot) Answers(cs []Choice, chosen int) []string {
-	out := make([]string, len(cs))
-	for i, c := range cs {
-		if i == chosen {
-			out[i] = b.Full("❯") + b.Rev(" "+c.Label+" ")
-			if c.Does != "" {
-				out[i] += " " + b.Full(c.Does)
-			}
-			continue
-		}
-		out[i] = "  " + b.Strong(c.Label)
-		if c.Does != "" {
-			out[i] += "  " + b.Mid(c.Does)
-		}
-	}
-	return out
-}
-
-// Field is a typed answer: an amber ❯, a dot for each character typed,
-// hidden, and the cursor.
-func (b Boot) Field(typed int) string {
-	return b.Full("❯") + " " + b.Full(strings.Repeat("•", typed)) + b.Rev(" ")
-}
-
 // Todo is what to do: an arrow, then the words.
-func (b Boot) Todo(text string) string { return b.Mid("→ ") + b.Full(text) }
-
-// Output is a tool's lines, as it printed them.
-func (b Boot) Output(lines ...string) []string {
-	out := make([]string, len(lines))
-	for i, l := range lines {
-		out[i] = b.Mid(l)
-	}
-	return out
-}
+func (b Boot) Todo(text string) string { return b.todo(b.Full(text)) }
 
 // QR is text as a QR code in half blocks, a cell two modules high, dark on
 // light as a camera reads it: on a dark background its light modules and a
