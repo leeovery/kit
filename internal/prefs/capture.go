@@ -99,7 +99,8 @@ func normalised(m map[string]any) ([]byte, error) {
 }
 
 // settingsFiles are the files [prefs files] names: each file, and every file
-// under each folder (.DS_Store left out); an entry with *, ? or [ is a glob.
+// under each folder (those the store's ignore file leaves out left out:
+// ignored); an entry with *, ? or [ is a glob.
 func (p *Prefs) settingsFiles() []string {
 	var out []string
 	for _, entry := range p.Lists.Files {
@@ -142,7 +143,7 @@ func walk(dir string) []string {
 		switch {
 		case isDir:
 			dirs = append(dirs, path)
-		case e.Name() != ".DS_Store":
+		case !ignored(e.Name()):
 			files = append(files, path)
 		}
 	}

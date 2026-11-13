@@ -193,6 +193,7 @@ func TestCaptureSavesWhatChanged(t *testing.T) {
 	w.write(t, filepath.Join(w.home, ".config", "folder", "one.txt"), "1")
 	w.write(t, filepath.Join(w.home, ".config", "folder", "deeper", "two.txt"), "2")
 	w.write(t, filepath.Join(w.home, ".config", "folder", ".DS_Store"), "Finder's")
+	w.write(t, filepath.Join(w.home, ".config", "folder", ".editor.tmp"), "an app's, half written")
 	w.write(t, filepath.Join(w.home, "Library", "Tool", "App2026.2", "options", "ui.xml"), "<ui/>")
 	w.write(t, filepath.Join(w.home, "Library", "Tool", "App2026.1", "options", "ui.xml"), "<old/>")
 	w.write(t, filepath.Join(w.home, "Library", "Tool", "Cache", "options", "ui.xml"), "not a version")
@@ -260,7 +261,7 @@ claimed: the folder, for this Mac's hardware`
 			t.Errorf("%s = %q, want %q", path, got, want)
 		}
 	}
-	for _, gone := range []string{"domains/com.example.gone.plist", "domains/com.example.empty.plist", "files/.config/dropped.json", "files/.config/.hidden", "files/.config/folder/.DS_Store", "files/Library/Tool/Cache"} {
+	for _, gone := range []string{"domains/com.example.gone.plist", "domains/com.example.empty.plist", "files/.config/dropped.json", "files/.config/.hidden", "files/.config/folder/.DS_Store", "files/.config/folder/.editor.tmp", "files/Library/Tool/Cache"} {
 		if _, err := os.Stat(filepath.Join(store, gone)); !os.IsNotExist(err) {
 			t.Errorf("%s is there, want it gone", gone)
 		}
