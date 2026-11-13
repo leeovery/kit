@@ -388,15 +388,15 @@ func temporarily(ctx context.Context, r *run, c *changes, k kind.Kind, scope, na
 		return check.Result{State: check.Failed, Reason: err.Error()}
 	}
 	summary := verb + ", for now: not declared, quiet for 7 days, then kit reconcile asks"
-	// reconcile asks only of a kind looked after: one with a section.
-	if d, _ := kinds.Named(kindName); !r.lists[kindName].Declared {
+	// reconcile asks only of a kind looked after: one this Mac declares.
+	if !r.lists[kindName].Declared {
 		added, err := r.cfg.AddSection(kindName, scope)
 		if err != nil {
 			return check.Result{State: check.Failed, Reason: verb + ", but couldn't add its kind's section: " + err.Error()}
 		}
 		if added {
 			c.changed(config.DeclFile(scope))
-			summary += "; [" + d.Section.Header + "] added to " + scope + ", empty"
+			summary += "; [" + descriptorOf(k).Section.Header + "] added to " + scope + ", empty"
 		}
 	}
 	return check.Result{State: check.OK, Summary: summary}

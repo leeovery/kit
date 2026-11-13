@@ -539,6 +539,11 @@ func (h *Homebrew) lines(ctx context.Context, args ...string) ([]string, error) 
 
 type formulae struct{ *Homebrew }
 
+var (
+	_ kind.Resolver = formulae{}
+	_ kind.Resolver = casks{}
+)
+
 func (formulae) Name() string    { return formulaeName }
 func (formulae) Program() string { return "brew" }
 

@@ -617,6 +617,7 @@ func found(a app) kind.Found {
 var _ interface {
 	kind.Kind
 	kind.Keyed
+	kind.Resolver
 	kind.Counter
 	kind.Admin
 	kind.Blocker

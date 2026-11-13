@@ -324,7 +324,7 @@ func TestStatusQuietensNewDrift(t *testing.T) {
 // A kind the config has no section of for the Mac, the shared file's or its
 // own, isn't in the run, though its program's installed with things of its
 // own; and Homebrew's step isn't either, with no kind needing it.
-func TestStatusLeavesOutAKindWithoutASection(t *testing.T) {
+func TestStatusLeavesOutAKindNotDeclaredForThisMac(t *testing.T) {
 	w := newWorld(t, map[string]string{"kit.toml": twoMacs, "studio/declarations": "[homebrew formulae]\nffmpeg\n"})
 	w.write(t, filepath.Join(".local", "state", "kit", "machine"), "laptop\n")
 	w.fake.On("brew", "--prefix").Prints("/opt/homebrew\n")

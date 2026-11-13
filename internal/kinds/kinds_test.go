@@ -21,9 +21,10 @@ func deps(t *testing.T) *kind.Deps {
 }
 
 // Every kind says all kit's shared code asks of it: its names, its group
-// and row, how it's made, its section, its command's help, whether its things are apps, saying what they
-// leave, the steps it needs, made by its own setup, and what it comes
-// after: kinds before it, or the data restore.
+// and row, how it's made, its section, its command's help, whether its
+// things are apps, saying what they leave, the steps it needs, made by its
+// own setup, and what it comes after: kinds before it, or the data
+// restore.
 func TestEveryKindIsComplete(t *testing.T) {
 	d := deps(t)
 	groups := []kind.Group{kind.Packages, kind.Settings, kind.Secrets}
