@@ -2,9 +2,9 @@
 // paths declared in a [spotlight exclusions] section, each checked by
 // asking Spotlight for files in it. Adding one writes Spotlight's privacy
 // list, through sudo; the running Spotlight service doesn't reload it, so
-// it takes effect after a restart, and kit remembers it has added it.
-// Spotlight's list can only be read as root, so kit finds no folders
-// excluded by hand.
+// it takes effect after a restart, and kit remembers it has added it till
+// it's kept out, or undeclared. Spotlight's list can only be read as root,
+// so kit finds no folders excluded by hand.
 package spotlight
 
 import (
@@ -97,10 +97,12 @@ func (s *Spotlight) full(name string) string {
 	return name
 }
 
-// indexed reports whether Spotlight has files in folder in its index: none
-// found means it's kept out (or holds nothing Spotlight indexes).
+// indexed reports whether Spotlight has anything in folder in its index,
+// by name, which it indexes for every file whatever its kind: nothing found
+// means it's kept out, or holds nothing yet, with nothing to keep out till
+// it does.
 func (s *Spotlight) indexed(ctx context.Context, folder string) (bool, error) {
-	res, err := s.run.Run(ctx, runner.Command{Name: "mdfind", Args: []string{"-onlyin", folder, "-count", `kMDItemFSName == "*.md" || kMDItemFSName == "*.json"`}, Timeout: probeTimeout})
+	res, err := s.run.Run(ctx, runner.Command{Name: "mdfind", Args: []string{"-onlyin", folder, "-count", `kMDItemFSName == "*"`}, Timeout: probeTimeout})
 	if err != nil {
 		return false, err
 	}
@@ -108,19 +110,34 @@ func (s *Spotlight) indexed(ctx context.Context, folder string) (bool, error) {
 	return err == nil && n > 0, nil
 }
 
-// Installed lists the declared folders Spotlight keeps out of its index.
+// Installed lists the declared folders Spotlight keeps out of its index,
+// and forgets having added those no longer waiting for a restart.
 func (s *Spotlight) Installed(ctx context.Context) ([]kind.Installed, error) {
 	var out []kind.Installed
+	var waiting []string
 	for _, name := range s.declared {
 		on, err := s.indexed(ctx, s.full(name))
 		if err != nil {
 			return nil, fmt.Errorf("ask Spotlight about %s: %w", name, err)
 		}
-		if !on {
+		if on {
+			waiting = append(waiting, name)
+		} else {
 			out = append(out, kind.Installed{Name: name, Explicit: true})
 		}
 	}
-	return out, nil
+	return out, s.forget(waiting)
+}
+
+// forget takes off kit's record of the folders it has added each but those
+// of waiting, declared and still indexed: kept out now, or undeclared.
+func (s *Spotlight) forget(waiting []string) error {
+	done := func(name string) bool { return !slices.Contains(waiting, name) }
+	rec, err := state.Load[record](s.stateDir, recordName)
+	if err != nil || !slices.ContainsFunc(rec.Added, done) {
+		return err
+	}
+	return state.Update(s.stateDir, recordName, func(rec *record) { rec.Added = slices.DeleteFunc(rec.Added, done) })
 }
 
 // Resolve knows every folder.
