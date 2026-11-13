@@ -22,6 +22,10 @@ func (s *Server) kept() string {
 	return s.password
 }
 
+// bySudo is the helper here taken as run by sudo: the helper is this test
+// itself, and its parent stands for sudo.
+func bySudo(pid int) bool { return pid == os.Getppid() }
+
 // ask is the helper asking, as sudo runs it: what it was given, or its
 // error.
 func ask(t *testing.T, s *Server) (string, error) {
@@ -38,13 +42,13 @@ func ask(t *testing.T, s *Server) (string, error) {
 func TestAnswersASudo(t *testing.T) {
 	var asked []int
 	notGiven := false
-	s, err := Start("", "/usr/bin/true", func(_ context.Context, n int) (string, error) {
+	s, err := start("", "/usr/bin/true", func(_ context.Context, n int) (string, error) {
 		asked = append(asked, n)
 		if notGiven {
 			return "", errors.New("cancelled")
 		}
 		return "typed" + strconv.Itoa(n), nil
-	})
+	}, bySudo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,6 +77,58 @@ func TestAnswersASudo(t *testing.T) {
 	}
 	if _, err := ask(t, s); err == nil {
 		t.Error("asked after the run ended: want an error")
+	}
+}
+
+// A program that connects to ask for itself, not through the helper run by
+// sudo, is refused: the person isn't asked, and nothing's given, however
+// the run holds the password.
+func TestRefusesAnAskerNotSudos(t *testing.T) {
+	asked := false
+	s, err := Start("", "/usr/bin/true", func(context.Context, int) (string, error) {
+		asked = true
+		return "typed", nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	s.Keep("hunter2")
+	if got, err := ask(t, s); got != "" || err == nil || asked {
+		t.Errorf("asked by a program, not sudo: %q, %v, the person asked %v; want nothing given", got, err, asked)
+	}
+}
+
+// The run's end gives up asking the person for a sudo still waiting for
+// their answer: Close doesn't wait for it, and the helper's given nothing.
+func TestCloseGivesUpAsking(t *testing.T) {
+	asking := make(chan struct{})
+	s, err := start("", "/usr/bin/true", func(ctx context.Context, _ int) (string, error) {
+		close(asking)
+		<-ctx.Done()
+		return "", ctx.Err()
+	}, bySudo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	given := make(chan error, 1)
+	go func() {
+		_, err := ask(t, s)
+		given <- err
+	}()
+	<-asking
+	closed := make(chan error, 1)
+	go func() { closed <- s.Close() }()
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Error(err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Close is waiting for the person's answer")
+	}
+	if err := <-given; err == nil {
+		t.Error("the helper was answered after the run ended: want nothing given")
 	}
 }
 
@@ -158,10 +214,10 @@ func TestEnvHasSudoAskTheRun(t *testing.T) {
 // given it, the person asked nothing more.
 func TestAsksOneThingAtATime(t *testing.T) {
 	asking := make(chan struct{}, 2)
-	s, err := Start("", "/usr/bin/true", func(context.Context, int) (string, error) {
+	s, err := start("", "/usr/bin/true", func(context.Context, int) (string, error) {
 		asking <- struct{}{}
 		return "", errors.New("the person was asked twice")
-	})
+	}, bySudo)
 	if err != nil {
 		t.Fatal(err)
 	}

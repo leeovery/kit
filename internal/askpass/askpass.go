@@ -3,9 +3,9 @@
 // of the run's own, beside a socket the run answers on. sudo runs kit
 // through the link, with its prompt, as sudo -A does, and plain sudo
 // without a terminal (Env); kit, run so, asks the run over the socket and
-// prints the answer, for sudo to read. Only a program the run started may
-// ask, and the password is never on a command line, in a file or in the
-// log.
+// prints the answer, for sudo to read. Only the real sudo, run by a
+// program the run started, may ask, and the password is never on a command
+// line, in a file or in the log.
 package askpass
 
 import (
@@ -40,7 +40,12 @@ type Server struct {
 	dir string
 	ln  net.Listener
 	ask Asker
-	wg  sync.WaitGroup
+	// sudo reports whether a process is the real sudo.
+	sudo func(pid int) bool
+	wg   sync.WaitGroup
+	// ctx is what the person's asked in, cancelled as the run ends.
+	ctx    context.Context
+	cancel context.CancelFunc
 	// asking has the person asked one thing at a time (Turn); pending is
 	// how many sudos are waiting for the person, their turn or their answer.
 	asking  sync.Mutex
@@ -66,11 +71,17 @@ type answered struct {
 // else, and when that sudo asks again, as it does when a password's wrong,
 // with what ask gets from them.
 func Start(base, self string, ask Asker) (*Server, error) {
+	return start(base, self, ask, isSudo)
+}
+
+// start is Start, a process taken as the real sudo as sudo says.
+func start(base, self string, ask Asker, sudo func(pid int) bool) (*Server, error) {
 	dir, err := os.MkdirTemp(base, "kit-askpass-")
 	if err != nil {
 		return nil, fmt.Errorf("make a directory for asking: %w", err)
 	}
-	s := &Server{dir: dir, ask: ask, sudos: map[int]*answered{}}
+	s := &Server{dir: dir, ask: ask, sudo: sudo, sudos: map[int]*answered{}}
+	s.ctx, s.cancel = context.WithCancel(context.Background())
 	if err := os.Symlink(self, s.Helper()); err != nil {
 		_ = os.RemoveAll(dir)
 		return nil, fmt.Errorf("link kit for asking: %w", err)
@@ -113,8 +124,10 @@ func (s *Server) Keep(password string) {
 	s.password = password
 }
 
-// Close stops answering, forgets the password, and removes the directory.
+// Close stops answering, what's being asked given up, forgets the
+// password, and removes the directory.
 func (s *Server) Close() error {
+	s.cancel()
 	_ = s.ln.Close()
 	s.wg.Wait()
 	s.Keep("")
@@ -133,8 +146,9 @@ func (s *Server) serve() {
 	}
 }
 
-// answer answers an asking, from a program the run started, through the
-// helper; anything else, it closes on.
+// answer answers an asking through the helper, run by the real sudo, from
+// a program the run started; anything else, as a program connecting to ask
+// for itself, it closes on.
 func (s *Server) answer(c net.Conn) {
 	defer func() { _ = c.Close() }()
 	uc, ok := c.(*net.UnixConn)
@@ -145,12 +159,16 @@ func (s *Server) answer(c net.Conn) {
 	if err != nil || !descends(helper, os.Getpid()) {
 		return
 	}
+	sudo := parent(helper)
+	if !s.sudo(sudo) {
+		return
+	}
 	_ = c.SetReadDeadline(time.Now().Add(5 * time.Second))
 	if _, err := bufio.NewReader(c).ReadString('\n'); err != nil {
 		return
 	}
 	_ = c.SetReadDeadline(time.Time{})
-	password, err := s.passwordFor(parent(helper))
+	password, err := s.passwordFor(sudo)
 	if err != nil {
 		return
 	}
@@ -176,7 +194,7 @@ func (s *Server) passwordFor(sudo int) (password string, err error) {
 	defer s.pending.Add(-1)
 	s.Turn(func() {
 		var asked bool
-		if password, asked, err = s.next(context.Background(), a); asked && err == nil {
+		if password, asked, err = s.next(s.ctx, a); asked && err == nil {
 			s.Keep(password)
 		}
 	})
