@@ -232,14 +232,6 @@ func (r *run) kindNamed(name string) (kind.Kind, error) {
 	return k, nil
 }
 
-// changedFile notes the file at path as changed, to commit, when it's in
-// the config repository: tmux's config, among the linked files.
-func (r *run) changedFile(c *changes, path string) {
-	if rel, ok := strings.CutPrefix(path, r.repo.Dir+"/"); ok {
-		c.changed(rel)
-	}
-}
-
 // scope is whose declarations a thing is declared in: shared, or this Mac's.
 func (r *run) scope(shared bool) string {
 	if shared {
@@ -277,6 +269,51 @@ func (c *changes) declare(kindName, scope string, e config.Entry) (string, error
 	return outOf(moved) + said, err
 }
 
+// undeclareIn takes name, of the kind called kindName, out of scope's
+// declarations, noting the file changed.
+func (c *changes) undeclareIn(kindName, scope, name string) error {
+	if err := c.run.cfg.Undeclare(kindName, scope, name); err != nil {
+		return err
+	}
+	c.changed(config.DeclFile(scope))
+	return nil
+}
+
+// undeclareHere takes name, of the kind called kindName, out of this Mac's
+// declarations, and the shared ones with shared, and says whose it was
+// taken out of. One declared for every Mac, without shared, is refused
+// (*everyMacError) before anything's written, as the shared file's entries
+// come first.
+func (c *changes) undeclareHere(kindName, name string, shared bool) ([]string, error) {
+	r := c.run
+	where, err := r.cfg.Where(kindName, name)
+	if err != nil {
+		return nil, err
+	}
+	var from []string
+	for _, e := range where {
+		switch {
+		case e.Scope == config.Shared && !shared:
+			return nil, &everyMacError{at: e}
+		case e.Scope != config.Shared && e.Scope != r.machine:
+			continue
+		}
+		if err := c.undeclareIn(kindName, e.Scope, name); err != nil {
+			return from, err
+		}
+		from = append(from, e.Scope)
+	}
+	return from, nil
+}
+
+// everyMacError is undeclaring refused a thing declared for every Mac, at,
+// without --shared.
+type everyMacError struct{ at config.Entry }
+
+func (e *everyMacError) Error() string {
+	return "declared for every Mac, in " + e.at.Pos() + ": --shared takes it out of every Mac's"
+}
+
 // checkDeclare says why declare would refuse e in scope's declarations,
 // writing nothing: nil when it would declare it.
 func (r *run) checkDeclare(kindName, scope string, e config.Entry) error {
@@ -293,7 +330,7 @@ func (r *run) checkDeclare(kindName, scope string, e config.Entry) error {
 // macsDeclaring are the Macs whose own files declare name, of the kind
 // called kindName: those a shared declare takes it out of.
 func (r *run) macsDeclaring(kindName, name string) ([]string, error) {
-	where, err := r.where(kindName, name)
+	where, err := r.cfg.Where(kindName, name)
 	if err != nil {
 		return nil, err
 	}
@@ -313,27 +350,6 @@ func outOf(moved []string) string {
 		return ""
 	}
 	return ", out of " + strings.Join(moved, " and ")
-}
-
-// where are the entries declaring name, of the kind called kindName: in
-// every declarations file; or, for a kind declared outside the config
-// repository, in its own file, matching as the kind matches things.
-func (r *run) where(kindName, name string) ([]config.Entry, error) {
-	k := r.kindsByName[kindName]
-	if _, ok := k.(kind.Declarer); !ok {
-		return r.cfg.Where(kindName, name)
-	}
-	key := func(n string) string { return n }
-	if kd, ok := k.(kind.Keyed); ok {
-		key = kd.Key
-	}
-	var found []config.Entry
-	for _, e := range r.lists[kindName].Entries {
-		if key(e.Name) == key(name) {
-			found = append(found, e)
-		}
-	}
-	return found, nil
 }
 
 // installed reports whether name, as given, is among what k finds

@@ -1,7 +1,7 @@
 // Package kind is kinds: lists of things of one sort, such as Homebrew's
 // formulae, compared with what's on the Mac. A kind says what's installed,
-// and the full name of a thing known by another; the comparison, and the
-// step it makes, are the same for every kind.
+// and, where it can, the full name of a thing known by another; the
+// comparison, and the step it makes, are the same for every kind.
 package kind
 
 import (
@@ -44,20 +44,36 @@ type Kind interface {
 	Program() string
 	// Installed lists what's on the Mac.
 	Installed(ctx context.Context) ([]Installed, error)
-	// Resolve finds the full names of things known by other names, such as
-	// aliases and old names. A name the kind doesn't know at all is left
-	// out.
-	Resolve(ctx context.Context, names []string) (map[string]string, error)
 	// Install installs names.
 	Install(ctx context.Context, names []string) error
 	// Remove uninstalls names.
 	Remove(ctx context.Context, names []string) error
 }
 
+// Resolver is a kind whose things can be known by other names, such as
+// aliases and old names.
+type Resolver interface {
+	// Resolve finds the full names of names. A name the kind doesn't know
+	// at all is left out.
+	Resolve(ctx context.Context, names []string) (map[string]string, error)
+}
+
+// Resolve finds the full names of names, as k's Resolver says: each its own,
+// for a kind that knows a thing by one name alone.
+func Resolve(ctx context.Context, k Kind, names []string) (map[string]string, error) {
+	if r, ok := k.(Resolver); ok {
+		return r.Resolve(ctx, names)
+	}
+	resolved := make(map[string]string, len(names))
+	for _, name := range names {
+		resolved[name] = name
+	}
+	return resolved, nil
+}
+
 // Commanded is a kind whose check and install run commands other than its
-// Program, or none, as tmux's plugins, read from tmux's config and cloned
-// with git, which macOS has, need no tmux; or several, as exclusions run
-// the program of each backup tool keeping them.
+// Program: several, as exclusions run the program of each backup tool
+// keeping them, or none.
 type Commanded interface {
 	// Commands are the commands its check and install run: none for none.
 	Commands() []string
@@ -158,18 +174,6 @@ type Leftovers struct {
 	App, Bundle string
 	Files       []string
 	Domains     []string
-}
-
-// Declarer is a kind declared in a file of its own, where the program
-// that uses the declarations reads them: tmux's plugins, in tmux's config.
-// kit reads the file, and edits it in place.
-type Declarer interface {
-	// Declared is what the kind's file declares.
-	Declared() (config.List, error)
-	// Declare adds name to the kind's file, and Undeclare takes it out:
-	// each says which file it changed, by its real path, links followed.
-	Declare(name string) (string, error)
-	Undeclare(name string) (string, error)
 }
 
 // Valued is a kind whose declarations carry a value after each name: an MCP
@@ -1368,7 +1372,7 @@ func Compare(ctx context.Context, k Kind, declared config.List) check.Result {
 	var missing, unknown []string
 	fullNames := make(map[string]string)
 	if len(unmatched) > 0 {
-		resolved, err := k.Resolve(ctx, unmatched)
+		resolved, err := Resolve(ctx, k, unmatched)
 		if err != nil {
 			return failed(k, err)
 		}

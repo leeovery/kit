@@ -33,7 +33,7 @@ var Descriptor = kind.Descriptor{
 	Name:    kindName,
 	Label:   "git config",
 	Group:   kind.Settings,
-	Section: &config.Section{Kind: kindName, Header: "git config", Form: config.Settings, Sorted: true, Says: lineSays, FromMac: true},
+	Section: config.Section{Kind: kindName, Header: "git config", Form: config.Settings, Sorted: true, Says: lineSays, FromMac: true},
 	Help: &kind.Help{
 		What:   "git's global settings",
 		Add:    "Declare git settings as this Mac has them",
@@ -146,15 +146,6 @@ func (g *GitConfig) Installed(ctx context.Context) ([]kind.Installed, error) {
 	out := make([]kind.Installed, len(keys))
 	for i, key := range keys {
 		out[i] = kind.Installed{Name: key, Explicit: true}
-	}
-	return out, nil
-}
-
-// Resolve knows every key: one not set is missing.
-func (g *GitConfig) Resolve(_ context.Context, names []string) (map[string]string, error) {
-	out := make(map[string]string, len(names))
-	for _, name := range names {
-		out[name] = name
 	}
 	return out, nil
 }

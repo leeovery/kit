@@ -306,11 +306,10 @@ type Entry struct {
 	Name string
 	// Value is what follows the name on a command's line: its options.
 	Value string `json:",omitempty"`
-	// Scope is whose declarations file declares it: shared, or a Mac's; ""
-	// for a thing declared in a file of its own (File).
+	// Scope is whose declarations file declares it: shared, or a Mac's.
 	Scope string `json:",omitempty"`
 	// File is the file declaring it when that isn't a declarations file, as
-	// tmux's config declares its plugins: as it's shown, ~ and all.
+	// a linked file's own, in the config repository.
 	File string `json:",omitempty"`
 	// Section is its section's header, as in homebrew formulae.
 	Section string

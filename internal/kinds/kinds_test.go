@@ -21,8 +21,7 @@ func deps(t *testing.T) *kind.Deps {
 }
 
 // Every kind says all kit's shared code asks of it: its names, its group
-// and row, how it's made, its section unless it's declared in a file of its
-// own, its command's help, whether its things are apps, saying what they
+// and row, how it's made, its section, its command's help, whether its things are apps, saying what they
 // leave, the steps it needs, made by its own setup, and what it comes
 // after: kinds before it, or the data restore.
 func TestEveryKindIsComplete(t *testing.T) {
@@ -37,15 +36,10 @@ func TestEveryKindIsComplete(t *testing.T) {
 		if made.Name() != k.Name {
 			t.Errorf("%s makes a kind named %s", k.Name, made.Name())
 		}
-		_, outside := made.(kind.Declarer)
 		switch {
-		case k.Section == nil && !outside:
-			t.Errorf("%s has no section, and isn't declared in a file of its own", k.Name)
-		case k.Section != nil && outside:
-			t.Errorf("%s has a section, and is declared in a file of its own", k.Name)
-		case k.Section != nil && (k.Section.Header == "" || !strings.EqualFold(k.Label, k.Section.Header)):
+		case k.Section.Header == "" || !strings.EqualFold(k.Label, k.Section.Header):
 			t.Errorf("%s's label is %q, want its section's words, %q", k.Name, k.Label, k.Section.Header)
-		case k.Section != nil && k.Section.Kind != k.Name:
+		case k.Section.Kind != k.Name:
 			t.Errorf("%s's section declares %q, want it", k.Name, k.Section.Kind)
 		}
 		if !slices.Contains(render.Rows(), k.Row) {
@@ -89,9 +83,6 @@ func TestNamesAndHeadersAreUnique(t *testing.T) {
 			t.Errorf("two kinds are named %s", k.Name)
 		}
 		names[k.Name] = true
-		if k.Section == nil {
-			continue
-		}
 		if headers[k.Section.Header] {
 			t.Errorf("two kinds' sections are [%s]", k.Section.Header)
 		}
@@ -107,7 +98,7 @@ func TestTheOrders(t *testing.T) {
 	for _, k := range kinds.All {
 		run = append(run, k.Name)
 	}
-	want := []string{"brew", "cask", "mas", "npm", "composer", "go", "gh", "tmux", "login-item", "claude-mcp", "claude-skill",
+	want := []string{"brew", "cask", "mas", "npm", "composer", "gh", "login-item", "claude-mcp", "claude-skill",
 		"secret", "git-config", "defaults", "power", "backup-exclusion", "spotlight-exclusion"}
 	if !slices.Equal(run, want) {
 		t.Errorf("the run's order is %v\nwant %v", run, want)
@@ -117,7 +108,7 @@ func TestTheOrders(t *testing.T) {
 		file = append(file, s.Kind)
 	}
 	want = []string{"git-config", "defaults", "power", "backup-exclusion", "spotlight-exclusion",
-		"brew", "cask", "mas", "npm", "composer", "go", "gh", "login-item", "claude-mcp", "claude-skill", "secret"}
+		"brew", "cask", "mas", "npm", "composer", "gh", "login-item", "claude-mcp", "claude-skill", "secret"}
 	if !slices.Equal(file, want) {
 		t.Errorf("the file's order is %v\nwant %v", file, want)
 	}
@@ -156,9 +147,6 @@ func TestEachSectionDeclaresItsKind(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, k := range kinds.All {
-		if k.Section == nil {
-			continue
-		}
 		for mac, want := range map[string]bool{"laptop": true, "studio": false} {
 			if list, err := cfg.List(k.Name, mac); err != nil || list.Declared != want || len(list.Entries) != 0 {
 				t.Errorf("List(%s, %s) = %+v, %v; want declared %v, nothing in it", k.Name, mac, list, err, want)

@@ -113,10 +113,6 @@ func (d kindDrifter) choices(it check.Item) []choice {
 		{action: adopt, words: does(declaring, "declare it, for this Mac")},
 		{action: adopt, words: does(declaring, "declare it, for every Mac"), shared: true},
 	}
-	if _, ownFile := d.k.(kind.Declarer); ownFile {
-		// Declared in a file of its own, which every Mac linking it shares.
-		adopting = []choice{{action: adopt, words: does(declaring, "declare it")}}
-	}
 	uninstalling := []choice{{action: remove, words: d.removing}}
 	if _, reverts := d.k.(kind.Reverter); reverts {
 		// A setting changed on the Mac: put back what it was.
@@ -208,7 +204,7 @@ func (d kindDrifter) adoptValue(ctx context.Context, r *run, c *changes, dec dec
 	if err != nil {
 		return check.Result{State: check.Failed, Reason: err.Error()}
 	}
-	where, err := r.where(d.k.Name(), dec.item.Name)
+	where, err := r.cfg.Where(d.k.Name(), dec.item.Name)
 	if err != nil {
 		return check.Result{State: check.Failed, Reason: err.Error()}
 	}

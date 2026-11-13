@@ -12,20 +12,16 @@ import (
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/kind/appstore"
 	"github.com/leeovery/kit/internal/kind/brew"
-	"github.com/leeovery/kit/internal/kind/composer"
 	"github.com/leeovery/kit/internal/kind/defaults"
+	"github.com/leeovery/kit/internal/kind/devtool"
 	"github.com/leeovery/kit/internal/kind/exclusion"
-	"github.com/leeovery/kit/internal/kind/ghext"
 	"github.com/leeovery/kit/internal/kind/gitconfig"
-	"github.com/leeovery/kit/internal/kind/gotool"
 	"github.com/leeovery/kit/internal/kind/login"
 	"github.com/leeovery/kit/internal/kind/mcp"
-	"github.com/leeovery/kit/internal/kind/npm"
 	"github.com/leeovery/kit/internal/kind/power"
 	"github.com/leeovery/kit/internal/kind/secret"
 	"github.com/leeovery/kit/internal/kind/skill"
 	"github.com/leeovery/kit/internal/kind/spotlight"
-	"github.com/leeovery/kit/internal/kind/tmux"
 	"github.com/leeovery/kit/internal/steps"
 )
 
@@ -34,11 +30,9 @@ var All = []kind.Descriptor{
 	brew.FormulaeDescriptor,
 	brew.CasksDescriptor,
 	appstore.Descriptor,
-	npm.Descriptor,
-	composer.Descriptor,
-	gotool.Descriptor,
-	ghext.Descriptor,
-	tmux.Descriptor,
+	devtool.NPMDescriptor,
+	devtool.ComposerDescriptor,
+	devtool.GHDescriptor,
 	login.Descriptor,
 	mcp.Descriptor,
 	skill.Descriptor,
@@ -101,8 +95,8 @@ func Sections() []config.Section {
 	var out []config.Section
 	for _, group := range fileOrder {
 		for _, d := range All {
-			if d.Section != nil && d.Group == group {
-				out = append(out, *d.Section)
+			if d.Group == group {
+				out = append(out, d.Section)
 			}
 		}
 	}

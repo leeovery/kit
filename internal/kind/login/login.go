@@ -109,7 +109,7 @@ var Descriptor = kind.Descriptor{
 	Name:    kindName,
 	Label:   "macOS login items",
 	Group:   kind.Packages,
-	Section: &config.Section{Kind: kindName, Header: "macos login items", Form: config.Names, Sorted: true, Held: true},
+	Section: config.Section{Kind: kindName, Header: "macos login items", Form: config.Names, Sorted: true, Held: true},
 	Help: &kind.Help{
 		What:   "macOS login items",
 		Add:    "Add login items, by app, and declare them",
@@ -304,15 +304,6 @@ func (l *Login) Installed(ctx context.Context) ([]kind.Installed, error) {
 // Key is a bundle id, in lowercase, as macOS matches them.
 func (*Login) Key(name string) string {
 	return strings.ToLower(name)
-}
-
-// Resolve takes every name as a bundle id: one no app has is held up.
-func (*Login) Resolve(_ context.Context, names []string) (map[string]string, error) {
-	resolved := make(map[string]string, len(names))
-	for _, name := range names {
-		resolved[name] = name
-	}
-	return resolved, nil
 }
 
 // Blocked holds up the login items whose apps aren't installed.

@@ -16,10 +16,7 @@ import (
 	"github.com/leeovery/kit/internal/gitrepo"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/kind/brew"
-	"github.com/leeovery/kit/internal/kind/composer"
-	"github.com/leeovery/kit/internal/kind/ghext"
-	"github.com/leeovery/kit/internal/kind/gotool"
-	"github.com/leeovery/kit/internal/kind/npm"
+	"github.com/leeovery/kit/internal/kind/devtool"
 	"github.com/leeovery/kit/internal/kind/secret"
 	"github.com/leeovery/kit/internal/reinstall"
 	"github.com/leeovery/kit/internal/restore"
@@ -248,6 +245,6 @@ func (a *app) reinstallStep(r *run, dirs config.Dirs, restoring bool) (*engine.S
 // which write what private packages need. Never the App Store's, whose
 // sign-in is by hand, nor login items.
 var reinstallAfter = []string{
-	brew.FormulaeDescriptor.Name, brew.CasksDescriptor.Name, npm.Descriptor.Name, composer.Descriptor.Name,
-	gotool.Descriptor.Name, ghext.Descriptor.Name, secret.Descriptor.Name,
+	brew.FormulaeDescriptor.Name, brew.CasksDescriptor.Name, devtool.NPMDescriptor.Name, devtool.ComposerDescriptor.Name,
+	devtool.GHDescriptor.Name, secret.Descriptor.Name,
 }

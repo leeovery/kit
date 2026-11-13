@@ -7,7 +7,6 @@ import (
 	"io"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -149,30 +148,19 @@ func (a *app) secretsSync(ctx context.Context, r *run) error {
 	if err != nil || !slices.Contains(r.kinds, secretKind) {
 		return errors.New("no secrets are declared: kit-config's [secrets] declares them")
 	}
-	r.sink.Emit(event.RunStarted{Time: r.now, Command: r.command, Machine: r.machine, Version: r.version, Steps: []event.Step{{Name: secret.Descriptor.Name, Title: secret.Descriptor.Label, Area: steps.AreaDrift, Row: secret.Descriptor.Row}}})
-	started := time.Now()
-	r.sink.Emit(event.StepStarted{Time: started, Step: secretKind, Doing: "syncing"})
-	ctx = event.WithSaying(event.WithStep(ctx, secretKind), func(e event.Doing) {
-		e.Time, e.Step = time.Now(), secretKind
-		r.sink.Emit(e)
+	step := event.Step{Name: secret.Descriptor.Name, Title: secret.Descriptor.Label, Area: steps.AreaDrift, Row: secret.Descriptor.Row}
+	return a.oneStep(ctx, r, step, "syncing", func(ctx context.Context) check.Result {
+		report, err := k.Sync(ctx)
+		switch {
+		case err != nil:
+			return check.Result{State: check.Failed, Reason: err.Error()}
+		case len(report.Failed) > 0:
+			return check.Result{State: check.Failed, Reason: report.Error()}
+		case len(report.Held) > 0:
+			return check.Result{State: check.Deferred, Reason: report.Error()}
+		}
+		return check.Result{State: check.OK, Summary: report.Summary()}
 	})
-	report, err := k.Sync(event.WithDoing(ctx, "syncing"))
-	res := check.Result{State: check.OK, Summary: report.Summary()}
-	switch {
-	case err != nil:
-		res = check.Result{State: check.Failed, Reason: err.Error()}
-	case len(report.Failed) > 0:
-		res = check.Result{State: check.Failed, Reason: report.Error()}
-	case len(report.Held) > 0:
-		res = check.Result{State: check.Deferred, Reason: report.Error()}
-	}
-	r.sink.Emit(event.StepFinished{Time: time.Now(), Step: secretKind, Result: res, Duration: time.Since(started)})
-	counts := event.Tally(res)
-	r.sink.Emit(event.RunFinished{Time: time.Now(), Duration: time.Since(started), Counts: counts})
-	if res.State != check.OK {
-		return attention{}
-	}
-	return nil
 }
 
 // placesSchema is kit secret places --json's document's version.

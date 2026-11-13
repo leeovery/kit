@@ -96,11 +96,10 @@ func (a *app) switchFeatures(ctx context.Context, r *run, names []string, on, sh
 			case !in:
 				return check.Result{State: check.OK, Summary: "off already"}
 			default:
-				if err := r.cfg.Undeclare(config.FeaturesKind, scope, name); err != nil {
+				if err := c.undeclareIn(config.FeaturesKind, scope, name); err != nil {
 					return failed(err)
 				}
 			}
-			c.changed(config.DeclFile(scope))
 			return check.Result{State: check.OK, Summary: verb + ", in " + scope}
 		})
 	}

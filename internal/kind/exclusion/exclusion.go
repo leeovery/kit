@@ -44,7 +44,7 @@ var Descriptor = kind.Descriptor{
 	Name:    kindName,
 	Label:   "Backup exclusions",
 	Group:   kind.Settings,
-	Section: &config.Section{Kind: kindName, Header: "backup exclusions", Form: config.Paths, Sorted: true},
+	Section: config.Section{Kind: kindName, Header: "backup exclusions", Form: config.Paths, Sorted: true},
 	Help: &kind.Help{
 		What:   "Folders the backups leave out",
 		Add:    "Leave folders out of backups, and declare them",
@@ -181,15 +181,6 @@ func (x *Exclusions) globbed(name string) bool {
 		ok, _ := filepath.Match(glob, x.full(name))
 		return ok
 	})
-}
-
-// Resolve knows every path.
-func (x *Exclusions) Resolve(_ context.Context, names []string) (map[string]string, error) {
-	out := make(map[string]string, len(names))
-	for _, name := range names {
-		out[name] = name
-	}
-	return out, nil
 }
 
 // Install keeps each path out of every excluder's backups, one at a time so

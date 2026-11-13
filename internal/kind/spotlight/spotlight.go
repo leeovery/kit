@@ -60,7 +60,7 @@ var Descriptor = kind.Descriptor{
 	Name:    kindName,
 	Label:   "Spotlight exclusions",
 	Group:   kind.Settings,
-	Section: &config.Section{Kind: kindName, Header: "spotlight exclusions", Form: config.Paths, Sorted: true},
+	Section: config.Section{Kind: kindName, Header: "spotlight exclusions", Form: config.Paths, Sorted: true},
 	Help: &kind.Help{
 		What:   "Folders Spotlight leaves out",
 		Add:    "Leave folders out of Spotlight, and declare them",
@@ -146,15 +146,6 @@ func (s *Spotlight) forget(waiting []string) error {
 		return err
 	}
 	return state.Update(s.stateDir, recordName, func(rec *record) { rec.Added = slices.DeleteFunc(rec.Added, done) })
-}
-
-// Resolve knows every folder.
-func (s *Spotlight) Resolve(_ context.Context, names []string) (map[string]string, error) {
-	out := make(map[string]string, len(names))
-	for _, name := range names {
-		out[name] = name
-	}
-	return out, nil
 }
 
 // Install adds each folder to Spotlight's privacy list, through sudo, and

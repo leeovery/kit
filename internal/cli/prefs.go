@@ -180,14 +180,19 @@ func (a *app) prefs(r *run) (*prefs.Prefs, error) {
 	return p, nil
 }
 
-// oneStep runs do as a run of one step, name, in area, saying what it's
-// doing meanwhile: the run needs attention unless it stands ok.
-func (a *app) oneStep(ctx context.Context, r *run, name, title, area, doing string, do func(ctx context.Context) check.Result) error {
-	r.sink.Emit(event.RunStarted{Time: r.now, Command: r.command, Machine: r.machine, Version: r.version, Steps: []event.Step{{Name: name, Title: title, Area: area}}})
+// oneStep runs do as a run of one step, saying what it's doing as it
+// starts, and whatever do says meanwhile: the run needs attention unless it
+// stands ok.
+func (a *app) oneStep(ctx context.Context, r *run, step event.Step, doing string, do func(ctx context.Context) check.Result) error {
+	r.sink.Emit(event.RunStarted{Time: r.now, Command: r.command, Machine: r.machine, Version: r.version, Steps: []event.Step{step}})
 	started := time.Now()
-	r.sink.Emit(event.StepStarted{Time: started, Step: name, Doing: doing})
-	res := do(event.WithStep(ctx, name))
-	r.sink.Emit(event.StepFinished{Time: time.Now(), Step: name, Result: res, Duration: time.Since(started)})
+	r.sink.Emit(event.StepStarted{Time: started, Step: step.Name, Doing: doing})
+	ctx = event.WithSaying(event.WithStep(ctx, step.Name), func(e event.Doing) {
+		e.Time, e.Step = time.Now(), step.Name
+		r.sink.Emit(e)
+	})
+	res := do(event.WithDoing(ctx, doing))
+	r.sink.Emit(event.StepFinished{Time: time.Now(), Step: step.Name, Result: res, Duration: time.Since(started)})
 	r.sink.Emit(event.RunFinished{Time: time.Now(), Duration: time.Since(started), Counts: event.Tally(res)})
 	if res.State != check.OK {
 		return attention{}
@@ -195,13 +200,16 @@ func (a *app) oneStep(ctx context.Context, r *run, name, title, area, doing stri
 	return nil
 }
 
+// prefsStep is kit prefs' commands' one step.
+var prefsStep = event.Step{Name: steps.PrefsName, Title: "Settings", Area: steps.AreaBackups}
+
 // prefsCapture captures apps' settings, as a run of one step.
 func (a *app) prefsCapture(ctx context.Context, r *run) error {
 	p, err := a.prefs(r)
 	if err != nil {
 		return err
 	}
-	return a.oneStep(ctx, r, steps.PrefsName, "Settings", steps.AreaBackups, "capturing", func(ctx context.Context) check.Result {
+	return a.oneStep(ctx, r, prefsStep, "capturing", func(ctx context.Context) check.Result {
 		return captureResult(p.Capture(ctx))
 	})
 }
@@ -242,7 +250,7 @@ func (a *app) prefsRestore(ctx context.Context, r *run, opts prefs.RestoreOption
 	if opts.DryRun {
 		doing = "checking what it would restore"
 	}
-	return a.oneStep(ctx, r, steps.PrefsName, "Settings", steps.AreaBackups, doing, func(ctx context.Context) check.Result {
+	return a.oneStep(ctx, r, prefsStep, doing, func(ctx context.Context) check.Result {
 		report, err := p.Restore(ctx, opts)
 		if err != nil {
 			return check.Result{State: check.Failed, Reason: err.Error()}

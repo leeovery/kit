@@ -128,7 +128,7 @@ var Descriptor = kind.Descriptor{
 	Name:    kindName,
 	Label:   "macOS settings",
 	Group:   kind.Settings,
-	Section: &config.Section{Kind: kindName, Header: "macos settings", Form: config.Defaults, Sorted: true, Says: lineSays, FromMac: true},
+	Section: config.Section{Kind: kindName, Header: "macos settings", Form: config.Defaults, Sorted: true, Says: lineSays, FromMac: true},
 	Help: &kind.Help{
 		What:   "macOS settings, in defaults write's form",
 		Add:    "Declare macOS settings as this Mac has them",
@@ -552,15 +552,6 @@ func isNoise(domain, key string) bool {
 		}
 	}
 	return false
-}
-
-// Resolve knows every setting: one not set is missing.
-func (d *Defaults) Resolve(_ context.Context, names []string) (map[string]string, error) {
-	out := make(map[string]string, len(names))
-	for _, name := range names {
-		out[name] = name
-	}
-	return out, nil
 }
 
 // Differs says, of the declared settings it compares, how each changed since

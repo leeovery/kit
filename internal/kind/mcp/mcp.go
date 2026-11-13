@@ -81,7 +81,7 @@ var Descriptor = kind.Descriptor{
 	Name:    kindName,
 	Label:   "Claude MCP",
 	Group:   kind.Packages,
-	Section: &config.Section{Kind: kindName, Header: "claude mcp", Form: config.Commands, Folders: true, Says: lineSays, FromMac: true},
+	Section: config.Section{Kind: kindName, Header: "claude mcp", Form: config.Commands, Folders: true, Says: lineSays, FromMac: true},
 	Help: &kind.Help{
 		What:   "Claude Code's MCP servers",
 		Add:    "Declare MCP servers Claude Code has, as it has them",
@@ -228,15 +228,6 @@ func (m *MCP) installed() ([]Server, error) {
 	}
 	slices.SortFunc(servers, func(a, b Server) int { return strings.Compare(a.ID(), b.ID()) })
 	return servers, nil
-}
-
-// Resolve takes every name as a server's id.
-func (*MCP) Resolve(_ context.Context, names []string) (map[string]string, error) {
-	resolved := make(map[string]string, len(names))
-	for _, name := range names {
-		resolved[name] = name
-	}
-	return resolved, nil
 }
 
 // Differs says, of the declared servers installed, how each installed

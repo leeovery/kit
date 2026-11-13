@@ -351,3 +351,12 @@ func TestStatusLeavesOutAKindWithoutASection(t *testing.T) {
 		}
 	}
 }
+
+// A run whose log can't be opened fails, saying so, its face closed.
+func TestStatusWhoseLogCantOpen(t *testing.T) {
+	w := laptopWorld(t)
+	w.write(t, filepath.Join("Library", "Logs", "kit"), "a file where the folder goes\n")
+	if _, errOut, code := w.run(t, "status"); code == 0 || errOut == "" {
+		t.Errorf("kit status exited %d, printing %q; want it to fail, saying why", code, errOut)
+	}
+}

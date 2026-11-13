@@ -80,7 +80,7 @@ var Descriptor = kind.Descriptor{
 	Name:    kindName,
 	Label:   "App Store apps",
 	Group:   kind.Packages,
-	Section: &config.Section{Kind: kindName, Header: "app store apps", Form: config.Names, Sorted: true, Held: true},
+	Section: config.Section{Kind: kindName, Header: "app store apps", Form: config.Names, Sorted: true, Held: true},
 	Help: &kind.Help{
 		What:   "App Store apps",
 		Add:    "Install App Store apps, by name or id, and declare them",

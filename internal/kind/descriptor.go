@@ -24,9 +24,8 @@ type Descriptor struct {
 	// kit's reports count them.
 	Group Group
 	// Section is how its section in a declarations file reads, its Kind
-	// the kind's Name; nil for a kind declared in a file of its own
-	// (Declarer), as tmux's plugins are, in tmux's config.
-	Section *config.Section
+	// the kind's Name.
+	Section config.Section
 	// Help is its command, kit <name>, adding and removing its things: nil
 	// for a kind with a command of its own.
 	Help *Help

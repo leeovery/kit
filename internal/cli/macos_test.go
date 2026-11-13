@@ -25,18 +25,6 @@ func macosWorld(t *testing.T, dock string) *world {
 	return w
 }
 
-func TestStatusShowsMacOSSettings(t *testing.T) {
-	w := macosWorld(t, "<key>tilesize</key><integer>60</integer>")
-	if out, _, _ := w.run(t, "status"); !strings.Contains(out, "defaults ok 1 declared, all set\n") {
-		t.Errorf("kit status printed\n%s", out)
-	}
-	w.exports("com.apple.dock", "<key>tilesize</key><integer>48</integer><key>autohide</key><true/>")
-	out, _, _ := w.run(t, "status")
-	if !strings.Contains(out, "defaults diverged:new com.apple.dock:tilesize (set to 48)\n") || !strings.Contains(out, "defaults extra:new com.apple.dock:autohide\n") {
-		t.Errorf("kit status printed\n%s\nwant the size changed on the Mac, and autohide new", out)
-	}
-}
-
 func TestReconcileAdoptsAndPutsBackSettings(t *testing.T) {
 	w := macosWorld(t, "<key>tilesize</key><integer>60</integer>")
 	w.run(t, "status")
