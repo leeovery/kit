@@ -235,7 +235,7 @@ func (t tracking) from() (string, error) {
 // unset is the refusal for a branch with no upstream, which remote it's
 // pushed to not set.
 func (t tracking) unset() error {
-	return nowhere{fmt.Errorf("%s has no upstream, and which remote it's pushed to isn't set, so nothing was pushed: git config remote.pushDefault <remote> sets it", t.name())}
+	return nowhere{fmt.Errorf("%s has no upstream, and which remote it's pushed to isn't set, so kit pushes nothing: git config remote.pushDefault <remote> sets it", t.name())}
 }
 
 // pushedTo is the remote-tracking ref of the branch Push pushes to: the
@@ -254,7 +254,7 @@ func (t tracking) pushedTo() string {
 func (r Repo) tracking(ctx context.Context, remotes []string) (tracking, error) {
 	res, err := r.git(ctx, "symbolic-ref", "-q", "HEAD")
 	if exit, ok := errors.AsType[*runner.ExitError](err); ok && exit.Code == 1 {
-		return tracking{}, nowhere{errors.New("HEAD isn't on a branch, so nothing was pushed")}
+		return tracking{}, nowhere{errors.New("HEAD isn't on a branch, so kit pushes nothing")}
 	}
 	if err != nil {
 		return tracking{}, err
@@ -284,9 +284,9 @@ func (r Repo) pushRemote(ctx context.Context, t tracking, remotes []string) (str
 		case slices.Contains(remotes, remote):
 			return remote, nil
 		case strings.ContainsAny(remote, ":/"):
-			return "", nowhere{fmt.Errorf("%s is a URL, not a remote's name, so nothing was pushed: kit pushes only to one of the repository's remotes, by its name", key)}
+			return "", nowhere{fmt.Errorf("%s is a URL, not a remote's name, so kit pushes nothing: kit pushes only to one of the repository's remotes, by its name", key)}
 		}
-		return "", nowhere{fmt.Errorf("%s is %s, not one of the repository's remotes, so nothing was pushed: kit pushes only to a remote by its name", key, remote)}
+		return "", nowhere{fmt.Errorf("%s is %s, not one of the repository's remotes, so kit pushes nothing: kit pushes only to a remote by its name", key, remote)}
 	}
 	switch {
 	case t.upstream != "":
