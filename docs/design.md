@@ -1415,7 +1415,8 @@ refuses a line the restore would refuse, before writing anything, and copies not
   with no Mac looked for, or to restore nothing, the answer for a Mac in use brought onto kit
   by its boot under its own name, or one starting afresh, which the boot can't tell from a
   clean install (each path recorded not restored, never begun, nothing set aside, and the
-  restore settles). A new Mac with nothing to come from (a new name, no `from`) restores
+  restore settles); the card names the listed paths whose files a backup would set aside. A
+  new Mac with nothing to come from (a new name, no `from`) restores
   nothing, and a Mac in use, which never runs the boot, restores nothing, whatever its `from`
   says. A Mac rebuilt under its own name while its `from` is still in kit-config restores from
   that Mac. A Mac in set-up whose `[restore]` lists nothing still has the step, fine with
@@ -1470,8 +1471,10 @@ refuses a line the restore would refuse, before writing anything, and copies not
   reachable, free space for the copy, the same username (tools key their data by full path).
   Then a second pass comparing checksums: from a backup it must find nothing; from a live Mac
   what changed during the copy is copied again, and counted. A listed file the copy kept as
-  newer here (rsync says so) is kept, as newer work always is, the log saying so. rsync's own
-  errors fail the step.
+  newer here (rsync says so), as a shell's history every tab writes, between its setting aside
+  and its copy, is set aside and copied again, once, before the second pass: only in set-up's
+  window, before its copy first started, never one resumed; any other is kept, as newer work
+  always is. rsync's own errors fail the step.
 - **The judgement, per path, before its copy.** Recorded done: never restored again; its copy
   begun: carried on, never judged again, what's in it the copy's. Absent, or holding only
   what's kit's: restored. Holding anything else in set-up's window, whatever its age (a

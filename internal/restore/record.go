@@ -134,11 +134,17 @@ func (r Record) Resuming(lines []Line, kind string) (from Origin, ok bool) {
 	return Origin{}, false
 }
 
-// mayAside is whether the listed path path may be set aside: one the
-// restore's first run listed, before the restore settled, its source yet to
-// be found without it.
-func (r Record) mayAside(path string) bool {
-	return r.Settled.IsZero() && slices.Contains(r.First.Paths, path) && r.Paths[path].State != NotThere
+// MaySetAside reports whether what's at the listed path path, not kit's,
+// may be set aside to make way for its copy: in set-up's window, which is
+// the Mac's state, never its files' times, open on a Mac the boot set up,
+// setUp, till the restore first settles, and only to a path the restore's
+// first run listed, its source yet to be found without it, before its copy
+// first began, from any source, as a copy begun put what's there. Shut on
+// a Mac in use, and to a line added after the first run. r is the record
+// from before the path's copy began.
+func (r Record) MaySetAside(path string, setUp bool) bool {
+	p := r.Paths[path]
+	return setUp && r.Settled.IsZero() && slices.Contains(r.First.Paths, path) && p.State != NotThere && !p.started()
 }
 
 // Finished reports whether the restore is done with the listed path path:

@@ -226,7 +226,7 @@ func TestStatusShowsTheDataRestore(t *testing.T) {
 		{"status-restore.golden", check.Result{State: check.Attention, Summary: "5 declared, 1 here already, 4 to restore", Items: []check.Item{
 			{ID: "restore:~/Code", Name: "~/Code", State: "missing", Detail: "part-way from Time Machine's backup of 8 Nov 2026 14:19", Action: "restore"},
 			{ID: "restore:~/.claude", Name: "~/.claude", State: "missing", Action: "restore"},
-			{ID: "restore:~/.zsh_history", Name: "~/.zsh_history", State: "missing", Detail: "set-up's copy set aside first", Action: "restore"},
+			{ID: "restore:~/.zsh_history", Name: "~/.zsh_history", State: "missing", Detail: "what's here set aside first", Action: "restore"},
 			{ID: "restore:~/Documents", Name: "~/Documents", State: "missing", Detail: "2 files differed from Time Machine's backup of 8 Nov 2026 14:19, copied again; compared again next run", Action: "restore"},
 		}}},
 		{"status-restore-settled.golden", check.Result{State: check.OK, Summary: "5 declared, 3 restored, 2 not restored", Items: []check.Item{
