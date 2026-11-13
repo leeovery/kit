@@ -170,18 +170,24 @@ func (p *Prefs) livePath(files, stored string) string {
 	return filepath.Join(p.Home, rel)
 }
 
-// storedFiles are the files in the store's files folder, sorted, those
-// whose names start with a dot left out (prefsync's rule).
+// storedFiles are the files in the store's files folder, sorted, those its
+// ignore file leaves out (gitignore) left out.
 func storedFiles(files string) []string {
 	var out []string
 	_ = filepath.WalkDir(files, func(path string, d fs.DirEntry, err error) error {
-		if err == nil && !d.IsDir() && !strings.HasPrefix(d.Name(), ".") {
+		if err == nil && !d.IsDir() && !ignored(d.Name()) {
 			out = append(out, path)
 		}
 		return nil
 	})
 	slices.Sort(out)
 	return out
+}
+
+// ignored reports whether a file called name is one the store's ignore file
+// leaves out (gitignore).
+func ignored(name string) bool {
+	return name == ".DS_Store" || strings.HasPrefix(name, ".") && strings.HasSuffix(name, ".tmp")
 }
 
 // pruneEmpty removes the folders left empty under root, deepest first, but

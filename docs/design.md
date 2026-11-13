@@ -1314,8 +1314,9 @@ short plan before code.
 Every preferences domain that isn't Apple's or the system's (no dot in its name, or `com.apple.`,
 `group.com.apple.`, `systemgroup.`, `.GlobalPreferences`, `org.cups.`), through `defaults export`
 and `import` (cfprefsd's view; a plist copied behind its back half-sticks), and the settings files
-`[prefs files]` names (folders taken whole, globs with Python's rules: a wildcard never matches a
-hidden name). Each Mac saves into its own folder of one git repository, `kit.toml`'s
+`[prefs files]` names (folders taken whole, dot-files and all but Finder's `.DS_Store`; globs
+matching each part as rsync's wildmatch does, as a data restore reads them: a wildcard matches a
+hidden name too). Each Mac saves into its own folder of one git repository, `kit.toml`'s
 `prefs_repo`, cloned in kit's data folder (`~/.local/share/kit/prefs`), in prefsync's format byte
 for byte: `<mac>/domains/<domain>.plist`, sorted XML as Python's plistlib writes it, the keys that
 change by themselves stripped (window frames, list views, file dialogs, Sparkle's check times);
