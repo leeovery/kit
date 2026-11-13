@@ -224,6 +224,13 @@ func TestConfigSync(t *testing.T) {
 	if state, text, _ := checked(t, sync(fake)); state != check.OK || text != "nothing to push to" {
 		t.Errorf("no remote = %s %q, want ok, nothing to push to", state, text)
 	}
+
+	// git failing is no "nothing to push to": the check fails.
+	fake = runnertest.New(t)
+	fake.On("git", git("remote")...).Exits(128)
+	if state, _, _ := checked(t, sync(fake)); state != check.Failed {
+		t.Errorf("git failing = %s, want failed", state)
+	}
 }
 
 // kit-config's edits, its files on disk that differ from the last commit,

@@ -2,6 +2,7 @@ package steps
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"time"
@@ -27,8 +28,11 @@ func ConfigSync(repo gitrepo.Repo, now func() time.Time) engine.Step {
 		Name: ConfigSyncName, Title: "Sync", Area: AreaConfig,
 		Check: func(ctx context.Context) check.Result {
 			made, err := repo.Waiting(ctx)
-			if err != nil {
+			switch {
+			case errors.Is(err, gitrepo.ErrNoRemote):
 				return check.Result{State: check.OK, Summary: "nothing to push to", Glance: "nothing to push to"}
+			case err != nil:
+				return failed(err)
 			}
 			if len(made) == 0 {
 				return check.Result{State: check.OK, Summary: "pushed", Glance: "pushed"}
