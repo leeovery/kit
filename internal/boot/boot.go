@@ -429,6 +429,10 @@ type state struct {
 	Access  string    `json:"access,omitempty"`
 	Arrived time.Time `json:"arrived,omitzero"`
 	SetUp   bool      `json:"set_up,omitempty"`
+	// Began is what kit before set_up recorded instead, when the Mac's
+	// set-up began: read as SetUp, so a Mac part-way through set-up then
+	// carries on.
+	Began time.Time `json:"began,omitzero"`
 }
 
 const stateName = "bootstrap.json"
@@ -440,7 +444,7 @@ const stateName = "bootstrap.json"
 // other, as a Mac in use or a new one started fresh.
 func SetUp(stateDir string) (bool, error) {
 	st, err := kitstate.Load[state](stateDir, stateName)
-	return st.SetUp, err
+	return st.SetUp || !st.Began.IsZero(), err
 }
 
 // NewMac is the new Mac the boot added to kit-config, as its record in

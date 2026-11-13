@@ -531,6 +531,25 @@ func TestSetUpForAMacAddedAhead(t *testing.T) {
 	}
 }
 
+// A Mac part-way through set-up under kit before set_up, its boot having
+// recorded when its set-up began instead, is set up still, and stays so as
+// the boot's record changes.
+func TestSetUpReadsWhenSetUpBegan(t *testing.T) {
+	stateDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(stateDir, stateName), []byte(`{"began": "2026-11-20T09:00:00Z"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if setUp, err := SetUp(stateDir); err != nil || !setUp {
+		t.Fatalf("SetUp() = %v, %v; want set up", setUp, err)
+	}
+	if err := ForgetNewMac(stateDir); err != nil {
+		t.Fatal(err)
+	}
+	if setUp, err := SetUp(stateDir); err != nil || !setUp {
+		t.Errorf("the record changed, SetUp() = %v, %v; want set up still", setUp, err)
+	}
+}
+
 // The self-test: the chip, memory, the disk, macOS, the network.
 func TestSelfTest(t *testing.T) {
 	gh := &gitHub{}
