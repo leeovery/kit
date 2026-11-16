@@ -141,6 +141,10 @@ type Section struct {
 	// doesn't read as the kind reads it: nil when it does. kit never writes
 	// a line it refuses (Config.Declare).
 	Line func(Entry) error
+	// FromMac is whether its lines' values are read from the Mac as it's
+	// set, so a shared declare refused for a value other than a Mac's line
+	// says to set it the same here.
+	FromMac bool
 	// Held is whether it's a list whose sections can hold their lines back,
 	// options after the header saying what for: --after a step, or one of a
 	// step's things; --secret a secret they need, as in [homebrew formulae
@@ -170,6 +174,8 @@ type sectionDef struct {
 	items func(ref string) error
 	// line is the kind's own check of a line (Section.Line).
 	line func(Entry) error
+	// fromMac is whether its values are read from the Mac (Section.FromMac).
+	fromMac bool
 	// holds are the options the kind's sections take after the header,
 	// holding their lines back, what for (its hold): --after a step, or one
 	// of a step's things; --secret a secret they need, as in [homebrew
@@ -214,7 +220,7 @@ var (
 func sectionDefs(kinds []Section) []sectionDef {
 	var defs []sectionDef
 	for _, k := range kinds {
-		d := sectionDef{header: k.Header, kind: k.Kind, form: k.Form, isKind: true, folders: k.Folders, items: k.Items, line: k.Line, sorted: k.Sorted}
+		d := sectionDef{header: k.Header, kind: k.Kind, form: k.Form, isKind: true, folders: k.Folders, items: k.Items, line: k.Line, fromMac: k.FromMac, sorted: k.Sorted}
 		if k.Held {
 			d.holds = listOptions
 		}

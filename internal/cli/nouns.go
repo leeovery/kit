@@ -87,6 +87,12 @@ It's declared in this Mac's declarations file, named after it, unless --shared
 declares it for every Mac, in the shared file, which takes it out of each
 Mac's own. The change is committed and pushed to the config repository.`
 
+// movedWhole is how a line adding command says a Mac's line moves to the
+// shared file whole.
+const movedWhole = `
+
+With --shared, its name alone moves the line the Macs declare, as written.`
+
 // undeclaredWhere is how removing says where a thing's undeclared.
 const undeclaredWhere = `
 
@@ -276,7 +282,7 @@ func newLineAdd(a *app, name, short string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   lineUsage(name),
 		Short: short + " (--shared: every Mac)",
-		Long:  long + declaredWhere,
+		Long:  long + movedWhole + declaredWhere,
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return a.prepared(cmd, name+" add", func(ctx context.Context, r *run) error {

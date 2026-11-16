@@ -48,7 +48,7 @@ var Descriptor = kind.Descriptor{
 	Name:    kindName,
 	Label:   "Power settings",
 	Group:   kind.Settings,
-	Section: config.Section{Kind: kindName, Header: "power settings", Form: config.Power, Sorted: true},
+	Section: config.Section{Kind: kindName, Header: "power settings", Form: config.Power, Sorted: true, FromMac: true},
 	Help: &kind.Help{
 		What:   "Power settings, in pmset's form",
 		Add:    "Declare power settings as this Mac has them",

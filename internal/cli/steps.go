@@ -514,6 +514,33 @@ type stepOptions struct {
 	addOptions
 }
 
+// stepValue is the line kit step add declares, after the step's name: what
+// it does and its options, as args and opts give them; or, args the name
+// alone, with --shared and no options, the Macs' line's.
+func stepValue(r *run, args []string, opts stepOptions) (string, error) {
+	usage := `kit step add <name> "<what it does>"`
+	if len(args) == 1 {
+		if !opts.shared || len(opts.after)+len(opts.before)+len(opts.secrets) > 0 || opts.sudo {
+			return "", errors.New("say it as " + usage)
+		}
+		return r.movedValue(config.StepsKind, args[0], usage)
+	}
+	words := []string{config.Quote(args[1])}
+	for _, after := range opts.after {
+		words = append(words, "--after", config.Quote(after))
+	}
+	for _, before := range opts.before {
+		words = append(words, "--before", config.Quote(before))
+	}
+	for _, name := range opts.secrets {
+		words = append(words, "--secret", config.Quote(name))
+	}
+	if opts.sudo {
+		words = append(words, "--sudo")
+	}
+	return strings.Join(words, " "), nil
+}
+
 // newStepCommand is kit step: adding and removing steps of your own.
 func newStepCommand(a *app) *cobra.Command {
 	var opts stepOptions
@@ -531,11 +558,11 @@ script run with it set when it's a variable; each as often as wanted. --sudo
 says applying needs an administrator's password.
 
 The script starts as a template following that contract: write its check and
-apply.` + declaredWhere,
-		Args: cobra.ExactArgs(2),
+apply.` + movedWhole + declaredWhere,
+		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return a.prepared(cmd, stepCommand+" add", func(ctx context.Context, r *run) error {
-				return a.addStep(ctx, r, args[0], args[1], opts)
+				return a.addStep(ctx, r, args, opts)
 			})
 		},
 	}
@@ -548,24 +575,16 @@ apply.` + declaredWhere,
 	return newLineCommand(a, stepCommand, "Steps of your own, each a script in kit-config that sets something up", add)
 }
 
-// addStep declares the step called name, which does what does says, and
-// writes its folder, its script a template.
-func (a *app) addStep(ctx context.Context, r *run, name, does string, opts stepOptions) error {
-	scope := r.scope(opts.shared)
-	words := []string{config.Quote(does)}
-	for _, after := range opts.after {
-		words = append(words, "--after", config.Quote(after))
+// addStep declares the step args name, which does what they say next, and
+// writes its folder, its script a template; or, given its name alone with
+// --shared, moves the Macs' line as written.
+func (a *app) addStep(ctx context.Context, r *run, args []string, opts stepOptions) error {
+	name, scope := args[0], r.scope(opts.shared)
+	value, err := stepValue(r, args, opts)
+	if err != nil {
+		return err
 	}
-	for _, before := range opts.before {
-		words = append(words, "--before", config.Quote(before))
-	}
-	for _, name := range opts.secrets {
-		words = append(words, "--secret", config.Quote(name))
-	}
-	if opts.sudo {
-		words = append(words, "--sudo")
-	}
-	entry := config.Entry{Name: name, Value: strings.Join(words, " "), Note: opts.note, Scope: scope}
+	entry := config.Entry{Name: name, Value: value, Note: opts.note, Scope: scope}
 	c := startChanges(r, []string{name})
 	c.step(ctx, name, func(context.Context) check.Result {
 		s, err := steps.ParseScript(r.cfg.Dir, entry)
@@ -598,7 +617,7 @@ func (a *app) addStep(ctx context.Context, r *run, name, does string, opts stepO
 		if err := r.checkDeclare(config.StepsKind, scope, entry); err != nil {
 			return failed(err)
 		}
-		made, undo, err := r.makeStepFolder(s, does, folders)
+		made, undo, err := r.makeStepFolder(s, s.Does, folders)
 		if err != nil {
 			return failed(errors.Join(err, undo()))
 		}

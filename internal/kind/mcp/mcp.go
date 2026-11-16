@@ -82,7 +82,7 @@ var Descriptor = kind.Descriptor{
 	Name:    kindName,
 	Label:   "Claude MCP",
 	Group:   kind.Packages,
-	Section: config.Section{Kind: kindName, Header: "claude mcp", Form: config.Commands, Folders: true},
+	Section: config.Section{Kind: kindName, Header: "claude mcp", Form: config.Commands, Folders: true, FromMac: true},
 	Help: &kind.Help{
 		What:   "Claude Code's MCP servers",
 		Add:    "Declare MCP servers Claude Code has, as it has them",

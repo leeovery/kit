@@ -373,13 +373,13 @@ func TestAddASecretSharedRefusesWhatAMacSaysOtherwise(t *testing.T) {
 		args                                   []string
 	}{
 		{"given at another field", "FOO Section/foo\n", "", "",
-			"laptop/declarations:5 has FOO with Section/foo, where this gives Section/other: give the same, or take that line out first",
+			"laptop/declarations:5 has FOO Section/foo, where this gives FOO Section/other: give the same, or take that line out first",
 			[]string{"FOO", "--item", "op://vault/Item", "--field", "Section/other", "--stdin"}},
 		{"in another item", "TOKEN Section/token\n", "Other", "FOO Section/foo\n",
-			"studio/declarations:5 has FOO in op://vault/Other, where this gives op://vault/Item: give the same, or take that line out first",
+			"studio/declarations:5 has FOO in [secrets op://vault/Other], where this gives [secrets op://vault/Item]: move that line to the same section, or take it out first",
 			[]string{"FOO", "--in", "mac-secrets", "--field", "Section/foo", "--stdin"}},
 		{"written otherwise", "FOO Section/foo\n", "Item", "FOO 'Section/foo'   # a token\n",
-			`the lines it moves have different notes, laptop/declarations:5 (none), studio/declarations:5 ("a token"): make them the same, or take those lines out first`,
+			"the lines it moves have different notes, laptop/declarations:5 (none), studio/declarations:5 (a token): make them the same, give one with --note, or take those lines out first",
 			[]string{"FOO", "--ref", "op://vault/Item/Section/foo"}},
 	} {
 		w := laptopWorld(t)

@@ -349,8 +349,8 @@ func (c *Config) Declare(kind, scope string, e Entry) error {
 // DeclareShared declares e in the shared declarations, as Declare does,
 // taking it out of the files of each of the Macs from, as Undeclare does:
 // one edit, judged as a whole before any of it's written. The Macs' block
-// moves as written, refused when theirs differ or e gives otherwise
-// (moving). It returns the scopes whose files it wrote, those written
+// moves as written, refused when theirs differ, e gives otherwise (moving),
+// or the shared file's block for its item goes by another name. It returns the scopes whose files it wrote, those written
 // before one failed too.
 func (c *Config) DeclareShared(kind string, e Entry, from []string) (written []string, err error) {
 	d, files, err := c.declaring(kind, Shared, e, from...)
@@ -422,7 +422,7 @@ func (c *Config) declaring(kind, scope string, e Entry, from ...string) (section
 	if err != nil {
 		return d, nil, err
 	}
-	e, notes, err := moving(e, moved)
+	e, notes, err := moving(d, e, moved)
 	if err != nil {
 		return d, nil, err
 	}
@@ -436,8 +436,11 @@ func (c *Config) declaring(kind, scope string, e Entry, from ...string) (section
 		return d, nil, err
 	}
 	s := f.find(d, arg, e.Hold)
-	if s == nil {
+	switch {
+	case s == nil:
 		s = f.add(&section{def: d, arg: arg, as: e.As, hold: e.Hold})
+	case len(moved) > 0 && e.As != "" && s.as != e.As:
+		return d, nil, fmt.Errorf("%s:%d's block for %s goes by %s, where the line moved goes by %s: give them the same name, or take that line out first", DeclFile(scope), s.start, arg, cmp.Or(s.as, "no name"), e.As)
 	}
 	block := slices.Concat(notes, []string{line}, steps)
 	switch b := splitBody(d.form, s.body); {

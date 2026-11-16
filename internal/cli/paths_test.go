@@ -50,7 +50,8 @@ func TestApplyWritesTheShellsPath(t *testing.T) {
 
 // Declared for every Mac, a name comes out of the Macs' files that had it,
 // in the same edit, whatever the command, refused where a Mac's line says
-// otherwise; declared for this Mac, one the
+// otherwise, and moved as written given its name alone; declared for this
+// Mac, one the
 // shared file has is refused, saying so.
 func TestSharedTakesTheNameOutOfTheMacs(t *testing.T) {
 	w := laptopWorld(t)
@@ -67,12 +68,15 @@ func TestSharedTakesTheNameOutOfTheMacs(t *testing.T) {
 	}
 
 	w.fake.On("dig", "example.com")
-	if out, _, code := w.run(t, "check", "add", "dns", "--shared", "--", "dig", "example.org"); code != 1 || !strings.Contains(out, "studio/declarations:5 has dns with -- dig example.com, where this gives -- dig example.org: give the same, or take that line out first") {
+	if out, _, code := w.run(t, "check", "add", "dns", "--shared", "--", "dig", "example.org"); code != 1 || !strings.Contains(out, "studio/declarations:5 has dns -- dig example.com, where this gives dns -- dig example.org: give only its name to move it as written, or take that line out first") {
 		t.Errorf("kit check add --shared, another command than studio's, printed\n%s exit %d", out, code)
 	}
 	w.expectSync(t, []string{"shared/declarations", "studio/declarations"}, "kit check add dns (laptop)")
-	if out, _, code := w.run(t, "check", "add", "dns", "--shared", "--", "dig", "example.com"); code != 0 || !strings.Contains(out, "dns ok declared in shared, out of studio") {
-		t.Errorf("kit check add --shared printed\n%s exit %d", out, code)
+	if out, _, code := w.run(t, "check", "add", "dns", "--shared"); code != 0 || !strings.Contains(out, "dns ok declared in shared, out of studio; it passes now") {
+		t.Errorf("kit check add dns --shared printed\n%s exit %d", out, code)
+	}
+	if got := w.readSection(t, "shared", "checks"); got != "dns -- dig example.com\n" {
+		t.Errorf("shared's [checks] = %q, want studio's line as written", got)
 	}
 	if got := w.readSection(t, "studio", "checks"); got != "" {
 		t.Errorf("studio's [checks] = %q, want dns out of it", got)

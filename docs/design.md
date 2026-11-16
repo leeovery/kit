@@ -744,14 +744,22 @@ installed or asked for:
   count), its note, the comments above it by their words (one set apart from the line by a
   blank line is the line's, as kit's sorting has it), a step by hand's steps, and its section's
   item, `--as` name and hold (`[homebrew formulae --after cask:x]`). Otherwise it's refused,
-  naming each line and what it has: make them the same, or take those lines out first.
-- What the command gives of the line's value, its item and its section's hold must have the
-  same words as the block's, otherwise it's refused, naming both: give the same, or take that
-  line out first. `-integer 60` and `-int 60` differ, as do options in another order.
+  naming each line and what it has, as written: make them the same (for notes, or give one
+  with `--note`), or take those lines out first.
+- A command taking a line's value (`kit check|hourly|nightly|manual|step add`, backups, a
+  restore path) takes the name alone with `--shared` when Macs declare it, moving their line
+  as written: `kit manual add hammerspoon --shared` moves its options and steps too.
+- A value the command gives, its item and its section's hold must have the same words as the
+  block's, otherwise it's refused, naming both lines: give only the name, to move it as
+  written; for a value kit reads from this Mac (macOS, power and git settings, MCP servers),
+  set it the same here, or edit the line; for a secret, give the same. `-integer 60` and
+  `-int 60` differ, as do options in another order.
 - Otherwise the block moves as written: its comments, line, steps and section's hold and
   `--as` name. A note or `--as` the command gives wins; a note kit makes up, as a login item's
-  app name, is the note only when nothing else gives one. A block name another file gives to
-  a different item is refused with the whole edit, as the config wouldn't read with it.
+  app name, is the note only when nothing else gives one. A block name the shared file's block
+  for the item doesn't go by (another, or none) is refused, naming both, as the name would be
+  lost; one another file gives to a different item is refused with the whole edit, as the
+  config wouldn't read with it.
 - A step of your own's folder moves with its line: the Macs' folders, all the same, go to the
   shared one, or are left for one there already that's the same.
 

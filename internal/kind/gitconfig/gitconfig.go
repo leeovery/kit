@@ -33,7 +33,7 @@ var Descriptor = kind.Descriptor{
 	Name:    kindName,
 	Label:   "git config",
 	Group:   kind.Settings,
-	Section: config.Section{Kind: kindName, Header: "git config", Form: config.Settings, Sorted: true},
+	Section: config.Section{Kind: kindName, Header: "git config", Form: config.Settings, Sorted: true, FromMac: true},
 	Help: &kind.Help{
 		What:   "git's global settings",
 		Add:    "Declare git settings as this Mac has them",

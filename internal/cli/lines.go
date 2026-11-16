@@ -33,9 +33,14 @@ func (a *app) addLine(ctx context.Context, r *run, name string, args []string, d
 	kind := lineKinds[name]
 	usage := "kit " + name + " " + lineUsage(name)
 	var value string
+	var err error
 	switch {
 	case kind == config.NightlyKind && len(args) > 0 && (args[0] == "add" || args[0] == "remove"):
 		return fmt.Errorf("a nightly job can't be named %s: kit nightly %s is the command", args[0], args[0])
+	case opts.shared && len(args) == 1 && dash < 0 && opts.group == "":
+		if value, err = r.movedValue(kind, args[0], usage); err != nil {
+			return err
+		}
 	case kind == config.ManualKind && (len(args) < 2 || dash >= 0 && (dash != 2 || len(args) == 2) || dash < 0 && len(args) != 2):
 		return errors.New("say it as " + usage)
 	case kind == config.ManualKind:

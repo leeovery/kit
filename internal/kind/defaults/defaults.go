@@ -116,7 +116,7 @@ var Descriptor = kind.Descriptor{
 	Name:    kindName,
 	Label:   "macOS settings",
 	Group:   kind.Settings,
-	Section: config.Section{Kind: kindName, Header: "macos settings", Form: config.Defaults, Sorted: true},
+	Section: config.Section{Kind: kindName, Header: "macos settings", Form: config.Defaults, Sorted: true, FromMac: true},
 	Help: &kind.Help{
 		What:   "macOS settings, in defaults write's form",
 		Add:    "Declare macOS settings as this Mac has them",

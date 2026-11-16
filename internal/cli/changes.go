@@ -340,6 +340,23 @@ func (r *run) macsDeclaring(kindName, name string) ([]string, error) {
 	return macs, nil
 }
 
+// movedValue is the value of a Mac's line declaring name, of the kind
+// called kindName, for a shared declare given the name alone, which moves
+// the Macs' line as written; refused, saying usage, when no Mac's file
+// declares it.
+func (r *run) movedValue(kindName, name, usage string) (string, error) {
+	where, err := r.cfg.Where(kindName, name)
+	if err != nil {
+		return "", err
+	}
+	for _, w := range where {
+		if w.Scope != config.Shared {
+			return w.Value, nil
+		}
+	}
+	return "", fmt.Errorf("no Mac declares %s to move: say it as %s", name, usage)
+}
+
 // outOf says the Macs a thing declared shared was moved out of, after what
 // it says it did: nothing for none.
 func outOf(moved []string) string {
