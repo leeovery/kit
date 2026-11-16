@@ -197,7 +197,7 @@ func TestAddAStepSharedMovesItsFolder(t *testing.T) {
 	}
 
 	// A Mac's folder git never kept is moved, and left out of the commit,
-	// git having nothing of it to take out.
+	// git having nothing of it to take out; the name alone moves the line.
 	w = setUp(t, "#!/bin/bash\n", "")
 	w.expectCommit(t, commit{
 		message: "kit step add tool (laptop)", paths: all,
@@ -205,8 +205,11 @@ func TestAddAStepSharedMovesItsFolder(t *testing.T) {
 		update: []string{"laptop/declarations", "shared/declarations", "studio/declarations", "studio/steps/tool/run", "shared/steps/tool/run"},
 		staged: "laptop/declarations\x00shared/declarations\x00shared/steps/tool/run\x00studio/declarations\x00studio/steps/tool/run\x00",
 	})
-	if out, errOut, code := w.run(t, "step", "add", "tool", "Installs the tool", "--after", "brew", "--shared"); code != 0 || !strings.Contains(out, "kit-config ok committed and pushed") {
-		t.Errorf("kit step add --shared, laptop's folder never committed, printed\n%s%s exit %d", out, errOut, code)
+	if out, errOut, code := w.run(t, "step", "add", "tool", "--shared"); code != 0 || !strings.Contains(out, "kit-config ok committed and pushed") {
+		t.Errorf("kit step add tool --shared, laptop's folder never committed, printed\n%s%s exit %d", out, errOut, code)
+	}
+	if got := w.readSection(t, "shared", "steps"); got != line {
+		t.Errorf("shared [steps], given the name alone = %q, want the Macs' line", got)
 	}
 
 	for _, c := range []struct {

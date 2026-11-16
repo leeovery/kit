@@ -22,7 +22,6 @@ import (
 	"github.com/leeovery/kit/internal/kind/secret"
 	"github.com/leeovery/kit/internal/kind/skill"
 	"github.com/leeovery/kit/internal/kind/spotlight"
-	"github.com/leeovery/kit/internal/steps"
 )
 
 // All are every kind kit knows, in the order a run takes them.
@@ -101,10 +100,4 @@ func Sections() []config.Section {
 		}
 	}
 	return out
-}
-
-// ConfigSections are the sections the config reads with (config.Load): the
-// kinds', then the readings of the config's own lines.
-func ConfigSections() []config.Section {
-	return append(Sections(), steps.Readings...)
 }

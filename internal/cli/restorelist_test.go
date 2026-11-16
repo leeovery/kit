@@ -25,7 +25,7 @@ func TestRestoreAddDeclaresALine(t *testing.T) {
 	if got, want := w.readSection(t, "laptop", "restore"), "~/Code --skip logs --skip \"old builds\"   # the code\n"; got != want {
 		t.Errorf("[restore] = %q, want %q", got, want)
 	}
-	cfg, err := config.Load(filepath.Join(w.home, ".config", "kit"), kinds.ConfigSections())
+	cfg, err := config.Load(filepath.Join(w.home, ".config", "kit"), kinds.Sections())
 	if err != nil {
 		t.Fatal(err)
 	}

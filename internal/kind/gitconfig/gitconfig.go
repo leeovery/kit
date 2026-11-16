@@ -33,7 +33,7 @@ var Descriptor = kind.Descriptor{
 	Name:    kindName,
 	Label:   "git config",
 	Group:   kind.Settings,
-	Section: config.Section{Kind: kindName, Header: "git config", Form: config.Settings, Sorted: true, Says: lineSays, FromMac: true},
+	Section: config.Section{Kind: kindName, Header: "git config", Form: config.Settings, Sorted: true, FromMac: true},
 	Help: &kind.Help{
 		What:   "git's global settings",
 		Add:    "Declare git settings as this Mac has them",
@@ -101,12 +101,6 @@ func readSetting(e config.Entry) (string, error) {
 		return "", errors.New("one value after the key, in quotes when it holds spaces")
 	}
 	return words[0], nil
-}
-
-// lineSays is what e's line says: its value, however it's quoted.
-func lineSays(e config.Entry) ([]string, error) {
-	v, err := readSetting(e)
-	return []string{config.Quote(v)}, err
 }
 
 // settings are git's global settings: each key, as git lists it, with its

@@ -294,7 +294,7 @@ func TestAddSharedRefusedFailsAlone(t *testing.T) {
 			args = append(args, "--json")
 		}
 		out, errOut, code := w.run(t, args...)
-		refused := "hello failed couldn't declare: the lines it moves have different notes, laptop/declarations:3 (\"a test\"), studio/declarations:2 (\"for work\"): say which with --note"
+		refused := "hello failed couldn't declare: the lines it moves have different notes, laptop/declarations:3 (a test), studio/declarations:2 (for work): make them the same, give one with --note, or take those lines out first"
 		if asJSON {
 			refused = `"state": "failed"`
 		}

@@ -329,15 +329,14 @@ func TestAddASecretNamedInTheSharedFile(t *testing.T) {
 	}
 }
 
-// Declared for every Mac by the reference the Macs' lines give, short or in
-// full, whatever block they're in, a secret comes out of their files in the
-// same edit and commit, its shared line in the shared block for its item,
-// keeping their note; nothing is stored.
+// Declared for every Mac by the reference the Macs' lines give, a secret
+// comes out of their files in the same edit and commit, its shared line in
+// the shared block for its item, keeping their note; nothing is stored.
 func TestAddASecretSharedTakesItOutOfTheMacs(t *testing.T) {
 	w := laptopWorld(t)
 	w.writeSection(t, "shared", "secrets op://vault/Item --as mac-secrets", "TOKEN Section/token\n")
 	w.writeSection(t, "laptop", "secrets op://vault/Item --as mac-secrets", "FOO Section/foo   # a token\n")
-	w.writeSection(t, "studio", "secrets", "FOO op://vault/Item/Section/foo\n")
+	w.writeSection(t, "studio", "secrets op://vault/Item --as mac-secrets", "FOO Section/foo   # a token\n")
 	f := w.fake
 	f.On("op", "whoami")
 	optest.Holds(f, map[string]string{"op://vault/Item/Section/foo": "foo", "op://vault/Item/Section/token": "the value"})
@@ -365,43 +364,36 @@ func TestAddASecretSharedTakesItOutOfTheMacs(t *testing.T) {
 	}
 }
 
-// Declared for every Mac, a secret a Mac's line keeps elsewhere, or as a
-// file of another mode, is refused before the store's asked anything, the
-// files untouched, naming the line, and, for a value elsewhere, the --ref
-// that shares it: whatever block the line is in, one going by the same name
-// for another item too.
+// Declared for every Mac, a secret whose Macs' lines are written otherwise,
+// or that's given otherwise than they have it, is refused before the
+// store's asked anything, the files untouched, naming the lines.
 func TestAddASecretSharedRefusesWhatAMacSaysOtherwise(t *testing.T) {
 	for _, c := range []struct {
-		name, header, line, want string
-		args                     []string
+		name, laptop, studioItem, studio, want string
+		args                                   []string
 	}{
-		{"a file of another mode", "secrets op://vault/Item --as mac-secrets", "~/.npmrc Section/npmrc --mode 644\n",
-			"laptop/declarations:5 has ~/.npmrc with --mode 644, where this gives --mode 600: give the same, or take that line out first; --ref op://vault/Item/Section/npmrc --mode 644 shares the value it has",
-			[]string{"~/.npmrc", "--ref", "op://vault/Item/Section/npmrc"}},
-		{"a file of the default mode, given another", "secrets op://vault/Item --as mac-secrets", "~/.npmrc Section/npmrc\n",
-			"laptop/declarations:5 has ~/.npmrc with --mode 600, where this gives --mode 644: give the same, or take that line out first; --ref op://vault/Item/Section/npmrc without --mode shares the value it has",
-			[]string{"~/.npmrc", "--ref", "op://vault/Item/Section/npmrc", "--mode", "644"}},
-		{"a value at another field", "secrets op://vault/Item --as mac-secrets", "FOO Section/foo\n",
-			"laptop/declarations:5 has FOO with op://vault/Item/Section/foo, where this gives op://vault/Item/Section/other: give the same, or take that line out first; --ref op://vault/Item/Section/foo shares the value it has",
+		{"given at another field", "FOO Section/foo\n", "", "",
+			"laptop/declarations:5 has FOO Section/foo, where this gives FOO Section/other: give the same, or take that line out first",
 			[]string{"FOO", "--item", "op://vault/Item", "--field", "Section/other", "--stdin"}},
-		{"a block of the same name for another item", "", "",
-			"studio/declarations:5 has FOO with op://vault/Other/Section/foo, where this gives op://vault/Item/Section/foo: give the same, or take that line out first; --ref op://vault/Other/Section/foo shares the value it has",
+		{"in another item", "TOKEN Section/token\n", "Other", "FOO Section/foo\n",
+			"studio/declarations:5 has FOO in [secrets op://vault/Other], where this gives [secrets op://vault/Item]: move that line to the same section, or take it out first",
 			[]string{"FOO", "--in", "mac-secrets", "--field", "Section/foo", "--stdin"}},
+		{"written otherwise", "FOO Section/foo\n", "Item", "FOO 'Section/foo'   # a token\n",
+			"the lines it moves have different notes, laptop/declarations:5 (none), studio/declarations:5 (a token): make them the same, give one with --note, or take those lines out first",
+			[]string{"FOO", "--ref", "op://vault/Item/Section/foo"}},
 	} {
 		w := laptopWorld(t)
 		w.stdin = "new value"
-		if c.header != "" {
-			w.writeSection(t, "laptop", c.header, c.line)
-		} else {
-			w.writeSection(t, "laptop", "secrets op://vault/Item --as mac-secrets", "TOKEN Section/token\n")
-			w.writeSection(t, "studio", "secrets op://vault/Other --as mac-secrets", "FOO Section/foo\n")
+		w.writeSection(t, "laptop", "secrets op://vault/Item --as mac-secrets", c.laptop)
+		if c.studio != "" {
+			w.writeSection(t, "studio", "secrets op://vault/"+c.studioItem+" --as mac-secrets", c.studio)
 		}
 		before := map[string]string{}
 		for _, scope := range []string{"shared", "laptop", "studio"} {
 			before[scope] = w.read(t, filepath.Join(".config", "kit", scope, "declarations"))
 		}
 		_, errOut, code := w.run(t, append([]string{"secret", "add", "--shared"}, c.args...)...)
-		if code != 2 || !strings.Contains(ansi.Strip(errOut), c.want) {
+		if code != 2 || !strings.Contains(ansi.Strip(errOut), "kit: "+c.want+"\n") {
 			t.Errorf("%s: printed %q, exit %d; want it refused with %q", c.name, errOut, code, c.want)
 		}
 		if calls := w.fake.Calls(); len(calls) > 0 {
@@ -686,25 +678,5 @@ func TestAddASecretSharedKeepsItsBlocksName(t *testing.T) {
 	}
 	if got := w.read(t, filepath.Join(".config", "kit", "laptop", "declarations")); strings.Contains(got, "FOO") || strings.Contains(got, "mac-secrets") {
 		t.Errorf("laptop's declarations = %q, want its block gone", got)
-	}
-}
-
-// A Mac's block name another Mac gives to another item isn't carried into
-// the shared file, where it'd stand for two: the shared block goes unnamed,
-// and kit says why, the secret moved all the same.
-func TestAddASecretSharedLeavesANameAnotherItemHas(t *testing.T) {
-	w := laptopWorld(t)
-	w.writeSection(t, "laptop", "secrets op://vault/Item --as keys", "FOO Section/foo\n")
-	w.writeSection(t, "studio", "secrets op://vault/Studio --as keys", "BAR Section/bar\n")
-	f := w.fake
-	f.On("op", "whoami")
-	optest.Holds(f, map[string]string{"op://vault/Item/Section/foo": "foo"})
-	w.expectSync(t, []string{"laptop/declarations", "shared/declarations"}, "kit secret add FOO (laptop)")
-	out, _, code := w.run(t, "secret", "add", "FOO", "--shared", "--ref", "op://vault/Item/Section/foo")
-	if code != 0 || !strings.Contains(out, "declared in shared, out of laptop; its block's name, keys, not carried: studio/declarations:4 gives it to op://vault/Studio, synced") {
-		t.Fatalf("kit secret add --shared printed\n%s exit %d", out, code)
-	}
-	if got := w.readSection(t, "shared", "secrets op://vault/Item"); got != "FOO Section/foo\n" {
-		t.Errorf("shared's [secrets op://vault/Item] = %q", got)
 	}
 }

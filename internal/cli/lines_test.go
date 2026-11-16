@@ -37,6 +37,36 @@ func TestAddAJob(t *testing.T) {
 	}
 }
 
+// A step by hand the Macs declare, given its name alone with --shared,
+// moves to the shared file whole: its options, note, comments and steps as
+// written. Given what to do without the options a Mac's line has, it's
+// refused, naming both lines; and the name alone, no Mac declaring it.
+func TestStepByHandMovedWhole(t *testing.T) {
+	block := "# its permissions\nhammerspoon \"Open Hammerspoon\" --group Apps --after cask:hammerspoon   # automation\n  Allow it Accessibility\n"
+	w := laptopWorld(t)
+	w.writeSection(t, "laptop", "manual", block)
+	w.writeSection(t, "studio", "manual", block)
+	out, _, code := w.run(t, "manual", "add", "hammerspoon", "Open Hammerspoon", "--group", "Apps", "--shared")
+	if want := `laptop/declarations:6 has hammerspoon "Open Hammerspoon" --group Apps --after cask:hammerspoon, where this gives hammerspoon "Open Hammerspoon" --group Apps: give only its name to move it as written, or take that line out first`; code != 1 || !strings.Contains(out, want) {
+		t.Errorf("kit manual add hammerspoon \"Open Hammerspoon\" --shared printed\n%s exit %d; want %q", out, code, want)
+	}
+	w.expectSync(t, []string{"laptop/declarations", "shared/declarations", "studio/declarations"}, "kit manual add hammerspoon (laptop)")
+	if out, _, code := w.run(t, "manual", "add", "hammerspoon", "--shared"); code != 0 || !strings.Contains(out, "hammerspoon ok declared in shared, out of laptop and studio") {
+		t.Fatalf("kit manual add hammerspoon --shared printed\n%s exit %d", out, code)
+	}
+	if got := w.readSection(t, "shared", "manual"); got != block {
+		t.Errorf("shared [manual] = %q, want the Macs' block whole", got)
+	}
+	for _, mac := range []string{"laptop", "studio"} {
+		if got := w.readSection(t, mac, "manual"); got != "" {
+			t.Errorf("%s's [manual] = %q, want hammerspoon out of it", mac, got)
+		}
+	}
+	if _, errOut, code := w.run(t, "manual", "add", "nothing", "--shared"); code != 2 || !strings.Contains(errOut, "no Mac declares nothing to move: say it as kit manual add <name>") {
+		t.Errorf("kit manual add nothing --shared printed %q, exit %d", errOut, code)
+	}
+}
+
 func TestStepsByHand(t *testing.T) {
 	w := laptopWorld(t)
 	w.expectSync(t, []string{"laptop/declarations"}, "kit manual add sign-in (laptop)")

@@ -116,7 +116,7 @@ var Descriptor = kind.Descriptor{
 	Name:    kindName,
 	Label:   "macOS settings",
 	Group:   kind.Settings,
-	Section: config.Section{Kind: kindName, Header: "macos settings", Form: config.Defaults, Sorted: true, Says: lineSays, FromMac: true},
+	Section: config.Section{Kind: kindName, Header: "macos settings", Form: config.Defaults, Sorted: true, FromMac: true},
 	Help: &kind.Help{
 		What:   "macOS settings, in defaults write's form",
 		Add:    "Declare macOS settings as this Mac has them",
@@ -156,33 +156,6 @@ func (d *Defaults) Values(list config.List) (config.List, error) {
 		d.declared[e.Name] = v
 	}
 	return list, nil
-}
-
-// lineSays is what e's line says: whether it sets a dict's entry
-// (-dict-add), and its value, by its type, as defaults write takes it,
-// however the line writes it (-integer 60 as -int 60, -bool YES as -bool
-// true). Where it's kept, this host's or not, the domain and the key, is
-// its name.
-func lineSays(e config.Entry) ([]string, error) {
-	dv, err := readDeclared(e)
-	if err != nil {
-		return nil, err
-	}
-	var parts []string
-	if dv.setting.Entry != "" {
-		parts = append(parts, "-dict-add")
-	}
-	switch v := dv.value.(type) {
-	case bool:
-		return append(parts, fmt.Sprintf("-bool %t", v)), nil
-	case int64:
-		return append(parts, fmt.Sprintf("-int %d", v)), nil
-	case float64:
-		return append(parts, "-float "+strconv.FormatFloat(v, 'g', -1, 64)), nil
-	case string:
-		return append(parts, "-string "+config.Quote(v)), nil
-	}
-	return append(parts, plist.XML(dv.value)), nil
 }
 
 // readDeclared reads an entry's setting and value.

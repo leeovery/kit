@@ -339,7 +339,7 @@ func (c *Config) AddSection(kind, scope string) (bool, error) {
 // wouldn't read back, as the config and the kind read it (Section.Line),
 // is never written.
 func (c *Config) Declare(kind, scope string, e Entry) error {
-	d, files, _, err := c.declaring(kind, scope, e)
+	d, files, err := c.declaring(kind, scope, e)
 	if err != nil {
 		return err
 	}
@@ -348,30 +348,28 @@ func (c *Config) Declare(kind, scope string, e Entry) error {
 
 // DeclareShared declares e in the shared declarations, as Declare does,
 // taking it out of the files of each of the Macs from, as Undeclare does:
-// one edit, judged as a whole before any of it's written. Nothing a line it
-// moves says is lost: what its command can say must be the same
-// (LineDiffers), and what none can, its notes and comments are carried
-// (Config.carry). It returns the scopes whose files it wrote, those
-// written before one failed too, and what it says of anything it didn't
-// carry.
-func (c *Config) DeclareShared(kind string, e Entry, from []string) (written []string, said string, err error) {
-	d, files, said, err := c.declaring(kind, Shared, e, from...)
+// one edit, judged as a whole before any of it's written. The Macs' block
+// moves as written, refused when theirs differ, e gives otherwise (moving),
+// or the shared file's block for its item goes by another name. It returns the scopes whose files it wrote, those written
+// before one failed too.
+func (c *Config) DeclareShared(kind string, e Entry, from []string) (written []string, err error) {
+	d, files, err := c.declaring(kind, Shared, e, from...)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 	for i, f := range files {
 		if err := c.writeDecl(f, d, e.Name, i == 0); err != nil {
-			return written, said, err
+			return written, err
 		}
 		written = append(written, f.scope)
 	}
-	return written, said, nil
+	return written, nil
 }
 
 // CheckDeclare says why Declare would refuse e, writing nothing: nil when
 // it would declare it.
 func (c *Config) CheckDeclare(kind, scope string, e Entry) error {
-	_, _, _, err := c.declaring(kind, scope, e)
+	_, _, err := c.declaring(kind, scope, e)
 	return err
 }
 
@@ -379,7 +377,7 @@ func (c *Config) CheckDeclare(kind, scope string, e Entry) error {
 // of the files of the Macs from, writing nothing: nil when it would declare
 // it.
 func (c *Config) CheckDeclareShared(kind string, e Entry, from []string) error {
-	_, _, _, err := c.declaring(kind, Shared, e, from...)
+	_, _, err := c.declaring(kind, Shared, e, from...)
 	return err
 }
 
@@ -387,64 +385,62 @@ func (c *Config) CheckDeclareShared(kind string, e Entry, from []string) error {
 // writes it, then each of the files of the Macs from with it taken out, none
 // yet written, once the config reads as kit reads it with them all
 // (readsAfter).
-func (c *Config) declaring(kind, scope string, e Entry, from ...string) (sectionDef, []*declFile, string, error) {
+func (c *Config) declaring(kind, scope string, e Entry, from ...string) (sectionDef, []*declFile, error) {
 	d, f, err := c.editable(kind, scope)
 	if err != nil {
-		return d, nil, "", err
+		return d, nil, err
 	}
-	arg, name := splitName(d, e.Name)
-	if d.items != nil {
-		arg = strings.TrimSuffix(e.Item, "/")
-		if arg != "" {
-			if err := d.items(arg); err != nil {
-				return d, nil, "", err
-			}
+	e.Item = strings.TrimSuffix(e.Item, "/")
+	arg, _ := sectionArg(d, e)
+	if d.items != nil && arg != "" {
+		if err := d.items(arg); err != nil {
+			return d, nil, err
 		}
 	}
 	if e.As != "" && arg == "" {
-		return d, nil, "", fmt.Errorf("%s %s names an item's section: say which item", asOption, e.As)
+		return d, nil, fmt.Errorf("%s %s names an item's section: say which item", asOption, e.As)
 	}
 	if e.Hold != "" && len(d.holds) == 0 {
-		return d, nil, "", fmt.Errorf("[%s] holds no lines back: only a list's sections, and [features], do", d.header)
+		return d, nil, fmt.Errorf("[%s] holds no lines back: only a list's sections, and [features], do", d.header)
 	}
-	if _, err := readHold(d, e.Hold); err != nil {
-		return d, nil, "", err
+	if e.Hold, err = readHold(d, e.Hold); err != nil {
+		return d, nil, err
 	}
 	if s, _ := f.holding(d, e.Name); s != nil {
-		return d, nil, "", fmt.Errorf("%s is in %s already", e.Name, DeclFile(scope))
+		return d, nil, fmt.Errorf("%s is in %s already", e.Name, DeclFile(scope))
 	}
 	if scope != Shared {
 		shared, err := c.readDecl(Shared)
 		if err != nil {
-			return d, nil, "", err
+			return d, nil, err
 		}
 		if s, _ := shared.holding(d, e.Name); s != nil {
-			return d, nil, "", fmt.Errorf("%s is in the shared declarations already (%s), for every Mac", e.Name, DeclFile(Shared))
+			return d, nil, fmt.Errorf("%s is in the shared declarations already (%s), for every Mac", e.Name, DeclFile(Shared))
 		}
 	}
 	moved, err := c.movedLines(kind, e.Name, from)
 	if err != nil {
-		return d, nil, "", err
+		return d, nil, err
 	}
-	e, notes, said, err := c.carry(d, e, moved)
+	e, notes, err := moving(d, e, moved)
 	if err != nil {
-		return d, nil, "", err
+		return d, nil, err
 	}
-	hold, err := readHold(d, e.Hold)
-	if err != nil {
-		return d, nil, "", err
-	}
+	arg, name := sectionArg(d, e)
 	line, err := entryText(d, name, e)
 	if err != nil {
-		return d, nil, "", err
+		return d, nil, err
 	}
 	steps, err := stepLines(d, e.Steps)
 	if err != nil {
-		return d, nil, "", err
+		return d, nil, err
 	}
-	s := f.find(d, arg, hold)
-	if s == nil {
-		s = f.add(&section{def: d, arg: arg, as: e.As, hold: hold})
+	s := f.find(d, arg, e.Hold)
+	switch {
+	case s == nil:
+		s = f.add(&section{def: d, arg: arg, as: e.As, hold: e.Hold})
+	case len(moved) > 0 && e.As != "" && s.as != e.As:
+		return d, nil, fmt.Errorf("%s:%d's block for %s goes by %s, where the line moved goes by %s: give them the same name, or take that line out first", DeclFile(scope), s.start, arg, cmp.Or(s.as, "no name"), e.As)
 	}
 	block := slices.Concat(notes, []string{line}, steps)
 	switch b := splitBody(d.form, s.body); {
@@ -460,9 +456,6 @@ func (c *Config) declaring(kind, scope string, e Entry, from ...string) (section
 		b.insert(b.sortedPlace(0, len(b.lines), name), block...)
 		s.body = b.lines
 	}
-	if err := sameAsMoved(d, f, e.Name, moved); err != nil {
-		return d, nil, "", err
-	}
 	files := []*declFile{f}
 	// Taken out as the config reads with the shared file edited: whether a
 	// Mac's section left empty stays (keeps) turns on the shared file.
@@ -470,11 +463,21 @@ func (c *Config) declaring(kind, scope string, e Entry, from ...string) (section
 	for _, mac := range from {
 		_, g, err := withShared.undeclaring(kind, mac, e.Name)
 		if err != nil {
-			return d, nil, "", err
+			return d, nil, err
 		}
 		files = append(files, g)
 	}
-	return d, files, said, c.readsAfter(d, e.Name, files)
+	return d, files, c.readsAfter(d, e.Name, files)
+}
+
+// sectionArg is what follows the header of the section e goes in, its
+// item's or its folder, and its name, without its folder.
+func sectionArg(d sectionDef, e Entry) (string, string) {
+	arg, name := splitName(d, e.Name)
+	if d.items != nil {
+		arg = e.Item
+	}
+	return arg, name
 }
 
 // readsAfter says why the config, with files written, the first declaring

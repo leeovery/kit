@@ -245,8 +245,7 @@ func (r *run) scope(shared bool) string {
 // changed: in the shared one, it takes e out of each Mac's file declaring
 // it, in the same edit, as a thing is in the shared declarations or a
 // Mac's, never both (config.DeclareShared). It returns what to say after
-// where it's declared: the Macs it's moved out of, and anything of theirs
-// it didn't carry.
+// where it's declared: the Macs it's moved out of.
 func (c *changes) declare(kindName, scope string, e config.Entry) (string, error) {
 	r := c.run
 	if scope != config.Shared {
@@ -260,14 +259,11 @@ func (c *changes) declare(kindName, scope string, e config.Entry) (string, error
 	if err != nil {
 		return "", err
 	}
-	written, said, err := r.cfg.DeclareShared(kindName, e, moved)
+	written, err := r.cfg.DeclareShared(kindName, e, moved)
 	for _, scope := range written {
 		c.changed(config.DeclFile(scope))
 	}
-	if said != "" {
-		said = "; " + said
-	}
-	return outOf(moved) + said, err
+	return outOf(moved), err
 }
 
 // undeclareIn takes name, of the kind called kindName, out of scope's
@@ -342,6 +338,23 @@ func (r *run) macsDeclaring(kindName, name string) ([]string, error) {
 		}
 	}
 	return macs, nil
+}
+
+// movedValue is the value of a Mac's line declaring name, of the kind
+// called kindName, for a shared declare given the name alone, which moves
+// the Macs' line as written; refused, saying usage, when no Mac's file
+// declares it.
+func (r *run) movedValue(kindName, name, usage string) (string, error) {
+	where, err := r.cfg.Where(kindName, name)
+	if err != nil {
+		return "", err
+	}
+	for _, w := range where {
+		if w.Scope != config.Shared {
+			return w.Value, nil
+		}
+	}
+	return "", fmt.Errorf("no Mac declares %s to move: say it as %s", name, usage)
 }
 
 // outOf says the Macs a thing declared shared was moved out of, after what

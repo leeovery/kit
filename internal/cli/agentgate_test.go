@@ -330,7 +330,7 @@ func readsAsDeclarations(t *testing.T, example string) error {
 			t.Fatal(err)
 		}
 	}
-	cfg, err := config.Load(dir, kinds.ConfigSections())
+	cfg, err := config.Load(dir, kinds.Sections())
 	if err != nil {
 		return err
 	}

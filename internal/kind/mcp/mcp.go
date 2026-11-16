@@ -82,7 +82,7 @@ var Descriptor = kind.Descriptor{
 	Name:    kindName,
 	Label:   "Claude MCP",
 	Group:   kind.Packages,
-	Section: config.Section{Kind: kindName, Header: "claude mcp", Form: config.Commands, Folders: true, Says: lineSays, FromMac: true},
+	Section: config.Section{Kind: kindName, Header: "claude mcp", Form: config.Commands, Folders: true, FromMac: true},
 	Help: &kind.Help{
 		What:   "Claude Code's MCP servers",
 		Add:    "Declare MCP servers Claude Code has, as it has them",
@@ -137,17 +137,6 @@ func (m *MCP) Values(list config.List) (config.List, error) {
 		out.Entries[i].Off = isOff
 	}
 	return out, nil
-}
-
-// lineSays is what e's line says: the server's definition, as it compares,
-// in either of the line's forms, and whether it's declared off.
-func lineSays(e config.Entry) ([]string, error) {
-	def, isOff, err := readValue(e.Value)
-	if err != nil {
-		return nil, err
-	}
-	line, err := writeValue(normal(def), isOff)
-	return []string{line}, err
 }
 
 // Value is the line to declare the server name with, after its name, as

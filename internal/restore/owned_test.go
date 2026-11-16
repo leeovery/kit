@@ -53,7 +53,7 @@ func TestReadOwned(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	cfg, err := config.Load(repo, kinds.ConfigSections())
+	cfg, err := config.Load(repo, kinds.Sections())
 	if err != nil {
 		t.Fatal(err)
 	}
