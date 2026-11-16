@@ -18,7 +18,7 @@ gate() {
 }
 
 gate gofmt
-unformatted=$(gofmt -l .)
+unformatted=$(git ls-files -z --cached --others --exclude-standard -- '*.go' | xargs -0 gofmt -l)
 if [ -n "$unformatted" ]; then
 	printf '%s\n' "$unformatted" >&2
 	echo "gates: gofmt would change the files above" >&2
