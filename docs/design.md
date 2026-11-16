@@ -116,10 +116,12 @@ those comments, as nothing written by hand goes without being asked.
   status`, not the nightly run), a kind whose command isn't on kit's PATH yet (npm's `npm`,
   each secrets store's, as 1Password's `op`, MCP's `claude`) waits for it before its check,
   saying so, looking again as installs end, till it's there or nothing still at work in the run could bring it,
-  then stands deferred, saying it isn't there yet. The config's waits order the rest (the
-  secrets after the sign-in, `--before secret`; npm after mise, `--before npm`). Two orders stay, being kit's
-  own data: git's settings after the secrets they sign with, login items after the casks
-  and App Store apps they open.
+  then stands deferred, saying it isn't there yet. The config's waits order the rest (npm
+  after mise, `--before npm`). Three orders stay, being kit's own data: each store's
+  secrets after its sign-in, the sign-in after what its driver names it comes as, declared
+  for the Mac (1Password's casks), so those install first, or till its program and app are
+  there however they came (an app installed by hand fails its cask); git's settings after the secrets
+  they sign with; login items after the casks and App Store apps they open.
 - **A list's lines held back:** a list's section can say, after its header, what its lines
   wait for, each as often as wanted: `--after` a step, or one of a step's things
   (`cask:firefox`), order alone; `--secret` a secret a secrets section declares (one it
@@ -144,7 +146,9 @@ those comments, as nothing written by hand goes without being asked.
   secret set as applying would, once it's in place. A check that can't be made declares the
   line plainly, saying so; one stopped fails the add.
 - **What's waited for goes first:** a thing a step names (`--after cask:firefox`) is
-  installed ahead of the rest of its list, as one command, then the rest as one; where kinds
+  installed ahead of the rest of its list, as one command, then the rest as one, as is what
+  a driver says its tool comes as, declared for the Mac (Arq's cask; 1Password's casks,
+  before its sign-in); where kinds
   share a tool's lock (Homebrew's formulae and casks), neither's rest begins till the other's
   waited-for things are in, or their step has finished. A wait looks again whenever an
   install ends or counts a thing done, and otherwise every 30 seconds.
@@ -180,7 +184,8 @@ for the tools they use, and the switches exist because those Macs differ.
 tool, then `--after` and `--before` as on any line (`arq --after cask:arq`: as kit applies,
 Arq's check waits till its cask is in, rather than reading "not installed" while the cask
 waits its turn; one placed after or before what isn't a step fails its check, saying so;
-what the tool comes as, declared for the Mac, is waited for whatever its line says). A
+what the tool comes as, its driver's `Package`, declared for the Mac, is waited for
+whatever its line says, as a secrets store's sign-in waits for its driver's packages). A
 Mac with no `[backups]` has no backup steps; the tools' steps run in kit's order (Time
 Machine, then Arq), whatever the files' order. `kit backup add <tool>` (`--after`, `--before`,
 `--shared`, `--note`) declares one (with `--shared`, for every Mac, taking it out of each Mac's

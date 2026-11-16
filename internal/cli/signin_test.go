@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/leeovery/kit/internal/ask"
 	"github.com/leeovery/kit/internal/check"
@@ -186,5 +187,43 @@ func TestApplySignInWaitsForTheProgram(t *testing.T) {
 	}
 	if up := cards(records); len(up) > 0 || slices.ContainsFunc(f.Calls(), func(c string) bool { return strings.HasPrefix(c, "open -b") }) {
 		t.Errorf("cards %+v, ran %q: want none raised, nothing opened", up, f.Calls())
+	}
+}
+
+// An app installed by hand, as the store's is to reach its passwords before
+// kit's first run, makes its cask's install fail: the sign-in goes up all
+// the same, its program and app there, and the casks say why they failed.
+func TestApplySignInWithItsAppInstalledByHand(t *testing.T) {
+	w := secretsWorld(t)
+	w.withoutKitApp(t)
+	w.writeSection(t, "laptop", "homebrew casks", "1password\n1password-cli\n")
+	w.installApp(t, "1Password", signInApp)
+	w.terminal, w.size = true, [2]int{160, 64}
+	kb := &keyboard{}
+	w.listen = kb.listen
+	f := w.fake
+	f.On("op", "whoami").Exits(1)
+	f.On("op", "account", "list", "--format", "json").Prints("[]")
+	f.On("brew", "info", "--json=v2", "--cask", "1password", "1password-cli").Prints(`{"formulae": [], "casks": [{"token": "1password", "full_token": "1password", "artifacts": [{"app": ["1Password.app"]}]}, {"token": "1password-cli", "full_token": "1password-cli", "artifacts": [{"binary": ["op"]}]}]}`)
+	f.On("brew", "update", "--quiet")
+	f.On("sudo", "-n", "true").Exits(1)
+	install := "brew install --cask 1password 1password-cli"
+	f.On("brew", "install", "--cask", "1password", "1password-cli").Exits(1).PrintsToStderr("Error: It seems there is already an App at '/Applications/1Password.app'.\n")
+	f.On("osascript", "-e", `display notification "Your secrets come from 1Password." with title "kit" subtitle "Sign in to 1Password"`)
+	f.On("osascript", "-l", "JavaScript", "-e", login.ReadScript).Prints("[]")
+	// Stopped at the card once the casks have had their go.
+	f.On("open", "-b", signInApp).Does(func() {
+		for deadline := time.Now().Add(3 * time.Second); time.Now().Before(deadline) && !slices.Contains(f.Calls(), install); time.Sleep(time.Millisecond) {
+		}
+		kb.press(t, ask.Key{Name: "ctrl+c"})
+	})
+
+	w.run(t, "apply")
+	records := w.lastLog(t)
+	if up := cards(records); len(up) != 1 || up[0].Step != "1password-sign-in" {
+		t.Errorf("cards logged = %+v, want 1Password's sign-in", up)
+	}
+	if res, ok := finished(records, "cask"); !ok || res.State != check.Failed || !strings.Contains(res.Reason, "already an App") {
+		t.Errorf("the casks finished %+v, %v: want them failed, saying why", res, ok)
 	}
 }

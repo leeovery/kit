@@ -54,7 +54,8 @@ func backupNames(tools []steps.BackupTool) []string {
 // once they're in, as a step of your own does, and before the steps it
 // names. One placed after or before what isn't a step fails, saying so.
 // What the tool comes as (its Package), declared for this Mac, is waited
-// for too, as kit apply installs it.
+// for too, as kit apply installs it, as a store's sign-in waits for its
+// driver's (cardSteps).
 func (r *run) placeBackups(all []engine.Step, tools []steps.BackupTool) {
 	names := stepNames(all)
 	for _, b := range tools {

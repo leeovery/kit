@@ -91,6 +91,7 @@ var about = store.About{
 			"Quit 1Password and open it again",
 		},
 		App: "com.1password.1password", AppName: "1Password",
+		Packages: []string{"cask:1password", "cask:1password-cli"},
 	},
 }
 

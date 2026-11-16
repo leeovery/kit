@@ -95,7 +95,7 @@ func (s *Secrets) Cards() []kind.Card {
 		out = append(out, kind.Card{
 			Name: signInName(d), Title: a.SignIn.Title, Why: "Your secrets come from " + a.Name + ".", Steps: a.SignIn.Steps,
 			Done:    func(ctx context.Context) bool { return d.Session(ctx, s.run) != store.SignedOut },
-			Program: a.Program, App: a.SignIn.App, AppName: a.SignIn.AppName,
+			Program: a.Program, App: a.SignIn.App, AppName: a.SignIn.AppName, Packages: a.SignIn.Packages,
 		})
 	}
 	return out
