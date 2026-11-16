@@ -313,21 +313,23 @@ func installed(ids ...int64) string {
 }
 
 // storeRun applies the App Store's apps, declared, after a step by hand
-// signing in to it, done again as many times as it's asked, unless it
-// can't be (no one to act): the App Store's result, and how many times
-// signing in was done again.
-func storeRun(t *testing.T, fake *runnertest.Fake, someone bool, declared config.List) (check.Result, int) {
+// signing in to it: the App Store's result, and how many times signing in
+// was unmarked.
+func storeRun(t *testing.T, fake *runnertest.Fake, declared config.List) (check.Result, int) {
 	t.Helper()
-	again := 0
+	return storeRunUnmarking(t, fake, declared, nil)
+}
+
+// storeRunUnmarking is storeRun, unmarking signing in saying failed.
+func storeRunUnmarking(t *testing.T, fake *runnertest.Fake, declared config.List, failed error) (check.Result, int) {
+	t.Helper()
+	unmarked := 0
 	signIn := engine.Step{Name: "appstore", Before: []string{"mas"}, Check: func(context.Context) check.Result {
 		return check.Result{State: check.OK, Summary: "done"}
+	}, Unmark: func() error {
+		unmarked++
+		return failed
 	}}
-	if someone {
-		signIn.Again = func(context.Context) error {
-			again++
-			return nil
-		}
-	}
 	p, err := engine.New(signIn, kind.Step(appstore.New(fake), declared))
 	if err != nil {
 		t.Fatal(err)
@@ -336,68 +338,13 @@ func storeRun(t *testing.T, fake *runnertest.Fake, someone bool, declared config
 	if err != nil {
 		t.Fatal(err)
 	}
-	return report.Results["mas"], again
-}
-
-// The first app's install is the check that someone's signed in: while mas
-// says no one is, signing in, the step by hand before the App Store's, is
-// done again, then the first's tried again; only once it's in, the rest,
-// an app at a time.
-func TestASignInNotDoneIsDoneAgain(t *testing.T) {
-	fake := runnertest.New(t)
-	fake.On("mas", "list", "--json").Prints("").Then().Prints(installed(1091189122, 409203825, 497799835))
-	fake.On("sudo", "-n", "mas", "install", "1091189122").Exits(1).PrintsToStderr(signedOut).
-		Then().Exits(1).PrintsToStderr(signedOut).
-		Then()
-	fake.On("sudo", "-n", "mas", "install", "409203825")
-	fake.On("sudo", "-n", "mas", "install", "497799835")
-	res, again := storeRun(t, fake, true, declared("bear@1091189122", "numbers@409203825", "xcode@497799835"))
-	if res.State != check.OK || again != 2 {
-		t.Errorf("the App Store's apps stand %+v, signing in done again %d times; want them installed, it done again twice", res, again)
-	}
-	want := []string{
-		"mas list --json",
-		"sudo -n mas install 1091189122", "sudo -n mas install 1091189122", "sudo -n mas install 1091189122",
-		"sudo -n mas install 409203825", "sudo -n mas install 497799835",
-		"mas list --json",
-	}
-	if !slices.Equal(fake.Calls(), want) {
-		t.Errorf("ran %q\nwant %q", fake.Calls(), want)
-	}
+	return report.Results["mas"], unmarked
 }
 
 // stray is how pgrep finds what's left of kit's install of the app id, in
 // its process group, 4242.
 func stray(id string) []string {
 	return []string{"pgrep", "-g", "4242", "-f", "^(/[^ ]*/)?mas install " + id + "$"}
-}
-
-// mas 7, with no one signed in, waits for good, saying nothing, rather than
-// saying so: the first app's install that says nothing at all for its
-// minutes is taken as no one signed in, so what's left of it, in its process
-// group, is stopped, signing in is done again, and the app's tried again.
-func TestAHangIsTakenAsNoOneSignedIn(t *testing.T) {
-	defer appstore.SetFirstWord(50 * time.Millisecond)()
-	fake := runnertest.New(t)
-	fake.On("mas", "list", "--json").Prints("").Then().Prints(installed(1091189122, 497799835))
-	fake.On("sudo", "-n", "mas", "install", "1091189122").Hangs().InGroup(4242).
-		Then()
-	fake.On(stray("1091189122")[0], stray("1091189122")[1:]...).Prints("5151\n")
-	fake.On("sudo", "-n", "kill", "-KILL", "5151")
-	fake.On("sudo", "-n", "mas", "install", "497799835")
-	res, again := storeRun(t, fake, true, declared("bear@1091189122", "xcode@497799835"))
-	if res.State != check.OK || again != 1 {
-		t.Errorf("the App Store's apps stand %+v, signing in done again %d times; want them installed, it done again once", res, again)
-	}
-	want := []string{
-		"mas list --json",
-		"sudo -n mas install 1091189122", "pgrep -g 4242 -f '^(/[^ ]*/)?mas install 1091189122$'", "sudo -n kill -KILL 5151",
-		"sudo -n mas install 1091189122", "sudo -n mas install 497799835",
-		"mas list --json",
-	}
-	if !slices.Equal(fake.Calls(), want) {
-		t.Errorf("ran %q\nwant %q", fake.Calls(), want)
-	}
 }
 
 // slowRunner is the fake, but mas installing an app says it's downloading
@@ -433,24 +380,36 @@ func TestASlowFirstDownloadIsntAHang(t *testing.T) {
 	}
 }
 
-// Without anyone to sign in, a hang fails every app, in kit's words, naming
-// the fix, never the command; the rest aren't tried.
-func TestAHangWithNoOneToSignInFailsNamingTheFix(t *testing.T) {
+// mas 7, with no one signed in, waits for good, saying nothing, rather than
+// saying so: the first app's install that says nothing at all for its
+// minutes is taken as no one signed in, so what's left of it, in its process
+// group, is stopped, signing in is unmarked, and every app fails, in kit's
+// words, naming the fix, never the command; the rest aren't tried.
+func TestAHangIsTakenAsNoOneSignedIn(t *testing.T) {
 	defer appstore.SetFirstWord(50 * time.Millisecond)()
 	fake := runnertest.New(t)
 	fake.On("mas", "list", "--json").Prints("")
 	fake.On("sudo", "-n", "mas", "install", "1091189122").Hangs().InGroup(4242)
-	fake.On(stray("1091189122")[0], stray("1091189122")[1:]...).Exits(1)
-	res, _ := storeRun(t, fake, false, declared("bear@1091189122", "xcode@497799835"))
+	fake.On(stray("1091189122")[0], stray("1091189122")[1:]...).Prints("5151\n")
+	fake.On("sudo", "-n", "kill", "-KILL", "5151")
+	res, unmarked := storeRun(t, fake, declared("bear@1091189122", "xcode@497799835"))
 	want := "couldn't install bear@1091189122, xcode@497799835: the App Store didn't answer: sign in to the App Store, then try again"
-	if res.State != check.Failed || res.Reason != want {
-		t.Errorf("the App Store's apps stand %+v; want them failed, %q", res, want)
+	if res.State != check.Failed || res.Reason != want || unmarked != 1 {
+		t.Errorf("the App Store's apps stand %+v, signing in unmarked %d times; want them failed, %q, it unmarked once", res, unmarked, want)
+	}
+	calls := []string{
+		"mas list --json",
+		"sudo -n mas install 1091189122", "pgrep -g 4242 -f '^(/[^ ]*/)?mas install 1091189122$'", "sudo -n kill -KILL 5151",
+		"mas list --json",
+	}
+	if !slices.Equal(fake.Calls(), calls) {
+		t.Errorf("ran %q\nwant %q", fake.Calls(), calls)
 	}
 }
 
 // Another failure of an app's install fails that app alone, in kit's words,
 // what mas said or how it ended, never the command, what's left of one kit
-// ended stopped: nothing's done again, and the next app's the check that
+// ended stopped: nothing's unmarked, and the next app's the check that
 // someone's signed in, then the rest, an app at a time, none of them held
 // up by it. A sign-in not done then fails what's left, with what failed;
 // a line above mas's error that only mentions signing in is no sign-in
@@ -464,10 +423,10 @@ func TestAnInstallFailingOtherwiseFailsItAlone(t *testing.T) {
 	fake.On("sudo", "-n", "mas", "install", "1295203466").Fails(fmt.Errorf("sudo -n mas install 1295203466: %w", context.DeadlineExceeded)).InGroup(4242)
 	fake.On(stray("1295203466")[0], stray("1295203466")[1:]...).Prints("5151\n")
 	fake.On("sudo", "-n", "kill", "-KILL", "5151")
-	res, again := storeRun(t, fake, true, declared("bear@1091189122", "numbers@409203825", "xcode@497799835", "windows-app@1295203466"))
+	res, unmarked := storeRun(t, fake, declared("bear@1091189122", "numbers@409203825", "xcode@497799835", "windows-app@1295203466"))
 	want := "couldn't install bear@1091189122, numbers@409203825, windows-app@1295203466: [ERROR] 2026/10/16 04:22:49 no app has the id 1091189122; mas was stopped; mas didn't finish in 90 minutes"
-	if res.State != check.Failed || res.Reason != want || again != 0 {
-		t.Errorf("the App Store's apps stand %+v, signing in done again %d times; want them failed, %q, nothing done again", res, again, want)
+	if res.State != check.Failed || res.Reason != want || unmarked != 0 {
+		t.Errorf("the App Store's apps stand %+v, signing in unmarked %d times; want them failed, %q, nothing unmarked", res, unmarked, want)
 	}
 	if calls := fake.Calls(); slices.Index(calls, "sudo -n mas install 497799835") < slices.Index(calls, "sudo -n kill -KILL 5151") {
 		t.Errorf("ran %q, want xcode tried after the others failed, and what's left of the one kit ended stopped", calls)
@@ -477,7 +436,7 @@ func TestAnInstallFailingOtherwiseFailsItAlone(t *testing.T) {
 	fake.On("mas", "list", "--json").Prints("")
 	fake.On("sudo", "-n", "mas", "install", "1091189122").Exits(1).PrintsToStderr("[ERROR] 2026/10/16 04:22:49 no app has the id 1091189122")
 	fake.On("sudo", "-n", "mas", "install", "497799835").Exits(1).PrintsToStderr(signedOut)
-	res, _ = storeRun(t, fake, false, declared("bear@1091189122", "xcode@497799835"))
+	res, _ = storeRun(t, fake, declared("bear@1091189122", "xcode@497799835"))
 	want = "couldn't install bear@1091189122, xcode@497799835: [ERROR] 2026/10/16 04:22:49 no app has the id 1091189122; no one's signed in: sign in to the App Store, then try again"
 	if res.Reason != want {
 		t.Errorf("the App Store's apps stand %+v; want them failed, %q", res, want)
@@ -487,7 +446,7 @@ func TestAnInstallFailingOtherwiseFailsItAlone(t *testing.T) {
 	fake.On("mas", "list", "--json").Prints("").Then().Prints(installed(497799835))
 	fake.On("sudo", "-n", "mas", "install", "1091189122").Exits(1).PrintsToStderr("Warning: the account is not signed in to iCloud\n[ERROR] 2026/10/16 04:22:49 no app has the id 1091189122")
 	fake.On("sudo", "-n", "mas", "install", "497799835")
-	res, _ = storeRun(t, fake, false, declared("bear@1091189122", "xcode@497799835"))
+	res, _ = storeRun(t, fake, declared("bear@1091189122", "xcode@497799835"))
 	want = "couldn't install bear@1091189122: [ERROR] 2026/10/16 04:22:49 no app has the id 1091189122"
 	if res.Reason != want {
 		t.Errorf("the App Store's apps stand %+v; want bear failed alone, %q", res, want)
@@ -502,7 +461,7 @@ func TestAPasswordMasMentionsIsntSudos(t *testing.T) {
 	fake.On("mas", "list", "--json").Prints("").Then().Prints(installed(497799835))
 	fake.On("sudo", "-n", "mas", "install", "1091189122").Exits(1).PrintsToStderr("Error: a password is required to download this app\n")
 	fake.On("sudo", "-n", "mas", "install", "497799835")
-	res, _ := storeRun(t, fake, false, declared("bear@1091189122", "xcode@497799835"))
+	res, _ := storeRun(t, fake, declared("bear@1091189122", "xcode@497799835"))
 	if want := "couldn't install bear@1091189122: Error: a password is required to download this app"; res.Reason != want {
 		t.Errorf("the App Store's apps stand %+v; want bear failed alone, %q", res, want)
 	}
@@ -585,17 +544,24 @@ func TestAForgottenPasswordIsAskedForAgain(t *testing.T) {
 	}
 }
 
-// With no one to sign in, as without a terminal, or outside a run, no one
-// signed in fails the install at once, every app, naming the fix: the rest
-// aren't tried.
-func TestNoOneToSignInFailsNamingTheFix(t *testing.T) {
+// The first app's install is the check that someone's signed in: mas
+// saying no one is fails the install at once, every app, naming the fix,
+// and signing in, the step by hand before the App Store's, is unmarked, for
+// the next run to ask for it again, unmarking failing said after it, on
+// the same line; the rest aren't tried. Outside a run, there's nothing to
+// unmark.
+func TestNoOneSignedInFailsNamingTheFix(t *testing.T) {
 	fake := runnertest.New(t)
 	fake.On("mas", "list", "--json").Prints("")
 	fake.On("sudo", "-n", "mas", "install", "1091189122").Exits(1).PrintsToStderr(signedOut)
-	res, _ := storeRun(t, fake, false, declared("bear@1091189122", "numbers@409203825", "xcode@497799835"))
+	res, unmarked := storeRun(t, fake, declared("bear@1091189122", "numbers@409203825", "xcode@497799835"))
 	want := "couldn't install bear@1091189122, numbers@409203825, xcode@497799835: no one's signed in: sign in to the App Store, then try again"
-	if res.State != check.Failed || res.Reason != want {
-		t.Errorf("the App Store's apps stand %+v; want them failed, %q", res, want)
+	if res.State != check.Failed || res.Reason != want || unmarked != 1 {
+		t.Errorf("the App Store's apps stand %+v, signing in unmarked %d times; want them failed, %q, it unmarked once", res, unmarked, want)
+	}
+	res, _ = storeRunUnmarking(t, fake, declared("bear@1091189122"), errors.New("the record couldn't be written"))
+	if want := "couldn't install bear@1091189122: no one's signed in: sign in to the App Store, then try again; couldn't ask again next run: the record couldn't be written"; res.Reason != want {
+		t.Errorf("unmarking failing, the App Store's apps stand %+v; want %q", res, want)
 	}
 	err := appstore.New(fake).Install(t.Context(), []string{"bear@1091189122", "xcode@497799835"})
 	if err == nil || err.Error() != "no one's signed in: sign in to the App Store, then try again" {

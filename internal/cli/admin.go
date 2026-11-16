@@ -57,15 +57,17 @@ func (a *app) holdAdmin(ctx context.Context, r *run, wanted map[string][]string)
 }
 
 // holdAdminAlongside is holdAdmin for a run that goes on while kit asks, as
-// kit apply's does: at a terminal, the question's asked under the run's
-// heading, which holds still meanwhile, the run going on behind it, and
-// what needs the password waits for the answer (adminHold), however long
-// it takes.
-func (a *app) holdAdminAlongside(ctx context.Context, r *run, wanted map[string][]string) (stop func()) {
+// kit apply's does, for what applying the steps only names would install
+// (toInstall), worked out only at a terminal, where kit can ask: there, the
+// question's asked under the run's heading, which holds still meanwhile,
+// the run going on behind it, and what needs the password waits for the
+// answer (adminHold), however long it takes.
+func (a *app) holdAdminAlongside(ctx context.Context, r *run, only []string) (stop func()) {
 	if !a.pretty(a.Stdout) {
-		_, _, stop = a.holdAdmin(ctx, r, wanted)
+		_, _, stop = a.holdAdmin(ctx, r, nil)
 		return stop
 	}
+	wanted := toInstall(ctx, r, only)
 	if !needsAdmin(ctx, r, wanted) {
 		return func() {}
 	}

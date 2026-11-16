@@ -296,8 +296,8 @@ and one taken away before it went out is never posted. A look, a key and readyin
 time, keys in the order pressed, ahead of the next look, the card saying at once that a key's
 taken, as a choice's does; a key behind a look that finds it done isn't done. A card holds none of the run's jobs while it's up, and,
 done, or found done, comes down that moment, every job busy or not: a step with nothing more to
-do finishes without waiting for one, and one with more (the step a card raised again comes
-before) waits for a job with the card down. `space` says it's done (`enter`
+do finishes without waiting for one, and one with more (the restore, which copies once its
+source card's answered) waits for a job with the card down. `space` says it's done (`enter`
 too, unshown: marked as `kit manual done` marks it; one with a command is looked at at once, as
 it is every few seconds anyway); a card with a command offers no key, kit carrying on by itself
 once it's done. There's no putting a card off: it's done, or the run's stopped. One card is up
@@ -362,21 +362,18 @@ then finishes.
 Without a terminal, nothing's raised: kit's own stay items of their steps. A step a line comes
 before can find, as it applies, that the line wasn't done after all, as the App Store's first
 install finds no one signed in (signing in has no `--test`: mas can't say who's signed in, and
-macOS keeps it private): the line, marked done no more, comes up again as it did, card and
-notification, the step waiting for it meanwhile, its row saying it waits for you, and the log
-that it's waiting for you, then, once it's done, done and how long it took; then the step tries
-again, as often as it finds it not done. So kit installs App Store apps one at a time, the
-first the check: mas, with no one signed in, says so or waits for good, saying nothing at all,
-so till an app's in, mas saying nothing for five minutes is taken as no one signed in, as one
-mas says it of is. Once mas has said anything, as that it's downloading, the install takes as
-long as it takes (it draws its progress only at a terminal, so through kit it says nothing more
-till it's done), up to an hour and a half (Xcode is gigabytes); one failing holds none of the
-others up. What's left of an install kit ended, in its process group, is stopped before the
-next try: mas runs as root, which only root can stop. While someone's at the terminal, no app
-fails for want of a sign-in. A line whose test
-still passes has nothing to raise again; without a terminal nothing is raised, and the install
-fails at once, naming the fix (sign in to the App Store, then try again), with what failed
-before it; an install that fails otherwise says what mas said, or that mas didn't finish, never
+macOS keeps it private): the line, marked done with `space`, is marked done no more, so the next
+`kit apply` raises its card again; this run doesn't, and the step fails, naming the fix (sign in
+to the App Store, then try again), with what failed before it, the rest of the run carrying on. A
+line with a `--test`, or one of kit's own, kit tells done itself: there's nothing to unmark. So
+kit installs App Store apps one at a time, the first the check: mas, with no one signed in, says
+so or waits for good, saying nothing at all, so till an app's in, mas saying nothing for five
+minutes is taken as no one signed in, as one mas says it of is, and the apps after it aren't
+tried. Once mas has said anything, as that it's downloading, the install takes as long as it
+takes (it draws its progress only at a terminal, so through kit it says nothing more till it's
+done), up to an hour and a half (Xcode is gigabytes); one failing holds none of the others up.
+What's left of an install kit ended, in its process group, is stopped: mas runs as root, which
+only root can stop; an install that fails otherwise says what mas said, or that mas didn't finish, never
 mas's command line, which the run's log has. `kit check|hourly|nightly add
 <name> -- <command>` and `kit manual add <name> "<what to do>" [-- <command>]` (written as
 `--test`; `--group` as on the line) declare checks, jobs and steps by hand (a check, and a
@@ -585,9 +582,8 @@ stand; look at one, its check run as that step's own, the run's record of it lef
 again, what it finds taking its place in the report and emitted as the step finishing again, for
 the faces and the log, with what applying it did earlier kept; and use one's choice, the keys of
 the to-dos its check finds, run as that step's own; and say what it comes after wasn't done after
-all: each of those steps that can be done again (a step by hand of its own, its card raised again)
-is, in order, as its own, then checked again as above, the step saying meanwhile that it waits for
-it, and carrying on once they stand ok. A run that's stopped (an interrupt) fails the steps it
+all: each of those steps that can be unmarked (a step by hand of its own, marked done) is, for the
+next run to do it again. A run that's stopped (an interrupt) fails the steps it
 hadn't started. A step whose check failed, as one that didn't answer in time (30 seconds, tried
 twice), is applied on that, which gives its apply nothing to act on; then, once its check
 answers with things to act on, again, on those.

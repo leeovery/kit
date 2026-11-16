@@ -437,14 +437,13 @@ func TestACardWithATestLooksAgain(t *testing.T) {
 
 // A step by hand of kit's own, as a store's sign-in, is told done as its
 // Done says: not done, its card goes up, watched, kit opening its app as it
-// first goes up, and comes down by itself once Done says so. Raised again,
-// the app isn't opened again. Done by the time its turn comes, its card
-// never goes up, and kit opens nothing.
+// first goes up, and comes down by itself once Done says so. Done by the
+// time its turn comes, its card never goes up, and kit opens nothing.
 func TestKitsOwnCardIsWatchedAndOpensItsApp(t *testing.T) {
 	defer steps.SetManualPoll(time.Millisecond)()
 	c := newCard(t)
 	var signedIn atomic.Bool
-	opened := make(chan struct{}, 2)
+	opened := make(chan struct{}, 1)
 	c.fake.On("open", "-b", "com.example.vault").Does(func() { opened <- struct{}{} })
 	m := steps.ManualStep{Name: "vault-sign-in", Do: "Sign in to the vault", Why: "Your secrets come from it.", Steps: []string{"Scan the code"}, Before: []string{"secret"},
 		Done: func(context.Context) bool { return signedIn.Load() }, Open: "com.example.vault"}
@@ -465,14 +464,6 @@ func TestKitsOwnCardIsWatchedAndOpensItsApp(t *testing.T) {
 	if res := step.Check(t.Context()); res.State != check.OK {
 		t.Errorf("check once signed in = %+v", res)
 	}
-	signedIn.Store(false)
-	again := make(chan error, 1)
-	go func() { again <- step.Again(t.Context()) }()
-	c.cards(t, 2)
-	signedIn.Store(true)
-	if err := ended(t, again); err != nil {
-		t.Fatal(err)
-	}
 	c.raise.Wait()
 	if got := c.fake.Calls(); !slices.Equal(got, []string{"open -b com.example.vault"}) {
 		t.Errorf("ran %q, want the app opened once", got)
@@ -483,8 +474,65 @@ func TestKitsOwnCardIsWatchedAndOpensItsApp(t *testing.T) {
 		t.Fatal(err)
 	}
 	c.raise.Wait()
-	if n := len(c.cardsNow()); n != 2 || !slices.Equal(c.downs(), []string{"vault-sign-in", "vault-sign-in"}) || len(c.fake.Calls()) != 1 {
+	if n := len(c.cardsNow()); n != 1 || !slices.Equal(c.downs(), []string{"vault-sign-in"}) || len(c.fake.Calls()) != 1 {
 		t.Errorf("signed in already: %d cards up, cards down %q, ran %q; want its card never up, its first look finding it done, and nothing opened", n, c.downs(), c.fake.Calls())
+	}
+}
+
+// A step by hand of its own, marked done with space, that a step it comes
+// before finds wasn't done after all (engine.Unmark), as the App Store's
+// first install finds no one signed in, is marked done no more: its card
+// isn't raised again that run, which goes on, the step that found it
+// failing; the next run raises it again. One kit tells done itself, by its
+// test or, kit's own, its Done, has nothing to unmark.
+func TestAStepByHandFoundNotDoneIsAskedForNextRun(t *testing.T) {
+	m := steps.ManualStep{Name: "appstore", Do: "Sign in to the App Store", Before: []string{"mas"}}
+	notSignedIn := errors.New("no one's signed in: sign in to the App Store, then try again")
+	apply := func(c *card) <-chan engine.Report {
+		signIn := steps.OwnManual(c.fake, c.state, m, c.raise)
+		signIn.Before = m.Before
+		mas := engine.Step{Name: "mas", AlwaysApply: true, Check: func(context.Context) check.Result { return check.Result{State: check.OK} },
+			Apply: func(ctx context.Context, _ check.Result) error { return errors.Join(notSignedIn, engine.Unmark(ctx)) }}
+		after := engine.Step{Name: "after", After: []string{"mas"}, Check: func(context.Context) check.Result { return check.Result{State: check.OK} }}
+		p, err := engine.New(signIn, mas, after)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ran := make(chan engine.Report, 1)
+		go func() {
+			report, _ := p.Apply(t.Context(), c.sink, engine.Options{Jobs: 1})
+			ran <- report
+		}()
+		return ran
+	}
+	c := newCard(t)
+	ran := apply(c)
+	c.cards(t, 1)
+	c.answer(t, "appstore", hand.Done)
+	report := over(t, ran)
+	if res := report.Results["mas"]; res.State != check.Failed || res.Reason != notSignedIn.Error() || report.Results["after"].State != check.OK || len(c.cardsNow()) != 1 {
+		t.Errorf("mas %+v, after %+v, %d cards up; want mas failed, %q, the run gone on, the card up once", res, report.Results["after"], len(c.cardsNow()), notSignedIn)
+	}
+	if res := steps.OwnManual(c.fake, c.state, m, nil).Check(t.Context()); res.State == check.OK {
+		t.Errorf("signing in, once unmarked, checks %+v; want it marked done no more", res)
+	}
+	next := newCard(t)
+	next.state = c.state
+	ran = apply(next)
+	if up := next.cards(t, 1)[0]; up.Item != "appstore" {
+		t.Errorf("the next run's card = %+v, want signing in's", up)
+	}
+	next.answer(t, "appstore", hand.Done)
+	over(t, ran)
+
+	tested := m
+	tested.Command = &runner.Command{Name: "test", Args: []string{"-f", "/signed-in"}}
+	own := m
+	own.Done = func(context.Context) bool { return false }
+	for _, w := range []steps.ManualStep{tested, own} {
+		if steps.OwnManual(c.fake, c.state, w, c.raise).Unmark != nil {
+			t.Errorf("%+v can be unmarked; want nothing to unmark, kit telling it done itself", w)
+		}
 	}
 }
 
@@ -1221,72 +1269,6 @@ func TestTheRestOneCardEach(t *testing.T) {
 	}
 }
 
-// A step by hand of its own that a step it comes before finds wasn't done
-// after all (engine.Undone), as the App Store's first install finds no one
-// signed in, goes up again: marked done no more, its card and notification
-// as the first time; done again, the step carries on. One whose test still
-// passes has nothing to raise; with no one to act, none can go up again.
-func TestACardGoesUpAgain(t *testing.T) {
-	c := newCard(t)
-	m := steps.ManualStep{Name: "appstore", Do: "Sign in to the App Store", Before: []string{"mas"}, Why: "The App Store's apps install once you're signed in.", Steps: []string{"Open the App Store", "Store › Sign In, with your Apple Account"}}
-	signIn := steps.OwnManual(c.fake, c.state, m, c.raise)
-	signIn.Before = m.Before
-	var undone bool
-	mas := engine.Step{Name: "mas", AlwaysApply: true, Check: func(context.Context) check.Result { return check.Result{State: check.OK, Summary: "all installed"} },
-		Apply: func(ctx context.Context, _ check.Result) error {
-			undone = engine.Undone(ctx)
-			return nil
-		}}
-	p, err := engine.New(signIn, mas)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ran := make(chan engine.Report, 1)
-	go func() {
-		report, _ := p.Apply(t.Context(), c.sink, engine.Options{Jobs: 1})
-		ran <- report
-	}()
-	first := c.cards(t, 1)[0]
-	c.noticed(t, 1)
-	c.answer(t, "appstore", hand.Done)
-	again := c.cards(t, 2)[1]
-	c.noticed(t, 2)
-	first.Time, again.Time = time.Time{}, time.Time{}
-	if !reflect.DeepEqual(again, first) {
-		t.Errorf("the card again = %+v, want it as the first time, %+v", again, first)
-	}
-	if res := signIn.Check(t.Context()); res.State == check.OK {
-		t.Errorf("with its card up again, its check = %+v; want it marked done no more", res)
-	}
-	c.answer(t, "appstore", hand.Done)
-	var report engine.Report
-	select {
-	case report = <-ran:
-	case <-time.After(5 * time.Second):
-		t.Fatal("the run never ended")
-	}
-	if !undone || report.Results["appstore"].State != check.OK {
-		t.Errorf("undone %v, the step by hand stands %+v; want it done again", undone, report.Results["appstore"])
-	}
-	posted := []string{
-		"notify card:appstore:appstore | Sign in to the App Store | The App Store's apps install once you're signed in.", "clear card:appstore:appstore",
-		"notify card:appstore:appstore | Sign in to the App Store | The App Store's apps install once you're signed in.", "clear card:appstore:appstore",
-	}
-	if got := c.posted(); !slices.Equal(got, posted) {
-		t.Errorf("notifications %q, want %q", got, posted)
-	}
-
-	c = newCard(t)
-	c.fake.On("test", "-f", "/signed-in")
-	tested := steps.OwnManual(c.fake, c.state, steps.ManualStep{Name: "sign-in", Do: "Sign in", Before: []string{"secret"}, Command: &runner.Command{Name: "test", Args: []string{"-f", "/signed-in"}}}, c.raise)
-	if err := tested.Again(t.Context()); err == nil || len(c.posted()) != 0 {
-		t.Errorf("again, its test passing = %v, posted %q; want it refused, nothing raised", err, c.posted())
-	}
-	if steps.OwnManual(c.fake, c.state, m, nil).Again != nil {
-		t.Error("with no one to act, a step by hand can be done again")
-	}
-}
-
 // A card up between two to-dos counts every to-do still to come after it,
 // not the next alone.
 func TestACardBetweenToDosCountsThemAll(t *testing.T) {
@@ -1682,71 +1664,6 @@ func TestAChoiceWhileKitLooks(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("r was never done")
-	}
-}
-
-// A card raised again by the step it comes before, done while every job is
-// busy, comes down at once, its step checked again and its answers no
-// longer taken: the step that raised it waits for a job to go on with, its
-// card down first, saying it's applying, no longer waiting for the card.
-func TestACardAgainDoneWithEveryJobBusy(t *testing.T) {
-	c := newCard(t)
-	gate, busy, rechecked, applying := make(chan struct{}), make(chan struct{}), make(chan struct{}), make(chan struct{})
-	var busyOnce, applyingOnce sync.Once
-	var finishes atomic.Int32
-	c.sink.on = func(e event.Event) {
-		switch e := e.(type) {
-		case event.StepStarted:
-			if e.Step == "cask" && e.Doing == "applying" {
-				busyOnce.Do(func() { close(busy) })
-			}
-		case event.StepFinished:
-			if e.Step == "appstore" && finishes.Add(1) == 2 {
-				close(rechecked)
-			}
-		case event.Doing:
-			if e.Step == "mas" && e.Says == "applying" && finishes.Load() == 2 {
-				applyingOnce.Do(func() { close(applying) })
-			}
-		}
-	}
-	m := steps.ManualStep{Name: "appstore", Do: "Sign in to the App Store", Before: []string{"mas"}}
-	signIn := steps.OwnManual(c.fake, c.state, m, c.raise)
-	signIn.Before = m.Before
-	var tried atomic.Int32
-	mas := engine.Step{Name: "mas", AlwaysApply: true, Check: func(context.Context) check.Result { return check.Result{State: check.OK} },
-		Apply: func(ctx context.Context, _ check.Result) error {
-			if tried.Add(1) == 1 {
-				engine.Undone(ctx)
-			}
-			return nil
-		}}
-	cask := gated("cask", gate)
-	cask.After = []string{"appstore"}
-	p, err := engine.New(signIn, mas, cask)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ran := make(chan engine.Report, 1)
-	go func() {
-		report, _ := p.Apply(t.Context(), c.sink, engine.Options{Jobs: 1})
-		ran <- report
-	}()
-	c.cards(t, 1)
-	c.answer(t, "appstore", hand.Done)
-	c.cards(t, 2)
-	within(t, busy, "the cask step never took the job the card gave up")
-	if !c.desk.Answer("appstore", hand.Done) {
-		t.Fatal("the card raised again didn't take space")
-	}
-	within(t, rechecked, "the card raised again never came down while every job was busy")
-	if c.desk.Answer("appstore", hand.Done) {
-		t.Error("the card's answers were still taken once it was done")
-	}
-	within(t, applying, "the step that raised the card never said it was applying while it waited for a job")
-	close(gate)
-	if report := over(t, ran); report.Results["appstore"].State != check.OK || report.Results["mas"].State != check.OK {
-		t.Errorf("appstore %+v, mas %+v; want both done", report.Results["appstore"], report.Results["mas"])
 	}
 }
 

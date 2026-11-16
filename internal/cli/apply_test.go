@@ -127,6 +127,22 @@ func TestApplyWithoutATerminalNeverPrompts(t *testing.T) {
 	}
 }
 
+// What will need an administrator's password is worked out only to ask for
+// it, which only happens at a terminal: without one, the casks are listed
+// once, by the run's own check.
+func TestApplyWithoutATerminalWorksOutNoAdmin(t *testing.T) {
+	w := laptopWorld(t)
+	w.writeSection(t, "laptop", "homebrew casks", "firefox\nzoom\n")
+	w.fake.On("brew", "info", "--json=v2", "--cask", "zoom").Prints(zoomInfo)
+	w.fake.On("sudo", "-n", "true").Exits(1).PrintsToStderr("sudo: a password is required")
+
+	w.run(t, "apply")
+	calls := w.fake.Calls()
+	if listed := len(slices.DeleteFunc(slices.Clone(calls), func(c string) bool { return c != "brew list --cask --full-name -1" })); listed != 1 {
+		t.Errorf("ran %q; want the casks listed once, by the run", calls)
+	}
+}
+
 func TestApplyAtATerminalAsksForThePasswordUpFront(t *testing.T) {
 	w := laptopWorld(t)
 	w.terminal = true

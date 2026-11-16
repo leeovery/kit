@@ -255,10 +255,10 @@ func howOf(steps []string, detail string) []string {
 // OwnManual is a step by hand a step comes after (Ordered), as a step of
 // its own: done as its Done says, when its command exits 0, or once marked
 // done. Applying it with raise raises it, opening its app the first time,
-// and waits till it's done; and so does doing it again, should a step it
-// comes before find it wasn't done after all (again). Without raise, with
-// no one to act, applying leaves it as it stands, and it can't be done
-// again.
+// and waits till it's done. Without raise, with no one to act, applying
+// leaves it as it stands. One marked done is marked done no more should a
+// step it comes before find it wasn't done after all (engine.Unmark), for
+// the next run to raise it again.
 func OwnManual(run runner.Runner, stateDir string, m ManualStep, raise *Raise) engine.Step {
 	b := byHand{ManualStep: m, run: run, stateDir: stateDir, opened: &sync.Once{}}
 	step := engine.Step{
@@ -282,8 +282,8 @@ func OwnManual(run runner.Runner, stateDir string, m ManualStep, raise *Raise) e
 			return nil
 		},
 	}
-	if raise != nil {
-		step.Again = func(ctx context.Context) error { return b.again(ctx, raise) }
+	if !b.watched() {
+		step.Unmark = func() error { return MarkDone(stateDir, []string{m.Name}, time.Time{}, true) }
 	}
 	return step
 }
@@ -305,23 +305,6 @@ func awaitAll(ctx context.Context, waits []engine.Wait) error {
 		return engine.NotYet(engine.NotThere(missing))
 	}
 	return nil
-}
-
-// again raises it once more, as a step it comes before found it wasn't done
-// after all (engine.Undone), and waits till it's done: marked done no more,
-// as kit manual done --undo unmarks it, else it'd be found done before its
-// card went up. One whose test still passes has nothing to raise.
-func (b byHand) again(ctx context.Context, raise *Raise) error {
-	switch {
-	case !b.watched():
-		if err := MarkDone(b.stateDir, []string{b.Name}, time.Time{}, true); err != nil {
-			return err
-		}
-	case b.isDone(ctx):
-		return fmt.Errorf("%s's test says it's done", b.Name)
-	}
-	_, _, err := raise.up(ctx, b.Name, b, midRun(ctx, b.Name))
-	return err
 }
 
 // Manual checks what a person must do by hand, as [manual] declares it: a

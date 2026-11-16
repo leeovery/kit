@@ -97,10 +97,12 @@ type Step struct {
 	// (an item's ToDo with keys), as applying raises them at its end, and
 	// once one it watches is done. Optional.
 	Choice *Choice
-	// Again does the step once more, finished, should a step applied after
-	// it find it wasn't done after all (Undone), as a step by hand's card
-	// raised again. Optional.
-	Again func(ctx context.Context) error
+	// Unmark takes the step as done no more, for the next run to do it
+	// again, should a step applied after it find it wasn't done after all
+	// (Unmark): any [manual] line without a --test placed before the step
+	// that finds it, as the App Store's sign-in is before its apps.
+	// Optional.
+	Unmark func() error
 }
 
 // Choice is what a step's to-dos do beyond being looked at: Ready is one as
@@ -211,15 +213,6 @@ func program(command string) string {
 // title is the step's title, or its name.
 func (s Step) title() string {
 	return cmp.Or(s.Title, s.Name)
-}
-
-// asks is what the step asks of the person, as its card's title says, when
-// it's a step by hand of its own, as the faces show it; else its title.
-func (s Step) asks() string {
-	if len(s.ByHand) == 1 && s.ByHand[0].Name == s.Name {
-		return s.ByHand[0].Title
-	}
-	return s.title()
 }
 
 // Pipeline is the steps, in an order that puts each after what it needs.
@@ -644,6 +637,7 @@ func (p *Pipeline) run(ctx context.Context, sink event.Sink, opts Options, apply
 		titles:   titles,
 		byName:   byName,
 		steps:    steps,
+		all:      p.steps,
 		calls:    make(chan func()),
 		results:  make(map[string]check.Result, len(steps)),
 		started:  make(map[string]bool, len(steps)),
@@ -672,17 +666,19 @@ func (p *Pipeline) run(ctx context.Context, sink event.Sink, opts Options, apply
 // dispatch runs a run's steps: it starts each, in pipeline order, once what
 // it needs is done and a job is free, and defers each whose needs didn't
 // stand ok. Only its own goroutine touches its maps, but away, putting,
-// freed and looks, which mu guards, and titles, byName, steps and over,
+// freed and looks, which mu guards, and titles, byName, steps, all and over,
 // which steps' goroutines read, as they never change once it's started; a
 // step's goroutine has it do anything else through calls (inLoop).
 type dispatch struct {
-	sink     event.Sink
-	now      func() time.Time
-	within   time.Duration
-	apply    bool
-	titles   map[string]string
-	byName   map[string]Step
-	steps    []Step
+	sink   event.Sink
+	now    func() time.Time
+	within time.Duration
+	apply  bool
+	titles map[string]string
+	byName map[string]Step
+	steps  []Step
+	// all are the pipeline's steps, the run's or not.
+	all      []Step
 	calls    chan func()
 	results  map[string]check.Result
 	started  map[string]bool
@@ -958,15 +954,15 @@ func (d *dispatch) startReady(ctx context.Context, steps []Step, running *int, j
 // for partway through applying is waited for as its Later are, what it says
 // may be in place has the steps waiting for its things look again, what it
 // says it's putting in place isn't there for them till it says it is, and
-// what it comes after that it finds wasn't done after all is done again. j
-// is its job.
+// what it comes after that it finds wasn't done after all is unmarked. j is
+// its job.
 func (d *dispatch) stepContext(ctx context.Context, s Step, j *job) context.Context {
 	ctx = context.WithValue(d.attributed(ctx, s), dispatchKey{}, d)
 	ctx = context.WithValue(ctx, changedKey{}, func() { d.poke(s.Name) })
 	ctx = context.WithValue(ctx, jobKey{}, j)
 	ctx = context.WithValue(ctx, puttingKey{}, func(things []string) func() { return d.putIn(s.Name, things) })
 	ctx = context.WithValue(ctx, putKey{}, func(thing string) { d.put(s.Name, thing) })
-	ctx = context.WithValue(ctx, undoneKey{}, func(ctx context.Context) bool { return d.undone(ctx, s) })
+	ctx = context.WithValue(ctx, unmarkKey{}, func() error { return d.unmark(s) })
 	return context.WithValue(ctx, awaitKey{}, func(ctx context.Context, w Wait, says string) bool {
 		return d.await(ctx, s, w, func() { event.Say(ctx, event.Doing{Says: says}) })
 	})
@@ -1175,56 +1171,30 @@ func ChoiceOf(ctx context.Context, name string) *Choice {
 	}
 }
 
-type undoneKey struct{}
+type unmarkKey struct{}
 
-// Undone tells the run that what the step ctx is running comes after wasn't
+// Unmark tells the run that what the step ctx is running comes after wasn't
 // done after all, as an App Store install finds no one signed in, which a
 // step by hand before it asks for: each of the steps it's applied after that
-// can be done again (Again), finished, is, in the pipeline's order, as its
-// own, then checked again, as Recheck does; the step saying meanwhile that it
-// waits for it, then that it's applying again. It reports whether each was
-// done again and stands ok: false outside a run, with none to do again, or
-// once the run's stopped.
-func Undone(ctx context.Context) bool {
-	if undone, ok := ctx.Value(undoneKey{}).(func(context.Context) bool); ok {
-		return undone(ctx)
+// can be (Step.Unmark) is taken as done no more, for the next run to do it
+// again. Outside a run, it does nothing.
+func Unmark(ctx context.Context) error {
+	if unmark, ok := ctx.Value(unmarkKey{}).(func() error); ok {
+		return unmark()
 	}
-	return false
+	return nil
 }
 
-// undone does again, for s, what it comes after that can be (Undone).
-func (d *dispatch) undone(ctx context.Context, s Step) bool {
-	if ctx.Err() != nil {
-		return false
-	}
-	var again []Step
-	d.inLoop(func() {
-		for _, a := range d.steps {
-			if _, done := d.results[a.Name]; done && a.Again != nil && slices.Contains(s.After, a.Name) {
-				again = append(again, a)
-			}
-		}
-	})
-	if len(again) == 0 {
-		return false
-	}
-	// What's done again waits for a person, s's job given up meanwhile
-	// (Release): s takes it back to go on once each is checked again, so
-	// that its card's down first, saying it's applying as it waits for one.
-	defer func() {
-		event.Say(ctx, event.Doing{Says: "applying"})
-		jobOf(ctx).back()
-	}()
-	for _, a := range again {
-		event.Say(ctx, event.Doing{Says: "waiting for " + a.asks()})
-		if err := a.Again(d.attributed(event.WithChanging(ctx), a)); err != nil {
-			return false
-		}
-		if res, ok := Recheck(ctx, a.Name); !ok || res.State != check.OK {
-			return false
+// unmark unmarks, for s, what it comes after that can be (Unmark), whether
+// or not the run took it, as when s is the step named alone.
+func (d *dispatch) unmark(s Step) error {
+	var errs []error
+	for _, a := range d.all {
+		if a.Unmark != nil && slices.Contains(s.After, a.Name) {
+			errs = append(errs, a.Unmark())
 		}
 	}
-	return true
+	return errors.Join(errs...)
 }
 
 type awaitKey struct{}
