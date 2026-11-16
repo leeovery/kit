@@ -108,34 +108,45 @@ func (p *Pretty) drawApplying() {
 }
 
 // tooSmall is applying's live part in a window h high, too small for its
-// screen: under the heading, the rows' lights and the size that brings
-// the screen; then macOS asking something, and the card up, each while
-// there is one. In a window too short for the heading too, it goes, as it
-// would have scrolled away; what's still too tall is cut to the window.
+// screen: under the heading, the rows' lights; then what's to act on: the
+// size that brings the screen, macOS asking something, and the card up,
+// each while there is one. In a window too short for it all, the heading
+// goes first, as it would have scrolled away, then the lights; what's
+// still too tall is cut to the window.
 func (p *Pretty) tooSmall(h int) []string {
-	lines := append(look.Lights(p.width, p.lamps()...), "", "  "+look.Todo(look.Muted(fmt.Sprintf("make the window at least %d×%d to follow the run", screenWidth, screenHeight))))
+	act := []string{"  " + look.Todo(look.Muted(fmt.Sprintf("make the window at least %d×%d to follow the run", screenWidth, screenHeight)))}
 	for _, block := range [][]string{p.askingLines(p.width), p.cardUpLines(p.width)} {
 		if len(block) > 0 {
-			lines = append(append(lines, ""), block...)
+			act = append(append(act, ""), block...)
 		}
 	}
-	if head := p.headingLive(false); h == 0 || len(head)+len(lines) < h {
-		lines = append(head, lines...)
+	lit := slices.Concat(look.Lights(p.width, p.lamps()...), []string{""}, act)
+	for _, lines := range [][]string{slices.Concat(p.headingLive(false), lit), lit} {
+		if h == 0 || len(lines) < h {
+			return lines
+		}
 	}
-	if h > 0 {
-		lines = lines[:min(len(lines), max(h-1, 1))]
-	}
-	return lines
+	return act[:min(len(act), max(h-1, 1))]
 }
 
 // cardUpLines are the card up, w wide, in a window too small for the
-// screen, which alone reads its keys: its row, and that a bigger window
-// shows them; none when no card's up.
+// screen, which alone reads its keys: its row, then, under it, what its
+// chosen key is doing while it's being answered; for one kit watches,
+// that a bigger window shows how and kit carries on by itself; else that
+// a bigger window shows the keys to answer it. None when no card's up.
 func (p *Pretty) cardUpLines(w int) []string {
-	if p.card == nil {
+	c := p.card
+	if c == nil {
 		return nil
 	}
-	return look.Timeline("  ", w, look.Row{State: look.NeedsYou, Name: p.card.Title, Says: look.Orange("needs you"), Under: todoLines("a bigger window shows the keys to answer it", w-6)})
+	under := look.Todo(look.Muted("a bigger window shows the keys to answer it"))
+	switch doing := answeringWith(*c); {
+	case c.Answering != "" && doing != "":
+		under = look.Muted(doing)
+	case c.Tells:
+		under = look.Todo(look.Muted("a bigger window shows how"), look.Muted("kit carries on by itself once it's done"))
+	}
+	return look.Timeline("  ", w, look.Row{State: look.NeedsYou, Name: c.Title, Says: look.Orange("needs you"), Under: look.Fold("  ", w, under)})
 }
 
 // window is the terminal's size as it is now, all of it: no size when the

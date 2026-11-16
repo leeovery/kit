@@ -722,7 +722,8 @@ func TestPrettyTimelineShowsWhatYoureToDo(t *testing.T) {
 }
 
 // While applying gets ready, the rows' lights are under the wordmark, and
-// what kit's doing; at the end, its record in their place, the wordmark
+// what kit's doing; below 100×30, the run stays in place, never on a
+// screen of its own; at the end, its record in their place, the wordmark
 // once: what ran, the bar and the tally beside it, then the rows done.
 func TestPrettyApplyingNow(t *testing.T) {
 	var out syncBuffer
@@ -746,6 +747,9 @@ func TestPrettyApplyingNow(t *testing.T) {
 	face.Emit(event.RunFinished{Duration: 4200 * time.Millisecond, Counts: map[check.State]int{check.OK: 4}})
 	if err := face.Close(); err != nil {
 		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "\x1b[?1049") {
+		t.Error("applying below 100×30 took a screen of its own: want it in place, under its heading")
 	}
 	got := screen(out.String())
 	want := "\n  █  ▄▀  ▀█▀  ▀▀█▀▀  │  apply · laptop · Fri 2 Jan · 03:04\n  █▀▀▄    █     █    │  ▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮\n  █   █  ▄█▄    █    │  4 fine · 4.2s\n\n" +
@@ -788,12 +792,12 @@ func TestPrettyLightsSayAtOnce(t *testing.T) {
 	}
 }
 
-// The face draws to the terminal's size as it is when it draws, not as it
+// The face draws to the terminal's width as it is when it draws, not as it
 // was when kit started: Ghostty starts kit before it's sized its window.
 func TestPrettyFollowsTheTerminalsWidth(t *testing.T) {
 	var out syncBuffer
 	width := 45
-	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, width, true).Turned().Sized(func() (int, int) { return 160, 40 })
+	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.Ascii}, width, true).Turned().Sized(func() (int, int) { return 80, 40 })
 	steps := []event.Step{
 		{Name: "time-machine", Title: "Time Machine", Area: "Backups"},
 		{Name: "brew", Title: "Homebrew formulae", Area: "Drift", Row: "Homebrew formulae", Tool: "Homebrew"},
@@ -803,9 +807,9 @@ func TestPrettyFollowsTheTerminalsWidth(t *testing.T) {
 	face.Emit(event.RunStarted{Time: at, Command: "apply", Machine: "laptop", Steps: steps})
 	face.Emit(event.StepStarted{Step: "brew", Doing: "applying"})
 	face.Turn()
-	got := screen(out.String())
-	if i := slices.IndexFunc(strings.Split(got, "\n"), func(l string) bool { return strings.Contains(l, "┬") }); i < 0 || ansi.StringWidth(strings.Split(got, "\n")[i]) != 160 {
-		t.Errorf("at 160 columns, started at 45, the screen is\n%s\nwant its rule 160 wide", got)
+	got := turned(screen(out.String()))
+	if want := "  ◐ HOMEBREW FORMULAE  ○ YOUR STEPS  ○ BACKUPS\n"; !strings.Contains(got, want) {
+		t.Errorf("at 80 columns, started at 45, the window is\n%s\nwant the lights whole\n%s", got, want)
 	}
 	for _, s := range steps {
 		face.Emit(event.StepFinished{Step: s.Name, Result: check.Result{State: check.OK, Summary: "fine"}})

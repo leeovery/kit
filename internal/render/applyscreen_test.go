@@ -621,7 +621,8 @@ var spaceman = event.NeedsYou{Time: after(360), Step: "manual", Item: "spaceman"
 var linkTargets = regexp.MustCompile("\x1b]8;;([^\x07\x1b]+)")
 
 // A link in a card's text is one the terminal opens when it's clicked, its
-// text as written, on applying's screen; it takes no room, every line as wide as without it; nothing else is linked.
+// text as written, on applying's screen; it takes no room, every line as
+// wide as without it; nothing else is linked.
 func TestApplyingCardsLinkTheirLinks(t *testing.T) {
 	linked := ansi.SetHyperlink("https://github.com/example/spaceman/releases") + "github.com/example/spaceman/releases" + ansi.ResetHyperlink()
 	for _, size := range [][2]int{{160, 64}, {100, 30}} {
@@ -1406,11 +1407,10 @@ func TestApplyingStateLine(t *testing.T) {
 }
 
 // The screen takes a window 100 by 30 or more. A window too small for it
-// has, in place under the heading, the rows' lights and the size that
-// brings the screen; then macOS asking something, and the card up, with
-// what to do, each while there is one. A window too short for the heading
-// too loses it, as it would have scrolled away, and what's still too tall
-// is cut to the window.
+// has, in place under the heading, the rows' lights, then what's to act
+// on: the size that brings the screen, macOS asking something, and the
+// card up, each while there is one. A window too short for it all loses
+// the heading first, as it would have scrolled away, then the lights.
 func TestApplyingScreenNeedsTheRoom(t *testing.T) {
 	for _, tt := range []struct {
 		w, h   int
@@ -1445,6 +1445,35 @@ func TestApplyingScreenNeedsTheRoom(t *testing.T) {
 				t.Fatal(err)
 			}
 			golden(t, tt.golden, got+"\n")
+		})
+	}
+}
+
+// In a window too small for applying's screen, keys aren't read: the card
+// up is its row, and under it, for one that takes keys, that a bigger
+// window shows them; for one kit watches, that a bigger window shows how,
+// and kit carries on by itself; for a choice being answered, what its key
+// is doing.
+func TestApplyingCardInASmallWindow(t *testing.T) {
+	editor := event.NeedsYou{Time: after(360), Step: "manual", Item: "editor", Title: "Install the editor from its site", Steps: []string{"Download it from editor.example.com"}}
+	for _, tt := range []struct {
+		name   string
+		events []event.Event
+		want   string
+	}{
+		{"keys", cardUp(editor), "  ▲ Install the editor from its site  needs you\n  │ → a bigger window shows the keys to answer it\n"},
+		{"watched", cardUp(signIn), "  ▲ " + signIn.Title + "  needs you\n  │ → a bigger window shows how · kit carries on by itself once it's done\n"},
+		{"answering", answeredWith(toDosUpTo(0), "r"), "  needs you\n  │ restores this machine ID's last save (15 Oct)\n"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			face, out, _ := applyAt(99, 40, 6*time.Minute, tt.events)
+			got := screen(out.String()) + "\n"
+			if err := face.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.HasSuffix(got, tt.want) {
+				t.Errorf("in a small window, the card is\n%s\nwant it to end\n%s", got, tt.want)
+			}
 		})
 	}
 }
