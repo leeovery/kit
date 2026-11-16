@@ -116,4 +116,8 @@ type SignIn struct {
 	Title        string
 	Steps        []string
 	App, AppName string
+	// Packages are what install its program and app, each as a line names
+	// one of a step's things, kind:item (cask:1password): those the config
+	// declares install first, as kit waits for them before the card.
+	Packages []string
 }

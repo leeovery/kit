@@ -7,23 +7,25 @@ import (
 	"testing"
 	"time"
 
+	"github.com/leeovery/kit/internal/kind/login"
 	"github.com/leeovery/kit/internal/kind/secret/onepassword/optest"
 	"github.com/leeovery/kit/internal/runner"
 )
 
 // On a new Mac, each kind waits for its own command, which steps of the
-// config bring, not for the formulae: the secrets sync once the sign-in,
-// raised once 1Password's casks are in, is done; npm's packages install
-// once mise's step has put npm there; Claude Code's MCP servers once its
-// step has installed claude; all while the rest of the formulae install.
+// config bring, not for the formulae: the secrets sync once their store's
+// sign-in is done, its casks, which its driver names, installed ahead of
+// the rest of the casks; npm's packages install once mise's step has put
+// npm there; Claude Code's MCP servers once its step has installed claude;
+// all while the rest of the formulae install.
 func TestEachKindWaitsForItsCommand(t *testing.T) {
 	w := laptopWorld(t)
+	w.terminal, w.size = true, [2]int{160, 64}
 	w.writeSection(t, "laptop", "homebrew formulae", "go\nmise\nripgrep\n")
-	w.writeSection(t, "laptop", "homebrew casks", "1password\nowner/tap/1password-cli\n")
+	w.writeSection(t, "laptop", "homebrew casks", "1password\n1password-cli\nzoom\n")
 	w.writeSection(t, "laptop", itemSection, "TOKEN   Section/token\n")
 	w.writeSection(t, "laptop", "npm packages", "intelephense\n")
 	w.writeSection(t, "laptop", "claude mcp", "docs --transport http https://docs.example.com/mcp\n")
-	w.writeSection(t, "laptop", "manual", `1password "Sign in to 1Password" --after cask:1password --after cask:owner/tap/1password-cli --before secret --test test -f /signed-in`+"\n")
 	w.writeSection(t, "laptop", "steps", strings.Join([]string{
 		`claude-code "Claude Code, from its installer"`,
 		`mise "The tool versions mise names" --after brew:mise --before npm`,
@@ -31,8 +33,11 @@ func TestEachKindWaitsForItsCommand(t *testing.T) {
 	f := w.fake
 	formulae := "go\njq\noniguruma\nowner/tap/tool\nnode@20\nffmpeg\n"
 	f.On("brew", "info", "--json=v2", "--formula", "mise", "ripgrep").Prints(`{"formulae": [{"name": "mise", "full_name": "mise"}, {"name": "ripgrep", "full_name": "ripgrep"}], "casks": []}`)
-	f.On("brew", "info", "--json=v2", "--cask", "1password", "owner/tap/1password-cli").Prints(`{"formulae": [], "casks": [{"token": "1password", "full_token": "1password", "artifacts": [{"app": ["1Password.app"]}]}, {"token": "1password-cli", "full_token": "owner/tap/1password-cli", "artifacts": [{"binary": ["op"]}]}]}`)
-	f.On("brew", "tap").Prints("owner/tap\n")
+	f.On("brew", "info", "--json=v2", "--cask", "1password", "1password-cli", "zoom").Prints(`{"formulae": [], "casks": [{"token": "1password", "full_token": "1password", "artifacts": [{"app": ["1Password.app"]}]}, {"token": "1password-cli", "full_token": "1password-cli", "artifacts": [{"binary": ["op"]}]}, {"token": "zoom", "full_token": "zoom", "artifacts": [{"app": ["zoom.us.app"]}]}]}`)
+	f.On("brew", "info", "--json=v2", "--cask", "1password", "1password-cli").Prints(`{"formulae": [], "casks": [{"token": "1password", "full_token": "1password", "artifacts": [{"app": ["1Password.app"]}]}, {"token": "1password-cli", "full_token": "1password-cli", "artifacts": [{"binary": ["op"]}]}]}`)
+	f.On("brew", "info", "--json=v2", "--cask", "zoom").Prints(`{"formulae": [], "casks": [{"token": "zoom", "full_token": "zoom", "artifacts": [{"app": ["zoom.us.app"]}]}]}`)
+	f.On("osascript", "-l", "JavaScript", "-e", login.ReadScript).Prints("[]")
+	w.choose = func(string, []string) (int, error) { return 1, nil }
 	f.On("brew", "update", "--quiet")
 	f.On("sudo", "-n", "true").Exits(1)
 	f.On("brew", "install", "--formula", "mise").Does(func() {
@@ -50,16 +55,13 @@ func TestEachKindWaitsForItsCommand(t *testing.T) {
 		formulae += "ripgrep\n"
 		f.On("brew", "list", "--formula", "--full-name", "-1").Prints(formulae)
 	})
-	// A tap's cask goes in apart, first.
-	f.On("brew", "install", "--cask", "owner/tap/1password-cli").Does(func() {
-		f.On("brew", "list", "--cask", "--full-name", "-1").Prints("ghostty\nfirefox\nowner/tap/1password-cli\n")
-	})
-	f.On("brew", "install", "--cask", "1password").Does(func() {
-		f.On("brew", "list", "--cask", "--full-name", "-1").Prints("ghostty\nfirefox\n1password\nowner/tap/1password-cli\n")
+	// Signed in to the app, once it's in: the card's found done.
+	f.On("brew", "install", "--cask", "1password", "1password-cli").Does(func() {
+		f.On("brew", "list", "--cask", "--full-name", "-1").Prints("ghostty\nfirefox\n1password\n1password-cli\n")
 		f.On("op", "whoami")
 		optest.Holds(f, map[string]string{"op://vault/Item/Section/token": "plain-token-value"})
 	})
-	f.On("test", "-f", "/signed-in")
+	f.On("brew", "install", "--cask", "zoom")
 	// A program is on kit's PATH once a command of it is scripted.
 	mise := w.stepScript(t, "laptop", "mise")
 	f.On(mise, "check").Exits(1)
@@ -77,7 +79,11 @@ func TestEachKindWaitsForItsCommand(t *testing.T) {
 
 	out, errOut, _ := w.run(t, "apply")
 	calls := f.Calls()
-	if !before(calls, "brew install --cask owner/tap/1password-cli", "brew install --cask 1password") || !before(calls, "brew install --cask 1password", "test -f /signed-in") || !before(calls, "test -f /signed-in", synced) {
+	casks := "brew install --cask 1password 1password-cli"
+	if !before(calls, casks, "brew install --cask zoom") || !before(calls, casks, "brew install --formula ripgrep") {
+		t.Errorf("ran %q: want 1Password's casks installed first, ahead of the rest of the casks and formulae", calls)
+	}
+	if !before(calls, casks, "op whoami") || !before(calls, "op whoami", synced) {
 		t.Errorf("ran %q: want the secrets synced once 1Password's casks were in and the sign-in done", calls)
 	}
 	if !before(calls, mise+" apply", npm) {

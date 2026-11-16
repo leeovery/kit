@@ -101,9 +101,11 @@ func (r *run) manualSteps(ordered []steps.ManualStep, others []engine.Step, rais
 
 // cardSteps are the steps by hand the run's kinds need done before their
 // things (kind.Carded), as a secrets store's sign-in, each a step of its
-// own, raised with raise at a terminal: once found not done, it waits for
-// the program it needs on kit's PATH and the app it needs installed in
-// folders, which kit opens as its card first comes up. Its kind's step,
+// own, raised with raise at a terminal: applied after what installs them
+// (Card.Packages) that the config declares, so they're among their list's
+// first; once found not done, it waits for the program it needs on kit's
+// PATH and the app it needs installed in folders, whatever installs them,
+// and kit opens the app as its card first comes up. Its kind's step,
 // among kindSteps, waits for it partway through applying (Later), not
 // before it starts: one store's sign-in holds back that store's secrets
 // alone.
@@ -123,7 +125,14 @@ func (r *run) cardSteps(raise *steps.Raise, folders *apps.Folders, kindSteps []e
 				m.Await = append(m.Await, engine.Wait{Thing: c.AppName, Ready: func(context.Context) bool { return folders.Has(c.App) }})
 			}
 			kindSteps[i].Later = append(kindSteps[i].Later, engine.Wait{Step: c.Name})
-			out = append(out, steps.OwnManual(r.run, r.stateDir, m, raise))
+			step := steps.OwnManual(r.run, r.stateDir, m, raise)
+			for _, p := range c.Packages {
+				if r.declares(p) {
+					kindName, thing, _ := strings.Cut(p, ":")
+					step.Waits = append(step.Waits, r.thingWait(kindName, thing))
+				}
+			}
+			out = append(out, step)
 		}
 	}
 	return out
@@ -200,7 +209,7 @@ func (r *run) place(after, before []string, names map[string]bool) (ordered []st
 		kindName, thing, isThing := strings.Cut(a, ":")
 		switch {
 		case isThing && names[kindName] && r.kindsByName[kindName] != nil:
-			waits = append(waits, engine.Wait{Step: kindName, Thing: thing, Ready: r.installed(kindName, thing)})
+			waits = append(waits, r.thingWait(kindName, thing))
 		case names[a]:
 			ordered = append(ordered, a)
 		case slices.Contains(sometimes, a):
@@ -442,6 +451,12 @@ func (r *run) installed(kindName, thing string) func(context.Context) bool {
 		}
 		return slices.ContainsFunc(have, func(in kind.Installed) bool { return sameThing(in.Name, thing) })
 	}
+}
+
+// thingWait is a wait for thing, one of the things of the kind called
+// kindName, till it's installed.
+func (r *run) thingWait(kindName, thing string) engine.Wait {
+	return engine.Wait{Step: kindName, Thing: thing, Ready: r.installed(kindName, thing)}
 }
 
 // declares reports whether kit apply installs thing, one of a step's

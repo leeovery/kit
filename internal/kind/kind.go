@@ -108,6 +108,9 @@ type Card struct {
 	// installed, by bundle id, which kit opens as its card first comes up,
 	// and AppName that app's name: each waited for before it's raised.
 	Program, App, AppName string
+	// Packages are what install them, each as one of a step's things, as in
+	// cask:1password: those declared for the Mac are waited for too.
+	Packages []string
 }
 
 // Carded is a kind whose things need steps by hand done before its step

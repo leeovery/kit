@@ -241,7 +241,8 @@ func TestOrderPlacesTheSignInBeforeTheSecrets(t *testing.T) {
 }
 
 // The password manager's sign-in waits for its program on kit's PATH and
-// its app installed, whatever installs them: it's not among the first.
+// its app installed, whatever installs them, its casks not declared for
+// this Mac: it's not among the first.
 func TestOrderOfTheSignInWaitsForItsProgramAndApp(t *testing.T) {
 	w := orderWorld(t)
 	doc := w.order(t, "1password-sign-in")
@@ -254,6 +255,17 @@ func TestOrderOfTheSignInWaitsForItsProgramAndApp(t *testing.T) {
 	out, _, code := w.run(t, "agent", "order", "1password-sign-in")
 	if code != 0 || strings.Contains(out, "among the first") || !strings.Contains(out, "\nBefore it\n  op (on PATH) ") || !strings.Contains(out, "\n  1Password (app) ") {
 		t.Errorf("kit agent order 1password-sign-in printed\n%s\nexit %d, want op and 1Password before it", out, code)
+	}
+}
+
+// The password manager's casks, declared for this Mac, are in before its
+// sign-in, as its driver names them, its program and app with them.
+func TestOrderOfTheSignInAfterItsCasks(t *testing.T) {
+	w := orderWorld(t)
+	w.writeSection(t, "laptop", "homebrew casks", "1password\n1password-cli\n")
+	doc := w.order(t, "1password-sign-in")
+	if got, want := names(doc.Before), []string{"homebrew", "cask:1password", "cask:1password-cli", "brew (on PATH)", "op (on PATH)", "1Password (app)"}; !slices.Equal(got, want) {
+		t.Errorf("before the sign-in = %q, want %q", got, want)
 	}
 }
 
