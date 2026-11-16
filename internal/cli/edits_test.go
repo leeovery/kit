@@ -42,12 +42,11 @@ func TestReconcileCommitsAnEdit(t *testing.T) {
 
 // Drift is kit-config's files on disk against the last commit: a
 // difference only in git's index, as the user staged it, the file on disk
-// as last committed, is the user's own business in git, never an edit:
-// an edit staged then put back, a file untracked and back. What git prints
-// is what real git does.
+// as last committed, is the user's own business in git, never an edit, as
+// an edit staged then put back. What git prints is what real git does.
 func TestEditsOnlyInGitsIndexArentDrift(t *testing.T) {
 	w := laptopWorld(t)
-	w.edits(t, "MM shared/home/.zshrc\x00D  kept\x00?? kept\x00", "")
+	w.edits(t, "MM shared/home/.zshrc\x00", "")
 	if out, _, _ := w.run(t, "status"); !strings.Contains(out, "config ok all committed\n") {
 		t.Errorf("kit status printed\n%s", out)
 	}
@@ -90,8 +89,8 @@ func TestNothingChangedPushesWhatsWaiting(t *testing.T) {
 		}
 		pushed := false
 		for _, cmd := range w.fake.Commands() {
-			pushed = pushed || slices.Equal(cmd.Args, git("push", "--quiet"))
-			if slices.Contains(cmd.Args, "commit-tree") || slices.Contains(cmd.Args, "stash") {
+			pushed = pushed || slices.Equal(cmd.Args, git("push", "--quiet", "origin", "HEAD:refs/heads/main"))
+			if slices.Contains(cmd.Args, "commit") || slices.Contains(cmd.Args, "stash") {
 				t.Errorf("%s: ran %s, want nothing committed or set aside", c.name, cmd)
 			}
 		}
@@ -101,38 +100,16 @@ func TestNothingChangedPushesWhatsWaiting(t *testing.T) {
 	}
 }
 
-// The index a run of kit's left in git's lock, stopped once HEAD had taken
-// its commit, is put in place before kit commits, and said first, whether
-// the commit then goes ahead or fails, as when other gits keep moving HEAD.
-func TestReconcileFinishesTheIndexAStoppedRunLeft(t *testing.T) {
-	for _, c := range []struct {
-		moved bool
-		want  string
-	}{
-		{false, "kit-config ok finished the last run's index; committed and pushed shared/home/.zshrc"},
-		{true, "kit-config failed finished the last run's index; couldn't commit shared/home/.zshrc: HEAD kept moving"},
-	} {
-		w := editsWorld(t)
-		commit := edited("kit reconcile (laptop): adopt config:shared/home/.zshrc", "shared/home/.zshrc")
-		commit.left, commit.moved = true, c.moved
-		w.expectCommit(t, commit)
-		if out, _, _ := w.run(t, "reconcile", "config:shared/home/.zshrc", "--adopt"); !strings.Contains(out, c.want) {
-			t.Errorf("HEAD moving %v: kit reconcile printed\n%s", c.moved, out)
-		}
-	}
-}
-
-// Other gits moving HEAD each time kit commits leave nothing committed:
-// kit says so, and that kit reconcile commits it, the edit left as drift,
-// and nothing's pushed or brought in.
-func TestReconcileWhenHEADKeepsMoving(t *testing.T) {
+// A commit git refuses leaves nothing committed: kit says what git said,
+// the edit left as drift, and nothing's pushed or brought in.
+func TestReconcileWhenTheCommitFails(t *testing.T) {
 	w := editsWorld(t)
 	dir := filepath.Join(w.home, ".config", "kit")
 	c := edited("kit reconcile (laptop): adopt config:shared/home/.zshrc", "shared/home/.zshrc")
-	c.moved = true
+	c.fails = "fatal: unable to write new_index file\n"
 	w.expectCommit(t, c)
 	out, _, _ := w.run(t, "reconcile", "config:shared/home/.zshrc", "--adopt")
-	if !strings.Contains(out, "kit-config failed couldn't commit shared/home/.zshrc: HEAD kept moving while kit committed, so nothing was committed: kit reconcile commits it") {
+	if !strings.Contains(out, "kit-config failed couldn't commit shared/home/.zshrc: ") || !strings.Contains(out, "unable to write new_index file") {
 		t.Errorf("kit reconcile printed\n%s", out)
 	}
 	if slices.ContainsFunc(w.fake.Calls(), func(call string) bool {
@@ -159,43 +136,16 @@ func TestReconcileANestedRepository(t *testing.T) {
 }
 
 // A file the user took out of git's index, kept on disk as git ignores it,
-// and changed there since the last commit, is untracked: kit says so, and adopting it commits it as the user left
-// it, deleted from kit-config and kept on this Mac; undoing it tracks it
-// again, the file as it is. Status names it as real git does.
-func TestReconcileAnUntrackedFile(t *testing.T) {
+// is deleted, as git reads it. Status names it as real git does.
+func TestStatusShowsAFileTakenOutOfGitsIndexDeleted(t *testing.T) {
 	const secret = "shared/home/.secret"
-	untracked := func(t *testing.T) *world {
-		w := laptopWorld(t)
-		w.write(t, ".config/kit/"+secret, "s\n")
-		// Out of git's index, and ignored: no file of kit's to link.
-		w.keeps()
-		w.edits(t, "D  "+secret+"\x00", "1\t0\t"+secret+"\x00")
-		return w
-	}
-	w := untracked(t)
-	if out, _, _ := w.run(t, "status"); !strings.Contains(out, "config untracked:new "+secret+"\n") {
+	w := laptopWorld(t)
+	w.write(t, ".config/kit/"+secret, "s\n")
+	// Out of git's index, and ignored: no file of kit's to link.
+	w.keeps()
+	w.edits(t, "D  "+secret+"\x00", "0\t1\t"+secret+"\x00")
+	if out, _, _ := w.run(t, "status"); !strings.Contains(out, "config deleted:new "+secret+" (+0 −1 lines)\n") {
 		t.Errorf("kit status printed\n%s", out)
-	}
-
-	w = untracked(t)
-	w.expectCommit(t, commit{message: "kit reconcile (laptop): adopt config:" + secret, paths: []string{secret}, status: "D  " + secret + "\x00", staged: secret + "\x00"})
-	w.fake.On("git", "-C", filepath.Join(w.home, ".config", "kit"), "update-index", "--force-remove", "-z", "--stdin").Filters(func(in string) (string, error) {
-		if in != secret+"\x00" {
-			t.Errorf("committed %q as deleted, want the file untracked", in)
-		}
-		return "", nil
-	})
-	if out, _, code := w.run(t, "reconcile", "config:"+secret, "--adopt"); code != 0 || !strings.Contains(out, "kit-config ok committed and pushed "+secret) || w.read(t, ".config/kit/"+secret) != "s\n" {
-		t.Errorf("kit reconcile --adopt printed\n%s exit %d; want it committed and the file kept", out, code)
-	}
-
-	w = untracked(t)
-	w.fake.On("git", "-C", filepath.Join(w.home, ".config", "kit"), "--literal-pathspecs", "restore", "--source=HEAD", "--staged", "--", secret)
-	if out, _, code := w.run(t, "reconcile", "config:"+secret, "--revert"); code != 0 || !strings.Contains(out, "undone: tracked again") || w.read(t, ".config/kit/"+secret) != "s\n" {
-		t.Errorf("kit reconcile --revert printed\n%s exit %d; want it tracked and the file kept", out, code)
-	}
-	if slices.ContainsFunc(w.fake.Calls(), func(c string) bool { return strings.Contains(c, "--worktree") }) {
-		t.Errorf("ran %q, want the file on disk left as it is", w.fake.Calls())
 	}
 }
 

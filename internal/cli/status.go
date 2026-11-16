@@ -341,7 +341,7 @@ func (a *app) build(command, logName string, face render.Face, atTerminal bool) 
 		command: command, machine: machine, version: a.Version, sink: sink, face: face, log: log,
 		stateDir: dirs.State, now: now, run: observed, path: path, env: env, cfg: cfg, homeDir: home, logsDir: dirs.Logs, dataDir: dirs.Data,
 		kindsByName: map[string]kind.Kind{}, lists: map[string]config.List{}, placing: map[string]kind.Placing{},
-		repo: gitrepo.Repo{Dir: dirs.Config, Run: observed, Home: home}, record: record,
+		repo: gitrepo.Repo{Dir: dirs.Config, Run: observed}, record: record,
 		drifters: map[string]drifter{}, admin: &steps.Admin{},
 	}
 	r.files = &linked.Files{Repo: r.repo, Home: home, StateDir: dirs.State, Scopes: []string{config.Shared, machine}}

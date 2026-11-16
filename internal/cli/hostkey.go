@@ -67,16 +67,16 @@ func (r *run) recordHostKey(ctx context.Context, stateDir, key string) (check.Re
 	if err := r.cfg.SetHostKey(r.machine, key); err != nil {
 		return check.Result{}, err
 	}
-	out, err := r.repo.Commit(ctx, commitMessage("record", steps.HostKeyName, []string{r.machine}, r.machine, ""), config.File)
-	if !out.Committed && err != nil {
+	committed, err := r.repo.Commit(ctx, commitMessage("record", steps.HostKeyName, []string{r.machine}, r.machine, ""), config.File)
+	if err != nil {
 		if undo := os.WriteFile(path, was, 0o644); undo != nil {
 			return check.Result{}, errors.Join(err, fmt.Errorf("put %s back as it was: %w", config.File, undo))
 		}
 		if errors.Is(err, gitrepo.ErrUnsigned) {
 			return check.Result{}, engine.NotYet(err.Error() + "; the next kit apply tries again")
 		}
-		return check.Result{}, fmt.Errorf("couldn't commit %s: %s", config.File, whyNot(err))
+		return check.Result{}, fmt.Errorf("couldn't commit %s: %w", config.File, err)
 	}
 	sync := syncing{repo: r.repo, files: []string{config.File}, what: config.File}
-	return noted(sync.committed(ctx, out.Committed, err), out.Notes), nil
+	return sync.committed(ctx, committed, nil), nil
 }

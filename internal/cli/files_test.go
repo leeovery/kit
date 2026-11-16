@@ -106,8 +106,7 @@ func TestAddFileMovesItIntoKitConfig(t *testing.T) {
 	w.fake.On("git", "-C", filepath.Join(w.home, ".config", "kit"), "check-ignore", "--verbose", "--stdin", "-z").Exits(1)
 	w.expectCommit(t, commit{
 		message: "kit file add ~/.config/new/conf (laptop)", paths: []string{"laptop/home/.config/new/conf"},
-		status: "?? laptop/home/.config/new/conf\x00", update: []string{"laptop/home/.config/new/conf"},
-		staged: "laptop/home/.config/new/conf\x00",
+		status: "?? laptop/home/.config/new/conf\x00", files: []string{"laptop/home/.config/new/conf"},
 	})
 	out, _, code := w.run(t, "file", "add", filepath.Join(w.home, ".config/new/conf"))
 	if code != 0 || !strings.Contains(out, "in kit-config, linked: laptop/home/.config/new/conf") {
@@ -144,8 +143,7 @@ func TestAddAFolderHoldingAFileGitIgnores(t *testing.T) {
 		Prints(w.home + "/.gitignore_global\x001\x00*.swp\x00laptop/home/.config/new/.conf.swp\x00")
 	w.expectCommit(t, commit{
 		message: "kit file add ~/.config/new (laptop)", paths: []string{"laptop/home/.config/new/conf"},
-		status: "?? laptop/home/.config/new/conf\x00", update: []string{"laptop/home/.config/new/conf"},
-		staged: "laptop/home/.config/new/conf\x00",
+		status: "?? laptop/home/.config/new/conf\x00", files: []string{"laptop/home/.config/new/conf"},
 	})
 	out, _, code := w.run(t, "file", "add", filepath.Join(w.home, ".config/new"))
 	if code != 0 || !strings.Contains(out, "in kit-config, linked: laptop/home/.config/new/conf; git ignores ~/.config/new/.conf.swp, which stays on this Mac only") {
@@ -165,8 +163,7 @@ func TestRemoveAFileEveryMacLinksNeedsShared(t *testing.T) {
 	}
 	w.expectCommit(t, commit{
 		message: "kit file remove ~/.zshrc (laptop)", paths: []string{"shared/home/.zshrc"},
-		status: " D shared/home/.zshrc\x00", update: []string{"shared/home/.zshrc"},
-		staged: "shared/home/.zshrc\x00",
+		status: " D shared/home/.zshrc\x00", files: []string{"shared/home/.zshrc"},
 	})
 	out, _, code = w.run(t, "file", "remove", "~/.zshrc", "--shared")
 	if code != 0 || w.linksTo(".zshrc") != "" || w.read(t, ".zshrc") != "zsh\n" {

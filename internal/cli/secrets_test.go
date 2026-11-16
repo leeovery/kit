@@ -358,7 +358,7 @@ func TestAddASecretSharedTakesItOutOfTheMacs(t *testing.T) {
 			t.Errorf("ran %s: a reference stores nothing", call)
 		}
 	}
-	commits := slices.DeleteFunc(f.Calls(), func(call string) bool { return !strings.Contains(call, " commit-tree ") })
+	commits := slices.DeleteFunc(f.Calls(), func(call string) bool { return !strings.Contains(call, " commit --quiet --only ") })
 	if len(commits) != 1 {
 		t.Errorf("committed %q, want one commit", commits)
 	}

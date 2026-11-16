@@ -103,8 +103,7 @@ func TestMachineAddCopiesAMac(t *testing.T) {
 	w.expectCommit(t, commit{
 		message: "kit machine add mini (laptop)", paths: []string{"kit.toml", "mini"},
 		status: " M kit.toml\x00?? mini/declarations\x00?? mini/steps/tool/run\x00",
-		update: []string{"kit.toml", "mini/declarations", "mini/steps/tool/run"},
-		staged: "kit.toml\x00mini/declarations\x00mini/steps/tool/run\x00",
+		files:  []string{"kit.toml", "mini/declarations", "mini/steps/tool/run"},
 	})
 	out, errOut, code := w.run(t, "machine", "add", "mini", "--from", "studio", "--description", `Mac "mini"`)
 	if code != 0 || !strings.Contains(out, "mini ok added to kit-config, a copy of studio") {
@@ -130,8 +129,7 @@ func TestMachineAddMakesAnEmptyMac(t *testing.T) {
 	w := laptopWorld(t)
 	w.expectCommit(t, commit{
 		message: "kit machine add mini (laptop)", paths: []string{"kit.toml", "mini"},
-		status: " M kit.toml\x00?? mini/declarations\x00", update: []string{"kit.toml", "mini/declarations"},
-		staged: "kit.toml\x00mini/declarations\x00",
+		status: " M kit.toml\x00?? mini/declarations\x00", files: []string{"kit.toml", "mini/declarations"},
 	})
 	out, errOut, code := w.run(t, "machine", "add", "mini")
 	if code != 0 || !strings.Contains(out, "mini ok added to kit-config\n") {

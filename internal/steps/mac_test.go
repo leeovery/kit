@@ -124,14 +124,11 @@ func TestConfigSync(t *testing.T) {
 	const head = "0e0bf17a399109574ffb00e33300280a33f81ab7"
 	log := git("log", "--format=%ct", "refs/remotes/origin/main..HEAD")
 	// tracking scripts the branch, main, as git says it stands with its
-	// remote, origin: its upstream origin's main, there, and no other
-	// remote set to push to.
+	// one remote, origin: its upstream origin's main, there.
 	tracking := func(fake *runnertest.Fake) {
 		fake.On("git", git("remote")...).Prints("origin\n")
 		fake.On("git", git("symbolic-ref", "-q", "HEAD")...).Prints("refs/heads/main\n")
-		fake.On("git", git("for-each-ref", "--format=%(upstream)%00%(upstream:remotename)", "refs/heads/main")...).Prints("refs/remotes/origin/main\x00origin\n")
-		fake.On("git", git("config", "--get", "branch.main.pushRemote")...).Exits(1)
-		fake.On("git", git("config", "--get", "remote.pushDefault")...).Exits(1)
+		fake.On("git", git("for-each-ref", "--format=%(upstream) %(upstream:remoteref)", "refs/heads/main")...).Prints("refs/remotes/origin/main refs/heads/main\n")
 		fake.On("git", git("rev-parse", "--verify", "--quiet", "refs/remotes/origin/main")...).Prints(head + "\n")
 	}
 	// waiting scripts the commits waiting, as times, newest first as git log
@@ -177,15 +174,10 @@ func TestConfigSync(t *testing.T) {
 	// why nothing's pushed.
 	fake = waiting([]time.Time{now().Add(-time.Minute)}, "MM notes\x00", "1")
 	fake.On("git", git("diff", "--name-only", "-z", "--no-renames", "HEAD...refs/remotes/origin/main")...).Prints("notes\x00")
-	fake.On("git", git("config", "--get", "--type=bool", "core.ignorecase")...).Prints("true\n")
-	fake.On("git", git("ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory")...)
-	fake.On("git", git("rev-parse", "--verify", "--quiet", "HEAD")...).Prints(head + "\n")
-	fake.On("git", git("read-tree", head)...)
-	fake.On("git", git("diff", "--numstat", "-z", "--no-renames", "--no-ext-diff", "HEAD")...)
 	res := sync(fake).Check(t.Context())
 	if res.State != check.Attention || res.Summary != "pushes held back" || len(res.Items) != 1 ||
 		res.Items[0].ID != "config-sync:held" || res.Items[0].Name != "1 commit not pushed" ||
-		!strings.Contains(res.Items[0].Detail, "notes staged here, its file on disk as last committed: git's index is yours, to commit or unstage (git restore --staged notes)") {
+		!strings.Contains(res.Items[0].Detail, "commit or undo the change to notes first") {
 		t.Errorf("held back by a staged change = %+v", res)
 	}
 
@@ -215,10 +207,9 @@ func TestConfigSync(t *testing.T) {
 
 // kit-config's edits, its files on disk that differ from the last commit,
 // are each an item, with the lines it adds and removes: one to be added
-// (git add -N) new; a file the user untracked, kept on this Mac as git
-// ignores it, as it was, an item all the same, with no lines, as
-// committing it deletes it from the other Macs; and a repository nested in
-// kit-config what it is. One differing only in git's index, its file on
+// (git add -N) new; a file the user took out of git's index, kept on this
+// Mac as git ignores it, deleted, as git reads it; and a repository nested
+// in kit-config what it is. One differing only in git's index, its file on
 // disk as last committed, is none. Status and the lines are as real git
 // prints them.
 func TestConfigEdits(t *testing.T) {
@@ -241,15 +232,14 @@ func TestConfigEdits(t *testing.T) {
 	fake = runnertest.New(t)
 	fake.On("git", status...).Prints(" D personal/declarations\x00MM same\x00 M shared/home/.zshrc\x00D  secret\x00 A ita\x00?? notes\x00?? vendor/tool/\x00")
 	fake.On("git", git("rev-parse", "--verify", "--quiet", "HEAD")...).Prints("0e0bf17a399109574ffb00e33300280a33f81ab7\n")
-	fake.On("git", git("read-tree", "0e0bf17a399109574ffb00e33300280a33f81ab7")...)
-	fake.On("git", git("diff", "--numstat", "-z", "--no-renames", "--no-ext-diff", "HEAD")...).Prints("0\t40\tpersonal/declarations\x003\t1\tshared/home/.zshrc\x00")
+	fake.On("git", git("diff", "--numstat", "-z", "--no-renames", "--no-ext-diff", "HEAD")...).Prints("0\t40\tpersonal/declarations\x003\t1\tshared/home/.zshrc\x000\t2\tsecret\x002\t0\tita\x00")
 	res := steps.ConfigEdits(gitrepo.Repo{Dir: repo, Run: fake}).Check(t.Context())
 	var got []string
 	for _, it := range res.Items {
 		got = append(got, it.ID+" "+it.State+" "+it.Detail)
 	}
 	want := []string{
-		"config:personal/declarations deleted +0 −40 lines", "config:shared/home/.zshrc edited +3 −1 lines", "config:secret untracked ",
+		"config:personal/declarations deleted +0 −40 lines", "config:shared/home/.zshrc edited +3 −1 lines", "config:secret deleted +0 −2 lines",
 		"config:ita added +2 −0 lines", "config:notes added +2 −0 lines", "config:vendor/tool/ repository kit-config can't keep it",
 	}
 	if res.State != check.Attention || res.Summary != "6 files not committed" || !slices.Equal(got, want) {

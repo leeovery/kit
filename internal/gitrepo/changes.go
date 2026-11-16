@@ -9,14 +9,12 @@ import (
 	"strings"
 )
 
-// The states of a change not committed: untracked is a file the user took
-// out of git's index, kept on disk, ignored; a repository is one of its
-// own, nested in this one, which git can't keep.
+// The states of a change not committed: a repository is one of its own,
+// nested in this one, which git can't keep.
 const (
 	Edited     = "edited"
 	Added      = "added"
 	Deleted    = "deleted"
-	Untracked  = "untracked"
 	Repository = "repository"
 )
 
@@ -25,8 +23,8 @@ type Change struct {
 	// Path is the file, as a path in the repository; a nested repository's
 	// ends in a slash.
 	Path string
-	// State is edited, added (new to the repository), deleted, untracked,
-	// or a repository nested in this one.
+	// State is edited, added (new to the repository), deleted, or a
+	// repository nested in this one.
 	State string
 	// Added and Removed count the lines the change adds and removes.
 	Added, Removed int
@@ -37,8 +35,8 @@ type Change struct {
 // each adds and removes against it: a file added then gone before it was
 // committed is none, and so is one whose difference is only in git's
 // index, as the user staged it, its file on disk as last committed, which
-// is the user's own business in git; but not a file untracked, kept on
-// disk as git ignores it, which a commit of it commits as deleted.
+// is the user's own business in git. A file taken out of git's index and
+// kept on disk, ignored, is deleted, as git reads it.
 func (r Repo) Changes(ctx context.Context) ([]Change, error) {
 	entries, err := r.status(ctx)
 	if err != nil || len(entries) == 0 {
@@ -55,8 +53,6 @@ func (r Repo) Changes(ctx context.Context) ([]Change, error) {
 		switch {
 		case !ok:
 			continue
-		case deletedAlone(e, entries) && r.isFile(e.path):
-			state = Untracked
 		case inHead(e, entries) && !differs:
 			continue
 		}
@@ -92,66 +88,27 @@ func inHead(e entry, entries []entry) bool {
 	return !strings.Contains(e.code, "A")
 }
 
-// deletedAlone reports whether e is a file staged as deleted with no
-// untracked twin among entries: gone, or on disk and ignored.
-func deletedAlone(e entry, entries []entry) bool {
-	return e.code == "D " && !slices.Contains(entries, entry{code: "??", path: e.path})
-}
-
-// isFile reports whether path, in the repository, is on disk, and no
-// folder.
-func (r Repo) isFile(path string) bool {
-	info, err := os.Lstat(filepath.Join(r.Dir, path))
-	return err == nil && !info.IsDir()
-}
-
 // counts are the files on disk that differ from the last commit, by path,
-// each with the lines it adds and removes, whatever's staged: none before
-// the first commit; a binary file's, none counted.
+// each with the lines it adds and removes, whatever's staged, as git's index
+// has the files, so one taken out of it is deleted: none before the first
+// commit; a binary file's, none counted.
 func (r Repo) counts(ctx context.Context) (map[string][2]int, error) {
 	counts := make(map[string][2]int)
-	err := r.withHeadIndex(ctx, func(env []string) error {
-		res, err := r.gitIn(ctx, env, nil, "diff", "--numstat", "-z", "--no-renames", "--no-ext-diff", "HEAD")
-		if err != nil {
-			return err
-		}
-		for _, rec := range names(res.Stdout) {
-			if f := strings.SplitN(rec, "\t", 3); len(f) == 3 {
-				added, _ := strconv.Atoi(f[0])
-				removed, _ := strconv.Atoi(f[1])
-				counts[f[2]] = [2]int{added, removed}
-			}
-		}
-		return nil
-	})
-	return counts, err
-}
-
-// withHeadIndex runs do with an index of the last commit's alone, a file of
-// its own, so the user's is never read or written: git run with env uses
-// it. Before the first commit, there's nothing to run it on.
-func (r Repo) withHeadIndex(ctx context.Context, do func(env []string) error) error {
-	base, err := r.commitAt(ctx, "HEAD")
-	if err != nil || base == "" {
-		return err
+	if head, err := r.commitAt(ctx, "HEAD"); err != nil || head == "" {
+		return counts, err
 	}
-	f, err := os.CreateTemp("", "kit-read-index-*")
+	res, err := r.git(ctx, "diff", "--numstat", "-z", "--no-renames", "--no-ext-diff", "HEAD")
 	if err != nil {
-		return err
+		return nil, err
 	}
-	index := f.Name()
-	// git writes it: an empty file doesn't read as an index.
-	_ = f.Close()
-	_ = os.Remove(index)
-	defer func() {
-		_ = os.Remove(index)
-		_ = os.Remove(index + ".lock")
-	}()
-	env := []string{"GIT_INDEX_FILE=" + index}
-	if _, err := r.gitIn(ctx, env, nil, "read-tree", base); err != nil {
-		return err
+	for _, rec := range names(res.Stdout) {
+		if f := strings.SplitN(rec, "\t", 3); len(f) == 3 {
+			added, _ := strconv.Atoi(f[0])
+			removed, _ := strconv.Atoi(f[1])
+			counts[f[2]] = [2]int{added, removed}
+		}
 	}
-	return do(env)
+	return counts, nil
 }
 
 // entry is a file git status names: its two letters, staged and not, and
@@ -205,26 +162,17 @@ func (r Repo) status(ctx context.Context, paths ...string) ([]entry, error) {
 
 // Diff is the change to path on disk against the last commit, whatever's
 // staged, as git shows it, uncoloured: none for a file new to the
-// repository.
+// repository, or before the first commit.
 func (r Repo) Diff(ctx context.Context, path string) (string, error) {
-	var diff string
-	err := r.withHeadIndex(ctx, func(env []string) error {
-		res, err := r.gitIn(ctx, env, nil, "--literal-pathspecs", "diff", "--no-color", "--no-ext-diff", "HEAD", "--", path)
-		diff = string(res.Stdout)
-		return err
-	})
-	return diff, err
+	if head, err := r.commitAt(ctx, "HEAD"); err != nil || head == "" {
+		return "", err
+	}
+	res, err := r.gitOn(ctx, []string{"diff", "--no-color", "--no-ext-diff", "HEAD"}, path)
+	return string(res.Stdout), err
 }
 
 // Restore puts path back as it was last committed, staged and not.
 func (r Repo) Restore(ctx context.Context, path string) error {
 	_, err := r.gitOn(ctx, []string{"restore", "--source=HEAD", "--staged", "--worktree"}, path)
-	return err
-}
-
-// Track puts path back in git's index as it was last committed, the file on
-// disk left as it is.
-func (r Repo) Track(ctx context.Context, path string) error {
-	_, err := r.gitOn(ctx, []string{"restore", "--source=HEAD", "--staged"}, path)
 	return err
 }

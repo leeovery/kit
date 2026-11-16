@@ -658,8 +658,6 @@ func wrong(s event.Step, it check.Item) string {
 		return "new, not committed"
 	case "deleted":
 		return "deleted, not committed"
-	case "untracked":
-		return "untracked, kept on this Mac"
 	case "repository":
 		return "a repository of its own"
 	}
@@ -1073,7 +1071,6 @@ var driftStates = map[string]string{
 	"edited":            "not committed",
 	"added":             "new, not committed",
 	"deleted":           "deleted, not committed",
-	"untracked":         "untracked, kept on this Mac",
 	"repository":        "a repository of its own",
 }
 
