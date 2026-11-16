@@ -99,7 +99,9 @@ type Step struct {
 	Choice *Choice
 	// Unmark takes the step as done no more, for the next run to do it
 	// again, should a step applied after it find it wasn't done after all
-	// (Unmark), as a step by hand marked done. Optional.
+	// (Unmark): any [manual] line without a --test placed before the step
+	// that finds it, as the App Store's sign-in is before its apps.
+	// Optional.
 	Unmark func() error
 }
 
@@ -635,6 +637,7 @@ func (p *Pipeline) run(ctx context.Context, sink event.Sink, opts Options, apply
 		titles:   titles,
 		byName:   byName,
 		steps:    steps,
+		all:      p.steps,
 		calls:    make(chan func()),
 		results:  make(map[string]check.Result, len(steps)),
 		started:  make(map[string]bool, len(steps)),
@@ -663,17 +666,19 @@ func (p *Pipeline) run(ctx context.Context, sink event.Sink, opts Options, apply
 // dispatch runs a run's steps: it starts each, in pipeline order, once what
 // it needs is done and a job is free, and defers each whose needs didn't
 // stand ok. Only its own goroutine touches its maps, but away, putting,
-// freed and looks, which mu guards, and titles, byName, steps and over,
+// freed and looks, which mu guards, and titles, byName, steps, all and over,
 // which steps' goroutines read, as they never change once it's started; a
 // step's goroutine has it do anything else through calls (inLoop).
 type dispatch struct {
-	sink     event.Sink
-	now      func() time.Time
-	within   time.Duration
-	apply    bool
-	titles   map[string]string
-	byName   map[string]Step
-	steps    []Step
+	sink   event.Sink
+	now    func() time.Time
+	within time.Duration
+	apply  bool
+	titles map[string]string
+	byName map[string]Step
+	steps  []Step
+	// all are the pipeline's steps, the run's or not.
+	all      []Step
 	calls    chan func()
 	results  map[string]check.Result
 	started  map[string]bool
@@ -1180,11 +1185,12 @@ func Unmark(ctx context.Context) error {
 	return nil
 }
 
-// unmark unmarks, for s, what it comes after that can be (Unmark).
+// unmark unmarks, for s, what it comes after that can be (Unmark), whether
+// or not the run took it, as when s is the step named alone.
 func (d *dispatch) unmark(s Step) error {
 	var errs []error
-	for _, name := range s.After {
-		if a := d.byName[name]; a.Unmark != nil {
+	for _, a := range d.all {
+		if a.Unmark != nil && slices.Contains(s.After, a.Name) {
 			errs = append(errs, a.Unmark())
 		}
 	}

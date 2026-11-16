@@ -291,7 +291,8 @@ and one taken away before it went out is never posted. A look, a key and readyin
 time, keys in the order pressed, ahead of the next look, the card saying at once that a key's
 taken, as a choice's does; a key behind a look that finds it done isn't done. A card holds none of the run's jobs while it's up, and,
 done, or found done, comes down that moment, every job busy or not: a step with nothing more to
-do finishes without waiting for one, and one with more waits for a job with the card down. `space` says it's done (`enter`
+do finishes without waiting for one, and one with more (the restore, which copies once its
+source card's answered) waits for a job with the card down. `space` says it's done (`enter`
 too, unshown: marked as `kit manual done` marks it; one with a command is looked at at once, as
 it is every few seconds anyway); a card with a command offers no key, kit carrying on by itself
 once it's done. There's no putting a card off: it's done, or the run's stopped. One card is up

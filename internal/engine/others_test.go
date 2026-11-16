@@ -274,8 +274,9 @@ func TestAStepsChoiceRunsAsItsOwn(t *testing.T) {
 // A step can find what it comes after wasn't done after all, as an App Store
 // install finds no one signed in: each step it's applied after, through
 // its own After or another's Before, that can be unmarked is, and what
-// unmarking says goes back to it; a step it doesn't come after isn't
-// unmarked, nor is one that can't be. Outside a run, nothing is.
+// unmarking says goes back to it, the run taking them or not, as when it's
+// the step named alone; a step it doesn't come after isn't unmarked, nor is
+// one that can't be. Outside a run, nothing is.
 func TestAStepUnmarksWhatItComesAfter(t *testing.T) {
 	if err := engine.Unmark(t.Context()); err != nil {
 		t.Errorf("outside a run, Unmark = %v; want nothing done", err)
@@ -290,17 +291,20 @@ func TestAStepUnmarksWhatItComesAfter(t *testing.T) {
 	signIn := engine.Step{Name: "sign-in", Before: []string{"last"}, Check: ok("done"), Unmark: unmark("sign-in", errors.New("couldn't write"))}
 	earlier := engine.Step{Name: "earlier", Check: ok("done"), Unmark: unmark("earlier", nil)}
 	elsewhere := engine.Step{Name: "elsewhere", Check: ok("done"), Unmark: unmark("elsewhere", nil)}
-	var err error
-	last := lastStep([]string{"earlier", "cask"}, func(ctx context.Context) { err = engine.Unmark(ctx) })
-	p, perr := engine.New(engine.Step{Name: "cask", Check: ok("fine")}, signIn, earlier, elsewhere, last)
-	if perr != nil {
-		t.Fatal(perr)
-	}
-	if _, perr := p.Apply(t.Context(), &recorder{}, engine.Options{Jobs: 1}); perr != nil {
-		t.Fatal(perr)
-	}
-	slices.Sort(unmarked)
-	if !slices.Equal(unmarked, []string{"earlier", "sign-in"}) || err == nil || err.Error() != "couldn't write" {
-		t.Errorf("unmarked %q, Unmark = %v; want earlier and sign-in unmarked, what failing said", unmarked, err)
+	for _, only := range [][]string{nil, {"last"}} {
+		unmarked = nil
+		var err error
+		last := lastStep([]string{"earlier", "cask"}, func(ctx context.Context) { err = engine.Unmark(ctx) })
+		p, perr := engine.New(engine.Step{Name: "cask", Check: ok("fine")}, signIn, earlier, elsewhere, last)
+		if perr != nil {
+			t.Fatal(perr)
+		}
+		if _, perr := p.Apply(t.Context(), &recorder{}, engine.Options{Jobs: 1, Only: only}); perr != nil {
+			t.Fatal(perr)
+		}
+		slices.Sort(unmarked)
+		if !slices.Equal(unmarked, []string{"earlier", "sign-in"}) || err == nil || err.Error() != "couldn't write" {
+			t.Errorf("only %q: unmarked %q, Unmark = %v; want earlier and sign-in unmarked, what failing said", only, unmarked, err)
+		}
 	}
 }

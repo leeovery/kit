@@ -317,12 +317,18 @@ func installed(ids ...int64) string {
 // was unmarked.
 func storeRun(t *testing.T, fake *runnertest.Fake, declared config.List) (check.Result, int) {
 	t.Helper()
+	return storeRunUnmarking(t, fake, declared, nil)
+}
+
+// storeRunUnmarking is storeRun, unmarking signing in saying failed.
+func storeRunUnmarking(t *testing.T, fake *runnertest.Fake, declared config.List, failed error) (check.Result, int) {
+	t.Helper()
 	unmarked := 0
 	signIn := engine.Step{Name: "appstore", Before: []string{"mas"}, Check: func(context.Context) check.Result {
 		return check.Result{State: check.OK, Summary: "done"}
 	}, Unmark: func() error {
 		unmarked++
-		return nil
+		return failed
 	}}
 	p, err := engine.New(signIn, kind.Step(appstore.New(fake), declared))
 	if err != nil {
@@ -541,8 +547,9 @@ func TestAForgottenPasswordIsAskedForAgain(t *testing.T) {
 // The first app's install is the check that someone's signed in: mas
 // saying no one is fails the install at once, every app, naming the fix,
 // and signing in, the step by hand before the App Store's, is unmarked, for
-// the next run to ask for it again; the rest aren't tried. Outside a run,
-// there's nothing to unmark.
+// the next run to ask for it again, unmarking failing said after it, on
+// the same line; the rest aren't tried. Outside a run, there's nothing to
+// unmark.
 func TestNoOneSignedInFailsNamingTheFix(t *testing.T) {
 	fake := runnertest.New(t)
 	fake.On("mas", "list", "--json").Prints("")
@@ -551,6 +558,10 @@ func TestNoOneSignedInFailsNamingTheFix(t *testing.T) {
 	want := "couldn't install bear@1091189122, numbers@409203825, xcode@497799835: no one's signed in: sign in to the App Store, then try again"
 	if res.State != check.Failed || res.Reason != want || unmarked != 1 {
 		t.Errorf("the App Store's apps stand %+v, signing in unmarked %d times; want them failed, %q, it unmarked once", res, unmarked, want)
+	}
+	res, _ = storeRunUnmarking(t, fake, declared("bear@1091189122"), errors.New("the record couldn't be written"))
+	if want := "couldn't install bear@1091189122: no one's signed in: sign in to the App Store, then try again; couldn't ask again next run: the record couldn't be written"; res.Reason != want {
+		t.Errorf("unmarking failing, the App Store's apps stand %+v; want %q", res, want)
 	}
 	err := appstore.New(fake).Install(t.Context(), []string{"bear@1091189122", "xcode@497799835"})
 	if err == nil || err.Error() != "no one's signed in: sign in to the App Store, then try again" {

@@ -347,7 +347,9 @@ func (s *AppStore) Install(ctx context.Context, names []string) error {
 		err := s.install(ctx, name, signedIn)
 		_, out := errors.AsType[*notSignedIn](err)
 		if out {
-			err = errors.Join(err, engine.Unmark(ctx))
+			if unmarked := engine.Unmark(ctx); unmarked != nil {
+				err = fmt.Errorf("%w; couldn't ask again next run: %w", err, unmarked)
+			}
 		}
 		if out || errors.Is(err, errAdminWait) {
 			return kind.Joined(append(errs, err))
