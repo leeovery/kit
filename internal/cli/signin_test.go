@@ -74,7 +74,7 @@ func TestApplyRaisesTheStoresSignIn(t *testing.T) {
 	if !slices.Equal(opened, []string{"open -b " + signInApp}) {
 		t.Errorf("opened %q, want 1Password's app", opened)
 	}
-	if slices.Contains(f.Calls(), "op inject") {
+	if slices.ContainsFunc(f.Calls(), func(c string) bool { return strings.HasPrefix(c, "op read") }) {
 		t.Errorf("ran %q: want nothing read before the sign-in", f.Calls())
 	}
 }

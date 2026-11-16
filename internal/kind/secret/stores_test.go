@@ -85,33 +85,20 @@ func (f *fakeStore) signIn() {
 }
 
 func (f *fakeStore) Unlock(context.Context, runner.Runner) error { return nil }
-
-func (f *fakeStore) Read(ctx context.Context, run runner.Runner, ref string) (string, error) {
-	got, err := f.ReadMany(ctx, run, []string{ref})
-	return got[ref], err
+func (f *fakeStore) Read(_ context.Context, _ runner.Runner, ref string) (string, error) {
+	f.reads = append(f.reads, []string{ref})
+	if f.locked {
+		return "", errors.New("not approved")
+	}
+	v, ok := f.values[ref]
+	if !ok {
+		return "", store.Unread{ref: "no such value"}
+	}
+	return v, nil
 }
 
 func (f *fakeStore) ReadFile(ctx context.Context, run runner.Runner, ref string) (string, error) {
 	return f.Read(ctx, run, ref)
-}
-
-func (f *fakeStore) ReadMany(_ context.Context, _ runner.Runner, refs []string) (map[string]string, error) {
-	f.reads = append(f.reads, refs)
-	if f.locked {
-		return nil, errors.New("not approved")
-	}
-	values, unread := map[string]string{}, store.Unread{}
-	for _, ref := range refs {
-		v, ok := f.values[ref]
-		if !ok {
-			unread[ref] = "no such value"
-		}
-		values[ref] = v
-	}
-	if len(unread) > 0 {
-		return nil, unread
-	}
-	return values, nil
 }
 
 func (f *fakeStore) Field(field string) (string, error) { return field, nil }
@@ -187,12 +174,12 @@ func TestEachStoreReadsItsOwn(t *testing.T) {
 	if err != nil || report.Synced != 3 || len(report.Failed)+len(report.Held) != 0 {
 		t.Fatalf("Sync() = %+v, %v", report, err)
 	}
-	if want := [][]string{{"vault:keys/b", "vault:keys/c"}}; !slices.EqualFunc(fake.reads, want, slices.Equal) {
-		t.Errorf("the fake store read %q, want its own, at once", fake.reads)
+	if want := [][]string{{"vault:keys/b"}, {"vault:keys/c"}}; !slices.EqualFunc(fake.reads, want, slices.Equal) {
+		t.Errorf("the fake store read %q, want its own, each once", fake.reads)
 	}
 	for _, c := range run.Commands() {
-		if c.String() == "op inject" && strings.Contains(c.Input, "vault:") {
-			t.Errorf("op inject read %q: want 1Password's alone", c.Input)
+		if c.Name == "op" && strings.Contains(c.String(), "vault:") {
+			t.Errorf("%s: want 1Password's alone read with op", c)
 		}
 	}
 	env, _ := os.ReadFile(filepath.Join(home, ".secrets.zsh"))

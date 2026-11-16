@@ -123,9 +123,6 @@ func TestReadsWaitForThePersonsApproval(t *testing.T) {
 	run := runnertest.New(t)
 	optest.Holds(run, map[string]string{"op://vault/item/a": "a", "op://vault/item/b": "b"})
 	d := onepassword.Driver{}
-	if _, err := d.ReadMany(t.Context(), run, []string{"op://vault/item/a", "op://vault/item/b"}); err != nil {
-		t.Fatal(err)
-	}
 	if _, err := d.Read(t.Context(), run, "op://vault/item/a"); err != nil {
 		t.Fatal(err)
 	}
@@ -159,9 +156,6 @@ func TestOpSharesKitsSessionUnlessSignedInWithAPassword(t *testing.T) {
 			if err := d.Unlock(t.Context(), run); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := d.ReadMany(t.Context(), run, []string{"op://vault/item/a"}); err != nil {
-				t.Fatal(err)
-			}
 			if _, err := d.Read(t.Context(), run, "op://vault/item/a"); err != nil {
 				t.Fatal(err)
 			}
@@ -192,7 +186,7 @@ func TestOpGetsKitsOwnVariablesOfOps(t *testing.T) {
 	if got := d.Session(t.Context(), run); got != store.Open {
 		t.Fatalf("Session() = %v, want open", got)
 	}
-	if _, err := d.ReadMany(t.Context(), run, []string{"op://vault/item/a"}); err != nil {
+	if _, err := d.Read(t.Context(), run, "op://vault/item/a"); err != nil {
 		t.Fatal(err)
 	}
 	for _, c := range run.Commands() {
@@ -203,63 +197,45 @@ func TestOpGetsKitsOwnVariablesOfOps(t *testing.T) {
 	}
 }
 
-// A read that fails names, as store.Unread, the references op quotes in its
-// errors, each with the line it quotes it in, and those alone: one that's
-// the start of another quoted isn't named by it. A failure that quotes
-// none, or where op didn't run to the end, names none.
+// A read that fails names its reference, as store.Unread, when op quotes it
+// in its errors, with the line it quotes it in. A failure that quotes it
+// about the person's approval or the session, or quotes nothing, or where
+// op didn't run to the end, names none.
 func TestAReadThatFailsNamesWhatOpQuotes(t *testing.T) {
-	refs := []string{"op://vault/item/token", "op://vault/item/token2", "op://vault/item/other"}
+	ref := "op://vault/item/token"
 	d := onepassword.Driver{}
 	for _, c := range []struct {
 		name   string
 		script func(*runnertest.Script)
 		want   store.Unread
 	}{
-		{"one quoted", func(s *runnertest.Script) {
-			s.Exits(1).PrintsToStderr("[ERROR] could not read secret 'op://vault/item/token2': no such field\n")
-		}, store.Unread{"op://vault/item/token2": "[ERROR] could not read secret 'op://vault/item/token2': no such field"}},
-		{"two quoted", func(s *runnertest.Script) {
-			s.Exits(1).PrintsToStderr("first: op://vault/item/token\nthen: op://vault/item/other, gone\n")
-		}, store.Unread{"op://vault/item/token": "first: op://vault/item/token", "op://vault/item/other": "then: op://vault/item/other, gone"}},
+		{"quoted", func(s *runnertest.Script) {
+			s.Exits(1).PrintsToStderr("[ERROR] could not read secret 'op://vault/item/token': no such field\n")
+		}, store.Unread{ref: "[ERROR] could not read secret 'op://vault/item/token': no such field"}},
 		{"none quoted", func(s *runnertest.Script) { s.Exits(1).PrintsToStderr("authorization prompt dismissed\n") }, nil},
 		{"quoted, not approved", func(s *runnertest.Script) {
 			s.Exits(1).PrintsToStderr("[ERROR] 2026/11/05 05:52:13 could not read secret 'op://vault/item/token': error initializing client: authorization prompt dismissed, please try again\n")
 		}, nil},
 		{"quoted, not in time", func(s *runnertest.Script) {
-			s.Exits(1).PrintsToStderr("[ERROR] 2026/11/05 05:52:13 could not read secret 'op://vault/item/other': error initializing client: authorization timeout\n")
+			s.Exits(1).PrintsToStderr("[ERROR] 2026/11/05 05:52:13 could not read secret 'op://vault/item/token': error initializing client: authorization timeout\n")
 		}, nil},
 		{"quoted, signed out", func(s *runnertest.Script) {
-			s.Exits(1).PrintsToStderr("[ERROR] op://vault/item/other: You are not currently signed in. Please run `op signin --help` for instructions\n")
+			s.Exits(1).PrintsToStderr("[ERROR] op://vault/item/token: You are not currently signed in. Please run `op signin --help` for instructions\n")
 		}, nil},
-		{"ended", func(s *runnertest.Script) { s.Fails(fmt.Errorf("op inject: %w", context.DeadlineExceeded)) }, nil},
+		{"ended", func(s *runnertest.Script) { s.Fails(fmt.Errorf("op read: %w", context.DeadlineExceeded)) }, nil},
 	} {
 		run := runnertest.New(t)
-		c.script(run.On("op", "inject"))
-		_, err := d.ReadMany(t.Context(), run, refs)
+		c.script(run.On("op", "read", ref))
+		_, err := d.Read(t.Context(), run, ref)
 		got, named := errors.AsType[store.Unread](err)
 		switch {
 		case err == nil:
-			t.Errorf("%s: ReadMany() didn't fail", c.name)
+			t.Errorf("%s: Read() didn't fail", c.name)
 		case c.want == nil && named:
-			t.Errorf("%s: ReadMany() named %v, want none", c.name, got)
+			t.Errorf("%s: Read() named %v, want none", c.name, got)
 		case c.want != nil && !maps.Equal(got, c.want):
-			t.Errorf("%s: ReadMany() = %v, want %v named", c.name, err, c.want)
+			t.Errorf("%s: Read() = %v, want %v named", c.name, err, c.want)
 		}
-	}
-}
-
-// A reference a template can't take, with a $ or }}, is read alone, with op
-// read, beside the rest's op inject.
-func TestAnAwkwardReferenceIsReadAlone(t *testing.T) {
-	awkward := "op://vault/Item $HOME/field}}"
-	run := runnertest.New(t)
-	optest.Holds(run, map[string]string{"op://vault/item/a": "a", awkward: "awkward"})
-	values, err := (onepassword.Driver{}).ReadMany(t.Context(), run, []string{"op://vault/item/a", awkward})
-	if err != nil || values["op://vault/item/a"] != "a" || values[awkward] != "awkward" {
-		t.Fatalf("ReadMany() = %v, %v", values, err)
-	}
-	if want := []string{"op inject", "op read '" + awkward + "'"}; !slices.Equal(run.Calls(), want) {
-		t.Errorf("ran %q, want %q", run.Calls(), want)
 	}
 }
 
@@ -275,25 +251,9 @@ func TestAReadNotApprovedNamesNone(t *testing.T) {
 	}
 }
 
-// A reference read alone, as a template can't take it, that op names as
-// one it couldn't read fails alone: what op inject read is given back
-// beside it.
-func TestAnAwkwardReferenceThatWontReadKeepsTheRest(t *testing.T) {
-	awkward := "op://vault/Item $HOME/field}}"
-	run := runnertest.New(t)
-	optest.Holds(run, map[string]string{"op://vault/item/a": "a"})
-	run.On("op", "read", awkward).Exits(1).PrintsToStderr("[ERROR] could not read secret '" + awkward + "': no such field\n")
-	values, err := (onepassword.Driver{}).ReadMany(t.Context(), run, []string{"op://vault/item/a", awkward})
-	named, ok := errors.AsType[store.Unread](err)
-	if !ok || len(named) != 1 || named[awkward] == "" || values["op://vault/item/a"] != "a" {
-		t.Errorf("ReadMany() = %v, %v; want a read, the awkward one named", values, err)
-	}
-}
-
 // op read, through a pipe, ends a value with a newline unless it ends with
 // one already: Read takes that newline off, so a value ending with its own
-// reads without it, the pipe telling the two apart no further. op inject
-// gives the value exactly.
+// reads without it, the pipe telling the two apart no further.
 func TestReadTakesOffTheNewlineOpAdds(t *testing.T) {
 	run := runnertest.New(t)
 	optest.Holds(run, map[string]string{"op://vault/item/a": "a", "op://vault/item/b": "b\n"})
@@ -303,18 +263,13 @@ func TestReadTakesOffTheNewlineOpAdds(t *testing.T) {
 			t.Errorf("Read(%s) = %q, %v; want %q", ref, got, err, want)
 		}
 	}
-	values, err := d.ReadMany(t.Context(), run, []string{"op://vault/item/a", "op://vault/item/b"})
-	if err != nil || values["op://vault/item/a"] != "a" || values["op://vault/item/b"] != "b\n" {
-		t.Errorf("ReadMany() = %q, %v; want each value exactly", values, err)
-	}
 }
 
 // ReadFile reads an attachment, the item's own or a section's, byte for
 // byte with op read --out-file, into a folder of its own, removed after,
 // never through a pipe, which can't tell a final newline of its own from
-// op's, nor op inject, which turns each byte that isn't UTF-8 into U+FFFD;
-// a field's text it ends with one newline, in place of those it ends with,
-// the item saying which each is.
+// op's; a field's text it ends with one newline, in place of those it ends
+// with, the item saying which each is.
 func TestReadFile(t *testing.T) {
 	blob := "\xff\xfe\x00kit\xc3\x28\x80\n\n"
 	run := runnertest.New(t)
@@ -342,14 +297,10 @@ func TestReadFile(t *testing.T) {
 	if got := strings.Count(calls, "op item get"); got != 5 {
 		t.Errorf("ran %q: want the item asked of each reference", run.Calls())
 	}
-	if got := strings.Count(calls, "--out-file"); got != 3 || strings.Contains(calls, "op inject") {
-		t.Errorf("ran %q: want each attachment read with --out-file, and no op inject", run.Calls())
+	if got := strings.Count(calls, "--out-file"); got != 3 {
+		t.Errorf("ran %q: want each attachment read with --out-file", run.Calls())
 	}
 	folders(t, run)
-	values, err := d.ReadMany(t.Context(), run, []string{"op://vault/Item/blob"})
-	if err != nil || values["op://vault/Item/blob"] == blob {
-		t.Errorf("ReadMany() of bytes that aren't UTF-8 = %v: want them turned into U+FFFD, as op inject does", err)
-	}
 }
 
 // An attachment goes in a section as op's assignments name one, section

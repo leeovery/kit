@@ -99,7 +99,7 @@ func TestALinesSectionWaitsForItsSecret(t *testing.T) {
 
 	out, errOut, _ := w.run(t, "apply")
 	calls := w.fake.Calls()
-	plain, synced, held := slices.Index(calls, "brew install --formula ripgrep"), slices.Index(calls, "op inject"), slices.Index(calls, "brew install --formula owner/private/fetcher")
+	plain, synced, held := slices.Index(calls, "brew install --formula ripgrep"), slices.Index(calls, "op read op://vault/Item/Section/token"), slices.Index(calls, "brew install --formula owner/private/fetcher")
 	if plain < 0 || synced < 0 || held < plain || held < synced {
 		t.Fatalf("ran %q: want ripgrep installed, and TOKEN synced, then fetcher installed", calls)
 	}
