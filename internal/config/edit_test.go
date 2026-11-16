@@ -1,7 +1,6 @@
 package config_test
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -519,7 +518,7 @@ func TestDeclareSharedMovesItOutOfTheMacs(t *testing.T) {
 		"laptop/declarations": "[homebrew formulae]\ngo\nripgrep\n",
 		"studio/declarations": "[homebrew formulae]\ngo\n",
 	})
-	written, _, err := cfg.DeclareShared("brew", config.Entry{Name: "go"}, []string{"laptop", "studio"})
+	written, err := cfg.DeclareShared("brew", config.Entry{Name: "go"}, []string{"laptop", "studio"})
 	if err != nil || !slices.Equal(written, []string{"shared", "laptop", "studio"}) {
 		t.Fatalf("DeclareShared() wrote %q, %v", written, err)
 	}
@@ -532,107 +531,51 @@ func TestDeclareSharedMovesItOutOfTheMacs(t *testing.T) {
 			t.Errorf("%s = %q, want %q", path, got, want)
 		}
 	}
-	if written, _, err := cfg.DeclareShared("brew", config.Entry{Name: "ripgrep"}, nil); err == nil || len(written) > 0 {
+	if written, err := cfg.DeclareShared("brew", config.Entry{Name: "ripgrep"}, nil); err == nil || len(written) > 0 {
 		t.Errorf("DeclareShared() of what a Mac's file holds, not moved, wrote %q, %v", written, err)
 	}
 }
 
-// A shared declare loses nothing a line it moves says, whatever the kind.
-// What its command can say must be the same, by meaning (options in any
-// order, a secret's reference short or in full), else it's refused, naming
-// the line and what differs. What no command says is carried, the same in
-// every line moved, else refused, naming them: its section's hold, a step
-// by hand's steps and its --after and --before. Their note and the comments
-// above them, compared by their words, the block taking the line out takes
-// (a comment apart from it, a blank line between, too), and an item block's
-// name are carried, one between them, else refused; a note given wins, the
-// comments kept, and a note kit made up is used only when none is. A name
-// in the shared file is refused as before. Each Mac's file is left without
-// the line and its block. CheckDeclareShared judges as DeclareShared does,
-// writing nothing.
-func TestDeclareSharedKeepsWhatAMovedLineSays(t *testing.T) {
+// A shared declare moves the Macs' block as written: its comments, line,
+// steps and section's hold and name. Every Mac's must be the same, words
+// re-quoted (so quoting and spacing don't count), note, comments by their
+// words, steps, item, name and hold, else it's refused, naming each line;
+// and what the command gives of the value, item and hold must be the
+// block's, else it's refused, naming both. A note or name given wins over
+// the block's, and differs from it freely; a note kit made up is used only
+// when none is. A block name another item has refuses the whole edit.
+// CheckDeclareShared judges as DeclareShared does, writing nothing.
+func TestDeclareSharedMovesTheBlockAsWritten(t *testing.T) {
+	const manual = "[manual]\n# from its maker\nsign-in \"Sign in\" --after cask:app   # first\n    Open the app\n"
 	for name, c := range map[string]struct {
-		had, laptop, studio string
-		kind                string
-		e                   config.Entry
-		want, shared, said  string
-		left                map[string]string
+		laptop, studio, kind string
+		e                    config.Entry
+		shared, want         string
 	}{
-		"a setting written otherwise": {laptop: "[macos settings]\ncom.apple.dock tilesize -integer 60\ncom.apple.dock autohide -bool YES\n", kind: "defaults", e: config.Entry{Name: "com.apple.dock:tilesize", Value: "-int 60"},
-			shared: "[macos settings]\ncom.apple.dock tilesize -int 60\n", left: map[string]string{"laptop": "[macos settings]\ncom.apple.dock autohide -bool YES\n"}},
-		"a yes written as true": {laptop: "[macos settings]\ncom.apple.dock autohide -bool YES\n", kind: "defaults", e: config.Entry{Name: "com.apple.dock:autohide", Value: "-bool true"},
-			shared: "[macos settings]\ncom.apple.dock autohide -bool true\n"},
-		"a setting set otherwise": {laptop: "[macos settings]\ncom.apple.dock tilesize -int 48\n", kind: "defaults", e: config.Entry{Name: "com.apple.dock:tilesize", Value: "-int 60"},
-			want: "laptop/declarations:2 has com.apple.dock:tilesize with -int 48, where this gives -int 60: set it the same here, or take that line out first"},
-		"a server in JSON, the same as its options": {laptop: "[claude mcp]\ndocs {\"type\": \"http\", \"url\": \"https://docs.example.com/mcp\"}\n", kind: "claude-mcp", e: config.Entry{Name: "docs", Value: "--transport http https://docs.example.com/mcp"},
-			shared: "[claude mcp]\ndocs --transport http https://docs.example.com/mcp\n"},
-		"a git setting quoted otherwise": {laptop: "[git config]\nalias.st \"status -sb\"\n", kind: "git-config", e: config.Entry{Name: "alias.st", Value: "'status -sb'"},
-			shared: "[git config]\nalias.st 'status -sb'\n"},
-		"an option given twice": {laptop: "[backups]\narq --after cask:arq --after cask:arq\n", kind: config.BackupsKind, e: config.Entry{Name: "arq", Value: "--after cask:arq"},
-			shared: "[backups]\narq --after cask:arq\n"},
-		"a group written elsewhere": {laptop: "[manual]\nsign-in \"Sign in\" --group First --after cask:app\n", kind: config.ManualKind, e: config.Entry{Name: "sign-in", Value: `"Sign in" --group First`},
-			shared: "[manual]\nsign-in \"Sign in\" --after cask:app --group First\n"},
+		"quoted otherwise": {laptop: "[git config]\nalias.st \"status -sb\"\n", studio: "[git config]\nalias.st  'status -sb'\n", kind: "git-config", e: config.Entry{Name: "alias.st", Value: `status\ -sb`},
+			shared: "[git config]\nalias.st \"status -sb\"\n"},
+		"comments, steps and a hold": {laptop: manual, studio: manual, kind: config.ManualKind, e: config.Entry{Name: "sign-in"},
+			shared: "[manual]\n# from its maker\nsign-in \"Sign in\" --after cask:app   # first\n  Open the app\n"},
+		"a section's hold":   {laptop: "[homebrew formulae --after cask:x]\ngo\n", kind: "brew", e: config.Entry{Name: "go"}, shared: "[homebrew formulae --after cask:x]\ngo\n"},
+		"a block's name":     {laptop: "[secrets op://vault/Item --as keys]\nFOO Section/foo\n", kind: "secret", e: config.Entry{Name: "FOO", Value: "Section/foo", Item: "op://vault/Item"}, shared: "[secrets op://vault/Item --as keys]\nFOO Section/foo\n"},
+		"a name given":       {laptop: "[secrets op://vault/Item --as keys]\nFOO Section/foo\n", studio: "[secrets op://vault/Item --as tokens]\nFOO Section/foo\n", kind: "secret", e: config.Entry{Name: "FOO", Item: "op://vault/Item", As: "both"}, shared: "[secrets op://vault/Item --as both]\nFOO Section/foo\n"},
+		"a note given":       {laptop: "[homebrew formulae]\ngo   # a compiler\n", studio: "[homebrew formulae]\ngo   # for work\n", kind: "brew", e: config.Entry{Name: "go", Note: "Go"}, shared: "[homebrew formulae]\ngo   # Go\n"},
+		"a note made up":     {laptop: "[homebrew formulae]\ngo\n", kind: "brew", e: config.Entry{Name: "go", DefaultNote: "Go"}, shared: "[homebrew formulae]\ngo   # Go\n"},
+		"a note moved first": {laptop: "[homebrew formulae]\ngo   # a compiler\n", kind: "brew", e: config.Entry{Name: "go", DefaultNote: "Go"}, shared: "[homebrew formulae]\ngo   # a compiler\n"},
+		"options in another order": {laptop: "[backups]\narq --after cask:arq --before config\n", studio: "[backups]\narq --before config --after cask:arq\n", kind: config.BackupsKind, e: config.Entry{Name: "arq"},
+			want: `the lines it moves have different words, laptop/declarations:2 ("--after cask:arq --before config"), studio/declarations:2 ("--before config --after cask:arq"): make them the same, or take those lines out first`},
+		"notes":    {laptop: "[homebrew formulae]\ngo   # a compiler\n", studio: "[homebrew formulae]\ngo\n", kind: "brew", e: config.Entry{Name: "go"}, want: `different notes, laptop/declarations:2 ("a compiler"), studio/declarations:2 (none)`},
+		"comments": {laptop: "[homebrew formulae]\n# the compiler\ngo\n", studio: "[homebrew formulae]\n# for work\ngo\n", kind: "brew", e: config.Entry{Name: "go"}, want: `different comments above them, laptop/declarations:3 ("the compiler"), studio/declarations:3 ("for work")`},
+		"steps":    {laptop: "[manual]\nsign-in \"Sign in\"\n  Open the app\n", studio: "[manual]\nsign-in \"Sign in\"\n  Open it\n", kind: config.ManualKind, e: config.Entry{Name: "sign-in"}, want: `different steps under them, laptop/declarations:2 ("Open the app"), studio/declarations:2 ("Open it")`},
+		"holds":    {laptop: "[homebrew formulae --after cask:x]\ngo\n", studio: "[homebrew formulae]\ngo\n", kind: "brew", e: config.Entry{Name: "go"}, want: `different holds, laptop/declarations:2 ("--after cask:x"), studio/declarations:2 (none)`},
+		"a value given otherwise": {laptop: "[macos settings]\ncom.apple.dock tilesize -integer 60\n", kind: "defaults", e: config.Entry{Name: "com.apple.dock:tilesize", Value: "-int 60"},
+			want: "laptop/declarations:2 has com.apple.dock:tilesize with -integer 60, where this gives -int 60: give the same, or take that line out first"},
+		"an item given otherwise": {laptop: "[secrets op://vault/Other]\nFOO Section/foo\n", kind: "secret", e: config.Entry{Name: "FOO", Value: "Section/foo", Item: "op://vault/Item"}, want: "laptop/declarations:2 has FOO in op://vault/Other, where this gives op://vault/Item"},
+		"a hold given otherwise":  {laptop: "[homebrew formulae --after cask:x]\ngo\n", kind: "brew", e: config.Entry{Name: "go", Hold: "--after cask:y"}, want: "laptop/declarations:2 has go in a section holding it --after cask:x, where this gives --after cask:y"},
 		"a block's name another item has": {laptop: "[secrets op://vault/Item --as keys]\nFOO Section/foo\n", studio: "[secrets op://vault/Studio --as keys]\nBAR Section/bar\n", kind: "secret", e: config.Entry{Name: "FOO", Value: "Section/foo", Item: "op://vault/Item"},
-			shared: "[secrets op://vault/Item]\nFOO Section/foo\n", said: "its block's name, keys, not carried: studio/declarations:1 gives it to op://vault/Studio",
-			left: map[string]string{"studio": "[secrets op://vault/Studio --as keys]\nBAR Section/bar\n"}},
-		"a section's own comments, kept": {laptop: "[homebrew formulae]\n# my brews\n\ngo\n", kind: "brew", e: config.Entry{Name: "go"},
-			shared: "[homebrew formulae]\ngo\n", left: map[string]string{"laptop": "[homebrew formulae]\n# my brews\n"}},
-		"a blank line before the last, gone": {laptop: "[paths]\n~/bin\n\n~/go/bin\n", kind: config.PathsKind, e: config.Entry{Name: "~/go/bin"},
-			shared: "[paths]\n~/go/bin\n", left: map[string]string{"laptop": "[paths]\n~/bin\n"}},
-		"a section's hold, carried": {laptop: "[homebrew formulae --after cask:x]\ngo\n", kind: "brew", e: config.Entry{Name: "go"},
-			shared: "[homebrew formulae --after cask:x]\ngo\n"},
-		"a hold of two, in another order, carried": {laptop: "[homebrew formulae --secret TOKEN --after cask:x]\ngo\n", studio: "[homebrew formulae --after cask:x --secret TOKEN]\ngo\n", kind: "brew", e: config.Entry{Name: "go"},
-			shared: "[homebrew formulae --after cask:x --secret TOKEN]\ngo\n"},
-		"holds that differ": {laptop: "[homebrew formulae --after cask:x]\ngo\n", studio: "[homebrew formulae]\ngo\n", kind: "brew", e: config.Entry{Name: "go"},
-			want: `the lines it moves have different sections, laptop/declarations:2 ("--after cask:x"), studio/declarations:2 (none): make them the same, or take those lines out first`},
-		"options in another order": {laptop: "[backups]\narq --after cask:arq --before config\n", kind: config.BackupsKind, e: config.Entry{Name: "arq", Value: "--before config --after cask:arq"},
-			shared: "[backups]\narq --before config --after cask:arq\n"},
-		"options dropped": {laptop: "[backups]\narq --after cask:arq\n", kind: config.BackupsKind, e: config.Entry{Name: "arq"},
-			want: "laptop/declarations:2 has arq with --after cask:arq, where this doesn't: give the same, or take that line out first"},
-		"a step's --after dropped": {studio: "[steps]\ntool \"Install it\" --after mise\n", kind: config.StepsKind, e: config.Entry{Name: "tool", Value: `"Install it"`},
-			want: "studio/declarations:2 has tool with --after mise, where this doesn't: give the same, or take that line out first"},
-		"a check's other command": {studio: "[checks]\ndns -- dig example.com\n", kind: config.ChecksKind, e: config.Entry{Name: "dns", Value: "-- dig example.org"},
-			want: "studio/declarations:2 has dns with -- dig example.com, where this gives -- dig example.org: give the same"},
-		"a step by hand's steps and order, carried": {laptop: "[manual]\nsign-in \"Sign in\" --after cask:app --test true\n    Open the app\n    Sign in\n", kind: config.ManualKind, e: config.Entry{Name: "sign-in", Value: `"Sign in" --test true`},
-			shared: "[manual]\nsign-in \"Sign in\" --after cask:app --test true\n  Open the app\n  Sign in\n"},
-		"a step by hand's steps that differ": {laptop: "[manual]\nsign-in \"Sign in\"\n    Open the app\n", studio: "[manual]\nsign-in \"Sign in\"\n    Open it\n", kind: config.ManualKind, e: config.Entry{Name: "sign-in", Value: `"Sign in"`},
-			want: `the lines it moves have different steps under them, laptop/declarations:2 ("Open the app"), studio/declarations:2 ("Open it"): make them the same, or take those lines out first`},
-		"a step by hand's order that differs": {laptop: "[manual]\nsign-in \"Sign in\" --after cask:app\n", studio: "[manual]\nsign-in \"Sign in\"\n", kind: config.ManualKind, e: config.Entry{Name: "sign-in", Value: `"Sign in"`},
-			want: `the lines it moves have different options, laptop/declarations:2 ("--after cask:app"), studio/declarations:2 (none)`},
-		"a secret's reference, short for the same": {laptop: "[secrets]\nFOO op://vault/Item/Section/foo\n", kind: "secret", e: config.Entry{Name: "FOO", Value: "Section/foo", Item: "op://vault/Item"},
-			shared: "[secrets op://vault/Item]\nFOO Section/foo\n"},
-		"a secret's block name, carried": {laptop: "[secrets op://vault/Item --as keys]\nFOO Section/foo\n", kind: "secret", e: config.Entry{Name: "FOO", Value: "Section/foo", Item: "op://vault/Item"},
-			shared: "[secrets op://vault/Item --as keys]\nFOO Section/foo\n"},
-		"a secret in another item": {laptop: "[secrets op://vault/Other --as keys]\nFOO Section/foo\n", kind: "secret", e: config.Entry{Name: "FOO", Value: "Section/foo", Item: "op://vault/Item"},
-			want: "laptop/declarations:2 has FOO with op://vault/Other/Section/foo, where this gives op://vault/Item/Section/foo"},
-		"a file's mode dropped": {laptop: "[secrets op://vault/Item]\n~/.npmrc Section/npmrc --mode 644\n", kind: "secret", e: config.Entry{Name: "~/.npmrc", Value: "Section/npmrc", Item: "op://vault/Item"},
-			want: "laptop/declarations:2 has ~/.npmrc with --mode 644, where this gives --mode 600"},
-		"a note carried": {laptop: "[homebrew formulae]\ngo   # a compiler\n", studio: "[homebrew formulae]\ngo\n", kind: "brew", e: config.Entry{Name: "go", DefaultNote: "Go"},
-			shared: "[homebrew formulae]\ngo   # a compiler\n"},
-		"a note made up, none moved": {laptop: "[homebrew formulae]\ngo\n", kind: "brew", e: config.Entry{Name: "go", DefaultNote: "Go"},
-			shared: "[homebrew formulae]\ngo   # Go\n"},
-		"notes that differ": {laptop: "[homebrew formulae]\ngo   # a compiler\n", studio: "[homebrew formulae]\ngo   # for work\n", kind: "brew", e: config.Entry{Name: "go"},
-			want: `the lines it moves have different notes, laptop/declarations:2 ("a compiler"), studio/declarations:2 ("for work"): say which with --note`},
-		"a note given": {laptop: "[homebrew formulae]\ngo   # a compiler\n", studio: "[homebrew formulae]\ngo   # for work\n", kind: "brew", e: config.Entry{Name: "go", Note: "Go"},
-			shared: "[homebrew formulae]\ngo   # Go\n"},
-		"in shared already, notes that differ": {had: "[homebrew formulae]\ngo\n", laptop: "[homebrew formulae]\ngo   # a compiler\n", studio: "[homebrew formulae]\ngo   # for work\n", kind: "brew", e: config.Entry{Name: "go"},
-			want: "go is in shared/declarations already"},
-		"comments carried, in their place": {had: "[homebrew formulae]\n# about jq\njq\n", laptop: "[homebrew formulae]\n# the compiler\n# for work\ngo\nripgrep\n", studio: "[homebrew formulae]\ngo\n", kind: "brew", e: config.Entry{Name: "go"},
-			shared: "[homebrew formulae]\n# the compiler\n# for work\ngo\n# about jq\njq\n", left: map[string]string{"laptop": "[homebrew formulae]\nripgrep\n"}},
-		"a comment apart, carried": {laptop: "[homebrew formulae]\njq\n\n# about go\n\ngo\n", kind: "brew", e: config.Entry{Name: "go"},
-			shared: "[homebrew formulae]\n# about go\ngo\n", left: map[string]string{"laptop": "[homebrew formulae]\njq\n"}},
-		"comments apart that differ": {laptop: "[homebrew formulae]\njq\n# laptop go\n\ngo\n", studio: "[homebrew formulae]\n# studio go\ngo\n", kind: "brew", e: config.Entry{Name: "go"},
-			want: `the lines it moves have different comments above them, laptop/declarations:5 ("laptop go"), studio/declarations:3 ("studio go"): make them the same, or take those lines out first`},
-		"comments in a section kit doesn't sort": {studio: "[steps]\n# from its maker\ntool \"Install it\"\n", kind: config.StepsKind, e: config.Entry{Name: "tool", Value: `"Install it"`},
-			shared: "[steps]\n# from its maker\ntool \"Install it\"\n"},
-		"comments on a PATH's directory": {laptop: "[paths]\n~/bin\n# its tools\n~/go/bin\n", kind: config.PathsKind, e: config.Entry{Name: "~/go/bin"},
-			shared: "[paths]\n# its tools\n~/go/bin\n", left: map[string]string{"laptop": "[paths]\n~/bin\n"}},
-		"comments that differ": {laptop: "[homebrew formulae]\n# the compiler\ngo\n", studio: "[homebrew formulae]\n# for work\ngo\n", kind: "brew", e: config.Entry{Name: "go"},
-			want: `the lines it moves have different comments above them, laptop/declarations:3 ("the compiler"), studio/declarations:3 ("for work"): make them the same, or take those lines out first`},
-		"comments and a note given": {laptop: "[homebrew formulae]\n# the compiler\ngo   # a compiler\n", kind: "brew", e: config.Entry{Name: "go", Note: "Go"},
-			shared: "[homebrew formulae]\n# the compiler\ngo   # Go\n"},
+			want: "the config wouldn't read with it"},
 	} {
-		files := map[string]string{"shared/declarations": c.had, "laptop/declarations": c.laptop, "studio/declarations": c.studio}
+		files := map[string]string{"shared/declarations": "", "laptop/declarations": c.laptop, "studio/declarations": c.studio}
 		cfg := loadRepo(t, files)
 		where, err := cfg.Where(c.kind, c.e.Name)
 		if err != nil {
@@ -640,13 +583,11 @@ func TestDeclareSharedKeepsWhatAMovedLineSays(t *testing.T) {
 		}
 		var from []string
 		for _, e := range where {
-			if e.Scope != config.Shared {
-				from = append(from, e.Scope)
-			}
+			from = append(from, e.Scope)
 		}
 		checked := cfg.CheckDeclareShared(c.kind, c.e, from)
+		_, err = cfg.DeclareShared(c.kind, c.e, from)
 		if c.want != "" {
-			_, _, err := cfg.DeclareShared(c.kind, c.e, from)
 			if checked == nil || err == nil || checked.Error() != err.Error() || !strings.Contains(err.Error(), c.want) {
 				t.Errorf("%s: CheckDeclareShared() = %v, DeclareShared() = %v; want both %q, in the same words", name, checked, err, c.want)
 			}
@@ -657,19 +598,11 @@ func TestDeclareSharedKeepsWhatAMovedLineSays(t *testing.T) {
 			}
 			continue
 		}
-		if checked != nil {
-			t.Errorf("%s: CheckDeclareShared() = %v", name, checked)
-		}
-		if _, said, err := cfg.DeclareShared(c.kind, c.e, from); err != nil || said != c.said {
-			t.Errorf("%s: DeclareShared() = %q, %v; want %q", name, said, err, c.said)
+		if checked != nil || err != nil {
+			t.Errorf("%s: CheckDeclareShared() = %v, DeclareShared() = %v", name, checked, err)
 		}
 		if got := readFile(t, cfg, "shared/declarations"); got != c.shared {
 			t.Errorf("%s: shared/declarations = %q, want %q", name, got, c.shared)
-		}
-		for _, mac := range []string{"laptop", "studio"} {
-			if got := readFile(t, cfg, mac+"/declarations"); got != c.left[mac] {
-				t.Errorf("%s: %s/declarations = %q, want %q", name, mac, got, c.left[mac])
-			}
 		}
 	}
 }
@@ -686,7 +619,7 @@ func TestDeclareSharedSaysWhatItWroteWhenAWriteFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(laptop, 0o700) })
-	written, _, err := cfg.DeclareShared("brew", config.Entry{Name: "go"}, []string{"laptop"})
+	written, err := cfg.DeclareShared("brew", config.Entry{Name: "go"}, []string{"laptop"})
 	if err == nil || !slices.Equal(written, []string{"shared"}) {
 		t.Errorf("DeclareShared() with laptop's folder read-only wrote %q, %v; want shared's alone, and why laptop's wasn't", written, err)
 	}
@@ -700,7 +633,7 @@ func TestDeclareSharedDropsASectionItEmpties(t *testing.T) {
 		"shared/declarations": "[npm packages]\nx\n",
 		"laptop/declarations": "[homebrew formulae]\ngo\n\n[npm packages]\ny\n",
 	})
-	if _, _, err := cfg.DeclareShared("brew", config.Entry{Name: "go"}, []string{"laptop"}); err != nil {
+	if _, err := cfg.DeclareShared("brew", config.Entry{Name: "go"}, []string{"laptop"}); err != nil {
 		t.Fatal(err)
 	}
 	if got := readFile(t, cfg, "laptop/declarations"); got != "[npm packages]\ny\n" {
@@ -829,85 +762,4 @@ func TestDeclareAfterASectionsOwnComments(t *testing.T) {
 	if got := readFile(t, cfg, "laptop/declarations"); got != "[paths]\n# my paths\n\n~/a\n" {
 		t.Errorf("laptop/declarations = %q, want ~/a after the comment and a blank line", got)
 	}
-}
-
-// Each kind's reading tells apart lines that write different things,
-// however alike they look: a shared declare of one never moves the other.
-func TestReadingsTellLinesApart(t *testing.T) {
-	for name, c := range map[string]struct {
-		section, line, kind string
-		e                   config.Entry
-	}{
-		"a dict's entry, not a key":           {"macos settings", "com.apple.dock persistent -dict-add tile '<integer>5</integer>'", "defaults", config.Entry{Name: "com.apple.dock:persistent:tile", Value: "-int 5"}},
-		"a key, not a dict's entry":           {"macos settings", "com.apple.dock persistent:tile -int 5", "defaults", config.Entry{Name: "com.apple.dock:persistent:tile", Value: "-dict-add '<integer>5</integer>'"}},
-		"a string, not a number":              {"macos settings", "com.apple.dock tilesize -string 60", "defaults", config.Entry{Name: "com.apple.dock:tilesize", Value: "-int 60"}},
-		"a string's spaces":                   {"macos settings", "com.apple.dock title '<string> a </string>'", "defaults", config.Entry{Name: "com.apple.dock:title", Value: "-string a"}},
-		"a dict's key's spaces":               {"macos settings", "com.apple.dock tiles '<dict><key> x</key><true/></dict>'", "defaults", config.Entry{Name: "com.apple.dock:tiles", Value: "'<dict><key>x</key><true/></dict>'"}},
-		"a step by hand's steps, joined":      {"manual", "sign-in \"Sign in\"\n  Open it; then quit", config.ManualKind, config.Entry{Name: "sign-in", Value: `"Sign in"`, Steps: []string{"Open it", "then quit"}}},
-		"a server elsewhere":                  {"claude mcp", "docs --transport http https://docs.example.com/mcp", "claude-mcp", config.Entry{Name: "docs", Value: "--transport http https://other.example.com/mcp"}},
-		"a server declared off":               {"claude mcp", "docs --off --transport http https://docs.example.com/mcp", "claude-mcp", config.Entry{Name: "docs", Value: "--transport http https://docs.example.com/mcp"}},
-		"a git setting's other value":         {"git config", "pull.rebase true", "git-config", config.Entry{Name: "pull.rebase", Value: "false"}},
-		"a power setting's other value":       {"power settings", "-c sleep 0", "power", config.Entry{Name: "charger:sleep", Value: "10"}},
-		"a step without --sudo":               {"steps", `tool "Install it" --sudo`, config.StepsKind, config.Entry{Name: "tool", Value: `"Install it"`}},
-		"a step needing another secret":       {"steps", `tool "Install it" --secret TOKEN`, config.StepsKind, config.Entry{Name: "tool", Value: `"Install it" --secret OTHER`}},
-		"a step doing otherwise":              {"steps", `tool "Install it"`, config.StepsKind, config.Entry{Name: "tool", Value: `"Install the tool"`}},
-		"a step by hand in another group":     {"manual", `sign-in "Sign in" --group First`, config.ManualKind, config.Entry{Name: "sign-in", Value: `"Sign in" --group Second`}},
-		"a step by hand tested otherwise":     {"manual", `sign-in "Sign in" --test true`, config.ManualKind, config.Entry{Name: "sign-in", Value: `"Sign in" --test false`}},
-		"a job running otherwise":             {"nightly", "tidy -- tidy --all", config.NightlyKind, config.Entry{Name: "tidy", Value: "-- tidy"}},
-		"a backup tool placed otherwise":      {"backups", "arq --before config", config.BackupsKind, config.Entry{Name: "arq", Value: "--after config"}},
-		"a secret's file of another mode":     {"secrets", "~/.npmrc op://vault/Item/npmrc --mode 644", "secret", config.Entry{Name: "~/.npmrc", Value: "op://vault/Item/npmrc --mode 640"}},
-		"a secret kept elsewhere":             {"secrets", "TOKEN op://vault/Item/token", "secret", config.Entry{Name: "TOKEN", Value: "op://vault/Other/token"}},
-		"a formula held for another":          {"homebrew formulae --after cask:x", "go", "brew", config.Entry{Name: "go", Hold: "--after cask:y"}},
-		"a step by hand's steps, given apart": {"manual", "sign-in \"Sign in\"\n  Open the app", config.ManualKind, config.Entry{Name: "sign-in", Value: `"Sign in"`, Steps: []string{"Open it"}}},
-		"a restored path skipping otherwise":  {"restore", "~/Code --skip vendor", config.RestoreKind, config.Entry{Name: "~/Code", Value: "--skip 'vendor/*'"}},
-	} {
-		cfg := loadRepo(t, map[string]string{"laptop/declarations": "[" + c.section + "]\n" + c.line + "\n"})
-		err := cfg.CheckDeclareShared(c.kind, c.e, []string{"laptop"})
-		if _, differs := errors.AsType[config.LineDiffers](err); !differs {
-			t.Errorf("%s: CheckDeclareShared() = %v, want it refused as saying otherwise", name, err)
-		}
-	}
-}
-
-// Options carried from the lines moved compare as a set: written in
-// another order, or one given twice, they're the same.
-func TestCarriedOptionsAreASet(t *testing.T) {
-	cfg := loadRepo(t, map[string]string{
-		"laptop/declarations": "[manual]\nsign-in \"Sign in\" --after a --after b --after a\n",
-		"studio/declarations": "[manual]\nsign-in \"Sign in\" --after b --after a\n",
-	})
-	if _, _, err := cfg.DeclareShared(config.ManualKind, config.Entry{Name: "sign-in", Value: `"Sign in"`}, []string{"laptop", "studio"}); err != nil {
-		t.Fatalf("DeclareShared() = %v", err)
-	}
-	if got := readFile(t, cfg, "shared/declarations"); got != "[manual]\nsign-in \"Sign in\" --after a --after b\n" {
-		t.Errorf("shared/declarations = %q", got)
-	}
-}
-
-// A restore line's skips compare as a set: two Macs' lines skipping the
-// same, in another order and quoted otherwise, move into the shared file as
-// one.
-func TestRestoreSkipsAreASet(t *testing.T) {
-	cfg := loadRepo(t, map[string]string{
-		"laptop/declarations": "[restore]\n~/Code --skip a --skip 'b/*'\n",
-		"studio/declarations": "[restore]\n~/Code --skip b/* --skip a\n",
-	})
-	if _, _, err := cfg.DeclareShared(config.RestoreKind, config.Entry{Name: "~/Code", Value: "--skip a --skip 'b/*'"}, []string{"laptop", "studio"}); err != nil {
-		t.Fatalf("DeclareShared() = %v", err)
-	}
-	if got := readFile(t, cfg, "shared/declarations"); got != "[restore]\n~/Code --skip a --skip 'b/*'\n" {
-		t.Errorf("shared/declarations = %q", got)
-	}
-}
-
-// A reading given for none of the config's own sections is a mistake in
-// kit: loading panics, rather than taking it for a kind with no header.
-func TestAReadingForNoSectionPanics(t *testing.T) {
-	defer func() {
-		if recover() == nil {
-			t.Error("Load() didn't panic")
-		}
-	}()
-	dir := writeRepo(t, map[string]string{config.File: twoMacs})
-	_, _ = config.Load(dir, []config.Section{{Kind: "nothing", Says: func(config.Entry) ([]string, error) { return nil, nil }}})
 }

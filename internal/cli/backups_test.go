@@ -208,11 +208,11 @@ func TestBackupToolsInKitsOrder(t *testing.T) {
 }
 
 // kit backup add declares a backup tool for this Mac, or every Mac with
-// --shared, taking it out of the Macs' files that had it in the same edit,
-// its check placed as --after and --before say, and kit backup remove takes
-// it out, each committed and pushed; one declared already, in the shared
-// file or the one it goes in, a tool kit doesn't know, or one placed after
-// what isn't a step is refused.
+// --shared, moving the Macs' line as written out of their files in the
+// same edit, its check placed as --after and --before say, and kit backup
+// remove takes it out, each committed and pushed; one declared already, in
+// the shared file or the one it goes in, a tool kit doesn't know, one placed
+// after what isn't a step, or Macs' lines written otherwise, is refused.
 func TestBackupAddAndRemove(t *testing.T) {
 	w := laptopWorld(t)
 	w.expectSync(t, []string{"laptop/declarations"}, "kit backup add arq (laptop): offsite")
@@ -251,16 +251,17 @@ func TestBackupAddAndRemove(t *testing.T) {
 	for _, scope := range []string{"shared", "laptop", "studio"} {
 		before[scope] = w.readSection(t, scope, "backups")
 	}
-	if out, _, code := w.run(t, "backup", "add", "arq", "--shared"); code != 1 || !strings.Contains(out, "arq failed laptop/declarations:") || !strings.Contains(out, "has arq with --after cask:arq and --before config, where this doesn't: give the same, or take that line out first") {
-		t.Errorf("kit backup add --shared, dropping the Macs' options, printed\n%s exit %d", out, code)
+	if out, _, code := w.run(t, "backup", "add", "arq", "--shared"); code != 1 || !strings.Contains(out, `arq failed the lines it moves have different words, laptop/declarations:2 ("--after cask:arq --before config"), studio/declarations:5 ("--before config --after cask:arq"): make them the same, or take those lines out first`) {
+		t.Errorf("kit backup add --shared, the Macs' options in another order, printed\n%s exit %d", out, code)
 	}
 	for scope, was := range before {
 		if got := w.readSection(t, scope, "backups"); got != was {
 			t.Errorf("%s's [backups] = %q, want it untouched", scope, got)
 		}
 	}
+	w.writeSection(t, "studio", "backups", "arq --after cask:arq --before config   # offsite\n")
 	w.expectSync(t, []string{"laptop/declarations", "shared/declarations", "studio/declarations"}, "kit backup add arq (laptop)")
-	if out, errOut, code := w.run(t, "backup", "add", "arq", "--shared", "--before", "config", "--after", "cask:arq"); code != 0 || !strings.Contains(out, "arq ok declared in shared, out of laptop and studio\n") {
+	if out, errOut, code := w.run(t, "backup", "add", "arq", "--shared"); code != 0 || !strings.Contains(out, "arq ok declared in shared, out of laptop and studio\n") {
 		t.Fatalf("kit backup add --shared, declared by Macs, printed\n%s%s exit %d", out, errOut, code)
 	}
 	if got := w.readSection(t, "shared", "backups"); got != "arq --after cask:arq --before config   # offsite\ntime-machine\n" {

@@ -245,8 +245,7 @@ func (r *run) scope(shared bool) string {
 // changed: in the shared one, it takes e out of each Mac's file declaring
 // it, in the same edit, as a thing is in the shared declarations or a
 // Mac's, never both (config.DeclareShared). It returns what to say after
-// where it's declared: the Macs it's moved out of, and anything of theirs
-// it didn't carry.
+// where it's declared: the Macs it's moved out of.
 func (c *changes) declare(kindName, scope string, e config.Entry) (string, error) {
 	r := c.run
 	if scope != config.Shared {
@@ -260,14 +259,11 @@ func (c *changes) declare(kindName, scope string, e config.Entry) (string, error
 	if err != nil {
 		return "", err
 	}
-	written, said, err := r.cfg.DeclareShared(kindName, e, moved)
+	written, err := r.cfg.DeclareShared(kindName, e, moved)
 	for _, scope := range written {
 		c.changed(config.DeclFile(scope))
 	}
-	if said != "" {
-		said = "; " + said
-	}
-	return outOf(moved) + said, err
+	return outOf(moved), err
 }
 
 // undeclareIn takes name, of the kind called kindName, out of scope's

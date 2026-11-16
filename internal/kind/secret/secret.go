@@ -72,7 +72,7 @@ var Descriptor = kind.Descriptor{
 	Name:       kindName,
 	Label:      "Secrets",
 	Group:      kind.Secrets,
-	Section:    config.Section{Kind: kindName, Header: "secrets", Form: config.Secrets, Sorted: true, Items: checkItem, Line: checkLine, Says: lineSays},
+	Section:    config.Section{Kind: kindName, Header: "secrets", Form: config.Secrets, Sorted: true, Items: checkItem, Line: checkLine},
 	Row:        "Secrets",
 	Installing: kind.Words{Label: "Sync", Does: "sync it", Doing: "syncing", Done: "synced"},
 	Removing:   kind.Words{Label: "Delete", Does: "delete it from this Mac: its store keeps it", Doing: "deleting", Done: "deleted"},
@@ -137,26 +137,6 @@ func (s *Secrets) Values(list config.List) (config.List, error) {
 func checkLine(e config.Entry) error {
 	_, err := parse(e)
 	return err
-}
-
-// lineSays is what e's line says, in parts: where its value is, in full,
-// and a file's mode, however the line gives them.
-func lineSays(e config.Entry) ([]string, error) {
-	sec, err := parse(e)
-	if err != nil || !sec.IsFile() {
-		return []string{sec.Ref}, err
-	}
-	return []string{sec.Ref, ModeOption(sec.Mode)}, nil
-}
-
-// ModeOption is a file's mode as its line gives it, as in --mode 644.
-func ModeOption(mode os.FileMode) string { return fmt.Sprintf("--mode %o", mode) }
-
-// Where is where e's line says its store keeps its value, in full, and the
-// file's mode it says.
-func Where(e config.Entry) (ref string, mode os.FileMode, err error) {
-	sec, err := parse(e)
-	return sec.Ref, sec.Mode, err
 }
 
 // parse reads e's line as a secret's: its reference, then its options.

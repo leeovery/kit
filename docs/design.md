@@ -250,10 +250,9 @@ item with its JSON on op's standard input), then read back and compared, declare
 never shown. `--mode` as on the line. `--shared` declares it in the shared file, in the block
 `--in` or `--item` names, or, with `--ref`, as above (the shared file having no block for its
 item, in one made for the item of the Mac's block holding it, going by that block's name), and
-takes it out of each Mac's own file, whatever block it was in, by the rule for moving a line
-(below): a Mac's line keeping it elsewhere, or of another mode, is refused before
-anything's stored, saying the `--ref` and `--mode` that share the value it has; one the shared
-file has already is refused. `kit secret remove <name>` takes it off the Mac, undeclares it, and
+takes it out of each Mac's own file, by the rule for moving a line (below): a Mac's line
+written otherwise is refused before anything's stored; one the shared file has already is
+refused. `kit secret remove <name>` takes it off the Mac, undeclares it, and
 keeps or deletes its value in its store (`--keep-value`, `--delete-value`; asked at a terminal);
 a value given in full, outside the items' blocks, is left where it is.
 
@@ -739,29 +738,24 @@ failing leaves the others), then commit the config's changed files, with a messa
 main, pulling with rebase first. A push that fails leaves the commit, and says so.
 
 **Moving a line.** Every command declaring for every Mac takes the name out of each Mac's own
-file in the same edit, losing nothing the lines it moves say, all judged before anything's
-stored, installed or asked for:
-- What the command can say must be the same, by meaning, as each kind reads its lines: options
-  in any order and once each, a macOS setting's value by its type (`-integer 60` is `-int 60`,
-  `-bool YES` is `-bool true`) and whether it's a dict's entry, an MCP server in JSON or as
-  options, a secret's full reference (short in its block or in full) and its mode. A reading
-  only evens out how a line is written, never what it does. Otherwise it's refused, naming the line and
-  what differs: give the same, or, for a value kit reads from the Mac (macOS, power and git
-  settings, MCP servers), set it the same here, or take that line out first; for a secret,
-  with the `--ref` and `--mode` sharing its value.
-- What no command can say is carried, the same in every line moved: its section's hold
-  (`[homebrew formulae --after cask:x]`), and a step by hand's steps, `--after` and `--before`.
-- Their note, unless the command gives one, and the comments above them, compared by their
-  words (one set apart from the line by a blank line is the line's, as kit's sorting has it),
-  are carried, one between them; a note given stays after the line, the comments above it. A
-  note kit makes up, as a login item's app name, is the note only when nothing else gives one.
-- So is the name of an item's block (`--as`), for a block the shared file hasn't, unless a
-  file gives that name to another item: then the block goes unnamed, kit saying why.
+file in the same edit, the line moving as written, all judged before anything's stored,
+installed or asked for:
+- Each Mac's block must be the same: the line's words (re-quoted, so quoting and spacing don't
+  count), its note, the comments above it by their words (one set apart from the line by a
+  blank line is the line's, as kit's sorting has it), a step by hand's steps, and its section's
+  item, `--as` name and hold (`[homebrew formulae --after cask:x]`). Otherwise it's refused,
+  naming each line and what it has: make them the same, or take those lines out first.
+- What the command gives of the line's value, its item and its section's hold must have the
+  same words as the block's, otherwise it's refused, naming both: give the same, or take that
+  line out first. `-integer 60` and `-int 60` differ, as do options in another order.
+- Otherwise the block moves as written: its comments, line, steps and section's hold and
+  `--as` name. A note or `--as` the command gives wins; a note kit makes up, as a login item's
+  app name, is the note only when nothing else gives one. A block name another file gives to
+  a different item is refused with the whole edit, as the config wouldn't read with it.
 - A step of your own's folder moves with its line: the Macs' folders, all the same, go to the
   shared one, or are left for one there already that's the same.
 
-Lines moved that differ in what's carried are refused, naming each. A name in the shared file
-already is refused as before. `kit <kind> add` judges each name before anything's installed
+A name in the shared file already is refused as before. `kit <kind> add` judges each name before anything's installed
 or asked for: one refused fails alone, in its row, and the rest carry on.
 
 `kit reconcile` settles drift. At a terminal it goes through each item that needs attention
