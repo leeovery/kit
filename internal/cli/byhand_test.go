@@ -128,8 +128,7 @@ func TestApplyRaisesACardOnceItsGraceIsOver(t *testing.T) {
 // Where kit's app can be built, a run that raises cards builds it, once, in
 // kit's data folder: the card's notification is posted through it, under an
 // id of its step and item, a click bringing forward the terminal kit runs
-// in, as the first run to send any there, and taken away as the run ends
-// with the card not done.
+// in, and taken away as the run ends with the card not done.
 func TestApplyNotifiesThroughKitsApp(t *testing.T) {
 	w := signInWorld(t)
 	w.terminal, w.size = true, [2]int{160, 64}
@@ -146,8 +145,8 @@ func TestApplyNotifiesThroughKitsApp(t *testing.T) {
 		{Name: "codesign", Args: []string{"-s", "-", "-f", filepath.Join(work, "kit.app")}},
 	}
 	at := w.now.UnixNano()
-	notify := runner.Command{Name: "open", Args: []string{"-g", "-n", app, "--args", "notify", "--id", "card:sign-in:sign-in", "--title", "Sign in to the tool", "--body", "The tool's commands need it.", "--activate", "com.example.terminal", "--at", strconv.FormatInt(at, 10), "--run", "1"}}
-	clear := runner.Command{Name: "open", Args: []string{"-g", "-n", app, "--args", "clear", "--id", "card:sign-in:sign-in", "--at", strconv.FormatInt(at+1, 10), "--run", "1"}}
+	notify := runner.Command{Name: "open", Args: []string{"-g", "-n", app, "--args", "notify", "--id", "card:sign-in:sign-in", "--title", "Sign in to the tool", "--body", "The tool's commands need it.", "--activate", "com.example.terminal", "--at", strconv.FormatInt(at, 10)}}
+	clear := runner.Command{Name: "open", Args: []string{"-g", "-n", app, "--args", "clear", "--id", "card:sign-in:sign-in", "--at", strconv.FormatInt(at+1, 10)}}
 	w.fake.On("xcode-select", "-p")
 	w.fake.On("codesign", built[2].Args...)
 	w.fake.On("swiftc", built[1].Args...).Does(func() {

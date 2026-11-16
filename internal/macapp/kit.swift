@@ -4,22 +4,20 @@
 // the hourly launch opens to run kit nightly, as its child, so that Full
 // Disk Access is the app's. It quits once it's done: it never lingers.
 //
-//   notify --id <id> --title <title> --body <body> [--activate <bundle id>] [--at <ns> [--run <n>]]
-//   clear --id <id> [--at <ns> [--run <n>]]
+//   notify --id <id> --title <title> --body <body> [--activate <bundle id>] [--at <ns>]
+//   clear --id <id> [--at <ns>]
 //   nightly <kit>   runs <kit> nightly --scheduled, waits for it, and quits;
 //                   it posts nothing. open -W exits 0 whatever the run did,
 //                   so nothing reads how it ended: kit's run log has it
 //   (no arguments)  launched by macOS for a click on a notification: brings
 //                   forward the app the notification names, then quits
 //
-// --at is when kit sent it, --run which run of kit's did. kit sends them in
-// order, but macOS can run two launched one after the other in either
-// order, and the first notify holds while macOS asks the person to allow
-// them: the newest sent under an id is kept, in kit's data folder, beside
-// the app, ordered by run, then time, and one older does nothing, so a
-// notification taken away before it could be posted never is, nor stays
-// posted; nor is one posted that a run sent once it's ended, as kit keeps
-// it, there too. One that says no run is posted whatever runs have ended.
+// --at is when kit sent it. kit sends them in order, but macOS can run two
+// launched one after the other in either order, and the first notify holds
+// while macOS asks the person to allow them: the newest sent under an id is
+// kept, in kit's data folder, beside the app, and one older does nothing,
+// so a notification taken away before it could be posted never is, nor
+// stays posted.
 
 import AppKit
 import CryptoKit
@@ -44,32 +42,25 @@ func options(_ words: ArraySlice<String>) -> [String: String] {
 }
 
 // marks is where the newest sent under each id is kept, a file each, named
-// for the id's hash, so any id fits a file's name; and, in ended, the runs
-// of kit's last ended, one a line. lock is the lock kit and the app take to
-// read and write them, beside the folder, never in it.
+// for the id's hash, so any id fits a file's name. lock is the lock the
+// app's instances take to read and write them, beside the folder, never in
+// it, as kit empties the folder as each run starts.
 let data = Bundle.main.bundleURL.deletingLastPathComponent()
 let marks = data.appendingPathComponent("notices", isDirectory: true)
-let ended = marks.appendingPathComponent("ended")
 let lock = data.appendingPathComponent("notices.lock")
 
 func markFile(_ id: String) -> URL {
     marks.appendingPathComponent(SHA256.hash(data: Data(id.utf8)).map { String(format: "%02x", $0) }.joined())
 }
 
-// Sent is a notify or clear as kit sent it and its mark keeps it: the run
-// that sent it, when, and whether it was a clear. One that says no run, as
-// kit sends till it's numbered its run, or a mark from before runs were
-// numbered, has run 0.
+// Sent is a notify or clear as kit sent it and its mark keeps it: when, and
+// whether it was a clear.
 struct Sent {
-    var run: Int64
     var at: Int64
     var clear: Bool
 
-    // isNewer reports whether it was sent after other: by a later run, or
-    // later in the same run; by when alone, should either say no run, so
-    // that one from a run not numbered yet is ordered with the rest.
     func isNewer(than other: Sent) -> Bool {
-        run != other.run && run != 0 && other.run != 0 ? run > other.run : at > other.at
+        at > other.at
     }
 }
 
@@ -77,7 +68,7 @@ struct Sent {
 // nothing of when, as by hand, so that it's done whatever was sent before.
 func sent(_ given: [String: String], clear: Bool) -> Sent? {
     guard let at = Int64(given["at"] ?? "") else { return nil }
-    return Sent(run: Int64(given["run"] ?? "") ?? 0, at: at, clear: clear)
+    return Sent(at: at, clear: clear)
 }
 
 // locked runs body holding the lock on the marks, so that no two of kit
@@ -92,25 +83,13 @@ func locked<T>(_ body: () -> T) -> T {
     return body()
 }
 
-// hasEnded reports whether kit keeps sent's run as ended: never one that
-// said no run. The lock is held.
-func hasEnded(_ sent: Sent) -> Bool {
-    guard sent.run > 0, let text = try? String(contentsOf: ended, encoding: .utf8) else { return false }
-    return text.split(whereSeparator: \.isNewline).contains { Int64($0) == sent.run }
-}
-
-// newest is the newest notify or clear sent under id: run and at 0 for
-// none. The lock is held.
+// newest is the newest notify or clear sent under id: at 0 for none. The
+// lock is held.
 func newest(_ id: String) -> Sent {
-    guard let text = try? String(contentsOf: markFile(id), encoding: .utf8) else { return Sent(run: 0, at: 0, clear: false) }
-    let words = text.split(separator: " ").map(String.init)
-    let numbers = words.dropLast().compactMap { Int64($0) }
-    let clear = words.last == "clear"
-    switch numbers.count {
-    case 2: return Sent(run: numbers[0], at: numbers[1], clear: clear)
-    case 1: return Sent(run: 0, at: numbers[0], clear: clear)
-    default: return Sent(run: 0, at: 0, clear: false)
-    }
+    guard let text = try? String(contentsOf: markFile(id), encoding: .utf8) else { return Sent(at: 0, clear: false) }
+    let words = text.split(separator: " ")
+    guard words.count == 2, let at = Int64(words[0]) else { return Sent(at: 0, clear: false) }
+    return Sent(at: at, clear: words[1] == "clear")
 }
 
 // mark keeps sent as the newest under id, reporting whether it is: false
@@ -121,7 +100,7 @@ func mark(_ id: String, _ sent: Sent) -> Bool {
         return false
     }
     try? FileManager.default.createDirectory(at: marks, withIntermediateDirectories: true)
-    try? "\(sent.run) \(sent.at) \(sent.clear ? "clear" : "notify")".write(to: markFile(id), atomically: true, encoding: .utf8)
+    try? "\(sent.at) \(sent.clear ? "clear" : "notify")".write(to: markFile(id), atomically: true, encoding: .utf8)
     return true
 }
 
@@ -148,9 +127,8 @@ func wait(_ seconds: Double, _ body: (@escaping () -> Void) -> Void) {
 func post(_ given: [String: String]) -> Int32 {
     guard let id = given["id"], let title = given["title"] else { return 64 }
     let mine = sent(given, clear: false)
-    // What a run sent once it's ended, or sent before the newest under its
-    // id, isn't posted.
-    if let mine, !locked({ !hasEnded(mine) && mark(id, mine) }) {
+    // What was sent before the newest under its id isn't posted.
+    if let mine, !locked({ mark(id, mine) }) {
         return 0
     }
     let center = UNUserNotificationCenter.current()
@@ -172,13 +150,13 @@ func post(_ given: [String: String]) -> Int32 {
         content.userInfo = ["activate": activate]
     }
     var failed = false
-    // Posted only while it's still the newest sent under its id, and its run
-    // hasn't ended, checked and added under the lock: taken away, sent
-    // again, or its run ended while macOS asked, it isn't. Added under the
-    // lock too, as one id can be sent saying something new (macOS asking
-    // for another thing), which an older one added after would hide.
+    // Posted only while it's still the newest sent under its id, checked and
+    // added under the lock: taken away or sent again while macOS asked, it
+    // isn't. Added under the lock too, as one id can be sent saying
+    // something new (macOS asking for another thing), which an older one
+    // added after would hide.
     let added = locked { () -> Bool in
-        if let mine, hasEnded(mine) || newest(id).isNewer(than: mine) {
+        if let mine, newest(id).isNewer(than: mine) {
             return false
         }
         wait(30) { finish in
