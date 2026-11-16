@@ -7,9 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"strconv"
-	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -225,13 +222,12 @@ func TestWithoutSwift(t *testing.T) {
 // launches apps, a new one in the background, with its id, title and body,
 // and the app a click brings forward; clearing takes it away by its id.
 // Each says when it was sent, each after the last though the clock hasn't
-// moved, and by which run, the first to send any here, so the app keeps
-// their order.
+// moved, so the app keeps their order.
 func TestNotifyAndClear(t *testing.T) {
 	app, fake := built(t)
 	open := []string{"-g", "-n", app.Path(), "--args"}
-	notify := append(append([]string(nil), open...), "notify", "--id", "card:sign-in", "--title", "Sign in", "--body", "Open the tool", "--activate", terminal, "--at", "1000", "--run", "1")
-	clear := append(append([]string(nil), open...), "clear", "--id", "card:sign-in", "--at", "1001", "--run", "1")
+	notify := append(append([]string(nil), open...), "notify", "--id", "card:sign-in", "--title", "Sign in", "--body", "Open the tool", "--activate", terminal, "--at", "1000")
+	clear := append(append([]string(nil), open...), "clear", "--id", "card:sign-in", "--at", "1001")
 	fake.On("open", notify...)
 	fake.On("open", clear...)
 
@@ -249,7 +245,7 @@ func TestNotifyWithNothingToActivate(t *testing.T) {
 	app, _ := built(t)
 	fake := runnertest.New(t)
 	app = macapp.New(fake, filepath.Dir(app.Path()), "", clock)
-	args := []string{"-g", "-n", app.Path(), "--args", "notify", "--id", "dialog", "--title", "macOS is asking", "--body", "Answer it", "--at", "1000", "--run", "1"}
+	args := []string{"-g", "-n", app.Path(), "--args", "notify", "--id", "dialog", "--title", "macOS is asking", "--body", "Answer it", "--at", "1000"}
 	fake.On("open", args...)
 	app.Notify(t.Context(), "dialog", "macOS is asking", "Answer it")
 	if got, want := fake.Calls(), []string{runner.Command{Name: "open", Args: args}.String()}; !reflect.DeepEqual(got, want) {
@@ -261,7 +257,7 @@ func TestNotifyWithNothingToActivate(t *testing.T) {
 // osascript.
 func TestAnAppThatWontOpen(t *testing.T) {
 	app, fake := built(t)
-	fake.On("open", "-g", "-n", app.Path(), "--args", "notify", "--id", "dialog", "--title", "macOS is asking", "--body", "Answer it", "--activate", terminal, "--at", "1000", "--run", "1").Exits(1)
+	fake.On("open", "-g", "-n", app.Path(), "--args", "notify", "--id", "dialog", "--title", "macOS is asking", "--body", "Answer it", "--activate", terminal, "--at", "1000").Exits(1)
 	fake.On("osascript", "-e", `display notification "Answer it" with title "kit" subtitle "macOS is asking"`)
 	app.Notify(t.Context(), "dialog", "macOS is asking", "Answer it")
 	if calls := fake.Calls(); len(calls) != 2 || calls[1] != `osascript -e 'display notification "Answer it" with title "kit" subtitle "macOS is asking"'` {
@@ -318,146 +314,31 @@ func TestPrepareBuildsAside(t *testing.T) {
 	}
 }
 
-// Prepared as a run starts, the app numbers the run, after the last run to
-// send notifications, so that it keeps each run's after the last's: the
-// order of the last run's kept, and the lock it's kept under beside it,
-// never in the folder, as the app's instances can still be using both.
-// Each run's number is taken once, as it starts or as it first sends one.
-func TestPrepareNumbersTheRun(t *testing.T) {
+// Prepared as a run starts, the app forgets the order of the notifications
+// the last run sent, so that a clock gone back since can't silence an id:
+// the lock it's kept under, beside the folder, stays, as the app's
+// instances can still be using it.
+func TestPrepareForgetsTheLastRunsOrder(t *testing.T) {
 	app, _ := built(t)
 	dir := filepath.Dir(app.Path())
 	mark := filepath.Join(dir, "notices", "0a1b")
+	lock := filepath.Join(dir, "notices.lock")
 	if err := os.MkdirAll(filepath.Dir(mark), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(mark, []byte("1000 clear"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	app.Prepare()
-	app.Prepare()
-	if run := read(t, filepath.Join(dir, "notices", "run")); run != "1\n" {
-		t.Errorf("the run's number is %q, want 1, the first", run)
-	}
-	if got := read(t, mark); got != "1000 clear" {
-		t.Errorf("the last run's order is %q, want it kept", got)
-	}
-	if _, err := os.Stat(filepath.Join(dir, "notices.lock")); err != nil {
-		t.Errorf("no lock beside the order kept: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(dir, "notices", ".lock")); !errors.Is(err, os.ErrNotExist) {
-		t.Errorf("a lock in the folder (%v), want it beside", err)
-	}
-
-	fake := runnertest.New(t)
-	next := macapp.New(fake, dir, terminal, clock)
-	args := []string{"-g", "-n", app.Path(), "--args", "clear", "--id", "dialog", "--at", "1000", "--run", "2"}
-	fake.On("open", args...)
-	next.Prepare()
-	next.Clear(t.Context(), "dialog")
-	if got := fake.Calls(); !reflect.DeepEqual(got, []string{runner.Command{Name: "open", Args: args}.String()}) {
-		t.Errorf("the next run ran %q, want its clear sent as run 2", got)
-	}
-}
-
-// Closed, a run numbered is kept as ended, after those before it, the last
-// 32 of them, so that the app posts nothing it sent that's still to post:
-// what it sends after says its run all the same. A run never numbered
-// isn't, nor numbered once it's closed.
-func TestCloseKeepsTheRunEnded(t *testing.T) {
-	app, fake := built(t)
-	dir := filepath.Dir(app.Path())
-	ended := filepath.Join(dir, "notices", "ended")
-	var before []string
-	for n := range 32 {
-		before = append(before, strconv.Itoa(1000+n))
-	}
-	if err := os.MkdirAll(filepath.Dir(ended), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(ended, []byte(strings.Join(before, "\n")+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(lock, nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	app.Prepare()
-	app.Close()
-	if got, want := read(t, ended), strings.Join(append(before[1:], "1"), "\n")+"\n"; got != want {
-		t.Errorf("runs ended = %q, want %q", got, want)
+	if _, err := os.Stat(filepath.Join(dir, "notices")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the last run's order is still there (%v), want it forgotten", err)
 	}
-	args := []string{"-g", "-n", app.Path(), "--args", "clear", "--id", "dialog", "--at", "1000", "--run", "1"}
-	fake.On("open", args...)
-	app.Clear(t.Context(), "dialog")
-	if got := fake.Calls(); !reflect.DeepEqual(got, []string{runner.Command{Name: "open", Args: args}.String()}) {
-		t.Errorf("ran %q once closed, want its clear sent as run 1", got)
+	if _, err := os.Stat(lock); err != nil {
+		t.Errorf("the lock beside the order is gone: %v", err)
 	}
-
-	fake = runnertest.New(t)
-	never := macapp.New(fake, dir, terminal, clock)
-	if !never.Ready(t.Context()) {
-		t.Fatal("the app built isn't ready")
-	}
-	never.Close()
-	args = []string{"-g", "-n", app.Path(), "--args", "clear", "--id", "dialog", "--at", "1000"}
-	fake.On("open", args...)
-	never.Clear(t.Context(), "dialog")
-	if got := read(t, filepath.Join(dir, "notices", "run")); got != "1\n" {
-		t.Errorf("the last run's number is %q once closed unnumbered, want 1 still", got)
-	}
-	if got := fake.Calls(); !reflect.DeepEqual(got, []string{runner.Command{Name: "open", Args: args}.String()}) {
-		t.Errorf("ran %q, want a clear saying no run", got)
-	}
-}
-
-// With the lock held long, as by an instance of the app while macOS posts a
-// notification, a run starting doesn't wait on it: it goes unnumbered, and
-// what it sends meanwhile says no run, the app keeping its order by time
-// alone; once the lock's let go, the next it sends numbers it. Its end,
-// numbered, is kept with the lock held all the same.
-func TestTheLockHeldLong(t *testing.T) {
-	app, fake := built(t)
-	dir := filepath.Dir(app.Path())
-	held := lockHeld(t, dir)
-	app.Prepare()
-	unnumbered := []string{"-g", "-n", app.Path(), "--args", "clear", "--id", "dialog", "--at", "1000"}
-	numbered := []string{"-g", "-n", app.Path(), "--args", "clear", "--id", "dialog", "--at", "1001", "--run", "1"}
-	fake.On("open", unnumbered...)
-	fake.On("open", numbered...)
-	app.Clear(t.Context(), "dialog")
-	held()
-	app.Clear(t.Context(), "dialog")
-	want := []string{runner.Command{Name: "open", Args: unnumbered}.String(), runner.Command{Name: "open", Args: numbered}.String()}
-	if got := fake.Calls(); !reflect.DeepEqual(got, want) {
-		t.Errorf("ran %q, want a clear saying no run, then, the lock let go, one saying run 1", got)
-	}
-
-	held = lockHeld(t, dir)
-	defer held()
-	app.Close()
-	if got := read(t, filepath.Join(dir, "notices", "ended")); got != "1\n" {
-		t.Errorf("runs ended = %q, want run 1's end kept without the lock", got)
-	}
-}
-
-// lockHeld holds the lock on the app's marks in dir, as an instance of the
-// app would, till what it returns is called.
-func lockHeld(t *testing.T, dir string) (release func()) {
-	t.Helper()
-	f, err := os.OpenFile(filepath.Join(dir, "notices.lock"), os.O_CREATE|os.O_RDWR, 0o644)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
-		t.Fatal(err)
-	}
-	return func() { _ = f.Close() }
-}
-
-// read is the file at path, failing the test should it not read.
-func read(t *testing.T, path string) string {
-	t.Helper()
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return string(data)
 }
 
 // A notification waiting for the build under way gives up its wait once its
