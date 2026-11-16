@@ -225,7 +225,7 @@ func TestApplyRestoreWithoutATerminalNamesTheFlag(t *testing.T) {
 			w.recordingStudio(t, tt.key, tt.named)
 			w.rsync3()
 			w.fake.OnMatch("ssh", func(args []string) bool { return slices.Contains(args, studioAt) }).
-				PrintsToStderr("ssh: Could not resolve hostname " + studioAt + ": nodename nor servname provided, or not known\n").Exits(255)
+				PrintsToStderr("ssh: connect to host " + studioAt + " port 22: Operation timed out\n").Exits(255)
 			out, errOut, code := w.run(t, "apply", "restore")
 			if want := "restore failed couldn't restore: " + tt.why + ways; code == 0 || !strings.Contains(out, want) {
 				t.Errorf("kit apply restore printed\n%s%s\nexit %d; want it failing, saying\n%s", out, errOut, code, want)

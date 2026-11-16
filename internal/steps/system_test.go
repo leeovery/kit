@@ -156,8 +156,9 @@ func TestHostKey(t *testing.T) {
 // The local hostname's recorded as macOS says it now: kit-config without
 // one, as on a Mac whose key an older kit recorded, or with another, as on
 // a Mac renamed since, needs it recorded, and applying records it, the key
-// with it; one scutil can't say fails the check, saying why, and leaves
-// nothing recorded.
+// with it; one scutil can't say, or one another Mac can't reach this one
+// by, as one set by hand, fails the check, saying why and how to set one,
+// and leaves nothing recorded.
 func TestHostKeyRecordsTheLocalHostname(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ssh_host_ed25519_key.pub"), []byte(fakeHostKey+" root@laptop\n"), 0o644); err != nil {
@@ -184,21 +185,26 @@ func TestHostKeyRecordsTheLocalHostname(t *testing.T) {
 			}
 		})
 	}
-	t.Run("scutil says none", func(t *testing.T) {
-		fake := runnertest.New(t)
-		fake.On("scutil", "--get", "LocalHostName").Prints("\n")
-		step := steps.HostKey(steps.HostKeying{RemoteLogin: true, Dir: dir, Run: fake, Recorded: fakeHostKey, Record: func(context.Context, string, string) (check.Result, error) {
-			t.Error("recorded a key")
-			return check.Result{}, nil
-		}})
-		res := step.Check(t.Context())
-		if want := "this Mac has no local hostname: set one in System Settings › General › Sharing"; res.State != check.Failed || res.Reason != want {
-			t.Errorf("Check() = %+v; want failed, %q", res, want)
-		}
-		if err := step.Apply(t.Context(), res); err == nil {
-			t.Error("Apply() = nil; want the missing name an error")
-		}
-	})
+	for _, tt := range []struct{ name, says, want string }{
+		{"scutil says none", "\n", "this Mac has no local hostname: set one in System Settings › General › Sharing"},
+		{"scutil says one set by hand", "Someones.Mac\n", `this Mac's local hostname, "Someones.Mac", isn't one another Mac can reach it by: set one of letters, digits and - in System Settings › General › Sharing`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			fake := runnertest.New(t)
+			fake.On("scutil", "--get", "LocalHostName").Prints(tt.says)
+			step := steps.HostKey(steps.HostKeying{RemoteLogin: true, Dir: dir, Run: fake, Recorded: fakeHostKey, Record: func(context.Context, string, string) (check.Result, error) {
+				t.Error("recorded a key")
+				return check.Result{}, nil
+			}})
+			res := step.Check(t.Context())
+			if res.State != check.Failed || res.Reason != tt.want {
+				t.Errorf("Check() = %+v; want failed, %q", res, tt.want)
+			}
+			if err := step.Apply(t.Context(), res); err == nil || err.Error() != tt.want {
+				t.Errorf("Apply() = %v; want %q", err, tt.want)
+			}
+		})
+	}
 }
 
 // With no key yet, a Remote Login that doesn't answer, answers as

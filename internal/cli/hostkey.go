@@ -58,9 +58,9 @@ func (r *run) recordHostKey(ctx context.Context, stateDir, key, localHostName st
 		case err != nil:
 			return check.Result{}, err
 		case newMac == r.machine:
-			return check.Result{}, engine.NotYet(config.File + " holds this Mac's table, not committed yet: the new-mac step commits it, then kit apply records the key")
+			return check.Result{}, engine.NotYet(config.File + " holds this Mac's table, not committed yet: the new-mac step commits it, then kit apply records this Mac's host key and local hostname")
 		}
-		return check.Result{}, engine.NotYet(config.File + " has edits not committed: kit reconcile settles them, then kit apply records the key")
+		return check.Result{}, engine.NotYet(config.File + " has edits not committed: kit reconcile settles them, then kit apply records this Mac's host key and local hostname")
 	}
 	path := filepath.Join(r.cfg.Dir, config.File)
 	was, err := os.ReadFile(path)

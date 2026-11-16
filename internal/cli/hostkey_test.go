@@ -184,10 +184,10 @@ func TestApplyLeavesTheHostKeyForTheNextRun(t *testing.T) {
 		{"Remote Login doesn't answer", "this Mac has no SSH host key yet, and Remote Login didn't answer at 127.0.0.1:1 to make one: ", func(t *testing.T, w *world) {
 			w.noKeyYet(t)
 		}},
-		{"kit.toml edited", "kit.toml has edits not committed: kit reconcile settles them, then kit apply records the key", func(t *testing.T, w *world) {
+		{"kit.toml edited", "kit.toml has edits not committed: kit reconcile settles them, then kit apply records this Mac's host key and local hostname", func(t *testing.T, w *world) {
 			w.edits(t, " M kit.toml\x00", "1\t0\tkit.toml\x00")
 		}},
-		{"this Mac's table not committed", "kit.toml holds this Mac's table, not committed yet: the new-mac step commits it, then kit apply records the key", func(t *testing.T, w *world) {
+		{"this Mac's table not committed", "kit.toml holds this Mac's table, not committed yet: the new-mac step commits it, then kit apply records this Mac's host key and local hostname", func(t *testing.T, w *world) {
 			w.edits(t, " M kit.toml\x00", "1\t0\tkit.toml\x00")
 			w.write(t, bootState, `{"new_mac": "laptop", "from": "studio"}`)
 		}},

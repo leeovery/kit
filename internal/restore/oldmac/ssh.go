@@ -132,14 +132,20 @@ func shellQuote(s string) string {
 // sshExit is ssh's own exit for a failure of its own, never the command's.
 const sshExit = 255
 
-// unreachable are ssh's words for a Mac that isn't there to answer.
-var unreachable = []string{"Connection refused", "Operation timed out", "Connection timed out", "Host is down", "Could not resolve hostname", "Network is unreachable"}
-
 // errRefusedKey is a Mac answering but refusing this Mac's key.
 var errRefusedKey = errors.New("refused this Mac's key, which the old Mac's ~/.ssh/authorized_keys must hold")
 
 // errNoAnswer is a Mac not answering SSH.
 var errNoAnswer = errors.New("didn't answer")
+
+// errUnresolved is a Mac's name nothing on the network answers to: a Mac
+// asleep, away or renamed; or, from an app macOS hasn't let find devices on
+// local networks, any .local name.
+var errUnresolved = errors.New("didn't answer: nothing on the network has its name")
+
+// errRemoteLoginOff is a Mac refusing the connection, as with its Remote
+// Login off.
+var errRemoteLoginOff = errors.New("refused the connection: its Remote Login is off")
 
 // noRoute is ssh's words for a Mac it has no route to: as when macOS hasn't
 // let the app kit's running in find devices on local networks, which it
@@ -150,15 +156,27 @@ const noRoute = "No route to host"
 // errNoRoute is a Mac ssh has no route to.
 var errNoRoute = errors.New("didn't answer: no route to it")
 
+// sshSays are ssh's words for its own failures, in the order they're
+// looked for, and what each means.
+var sshSays = []struct {
+	words []string
+	means error
+}{
+	{[]string{"Permission denied"}, errRefusedKey},
+	{[]string{noRoute}, errNoRoute},
+	{[]string{"Could not resolve hostname"}, errUnresolved},
+	{[]string{"Connection refused"}, errRemoteLoginOff},
+	{[]string{"Operation timed out", "Connection timed out", "Host is down", "Network is unreachable"}, errNoAnswer},
+}
+
 // hostKeyError is a Mac presenting a host key ssh won't trust: another than
 // the one pinned.
 type hostKeyError struct{ said string }
 
 func (e *hostKeyError) Error() string { return "couldn't be reached over SSH: " + e.said }
 
-// sshFailed is err, from ssh's run, as what it means: errRefusedKey,
-// errNoRoute, errNoAnswer, or ssh's own words, else what the command there
-// said.
+// sshFailed is err, from ssh's run, as what it means: one of sshSays's,
+// a hostKeyError, or ssh's own words, else what the command there said.
 func sshFailed(err error) error {
 	exit, ok := errors.AsType[*runner.ExitError](err)
 	if !ok {
@@ -167,17 +185,17 @@ func sshFailed(err error) error {
 	if exit.Code != sshExit {
 		return fmt.Errorf("failed to answer, exit %d: %s", exit.Code, printable(exit.Stderr))
 	}
-	lines := exit.Lines()
-	switch {
-	case slices.ContainsFunc(lines, func(l string) bool { return strings.Contains(l, "Permission denied") }):
-		return errRefusedKey
-	case slices.ContainsFunc(lines, func(l string) bool { return strings.Contains(l, noRoute) }):
-		return errNoRoute
-	case slices.ContainsFunc(lines, func(l string) bool {
-		return slices.ContainsFunc(unreachable, func(u string) bool { return strings.Contains(l, u) })
-	}):
-		return errNoAnswer
-	case slices.ContainsFunc(lines, func(l string) bool { return strings.Contains(l, "Host key verification failed") }):
+	said := func(words ...string) bool {
+		return slices.ContainsFunc(exit.Lines(), func(l string) bool {
+			return slices.ContainsFunc(words, func(w string) bool { return strings.Contains(l, w) })
+		})
+	}
+	for _, s := range sshSays {
+		if said(s.words...) {
+			return s.means
+		}
+	}
+	if said("Host key verification failed") {
 		return &hostKeyError{said: printable(exit.Stderr)}
 	}
 	return fmt.Errorf("couldn't be reached over SSH: %s", printable(exit.Stderr))

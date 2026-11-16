@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/leeovery/kit/internal/apps"
+	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/restore"
 	"github.com/leeovery/kit/internal/runner"
 )
@@ -36,10 +37,10 @@ const probeTimeout = 30 * time.Second
 // till macOS lets the terminal find devices on local networks.
 var ErrNoAnswer = errors.New("doesn't answer over SSH")
 
-// ErrUnrecorded is in the error of an old Mac kit-config doesn't record as
-// it is now: its host key or local hostname not recorded, or nothing
-// answering at its local hostname, as when it's been renamed since. kit
-// apply on it records them.
+// ErrUnrecorded is in the error of an old Mac kit apply on it puts right:
+// kit-config not recording its host key or local hostname, or not as they
+// are now, as when nothing answers at its name, it having been renamed
+// since; or its Remote Login off, which kit apply turns on.
 var ErrUnrecorded = errors.New("can't be restored from")
 
 // Finder reaches the old Mac over SSH, run through Run, the host key it
@@ -82,6 +83,11 @@ type Mac struct {
 // localHostName is a local hostname as macOS makes one: letters, digits
 // and -, not starting with -.
 var localHostName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]*$`)
+
+// IsLocalHostName reports whether name is a local hostname another Mac can
+// reach this one by, then .local: letters, digits and -, not starting with
+// -.
+func IsLocalHostName(name string) bool { return localHostName.MatchString(name) }
 
 // Find reaches the old Mac, whose kit name is from, at LocalHostName, on
 // the local network, presenting HostKey, and asks it its kit name. Either
@@ -148,30 +154,46 @@ func (f Finder) host(from string) (string, error) {
 	switch {
 	case f.LocalHostName == "":
 		return "", fmt.Errorf("%s %w: %s's local hostname isn't in kit-config: kit apply on %s records it", from, ErrUnrecorded, from, from)
-	case !localHostName.MatchString(f.LocalHostName):
+	case !IsLocalHostName(f.LocalHostName):
 		return "", fmt.Errorf("%s %w: %s's local hostname in kit-config, %q, isn't one: kit apply on %s records it", from, ErrUnrecorded, from, printable(f.LocalHostName), from)
 	}
 	return f.LocalHostName + ".local", nil
 }
 
 // unanswered is the error for the Mac called from not answering at host,
-// as ssh's error, err, says.
+// as ssh's error, err, says. Where macOS may be asking whether the app
+// kit's running in can find devices on local networks, as it does of its
+// first ssh to a .local name, failing it till it's allowed, it says so: of
+// no route, alone; of the name not found, beside what kit apply there puts
+// right. Over SSH, macOS never asks.
 func (f Finder) unanswered(from, host string, err error) error {
+	asked := !f.OverSSH
+	applyThere := "with " + from + " awake on this network, kit apply on " + from + " records the one it has now"
 	switch _, key := errors.AsType[*hostKeyError](err); {
 	case key:
 		return fmt.Errorf("%s %w: %s isn't %s: its host key doesn't match the one kit-config records (kit apply on %s records a new one)", from, ErrNoAnswer, host, from, from)
-	case errors.Is(err, errNoRoute) && !f.OverSSH:
-		app := cmp.Or(f.Terminal, apps.Unnamed)
-		return fmt.Errorf("%s %w: %s didn't answer: macOS may be asking whether %s can find devices on local networks: choose Allow, then try again, or, if Don't Allow was chosen, turn on %s in System Settings › Privacy & Security › Local Network",
-			from, ErrNoAnswer, host, app, app)
-	case errors.Is(err, errNoAnswer), errors.Is(err, errNoRoute):
-		return unrecorded{fmt.Errorf("%s %w: nothing answered at %s, its local hostname in kit-config: with %s awake on this network, kit apply on %s records the one it has now", from, ErrNoAnswer, host, from, from)}
+	case errors.Is(err, errNoRoute) && asked:
+		return fmt.Errorf("%s %w: %s didn't answer: %s", from, ErrNoAnswer, host, f.localNetwork())
+	case errors.Is(err, errUnresolved) && asked:
+		return unrecorded{fmt.Errorf("%s %w: nothing answered at %s, its local hostname in kit-config: %s; else, %s", from, ErrNoAnswer, host, f.localNetwork(), applyThere)}
+	case errors.Is(err, errRemoteLoginOff):
+		return unrecorded{fmt.Errorf("%s %w: %s answered, but its Remote Login is off: kit apply on %s turns it on", from, ErrNoAnswer, host, from)}
+	case errors.Is(err, errNoAnswer), errors.Is(err, errNoRoute), errors.Is(err, errUnresolved):
+		return unrecorded{fmt.Errorf("%s %w: nothing answered at %s, its local hostname in kit-config: %s", from, ErrNoAnswer, host, applyThere)}
 	}
 	return fmt.Errorf("%s %w: %s %s", from, ErrNoAnswer, host, printable(err.Error()))
 }
 
+// localNetwork says macOS may be asking whether the app kit's running in
+// can find devices on local networks, and how to allow it.
+func (f Finder) localNetwork() string {
+	app := cmp.Or(f.Terminal, apps.Unnamed)
+	return "macOS may be asking whether " + app + " can find devices on local networks: choose Allow, then try again, or, if Don't Allow was chosen, turn on " +
+		app + " in System Settings › Privacy & Security › Local Network"
+}
+
 // unrecorded is an error, in its own words, that's ErrUnrecorded too: kit
-// apply on the old Mac is the way on.
+// apply on the old Mac puts it right.
 type unrecorded struct{ error }
 
 func (u unrecorded) Unwrap() []error { return []error{u.error, ErrUnrecorded} }
@@ -241,16 +263,14 @@ type Source struct {
 
 // Open finds the Mac to restore from, and opens it, once nothing stops it
 // being copied from: not answering is an error, ErrNoAnswer, saying why;
-// its host key or local hostname not recorded, or not to be had from
-// kit-config's remote, ErrUnrecorded; what stops it, Check's, each naming
-// its fix.
+// its host key or local hostname not recorded, ErrUnrecorded; what stops
+// it, Check's, each naming its fix. Tried again, it's found as kit-config's
+// remote records it then (fetch).
 func (s *Source) Open(ctx context.Context) (*restore.Opened, error) {
 	if s.tried && s.Recorded != nil {
-		key, name, err := s.Recorded(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("%s %w: kit couldn't fetch kit-config to read its record of %s: %w", s.From, ErrUnrecorded, s.From, err)
+		if err := s.fetch(ctx); err != nil {
+			return nil, err
 		}
-		s.Finder.HostKey, s.Finder.LocalHostName = key, name
 	}
 	s.tried = true
 	m, err := s.Finder.Find(ctx, s.From)
@@ -261,4 +281,20 @@ func (s *Source) Open(ctx context.Context) (*restore.Opened, error) {
 		return nil, err
 	}
 	return m.Opened(), nil
+}
+
+// fetch takes what kit-config's remote records for From now (Recorded):
+// one kit can't fetch leaves the record the Finder has, said in the run's
+// log, while it's whole, or else is an error, ErrUnrecorded.
+func (s *Source) fetch(ctx context.Context) error {
+	key, name, err := s.Recorded(ctx)
+	if err == nil {
+		s.Finder.HostKey, s.Finder.LocalHostName = key, name
+		return nil
+	}
+	if _, bad := PublicKey(s.Finder.HostKey); bad != nil || !IsLocalHostName(s.Finder.LocalHostName) {
+		return fmt.Errorf("%s %w: kit couldn't fetch kit-config to read its record of %s: %w", s.From, ErrUnrecorded, s.From, err)
+	}
+	event.Log(ctx, event.Logged{Line: "kit couldn't fetch kit-config, so it reaches " + s.From + " as its record was: " + err.Error(), Alert: true})
+	return nil
 }

@@ -247,17 +247,21 @@ func HostKey(h HostKeying) engine.Step {
 }
 
 // localHostName is the name this Mac answers to on the local network,
-// without .local: macOS's LocalHostName, as scutil says it.
+// without .local: macOS's LocalHostName, as scutil says it, one a Mac
+// restored from this one reaches it by (oldmac.IsLocalHostName).
 func localHostName(ctx context.Context, run runner.Runner) (string, error) {
 	out, err := output(ctx, run, "scutil", "--get", "LocalHostName")
 	if err != nil {
 		return "", fmt.Errorf("read this Mac's local hostname: %w", err)
 	}
-	name := strings.TrimSpace(out)
-	if name == "" {
+	switch name := strings.TrimSpace(out); {
+	case name == "":
 		return "", errors.New("this Mac has no local hostname: set one in System Settings › General › Sharing")
+	case !oldmac.IsLocalHostName(name):
+		return "", fmt.Errorf("this Mac's local hostname, %q, isn't one another Mac can reach it by: set one of letters, digits and - in System Settings › General › Sharing", name)
+	default:
+		return name, nil
 	}
-	return name, nil
 }
 
 // made is this Mac's host key, Remote Login woken to make it when there's

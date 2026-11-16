@@ -184,23 +184,29 @@ func TestFindsNothingUnrecorded(t *testing.T) {
 // The old Mac not answering at its recorded name as itself is ErrNoAnswer,
 // saying why: nothing answering there is ErrUnrecorded too, as a Mac
 // renamed since answers elsewhere, and kit apply on it records its name as
-// it is; ssh having no route to it, macOS asking whether the app kit's
-// running in can find devices on local networks, which it asks of the
-// first ssh run there, failing every connection till it's allowed (that
-// app named, or, unknown, said as Unnamed), but over SSH, where macOS never
-// asks; a Mac presenting another host key isn't it; and one answering as
-// another Mac, or without kit, isn't, its words without control
-// characters.
+// it is, as is its Remote Login off, which kit apply there turns on. ssh
+// having no route to it, or not finding its .local name, may be macOS
+// asking whether the app kit's running in can find devices on local
+// networks, which it asks of the first ssh run there, failing it till it's
+// allowed (that app named, or, unknown, said as Unnamed): said alone of no
+// route, and beside kit apply there of a name not found; but over SSH,
+// where macOS never asks. A Mac presenting another host key isn't it; and
+// one answering as another Mac, or without kit, isn't, its words without
+// control characters.
 func TestFindsWhyTheMacDoesntAnswer(t *testing.T) {
-	const nothing = "laptop doesn't answer over SSH: nothing answered at " + laptopAt + ", its local hostname in kit-config: with laptop awake on this network, kit apply on laptop records the one it has now"
+	const (
+		nothing    = "laptop doesn't answer over SSH: nothing answered at " + laptopAt + ", its local hostname in kit-config: "
+		applyThere = "with laptop awake on this network, kit apply on laptop records the one it has now"
+	)
 	localNetwork := func(app string) string {
-		return "laptop doesn't answer over SSH: " + laptopAt + " didn't answer: macOS may be asking whether " + app +
-			" can find devices on local networks: choose Allow, then try again, or, if Don't Allow was chosen, turn on " + app +
-			" in System Settings › Privacy & Security › Local Network"
+		return "macOS may be asking whether " + app + " can find devices on local networks: choose Allow, then try again, or, if Don't Allow was chosen, turn on " +
+			app + " in System Settings › Privacy & Security › Local Network"
 	}
 	sshSays := func(said string) func(*runnertest.Script) {
 		return func(s *runnertest.Script) { s.PrintsToStderr(said).Exits(255) }
 	}
+	unresolved := sshSays("ssh: Could not resolve hostname " + laptopAt + ": nodename nor servname provided, or not known\n")
+	noRoute := sshSays("ssh: connect to host " + laptopAt + " port 22: No route to host\n")
 	tests := []struct {
 		name       string
 		terminal   string
@@ -209,12 +215,14 @@ func TestFindsWhyTheMacDoesntAnswer(t *testing.T) {
 		want       string
 		unrecorded bool
 	}{
-		{"asleep", "", false, sshSays("ssh: connect to host " + laptopAt + " port 22: Operation timed out\n"), nothing, true},
-		{"renamed since", "", false, sshSays("ssh: Could not resolve hostname " + laptopAt + ": nodename nor servname provided, or not known\n"), nothing, true},
-		{"Remote Login off", "", false, sshSays("ssh: connect to host " + laptopAt + " port 22: Connection refused\n"), nothing, true},
-		{"no route, in Ghostty", "Ghostty", false, sshSays("ssh: connect to host " + laptopAt + " port 22: No route to host\n"), localNetwork("Ghostty"), false},
-		{"no route, the terminal unknown", "", false, sshSays("ssh: connect to host " + laptopAt + " port 22: No route to host\n"), localNetwork(apps.Unnamed), false},
-		{"no route, over SSH", "Ghostty", true, sshSays("ssh: connect to host " + laptopAt + " port 22: No route to host\n"), nothing, true},
+		{"asleep", "", false, sshSays("ssh: connect to host " + laptopAt + " port 22: Operation timed out\n"), nothing + applyThere, true},
+		{"not found, in Ghostty", "Ghostty", false, unresolved, nothing + localNetwork("Ghostty") + "; else, " + applyThere, true},
+		{"not found, over SSH", "Ghostty", true, unresolved, nothing + applyThere, true},
+		{"Remote Login off", "", false, sshSays("ssh: connect to host " + laptopAt + " port 22: Connection refused\n"),
+			"laptop doesn't answer over SSH: " + laptopAt + " answered, but its Remote Login is off: kit apply on laptop turns it on", true},
+		{"no route, in Ghostty", "Ghostty", false, noRoute, "laptop doesn't answer over SSH: " + laptopAt + " didn't answer: " + localNetwork("Ghostty"), false},
+		{"no route, the terminal unknown", "", false, noRoute, "laptop doesn't answer over SSH: " + laptopAt + " didn't answer: " + localNetwork(apps.Unnamed), false},
+		{"no route, over SSH", "Ghostty", true, noRoute, nothing + applyThere, true},
 		{"the key refused", "", false, refused,
 			"laptop doesn't answer over SSH: " + laptopAt + " refused this Mac's key, which the old Mac's ~/.ssh/authorized_keys must hold", false},
 		{"another host key", "", false, sshSays("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @\nHost key for laptop has changed and you have requested strict checking.\nHost key verification failed.\n"),
@@ -313,10 +321,12 @@ func TestRemoteFailuresSaid(t *testing.T) {
 		want string
 	}{
 		{"the key refused", runner.NewExitError("ssh", 255, []byte("someone@host: Permission denied (publickey).\n")), errRefusedKey.Error()},
-		{"refused", runner.NewExitError("ssh", 255, []byte("ssh: connect to host h port 22: Connection refused\n")), "didn't answer"},
+		{"refused", runner.NewExitError("ssh", 255, []byte("ssh: connect to host h port 22: Connection refused\n")), errRemoteLoginOff.Error()},
 		{"no route", runner.NewExitError("ssh", 255, []byte("ssh: connect to host h port 22: No route to host\n")), errNoRoute.Error()},
 		{"down", runner.NewExitError("ssh", 255, []byte("ssh: connect to host h port 22: Host is down\n")), "didn't answer"},
-		{"no such host", runner.NewExitError("ssh", 255, []byte("ssh: Could not resolve hostname h: nodename nor servname provided, or not known\n")), "didn't answer"},
+		{"no such host", runner.NewExitError("ssh", 255, []byte("ssh: Could not resolve hostname h: nodename nor servname provided, or not known\n")), errUnresolved.Error()},
+		{"timed out", runner.NewExitError("ssh", 255, []byte("ssh: connect to host h port 22: Operation timed out\n")), "didn't answer"},
+		{"another host key", runner.NewExitError("ssh", 255, []byte("Host key verification failed.\n")), "couldn't be reached over SSH: Host key verification failed."},
 		{"the command there", runner.NewExitError("ssh", 2, []byte("sh: line 1: find: command not found\n")), "failed to answer, exit 2: sh: line 1: find: command not found"},
 		{"not an exit", errors.New("boom"), "boom"},
 	}

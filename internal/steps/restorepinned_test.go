@@ -136,26 +136,35 @@ func TestRestoreRefusesAnotherHostKey(t *testing.T) {
 // Without the old Mac's host key or local hostname in kit-config, as for a
 // Mac an older kit recorded, it isn't reached, never trusted on first
 // sight: the card for an old Mac that doesn't answer goes up, saying why
-// and the way on, kit apply there, then trying again, offering Arq too.
-// Nothing answering at the name recorded is said the same way, as a Mac
-// renamed since answers elsewhere.
+// and what puts it right, kit apply there, then trying again, offering Arq
+// too. Nothing answering at the name recorded is said the same way, as a
+// Mac renamed since answers elsewhere; its .local name not found, macOS
+// asking whether the terminal can find devices on local networks too; its
+// Remote Login off, which kit apply there turns on.
 func TestRestoreUnrecordedAsks(t *testing.T) {
+	const localNetwork = "macOS may be asking whether Ghostty can find devices on local networks: choose Allow, then try again, or, " +
+		"if Don't Allow was chosen, turn on Ghostty in System Settings › Privacy & Security › Local Network"
 	for _, tt := range []struct {
-		name         string
-		at           record
-		title, why   string
-		silentLaptop bool
+		name       string
+		at         record
+		ssh        string
+		title, why string
 	}{
-		{"no host key", record{"", laptopName}, "laptop can't be restored from", "Laptop's SSH host key isn't in kit-config: kit apply on laptop records it, then try again.", false},
-		{"no local hostname", record{pinnedKey, ""}, "laptop can't be restored from", "Laptop's local hostname isn't in kit-config: kit apply on laptop records it, then try again.", false},
-		{"nothing answering at it", recorded, "laptop doesn't answer over SSH",
-			"Nothing answered at " + laptopAt + ", its local hostname in kit-config: with laptop awake on this network, kit apply on laptop records the one it has now, then try again.", true},
+		{"no host key", record{"", laptopName}, "", "laptop can't be restored from", "Laptop's SSH host key isn't in kit-config: kit apply on laptop records it, then try again."},
+		{"no local hostname", record{pinnedKey, ""}, "", "laptop can't be restored from", "Laptop's local hostname isn't in kit-config: kit apply on laptop records it, then try again."},
+		{"nothing answering at it", recorded, "ssh: connect to host " + laptopAt + " port 22: Operation timed out\n", "laptop doesn't answer over SSH",
+			"Nothing answered at " + laptopAt + ", its local hostname in kit-config: with laptop awake on this network, kit apply on laptop records the one it has now, then try again."},
+		{"its name not found", recorded, "ssh: Could not resolve hostname " + laptopAt + ": nodename nor servname provided, or not known\n", "laptop doesn't answer over SSH",
+			"Nothing answered at " + laptopAt + ", its local hostname in kit-config: " + localNetwork + "; else, with laptop awake on this network, kit apply on laptop records the one it has now, then try again."},
+		{"its Remote Login off", recorded, "ssh: connect to host " + laptopAt + " port 22: Connection refused\n", "laptop doesn't answer over SSH",
+			laptopAt + " answered, but its Remote Login is off: kit apply on laptop turns it on, then try again."},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			c := newRestoring(t, "~/.zsh_history")
-			c.reaching(tt.at, tt.at)
-			if tt.silentLaptop {
-				c.probed().PrintsToStderr("ssh: Could not resolve hostname " + laptopAt + ": nodename nor servname provided, or not known\n").Exits(255)
+			src, _ := c.reaching(tt.at, tt.at)
+			src.Finder.Terminal = "Ghostty"
+			if tt.ssh != "" {
+				c.probed().PrintsToStderr(tt.ssh).Exits(255)
 			}
 			k := c.atTerminal(t, restore.Disks{})
 			step := c.step()
@@ -178,7 +187,7 @@ func TestRestoreUnrecordedAsks(t *testing.T) {
 			if err := ended(t, done); !errors.Is(err, context.Canceled) {
 				t.Errorf("apply = %v; want it stopped with the run", err)
 			}
-			if calls := c.fake.Calls(); !tt.silentLaptop && slices.ContainsFunc(calls, func(call string) bool { return strings.HasPrefix(call, "ssh") }) {
+			if calls := c.fake.Calls(); tt.ssh == "" && slices.ContainsFunc(calls, func(call string) bool { return strings.HasPrefix(call, "ssh") }) {
 				t.Errorf("ran %q; want the old Mac not reached", calls)
 			}
 		})
