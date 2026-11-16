@@ -55,19 +55,18 @@ func newMacStep(repo gitrepo.Repo, stateDir, mac string) engine.Step {
 			return settled
 		},
 		Apply: func(ctx context.Context, _ check.Result) error {
-			out, err := repo.Commit(ctx, commitMessage("add", machineCommand, []string{mac}, mac, ""), paths...)
+			committed, err := repo.Commit(ctx, commitMessage("add", machineCommand, []string{mac}, mac, ""), paths...)
 			if errors.Is(err, gitrepo.ErrUnsigned) {
 				return engine.NotYet(err.Error() + "; the next kit apply tries again")
 			}
 			sync := syncing{repo: repo, files: paths, what: what}
 			res := settled
 			switch {
-			case out.Committed || err != nil:
-				res = sync.committed(ctx, out.Committed, err)
+			case committed || err != nil:
+				res = sync.committed(ctx, committed, err)
 			case repo.Unpushed(ctx) > 0:
 				res = sync.pushWaiting(ctx)
 			}
-			res = noted(res, out.Notes)
 			if res.State == check.OK {
 				if err := boot.ForgetNewMac(stateDir); err != nil {
 					return err

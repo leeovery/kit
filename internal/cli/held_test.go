@@ -265,8 +265,7 @@ func TestAddAStepNeedingASecret(t *testing.T) {
 	}
 	w.expectCommit(t, commit{
 		message: "kit step add fetch (laptop)", paths: []string{"laptop/declarations", "laptop/steps/fetch"},
-		status: " M laptop/declarations\x00?? laptop/steps/fetch/run\x00", update: []string{"laptop/declarations", "laptop/steps/fetch/run"},
-		staged: "laptop/declarations\x00laptop/steps/fetch/run\x00",
+		status: " M laptop/declarations\x00?? laptop/steps/fetch/run\x00", files: []string{"laptop/declarations", "laptop/steps/fetch/run"},
 	})
 	out, _, code = w.run(t, "step", "add", "fetch", "Fetches the releases", "--secret", "TOKEN")
 	if code != 0 || w.readSection(t, "laptop", "steps") != `fetch "Fetches the releases" --secret TOKEN`+"\n" {

@@ -159,37 +159,36 @@ func (p *Prefs) lock(ctx context.Context, path string) (unlock func(), err error
 // repo is the store's clone, as git drives it: pulled, committed and
 // pushed as kit-config is.
 func (p *Prefs) repo() gitrepo.Repo {
-	return gitrepo.Repo{Dir: p.Clone, Run: p.Run, Sleep: p.Sleep, Home: p.Home}
+	return gitrepo.Repo{Dir: p.Clone, Run: p.Run, Sleep: p.Sleep}
 }
 
 // push sends the store's commits to its remote, only when every URL Push
-// pushes to is proven private, as git pushes there (gitrepo.Place): what
-// the push did besides (Push), and why it didn't push, or "" once pushed.
-func (p *Prefs) push(ctx context.Context, repo gitrepo.Repo) ([]string, string) {
-	remote, urls, err := repo.PushURLs(ctx)
+// pushes to is proven private (gitrepo.Place): why it didn't push, or ""
+// once pushed.
+func (p *Prefs) push(ctx context.Context, repo gitrepo.Repo) string {
+	urls, err := repo.PushURLs(ctx)
 	switch {
 	case errors.Is(err, gitrepo.ErrNoRemote):
-		return nil, "no remote to push to"
+		return "no remote to push to"
 	case err != nil:
-		return nil, err.Error()
+		return err.Error()
 	}
 	for _, url := range urls {
-		place, err := repo.Place(ctx, remote, url, gitrepo.Pushing)
+		place, err := repo.Place(ctx, url)
 		switch {
 		case err != nil:
-			return nil, err.Error()
+			return err.Error()
 		case place.Private():
 		case place.Repo != "":
-			return nil, fmt.Sprintf("%s is %s on GitHub: kit pushes apps' settings only to a private repository (gh repo edit %s --visibility private --accept-visibility-change-consequences)", place.Repo, place.Visibility, place.Repo)
+			return fmt.Sprintf("%s is %s on GitHub: kit pushes apps' settings only to a private repository (gh repo edit %s --visibility private --accept-visibility-change-consequences)", place.Repo, place.Visibility, place.Repo)
 		default:
-			return nil, fmt.Sprintf("kit pushes apps' settings only to a repository it can prove private, and can't for %s: %s", gitrepo.Shown(url), place.Unproven)
+			return fmt.Sprintf("kit pushes apps' settings only to a repository it can prove private, and can't for %s: %s", gitrepo.Shown(url), place.Unproven)
 		}
 	}
-	notes, err := repo.Push(ctx)
-	if err != nil {
-		return notes, err.Error()
+	if err := repo.Push(ctx); err != nil {
+		return err.Error()
 	}
-	return notes, ""
+	return ""
 }
 
 // History is the captures that changed a Mac's folder, newest first, count

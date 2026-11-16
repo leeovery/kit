@@ -108,7 +108,7 @@ func TestStatusOfTheHostKey(t *testing.T) {
 				t.Error("kit status woke Remote Login")
 			}
 			for _, c := range w.fake.Calls() {
-				if strings.Contains(c, "commit-tree") || strings.HasSuffix(c, "push --quiet") {
+				if strings.Contains(c, " commit --quiet --only ") || strings.HasSuffix(c, "push --quiet") {
 					t.Errorf("ran %s; want nothing committed or pushed", c)
 				}
 			}

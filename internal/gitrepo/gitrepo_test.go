@@ -3,8 +3,6 @@ package gitrepo_test
 import (
 	"context"
 	"maps"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -15,84 +13,66 @@ import (
 
 const dir = "/Users/someone/.config/kit"
 
-// base is the commit HEAD names in the tests' repositories, and made the
-// commit kit makes onto it.
-const (
-	base = "0e0bf17a399109574ffb00e33300280a33f81ab7"
-	made = "2f8f9a0d6c1b4e5a7d3c2b1a0f9e8d7c6b5a4f3e"
-)
+// base is the commit HEAD names in the tests' repositories.
+const base = "0e0bf17a399109574ffb00e33300280a33f81ab7"
 
 func git(args ...string) []string { return append([]string{"-C", dir}, args...) }
 
-// The indexes a command runs in: the user's, kit's own of the last commit
-// to commit from, the next of the user's, made while kit holds it, or one
-// of kit's own only read, made in the temporary folder.
-const (
-	usersIndex = ""
-	ownIndex   = "kit-index"
-	nextIndex  = "kit-index.next"
-	readIndex  = "read"
-)
-
-// call is a command kit ran: its arguments, what it read, and the index it
-// ran in.
+// call is a command kit ran: its arguments, and what it read.
 type call struct {
 	args  []string
 	input string
-	index string
 }
 
-// checkCalls checks fake ran want, in order, each in the C locale, as kit
-// reads what git says, reading what it says and in the index it says:
-// kit's own and the next of the user's in gitDir, one it only reads a file
-// of the temporary folder's, gone now.
-func checkCalls(t *testing.T, name string, fake *runnertest.Fake, gitDir string, want []call) {
+// checkCalls checks fake ran want, in order, each reading what it says and
+// in the C locale alone, as kit reads what git says: git's own index, never
+// one of kit's.
+func checkCalls(t *testing.T, name string, fake *runnertest.Fake, want []call) {
 	t.Helper()
 	var ran []call
-	var read string
 	for _, cmd := range fake.Commands() {
-		if !slices.Contains(cmd.Env, "LC_ALL=C") {
-			t.Errorf("%s: %s ran in the user's locale, not C", name, cmd)
+		if !slices.Equal(cmd.Env, []string{"LC_ALL=C"}) {
+			t.Errorf("%s: %s ran with %q, want the C locale alone", name, cmd, cmd.Env)
 		}
-		c := call{args: cmd.Args, input: cmd.Input}
-		for _, e := range cmd.Env {
-			path, ok := strings.CutPrefix(e, "GIT_INDEX_FILE=")
-			switch {
-			case !ok:
-				continue
-			case filepath.Dir(path) == gitDir:
-				c.index = filepath.Base(path)
-			case filepath.Dir(path) == filepath.Clean(os.TempDir()) && strings.HasPrefix(filepath.Base(path), "kit-read-index-"):
-				c.index = readIndex
-				if read == "" {
-					read = path
-				}
-				if path != read {
-					t.Errorf("%s: %s read the index %s, and another before it, %s", name, cmd, path, read)
-				}
-			default:
-				t.Errorf("%s: %s ran in the index %s, none of kit's", name, cmd, path)
-			}
-		}
-		ran = append(ran, c)
+		ran = append(ran, call{args: cmd.Args, input: cmd.Input})
 	}
-	if !slices.EqualFunc(ran, want, func(a, b call) bool { return slices.Equal(a.args, b.args) && a.input == b.input && a.index == b.index }) {
-		t.Errorf("%s: ran\n%s\n%v\nwant\n%v", name, strings.Join(fake.Calls(), "\n"), ran, want)
-	}
-	if read != "" {
-		if _, err := os.Lstat(read); err == nil {
-			t.Errorf("%s: left the index it read, %s", name, read)
-		}
+	if !slices.EqualFunc(ran, want, func(a, b call) bool { return slices.Equal(a.args, b.args) && a.input == b.input }) {
+		t.Errorf("%s: ran\n%s\nwant\n%v", name, strings.Join(fake.Calls(), "\n"), want)
 	}
 }
 
-// nul is paths, each ended by a NUL, as git reads them with -z.
-func nul(paths []string) string {
-	var b strings.Builder
-	for _, p := range paths {
-		b.WriteString(p + "\x00")
+// sequence is the commands a test expects git to run, in order, as it
+// scripts them.
+type sequence struct {
+	fake *runnertest.Fake
+	// root is the repository's folder, when it isn't dir's.
+	root    string
+	want    []call
+	scripts map[string]*runnertest.Script
+}
+
+// expect scripts the command git runs with args, expected next: a command
+// expected before answers again, as scripted now.
+func (s *sequence) expect(args ...string) *runnertest.Script {
+	if s.root != "" {
+		args = slices.Concat([]string{"-C", s.root}, args[2:])
 	}
-	return b.String()
+	s.want = append(s.want, call{args: args})
+	key := strings.Join(args, "\x00")
+	if script, ok := s.scripts[key]; ok {
+		return script.Then()
+	}
+	if s.scripts == nil {
+		s.scripts = map[string]*runnertest.Script{}
+	}
+	s.scripts[key] = s.fake.On("git", args...)
+	return s.scripts[key]
+}
+
+// check checks git ran what s expects, in order, and nothing else.
+func (s *sequence) check(t *testing.T, name string) {
+	t.Helper()
+	checkCalls(t, name, s.fake, s.want)
 }
 
 // Ignored names each path a rule ignores, with the rule, as check-ignore

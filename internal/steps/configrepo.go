@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/leeovery/kit/internal/check"
@@ -19,71 +20,57 @@ const ConfigPrivateName = "config-private"
 
 // ConfigPrivate checks the config repository, repo, is proven private
 // wherever it goes (gitrepo.Place): every URL kit pushes it to (PushURLs),
-// pushing, and origin's, fetching, each place that isn't named, gh asked
-// of each repository on GitHub once a check. The config is personal, and
-// must never be public. With no remote it's pushed to or fetched from, it
-// isn't public; a place git, ssh or gh can't be asked about fails.
+// and origin's, each URL once a check. The config is personal, and must
+// never be public. With no remote it's pushed to or fetched from, it isn't
+// public; a place git or gh can't be asked about fails.
 func ConfigPrivate(repo gitrepo.Repo) engine.Step {
 	return engine.Step{
 		Name:  ConfigPrivateName,
 		Title: "Privacy",
 		Area:  AreaConfig,
 		Check: func(ctx context.Context) check.Result {
-			repo := repo.Remembering()
-			all, err := whereTo(ctx, repo)
+			urls, err := whereTo(ctx, repo)
 			switch {
 			case err != nil:
 				return failed(err)
-			case len(all) == 0:
+			case len(urls) == 0:
 				return check.Result{State: check.OK, Summary: "no remote it's pushed to or fetched from, so not public"}
 			}
-			return privacy(ctx, repo, all)
+			return privacy(ctx, repo, urls)
 		},
 	}
 }
 
-// where is a URL the config repository goes to or comes from, its remote,
-// and which way git goes there.
-type where struct {
-	remote, url string
-	way         gitrepo.Way
-}
-
 // whereTo is every URL kit pushes repo to, none where Push can't tell where
-// to push, as it pushes nowhere, and origin's, fetched from: the same URL
-// both ways twice, as ssh's config can send each way elsewhere.
-func whereTo(ctx context.Context, repo gitrepo.Repo) ([]where, error) {
-	remote, urls, err := repo.PushURLs(ctx)
+// to push, as it pushes nowhere, and origin's, fetched from, each once.
+func whereTo(ctx context.Context, repo gitrepo.Repo) ([]string, error) {
+	urls, err := repo.PushURLs(ctx)
 	if err != nil && !errors.Is(err, gitrepo.ErrNoRemote) && !errors.Is(err, gitrepo.ErrNowhere) {
 		return nil, err
 	}
-	var all []where
-	for _, url := range urls {
-		all = append(all, where{remote, url, gitrepo.Pushing})
-	}
 	origin, err := repo.URL(ctx, "origin")
-	if err == nil && origin != "" {
-		all = append(all, where{"origin", origin, gitrepo.Fetching})
+	if err == nil && origin != "" && !slices.Contains(urls, origin) {
+		urls = append(urls, origin)
 	}
-	return all, err
+	return urls, err
 }
 
-// privacy is how the config repository's places, all, stand: each that
+// privacy is how the config repository's URLs, urls, stand: each that
 // isn't proven private named, a repository on GitHub that isn't private,
 // with how to make it so.
-func privacy(ctx context.Context, repo gitrepo.Repo, all []where) check.Result {
+func privacy(ctx context.Context, repo gitrepo.Repo, urls []string) check.Result {
 	var private, github, unproven []string
 	var items []check.Item
 	seen := map[string]bool{}
-	for _, w := range all {
-		place, err := repo.Place(ctx, w.remote, w.url, w.way)
+	for _, url := range urls {
+		place, err := repo.Place(ctx, url)
 		if err != nil {
 			return failed(err)
 		}
-		// A repository on GitHub is named by its owner and name, wherever
-		// its URLs lead.
-		key := cmp.Or(place.Repo, gitrepo.Shown(w.url))
-		if place.OnThisMac || seen[key] {
+		// A repository on GitHub is named by its owner and name, whatever
+		// its URLs.
+		key := cmp.Or(place.Repo, gitrepo.Shown(url))
+		if seen[key] {
 			continue
 		}
 		seen[key] = true
@@ -110,11 +97,8 @@ func privacy(ctx context.Context, repo gitrepo.Repo, all []where) check.Result {
 		says = append(says, strings.Join(github, ", ")+": they must be private")
 	}
 	says = append(says, unproven...)
-	switch {
-	case len(says) > 0:
+	if len(says) > 0 {
 		return check.Result{State: check.Attention, Summary: strings.Join(says, "; "), Items: items}
-	case len(private) > 0:
-		return check.Result{State: check.OK, Summary: "private on GitHub (" + strings.Join(private, ", ") + ")", Glance: "private"}
 	}
-	return check.Result{State: check.OK, Summary: "on this Mac, so private"}
+	return check.Result{State: check.OK, Summary: "private on GitHub (" + strings.Join(private, ", ") + ")", Glance: "private"}
 }

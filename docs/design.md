@@ -405,143 +405,57 @@ step did.
 
 **The config repository's own edits** are drift, not a problem: linked files mean edits land in
 the repository outside kit (through a link, by hand, by an app), and kit commits only its own
-changes: the paths it changed, each whole as it is on disk (a rename's two sides, a deletion, a
-new folder's every file, a file become a folder), whatever the user's git config says,
-committed from an index of the last commit's and those paths alone, so nothing else staged goes
-in or is touched. As `git commit` does, it holds git's index (`index.lock`, taken only when no
-other git holds it, else tried again for a moment, then refused, saying how old the lock is
-and, should no git be running, to remove it) from before it reads the last commit until the
-user's index holds the files it committed as committed, written through a copy (keeping the
-index's time, for git's racy-entry rule, and its mode) and put in place as git does; kit's own
-index files go only while it holds the lock. With nothing committed, the user's index is left
-as it is. kit's commits are its own, made with git's plumbing: no commit hooks run
-(`pre-commit`, `commit-msg`, `post-commit` and the rest); the two git runs on any write of an
-index or a ref do, as for any git command (`post-index-change`, given kit's own index, and
-`reference-transaction`, which can refuse HEAD's move: then nothing's committed, git's error
-said). The commit is of its index's tree onto the last commit, signed when git's config would
-have `git commit` sign it (`commit.gpgsign`, which `git commit-tree` doesn't read itself, so
-kit passes `-S`, signing with the program and key the config names, as `git commit` does), its
-author and committer git's own, its message as `git commit -m` leaves it (each line's trailing
-whitespace and blank lines first, last or doubled gone). The user's index's next contents are
-made before HEAD moves, written into the lock, so once HEAD has moved all that's left is the
-lock taking the index's place: a run that stops between leaves the lock, never an index from
-which a `git commit` would undo kit's, and should the lock not take its place, kit names the
-`git --literal-pathspecs reset -q -- <files>` that brings the index up to date. A commit holds
-kit's own lock on committing in the repository all the while, a kernel lock on `kit-commits` in
-the git folder (a name no cleaner of `*.lock` files removes; one removed or replaced while kit
-waited, kit locks the file there now), which the kernel lets go of should the run die, so no two
-kits commit there at once; where the git folder's filesystem takes no such lock (NFS without
-locks, some FUSE filesystems), kit commits without it, says so once, and leaves what a stopped
-run left alone, its mark too, leaving none of its own, as it can't then tell that run from one
-at work. Before HEAD moves, once it's sure it still holds the commit lock's file (one removed or
-replaced meanwhile, it commits nothing), kit leaves a mark beside the lock (`kit-mark`): a line
-naming the commit HEAD's on (`-` before the first) and the one it's moving onto, each by its
-object name in hex, and the lock by its hash and its file (device and inode, so a lock written
-later, the same byte for byte, isn't taken for it); then,
-for each path the commit takes, what the user's index held for it as kit read it under git's
-lock (its entry's mode, object and stage, `-` for none), a tab and the path, ended by a NUL, as
-a path can hold any byte but that; then `end` and a NUL, which no record is, as each holds a
-tab, so a mark cut short anywhere, between records too, is never taken for whole. It's written
-in one step: into `kit-index.mark` first (swept with kit's other files), synced to the disk,
-then renamed over `kit-mark`, the git folder synced after (on a filesystem that can't sync a
-folder, saying `ENOTSUP` or `EINVAL`, as far as it can; a sync that fails stops the commit, the
-mark removed), so a stop or a power loss leaves it whole or not there. A folder in the way of
-`kit-index.mark`, `kit-mark` or `kit-index.next`, which no sweep takes, as it holds files, is
-named, with "remove it, then try again". A run
-removes only the mark it left. Where there's a mark,
-and git isn't part way through one of its operations (a rebase stopped on kit's commit is never
-repaired under it), the next commit, pull
-or push takes the commit lock, so no kit's writing (without a mark, a pull or push never takes
-it, so never waits for a kit at work), and deals with what a stopped run left, by facts, never
-by age, saying what it did: the lock still the very file the mark's first line names, which that
-line alone tells, its records whole or not, it puts it in the index's place when HEAD's on the
-mark's commit, as the stopped run would have ("finished the
-last run's index"), and removes it when HEAD's on the commit that run started from ("removed the
-lock on git's index a stopped run left; HEAD is where that run started", as when it stopped
-before HEAD moved, or a `git reset --soft` undid its commit); the lock gone, as when it was
-removed as git advises, it takes git's lock on the index first, then, HEAD on the mark's
-commit, sets each path whose entry the user's index still holds as the stopped run read it (as
-the mark says) to the commit's, that entry alone, as `git ls-tree` lists it, or removes that
-entry where the commit has none (`git update-index --index-info`, on a copy of the index), as
-that run would have, so a path never takes the files under it, and a file the commit made a
-folder, or a folder it made a file, replaces what's in its way, as git's reset would, a file
-the user had staged before it included, never one staged since ("repaired the index a stopped
-run left"); with nothing to repair, or HEAD moved on, the mark's cleared. A mark kit can't use
-is cleared, the index and any lock left as they are ("left the index a stopped run left as it
-is, as kit can't use its mark: git status shows whether that run's files
-are staged as they were before its commit"): before anything else, one whose first line isn't
-the mark's (four words, its commits each an object name in hex, `-` for no base, so none reaches
-git as an option); and, its lock gone, as finishing or clearing the lock needs no records and a
-repair does, one whose records kit can't use (cut short, more after its end, or a record whose
-path isn't one git names a file in the repository by: empty, `.`, `..`, absolute, or with an
-empty, `.` or `..` part). A revision kit gives `git ls-tree` or `git reset` comes after
-`--end-of-options`. A repair that fails keeps the mark, for the next run, and its error names
-the mark, saying kit tries again next run, or to remove it once
-`git status` shows the index as it should be. Any other lock it names, with how long since it last
-changed (its change time: kit's
-own lock carries the index's time) and what to do should no git be running, and a lock no
-longer kit's own, as when another git removed it, kit never puts in place or removes. HEAD
-moves onto the commit only from the last commit, so when another git moved HEAD meanwhile, git refuses, and kit, still
-holding the index, makes the commit again onto where HEAD is now, a few times at most; then
-nothing's committed, HEAD and the user's index stay as they were, and kit says so, and that
-`kit reconcile` commits it. A branch's lock another git holds is named, as the index's is. It
-refuses while git is part way through a merge, rebase, cherry-pick, revert or `git am`, or a
-conflict in its paths waits to be resolved: its change waits till that's finished. Nothing's
-pushed after a commit that failed. Once git has made the commit, HEAD's move and the index
-catching up are done whatever becomes of the run. What git can't keep (an ignored file, an
-empty folder, a repository nested in kit-config, which `kit reconcile` names and only snoozes)
-is left out. With nothing to commit it says nothing changed, pushing only commits still waiting
-for the upstream, as when a push failed. Drift is kit-config's files on disk against the last
-commit: the `config` step makes each file whose working copy differs from it an item
-(`config:shared/home/.zshrc`, edited, added, as one to be added with `git add -N` is, or
-deleted, with the lines it adds and removes; untracked, a file taken out of git's index and
-kept on this Mac as git ignores it, changed or not, as committing it deletes it from the other
-Macs; a repository, by its folder, `config:vendor/tool/`), quiet for a day as drift is; any
-other difference only in git's index, the file on disk as last committed, is the user's own
-business in git, never drift. `kit reconcile` shows an edit's diff and offers adopt (commit it,
-then push, `--note` the message's end; an untracked file is committed as deleted, kept on this
-Mac), revert (back to the last commit; a new file to the Bin; an untracked file tracked again,
-as it is) or snooze. kit pulls before it pushes, and pulls the prefs store's clone the same way
-(`kit prefs`): it refuses while git is part way through one of its operations, or a conflict
-waits, as setting work aside would end the one; then it fetches the remote it'll use, the
-upstream's, or, with none, the one the branch is pushed to, pruning its branches gone from it
-(a remote out of reach said plainly). An upstream not there on a remote with no
-branches yet, as a new, empty one's, has nothing to bring in, and the branch is pushed to it;
-one gone from a remote that has others, as when it's renamed or deleted there, is refused,
-naming it, as pushing would make it anew. A branch with no upstream follows the remote's branch
-of its name when there is one, made its upstream and caught up with; otherwise it's pushed to
-the remote it's pushed to (`branch.<name>.pushRemote`, then `remote.pushDefault`, then
-`origin`, or the only remote), which becomes its upstream, and with several remotes and none of
-those set, kit refuses. A branch with an upstream is pushed where `git push` sends it: to
-`branch.<name>.pushRemote` or `remote.pushDefault` when set, else its upstream's remote. Pushed
-to another remote than its upstream's, as in a triangular workflow, kit fetches that remote too,
-and refuses when its branch there has commits this Mac hasn't, naming how many, before anything's
-rebased. Pulling, with a rebase, from one remote while pushing to another isn't supported: once
-kit has rebased onto the upstream's commits, the other remote's branch holds commits this Mac no
-longer has, and kit refuses, saying so, until they're brought in or pushed over by hand. A push setting that's a URL, or names no remote, is refused (a URL said plainly, never
-shown, as it may carry a token): kit pushes only where a remote's URLs say, which it checks. HEAD
-on no branch is refused. Commits waiting to be pushed are those the branch it's pushed to
-hasn't, the upstream, or that remote's branch of its name when another is set, or, with it not
-there or none, those on none of that remote's branches, so a failed first push, or commits made
-offline, show as waiting. When the remote has commits this
-Mac hasn't, kit rebases onto them by the commits since the two parted (never git's fork-point,
-which can leave out a commit, so the rebase changes no more than the remote's commits do), so
-two Macs don't fight. Anything not committed is set aside in a stash of kit's own and put back
-as it was, staged or not; but when the remote's commits change what's not committed here,
-nothing is set aside, rebased or pushed, and kit names the files and what to do: a file changed
-here (`kit reconcile` commits or undoes it); a change only staged, its file on disk as last
-committed, which drift doesn't show (the user's to commit or unstage); a file git ignores here,
-which the rebase would replace without a word (move it aside), and, of a folder git ignores
-whole, only what the remote's would replace (a file at its path, a file where it needs a
-folder, or the folder itself, where it has a file), as git adds to such a folder harmlessly;
-counting a folder of the remote's where a file is here, or the other way round, and, where git
-folds case (`core.ignorecase`, as on macOS's own disks), names differing only by the case of
-their ASCII letters, as git folds them. Each file is named once, a file both changed and
-ignored as changed. `kit status`'s Sync line says so too, as far as the last fetch tells, while
-it holds commits back. A stash that won't go back is kept, named, never dropped, kit saying
-whether the work is wholly in it or back with git's conflict markers in which files; a rebase
-judged under way by git's own record of it is aborted, one that never started leaves nothing to
-undo, and nothing is pushed. What a program says, kit looks for on the line that carries its
+changes, with git's own commit: the paths it changed, each whole as it is on disk (a deletion, a
+new folder's every file), and nothing else (`git commit --only`), so the user's staged and
+unstaged changes to any other file stay as they are. Files new to git are entered in its index
+first as to be added (`git add --intent-to-add`), they alone, never `git add -A`, so a
+`git commit` made by hand meanwhile takes none of kit's files; committing nothing, kit takes them
+back out (`git rm --cached`), git's index as it found it. No hook runs
+(`-c core.hooksPath=/dev/null`, as `--no-verify` still runs `prepare-commit-msg` and
+`post-commit`). It's signed as `git commit` signs, by the user's own config: set to sign and
+unable to, as when the key isn't on the Mac yet, nothing's committed, and the step waits for the
+next apply. Another git holding the index (`index.lock`) a moment, as `git status` does, kit
+tries again for about two seconds, then says what git said. Once begun, the commit finishes
+whatever becomes of the run. A change git's commit refuses, as a tracked file become a folder,
+kit says as git said it, and it waits as drift. It refuses while git is part way through a
+merge, rebase, cherry-pick, revert or `git am`, or a conflict in its paths waits to be resolved:
+its change waits till that's finished. Nothing's pushed after a commit that failed. What git
+can't keep (an ignored file, a file added then gone, a repository nested in kit-config, which
+`kit reconcile` names and only snoozes) is left out. With nothing to commit, the files on disk
+as last committed, it says nothing changed, pushing only commits still waiting for the
+upstream, as when a push failed. Drift is kit-config's files on disk against the last commit,
+as git's index has them: the `config` step makes each file whose working copy differs from it an
+item (`config:shared/home/.zshrc`, edited, added, as one to be added with `git add -N` is, or
+deleted, with the lines it adds and removes, a file taken out of git's index and kept on disk,
+ignored, deleted as git reads it; a repository, by its folder, `config:vendor/tool/`), quiet for
+a day as drift is; any other difference only in git's index, the file on disk as last
+committed, is the user's own business in git, never drift. `kit reconcile` shows an edit's diff
+and offers adopt (commit it, then push, `--note` the message's end), revert (back to the last
+commit; a new file to the Bin) or snooze.
+
+kit pulls before it pushes, and pulls the prefs store's clone the same way (`kit prefs`), with
+the repository's one remote: with several, it pushes to none, and says so, and HEAD on no branch
+is refused. It refuses while git is part way through one of its operations, or a conflict
+waits, as setting work aside would end the one; then it fetches the remote, pruning its branches
+gone from it (a remote out of reach said plainly). A branch with no upstream is pushed to the
+remote's branch of its name, which becomes its upstream; an upstream not there yet, as on a
+new, empty remote, has nothing to bring in. Commits waiting to be pushed are those the upstream
+hasn't, or, with none or it not there, those on none of the remote's branches, so a failed first
+push, or commits made offline, show as waiting. When the upstream has commits this Mac hasn't,
+kit rebases onto them by the commits since the two parted (never git's fork-point, which can
+leave out a commit, so the rebase changes no more than the remote's commits do), so two Macs
+don't fight. What's not committed in the files git tracks is set aside first, in a stash of its
+own that's never in git's list of stashes (`git stash create`), the files reset to the last
+commit, and put back by it once rebased (`git stash apply --index`), so what was staged is
+staged still, as `--autostash` wouldn't have it; files git doesn't track stay where they are.
+Should it not go back, it's kept in git's list of stashes, as "kit: your changes before
+pulling", so nothing's lost, and kit says so. But when the remote's commits change a file not
+committed here, staged or not, new, or in a repository nested here, nothing is set aside,
+rebased or pushed, and kit names the files: put back, the change would conflict. `kit status`'s
+Sync line says so too, as far as the last fetch tells, while it holds commits back. A rebase
+that stops on a conflict, judged under way by git's own record of it, is aborted and what was
+set aside put back, so nothing's lost; one that never started leaves nothing to undo; either way
+nothing is pushed. What a program says, kit looks for on the line that carries its
 error (git's `fatal:`, or ssh's own lines above it, some with no prefix of ssh's; mas's
 `Error:` or `[ERROR]`; brew's `Error:`; osascript's `execution error:`; sudo's own), as the
 reason is often above the last line, and a line that merely mentions it isn't the error; git
@@ -777,119 +691,15 @@ person's decisions.
 
 `kit status` runs every step's check (named steps run with what they need): Homebrew, each
 kind, and the config repository being proven private (`config-private`): every URL kit pushes it
-to (the push URLs of the remote it's pushed to, as `git push` has them; git failing to name them
-fails the check) and origin's, which it's fetched from, each place that isn't proven private
-named, each URL asked of the way git goes there: pushing for the push URLs, fetching for
-origin's. Proof is positive, never detection: a URL is proven private only as this Mac's, or as
-a repository on GitHub that `gh` says is private, asked by its URL, whatever host `GH_HOST`
-names, once a repository a check, whatever URLs and ways lead to it (`gh` not signed in, as it
-says by exiting 4, fails the check: "gh isn't signed in to GitHub: run gh auth login"). This
-Mac's is a local path, the repository's when relative, or a `file://` URL (its path decoded, its
-host ignored, as git takes them), where git runs its own program at the other end
-(`remote.<name>.receivepack` pushing, `uploadpack` fetching, unset or exactly `git-receive-pack`
-or `git-upload-pack`, or those without their dash, `git receive-pack` and `git upload-pack`: git
-runs a remote's own for a local path too), and the repository it finds there stays on the Mac
-and, pushed to, runs nothing of its own. git finds it as real git does at the other end of a
-push or fetch: the path's trailing slashes dropped, a leading `~` the `HOME` of git's
-environment (another user's `~name` is refused), then the path with `/.git`, nothing,
-`.git/.git` and `.git` added in turn, the first that's a file, or a folder git takes for a
-repository (a `HEAD` of `ref:`, any of git's space (space, tab, newline or carriage return,
-never `\v` or `\f`) and a path in `refs/`, a link into `refs/`, or an object's hash,
-and `objects` and `refs` folders, a worktree's in the common folder its `commondir` names), a
-file followed to the git folder its `gitdir: ` line names, no other tried should that be none,
-the file itself not checked. Links on the way to the repository (the path itself, a folder above
-it) are followed, nothing resolved by name, so `..` after a link leads where the link does. Then
-three rules, and nothing more. Its folders stay on the Mac: its git folder and its common folder
-(resolved, as git reaches them), each checked by identity, once, and first, as this reads
-nothing in them, so a repository in the Desktop or Documents, which macOS asks permission to
-read in, is said to maybe sync, never that kit can't read it: on a filesystem that's local
-(`statfs`'s `MNT_LOCAL`) and outside the folders in the home whose files may leave the Mac, told
-by their files (`os.SameFile` up the folder's path), never by comparing names, so by any name,
-case or spelling, as `/System/Volumes/Data/Users/…` is `/Users/…`, the home's too:
-`Library/CloudStorage` (File Provider's cloud drives, as Dropbox's) and `Library/Mobile
-Documents` (iCloud Drive),
-which sync off it, and `Desktop` and `Documents`, which iCloud syncs in place when its Desktop &
-Documents is on, said as maybe syncing, never detected. The list is partial: a program such as
-Syncthing syncs any folder, which kit can't tell. Nothing in them leads elsewhere: no symbolic
-link anywhere, dangling or not, wherever it leads, but under `hooks`, which git never writes;
-any other is refused ("<path> is a link: kit proves a repository on this Mac only when nothing
-in it leads elsewhere"), as git writes through a link wherever it leads, a `HEAD` that's a link
-among them, as `core.preferSymlinkRefs` makes, which git deprecates; nor a folder kit can't read
-(`EACCES`, `EPERM`), which may hold one; nor a folder on another filesystem than the git folder
-holding it, as one mounted there is, which `statfs` of the git folder can't speak for, told by
-its device (one `lstat` a folder, none a file): "<path> is another filesystem"; nor a regular
-file outside `objects` hard-linked (a link count above 1), as git appends to a reflog in place,
-through every link: "<path> is hard-linked, so git writes it wherever its other links are" (in
-`objects`, git's local clones hard-link files, which git never writes in place). An entry gone
-while kit looks, as receive-pack's quarantine (`objects/incoming-*`) and a gc's pruning leave,
-is passed over, but the folder itself. And, pushed to (fetched from, it runs none of them), it
-runs nothing of its own, as git reads its config for receive-pack, in its git folder (a
-worktree's reads its own after its repository's), every file's, the system's and the user's
-included (`git --git-dir=. config -z --get-regexp`, run there): `receive.denyCurrentBranch`
-`updateInstead` (its last value, in any case, as git takes it), with which a push writes the
-work tree, wherever `core.worktree` or a linked worktree puts it, is refused, and so is
-`core.hooksPath` set, with any value or none, `core.alternateRefsCommand` set, which
-receive-pack runs for a repository with alternates, a hook configured (`hook.<name>.event`) for
-an event git runs for a push, named in git's case, and an executable regular file (a link to one
-too) named as one in its common folder's `hooks` (a link followed): `pre-receive`, `update`,
-`proc-receive`, `post-receive`, `post-update`, `push-to-checkout`, `reference-transaction`, and
-`pre-auto-gc`, which the gc a push starts runs (a `.sample` is none), each named ("the
-repository runs its own post-receive hook, which can take the push anywhere"). A repository is
-on GitHub when the host git reaches is `github.com` or `ssh.github.com`, no other
-(no other host
-under `github.com`, as `gist.github.com`, holds one git pushes to as owner/name), in plain ASCII,
-reached over https or ssh alone: a URL's host in any case, with a full name's last dot or
-without; over ssh, the host ssh's config resolves, asked of `ssh -G` with what git gives ssh
-going that way, the arguments taken from real git: `-o SendEnv=GIT_PROTOCOL` as git passes it
-(fetching at any protocol version but 0, pushing at version 1 alone, `protocol.version` 2 when
-it isn't set), `-p <port>`, `[<user>@]<host>` as git gives it, its case kept, as `Host`
-patterns are case-sensitive and a `Match user` needs the user, and the command git runs at the
-other end: the remote's `receivepack` pushing or `uploadpack` fetching (its first value, as git
-takes it), else `git-receive-pack` or `git-upload-pack`, then the path as git quotes it for the
-shell (in single quotes, a quote and a `!` escaped outside them), from its `~` when that's its
-second letter, as git has it; a `Match sessiontype exec` or `Match command …` can send the
-command elsewhere, so the check asks with it, never without. ssh's variant is git's: the
-environment's `GIT_SSH_VARIANT` over `ssh.variant`, a value git doesn't know, in its case, being
-ssh's own, and `simple` asked with the host and command alone, as git gives no other. ssh's
-proof of the host must stand: its key checked, strictly or by asking (`stricthostkeychecking`
-`yes` or `ask`, the default), against what ssh knows (a key it can't check, it refuses, or asks
-of a terminal), in whatever files ssh keeps, GitHub's keys pinned in one of their own too; never
-trusted on first sight (`stricthostkeychecking accept-new`, refused outright, as which keys ssh
-takes then is more than kit can prove), nor taken from DNS unasked (`verifyhostkeydns yes`,
-which `ssh -G` prints as `true`, takes a key from an SSHFP record DNSSEC vouches for, before
-ssh's files, on the resolver's word; `ask` still asks). A `controlpath` is asked of a host no
-config means too, `kit-sentinel.invalid`, as git's call with the user and port ssh resolved:
-the same path there is one other hosts share,
-where a connection another host has open can carry git's, whatever `controlmaster` says. A path
-shared on purpose between hosts the config names, or an alias whose `HostName` is GitHub's with
-a proxy that opens the connection there, kit can't see. `ssh -G` connects nowhere, but runs the
-commands the config's `Match exec` lines name, as ssh does to read its config. Over https,
-TLS's proof of the host must stand. Everything git takes from the environment is read from the
-one kit runs git in, as the runner has it, never kit's own. Anything else is refused, named
-without who it signs in as, with why: a URL git hands to a helper (a scheme outside git's own,
-`ssh`, `git+ssh`, `ssh+git`, `git`, `http`, `https`, `ftp`, `ftps` and `file`, in lower case; a
-`::`; `remote.<name>.vcs`); one git reads otherwise than kit could (a query, a fragment, or a
-password in an ssh URL, which git gives ssh as its user); `git://`, `http://` and `ftp(s)://`,
-which aren't https or ssh; for ssh, an ssh command set (`core.sshCommand`, `GIT_SSH_COMMAND`,
-`GIT_SSH`), a variant git gives other options (`plink`, `putty`, `tortoiseplink`) or `simple`
-with a port, which git refuses, a proxy in ssh's answer (`proxycommand` or `proxyjump` other
-than `none`), a host name canonicalized (`canonicalizehostname` other than `false`, which looks
-it up anew), the host's key not checked (`stricthostkeychecking no`, which `ssh -G` prints as
-`false`), checked by another name (`hostkeyalias`) or against keys a command gives
-(`knownhostscommand`), taken from DNS (`verifyhostkeydns yes`) or trusted on first sight
-(`stricthostkeychecking accept-new`), or a `controlpath` other hosts share; for https,
-`GIT_SSL_NO_VERIFY`, `GIT_SSL_CAINFO`, `GIT_SSL_CAPATH`, `SSL_CERT_FILE` or `SSL_CERT_DIR` set,
-or, for the URL (`git config
---get-urlmatch`, its user kept and its password left out), `http.sslVerify` false,
-`http.sslCAInfo` or `http.sslCAPath` set, or `http.curloptResolve` other than empty; another
-host, an IP address, or one not in plain ASCII; a host kit can't read (escaped, in brackets,
-like a flag); a path on GitHub that isn't an owner's repository; a local path where git finds no
-repository, whose program at the other end the remote sets, or whose repository is in a folder
-that syncs off the Mac or may, or on a filesystem that isn't local, holds a link (a `HEAD`
-`core.preferSymlinkRefs` makes among them), a folder kit can't read, a filesystem mounted in it
-or a file outside `objects` hard-linked, or, pushed to, writes its work tree
-(`receive.denyCurrentBranch updateInstead`) or runs a program of its own (`core.hooksPath`,
-`core.alternateRefsCommand`, a hook git runs for a push, configured or in its `hooks`). With no
+to (its one remote's push URLs, as `git push` has them, git's `insteadOf` applied; git failing
+to name them fails the check) and origin's, which it's fetched from, each URL once, each that
+isn't proven private named. Proof is positive, never detection: a URL is proven private only as
+a repository on github.com, written exactly as `https://github.com/<owner>/<name>`,
+`git@github.com:<owner>/<name>` or `ssh://git@github.com/<owner>/<name>`, with `.git` or
+without, that `gh` says is private, asked by its URL, whatever host `GH_HOST` names (`gh` not
+signed in, as it says by exiting 4, fails the check: "gh isn't signed in to GitHub: run gh auth
+login"). Anything else is unproven, named without who it signs in as, saying the three forms
+kit takes: another host, scheme, port, user or form, a path on this Mac, a helper's URL. With no
 remote it's pushed to or fetched from, it isn't public.
 
 Every command takes `--plain` (plain lines, as without a terminal) and `--verbose` (commands'
@@ -1333,9 +1143,9 @@ to.
   is refused until it takes ownership). It pulls, writes only what changed, removes what's gone
   from the Mac (history keeps it), leaves domains waiting to be restored alone, keeps a domain
   that fails to export, commits once in prefsync's message format, and pushes, only when every
-  URL the push goes to (the push URLs of the remote it's pushed to, as `git push` has them) is
-  proven private, as `config-private` proves it; any other holds the push, saying why. A push
-  that fails waits for the next.
+  URL the push goes to (its one remote's push URLs, as `git push` has them) is proven
+  private, as `config-private` proves it; any other, or a clone with more than one remote,
+  holds the push, saying why. A push that fails waits for the next.
 - **`kit prefs restore [<domain>...]`** (`--from`, `--at`, `--as`, `--pending`, `--dry-run`): a
   domain's app found from the installed apps' bundle ids (sub-domains, shared domains, group and
   team prefixes, `[prefs apps]` for the rest); not installed or running, it waits; a sandboxed

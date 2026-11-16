@@ -133,61 +133,32 @@ func (s syncing) commit(ctx context.Context, message string) check.Result {
 	if len(s.files) == 0 {
 		return s.pushWaiting(ctx)
 	}
-	out, err := s.repo.Commit(ctx, message, s.files...)
-	return noted(s.committed(ctx, out.Committed, err), out.Notes)
-}
-
-// noted is res, sync's step, first saying what else git's side of it did,
-// notes, as dealing with what a run of kit's that stopped left: in its
-// reason when it failed, as a failure's shown by that.
-func noted(res check.Result, notes []string) check.Result {
-	if len(notes) == 0 {
-		return res
-	}
-	said := strings.Join(notes, "; ") + "; "
-	if res.State == check.Failed {
-		res.Reason = said + res.Reason
-	} else {
-		res.Summary = said + res.Summary
-	}
-	return res
+	committed, err := s.repo.Commit(ctx, message, s.files...)
+	return s.committed(ctx, committed, err)
 }
 
 // committed is how syncing stands once the commit's done, as it went:
 // pushed, unless it failed.
 func (s syncing) committed(ctx context.Context, committed bool, err error) check.Result {
 	switch {
-	case !committed && err != nil:
-		return check.Result{State: check.Failed, Reason: "couldn't commit " + s.what + ": " + whyNot(err)}
+	case err != nil:
+		return check.Result{State: check.Failed, Reason: "couldn't commit " + s.what + ": " + err.Error()}
 	case !committed:
 		return s.pushWaiting(ctx)
 	}
-	res := s.push(ctx)
-	if err != nil {
-		res.State, res.Summary = check.Attention, res.Summary+"; "+err.Error()
-	}
-	return res
-}
-
-// whyNot is why sync committed nothing, err, and, when other gits kept
-// moving HEAD, what commits the files it leaves as they are.
-func whyNot(err error) string {
-	if errors.Is(err, gitrepo.ErrHeadMoving) {
-		return err.Error() + ": kit reconcile commits it"
-	}
-	return err.Error()
+	return s.push(ctx)
 }
 
 // push pushes what was committed.
 func (s syncing) push(ctx context.Context) check.Result {
-	notes, err := s.repo.Push(ctx)
+	err := s.repo.Push(ctx)
 	switch {
 	case errors.Is(err, gitrepo.ErrNoRemote):
 		return check.Result{State: check.OK, Summary: "committed; no remote to push to"}
 	case err != nil:
-		return noted(check.Result{State: check.Attention, Summary: "committed, not pushed: " + err.Error()}, notes)
+		return check.Result{State: check.Attention, Summary: "committed, not pushed: " + err.Error()}
 	}
-	return noted(check.Result{State: check.OK, Summary: "committed and pushed " + s.what}, notes)
+	return check.Result{State: check.OK, Summary: "committed and pushed " + s.what}
 }
 
 // pushWaiting is how syncing stands with nothing committed: the commits
@@ -199,14 +170,14 @@ func (s syncing) pushWaiting(ctx context.Context) check.Result {
 		return nothing
 	}
 	waiting := fmt.Sprintf("%d %s waiting", n, look.Plural(n, "commit", "commits"))
-	notes, err := s.repo.Push(ctx)
+	err := s.repo.Push(ctx)
 	switch {
 	case errors.Is(err, gitrepo.ErrNoRemote):
 		return nothing
 	case err != nil:
-		return noted(check.Result{State: check.Attention, Summary: "nothing changed; " + waiting + ", not pushed: " + err.Error()}, notes)
+		return check.Result{State: check.Attention, Summary: "nothing changed; " + waiting + ", not pushed: " + err.Error()}
 	}
-	return noted(check.Result{State: check.OK, Summary: "nothing changed; pushed " + waiting}, notes)
+	return check.Result{State: check.OK, Summary: "nothing changed; pushed " + waiting}
 }
 
 // finish ends the run, returning attention when a step didn't stand ok.

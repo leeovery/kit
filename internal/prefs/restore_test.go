@@ -190,7 +190,7 @@ func TestANamedRestoreHoldsWhatWaits(t *testing.T) {
 	w.pushes(t, "Capture 2026-10-06 03:00: 1 changed, 1 new\n\nnew: com.example.other\nchanged: com.example.stubborn\nclaimed: the folder, for this Mac's hardware",
 		"?? laptop/.gitignore\x00?? laptop/domains/com.example.other.plist\x00 M laptop/domains/com.example.stubborn.plist\x00?? laptop/owner\x00",
 		[]string{"laptop/.gitignore", "laptop/domains/com.example.other.plist", "laptop/domains/com.example.stubborn.plist", "laptop/owner"},
-		"laptop/.gitignore\x00laptop/domains/com.example.other.plist\x00laptop/domains/com.example.stubborn.plist\x00laptop/owner\x00")
+		[]string{"laptop/.gitignore", "laptop/domains/com.example.other.plist", "laptop/owner"})
 	if _, err := w.p.Capture(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -599,14 +599,6 @@ func TestRestorePendingDryRunAndScratch(t *testing.T) {
 		t.Errorf("Restore(--as) = %q, %v", report.Summary(), err)
 	}
 
-	// What a capture that stopped left, the pull deals with, and the
-	// summary says.
-	w.leavesIndex(t)
-	w.fake.On("git", "-C", w.clone, "rev-parse", "--verify", "--quiet", "HEAD").Prints(head + "\n")
-	report, err = w.p.Restore(t.Context(), prefs.RestoreOptions{Domains: []string{"com.example.later"}, As: "scratch.test"})
-	if err != nil || report.Summary() != "imported com.example.later as scratch.test; finished the last run's index" {
-		t.Errorf("Restore(--as), a capture's index left = %q, %v", report.Summary(), err)
-	}
 }
 
 // --at restores the store as it was then, from its history.

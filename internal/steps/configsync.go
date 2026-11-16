@@ -54,14 +54,12 @@ func ConfigSync(repo gitrepo.Repo, now func() time.Time) engine.Step {
 }
 
 // The states of kit-config's edits, as the config step's items carry them:
-// untracked is a file taken out of git's index, kept on this Mac, as git
-// ignores it; a repository is one of its own, nested in kit-config, which
-// it can't keep.
+// a repository is one of its own, nested in kit-config, which it can't
+// keep.
 const (
 	ConfigEdited     = gitrepo.Edited
 	ConfigAdded      = gitrepo.Added
 	ConfigDeleted    = gitrepo.Deleted
-	ConfigUntracked  = gitrepo.Untracked
 	ConfigRepository = gitrepo.Repository
 )
 
@@ -94,13 +92,9 @@ func ConfigEdits(repo gitrepo.Repo) engine.Step {
 }
 
 // editDetail says more of an edit: the lines it adds and removes, or what
-// to do about a repository nested in kit-config; nothing of a file
-// untracked, whose lines are kept.
+// to do about a repository nested in kit-config.
 func editDetail(c gitrepo.Change) string {
-	switch c.State {
-	case ConfigUntracked:
-		return ""
-	case ConfigRepository:
+	if c.State == ConfigRepository {
 		return "kit-config can't keep it"
 	}
 	return fmt.Sprintf("+%d −%d lines", c.Added, c.Removed)

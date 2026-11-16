@@ -2,15 +2,11 @@ package prefs_test
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -52,79 +48,53 @@ func newWorld(t *testing.T, lists prefs.Lists) *world {
 	return w
 }
 
-// pulls scripts a pull of the store's, as real git answers, its remote
-// with nothing new, and nothing changed in the clone; its branch main,
-// origin's main its upstream, and no other remote set to push to.
+// pulls scripts a pull of the store's, as real git answers, its one
+// remote, origin, with nothing new, and nothing changed in the clone; its
+// branch main, origin's main its upstream.
 func (w *world) pulls() {
 	w.fake.On("git", "-C", w.clone, "remote").Prints("origin\n")
 	w.fake.On("git", "-C", w.clone, "rev-parse", "--absolute-git-dir").Prints(filepath.Join(w.clone, ".git") + "\n")
 	w.fake.On("git", "-C", w.clone, "--literal-pathspecs", "status", "--porcelain", "-z", "--untracked-files=all", "--no-renames", "--")
 	w.fake.On("git", "-C", w.clone, "symbolic-ref", "-q", "HEAD").Prints("refs/heads/main\n")
-	w.fake.On("git", "-C", w.clone, "for-each-ref", "--format=%(upstream)%00%(upstream:remotename)", "refs/heads/main").Prints("refs/remotes/origin/main\x00origin\n")
-	w.fake.On("git", "-C", w.clone, "config", "--get", "branch.main.pushRemote").Exits(1)
-	w.fake.On("git", "-C", w.clone, "config", "--get", "remote.pushDefault").Exits(1)
+	w.fake.On("git", "-C", w.clone, "for-each-ref", "--format=%(upstream)", "refs/heads/main").Prints("refs/remotes/origin/main\n")
 	w.fake.On("git", "-C", w.clone, "fetch", "--prune", "--quiet", "origin")
 	w.fake.On("git", "-C", w.clone, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/main").Prints(head + "\n")
 	w.fake.On("git", "-C", w.clone, "rev-list", "--count", "HEAD..refs/remotes/origin/main").Prints("0\n")
 }
 
 // pushes scripts the commit of the Mac's folder with message, git's
-// status of it being status (-z), each file of which kit stages as it is on
-// disk in an index of its own (update), what's staged there being staged
-// (-z), the files committed, which the user's index then takes as
-// committed, as real git prints them; and a private remote taking it, with
-// nothing new of its own, nothing else changed in the clone.
-func (w *world) pushes(t *testing.T, message, status string, update []string, staged string) {
+// status of it being status (-z), as real git prints it: files committed
+// whole, those of them new to git, added, entered in its index first; then
+// a private remote taking it, with nothing new of its own, nothing else
+// changed in the clone. Any other commit, or a push, fails the test, as an
+// unscripted command.
+func (w *world) pushes(t *testing.T, message, status string, files, added []string) {
 	t.Helper()
-	reads := func(want string) func(string) (string, error) {
-		return func(in string) (string, error) {
-			if in != want {
-				t.Errorf("git read %q, want %q", in, want)
-			}
-			return "", nil
-		}
+	git := func(args ...string) []string { return append([]string{"-C", w.clone}, args...) }
+	paths := func(args []string, paths []string) []string {
+		return git(slices.Concat([]string{"--literal-pathspecs"}, args, []string{"--"}, paths)...)
 	}
-	gitDir := filepath.Join(w.clone, ".git")
-	w.fake.On("git", "-C", w.clone, "--literal-pathspecs", "status", "--porcelain", "-z", "--untracked-files=all", "--no-renames", "--", "laptop").Prints(status)
-	w.fake.On("git", "-C", w.clone, "rev-parse", "--absolute-git-dir").Prints(gitDir + "\n")
-	w.fake.On("git", "-C", w.clone, "rev-parse", "--verify", "--quiet", "HEAD").Prints(head + "\n")
-	w.fake.On("git", "-C", w.clone, "read-tree", head)
-	w.fake.On("git", "-C", w.clone, "update-index", "--add", "--remove", "--replace", "-z", "--stdin").Filters(reads(strings.Join(update, "\x00") + "\x00"))
-	w.fake.On("git", "-C", w.clone, "diff", "--cached", "--name-only", "-z", "--no-renames").Prints(staged)
-	w.fake.On("git", "-C", w.clone, "write-tree").Prints(tree + "\n")
-	w.fake.On("git", "-C", w.clone, "config", "--get", "--type=bool", "commit.gpgsign").Prints("false\n")
-	w.fake.On("git", "-C", w.clone, "commit-tree", tree, "-p", head, "-m", message).Prints(made + "\n")
-	subject, _, _ := strings.Cut(message, "\n")
-	w.fake.On("git", "-C", w.clone, "update-ref", "-m", "kit: "+subject, "HEAD", made, head)
-	w.fake.On("git", "-C", w.clone, "ls-files", "--stage", "-z").Prints("100644 5e1c309dae7f45e0f39b1bf3ac3cd9db12e7d689 0\t.gitattributes\x00")
-	w.fake.On("git", "-C", w.clone, "--literal-pathspecs", "reset", "--quiet", "--pathspec-from-file=-", "--pathspec-file-nul", "--end-of-options", made).Filters(reads(staged)).Does(func() {
-		w.write(t, filepath.Join(gitDir, "kit-index.next"), "the index, as committed")
-	})
-	w.fake.On("git", "-C", w.clone, "remote", "get-url", "--push", "--all", "origin").Prints(remote + "\n")
-	for _, key := range []string{"remote.origin.vcs", "core.sshCommand", "ssh.variant", "protocol.version"} {
-		w.fake.On("git", "-C", w.clone, "config", "--get", key).Exits(1)
+	w.fake.On("git", paths([]string{"status", "--porcelain", "-z", "--untracked-files=all", "--no-renames"}, []string{"laptop"})...).Prints(status)
+	w.fake.On("git", git("rev-parse", "--absolute-git-dir")...).Prints(filepath.Join(w.clone, ".git") + "\n")
+	w.fake.On("git", git("config", "--get", "--type=bool", "commit.gpgsign")...).Prints("false\n")
+	if len(added) > 0 {
+		w.fake.On("git", paths([]string{"add", "--intent-to-add"}, added)...)
 	}
-	w.fake.On("git", "-C", w.clone, "config", "-z", "--get-all", "remote.origin.receivepack").Exits(1)
-	w.sshResolves("someone/prefs.git")
+	w.fake.On("git", git("rev-parse", "--verify", "--quiet", "HEAD")...).Prints(head + "\n")
+	w.fake.On("git", paths([]string{"diff", "--quiet", "--no-ext-diff", "HEAD"}, files)...).Exits(1)
+	w.fake.On("git", paths([]string{"-c", "core.hooksPath=/dev/null", "commit", "--quiet", "--only", "-m", message}, files)...)
+	w.fake.On("git", git("remote", "get-url", "--push", "--all", "origin")...).Prints(remote + "\n")
 	w.fake.On("gh", "repo", "view", "https://github.com/someone/prefs", "--json", "visibility", "--jq", ".visibility").Prints("PRIVATE\n")
 	w.pulls()
-	w.fake.On("git", "-C", w.clone, "push", "--quiet")
+	w.fake.On("git", git("push", "--quiet")...)
 }
 
-// sshResolves scripts ssh -G resolving git@github.com to github.com, as
-// real ssh prints it, cut short, for git pushing to path there.
-func (w *world) sshResolves(path string) {
-	w.fake.On("ssh", "-G", "git@github.com", "git-receive-pack '"+path+"'").Prints("host github.com\nuser git\nhostname github.com\nport 22\ncanonicalizefallbacklocal yes\ncanonicalizehostname false\ncontrolmaster false\nsessiontype default\n")
-}
+// newFiles are the files a first capture of one domain makes, each new to
+// git.
+var newFiles = []string{"laptop/.gitignore", "laptop/domains/com.example.app.plist", "laptop/owner"}
 
-// head is the commit HEAD names in the store's clone, tree the tree git
-// writes of kit's own index of it, and made the commit a capture makes of
-// that onto it.
-const (
-	head = "0e0bf17a399109574ffb00e33300280a33f81ab7"
-	tree = "af9055821923c351c404eaaff97d82a5552a1ad5"
-	made = "2f8f9a0d6c1b4e5a7d3c2b1a0f9e8d7c6b5a4f3e"
-)
+// head is the commit HEAD names in the store's clone.
+const head = "0e0bf17a399109574ffb00e33300280a33f81ab7"
 
 func (w *world) write(t *testing.T, path, text string) {
 	t.Helper()
@@ -227,9 +197,10 @@ claimed: the folder, for this Mac's hardware`
 			"laptop/.gitignore", "laptop/domains/com.example.app.plist", "laptop/files/.config/folder/deeper/two.txt", "laptop/files/.config/folder/one.txt",
 			"laptop/files/.config/tool/settings.json", "laptop/files/Library/Tool/App2026.1/options/ui.xml", "laptop/files/Library/Tool/App2026.2/options/ui.xml", "laptop/owner",
 		},
-		"laptop/.gitignore\x00laptop/domains/com.example.app.plist\x00laptop/domains/com.example.empty.plist\x00laptop/domains/com.example.gone.plist\x00laptop/files/.config/.hidden\x00laptop/files/.config/dropped.json\x00"+
-			"laptop/files/.config/folder/deeper/two.txt\x00laptop/files/.config/folder/one.txt\x00laptop/files/.config/tool/settings.json\x00"+
-			"laptop/files/Library/Tool/App2026.1/options/ui.xml\x00laptop/files/Library/Tool/App2026.2/options/ui.xml\x00laptop/owner\x00")
+		[]string{
+			"laptop/.gitignore", "laptop/domains/com.example.app.plist", "laptop/files/.config/folder/deeper/two.txt", "laptop/files/.config/folder/one.txt",
+			"laptop/files/.config/tool/settings.json", "laptop/files/Library/Tool/App2026.1/options/ui.xml", "laptop/files/Library/Tool/App2026.2/options/ui.xml", "laptop/owner",
+		})
 
 	report, err := w.p.Capture(t.Context())
 	if err != nil {
@@ -328,8 +299,7 @@ func TestCaptureRefuses(t *testing.T) {
 		w.write(t, filepath.Join(w.clone, "laptop", "owner"), "hardware HW-THIS\nmodel Mac99,1\nsince 2026-09-28 17:00\n")
 		w.fake.On("git", "-C", w.clone, "rev-list", "--count", "HEAD..refs/remotes/origin/main").Prints("1\n")
 		w.fake.On("git", "-C", w.clone, "diff", "--name-only", "-z", "--no-renames", "HEAD...refs/remotes/origin/main").Prints("laptop/owner\x00")
-		w.fake.On("git", "-C", w.clone, "config", "--get", "--type=bool", "core.ignorecase").Prints("true\n")
-		w.fake.On("git", "-C", w.clone, "ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory")
+		w.fake.On("git", "-C", w.clone, "stash", "create", "kit: your changes before pulling")
 		w.fake.On("git", "-C", w.clone, "rebase", "--no-fork-point", "--quiet", "refs/remotes/origin/main").Does(func() {
 			w.write(t, filepath.Join(w.clone, "laptop", "owner"), "hardware HW-NEW\nmodel Mac100,1\nsince 2026-10-05 09:00\n")
 		})
@@ -350,26 +320,24 @@ func asNotOwner(err error, into *prefs.NotOwnerError) bool {
 
 // A capture whose commit failed pushes nothing: refused while git's part
 // way through a merge in the clone, which pulling or pushing would set
-// aside, so nothing's brought in either; or given up as other gits kept
-// moving HEAD. The record says why.
+// aside, so nothing's brought in either; or given up as another git held
+// the index throughout. The record says why.
 func TestCaptureHoldsBackThePushWhenTheCommitFailed(t *testing.T) {
 	const message = "Capture 2026-10-06 03:00: 1 new\n\nnew: com.example.app\nclaimed: the folder, for this Mac's hardware"
 	for _, c := range []struct{ name, want string }{
 		{"a merge under way", "not pushed: a merge is under way in the repository (MERGE_HEAD)"},
-		{"HEAD kept moving", "not pushed: HEAD kept moving while kit committed, so nothing was committed"},
+		{"the index held", "not pushed: another git holds the repository's index, so kit's change waits till it's done"},
 	} {
 		w := newWorld(t, prefs.Lists{})
 		writeRecord(t, w.state, `{"on": "started fresh"}`)
 		w.fake.On("defaults", "domains").Prints("com.example.app\n")
 		w.exports(t, "com.example.app", map[string]any{"Theme": "dark"})
-		w.pushes(t, message,
-			"?? laptop/.gitignore\x00?? laptop/domains/com.example.app.plist\x00?? laptop/owner\x00",
-			[]string{"laptop/.gitignore", "laptop/domains/com.example.app.plist", "laptop/owner"},
-			"laptop/.gitignore\x00laptop/domains/com.example.app.plist\x00laptop/owner\x00")
+		w.pushes(t, message, "?? laptop/.gitignore\x00?? laptop/domains/com.example.app.plist\x00?? laptop/owner\x00", newFiles, newFiles)
 		if c.name == "a merge under way" {
 			w.write(t, filepath.Join(w.clone, ".git", "MERGE_HEAD"), head+"\n")
 		} else {
-			w.movingHEAD(message)
+			w.fake.On("git", slices.Concat([]string{"-C", w.clone, "--literal-pathspecs", "add", "--intent-to-add", "--"}, newFiles)...).Exits(128).
+				PrintsToStderr("fatal: Unable to create '" + filepath.Join(w.clone, ".git", "index.lock") + "': File exists.\n")
 		}
 		report, err := w.p.Capture(t.Context())
 		if err != nil || report.Committed || !strings.HasPrefix(report.PushError, c.want) {
@@ -386,46 +354,30 @@ func TestCaptureHoldsBackThePushWhenTheCommitFailed(t *testing.T) {
 	}
 }
 
-// movingHEAD scripts other gits moving HEAD each time a capture commits
-// with message, as real git refuses the move: off head, then off each of
-// theirs in turn.
-func (w *world) movingHEAD(message string) {
-	heads := []string{head, "154906a47f12246099602d1bee6b1c558d3409c9", "2c1d8e0f4b6a7c9d3e5f7a1b2c4d6e8f0a1b3c5d", "3d2e9f1a5c7b8d0e4f6a8b2c3d5e7f9a1b2c4d6e"}
-	var moved atomic.Int32
-	w.fake.On("git", "-C", w.clone, "rev-parse", "--verify", "--quiet", "HEAD").Filters(func(string) (string, error) {
-		return heads[moved.Load()] + "\n", nil
-	})
-	subject, _, _ := strings.Cut(message, "\n")
-	for i, base := range heads[:len(heads)-1] {
-		w.fake.On("git", "-C", w.clone, "read-tree", base)
-		w.fake.On("git", "-C", w.clone, "commit-tree", tree, "-p", base, "-m", message).Prints(made + "\n")
-		w.fake.On("git", "-C", w.clone, "update-ref", "-m", "kit: "+subject, "HEAD", made, base).Exits(128).
-			PrintsToStderr("fatal: update_ref failed for ref 'HEAD': cannot lock ref 'HEAD': is at " + heads[i+1] + " but expected " + base + "\n").
-			Does(func() { moved.Add(1) })
-	}
-}
-
 // A store that isn't proven private is never pushed to: the commit waits,
 // and the record says since when. It's where git push sends it that's
 // looked at: a push URL the remote has set, public, in its private URL's
 // place, which git names alone, as it pushes there alone; a repository on
-// GitHub that isn't private; a host kit can't prove private.
+// GitHub that isn't private; another host, or a path on this Mac, which
+// kit doesn't prove private; and a clone with more than one remote, which
+// kit pushes to none of.
 func TestCaptureNeverPushesToAPublicStore(t *testing.T) {
-	for _, c := range []struct{ name, pushURL, public, says string }{
-		{"the store public", remote, "someone/prefs", "someone/prefs is public on GitHub: kit pushes apps' settings only to a private repository"},
-		{"a push URL public", "git@github.com:someone/public-prefs.git", "someone/public-prefs", "someone/public-prefs is public on GitHub: kit pushes apps' settings only to a private repository"},
-		{"another host", "https://gitlab.com/someone/prefs.git", "", "kit pushes apps' settings only to a repository it can prove private, and can't for https://gitlab.com/someone/prefs.git: gitlab.com isn't GitHub"},
+	const notGitHub = "kit proves private only a repository on github.com, at https://github.com/<owner>/<name>, git@github.com:<owner>/<name> or ssh://git@github.com/<owner>/<name>"
+	for _, c := range []struct{ name, remotes, pushURL, public, says string }{
+		{"the store public", "origin\n", remote, "someone/prefs", "someone/prefs is public on GitHub: kit pushes apps' settings only to a private repository"},
+		{"a push URL public", "origin\n", "git@github.com:someone/public-prefs.git", "someone/public-prefs", "someone/public-prefs is public on GitHub: kit pushes apps' settings only to a private repository"},
+		{"another host", "origin\n", "https://gitlab.com/someone/prefs.git", "", "kit pushes apps' settings only to a repository it can prove private, and can't for https://gitlab.com/someone/prefs.git: " + notGitHub},
+		{"a path on this Mac", "origin\n", "/Volumes/Backup/prefs.git", "", "kit pushes apps' settings only to a repository it can prove private, and can't for /Volumes/Backup/prefs.git: " + notGitHub},
+		{"two remotes", "origin\nbackup\n", remote, "", "the repository has 2 remotes, so kit pushes nothing: kit pushes to one alone"},
 	} {
 		w := newWorld(t, prefs.Lists{})
 		writeRecord(t, w.state, `{"on": "started fresh"}`)
 		w.fake.On("defaults", "domains").Prints("com.example.app\n")
 		w.exports(t, "com.example.app", map[string]any{"Theme": "dark"})
 		w.pushes(t, "Capture 2026-10-06 03:00: 1 new\n\nnew: com.example.app\nclaimed: the folder, for this Mac's hardware",
-			"?? laptop/.gitignore\x00?? laptop/domains/com.example.app.plist\x00?? laptop/owner\x00",
-			[]string{"laptop/.gitignore", "laptop/domains/com.example.app.plist", "laptop/owner"},
-			"laptop/.gitignore\x00laptop/domains/com.example.app.plist\x00laptop/owner\x00")
+			"?? laptop/.gitignore\x00?? laptop/domains/com.example.app.plist\x00?? laptop/owner\x00", newFiles, newFiles)
+		w.fake.On("git", "-C", w.clone, "remote").Prints(c.remotes)
 		w.fake.On("git", "-C", w.clone, "remote", "get-url", "--push", "--all", "origin").Prints(c.pushURL + "\n")
-		w.sshResolves(strings.TrimPrefix(c.pushURL, "git@github.com:"))
 		w.fake.On("gh", "repo", "view", "https://github.com/"+c.public, "--json", "visibility", "--jq", ".visibility").Prints("PUBLIC\n")
 		report, err := w.p.Capture(t.Context())
 		if err != nil || !strings.HasPrefix(report.PushError, c.says) {
@@ -437,100 +389,6 @@ func TestCaptureNeverPushesToAPublicStore(t *testing.T) {
 		if rec, _ := w.p.Load(); rec.Unpushed.IsZero() || rec.PushError == "" {
 			t.Errorf("%s: record = %+v, want the push waiting", c.name, rec)
 		}
-	}
-}
-
-// A store on this Mac, a local path that stays on it, is proven private, so
-// pushed to; one in a folder macOS syncs off it, in the home, isn't, nor
-// one that runs a hook of its own when pushed to.
-func TestCapturePushesToAStoreOnThisMac(t *testing.T) {
-	for _, c := range []struct {
-		// in is the folder the store's in, in the home when it starts
-		// home/; hooked whether it runs a post-receive hook; why why it
-		// isn't pushed to: "" when it is.
-		name, in string
-		hooked   bool
-		why      string
-	}{
-		{name: "on this Mac", in: "Backup"},
-		{name: "in a cloud drive", in: "home/Library/CloudStorage/Dropbox", why: "git writes it in ~/Library/CloudStorage/Dropbox, which syncs off this Mac"},
-		{name: "running its own hook", in: "Backup", hooked: true, why: "the repository runs its own post-receive hook, which can take the push anywhere"},
-	} {
-		w := newWorld(t, prefs.Lists{})
-		writeRecord(t, w.state, `{"on": "started fresh"}`)
-		w.fake.On("defaults", "domains").Prints("com.example.app\n")
-		w.exports(t, "com.example.app", map[string]any{"Theme": "dark"})
-		w.pushes(t, "Capture 2026-10-06 03:00: 1 new\n\nnew: com.example.app\nclaimed: the folder, for this Mac's hardware",
-			"?? laptop/.gitignore\x00?? laptop/domains/com.example.app.plist\x00?? laptop/owner\x00",
-			[]string{"laptop/.gitignore", "laptop/domains/com.example.app.plist", "laptop/owner"},
-			"laptop/.gitignore\x00laptop/domains/com.example.app.plist\x00laptop/owner\x00")
-		store := filepath.Join(w.home, strings.TrimPrefix(c.in, "home/"), "prefs.git")
-		if !strings.HasPrefix(c.in, "home/") {
-			store = filepath.Join(t.TempDir(), c.in, "prefs.git")
-		}
-		// A repository git takes: a HEAD naming a branch, objects and refs.
-		for _, folder := range []string{"objects", "refs"} {
-			if err := os.MkdirAll(filepath.Join(store, folder), 0o700); err != nil {
-				t.Fatal(err)
-			}
-		}
-		w.write(t, filepath.Join(store, "HEAD"), "ref: refs/heads/main\n")
-		if c.hooked {
-			w.write(t, filepath.Join(store, "hooks", "post-receive"), "#!/bin/sh\n")
-			if err := os.Chmod(filepath.Join(store, "hooks", "post-receive"), 0o700); err != nil {
-				t.Fatal(err)
-			}
-		}
-		w.fake.On("git", "-C", w.clone, "remote", "get-url", "--push", "--all", "origin").Prints(store + "\n")
-		w.fake.On("git", "--git-dir=.", "config", "-z", "--get-regexp", `^(receive\.denycurrentbranch|core\.(hookspath|alternaterefscommand)|hook\..+\.event)$`).Exits(1)
-		says := ""
-		if c.why != "" {
-			says = "kit pushes apps' settings only to a repository it can prove private, and can't for " + store + ": " + c.why
-		}
-		report, err := w.p.Capture(t.Context())
-		pushed := slices.Contains(w.fake.Calls(), "git -C "+w.clone+" push --quiet")
-		if err != nil || pushed != (says == "") || report.PushError != says {
-			t.Errorf("%s: Capture() = %+v, %v, pushed %t; want it pushed only on this Mac, else held, saying %q", c.name, report, err, pushed, says)
-		}
-	}
-}
-
-// leavesIndex leaves in the clone's git folder git's lock holding the index
-// a capture left, stopped once HEAD had moved onto its commit, head, and
-// its mark: the commit HEAD was on, that one, and the lock by its hash and
-// file, device and inode, then the end of its records, of which it has
-// none.
-func (w *world) leavesIndex(t *testing.T) {
-	t.Helper()
-	const left, before = "the index a capture left", "9f8e7d6c5b4a39281706f5e4d3c2b1a098765432"
-	lock := filepath.Join(w.clone, ".git", "index.lock")
-	w.write(t, lock, left)
-	info, err := os.Stat(lock)
-	if err != nil {
-		t.Fatal(err)
-	}
-	st := info.Sys().(*syscall.Stat_t)
-	sum := sha256.Sum256([]byte(left))
-	w.write(t, filepath.Join(w.clone, ".git", "kit-mark"), fmt.Sprintf("%s %s %s %d:%d\n", before, head, hex.EncodeToString(sum[:]), st.Dev, st.Ino)+"end\x00")
-}
-
-// The index a capture left in git's lock, stopped once HEAD had moved onto
-// its commit, its mark naming that commit and the lock by its hash and
-// file, is put in place before the next commits, and the summary says so.
-func TestCaptureFinishesTheIndexAStoppedCaptureLeft(t *testing.T) {
-	const message = "Capture 2026-10-06 03:00: 1 new\n\nnew: com.example.app\nclaimed: the folder, for this Mac's hardware"
-	w := newWorld(t, prefs.Lists{})
-	writeRecord(t, w.state, `{"on": "started fresh"}`)
-	w.fake.On("defaults", "domains").Prints("com.example.app\n")
-	w.exports(t, "com.example.app", map[string]any{"Theme": "dark"})
-	w.pushes(t, message,
-		"?? laptop/.gitignore\x00?? laptop/domains/com.example.app.plist\x00?? laptop/owner\x00",
-		[]string{"laptop/.gitignore", "laptop/domains/com.example.app.plist", "laptop/owner"},
-		"laptop/.gitignore\x00laptop/domains/com.example.app.plist\x00laptop/owner\x00")
-	w.leavesIndex(t)
-	report, err := w.p.Capture(t.Context())
-	if err != nil || !report.Committed || !slices.Equal(report.Notes, []string{"finished the last run's index"}) || !strings.HasSuffix(report.Summary(), "; finished the last run's index") {
-		t.Errorf("Capture() = %+v, %v; want the index finished, then committed, and said", report, err)
 	}
 }
 
@@ -584,7 +442,7 @@ func TestPatterns(t *testing.T) {
 	files := []string{"laptop/files/Other/abc/conf", "laptop/files/Tool/.App2026.3/opts/x", "laptop/files/Tool/App2026.2/opts/x"}
 	paths := slices.Concat([]string{"laptop/.gitignore", "laptop/domains/a.b.c.plist", "laptop/domains/jetbrains.csat.plist"}, files, []string{"laptop/owner"})
 	w.pushes(t, "Capture 2026-10-06 03:00: 5 new\n\nnew: a.b.c\nnew: jetbrains.csat\nnew: ~/Tool/.App2026.3/opts/x\nnew: ~/Tool/App2026.2/opts/x\nnew: ~/Other/abc/conf\nclaimed: the folder, for this Mac's hardware",
-		"?? "+strings.Join(paths, "\x00?? ")+"\x00", paths, strings.Join(paths, "\x00")+"\x00")
+		"?? "+strings.Join(paths, "\x00?? ")+"\x00", paths, paths)
 	if report, err := w.p.Capture(t.Context()); err != nil || report.Domains != 2 || report.Files != 3 {
 		t.Errorf("Capture() = %+v, %v", report, err)
 	}
