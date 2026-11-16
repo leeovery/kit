@@ -74,13 +74,13 @@ func isKeyType(field string) bool {
 	return slices.ContainsFunc(keyTypes, func(t string) bool { return strings.HasPrefix(field, t) })
 }
 
-// sshOptions are ssh's options reaching a Mac at port: never a question
+// sshOptions are ssh's options reaching the old Mac: never a question
 // asked, as there's no one to answer it; only ssh's errors said; and the
 // Mac's host key the one pinned, in the file pinnedHosts, under alias (the
 // old Mac's kit name), and nowhere else's (no other file, no command of the
 // person's config, no DNS).
-func sshOptions(pinnedHosts, alias string, port int) []string {
-	opts := []string{
+func sshOptions(pinnedHosts, alias string) []string {
+	return []string{
 		"-o", "BatchMode=yes", "-o", "ConnectTimeout=" + strconv.Itoa(connectTimeout),
 		"-o", "StrictHostKeyChecking=yes",
 		"-o", "UserKnownHostsFile=" + sshValue(pinnedHosts),
@@ -90,10 +90,6 @@ func sshOptions(pinnedHosts, alias string, port int) []string {
 		"-o", "HostKeyAlias=" + alias,
 		"-o", "LogLevel=ERROR",
 	}
-	if port != 0 && port != 22 {
-		opts = append(opts, "-p", strconv.Itoa(port))
-	}
-	return opts
 }
 
 // sshValue is v as ssh reads an option's value: one holding a space in
@@ -122,8 +118,8 @@ func checkStateDir(dir string) error {
 
 // remote is ssh running script, a /bin/sh script, on host through opts:
 // ssh hands its command to the person's own shell there, which runs sh
-// with the script, quoted for it. -- ends ssh's options, so a host, which
-// a device on the network names, is never taken as one.
+// with the script, quoted for it. -- ends ssh's options, so a host is never
+// taken as one.
 func remote(opts []string, host, script string, timeout time.Duration) runner.Command {
 	return runner.Command{Name: "ssh", Args: slices.Concat(opts, []string{"--", host, "/bin/sh -c " + shellQuote(script)}), Timeout: timeout}
 }
@@ -194,7 +190,6 @@ const (
 	keyKit       = "kit"
 	keyProtected = "protected"
 	keyRsync     = "rsync"
-	keyHostKey   = "hostkey"
 )
 
 // hostKeys are a Mac's SSH host keys' public halves, in SSHDir, as patterns,
@@ -204,7 +199,7 @@ var hostKeys = []string{"ssh_host_ed25519_key.pub", "ssh_host_*_key.pub"}
 // SSHDir is where macOS keeps its SSH host keys.
 const SSHDir = "/etc/ssh"
 
-// HostKey is this Mac's own SSH host key, as the probe says another's: the
+// HostKey is this Mac's own SSH host key, as ssh finds it presented: the
 // first of hostKeys in dir (SSHDir) anyone may read, as PublicKey has it;
 // "" when there's none, as macOS makes them only once Remote Login first
 // starts.
@@ -249,15 +244,9 @@ const (
 // folder; its kit name, as config.ReadMachine reads it, from kit's state
 // where config.Locate puts it; whether SSH may read the first of the
 // protected folders there, which needs Remote Login's full disk access;
-// the version of its rsync, the one at rsync; and its SSH host key, the
-// first of hostKeys in keys, anyone may read, its type and key. Each
-// answer's a line, key=value, as the person's shell can print lines of its
-// own.
-func probeScript(rsync, keys string) string {
-	globs := make([]string, len(hostKeys))
-	for i, k := range hostKeys {
-		globs[i] = shellQuote(keys) + "/" + k
-	}
+// and the version of its rsync, the one at rsync. Each answer's a line,
+// key=value, as the person's shell can print lines of its own.
+func probeScript(rsync string) string {
 	return strings.Join([]string{
 		`d=${XDG_STATE_HOME:-}`,
 		`case $d in /*) ;; *) d=$HOME/.local/state ;; esac`,
@@ -274,9 +263,6 @@ func probeScript(rsync, keys string) string {
 		`echo "` + keyProtected + `=$p"`,
 		`r=` + shellQuote(rsync),
 		`if [ -x "$r" ]; then "$r" --version 2>&1 | sed 's/^/` + keyRsync + `=/'; fi`,
-		`for k in ` + strings.Join(globs, " ") + `; do`,
-		`  if [ -r "$k" ]; then echo "` + keyHostKey + `=$(cut -d ' ' -f 1,2 "$k")"; break; fi`,
-		`done`,
 	}, "\n")
 }
 
@@ -305,7 +291,7 @@ func (p probed) one(key string) string {
 
 // probe asks the Mac at host, through opts, what probeScript does.
 func (f Finder) probe(ctx context.Context, opts []string, host string) (probed, error) {
-	res, err := f.Run.Run(ctx, remote(opts, host, probeScript(RemoteRsync, SSHDir), probeTimeout))
+	res, err := f.Run.Run(ctx, remote(opts, host, probeScript(RemoteRsync), probeTimeout))
 	if err != nil {
 		return nil, sshFailed(err)
 	}

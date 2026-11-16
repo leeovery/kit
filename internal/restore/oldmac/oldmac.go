@@ -1,10 +1,9 @@
 // Package oldmac reaches the Mac a new one started from, over SSH, to
-// restore from it. kit's config holds no address for a Mac, and the name a
-// Mac answers to on the network isn't kit's, so the Macs offering Remote
-// Login are found through Bonjour and each asked, over SSH, its kit name;
-// the one with the name wanted is checked can be copied from; and what its
-// backups leave out of each listed folder is found, for the restore to
-// leave out too.
+// restore from it: at the local hostname kit-config records for it, as kit
+// apply on it records it, presenting the host key kit-config records, as a
+// Mac's name is only its own say. It checks the Mac can be copied from, and
+// finds what its backups leave out of each listed folder, for the restore
+// to leave out too.
 package oldmac
 
 import (
@@ -14,9 +13,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
+	"regexp"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/leeovery/kit/internal/apps"
@@ -29,36 +27,33 @@ import (
 // openrsync.
 const RemoteRsync = "/opt/homebrew/bin/rsync"
 
-// How long Bonjour's listened to for the Macs offering Remote Login, and
-// for where one answers; and how long a Mac's given to answer the probe.
-const (
-	browseFor    = 3 * time.Second
-	resolveFor   = 3 * time.Second
-	probeTimeout = 30 * time.Second
-)
+// probeTimeout is how long a Mac's given to answer the probe.
+const probeTimeout = 30 * time.Second
 
-// ErrNoAnswer is in the error of a search that found no Mac answering over
-// SSH as the one wanted: off, asleep, away, refusing this Mac's key,
-// presenting another host key than kit-config's, not offering Remote
-// Login, or out of reach till macOS lets the terminal find devices on
-// local networks.
+// ErrNoAnswer is in the error of an old Mac not answering over SSH as
+// itself: off, asleep, away, refusing this Mac's key, presenting another
+// host key than kit-config's, not offering Remote Login, or out of reach
+// till macOS lets the terminal find devices on local networks.
 var ErrNoAnswer = errors.New("doesn't answer over SSH")
 
-// ErrNoHostKey is in the error of a search for a Mac whose host key
-// kit-config doesn't record: none is looked for, as a Mac's name is only
-// its own say.
-var ErrNoHostKey = errors.New("can't be restored from")
+// ErrUnrecorded is in the error of an old Mac kit-config doesn't record as
+// it is now: its host key or local hostname not recorded, or nothing
+// answering at its local hostname, as when it's been renamed since. kit
+// apply on it records them.
+var ErrUnrecorded = errors.New("can't be restored from")
 
-// Finder finds Macs on the network, run through Run, the host key looked
-// for kept in kit's state, StateDir.
+// Finder reaches the old Mac over SSH, run through Run, the host key it
+// must present kept in kit's state, StateDir.
 type Finder struct {
 	Run      runner.Runner
 	StateDir string
-	// HostKey is the host key the Mac looked for must present, kit-config's,
-	// a public key as a known-hosts line or a .pub file has it: a Mac
-	// presenting another isn't it, whatever it says its name is. Without
-	// one, none is looked for (ErrNoHostKey).
-	HostKey string
+	// HostKey is the host key the old Mac must present, kit-config's, a
+	// public key as a known-hosts line or a .pub file has it: a Mac
+	// presenting another isn't it, whatever it says its name is.
+	// LocalHostName is the name it answers to on the local network,
+	// kit-config's, without .local. Without either, it isn't reached
+	// (ErrUnrecorded).
+	HostKey, LocalHostName string
 	// Terminal is the app kit's running in, as macOS names it asking
 	// whether it can find devices on local networks (apps.RunningIn):
 	// apps.Unnamed when "".
@@ -66,25 +61,16 @@ type Finder struct {
 	// OverSSH is kit running in an SSH session, where macOS never asks
 	// that, so a Mac ssh has no route to is said plainly not to answer.
 	OverSSH bool
-	// Browse and Resolve are how long Bonjour's listened to for the Macs
-	// offering Remote Login, and for where one answers: browseFor and
-	// resolveFor when 0.
-	Browse, Resolve time.Duration
 }
 
-// Mac is a Mac found answering over SSH.
+// Mac is the old Mac, answering over SSH.
 type Mac struct {
-	// Name is its name, kit's; Instance, the name it offers Remote Login
-	// under; Host and Port, where it answered.
-	Name, Instance, Host string
-	Port                 int
+	// Name is its name, kit's; Host, where it answered.
+	Name, Host string
 	// User and Home are who SSH reaches it as, and their home folder there.
 	User, Home string
 	// Rsync is Homebrew's rsync there.
 	Rsync restore.Found
-	// HostKey is its SSH host key, its type and key, as it says it: "" when
-	// it couldn't read one.
-	HostKey string
 	// protected is whether SSH may read the first protected folder there,
 	// as the probe says it, and the folder.
 	protected, folder string
@@ -93,19 +79,15 @@ type Mac struct {
 	opts []string
 }
 
-// candidate is a Mac offering Remote Login, and what came of asking it its
-// name: the Mac, or why not.
-type candidate struct {
-	instance string
-	mac      *Mac
-	why      error
-}
+// localHostName is a local hostname as macOS makes one: letters, digits
+// and -, not starting with -.
+var localHostName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]*$`)
 
-// Find finds the Mac whose kit name is from and that presents HostKey, as
-// a Mac's name is only its own say. One Mac offering Remote Login under two
-// names, as when it's renamed, counts once. None answering as from is an
-// error, ErrNoAnswer, saying of each Mac found why it isn't; no HostKey, an
-// error, ErrNoHostKey, saying how kit-config comes to record it.
+// Find reaches the old Mac, whose kit name is from, at LocalHostName, on
+// the local network, presenting HostKey, and asks it its kit name. Either
+// not recorded is an error, ErrUnrecorded, saying how kit-config comes to
+// record it; not answering, presenting another key, or answering as
+// another Mac, ErrNoAnswer, saying why.
 func (f Finder) Find(ctx context.Context, from string) (*Mac, error) {
 	if err := checkStateDir(f.StateDir); err != nil {
 		return nil, err
@@ -114,46 +96,34 @@ func (f Finder) Find(ctx context.Context, from string) (*Mac, error) {
 	if err != nil {
 		return nil, err
 	}
-	names, err := f.browse(ctx)
+	host, err := f.host(from)
 	if err != nil {
 		return nil, err
 	}
-	found := make([]candidate, len(names))
-	var wg sync.WaitGroup
-	for i, name := range names {
-		wg.Go(func() { found[i] = f.ask(ctx, name, from, pin) })
+	opts := sshOptions(pin, from)
+	p, err := f.probe(ctx, opts, host)
+	if err != nil {
+		return nil, f.unanswered(from, host, err)
 	}
-	wg.Wait()
-	if ctx.Err() != nil {
-		return nil, ctx.Err()
+	protected, folder, _ := strings.Cut(p.one(keyProtected), " ")
+	m := &Mac{
+		Name: strings.TrimSpace(p.one(keyKit)), Host: host, User: p.one(keyUser), Home: p.one(keyHome),
+		protected: protected, folder: folder, Rsync: rsyncThere(p[keyRsync]), run: f.Run, opts: opts,
 	}
-	var macs []*Mac
-	for _, c := range found {
-		if c.mac != nil && c.mac.Name == from && !slices.ContainsFunc(macs, c.mac.same) {
-			macs = append(macs, c.mac)
-		}
+	if m.Name != from {
+		return nil, fmt.Errorf("%s %w: %s answered, but it's %s", from, ErrNoAnswer, host, printable(cmp.Or(m.Name, "a Mac without kit")))
 	}
-	switch len(macs) {
-	case 0:
-		return nil, f.notFound(from, found)
-	case 1:
-		return macs[0], nil
-	}
-	hosts := make([]string, len(macs))
-	for i, m := range macs {
-		hosts[i] = m.Host
-	}
-	return nil, fmt.Errorf("more than one Mac answers as %s, %s: turn off Remote Login on all but the old Mac", from, strings.Join(hosts, " and "))
+	return m, nil
 }
 
 // pin readies the Mac called from's host key in a known-hosts file of its
 // own, and returns its path.
 func (f Finder) pin(from string) (string, error) {
 	if f.HostKey == "" {
-		return "", fmt.Errorf("%s %w: %s's SSH host key isn't in kit-config: kit apply on %s records it", from, ErrNoHostKey, from, from)
+		return "", fmt.Errorf("%s %w: %s's SSH host key isn't in kit-config: kit apply on %s records it", from, ErrUnrecorded, from, from)
 	}
 	if _, err := PublicKey(f.HostKey); err != nil {
-		return "", fmt.Errorf("%s %w: %s's SSH host key in kit-config isn't a valid key: kit apply on %s records it", from, ErrNoHostKey, from, from)
+		return "", fmt.Errorf("%s %w: %s's SSH host key in kit-config isn't a valid key: kit apply on %s records it", from, ErrUnrecorded, from, from)
 	}
 	path := pinned(f.StateDir)
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
@@ -172,68 +142,39 @@ func (f Finder) pin(from string) (string, error) {
 	return path, nil
 }
 
-// ask is the Mac offering Remote Login as name, asked its kit name, its
-// host key the one pinned, in the file pin, for from.
-func (f Finder) ask(ctx context.Context, name, from, pin string) candidate {
-	c := candidate{instance: name}
-	a, ok, err := f.resolve(ctx, name)
+// host is where the Mac called from answers on the local network: its
+// local hostname, then .local, as macOS answers to it.
+func (f Finder) host(from string) (string, error) {
 	switch {
-	case err != nil:
-		c.why = err
-		return c
-	case !ok:
-		c.why = errNoAnswer
-		return c
-	case !plainName.MatchString(a.host):
-		c.why = fmt.Errorf("names its host %q, which isn't a host name kit reaches: letters, digits, - and ., not starting with -", a.host)
-		return c
+	case f.LocalHostName == "":
+		return "", fmt.Errorf("%s %w: %s's local hostname isn't in kit-config: kit apply on %s records it", from, ErrUnrecorded, from, from)
+	case !localHostName.MatchString(f.LocalHostName):
+		return "", fmt.Errorf("%s %w: %s's local hostname in kit-config, %q, isn't one: kit apply on %s records it", from, ErrUnrecorded, from, printable(f.LocalHostName), from)
 	}
-	opts := sshOptions(pin, from, a.port)
-	p, err := f.probe(ctx, opts, a.host)
-	if _, key := errors.AsType[*hostKeyError](err); key {
-		err = fmt.Errorf("isn't %s: its host key doesn't match the one kit-config records (kit apply on %s records a new one)", from, from)
-	}
-	if f.OverSSH && errors.Is(err, errNoRoute) {
-		err = errNoAnswer
-	}
-	if err != nil {
-		c.why = err
-		return c
-	}
-	protected, folder, _ := strings.Cut(p.one(keyProtected), " ")
-	m := &Mac{
-		Name: strings.TrimSpace(p.one(keyKit)), Instance: name, Host: a.host, Port: a.port,
-		User: p.one(keyUser), Home: p.one(keyHome), protected: protected, folder: folder,
-		Rsync: rsyncThere(p[keyRsync]), HostKey: p.one(keyHostKey), run: f.Run, opts: opts,
-	}
-	if m.Name == "" {
-		c.why = errors.New("has no kit")
-		return c
-	}
-	c.mac = m
-	return c
+	return f.LocalHostName + ".local", nil
 }
 
-// localNetwork is why the Macs Bonjour found, called unrouted, that ssh
-// has no route to, didn't answer: as when macOS is asking whether the app
-// kit's running in can find devices on local networks, or was told it
-// can't. It's the app's to be allowed, so it's said once for them all.
-func (f Finder) localNetwork(unrouted []string) error {
-	app := cmp.Or(f.Terminal, apps.Unnamed)
-	return fmt.Errorf("%s %w: macOS may be asking whether %s can find devices on local networks: choose Allow, then try again, or, if Don't Allow was chosen, turn on %s in System Settings › Privacy & Security › Local Network",
-		strings.Join(unrouted, " and "), errNoAnswer, app, app)
+// unanswered is the error for the Mac called from not answering at host,
+// as ssh's error, err, says.
+func (f Finder) unanswered(from, host string, err error) error {
+	switch _, key := errors.AsType[*hostKeyError](err); {
+	case key:
+		return fmt.Errorf("%s %w: %s isn't %s: its host key doesn't match the one kit-config records (kit apply on %s records a new one)", from, ErrNoAnswer, host, from, from)
+	case errors.Is(err, errNoRoute) && !f.OverSSH:
+		app := cmp.Or(f.Terminal, apps.Unnamed)
+		return fmt.Errorf("%s %w: %s didn't answer: macOS may be asking whether %s can find devices on local networks: choose Allow, then try again, or, if Don't Allow was chosen, turn on %s in System Settings › Privacy & Security › Local Network",
+			from, ErrNoAnswer, host, app, app)
+	case errors.Is(err, errNoAnswer), errors.Is(err, errNoRoute):
+		return unrecorded{fmt.Errorf("%s %w: nothing answered at %s, its local hostname in kit-config: with %s awake on this network, kit apply on %s records the one it has now", from, ErrNoAnswer, host, from, from)}
+	}
+	return fmt.Errorf("%s %w: %s %s", from, ErrNoAnswer, host, printable(err.Error()))
 }
 
-// same reports whether m and other are the same Mac: by their host keys,
-// as a Mac renamed for a clash of names offers Remote Login under its new
-// name and host while its old ones, still cached, reach it too; else, a
-// key unread, by their host.
-func (m *Mac) same(other *Mac) bool {
-	if m.HostKey != "" && other.HostKey != "" {
-		return m.HostKey == other.HostKey
-	}
-	return strings.EqualFold(m.Host, other.Host) && m.Port == other.Port
-}
+// unrecorded is an error, in its own words, that's ErrUnrecorded too: kit
+// apply on the old Mac is the way on.
+type unrecorded struct{ error }
+
+func (u unrecorded) Unwrap() []error { return []error{u.error, ErrUnrecorded} }
 
 // rsyncThere is what Homebrew's rsync on a Mac said of itself, its
 // --version's lines.
@@ -242,29 +183,6 @@ func rsyncThere(lines []string) restore.Found {
 		return restore.Found{Why: "it isn't installed"}
 	}
 	return restore.ReadVersion(strings.Join(lines, "\n"))
-}
-
-// notFound is the error for no Mac answering as from, of those found:
-// those ssh has no route to said together, last (localNetwork).
-func (f Finder) notFound(from string, found []candidate) error {
-	if len(found) == 0 {
-		return fmt.Errorf("%s %w: no Mac on the network offers Remote Login", from, ErrNoAnswer)
-	}
-	var whys, unrouted []string
-	for _, c := range found {
-		switch {
-		case c.mac != nil:
-			whys = append(whys, fmt.Sprintf("%s answered, but it's %s", c.instance, c.mac.Name))
-		case errors.Is(c.why, errNoRoute):
-			unrouted = append(unrouted, c.instance)
-		default:
-			whys = append(whys, fmt.Sprintf("%s %s", c.instance, c.why))
-		}
-	}
-	if len(unrouted) > 0 {
-		whys = append(whys, f.localNetwork(unrouted).Error())
-	}
-	return fmt.Errorf("%s %w: %s", from, ErrNoAnswer, printable(strings.Join(whys, "; ")))
 }
 
 // Check says what stops m being copied from, to a Mac where the person is
@@ -313,26 +231,26 @@ func (m *Mac) Opened() *restore.Opened {
 type Source struct {
 	Finder           Finder
 	From, User, Home string
-	// HostKey is the host key kit-config's remote records for From now,
-	// looked for each time the Mac's tried again, as it may have been
-	// recorded there since the run began: kit apply on the old Mac records
-	// it. Without it, the Finder's is kept.
-	HostKey func(ctx context.Context) (string, error)
-	tried   bool
+	// Recorded is what kit-config's remote records for From now: its host
+	// key and local hostname, looked for each time the Mac's tried again,
+	// as kit apply on it may have recorded them since the run began.
+	// Without it, the Finder's are kept.
+	Recorded func(ctx context.Context) (hostKey, localHostName string, err error)
+	tried    bool
 }
 
 // Open finds the Mac to restore from, and opens it, once nothing stops it
-// being copied from: none answering is an error, ErrNoAnswer, saying why
-// of each found; no host key to look for, or none to be had from
-// kit-config's remote, ErrNoHostKey; what stops it, Check's, each naming
+// being copied from: not answering is an error, ErrNoAnswer, saying why;
+// its host key or local hostname not recorded, or not to be had from
+// kit-config's remote, ErrUnrecorded; what stops it, Check's, each naming
 // its fix.
 func (s *Source) Open(ctx context.Context) (*restore.Opened, error) {
-	if s.tried && s.HostKey != nil {
-		key, err := s.HostKey(ctx)
+	if s.tried && s.Recorded != nil {
+		key, name, err := s.Recorded(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("%s %w: kit couldn't fetch its SSH host key from kit-config: %w", s.From, ErrNoHostKey, err)
+			return nil, fmt.Errorf("%s %w: kit couldn't fetch kit-config to read its record of %s: %w", s.From, ErrUnrecorded, s.From, err)
 		}
-		s.Finder.HostKey = key
+		s.Finder.HostKey, s.Finder.LocalHostName = key, name
 	}
 	s.tried = true
 	m, err := s.Finder.Find(ctx, s.From)

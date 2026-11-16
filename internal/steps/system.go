@@ -151,37 +151,43 @@ func service(run runner.Runner, admin *Admin, name, title, label, plist string) 
 	}
 }
 
-// HostKeyName names the step recording this Mac's SSH host key in
-// kit-config.
+// HostKeyName names the step recording this Mac's SSH host key and local
+// hostname in kit-config.
 const HostKeyName = "host-key"
 
 // SSHAddress is where this Mac's Remote Login answers.
 const SSHAddress = "127.0.0.1:22"
 
-// HostKeying is the step recording this Mac's SSH host key in kit-config,
-// for a Mac restored from it to know it by.
+// HostKeying is the step recording this Mac's SSH host key and local
+// hostname in kit-config, for a Mac restored from it to reach it by, and
+// know it by.
 type HostKeying struct {
 	// RemoteLogin is whether the Mac's Remote Login feature is on: off,
-	// there's no host key to record.
+	// there's nothing to record.
 	RemoteLogin bool
 	// Dir is where the Mac keeps its host keys: oldmac.SSHDir. Address is
 	// where its Remote Login answers: SSHAddress.
 	Dir, Address string
-	// Recorded is the host key kit-config records for this Mac: "" for none.
-	Recorded string
-	// Record records key as this Mac's in kit-config, committing and
-	// pushing it, and says how that went.
-	Record func(ctx context.Context, key string) (check.Result, error)
+	// Run runs scutil, which says the Mac's local hostname.
+	Run runner.Runner
+	// Recorded is the host key kit-config records for this Mac, and
+	// RecordedName its local hostname: "" for none.
+	Recorded, RecordedName string
+	// Record records key as this Mac's host key in kit-config, and
+	// localHostName as its local hostname, committing and pushing them, and
+	// says how that went.
+	Record func(ctx context.Context, key, localHostName string) (check.Result, error)
 }
 
 // wakeFor is how long Remote Login has to answer, making the host keys.
 const wakeFor = 30 * time.Second
 
 // HostKey checks kit-config records this Mac's SSH host key, the one its
-// Remote Login presents, as oldmac reads it, while the Remote Login feature
-// is on; applying records it, as a Mac set up again gets a new key, and
-// the new one is right. With no key yet, applying has Remote Login answer
-// once, which makes them (wake), then records it.
+// Remote Login presents, as oldmac reads it, and its local hostname, as
+// macOS says it, while the Remote Login feature is on; applying records
+// them, as a Mac set up again gets a new key, and one renamed a new name,
+// and the new ones are right. With no key yet, applying has Remote Login
+// answer once, which makes them (wake), then records it.
 func HostKey(h HostKeying) engine.Step {
 	// done is what recording did, which the check after it says.
 	var done *check.Result
@@ -192,7 +198,7 @@ func HostKey(h HostKeying) engine.Step {
 		}
 		return step
 	}
-	step.Check = func(context.Context) check.Result {
+	step.Check = func(ctx context.Context) check.Result {
 		if done != nil {
 			return *done
 		}
@@ -210,6 +216,15 @@ func HostKey(h HostKeying) engine.Step {
 		case recorded != own:
 			return problem(HostKeyName, "not kit-config's", [3]string{"differs", "SSH host key not the one kit-config records", "kit apply records this Mac's: a Mac set up again has a new one"})
 		}
+		name, err := localHostName(ctx, h.Run)
+		switch {
+		case err != nil:
+			return failed(err)
+		case h.RecordedName == "":
+			return problem(HostKeyName, "local hostname not in kit-config", [3]string{"unnamed", "local hostname not in kit-config", "kit apply records it"})
+		case h.RecordedName != name:
+			return problem(HostKeyName, "local hostname not kit-config's", [3]string{"renamed", "local hostname not the one kit-config records", "kit apply records this Mac's: it's been renamed"})
+		}
 		return check.Result{State: check.OK, Summary: "in kit-config"}
 	}
 	step.Apply = func(ctx context.Context, _ check.Result) error {
@@ -217,7 +232,11 @@ func HostKey(h HostKeying) engine.Step {
 		if err != nil {
 			return err
 		}
-		res, err := h.Record(ctx, own)
+		name, err := localHostName(ctx, h.Run)
+		if err != nil {
+			return err
+		}
+		res, err := h.Record(ctx, own, name)
 		if err != nil {
 			return err
 		}
@@ -225,6 +244,20 @@ func HostKey(h HostKeying) engine.Step {
 		return nil
 	}
 	return step
+}
+
+// localHostName is the name this Mac answers to on the local network,
+// without .local: macOS's LocalHostName, as scutil says it.
+func localHostName(ctx context.Context, run runner.Runner) (string, error) {
+	out, err := output(ctx, run, "scutil", "--get", "LocalHostName")
+	if err != nil {
+		return "", fmt.Errorf("read this Mac's local hostname: %w", err)
+	}
+	name := strings.TrimSpace(out)
+	if name == "" {
+		return "", errors.New("this Mac has no local hostname: set one in System Settings › General › Sharing")
+	}
+	return name, nil
 }
 
 // made is this Mac's host key, Remote Login woken to make it when there's

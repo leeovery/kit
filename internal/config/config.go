@@ -64,12 +64,15 @@ const DefaultNightlyAt = 3 * time.Hour
 // Mac is a Mac the config repository knows: From is the Mac it started as
 // a copy of, "" when none or one the config doesn't know; HostKey, its SSH
 // host key, its type then the key, as a Mac it's restored to must find it
-// presenting: "" until its kit apply records it.
+// presenting; LocalHostName, the name it answers to on the local network,
+// without .local, as macOS's LocalHostName has it: each "" until its kit
+// apply records it.
 type Mac struct {
-	Name        string
-	Description string
-	From        string
-	HostKey     string
+	Name          string
+	Description   string
+	From          string
+	HostKey       string
+	LocalHostName string
 }
 
 // file is kit.toml as written.
@@ -84,9 +87,10 @@ type file struct {
 }
 
 type macFile struct {
-	Description string `toml:"description,omitempty"`
-	From        string `toml:"from,omitempty"`
-	HostKey     string `toml:"host_key,omitempty"`
+	Description   string `toml:"description,omitempty"`
+	From          string `toml:"from,omitempty"`
+	HostKey       string `toml:"host_key,omitempty"`
+	LocalHostName string `toml:"local_hostname,omitempty"`
 }
 
 // macName is what a Mac's name may be: it names the Mac's own declarations
@@ -159,7 +163,7 @@ func Load(dir string, kinds []Section) (*Config, error) {
 		case name == Shared:
 			return nil, fmt.Errorf("%s: a Mac can't be called %s: that's the file every Mac reads", File, Shared)
 		}
-		cfg.Macs[name] = Mac{Name: name, Description: m.Description, From: m.From, HostKey: strings.TrimSpace(m.HostKey)}
+		cfg.Macs[name] = m.mac(name)
 	}
 	for name, m := range cfg.Macs {
 		if !cfg.Knows(m.From) {
@@ -179,14 +183,20 @@ func Load(dir string, kinds []Section) (*Config, error) {
 	return cfg, nil
 }
 
-// HostKeyIn is the host key a kit.toml, data, records for the Mac named
-// mac, as Load reads it: "" for none.
-func HostKeyIn(data []byte, mac string) (string, error) {
+// mac is the Mac named name, as m, its table, has it.
+func (m macFile) mac(name string) Mac {
+	return Mac{Name: name, Description: m.Description, From: m.From, HostKey: strings.TrimSpace(m.HostKey), LocalHostName: strings.TrimSpace(m.LocalHostName)}
+}
+
+// MacIn is the Mac named name as a kit.toml, data, records it: its host
+// key and local hostname as Load reads them; nothing for a Mac data doesn't
+// know.
+func MacIn(data []byte, name string) (Mac, error) {
 	var f file
 	if _, err := toml.Decode(string(data), &f); err != nil {
-		return "", fmt.Errorf("%s: %w", File, err)
+		return Mac{}, fmt.Errorf("%s: %w", File, err)
 	}
-	return strings.TrimSpace(f.Macs[mac].HostKey), nil
+	return f.Macs[name].mac(name), nil
 }
 
 // Knows reports whether the config knows a Mac named name.

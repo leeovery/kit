@@ -579,13 +579,15 @@ the next apply, saying why in git's words. A push that fails is the next apply's
 committed and pushed, the boot's record forgets the Mac, and later runs have no such step.
 
 Every Mac's SSH host key is recorded in its table, `host_key`, its type then the key (a host
-key is public), for a Mac restored from it to know it by (Data restore). The `host-key` step
-(the Git row), on every Mac, is ok and quiet while its `remote-login` feature is off: there's
-no key to record. With it on, after Remote Login's step, it checks this Mac's own key, the
-first of `/etc/ssh`'s `ssh_host_ed25519_key.pub`, then the rest, anyone may read, against
+key is public), and its local hostname, `local_hostname`, as macOS's LocalHostName has it
+(`scutil --get LocalHostName`, without `.local`), for a Mac restored from it to reach it by and
+know it by (Data restore). The `host-key` step (the Git row), on every Mac, is ok and quiet
+while its `remote-login` feature is off: there's nothing to record. With it on, after Remote
+Login's step, it checks this Mac's own key, the first of `/etc/ssh`'s
+`ssh_host_ed25519_key.pub`, then the rest, anyone may read, and its local hostname, against
 kit.toml's: ok when they match; not recorded, or another (a Mac set up again under its name
-has a new key, which is right), it needs attention, and `kit apply` records it, committing and
-pushing kit.toml, placed as `new-mac` is, after it. macOS makes the keys at Remote Login's first
+has a new key, a Mac renamed a new name, which is right), it needs attention, and `kit apply`
+records both, committing and pushing kit.toml, placed as `new-mac` is, after it. macOS makes the keys at Remote Login's first
 connection (`ssh.plist` is inetd-style: `sshd-keygen-wrapper` runs for each one), so with none
 yet apply connects to port 22 on this Mac once, reading the banner, logging into nothing, then
 records the key. It waits for the next apply, saying why, while kit.toml has edits not
@@ -868,6 +870,7 @@ nightly_at = "03:00"   # when the nightly run falls due: 03:00 unless set
 [macs.laptop]
 description = "MacBook Pro"
 host_key = "ssh-ed25519 AAAA…"   # recorded by the host-key step
+local_hostname = "Laptop"         # likewise: where a Mac restored from it reaches it
 
 [macs.studio]
 description = "Mac Studio"
@@ -1260,17 +1263,19 @@ refuses a line the restore would refuse, before writing anything, and copies not
   holding data is here, never touched, though one recorded here is restored once it's absent
   again; `--at` picks the backup, the latest at or before a date or time.
 - **Sources, best first.** The old Mac, over SSH on the local network, while it answers
-  (found among the Macs offering SSH, confirmed by its kit name and by the host key kit-config
-  records for it, `host_key`, ssh trusting that key alone, never one on first sight: a Mac
-  presenting another isn't it, whatever it says its name is; logged into with the key kit's
-  secrets write); its Time Machine disk, the backup's snapshot mounted read-only; Arq, restored
+  (reached at the local hostname kit-config records for it, `local_hostname`, then `.local`,
+  confirmed by the host key kit-config records, `host_key`, ssh trusting that key alone, never
+  one on first sight: a Mac presenting another isn't it, whatever it says its name is; and by
+  its kit name; logged into with the key kit's secrets write); its Time Machine disk, the backup's snapshot mounted read-only; Arq, restored
   by the person in Arq's app into a holding folder kit names, then put in place by kit and
   compared as from Time Machine, the holding folder deleted after. When the old Mac doesn't
-  answer, or kit-config records no host key for it, or one that isn't a key (it isn't looked
-  for: `kit apply` on it records it), a card offers its Time Machine disk, Arq, or trying again,
-  which first fetches kit-config and takes the old Mac's host key from the remote's kit.toml,
-  merging nothing, as `kit apply` on it may have recorded it, or a new one, since the run began;
-  without a terminal, the failure says to run `kit apply` on it, then here. A Mac rebuilt
+  answer, or kit-config records no host key or local hostname for it, or one that isn't one
+  (it isn't reached: `kit apply` on it records them), a card offers its Time Machine disk, Arq,
+  or trying again, which first fetches kit-config and takes the old Mac's host key and local
+  hostname from the remote's kit.toml, merging nothing, as `kit apply` on it may have recorded
+  them, or new ones (a Mac renamed), since the boot cloned kit-config; the card's words say to
+  run `kit apply` on it, then try again; without a terminal, the failure says to run `kit
+  apply` on it, then here. A Mac rebuilt
   under its own name has no old Mac: its card offers its own Time Machine disk, Arq, or
   restoring nothing, looking for the disks again while there's none to choose or one's
   locked, and Arq's card names this Mac's backup; without a terminal it fails, naming `kit
