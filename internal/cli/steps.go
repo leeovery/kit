@@ -103,7 +103,7 @@ func (r *run) manualSteps(ordered []steps.ManualStep, others []engine.Step, rais
 // things (kind.Carded), as a secrets store's sign-in, each a step of its
 // own, raised with raise at a terminal: applied after what installs them
 // (Card.Packages) that the config declares, so they're among their list's
-// first; once found not done, it waits for the program it needs on kit's
+// first, or after they're there however they came; once found not done, it waits for the program it needs on kit's
 // PATH and the app it needs installed in folders, whatever installs them,
 // and kit opens the app as its card first comes up. Its kind's step,
 // among kindSteps, waits for it partway through applying (Later), not
@@ -129,13 +129,28 @@ func (r *run) cardSteps(raise *steps.Raise, folders *apps.Folders, kindSteps []e
 			for _, p := range c.Packages {
 				if r.declares(p) {
 					kindName, thing, _ := strings.Cut(p, ":")
-					step.Waits = append(step.Waits, r.thingWait(kindName, thing))
+					step.Waits = append(step.Waits, orArrived(r.thingWait(kindName, thing), m.Await))
 				}
 			}
 			out = append(out, step)
 		}
 	}
 	return out
+}
+
+// orArrived is w, one of a step's things, there too once every one of
+// arrived is, as a sign-in's package is once its program and app are,
+// however they came: an app installed by hand makes the cask's install fail,
+// and the card goes up all the same.
+func orArrived(w engine.Wait, arrived []engine.Wait) engine.Wait {
+	if len(arrived) == 0 {
+		return w
+	}
+	installed := w.Ready
+	w.Ready = func(ctx context.Context) bool {
+		return installed(ctx) || !slices.ContainsFunc(arrived, func(a engine.Wait) bool { return !a.Ready(ctx) })
+	}
+	return w
 }
 
 // appFolders are the folders apps are installed in: kit's own

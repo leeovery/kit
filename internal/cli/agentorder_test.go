@@ -259,13 +259,21 @@ func TestOrderOfTheSignInWaitsForItsProgramAndApp(t *testing.T) {
 }
 
 // The password manager's casks, declared for this Mac, are in before its
-// sign-in, as its driver names them, its program and app with them.
+// sign-in, as its driver names them, a tap's by its own name, its program
+// and app with them.
 func TestOrderOfTheSignInAfterItsCasks(t *testing.T) {
-	w := orderWorld(t)
-	w.writeSection(t, "laptop", "homebrew casks", "1password\n1password-cli\n")
-	doc := w.order(t, "1password-sign-in")
-	if got, want := names(doc.Before), []string{"homebrew", "cask:1password", "cask:1password-cli", "brew (on PATH)", "op (on PATH)", "1Password (app)"}; !slices.Equal(got, want) {
-		t.Errorf("before the sign-in = %q, want %q", got, want)
+	for _, tt := range []struct{ name, casks string }{
+		{"Homebrew's", "1password\n1password-cli\n"},
+		{"a tap's", "1password\nowner/tap/1password-cli\n"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			w := orderWorld(t)
+			w.writeSection(t, "laptop", "homebrew casks", tt.casks)
+			doc := w.order(t, "1password-sign-in")
+			if got, want := names(doc.Before), []string{"homebrew", "cask:1password", "cask:1password-cli", "brew (on PATH)", "op (on PATH)", "1Password (app)"}; !slices.Equal(got, want) {
+				t.Errorf("before the sign-in = %q, want %q", got, want)
+			}
+		})
 	}
 }
 

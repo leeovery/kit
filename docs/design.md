@@ -119,7 +119,8 @@ those comments, as nothing written by hand goes without being asked.
   then stands deferred, saying it isn't there yet. The config's waits order the rest (npm
   after mise, `--before npm`). Three orders stay, being kit's own data: each store's
   secrets after its sign-in, the sign-in after what its driver names it comes as, declared
-  for the Mac (1Password's casks), so those install first; git's settings after the secrets
+  for the Mac (1Password's casks), so those install first, or till its program and app are
+  there however they came (an app installed by hand fails its cask); git's settings after the secrets
   they sign with; login items after the casks and App Store apps they open.
 - **A list's lines held back:** a list's section can say, after its header, what its lines
   wait for, each as often as wanted: `--after` a step, or one of a step's things
