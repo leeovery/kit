@@ -371,19 +371,36 @@ func TestExecEndsACommandWithSIGTERMFirst(t *testing.T) {
 }
 
 // A command that exits by itself, a child it left holding its output, has
-// that output waited for as long as any command's, no longer: the grace
-// kit gives a command it ends isn't added to it.
+// that output waited for, then given up on, not waited for till the child
+// ends. How long it's waited for, the grace kit gives a command it ends not
+// added, is TestDetachWaitsAsLongAsTheClockSays's: timed here, under heavy
+// load, a wait of 500ms has taken over 7s.
 func TestExecWaitsForTheOutputOfACommandThatExits(t *testing.T) {
-	r, _ := programs(t, map[string]string{"exits": "/bin/sleep 5 & exit 0"})
+	left := filepath.Join(t.TempDir(), "left")
+	r, _ := programs(t, map[string]string{"exits": `/bin/sleep 600 & echo $! > "$1"; exit 0`})
+	t.Cleanup(func() {
+		if pid, runs := stillRuns(t, left, 0); runs && pid != 0 {
+			_ = syscall.Kill(pid, syscall.SIGKILL)
+		}
+	})
 	const wait = 500 * time.Millisecond
 	r, _ = timed(r, wait)
 	start := time.Now()
-	if _, err := r.Run(t.Context(), runner.Command{Name: "exits"}); err == nil {
-		t.Error("Run() = nil, want its output's wait to have run out")
-	}
-	// With the grace, 2s, added, it would take longer.
-	if took := time.Since(start); took < wait || took > wait+time.Second {
-		t.Errorf("Run() took %v, want the output waited for %v", took, wait)
+	ran := make(chan error, 1)
+	go func() {
+		_, err := r.Run(t.Context(), runner.Command{Name: "exits", Args: []string{left}})
+		ran <- err
+	}()
+	select {
+	case err := <-ran:
+		if err == nil {
+			t.Error("Run() = nil, want its output's wait to have run out")
+		}
+		if took := time.Since(start); took < wait {
+			t.Errorf("Run() took %v, want the output waited for %v", took, wait)
+		}
+	case <-time.After(time.Minute):
+		t.Fatal("Run() still waits for the output of what the command left, want it given up on once waited for")
 	}
 }
 

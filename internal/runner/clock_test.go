@@ -3,6 +3,7 @@ package runner
 import (
 	"context"
 	"errors"
+	"os/exec"
 	"testing"
 	"time"
 )
@@ -48,5 +49,25 @@ func TestTheRealClock(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Error("the time limit never ran out")
+	}
+}
+
+// A command's output is waited for as long as its clock says, the grace kit
+// gives a command it ends not added to it; kit's own sudo's, twice that, so
+// sudo has the wait to pass SIGTERM on to what it runs as root.
+func TestDetachWaitsAsLongAsTheClockSays(t *testing.T) {
+	k := &clock{after: realClock.after, wait: 500 * time.Millisecond}
+	for _, tc := range []struct {
+		cmd  Command
+		want time.Duration
+	}{
+		{Command{Name: "brew", Args: []string{"list"}}, k.wait},
+		{Command{Name: "sudo", Args: []string{"-n", "true"}}, 2 * k.wait},
+	} {
+		c := exec.Command("/usr/bin/true")
+		detach(c, tc.cmd, k)
+		if c.WaitDelay != tc.want {
+			t.Errorf("%s's output waited for %v, want %v", tc.cmd.Name, c.WaitDelay, tc.want)
+		}
 	}
 }
