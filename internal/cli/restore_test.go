@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/leeovery/kit/internal/logs"
+	"github.com/leeovery/kit/internal/runner/runnertest"
 )
 
 // startedFrom has kit.toml say the test's Mac, laptop, started from
@@ -176,40 +177,62 @@ func TestApplyRestoresFromTheBackupNamed(t *testing.T) {
 	}
 }
 
-// Started from another Mac, the restore copies from it over SSH, finding
-// it through Bonjour, as the Mac presenting the host key kit-config records
-// for it; with none recorded, it isn't looked for. Without a terminal,
-// there's no card to ask where else to restore from, so the step fails,
-// saying why and the flag that answers it. A Mac clean-installed under its
-// own name restores from its own backups, never looking for a Mac:
-// without a terminal, there's no card to choose them on, so it fails
-// likewise.
+// studioName is studio's local hostname, as its kit apply records it;
+// studioAt, where it answers on the local network.
+const (
+	studioName = "Someones-Mac-Studio"
+	studioAt   = studioName + ".local"
+)
+
+// recordingStudio has kit.toml record studio's host key and local hostname,
+// as its kit apply does: none for "".
+func (w *world) recordingStudio(t *testing.T, key, name string) {
+	t.Helper()
+	var lines string
+	if key != "" {
+		lines += "host_key = \"" + key + "\"\n"
+	}
+	if name != "" {
+		lines += "local_hostname = \"" + name + "\"\n"
+	}
+	w.write(t, configFile, w.read(t, configFile)+lines)
+}
+
+// Started from another Mac, the restore copies from it over SSH, at the
+// local hostname kit-config records for it, as the Mac presenting the host
+// key recorded; without either recorded, it isn't reached. Without a
+// terminal, there's no card to ask where else to restore from, so the step
+// fails, saying why, the way on, and the flag that answers it. A Mac
+// clean-installed under its own name restores from its own backups, never
+// reaching a Mac: without a terminal, there's no card to choose them on,
+// so it fails likewise.
 func TestApplyRestoreWithoutATerminalNamesTheFlag(t *testing.T) {
 	const ways = ": kit apply --restore-from time-machine|arq restores ~/Code from another source, or kit restore remove ~/Code drops its line\n"
 	for _, tt := range []struct {
-		name     string
-		recorded bool
-		why      string
+		name, key, named string
+		why              string
 	}{
-		{"its host key recorded", true, "studio doesn't answer over SSH: no Mac on the network offers Remote Login"},
-		{"no host key recorded", false, "studio can't be restored from: studio's SSH host key isn't in kit-config: kit apply on studio records it, then kit apply here"},
+		{"recorded, not answering", otherKey, studioName, "studio doesn't answer over SSH: nothing answered at " + studioAt + ", its local hostname in kit-config: " +
+			"with studio awake on this network, kit apply on studio records the one it has now, then kit apply here"},
+		{"no host key recorded", "", studioName, "studio can't be restored from: studio's SSH host key isn't in kit-config: kit apply on studio records it, then kit apply here"},
+		{"no local hostname recorded", otherKey, "", "studio can't be restored from: studio's local hostname isn't in kit-config: kit apply on studio records it, then kit apply here"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			w := laptopWorld(t)
 			w.writeSection(t, "laptop", "restore", "~/Code\n")
 			w.startedFrom(t)
 			w.settingUp(t)
-			if tt.recorded {
-				w.write(t, ".config/kit/kit.toml", w.read(t, ".config/kit/kit.toml")+"host_key = \"ssh-rsa ZmFrZSByc2EgaG9zdCBrZXk=\"\n")
-			}
+			w.recordingStudio(t, tt.key, tt.named)
 			w.rsync3()
-			w.fake.On("dns-sd", "-B", "_ssh._tcp", "local.").Prints("Browsing for _ssh._tcp.local.\n")
+			w.fake.OnMatch("ssh", func(args []string) bool { return slices.Contains(args, studioAt) }).
+				PrintsToStderr("ssh: connect to host " + studioAt + " port 22: Operation timed out\n").Exits(255)
 			out, errOut, code := w.run(t, "apply", "restore")
 			if want := "restore failed couldn't restore: " + tt.why + ways; code == 0 || !strings.Contains(out, want) {
 				t.Errorf("kit apply restore printed\n%s%s\nexit %d; want it failing, saying\n%s", out, errOut, code, want)
 			}
-			if browsed := slices.Contains(w.fake.Calls(), "dns-sd -B _ssh._tcp local."); browsed != tt.recorded {
-				t.Errorf("looked for Macs on the network: %v, want %v", browsed, tt.recorded)
+			reached := slices.ContainsFunc(w.fake.Calls(), func(c string) bool { return strings.HasPrefix(c, "ssh ") })
+			if want := tt.key != "" && tt.named != ""; reached != want {
+				t.Errorf("reached studio: %v, want %v", reached, want)
 			}
 		})
 	}
@@ -224,10 +247,67 @@ func TestApplyRestoreWithoutATerminalNamesTheFlag(t *testing.T) {
 		if code == 0 || !strings.Contains(out, want) {
 			t.Errorf("kit apply restore printed\n%s%s\nexit %d; want it failing, saying\n%s", out, errOut, code, want)
 		}
-		if calls := w.fake.Calls(); slices.ContainsFunc(calls, func(c string) bool { return strings.HasPrefix(c, "dns-sd") || strings.HasPrefix(c, "ssh") }) {
-			t.Errorf("kit apply ran %q; want no Mac looked for", calls)
+		if calls := w.fake.Calls(); slices.ContainsFunc(calls, func(c string) bool { return strings.HasPrefix(c, "ssh") }) {
+			t.Errorf("kit apply ran %q; want no Mac reached", calls)
 		}
 	})
+}
+
+// Moving day: a Mac the boot set up as started from studio copies its
+// [restore] paths from studio at its first kit apply, reaching it at the
+// local hostname kit-config records, then .local, trusting the host key
+// recorded alone, under studio's kit name, for the probe, the look and the
+// copy; nothing fetched, as the boot's kit-config is the record.
+func TestApplyRestoresFromTheMacItStartedFrom(t *testing.T) {
+	w := laptopWorld(t)
+	w.writeSection(t, "laptop", "restore", "~/Code\n")
+	w.startedFrom(t)
+	w.settingUp(t)
+	w.recordingStudio(t, otherKey, studioName)
+	w.rsync3()
+	w.fake.OnMatch("ssh", func(args []string) bool {
+		return slices.Contains(args, studioAt) && strings.Contains(args[len(args)-1], "kit/machine")
+	}).Prints("user=" + filepath.Base(w.home) + "\nhome=" + w.home + "\nkit=studio\nprotected=read Documents\n" +
+		"rsync=rsync  version 3.4.1  protocol version 32\nrsync=Capabilities:\nrsync=    xattrs, crtimes\n")
+	w.fake.OnMatch("ssh", func(args []string) bool {
+		return slices.Contains(args, studioAt) && strings.Contains(args[len(args)-1], "\nlook ")
+	}).Prints("folder\x00")
+	const stats = "Number of files: 2 (reg: 1, dir: 1)\nNumber of regular files transferred: 1\nTotal file size: 1000 bytes\nTotal transferred file size: 1000 bytes\n"
+	from := studioAt + ":" + filepath.Join(w.home, "Code") + "/"
+	rsyncs := func(flag string) *runnertest.Script {
+		return w.fake.OnMatch("rsync", func(args []string) bool { return slices.Contains(args, flag) && slices.Contains(args, from) })
+	}
+	rsyncs("--dry-run").Prints(stats)
+	rsyncs("--info=progress2,skip1").Prints("1000 100% 1.00MB/s 0:00:01 (xfr#1, to-chk=0/1)\r\n" + stats)
+	rsyncs("--checksum")
+
+	out, errOut, code := w.run(t, "apply", "restore")
+	if code != 0 || !strings.Contains(out, "restore restored ~/Code\n") {
+		t.Fatalf("kit apply restore printed\n%s%s\nexit %d; want ~/Code restored", out, errOut, code)
+	}
+	if rec := w.read(t, restoreRecord); !strings.Contains(rec, `"~/Code": {`) || !strings.Contains(rec, `"state": "done"`) || !strings.Contains(rec, `"detail": "studio"`) {
+		t.Errorf("the restore's record = %s; want ~/Code done, from studio", rec)
+	}
+	pinned := filepath.Join(w.stateDir(), "restore", "pinned_host")
+	if got := w.read(t, strings.TrimPrefix(pinned, w.home+"/")); got != "studio "+otherKey+"\n" {
+		t.Errorf("the pinned key's file = %q; want studio's key", got)
+	}
+	trusts := []string{"StrictHostKeyChecking=yes", "UserKnownHostsFile=" + pinned, "HostKeyAlias=studio"}
+	for _, c := range w.fake.Commands() {
+		said := strings.Join(c.Args, " ")
+		if c.Name == "git" && strings.Contains(said, " fetch ") {
+			t.Errorf("ran git %s; want nothing fetched at the first try", said)
+		}
+		copying := c.Name == "rsync" && slices.Contains(c.Args, from)
+		if c.Name != "ssh" && !copying {
+			continue
+		}
+		for _, want := range trusts {
+			if !strings.Contains(said, want) {
+				t.Errorf("%s %s\nwant it holding %s", c.Name, said, want)
+			}
+		}
+	}
 }
 
 // restoreWaits are the steps the data restore waits for in kit apply's run

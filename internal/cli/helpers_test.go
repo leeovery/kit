@@ -28,17 +28,23 @@ import (
 	"github.com/leeovery/kit/internal/steps"
 )
 
-// hostKey is the test Mac's SSH host key, plainly no real one: the one
-// twoMacs records for laptop, and the world's Mac presents.
-const hostKey = "ssh-ed25519 ZmFrZSBlZDI1NTE5IGhvc3Qga2V5"
+// hostKey is the test Mac's SSH host key, plainly no real one, and
+// localName its local hostname: the ones twoMacs records for laptop, and
+// the world's Mac presents.
+const (
+	hostKey   = "ssh-ed25519 ZmFrZSBlZDI1NTE5IGhvc3Qga2V5"
+	localName = "Someones-MacBook-Pro"
+)
 
-// twoMacs is a kit.toml knowing two Macs, laptop's host key recorded.
+// twoMacs is a kit.toml knowing two Macs, laptop's host key and local
+// hostname recorded.
 const twoMacs = `format = 1
 primary = "laptop"
 
 [macs.laptop]
 description = "MacBook Pro"
 host_key = "` + hostKey + `"
+local_hostname = "` + localName + `"
 
 [macs.studio]
 description = "Mac Studio"

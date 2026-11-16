@@ -18,17 +18,19 @@ import (
 	"github.com/leeovery/kit/internal/steps"
 )
 
-// hostKeyStep is the step recording this Mac's SSH host key in kit-config,
-// its host keys in dir and its Remote Login answering at address, each
-// kit's own when "", with the Remote Login feature on (remoteLogin), after
-// that feature's step; committed and pushed as the new Mac the boot added
-// is (placeCommits), unless kit.toml has edits not committed.
+// hostKeyStep is the step recording this Mac's SSH host key and local
+// hostname in kit-config, its host keys in dir and its Remote Login
+// answering at address, each kit's own when "", with the Remote Login
+// feature on (remoteLogin), after that feature's step; committed and pushed
+// as the new Mac the boot added is (placeCommits), unless kit.toml has
+// edits not committed.
 func (r *run) hostKeyStep(dir, address, stateDir string, remoteLogin bool) engine.Step {
+	mac := r.cfg.Macs[r.machine]
 	step := steps.HostKey(steps.HostKeying{
-		RemoteLogin: remoteLogin, Dir: cmp.Or(dir, oldmac.SSHDir), Address: cmp.Or(address, steps.SSHAddress),
-		Recorded: r.cfg.Macs[r.machine].HostKey,
-		Record: func(ctx context.Context, key string) (check.Result, error) {
-			return r.recordHostKey(ctx, stateDir, key)
+		RemoteLogin: remoteLogin, Dir: cmp.Or(dir, oldmac.SSHDir), Address: cmp.Or(address, steps.SSHAddress), Run: r.run,
+		Recorded: mac.HostKey, RecordedName: mac.LocalHostName,
+		Record: func(ctx context.Context, key, localHostName string) (check.Result, error) {
+			return r.recordHostKey(ctx, stateDir, key, localHostName)
 		},
 	})
 	if remoteLogin {
@@ -38,13 +40,14 @@ func (r *run) hostKeyStep(dir, address, stateDir string, remoteLogin bool) engin
 }
 
 // recordHostKey records key as this Mac's SSH host key in kit.toml, and
-// commits and pushes it, saying how that went. kit.toml with edits not
-// committed, it waits, as committing it whole would take them too: the
-// person's, for kit reconcile; or this Mac's table, as the boot left it,
-// for the new-mac step, kit's state, stateDir, saying so. Committed
-// nothing, as when git can't sign yet, kit.toml goes back as it was: left
-// edited, the key would read as recorded, and no run would commit it.
-func (r *run) recordHostKey(ctx context.Context, stateDir, key string) (check.Result, error) {
+// localHostName as its local hostname, and commits and pushes them, saying
+// how that went. kit.toml with edits not committed, it waits, as
+// committing it whole would take them too: the person's, for kit
+// reconcile; or this Mac's table, as the boot left it, for the new-mac
+// step, kit's state, stateDir, saying so. Committed nothing, as when git
+// can't sign yet, kit.toml goes back as it was: left edited, the key would
+// read as recorded, and no run would commit it.
+func (r *run) recordHostKey(ctx context.Context, stateDir, key, localHostName string) (check.Result, error) {
 	changes, err := r.repo.Changes(ctx)
 	if err != nil {
 		return check.Result{}, err
@@ -55,16 +58,16 @@ func (r *run) recordHostKey(ctx context.Context, stateDir, key string) (check.Re
 		case err != nil:
 			return check.Result{}, err
 		case newMac == r.machine:
-			return check.Result{}, engine.NotYet(config.File + " holds this Mac's table, not committed yet: the new-mac step commits it, then kit apply records the key")
+			return check.Result{}, engine.NotYet(config.File + " holds this Mac's table, not committed yet: the new-mac step commits it, then kit apply records this Mac's host key and local hostname")
 		}
-		return check.Result{}, engine.NotYet(config.File + " has edits not committed: kit reconcile settles them, then kit apply records the key")
+		return check.Result{}, engine.NotYet(config.File + " has edits not committed: kit reconcile settles them, then kit apply records this Mac's host key and local hostname")
 	}
 	path := filepath.Join(r.cfg.Dir, config.File)
 	was, err := os.ReadFile(path)
 	if err != nil {
 		return check.Result{}, fmt.Errorf("read the config: %w", err)
 	}
-	if err := r.cfg.SetHostKey(r.machine, key); err != nil {
+	if err := r.cfg.SetHost(r.machine, key, localHostName); err != nil {
 		return check.Result{}, err
 	}
 	committed, err := r.repo.Commit(ctx, commitMessage("record", steps.HostKeyName, []string{r.machine}, r.machine, ""), config.File)

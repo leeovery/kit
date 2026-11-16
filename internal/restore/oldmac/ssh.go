@@ -74,13 +74,13 @@ func isKeyType(field string) bool {
 	return slices.ContainsFunc(keyTypes, func(t string) bool { return strings.HasPrefix(field, t) })
 }
 
-// sshOptions are ssh's options reaching a Mac at port: never a question
+// sshOptions are ssh's options reaching the old Mac: never a question
 // asked, as there's no one to answer it; only ssh's errors said; and the
 // Mac's host key the one pinned, in the file pinnedHosts, under alias (the
 // old Mac's kit name), and nowhere else's (no other file, no command of the
 // person's config, no DNS).
-func sshOptions(pinnedHosts, alias string, port int) []string {
-	opts := []string{
+func sshOptions(pinnedHosts, alias string) []string {
+	return []string{
 		"-o", "BatchMode=yes", "-o", "ConnectTimeout=" + strconv.Itoa(connectTimeout),
 		"-o", "StrictHostKeyChecking=yes",
 		"-o", "UserKnownHostsFile=" + sshValue(pinnedHosts),
@@ -90,10 +90,6 @@ func sshOptions(pinnedHosts, alias string, port int) []string {
 		"-o", "HostKeyAlias=" + alias,
 		"-o", "LogLevel=ERROR",
 	}
-	if port != 0 && port != 22 {
-		opts = append(opts, "-p", strconv.Itoa(port))
-	}
-	return opts
 }
 
 // sshValue is v as ssh reads an option's value: one holding a space in
@@ -122,8 +118,8 @@ func checkStateDir(dir string) error {
 
 // remote is ssh running script, a /bin/sh script, on host through opts:
 // ssh hands its command to the person's own shell there, which runs sh
-// with the script, quoted for it. -- ends ssh's options, so a host, which
-// a device on the network names, is never taken as one.
+// with the script, quoted for it. -- ends ssh's options, so a host is never
+// taken as one.
 func remote(opts []string, host, script string, timeout time.Duration) runner.Command {
 	return runner.Command{Name: "ssh", Args: slices.Concat(opts, []string{"--", host, "/bin/sh -c " + shellQuote(script)}), Timeout: timeout}
 }
@@ -136,14 +132,20 @@ func shellQuote(s string) string {
 // sshExit is ssh's own exit for a failure of its own, never the command's.
 const sshExit = 255
 
-// unreachable are ssh's words for a Mac that isn't there to answer.
-var unreachable = []string{"Connection refused", "Operation timed out", "Connection timed out", "Host is down", "Could not resolve hostname", "Network is unreachable"}
-
 // errRefusedKey is a Mac answering but refusing this Mac's key.
 var errRefusedKey = errors.New("refused this Mac's key, which the old Mac's ~/.ssh/authorized_keys must hold")
 
 // errNoAnswer is a Mac not answering SSH.
 var errNoAnswer = errors.New("didn't answer")
+
+// errUnresolved is a Mac's name nothing on the network answers to: a Mac
+// asleep, away or renamed; or, from an app macOS hasn't let find devices on
+// local networks, any .local name.
+var errUnresolved = errors.New("didn't answer: nothing on the network has its name")
+
+// errRemoteLoginOff is a Mac refusing the connection, as with its Remote
+// Login off.
+var errRemoteLoginOff = errors.New("refused the connection: its Remote Login is off")
 
 // noRoute is ssh's words for a Mac it has no route to: as when macOS hasn't
 // let the app kit's running in find devices on local networks, which it
@@ -154,15 +156,27 @@ const noRoute = "No route to host"
 // errNoRoute is a Mac ssh has no route to.
 var errNoRoute = errors.New("didn't answer: no route to it")
 
+// sshSays are ssh's words for its own failures, in the order they're
+// looked for, and what each means.
+var sshSays = []struct {
+	words []string
+	means error
+}{
+	{[]string{"Permission denied"}, errRefusedKey},
+	{[]string{noRoute}, errNoRoute},
+	{[]string{"Could not resolve hostname"}, errUnresolved},
+	{[]string{"Connection refused"}, errRemoteLoginOff},
+	{[]string{"Operation timed out", "Connection timed out", "Host is down", "Network is unreachable"}, errNoAnswer},
+}
+
 // hostKeyError is a Mac presenting a host key ssh won't trust: another than
 // the one pinned.
 type hostKeyError struct{ said string }
 
 func (e *hostKeyError) Error() string { return "couldn't be reached over SSH: " + e.said }
 
-// sshFailed is err, from ssh's run, as what it means: errRefusedKey,
-// errNoRoute, errNoAnswer, or ssh's own words, else what the command there
-// said.
+// sshFailed is err, from ssh's run, as what it means: one of sshSays's,
+// a hostKeyError, or ssh's own words, else what the command there said.
 func sshFailed(err error) error {
 	exit, ok := errors.AsType[*runner.ExitError](err)
 	if !ok {
@@ -171,17 +185,17 @@ func sshFailed(err error) error {
 	if exit.Code != sshExit {
 		return fmt.Errorf("failed to answer, exit %d: %s", exit.Code, printable(exit.Stderr))
 	}
-	lines := exit.Lines()
-	switch {
-	case slices.ContainsFunc(lines, func(l string) bool { return strings.Contains(l, "Permission denied") }):
-		return errRefusedKey
-	case slices.ContainsFunc(lines, func(l string) bool { return strings.Contains(l, noRoute) }):
-		return errNoRoute
-	case slices.ContainsFunc(lines, func(l string) bool {
-		return slices.ContainsFunc(unreachable, func(u string) bool { return strings.Contains(l, u) })
-	}):
-		return errNoAnswer
-	case slices.ContainsFunc(lines, func(l string) bool { return strings.Contains(l, "Host key verification failed") }):
+	said := func(words ...string) bool {
+		return slices.ContainsFunc(exit.Lines(), func(l string) bool {
+			return slices.ContainsFunc(words, func(w string) bool { return strings.Contains(l, w) })
+		})
+	}
+	for _, s := range sshSays {
+		if said(s.words...) {
+			return s.means
+		}
+	}
+	if said("Host key verification failed") {
 		return &hostKeyError{said: printable(exit.Stderr)}
 	}
 	return fmt.Errorf("couldn't be reached over SSH: %s", printable(exit.Stderr))
@@ -194,7 +208,6 @@ const (
 	keyKit       = "kit"
 	keyProtected = "protected"
 	keyRsync     = "rsync"
-	keyHostKey   = "hostkey"
 )
 
 // hostKeys are a Mac's SSH host keys' public halves, in SSHDir, as patterns,
@@ -204,7 +217,7 @@ var hostKeys = []string{"ssh_host_ed25519_key.pub", "ssh_host_*_key.pub"}
 // SSHDir is where macOS keeps its SSH host keys.
 const SSHDir = "/etc/ssh"
 
-// HostKey is this Mac's own SSH host key, as the probe says another's: the
+// HostKey is this Mac's own SSH host key, as ssh finds it presented: the
 // first of hostKeys in dir (SSHDir) anyone may read, as PublicKey has it;
 // "" when there's none, as macOS makes them only once Remote Login first
 // starts.
@@ -249,15 +262,9 @@ const (
 // folder; its kit name, as config.ReadMachine reads it, from kit's state
 // where config.Locate puts it; whether SSH may read the first of the
 // protected folders there, which needs Remote Login's full disk access;
-// the version of its rsync, the one at rsync; and its SSH host key, the
-// first of hostKeys in keys, anyone may read, its type and key. Each
-// answer's a line, key=value, as the person's shell can print lines of its
-// own.
-func probeScript(rsync, keys string) string {
-	globs := make([]string, len(hostKeys))
-	for i, k := range hostKeys {
-		globs[i] = shellQuote(keys) + "/" + k
-	}
+// and the version of its rsync, the one at rsync. Each answer's a line,
+// key=value, as the person's shell can print lines of its own.
+func probeScript(rsync string) string {
 	return strings.Join([]string{
 		`d=${XDG_STATE_HOME:-}`,
 		`case $d in /*) ;; *) d=$HOME/.local/state ;; esac`,
@@ -274,9 +281,6 @@ func probeScript(rsync, keys string) string {
 		`echo "` + keyProtected + `=$p"`,
 		`r=` + shellQuote(rsync),
 		`if [ -x "$r" ]; then "$r" --version 2>&1 | sed 's/^/` + keyRsync + `=/'; fi`,
-		`for k in ` + strings.Join(globs, " ") + `; do`,
-		`  if [ -r "$k" ]; then echo "` + keyHostKey + `=$(cut -d ' ' -f 1,2 "$k")"; break; fi`,
-		`done`,
 	}, "\n")
 }
 
@@ -305,7 +309,7 @@ func (p probed) one(key string) string {
 
 // probe asks the Mac at host, through opts, what probeScript does.
 func (f Finder) probe(ctx context.Context, opts []string, host string) (probed, error) {
-	res, err := f.Run.Run(ctx, remote(opts, host, probeScript(RemoteRsync, SSHDir), probeTimeout))
+	res, err := f.Run.Run(ctx, remote(opts, host, probeScript(RemoteRsync), probeTimeout))
 	if err != nil {
 		return nil, sshFailed(err)
 	}

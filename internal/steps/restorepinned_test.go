@@ -18,24 +18,32 @@ import (
 	"github.com/leeovery/kit/internal/runner/runnertest"
 )
 
-// laptopAt is where the old Mac answers on the network, offering Remote
-// Login as the instance Laptop.
-const laptopAt = "laptop.example.com"
+// laptopName is the old Mac's local hostname, as kit-config records it;
+// laptopAt, where it answers on the local network.
+const (
+	laptopName = "Someones-MacBook-Pro"
+	laptopAt   = laptopName + ".local"
+)
 
-// onTheNetwork has c restore from laptop as kit finds it on the network,
-// the Mac it looks for the one presenting key, kit-config's host key for
-// it ("" for none), and, tried again, fetched, the one kit-config's remote
-// records then: one Mac offers Remote Login, answering at laptopAt. It
-// returns the old Mac's source, as the restore opens it.
-func (c *restoring) onTheNetwork(key, fetched string) *oldmac.Source {
-	src := &oldmac.Source{Finder: oldmac.Finder{Run: c.fake, StateDir: c.state, HostKey: key}, From: "laptop", User: "someone", Home: c.home,
-		HostKey: func(context.Context) (string, error) { return fetched, nil }}
+// record is what kit-config records for the old Mac: its host key and
+// local hostname, "" for none.
+type record struct{ key, name string }
+
+// reaching has c restore from laptop, reached as kit-config records it,
+// at, and, tried again, as kit-config's remote records it then, fetched,
+// each fetch said in fetches. It returns the old Mac's source, as the
+// restore opens it.
+func (c *restoring) reaching(at, fetched record) (src *oldmac.Source, fetches *int) {
+	fetches = new(int)
+	src = &oldmac.Source{
+		Finder: oldmac.Finder{Run: c.fake, StateDir: c.state, HostKey: at.key, LocalHostName: at.name}, From: "laptop", User: "someone", Home: c.home,
+		Recorded: func(context.Context) (string, string, error) {
+			*fetches++
+			return fetched.key, fetched.name, nil
+		},
+	}
 	c.r.Sources = func(restore.Origin, time.Time, bool) restore.Opener { return src }
-	c.fake.On("dns-sd", "-B", "_ssh._tcp", "local.").Prints("Browsing for _ssh._tcp.local.\nTimestamp     A/R    Flags  if Domain               Service Type         Instance Name\n" +
-		"21:38:59.104  Add        3  13 local.               _ssh._tcp.           Laptop\n")
-	c.fake.On("dns-sd", "-L", "Laptop", "_ssh._tcp", "local.").Prints("Lookup Laptop._ssh._tcp.local.\n" +
-		"21:39:08.624  Laptop._ssh._tcp.local. can be reached at " + laptopAt + ".:22 (interface 13) Flags: 1\n")
-	return src
+	return src, fetches
 }
 
 // probed scripts ssh's probe of the old Mac: what it asks it, as it
@@ -46,25 +54,29 @@ func (c *restoring) probed() *runnertest.Script {
 	})
 }
 
-// laptopSays is the probe's answer from laptop, presenting key: kit's on
-// it, as laptop, someone at this Mac's home, its ~/Documents read, and
-// Homebrew's rsync 3.
-func (c *restoring) laptopSays(key string) string {
+// laptopSays is the probe's answer from laptop: kit's on it, as laptop,
+// someone at this Mac's home, its ~/Documents read, and Homebrew's rsync 3.
+func (c *restoring) laptopSays() string {
 	return "user=someone\nhome=" + c.home + "\nkit=laptop\nprotected=read Documents\n" +
-		"rsync=rsync  version 3.4.1  protocol version 32\nrsync=Capabilities:\nrsync=    xattrs, crtimes\nhostkey=" + key + "\n"
+		"rsync=rsync  version 3.4.1  protocol version 32\nrsync=Capabilities:\nrsync=    xattrs, crtimes\n"
 }
+
+// recorded is laptop as kit-config records it, by the new kit.
+var recorded = record{pinnedKey, laptopName}
 
 // pinnedKey is the old Mac's host key, as kit-config records it, plainly no
 // real one.
 const pinnedKey = "ssh-ed25519 ZmFrZSBlZDI1NTE5IGhvc3Qga2V5"
 
-// The old Mac is found on the network as the Mac presenting the host key
-// kit-config records for it, ssh told to trust that key alone, under the
-// Mac's kit name, for the probe, the look and the copy; it's copied from.
+// The old Mac is reached at the local hostname kit-config records for it,
+// then .local, as the Mac presenting the host key kit-config records, ssh
+// told to trust that key alone, under the Mac's kit name, for the probe,
+// the look and the copy; it's copied from at its first try, nothing
+// fetched.
 func TestRestoreFromTheOldMacPinned(t *testing.T) {
 	c := newRestoring(t, "~/.zsh_history")
-	c.onTheNetwork(pinnedKey, pinnedKey)
-	c.probed().Prints(c.laptopSays(pinnedKey))
+	_, fetches := c.reaching(recorded, record{})
+	c.probed().Prints(c.laptopSays())
 	c.fake.OnMatch("ssh", func(args []string) bool { return strings.Contains(args[len(args)-1], "\nlook ") }).Prints("file\x00")
 	c.copiesFrom(laptopAt+":"+filepath.Join(c.home, ".zsh_history"), 1, 1_000)
 
@@ -96,19 +108,22 @@ func TestRestoreFromTheOldMacPinned(t *testing.T) {
 	if ran != 3 {
 		t.Errorf("ssh and the copy ran %d times, want 3: the probe, the look and the copy", ran)
 	}
+	if *fetches != 0 {
+		t.Errorf("fetched kit-config %d times; want none at the first try", *fetches)
+	}
 }
 
-// A Mac on the network presenting another host key than kit-config's isn't
-// the old Mac, whatever it says its name is: none answers as it, nothing's
+// A Mac at the old Mac's name presenting another host key than
+// kit-config's isn't the old Mac, whatever it says its name is: nothing's
 // copied, and, without a terminal, the restore fails, saying so and the
 // ways on.
 func TestRestoreRefusesAnotherHostKey(t *testing.T) {
 	c := newRestoring(t, "~/.zsh_history")
-	c.onTheNetwork(pinnedKey, pinnedKey)
+	c.reaching(recorded, recorded)
 	c.probed().PrintsToStderr("Host key for laptop has changed and you have requested strict checking.\nHost key verification failed.\n").Exits(255)
 
 	err := c.apply(t.Context())
-	want := "couldn't restore: laptop doesn't answer over SSH: Laptop isn't laptop: its host key doesn't match the one kit-config records (kit apply on laptop records a new one): " +
+	want := "couldn't restore: laptop doesn't answer over SSH: " + laptopAt + " isn't laptop: its host key doesn't match the one kit-config records (kit apply on laptop records a new one): " +
 		"kit apply --restore-from time-machine|arq restores ~/.zsh_history from another source, or kit restore remove ~/.zsh_history drops its line"
 	if err == nil || err.Error() != want {
 		t.Errorf("apply = %v\nwant %q", err, want)
@@ -118,36 +133,64 @@ func TestRestoreRefusesAnotherHostKey(t *testing.T) {
 	}
 }
 
-// With no host key recorded for the old Mac, it isn't looked for, never
-// trusted on first sight: the card for an old Mac that doesn't answer goes
-// up, saying why and how kit-config comes to record it, offering Arq or
-// trying again.
-func TestRestoreWithoutTheOldMacsHostKeyAsks(t *testing.T) {
-	c := newRestoring(t, "~/.zsh_history")
-	c.onTheNetwork("", "")
-	k := c.atTerminal(t, restore.Disks{})
-	step := c.step()
-	ctx, stop := context.WithCancel(t.Context())
-	found := step.Check(ctx)
-	done := make(chan error, 1)
-	go func() { done <- step.Apply(c.ctx(ctx), found) }()
+// Without the old Mac's host key or local hostname in kit-config, as for a
+// Mac an older kit recorded, it isn't reached, never trusted on first
+// sight: the card for an old Mac that doesn't answer goes up, saying why
+// and what puts it right, kit apply there, then trying again, offering Arq
+// too. Nothing answering at the name recorded is said the same way, as a
+// Mac renamed since answers elsewhere; its .local name not found, macOS
+// asking whether the terminal can find devices on local networks too; its
+// Remote Login off, which kit apply there turns on.
+func TestRestoreUnrecordedAsks(t *testing.T) {
+	const localNetwork = "macOS may be asking whether Ghostty can find devices on local networks: choose Allow, then try again, or, " +
+		"if Don't Allow was chosen, turn on Ghostty in System Settings › Privacy & Security › Local Network"
+	for _, tt := range []struct {
+		name       string
+		at         record
+		ssh        string
+		title, why string
+	}{
+		{"no host key", record{"", laptopName}, "", "laptop can't be restored from", "Laptop's SSH host key isn't in kit-config: kit apply on laptop records it, then try again."},
+		{"no local hostname", record{pinnedKey, ""}, "", "laptop can't be restored from", "Laptop's local hostname isn't in kit-config: kit apply on laptop records it, then try again."},
+		{"nothing answering at it", recorded, "ssh: connect to host " + laptopAt + " port 22: Operation timed out\n", "laptop doesn't answer over SSH",
+			"Nothing answered at " + laptopAt + ", its local hostname in kit-config: with laptop awake on this network, kit apply on laptop records the one it has now, then try again."},
+		{"its name not found", recorded, "ssh: Could not resolve hostname " + laptopAt + ": nodename nor servname provided, or not known\n", "laptop doesn't answer over SSH",
+			"Nothing answered at " + laptopAt + ", its local hostname in kit-config: " + localNetwork + "; else, with laptop awake on this network, kit apply on laptop records the one it has now, then try again."},
+		{"its Remote Login off", recorded, "ssh: connect to host " + laptopAt + " port 22: Connection refused\n", "laptop doesn't answer over SSH",
+			laptopAt + " answered, but its Remote Login is off: kit apply on laptop turns it on, then try again."},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			c := newRestoring(t, "~/.zsh_history")
+			src, _ := c.reaching(tt.at, tt.at)
+			src.Finder.Terminal = "Ghostty"
+			if tt.ssh != "" {
+				c.probed().PrintsToStderr(tt.ssh).Exits(255)
+			}
+			k := c.atTerminal(t, restore.Disks{})
+			step := c.step()
+			ctx, stop := context.WithCancel(t.Context())
+			found := step.Check(ctx)
+			done := make(chan error, 1)
+			go func() { done <- step.Apply(c.ctx(ctx), found) }()
 
-	card := up(t, k, 1)[0]
-	want := event.NeedsYou{Time: card.Time, Step: "restore", Item: "restore:source", Title: "laptop can't be restored from",
-		Why: "Laptop's SSH host key isn't in kit-config: kit apply on laptop records it. No Time Machine disk holding your backups is attached: attach it, then try again.",
-		Keys: []check.Key{
-			{Key: "a", Does: "restores through Arq, by hand"},
-			{Key: "enter", Does: "tries laptop again"},
-		}}
-	if !reflect.DeepEqual(card, want) {
-		t.Errorf("the card = %+v\nwant %+v", card, want)
-	}
-	stop()
-	if err := ended(t, done); !errors.Is(err, context.Canceled) {
-		t.Errorf("apply = %v; want it stopped with the run", err)
-	}
-	if calls := c.fake.Calls(); slices.ContainsFunc(calls, func(call string) bool { return strings.HasPrefix(call, "dns-sd") || strings.HasPrefix(call, "ssh") }) {
-		t.Errorf("ran %q; want no Mac looked for", calls)
+			card := up(t, k, 1)[0]
+			want := event.NeedsYou{Time: card.Time, Step: "restore", Item: "restore:source", Title: tt.title,
+				Why: tt.why + " No Time Machine disk holding your backups is attached: attach it, then try again.",
+				Keys: []check.Key{
+					{Key: "a", Does: "restores through Arq, by hand"},
+					{Key: "enter", Does: "tries laptop again"},
+				}}
+			if !reflect.DeepEqual(card, want) {
+				t.Errorf("the card = %+v\nwant %+v", card, want)
+			}
+			stop()
+			if err := ended(t, done); !errors.Is(err, context.Canceled) {
+				t.Errorf("apply = %v; want it stopped with the run", err)
+			}
+			if calls := c.fake.Calls(); tt.ssh == "" && slices.ContainsFunc(calls, func(call string) bool { return strings.HasPrefix(call, "ssh") }) {
+				t.Errorf("ran %q; want the old Mac not reached", calls)
+			}
+		})
 	}
 }
 
@@ -156,7 +199,8 @@ func TestRestoreWithoutTheOldMacsHostKeyAsks(t *testing.T) {
 // Allow, then try again, or turn it on in System Settings.
 func TestRestoreSaysTheLocalNetworkMayBeAsked(t *testing.T) {
 	c := newRestoring(t, "~/.zsh_history")
-	c.onTheNetwork(pinnedKey, pinnedKey).Finder.Terminal = "Ghostty"
+	src, _ := c.reaching(recorded, recorded)
+	src.Finder.Terminal = "Ghostty"
 	c.probed().PrintsToStderr("ssh: connect to host " + laptopAt + " port 22: No route to host\n").Exits(255)
 	k := c.atTerminal(t, restore.Disks{})
 	step := c.step()
@@ -167,7 +211,7 @@ func TestRestoreSaysTheLocalNetworkMayBeAsked(t *testing.T) {
 
 	card := up(t, k, 1)[0]
 	want := event.NeedsYou{Time: card.Time, Step: "restore", Item: "restore:source", Title: "laptop doesn't answer over SSH",
-		Why: "Laptop didn't answer: macOS may be asking whether Ghostty can find devices on local networks: choose Allow, then try again, or, " +
+		Why: laptopAt + " didn't answer: macOS may be asking whether Ghostty can find devices on local networks: choose Allow, then try again, or, " +
 			"if Don't Allow was chosen, turn on Ghostty in System Settings › Privacy & Security › Local Network. " +
 			"No Time Machine disk holding your backups is attached: attach it, then try again.",
 		Keys: []check.Key{
@@ -187,25 +231,36 @@ func TestRestoreSaysTheLocalNetworkMayBeAsked(t *testing.T) {
 // one.
 const newKey = "ssh-ed25519 ZmFrZSBuZXcgaG9zdCBrZXk="
 
-// Tried again from the card, the old Mac is looked for by the host key
-// kit-config's remote records for it then, as kit apply on it records it
-// meanwhile: none recorded when the run began, or the key it had before
-// it was set up again; found by the new one, it's copied from.
-func TestRestoreTriedAgainTakesTheHostKeyRecordedSince(t *testing.T) {
+// Tried again from the card, kit-config is fetched, and the old Mac
+// reached as its remote records it then, as kit apply on it records it
+// meanwhile, after the boot cloned kit-config: no local hostname recorded
+// when the run began, as for a Mac an older kit recorded; none at all; a
+// name nothing answers at, as for a Mac renamed since; or the key it had
+// before it was set up again. Reached as recorded since, it's copied from.
+func TestRestoreTriedAgainTakesWhatsRecordedSince(t *testing.T) {
+	renamed := record{pinnedKey, "Someones-Old-Name"}
 	for _, tt := range []struct {
-		name, key, title string
+		name  string
+		at    record
+		title string
 	}{
-		{"none recorded", "", "laptop can't be restored from"},
-		{"set up again", pinnedKey, "laptop doesn't answer over SSH"},
+		{"no local hostname", record{pinnedKey, ""}, "laptop can't be restored from"},
+		{"nothing recorded", record{}, "laptop can't be restored from"},
+		{"renamed since", renamed, "laptop doesn't answer over SSH"},
+		{"set up again", record{pinnedKey, laptopName}, "laptop doesn't answer over SSH"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			c := newRestoring(t, "~/.zsh_history")
-			c.onTheNetwork(tt.key, newKey)
+			_, fetches := c.reaching(tt.at, record{newKey, laptopName})
 			probe := c.probed()
-			if tt.key != "" {
+			switch tt.at {
+			case renamed:
+				c.fake.OnMatch("ssh", func(args []string) bool { return len(args) > 2 && args[len(args)-2] == renamed.name+".local" }).
+					PrintsToStderr("ssh: Could not resolve hostname " + renamed.name + ".local: nodename nor servname provided, or not known\n").Exits(255)
+			case record{pinnedKey, laptopName}:
 				probe.PrintsToStderr("Host key verification failed.\n").Exits(255).Then()
 			}
-			probe.Prints(c.laptopSays(newKey))
+			probe.Prints(c.laptopSays())
 			c.fake.OnMatch("ssh", func(args []string) bool { return strings.Contains(args[len(args)-1], "\nlook ") }).Prints("file\x00")
 			c.copiesFrom(laptopAt+":"+filepath.Join(c.home, ".zsh_history"), 1, 1_000)
 			k := c.atTerminal(t, restore.Disks{})
@@ -221,6 +276,9 @@ func TestRestoreTriedAgainTakesTheHostKeyRecordedSince(t *testing.T) {
 			if rec := c.record(); rec.Paths["~/.zsh_history"].State != restore.Done {
 				t.Errorf("the record = %+v; want ~/.zsh_history restored", rec)
 			}
+			if *fetches != 1 {
+				t.Errorf("fetched kit-config %d times, want once, as it was tried again", *fetches)
+			}
 			if data, err := os.ReadFile(filepath.Join(c.state, "restore", "pinned_host")); err != nil || string(data) != "laptop "+newKey+"\n" {
 				t.Errorf("the pinned key's file = %q, %v; want the key fetched", data, err)
 			}
@@ -228,15 +286,25 @@ func TestRestoreTriedAgainTakesTheHostKeyRecordedSince(t *testing.T) {
 	}
 }
 
-// Without a terminal, no host key recorded for the old Mac fails the
-// restore, naming the way on: kit apply on it, then here.
-func TestRestoreWithoutTheOldMacsHostKeyNamesTheWayOn(t *testing.T) {
-	c := newRestoring(t, "~/.zsh_history")
-	c.onTheNetwork("", "")
-	err := c.apply(t.Context())
-	want := "couldn't restore: laptop can't be restored from: laptop's SSH host key isn't in kit-config: kit apply on laptop records it, then kit apply here: " +
-		"kit apply --restore-from time-machine|arq restores ~/.zsh_history from another source, or kit restore remove ~/.zsh_history drops its line"
-	if err == nil || err.Error() != want {
-		t.Errorf("apply = %v\nwant %q", err, want)
+// Without a terminal, the old Mac not recorded as it is fails the restore,
+// naming the way on: kit apply on it, then here.
+func TestRestoreUnrecordedNamesTheWayOn(t *testing.T) {
+	for _, tt := range []struct {
+		name, why string
+		at        record
+	}{
+		{"no host key", "laptop can't be restored from: laptop's SSH host key isn't in kit-config: kit apply on laptop records it", record{"", laptopName}},
+		{"no local hostname", "laptop can't be restored from: laptop's local hostname isn't in kit-config: kit apply on laptop records it", record{pinnedKey, ""}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			c := newRestoring(t, "~/.zsh_history")
+			c.reaching(tt.at, tt.at)
+			err := c.apply(t.Context())
+			want := "couldn't restore: " + tt.why + ", then kit apply here: " +
+				"kit apply --restore-from time-machine|arq restores ~/.zsh_history from another source, or kit restore remove ~/.zsh_history drops its line"
+			if err == nil || err.Error() != want {
+				t.Errorf("apply = %v\nwant %q", err, want)
+			}
+		})
 	}
 }

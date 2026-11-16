@@ -95,11 +95,11 @@ func tableEnd(lines []string, header int) int {
 	return end
 }
 
-// SetHostKey records key as the SSH host key of the Mac named name, in its
-// table in kit.toml: its host_key set where it is, else added after the
-// table's last setting, the rest as it was. The Config as loaded is left as
-// it is, as AddMac leaves it.
-func (c *Config) SetHostKey(name, key string) error {
+// SetHost records key as the SSH host key of the Mac named name, and
+// localHostName as its local hostname, in its table in kit.toml: each set
+// where it is, else added after the table's last setting, the rest as it
+// was. The Config as loaded is left as it is, as AddMac leaves it.
+func (c *Config) SetHost(name, key, localHostName string) error {
 	if !c.Knows(name) {
 		return fmt.Errorf("no Mac named %s in %s: one of %s", name, File, c.macList())
 	}
@@ -108,30 +108,39 @@ func (c *Config) SetHostKey(name, key string) error {
 	if err != nil {
 		return fmt.Errorf("read the config: %w", err)
 	}
-	edited, err := withHostKey(string(data), name, key)
+	edited, err := withSetting(string(data), name, hostKeySetting, key)
+	if err == nil {
+		edited, err = withSetting(edited, name, localHostNameSetting, localHostName)
+	}
 	if err != nil {
 		return err
 	}
 	if err := writeAtomic(path, []byte(edited)); err != nil {
-		return fmt.Errorf("record %s's host key: %w", name, err)
+		return fmt.Errorf("record %s's host key and local hostname: %w", name, err)
 	}
 	return nil
 }
 
-// withHostKey is kit.toml's text with key as the host_key of the Mac named
-// name, read back to be sure that's what it says.
-func withHostKey(text, name, key string) (string, error) {
+// The settings of a Mac's table SetHost writes.
+const (
+	hostKeySetting       = "host_key"
+	localHostNameSetting = "local_hostname"
+)
+
+// withSetting is kit.toml's text with value as the setting key of the Mac
+// named name, read back to be sure that's what it says.
+func withSetting(text, name, key, value string) (string, error) {
 	lines := strings.SplitAfter(text, "\n")
 	header := slices.IndexFunc(lines, func(line string) bool { return tableName(line) == "macs."+name })
 	if header < 0 {
-		return "", fmt.Errorf("%s has no [macs.%s] table to record its host key in", File, name)
+		return "", fmt.Errorf("%s has no [macs.%s] table to record its %s in", File, name, key)
 	}
 	var setting bytes.Buffer
-	if err := toml.NewEncoder(&setting).Encode(macFile{HostKey: key}); err != nil {
-		return "", fmt.Errorf("write %s's host key: %w", name, err)
+	if err := toml.NewEncoder(&setting).Encode(map[string]string{key: value}); err != nil {
+		return "", fmt.Errorf("write %s's %s: %w", name, key, err)
 	}
 	end := tableEnd(lines, header)
-	if at := slices.IndexFunc(lines[header+1:end], isHostKey); at >= 0 {
+	if at := slices.IndexFunc(lines[header+1:end], func(line string) bool { return sets(line, key) }); at >= 0 {
 		lines[header+1+at] = setting.String()
 	} else {
 		if !strings.HasSuffix(lines[end-1], "\n") {
@@ -140,12 +149,14 @@ func withHostKey(text, name, key string) (string, error) {
 		lines = slices.Insert(lines, end, setting.String())
 	}
 	edited := strings.Join(lines, "")
-	var f file
-	if _, err := toml.Decode(edited, &f); err != nil {
-		return "", fmt.Errorf("couldn't record %s's host key in %s: %w", name, File, err)
+	var f struct {
+		Macs map[string]map[string]any `toml:"macs"`
 	}
-	if f.Macs[name].HostKey != key {
-		return "", fmt.Errorf("couldn't record %s's host key in %s: its [macs.%s] table isn't one kit can write to", name, File, name)
+	if _, err := toml.Decode(edited, &f); err != nil {
+		return "", fmt.Errorf("couldn't record %s's %s in %s: %w", name, key, File, err)
+	}
+	if f.Macs[name][key] != value {
+		return "", fmt.Errorf("couldn't record %s's %s in %s: its [macs.%s] table isn't one kit can write to", name, key, File, name)
 	}
 	return edited, nil
 }
@@ -161,10 +172,10 @@ func tableName(line string) string {
 	return strings.TrimSpace(text[1 : len(text)-1])
 }
 
-// isHostKey reports whether line sets host_key.
-func isHostKey(line string) bool {
-	key, _, ok := strings.Cut(line, "=")
-	return ok && strings.TrimSpace(key) == "host_key"
+// sets reports whether line sets the setting key.
+func sets(line, key string) bool {
+	k, _, ok := strings.Cut(line, "=")
+	return ok && strings.TrimSpace(k) == key
 }
 
 // copyTree copies the folder from to to, which isn't there: every file as

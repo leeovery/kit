@@ -144,9 +144,14 @@ func (a *app) restoreStep(r *run, dirs config.Dirs, prefsOn bool) (*engine.Step,
 	mac := restore.Mac{Config: r.cfg, Name: r.machine, Home: r.homeDir, Dirs: dirs, Linked: r.files, Prefs: prefsOn, Kinds: homed}
 	user := filepath.Base(r.homeDir)
 	sources := restore.Sources{Run: r.run, User: user, MountPoint: restore.MountPoint(dirs.State), Mac: func(from string) restore.Opener {
+		old := r.cfg.Macs[from]
 		return &oldmac.Source{
-			Finder: oldmac.Finder{Run: r.run, StateDir: dirs.State, HostKey: r.cfg.Macs[from].HostKey, Terminal: apps.RunningIn(a.Getenv), OverSSH: a.Getenv("SSH_CONNECTION") != ""}, From: from, User: user, Home: r.homeDir,
-			HostKey: func(ctx context.Context) (string, error) { return fetchedHostKey(ctx, r.repo, from) },
+			Finder: oldmac.Finder{
+				Run: r.run, StateDir: dirs.State, HostKey: old.HostKey, LocalHostName: old.LocalHostName,
+				Terminal: apps.RunningIn(a.Getenv), OverSSH: a.Getenv("SSH_CONNECTION") != "",
+			},
+			From: from, User: user, Home: r.homeDir,
+			Recorded: func(ctx context.Context) (string, string, error) { return fetchedRecord(ctx, r.repo, from) },
 		}
 	}}
 	folders := a.appFolders(r.homeDir)
@@ -202,15 +207,17 @@ func (a *app) settleStep(r *run, dirs config.Dirs) (*engine.Step, error) {
 	return &step, nil
 }
 
-// fetchedHostKey is the host key kit-config's remote records for the Mac
-// called from, fetched now, as kit apply on that Mac may have recorded it
-// since this run began: nothing merged here.
-func fetchedHostKey(ctx context.Context, repo gitrepo.Repo, from string) (string, error) {
+// fetchedRecord is the host key and local hostname kit-config's remote
+// records for the Mac called from, fetched now, as kit apply on that Mac
+// may have recorded them since this run began, after the boot cloned
+// kit-config: nothing merged here, mid-run.
+func fetchedRecord(ctx context.Context, repo gitrepo.Repo, from string) (key, localHostName string, err error) {
 	data, err := repo.Fetched(ctx, config.File)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	return config.HostKeyIn(data, from)
+	mac, err := config.MacIn(data, from)
+	return mac.HostKey, mac.LocalHostName, err
 }
 
 // reinstallStep is the step reinstalling the dependencies of the projects

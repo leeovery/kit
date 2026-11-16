@@ -27,8 +27,8 @@ import (
 var laptop = restore.Origin{Kind: restore.FromMac, Detail: "laptop"}
 
 // errSilent is the old Mac not answering over SSH, as oldmac says so: the Mac
-// found refusing this Mac's key.
-var errSilent = fmt.Errorf("laptop %w: Someone’s MacBook Pro refused this Mac's key, which the old Mac's ~/.ssh/authorized_keys must hold", oldmac.ErrNoAnswer)
+// refusing this Mac's key.
+var errSilent = fmt.Errorf("laptop %w: "+laptopAt+" refused this Mac's key, which the old Mac's ~/.ssh/authorized_keys must hold", oldmac.ErrNoAnswer)
 
 // fromLaptop has c restore from the old Mac, laptop, in use.
 func (c *restoring) fromLaptop() {
@@ -130,8 +130,8 @@ func TestRestoreFromTheOldMac(t *testing.T) {
 	if want := "Nothing to restore in ~/Gone: laptop hasn't it"; !slices.Contains(c.logged, want) {
 		t.Errorf("the log says %q, want %q", c.logged, want)
 	}
-	if !slices.ContainsFunc(c.doing, func(d said) bool { return d.Says == "looking for laptop" }) {
-		t.Error("the restore never said it was looking for laptop")
+	if !slices.ContainsFunc(c.doing, func(d said) bool { return d.Says == "reaching laptop" }) {
+		t.Error("the restore never said it was reaching laptop")
 	}
 }
 
@@ -184,7 +184,7 @@ func TestRestoreAsksWhenTheOldMacDoesntAnswer(t *testing.T) {
 
 			card := up(t, k, 1)[0]
 			want := event.NeedsYou{Time: card.Time, Step: "restore", Item: "restore:source", Title: "laptop doesn't answer over SSH",
-				Why: "Someone’s MacBook Pro refused this Mac's key, which the old Mac's ~/.ssh/authorized_keys must hold. The Time Machine disk Vault is locked: unlock it in Disk Utility, then try again.",
+				Why: laptopAt + " refused this Mac's key, which the old Mac's ~/.ssh/authorized_keys must hold. The Time Machine disk Vault is locked: unlock it in Disk Utility, then try again.",
 				Keys: []check.Key{
 					{Key: "t", Does: "restores from the Time Machine disk Backups of laptop"},
 					{Key: "a", Does: "restores through Arq, by hand"},
@@ -237,7 +237,7 @@ func TestRestoreOffersEachDisk(t *testing.T) {
 		{Key: "2", Does: "restores from the Time Machine disk Backups (disk9s2)"},
 		{Key: "a", Does: "restores through Arq, by hand"},
 		{Key: "enter", Does: "tries laptop again"},
-	}; !reflect.DeepEqual(card.Keys, want) || card.Why != "Someone’s MacBook Pro refused this Mac's key, which the old Mac's ~/.ssh/authorized_keys must hold." {
+	}; !reflect.DeepEqual(card.Keys, want) || card.Why != laptopAt+" refused this Mac's key, which the old Mac's ~/.ssh/authorized_keys must hold." {
 		t.Errorf("the card says %q, offering %+v", card.Why, card.Keys)
 	}
 	k.answer(t, "restore", "2")
@@ -332,9 +332,7 @@ func TestRestoreRebuiltAsksForItsOwnBackups(t *testing.T) {
 	if rec := c.record(); disk.opens != 1 || rec.From != disk.origin || rec.Paths["~/Code"].State != restore.Done || rec.Paths["~/Code"].From != disk.origin || rec.Settled.IsZero() {
 		t.Errorf("the disk opened %d times, the record = %+v; want ~/Code restored from it, settled", disk.opens, rec)
 	}
-	if slices.ContainsFunc(c.doing, func(d said) bool {
-		return strings.HasPrefix(d.Says, "looking for ") && d.Says != "looking for Time Machine disks"
-	}) {
+	if slices.ContainsFunc(c.doing, func(d said) bool { return strings.HasPrefix(d.Says, "reaching ") }) {
 		t.Errorf("the restore said %+v; want no Mac looked for", c.doing)
 	}
 

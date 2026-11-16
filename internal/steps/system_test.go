@@ -92,23 +92,41 @@ func sshd(t *testing.T, path, key, banner string) string {
 	return l.Addr().String()
 }
 
+// localName is the test Mac's local hostname, as scutil says it.
+const localName = "Someones-MacBook-Pro"
+
+// named is a runner whose scutil says the Mac's local hostname is
+// localName.
+func named(t *testing.T) *runnertest.Fake {
+	fake := runnertest.New(t)
+	fake.On("scutil", "--get", "LocalHostName").Prints(localName + "\n")
+	return fake
+}
+
+// recording is what the host key's step recorded: the key and local
+// hostname of each time.
+type recording [][2]string
+
+func (r *recording) record(_ context.Context, key, name string) (check.Result, error) {
+	*r = append(*r, [2]string{key, name})
+	return check.Result{State: check.OK, Summary: "committed and pushed kit.toml"}, nil
+}
+
 // The host key's step is ok while kit-config records this Mac's key, its
-// type and key whatever comment either has; else applying hands the key,
-// as its file has it but the comment, to be recorded, and the check after
-// says how recording went. With no key yet, applying has Remote Login
-// answer once, which makes it, then records it.
+// type and key whatever comment either has, and its local hostname, as
+// scutil says it; else applying hands both, the key as its file has it but
+// the comment, to be recorded, and the check after says how recording
+// went. With no key yet, applying has Remote Login answer once, which makes
+// it, then records it.
 func TestHostKey(t *testing.T) {
 	dir := t.TempDir()
 	key := filepath.Join(dir, "ssh_host_ed25519_key.pub")
-	var recorded []string
-	step := func(in, address string) engine.Step {
-		return steps.HostKey(steps.HostKeying{RemoteLogin: true, Dir: dir, Address: address, Recorded: in, Record: func(_ context.Context, key string) (check.Result, error) {
-			recorded = append(recorded, key)
-			return check.Result{State: check.OK, Summary: "committed and pushed kit.toml"}, nil
-		}})
+	var recorded recording
+	step := func(in, name, address string) engine.Step {
+		return steps.HostKey(steps.HostKeying{RemoteLogin: true, Dir: dir, Address: address, Run: named(t), Recorded: in, RecordedName: name, Record: recorded.record})
 	}
 
-	woken := step("", sshd(t, key, fakeHostKey, "SSH-2.0-OpenSSH_9.9\r\n"))
+	woken := step("", "", sshd(t, key, fakeHostKey, "SSH-2.0-OpenSSH_9.9\r\n"))
 	res := woken.Check(t.Context())
 	if res.State != check.Attention || res.Summary != "none yet" {
 		t.Fatalf("no key yet = %+v", res)
@@ -116,10 +134,10 @@ func TestHostKey(t *testing.T) {
 	if err := woken.Apply(t.Context(), res); err != nil {
 		t.Fatal(err)
 	}
-	if res := step(fakeHostKey+" a comment", "").Check(t.Context()); res.State != check.OK {
+	if res := step(fakeHostKey+" a comment", localName, "").Check(t.Context()); res.State != check.OK {
 		t.Errorf("recorded = %+v, want ok", res)
 	}
-	unrecorded := step("", "")
+	unrecorded := step("", localName, "")
 	res = unrecorded.Check(t.Context())
 	if res.State != check.Attention || res.Summary != "not in kit-config" {
 		t.Fatalf("not recorded = %+v", res)
@@ -127,11 +145,65 @@ func TestHostKey(t *testing.T) {
 	if err := unrecorded.Apply(t.Context(), res); err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{fakeHostKey, fakeHostKey}; !slices.Equal(recorded, want) {
-		t.Errorf("recorded %q, want %q: the key woken, then the one there", recorded, want)
+	if want := (recording{{fakeHostKey, localName}, {fakeHostKey, localName}}); !slices.Equal(recorded, want) {
+		t.Errorf("recorded %q, want %q: the key woken, then the one there, each with the local hostname", recorded, want)
 	}
 	if res := unrecorded.Check(t.Context()); res.State != check.OK || res.Summary != "committed and pushed kit.toml" {
 		t.Errorf("after recording = %+v, want what recording said", res)
+	}
+}
+
+// The local hostname's recorded as macOS says it now: kit-config without
+// one, as on a Mac whose key an older kit recorded, or with another, as on
+// a Mac renamed since, needs it recorded, and applying records it, the key
+// with it; one scutil can't say, or one another Mac can't reach this one
+// by, as one set by hand, fails the check, saying why and how to set one,
+// and leaves nothing recorded.
+func TestHostKeyRecordsTheLocalHostname(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ssh_host_ed25519_key.pub"), []byte(fakeHostKey+" root@laptop\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		name, recorded, summary, item string
+	}{
+		{"none recorded", "", "local hostname not in kit-config", "local hostname not in kit-config (kit apply records it)"},
+		{"renamed since", "Someones-Old-Name", "local hostname not kit-config's", "local hostname not the one kit-config records (kit apply records this Mac's: it's been renamed)"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var recorded recording
+			step := steps.HostKey(steps.HostKeying{RemoteLogin: true, Dir: dir, Run: named(t), Recorded: fakeHostKey, RecordedName: tt.recorded, Record: recorded.record})
+			res := step.Check(t.Context())
+			if res.State != check.Attention || res.Summary != tt.summary || len(res.Items) != 1 || res.Items[0].Name+" ("+res.Items[0].Detail+")" != tt.item {
+				t.Fatalf("Check() = %+v; want %q, %q", res, tt.summary, tt.item)
+			}
+			if err := step.Apply(t.Context(), res); err != nil {
+				t.Fatal(err)
+			}
+			if want := (recording{{fakeHostKey, localName}}); !slices.Equal(recorded, want) {
+				t.Errorf("recorded %q, want %q", recorded, want)
+			}
+		})
+	}
+	for _, tt := range []struct{ name, says, want string }{
+		{"scutil says none", "\n", "this Mac has no local hostname: set one in System Settings › General › Sharing"},
+		{"scutil says one set by hand", "Someones.Mac\n", `this Mac's local hostname, "Someones.Mac", isn't one another Mac can reach it by: set one of letters, digits and - in System Settings › General › Sharing`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			fake := runnertest.New(t)
+			fake.On("scutil", "--get", "LocalHostName").Prints(tt.says)
+			step := steps.HostKey(steps.HostKeying{RemoteLogin: true, Dir: dir, Run: fake, Recorded: fakeHostKey, Record: func(context.Context, string, string) (check.Result, error) {
+				t.Error("recorded a key")
+				return check.Result{}, nil
+			}})
+			res := step.Check(t.Context())
+			if res.State != check.Failed || res.Reason != tt.want {
+				t.Errorf("Check() = %+v; want failed, %q", res, tt.want)
+			}
+			if err := step.Apply(t.Context(), res); err == nil || err.Error() != tt.want {
+				t.Errorf("Apply() = %v; want %q", err, tt.want)
+			}
+		})
 	}
 }
 
@@ -152,7 +224,7 @@ func TestHostKeyNotMadeYet(t *testing.T) {
 			if tt.banner != "" {
 				address = sshd(t, filepath.Join(dir, "ssh_host_ed25519_key.pub"), tt.key, tt.banner)
 			}
-			step := steps.HostKey(steps.HostKeying{RemoteLogin: true, Dir: dir, Address: address, Record: func(context.Context, string) (check.Result, error) {
+			step := steps.HostKey(steps.HostKeying{RemoteLogin: true, Dir: dir, Address: address, Run: named(t), Record: func(context.Context, string, string) (check.Result, error) {
 				t.Error("recorded a key")
 				return check.Result{}, nil
 			}})

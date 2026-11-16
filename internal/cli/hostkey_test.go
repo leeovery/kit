@@ -20,22 +20,31 @@ var (
 	ownKey     = filepath.Join("etc", "ssh", "ssh_host_ed25519_key.pub")
 )
 
-// recording has w's kit.toml record key as laptop's host key: none for "".
-func (w *world) recording(t *testing.T, key string) {
+// recording has w's kit.toml record key as laptop's host key, and name as
+// its local hostname: none for "", the key with the name, as kit apply
+// records them together.
+func (w *world) recording(t *testing.T, key, name string) {
 	t.Helper()
-	line := `host_key = "` + hostKey + `"` + "\n"
-	if key != "" {
-		w.write(t, configFile, strings.Replace(twoMacs, line, `host_key = "`+key+`"`+"\n", 1))
-		return
+	toml := twoMacs
+	for setting, value := range map[string]string{"host_key": key, "local_hostname": name} {
+		at := strings.Index(toml, setting+" = ")
+		line := toml[at : at+strings.Index(toml[at:], "\n")+1]
+		if value != "" {
+			toml = strings.Replace(toml, line, setting+` = "`+value+`"`+"\n", 1)
+		} else {
+			toml = strings.Replace(toml, line, "", 1)
+		}
 	}
-	w.write(t, configFile, strings.Replace(twoMacs, line, "", 1))
+	w.write(t, configFile, toml)
 }
 
-// remoteLogin switches w's Mac's Remote Login feature on, as it stands.
+// remoteLogin switches w's Mac's Remote Login feature on, as it stands,
+// the Mac's local hostname localName.
 func (w *world) remoteLogin(t *testing.T) {
 	t.Helper()
 	w.writeSection(t, "laptop", "features", "remote-login\n")
 	w.fake.On("launchctl", "print-disabled", "system").Prints("disabled services = {\n\t\t\"com.openssh.sshd\" => enabled\n}\n")
+	w.fake.On("scutil", "--get", "LocalHostName").Prints(localName + "\n")
 }
 
 // noKeyYet has w's Mac without a host key, as macOS leaves it till Remote
@@ -69,26 +78,29 @@ func (w *world) sshd(t *testing.T) {
 }
 
 // kit status says whether kit-config records this Mac's SSH host key, the
-// one its Remote Login presents: recorded, not recorded, another (a Mac set
-// up again has a new one), or none yet, as macOS makes it only at Remote
+// one its Remote Login presents, and its local hostname, as macOS says it:
+// recorded, not recorded, another (a Mac set up again has a new key, one
+// renamed a new name), or no key yet, as macOS makes it only at Remote
 // Login's first connection; with Remote Login off, there's none to record,
 // which is fine. It changes nothing, and connects to nothing.
 func TestStatusOfTheHostKey(t *testing.T) {
 	for _, tt := range []struct {
-		name, recorded string
-		off, noKey     bool
-		want           string
-		status         int
+		name, recorded, named string
+		off, noKey            bool
+		want                  string
+		status                int
 	}{
-		{"recorded", hostKey, false, false, "host-key ok in kit-config\n", 0},
-		{"not recorded", "", false, false, "host-key attention not in kit-config\nhost-key problem SSH host key not in kit-config (kit apply records it)\n", 1},
-		{"another recorded", otherKey, false, false, "host-key attention not kit-config's\nhost-key problem SSH host key not the one kit-config records (kit apply records this Mac's: a Mac set up again has a new one)\n", 1},
-		{"none yet", hostKey, false, true, "host-key attention none yet\nhost-key problem no SSH host key yet (macOS makes it at Remote Login's first connection: kit apply connects once, then records it)\n", 1},
-		{"Remote Login off", "", true, true, "host-key ok Remote Login is off: no host key to record\n", 0},
+		{"recorded", hostKey, localName, false, false, "host-key ok in kit-config\n", 0},
+		{"not recorded", "", "", false, false, "host-key attention not in kit-config\nhost-key problem SSH host key not in kit-config (kit apply records it)\n", 1},
+		{"another recorded", otherKey, localName, false, false, "host-key attention not kit-config's\nhost-key problem SSH host key not the one kit-config records (kit apply records this Mac's: a Mac set up again has a new one)\n", 1},
+		{"no local hostname recorded", hostKey, "", false, false, "host-key attention local hostname not in kit-config\nhost-key problem local hostname not in kit-config (kit apply records it)\n", 1},
+		{"renamed since", hostKey, "Someones-Old-Name", false, false, "host-key attention local hostname not kit-config's\nhost-key problem local hostname not the one kit-config records (kit apply records this Mac's: it's been renamed)\n", 1},
+		{"none yet", hostKey, localName, false, true, "host-key attention none yet\nhost-key problem no SSH host key yet (macOS makes it at Remote Login's first connection: kit apply connects once, then records it)\n", 1},
+		{"Remote Login off", "", "", true, true, "host-key ok Remote Login is off: no host key to record\n", 0},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			w := laptopWorld(t)
-			w.recording(t, tt.recorded)
+			w.recording(t, tt.recorded, tt.named)
 			if !tt.off {
 				w.remoteLogin(t)
 			}
@@ -117,22 +129,25 @@ func TestStatusOfTheHostKey(t *testing.T) {
 }
 
 // kit apply records this Mac's host key in its table in kit.toml, its type
-// and key, without the comment its file has, in place of another, and
-// commits and pushes kit.toml; with none yet, it has Remote Login answer
-// once, which makes it, then records it.
+// and key, without the comment its file has, and its local hostname, as
+// scutil says it, each in place of another, and commits and pushes
+// kit.toml; with no key yet, it has Remote Login answer once, which makes
+// it, then records it.
 func TestApplyRecordsTheHostKey(t *testing.T) {
 	for _, tt := range []struct {
-		name, recorded string
-		noKey          bool
+		name, recorded, named string
+		noKey                 bool
 	}{
-		{"not recorded", "", false},
-		{"another recorded", otherKey, false},
-		{"none yet", "", true},
+		{"not recorded", "", "", false},
+		{"another recorded", otherKey, localName, false},
+		{"no local hostname recorded", hostKey, "", false},
+		{"renamed since", hostKey, "Someones-Old-Name", false},
+		{"none yet", "", "", true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			w := laptopWorld(t)
 			w.remoteLogin(t)
-			w.recording(t, tt.recorded)
+			w.recording(t, tt.recorded, tt.named)
 			if tt.noKey {
 				w.noKeyYet(t)
 				w.sshd(t)
@@ -169,10 +184,10 @@ func TestApplyLeavesTheHostKeyForTheNextRun(t *testing.T) {
 		{"Remote Login doesn't answer", "this Mac has no SSH host key yet, and Remote Login didn't answer at 127.0.0.1:1 to make one: ", func(t *testing.T, w *world) {
 			w.noKeyYet(t)
 		}},
-		{"kit.toml edited", "kit.toml has edits not committed: kit reconcile settles them, then kit apply records the key", func(t *testing.T, w *world) {
+		{"kit.toml edited", "kit.toml has edits not committed: kit reconcile settles them, then kit apply records this Mac's host key and local hostname", func(t *testing.T, w *world) {
 			w.edits(t, " M kit.toml\x00", "1\t0\tkit.toml\x00")
 		}},
-		{"this Mac's table not committed", "kit.toml holds this Mac's table, not committed yet: the new-mac step commits it, then kit apply records the key", func(t *testing.T, w *world) {
+		{"this Mac's table not committed", "kit.toml holds this Mac's table, not committed yet: the new-mac step commits it, then kit apply records this Mac's host key and local hostname", func(t *testing.T, w *world) {
 			w.edits(t, " M kit.toml\x00", "1\t0\tkit.toml\x00")
 			w.write(t, bootState, `{"new_mac": "laptop", "from": "studio"}`)
 		}},
@@ -180,7 +195,7 @@ func TestApplyLeavesTheHostKeyForTheNextRun(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			w := laptopWorld(t)
 			w.remoteLogin(t)
-			w.recording(t, "")
+			w.recording(t, "", "")
 			tt.set(t, w)
 			was := w.read(t, configFile)
 

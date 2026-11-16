@@ -59,9 +59,10 @@ just named, in one of two cases:
 - A Mac started from another (the boot's "start from a Mac", or
   `kit machine add --from`), which carries its `[restore]` list in its
   copied declarations: from the Mac it started from, over the local
-  network, while it answers, known by the SSH host key kit-config records
-  for it (`host_key` in kit.toml, which `kit apply` on that Mac records with
-  its remote-login feature on; without it, the old Mac isn't looked for);
+  network, while it answers, reached at the local hostname kit-config
+  records for it and known by its SSH host key (`local_hostname` and
+  `host_key` in kit.toml, which `kit apply` on that Mac records with its
+  remote-login feature on; without them, the old Mac isn't reached);
   else its Time Machine disk, attached, or Arq's backup, which the person
   restores in Arq for kit to put in place
   (`kit apply --restore-from time-machine|arq`; `mac` goes back to the old

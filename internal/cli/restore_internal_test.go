@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -40,11 +41,12 @@ func TestRestoreAtReadsADateOrATime(t *testing.T) {
 	}
 }
 
-// On moving day the new Mac reads the old one's host key as kit-config's
-// remote records it, fetched now, as kit apply on the old Mac may have
-// recorded it since this run began: nothing merged, the remote out of
-// reach an error, never a key. What git prints is what real git does.
-func TestTheOldMacsHostKeyIsFetched(t *testing.T) {
+// On moving day, tried again, the new Mac reads what kit-config's remote
+// records for the old one, its host key and local hostname, fetched now,
+// as kit apply on the old Mac may have recorded them since this run began,
+// after the boot cloned kit-config: nothing merged, the remote out of
+// reach an error, never a record. What git prints is what real git does.
+func TestTheOldMacsRecordIsFetched(t *testing.T) {
 	const dir = "/Users/someone/.config/kit"
 	fetching := func() *runnertest.Fake {
 		fake := runnertest.New(t)
@@ -55,14 +57,20 @@ func TestTheOldMacsHostKeyIsFetched(t *testing.T) {
 	}
 	fake := fetching()
 	fake.On("git", "-C", dir, "fetch", "--prune", "--quiet", "origin")
-	fake.On("git", "-C", dir, "show", "refs/remotes/origin/main:kit.toml").Prints("format = 1\n\n[macs.laptop]\nhost_key = \"ssh-ed25519 AAAAC3Nza\"\n\n[macs.studio]\n")
-	if key, err := fetchedHostKey(context.Background(), gitrepo.Repo{Dir: dir, Run: fake}, "laptop"); key != "ssh-ed25519 AAAAC3Nza" || err != nil {
-		t.Errorf("fetchedHostKey() = %q, %v", key, err)
+	fake.On("git", "-C", dir, "show", "refs/remotes/origin/main:kit.toml").Prints("format = 1\n\n[macs.laptop]\nhost_key = \"ssh-ed25519 AAAAC3Nza\"\nlocal_hostname = \"Someones-MacBook-Pro\"\n\n[macs.studio]\n")
+	key, name, err := fetchedRecord(context.Background(), gitrepo.Repo{Dir: dir, Run: fake}, "laptop")
+	if key != "ssh-ed25519 AAAAC3Nza" || name != "Someones-MacBook-Pro" || err != nil {
+		t.Errorf("fetchedRecord() = %q, %q, %v", key, name, err)
+	}
+	for _, c := range fake.Calls() {
+		if strings.Contains(c, " merge") || strings.Contains(c, " rebase") || strings.Contains(c, " pull") || strings.Contains(c, " reset") {
+			t.Errorf("ran %s; want nothing merged", c)
+		}
 	}
 
 	fake = fetching()
 	fake.On("git", "-C", dir, "fetch", "--prune", "--quiet", "origin").Exits(128).PrintsToStderr("ssh: Could not resolve hostname github.com: nodename nor servname provided, or not known\nfatal: Could not read from remote repository.\n")
-	if key, err := fetchedHostKey(context.Background(), gitrepo.Repo{Dir: dir, Run: fake}, "laptop"); key != "" || err == nil || err.Error() != "couldn't reach origin" {
-		t.Errorf("fetchedHostKey(), offline = %q, %v", key, err)
+	if key, name, err := fetchedRecord(context.Background(), gitrepo.Repo{Dir: dir, Run: fake}, "laptop"); key != "" || name != "" || err == nil || err.Error() != "couldn't reach origin" {
+		t.Errorf("fetchedRecord(), offline = %q, %q, %v", key, name, err)
 	}
 }
