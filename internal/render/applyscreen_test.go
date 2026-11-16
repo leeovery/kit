@@ -621,11 +621,10 @@ var spaceman = event.NeedsYou{Time: after(360), Step: "manual", Item: "spaceman"
 var linkTargets = regexp.MustCompile("\x1b]8;;([^\x07\x1b]+)")
 
 // A link in a card's text is one the terminal opens when it's clicked, its
-// text as written, on applying's screen and in a small window alike; it
-// takes no room, every line as wide as without it; nothing else is linked.
+// text as written, on applying's screen; it takes no room, every line as wide as without it; nothing else is linked.
 func TestApplyingCardsLinkTheirLinks(t *testing.T) {
 	linked := ansi.SetHyperlink("https://github.com/example/spaceman/releases") + "github.com/example/spaceman/releases" + ansi.ResetHyperlink()
-	for _, size := range [][2]int{{160, 64}, {100, 30}, {80, 40}} {
+	for _, size := range [][2]int{{160, 64}, {100, 30}} {
 		t.Run(fmt.Sprintf("%dx%d", size[0], size[1]), func(t *testing.T) {
 			face, out, _ := applyAt(size[0], size[1], 6*time.Minute, cardUp(spaceman))
 			defer func() { _ = face.Close() }()
@@ -1044,8 +1043,7 @@ func TestApplyingCardUpAgain(t *testing.T) {
 }
 
 // A card's why is said once: as its line's notes say, when it has some;
-// else, in kit's words, why the run waits for it. On applying's screen and
-// in a window too small for it alike.
+// else, in kit's words, why the run waits for it.
 func TestApplyingCardsWhySaidOnce(t *testing.T) {
 	noted := []event.Step{
 		{Name: "appstore", Title: "appstore", Area: "Manual", ByHand: []event.Hand{{Name: "appstore", Title: "Sign in to the App Store"}}},
@@ -1072,20 +1070,6 @@ func TestApplyingCardsWhySaidOnce(t *testing.T) {
 			panel := strings.Join(right[:6], "\n")
 			if !strings.Contains(panel, "      "+tt.why) || strings.Contains(panel, tt.not) {
 				t.Errorf("the panel starts\n%s\nwant it to say %q, and that alone", panel, tt.why)
-			}
-
-			var narrow syncBuffer
-			small := render.NewPretty(&colorprofile.Writer{Forward: &narrow, Profile: colorprofile.Ascii}, 80, true).Turned().Sized(func() (int, int) { return 80, 40 })
-			for _, e := range events {
-				small.Emit(e)
-			}
-			small.Turn()
-			live := turned(screen(narrow.String()))
-			if err := small.Close(); err != nil {
-				t.Fatal(err)
-			}
-			if !strings.Contains(live, tt.why) || strings.Contains(live, tt.not) {
-				t.Errorf("in a small window:\n%s\nwant the card to say %q, and that alone", live, tt.why)
 			}
 		})
 	}
@@ -1421,21 +1405,12 @@ func TestApplyingStateLine(t *testing.T) {
 	}
 }
 
-// In a small window, the bar's last lit cell is red once a step has failed,
-// as the record's is.
-func TestApplyingSmallBarSaysAFailure(t *testing.T) {
-	steps := []event.Step{{Name: "a", Title: "a", Area: "Steps"}, {Name: "b", Title: "b", Area: "Steps"}}
-	face, out, _ := applyIn(colorprofile.TrueColor, 99, 40, time.Minute, rowsRun(steps, append(applying(1, "b"),
-		finished(2, "a", check.Result{State: check.Failed, Reason: "broke"}))...))
-	defer func() { _ = face.Close() }()
-	if !strings.Contains(out.String(), look.Words(look.Failed, "▮")) {
-		t.Errorf("with a failed, the small window's bar has no red cell:\n%s", uncoloured(out.String()))
-	}
-}
-
-// A window too small for the screen keeps the run in place under its
-// heading, as before, the rows' lights at its top; the screen takes a
-// window 100 by 30 or more.
+// The screen takes a window 100 by 30 or more. A window too small for it
+// has, in place under the heading, the rows' lights and the size that
+// brings the screen; then macOS asking something, and the card up, with
+// what to do, each while there is one. A window too short for the heading
+// too loses it, as it would have scrolled away, and what's still too tall
+// is cut to the window.
 func TestApplyingScreenNeedsTheRoom(t *testing.T) {
 	for _, tt := range []struct {
 		w, h   int
@@ -1453,53 +1428,24 @@ func TestApplyingScreenNeedsTheRoom(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	face, out, _ := applyAt(99, 40, 6*time.Minute+12*time.Second, sixMinutesIn())
-	got := turned(screen(out.String()))
-	if err := face.Close(); err != nil {
-		t.Fatal(err)
-	}
-	golden(t, "apply-small.golden", got+"\n")
-	for _, want := range []string{"  ● THIS MAC 6  ● FILES AND SHELL 2  ● MAC SETTINGS 3  ○ SECRETS\n  ◐ HOMEBREW FORMULAE", "  ◐ YOUR STEPS  ○ BACKUPS\n"} {
-		if !strings.Contains(got, want) {
-			t.Errorf("in a small window, the screen is\n%s\nwant the rows' lights, as the screen's rows stand\n%s", got, want)
-		}
-	}
-}
-
-// In a window too small for applying's screen, keys aren't read: a card
-// waiting for an answer says a bigger window shows them; one kit tells
-// about by itself says it carries on. Why it's there comes under its
-// title, before its steps, a subheading among them unnumbered, the
-// numbering carrying on across it.
-func TestApplyingCardInASmallWindow(t *testing.T) {
-	paper := event.NeedsYou{Time: after(360), Step: "manual", Item: "editor", Title: "Install the editor from its site", Steps: []string{"Download it from editor.example.com"}}
+	asking := append(cardUp(signIn), event.Asking{Time: after(358), Says: "asking whether to open a program from the internet"})
 	for _, tt := range []struct {
-		card  event.NeedsYou
-		want  string
-		order []string
+		golden string
+		w, h   int
+		events []event.Event
 	}{
-		{paper, "a bigger window shows the keys to answer it", nil},
-		{signIn, "kit carries on by itself once it's done", []string{
-			"Sign in to 1Password", "Every secret kit puts in place", "1  Scan the QR code", "2  Settings › Developer",
-			"\n       If kit still waits with both done:\n       3  Quit 1Password",
-		}},
+		{"apply-notice-99x40.golden", 99, 40, sixMinutesIn()},
+		{"apply-notice-160x29.golden", 160, 29, asking},
+		{"apply-notice-99x8.golden", 99, 8, asking},
 	} {
-		var narrow syncBuffer
-		small := render.NewPretty(&colorprofile.Writer{Forward: &narrow, Profile: colorprofile.Ascii}, 80, true).Turned().Sized(func() (int, int) { return 80, 40 })
-		for _, e := range cardUp(tt.card) {
-			small.Emit(e)
-		}
-		small.Turn()
-		live := turned(screen(narrow.String()))
-		if !strings.Contains(live, tt.card.Title) || !strings.Contains(live, tt.want) {
-			t.Errorf("%s in a small window:\n%s\nwant its card, saying %q", tt.card.Title, live, tt.want)
-		}
-		if !inOrder(live, tt.order...) {
-			t.Errorf("%s in a small window:\n%s\nwant in order %q", tt.card.Title, live, tt.order)
-		}
-		if err := small.Close(); err != nil {
-			t.Fatal(err)
-		}
+		t.Run(tt.golden, func(t *testing.T) {
+			face, out, _ := applyAt(tt.w, tt.h, 6*time.Minute, tt.events)
+			got := turned(screen(out.String()))
+			if err := face.Close(); err != nil {
+				t.Fatal(err)
+			}
+			golden(t, tt.golden, got+"\n")
+		})
 	}
 }
 
@@ -1650,8 +1596,8 @@ func TestApplyingRecordKeepsWhatWaits(t *testing.T) {
 // the cursor shown, the mouse and focus no longer reported, and its keys
 // stop being read, the terminal out of its raw mode, as the question needs
 // it: for a question asked mid-run, and back after it; when the window's
-// made too small for it, the run drawn in place, and taken again when it's
-// big enough; when the face closes without the run finishing.
+// made too small for it, what makes it come said in place, and taken again
+// when it's big enough; when the face closes without the run finishing.
 func TestApplyingGivesTheScreenBack(t *testing.T) {
 	var out syncBuffer
 	var mu sync.Mutex
@@ -1690,8 +1636,8 @@ func TestApplyingGivesTheScreenBack(t *testing.T) {
 		t.Error("back from the question, the face didn't take its screen, its keys and the mouse again")
 	}
 	resize(99)
-	if got := turned(screen(out.String())); onScreen() || mouse() || !mouseOffFirst(kb) || kb.isRaw() || !strings.Contains(got, "◐ Homebrew formulae  installing ffmpeg") {
-		t.Errorf("made too small, the window shows\n%s\nraw: %v; want the run in place on the terminal's own screen, the mouse no longer reported, then not raw", got, kb.isRaw())
+	if got := turned(screen(out.String())); onScreen() || mouse() || !mouseOffFirst(kb) || kb.isRaw() || !strings.Contains(got, "make the window at least 100×30 to follow the run") {
+		t.Errorf("made too small, the window shows\n%s\nraw: %v; want what makes the screen come, in place on the terminal's own screen, the mouse no longer reported, then not raw", got, kb.isRaw())
 	}
 	resize(160)
 	if !onScreen() || !mouse() || !kb.isRaw() {

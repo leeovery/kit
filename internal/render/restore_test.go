@@ -76,21 +76,13 @@ func restoredData() []event.Event {
 // says it: what it's copying, the files copied of all those to copy, and,
 // in the bar under the row, how far by their bytes; the log what it's
 // restored. Done, the record says what it restored, and how its paths
-// stand. In a small window, the row's the same, in the run's place.
+// stand.
 func TestApplyingShowsTheDataRestore(t *testing.T) {
 	took := 40 * time.Minute
 	t.Run("apply-screen-restore-160x64.golden", func(t *testing.T) {
 		face, out, _ := applyAt(160, 64, took, restoringData())
 		defer func() { _ = face.Close() }()
 		golden(t, "apply-screen-restore-160x64.golden", screen(out.String())+"\n")
-	})
-	t.Run("apply-restore-small.golden", func(t *testing.T) {
-		face, out, _ := applyAt(99, 40, took, restoringData())
-		got := turned(screen(out.String()))
-		if err := face.Close(); err != nil {
-			t.Fatal(err)
-		}
-		golden(t, "apply-restore-small.golden", got+"\n")
 	})
 	t.Run("apply-record-restore.golden", func(t *testing.T) {
 		face, out, _ := applyAt(160, 64, time.Hour, restoredData())
@@ -134,8 +126,7 @@ func askingWhereFrom() []event.Event {
 
 // The data restore's card, up mid-run in its row, offers its choices as
 // the run's end does a to-do's: each key, what it does, a line each, never
-// "space when it's done". In a small window, its card says a bigger window
-// shows the keys.
+// "space when it's done".
 func TestApplyingShowsTheRestoresChoices(t *testing.T) {
 	took := 80 * time.Second
 	for _, size := range [][2]int{{100, 30}, {160, 64}} {
@@ -146,14 +137,6 @@ func TestApplyingShowsTheRestoresChoices(t *testing.T) {
 			golden(t, name, screen(out.String())+"\n")
 		})
 	}
-	t.Run("apply-restore-card-small.golden", func(t *testing.T) {
-		face, out, _ := applyAt(99, 40, took, askingWhereFrom())
-		got := turned(screen(out.String()))
-		if err := face.Close(); err != nil {
-			t.Fatal(err)
-		}
-		golden(t, "apply-restore-card-small.golden", got+"\n")
-	})
 }
 
 // The card saying what of Arq's restore isn't in its holding folders, once

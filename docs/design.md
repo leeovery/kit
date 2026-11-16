@@ -1147,9 +1147,10 @@ step failed, with the error; the run finishing, with its summary. Faces subscrib
   them, To do and how many, each group's name muted, done ones ticked, the one up a pill, `q`
   stopping there at its foot; on the right the one up is a panel ruled off over the log, as a
   card is: its title and where it is in the list, why, its steps, then how it ends (kit watching,
-  and what for; `space`; a choice's keys). In a smaller window the run is drawn in place: a light
-  a row, the bar, what's running and what's wrong, a card or a to-do up in place under them, no
-  list. Once applied, its record takes the screen's place: the wordmark with the bar and the
+  and what for; `space`; a choice's keys). In a smaller window, in place under the heading, a light a
+  row and `→ make the window at least 100×30 to follow the run`; macOS asking, and a card up with
+  `→ a bigger window shows the keys to answer it`; the screen takes over once the window's big
+  enough. Once applied, its record takes the screen's place: the wordmark with the bar and the
   tally, then what's left to do (the to-dos at the end first, in their order, each its steps as
   how), what failed, what needs you, and the rows done, under each what of its steps still
   waits, but for what's known to come by itself (a project's MCP server whose folder isn't

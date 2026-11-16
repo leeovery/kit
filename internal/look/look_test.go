@@ -319,56 +319,6 @@ func TestLights(t *testing.T) {
 	)
 }
 
-// A card: an orange rule across, w wide with the margins, carrying the
-// needs-you mark, the title strong and what it says; a blank line; why,
-// muted, wrapped, and a blank line; its steps numbered, the numbers
-// orange, each wrapped under its own words and a blank line after it, a
-// subheading muted, unnumbered, straight on to the step after it, the
-// numbering carrying on across it; then what's said after them, muted,
-// wrapped, and a blank line. A title too long for its rule is cut, some
-// rule kept.
-func TestCard(t *testing.T) {
-	got := look.Card(70, look.CardText{
-		Title: "Sign in to 1Password",
-		Says:  look.Says(look.Orange("needs you"), look.Muted("2 more after this")),
-		Why:   "It unlocks every secret kit puts in place, so the rest of the run waits for it.",
-		Steps: []string{"Open 1Password", "If it doesn't ask, in its settings:", "Settings › Developer › turn on Integrate with 1Password CLI"},
-		After: "kit carries on by itself once it's done",
-	})
-	same(t, got,
-		"  ── ▲ Sign in to 1Password  needs you · 2 more after this ─────────",
-		"",
-		"       It unlocks every secret kit puts in place, so the rest of the",
-		"       run waits for it.",
-		"",
-		"       1  Open 1Password",
-		"",
-		"       If it doesn't ask, in its settings:",
-		"       2  Settings › Developer › turn on Integrate with 1Password",
-		"          CLI",
-		"",
-		"       kit carries on by itself once it's done",
-		"",
-	)
-	if !strings.HasPrefix(got[0], "  "+look.Orange("── ")+look.Orange("▲")+" "+look.Strong("Sign in to 1Password")) || !strings.HasSuffix(got[0], " "+look.Orange("─────────")) {
-		t.Errorf("the card's rule is %q; want it orange, the mark orange, the title strong", got[0])
-	}
-	if got[2] != "       "+look.Muted("It unlocks every secret kit puts in place, so the rest of the") || got[7] != "       "+look.Muted("If it doesn't ask, in its settings:") {
-		t.Errorf("why and the subheading are %q and %q; want them muted", got[2], got[7])
-	}
-	for _, l := range got {
-		if w := ansi.StringWidth(l); w > 68 {
-			t.Errorf("%q is %d wide; want it to end two cells from the edge", ansi.Strip(l), w)
-		}
-	}
-	same(t, look.Card(30, look.CardText{Title: "Allow Karabiner-Elements", Says: look.Orange("needs you"), Steps: []string{"Allow its driver"}}),
-		"  ── ▲ Allow Karabiner-… ───",
-		"",
-		"       1  Allow its driver",
-		"",
-	)
-}
-
 // What's left to do, numbered: the to-do mark, the number and the title,
 // then how, each thing under the title after an arrow, muted, wrapped
 // under its own words, a subheading without the arrow; a title too long

@@ -41,8 +41,8 @@ const (
 	focusOff = "\x1b[?1004l"
 )
 
-// The least window applying takes a screen of its own in: below it, the run
-// stays in place under its heading.
+// The least window applying takes a screen of its own in: below it, only
+// its lights stay in place under its heading, and what brings the screen.
 const (
 	screenWidth  = 100
 	screenHeight = 30
@@ -96,20 +96,46 @@ func (h headline) length() int {
 func (h headline) whole() string { return h.typed(h.length()) }
 
 // drawApplying draws applying's live part: its screen, when the window's
-// big enough for it; otherwise in place, under its heading.
+// big enough for it; otherwise, in place, what brings it (tooSmall).
 func (p *Pretty) drawApplying() {
-	if w, h := p.window(); p.screenFits(w, h) {
+	w, h := p.window()
+	if p.screenFits(w, h) {
 		p.drawScreen(w, h)
 		return
 	}
 	p.leaveScreen()
-	lines := p.applyLive()
-	// In a window too short for the heading too, it goes, as it would have
-	// scrolled away.
-	if head := p.headingLive(false); len(head)+len(lines) < p.height() {
+	p.drawLive(p.tooSmall(h))
+}
+
+// tooSmall is applying's live part in a window h high, too small for its
+// screen: under the heading, the rows' lights and the size that brings
+// the screen; then macOS asking something, and the card up, each while
+// there is one. In a window too short for the heading too, it goes, as it
+// would have scrolled away; what's still too tall is cut to the window.
+func (p *Pretty) tooSmall(h int) []string {
+	lines := append(look.Lights(p.width, p.lamps()...), "", "  "+look.Todo(look.Muted(fmt.Sprintf("make the window at least %d×%d to follow the run", screenWidth, screenHeight))))
+	for _, block := range [][]string{p.askingLines(p.width), p.cardUpLines(p.width)} {
+		if len(block) > 0 {
+			lines = append(append(lines, ""), block...)
+		}
+	}
+	if head := p.headingLive(false); h == 0 || len(head)+len(lines) < h {
 		lines = append(head, lines...)
 	}
-	p.drawLive(lines)
+	if h > 0 {
+		lines = lines[:min(len(lines), max(h-1, 1))]
+	}
+	return lines
+}
+
+// cardUpLines are the card up, w wide, in a window too small for the
+// screen, which alone reads its keys: its row, and that a bigger window
+// shows them; none when no card's up.
+func (p *Pretty) cardUpLines(w int) []string {
+	if p.card == nil {
+		return nil
+	}
+	return look.Timeline("  ", w, look.Row{State: look.NeedsYou, Name: p.card.Title, Says: look.Orange("needs you"), Under: todoLines("a bigger window shows the keys to answer it", w-6)})
 }
 
 // window is the terminal's size as it is now, all of it: no size when the
@@ -637,31 +663,6 @@ func (p *Pretty) standing(step string, seen map[string]bool) standing {
 		return clearOfIt
 	}
 	return inTheWay
-}
-
-// cardLines are the step by hand up for you as a card w wide, in place
-// under the run's heading in a window too small for applying's screen:
-// what to do, how many more wait after it, why it's there (cardWhy), its
-// steps, and that kit carries on by itself, when it tells, what its key
-// does while it's being answered, else that a bigger window shows the keys
-// to answer it; none when no card's up.
-func (p *Pretty) cardLines(w int) []string {
-	c := p.card
-	if c == nil {
-		return nil
-	}
-	says := []string{look.Orange("needs you")}
-	if c.More > 0 {
-		says = append(says, look.Muted(fmt.Sprintf("%d more after this", c.More)))
-	}
-	after := "a bigger window shows the keys to answer it"
-	switch {
-	case c.Tells:
-		after = "kit carries on by itself once it's done"
-	case c.Answering != "":
-		after = answeringWith(*c)
-	}
-	return look.Card(w, look.CardText{Title: c.Title, Says: look.Says(says...), Why: p.cardWhy(), Steps: c.Steps, After: after})
 }
 
 // cardID is how a step by hand's card is known among those that came up:
