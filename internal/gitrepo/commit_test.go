@@ -474,15 +474,34 @@ func TestCommitFails(t *testing.T) {
 	}
 	s.check(t, "comparing failing")
 
+}
+
+// A file git tracks become a folder git commit --only refuses, and so does
+// kit, naming it plainly, the new files taken back out of git's index;
+// that failing too, both are said. What git prints is what real git does.
+func TestCommitRefusesAFileBecomeAFolder(t *testing.T) {
+	const refused = "error: 'f' does not have a commit checked out\nerror: unable to index file 'f'\nfatal: updating files failed\n"
+	const says = "f was a file git tracks and is a folder now, which kit doesn't commit: commit the change by hand"
+	fake := runnertest.New(t)
+	s := &sequence{fake: fake}
+	s.begins(t, " D f\x00?? f/x\x00", false, []string{"f/x"}, "f", "f/x")
+	s.differs("f", "f/x")
+	s.expect(commitOnly("f", "f/x")...).Exits(128).PrintsToStderr(refused)
+	s.expect(unintend("f/x")...)
+	if committed, err := commit(fake, "f", "f/x"); committed || err == nil || err.Error() != says {
+		t.Errorf("Commit(), a file become a folder = %v, %v; want %q", committed, err, says)
+	}
+	s.check(t, "a file become a folder")
+
 	fake = runnertest.New(t)
 	s = &sequence{fake: fake}
 	s.begins(t, " D f\x00?? f/x\x00", false, []string{"f/x"}, "f", "f/x")
 	s.differs("f", "f/x")
-	s.expect(commitOnly("f", "f/x")...).Exits(128).PrintsToStderr("error: 'f' does not have a commit checked out\nerror: unable to index file 'f'\nfatal: updating files failed\n")
+	s.expect(commitOnly("f", "f/x")...).Exits(128).PrintsToStderr(refused)
 	s.expect(unintend("f/x")...).Exits(128).PrintsToStderr("fatal: index file corrupt\n")
 	committed, err := commit(fake, "f", "f/x")
-	if committed || err == nil || !strings.Contains(err.Error(), "updating files failed") || !strings.Contains(err.Error(), "index file corrupt") {
-		t.Errorf("Commit(), a file become a folder = %v, %v; want git's refusal, and its failure to take the new file back out", committed, err)
+	if committed || err == nil || !strings.HasPrefix(err.Error(), says) || !strings.Contains(err.Error(), "index file corrupt") {
+		t.Errorf("Commit(), a file become a folder, not taken back out = %v, %v; want the refusal, and git's failure to take the new file back out", committed, err)
 	}
-	s.check(t, "a file become a folder")
+	s.check(t, "not taken back out")
 }

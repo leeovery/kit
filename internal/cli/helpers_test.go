@@ -427,7 +427,7 @@ func (w *world) tracks() {
 		return append([]string{"-C", filepath.Join(w.home, ".config", "kit")}, args...)
 	}
 	w.fake.On("git", git("symbolic-ref", "-q", "HEAD")...).Prints("refs/heads/main\n")
-	w.fake.On("git", git("for-each-ref", "--format=%(upstream)", "refs/heads/main")...).Prints("refs/remotes/origin/main\n")
+	w.fake.On("git", git("for-each-ref", "--format=%(upstream) %(upstream:remoteref)", "refs/heads/main")...).Prints("refs/remotes/origin/main refs/heads/main\n")
 	w.fake.On("git", git("rev-parse", "--verify", "--quiet", "refs/remotes/origin/main")...).Prints(head + "\n")
 }
 
@@ -446,7 +446,7 @@ func (w *world) expectPush(t *testing.T, gitDir string) {
 	w.tracks()
 	w.fake.On("git", git("fetch", "--prune", "--quiet", "origin")...)
 	w.fake.On("git", git("rev-list", "--count", "HEAD..refs/remotes/origin/main")...).Prints("0\n")
-	w.fake.On("git", git("push", "--quiet")...)
+	w.fake.On("git", git("push", "--quiet", "origin", "HEAD:refs/heads/main")...)
 }
 
 // edits scripts git's answers as kit asks for kit-config's edits, as real

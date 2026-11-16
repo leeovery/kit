@@ -30,12 +30,21 @@ func main() {
 		}
 		return
 	}
-	// An interrupt ends the commands kit is running, each with everything it
-	// started, before kit exits: each runs in a process group of its own,
-	// which the terminal's interrupt doesn't reach.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := ending()
 	root := cli.NewRootCommand(cli.Real(version))
 	status := cli.Execute(ctx, root, os.Args[1:])
 	stop()
 	os.Exit(status)
+}
+
+// ending is the context kit runs in, ended by an interrupt, a SIGTERM or the
+// terminal closing (SIGHUP), which ends the commands kit is running, each
+// with everything it started, before kit exits: each runs in a process
+// group of its own, which the terminal's signals don't reach. kit itself
+// isn't killed, so a job begun on git runs on past it and finishes. Its
+// writes to a terminal that's gone fail, and end nothing: only SIGPIPE
+// would, which a closed pipe sends, never a closed terminal (proven on
+// macOS 26).
+func ending() (context.Context, context.CancelFunc) {
+	return signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 }

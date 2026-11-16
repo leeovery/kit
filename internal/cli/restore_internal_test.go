@@ -50,7 +50,7 @@ func TestTheOldMacsHostKeyIsFetched(t *testing.T) {
 		fake := runnertest.New(t)
 		fake.On("git", "-C", dir, "remote").Prints("origin\n")
 		fake.On("git", "-C", dir, "symbolic-ref", "-q", "HEAD").Prints("refs/heads/main\n")
-		fake.On("git", "-C", dir, "for-each-ref", "--format=%(upstream)", "refs/heads/main").Prints("refs/remotes/origin/main\n")
+		fake.On("git", "-C", dir, "for-each-ref", "--format=%(upstream) %(upstream:remoteref)", "refs/heads/main").Prints("refs/remotes/origin/main refs/heads/main\n")
 		return fake
 	}
 	fake := fetching()

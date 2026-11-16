@@ -88,7 +88,7 @@ func TestApplyLeavesANewMacGitCantCommit(t *testing.T) {
 		t.Errorf("kit apply printed\n%s%s\nwant the new Mac left, waiting for git's name and email", out, errOut)
 	}
 	for _, c := range w.fake.Calls() {
-		if strings.Contains(c, " commit --quiet --only ") || strings.HasSuffix(c, "push --quiet") {
+		if strings.Contains(c, " commit --quiet --only ") || strings.Contains(c, " push ") {
 			t.Errorf("ran %s; want nothing committed or pushed", c)
 		}
 	}
@@ -208,7 +208,7 @@ func (w *world) committedNotPushed(t *testing.T) {
 func TestApplyPushesANewMacOnceItCan(t *testing.T) {
 	w, _ := newMacWorld(t)
 	w.expectCommit(t, newMacCommit)
-	w.fake.On("git", "-C", filepath.Join(w.home, ".config", "kit"), "push", "--quiet").Exits(128).PrintsToStderr("fatal: unable to access the remote\n")
+	w.fake.On("git", "-C", filepath.Join(w.home, ".config", "kit"), "push", "--quiet", "origin", "HEAD:refs/heads/main").Exits(128).PrintsToStderr("fatal: unable to access the remote\n")
 
 	out, errOut, _ := w.run(t, "apply")
 	if !strings.Contains(out, "new-mac attention committed, not pushed: ") {
@@ -239,7 +239,7 @@ func TestApplyPushesANewMacAStoppedRunCommitted(t *testing.T) {
 	if !strings.Contains(out, "new-mac ok nothing changed; pushed 1 commit waiting\n") {
 		t.Errorf("kit apply printed\n%s%s\nwant the commit waiting pushed", out, errOut)
 	}
-	if !slices.Contains(w.fake.Calls(), "git -C "+filepath.Join(w.home, ".config", "kit")+" push --quiet") {
+	if !slices.Contains(w.fake.Calls(), "git -C "+filepath.Join(w.home, ".config", "kit")+" push --quiet origin HEAD:refs/heads/main") {
 		t.Errorf("ran\n%s\nwant the commit pushed", strings.Join(w.fake.Calls(), "\n"))
 	}
 	if state := w.read(t, bootState); strings.Contains(state, "laptop") {

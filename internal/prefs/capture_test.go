@@ -56,7 +56,7 @@ func (w *world) pulls() {
 	w.fake.On("git", "-C", w.clone, "rev-parse", "--absolute-git-dir").Prints(filepath.Join(w.clone, ".git") + "\n")
 	w.fake.On("git", "-C", w.clone, "--literal-pathspecs", "status", "--porcelain", "-z", "--untracked-files=all", "--no-renames", "--")
 	w.fake.On("git", "-C", w.clone, "symbolic-ref", "-q", "HEAD").Prints("refs/heads/main\n")
-	w.fake.On("git", "-C", w.clone, "for-each-ref", "--format=%(upstream)", "refs/heads/main").Prints("refs/remotes/origin/main\n")
+	w.fake.On("git", "-C", w.clone, "for-each-ref", "--format=%(upstream) %(upstream:remoteref)", "refs/heads/main").Prints("refs/remotes/origin/main refs/heads/main\n")
 	w.fake.On("git", "-C", w.clone, "fetch", "--prune", "--quiet", "origin")
 	w.fake.On("git", "-C", w.clone, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/main").Prints(head + "\n")
 	w.fake.On("git", "-C", w.clone, "rev-list", "--count", "HEAD..refs/remotes/origin/main").Prints("0\n")
@@ -86,7 +86,7 @@ func (w *world) pushes(t *testing.T, message, status string, files, added []stri
 	w.fake.On("git", git("remote", "get-url", "--push", "--all", "origin")...).Prints(remote + "\n")
 	w.fake.On("gh", "repo", "view", "https://github.com/someone/prefs", "--json", "visibility", "--jq", ".visibility").Prints("PRIVATE\n")
 	w.pulls()
-	w.fake.On("git", git("push", "--quiet")...)
+	w.fake.On("git", git("push", "--quiet", "origin", "HEAD:refs/heads/main")...)
 }
 
 // newFiles are the files a first capture of one domain makes, each new to
@@ -344,7 +344,7 @@ func TestCaptureHoldsBackThePushWhenTheCommitFailed(t *testing.T) {
 			t.Errorf("%s: Capture() = %+v, %v; want %q", c.name, report, err, c.want)
 		}
 		for _, call := range w.fake.Calls() {
-			if strings.Contains(call, " push --quiet") || strings.Contains(call, " stash ") || strings.Contains(call, " fetch ") && c.name == "a merge under way" {
+			if strings.Contains(call, " push ") || strings.Contains(call, " stash ") || strings.Contains(call, " fetch ") && c.name == "a merge under way" {
 				t.Errorf("%s: ran %s, want nothing pushed or set aside", c.name, call)
 			}
 		}
@@ -383,7 +383,7 @@ func TestCaptureNeverPushesToAPublicStore(t *testing.T) {
 		if err != nil || !strings.HasPrefix(report.PushError, c.says) {
 			t.Errorf("%s: Capture() = %+v, %v; want the push held, saying %q", c.name, report, err, c.says)
 		}
-		if slices.Contains(w.fake.Calls(), "git -C "+w.clone+" push --quiet") {
+		if slices.ContainsFunc(w.fake.Calls(), func(call string) bool { return strings.Contains(call, " push ") }) {
 			t.Errorf("%s: pushed to a store not proven private", c.name)
 		}
 		if rec, _ := w.p.Load(); rec.Unpushed.IsZero() || rec.PushError == "" {

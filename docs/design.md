@@ -417,7 +417,7 @@ unable to, as when the key isn't on the Mac yet, nothing's committed, and the st
 next apply. Another git holding the index (`index.lock`) a moment, as `git status` does, kit
 tries again for about two seconds, then says what git said. Once begun, the commit finishes
 whatever becomes of the run. A change git's commit refuses, as a tracked file become a folder,
-kit says as git said it, and it waits as drift. It refuses while git is part way through a
+kit says so, naming the file, and it waits as drift. It refuses while git is part way through a
 merge, rebase, cherry-pick, revert or `git am`, or a conflict in its paths waits to be resolved:
 its change waits till that's finished. Nothing's pushed after a commit that failed. What git
 can't keep (an ignored file, a file added then gone, a repository nested in kit-config, which
@@ -435,31 +435,39 @@ commit; a new file to the Bin) or snooze.
 
 kit pulls before it pushes, and pulls the prefs store's clone the same way (`kit prefs`), with
 the repository's one remote: with several, it pushes to none, and says so, and HEAD on no branch
-is refused. It refuses while git is part way through one of its operations, or a conflict
-waits, as setting work aside would end the one; then it fetches the remote, pruning its branches
-gone from it (a remote out of reach said plainly). A branch with no upstream is pushed to the
-remote's branch of its name, which becomes its upstream; an upstream not there yet, as on a
-new, empty remote, has nothing to bring in. Commits waiting to be pushed are those the upstream
-hasn't, or, with none or it not there, those on none of the remote's branches, so a failed first
-push, or commits made offline, show as waiting. When the upstream has commits this Mac hasn't,
-kit rebases onto them by the commits since the two parted (never git's fork-point, which can
-leave out a commit, so the rebase changes no more than the remote's commits do), so two Macs
-don't fight. What's not committed in the files git tracks is set aside first, in a stash of its
-own that's never in git's list of stashes (`git stash create`), the files reset to the last
-commit, and put back by it once rebased (`git stash apply --index`), so what was staged is
-staged still, as `--autostash` wouldn't have it; files git doesn't track stay where they are.
-Should it not go back, it's kept in git's list of stashes, as "kit: your changes before
-pulling", so nothing's lost, and kit says so. But when the remote's commits change a file not
-committed here, staged or not, new, or in a repository nested here, nothing is set aside,
-rebased or pushed, and kit names the files: put back, the change would conflict. `kit status`'s
-Sync line says so too, as far as the last fetch tells, while it holds commits back. A rebase
-that stops on a conflict, judged under way by git's own record of it, is aborted and what was
-set aside put back, so nothing's lost; one that never started leaves nothing to undo; either way
-nothing is pushed. What a program says, kit looks for on the line that carries its
-error (git's `fatal:`, or ssh's own lines above it, some with no prefix of ssh's; mas's
-`Error:` or `[ERROR]`; brew's `Error:`; osascript's `execution error:`; sudo's own), as the
-reason is often above the last line, and a line that merely mentions it isn't the error; git
-runs in the C locale for it, as git translates `fatal:`.
+is refused. It refuses while git is part way through one of its operations, or a conflict waits,
+as setting work aside would end the one; then it fetches the remote, pruning its branches gone
+from it (a remote out of reach said plainly). The push names that remote and the upstream's
+branch on it (`git push <remote> HEAD:<branch>`), so nothing in git's config, as `pushRemote` or
+`pushDefault`, sends it anywhere but where its URLs were proven private. A branch with no
+upstream is pushed to the remote's branch of its name, which becomes its upstream; an upstream
+not there yet, as on a new, empty remote, has nothing to bring in. Commits waiting to be pushed
+are those the upstream hasn't, or, with none or it not there, those on none of the remote's
+branches, so a failed first push, or commits made offline, show as waiting. When the upstream
+has commits this Mac hasn't, kit rebases onto them by the commits since the two parted (never
+git's fork-point, which can leave out a commit, so the rebase changes no more than the remote's
+commits do), so two Macs don't fight. What's not committed in the files git tracks is set aside
+first, in a stash of its own that's never in git's list of stashes (`git stash create`), the
+files reset to the last commit, and put back by it once rebased (`git stash apply --index`), so
+what was staged is staged still, as `--autostash` wouldn't have it; files git doesn't track stay
+where they are. Should it not go back, it's kept in git's list of stashes, as "kit: your changes
+before pulling", so nothing's lost, and kit says so; should the reset fail, everything's left as
+it was. But when the remote's commits change a file not committed here, staged or not, new, or
+in a repository nested here, nothing is set aside, rebased or pushed, and kit names the files:
+put back, the change would conflict. Nor is anything when a file git tracks is a folder now (a
+folder on disk where git says the file's deleted or changed in type, which takes in a repository
+of its own, whose files git doesn't list), or a folder a file (a file git doesn't track over the
+folder's files): reset to the last commit, the path would take the place of what's there,
+deleting it, so kit names it. `kit status`'s Sync line says so too, as far as the last fetch
+tells, while it holds commits back. A rebase that stops on a conflict, judged under way by git's
+own record of it, is aborted and what was set aside put back, so nothing's lost; one that stops
+as git, set to sign, can't sign a commit it rebases is aborted the same, and said as a commit
+unable to sign is; one that never started leaves nothing to undo; either way nothing is pushed.
+What a program says, kit looks for on the line that carries its error (git's `fatal:`, or ssh's
+own lines above it, some with no prefix of ssh's; mas's `Error:` or `[ERROR]`; brew's `Error:`;
+osascript's `execution error:`; sudo's own), as the reason is often above the last line, and a
+line that merely mentions it isn't the error; git runs in the C locale for it, as git translates
+`fatal:`.
 
 **Steps.** Everything kit applies is a step in one pipeline. A step has:
 
@@ -497,10 +505,12 @@ the faces and the log, with what applying it did earlier kept; and use one's cho
 the to-dos its check finds, run as that step's own; and say what it comes after wasn't done after
 all: each of those steps that can be done again (a step by hand of its own, its card raised again)
 is, in order, as its own, then checked again as above, the step saying meanwhile that it waits for
-it, and carrying on once they stand ok. A run that's stopped (an interrupt) fails the steps it
-hadn't started. A step whose check failed, as one that didn't answer in time (30 seconds, tried
-twice), is applied on that, which gives its apply nothing to act on; then, once its check
-answers with things to act on, again, on those.
+it, and carrying on once they stand ok. A run that's stopped (an interrupt, a SIGTERM, or its
+terminal closing) fails the steps it hadn't started; a job begun on git (a commit, or a pull's
+rebase and putting back what it set aside) finishes first, and what kit writes to a terminal
+that's gone is lost, not kit. A step whose check failed, as one that didn't answer in time
+(30 seconds, tried twice), is applied on that, which gives its apply nothing to act on; then,
+once its check answers with things to act on, again, on those.
 
 ## Commands
 

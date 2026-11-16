@@ -89,7 +89,7 @@ func TestNothingChangedPushesWhatsWaiting(t *testing.T) {
 		}
 		pushed := false
 		for _, cmd := range w.fake.Commands() {
-			pushed = pushed || slices.Equal(cmd.Args, git("push", "--quiet"))
+			pushed = pushed || slices.Equal(cmd.Args, git("push", "--quiet", "origin", "HEAD:refs/heads/main"))
 			if slices.Contains(cmd.Args, "commit") || slices.Contains(cmd.Args, "stash") {
 				t.Errorf("%s: ran %s, want nothing committed or set aside", c.name, cmd)
 			}

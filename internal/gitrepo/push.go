@@ -1,6 +1,7 @@
 package gitrepo
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -34,28 +35,32 @@ const stashMessage = "kit: your changes before pulling"
 // Pull brings in the remote's changes, rebasing what's committed here onto
 // the branch's upstream when it has commits HEAD hasn't. It refuses while
 // git is part way through a merge, rebase, cherry-pick, revert or am, or a
-// conflict waits to be resolved; and when the remote's commits change a
-// path not committed here, as putting it back would conflict. What's not
-// committed is set aside while it rebases and put back as it was, staged
-// or not, git's list of stashes left as it is unless what was set aside
-// won't go back, when it's kept there, and the error says so. A rebase
-// that stops on a conflict is aborted, leaving the repository as it was.
+// conflict waits to be resolved; when the remote's commits change a path
+// not committed here, as putting it back would conflict; and when a file
+// git tracks is a folder now, or a folder a file, as setting it aside
+// would delete what's there. What's not committed is set aside while it
+// rebases and put back as it was, staged or not, git's list of stashes
+// left as it is unless what was set aside won't go back, when it's kept
+// there, and the error says so. A rebase that stops on a conflict is
+// aborted, leaving the repository as it was.
 func (r Repo) Pull(ctx context.Context) error {
 	_, _, err := r.pull(ctx)
 	return err
 }
 
-// Push pulls the remote's changes (Pull), then pushes to the repository's
-// one remote, nothing when Pull refuses or fails. A branch with no upstream
-// is pushed to the same branch there, which becomes its upstream.
+// Push pulls the remote's changes (Pull), then pushes to the branch's
+// upstream on the repository's one remote, the remote PushURLs reads,
+// named, so git's pushRemote or pushDefault can't send it elsewhere:
+// nothing when Pull refuses or fails. A branch with no upstream is pushed
+// to the same branch there, which becomes its upstream.
 func (r Repo) Push(ctx context.Context) error {
-	remote, up, err := r.pull(ctx)
+	remote, t, err := r.pull(ctx)
 	if err != nil {
 		return err
 	}
-	args := []string{"push", "--quiet"}
-	if up == "" {
-		args = append(args, "-u", remote, "HEAD")
+	args := []string{"push", "--quiet", remote, "HEAD:" + t.merge}
+	if t.up == "" {
+		args = []string{"push", "--quiet", "-u", remote, "HEAD"}
 	}
 	if _, err := r.git(ctx, args...); err != nil {
 		return fmt.Errorf("couldn't push: %w", err)
@@ -75,48 +80,47 @@ func (r Repo) Holding(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	_, up, err := r.upstream(ctx)
+	t, err := r.upstream(ctx)
 	if err != nil {
 		return err
 	}
-	if n, err := r.behind(ctx, up); err != nil || n == 0 {
+	if n, err := r.behind(ctx, t.up); err != nil || n == 0 {
 		return nil
 	}
-	return r.clashes(ctx, dirty, up)
+	return r.holds(ctx, dirty, t.up)
 }
 
-// pull is Pull: the repository's remote, and the branch's upstream, ""
-// for none.
-func (r Repo) pull(ctx context.Context) (remote, up string, err error) {
+// pull is Pull: the repository's remote, and the branch HEAD is on.
+func (r Repo) pull(ctx context.Context) (remote string, t tracking, err error) {
 	if remote, err = r.remote(ctx); err != nil {
-		return "", "", err
+		return "", tracking{}, err
 	}
 	gitDir, err := r.gitDir(ctx)
 	if err != nil {
-		return "", "", err
+		return "", tracking{}, err
 	}
 	dirty, err := r.settled(ctx, gitDir)
 	if err != nil {
-		return "", "", err
+		return "", tracking{}, err
 	}
-	if _, up, err = r.upstream(ctx); err != nil {
-		return "", "", err
+	if t, err = r.upstream(ctx); err != nil {
+		return "", tracking{}, err
 	}
 	if err := r.fetch(ctx, remote); err != nil {
-		return "", "", err
+		return "", tracking{}, err
 	}
-	n, err := r.behind(ctx, up)
+	n, err := r.behind(ctx, t.up)
 	if err != nil {
-		return "", "", fmt.Errorf("couldn't bring in the remote's changes, so nothing was pushed: %w", err)
+		return "", tracking{}, fmt.Errorf("couldn't bring in the remote's changes, so nothing was pushed: %w", err)
 	}
 	if n == 0 {
-		return remote, up, nil
+		return remote, t, nil
 	}
-	if err := r.clashes(ctx, dirty, up); err != nil {
-		return "", "", err
+	if err := r.holds(ctx, dirty, t.up); err != nil {
+		return "", tracking{}, err
 	}
 	// Begun, what's set aside is put back whatever becomes of the run.
-	return remote, up, r.catchUp(context.WithoutCancel(ctx), gitDir, up)
+	return remote, t, r.catchUp(context.WithoutCancel(ctx), gitDir, t.up)
 }
 
 // remote is the repository's one remote: ErrNoRemote without one, and a
@@ -135,22 +139,27 @@ func (r Repo) remote(ctx context.Context) (string, error) {
 	return names[0], nil
 }
 
-// upstream is the branch HEAD is on, as in main, and its upstream, as in
-// refs/remotes/origin/main, "" for none: a refusal (ErrNowhere) when HEAD
-// is on no branch.
-func (r Repo) upstream(ctx context.Context) (branch, up string, err error) {
+// tracking is the branch HEAD is on, as in main, and its upstream: the
+// remote-tracking ref, as in refs/remotes/origin/main, and the branch it
+// is on the remote, as in refs/heads/main, both "" for none.
+type tracking struct{ branch, up, merge string }
+
+// upstream is the branch HEAD is on: a refusal (ErrNowhere) when it's on
+// none.
+func (r Repo) upstream(ctx context.Context) (tracking, error) {
 	res, err := r.git(ctx, "symbolic-ref", "-q", "HEAD")
 	if exit, ok := errors.AsType[*runner.ExitError](err); ok && exit.Code == 1 {
-		return "", "", nowhere{errors.New("HEAD isn't on a branch, so kit pushes nothing")}
+		return tracking{}, nowhere{errors.New("HEAD isn't on a branch, so kit pushes nothing")}
 	}
 	if err != nil {
-		return "", "", err
+		return tracking{}, err
 	}
 	ref := strings.TrimSpace(string(res.Stdout))
-	if res, err = r.git(ctx, "for-each-ref", "--format=%(upstream)", ref); err != nil {
-		return "", "", err
+	if res, err = r.git(ctx, "for-each-ref", "--format=%(upstream) %(upstream:remoteref)", ref); err != nil {
+		return tracking{}, err
 	}
-	return strings.TrimPrefix(ref, "refs/heads/"), strings.TrimSpace(string(res.Stdout)), nil
+	up, merge, _ := strings.Cut(strings.TrimSpace(string(res.Stdout)), " ")
+	return tracking{branch: strings.TrimPrefix(ref, "refs/heads/"), up: up, merge: merge}, nil
 }
 
 // settled is what's changed and not committed in the repository whose git
@@ -227,6 +236,43 @@ var (
 	}
 )
 
+// holds is the refusal when dirty, what's not committed, can't be set
+// aside to rebase onto up: a path swapped (swapped), or one up's commits
+// change (clashes).
+func (r Repo) holds(ctx context.Context, dirty []entry, up string) error {
+	if err := r.swapped(dirty); err != nil {
+		return err
+	}
+	return r.clashes(ctx, dirty, up)
+}
+
+// swapped is the refusal when dirty, what's not committed, has a path git
+// tracks that's something else now: a file become a folder, by the folder
+// on disk where git says the file's deleted or changed in type, as git
+// lists no file in a repository of its own put there; or a folder become a
+// file, by a path git doesn't track over one it does that's gone. Set
+// aside, the path's put back as last committed, which deletes what's in
+// its place. Nothing's touched.
+func (r Repo) swapped(dirty []entry) error {
+	for _, gone := range dirty {
+		if gone.code == addedThenGone || !strings.ContainsAny(gone.code, "DT") {
+			continue
+		}
+		if info, err := os.Lstat(filepath.Join(r.Dir, gone.path)); err == nil && info.IsDir() {
+			return keptBack(gone.path, "was a file git tracks and is a folder now, whose files")
+		}
+		if i := slices.IndexFunc(dirty, func(e entry) bool { return e.code == "??" && strings.HasPrefix(gone.path, e.path+"/") }); i >= 0 {
+			return keptBack(dirty[i].path, "was a folder git tracks and is a file now, which")
+		}
+	}
+	return nil
+}
+
+// keptBack is swapped's refusal for path, which was says what became of.
+func keptBack(path, was string) error {
+	return fmt.Errorf("%s %s pulling would delete, so nothing was touched or pushed: commit or undo the change to %s first", path, was, path)
+}
+
 // clashes is the refusal when up's commits, those HEAD hasn't, change what's
 // not committed here, dirty, staged or not, a nested repository's folder
 // by any path in it: put back after the rebase, it would conflict, leaving
@@ -272,24 +318,24 @@ func (r Repo) catchUp(ctx context.Context, gitDir, up string) error {
 // setAside sets aside the changes not committed to files git tracks, staged
 // or not, in a stash of their own, never in git's list of stashes (git
 // stash create), the files then put back as last committed: the stash, ""
-// with nothing to set aside. Files git doesn't track stay as they are.
+// with nothing to set aside. Files git doesn't track stay as they are, and
+// failing, so does everything.
 func (r Repo) setAside(ctx context.Context) (string, error) {
 	res, err := r.git(ctx, "stash", "create", stashMessage)
-	if err != nil {
-		return "", fmt.Errorf("couldn't set aside what's not committed, so nothing was pushed: %w", err)
-	}
 	stash := strings.TrimSpace(string(res.Stdout))
-	if stash == "" {
-		return "", nil
+	if err == nil && stash != "" {
+		_, err = r.git(ctx, "reset", "--hard", "--quiet")
 	}
-	if _, err := r.git(ctx, "reset", "--hard", "--quiet"); err != nil {
-		return "", r.keep(ctx, stash, fmt.Errorf("couldn't set it aside: %w", err))
+	if err != nil {
+		return "", fmt.Errorf("couldn't set aside what's not committed, so it's left as it was and nothing was pushed: %w", err)
 	}
 	return stash, nil
 }
 
 // rebase rebases what's committed here onto up, a remote-tracking ref,
-// aborted if it stops part way, so back as it was.
+// aborted if it stops part way, so back as it was: on a conflict, or when
+// git, set to sign its commits, couldn't sign one it rebased, which is
+// ErrUnsigned, as Commit's is.
 func (r Repo) rebase(ctx context.Context, gitDir, up string) error {
 	// Not by fork-point, which leaves out a commit the upstream had once,
 	// before it was pushed over, so the rebase changes more than the
@@ -301,10 +347,16 @@ func (r Repo) rebase(ctx context.Context, gitDir, up string) error {
 	case !rebasing(gitDir):
 		return fmt.Errorf("couldn't rebase onto the remote's changes, so nothing was pushed: %w", err)
 	}
+	then := "so nothing was pushed; the rebase was undone"
 	if _, abort := r.git(ctx, "rebase", "--abort"); abort != nil || rebasing(gitDir) {
-		return fmt.Errorf("the remote's changes conflict with this Mac's, and the rebase couldn't be undone, so nothing was pushed: git rebase --abort undoes it: %w", err)
+		then = "and the rebase couldn't be undone, so nothing was pushed: git rebase --abort undoes it"
 	}
-	return fmt.Errorf("the remote's changes conflict with this Mac's, so nothing was pushed; the rebase was undone: %w", err)
+	if unwritten(err) {
+		if signs, _ := r.flag(ctx, "commit.gpgsign"); signs {
+			return fmt.Errorf("%w rebased onto the remote's changes, %s: %s", ErrUnsigned, then, signingSaid(err))
+		}
+	}
+	return fmt.Errorf("the remote's changes conflict with this Mac's, %s: %w", then, err)
 }
 
 // rebasing reports whether a rebase is under way in the repository whose
@@ -343,18 +395,18 @@ func (r Repo) Waiting(ctx context.Context) ([]time.Time, error) {
 	if err != nil {
 		return nil, err
 	}
-	_, up, err := r.upstream(ctx)
+	t, err := r.upstream(ctx)
 	if err != nil {
 		return nil, err
 	}
 	revs := []string{"HEAD", "--not", "--remotes=" + remote}
-	if up != "" {
-		at, err := r.commitAt(ctx, up)
+	if t.up != "" {
+		at, err := r.commitAt(ctx, t.up)
 		if err != nil {
 			return nil, err
 		}
 		if at != "" {
-			revs = []string{up + "..HEAD"}
+			revs = []string{t.up + "..HEAD"}
 		}
 	}
 	res, err := r.git(ctx, slices.Concat([]string{"log", "--format=%ct"}, revs)...)
@@ -412,7 +464,7 @@ func (r Repo) Fetched(ctx context.Context, path string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	branch, up, err := r.upstream(ctx)
+	t, err := r.upstream(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -422,9 +474,7 @@ func (r Repo) Fetched(ctx context.Context, path string) ([]byte, error) {
 		}
 		return nil, fmt.Errorf("couldn't fetch %s: %w", remote, err)
 	}
-	if up == "" {
-		up = "refs/remotes/" + remote + "/" + branch
-	}
+	up := cmp.Or(t.up, "refs/remotes/"+remote+"/"+t.branch)
 	res, err := r.git(ctx, "show", up+":"+path)
 	if err != nil {
 		return nil, fmt.Errorf("read %s as %s has it: %w", path, remote, err)

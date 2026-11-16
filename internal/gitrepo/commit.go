@@ -87,7 +87,8 @@ func toCommit(changed []entry) (files, added []string) {
 
 // commitOnly commits files alone, each as it is on disk, signed when signs,
 // as git's config says: nothing when they're on disk as last committed,
-// their difference only in git's index.
+// their difference only in git's index. A file git tracks become a folder
+// it refuses, as git commit --only does, naming it.
 func (r Repo) commitOnly(ctx context.Context, message string, signs bool, files []string) (bool, error) {
 	if same, err := r.unchanged(ctx, files); same || err != nil {
 		return false, err
@@ -95,10 +96,28 @@ func (r Repo) commitOnly(ctx context.Context, message string, signs bool, files 
 	// Begun, the commit finishes whatever becomes of the run: git stopped
 	// once HEAD has moved leaves its index behind it.
 	_, err := r.locked(context.WithoutCancel(ctx), []string{"-c", "core.hooksPath=/dev/null", "commit", "--quiet", "--only", "-m", message}, files...)
-	if exit, ok := errors.AsType[*runner.ExitError](err); ok && signs && slices.Contains(exit.Lines("fatal:"), "fatal: failed to write commit object") {
+	if signs && unwritten(err) {
 		return false, fmt.Errorf("%w: %s", ErrUnsigned, signingSaid(err))
 	}
+	if path := folderNow(err); path != "" {
+		return false, fmt.Errorf("%s was a file git tracks and is a folder now, which kit doesn't commit: commit the change by hand", path)
+	}
 	return err == nil, err
+}
+
+// folderNow is the path git, failing as err to commit it, found a folder
+// where it tracks a file, as it says: "" for none.
+func folderNow(err error) string {
+	exit, ok := errors.AsType[*runner.ExitError](err)
+	if !ok {
+		return ""
+	}
+	for _, line := range exit.Lines("error: '") {
+		if path, ok := strings.CutSuffix(strings.TrimPrefix(line, "error: '"), "' does not have a commit checked out"); ok {
+			return path
+		}
+	}
+	return ""
 }
 
 // unchanged reports whether files are on disk as last committed, as git
@@ -145,8 +164,18 @@ func (r Repo) locked(ctx context.Context, args []string, paths ...string) (runne
 // yet, the error saying what git said of it. Nothing's committed.
 var ErrUnsigned = errors.New("git couldn't sign the commit")
 
+// noCommit is git's line for a commit it didn't write, as when it couldn't
+// sign it: fatal: from git commit, error: from git rebase.
+const noCommit = "failed to write commit object"
+
+// unwritten reports whether err is git failing to write a commit.
+func unwritten(err error) bool {
+	exit, ok := errors.AsType[*runner.ExitError](err)
+	return ok && len(exit.Lines("fatal: "+noCommit, "error: "+noCommit)) > 0
+}
+
 // signingSaid is what git said of failing to sign a commit, err: the error
-// lines its signing program left, above the fatal: line that only says no
+// lines its signing program left, above git's line that only says no
 // commit was written; else the last line it printed.
 func signingSaid(err error) string {
 	exit, ok := errors.AsType[*runner.ExitError](err)
@@ -155,7 +184,9 @@ func signingSaid(err error) string {
 	}
 	var said []string
 	for _, line := range exit.Lines("error:") {
-		said = append(said, strings.TrimSpace(strings.TrimPrefix(line, "error:")))
+		if line != "error: "+noCommit {
+			said = append(said, strings.TrimSpace(strings.TrimPrefix(line, "error:")))
+		}
 	}
 	if len(said) == 0 {
 		return exit.Stderr

@@ -128,7 +128,7 @@ func TestConfigSync(t *testing.T) {
 	tracking := func(fake *runnertest.Fake) {
 		fake.On("git", git("remote")...).Prints("origin\n")
 		fake.On("git", git("symbolic-ref", "-q", "HEAD")...).Prints("refs/heads/main\n")
-		fake.On("git", git("for-each-ref", "--format=%(upstream)", "refs/heads/main")...).Prints("refs/remotes/origin/main\n")
+		fake.On("git", git("for-each-ref", "--format=%(upstream) %(upstream:remoteref)", "refs/heads/main")...).Prints("refs/remotes/origin/main refs/heads/main\n")
 		fake.On("git", git("rev-parse", "--verify", "--quiet", "refs/remotes/origin/main")...).Prints(head + "\n")
 	}
 	// waiting scripts the commits waiting, as times, newest first as git log
