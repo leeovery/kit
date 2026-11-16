@@ -105,11 +105,10 @@ func (r *run) manualSteps(ordered []steps.ManualStep, others []engine.Step, rais
 // (Card.Packages) that the config declares, so they're among their list's
 // first, or after they're there however they came; once found not done,
 // it waits for the program it needs on kit's PATH and the app it needs
-// installed in folders, whatever installs them,
-// and kit opens the app as its card first comes up. Its kind's step,
-// among kindSteps, waits for it partway through applying (Later), not
-// before it starts: one store's sign-in holds back that store's secrets
-// alone.
+// installed in folders, whatever installs them, and kit opens the app as
+// its card first comes up. Its kind's step, among kindSteps, waits for it
+// partway through applying (Later), not before it starts: one store's
+// sign-in holds back that store's secrets alone.
 func (r *run) cardSteps(raise *steps.Raise, folders *apps.Folders, kindSteps []engine.Step) []engine.Step {
 	var out []engine.Step
 	for i, ks := range kindSteps {

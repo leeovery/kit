@@ -186,8 +186,9 @@ near the end of the run.
 
 On a Mac the boot has just set up, the data restore brings back the paths
 `[restore]` lists, once Homebrew's rsync is in: on a Mac started from
-another, from that Mac, known by the SSH host key kit-config records for
-it, once the secrets have synced, else a backup of it; on a Mac
+another, from that Mac, reached at the local hostname kit-config records
+for it and known by the SSH host key recorded beside it (kit apply on that
+Mac records both), once the secrets have synced, else a backup of it; on a Mac
 clean-installed under its own name, from its own backups, or nothing, as
 the person says on its card. Claude Code's MCP
 servers and skills, the reinstall of restored projects' dependencies, and a
