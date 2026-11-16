@@ -71,9 +71,9 @@ func sent(_ given: [String: String], clear: Bool) -> Sent? {
     return Sent(at: at, clear: clear)
 }
 
-// locked runs body holding the lock on the marks, so that no two of kit
-// and the app read and write them between each other; without it, should
-// it not be had, rather than do nothing.
+// locked runs body holding the lock on the marks, so that no two of the
+// app's instances read and write them between each other; without it,
+// should it not be had, rather than do nothing.
 func locked<T>(_ body: () -> T) -> T {
     let fd = open(lock.path, O_CREAT | O_RDWR, 0o644)
     guard fd >= 0 else { return body() }
