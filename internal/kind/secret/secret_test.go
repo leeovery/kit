@@ -320,22 +320,23 @@ func reads(fake *runnertest.Fake) []runner.Command {
 	})
 }
 
-// While op waits for the person to approve the read, the step says so, and
-// what they're to do, as macOS asking is said, then what it's doing again,
-// nothing left to do; with a session open, nothing's asked, and nothing
-// said.
+// While op waits for the person to approve the first read, the step says
+// so, and what they're to do, as macOS asking is said, then, that read
+// answered, what it's doing again, nothing left to do, before it reads the
+// rest; with a session open, nothing's asked, and nothing said.
 func TestSyncSaysItsWaitingForApproval(t *testing.T) {
 	for _, open := range []bool{false, true} {
 		fake := runnertest.New(t)
 		s := secret.New(fake, t.TempDir())
-		declare(t, s, [2]string{"ONE", "Section/one"})
+		declare(t, s, [2]string{"ONE", "Section/one"}, [2]string{"TWO", "Section/two"})
 		if open {
 			fake.On("op", "whoami")
 		} else {
 			signedIn(fake)
 		}
 		optest.Holds(fake, map[string]string{item + "/Section/one": "1"})
-		var said []string
+		var said, atSecond []string
+		fake.On("op", "read", item+"/Section/two").Does(func() { atSecond = slices.Clone(said) }).Prints("2\n")
 		ctx := event.WithSaying(t.Context(), func(d event.Doing) { said = append(said, d.Says+" | "+d.Todo) })
 		if _, err := s.Sync(event.WithDoing(ctx, "syncing")); err != nil {
 			t.Fatal(err)
@@ -344,8 +345,8 @@ func TestSyncSaysItsWaitingForApproval(t *testing.T) {
 		if open {
 			want = nil
 		}
-		if !slices.Equal(said, want) {
-			t.Errorf("a session open %v: the step said %q, want %q", open, said, want)
+		if !slices.Equal(said, want) || !slices.Equal(atSecond, want) {
+			t.Errorf("a session open %v: the step said %q, %q by the second read; want %q by then", open, said, atSecond, want)
 		}
 	}
 }

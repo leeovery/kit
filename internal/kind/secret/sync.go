@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/event"
@@ -100,11 +101,15 @@ func (s *Secrets) Cards() []kind.Card {
 	return out
 }
 
+// reader reads the value at a reference, as store.Driver's Read and
+// ReadFile do.
+type reader func(ctx context.Context, run runner.Runner, ref string) (string, error)
+
 // readEach reads refs from d with read, each alone: those d names as ones
 // it couldn't read left out, each with d's words; any other failure, the
 // person not approving, or not in time, holds back every ref not read, for
 // the next sync to read again, as reading on would ask the person again.
-func (s *Secrets) readEach(ctx context.Context, d store.Driver, refs []string, read func(context.Context, runner.Runner, string) (string, error)) (got, unread map[string]string, err error) {
+func (s *Secrets) readEach(ctx context.Context, d store.Driver, refs []string, read reader) (got, unread map[string]string, err error) {
 	got, unread = map[string]string{}, map[string]string{}
 	for _, ref := range refs {
 		v, err := read(ctx, s.run, ref)
@@ -206,29 +211,39 @@ type syncing struct {
 }
 
 // read reads d's secrets' values, d standing as session says: signed in,
-// with no session open, d has the person approve the read, the step saying
-// it's waiting for them, and what they're to do, and giving its job up
-// meanwhile. d's down when it doesn't read them all.
+// with no session open, d has the person approve its first read, the step
+// saying it's waiting for them, and what they're to do, and giving its job
+// up till that read's answered, the approval covering the rest. d's down
+// when it doesn't read them all.
 func (sy *syncing) read(ctx context.Context, d store.Driver, session store.Session) {
 	refs, files := sy.s.refs(d, false), sy.s.refs(d, true)
 	if len(refs)+len(files) == 0 {
 		return
 	}
+	answered := func() {}
 	if session == store.SignedIn {
 		name := d.About().Name
 		over := event.Meanwhile(ctx, event.Doing{Says: "waiting for your approval in " + name, Todo: name + " asks whether kit may read your secrets: approve it"})
 		back := engine.Release(ctx)
-		defer func() {
+		answered = sync.OnceFunc(func() {
 			over()
 			back()
-		}()
+		})
+		defer answered()
 	}
-	got, unread, err := sy.s.readEach(ctx, d, refs, d.Read)
+	first := func(read reader) reader {
+		return func(ctx context.Context, run runner.Runner, ref string) (string, error) {
+			v, err := read(ctx, run, ref)
+			answered()
+			return v, err
+		}
+	}
+	got, unread, err := sy.s.readEach(ctx, d, refs, first(d.Read))
 	maps.Copy(sy.values, got)
 	maps.Copy(sy.unread, unread)
 	sy.refuseLines()
 	if err == nil {
-		got, unread, err = sy.s.readEach(ctx, d, files, d.ReadFile)
+		got, unread, err = sy.s.readEach(ctx, d, files, first(d.ReadFile))
 		maps.Copy(sy.files, got)
 		maps.Copy(sy.unread, unread)
 	}
