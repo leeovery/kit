@@ -518,3 +518,96 @@ func TestACaptureStoppedWhileItWaits(t *testing.T) {
 		t.Errorf("Capture() = %v, ran %q; want it stopped, nothing run", err, w.fake.Calls())
 	}
 }
+
+// A restore never works on the store's clone while a capture does: it
+// waits while the capture holds the store's lock, running nothing, then
+// holds it itself throughout, the pull and the settings put back alike.
+func TestARestoreWaitsForACapture(t *testing.T) {
+	w := newWorld(t, prefs.Lists{})
+	w.write(t, filepath.Join(w.clone, "laptop", "domains", "com.example.app.plist"), stored(t, map[string]any{"A": true}))
+	lock := w.clone + ".capture.lock"
+	capture := holdLock(t, lock)
+	waited := 0
+	w.p.Sleep = func(time.Duration) {
+		waited++
+		if waited == 1 {
+			if calls := w.fake.Calls(); len(calls) > 0 {
+				t.Errorf("ran %q while a capture held the store", calls)
+			}
+			_ = capture.Close()
+		}
+	}
+	pulling, applying := false, false
+	w.fake.On("git", "-C", w.clone, "remote").Prints("origin\n").Does(func() { pulling = !lockFree(lock) })
+	w.fake.On("git", "-C", w.clone, "rev-parse", "HEAD").Prints("abc123\n")
+	w.exports(t, "com.example.app", map[string]any{})
+	w.fake.On("defaults", "delete", "com.example.app")
+	w.fake.On("defaults", "import", "com.example.app", filepath.Join(w.clone, "laptop", "domains", "com.example.app.plist")).Does(func() {
+		applying = !lockFree(lock)
+		w.exports(t, "com.example.app", map[string]any{"A": true})
+	})
+
+	report, err := w.p.Restore(t.Context(), prefs.RestoreOptions{Domains: []string{"com.example.app"}})
+	if err != nil || !slices.Equal(report.Restored, []string{"com.example.app"}) {
+		t.Fatalf("Restore() = %+v, %v; want it restored once the capture's done", report, err)
+	}
+	if waited == 0 || !pulling || !applying {
+		t.Errorf("waited %d times, held the lock pulling: %v, importing: %v; want it to wait, then hold it throughout", waited, pulling, applying)
+	}
+	if !lockFree(lock) {
+		t.Error("the store's lock is still held once the restore's done")
+	}
+}
+
+// A restore that can't take the store's lock fails with why, or stops,
+// stopped while it waits, having run nothing.
+func TestARestoreThatCantLockTheStore(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		lock func(w *world) context.Context
+		want func(err error) bool
+	}{
+		{"stopped while it waits", func(w *world) context.Context {
+			holdLock(t, w.clone+".capture.lock")
+			ctx, cancel := context.WithCancel(t.Context())
+			w.p.Sleep = func(time.Duration) { cancel() }
+			return ctx
+		}, func(err error) bool { return errors.Is(err, context.Canceled) }},
+		{"its lock unreadable", func(w *world) context.Context {
+			if err := os.Mkdir(w.clone+".capture.lock", 0o700); err != nil {
+				t.Fatal(err)
+			}
+			return t.Context()
+		}, func(err error) bool { return err != nil && strings.HasPrefix(err.Error(), "lock the store: ") }},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			w := newWorld(t, prefs.Lists{})
+			w.write(t, filepath.Join(w.clone, "laptop", "domains", "com.example.app.plist"), stored(t, map[string]any{"A": true}))
+			if _, err := w.p.Restore(tt.lock(w), prefs.RestoreOptions{Domains: []string{"com.example.app"}}); !tt.want(err) || len(w.fake.Calls()) > 0 {
+				t.Errorf("Restore() = %v, ran %q; want the lock's failure, nothing run", err, w.fake.Calls())
+			}
+		})
+	}
+}
+
+// Taking a Mac's folder over writes into the store's clone, so it waits
+// while a capture holds the store's lock.
+func TestTakingOverWaitsForACapture(t *testing.T) {
+	w := newWorld(t, prefs.Lists{})
+	w.write(t, filepath.Join(w.clone, "laptop", "owner"), "hardware HW-OLD\n")
+	capture := holdLock(t, w.clone+".capture.lock")
+	waited := false
+	w.p.Sleep = func(time.Duration) {
+		if calls := w.fake.Calls(); len(calls) > 0 {
+			t.Errorf("ran %q while a capture held the store", calls)
+		}
+		waited = true
+		_ = capture.Close()
+	}
+	if err := w.p.TakeOver(t.Context()); err != nil || !waited {
+		t.Errorf("TakeOver() = %v, waited: %v; want it to wait, then take over", err, waited)
+	}
+	if got := w.read(t, filepath.Join(w.clone, "laptop", "owner")); !strings.HasPrefix(got, "hardware HW-THIS\n") {
+		t.Errorf("the owner file says %q, want this Mac's", got)
+	}
+}

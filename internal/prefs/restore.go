@@ -307,6 +307,11 @@ func (p *Prefs) Restore(ctx context.Context, opts RestoreOptions) (RestoreReport
 	if !opts.DryRun && !p.HasFullDiskAccess() {
 		return report, errNoAccess
 	}
+	unlock, err := p.lockCapture(ctx)
+	if err != nil {
+		return report, err
+	}
+	defer unlock()
 	if err := p.ensureClone(ctx); err != nil {
 		return report, err
 	}

@@ -109,13 +109,14 @@ func (p *Prefs) lockClone(ctx context.Context) (unlock func(), err error) {
 	return unlock, err
 }
 
-// captureWait is how long a capture waits for one under way to finish.
+// captureWait is how long a capture, restore or take-over waits for one
+// under way to finish.
 const captureWait = 30 * time.Minute
 
-// lockCapture takes the lock on capturing into the store, beside the
-// clone, so that no two captures, as the hourly launch's and one by hand,
-// write the store at once: waiting for one under way, till ctx is done or
-// for captureWait at most. unlock lets it go.
+// lockCapture takes the lock on the store's clone, beside it, so that no
+// capture, restore or take-over, as the hourly launch's and one by hand,
+// works on the clone while another does: waiting for one under way, till
+// ctx is done or for captureWait at most. unlock lets it go.
 func (p *Prefs) lockCapture(ctx context.Context) (unlock func(), err error) {
 	if err := os.MkdirAll(filepath.Dir(p.Clone), 0o700); err != nil {
 		return nil, err
@@ -127,9 +128,9 @@ func (p *Prefs) lockCapture(ctx context.Context) (unlock func(), err error) {
 	case err == nil, ctx.Err() != nil:
 		return unlock, err
 	case waiting.Err() != nil:
-		return nil, fmt.Errorf("another capture still held the store after %d minutes: this one didn't run", int(captureWait.Minutes()))
+		return nil, fmt.Errorf("another capture or restore still held the store after %d minutes: this one didn't run", int(captureWait.Minutes()))
 	}
-	return nil, fmt.Errorf("lock the store for capture: %w", err)
+	return nil, fmt.Errorf("lock the store: %w", err)
 }
 
 // lock takes the lock in the file at path, trying again while another kit
