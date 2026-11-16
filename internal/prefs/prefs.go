@@ -307,6 +307,11 @@ func (p *Prefs) TakingOver(ctx context.Context) (Owner, bool, error) {
 // clone, when other hardware owns it: the next capture commits and pushes
 // it, and the other Mac's next capture is refused (NotOwnerError).
 func (p *Prefs) TakeOver(ctx context.Context) error {
+	unlock, err := p.lockCapture(ctx)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	if _, taking, err := p.TakingOver(ctx); err != nil || !taking {
 		return err
 	}
