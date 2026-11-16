@@ -207,13 +207,13 @@ func TestApplySignInWithItsAppInstalledByHand(t *testing.T) {
 	f.On("brew", "info", "--json=v2", "--cask", "1password", "1password-cli").Prints(`{"formulae": [], "casks": [{"token": "1password", "full_token": "1password", "artifacts": [{"app": ["1Password.app"]}]}, {"token": "1password-cli", "full_token": "1password-cli", "artifacts": [{"binary": ["op"]}]}]}`)
 	f.On("brew", "update", "--quiet")
 	f.On("sudo", "-n", "true").Exits(1)
-	install := "brew install --cask 1password 1password-cli"
 	f.On("brew", "install", "--cask", "1password", "1password-cli").Exits(1).PrintsToStderr("Error: It seems there is already an App at '/Applications/1Password.app'.\n")
 	f.On("osascript", "-e", `display notification "Your secrets come from 1Password." with title "kit" subtitle "Sign in to 1Password"`)
 	f.On("osascript", "-l", "JavaScript", "-e", login.ReadScript).Prints("[]")
-	// Stopped at the card once the casks have had their go.
+	// Stopped at the card once the casks' step has finished, as the run's
+	// log, written as it goes, says.
 	f.On("open", "-b", signInApp).Does(func() {
-		for deadline := time.Now().Add(3 * time.Second); time.Now().Before(deadline) && !slices.Contains(f.Calls(), install); time.Sleep(time.Millisecond) {
+		for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline) && !w.logsFinished("cask"); time.Sleep(time.Millisecond) {
 		}
 		kb.press(t, ask.Key{Name: "ctrl+c"})
 	})
@@ -226,4 +226,20 @@ func TestApplySignInWithItsAppInstalledByHand(t *testing.T) {
 	if res, ok := finished(records, "cask"); !ok || res.State != check.Failed || !strings.Contains(res.Reason, "already an App") {
 		t.Errorf("the casks finished %+v, %v: want them failed, saying why", res, ok)
 	}
+}
+
+// logsFinished reports whether the latest run's log, as far as it's
+// written, says the step called step has finished: false while it can't be
+// read, as when a line's half written.
+func (w *world) logsFinished(step string) bool {
+	path, err := logs.Latest(filepath.Join(w.home, "Library", "Logs", "kit"))
+	if err != nil {
+		return false
+	}
+	records, err := logs.Read(path)
+	if err != nil {
+		return false
+	}
+	_, ok := finished(records, step)
+	return ok
 }
