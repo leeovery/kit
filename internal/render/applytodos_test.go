@@ -370,7 +370,7 @@ func TestTheToDoPanel(t *testing.T) {
 
 // While kit does what a choice's key says, its panel offers none of its
 // keys: what that key does, turning, in their place, and no s, as it's
-// decided. So does its card in a window too small for the screen.
+// decided.
 func TestAChoiceBeingAnswered(t *testing.T) {
 	events := answeredWith(toDosUpTo(0), "r")
 	face, out, _ := applyIn(colorprofile.TrueColor, 160, 64, time.Minute, events)
@@ -382,27 +382,6 @@ func TestAChoiceBeingAnswered(t *testing.T) {
 	}
 	if frame := strings.Join(lastFrame(out.String()), "\n"); !strings.Contains(frame, look.Cyan("◐")+" "+look.White("restores this machine ID's last save (15 Oct)")) {
 		t.Error("what r does isn't led by the turning mark")
-	}
-	small, out2, _ := applyAt(99, 40, since(events), events)
-	defer func() { _ = small.Close() }()
-	if got := screen(out2.String()); !strings.Contains(got, "restores this machine ID's last save (15 Oct)") || strings.Contains(got, "a bigger window shows the keys") {
-		t.Errorf("in a small window, being answered, the card shows\n%s\nwant what r does in place of the keys", got)
-	}
-}
-
-// In a window too small for the screen, the to-do up is a card in place,
-// as a step by hand's is, by its title: no list; a choice, that a bigger
-// window shows its keys.
-func TestTheToDosInASmallWindow(t *testing.T) {
-	events := toDosUpTo(0)
-	small, out, _ := applyAt(99, 40, since(events), events)
-	got := turned(screen(out.String()))
-	if err := small.Close(); err != nil {
-		t.Fatal(err)
-	}
-	golden(t, "apply-todo-small.golden", got+"\n")
-	if !strings.Contains(got, "Restore application settings") || !strings.Contains(got, "a bigger window shows the keys to answer it") || strings.Contains(got, "TO DO") {
-		t.Errorf("in a small window, the to-dos show\n%s\nwant the one up as a card, no list", got)
 	}
 }
 

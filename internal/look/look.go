@@ -487,71 +487,9 @@ func Junction(w, at int, joint string) string {
 	return Dim(strings.Repeat("─", at) + joint + strings.Repeat("─", max(w-at-ansi.StringWidth(joint), 0)))
 }
 
-// A card's rule before its title, after the margin; how much of the rule a
-// title cut to fit it leaves after it; and where what's under the title
-// starts, under its name.
-const (
-	cardLead  = "── "
-	cardLeast = 3
-	cardUnder = "       "
-)
-
-// CardText is what a card says: what needs you, and what it says beside
-// that; why, a paragraph; the steps to do it; and what to say after them.
-type CardText struct {
-	Title, Says, Why string
-	Steps            []string
-	After            string
-}
-
 // Subheading reports whether a step by hand's step heads those after it,
 // as a line ending with a colon does: shown muted, unnumbered.
 func Subheading(step string) bool { return strings.HasSuffix(step, ":") }
-
-// Card is what needs you, front and centre, w wide with the margins: an
-// orange rule carrying the needs-you mark, the title and what it says, cut
-// to fit, some rule kept after it; a blank line; why, muted, and a blank
-// line, when there's a why; its steps, numbered, the numbers orange, each
-// wrapped under its own text and a blank line after it, a subheading
-// muted, unnumbered and straight on to the step after it; then, when
-// there's something to say after them, that, muted, and a blank line.
-func Card(w int, c CardText) []string {
-	end := w - 2
-	lead := "  " + Orange(cardLead)
-	row := Cut(line("", Row{State: NeedsYou, Name: c.Title, Says: c.Says}), end-ansi.StringWidth(lead)-1-cardLeast)
-	fill := end - ansi.StringWidth(lead+row) - 1
-	out := []string{lead + row + " " + Orange(strings.Repeat("─", max(fill, 0))), ""}
-	room := w - 2 - len(cardUnder)
-	muted := func(text string) {
-		for _, l := range Wrap(text, room) {
-			out = append(out, Cut(cardUnder+Muted(Linked(l)), w-2))
-		}
-	}
-	if c.Why != "" {
-		muted(c.Why)
-		out = append(out, "")
-	}
-	n := 0
-	for _, s := range c.Steps {
-		if Subheading(s) {
-			muted(s)
-			continue
-		}
-		n++
-		num := fmt.Sprint(n)
-		at := Urgent(num) + "  "
-		for _, l := range Wrap(s, room-len(num)-2) {
-			out = append(out, Cut(cardUnder+at+White(Linked(l)), w-2))
-			at = strings.Repeat(" ", len(num)+2)
-		}
-		out = append(out, "")
-	}
-	if c.After != "" {
-		muted(c.After)
-		out = append(out, "")
-	}
-	return out
-}
 
 // Task is a thing left for the person at the Mac to do: what, and how, a
 // line each.
