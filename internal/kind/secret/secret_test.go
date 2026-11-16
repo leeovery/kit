@@ -170,12 +170,11 @@ func TestSyncPutsEachInPlace(t *testing.T) {
 	}
 }
 
-// A sync reads every variable's value in one run of op, op inject, its
-// references on its standard input and its output kept from the log, after
-// asking, of no one, whether 1Password is signed in; a file's is read
-// alone, with op read, never through op inject's template, and its item
-// asked whether it's an attachment.
-func TestSyncReadsEveryValueInOneRunOfOp(t *testing.T) {
+// A sync reads each value with a run of op read of its own, its output kept
+// from the log, each reference once, after asking, of no one, whether
+// 1Password is signed in; a file's item is asked whether it's an
+// attachment.
+func TestSyncReadsEachValueWithOpRead(t *testing.T) {
 	fake := runnertest.New(t)
 	s := secret.New(fake, t.TempDir())
 	declare(t, s,
@@ -191,23 +190,21 @@ func TestSyncReadsEveryValueInOneRunOfOp(t *testing.T) {
 	if report, err := s.Sync(t.Context()); err != nil || report.Synced != 4 {
 		t.Fatalf("Sync() = %+v, %v", report, err)
 	}
-	want := []string{"op whoami", "op account list --format json", "op inject", "op read 'op://vault/Key Item/private key'", "op item get 'Key Item' --vault vault --format json"}
+	want := []string{"op whoami", "op account list --format json", "op read " + item + "/Section/one", "op read " + item + "/Section/two", "op read 'op://vault/Key Item/private key'", "op item get 'Key Item' --vault vault --format json"}
 	if got := fake.Calls(); !slices.Equal(got, want) {
-		t.Errorf("ran %q, want %q: one run of op reading the variables, the file read alone", got, want)
+		t.Errorf("ran %q, want %q: each reference read once", got, want)
 	}
-	inject := fake.Commands()[2]
-	if !inject.Secret || strings.Count(inject.Input, "{{") != 2 || strings.Contains(inject.Input, "Key Item") {
-		t.Errorf("op inject read %q (secret: %v): want each variable's reference once, the file's not, its output kept from the log", inject.Input, inject.Secret)
-	}
-	if !fake.Commands()[3].Secret {
-		t.Error("op read's output isn't kept from the log")
+	for _, c := range reads(fake) {
+		if !c.Secret {
+			t.Errorf("%s: its output isn't kept from the log", c)
+		}
 	}
 }
 
 // A file kept as an attachment lands byte for byte, whatever it holds:
-// bytes that aren't UTF-8, which op inject would turn into U+FFFD, and the
-// newlines it ends with, one or several. A field's text in a file ends with one newline,
-// and a variable's value with none, as they always have.
+// bytes that aren't UTF-8, and the newlines it ends with, one or several. A
+// field's text in a file ends with one newline, and a variable's value with
+// none, as they always have.
 func TestSyncWritesAnAttachmentByteForByte(t *testing.T) {
 	home := t.TempDir()
 	fake := runnertest.New(t)
@@ -319,7 +316,7 @@ func signedIn(fake *runnertest.Fake) {
 // reads are the runs of op that read values, as fake has them.
 func reads(fake *runnertest.Fake) []runner.Command {
 	return slices.DeleteFunc(fake.Commands(), func(c runner.Command) bool {
-		return len(c.Args) == 0 || c.Args[0] != "inject" && c.Args[0] != "read" && c.Args[0] != "vault"
+		return len(c.Args) == 0 || c.Args[0] != "read" && c.Args[0] != "vault"
 	})
 }
 
@@ -362,7 +359,7 @@ func TestSyncGivesUpItsJobWhileItWaitsForApproval(t *testing.T) {
 	signedIn(fake)
 	asking, ran := make(chan struct{}), make(chan struct{})
 	gaveUp := false
-	fake.On("op", "inject").Does(func() {
+	fake.On("op", "read", item+"/Section/one").Does(func() {
 		close(asking)
 		select {
 		case <-ran:
@@ -426,9 +423,8 @@ func TestSyncRefusesAVariableOfManyLines(t *testing.T) {
 	}
 }
 
-// A reference op names in saying why op inject failed is left out, failing
-// in op's words and keeping its previous value, and the rest read in one
-// more run: the person approves two reads, never more.
+// A reference op names in saying why it couldn't read it fails, in op's
+// words, keeping its previous value; the rest are read, each once.
 func TestSyncLeavesOutAReferenceOpNames(t *testing.T) {
 	home := t.TempDir()
 	fake := runnertest.New(t)
@@ -443,16 +439,17 @@ func TestSyncLeavesOutAReferenceOpNames(t *testing.T) {
 	}
 	signedIn(fake)
 	optest.Holds(fake, map[string]string{item + "/Section/a": "a", item + "/Section/d": "d"})
+	said := "[ERROR] could not read secret " + item + "/Section/broken"
+	fake.On("op", "read", item+"/Section/broken").Exits(1).PrintsToStderr(said)
 	report, err := s.Sync(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "[ERROR] could not read secret " + item + "/Section/broken"; report.Synced != 2 || len(report.Failed) != 1 || report.Failed["BROKEN"] != want || len(report.Held) != 0 {
-		t.Errorf("report = %+v, want BROKEN failed in op's words: %q", report, want)
+	if report.Synced != 2 || len(report.Failed) != 1 || report.Failed["BROKEN"] != said || len(report.Held) != 0 {
+		t.Errorf("report = %+v, want BROKEN failed in op's words: %q", report, said)
 	}
-	got := reads(fake)
-	if len(got) != 2 || got[0].String() != "op inject" || got[1].String() != "op inject" || strings.Contains(got[1].Input, "broken") || strings.Count(got[1].Input, "{{") != 2 {
-		t.Errorf("read with %q: want every value in one op inject, then the rest but BROKEN in one more", fake.Calls())
+	if n := len(reads(fake)); n != 3 {
+		t.Errorf("read with %q: want each reference read once", fake.Calls())
 	}
 	env, _ := os.ReadFile(filepath.Join(home, ".secrets.zsh"))
 	for _, line := range []string{"export A='a'\n", "export D='d'\n", "export BROKEN='old value'\n"} {
@@ -480,41 +477,25 @@ func held(said string) string {
 	return onePassword.Name + " wasn't approved, or couldn't read them: " + said + "; " + onePassword.NoAnswer
 }
 
-// Should the second read fail naming no reference, the rest are held back,
-// in op's words and how to have it answer, with no third: the reference op
-// named first still fails in its words.
-func TestSyncReadsTheRestOnceMore(t *testing.T) {
+// Should a read partway fail naming no reference, as when the person
+// dismisses 1Password's prompt, what's read is kept, what op named fails in
+// its words, and the rest are held back, read no further, so the person
+// isn't asked again.
+func TestSyncReadsNoFurtherOnceNotApproved(t *testing.T) {
 	fake := runnertest.New(t)
 	s := secret.New(fake, t.TempDir())
-	declare(t, s, [2]string{"A", "Section/a"}, [2]string{"BROKEN", "Section/broken"})
+	declare(t, s, [2]string{"A", "Section/a"}, [2]string{"BROKEN", "Section/broken"}, [2]string{"C", "Section/c"}, [2]string{"D", "Section/d"})
 	signedIn(fake)
-	fake.On("op", "inject").Exits(1).PrintsToStderr("[ERROR] could not read secret " + item + "/Section/broken").
-		Then().Exits(1).PrintsToStderr("[ERROR] authorization prompt dismissed, please try again")
+	optest.Holds(fake, map[string]string{item + "/Section/a": "a"})
+	fake.On("op", "read", item+"/Section/broken").Exits(1).PrintsToStderr("[ERROR] could not read secret " + item + "/Section/broken")
+	fake.On("op", "read", item+"/Section/c").Exits(1).PrintsToStderr("[ERROR] authorization prompt dismissed, please try again")
 	report, err := s.Sync(t.Context())
-	if err != nil || report.Failed["BROKEN"] == "" || report.Held["A"] != held("[ERROR] authorization prompt dismissed, please try again") {
-		t.Errorf("Sync() = %+v, %v; want BROKEN failed, A held back", report, err)
+	want := held("[ERROR] authorization prompt dismissed, please try again")
+	if err != nil || report.Synced != 1 || report.Failed["BROKEN"] == "" || report.Held["C"] != want || report.Held["D"] != want {
+		t.Errorf("Sync() = %+v, %v; want A synced, BROKEN failed, C and D held back", report, err)
 	}
-	if n := len(reads(fake)); n != 2 {
-		t.Errorf("read with %q: want two runs of op inject, no more", fake.Calls())
-	}
-}
-
-// Should the second read name references too, they fail in op's words as
-// the first's did, and only what neither read nor named is held back, with
-// no third.
-func TestSyncFailsWhatEachReadNames(t *testing.T) {
-	fake := runnertest.New(t)
-	s := secret.New(fake, t.TempDir())
-	declare(t, s, [2]string{"A", "Section/a"}, [2]string{"B", "Section/b"}, [2]string{"C", "Section/c"})
-	signedIn(fake)
-	sayA, sayB := "[ERROR] could not read secret "+item+"/Section/a", "[ERROR] could not read secret "+item+"/Section/b"
-	fake.On("op", "inject").Exits(1).PrintsToStderr(sayA).Then().Exits(1).PrintsToStderr(sayB)
-	report, err := s.Sync(t.Context())
-	if err != nil || report.Failed["A"] != sayA || report.Failed["B"] != sayB || report.Held["C"] == "" || report.Synced != 0 {
-		t.Errorf("Sync() = %+v, %v; want A and B failed in op's words, C held back", report, err)
-	}
-	if n := len(reads(fake)); n != 2 {
-		t.Errorf("read with %q: want two runs of op inject, no more", fake.Calls())
+	if n := len(reads(fake)); n != 3 {
+		t.Errorf("read with %q: want D never read", fake.Calls())
 	}
 }
 
@@ -524,61 +505,19 @@ func TestSyncFailsWhatEachReadNames(t *testing.T) {
 func TestAnApprovalOpQuotesAReferenceInNamesNone(t *testing.T) {
 	for _, said := range []string{
 		"[ERROR] 2026/11/05 05:52:13 could not read secret '" + item + "/Section/a': error initializing client: authorization prompt dismissed, please try again",
-		"[ERROR] 2026/11/05 05:52:13 could not read secret '" + item + "/Section/b': error initializing client: authorization timeout",
+		"[ERROR] 2026/11/05 05:52:13 could not read secret '" + item + "/Section/a': error initializing client: authorization timeout",
 	} {
 		fake := runnertest.New(t)
 		s := secret.New(fake, t.TempDir())
 		declare(t, s, [2]string{"A", "Section/a"}, [2]string{"B", "Section/b"})
 		signedIn(fake)
-		fake.On("op", "inject").Exits(1).PrintsToStderr(said)
+		fake.On("op", "read", item+"/Section/a").Exits(1).PrintsToStderr(said)
 		if _, err := s.Sync(t.Context()); !engine.IsNotYet(err) || err.Error() != held(said) {
 			t.Errorf("op saying %q: Sync() = %v, want both held back in op's words", said, err)
 		}
 		if n := len(reads(fake)); n != 1 {
-			t.Errorf("op saying %q: read with %q: want one run of op inject", said, fake.Calls())
+			t.Errorf("op saying %q: read with %q: want B never read", said, fake.Calls())
 		}
-	}
-}
-
-// A reference read alone, as a template can't take it, that op names as
-// one it couldn't read fails alone: what op inject read is kept, never
-// read again.
-func TestSyncKeepsWhatOneReadReadBesideAnAwkwardReference(t *testing.T) {
-	fake := runnertest.New(t)
-	s := secret.New(fake, t.TempDir())
-	awkward := "op://vault/Item $HOME/field}}"
-	declare(t, s, [2]string{"PLAIN", "Section/plain"}, [2]string{"AWKWARD", "'" + awkward + "'"})
-	signedIn(fake)
-	optest.Holds(fake, map[string]string{item + "/Section/plain": "plain"})
-	fake.On("op", "read", awkward).Exits(1).PrintsToStderr("[ERROR] could not read secret '" + awkward + "': no such field")
-	report, err := s.Sync(t.Context())
-	if err != nil || report.Synced != 1 || report.Failed["AWKWARD"] == "" || len(report.Held) != 0 {
-		t.Errorf("Sync() = %+v, %v; want PLAIN synced, AWKWARD failed", report, err)
-	}
-	if want := []string{"op whoami", "op account list --format json", "op inject", "op read '" + awkward + "'"}; !slices.Equal(fake.Calls(), want) {
-		t.Errorf("ran %q, want %q", fake.Calls(), want)
-	}
-}
-
-// A template would read a $ in a reference as a variable, and }} as its
-// end: such a reference is read alone, never through op inject.
-func TestSyncReadsAnAwkwardReferenceAlone(t *testing.T) {
-	fake := runnertest.New(t)
-	s := secret.New(fake, t.TempDir())
-	awkward := "op://vault/Item $HOME/field}}"
-	declare(t, s, [2]string{"PLAIN", "Section/plain"}, [2]string{"AWKWARD", "'" + awkward + "'"})
-	fake.On("op", "whoami")
-	optest.Holds(fake, map[string]string{item + "/Section/plain": "plain", awkward: "awkward"})
-	if report, err := s.Sync(t.Context()); err != nil || report.Synced != 2 {
-		t.Fatalf("Sync() = %+v, %v", report, err)
-	}
-	for _, c := range fake.Commands() {
-		if c.String() == "op inject" && strings.Contains(c.Input, "$HOME") {
-			t.Errorf("op inject read %q", c.Input)
-		}
-	}
-	if !slices.Contains(fake.Calls(), "op read '"+awkward+"'") {
-		t.Errorf("ran %q: want the awkward reference read alone", fake.Calls())
 	}
 }
 
@@ -624,18 +563,18 @@ func TestVariableReadsWhatASyncWrote(t *testing.T) {
 	}
 }
 
-// When the one run of op that reads every value fails naming no reference,
+// When the first read fails naming no reference,
 // as when the person dismisses 1Password's prompt, or it's ended, hung, or
 // the run's stopped, every secret's held back, not yet, nothing read again,
 // alone or otherwise, and no session opened by asking the person again:
-// the next sync tries one read again.
+// the next sync reads again.
 func TestSyncHoldsBackWhatOneReadDoesnt(t *testing.T) {
 	for _, c := range []struct {
 		name, said string
 		script     func(s *runnertest.Script, stop func())
 	}{
 		{"dismissed", "authorization prompt dismissed", func(s *runnertest.Script, _ func()) { s.Exits(1).PrintsToStderr("authorization prompt dismissed") }},
-		{"hung", "op didn't finish", func(s *runnertest.Script, _ func()) { s.Fails(fmt.Errorf("op inject: %w", context.DeadlineExceeded)) }},
+		{"hung", "op didn't finish", func(s *runnertest.Script, _ func()) { s.Fails(fmt.Errorf("op read: %w", context.DeadlineExceeded)) }},
 		{"stopped", "op didn't finish", func(s *runnertest.Script, stop func()) { s.Does(stop).Hangs() }},
 	} {
 		fake := runnertest.New(t)
@@ -643,13 +582,13 @@ func TestSyncHoldsBackWhatOneReadDoesnt(t *testing.T) {
 		declare(t, s, [2]string{"PLAIN", "Section/plain"}, [2]string{"OTHER", "Section/other"})
 		signedIn(fake)
 		ctx, stop := context.WithCancel(t.Context())
-		c.script(fake.On("op", "inject"), stop)
+		c.script(fake.On("op", "read", item+"/Section/plain"), stop)
 		_, err := s.Sync(ctx)
 		stop()
 		if err == nil || !engine.IsNotYet(err) || err.Error() != held(c.said) {
 			t.Errorf("%s: Sync() = %v, want both held back", c.name, err)
 		}
-		if want := []string{"op whoami", "op account list --format json", "op inject"}; !slices.Equal(fake.Calls(), want) {
+		if want := []string{"op whoami", "op account list --format json", "op read " + item + "/Section/plain"}; !slices.Equal(fake.Calls(), want) {
 			t.Errorf("%s: ran %q, want %q: no read but the one", c.name, fake.Calls(), want)
 		}
 	}

@@ -7,10 +7,11 @@
 // its driver (Stores): a config may keep secrets in several.
 //
 // Checking never asks a store, which may ask for a fingerprint every hour:
-// it reads only what's on the Mac. Syncing reads each store's values at
-// once, as a store may have the person approve each read; a value that
-// fails to read keeps its previous one, and a store that's signed out fails
-// its own secrets alone. Values never pass through kit's events or log.
+// it reads only what's on the Mac. Syncing reads each value alone, a store
+// not approving holding back its values not yet read, as reading on would
+// ask the person again for each; a value that fails to read keeps its
+// previous one, and a store that's signed out fails its own secrets alone.
+// Values never pass through kit's events or log.
 package secret
 
 import (

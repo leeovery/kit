@@ -100,68 +100,31 @@ func (s *Secrets) Cards() []kind.Card {
 	return out
 }
 
-// readAll reads refs from d in one read, as a store may have the person
-// approve each, waiting for them as long as they take: none, given none.
-// Only should d name refs it couldn't read (store.Unread) are those left
-// out, each with d's words, and the rest read in one more, no further: any
-// other failure, the person not approving, or not in time, holds back
-// every ref not read, for the next sync to read again, as reading in
-// pieces would have them approve each.
-func (s *Secrets) readAll(ctx context.Context, d store.Driver, refs []string) (values, unread map[string]string, err error) {
-	values, unread = map[string]string{}, map[string]string{}
-	if len(refs) == 0 {
-		return values, unread, nil
-	}
-	rest := refs
-	for range 2 {
-		got, err := d.ReadMany(ctx, s.run, rest)
-		maps.Copy(values, got)
-		named, isUnread := errors.AsType[store.Unread](err)
-		maps.Copy(unread, named)
-		if err != nil && (!isUnread || ctx.Err() != nil) {
-			return values, unread, notRead(d, err.Error())
-		}
-		rest = slices.DeleteFunc(slices.Clone(rest), func(ref string) bool {
-			_, read := values[ref]
-			_, bad := unread[ref]
-			return read || bad
-		})
-		if len(rest) == 0 {
-			return values, unread, nil
-		}
-	}
-	return values, unread, notRead(d, "")
-}
-
-// readFiles reads refs from d as files hold them, each alone, as a file's
-// bytes may not read whole beside others (store.Driver.ReadFile): as
-// readAll has them, those d names as ones it couldn't read left out, each
-// with d's words, and any other failure holding back every ref not read.
-func (s *Secrets) readFiles(ctx context.Context, d store.Driver, refs []string) (contents, unread map[string]string, err error) {
-	contents, unread = map[string]string{}, map[string]string{}
+// readEach reads refs from d with read, each alone: those d names as ones
+// it couldn't read left out, each with d's words; any other failure, the
+// person not approving, or not in time, holds back every ref not read, for
+// the next sync to read again, as reading on would ask the person again.
+func (s *Secrets) readEach(ctx context.Context, d store.Driver, refs []string, read func(context.Context, runner.Runner, string) (string, error)) (got, unread map[string]string, err error) {
+	got, unread = map[string]string{}, map[string]string{}
 	for _, ref := range refs {
-		got, err := d.ReadFile(ctx, s.run, ref)
+		v, err := read(ctx, s.run, ref)
 		named, isUnread := errors.AsType[store.Unread](err)
 		switch {
 		case err == nil:
-			contents[ref] = got
+			got[ref] = v
 		case isUnread && ctx.Err() == nil:
 			maps.Copy(unread, named)
 		default:
-			return contents, unread, notRead(d, err.Error())
+			return got, unread, notRead(d, err.Error())
 		}
 	}
-	return contents, unread, nil
+	return got, unread, nil
 }
 
 // notRead is why d's secrets are held back when it didn't read them: what
-// it said, when it said something, and how to have it answer.
+// it said, and how to have it answer.
 func notRead(d store.Driver, said string) error {
-	why := d.About().Name + " wasn't approved, or couldn't read them"
-	if said != "" {
-		why += ": " + said
-	}
-	return errors.New(why + "; " + d.About().NoAnswer)
+	return errors.New(d.About().Name + " wasn't approved, or couldn't read them: " + said + "; " + d.About().NoAnswer)
 }
 
 // refs are the references of the declared secrets d keeps, each once, in
@@ -260,12 +223,12 @@ func (sy *syncing) read(ctx context.Context, d store.Driver, session store.Sessi
 			back()
 		}()
 	}
-	got, unread, err := sy.s.readAll(ctx, d, refs)
+	got, unread, err := sy.s.readEach(ctx, d, refs, d.Read)
 	maps.Copy(sy.values, got)
 	maps.Copy(sy.unread, unread)
 	sy.refuseLines()
 	if err == nil {
-		got, unread, err = sy.s.readFiles(ctx, d, files)
+		got, unread, err = sy.s.readEach(ctx, d, files, d.ReadFile)
 		maps.Copy(sy.files, got)
 		maps.Copy(sy.unread, unread)
 	}

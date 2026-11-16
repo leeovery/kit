@@ -38,11 +38,6 @@ type Driver interface {
 	// Read reads the value at ref, a field's text, as the store gives it
 	// back: a file's bytes read whole with ReadFile alone.
 	Read(ctx context.Context, run runner.Runner, ref string) (string, error)
-	// ReadMany reads the values at refs at once, as Read does each, a value
-	// of text alone read whole: failing whole when one won't read, saying
-	// why in the store's words, with Unread when it names those it
-	// couldn't, the values it read beside them given back.
-	ReadMany(ctx context.Context, run runner.Runner, refs []string) (map[string]string, error)
 	// ReadFile reads the value at ref as a file holds it: a file the store
 	// keeps, an attachment, byte for byte; a field's text ended by one
 	// newline, in place of any it ends with. It fails as Read does.

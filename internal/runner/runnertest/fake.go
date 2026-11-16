@@ -39,19 +39,21 @@ func New(t testing.TB) *Fake {
 // default, nothing printed and exit 0. Scripted again, the later answer
 // wins.
 func (f *Fake) On(name string, args ...string) *Script {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	s := &Script{argv: slices.Concat([]string{name}, args), answers: []*answer{{}}}
-	f.scripts = append(f.scripts, s)
-	return s
+	return f.add(&Script{argv: slices.Concat([]string{name}, args), answers: []*answer{{}}})
 }
 
 // OnMatch scripts the answer to the program name run with any args match
 // accepts, as On does: for a command whose arguments vary from run to run,
 // as a path made for it, or that its program reads loosely.
 func (f *Fake) OnMatch(name string, match func(args []string) bool) *Script {
-	s := f.On(name)
-	s.match = match
+	return f.add(&Script{argv: []string{name}, match: match, answers: []*answer{{}}})
+}
+
+// add scripts s, whole before a command running meanwhile can find it.
+func (f *Fake) add(s *Script) *Script {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.scripts = append(f.scripts, s)
 	return s
 }
 
@@ -139,7 +141,7 @@ func (s *Script) WritesPartly(flag, content string) *Script {
 }
 
 // Filters has the command print what f makes of what it reads on its
-// standard input, as a filter such as op inject does: when f fails, it
+// standard input, as a filter does: when f fails, it
 // prints the error on its standard error instead, and exits 1.
 func (s *Script) Filters(f func(input string) (string, error)) *Script {
 	s.last().filter = f

@@ -13,8 +13,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"iter"
-	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -159,13 +157,12 @@ func (Driver) Unlock(ctx context.Context, run runner.Runner) error {
 func (Driver) Read(ctx context.Context, run runner.Runner, ref string) (string, error) {
 	res, err := opRun(ctx, run, runner.Command{Args: []string{"read", ref}, Timeout: approvalTimeout, Secret: true})
 	if err != nil {
-		return "", unread(err, []string{ref})
+		return "", unread(err, ref)
 	}
 	return strings.TrimSuffix(string(res.Stdout), "\n"), nil
 }
 
-// ReadFile reads a value as a file holds it, never with op inject, which
-// turns each byte that isn't UTF-8 into U+FFFD: an attachment's bytes
+// ReadFile reads a value as a file holds it: an attachment's bytes
 // exactly, with op read --out-file; a field's text, with Read, ended by one
 // newline in place of any it ends with. Read first, so op names ref should
 // it not read; then the item says whether it's an attachment.
@@ -195,7 +192,7 @@ func readOut(ctx context.Context, run runner.Runner, ref string) (string, error)
 	out := filepath.Join(dir, "value")
 	args := []string{"read", "--force", "--file-mode", "0600", "--out-file", out, ref}
 	if _, err := opRun(ctx, run, runner.Command{Args: args, Timeout: approvalTimeout, Secret: true}); err != nil {
-		return "", unread(err, []string{ref})
+		return "", unread(err, ref)
 	}
 	data, err := os.ReadFile(out)
 	if err != nil {
@@ -226,112 +223,22 @@ func isAttachment(ctx context.Context, run runner.Runner, ref string) (bool, err
 	return file, nil
 }
 
-// ReadMany reads refs in one run of op inject, as 1Password may have the
-// person approve each run: a template on its standard input, each ref between
-// lines of a mark no value holds, so that a value of many lines reads back
-// whole, each exactly as op inject gives it. op inject is a text
-// template, so a value that isn't UTF-8, as a file may be, doesn't read
-// back whole: ReadFile reads those. A ref with a $ or }} in it is read
-// alone, with Read, as Read gives it, its final newline lost: a template
-// would read it as a variable, or as the reference's end. It fails with store.Unread when op names refs in saying
-// why it couldn't, the values read beside them given back.
-func (d Driver) ReadMany(ctx context.Context, run runner.Runner, refs []string) (map[string]string, error) {
-	plain, awkward := split(refs)
-	values, err := inject(ctx, run, plain)
-	if err != nil {
-		return nil, err
-	}
-	named := store.Unread{}
-	for _, ref := range awkward {
-		v, err := d.Read(ctx, run, ref)
-		bad, isUnread := errors.AsType[store.Unread](err)
-		switch {
-		case err == nil:
-			values[ref] = v
-		case !isUnread:
-			return nil, err
-		default:
-			maps.Copy(named, bad)
-		}
-	}
-	if len(named) > 0 {
-		return values, named
-	}
-	return values, nil
-}
-
-// split is refs a template can take, and those it can't, with a $ or }}.
-func split(refs []string) (plain, awkward []string) {
-	for _, ref := range refs {
-		if strings.Contains(ref, "$") || strings.Contains(ref, "}}") {
-			awkward = append(awkward, ref)
-		} else {
-			plain = append(plain, ref)
-		}
-	}
-	return plain, awkward
-}
-
-// inject reads refs in one run of op inject, as ReadMany says: none, given
-// none.
-func inject(ctx context.Context, run runner.Runner, refs []string) (map[string]string, error) {
-	values := make(map[string]string, len(refs))
-	if len(refs) == 0 {
-		return values, nil
-	}
-	mark := "kit-" + newID()
-	var template strings.Builder
-	for _, ref := range refs {
-		template.WriteString(mark + "\n{{ " + ref + " }}\n")
-	}
-	template.WriteString(mark + "\n")
-	res, err := opRun(ctx, run, runner.Command{Args: []string{"inject"}, Input: template.String(), Timeout: approvalTimeout, Secret: true})
-	if err != nil {
-		return nil, unread(err, refs)
-	}
-	parts := strings.Split(string(res.Stdout), mark)
-	if len(parts) != len(refs)+2 {
-		return nil, errors.New("op inject gave back other than its template")
-	}
-	for i, ref := range refs {
-		values[ref] = strings.TrimSuffix(strings.TrimPrefix(parts[i+1], "\n"), "\n")
-	}
-	return values, nil
-}
-
-// unread is why a read of refs failed with err: store.Unread when op, having
-// run, quoted some of them in its errors, each with the line it's quoted
-// in; else what op said last, or how it ended. A ref is quoted
-// where it's the longest of refs at that place, so that op quoting
-// op://vault/item/token2 doesn't name op://vault/item/token; a line about
-// the person's approval, or the session, names none, as op quotes the
-// reference it was reading in saying it wasn't approved.
-func unread(err error, refs []string) error {
+// unread is why a read of ref failed with err: store.Unread when op, having
+// run, quoted it in its errors, with the line it's quoted in; else what op
+// said last, or how it ended. A line about the person's approval, or the
+// session, names none, as op quotes the reference it was reading in saying
+// it wasn't approved.
+func unread(err error, ref string) error {
 	exit, ok := errors.AsType[*runner.ExitError](err)
 	if !ok {
 		return errors.New("op didn't finish")
 	}
-	longest := slices.SortedFunc(slices.Values(refs), func(a, b string) int { return len(b) - len(a) })
-	named := store.Unread{}
 	for line := range strings.Lines(exit.FullStderr) {
-		line = strings.TrimSpace(line)
-		if aboutApproval(line) {
-			continue
-		}
-		quoted := map[int]bool{}
-		for _, ref := range longest {
-			for at := range quotes(line, ref) {
-				if !quoted[at] {
-					quoted[at] = true
-					named[ref] = line
-				}
-			}
+		if line = strings.TrimSpace(line); strings.Contains(line, ref) && !aboutApproval(line) {
+			return store.Unread{ref: line}
 		}
 	}
-	if len(named) == 0 {
-		return errors.New(cmp.Or(exit.Stderr, fmt.Sprintf("op exited %d", exit.Code)))
-	}
-	return named
+	return errors.New(cmp.Or(exit.Stderr, fmt.Sprintf("op exited %d", exit.Code)))
 }
 
 // approval are words of op's errors about the person's approval, or the
@@ -343,19 +250,6 @@ var approval = []string{"initializing client", "authoriz", "dismissed", "sign in
 func aboutApproval(line string) bool {
 	line = strings.ToLower(line)
 	return slices.ContainsFunc(approval, func(w string) bool { return strings.Contains(line, w) })
-}
-
-// quotes are where ref is in line, each place it starts.
-func quotes(line, ref string) iter.Seq[int] {
-	return func(yield func(int) bool) {
-		for from := 0; ; {
-			i := strings.Index(line[from:], ref)
-			if i < 0 || !yield(from+i) {
-				return
-			}
-			from += i + 1
-		}
-	}
 }
 
 // itemArgs are op's arguments naming item (op://vault/item): the item, and
@@ -568,8 +462,8 @@ func (Driver) Delete(ctx context.Context, run runner.Runner, item, short string)
 	return nil
 }
 
-// newID is an id for a new field or section, as 1Password's are, or a
-// template's mark: 26 lower-case letters and digits, at random.
+// newID is an id for a new field or section, as 1Password's are: 26
+// lower-case letters and digits, at random.
 func newID() string {
 	b := make([]byte, 13)
 	_, _ = rand.Read(b)
