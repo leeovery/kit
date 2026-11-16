@@ -863,10 +863,9 @@ func Saying(ctx context.Context, says string) (resume func()) {
 	return aside(ctx, says, false)
 }
 
-// Away is Waiting for a wait that says what it waits for itself, as a step
-// by hand done again (engine.Undone), or the administrator's password
-// (AwaitAdmin): never quiet meanwhile; back, how the install's going is
-// said again.
+// Away is Waiting for a wait that says what it waits for itself, as the
+// administrator's password (AwaitAdmin): never quiet meanwhile; back, how
+// the install's going is said again.
 func Away(ctx context.Context) (back func()) {
 	p, ok := ctx.Value(progressKey{}).(*progress)
 	if !ok {

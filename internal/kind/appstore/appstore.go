@@ -328,7 +328,9 @@ func (*AppStore) Resolve(_ context.Context, names []string) (map[string]string, 
 // up, each once kit has the password, should it be asking for it again
 // (kind.AwaitAdmin): till one's in, each is the check that someone's signed
 // in to the App Store (install). No one signed in, or the password not
-// given, the rest aren't tried.
+// given, the rest aren't tried; no one signed in, signing in, a step by
+// hand before the App Store's, is unmarked (engine.Unmark), for the next
+// run to ask for it again.
 func (s *AppStore) Install(ctx context.Context, names []string) error {
 	var errs []error
 	signedIn := false
@@ -343,7 +345,11 @@ func (s *AppStore) Install(ctx context.Context, names []string) error {
 			break
 		}
 		err := s.install(ctx, name, signedIn)
-		if _, out := errors.AsType[*notSignedIn](err); out || errors.Is(err, errAdminWait) {
+		_, out := errors.AsType[*notSignedIn](err)
+		if out {
+			err = errors.Join(err, engine.Unmark(ctx))
+		}
+		if out || errors.Is(err, errAdminWait) {
 			return kind.Joined(append(errs, err))
 		}
 		if err != nil {
@@ -357,35 +363,25 @@ func (s *AppStore) Install(ctx context.Context, names []string) error {
 
 // install installs name alone. Till an app's in (signedIn), an install mas
 // says no one's signed in for, or hangs, as mas 7's does with no one signed
-// in (attempt), means signing in, a step by hand before the App Store's,
-// wasn't done after all: it's done again (engine.Undone), then name's tried
-// again. With nothing to do again, as without a terminal, it fails, naming
-// the fix.
+// in (attempt), fails, naming the fix.
 func (s *AppStore) install(ctx context.Context, name string, signedIn bool) error {
 	if id(name) == 0 {
 		return notAnApp(name)
 	}
-	for {
-		var hung bool
-		err := kind.AdminAgain(ctx, func() (err error) {
-			hung, err = s.attempt(ctx, name, signedIn)
-			return err
-		})
-		switch {
-		case err == nil:
-			return nil
-		case kind.SudoForgot(err):
-			return errAdminWait
-		case !hung && !signedOut(err):
-			return failed(err)
-		}
-		back := kind.Away(ctx)
-		again := engine.Undone(ctx)
-		back()
-		if !again {
-			return &notSignedIn{err: err, hung: hung}
-		}
+	var hung bool
+	err := kind.AdminAgain(ctx, func() (err error) {
+		hung, err = s.attempt(ctx, name, signedIn)
+		return err
+	})
+	switch {
+	case err == nil:
+		return nil
+	case kind.SudoForgot(err):
+		return errAdminWait
+	case !hung && !signedOut(err):
+		return failed(err)
 	}
+	return &notSignedIn{err: err, hung: hung}
 }
 
 // attempt installs name once, reporting whether it hung: till an app's in

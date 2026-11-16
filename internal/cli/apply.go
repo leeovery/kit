@@ -79,7 +79,7 @@ kit apply reinstall tries those that failed again.`,
 					steps, _ := r.pipeline.Planned(r.options(a, args))
 					r.sink.Emit(event.Preparing{Time: r.now, Command: command, Machine: r.machine, Doing: "checking what will need an administrator's password", Steps: steps})
 				}
-				stop := a.holdAdminAlongside(ctx, r, toInstall(ctx, r, args))
+				stop := a.holdAdminAlongside(ctx, r, args)
 				report, err = r.pipeline.Apply(ctx, r.sink, r.options(a, args))
 				stop()
 			}
