@@ -66,8 +66,8 @@ otherwise `kit manual done <name>` marks it.
 that its backups run, and keeps `[backup exclusions]` in Time Machine's list. Arq leaves them
 out once its plan follows that list.
 
-**Card.** What the boot, or a whole `kit apply` at a terminal, shows when it needs you: what to
-do, why, and the steps to do it. A step by hand that isn't done comes up as a card.
+**Card.** What the boot, or a whole `kit apply` at a terminal, shows when it needs you. It
+says what to do, why, and the steps to do it. A step by hand that isn't done comes up as a card.
 
 **Check of your own.** A command declared in `[checks]`, with `kit check add`, that exits 0 when
 all's well. `kit status` and the hourly run run it.
