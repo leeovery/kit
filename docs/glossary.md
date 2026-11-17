@@ -39,6 +39,10 @@ an environment variable, or a file. kit-config holds where the value is kept, ne
 **Synced.** A secret is synced once kit has read its value from the store and put it in place on
 this Mac.
 
+**Secrets block.** A section of secrets in a declarations file. A block for one item in the
+store, such as `[secrets op://vault/item]`, names a field of that item on each line. The plain
+`[secrets]` block gives each reference in full. `kit secret places` lists the blocks.
+
 **Linked file.** A file in kit-config, under a Mac's `home` folder or `shared/home`, that kit
 links into your home folder at the same path. `shared/home/.zshrc` is linked at `~/.zshrc`. An
 edit through the link is an edit in kit-config. `kit file add` moves a file in and links it back.
@@ -81,7 +85,7 @@ Without one, you name each item and what to do with it. The main answers:
 | Answer | What kit does |
 |---|---|
 | `--adopt` | Declares what this Mac has |
-| `--revert` | Puts back what's declared |
+| `--revert` | Puts back what was there, or what's declared |
 | `--remove` | Uninstalls it |
 
 kit then commits and pushes kit-config. `--install`, `--undeclare` and `--snooze` settle the
