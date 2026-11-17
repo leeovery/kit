@@ -14,7 +14,20 @@ for scripts and agents, so an agent can drive it with the same commands you run.
 
 ## Install
 
-Not released yet. Build it from source, with Go 1.27:
+With Homebrew, which keeps it up to date:
+
+```bash
+brew install leeovery/tools/kit
+```
+
+On a new Mac, before Homebrew, `install.sh` downloads the newest release, checks it, and starts
+`kit bootstrap`:
+
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/leeovery/kit/main/install.sh)"
+```
+
+Or build it from source, with Go 1.27:
 
 ```bash
 go build -o ~/.local/bin/kit ./cmd/kit

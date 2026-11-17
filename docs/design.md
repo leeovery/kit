@@ -760,9 +760,11 @@ nightly --scheduled` as its child, waits, and quits (`open -W` exits 0 whatever 
 nothing reads how it ended: kit's run log has it). macOS holds kit.app responsible for its
 child, so Full Disk Access is kit.app's, kept across kit's updates as kit.app is rebuilt only
 when its own files change (the dotfiles' Nightly.app did the same). The agent names that kit
-only when it's the kit running: a kit run from elsewhere (`go run`'s, a worktree's, a build in
-a temporary folder, or any other kit than the one on PATH) leaves the agent as it stands, its
-check looking at the kit the agent names, and `kit apply` saying why it left it. Its check: the
+whichever kit applies, so a build of kit's own, or install.sh's copy once Homebrew's kit is on
+PATH, names the kit on PATH, not itself. With no kit on PATH, it names the kit applying, unless
+that's a build that won't last (`go run`'s, a worktree's, a build in a temporary folder): then
+it leaves the agent as it stands, its check looking at the kit the agent names, and `kit apply`
+saying why it left it. Its check: the
 agent says that, for the kit and kit.app, the kit it names is there, kit.app is built from this
 kit's files, and launchd has it loaded (`launchctl print gui/<uid>/…`); `kit apply` builds
 kit.app, writes the agent, loads it (`launchctl bootstrap`, after `bootout` when it was loaded
@@ -1364,5 +1366,6 @@ refuses a line the restore would refuse, before writing anything, and copies not
 
 - No personal data in the repo or its history, ever (see House rules in `CLAUDE.md`);
   `scripts/personal-data-scan` checks the files and every commit, in `scripts/gates`.
-- Public, under the MIT licence. Released by the maintainer, once kit is ready, with mint,
-  GoReleaser and a Homebrew tap.
+- Public, under the MIT licence. Released by the maintainer with mint, whose hooks build the
+  binaries on the Mac before the tag, then upload them to the release and update the Homebrew
+  tap (`scripts/release-build`, `scripts/release-upload`).

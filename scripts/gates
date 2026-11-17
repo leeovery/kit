@@ -40,6 +40,8 @@ gate shellcheck
 # shell: POSIX alone.
 shellcheck internal/steps/template.sh
 shellcheck --shell=sh install.sh
+# The release's hooks, which mint runs.
+shellcheck -x scripts/release-common scripts/release-build scripts/release-upload
 
 gate "go build"
 go build ./...

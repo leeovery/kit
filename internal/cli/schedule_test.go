@@ -104,26 +104,32 @@ func TestApplyMovesTheHourlyLaunchToTheKitOnPath(t *testing.T) {
 	}
 }
 
-// A kit that isn't the one on kit's PATH, as a build of kit's own, leaves
-// the launch as it stands: its check looks at the agent there, and kit
-// apply writes nothing, saying why.
-func TestAnotherKitLeavesTheHourlyLaunch(t *testing.T) {
+// A kit that isn't the one on kit's PATH, as a build of kit's own, names
+// the kit on PATH, not itself: kit apply writes the agent for it, and the
+// check, run by that build, agrees.
+func TestAnotherKitNamesTheKitOnPath(t *testing.T) {
 	w := laptopWorld(t)
 	w.self = filepath.Join(w.home, "Code", "kit", "kit")
 	w.write(t, filepath.Join("Code", "kit", "kit"), "a build")
-	if out, _, _ := w.run(t, "status", "hourly-launch"); !strings.Contains(out, "hourly-launch ok hourly, through kit.app\n") {
-		t.Errorf("kit status hourly-launch printed\n%s\nwant the launch in place, as the agent stands", out)
-	}
-
 	if err := os.Remove(filepath.Join(w.home, launchAgent)); err != nil {
 		t.Fatal(err)
 	}
-	out, _, _ := w.run(t, "apply", "hourly-launch")
-	if want := "hourly-launch deferred this kit, " + w.self + ", isn't the one on kit's PATH, " + filepath.Join(w.home, kitPath) + ": the hourly launch is left for that kit's apply\n"; !strings.Contains(out, want) {
-		t.Errorf("kit apply hourly-launch printed\n%s\nwant it to hold %q", out, want)
+	w.fake.On("launchctl", "print", launchService).Exits(113).Then().Prints("loaded\n")
+	w.fake.On("launchctl", "bootstrap", strings.TrimSuffix(launchService, "/"+steps.LaunchLabel), filepath.Join(w.home, launchAgent))
+
+	out, errOut, _ := w.run(t, "apply", "hourly-launch")
+	if !strings.Contains(out, "hourly-launch ok hourly, through kit.app\n") {
+		t.Errorf("kit apply hourly-launch printed\n%s%s\nwant it installed", out, errOut)
 	}
-	if w.read(t, launchAgent) != "" || slices.ContainsFunc(w.fake.Calls(), func(c string) bool { return strings.HasPrefix(c, "launchctl bootstrap") }) {
-		t.Errorf("wrote the agent or loaded it (ran %q); want it left", w.fake.Calls())
+	want, err := steps.LaunchAgent(filepath.Join(w.home, kitApp), filepath.Join(w.home, kitPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := w.read(t, launchAgent); got != string(want) {
+		t.Errorf("the agent =\n%s\nwant it running the kit on kit's PATH:\n%s", got, want)
+	}
+	if out, _, _ := w.run(t, "status", "hourly-launch"); !strings.Contains(out, "hourly-launch ok hourly, through kit.app\n") {
+		t.Errorf("kit status hourly-launch printed\n%s\nwant the launch in place, as apply wrote it", out)
 	}
 }
 

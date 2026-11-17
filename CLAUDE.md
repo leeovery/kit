@@ -20,6 +20,7 @@ go vet ./...
 scripts/test-isolated        # every test, race detector on, isolated: see Test isolation
 golangci-lint run            # standard linters plus modernize (.golangci.yml)
 shellcheck internal/steps/template.sh   # the script steps of the user's own start from
+shellcheck -x scripts/release-*         # the release's hooks
 go build ./...
 scripts/personal-data-scan   # no personal data in the files or the history
 ```
@@ -57,8 +58,9 @@ scripts/personal-data-scan   # no personal data in the files or the history
   `192.0.2.0/24`. The repo is public, and its history goes with it; `scripts/personal-data-scan`
   checks both, with private patterns CI holds as a secret.
 - **Releases are the maintainer's.** Never tag, release, or write a changelog or release
-  notes. The maintainer releases with mint (`./release`), which runs the gates first; the tag
-  then has GoReleaser add the binaries and update the Homebrew tap.
+  notes. The maintainer releases with mint (`./release`), whose hooks run the gates and build
+  the binaries on the Mac before the tag (`scripts/release-build`), then upload them to the
+  release and update the Homebrew tap (`scripts/release-upload`).
 - **Never log a secret.** Values go from their store to their file without passing through
   events; arguments, environment and output are redacted before they're logged.
 

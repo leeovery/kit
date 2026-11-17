@@ -579,9 +579,8 @@ func (a *app) build(command, logName string, face render.Face, atTerminal bool) 
 
 // schedulingSteps are the steps that have kit run by itself, on every Mac:
 // the hourly launch, opening kit.app to run the kit on kit's PATH nightly,
-// when it's this one (steps.LaunchKit); and, after
-// it, the step by hand giving kit.app Full Disk Access, raised at a
-// terminal (raise).
+// whichever kit applies (steps.LaunchKit); and, after it, the step by hand
+// giving kit.app Full Disk Access, raised at a terminal (raise).
 func (r *run) schedulingSteps(a *app, dirs config.Dirs, raise *steps.Raise) ([]engine.Step, error) {
 	self, err := a.Self()
 	if err != nil {

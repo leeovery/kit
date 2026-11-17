@@ -56,31 +56,19 @@ type Launching struct {
 }
 
 // LaunchKit is the kit the hourly launch is to run, self being the kit
-// running: the kit on path, kit's PATH, the one the person runs, when it's
-// self, named as it's found there, so Homebrew's link outlasts its
-// upgrades. Another kit on path, or none and self a build that won't last
-// (in temp, Go's build cache or a worktree), is none to name: why says so.
+// running: the kit on path, kit's PATH, the one the person runs, named as
+// it's found there, so Homebrew's link outlasts its upgrades, whichever kit
+// is applying, so a build of kit's own names it, not itself. With none on
+// path, self, unless it's a build that won't last (in temp, Go's build
+// cache or a worktree): none to name, why says so.
 func LaunchKit(self string, path []string, temp string) (kit, why string) {
-	onPath, err := runner.Exec{Path: path}.Find("kit")
-	switch {
-	case err == nil && sameFile(self, onPath):
+	if onPath, err := (runner.Exec{Path: path}).Find("kit"); err == nil {
 		return onPath, ""
-	case err == nil:
-		return "", fmt.Sprintf("this kit, %s, isn't the one on kit's PATH, %s: the hourly launch is left for that kit's apply", self, onPath)
-	case passing(self, temp):
+	}
+	if passing(self, temp) {
 		return "", fmt.Sprintf("this kit, %s, is a build that won't last: the hourly launch is left for the kit on kit's PATH", self)
 	}
 	return self, ""
-}
-
-// sameFile reports whether a and b are one file, links followed.
-func sameFile(a, b string) bool {
-	ai, err := os.Stat(a)
-	if err != nil {
-		return false
-	}
-	bi, err := os.Stat(b)
-	return err == nil && os.SameFile(ai, bi)
 }
 
 // passing reports whether the kit at self is a build that won't last: in
