@@ -1,20 +1,20 @@
-# Your data comes across to a new Mac
+# Your data on a new Mac
 
 kit rebuilds your apps and settings from kit-config, but your own data isn't there: code,
 shell history, the state your tools keep. The restore list names those paths. A new Mac copies
-them from the Mac it started from, or from a backup. You'd want it before you move to a new Mac,
-or reinstall this one.
+them from the Mac it started from, or from a backup. You'd want it before moving to a new
+Mac, or reinstalling this one.
 
 ## Try it
 
 ```bash
-# Carry ~/Code across, without its logs
-kit restore add ~/Code --skip logs
+# Carry ~/Code across, without its caches
+kit restore add ~/Code --skip 'cache/*'
 # Carry shell history across, for every Mac
 kit restore add ~/.zsh_history --shared
 ```
 
-kit declares the path, then commits and pushes kit-config. It copies nothing now:
+kit declares the path, and copies nothing now:
 
 ```text
 ~/Code ok declared in laptop; nothing copied
@@ -24,16 +24,26 @@ The line lands under `[restore]`, in `laptop/declarations`:
 
 ```text
 [restore]
-~/Code --skip logs
+~/Code --skip cache/*
 ```
 
-`--skip` names what in the path to leave out, such as credentials a tool makes again when you
-set it up. It's relative to the path: a path, or a pattern as rsync takes one, as often as you want.
+`--skip` names what in the path to leave out, relative to the path: a path, or a pattern as
+rsync takes one. Quote a pattern, so your shell leaves it for kit.
+
+## What happens
+
+- **The data restore runs in the first `kit apply`** on a Mac the boot has just set up.
+- **It waits for rsync 3 from Homebrew.** Copying from the old Mac, it waits for your secrets
+  too.
+- **Little waits for it:** only Claude Code's MCP servers and skills, and steps declared
+  `--after restore`.
+- **Nothing here is lost.** What a listed path holds already is set aside in kit's state,
+  never deleted.
+- **Projects get their dependencies** from their lockfiles: Composer, npm, pnpm, Yarn, Bun or
+  uv. Yarn Berry, Go, Cargo, Swift and Terraform projects are left alone.
+- **A stopped restore carries on** at the next `kit apply`.
 
 ## Where the data comes from
-
-The data restore runs on the first `kit apply` after the boot. Where it copies from depends on
-which Mac this is:
 
 | This Mac | Copies from |
 |---|---|
@@ -41,57 +51,46 @@ which Mac this is:
 | Reinstalled under its own name | Its own backups |
 | Started fresh, or in use | Nothing, unless you ask |
 
-On a Mac reinstalled under its own name, a card asks for a Time Machine disk or Arq. It also
-offers nothing, for a Mac starting afresh.
+On a Mac reinstalled under its own name, a card asks for a Time Machine disk or Arq. The card
+also offers to restore nothing, for a Mac already in use or starting afresh.
 
 ## Copying from the old Mac
 
-The new Mac reaches the old one on your local network. `kit.toml` records the local hostname
+`kit.toml` records the local hostname
 and the SSH host key of the old Mac. The new Mac copies only from the Mac that presents that
-key, at that name. The old Mac needs:
+key, at that name. Ready the old Mac first:
 
-- Remote Login on, with `kit feature on remote-login`. Its next `kit apply` records the key and
-  the hostname.
-- Remote Login's "Allow full disk access for remote users" on, in System Settings.
-- A `~/.ssh/authorized_keys` that holds the key the new Mac uses.
-- Homebrew's rsync, on both Macs.
-- The same user name and home folder as the new Mac.
+- Turn Remote Login on, with `kit feature on remote-login`. The next `kit apply` on the old Mac
+  records its host key and local hostname in kit-config.
+- Turn on "Allow full disk access for remote users", in Remote Login's settings.
+- Add to its `~/.ssh/authorized_keys` the public half of the SSH key kit-config puts on the new
+  Mac as a [secret](secrets.md). That's why the copy waits for secrets.
+- Declare Homebrew's rsync for both Macs: `kit brew add rsync --shared`.
+- Make the user on the new Mac with the same user name and home folder.
 
-If the old Mac doesn't answer, a card offers its Time Machine disk, a restore through Arq by
-hand, or trying the Mac again.
-
-## What happens
-
-- **It waits only for what it needs:** rsync 3 on kit's PATH, and, copying from the old Mac,
-  your secrets.
-- **The rest of the Mac doesn't wait.** Only Claude Code's MCP servers and skills, and steps
-  declared `--after restore`, wait for the copy.
-- **Nothing here is lost.** Whatever a listed path holds before its copy is set aside in kit's
-  state first, never deleted.
-- **Projects get their dependencies.** Each restored project installs them again from its
-  lockfile: Composer, npm, pnpm, Yarn, Bun or uv.
-- **A stopped restore carries on** from where it was, at the next `kit apply`.
-- **Once done, it's gone** from `kit apply` and `kit status`.
+On the first copy, macOS asks whether your terminal may find devices on local networks. Choose
+Allow: the copy fails until you do. If the old Mac doesn't answer, a card offers its Time
+Machine disk, a restore through Arq by hand, or trying the Mac again.
 
 ## What it leaves out by itself
 
-kit brings some things back itself, and others don't belong. The restore leaves out:
+kit brings some things back itself. `kit restore add` refuses a path
+that's one of these, or inside one:
 
 - what kit links, what prefs saves, and what a kind puts in place, such as Claude skills;
 - kit's own folders;
-- what the backups leave out, with `[backup exclusions]`;
-- from the old Mac, folders marked excluded from backups, unless one holds a git checkout;
-- the `.DS_Store` and `.localized` files Finder makes.
+- what `[backup exclusions]` leaves out.
 
-`kit restore add` refuses a path that's one of these, or inside one.
+The copy also leaves out the `.DS_Store` and `.localized` files Finder makes. From the old Mac,
+it leaves out folders excluded from its backups, unless one holds a git checkout.
 
 ## Good to know
 
 - **A Mac in use restores nothing by itself.** `kit apply --restore-from` brings a path later,
-  from the old Mac or a backup, and only while the path is absent or empty. A path holding data is never touched.
-- **Without a terminal, there's no card.** `--restore-from` answers it: `mac`, `time-machine` or
-  `arq`.
-- **One path, one line.** Lines can't overlap: a path inside another listed path is refused.
+  and only while the path is absent or empty. A path holding data is never touched.
+- **`mac` works only on a Mac started from another.** `time-machine` and `arq` work anywhere.
+- **Without a terminal, there's no card.** The restore fails until `--restore-from` names
+  `mac`, `time-machine` or `arq`.
 
 ## Reference
 

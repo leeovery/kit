@@ -1,8 +1,8 @@
 # Backups that kit checks
 
 Name the backup tools a Mac uses, Time Machine and Arq, and `kit status` says when a backup is
-late, stuck or never set up. One list of exclusions keeps the folders you name out of both
-tools. You'd want it on every Mac whose data you can't lose.
+late, stuck or never set up. One list of exclusions keeps the folders you name out of Time
+Machine, and out of Arq once its plan follows that list. You'd want it on every Mac whose data you can't lose.
 
 ## Try it
 
@@ -31,15 +31,22 @@ arq
 ~/Downloads
 ```
 
-## What kit status checks
+## What happens
 
-`kit status` checks each tool under BACKUPS. A tool backing up on time reads like this:
+`kit status` checks each tool under BACKUPS:
 
 ```text
-arq ok last backup 01:04
+  BACKUPS
+  ● Time Machine  last backup 02:35
 ```
 
-kit says a tool needs attention when:
+- **Every check, every hour.** The hourly run checks the tools too, and `kit status` shows what
+  it found.
+- **Each problem says what to do,** such as connecting the backup disk.
+- **Manual plans don't count.** Arq plans set to Manual never run by themselves, so kit leaves
+  them out.
+
+A tool needs attention when:
 
 | Tool | Needs attention when |
 |---|---|
@@ -48,9 +55,6 @@ kit says a tool needs attention when:
 | Time Machine | A backup is stuck in one phase over 3 hours |
 | Arq | A plan on a schedule hasn't backed up in 26 hours |
 | Arq | No plan runs on a schedule |
-
-Each problem says what to do, such as connecting the backup disk. Arq plans set to Manual are
-left out, because they never run by themselves. The hourly run checks the tools too.
 
 ## Setting up is yours
 
@@ -80,11 +84,11 @@ A line is a path or a pattern:
 
 | Line | How kit excludes it |
 |---|---|
-| `~/Downloads` | Fixed, before the folder exists |
-| `~/Code/*/node_modules` | Each match, where it is now |
+| `~/Downloads` | By its path, even before the folder exists |
+| `~/Code/*/node_modules` | Each folder that matches, where it is now |
 
-A fixed path needs your administrator's password, which `kit apply` asks for at a terminal.
-Matches of a pattern need none. So the hourly run keeps a new match out within the hour.
+A plain path needs your administrator's password, which `kit apply` asks for at a terminal.
+Matches of a pattern need none, so the hourly run keeps a new match out within the hour.
 
 ## Good to know
 

@@ -4,6 +4,11 @@ Paste one line into Terminal on a blank Mac, and kit sets it up from kit-config.
 GitHub on your phone, pick which Mac this is, and type your password once. kit installs the
 rest, then carries on in your own terminal. You'd use it on every Mac you set up.
 
+The line reads the repository named `kit-config` in your GitHub account. If you don't have one
+yet, see [Your first kit-config](first-config.md). To copy from one of your Macs, ready it first.
+Then make your user in macOS's own setup with the same user name as that Mac.
+[Your data on a new Mac](your-data.md) says how.
+
 ## Try it
 
 ```bash
@@ -13,8 +18,8 @@ https://raw.githubusercontent.com/leeovery/kit/main/install.sh)"
 ```
 
 The line downloads the newest release of kit, checks it against its checksum, and runs
-`kit bootstrap`. A splash plays while kit tests the Mac, then enter starts the boot. Each row
-is a step, in order:
+`kit bootstrap`. A splash plays while kit tests the Mac, then enter starts the boot. The end of
+the boot looks like this:
 
 ```text
   SIGN IN
@@ -37,26 +42,23 @@ is a step, in order:
    kit reads kit-config, which must be private.
 2. **This Mac.** Pick one of the Macs kit-config names, or `new`. A new Mac gets a name, then
    starts fresh or as a copy of one of your Macs.
-3. **Password.** Typed once, for everything the boot installs. If kit-config turns on Touch ID
-   for sudo, macOS asks to allow it.
+3. **Password.** Typed once, for everything the boot installs.
 4. **Homebrew,** with Apple's command line tools.
 5. **Apps.** The terminal `kit.toml` names, such as Ghostty.
 6. **kit-config.** Cloned to `~/.config/kit`, its files linked into your home folder.
 7. **kit,** installed through Homebrew, so it stays up to date.
-8. **Full Disk Access.** kit opens System Settings and Finder. You drag the terminal into the
-   list, then press enter.
+8. **Full Disk Access.** You drag the terminal into the list System Settings shows.
 9. **The terminal.** It opens, and kit carries on there.
 
-## kit apply takes over
+## What happens
 
-In the terminal, kit runs the whole of `kit apply` on a screen of its own. Rows on the left
-show each part of the Mac, such as Homebrew casks or Secrets, with what each waits for.
-Installs run side by side, a few at a time.
-
-If something waits for a step done by hand, such as "Sign in to 1Password", the step comes up
-as a card on the right. The card lists what to do, and kit carries on by itself once it's
-done. Steps by hand that nothing waits for come at the end, as a to-do list, with set-up only
-you can do:
+- **`kit apply` runs on a screen of its own.** Rows show each part of the Mac, such as
+  Homebrew casks, with what each waits for.
+- **What waits for you comes up as a card,** such as signing in to 1Password, or a step by
+  hand. kit carries on by itself once it's done.
+- **A to-do list comes at the end:** steps by hand that nothing waits for, and set-up only you
+  can do, such as a backup disk.
+- **The window becomes a fresh shell** once `kit apply` ends.
 
 ```text
   TO DO  2 · kit apply brings them back
@@ -64,55 +66,49 @@ you can do:
        → Plug in your backup disk
   △ 2  Set up Arq's backup plan
        → Open Arq
-       → Sign in to your Arq account
-       → Adopt this Mac's plan, and let it run
 ```
-
-Once `kit apply` ends, the window becomes a fresh shell.
 
 ## Which Mac it starts from
 
 | You pick | Its declarations | Your data |
 |---|---|---|
-| `new`, from one of your Macs | A copy of that Mac's | Copied from that Mac |
-| A Mac kit-config names | That Mac's own | From its own backups |
-| `new`, fresh | Only `shared` | Nothing restored |
+| `new`, from one of your Macs | A copy of that Mac's | From that Mac |
+| A Mac added with `--from` | Its own | From that Mac |
+| Any other Mac kit-config names | Its own | Its own backups, or none |
+| `new`, fresh | Only `shared` | None |
 
-You can make the copy beforehand: `kit machine add studio --from laptop` adds `studio`,
-started from `laptop`. Pick `studio` at the boot, and it copies from `laptop`. [Your data on a new Mac](your-data.md) covers the data restore.
+`kit machine add studio --from laptop` adds `studio`, started from `laptop`. Pick `studio` at
+the boot, and its first `kit apply` copies your data from `laptop`.
 
 ## What waits for what
 
 kit installs nothing before what it needs is in place:
 
-- Each kind waits for its program on kit's PATH: npm from a formula, `gh`, `mas`,
-  `claude` and `agntc`.
-- A line from a private tap waits for its token to sync.
-- App Store apps need you signed in to the App Store. Declare that sign-in as a step by hand,
-  before them, or their install fails.
-- Login items wait for the casks and App Store apps.
-- Claude Code's MCP servers and skills wait for the data restore. So does a step declared
-  `--after restore`.
+- npm packages wait for npm, from a formula;
+- GitHub CLI extensions wait for `gh`, App Store apps for `mas`;
+- MCP servers wait for `claude`, and skills for `agntc`;
+- a line from a private tap waits for its token to sync;
+- login items wait for the casks and App Store apps;
+- MCP servers, skills and steps declared `--after restore` wait for the data restore.
+
+App Store apps also need you signed in to the App Store, or their install fails. Declare that
+sign-in as a step by hand, and give the `[app store apps]` header `--after` its name. See
+[Steps of your own, and steps by hand](steps.md).
 
 ## Good to know
 
-- **A failure is no dead end.** Paste the install line into Terminal again. Each step that's
-  done is found so by its check, and the boot picks up where it stopped.
+- **A failure is no dead end.** Paste the install line into Terminal again. The checks find
+  the steps already done, and the boot picks up where it stopped.
 - **After the boot, run `kit apply` again.** It installs what failed or waited, and never
   removes anything.
-- **Your config, by name.** Without `--config`, the boot reads the repository named
-  `kit-config` in your GitHub account. If you don't have one yet, see
-  [Your first kit-config](first-config.md).
 
 ## Reference
 
-| Command or flag | What it does |
+| Command | What it does |
 |---|---|
-| `kit bootstrap` | The boot: the install line runs it |
-| `bootstrap --mac <name>` | Names this Mac, rather than asking |
-| `bootstrap --config owner/name` | Reads another config repository |
 | `kit machine add <name> --from <mac>` | Adds a Mac, a copy of another |
 | `kit apply` | Installs what's declared and missing |
+| `kit bootstrap` | The boot, which the install line runs |
 
 ## Related
 
