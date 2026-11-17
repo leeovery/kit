@@ -4,3 +4,5 @@
 *.out
 .claude/settings.local.json
 .claude/worktrees/
+/notes/
+/CLAUDE.local.md
