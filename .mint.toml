@@ -34,4 +34,4 @@ pre_tag = ['scripts/gates', 'scripts/release-build']
 post_release = ['scripts/release-upload']
 
 [release]
-diff_exclude = [".gitignore", ".goreleaser.yaml"]
+diff_exclude = [".gitignore"]
