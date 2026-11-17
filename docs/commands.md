@@ -1,6 +1,6 @@
 # Commands: every kit command, and what it's for
 
-This page lists every command, in the groups `kit --help` uses. Each line links to the page
+This page lists every command, grouped much as `kit --help` groups them. Each line links to the page
 that covers it. To see the flags a command takes, run `kit <command> --help`.
 
 At a terminal, `kit` on its own opens a menu of what to run next.
@@ -21,11 +21,13 @@ At a terminal, `kit` on its own opens a menu of what to run next.
 | `kit agent` | Instructions for an agent working through kit | [Agents](agents.md) |
 
 `kit machine add` adds a Mac to kit-config, empty or as a copy of another (`--from`).
+`kit agent <topic>` prints one topic of the guide, and `kit agent --help` lists the topics.
 
 ## Packages
 
 Each of these has `add` and `remove`. `add` installs and declares, and `remove` uninstalls and
-undeclares.
+undeclares. `kit claude-mcp add` is the exception: it installs nothing, and declares servers
+Claude Code has already.
 
 | Command | What it installs | Page |
 |---|---|---|
@@ -39,12 +41,14 @@ undeclares.
 | `kit claude-mcp` | Claude Code's MCP servers | [Packages](packages.md) |
 | `kit claude-skill` | Claude skills, through agntc | [Packages](packages.md) |
 
-`kit claude-mcp` also has `on` and `off`. `off` removes a server from Claude Code, and keeps its
-line.
+`kit claude-mcp` also has `on` and `off`. `on` installs a declared server. `off` removes a
+server from Claude Code, and keeps its line.
 
 ## Settings
 
-Each of these has `add` and `remove`. `add` declares a setting with the value this Mac has.
+Each of these has `add` and `remove`. For the first three, `add` declares a setting with the
+value this Mac has. The two exclusion commands change the Mac: `add` leaves the folder out,
+then declares it.
 
 | Command | What it declares | Page |
 |---|---|---|
@@ -100,7 +104,7 @@ Each has `add` and `remove`. `kit manual done` marks a step by hand done on this
 | `--verbose` | Keep commands' output whole in the run's log |
 | `-h`, `--help` | Help for the command |
 
-`kit --version` prints the version.
+`kit --version`, or `kit -v`, prints the version.
 
 ## Related
 

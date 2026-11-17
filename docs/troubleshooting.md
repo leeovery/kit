@@ -11,15 +11,15 @@ kit: no config repository: no kit.toml in /Users/someone/.config/kit: clone your
 
 **Cause:** kit found no `kit.toml` in the folder it reads kit-config from, so it stops.
 
-**Fix:** clone kit-config into that folder, or tell kit where yours is:
+**Fix:** clone kit-config into the folder the message names:
 
 ```bash
 # Clone kit-config where kit looks for it
 gh repo clone owner/kit-config ~/.config/kit
-# Or point kit at a clone you have, by full path
-export KIT_CONFIG=/Users/someone/kit-config
 ```
 
+`KIT_CONFIG` can point kit at a clone somewhere else, but it reaches only the shell that sets
+it. The hourly run still reads the folder the message names, so prefer the clone.
 [Configuration](configuration.md) says where kit looks.
 
 ## kit-config is public
@@ -48,19 +48,25 @@ gh repo edit owner/kit-config \
 ```
 
 If `kit status` says it `can't prove` kit-config private, the remote isn't a github.com URL
-in a form kit reads. kit proves privacy only on github.com, and the message lists the forms.
+kit reads. The message lists the forms kit reads.
 
-## A step waits for a password
+## An install waits for a password
 
 ```text
 waiting for an administrator's password: kit apply at a terminal asks for it
 needs an administrator's password: run kit apply at a terminal
 ```
 
-**Cause:** some installs and steps need an administrator's password. A step declared `--sudo`
-needs it, and so does a cask that installs through a package. kit asks for it only at a terminal. The
-hourly run, an agent and a run with `--json` or `--plain` have nobody to ask, so those items
-wait. The rest of the run carries on.
+**Cause:** some installs need an administrator's password:
+
+- a cask that installs through a package;
+- an App Store app;
+- some macOS and power settings;
+- backup and Spotlight exclusions;
+- a step declared `--sudo`.
+
+kit asks for the password only at a terminal. The hourly run, an agent and a run with `--json`
+or `--plain` have nobody to ask, so those items wait. The rest of the run carries on.
 
 **Fix:** run `kit apply` at a terminal. kit asks for the password once, as the run starts. To
 apply one step, name it, such as `kit apply fonts`.
@@ -70,8 +76,8 @@ apply one step, name it, such as `kit apply fonts`.
 The secrets step says `1Password wasn't approved, or couldn't read them`. Then it gives what
 1Password said, and how to have it answer.
 
-**Cause:** 1Password asks you to approve kit's first read of your secrets. kit waits up to 10
-minutes for that answer. If nobody approves in time, kit holds back the secrets it hasn't
+**Cause:** 1Password asks you to approve a read of your secrets once its last approval has
+lapsed. kit waits up to 10 minutes for that answer. If nobody approves in time, kit holds back the secrets it hasn't
 read until the next sync. Whatever waits on them waits too.
 
 **Fix:**
@@ -126,8 +132,11 @@ The next hourly run checks the grant.
 
 ## A linked file differs
 
+`kit apply` lists the file as waiting:
+
 ```text
-~/.zshrc · a file of its own, different from shared/home/.zshrc
+  ● Files and shell  all 2 done
+  │ ~/.zshrc · a file of its own, different from shared/home/.zshrc
 ```
 
 **Cause:** something replaced the link with a file of its own. An app that saves by writing a

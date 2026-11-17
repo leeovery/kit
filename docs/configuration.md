@@ -52,7 +52,8 @@ description = "Mac Studio"
 from = "laptop"
 ```
 
-kit refuses a setting it doesn't know, so a typo shows as an error.
+kit refuses a setting it doesn't know, so a typo shows as an error. kit.toml needs at least
+one `[macs.<name>]` table.
 
 | Field | Meaning |
 |---|---|
@@ -74,12 +75,13 @@ as `laptop`. A Mac can't be called `shared`. `kit machine add` writes the table 
 |---|---|
 | `description` | What the Mac is, such as `"Mac Studio"` |
 | `from` | The Mac this one started as a copy of |
-| `host_key` | Its SSH host key: kit apply records it |
-| `local_hostname` | Its name on the local network: kit apply records it |
+| `host_key` | Its SSH host key: `kit apply` records it |
+| `local_hostname` | Its name on the local network: `kit apply` records it |
 
-`from` names the Mac that the [data restore](your-data.md) copies from. kit apply records
-`host_key` and `local_hostname` on a Mac with Remote Login on. A Mac restored from it uses
-them to find it and trust it.
+`from` names the Mac that the [data restore](your-data.md) copies from. A `from` that names
+no Mac in kit.toml counts for nothing. `kit apply` records `host_key` and `local_hostname` on
+a Mac with the `remote-login` feature on. A Mac restored from it uses them to find it and
+trust it.
 
 ## The declarations file
 
@@ -100,15 +102,19 @@ com.apple.dock tilesize -int 60
 - **Comments directly above a line**, with no blank line between, belong to that line. kit
   moves them with it when it sorts.
 - **Comments before the first section** are fine. Any other line there is an error.
-- **A section appears once a file.** A thing goes in the shared file or a Mac file, not both.
+- **A header appears once a file.** `[homebrew formulae]` and
+  `[homebrew formulae --secret NAME]` are two headers, so a file may hold both.
+- **A thing is declared once,** in the shared file or a Mac file, not both.
 
-kit keeps the lists of packages and settings sorted. `[paths]`, the commands, the jobs and
-the steps keep the order you wrote. A kind is looked after only while a file has its section,
+kit keeps the sections of packages and settings sorted, all but `[claude mcp]`. The others
+keep the order you wrote. kit puts a new line in `[paths]` or `[restore]` last, and a new line
+anywhere else in its place by name. A kind is looked after only while a file has its section,
 even an empty one.
 
 ### The sections
 
-These are the sections, in the order kit writes them. A command adds each line for you.
+These are the sections, in the order kit writes them. A command adds each line for you,
+though the ordering options on a `[manual]` line are written by hand.
 
 | Section | A line holds | Command |
 |---|---|---|
@@ -143,12 +149,11 @@ The four `[prefs …]` sections belong to apps' settings, which get a
 A few sections take more after the header:
 
 - **`[claude mcp ~/Code/site]`** holds servers for one project folder.
-- **`[secrets op://vault/item]`** holds secrets kept in one item. Each line gives only the
-  field, such as `GitHub/token`. `--as tokens` after the item names the block, for
-  `kit secret add --in tokens`.
-- **Under a `[manual]` line**, indented lines are what to do, in order.
+- **`[secrets op://vault/item]`** holds secrets kept in one item. Each line still starts with
+  what it fills, but gives only the field, such as `API_TOKEN GitHub/token`. `--as tokens`
+  after the item names the block, for `kit secret add --in tokens`.
 
-### Sections held for a secret
+### Held sections
 
 A section of packages can hold its lines back until something is in place. The header says
 what for:
@@ -166,8 +171,8 @@ firefox-helper
 | `--secret NAME` | The secret that fills `NAME` to sync |
 | `--after step` | A step, or a thing such as `cask:firefox` |
 
-The package sections take both, each as often as you like, but `[claude mcp]` takes neither. `[features]` takes `--after` only.
-No other section takes either. A secret is named by what it fills: an environment
+The package sections take both, each as often as you like, but `[claude mcp]` takes neither.
+`[features]` takes `--after` only. No other section takes either. A secret is named by what it fills: an environment
 variable, or a file path from `~` or `/`. [Secrets from 1Password](secrets.md) says when a
 private tap needs a section like this.
 
@@ -188,12 +193,16 @@ app-store "Sign in to the App Store" --before mas
 |---|---|
 | `--after` | Wait for a step, or a thing such as `cask:firefox` |
 | `--before` | Come before a step |
-| `--secret` | Wait for a secret, and run with it set (`[steps]`) |
+| `--secret` | Wait for a secret; a variable is set for the script (`[steps]`) |
 | `--sudo` | Needs an administrator's password (`[steps]`) |
+| `--group` | The group a step by hand is in (`[manual]`) |
 
-`--after`, `--before` and `--secret` may each appear as often as you like. A `[manual]` line
-may also end with `--test` and a command that says whether it's done.
-[Steps of your own](steps.md) covers both kinds of step.
+`--after`, `--before` and `--secret` may each appear as often as you like. `kit manual add`
+writes no `--after` or `--before`: add those to a `[manual]` line by hand.
+
+A `[manual]` line may also end with `--test` and a command that says whether it's done.
+Indented lines under it are what to do, in order. A step of your own keeps its `run` script in
+`<mac>/steps/<name>/`. [Steps](steps.md) covers both kinds of step.
 
 ## The home folders
 
@@ -215,7 +224,7 @@ kit looks for kit-config in the first of these that's set:
 | If | kit-config is at |
 |---|---|
 | `KIT_CONFIG` is set | That folder, an absolute path |
-| `XDG_CONFIG_HOME` is set | `$XDG_CONFIG_HOME/kit` |
+| `XDG_CONFIG_HOME` is an absolute path | `$XDG_CONFIG_HOME/kit` |
 | Neither | `~/.config/kit` |
 
 A relative `KIT_CONFIG` is an error. On a new Mac, the boot clones kit-config into place for
@@ -225,9 +234,12 @@ you. If kit finds no `kit.toml` there, it stops: see [Troubleshooting](troublesh
 
 kit-config names your Macs, your apps and where your secrets are kept, so it must never be
 public. The boot reads it from GitHub, and refuses one that's public. `kit status` checks it on
-every run, and shows `kit-config  private` under CONFIG once GitHub says so. kit proves a
-repository private only on github.com. If kit-config is public, or kit can't prove it private,
-`kit status` says so and gives the command that fixes it.
+every run, and shows `kit-config  private` under CONFIG once GitHub says so.
+
+| If kit-config is | `kit status` |
+|---|---|
+| Public on GitHub | Says so, with the `gh repo edit` command that fixes it |
+| Not at a github.com URL kit reads | Can't prove it private, and lists the URL forms it reads |
 
 ## Related
 

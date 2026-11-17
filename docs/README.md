@@ -5,8 +5,9 @@ question. Start with the first group, then go to the page for the job in front o
 
 ## Start here
 
-- [Your first kit-config](first-config.md) (coming): how to start a kit-config of your own.
 - [A new Mac from one line](new-mac.md): what the boot does, and what waits for what.
+- [Install kit](../README.md): the install line, and a quick start.
+- [Your first kit-config](first-config.md) (coming): how to start a kit-config of your own.
 - [Glossary](glossary.md): the words kit uses, each defined once.
 
 ## What kit does for you
