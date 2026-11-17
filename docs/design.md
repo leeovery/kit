@@ -764,9 +764,9 @@ whichever kit applies, so a lasting build of kit's own, as install.sh's `KIT_FRO
 `~/.local/bin`, names the kit on PATH, not itself; with no kit on PATH, the kit applying. It
 comes after Homebrew's formulae, however they went, and finds the kit then, so a first apply
 from such a build names Homebrew's kit, installed earlier in the run. A build that won't last
-(`go run`'s, a worktree's, a build in a temporary folder) names none, as applying would rebuild
-kit.app from its files and lose kit.app's Full Disk Access: it leaves the agent as it stands,
-its check looking at the kit the agent names, and `kit apply` saying why it left it. Its check:
+(`go run`'s, a worktree's, a build in a temporary folder) names none, so the hourly run never
+runs a kit that may be gone: it leaves the agent as it stands, its check looking at the kit the
+agent names, and `kit apply` saying why it left it. Its check:
 the agent says that, for the kit and kit.app, the kit it names is there, kit.app is built from this
 kit's files, and launchd has it loaded (`launchctl print gui/<uid>/…`); `kit apply` builds
 kit.app, writes the agent, loads it (`launchctl bootstrap`, after `bootout` when it was loaded

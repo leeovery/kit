@@ -36,12 +36,12 @@ var bootPath = []string{"/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/local/b
 
 func newBootstrapCommand(a *app) *cobra.Command {
 	var mac, repo string
-	var handedOver, carryingOn bool
+	var handedOver bool
 	cmd := &cobra.Command{
 		Use:   "bootstrap",
 		Short: "Set up a new Mac, from nothing: the install script runs it",
-		Long: `Set up a new Mac, from nothing: the install script runs it, and running it
-again carries on where it stopped.
+		Long: `Set up a new Mac, from nothing: the install script runs it, and pasting the
+install line into Terminal again carries on where it stopped.
 
 It signs in to GitHub on your phone, asks which of your Macs this is and for
 the password once, then installs the rest without you: Homebrew, kit itself
@@ -52,13 +52,15 @@ shell. Run from a build of kit's own (KIT_FROM, to the install script), it
 installs no kit, and carries on with that build.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			carryingOn := handedOver && a.Getenv(carryOn) != ""
 			kit, err := a.bootstrap(cmd.Context(), mac, repo, handedOver, carryingOn)
 			if kit != "" {
 				// Once the boot has closed what it opened, as becoming another
-				// program runs no deferred call.
-				return a.Become(kit, []string{"bootstrap", "--" + carryOn})
+				// program runs no deferred call. Handed over, as a kit before
+				// carryOn knows, which then only leaves a shell in a shell.
+				return a.Become(kit, []string{"bootstrap", "--handed-over"}, []string{carryOn + "=1"})
 			}
-			if !handedOver || a.Shell == nil {
+			if !handedOver || carryingOn || a.Shell == nil {
 				return err
 			}
 			// Handed over, kit is the terminal's own command: it becomes the
@@ -75,18 +77,19 @@ installs no kit, and carries on with that build.`,
 	cmd.Flags().StringVar(&repo, "config", "", "your config repository on GitHub, as owner/name: yours named kit-config, unless given")
 	cmd.Flags().BoolVar(&handedOver, "handed-over", false, "started by the boot in Terminal, in the terminal it hands over to")
 	_ = cmd.Flags().MarkHidden("handed-over")
-	cmd.Flags().BoolVar(&carryingOn, carryOn, false, "started by the boot in the terminal kit.toml names, carrying on there as Homebrew's kit")
-	_ = cmd.Flags().MarkHidden(carryOn)
 	return cmd
 }
 
-// carryOn is the flag the boot, in the terminal kit.toml names already,
-// starts Homebrew's kit with, to carry on there as it.
-const carryOn = "carry-on"
+// carryOn is the variable the boot, in the terminal kit.toml names already,
+// sets for Homebrew's kit, handed over to in that same terminal, to carry
+// on there as it: it ends, the terminal not its own, rather than become the
+// login shell.
+const carryOn = "KIT_CARRY_ON"
 
-// bootstrap runs the boot: handed over to, or carrying on, the boot in the
-// terminal kit.toml names. It returns the kit to carry on as, when the boot,
-// there already, isn't that kit: "" when it has carried on itself.
+// bootstrap runs the boot: handed over to, or carrying on (carryOn), the
+// boot in the terminal kit.toml names. It returns the kit to carry on as,
+// when the boot, there already, isn't that kit: "" when it has carried on
+// itself.
 func (a *app) bootstrap(ctx context.Context, mac, repo string, handedOver, carryingOn bool) (string, error) {
 	dirs, err := a.dirs()
 	if err != nil {
@@ -96,17 +99,17 @@ func (a *app) bootstrap(ctx context.Context, mac, repo string, handedOver, carry
 	if err != nil {
 		return "", fmt.Errorf("find the home directory: %w", err)
 	}
-	if handedOver || carryingOn {
+	if handedOver {
 		b := &boot.Boot{
 			GitHub: boot.NewGitHub(&http.Client{Timeout: time.Minute}), Now: a.Now, Ask: &plainAsker{},
 			State: dirs.State, Data: dirs.Data, Config: dirs.Config, Kinds: kinds.Sections(), Repo: repo, Mac: mac, Getenv: a.Getenv,
-			Home: home, Applications: "/Applications", SudoLocal: a.SudoLocal, HandedOver: true,
+			Home: home, Applications: "/Applications", SudoLocal: a.SudoLocal, Version: a.Version, HandedOver: true,
 		}
 		// Handed over, kit says so at once: the boot in Terminal is waiting.
 		if err := b.Arrive(); err != nil {
 			return "", err
 		}
-		return "", a.inTerminal(ctx, b, handedOver)
+		return "", a.inTerminal(ctx, b, !carryingOn)
 	}
 	now := a.Now()
 	log, err := logs.Open(dirs.Logs, now, "bootstrap", a.verbose)
@@ -135,7 +138,7 @@ func (a *app) bootstrap(ctx context.Context, mac, repo string, handedOver, carry
 	// What the boot runs asks it for the password through sudo (askpass):
 	// given once, in the password's row, it's kept for the run, and asked
 	// again only if sudo wants it again.
-	self, err := os.Executable()
+	self, err := a.Self()
 	if err != nil {
 		_ = face.Close()
 		return "", fmt.Errorf("find kit: %w", err)
@@ -158,7 +161,7 @@ func (a *app) bootstrap(ctx context.Context, mac, repo string, handedOver, carry
 	b := &boot.Boot{
 		Run: observed, Sink: sink, Ask: asker, GitHub: boot.NewGitHub(&http.Client{Timeout: time.Minute}), Now: a.Now,
 		State: dirs.State, Data: dirs.Data, Config: dirs.Config, Kinds: kinds.Sections(), Repo: repo, Mac: mac, Getenv: a.Getenv,
-		Home: home, Applications: "/Applications", SudoLocal: a.SudoLocal, Self: self, HandedOver: handedOver,
+		Home: home, Applications: "/Applications", SudoLocal: a.SudoLocal, Self: self, Version: a.Version,
 	}
 	if asks != nil {
 		b.Keep = asks.Keep
@@ -233,24 +236,13 @@ func (a *app) bootstrap(ctx context.Context, mac, repo string, handedOver, carry
 		// Run in the terminal kit.toml names, the boot carries on in it, as
 		// it would have, handed over to: as Homebrew's kit, unless it's that
 		// kit, or a build of kit's own.
-		kit, err := b.CarriesOnAs(ctx)
-		if err != nil || !sameFile(kit, self) {
+		kit, err := b.Becomes(ctx, self)
+		if err != nil || kit != "" {
 			return kit, err
 		}
 		return "", a.inTerminal(ctx, b, false)
 	}
 	return "", nil
-}
-
-// sameFile reports whether a and b are one file, links followed, as
-// Homebrew's kit is a link to its version's.
-func sameFile(a, b string) bool {
-	ai, err := os.Stat(a)
-	if err != nil {
-		return false
-	}
-	bi, err := os.Stat(b)
-	return err == nil && os.SameFile(ai, bi)
 }
 
 // inTerminal is the boot in the terminal kit.toml names, carrying on there:
@@ -435,12 +427,12 @@ func (*plainAsker) Name(_ context.Context, step, _ string) (string, error) {
 
 // Secret fails: a password is typed at a terminal.
 func (*plainAsker) Secret(_ context.Context, step, _ string) (string, error) {
-	return "", fmt.Errorf("%w: the password is asked at a terminal (the %s step): run kit bootstrap in Terminal", errNoTerminal, step)
+	return "", fmt.Errorf("%w: the password is asked at a terminal (the %s step): paste the install line into Terminal", errNoTerminal, step)
 }
 
 // Wait fails, saying what there's to do.
 func (*plainAsker) Wait(_ context.Context, step, _, todo string, _ []boot.Key) (string, error) {
-	return "", fmt.Errorf("%w: %s, then run kit bootstrap again (the %s step)", errNoTerminal, strings.TrimSuffix(todo, ", then press enter"), step)
+	return "", fmt.Errorf("%w: %s, then paste the install line into Terminal again (the %s step)", errNoTerminal, strings.TrimSuffix(todo, ", then press enter"), step)
 }
 
 // Pick takes the first of keys, the first time a step asks: without a

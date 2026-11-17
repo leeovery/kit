@@ -90,10 +90,8 @@ type world struct {
 	// pick picks from a list kit shows at a terminal, as its lines read,
 	// plain: the value of the line picked.
 	pick func(lines []ask.Line) (string, error)
-	// became is each command kit became, as its arguments, and becameKits
-	// the kit each ran.
-	became     [][]string
-	becameKits []string
+	// became is each command kit became, as its arguments.
+	became [][]string
 	// shell, when set, is kit becoming the login shell.
 	shell func() error
 	// ended are the waits of a step by hand's card that end at once (after).
@@ -283,8 +281,7 @@ func (w *world) run(t *testing.T, args ...string) (stdout, stderr string, status
 			}
 			return w.pick(lines)
 		},
-		Become: func(kit string, args []string) error {
-			w.becameKits = append(w.becameKits, kit)
+		Become: func(_ string, args, _ []string) error {
 			w.became = append(w.became, args)
 			return nil
 		},

@@ -80,6 +80,27 @@ func TestLoadRefuses(t *testing.T) {
 	}
 }
 
+// A release is older than a later one; a version that isn't a release's,
+// either side, is never older.
+func TestOlder(t *testing.T) {
+	for _, tt := range []struct {
+		version, than string
+		want          bool
+	}{
+		{"0.1.0", "0.2.0", true},
+		{"v0.9.9", "0.10.0", true},
+		{"0.2.0", "0.2.0", false},
+		{"0.2.1", "0.2.0", false},
+		{"dev", "0.2.0", false},
+		{"0.1.0", "dev", false},
+		{"0.1.0", "0.2.0-rc.1", false},
+	} {
+		if got := config.Older(tt.version, tt.than); got != tt.want {
+			t.Errorf("Older(%q, %q) = %v, want %v", tt.version, tt.than, got, tt.want)
+		}
+	}
+}
+
 func TestSupports(t *testing.T) {
 	tests := []struct {
 		minimum string

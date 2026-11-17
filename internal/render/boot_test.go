@@ -81,7 +81,7 @@ func TestBootFace(t *testing.T) {
 		t.Errorf("chose %d; want studio", i)
 	}
 	f.Emit(event.StepFinished{Time: now, Step: "mac", Result: check.Result{State: check.OK, Summary: "studio"}})
-	f.Emit(event.StepFinished{Time: now, Step: "password", Result: check.Result{State: check.Failed, Reason: "sudo refused the password: run kit bootstrap again"}})
+	f.Emit(event.StepFinished{Time: now, Step: "password", Result: check.Result{State: check.Failed, Reason: "sudo refused the password: paste the install line into Terminal again"}})
 	f.Emit(event.StepStarted{Time: now, Step: "homebrew"})
 	f.Emit(event.Doing{Time: now, Step: "homebrew", Says: "installing"})
 	f.Emit(event.Output{Time: now, Step: "homebrew", Line: "==> Installing Command Line Tools"})
@@ -134,7 +134,7 @@ func TestBootFaceNeedsYou(t *testing.T) {
 	}
 	f.Emit(event.StepFinished{Time: at, Step: "password", Result: check.Result{State: check.OK, Summary: "Touch ID on for sudo"}, Duration: 12 * time.Second})
 	ok("homebrew", "7.0.9 · Xcode tools 27.0", 6*time.Minute+2*time.Second)
-	ok("kit", "installed through Homebrew", 21*time.Second)
+	ok("kit", "0.1.1 · through Homebrew", 21*time.Second)
 	ok("apps", "Ghostty 1.3.1 · 1Password 8.12.40", 98*time.Second)
 	ok("kit-config", "cloned · 61 files linked", 6*time.Second)
 	f.Emit(event.StepStarted{Time: at, Step: "full-disk-access"})

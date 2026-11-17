@@ -30,9 +30,9 @@ func TestBootstrapHandedOverIsApply(t *testing.T) {
 	}
 }
 
-// Carrying on as Homebrew's kit, in the terminal the boot was in already,
-// kit bootstrap runs as handed over to, then ends, for the install script
-// to remove its download: it never becomes the login shell.
+// Carrying on as Homebrew's kit, in the terminal the boot was in already
+// (KIT_CARRY_ON), kit bootstrap runs as handed over to, then ends, for the
+// install script to remove its download: it never becomes the login shell.
 func TestBootstrapCarryingOnEnds(t *testing.T) {
 	w := missingWorld(t)
 	w.write(t, filepath.Join(".config", "kit", "kit.toml"), strings.Replace(twoMacs, "primary = \"laptop\"\n", "primary = \"laptop\"\nterminal = \"ghostty\"\n", 1))
@@ -45,13 +45,15 @@ func TestBootstrapCarryingOnEnds(t *testing.T) {
 	f.On("brew", "update", "--quiet")
 	f.On("brew", "install", "--formula", "ripgrep")
 
-	out, errOut, _ := w.run(t, "bootstrap", "--carry-on")
+	w.env["KIT_CARRY_ON"] = "1"
+	out, errOut, _ := w.run(t, "bootstrap", "--handed-over")
 	if !strings.Contains(out, "brew installed ripgrep\n") {
-		t.Errorf("kit bootstrap --carry-on printed\n%s%s\nwant kit apply's run", out, errOut)
+		t.Errorf("kit bootstrap --handed-over, carrying on, printed\n%s%s\nwant kit apply's run", out, errOut)
 	}
 	if shells != 0 {
 		t.Error("became the login shell; want kit to end")
 	}
+	delete(w.env, "KIT_CARRY_ON")
 	w.run(t, "bootstrap", "--handed-over")
 	if shells != 1 {
 		t.Error("handed over to, didn't become the login shell")

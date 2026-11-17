@@ -181,7 +181,7 @@ func TestPasswordRefusedOrNotNeeded(t *testing.T) {
 	b, _ := newBoot(t, run, GitHub{}, &asker{secrets: []string{"a", "b", "c"}})
 	read(t, b, map[string]string{config.File: kitToml}, "laptop")
 	b.Keep = func(string) { t.Error("kept a password sudo refused") }
-	if err := b.passwordStep().Apply(context.Background(), check.Result{}); err == nil || err.Error() != "sudo refused the password: run kit bootstrap again" || b.Held() {
+	if err := b.passwordStep().Apply(context.Background(), check.Result{}); err == nil || err.Error() != "sudo refused the password: paste the install line into Terminal again" || b.Held() {
 		t.Errorf("apply = %v, held %v", err, b.Held())
 	}
 
@@ -246,12 +246,16 @@ func linkKit(t *testing.T, kit string) {
 
 // kit itself, installed through Homebrew by its formula's full name, which
 // taps its tap: done when Homebrew's kit is in Homebrew's bin, and nothing
-// run when it's there already.
+// kit itself, installed through Homebrew by its formula's full name, which
+// taps its tap: done when Homebrew's kit is in Homebrew's bin, saying its
+// version.
 func TestKit(t *testing.T) {
 	run := runnertest.New(t)
 	kit := homebrewAt(t, run)
 	run.On("brew", "install", "--formula", "leeovery/tools/kit").Does(func() { linkKit(t, kit) })
+	run.On(kit, "--version").Prints("kit version 0.2.0\n")
 	b, _ := newBoot(t, run, GitHub{}, &asker{})
+	b.Version = "0.2.0"
 	step := b.kitStep()
 	if res := step.Check(context.Background()); res.State != check.Attention || res.Summary != "not installed" {
 		t.Fatalf("check before = %+v", res)
@@ -259,7 +263,7 @@ func TestKit(t *testing.T) {
 	if err := step.Apply(context.Background(), check.Result{}); err != nil {
 		t.Fatalf("apply = %v", err)
 	}
-	if res := step.Check(context.Background()); res.State != check.OK || res.Summary != "installed through Homebrew" {
+	if res := step.Check(context.Background()); res.State != check.OK || res.Summary != "0.2.0 · through Homebrew" {
 		t.Errorf("check after = %+v", res)
 	}
 	if !slices.Contains(run.Calls(), "brew install --formula leeovery/tools/kit") {
@@ -267,13 +271,45 @@ func TestKit(t *testing.T) {
 	}
 }
 
-// Homebrew's kit there already, the step's done: the boot applies nothing.
+// Homebrew's kit there already is done, unless it's older than the boot's
+// own, a release's: then it's upgraded. A boot that isn't a release's, as a
+// build from source, compares none.
 func TestKitThereAlready(t *testing.T) {
-	run := runnertest.New(t)
-	linkKit(t, homebrewAt(t, run))
-	b, _ := newBoot(t, run, GitHub{}, &asker{})
-	if res := b.kitStep().Check(context.Background()); res.State != check.OK {
-		t.Errorf("check = %+v; want it done", res)
+	for _, tt := range []struct {
+		name, boot, homebrews string
+		want                  check.State
+	}{
+		{"the same", "0.2.0", "0.2.0", check.OK},
+		{"newer", "0.2.0", "0.2.1", check.OK},
+		{"older", "0.2.0", "0.1.0", check.Attention},
+		{"a boot from source", "dev", "0.1.0", check.OK},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			run := runnertest.New(t)
+			kit := homebrewAt(t, run)
+			linkKit(t, kit)
+			run.On(kit, "--version").Prints("kit version " + tt.homebrews + "\n").Then().Prints("kit version " + tt.boot + "\n")
+			run.On("brew", "upgrade", "--formula", "leeovery/tools/kit")
+			b, _ := newBoot(t, run, GitHub{}, &asker{})
+			b.Version = tt.boot
+			step := b.kitStep()
+			res := step.Check(context.Background())
+			if res.State != tt.want {
+				t.Fatalf("check = %+v; want %s", res, tt.want)
+			}
+			if res.State == check.OK {
+				return
+			}
+			if want := tt.homebrews + ", older than this kit, " + tt.boot; res.Summary != want {
+				t.Errorf("check says %q; want %q", res.Summary, want)
+			}
+			if err := step.Apply(context.Background(), res); err != nil || !slices.Contains(run.Calls(), "brew upgrade --formula leeovery/tools/kit") {
+				t.Errorf("apply = %v, ran %q; want kit's formula upgraded", err, run.Calls())
+			}
+			if res := step.Check(context.Background()); res.State != check.OK {
+				t.Errorf("check after = %+v", res)
+			}
+		})
 	}
 }
 
@@ -546,6 +582,53 @@ func TestCarriesOnAs(t *testing.T) {
 	if got, err := b.CarriesOnAs(context.Background()); err != nil || got != b.Self {
 		t.Errorf("CarriesOnAs(), a build of its own = %q, %v; want itself, %q", got, err, b.Self)
 	}
+}
+
+// In the terminal kit.toml names already, the boot becomes Homebrew's kit,
+// unless it's that kit, a link to it included, or a build of its own; brew
+// failing to say where it is fails.
+func TestBecomes(t *testing.T) {
+	for _, tt := range []struct {
+		name, from string
+		self       func(kit string) string
+		brewFails  bool
+		becomes    bool
+		fails      bool
+	}{
+		{name: "the download", self: func(string) string { return "/Users/someone/tmp/kit" }, becomes: true},
+		{name: "Homebrew's kit, through its link", self: func(kit string) string { return linkTo(t, kit) }},
+		{name: "a build of its own", from: "/Users/someone/kit", self: func(string) string { return "/Users/someone/.local/bin/kit" }},
+		{name: "brew failing", self: func(string) string { return "/Users/someone/tmp/kit" }, brewFails: true, fails: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			run := runnertest.New(t)
+			kit := homebrewAt(t, run)
+			linkKit(t, kit)
+			if tt.brewFails {
+				run.On("brew", "--prefix").Exits(1)
+			}
+			b, _ := newBoot(t, run, GitHub{}, &asker{})
+			b.Getenv = env(map[string]string{"KIT_FROM": tt.from})
+			got, err := b.Becomes(context.Background(), tt.self(kit))
+			want := ""
+			if tt.becomes {
+				want = kit
+			}
+			if got != want || (err != nil) != tt.fails {
+				t.Errorf("Becomes() = %q, %v; want %q, failing %v", got, err, want, tt.fails)
+			}
+		})
+	}
+}
+
+// linkTo makes a link to path, as Homebrew's bin holds, and returns it.
+func linkTo(t *testing.T, path string) string {
+	t.Helper()
+	link := filepath.Join(t.TempDir(), "kit")
+	if err := os.Symlink(path, link); err != nil {
+		t.Fatal(err)
+	}
+	return link
 }
 
 // A terminal that fails to open fails the hand-off, naming it.

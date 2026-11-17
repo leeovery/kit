@@ -175,7 +175,7 @@ func (b *Boot) givePassword(ctx context.Context) error {
 	case ctx.Err() != nil:
 		return ctx.Err()
 	case err != nil:
-		return errors.New("sudo refused the password: run kit bootstrap again")
+		return errors.New("sudo refused the password: paste the install line into Terminal again")
 	}
 	b.mu.Lock()
 	b.held = true
@@ -223,7 +223,7 @@ func (b *Boot) homebrewStep() engine.Step {
 		},
 		Apply: func(ctx context.Context, _ check.Result) error {
 			if !b.Held() {
-				return errors.New("needs this Mac's password: run kit bootstrap at a terminal")
+				return errors.New("needs this Mac's password: paste the install line into Terminal")
 			}
 			b.doing(HomebrewStep, "installing")
 			return brew.Install(ctx, b.Run)
@@ -264,25 +264,64 @@ func (b *Boot) CarriesOnAs(ctx context.Context) (string, error) {
 	return b.homebrewKit(ctx)
 }
 
+// Becomes is the kit the boot, running as self in the terminal kit.toml
+// names already, becomes to carry on there: Homebrew's, which it installed;
+// "" when it carries on itself, being that kit, or a build of its own.
+func (b *Boot) Becomes(ctx context.Context, self string) (string, error) {
+	if b.OwnBuild() {
+		return "", nil
+	}
+	kit, err := b.homebrewKit(ctx)
+	if err != nil || sameFile(kit, self) {
+		return "", err
+	}
+	return kit, nil
+}
+
+// sameFile reports whether a and b are one file, links followed, as
+// Homebrew's kit is a link to its version's.
+func sameFile(a, b string) bool {
+	ai, err := os.Stat(a)
+	if err != nil {
+		return false
+	}
+	bi, err := os.Stat(b)
+	return err == nil && os.SameFile(ai, bi)
+}
+
 // kitStep installs kit itself through Homebrew, which keeps it up to date,
-// for the boot to hand over to: done when Homebrew's kit is there.
+// for the boot to hand over to: done when Homebrew's kit is there, and no
+// older than the boot's own, as it may be on a boot run again, or with the
+// tap a release behind; a boot that isn't a release's compares none.
 func (b *Boot) kitStep() engine.Step {
 	return engine.Step{
 		Name: KitStep, Title: "kit",
 		Check: func(ctx context.Context) check.Result {
 			kit, err := b.homebrewKit(ctx)
-			switch {
-			case err != nil:
+			if err != nil {
 				return check.Result{State: check.Failed, Reason: err.Error()}
-			case !runner.Has(runner.Exec{}, kit):
+			}
+			if !runner.Has(runner.Exec{}, kit) {
 				return check.Result{State: check.Attention, Summary: "not installed"}
 			}
-			return check.Result{State: check.OK, Summary: "installed through Homebrew"}
+			res, err := b.Run.Run(ctx, runner.Command{Name: kit, Args: []string{"--version"}})
+			if err != nil {
+				return check.Result{State: check.Failed, Reason: fmt.Sprintf("read Homebrew's kit's version: %v", err)}
+			}
+			have := strings.TrimPrefix(strings.TrimSpace(string(res.Stdout)), "kit version ")
+			if config.Older(have, b.Version) {
+				return check.Result{State: check.Attention, Summary: fmt.Sprintf("%s, older than this kit, %s", have, b.Version)}
+			}
+			return check.Result{State: check.OK, Summary: have + " · through Homebrew"}
 		},
 		Apply: func(ctx context.Context, _ check.Result) error {
-			b.doing(KitStep, "installing")
-			if _, err := b.Run.Run(ctx, runner.Command{Name: "brew", Args: []string{"install", "--formula", kitFormula}, Timeout: 15 * time.Minute, SudoAsks: true}); err != nil {
-				return fmt.Errorf("install kit through Homebrew: %w", err)
+			verb, doing := "install", "installing"
+			if kit, err := b.homebrewKit(ctx); err == nil && runner.Has(runner.Exec{}, kit) {
+				verb, doing = "upgrade", "upgrading"
+			}
+			b.doing(KitStep, doing)
+			if _, err := b.Run.Run(ctx, runner.Command{Name: "brew", Args: []string{verb, "--formula", kitFormula}, Timeout: 15 * time.Minute, SudoAsks: true}); err != nil {
+				return fmt.Errorf("%s kit through Homebrew: %w", verb, err)
 			}
 			return nil
 		},
