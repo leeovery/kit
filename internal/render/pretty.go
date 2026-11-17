@@ -777,7 +777,7 @@ func (p *Pretty) drawSpinner() {
 		return
 	}
 	done, total := len(p.results), len(p.start.Steps)
-	text := "  " + mark + " " + look.Bar(done, len(p.running), total, look.Done) + "  " + look.Says(look.White(fmt.Sprintf("%d of %d", done, total)), look.Muted(doing(p.running)))
+	text := "  " + mark + " " + look.Bar(done, len(p.running), total, look.Done) + "  " + look.White(fmt.Sprintf("%d of %d", done, total))
 	lines := []string{text}
 	if !p.byArea() {
 		lines = look.Timeline("  ", p.width, p.runningRow(p.running[0], p.width))
@@ -1042,24 +1042,6 @@ func wasStopped(f event.StepFinished) bool {
 // without is running without step.
 func without(running []runningStep, step string) []runningStep {
 	return slices.DeleteFunc(slices.Clone(running), func(r runningStep) bool { return r.step == step })
-}
-
-// doing says what the steps running are doing, as in "applying Formulae ·
-// checking Casks, App Store".
-func doing(running []runningStep) string {
-	var kinds []string
-	titles := map[string][]string{}
-	for _, r := range running {
-		if _, ok := titles[r.doing]; !ok {
-			kinds = append(kinds, r.doing)
-		}
-		titles[r.doing] = append(titles[r.doing], r.title)
-	}
-	parts := make([]string, len(kinds))
-	for i, k := range kinds {
-		parts[i] = k + " " + strings.Join(titles[k], ", ")
-	}
-	return strings.Join(parts, " · ")
 }
 
 // driftStates say what a drift item is, briefly.
