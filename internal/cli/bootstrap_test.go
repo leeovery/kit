@@ -30,6 +30,34 @@ func TestBootstrapHandedOverIsApply(t *testing.T) {
 	}
 }
 
+// Carrying on as Homebrew's kit, in the terminal the boot was in already,
+// kit bootstrap runs as handed over to, then ends, for the install script
+// to remove its download: it never becomes the login shell.
+func TestBootstrapCarryingOnEnds(t *testing.T) {
+	w := missingWorld(t)
+	w.write(t, filepath.Join(".config", "kit", "kit.toml"), strings.Replace(twoMacs, "primary = \"laptop\"\n", "primary = \"laptop\"\nterminal = \"ghostty\"\n", 1))
+	w.env["TERM_PROGRAM"] = "ghostty"
+	shells := 0
+	w.shell = func() error { shells++; return nil }
+	f := w.fake
+	f.On("security", "find-generic-password", "-s", "kit-github", "-w").Exits(44)
+	f.On("gh", "auth", "token").Exits(1)
+	f.On("brew", "update", "--quiet")
+	f.On("brew", "install", "--formula", "ripgrep")
+
+	out, errOut, _ := w.run(t, "bootstrap", "--carry-on")
+	if !strings.Contains(out, "brew installed ripgrep\n") {
+		t.Errorf("kit bootstrap --carry-on printed\n%s%s\nwant kit apply's run", out, errOut)
+	}
+	if shells != 0 {
+		t.Error("became the login shell; want kit to end")
+	}
+	w.run(t, "bootstrap", "--handed-over")
+	if shells != 1 {
+		t.Error("handed over to, didn't become the login shell")
+	}
+}
+
 // A step by hand saying what it comes after and before is a step of its
 // own: due once the cask it's about is installed, and not done till its
 // command says so; one called as another step is, or placed before what

@@ -533,6 +533,21 @@ func TestHandOverToABuildOfItsOwn(t *testing.T) {
 	}
 }
 
+// In the terminal kit.toml names, the boot carries on as Homebrew's kit; or,
+// running a build of its own, as that build.
+func TestCarriesOnAs(t *testing.T) {
+	run := runnertest.New(t)
+	kit := homebrewAt(t, run)
+	b, _ := newBoot(t, run, GitHub{}, &asker{})
+	if got, err := b.CarriesOnAs(context.Background()); err != nil || got != kit {
+		t.Errorf("CarriesOnAs() = %q, %v; want Homebrew's kit, %q", got, err, kit)
+	}
+	b.Getenv = env(map[string]string{"KIT_FROM": "/Users/someone/kit"})
+	if got, err := b.CarriesOnAs(context.Background()); err != nil || got != b.Self {
+		t.Errorf("CarriesOnAs(), a build of its own = %q, %v; want itself, %q", got, err, b.Self)
+	}
+}
+
 // A terminal that fails to open fails the hand-off, naming it.
 func TestHandOverFails(t *testing.T) {
 	run := runnertest.New(t)

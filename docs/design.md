@@ -1145,8 +1145,9 @@ repository of its own, below.
 **11. The bootstrap — built.** `install.sh` and `kit bootstrap`: GitHub's sign-in on the
 phone, which Mac it is, Homebrew, kit itself through Homebrew (`leeovery/tools/kit`), the
 terminal the config names, then `kit apply`, from Homebrew's kit, on a screen of its own, with
-cards for what a person does by hand; proven from a blank Mac in a virtual machine. install.sh
-runs its download from a temporary folder, removed once the boot has handed over, so nothing's
+cards for what a person does by hand; proven from a blank Mac in a virtual machine. Run in that
+terminal already, the boot carries on there as Homebrew's kit, becoming it. install.sh runs its
+download from a temporary folder, removed once the boot has handed over or ended, so nothing's
 left but Homebrew's kit; a build of kit's own (`KIT_FROM`) goes in `~/.local/bin` and runs
 throughout, the boot installing no kit.
 

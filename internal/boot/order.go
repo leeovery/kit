@@ -253,6 +253,17 @@ func (b *Boot) homebrewKit(ctx context.Context) (string, error) {
 	return filepath.Join(strings.TrimSpace(string(res.Stdout)), "bin", "kit"), nil
 }
 
+// CarriesOnAs is the kit the boot carries on as in the terminal kit.toml
+// names, handed over to or there already: Homebrew's, which the boot
+// installed, so kit apply and all after run from it; or, running a build of
+// its own, that build (Self).
+func (b *Boot) CarriesOnAs(ctx context.Context) (string, error) {
+	if b.OwnBuild() {
+		return b.Self, nil
+	}
+	return b.homebrewKit(ctx)
+}
+
 // kitStep installs kit itself through Homebrew, which keeps it up to date,
 // for the boot to hand over to: done when Homebrew's kit is there.
 func (b *Boot) kitStep() engine.Step {
@@ -555,8 +566,7 @@ func (b *Boot) accessStep(t apps.Terminal) engine.Step {
 // handOverStep opens the terminal running kit bootstrap again, which
 // carries the boot on there, its window maximized for kit apply's screen:
 // done once that kit has arrived, or when this is it. The kit it runs is
-// Homebrew's, which the boot installed, so kit apply and all after run
-// from it; or, the boot running a build of its own, that build.
+// the one the boot carries on as (CarriesOnAs).
 func (b *Boot) handOverStep(t apps.Terminal) engine.Step {
 	return engine.Step{
 		Name: TerminalStep, Title: t.Title,
@@ -570,14 +580,13 @@ func (b *Boot) handOverStep(t apps.Terminal) engine.Step {
 			return check.Result{State: check.Attention, Summary: "not opened yet"}
 		},
 		Apply: func(ctx context.Context, _ check.Result) error {
-			kit, env := b.Self, []string{"SUDO_ASKPASS="}
+			kit, err := b.CarriesOnAs(ctx)
+			if err != nil {
+				return err
+			}
+			env := []string{"SUDO_ASKPASS="}
 			if b.OwnBuild() {
 				env = append(env, "KIT_FROM="+b.Getenv("KIT_FROM"))
-			} else {
-				var err error
-				if kit, err = b.homebrewKit(ctx); err != nil {
-					return err
-				}
 			}
 			// The terminal takes on the environment it's opened with: not this
 			// run's askpass, which ends with it; and the build of its own the
