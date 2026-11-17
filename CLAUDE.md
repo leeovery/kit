@@ -191,8 +191,9 @@ About 700 words, in this order:
    under `## Why kit?`.
 2. **Benefits,** six at most: a bold benefit of six words or fewer, one specific sentence, and a
    link to its page. The smaller pages go in one line of links under them.
-3. **Screens:** a grid of stills, each captioned with the one thing it answers, each linking to
-   its page.
+3. **Screens:** a grid of stills recorded from kit's real screens (tapes in `demo/`, VHS,
+   `art/*.webp`, as Switchboard and Portal make theirs), each captioned with the one thing it
+   answers, each linking to its page. Never a code block or a mock-up of a screen kit draws.
 4. **Install:** one line of requirements, the commands, one line on removing kit.
 5. **Quick start:** two to four commands, a comment above each.
 6. **Questions:** four or five one-line answers to readers' objections, each linking to a page.
