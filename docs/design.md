@@ -109,7 +109,9 @@ those comments, as nothing written by hand goes without being asked.
   setting's domain: the first look takes their values; a setting changed since, not
   declared, and not one macOS changes by itself (a list in kit: window frames, recent
   items, timestamps, the Dock's apps) is extra, and reconcile adopts it or puts it back as
-  it was (a dict whose entries are declared is watched entry by entry).
+  it was (a dict whose entries are declared is watched entry by entry). One removed since is
+  removed: reconcile's `--adopt` accepts it gone, kit forgetting its value and declaring
+  nothing, or `--revert` puts it back.
 - **A kind's program:** while it isn't installed, a kind in the run is deferred, saying what
   it needs, or, with nothing declared, fine.
   Where a kind's command comes from isn't kit's to know: while kit applies (not `kit
@@ -264,7 +266,7 @@ a value given in full, outside the items' blocks, is left where it is.
 **Steps by hand** go in a `[manual]` section, a line each: a name, what to do in quotes, then
 `--after` and `--before` (as on any line), `--group <name>` (the group it's in, one word or
 quoted, at most once), and `--test` and a command saying whether it's done (exit 0: done), the
-rest of the line, as in `tool "Install the tool from its site" --test test -d
+rest of the line, which can't hold kit's own options (they go before `--test`), as in `tool "Install the tool from its site" --test test -d
 /Applications/Tool.app`. The comment lines directly above it, no blank line between, are its
 notes: why it's there, one paragraph. The lines indented under it are its steps, one each, in
 order, which kit keeps with it, notes and all; a step ending with a colon heads the steps after

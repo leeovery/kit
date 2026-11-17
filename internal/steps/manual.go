@@ -67,6 +67,7 @@ func (m ManualStep) Ordered() bool { return len(m.Before) > 0 }
 // --after and --before, each as often as wanted, --group and the group
 // it's in, and --test, then the rest of the line, the command saying
 // whether it's done (exit 0: done), a word starting ~/ starting at home.
+// The command can't hold one of those options, which it would swallow.
 // Its why and its steps are the entry's notes and steps.
 func ParseManual(home string, e config.Entry) (ManualStep, error) {
 	m := ManualStep{Name: e.Name, Why: e.Notes, Steps: e.Steps, Pos: e.Pos()}
@@ -101,6 +102,9 @@ func ParseManual(home string, e config.Entry) (ManualStep, error) {
 			if cmd = words[i+1:]; len(cmd) == 0 {
 				return m, errors.New("--test needs the command saying whether it's done after it")
 			}
+			if j := slices.IndexFunc(cmd, isManualOption); j >= 0 {
+				return m, fmt.Errorf("%s can't be in --test's command: kit's options go before --test, its command last", cmd[j])
+			}
 		default:
 			return m, fmt.Errorf("%q isn't one of a step by hand's options: --after, --before, --group and --test", w)
 		}
@@ -113,6 +117,11 @@ func ParseManual(home string, e config.Entry) (ManualStep, error) {
 	}
 	m.Command = &runner.Command{Name: cmd[0], Args: cmd[1:], Timeout: ownTimeout}
 	return m, nil
+}
+
+// isManualOption reports whether w is one of a step by hand's options.
+func isManualOption(w string) bool {
+	return slices.Contains([]string{"--after", "--before", "--group", "--test"}, w)
 }
 
 // groupOf is the group the --group at words[i] names, one word, quoted

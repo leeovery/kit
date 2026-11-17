@@ -118,3 +118,22 @@ func TestAStepByHandKitChecksItself(t *testing.T) {
 		t.Errorf("kit status printed\n%s", out)
 	}
 }
+
+// A step by hand's --test command can't hold kit's own options: kit status
+// says so of the line, and kit manual add refuses it, writing nothing.
+func TestAStepByHandsCommandHoldsNoOptions(t *testing.T) {
+	w := laptopWorld(t)
+	w.writeSection(t, "laptop", "manual", `tool "Install the tool" --test test -L ~/bin/tool --after brew`+"\n")
+	const said = "tool: --after can't be in --test's command: kit's options go before --test, its command last"
+	if out, _, _ := w.run(t, "status"); !strings.Contains(out, "manual failed laptop/declarations:") || !strings.Contains(out, said) {
+		t.Errorf("kit status printed\n%s\nwant %q", out, said)
+	}
+	w.writeSection(t, "laptop", "manual", "")
+	_, errOut, code := w.run(t, "manual", "add", "tool", "Install the tool", "--", "test", "-L", "~/bin/tool", "--after", "brew")
+	if code == 0 || !strings.Contains(errOut, "--after can't be in --test's command") {
+		t.Errorf("kit manual add printed %q, exit %d", errOut, code)
+	}
+	if got := w.readSection(t, "laptop", "manual"); got != "" {
+		t.Errorf("[manual] = %q; want nothing written", got)
+	}
+}
