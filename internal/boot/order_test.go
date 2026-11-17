@@ -57,8 +57,9 @@ func bundle(t *testing.T, b *Boot, name, version string) {
 <plist version="1.0"><dict><key>CFBundleShortVersionString</key><string>` + version + `</string></dict></plist>`})
 }
 
-// The boot order is planned from kit-config: kit itself after Homebrew,
-// unless the boot runs a build of its own; the apps kit.toml names, and,
+// The boot order is planned from kit-config: kit itself after kit-config's
+// files are linked, unless the boot runs a build of its own; the apps
+// kit.toml names, and,
 // with a terminal, Full Disk Access for it and the hand-off to it, each
 // step needing the one before.
 func TestOrder(t *testing.T) {
@@ -66,8 +67,8 @@ func TestOrder(t *testing.T) {
 		name, toml, from string
 		want             []string
 	}{
-		{"a terminal", appsToml, "", []string{"mac", "password", "homebrew", "kit", "apps", "kit-config", "full-disk-access", "terminal"}},
-		{"neither", kitToml, "", []string{"mac", "password", "homebrew", "kit", "kit-config"}},
+		{"a terminal", appsToml, "", []string{"mac", "password", "homebrew", "apps", "kit-config", "kit", "full-disk-access", "terminal"}},
+		{"neither", kitToml, "", []string{"mac", "password", "homebrew", "kit-config", "kit"}},
 		{"a build of its own", appsToml, "/Users/someone/kit", []string{"mac", "password", "homebrew", "apps", "kit-config", "full-disk-access", "terminal"}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {

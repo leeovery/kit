@@ -38,21 +38,24 @@ const (
 )
 
 // Order is the boot order, planned from the config repository signing in
-// read: this Mac; the password, once; Homebrew; kit itself, through
-// Homebrew, unless it runs a build of its own (OwnBuild); the apps kit.toml
-// names; kit-config, cloned, its files linked; then, with a terminal named,
-// Full Disk Access for it, and the hand-off to it. Each needs the one
-// before.
+// read: this Mac; the password, once; Homebrew; the apps kit.toml names;
+// kit-config, cloned, its files linked; kit itself, through Homebrew,
+// unless it runs a build of its own (OwnBuild); then, with a terminal
+// named, Full Disk Access for it, and the hand-off to it. Each needs the
+// one before. kit comes after kit-config's files are linked, as Homebrew,
+// installing it by its tap's name, writes that it trusts it into
+// ~/.homebrew/trust.json, which kit-config may link: written first, the
+// file would stand where the link belongs.
 func (b *Boot) Order() []engine.Step {
 	cfg := b.config()
 	order := []engine.Step{b.macStep(), b.passwordStep(), b.homebrewStep()}
-	if !b.OwnBuild() {
-		order = append(order, b.kitStep())
-	}
 	if wanted := b.apps(cfg); len(wanted) > 0 {
 		order = append(order, b.appsStep(wanted))
 	}
 	order = append(order, b.configStep())
+	if !b.OwnBuild() {
+		order = append(order, b.kitStep())
+	}
 	if t, ok := b.terminal(cfg); ok {
 		order = append(order, b.accessStep(t), b.handOverStep(t))
 	}

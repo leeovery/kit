@@ -39,7 +39,7 @@ func Rows() []string { return slices.Clone(applyRows) }
 // rowSteps are kit's own steps that don't say their row, by name, in each
 // row: a kind's step, and the steps it needs, say theirs (event.Step.Row).
 var rowSteps = map[string][]string{
-	rowThisMac: {"boot-github", "boot-mac", "boot-password", "boot-homebrew", "boot-kit", "boot-apps", "boot-kit-config",
+	rowThisMac: {"boot-github", "boot-mac", "boot-password", "boot-homebrew", "boot-apps", "boot-kit-config", "boot-kit",
 		"boot-full-disk-access", "boot-terminal", "disk", "memory", "load", "full-disk-access"},
 	rowFiles:    {"file", "path"},
 	rowSettings: {"touch-id-sudo", "remote-login", "file-sharing"},

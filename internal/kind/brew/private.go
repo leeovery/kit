@@ -42,7 +42,9 @@ func (c casks) NeedsSecret(ctx context.Context, name string) (kind.Need, error) 
 // other than Homebrew's own, by its full name, and any of its downloads
 // answers as a private one does (private): a formula's source, and its
 // bottle. A tap named that isn't added yet is added first, as brew info
-// can't describe what's in it, the Need's Undo taking it out again.
+// can't describe what's in it, the Need's Undo taking it out again; one
+// added already is updated first, once a run, as installing it is, since
+// brew info reads a tap as it was last fetched, which may not have it yet.
 func (h *Homebrew) needsToken(ctx context.Context, kindName, which, name string) (kind.Need, error) {
 	var need kind.Need
 	if _, ok := tapOf(name); ok {
@@ -52,6 +54,9 @@ func (h *Homebrew) needsToken(ctx context.Context, kindName, which, name string)
 		}
 		if err != nil {
 			return need, err
+		}
+		if len(added) == 0 {
+			h.updated(ctx)
 		}
 	}
 	full, downloads, err := h.downloads(ctx, which, name)

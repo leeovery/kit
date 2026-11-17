@@ -1143,13 +1143,15 @@ adding lines to `[checks]`, `[hourly]` and `[nightly]`; commands naming the kind
 repository of its own, below.
 
 **11. The bootstrap — built.** `install.sh` and `kit bootstrap`: GitHub's sign-in on the
-phone, which Mac it is, Homebrew, kit itself through Homebrew (`leeovery/tools/kit`), the
-terminal the config names, then `kit apply`, from Homebrew's kit, on a screen of its own, with
-cards for what a person does by hand; proven from a blank Mac in a virtual machine. Run in that
-terminal already, the boot carries on there as Homebrew's kit, becoming it. install.sh runs its
-download from a temporary folder, removed once the boot has handed over or ended, so nothing's
-left but Homebrew's kit; a build of kit's own (`KIT_FROM`) goes in `~/.local/bin` and runs
-throughout, the boot installing no kit.
+phone, which Mac it is, Homebrew, the terminal the config names, kit-config, then kit itself
+through Homebrew (`leeovery/tools/kit`) once kit-config's files are linked, as Homebrew writes
+its trust of a tap's formula into `~/.homebrew/trust.json`, which kit-config may link; then
+`kit apply`, from Homebrew's kit, on a screen of its own, with cards for what a person does by
+hand; proven from a blank Mac in a virtual machine. Run in that terminal already, the boot
+carries on there as Homebrew's kit, becoming it. install.sh runs its download from a temporary
+folder, removed once the boot has handed over or ended, so nothing's left but Homebrew's kit; a
+build of kit's own (`KIT_FROM`) goes in `~/.local/bin` and runs throughout, the boot installing
+no kit.
 
 **12. Data restore — built.** `[restore]`, copied from the Mac a new one starts from, over SSH
 and pinned to its host key, else from its backups; the boot its one trigger.

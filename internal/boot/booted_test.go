@@ -28,7 +28,7 @@ func TestBooted(t *testing.T) {
 			t.Errorf("%s needs %q, want the step before", s.Name, s.Needs)
 		}
 	}
-	want := []string{"boot-github", "boot-mac", "boot-password", "boot-homebrew", "boot-kit", "boot-apps", "boot-kit-config", "boot-full-disk-access", "boot-terminal"}
+	want := []string{"boot-github", "boot-mac", "boot-password", "boot-homebrew", "boot-apps", "boot-kit-config", "boot-kit", "boot-full-disk-access", "boot-terminal"}
 	if !slices.Equal(names, want) {
 		t.Errorf("Booted() = %q, want %q", names, want)
 	}

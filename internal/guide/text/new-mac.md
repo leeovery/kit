@@ -7,10 +7,10 @@ from now, by a person who may not be watching.
 
 One line pasted into Terminal downloads kit and runs `kit bootstrap`: it
 signs in to GitHub on the person's phone, asks which Mac this is and for
-the administrator's password once, then installs Homebrew, kit itself
-through Homebrew, the terminal kit.toml names and kit-config, and links its
-files. It carries on in that terminal with the whole of `kit apply`, from
-Homebrew's kit; the download is removed.
+the administrator's password once, then installs Homebrew, the terminal
+kit.toml names and kit-config, links its files, and installs kit itself
+through Homebrew. It carries on in that terminal with the whole of
+`kit apply`, from Homebrew's kit; the download is removed.
 
 So when `kit apply` starts: Homebrew, its kit and the terminal are there,
 gh is signed in to GitHub, kit-config is cloned and its files linked, and
