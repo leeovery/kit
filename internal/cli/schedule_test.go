@@ -133,6 +133,82 @@ func TestAnotherKitNamesTheKitOnPath(t *testing.T) {
 	}
 }
 
+// homebrewKit is where Homebrew links kit in the world, from the home, its
+// folder ahead of install.sh's copy (kitPath) on kit's PATH, as on a Mac.
+var homebrewKit = filepath.Join("homebrew", "bin", "kit")
+
+// withHomebrewFirst puts Homebrew's folder ahead of kitPath's on kit's PATH,
+// and has a Mac's first apply be from install.sh's copy, with no agent yet.
+func withHomebrewFirst(t *testing.T) *world {
+	t.Helper()
+	w := unscheduled(t)
+	w.writeSection(t, "shared", "paths", "~/homebrew/bin\n~/.local/bin\n")
+	w.fake.On("launchctl", "print", launchService).Exits(113).Then().Prints("loaded\n")
+	w.fake.On("launchctl", "bootstrap", strings.TrimSuffix(launchService, "/"+steps.LaunchLabel), filepath.Join(w.home, launchAgent))
+	return w
+}
+
+// installKit has the world's Homebrew link kit, as installing its formula
+// does.
+func (w *world) installKit(t *testing.T) {
+	t.Helper()
+	w.write(t, homebrewKit, "")
+	if err := os.Chmod(filepath.Join(w.home, homebrewKit), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// launchNamesHomebrewKit fails t unless the agent is written for Homebrew's
+// kit, and kit status hourly-launch agrees it's in place.
+func (w *world) launchNamesHomebrewKit(t *testing.T, out string) {
+	t.Helper()
+	if !strings.Contains(out, "hourly-launch ok hourly, through kit.app\n") {
+		t.Errorf("kit apply printed\n%s\nwant the hourly launch installed", out)
+	}
+	want, err := steps.LaunchAgent(filepath.Join(w.home, kitApp), filepath.Join(w.home, homebrewKit))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := w.read(t, launchAgent); got != string(want) {
+		t.Errorf("the agent =\n%s\nwant it running Homebrew's kit:\n%s", got, want)
+	}
+	if out, _, _ := w.run(t, "status", "hourly-launch"); !strings.Contains(out, "hourly-launch ok hourly, through kit.app\n") {
+		t.Errorf("kit status hourly-launch printed\n%s\nwant the launch in place, as apply wrote it", out)
+	}
+}
+
+// A new Mac's first apply runs from install.sh's copy, and installs kit's
+// formula: the launch, after the formulae, names Homebrew's kit.
+func TestFirstApplyNamesHomebrewsKit(t *testing.T) {
+	w := withHomebrewFirst(t)
+	w.writeSection(t, "laptop", "homebrew formulae", "go\nkit\n")
+	w.fake.On("brew", "info", "--json=v2", "--formula", "kit").Prints(`{"formulae": [{"name": "kit", "full_name": "kit", "aliases": [], "oldnames": []}], "casks": []}`)
+	w.fake.On("brew", "update", "--quiet")
+	w.fake.On("brew", "install", "--formula", "kit").Does(func() { w.installKit(t) })
+
+	out, errOut, _ := w.run(t, "apply", "brew", "hourly-launch")
+	if !slices.Contains(w.fake.Calls(), "brew install --formula kit") {
+		t.Fatalf("ran %q; want kit's formula installed\n%s%s", w.fake.Calls(), out, errOut)
+	}
+	w.launchNamesHomebrewKit(t, out)
+}
+
+// A formula failing to install fails the formulae, and never holds the
+// launch back: it comes after them, however they went.
+func TestAFailedFormulaLeavesTheLaunchToGoAhead(t *testing.T) {
+	w := withHomebrewFirst(t)
+	w.installKit(t)
+	w.writeSection(t, "laptop", "homebrew formulae", "go\nhello\n")
+	w.fake.On("brew", "update", "--quiet")
+	w.fake.On("brew", "install", "--formula", "hello").Exits(1).PrintsToStderr("Error: hello: failed to download")
+
+	out, _, _ := w.run(t, "apply", "brew", "hourly-launch")
+	if !strings.Contains(out, "brew failed") {
+		t.Errorf("kit apply printed\n%s\nwant the formulae failed", out)
+	}
+	w.launchNamesHomebrewKit(t, out)
+}
+
 // Only the hourly launch's runs record the hourly run: one by hand runs the
 // same, and never hides a launch that's stopped.
 func TestOnlyTheLaunchRecordsTheHourlyRun(t *testing.T) {

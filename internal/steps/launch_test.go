@@ -60,7 +60,7 @@ func homeWith(t *testing.T, kits ...string) string {
 func launching(home string, fake *runnertest.Fake, app *kitApp, kit string) steps.Launching {
 	return steps.Launching{
 		Run: fake, Dir: filepath.Join(home, "Library", "LaunchAgents"), Domain: "gui/501",
-		Kit: kit, App: app, StateDir: filepath.Join(home, "state"), Now: func() time.Time { return launchAt },
+		Kit: func() (string, string) { return kit, "" }, App: app, StateDir: filepath.Join(home, "state"), Now: func() time.Time { return launchAt },
 		Sleep: func(time.Duration) {},
 	}
 }
@@ -182,7 +182,8 @@ func TestHourlyLaunchInstalled(t *testing.T) {
 	if err := step.Apply(t.Context(), res); err != nil {
 		t.Fatal(err)
 	}
-	want, _ := steps.LaunchAgent(app.path, l.Kit)
+	kit, _ := l.Kit()
+	want, _ := steps.LaunchAgent(app.path, kit)
 	if got, err := os.ReadFile(agent); err != nil || string(got) != string(want) {
 		t.Errorf("the agent written = %q (%v), want LaunchAgent's", got, err)
 	}
@@ -318,7 +319,8 @@ func TestHourlyLaunchLeftWithNoKitToName(t *testing.T) {
 	home := homeWith(t, "bin/kit")
 	fake := runnertest.New(t)
 	l := launching(home, fake, &kitApp{path: "/Users/someone/.local/share/kit/kit.app", current: true, buildable: true}, "")
-	l.Why = "this kit, /tmp/kit, is a build that won't last: the hourly launch is left for the kit on kit's PATH"
+	why := "this kit, /tmp/kit, is a build that won't last: the hourly launch is left for the kit on kit's PATH"
+	l.Kit = func() (string, string) { return "", why }
 	writeAgent(t, l, filepath.Join(home, "bin/kit"))
 	fake.On("launchctl", "print", "gui/501/com.leeovery.kit.nightly")
 	step := steps.HourlyLaunch(l)
@@ -333,7 +335,7 @@ func TestHourlyLaunchLeftWithNoKitToName(t *testing.T) {
 	if res.Summary != "runs a kit that's gone ("+gone+")" {
 		t.Errorf("the agent naming a kit that's gone = %+v", res)
 	}
-	if err := step.Apply(t.Context(), res); !engine.IsNotYet(err) || err.Error() != l.Why {
+	if err := step.Apply(t.Context(), res); !engine.IsNotYet(err) || err.Error() != why {
 		t.Errorf("Apply() = %v, want it left, saying why", err)
 	}
 	if now, _ := os.ReadFile(agent); string(now) != string(written) || slices.Contains(fake.Calls(), "launchctl bootstrap") {

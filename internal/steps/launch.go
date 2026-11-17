@@ -42,11 +42,12 @@ type Launching struct {
 	// Dir is the user's LaunchAgents folder, and Domain launchd's for the
 	// user's agents, as in gui/501.
 	Dir, Domain string
-	// Kit is the kit the launch runs, as the person runs it (LaunchKit):
-	// "" when the kit running isn't one to name, Why saying why, and the
-	// launch is left as it stands.
-	Kit, Why string
-	App      App
+	// Kit finds the kit the launch runs, as the person runs it (LaunchKit):
+	// "" when there's none to name, why saying why, and the launch is left
+	// as it stands. It's asked as the step checks and applies, not before,
+	// as kit's formula can be installed earlier in the run.
+	Kit func() (kit, why string)
+	App App
 	// StateDir is kit's state, where the launch's loading is recorded.
 	StateDir string
 	Now      func() time.Time
@@ -132,8 +133,8 @@ const reloadWait = time.Second
 // kit's files, and loaded; applying builds kit.app, writes the agent and
 // loads it, loading it again when it's changed, and records when, so that
 // the check on the runs gives the first run its hour. With no kit to name
-// (Kit ""), the check looks at the agent as it stands, the kit it names,
-// and applying leaves it, saying why.
+// (Kit gives ""), the check looks at the agent as it stands, the kit it
+// names, and applying leaves it, saying why.
 func HourlyLaunch(l Launching) engine.Step {
 	file := filepath.Join(l.Dir, LaunchLabel+".plist")
 	service := l.Domain + "/" + LaunchLabel
@@ -153,7 +154,8 @@ func HourlyLaunch(l Launching) engine.Step {
 				return failed(err)
 			}
 			named := agentKit(have)
-			kit := cmp.Or(l.Kit, named)
+			found, _ := l.Kit()
+			kit := cmp.Or(found, named)
 			want, err := LaunchAgent(l.App.Path(), kit)
 			if err != nil {
 				return failed(err)
@@ -174,13 +176,14 @@ func HourlyLaunch(l Launching) engine.Step {
 			return check.Result{State: check.OK, Summary: "hourly, through kit.app"}
 		},
 		Apply: func(ctx context.Context, _ check.Result) error {
-			if l.Kit == "" {
-				return engine.NotYet(l.Why)
+			kit, why := l.Kit()
+			if kit == "" {
+				return engine.NotYet(why)
 			}
 			if !l.App.Ready(ctx) {
 				return engine.NotYet("kit.app isn't built: it needs Swift's compiler, from the command line tools; the next kit apply builds it")
 			}
-			want, err := LaunchAgent(l.App.Path(), l.Kit)
+			want, err := LaunchAgent(l.App.Path(), kit)
 			if err != nil {
 				return err
 			}

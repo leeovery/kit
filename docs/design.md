@@ -761,7 +761,9 @@ nothing reads how it ended: kit's run log has it). macOS holds kit.app responsib
 child, so Full Disk Access is kit.app's, kept across kit's updates as kit.app is rebuilt only
 when its own files change (the dotfiles' Nightly.app did the same). The agent names that kit
 whichever kit applies, so a build of kit's own, or install.sh's copy once Homebrew's kit is on
-PATH, names the kit on PATH, not itself. With no kit on PATH, it names the kit applying, unless
+PATH, names the kit on PATH, not itself. It comes after Homebrew's formulae, however they went,
+and finds the kit then, so a new Mac's first apply, from install.sh's copy, names Homebrew's kit
+installed earlier in the run. With no kit on PATH, it names the kit applying, unless
 that's a build that won't last (`go run`'s, a worktree's, a build in a temporary folder): then
 it leaves the agent as it stands, its check looking at the kit the agent names, and `kit apply`
 saying why it left it. Its check: the
