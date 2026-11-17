@@ -9,6 +9,7 @@ import (
 
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/config"
+	"github.com/leeovery/kit/internal/render"
 )
 
 // machineCommand names kit machine, which adds Macs to the config.
@@ -21,9 +22,10 @@ func newMachineCommand(a *app) *cobra.Command {
 		Annotations: map[string]string{brief: "this Mac's name"},
 		Long: `Show this Mac's name, or set it to one of the Macs kit.toml knows.
 
-kit reads a Mac's own files (brew.<name> and the rest) by this name, so it's
-settled before anything else. A replacement Mac can take the name of the one
-it replaces; a new one is added to the config with kit machine add.`,
+kit reads a Mac's own folder in kit-config (<name>/declarations, its steps
+and its files) by this name, so it's settled before anything else. A
+replacement Mac can take the name of the one it replaces; a new one is added
+to the config with kit machine add. --json gives the name as a document.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dirs, err := a.dirs()
@@ -93,8 +95,22 @@ func (a *app) showMachine(cmd *cobra.Command, dirs config.Dirs) error {
 		}
 		return fmt.Errorf("this Mac has no name yet: %s", hint)
 	}
+	if a.json {
+		return a.writeMachine(name, "")
+	}
 	_, err = fmt.Fprintln(cmd.OutOrStdout(), name)
 	return err
+}
+
+// writeMachine writes this Mac's name as kit machine --json's document,
+// with the name it had, was, when it's just been changed from one: "" for
+// none.
+func (a *app) writeMachine(name, was string) error {
+	return render.WriteJSON(a.Stdout, struct {
+		Schema  int    `json:"schema"`
+		Machine string `json:"machine"`
+		Was     string `json:"was,omitempty"`
+	}{briefSchema, name, was})
 }
 
 func (a *app) setMachine(cmd *cobra.Command, dirs config.Dirs, name string) error {
@@ -110,15 +126,21 @@ func (a *app) setMachine(cmd *cobra.Command, dirs config.Dirs, name string) erro
 		return err
 	}
 	if was == name {
+		if a.json {
+			return a.writeMachine(name, "")
+		}
 		_, err := fmt.Fprintf(cmd.OutOrStdout(), "this Mac is %s already\n", name)
 		return err
 	}
 	if err := config.WriteMachine(dirs.State, name); err != nil {
 		return err
 	}
-	if was == "" {
+	switch {
+	case a.json:
+		return a.writeMachine(name, was)
+	case was == "":
 		_, err = fmt.Fprintf(cmd.OutOrStdout(), "this Mac is %s\n", name)
-	} else {
+	default:
 		_, err = fmt.Fprintf(cmd.OutOrStdout(), "this Mac was %s; it's %s now\n", was, name)
 	}
 	return err

@@ -3,6 +3,7 @@ package config_test
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -421,7 +422,7 @@ func TestDeclareASecretOnce(t *testing.T) {
 	if got := readFile(t, cfg, "laptop/declarations"); got != before {
 		t.Errorf("laptop = %q, want it untouched", got)
 	}
-	if places, err := cfg.Places("secret", "laptop"); err != nil || len(places) != 1 || places[0] != (config.Place{Item: "op://vault/A", Scope: "laptop", Line: 1, Count: 1}) {
+	if places, err := cfg.Places("secret", "laptop"); err != nil || len(places) != 1 || !reflect.DeepEqual(places[0], config.Place{Item: "op://vault/A", Scope: "laptop", Line: 1, Count: 1, Shorts: []string{"a/b"}}) {
 		t.Errorf("Places() = %+v, %v", places, err)
 	}
 }

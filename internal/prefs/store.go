@@ -192,17 +192,32 @@ func (p *Prefs) push(ctx context.Context, repo gitrepo.Repo) string {
 	return ""
 }
 
+// Change is a capture that changed a Mac's folder, as History lists it: its
+// commit, when it was made and its message; and what it changed: in all, as
+// git's shortstat says it, or, in a domain's or a file's history, as a diff.
+type Change struct {
+	Commit  string    `json:"commit"`
+	Date    time.Time `json:"date"`
+	Message string    `json:"message"`
+	Changed string    `json:"changed"`
+}
+
+// ErrNoHistory is History finding no capture that changed what it was asked
+// about.
+var ErrNoHistory = errors.New("no history")
+
 // History is the captures that changed a Mac's folder, newest first, count
 // of them; or, for target (a domain, or a settings file's path from ~ or
-// /), its changes as diffs.
-func (p *Prefs) History(ctx context.Context, mac, target string, count int) (string, error) {
+// /), its changes, each with its diff.
+func (p *Prefs) History(ctx context.Context, mac, target string, count int) ([]Change, error) {
 	if mac == "" {
 		mac = p.Mac
 	}
 	if _, err := os.Stat(filepath.Join(p.Clone, ".git")); err != nil {
-		return "", errors.New("this Mac has no clone of the prefs repository yet: its first capture or restore makes one")
+		return nil, errors.New("this Mac has no clone of the prefs repository yet: its first capture or restore makes one")
 	}
-	format := []string{"log", "--no-color", "-n" + strconv.Itoa(count), "--date=format:%Y-%m-%d %H:%M", "--format=%h  %ad  %s"}
+	// Each change starts with a record separator, its fields apart by NULs.
+	format := []string{"log", "--no-color", "-n" + strconv.Itoa(count), "--format=%x1e%h%x00%aI%x00%s"}
 	path := mac
 	if target != "" {
 		path = filepath.Join(mac, "domains", target+".plist")
@@ -215,13 +230,30 @@ func (p *Prefs) History(ctx context.Context, mac, target string, count int) (str
 	}
 	res, err := p.git(ctx, slices.Concat(format, []string{"--", path})...)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	out := strings.TrimRight(string(res.Stdout), "\n")
-	if out == "" {
-		return "", fmt.Errorf("no history for %s", path)
+	var changes []Change
+	for _, logged := range strings.Split(string(res.Stdout), "\x1e")[1:] {
+		head, body, _ := strings.Cut(logged, "\n")
+		fields := strings.SplitN(head, "\x00", 3)
+		if len(fields) != 3 {
+			return nil, fmt.Errorf("git log said %q, not a commit, its date and its message", head)
+		}
+		date, err := time.Parse(time.RFC3339, fields[1])
+		if err != nil {
+			return nil, fmt.Errorf("git log's date for %s: %w", fields[0], err)
+		}
+		// A shortstat's line starts with a space; a diff's context lines do too.
+		changed := strings.Trim(body, "\n")
+		if target == "" {
+			changed = strings.TrimSpace(changed)
+		}
+		changes = append(changes, Change{Commit: fields[0], Date: date, Message: fields[2], Changed: changed})
 	}
-	return out, nil
+	if len(changes) == 0 {
+		return nil, fmt.Errorf("%w for %s", ErrNoHistory, path)
+	}
+	return changes, nil
 }
 
 // Snapshot is a Mac's folder as it was at when (any date git reads:

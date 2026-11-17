@@ -86,6 +86,12 @@ func TestStepsByHand(t *testing.T) {
 	if out, _, _ := w.run(t, "status"); !strings.Contains(out, "manual ok all 1 done\n") {
 		t.Errorf("after kit done, kit status printed\n%s", out)
 	}
+	if out, _, code := w.run(t, "manual", "done", "sign-in", "--undo", "--json"); code != 0 || compact(t, out) != `{"schema":1,"marked":["sign-in"],"done":false}` {
+		t.Errorf("kit manual done --undo --json printed %q, exit %d", out, code)
+	}
+	if out, _, code := w.run(t, "manual", "done", "sign-in", "--json"); code != 0 || compact(t, out) != `{"schema":1,"marked":["sign-in"],"done":true}` {
+		t.Errorf("kit manual done --json printed %q, exit %d", out, code)
+	}
 	if _, errOut, code := w.run(t, "manual", "done", "nothing"); code != 2 || !strings.Contains(errOut, "no step by hand named nothing") {
 		t.Errorf("kit manual done nothing printed %q, exit %d", errOut, code)
 	}

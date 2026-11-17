@@ -7,6 +7,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/leeovery/kit/internal/config"
+	"github.com/leeovery/kit/internal/render"
 	"github.com/leeovery/kit/internal/steps"
 )
 
@@ -36,6 +37,13 @@ itself, such as signing in somewhere. --undo marks them not done.`,
 			}
 			if err := steps.MarkDone(r.stateDir, names, r.now, undo); err != nil {
 				return err
+			}
+			if a.json {
+				return render.WriteJSON(a.Stdout, struct {
+					Schema int      `json:"schema"`
+					Marked []string `json:"marked"`
+					Done   bool     `json:"done"`
+				}{briefSchema, names, !undo})
 			}
 			verb := "done"
 			if undo {

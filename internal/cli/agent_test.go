@@ -24,9 +24,10 @@ func TestAgentOpensWithTheFacts(t *testing.T) {
 		"  repository  github.com:someone/kit-config.git\n" +
 		"  this Mac    laptop: its own lines and files in laptop/, every Mac's in shared/\n" +
 		"  Macs        laptop (MacBook Pro), studio (Mac Studio)\n" +
-		"  secrets     tokens: 1Password · op://vault/Item · shared · 2 secrets\n" +
+		"  secrets     tokens: 1Password · op://vault/Item · shared · 2 secrets ·\n" +
+		"              sections Other, Section\n" +
 		"              [secrets]: references in full · laptop · 1 secret\n" +
-		"              op://vault/Other: 1Password · laptop · 1 secret\n" +
+		"              op://vault/Other: 1Password · laptop · 1 secret · section Section\n" +
 		"  kit         0.1.0\n" +
 		"\n"
 	if code != 0 || !strings.HasPrefix(out, want) {
@@ -92,7 +93,7 @@ func TestAgentTopics(t *testing.T) {
 		}
 		return ""
 	}
-	const topics = "kit agent's topics are steps, secrets, packages, files, settings, prefs, new-mac and order"
+	const topics = "kit agent's topics are steps, secrets, packages, files, settings, prefs, new-mac, moving and order"
 	tests := []struct {
 		given, want, wrong string
 	}{
@@ -104,6 +105,7 @@ func TestAgentTopics(t *testing.T) {
 		{given: "set", want: topic("settings")},
 		{given: "pr", want: topic("prefs")},
 		{given: "new", want: topic("new-mac")},
+		{given: "m", want: topic("moving")},
 		{given: "s", wrong: "kit: s could be steps, secrets or settings: " + topics},
 		{given: "p", wrong: "kit: p could be packages or prefs: " + topics},
 		{given: "nosuch", wrong: "kit: no topic nosuch: " + topics},
@@ -124,15 +126,32 @@ func TestAgentTopics(t *testing.T) {
 }
 
 // kit agent, its topics and kit agent order print the text agents read,
-// and refuse --json, as a usage error, rather than print text in its place.
-func TestAgentRefusesJSON(t *testing.T) {
-	for _, args := range [][]string{{"agent"}, {"agent", "prefs"}, {"agent", "order", "alone"}} {
+// as kit's menu prints text, and help, however it's asked for; each refuses
+// --json, as a usage error, rather than print text in its place.
+func TestTextOnlyCommandsRefuseJSON(t *testing.T) {
+	for _, tt := range []struct {
+		args []string
+		says string
+	}{
+		{[]string{"agent"}, "kit agent prints text"},
+		{[]string{"agent", "prefs"}, "kit agent prefs prints text"},
+		{[]string{"agent", "order", "alone"}, "kit agent order prints text"},
+		{nil, "kit prints text"},
+		{[]string{"help"}, "kit's help prints text"},
+		{[]string{"help", "status"}, "kit status's help prints text"},
+		{[]string{"--help"}, "kit's help prints text"},
+		{[]string{"status", "--help"}, "kit status's help prints text"},
+		{[]string{"brew", "add", "--help"}, "kit brew add's help prints text"},
+		{[]string{"brew"}, "kit brew's help prints text"},
+		{[]string{"secret"}, "kit secret's help prints text"},
+		{[]string{"prefs"}, "kit prefs's help prints text"},
+	} {
 		w := laptopWorld(t)
 		w.writeSection(t, "laptop", "steps", `alone "stands alone"`+"\n")
-		out, errOut, code := w.run(t, append(args, "--json")...)
-		want := "kit: kit " + strings.Join(args[:min(len(args), 2)], " ") + " prints text; it takes no --json\n"
-		if code != 2 || out != "" || errOut != want {
-			t.Errorf("kit %s --json printed %q, %q, exit %d; want exit 2 and %q", strings.Join(args, " "), out, errOut, code, want)
+		out, errOut, code := w.run(t, append(tt.args, "--json")...)
+		want := "{\n  \"schema\": 1,\n  \"error\": \"" + tt.says + "; it takes no --json\",\n  \"exit\": 2\n}\n"
+		if code != 2 || out != want || errOut != "" {
+			t.Errorf("kit %s --json printed %q, %q, exit %d; want exit 2 and %q", strings.Join(tt.args, " "), out, errOut, code, want)
 		}
 	}
 }

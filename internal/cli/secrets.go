@@ -14,6 +14,7 @@ import (
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/kind/secret"
+	"github.com/leeovery/kit/internal/kind/secret/store"
 	"github.com/leeovery/kit/internal/look"
 	"github.com/leeovery/kit/internal/render"
 	"github.com/leeovery/kit/internal/steps"
@@ -42,12 +43,13 @@ Its value is typed, unshown, at a terminal; or comes on standard input
 in a section as Section/name); or is in a store already (--ref and where
 it's kept, in full: nothing is stored).
 
-A new value goes where you say, nowhere by default: --in and a block's name,
-as a block's header gives it ([secrets <item> --as <name>]), or --item and
-the item, in full. --field says where in the item, in its store's words.
-kit secret places lists the blocks. The line goes in this file's block for
-that item, which kit makes when there's none, going by the name --in gave.
-Then the value's read back and compared, declared and synced.
+A new value goes where you say: --in and a block's name, as a block's
+header gives it ([secrets <item> --as <name>]), or --item and the item, in
+full; told neither, in this file's block for an item when it has one alone.
+--field says where in the item, in its store's words. kit secret places
+lists the blocks. The line goes in this file's block for that item, which
+kit makes when there's none, going by the name --in gave. Then the value's
+read back and compared, declared and synced.
 
 A value in a store already (--ref) goes in this file's block for its item,
 short, when there's one, else in the plain [secrets], in full.
@@ -111,12 +113,13 @@ alone. Values are never printed or logged.`,
 	}
 	places := &cobra.Command{
 		Use:   "places",
-		Short: "List the blocks secrets are declared in: each one's name, store, item, file and count",
+		Short: "List the blocks secrets are declared in: each one's name, store, item, file, count and sections",
 		Long: `List the blocks secrets are declared in, in the shared file and this Mac's:
 each block's name, if its header gives it one (--as), its store, its item,
-its file, and how many secrets it holds. A new secret goes in one with kit
-secret add --in <name> or --item <item>. --json gives the same as one
-document.`,
+its file, how many secrets it holds, and the sections of its item its lines
+name, as kit-config has them, the store not asked. A new secret goes in one
+with kit secret add --in <name> or --item <item>, or, told neither, in its
+file's one block for an item. --json gives the same as one document.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return a.prepared(cmd, secretKind+" places", func(_ context.Context, r *run) error {
@@ -170,15 +173,16 @@ const placesSchema = 1
 // the name its header gives it, if any; its store and its item, none for
 // the plain [secrets], whose references are in full; whose declarations
 // declare it, shared or a Mac's, its file and its header's line; and how
-// many secrets it holds.
+// many secrets it holds; and the sections of its item they're in.
 type place struct {
-	Name    string `json:"name,omitempty"`
-	Store   string `json:"store,omitempty"`
-	Item    string `json:"item,omitempty"`
-	Scope   string `json:"scope"`
-	File    string `json:"file"`
-	Line    int    `json:"line"`
-	Secrets int    `json:"secrets"`
+	Name     string   `json:"name,omitempty"`
+	Store    string   `json:"store,omitempty"`
+	Item     string   `json:"item,omitempty"`
+	Scope    string   `json:"scope"`
+	File     string   `json:"file"`
+	Line     int      `json:"line"`
+	Secrets  int      `json:"secrets"`
+	Sections []string `json:"sections,omitempty"`
 }
 
 // secretPlaces lists the blocks secrets are declared in, for this Mac: as
@@ -222,9 +226,23 @@ func secretsPlaces(cfg *config.Config, machine string) ([]place, error) {
 		places[i] = place{Name: p.As, Item: p.Item, Scope: p.Scope, File: config.DeclFile(p.Scope), Line: p.Line, Secrets: p.Count}
 		if d, err := secret.ItemStore(p.Item); p.Item != "" && err == nil {
 			places[i].Store = d.About().Name
+			places[i].Sections = sectionsOf(d, p.Shorts)
 		}
 	}
 	return places, nil
+}
+
+// sectionsOf are the sections of its item that shorts, references short
+// for it, name, as d reads them: sorted, each once. d is asked nothing.
+func sectionsOf(d store.Driver, shorts []string) []string {
+	var sections []string
+	for _, short := range shorts {
+		if section, ok := d.Section(short); ok {
+			sections = append(sections, section)
+		}
+	}
+	slices.Sort(sections)
+	return slices.Compact(sections)
 }
 
 // line is a block as a plain line lists it: its title, and what's said of
@@ -260,7 +278,8 @@ func (p place) title() string {
 }
 
 // says is what's said of a block after its title: its store, its item when
-// its title is its name, its scope and how many secrets it holds.
+// its title is its name, its scope, how many secrets it holds, and the
+// sections of its item they're in.
 func (p place) says() []string {
 	var says []string
 	switch {
@@ -272,7 +291,11 @@ func (p place) says() []string {
 	if p.Name != "" {
 		says = append(says, p.Item)
 	}
-	return append(says, p.Scope, fmt.Sprintf("%d %s", p.Secrets, look.Plural(p.Secrets, "secret", "secrets")))
+	says = append(says, p.Scope, fmt.Sprintf("%d %s", p.Secrets, look.Plural(p.Secrets, "secret", "secrets")))
+	if len(p.Sections) > 0 {
+		says = append(says, look.Plural(len(p.Sections), "section ", "sections ")+strings.Join(p.Sections, ", "))
+	}
+	return says
 }
 
 // writeLines writes lines to out, each ended by a newline.

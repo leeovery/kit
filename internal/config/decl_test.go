@@ -111,10 +111,11 @@ func TestListSecretsByItem(t *testing.T) {
 
 // An item's secrets section may go by a name, --as after its item, which
 // its lines carry; a name stands for its item in the shared file and each
-// Mac's, and Places lists each section with how many it holds.
+// Mac's, and Places lists each section with how many it holds and, for an
+// item, where each of its lines says its value is.
 func TestSecretsSectionsGoByNames(t *testing.T) {
 	cfg := loadRepo(t, map[string]string{
-		"shared/declarations": "[secrets op://vault/Shared Item --as tokens]\nA a/b\nB a/c\n",
+		"shared/declarations": "[secrets op://vault/Shared Item --as tokens]\nA a/b\nB \"API Keys/c\" --mode 600\nD top\nE a/e\n",
 		"laptop/declarations": "[secrets]\nKEY op://vault/Other/key\n\n[secrets op://vault/Shared Item --as tokens]\nC a/d\n",
 	})
 	got, err := cfg.List("secret", "laptop")
@@ -126,9 +127,9 @@ func TestSecretsSectionsGoByNames(t *testing.T) {
 	}
 	places, err := cfg.Places("secret", "laptop")
 	want := []config.Place{
-		{Item: "op://vault/Shared Item", As: "tokens", Scope: "shared", Line: 1, Count: 2},
+		{Item: "op://vault/Shared Item", As: "tokens", Scope: "shared", Line: 1, Count: 4, Shorts: []string{"a/b", "API Keys/c", "top", "a/e"}},
 		{Scope: "laptop", Line: 1, Count: 1},
-		{Item: "op://vault/Shared Item", As: "tokens", Scope: "laptop", Line: 4, Count: 1},
+		{Item: "op://vault/Shared Item", As: "tokens", Scope: "laptop", Line: 4, Count: 1, Shorts: []string{"a/d"}},
 	}
 	if err != nil || !reflect.DeepEqual(places, want) {
 		t.Errorf("Places() = %+v, %v\nwant %+v", places, err, want)

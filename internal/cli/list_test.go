@@ -82,13 +82,17 @@ func TestWhyJSON(t *testing.T) {
 			Kind       string `json:"kind"`
 			ForThisMac bool   `json:"for_this_mac"`
 			Installed  bool   `json:"installed"`
-			Declared   []struct{ Scope string }
+			Declared   []struct {
+				Scope   string `json:"scope"`
+				Section string `json:"section"`
+				Line    int    `json:"line"`
+			} `json:"declared"`
 		} `json:"kinds"`
 	}
-	if err := json.Unmarshal([]byte(out), &doc); err != nil || doc.Schema != 2 || doc.Name != "jq" || len(doc.Kinds) != 1 || strings.Contains(out, `"Group"`) {
+	if err := json.Unmarshal([]byte(out), &doc); err != nil || doc.Schema != 3 || doc.Name != "jq" || len(doc.Kinds) != 1 || strings.Contains(out, `"Group"`) || !strings.Contains(out, `"section": "homebrew formulae"`) {
 		t.Fatalf("kit why --json printed %q: %v", out, err)
 	}
-	if k := doc.Kinds[0]; k.Kind != "brew" || !k.ForThisMac || !k.Installed || k.Declared[0].Scope != "shared" {
+	if k := doc.Kinds[0]; k.Kind != "brew" || !k.ForThisMac || !k.Installed || k.Declared[0].Scope != "shared" || k.Declared[0].Section != "homebrew formulae" || k.Declared[0].Line == 0 {
 		t.Errorf("kind = %+v", k)
 	}
 }

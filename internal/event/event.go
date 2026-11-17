@@ -5,6 +5,7 @@ package event
 import (
 	"cmp"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -38,45 +39,65 @@ type RunStarted struct {
 
 // Step names a step, and titles it for people.
 type Step struct {
-	Name  string
-	Title string
+	Name  string `json:"name"`
+	Title string `json:"title"`
 	// Area is what the step is about, as the at-a-glance view groups steps:
 	// Backups, Mac, Drift, Config, Checks.
-	Area string
+	Area string `json:"area"`
 	// Part is what the step counts towards in a view rolling its area up:
 	// Packages, Settings, Files, Secrets, or the config repository.
-	Part string `json:",omitempty"`
+	Part string `json:"part,omitempty"`
 	// Row is the row of applying's screen it sits in, when it says, as a
 	// kind's step does: else the face places it.
-	Row string `json:",omitempty"`
+	Row string `json:"row,omitempty"`
 	// Tool is what its commands run, as the person knows it, when it says:
 	// Homebrew.
-	Tool string `json:",omitempty"`
+	Tool string `json:"tool,omitempty"`
 	// Verb is what one of its things on the Mac as declared is, in its
 	// kind's words, as in excluded: "" for its part's.
-	Verb string `json:",omitempty"`
+	Verb string `json:"verb,omitempty"`
 	// Waiting is what the step says while it waits its turn, when that's
 	// more than that it's waiting: what it'll need of you, or do.
-	Waiting string `json:",omitempty"`
+	Waiting string `json:"waiting,omitempty"`
 	// Waits are the steps it waits for, by name: those it needs, those it's
 	// applied after, and those it waits for, finished, partway through
 	// applying.
-	Waits []string `json:",omitempty"`
+	Waits []string `json:"waits,omitempty"`
 	// ByHand are the steps by hand it raises, in order, known before it
 	// runs: a list of what may need the person at the Mac.
-	ByHand []Hand `json:",omitempty"`
+	ByHand []Hand `json:"by_hand,omitempty"`
 	// Did is what it says it did to each thing it put in place, as in
 	// installed, set or synced, when it says.
-	Did string `json:",omitempty"`
+	Did string `json:"did,omitempty"`
 	// Weight is how many things applying it has to do, as known as the run
 	// started: its share of the run's bar. None counts as one.
-	Weight int `json:",omitempty"`
+	Weight int `json:"weight,omitempty"`
 }
 
 // Hand is a step by hand, as a step that raises it lists it: its line's
 // name, as its NeedsYou's Item; and what to do, as its Title.
 type Hand struct {
-	Name, Title string
+	Name  string `json:"name"`
+	Title string `json:"title"`
+}
+
+// UnmarshalJSON reads a step as it's written, and as logs written before
+// its fields had names of their own have it: ByHand for by_hand, the one
+// name that doesn't match whatever its case.
+func (s *Step) UnmarshalJSON(data []byte) error {
+	type step Step
+	var read struct {
+		step
+		Before []Hand `json:"ByHand"`
+	}
+	if err := json.Unmarshal(data, &read); err != nil {
+		return err
+	}
+	*s = Step(read.step)
+	if s.ByHand == nil {
+		s.ByHand = read.Before
+	}
+	return nil
 }
 
 // Preparing is kit getting a run ready, before it starts, as applying works
@@ -236,14 +257,15 @@ func (e ToDos) At() time.Time { return e.Time }
 // there, what was under way still to say whether it's done. The list's
 // emitted again once it's come.
 type ToDo struct {
-	Step, ID string
-	Title    string
-	Group    string   `json:",omitempty"`
-	How      []string `json:",omitempty"`
-	Done     bool     `json:",omitempty"`
-	Saw      string   `json:",omitempty"`
-	Skipped  bool     `json:",omitempty"`
-	Settling bool     `json:",omitempty"`
+	Step     string   `json:"step"`
+	ID       string   `json:"id"`
+	Title    string   `json:"title"`
+	Group    string   `json:"group,omitempty"`
+	How      []string `json:"how,omitempty"`
+	Done     bool     `json:"done,omitempty"`
+	Saw      string   `json:"saw,omitempty"`
+	Skipped  bool     `json:"skipped,omitempty"`
+	Settling bool     `json:"settling,omitempty"`
 }
 
 // Queued is what a step by hand says, in a Doing, while its card waits its

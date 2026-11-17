@@ -7,6 +7,7 @@ import (
 	"io"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
@@ -16,6 +17,7 @@ import (
 	"github.com/leeovery/kit/internal/ask"
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/look"
+	"github.com/leeovery/kit/internal/render"
 )
 
 // brief is the annotation holding what a command does, briefly, as kit's
@@ -23,9 +25,14 @@ import (
 const brief = "brief"
 
 // help shows kit's help at a terminal in kit's look, and cobra's otherwise:
-// kit's own page, or a command's.
+// kit's own page, or a command's. Help is text: with --json, it shows
+// nothing, and the run fails as refused (helpRefused).
 func (a *app) help(plain func(*cobra.Command, []string)) func(*cobra.Command, []string) {
 	return func(cmd *cobra.Command, args []string) {
+		if a.json {
+			a.helpRefused = usageError{fmt.Errorf("%s's help prints text; it takes no --json", cmd.CommandPath())}
+			return
+		}
 		out := cmd.OutOrStdout()
 		if !a.pretty(out) {
 			plain(cmd, args)
@@ -200,12 +207,32 @@ func startingWith(root *cobra.Command, parent, typed string) []string {
 	return names
 }
 
-// show shows err, from cmd run with args: at a terminal, a row of its own,
-// what to do about it on the line under it; else "kit:" and the error. An
-// error that only needs attention shows as such. A command line naming a
-// command by a start of its name that others' names start with too lists
-// them.
-func (e *errOut) show(cmd *cobra.Command, args []string, err error, needsYou bool) {
+// asked reports whether args, a command line kit couldn't read, set the
+// boolean flag named, as --json or --json=true, before any --: its last
+// setting, as flags are read.
+func asked(args []string, flag string) bool {
+	set := false
+	for _, arg := range args {
+		if arg == "--" {
+			break
+		}
+		if arg == flag {
+			set = true
+		} else if value, ok := strings.CutPrefix(arg, flag+"="); ok {
+			set, _ = strconv.ParseBool(value)
+		}
+	}
+	return set
+}
+
+// show shows err, from cmd run with args, which has kit exit with status:
+// with --json, a document on standard output, unless the command wrote its
+// own, then a line, as without a terminal; at a terminal, a row of its
+// own, what to do about it on the line under it; else "kit:" and the
+// error, then, for a command line kit couldn't read, its usage. An error
+// that only needs attention shows as such. A command line naming a command
+// by a start of its name that others' names start with too lists them.
+func (e *errOut) show(cmd *cobra.Command, args []string, err error, status int) {
 	m := unknownCommand.FindStringSubmatch(err.Error())
 	var could []string
 	if m != nil {
@@ -213,14 +240,31 @@ func (e *errOut) show(cmd *cobra.Command, args []string, err error, needsYou boo
 			could = append(could, m[2]+" "+name)
 		}
 	}
-	if !e.a.pretty(e.Writer) {
-		if len(could) > 1 {
-			_, _ = fmt.Fprintf(e.Writer, "kit: %s %s could be %s\n", m[2], m[1], strings.Join(could, ", "))
-			return
-		}
-		_, _ = fmt.Fprintf(e.Writer, "kit: %v\n", err)
+	said := err.Error()
+	if len(could) > 1 {
+		said = fmt.Sprintf("%s %s could be %s", m[2], m[1], strings.Join(could, ", "))
+	}
+	// A command line kit couldn't read may not have set --json or --plain.
+	asJSON := e.a.json || !e.a.parsed && asked(args, "--json")
+	plain := e.a.plain || !e.a.parsed && asked(args, "--plain")
+	// Standard output keeps to one document: what went wrong after the
+	// command wrote its own is a line on standard error.
+	if asJSON && !e.a.documented() {
+		_ = render.WriteJSON(e.a.Stdout, struct {
+			Schema int    `json:"schema"`
+			Error  string `json:"error"`
+			Exit   int    `json:"exit"`
+		}{briefSchema, said, status})
 		return
 	}
+	if asJSON || !e.a.pretty(e.Writer) || plain {
+		_, _ = fmt.Fprintf(e.Writer, "kit: %s\n", said)
+		if !e.a.parsed {
+			_, _ = fmt.Fprintln(e.Writer, cmd.UsageString())
+		}
+		return
+	}
+	_, needsYou := errors.AsType[notFound](err)
 	width := min(max(e.a.Width(e.Writer), 40), look.Width)
 	state, says := look.Failed, look.Red
 	switch {

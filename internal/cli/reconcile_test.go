@@ -111,7 +111,7 @@ func TestReconcileSnoozesByID(t *testing.T) {
 
 func TestReconcileHasNoGroups(t *testing.T) {
 	w := laptopWorld(t)
-	if _, errOut, code := w.run(t, "reconcile", "brew:ffmpeg", "--adopt", "--group", "Media"); errOut != "kit: unknown flag: --group\n" || code != 2 {
+	if _, errOut, code := w.run(t, "reconcile", "brew:ffmpeg", "--adopt", "--group", "Media"); !strings.HasPrefix(errOut, "kit: unknown flag: --group\n") || code != 2 {
 		t.Errorf("kit reconcile --group: %q, exit %d; want the flag unknown", errOut, code)
 	}
 }

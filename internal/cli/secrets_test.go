@@ -149,10 +149,10 @@ func TestAddASecretByItsReference(t *testing.T) {
 	}
 }
 
-// A new value goes where it's told, never by default: without --in or
-// --item, even with one block the file could take it in, it's refused,
-// listing the blocks, by name and item; a reference says where it is
-// already, so it's told neither.
+// A new value goes where it's told, or, without --in or --item, in the one
+// block for an item the file it's declared in has: with none there, or
+// several, it's refused, listing the blocks, by name and item; a reference
+// says where it is already, so it's told neither.
 func TestAddASecretSaysWhereItGoes(t *testing.T) {
 	w := laptopWorld(t)
 	w.stdin = "x"
@@ -164,7 +164,11 @@ func TestAddASecretSaysWhereItGoes(t *testing.T) {
 		t.Errorf("printed %q, exit %d", errOut, code)
 	}
 	w.writeSection(t, "laptop", "secrets op://vault/B", "B_TOKEN S/b\n")
-	if _, errOut, code := w.run(t, "secret", "add", "NEW_ONE", "--stdin", "--field", "S/f", "--in", "keys"); code != 2 || !strings.Contains(errOut, "no secrets block goes by keys: the blocks are tokens (op://vault/A, shared/declarations), op://vault/B (laptop/declarations)") {
+	w.writeSection(t, "laptop", "secrets op://vault/C", "C_TOKEN S/c\n")
+	if _, errOut, code := w.run(t, "secret", "add", "NEW_ONE", "--stdin", "--field", "S/f"); code != 2 || !strings.Contains(errOut, "say where it goes: --in <a block's name>, or --item <an item> (1Password's, as in op://vault/item), its block made when the file has none; the blocks are tokens (op://vault/A, shared/declarations), op://vault/B (laptop/declarations), op://vault/C (laptop/declarations)") {
+		t.Errorf("printed %q, exit %d", errOut, code)
+	}
+	if _, errOut, code := w.run(t, "secret", "add", "NEW_ONE", "--stdin", "--field", "S/f", "--in", "keys"); code != 2 || !strings.Contains(errOut, "no secrets block goes by keys: the blocks are tokens (op://vault/A, shared/declarations), op://vault/B (laptop/declarations), op://vault/C (laptop/declarations)") {
 		t.Errorf("printed %q, exit %d", errOut, code)
 	}
 	for _, args := range [][]string{{"--ref", "op://vault/A/S/f", "--item", "op://vault/A"}, {"--ref", "op://vault/A/S/f", "--in", "tokens"}} {
@@ -203,6 +207,26 @@ func TestAddASecretInANamedBlock(t *testing.T) {
 	w.expectSync(t, []string{"shared/declarations"}, "kit secret add MORE (laptop)")
 	if out, _, code := w.run(t, "secret", "add", "MORE", "--shared", "--in", "tokens", "--field", "Section/more", "--stdin"); code != 0 {
 		t.Fatalf("kit secret add --shared printed\n%s exit %d", out, code)
+	}
+	if got := w.readSection(t, "shared", "secrets op://vault/Item --as tokens"); got != "MORE Section/more\nTOKEN Section/token\n" {
+		t.Errorf("shared's [secrets op://vault/Item --as tokens] = %q, want it joined", got)
+	}
+}
+
+// Without --in or --item, a new value goes in the one block for an item
+// the file it's declared in has, whatever it's called.
+func TestAddASecretInTheFilesOneBlock(t *testing.T) {
+	w := laptopWorld(t)
+	w.writeSection(t, "shared", "secrets op://vault/Item --as tokens", "TOKEN Section/token\n")
+	w.stdin = "more"
+	f := w.fake
+	f.On("op", "whoami")
+	f.On("op", "item", "get", "Item", "--vault", "vault", "--format", "json").Prints(`{"id":"abc","title":"Item","sections":[{"id":"s1","label":"Section"}],"fields":[]}`)
+	f.On("op", "item", "edit", "Item", "--vault", "vault")
+	optest.Holds(f, map[string]string{"op://vault/Item/Section/token": "the value", "op://vault/Item/Section/more": "more"})
+	w.expectSync(t, []string{"shared/declarations"}, "kit secret add MORE (laptop)")
+	if out, errOut, code := w.run(t, "secret", "add", "MORE", "--shared", "--field", "Section/more", "--stdin"); code != 0 {
+		t.Fatalf("kit secret add --shared printed\n%s%s exit %d", out, errOut, code)
 	}
 	if got := w.readSection(t, "shared", "secrets op://vault/Item --as tokens"); got != "MORE Section/more\nTOKEN Section/token\n" {
 		t.Errorf("shared's [secrets op://vault/Item --as tokens] = %q, want it joined", got)
@@ -608,20 +632,21 @@ func TestASecretFromAFileSyncsByteForByte(t *testing.T) {
 func placesWorld(t *testing.T) *world {
 	t.Helper()
 	w := laptopWorld(t)
-	w.writeSection(t, "shared", "secrets op://vault/Item --as tokens", "A Section/a\nB Section/b\n")
+	w.writeSection(t, "shared", "secrets op://vault/Item --as tokens", "A Section/a\nB Other/b\n")
 	w.writeSection(t, "laptop", "secrets", "KEY op://vault/Elsewhere/key\n")
 	w.writeSection(t, "laptop", "secrets op://vault/Other", "C Section/c\n")
 	return w
 }
 
 // kit secret places lists the blocks this Mac reads, a line each: its name,
-// if it has one, its store, its item, its file and how many it holds.
+// if it has one, its store, its item, its file, how many it holds and the
+// sections of its item they're in.
 func TestSecretPlaces(t *testing.T) {
 	w := placesWorld(t)
 	out, _, code := w.run(t, "secret", "places")
-	want := "tokens  1Password · op://vault/Item · shared · 2 secrets\n" +
+	want := "tokens  1Password · op://vault/Item · shared · 2 secrets · sections Other, Section\n" +
 		"[secrets]  references in full · laptop · 1 secret\n" +
-		"op://vault/Other  1Password · laptop · 1 secret\n"
+		"op://vault/Other  1Password · laptop · 1 secret · section Section\n"
 	if code != 0 || out != want {
 		t.Errorf("kit secret places printed\n%s\nexit %d, want\n%s", out, code, want)
 	}
@@ -630,11 +655,12 @@ func TestSecretPlaces(t *testing.T) {
 func TestSecretPlacesPretty(t *testing.T) {
 	w := placesWorld(t)
 	w.terminal, w.environ = true, []string{"TTY_FORCE=1", "TERM=xterm-256color"}
+	w.size = [2]int{100, 40}
 	out, _, code := w.run(t, "secret", "places")
 	want := []string{
-		"  ● tokens  1Password · op://vault/Item · shared · 2 secrets",
+		"  ● tokens  1Password · op://vault/Item · shared · 2 secrets · sections Other, Section",
 		"  ● [secrets]  references in full · laptop · 1 secret",
-		"  ● op://vault/Other  1Password · laptop · 1 secret",
+		"  ● op://vault/Other  1Password · laptop · 1 secret · section Section",
 	}
 	if got := strings.Split(strings.TrimRight(ansi.Strip(out), "\n"), "\n"); code != 0 || !slices.Equal(got, want) {
 		t.Errorf("kit secret places printed\n%s\nexit %d, want\n%s", out, code, strings.Join(want, "\n"))
@@ -653,6 +679,7 @@ func TestSecretPlacesJSON(t *testing.T) {
 		Places  []struct {
 			Name, Store, Item, Scope, File string
 			Line, Secrets                  int
+			Sections                       []string
 		} `json:"places"`
 	}
 	if err := json.Unmarshal([]byte(out), &doc); err != nil || code != 0 {
@@ -662,10 +689,10 @@ func TestSecretPlacesJSON(t *testing.T) {
 		t.Fatalf("document = %+v", doc)
 	}
 	first := doc.Places[0]
-	if first.Name != "tokens" || first.Store != "1Password" || first.Item != "op://vault/Item" || first.Scope != "shared" || first.File != "shared/declarations" || first.Secrets != 2 || first.Line == 0 {
+	if first.Name != "tokens" || first.Store != "1Password" || first.Item != "op://vault/Item" || first.Scope != "shared" || first.File != "shared/declarations" || first.Secrets != 2 || first.Line == 0 || !slices.Equal(first.Sections, []string{"Other", "Section"}) || !strings.Contains(out, `"sections": [`) {
 		t.Errorf("places[0] = %+v", first)
 	}
-	if plain := doc.Places[1]; plain.Name != "" || plain.Store != "" || plain.Item != "" || plain.Scope != "laptop" || plain.Secrets != 1 {
+	if plain := doc.Places[1]; plain.Name != "" || plain.Store != "" || plain.Item != "" || plain.Scope != "laptop" || plain.Secrets != 1 || plain.Sections != nil {
 		t.Errorf("places[1] = %+v, want the plain block, no store or item", plain)
 	}
 }

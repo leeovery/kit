@@ -72,6 +72,17 @@ func TestFieldsAndAttachments(t *testing.T) {
 	}
 }
 
+// A reference short for its item names a section by what's before its first
+// slash; a name alone names none.
+func TestSection(t *testing.T) {
+	d := onepassword.Driver{}
+	for short, want := range map[string]string{"GitHub/token": "GitHub", "API Keys/key.pem": "API Keys", "token": "", "/token": ""} {
+		if got, ok := d.Section(short); got != want || ok != (want != "") {
+			t.Errorf("Section(%q) = %q, %v; want %q", short, got, ok, want)
+		}
+	}
+}
+
 // Free asks 1Password whether an item keeps something where a value would
 // go, changing nothing, as op read would find it, so kit never makes a
 // name op could read two ways: a name alone is taken by a field or an

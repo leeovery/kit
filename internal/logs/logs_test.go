@@ -190,6 +190,53 @@ func TestLatest(t *testing.T) {
 	}
 }
 
+// A log names a step's fields, its steps by hand's and its to-dos' in lower
+// case, words joined by an underscore, as the rest of its record.
+func TestALogNamesItsFieldsInLowerCase(t *testing.T) {
+	l, err := logs.Open(t.TempDir(), at, "apply", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l.Emit(event.RunStarted{Time: at, Command: "apply", Steps: []event.Step{{Name: "manual", Title: "By hand", Area: "Manual", ByHand: []event.Hand{{Name: "sign-in", Title: "Sign in"}}, Weight: 2}}})
+	l.Emit(event.ToDos{Time: at, Step: "manual", List: []event.ToDo{{Step: "manual", ID: "manual:sign-in", Title: "Sign in", How: []string{"Scan the code"}}}})
+	if err := l.Close(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(l.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`"steps":[{"name":"manual","title":"By hand","area":"Manual","by_hand":[{"name":"sign-in","title":"Sign in"}],"weight":2}]`,
+		`"to_dos":[{"step":"manual","id":"manual:sign-in","title":"Sign in","how":["Scan the code"]}]`,
+	} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("the log is\n%s\nwant %s in it", data, want)
+		}
+	}
+}
+
+// A log written before its fields were named in lower case still reads,
+// ByHand, the one name that doesn't match whatever its case, included.
+func TestAnOlderLogStillReads(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "old.jsonl")
+	old := `{"time":"2026-01-02T03:04:05Z","event":"run_started","command":"apply","steps":[{"Name":"manual","Title":"By hand","Area":"Manual","ByHand":[{"Name":"sign-in","Title":"Sign in"}],"Weight":2}]}` + "\n" +
+		`{"time":"2026-01-02T03:04:05Z","event":"to_dos","step":"manual","to_dos":[{"Step":"manual","ID":"manual:sign-in","Title":"Sign in","How":["Scan the code"]}],"up":0}` + "\n"
+	if err := os.WriteFile(path, []byte(old), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	records, err := logs.Read(path)
+	if err != nil || len(records) != 2 {
+		t.Fatalf("Read() = %+v, %v", records, err)
+	}
+	if want := []event.Step{{Name: "manual", Title: "By hand", Area: "Manual", ByHand: []event.Hand{{Name: "sign-in", Title: "Sign in"}}, Weight: 2}}; !reflect.DeepEqual(records[0].Steps, want) {
+		t.Errorf("steps = %+v, want %+v", records[0].Steps, want)
+	}
+	if want := []event.ToDo{{Step: "manual", ID: "manual:sign-in", Title: "Sign in", How: []string{"Scan the code"}}}; !reflect.DeepEqual(records[1].ToDos, want) {
+		t.Errorf("to-dos = %+v, want %+v", records[1].ToDos, want)
+	}
+}
+
 func TestReadRefusesALineThatIsntARecord(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "x.jsonl")
 	if err := os.WriteFile(path, []byte("{\"event\":\"run_started\"}\nnot json\n"), 0o600); err != nil {

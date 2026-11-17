@@ -61,7 +61,7 @@ func TestLogShowsTheLastRun(t *testing.T) {
 		t.Errorf("kit log printed\n%s%q, exit %d\nwant\n%s", out, errOut, status, want)
 	}
 
-	out, _, status = w.run(t, "log", "--json")
+	out, _, status = w.run(t, "log", "status", "--json")
 	var doc struct {
 		Schema  int           `json:"schema"`
 		Log     string        `json:"log"`
@@ -70,7 +70,7 @@ func TestLogShowsTheLastRun(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &doc); err != nil || status != 0 {
 		t.Fatalf("kit log --json printed %q, exit %d: %v", out, status, err)
 	}
-	if doc.Schema != 1 || doc.Log != path || len(doc.Records) != 4 || doc.Records[1].Command != "brew leaves" {
+	if doc.Schema != 2 || doc.Log != path || len(doc.Records) != 4 || doc.Records[1].Command != "brew leaves" {
 		t.Errorf("kit log --json = %+v, want the last run's records", doc)
 	}
 	if strings.Contains(out, "\x1b[") {
@@ -98,10 +98,50 @@ func TestLogShowsTheLastRunNotALogWithNoRun(t *testing.T) {
 	if err != nil || len(entries) != 2 || slices.ContainsFunc(entries, func(e os.DirEntry) bool { return strings.Contains(e.Name(), "agent") }) {
 		t.Errorf("logs = %v, %v: want the run's and secret places', none of kit agent order's", entries, err)
 	}
-	out, _, status := w.run(t, "log", "--json")
-	var doc struct{ Log string }
-	if err := json.Unmarshal([]byte(out), &doc); err != nil || status != 0 || doc.Log != path {
-		t.Errorf("kit log --json printed\n%s\nexit %d, want the run's log, %s", out, status, path)
+	if out, _, status := w.run(t, "log"); status != 0 || !strings.Contains(out, "\n"+path+"\n") {
+		t.Errorf("kit log printed\n%s\nexit %d, want the run's log, %s", out, status, path)
+	}
+}
+
+// kit log --json, no command named, lists the runs, newest first: each
+// one's log, what it was of, when it started and finished, how it ended in
+// a word, the worst of its steps' states or unfinished, and its counts.
+func TestLogListsTheRunsWithJSON(t *testing.T) {
+	w := newWorld(t, nil)
+	if out, errOut, status := w.run(t, "log", "--json"); out != "{\n  \"schema\": 2,\n  \"runs\": []\n}\n" || errOut != "" || status != 0 {
+		t.Errorf("kit log --json, no runs, printed %q, %q, exit %d; want none listed", out, errOut, status)
+	}
+	when := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	ends := []map[check.State]int{{check.OK: 8, check.Failed: 1}, {check.OK: 2, check.Attention: 1}, {check.OK: 2, check.Deferred: 1}, {check.OK: 23}, nil}
+	var paths []string
+	for i, counts := range ends {
+		at := when.Add(time.Duration(i) * time.Hour)
+		events := []event.Event{event.RunStarted{Time: at, Command: "apply", Machine: "laptop", Only: []string{"brew"}}}
+		if counts != nil {
+			events = append(events, event.RunFinished{Time: at.Add(time.Minute), Counts: counts})
+		}
+		paths = append(paths, w.logRun(t, at, events...))
+	}
+	out, errOut, status := w.run(t, "log", "--json")
+	var doc struct {
+		Schema int `json:"schema"`
+		Runs   []struct {
+			Log, Command, Result string
+			Started, Finished    time.Time
+			Counts               map[check.State]int
+		} `json:"runs"`
+	}
+	if err := json.Unmarshal([]byte(out), &doc); err != nil || errOut != "" || status != 0 || doc.Schema != 2 || len(doc.Runs) != len(ends) {
+		t.Fatalf("kit log --json printed\n%s%q, exit %d: %v", out, errOut, status, err)
+	}
+	for i, want := range []string{"unfinished", "ok", "deferred", "attention", "failed"} {
+		r, at := doc.Runs[i], when.Add(time.Duration(len(ends)-1-i)*time.Hour)
+		if r.Log != paths[len(ends)-1-i] || r.Command != "apply brew" || r.Result != want || !r.Started.Equal(at) {
+			t.Errorf("runs[%d] = %+v, want %s's, %s", i, r, at, want)
+		}
+		if finished := !r.Finished.IsZero(); finished != (want != "unfinished") || finished && (!r.Finished.Equal(at.Add(time.Minute)) || len(r.Counts) == 0) {
+			t.Errorf("runs[%d] finished %s with %v", i, r.Finished, r.Counts)
+		}
 	}
 }
 

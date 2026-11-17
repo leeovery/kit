@@ -28,6 +28,7 @@ var Topics = []Topic{
 	{"settings", "Settings: macOS's, power, git's, exclusions and features"},
 	{"prefs", "Apps' settings: what kit prefs keeps, and restoring them"},
 	{"new-mac", "A new Mac: the boot, the run's order, its data, what isn't there"},
+	{"moving", "Moving to a new Mac: what to check on the old one first"},
 }
 
 // Main is the guide, read in one go: kit and kit-config, steps of your own,

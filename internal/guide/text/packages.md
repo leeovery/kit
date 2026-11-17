@@ -28,8 +28,8 @@ still needs it, nothing changes, and kit says why. Ask the person before
 you remove anything.
 
 Removing an app, as `kit cask remove` does, asks at a terminal whether to
-keep its files and settings; `--keep` keeps them and `--zap` removes them,
-without asking.
+keep its files and settings; without one, they're kept. `--keep` keeps them
+and `--zap` removes them, without asking.
 
 What's installed but not declared, or declared but not installed, is drift:
 `kit status` lists it, quiet for its first day, and `kit reconcile` settles
@@ -60,7 +60,8 @@ commit it, when a package needs something kit installs first.
   new Mac's run.
 - npm and Composer wait till their program is on kit's PATH, whatever
   installs it.
-- App Store apps need someone signed in to the App Store.
+- App Store apps need someone signed in to the App Store. That's the
+  person's alone, in the App Store app: ask them, as you can't.
 - Login items come after the casks and App Store apps.
 - kit doesn't open an app it installs, though a few installers do, and the
   password manager's sign-in card opens that app: an app's first launch is
