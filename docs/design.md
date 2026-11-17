@@ -783,8 +783,9 @@ for a capture or restore run there; the launch's runs leave it out. A capture ho
 beside the store's clone for its whole run, so two (the launch's and one by hand) never write
 the store at once: the second waits, up to 30 minutes.
 
-Later: `share`, `edit`, `update`, `secrets`, `prefs`,
-`bootstrap`, `takeover`, `retire`, `decisions`, `decide`, `fleet`.
+Built since this list was made: `bootstrap`, `secret` (for `secrets`) and `prefs`. Not built,
+and in no plan: `share` (`--shared` does its job), `edit`, `update`, `takeover`, `retire`,
+`decisions`, `decide`, `fleet`.
 
 Every question has a flag that answers it, so everything runs without prompts. Without a
 terminal kit never prompts: a question it can't ask is an error naming the flag. `--json`
@@ -1076,17 +1077,17 @@ built:
 | 2 | The Mac's name is settled before any config is read, and every reader uses it | `cli.TestStatusNeedsTheMacsNameFirst` |
 | 3 | kit sets its own PATH, from the same list the shell uses | `cli.TestStatusRunsProgramsOnKitsOwnPath` |
 | 4 | Questions up front, then unattended: no step asks its own | `cli.TestApplyWithoutATerminalNeverPrompts`, `cli.TestApplyAtATerminalAsksForThePasswordUpFront` |
-| 5 | Full Disk Access for the terminal kit runs in, checked before anything that needs it | later |
-| 6 | Each secrets store signed in, with a session open, before its secrets | later |
-| 7 | GitHub over SSH only once the key exists; GitHub's host keys seeded | later |
-| 8 | A secret that fails to fetch keeps its previous value; a partial fetch never shrinks the file | later |
-| 9 | Settings restore and capture wait for a fully synced store | later |
-| 10 | Notifications allowed as a step, with a check, while someone's at the screen | later |
-| 11 | Data restore works on a different Mac, at the right moment | later |
-| 12 | Steps declare their Macs: no step asks whether it applies | later |
-| 13 | Heavy, independent steps run last or alongside, never blocking quick ones | later |
-| 14 | Nothing needs Go installed: a new Mac downloads a release | later |
-| 15 | The network check is an HTTPS request, not a ping | later |
+| 5 | Full Disk Access for the terminal kit runs in, checked before anything that needs it | `boot.TestFullDiskAccess`, `steps.TestFullDiskAccess` |
+| 6 | Each secrets store signed in, with a session open, before its secrets | `cli.TestOrderPlacesTheSignInBeforeTheSecrets`, `secret.TestEachStoreUsedBringsItsSignIn` |
+| 7 | GitHub reached through the boot's sign-in on the phone, over HTTPS; an SSH key is the config's own step | `boot.TestGitHubSignsInAndReads` |
+| 8 | A secret that fails to fetch keeps its previous value; a partial fetch never shrinks the file | `secret.TestSyncHoldsBackWhatOneReadDoesnt` |
+| 9 | Settings restore and capture wait for their store | `prefs.TestARestoreWaitsForACapture`; the store a git repository, not a synced folder |
+| 10 | Notifications allowed as a step, with a check, while someone's at the screen | not kit's: a step done by hand where the config wants one |
+| 11 | Data restore works on a different Mac, at the right moment | `cli.TestApplyRestoresFromTheMacItStartedFrom`, `restore.TestJudgeOnceTheRestoreHasSettled` |
+| 12 | Steps declare their Macs: no step asks whether it applies | a folder per Mac, and `--shared` (milestone 9) |
+| 13 | Heavy, independent steps run last or alongside, never blocking quick ones | `engine.TestIndependentChecksRunSideBySide` |
+| 14 | Nothing needs Go installed: a new Mac downloads a release | `install.sh`, proven from a blank Mac in the bootstrap's runs |
+| 15 | The network check is an HTTPS request, not a ping | `boot.TestSelfTest` |
 
 ## Milestones
 
@@ -1134,14 +1135,25 @@ config repository's own edits settled by `kit reconcile`; the shell and PATH, gi
 settings and backup exclusions as kinds, secrets, what a person must do by hand; commands
 adding lines to `[checks]`, `[hourly]` and `[nightly]`; commands naming the kind first.
 
-**10. Apps' settings — in progress.** `kit prefs`, the dotfiles' prefsync in Go: its store in a
+**10. Apps' settings — built.** `kit prefs`, the dotfiles' prefsync in Go: its store in a
 repository of its own, below.
 
-**Then:** the
-primary reading the other Macs; the bootstrap and its install script, tested in a virtual
-machine; data restore and moving to a new Mac; an agent's daily check, with decisions queued
-for a person. Claude Code's skills wait for the installer they'll go through. Each gets a
-short plan before code.
+**11. The bootstrap — built.** `install.sh` and `kit bootstrap`: GitHub's sign-in on the
+phone, which Mac it is, Homebrew, the terminal the config names, then `kit apply` on a screen of
+its own, with cards for what a person does by hand; proven from a blank Mac in a virtual
+machine.
+
+**12. Data restore — built.** `[restore]`, copied from the Mac a new one starts from, over SSH
+and pinned to its host key, else from its backups; the boot its one trigger.
+
+**13. kit by itself — built.** An hourly launch through kit's own app; nothing alerts.
+
+**14. The whole-codebase review — done.** Its bugs fixed, and what cost more than it gave cut.
+
+**15. Agents — built.** `kit agent`'s guide, `--json` from every command an agent reads.
+
+**Then:** the Mac mini onto kit; Claude Code's skills, through their installer, when they're
+wanted.
 
 ## Apps' settings (`kit prefs`)
 
