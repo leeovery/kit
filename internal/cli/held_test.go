@@ -185,7 +185,7 @@ func TestALinesSectionWhoseSecretNeverComes(t *testing.T) {
 		}
 	}
 	installed(t, w, "ripgrep")
-	if !strings.Contains(out, "brew missing:new owner/private/fetcher (needs TOKEN, which isn't there yet)\n") || code != 1 {
+	if !strings.Contains(out, "brew missing:new owner/private/fetcher (needs TOKEN, which isn't there yet)\n") || code != 0 {
 		t.Errorf("kit apply printed\n%s%s\nexit %d; want fetcher missing, saying TOKEN isn't there", out, errOut, code)
 	}
 }

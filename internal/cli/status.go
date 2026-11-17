@@ -49,8 +49,9 @@ attention, such as packages declared but missing, or installed but not declared.
 Name steps, as kit status shows them (homebrew, brew, cask, config-private),
 to check only those, with what they need. A kind is checked only while the
 config has its section for this Mac, the shared file's or its own, even an
-empty one. Exits 0 when nothing needs attention, 1 when something does, and
-2 when kit couldn't check. Each run is logged: see kit log.`,
+empty one. Exits 0 when kit checked, even when something needs attention, 1
+when a check failed, and 2 when kit couldn't check. Each run is logged: see
+kit log.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			r, err := a.prepare("status", "status")
 			if err != nil {
@@ -66,8 +67,8 @@ empty one. Exits 0 when nothing needs attention, 1 when something does, and
 			if err != nil {
 				return err
 			}
-			if report.Attention() {
-				return attention{}
+			if report.Failed() {
+				return failure{}
 			}
 			return nil
 		},

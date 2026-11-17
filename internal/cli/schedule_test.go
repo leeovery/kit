@@ -42,8 +42,8 @@ func TestStatusSaysKitNeverRanOnASchedule(t *testing.T) {
 			t.Errorf("kit status printed\n%s\nwant it to hold %q", out, want)
 		}
 	}
-	if code != 1 {
-		t.Errorf("exit %d, want 1", code)
+	if code != 0 {
+		t.Errorf("exit %d, want 0", code)
 	}
 }
 
@@ -173,7 +173,7 @@ func TestTheHourlyRunRecordsKitAppsAccess(t *testing.T) {
 		t.Errorf("recorded %+v (%v), want access denied now", rec.Access, err)
 	}
 	out, _, code := w.run(t, "status", "kit-app-access")
-	if !strings.Contains(out, "kit-app-access attention not granted: the hourly run at 04:04 couldn't read what it protects\n") || code != 1 {
+	if !strings.Contains(out, "kit-app-access attention not granted: the hourly run at 04:04 couldn't read what it protects\n") || code != 0 {
 		t.Errorf("kit status printed\n%s exit %d; want kit.app's access not granted", out, code)
 	}
 }
@@ -203,8 +203,8 @@ func TestARebuiltKitAppNeedsItsAccessAgain(t *testing.T) {
 			t.Errorf("kit status printed\n%s\nwant it to hold %q", out, want)
 		}
 	}
-	if code != 1 {
-		t.Errorf("exit %d, want 1", code)
+	if code != 0 {
+		t.Errorf("exit %d, want 0", code)
 	}
 }
 

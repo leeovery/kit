@@ -232,7 +232,7 @@ func (a *app) why(ctx context.Context, r *run, name string) error {
 		}{whySchema, r.machine, name, found})
 	}
 	if len(found) == 0 {
-		return attention{message: name + " isn't declared for any Mac, nor installed here"}
+		return notFound{message: name + " isn't declared for any Mac, nor installed here"}
 	}
 	var b strings.Builder
 	for _, w := range found {

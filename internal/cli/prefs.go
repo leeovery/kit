@@ -182,8 +182,7 @@ func (a *app) prefs(r *run) (*prefs.Prefs, error) {
 }
 
 // oneStep runs do as a run of one step, saying what it's doing as it
-// starts, and whatever do says meanwhile: the run needs attention unless it
-// stands ok.
+// starts, and whatever do says meanwhile: the run fails when the step does.
 func (a *app) oneStep(ctx context.Context, r *run, step event.Step, doing string, do func(ctx context.Context) check.Result) error {
 	r.sink.Emit(event.RunStarted{Time: r.now, Command: r.command, Machine: r.machine, Version: r.version, Steps: []event.Step{step}})
 	started := time.Now()
@@ -195,8 +194,8 @@ func (a *app) oneStep(ctx context.Context, r *run, step event.Step, doing string
 	res := do(event.WithDoing(ctx, doing))
 	r.sink.Emit(event.StepFinished{Time: time.Now(), Step: step.Name, Result: res, Duration: time.Since(started)})
 	r.sink.Emit(event.RunFinished{Time: time.Now(), Duration: time.Since(started), Counts: event.Tally(res)})
-	if res.State != check.OK {
-		return attention{}
+	if res.State == check.Failed {
+		return failure{}
 	}
 	return nil
 }

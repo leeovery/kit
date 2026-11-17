@@ -721,9 +721,12 @@ Every command takes `--plain` (plain lines, as without a terminal) and `--verbos
 output kept whole in the run's log), and every one but `kit agent`, whose text is what agents
 read, `--json` (one document).
 
-Exit statuses: 0 when all's well, 1 when something needs attention (a Mac with no name yet,
-drift), 2 when kit couldn't do its job (no config repository, a config error, an unknown
-command).
+Exit statuses: 0 when kit did its job, even when what it found needs attention (drift, a
+to-do, a step by hand, a plan with things to do, a lookup that found nothing), 1 when
+something it tried failed (a step's check or apply, an install, a push) or a question was
+cancelled, 2 when kit couldn't do its job at all (no config repository, a config error, an
+unknown command, a Mac with no name yet). What needs attention is in the output and
+`--json`, never the status.
 
 Bare `kit` runs every check, as `kit status` does, and shows a line an area (Backups, Mac,
 Drift, Config, Checks): the steps' short forms when all's well ("Time Machine 16:00 · Arq
@@ -991,8 +994,8 @@ step failed, with the error; the run finishing, with its summary. Faces subscrib
 - **the log**, always: every event as a JSON line. A command's output is capped at 64 KB a
   stream, its full size noted; `--verbose` keeps it whole.
 
-`kit status` exits 0 when nothing needs attention, 1 when something does, and 2 when it
-couldn't do its job, as every command does.
+`kit status` exits 0 when it checked, even when something needs attention, 1 when a check
+failed, and 2 when it couldn't do its job, as every command does.
 
 ## Homebrew
 

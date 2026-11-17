@@ -19,8 +19,8 @@ brew:ffmpeg extra since 31 Dec: --adopt, --remove or --snooze
 brew:node@20 unused-dependency since 31 Dec: --remove, --adopt or --snooze
 cask:firefox extra since 31 Dec: --adopt, --remove or --snooze
 `
-	if out != want || code != 1 {
-		t.Errorf("kit reconcile printed\n%s exit %d\nwant\n%s(exit 1)", out, code, want)
+	if out != want || code != 0 {
+		t.Errorf("kit reconcile printed\n%s exit %d\nwant\n%s(exit 0)", out, code, want)
 	}
 }
 
@@ -37,7 +37,7 @@ func TestReconcileJSON(t *testing.T) {
 			Choices []string `json:"choices"`
 		} `json:"items"`
 	}
-	if err := json.Unmarshal([]byte(out), &doc); err != nil || code != 1 {
+	if err := json.Unmarshal([]byte(out), &doc); err != nil || code != 0 {
 		t.Fatalf("kit reconcile --json printed %q, exit %d: %v", out, code, err)
 	}
 	if doc.Schema != 1 || doc.Machine != "laptop" || len(doc.Items) != 3 {
@@ -196,7 +196,7 @@ func TestReconcileStoppedEarlyDoesNothing(t *testing.T) {
 func TestReconcileOneKind(t *testing.T) {
 	out, _, code := laptopWorld(t).run(t, "reconcile", "cask")
 	want := "kit reconcile · laptop\ncask:firefox extra since 31 Dec: --adopt, --remove or --snooze\n"
-	if out != want || code != 1 {
+	if out != want || code != 0 {
 		t.Errorf("kit reconcile cask printed\n%s exit %d\nwant\n%s", out, code, want)
 	}
 }

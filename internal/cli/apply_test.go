@@ -45,8 +45,8 @@ func TestApplyInstallsWhatsMissing(t *testing.T) {
 			t.Errorf("kit apply printed\n%s%s\nwant it to hold %q", out, errOut, want)
 		}
 	}
-	if code != 1 {
-		t.Errorf("exit %d, want 1: ffmpeg still needs reconciling", code)
+	if code != 0 {
+		t.Errorf("exit %d, want 0: ffmpeg needing reconciling is no failure", code)
 	}
 	calls := w.fake.Calls()
 	for _, unwanted := range []string{"uninstall"} {
@@ -85,16 +85,28 @@ func TestApplyLeavingWhatItInstalledMissingNeedsAttention(t *testing.T) {
 			t.Errorf("kit apply printed\n%s%s\nwant it to hold %q", out, errOut, want)
 		}
 	}
-	if code != 1 {
-		t.Errorf("exit %d, want 1: ripgrep wasn't installed", code)
+	if code != 0 {
+		t.Errorf("exit %d, want 0: the install ended well", code)
+	}
+}
+
+// An install that fails is something kit tried that failed: kit exits 1.
+func TestApplyWhoseInstallFails(t *testing.T) {
+	w := missingWorld(t)
+	w.fake.On("brew", "update", "--quiet")
+	w.fake.On("brew", "list", "--formula", "--full-name", "-1").Prints("go\njq\noniguruma\nowner/tap/tool\nnode@20\nffmpeg\n")
+	w.fake.On("brew", "install", "--formula", "ripgrep").Exits(1).PrintsToStderr("Error: ripgrep: no bottle\n")
+	out, errOut, code := w.run(t, "apply")
+	if !strings.Contains(out, "brew failed") || code != 1 {
+		t.Errorf("kit apply printed\n%s%s exit %d; want the install failed, exit 1", out, errOut, code)
 	}
 }
 
 func TestApplyPlanChangesNothing(t *testing.T) {
 	w := missingWorld(t)
 	out, errOut, code := w.run(t, "apply", "--plan")
-	if !strings.Contains(out, "kit apply --plan · laptop\n") || !strings.Contains(out, "brew missing:new ripgrep (to install)\n") || code != 1 {
-		t.Errorf("kit apply --plan printed %q exit %d (%q); want ripgrep to install, exit 1", out, code, errOut)
+	if !strings.Contains(out, "kit apply --plan · laptop\n") || !strings.Contains(out, "brew missing:new ripgrep (to install)\n") || code != 0 {
+		t.Errorf("kit apply --plan printed %q exit %d (%q); want ripgrep to install, exit 0", out, code, errOut)
 	}
 	for _, c := range w.fake.Calls() {
 		if strings.HasPrefix(c, "brew install ") || strings.HasPrefix(c, "brew update") || strings.HasPrefix(c, "sudo") {
@@ -113,8 +125,8 @@ func TestApplyWithoutATerminalNeverPrompts(t *testing.T) {
 	w.fake.On("sudo", "-n", "true").Exits(1).PrintsToStderr("sudo: a password is required")
 
 	out, errOut, code := w.run(t, "apply")
-	if want := "cask missing:new zoom (needs an administrator's password: run kit apply at a terminal)\n"; !strings.Contains(out, want) || code != 1 {
-		t.Errorf("kit apply printed\n%s exit %d (%s); want zoom waiting, exit 1", out, code, errOut)
+	if want := "cask missing:new zoom (needs an administrator's password: run kit apply at a terminal)\n"; !strings.Contains(out, want) || code != 0 {
+		t.Errorf("kit apply printed\n%s exit %d (%s); want zoom waiting, exit 0", out, code, errOut)
 	}
 	for _, cmd := range w.fake.Commands() {
 		if slices.Equal(cmd.Args, []string{"-v"}) || slices.Contains(cmd.Args, "--cask") && cmd.Args[0] == "install" {
@@ -157,8 +169,8 @@ func TestApplyAtATerminalAsksForThePasswordUpFront(t *testing.T) {
 
 	w.choose = func(string, []string) (int, error) { return 0, nil }
 
-	if _, errOut, code := w.run(t, "apply"); code != 1 {
-		t.Errorf("kit apply exit %d (%s), want 1: ffmpeg still needs reconciling", code, errOut)
+	if _, errOut, code := w.run(t, "apply"); code != 0 {
+		t.Errorf("kit apply exit %d (%s), want 0: ffmpeg needing reconciling is no failure", code, errOut)
 	}
 	// What applying leaves differing from the config, it offers to settle.
 	if !slices.Equal(w.asked, []string{"Reconcile now?"}) || len(w.became) != 1 || !slices.Equal(w.became[0], []string{"reconcile"}) {

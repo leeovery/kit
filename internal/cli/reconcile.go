@@ -224,10 +224,8 @@ func past(action string) string {
 	return action + "d"
 }
 
-// listDrift prints the items, as plain lines or one JSON document; it
-// returns attention when any isn't quiet.
+// listDrift prints the items, as plain lines or one JSON document.
 func (a *app) listDrift(r *run, items []driftItem) error {
-	loud := slices.ContainsFunc(items, func(it driftItem) bool { return it.Quiet == "" })
 	if a.json {
 		if items == nil {
 			items = []driftItem{}
@@ -261,9 +259,6 @@ func (a *app) listDrift(r *run, items []driftItem) error {
 		if _, err := fmt.Fprint(a.Stdout, b.String()); err != nil {
 			return err
 		}
-	}
-	if loud {
-		return attention{}
 	}
 	return nil
 }

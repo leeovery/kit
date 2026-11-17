@@ -81,8 +81,8 @@ func TestApplyWithoutATerminalLeavesAppsWaiting(t *testing.T) {
 	w.fake.On("sudo", "-n", "true").Exits(1).PrintsToStderr("sudo: a password is required")
 
 	out, _, code := w.run(t, "apply")
-	if want := "mas missing:new bear@1091189122 (needs an administrator's password: run kit apply at a terminal)\n"; !strings.Contains(out, want) || code != 1 {
-		t.Errorf("kit apply printed\n%s exit %d; want Bear waiting", out, code)
+	if want := "mas missing:new bear@1091189122 (needs an administrator's password: run kit apply at a terminal)\n"; !strings.Contains(out, want) || code != 0 {
+		t.Errorf("kit apply printed\n%s exit %d; want Bear waiting, exit 0", out, code)
 	}
 	for _, c := range w.fake.Calls() {
 		if strings.Contains(c, "mas install") {

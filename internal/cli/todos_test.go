@@ -166,8 +166,8 @@ func TestStoppingAtTheToDosLeavesTheRestToDo(t *testing.T) {
 	notified(t, w, kb, "Do the first", "kit waits for you to do this", ask.Key{Text: "q"}, ask.Key{Name: "down"}, ask.Key{Name: "enter"})
 
 	out, errOut, code := w.run(t, "apply")
-	if code != 1 {
-		t.Fatalf("kit apply, stopped at the to-dos, exit %d (%s), want 1: they're left to do", code, errOut)
+	if code != 0 {
+		t.Fatalf("kit apply, stopped at the to-dos, exit %d (%s), want 0: what's left to do is no failure", code, errOut)
 	}
 	records := w.lastLog(t)
 	lists := toDoLists(records)

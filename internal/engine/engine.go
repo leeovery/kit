@@ -525,6 +525,17 @@ func (r Report) Attention() bool {
 	return false
 }
 
+// Failed reports whether any step failed: its check couldn't find out, or
+// applying it went wrong.
+func (r Report) Failed() bool {
+	for _, res := range r.Results {
+		if res.State == check.Failed {
+			return true
+		}
+	}
+	return false
+}
+
 // Check runs the checks of the steps opts select, each once what it needs
 // has stood ok, emitting the run's events to sink.
 func (p *Pipeline) Check(ctx context.Context, sink event.Sink, opts Options) (Report, error) {

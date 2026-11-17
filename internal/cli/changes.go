@@ -180,12 +180,13 @@ func (s syncing) pushWaiting(ctx context.Context) check.Result {
 	return check.Result{State: check.OK, Summary: "nothing changed; pushed " + waiting}
 }
 
-// finish ends the run, returning attention when a step didn't stand ok.
+// finish ends the run, returning failure when a step didn't stand ok: each
+// is a change kit tried.
 func (c *changes) finish() error {
 	counts := event.Tally(c.results...)
 	c.run.sink.Emit(event.RunFinished{Time: time.Now(), Duration: time.Since(c.started), Counts: counts})
 	if counts[check.OK] != len(c.results) {
-		return attention{}
+		return failure{}
 	}
 	return nil
 }

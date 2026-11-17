@@ -45,7 +45,7 @@ Each run's log is a JSON-lines file in ~/Library/Logs/kit, kept 30 days;
 				}
 				i := slices.IndexFunc(runs, func(r logs.Run) bool { return isOf(r, args) })
 				if i < 0 {
-					return attention{message: "no run of " + strings.Join(args, " ") + " logged"}
+					return notFound{message: "no run of " + strings.Join(args, " ") + " logged"}
 				}
 				path = runs[i].Path
 			case a.pretty(out):
@@ -54,7 +54,7 @@ Each run's log is a JSON-lines file in ~/Library/Logs/kit, kept 30 days;
 					return err
 				}
 				if len(runs) == 0 {
-					return attention{message: "no runs logged yet"}
+					return notFound{message: "no runs logged yet"}
 				}
 				path, err = a.Pick(cmd.Context(), []string{""}, render.RunList(runs), []look.Key{{Key: "↑↓", Does: "choose"}, {Key: "enter", Does: "open"}, {Key: "q", Does: "quit"}})
 				if errors.Is(err, ask.ErrCancelled) {
@@ -66,7 +66,7 @@ Each run's log is a JSON-lines file in ~/Library/Logs/kit, kept 30 days;
 			default:
 				path, err = logs.Latest(dirs.Logs)
 				if errors.Is(err, logs.ErrNoLogs) {
-					return attention{message: "no runs logged yet"}
+					return notFound{message: "no runs logged yet"}
 				}
 				if err != nil {
 					return err

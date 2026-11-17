@@ -12,7 +12,7 @@ func TestPrefsCommands(t *testing.T) {
 	w := laptopWorld(t)
 	w.writeSection(t, "laptop", "features", "prefs\n")
 	out, _, code := w.run(t, "prefs", "capture")
-	if code != 1 || !strings.Contains(out, "prefs attention paused: capture isn't switched on for this Mac\n") {
+	if code != 0 || !strings.Contains(out, "prefs attention paused: capture isn't switched on for this Mac\n") {
 		t.Errorf("kit prefs capture printed\n%s exit %d", out, code)
 	}
 	if out, _, _ := w.run(t, "prefs", "pending"); out != "Nothing is held to be restored.\n" {

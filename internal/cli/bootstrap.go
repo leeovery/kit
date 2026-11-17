@@ -57,7 +57,7 @@ on there: the whole of kit apply, then a fresh shell.`,
 			// Handed over, kit is the terminal's own command: it becomes the
 			// login shell, so the window stays, whatever the boot came to, a
 			// blank line under its last word.
-			if _, isAttention := errors.AsType[attention](err); err != nil && !isAttention && !errors.Is(err, ask.ErrCancelled) {
+			if _, isFailure := errors.AsType[failure](err); err != nil && !isFailure && !errors.Is(err, ask.ErrCancelled) {
 				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "kit: %v\n", err)
 			}
 			_, _ = fmt.Fprintln(a.Stdout)
@@ -212,7 +212,7 @@ func (a *app) bootstrap(ctx context.Context, mac, repo string, handedOver bool) 
 	case ctx.Err() != nil:
 		return ask.ErrCancelled
 	case report.Attention():
-		return attention{}
+		return failure{}
 	case b.InTerminal():
 		// Run in the terminal kit.toml names, the boot carries on in it, as
 		// it would have, handed over to.
@@ -277,8 +277,8 @@ func (a *app) inTerminal(ctx context.Context, b *boot.Boot, fresh bool) error {
 		return err
 	case ctx.Err() != nil:
 		return ask.ErrCancelled
-	case report.Attention():
-		return attention{}
+	case report.Failed():
+		return failure{}
 	}
 	return nil
 }

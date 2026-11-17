@@ -88,15 +88,14 @@ func TestStatusOfTheHostKey(t *testing.T) {
 		name, recorded, named string
 		off, noKey            bool
 		want                  string
-		status                int
 	}{
-		{"recorded", hostKey, localName, false, false, "host-key ok in kit-config\n", 0},
-		{"not recorded", "", "", false, false, "host-key attention not in kit-config\nhost-key problem SSH host key not in kit-config (kit apply records it)\n", 1},
-		{"another recorded", otherKey, localName, false, false, "host-key attention not kit-config's\nhost-key problem SSH host key not the one kit-config records (kit apply records this Mac's: a Mac set up again has a new one)\n", 1},
-		{"no local hostname recorded", hostKey, "", false, false, "host-key attention local hostname not in kit-config\nhost-key problem local hostname not in kit-config (kit apply records it)\n", 1},
-		{"renamed since", hostKey, "Someones-Old-Name", false, false, "host-key attention local hostname not kit-config's\nhost-key problem local hostname not the one kit-config records (kit apply records this Mac's: it's been renamed)\n", 1},
-		{"none yet", hostKey, localName, false, true, "host-key attention none yet\nhost-key problem no SSH host key yet (macOS makes it at Remote Login's first connection: kit apply connects once, then records it)\n", 1},
-		{"Remote Login off", "", "", true, true, "host-key ok Remote Login is off: no host key to record\n", 0},
+		{"recorded", hostKey, localName, false, false, "host-key ok in kit-config\n"},
+		{"not recorded", "", "", false, false, "host-key attention not in kit-config\nhost-key problem SSH host key not in kit-config (kit apply records it)\n"},
+		{"another recorded", otherKey, localName, false, false, "host-key attention not kit-config's\nhost-key problem SSH host key not the one kit-config records (kit apply records this Mac's: a Mac set up again has a new one)\n"},
+		{"no local hostname recorded", hostKey, "", false, false, "host-key attention local hostname not in kit-config\nhost-key problem local hostname not in kit-config (kit apply records it)\n"},
+		{"renamed since", hostKey, "Someones-Old-Name", false, false, "host-key attention local hostname not kit-config's\nhost-key problem local hostname not the one kit-config records (kit apply records this Mac's: it's been renamed)\n"},
+		{"none yet", hostKey, localName, false, true, "host-key attention none yet\nhost-key problem no SSH host key yet (macOS makes it at Remote Login's first connection: kit apply connects once, then records it)\n"},
+		{"Remote Login off", "", "", true, true, "host-key ok Remote Login is off: no host key to record\n"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			w := laptopWorld(t)
@@ -110,8 +109,8 @@ func TestStatusOfTheHostKey(t *testing.T) {
 			w.sshd(t)
 			was := w.read(t, configFile)
 			out, errOut, status := w.run(t, "status", "host-key")
-			if !strings.Contains(out, tt.want) || status != tt.status {
-				t.Errorf("kit status host-key printed\n%s%s\nexit %d; want it holding\n%s(exit %d)", out, errOut, status, tt.want, tt.status)
+			if !strings.Contains(out, tt.want) || status != 0 {
+				t.Errorf("kit status host-key printed\n%s%s\nexit %d; want it holding\n%s(exit 0)", out, errOut, status, tt.want)
 			}
 			if got := w.read(t, configFile); got != was {
 				t.Errorf("kit.toml =\n%s\nwant it as it was", got)

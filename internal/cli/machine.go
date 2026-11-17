@@ -91,7 +91,7 @@ func (a *app) showMachine(cmd *cobra.Command, dirs config.Dirs) error {
 		if cfg, err := a.loadConfig(dirs); err == nil {
 			hint += ", one of " + strings.Join(cfg.MacNames(), ", ")
 		}
-		return attention{message: "this Mac has no name yet: " + hint}
+		return fmt.Errorf("this Mac has no name yet: %s", hint)
 	}
 	_, err = fmt.Fprintln(cmd.OutOrStdout(), name)
 	return err
