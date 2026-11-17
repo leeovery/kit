@@ -57,7 +57,7 @@ the check says it isn't done.
 `[manual]` with `kit manual add`. It says what to do. A command may say whether it's done, and
 otherwise `kit manual done <name>` marks it.
 
-**Card.** What a whole `kit apply` at a terminal shows when it needs you: what to do, why, and
+**Card.** What the boot, or a whole `kit apply` at a terminal, shows when it needs you: what to do, why, and
 the steps to do it. A step by hand that isn't done comes up as a card.
 
 **Check of your own.** A command declared in `[checks]`, with `kit check add`, that exits 0 when

@@ -1,7 +1,8 @@
 # Linked files: your config files, on every Mac
 
 `kit file add` moves a file you write into [kit-config](glossary.md) and links it back in its
-place. Your next Mac gets the same file at the same path, and `--shared` puts it on every Mac.
+place. A Mac that replaces this one gets the same file at the same path, and `--shared` puts
+it on every Mac.
 You'd want it for any config file you edit by hand, such as `~/.zshrc`.
 
 ## Try it
@@ -51,7 +52,7 @@ stay the app's.
 - **A folder adds file by file.** `kit file add ~/.config/tool` moves and links each file in
   it. A file git ignores stays on this Mac only, and kit names it.
 - **Private files stay private.** A file under `~/.ssh` or `~/.gnupg` is kept readable by you
-  only, and so is its folder.
+  only, and so is its folder. A public key, ending `.pub`, is left as it is.
 - **A new Mac has them from the start.** The boot links kit-config's files when it clones
   kit-config, so the terminal it opens is set up already.
 - **`kit file remove` undoes it.** It puts a copy back in place of the link, and takes the file
@@ -61,10 +62,11 @@ stay the app's.
 
 Some programs replace a file when they save it. They write a new copy where the link was, so
 the link is gone after the first save. Many apps do this with their settings, and so do some
-tools.
+tools. kit can't tell which files a program replaces, so `kit file add` links them anyway.
 
 Don't link those files. Leave them to [apps' settings](apps-settings.md), which saves them
-every night and restores them on a new Mac.
+every night and restores them on a new Mac. It saves only once `kit feature on prefs` is on.
+A settings file outside an app's preferences is saved only if `[prefs files]` names it.
 
 A file that holds a secret doesn't belong in kit-config either. Declare it as a secret, and
 kit writes it on each Mac: see [Secrets from 1Password](secrets.md).

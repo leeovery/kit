@@ -2,8 +2,8 @@
 
 A step of your own is a script in [kit-config](glossary.md) that checks one piece of set-up and
 puts it right. kit runs it with every other step, on this Mac and on a new one. A step by hand
-covers what only you can do, such as a sign-in. You'd want these once packages and settings
-can't say it.
+covers what only you can do, such as a sign-in. You'd want one for set-up that no package or
+setting covers.
 
 ## Try it
 
@@ -18,25 +18,32 @@ kit writes its script as a template, then commits and pushes kit-config:
   ● tool  declared in laptop · its script, laptop/steps/tool/run, is a template: write its check and apply
 ```
 
-The line lands in `[steps]`, in the order you add them:
+The line lands in `[steps]`, in its place by name. The order of the lines doesn't set the
+order steps run in: `--after` and `--before` do.
 
 ```text
 [steps]
 tool "Installs the tool" --after brew
 ```
 
-Fill in `check` and `apply`, then try it:
+Fill in `check` and `apply`, then try it with `kit apply tool`.
 
-```bash
-# Apply it, then show its check
-kit apply tool
-kit status tool
-```
+## What happens
+
+- **The step shows under STEPS** in `kit status`, with the first line its check prints:
+
+  ```console
+    STEPS
+    ● fonts  16 installed
+  ```
+
+- **A new Mac runs it in its place,** once what it comes after is done.
+- **A step by hand raises a card** at a terminal, saying what to do.
 
 ## The script answers check and apply
 
 kit runs `run check` in the step folder. If the check says it isn't done, kit runs `run apply`,
-then checks again. The step is done only once that second check says so.
+then checks again. It's done only once that check says so.
 
 | `run check` exits | kit reads it as |
 |---|---|
@@ -45,31 +52,24 @@ then checks again. The step is done only once that second check says so.
 | 3 | Can't be done yet: not applied this run |
 | anything else | The check failed |
 
-The first line the check prints is what `kit status` shows, under STEPS:
-
-```console
-  STEPS
-  ● fonts  16 installed
-```
-
 A check runs on every `kit status` and every [hourly run](running-by-itself.md), so it must
-change nothing and ask no one. If `apply` fails, its last line says why.
+change nothing and ask no one. If `run apply` fails, the last line it prints says why.
 
 ## A step waits for what it needs
 
-Four flags on `kit step add` say what a step needs. Give each but `--sudo` more than once if
-you need to.
+Four flags on `kit step add` say what a step needs. All but `--sudo` can repeat.
 
 | Flag | What it does |
 |---|---|
 | `--after <name>` | Waits for a step, or a thing such as `cask:firefox` |
 | `--before <name>` | Makes that step wait for this one |
-| `--secret <name>` | Waits for the secret, and runs with it set |
+| `--secret <name>` | Waits for the secret to sync |
 | `--sudo` | Needs an administrator's password to apply |
 
 A secret is named by what it fills, and must be declared first: see
-[Secrets from 1Password](secrets.md). With `--sudo`, kit asks at a terminal for the password once.
-kit gives it to `sudo` when the script asks. `--after restore` waits for the
+[Secrets from 1Password](secrets.md). If the secret is a variable, the script runs with it set.
+A secret that fills a file is only waited for. With `--sudo`, kit asks for the password once at a terminal,
+for `sudo` in the script. `--after restore` waits for the
 [data restore](your-data.md) on a new Mac.
 
 ## Steps done by hand
@@ -91,20 +91,22 @@ licence "Enter the editor's licence"
 tool "Install the tool" --test test -d /Applications/Tool.app
 ```
 
-If a step by hand has a `--test` command, kit runs it to see whether the step is done. Exit 0
-means done. Without one, `kit manual done <name>` marks it done on this Mac.
+The boot, and a whole `kit apply` at a terminal, show each step by hand that isn't done as a
+card. A comment above the line says why, and indented lines under it become numbered steps.
 
-A whole `kit apply` at a terminal shows each step by hand that isn't done as a card. The card
-says what to do, and a comment above the line says why. Indented lines under the line become
-numbered steps on the card.
-
-With `--test`, kit sees the step done and carries on. Without one, you press space once it's
-done. If a card waits a while, kit posts a notification too.
+With `--test`, kit sees the step done once the command exits 0, and carries on. Without one,
+you press space on the card, or run `kit manual done`. If a card waits a while, kit posts a
+notification too.
 
 ## Where a step falls on a new Mac
 
 On this Mac, everything a step comes after is done already. `kit agent order` shows what a new
 Mac has done by the time the step runs:
+
+```bash
+# Where uses-app, a step after cask:ghostty, falls
+kit agent order uses-app
+```
 
 ```console
 uses-app on a new Mac
@@ -117,11 +119,9 @@ Before it
 
 ## Good to know
 
-- **The script runs in kit's environment.** It gets kit's PATH, from `[paths]`, and none of
-  your shell's variables. A token it needs is a `--secret`. Other files in the step folder are its
-  data.
-- **Exit 3 costs a run.** A step that can't be done yet waits for the next `kit apply`. Name
-  what it needs with `--after` or `--secret` instead.
+- **The script runs in kit's environment.** It gets kit's PATH, from `[paths]`, and only a few
+  basics such as `HOME` and `USER`: nothing your `.zshrc` sets.
+- **Exit 3 costs a run.** Name what a step needs with `--after` or `--secret` instead.
 - **Steps by hand come last.** Their cards come up once the rest is done, unless you add
   `--before <step>` to the line by hand.
 
@@ -132,12 +132,11 @@ Before it
 | `kit step add <name> "<what>"` | Declare a step, and write its script |
 | `kit step remove <name>` | Undeclare it, and remove its folder |
 | `kit manual add <name> "<what>"` | Declare a step by hand |
-| `manual add ... -- <command>` | With a command that says it's done |
 | `kit manual done <name>` | Mark it done on this Mac (`--undo`) |
-| `kit manual remove <name>` | Undeclare a step by hand |
 | `kit agent order <name>` | Where it falls in a new Mac's run |
 
-Each `add` takes `--shared` for every Mac, and `--note` for why.
+Each `add` takes `--shared` for every Mac and `--note` for why; `kit manual add` also takes
+`--group`. Each has a `remove`.
 
 ## Related
 

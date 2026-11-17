@@ -24,22 +24,24 @@ runs `kit nightly`. `kit apply` installs that launch and builds kit.app.
 A job is a command kit runs on a schedule. Declare one in `[hourly]` or `[nightly]`:
 
 ```bash
-# Every hour: keep dependency folders out of backups
-kit hourly add marks -- asimov ~/Code
+# Every hour: quoted, so kit writes ~ itself
+kit hourly add notes -- '~/bin/sync-notes'
 # Every night
 kit nightly add tidy -- tidy-up --all
 ```
 
 ```text
 [hourly]
-marks -- asimov ~/Code
+notes -- ~/bin/sync-notes
 
 [nightly]
 tidy -- tidy-up --all
 ```
 
-A nightly job suits work too slow for every hour. For example, one can clear a scratch folder
-of files untouched for a week. kit has no clean-up of its own: a job like that is yours.
+kit reads a `~/` at the start of a word as your home folder when the job runs. Quote it, or
+your shell writes your full home path into the line.
+
+For example, a nightly job can clear a scratch folder of files untouched for a week. kit clears none of your folders: a job like that is yours.
 
 ## What each run does
 
@@ -49,7 +51,7 @@ of files untouched for a week. kit has no clean-up of its own: a job like that i
 | Restores apps' settings that wait for their apps | Saves your apps' settings |
 | Every check, as `kit status` | |
 
-- **The night run comes at 03:00,** unless `nightly_at` in `kit.toml` names another time. A Mac
+- **The nightly run comes at 03:00,** unless `nightly_at` in `kit.toml` names another time. A Mac
   asleep then runs it at the first hourly run after it wakes.
 - **Jobs run one at a time, in order.** One that fails never stops the others. Each may run for
   an hour.
@@ -61,7 +63,7 @@ of files untouched for a week. kit has no clean-up of its own: a job like that i
 ## Checks of your own
 
 A check is a command that exits 0 when all's well. Declare it in `[checks]`, and kit runs it on
-every `kit status` and every hourly run. kit runs it once as you add it:
+every `kit status` and every hourly run. kit runs it once when you add it:
 
 ```bash
 # Check the local DNS server answers
@@ -78,14 +80,9 @@ nothing, and finish within a minute.
 ## kit.app needs Full Disk Access
 
 The hourly run goes through kit.app. kit.app needs Full Disk Access to save apps' settings and
-read Time Machine's state. A whole `kit apply` at a terminal asks for it with
-a card:
-
-```text
-Give kit.app Full Disk Access
-1  System Settings is open at Full Disk Access, and Finder at kit.app
-2  Drag kit.app into the list, and switch it on
-```
+read Time Machine's state. A whole `kit apply` at a terminal asks for it with a card, "Give
+kit.app Full Disk Access". The card opens System Settings at Full Disk Access, and Finder at
+kit.app. Its step says "Drag kit.app into the list, and switch it on".
 
 The next hourly run checks it. A new build of kit.app needs it given again: remove the old one
 from the list with −, then drag kit.app in.
@@ -96,7 +93,7 @@ The runs post no notification and send no message. `kit status` shows what they 
 flags the runs themselves:
 
 - no hourly run in the last two hours;
-- no nightly run finished in the last 26 hours;
+- no nightly run finished in the last 26 hours, if the Mac has nightly jobs or saves apps' settings;
 - a job that failed, and what it said.
 
 `kit nightly <job>` runs a failed job again, and `kit log` shows each run whole.
@@ -107,7 +104,6 @@ flags the runs themselves:
   carries on.
 - **A Mac without the launch says so.** `kit status` flags a Mac that has never run on a
   schedule. `kit apply` puts the launch in place.
-- **Name jobs to run only those.** `kit nightly tidy` runs that job now, then every check.
 
 ## Reference
 
