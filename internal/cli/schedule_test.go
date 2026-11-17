@@ -134,11 +134,12 @@ func TestAnotherKitNamesTheKitOnPath(t *testing.T) {
 }
 
 // homebrewKit is where Homebrew links kit in the world, from the home, its
-// folder ahead of install.sh's copy (kitPath) on kit's PATH, as on a Mac.
+// folder ahead of kitPath's on kit's PATH, as on a Mac.
 var homebrewKit = filepath.Join("homebrew", "bin", "kit")
 
 // withHomebrewFirst puts Homebrew's folder ahead of kitPath's on kit's PATH,
-// and has a Mac's first apply be from install.sh's copy, with no agent yet.
+// and has a Mac's first apply be from the kit there, as install.sh leaves a
+// build of kit's own (KIT_FROM), with no agent yet.
 func withHomebrewFirst(t *testing.T) *world {
 	t.Helper()
 	w := unscheduled(t)
@@ -177,8 +178,9 @@ func (w *world) launchNamesHomebrewKit(t *testing.T, out string) {
 	}
 }
 
-// A new Mac's first apply runs from install.sh's copy, and installs kit's
-// formula: the launch, after the formulae, names Homebrew's kit.
+// A new Mac's first apply runs from a build of kit's own in ~/.local/bin,
+// and installs kit's formula: the launch, after the formulae, names
+// Homebrew's kit.
 func TestFirstApplyNamesHomebrewsKit(t *testing.T) {
 	w := withHomebrewFirst(t)
 	w.writeSection(t, "laptop", "homebrew formulae", "go\nkit\n")

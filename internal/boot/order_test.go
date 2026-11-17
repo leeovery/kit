@@ -57,19 +57,22 @@ func bundle(t *testing.T, b *Boot, name, version string) {
 <plist version="1.0"><dict><key>CFBundleShortVersionString</key><string>` + version + `</string></dict></plist>`})
 }
 
-// The boot order is planned from kit-config: the apps kit.toml names, and,
+// The boot order is planned from kit-config: kit itself after Homebrew,
+// unless the boot runs a build of its own; the apps kit.toml names, and,
 // with a terminal, Full Disk Access for it and the hand-off to it, each
 // step needing the one before.
 func TestOrder(t *testing.T) {
 	for _, tt := range []struct {
-		name, toml string
-		want       []string
+		name, toml, from string
+		want             []string
 	}{
-		{"a terminal", appsToml, []string{"mac", "password", "homebrew", "apps", "kit-config", "full-disk-access", "terminal"}},
-		{"neither", kitToml, []string{"mac", "password", "homebrew", "kit-config"}},
+		{"a terminal", appsToml, "", []string{"mac", "password", "homebrew", "kit", "apps", "kit-config", "full-disk-access", "terminal"}},
+		{"neither", kitToml, "", []string{"mac", "password", "homebrew", "kit", "kit-config"}},
+		{"a build of its own", appsToml, "/Users/someone/kit", []string{"mac", "password", "homebrew", "apps", "kit-config", "full-disk-access", "terminal"}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			b, _ := newBoot(t, runnertest.New(t), GitHub{}, &asker{})
+			b.Getenv = env(map[string]string{"KIT_FROM": tt.from})
 			read(t, b, map[string]string{config.File: tt.toml}, "")
 			order := b.Order()
 			var names []string
@@ -87,7 +90,7 @@ func TestOrder(t *testing.T) {
 	b, _ := newBoot(t, runnertest.New(t), GitHub{}, &asker{})
 	read(t, b, map[string]string{config.File: appsToml}, "")
 	order := b.Order()
-	if access, handOver := order[5], order[6]; access.Waiting != "for Ghostty" || handOver.Title != "Ghostty" {
+	if access, handOver := order[6], order[7]; access.Waiting != "for Ghostty" || handOver.Title != "Ghostty" {
 		t.Errorf("Full Disk Access waits %q, the hand-off is %q; want them the terminal's", access.Waiting, handOver.Title)
 	}
 }
@@ -213,6 +216,75 @@ func TestHomebrew(t *testing.T) {
 	}
 	if res := step.Check(context.Background()); res.State != check.OK || res.Summary != "7.0.9 · Xcode tools 27.0" {
 		t.Errorf("check after = %+v", res)
+	}
+}
+
+// env is a getenv reading vars alone.
+func env(vars map[string]string) func(string) string {
+	return func(name string) string { return vars[name] }
+}
+
+// homebrewAt has brew say its prefix is a folder of the test's, and returns
+// where Homebrew's kit is in it.
+func homebrewAt(t *testing.T, run *runnertest.Fake) string {
+	t.Helper()
+	prefix := t.TempDir()
+	run.On("brew", "--prefix").Prints(prefix + "\n")
+	return filepath.Join(prefix, "bin", "kit")
+}
+
+// linkKit puts kit where Homebrew links it.
+func linkKit(t *testing.T, kit string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(kit), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(kit, nil, 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// kit itself, installed through Homebrew by its formula's full name, which
+// taps its tap: done when Homebrew's kit is in Homebrew's bin, and nothing
+// run when it's there already.
+func TestKit(t *testing.T) {
+	run := runnertest.New(t)
+	kit := homebrewAt(t, run)
+	run.On("brew", "install", "--formula", "leeovery/tools/kit").Does(func() { linkKit(t, kit) })
+	b, _ := newBoot(t, run, GitHub{}, &asker{})
+	step := b.kitStep()
+	if res := step.Check(context.Background()); res.State != check.Attention || res.Summary != "not installed" {
+		t.Fatalf("check before = %+v", res)
+	}
+	if err := step.Apply(context.Background(), check.Result{}); err != nil {
+		t.Fatalf("apply = %v", err)
+	}
+	if res := step.Check(context.Background()); res.State != check.OK || res.Summary != "installed through Homebrew" {
+		t.Errorf("check after = %+v", res)
+	}
+	if !slices.Contains(run.Calls(), "brew install --formula leeovery/tools/kit") {
+		t.Errorf("ran %q; want kit's formula installed", run.Calls())
+	}
+}
+
+// Homebrew's kit there already, the step's done: the boot applies nothing.
+func TestKitThereAlready(t *testing.T) {
+	run := runnertest.New(t)
+	linkKit(t, homebrewAt(t, run))
+	b, _ := newBoot(t, run, GitHub{}, &asker{})
+	if res := b.kitStep().Check(context.Background()); res.State != check.OK {
+		t.Errorf("check = %+v; want it done", res)
+	}
+}
+
+// Installing kit's formula failing fails the step, saying so.
+func TestKitFails(t *testing.T) {
+	run := runnertest.New(t)
+	homebrewAt(t, run)
+	run.On("brew", "install", "--formula", "leeovery/tools/kit").Exits(1).PrintsToStderr("Error: kit: failed to download")
+	b, _ := newBoot(t, run, GitHub{}, &asker{})
+	if err := b.kitStep().Apply(context.Background(), check.Result{}); err == nil || !strings.HasPrefix(err.Error(), "install kit through Homebrew: ") {
+		t.Errorf("apply = %v; want it failed, saying so", err)
 	}
 }
 
@@ -397,10 +469,13 @@ func (o *opener) Open(_ context.Context, _ runner.Runner, app string, w apps.Win
 func (*opener) TabProgress() bool { return false }
 
 // The hand-off, through the terminal's driver, whichever it is: a window
-// opened running kit bootstrap, handed over, maximized, without this run's
-// askpass; done once that kit arrives, saying what macOS asks meanwhile.
+// opened running Homebrew's kit bootstrap, handed over, maximized, without
+// this run's askpass; done once that kit arrives, saying what macOS asks
+// meanwhile.
 func TestHandOver(t *testing.T) {
-	b, s := newBoot(t, runnertest.New(t), GitHub{}, &asker{})
+	run := runnertest.New(t)
+	kit := homebrewAt(t, run)
+	b, s := newBoot(t, run, GitHub{}, &asker{})
 	read(t, b, map[string]string{config.File: appsToml}, "laptop")
 	driver := &opener{does: func() {
 		go func() {
@@ -420,7 +495,7 @@ func TestHandOver(t *testing.T) {
 	if err := step.Apply(context.Background(), check.Result{}); err != nil {
 		t.Fatalf("apply = %v", err)
 	}
-	want := apps.Window{Command: []string{b.Self, "bootstrap", "--handed-over"}, Env: []string{"SUDO_ASKPASS="}, Maximized: true}
+	want := apps.Window{Command: []string{kit, "bootstrap", "--handed-over"}, Env: []string{"SUDO_ASKPASS="}, Maximized: true}
 	if len(driver.windows) != 1 || !reflect.DeepEqual(driver.windows[0], want) || driver.app != filepath.Join(b.Applications, "Ghostty.app") {
 		t.Errorf("opened %q with %+v; want %+v", driver.app, driver.windows, want)
 	}
@@ -442,9 +517,27 @@ func TestHandOver(t *testing.T) {
 	}
 }
 
+// A boot running a build of its own hands over to it, the build named on to
+// the boot handed over to.
+func TestHandOverToABuildOfItsOwn(t *testing.T) {
+	b, _ := newBoot(t, runnertest.New(t), GitHub{}, &asker{})
+	b.Getenv = env(map[string]string{"KIT_FROM": "/Users/someone/kit"})
+	read(t, b, map[string]string{config.File: appsToml}, "laptop")
+	t2, _ := b.terminal(b.config())
+	driver := &opener{fails: errors.New("stop here")}
+	t2.Driver = driver
+	_ = b.handOverStep(t2).Apply(context.Background(), check.Result{})
+	want := apps.Window{Command: []string{b.Self, "bootstrap", "--handed-over"}, Env: []string{"SUDO_ASKPASS=", "KIT_FROM=/Users/someone/kit"}, Maximized: true}
+	if len(driver.windows) != 1 || !reflect.DeepEqual(driver.windows[0], want) {
+		t.Errorf("opened %+v; want %+v", driver.windows, want)
+	}
+}
+
 // A terminal that fails to open fails the hand-off, naming it.
 func TestHandOverFails(t *testing.T) {
-	b, _ := newBoot(t, runnertest.New(t), GitHub{}, &asker{})
+	run := runnertest.New(t)
+	homebrewAt(t, run)
+	b, _ := newBoot(t, run, GitHub{}, &asker{})
 	read(t, b, map[string]string{config.File: appsToml}, "laptop")
 	failed := errors.New("no such app")
 	t2, _ := b.terminal(b.config())

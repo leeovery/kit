@@ -760,10 +760,10 @@ nightly --scheduled` as its child, waits, and quits (`open -W` exits 0 whatever 
 nothing reads how it ended: kit's run log has it). macOS holds kit.app responsible for its
 child, so Full Disk Access is kit.app's, kept across kit's updates as kit.app is rebuilt only
 when its own files change (the dotfiles' Nightly.app did the same). The agent names that kit
-whichever kit applies, so install.sh's copy, or a lasting build of kit's own, names
-the kit on PATH, not itself; with no kit on PATH, the kit applying. It comes after Homebrew's
-formulae, however they went, and finds the kit then, so a new Mac's first apply, from
-install.sh's copy, names Homebrew's kit installed earlier in the run. A build that won't last
+whichever kit applies, so a lasting build of kit's own, as install.sh's `KIT_FROM` leaves in
+`~/.local/bin`, names the kit on PATH, not itself; with no kit on PATH, the kit applying. It
+comes after Homebrew's formulae, however they went, and finds the kit then, so a first apply
+from such a build names Homebrew's kit, installed earlier in the run. A build that won't last
 (`go run`'s, a worktree's, a build in a temporary folder) names none, as applying would rebuild
 kit.app from its files and lose kit.app's Full Disk Access: it leaves the agent as it stands,
 its check looking at the kit the agent names, and `kit apply` saying why it left it. Its check:
@@ -1143,9 +1143,12 @@ adding lines to `[checks]`, `[hourly]` and `[nightly]`; commands naming the kind
 repository of its own, below.
 
 **11. The bootstrap — built.** `install.sh` and `kit bootstrap`: GitHub's sign-in on the
-phone, which Mac it is, Homebrew, the terminal the config names, then `kit apply` on a screen of
-its own, with cards for what a person does by hand; proven from a blank Mac in a virtual
-machine.
+phone, which Mac it is, Homebrew, kit itself through Homebrew (`leeovery/tools/kit`), the
+terminal the config names, then `kit apply`, from Homebrew's kit, on a screen of its own, with
+cards for what a person does by hand; proven from a blank Mac in a virtual machine. install.sh
+runs its download from a temporary folder, removed once the boot has handed over, so nothing's
+left but Homebrew's kit; a build of kit's own (`KIT_FROM`) goes in `~/.local/bin` and runs
+throughout, the boot installing no kit.
 
 **12. Data restore — built.** `[restore]`, copied from the Mac a new one starts from, over SSH
 and pinned to its host key, else from its backups; the boot its one trigger.

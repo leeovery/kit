@@ -4,13 +4,14 @@
 #   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/leeovery/kit/main/install.sh)"
 #
 # It downloads kit's newest release for this Mac, checks it against its
-# checksum, puts it in ~/.local/bin, and starts kit bootstrap. KIT_FROM names
-# a build to use instead: a path or an address, of kit itself or a release's
-# archive.
+# checksum, and runs kit bootstrap from a temporary folder, removed once the
+# boot has ended: the boot installs kit through Homebrew, which keeps it up
+# to date, and hands over to that kit. KIT_FROM names a build to use
+# instead: a path or an address, of kit itself or a release's archive. It's
+# put in ~/.local/bin, and the boot runs it throughout.
 set -eu
 
 repo=leeovery/kit
-bin="$HOME/.local/bin"
 
 fail() {
 	printf 'kit install: %s\n' "$1" >&2
@@ -57,10 +58,17 @@ else
 	mv "$tmp/download" "$tmp/kit"
 fi
 chmod 755 "$tmp/kit"
-mkdir -p "$bin"
-mv "$tmp/kit" "$bin/kit"
 
-size=$(wc -c <"$bin/kit" | awk '{ printf "%.1f", $1 / 1000000 }')
-version=$("$bin/kit" --version | sed 's/^kit version /kit /')
+size=$(wc -c <"$tmp/kit" | awk '{ printf "%.1f", $1 / 1000000 }')
+version=$("$tmp/kit" --version | sed 's/^kit version /kit /')
 printf '%s for %s · %s MB · %s\n' "$version" "$arch" "$size" "$checked"
-exec "$bin/kit" bootstrap
+if [ -n "${KIT_FROM-}" ]; then
+	# The boot reads KIT_FROM to run this build throughout.
+	export KIT_FROM
+	mkdir -p "$HOME/.local/bin"
+	mv "$tmp/kit" "$HOME/.local/bin/kit"
+	rm -rf "$tmp"
+	exec "$HOME/.local/bin/kit" bootstrap
+fi
+# A child, not exec'd, so the trap removes the download once the boot ends.
+"$tmp/kit" bootstrap

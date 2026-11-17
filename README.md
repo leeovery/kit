@@ -21,7 +21,7 @@ brew install leeovery/tools/kit
 ```
 
 On a new Mac, before Homebrew, `install.sh` downloads the newest release, checks it, and starts
-`kit bootstrap`:
+`kit bootstrap`, which installs Homebrew, then kit through it, and carries on from that kit:
 
 ```bash
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/leeovery/kit/main/install.sh)"
