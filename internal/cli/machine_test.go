@@ -34,6 +34,26 @@ func TestMachineSetsAndShowsTheName(t *testing.T) {
 	}
 }
 
+// With --json, kit machine's name is a document, and setting it says the
+// name it had, when it had another.
+func TestMachineWithJSON(t *testing.T) {
+	w := newWorld(t, map[string]string{"kit.toml": twoMacs})
+	for _, s := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"machine", "laptop", "--json"}, `{"schema":1,"machine":"laptop"}`},
+		{[]string{"machine", "--json"}, `{"schema":1,"machine":"laptop"}`},
+		{[]string{"machine", "laptop", "--json"}, `{"schema":1,"machine":"laptop"}`},
+		{[]string{"machine", "studio", "--json"}, `{"schema":1,"machine":"studio","was":"laptop"}`},
+	} {
+		out, errOut, status := w.run(t, s.args...)
+		if got := compact(t, out); got != s.want || errOut != "" || status != 0 {
+			t.Errorf("kit %v printed %q, %q, exit %d; want %s", s.args, out, errOut, status, s.want)
+		}
+	}
+}
+
 func TestMachineWithoutAName(t *testing.T) {
 	tests := []struct {
 		name  string

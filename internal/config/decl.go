@@ -275,40 +275,40 @@ func (l List) On() []string {
 type Entry struct {
 	// Name is what kit calls it: the name a line declares, or, in a project
 	// folder's section, the folder and the name, as in ~/Code/site:mail.
-	Name string
+	Name string `json:"name"`
 	// Value is what follows the name on a command's line: its options.
-	Value string `json:",omitempty"`
+	Value string `json:"value,omitempty"`
 	// Scope is whose declarations file declares it: shared, or a Mac's.
-	Scope string `json:",omitempty"`
+	Scope string `json:"scope,omitempty"`
 	// File is the file declaring it when that isn't a declarations file, as
 	// a linked file's own, in the config repository.
-	File string `json:",omitempty"`
+	File string `json:"file,omitempty"`
 	// Section is its section's header, as in homebrew formulae.
-	Section string
+	Section string `json:"section"`
 	// Folder is the project folder whose section it's in, if any.
-	Folder string `json:",omitempty"`
+	Folder string `json:"folder,omitempty"`
 	// Item is the store's item whose section it's in, if any, as in
 	// op://vault/item; As is the name that section goes by, if it has one,
 	// as its header says after --as.
-	Item string `json:",omitempty"`
-	As   string `json:",omitempty"`
+	Item string `json:"item,omitempty"`
+	As   string `json:"as,omitempty"`
 	// Hold is what its section holds its lines back for, as its header says
 	// after its name, if it does, as kit writes it: --after a step or one of
 	// a step's things, --secret a secret they need (After, Secrets).
-	Hold string `json:",omitempty"`
+	Hold string `json:"hold,omitempty"`
 	// Line is its line in that file.
-	Line int
+	Line int `json:"line"`
 	// Note is the comment after it, saying why it's there, if any.
-	Note string
+	Note string `json:"note"`
 	// Notes are the comments directly above it, no blank line between, as
 	// one paragraph: each without its # and the space after that.
-	Notes string `json:",omitempty"`
+	Notes string `json:"notes,omitempty"`
 	// Steps are what to do, in order, as the lines indented under it say: a
 	// step by hand's.
-	Steps []string `json:",omitempty"`
+	Steps []string `json:"steps,omitempty"`
 	// Off is whether it's declared, but not to be installed: never installed
 	// by kit, and left alone when it is. Kinds whose lines say so set it.
-	Off bool `json:",omitempty"`
+	Off bool `json:"off,omitempty"`
 	// DefaultNote is a note kit makes up for a line it declares, as an
 	// app's name: its note only when neither Note nor a line a shared
 	// declare moves gives one. Never read from a file.
@@ -831,13 +831,15 @@ func (c *Config) List(kind, mac string) (List, error) {
 // Place is one of the sections of a kind with sections for items
 // (Section.Items), where its things are kept: the item it's for, "" for the
 // plain section; the name it goes by (--as), if any; whose declarations
-// file it's in, shared or a Mac's, and the line of its header; and how many
-// things it declares.
+// file it's in, shared or a Mac's, and the line of its header; how many
+// things it declares; and, for an item, the sections of the item its lines
+// name, sorted: what's before a line's last slash, as in GitHub/token.
 type Place struct {
 	Item, As string
 	Scope    string
 	Line     int
 	Count    int
+	Sections []string
 }
 
 // Places are kind's sections in the shared file then the Mac named mac's,
@@ -864,6 +866,9 @@ func (c *Config) Places(kind, mac string) ([]Place, error) {
 				return nil, err
 			}
 			p := Place{Item: s.arg, As: s.as, Scope: scope, Line: s.start, Count: len(entries)}
+			if p.Item != "" {
+				p.Sections = itemSections(entries)
+			}
 			if other, ok := named[p.As]; ok && other.Item != p.Item {
 				return nil, fmt.Errorf("%s:%d: [%s]: %s %s is %s in %s (line %d): a name stands for one item", DeclFile(scope), p.Line, s.name(), asOption, p.As, other.Item, DeclFile(other.Scope), other.Line)
 			}
@@ -874,6 +879,23 @@ func (c *Config) Places(kind, mac string) ([]Place, error) {
 		}
 	}
 	return places, nil
+}
+
+// itemSections are the sections of an item that entries, the lines of its
+// block, name: what's before each one's last slash, sorted, each once.
+func itemSections(entries []Entry) []string {
+	var sections []string
+	for _, e := range entries {
+		words, err := Words(e.Value)
+		if err != nil || len(words) == 0 {
+			continue
+		}
+		if i := strings.LastIndex(words[0], "/"); i > 0 {
+			sections = append(sections, words[0][:i])
+		}
+	}
+	slices.Sort(sections)
+	return slices.Compact(sections)
 }
 
 // Where are the entries for name in kind's sections: the shared file's,

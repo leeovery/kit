@@ -7,8 +7,12 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/leeovery/kit/internal/config"
+	"github.com/leeovery/kit/internal/render"
 	"github.com/leeovery/kit/internal/steps"
 )
+
+// doneSchema is kit manual done --json's document's version.
+const doneSchema = 1
 
 // newDoneCommand is kit manual done: steps by hand marked done.
 func newDoneCommand(a *app) *cobra.Command {
@@ -36,6 +40,13 @@ itself, such as signing in somewhere. --undo marks them not done.`,
 			}
 			if err := steps.MarkDone(r.stateDir, names, r.now, undo); err != nil {
 				return err
+			}
+			if a.json {
+				return render.WriteJSON(a.Stdout, struct {
+					Schema int      `json:"schema"`
+					Marked []string `json:"marked"`
+					Done   bool     `json:"done"`
+				}{doneSchema, names, !undo})
 			}
 			verb := "done"
 			if undo {

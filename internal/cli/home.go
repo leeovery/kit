@@ -22,8 +22,11 @@ const underHome = "under-home"
 // with the Mac and the time, what to run next, each with what it does and
 // its command, Status first. q folds it away; enter leaves the line chosen,
 // and kit becomes that command, under the wordmark. Without a terminal,
-// kit's help; kit status is the report.
+// kit's help; kit status is the report. Neither takes --json.
 func (a *app) home(cmd *cobra.Command) error {
+	if err := a.textOnly(cmd); err != nil {
+		return err
+	}
 	if !a.pretty(a.Stdout) {
 		return cmd.Help()
 	}

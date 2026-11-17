@@ -21,15 +21,23 @@ as in API_TOKEN, or a file's path, from ~ or /.
 - The value comes typed at a terminal, on standard input (`--stdin`), from
   a file (`--from`, kept as an attachment), or is in a store already
   (`--ref` and where it's kept, in full: nothing is stored then).
-- A new value goes where you say, nowhere unless you do: `--in` and a
-  block's name, or `--item` and the store's item, in full. `--field` says
-  where in the item. `kit secret places` lists the blocks, as this guide's
-  facts do.
+- A new value goes where you say: `--in` and a block's name, or `--item`
+  and the store's item, in full; told neither, in its file's block for an
+  item when that's the file's one. `--field` says where in the item.
+  `kit secret places` lists the blocks, with the item's sections their
+  lines name, as this guide's facts do.
 - `--mode` sets a file's permissions (600 otherwise).
 - `--shared` declares it for every Mac.
 
 `kit secret add --help` says how the stores kit knows write their
 references.
+
+## The person's approval
+
+Reading, keeping or deleting a value may have the person approve it, at
+their store's prompt, as 1Password's app asks for a fingerprint once its
+last approval has lapsed. A command waits up to 10 minutes for that: tell
+the person to look for the prompt. Only they can answer it.
 
 ## How they're declared
 

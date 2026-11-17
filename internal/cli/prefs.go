@@ -7,6 +7,7 @@ import (
 	"maps"
 	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -95,7 +96,8 @@ what's waiting too, but opens only such helpers, and leaves what failed to
 		Short: "The captures that changed anything, or one domain's or file's changes",
 		Long: `The captures that changed anything, newest first; or, named, one domain's
 or one settings file's (~/...) changes over time, as diffs: settings are
-sorted XML, so a diff is the setting that changed.`,
+sorted XML, so a diff is the setting that changed. --json gives them as a
+list: each one's commit, date and message, and what it changed.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return a.prepared(cmd, prefsNoun+" history", func(ctx context.Context, r *run) error {
@@ -107,12 +109,14 @@ sorted XML, so a diff is the setting that changed.`,
 				if len(args) == 1 {
 					target = args[0]
 				}
-				out, err := p.History(ctx, from, target, count)
+				changes, err := p.History(ctx, from, target, count)
+				if errors.Is(err, prefs.ErrNoHistory) {
+					return notFound{message: err.Error()}
+				}
 				if err != nil {
 					return err
 				}
-				_, err = fmt.Fprintln(a.Stdout, out)
-				return err
+				return a.writeHistory(changes)
 			})
 		},
 	}
@@ -149,6 +153,12 @@ again. --clear drops it all, so capture saves what's on the Mac.`,
 				if err := p.StartFresh(); err != nil {
 					return err
 				}
+				if a.json {
+					return render.WriteJSON(a.Stdout, struct {
+						Schema    int  `json:"schema"`
+						CaptureOn bool `json:"capture_on"`
+					}{prefsSchema, true})
+				}
 				_, err = fmt.Fprintln(a.Stdout, "Capture is switched on for this Mac: the next capture starts its store.")
 				return err
 			})
@@ -156,6 +166,33 @@ again. --clear drops it all, so capture saves what's on the Mac.`,
 	}
 	cmd.AddCommand(capture, restore, history, pending, startFresh)
 	return cmd
+}
+
+// prefsSchema is the version of the documents kit prefs's commands print
+// with --json: history's, start-fresh's and pending --clear's.
+const prefsSchema = 1
+
+// writeHistory writes the captures History found: as one document with
+// --json, else each as git shows it, with what it changed under it.
+func (a *app) writeHistory(changes []prefs.Change) error {
+	if a.json {
+		return render.WriteJSON(a.Stdout, struct {
+			Schema  int            `json:"schema"`
+			History []prefs.Change `json:"history"`
+		}{prefsSchema, changes})
+	}
+	shown := make([]string, len(changes))
+	for i, c := range changes {
+		shown[i] = c.Commit + "  " + c.Date.Format("2006-01-02 15:04") + "  " + c.Message
+		switch {
+		case c.Stat != "":
+			shown[i] += "\n\n " + c.Stat
+		case c.Diff != "":
+			shown[i] += "\n\n" + c.Diff
+		}
+	}
+	_, err := fmt.Fprintln(a.Stdout, strings.Join(shown, "\n"))
+	return err
 }
 
 // prefs is apps' settings on this Mac, with kit-config's lists for it.
@@ -295,6 +332,12 @@ func (a *app) prefsPending(r *run, clear bool) error {
 		n, err := p.ClearPending()
 		if err != nil {
 			return err
+		}
+		if a.json {
+			return render.WriteJSON(a.Stdout, struct {
+				Schema  int `json:"schema"`
+				Cleared int `json:"cleared"`
+			}{prefsSchema, n})
 		}
 		_, err = fmt.Fprintf(a.Stdout, "Cleared %d %s: capture saves what's on the Mac for them now.\n", n, look.Plural(n, "pending setting", "pending settings"))
 		return err

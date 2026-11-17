@@ -101,7 +101,7 @@ func TestCommandsByTheStartOfTheirName(t *testing.T) {
 	if short != full || shortErr != fullErr || shortCode != fullCode {
 		t.Errorf("kit rec printed %q, %q, exit %d; want what kit reconcile does: %q, %q, exit %d", short, shortErr, shortCode, full, fullErr, fullCode)
 	}
-	if _, errOut, code := w.run(t, "s"); errOut != "kit: kit s could be kit secret, kit splash, kit spotlight-exclusion, kit status, kit step\n" || code != 2 {
+	if _, errOut, code := w.run(t, "s"); !strings.HasPrefix(errOut, "kit: kit s could be kit secret, kit splash, kit spotlight-exclusion, kit status, kit step\n") || code != 2 {
 		t.Errorf("kit s printed %q, exit %d", errOut, code)
 	}
 	// Under a command, one that's not known shows that command's help, its

@@ -9,8 +9,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"slices"
-	"strings"
 	"time"
 
 	"github.com/charmbracelet/colorprofile"
@@ -22,6 +20,7 @@ import (
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/kinds"
 	"github.com/leeovery/kit/internal/look"
+	"github.com/leeovery/kit/internal/render"
 	"github.com/leeovery/kit/internal/runner"
 	"github.com/leeovery/kit/internal/steps"
 )
@@ -135,6 +134,10 @@ type app struct {
 	json    bool
 	plain   bool
 	verbose bool
+	version bool
+	// parsed is whether kit got as far as running the command: its command
+	// line read, so what went wrong is no mistake in it.
+	parsed bool
 	// underHome is whether kit runs from its home's menu, under the home's
 	// wordmark: its own heading leaves the wordmark out.
 	underHome bool
@@ -161,13 +164,12 @@ func NewRootCommand(deps Deps) *cobra.Command {
 	cobra.EnablePrefixMatching = true
 	a := &app{Deps: deps}
 	root := &cobra.Command{
-		Use:     "kit",
-		Short:   "Set up a Mac from a config repository, and keep it that way",
-		Version: deps.Version,
+		Use:   "kit",
+		Short: "Set up a Mac from a config repository, and keep it that way",
 		// Flags and arguments have parsed by the time this runs, so usage still
 		// follows a mistyped command line but not a failure after it.
-		PersistentPreRun: func(cmd *cobra.Command, _ []string) {
-			cmd.SilenceUsage = true
+		PersistentPreRun: func(*cobra.Command, []string) {
+			a.parsed = true
 		},
 		SilenceErrors:     true,
 		CompletionOptions: cobra.CompletionOptions{DisableDefaultCmd: true},
@@ -176,7 +178,12 @@ func NewRootCommand(deps Deps) *cobra.Command {
 Run alone at a terminal, it's kit's menu: what to run next, at once. kit
 status is the report, every check.`,
 		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error { return a.home(cmd) },
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if a.version {
+				return a.showVersion()
+			}
+			return a.home(cmd)
+		},
 	}
 	root.SuggestionsMinimumDistance = 2
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return usageError{err} })
@@ -189,6 +196,7 @@ status is the report, every check.`,
 	flags.BoolVar(&a.verbose, "verbose", false, "keep commands' output whole in the run's log")
 	flags.BoolVar(&a.underHome, underHome, false, "run from kit's home, under its wordmark")
 	_ = flags.MarkHidden(underHome)
+	root.Flags().BoolVarP(&a.version, "version", "v", false, "version for kit")
 	// Commands show in the order they're added: the whole Mac's by use,
 	// then what kit manages, by group.
 	cobra.EnableCommandSorting = false
@@ -199,6 +207,10 @@ status is the report, every check.`,
 	}
 	root.AddCommand(nounCommands(a)...)
 	root.AddCommand(newSplashCommand(a))
+	root.InitDefaultHelpCmd()
+	if help, _, err := root.Find([]string{"help"}); err == nil {
+		help.PreRunE = func(cmd *cobra.Command, _ []string) error { return a.textOnly(cmd) }
+	}
 	return root
 }
 
@@ -211,12 +223,9 @@ func Execute(ctx context.Context, root *cobra.Command, args []string) int {
 	if ok {
 		defer e.a.unwind()
 	}
-	// In kit's look, what went wrong says what to run instead of a usage.
-	if ok && e.a.Terminal(e.Writer) && !slices.ContainsFunc(args, func(arg string) bool {
-		return arg == "--plain" || strings.HasPrefix(arg, "--json")
-	}) {
-		root.SilenceUsage = true
-	}
+	// kit shows a usage itself, where one helps (errOut.show): cobra's goes
+	// to standard output.
+	root.SilenceUsage = true
 	cmd, err := root.ExecuteContextC(ctx)
 	if err == nil {
 		return 0
@@ -224,22 +233,37 @@ func Execute(ctx context.Context, root *cobra.Command, args []string) int {
 	if _, isFailure := errors.AsType[failure](err); isFailure {
 		return failedStatus
 	}
-	_, isNotFound := errors.AsType[notFound](err)
-	if ok {
-		e.show(cmd, args, err, isNotFound)
-	} else {
-		_, _ = fmt.Fprintf(root.ErrOrStderr(), "kit: %v\n", err)
-	}
-	switch {
+	status := couldntStatus
+	switch _, isNotFound := errors.AsType[notFound](err); {
 	case isNotFound:
-		return 0
+		status = 0
 	// A question cancelled exits as a failure: nothing was done, so what
 	// needed attention still does.
 	case errors.Is(err, ask.ErrCancelled):
-		return failedStatus
+		status = failedStatus
 	}
-	return couldntStatus
+	if ok {
+		e.show(cmd, args, err, status)
+	} else {
+		_, _ = fmt.Fprintf(root.ErrOrStderr(), "kit: %v\n", err)
+	}
+	return status
 }
+
+// showVersion prints kit's version: as a document with --json.
+func (a *app) showVersion() error {
+	if a.json {
+		return render.WriteJSON(a.Stdout, struct {
+			Schema  int    `json:"schema"`
+			Version string `json:"version"`
+		}{versionSchema, a.Version})
+	}
+	_, err := fmt.Fprintf(a.Stdout, "kit version %s\n", a.Version)
+	return err
+}
+
+// versionSchema is kit --version --json's document's version.
+const versionSchema = 1
 
 // unwind, deferred at kit's top, has a panic put the terminal back as the
 // faces kit showed found it (applying's screen takes the terminal's

@@ -296,8 +296,9 @@ func (a *app) secretValue(ctx context.Context, r *run, name string, so secretOpt
 // file, and the name the block goes by should kit make it, of places, the
 // secrets' blocks this Mac reads: for a reference, the item of the file's
 // block it's in, if one is, else none (the plain [secrets]); for a new
-// value, --item's, or the item --in's name stands for. A new value needs
-// one of them: else it's refused, listing the blocks.
+// value, --item's, or the item --in's name stands for, or, told neither, the
+// item of the file's one block for an item. Without that one, it's refused,
+// listing the blocks.
 func secretPlace(so secretOptions, places []config.Place, scope string) (item, as string, err error) {
 	switch {
 	case so.ref != "":
@@ -324,6 +325,15 @@ func secretPlace(so secretOptions, places []config.Place, scope string) (item, a
 			return "", "", fmt.Errorf("no secrets block goes by %s: %s", so.in, blocksSaid(places))
 		}
 		return places[i].Item, so.in, nil
+	}
+	var own []config.Place
+	for _, p := range places {
+		if p.Scope == scope && p.Item != "" {
+			own = append(own, p)
+		}
+	}
+	if len(own) == 1 {
+		return own[0].Item, own[0].As, nil
 	}
 	return "", "", fmt.Errorf("say where it goes: --in <a block's name>, or --item <an item> (%s), its block made when the file has none; %s", secret.Items(), blocksSaid(places))
 }

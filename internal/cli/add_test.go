@@ -79,7 +79,7 @@ func TestAddCancelledDoesNothing(t *testing.T) {
 
 func TestAddHasNoGroups(t *testing.T) {
 	w := laptopWorld(t)
-	if _, errOut, code := w.run(t, "brew", "add", "golangci-lint", "--group", "Go"); errOut != "kit: unknown flag: --group\n" || code != 2 {
+	if _, errOut, code := w.run(t, "brew", "add", "golangci-lint", "--group", "Go"); !strings.HasPrefix(errOut, "kit: unknown flag: --group\n") || code != 2 {
 		t.Errorf("kit brew add --group: %q, exit %d; want the flag unknown", errOut, code)
 	}
 }

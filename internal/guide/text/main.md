@@ -65,6 +65,7 @@ Take the first that fits, in this order:
 6. The person's data: code, history, ledgers, a tool's state. The restore
    list, `[restore]`: `kit restore add`.
 7. A step done by hand: `kit manual add`, for what only a person can do.
+   Once they've done one kit can't check, `kit manual done <name>` marks it.
 8. A step of your own: `kit step add`, a script, the last resort.
 
 A file or folder that's none of 3 to 6 is nothing of kit's: kit rebuilds

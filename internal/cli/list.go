@@ -133,7 +133,7 @@ func (a *app) list(ctx context.Context, r *run, args []string) error {
 }
 
 // whySchema is kit why --json's document's version.
-const whySchema = 2
+const whySchema = 3
 
 // why is what kit knows of a name, as one kind.
 type why struct {

@@ -16,6 +16,7 @@ import (
 	"github.com/leeovery/kit/internal/ask"
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/look"
+	"github.com/leeovery/kit/internal/render"
 )
 
 // brief is the annotation holding what a command does, briefly, as kit's
@@ -200,12 +201,17 @@ func startingWith(root *cobra.Command, parent, typed string) []string {
 	return names
 }
 
-// show shows err, from cmd run with args: at a terminal, a row of its own,
-// what to do about it on the line under it; else "kit:" and the error. An
-// error that only needs attention shows as such. A command line naming a
-// command by a start of its name that others' names start with too lists
-// them.
-func (e *errOut) show(cmd *cobra.Command, args []string, err error, needsYou bool) {
+// errorSchema is the version of the document kit prints, with --json, for
+// what went wrong.
+const errorSchema = 1
+
+// show shows err, from cmd run with args, which has kit exit with status:
+// with --json, a document on standard output; at a terminal, a row of its
+// own, what to do about it on the line under it; else "kit:" and the
+// error, then, for a command line kit couldn't read, its usage. An error
+// that only needs attention shows as such. A command line naming a command
+// by a start of its name that others' names start with too lists them.
+func (e *errOut) show(cmd *cobra.Command, args []string, err error, status int) {
 	m := unknownCommand.FindStringSubmatch(err.Error())
 	var could []string
 	if m != nil {
@@ -213,14 +219,27 @@ func (e *errOut) show(cmd *cobra.Command, args []string, err error, needsYou boo
 			could = append(could, m[2]+" "+name)
 		}
 	}
-	if !e.a.pretty(e.Writer) {
-		if len(could) > 1 {
-			_, _ = fmt.Fprintf(e.Writer, "kit: %s %s could be %s\n", m[2], m[1], strings.Join(could, ", "))
-			return
-		}
-		_, _ = fmt.Fprintf(e.Writer, "kit: %v\n", err)
+	said := err.Error()
+	if len(could) > 1 {
+		said = fmt.Sprintf("%s %s could be %s", m[2], m[1], strings.Join(could, ", "))
+	}
+	// A command line kit couldn't read may not have set --json or --plain.
+	if e.a.json || slices.Contains(args, "--json") {
+		_ = render.WriteJSON(e.a.Stdout, struct {
+			Schema int    `json:"schema"`
+			Error  string `json:"error"`
+			Exit   int    `json:"exit"`
+		}{errorSchema, said, status})
 		return
 	}
+	if !e.a.pretty(e.Writer) || slices.Contains(args, "--plain") {
+		_, _ = fmt.Fprintf(e.Writer, "kit: %s\n", said)
+		if !e.a.parsed {
+			_, _ = fmt.Fprintln(e.Writer, cmd.UsageString())
+		}
+		return
+	}
+	_, needsYou := errors.AsType[notFound](err)
 	width := min(max(e.a.Width(e.Writer), 40), look.Width)
 	state, says := look.Failed, look.Red
 	switch {

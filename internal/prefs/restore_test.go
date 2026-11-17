@@ -3,6 +3,7 @@ package prefs_test
 import (
 	"archive/tar"
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -624,19 +625,34 @@ func TestRestoreAt(t *testing.T) {
 	}
 }
 
+// History lists the captures from git's log, each with what it changed:
+// in all, or a domain's or a file's diff; none is ErrNoHistory.
 func TestHistory(t *testing.T) {
 	w := newWorld(t, prefs.Lists{})
-	format := []string{"-C", w.clone, "log", "--no-color", "-n5", "--date=format:%Y-%m-%d %H:%M", "--format=%h  %ad  %s"}
-	w.fake.On("git", append(format, "--shortstat", "--", "laptop")...).Prints("abc1234  2026-10-06 03:00  Capture 2026-10-06 03:00: 1 changed\n")
-	w.fake.On("git", append(format, "-p", "--", "laptop/domains/com.example.app.plist")...).Prints("a diff\n")
+	format := []string{"-C", w.clone, "log", "--no-color", "-n5", "--format=%x1e%h%x00%aI%x00%s"}
+	w.fake.On("git", append(format, "--shortstat", "--", "laptop")...).Prints("\x1eabc1234\x002026-10-06T03:00:00+01:00\x00Capture 2026-10-06 03:00: 1 changed\n\n 1 file changed, 2 insertions(+)\n" +
+		"\x1edef5678\x002026-10-05T03:00:00+01:00\x00Capture 2026-10-05 03:00: 2 changed\n\n 2 files changed, 1 deletion(-)\n")
+	w.fake.On("git", append(format, "-p", "--", "laptop/domains/com.example.app.plist")...).Prints("\x1eabc1234\x002026-10-06T03:00:00+01:00\x00Capture\n\ndiff --git a/x b/x\n context\n+added\n")
 	w.fake.On("git", append(format, "-p", "--", "laptop/files/.config/tool/settings.json")...).Prints("")
-	if out, err := w.p.History(t.Context(), "", "", 5); err != nil || !strings.HasPrefix(out, "abc1234") {
-		t.Errorf("History() = %q, %v", out, err)
+	bst := time.FixedZone("", 3600)
+	changes, err := w.p.History(t.Context(), "", "", 5)
+	want := []prefs.Change{
+		{Commit: "abc1234", Date: time.Date(2026, 10, 6, 3, 0, 0, 0, bst), Message: "Capture 2026-10-06 03:00: 1 changed", Stat: "1 file changed, 2 insertions(+)"},
+		{Commit: "def5678", Date: time.Date(2026, 10, 5, 3, 0, 0, 0, bst), Message: "Capture 2026-10-05 03:00: 2 changed", Stat: "2 files changed, 1 deletion(-)"},
 	}
-	if out, err := w.p.History(t.Context(), "", "com.example.app", 5); err != nil || out != "a diff" {
-		t.Errorf("History(domain) = %q, %v", out, err)
+	if err != nil || len(changes) != 2 {
+		t.Fatalf("History() = %+v, %v", changes, err)
 	}
-	if _, err := w.p.History(t.Context(), "", "~/.config/tool/settings.json", 5); err == nil || !strings.Contains(err.Error(), "no history for laptop/files/.config/tool/settings.json") {
+	for i := range want {
+		if c := changes[i]; c.Commit != want[i].Commit || !c.Date.Equal(want[i].Date) || c.Message != want[i].Message || c.Stat != want[i].Stat || c.Diff != "" {
+			t.Errorf("History()[%d] = %+v, want %+v", i, c, want[i])
+		}
+	}
+	changes, err = w.p.History(t.Context(), "", "com.example.app", 5)
+	if err != nil || len(changes) != 1 || changes[0].Diff != "diff --git a/x b/x\n context\n+added" || changes[0].Stat != "" {
+		t.Errorf("History(domain) = %+v, %v", changes, err)
+	}
+	if _, err := w.p.History(t.Context(), "", "~/.config/tool/settings.json", 5); !errors.Is(err, prefs.ErrNoHistory) || !strings.Contains(err.Error(), "no history for laptop/files/.config/tool/settings.json") {
 		t.Errorf("History(file) = %v", err)
 	}
 }
