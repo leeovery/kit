@@ -1,0 +1,12 @@
+#!/bin/sh
+# kit, as the tapes type it: the capture tool drawing the same command's
+# screen from its fixture, never kit itself. A tape puts this directory on a
+# PATH without Homebrew's, so the kit installed on the Mac can't be reached.
+here=$(cd "$(dirname "$0")" && pwd)
+case "$*" in
+status) exec "$here/../out/capturetool" --fixture status ;;
+*)
+	echo "kit (demo): no fixture draws kit $*" >&2
+	exit 1
+	;;
+esac
