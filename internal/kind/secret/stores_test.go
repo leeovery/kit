@@ -105,6 +105,8 @@ func (f *fakeStore) Field(field string) (string, error) { return field, nil }
 
 func (f *fakeStore) Attachment(name string) (string, error) { return name, nil }
 
+func (f *fakeStore) Section(string) (string, bool) { return "", false }
+
 func (f *fakeStore) Free(_ context.Context, _ runner.Runner, item, short string) error {
 	if _, ok := f.values[f.Join(item, short)]; ok {
 		return errors.New(short + " is kept already")

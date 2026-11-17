@@ -31,10 +31,10 @@ couldn't find out; `deferred`, not checked, as what it needs isn't there.
 - Its `items` say what: each an `id`, as in brew:jq, and a `state`, in its
   kind's words (missing, extra), or `problem` or `manual` for what only
   the person can put right or do, its `to_do` saying what.
-- An item with `quiet` needs nothing yet: `new` on its first day, `snoozed`
-  or `temporary`. A step whose items are all quiet reads `ok`: read its
-  items too. `later` is one that comes by itself; `action` is what
-  `kit apply` would do about it.
+- An item with `quiet` needs nothing yet, whatever it says, as in `new` on
+  its first day, `snoozed` or `temporary`. A step whose items are all quiet
+  reads `ok`: read its items too. `later` is one that comes by itself;
+  `action` is what `kit apply` would do about it.
 - The `config` step reads `ok` on an edit's first day: each of its items
   is a file in kit-config not committed. Commit it before you finish.
 
@@ -57,5 +57,8 @@ it, or takes the safe one.
 - `kit` alone prints its help: `kit status` is the report.
 
 Every command takes `--json`, for one JSON document to read, but `kit`
-alone, `kit help` and `kit agent`, which print text. With `--json`, what
-went wrong is a document too: `error`, what it was, and `exit`, the status.
+alone, help (kit help, `--help`, or a group alone, as `kit brew`) and
+`kit agent`, which print text and refuse it, and `kit splash`, which plays
+only at a terminal. With `--json`, what went wrong is a document too:
+`error`, what it was, and `exit`, the status; after the command's own
+document, it's a line on standard error.

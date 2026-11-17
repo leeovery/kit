@@ -326,14 +326,14 @@ func secretPlace(so secretOptions, places []config.Place, scope string) (item, a
 		}
 		return places[i].Item, so.in, nil
 	}
-	var own []config.Place
-	for _, p := range places {
+	own, at := 0, 0
+	for i, p := range places {
 		if p.Scope == scope && p.Item != "" {
-			own = append(own, p)
+			own, at = own+1, i
 		}
 	}
-	if len(own) == 1 {
-		return own[0].Item, own[0].As, nil
+	if own == 1 {
+		return places[at].Item, places[at].As, nil
 	}
 	return "", "", fmt.Errorf("say where it goes: --in <a block's name>, or --item <an item> (%s), its block made when the file has none; %s", secret.Items(), blocksSaid(places))
 }

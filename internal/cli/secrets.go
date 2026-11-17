@@ -14,6 +14,7 @@ import (
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/kind/secret"
+	"github.com/leeovery/kit/internal/kind/secret/store"
 	"github.com/leeovery/kit/internal/look"
 	"github.com/leeovery/kit/internal/render"
 	"github.com/leeovery/kit/internal/steps"
@@ -222,12 +223,26 @@ func secretsPlaces(cfg *config.Config, machine string) ([]place, error) {
 	}
 	places := make([]place, len(found))
 	for i, p := range found {
-		places[i] = place{Name: p.As, Item: p.Item, Scope: p.Scope, File: config.DeclFile(p.Scope), Line: p.Line, Secrets: p.Count, Sections: p.Sections}
+		places[i] = place{Name: p.As, Item: p.Item, Scope: p.Scope, File: config.DeclFile(p.Scope), Line: p.Line, Secrets: p.Count}
 		if d, err := secret.ItemStore(p.Item); p.Item != "" && err == nil {
 			places[i].Store = d.About().Name
+			places[i].Sections = sectionsOf(d, p.Shorts)
 		}
 	}
 	return places, nil
+}
+
+// sectionsOf are the sections of its item that shorts, references short
+// for it, name, as d reads them: sorted, each once. d is asked nothing.
+func sectionsOf(d store.Driver, shorts []string) []string {
+	var sections []string
+	for _, short := range shorts {
+		if section, ok := d.Section(short); ok {
+			sections = append(sections, section)
+		}
+	}
+	slices.Sort(sections)
+	return slices.Compact(sections)
 }
 
 // line is a block as a plain line lists it: its title, and what's said of

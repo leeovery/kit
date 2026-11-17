@@ -832,14 +832,14 @@ func (c *Config) List(kind, mac string) (List, error) {
 // (Section.Items), where its things are kept: the item it's for, "" for the
 // plain section; the name it goes by (--as), if any; whose declarations
 // file it's in, shared or a Mac's, and the line of its header; how many
-// things it declares; and, for an item, the sections of the item its lines
-// name, sorted: what's before a line's last slash, as in GitHub/token.
+// things it declares; and, for an item, where in it each of its lines
+// says its value is, in its store's words, as in GitHub/token.
 type Place struct {
 	Item, As string
 	Scope    string
 	Line     int
 	Count    int
-	Sections []string
+	Shorts   []string
 }
 
 // Places are kind's sections in the shared file then the Mac named mac's,
@@ -867,7 +867,7 @@ func (c *Config) Places(kind, mac string) ([]Place, error) {
 			}
 			p := Place{Item: s.arg, As: s.as, Scope: scope, Line: s.start, Count: len(entries)}
 			if p.Item != "" {
-				p.Sections = itemSections(entries)
+				p.Shorts = shorts(entries)
 			}
 			if other, ok := named[p.As]; ok && other.Item != p.Item {
 				return nil, fmt.Errorf("%s:%d: [%s]: %s %s is %s in %s (line %d): a name stands for one item", DeclFile(scope), p.Line, s.name(), asOption, p.As, other.Item, DeclFile(other.Scope), other.Line)
@@ -881,21 +881,16 @@ func (c *Config) Places(kind, mac string) ([]Place, error) {
 	return places, nil
 }
 
-// itemSections are the sections of an item that entries, the lines of its
-// block, name: what's before each one's last slash, sorted, each once.
-func itemSections(entries []Entry) []string {
-	var sections []string
+// shorts are where entries, the lines of an item's block, say their values
+// are: each line's first word.
+func shorts(entries []Entry) []string {
+	var out []string
 	for _, e := range entries {
-		words, err := Words(e.Value)
-		if err != nil || len(words) == 0 {
-			continue
-		}
-		if i := strings.LastIndex(words[0], "/"); i > 0 {
-			sections = append(sections, words[0][:i])
+		if words, err := Words(e.Value); err == nil && len(words) > 0 {
+			out = append(out, words[0])
 		}
 	}
-	slices.Sort(sections)
-	return slices.Compact(sections)
+	return out
 }
 
 // Where are the entries for name in kind's sections: the shared file's,

@@ -11,9 +11,6 @@ import (
 	"github.com/leeovery/kit/internal/steps"
 )
 
-// doneSchema is kit manual done --json's document's version.
-const doneSchema = 1
-
 // newDoneCommand is kit manual done: steps by hand marked done.
 func newDoneCommand(a *app) *cobra.Command {
 	var undo bool
@@ -46,7 +43,7 @@ itself, such as signing in somewhere. --undo marks them not done.`,
 					Schema int      `json:"schema"`
 					Marked []string `json:"marked"`
 					Done   bool     `json:"done"`
-				}{doneSchema, names, !undo})
+				}{briefSchema, names, !undo})
 			}
 			verb := "done"
 			if undo {

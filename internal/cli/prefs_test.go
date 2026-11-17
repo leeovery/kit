@@ -55,8 +55,8 @@ func TestPrefsPendingSaysWhy(t *testing.T) {
 	}
 }
 
-// kit prefs history shows the captures as git does, each with what it
-// changed; --json lists them, each one's commit, date, message and stat;
+// kit prefs history shows the captures, each with what it changed; --json
+// lists them, each one's commit, date, message and what it changed;
 // a domain with no history says so, and exits 0, as a lookup that finds
 // nothing does.
 func TestPrefsHistory(t *testing.T) {
@@ -66,10 +66,10 @@ func TestPrefsHistory(t *testing.T) {
 	format := []string{"-C", clone, "log", "--no-color", "-n20", "--format=%x1e%h%x00%aI%x00%s"}
 	w.fake.On("git", append(format, "--shortstat", "--", "laptop")...).Prints("\x1eabc1234\x002026-10-06T03:00:00+01:00\x00Capture: 1 changed\n\n 1 file changed, 2 insertions(+)\n")
 	w.fake.On("git", append(format, "-p", "--", "laptop/domains/com.example.none.plist")...).Prints("")
-	if out, errOut, code := w.run(t, "prefs", "history"); out != "abc1234  2026-10-06 03:00  Capture: 1 changed\n\n 1 file changed, 2 insertions(+)\n" || errOut != "" || code != 0 {
+	if out, errOut, code := w.run(t, "prefs", "history"); out != "abc1234  2026-10-06 03:00  Capture: 1 changed\n\n1 file changed, 2 insertions(+)\n" || errOut != "" || code != 0 {
 		t.Errorf("kit prefs history printed %q, %q, exit %d", out, errOut, code)
 	}
-	want := `{"schema":1,"history":[{"commit":"abc1234","date":"2026-10-06T03:00:00+01:00","message":"Capture: 1 changed","stat":"1 file changed, 2 insertions(+)"}]}`
+	want := `{"schema":1,"history":[{"commit":"abc1234","date":"2026-10-06T03:00:00+01:00","message":"Capture: 1 changed","changed":"1 file changed, 2 insertions(+)"}]}`
 	if out, errOut, code := w.run(t, "prefs", "history", "--json"); compact(t, out) != want || errOut != "" || code != 0 {
 		t.Errorf("kit prefs history --json printed %q, %q, exit %d; want %s", out, errOut, code, want)
 	}

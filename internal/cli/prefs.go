@@ -97,7 +97,8 @@ what's waiting too, but opens only such helpers, and leaves what failed to
 		Long: `The captures that changed anything, newest first; or, named, one domain's
 or one settings file's (~/...) changes over time, as diffs: settings are
 sorted XML, so a diff is the setting that changed. --json gives them as a
-list: each one's commit, date and message, and what it changed.`,
+list: each one's commit, date and message, and what it changed (the
+shortstat, or the diff).`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return a.prepared(cmd, prefsNoun+" history", func(ctx context.Context, r *run) error {
@@ -157,7 +158,7 @@ again. --clear drops it all, so capture saves what's on the Mac.`,
 					return render.WriteJSON(a.Stdout, struct {
 						Schema    int  `json:"schema"`
 						CaptureOn bool `json:"capture_on"`
-					}{prefsSchema, true})
+					}{briefSchema, true})
 				}
 				_, err = fmt.Fprintln(a.Stdout, "Capture is switched on for this Mac: the next capture starts its store.")
 				return err
@@ -168,10 +169,6 @@ again. --clear drops it all, so capture saves what's on the Mac.`,
 	return cmd
 }
 
-// prefsSchema is the version of the documents kit prefs's commands print
-// with --json: history's, start-fresh's and pending --clear's.
-const prefsSchema = 1
-
 // writeHistory writes the captures History found: as one document with
 // --json, else each as git shows it, with what it changed under it.
 func (a *app) writeHistory(changes []prefs.Change) error {
@@ -179,16 +176,13 @@ func (a *app) writeHistory(changes []prefs.Change) error {
 		return render.WriteJSON(a.Stdout, struct {
 			Schema  int            `json:"schema"`
 			History []prefs.Change `json:"history"`
-		}{prefsSchema, changes})
+		}{briefSchema, changes})
 	}
 	shown := make([]string, len(changes))
 	for i, c := range changes {
 		shown[i] = c.Commit + "  " + c.Date.Format("2006-01-02 15:04") + "  " + c.Message
-		switch {
-		case c.Stat != "":
-			shown[i] += "\n\n " + c.Stat
-		case c.Diff != "":
-			shown[i] += "\n\n" + c.Diff
+		if c.Changed != "" {
+			shown[i] += "\n\n" + c.Changed
 		}
 	}
 	_, err := fmt.Fprintln(a.Stdout, strings.Join(shown, "\n"))
@@ -337,7 +331,7 @@ func (a *app) prefsPending(r *run, clear bool) error {
 			return render.WriteJSON(a.Stdout, struct {
 				Schema  int `json:"schema"`
 				Cleared int `json:"cleared"`
-			}{prefsSchema, n})
+			}{briefSchema, n})
 		}
 		_, err = fmt.Fprintf(a.Stdout, "Cleared %d %s: capture saves what's on the Mac for them now.\n", n, look.Plural(n, "pending setting", "pending settings"))
 		return err

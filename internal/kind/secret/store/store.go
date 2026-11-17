@@ -51,6 +51,10 @@ type Driver interface {
 	// has them: an error when it isn't an attachment's name. It asks the
 	// store nothing.
 	Attachment(name string) (string, error)
+	// Section is the section of its item short names, a value's reference
+	// short for the item, and whether it names one. It asks the store
+	// nothing.
+	Section(short string) (string, bool)
 	// Free is nil when item keeps nothing at short, where Field or
 	// Attachment says a value would go: else that something's there
 	// already. It changes nothing in the store.

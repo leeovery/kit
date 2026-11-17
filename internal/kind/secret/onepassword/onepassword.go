@@ -405,6 +405,16 @@ func (Driver) Field(field string) (string, error) {
 	return field, nil
 }
 
+// Section is the section short is in, as in GitHub for GitHub/token: none
+// for a name alone, found in any section.
+func (Driver) Section(short string) (string, bool) {
+	section, _, ok := strings.Cut(short, "/")
+	if !ok || section == "" {
+		return "", false
+	}
+	return section, true
+}
+
 // Attachment is name, an attachment's: its name alone, with no /, or a
 // section's name and its, as a field's are.
 func (d Driver) Attachment(name string) (string, error) {

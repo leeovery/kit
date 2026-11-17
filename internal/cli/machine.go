@@ -102,9 +102,6 @@ func (a *app) showMachine(cmd *cobra.Command, dirs config.Dirs) error {
 	return err
 }
 
-// machineSchema is kit machine --json's document's version.
-const machineSchema = 1
-
 // writeMachine writes this Mac's name as kit machine --json's document,
 // with the name it had, was, when it's just been changed from one: "" for
 // none.
@@ -113,7 +110,7 @@ func (a *app) writeMachine(name, was string) error {
 		Schema  int    `json:"schema"`
 		Machine string `json:"machine"`
 		Was     string `json:"was,omitempty"`
-	}{machineSchema, name, was})
+	}{briefSchema, name, was})
 }
 
 func (a *app) setMachine(cmd *cobra.Command, dirs config.Dirs, name string) error {

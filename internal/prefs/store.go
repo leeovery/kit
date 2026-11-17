@@ -193,15 +193,13 @@ func (p *Prefs) push(ctx context.Context, repo gitrepo.Repo) string {
 }
 
 // Change is a capture that changed a Mac's folder, as History lists it: its
-// commit, when it was made and its message; and what it changed, in all, as
-// git's shortstat says it (Stat), or, in a domain's or a file's history, as
-// a diff.
+// commit, when it was made and its message; and what it changed: in all, as
+// git's shortstat says it, or, in a domain's or a file's history, as a diff.
 type Change struct {
 	Commit  string    `json:"commit"`
 	Date    time.Time `json:"date"`
 	Message string    `json:"message"`
-	Stat    string    `json:"stat,omitempty"`
-	Diff    string    `json:"diff,omitempty"`
+	Changed string    `json:"changed"`
 }
 
 // ErrNoHistory is History finding no capture that changed what it was asked
@@ -245,13 +243,12 @@ func (p *Prefs) History(ctx context.Context, mac, target string, count int) ([]C
 		if err != nil {
 			return nil, fmt.Errorf("git log's date for %s: %w", fields[0], err)
 		}
-		c := Change{Commit: fields[0], Date: date, Message: fields[2]}
+		// A shortstat's line starts with a space; a diff's context lines do too.
+		changed := strings.Trim(body, "\n")
 		if target == "" {
-			c.Stat = strings.TrimSpace(body)
-		} else {
-			c.Diff = strings.Trim(body, "\n")
+			changed = strings.TrimSpace(changed)
 		}
-		changes = append(changes, c)
+		changes = append(changes, Change{Commit: fields[0], Date: date, Message: fields[2], Changed: changed})
 	}
 	if len(changes) == 0 {
 		return nil, fmt.Errorf("%w for %s", ErrNoHistory, path)

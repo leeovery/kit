@@ -637,19 +637,19 @@ func TestHistory(t *testing.T) {
 	bst := time.FixedZone("", 3600)
 	changes, err := w.p.History(t.Context(), "", "", 5)
 	want := []prefs.Change{
-		{Commit: "abc1234", Date: time.Date(2026, 10, 6, 3, 0, 0, 0, bst), Message: "Capture 2026-10-06 03:00: 1 changed", Stat: "1 file changed, 2 insertions(+)"},
-		{Commit: "def5678", Date: time.Date(2026, 10, 5, 3, 0, 0, 0, bst), Message: "Capture 2026-10-05 03:00: 2 changed", Stat: "2 files changed, 1 deletion(-)"},
+		{Commit: "abc1234", Date: time.Date(2026, 10, 6, 3, 0, 0, 0, bst), Message: "Capture 2026-10-06 03:00: 1 changed", Changed: "1 file changed, 2 insertions(+)"},
+		{Commit: "def5678", Date: time.Date(2026, 10, 5, 3, 0, 0, 0, bst), Message: "Capture 2026-10-05 03:00: 2 changed", Changed: "2 files changed, 1 deletion(-)"},
 	}
 	if err != nil || len(changes) != 2 {
 		t.Fatalf("History() = %+v, %v", changes, err)
 	}
 	for i := range want {
-		if c := changes[i]; c.Commit != want[i].Commit || !c.Date.Equal(want[i].Date) || c.Message != want[i].Message || c.Stat != want[i].Stat || c.Diff != "" {
+		if c := changes[i]; c.Commit != want[i].Commit || !c.Date.Equal(want[i].Date) || c.Message != want[i].Message || c.Changed != want[i].Changed {
 			t.Errorf("History()[%d] = %+v, want %+v", i, c, want[i])
 		}
 	}
 	changes, err = w.p.History(t.Context(), "", "com.example.app", 5)
-	if err != nil || len(changes) != 1 || changes[0].Diff != "diff --git a/x b/x\n context\n+added" || changes[0].Stat != "" {
+	if err != nil || len(changes) != 1 || changes[0].Changed != "diff --git a/x b/x\n context\n+added" {
 		t.Errorf("History(domain) = %+v, %v", changes, err)
 	}
 	if _, err := w.p.History(t.Context(), "", "~/.config/tool/settings.json", 5); !errors.Is(err, prefs.ErrNoHistory) || !strings.Contains(err.Error(), "no history for laptop/files/.config/tool/settings.json") {

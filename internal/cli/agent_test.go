@@ -126,24 +126,30 @@ func TestAgentTopics(t *testing.T) {
 }
 
 // kit agent, its topics and kit agent order print the text agents read,
-// as kit's menu and kit help print text, and refuse --json, as a usage
-// error, rather than print text in its place.
+// as kit's menu prints text, and help, however it's asked for; each refuses
+// --json, as a usage error, rather than print text in its place.
 func TestTextOnlyCommandsRefuseJSON(t *testing.T) {
 	for _, tt := range []struct {
 		args []string
-		cmd  string
+		says string
 	}{
-		{[]string{"agent"}, "kit agent"},
-		{[]string{"agent", "prefs"}, "kit agent prefs"},
-		{[]string{"agent", "order", "alone"}, "kit agent order"},
-		{nil, "kit"},
-		{[]string{"help"}, "kit help"},
-		{[]string{"help", "status"}, "kit help"},
+		{[]string{"agent"}, "kit agent prints text"},
+		{[]string{"agent", "prefs"}, "kit agent prefs prints text"},
+		{[]string{"agent", "order", "alone"}, "kit agent order prints text"},
+		{nil, "kit prints text"},
+		{[]string{"help"}, "kit's help prints text"},
+		{[]string{"help", "status"}, "kit status's help prints text"},
+		{[]string{"--help"}, "kit's help prints text"},
+		{[]string{"status", "--help"}, "kit status's help prints text"},
+		{[]string{"brew", "add", "--help"}, "kit brew add's help prints text"},
+		{[]string{"brew"}, "kit brew's help prints text"},
+		{[]string{"secret"}, "kit secret's help prints text"},
+		{[]string{"prefs"}, "kit prefs's help prints text"},
 	} {
 		w := laptopWorld(t)
 		w.writeSection(t, "laptop", "steps", `alone "stands alone"`+"\n")
 		out, errOut, code := w.run(t, append(tt.args, "--json")...)
-		want := "{\n  \"schema\": 1,\n  \"error\": \"" + tt.cmd + " prints text; it takes no --json\",\n  \"exit\": 2\n}\n"
+		want := "{\n  \"schema\": 1,\n  \"error\": \"" + tt.says + "; it takes no --json\",\n  \"exit\": 2\n}\n"
 		if code != 2 || out != want || errOut != "" {
 			t.Errorf("kit %s --json printed %q, %q, exit %d; want exit 2 and %q", strings.Join(tt.args, " "), out, errOut, code, want)
 		}

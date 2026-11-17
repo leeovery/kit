@@ -107,6 +107,12 @@ const (
 	couldntStatus = 2
 )
 
+// briefSchema is the version of the short documents commands print with
+// --json that have no schema of their own: what went wrong, kit's version,
+// this Mac's name, a step by hand marked, and kit prefs's history, its
+// start afresh and what it cleared.
+const briefSchema = 1
+
 // failure is the error a command returns when something it tried failed,
 // the face having said what: kit exits failedStatus for it, printing
 // nothing more.
@@ -138,6 +144,12 @@ type app struct {
 	// parsed is whether kit got as far as running the command: its command
 	// line read, so what went wrong is no mistake in it.
 	parsed bool
+	// document is standard output with --json, which knows whether the
+	// command has written its document.
+	document *document
+	// helpRefused is help asked for with --json, which it doesn't take:
+	// cobra shows help without an error to return.
+	helpRefused error
 	// underHome is whether kit runs from its home's menu, under the home's
 	// wordmark: its own heading leaves the wordmark out.
 	underHome bool
@@ -168,8 +180,13 @@ func NewRootCommand(deps Deps) *cobra.Command {
 		Short: "Set up a Mac from a config repository, and keep it that way",
 		// Flags and arguments have parsed by the time this runs, so usage still
 		// follows a mistyped command line but not a failure after it.
-		PersistentPreRun: func(*cobra.Command, []string) {
+		PersistentPreRun: func(cmd *cobra.Command, _ []string) {
 			a.parsed = true
+			if a.json {
+				a.document = &document{Writer: a.Stdout}
+				a.Stdout = a.document
+				cmd.Root().SetOut(a.Stdout)
+			}
 		},
 		SilenceErrors:     true,
 		CompletionOptions: cobra.CompletionOptions{DisableDefaultCmd: true},
@@ -207,10 +224,6 @@ status is the report, every check.`,
 	}
 	root.AddCommand(nounCommands(a)...)
 	root.AddCommand(newSplashCommand(a))
-	root.InitDefaultHelpCmd()
-	if help, _, err := root.Find([]string{"help"}); err == nil {
-		help.PreRunE = func(cmd *cobra.Command, _ []string) error { return a.textOnly(cmd) }
-	}
 	return root
 }
 
@@ -227,6 +240,9 @@ func Execute(ctx context.Context, root *cobra.Command, args []string) int {
 	// to standard output.
 	root.SilenceUsage = true
 	cmd, err := root.ExecuteContextC(ctx)
+	if err == nil && ok {
+		err = e.a.helpRefused
+	}
 	if err == nil {
 		return 0
 	}
@@ -256,14 +272,11 @@ func (a *app) showVersion() error {
 		return render.WriteJSON(a.Stdout, struct {
 			Schema  int    `json:"schema"`
 			Version string `json:"version"`
-		}{versionSchema, a.Version})
+		}{briefSchema, a.Version})
 	}
 	_, err := fmt.Fprintf(a.Stdout, "kit version %s\n", a.Version)
 	return err
 }
-
-// versionSchema is kit --version --json's document's version.
-const versionSchema = 1
 
 // unwind, deferred at kit's top, has a panic put the terminal back as the
 // faces kit showed found it (applying's screen takes the terminal's
@@ -302,6 +315,24 @@ func (a *app) loadConfig(dirs config.Dirs) (*config.Config, error) {
 		return nil, err
 	}
 	return cfg, nil
+}
+
+// document is standard output with --json, keeping to one document: it
+// knows whether one's been written.
+type document struct {
+	io.Writer
+	written bool
+}
+
+func (d *document) Write(p []byte) (int, error) {
+	d.written = d.written || len(p) > 0
+	return d.Writer.Write(p)
+}
+
+// documented reports whether the command has written its document to
+// standard output, with --json.
+func (a *app) documented() bool {
+	return a.document != nil && a.document.written
 }
 
 // pretty reports whether out shows the pretty face: a terminal, and
