@@ -57,6 +57,15 @@ the check says it isn't done.
 `[manual]` with `kit manual add`. It says what to do. A command may say whether it's done, and
 otherwise `kit manual done <name>` marks it.
 
+**Card.** What the boot, or a whole `kit apply` at a terminal, shows when it needs you: what to do, why, and
+the steps to do it. A step by hand that isn't done comes up as a card.
+
+**Check of your own.** A command declared in `[checks]`, with `kit check add`, that exits 0 when
+all's well. `kit status` and the hourly run run it.
+
+**Job.** A command kit runs on a schedule, declared in `[hourly]` or `[nightly]`. The hourly run
+runs the hourly jobs every time, and the nightly jobs once a day.
+
 **Drift.** A difference between this Mac and kit-config. It's one of these:
 
 - a package installed but not declared, or declared but not installed;
