@@ -44,8 +44,9 @@ func newBootstrapCommand(a *app) *cobra.Command {
 install line into Terminal again carries on where it stopped.
 
 It signs in to GitHub on your phone, asks which of your Macs this is and for
-the password once, then installs the rest without you: Homebrew, kit itself
-through Homebrew, the terminal kit.toml names, kit-config, its files linked.
+the password once, then installs the rest without you: Homebrew, the
+terminal kit.toml names, kit-config, its files linked, kit itself through
+Homebrew.
 With a terminal named, you give it Full Disk Access, then kit opens it and
 carries on there, from Homebrew's kit: the whole of kit apply, then a fresh
 shell. Run from a build of kit's own (KIT_FROM, to the install script), it

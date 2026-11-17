@@ -78,6 +78,7 @@ func TestATapsPrivateDownloadNeedsTheToken(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			fake := runnertest.New(t)
 			fake.On("brew", "tap").Prints("owner/tap\n")
+			fake.On("brew", "update", "--quiet")
 			fake.On("brew", "info", "--json=v2", "--cask", "owner/tap/app").Prints(appInfo)
 			fake.On("curl", asking(appDownload)...).Prints(tt.answer).Exits(tt.exit).PrintsToStderr(tt.stderr)
 
@@ -126,6 +127,7 @@ func TestAFormulasBottleIsCheckedToo(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			fake := runnertest.New(t)
 			fake.On("brew", "tap").Prints("owner/tap\n")
+			fake.On("brew", "update", "--quiet")
 			fake.On("brew", "info", "--json=v2", "--formula", "owner/tap/tool").Prints(info)
 			fake.On("curl", asking(source)...).Prints(tt.source)
 			fake.On("curl", asking(bottle)...).Prints(tt.bottle)
@@ -198,8 +200,26 @@ func TestATapAddedToCheckIsUndone(t *testing.T) {
 func TestNoDownloadCantBeChecked(t *testing.T) {
 	fake := runnertest.New(t)
 	fake.On("brew", "tap").Prints("owner/tap\n")
+	fake.On("brew", "update", "--quiet")
 	fake.On("brew", "info", "--json=v2", "--cask", "owner/tap/app").Prints(`{"formulae": [], "casks": [{"token": "app", "full_token": "owner/tap/app"}]}`)
 	if need, _, err := needsSecret(t, fake, (*brew.Homebrew).Casks, "owner/tap/app"); need.Secret != "" || err == nil || err.Error() != "brew info names no download of owner/tap/app" {
 		t.Errorf("NeedsSecret() = %+v, %v; want brew info naming no download", need, err)
+	}
+}
+
+// A tap added already is read as it was last fetched, which may not have
+// what's asked after yet, as a formula its tap gained since: Homebrew's
+// updated first, as installing it is.
+func TestATapAddedAlreadyIsUpdatedFirst(t *testing.T) {
+	fake := runnertest.New(t)
+	fake.On("brew", "tap").Prints("owner/tap\n")
+	fake.On("brew", "info", "--json=v2", "--cask", "owner/tap/app").Exits(1).PrintsToStderr(`Error: No available cask with the name "owner/tap/app".`)
+	fake.On("brew", "update", "--quiet").Does(func() {
+		fake.On("brew", "info", "--json=v2", "--cask", "owner/tap/app").Prints(appInfo)
+	})
+	fake.On("curl", asking(appDownload)...).Prints("404 " + appDownload)
+
+	if need, _, err := needsSecret(t, fake, (*brew.Homebrew).Casks, "owner/tap/app"); err != nil || need.Secret != "HOMEBREW_GITHUB_API_TOKEN" {
+		t.Errorf("NeedsSecret() = %+v, %v; want HOMEBREW_GITHUB_API_TOKEN, found once updated", need, err)
 	}
 }
