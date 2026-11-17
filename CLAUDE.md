@@ -114,3 +114,117 @@ programs. Ever.
   macOS, testguard alone guards them.
 - **Never loosen a guard to make a test pass.** A test that needs what a guard blocks is a finding:
   inject it instead.
+
+## Writing the docs
+
+The README and `docs/` are for someone deciding whether to use kit, or with one job to do, often
+reading in the GitHub app on a phone. `docs/design.md` is for contributors and keeps its own
+style. `kit agent`'s guide (`internal/guide/text/`) is for agents: read it for facts, never copy
+its sentences.
+
+### The rules
+
+1. **One idea a sentence.** Under 5% of a page's sentences run over 25 words.
+2. **One topic a paragraph,** led by its point, 3 to 5 sentences, never over 100 words.
+3. **Example first, rule after.** The command and what it prints, then the explanation.
+4. **No fact-chains.** Three or more items make a list; conditions make an if-then table.
+5. **Name the thing.** At most one "its" a sentence, and only for the subject. Repeat the noun
+   rather than leave a pronoun to resolve.
+6. **No possessive chains.** One possessive a noun phrase, under 1.5 per 100 words. "kit's
+   PATH" is fine. "The cask's app's settings" isn't: write "the settings the cask's app
+   keeps". A verb beats both. Never drop the verb from a second clause.
+7. **Plain words in their usual sense:** "if", not "where"; "only", not "alone"; "because" or
+   "for example", not "as".
+8. **One term, one meaning.** Each term is defined once, in `docs/glossary.md`, and used in
+   that sense only. A second sense gets a new word.
+9. **Headings that inform,** their first two words carrying them. H3 at most.
+10. **The main path on the page.** Edge cases go one level down, behind a clear link.
+11. **Link to whole pages,** never a heading in another file: the GitHub app opens such a link
+    at the top of the page.
+12. **Benefits first, and specific:** a number, or something the reader will see. No praise
+    words ("powerful", "seamless") or minimisers ("simply", "just").
+13. **"You" and the active voice.** Say who does what; a condition goes before the instruction
+    it governs.
+
+### The phone
+
+- Code lines run 52 columns at most. A comment goes on a line of its own, above the command.
+- Tables run 4 columns at most, with short cells.
+- No forced line breaks (`<br>`).
+- What kit prints goes in a `console` or `text` fence, copied from the code (a test, a golden
+  file or `--help`), never made up. Cut lines you don't need; never change one. Its wide lines
+  stand.
+
+### Facts and placeholders
+
+- Check every claim against the code and the commands' `--help`. Start at `internal/kind` and
+  `internal/cli`. The rules of the config, drift and the engine are in their own packages, and
+  what kit prints is in `internal/render`'s tests and testdata. The code wins over any page,
+  the guide included.
+- Use kit's own words for kit's things, as the glossary has them: kit-config, a declarations
+  file, a kind, drift, reconcile. "Feature" means only what `kit feature` switches on: call
+  the rest pages or benefits.
+- Never call `kit status`'s CONFIG section "drift": it holds more, such as kit-config's sync
+  and the counts.
+- Placeholders as the house rules say: Macs `laptop` and `studio`, `/Users/someone`,
+  `op://vault/item/field`, `owner/tap` for a tap, `owner/repo` for a repository.
+
+### Measuring
+
+```bash
+S=~/.claude/skills/readme-and-docs
+python3 -I $S/scripts/measure.py --root . \
+  --exclude docs/design.md --detail
+```
+
+It fails a page that breaks a rule's limit, and prints signs for a reviewer: fix what it flags
+in the prose, never by bending prose to the meter.
+
+### The README
+
+About 700 words, in this order:
+
+1. **The top:** the logo (kit.app's icon), name, tagline, lead and opening paragraph, then a row
+   of page links and the hero, one animation that tours kit.
+2. **Benefits,** six at most: a bold benefit of six words or fewer, one specific sentence, and a
+   link to its page. The smaller pages go in one line of links under them.
+3. **Screens:** a grid of stills, each captioned with the one thing it answers, each linking to
+   its page.
+4. **Install:** one line of requirements, the commands, one line on removing kit.
+5. **Quick start:** two to four commands, a comment above each.
+6. **Questions:** four or five one-line answers to readers' objections, each linking to a page.
+7. **Where next:** the docs index (`docs/README.md`), commands, configuration, troubleshooting;
+   one line for contributors.
+8. **Licence.**
+
+A benefit gets a bullet and a page, never a section of the README. The commands table, the
+config layout and the gates live on their own pages.
+
+### A benefit page
+
+300 to 700 words, headings no deeper than H2, in this order:
+
+| Part | What it holds |
+|---|---|
+| Title | The benefit, in the reader's words |
+| Opening | 40 to 60 words: what it does for you, and when you'd want it |
+| The moment | One still or clip, once one exists |
+| Try it | 2 to 4 commands, a comment above each, then what kit prints |
+| What happens | 3 to 6 one-sentence bullets on what you'll notice |
+| Good to know | 2 to 4 bullets: limits, costs, objections |
+| Reference | A table of 8 rows at most, or links to the reference pages |
+| Related | 2 or 3 links to other pages |
+
+A page may add a section or two of its own between What happens and Good to know, if its
+reader needs it, such as packages' "Installs by hand show up". Edge cases still go one level
+down. `docs/packages.md` is the first page written to it. Other pages:
+
+- **A command page:** "`kit cmd`: what it's for", an example with its output, the synopsis,
+  a flags table.
+- **A reference page:** one file or format, an example, then a table of field and meaning.
+- **A troubleshooting page:** each problem a heading in the reader's words, then the cause in a
+  sentence, then the fix.
+- **The glossary:** each term in bold, then one to three plain sentences.
+
+A page named `claude.md` or `readme.md` folds to `CLAUDE.md` or `README.md` on a Mac: name it
+otherwise.
