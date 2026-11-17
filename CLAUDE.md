@@ -131,7 +131,8 @@ its sentences.
 5. **Name the thing.** At most one "its" a sentence, and only for the subject. Repeat the noun
    rather than leave a pronoun to resolve.
 6. **No possessive chains.** One possessive a noun phrase, under 1.5 per 100 words. "kit's
-   PATH" is fine; "the cask's app's settings" isn't. A verb beats both. Never drop a verb.
+   PATH" is fine. "The cask's app's settings" isn't: write "the settings the cask's app
+   keeps". A verb beats both. Never drop the verb from a second clause.
 7. **Plain words in their usual sense:** "if", not "where"; "only", not "alone"; "because" or
    "for example", not "as".
 8. **One term, one meaning.** Each term is defined once, in `docs/glossary.md`, and used in
@@ -151,14 +152,20 @@ its sentences.
 - Tables run 4 columns at most, with short cells.
 - No forced line breaks (`<br>`).
 - What kit prints goes in a `console` or `text` fence, copied from the code (a test, a golden
-  file or `--help`), never made up. Its wide lines stand.
+  file or `--help`), never made up. Cut lines you don't need; never change one. Its wide lines
+  stand.
 
 ### Facts and placeholders
 
-- Check every claim against the code (`internal/kind/*`, `internal/cli/*`) and the commands'
-  `--help`. The code wins over any page, the guide's included.
+- Check every claim against the code and the commands' `--help`. Start at `internal/kind` and
+  `internal/cli`. The rules of the config, drift and the engine are in their own packages, and
+  what kit prints is in `internal/render`'s tests and testdata. The code wins over any page,
+  the guide included.
 - Use kit's own words for kit's things, as the glossary has them: kit-config, a declarations
-  file, a kind, drift, reconcile.
+  file, a kind, drift, reconcile. "Feature" means only what `kit feature` switches on: call
+  the rest pages or benefits.
+- Never call `kit status`'s CONFIG section "drift": it holds more, such as kit-config's sync
+  and the counts.
 - Placeholders as the house rules say: Macs `laptop` and `studio`, `/Users/someone`,
   `op://vault/item/field`, `owner/tap` for a tap, `owner/repo` for a repository.
 
@@ -170,17 +177,8 @@ python3 -I $S/scripts/measure.py --root . \
   --exclude docs/design.md --detail
 ```
 
-It fails a page that breaks a limit, and prints signs for a reviewer. Fix what it flags in the
-prose, never by bending prose to the meter.
-
-| Check | Limit |
-|---|---|
-| Sentences over 25 words | under 5% |
-| Paragraphs and list items | 100 words at most |
-| Possessives | under 1.5 per 100 words |
-| Links to a heading in another file, broken links | none |
-| Code lines over 52 columns | none |
-| Heading depth | H3 at most |
+It fails a page that breaks a rule's limit, and prints signs for a reviewer: fix what it flags
+in the prose, never by bending prose to the meter.
 
 ### The README
 
@@ -189,7 +187,7 @@ About 700 words, in this order:
 1. **The top:** the logo (kit.app's icon), name, tagline, lead and opening paragraph, then a row
    of page links and the hero, one animation that tours kit.
 2. **Benefits,** six at most: a bold benefit of six words or fewer, one specific sentence, and a
-   link to its page. Smaller features go in one line of page links under them.
+   link to its page. The smaller pages go in one line of links under them.
 3. **Screens:** a grid of stills, each captioned with the one thing it answers, each linking to
    its page.
 4. **Install:** one line of requirements, the commands, one line on removing kit.
@@ -199,10 +197,10 @@ About 700 words, in this order:
    one line for contributors.
 8. **Licence.**
 
-A feature gets a bullet and a page, never a section of the README. The commands table, the
+A benefit gets a bullet and a page, never a section of the README. The commands table, the
 config layout and the gates live on their own pages.
 
-### A feature page
+### A benefit page
 
 300 to 700 words, headings no deeper than H2, in this order:
 
@@ -217,7 +215,9 @@ config layout and the gates live on their own pages.
 | Reference | A table of 8 rows at most, or links to the reference pages |
 | Related | 2 or 3 links to other pages |
 
-`docs/packages.md` is the first page written to it. Other pages:
+A page may add a section or two of its own between What happens and Good to know, if its
+reader needs it, such as packages' "Installs by hand show up". Edge cases still go one level
+down. `docs/packages.md` is the first page written to it. Other pages:
 
 - **A command page:** "`kit cmd`: what it's for", an example with its output, the synopsis,
   a flags table.

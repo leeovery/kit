@@ -5,7 +5,8 @@ Each term here has one meaning, and the docs use it in that sense only.
 ## kit-config and what's in it
 
 **kit-config.** The private git repository that declares what each of your Macs should have.
-kit keeps its clone in `~/.config/kit`, unless `KIT_CONFIG` names another folder. It holds
+kit keeps its clone in `~/.config/kit`, or `$XDG_CONFIG_HOME/kit`, unless `KIT_CONFIG` names
+another folder. It holds
 `kit.toml`, a folder for each Mac, and the `shared` folder.
 
 **kit.toml.** The file at the top of kit-config that names your Macs. It also names the terminal
@@ -17,8 +18,8 @@ write one by hand.
 
 **Declarations file.** The file of declarations in each folder of kit-config, such as
 `laptop/declarations` for the Mac named `laptop`. It's made of sections, each a header in
-brackets, such as `[homebrew casks]`, then a line for each thing. kit's commands keep each list
-sorted.
+brackets, such as `[homebrew casks]`, then a line for each thing. Package and settings lists are kept
+sorted. The rest, such as `[paths]` and `[steps]`, keep the order you wrote.
 
 **`shared`.** The folder of kit-config whose declarations file is for every Mac. A Mac has what
 `shared/declarations` declares, and what its own file declares. `--shared` on an `add` command
@@ -28,12 +29,15 @@ puts the line in the shared file.
 `--after` a step, or `--secret` a secret. For example, `[homebrew casks --secret TOKEN]` installs
 its casks once `TOKEN` has synced.
 
-**Kind.** A sort of thing kit lists and installs, such as Homebrew's casks. Each kind has its own
-section, `add` and `remove` commands, and step. `kit --help` lists the kinds
-under Packages and Settings.
+**Kind.** A sort of thing kit lists and puts in place, such as Homebrew casks or macOS settings.
+Each kind has its own section, `add` and `remove` commands, and step. `kit --help` lists the
+kinds under Packages and Settings, and secrets under Files, secrets and features.
 
 **Secret.** A value kept in a password manager, such as 1Password, and put in place on each Mac:
 an environment variable, or a file. kit-config holds where the value is kept, never the value.
+
+**Synced.** A secret is synced once kit has read its value from the store and put it in place on
+this Mac.
 
 **Linked file.** A file in kit-config, under a Mac's `home` folder or `shared/home`, that kit
 links into your home folder at the same path. `shared/home/.zshrc` is linked at `~/.zshrc`. An
@@ -53,9 +57,14 @@ the check says it isn't done.
 `[manual]` with `kit manual add`. It says what to do. A command may say whether it's done, and
 otherwise `kit manual done <name>` marks it.
 
-**Drift.** A difference between this Mac and kit-config. It's a package installed but not
-declared, or declared but not installed. It's also a setting changed by hand, or a linked file
-that a program replaced with a copy. `kit status` shows drift after its first day.
+**Drift.** A difference between this Mac and kit-config. It's one of these:
+
+- a package installed but not declared, or declared but not installed;
+- a dependency that nothing installed needs any more;
+- a setting changed by hand;
+- a linked file that a program replaced with a copy.
+
+`kit status` lists drift under CONFIG once a day has passed.
 
 **Reconcile.** Settling drift, with `kit reconcile`. At a terminal it asks about each item.
 Without one, you name each item and what to do with it. The main answers:
