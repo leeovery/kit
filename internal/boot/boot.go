@@ -250,7 +250,9 @@ func (b *Boot) signIn(ctx context.Context) (string, error) {
 		b.Sink.Emit(event.DeviceCode{Time: b.Now(), Step: GitHubStep, URI: code.URI, Code: code.UserCode, Expires: b.Now().Add(time.Duration(code.ExpiresIn) * time.Second)})
 		b.doing(GitHubStep, "waiting for you to sign in")
 		waiting, stop := context.WithCancel(ctx)
+		asking := make(chan struct{})
 		go func(how string) {
+			defer close(asking)
 			for {
 				if how == "s" {
 					_, _ = b.Run.Run(waiting, runner.Command{Name: "open", Args: []string{code.URI}})
@@ -263,6 +265,7 @@ func (b *Boot) signIn(ctx context.Context) (string, error) {
 		}(how)
 		token, err := b.GitHub.token(ctx, code)
 		stop()
+		<-asking
 		if errors.Is(err, errExpired) {
 			continue
 		}
