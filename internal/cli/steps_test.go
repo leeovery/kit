@@ -29,7 +29,7 @@ func TestAStepOfYourOwn(t *testing.T) {
 		Then().Exits(1).Prints("not installed\n").
 		Then().Prints("installed, 2.1\n")
 	out, _, code := w.run(t, "status", "tool")
-	if code != 1 || !strings.Contains(out, "tool attention not installed\n") || !strings.Contains(out, "Installs the tool") || !strings.Contains(out, "kit apply tool") {
+	if code != 0 || !strings.Contains(out, "tool attention not installed\n") || !strings.Contains(out, "Installs the tool") || !strings.Contains(out, "kit apply tool") {
 		t.Errorf("kit status tool printed\n%s exit %d", out, code)
 	}
 	if out, _, _ := w.run(t, "status"); !strings.Contains(out, "tool attention not installed\n") {

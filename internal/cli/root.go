@@ -100,25 +100,33 @@ type Deps struct {
 	WatchDialogs bool
 }
 
-// Exit statuses: a command that needs attention exits attentionStatus, one
-// that couldn't do its job failedStatus.
+// Exit statuses: a command that ran exits 0, even when what it found needs
+// attention; one in which something it tried failed exits failedStatus, and
+// one that couldn't do its job at all couldntStatus.
 const (
-	attentionStatus = 1
-	failedStatus    = 2
+	failedStatus  = 1
+	couldntStatus = 2
 )
 
-// attention is an error a command returns when it ran but found something
-// that needs attention: kit exits 1 for it, printing the message.
-type attention struct {
+// failure is the error a command returns when something it tried failed,
+// the face having said what: kit exits failedStatus for it, printing
+// nothing more.
+type failure struct{}
+
+func (failure) Error() string {
+	return "something kit tried failed"
+}
+
+// notFound is the error a command returns when what it was asked for isn't
+// there: kit prints the message, and exits 0, the command having done its
+// job.
+type notFound struct {
 	message string
 }
 
-func (a attention) Error() string {
-	return a.message
+func (n notFound) Error() string {
+	return n.message
 }
-
-// attention without a message needs nothing printed: the face has said what
-// needs attention.
 
 // app is what every command shares: its dependencies, and the flags every
 // command takes.
@@ -195,7 +203,7 @@ status is the report, every check.`,
 }
 
 // Execute runs root with args in ctx, shows what went wrong, if anything,
-// and returns the status to exit with: 0, attentionStatus, or failedStatus.
+// and returns the status to exit with: 0, failedStatus, or couldntStatus.
 // Should kit panic, the terminal is put back before the panic shows.
 func Execute(ctx context.Context, root *cobra.Command, args []string) int {
 	root.SetArgs(args)
@@ -213,20 +221,24 @@ func Execute(ctx context.Context, root *cobra.Command, args []string) int {
 	if err == nil {
 		return 0
 	}
-	a, isAttention := errors.AsType[attention](err)
-	if !isAttention || a.message != "" {
-		if ok {
-			e.show(cmd, args, err, isAttention)
-		} else {
-			_, _ = fmt.Fprintf(root.ErrOrStderr(), "kit: %v\n", err)
-		}
+	if _, isFailure := errors.AsType[failure](err); isFailure {
+		return failedStatus
 	}
-	// A question cancelled isn't kit failing: nothing was done, so what
+	_, isNotFound := errors.AsType[notFound](err)
+	if ok {
+		e.show(cmd, args, err, isNotFound)
+	} else {
+		_, _ = fmt.Fprintf(root.ErrOrStderr(), "kit: %v\n", err)
+	}
+	switch {
+	case isNotFound:
+		return 0
+	// A question cancelled exits as a failure: nothing was done, so what
 	// needed attention still does.
-	if isAttention || errors.Is(err, ask.ErrCancelled) {
-		return attentionStatus
+	case errors.Is(err, ask.ErrCancelled):
+		return failedStatus
 	}
-	return failedStatus
+	return couldntStatus
 }
 
 // unwind, deferred at kit's top, has a panic put the terminal back as the

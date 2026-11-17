@@ -99,8 +99,8 @@ kit-app-access ok granted
 nightly ok last ran: hourly 03:04
 2 need attention
 `
-	if out != want || errOut != "" || status != 1 {
-		t.Errorf("kit status printed\n%s%q, exit %d\nwant\n%s(exit 1)", out, errOut, status, want)
+	if out != want || errOut != "" || status != 0 {
+		t.Errorf("kit status printed\n%s%q, exit %d\nwant\n%s(exit 0)", out, errOut, status, want)
 	}
 }
 
@@ -126,7 +126,7 @@ func TestStatusShowsTabProgressWhereTheTerminalDoes(t *testing.T) {
 func TestStatusJSON(t *testing.T) {
 	out, _, code := laptopWorld(t).run(t, "status", "--json")
 	var doc status.Document
-	if err := json.Unmarshal([]byte(out), &doc); err != nil || code != 1 {
+	if err := json.Unmarshal([]byte(out), &doc); err != nil || code != 0 {
 		t.Fatalf("kit status --json printed %q, exit %d: %v", out, code, err)
 	}
 	if doc.Schema != 1 || doc.Kit != "0.1.0" || doc.Machine != "laptop" || !doc.Attention || len(doc.Steps) != 14 {
@@ -152,7 +152,7 @@ func TestStatusWithNothingToAttendTo(t *testing.T) {
 func TestStatusOfOneStep(t *testing.T) {
 	out, _, status := laptopWorld(t).run(t, "status", "cask")
 	want := "kit status · laptop\nhomebrew ok /opt/homebrew\ncask attention 1 declared, all installed\ncask extra firefox\n1 needs attention\n"
-	if out != want || status != 1 {
+	if out != want || status != 0 {
 		t.Errorf("kit status cask printed\n%s exit %d\nwant\n%s", out, status, want)
 	}
 	_, errOut, status := laptopWorld(t).run(t, "status", "plex")
@@ -176,8 +176,8 @@ func TestStatusDefersWhatNeedsHomebrew(t *testing.T) {
 			t.Errorf("kit status printed\n%s\nwant it to hold %q", out, want)
 		}
 	}
-	if status != 1 {
-		t.Errorf("exit %d, want 1", status)
+	if status != 0 {
+		t.Errorf("exit %d, want 0", status)
 	}
 }
 
@@ -214,8 +214,8 @@ func TestStatusRunsProgramsOnKitsOwnPath(t *testing.T) {
 	w := laptopWorld(t)
 	w.env["PATH"] = "/somewhere/inherited/bin"
 	w.env["SSH_AUTH_SOCK"] = "/private/tmp/agent.sock"
-	if _, _, status := w.run(t, "status"); status != 1 {
-		t.Fatalf("kit status exit %d, want 1", status)
+	if _, _, status := w.run(t, "status"); status != 0 {
+		t.Fatalf("kit status exit %d, want 0", status)
 	}
 	wantPath := []string{filepath.Join(w.home, ".local", "bin"), "/opt/homebrew/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"}
 	if !slices.Equal(w.path, wantPath) {
@@ -230,10 +230,21 @@ func TestStatusRunsProgramsOnKitsOwnPath(t *testing.T) {
 	}
 }
 
+// What needs attention is no failure: a check that failed is, and kit
+// exits 1 for it.
+func TestStatusOfACheckThatFailed(t *testing.T) {
+	w := laptopWorld(t)
+	w.fake.On("brew", "list", "--cask", "--full-name", "-1").Exits(1).PrintsToStderr("Error: something broke\n")
+	out, errOut, status := w.run(t, "status", "cask")
+	if !strings.Contains(out, "cask failed") || status != 1 {
+		t.Errorf("kit status cask printed\n%s%s exit %d; want the check failed, exit 1", out, errOut, status)
+	}
+}
+
 func TestStatusIsLogged(t *testing.T) {
 	w := laptopWorld(t)
-	if _, _, status := w.run(t, "status"); status != 1 {
-		t.Fatalf("kit status exit %d, want 1", status)
+	if _, _, status := w.run(t, "status"); status != 0 {
+		t.Fatalf("kit status exit %d, want 0", status)
 	}
 	out, _, status := w.run(t, "log")
 	for _, want := range []string{
@@ -279,8 +290,8 @@ func TestStatusQuietensNewDrift(t *testing.T) {
 	w.now = w.now.Add(2 * time.Hour)
 	w.ranHourly(t)
 	out, _, code = w.run(t, "status")
-	if !strings.Contains(out, "brew extra ffmpeg\n") || code != 1 {
-		t.Errorf("kit status over a day later printed\n%s exit %d; want ffmpeg needing attention, exit 1", out, code)
+	if !strings.Contains(out, "brew extra ffmpeg\n") || code != 0 {
+		t.Errorf("kit status over a day later printed\n%s exit %d; want ffmpeg needing attention, exit 0", out, code)
 	}
 }
 

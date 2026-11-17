@@ -1,8 +1,9 @@
 ## Checking a change
 
 - `kit status <name>`: the step's check, and what needs attention in it.
-  `kit status` alone checks the whole Mac: exit 0 when nothing needs
-  attention.
+  `kit status` alone checks the whole Mac. It exits 0 whether or not
+  something needs attention: read that in `--json`. Exit 1 is a check
+  that failed.
 - `kit apply <name>`: applies that step, with the steps it needs; not the
   ones it comes after, which a new Mac's run applies first. What needs an
   administrator's password waits without a terminal: the person runs that

@@ -180,9 +180,36 @@ func TestAFailedStepNeverEndsTheRun(t *testing.T) {
 	if !report.Attention() {
 		t.Error("Attention() = false, want true")
 	}
+	if !report.Failed() {
+		t.Error("Failed() = false, want true")
+	}
 	last, isFinish := rec.events[len(rec.events)-1].(event.RunFinished)
 	if !isFinish || last.Counts[check.OK] != 1 || last.Counts[check.Failed] != 3 || last.Counts[check.Deferred] != 2 {
 		t.Errorf("the last event = %+v, want the run finished with its counts", rec.events[len(rec.events)-1])
+	}
+}
+
+// A report fails only for a step that failed: one needing attention, or
+// deferred, isn't a failure.
+func TestReportFailed(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		states []check.State
+		want   bool
+	}{
+		{"all ok", []check.State{check.OK, check.OK}, false},
+		{"attention and deferred", []check.State{check.OK, check.Attention, check.Deferred}, false},
+		{"one failed", []check.State{check.Attention, check.Failed}, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			report := engine.Report{Results: map[string]check.Result{}}
+			for i, s := range tt.states {
+				report.Results[fmt.Sprint(i)] = check.Result{State: s}
+			}
+			if got := report.Failed(); got != tt.want {
+				t.Errorf("Failed() = %t, want %t", got, tt.want)
+			}
+		})
 	}
 }
 

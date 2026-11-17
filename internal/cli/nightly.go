@@ -165,8 +165,8 @@ func (a *app) nightly(ctx context.Context, r *run, names []string, plan bool) er
 	if err := r.remember(report); err != nil {
 		return err
 	}
-	if report.Attention() || (plan && actions(report)) {
-		return attention{}
+	if report.Failed() {
+		return failure{}
 	}
 	return nil
 }

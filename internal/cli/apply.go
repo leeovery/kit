@@ -29,8 +29,8 @@ Name steps to apply only those, with what they need. Some installs need an
 administrator's password (a cask that installs through a package, an App
 Store app): at a terminal, kit asks for it once, as it starts, for as long
 as it takes, the rest applying meanwhile; without one, those installs wait.
-Exits 0 when nothing needs attention after applying, 1 when something does,
-and 2 when kit couldn't apply.
+Exits 0 when kit applied, even when something still needs attention, 1 when
+something it tried failed, and 2 when kit couldn't apply.
 
 On a Mac the boot has just set up, the data restore brings the paths
 [restore] lists back, till it's done: on a Mac started from another (from,
@@ -98,8 +98,8 @@ kit apply reinstall tries those that failed again.`,
 					return err
 				}
 			}
-			if report.Attention() || (plan && actions(report)) {
-				return attention{}
+			if report.Failed() {
+				return failure{}
 			}
 			return nil
 		},
@@ -109,17 +109,6 @@ kit apply reinstall tries those that failed again.`,
 	cmd.Flags().Var(&a.restoring.from, "restore-from", "restore [restore]'s paths from the old Mac or a backup")
 	cmd.Flags().Var(&a.restoring.at, "at", "with --restore-from, the latest backup by that date or time")
 	return cmd
-}
-
-// actions reports whether any step of report has something applying would
-// do.
-func actions(report engine.Report) bool {
-	for _, res := range report.Results {
-		if res.Actions() {
-			return true
-		}
-	}
-	return false
 }
 
 // toInstall are what applying the steps only names (every step, when none)

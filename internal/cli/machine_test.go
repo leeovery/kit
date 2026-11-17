@@ -46,8 +46,8 @@ func TestMachineWithoutAName(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			out, errOut, status := newWorld(t, tt.files).run(t, "machine")
-			if out != "" || errOut != tt.want || status != 1 {
-				t.Errorf("kit machine printed %q, %q, exit %d; want %q, exit 1", out, errOut, status, tt.want)
+			if out != "" || errOut != tt.want || status != 2 {
+				t.Errorf("kit machine printed %q, %q, exit %d; want %q, exit 2", out, errOut, status, tt.want)
 			}
 		})
 	}

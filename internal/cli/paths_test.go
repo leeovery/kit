@@ -95,7 +95,7 @@ func TestSharedTakesTheNameOutOfTheMacs(t *testing.T) {
 }
 
 // kit path add's --json has the shell's PATH written as a step: one that
-// failed is attention, as kit's exit says.
+// failed shows as attention, and kit exits 1 for it.
 func TestAddPathJSONSaysTheShellsPathFailed(t *testing.T) {
 	w := laptopWorld(t)
 	path := filepath.Join(w.home, ".local/state/kit/path")

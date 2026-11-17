@@ -50,6 +50,17 @@ func TestSecretsSync(t *testing.T) {
 	}
 }
 
+// A secret 1Password won't give fails the sync, and kit exits 1.
+func TestSecretsSyncThatFailsExitsOne(t *testing.T) {
+	w := secretsWorld(t)
+	w.fake.On("op", "whoami")
+	w.fake.OnMatch("op", func(args []string) bool { return len(args) > 0 && args[0] == "read" }).Exits(1).PrintsToStderr("[ERROR] no such item\n")
+	out, _, code := w.run(t, "secret", "sync")
+	if code != 1 || !strings.Contains(out, "secret failed") {
+		t.Errorf("kit secret sync printed\n%s exit %d; want the sync failed, exit 1", out, code)
+	}
+}
+
 // kit secret sync's step says it's waiting for your approval in 1Password
 // while op asks, then that it's syncing again.
 func TestSecretsSyncSaysItsWaitingForApproval(t *testing.T) {

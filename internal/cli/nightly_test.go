@@ -54,16 +54,19 @@ func TestNightlyRunsWhatsDue(t *testing.T) {
 	// An hour on, the nightly run has happened today: the hourly job alone.
 	w.now = w.now.Add(time.Hour)
 	before := len(w.fake.Calls())
-	out, _, _ = w.run(t, "nightly")
+	out, _, code = w.run(t, "nightly")
 	if !strings.Contains(out, "nightly:tidy ok not due\n") || slices.Contains(w.fake.Calls()[before:], "tidy-up --all") {
 		t.Errorf("an hour on, kit nightly printed\n%s\nwant the nightly job not due", out)
+	}
+	if code != 0 {
+		t.Errorf("an hour on, exit %d, want 0: the drift left needs attention, and nothing failed", code)
 	}
 }
 
 func TestNightlyPlanRunsNothing(t *testing.T) {
 	w := jobsWorld(t)
 	out, _, code := w.run(t, "nightly", "--plan")
-	if !strings.Contains(out, "hourly:marks ok due\n") || !strings.Contains(out, "nightly:tidy ok due\n") || code != 1 {
+	if !strings.Contains(out, "hourly:marks ok due\n") || !strings.Contains(out, "nightly:tidy ok due\n") || code != 0 {
 		t.Errorf("kit nightly --plan printed\n%s exit %d", out, code)
 	}
 	for _, c := range w.fake.Calls() {

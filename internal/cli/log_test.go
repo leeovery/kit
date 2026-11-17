@@ -36,8 +36,8 @@ func (w *world) logRun(t *testing.T, when time.Time, events ...event.Event) stri
 
 func TestLogWithoutARun(t *testing.T) {
 	out, errOut, status := newWorld(t, nil).run(t, "log")
-	if out != "" || errOut != "kit: no runs logged yet\n" || status != 1 {
-		t.Errorf("kit log printed %q, %q, exit %d; want it to say there's none, exit 1", out, errOut, status)
+	if out != "" || errOut != "kit: no runs logged yet\n" || status != 0 {
+		t.Errorf("kit log printed %q, %q, exit %d; want it to say there's none, exit 0", out, errOut, status)
 	}
 }
 
@@ -147,7 +147,7 @@ func TestLogOfACommand(t *testing.T) {
 	if out, _, status := w.run(t, "log", "brew", "add"); !strings.HasPrefix(out, "kit brew add jq · laptop") || status != 0 {
 		t.Errorf("kit log brew add printed\n%s exit %d; want brew add jq's run", out, status)
 	}
-	if out, errOut, status := w.run(t, "log", "apply"); out != "" || errOut != "kit: no run of apply logged\n" || status != 1 {
+	if out, errOut, status := w.run(t, "log", "apply"); out != "" || errOut != "kit: no run of apply logged\n" || status != 0 {
 		t.Errorf("kit log apply printed %q, %q, exit %d; want it to say there's none", out, errOut, status)
 	}
 }

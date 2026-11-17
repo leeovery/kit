@@ -265,8 +265,8 @@ func TestApplyNamedRaisesNothing(t *testing.T) {
 	defer cancel()
 	w.ctx = ctx
 
-	if _, errOut, code := w.run(t, "apply", "sign-in"); ctx.Err() != nil || code != 1 {
-		t.Errorf("kit apply sign-in exit %d (%s), stopped: %v; want 1 at once, the step by hand not done", code, errOut, ctx.Err())
+	if _, errOut, code := w.run(t, "apply", "sign-in"); ctx.Err() != nil || code != 0 {
+		t.Errorf("kit apply sign-in exit %d (%s), stopped: %v; want 0 at once, the step by hand not done", code, errOut, ctx.Err())
 	}
 	if up := cards(w.lastLog(t)); len(up) > 0 {
 		t.Errorf("cards logged = %+v, want none", up)
