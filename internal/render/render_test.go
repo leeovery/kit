@@ -285,6 +285,7 @@ func TestPrettyStatusWrapsDetails(t *testing.T) {
 	}}
 	unset := check.Result{State: check.Attention, Summary: "3 declared, 2 set", Items: []check.Item{
 		{ID: "defaults:agent", Name: "com.example.agent", State: "missing", Detail: "not installed: install the app, or open the app it comes with", Since: since},
+		{ID: "defaults:com.apple.dock:autohide", Name: "com.apple.dock:autohide", State: "removed", Since: since},
 	}}
 	face := render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.NoTTY}, 80, false)
 	steps := []event.Step{
@@ -311,6 +312,7 @@ func TestPrettyStatusWrapsDetails(t *testing.T) {
 			"    declared, not set · not installed: install the app, or open the app it comes\n" +
 			"    with · 2 days\n" +
 			"    → kit apply\n",
+		"  ▲ com.apple.dock:autohide  removed, not declared · 2 days · → kit reconcile\n",
 		"  ▲ macOS login items  needs your permission\n" +
 			"    macOS hasn't let the terminal control System Events\n" +
 			"    → System Settings › Privacy & Security › Automation › the terminal › System\n" +

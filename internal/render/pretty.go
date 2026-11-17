@@ -638,12 +638,14 @@ func (p *Pretty) thing(s event.Step, it check.Item) look.Row {
 
 // wrong says what's wrong with a thing of step s, in its kind's words:
 // installed, not declared; of a backup exclusion, excluded, not declared;
-// else, of a setting, set, not declared.
+// else, of a setting, set, not declared, or removed, not declared.
 func wrong(s event.Step, it check.Item) string {
 	verb := cmp.Or(s.Verb, map[string]string{PartSettings: "set", PartSecrets: "synced"}[s.Part], "installed")
 	switch it.State {
 	case "extra":
 		return verb + ", not declared"
+	case "removed":
+		return "removed, not declared"
 	case "missing":
 		return "declared, not " + verb
 	case "unused-dependency":
@@ -1063,6 +1065,7 @@ func doing(running []runningStep) string {
 // driftStates say what a drift item is, briefly.
 var driftStates = map[string]string{
 	"extra":             "not declared",
+	"removed":           "removed",
 	"missing":           "missing",
 	"unused-dependency": "unused",
 	"changed":           "changed",

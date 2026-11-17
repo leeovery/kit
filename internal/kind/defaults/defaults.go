@@ -68,13 +68,14 @@ var Watched = []string{
 var noise = map[string][]string{
 	"*": {
 		"NSWindow Frame *", "NSSplitView Subview Frames *", "NSTableView *", "NSToolbar Configuration *",
-		"NSNavPanel*", "NSNavLastRootDirectory", "NSNavRecentPlaces", "*RecentDocuments*", "*LastUsed*",
+		"NSNavPanel*", "NSNavLastRootDirectory", "NSOSPLastRootDirectory", "NSNavRecentPlaces", "*RecentDocuments*", "*LastUsed*",
 		"*Timestamp*", "*timestamp*", "*-stamp", "*Date", "*date", "*Heartbeat*",
 	},
 	"NSGlobalDomain":   {"com.apple.gms.*", "NSLinguisticDataAssets*", "AKLastIDMSEnvironment", "NSPreferredWebServices", "com.apple.springing.*"},
 	"com.apple.spaces": {"SpacesDisplayConfiguration"},
-	// Shown in the menu bar while an app uses the microphone or camera.
-	"com.apple.controlcenter": {"NSStatusItem VisibleCC AudioVideoModule"},
+	// The menu bar's item while an app uses the microphone or camera, and
+	// live activities.
+	"com.apple.controlcenter": {"NSStatusItem VisibleCC AudioVideoModule", "LiveActivityState"},
 	"/Library/Preferences/com.apple.SoftwareUpdate": {
 		"Last*", "*Date*", "*Dictionary", "*Count", "RecommendedUpdates", "DDMPersistedErrorKey",
 		"PostSuccessful*", "PrimaryLanguages", "SplatEnabled",
@@ -83,6 +84,7 @@ var noise = map[string][]string{
 	"com.apple.finder": {
 		"FXRecentFolders", "GoToField*", "FXDesktopVolumePositions", "FXConnectToBounds", "FXConnectToLastURL",
 		"TrashViewSettings", "SearchRecentsSavedViewStyle*", "ComputerViewSettings", "FK_*", "LastTrashState", "FXSidebarUpgradedTo*",
+		"RecentMoveAndCopyDestinations", "SearchRecentsViewSettings", "ICloudViewSettings", "NetworkViewSettings",
 		// The toolbar buttons sync apps' Finder extensions add by themselves.
 		"FXSyncExtensionToolbarItems*",
 	},
@@ -315,9 +317,7 @@ func (d *Defaults) Installed(ctx context.Context) ([]kind.Installed, error) {
 			}
 		}
 		d.seen = maps.Clone(rec.Seen)
-		for _, name := range d.changed(l, rec) {
-			out = append(out, kind.Installed{Name: name, Explicit: true})
-		}
+		out = append(out, d.changed(l, rec)...)
 	})
 	return out, err
 }
@@ -352,10 +352,10 @@ func (d *Defaults) watchedSettings(id string, m map[string]any) map[string]strin
 }
 
 // changed are the watched settings changed since kit took their values, and
-// not declared: set, changed or unset. A domain kit hasn't watched before
+// not declared: set, changed, or removed. A domain kit hasn't watched before
 // has its values taken now, with nothing changed.
-func (d *Defaults) changed(l look, rec *record) []string {
-	var names []string
+func (d *Defaults) changed(l look, rec *record) []kind.Installed {
+	var out []kind.Installed
 	for _, id := range slices.Sorted(maps.Keys(l.domains)) {
 		now := d.watchedSettings(id, l.domains[id])
 		if !rec.Domains[id] {
@@ -363,34 +363,35 @@ func (d *Defaults) changed(l look, rec *record) []string {
 			maps.Copy(rec.Baseline, now)
 			continue
 		}
-		names = append(names, d.changedIn(id, now, rec)...)
+		out = append(out, d.changedIn(id, now, rec)...)
 	}
-	slices.Sort(names)
-	return slices.Compact(names)
+	slices.SortFunc(out, func(a, b kind.Installed) int { return strings.Compare(a.Name, b.Name) })
+	return slices.CompactFunc(out, func(a, b kind.Installed) bool { return a.Name == b.Name })
 }
 
 // changedIn are the watched settings of the domain id, now as now has them,
 // changed since kit took their values, and not declared.
-func (d *Defaults) changedIn(id string, now map[string]string, rec *record) []string {
-	var names []string
+func (d *Defaults) changedIn(id string, now map[string]string, rec *record) []kind.Installed {
+	var out []kind.Installed
 	for name, was := range rec.Baseline {
 		if !strings.HasPrefix(name, id+":") {
 			continue
 		}
+		is, set := now[name]
 		switch {
 		case isNoiseSetting(name):
 			// Taken before kit knew it for noise.
 			delete(rec.Baseline, name)
-		case now[name] != was && !d.isDeclared(name):
-			names = append(names, name)
+		case is != was && !d.isDeclared(name):
+			out = append(out, kind.Installed{Name: name, Explicit: true, Removed: !set})
 		}
 	}
 	for name := range now {
 		if _, known := rec.Baseline[name]; !known && !d.isDeclared(name) {
-			names = append(names, name)
+			out = append(out, kind.Installed{Name: name, Explicit: true})
 		}
 	}
-	return names
+	return out
 }
 
 // isNoiseSetting reports whether the watched setting name is noise, a
@@ -631,6 +632,12 @@ func (d *Defaults) Revert(ctx context.Context, name string) error {
 	return d.takeUp(ctx, []string{s.Domain})
 }
 
+// Accept takes a watched setting removed from the Mac as gone: kit forgets
+// the value it last accepted, so it's no longer shown.
+func (d *Defaults) Accept(_ context.Context, name string) error {
+	return state.Update(d.stateDir, recordName, func(rec *record) { delete(rec.Baseline, name) })
+}
+
 // write sets the setting name to v, or unsets it when set is false: a
 // dict's entry by writing the dict whole.
 func (d *Defaults) write(ctx context.Context, name string, v any, set bool) error {
@@ -714,4 +721,5 @@ var _ interface {
 	kind.Admin
 	kind.Blocker
 	kind.Reverter
+	kind.Accepter
 } = (*Defaults)(nil)

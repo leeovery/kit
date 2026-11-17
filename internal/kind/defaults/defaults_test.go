@@ -107,7 +107,7 @@ func TestAWatchedSettingChangedShowsUp(t *testing.T) {
 		t.Fatalf("first look = %q; want the values taken, nothing changed", got)
 	}
 	m.set("NSGlobalDomain", "<key>NSWindow Frame Main</key><string>5 6 7 8</string><key>AppleShowAllExtensions</key><true/>")
-	want := []string{"NSGlobalDomain:AppleInterfaceStyle extra", "NSGlobalDomain:AppleShowAllExtensions extra"}
+	want := []string{"NSGlobalDomain:AppleShowAllExtensions extra", "NSGlobalDomain:AppleInterfaceStyle removed"}
 	if got := m.items(list); !slices.Equal(got, want) {
 		t.Errorf("items = %q, want %q (a window's frame is macOS's own)", got, want)
 	}
@@ -268,32 +268,79 @@ func (m *mac) record() (rec struct{ Baseline map[string]string }) {
 	return rec
 }
 
-// Finder's own bookkeeping of the toolbar buttons sync apps add never shows
-// as changed: only a setting a person changed does.
-func TestFindersToolbarBookkeepingIsNoise(t *testing.T) {
-	m := newMac(t)
-	list := m.declare()
-	if err := os.WriteFile(filepath.Join(m.state, "settings.json"), []byte(`{"domains": {"com.apple.finder": true}}`), 0o600); err != nil {
-		t.Fatal(err)
+// What macOS keeps for itself never shows as changed: only a setting a
+// person changed, beside it, does.
+func TestMacOSsOwnBookkeepingIsNoise(t *testing.T) {
+	cases := []struct{ name, domain, noise, setting string }{
+		{"Finder's record of sync apps' toolbar buttons", "com.apple.finder", "FXSyncExtensionToolbarItemsPendingAdd", "ShowPathbar"},
+		{"the folders last moved or copied to", "com.apple.finder", "RecentMoveAndCopyDestinations", "ShowPathbar"},
+		{"the search window's layout", "com.apple.finder", "SearchRecentsViewSettings", "StandardViewSettings"},
+		{"how iCloud's window was last viewed", "com.apple.finder", "ICloudViewSettings", "StandardViewSettings"},
+		{"how the network's window was last viewed", "com.apple.finder", "NetworkViewSettings", "StandardViewSettings"},
+		{"the folder an open or save panel last showed", "NSGlobalDomain", "NSOSPLastRootDirectory", "AppleShowAllExtensions"},
+		{"the microphone and camera item", "com.apple.controlcenter", "NSStatusItem VisibleCC AudioVideoModule", "NSStatusItem Visible Bluetooth"},
+		{"live activities", "com.apple.controlcenter", "LiveActivityState", "NSStatusItem Visible Bluetooth"},
 	}
-	m.set("com.apple.finder", "<key>FXSyncExtensionToolbarItemsPendingRemove</key><array/><key>FXSyncExtensionToolbarItemsPendingAdd</key><array/><key>ShowPathbar</key><true/>")
-	if got := m.items(list); !slices.Equal(got, []string{"com.apple.finder:ShowPathbar extra"}) {
-		t.Errorf("items = %q; want Finder's bookkeeping left out, the setting found", got)
+	for _, c := range cases {
+		m := newMac(t)
+		list := m.declare()
+		if err := os.WriteFile(filepath.Join(m.state, "settings.json"), []byte(`{"domains": {"`+c.domain+`": true}}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		m.set(c.domain, "<key>"+c.noise+"</key><dict/><key>"+c.setting+"</key><true/>")
+		if got, want := m.items(list), []string{c.domain + ":" + c.setting + " extra"}; !slices.Equal(got, want) {
+			t.Errorf("%s: items = %q, want %q", c.name, got, want)
+		}
 	}
 }
 
-// Control Center's microphone and camera item, which macOS shows while an
-// app uses them, never shows as changed; the menu bar items a person chose
-// do.
-func TestTheMicrophoneAndCameraItemIsNoise(t *testing.T) {
+// A setting both declared and noise is compared as declared: noise only
+// keeps what isn't declared from showing.
+func TestADeclaredSettingThatsNoiseIsComparedAsDeclared(t *testing.T) {
+	m := newMac(t)
+	list := m.declare("com.apple.controlcenter:LiveActivityState", "-int 1")
+	m.set("com.apple.controlcenter", "<key>LiveActivityState</key><integer>1</integer>")
+	if got := m.items(list); len(got) != 0 {
+		t.Fatalf("items = %q; want none, as declared", got)
+	}
+	m.set("com.apple.controlcenter", "<key>LiveActivityState</key><integer>2</integer>")
+	if got, want := m.items(list), []string{"com.apple.controlcenter:LiveActivityState diverged set to 2"}; !slices.Equal(got, want) {
+		t.Errorf("items = %q, want %q", got, want)
+	}
+	if got := m.items(m.declare()); len(got) != 0 {
+		t.Errorf("undeclared, items = %q; want none, as noise", got)
+	}
+}
+
+// A watched setting removed since kit took its value shows as removed;
+// accepting it forgets it, and reverting writes it back.
+func TestAWatchedSettingRemovedShowsAsRemoved(t *testing.T) {
 	m := newMac(t)
 	list := m.declare()
-	if err := os.WriteFile(filepath.Join(m.state, "settings.json"), []byte(`{"domains": {"com.apple.controlcenter": true}}`), 0o600); err != nil {
+	m.set("com.apple.dock", "<key>autohide</key><true/>")
+	if got := m.items(list); len(got) != 0 {
+		t.Fatalf("first look = %q; want the values taken, nothing changed", got)
+	}
+	m.set("com.apple.dock", "")
+	if got, want := m.items(list), []string{"com.apple.dock:autohide removed"}; !slices.Equal(got, want) {
+		t.Fatalf("items = %q, want %q", got, want)
+	}
+	m.fake.On("defaults", "write", "com.apple.dock", "autohide", "<true/>")
+	m.fake.On("killall", "Dock")
+	if err := m.d.Revert(t.Context(), "com.apple.dock:autohide"); err != nil {
+		t.Errorf("Revert() = %v", err)
+	}
+	if calls := strings.Join(m.fake.Calls(), "\n"); !strings.Contains(calls, "defaults write com.apple.dock autohide '<true/>'") {
+		t.Errorf("ran\n%s\nwant the value written back", calls)
+	}
+	if err := m.d.Accept(t.Context(), "com.apple.dock:autohide"); err != nil {
 		t.Fatal(err)
 	}
-	m.set("com.apple.controlcenter", "<key>NSStatusItem VisibleCC AudioVideoModule</key><true/><key>NSStatusItem Visible Bluetooth</key><true/>")
-	if got := m.items(list); !slices.Equal(got, []string{"com.apple.controlcenter:NSStatusItem Visible Bluetooth extra"}) {
-		t.Errorf("items = %q; want the microphone's item left out, Bluetooth's found", got)
+	if rec := m.record(); rec.Baseline["com.apple.dock:autohide"] != "" {
+		t.Errorf("record = %+v; want the setting forgotten", rec)
+	}
+	if got := m.items(list); len(got) != 0 {
+		t.Errorf("accepted, items = %q; want none", got)
 	}
 }
 

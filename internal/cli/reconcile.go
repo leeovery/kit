@@ -92,7 +92,7 @@ run and one commit:
 		},
 	}
 	f := cmd.Flags()
-	f.BoolVar(&opts.adopt, "adopt", false, "declare it: for this Mac, or every Mac with --shared")
+	f.BoolVar(&opts.adopt, "adopt", false, "declare it: for this Mac, or every Mac with --shared; a setting removed from the Mac, accept it gone")
 	f.BoolVar(&opts.remove, "remove", false, "uninstall it")
 	f.BoolVar(&opts.install, "install", false, "install it, as it's declared")
 	f.BoolVar(&opts.undeclare, "undeclare", false, "take it out of this Mac's file, or the shared one with --shared")

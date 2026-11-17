@@ -130,6 +130,9 @@ func (d kindDrifter) choices(it check.Item) []choice {
 			all = append(all, choice{action: install, words: d.installing})
 		}
 		all = append(all, choice{action: undeclare, words: kind.Words{Label: "Undeclare", Does: "undeclare it", Doing: "undeclaring"}}, snoozeChoice)
+	case kind.Removed:
+		all = []choice{{action: adopt, words: kind.Words{Label: "Accept", Does: "leave it removed, declaring nothing", Doing: "accepting"}}}
+		all = append(append(all, uninstalling...), snoozeChoice)
 	case kind.Diverged:
 		all = []choice{
 			{action: adopt, words: keepingMacs},
@@ -154,6 +157,7 @@ func (d kindDrifter) describe(it check.Item) string {
 	}
 	return map[string]string{
 		kind.Extra:            d.installing.Done + ", not declared",
+		kind.Removed:          "removed on this Mac, not declared",
 		kind.Missing:          "declared, not " + d.installing.Done,
 		kind.UnusedDependency: "installed for something since removed, needed by nothing",
 		kind.Diverged:         "changed on this Mac from what's declared",
@@ -165,7 +169,16 @@ func (d kindDrifter) settle(ctx context.Context, r *run, c *changes, dec decisio
 	switch {
 	case dec.action == adopt && (dec.item.State == kind.Diverged || dec.item.State == kind.Changed):
 		return d.adoptValue(ctx, r, c, dec, note)
-	case dec.action == revert && dec.item.State == kind.Extra:
+	case dec.action == adopt && dec.item.State == kind.Removed:
+		ac, ok := d.k.(kind.Accepter)
+		if !ok {
+			return check.Result{State: check.Failed, Reason: "kit can't accept it as removed"}
+		}
+		if err := ac.Accept(ctx, dec.item.Name); err != nil {
+			return check.Result{State: check.Failed, Reason: err.Error()}
+		}
+		return check.Result{State: check.OK, Summary: "accepted as removed"}
+	case dec.action == revert && (dec.item.State == kind.Extra || dec.item.State == kind.Removed):
 		rv, ok := d.k.(kind.Reverter)
 		if !ok {
 			return check.Result{State: check.Failed, Reason: "kit doesn't know what it was"}

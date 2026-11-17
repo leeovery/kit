@@ -32,6 +32,9 @@ type Installed struct {
 	Explicit bool
 	// Needed is whether something else installed needs it.
 	Needed bool
+	// Removed is whether it's gone from the Mac: found only by what kit
+	// last accepted, as a watched setting is.
+	Removed bool
 }
 
 // Kind is a list of things of one sort.
@@ -287,6 +290,13 @@ type Reverter interface {
 	Revert(ctx context.Context, name string) error
 }
 
+// Accepter is a kind whose things removed from the Mac kit reconcile can
+// accept as gone: kit stops looking for them, and nothing is declared.
+type Accepter interface {
+	// Accept forgets name, removed from the Mac.
+	Accept(ctx context.Context, name string) error
+}
+
 // Keyed is a kind whose things match by part of their names: an App Store
 // app by its id, an npm package without its version.
 type Keyed interface {
@@ -398,6 +408,9 @@ const (
 	// Diverged is a Diverger's thing installed otherwise than declared:
 	// applying leaves it.
 	Diverged = "diverged"
+	// Removed is a thing gone from the Mac, not declared: kit reconcile
+	// accepts it gone or puts it back.
+	Removed = "removed"
 )
 
 // Step is the step that checks k, what declared lists against what's on
@@ -1327,8 +1340,9 @@ func keyOf(k Kind) func(string) string {
 
 // Compare checks what declared lists against what k finds installed: a
 // declared thing is ok installed for any reason, or missing; an undeclared
-// one installed for itself, and needed by nothing, is extra; one installed
-// only as a dependency, and needed by nothing now, is an unused dependency.
+// one installed for itself, and needed by nothing, is extra, or removed when
+// it's gone; one installed only as a dependency, and needed by nothing now,
+// is an unused dependency.
 // A thing declared off is neither missing nor extra. A kind that can tell
 // finds things installed otherwise than declared. While k's program isn't
 // installed, nothing declared is fine, and anything declared defers the
@@ -1398,14 +1412,15 @@ func Compare(ctx context.Context, k Kind, declared config.List) check.Result {
 			return failed(k, err)
 		}
 	}
-	var extra, unused []string
+	var extra, removed, unused []string
 	for _, it := range installed {
-		if matched[it.Name] || it.Needed {
-			continue
-		}
-		if it.Explicit {
+		switch {
+		case matched[it.Name] || it.Needed:
+		case it.Removed:
+			removed = append(removed, it.Name)
+		case it.Explicit:
 			extra = append(extra, it.Name)
-		} else {
+		default:
 			unused = append(unused, it.Name)
 		}
 	}
@@ -1431,6 +1446,9 @@ func Compare(ctx context.Context, k Kind, declared config.List) check.Result {
 	}
 	if len(changed) > 0 {
 		res.Counts["changed"] = len(changed)
+	}
+	if len(removed) > 0 {
+		res.Counts["removed"] = len(removed)
 	}
 	if off > 0 {
 		res.Counts["off"] = off
@@ -1471,6 +1489,7 @@ func Compare(ctx context.Context, k Kind, declared config.List) check.Result {
 		items(k, unknown, Missing, "unknown"),
 		changedItems,
 		items(k, extra, Extra, ""),
+		items(k, removed, Removed, ""),
 		items(k, unused, UnusedDependency, ""),
 	)
 	if len(res.Items) > 0 {

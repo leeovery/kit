@@ -65,13 +65,13 @@ func TestManualLinesRead(t *testing.T) {
 		`"Do it" --after`:                       "--after needs a step's name after it",
 		`"Do it" --before cask:1password`:       "--before a step",
 		`"Do it" --after cask: --test true`:     "one of its things as in cask:firefox",
-		`"Do it" --test test -d x --after cask`: "",
+		`"Do it" --test test -d x --after cask`: "--after can't be in --test's command: kit's options go before --test, its command last",
+		`"Do it" --test test --before x`:        "--before can't be in --test's command",
+		`"Do it" --test true --group Apps`:      "--group can't be in --test's command",
+		`"Do it" --test true --test false`:      "--test can't be in --test's command",
 	} {
 		_, err := steps.ParseManual("/home", config.Entry{Name: "x", Value: value})
-		switch {
-		case want == "" && err != nil:
-			t.Errorf("%q: error = %v, want --after taken as the command's own word", value, err)
-		case want != "" && (err == nil || !strings.Contains(err.Error(), want)):
+		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%q: error = %v, want %q", value, err, want)
 		}
 	}

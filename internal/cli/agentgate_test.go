@@ -113,6 +113,7 @@ func TestTheGuidesChecksFindWhatsWrong(t *testing.T) {
 		{"[steps]\nname \"does\" --after cask:a\n", ""},
 		{"[steps]\nname --after cask:a\n", "what the step does comes after its name"},
 		{"[manual]\nname \"do\" --frob x\n", "isn't one of a step by hand's options"},
+		{"[manual]\nname \"do\" --test test -L x --after cask:a\n", "--after can't be in --test's command"},
 		{"[secrets op://vault/item --as tokens]\nTOKEN Section/token\n", ""},
 	}
 	for _, tt := range examples {
