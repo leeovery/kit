@@ -1,8 +1,8 @@
 # Built for agents: Claude sets up your Mac with you
 
 kit is agent-first. Claude or any other agent runs the same commands you do. Every command
-answers in JSON with `--json`. Without a terminal, kit never waits on a question: it takes the
-safe answer, or fails and names the flag that gives one. `kit agent` gives an agent the rules
+that checks or changes something answers in JSON with `--json`. Without a terminal, kit never
+waits on a question: it takes the safe answer, or fails and names the flag that gives one. `kit agent` gives an agent the rules
 for changing your Mac, so that each change lands on your next Mac too.
 
 ## Try it
@@ -74,14 +74,16 @@ kit reconcile brew:nosuch --snooze --json
 
 ## What only you can do
 
-Some steps need a person at the Mac. An agent asks you, and kit waits:
+An agent can't do these, so it asks you:
 
-- **GitHub's sign-in,** on your phone, when the boot starts a new Mac.
-- **1Password's approval,** such as a fingerprint, when kit reads or keeps a secret. kit waits up
-  to 10 minutes for it.
+- **GitHub's sign-in,** on your phone or in the browser, when the boot starts a new Mac.
+- **1Password's approval,** such as a fingerprint. It may be asked for before a secret is
+  read, kept or deleted, and kit waits up to 10 minutes for it.
 - **The App Store's sign-in,** a step by hand that kit-config declares before App Store apps.
-- **Your administrator's password,** at a terminal. Without one, an install that needs it
-  waits, and you run `kit apply` yourself.
+  The App Store apps wait until you've done it.
+- **Your administrator's password,** at a terminal. Without a terminal, an install that needs
+  it doesn't run, and kit names the command to run at one. If sudo holds a password already,
+  nothing waits.
 
 ## Good to know
 
@@ -89,7 +91,8 @@ Some steps need a person at the Mac. An agent asks you, and kit waits:
   alone.
 - **One document on standard output.** If something goes wrong after a command has printed its
   JSON, the error is a line on standard error.
-- **Removing uninstalls.** The guide tells an agent to ask you before it removes anything.
+- **Removing undoes it on the Mac.** The guide tells an agent to ask you before it removes
+  anything.
 
 ## Reference
 
@@ -98,7 +101,7 @@ Some steps need a person at the Mac. An agent asks you, and kit waits:
 | `kit agent` | The guide, this config's facts first |
 | `kit agent <topic>` | One topic, such as `secrets` |
 | `kit agent order <name>` | Where a step falls in a new Mac's run |
-| `--json` | One JSON document, for any command |
+| `--json` | One JSON document, but from `kit agent` and help |
 | `--plain` | Plain lines, no colour or animation |
 | `<command> --help` | What it needs and what it changes |
 

@@ -3,20 +3,21 @@
 Change a setting in System Settings as you always do, then tell kit to keep it. kit reads the
 value this Mac has and declares it in kit-config, and each Mac it's declared for gets it.
 kit also watches the Dock, Finder, the trackpad and more, so a change you forgot to keep still
-turns up. Power settings and git settings work the same way.
+turns up. `kit power` and `kit git-config` keep power and git settings the same way. kit watches
+every git setting, but only the power settings you declare.
 
 ## Try it
 
 ```bash
-# Hide the Dock in System Settings, then keep it
-kit defaults add com.apple.dock:autohide
+# Resize the Dock in System Settings, then keep it
+kit defaults add com.apple.dock:tilesize
 ```
 
 kit reads the value and writes the line in the form `defaults write` takes:
 
 ```text
 [macos settings]
-com.apple.dock autohide -bool true
+com.apple.dock tilesize -int 48
 ```
 
 ```bash
@@ -26,33 +27,28 @@ kit power add charger:sleep --shared
 kit git-config add pull.rebase
 ```
 
-Each lands in its own section, in sorted order, then kit commits and pushes kit-config:
+Each lands in its own section, in sorted order, then kit commits and pushes kit-config. The
+power setting goes in `shared/declarations`:
 
 ```text
 [power settings]
 -c sleep 0
+```
 
+The git setting goes in this Mac's file, `laptop/declarations`:
+
+```text
 [git config]
 pull.rebase true
 ```
-
-## The settings kit keeps
-
-| Command | Section | Named as |
-|---|---|---|
-| `kit defaults` | `[macos settings]` | `com.apple.dock:autohide` |
-| `kit power` | `[power settings]` | `charger:sleep` |
-| `kit git-config` | `[git config]` | `pull.rebase` |
-
-A setting name is the domain and the key, joined by a colon. A power setting starts with its
-source: `charger`, `battery`, `all` or `ups`.
 
 ## What happens
 
 - **`kit apply` sets what's missing.** On a new Mac, or for a line you wrote by hand, kit writes
   the declared value.
-- **You see the change at once.** kit restarts the Dock, Finder or Control Center after it
-  writes one of their settings. It reloads keyboard shortcuts too.
+- **You see the change at once.** After kit sets, unsets or puts back a setting, it restarts
+  what shows it: the Dock, Finder, Control Center or the menu bar. It reloads keyboard
+  shortcuts too.
 - **A change by hand is never undone behind your back.** If a declared setting changes on the
   Mac, `kit apply` leaves it. It's drift, and you choose to keep the new value or put the
   declared one back.
@@ -73,7 +69,7 @@ The first time kit looks at a domain, it takes the values as they are. After tha
 you change there and haven't declared is drift. After a day, `kit status` lists it, and `kit
 reconcile` asks whether to declare it or put back what it was.
 
-A setting removed from the Mac shows up the same way:
+A setting you never declared, removed from the Mac, shows up the same way:
 
 ```console
   ▲ com.apple.dock:autohide  removed, not declared · 2 days · → kit reconcile
@@ -85,7 +81,7 @@ showing it. `--revert` puts the old value back. See
 
 ## What macOS changes by itself is ignored
 
-macOS writes some values on its own, all day. kit ignores them, so they never show up as
+macOS writes some values on its own. kit ignores them, so they never show up as
 drift:
 
 - window sizes and positions, and the columns of a table;
@@ -97,9 +93,9 @@ git is different: every global setting that kit-config doesn't declare shows up.
 
 ## Good to know
 
-- **A setting for this Mac only starts `currentHost:`.** For example,
-  `currentHost:NSGlobalDomain:com.apple.mouse.tapBehavior` writes a line that starts
-  `-currentHost`.
+- **A name that starts `currentHost:`** is a setting macOS keeps for each Mac apart. For
+  example, `currentHost:NSGlobalDomain:com.apple.mouse.tapBehavior` writes a line that starts
+  `-currentHost`. It can still be declared for every Mac.
 - **Some settings need your password.** A setting in a domain under `/Library`, and every
   power setting, is written through sudo. `kit apply` asks for the password once, at a
   terminal.
@@ -112,14 +108,18 @@ git is different: every global setting that kit-config doesn't declare shows up.
 
 | Command or flag | What it does |
 |---|---|
-| `kit <kind> add <name>...` | Declares it as this Mac has it |
+| `kit defaults add <domain:key>...` | Keeps macOS settings |
+| `kit power add <source:setting>...` | Keeps power settings |
+| `kit git-config add <key>...` | Keeps git settings |
 | `add --shared` | Declares it for every Mac |
 | `add --note "<why>"` | Keeps why, after the line |
 | `kit <kind> remove <name>...` | Takes the line out, as above |
 | `remove --shared` | Needed to remove a shared line |
 | `kit reconcile` | Settles what changed by hand |
 
-Each of these takes `--json`, and `--help` says what it needs and what it changes.
+A power source is `charger`, `battery`,
+`all` or `ups`. Each of these commands takes `--json`, and `--help` says what it needs and
+what it changes.
 
 ## Related
 

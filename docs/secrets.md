@@ -28,21 +28,8 @@ kit secret add OTHER_TOKEN --field GitHub/other \
 kit secret add ~/.ssh/id.pem --from id.pem
 ```
 
-Neither names an item, so both go in the one block that this Mac's declarations file has.
-
-## Where a value goes
-
-| If you give | The value goes in |
-|---|---|
-| `--in <name>` | The block with that name |
-| `--item <item>` | That item, its block made if needed |
-| Neither, one block | The block in that file |
-| Neither, none or several | Nowhere: kit asks you to say |
-
-"That file" is this Mac's declarations file, or the shared one with `--shared`. A block takes a
-name with `--as` in its header, as in `[secrets op://vault/item --as tokens]`. `--field` says
-where in the item the value goes. A file from `--from` needs no `--field`: it's kept under its
-own name.
+Neither names an item, so both go in the one block for an item that this Mac's declarations
+file has.
 
 ## What happens
 
@@ -52,19 +39,26 @@ own name.
 - **A value already in 1Password needs no copy.** `--ref op://vault/item/field` declares it
   and stores nothing.
 - **Nothing logs a value.** kit hides each value it sets from the run log.
+- **A failed read keeps the old value.** If `kit secret sync` can't read a value, the one in
+  place stays.
 
-## Your approval in 1Password
+## Where a value goes
 
-Reading or keeping a value may need your approval in the 1Password app, such as a fingerprint.
-While it waits, kit says "waiting for your approval in 1Password", for up to 10 minutes. Only you
-can answer it, so an agent's command waits on you too.
+A new value goes in an item, and its line goes in a block for that item:
 
-## See and sync
+| If you give | The line goes in |
+|---|---|
+| `--item <item>` | This file's block for that item, made if needed |
+| `--in <name>` | This file's block for the item of the block named, made if needed |
+| Neither, and one block for an item | That block |
+| Neither, and none or several | Nowhere: kit refuses, and lists the blocks |
 
-```bash
-# The blocks secrets are declared in
-kit secret places
-```
+"This file" is this Mac's declarations file, or the shared one with `--shared`. So `--in` with
+the name of a shared block, without `--shared`, makes a block in this Mac's file. The plain
+`[secrets]` block counts for none of this. `--field` says where in the item the value goes. A
+file from `--from` needs no `--field`: it's kept under its own name.
+
+`kit secret places` lists the blocks. On a Mac with three blocks, it prints:
 
 ```console
   ● tokens  1Password · op://vault/Item · shared · 2 secrets · sections Other, Section
@@ -72,8 +66,7 @@ kit secret places
   ● op://vault/Other  1Password · laptop · 1 secret · section Section
 ```
 
-After you change a value in 1Password, `kit secret sync` puts every secret in place again. A
-value that fails to read keeps the one it had.
+The first is named with `--as` in its header: `[secrets op://vault/Item --as tokens]`.
 
 ## Private taps need a token
 
@@ -94,6 +87,9 @@ waits until the token has synced.
 
 ## Good to know
 
+- **1Password may ask for your approval,** such as a fingerprint. It may ask before a value is
+  read, kept or deleted. While it waits, kit says "waiting for your approval in 1Password",
+  for up to 10 minutes. A command an agent runs waits on you too.
 - **1Password is the one store today.** The reference picks it: `op://` means 1Password.
 - **A new Mac syncs after you sign in.** Signing in to 1Password is a card partway through the
   run. What needs a secret waits until then.
@@ -111,7 +107,7 @@ waits until the token has synced.
 | `add --from <file>` | Keeps a file as an attachment |
 | `add --ref <reference>` | Declares a value kept already |
 | `kit secret places` | Lists the blocks |
-| `kit secret sync` | Puts every secret in place again |
+| `kit secret sync` | Puts every secret in place again, after a change in 1Password |
 | `kit secret remove <name>...` | Takes it off, and undeclares it |
 
 ## Related

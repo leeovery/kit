@@ -76,7 +76,7 @@ Without one, you name each item and what to do with it. The main answers:
 | Answer | What kit does |
 |---|---|
 | `--adopt` | Declares what this Mac has |
-| `--revert` | Puts back what's declared |
+| `--revert` | Puts back what was there, or what's declared |
 | `--remove` | Uninstalls it |
 
 kit then commits and pushes kit-config. `--install`, `--undeclare` and `--snooze` settle the

@@ -1,9 +1,9 @@
 # Drift: keep or undo what changed by hand
 
-You install a package with brew, change a Dock setting, or an app replaces a linked file. kit
-sees each one, and `kit reconcile` asks what you want. You keep it, and kit declares it in kit-config. Or
-you undo it, and the Mac goes back to what kit-config says. You'd want it so that your next
-Mac matches the one you use today.
+You install a package with brew. You change a Dock setting. An app replaces a linked file. kit
+sees each one, and `kit reconcile` asks what you want. You keep it, and kit declares it in
+kit-config; or you undo it, and the Mac goes back to what kit-config says. You'd want it so
+that your next Mac matches the one you use today.
 
 ## Try it
 
@@ -64,8 +64,8 @@ Name the ids, and one answer for them all:
 ```bash
 # Declare both, for this Mac
 kit reconcile brew:ffmpeg cask:firefox --adopt
-# Quiet one for 7 days
-kit reconcile cask:firefox --snooze
+# Quiet another for 7 days
+kit reconcile brew:node@20 --snooze
 ```
 
 The answers, and what each one does:
@@ -73,11 +73,25 @@ The answers, and what each one does:
 | Answer | What kit does |
 |---|---|
 | `--adopt` | Declares what this Mac has |
-| `--revert` | Puts back what's declared |
+| `--revert` | Puts back what was there, or what's declared |
 | `--remove` | Uninstalls it |
 | `--install` | Installs it, as declared |
 | `--undeclare` | Takes its line out |
 | `--snooze` | Quiets it for 7 days |
+
+Each item takes only some of them, and `--snooze` takes any:
+
+| If the item is | It takes |
+|---|---|
+| Installed, not declared | `--adopt`, `--remove` |
+| An unused dependency | `--remove`, `--adopt` |
+| Declared, not installed | `--install`, `--undeclare` |
+| A setting changed on the Mac | `--adopt`, `--revert` |
+| A setting set otherwise | `--install`, `--adopt` |
+| A replaced linked file | `--adopt`, `--revert` |
+| A file not linked | `--install` |
+| A dead link | `--remove` |
+| An edit in kit-config | `--adopt`, `--revert` |
 
 `--shared` with `--adopt` or `--undeclare` uses the shared file, for every Mac. `--note "why"`
 keeps a note after the line it adopts. `kit reconcile brew cask` goes through only those kinds.
@@ -102,8 +116,9 @@ reconcile` asks whether to keep it.
   section for this Mac, even an empty one. `--temp` adds an empty section if there's none.
 - **A setting removed from the Mac can be accepted.** `--adopt` on a removed setting leaves
   it removed, and kit stops showing it. See [macOS settings](settings.md).
-- **A replaced linked file goes to the Bin.** `--revert` links kit-config's copy back, and
-  moves the Mac's copy to the Bin. `--adopt` moves the Mac's copy into kit-config instead.
+- **A replaced linked file is never lost.** `--adopt` moves the copy on the Mac into
+  kit-config, and links it back. `--revert` links the copy in kit-config instead, and moves the
+  other to the Bin.
 - **Edits by hand in kit-config come up too.** `kit reconcile` commits a file you edited
   there, or undoes the edit.
 
