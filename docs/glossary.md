@@ -57,6 +57,9 @@ the check says it isn't done.
 `[manual]` with `kit manual add`. It says what to do. A command may say whether it's done, and
 otherwise `kit manual done <name>` marks it.
 
+**Backup tool.** Time Machine or Arq, declared in `[backups]` with `kit backup add`. kit checks
+that its backups run, and keeps `[backup exclusions]` out of them.
+
 **Drift.** A difference between this Mac and kit-config. It's one of these:
 
 - a package installed but not declared, or declared but not installed;
