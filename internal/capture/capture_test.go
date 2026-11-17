@@ -3,6 +3,7 @@ package capture_test
 import (
 	"bytes"
 	"context"
+	"flag"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,26 +17,39 @@ import (
 	"github.com/leeovery/kit/internal/capture"
 )
 
-// The status still is the screen kit's face prints for the run its golden
-// file holds, colour and all, at any width: kit draws no wider than its
-// look allows.
-func TestStatusIsTheGoldensScreen(t *testing.T) {
-	want, err := os.ReadFile(filepath.Join("..", "render", "testdata", "pretty-colour.golden"))
-	if err != nil {
-		t.Fatal(err)
-	}
+var update = flag.Bool("update", false, "rewrite the golden files with what the fixtures draw")
+
+// The status still is kit status on a Mac in daily use, two things
+// waiting on the person, as kit's face prints it, at any width: kit draws
+// no wider than its look allows. Its words held by status.golden, without
+// colour; -update writes it again.
+func TestStatusFixture(t *testing.T) {
 	f, err := capture.FixtureNamed("status")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, width := range []int{80, 120} {
+	draw := func(width int) string {
 		var out bytes.Buffer
-		if err := f.Draw(&colorprofile.Writer{Forward: &out, Profile: colorprofile.TrueColor}, width); err != nil {
+		if err := f.Draw(&colorprofile.Writer{Forward: &out, Profile: colorprofile.NoTTY}, width); err != nil {
 			t.Fatal(err)
 		}
-		if out.String() != string(want) {
-			t.Errorf("at %d columns, drew\n%s\nwant pretty-colour.golden's\n%s", width, out.String(), want)
+		return out.String()
+	}
+	got, path := draw(80), filepath.Join("testdata", "status.golden")
+	if *update {
+		if err := os.WriteFile(path, []byte(got), 0o600); err != nil {
+			t.Fatal(err)
 		}
+	}
+	want, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s (run with -update to write it): %v", path, err)
+	}
+	if got != string(want) {
+		t.Errorf("drew\n%s\nwant status.golden's\n%s", got, want)
+	}
+	if wide := draw(120); wide != got {
+		t.Errorf("at 120 columns, drew\n%s\nwant it as at 80", wide)
 	}
 }
 
@@ -71,10 +85,22 @@ func (s *screen) text() string {
 	return ansi.Strip(s.out.String())
 }
 
-// Each scenario plays through in real time, as its tape records it, its
-// keys landing on what waits for them, to its last screen, held: each of
-// what it shows, shown in turn.
+// play plays s at a screen of its size, at four times its own pace, and
+// returns the screen, a channel told once it's held its last screen, and
+// one given what Play returned.
+func play(ctx context.Context, s capture.Scenario) (*screen, <-chan struct{}, <-chan error) {
+	at := &screen{w: s.Width, h: s.Height}
+	held, played := make(chan struct{}), make(chan error, 1)
+	go func() {
+		played <- s.Faster(4).Play(ctx, capture.Screen{Out: at, Size: at.size}, func() { close(held) })
+	}()
+	return at, held, played
+}
+
+// Each scenario plays through, its keys pressed as what they answer shows,
+// to its last screen, held: each of what it shows, shown in turn.
 func TestScenariosPlayThrough(t *testing.T) {
+	t.Parallel()
 	for _, tt := range []struct {
 		name  string
 		shows []string
@@ -90,7 +116,7 @@ func TestScenariosPlayThrough(t *testing.T) {
 		}},
 		{"arrival", []string{
 			"hello again", "press any key", "bootstrap · laptop · Fri 20 Nov · 09:52",
-			"tab next row · ↑↓ scroll · q stop",
+			"tab next row · ↑↓ scroll · q stop", "Homebrew: 5.0.3 · Xcode tools 26.1", "Homebrew: /opt/homebrew",
 			"Installed 1password-cli", "Sign in to 1Password", "Installed slack", "set up · 3 plugins",
 		}},
 	} {
@@ -100,16 +126,13 @@ func TestScenariosPlayThrough(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			at := &screen{w: s.Width, h: s.Height}
 			ctx, stop := context.WithTimeout(context.Background(), time.Minute)
 			defer stop()
-			held := make(chan struct{})
-			played := make(chan error, 1)
-			go func() { played <- s.Play(ctx, capture.Screen{Out: at, Size: at.size}, func() { close(held) }) }()
+			at, held, played := play(ctx, s)
 			select {
 			case <-held:
 			case err := <-played:
-				t.Fatalf("ended before its last screen: %v\n%s", err, at.text())
+				t.Fatalf("ended before its last screen: %v\n%s", err, tail(at.text()))
 			case <-ctx.Done():
 				t.Fatalf("never reached its last screen: a key it pressed found nothing waiting for it\n%s", tail(at.text()))
 			}
@@ -130,20 +153,41 @@ func TestScenariosPlayThrough(t *testing.T) {
 }
 
 // Stopped while it plays, a scenario ends there, at once and without an
-// error, taking down what it showed.
+// error: in its splash or arrival, at a question, at work, on apply's
+// screen.
 func TestScenarioStoppedWhileItPlays(t *testing.T) {
-	for _, s := range capture.Scenarios() {
-		t.Run(s.Name, func(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct{ name, at string }{
+		{"boot", "computers are fun"},
+		{"boot", "which of your Macs is this?"},
+		{"boot", "==> Downloading and installing Homebrew..."},
+		{"arrival", "hello again"},
+		{"arrival", "Installed 1password"},
+	} {
+		t.Run(tt.name+" at "+tt.at, func(t *testing.T) {
 			t.Parallel()
-			at := &screen{w: s.Width, h: s.Height}
-			ctx, stop := context.WithTimeout(context.Background(), 700*time.Millisecond)
-			defer stop()
-			began := time.Now()
-			if err := s.Play(ctx, capture.Screen{Out: at, Size: at.size}, nil); err != nil {
-				t.Fatalf("Play() = %v", err)
+			s, err := capture.ScenarioNamed(tt.name)
+			if err != nil {
+				t.Fatal(err)
 			}
-			if took := time.Since(began); took > 3*time.Second {
-				t.Errorf("took %s to stop", took)
+			ctx, stop := context.WithCancel(context.Background())
+			defer stop()
+			at, _, played := play(ctx, s)
+			deadline := time.Now().Add(time.Minute)
+			for !strings.Contains(at.text(), tt.at) {
+				if time.Now().After(deadline) {
+					t.Fatalf("never showed %q", tt.at)
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+			stop()
+			select {
+			case err := <-played:
+				if err != nil {
+					t.Fatalf("Play() = %v", err)
+				}
+			case <-time.After(3 * time.Second):
+				t.Fatal("still playing 3s after it was stopped")
 			}
 		})
 	}

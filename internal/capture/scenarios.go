@@ -44,11 +44,11 @@ func selfTest(at time.Time) event.SelfTest {
 }
 
 // boot is the boot in Terminal, as kit bootstrap plays it: the splash,
-// enter pressed once it's resolved; the self-test; signing in to GitHub
+// enter pressed once it says to; the self-test; signing in to GitHub
 // with the phone, its QR code the whole window; then the boot order, a
 // step at a time, what it asks answered in its row, to the hand-off.
 func boot(s *stage) error {
-	s.pressAfter(3300*time.Millisecond, "enter")
+	s.meanwhile(func() { s.answer(0, "press enter", 900*time.Millisecond, func() { s.press("enter") }) })
 	if err := render.NewSplash(true).Play(s.ctx, s.term); err != nil {
 		return err
 	}
@@ -103,13 +103,15 @@ func done(step, summary string) func(time.Time) event.Event {
 	}
 }
 
-// ask asks the face question, as the boot does, while keys presses what
-// answers it; then waits for the answer, as the boot goes on only once it
-// has it, so a key pressed next can't answer it in its place.
-func (b *booting) ask(question func() error, keys func()) {
+// ask asks the face question, as the boot does, and once it shows what
+// it asks, after read, answers it as does does; then waits for the answer,
+// as the boot goes on only once it has it, so a key pressed next can't
+// answer it in its place.
+func (b *booting) ask(question func() error, shows string, read time.Duration, does func()) {
+	mark := b.s.shown.mark()
 	answered := make(chan error, 1)
 	go func() { answered <- question() }()
-	keys()
+	b.s.answer(mark, shows, read, does)
 	b.err = cmp.Or(b.err, <-answered)
 }
 
@@ -121,10 +123,7 @@ func (b *booting) signIn() {
 	b.ask(func() error {
 		_, err := b.face.Pick(ctx, "github", []look.Key{{Key: "enter", Does: "with your phone"}, {Key: "s", Does: "here, in your browser"}})
 		return err
-	}, func() {
-		s.pause(1100 * time.Millisecond)
-		s.press("enter")
-	})
+	}, "enter with your phone", 1100*time.Millisecond, func() { s.press("enter") })
 	s.pause(400 * time.Millisecond)
 	b.face.Emit(event.DeviceCode{Time: s.now(), Step: "github", URI: "https://github.com/login/device", Code: "WDJB-MJHT", Expires: s.now().Add(15 * time.Minute)})
 	s.pause(2300 * time.Millisecond)
@@ -143,16 +142,12 @@ func (b *booting) order() {
 			{Label: "new", Does: "a new machine ID, started fresh or from one of your Macs"},
 		})
 		return err
-	}, func() {
-		s.pause(1100 * time.Millisecond)
-		s.press("enter")
-	})
+	}, "which of your Macs is this?", 1100*time.Millisecond, func() { s.press("enter") })
 	b.emit(done("mac", newMac), started("password"))
 	b.ask(func() error {
 		_, err := b.face.Secret(ctx, "password", "this Mac's password, once")
 		return err
-	}, func() {
-		s.pause(400 * time.Millisecond)
+	}, "this Mac's password, once", 400*time.Millisecond, func() {
 		s.typeIn("opensesame")
 		s.press("enter")
 	})
@@ -178,10 +173,7 @@ func (b *booting) order() {
 			"System Settings is open at Full Disk Access, and Finder at Applications: drag Ghostty into the list, then press enter",
 			[]look.Key{{Key: "enter", Does: "done"}})
 		return err
-	}, func() {
-		s.pause(1700 * time.Millisecond)
-		s.press("enter")
-	})
+	}, "drag Ghostty into the list", 1700*time.Millisecond, func() { s.press("enter") })
 	b.emit(done("full-disk-access", "granted to Ghostty"), started("terminal"),
 		doing("terminal", "opening", "macOS asks before Ghostty first opens: choose Open"))
 	s.pause(1400 * time.Millisecond)
@@ -200,7 +192,7 @@ func (b *booting) step(step, says, summary string, d time.Duration) {
 // the arrival, a key pressed at its greeting; then kit apply's screen,
 // under the header it lands on.
 func arrival(s *stage) error {
-	s.pressAfter(1300*time.Millisecond, "enter")
+	s.meanwhile(func() { s.answer(0, "press any key", 1100*time.Millisecond, func() { s.press("enter") }) })
 	a := render.NewArrival(true, "bootstrap", newMac, s.now()).KeepHeader()
 	if err := a.Play(s.ctx, s.term); err != nil {
 		return err
@@ -232,9 +224,10 @@ type beat struct {
 	events []event.Event
 }
 
-// applying is a new Mac's run as kit apply has it, a few seconds of it: the boot's steps done, what's quick done, Homebrew
-// installing formulae and casks, 1Password's sign-in coming up once its
-// casks are in, and Claude Code finishing setting itself up.
+// applying is a new Mac's run as kit apply has it, a few seconds of it:
+// the boot's steps done, what's quick done, Homebrew installing formulae
+// and casks, 1Password's sign-in coming up once its casks are in, and
+// Claude Code finishing setting itself up.
 func applying() []beat {
 	ok := func(step, summary string) event.Event {
 		return event.StepFinished{Step: step, Result: check.Result{State: check.OK, Summary: summary}}
@@ -245,7 +238,7 @@ func applying() []beat {
 	beats := []beat{
 		{300 * time.Millisecond, []event.Event{
 			ok("boot-github", "someone · kit-config has laptop and studio"), ok("boot-mac", newMac),
-			ok("boot-homebrew", "/opt/homebrew"), ok("boot-kit-config", "cloned"),
+			ok("boot-homebrew", "5.0.3 · Xcode tools 26.1"), ok("boot-kit-config", "cloned · 61 files linked"),
 		}},
 		{400 * time.Millisecond, []event.Event{
 			ok("homebrew", "/opt/homebrew"), ok("file", "54 linked"), ok("path", "15 directories"),

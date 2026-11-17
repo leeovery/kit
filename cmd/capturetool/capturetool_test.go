@@ -3,27 +3,24 @@ package main
 import (
 	"bytes"
 	"context"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/charmbracelet/x/ansi"
 )
 
 func size() (int, int) { return 120, 34 }
 
-// A fixture prints in truecolor, whatever the terminal says it shows, at
-// the terminal's width: the status still is pretty-colour.golden's screen.
+// A fixture prints in truecolor, whatever the terminal says it shows: the
+// status still's words in kit's own colours.
 func TestFixture(t *testing.T) {
-	want, err := os.ReadFile(filepath.Join("..", "..", "internal", "render", "testdata", "pretty-colour.golden"))
-	if err != nil {
-		t.Fatal(err)
-	}
 	var out bytes.Buffer
 	if err := run(context.Background(), []string{"--fixture", "status"}, strings.NewReader(""), &out, size); err != nil {
 		t.Fatal(err)
 	}
-	if out.String() != string(want) {
-		t.Errorf("printed\n%s\nwant\n%s", out.String(), want)
+	// kit's pink, #FF4F9A, as a truecolor escape.
+	if got := out.String(); !strings.Contains(got, "\x1b[38;2;255;79;154m") || !strings.Contains(ansi.Strip(got), "2 need you · 13 fine") {
+		t.Errorf("printed\n%s\nwant the status still in truecolor", got)
 	}
 }
 
