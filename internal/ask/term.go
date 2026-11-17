@@ -188,7 +188,9 @@ func (t Terminal) raw() (restore func()) {
 // keys reads keys from In as they come, and returns them, and what stops
 // reading: a read waiting for a key is cancelled, so the next question's
 // keys aren't taken, and closed once it's returned, as a cancelled read
-// still reads what cancelled it.
+// still reads what cancelled it. One reader of In at a time: a second,
+// taking the bytes the first was woken for, would leave the first's read
+// waiting where a cancel can't reach it, and stopping it waiting with it.
 func (t Terminal) keys() (<-chan key, func()) {
 	in := t.In
 	var r cancelreader.CancelReader

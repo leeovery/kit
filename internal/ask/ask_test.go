@@ -499,8 +499,8 @@ func TestListen(t *testing.T) {
 // Keys read from a file, as kit reads the terminal's, stop cleanly, each
 // question's keys going to it: the read waiting for a key is cancelled,
 // and has returned before what cancelled it is closed. Closed sooner, the
-// race detector finds the cancelled read reading it, though only in some
-// interleavings, which this can't force.
+// race detector finds the cancelled read reading it: in most runs of this
+// one, not all, as it needs the read and the close to interleave so.
 func TestKeysFromAFileStopCleanly(t *testing.T) {
 	in, typing, err := os.Pipe()
 	if err != nil {
@@ -508,7 +508,7 @@ func TestKeysFromAFileStopCleanly(t *testing.T) {
 	}
 	defer func() { _ = in.Close() }()
 	defer func() { _ = typing.Close() }()
-	for i := range 20 {
+	for i := range 400 {
 		keys, stop := Listen(Terminal{In: in})
 		key := strconv.Itoa(i % 10)
 		if _, err := typing.WriteString(key); err != nil {
@@ -518,7 +518,7 @@ func TestKeysFromAFileStopCleanly(t *testing.T) {
 			t.Fatalf("question %d took %+v; want %q", i, k, key)
 		}
 		// The read waits for the next key, as it does while a question's up.
-		time.Sleep(5 * time.Millisecond)
+		time.Sleep(time.Millisecond)
 		stop()
 	}
 }
