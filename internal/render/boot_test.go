@@ -15,6 +15,7 @@ import (
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/look"
 	"github.com/leeovery/kit/internal/render"
+	"github.com/leeovery/kit/internal/render/rendertest"
 )
 
 var bootSteps = []event.Step{
@@ -90,25 +91,13 @@ func TestBootFace(t *testing.T) {
 	golden(t, "boot.golden", screens.String())
 }
 
-var orderSteps = []event.Step{
-	{Name: "github", Title: "GitHub", Area: "Sign in", Waiting: "This Mac is set up from your kit-config, a private repository on GitHub. Sign in to GitHub, and kit fetches it."},
-	{Name: "mac", Title: "This Mac", Area: "Boot order"},
-	{Name: "password", Title: "Password", Area: "Boot order", Waiting: "once"},
-	{Name: "homebrew", Title: "Homebrew", Area: "Boot order"},
-	{Name: "apps", Title: "Apps", Area: "Boot order"},
-	{Name: "kit-config", Title: "kit-config", Area: "Boot order"},
-	{Name: "kit", Title: "kit", Area: "Boot order"},
-	{Name: "full-disk-access", Title: "Full Disk Access", Area: "Boot order", Waiting: "for Ghostty"},
-	{Name: "terminal", Title: "Ghostty", Area: "Boot order"},
-}
-
 // What the boot needs of you, in its row: the password, a dot a character;
 // Full Disk Access, what to do, then enter; and while Ghostty opens, what
 // macOS asks. A step that took a while, without asking, says how long.
 func TestBootFaceNeedsYou(t *testing.T) {
 	at := time.Date(2026, 10, 9, 15, 2, 0, 0, time.UTC)
 	f := render.NewBootFace(ask.Terminal{Out: &bytes.Buffer{}}, true, func() time.Time { return at }, nil)
-	f.Show(orderSteps)
+	f.Show(rendertest.BootOrder())
 	ok := func(step, summary string, took time.Duration) {
 		f.Emit(event.StepStarted{Time: at, Step: step})
 		f.Emit(event.StepFinished{Time: at, Step: step, Result: check.Result{State: check.OK, Summary: summary}, Duration: took})
@@ -162,7 +151,7 @@ func TestBootFaceNeedsYou(t *testing.T) {
 func TestBootFaceName(t *testing.T) {
 	at := time.Date(2026, 11, 4, 15, 2, 0, 0, time.UTC)
 	f := render.NewBootFace(ask.Terminal{Out: &bytes.Buffer{}}, true, func() time.Time { return at }, nil)
-	f.Show(orderSteps)
+	f.Show(rendertest.BootOrder())
 	f.Emit(event.StepStarted{Time: at, Step: "github"})
 	f.Emit(event.StepFinished{Time: at, Step: "github", Result: check.Result{State: check.OK, Summary: "someone"}})
 	f.Emit(event.StepStarted{Time: at, Step: "mac"})

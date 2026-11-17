@@ -201,6 +201,13 @@ func (p *Pretty) fit() {
 	p.width = min(max(w, 40), look.Width)
 }
 
+// Clocked has the face tell the time by now, for how long a run has taken
+// and when what it logs came.
+func (p *Pretty) Clocked(now func() time.Time) *Pretty {
+	p.now = now
+	return p
+}
+
 // UnderHome has the face show a run started from kit's home, under the
 // home's wordmark: its heading leaves the wordmark out.
 func (p *Pretty) UnderHome() *Pretty {

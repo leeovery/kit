@@ -21,6 +21,7 @@ import (
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/look"
 	"github.com/leeovery/kit/internal/render"
+	"github.com/leeovery/kit/internal/render/rendertest"
 )
 
 var update = flag.Bool("update", false, "rewrite the golden files with what the faces print")
@@ -45,7 +46,7 @@ func golden(t *testing.T, name, got string) {
 	}
 }
 
-var at = time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+var at = rendertest.At
 
 // run is a run's events: steps finishing out of order, one of each state,
 // and items of each sort.
@@ -78,51 +79,6 @@ func run() []event.Event {
 		event.StepFinished{Time: at, Step: "brew", Result: brew},
 		event.StepFinished{Time: at, Step: "mas", Result: check.Result{State: check.Deferred, Reason: "needs Homebrew"}},
 		event.RunFinished{Time: at, Duration: time.Second, Counts: map[check.State]int{check.OK: 2, check.Attention: 1, check.Failed: 1, check.Deferred: 1}},
-	}
-}
-
-// statusRun is a run of kit status as the pretty face shows it: steps in
-// their areas, Config's with their parts, one of each state, and items of
-// each sort.
-func statusRun() []event.Event {
-	steps := []event.Step{
-		{Name: "homebrew", Title: "Homebrew", Area: "Drift", Row: "Homebrew formulae", Tool: "Homebrew", Part: render.PartPackages},
-		{Name: "brew", Title: "Formulae", Area: "Drift", Row: "Homebrew formulae", Tool: "Homebrew", Part: render.PartPackages},
-		{Name: "cask", Title: "Casks", Area: "Drift", Row: "Homebrew casks", Tool: "Homebrew", Part: render.PartPackages},
-		{Name: "defaults", Title: "macOS settings", Area: "Drift", Row: "Mac settings", Part: render.PartSettings},
-		{Name: "config-private", Title: "Privacy", Area: "Config", Part: render.PartConfig},
-		{Name: "config-sync", Title: "Sync", Area: "Config", Part: render.PartConfig},
-		{Name: "mas", Title: "App Store", Area: "Drift", Row: "App Store apps", Part: render.PartPackages},
-		{Name: "time-machine", Title: "Time Machine", Area: "Backups"},
-		{Name: "disk", Title: "Disk space", Area: "Mac"},
-		{Name: "fonts", Title: "fonts", Area: "Steps"},
-	}
-	brew := check.Result{
-		State: check.Attention, Summary: "6 declared, 4 installed", Counts: map[string]int{"declared": 6, "installed": 4},
-		Items: []check.Item{
-			{ID: "brew:jq", Name: "jq", State: "missing", Action: "install"},
-			{ID: "brew:ffmpeg", Name: "ffmpeg", State: "extra", Since: at.Add(-50 * time.Hour)},
-			{ID: "brew:hello", Name: "hello", State: "extra", Quiet: "new"},
-		},
-	}
-	ok := func(summary string, counts map[string]int) check.Result {
-		return check.Result{State: check.OK, Summary: summary, Counts: counts}
-	}
-	return []event.Event{
-		event.RunStarted{Time: at, Command: "status", Machine: "laptop", Version: "0.1.0", Steps: steps},
-		event.StepFinished{Time: at, Step: "homebrew", Result: ok("/opt/homebrew", nil)},
-		event.StepFinished{Time: at, Step: "cask", Result: ok("3 declared, all installed", map[string]int{"installed": 3})},
-		event.StepFinished{Time: at, Step: "defaults", Result: ok("9 declared, all set", map[string]int{"installed": 9})},
-		event.StepFinished{Time: at, Step: "config-private", Result: check.Result{State: check.OK, Summary: "private on GitHub", Glance: "private"}},
-		event.StepFinished{Time: at, Step: "config-sync", Result: check.Result{State: check.Failed, Reason: "not a git repository"}},
-		event.StepFinished{Time: at, Step: "brew", Result: brew},
-		event.StepFinished{Time: at, Step: "mas", Result: check.Result{State: check.Deferred, Reason: "needs Homebrew"}},
-		event.StepFinished{Time: at, Step: "time-machine", Result: ok("last backup 02:35", nil)},
-		event.StepFinished{Time: at, Step: "disk", Result: check.Result{State: check.Attention, Summary: "8% free", Items: []check.Item{
-			{ID: "disk:low", Name: "only 8% free on the startup disk", State: "problem", Detail: "free some space: kit status says where it went"},
-		}}},
-		event.StepFinished{Time: at, Step: "fonts", Result: ok("16 installed", nil)},
-		event.RunFinished{Time: at, Duration: 1800 * time.Millisecond, Counts: map[check.State]int{check.OK: 6, check.Attention: 2, check.Failed: 1, check.Deferred: 1}},
 	}
 }
 
@@ -207,13 +163,13 @@ func TestFacesShowNothingOfTheLogsLines(t *testing.T) {
 
 func TestPrettyLayout(t *testing.T) {
 	var out bytes.Buffer
-	show(t, render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.NoTTY}, 80, false), statusRun())
+	show(t, render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.NoTTY}, 80, false), rendertest.StatusRun())
 	golden(t, "pretty.golden", out.String())
 }
 
 func TestPrettyColour(t *testing.T) {
 	var out bytes.Buffer
-	show(t, render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.TrueColor}, 80, false), statusRun())
+	show(t, render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.TrueColor}, 80, false), rendertest.StatusRun())
 	golden(t, "pretty-colour.golden", out.String())
 }
 
