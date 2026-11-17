@@ -57,17 +57,18 @@ type Launching struct {
 }
 
 // LaunchKit is the kit the hourly launch is to run, self being the kit
-// running: the kit on path, kit's PATH, the one the person runs, named as
-// it's found there, so Homebrew's link outlasts its upgrades, whichever kit
-// is applying, so a build of kit's own names it, not itself. With none on
-// path, self, unless it's a build that won't last (in temp, Go's build
-// cache or a worktree): none to name, why says so.
+// running. A build that won't last (in temp, Go's build cache or a
+// worktree) names none, why saying so, as applying would build kit.app
+// from its own files, which loses kit.app's Full Disk Access. Any other
+// kit names the kit on path, kit's PATH, the one the person runs, as it's
+// found there, so Homebrew's link outlasts its upgrades, whichever kit is
+// applying; or, with none on path, self.
 func LaunchKit(self string, path []string, temp string) (kit, why string) {
-	if onPath, err := (runner.Exec{Path: path}).Find("kit"); err == nil {
-		return onPath, ""
-	}
 	if passing(self, temp) {
 		return "", fmt.Sprintf("this kit, %s, is a build that won't last: the hourly launch is left for the kit on kit's PATH", self)
+	}
+	if onPath, err := (runner.Exec{Path: path}).Find("kit"); err == nil {
+		return onPath, ""
 	}
 	return self, ""
 }

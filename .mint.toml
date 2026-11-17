@@ -21,7 +21,7 @@ diff_exclude = [
 
 [release.hooks]
 # CI is off until kit is ready, and no CI job builds a release: both happen
-# on this Mac, after the notes and before the irreversible tag and push.
+# on this Mac, before the notes and the irreversible tag and push.
 # scripts/gates runs every gate, the personal-data scan included; then
 # scripts/release-build builds the binaries and keeps them, so a failure
 # building or checking them stops the release before its tag, with nothing

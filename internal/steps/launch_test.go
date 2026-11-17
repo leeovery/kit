@@ -120,9 +120,9 @@ func TestLaunchAgent(t *testing.T) {
 	}
 }
 
-// The kit the launch runs is the one on kit's PATH, named as it's found
-// there, whichever kit is running; with none on PATH, the kit running,
-// unless it's a build that won't last: none to name.
+// A build that won't last names no kit for the launch; any other names the
+// one on kit's PATH, as it's found there, whichever kit is running, or, with
+// none on PATH, itself.
 func TestLaunchKit(t *testing.T) {
 	home := homeWith(t, "bin/kit", "Cellar/kit/1.0/bin/kit", "elsewhere/kit", "Code/kit/.claude/worktrees/one/kit", "cache/go-build123/b001/exe/kit", "tmp/built/kit")
 	if err := os.Symlink(filepath.Join(home, "Cellar/kit/1.0/bin/kit"), filepath.Join(home, "linked")); err != nil {
@@ -145,7 +145,7 @@ func TestLaunchKit(t *testing.T) {
 		{"the kit on PATH, running", at("bin/kit"), []string{at("bin")}, at("bin/kit"), ""},
 		{"the kit on PATH, Homebrew's link to it running", at("Cellar/kit/1.0/bin/kit"), []string{at("brew")}, at("brew/kit"), ""},
 		{"another kit than PATH's", at("elsewhere/kit"), []string{at("bin")}, at("bin/kit"), ""},
-		{"a worktree's build, a kit on PATH", at("Code/kit/.claude/worktrees/one/kit"), []string{at("brew")}, at("brew/kit"), ""},
+		{"a worktree's build, a kit on PATH", at("Code/kit/.claude/worktrees/one/kit"), []string{at("brew")}, "", "this kit, " + at("Code/kit/.claude/worktrees/one/kit") + ", is a build that won't last: the hourly launch is left for the kit on kit's PATH"},
 		{"none on PATH, a lasting kit", at("elsewhere/kit"), []string{at("nothing")}, at("elsewhere/kit"), ""},
 		{"none on PATH, a worktree's build", at("Code/kit/.claude/worktrees/one/kit"), nil, "", "this kit, " + at("Code/kit/.claude/worktrees/one/kit") + ", is a build that won't last: the hourly launch is left for the kit on kit's PATH"},
 		{"none on PATH, go run's build", at("cache/go-build123/b001/exe/kit"), nil, "", "this kit, " + at("cache/go-build123/b001/exe/kit") + ", is a build that won't last: the hourly launch is left for the kit on kit's PATH"},
