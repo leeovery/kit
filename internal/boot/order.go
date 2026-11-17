@@ -30,6 +30,7 @@ import (
 const (
 	PasswordStep = "password"
 	HomebrewStep = "homebrew"
+	KitStep      = "kit"
 	AppsStep     = "apps"
 	ConfigStep   = "kit-config"
 	AccessStep   = "full-disk-access"
@@ -37,12 +38,17 @@ const (
 )
 
 // Order is the boot order, planned from the config repository signing in
-// read: this Mac; the password, once; Homebrew; the apps kit.toml names;
-// kit-config, cloned, its files linked; then, with a terminal named, Full
-// Disk Access for it, and the hand-off to it. Each needs the one before.
+// read: this Mac; the password, once; Homebrew; kit itself, through
+// Homebrew, unless it runs a build of its own (OwnBuild); the apps kit.toml
+// names; kit-config, cloned, its files linked; then, with a terminal named,
+// Full Disk Access for it, and the hand-off to it. Each needs the one
+// before.
 func (b *Boot) Order() []engine.Step {
 	cfg := b.config()
 	order := []engine.Step{b.macStep(), b.passwordStep(), b.homebrewStep()}
+	if !b.OwnBuild() {
+		order = append(order, b.kitStep())
+	}
 	if wanted := b.apps(cfg); len(wanted) > 0 {
 		order = append(order, b.appsStep(wanted))
 	}
@@ -169,7 +175,7 @@ func (b *Boot) givePassword(ctx context.Context) error {
 	case ctx.Err() != nil:
 		return ctx.Err()
 	case err != nil:
-		return errors.New("sudo refused the password: run kit bootstrap again")
+		return errors.New("sudo refused the password: paste the install line into Terminal again")
 	}
 	b.mu.Lock()
 	b.held = true
@@ -217,10 +223,107 @@ func (b *Boot) homebrewStep() engine.Step {
 		},
 		Apply: func(ctx context.Context, _ check.Result) error {
 			if !b.Held() {
-				return errors.New("needs this Mac's password: run kit bootstrap at a terminal")
+				return errors.New("needs this Mac's password: paste the install line into Terminal")
 			}
 			b.doing(HomebrewStep, "installing")
 			return brew.Install(ctx, b.Run)
+		},
+	}
+}
+
+// kitFormula is kit's own formula, named in full, so brew taps its tap
+// itself.
+const kitFormula = "leeovery/tools/kit"
+
+// OwnBuild reports whether the boot runs a build of kit's own, as the
+// install script given one (KIT_FROM) starts it: it then hands over to that
+// build, and Homebrew's kit is kit apply's to install, as kit-config
+// declares it.
+func (b *Boot) OwnBuild() bool {
+	return b.Getenv("KIT_FROM") != ""
+}
+
+// homebrewKit is where Homebrew puts kit: in its prefix's bin, as brew
+// --prefix says, /opt/homebrew on Apple silicon and /usr/local on Intel.
+func (b *Boot) homebrewKit(ctx context.Context) (string, error) {
+	res, err := b.Run.Run(ctx, runner.Command{Name: "brew", Args: []string{"--prefix"}})
+	if err != nil {
+		return "", fmt.Errorf("find Homebrew: %w", err)
+	}
+	return filepath.Join(strings.TrimSpace(string(res.Stdout)), "bin", "kit"), nil
+}
+
+// CarriesOnAs is the kit the boot carries on as in the terminal kit.toml
+// names, handed over to or there already: Homebrew's, which the boot
+// installed, so kit apply and all after run from it; or, running a build of
+// its own, that build (Self).
+func (b *Boot) CarriesOnAs(ctx context.Context) (string, error) {
+	if b.OwnBuild() {
+		return b.Self, nil
+	}
+	return b.homebrewKit(ctx)
+}
+
+// Becomes is the kit the boot, running as self in the terminal kit.toml
+// names already, becomes to carry on there: Homebrew's, which it installed;
+// "" when it carries on itself, being that kit, or a build of its own.
+func (b *Boot) Becomes(ctx context.Context, self string) (string, error) {
+	if b.OwnBuild() {
+		return "", nil
+	}
+	kit, err := b.homebrewKit(ctx)
+	if err != nil || sameFile(kit, self) {
+		return "", err
+	}
+	return kit, nil
+}
+
+// sameFile reports whether a and b are one file, links followed, as
+// Homebrew's kit is a link to its version's.
+func sameFile(a, b string) bool {
+	ai, err := os.Stat(a)
+	if err != nil {
+		return false
+	}
+	bi, err := os.Stat(b)
+	return err == nil && os.SameFile(ai, bi)
+}
+
+// kitStep installs kit itself through Homebrew, which keeps it up to date,
+// for the boot to hand over to: done when Homebrew's kit is there, and no
+// older than the boot's own, as it may be on a boot run again, or with the
+// tap a release behind; a boot that isn't a release's compares none.
+func (b *Boot) kitStep() engine.Step {
+	return engine.Step{
+		Name: KitStep, Title: "kit",
+		Check: func(ctx context.Context) check.Result {
+			kit, err := b.homebrewKit(ctx)
+			if err != nil {
+				return check.Result{State: check.Failed, Reason: err.Error()}
+			}
+			if !runner.Has(runner.Exec{}, kit) {
+				return check.Result{State: check.Attention, Summary: "not installed"}
+			}
+			res, err := b.Run.Run(ctx, runner.Command{Name: kit, Args: []string{"--version"}})
+			if err != nil {
+				return check.Result{State: check.Failed, Reason: fmt.Sprintf("read Homebrew's kit's version: %v", err)}
+			}
+			have := strings.TrimPrefix(strings.TrimSpace(string(res.Stdout)), "kit version ")
+			if config.Older(have, b.Version) {
+				return check.Result{State: check.Attention, Summary: fmt.Sprintf("%s, older than this kit, %s", have, b.Version)}
+			}
+			return check.Result{State: check.OK, Summary: have + " · through Homebrew"}
+		},
+		Apply: func(ctx context.Context, _ check.Result) error {
+			verb, doing := "install", "installing"
+			if kit, err := b.homebrewKit(ctx); err == nil && runner.Has(runner.Exec{}, kit) {
+				verb, doing = "upgrade", "upgrading"
+			}
+			b.doing(KitStep, doing)
+			if _, err := b.Run.Run(ctx, runner.Command{Name: "brew", Args: []string{verb, "--formula", kitFormula}, Timeout: 15 * time.Minute, SudoAsks: true}); err != nil {
+				return fmt.Errorf("%s kit through Homebrew: %w", verb, err)
+			}
+			return nil
 		},
 	}
 }
@@ -501,7 +604,8 @@ func (b *Boot) accessStep(t apps.Terminal) engine.Step {
 
 // handOverStep opens the terminal running kit bootstrap again, which
 // carries the boot on there, its window maximized for kit apply's screen:
-// done once that kit has arrived, or when this is it.
+// done once that kit has arrived, or when this is it. The kit it runs is
+// the one the boot carries on as (CarriesOnAs).
 func (b *Boot) handOverStep(t apps.Terminal) engine.Step {
 	return engine.Step{
 		Name: TerminalStep, Title: t.Title,
@@ -515,9 +619,18 @@ func (b *Boot) handOverStep(t apps.Terminal) engine.Step {
 			return check.Result{State: check.Attention, Summary: "not opened yet"}
 		},
 		Apply: func(ctx context.Context, _ check.Result) error {
+			kit, err := b.CarriesOnAs(ctx)
+			if err != nil {
+				return err
+			}
+			env := []string{"SUDO_ASKPASS="}
+			if b.OwnBuild() {
+				env = append(env, "KIT_FROM="+b.Getenv("KIT_FROM"))
+			}
 			// The terminal takes on the environment it's opened with: not this
-			// run's askpass, which ends with it.
-			w := apps.Window{Command: []string{b.Self, "bootstrap", "--handed-over"}, Env: []string{"SUDO_ASKPASS="}, Maximized: true}
+			// run's askpass, which ends with it; and the build of its own the
+			// boot runs, so the boot handed over to knows it.
+			w := apps.Window{Command: []string{kit, "bootstrap", "--handed-over"}, Env: env, Maximized: true}
 			if err := t.Open(ctx, b.Run, b.Applications, w); err != nil {
 				return fmt.Errorf("open %s: %w", t.Title, err)
 			}

@@ -4,8 +4,8 @@
 
 # Tracked churn that isn't user-facing release content, kept out of the AI
 # release notes and commit diffs so they describe the CLI: agent config and
-# contributor rules, the design doc, the gate and test-isolation tooling, CI
-# plumbing, lockfile noise, and test scaffolding. Tests and their golden
+# contributor rules, the design doc, the gate, test-isolation and release
+# tooling, CI plumbing, lockfile noise, and test scaffolding. Tests and their golden
 # fixtures are the bulk of any change's diff, enough to crowd the behaviour
 # out of the notes.
 diff_exclude = [
@@ -20,9 +20,15 @@ diff_exclude = [
 ]
 
 [release.hooks]
-# CI is off until kit is ready, and release.yml only builds on the tag push,
-# so the release is gated here, after the notes and before the irreversible
-# tag and push: every gate, the personal-data scan included.
-pre_tag = [
-    'scripts/gates',
-]
+# CI is off until kit is ready, and no CI job builds a release: both happen
+# on this Mac, before the notes and the irreversible tag and push.
+# scripts/gates runs every gate, the personal-data scan included; then
+# scripts/release-build builds the binaries and keeps them, so a failure
+# building or checking them stops the release before its tag, with nothing
+# public yet.
+pre_tag = ['scripts/gates', 'scripts/release-build']
+# Once the tag and the release are up: scripts/release-upload uploads the
+# kept binaries to the release and moves the Homebrew formula on to them.
+# mint only warns when it fails, so scripts/release-upload <version>, run by
+# hand, finishes the release.
+post_release = ['scripts/release-upload']

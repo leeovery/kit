@@ -223,18 +223,18 @@ func (c *Config) macList() string {
 // Supports returns an error when the config needs a later kit than version.
 // A version that isn't a release's, such as a build from source, reads any.
 func (c *Config) Supports(version string) error {
-	if c.MinimumKit == "" {
-		return nil
-	}
-	have, ok := parseVersion(version)
-	if !ok {
-		return nil
-	}
-	need, _ := parseVersion(c.MinimumKit)
-	if slices.Compare(have, need) < 0 {
+	if Older(version, c.MinimumKit) {
 		return fmt.Errorf("the config needs kit %s or later, and this is %s: update kit", c.MinimumKit, version)
 	}
 	return nil
+}
+
+// Older reports whether version is a release's older than than's: never
+// when either isn't a release's, such as a build from source.
+func Older(version, than string) bool {
+	have, ok := parseVersion(version)
+	need, known := parseVersion(than)
+	return ok && known && slices.Compare(have, need) < 0
 }
 
 // parseVersion reads a release's version, as in 0.1.0 or v0.1.0.

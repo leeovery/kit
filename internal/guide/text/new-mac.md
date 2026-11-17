@@ -5,15 +5,16 @@ from now, by a person who may not be watching.
 
 ## The boot
 
-One line pasted into Terminal installs kit and runs `kit bootstrap`: it
+One line pasted into Terminal downloads kit and runs `kit bootstrap`: it
 signs in to GitHub on the person's phone, asks which Mac this is and for
-the administrator's password once, then installs Homebrew, the terminal
-kit.toml names and kit-config, and links its files. It carries on in that
-terminal with the whole of `kit apply`.
+the administrator's password once, then installs Homebrew, kit itself
+through Homebrew, the terminal kit.toml names and kit-config, and links its
+files. It carries on in that terminal with the whole of `kit apply`, from
+Homebrew's kit; the download is removed.
 
-So when `kit apply` starts: Homebrew and the terminal are there, gh is
-signed in to GitHub, kit-config is cloned and its files linked, and nothing
-else of the person's is.
+So when `kit apply` starts: Homebrew, its kit and the terminal are there,
+gh is signed in to GitHub, kit-config is cloned and its files linked, and
+nothing else of the person's is.
 
 ## The run
 

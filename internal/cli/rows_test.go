@@ -66,7 +66,7 @@ func TestEveryStepHasARow(t *testing.T) {
 		made = append(made, steps.Backup(fake, d, never, func(context.Context, string) (bool, bool) { return false, false }))
 	}
 	// kit.toml naming a terminal, the boot makes every step it has.
-	booted := (&boot.Boot{Config: configDir}).Booted()
+	booted := (&boot.Boot{Config: configDir, Getenv: func(string) string { return "" }}).Booted()
 	if !slices.ContainsFunc(booted, func(s engine.Step) bool { return s.Name == "boot-"+boot.TerminalStep }) {
 		t.Fatalf("the boot made %d steps, not the hand-off to the terminal: want every one", len(booted))
 	}

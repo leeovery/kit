@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"maps"
@@ -25,6 +26,7 @@ import (
 	"github.com/leeovery/kit/internal/gitrepo"
 	"github.com/leeovery/kit/internal/hand"
 	"github.com/leeovery/kit/internal/kind"
+	"github.com/leeovery/kit/internal/kind/brew"
 	"github.com/leeovery/kit/internal/kinds"
 	"github.com/leeovery/kit/internal/linked"
 	"github.com/leeovery/kit/internal/logs"
@@ -579,20 +581,25 @@ func (a *app) build(command, logName string, face render.Face, atTerminal bool) 
 
 // schedulingSteps are the steps that have kit run by itself, on every Mac:
 // the hourly launch, opening kit.app to run the kit on kit's PATH nightly,
-// when it's this one (steps.LaunchKit); and, after
-// it, the step by hand giving kit.app Full Disk Access, raised at a
-// terminal (raise).
+// whichever kit applies (steps.LaunchKit), found once Homebrew's formulae
+// are applied; and, after it, the step by hand
+// giving kit.app Full Disk Access, raised at a terminal (raise).
 func (r *run) schedulingSteps(a *app, dirs config.Dirs, raise *steps.Raise) ([]engine.Step, error) {
 	self, err := a.Self()
 	if err != nil {
 		return nil, fmt.Errorf("find kit: %w", err)
 	}
-	kit, why := steps.LaunchKit(self, r.path, os.TempDir())
 	app := r.notifier(a.Getenv, a.Now)
 	launch := steps.HourlyLaunch(steps.Launching{
 		Run: r.run, Dir: filepath.Join(r.homeDir, "Library", "LaunchAgents"), Domain: fmt.Sprintf("gui/%d", os.Getuid()),
-		Kit: kit, Why: why, App: app, StateDir: dirs.State, Now: a.Now,
+		Kit: func() (string, string) { return steps.LaunchKit(self, r.path, cmp.Or(a.Getenv("TMPDIR"), "/tmp")) },
+		App: app, StateDir: dirs.State, Now: a.Now,
 	})
+	// After the formulae, as kit's own may be among them, whether or not
+	// they all install: After waits for a step to finish, never on how.
+	if slices.Contains(r.kinds, brew.FormulaeDescriptor.Name) {
+		launch.After = []string{brew.FormulaeDescriptor.Name}
+	}
 	access := steps.AppAccess(steps.AppAccessing{
 		Run: r.run, App: app.Path(), Built: func() string { return macapp.Built(dirs.Data) },
 		StateDir: dirs.State, Raise: raise, Now: a.Now,

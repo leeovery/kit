@@ -71,10 +71,11 @@ type Deps struct {
 	// for applying's screen, as ask.Listen does: they come till stop puts
 	// the terminal back. Without it, applying's screen reads none.
 	Listen func() (keys <-chan ask.Key, stop func())
-	// Become has kit become kit run with args, as if it had been run so at
+	// Become has kit become the kit at kit run with args, in its own
+	// environment with env's variables added, as if it had been run so at
 	// the terminal: it replaces this process, and returns only when it
 	// can't.
-	Become func(args []string) error
+	Become func(kit string, args, env []string) error
 	// Shell has kit become the person's login shell, as a terminal starts
 	// it: it replaces this process, and returns only when it can't.
 	Shell func() error
@@ -266,6 +267,15 @@ func Execute(ctx context.Context, root *cobra.Command, args []string) int {
 	return status
 }
 
+// becomeSelf has kit become itself, run with args (Become).
+func (a *app) becomeSelf(args []string) error {
+	self, err := a.Self()
+	if err != nil {
+		return fmt.Errorf("find kit: %w", err)
+	}
+	return a.Become(self, args, nil)
+}
+
 // showVersion prints kit's version: as a document with --json.
 func (a *app) showVersion() error {
 	if a.json {
@@ -383,12 +393,8 @@ func Real(version string) Deps {
 		Listen: func() (<-chan ask.Key, func()) {
 			return ask.Listen(terminal())
 		},
-		Become: func(args []string) error {
-			self, err := os.Executable()
-			if err != nil {
-				return fmt.Errorf("find kit: %w", err)
-			}
-			return runner.Become(self, args, os.Environ())
+		Become: func(kit string, args, env []string) error {
+			return runner.Become(kit, args, append(os.Environ(), env...))
 		},
 		Shell: func() error {
 			return runner.BecomeLoginShell(cmp.Or(os.Getenv("SHELL"), "/bin/zsh"), askpass.Without(os.Environ()))

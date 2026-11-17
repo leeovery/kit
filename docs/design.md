@@ -760,10 +760,14 @@ nightly --scheduled` as its child, waits, and quits (`open -W` exits 0 whatever 
 nothing reads how it ended: kit's run log has it). macOS holds kit.app responsible for its
 child, so Full Disk Access is kit.app's, kept across kit's updates as kit.app is rebuilt only
 when its own files change (the dotfiles' Nightly.app did the same). The agent names that kit
-only when it's the kit running: a kit run from elsewhere (`go run`'s, a worktree's, a build in
-a temporary folder, or any other kit than the one on PATH) leaves the agent as it stands, its
-check looking at the kit the agent names, and `kit apply` saying why it left it. Its check: the
-agent says that, for the kit and kit.app, the kit it names is there, kit.app is built from this
+whichever kit applies, so a lasting build of kit's own, as install.sh's `KIT_FROM` leaves in
+`~/.local/bin`, names the kit on PATH, not itself; with no kit on PATH, the kit applying. It
+comes after Homebrew's formulae, however they went, and finds the kit then, so a first apply
+from such a build names Homebrew's kit, installed earlier in the run. A build that won't last
+(`go run`'s, a worktree's, a build in a temporary folder) names none, so the hourly run never
+runs a kit that may be gone: it leaves the agent as it stands, its check looking at the kit the
+agent names, and `kit apply` saying why it left it. Its check:
+the agent says that, for the kit and kit.app, the kit it names is there, kit.app is built from this
 kit's files, and launchd has it loaded (`launchctl print gui/<uid>/…`); `kit apply` builds
 kit.app, writes the agent, loads it (`launchctl bootstrap`, after `bootout` when it was loaded
 and changed, asked once more a second later should launchd refuse, as it can while the old job
@@ -1139,9 +1143,13 @@ adding lines to `[checks]`, `[hourly]` and `[nightly]`; commands naming the kind
 repository of its own, below.
 
 **11. The bootstrap — built.** `install.sh` and `kit bootstrap`: GitHub's sign-in on the
-phone, which Mac it is, Homebrew, the terminal the config names, then `kit apply` on a screen of
-its own, with cards for what a person does by hand; proven from a blank Mac in a virtual
-machine.
+phone, which Mac it is, Homebrew, kit itself through Homebrew (`leeovery/tools/kit`), the
+terminal the config names, then `kit apply`, from Homebrew's kit, on a screen of its own, with
+cards for what a person does by hand; proven from a blank Mac in a virtual machine. Run in that
+terminal already, the boot carries on there as Homebrew's kit, becoming it. install.sh runs its
+download from a temporary folder, removed once the boot has handed over or ended, so nothing's
+left but Homebrew's kit; a build of kit's own (`KIT_FROM`) goes in `~/.local/bin` and runs
+throughout, the boot installing no kit.
 
 **12. Data restore — built.** `[restore]`, copied from the Mac a new one starts from, over SSH
 and pinned to its host key, else from its backups; the boot its one trigger.
@@ -1364,5 +1372,6 @@ refuses a line the restore would refuse, before writing anything, and copies not
 
 - No personal data in the repo or its history, ever (see House rules in `CLAUDE.md`);
   `scripts/personal-data-scan` checks the files and every commit, in `scripts/gates`.
-- Public, under the MIT licence. Released by the maintainer, once kit is ready, with mint,
-  GoReleaser and a Homebrew tap.
+- Public, under the MIT licence. Released by the maintainer with mint, whose hooks build the
+  binaries on the Mac before the tag, then upload them to the release and update the Homebrew
+  tap (`scripts/release-build`, `scripts/release-upload`).

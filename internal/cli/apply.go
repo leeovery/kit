@@ -154,7 +154,7 @@ func (a *app) reconcileNow(ctx context.Context) error {
 	case err != nil:
 		return err
 	case i == 0:
-		return a.Become([]string{"reconcile"})
+		return a.becomeSelf([]string{"reconcile"})
 	}
 	return nil
 }

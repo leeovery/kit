@@ -167,9 +167,10 @@ Then think it through on a new Mac, as the next section says, with
 ### How its run goes
 
 The boot comes first: GitHub's sign-in on the phone, which Mac it is, the
-administrator's password, Homebrew, the terminal kit-config names, then
-kit-config cloned and its files linked. Then `kit apply` runs everything
-kit-config declares for that Mac, in that terminal.
+administrator's password, Homebrew, kit itself through Homebrew, the
+terminal kit-config names, then kit-config cloned and its files linked.
+Then `kit apply` runs everything kit-config declares for that Mac, in that
+terminal, from Homebrew's kit.
 
 kit apply orders what's declared by `--after` and `--before`, and by kit's
 own order (Homebrew before its formulae, apps' settings after the apps).

@@ -92,6 +92,8 @@ type world struct {
 	pick func(lines []ask.Line) (string, error)
 	// became is each command kit became, as its arguments.
 	became [][]string
+	// shell, when set, is kit becoming the login shell.
+	shell func() error
 	// ended are the waits of a step by hand's card that end at once (after).
 	ended []steps.Wait
 	// ctx, when set, is what kit runs in, for a test to stop it; else the
@@ -279,10 +281,11 @@ func (w *world) run(t *testing.T, args ...string) (stdout, stderr string, status
 			}
 			return w.pick(lines)
 		},
-		Become: func(args []string) error {
+		Become: func(_ string, args, _ []string) error {
 			w.became = append(w.became, args)
 			return nil
 		},
+		Shell: w.shell,
 	})
 	ctx := w.ctx
 	if ctx == nil {

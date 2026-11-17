@@ -65,5 +65,5 @@ func (a *app) home(cmd *cobra.Command) error {
 			_, _ = io.WriteString(a.colors(a.Stdout), strings.Join(record, "\n")+"\n")
 		}
 	}
-	return a.Become(append([]string{"--" + underHome}, strings.Fields(chosen)...))
+	return a.becomeSelf(append([]string{"--" + underHome}, strings.Fields(chosen)...))
 }

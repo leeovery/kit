@@ -60,7 +60,7 @@ func homeWith(t *testing.T, kits ...string) string {
 func launching(home string, fake *runnertest.Fake, app *kitApp, kit string) steps.Launching {
 	return steps.Launching{
 		Run: fake, Dir: filepath.Join(home, "Library", "LaunchAgents"), Domain: "gui/501",
-		Kit: kit, App: app, StateDir: filepath.Join(home, "state"), Now: func() time.Time { return launchAt },
+		Kit: func() (string, string) { return kit, "" }, App: app, StateDir: filepath.Join(home, "state"), Now: func() time.Time { return launchAt },
 		Sleep: func(time.Duration) {},
 	}
 }
@@ -120,9 +120,9 @@ func TestLaunchAgent(t *testing.T) {
 	}
 }
 
-// The kit the launch runs is the one on kit's PATH, named as it's found
-// there, when it's the kit running; another kit on PATH, or none and a
-// build that won't last, is none to name.
+// A build that won't last names no kit for the launch; any other names the
+// one on kit's PATH, as it's found there, whichever kit is running, or, with
+// none on PATH, itself.
 func TestLaunchKit(t *testing.T) {
 	home := homeWith(t, "bin/kit", "Cellar/kit/1.0/bin/kit", "elsewhere/kit", "Code/kit/.claude/worktrees/one/kit", "cache/go-build123/b001/exe/kit", "tmp/built/kit")
 	if err := os.Symlink(filepath.Join(home, "Cellar/kit/1.0/bin/kit"), filepath.Join(home, "linked")); err != nil {
@@ -144,7 +144,8 @@ func TestLaunchKit(t *testing.T) {
 	}{
 		{"the kit on PATH, running", at("bin/kit"), []string{at("bin")}, at("bin/kit"), ""},
 		{"the kit on PATH, Homebrew's link to it running", at("Cellar/kit/1.0/bin/kit"), []string{at("brew")}, at("brew/kit"), ""},
-		{"another kit than PATH's", at("elsewhere/kit"), []string{at("bin")}, "", "this kit, " + at("elsewhere/kit") + ", isn't the one on kit's PATH, " + at("bin/kit") + ": the hourly launch is left for that kit's apply"},
+		{"another kit than PATH's", at("elsewhere/kit"), []string{at("bin")}, at("bin/kit"), ""},
+		{"a worktree's build, a kit on PATH", at("Code/kit/.claude/worktrees/one/kit"), []string{at("brew")}, "", "this kit, " + at("Code/kit/.claude/worktrees/one/kit") + ", is a build that won't last: the hourly launch is left for the kit on kit's PATH"},
 		{"none on PATH, a lasting kit", at("elsewhere/kit"), []string{at("nothing")}, at("elsewhere/kit"), ""},
 		{"none on PATH, a worktree's build", at("Code/kit/.claude/worktrees/one/kit"), nil, "", "this kit, " + at("Code/kit/.claude/worktrees/one/kit") + ", is a build that won't last: the hourly launch is left for the kit on kit's PATH"},
 		{"none on PATH, go run's build", at("cache/go-build123/b001/exe/kit"), nil, "", "this kit, " + at("cache/go-build123/b001/exe/kit") + ", is a build that won't last: the hourly launch is left for the kit on kit's PATH"},
@@ -181,7 +182,8 @@ func TestHourlyLaunchInstalled(t *testing.T) {
 	if err := step.Apply(t.Context(), res); err != nil {
 		t.Fatal(err)
 	}
-	want, _ := steps.LaunchAgent(app.path, l.Kit)
+	kit, _ := l.Kit()
+	want, _ := steps.LaunchAgent(app.path, kit)
 	if got, err := os.ReadFile(agent); err != nil || string(got) != string(want) {
 		t.Errorf("the agent written = %q (%v), want LaunchAgent's", got, err)
 	}
@@ -310,13 +312,15 @@ func TestHourlyLaunchLoadsAgain(t *testing.T) {
 	}
 }
 
-// With no kit to name, as from a build of kit's own, the check looks at the
-// agent as it stands, the kit it names, and applying leaves it, saying why.
-func TestHourlyLaunchLeftForAnotherKit(t *testing.T) {
+// With no kit to name, as from a build that won't last with no kit on PATH,
+// the check looks at the agent as it stands, the kit it names, and applying
+// leaves it, saying why.
+func TestHourlyLaunchLeftWithNoKitToName(t *testing.T) {
 	home := homeWith(t, "bin/kit")
 	fake := runnertest.New(t)
 	l := launching(home, fake, &kitApp{path: "/Users/someone/.local/share/kit/kit.app", current: true, buildable: true}, "")
-	l.Why = "this kit, /tmp/kit, is a build that won't last: the hourly launch is left for the kit on kit's PATH"
+	why := "this kit, /tmp/kit, is a build that won't last: the hourly launch is left for the kit on kit's PATH"
+	l.Kit = func() (string, string) { return "", why }
 	writeAgent(t, l, filepath.Join(home, "bin/kit"))
 	fake.On("launchctl", "print", "gui/501/com.leeovery.kit.nightly")
 	step := steps.HourlyLaunch(l)
@@ -331,7 +335,7 @@ func TestHourlyLaunchLeftForAnotherKit(t *testing.T) {
 	if res.Summary != "runs a kit that's gone ("+gone+")" {
 		t.Errorf("the agent naming a kit that's gone = %+v", res)
 	}
-	if err := step.Apply(t.Context(), res); !engine.IsNotYet(err) || err.Error() != l.Why {
+	if err := step.Apply(t.Context(), res); !engine.IsNotYet(err) || err.Error() != why {
 		t.Errorf("Apply() = %v, want it left, saying why", err)
 	}
 	if now, _ := os.ReadFile(agent); string(now) != string(written) || slices.Contains(fake.Calls(), "launchctl bootstrap") {

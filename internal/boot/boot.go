@@ -96,8 +96,9 @@ type Boot struct {
 	// Home is the home folder, Applications where apps are installed, and
 	// SudoLocal sudo's file of local settings, where Touch ID is turned on.
 	Home, Applications, SudoLocal string
-	// Self is kit, as the terminal handed over to runs it.
-	Self string
+	// Self is kit, as the terminal handed over to runs it, and Version its
+	// version.
+	Self, Version string
 	// Keep keeps the password given, for the rest of the run, for sudo
 	// when the programs the boot runs ask for it (askpass).
 	Keep func(password string)

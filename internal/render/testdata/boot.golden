@@ -23,7 +23,7 @@
   BOOT ORDER
   [ OK ] This Mac  studio
   [FAIL] Password  sudo refused the password
-         → run kit bootstrap again
+         → paste the install line into Terminal again
   [*   ] Homebrew  installing · 2m14s
          ==> Installing Command Line Tools
 
