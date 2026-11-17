@@ -1,8 +1,8 @@
 // Package rendertest holds runs kit's faces are tested against, the runs
-// their golden files hold, so the capture tool (cmd/capturetool) draws the
-// README's screens from the very same: kit status on a Mac with some of
-// everything, a new Mac's steps as kit apply runs them, 1Password's sign-in
-// among them, and the boot's order.
+// their golden files hold: kit status on a Mac with some of everything, a
+// new Mac's steps as kit apply runs them, 1Password's sign-in among them,
+// and the boot's order. The capture tool (cmd/capturetool) plays the
+// README's clips with the very same steps.
 package rendertest
 
 import (

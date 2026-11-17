@@ -669,11 +669,14 @@ func TestApplyingRowStillToRun(t *testing.T) {
 }
 
 // A card taller than the right pane at the least window leaves the log no
-// room: the screen still draws, the panel cut at the window's foot.
+// room, drawn and scrolled alike: the screen still draws, the panel cut at
+// the window's foot.
 func TestApplyScreenCardTallerThanThePane(t *testing.T) {
 	card := signIn
 	card.Steps = numbered("Do this", 30)
-	_, out, _ := applyAt(100, 30, 6*time.Minute, cardUp(card))
+	face, out, kb := applyAt(100, 30, 6*time.Minute, cardUp(card))
+	kb.press(t, ask.Key{Name: "up"}, ask.Key{Name: "pgup"})
+	face.Turn()
 	got := screen(out.String())
 	fits(t, got, [2]int{100, 30})
 	if !strings.Contains(got, "Do this-1") {
