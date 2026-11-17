@@ -18,8 +18,9 @@ write one by hand.
 
 **Declarations file.** The file of declarations in each folder of kit-config, such as
 `laptop/declarations` for the Mac named `laptop`. It's made of sections, each a header in
-brackets, such as `[homebrew casks]`, then a line for each thing. Package and settings lists are kept
-sorted. The rest, such as `[paths]` and `[steps]`, keep the order you wrote.
+brackets, such as `[homebrew casks]`, then a line for each thing. kit keeps the lists of
+packages, settings and secrets sorted, all but `[claude mcp]`. The rest, such as `[paths]` and
+`[steps]`, keep the order you wrote.
 
 **`shared`.** The folder of kit-config whose declarations file is for every Mac. A Mac has what
 `shared/declarations` declares, and what its own file declares. `--shared` on an `add` command
@@ -61,8 +62,12 @@ the check says it isn't done.
 `[manual]` with `kit manual add`. It says what to do. A command may say whether it's done, and
 otherwise `kit manual done <name>` marks it.
 
-**Card.** What the boot, or a whole `kit apply` at a terminal, shows when it needs you: what to do, why, and
-the steps to do it. A step by hand that isn't done comes up as a card.
+**Backup tool.** Time Machine or Arq, declared in `[backups]` with `kit backup add`. kit checks
+that its backups run, and keeps `[backup exclusions]` in Time Machine's list. Arq leaves them
+out once its plan follows that list.
+
+**Card.** What the boot, or a whole `kit apply` at a terminal, shows when it needs you: what to
+do, why, and the steps to do it. A step by hand that isn't done comes up as a card.
 
 **Check of your own.** A command declared in `[checks]`, with `kit check add`, that exits 0 when
 all's well. `kit status` and the hourly run run it.
@@ -107,8 +112,9 @@ it. `kit apply` installs it.
 ## A new Mac
 
 **The boot.** The one line you paste into Terminal on a new Mac. It runs `kit bootstrap`, which
-signs you in to GitHub on your phone and asks which Mac this is. It installs Homebrew, then
-kit-config and kit, and carries on with `kit apply` in the terminal `kit.toml` names.
+signs you in to GitHub, on your phone or in a browser, and asks which Mac this is. It installs Homebrew and the
+terminal `kit.toml` names, then kit-config and kit, and carries on with `kit apply` in that
+terminal.
 
 **The restore list.** The paths of your own data that a new Mac copies across, such as code,
 shell history and tools' state. They're declared in `[restore]`, with `kit restore add <path>`.
