@@ -187,13 +187,14 @@ func (t Terminal) raw() (restore func()) {
 
 // keys reads keys from In as they come, and returns them, and what stops
 // reading: a read waiting for a key is cancelled, so the next question's
-// keys aren't taken.
+// keys aren't taken, and closed once it's returned, as a cancelled read
+// still reads what cancelled it.
 func (t Terminal) keys() (<-chan key, func()) {
 	in := t.In
-	var cancel func()
+	var r cancelreader.CancelReader
 	if f, ok := t.In.(*os.File); ok {
-		if r, err := cancelreader.NewReader(f); err == nil {
-			in, cancel = r, func() { r.Cancel(); _ = r.Close() }
+		if cr, err := cancelreader.NewReader(f); err == nil {
+			in, r = cr, cr
 		}
 	}
 	keys, done := make(chan key), make(chan struct{})
@@ -239,9 +240,14 @@ func (t Terminal) keys() (<-chan key, func()) {
 	}()
 	return keys, func() {
 		close(done)
-		if cancel != nil {
-			cancel()
+		if r == nil {
+			return
 		}
+		if r.Cancel() {
+			for range reads {
+			}
+		}
+		_ = r.Close()
 	}
 }
 
