@@ -12,28 +12,27 @@ A blank Mac is one pasted line away: sign in to GitHub on your phone, and kit in
 
 ## What you get
 
-- **A new Mac from one line.** The boot installs Homebrew, your terminal and kit-config, then
-  carries on in that terminal. If a step fails, paste the line again to pick up where it
-  stopped. [A new Mac](docs/new-mac.md)
+- **A new Mac from one line.** The boot installs Homebrew, your terminal, kit-config and kit,
+  and pasting the line again after a failure picks up where it stopped.
+  [A new Mac](docs/new-mac.md)
 - **Built for agents.** `kit agent` gives Claude the rules for changing your Mac, and every
   command that checks or changes something answers in JSON with `--json`.
   [Agents](docs/agents.md)
-- **Drift you can keep or undo.** A package you installed with brew shows up in `kit status`
-  after a day, and `kit reconcile` declares it or uninstalls it. [Drift](docs/drift.md)
+- **Drift you can keep or undo.** A package you installed with brew gets its own line in
+  `kit status` after a day, and `kit reconcile` declares it or uninstalls it. [Drift](docs/drift.md)
 - **Everything you install, declared.** `kit brew add jq` installs jq and declares it in
-  kit-config, across nine kinds from Homebrew casks to Claude Code skills.
+  kit-config, across nine kinds, from Homebrew formulae to Claude's skills.
   [Packages](docs/packages.md)
-- **macOS settings, and your apps'.** `kit defaults add com.apple.dock:tilesize` keeps the Dock
-  size you set, and with `kit feature on prefs` the nightly run saves your apps' settings.
-  [Settings](docs/settings.md)
-- **Secrets from 1Password.** kit-config holds only where each token is kept. Each Mac gets
-  the token as a shell variable or a file, never printed. [Secrets](docs/secrets.md)
+- **macOS settings, kept.** `kit defaults add com.apple.dock:tilesize` keeps the Dock size you
+  set, on every Mac it's declared for. [Settings](docs/settings.md)
+- **Secrets from 1Password.** kit-config holds only where each secret is kept, and each Mac
+  gets the value as a shell variable or file, never printed. [Secrets](docs/secrets.md)
 
 More: [Linked files](docs/linked-files.md) · [Your data](docs/your-data.md) ·
 [Steps](docs/steps.md) · [Running by itself](docs/running-by-itself.md) ·
 [Backups](docs/backups.md)
 
-## How a Mac stands
+## One report, every check
 
 `kit status` runs every check, and says what needs you and the command that settles it:
 
@@ -58,8 +57,9 @@ More: [Linked files](docs/linked-files.md) · [Your data](docs/your-data.md) ·
 
 ## Install
 
-You need macOS 13 or later, on Apple silicon or Intel, and a GitHub account. 1Password is
-needed only for secrets.
+You need macOS 15 or later on Apple silicon, the Macs Homebrew supports. On an Intel Mac,
+Homebrew gives only its best effort. You also need a GitHub account holding a private
+kit-config, and the GitHub CLI (`gh`) signed in to it. 1Password is needed only for secrets.
 
 ```bash
 # On a Mac with Homebrew
@@ -72,8 +72,15 @@ brew install leeovery/tools/kit
 https://raw.githubusercontent.com/leeovery/kit/main/install.sh)"
 ```
 
-kit has no uninstall command. `brew uninstall kit` leaves the hourly launch in
-`~/Library/LaunchAgents`, kit.app and state under `~/.local`, and logs in `~/Library/Logs/kit`.
+kit has no uninstall command. Before `brew uninstall kit`, delete
+`~/Library/LaunchAgents/com.leeovery.kit.nightly.plist`, or launchd keeps opening kit.app every
+hour. Uninstalling kit leaves:
+
+- what kit installed and set on the Mac;
+- kit-config's clone in `~/.config/kit`, and the links into it from your home folder;
+- kit.app and kit's state, in `~/.local/share/kit` and `~/.local/state/kit`;
+- the values of your secrets, in `~/.secrets.zsh` and their files;
+- the logs, in `~/Library/Logs/kit`.
 
 ## Quick start
 
@@ -97,14 +104,15 @@ kit apply
 
 - **I have one Mac.** kit.toml can name a single Mac, and a reinstall rebuilds it from kit-config
   and its own backups. [Your data](docs/your-data.md)
-- **I don't use 1Password.** kit runs without it, until you declare a secret.
+- **I don't use 1Password.** kit runs without it until you declare a secret, and 1Password is
+  the one store today.
   [Secrets](docs/secrets.md)
 - **I install things by hand.** They show up as drift after a day, for you to keep or remove.
   [Drift](docs/drift.md)
-- **Can an agent break my Mac?** kit's guide tells it to ask you before it removes anything,
-  and your password and sign-ins stay with you. [Agents](docs/agents.md)
-- **Is kit-config public?** Never: the boot stops at a public kit-config, and `kit status`
-  flags one. [Troubleshooting](docs/troubleshooting.md)
+- **Can an agent break my Mac?** kit's guide tells it to ask you before it removes anything.
+  Installs that need your password wait for you at a terminal, and sign-ins are yours. [Agents](docs/agents.md)
+- **Is my kit-config public?** It must be private: the boot stops at a public kit-config, and
+  `kit status` flags one. [Troubleshooting](docs/troubleshooting.md)
 
 ## Where next
 
