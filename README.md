@@ -1,16 +1,26 @@
-<img src="docs/images/kit.png" alt="kit's icon" width="128">
+<div align="center">
+
+<img src="docs/images/kit.png" alt="kit's logo: seven upright bars on a dark rounded square, five lit from pink to orange and two unlit" width="128">
 
 # kit
 
-Declarative setup for your Macs.
+**Declarative setup for your Macs.**
 
 Still rebuilding your Mac from a dotfiles repo and a pile of scripts? kit does it from one private repository: your apps, settings, files and data, on every Mac you own. And it's built agent-first: Claude, or any agent, runs it with the same commands you do.
 
 A blank Mac is one pasted line away: sign in to GitHub on your phone, and kit installs everything and copies your data across from the Mac it replaces. Secrets come from 1Password, never the repository. Change something by hand and kit shows you, to keep or put back, and every night it saves your apps' settings without being asked.
 
-[Docs](docs/README.md) · [Commands](docs/commands.md) · [Configuration](docs/configuration.md) · [Glossary](docs/glossary.md)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Go](https://img.shields.io/badge/Go-1.27+-00ADD8.svg)](https://go.dev)
+[![Platform: macOS 15+ on Apple silicon](https://img.shields.io/badge/platform-macOS%2015%2B%20%C2%B7%20Apple%20silicon-lightgrey.svg)](#install)
 
-## What you get
+[Docs](docs/README.md) · [Commands](docs/commands.md) · [Configuration](docs/configuration.md) · [Troubleshooting](docs/troubleshooting.md)
+
+</div>
+
+---
+
+## Why kit?
 
 - **A new Mac from one line.** The boot installs Homebrew, your terminal, kit-config and kit,
   and pasting the line again after a failure picks up where it stopped.
@@ -31,29 +41,6 @@ A blank Mac is one pasted line away: sign in to GitHub on your phone, and kit in
 More: [Linked files](docs/linked-files.md) · [Your data](docs/your-data.md) ·
 [Steps](docs/steps.md) · [Running by itself](docs/running-by-itself.md) ·
 [Backups](docs/backups.md)
-
-## One report, every check
-
-`kit status` runs every check, and says what needs you and the command that settles it:
-
-```console
-  █  ▄▀  ▀█▀  ▀▀█▀▀  │  status
-  █▀▀▄    █     █    │  laptop
-  █   █  ▄█▄    █    │  Fri 2 Jan · 03:04
-
-  BACKUPS
-  ● Time Machine  last backup 02:35
-
-  CONFIG
-  ▲ jq  declared, not installed · → kit apply
-  ▲ ffmpeg  installed, not declared · 2 days · → kit reconcile
-  ● Packages  7 installed · 1 new
-  ● Settings  9 set
-  ● kit-config  private
-
-  STEPS
-  ● fonts  16 installed
-```
 
 ## Install
 
@@ -100,7 +87,7 @@ kit apply
 
 `kit apply` installs and sets what kit-config declares, and never removes anything.
 
-## Questions
+## Questions you may have
 
 - **I have one Mac.** kit.toml can name a single Mac, and a reinstall rebuilds it from kit-config
   and its own backups. [Your data](docs/your-data.md)
@@ -123,6 +110,6 @@ kit apply
 
 To work on kit, read [the design](docs/design.md) and [CLAUDE.md](CLAUDE.md).
 
-## Licence
+## License
 
 MIT: see [LICENSE](LICENSE).

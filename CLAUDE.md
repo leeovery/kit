@@ -184,8 +184,11 @@ in the prose, never by bending prose to the meter.
 
 About 700 words, in this order:
 
-1. **The top:** the logo (kit.app's icon), name, tagline, lead and opening paragraph, then a row
-   of page links and the hero, one animation that tours kit.
+1. **The top,** laid out as Lee's other tools' READMEs (Switchboard's is the model), all inside
+   `<div align="center">`: the logo (kit.app's icon, `width="128"`), `# kit`, the tagline in
+   bold, the lead and opening paragraph, the badges (licence, Go, platform), a row of page links
+   and the hero, one animation that tours kit. Then `</div>` and a `---` rule. The benefits come
+   under `## Why kit?`.
 2. **Benefits,** six at most: a bold benefit of six words or fewer, one specific sentence, and a
    link to its page. The smaller pages go in one line of links under them.
 3. **Screens:** a grid of stills, each captioned with the one thing it answers, each linking to
