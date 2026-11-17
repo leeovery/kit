@@ -32,3 +32,6 @@ pre_tag = ['scripts/gates', 'scripts/release-build']
 # mint only warns when it fails, so scripts/release-upload <version>, run by
 # hand, finishes the release.
 post_release = ['scripts/release-upload']
+
+[release]
+diff_exclude = [".gitignore", ".goreleaser.yaml"]
