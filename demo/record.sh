@@ -17,7 +17,8 @@
 # recording that fails without a word can't leave them to be taken for new.
 #
 # vhs's browser reaches ttyd over loopback: run this with an agent's
-# sandbox off.
+# sandbox off. It needs vhs, ffmpeg, libwebp's tools, Go and the font the
+# tapes draw in, and stops first, naming what's missing, without them.
 #
 # Usage:  demo/record.sh               all the art
 #         demo/record.sh new-mac       the art named: a tape's, or a clip's
@@ -25,6 +26,24 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
+
+# missing prints each of what record.sh and finalize.sh need that isn't
+# here, and how to get it.
+missing() {
+	local program
+	for program in vhs ffmpeg ffprobe img2webp cwebp go; do
+		command -v "$program" >/dev/null || echo "  $program: brew install $(case "$program" in ffprobe) echo ffmpeg ;; img2webp | cwebp) echo webp ;; *) echo "$program" ;; esac)"
+	done
+	compgen -G "$HOME/Library/Fonts/JetBrainsMono-Regular.*" >/dev/null ||
+		compgen -G "/Library/Fonts/JetBrainsMono-Regular.*" >/dev/null ||
+		echo "  JetBrains Mono: brew install --cask font-jetbrains-mono"
+}
+
+if needed="$(missing)" && [ -n "$needed" ]; then
+	echo "demo/record.sh needs:" >&2
+	echo "$needed" >&2
+	exit 1
+fi
 
 # art_of prints what the tape named makes, as its first line says.
 art_of() {

@@ -2,12 +2,13 @@
 
 Records the clips and stills in the project's README and docs, `art/*.webp`, by drawing kit's real
 screens through the capture tool, `cmd/capturetool`: kit's own faces (`internal/render`,
-`internal/look`), in-process, fed what the render tests are fed (`internal/render/rendertest`): the
-status still is the screen `pretty-colour.golden` holds, and the clips' steps are the tests' own. kit itself never runs: it changes the Mac it
-runs on. The capture tool runs no program and reads or writes nothing of the Mac's, no config,
-state, home or network, so it's safe to record anywhere.
+`internal/look`), in-process, from fixed data: the clips' steps are the render tests' own
+(`internal/render/rendertest`). kit itself never runs: it changes the Mac it runs on. The capture
+tool runs no program and reads or writes nothing of the Mac's, no config, state, home or network,
+so it's safe to record anywhere.
 
-A rerun after any change to what kit draws remakes the art, with no setting up:
+Once what [Setting up](#setting-up) lists is installed, a rerun after any change to what kit draws
+remakes the art, with nothing else to do:
 
 ```bash
 demo/record.sh               # all the art: record each tape, then make its art
@@ -19,8 +20,8 @@ demo/record.sh new-mac       # a clip in parts: each part's tape, then joined
 
 | Tape | Draws | Art |
 |---|---|---|
-| `status` | fixture `status` | `art/status.webp`, a still: `kit status`, the pretty face's report on a Mac with some of everything, the run `pretty-colour.golden` holds |
-| `new-mac-1-terminal`, `new-mac-2-ghostty` | scenarios `boot`, `arrival` | `art/new-mac.webp`, `.mp4`: the README's lead, a new Mac from the boot's splash in Terminal to kit apply's screen in Ghostty |
+| `status` | fixture `status` | `art/status.webp`, a still: `kit status` on a Mac in daily use, two things waiting on the person: an app declared and not yet installed, a tool installed by hand |
+| `new-mac-1-terminal`, `new-mac-2-ghostty` | scenarios `boot`, `arrival` | `art/new-mac.webp`: the README's lead, a new Mac from the boot's splash in Terminal to kit apply's screen in Ghostty; and `demo/out/new-mac.mp4`, the same, for a page that takes a video |
 
 `look.tape` holds the settings every tape sources; `look-terminal.tape` is the boot's, for what's
 recorded in Terminal. A tape's first line says what it makes: `# art: still` a still, `# art: part
@@ -29,7 +30,8 @@ of <clip>` a part of a clip, and any other line a clip of its own. Each tape end
 tool failing, fails the recording rather than leaving art that looks right.
 
 The art goes to `art/` at the repository's root, so `git diff` shows what a recording changed, and
-the art is committed with the change it shows.
+the art is committed with the change it shows: WebP alone, as a README doesn't play a video
+committed beside it.
 
 ## The capture tool
 
@@ -47,11 +49,13 @@ go run ./cmd/capturetool --scenario boot     # a clip: enter starts it, enter ag
   (`internal/capture/scenarios.go`). Its clock reads a fixed day, running on from there, so the
   heads and headers say the same day and minute in every recording; the animations run on kit's
   own timers, as kit draws them. The keys it presses reach kit's faces through a pipe, as they'd
-  come from the keyboard, and the script goes on only once the face has taken them, as kit's boot
-  does. It waits for a line on stdin to start, the screen cleared, so a tape shows it from its
+  come from the keyboard, each once the face shows what it answers, a moment after, as a person
+  reads it; the script goes on only once the face has taken it, as kit's boot does. It waits for a line on stdin to start, the screen cleared, so a tape shows it from its
   first frame, and holds its last screen, live, till the next.
-- `go test ./internal/capture` plays every scenario through, in real time, and holds the status
-  fixture to `pretty-colour.golden`; `kit`'s own binary is checked never to import the capture.
+- `go test ./internal/capture` plays every scenario through, its own pauses four times as fast,
+  kit's animations in their own time, checks each stops at once wherever it's stopped, and holds
+  the status still's words to `testdata/status.golden` (`-update` writes it again); `kit`'s own
+  binary is checked never to import the capture.
 
 ## The scenarios
 
@@ -79,7 +83,10 @@ with a made-up code. The boot's Mac is `MacBook-Pro`, set up as `laptop`; the Gi
   from Terminal's own profile (`Terminal.app/Contents/Resources/Initial Settings/Clear
   Dark.terminal`) and its background as the boot draws on it, `#212734`, the colour it reverses its
   tags onto (`internal/look/boot.go`).
-- **Everything after, in Ghostty:** kit's look is drawn against Nordfox, Ghostty's own values.
+- **Everything after, in Ghostty:** Nord Wave, Ghostty's own values, from its theme file
+  (`Ghostty.app/Contents/Resources/ghostty/themes/Nord Wave`). `look.tape` holds it as one `Set
+  Theme` line, with Nordfox's, which kit's look was drawn against, commented out under it:
+  switching is swapping which is commented.
 - **The font,** both: JetBrains Mono, as every frame of kit's look was designed in, Terminal's too.
   At 22px a cell is 13 × 29 px, so 120 × 34 is 1560 × 986, twice the 780 the README shows it at,
   so a high-density screen draws it sharp. The status still, 80 columns of kit's report, is drawn
@@ -97,8 +104,15 @@ vhs, and hands its frames to `finalize.sh`:
   animated WebP then stores whole; from the frames themselves it stores only what changed,
   losslessly.
 - **The art.** For a clip, an animated WebP, which GitHub shows inline, at the frames' 30 a second,
-  and an H.264 MP4 of the same frames; for a still, a lossless WebP of the last frame. Each frame is
-  set in a 40 px margin of its own background.
+  and an H.264 MP4 of the same frames in `demo/out/`; for a still, a lossless WebP of the last
+  frame. Each frame is set in a 40 px margin of its own background.
+- **Noise at 5 frames a second.** The splash's decode and the arrival's change the whole window
+  every frame, and no WebP squeezes them: lossy and near-lossless come out larger than lossless,
+  and so does the clip drawn at a smaller font. At 30 a second, the 3 s of them weigh nine tenths of
+  the clip. A frame changing more from the one before than `noisy` says is noise, and in a run of it
+  one frame in `noise_every`, 6, is kept, held for the ones dropped, keeping the clip under 3 MB; it
+  still reads as kit's decode, resolving in steps. kit's text, changing a row at a time, and a
+  screen redrawn, a lone frame, keep every frame.
 - **A clip in parts.** vhs records one terminal, in one theme, so the boot's move from Terminal to
   Ghostty is two tapes, and `finalize.sh --join` joins their frames, the last 0.4 s of the
   Terminal's fading into the first of Ghostty's, its blank window before "hello again": the window
@@ -113,11 +127,11 @@ vhs, and hands its frames to `finalize.sh`:
 ## Setting up
 
 ```bash
-brew install vhs ffmpeg webp
-ls ~/Library/Fonts /Library/Fonts | grep JetBrainsMono-Regular
+brew install vhs ffmpeg webp go
+brew install --cask font-jetbrains-mono
 ```
 
-vhs 0.12 or later.
+vhs 0.12 or later. `record.sh` checks for each before it starts, and names what's missing.
 
 ## Gotchas
 
@@ -134,6 +148,6 @@ vhs 0.12 or later.
   vhs a `TMPDIR` in `demo/out`.
 - **`Wait+Screen` reads the screen.** A scenario's last screen is what its tape waits for, so the
   line it waits on must be on the screen then, not scrolled away.
-- **A scenario's keys.** A key pressed before what waits for it is up is lost, and the scenario
-  holds still, never reaching its end: `go test ./internal/capture` finds it, as the tape's
+- **A scenario's keys.** Each waits for words on the screen, and a key whose words never come holds
+  the scenario still, never reaching its end: `go test ./internal/capture` finds it, as the tape's
   `Wait+Screen` would.

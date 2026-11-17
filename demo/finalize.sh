@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Make the README's art from the frames a tape in demo/ recorded: for a clip,
-# an animated WebP, which GitHub shows inline, and an MP4; for a still, a
-# lossless WebP of its last frame, cropped to what it drew; for a clip in
-# parts, its parts' frames joined, each fading into the next, as the boot in
-# Terminal hands over to Ghostty.
+# an animated WebP, which GitHub shows inline, and an MP4 of it in demo/out
+# for pages that take a video (a README doesn't play one committed); for a
+# still, a lossless WebP of its last frame, cropped to what it drew; for a
+# clip in parts, its parts' frames joined, each fading into the next, as the
+# boot in Terminal hands over to Ghostty.
 #
 # vhs writes each frame it shows, a layer of text and one of the cursor,
 # exactly as the terminal drew them. The art is made from those, not from a
@@ -15,7 +16,7 @@
 #         demo/finalize.sh --still <name>...            a still each
 #         demo/finalize.sh --join <clip> <part>...      a clip of its parts
 # Input:  demo/out/<name>/   the frames vhs demo/<name>.tape wrote
-# Output: art/<name>.webp, and for a clip, art/<name>.mp4
+# Output: art/<name>.webp, and for a clip, demo/out/<name>.mp4
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -23,6 +24,15 @@ art="$(dirname "$here")/art"
 fps=30  # the tapes' Framerate
 pad=40  # the margin round the screen, in px
 fade=12 # the frames one part takes to fade into the next, 0.4s
+# A frame changing more than this from the one before, as the mean of its
+# pixels' difference, 0 to 255, is noise: the splash's decode, the
+# arrival's. kit's text changing, a row or a line at a time, changes far
+# less.
+noisy=2
+# Noise keeps one frame in this many. It's the weight of a clip, as no
+# WebP, lossless or lossy, can squeeze it, and it still reads as noise at
+# a fraction of the rate.
+noise_every=6
 
 mode=clip
 case "${1:-}" in
@@ -34,6 +44,15 @@ esac
 [ $# -gt 0 ] || {
 	echo "usage: demo/finalize.sh [--still | --join <clip>] <name>..." >&2
 	exit 2
+}
+
+# made <path>... prints each file made, from the repository's root, and its
+# size: its bytes, as du's blocks on disk read larger.
+made() {
+	local path
+	for path; do
+		printf "   %-30s %s\n" "$path" "$(wc -c <"$here/../$path" | awk '{ printf($1 < 1e6 ? "%.0f KB" : "%.2f MB", $1 < 1e6 ? $1 / 1e3 : $1 / 1e6) }')"
+	done
 }
 
 # drawn_rows <frame> <width> <height> prints the first and last rows of the
@@ -88,18 +107,43 @@ still() {
 	w="${size%,*}" h="${size#*,}"
 	read -r top bottom <<<"$(drawn_rows "$last" "$w" "$h")"
 	cwebp -quiet -lossless -m 6 -crop 0 0 "$w" $((bottom + 1 + top)) "$last" -o "$art/$1.webp"
-	printf "   %-30s %s\n" "art/$1.webp" "$(du -h "$art/$1.webp" | cut -f1)"
+	made "art/$1.webp"
+}
+
+# changes <dir> prints how much each of dir's frames changes from the one
+# before, a line each, the first 0.
+changes() {
+	echo 0
+	ffmpeg -v error -framerate "$fps" -i "$1/f%05d.png" \
+		-vf "tblend=all_mode=difference,signalstats,metadata=print:key=lavfi.signalstats.YAVG:file=-" -f null - |
+		sed -n 's/.*YAVG=//p'
+}
+
+# timed <dir> prints img2webp's arguments for dir's frames, each its time
+# and its file: in a run of noisy frames, one in noise_every kept, its time
+# lengthened by the ones dropped after it. A frame the same as the one
+# before, as vhs takes when the screen's drawn no faster, carries a run on;
+# a noisy frame alone, a screen redrawn, is kept.
+timed() {
+	changes "$1" | awk -v fps="$fps" -v noisy="$noisy" -v every="$noise_every" -v dir="$1" '
+		{
+			run = $1 > noisy || (run && $1 == 0) ? run + 1 : 0
+			if (run > 1 && (run - 1) % every) count[kept]++
+			else count[kept = NR] = 1
+		}
+		END { for (i = 1; i <= NR; i++) if (count[i]) printf "-d\n%d\n%s/f%05d.png\n", int(count[i] * 1000 / fps + 0.5), dir, i }'
 }
 
 # clip <name> <dir> makes the clip from dir's frames.
 clip() {
-	img2webp -loop 0 -lossless -q 80 -m 6 -d $((1000 / fps)) "$2"/f*.png -o "$art/$1.webp" >/dev/null
+	local args=() line
+	while IFS= read -r line; do
+		args+=("$line")
+	done < <(timed "$2")
+	img2webp -loop 0 -lossless -q 80 -m 6 "${args[@]}" -o "$art/$1.webp" >/dev/null
 	ffmpeg -v error -y -framerate "$fps" -i "$2/f%05d.png" \
-		-c:v libx264 -preset slow -crf 20 -pix_fmt yuv420p -movflags +faststart "$art/$1.mp4"
-	local f
-	for f in "$1.webp" "$1.mp4"; do
-		printf "   %-30s %s\n" "art/$f" "$(du -h "$art/$f" | cut -f1)"
-	done
+		-c:v libx264 -preset slow -crf 20 -pix_fmt yuv420p -movflags +faststart "$here/out/$1.mp4"
+	made "art/$1.webp" "demo/out/$1.mp4"
 }
 
 # joined <dir> <part>... writes the parts' frames into dir, one after
@@ -123,7 +167,8 @@ joined() {
 	mv "$so_far" "$dir"
 }
 
-frames="$(mktemp -d)"
+mkdir -p "$here/out"
+frames="$(mktemp -d "$here/out/.frames.XXXX")"
 trap 'rm -rf "$frames"' EXIT
 mkdir -p "$art"
 

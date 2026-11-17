@@ -22,6 +22,8 @@ golangci-lint run            # standard linters plus modernize (.golangci.yml)
 shellcheck internal/steps/template.sh   # the script steps of the user's own start from
 shellcheck --shell=sh install.sh        # the install script: POSIX sh alone
 shellcheck -x scripts/release-*         # the release's hooks
+shellcheck demo/*.sh                    # the scripts that record the README's art
+shellcheck --shell=sh demo/bin/kit      # the shim its status tape types kit at
 go build ./...
 scripts/personal-data-scan   # no personal data in the files or the history
 ```
