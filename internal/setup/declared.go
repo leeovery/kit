@@ -4,19 +4,20 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/leeovery/kit/internal/boot"
 	"github.com/leeovery/kit/internal/check"
-	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/kinds"
 	"github.com/leeovery/kit/internal/look"
+	"github.com/leeovery/kit/internal/prefs"
 	"github.com/leeovery/kit/internal/snapshot"
-	"github.com/leeovery/kit/internal/steps"
+	"github.com/leeovery/kit/internal/tilde"
 )
 
 // snapshotStep looks at the Mac as it stands, for what it would declare,
@@ -36,12 +37,8 @@ func (s *Setup) snapshotStep() engine.Step {
 			if err != nil {
 				return err
 			}
-			m, err := s.Snapshot(cfg, s.Mac())
-			if err != nil {
-				return err
-			}
 			s.doing(SnapshotStep, "looking at what's on this Mac")
-			found, err := snapshot.Find(ctx, m)
+			found, m, err := s.Snapshot(ctx, cfg, s.Mac())
 			if err != nil {
 				return err
 			}
@@ -88,21 +85,35 @@ func counted(ps []snapshot.Part) check.Result {
 }
 
 // question is one of the snapshot's questions: what the record says it's
-// answered, as its row says it, done when it's answered; else whether
-// there's anything to ask, the row saying so when there isn't. ask asks it,
-// recording the answer.
+// answered, as its row says it, done when it's answered, unless its flag
+// answers it anew; else whether there's anything to ask, the row saying so
+// when there isn't. ask asks it, its flag answering first, recording the
+// answer. Nothing acts on an answer till setup commits, so a flag given
+// again replaces what's recorded.
 type question struct {
 	name, title string
 	answered    func(rec record) (string, bool)
+	anew        func(rec record) bool
 	nothing     func(ctx context.Context, found *snapshot.Snapshot) (string, bool)
 	ask         func(ctx context.Context, found *snapshot.Snapshot) error
+}
+
+// anew reports whether a flag gives an answer, given, other than the one
+// recorded.
+func anew[T any](given, recorded *T) bool {
+	return given != nil && (recorded == nil || !reflect.DeepEqual(*given, *recorded))
 }
 
 func (s *Setup) questionStep(q question) engine.Step {
 	return engine.Step{
 		Name: q.name, Title: q.title,
 		Check: func(ctx context.Context) check.Result {
-			if said, ok := q.answered(s.record()); ok {
+			rec := s.record()
+			said, ok := q.answered(rec)
+			switch {
+			case q.anew(rec):
+				return check.Result{State: check.Attention, Summary: "answered anew"}
+			case ok:
 				return check.Result{State: check.OK, Summary: said}
 			}
 			found, _ := s.snapshot()
@@ -153,6 +164,7 @@ func (s *Setup) dataStep() engine.Step {
 			}
 			return sized(found, *rec.Restore), true
 		},
+		anew: func(rec record) bool { return anew(s.Given.Restore, rec.Restore) },
 		nothing: func(_ context.Context, found *snapshot.Snapshot) (string, bool) {
 			return "no folders to bring back", len(found.Folders) == 0
 		},
@@ -206,8 +218,10 @@ func (s *Setup) ticked(ctx context.Context, step, question string, items []Item)
 
 // prefsStep asks whether apps' settings are saved every night, suggested
 // so: yes switches the prefs feature on for this Mac and starts afresh from
-// its settings as they are, as kit prefs start-fresh does. Asked only
-// while the feature's off for this Mac.
+// its settings as they are, as kit prefs start-fresh does. Asked unless
+// capture's switched on for this Mac already, as its own record of apps'
+// settings says, whatever kit-config declares: a Mac joining as a copy of
+// one saving them declares the feature, but has saved nothing.
 func (s *Setup) prefsStep() engine.Step {
 	return s.questionStep(question{
 		name: PrefsStep, title: "Apps' settings",
@@ -220,10 +234,9 @@ func (s *Setup) prefsStep() engine.Step {
 			}
 			return "not saved", true
 		},
+		anew: func(rec record) bool { return anew(s.Given.Prefs, rec.Prefs) },
 		nothing: func(context.Context, *snapshot.Snapshot) (string, bool) {
-			_, m := s.snapshot()
-			list, err := m.Config.List(config.FeaturesKind, m.Name)
-			return "every night already", err == nil && slices.Contains(list.Names(), steps.FeaturePrefs)
+			return "every night already", s.capturing()
 		},
 		ask: func(ctx context.Context, _ *snapshot.Snapshot) error {
 			yes, err := s.prefsAnswer(ctx)
@@ -233,6 +246,13 @@ func (s *Setup) prefsStep() engine.Step {
 			return s.update(func(r *record) { r.Prefs = &yes })
 		},
 	})
+}
+
+// capturing reports whether capture's switched on for this Mac, as its
+// record of apps' settings says.
+func (s *Setup) capturing() bool {
+	rec, err := (&prefs.Prefs{State: s.Dirs.State}).Load()
+	return err == nil && rec.On != ""
 }
 
 func (s *Setup) prefsAnswer(ctx context.Context) (bool, error) {
@@ -260,6 +280,7 @@ func (s *Setup) filesStep() engine.Step {
 			}
 			return strconv.Itoa(len(*rec.Link)), true
 		},
+		anew: func(rec record) bool { return anew(s.Given.Link, rec.Link) },
 		nothing: func(_ context.Context, found *snapshot.Snapshot) (string, bool) {
 			return "none to link", len(found.Files) == 0
 		},
@@ -302,6 +323,7 @@ func (s *Setup) installStep() engine.Step {
 			}
 			return "stopped here to look first: kit status, then kit apply", true
 		},
+		anew: func(rec record) bool { return anew(s.Given.Apply, rec.Apply) },
 		nothing: func(ctx context.Context, _ *snapshot.Snapshot) (string, bool) {
 			if s.record().Created {
 				return "nothing more", true
@@ -320,16 +342,16 @@ func (s *Setup) installStep() engine.Step {
 }
 
 func (s *Setup) installAnswer(ctx context.Context) (bool, error) {
+	if s.Given.Apply != nil {
+		return *s.Given.Apply, nil
+	}
 	missing := s.missing(ctx)
 	if missing == nil {
 		return false, errors.New("couldn't tell what kit-config declares that this Mac hasn't")
 	}
 	n := len(*missing)
 	what := fmt.Sprintf("kit-config declares %d %s this Mac hasn't", n, look.Plural(n, "thing", "things"))
-	switch {
-	case s.Given.Apply != nil:
-		return *s.Given.Apply, nil
-	case s.Ask == nil:
+	if s.Ask == nil {
 		return false, s.unanswered("--apply installs what " + what + " (" + some(*missing) + ") with the rest, or --no-apply stops to look first")
 	}
 	i, err := s.Ask.Choose(ctx, InstallStep, what+": "+some(*missing), []boot.Answer{{Label: "Install them with the rest"}, {Label: "Stop here to look first", Does: "kit status"}})
@@ -385,8 +407,10 @@ func (s *Setup) missing(ctx context.Context) *[]string {
 }
 
 // commitStep declares what the snapshot found, then the answers, and
-// commits and pushes them as one (Declare): done once it's committed,
-// which ends setup's part.
+// commits and pushes them as one (Declare), once GitHub says kit-config's
+// repository is private, whichever way it was chosen: done once it's
+// pushed, which ends setup's part. Till then, a run again declares only
+// what isn't, and pushes what's committed.
 func (s *Setup) commitStep() engine.Step {
 	return engine.Step{
 		Name: CommitStep, Title: "Committed",
@@ -400,9 +424,17 @@ func (s *Setup) commitStep() engine.Step {
 			return check.Result{State: check.Attention, Summary: "not committed yet"}
 		},
 		Apply: func(ctx context.Context, _ check.Result) error {
-			found, _ := s.snapshot()
 			rec := s.record()
-			d := Declaring{Found: found, Created: rec.Created, Prefs: rec.Prefs != nil && *rec.Prefs}
+			token, _ := s.signedIn()
+			private, err := s.GitHub.Private(ctx, token, rec.Repo)
+			if err := refusal(rec.Repo, private, err); err != nil {
+				return err
+			}
+			found, _ := s.snapshot()
+			d := Declaring{Found: found, Empty: rec.Created, Prefs: s.capturing()}
+			if rec.Prefs != nil {
+				d.Prefs = *rec.Prefs
+			}
 			if rec.Restore != nil {
 				d.Restore = *rec.Restore
 			}
@@ -410,15 +442,32 @@ func (s *Setup) commitStep() engine.Step {
 				d.Link = *rec.Link
 			}
 			res := s.Declare(ctx, d)
+			if res.State != check.OK {
+				res = s.stopped(res)
+			}
 			s.mu.Lock()
 			s.declared = &res
 			s.mu.Unlock()
-			if res.State == check.Failed {
+			if res.State != check.OK {
 				return nil
 			}
 			return s.update(func(r *record) { r.Done = true })
 		},
 	}
+}
+
+// stopped is res, setup's commit or push that didn't go, saying a run
+// again carries on: kit-config's folder holds files moved in from the
+// home folder, and linked back, so it's never to be deleted part-way.
+func (s *Setup) stopped(res check.Result) check.Result {
+	_, m := s.snapshot()
+	said := "kit setup again carries on; never delete " + tilde.Shown(m.Home, s.Dirs.Config) + " part-way, as files are moved into it and linked back"
+	if res.State == check.Failed {
+		res.Reason += "; " + said
+	} else {
+		res.Summary += "; " + said
+	}
+	return res
 }
 
 // byHandStep says which apps were installed by hand: kit leaves them to

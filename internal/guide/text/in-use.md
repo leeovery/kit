@@ -48,8 +48,17 @@ Every question has its flag; without a terminal kit setup asks nothing.
 3. Run `kit setup --json` again with the new flags. It carries on where it
    stopped: what's done stays done, and nothing is created twice.
 
-Once it's committed, kit setup runs `kit apply`, and the document's
-`apply` holds that run, as `kit apply --json` would.
+Run again, a question's flag replaces the answer given before. A
+`--create`, `--join` or `--mac` naming another repository or Mac than the
+run part-way chose is refused, naming the one it chose: give that, or
+leave the flag out.
+
+Setup is done once its commit is pushed. If the commit or the push fails,
+the `commit` step says so, and running kit setup again pushes it. Never
+delete `~/.config/kit` part-way: files are moved into it and linked back.
+
+Once it's pushed, kit setup runs `kit apply`, and the document's `apply`
+holds that run, as `kit apply --json` would.
 
 ## What to tell the person
 

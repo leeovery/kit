@@ -173,16 +173,10 @@ func (b *Boot) gitHubStep() engine.Step {
 		Name: GitHubStep, Title: "GitHub", Area: AreaSignIn,
 		Waiting: "This Mac is set up from your kit-config, a private repository on GitHub. Sign in to GitHub, and kit fetches it.",
 		Check: func(ctx context.Context) check.Result {
-			token := b.known(ctx)
-			if token == "" {
-				return check.Result{State: check.Attention, Summary: "not signed in"}
-			}
-			login, err := b.GitHub.Login(ctx, token)
-			switch {
-			case errors.Is(err, ErrSignedOut):
-				return check.Result{State: check.Attention, Summary: "signed out"}
-			case err != nil:
-				return check.Result{State: check.Failed, Reason: err.Error()}
+			held, _ := b.signedIn()
+			token, login, stands := b.account().Login(ctx, held)
+			if stands.State != check.OK {
+				return stands
 			}
 			b.hold(token, login)
 			cfg := b.config()
@@ -195,14 +189,10 @@ func (b *Boot) gitHubStep() engine.Step {
 			token, login := b.signedIn()
 			if token == "" {
 				var err error
-				if token, err = b.signIn(ctx); err != nil {
+				if token, login, err = b.account().SignInAndKeep(ctx, GitHubStep); err != nil {
 					return err
 				}
-				if login, err = b.GitHub.Login(ctx, token); err != nil {
-					return fmt.Errorf("find who signed in: %w", err)
-				}
 				b.hold(token, login)
-				b.account().Keep(ctx, token)
 			}
 			repo := b.repo(login)
 			b.doing(GitHubStep, "reading "+repo)
@@ -245,15 +235,6 @@ func (b *Boot) signIn(ctx context.Context) (string, error) {
 // keychainItem is where kit keeps GitHub's sign-in, in the login keychain,
 // till GitHub's CLI has it.
 const keychainItem = "kit-github"
-
-// known is the GitHub sign-in at hand: the boot's own, held this run, else
-// one kept or GitHub's CLI's; "" when there's none.
-func (b *Boot) known(ctx context.Context) string {
-	if token, _ := b.signedIn(); token != "" {
-		return token
-	}
-	return b.account().Known(ctx)
-}
 
 // macStep settles which of the config's Macs this is, or that it's a new
 // one: done when kit has a name for this Mac that the config knows, or that

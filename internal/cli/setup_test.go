@@ -2,10 +2,11 @@ package cli_test
 
 import (
 	"encoding/json"
-	"os"
+	"errors"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/leeovery/kit/internal/backup/arq"
@@ -22,7 +23,7 @@ import (
 func inUse(t *testing.T, repos map[string]bool) *world {
 	t.Helper()
 	w := newWorld(t, nil)
-	w.gitHub = boottest.Serve(t, repos)
+	w.gitHub, w.repos = boottest.ServeRepos(t, repos)
 	f := w.fake
 	f.On("system_profiler", "SPHardwareDataType", "-json").Prints(`{"SPHardwareDataType" : [{"_name" : "hardware_overview", "machine_name" : "MacBook Pro"}]}`)
 	f.On("security", "find-generic-password", "-s", "kit-github", "-w").Exits(44)
@@ -44,19 +45,65 @@ func inUse(t *testing.T, repos map[string]bool) *world {
 }
 
 // creates scripts GitHub's CLI creating kit-config, private, on the
-// person's account, and cloning it, empty, on main and tracking it alone.
-func (w *world) creates() {
+// person's account, and cloning it, empty.
+func (w *world) creates(t *testing.T) {
+	w.fake.On("gh", "repo", "create", "someone/kit-config", "--private").Prints("https://github.com/someone/kit-config\n").
+		Does(func() { w.repos.Add("someone/kit-config", true) })
+	w.clones(t, "someone/kit-config", nil)
+}
+
+// clones scripts GitHub's CLI cloning repo into kit-config's folder,
+// holding files, by name, and git there as git keeps it, kit setting and
+// reading it: its origin; HEAD and what it tracks, on main and tracking it
+// alone, as a single-branch clone is, or, with no files, on git's own first
+// branch, tracking nothing, as an empty one is; and how it signs in.
+func (w *world) clones(t *testing.T, repo string, files map[string]string) {
 	dir := filepath.Join(w.home, ".config", "kit")
-	f := w.fake
-	f.On("gh", "repo", "create", "kit-config", "--private").Prints("https://github.com/someone/kit-config\n")
-	f.On("gh", "repo", "clone", "someone/kit-config", dir, "--", "--quiet", "--single-branch").Does(func() {
-		_ = os.MkdirAll(filepath.Join(dir, ".git"), 0o700)
+	git := func(args ...string) []string { return append([]string{"-C", dir}, args...) }
+	var mu sync.Mutex
+	has := map[string]string{}
+	put := func(key, value string) func() {
+		return func() {
+			mu.Lock()
+			defer mu.Unlock()
+			has[key] = value
+		}
+	}
+	get := func(key string) func(string) (string, error) {
+		return func(string) (string, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			if value, ok := has[key]; ok {
+				return value + "\n", nil
+			}
+			return "", errors.New("")
+		}
+	}
+	tracking := map[string]string{"remote.origin.fetch": "+refs/heads/main:refs/remotes/origin/main", "branch.main.remote": "origin", "branch.main.merge": "refs/heads/main"}
+	for key, value := range tracking {
+		w.fake.On("git", git("config", "--get", key)...).Filters(get(key))
+		w.fake.On("git", git("config", key, value)...).Does(put(key, value))
+	}
+	w.fake.On("git", git("config", "--get", "credential.https://github.com.helper")...).Filters(get("helper"))
+	w.fake.On("git", git("config", "credential.https://github.com.helper", "!gh auth git-credential")...).Does(put("helper", "!gh auth git-credential"))
+	w.fake.On("git", git("symbolic-ref", "HEAD")...).Filters(get("HEAD"))
+	w.fake.On("git", git("symbolic-ref", "HEAD", "refs/heads/main")...).Does(put("HEAD", "refs/heads/main"))
+	w.fake.On("git", git("remote", "get-url", "origin")...).Filters(get("origin"))
+	w.fake.On("gh", "repo", "clone", repo, dir, "--", "--quiet", "--single-branch").Does(func() {
+		w.write(t, filepath.Join(".config", "kit", ".git", "HEAD"), "")
+		for name, content := range files {
+			w.write(t, filepath.Join(".config", "kit", name), content)
+		}
+		put("origin", "https://github.com/"+repo+".git")()
+		if len(files) == 0 {
+			put("HEAD", "refs/heads/master")()
+			return
+		}
+		put("HEAD", "refs/heads/main")()
+		for key, value := range tracking {
+			put(key, value)()
+		}
 	})
-	f.On("git", "-C", dir, "config", "credential.https://github.com.helper", "!gh auth git-credential")
-	f.On("git", "-C", dir, "symbolic-ref", "HEAD", "refs/heads/main")
-	f.On("git", "-C", dir, "config", "remote.origin.fetch", "+refs/heads/main:refs/remotes/origin/main")
-	f.On("git", "-C", dir, "config", "branch.main.remote", "origin")
-	f.On("git", "-C", dir, "config", "branch.main.merge", "refs/heads/main")
 }
 
 // setupDocument is kit setup --json's document, as an agent reads it.
@@ -67,6 +114,11 @@ type setupDocument struct {
 		State   string `json:"state"`
 		Summary string `json:"summary"`
 		Reason  string `json:"reason"`
+		Items   []struct {
+			Name   string `json:"name"`
+			State  string `json:"state"`
+			Detail string `json:"detail"`
+		} `json:"items"`
 	} `json:"steps"`
 	Apply *struct {
 		Machine string `json:"machine"`
@@ -109,14 +161,14 @@ func TestSetupRefusesAMacKitLooksAfter(t *testing.T) {
 // kit doesn't look after, and where secrets go.
 func TestSetupWithoutATerminal(t *testing.T) {
 	w := inUse(t, map[string]bool{})
-	w.creates()
+	w.creates(t)
 
 	out, errOut, code := w.run(t, "setup", "--json", "--create", "kit-config", "--mac", "laptop")
 	doc := readSetup(t, out)
 	stood := doc.stood()
 	for _, want := range []string{
 		"github ok someone · GitHub's CLI's sign-in",
-		"kit-config ok someone/kit-config · created, private",
+		"kit-config ok someone/kit-config · new, private",
 		"mac ok laptop",
 		"snapshot ok 1: 1 git config",
 		"restore failed no terminal to ask at: --restore <path> for each folder a new Mac brings back from your backups (~/Code ",
@@ -143,7 +195,7 @@ func TestSetupWithoutATerminal(t *testing.T) {
 	out, errOut, code = w.run(t, "setup", "--json", "--restore", "~/Code", "--prefs", "--no-apply")
 	stood = readSetup(t, out).stood()
 	for _, want := range []string{
-		"kit-config ok someone/kit-config · created, private",
+		"kit-config ok someone/kit-config · new, private",
 		"restore ok 1 folder",
 		"prefs ok every night",
 		"commit ok 1 declared · committed and pushed kit.toml and laptop/",
@@ -162,7 +214,7 @@ func TestSetupWithoutATerminal(t *testing.T) {
 		t.Errorf("laptop/declarations =\n%s\nwant\n%s", got, want)
 	}
 	for _, call := range w.fake.Calls() {
-		if strings.Count(call, "gh repo create") > 0 && call != "gh repo create kit-config --private" {
+		if strings.Count(call, "gh repo create") > 0 && call != "gh repo create someone/kit-config --private" {
 			t.Errorf("ran %s", call)
 		}
 	}
@@ -175,7 +227,7 @@ func TestSetupWithoutATerminal(t *testing.T) {
 // would, in the same run: its steps, built from the config setup made.
 func TestSetupThenApplies(t *testing.T) {
 	w := inUse(t, map[string]bool{})
-	w.creates()
+	w.creates(t)
 	healthyMac(w)
 	w.private()
 	w.expectCommit(t, commit{
@@ -200,14 +252,7 @@ func TestSetupThenApplies(t *testing.T) {
 func TestSetupAsksAtATerminal(t *testing.T) {
 	w := inUse(t, map[string]bool{"someone/kit-config": true, "someone/notes": true})
 	w.terminal = true
-	dir := filepath.Join(w.home, ".config", "kit")
-	w.fake.On("gh", "repo", "clone", "someone/kit-config", dir, "--", "--quiet", "--single-branch").Does(func() {
-		w.write(t, filepath.Join(".config", "kit", ".git", "HEAD"), "ref: refs/heads/main\n")
-		w.write(t, filepath.Join(".config", "kit", "kit.toml"), twoMacs)
-		w.write(t, filepath.Join(".config", "kit", "laptop", "declarations"), "")
-		w.write(t, filepath.Join(".config", "kit", "studio", "declarations"), "")
-	})
-	w.fake.On("git", "-C", dir, "config", "credential.https://github.com.helper", "!gh auth git-credential")
+	w.clones(t, "someone/kit-config", map[string]string{"kit.toml": twoMacs, "laptop/declarations": "", "studio/declarations": ""})
 	w.choose = func(question string, options []string) (int, error) {
 		switch {
 		case strings.Contains(question, "which of your Macs"):
@@ -246,5 +291,65 @@ func TestSetupAsksAtATerminal(t *testing.T) {
 	}
 	if !strings.HasSuffix(w.read(t, filepath.Join(".config", "kit", "kit.toml")), "[macs.macbook-pro]\ndescription = \"MacBook Pro\"\n") || code != 0 {
 		t.Errorf("kit.toml =\n%s\nexit %d", w.read(t, filepath.Join(".config", "kit", "kit.toml")), code)
+	}
+}
+
+// A push that fails leaves setup part-way, saying a run again carries on
+// and never to delete kit-config's folder: a run again declares nothing
+// twice, commits nothing new, and pushes what's waiting, to GitHub's new,
+// empty, repository, its branch made by the push. Then it's done.
+func TestSetupCarriesOnFromAPushThatFailed(t *testing.T) {
+	w := inUse(t, map[string]bool{})
+	w.creates(t)
+	dir := filepath.Join(w.home, ".config", "kit")
+	git := func(args ...string) []string { return append([]string{"-C", dir}, args...) }
+	paths := []string{"kit.toml", "laptop"}
+	w.expectCommit(t, commit{
+		message: "kit setup (laptop): this Mac as it is", paths: paths,
+		files: []string{"kit.toml", "laptop/declarations"}, status: "?? kit.toml\x00?? laptop/declarations\x00",
+	})
+	w.fake.On("git", git("rev-parse", "--verify", "--quiet", "refs/remotes/origin/main")...).Exits(1)
+	w.fake.On("git", git("fetch", "--prune", "--quiet", "origin")...).Exits(128).PrintsToStderr("fatal: couldn't find remote ref refs/heads/main\n")
+	w.fake.On("git", git("update-ref", "-d", "refs/remotes/origin/main")...)
+	w.fake.On("git", git("push", "--quiet", "origin", "HEAD:refs/heads/main")...).Exits(128).PrintsToStderr("fatal: the remote end hung up unexpectedly\n").Then()
+	flags := []string{"setup", "--json", "--create", "kit-config", "--mac", "laptop", "--restore", "~/Code", "--prefs", "--no-apply"}
+	prefsRecord := filepath.Join(".local", "state", "kit", "prefs.json")
+
+	out, _, code := w.run(t, flags...)
+	stood := readSetup(t, out).stood()
+	if want := "commit attention 1 declared · committed, not pushed: couldn't push: "; !slices.ContainsFunc(stood, func(s string) bool { return strings.HasPrefix(s, want) }) || code != 1 {
+		t.Errorf("the push failing, kit setup stood\n%s\nexit %d; want it to hold %q", strings.Join(stood, "\n"), code, want)
+	}
+	if carryOn := "; kit setup again carries on; never delete ~/.config/kit part-way, as files are moved into it and linked back"; !slices.ContainsFunc(stood, func(s string) bool { return strings.HasSuffix(s, carryOn) }) {
+		t.Errorf("the push failing, kit setup stood\n%s\nwant the commit's row to end %q", strings.Join(stood, "\n"), carryOn)
+	}
+	if got := w.read(t, prefsRecord); !strings.Contains(got, `"on": "started fresh `) {
+		t.Errorf("prefs.json says\n%s\nwant capture started afresh", got)
+	}
+
+	capturing := `{"on": "started fresh 2026-11-01 09:00", "captured": "2026-11-02T01:00:00Z"}`
+	w.write(t, prefsRecord, capturing)
+	w.fake.On("git", w.committing([]string{"status", "--porcelain", "-z", "--untracked-files=all", "--no-renames"}, paths...)...)
+	w.fake.On("git", git("log", "--format=%ct", "HEAD", "--not", "--remotes=origin")...).Prints("1763460000\n")
+	out, errOut, code := w.run(t, flags...)
+	doc := readSetup(t, out)
+	stood = doc.stood()
+	if want := "commit ok 0 declared · nothing changed; pushed 1 commit waiting"; !slices.Contains(stood, want) || code != 0 {
+		t.Errorf("run again, kit setup stood\n%s\nsaid %q, exit %d; want it to hold %q", strings.Join(stood, "\n"), errOut, code, want)
+	}
+	for _, s := range doc.Steps {
+		if s.ID == "commit" && len(s.Items) > 0 {
+			t.Errorf("run again, the commit's items are %+v: want what's declared already left as it is", s.Items)
+		}
+	}
+	want := "[features]\nprefs\n\n[git config]\nuser.name \"Some One\"\n\n[macos settings]\n\n[github extensions]\n\n[restore]\n~/Code\n"
+	if got := w.read(t, filepath.Join(".config", "kit", "laptop", "declarations")); got != want {
+		t.Errorf("laptop/declarations =\n%s\nwant\n%s", got, want)
+	}
+	if got := w.read(t, prefsRecord); got != capturing {
+		t.Errorf("prefs.json says\n%s\nwant capture left as it was", got)
+	}
+	if _, _, code := w.run(t, "setup"); code != 2 {
+		t.Errorf("once pushed, kit setup exits %d; want it refused, kit looking after this Mac", code)
 	}
 }

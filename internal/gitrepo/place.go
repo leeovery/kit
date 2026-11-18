@@ -45,11 +45,10 @@ const ghSignedOut = 4
 // its URL, so of github.com whatever host GH_HOST names; anything else is
 // unproven. An error is a failure to ask gh.
 func (r Repo) Place(ctx context.Context, url string) (Place, error) {
-	m := onGitHub.FindStringSubmatch(url)
-	if m == nil || !githubName.MatchString(m[1]) || !githubName.MatchString(m[2]) {
+	repo := OnGitHub(url)
+	if repo == "" {
 		return Place{Unproven: notGitHub}, nil
 	}
-	repo := m[1] + "/" + m[2]
 	res, err := r.Run.Run(ctx, runner.Command{Name: "gh", Args: []string{"repo", "view", "https://github.com/" + repo, "--json", "visibility", "--jq", ".visibility"}})
 	if exit, ok := errors.AsType[*runner.ExitError](err); ok && exit.Code == ghSignedOut {
 		return Place{}, errors.New("gh isn't signed in to GitHub: run gh auth login")
@@ -58,6 +57,16 @@ func (r Repo) Place(ctx context.Context, url string) (Place, error) {
 		return Place{}, fmt.Errorf("couldn't ask GitHub: %w", err)
 	}
 	return Place{Repo: repo, Visibility: strings.ToLower(strings.TrimSpace(string(res.Stdout)))}, nil
+}
+
+// OnGitHub is the repository on github.com url names, written exactly as
+// onGitHub has it, as owner/name: "" when it names none.
+func OnGitHub(url string) string {
+	m := onGitHub.FindStringSubmatch(url)
+	if m == nil || !githubName.MatchString(m[1]) || !githubName.MatchString(m[2]) {
+		return ""
+	}
+	return m[1] + "/" + m[2]
 }
 
 // Shown is remote, a URL, as kit names it: without who it signs in as,

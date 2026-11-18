@@ -18,6 +18,7 @@ import (
 	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/kinds"
+	"github.com/leeovery/kit/internal/linked"
 	"github.com/leeovery/kit/internal/logs"
 	"github.com/leeovery/kit/internal/look"
 	"github.com/leeovery/kit/internal/render"
@@ -61,7 +62,12 @@ runs kit apply.
 
 It refuses when the config folder holds a config already. Without a
 terminal it asks nothing: a question its flag doesn't answer stops it,
-naming the flag, and running it again with the flag carries on.`,
+naming the flag, and running it again with the flag carries on. Run
+again, a question's flag replaces the answer given before, and a --create,
+--join or --mac naming another than the run part-way chose is refused.
+It's done once its commit is pushed: if the push fails, running it again
+pushes it. Never delete the config folder part-way: files are moved into
+it and linked back.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			given.Restore, given.Link = listFlag(restores, noRestore), listFlag(links, noLink)
@@ -121,9 +127,6 @@ func (a *app) setup(ctx context.Context, given setup.Answers) error {
 	if err != nil {
 		return fmt.Errorf("find the home directory: %w", err)
 	}
-	if err := setup.Begin(dirs); err != nil {
-		return err
-	}
 	log, err := logs.Open(dirs.Logs, a.Now(), "setup", a.verbose)
 	if err != nil {
 		return err
@@ -142,20 +145,26 @@ func (a *app) setup(ctx context.Context, given setup.Answers) error {
 	defer stop()
 	s := &setup.Setup{
 		Run: run, Sink: sink, GitHub: a.GitHub(), Now: a.Now,
-		Dirs: dirs, Kinds: kinds.Sections(), Getenv: a.Getenv, Version: a.Version, Model: setup.Model(ctx, run), Given: given,
-		Snapshot: func(cfg *config.Config, mac string) (snapshot.Mac, error) {
+		Dirs: dirs, Kinds: kinds.Sections(), Getenv: a.Getenv, Version: a.Version, Given: given,
+		Snapshot: func(ctx context.Context, cfg *config.Config, mac string) (snapshot.Snapshot, snapshot.Mac, error) {
 			path, err := cfg.SearchPath(home, mac)
 			if err != nil {
-				return snapshot.Mac{}, err
+				return snapshot.Snapshot{}, snapshot.Mac{}, err
 			}
 			path = distinct(slices.Concat(path, bootPath))
-			return snapshot.Mac{
+			m := snapshot.Mac{
 				Name: mac, Config: cfg, Run: a.commands(path, childEnv(a.Getenv, home, path), sink, noAsks), Home: home,
 				ConfigHome: a.configHome(), Dirs: dirs, AppDirs: a.appFolders(home).Dirs, SudoLocal: a.SudoLocal, Now: a.Now,
-			}, nil
+			}
+			found, err := snapshot.Find(ctx, m)
+			return found, m, err
 		},
 		Declare: func(ctx context.Context, d setup.Declaring) check.Result { return a.declareSetup(ctx, sink, d) },
 	}
+	if err := s.Begin(ctx); err != nil {
+		return err
+	}
+	s.Model = setup.Model(ctx, run)
 	steps := s.Steps()
 	if a.pretty(a.Stdout) {
 		s.Ask = &setupAsker{a: a, stop: stop, titles: titles(steps)}
@@ -259,7 +268,7 @@ func (a *app) declareSetup(ctx context.Context, sink event.Sink, d setup.Declari
 		}
 	}
 	repo := r.repo
-	repo.BranchMayBeMissing = d.Created
+	repo.BranchMayBeMissing = d.Empty
 	files := []string{config.File, r.machine}
 	res := syncing{repo: repo, files: files, what: config.File + " and " + r.machine + "/"}.commit(ctx, fmt.Sprintf("kit setup (%s): this Mac as it is", r.machine))
 	if res.State != check.Failed {
@@ -270,12 +279,20 @@ func (a *app) declareSetup(ctx context.Context, sink event.Sink, d setup.Declari
 }
 
 // declareRestores declares each of paths in this Mac's [restore], as kit
-// restore add would, each refused an item saying why.
+// restore add would, but those declared already, as by setup's run
+// part-way: each refused an item saying why.
 func (r *run) declareRestores(ctx context.Context, paths []string) []check.Item {
+	list, err := r.cfg.List(config.RestoreKind, r.machine)
+	if err != nil {
+		return []check.Item{{ID: config.RestoreKind, Name: strings.Join(paths, ", "), State: "refused", Detail: err.Error()}}
+	}
 	var refused []check.Item
 	for _, p := range r.tildePaths(paths) {
 		line, err := restore.ReadLine(p, "")
 		e := config.Entry{Name: line.Path}
+		if err == nil && slices.Contains(list.Names(), line.Path) {
+			continue
+		}
 		if err == nil {
 			line.Pos = config.DeclFile(r.machine)
 			err = r.checkRestore(ctx, r.machine, line, e)
@@ -291,9 +308,16 @@ func (r *run) declareRestores(ctx context.Context, paths []string) []check.Item 
 }
 
 // linkFiles moves each file at paths into kit-config, for this Mac, and
-// links it back, as kit file add would, each refused an item saying why.
+// links it back, as kit file add would, but those linked already, as by
+// setup's run part-way: each refused an item saying why.
 func (r *run) linkFiles(ctx context.Context, paths []string) []check.Item {
 	full, shown, err := r.filePaths(paths)
+	if err == nil && len(full) > 0 {
+		var declared []linked.Link
+		if declared, err = r.files.Declared(ctx); err == nil {
+			full, shown = unlinked(declared, full, shown)
+		}
+	}
 	if err != nil {
 		return []check.Item{{ID: "files", Name: strings.Join(paths, ", "), State: "refused", Detail: err.Error()}}
 	}
@@ -306,9 +330,21 @@ func (r *run) linkFiles(ctx context.Context, paths []string) []check.Item {
 	return refused
 }
 
+// unlinked are full, files to link, those declared linked already left
+// out, and how each is shown: a folder's left out when any file in it is.
+func unlinked(declared []linked.Link, full, shown []string) (unlinkedFull, unlinkedShown []string) {
+	for i, s := range shown {
+		if !slices.ContainsFunc(declared, func(l linked.Link) bool { return l.Name == s || strings.HasPrefix(l.Name, s+"/") }) {
+			unlinkedFull, unlinkedShown = append(unlinkedFull, full[i]), append(unlinkedShown, s)
+		}
+	}
+	return unlinkedFull, unlinkedShown
+}
+
 // prefsOn switches the prefs feature on for this Mac, as kit feature on
 // would, and starts this Mac's saved settings afresh from its settings as
-// they are, as kit prefs start-fresh does.
+// they are, as kit prefs start-fresh does, unless capture's on already, as
+// by setup's run part-way.
 func (a *app) prefsOn(r *run) error {
 	list, err := r.cfg.List(config.FeaturesKind, r.machine)
 	if err != nil {
@@ -321,6 +357,9 @@ func (a *app) prefsOn(r *run) error {
 	}
 	p, err := a.prefs(r)
 	if err != nil {
+		return err
+	}
+	if rec, err := p.Load(); err != nil || rec.On != "" {
 		return err
 	}
 	return p.StartFresh()
@@ -431,7 +470,11 @@ func (s *setupAsker) Pick(ctx context.Context, step string, keys []boot.Key) (st
 	s.picked = true
 	choices := make([]look.Choice, len(keys))
 	for i, k := range keys {
-		choices[i] = look.Choice{Label: strings.ToUpper(k.Does[:1]) + k.Does[1:]}
+		label := cmp.Or(k.Does, k.Key)
+		if label != "" {
+			label = strings.ToUpper(label[:1]) + label[1:]
+		}
+		choices[i] = look.Choice{Label: label}
 	}
 	i, err := s.a.Choose(ctx, ask.Question{About: s.about(step, "how will you sign in?"), Answers: choices})
 	if err != nil {

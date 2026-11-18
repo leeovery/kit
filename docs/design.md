@@ -610,19 +610,29 @@ when it was the default, `nightly_at` is written, so the time holds should the d
 
 `kit setup` is the front door for a Mac in use, as the boot is for a blank one (the maintainer,
 18 Nov 2026): one command, all the way, its steps through the engine, each found done by its
-check or its record in kit's state (`setup.json`), so a run stopped anywhere, a question
-cancelled or one its flag doesn't answer, carries on where it stopped. It refuses while the
-config folder holds anything, unless its own run part-way left it there; a run that finished
-is forgotten once the folder's gone. GitHub: GitHub's CLI's sign-in when it has one, else the
-boot's (its device flow, the phone or the browser), then GitHub's CLI installed through
-Homebrew and handed it, as the boot does, the same code. The config: `--create <name>`, a new
-repository, private, on the signed-in account, through GitHub's CLI, its clone set on main and
-tracking main alone, the remote having no branch till the first push; or `--join owner/name`,
-refused unless GitHub says it's private. At a terminal with neither, the person's `kit-config`
-is offered when they have one; else a new one, one of their private repositories (one call,
-never looking inside any) or a name typed. Cloned as the boot clones, single-branch, git
-signing in through GitHub's CLI. This Mac: `--mac`, suggested from its model, as macOS names it
-(`MacBook Pro`, `macbook-pro`); a created config's first files are kit.toml (`format`,
+check looking at what's there, the clone and git's settings in it, GitHub and the Mac, its
+record in kit's state (`setup.json`) keeping only the choices made, so a run stopped anywhere,
+a question cancelled, one its flag doesn't answer, or a clone, a setting or a push cut short,
+carries on where it stopped and ends as a run never stopped does. It refuses while the config
+folder holds anything, unless its own run part-way left it there: the folder empty or a clone
+of the repository it chose, and kit's name for the Mac none or the one it chose; else it's a
+Mac kit looks after. Run again, a `--create`, `--join` or `--mac` other than the run recorded
+is refused, naming what it recorded; the questions' flags replace their recorded answers, as
+nothing acts on them before the commit. GitHub: GitHub's CLI's sign-in first, else kit's
+kept one, else the boot's (its device flow, the phone or the browser), then GitHub's CLI
+installed through Homebrew and handed it, as the boot does, the same code. The config:
+`--create <name>`, a new repository, private, created through GitHub's CLI as owner/name on
+the signed-in account, or taken when it's there, private and empty, as a run cut short after
+creating it leaves it; or `--join owner/name`, refused unless GitHub says it's private. At a
+terminal with neither, the person's `kit-config` is offered when they have one; else a new one,
+one of their private repositories (one call, never looking inside any) or a name typed. Cloned
+as the boot clones, single-branch, git signing in through GitHub's CLI, then looked at before
+anything's written in it: empty, kit-config starts on this Mac, as one created does, its clone
+set on main and tracking main alone, the remote having no branch till the first push; holding
+a kit.toml, it's joined; else, or holding anything when it was to be created, the clone's
+deleted and the choice forgotten. This Mac: `--mac`, suggested from its model, as macOS names
+it (`MacBook Pro`, `macbook-pro`), named as `kit machine add` names one, recorded before it's
+written anywhere; a config starting on this Mac has first files kit.toml (`format`,
 `minimum_kit` this kit when it's a release, `primary` this Mac, `terminal` Ghostty only when
 setup runs in it, the Mac's table, its model the `description`) and the Mac's folder, its
 declarations file empty; joining, one of kit.toml's Macs or a new one, added as `kit machine
@@ -631,11 +641,16 @@ PATH and Homebrew's), a row its counts by part, and its questions, each with its
 suggested, its flag, and its answer kept in the record: the folders a new Mac brings back
 (`--restore`, as `kit restore add` declares them), apps' settings saved nightly (`--prefs`:
 the `prefs` feature on, started afresh from this Mac's settings as `kit prefs start-fresh`
-does; asked only while it's off), the shell's and tools' files kept (`--link`, as `kit file
+does; asked unless this Mac's own record says capture's on, whatever kit-config declares, as a
+Mac joining as a copy of one saving them has saved nothing), the shell's and tools' files kept (`--link`, as `kit file
 add` moves and links them), and, joining, what kit-config declares that this Mac hasn't:
-installed with the rest (`--apply`) or setup stopping to look first (`--no-apply`). Then one
-edit and one commit, `snapshot.Write` and the answers, kit.toml and the Mac's folder, pushed;
-it says what's refused and what couldn't be checked, each with why, the apps installed by hand
+installed with the rest (`--apply`) or setup stopping to look first (`--no-apply`). Then,
+once GitHub says the recorded repository's private, one edit and one commit, `snapshot.Write`
+and the answers, kit.toml and the Mac's folder, pushed; setup's done only once the push lands.
+A commit or push that didn't go says a run again carries on, and never to delete kit-config's
+folder part-way, as files are moved into it and linked back: the run again declares only what
+isn't, links only what isn't, commits nothing new and pushes what's waiting, to an empty
+repository as one, its branch made by the push. It says what's refused and what couldn't be checked, each with why, the apps installed by hand
 (the person's to install through Homebrew or the App Store should kit set the Mac up again),
 and that secrets go in a store with `kit secret add`; then `kit apply` runs in the same
 process, with its own screen at a terminal. Without a terminal it asks nothing: each question

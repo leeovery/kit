@@ -62,10 +62,11 @@ func Suggest(model string, taken func(string) bool) string {
 	}
 }
 
-// macStep names this Mac: in a config setup created, its one Mac, written
-// in its first files; in one joined, one of its Macs, or a new one, added
-// as kit machine add adds it. Done when kit has this Mac's name, as setup
-// recorded it, and the config knows it.
+// macStep names this Mac, the name recorded before it's written anywhere:
+// in a config starting on this Mac, its one Mac, written in its first
+// files; in one joined, one of its Macs, or a new one, added as kit machine
+// add adds it. Done when kit has this Mac's name, as setup recorded it, and
+// the config knows it.
 func (s *Setup) macStep() engine.Step {
 	return engine.Step{
 		Name: MacStep, Title: "This Mac",
@@ -91,56 +92,60 @@ func (s *Setup) macStep() engine.Step {
 			return check.Result{State: check.OK, Summary: name}
 		},
 		Apply: func(ctx context.Context, _ check.Result) error {
-			name, isNew, err := s.name(ctx)
-			if err != nil {
+			if s.record().Mac == "" {
+				if err := s.name(ctx); err != nil {
+					return err
+				}
+			}
+			rec := s.record()
+			if err := s.known(rec); err != nil {
 				return err
 			}
-			if err := s.update(func(r *record) { r.Mac, r.NewMac = name, isNew }); err != nil {
-				return err
-			}
-			return config.WriteMachine(s.Dirs.State, name)
+			return config.WriteMachine(s.Dirs.State, rec.Mac)
 		},
 	}
 }
 
-// name is this Mac's name, its folder in kit-config made, and whether it's
-// new to a config setup joined.
-func (s *Setup) name(ctx context.Context) (string, bool, error) {
+// name names this Mac, recording its name, whether it's new to a config
+// joined, and the Mac it starts as a copy of, if any.
+func (s *Setup) name(ctx context.Context) error {
 	if s.record().Created {
-		name, err := s.first(ctx)
-		return name, false, err
+		name, err := s.newName(ctx, func(string) bool { return false })
+		if err != nil {
+			return err
+		}
+		return s.update(func(r *record) { r.Mac = name })
 	}
 	cfg, err := s.config()
 	if err != nil {
-		return "", false, err
+		return err
 	}
 	name, from, err := s.whichMac(ctx, cfg)
-	if err != nil || cfg.Knows(name) {
-		return name, false, err
+	if err != nil {
+		return err
 	}
-	return name, true, cfg.AddMac(name, from, s.Model)
+	return s.update(func(r *record) { r.Mac, r.NewMac, r.From = name, !cfg.Knows(name), from })
 }
 
-// first writes a config setup created's first files, naming this Mac,
-// unless they're written: their Mac then. The terminal is Ghostty when
-// setup runs in it.
-func (s *Setup) first(ctx context.Context) (string, error) {
-	if _, err := os.Stat(filepath.Join(s.Dirs.Config, config.File)); err == nil {
+// known has kit-config know rec's Mac: written in the first files of a
+// config starting on this Mac, unless they're there; added to one joined,
+// unless it's there. The terminal is Ghostty when setup runs in it.
+func (s *Setup) known(rec record) error {
+	if !rec.Created {
 		cfg, err := s.config()
-		if err != nil {
-			return "", err
+		if err != nil || cfg.Knows(rec.Mac) {
+			return err
 		}
-		return cfg.Primary, nil
+		return cfg.AddMac(rec.Mac, rec.From, s.Model)
 	}
-	name, err := s.newName(ctx, func(string) bool { return false })
-	if err != nil {
-		return "", err
+	if _, err := os.Stat(filepath.Join(s.Dirs.Config, config.File)); err == nil {
+		return nil
 	}
-	f := config.First{Mac: name, Description: s.Model, Kit: s.Version}
+	f := config.First{Mac: rec.Mac, Description: s.Model, Kit: s.Version}
 	if t, ok := apps.Running(s.Getenv); ok && t.Name == "ghostty" {
 		f.Terminal = t.Name
 	}
-	return name, config.Start(s.Dirs.Config, f)
+	return config.Start(s.Dirs.Config, f)
 }
 
 // newName is a new Mac's name: --mac's, else asked, suggested from its
@@ -157,10 +162,7 @@ func (s *Setup) newName(ctx context.Context, taken func(string) bool) (string, e
 			return "", err
 		}
 	}
-	if !config.ValidName(name) || name == config.Shared {
-		return "", fmt.Errorf("%q can't name a Mac: lower case letters, digits and dashes, as in %s", name, suggestion)
-	}
-	return name, nil
+	return name, config.NewMacName(name)
 }
 
 // whichMac is which of cfg's Macs this is, or a new one's name and the Mac

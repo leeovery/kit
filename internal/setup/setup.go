@@ -3,14 +3,17 @@
 // one, else the boot's; the config repository, created or joined, cloned as
 // the boot clones it; this Mac's name; then the snapshot, the Mac declared
 // as it stands, and the questions it asks, each with its answer suggested,
-// committed and pushed as one. Each step done is found so by its check or
-// its record, so a setup stopped anywhere carries on where it was. It asks
+// committed and pushed as one. Each step's check looks at what's there,
+// the Mac, kit-config's clone and git's settings in it, its record keeping
+// only the choices made, so a setup stopped anywhere carries on where it
+// was, and ends as one that never stopped. It asks
 // the person through an Asker, at a terminal, in the row it's about;
 // without one, every question is a flag's to answer. It says what it's
 // doing through events.
 package setup
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -26,6 +29,7 @@ import (
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/engine"
 	"github.com/leeovery/kit/internal/event"
+	"github.com/leeovery/kit/internal/gitrepo"
 	"github.com/leeovery/kit/internal/runner"
 	"github.com/leeovery/kit/internal/snapshot"
 	kitstate "github.com/leeovery/kit/internal/state"
@@ -93,10 +97,12 @@ type Declaring struct {
 	Found   *snapshot.Snapshot
 	Restore []string
 	Link    []string
-	Prefs   bool
-	// Created is whether setup created the config repository: its branch
-	// isn't on the remote till this first push.
-	Created bool
+	// Prefs is whether apps' settings are saved: as answered, else as
+	// they are, capture switched on for this Mac already.
+	Prefs bool
+	// Empty is whether the config repository was empty, created by setup
+	// or joined so: its branch isn't on the remote till setup's first push.
+	Empty bool
 }
 
 // Setup is kit setup, and what it runs with.
@@ -117,9 +123,10 @@ type Setup struct {
 	Model string
 	// Given are the questions answered by flags.
 	Given Answers
-	// Snapshot is the Mac the snapshot looks at, named mac in cfg: what
-	// every kind's made from, on kit's PATH as cfg makes it.
-	Snapshot func(cfg *config.Config, mac string) (snapshot.Mac, error)
+	// Snapshot looks at this Mac, named mac in cfg, for what it would
+	// declare (snapshot.Find), every kind made on kit's PATH as cfg makes
+	// it: what it found, and the Mac it looked at.
+	Snapshot func(ctx context.Context, cfg *config.Config, mac string) (snapshot.Snapshot, snapshot.Mac, error)
 	// Declare declares what the snapshot found and the answers, then
 	// commits and pushes: how it went.
 	Declare func(ctx context.Context, d Declaring) check.Result
@@ -136,14 +143,18 @@ type Setup struct {
 // recordName is setup's record, in kit's state.
 const recordName = "setup.json"
 
-// record is what setup keeps between its runs: the config repository, and
-// whether setup created it; this Mac's name, and whether it's new to
-// kit-config; the answers given; and whether it's done.
+// record is what setup keeps between its runs: the config repository;
+// whether kit-config starts on this Mac, created by setup or joined empty,
+// and whether its clone was looked at for that; this Mac's name, and
+// whether it's new to kit-config, and the Mac it starts as a copy of; the
+// answers given; and whether it's done, pushed.
 type record struct {
 	Repo    string    `json:"repo,omitempty"`
 	Created bool      `json:"created,omitempty"`
+	Cloned  bool      `json:"cloned,omitempty"`
 	Mac     string    `json:"mac,omitempty"`
 	NewMac  bool      `json:"new_mac,omitempty"`
+	From    string    `json:"from,omitempty"`
 	Restore *[]string `json:"restore,omitempty"`
 	Link    *[]string `json:"link,omitempty"`
 	Prefs   *bool     `json:"prefs,omitempty"`
@@ -155,28 +166,72 @@ type record struct {
 // chosen, and not done.
 func (r record) partWay() bool { return r.Repo != "" && !r.Done }
 
-// Begin readies a run of setup in dirs: refused while the config folder
-// holds anything, unless setup's own run part-way left it there, which
-// carries on; else started afresh.
-func Begin(dirs config.Dirs) error {
-	rec, err := kitstate.Load[record](dirs.State, recordName)
+// Begin readies a run of setup: refused while the config folder holds
+// anything, unless setup's own run part-way left it there (carriesOn),
+// which carries on, but not with a flag naming kit-config or this Mac
+// otherwise than it recorded; else started afresh.
+func (s *Setup) Begin(ctx context.Context) error {
+	rec, err := kitstate.Load[record](s.Dirs.State, recordName)
 	if err != nil {
 		return err
 	}
-	if rec.partWay() {
-		return nil
+	entries, err := os.ReadDir(s.Dirs.Config)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("read %s: %w", s.Dirs.Config, err)
 	}
-	entries, err := os.ReadDir(dirs.Config)
+	empty := len(entries) == 0
+	carries, err := s.carriesOn(ctx, rec, empty)
 	switch {
-	case errors.Is(err, fs.ErrNotExist), err == nil && len(entries) == 0:
-		return kitstate.Update(dirs.State, recordName, func(r *record) { *r = record{} })
 	case err != nil:
-		return fmt.Errorf("read %s: %w", dirs.Config, err)
+		return err
+	case carries:
+		return s.asRecorded(rec)
+	case empty:
+		return s.update(func(r *record) { *r = record{} })
 	}
-	if _, err := os.Stat(filepath.Join(dirs.Config, config.File)); err == nil {
-		return fmt.Errorf("%s holds a config already, so kit looks after this Mac: kit status says how it stands", dirs.Config)
+	if _, err := os.Stat(filepath.Join(s.Dirs.Config, config.File)); err == nil {
+		return fmt.Errorf("%s holds a config already, so kit looks after this Mac: kit status says how it stands", s.Dirs.Config)
 	}
-	return fmt.Errorf("%s is there, and isn't a config: move it aside, then run kit setup again", dirs.Config)
+	return fmt.Errorf("%s is there, and isn't a config: move it aside, then run kit setup again", s.Dirs.Config)
+}
+
+// carriesOn reports whether rec is setup's run part-way, for this one to
+// carry on: the config folder empty, or a clone of the repository rec
+// names; kit's name for this Mac none yet, or the one rec names.
+func (s *Setup) carriesOn(ctx context.Context, rec record, empty bool) (bool, error) {
+	if !rec.partWay() {
+		return false, nil
+	}
+	name, err := config.ReadMachine(s.Dirs.State)
+	if err != nil || name != "" && name != rec.Mac {
+		return false, err
+	}
+	return empty || strings.EqualFold(s.origin(ctx), rec.Repo), nil
+}
+
+// origin is the repository on GitHub the config folder's clone is of, as
+// owner/name: "" when it's no clone of one.
+func (s *Setup) origin(ctx context.Context) string {
+	res, err := s.Run.Run(ctx, runner.Command{Name: "git", Args: []string{"-C", s.Dirs.Config, "remote", "get-url", "origin"}})
+	if err != nil {
+		return ""
+	}
+	return gitrepo.OnGitHub(strings.TrimSpace(string(res.Stdout)))
+}
+
+// asRecorded refuses a flag naming kit-config or this Mac otherwise than
+// rec, a run part-way, records them.
+func (s *Setup) asRecorded(rec record) error {
+	g := s.Given
+	_, name, _ := strings.Cut(rec.Repo, "/")
+	again := "run kit setup again without it"
+	switch {
+	case g.Join != "" && !strings.EqualFold(g.Join, rec.Repo), g.Create != "" && !strings.EqualFold(g.Create, name):
+		return fmt.Errorf("kit setup, part-way, has %s as kit-config: %s, or with --join %s", rec.Repo, again, rec.Repo)
+	case g.Mac != "" && rec.Mac != "" && g.Mac != rec.Mac:
+		return fmt.Errorf("kit setup, part-way, named this Mac %s: %s, or with --mac %s", rec.Mac, again, rec.Mac)
+	}
+	return nil
 }
 
 // Steps are setup's steps, in order, each needing the one before it, but
@@ -212,12 +267,13 @@ func (s *Setup) Done() bool { return s.record().Done }
 func (s *Setup) Mac() string { return s.record().Mac }
 
 // Applies reports whether kit apply runs once setup's done: unless the
-// person said to stop to look first, or not to.
+// person said to stop to look first, or not to, by a flag now, else as
+// recorded.
 func (s *Setup) Applies() bool {
-	if a := s.record().Apply; a != nil {
+	if a := cmp.Or(s.Given.Apply, s.record().Apply); a != nil {
 		return *a
 	}
-	return s.Given.Apply == nil || *s.Given.Apply
+	return true
 }
 
 // Wanted are the flags the questions asked without a terminal want, each

@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
+	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/runner"
 )
@@ -26,29 +28,84 @@ type Account struct {
 	Ask    Picker
 	GitHub GitHub
 	Now    func() time.Time
+	// CLIFirst has GitHub's CLI's sign-in come before kit's own, as on a
+	// Mac in use, whose GitHub's CLI is how the person works.
+	CLIFirst bool
 }
 
 func (a Account) doing(step, says string) {
 	a.Sink.Emit(event.Doing{Time: a.Now(), Step: step, Says: says})
 }
 
-// Known is the GitHub sign-in at hand: kit's own, kept in the keychain, or
-// else GitHub's CLI's; "" when there's none.
+// Known is the GitHub sign-in at hand: kit's own, kept in the keychain,
+// else GitHub's CLI's, or the other way round with CLIFirst; "" when
+// there's none.
 func (a Account) Known(ctx context.Context) string {
-	res, err := a.Run.Run(ctx, runner.Command{Name: "security", Args: []string{"find-generic-password", "-s", keychainItem, "-w"}, Secret: true})
-	if err == nil {
-		if token := strings.TrimSpace(string(res.Stdout)); token != "" {
+	ways := []func(context.Context) string{a.kept, a.cli}
+	if a.CLIFirst {
+		slices.Reverse(ways)
+	}
+	for _, way := range ways {
+		if token := way(ctx); token != "" {
 			return token
 		}
 	}
-	if !runner.Has(a.Run, "gh") {
-		return ""
-	}
-	res, err = a.Run.Run(ctx, runner.Command{Name: "gh", Args: []string{"auth", "token"}, Secret: true})
+	return ""
+}
+
+// kept is kit's own sign-in, kept in the keychain: "" when there's none.
+func (a Account) kept(ctx context.Context) string {
+	res, err := a.Run.Run(ctx, runner.Command{Name: "security", Args: []string{"find-generic-password", "-s", keychainItem, "-w"}, Secret: true})
 	if err != nil {
 		return ""
 	}
 	return strings.TrimSpace(string(res.Stdout))
+}
+
+// cli is GitHub's CLI's sign-in: "" when it's not there, or not signed in.
+func (a Account) cli(ctx context.Context) string {
+	if !runner.Has(a.Run, "gh") {
+		return ""
+	}
+	res, err := a.Run.Run(ctx, runner.Command{Name: "gh", Args: []string{"auth", "token"}, Secret: true})
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(res.Stdout))
+}
+
+// Login is the sign-in held, else the one Known finds, and whose it is, as
+// GitHub says: OK when GitHub takes it; Attention, saying so, when there's
+// none, or GitHub's signed it out; Failed when GitHub can't say.
+func (a Account) Login(ctx context.Context, held string) (token, login string, stands check.Result) {
+	token = held
+	if token == "" {
+		token = a.Known(ctx)
+	}
+	if token == "" {
+		return "", "", check.Result{State: check.Attention, Summary: "not signed in"}
+	}
+	login, err := a.GitHub.Login(ctx, token)
+	switch {
+	case errors.Is(err, ErrSignedOut):
+		return "", "", check.Result{State: check.Attention, Summary: "signed out"}
+	case err != nil:
+		return "", "", check.Result{State: check.Failed, Reason: err.Error()}
+	}
+	return token, login, check.Result{State: check.OK}
+}
+
+// SignInAndKeep signs in to GitHub, as SignIn does, then keeps the sign-in
+// (Keep): it, and whose it is.
+func (a Account) SignInAndKeep(ctx context.Context, step string) (token, login string, err error) {
+	if token, err = a.SignIn(ctx, step); err != nil {
+		return "", "", err
+	}
+	if login, err = a.GitHub.Login(ctx, token); err != nil {
+		return "", "", fmt.Errorf("find who signed in: %w", err)
+	}
+	a.Keep(ctx, token)
+	return token, login, nil
 }
 
 // SignIn signs in to GitHub through its device flow, in step's row, the way
@@ -127,9 +184,9 @@ func (a Account) CLISignedIn(ctx context.Context) bool {
 	return err == nil
 }
 
-// gitCredentials has git ask GitHub's CLI for the sign-in, for the config
+// GitCredentials has git ask GitHub's CLI for the sign-in, for the config
 // repository alone: set in its own settings, not the person's.
-const gitCredentials = "!gh auth git-credential"
+const GitCredentials = "!gh auth git-credential"
 
 // Clone clones the repository named repo, as owner/name, into dir through
 // GitHub's CLI, signed in, in step's row, git set to sign in through it.
@@ -140,7 +197,7 @@ func (a Account) Clone(ctx context.Context, step, repo, dir string) error {
 	if _, err := a.Run.Run(ctx, runner.Command{Name: "gh", Args: []string{"repo", "clone", repo, dir, "--", "--quiet", "--single-branch"}, Timeout: 10 * time.Minute}); err != nil {
 		return fmt.Errorf("clone %s: %w", repo, err)
 	}
-	if _, err := a.Run.Run(ctx, runner.Command{Name: "git", Args: []string{"-C", dir, "config", "credential.https://github.com.helper", gitCredentials}}); err != nil {
+	if _, err := a.Run.Run(ctx, runner.Command{Name: "git", Args: []string{"-C", dir, "config", "credential.https://github.com.helper", GitCredentials}}); err != nil {
 		return fmt.Errorf("have git sign in through GitHub's CLI: %w", err)
 	}
 	return nil

@@ -20,6 +20,7 @@ import (
 
 	"github.com/leeovery/kit/internal/ask"
 	"github.com/leeovery/kit/internal/boot"
+	"github.com/leeovery/kit/internal/boot/boottest"
 	"github.com/leeovery/kit/internal/cli"
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/look"
@@ -106,8 +107,9 @@ type world struct {
 	// self is where kit runs from, when a test moves it: kitPath else.
 	self string
 	// gitHub is GitHub, as kit reaches it: on this machine, where nothing
-	// answers, unless a test serves it.
+	// answers, unless a test serves it, holding repos.
 	gitHub boot.GitHub
+	repos  *boottest.Repos
 	// text answers what kit asks to be typed at a terminal, as its row
 	// reads, given what's typed to start with: that, unless it's set.
 	text func(question, typed string) string

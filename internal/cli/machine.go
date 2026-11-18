@@ -63,8 +63,8 @@ committed and pushed to the config repository.`,
 // addMachine adds the Mac called name to the config, a copy of from's
 // folder unless from is "", and commits it.
 func addMachine(ctx context.Context, r *run, name, from, description string) error {
-	if name == "add" {
-		return fmt.Errorf("a Mac can't be called add: that's kit machine add")
+	if err := config.NewMacName(name); err != nil {
+		return err
 	}
 	if err := r.cfg.AddMac(name, from, description); err != nil {
 		return err

@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -23,11 +24,56 @@ const (
 	Login = "someone"
 )
 
+// Repos are the repositories GitHub has, by owner/name, each private or
+// not: added to while it serves them, as gh repo create adds one.
+type Repos struct {
+	mu   sync.Mutex
+	have map[string]bool
+}
+
+// Add has GitHub hold repo, private or not.
+func (r *Repos) Add(repo string, private bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.have[repo] = private
+}
+
+func (r *Repos) private(repo string) (private, ok bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	private, ok = r.have[repo]
+	return private, ok
+}
+
+func (r *Repos) privateOnes() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var names []string
+	for name, private := range r.have {
+		if private {
+			names = append(names, name)
+		}
+	}
+	slices.SortFunc(names, strings.Compare)
+	return names
+}
+
 // Serve is GitHub, on this machine, for the test's length: Login, signed in
 // with Token, seeing repos, by owner/name, each private or not; listing the
 // private ones alone.
 func Serve(t *testing.T, repos map[string]bool) boot.GitHub {
+	gh, _ := ServeRepos(t, repos)
+	return gh
+}
+
+// ServeRepos is GitHub as Serve has it, and the repositories it holds, to
+// add to.
+func ServeRepos(t *testing.T, repos map[string]bool) (boot.GitHub, *Repos) {
 	t.Helper()
+	have := &Repos{have: map[string]bool{}}
+	for name, private := range repos {
+		have.Add(name, private)
+	}
 	mux := http.NewServeMux()
 	signedIn := func(r *http.Request) bool { return r.Header.Get("Authorization") == "Bearer "+Token }
 	mux.HandleFunc("GET /user", func(w http.ResponseWriter, r *http.Request) {
@@ -38,7 +84,7 @@ func Serve(t *testing.T, repos map[string]bool) boot.GitHub {
 		_ = json.NewEncoder(w).Encode(map[string]string{"login": Login})
 	})
 	mux.HandleFunc("GET /repos/{owner}/{name}", func(w http.ResponseWriter, r *http.Request) {
-		private, ok := repos[r.PathValue("owner")+"/"+r.PathValue("name")]
+		private, ok := have.private(r.PathValue("owner") + "/" + r.PathValue("name"))
 		if !ok || !signedIn(r) {
 			w.WriteHeader(http.StatusNotFound)
 			return
@@ -49,16 +95,13 @@ func Serve(t *testing.T, repos map[string]bool) boot.GitHub {
 		if r.URL.Query().Get("visibility") != "private" {
 			t.Errorf("listed repositories with %s, want the private ones alone", r.URL.RawQuery)
 		}
-		var list []map[string]string
-		for name, private := range repos {
-			if private {
-				list = append(list, map[string]string{"full_name": name})
-			}
+		list := []map[string]string{}
+		for _, name := range have.privateOnes() {
+			list = append(list, map[string]string{"full_name": name})
 		}
-		slices.SortFunc(list, func(a, b map[string]string) int { return strings.Compare(a["full_name"], b["full_name"]) })
 		_ = json.NewEncoder(w).Encode(list)
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
-	return boot.GitHub{Client: srv.Client(), Site: srv.URL, API: srv.URL, ClientID: boot.ClientID, Wait: func(context.Context, time.Duration) error { return nil }}
+	return boot.GitHub{Client: srv.Client(), Site: srv.URL, API: srv.URL, ClientID: boot.ClientID, Wait: func(context.Context, time.Duration) error { return nil }}, have
 }
