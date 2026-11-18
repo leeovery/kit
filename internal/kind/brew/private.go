@@ -37,6 +37,29 @@ func (c casks) NeedsSecret(ctx context.Context, name string) (kind.Need, error) 
 	return c.needsToken(ctx, c.Name(), "--cask", name)
 }
 
+// InstalledNeedsSecret is NeedsSecret for a formula installed, by its full
+// name (installedNeedsToken).
+func (f formulae) InstalledNeedsSecret(ctx context.Context, name string) (kind.Need, error) {
+	return f.installedNeedsToken(ctx, "--formula", name)
+}
+
+// InstalledNeedsSecret is NeedsSecret for a cask installed, by its full
+// name (installedNeedsToken).
+func (c casks) InstalledNeedsSecret(ctx context.Context, name string) (kind.Need, error) {
+	return c.installedNeedsToken(ctx, "--cask", name)
+}
+
+// installedNeedsToken is needsToken for name installed already, by its full
+// name, as brew lists it: its tap is on the Mac with it, so nothing is
+// tapped or updated to find out, and a name of no tap is Homebrew's own,
+// which needs nothing, so brew isn't asked about it at all.
+func (h *Homebrew) installedNeedsToken(ctx context.Context, which, name string) (kind.Need, error) {
+	if _, ok := tapOf(name); !ok {
+		return kind.Need{}, nil
+	}
+	return h.downloadsNeed(ctx, kind.Need{}, which, name)
+}
+
 // needsToken is githubToken, and why, for name, of the kind named kindName,
 // a formula or a cask as which says, when brew info finds it's from a tap
 // other than Homebrew's own, by its full name, and any of its downloads
@@ -59,6 +82,14 @@ func (h *Homebrew) needsToken(ctx context.Context, kindName, which, name string)
 			h.updated(ctx)
 		}
 	}
+	return h.downloadsNeed(ctx, need, which, name)
+}
+
+// downloadsNeed is need with githubToken, and why, when brew info finds
+// name, a formula or a cask as which says, is from a tap other than
+// Homebrew's own, by its full name, and any of its downloads answers as a
+// private one does (private).
+func (h *Homebrew) downloadsNeed(ctx context.Context, need kind.Need, which, name string) (kind.Need, error) {
 	full, downloads, err := h.downloads(ctx, which, name)
 	if _, ok := tapOf(full); err != nil || !ok {
 		return need, err

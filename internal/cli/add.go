@@ -238,7 +238,7 @@ func prepareAdding(ctx context.Context, r *run, k kind.Kind, scope, name string,
 	if len(mine) > 0 || opts.temp || valued && !isIn {
 		return p, nil
 	}
-	if p.line, err = addedLine(ctx, k, name, opts); err != nil {
+	if p.line, err = kind.Line(ctx, k, name, opts.note); err != nil {
 		return p, err
 	}
 	p.ready = true
@@ -276,7 +276,7 @@ func installAndDeclare(ctx context.Context, r *run, c *changes, k kind.Kind, sco
 	}
 	if !p.ready {
 		var err error
-		if p.line, err = addedLine(ctx, k, name, opts); err == nil {
+		if p.line, err = kind.Line(ctx, k, name, opts.note); err == nil {
 			err = r.holdLine(ctx, k, scope, &p)
 		}
 		if err != nil {
@@ -290,66 +290,15 @@ func installAndDeclare(ctx context.Context, r *run, c *changes, k kind.Kind, sco
 	return check.Result{State: check.OK, Summary: fmt.Sprintf("%s; declared in %s%s%s", verb, scope, said, p.said)}
 }
 
-// holdLine has p's line, declared in scope's declarations, go in its kind's
-// section held for the secret k says installing it needs (kind.Private),
-// which every Mac the line reaches must declare, p.said saying so; or that k
-// couldn't tell, the line then declared as it is. It's judged again so.
-// Refused, what finding out changed on the Mac is put back; stopped, it
-// fails, rather than declare what it didn't check.
+// holdLine has p's line, declared in scope's declarations, held for the
+// secret installing it needs, p.said saying so, as kind.Hold does, judged
+// again as declaring it will.
 func (r *run) holdLine(ctx context.Context, k kind.Kind, scope string, p *adding) error {
-	private, ok := k.(kind.Private)
-	if !ok {
-		return nil
-	}
-	need, err := private.NeedsSecret(ctx, p.line.Name)
-	if ctx.Err() != nil {
-		return fmt.Errorf("stopped checking whether it needs a secret: %w", ctx.Err())
-	}
-	if err != nil {
-		p.said = "; couldn't check whether it needs a secret: " + engine.Reason(err)
-	} else if need.Secret != "" {
-		p.line.Hold, p.said = config.SecretHold(need.Secret), "; held for "+need.Secret+": "+need.Why
-	}
-	refused := r.secretDeclared(scope, need)
-	if refused == nil {
-		refused = r.checkDeclare(k.Name(), scope, p.line)
-	}
-	if refused != nil && need.Undo != nil {
-		if err := need.Undo(ctx); err != nil {
-			refused = fmt.Errorf("%w; %s", refused, engine.Reason(err))
-		}
-	}
-	return refused
-}
-
-// secretDeclared says why a line in scope's declarations can't be held for
-// the secret need names, if it can't: a Mac the line reaches doesn't
-// declare it (this Mac, or, for the shared declarations, any).
-func (r *run) secretDeclared(scope string, need kind.Need) error {
-	if need.Secret == "" {
-		return nil
-	}
-	macs := []string{r.machine}
-	if scope == config.Shared {
-		macs = r.cfg.MacNames()
-	}
-	var without []string
-	for _, mac := range macs {
-		list, err := r.cfg.List(secretKind, mac)
-		if err != nil {
-			return err
-		}
-		if !slices.Contains(list.Names(), need.Secret) {
-			without = append(without, mac)
-		}
-	}
-	switch {
-	case len(without) == 0:
-		return nil
-	case scope == config.Shared:
-		return fmt.Errorf("%s, so it needs %s, which no [secrets] section declares for %s: declare it for every Mac first (kit secret add %s --shared)", need.Why, need.Secret, strings.Join(without, " and "), need.Secret)
-	}
-	return fmt.Errorf("%s, so it needs %s, which no [secrets] section declares: declare it first (kit secret add %s)", need.Why, need.Secret, need.Secret)
+	said, err := kind.Hold(ctx, k, r.cfg, scope, r.machine, &p.line, func(e config.Entry) error {
+		return r.checkDeclare(k.Name(), scope, e)
+	})
+	p.said = said
+	return err
 }
 
 // installAdding installs name, of k, which adding declares as p says: held
@@ -400,27 +349,6 @@ func temporarily(ctx context.Context, r *run, c *changes, k kind.Kind, scope, na
 		}
 	}
 	return check.Result{State: check.OK, Summary: summary}
-}
-
-// addedLine is the line adding name declares: its value, for a kind whose
-// lines have one, as it's installed; the note given, after what the kind
-// says it is, or that alone as the note kit makes up (DefaultNote).
-func addedLine(ctx context.Context, k kind.Kind, name string, opts addOptions) (config.Entry, error) {
-	e := config.Entry{Name: name, Note: opts.note}
-	if d, ok := k.(kind.Describer); ok {
-		if what := d.Describe(ctx, name); what != "" && opts.note != "" {
-			e.Note = what + ": " + opts.note
-		} else {
-			e.DefaultNote = what
-		}
-	}
-	if v, ok := k.(kind.Valued); ok {
-		var err error
-		if e.Value, err = v.Value(ctx, name); err != nil {
-			return e, err
-		}
-	}
-	return e, nil
 }
 
 // notInstalled are which of names k doesn't find installed.

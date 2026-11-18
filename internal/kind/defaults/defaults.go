@@ -41,6 +41,10 @@ type record struct {
 	// Baseline is each watched setting's value as kit last accepted it, as
 	// XML, by name.
 	Baseline map[string]string `json:"baseline,omitempty"`
+	// Chosen are the keys of chosen kit has taken the values of, in each
+	// watched domain it had taken before they were chosen, by name, as in
+	// com.apple.menuextra.clock:ShowDate.
+	Chosen map[string]bool `json:"chosen,omitempty"`
 }
 
 // Watched are Apple's domains whose settings kit watches for changes, as
@@ -88,6 +92,15 @@ var noise = map[string][]string{
 		// The toolbar buttons sync apps' Finder extensions add by themselves.
 		"FXSyncExtensionToolbarItems*",
 	},
+}
+
+// chosen are keys noise's patterns catch that are the person's choices, by
+// domain: never noise.
+var chosen = map[string][]string{
+	// Save panels shown expanded.
+	"NSGlobalDomain": {"NSNavPanelExpandedStateForSaveMode", "NSNavPanelExpandedStateForSaveMode2"},
+	// The date in the menu bar's clock.
+	"com.apple.menuextra.clock": {"ShowDate"},
 }
 
 // Defaults is macOS settings, driven through defaults.
@@ -322,10 +335,20 @@ func (d *Defaults) Installed(ctx context.Context) ([]kind.Installed, error) {
 	return out, err
 }
 
-// watchedSettings are a domain's settings as kit watches them, by name: a
-// key's value, or, for a key some of whose entries are declared, each
-// entry's.
+// watchedSettings are a domain's settings as kit watches them, by name,
+// each value as XML (settingsOf).
 func (d *Defaults) watchedSettings(id string, m map[string]any) map[string]string {
+	out := map[string]string{}
+	for s, v := range d.settingsOf(id, m) {
+		out[s.Name()] = plist.XML(v)
+	}
+	return out
+}
+
+// settingsOf are the settings m, the domain id's as exported, holds, noise
+// aside: a key's value, or, for a key some of whose entries are declared,
+// each entry's.
+func (d *Defaults) settingsOf(id string, m map[string]any) map[config.Setting]any {
 	s, _ := config.ParseSetting(id + ":x")
 	byEntry := map[string]bool{}
 	for _, dv := range d.declared {
@@ -333,7 +356,7 @@ func (d *Defaults) watchedSettings(id string, m map[string]any) map[string]strin
 			byEntry[dv.setting.Key] = true
 		}
 	}
-	out := map[string]string{}
+	out := map[config.Setting]any{}
 	for key, v := range m {
 		if isNoise(s.Domain, key) {
 			continue
@@ -342,11 +365,11 @@ func (d *Defaults) watchedSettings(id string, m map[string]any) map[string]strin
 		if entries, ok := v.(map[string]any); ok && byEntry[key] {
 			for entry, ev := range entries {
 				at.Entry = entry
-				out[at.Name()] = plist.XML(ev)
+				out[at] = ev
 			}
 			continue
 		}
-		out[at.Name()] = plist.XML(v)
+		out[at] = v
 	}
 	return out
 }
@@ -358,6 +381,7 @@ func (d *Defaults) changed(l look, rec *record) []kind.Installed {
 	var out []kind.Installed
 	for _, id := range slices.Sorted(maps.Keys(l.domains)) {
 		now := d.watchedSettings(id, l.domains[id])
+		takeChosen(id, now, rec)
 		if !rec.Domains[id] {
 			rec.Domains[id] = true
 			maps.Copy(rec.Baseline, now)
@@ -367,6 +391,29 @@ func (d *Defaults) changed(l look, rec *record) []kind.Installed {
 	}
 	slices.SortFunc(out, func(a, b kind.Installed) int { return strings.Compare(a.Name, b.Name) })
 	return slices.CompactFunc(out, func(a, b kind.Installed) bool { return a.Name == b.Name })
+}
+
+// takeChosen takes, quietly, the values of the keys of the domain id, now
+// as now has them, that kit watched as noise before they were chosen, the
+// first time it sees them since, so a choice made back then shows as
+// changed only once it changes.
+func takeChosen(id string, now map[string]string, rec *record) {
+	s, _ := config.ParseSetting(id + ":x")
+	for _, key := range chosen[s.Domain] {
+		name := id + ":" + key
+		if rec.Chosen[name] {
+			continue
+		}
+		if rec.Chosen == nil {
+			rec.Chosen = map[string]bool{}
+		}
+		rec.Chosen[name] = true
+		if v, ok := now[name]; ok {
+			if _, known := rec.Baseline[name]; !known {
+				rec.Baseline[name] = v
+			}
+		}
+	}
 }
 
 // changedIn are the watched settings of the domain id, now as now has them,
@@ -415,6 +462,9 @@ func (d *Defaults) isDeclared(name string) bool {
 
 // isNoise reports whether key, in domain, is one macOS changes by itself.
 func isNoise(domain, key string) bool {
+	if slices.Contains(chosen[domain], key) {
+		return false
+	}
 	for _, pattern := range slices.Concat(noise["*"], noise[domain]) {
 		if ok, _ := path.Match(pattern, key); ok {
 			return true
@@ -478,6 +528,13 @@ func (d *Defaults) Value(ctx context.Context, name string) (string, error) {
 	case !ok:
 		return "", fmt.Errorf("%s isn't set", name)
 	}
+	return valueWords(v, s.Entry != ""), nil
+}
+
+// valueWords is v, a setting's value, as its declared line takes it after
+// the key, each word quoted where it needs it: an entry's, of a dict, by
+// -dict-add.
+func valueWords(v any, entry bool) string {
 	var words []string
 	switch x := v.(type) {
 	case bool:
@@ -491,13 +548,13 @@ func (d *Defaults) Value(ctx context.Context, name string) (string, error) {
 	default:
 		words = []string{plist.XML(v)}
 	}
-	if s.Entry != "" {
+	if entry {
 		words = []string{"-dict-add", plist.XML(v)}
 	}
 	for i, w := range words {
 		words[i] = config.Quote(w)
 	}
-	return strings.Join(words, " "), nil
+	return strings.Join(words, " ")
 }
 
 // entryKey reports whether key, in domain, is declared by its entries.

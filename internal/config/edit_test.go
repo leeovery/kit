@@ -327,6 +327,53 @@ func TestAddSection(t *testing.T) {
 	}
 }
 
+// DeclareAll makes the kinds' sections it's given, empty, in their places,
+// declares each line in its section's sorted place, leaves out a line
+// Declare would refuse, saying why, and writes the file once.
+func TestDeclareAll(t *testing.T) {
+	cfg := loadRepo(t, map[string]string{
+		"shared/declarations": "[homebrew formulae]\njq\n",
+		"laptop/declarations": "[paths]\n~/bin\n\n[homebrew formulae]\nbat\n",
+	})
+	refused, err := cfg.DeclareAll("laptop", []string{"brew", "npm", "cask"}, []config.Declaration{
+		{Kind: "brew", Entry: config.Entry{Name: "zoxide"}},
+		{Kind: "brew", Entry: config.Entry{Name: "jq"}},
+		{Kind: "login-item", Entry: config.Entry{Name: "com.example.app", DefaultNote: "Example"}},
+		{Kind: "brew", Entry: config.Entry{Name: "atuin"}},
+		{Kind: "defaults", Entry: config.Entry{Name: "com.apple.dock:tilesize", Value: "-int 60"}},
+		{Kind: config.FeaturesKind, Entry: config.Entry{Name: "remote-login"}},
+		{Kind: config.BackupsKind, Entry: config.Entry{Name: "time-machine"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "[features]\nremote-login\n\n[backups]\ntime-machine\n\n[paths]\n~/bin\n\n[macos settings]\ncom.apple.dock tilesize -int 60\n\n" +
+		"[homebrew formulae]\natuin\nbat\nzoxide\n\n[homebrew casks]\n\n[npm packages]\n\n[macos login items]\ncom.example.app   # Example\n"
+	if got := readFile(t, cfg, "laptop/declarations"); got != want {
+		t.Errorf("laptop =\n%s\nwant\n%s", got, want)
+	}
+	if len(refused) != 1 || refused[0].Entry.Name != "jq" || !strings.Contains(refused[0].Err.Error(), "shared declarations already") {
+		t.Errorf("refused = %+v, want jq, declared for every Mac already", refused)
+	}
+}
+
+// DeclareAll edits a Mac's file alone, and, every line refused, leaves it
+// as it was.
+func TestDeclareAllEditsAMacsFileAlone(t *testing.T) {
+	before := "[homebrew formulae]\nbat\n"
+	cfg := loadRepo(t, map[string]string{"laptop/declarations": before})
+	if _, err := cfg.DeclareAll("shared", nil, []config.Declaration{{Kind: "brew", Entry: config.Entry{Name: "jq"}}}); err == nil {
+		t.Error("DeclareAll(shared) = nil error, want it refused: a Mac's file alone")
+	}
+	refused, err := cfg.DeclareAll("laptop", nil, []config.Declaration{{Kind: "brew", Entry: config.Entry{Name: "bat"}}})
+	if err != nil || len(refused) != 1 {
+		t.Fatalf("DeclareAll(bat again) = %+v, %v, want bat refused alone", refused, err)
+	}
+	if got := readFile(t, cfg, "laptop/declarations"); got != before {
+		t.Errorf("laptop =\n%s\nwant it as it was:\n%s", got, before)
+	}
+}
+
 func TestReplaceKeepsTheNotesAbove(t *testing.T) {
 	cfg := loadRepo(t, map[string]string{"laptop/declarations": "[claude mcp]\n# the tablet\ntablet -- zsh -c tablet-mcp\n"})
 	if err := cfg.Replace("claude-mcp", "laptop", config.Entry{Name: "tablet", Value: "--off -- zsh -c tablet-mcp", Note: "over USB"}); err != nil {

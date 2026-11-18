@@ -381,6 +381,76 @@ func (c *Config) CheckDeclareShared(kind string, e Entry, from []string) error {
 	return err
 }
 
+// Declaration is a line to declare: the name of its kind, or of one of the
+// config's own sections, and its entry.
+type Declaration struct {
+	Kind  string
+	Entry Entry
+}
+
+// Refusal is a line DeclareAll left out, and why Declare would refuse it.
+type Refusal struct {
+	Declaration
+	Err error
+}
+
+// DeclareAll declares, in the Mac called mac's declarations, the section of
+// each of kinds, empty, where the file has none, as AddSection does; then
+// each of lines, in turn, as Declare does: one edit, the file written whole
+// or not at all, once each list it touches reads back as the config's
+// loader reads it, every line it kept there. A line Declare would refuse is
+// left out, in refused; the rest are written.
+func (c *Config) DeclareAll(mac string, kinds []string, lines []Declaration) (refused []Refusal, err error) {
+	if !c.Knows(mac) {
+		return nil, fmt.Errorf("no Mac named %s in %s: one of %s", mac, File, c.macList())
+	}
+	var f *declFile
+	edited := c
+	for _, kind := range kinds {
+		d, g, err := edited.editable(kind, mac)
+		if err != nil {
+			return nil, err
+		}
+		if !slices.ContainsFunc(g.sections, func(s *section) bool { return s.def.kind == d.kind }) {
+			g.add(&section{def: d})
+			f, edited = g, c.with([]*declFile{g})
+		}
+	}
+	kept := map[string][]string{}
+	for _, l := range lines {
+		_, files, err := edited.declaring(l.Kind, mac, l.Entry)
+		if err != nil {
+			refused = append(refused, Refusal{Declaration: l, Err: err})
+			continue
+		}
+		f, edited = files[0], c.with(files)
+		kept[l.Kind] = append(kept[l.Kind], l.Entry.Name)
+	}
+	if f == nil {
+		return refused, nil
+	}
+	for _, kind := range kinds {
+		if _, ok := kept[kind]; !ok {
+			kept[kind] = nil
+		}
+	}
+	return refused, c.write(f, func(back *declFile) error {
+		after := c.with([]*declFile{back})
+		for kind, names := range kept {
+			list, err := after.List(kind, mac)
+			if err != nil {
+				return fmt.Errorf("the edit would leave %s unreadable: %w", DeclFile(mac), err)
+			}
+			for _, name := range names {
+				if !slices.ContainsFunc(list.Entries, func(e Entry) bool { return e.Name == name }) {
+					return fmt.Errorf("the edit didn't leave %s as it should in %s", name, DeclFile(mac))
+				}
+			}
+		}
+		return nil
+	})
+}
+
 // declaring is scope's declarations file with e declared, as Declare
 // writes it, then each of the files of the Macs from with it taken out, none
 // yet written, once the config reads as kit reads it with them all

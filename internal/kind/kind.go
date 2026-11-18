@@ -209,6 +209,10 @@ type Private interface {
 	// as it finds out. An error says it couldn't tell, as without the
 	// network; the Need's Undo is there with it.
 	NeedsSecret(ctx context.Context, name string) (Need, error)
+	// InstalledNeedsSecret is NeedsSecret for name installed already, by
+	// its full name, as its kind lists it: it changes nothing on the Mac
+	// to find out, so its Need has no Undo.
+	InstalledNeedsSecret(ctx context.Context, name string) (Need, error)
 }
 
 // Need is what installing a thing needs, as a Private kind finds it.

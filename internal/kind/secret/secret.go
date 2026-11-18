@@ -65,7 +65,7 @@ type Secrets struct {
 }
 
 // kindName names the kind.
-const kindName = "secret"
+const kindName = kind.SecretsKind
 
 // Descriptor is secrets' kind, as kit's shared code knows it: kit secret is
 // a command of its own.
