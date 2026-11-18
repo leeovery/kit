@@ -9,8 +9,8 @@
 package capture
 
 import (
+	"context"
 	"fmt"
-	"io"
 	"time"
 
 	"github.com/leeovery/kit/internal/check"
@@ -19,18 +19,33 @@ import (
 	"github.com/leeovery/kit/internal/render"
 )
 
-// Fixture is a still: a run's screen, printed as kit prints it.
+// Fixture is a still: kit's screen, drawn from a fixed run at a moment of
+// a day, its clock moved on only by the run's own pauses. One is printed,
+// a report, at whatever width; the rest are a window of their own, Width by
+// Height, as their tapes record them, held once drawn.
 type Fixture struct {
-	Name, About string
-	draw        func(out io.Writer, width int) error
+	Name, About   string
+	Width, Height int
+	at            time.Time
+	draw          func(*stage) error
 }
 
-// Draw prints the fixture to out, a terminal width columns wide: kit's
-// faces go no wider than kit's look allows, whatever the terminal.
-func (f Fixture) Draw(out io.Writer, width int) error { return f.draw(out, width) }
+// Held is whether f is a window of its own, held once it's drawn, rather
+// than printed.
+func (f Fixture) Held() bool { return f.Width > 0 }
+
+// Draw draws f at screen: printed, it returns once it's printed; held, it
+// holds till ctx is done, telling held once it's drawn.
+func (f Fixture) Draw(ctx context.Context, screen Screen, held func()) error {
+	return perform(ctx, screen, stepped(f.at), held, f.draw)
+}
 
 var fixtures = []Fixture{
 	{Name: "status", About: "kit status on a Mac in daily use, two things waiting on you", draw: status},
+	{Name: "apply-card", About: "kit apply's screen, 1Password's sign-in come up as a card", Width: 120, Height: 34, at: arrivedAt, draw: applyCard},
+	{Name: "apply-todos", About: "the to-dos at kit apply's end, the first one's card up", Width: 120, Height: 34, at: arrivedAt, draw: applyToDos},
+	{Name: "boot-sign-in", About: "the boot signing in to GitHub, its QR code the whole window", Width: 120, Height: 34, at: bootAt, draw: bootSignIn},
+	{Name: "reconcile", About: "kit reconcile asking what to do with each thing that drifted", Width: 100, Height: 24, at: reconcileAt, draw: reconcile},
 }
 
 // Fixtures are every fixture, by name.
@@ -47,9 +62,10 @@ func FixtureNamed(name string) (Fixture, error) {
 }
 
 // status is kit status's report, as its face prints it once the run's
-// done.
-func status(out io.Writer, width int) error {
-	face := render.NewPretty(out, width, false)
+// done, as wide as the terminal allows.
+func status(s *stage) error {
+	width, _ := s.term.Size()
+	face := render.NewPretty(s.term.Out, width, false)
 	for _, e := range statusRun() {
 		face.Emit(e)
 	}

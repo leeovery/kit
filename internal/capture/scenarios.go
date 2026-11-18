@@ -20,17 +20,24 @@ import (
 // moment of a day, as the boot's head and apply's header say.
 var scenarios = []Scenario{
 	{
-		Name: "boot", Width: 120, Height: 34, start: time.Date(2026, 11, 20, 9, 41, 0, 0, time.UTC), play: boot,
+		Name: "boot", Width: 120, Height: 34, start: bootAt, play: boot,
 		About: "the boot in Terminal: the splash, the self-test, signing in with the phone, the boot order to the hand-off",
 	},
 	{
-		Name: "arrival", Width: 120, Height: 34, start: time.Date(2026, 11, 20, 9, 52, 0, 0, time.UTC), play: arrival,
-		About: "the boot arriving in Ghostty: hello again, the decode in colour, then kit apply's screen, a card coming up",
+		Name: "arrival", Width: 120, Height: 34, start: arrivedAt, play: arrival,
+		About: "the boot arriving in Ghostty: hello again, the decode in colour, then kit apply flying through to its record",
 	},
 }
 
 // newMac is the Mac the scenarios set up, as kit-config knows it.
 const newMac = "laptop"
+
+// When the boot starts on the new Mac, in Terminal, and when it arrives in
+// Ghostty.
+var (
+	bootAt    = time.Date(2026, 11, 20, 9, 41, 0, 0, time.UTC)
+	arrivedAt = time.Date(2026, 11, 20, 9, 52, 0, 0, time.UTC)
+)
 
 // selfTest is what a new Mac's self-test finds.
 func selfTest(at time.Time) event.SelfTest {
@@ -118,16 +125,25 @@ func (b *booting) ask(question func() error, shows string, read time.Duration, d
 // signIn signs in with the phone: the ways, enter chosen, the QR code and
 // the code, approved.
 func (b *booting) signIn() {
+	b.showCode()
+	b.s.pause(1600 * time.Millisecond)
+	b.emit(done("github", "someone · kit-config has laptop and studio"))
+}
+
+// deviceCode is the code the sign-in shows, as the phone enters it.
+const deviceCode = "WDJB-MJHT"
+
+// showCode starts signing in to GitHub: the ways, enter chosen; then the
+// QR code and the code, waiting for the phone.
+func (b *booting) showCode() {
 	s, ctx := b.s, b.s.ctx
 	b.emit(started("github"))
 	b.ask(func() error {
 		_, err := b.face.Pick(ctx, "github", []look.Key{{Key: "enter", Does: "with your phone"}, {Key: "s", Does: "here, in your browser"}})
 		return err
-	}, "enter with your phone", 1100*time.Millisecond, func() { s.press("enter") })
+	}, "enter with your phone", 800*time.Millisecond, func() { s.press("enter") })
 	s.pause(400 * time.Millisecond)
-	b.face.Emit(event.DeviceCode{Time: s.now(), Step: "github", URI: "https://github.com/login/device", Code: "WDJB-MJHT", Expires: s.now().Add(15 * time.Minute)})
-	s.pause(2300 * time.Millisecond)
-	b.emit(done("github", "someone · kit-config has laptop and studio"))
+	b.face.Emit(event.DeviceCode{Time: s.now(), Step: "github", URI: "https://github.com/login/device", Code: deviceCode, Expires: s.now().Add(15 * time.Minute)})
 }
 
 // order plays the boot order: which Mac this is, chosen; the password,
@@ -142,7 +158,7 @@ func (b *booting) order() {
 			{Label: "new", Does: "a new machine ID, started fresh or from one of your Macs"},
 		})
 		return err
-	}, "which of your Macs is this?", 1100*time.Millisecond, func() { s.press("enter") })
+	}, "which of your Macs is this?", 800*time.Millisecond, func() { s.press("enter") })
 	b.emit(done("mac", newMac), started("password"))
 	b.ask(func() error {
 		_, err := b.face.Secret(ctx, "password", "this Mac's password, once")
@@ -159,12 +175,12 @@ func (b *booting) order() {
 		"==> Pouring portable-ruby-3.4.7.arm64_big_sur.bottle.tar.gz",
 		"==> Installation successful!",
 	} {
-		s.pause(600 * time.Millisecond)
+		s.pause(350 * time.Millisecond)
 		b.emit(printed("homebrew", l))
 	}
 	s.pause(400 * time.Millisecond)
 	b.emit(done("homebrew", "5.0.3 · Xcode tools 26.1"))
-	b.step("apps", "installing Ghostty", "Ghostty 1.3.1", 900*time.Millisecond)
+	b.step("apps", "installing Ghostty", "Ghostty 1.3.1", 700*time.Millisecond)
 	b.step("kit-config", "cloning", "cloned · 61 files linked", 600*time.Millisecond)
 	b.step("kit", "installing through Homebrew", "0.1.2 · through Homebrew", 500*time.Millisecond)
 	b.emit(started("full-disk-access"))
@@ -173,10 +189,10 @@ func (b *booting) order() {
 			"System Settings is open at Full Disk Access, and Finder at Applications: drag Ghostty into the list, then press enter",
 			[]look.Key{{Key: "enter", Does: "done"}})
 		return err
-	}, "drag Ghostty into the list", 1700*time.Millisecond, func() { s.press("enter") })
+	}, "drag Ghostty into the list", 1100*time.Millisecond, func() { s.press("enter") })
 	b.emit(done("full-disk-access", "granted to Ghostty"), started("terminal"),
 		doing("terminal", "opening", "macOS asks before Ghostty first opens: choose Open"))
-	s.pause(1400 * time.Millisecond)
+	s.pause(1000 * time.Millisecond)
 	b.emit(done("terminal", "opened · kit carries on there"))
 }
 
@@ -190,95 +206,43 @@ func (b *booting) step(step, says, summary string, d time.Duration) {
 
 // arrival is the boot carrying on in Ghostty, as kit bootstrap does there:
 // the arrival, a key pressed at its greeting; then kit apply's screen,
-// under the header it lands on.
+// under the header it lands on, flying through the run to its record.
 func arrival(s *stage) error {
-	s.meanwhile(func() { s.answer(0, "press any key", 1100*time.Millisecond, func() { s.press("enter") }) })
+	s.meanwhile(func() { s.answer(0, "press any key", 800*time.Millisecond, func() { s.press("enter") }) })
 	a := render.NewArrival(true, "bootstrap", newMac, s.now()).KeepHeader()
 	if err := a.Play(s.ctx, s.term); err != nil {
 		return err
 	}
-	width, _ := s.term.Size()
-	face := render.NewPretty(s.term.Out, width, true).Sized(s.term.Size).Clocked(s.now).
-		Keys(func() (<-chan ask.Key, func()) { return ask.Listen(s.term) }, func() {})
-	if a.Landed() {
-		face.UnderHome()
-	}
+	face := s.applyFace(a.Landed())
 	defer face.Unwind()
-	steps := rendertest.NewMac()
-	face.Emit(event.Preparing{Time: s.now(), Command: "bootstrap", Machine: newMac, Doing: "checking what will need an administrator's password", Steps: steps})
-	s.pause(700 * time.Millisecond)
-	face.Emit(event.RunStarted{Time: s.now(), Command: "bootstrap", Machine: newMac, Steps: steps})
-	for _, b := range applying() {
-		s.pause(b.pause)
-		for _, e := range b.events {
-			face.Emit(e)
-		}
-	}
+	began := s.applyStarts(face, 500*time.Millisecond)
+	s.play(face, toTheCard())
+	s.play(face, toTheEnd())
+	face.Emit(applied(began, s.now()))
 	s.hold()
 	return face.Close()
 }
 
-// beat is what happens in a run a pause after the beat before.
-type beat struct {
-	pause  time.Duration
-	events []event.Event
+// applyFace is kit apply's face at the stage, live, at the window's size,
+// telling the time by the stage's clock, reading keys from it; under the
+// header the arrival landed, when it did.
+func (s *stage) applyFace(underHome bool) *render.Pretty {
+	width, _ := s.term.Size()
+	face := render.NewPretty(s.term.Out, width, true).Sized(s.term.Size).Clocked(s.now).
+		Keys(func() (<-chan ask.Key, func()) { return ask.Listen(s.term) }, func() {})
+	if underHome {
+		face.UnderHome()
+	}
+	return face
 }
 
-// applying is a new Mac's run as kit apply has it, a few seconds of it:
-// the boot's steps done, what's quick done, Homebrew installing formulae
-// and casks, 1Password's sign-in coming up once its casks are in, and
-// Claude Code finishing setting itself up.
-func applying() []beat {
-	ok := func(step, summary string) event.Event {
-		return event.StepFinished{Step: step, Result: check.Result{State: check.OK, Summary: summary}}
-	}
-	work := func(step string) []event.Event {
-		return []event.Event{event.StepStarted{Step: step, Doing: "checking"}, event.StepStarted{Step: step, Doing: "applying"}}
-	}
-	beats := []beat{
-		{300 * time.Millisecond, []event.Event{
-			ok("boot-github", "someone · kit-config has laptop and studio"), ok("boot-mac", newMac),
-			ok("boot-homebrew", "5.0.3 · Xcode tools 26.1"), ok("boot-kit-config", "cloned · 61 files linked"),
-		}},
-		{400 * time.Millisecond, []event.Event{
-			ok("homebrew", "/opt/homebrew"), ok("file", "54 linked"), ok("path", "15 directories"),
-			ok("disk", "93% free"), ok("load", "load 2.4 on 14 cores"),
-		}},
-		{300 * time.Millisecond, append(append(work("cask"), work("brew")...), work("claude-code")...)},
-	}
-	casks := []string{"1password", "1password-cli", "raycast", "slack", "arc", "obsidian"}
-	formulae := []string{"git", "gh", "jq", "ripgrep", "fzf", "ffmpeg"}
-	for i := range casks {
-		beats = append(beats,
-			beat{350 * time.Millisecond, installing("cask", casks, i, 42)},
-			beat{350 * time.Millisecond, installing("brew", formulae, i, 129)},
-		)
-		switch i {
-		case 0:
-			beats = append(beats, beat{0, []event.Event{ok("touch-id-sudo", "turned on"), ok("fonts", "16 installed")}})
-		case 1:
-			beats = append(beats, beat{300 * time.Millisecond, []event.Event{
-				ok("defaults", "99 set"), ok("power", "6 set"),
-				event.StepFinished{Step: "time-machine", Result: check.Result{State: check.Attention, Summary: "no backup disk", Items: []check.Item{
-					{ID: "time-machine:disk", Name: "Add a Time Machine disk", State: check.Problem, Detail: "System Settings › General › Time Machine › Add Backup Disk"}}}},
-			}})
-		case 2:
-			beats = append(beats, beat{200 * time.Millisecond, []event.Event{
-				event.StepStarted{Step: "1password", Doing: "applying"}, rendertest.SignIn(time.Time{}),
-			}})
-		case 4:
-			beats = append(beats, beat{300 * time.Millisecond, []event.Event{ok("claude-code", "set up · 3 plugins")}})
-		}
-	}
-	return append(beats, beat{800 * time.Millisecond, nil})
-}
-
-// installing is a Homebrew step having installed names[i], and at work on
-// the next, of of all it installs.
-func installing(step string, names []string, i, of int) []event.Event {
-	events := []event.Event{event.Logged{Step: step, Line: "Installed " + names[i]}}
-	if i+1 < len(names) {
-		events = append(events, event.Doing{Step: step, Says: "installing " + names[i+1], Done: i + 1, Of: of})
-	}
-	return events
+// applyStarts starts the new Mac's run on face, as kit bootstrap does once
+// in the terminal: preparing for preparing, then started. It returns when.
+func (s *stage) applyStarts(face *render.Pretty, preparing time.Duration) time.Time {
+	steps := rendertest.NewMac()
+	face.Emit(event.Preparing{Time: s.now(), Command: "bootstrap", Machine: newMac, Doing: "checking what will need an administrator's password", Steps: steps})
+	s.pause(preparing)
+	began := s.now()
+	face.Emit(event.RunStarted{Time: began, Command: "bootstrap", Machine: newMac, Steps: steps})
+	return began
 }

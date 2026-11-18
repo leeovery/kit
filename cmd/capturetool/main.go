@@ -8,11 +8,14 @@
 //
 //	capturetool --list               the fixtures and scenarios
 //	capturetool --fixture status     a still, printed at the terminal's width
+//	capturetool --fixture reconcile  a still, a window of its own, held
 //	capturetool --scenario boot      a clip, played full size in real time
 //
-// A scenario waits for a line on stdin before it starts, so a tape shows it
-// from its first frame; it plays its cues, then holds its last screen, live,
-// till another line, or stdin's end, stops it.
+// A still that's a window of its own is drawn on a cleared screen, then
+// held, live, till a line on stdin, or its end, stops it. A scenario waits
+// for a line on stdin before it starts, so a tape shows it from its first
+// frame; it plays its cues, then holds its last screen, live, till another
+// line, or stdin's end, stops it.
 package main
 
 import (
@@ -72,8 +75,7 @@ func run(ctx context.Context, args []string, in io.Reader, out io.Writer, size f
 		if err != nil {
 			return err
 		}
-		w, _ := size()
-		return f.Draw(colour, w)
+		return draw(ctx, f, in, out, capture.Screen{Out: colour, Size: size})
 	case *scenario != "":
 		s, err := capture.ScenarioNamed(*scenario)
 		if err != nil {
@@ -84,6 +86,20 @@ func run(ctx context.Context, args []string, in io.Reader, out io.Writer, size f
 	return errors.New("name a fixture or a scenario: --list lists them")
 }
 
+// draw draws f at screen: printed, there and then; held, the screen
+// cleared first, till a line comes from in, or its end.
+func draw(ctx context.Context, f capture.Fixture, in io.Reader, out io.Writer, screen capture.Screen) error {
+	if !f.Held() {
+		return f.Draw(ctx, screen, nil)
+	}
+	ctx, stop := untilALine(ctx, bufio.NewScanner(in))
+	defer stop()
+	if _, err := io.WriteString(out, clear); err != nil {
+		return err
+	}
+	return f.Draw(ctx, screen, nil)
+}
+
 // play plays s at screen once a line comes from in, the screen cleared
 // first, till the next line, or in's end.
 func play(ctx context.Context, s capture.Scenario, in io.Reader, out io.Writer, screen capture.Screen) error {
@@ -91,25 +107,35 @@ func play(ctx context.Context, s capture.Scenario, in io.Reader, out io.Writer, 
 	if !lines.Scan() {
 		return lines.Err()
 	}
-	ctx, stop := context.WithCancel(ctx)
+	ctx, stop := untilALine(ctx, lines)
 	defer stop()
-	go func() {
-		lines.Scan()
-		stop()
-	}()
 	if _, err := io.WriteString(out, clear); err != nil {
 		return err
 	}
 	return s.Play(ctx, screen, nil)
 }
 
+// untilALine is ctx, done once lines reads its next line, or ends.
+func untilALine(ctx context.Context, lines *bufio.Scanner) (context.Context, context.CancelFunc) {
+	ctx, stop := context.WithCancel(ctx)
+	go func() {
+		lines.Scan()
+		stop()
+	}()
+	return ctx, stop
+}
+
 func listAll(out io.Writer) error {
 	w := bufio.NewWriter(out)
 	for _, f := range capture.Fixtures() {
-		_, _ = fmt.Fprintf(w, "--fixture %-10s %s\n", f.Name, f.About)
+		size := ""
+		if f.Held() {
+			size = fmt.Sprintf(", %d×%d", f.Width, f.Height)
+		}
+		_, _ = fmt.Fprintf(w, "--fixture %-14s %s%s\n", f.Name, f.About, size)
 	}
 	for _, s := range capture.Scenarios() {
-		_, _ = fmt.Fprintf(w, "--scenario %-9s %s, %d×%d\n", s.Name, s.About, s.Width, s.Height)
+		_, _ = fmt.Fprintf(w, "--scenario %-13s %s, %d×%d\n", s.Name, s.About, s.Width, s.Height)
 	}
 	return w.Flush()
 }

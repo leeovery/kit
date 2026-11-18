@@ -1,0 +1,34 @@
+
+  █  ▄▀  ▀█▀  ▀▀█▀▀  │  bootstrap · laptop · Fri 20 Nov · 09:52
+  █▀▀▄    █     █    │  ▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮  46% · 4m03s so far
+  █   █  ▄█▄    █    │  ▲ waiting for you · Sign in to 1Password
+
+────────────────────────────────────────────────────┬───────────────────────────────────────────────────────────────────
+                                                    │
+  ≡ Everything                                      │  ▲ Sign in to 1Password                             waiting 0.0s  
+                                                    │
+  ● This Mac  all 6 done                            │      Every secret kit puts in place comes from 1Password, so it
+  ● Files and shell  all 2 done                     │      needs the app signed in and its command line turned on.
+  ● Mac settings  all 3 done                        │
+  ▲ Secrets  waits for you: Sign in to 1Password    │      1  Scan the QR code 1Password shows with 1Password on your
+  ◐ Homebrew formulae  installing ripgr… · 3 of 129 │         phone
+    ▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮  2.2s                  │      2  Settings › Developer › turn on Integrate with 1Password
+  ◐ Homebrew casks  installing slack · 3 of 42      │         CLI
+    ▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮  2.2s                  │
+  ○ App Store apps  waiting                         │      If kit still waits with both done:
+  ○ Developer tools  waits for Homebrew formulae    │      3  Quit 1Password and open it again
+  ○ Git  waits for Secrets                          │
+  ○ Login items  waits for Homebrew casks           │      kit carries on by itself once it's done
+  ◐ Your steps  applying claude-code                │
+  ○ Backups  1 of 3 · Arq waits for Homebrew casks  ├───────────────────────────────────────────────────────────────────
+                                                    │
+                                                    │  LOG
+                                                    │
+                                                    │  09:56:04  ● Power settings: 6 set
+                                                    │  09:56:04  ● Time Machine: no backup disk
+                                                    │  09:56:04  + Installed raycast
+                                                    │  09:56:04  + Installed jq
+                                                    │  09:56:05  ▲ Sign in to 1Password: waiting for you
+                                                    │  09:56:05  ◐ Installing slack · 3 of 42
+                                                    │            ◐ Installing ripgrep · 3 of 129
+  tab next row · ↑↓ scroll · q stop                 │            ◐ Applying claude-code

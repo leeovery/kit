@@ -1,0 +1,34 @@
+
+  █  ▄▀  ▀█▀  ▀▀█▀▀  │  bootstrap · laptop · Fri 20 Nov · 09:52
+  █▀▀▄    █     █    │  ▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮  96% · 31m07s so far
+  █   █  ▄█▄    █    │  △ 3 to do · ● 1 done
+
+────────────────────────────────────────────────────┬───────────────────────────────────────────────────────────────────
+                                                    │
+  TO DO  4                                          │  △ Install the editor from its site                       2 of 4  
+                                                    │
+  Everything else is done. kit can't do these       │      It isn't in Homebrew or the App Store, so only you can fetch
+  itself: work through them one at a time, as the   │      it.
+  card on the right says.                           │
+                                                    │      1  Download it from editor.example.com
+  Apps                                              │      2  Drag it to Applications
+  ● Allow Karabiner-Elements                        │
+  △ Install the editor from its site                │      space when it's done
+                                                    │      s skips it for now: kit apply brings it back
+  System Settings                                   │
+  △ Allow remote users Full Disk Access             ├───────────────────────────────────────────────────────────────────
+                                                    │
+  Backups                                           │  LOG
+  △ Add a Time Machine disk                         │
+                                                    │  10:22:08  ● Homebrew casks: 42 installed
+                                                    │  10:22:08  ● git config: 8 set
+                                                    │  10:22:08  ● App Store apps: 6 installed
+                                                    │  10:22:09  ● npm packages: 4 installed
+                                                    │  10:22:09  ● mise: 3 tools
+                                                    │  10:22:09  ● Composer packages: 2 installed
+                                                    │  10:22:09  ● macOS login items: 5 added
+                                                    │  10:22:09  ● Arq: first backup soon
+                                                    │  10:22:09  ● App settings: 214 apps' settings restored
+                                                    │  10:22:09  ● kit-config edits: nothing to commit
+                                                    │  10:22:09  ● Sync: pushed
+  q stop here                                       │  10:23:09  ● Allow Karabiner-Elements: done

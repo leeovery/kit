@@ -11,46 +11,82 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/colorprofile"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/leeovery/kit/internal/capture"
+	"github.com/leeovery/kit/internal/render/rendertest"
 )
 
 var update = flag.Bool("update", false, "rewrite the golden files with what the fixtures draw")
 
-// The status still is kit status on a Mac in daily use, two things
-// waiting on the person, as kit's face prints it, at any width: kit draws
-// no wider than its look allows. Its words held by status.golden, without
-// colour; -update writes it again.
-func TestStatusFixture(t *testing.T) {
-	f, err := capture.FixtureNamed("status")
-	if err != nil {
-		t.Fatal(err)
+// Each still draws its screen as kit's faces draw it, held by its golden
+// file, testdata/<name>.golden, the screen's words without their colours:
+// a report printed at 80 columns, the same at 120, as kit draws no wider
+// than its look allows; a window of its own at its size, once it holds.
+// -update writes them again.
+func TestFixtures(t *testing.T) {
+	for _, f := range capture.Fixtures() {
+		t.Run(f.Name, func(t *testing.T) {
+			t.Parallel()
+			got := drawn(t, f, 80)
+			path := filepath.Join("testdata", f.Name+".golden")
+			if *update {
+				if err := os.WriteFile(path, []byte(got), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			want, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read %s (run with -update to write it): %v", path, err)
+			}
+			if got != string(want) {
+				t.Errorf("drew\n%s\nwant %s's\n%s", got, path, want)
+			}
+			if wide := drawn(t, f, 120); !f.Held() && wide != got {
+				t.Errorf("at 120 columns, drew\n%s\nwant it as at 80", wide)
+			}
+		})
 	}
-	draw := func(width int) string {
-		var out bytes.Buffer
-		if err := f.Draw(&colorprofile.Writer{Forward: &out, Profile: colorprofile.NoTTY}, width); err != nil {
-			t.Fatal(err)
+}
+
+// drawn is the screen f draws: printed at a terminal width wide; a window
+// of its own at its size, as it holds; its running marks as they start,
+// whichever way they've turned.
+func drawn(t *testing.T, f capture.Fixture, width int) string {
+	t.Helper()
+	at := &screen{w: width, h: 40}
+	if f.Held() {
+		at.w, at.h = f.Width, f.Height
+	}
+	ctx, stop := context.WithTimeout(context.Background(), time.Minute)
+	defer stop()
+	held, drew := make(chan struct{}), make(chan error, 1)
+	go func() { drew <- f.Draw(ctx, capture.Screen{Out: at, Size: at.size}, func() { close(held) }) }()
+	if !f.Held() {
+		if err := <-drew; err != nil {
+			t.Fatalf("Draw() = %v", err)
 		}
-		return out.String()
+		return turned(rendertest.Screen(at.raw()))
 	}
-	got, path := draw(80), filepath.Join("testdata", "status.golden")
-	if *update {
-		if err := os.WriteFile(path, []byte(got), 0o600); err != nil {
-			t.Fatal(err)
-		}
+	select {
+	case <-held:
+	case err := <-drew:
+		t.Fatalf("ended before it held its screen: %v\n%s", err, tail(at.text()))
+	case <-ctx.Done():
+		t.Fatalf("never held its screen\n%s", tail(at.text()))
 	}
-	want, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read %s (run with -update to write it): %v", path, err)
+	shown := at.raw()
+	stop()
+	if err := <-drew; err != nil {
+		t.Fatalf("stopped once held: %v", err)
 	}
-	if got != string(want) {
-		t.Errorf("drew\n%s\nwant status.golden's\n%s", got, want)
-	}
-	if wide := draw(120); wide != got {
-		t.Errorf("at 120 columns, drew\n%s\nwant it as at 80", wide)
-	}
+	return turned(rendertest.Screen(shown))
+}
+
+// turned is a screen with its running marks as they start, whichever way
+// they've turned since.
+func turned(screen string) string {
+	return strings.NewReplacer("◓", "◐", "◑", "◐", "◒", "◐").Replace(screen)
 }
 
 // A name that names nothing says what there is.
@@ -77,6 +113,13 @@ func (s *screen) Write(p []byte) (int, error) {
 }
 
 func (s *screen) size() (int, int) { return s.w, s.h }
+
+// raw is what's been drawn, as it was.
+func (s *screen) raw() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.out.String()
+}
 
 // text is what's been drawn, without its colours and controls.
 func (s *screen) text() string {
@@ -118,6 +161,9 @@ func TestScenariosPlayThrough(t *testing.T) {
 			"hello again", "press any key", "bootstrap · laptop · Fri 20 Nov · 09:52",
 			"tab next row · ↑↓ scroll · q stop", "Homebrew: 5.0.3 · Xcode tools 26.1", "Homebrew: /opt/homebrew",
 			"Installed 1password-cli", "Sign in to 1Password", "Installed slack", "set up · 3 plugins",
+			"12 in place", "Homebrew formulae: 129 installed",
+			"TO DO", "Allow Karabiner-Elements", "Install the editor from its site", "Add a Time Machine disk",
+			"carrying on", "1 to do · ", "TO DO  1 · kit apply brings them back", "DONE",
 		}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -154,7 +200,7 @@ func TestScenariosPlayThrough(t *testing.T) {
 
 // Stopped while it plays, a scenario ends there, at once and without an
 // error: in its splash or arrival, at a question, at work, on apply's
-// screen.
+// screen, among its to-dos.
 func TestScenarioStoppedWhileItPlays(t *testing.T) {
 	t.Parallel()
 	for _, tt := range []struct{ name, at string }{
@@ -163,6 +209,7 @@ func TestScenarioStoppedWhileItPlays(t *testing.T) {
 		{"boot", "==> Downloading and installing Homebrew..."},
 		{"arrival", "hello again"},
 		{"arrival", "Installed 1password"},
+		{"arrival", "Allow remote users Full Disk Access"},
 	} {
 		t.Run(tt.name+" at "+tt.at, func(t *testing.T) {
 			t.Parallel()

@@ -65,6 +65,13 @@ type Screen struct {
 // once what it answers is on the screen; the keyboard itself is never read.
 // Stopped before its cues are played, it ends there, without an error.
 func (s Scenario) Play(ctx context.Context, screen Screen, held func()) error {
+	return perform(ctx, screen, &clock{start: s.start, began: time.Now(), pace: cmp.Or(s.pace, 1)}, held, s.play)
+}
+
+// perform does play at a stage set at screen, telling the time by c,
+// telling held once it holds its last screen; then waits for the keys it's
+// pressing meanwhile. Stopped, it ends without an error.
+func perform(ctx context.Context, screen Screen, c *clock, held func(), play func(*stage) error) error {
 	in, keys, err := os.Pipe()
 	if err != nil {
 		return fmt.Errorf("make the keys' pipe: %w", err)
@@ -74,9 +81,9 @@ func (s Scenario) Play(ctx context.Context, screen Screen, held func()) error {
 	shown := &shown{out: screen.Out, more: make(chan struct{})}
 	st := &stage{
 		term: ask.Terminal{In: in, Out: shown, Size: screen.Size}, shown: shown,
-		ctx: ctx, start: s.start, began: time.Now(), pace: cmp.Or(s.pace, 1), keys: keys, held: held,
+		ctx: ctx, clock: c, keys: keys, held: held,
 	}
-	err = s.play(st)
+	err = play(st)
 	st.wg.Wait()
 	if err == nil {
 		err = st.pressErr()
@@ -130,31 +137,61 @@ func (w *shown) since(ctx context.Context, mark int, text string) {
 	}
 }
 
-// stage is where a scenario plays: the terminal kit's faces draw at, and
-// read keys from, what they've drawn, a clock, and the keys the script
-// presses.
+// stage is where a scenario plays, or a fixture's drawn: the terminal
+// kit's faces draw at, and read keys from, what they've drawn, a clock,
+// and the keys the script presses.
 type stage struct {
 	term  ask.Terminal
 	shown *shown
 	ctx   context.Context
-	// start is when the clock reads as it's begun, began when it was.
-	start, began time.Time
-	pace         float64
-	keys         *os.File
-	held         func()
+	clock *clock
+	keys  *os.File
+	held  func()
 
 	wg       sync.WaitGroup
 	mu       sync.Mutex
 	pressing error
 }
 
-// now is the scenario's clock: its start, and the time since, in real
-// time.
-func (s *stage) now() time.Time { return s.start.Add(time.Since(s.began)) }
+// clock is what a stage tells the time by: from start, the time since
+// it began, in real time, a scenario's; or, stepped, a fixture's, start
+// moved on only by its pauses, which take no time.
+type clock struct {
+	start, began time.Time
+	// pace is how many times as fast as written a scenario's pauses go.
+	pace    float64
+	stepped bool
 
-// pause waits d, at the scenario's pace, or till it's stopped.
+	mu    sync.Mutex
+	moved time.Duration
+}
+
+// stepped is a clock reading at, moved on only by pauses.
+func stepped(at time.Time) *clock { return &clock{start: at, stepped: true} }
+
+// now is the time by the clock, as kit's faces and the events tell it.
+func (c *clock) now() time.Time {
+	if !c.stepped {
+		return c.start.Add(time.Since(c.began))
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.start.Add(c.moved)
+}
+
+// now is the stage's clock, as kit's faces and the events tell the time.
+func (s *stage) now() time.Time { return s.clock.now() }
+
+// pause waits d, at the scenario's pace, or till it's stopped; on a stepped
+// clock, it moves the clock on d, at once.
 func (s *stage) pause(d time.Duration) {
-	t := time.NewTimer(time.Duration(float64(d) / s.pace))
+	if s.clock.stepped {
+		s.clock.mu.Lock()
+		s.clock.moved += d
+		s.clock.mu.Unlock()
+		return
+	}
+	t := time.NewTimer(time.Duration(float64(d) / s.clock.pace))
 	defer t.Stop()
 	select {
 	case <-t.C:
@@ -182,7 +219,7 @@ func (s *stage) press(keys ...string) {
 }
 
 // typingEvery is how long a key typed takes, as a person types.
-const typingEvery = 110 * time.Millisecond
+const typingEvery = 75 * time.Millisecond
 
 // typeIn types text, a key at a time.
 func (s *stage) typeIn(text string) {

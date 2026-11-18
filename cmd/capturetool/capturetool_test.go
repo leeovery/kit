@@ -24,14 +24,14 @@ func TestFixture(t *testing.T) {
 	}
 }
 
-// --list names every fixture and scenario, and the size each scenario is
-// made for.
+// --list names every fixture and scenario, and the size each window of
+// its own is made for.
 func TestList(t *testing.T) {
 	var out bytes.Buffer
 	if err := run(context.Background(), []string{"--list"}, strings.NewReader(""), &out, size); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"--fixture status", "--scenario boot", "--scenario arrival", "120×34"} {
+	for _, want := range []string{"--fixture status", "--fixture reconcile", "100×24", "--scenario boot", "--scenario arrival", "120×34"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("listed\n%s\nwant %q", out.String(), want)
 		}
@@ -50,6 +50,18 @@ func TestScenarioWaitsForItsStart(t *testing.T) {
 	}
 	out.Reset()
 	if err := run(context.Background(), []string{"--scenario", "boot"}, strings.NewReader("\n"), &out, size); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(out.String(), "\x1b[2J\x1b[H") {
+		t.Errorf("drew %q; want the screen cleared first", out.String())
+	}
+}
+
+// A still that's a window of its own is drawn on a cleared screen, held,
+// and ends at stdin's end.
+func TestHeldFixture(t *testing.T) {
+	var out bytes.Buffer
+	if err := run(context.Background(), []string{"--fixture", "reconcile"}, strings.NewReader(""), &out, size); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.HasPrefix(out.String(), "\x1b[2J\x1b[H") {

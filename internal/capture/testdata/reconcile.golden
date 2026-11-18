@@ -1,0 +1,19 @@
+
+  █  ▄▀  ▀█▀  ▀▀█▀▀  │  reconcile
+  █▀▀▄    █     █    │  laptop
+  █   █  ▄█▄    █    │  Fri 20 Nov · 16:20
+
+  RECONCILE  2 of 3
+  ● ffmpeg
+  │ declare
+  ▲ node@20
+  │ brew · installed for something since removed, needed by nothing · 2 days
+  │ ❯ Uninstall  uninstall it
+  │   Declare  declare it, for this Mac
+  │   Declare everywhere  declare it, for every Mac
+  │   Snooze  snooze it for 7 days
+  │   Skip  not now
+  ○ firefox
+  │ cask · installed, not declared · 2 days
+
+  ↑↓ choose · enter decide · q stop · esc cancel
