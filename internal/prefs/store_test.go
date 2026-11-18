@@ -182,26 +182,34 @@ func TestAFolderInTheClonesPlace(t *testing.T) {
 }
 
 // The store is kit-config's prefs branch, cloned alone from where
-// kit-config's clone fetches: its one remote, whatever its name, by the
-// URL git takes for it. It pushes where kit-config does, as git push has
-// it: with git's pushInsteadOf rewriting kit-config's https URL to ssh for
-// pushing, both alike, the clone's taken as kit-config's.
+// kit-config's clone fetches: its one remote, whatever its name. The clone
+// is given the URL kit-config's remote has set, so git's insteadOf and
+// pushInsteadOf rules rewrite both alike, and it's checked as git takes
+// both: fetching from kit-config's URL, pushing where kit-config pushes.
+// With git's pushInsteadOf rewriting kit-config's https URL to ssh for
+// pushing, the clone's taken as kit-config's; with insteadOf too, rewriting
+// the URL kit-config's remote has set for fetching, the clone pushes where
+// kit-config does only given that URL as set, as git applies pushInsteadOf
+// to it, never to insteadOf's.
 func TestTheStoreIsKitConfigsPrefsBranch(t *testing.T) {
-	for _, c := range []struct{ name, remote, url, pushes string }{
-		{"origin, over ssh", "origin", remote, remote},
-		{"another name, over https", "upstream", "https://github.com/someone/kit-config.git", "https://github.com/someone/kit-config.git"},
-		{"pushing over ssh, by pushInsteadOf", "origin", "https://github.com/someone/kit-config.git", remote},
+	const https = "https://github.com/someone/kit-config.git"
+	for _, c := range []struct{ name, remote, set, url, pushes string }{
+		{"origin, over ssh", "origin", remote, remote, remote},
+		{"another name, over https", "upstream", https, https, https},
+		{"pushing over ssh, by pushInsteadOf", "origin", https, https, remote},
+		{"fetching by insteadOf, pushing by pushInsteadOf", "origin", https, remote, "ssh://git@github.com/someone/kit-config.git"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			clone, fake, settings := cloned(t)
 			p := settings()
 			fake.On("git", "-C", p.Config, "remote").Prints(c.remote + "\n")
 			fake.On("git", "-C", p.Config, "remote", "get-url", c.remote).Prints(c.url + "\n")
+			fake.On("git", "-C", p.Config, "config", "--get", "remote."+c.remote+".url").Prints(c.set + "\n")
 			fake.On("git", "-C", p.Config, "remote", "get-url", "--push", "--all", c.remote).Prints(c.pushes + "\n")
 			fake.On("git", "-C", clone, "remote", "get-url", "origin").Prints(c.url + "\n")
 			fake.On("git", "-C", clone, "remote", "get-url", "--push", "--all", "origin").Prints(c.pushes + "\n")
-			fake.On("git", "ls-remote", "--quiet", "--exit-code", c.url, "refs/heads/prefs").Prints(head + "\trefs/heads/prefs\n")
-			fake.On("git", "clone", "--quiet", "--single-branch", "--branch", "prefs", c.url, clone+".cloning").Does(func() { madeIn(t, clone+".cloning") })
+			fake.On("git", "ls-remote", "--quiet", "--exit-code", c.set, "refs/heads/prefs").Prints(head + "\trefs/heads/prefs\n")
+			fake.On("git", "clone", "--quiet", "--single-branch", "--branch", "prefs", c.set, clone+".cloning").Does(func() { madeIn(t, clone+".cloning") })
 			if saves, err := p.Saves(t.Context()); err != nil || !saved(saves) {
 				t.Errorf("saves %v, %v; want the branch cloned and its last save", saves, err)
 			}
@@ -251,6 +259,7 @@ func TestTheStoreReachesTheRemoteAsKitConfigDoes(t *testing.T) {
 		p := settings()
 		aside := clone + ".cloning"
 		fake.On("git", "-C", p.Config, "remote", "get-url", "origin").Prints(url + "\n")
+		fake.On("git", "-C", p.Config, "config", "--get", "remote.origin.url").Prints(url + "\n")
 		fake.On("git", "-C", p.Config, "remote", "get-url", "--push", "--all", "origin").Prints(pushURL[1] + "\n")
 		fake.On("git", "-C", clone, "remote", "get-url", "origin").Prints(url + "\n")
 		fake.On("git", "-C", clone, "remote", "get-url", "--push", "--all", "origin").Prints(pushURL[1] + "\n")
@@ -333,17 +342,19 @@ func TestTheFirstCaptureMakesTheBranch(t *testing.T) {
 // A clone with no commit, made before the branch was, as on a Mac whose
 // boot came before any Mac's first capture, is cloned again by a restore,
 // or a capture, holding the lock on the store, once another Mac's capture
-// has made the branch, so this Mac restores what that one saved. With the
-// branch still to be made, or the remote out of reach, it's kept, and the
-// restore goes on in it. Git gives an unborn branch no upstream, so no pull
-// of the empty clone would ever bring the branch in; git lists no branch in
-// a clone with no commit.
+// has made the branch, so this Mac restores what that one saved. The branch
+// is cloned aside, the empty clone in place till it's whole: a clone that
+// fails leaves the empty one. With the branch still to be made, or the
+// remote out of reach, it's kept, and the restore goes on in it. Git gives
+// an unborn branch no upstream, so no pull of the empty clone would ever
+// bring the branch in; git lists no branch in a clone with no commit.
 func TestAnEmptyCloneTakesTheBranchOnceMade(t *testing.T) {
 	const offline = "ssh: Could not resolve hostname github.com: nodename nor servname provided, or not known\nfatal: Could not read from remote repository.\n"
 	for _, c := range []struct {
-		name string
-		exit int
-	}{{"the branch made", 0}, {"the branch still to be made", 2}, {"offline", 128}} {
+		name       string
+		exit       int
+		cloneFails bool
+	}{{"the branch made", 0, false}, {"the branch made, its clone failing", 0, true}, {"the branch still to be made", 2, false}, {"offline", 128, false}} {
 		w := newWorld(t, prefs.Lists{})
 		aside := w.clone + ".cloning"
 		w.fake.On("git", "-C", w.clone, "for-each-ref", "--count=1", "--format=%(refname)", "refs/heads").Prints("").
@@ -355,25 +366,34 @@ func TestAnEmptyCloneTakesTheBranchOnceMade(t *testing.T) {
 		if c.exit == 128 {
 			looks.PrintsToStderr(offline)
 		}
-		w.fake.On("git", cloneOf(aside)...).Does(func() {
-			if _, err := os.Stat(w.clone); !errors.Is(err, fs.ErrNotExist) {
-				t.Errorf("%s: cloning with the empty clone still there (%v)", c.name, err)
+		cloning := w.fake.On("git", cloneOf(aside)...).Does(func() {
+			if _, err := os.Stat(filepath.Join(w.clone, ".git")); err != nil {
+				t.Errorf("%s: cloning with the empty clone gone (%v)", c.name, err)
 			}
 			madeIn(t, aside)
 			w.write(t, filepath.Join(aside, "laptop", "domains", "com.example.app.plist"), stored(t, map[string]any{"A": true}))
 		})
+		if c.cloneFails {
+			cloning.Exits(128).PrintsToStderr(offline)
+		}
 		w.fake.On("defaults", "export", "com.example.app", "-").Exits(1)
 		w.fake.On("git", "-C", w.clone, "rev-parse", "HEAD").Prints("abc123\n")
 
 		report, err := w.p.Restore(t.Context(), prefs.RestoreOptions{Domains: []string{"com.example.app"}})
-		if c.exit == 0 {
+		_, statErr := os.Stat(filepath.Join(w.clone, ".git"))
+		switch {
+		case c.cloneFails:
+			if err == nil || clones(w.fake) != 1 || statErr != nil {
+				t.Errorf("%s: Restore() = %v, the clone %v; want it failed, the empty clone kept", c.name, err, statErr)
+			}
+		case c.exit == 0:
 			if err != nil || report.Failed["com.example.app"] == "" || clones(w.fake) != 1 {
 				t.Errorf("%s: Restore() = %+v, %v, cloned %d times; want the branch cloned once, and restored from", c.name, report, err, clones(w.fake))
 			}
-			continue
-		}
-		if _, statErr := os.Stat(filepath.Join(w.clone, ".git")); err == nil || err.Error() != "no settings stored for laptop" || clones(w.fake) != 0 || statErr != nil {
-			t.Errorf("%s: Restore() = %v, cloned %d times, the clone %v; want the empty clone kept, and restored from, finding nothing", c.name, err, clones(w.fake), statErr)
+		default:
+			if err == nil || err.Error() != "no settings stored for laptop" || clones(w.fake) != 0 || statErr != nil {
+				t.Errorf("%s: Restore() = %v, cloned %d times, the clone %v; want the empty clone kept, and restored from, finding nothing", c.name, err, clones(w.fake), statErr)
+			}
 		}
 	}
 }
@@ -406,15 +426,35 @@ func TestAnEmptyCloneElsewhereIsRefused(t *testing.T) {
 	}
 }
 
-// A look at the store, as the settings to-do's, never touches a clone with
-// no commit: it has no saves, and nothing's asked of the remote.
-func TestALookLeavesAnEmptyClone(t *testing.T) {
-	clone, fake, settings := cloned(t)
-	madeIn(t, clone)
-	fake.On("git", "-C", clone, "for-each-ref", "--count=1", "--format=%(refname)", "refs/heads")
-	saves, err := settings().Saves(t.Context())
-	if err != nil || len(saves) != 0 || clones(fake) != 0 || slices.ContainsFunc(fake.Calls(), func(c string) bool { return strings.Contains(c, "ls-remote") }) {
-		t.Errorf("Saves() = %v, %v, ran %q; want none, the remote unasked, nothing cloned", saves, err, fake.Calls())
+// A look at the store, as the settings to-do's, takes the branch into a
+// clone with no commit once another Mac's capture has made it, holding the
+// lock on the store, so a paused Mac never starts afresh, or offers no
+// restore, while that Mac's save is there. With the branch still to be
+// made, the clone's kept, with no saves.
+func TestALookTakesTheBranchOnceMade(t *testing.T) {
+	for _, made := range []bool{true, false} {
+		clone, fake, settings := cloned(t)
+		madeIn(t, clone)
+		lock := clone + ".capture.lock"
+		locked := false
+		branches := fake.On("git", "-C", clone, "for-each-ref", "--count=1", "--format=%(refname)", "refs/heads")
+		if made {
+			branches.Then().Prints("refs/heads/prefs\n")
+		}
+		fake.On("git", cloneOf(clone+".cloning")...).Does(func() {
+			locked = !lockFree(lock)
+			madeIn(t, clone+".cloning")
+		})
+		if !made {
+			fake.On("git", "ls-remote", "--quiet", "--exit-code", remote, "refs/heads/prefs").Exits(2)
+		}
+		saves, err := settings().Saves(t.Context())
+		switch {
+		case made && (err != nil || !saved(saves) || clones(fake) != 1 || !locked):
+			t.Errorf("the branch made: Saves() = %v, %v, cloned %d times, locked %v; want its last save, the branch cloned once, holding the lock", saves, err, clones(fake), locked)
+		case !made && (err != nil || len(saves) != 0 || clones(fake) != 0):
+			t.Errorf("the branch still to be made: Saves() = %v, %v, cloned %d times; want none, nothing cloned", saves, err, clones(fake))
+		}
 	}
 }
 
@@ -473,6 +513,28 @@ func TestACloneElsewhereIsRefused(t *testing.T) {
 			if got := w.read(t, filepath.Join(w.clone, "laptop", "owner")); got != "hardware HW-OLD\nmodel Mac1,1\n" {
 				t.Errorf("%s, %s: the owner file says %q; want it as it was", c.name, do.name, got)
 			}
+		}
+	}
+}
+
+// A clone part way through a rebase, as one cut short, is on no branch till
+// it's finished, and holds commits not yet pushed: it's refused as the
+// rebase under way, never as a clone to move aside. Git's symbolic-ref
+// prints nothing then, exiting 1.
+func TestARebaseCutShortIsRefusedAsSuch(t *testing.T) {
+	const says = ": a rebase is under way in the repository (rebase-merge): kit's change waits till it's finished"
+	for name, run := range map[string]func(context.Context, *prefs.Prefs) error{
+		"capture": func(ctx context.Context, p *prefs.Prefs) error { _, err := p.Capture(ctx); return err },
+		"history": func(ctx context.Context, p *prefs.Prefs) error { _, err := p.History(ctx, "", "", 5); return err },
+	} {
+		w := newWorld(t, prefs.Lists{})
+		writeRecord(t, w.state, `{"on": "restored"}`)
+		if err := os.MkdirAll(filepath.Join(w.clone, ".git", "rebase-merge"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		w.fake.On("git", "-C", w.clone, "symbolic-ref", "-q", "HEAD").Exits(1)
+		if err := run(t.Context(), w.p); err == nil || err.Error() != "the store's clone, "+w.clone+says {
+			t.Errorf("%s: %v; want the rebase named", name, err)
 		}
 	}
 }

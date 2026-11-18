@@ -456,7 +456,10 @@ branches as the clone fetches them, so a failed first push, or commits made offl
 waiting. Two histories with no commit in common, as when two Macs each began the store's branch
 before either pushed, are the same pull: the remote's commits change every path the remote has
 (git's diff from where the two parted fails with no such place, so kit reads the remote's whole
-tree), and the rebase replays every commit here onto the remote's. When the upstream
+tree), and the rebase replays every commit here onto the remote's. A Mac whose empty store clone
+committed offline, while the remote's new branch already holds that Mac's own folder, conflicts on
+every rebase till the clone is moved aside; that happens only if another source pushed this Mac's
+folder. When the upstream
 has commits this Mac hasn't, kit rebases onto them by the commits since the two parted (never
 git's fork-point, which can leave out a commit, so the rebase changes no more than the remote's
 commits do), so two Macs don't fight. What's not committed in the files git tracks is set aside
@@ -1192,11 +1195,13 @@ outside it); `<mac>/owner`, the hardware UUID, model and name (`scutil --get Com
 Mac the folder belongs to.
 
 The branch lives on kit-config's own remote, the URL kit-config's clone fetches from (its one
-remote, as git takes it), so whatever reaches kit-config reaches the store, and the `prefs`
+remote), so whatever reaches kit-config reaches the store, and the `prefs`
 feature alone turns it on: nothing in `kit.toml` (a `prefs_repo` left there from when the store
 was a repository of its own is refused, saying to take the line out). kit clones the branch alone
 into its data folder (`~/.local/share/kit/prefs`), aside then moved into place under a lock, a
-clone of one branch that fetches only it, reaching the remote as kit-config's clone does: its
+clone of one branch that fetches only it, given the URL kit-config's remote has set, before git's
+`insteadOf` and `pushInsteadOf` rewrite it, so those rewrite both clones alike. It reaches the
+remote as kit-config's clone does: its
 clone's own `credential.*` settings (the boot's GitHub sign-in) and its remote's `pushurl`s go with
 each git that reaches the remote as it clones (`ls-remote` asked for 20 seconds at most), and stay
 in the store clone's settings, the push URLs as `origin`'s. The boot clones kit-config the same
@@ -1204,21 +1209,26 @@ way, its own branch alone, so the store's history never lands in a kit-config th
 clone that fetches every branch, made otherwise, fetches `prefs` too. A remote with no `prefs`
 branch yet, before any Mac's first capture, gets a clone that's empty, on the branch and tracking
 it, and that capture's push makes the branch. A clone with no commit (no branch, as git lists
-them) is cloned again by a capture or restore, holding the lock on the store, once the remote has
-the branch: no commit is lost, though a file written there and never committed, as by a capture
-whose commit failed, is, and the next capture writes it again from the Mac. Git gives a branch with
-no commit no upstream, so a pull would never bring another Mac's first capture in, and a new Mac
-booted before any Mac's first capture would never restore. Offline, or with the branch still to be
-made, the empty clone stays, and a capture carries on in it, its commit waiting to be pushed. A
-look at the store, as the settings to-do's, makes a clone when there's none but never replaces an
-empty one, which has no saves and no history. A clone in the store's place whose fetch URL isn't
-kit-config's, whose push URLs aren't kit-config's (each as `git push` has them, `pushInsteadOf`
-applied to both alike), or that's on another branch, as one of the repository the store was in
-before, empty or not, is refused, naming the clone, where it points and where it should; nothing's
-captured into it, restored from it, read for history or an app's saved settings, or taken over,
-and kit moves nothing: the person moves it aside, for kit to clone the branch there, and the new
-clone fetches and pushes as kit-config does. Removing an app with a refused clone uninstalls it
-all the same, deleting none of its saved settings and saying why.
+them) is cloned again once the remote has the branch, by a capture, a restore or a look at the
+store, as the settings to-do's or the settings step's before it starts afresh by itself, each
+holding the lock on the store: the branch is cloned aside while the empty clone stays in place, so
+a clone that fails leaves it. No commit is lost, though a file written there and never committed,
+as by a capture whose commit failed, is, and the next capture writes it again from the Mac. Git
+gives a branch with no commit no upstream, so a pull would never bring another Mac's first capture
+in, and a new Mac booted before any Mac's first capture would never restore, or would start afresh
+by itself while another Mac's save was on the branch. That costs one `ls-remote` a look, only while
+the Mac is paused with an empty clone. Offline, or with the branch still to be made, the empty
+clone stays, with no saves and no history, and a capture carries on in it, its commit waiting to
+be pushed. A clone in the store's place whose fetch URL isn't kit-config's, as git takes both,
+whose push URLs aren't kit-config's (each as `git push` has them, `pushInsteadOf` applied), or
+that's on another branch, as one of the repository the store was in before, empty or not, is
+refused, naming the clone, where it points and where it should; nothing's captured into it,
+restored from it, read for history or an app's saved settings, or taken over, and kit moves
+nothing: the person moves it aside, for kit to clone the branch there, and the new clone fetches
+and pushes as kit-config does. One off its branch part way through a rebase, as one cut short, is
+refused as the rebase under way, since it holds commits not yet pushed, never as a clone to move
+aside. Removing an app with a refused clone uninstalls it all the same, deleting none of its saved
+settings and saying why.
 
 - **`kit prefs capture`** (nightly, as the `prefs` feature's job): needs capture switched on (a
   full restore, or `kit prefs start-fresh`: a rebuilt Mac never captures defaults over a good

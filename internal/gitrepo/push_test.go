@@ -815,6 +815,45 @@ func TestRemoteURL(t *testing.T) {
 	}
 }
 
+// SetURL is the one remote's URL as set, before git's insteadOf rewrites
+// it: without a remote it's ErrNoRemote; with several, ErrNowhere.
+func TestSetURL(t *testing.T) {
+	fake := runnertest.New(t)
+	s := &sequence{fake: fake}
+	s.expect(remoteOf...).Prints("upstream\n")
+	s.expect(git("config", "--get", "remote.upstream.url")...).Prints("https://github.com/someone/kit-config.git\n")
+	if got, err := (gitrepo.Repo{Dir: dir, Run: fake}).SetURL(context.Background()); got != "https://github.com/someone/kit-config.git" || err != nil {
+		t.Errorf("SetURL() = %q, %v", got, err)
+	}
+	s.check(t, "the one remote's URL as set")
+
+	for remotes, want := range map[string]error{"": gitrepo.ErrNoRemote, "origin\nbackup\n": gitrepo.ErrNowhere} {
+		fake := runnertest.New(t)
+		fake.On("git", remoteOf...).Prints(remotes)
+		if got, err := (gitrepo.Repo{Dir: dir, Run: fake}).SetURL(context.Background()); got != "" || !errors.Is(err, want) {
+			t.Errorf("SetURL(), remotes %q = %q, %v; want %v", remotes, got, err, want)
+		}
+	}
+}
+
+// UnderWay is the refusal while a rebase, or another of git's operations,
+// is part way through, as when one was cut short: nil with none.
+func TestUnderWay(t *testing.T) {
+	gitDir := t.TempDir()
+	fake := runnertest.New(t)
+	fake.On("git", gitDirOf...).Prints(gitDir + "\n")
+	repo := gitrepo.Repo{Dir: dir, Run: fake}
+	if err := repo.UnderWay(context.Background()); err != nil {
+		t.Errorf("UnderWay(), nothing under way = %v", err)
+	}
+	if err := os.Mkdir(filepath.Join(gitDir, "rebase-merge"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UnderWay(context.Background()); err == nil || !strings.Contains(err.Error(), "under way in the repository (rebase-merge)") {
+		t.Errorf("UnderWay(), a rebase cut short = %v", err)
+	}
+}
+
 // URL is a remote's fetch URL, as git takes it, none without that remote.
 func TestURL(t *testing.T) {
 	fake := runnertest.New(t)

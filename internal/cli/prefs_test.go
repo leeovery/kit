@@ -96,6 +96,7 @@ func (w *world) kitConfigRemote() {
 	config := filepath.Join(w.home, ".config", "kit")
 	w.fake.On("git", "-C", config, "remote").Prints("origin\n")
 	w.fake.On("git", "-C", config, "remote", "get-url", "origin").Prints(kitConfigURL + "\n")
+	w.fake.On("git", "-C", config, "config", "--get", "remote.origin.url").Prints(kitConfigURL + "\n")
 	w.fake.On("git", "-C", config, "remote", "get-url", "--push", "--all", "origin").Prints(kitConfigURL + "\n")
 	w.fake.On("git", "-C", config, "config", "--local", "--get-regexp", "-z", `^(credential\..*|remote\..*\.pushurl)$`).Exits(1)
 }

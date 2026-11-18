@@ -60,6 +60,7 @@ const kitConfig = "git@github.com:someone/kit-config.git"
 func configures(fake *runnertest.Fake, config, clone string) {
 	fake.On("git", "-C", config, "remote").Prints("origin\n")
 	fake.On("git", "-C", config, "remote", "get-url", "origin").Prints(kitConfig + "\n")
+	fake.On("git", "-C", config, "config", "--get", "remote.origin.url").Prints(kitConfig + "\n")
 	fake.On("git", "-C", config, "remote", "get-url", "--push", "--all", "origin").Prints(kitConfig + "\n")
 	fake.On("git", "-C", config, "config", "--local", "--get-regexp", "-z", `^(credential\..*|remote\..*\.pushurl)$`).Exits(1)
 	fake.On("git", "ls-remote", "--quiet", "--exit-code", kitConfig, "refs/heads/prefs").Prints("abc123\trefs/heads/prefs\n")
@@ -214,19 +215,30 @@ func TestAppsSettingsChoice(t *testing.T) {
 
 // Applied, the settings step starts afresh by itself when the store holds
 // no source, raising no card, the log saying so; with a source, or a store it can't read, it
-// leaves the card be.
+// leaves the card be. A clone made before the branch was, empty, is cloned
+// again first, once another Mac's capture has made the branch, so a source
+// there is found.
 func TestAppsSettingsWithNoSource(t *testing.T) {
 	for _, tt := range []struct {
 		name, from string
 		saves      map[string]string
+		empty      bool
 		afresh     bool
 	}{
-		{"no source", "", map[string]string{"studio": "2026-10-25"}, true},
-		{"its own", "", map[string]string{"laptop": "2026-10-04"}, false},
-		{"the Mac it started from", "studio", map[string]string{"studio": "2026-10-25"}, false},
+		{"no source", "", map[string]string{"studio": "2026-10-25"}, false, true},
+		{"its own", "", map[string]string{"laptop": "2026-10-04"}, false, false},
+		{"the Mac it started from", "studio", map[string]string{"studio": "2026-10-25"}, false, false},
+		{"its own, in a clone made before the branch was", "", map[string]string{"laptop": "2026-10-04"}, true, false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			_, _, step, _ := settingsStore(t, tt.saves, tt.from)
+			fake, p, step, _ := settingsStore(t, tt.saves, tt.from)
+			if tt.empty {
+				if err := os.MkdirAll(filepath.Join(p.Clone, ".git"), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				fake.On("git", "-C", p.Clone, "for-each-ref", "--count=1", "--format=%(refname)", "refs/heads").Prints("").
+					Then().Prints("refs/heads/prefs\n")
+			}
 			var logged []string
 			ctx := event.WithLogging(t.Context(), func(l event.Logged) { logged = append(logged, l.Line) })
 			if err := step.Apply(ctx, step.Check(t.Context())); err != nil {

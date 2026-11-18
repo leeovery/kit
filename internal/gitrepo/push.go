@@ -496,6 +496,28 @@ func (r Repo) RemoteURL(ctx context.Context) (string, error) {
 	return r.URL(ctx, remote)
 }
 
+// SetURL is the URL the repository's one remote has set, before git's
+// insteadOf and pushInsteadOf rewrite it, as a clone given it, under the
+// same rules, fetches and pushes where this one does. ErrNoRemote without
+// a remote; an error that's ErrNowhere with several.
+func (r Repo) SetURL(ctx context.Context) (string, error) {
+	remote, err := r.remote(ctx)
+	if err != nil {
+		return "", err
+	}
+	return r.setting(ctx, "remote."+remote+".url")
+}
+
+// UnderWay is the refusal while one of git's operations is part way
+// through in the repository, as a rebase cut short: nil while none is.
+func (r Repo) UnderWay(ctx context.Context) error {
+	gitDir, err := r.gitDir(ctx)
+	if err != nil {
+		return err
+	}
+	return underWay(gitDir)
+}
+
 // URL is the URL the remote called remote is fetched from, as git takes it:
 // "" when there's no such remote, as git says by exiting 2.
 func (r Repo) URL(ctx context.Context, remote string) (string, error) {

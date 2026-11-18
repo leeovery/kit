@@ -51,20 +51,19 @@ const (
 	origin = "origin"
 )
 
-// ensureClone clones the store when this Mac has no clone (clone), refuses
-// one that isn't of the branch (checkClone), then applies its own git
-// settings. With renew, as a capture or restore has, holding the lock on
-// the store, a clone with nothing committed is cloned again once the remote
-// has the branch; without it, a look at the store never touches one.
-func (p *Prefs) ensureClone(ctx context.Context, renew bool) error {
+// ensureClone clones the store when this Mac has no clone, or has one with
+// nothing committed (clone), refuses one that isn't of the branch
+// (checkClone), then applies its own git settings. Its caller holds the
+// lock on the store (lockCapture), as an empty clone may be replaced.
+func (p *Prefs) ensureClone(ctx context.Context) error {
 	remote, err := p.remote(ctx)
 	if err != nil {
 		return err
 	}
-	if err := p.clone(ctx, remote, renew); err != nil {
+	if err := p.clone(ctx, remote); err != nil {
 		return err
 	}
-	if err := p.checkClone(ctx, remote); err != nil {
+	if err := p.checkClone(ctx, remote.url); err != nil {
 		return err
 	}
 	for _, kv := range gitConfig {
@@ -80,24 +79,34 @@ func (p *Prefs) config() gitrepo.Repo {
 	return gitrepo.Repo{Dir: p.Config, Run: p.Run}
 }
 
-// remote is where the store is: the URL kit-config's one remote is fetched
-// from, as git takes it.
-func (p *Prefs) remote(ctx context.Context) (string, error) {
+// kitRemote is kit-config's one remote, where the store is: its URL as set,
+// which the store's clone is given, so git's insteadOf and pushInsteadOf
+// rules rewrite both alike, and as git takes it, url, which the clone's is
+// checked against.
+type kitRemote struct{ set, url string }
+
+// remote is where the store is: kit-config's one remote.
+func (p *Prefs) remote(ctx context.Context) (kitRemote, error) {
 	url, err := p.config().RemoteURL(ctx)
-	switch {
-	case errors.Is(err, gitrepo.ErrNoRemote):
-		return "", errors.New("kit-config has no remote, so apps' settings have nowhere to be saved: they're saved on its prefs branch")
-	case err != nil:
-		return "", fmt.Errorf("find kit-config's remote, where apps' settings are saved: %w", err)
+	if err == nil {
+		var set string
+		set, err = p.config().SetURL(ctx)
+		return kitRemote{set: set, url: url}, err
 	}
-	return url, nil
+	if errors.Is(err, gitrepo.ErrNoRemote) {
+		return kitRemote{}, errors.New("kit-config has no remote, so apps' settings have nowhere to be saved: they're saved on its prefs branch")
+	}
+	return kitRemote{}, fmt.Errorf("find kit-config's remote, where apps' settings are saved: %w", err)
 }
 
-// checkClone refuses the store's clone unless it's of remote, kit-config's,
-// pushing where kit-config pushes, on the branch: one cloned from where the
-// store was before it moved to kit-config, or put on another branch, is
-// never captured into or restored from. Push URLs are compared as git push
-// has them, git's pushInsteadOf applied, as it is to both alike.
+// checkClone refuses the store's clone unless it's of remote, kit-config's
+// URL as git takes it, pushing where kit-config pushes, on the branch: one
+// cloned from where the store was before it moved to kit-config, or put on
+// another branch, is never captured into or restored from. Push URLs are
+// compared as git push has them, git's pushInsteadOf applied, as it is to
+// both alike. One off the branch part way through a rebase, as when one
+// was cut short, holds commits not yet pushed: it's refused as git's
+// operation under way, never as a clone to move aside.
 func (p *Prefs) checkClone(ctx context.Context, remote string) error {
 	at, err := p.repo().URL(ctx, origin)
 	if err != nil {
@@ -114,10 +123,14 @@ func (p *Prefs) checkClone(ctx context.Context, remote string) error {
 	if exit, ok := errors.AsType[*runner.ExitError](err); err != nil && (!ok || exit.Code != 1) {
 		return err
 	}
-	if on := strings.TrimPrefix(strings.TrimSpace(string(res.Stdout)), "refs/heads/"); on != branch {
-		return fmt.Errorf("%s is on %s, not kit-config's %s branch: move the clone aside for kit to clone the branch there", p.Clone, cmp.Or(on, "no branch"), branch)
+	on := strings.TrimPrefix(strings.TrimSpace(string(res.Stdout)), "refs/heads/")
+	if on == branch {
+		return nil
 	}
-	return nil
+	if err := p.repo().UnderWay(ctx); err != nil {
+		return fmt.Errorf("the store's clone, %s: %w", p.Clone, err)
+	}
+	return fmt.Errorf("%s is on %s, not kit-config's %s branch: move the clone aside for kit to clone the branch there", p.Clone, cmp.Or(on, "no branch"), branch)
 }
 
 // checkPushes refuses the store's clone unless it pushes where kit-config
@@ -157,7 +170,7 @@ func (p *Prefs) checked(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	return p.checkClone(ctx, remote)
+	return p.checkClone(ctx, remote.url)
 }
 
 // cloneState is how this Mac's clone of the store stands.
@@ -166,8 +179,8 @@ type cloneState int
 const (
 	noClone cloneState = iota
 	// emptyClone is a clone with no commit on any branch, as one made
-	// before the branch was: replaced once the branch is there, as a
-	// capture or restore finds it, losing no commit.
+	// before the branch was: replaced once the branch is there, losing no
+	// commit.
 	emptyClone
 	madeClone
 )
@@ -175,15 +188,15 @@ const (
 // clone clones the store, aside, then puts the clone in its place whole,
 // so that one cut short, by its time limit or the run stopping, leaves none
 // that a later run takes for whole: it clones again, what that one left
-// cleared first. With renew, an empty clone of kit-config's branch is
-// cloned again once the remote has the branch, so a Mac that made one
-// before the branch was, as a new Mac whose boot came before any Mac's
-// first capture, takes the branch another Mac's capture made; offline, or
-// with the branch still to be made, it's kept, and a capture carries on in
-// it. It holds a lock beside the clone throughout, so no two kits clone at
-// once: one that waited for it finds the clone the other made. A folder in
-// the clone's place that isn't one is refused before anything's downloaded.
-func (p *Prefs) clone(ctx context.Context, remote string, renew bool) error {
+// cleared first. An empty clone of kit-config's branch is cloned again once
+// the remote has the branch, so a Mac that made one before the branch was,
+// as a new Mac whose boot came before any Mac's first capture, takes the
+// branch another Mac's capture made; offline, or with the branch still to
+// be made, it's kept, and a capture carries on in it. It holds a lock
+// beside the clone throughout, so no two kits clone at once: one that
+// waited for it finds the clone the other made. A folder in the clone's
+// place that isn't one is refused before anything's downloaded.
+func (p *Prefs) clone(ctx context.Context, remote kitRemote) error {
 	if err := os.MkdirAll(filepath.Dir(p.Clone), 0o700); err != nil {
 		return err
 	}
@@ -196,11 +209,11 @@ func (p *Prefs) clone(ctx context.Context, remote string, renew bool) error {
 	switch {
 	case err != nil:
 		return err
-	case state == madeClone, state == emptyClone && !renew:
+	case state == madeClone:
 		return nil
 	case state == emptyClone:
 		// An empty clone of anywhere else is refused, never deleted.
-		if err := p.checkClone(ctx, remote); err != nil {
+		if err := p.checkClone(ctx, remote.url); err != nil {
 			return err
 		}
 	}
@@ -208,22 +221,20 @@ func (p *Prefs) clone(ctx context.Context, remote string, renew bool) error {
 	if err != nil {
 		return err
 	}
-	has, err := p.hasBranch(ctx, remote, carried)
+	has, err := p.hasBranch(ctx, remote.set, carried)
 	switch {
 	case state == emptyClone && (err != nil || !has):
 		return nil
 	case err != nil:
 		return err
 	}
-	return p.replace(ctx, remote, has, carried)
+	return p.replace(ctx, remote.set, has, carried)
 }
 
 // replace puts a clone of remote's branch, as cloneBranch makes it, in the
-// place of whatever's there, cloned aside first.
+// place of whatever's there, cloned aside first, so a clone that fails
+// leaves what was there.
 func (p *Prefs) replace(ctx context.Context, remote string, has bool, carried [][2]string) error {
-	if err := os.RemoveAll(p.Clone); err != nil {
-		return err
-	}
 	aside := p.Clone + ".cloning"
 	if err := os.RemoveAll(aside); err != nil {
 		return err
@@ -231,6 +242,9 @@ func (p *Prefs) replace(ctx context.Context, remote string, has bool, carried []
 	defer func() { _ = os.RemoveAll(aside) }()
 	if err := p.cloneBranch(ctx, remote, aside, has, carried); err != nil {
 		return fmt.Errorf("clone kit-config's %s branch: %w", branch, err)
+	}
+	if err := os.RemoveAll(p.Clone); err != nil {
+		return err
 	}
 	if err := os.Rename(aside, p.Clone); err != nil {
 		return fmt.Errorf("put the store's clone in place: %w", err)
@@ -586,11 +600,18 @@ type Save struct {
 }
 
 // Saves are the folders in the store with a save, sorted by name, this
-// Mac's too. The store's cloned first, when this Mac has no clone yet; an
-// empty clone has none, and is left as it is, for a capture or restore,
-// holding the lock on the store, to clone again.
+// Mac's too. The store's cloned first, holding the lock on it, when this
+// Mac has no clone yet, or has an empty one and the remote has the branch,
+// so a paused Mac never takes a clone made before another Mac's first
+// capture for a store with nothing to restore: an empty clone, offline or
+// with the branch still to be made, has none.
 func (p *Prefs) Saves(ctx context.Context) ([]Save, error) {
-	if err := p.ensureClone(ctx, false); err != nil {
+	unlock, err := p.lockCapture(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+	if err := p.ensureClone(ctx); err != nil {
 		return nil, err
 	}
 	switch state, err := p.clonedYet(ctx); {

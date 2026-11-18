@@ -312,7 +312,7 @@ func (p *Prefs) Restore(ctx context.Context, opts RestoreOptions) (RestoreReport
 		return report, err
 	}
 	defer unlock()
-	if err := p.ensureClone(ctx, true); err != nil {
+	if err := p.ensureClone(ctx); err != nil {
 		return report, err
 	}
 	// Offline, or refused, the clone's restored from as it is.
