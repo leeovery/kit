@@ -69,13 +69,13 @@ func nounCommands(a *app) []*cobra.Command {
 // closes the run. The run is of the command and what it was given, as in
 // brew add jq, which its log keeps.
 func (a *app) prepared(cmd *cobra.Command, command string, do func(ctx context.Context, r *run) error) error {
-	return a.preparedAs(cmd.Context(), redact.Text(strings.Join(append([]string{command}, cmd.Flags().Args()...), " ")), strings.ReplaceAll(command, " ", "-"), do)
+	return a.preparedAs(cmd.Context(), strings.Join(append([]string{command}, cmd.Flags().Args()...), " "), strings.ReplaceAll(command, " ", "-"), do)
 }
 
-// preparedAs runs do in a run prepared for command, as it's to be logged,
-// in the log named logName, then closes the run.
+// preparedAs runs do in a run prepared for command, as run, redacted, in
+// the log named logName, then closes the run.
 func (a *app) preparedAs(ctx context.Context, command, logName string, do func(ctx context.Context, r *run) error) error {
-	r, err := a.prepare(command, logName)
+	r, err := a.prepare(redact.Text(command), logName)
 	if err != nil {
 		return err
 	}

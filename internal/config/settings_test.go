@@ -58,6 +58,31 @@ func TestSetOwnSettings(t *testing.T) {
 			"format = 1\nprimary = \"laptop\"\n" + macs,
 			"format = 1\nprimary = \"laptop\"\n" + macs,
 		},
+		{
+			"added to a file whose lines end CRLF", terminal("ghostty"),
+			"format = 1\r\nprimary = \"laptop\"\r\n\r\n[macs.laptop]\r\n",
+			"format = 1\r\nprimary = \"laptop\"\r\nterminal = \"ghostty\"\r\n\r\n[macs.laptop]\r\n",
+		},
+		{
+			"replaced in a file whose lines end CRLF", nightlyAt("04:30"),
+			"format = 1\r\nnightly_at = \"03:00\" # due\r\nprimary = \"laptop\"\r\n\r\n[macs.laptop]\r\n",
+			"format = 1\r\nnightly_at = \"04:30\" # due\r\nprimary = \"laptop\"\r\n\r\n[macs.laptop]\r\n",
+		},
+		{
+			"added after a last line with no line break", terminal("ghostty"),
+			"format = 1\nprimary = \"laptop\"\nmacs.laptop.description = \"MacBook Pro\"",
+			"format = 1\nprimary = \"laptop\"\nmacs.laptop.description = \"MacBook Pro\"\nterminal = \"ghostty\"\n",
+		},
+		{
+			"replaced, its indent kept", terminal("ghostty"),
+			"format = 1\n  terminal = \"ghostty\"   # the boot's\nprimary = \"laptop\"\n" + macs,
+			"format = 1\n  terminal = \"ghostty\"   # the boot's\nprimary = \"laptop\"\n" + macs,
+		},
+		{
+			"replaced when indented, its indent kept", nightlyAt("05:00"),
+			"format = 1\n\tnightly_at = \"03:00\"\nprimary = \"laptop\"\n" + macs,
+			"format = 1\n\tnightly_at = \"05:00\"\nprimary = \"laptop\"\n" + macs,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -105,20 +130,36 @@ func TestSetOwnSettingsRefuses(t *testing.T) {
 	}
 }
 
-// An edit that wouldn't read back as Load reads it is refused, the file as
-// it was: here, as kit.toml sets nightly_at in a way of its own.
+// An edit that wouldn't read back as Load reads it, saying the value, is
+// refused, the file as it was: here, as kit.toml sets the setting with a
+// quoted key, a line kit doesn't take for the setting's.
 func TestSetOwnSettingsReadsBack(t *testing.T) {
-	toml := "format = 1\nprimary = \"laptop\"\n\"nightly_at\" = \"03:00\"\n\n[macs.laptop]\n"
-	dir := writeRepo(t, map[string]string{config.File: toml})
-	cfg, err := config.Load(dir, kinds.Sections())
-	if err != nil {
-		t.Fatal(err)
+	const head, macs = "format = 1\nprimary = \"laptop\"\n", "\n[macs.laptop]\n"
+	tests := []struct {
+		name string
+		set  func(*config.Config) error
+		toml string
+		want string
+	}{
+		{"set twice, so unread", func(c *config.Config) error { return c.SetNightlyAt("04:00") },
+			head + "\"nightly_at\" = \"03:00\"\n" + macs, "couldn't set nightly_at in kit.toml: kit.toml: "},
+		{"taken out, and still there", func(c *config.Config) error { return c.SetTerminal("") },
+			head + "\"terminal\" = \"ghostty\"\n" + macs, "couldn't set terminal in kit.toml: its line isn't one kit can write to"},
 	}
-	if err := cfg.SetNightlyAt("04:00"); err == nil || !strings.HasPrefix(err.Error(), "couldn't set nightly_at in kit.toml: ") {
-		t.Errorf("SetNightlyAt() = %v, want it refused", err)
-	}
-	if data, _ := os.ReadFile(filepath.Join(dir, config.File)); string(data) != toml {
-		t.Errorf("kit.toml =\n%s\nwant it as it was", data)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := writeRepo(t, map[string]string{config.File: tt.toml})
+			cfg, err := config.Load(dir, kinds.Sections())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := tt.set(cfg); err == nil || !strings.HasPrefix(err.Error(), tt.want) {
+				t.Errorf("set = %v, want %q", err, tt.want)
+			}
+			if data, _ := os.ReadFile(filepath.Join(dir, config.File)); string(data) != tt.toml {
+				t.Errorf("kit.toml =\n%s\nwant it as it was", data)
+			}
+		})
 	}
 }
 
@@ -144,13 +185,17 @@ func TestTimeOfDay(t *testing.T) {
 // Load says whether kit.toml sets nightly_at, as 03:00 it may say, or leaves
 // it to the default.
 func TestNightlyAtSet(t *testing.T) {
-	for toml, want := range map[string]bool{
-		twoMacs:                              false,
-		"nightly_at = \"03:00\"\n" + twoMacs: true,
-	} {
-		cfg := loadRepo(t, map[string]string{config.File: toml})
-		if cfg.NightlyAtSet() != want || cfg.NightlyAt != config.DefaultNightlyAt {
-			t.Errorf("Load(%q): NightlyAtSet() = %v, NightlyAt = %v; want %v, 03:00", toml, cfg.NightlyAtSet(), cfg.NightlyAt, want)
+	tests := []struct {
+		toml string
+		set  bool
+	}{
+		{twoMacs, false},
+		{"nightly_at = \"03:00\"\n" + twoMacs, true},
+	}
+	for _, tt := range tests {
+		cfg := loadRepo(t, map[string]string{config.File: tt.toml})
+		if cfg.NightlyAtSet() != tt.set || cfg.NightlyAt != config.DefaultNightlyAt {
+			t.Errorf("Load(%q): NightlyAtSet() = %v, NightlyAt = %v; want %v, 03:00", tt.toml, cfg.NightlyAtSet(), cfg.NightlyAt, tt.set)
 		}
 	}
 }

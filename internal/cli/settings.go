@@ -15,13 +15,6 @@ import (
 	"github.com/leeovery/kit/internal/render"
 )
 
-// The settings of kit.toml's own that kit terminal and kit nightly at set,
-// as kit.toml names them.
-const (
-	terminalSetting  = "terminal"
-	nightlyAtSetting = "nightly_at"
-)
-
 func newTerminalCommand(a *app) *cobra.Command {
 	var none bool
 	cmd := &cobra.Command{
@@ -38,6 +31,8 @@ repository. --json gives the terminal as a document.`,
 			switch {
 			case none && len(args) > 0:
 				return usageError{errors.New("name a terminal, or give --none, not both")}
+			case len(args) > 0 && args[0] == "":
+				return usageError{errors.New("name a terminal, or give --none")}
 			case len(args) > 0:
 				name = args[0]
 			case !none:
@@ -48,7 +43,7 @@ repository. --json gives the terminal as a document.`,
 				command = "terminal --none"
 			}
 			return a.preparedAs(cmd.Context(), command, "terminal", func(ctx context.Context, r *run) error {
-				return setOwn(ctx, r, terminalSetting, r.cfg.Terminal, name, func() error { return r.cfg.SetTerminal(name) })
+				return changeSetting(ctx, r, config.TerminalSetting, r.cfg.Terminal, name, func() error { return r.cfg.SetTerminal(name) })
 			})
 		},
 	}
@@ -79,16 +74,17 @@ time as a document.`,
 				if r.cfg.NightlyAtSet() {
 					was = config.TimeOfDay(r.cfg.NightlyAt)
 				}
-				return setOwn(ctx, r, nightlyAtSetting, was, now, func() error { return r.cfg.SetNightlyAt(now) })
+				return changeSetting(ctx, r, config.NightlyAtSetting, was, now, func() error { return r.cfg.SetNightlyAt(now) })
 			})
 		},
 	}
 }
 
-// setOwn changes kit.toml's own setting key from was to now, "" for none,
-// with set, as a run's step, then commits kit.toml alone and pushes, saying
-// what was run. As it is already, it sets nothing, and commits nothing.
-func setOwn(ctx context.Context, r *run, key, was, now string, set func() error) error {
+// changeSetting changes kit.toml's own setting key from was to now, "" for
+// none, with set, as a run's step, then commits kit.toml alone and pushes,
+// saying what was run. As it is already, it sets nothing, and commits
+// nothing.
+func changeSetting(ctx context.Context, r *run, key, was, now string, set func() error) error {
 	if was != now {
 		if err := set(); err != nil {
 			return err
@@ -155,7 +151,7 @@ func (a *app) showNightlyAt(out io.Writer) error {
 	}
 	said := "the nightly run falls due at " + look.Strong(at)
 	if !cfg.NightlyAtSet() {
-		said += ", the default: " + config.File + " sets no " + nightlyAtSetting
+		said += ", the default: " + config.File + " sets no " + config.NightlyAtSetting
 	}
 	_, err = fmt.Fprintln(a.colors(out), said)
 	return err

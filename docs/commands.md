@@ -17,7 +17,7 @@ At a terminal, `kit` on its own opens a menu of what to run next.
 | `kit why` | Where a package is declared, and what needs it | [Packages](packages.md) |
 | `kit log` | Past runs, with every check and command | [Running by itself](running-by-itself.md) |
 | `kit machine` | Show this Mac's name, or set it | [A new Mac](new-mac.md) |
-| `kit terminal` | The terminal a new Mac's boot opens | [A new Mac](new-mac.md) |
+| `kit terminal` | The terminal a new Mac's boot hands over to | [A new Mac](new-mac.md) |
 | `kit bootstrap` | Set up a new Mac: the install line runs it | [A new Mac](new-mac.md) |
 | `kit agent` | Instructions for an agent working through kit | [Agents](agents.md) |
 

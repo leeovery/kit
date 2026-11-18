@@ -17,8 +17,8 @@ import (
 // The settings of kit.toml's own, before its tables, that kit's commands
 // set.
 const (
-	terminalSetting  = "terminal"
-	nightlyAtSetting = "nightly_at"
+	TerminalSetting  = "terminal"
+	NightlyAtSetting = "nightly_at"
 )
 
 // ParseTimeOfDay reads a time of day, as in 03:00, as hours and minutes
@@ -47,7 +47,7 @@ func (c *Config) SetTerminal(name string) error {
 	if _, ok := apps.Terminals[name]; name != "" && !ok {
 		return fmt.Errorf("kit doesn't know the terminal %s: one of %s", name, apps.Names(apps.Terminals))
 	}
-	return c.setOwn(terminalSetting, name)
+	return c.setOwn(TerminalSetting, name, func(edited *Config) bool { return edited.Terminal == name })
 }
 
 // SetNightlyAt sets kit.toml's nightly_at to at, a time of day as in 03:00,
@@ -57,20 +57,28 @@ func (c *Config) SetNightlyAt(at string) error {
 	if err != nil {
 		return err
 	}
-	return c.setOwn(nightlyAtSetting, TimeOfDay(d))
+	return c.setOwn(NightlyAtSetting, TimeOfDay(d), func(edited *Config) bool { return edited.nightlyAtSet && edited.NightlyAt == d })
 }
 
 // setOwn sets kit.toml's own setting key to value, "" taking it out, and
-// writes the file whole.
-func (c *Config) setOwn(key, value string) error {
+// writes the file whole, once the edit reads back as Load reads it, and
+// says reports the setting as wanted.
+func (c *Config) setOwn(key, value string, says func(*Config) bool) error {
 	path := filepath.Join(c.Dir, File)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("read the config: %w", err)
 	}
-	edited, err := c.withOwn(string(data), key, value)
+	edited, err := withOwn(string(data), key, value)
 	if err != nil {
 		return err
+	}
+	cfg, err := read(c.Dir, edited, nil)
+	switch {
+	case err != nil:
+		return fmt.Errorf("couldn't set %s in %s: %w", key, File, err)
+	case !says(cfg):
+		return fmt.Errorf("couldn't set %s in %s: its line isn't one kit can write to", key, File)
 	}
 	if err := writeAtomic(path, []byte(edited)); err != nil {
 		return fmt.Errorf("set %s: %w", key, err)
@@ -79,55 +87,51 @@ func (c *Config) setOwn(key, value string) error {
 }
 
 // withOwn is kit.toml's text with its own setting key set to value, "" for
-// none: the setting's line replaced where it stands, its comment kept, else
-// one added after the last setting before the first table; the rest as it
-// was. It's read back as Load reads it, to be sure it says value.
-func (c *Config) withOwn(text, key, value string) (string, error) {
+// none: the setting's line replaced where it stands, its indent, comment and
+// line ending kept, else one added after the last setting before the first
+// table, ending as the lines before it do; the rest as it was.
+func withOwn(text, key, value string) (string, error) {
 	lines := strings.SplitAfter(text, "\n")
 	end := tableEnd(lines, -1)
 	at := slices.IndexFunc(lines[:end], func(line string) bool { return sets(line, key) })
-	var setting bytes.Buffer
-	if err := toml.NewEncoder(&setting).Encode(map[string]string{key: value}); err != nil {
+	var encoded bytes.Buffer
+	if err := toml.NewEncoder(&encoded).Encode(map[string]string{key: value}); err != nil {
 		return "", fmt.Errorf("write %s: %w", key, err)
 	}
+	setting := strings.TrimSuffix(encoded.String(), "\n")
 	switch {
 	case value == "" && at >= 0:
 		lines = slices.Delete(lines, at, at+1)
 	case value == "":
 	case at >= 0:
-		lines[at] = withComment(setting.String(), lines[at])
+		lines[at] = replaced(lines[at], setting)
 	default:
+		eol := ending(lines[:end])
 		if end > 0 && !strings.HasSuffix(lines[end-1], "\n") {
-			lines[end-1] += "\n"
+			lines[end-1] += eol
 		}
-		lines = slices.Insert(lines, end, setting.String())
+		lines = slices.Insert(lines, end, setting+eol)
 	}
-	edited := strings.Join(lines, "")
-	if _, err := read(c.Dir, edited, nil); err != nil {
-		return "", fmt.Errorf("couldn't set %s in %s: %w", key, File, err)
-	}
-	var own map[string]any
-	if _, err := toml.Decode(edited, &own); err != nil {
-		return "", fmt.Errorf("couldn't set %s in %s: %w", key, File, err)
-	}
-	if said, ok := own[key]; value == "" && ok || value != "" && said != value {
-		return "", fmt.Errorf("couldn't set %s in %s: its line isn't one kit can write to", key, File)
-	}
-	return edited, nil
+	return strings.Join(lines, ""), nil
 }
 
-// withComment is setting, a line, with the comment that ends was, the line
-// it replaces, if any, as far from the value as it was.
-func withComment(setting, was string) string {
-	was = strings.TrimRight(was, "\r\n")
-	for i := strings.IndexByte(was, '#'); i >= 0; i = nextHash(was, i) {
-		if _, err := toml.Decode(was[:i], new(map[string]any)); err != nil {
-			continue
+// replaced is was, a setting's line, saying setting instead: its indent,
+// the comment that ends it and its line ending kept.
+func replaced(was, setting string) string {
+	body := strings.TrimRight(was, "\r\n")
+	indent := body[:len(body)-len(strings.TrimLeft(body, " \t"))]
+	return indent + setting + comment(body) + was[len(body):]
+}
+
+// comment is the comment that ends line, a setting's, with the space before
+// it: "" for none. A # inside the value is no comment's.
+func comment(line string) string {
+	for i := strings.IndexByte(line, '#'); i >= 0; i = nextHash(line, i) {
+		if _, err := toml.Decode(line[:i], new(map[string]any)); err == nil {
+			return line[len(strings.TrimRight(line[:i], " \t")):]
 		}
-		value := strings.TrimRight(was[:i], " \t")
-		return strings.TrimSuffix(setting, "\n") + was[len(value):] + "\n"
 	}
-	return setting
+	return ""
 }
 
 // nextHash is where the # after the one at i is in line: -1 for none.
@@ -137,4 +141,18 @@ func nextHash(line string, i int) int {
 		return -1
 	}
 	return i + 1 + next
+}
+
+// ending is the line ending of the last of lines that has one: "\n" when
+// none has.
+func ending(lines []string) string {
+	for _, line := range slices.Backward(lines) {
+		if strings.HasSuffix(line, "\r\n") {
+			return "\r\n"
+		}
+		if strings.HasSuffix(line, "\n") {
+			return "\n"
+		}
+	}
+	return "\n"
 }

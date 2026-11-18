@@ -71,6 +71,38 @@ func TestOwnSettingsSet(t *testing.T) {
 	}
 }
 
+// Setting one is a run as any other is: plain lines with --plain, at a
+// terminal too, and one document with --json.
+func TestOwnSettingSetPlainAndJSON(t *testing.T) {
+	tests := []struct {
+		flag string
+		want []string
+	}{
+		{"--plain", []string{"terminal ok set to ghostty\n", "kit-config ok committed and pushed kit.toml\n"}},
+		{"--json", []string{`{"schema":1,"kit":"0.1.0","machine":"laptop","attention":false,"steps":[` +
+			`{"id":"terminal","title":"terminal","state":"ok","summary":"set to ghostty"},` +
+			`{"id":"kit-config","title":"kit-config","state":"ok","summary":"committed and pushed kit.toml"}]}`}},
+	}
+	for _, tt := range tests {
+		w := laptopWorld(t)
+		w.terminal = true
+		w.expectSync(t, []string{"kit.toml"}, "kit terminal ghostty (laptop)")
+		out, errOut, code := w.run(t, "terminal", "ghostty", tt.flag)
+		if tt.flag == "--json" {
+			out = compact(t, out)
+		}
+		for _, want := range tt.want {
+			if code != 0 || !strings.Contains(out, want) {
+				t.Errorf("kit terminal ghostty %s printed\n%s%s exit %d; want %s", tt.flag, out, errOut, code, want)
+			}
+		}
+		want := strings.Replace(twoMacs, "primary = \"laptop\"\n", "primary = \"laptop\"\nterminal = \"ghostty\"\n", 1)
+		if got := w.read(t, kitToml); got != want {
+			t.Errorf("kit terminal ghostty %s: kit.toml =\n%s", tt.flag, got)
+		}
+	}
+}
+
 // Without a value, each shows the setting: the terminal kit.toml names, or
 // none, and the boot runs on in Terminal; when the nightly run falls due,
 // saying when it's the default. --json gives each as a document.
@@ -116,6 +148,7 @@ func TestOwnSettingsRefused(t *testing.T) {
 		{[]string{"nightly", "at", "25:00"}, "kit: \"25:00\" isn't a time of day, as in 03:00\n"},
 		{[]string{"nightly", "at", "3am"}, "kit: \"3am\" isn't a time of day, as in 03:00\n"},
 		{[]string{"terminal", "ghostty", "--none"}, "kit: name a terminal, or give --none, not both\n"},
+		{[]string{"terminal", ""}, "kit: name a terminal, or give --none\n"},
 	}
 	for _, tt := range tests {
 		w := laptopWorld(t)
@@ -125,6 +158,11 @@ func TestOwnSettingsRefused(t *testing.T) {
 		}
 		if got := w.read(t, kitToml); got != twoMacs {
 			t.Errorf("kit %v left kit.toml\n%s", tt.args, got)
+		}
+		for _, cmd := range w.fake.Commands() {
+			if slices.Contains(cmd.Args, "commit") {
+				t.Errorf("kit %v ran %s, want nothing committed", tt.args, cmd)
+			}
 		}
 	}
 }

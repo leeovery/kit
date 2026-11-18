@@ -588,7 +588,7 @@ terminal a new Mac's boot hands over to, one `apps.Terminals` knows, or with `--
 boot running on in Terminal; and `kit nightly at [<time>]`, `nightly_at`, a time of day as in
 04:30, written as HH:MM, shown with 03:00 when kit.toml sets none, said to be the default. Without
 a value each shows its setting, `--json` as a document. With one, it edits kit.toml in place: the
-setting's line replaced where it stands, its comment kept, else one added after the last setting
+setting's line replaced where it stands, its indent, comment and line ending kept, else one added after the last setting
 before the first table, the rest as it was; read back with the config's own loader, written
 whole, then kit.toml alone committed and pushed as `kit machine add` is, the message the command
 run. A value kit.toml says already changes nothing and commits nothing, its step saying so; set

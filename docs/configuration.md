@@ -66,7 +66,7 @@ one `[macs.<name>]` table.
 A kit older than `minimum_kit` stops and tells you to update kit. A format newer than kit
 reads does the same. Without `terminal`, the boot carries on in macOS's own Terminal.
 
-`kit terminal` and `kit nightly at` show their setting, or set it given a value. Each changes
+`kit terminal` and `kit nightly at` show their setting, or set it given a value. Each sets
 one line in place, keeps the rest of `kit.toml` as it is, then commits and pushes.
 `kit terminal --none` takes the line out.
 
