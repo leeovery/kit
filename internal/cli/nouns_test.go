@@ -26,15 +26,17 @@ func TestHelpGroupsTheCommands(t *testing.T) {
 	}
 }
 
-// kit nightly runs jobs by name, so none is named add or remove.
-func TestANightlyJobIsntNamedAdd(t *testing.T) {
-	w := laptopWorld(t)
-	_, errOut, code := w.run(t, "nightly", "add", "add", "--", "true")
-	if code != 2 || !strings.Contains(errOut, "a nightly job can't be named add: kit nightly add is the command") {
-		t.Errorf("printed %q, exit %d", errOut, code)
-	}
-	if got := w.readSection(t, "laptop", "nightly"); got != "" {
-		t.Errorf("[nightly] = %q, want nothing declared", got)
+// kit nightly runs jobs by name, so none is named add, remove or at.
+func TestANightlyJobIsntNamedAVerb(t *testing.T) {
+	for _, verb := range []string{"add", "remove", "at"} {
+		w := laptopWorld(t)
+		_, errOut, code := w.run(t, "nightly", "add", verb, "--", "true")
+		if want := "kit: a nightly job can't be named " + verb + ": kit nightly " + verb + " is the command\n"; code != 2 || errOut != want {
+			t.Errorf("kit nightly add %s printed %q, exit %d; want %q, exit 2", verb, errOut, code, want)
+		}
+		if got := w.readSection(t, "laptop", "nightly"); got != "" {
+			t.Errorf("kit nightly add %s: [nightly] = %q, want nothing declared", verb, got)
+		}
 	}
 }
 

@@ -531,6 +531,8 @@ kit why <name>               Where it's declared, whether it's installed, what n
 kit log                      What the last run did: every check, every command, with timings
 kit machine [<name>]         This Mac's name: shown, or set (one of kit.toml's Macs)
 kit machine add <name>       Add a Mac to kit-config, a copy of another's or empty   [--from] [--description]
+kit terminal [<name>]        The terminal a new Mac's boot hands over to: shown, or set in kit.toml   [--none]
+kit nightly at [<time>]      When the nightly run falls due: shown, or set in kit.toml (nightly_at)
 
 What kit manages, a command each:
 kit <kind> add <name>...     Install, and declare for this Mac   [--shared] [--temp] [--note]
@@ -555,10 +557,10 @@ kit step add <name> "<what it does>"; kit step remove <name>...  Steps of your o
 
 The command shape (the maintainer, 6 Oct): a command about one kind of thing names it first, then what to
 do, as in `kit brew add`, `kit secret sync`, `kit manual done`; one about the whole Mac is a verb
-alone (`status`, `apply`, `reconcile`, `nightly`, `list`, `why`, `log`, `machine`), a kind named
+alone (`status`, `apply`, `reconcile`, `nightly`, `list`, `why`, `log`, `machine`, `terminal`), a kind named
 after it a filter. Each thing's help shows only its own flags and verbs. The help lists the
 commands in groups: This Mac, Packages, Settings, Files and secrets, Your own. `kit nightly`
-runs jobs by name, so no nightly job is named `add` or `remove`. Kinds are named as words read
+runs jobs by name, so no nightly job is named `add`, `remove` or `at`. Kinds are named as words read
 after `kit`: `git-config` (not `git`, read as git's own add), `spotlight-exclusion` and
 `backup-exclusion` (not `spotlight`, read as adding to it), `login-item`, `defaults` (the lines
 are `defaults write`'s words), `mas` (casks are apps too; package kinds are named after their
@@ -579,6 +581,18 @@ own, which can bring the key git signs with, once git has a name and email, wait
 the rest of the run is done. Without them, or with a commit git can't sign yet, it's left for
 the next apply, saying why in git's words. A push that fails is the next apply's to push. Once
 committed and pushed, the boot's record forgets the Mac, and later runs have no such step.
+
+The two settings of kit.toml's own a person changes have commands, so nobody edits kit.toml by
+hand (the maintainer, 18 Nov 2026): `kit terminal [<name>]`, shaped as `kit machine` is, the
+terminal a new Mac's boot hands over to, one `apps.Terminals` knows, or with `--none` none, the
+boot running on in Terminal; and `kit nightly at [<time>]`, `nightly_at`, a time of day as in
+04:30, written as HH:MM, shown with 03:00 when kit.toml sets none, said to be the default. Without
+a value each shows its setting, `--json` as a document. With one, it edits kit.toml in place: the
+setting's line replaced where it stands, its indent, comment and line ending kept, else one added after the last setting
+before the first table, the rest as it was; read back with the config's own loader, written
+whole, then kit.toml alone committed and pushed as `kit machine add` is, the message the command
+run. A value kit.toml says already changes nothing and commits nothing, its step saying so; set
+when it was the default, `nightly_at` is written, so the time holds should the default change.
 
 Every Mac's SSH host key is recorded in its table, `host_key`, its type then the key (a host key
 is public), and its local hostname, `local_hostname`, as macOS's LocalHostName has it (`scutil
@@ -875,7 +889,8 @@ all. A file it can't read, it doesn't edit.
 format = 1
 minimum_kit = "0.1.0"
 primary = "laptop"
-nightly_at = "03:00"   # when the nightly run falls due: 03:00 unless set
+nightly_at = "03:00"   # when the nightly run falls due: 03:00 unless set; kit nightly at sets it
+terminal = "ghostty"   # what a new Mac's boot hands over to; kit terminal sets it
 
 [macs.laptop]
 description = "MacBook Pro"

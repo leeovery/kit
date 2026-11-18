@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/leeovery/kit/internal/check"
@@ -25,6 +26,10 @@ var lineKinds = map[string]string{
 	backupCommand: config.BackupsKind,
 }
 
+// nightlyVerbs are kit nightly's commands: names no nightly job can take,
+// as kit nightly runs jobs by name.
+var nightlyVerbs = []string{"add", "remove", "at"}
+
 // addLine declares a check, a job or a step by hand: args are its name, for
 // a step by hand what to do, then its command, which starts at dash, where
 // the -- was (-1 for none). A check runs once, and a step by hand's command
@@ -35,7 +40,7 @@ func (a *app) addLine(ctx context.Context, r *run, name string, args []string, d
 	var value string
 	var err error
 	switch {
-	case kind == config.NightlyKind && len(args) > 0 && (args[0] == "add" || args[0] == "remove"):
+	case kind == config.NightlyKind && len(args) > 0 && slices.Contains(nightlyVerbs, args[0]):
 		return fmt.Errorf("a nightly job can't be named %s: kit nightly %s is the command", args[0], args[0])
 	case opts.shared && len(args) == 1 && dash < 0 && opts.group == "":
 		if value, err = r.movedValue(kind, args[0], usage); err != nil {
