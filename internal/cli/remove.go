@@ -121,35 +121,70 @@ func (a *app) leftovers(ctx context.Context, r *run, k kind.Kind, names []string
 		for _, f := range left.Files {
 			lo.files = append(lo.files, tilde.Shown(r.homeDir, f))
 		}
+		var unread error
 		if left.Bundle != "" && lo.saving {
-			lo.saved = p.SavedFor(left.Bundle)
+			// A store kit won't read has no saved settings it would delete.
+			lo.saved, unread = p.SavedFor(ctx, left.Bundle)
 		}
 		zap, said, err := a.zapping(ctx, lo, opts.zap)
-		switch {
-		case err != nil:
+		if err != nil {
 			return nil, err
-		case zap:
-			how[name] = func(ctx context.Context) (string, error) {
-				forgot := p.Forget(ctx, lo.saved)
-				if err := l.RemoveAll(ctx, []string{name}); err != nil {
-					return "", putBack(ctx, p, lo.saved, err)
-				}
-				forgot = cmp.Or(forgot, p.Forget(ctx, p.Unowned(lo.zapped)))
-				if forgot != nil {
-					return lo.removed() + ", but its settings are still held to be restored: " + forgot.Error(), nil
-				}
-				return lo.removed(), nil
-			}
-		case said:
-			how[name] = func(ctx context.Context) (string, error) {
-				if err := k.Remove(ctx, []string{name}); err != nil {
-					return "", err
-				}
-				return lo.done + ", " + lo.kept(), nil
-			}
+		}
+		if do := lo.uninstaller(p, k, l, name, zap, said); unread != nil {
+			how[name] = unreadSaid(do, k, name, unread)
+		} else if do != nil {
+			how[name] = do
 		}
 	}
 	return how, nil
+}
+
+// uninstaller is how name, which left lo, is uninstalled: with what it
+// left, zap; else, said, saying it's kept; else as its kind does, nil.
+func (lo leftover) uninstaller(p *prefs.Prefs, k kind.Kind, l kind.Leaver, name string, zap, said bool) uninstaller {
+	switch {
+	case zap:
+		return func(ctx context.Context) (string, error) {
+			forgot := p.Forget(ctx, lo.saved)
+			if err := l.RemoveAll(ctx, []string{name}); err != nil {
+				return "", putBack(ctx, p, lo.saved, err)
+			}
+			forgot = cmp.Or(forgot, p.Forget(ctx, p.Unowned(lo.zapped)))
+			if forgot != nil {
+				return lo.removed() + ", but its settings are still held to be restored: " + forgot.Error(), nil
+			}
+			return lo.removed(), nil
+		}
+	case said:
+		return func(ctx context.Context) (string, error) {
+			if err := k.Remove(ctx, []string{name}); err != nil {
+				return "", err
+			}
+			return lo.done + ", " + lo.kept(), nil
+		}
+	}
+	return nil
+}
+
+// unreadSaid is do, or, nil, k's own uninstall of name, saying why kit
+// prefs' store wasn't read for the settings it saved, why: none of them
+// were taken out of it.
+func unreadSaid(do uninstaller, k kind.Kind, name string, why error) uninstaller {
+	if do == nil {
+		do = func(ctx context.Context) (string, error) {
+			if err := k.Remove(ctx, []string{name}); err != nil {
+				return "", err
+			}
+			return descriptorOf(k).Removes().Done, nil
+		}
+	}
+	return func(ctx context.Context) (string, error) {
+		done, err := do(ctx)
+		if err != nil {
+			return "", err
+		}
+		return done + "; its saved settings weren't looked at: " + why.Error(), nil
+	}
 }
 
 // putBack restores the saved settings' domains deleted before an uninstall
@@ -226,11 +261,11 @@ func (lo leftover) title() string {
 func (lo leftover) removes() string {
 	switch {
 	case len(lo.files) > 0 && lo.settings():
-		return "its files from this Mac, and its saved settings from kit-prefs"
+		return "its files from this Mac, and its saved settings from kit prefs' store"
 	case len(lo.files) > 0:
 		return "its files from this Mac"
 	}
-	return "its saved settings from kit-prefs"
+	return "its saved settings from kit prefs' store"
 }
 
 // removed is what an uninstall that removed them did.

@@ -3,6 +3,7 @@ package prefs
 import (
 	"archive/tar"
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -20,10 +21,13 @@ import (
 	"github.com/leeovery/kit/internal/runner"
 )
 
-// cloneTimeout is how long cloning the store may take; cloneRetry how
-// often kit tries again for a lock on the store another kit holds.
+// cloneTimeout is how long cloning the store may take; lookTimeout how long
+// asking the remote whether it has the branch may, which can come on every
+// look at the store while its clone is empty; cloneRetry how often kit
+// tries again for a lock on the store another kit holds.
 const (
 	cloneTimeout = 10 * time.Minute
+	lookTimeout  = 20 * time.Second
 	cloneRetry   = 100 * time.Millisecond
 )
 
@@ -40,16 +44,26 @@ func (p *Prefs) git(ctx context.Context, args ...string) (runner.Result, error) 
 	return p.Run.Run(ctx, runner.Command{Name: "git", Args: slices.Concat([]string{"-C", p.Clone}, args)})
 }
 
-// ensureClone clones the store when this Mac has no clone, then applies
-// its own git settings.
+// branch is the branch of kit-config's remote the store is on; origin, the
+// name of that remote in the store's clone, as git clone names it.
+const (
+	branch = "prefs"
+	origin = "origin"
+)
+
+// ensureClone clones the store when this Mac has no clone, or has one with
+// nothing committed (clone), refuses one that isn't of the branch
+// (checkClone), then applies its own git settings. Its caller holds the
+// lock on the store (lockCapture), as an empty clone may be replaced.
 func (p *Prefs) ensureClone(ctx context.Context) error {
-	_, err := os.Stat(filepath.Join(p.Clone, ".git"))
-	switch {
-	case errors.Is(err, fs.ErrNotExist):
-		if err := p.clone(ctx); err != nil {
-			return err
-		}
-	case err != nil:
+	remote, err := p.remote(ctx)
+	if err != nil {
+		return err
+	}
+	if err := p.clone(ctx, remote); err != nil {
+		return err
+	}
+	if err := p.checkClone(ctx, remote.url); err != nil {
 		return err
 	}
 	for _, kv := range gitConfig {
@@ -60,17 +74,129 @@ func (p *Prefs) ensureClone(ctx context.Context) error {
 	return nil
 }
 
+// config is kit-config's clone, as git drives it.
+func (p *Prefs) config() gitrepo.Repo {
+	return gitrepo.Repo{Dir: p.Config, Run: p.Run}
+}
+
+// kitRemote is kit-config's one remote, where the store is: its URL as set,
+// which the store's clone is given, so git's insteadOf and pushInsteadOf
+// rules rewrite both alike, and as git takes it, url, which the clone's is
+// checked against.
+type kitRemote struct{ set, url string }
+
+// remote is where the store is: kit-config's one remote.
+func (p *Prefs) remote(ctx context.Context) (kitRemote, error) {
+	url, err := p.config().RemoteURL(ctx)
+	if err == nil {
+		var set string
+		set, err = p.config().SetURL(ctx)
+		return kitRemote{set: set, url: url}, err
+	}
+	if errors.Is(err, gitrepo.ErrNoRemote) {
+		return kitRemote{}, errors.New("kit-config has no remote, so apps' settings have nowhere to be saved: they're saved on its prefs branch")
+	}
+	return kitRemote{}, fmt.Errorf("find kit-config's remote, where apps' settings are saved: %w", err)
+}
+
+// checkClone refuses the store's clone unless it's of remote, kit-config's
+// URL as git takes it, pushing where kit-config pushes, on the branch: one
+// cloned from where the store was before it moved to kit-config, or put on
+// another branch, is never captured into or restored from. Push URLs are
+// compared as git push has them, git's pushInsteadOf applied, as it is to
+// both alike. One off the branch part way through a rebase, as when one
+// was cut short, holds commits not yet pushed: it's refused as git's
+// operation under way, never as a clone to move aside.
+func (p *Prefs) checkClone(ctx context.Context, remote string) error {
+	at, err := p.repo().URL(ctx, origin)
+	if err != nil {
+		return err
+	}
+	if at != remote {
+		return fmt.Errorf("%s points at %s, not kit-config's remote (%s): apps' settings are saved on its %s branch now, so move the clone aside for kit to clone the branch there",
+			p.Clone, cmp.Or(gitrepo.Shown(at), "no remote"), gitrepo.Shown(remote), branch)
+	}
+	if err := p.checkPushes(ctx); err != nil {
+		return err
+	}
+	res, err := p.git(ctx, "symbolic-ref", "-q", "HEAD")
+	if exit, ok := errors.AsType[*runner.ExitError](err); err != nil && (!ok || exit.Code != 1) {
+		return err
+	}
+	on := strings.TrimPrefix(strings.TrimSpace(string(res.Stdout)), "refs/heads/")
+	if on == branch {
+		return nil
+	}
+	if err := p.repo().UnderWay(ctx); err != nil {
+		return fmt.Errorf("the store's clone, %s: %w", p.Clone, err)
+	}
+	return fmt.Errorf("%s is on %s, not kit-config's %s branch: move the clone aside for kit to clone the branch there", p.Clone, cmp.Or(on, "no branch"), branch)
+}
+
+// checkPushes refuses the store's clone unless it pushes where kit-config
+// does.
+func (p *Prefs) checkPushes(ctx context.Context) error {
+	want, err := p.config().PushURLs(ctx)
+	if err != nil {
+		return fmt.Errorf("find where kit-config pushes: %w", err)
+	}
+	res, err := p.git(ctx, "remote", "get-url", "--push", "--all", origin)
+	if err != nil {
+		return err
+	}
+	pushes := slices.DeleteFunc(strings.Split(string(res.Stdout), "\n"), func(url string) bool { return url == "" })
+	if slices.Equal(pushes, want) {
+		return nil
+	}
+	return fmt.Errorf("%s pushes to %s, where kit-config pushes to %s: move the clone aside for kit to clone the branch there", p.Clone, shown(pushes), shown(want))
+}
+
+// shown are urls as kit names them (gitrepo.Shown), and'd.
+func shown(urls []string) string {
+	names := make([]string, len(urls))
+	for i, url := range urls {
+		names[i] = gitrepo.Shown(url)
+	}
+	return strings.Join(names, " and ")
+}
+
+// checked refuses the store's clone, when this Mac has one, unless it's of
+// kit-config's branch, as checkClone does.
+func (p *Prefs) checked(ctx context.Context) error {
+	if _, err := os.Stat(filepath.Join(p.Clone, ".git")); err != nil {
+		return nil
+	}
+	remote, err := p.remote(ctx)
+	if err != nil {
+		return err
+	}
+	return p.checkClone(ctx, remote.url)
+}
+
+// cloneState is how this Mac's clone of the store stands.
+type cloneState int
+
+const (
+	noClone cloneState = iota
+	// emptyClone is a clone with no commit on any branch, as one made
+	// before the branch was: replaced once the branch is there, losing no
+	// commit.
+	emptyClone
+	madeClone
+)
+
 // clone clones the store, aside, then puts the clone in its place whole,
 // so that one cut short, by its time limit or the run stopping, leaves none
 // that a later run takes for whole: it clones again, what that one left
-// cleared first. It holds a lock beside the clone throughout, so no two
-// kits clone at once: one that waited for it finds the clone the other
-// made. A folder in the clone's place that isn't one is refused before
-// anything's downloaded.
-func (p *Prefs) clone(ctx context.Context) error {
-	if p.Remote == "" {
-		return errors.New("kit.toml names no prefs_repo for apps' settings")
-	}
+// cleared first. An empty clone of kit-config's branch is cloned again once
+// the remote has the branch, so a Mac that made one before the branch was,
+// as a new Mac whose boot came before any Mac's first capture, takes the
+// branch another Mac's capture made; offline, or with the branch still to
+// be made, it's kept, and a capture carries on in it. It holds a lock
+// beside the clone throughout, so no two kits clone at once: one that
+// waited for it finds the clone the other made. A folder in the clone's
+// place that isn't one is refused before anything's downloaded.
+func (p *Prefs) clone(ctx context.Context, remote kitRemote) error {
 	if err := os.MkdirAll(filepath.Dir(p.Clone), 0o700); err != nil {
 		return err
 	}
@@ -79,24 +205,161 @@ func (p *Prefs) clone(ctx context.Context) error {
 		return err
 	}
 	defer unlock()
-	if _, err := os.Stat(filepath.Join(p.Clone, ".git")); err == nil {
+	state, err := p.clonedYet(ctx)
+	switch {
+	case err != nil:
+		return err
+	case state == madeClone:
 		return nil
+	case state == emptyClone:
+		// An empty clone of anywhere else is refused, never deleted.
+		if err := p.checkClone(ctx, remote.url); err != nil {
+			return err
+		}
 	}
-	if in, err := os.ReadDir(p.Clone); err == nil && len(in) > 0 {
-		return fmt.Errorf("%s isn't a clone of the prefs repository, and isn't empty: move it aside for kit to clone the store there", p.Clone)
+	carried, err := p.carried(ctx)
+	if err != nil {
+		return err
 	}
+	has, err := p.hasBranch(ctx, remote.set, carried)
+	switch {
+	case state == emptyClone && (err != nil || !has):
+		return nil
+	case err != nil:
+		return err
+	}
+	return p.replace(ctx, remote.set, has, carried)
+}
+
+// replace puts a clone of remote's branch, as cloneBranch makes it, in the
+// place of whatever's there, cloned aside first, so a clone that fails
+// leaves what was there.
+func (p *Prefs) replace(ctx context.Context, remote string, has bool, carried [][2]string) error {
 	aside := p.Clone + ".cloning"
 	if err := os.RemoveAll(aside); err != nil {
 		return err
 	}
 	defer func() { _ = os.RemoveAll(aside) }()
-	if _, err := p.Run.Run(ctx, runner.Command{Name: "git", Args: []string{"clone", "--quiet", p.Remote, aside}, Timeout: cloneTimeout}); err != nil {
-		return fmt.Errorf("clone the prefs repository: %w", err)
+	if err := p.cloneBranch(ctx, remote, aside, has, carried); err != nil {
+		return fmt.Errorf("clone kit-config's %s branch: %w", branch, err)
+	}
+	if err := os.RemoveAll(p.Clone); err != nil {
+		return err
 	}
 	if err := os.Rename(aside, p.Clone); err != nil {
-		return fmt.Errorf("put the prefs repository's clone in place: %w", err)
+		return fmt.Errorf("put the store's clone in place: %w", err)
 	}
 	return nil
+}
+
+// clonedYet is how this Mac's clone of the store stands: an error for a
+// folder in its place that isn't a clone, and isn't empty. A clone with no
+// branch, as git lists them, has no commit: HEAD unborn says only that the
+// branch it's on has none.
+func (p *Prefs) clonedYet(ctx context.Context) (cloneState, error) {
+	_, err := os.Stat(filepath.Join(p.Clone, ".git"))
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		if in, err := os.ReadDir(p.Clone); err == nil && len(in) > 0 {
+			return noClone, fmt.Errorf("%s isn't a clone of kit-config's %s branch, and isn't empty: move it aside for kit to clone the branch there", p.Clone, branch)
+		}
+		return noClone, nil
+	case err != nil:
+		return noClone, err
+	}
+	res, err := p.git(ctx, "for-each-ref", "--count=1", "--format=%(refname)", "refs/heads")
+	switch {
+	case err != nil:
+		return noClone, err
+	case strings.TrimSpace(string(res.Stdout)) == "":
+		return emptyClone, nil
+	}
+	return madeClone, nil
+}
+
+// cloneBranch clones remote's branch alone into dir, a clone that fetches
+// only it, so kit-config's own history never comes with it, with carried,
+// the git settings it takes from kit-config's, as git clone's -c keeps them
+// in the clone. With the remote holding no such branch, has false, as
+// before the first capture, git can't clone it: dir is made the clone it
+// would be, empty, on the branch and tracking it, for that capture's push
+// to make it.
+func (p *Prefs) cloneBranch(ctx context.Context, remote, dir string, has bool, carried [][2]string) error {
+	if has {
+		args := slices.Concat([]string{"clone"}, options(carried), []string{"--quiet", "--single-branch", "--branch", branch, remote, dir})
+		_, err := p.Run.Run(ctx, runner.Command{Name: "git", Args: args, Timeout: cloneTimeout})
+		return err
+	}
+	made := [][]string{
+		{"init", "--quiet", "--initial-branch=" + branch, dir},
+		{"-C", dir, "remote", "add", "-t", branch, origin, remote},
+		{"-C", dir, "config", "branch." + branch + ".remote", origin},
+		{"-C", dir, "config", "branch." + branch + ".merge", "refs/heads/" + branch},
+	}
+	for _, kv := range carried {
+		made = append(made, []string{"-C", dir, "config", "--add", kv[0], kv[1]})
+	}
+	for _, args := range made {
+		if _, err := p.Run.Run(ctx, runner.Command{Name: "git", Args: args}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// carried are kit-config's own git settings the store's clone takes, so
+// whatever reaches kit-config reaches the store, and it pushes where
+// kit-config does: how it signs in to its remote (its credential settings,
+// as the boot sets one to sign in through GitHub's CLI), and the push URLs
+// its remote has set, as origin's. Each is a key and its value.
+func (p *Prefs) carried(ctx context.Context) ([][2]string, error) {
+	res, err := p.Run.Run(ctx, runner.Command{Name: "git", Args: []string{"-C", p.Config, "config", "--local", "--get-regexp", "-z", carriedSettings}})
+	if exit, ok := errors.AsType[*runner.ExitError](err); ok && exit.Code == 1 {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read how kit-config reaches its remote: %w", err)
+	}
+	var settings [][2]string
+	for setting := range strings.SplitSeq(string(res.Stdout), "\x00") {
+		if setting == "" {
+			continue
+		}
+		// A key with no value, as git prints it, is true.
+		key, value, ok := strings.Cut(setting, "\n")
+		if !ok {
+			value = "true"
+		}
+		if strings.HasPrefix(key, "remote.") {
+			key = "remote." + origin + ".pushurl"
+		}
+		settings = append(settings, [2]string{key, value})
+	}
+	return settings, nil
+}
+
+// carriedSettings matches the settings carried takes, as git config's
+// --get-regexp reads it.
+const carriedSettings = `^(credential\..*|remote\..*\.pushurl)$`
+
+// hasBranch reports whether remote has the branch, as git ls-remote says,
+// exiting 2 for no such branch, with carried's settings.
+func (p *Prefs) hasBranch(ctx context.Context, remote string, carried [][2]string) (bool, error) {
+	args := slices.Concat(options(carried), []string{"ls-remote", "--quiet", "--exit-code", remote, "refs/heads/" + branch})
+	_, err := p.Run.Run(ctx, runner.Command{Name: "git", Args: args, Timeout: lookTimeout})
+	if exit, ok := errors.AsType[*runner.ExitError](err); ok && exit.Code == 2 {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+// options are settings, each a key and its value, as git's -c options.
+func options(settings [][2]string) []string {
+	var args []string
+	for _, kv := range settings {
+		args = append(args, "-c", kv[0]+"="+kv[1])
+	}
+	return args
 }
 
 // lockClone takes the lock on cloning the store, beside the clone, trying
@@ -104,7 +367,7 @@ func (p *Prefs) clone(ctx context.Context) error {
 func (p *Prefs) lockClone(ctx context.Context) (unlock func(), err error) {
 	unlock, err = p.lock(ctx, p.Clone+".lock")
 	if err != nil && ctx.Err() == nil {
-		err = fmt.Errorf("lock the prefs repository's clone: %w", err)
+		err = fmt.Errorf("lock the store's clone: %w", err)
 	}
 	return unlock, err
 }
@@ -158,9 +421,10 @@ func (p *Prefs) lock(ctx context.Context, path string) (unlock func(), err error
 }
 
 // repo is the store's clone, as git drives it: pulled, committed and
-// pushed as kit-config is.
+// pushed as kit-config is, but for its branch, which may be missing from
+// the remote till the first capture's push makes it.
 func (p *Prefs) repo() gitrepo.Repo {
-	return gitrepo.Repo{Dir: p.Clone, Run: p.Run, Sleep: p.Sleep}
+	return gitrepo.Repo{Dir: p.Clone, Run: p.Run, Sleep: p.Sleep, BranchMayBeMissing: true}
 }
 
 // push sends the store's commits to its remote, only when every URL Push
@@ -214,7 +478,10 @@ func (p *Prefs) History(ctx context.Context, mac, target string, count int) ([]C
 		mac = p.Mac
 	}
 	if _, err := os.Stat(filepath.Join(p.Clone, ".git")); err != nil {
-		return nil, errors.New("this Mac has no clone of the prefs repository yet: its first capture or restore makes one")
+		return nil, fmt.Errorf("this Mac has no clone of kit-config's %s branch yet: its first capture or restore makes one", branch)
+	}
+	if err := p.checked(ctx); err != nil {
+		return nil, err
 	}
 	// Each change starts with a record separator, its fields apart by NULs.
 	format := []string{"log", "--no-color", "-n" + strconv.Itoa(count), "--format=%x1e%h%x00%aI%x00%s"}
@@ -227,6 +494,12 @@ func (p *Prefs) History(ctx context.Context, mac, target string, count int) ([]C
 		format = append(format, "-p")
 	} else {
 		format = append(format, "--shortstat")
+	}
+	switch state, err := p.clonedYet(ctx); {
+	case err != nil:
+		return nil, err
+	case state == emptyClone:
+		return nil, fmt.Errorf("%w for %s", ErrNoHistory, path)
 	}
 	res, err := p.git(ctx, slices.Concat(format, []string{"--", path})...)
 	if err != nil {
@@ -327,10 +600,25 @@ type Save struct {
 }
 
 // Saves are the folders in the store with a save, sorted by name, this
-// Mac's too. The store's cloned first, when this Mac has no clone yet.
+// Mac's too. The store's cloned first, holding the lock on it, when this
+// Mac has no clone yet, or has an empty one and the remote has the branch,
+// so a paused Mac never takes a clone made before another Mac's first
+// capture for a store with nothing to restore: an empty clone, offline or
+// with the branch still to be made, has none.
 func (p *Prefs) Saves(ctx context.Context) ([]Save, error) {
+	unlock, err := p.lockCapture(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 	if err := p.ensureClone(ctx); err != nil {
 		return nil, err
+	}
+	switch state, err := p.clonedYet(ctx); {
+	case err != nil:
+		return nil, err
+	case state == emptyClone:
+		return nil, nil
 	}
 	entries, err := os.ReadDir(p.Clone)
 	if err != nil {

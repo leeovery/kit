@@ -51,11 +51,31 @@ func TestPrefs(t *testing.T) {
 	}
 }
 
-// configures scripts kit setting up git in the store's clone.
-func configures(fake *runnertest.Fake, clone string) {
+// kitConfig is where kit-config's clone fetches from, and so the store.
+const kitConfig = "git@github.com:someone/kit-config.git"
+
+// configures scripts kit-config's clone, at config, fetching from kitConfig,
+// its prefs branch there, and the store's clone, at clone, a clone of that
+// branch: kit finding the store, and setting up git in its clone.
+func configures(fake *runnertest.Fake, config, clone string) {
+	fake.On("git", "-C", config, "remote").Prints("origin\n")
+	fake.On("git", "-C", config, "remote", "get-url", "origin").Prints(kitConfig + "\n")
+	fake.On("git", "-C", config, "config", "--get", "remote.origin.url").Prints(kitConfig + "\n")
+	fake.On("git", "-C", config, "remote", "get-url", "--push", "--all", "origin").Prints(kitConfig + "\n")
+	fake.On("git", "-C", config, "config", "--local", "--get-regexp", "-z", `^(credential\..*|remote\..*\.pushurl)$`).Exits(1)
+	fake.On("git", "ls-remote", "--quiet", "--exit-code", kitConfig, "refs/heads/prefs").Prints("abc123\trefs/heads/prefs\n")
+	fake.On("git", "-C", clone, "for-each-ref", "--count=1", "--format=%(refname)", "refs/heads").Prints("refs/heads/prefs\n")
+	fake.On("git", "-C", clone, "remote", "get-url", "origin").Prints(kitConfig + "\n")
+	fake.On("git", "-C", clone, "remote", "get-url", "--push", "--all", "origin").Prints(kitConfig + "\n")
+	fake.On("git", "-C", clone, "symbolic-ref", "-q", "HEAD").Prints("refs/heads/prefs\n")
 	for _, kv := range [][2]string{{"user.name", "kit"}, {"user.email", "kit@localhost"}, {"commit.gpgsign", "false"}, {"tag.gpgsign", "false"}, {"core.excludesFile", "/dev/null"}, {"core.hooksPath", "/dev/null"}, {"core.autocrlf", "false"}} {
 		fake.On("git", "-C", clone, "config", kv[0], kv[1])
 	}
+}
+
+// clonesInto is git cloning kit-config's prefs branch alone into dir.
+func clonesInto(dir string) []string {
+	return []string{"clone", "--quiet", "--single-branch", "--branch", "prefs", kitConfig, dir}
 }
 
 // settingsStore is a Mac, laptop, whose apps' settings aren't switched
@@ -65,14 +85,14 @@ func configures(fake *runnertest.Fake, clone string) {
 // from, its paused to-do as its check finds it.
 func settingsStore(t *testing.T, saves map[string]string, from string) (fake *runnertest.Fake, p *prefs.Prefs, step engine.Step, paused check.Item) {
 	t.Helper()
-	state := t.TempDir()
+	state, config := t.TempDir(), t.TempDir()
 	clone := filepath.Join(t.TempDir(), "prefs")
 	if err := os.WriteFile(filepath.Join(state, "prefs.json"), []byte(`{}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	fake = runnertest.New(t)
-	configures(fake, clone)
-	fake.On("git", "clone", "--quiet", "git@github.com:someone/prefs.git", clone+".cloning").Does(func() {
+	configures(fake, config, clone)
+	fake.On("git", clonesInto(clone+".cloning")...).Does(func() {
 		if err := os.MkdirAll(filepath.Join(clone+".cloning", ".git"), 0o700); err != nil {
 			t.Error(err)
 		}
@@ -85,7 +105,7 @@ func settingsStore(t *testing.T, saves map[string]string, from string) (fake *ru
 	}
 	fake.On("git", "-C", clone, "remote")
 	fake.On("git", "-C", clone, "rev-parse", "HEAD").Prints("abc123\n")
-	p = prefs.New(fake, t.TempDir(), state, clone, "git@github.com:someone/prefs.git", "laptop", prefs.Lists{}, now)
+	p = prefs.New(fake, t.TempDir(), state, clone, config, "laptop", prefs.Lists{}, now)
 	p.Probes, p.AppDirs = nil, []string{t.TempDir()}
 	step = steps.Prefs(p, from, now)
 	return fake, p, step, step.Check(t.Context()).Items[0]
@@ -130,7 +150,9 @@ func TestAppsSettingsKeys(t *testing.T) {
 			}
 		})
 	}
-	noStore := steps.Prefs(prefs.New(runnertest.New(t), t.TempDir(), t.TempDir(), t.TempDir(), "", "laptop", prefs.Lists{}, now), "", now)
+	fake, config := runnertest.New(t), t.TempDir()
+	fake.On("git", "-C", config, "remote")
+	noStore := steps.Prefs(prefs.New(fake, t.TempDir(), t.TempDir(), t.TempDir(), config, "laptop", prefs.Lists{}, now), "", now)
 	paused := noStore.Check(t.Context()).Items[0]
 	if ready := noStore.Choice.Ready(t.Context(), paused); !slices.Equal(ready.ToDo.Keys, paused.ToDo.Keys) || paused.ToDo.Keys[0].Does != "restores the last save" {
 		t.Errorf("with no store to look at, the keys are %v; want the check's, %v", ready.ToDo.Keys, paused.ToDo.Keys)
@@ -193,19 +215,30 @@ func TestAppsSettingsChoice(t *testing.T) {
 
 // Applied, the settings step starts afresh by itself when the store holds
 // no source, raising no card, the log saying so; with a source, or a store it can't read, it
-// leaves the card be.
+// leaves the card be. A clone made before the branch was, empty, is cloned
+// again first, once another Mac's capture has made the branch, so a source
+// there is found.
 func TestAppsSettingsWithNoSource(t *testing.T) {
 	for _, tt := range []struct {
 		name, from string
 		saves      map[string]string
+		empty      bool
 		afresh     bool
 	}{
-		{"no source", "", map[string]string{"studio": "2026-10-25"}, true},
-		{"its own", "", map[string]string{"laptop": "2026-10-04"}, false},
-		{"the Mac it started from", "studio", map[string]string{"studio": "2026-10-25"}, false},
+		{"no source", "", map[string]string{"studio": "2026-10-25"}, false, true},
+		{"its own", "", map[string]string{"laptop": "2026-10-04"}, false, false},
+		{"the Mac it started from", "studio", map[string]string{"studio": "2026-10-25"}, false, false},
+		{"its own, in a clone made before the branch was", "", map[string]string{"laptop": "2026-10-04"}, true, false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			_, _, step, _ := settingsStore(t, tt.saves, tt.from)
+			fake, p, step, _ := settingsStore(t, tt.saves, tt.from)
+			if tt.empty {
+				if err := os.MkdirAll(filepath.Join(p.Clone, ".git"), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				fake.On("git", "-C", p.Clone, "for-each-ref", "--count=1", "--format=%(refname)", "refs/heads").Prints("").
+					Then().Prints("refs/heads/prefs\n")
+			}
 			var logged []string
 			ctx := event.WithLogging(t.Context(), func(l event.Logged) { logged = append(logged, l.Line) })
 			if err := step.Apply(ctx, step.Check(t.Context())); err != nil {
@@ -221,13 +254,14 @@ func TestAppsSettingsWithNoSource(t *testing.T) {
 		})
 	}
 	fake := runnertest.New(t)
-	clone := filepath.Join(t.TempDir(), "prefs")
-	fake.On("git", "clone", "--quiet", "git@github.com:someone/prefs.git", clone+".cloning").Exits(128)
+	clone, config := filepath.Join(t.TempDir(), "prefs"), t.TempDir()
+	configures(fake, config, clone)
+	fake.On("git", clonesInto(clone+".cloning")...).Exits(128)
 	state := t.TempDir()
 	if err := os.WriteFile(filepath.Join(state, "prefs.json"), []byte(`{}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	step := steps.Prefs(prefs.New(fake, t.TempDir(), state, clone, "git@github.com:someone/prefs.git", "laptop", prefs.Lists{}, now), "", now)
+	step := steps.Prefs(prefs.New(fake, t.TempDir(), state, clone, config, "laptop", prefs.Lists{}, now), "", now)
 	if err := step.Apply(t.Context(), step.Check(t.Context())); err != nil {
 		t.Fatalf("apply with a store it can't read = %v", err)
 	}
@@ -304,7 +338,7 @@ const noSettings = `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><
 // leaving what failed otherwise alone, which the check goes on saying is
 // held, and the to-do's gone.
 func TestAppsSettingsAppsToOpen(t *testing.T) {
-	state, clone, home, appDir := t.TempDir(), filepath.Join(t.TempDir(), "prefs"), t.TempDir(), t.TempDir()
+	state, config, clone, home, appDir := t.TempDir(), t.TempDir(), filepath.Join(t.TempDir(), "prefs"), t.TempDir(), t.TempDir()
 	if err := os.WriteFile(filepath.Join(state, "prefs.json"), []byte(`{}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -328,7 +362,7 @@ func TestAppsSettingsAppsToOpen(t *testing.T) {
 		fake.On("osascript", "-e", `application id "`+a[1]+`" is running`).Prints("false\n")
 		fake.On("defaults", "delete", a[1])
 	}
-	configures(fake, clone)
+	configures(fake, config, clone)
 	fake.On("git", "-C", clone, "remote")
 	fake.On("git", "-C", clone, "rev-parse", "HEAD").Prints("abc123\n")
 	fake.On("git", "-C", clone, "log", "-1", "--format=%cI", "--", "laptop").Prints("2026-10-04T03:00:00Z\n")
@@ -341,7 +375,7 @@ func TestAppsSettingsAppsToOpen(t *testing.T) {
 	fake.On("codesign", "-d", "--entitlements", "-", "--xml", apps["com.example.stubborn"])
 	fake.On("defaults", "export", "com.example.stubborn", "-").Prints(noSettings)
 	fake.On("defaults", "import", "com.example.stubborn", filepath.Join(clone, "laptop", "domains", "com.example.stubborn.plist")).Exits(1)
-	p := prefs.New(fake, home, state, clone, "git@github.com:someone/prefs.git", "laptop", prefs.Lists{}, now)
+	p := prefs.New(fake, home, state, clone, config, "laptop", prefs.Lists{}, now)
 	p.Probes, p.AppDirs, p.Sleep = nil, []string{appDir}, func(time.Duration) {}
 	step := steps.Prefs(p, "", now)
 	paused := step.Check(t.Context()).Items[0]
@@ -476,7 +510,7 @@ func TestAppsSettingsHeldNeverHideCapture(t *testing.T) {
 // whatever it finds, after the apps it installs, it restores those whose
 // apps are installed now, the log saying so; with none, it says nothing.
 func TestAppsSettingsKeptForAppsNotInstalled(t *testing.T) {
-	state, clone, appDir := t.TempDir(), filepath.Join(t.TempDir(), "prefs"), t.TempDir()
+	state, config, clone, appDir := t.TempDir(), t.TempDir(), filepath.Join(t.TempDir(), "prefs"), t.TempDir()
 	write := func(path, text string) {
 		t.Helper()
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
@@ -495,7 +529,7 @@ func TestAppsSettingsKeptForAppsNotInstalled(t *testing.T) {
 		write(filepath.Join(clone, "laptop", "domains", d+".plist"), theme)
 	}
 	fake := runnertest.New(t)
-	p := prefs.New(fake, t.TempDir(), state, clone, "git@github.com:someone/prefs.git", "laptop", prefs.Lists{}, now)
+	p := prefs.New(fake, t.TempDir(), state, clone, config, "laptop", prefs.Lists{}, now)
 	p.Probes, p.AppDirs = nil, []string{appDir}
 	step := steps.Prefs(p, "", now)
 	if !step.AlwaysApply {
@@ -513,7 +547,7 @@ func TestAppsSettingsKeptForAppsNotInstalled(t *testing.T) {
 
 	app := filepath.Join(appDir, "Example.app")
 	write(filepath.Join(app, "Contents", "Info.plist"), `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>com.example.app</string></dict></plist>`)
-	configures(fake, clone)
+	configures(fake, config, clone)
 	fake.On("git", "-C", clone, "remote")
 	fake.On("git", "-C", clone, "rev-parse", "HEAD").Prints("abc123\n")
 	fake.On("osascript", "-e", `application id "com.example.app" is running`).Prints("false\n")

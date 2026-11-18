@@ -98,6 +98,7 @@ func titles(list logs.Record) []string {
 func TestApplyWorksThroughTheToDos(t *testing.T) {
 	w, kb := toDoWorld(t, false)
 	w.writeSection(t, "laptop", "features", "prefs\n")
+	w.storeOutOfReach()
 	w.writeSection(t, "laptop", "manual", `sharing "Allow remote users Full Disk Access" --group "System Settings"`+"\n  System Settings › General › Sharing\n")
 	notified(t, w, kb, "Restore application settings", "First, so the apps you open next start with yours.", ask.Key{Text: "f"})
 	notified(t, w, kb, "Allow remote users Full Disk Access", "System Settings › General › Sharing", ask.Key{Text: " "})

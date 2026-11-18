@@ -4,7 +4,11 @@ kit prefs saves apps' settings and restores them on a new Mac: every
 preferences domain that isn't Apple's or the system's, through defaults
 export and import, and the settings files kit-config's `[prefs files]`
 names. It's the feature prefs (`kit feature on prefs`), and its store is
-the private repository kit.toml's prefs_repo names, a folder for each Mac.
+kit-config's prefs branch, a folder for each Mac, on the same remote as
+kit-config: nothing to set up, and the first capture makes the branch.
+kit clones that branch alone into its data folder. The boot clones
+kit-config's own branch alone, so a kit-config it cloned never fetches
+prefs; a clone of kit-config made otherwise may fetch every branch.
 
 ## What it keeps
 

@@ -3,7 +3,7 @@
 // Apple's or the system's, through defaults export and import (cfprefsd's
 // view, never a plist copied behind its back), and the settings files
 // [prefs files] names. Each Mac keeps them in its own folder of one git
-// repository (kit.toml's prefs_repo), cloned in kit's data folder: a commit
+// branch, kit-config's prefs, cloned alone in kit's data folder: a commit
 // for each capture that changed anything, pushed, so history can restore
 // the settings as they were on a date.
 //
@@ -110,9 +110,10 @@ type Prefs struct {
 	Home string
 	// State is kit's state folder, holding the record and saved settings.
 	State string
-	// Clone is the store's clone; Remote, where it's cloned from.
+	// Clone is the store's clone, of the prefs branch of Config's one
+	// remote, Config being kit-config's clone.
 	Clone  string
-	Remote string
+	Config string
 	// Mac is this Mac's name: its folder in the store.
 	Mac   string
 	Lists Lists
@@ -129,10 +130,11 @@ type Prefs struct {
 }
 
 // New returns apps' settings for the user whose home is home, with kit's
-// state in stateDir and the store's clone in clone, cloned from remote.
-func New(run runner.Runner, home, stateDir, clone, remote, mac string, lists Lists, now func() time.Time) *Prefs {
+// state in stateDir and the store's clone in clone, of the prefs branch of
+// the remote of kit-config's clone, config.
+func New(run runner.Runner, home, stateDir, clone, config, mac string, lists Lists, now func() time.Time) *Prefs {
 	return &Prefs{
-		Run: run, Home: home, State: stateDir, Clone: clone, Remote: remote, Mac: mac, Lists: lists, Now: now,
+		Run: run, Home: home, State: stateDir, Clone: clone, Config: config, Mac: mac, Lists: lists, Now: now,
 		// The TCC database last, as kit's tests put theirs elsewhere.
 		Probes: []string{
 			filepath.Join(home, "Library/Safari"), filepath.Join(home, "Library/Mail"), filepath.Join(home, "Library/Messages"),
@@ -292,6 +294,9 @@ func (p *Prefs) claim(ctx context.Context, store, hardware string) error {
 // store's clone, and which: this Mac takes the folder over as it restores
 // or starts afresh (TakeOver).
 func (p *Prefs) TakingOver(ctx context.Context) (Owner, bool, error) {
+	if err := p.checked(ctx); err != nil {
+		return Owner{}, false, err
+	}
 	owner, owned, err := readOwner(filepath.Join(p.Clone, p.Mac))
 	if err != nil || !owned {
 		return Owner{}, false, err

@@ -106,7 +106,7 @@ func (r Repo) pull(ctx context.Context) (remote string, t tracking, err error) {
 	if t, err = r.upstream(ctx); err != nil {
 		return "", tracking{}, err
 	}
-	if err := r.fetch(ctx, remote); err != nil {
+	if err := r.fetch(ctx, remote, t); err != nil {
 		return "", tracking{}, err
 	}
 	n, err := r.behind(ctx, t.up)
@@ -179,15 +179,34 @@ func (r Repo) settled(ctx context.Context, gitDir string) ([]entry, error) {
 	return dirty, nil
 }
 
-// fetch brings in remote's commits, pruning its branches gone from it.
-func (r Repo) fetch(ctx context.Context, remote string) error {
-	if _, err := r.git(ctx, "fetch", "--prune", "--quiet", remote); err != nil {
-		if unreachable(err) {
-			return errors.New("couldn't reach the remote, so nothing was pushed")
+// fetch brings in remote's commits, pruning its branches gone from it. A
+// clone of one branch fetches that branch alone, and git fails the fetch
+// while the remote hasn't it: in a repository whose branch may be missing
+// (BranchMayBeMissing), t's upstream not there has nothing to bring in, as
+// on a new, empty remote, and its remote-tracking ref, which the fetch
+// couldn't prune, is deleted, so what's waiting is counted against the
+// remote as it is.
+func (r Repo) fetch(ctx context.Context, remote string, t tracking) error {
+	_, err := r.git(ctx, "fetch", "--prune", "--quiet", remote)
+	switch {
+	case err == nil:
+		return nil
+	case r.BranchMayBeMissing && t.up != "" && notThere(err, t.merge):
+		if _, err := r.git(ctx, "update-ref", "-d", t.up); err != nil {
+			return fmt.Errorf("couldn't forget %s, gone from the remote, so nothing was pushed: %w", t.up, err)
 		}
-		return fmt.Errorf("couldn't bring in the remote's changes, so nothing was pushed: %w", err)
+		return nil
+	case unreachable(err):
+		return errors.New("couldn't reach the remote, so nothing was pushed")
 	}
-	return nil
+	return fmt.Errorf("couldn't bring in the remote's changes, so nothing was pushed: %w", err)
+}
+
+// notThere reports whether git failed a fetch for want of ref on the
+// remote, as its fatal: line says.
+func notThere(err error, ref string) bool {
+	exit, ok := errors.AsType[*runner.ExitError](err)
+	return ok && slices.Contains(exit.Lines("fatal:"), "fatal: couldn't find remote ref "+ref)
 }
 
 // behind is how many of up's commits HEAD hasn't, up the branch's
@@ -279,11 +298,10 @@ func keptBack(path, was string) error {
 // git's markers in a file that may be linked into the home folder.
 // Nothing's touched.
 func (r Repo) clashes(ctx context.Context, dirty []entry, up string) error {
-	res, err := r.git(ctx, "diff", "--name-only", "-z", "--no-renames", "HEAD..."+up)
+	incoming, err := r.incoming(ctx, up)
 	if err != nil {
 		return fmt.Errorf("couldn't read the remote's changes, so nothing was pushed: %w", err)
 	}
-	incoming := names(res.Stdout)
 	var hit []string
 	for _, e := range dirty {
 		meets := func(p string) bool { return p == e.path || e.nested() && strings.HasPrefix(p, e.path) }
@@ -295,6 +313,34 @@ func (r Repo) clashes(ctx context.Context, dirty []entry, up string) error {
 		return nil
 	}
 	return fmt.Errorf("the remote's commits change what's not committed here, so nothing was touched or pushed: commit or undo the change to %s first", strings.Join(hit, ", "))
+}
+
+// incoming are the paths up's commits change, those HEAD hasn't: since the
+// two parted, or, with no commit in common, as when two Macs each began the
+// store's branch, every path up has, as the rebase then replays every
+// commit HEAD has onto up. Git's diff of HEAD...up fails without a commit
+// in common, which alone has it ask for up's tree.
+func (r Repo) incoming(ctx context.Context, up string) ([]string, error) {
+	res, err := r.git(ctx, "diff", "--name-only", "-z", "--no-renames", "HEAD..."+up)
+	if err != nil {
+		if related, rerr := r.related(ctx, up); rerr != nil || related {
+			return nil, err
+		}
+		if res, err = r.git(ctx, "ls-tree", "-r", "--name-only", "-z", up); err != nil {
+			return nil, err
+		}
+	}
+	return names(res.Stdout), nil
+}
+
+// related reports whether HEAD and up have a commit in common, as git
+// merge-base says, exiting 1 for none.
+func (r Repo) related(ctx context.Context, up string) (bool, error) {
+	_, err := r.git(ctx, "merge-base", "HEAD", up)
+	if exit, ok := errors.AsType[*runner.ExitError](err); ok && exit.Code == 1 {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 // catchUp rebases what's committed here onto up, a remote-tracking ref, what
@@ -437,6 +483,39 @@ func (r Repo) PushURLs(ctx context.Context) ([]string, error) {
 		return nil, err
 	}
 	return slices.DeleteFunc(strings.Split(string(res.Stdout), "\n"), func(url string) bool { return url == "" }), nil
+}
+
+// RemoteURL is the URL the repository's one remote is fetched from, as URL
+// has it: ErrNoRemote without a remote; an error that's ErrNowhere with
+// several.
+func (r Repo) RemoteURL(ctx context.Context) (string, error) {
+	remote, err := r.remote(ctx)
+	if err != nil {
+		return "", err
+	}
+	return r.URL(ctx, remote)
+}
+
+// SetURL is the URL the repository's one remote has set, before git's
+// insteadOf and pushInsteadOf rewrite it, as a clone given it, under the
+// same rules, fetches and pushes where this one does. ErrNoRemote without
+// a remote; an error that's ErrNowhere with several.
+func (r Repo) SetURL(ctx context.Context) (string, error) {
+	remote, err := r.remote(ctx)
+	if err != nil {
+		return "", err
+	}
+	return r.setting(ctx, "remote."+remote+".url")
+}
+
+// UnderWay is the refusal while one of git's operations is part way
+// through in the repository, as a rebase cut short: nil while none is.
+func (r Repo) UnderWay(ctx context.Context) error {
+	gitDir, err := r.gitDir(ctx)
+	if err != nil {
+		return err
+	}
+	return underWay(gitDir)
 }
 
 // URL is the URL the remote called remote is fetched from, as git takes it:

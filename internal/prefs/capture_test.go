@@ -16,31 +16,30 @@ import (
 	"github.com/leeovery/kit/internal/runner/runnertest"
 )
 
-// world is a Mac for prefs: a made-up home, kit's state, and the store's
-// clone, every program faked.
+// world is a Mac for prefs: a made-up home, kit's state, kit-config's
+// clone, and the store's clone, every program faked.
 type world struct {
-	home, state, clone, apps string
-	fake                     *runnertest.Fake
-	p                        *prefs.Prefs
+	home, state, config, clone, apps string
+	fake                             *runnertest.Fake
+	p                                *prefs.Prefs
 }
 
-const remote = "git@github.com:someone/prefs.git"
+// remote is where kit-config's clone fetches from, and so the store's.
+const remote = "git@github.com:someone/kit-config.git"
 
 func newWorld(t *testing.T, lists prefs.Lists) *world {
 	t.Helper()
-	w := &world{home: t.TempDir(), state: t.TempDir(), apps: t.TempDir(), fake: runnertest.New(t)}
+	w := &world{home: t.TempDir(), state: t.TempDir(), config: t.TempDir(), apps: t.TempDir(), fake: runnertest.New(t)}
 	w.clone = filepath.Join(t.TempDir(), "prefs")
 	if err := os.MkdirAll(filepath.Join(w.clone, ".git"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	now := func() time.Time { return time.Date(2026, 10, 6, 3, 0, 0, 0, time.UTC) }
-	w.p = prefs.New(w.fake, w.home, w.state, w.clone, remote, "laptop", lists, now)
+	w.p = prefs.New(w.fake, w.home, w.state, w.clone, w.config, "laptop", lists, now)
 	w.p.Probes = nil
 	w.p.AppDirs = []string{w.apps}
 	w.p.Sleep = func(time.Duration) {}
-	for _, kv := range [][2]string{{"user.name", "kit"}, {"user.email", "kit@localhost"}, {"commit.gpgsign", "false"}, {"tag.gpgsign", "false"}, {"core.excludesFile", "/dev/null"}, {"core.hooksPath", "/dev/null"}, {"core.autocrlf", "false"}} {
-		w.fake.On("git", "-C", w.clone, "config", kv[0], kv[1])
-	}
+	onTheBranch(w.fake, w.config, w.clone)
 	w.pulls()
 	w.fake.On("ioreg", "-rd1", "-c", "IOPlatformExpertDevice").Prints(`  "IOPlatformUUID" = "HW-THIS"` + "\n")
 	w.fake.On("sysctl", "-n", "hw.model").Prints("Mac99,1\n")
@@ -48,18 +47,43 @@ func newWorld(t *testing.T, lists prefs.Lists) *world {
 	return w
 }
 
+// onTheBranch scripts, on fake, kit-config's clone, at config, fetching
+// from remote alone, and the store's clone, at clone, a clone of its prefs
+// branch, with the clone's own git settings.
+func onTheBranch(fake *runnertest.Fake, config, clone string) {
+	fake.On("git", "-C", config, "remote").Prints("origin\n")
+	fake.On("git", "-C", config, "remote", "get-url", "origin").Prints(remote + "\n")
+	fake.On("git", "-C", config, "config", "--get", "remote.origin.url").Prints(remote + "\n")
+	fake.On("git", "-C", config, "remote", "get-url", "--push", "--all", "origin").Prints(remote + "\n")
+	fake.On("git", carries(config)...).Exits(1)
+	fake.On("git", "-C", clone, "for-each-ref", "--count=1", "--format=%(refname)", "refs/heads").Prints("refs/heads/prefs\n")
+	fake.On("git", "-C", clone, "remote", "get-url", "origin").Prints(remote + "\n")
+	fake.On("git", "-C", clone, "remote", "get-url", "--push", "--all", "origin").Prints(remote + "\n")
+	fake.On("git", "-C", clone, "symbolic-ref", "-q", "HEAD").Prints("refs/heads/prefs\n")
+	for _, kv := range [][2]string{{"user.name", "kit"}, {"user.email", "kit@localhost"}, {"commit.gpgsign", "false"}, {"tag.gpgsign", "false"}, {"core.excludesFile", "/dev/null"}, {"core.hooksPath", "/dev/null"}, {"core.autocrlf", "false"}} {
+		fake.On("git", "-C", clone, "config", kv[0], kv[1])
+	}
+}
+
+// carries is git reading the settings the store takes from kit-config, at
+// config: its own credential and push URL settings, exiting 1 with none,
+// as real git does.
+func carries(config string) []string {
+	return []string{"-C", config, "config", "--local", "--get-regexp", "-z", `^(credential\..*|remote\..*\.pushurl)$`}
+}
+
 // pulls scripts a pull of the store's, as real git answers, its one
 // remote, origin, with nothing new, and nothing changed in the clone; its
-// branch main, origin's main its upstream.
+// branch prefs, origin's prefs its upstream.
 func (w *world) pulls() {
 	w.fake.On("git", "-C", w.clone, "remote").Prints("origin\n")
 	w.fake.On("git", "-C", w.clone, "rev-parse", "--absolute-git-dir").Prints(filepath.Join(w.clone, ".git") + "\n")
 	w.fake.On("git", "-C", w.clone, "--literal-pathspecs", "status", "--porcelain", "-z", "--untracked-files=all", "--no-renames", "--")
-	w.fake.On("git", "-C", w.clone, "symbolic-ref", "-q", "HEAD").Prints("refs/heads/main\n")
-	w.fake.On("git", "-C", w.clone, "for-each-ref", "--format=%(upstream) %(upstream:remoteref)", "refs/heads/main").Prints("refs/remotes/origin/main refs/heads/main\n")
+	w.fake.On("git", "-C", w.clone, "symbolic-ref", "-q", "HEAD").Prints("refs/heads/prefs\n")
+	w.fake.On("git", "-C", w.clone, "for-each-ref", "--format=%(upstream) %(upstream:remoteref)", "refs/heads/prefs").Prints("refs/remotes/origin/prefs refs/heads/prefs\n")
 	w.fake.On("git", "-C", w.clone, "fetch", "--prune", "--quiet", "origin")
-	w.fake.On("git", "-C", w.clone, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/main").Prints(head + "\n")
-	w.fake.On("git", "-C", w.clone, "rev-list", "--count", "HEAD..refs/remotes/origin/main").Prints("0\n")
+	w.fake.On("git", "-C", w.clone, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/prefs").Prints(head + "\n")
+	w.fake.On("git", "-C", w.clone, "rev-list", "--count", "HEAD..refs/remotes/origin/prefs").Prints("0\n")
 }
 
 // pushes scripts the commit of the Mac's folder with message, git's
@@ -84,9 +108,9 @@ func (w *world) pushes(t *testing.T, message, status string, files, added []stri
 	w.fake.On("git", paths([]string{"diff", "--quiet", "--no-ext-diff", "HEAD"}, files)...).Exits(1)
 	w.fake.On("git", paths([]string{"-c", "core.hooksPath=/dev/null", "commit", "--quiet", "--only", "-m", message}, files)...)
 	w.fake.On("git", git("remote", "get-url", "--push", "--all", "origin")...).Prints(remote + "\n")
-	w.fake.On("gh", "repo", "view", "https://github.com/someone/prefs", "--json", "visibility", "--jq", ".visibility").Prints("PRIVATE\n")
+	w.fake.On("gh", "repo", "view", "https://github.com/someone/kit-config", "--json", "visibility", "--jq", ".visibility").Prints("PRIVATE\n")
 	w.pulls()
-	w.fake.On("git", git("push", "--quiet", "origin", "HEAD:refs/heads/main")...)
+	w.fake.On("git", git("push", "--quiet", "origin", "HEAD:refs/heads/prefs")...)
 }
 
 // newFiles are the files a first capture of one domain makes, each new to
@@ -297,10 +321,10 @@ func TestCaptureRefuses(t *testing.T) {
 		w := newWorld(t, prefs.Lists{})
 		writeRecord(t, w.state, `{"on": "restored from laptop"}`)
 		w.write(t, filepath.Join(w.clone, "laptop", "owner"), "hardware HW-THIS\nmodel Mac99,1\nsince 2026-09-28 17:00\n")
-		w.fake.On("git", "-C", w.clone, "rev-list", "--count", "HEAD..refs/remotes/origin/main").Prints("1\n")
-		w.fake.On("git", "-C", w.clone, "diff", "--name-only", "-z", "--no-renames", "HEAD...refs/remotes/origin/main").Prints("laptop/owner\x00")
+		w.fake.On("git", "-C", w.clone, "rev-list", "--count", "HEAD..refs/remotes/origin/prefs").Prints("1\n")
+		w.fake.On("git", "-C", w.clone, "diff", "--name-only", "-z", "--no-renames", "HEAD...refs/remotes/origin/prefs").Prints("laptop/owner\x00")
 		w.fake.On("git", "-C", w.clone, "stash", "create", "kit: your changes before pulling")
-		w.fake.On("git", "-C", w.clone, "rebase", "--no-fork-point", "--quiet", "refs/remotes/origin/main").Does(func() {
+		w.fake.On("git", "-C", w.clone, "rebase", "--no-fork-point", "--quiet", "refs/remotes/origin/prefs").Does(func() {
 			w.write(t, filepath.Join(w.clone, "laptop", "owner"), "hardware HW-NEW\nmodel Mac100,1\nsince 2026-10-05 09:00\n")
 		})
 		var notOwner prefs.NotOwnerError
@@ -356,18 +380,17 @@ func TestCaptureHoldsBackThePushWhenTheCommitFailed(t *testing.T) {
 
 // A store that isn't proven private is never pushed to: the commit waits,
 // and the record says since when. It's where git push sends it that's
-// looked at: a push URL the remote has set, public, in its private URL's
-// place, which git names alone, as it pushes there alone; a repository on
-// GitHub that isn't private; another host, or a path on this Mac, which
-// kit doesn't prove private; and a clone with more than one remote, which
-// kit pushes to none of.
+// looked at, kit-config's remote, the store's: a repository on GitHub that
+// isn't private; another host, or a path on this Mac, which kit doesn't
+// prove private; and a clone with more than one remote, which kit pushes
+// to none of. A push URL that isn't kit-config's never gets this far: the
+// clone's refused (TestACloneElsewhereIsRefused).
 func TestCaptureNeverPushesToAPublicStore(t *testing.T) {
 	const notGitHub = "kit proves private only a repository on github.com, at https://github.com/<owner>/<name>, git@github.com:<owner>/<name> or ssh://git@github.com/<owner>/<name>"
-	for _, c := range []struct{ name, remotes, pushURL, public, says string }{
-		{"the store public", "origin\n", remote, "someone/prefs", "someone/prefs is public on GitHub: kit pushes apps' settings only to a private repository"},
-		{"a push URL public", "origin\n", "git@github.com:someone/public-prefs.git", "someone/public-prefs", "someone/public-prefs is public on GitHub: kit pushes apps' settings only to a private repository"},
-		{"another host", "origin\n", "https://gitlab.com/someone/prefs.git", "", "kit pushes apps' settings only to a repository it can prove private, and can't for https://gitlab.com/someone/prefs.git: " + notGitHub},
-		{"a path on this Mac", "origin\n", "/Volumes/Backup/prefs.git", "", "kit pushes apps' settings only to a repository it can prove private, and can't for /Volumes/Backup/prefs.git: " + notGitHub},
+	for _, c := range []struct{ name, remotes, url, public, says string }{
+		{"the store public", "origin\n", remote, "someone/kit-config", "someone/kit-config is public on GitHub: kit pushes apps' settings only to a private repository"},
+		{"another host", "origin\n", "https://gitlab.com/someone/kit-config.git", "", "kit pushes apps' settings only to a repository it can prove private, and can't for https://gitlab.com/someone/kit-config.git: " + notGitHub},
+		{"a path on this Mac", "origin\n", "/Volumes/Backup/kit-config.git", "", "kit pushes apps' settings only to a repository it can prove private, and can't for /Volumes/Backup/kit-config.git: " + notGitHub},
 		{"two remotes", "origin\nbackup\n", remote, "", "the repository has 2 remotes, so kit pushes nothing: kit pushes to one alone"},
 	} {
 		w := newWorld(t, prefs.Lists{})
@@ -376,8 +399,12 @@ func TestCaptureNeverPushesToAPublicStore(t *testing.T) {
 		w.exports(t, "com.example.app", map[string]any{"Theme": "dark"})
 		w.pushes(t, "Capture 2026-10-06 03:00: 1 new\n\nnew: com.example.app\nclaimed: the folder, for this Mac's hardware",
 			"?? laptop/.gitignore\x00?? laptop/domains/com.example.app.plist\x00?? laptop/owner\x00", newFiles, newFiles)
+		w.fake.On("git", "-C", w.config, "remote", "get-url", "origin").Prints(c.url + "\n")
+		w.fake.On("git", "-C", w.config, "config", "--get", "remote.origin.url").Prints(c.url + "\n")
+		w.fake.On("git", "-C", w.config, "remote", "get-url", "--push", "--all", "origin").Prints(c.url + "\n")
+		w.fake.On("git", "-C", w.clone, "remote", "get-url", "origin").Prints(c.url + "\n")
 		w.fake.On("git", "-C", w.clone, "remote").Prints(c.remotes)
-		w.fake.On("git", "-C", w.clone, "remote", "get-url", "--push", "--all", "origin").Prints(c.pushURL + "\n")
+		w.fake.On("git", "-C", w.clone, "remote", "get-url", "--push", "--all", "origin").Prints(c.url + "\n")
 		w.fake.On("gh", "repo", "view", "https://github.com/"+c.public, "--json", "visibility", "--jq", ".visibility").Prints("PUBLIC\n")
 		report, err := w.p.Capture(t.Context())
 		if err != nil || !strings.HasPrefix(report.PushError, c.says) {

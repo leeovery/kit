@@ -10,7 +10,7 @@ another folder. It holds
 `kit.toml`, a folder for each Mac, and the `shared` folder.
 
 **kit.toml.** The file at the top of kit-config that names your Macs. It also names the terminal
-a new Mac installs, the repository for apps' settings, and when nightly jobs run.
+a new Mac installs and when nightly jobs run.
 
 **Declaration.** A line that says a Mac should have something: a package, a setting, a secret,
 a step. A note may follow it, after `#`. kit's `add` commands write declarations, and you can
@@ -102,8 +102,8 @@ those on in `[features]`.
 
 **Apps' settings (kit prefs).** The feature that saves your apps' settings every night and
 restores them on a new Mac. It saves every preferences domain that isn't Apple's or the
-system's, and the settings files `[prefs files]` names. They go to a private repository of
-their own, which `kit.toml` names.
+system's, and the settings files `[prefs files]` names. They go to the `prefs` branch of
+kit-config, which the first save makes.
 
 **The hourly run.** On the hour, launchd opens kit.app, which runs `kit nightly`. It runs the jobs
 that are due, then every check. It tells no one what it finds: `kit status` and `kit log` show

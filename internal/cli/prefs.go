@@ -33,12 +33,13 @@ func newPrefsCommand(a *app) *cobra.Command {
 		GroupID: groupFiles,
 		Long: `Apps' settings: every preferences domain that isn't Apple's or the system's,
 through defaults export and import, and the settings files [prefs files] names.
-Each Mac saves them nightly into its own folder of the repository kit.toml's
-prefs_repo names (private on GitHub, or kit doesn't push), cloned in kit's data
+Each Mac saves them nightly into its own folder on kit-config's prefs branch
+(private on GitHub, or kit doesn't push), which kit clones alone in its data
 folder; each capture that changed anything is a commit, so restore can go back
-to a date. [prefs deny] leaves domains out; [prefs apps] says whose a domain
-is when its name doesn't; [prefs machine-bound] are never copied to another
-Mac, or onto other hardware.`,
+to a date. The first capture makes the branch. [prefs deny] leaves domains
+out; [prefs apps] says whose a domain is when its name doesn't;
+[prefs machine-bound] are never copied to another Mac, or onto other
+hardware.`,
 	}
 	capture := &cobra.Command{
 		Use:   "capture",
@@ -206,7 +207,7 @@ func (a *app) prefs(r *run) (*prefs.Prefs, error) {
 	for _, e := range apps.Entries {
 		lists.Apps = append(lists.Apps, [2]string{e.Name, e.Value})
 	}
-	p := prefs.New(r.run, r.homeDir, r.stateDir, filepath.Join(r.dataDir, prefsNoun), r.cfg.PrefsRepo, r.machine, lists, a.Now)
+	p := prefs.New(r.run, r.homeDir, r.stateDir, filepath.Join(r.dataDir, prefsNoun), r.cfg.Dir, r.machine, lists, a.Now)
 	p.Probes = append(p.Probes[:len(p.Probes)-1], a.TCC)
 	p.AppDirs = a.appFolders(r.homeDir).Dirs
 	return p, nil

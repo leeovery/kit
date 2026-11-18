@@ -12,8 +12,12 @@ import (
 
 // SavedFor are the domains this Mac's folder in the store's clone holds
 // that belong to the installed app of a bundle id alone, as a restore finds
-// whose a domain is, sorted: never one it shares with another app.
-func (p *Prefs) SavedFor(id string) []string {
+// whose a domain is, sorted: never one it shares with another app. A clone
+// that isn't of kit-config's branch is refused, as checkClone does.
+func (p *Prefs) SavedFor(ctx context.Context, id string) ([]string, error) {
+	if err := p.checked(ctx); err != nil {
+		return nil, err
+	}
 	entries, _ := os.ReadDir(filepath.Join(p.Clone, p.Mac, "domains"))
 	installed := p.installedApps()
 	var owned []string
@@ -23,7 +27,7 @@ func (p *Prefs) SavedFor(id string) []string {
 		}
 	}
 	slices.Sort(owned)
-	return owned
+	return owned, nil
 }
 
 // Unowned are those of domains no installed app uses, as a restore finds

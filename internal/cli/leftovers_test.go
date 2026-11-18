@@ -221,6 +221,37 @@ func TestRemovingAnAppStoreAppAsksAboutItsSavedSettings(t *testing.T) {
 	}
 }
 
+// Removing an app goes on when kit prefs' store is a clone kit won't read,
+// as one of the repository it was in before: nothing's asked about the
+// settings it saved, none is deleted, and the uninstall says why.
+func TestRemovingAnAppWithTheStoreRefused(t *testing.T) {
+	for _, terminal := range []bool{true, false} {
+		w := notesWorld(t, true)
+		w.terminal = terminal
+		clone := w.storeCloned()
+		w.write(t, filepath.Join(".local", "share", "kit", "prefs", ".git", "HEAD"), "ref: refs/heads/main\n")
+		w.fake.On("git", "-C", clone, "remote", "get-url", "origin").Prints("git@github.com:someone/prefs.git\n")
+		w.expectPassword()
+		w.fake.On("sudo", "-n", "mas", "uninstall", "123456789")
+		w.expectSync(t, []string{"laptop/declarations"}, "kit mas remove notes-example@123456789 (laptop)")
+		out, errOut, code := w.run(t, "mas", "remove", "notes-example@123456789")
+		if code != 0 || len(w.asked) != 0 {
+			t.Fatalf("at a terminal %v: kit mas remove exit %d (%s), asked %q; want it uninstalled, unasked", terminal, code, errOut, w.asked)
+		}
+		// A terminal's line is cut to its width.
+		want := "its saved settings weren't looked at"
+		if !terminal {
+			want += ": " + clone + " points at github.com:someone/prefs.git"
+		}
+		if !strings.Contains(out, want) {
+			t.Errorf("at a terminal %v: kit mas remove printed\n%s\nwant it to say %q", terminal, out, want)
+		}
+		if ran(w, "defaults delete com.example.notes") {
+			t.Errorf("at a terminal %v: ran %q; want no saved settings deleted", terminal, w.fake.Calls())
+		}
+	}
+}
+
 // An uninstall that fails once its saved settings were deleted, the app
 // still there, puts them back from kit prefs' store; with the app running,
 // they're held till it's quit, so the next capture keeps them, and it says
@@ -238,13 +269,10 @@ func TestRemovingAnAppThatFailsToUninstallPutsItsSettingsBack(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			w := notesWorld(t, true)
 			store := filepath.Join(".local", "share", "kit", "prefs")
-			clone := filepath.Join(w.home, store)
+			clone := w.storeCloned()
 			saved := filepath.Join(clone, "laptop", "domains", "com.example.notes.plist")
 			w.write(t, filepath.Join(store, ".git", "HEAD"), "")
 			w.write(t, filepath.Join(store, "laptop", "domains", "com.example.notes.plist"), exampleSettings)
-			for _, kv := range [][2]string{{"user.name", "kit"}, {"user.email", "kit@localhost"}, {"commit.gpgsign", "false"}, {"tag.gpgsign", "false"}, {"core.excludesFile", "/dev/null"}, {"core.hooksPath", "/dev/null"}, {"core.autocrlf", "false"}} {
-				w.fake.On("git", "-C", clone, "config", kv[0], kv[1])
-			}
 			w.fake.On("git", "-C", clone, "remote")
 			w.fake.On("git", "-C", clone, "rev-parse", "HEAD").Prints("abc123\n")
 			w.expectPassword()
@@ -277,12 +305,11 @@ func TestRemovingAnAppThatFailsToUninstallPutsItsSettingsBack(t *testing.T) {
 func keptWorld(t *testing.T) *world {
 	t.Helper()
 	w := laptopWorld(t)
-	w.write(t, filepath.Join(".config", "kit", "kit.toml"), strings.Replace(twoMacs, "primary = \"laptop\"\n", "primary = \"laptop\"\nprefs_repo = \"git@github.com:someone/prefs.git\"\n", 1))
 	w.writeSection(t, "laptop", "features", "prefs\n")
 	w.write(t, filepath.Join(".local", "state", "kit", "prefs.json"), `{"on": "restored", "pending": {"from": "laptop", "domains": ["com.example.app"],
 		"why": {"com.example.app": "kept till its app is installed"}}}`)
 	store := filepath.Join(".local", "share", "kit", "prefs")
-	clone := filepath.Join(w.home, store)
+	clone := w.storeCloned()
 	w.write(t, filepath.Join(store, ".git", "HEAD"), "")
 	w.write(t, filepath.Join(store, "laptop", "domains", "com.example.app.plist"), exampleSettings)
 	w.fake.On("brew", "info", "--json=v2", "--cask", "example-app").Prints(exampleInfo)
@@ -292,9 +319,6 @@ func keptWorld(t *testing.T) *world {
 		w.write(t, filepath.Join("Applications", "Example App.app", "Contents", "Info.plist"),
 			`<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>com.example.app</string></dict></plist>`)
 	})
-	for _, kv := range [][2]string{{"user.name", "kit"}, {"user.email", "kit@localhost"}, {"commit.gpgsign", "false"}, {"tag.gpgsign", "false"}, {"core.excludesFile", "/dev/null"}, {"core.hooksPath", "/dev/null"}, {"core.autocrlf", "false"}} {
-		w.fake.On("git", "-C", clone, "config", kv[0], kv[1])
-	}
 	w.fake.On("git", "-C", clone, "remote")
 	w.fake.On("git", "-C", clone, "rev-parse", "HEAD").Prints("abc123\n")
 	w.fake.On("osascript", "-e", `application id "com.example.app" is running`).Prints("false\n")

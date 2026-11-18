@@ -59,6 +59,7 @@ func TestLoadRefuses(t *testing.T) {
 		{name: "not TOML", toml: "format = \n", want: "kit.toml: toml:"},
 		{name: "an unknown setting", toml: "format = 1\nprimary = \"laptop\"\ncolour = \"red\"\n" + macs, want: "kit.toml: unknown setting colour"},
 		{name: "an unknown Mac setting", toml: "format = 1\nprimary = \"laptop\"\n[macs.laptop]\nmodel = \"x\"\n", want: "kit.toml: unknown setting macs.laptop.model"},
+		{name: "the retired prefs_repo", toml: "format = 1\nprimary = \"laptop\"\nprefs_repo = \"git@github.com:someone/prefs.git\"\n" + macs, want: "kit.toml: prefs_repo: apps' settings are saved on kit-config's prefs branch now: take the line out"},
 		{name: "no format", toml: "primary = \"laptop\"\n" + macs, want: "kit.toml: no format: add format = 1"},
 		{name: "a later format", toml: "format = 2\nprimary = \"laptop\"\n" + macs, want: "the config is format 2, newer than this kit reads (1): update kit"},
 		{name: "a negative format", toml: "format = -1\nprimary = \"laptop\"\n" + macs, want: "format -1 isn't one"},
@@ -157,16 +158,6 @@ func TestTerminal(t *testing.T) {
 	dir := writeRepo(t, map[string]string{config.File: "format = 1\nprimary = \"laptop\"\npassword_manager = \"1password\"\n\n[macs.laptop]\n"})
 	if _, err := config.Load(dir, kinds.Sections()); err == nil || !strings.Contains(err.Error(), "password_manager") {
 		t.Errorf("Load() with a password manager = %v, want it refused", err)
-	}
-}
-
-func TestPrefsRepo(t *testing.T) {
-	if cfg := loadRepo(t, map[string]string{}); cfg.PrefsRepo != "" {
-		t.Errorf("PrefsRepo unset = %q", cfg.PrefsRepo)
-	}
-	cfg := loadRepo(t, map[string]string{config.File: "format = 1\nprimary = \"laptop\"\nprefs_repo = \"git@github.com:someone/prefs.git\"\n\n[macs.laptop]\n"})
-	if cfg.PrefsRepo != "git@github.com:someone/prefs.git" {
-		t.Errorf("PrefsRepo = %q", cfg.PrefsRepo)
 	}
 }
 
