@@ -23,9 +23,12 @@ type Folder struct {
 	// Path is where it is, from ~, as in ~/Code.
 	Path string
 	// Size is what it holds on disk, in bytes; Whole says that's all of
-	// it, rather than as much as was counted in the time given.
+	// it, rather than as much as was counted in the time given, or could be
+	// read. Err is why some of it couldn't be read, as without macOS's
+	// permission.
 	Size  int64
 	Whole bool
+	Err   error
 	// Ticked is whether the question suggests bringing it back.
 	Ticked bool
 }
@@ -77,18 +80,21 @@ func (m Mac) folders(owned restore.Owned) ([]Folder, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read the home folder: %w", err)
 	}
-	home, _ := device(m.Home)
+	home, err := device(m.Home)
+	if err != nil {
+		return nil, fmt.Errorf("read the home folder: %w", err)
+	}
 	var out []Folder
 	for _, e := range entries {
 		name := e.Name()
 		if !e.IsDir() || strings.HasPrefix(name, ".") || slices.Contains(notData, name) {
 			continue
 		}
-		if dev, ok := device(filepath.Join(m.Home, name)); !ok || dev != home {
+		if dev, err := device(filepath.Join(m.Home, name)); err == nil && dev != home {
 			continue
 		}
 		p := "~/" + name
-		if _, err := restore.NewFilter(restore.Line{Path: p}, owned); err != nil {
+		if isKits(owned, p) {
 			continue
 		}
 		out = append(out, Folder{Path: p, Ticked: !slices.Contains(unticked, name)})
@@ -97,15 +103,22 @@ func (m Mac) folders(owned restore.Owned) ([]Folder, error) {
 }
 
 // files are those of linkable that are files of the Mac's own, not links,
-// nor files kit links already.
+// nor kit's already: linked, saved by prefs, filled by a secret.
 func (m Mac) files(owned restore.Owned) []string {
 	var out []string
 	for _, rel := range linkable {
 		p := "~/" + rel
 		info, err := os.Lstat(filepath.Join(m.Home, rel))
-		if err == nil && info.Mode().IsRegular() && !slices.Contains(owned.Linked, p) {
+		if err == nil && info.Mode().IsRegular() && !isKits(owned, p) {
 			out = append(out, p)
 		}
 	}
 	return out
+}
+
+// isKits reports whether p, from ~, is kit's, or in what's kit's, as the
+// restore judges a path: one owner a path.
+func isKits(owned restore.Owned, p string) bool {
+	_, err := restore.NewFilter(restore.Line{Path: p}, owned)
+	return err != nil
 }

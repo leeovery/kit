@@ -15,13 +15,14 @@ import (
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/event"
+	"github.com/leeovery/kit/internal/kind"
 	"github.com/leeovery/kit/internal/kind/secret"
 	"github.com/leeovery/kit/internal/kind/secret/store"
 	"github.com/leeovery/kit/internal/look"
 )
 
 // secretKind names the secrets' kind, and its command.
-const secretKind = "secret"
+const secretKind = kind.SecretsKind
 
 // secretOptions are kit secret add's flags: where its value comes from (an
 // existing reference, a file, standard input, or typed), where in a store

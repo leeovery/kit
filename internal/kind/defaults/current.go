@@ -26,16 +26,18 @@ var never = map[int]map[string][]string{
 			"*TransitionComplete", "*DidMigrate", "*Migration", "HasDisplayed*", "*Cache", "*History",
 		},
 		"NSGlobalDomain": {
-			"AKLastLocale", "CFKAL", "NSBXY", "NSTAB", "NavPanelFileListModeFor*", "com.apple.finder.SyncExtensions",
+			"AKLastLocale", "CFKAL", "CFZKL", "NSBXY", "NSTAB", "NavPanelFileListModeFor*", "com.apple.finder.SyncExtensions",
 		},
 		"com.apple.AppleMultitouchTrackpad":                  {"UserPreferences"},
 		"com.apple.driver.AppleBluetoothMultitouch.trackpad": {"UserPreferences"},
 		"com.apple.HIToolbox":                                {"AppleCurrentKeyboardLayoutInputSourceID", "AppleSelectedInputSources"},
-		"com.apple.controlcenter":                            {"ControlCenterDisplayableChronoControlsProviderConfiguration", "IRServiceToken"},
+		// The menu bar's items' offsets, which move by themselves, each display
+		// its own.
+		"com.apple.controlcenter": {"ControlCenterDisplayableChronoControlsProviderConfiguration", "IRServiceToken", "NSStatusItem Preferred Position *"},
 		"com.apple.finder": {
 			"FXDetached*ProviderID", "FXICloud*", "FXInfoPanesExpanded", "FXLastSearchScope", "MeetingRoomViewSetting",
 			"PreferencesWindow.LastSelection", "RecentsArrangeGroupViewBy", "SGTRecentFileSearches", "Sidebar*",
-			"SmartSharedSearchViewSettings",
+			"SmartSharedSearchViewSettings", "TagsCloudSerialNumber",
 		},
 	},
 }
@@ -47,6 +49,9 @@ func neverFor(version string) (map[string][]string, error) {
 	major, err := strconv.Atoi(strings.SplitN(version, ".", 2)[0])
 	if err != nil {
 		return nil, fmt.Errorf("macOS's version %q doesn't read", version)
+	}
+	if len(never) == 0 {
+		return nil, nil
 	}
 	versions := slices.Sorted(maps.Keys(never))
 	at := versions[0]
@@ -72,7 +77,7 @@ func isNever(list map[string][]string, domain, key string) bool {
 // currentHost copies, as a snapshot of the Mac declares them, each named,
 // and its value written, as adopting it declares it (Value), in name order.
 // Left out are those declared (Values), noise, and macOS's own state for
-// the macOS whose version sw_vers gives (neverFor), a date as a value
+// the macOS whose version sw_vers gives (neverFor), a value holding a date
 // among it. A key some of whose entries are declared goes by its entries,
 // as kit watches it.
 func (d *Defaults) Current(ctx context.Context, version string) ([]config.Entry, error) {
@@ -87,12 +92,9 @@ func (d *Defaults) Current(ctx context.Context, version string) ([]config.Entry,
 			if err != nil {
 				return nil, err
 			}
-			maps.DeleteFunc(m, func(key string, v any) bool {
-				_, date := v.(time.Time)
-				return date || isNever(list, domain, key)
-			})
+			maps.DeleteFunc(m, func(key string, _ any) bool { return isNever(list, domain, key) })
 			for s, v := range d.settingsOf(domainID(currentHost, domain), m) {
-				if !d.isDeclared(s.Name()) {
+				if !d.isDeclared(s.Name()) && !holdsDate(v) {
 					out = append(out, config.Entry{Name: s.Name(), Value: valueWords(v, s.Entry != "")})
 				}
 			}
@@ -100,4 +102,18 @@ func (d *Defaults) Current(ctx context.Context, version string) ([]config.Entry,
 	}
 	slices.SortFunc(out, func(a, b config.Entry) int { return strings.Compare(a.Name, b.Name) })
 	return out, nil
+}
+
+// holdsDate reports whether v is a date, or holds one, in a dict or an
+// array, however deep: a time something happened, never a choice.
+func holdsDate(v any) bool {
+	switch x := v.(type) {
+	case time.Time:
+		return true
+	case map[string]any:
+		return slices.ContainsFunc(slices.Collect(maps.Values(x)), holdsDate)
+	case []any:
+		return slices.ContainsFunc(x, holdsDate)
+	}
+	return false
 }

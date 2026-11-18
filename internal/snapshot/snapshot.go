@@ -12,6 +12,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -47,6 +48,8 @@ type Mac struct {
 	// SizeFor is how long the data folders are sized for: one not sized by
 	// then says as much as was counted.
 	SizeFor time.Duration
+	// Now is the time, as the backup tools' last backups are judged by.
+	Now func() time.Time
 }
 
 // Snapshot is what a snapshot of a Mac found: what it declares, a part
@@ -60,8 +63,9 @@ type Snapshot struct {
 	// that could be linked in.
 	Files []string
 	// ByHand are the apps installed by hand, by name: kit never manages
-	// them.
-	ByHand []string
+	// them. ByHandErr is why they couldn't be told, when they couldn't.
+	ByHand    []string
+	ByHandErr error
 }
 
 // Part is a part of what a snapshot declares: a kind's things, or the
@@ -70,8 +74,9 @@ type Part struct {
 	// Kind names its section, a kind's or the config's own; Label names it
 	// as kit's reports do.
 	Kind, Label string
-	// Lines are what it declares, each as adopting it would; Refused, what
-	// declaring refused, and why.
+	// Lines are what it declares, each as adopting it would, held for the
+	// secret its install needs; Refused, what declaring refused, and why,
+	// as a secret the Mac doesn't declare, naming kit secret add.
 	Lines   []config.Entry
 	Refused []config.Refusal
 	// Err is why it couldn't be looked at: none of it is declared.
@@ -93,7 +98,9 @@ var settingsKinds = []string{gitconfig.Descriptor.Name, defaults.Descriptor.Name
 
 // Find looks at the Mac as it stands: what each part would declare, and
 // what the questions offer. It declares nothing: Write does. A part that
-// couldn't be looked at says why, and the rest are found.
+// couldn't be looked at says why, as the apps installed by hand do, and
+// the rest are found; it fails only when the home folder, or what's kit's
+// there, can't be read.
 func Find(ctx context.Context, m Mac) (Snapshot, error) {
 	deps := &kind.Deps{Run: m.Run, Home: m.Home, ConfigHome: m.ConfigHome, StateDir: m.Dirs.State, AppDirs: m.AppDirs}
 	owned, err := m.owned(ctx, deps)
@@ -109,11 +116,11 @@ func Find(ctx context.Context, m Mac) (Snapshot, error) {
 	sizing, sized := context.WithTimeout(ctx, m.SizeFor)
 	defer sized()
 	sizes := make(chan []Folder, 1)
-	go func() { sizes <- sizeAll(sizing, m.Home, folders) }()
+	go func() { sizes <- sizeAll(sizing, m.Home, folders, os.ReadDir) }()
 	s := Snapshot{Parts: append(m.kindParts(ctx, deps), m.featuresPart(ctx), m.backupsPart(ctx)), Files: m.files(owned)}
-	s.ByHand, err = m.byHand(ctx, deps)
+	s.ByHand, s.ByHandErr = m.byHand(ctx, deps)
 	s.Folders = <-sizes
-	return s, err
+	return s, nil
 }
 
 // kindParts are the parts of the kinds a snapshot declares whose program is
@@ -158,22 +165,52 @@ func (m Mac) undeclared(ctx context.Context, k kind.Kind) ([]config.Entry, []con
 	if res.State == check.Failed {
 		return nil, nil, errors.New(res.Reason)
 	}
-	var lines []config.Entry
-	var refused []config.Refusal
+	var extra []string
 	for _, it := range res.Items {
 		switch it.State {
 		case check.NotAllowed:
 			return nil, nil, fmt.Errorf("%s: allow it in %s", it.Name, it.Detail)
 		case kind.Extra:
-			e, err := kind.Line(ctx, k, it.Name, "")
-			if err != nil {
-				refused = append(refused, config.Refusal{Kind: k.Name(), Entry: e, Err: err})
-				continue
-			}
+			extra = append(extra, it.Name)
+		}
+	}
+	entries, errs := make([]config.Entry, len(extra)), make([]error, len(extra))
+	var wg sync.WaitGroup
+	free := make(chan struct{}, liners)
+	for i, name := range extra {
+		wg.Go(func() {
+			free <- struct{}{}
+			defer func() { <-free }()
+			entries[i], errs[i] = m.line(ctx, k, name)
+		})
+	}
+	wg.Wait()
+	var lines []config.Entry
+	var refused []config.Refusal
+	for i, e := range entries {
+		if errs[i] != nil {
+			refused = append(refused, config.Refusal{Kind: k.Name(), Entry: e, Err: errs[i]})
+		} else {
 			lines = append(lines, e)
 		}
 	}
 	return lines, refused, nil
+}
+
+// liners is how many of a kind's lines are made at once: holding one for a
+// secret asks Homebrew about it, a second or so each.
+const liners = 8
+
+// line is the line adopting name, one of k's things, declares in the Mac's
+// file: held for the secret installing it needs, refused while the Mac
+// doesn't declare that secret.
+func (m Mac) line(ctx context.Context, k kind.Kind, name string) (config.Entry, error) {
+	e, err := kind.Line(ctx, k, name, "")
+	if err != nil {
+		return e, err
+	}
+	_, err = kind.Hold(ctx, k, m.Config, m.Name, m.Name, &e, nil)
+	return e, err
 }
 
 // macOSVersion is the Mac's macOS's, as in 26.1.
@@ -221,7 +258,7 @@ func (m Mac) backupsPart(ctx context.Context) Part {
 	var errs []error
 	for _, d := range backup.Tools {
 		about := d.About()
-		st, err := d.Look(ctx, m.Run, time.Now())
+		st, err := d.Look(ctx, m.Run, m.Now())
 		switch {
 		case err != nil:
 			errs = append(errs, fmt.Errorf("%s: %w", about.Name, err))

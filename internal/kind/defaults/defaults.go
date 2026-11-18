@@ -41,6 +41,10 @@ type record struct {
 	// Baseline is each watched setting's value as kit last accepted it, as
 	// XML, by name.
 	Baseline map[string]string `json:"baseline,omitempty"`
+	// Chosen are the keys of chosen kit has taken the values of, in each
+	// watched domain it had taken before they were chosen, by name, as in
+	// com.apple.menuextra.clock:ShowDate.
+	Chosen map[string]bool `json:"chosen,omitempty"`
 }
 
 // Watched are Apple's domains whose settings kit watches for changes, as
@@ -377,6 +381,7 @@ func (d *Defaults) changed(l look, rec *record) []kind.Installed {
 	var out []kind.Installed
 	for _, id := range slices.Sorted(maps.Keys(l.domains)) {
 		now := d.watchedSettings(id, l.domains[id])
+		takeChosen(id, now, rec)
 		if !rec.Domains[id] {
 			rec.Domains[id] = true
 			maps.Copy(rec.Baseline, now)
@@ -386,6 +391,29 @@ func (d *Defaults) changed(l look, rec *record) []kind.Installed {
 	}
 	slices.SortFunc(out, func(a, b kind.Installed) int { return strings.Compare(a.Name, b.Name) })
 	return slices.CompactFunc(out, func(a, b kind.Installed) bool { return a.Name == b.Name })
+}
+
+// takeChosen takes, quietly, the values of the keys of the domain id, now
+// as now has them, that kit watched as noise before they were chosen, the
+// first time it sees them since, so a choice made back then shows as
+// changed only once it changes.
+func takeChosen(id string, now map[string]string, rec *record) {
+	s, _ := config.ParseSetting(id + ":x")
+	for _, key := range chosen[s.Domain] {
+		name := id + ":" + key
+		if rec.Chosen[name] {
+			continue
+		}
+		if rec.Chosen == nil {
+			rec.Chosen = map[string]bool{}
+		}
+		rec.Chosen[name] = true
+		if v, ok := now[name]; ok {
+			if _, known := rec.Baseline[name]; !known {
+				rec.Baseline[name] = v
+			}
+		}
+	}
 }
 
 // changedIn are the watched settings of the domain id, now as now has them,

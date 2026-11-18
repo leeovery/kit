@@ -2,6 +2,7 @@ package defaults_test
 
 import (
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -140,6 +141,13 @@ func TestTheNeverListIsTheNewestAtOrBelowTheMacsMacOS(t *testing.T) {
 	if _, err := snapshotMac(t).d.Current(t.Context(), "unknown"); err == nil {
 		t.Error("Current(unknown) = nil error, want macOS's version refused")
 	}
+	defer defaults.SetNever(nil)()
+	m := snapshotMac(t)
+	m.set("com.apple.dock", "<key>OldState</key><true/>")
+	m.declare()
+	if got, err := m.d.Current(t.Context(), "26.1"); err != nil || len(got) != 1 {
+		t.Errorf("with no lists, Current() = %q, %v; want the setting, none left out", names(got), err)
+	}
 }
 
 // A choice noise's patterns would catch, as the clock's date, shows when
@@ -157,5 +165,36 @@ func TestChoicesNoiseWouldCatchShowUp(t *testing.T) {
 		if got, want := m.items(list), []string{c.domain + ":" + c.choice + " extra"}; !slices.Equal(got, want) {
 			t.Errorf("items = %q, want %q", got, want)
 		}
+	}
+}
+
+// A choice kit watched as noise before, set then, isn't shown as changed
+// the first time kit sees it as a choice: its value's taken quietly, and
+// it shows once it changes.
+func TestAChoiceOnceNoiseIsTakenQuietly(t *testing.T) {
+	m := newMac(t)
+	list := m.declare()
+	if err := os.WriteFile(filepath.Join(m.state, "settings.json"), []byte(`{"domains": {"com.apple.menuextra.clock": true}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m.set("com.apple.menuextra.clock", "<key>ShowDate</key><integer>1</integer>")
+	if got := m.items(list); len(got) != 0 {
+		t.Errorf("items = %q; want none, its value taken quietly", got)
+	}
+	m.set("com.apple.menuextra.clock", "<key>ShowDate</key><integer>2</integer>")
+	if got, want := m.items(list), []string{"com.apple.menuextra.clock:ShowDate extra"}; !slices.Equal(got, want) {
+		t.Errorf("items = %q, want %q", got, want)
+	}
+}
+
+// A date anywhere in a value marks it macOS's own, as a date at the top
+// does.
+func TestADateInADictIsNeverDeclared(t *testing.T) {
+	m := snapshotMac(t)
+	m.set("com.apple.dock", "<key>tilesize</key><integer>60</integer><key>shown</key><dict><key>at</key><date>2026-01-01T00:00:00Z</date></dict>")
+	m.declare()
+	got, err := m.d.Current(t.Context(), "26.0")
+	if want := []string{"com.apple.dock:tilesize"}; err != nil || !slices.Equal(names(got), want) {
+		t.Errorf("Current() = %q, %v; want %q", names(got), err, want)
 	}
 }

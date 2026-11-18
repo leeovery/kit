@@ -21,7 +21,7 @@ kept	bool	NSGlobalDomain	AppleMiniaturizeOnDoubleClick
 kept	bool	NSGlobalDomain	AppleShowAllExtensions
 kept	bool	NSGlobalDomain	AppleSpacesSwitchOnActivate
 own	dict	NSGlobalDomain	CFKAL
-kept	dict	NSGlobalDomain	CFZKL
+own	dict	NSGlobalDomain	CFZKL
 kept	bool	NSGlobalDomain	CGFontRenderingFontSmoothingDisabled
 kept	string	NSGlobalDomain	KB_DoubleQuoteOption
 kept	string	NSGlobalDomain	KB_SingleQuoteOption
@@ -129,9 +129,9 @@ own	bool	com.apple.controlcenter	HasAttemptedMenuBarWorkflowMigration
 noise	string	com.apple.controlcenter	LastHeartbeatDateString.daily
 noise	date	com.apple.controlcenter	LastPeriodicAnalyticsPostDate
 noise	data	com.apple.controlcenter	LiveActivityState
-kept	real	com.apple.controlcenter	NSStatusItem Preferred Position Battery
-kept	real	com.apple.controlcenter	NSStatusItem Preferred Position BentoBox-0
-kept	real	com.apple.controlcenter	NSStatusItem Preferred Position WiFi
+own	real	com.apple.controlcenter	NSStatusItem Preferred Position Battery
+own	real	com.apple.controlcenter	NSStatusItem Preferred Position BentoBox-0
+own	real	com.apple.controlcenter	NSStatusItem Preferred Position WiFi
 kept	bool	com.apple.controlcenter	NSStatusItem Visible AirDrop
 kept	bool	com.apple.controlcenter	NSStatusItem Visible Bluetooth
 kept	bool	com.apple.controlcenter	NSStatusItem VisibleCC Battery
@@ -261,7 +261,7 @@ own	real	com.apple.finder	SidebarWidth2
 own	dict	com.apple.finder	SmartSharedSearchViewSettings
 kept	dict	com.apple.finder	StandardViewOptions
 kept	dict	com.apple.finder	StandardViewSettings
-kept	integer	com.apple.finder	TagsCloudSerialNumber
+own	integer	com.apple.finder	TagsCloudSerialNumber
 noise	dict	com.apple.finder	TrashViewSettings
 own	string	com.apple.finder	ViewOptionsWindow.Location
 kept	bool	com.apple.finder	_FXShowPosixPathInTitle

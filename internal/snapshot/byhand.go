@@ -18,25 +18,25 @@ import (
 
 // byHand are the apps in the Mac's app folders installed by hand, by name:
 // none of Apple's, nor the App Store's (its receipt in the app), nor one a
-// cask put in place, as its app or through its package (pkgutil's
-// receipts).
+// cask put in place, as its app, in its suite's folder, or through its
+// package (pkgutil's receipts).
 func (m Mac) byHand(ctx context.Context, deps *kind.Deps) ([]string, error) {
-	var casked []string
+	var casked brew.Casked
 	var packaged map[string]bool
 	if runner.Has(m.Run, "brew") {
-		names, receipts, err := brew.Of(deps).Casked(ctx)
-		if err != nil {
+		var err error
+		if casked, err = brew.Of(deps).Casked(ctx); err != nil {
 			return nil, fmt.Errorf("find the casks' apps: %w", err)
 		}
-		if packaged, err = installedBy(ctx, m.Run, receipts); err != nil {
+		if packaged, err = installedBy(ctx, m.Run, casked.Receipts); err != nil {
 			return nil, fmt.Errorf("find the casks' packages' apps: %w", err)
 		}
-		casked = names
 	}
 	var out []string
 	for _, app := range apps.Installed(m.AppDirs) {
 		name := filepath.Base(app)
-		if strings.HasPrefix(apps.BundleID(app), "com.apple.") || fromAppStore(app) || slices.Contains(casked, name) || packaged[app] {
+		inSuite := slices.Contains(m.AppDirs, filepath.Dir(filepath.Dir(app))) && slices.Contains(casked.Suites, filepath.Base(filepath.Dir(app)))
+		if strings.HasPrefix(apps.BundleID(app), "com.apple.") || fromAppStore(app) || slices.Contains(casked.Apps, name) || inSuite || packaged[app] {
 			continue
 		}
 		out = append(out, strings.TrimSuffix(name, ".app"))
