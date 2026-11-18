@@ -36,6 +36,10 @@ On a Mac in use, `kit status` says so under CONFIG:
 public on GitHub (owner/kit-config): it must be private
 ```
 
+The row above it gives the command that fixes it:
+
+<img src="../art/troubleshooting-private.webp" alt="kit status under CONFIG: kit-config public on GitHub, with the command that makes it private" width="573">
+
 **Cause:** kit-config names your Macs, apps and where your secrets are kept, so kit insists it
 stays private.
 
@@ -135,9 +139,12 @@ The next hourly run checks the grant.
 `kit apply` lists the file as waiting:
 
 ```text
-  ● Files and shell  all 2 done
-  │ ~/.zshrc · a file of its own, different from shared/home/.zshrc
+~/.zshrc · a file of its own, different from shared/home/.zshrc
 ```
+
+It shows under the part of the Mac it belongs to:
+
+<img src="../art/troubleshooting-differs.webp" alt="kit apply's record: Files and shell done, with ~/.zshrc a file of its own, different from kit-config's" width="488">
 
 **Cause:** something replaced the link with a file of its own. An app that saves by writing a
 new file does this. kit never overwrites it, because the two differ.

@@ -12,11 +12,10 @@ setting covers.
 kit step add tool "Installs the tool" --after brew
 ```
 
-kit writes its script as a template, then commits and pushes kit-config:
+kit writes the step's script, `laptop/steps/tool/run`, as a template for you to fill in with its
+check and apply. Then kit commits and pushes kit-config:
 
-```console
-  ● tool  declared in laptop · its script, laptop/steps/tool/run, is a template: write its check and apply
-```
+<img src="../art/steps-add.webp" alt="kit step add at a terminal: the step declared in laptop, its script a template, then kit-config committed and pushed" width="573">
 
 The line lands in `[steps]`, in its place by name. The order of the lines doesn't set the
 order steps run in: `--after` and `--before` do.
@@ -32,10 +31,7 @@ Fill in `check` and `apply`, then try it with `kit apply tool`.
 
 - **The step shows under STEPS** in `kit status`, with the first line its check prints:
 
-  ```console
-    STEPS
-    ● fonts  16 installed
-  ```
+  <img src="../art/steps-status.webp" alt="kit status under STEPS: fonts and claude-code, each with the first line its check printed" width="261">
 
 - **A new Mac runs it in its place,** once what it comes after is done.
 - **A step by hand raises a card** at a terminal, saying what to do.

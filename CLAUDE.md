@@ -153,9 +153,16 @@ its sentences.
 - Code lines run 52 columns at most. A comment goes on a line of its own, above the command.
 - Tables run 4 columns at most, with short cells.
 - No forced line breaks (`<br>`).
-- What kit prints goes in a `console` or `text` fence, copied from the code (a test, a golden
-  file or `--help`), never made up. Cut lines you don't need; never change one. Its wide lines
-  stand.
+- What kit shows at a terminal goes on a page as a still recorded from kit's real screens, never
+  a code block or a copy: a fixture in `internal/capture`, drawn from the run the page's words
+  come from and pinned by its golden file, recorded through `demo/` to `art/<page>-<what>.webp`.
+  Embed it as `<img src="../art/…" alt="…" width="…">`: its alt text says what it shows, and its
+  width is half its pixels, so a phone draws it sharp.
+- Text fences stay only for what a reader copies or searches:
+  - JSON, for agents;
+  - kit's plain face, on a page about scripts and agents;
+  - an error message, quoted in troubleshooting;
+  - declarations, `kit.toml` and layout lines.
 
 ### Facts and placeholders
 
@@ -214,8 +221,8 @@ config layout and the gates live on their own pages.
 |---|---|
 | Title | The benefit, in the reader's words |
 | Opening | 40 to 60 words: what it does for you, and when you'd want it |
-| The moment | One still or clip, once one exists |
-| Try it | 2 to 4 commands, a comment above each, then what kit prints |
+| The moment | One still or clip, once one exists, as The phone says |
+| Try it | 2 to 4 commands, a comment above each, then the still of what kit shows |
 | What happens | 3 to 6 one-sentence bullets on what you'll notice |
 | Good to know | 2 to 4 bullets: limits, costs, objections |
 | Reference | A table of 8 rows at most, or links to the reference pages |

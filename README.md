@@ -16,7 +16,7 @@ A blank Mac is one pasted line away: sign in to GitHub on your phone, and kit in
 
 [Docs](docs/README.md) · [Commands](docs/commands.md) · [Configuration](docs/configuration.md) · [Troubleshooting](docs/troubleshooting.md)
 
-<img src="art/new-mac.webp" alt="A new Mac set up by kit: the boot in Terminal, its splash decoding into the wordmark, signing in to GitHub with the phone, then the boot order; then Ghostty, where kit's look arrives in colour, and kit apply runs through 1Password's sign-in, Homebrew's installs and the to-dos to its record" width="840">
+<img src="art/new-mac.png" alt="A new Mac set up by kit: the boot in Terminal, its splash decoding into the wordmark, signing in to GitHub with the phone, then the boot order; then Ghostty, where kit's look arrives in colour, and kit apply runs through 1Password's sign-in, Homebrew's installs and the to-dos to its record" width="840">
 
 </div>
 

@@ -16,9 +16,7 @@ kit restore add ~/.zsh_history --shared
 
 kit declares the path, and copies nothing now:
 
-```text
-~/Code ok declared in laptop; nothing copied
-```
+<img src="../art/your-data-add.webp" alt="kit restore add ~/Code at a terminal: declared in laptop, nothing copied, then kit-config committed and pushed" width="443">
 
 The line lands under `[restore]`, in `laptop/declarations`:
 

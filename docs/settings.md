@@ -71,9 +71,7 @@ reconcile` asks whether to declare it or put back what it was.
 
 A setting you never declared, removed from the Mac, shows up the same way:
 
-```console
-  ▲ com.apple.dock:autohide  removed, not declared · 2 days · → kit reconcile
-```
+<img src="../art/settings-status.webp" alt="kit status under CONFIG: com.apple.dock:autohide removed, not declared, for 2 days, with kit reconcile to settle it" width="553">
 
 `kit reconcile defaults:com.apple.dock:autohide --adopt` accepts it as removed, and kit stops
 showing it. `--revert` puts the old value back. See

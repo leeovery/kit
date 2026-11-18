@@ -70,9 +70,7 @@ every `kit status` and every hourly run. kit runs it once when you add it:
 kit check add dns -- dig @127.0.0.1 example.com
 ```
 
-```console
-  ● dns  declared in laptop · it fails now: ;; connection timed out
-```
+<img src="../art/running-by-itself-check.webp" alt="kit check add dns at a terminal: declared in laptop, and failing now, with what the check printed" width="508">
 
 If a check fails, the first line it prints is what `kit status` shows. A check must change
 nothing, and finish within a minute.

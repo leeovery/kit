@@ -60,11 +60,7 @@ file from `--from` needs no `--field`: it's kept under its own name.
 
 `kit secret places` lists the blocks. On a Mac with three blocks, it prints:
 
-```console
-  ● tokens  1Password · op://vault/Item · shared · 2 secrets · sections Other, Section
-  ● [secrets]  references in full · laptop · 1 secret
-  ● op://vault/Other  1Password · laptop · 1 secret · section Section
-```
+<img src="../art/secrets-places.webp" alt="kit secret places: three blocks of secrets, each with its store, item, file, count and sections" width="612">
 
 The first is named with `--as` in its header: `[secrets op://vault/Item --as tokens]`.
 
