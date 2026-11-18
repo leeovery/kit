@@ -69,23 +69,21 @@ func newMac(t *testing.T, shared string) (snapshot.Mac, *runnertest.Fake) {
 	fake.On(arq.Arqc, "stats").Fails(runner.ErrNotFound)
 	return snapshot.Mac{
 		Name: "laptop", Config: cfg, Run: fake, Home: home, Dirs: dirs,
-		AppDirs: []string{t.TempDir()}, SudoLocal: filepath.Join(t.TempDir(), "sudo_local"), SizeFor: time.Minute,
+		AppDirs: []string{t.TempDir()}, SudoLocal: filepath.Join(t.TempDir(), "sudo_local"),
 		Now: func() time.Time { return time.Date(2026, 11, 18, 12, 0, 0, 0, time.UTC) },
 	}, fake
 }
 
 // homebrew scripts Homebrew with the formulae and casks given, one a line,
-// every formula a leaf installed for itself, but those in deps, and each
-// of Homebrew's own packages' downloads open, as brew info finds them.
+// every formula a leaf installed for itself, but those in deps. Nothing
+// else is scripted: a snapshot never asks brew about Homebrew's own
+// packages, which can't be private, nor taps or updates anything.
 func homebrew(fake *runnertest.Fake, formulae, deps, casks string) {
 	fake.On("brew", "list", "--formula", "--full-name", "-1").Prints(formulae + deps)
 	fake.On("brew", "leaves").Prints(formulae)
 	fake.On("brew", "leaves", "--installed-on-request").Prints(formulae)
 	fake.On("brew", "list", "--cask", "--full-name", "-1").Prints(casks)
 	fake.On("brew", "info", "--json=v2", "--cask", "--installed").Prints(`{"formulae": [], "casks": []}`)
-	fake.OnMatch("brew", func(args []string) bool {
-		return len(args) == 4 && args[0] == "info" && args[3] != "--installed" && !strings.Contains(args[3], "/")
-	}).Prints(`{"formulae": [{"name": "core", "full_name": "core"}], "casks": []}`)
 }
 
 // setting scripts defaults export for id, currentHost: first for one of
@@ -171,8 +169,6 @@ func TestASnapshotDeclaresTheMacAsItStands(t *testing.T) {
 // download answers, asked for without a token, as answer says.
 func tapTool(fake *runnertest.Fake, answer string) {
 	const download = "https://github.com/owner/tool/releases/download/v1/tool.tar.gz"
-	fake.On("brew", "tap").Prints("owner/tap\n")
-	fake.On("brew", "update", "--quiet")
 	fake.On("brew", "info", "--json=v2", "--formula", "owner/tap/tool").Prints(`{"formulae": [{"name": "tool", "full_name": "owner/tap/tool", "urls": {"stable": {"url": "` + download + `"}}}], "casks": []}`)
 	fake.On("curl", "-q", "-sS", "-o", "/dev/null", "-w", "%{http_code} %{url_effective}", "-L", "-r", "0-0", "--max-time", "10", download).Prints(answer + " " + download)
 }
@@ -269,7 +265,7 @@ func TestTheDataFoldersOffered(t *testing.T) {
 		t.Errorf("folders = %q, want %q", got, want)
 	}
 
-	m.SizeFor = 0
+	m.SizeFor = time.Nanosecond
 	if s, err = snapshot.Find(t.Context(), m); err != nil {
 		t.Fatal(err)
 	}
@@ -332,19 +328,41 @@ func TestAFolderThatCantBeReadIsntWhole(t *testing.T) {
 	}
 }
 
-// A file of several hard links counts once, as du counts it.
+// Without the network, whether a tap's package needs a secret can't be
+// told: it's declared as it is, and its part says so, and why.
+func TestAPackageThatCouldntBeCheckedSaysSo(t *testing.T) {
+	m, fake := newMac(t, "")
+	homebrew(fake, "owner/tap/tool\n", "", "")
+	const download = "https://github.com/owner/tool/releases/download/v1/tool.tar.gz"
+	fake.On("brew", "info", "--json=v2", "--formula", "owner/tap/tool").Prints(`{"formulae": [{"name": "tool", "full_name": "owner/tap/tool", "urls": {"stable": {"url": "` + download + `"}}}], "casks": []}`)
+	fake.On("curl", "-q", "-sS", "-o", "/dev/null", "-w", "%{http_code} %{url_effective}", "-L", "-r", "0-0", "--max-time", "10", download).Prints("000 " + download).Exits(6)
+	s := take(t, m)
+	if got := declarations(t, m); !strings.Contains(got, "[homebrew formulae]\nowner/tap/tool\n") {
+		t.Errorf("laptop/declarations =\n%s\nwant owner/tap/tool declared as it is", got)
+	}
+	if u := s.Parts[0].Unchecked; len(u) != 1 || u[0].Name != "owner/tap/tool" || u[0].Err == nil {
+		t.Errorf("unchecked = %+v, want owner/tap/tool, saying why", u)
+	}
+}
+
+// A file of several hard links counts once, as du counts it, the folder's
+// own blocks with it.
 func TestAHardLinkedFileCountsOnce(t *testing.T) {
 	m, _ := newMac(t, "")
 	write(t, m.Home, map[string]string{"Code/a.bin": strings.Repeat("x", 100000)})
 	if err := os.Link(filepath.Join(m.Home, "Code", "a.bin"), filepath.Join(m.Home, "Code", "b.bin")); err != nil {
 		t.Fatal(err)
 	}
-	info, err := os.Stat(filepath.Join(m.Home, "Code", "a.bin"))
-	if err != nil {
-		t.Fatal(err)
+	var want int64
+	for _, path := range []string{"Code", "Code/a.bin"} {
+		info, err := os.Lstat(filepath.Join(m.Home, path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		want += info.Sys().(*syscall.Stat_t).Blocks * 512
 	}
 	s, err := snapshot.Find(t.Context(), m)
-	if want := info.Sys().(*syscall.Stat_t).Blocks * 512; err != nil || len(s.Folders) != 1 || s.Folders[0].Size != want {
+	if err != nil || len(s.Folders) != 1 || s.Folders[0].Size != want {
 		t.Errorf("folders = %+v, %v; want ~/Code, %d bytes", s.Folders, err, want)
 	}
 }

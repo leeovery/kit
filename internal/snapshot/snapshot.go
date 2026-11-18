@@ -9,6 +9,7 @@
 package snapshot
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -45,8 +46,8 @@ type Mac struct {
 	AppDirs []string
 	// SudoLocal is the file Touch ID for sudo's line goes in.
 	SudoLocal string
-	// SizeFor is how long the data folders are sized for: one not sized by
-	// then says as much as was counted.
+	// SizeFor is how long the data folders are sized for, DefaultSizeFor
+	// when 0: one not sized by then says as much as was counted.
 	SizeFor time.Duration
 	// Now is the time, as the backup tools' last backups are judged by.
 	Now func() time.Time
@@ -79,12 +80,26 @@ type Part struct {
 	// as a secret the Mac doesn't declare, naming kit secret add.
 	Lines   []config.Entry
 	Refused []config.Refusal
+	// Unchecked are those of Lines declared as they are, as whether they
+	// need a secret couldn't be told, as without the network.
+	Unchecked []Unchecked
 	// Err is why it couldn't be looked at: none of it is declared.
 	Err error
 	// section is whether it declares its section with nothing in it: a
 	// kind's, whose program is here.
 	section bool
 }
+
+// Unchecked is a line declared as it is, by its name, as whether it needs a
+// secret couldn't be told, and why.
+type Unchecked struct {
+	Name string
+	Err  error
+}
+
+// DefaultSizeFor is how long the data folders are sized for when Mac
+// doesn't say. Measured, 68 GB in 11 folders took 29 seconds.
+const DefaultSizeFor = time.Minute
 
 // Labels of the config's own parts.
 const (
@@ -113,7 +128,7 @@ func Find(ctx context.Context, m Mac) (Snapshot, error) {
 	}
 	// The folders are sized while the rest is found, for no longer than
 	// SizeFor.
-	sizing, sized := context.WithTimeout(ctx, m.SizeFor)
+	sizing, sized := context.WithTimeout(ctx, cmp.Or(m.SizeFor, DefaultSizeFor))
 	defer sized()
 	sizes := make(chan []Folder, 1)
 	go func() { sizes <- sizeAll(sizing, m.Home, folders, os.ReadDir) }()
@@ -140,77 +155,89 @@ func (m Mac) kindParts(ctx context.Context, deps *kind.Deps) []Part {
 	}
 	var wg sync.WaitGroup
 	for i, k := range ks {
-		wg.Go(func() { parts[i].Lines, parts[i].Refused, parts[i].Err = m.undeclared(ctx, k) })
+		wg.Go(func() { m.undeclared(ctx, k, &parts[i]) })
 	}
 	wg.Wait()
 	return parts
 }
 
-// undeclared are k's things on the Mac and not declared for it, each as
-// adopting it declares it, and those whose line couldn't be made.
-func (m Mac) undeclared(ctx context.Context, k kind.Kind) ([]config.Entry, []config.Refusal, error) {
+// undeclared finds p's lines, k's things on the Mac and not declared for
+// it, each as adopting it declares it; those whose line couldn't be made,
+// refused; or why k couldn't be looked at.
+func (m Mac) undeclared(ctx context.Context, k kind.Kind, p *Part) {
 	list, unread, err := kind.Declared(m.Config, k, m.Name)
-	if err = errors.Join(err, unread); err != nil {
-		return nil, nil, err
+	if p.Err = errors.Join(err, unread); p.Err != nil {
+		return
 	}
 	if d, ok := k.(*defaults.Defaults); ok {
 		version, err := macOSVersion(ctx, m.Run)
 		if err != nil {
-			return nil, nil, err
+			p.Err = err
+			return
 		}
-		lines, err := d.Current(ctx, version)
-		return lines, nil, err
+		p.Lines, p.Err = d.Current(ctx, version)
+		return
 	}
 	res := kind.Compare(ctx, k, list)
 	if res.State == check.Failed {
-		return nil, nil, errors.New(res.Reason)
+		p.Err = errors.New(res.Reason)
+		return
 	}
 	var extra []string
 	for _, it := range res.Items {
 		switch it.State {
 		case check.NotAllowed:
-			return nil, nil, fmt.Errorf("%s: allow it in %s", it.Name, it.Detail)
+			p.Err = fmt.Errorf("%s: allow it in %s", it.Name, it.Detail)
+			return
 		case kind.Extra:
 			extra = append(extra, it.Name)
 		}
 	}
-	entries, errs := make([]config.Entry, len(extra)), make([]error, len(extra))
+	lines := make([]madeLine, len(extra))
 	var wg sync.WaitGroup
 	free := make(chan struct{}, liners)
 	for i, name := range extra {
 		wg.Go(func() {
 			free <- struct{}{}
 			defer func() { <-free }()
-			entries[i], errs[i] = m.line(ctx, k, name)
+			lines[i] = m.line(ctx, k, name)
 		})
 	}
 	wg.Wait()
-	var lines []config.Entry
-	var refused []config.Refusal
-	for i, e := range entries {
-		if errs[i] != nil {
-			refused = append(refused, config.Refusal{Kind: k.Name(), Entry: e, Err: errs[i]})
-		} else {
-			lines = append(lines, e)
+	for _, l := range lines {
+		switch {
+		case l.err != nil:
+			p.Refused = append(p.Refused, config.Refusal{Kind: k.Name(), Entry: l.entry, Err: l.err})
+			continue
+		case l.unchecked != nil:
+			p.Unchecked = append(p.Unchecked, Unchecked{Name: l.entry.Name, Err: l.unchecked})
 		}
+		p.Lines = append(p.Lines, l.entry)
 	}
-	return lines, refused, nil
 }
 
 // liners is how many of a kind's lines are made at once: holding one for a
-// secret asks Homebrew about it, a second or so each.
+// secret asks for its download, over the network.
 const liners = 8
 
-// line is the line adopting name, one of k's things, declares in the Mac's
-// file: held for the secret installing it needs, refused while the Mac
-// doesn't declare that secret.
-func (m Mac) line(ctx context.Context, k kind.Kind, name string) (config.Entry, error) {
+// madeLine is a line a part declares: its entry; why whether it needs a secret
+// couldn't be told, when it couldn't; and why it's refused, when it is.
+type madeLine struct {
+	entry          config.Entry
+	unchecked, err error
+}
+
+// line is the line adopting name, one of k's things installed, declares in
+// the Mac's file: held for the secret installing it needs, refused while
+// the Mac doesn't declare that secret, nothing changed on the Mac to find
+// out (kind.HoldInstalled).
+func (m Mac) line(ctx context.Context, k kind.Kind, name string) madeLine {
 	e, err := kind.Line(ctx, k, name, "")
 	if err != nil {
-		return e, err
+		return madeLine{entry: e, err: err}
 	}
-	_, err = kind.Hold(ctx, k, m.Config, m.Name, m.Name, &e, nil)
-	return e, err
+	unchecked, err := kind.HoldInstalled(ctx, k, m.Config, m.Name, &e)
+	return madeLine{entry: e, unchecked: unchecked, err: err}
 }
 
 // macOSVersion is the Mac's macOS's, as in 26.1.
@@ -274,7 +301,9 @@ func (m Mac) backupsPart(ctx context.Context) Part {
 // edit, every section placed and sorted as kit writes them, the file
 // written whole or not at all once it reads back as the config's loader
 // reads it. A line the config refuses is left out, moved to its part's
-// Refused. Committing it is the caller's.
+// Refused. Nothing on the Mac is put back for one: finding its line
+// changed nothing, as its tap is on the Mac already (kind.HoldInstalled).
+// Committing it is the caller's.
 func Write(m Mac, s *Snapshot) error {
 	var sections []string
 	var lines []config.Declaration
@@ -295,8 +324,12 @@ func Write(m Mac, s *Snapshot) error {
 	}
 	for _, r := range refused {
 		i := slices.IndexFunc(s.Parts, func(p Part) bool { return p.Kind == r.Kind })
+		if i < 0 {
+			continue
+		}
 		p := &s.Parts[i]
 		p.Lines = slices.DeleteFunc(p.Lines, func(e config.Entry) bool { return e.Name == r.Entry.Name })
+		p.Unchecked = slices.DeleteFunc(p.Unchecked, func(u Unchecked) bool { return u.Name == r.Entry.Name })
 		p.Refused = append(p.Refused, r)
 	}
 	return nil

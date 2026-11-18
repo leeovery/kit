@@ -94,6 +94,11 @@ func (d *Defaults) Current(ctx context.Context, version string) ([]config.Entry,
 			}
 			maps.DeleteFunc(m, func(key string, _ any) bool { return isNever(list, domain, key) })
 			for s, v := range d.settingsOf(domainID(currentHost, domain), m) {
+				// A setting's name takes its last colon as its entry's start,
+				// so an entry whose key holds one can't be named.
+				if strings.Contains(s.Entry, ":") {
+					continue
+				}
 				if !d.isDeclared(s.Name()) && !holdsDate(v) {
 					out = append(out, config.Entry{Name: s.Name(), Value: valueWords(v, s.Entry != "")})
 				}

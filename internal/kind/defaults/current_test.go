@@ -187,6 +187,19 @@ func TestAChoiceOnceNoiseIsTakenQuietly(t *testing.T) {
 	}
 }
 
+// A dict going by its entries leaves out an entry whose key holds a colon,
+// which no setting's name can say, as a name's last colon starts its
+// entry's key: written, its line would set another key.
+func TestAnEntryWhoseKeyHoldsAColonIsLeftOut(t *testing.T) {
+	m := snapshotMac(t)
+	m.set("com.apple.symbolichotkeys", "<key>AppleSymbolicHotKeys</key><dict><key>28</key><true/><key>29</key><true/><key>a:b</key><true/></dict>")
+	m.declare("com.apple.symbolichotkeys:AppleSymbolicHotKeys:28", `-dict-add "<true/>"`)
+	got, err := m.d.Current(t.Context(), "26.0")
+	if want := []string{"com.apple.symbolichotkeys:AppleSymbolicHotKeys:29"}; err != nil || !slices.Equal(names(got), want) {
+		t.Errorf("Current() = %q, %v; want %q", names(got), err, want)
+	}
+}
+
 // A date anywhere in a value marks it macOS's own, as a date at the top
 // does.
 func TestADateInADictIsNeverDeclared(t *testing.T) {

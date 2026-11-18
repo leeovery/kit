@@ -32,12 +32,12 @@ func sizeAll(ctx context.Context, home string, folders []Folder, readDir func(st
 	s.more = sync.NewCond(&s.mu)
 	for i, f := range folders {
 		dir := filepath.Join(home, strings.TrimPrefix(f.Path, "~/"))
-		dev, err := device(dir)
+		st, err := lstat(dir)
 		if err != nil {
 			s.unread(i, err)
 			continue
 		}
-		s.devs[i] = dev
+		s.devs[i], s.folders[i].Size = st.Dev, st.Blocks*512
 		s.todo = append(s.todo, job{folder: i, dir: dir})
 		s.pending[i]++
 		s.left++
@@ -73,13 +73,14 @@ func sizeAll(ctx context.Context, home string, folders []Folder, readDir func(st
 	return out
 }
 
-// device is the volume path is on, itself, not what a link leads to.
-func device(path string) (int32, error) {
+// lstat is what's at path, itself, not what a link leads to: its volume,
+// and the blocks it takes.
+func lstat(path string) (syscall.Stat_t, error) {
 	var st syscall.Stat_t
 	if err := syscall.Lstat(path, &st); err != nil {
-		return 0, &fs.PathError{Op: "lstat", Path: path, Err: err}
+		return st, &fs.PathError{Op: "lstat", Path: path, Err: err}
 	}
-	return st.Dev, nil
+	return st, nil
 }
 
 // sizing is folders being sized: the folders in them still to read, each a

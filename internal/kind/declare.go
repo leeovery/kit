@@ -67,14 +67,39 @@ func Hold(ctx context.Context, k Kind, cfg *config.Config, scope, mac string, e 
 	if !ok {
 		return "", nil
 	}
-	need, err := private.NeedsSecret(ctx, e.Name)
-	if ctx.Err() != nil {
-		return "", fmt.Errorf("stopped checking whether it needs a secret: %w", ctx.Err())
+	need, unchecked, err := hold(ctx, private.NeedsSecret, cfg, scope, mac, e, check)
+	switch {
+	case unchecked != nil:
+		said = "; couldn't check whether it needs a secret: " + engine.Reason(unchecked)
+	case need.Secret != "":
+		said = "; held for " + need.Secret + ": " + need.Why
 	}
-	if err != nil {
-		said = "; couldn't check whether it needs a secret: " + engine.Reason(err)
-	} else if need.Secret != "" {
-		e.Hold, said = config.SecretHold(need.Secret), "; held for "+need.Secret+": "+need.Why
+	return said, err
+}
+
+// HoldInstalled is Hold for e, one of k's things installed already, by its
+// full name, declared in the Mac called mac's declarations, as a snapshot
+// of the Mac declares it (Private.InstalledNeedsSecret): nothing on the
+// Mac changes to find out. unchecked is why k couldn't tell, e then left
+// as it is.
+func HoldInstalled(ctx context.Context, k Kind, cfg *config.Config, mac string, e *config.Entry) (unchecked, err error) {
+	private, ok := k.(Private)
+	if !ok {
+		return nil, nil
+	}
+	_, unchecked, err = hold(ctx, private.InstalledNeedsSecret, cfg, mac, mac, e, nil)
+	return unchecked, err
+}
+
+// hold is Hold's judgement, needs finding what installing e needs: the
+// need, why it couldn't be found, if it couldn't, and why e is refused.
+func hold(ctx context.Context, needs func(context.Context, string) (Need, error), cfg *config.Config, scope, mac string, e *config.Entry, check func(config.Entry) error) (Need, error, error) {
+	need, unchecked := needs(ctx, e.Name)
+	if ctx.Err() != nil {
+		return need, nil, fmt.Errorf("stopped checking whether it needs a secret: %w", ctx.Err())
+	}
+	if unchecked == nil && need.Secret != "" {
+		e.Hold = config.SecretHold(need.Secret)
 	}
 	refused := secretDeclared(cfg, scope, mac, need)
 	if refused == nil && check != nil {
@@ -85,7 +110,7 @@ func Hold(ctx context.Context, k Kind, cfg *config.Config, scope, mac string, e 
 			refused = fmt.Errorf("%w; %s", refused, engine.Reason(err))
 		}
 	}
-	return said, refused
+	return need, unchecked, refused
 }
 
 // secretDeclared says why a line in scope's declarations can't be held for

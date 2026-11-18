@@ -80,7 +80,7 @@ func (m Mac) folders(owned restore.Owned) ([]Folder, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read the home folder: %w", err)
 	}
-	home, err := device(m.Home)
+	home, err := lstat(m.Home)
 	if err != nil {
 		return nil, fmt.Errorf("read the home folder: %w", err)
 	}
@@ -90,7 +90,7 @@ func (m Mac) folders(owned restore.Owned) ([]Folder, error) {
 		if !e.IsDir() || strings.HasPrefix(name, ".") || slices.Contains(notData, name) {
 			continue
 		}
-		if dev, err := device(filepath.Join(m.Home, name)); err == nil && dev != home {
+		if st, err := lstat(filepath.Join(m.Home, name)); err == nil && st.Dev != home.Dev {
 			continue
 		}
 		p := "~/" + name
