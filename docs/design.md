@@ -614,7 +614,8 @@ check looking at what's there, the clone and git's settings in it, GitHub and th
 record in kit's state (`setup.json`) keeping only the choices made, so a run stopped anywhere,
 a question cancelled, one its flag doesn't answer, or a clone, a setting or a push cut short,
 carries on where it stopped and ends as a run never stopped does. It refuses while the config
-folder holds anything, unless its own run part-way left it there: the folder empty or a clone
+folder holds anything but Finder's `.DS_Store`, which it deletes so git clones there, unless its
+own run part-way left it there: the folder empty or a clone
 of the repository it chose, read as its origin's URL is set, before an insteadOf rewrites it,
 and kit's name for the Mac none or the one it chose; else it's a Mac kit looks after. Run
 again with a flag other than the run recorded: till the commit's edits are begun, recorded as
@@ -685,8 +686,11 @@ note its total; then the apps installed by hand, a row each, where secrets go, a
 carries on now` before apply's own screen. Signing in, the way chosen takes the whole window, the
 QR code or the browser's page, and the code, as the boot's does, the head, then the blank lines,
 then the QR code giving way in a short window so the code and its expiry stay whole; esc gives
-it back, the code under GitHub's row. Esc, or q but in a typed field, stops it, what it cut
-short saying it stopped. Bare `kit` at a terminal offers it while setup hasn't finished: a
+it back, the code under GitHub's row. Esc, or q but in a typed field, stops it: a step the
+engine says the run was stopped before or in, or one skipped for it, says it stopped, rows done
+stay as they were, kit-config's never pushed, and nothing's said of the apps installed by hand
+or secrets. A checklist scrolls in the room the row and the keys leave, and the keys wrap only
+between keys. Bare `kit` at a terminal, its keys too, offers it while setup hasn't finished: a
 setup stopped part-way, enter carries it on; the config folder absent or empty, as setup starts
 on, enter runs `kit setup`; any other key leaves. Every command that needs a config and finds
 none names `kit setup` first.

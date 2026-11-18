@@ -810,18 +810,19 @@ func (q *question) take(k ask.Key) (answer, bool) {
 		}
 	case ticking:
 		switch {
-		case k.Is("up", "k"):
-			q.cursor = (q.cursor + len(q.ticks) - 1) % len(q.ticks)
-		case k.Is("down", "j"):
-			q.cursor = (q.cursor + 1) % len(q.ticks)
-		case k.Is(" "):
-			q.ticks[q.cursor].Ticked = !q.ticks[q.cursor].Ticked
 		case k.Is("enter"):
 			ticked := make([]bool, len(q.ticks))
 			for i, t := range q.ticks {
 				ticked[i] = t.Ticked
 			}
 			return answer{ticked: ticked}, true
+		case len(q.ticks) == 0:
+		case k.Is("up", "k"):
+			q.cursor = (q.cursor + len(q.ticks) - 1) % len(q.ticks)
+		case k.Is("down", "j"):
+			q.cursor = (q.cursor + 1) % len(q.ticks)
+		case k.Is(" "):
+			q.ticks[q.cursor].Ticked = !q.ticks[q.cursor].Ticked
 		}
 	case naming:
 		switch {

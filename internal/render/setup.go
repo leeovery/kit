@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/leeovery/kit/internal/ask"
 	"github.com/leeovery/kit/internal/boot"
 	"github.com/leeovery/kit/internal/check"
@@ -43,11 +45,14 @@ type SetupFace struct {
 	q     *question
 	// picked is whether the way to sign in has been asked; mode is that
 	// way, which has the whole window, and signing the step it's for.
-	picked   bool
-	mode     string
-	signing  string
-	qr       qrCode
+	picked  bool
+	mode    string
+	signing string
+	qr      qrCode
+	// stopping is whether esc has stopped setup; halted, whether a step
+	// has said the run was stopped, however it was.
 	stopping bool
+	halted   bool
 	// carries is what carries on once setup's done, said last.
 	carries string
 	frame   int
@@ -131,6 +136,7 @@ func (f *SetupFace) Emit(e event.Event) {
 		r := f.row(e.Step)
 		result := e.Result
 		r.running, r.code, r.finished = false, nil, &result
+		f.halted = f.halted || result.Reason == event.ErrStopped.Error()
 	default:
 		return
 	}
@@ -243,7 +249,7 @@ func (f *SetupFace) blocks(width, height int, live bool) []block {
 	if b, ok := f.byHand(width); ok {
 		out = append(out, b)
 	}
-	if r := f.rows[setup.SecretsStep]; r != nil && r.finished != nil {
+	if r := f.rows[setup.SecretsStep]; r != nil && r.finished != nil && r.finished.State == check.OK {
 		said, command := r.finished.Summary, ""
 		if i := strings.LastIndex(said, ": kit "); i >= 0 {
 			said, command = said[:i+2], said[i+2:]
@@ -262,7 +268,7 @@ func (f *SetupFace) installs() bool {
 		return true
 	}
 	r := f.rows[setup.InstallStep]
-	return r != nil && r.finished != nil && r.finished.Summary != setup.NothingNew
+	return r != nil && f.reached(r.finished) && r.finished.Summary != setup.NothingNew
 }
 
 // note is what an area's header says: how far SETUP's got, while it's
@@ -317,16 +323,21 @@ func (f *SetupFace) found(s event.Step, width int) []look.Row {
 		}
 		out = append(out, row)
 	}
-	if r := f.rows[s.Name]; r != nil && r.finished != nil && r.finished.State != check.OK && !f.cancelled(cmp.Or(r.finished.Reason, r.finished.Summary)) {
+	if r := f.rows[s.Name]; r != nil && f.reached(r.finished) && r.finished.State != check.OK {
 		out = append(out, f.ended(s.Title, *r.finished, width))
 	}
 	return out
 }
 
-// cancelled reports whether why is setup stopped, as esc stops it.
+// cancelled reports whether why is the run stopped: the reason the
+// engine gives a step it was stopped before, or in the middle of; or, the
+// run stopped, a part of the snapshot cut short by it.
 func (f *SetupFace) cancelled(why string) bool {
-	return f.stopping && strings.Contains(why, context.Canceled.Error())
+	return why == event.ErrStopped.Error() || f.stopped() && strings.Contains(why, context.Canceled.Error())
 }
+
+// stopped reports whether the run's been stopped, by esc or otherwise.
+func (f *SetupFace) stopped() bool { return f.stopping || f.halted }
 
 // muted are words, each muted, for a row's says.
 func muted(words []string) []string {
@@ -348,7 +359,7 @@ func (f *SetupFace) titled(name string) bool {
 func (f *SetupFace) stepRow(s event.Step, width, height int, live bool) look.Row {
 	r := f.rows[s.Name]
 	if s.Name == setup.ConfigStep {
-		if c := f.rows[setup.CommitStep]; c != nil && (c.running || c.finished != nil) && r != nil && r.finished != nil {
+		if c := f.rows[setup.CommitStep]; c != nil && (c.running || f.reached(c.finished)) && r != nil && r.finished != nil {
 			return f.committed(s.Title, *r.finished, c, width)
 		}
 	}
@@ -370,8 +381,15 @@ func (f *SetupFace) stepRow(s event.Step, width, height int, live bool) look.Row
 	return look.Row{State: look.Queued, Name: s.Title}
 }
 
+// reached reports whether a step ended as it ran to its end: done, needing
+// you, or failed, not skipped or stopped.
+func (f *SetupFace) reached(res *check.Result) bool {
+	return res != nil && res.State != check.Deferred && !f.cancelled(cmp.Or(res.Reason, res.Summary))
+}
+
 // asking is the row of the question being asked: the question beside its
-// name, what more it says under it, muted, then what answers it.
+// name, what more it says under it, muted, then what answers it, as much
+// of a checklist as height leaves room for.
 func (f *SetupFace) asking(title string, width, height int) look.Row {
 	text, more, _ := strings.Cut(f.q.text, "\n")
 	parts := strings.Split(text, " · ")
@@ -384,7 +402,11 @@ func (f *SetupFace) asking(title string, width, height int) look.Row {
 			row.Under = append(row.Under, look.Muted(l))
 		}
 	}
-	row.Under = append(row.Under, f.asked(height)...)
+	room := 0
+	if height > 0 {
+		room = max(height-len(look.Timeline("  ", width, row))-len(f.foot(width, true)), 3)
+	}
+	row.Under = append(row.Under, f.asked(room)...)
 	return row
 }
 
@@ -413,7 +435,11 @@ func (f *SetupFace) ended(title string, res check.Result, width int) look.Row {
 	case check.OK:
 		return look.Row{State: look.Done, Name: title, Says: look.Says(muted(strings.Split(res.Summary, " · "))...)}
 	case check.Deferred:
-		return look.Row{State: look.Skipped, Name: title, Says: look.Muted("skipped")}
+		says := "skipped"
+		if f.stopped() {
+			says = "stopped"
+		}
+		return look.Row{State: look.Skipped, Name: title, Says: look.Muted(says)}
 	}
 	text := cmp.Or(res.Reason, res.Summary)
 	if f.cancelled(text) {
@@ -435,7 +461,7 @@ func (f *SetupFace) ended(title string, res check.Result, width int) look.Row {
 // each, what's to be done about them under them.
 func (f *SetupFace) byHand(width int) (block, bool) {
 	r := f.rows[setup.ByHandStep]
-	if r == nil || r.finished == nil || r.finished.Summary == "none" {
+	if r == nil || r.finished == nil || r.finished.State != check.OK || r.finished.Summary == "none" {
 		return block{}, false
 	}
 	res := *r.finished
@@ -478,9 +504,9 @@ func margined(lines []string) []string {
 }
 
 // asked is what answers the question being asked, under its row: a
-// checklist longer than height leaves room shows the things around the
-// cursor, as kit's lists scroll. Height 0 is room for all of them.
-func (f *SetupFace) asked(height int) []string {
+// checklist longer than room shows the things around the cursor, as kit's
+// lists scroll. Room 0 is room for all of them.
+func (f *SetupFace) asked(room int) []string {
 	switch f.q.kind {
 	case choosing:
 		return look.Answers(f.q.choices, f.q.cursor)
@@ -488,9 +514,7 @@ func (f *SetupFace) asked(height int) []string {
 		return []string{look.Typed(string(f.q.typed))}
 	case ticking:
 		ticks, cursor := f.q.ticks, f.q.cursor
-		// The question's row, a line of what more it says, and the keys under
-		// a blank line, besides the things.
-		if room := max(height-5, 3); height > 0 && len(ticks) > room {
+		if room > 0 && len(ticks) > room {
 			from := min(max(cursor-room/2, 0), len(ticks)-room)
 			ticks, cursor = ticks[from:from+room], cursor-from
 		}
@@ -523,7 +547,25 @@ func (f *SetupFace) foot(width int, live bool) []string {
 			keys = append(slices.Clone(f.q.keys), stop)
 		}
 	}
-	return append(append(out, ""), margined(look.Fold("", width, strings.TrimPrefix(look.Keys(keys...), "  ")))...)
+	return append(append(out, ""), keyLines(width, keys)...)
+}
+
+// keyLines are keys as kit's keys show, width wide, wrapped only between
+// keys, so each stays with what it does.
+func keyLines(width int, keys []look.Key) []string {
+	var lines [][]look.Key
+	for _, k := range keys {
+		if n := len(lines); n > 0 && ansi.StringWidth(look.Keys(append(slices.Clone(lines[n-1]), k)...)) <= width {
+			lines[n-1] = append(lines[n-1], k)
+			continue
+		}
+		lines = append(lines, []look.Key{k})
+	}
+	out := make([]string, len(lines))
+	for i, l := range lines {
+		out[i] = look.Keys(l...)
+	}
+	return out
 }
 
 // Full is signing in, the whole window, the way chosen: with the phone, the

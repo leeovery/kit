@@ -734,7 +734,8 @@ func TestSetupStoppedAnywhereEndsAsOneNeverStopped(t *testing.T) {
 // all, unless its own run part-way left it there: the folder empty, or a
 // clone of the repository it chose, and kit's name for the Mac none, or
 // the one it chose: its origin read as set, before an insteadOf rewrites
-// it. Else setup starts afresh, forgetting a run that finished.
+// it. Else setup starts afresh, forgetting a run that finished. Finder's
+// file alone is empty, and goes.
 func TestBegin(t *testing.T) {
 	partWay := record{Repo: "someone/kit-config", Cloned: true, Mac: "laptop"}
 	for _, tt := range []struct {
@@ -748,6 +749,7 @@ func TestBegin(t *testing.T) {
 	}{
 		{"nothing there", nil, "", "", record{}, Answers{}, ""},
 		{"an empty folder", []string{"."}, "", "", record{}, Answers{}, ""},
+		{"Finder's file alone", []string{".DS_Store"}, "", "", record{}, Answers{}, ""},
 		{"a config", []string{config.File}, "", "", record{}, Answers{}, "holds a config already, so kit looks after this Mac: kit status says how it stands"},
 		{"something else", []string{"notes.txt"}, "", "", record{}, Answers{}, "is there, and isn't a config: move it aside, then run kit setup again"},
 		{"setup's own, part-way", []string{config.File}, "https://github.com/someone/kit-config.git", "", partWay, Answers{}, ""},
@@ -783,6 +785,9 @@ func TestBegin(t *testing.T) {
 			switch {
 			case tt.says == "" && err != nil, tt.says != "" && (err == nil || !strings.Contains(err.Error(), tt.says)):
 				t.Errorf("Begin = %v, want %q", err, tt.says)
+			}
+			if _, statErr := os.Stat(filepath.Join(m.dirs.Config, ".DS_Store")); err == nil && statErr == nil {
+				t.Error("Finder's file was left, for git to refuse to clone into the folder")
 			}
 			rec, _ := kitstate.Load[record](m.dirs.State, recordName)
 			if kept := rec.Repo != ""; err == nil && kept != tt.record.partWay() {

@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"io/fs"
-	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -31,7 +29,7 @@ func (a *app) home(cmd *cobra.Command) error {
 	if err := a.textOnly(cmd); err != nil {
 		return err
 	}
-	if !a.pretty(a.Stdout) {
+	if !a.pretty(a.Stdout) || !a.Terminal(a.Stdin) {
 		return cmd.Help()
 	}
 	if says, does := a.setupUnfinished(); says != "" {
@@ -87,7 +85,7 @@ func (a *app) setupUnfinished() (says, does string) {
 	if setup.PartWay(dirs.State) {
 		return "setup stopped part-way", "carries on"
 	}
-	if entries, err := os.ReadDir(dirs.Config); len(entries) == 0 && (err == nil || errors.Is(err, fs.ErrNotExist)) {
+	if empty, err := setup.Empty(dirs.Config); err == nil && empty {
 		return "isn't set up with kit", "runs kit setup"
 	}
 	return "", ""

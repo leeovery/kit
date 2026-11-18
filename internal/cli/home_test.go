@@ -94,6 +94,17 @@ func TestBareKitOffersSetup(t *testing.T) {
 	if out, _, code := w.run(t); !strings.Contains(out, "it's kit's menu") || code != 0 || w.offered != nil {
 		t.Errorf("without a terminal, kit printed %q, exit %d, offered %q; want its help", out, code, w.offered)
 	}
+	w.terminal, w.noKeys = true, true
+	if out, _, code := w.run(t); !strings.Contains(out, "kit sets a Mac up from a config repository") || code != 0 || w.offered != nil {
+		t.Errorf("without keys at a terminal, kit printed %q, exit %d, offered %q; want its help", out, code, w.offered)
+	}
+	w.noKeys = false
+
+	w.write(t, filepath.Join(".config", "kit", ".DS_Store"), "Finder's\n")
+	if w.run(t); len(w.offered) != 1 {
+		t.Errorf("the config folder holding Finder's file alone: offered %q; want kit setup offered", w.offered)
+	}
+	w.offered = nil
 
 	w.terminal, w.takeOffer = true, true
 	w.write(t, filepath.Join(".config", "kit", "kit.toml"), "format = 1\n")

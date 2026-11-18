@@ -57,7 +57,7 @@ func asking(t *testing.T, f *render.SetupFace, text string, ask func() error) <-
 		}
 		time.Sleep(time.Millisecond)
 	}
-	t.Fatalf("never asked %q", text)
+	t.Fatalf("never asked %q:\n%s", text, viewed(f, 80, 60))
 	return nil
 }
 
@@ -148,25 +148,82 @@ func TestSetupScreenGivesWay(t *testing.T) {
 }
 
 // A checklist longer than the screen shows the things around the cursor,
-// the question's row above them, its keys under them.
+// the question's row above them, its keys under them, however the row and
+// the keys wrap: at a phone's 52 columns and at 80, from 10 lines high.
 func TestSetupScreenChecklistScrolls(t *testing.T) {
-	f := setupFace(func() {}, setupTill(setup.FilesStep)...)
+	const question = "which folders should a new Mac bring back from your backups?"
 	var ticks []look.Tick
 	for name := range strings.FieldsSeq("a b c d e f g h i j k l m n o p q r s t u v w x y") {
-		ticks = append(ticks, look.Tick{Name: "~/." + name + "rc", Ticked: true})
+		ticks = append(ticks, look.Tick{Name: "~/" + name + "-folder", More: "1.2 GB", Ticked: true})
 	}
-	answered := asking(t, f, "keep", func() error {
-		_, err := f.Tick(context.Background(), setup.FilesStep, "which should kit-config keep?", ticks)
+	f := setupFace(func() {}, setupTill(setup.DataStep)...)
+	answered := asking(t, f, "bring back", func() error {
+		_, err := f.Tick(context.Background(), setup.DataStep, question, ticks)
 		return err
 	})
 	for range 20 {
 		f.Key(ask.Key{Name: "down"})
 	}
-	view := viewed(f, 80, 24)
-	if lines := strings.Count(view, "\n") + 1; lines > 24 || !strings.Contains(view, "▲ Linked files  which should kit-config keep?") || !strings.Contains(view, "❯ ■  ~/.urc") || strings.Contains(view, "~/.arc") || !strings.HasSuffix(view, "esc stop") {
-		t.Errorf("25 things, the cursor on the 21st, 24 lines high, drew\n%s\nwant the row, the things around the cursor, the keys", view)
+	for _, width := range []int{52, 80} {
+		for height := 10; height <= 31; height++ {
+			view := viewed(f, width, height)
+			if lines := strings.Count(view, "\n") + 1; lines > height || !strings.Contains(view, "▲ Your data") || !strings.Contains(view, "❯ ■  ~/u-folder") || !strings.HasSuffix(view, "esc stop") {
+				t.Errorf("25 things, the cursor on the 21st, %d by %d, drew\n%s\nwant the row, the things around the cursor, the keys", width, height, view)
+			}
+		}
 	}
 	f.Key(ask.Key{Name: "enter"})
+	if err := <-answered; err != nil {
+		t.Error(err)
+	}
+}
+
+// At a phone's 52 columns, the keys at the foot wrap between keys, each
+// with what it does: a checklist's, and the ways to sign in.
+func TestSetupScreenKeysWrapWhole(t *testing.T) {
+	f := setupFace(func() {}, started(setup.GitHubStep)...)
+	foot := func(f *render.SetupFace, what string) {
+		t.Helper()
+		lines := strings.Split(viewed(f, 52, 40), "\n")
+		var keys []string
+		for i, l := range slices.Backward(lines) {
+			if l == "" {
+				keys = lines[i+1:]
+				break
+			}
+		}
+		for _, l := range keys {
+			for keyed := range strings.SplitSeq(strings.TrimSpace(l), " · ") {
+				if len(strings.Fields(keyed)) < 2 {
+					t.Errorf("%s at 52 columns, the keys\n%s\nwant each key with what it does", what, strings.Join(keys, "\n"))
+				}
+			}
+		}
+	}
+	keys := []boot.Key{{Key: "enter", Does: "with your phone"}, {Key: "s", Does: "here, in your browser"}}
+	way := make(chan string, 1)
+	asking(t, f, "how will you sign in?", func() error {
+		k, err := f.Pick(t.Context(), setup.GitHubStep, keys)
+		way <- k
+		return err
+	})
+	f.Key(ask.Key{Name: "enter"})
+	<-way
+	f.Emit(event.DeviceCode{Time: rendertest.At, Step: setup.GitHubStep, URI: "https://github.com/login/device", Code: "WDJB-MJHT", Expires: rendertest.At.Add(15 * time.Minute)})
+	asking(t, f, "here, in your browser · esc stop", func() error {
+		_, err := f.Pick(t.Context(), setup.GitHubStep, keys)
+		return err
+	})
+	f.Key(ask.Key{Name: "esc"})
+	foot(f, "signing in")
+
+	data := setupFace(func() {}, setupTill(setup.DataStep)...)
+	answered := asking(t, data, "which folders?", func() error {
+		_, err := data.Tick(context.Background(), setup.DataStep, "which folders?", []look.Tick{{Name: "~/Documents"}})
+		return err
+	})
+	foot(data, "a checklist")
+	data.Key(ask.Key{Name: "enter"})
 	if err := <-answered; err != nil {
 		t.Error(err)
 	}
@@ -302,18 +359,36 @@ func TestSetupScreenFindsAndCommits(t *testing.T) {
 	}
 }
 
-// Stopped while the snapshot looks, a part cut short says it stopped, never
-// that it failed, and the snapshot's own row says nothing more.
-func TestSetupScreenStoppedWhileFinding(t *testing.T) {
+// Stopped while the snapshot looks, as the engine ends a run stopped: a
+// part cut short says it stopped, never that it failed; the snapshot's own
+// row says nothing more; each step after it, the engine saying the run was
+// stopped, or that it needs one that was, says it stopped; kit-config's row
+// stays as it was done, the commit never reached; and nothing's said of the
+// apps installed by hand, nor of secrets.
+func TestSetupScreenStoppedRows(t *testing.T) {
+	stopped := check.Result{State: check.Failed, Reason: event.ErrStopped.Error()}
 	f := setupFace(func() {}, started(setup.SnapshotStep)...)
 	f.Emit(event.Finding{Step: setup.SnapshotStep, Part: "Homebrew formulae", Found: true, Count: 12})
 	f.Emit(event.Finding{Step: setup.SnapshotStep, Part: "macOS settings", Doing: "reading what's here"})
 	f.Key(ask.Key{Name: "esc"})
 	f.Emit(event.Finding{Step: setup.SnapshotStep, Part: "macOS settings", Found: true, Err: "sw_vers: context canceled"})
-	f.Emit(event.StepFinished{Time: rendertest.At, Step: setup.SnapshotStep, Result: check.Result{State: check.Failed, Reason: "snapshot: context canceled"}})
+	for _, step := range []string{setup.SnapshotStep, setup.DataStep, setup.PrefsStep, setup.ByHandStep, setup.SecretsStep} {
+		f.Emit(event.StepFinished{Time: rendertest.At, Step: step, Result: stopped})
+	}
+	for _, step := range []string{setup.FilesStep, setup.InstallStep, setup.CommitStep} {
+		f.Emit(event.StepFinished{Time: rendertest.At, Step: step, Result: check.Result{State: check.Deferred, Reason: "needs Declared"}})
+	}
 	left := ansi.Strip(strings.Join(f.Leaves(80), "\n"))
-	if !strings.Contains(left, "– macOS settings  stopped") || strings.Contains(left, "✗") || strings.Contains(left, "– Declared") {
-		t.Errorf("stopped while finding, left\n%s\nwant the part cut short stopped, nothing failed, no row for the snapshot", left)
+	want := "● kit-config  someone/kit-config · new, private\n"
+	for _, row := range []string{want, "– macOS settings  stopped", "– Your data  stopped", "– Apps' settings  stopped", "– Linked files  stopped"} {
+		if !strings.Contains(left, row) {
+			t.Errorf("stopped, left\n%s\nwant %q", left, row)
+		}
+	}
+	for _, never := range []string{"✗", "the run was stopped", "skipped", "Declared", "To install", "INSTALLED BY HAND", "→"} {
+		if strings.Contains(left, never) {
+			t.Errorf("stopped, left\n%s\nwant no %q", left, never)
+		}
 	}
 }
 

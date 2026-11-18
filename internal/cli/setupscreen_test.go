@@ -162,12 +162,10 @@ func signedOut(t *testing.T, repos map[string]bool) *world {
 	return w
 }
 
-// At a terminal, kit setup draws its screen as round 13's frames have it,
-// from a Mac in use, its GitHub's CLI signed out, kit-config made anew:
-// signing in, the way chosen; the code, with the phone, the whole window;
-// the config; this Mac's name, typed; the snapshot part-way, a row a part;
-// your data, ticked; apps' settings; the files to link.
-func TestSetupScreen(t *testing.T) {
+// settingUp is kit setup's screen's Mac in use: signed out, kit-config to
+// be created, two apps installed by hand; kit apply, carrying on, finding
+// it all as setup left it.
+func settingUp(t *testing.T) *world {
 	w := signedOut(t, map[string]bool{})
 	w.creates(t)
 	healthyMac(w)
@@ -176,19 +174,126 @@ func TestSetupScreen(t *testing.T) {
 	}
 	dir := filepath.Join(w.home, ".config", "kit")
 	w.fake.On("git", "-C", dir, "check-ignore", "--verbose", "--stdin", "-z").Exits(1)
-	// kit apply, carrying on, finds it all as setup left it.
 	w.fake.On("brew", "--prefix").Prints("/opt/homebrew\n")
 	w.fake.On("sudo", "-S", "-p", "[kit: sudo wants the password]", "-v")
 	w.fake.On("git", "-C", dir, "--literal-pathspecs", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "laptop/home").Prints("laptop/home/.zshrc\x00")
-	w.expectCommit(t, commit{
-		message: "kit setup (laptop): this Mac as it is", paths: []string{"kit.toml", "laptop"},
-		files:  []string{"kit.toml", "laptop/declarations", "laptop/home/.zshrc"},
-		status: "?? kit.toml\x00?? laptop/declarations\x00?? laptop/home/.zshrc\x00",
-	})
+	return w
+}
+
+// laptopCommit is setup's commit of the Mac named laptop, ~/.zshrc linked.
+var laptopCommit = commit{
+	message: "kit setup (laptop): this Mac as it is", paths: []string{"kit.toml", "laptop"},
+	files:  []string{"kit.toml", "laptop/declarations", "laptop/home/.zshrc"},
+	status: "?? kit.toml\x00?? laptop/declarations\x00?? laptop/home/.zshrc\x00",
+}
+
+// readingSlowly has the snapshot's read of macOS's settings wait till read,
+// which the test's end calls too.
+func (w *world) readingSlowly(t *testing.T) (read func()) {
 	reading := make(chan struct{})
-	read := sync.OnceFunc(func() { close(reading) })
+	read = sync.OnceFunc(func() { close(reading) })
 	t.Cleanup(read)
 	w.fake.On("defaults", "export", defaults.Watched[0], "-").Prints("<plist version=\"1.0\"><dict/></plist>").Does(func() { <-reading })
+	return read
+}
+
+// stoppedAs checks what kit setup, stopped, leaves on screen: rows done as
+// they were done, row says, and nothing said to fail, nor skipped, nor
+// what's said only once setup's done.
+func stoppedAs(t *testing.T, screen *tty, ended <-chan int, says string) {
+	t.Helper()
+	code := <-ended
+	left := rendertest.Screen(screen.raw())
+	if code == 0 || !strings.Contains(left, says) {
+		t.Errorf("stopped, kit setup exited %d, leaving\n%s\nwant it to hold %q", code, left, says)
+	}
+	for _, never := range []string{"✗", "the run was stopped", "skipped", "INSTALLED BY HAND", "kit keeps secrets", "esc stop"} {
+		if strings.Contains(left, never) {
+			t.Errorf("stopped, kit setup left\n%s\nwant no %q", left, never)
+		}
+	}
+}
+
+// Esc at any of kit setup's questions stops it there: that question's row
+// says it stopped, the rows done before it as they were, and nothing more.
+func TestSetupScreenStoppedAtAQuestion(t *testing.T) {
+	questions := []struct{ asks, row string }{
+		{"how will you sign in?", "– GitHub  stopped"},
+		{"has no repository named kit-config", "– kit-config  stopped"},
+		{"what will kit-config call it?", "– This Mac  stopped"},
+		{"which folders should a new Mac bring back", "– Your data  stopped"},
+		{"save them every night", "– Apps' settings  stopped"},
+		{"which should kit-config keep", "– Linked files  stopped"},
+	}
+	for at, q := range questions {
+		t.Run(q.row, func(t *testing.T) {
+			w := settingUp(t)
+			screen := atTerminal(t, w, 80, 48)
+			ended := running(t, w, "setup")
+			for _, before := range questions[:at] {
+				screen.showing(t, before.asks)
+				screen.press(t, "enter")
+				if before.asks == "how will you sign in?" {
+					screen.showing(t, boottest.Code)
+					w.repos.Entered()
+				}
+			}
+			screen.showing(t, q.asks)
+			screen.press(t, "esc")
+			stoppedAs(t, screen, ended, q.row)
+			if at > 1 && !strings.Contains(rendertest.Screen(screen.raw()), "● kit-config  someone/kit-config · new, private") {
+				t.Errorf("stopped, kit setup left\n%s\nwant kit-config's row as it was done", rendertest.Screen(screen.raw()))
+			}
+		})
+	}
+}
+
+// Esc while the snapshot looks stops setup: no part said to fail, and the
+// questions after it say they stopped.
+func TestSetupScreenStoppedWhileFinding(t *testing.T) {
+	w := settingUp(t)
+	read := w.readingSlowly(t)
+	screen := atTerminal(t, w, 80, 48)
+	ended := running(t, w, "setup", "--create", "kit-config", "--mac", "laptop")
+	screen.showing(t, "how will you sign in?")
+	screen.press(t, "enter")
+	screen.showing(t, boottest.Code)
+	w.repos.Entered()
+	screen.showing(t, "◐ macOS settings")
+	screen.press(t, "esc")
+	read()
+	stoppedAs(t, screen, ended, "– Linked files  stopped")
+	if left := rendertest.Screen(screen.raw()); strings.Contains(left, "To install") {
+		t.Errorf("stopped on a new kit-config, kit setup left\n%s\nwant no row to install", left)
+	}
+}
+
+// Esc while setup commits and pushes stops it: kit-config's row as it was
+// done, never pushed, nor skipped.
+func TestSetupScreenStoppedWhileCommitting(t *testing.T) {
+	w := settingUp(t)
+	w.expectCommit(t, laptopCommit)
+	w.fake.On("git", "-C", filepath.Join(w.home, ".config", "kit"), "push", "--quiet", "origin", "HEAD:refs/heads/main").Hangs()
+	screen := atTerminal(t, w, 80, 48)
+	ended := running(t, w, "setup", "--create", "kit-config", "--mac", "laptop", "--no-restore", "--no-prefs", "--link", "~/.zshrc")
+	screen.showing(t, "how will you sign in?")
+	screen.press(t, "enter")
+	screen.showing(t, boottest.Code)
+	w.repos.Entered()
+	screen.showing(t, "committing and pushing")
+	screen.press(t, "esc")
+	stoppedAs(t, screen, ended, "● kit-config  someone/kit-config · new, private\n")
+}
+
+// At a terminal, kit setup draws its screen as round 13's frames have it,
+// from a Mac in use, its GitHub's CLI signed out, kit-config made anew:
+// signing in, the way chosen; the code, with the phone, the whole window;
+// the config; this Mac's name, typed; the snapshot part-way, a row a part;
+// your data, ticked; apps' settings; the files to link.
+func TestSetupScreen(t *testing.T) {
+	w := settingUp(t)
+	w.expectCommit(t, laptopCommit)
+	read := w.readingSlowly(t)
 	screen := atTerminal(t, w, 80, 48)
 	ended := running(t, w, "setup")
 
