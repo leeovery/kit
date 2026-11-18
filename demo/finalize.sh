@@ -32,7 +32,7 @@ noisy=2
 # Noise keeps one frame in this many. It's the weight of a clip, as no
 # WebP, lossless or lossy, can squeeze it, and it still reads as noise at
 # a fraction of the rate.
-noise_every=6
+noise_every=3
 
 mode=clip
 case "${1:-}" in
@@ -98,7 +98,7 @@ framed() {
 # still <name> <dir> makes the still from the last of dir's frames. Its
 # screen is as tall as the run's tallest moment, so its last frame can end
 # in empty rows: cut them, leaving under the last row drawn the margin
-# above the first.
+# above the first, or what's there of it, for a screen drawn to its foot.
 still() {
 	local shot last size w h top bottom
 	shot=("$2"/f*.png)
@@ -106,7 +106,7 @@ still() {
 	size="$(ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 "$last")"
 	w="${size%,*}" h="${size#*,}"
 	read -r top bottom <<<"$(drawn_rows "$last" "$w" "$h")"
-	cwebp -quiet -lossless -m 6 -crop 0 0 "$w" $((bottom + 1 + top)) "$last" -o "$art/$1.webp"
+	cwebp -quiet -lossless -m 6 -crop 0 0 "$w" $((bottom + 1 + top < h ? bottom + 1 + top : h)) "$last" -o "$art/$1.webp"
 	made "art/$1.webp"
 }
 
@@ -123,7 +123,9 @@ changes() {
 # and its file: in a run of noisy frames, one in noise_every kept, its time
 # lengthened by the ones dropped after it. A frame the same as the one
 # before, as vhs takes when the screen's drawn no faster, carries a run on;
-# a noisy frame alone, a screen redrawn, is kept.
+# a noisy frame alone, a screen redrawn, is kept. Each time is in whole ms,
+# rounded from where the frames before it end, so the clip is as long as
+# its frames at fps, the MP4's length, not a third of a ms short a frame.
 timed() {
 	changes "$1" | awk -v fps="$fps" -v noisy="$noisy" -v every="$noise_every" -v dir="$1" '
 		{
@@ -131,7 +133,13 @@ timed() {
 			if (run > 1 && (run - 1) % every) count[kept]++
 			else count[kept = NR] = 1
 		}
-		END { for (i = 1; i <= NR; i++) if (count[i]) printf "-d\n%d\n%s/f%05d.png\n", int(count[i] * 1000 / fps + 0.5), dir, i }'
+		END {
+			for (i = 1; i <= NR; i++) if (count[i]) {
+				ms = int((shown + count[i]) * 1000 / fps + 0.5) - int(shown * 1000 / fps + 0.5)
+				shown += count[i]
+				printf "-d\n%d\n%s/f%05d.png\n", ms, dir, i
+			}
+		}'
 }
 
 # clip <name> <dir> makes the clip from dir's frames.

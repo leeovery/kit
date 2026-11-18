@@ -4,8 +4,9 @@
 # (internal/capture/scenarios.go) in real time: "hello again", a key
 # pressed; the decode in colour, the wordmark locking in kit's gradient and
 # shrinking into the header's corner, its line typed in; then kit apply's
-# screen under it, rows at work, 1Password's sign-in coming up on the
-# right, and Claude Code's step finishing.
+# screen under it, flying through the run: 1Password's sign-in coming up on
+# the right and done, Homebrew counting through its installs, the to-dos at
+# the end worked through, and the run's record.
 #
 # Recorded with new-mac-1-terminal.tape: demo/record.sh new-mac
 
@@ -19,7 +20,7 @@ Sleep 1s
 Show
 Sleep 300ms
 Enter
-Wait+Screen@40s /set up · 3 plugins/
-Sleep 1200ms
+Wait+Screen@40s /kit apply brings them back/
+Sleep 2500ms
 Hide
 Enter

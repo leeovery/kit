@@ -16,6 +16,8 @@ A blank Mac is one pasted line away: sign in to GitHub on your phone, and kit in
 
 [Docs](docs/README.md) · [Commands](docs/commands.md) · [Configuration](docs/configuration.md) · [Troubleshooting](docs/troubleshooting.md)
 
+<img src="art/new-mac.webp" alt="A new Mac set up by kit: the boot in Terminal, its splash decoding into the wordmark, signing in to GitHub with the phone, then the boot order; then Ghostty, where kit's look arrives in colour, and kit apply runs through 1Password's sign-in, Homebrew's installs and the to-dos to its record" width="840">
+
 </div>
 
 ---
@@ -41,6 +43,14 @@ A blank Mac is one pasted line away: sign in to GitHub on your phone, and kit in
 More: [Linked files](docs/linked-files.md) · [Your data](docs/your-data.md) ·
 [Steps](docs/steps.md) · [Running by itself](docs/running-by-itself.md) ·
 [Backups](docs/backups.md)
+
+## Screens
+
+|  |  |
+|:---:|:---:|
+| <a href="docs/new-mac.md"><img src="art/boot-sign-in.webp" alt="The boot in Terminal signing in to GitHub: a QR code filling the window, and the code to enter on the phone" width="420"></a><br>**The boot**<br>A new Mac, signed in from your phone | <a href="docs/new-mac.md"><img src="art/apply-card.webp" alt="kit apply's screen: the rows at work on the left, 1Password's sign-in as a card on the right, the log under it" width="420"></a><br>**kit apply**<br>What needs you, as a card |
+| <a href="docs/steps.md"><img src="art/apply-todos.webp" alt="The to-dos at kit apply's end: the list on the left, one done, the next one's card on the right" width="420"></a><br>**To-dos**<br>What only you can do, one at a time | <a href="docs/drift.md"><img src="art/status.webp" alt="kit status on a Mac in daily use: backups, the disk and the config fine, a tool installed by hand and an app not yet installed waiting on you" width="420"></a><br>**kit status**<br>How this Mac stands |
+| <a href="docs/drift.md"><img src="art/reconcile.webp" alt="kit reconcile at a terminal: ffmpeg declared, then the next thing asked, with what can be done about it" width="420"></a><br>**kit reconcile**<br>Keep or undo what changed by hand |  |
 
 ## Install
 

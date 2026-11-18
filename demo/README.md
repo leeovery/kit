@@ -20,8 +20,12 @@ demo/record.sh new-mac       # a clip in parts: each part's tape, then joined
 
 | Tape | Draws | Art |
 |---|---|---|
+| `new-mac-1-terminal`, `new-mac-2-ghostty` | scenarios `boot`, `arrival` | `art/new-mac.webp`: the README's lead, a new Mac from the boot's splash in Terminal to kit apply's record in Ghostty; and `demo/out/new-mac.mp4`, the same, for a page that takes a video |
 | `status` | fixture `status` | `art/status.webp`, a still: `kit status` on a Mac in daily use, two things waiting on the person: an app declared and not yet installed, a tool installed by hand |
-| `new-mac-1-terminal`, `new-mac-2-ghostty` | scenarios `boot`, `arrival` | `art/new-mac.webp`: the README's lead, a new Mac from the boot's splash in Terminal to kit apply's screen in Ghostty; and `demo/out/new-mac.mp4`, the same, for a page that takes a video |
+| `apply-card` | fixture `apply-card` | `art/apply-card.webp`, a still: kit apply's screen on the new Mac, 1Password's sign-in come up as a card |
+| `apply-todos` | fixture `apply-todos` | `art/apply-todos.webp`, a still: the to-dos at kit apply's end, one done, the next one's card up |
+| `boot-sign-in` | fixture `boot-sign-in` | `art/boot-sign-in.webp`, a still: the boot in Terminal signing in to GitHub, its QR code the whole window |
+| `reconcile` | fixture `reconcile` | `art/reconcile.webp`, a still: `kit reconcile` at a terminal, one thing decided, the next asked |
 
 `look.tape` holds the settings every tape sources; `look-terminal.tape` is the boot's, for what's
 recorded in Terminal. A tape's first line says what it makes: `# art: still` a still, `# art: part
@@ -38,24 +42,29 @@ committed beside it.
 ```bash
 go run ./cmd/capturetool --list              # every fixture and scenario
 go run ./cmd/capturetool --fixture status    # a still, printed at the terminal's width
+go run ./cmd/capturetool --fixture reconcile # a still, a window of its own: enter ends it
 go run ./cmd/capturetool --scenario boot     # a clip: enter starts it, enter again ends it
 ```
 
-- **A fixture** is a still: a run's events emitted on kit's face, which prints its report as
-  `kit status` does. The status tape types `kit status`: `demo/bin/kit` is a shim that draws the
-  fixture of that command, on a `PATH` without Homebrew's, so the kit installed on the Mac can't
-  be reached.
+- **A fixture** is a still: a run's events emitted on kit's face, its clock reading a fixed
+  moment, moved on only by the run's own pauses, which take no time. `status` is printed, as
+  `kit status` prints its report: its tape types `kit status`, and `demo/bin/kit` is a shim that
+  draws the fixture of that command, on a `PATH` without Homebrew's, so the kit installed on the
+  Mac can't be reached. The rest are each a window of their own, its size theirs
+  (`internal/capture/stills.go`): drawn on a cleared screen, then held, live, till a line on
+  stdin; the screens of the clip, at a moment of it, draw from the same run.
 - **A scenario** is a clip, played in real time from events and keys scripted at moments into it
   (`internal/capture/scenarios.go`). Its clock reads a fixed day, running on from there, so the
   heads and headers say the same day and minute in every recording; the animations run on kit's
   own timers, as kit draws them. The keys it presses reach kit's faces through a pipe, as they'd
   come from the keyboard, each once the face shows what it answers, a moment after, as a person
-  reads it; the script goes on only once the face has taken it, as kit's boot does. It waits for a line on stdin to start, the screen cleared, so a tape shows it from its
-  first frame, and holds its last screen, live, till the next.
+  reads it; the script goes on only once the face has taken it, as kit's boot does. It waits for
+  a line on stdin to start, the screen cleared, so a tape shows it from its first frame, and holds
+  its last screen, live, till the next.
 - `go test ./internal/capture` plays every scenario through, its own pauses four times as fast,
   kit's animations in their own time, checks each stops at once wherever it's stopped, and holds
-  the status still's words to `testdata/status.golden` (`-update` writes it again); `kit`'s own
-  binary is checked never to import the capture.
+  each still's screen, its words, to `testdata/<name>.golden` (`-update` writes them again);
+  `kit`'s own binary is checked never to import the capture.
 
 ## The scenarios
 
@@ -66,8 +75,10 @@ go run ./cmd/capturetool --scenario boot     # a clip: enter starts it, enter ag
   Access done by hand, Ghostty opening, and "this window can be closed".
 - **`arrival`**, in Ghostty: "hello again", a key pressed; the decode in colour, the wordmark
   locking in kit's gradient, shrinking into the header's corner, its line typed in; then kit
-  apply's screen under it, rows at work, Homebrew's installs in the log, 1Password's sign-in
-  coming up as a card on the right, and Claude Code's step finishing.
+  apply's screen under it, flying through what takes a new Mac half an hour: rows at work,
+  1Password's sign-in coming up as a card on the right and signed in, Homebrew counting through
+  its installs, the rest done; the to-dos at the end worked through, a card at a time, the backup
+  disk left for later; then the run's record, what's left to do and what's done.
 
 What's scripted rather than real: the steps' events, and the keys pressed. Nothing is installed or
 asked of a real GitHub, Homebrew or macOS; the QR code is a real one for `github.com/login/device`,
@@ -106,13 +117,17 @@ vhs, and hands its frames to `finalize.sh`:
 - **The art.** For a clip, an animated WebP, which GitHub shows inline, at the frames' 30 a second,
   and an H.264 MP4 of the same frames in `demo/out/`; for a still, a lossless WebP of the last
   frame. Each frame is set in a 40 px margin of its own background.
-- **Noise at 5 frames a second.** The splash's decode and the arrival's change the whole window
+- **Noise at 10 frames a second.** The splash's decode and the arrival's change the whole window
   every frame, and no WebP squeezes them: lossy and near-lossless come out larger than lossless,
-  and so does the clip drawn at a smaller font. At 30 a second, the 3 s of them weigh nine tenths of
-  the clip. A frame changing more from the one before than `noisy` says is noise, and in a run of it
-  one frame in `noise_every`, 6, is kept, held for the ones dropped, keeping the clip under 3 MB; it
-  still reads as kit's decode, resolving in steps. kit's text, changing a row at a time, and a
-  screen redrawn, a lone frame, keep every frame.
+  and so does the clip drawn at a smaller font. A frame changing more from the one before than
+  `noisy` says is noise, and in a run of it one frame in `noise_every`, 3, is kept, held for the
+  ones dropped. kit's text, changing a row at a time, and a screen redrawn, a lone frame, keep
+  every frame. Each frame's time is rounded from where the frames before it end, so the WebP is as
+  long as the MP4.
+- **Safari plays it slower.** macOS draws WebP through ImageIO, which decodes each frame of an
+  animated WebP from the first, keyframes or not, so a frame takes longer the later it comes:
+  Safari, Quick Look and Preview play the clip at about a quarter of its pace. Chrome and Firefox
+  play it at the MP4's pace.
 - **A clip in parts.** vhs records one terminal, in one theme, so the boot's move from Terminal to
   Ghostty is two tapes, and `finalize.sh --join` joins their frames, the last 0.4 s of the
   Terminal's fading into the first of Ghostty's, its blank window before "hello again": the window
