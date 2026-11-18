@@ -1,8 +1,8 @@
 // Package rendertest holds runs kit's faces are tested against, the runs
 // their golden files hold: kit status on a Mac with some of everything, a
 // new Mac's steps as kit apply runs them, 1Password's sign-in among them,
-// and the boot's order. The capture tool (cmd/capturetool) plays the
-// README's clips with the very same steps.
+// the boot's order, and kit setup on a Mac in use. The capture tool
+// (cmd/capturetool) plays the README's clips with the very same steps.
 package rendertest
 
 import (
@@ -13,6 +13,7 @@ import (
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/kind/secret/onepassword"
 	"github.com/leeovery/kit/internal/render"
+	"github.com/leeovery/kit/internal/setup"
 )
 
 // At is when the runs start.
@@ -130,4 +131,57 @@ func BootOrder() []event.Step {
 		{Name: "full-disk-access", Title: "Full Disk Access", Area: boot.AreaBoot, Waiting: "for Ghostty"},
 		{Name: "terminal", Title: "Ghostty", Area: boot.AreaBoot},
 	}
+}
+
+// SetupDone is kit setup on a Mac in use, at at, done: kit-config made
+// anew, the Mac declared as it is, a part at a time, its questions
+// answered, committed and pushed; three apps installed by hand.
+func SetupDone(at time.Time) []event.Event {
+	steps := []event.Step{
+		{Name: setup.GitHubStep, Title: "GitHub", Area: setup.AreaSetup},
+		{Name: setup.ConfigStep, Title: "kit-config", Area: setup.AreaSetup},
+		{Name: setup.MacStep, Title: "This Mac", Area: setup.AreaSetup},
+		{Name: setup.SnapshotStep, Title: "Declared", Area: setup.AreaDeclared, Waiting: "everything on this Mac, as it is"},
+		{Name: setup.DataStep, Title: "Your data", Area: setup.AreaDeclared},
+		{Name: setup.PrefsStep, Title: "Apps' settings", Area: setup.AreaDeclared},
+		{Name: setup.FilesStep, Title: "Linked files", Area: setup.AreaDeclared},
+		{Name: setup.InstallStep, Title: "To install", Area: setup.AreaDeclared},
+		{Name: setup.CommitStep, Title: "Committed", Area: setup.AreaDeclared},
+		{Name: setup.ByHandStep, Title: "Installed by hand", Area: setup.AreaDeclared},
+		{Name: setup.SecretsStep, Title: "Secrets", Area: setup.AreaDeclared},
+	}
+	events := []event.Event{event.RunStarted{Time: at, Command: "setup", Machine: "MacBook Pro", Steps: steps}}
+	ok := func(step, summary string) {
+		events = append(events, event.StepStarted{Time: at, Step: step}, event.StepFinished{Time: at, Step: step, Result: check.Result{State: check.OK, Summary: summary}})
+	}
+	ok(setup.GitHubStep, "someone · GitHub's CLI's sign-in")
+	ok(setup.ConfigStep, "someone/kit-config · new, private")
+	ok(setup.MacStep, "laptop")
+	events = append(events, event.StepStarted{Time: at, Step: setup.SnapshotStep})
+	counts := map[string]int{}
+	for _, p := range []struct {
+		kind, label string
+		n           int
+	}{
+		{"brew", "Homebrew formulae", 126}, {"cask", "Homebrew casks", 23}, {"mas", "App Store apps", 7}, {"npm", "npm packages", 4},
+		{"login", "macOS login items", 5}, {"mcp", "Claude MCP", 3}, {"git-config", "git config", 12}, {"defaults", "macOS settings", 186},
+		{"features", "Features", 2}, {"backups", "Backups", 2},
+	} {
+		counts[p.kind] = p.n
+		events = append(events, event.Finding{Time: at, Step: setup.SnapshotStep, Part: p.label, Found: true, Count: p.n})
+	}
+	events = append(events, event.StepFinished{Time: at, Step: setup.SnapshotStep, Result: check.Result{State: check.OK, Counts: counts}})
+	ok(setup.DataStep, "3 folders · 56.3 GB")
+	ok(setup.PrefsStep, "every night")
+	ok(setup.FilesStep, "5")
+	ok(setup.InstallStep, "nothing more")
+	events = append(events, event.StepStarted{Time: at, Step: setup.CommitStep},
+		event.StepFinished{Time: at, Step: setup.CommitStep, Result: check.Result{State: check.OK, Summary: "370 declared · committed and pushed kit.toml and laptop/", Counts: counts}})
+	byHand := check.Result{State: check.OK, Summary: "3, which kit doesn't look after: if kit sets this Mac up again, they're yours to install, through Homebrew or the App Store, if they're there"}
+	for _, app := range []string{"Sketchpad", "Tally", "Mac Monitor"} {
+		byHand.Items = append(byHand.Items, check.Item{ID: setup.ByHandStep + ":" + app, Name: app, State: "installed by hand"})
+	}
+	events = append(events, event.StepFinished{Time: at, Step: setup.ByHandStep, Result: byHand})
+	ok(setup.SecretsStep, "kit keeps secrets in a store, never in kit-config: kit secret add")
+	return append(events, event.RunFinished{Time: at, Counts: map[check.State]int{check.OK: len(steps)}})
 }

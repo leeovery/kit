@@ -66,9 +66,9 @@ type Deps struct {
 	// ReadSecret asks, at the terminal, in place, for a value typed without
 	// being shown, for the thing about is, as ask.Secret does.
 	ReadSecret func(ctx context.Context, about look.Row) (string, error)
-	// ReadText asks, at the terminal, in place, for a value typed and shown,
-	// starting as typed, for the thing about is, as ask.Text does.
-	ReadText func(ctx context.Context, about look.Row, typed string) (string, error)
+	// Offer offers what lines say at the terminal, in place, keys under
+	// them, as ask.Offer does: whether enter took it up.
+	Offer func(ctx context.Context, lines []string, keys []look.Key) (bool, error)
 	// Pick shows a list at the terminal, in place, under head, to pick a line
 	// from, as ask.Pick does: the line's value, or ask.ErrCancelled.
 	Pick func(ctx context.Context, head []string, lines []ask.Line, keys []look.Key) (string, error)
@@ -324,7 +324,7 @@ func (a *app) dirs() (config.Dirs, error) {
 func (a *app) loadConfig(dirs config.Dirs) (*config.Config, error) {
 	cfg, err := config.Load(dirs.Config, kinds.Sections())
 	if errors.Is(err, config.ErrNoConfig) {
-		return nil, fmt.Errorf("%w: clone your config repository to %s, or point KIT_CONFIG at it", err, dirs.Config)
+		return nil, fmt.Errorf("%w: set this Mac up with kit setup, clone your config repository to %s, or point KIT_CONFIG at it", err, dirs.Config)
 	}
 	if err != nil {
 		return nil, err
@@ -395,8 +395,8 @@ func Real(version string) Deps {
 		ReadSecret: func(ctx context.Context, about look.Row) (string, error) {
 			return ask.Secret(ctx, terminal(), about)
 		},
-		ReadText: func(ctx context.Context, about look.Row, typed string) (string, error) {
-			return ask.Text(ctx, terminal(), about, typed)
+		Offer: func(ctx context.Context, lines []string, keys []look.Key) (bool, error) {
+			return ask.Offer(ctx, terminal(), lines, keys)
 		},
 		Pick: func(ctx context.Context, head []string, lines []ask.Line, keys []look.Key) (string, error) {
 			return ask.Pick(ctx, terminal(), head, lines, keys)

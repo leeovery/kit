@@ -5,9 +5,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 
+	"charm.land/lipgloss/v2"
 	"github.com/spf13/cobra"
 
 	"github.com/leeovery/kit/internal/ask"
@@ -116,9 +118,10 @@ func boolFlag(yes, no bool) *bool {
 	return &yes
 }
 
-// setup runs kit setup's steps, shown in plain lines, then kit apply, as
-// the command would, unless the person stops to look first. With --json,
-// one document: setup's steps, and apply's run.
+// setup runs kit setup's steps, then kit apply, as the command would,
+// unless the person stops to look first. At a terminal, setup's own screen
+// asks each question in its row; without one, plain lines. With --json, one
+// document: setup's steps, and apply's run.
 func (a *app) setup(ctx context.Context, given setup.Answers) error {
 	dirs, err := a.dirs()
 	if err != nil {
@@ -133,18 +136,24 @@ func (a *app) setup(ctx context.Context, given setup.Answers) error {
 		return err
 	}
 	defer func() { _ = log.Close() }()
+	ctx, stop := context.WithCancel(ctx)
+	defer stop()
+	var s *setup.Setup
 	var doc *built
+	var screen *render.SetupFace
 	var face render.Face = render.NewPlain(a.Stdout)
-	if a.json {
+	switch {
+	case a.json:
 		doc = &built{}
 		face = doc
+	case a.pretty(a.Stdout):
+		screen = render.NewSetupFace(a.tty(), a.darkBackground(), a.Now, stop, func() string { return cmp.Or(s.Mac(), s.Model) })
+		face = screen
 	}
 	sink := event.NewFanout(face, log)
 	noAsks := func() *askpass.Server { return nil }
 	run := a.commands(bootPath, childEnv(a.Getenv, home, bootPath), sink, noAsks)
-	ctx, stop := context.WithCancel(ctx)
-	defer stop()
-	s := &setup.Setup{
+	s = &setup.Setup{
 		Run: run, Sink: sink, GitHub: a.GitHub(), Now: a.Now,
 		Dirs: dirs, Kinds: kinds.Sections(), Getenv: a.Getenv, Version: a.Version, Given: given,
 		Snapshot: func(ctx context.Context, cfg *config.Config, mac string) (snapshot.Snapshot, snapshot.Mac, error) {
@@ -156,6 +165,13 @@ func (a *app) setup(ctx context.Context, given setup.Answers) error {
 			m := snapshot.Mac{
 				Name: mac, Config: cfg, Run: a.commands(path, childEnv(a.Getenv, home, path), sink, noAsks), Home: home,
 				ConfigHome: a.configHome(), Dirs: dirs, AppDirs: a.appFolders(home).Dirs, SudoLocal: a.SudoLocal, Now: a.Now,
+				Looks: func(l snapshot.Look) {
+					found := event.Finding{Time: a.Now(), Step: setup.SnapshotStep, Part: l.Label, Doing: l.Doing, Found: l.Looked, Count: l.Found}
+					if l.Err != nil {
+						found.Err = l.Err.Error()
+					}
+					sink.Emit(found)
+				},
 			}
 			found, err := snapshot.Find(ctx, m)
 			return found, m, err
@@ -166,15 +182,18 @@ func (a *app) setup(ctx context.Context, given setup.Answers) error {
 		return err
 	}
 	s.Model = setup.Model(ctx, run)
-	steps := s.Steps()
-	if a.pretty(a.Stdout) {
-		s.Ask = &setupAsker{a: a, stop: stop, titles: titles(steps)}
-	}
-	p, err := engine.New(steps...)
+	p, err := engine.New(s.Steps()...)
 	if err != nil {
 		return err
 	}
+	if screen != nil {
+		s.Ask = setupAsker{screen}
+		screen.Start()
+	}
 	report, err := p.Apply(ctx, sink, engine.Options{Command: "setup", Machine: cmp.Or(s.Mac(), s.Model), Version: a.Version, Jobs: 1, Now: a.Now})
+	if screen != nil && err == nil && ctx.Err() == nil && s.Done() && !report.Failed() && s.Applies() {
+		screen.Finish("kit apply", "carries on now")
+	}
 	if closeErr := face.Close(); err == nil {
 		err = closeErr
 	}
@@ -393,93 +412,49 @@ func (b *built) write(a *app) error {
 	}{b.Document(), b.apply})
 }
 
-// titles are steps' titles, by their names.
-func titles(steps []engine.Step) map[string]string {
-	out := make(map[string]string, len(steps))
-	for _, s := range steps {
-		out[s.Name] = s.Title
-	}
-	return out
-}
+// setupAsker asks kit setup's questions on its screen, each in its step's
+// row.
+type setupAsker struct{ screen *render.SetupFace }
 
-// setupAsker asks kit setup's questions at the terminal, in place, under
-// the lines it's printed: a question cancelled stops setup, for a run again
-// to carry on.
-type setupAsker struct {
-	a      *app
-	stop   context.CancelFunc
-	titles map[string]string
-	picked bool
-}
-
-func (s *setupAsker) about(step, question string) look.Row {
-	return look.Row{State: look.NeedsYou, Name: s.titles[step], Says: look.Words(look.NeedsYou, question)}
-}
-
-// asked is err, a question's, stopping setup when the person cancelled it.
-func (s *setupAsker) asked(err error) error {
-	if errors.Is(err, ask.ErrCancelled) {
-		s.stop()
-	}
-	return err
-}
-
-func (s *setupAsker) Choose(ctx context.Context, step, question string, answers []boot.Answer) (int, error) {
+func (s setupAsker) Choose(ctx context.Context, step, question string, answers []boot.Answer) (int, error) {
 	choices := make([]look.Choice, len(answers))
 	for i, an := range answers {
 		choices[i] = look.Choice{Label: an.Label, Does: an.Does}
 	}
-	i, err := s.a.Choose(ctx, ask.Question{About: s.about(step, question), Answers: choices})
-	return i, s.asked(err)
+	return s.screen.Choose(ctx, step, question, choices)
 }
 
-func (s *setupAsker) Text(ctx context.Context, step, question, suggested string) (string, error) {
-	text, err := s.a.ReadText(ctx, s.about(step, question), suggested)
-	return strings.TrimSpace(text), s.asked(err)
+func (s setupAsker) Text(ctx context.Context, step, question, suggested string) (string, error) {
+	text, err := s.screen.Text(ctx, step, question, suggested)
+	return strings.TrimSpace(text), err
 }
 
-// Tick asks of each item in turn whether to keep it, its suggested answer
-// first.
-func (s *setupAsker) Tick(ctx context.Context, _, question string, items []setup.Item) ([]bool, error) {
-	keep, leave := look.Choice{Label: "Keep"}, look.Choice{Label: "Leave"}
-	qs := make([]ask.Question, len(items))
+func (s setupAsker) Tick(ctx context.Context, step, question string, items []setup.Item) ([]bool, error) {
+	ticks := make([]look.Tick, len(items))
 	for i, it := range items {
-		answers := []look.Choice{leave, keep}
-		if it.Ticked {
-			answers = []look.Choice{keep, leave}
-		}
-		qs[i] = ask.Question{About: look.Row{State: look.NeedsYou, Name: it.Name, Says: it.More}, Answers: answers}
+		ticks[i] = look.Tick{Name: it.Name, More: it.More, Ticked: it.Ticked}
 	}
-	answers, err := s.a.Walk(ctx, question, qs)
-	if err != nil {
-		return nil, s.asked(err)
-	}
-	kept := make([]bool, len(items))
-	for i, it := range items {
-		kept[i] = (answers[i] == 0) == it.Ticked
-	}
-	return kept, nil
+	return s.screen.Tick(ctx, step, question, ticks)
 }
 
-// Pick asks the first time how to sign in, then waits, as no key will
-// come while the sign-in's code waits to be entered.
-func (s *setupAsker) Pick(ctx context.Context, step string, keys []boot.Key) (string, error) {
-	if s.picked || len(keys) == 0 {
-		<-ctx.Done()
-		return "", ctx.Err()
+func (s setupAsker) Pick(ctx context.Context, step string, keys []boot.Key) (string, error) {
+	return s.screen.Pick(ctx, step, lookKeys(keys))
+}
+
+// tty is kit's terminal, as its dependencies have it, where a screen
+// is drawn in place and its keys read.
+func (a *app) tty() ask.Terminal {
+	return ask.Terminal{
+		In:   a.Stdin,
+		Out:  a.colors(a.Stdout),
+		Size: func() (int, int) { return a.Width(a.Stdout), a.Height(a.Stdout) },
 	}
-	s.picked = true
-	choices := make([]look.Choice, len(keys))
-	for i, k := range keys {
-		label := cmp.Or(k.Does, k.Key)
-		if label != "" {
-			label = strings.ToUpper(label[:1]) + label[1:]
-		}
-		choices[i] = look.Choice{Label: label}
-	}
-	i, err := s.a.Choose(ctx, ask.Question{About: s.about(step, "how will you sign in?"), Answers: choices})
-	if err != nil {
-		return "", s.asked(err)
-	}
-	return keys[i].Key, nil
+}
+
+// darkBackground reports whether the terminal's background is dark, as it
+// answers when asked: dark when it can't be.
+func (a *app) darkBackground() bool {
+	in, isIn := a.Stdin.(*os.File)
+	out, isOut := a.Stdout.(*os.File)
+	return !isIn || !isOut || lipgloss.HasDarkBackground(in, out)
 }

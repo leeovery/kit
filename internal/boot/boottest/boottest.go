@@ -24,12 +24,22 @@ const (
 	Login = "someone"
 )
 
+// Code is the code GitHub gives a device to sign in with, to enter at its
+// site's page for it.
+const Code = "WDJB-MJHT"
+
 // Repos are the repositories GitHub has, by owner/name, each private or
-// not: added to while it serves them, as gh repo create adds one.
+// not: added to while it serves them, as gh repo create adds one. A device
+// signing in waits till its code's Entered.
 type Repos struct {
-	mu   sync.Mutex
-	have map[string]bool
+	mu      sync.Mutex
+	have    map[string]bool
+	entered chan struct{}
+	enter   sync.Once
 }
+
+// Entered has the code a device signs in with entered and approved.
+func (r *Repos) Entered() { r.enter.Do(func() { close(r.entered) }) }
 
 // Add has GitHub hold repo, private or not.
 func (r *Repos) Add(repo string, private bool) {
@@ -60,7 +70,7 @@ func (r *Repos) privateOnes() []string {
 
 // Serve is GitHub, on this machine, for the test's length: Login, signed in
 // with Token, seeing repos, by owner/name, each private or not; listing the
-// private ones alone.
+// private ones alone; a device signing in, with Code, once it's Entered.
 func Serve(t *testing.T, repos map[string]bool) boot.GitHub {
 	gh, _ := ServeRepos(t, repos)
 	return gh
@@ -70,7 +80,7 @@ func Serve(t *testing.T, repos map[string]bool) boot.GitHub {
 // add to.
 func ServeRepos(t *testing.T, repos map[string]bool) (boot.GitHub, *Repos) {
 	t.Helper()
-	have := &Repos{have: map[string]bool{}}
+	have := &Repos{have: map[string]bool{}, entered: make(chan struct{})}
 	for name, private := range repos {
 		have.Add(name, private)
 	}
@@ -100,6 +110,16 @@ func ServeRepos(t *testing.T, repos map[string]bool) (boot.GitHub, *Repos) {
 			list = append(list, map[string]string{"full_name": name})
 		}
 		_ = json.NewEncoder(w).Encode(list)
+	})
+	mux.HandleFunc("POST /login/device/code", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"device_code": "device", "user_code": Code, "verification_uri": "https://github.com/login/device", "expires_in": 900, "interval": 5})
+	})
+	mux.HandleFunc("POST /login/oauth/access_token", func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-have.entered:
+			_ = json.NewEncoder(w).Encode(map[string]string{"access_token": Token})
+		case <-r.Context().Done():
+		}
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)

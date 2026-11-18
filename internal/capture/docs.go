@@ -50,6 +50,8 @@ var docs = []Fixture{
 		})},
 	{Name: "new-mac-boot", About: "the boot's end in Terminal, Ghostty opening", Width: 63, Height: 34, Look: Terminal,
 		Shows: "choose Open", at: docsAt, draw: bootEnds},
+	{Name: "setup-done", About: "kit setup's end on a Mac in use: the Mac declared as it is, kit apply carrying on", Width: 82, Height: 37,
+		Shows: "carries on now", at: docsAt, draw: setupDone},
 	{Name: "new-mac-record", About: "kit apply's record on a new Mac, two to-dos left", Width: 81, Height: 31,
 		Shows: "brings them back", at: docsAt, draw: onFace(func(time.Time) []event.Event { return backupsLeft() })},
 	result("packages-add", "kit brew add jq: installed, declared, kit-config committed and pushed", "brew add jq",
@@ -273,4 +275,20 @@ func secretPlaces(s *stage) error {
 		{Scope: "laptop", Secrets: 1},
 		{Store: "1Password", Item: "op://vault/Other", Scope: "laptop", Secrets: 1, Sections: []string{"Section"}},
 	}))
+}
+
+// setupDone is kit setup's screen as it ends on a Mac in use, kit-config
+// made anew, kit apply carrying on: what it leaves on screen.
+func setupDone(s *stage) error {
+	face := render.NewSetupFace(s.term, true, s.now, nil, func() string { return "laptop" })
+	face.Start()
+	for _, e := range rendertest.SetupDone(s.now()) {
+		face.Emit(e)
+	}
+	face.Finish("kit apply", "carries on now")
+	if err := face.Close(); err != nil {
+		return err
+	}
+	s.holdShown()
+	return nil
 }

@@ -110,9 +110,15 @@ type world struct {
 	// answers, unless a test serves it, holding repos.
 	gitHub boot.GitHub
 	repos  *boottest.Repos
-	// text answers what kit asks to be typed at a terminal, as its row
-	// reads, given what's typed to start with: that, unless it's set.
-	text func(question, typed string) string
+	// offered is what kit offered at a terminal, each offer's lines, plain;
+	// takeOffer, whether enter takes it up.
+	offered   []string
+	takeOffer bool
+	// input and output, when set, are kit's standard input and output, a
+	// terminal a test types keys at and reads what's drawn on, rather than
+	// stdin and what run returns.
+	input  io.Reader
+	output io.Writer
 }
 
 // after is how long kit waits in the world, as time.After has it: no time
@@ -247,8 +253,8 @@ func (w *world) run(t *testing.T, args ...string) (stdout, stderr string, status
 		HomeDir:  func() (string, error) { return w.home, nil },
 		Now:      func() time.Time { return w.now },
 		After:    w.after,
-		Stdin:    strings.NewReader(w.stdin),
-		Stdout:   &out,
+		Stdin:    cmp.Or[io.Reader](w.input, strings.NewReader(w.stdin)),
+		Stdout:   cmp.Or[io.Writer](w.output, &out),
 		Stderr:   &errOut,
 		Terminal: func(io.Writer) bool { return w.terminal },
 		Width:    func(io.Writer) int { return cmp.Or(w.size[0], 80) },
@@ -289,13 +295,9 @@ func (w *world) run(t *testing.T, args ...string) (stdout, stderr string, status
 			}
 			return w.typed, nil
 		},
-		ReadText: func(_ context.Context, about look.Row, typed string) (string, error) {
-			question := ansi.Strip(about.Name + "  " + about.Says)
-			w.asked = append(w.asked, question)
-			if w.text != nil {
-				return w.text(question, typed), nil
-			}
-			return typed, nil
+		Offer: func(_ context.Context, lines []string, _ []look.Key) (bool, error) {
+			w.offered = append(w.offered, ansi.Strip(strings.Join(lines, "\n")))
+			return w.takeOffer, nil
 		},
 		GitHub: func() boot.GitHub { return w.gitHub },
 		Pick: func(_ context.Context, _ []string, lines []ask.Line, _ []look.Key) (string, error) {

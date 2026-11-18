@@ -668,8 +668,21 @@ and that secrets go in a store with `kit secret add`; then `kit apply` runs in t
 process, with its own screen at a terminal. Without a terminal it asks nothing: each question
 its flag doesn't answer fails its step, naming the flag and what it chooses from, the others
 asked on, and kit exits 2. `--json` is one document: setup's steps, as kit status's document
-has a run's, and, when it ran, apply's under `apply`. At a terminal its rows are plain lines,
-its questions asked in place under them, for now.
+has a run's, and, when it ran, apply's under `apply`. At a terminal it has a screen of its own,
+the boot's counterpart in kit's look (kit-look's round 13), drawn in place and left in the
+scrollback (`render.SetupFace`): the wordmark, with setup, the Mac (its model's name till it's
+named) and when; SETUP, a row a step, `n of 3` while one's asking; once that's done, DECLARED,
+a row a part of the snapshot as `snapshot.Find` tells of it (`Mac.Looks`, emitted as
+`event.Finding`: waiting, being read, its count), the folders' sizing in Your data's row, then a
+row a question; each question asked in its row (a choice, a visible typed field, a checklist of
+boxes for the folders and the files); the commit in kit-config's row, `pushed`, and DECLARED's
+note its total; then the apps installed by hand, a row each, where secrets go, and `kit apply
+carries on now` before apply's own screen. Signing in, the way chosen takes the whole window, the
+QR code or the browser's page, and the code, as the boot's does; esc gives it back, the code
+under GitHub's row. Esc, or q but in a typed field, stops it. Bare `kit` at a terminal on a
+Mac with nothing set up (no kit.toml in the config folder, no setup stopped part-way) offers
+it: enter becomes `kit setup`, any other key leaves; and every command that needs a config and
+finds none names `kit setup` first.
 
 Every Mac's SSH host key is recorded in its table, `host_key`, its type then the key (a host key
 is public), and its local hostname, `local_hostname`, as macOS's LocalHostName has it (`scutil

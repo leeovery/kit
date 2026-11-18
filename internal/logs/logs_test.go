@@ -248,7 +248,7 @@ func TestReadRefusesALineThatIsntARecord(t *testing.T) {
 }
 
 // A command's lines as they come aren't logged: its command's line has
-// its output whole.
+// its output whole. Nor is what a step finds as it looks: its end says it.
 func TestFileLeavesOutLinesAsTheyCome(t *testing.T) {
 	dir := t.TempDir()
 	f, err := logs.Open(dir, time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC), "status", false)
@@ -257,6 +257,7 @@ func TestFileLeavesOutLinesAsTheyCome(t *testing.T) {
 	}
 	f.Emit(event.RunStarted{Command: "status"})
 	f.Emit(event.Output{Step: "brew", Line: "==> Pouring jq"})
+	f.Emit(event.Finding{Step: "snapshot", Part: "Homebrew formulae", Found: true, Count: 12})
 	if err := f.Close(); err != nil {
 		t.Fatal(err)
 	}

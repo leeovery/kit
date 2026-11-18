@@ -57,7 +57,7 @@ func TestAgentWithoutAConfig(t *testing.T) {
 	facts, rest, _ := strings.Cut(out, guide.Main())
 	config := filepath.Join(w.home, ".config", "kit")
 	want := "kit agent: how to change this Mac's set-up through kit This config kit-config no config repository: no kit.toml in " +
-		config + ": clone your config repository to " + config + ", or point KIT_CONFIG at it kit 0.1.0"
+		config + ": set this Mac up with kit setup, clone your config repository to " + config + ", or point KIT_CONFIG at it kit 0.1.0"
 	if got := strings.Join(strings.Fields(facts), " "); code != 0 || got != want || !strings.HasSuffix(rest, guide.Checking()) {
 		t.Errorf("kit agent printed\n%s\nexit %d, want the facts to say\n%s\nthen the guide", out, code, want)
 	}

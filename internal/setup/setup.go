@@ -169,6 +169,13 @@ type record struct {
 // chosen, and not done.
 func (r record) partWay() bool { return r.Repo != "" && !r.Done }
 
+// PartWay reports whether a run of setup stopped part-way, as its record in
+// kit's state, in stateDir, says.
+func PartWay(stateDir string) bool {
+	rec, err := kitstate.Load[record](stateDir, recordName)
+	return err == nil && rec.partWay()
+}
+
 // Begin readies a run of setup: refused while the config folder holds
 // anything, unless setup's own run part-way left it there (carriesOn),
 // which carries on; else started afresh.

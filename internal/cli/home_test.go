@@ -1,6 +1,7 @@
 package cli_test
 
 import (
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -67,6 +68,43 @@ func TestBareKitMenu(t *testing.T) {
 	menus, w.became, picks = nil, nil, nil
 	if out, _, code := w.run(t); len(menus) != 1 || w.became != nil || code != 0 || out != "" {
 		t.Errorf("q: kit became %q, exit %d, printed %q; want nothing", w.became, code, out)
+	}
+}
+
+// Bare kit at a terminal on a Mac with nothing set up, no config and no
+// kit setup stopped part-way, offers kit setup: enter has kit become it,
+// any other key leaves. A setup stopped part-way leaves the menu as it is,
+// as does a config; without a terminal, it's kit's help.
+func TestBareKitOffersSetup(t *testing.T) {
+	w := newWorld(t, map[string]string{})
+	w.terminal = true
+	w.takeOffer = true
+	if _, _, code := w.run(t); code != 0 || len(w.became) != 1 || !slices.Equal(w.became[0], []string{"setup"}) {
+		t.Errorf("enter: kit became %q, exit %d; want kit setup", w.became, code)
+	}
+	if len(w.offered) != 1 || !strings.HasSuffix(w.offered[0], "\n\n  ▲ This Mac  isn't set up with kit") || !strings.Contains(w.offered[0], "▀█▀") {
+		t.Errorf("offered %q; want the wordmark, then this Mac not set up with kit", w.offered)
+	}
+	w.became, w.takeOffer = nil, false
+	if out, _, code := w.run(t); code != 0 || w.became != nil || out != "" {
+		t.Errorf("another key: kit became %q, exit %d, printed %q; want nothing", w.became, code, out)
+	}
+
+	w.terminal, w.offered = false, nil
+	if out, _, code := w.run(t); !strings.Contains(out, "it's kit's menu") || code != 0 || w.offered != nil {
+		t.Errorf("without a terminal, kit printed %q, exit %d, offered %q; want its help", out, code, w.offered)
+	}
+
+	w.terminal = true
+	w.write(t, filepath.Join(".local", "state", "kit", "setup.json"), `{"repo": "someone/kit-config"}`)
+	picked := false
+	w.pick = func([]ask.Line) (string, error) {
+		picked = true
+		return "", ask.ErrCancelled
+	}
+	w.run(t)
+	if !picked || w.offered != nil {
+		t.Errorf("kit setup stopped part-way: offered %q, menu shown %v; want the menu", w.offered, picked)
 	}
 }
 

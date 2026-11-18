@@ -263,55 +263,6 @@ func TestSetupThenApplies(t *testing.T) {
 	}
 }
 
-// At a terminal, setup asks what its flags don't answer, each with its
-// answer suggested: the person's kit-config offered to join; which of its
-// Macs this is, or a new one, named as its model suggests; the folders to
-// bring back, one by one; apps' settings.
-func TestSetupAsksAtATerminal(t *testing.T) {
-	w := inUse(t, map[string]bool{"someone/kit-config": true, "someone/notes": true})
-	w.terminal = true
-	w.clones(t, "someone/kit-config", map[string]string{"kit.toml": twoMacs, "laptop/declarations": "", "studio/declarations": ""})
-	w.choose = func(question string, options []string) (int, error) {
-		switch {
-		case strings.Contains(question, "which of your Macs"):
-			return slices.Index(options, "A new one"), nil
-		case strings.HasPrefix(question, "~/etc"), strings.HasPrefix(question, "Apps' settings"):
-			return 1, nil
-		}
-		return 0, nil
-	}
-	w.expectCommit(t, commit{
-		message: "kit setup (macbook-pro): this Mac as it is", paths: []string{"kit.toml", "macbook-pro"},
-		files: []string{"kit.toml", "macbook-pro/declarations"}, status: " M kit.toml\x00?? macbook-pro/declarations\x00",
-	})
-	out, errOut, code := w.run(t, "setup", "--no-apply")
-	want := []string{
-		"kit-config  someone has kit-config",
-		"This Mac  which of your Macs is this?",
-		"This Mac  what will kit-config call it?",
-		"This Mac  where does it start from?",
-		"~/Code",
-		"~/etc",
-		"Apps' settings  save them every night, so a new Mac gets them back?",
-	}
-	if len(w.asked) != len(want) {
-		t.Fatalf("asked\n%s\nwant\n%s", strings.Join(w.asked, "\n"), strings.Join(want, "\n"))
-	}
-	for i, q := range want {
-		if !strings.HasPrefix(w.asked[i], q) {
-			t.Errorf("asked %q, want %q", w.asked[i], q)
-		}
-	}
-	for _, want := range []string{"kit-config ok someone/kit-config · joined · has laptop and studio\n", "mac ok macbook-pro · new\n", "restore ok 1 folder · ", "prefs ok not saved\n", "commit ok "} {
-		if !strings.Contains(out, want) {
-			t.Errorf("kit setup printed\n%s%s\nwant it to hold %q", out, errOut, want)
-		}
-	}
-	if !strings.HasSuffix(w.read(t, filepath.Join(".config", "kit", "kit.toml")), "[macs.macbook-pro]\ndescription = \"MacBook Pro\"\n") || code != 0 {
-		t.Errorf("kit.toml =\n%s\nexit %d", w.read(t, filepath.Join(".config", "kit", "kit.toml")), code)
-	}
-}
-
 // A push that fails leaves setup part-way, saying a run again carries on
 // and never to delete kit-config's folder: a run again declares nothing
 // twice, commits nothing new, and pushes what's waiting, to GitHub's new,

@@ -162,7 +162,7 @@ func (s *Setup) dataStep() engine.Step {
 		return says(parts...)
 	}
 	return s.questionStep(question{
-		name: DataStep, title: "Your data", flags: "--restore or --no-restore",
+		name: DataStep, title: snapshot.FoldersLabel, flags: "--restore or --no-restore",
 		answered: func(rec record) (string, bool) {
 			if rec.Restore == nil {
 				return "", false

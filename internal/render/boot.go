@@ -77,7 +77,7 @@ type bootRow struct {
 }
 
 // questionKind is what a question takes: a choice, typed words, keys, a
-// password, or a key once something's done.
+// password, a key once something's done, or things ticked.
 type questionKind int
 
 const (
@@ -86,6 +86,7 @@ const (
 	picking
 	secret
 	waiting
+	ticking
 )
 
 // question is what the face is asking, in a step's row.
@@ -96,6 +97,7 @@ type question struct {
 	// todo is what to do before a key, for a question that waits.
 	todo    string
 	choices []look.Choice
+	ticks   []look.Tick
 	cursor  int
 	typed   []rune
 	keys    []look.Key
@@ -105,6 +107,7 @@ type question struct {
 type answer struct {
 	chosen int
 	text   string
+	ticked []bool
 	err    error
 }
 
@@ -351,19 +354,29 @@ type area struct {
 	order bool
 }
 
-// areas are the boot's areas, in order, as far as they're shown: an area
-// after one not yet done stays hidden.
+// areas are the boot's areas, in order, as far as they're shown.
 func (f *BootFace) areas() []area {
+	out := revealed(f.steps, f.rows)
+	for i := range out {
+		out[i].order = out[i].name == boot.AreaBoot
+	}
+	return out
+}
+
+// revealed are steps' areas, in order, as far as they're shown, rows
+// saying how each step stands: an area after one not yet done stays
+// hidden.
+func revealed(steps []event.Step, rows map[string]*bootRow) []area {
 	var out []area
-	for _, s := range f.steps {
+	for _, s := range steps {
 		if len(out) == 0 || out[len(out)-1].name != s.Area {
-			out = append(out, area{name: s.Area, order: s.Area == boot.AreaBoot})
+			out = append(out, area{name: s.Area})
 		}
 		out[len(out)-1].steps = append(out[len(out)-1].steps, s)
 	}
 	for i, a := range out {
 		for _, s := range a.steps {
-			if r := f.rows[s.Name]; r == nil || r.finished == nil || r.finished.State != check.OK {
+			if r := rows[s.Name]; r == nil || r.finished == nil || r.finished.State != check.OK {
 				return out[:i+1]
 			}
 		}
@@ -378,8 +391,17 @@ func (f *BootFace) View(width, height int) []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	width = min(width, look.Width)
-	blocks := f.blocks(width, true)
-	foot := f.foot(width, true)
+	out := fit(f.blocks(width, true), f.foot(width, true), height)
+	if len(out) > 0 && out[0] == "" {
+		out = out[1:]
+	}
+	return out
+}
+
+// fit is blocks, then foot, never taller than height: rows done give way
+// first, from the top, then those waiting, from the bottom, then headings,
+// so what's at work stays whole.
+func fit(blocks []block, foot []string, height int) []string {
 	size := func() int {
 		n := len(foot)
 		for _, b := range blocks {
@@ -419,9 +441,6 @@ func (f *BootFace) View(width, height int) []string {
 	var out []string
 	for _, b := range blocks {
 		out = append(out, b.lines...)
-	}
-	if len(out) > 0 && out[0] == "" {
-		out = out[1:]
 	}
 	out = append(out, foot...)
 	if len(out) > height {
@@ -737,6 +756,17 @@ func (f *BootFace) Key(k ask.Key) bool {
 	if q == nil {
 		return false
 	}
+	if a, ok := q.take(k); ok {
+		if q.kind == picking {
+			f.mode, f.signing = a.text, q.step
+		}
+		f.answered(a)
+	}
+	return false
+}
+
+// take is what k does to q: its answer, when k answers it.
+func (q *question) take(k ask.Key) (answer, bool) {
 	switch q.kind {
 	case choosing:
 		switch {
@@ -745,18 +775,29 @@ func (f *BootFace) Key(k ask.Key) bool {
 		case k.Is("down", "j"):
 			q.cursor = (q.cursor + 1) % len(q.choices)
 		case k.Is("enter"):
-			f.answered(answer{chosen: q.cursor})
+			return answer{chosen: q.cursor}, true
+		}
+	case ticking:
+		switch {
+		case k.Is("up", "k"):
+			q.cursor = (q.cursor + len(q.ticks) - 1) % len(q.ticks)
+		case k.Is("down", "j"):
+			q.cursor = (q.cursor + 1) % len(q.ticks)
+		case k.Is(" "):
+			q.ticks[q.cursor].Ticked = !q.ticks[q.cursor].Ticked
+		case k.Is("enter"):
+			ticked := make([]bool, len(q.ticks))
+			for i, t := range q.ticks {
+				ticked[i] = t.Ticked
+			}
+			return answer{ticked: ticked}, true
 		}
 	case naming:
 		switch {
 		case k.Is("enter"):
-			if len(q.typed) > 0 {
-				f.answered(answer{text: string(q.typed)})
-			}
+			return answer{text: string(q.typed)}, len(q.typed) > 0
 		case k.Is("backspace"):
-			if len(q.typed) > 0 {
-				q.typed = q.typed[:len(q.typed)-1]
-			}
+			q.typed = q.typed[:max(len(q.typed)-1, 0)]
 		case k.Name == "" && k.Paste:
 			q.typed = append(q.typed, []rune(strings.Map(dropControl, strings.TrimSpace(k.Text)))...)
 		case k.Name == "" && utf8.RuneCountInString(k.Text) == 1:
@@ -765,26 +806,20 @@ func (f *BootFace) Key(k ask.Key) bool {
 	case secret:
 		switch {
 		case k.Is("enter"):
-			f.answered(answer{text: string(q.typed)})
+			return answer{text: string(q.typed)}, true
 		case k.Is("backspace"):
-			if len(q.typed) > 0 {
-				q.typed = q.typed[:len(q.typed)-1]
-			}
+			q.typed = q.typed[:max(len(q.typed)-1, 0)]
 		case k.Name == "":
 			q.typed = append(q.typed, []rune(strings.TrimRight(k.Text, "\r\n"))...)
 		}
 	case picking, waiting:
 		for _, key := range q.keys {
 			if k.Is(key.Key) {
-				if q.kind == picking {
-					f.mode, f.signing = key.Key, q.step
-				}
-				f.answered(answer{text: key.Key})
-				break
+				return answer{text: key.Key}, true
 			}
 		}
 	}
-	return false
+	return answer{}, false
 }
 
 // dropControl drops r when it's a control character, as a line break

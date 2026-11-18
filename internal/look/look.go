@@ -348,6 +348,47 @@ type Choice struct {
 // two spaces after it.
 func Answers(cs []Choice, chosen int) []string { return kit.Answers(cs, chosen) }
 
+// Tick is a thing on a checklist: its name, what more there is to say of
+// it, and whether it's ticked.
+type Tick struct {
+	Name, More string
+	Ticked     bool
+}
+
+// Checklist is things to tick, a line each: the cursor's column, as a
+// question's answers have it; each thing's box, ticked a pink ■, not a
+// grey □, and a cell of room after it; its name; what more it says after a
+// dim dot. With the cursor on it, its name is a pill, a cell off its box.
+func Checklist(ts []Tick, cursor int) []string {
+	out := make([]string, len(ts))
+	for i, t := range ts {
+		box := Muted("□")
+		if t.Ticked {
+			box = Pink("■")
+		}
+		l := "  " + box + "  " + Strong(t.Name)
+		if i == cursor {
+			l = kit.cursor.Render("❯") + " " + box + " " + Pill(t.Name, Done)
+		}
+		if t.More != "" {
+			l += dot + Muted(t.More)
+		}
+		out[i] = l
+	}
+	return out
+}
+
+// QR is text as a QR code in half blocks, a cell two modules high, as a
+// camera reads it: on a dark background its light modules and a quiet zone
+// of two are white; on a light one, its dark modules are dark.
+func QR(text string, darkBackground bool) ([]string, error) {
+	paint := White
+	if !darkBackground {
+		paint = func(s string) string { return fg(dark).Render(s) }
+	}
+	return qrCode(text, darkBackground, paint)
+}
+
 // Chosen is something chosen from a list: the cursor in the marks'
 // column, and the thing a pill, its words where the others' are.
 func Chosen(text string) string { return kit.cursor.Render("❯") + Pill(text, Done) }

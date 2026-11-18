@@ -23,26 +23,10 @@ func Secret(ctx context.Context, t Terminal, about look.Row) (string, error) {
 	return string(f.typed), nil
 }
 
-// Text asks at t for a value typed, shown as it's typed, starting as typed
-// says, as Secret asks: enter takes it; escape cancels. Nothing stays on
-// screen.
-func Text(ctx context.Context, t Terminal, about look.Row, typed string) (string, error) {
-	f := &field{about: about, typed: []rune(typed), shown: true}
-	if err := show(ctx, t, f); err != nil {
-		return "", fmt.Errorf("ask for %s: %w", about.Name, err)
-	}
-	if f.cancelled {
-		return "", ErrCancelled
-	}
-	return string(f.typed), nil
-}
-
-// field is the question Secret and Text ask: shown is whether what's typed
-// shows.
+// field is the question Secret asks.
 type field struct {
 	about     look.Row
 	typed     []rune
-	shown     bool
 	cancelled bool
 }
 
@@ -67,9 +51,6 @@ func (f *field) view(width, _ int) []string {
 	row := f.about
 	row.Whole = true
 	row.Under = []string{look.Field(len(f.typed))}
-	if f.shown {
-		row.Under = []string{look.Typed(string(f.typed))}
-	}
 	return append(look.Timeline("  ", width, row), "", look.Keys(look.Key{Key: "enter", Does: "done"}, look.Key{Key: "esc", Does: "cancel"}))
 }
 

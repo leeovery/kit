@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -211,6 +212,44 @@ func TestAPartThatCantBeLookedAtSaysWhy(t *testing.T) {
 	}
 	if got, want := declarations(t, m), "[macos settings]\n\n[homebrew casks]\nghostty\n"; got != want {
 		t.Errorf("laptop/declarations =\n%s\nwant\n%s", got, want)
+	}
+}
+
+// Looks is told of every part waiting its turn before any is looked at,
+// then of each as it's looked at, and once it has been, what it found, or
+// why it couldn't be looked at.
+func TestFindSaysHowEachPartStandsAsItLooks(t *testing.T) {
+	m, fake := newMac(t, "")
+	homebrew(fake, "", "", "ghostty\n")
+	fake.On("brew", "list", "--formula", "--full-name", "-1").Exits(1).PrintsToStderr("Error: something broke\n")
+	var mu sync.Mutex
+	var looks []snapshot.Look
+	m.Looks = func(l snapshot.Look) {
+		mu.Lock()
+		defer mu.Unlock()
+		looks = append(looks, l)
+	}
+	take(t, m)
+	labels := []string{"Homebrew formulae", "Homebrew casks", "macOS settings", "Features", "Backups"}
+	if len(looks) < 3*len(labels) {
+		t.Fatalf("told %+v: want each of %q waiting, looked at, and looked", looks, labels)
+	}
+	for i, label := range labels {
+		if l := looks[i]; l.Label != label || l.Doing != "" || l.Looked {
+			t.Errorf("told %+v at %d: want %s waiting its turn", l, i, label)
+		}
+		at := slices.IndexFunc(looks, func(l snapshot.Look) bool { return l.Label == label && l.Doing != "" })
+		done := slices.IndexFunc(looks, func(l snapshot.Look) bool { return l.Label == label && l.Looked })
+		if at < len(labels) || done < at {
+			t.Errorf("told %+v: want %s looked at, then looked", looks, label)
+		}
+	}
+	for _, l := range looks {
+		switch {
+		case l.Label == "Homebrew casks" && l.Looked && l.Found != 1,
+			l.Label == "Homebrew formulae" && l.Looked && l.Err == nil:
+			t.Errorf("told %+v: want casks' one found, formulae's error", l)
+		}
 	}
 }
 

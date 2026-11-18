@@ -1,14 +1,20 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"io"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/leeovery/kit/internal/ask"
+	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/look"
+	"github.com/leeovery/kit/internal/setup"
 )
 
 // menuKeys are the keys kit's menu takes.
@@ -29,6 +35,9 @@ func (a *app) home(cmd *cobra.Command) error {
 	}
 	if !a.pretty(a.Stdout) {
 		return cmd.Help()
+	}
+	if a.nothingSetUp() {
+		return a.offerSetup(cmd.Context())
 	}
 	width := min(max(a.Width(a.Stdout), 40), look.Width)
 	choices := []look.Choice{
@@ -66,4 +75,27 @@ func (a *app) home(cmd *cobra.Command) error {
 		}
 	}
 	return a.becomeSelf(append([]string{"--" + underHome}, strings.Fields(chosen)...))
+}
+
+// nothingSetUp reports whether kit has nothing set up on this Mac: no
+// config in its folder, and no run of kit setup stopped part-way.
+func (a *app) nothingSetUp() bool {
+	dirs, err := a.dirs()
+	if err != nil {
+		return false
+	}
+	_, err = os.Stat(filepath.Join(dirs.Config, config.File))
+	return errors.Is(err, fs.ErrNotExist) && !setup.PartWay(dirs.State)
+}
+
+// offerSetup is bare kit on a Mac with nothing set up: the wordmark, then
+// a line saying so; enter has kit become kit setup, any other key leaves.
+func (a *app) offerSetup(ctx context.Context) error {
+	lines := append([]string{""}, look.Head(look.Muted(a.Now().Format("Mon 2 Jan · 15:04")))...)
+	lines = append(lines, "", look.Rows("  ", look.Width, look.Row{State: look.NeedsYou, Name: "This Mac", Says: look.Words(look.NeedsYou, "isn't set up with kit")})[0])
+	taken, err := a.Offer(ctx, lines, []look.Key{{Key: "enter", Does: "runs kit setup"}, {Key: "any other key", Does: "leaves"}})
+	if err != nil || !taken {
+		return err
+	}
+	return a.becomeSelf([]string{"setup"})
 }
