@@ -109,7 +109,7 @@ func TestErrorsWithJSON(t *testing.T) {
 		{[]string{"brew", "add", "jq", "--group", "Go", "--json"}, "unknown flag: --group", 2},
 		{[]string{"--json", "brew", "add", "jq", "--group", "Go"}, "unknown flag: --group", 2},
 		{[]string{"brw", "add", "jq", "--json"}, `unknown command \"brw\" for \"kit\"`, 2},
-		{[]string{"s", "--json"}, "kit s could be kit secret, kit splash, kit spotlight-exclusion, kit status, kit step", 2},
+		{[]string{"s", "--json"}, "kit s could be kit secret, kit setup, kit splash, kit spotlight-exclusion, kit status, kit step", 2},
 		{[]string{"reconcile", "brew:nosuch", "--snooze", "--json"}, "no item brew:nosuch: kit reconcile lists them", 2},
 		{[]string{"log", "apply", "--json"}, "no run of apply logged", 0},
 		{[]string{"status", "--bogus", "--json=true"}, "unknown flag: --bogus", 2},

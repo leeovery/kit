@@ -19,8 +19,10 @@ At a terminal, `kit` on its own opens a menu of what to run next.
 | `kit machine` | Show this Mac's name, or set it | [A new Mac](new-mac.md) |
 | `kit terminal` | The terminal a new Mac's boot hands over to | [A new Mac](new-mac.md) |
 | `kit bootstrap` | Set up a new Mac: the install line runs it | [A new Mac](new-mac.md) |
+| `kit setup` | Set up a Mac you already use | [Agents](agents.md) |
 | `kit agent` | Instructions for an agent working through kit | [Agents](agents.md) |
 
+`kit setup` creates kit-config (`--create`) or joins yours (`--join`), declares the Mac as it is, then runs `kit apply`.
 `kit machine add` adds a Mac to kit-config, empty or as a copy of another (`--from`).
 `kit terminal ghostty` sets the terminal, and `kit terminal --none` takes it out.
 `kit nightly at` shows when the nightly run falls due, and `kit nightly at 04:30` moves it.

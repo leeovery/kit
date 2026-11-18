@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -18,6 +19,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/leeovery/kit/internal/ask"
+	"github.com/leeovery/kit/internal/boot"
 	"github.com/leeovery/kit/internal/cli"
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/look"
@@ -103,6 +105,12 @@ type world struct {
 	sshAt string
 	// self is where kit runs from, when a test moves it: kitPath else.
 	self string
+	// gitHub is GitHub, as kit reaches it: on this machine, where nothing
+	// answers, unless a test serves it.
+	gitHub boot.GitHub
+	// text answers what kit asks to be typed at a terminal, as its row
+	// reads, given what's typed to start with: that, unless it's set.
+	text func(question, typed string) string
 }
 
 // after is how long kit waits in the world, as time.After has it: no time
@@ -121,7 +129,8 @@ func (w *world) after(wait steps.Wait, _ time.Duration) <-chan time.Time {
 // newWorld makes a home holding a config repository of files, by name.
 func newWorld(t *testing.T, files map[string]string) *world {
 	t.Helper()
-	w := &world{home: t.TempDir(), env: map[string]string{}, now: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC), fake: runnertest.New(t)}
+	w := &world{home: t.TempDir(), env: map[string]string{}, now: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC), fake: runnertest.New(t),
+		gitHub: boot.GitHub{Client: &http.Client{}, Site: nowhere, API: nowhere}}
 	// Without a terminal, Homebrew's installs ask whether sudo holds a
 	// password: it doesn't, unless a test says so.
 	w.fake.On("sudo", "-n", "true").Exits(1).PrintsToStderr("sudo: a password is required")
@@ -135,6 +144,9 @@ func newWorld(t *testing.T, files map[string]string) *world {
 	}
 	return w
 }
+
+// nowhere is an address on this machine nothing answers at.
+const nowhere = "http://127.0.0.1:1"
 
 // kitPath is where the world's kit is, from the home: on kit's PATH, the
 // kit that runs, unless a test moves it, and the one the hourly launch runs.
@@ -275,6 +287,15 @@ func (w *world) run(t *testing.T, args ...string) (stdout, stderr string, status
 			}
 			return w.typed, nil
 		},
+		ReadText: func(_ context.Context, about look.Row, typed string) (string, error) {
+			question := ansi.Strip(about.Name + "  " + about.Says)
+			w.asked = append(w.asked, question)
+			if w.text != nil {
+				return w.text(question, typed), nil
+			}
+			return typed, nil
+		},
+		GitHub: func() boot.GitHub { return w.gitHub },
 		Pick: func(_ context.Context, _ []string, lines []ask.Line, _ []look.Key) (string, error) {
 			if w.pick == nil {
 				t.Fatal("kit showed a list to pick from")

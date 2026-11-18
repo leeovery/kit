@@ -422,10 +422,6 @@ func (b *Boot) version(bundle string) (string, bool) {
 	return version, true
 }
 
-// gitCredentials has git ask GitHub's CLI for the sign-in, for the config
-// repository alone: set in its own settings, not the person's.
-const gitCredentials = "!gh auth git-credential"
-
 // configStep clones the config repository, through GitHub's CLI, handed
 // the sign-in, then links its files into the home folder, so the terminal
 // opens set up: done when it's cloned and its files are linked. A new Mac
@@ -505,27 +501,10 @@ func (b *Boot) clone(ctx context.Context) error {
 	if st, _ := kitstate.Load[state](b.State, stateName); st.Repo != "" {
 		repo = st.Repo
 	}
-	if !runner.Has(b.Run, "gh") {
-		b.doing(ConfigStep, "installing GitHub's CLI")
-		if _, err := b.Run.Run(ctx, runner.Command{Name: "brew", Args: []string{"install", "--formula", "gh"}, Timeout: 15 * time.Minute, SudoAsks: true}); err != nil {
-			return fmt.Errorf("install GitHub's CLI: %w", err)
-		}
+	if err := b.account().HandOver(ctx, ConfigStep, token); err != nil {
+		return err
 	}
-	if _, err := b.Run.Run(ctx, runner.Command{Name: "gh", Args: []string{"auth", "status", "--hostname", "github.com"}}); err != nil {
-		b.doing(ConfigStep, "signing GitHub's CLI in")
-		if _, err := b.Run.Run(ctx, runner.Command{Name: "gh", Args: []string{"auth", "login", "--hostname", "github.com", "--with-token"}, Input: token + "\n"}); err != nil {
-			return fmt.Errorf("sign GitHub's CLI in: %w", err)
-		}
-	}
-	_, _ = b.Run.Run(ctx, runner.Command{Name: "security", Args: []string{"delete-generic-password", "-s", keychainItem}})
-	b.doing(ConfigStep, "cloning "+repo)
-	if _, err := b.Run.Run(ctx, runner.Command{Name: "gh", Args: []string{"repo", "clone", repo, b.Config, "--", "--quiet", "--single-branch"}, Timeout: 10 * time.Minute}); err != nil {
-		return fmt.Errorf("clone %s: %w", repo, err)
-	}
-	if _, err := b.Run.Run(ctx, runner.Command{Name: "git", Args: []string{"-C", b.Config, "config", "credential.https://github.com.helper", gitCredentials}}); err != nil {
-		return fmt.Errorf("have git sign in through GitHub's CLI: %w", err)
-	}
-	return nil
+	return b.account().Clone(ctx, ConfigStep, repo, b.Config)
 }
 
 // addNewMac adds a new Mac, as chosen, to the clone's kit.toml, unless

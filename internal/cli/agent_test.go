@@ -93,7 +93,7 @@ func TestAgentTopics(t *testing.T) {
 		}
 		return ""
 	}
-	const topics = "kit agent's topics are steps, secrets, packages, files, settings, prefs, new-mac, moving and order"
+	const topics = "kit agent's topics are steps, secrets, packages, files, settings, prefs, new-mac, in-use, moving and order"
 	tests := []struct {
 		given, want, wrong string
 	}{
@@ -106,6 +106,7 @@ func TestAgentTopics(t *testing.T) {
 		{given: "pr", want: topic("prefs")},
 		{given: "new", want: topic("new-mac")},
 		{given: "m", want: topic("moving")},
+		{given: "i", want: topic("in-use")},
 		{given: "s", wrong: "kit: s could be steps, secrets or settings: " + topics},
 		{given: "p", wrong: "kit: p could be packages or prefs: " + topics},
 		{given: "nosuch", wrong: "kit: no topic nosuch: " + topics},

@@ -85,6 +85,17 @@ func InWords(names []string) string {
 	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
 }
 
+// Size is n bytes, as kit says it: in kB, MB or GB, a thousand each.
+func Size(n int64) string {
+	switch {
+	case n >= 1e9:
+		return fmt.Sprintf("%.1f GB", float64(n)/1e9)
+	case n >= 1e6:
+		return fmt.Sprintf("%.1f MB", float64(n)/1e6)
+	}
+	return fmt.Sprintf("%d kB", (n+999)/1000)
+}
+
 // Plural is the word a count of n takes: one when n is 1, else many.
 func Plural(n int, one, many string) string {
 	if n == 1 {
@@ -321,6 +332,10 @@ func Pill(text string, s State) string {
 // Field is a typed answer: a pink ❯, a dot for each character typed,
 // hidden, and a pink cursor.
 func Field(typed int) string { return kit.Field(typed) }
+
+// Typed is a typed answer shown as it's typed: a pink ❯, the text, white,
+// and a pink cursor.
+func Typed(text string) string { return kit.Typed(text) }
 
 // Choice is one answer to a question: its label, what it does, and the
 // command it runs, when it runs one.

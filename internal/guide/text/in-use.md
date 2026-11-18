@@ -1,0 +1,66 @@
+# A Mac in use
+
+`kit setup` brings a Mac that's in use onto kit, all the way, in one
+command: GitHub, kit-config made or joined, the Mac's name, everything on
+the Mac declared as it is, then `kit apply`. A blank Mac takes the install
+line (`kit bootstrap`) instead. `kit setup` refuses a Mac whose config
+folder holds a config already: kit looks after that one.
+
+## Before you run it
+
+GitHub's CLI signed in (`gh auth status`) is the sign-in kit setup takes.
+Without it, kit setup signs in as the boot does: in plain output, a line
+saying the code to enter at github.com/login/device, which the person
+enters on their phone or in a browser. `--json` holds its document till
+the end, so run that sign-in in plain output, or have the person run
+`gh auth login` first.
+
+## Its questions, and their flags
+
+Every question has its flag; without a terminal kit setup asks nothing.
+
+| Question | Flags |
+|---|---|
+| Create kit-config, or join one | `--create <name>`, `--join owner/name` |
+| This Mac's name | `--mac <name>`, `--from <mac>` for a new Mac |
+| Folders a new Mac brings back | `--restore <path>`..., `--no-restore` |
+| Apps' settings saved nightly | `--prefs`, `--no-prefs` |
+| Files kit-config keeps, linked | `--link <path>`..., `--no-link` |
+| Joining: install what it declares | `--apply`, `--no-apply` |
+
+- `--create` makes a private repository on the person's account; suggest
+  `kit-config`. `--join` refuses a repository that isn't private.
+- Joining, `--mac` is one of kit.toml's Macs, or a new one's name; a new
+  one starts empty, or as a copy of another with `--from`.
+- `--restore` and `--link` take a path each time they're given.
+- `--no-apply` stops once setup has committed, for the person to look
+  first; `kit apply` then installs the rest.
+
+## Running it without a terminal
+
+1. Run `kit setup --json` with the flags the person has answered. It goes
+   as far as they take it. A question its flag doesn't answer stops it:
+   that step fails, its reason naming the flags and what they choose from
+   (the folders, with sizes and which are suggested; the files), and kit
+   exits 2.
+2. Put each question to the person in their words, with its suggested
+   answer. Never answer for them.
+3. Run `kit setup --json` again with the new flags. It carries on where it
+   stopped: what's done stays done, and nothing is created twice.
+
+Once it's committed, kit setup runs `kit apply`, and the document's
+`apply` holds that run, as `kit apply --json` would.
+
+## What to tell the person
+
+Read the document's steps, then tell them:
+
+- `snapshot` and `commit`: how much was declared, by part (`counts`), and
+  that it's committed and pushed to kit-config.
+- `commit`'s items: lines refused, and lines declared as they are because
+  kit couldn't check whether they need a secret, each with why.
+- `by-hand`: the apps installed by hand. kit doesn't look after them: if
+  kit ever sets the Mac up again, they're the person's to install, and
+  Homebrew or the App Store is the way to.
+- `secrets`: kit keeps secrets in a store, never in kit-config. Point them
+  at `kit secret add`. Never search their files for secrets.

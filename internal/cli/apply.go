@@ -66,37 +66,9 @@ kit apply reinstall tries those that failed again.`,
 			if err != nil {
 				return err
 			}
-			ctx, halt := a.stoppable(cmd.Context(), r.face)
-			defer halt()
-			var report engine.Report
-			if plan {
-				report, err = r.pipeline.Check(ctx, r.sink, r.options(a, args))
-			} else {
-				// The heading shows at once, with the run's lights, and what kit's
-				// doing while it works out what will need an administrator's
-				// password; taken down only if sudo asks for it.
-				if len(args) == 0 {
-					steps, _ := r.pipeline.Planned(r.options(a, args))
-					r.sink.Emit(event.Preparing{Time: r.now, Command: command, Machine: r.machine, Doing: "checking what will need an administrator's password", Steps: steps})
-				}
-				stop := a.holdAdminAlongside(ctx, r, args)
-				report, err = r.pipeline.Apply(ctx, r.sink, r.options(a, args))
-				stop()
-			}
-			if err == nil {
-				err = r.remember(report)
-			}
-			if closeErr := r.close(); err == nil {
-				err = closeErr
-			}
+			report, err := a.applyRun(cmd.Context(), r, args, plan)
 			if err != nil {
 				return err
-			}
-			// A run stopped offers nothing more.
-			if decide, missing := needs(report); !plan && ctx.Err() == nil && a.pretty(a.Stdout) && len(decide) > len(missing) {
-				if err := a.reconcileNow(ctx); err != nil {
-					return err
-				}
 			}
 			if report.Failed() {
 				return failure{}
@@ -109,6 +81,47 @@ kit apply reinstall tries those that failed again.`,
 	cmd.Flags().Var(&a.restoring.from, "restore-from", "restore [restore]'s paths from the old Mac or a backup")
 	cmd.Flags().Var(&a.restoring.at, "at", "with --restore-from, the latest backup by that date or time")
 	return cmd
+}
+
+// applyRun runs r, prepared for kit apply, as kit apply does, applying
+// the steps args names (every step, when none), or, with plan, checking
+// them; then closes r. At a terminal, a run that wasn't stopped offers to
+// settle what it left differing from the config.
+func (a *app) applyRun(ctx context.Context, r *run, args []string, plan bool) (engine.Report, error) {
+	ctx, halt := a.stoppable(ctx, r.face)
+	defer halt()
+	var report engine.Report
+	var err error
+	if plan {
+		report, err = r.pipeline.Check(ctx, r.sink, r.options(a, args))
+	} else {
+		// The heading shows at once, with the run's lights, and what kit's
+		// doing while it works out what will need an administrator's
+		// password; taken down only if sudo asks for it.
+		if len(args) == 0 {
+			steps, _ := r.pipeline.Planned(r.options(a, args))
+			r.sink.Emit(event.Preparing{Time: r.now, Command: r.command, Machine: r.machine, Doing: "checking what will need an administrator's password", Steps: steps})
+		}
+		stop := a.holdAdminAlongside(ctx, r, args)
+		report, err = r.pipeline.Apply(ctx, r.sink, r.options(a, args))
+		stop()
+	}
+	if err == nil {
+		err = r.remember(report)
+	}
+	if closeErr := r.close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return report, err
+	}
+	// A run stopped offers nothing more.
+	if decide, missing := needs(report); !plan && ctx.Err() == nil && a.pretty(a.Stdout) && len(decide) > len(missing) {
+		if err := a.reconcileNow(ctx); err != nil {
+			return report, err
+		}
+	}
+	return report, nil
 }
 
 // toInstall are what applying the steps only names (every step, when none)

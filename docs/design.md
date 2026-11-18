@@ -546,6 +546,7 @@ kit machine [<name>]         This Mac's name: shown, or set (one of kit.toml's M
 kit machine add <name>       Add a Mac to kit-config, a copy of another's or empty   [--from] [--description]
 kit terminal [<name>]        The terminal a new Mac's boot hands over to: shown, or set in kit.toml   [--none]
 kit nightly at [<time>]      When the nightly run falls due: shown, or set in kit.toml (nightly_at)
+kit setup                    Set up a Mac in use: kit-config made or joined, the Mac declared as it is, then kit apply   [--create|--join] [--mac] [--from] [--restore|--no-restore] [--prefs|--no-prefs] [--link|--no-link] [--apply|--no-apply]
 
 What kit manages, a command each:
 kit <kind> add <name>...     Install, and declare for this Mac   [--shared] [--temp] [--note]
@@ -606,6 +607,42 @@ before the first table, the rest as it was; read back with the config's own load
 whole, then kit.toml alone committed and pushed as `kit machine add` is, the message the command
 run. A value kit.toml says already changes nothing and commits nothing, its step saying so; set
 when it was the default, `nightly_at` is written, so the time holds should the default change.
+
+`kit setup` is the front door for a Mac in use, as the boot is for a blank one (the maintainer,
+18 Nov 2026): one command, all the way, its steps through the engine, each found done by its
+check or its record in kit's state (`setup.json`), so a run stopped anywhere, a question
+cancelled or one its flag doesn't answer, carries on where it stopped. It refuses while the
+config folder holds anything, unless its own run part-way left it there; a run that finished
+is forgotten once the folder's gone. GitHub: GitHub's CLI's sign-in when it has one, else the
+boot's (its device flow, the phone or the browser), then GitHub's CLI installed through
+Homebrew and handed it, as the boot does, the same code. The config: `--create <name>`, a new
+repository, private, on the signed-in account, through GitHub's CLI, its clone set on main and
+tracking main alone, the remote having no branch till the first push; or `--join owner/name`,
+refused unless GitHub says it's private. At a terminal with neither, the person's `kit-config`
+is offered when they have one; else a new one, one of their private repositories (one call,
+never looking inside any) or a name typed. Cloned as the boot clones, single-branch, git
+signing in through GitHub's CLI. This Mac: `--mac`, suggested from its model, as macOS names it
+(`MacBook Pro`, `macbook-pro`); a created config's first files are kit.toml (`format`,
+`minimum_kit` this kit when it's a release, `primary` this Mac, `terminal` Ghostty only when
+setup runs in it, the Mac's table, its model the `description`) and the Mac's folder, its
+declarations file empty; joining, one of kit.toml's Macs or a new one, added as `kit machine
+add` adds it, `--from` a copy of another. Then the snapshot (`snapshot.Find`, on kit-config's
+PATH and Homebrew's), a row its counts by part, and its questions, each with its answer
+suggested, its flag, and its answer kept in the record: the folders a new Mac brings back
+(`--restore`, as `kit restore add` declares them), apps' settings saved nightly (`--prefs`:
+the `prefs` feature on, started afresh from this Mac's settings as `kit prefs start-fresh`
+does; asked only while it's off), the shell's and tools' files kept (`--link`, as `kit file
+add` moves and links them), and, joining, what kit-config declares that this Mac hasn't:
+installed with the rest (`--apply`) or setup stopping to look first (`--no-apply`). Then one
+edit and one commit, `snapshot.Write` and the answers, kit.toml and the Mac's folder, pushed;
+it says what's refused and what couldn't be checked, each with why, the apps installed by hand
+(the person's to install through Homebrew or the App Store should kit set the Mac up again),
+and that secrets go in a store with `kit secret add`; then `kit apply` runs in the same
+process, with its own screen at a terminal. Without a terminal it asks nothing: each question
+its flag doesn't answer fails its step, naming the flag and what it chooses from, the others
+asked on, and kit exits 2. `--json` is one document: setup's steps, as kit status's document
+has a run's, and, when it ran, apply's under `apply`. At a terminal its rows are plain lines,
+its questions asked in place under them, for now.
 
 Every Mac's SSH host key is recorded in its table, `host_key`, its type then the key (a host key
 is public), and its local hostname, `local_hostname`, as macOS's LocalHostName has it (`scutil
