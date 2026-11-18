@@ -23,7 +23,11 @@ kit file add ~/.zshrc --shared
 kit why ~/.zshrc
 ```
 
-<img src="../art/linked-files-why.webp" alt="kit why ~/.zshrc: linked from shared/home/.zshrc, and linked here" width="261">
+```text
+~/.zshrc (file)
+  linked from shared/home/.zshrc
+  linked here
+```
 
 ## kit-config mirrors your home folder
 

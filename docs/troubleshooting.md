@@ -36,7 +36,7 @@ On a Mac in use, `kit status` says so under CONFIG:
 public on GitHub (owner/kit-config): it must be private
 ```
 
-The row above it gives the command that fixes it:
+`kit status` also shows the command that makes it private:
 
 <img src="../art/troubleshooting-private.webp" alt="kit status under CONFIG: kit-config public on GitHub, with the command that makes it private" width="573">
 
@@ -136,13 +136,7 @@ The next hourly run checks the grant.
 
 ## A linked file differs
 
-`kit apply` lists the file as waiting:
-
-```text
-~/.zshrc · a file of its own, different from shared/home/.zshrc
-```
-
-It shows under the part of the Mac it belongs to:
+`kit apply` leaves the file as it is, and says so under Files and shell in its record:
 
 <img src="../art/troubleshooting-differs.webp" alt="kit apply's record: Files and shell done, with ~/.zshrc a file of its own, different from kit-config's" width="488">
 

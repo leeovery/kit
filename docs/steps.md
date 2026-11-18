@@ -12,8 +12,8 @@ setting covers.
 kit step add tool "Installs the tool" --after brew
 ```
 
-kit writes the step's script, `laptop/steps/tool/run`, as a template for you to fill in with its
-check and apply. Then kit commits and pushes kit-config:
+kit writes the step's script, `laptop/steps/tool/run`, as a template for its check and apply.
+Then kit commits and pushes kit-config:
 
 <img src="../art/steps-add.webp" alt="kit step add at a terminal: the step declared in laptop, its script a template, then kit-config committed and pushed" width="573">
 
@@ -64,8 +64,8 @@ Four flags on `kit step add` say what a step needs. All but `--sudo` can repeat.
 
 A secret is named by what it fills, and must be declared first: see
 [Secrets from 1Password](secrets.md). If the secret is a variable, the script runs with it set.
-A secret that fills a file is only waited for. With `--sudo`, kit asks for the password once at a terminal,
-for `sudo` in the script. `--after restore` waits for the
+A secret that fills a file is only waited for. With `--sudo`, kit asks for the password once at
+a terminal, for `sudo` in the script. `--after restore` waits for the
 [data restore](your-data.md) on a new Mac.
 
 ## Steps done by hand
@@ -90,7 +90,7 @@ tool "Install the tool" --test test -d /Applications/Tool.app
 The boot, and a whole `kit apply` at a terminal, show each step by hand that isn't done as a
 card. A comment above the line says why, and indented lines under it become numbered steps.
 
-With `--test`, kit sees the step done once the command exits 0, and carries on. Without one,
+With `--test`, kit sees the step done once the command exits 0. Without one,
 you press space on the card, or run `kit manual done`. If a card waits a while, kit posts a
 notification too.
 
@@ -118,8 +118,8 @@ Before it
 - **The script runs in kit's environment.** It gets kit's PATH, from `[paths]`, and only a few
   basics such as `HOME` and `USER`: nothing your `.zshrc` sets.
 - **Exit 3 costs a run.** Name what a step needs with `--after` or `--secret` instead.
-- **Steps by hand come last.** Their cards come up once the rest is done, unless you add
-  `--before <step>` to the line by hand.
+- **Steps by hand come last.** Their cards come up once the rest is done, unless the line has
+  `--before <step>`.
 
 ## Reference
 

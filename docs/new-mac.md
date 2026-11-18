@@ -47,6 +47,8 @@ the boot looks like this:
   can do, such as a backup disk.
 - **The window becomes a fresh shell** once `kit apply` ends.
 
+`kit apply` ends on its record: what's left for you to do, then what's done.
+
 <img src="../art/new-mac-record.webp" alt="kit apply's record on a new Mac: two to-dos left, the backup disk and Arq's plan, each with its steps, and the rest done" width="566">
 
 ## Which Mac it starts from

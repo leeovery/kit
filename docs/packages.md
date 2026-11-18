@@ -71,7 +71,7 @@ A few kinds take more than the name they keep:
 If you install a package with brew or npm yourself, kit-config doesn't have it. That's drift.
 After its first day, `kit status` lists it under CONFIG:
 
-<img src="../art/packages-status.webp" alt="kit status under CONFIG: ffmpeg installed, not declared, for 2 days, with kit reconcile to settle it" width="456">
+<img src="../art/drift-status.webp" alt="kit status under CONFIG: ffmpeg installed, not declared, for 2 days, with kit reconcile to settle it" width="456">
 
 `kit reconcile brew:ffmpeg --adopt` declares it, and `--remove` uninstalls it.
 

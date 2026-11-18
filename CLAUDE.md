@@ -152,12 +152,13 @@ its sentences.
 
 - Code lines run 52 columns at most. A comment goes on a line of its own, above the command.
 - Tables run 4 columns at most, with short cells.
-- No forced line breaks (`<br>`).
-- What kit shows at a terminal goes on a page as a still recorded from kit's real screens, never
-  a code block or a copy: a fixture in `internal/capture`, drawn from the run the page's words
-  come from and pinned by its golden file, recorded through `demo/` to `art/<page>-<what>.webp`.
-  Embed it as `<img src="../art/…" alt="…" width="…">`: its alt text says what it shows, and its
-  width is half its pixels, so a phone draws it sharp.
+- No forced line breaks (`<br>`), but in the README's Screens grid.
+- What kit shows at a terminal goes on a page as a still, drawn by kit's own faces from scripted
+  runs, never a code block or a copy.
+- Each still is a fixture in `internal/capture`, drawn from the run the page's words come from
+  and pinned by its golden file. `demo/` records it to `art/<page>-<what>.webp`.
+- Embed a still as `<img src="../art/…" alt="…" width="…">`. Its alt text says what it shows,
+  and its width is half its pixels, so a phone draws it sharp.
 - Text fences stay only for what a reader copies or searches:
   - JSON, for agents;
   - kit's plain face, on a page about scripts and agents;
@@ -200,9 +201,12 @@ About 700 words, in this order:
    under `## Why kit?`.
 2. **Benefits,** six at most: a bold benefit of six words or fewer, one specific sentence, and a
    link to its page. The smaller pages go in one line of links under them.
-3. **Screens:** a grid of stills recorded from kit's real screens (tapes in `demo/`, VHS,
-   `art/*.webp`, as Switchboard and Portal make theirs), each captioned with the one thing it
-   answers, each linking to its page. Never a code block or a mock-up of a screen kit draws.
+3. **Screens:** a grid of stills drawn by kit's own faces from scripted runs (tapes in `demo/`,
+   VHS, `art/*.webp`, as Switchboard and Portal make theirs), each captioned with the one thing
+   it answers, each linking to its page. Never a code block or a mock-up of a screen kit draws.
+   Every screen is the clip's window, whole, so all are one size and their text one scale. The
+   grid runs two to a row, an even number of screens, each `width` a quarter of its pixels. As
+   in Switchboard's, a `<br>` sets each caption under its screen, the one place one's allowed.
 4. **Install:** one line of requirements, the commands, one line on removing kit.
 5. **Quick start:** two to four commands, a comment above each.
 6. **Questions:** four or five one-line answers to readers' objections, each linking to a page.
