@@ -189,7 +189,7 @@ func Empty(dir string) (bool, error) {
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return false, fmt.Errorf("read %s: %w", dir, err)
 	}
-	return !slices.ContainsFunc(entries, func(e os.DirEntry) bool { return e.Name() != finderFile }), nil
+	return !slices.ContainsFunc(entries, func(e os.DirEntry) bool { return e.Name() != finderFile || !e.Type().IsRegular() }), nil
 }
 
 // Begin readies a run of setup: refused while the config folder holds

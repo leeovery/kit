@@ -262,10 +262,7 @@ func TestSetupScreenStoppedWhileFinding(t *testing.T) {
 	screen.showing(t, "◐ macOS settings")
 	screen.press(t, "esc")
 	read()
-	stoppedAs(t, screen, ended, "– Linked files  stopped")
-	if left := rendertest.Screen(screen.raw()); strings.Contains(left, "To install") {
-		t.Errorf("stopped on a new kit-config, kit setup left\n%s\nwant no row to install", left)
-	}
+	stoppedAs(t, screen, ended, "– Linked files  stopped\n  – To install  stopped")
 }
 
 // Esc while setup commits and pushes stops it: kit-config's row as it was

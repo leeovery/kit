@@ -186,6 +186,7 @@ func Timeline(indent string, w int, rs ...Row) []string {
 func drawRows(indent, under string, w int, rs []Row) []string {
 	var out []string
 	for _, r := range rs {
+		r = r.unbroken()
 		if l := line(indent, r); !r.Whole || ansi.StringWidth(l) <= w {
 			out = append(out, CutKeeping(l, r.Kept, w))
 		} else {
@@ -222,6 +223,7 @@ func named(r Row) string {
 // lines under it, wrapped too, then what belongs to it, as Timeline draws
 // it.
 func Stacked(indent string, w int, r Row) []string {
+	r = r.unbroken()
 	under := indent + Dim("│") + " "
 	out := stack(indent, under, w, r)
 	for _, u := range r.Under {
@@ -681,8 +683,55 @@ func Squeeze(s string, n int) string {
 // where a line break would spill it across what follows.
 func OneLine(s string) string { return strings.Join(strings.Fields(s), " ") }
 
-// Cut cuts a line to w cells, an ellipsis ending it when it's cut.
-func Cut(s string, w int) string { return ansi.Truncate(s, w, "…") }
+// Cut cuts a line to w cells, an ellipsis ending it when it's cut, on one
+// line however s breaks.
+func Cut(s string, w int) string { return ansi.Truncate(unbroken(s), w, "…") }
+
+// unbroken is s on one line: its lines, as an error joined from several
+// or a program's standard error has them, or what tabs part, without the
+// space at each break, styles kept, one space between those with words.
+// A line drawn broken spills onto the next, and a screen drawn in place,
+// counting it one, leaves a line behind each time it's drawn again. Styled
+// text of several lines is padded to its widest, hence the space.
+func unbroken(s string) string {
+	if !strings.ContainsAny(s, "\n\r\t") {
+		return s
+	}
+	unspaced := func(edge string) string { return strings.ReplaceAll(edge, " ", "") }
+	pieces := breaks.Split(s, -1)
+	var b strings.Builder
+	worded := false
+	for i, piece := range pieces {
+		if i > 0 {
+			piece = leading.ReplaceAllStringFunc(piece, unspaced)
+		}
+		if i < len(pieces)-1 {
+			piece = trailing.ReplaceAllStringFunc(piece, unspaced)
+		}
+		if ansi.Strip(piece) != "" {
+			if worded {
+				b.WriteByte(' ')
+			}
+			worded = true
+		}
+		b.WriteString(piece)
+	}
+	return b.String()
+}
+
+var (
+	// breaks part a line's pieces; leading and trailing are the space and
+	// styles at a piece's start and end.
+	breaks   = regexp.MustCompile(`[\r\n\t]+`)
+	leading  = regexp.MustCompile(`^(?: |\x1b\[[0-9;]*m)+`)
+	trailing = regexp.MustCompile(`(?: |\x1b\[[0-9;]*m)+$`)
+)
+
+// unbroken is r, what it names and says each on one line.
+func (r Row) unbroken() Row {
+	r.Name, r.Says, r.Kept = unbroken(r.Name), unbroken(r.Says), unbroken(r.Kept)
+	return r
+}
 
 // CutKeeping is s, then kept after a dot, cut at w: s cut, so kept stays
 // whole, as how far a thing at work has got after what it's doing. Without

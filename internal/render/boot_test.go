@@ -245,6 +245,20 @@ func TestBootFaceFits(t *testing.T) {
 	}
 }
 
+// A step failing with a reason of several lines, as a program's standard
+// error, draws as a line a row all the same, as the screen counts them.
+func TestBootFaceRowsNeverBreak(t *testing.T) {
+	at := time.Date(2026, 10, 8, 18, 2, 0, 0, time.UTC)
+	f := render.NewBootFace(ask.Terminal{Out: &bytes.Buffer{}}, true, func() time.Time { return at }, nil)
+	f.Show(bootSteps)
+	f.Emit(event.StepFinished{Time: at, Step: "github", Result: check.Result{State: check.Failed, Reason: "gh auth: exit 1\nerror connecting to api.github.com\ncheck your internet connection"}})
+	for _, l := range f.View(80, 40) {
+		if strings.ContainsAny(l, "\n\r") {
+			t.Errorf("the boot drew a line that breaks: %q", ansi.Strip(l))
+		}
+	}
+}
+
 // The self-test plays out a line at a time, then stays, each line saying
 // what it found.
 func TestPlaySelfTest(t *testing.T) {

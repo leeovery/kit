@@ -249,7 +249,7 @@ func (f *SetupFace) blocks(width, height int, live bool) []block {
 	if b, ok := f.byHand(width); ok {
 		out = append(out, b)
 	}
-	if r := f.rows[setup.SecretsStep]; r != nil && r.finished != nil && r.finished.State == check.OK {
+	if r := f.rows[setup.SecretsStep]; f.said(r) {
 		said, command := r.finished.Summary, ""
 		if i := strings.LastIndex(said, ": kit "); i >= 0 {
 			said, command = said[:i+2], said[i+2:]
@@ -260,15 +260,21 @@ func (f *SetupFace) blocks(width, height int, live bool) []block {
 }
 
 // installs reports whether the install step has a row: once it asks, or
-// once it's said what kit-config declares that this Mac hasn't. A
-// kit-config setup started has nothing in it to install, and never has
-// one.
+// once it's ended, but for a kit-config setup started, which has nothing
+// in it to install.
 func (f *SetupFace) installs() bool {
 	if f.q != nil && f.q.step == setup.InstallStep {
 		return true
 	}
 	r := f.rows[setup.InstallStep]
-	return r != nil && f.reached(r.finished) && r.finished.Summary != setup.NothingNew
+	return r != nil && r.finished != nil && r.finished.Summary != setup.NothingNew
+}
+
+// said reports whether r, a step after setup's commit, has something to
+// say: done, once the commit's done.
+func (f *SetupFace) said(r *bootRow) bool {
+	c := f.rows[setup.CommitStep]
+	return r != nil && r.finished != nil && r.finished.State == check.OK && c != nil && c.finished != nil && c.finished.State == check.OK
 }
 
 // note is what an area's header says: how far SETUP's got, while it's
@@ -397,10 +403,20 @@ func (f *SetupFace) asking(title string, width, height int) look.Row {
 		parts[i] = look.Words(look.NeedsYou, p)
 	}
 	row := look.Row{State: look.NeedsYou, Name: title, Says: look.Says(parts...), Whole: true}
-	if more != "" {
-		for _, l := range look.Wrap(more, width-4) {
-			row.Under = append(row.Under, look.Muted(l))
+	lines := look.Wrap(more, width-4)
+	if height > 0 {
+		// What answers it takes its room first: a checklist, three things at
+		// least.
+		answers := 3
+		if f.q.kind != ticking {
+			answers = len(f.asked(0))
 		}
+		if room := max(height-len(look.Timeline("  ", width, row))-len(f.foot(width, true))-answers, 1); len(lines) > room {
+			lines = append(lines[:room-1], look.Cut(lines[room-1]+" "+lines[room], width-4))
+		}
+	}
+	for _, l := range lines {
+		row.Under = append(row.Under, look.Muted(l))
 	}
 	room := 0
 	if height > 0 {
@@ -461,7 +477,7 @@ func (f *SetupFace) ended(title string, res check.Result, width int) look.Row {
 // each, what's to be done about them under them.
 func (f *SetupFace) byHand(width int) (block, bool) {
 	r := f.rows[setup.ByHandStep]
-	if r == nil || r.finished == nil || r.finished.State != check.OK || r.finished.Summary == "none" {
+	if !f.said(r) || r.finished.Summary == "none" {
 		return block{}, false
 	}
 	res := *r.finished

@@ -797,6 +797,40 @@ func TestBegin(t *testing.T) {
 	}
 }
 
+// The config folder is as setup starts on when it's not there, or holds
+// nothing but Finder's file; a folder named as Finder's file is something.
+func TestEmpty(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "kit")
+	for _, tt := range []struct {
+		name  string
+		make  func()
+		empty bool
+	}{
+		{"not there", func() {}, true},
+		{"Finder's file", func() {
+			if err := os.MkdirAll(dir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, ".DS_Store"), nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}, true},
+		{"a folder named as Finder's file", func() {
+			if err := os.Remove(filepath.Join(dir, ".DS_Store")); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Mkdir(filepath.Join(dir, ".DS_Store"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+		}, false},
+	} {
+		tt.make()
+		if empty, err := Empty(dir); err != nil || empty != tt.empty {
+			t.Errorf("%s: Empty = %v, %v; want %v", tt.name, empty, err, tt.empty)
+		}
+	}
+}
+
 // Run again with a flag naming kit-config or this Mac otherwise than the
 // run part-way chose: till the commit's edits are made, another repository
 // starts setup afresh, setup's own clone deleted, and the name it gave the

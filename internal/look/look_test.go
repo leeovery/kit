@@ -63,6 +63,22 @@ func TestRowsAreCut(t *testing.T) {
 }
 
 // A whole row is never cut: one that fits is as it is; one too long for
+// A row's line is one line however what it says breaks, as an error
+// joined from several, or a program's standard error, does: whole or cut,
+// on a timeline or stacked, the breaks spaces. A screen drawn in place
+// counts its lines, and a line that broke would leave one behind.
+func TestRowsNeverBreak(t *testing.T) {
+	failed := look.Row{State: look.Failed, Name: "Homebrew\nformulae", Says: look.Red("brew list: exit 1\nError: something broke\n"), Kept: "1\tof 2"}
+	same(t, look.Rows("  ", 80, failed), "  ✗ Homebrew formulae  brew list: exit 1 Error: something broke · 1 of 2")
+	same(t, look.Timeline("  ", 30, failed), "  ✗ Homebrew formula… · 1 of 2")
+	failed.Whole = true
+	same(t, look.Timeline("  ", 30, failed), "  ✗ Homebrew formulae", "  │ brew list: exit 1 Error:", "  │ something broke · 1 of 2")
+	same(t, look.Stacked("  ", 80, failed), "  ✗ Homebrew formulae", "  │ brew list: exit 1 Error: something broke · 1 of 2")
+	if got := look.Cut("  a \r\n  b", 80); got != "  a b" {
+		t.Errorf("Cut = %q, want one line, indented as it was", got)
+	}
+}
+
 // its line has its name on its own line, wrapped, and what it says, with
 // what it keeps, wrapped under it, on a timeline's line in a timeline;
 // what belongs to it goes under that.

@@ -359,6 +359,24 @@ func TestSetupScreenFindsAndCommits(t *testing.T) {
 	}
 }
 
+// A part that couldn't be looked at, why of several lines, as an error
+// joined from several, draws as one line, as the screen counts it; so does
+// a step failing so.
+func TestSetupScreenRowsNeverBreak(t *testing.T) {
+	f := setupFace(nil, started(setup.SnapshotStep)...)
+	f.Emit(event.Finding{Step: setup.SnapshotStep, Part: "Features", Found: true, Err: "Remote Login: launchctl: exit 1\nFile Sharing: launchctl: exit 1"})
+	f.Emit(event.StepFinished{Time: rendertest.At, Step: setup.SnapshotStep, Result: check.Result{State: check.Failed, Reason: "snapshot: brew: exit 1\nError: something broke: run kit setup again"}})
+	view := f.View(80, 40)
+	for _, l := range view {
+		if strings.ContainsAny(l, "\n\r") {
+			t.Errorf("setup drew a line that breaks: %q", ansi.Strip(l))
+		}
+	}
+	if text := ansi.Strip(strings.Join(view, "\n")); !strings.Contains(text, "✗ Features  Remote Login: launchctl: exit 1 File Sharing: launchctl: exit 1") {
+		t.Errorf("drew\n%s\nwant the part's why on its line", text)
+	}
+}
+
 // Stopped while the snapshot looks, as the engine ends a run stopped: a
 // part cut short says it stopped, never that it failed; the snapshot's own
 // row says nothing more; each step after it, the engine saying the run was
@@ -380,15 +398,55 @@ func TestSetupScreenStoppedRows(t *testing.T) {
 	}
 	left := ansi.Strip(strings.Join(f.Leaves(80), "\n"))
 	want := "● kit-config  someone/kit-config · new, private\n"
-	for _, row := range []string{want, "– macOS settings  stopped", "– Your data  stopped", "– Apps' settings  stopped", "– Linked files  stopped"} {
+	for _, row := range []string{want, "– macOS settings  stopped", "– Your data  stopped", "– Apps' settings  stopped", "– Linked files  stopped", "– To install  stopped"} {
 		if !strings.Contains(left, row) {
 			t.Errorf("stopped, left\n%s\nwant %q", left, row)
 		}
 	}
-	for _, never := range []string{"✗", "the run was stopped", "skipped", "Declared", "To install", "INSTALLED BY HAND", "→"} {
+	for _, never := range []string{"✗", "the run was stopped", "skipped", "Declared", "INSTALLED BY HAND", "→"} {
 		if strings.Contains(left, never) {
 			t.Errorf("stopped, left\n%s\nwant no %q", left, never)
 		}
+	}
+}
+
+// Setup failing early, nothing's said of the apps installed by hand, nor
+// of secrets, whatever their steps say: that's said once it's committed.
+func TestSetupScreenSaysTheRestOnceCommitted(t *testing.T) {
+	f := setupFace(nil, started(setup.ConfigStep)...)
+	f.Emit(event.StepFinished{Time: rendertest.At, Step: setup.ConfigStep, Result: check.Result{State: check.Failed, Reason: "clone someone/kit-config: exit 128: run kit setup again"}})
+	f.Emit(event.StepFinished{Time: rendertest.At, Step: setup.CommitStep, Result: check.Result{State: check.Deferred, Reason: "needs kit-config"}})
+	f.Emit(event.StepFinished{Time: rendertest.At, Step: setup.ByHandStep, Result: check.Result{State: check.OK, Summary: "2, which kit doesn't look after: install them", Items: []check.Item{{Name: "Sketchpad"}, {Name: "Tally"}}}})
+	f.Emit(event.StepFinished{Time: rendertest.At, Step: setup.SecretsStep, Result: check.Result{State: check.OK, Summary: "kit keeps secrets in a store, never in kit-config: kit secret add"}})
+	left := ansi.Strip(strings.Join(f.Leaves(80), "\n"))
+	if !strings.Contains(left, "✗ kit-config  clone someone/kit-config") || strings.Contains(left, "INSTALLED BY HAND") || strings.Contains(left, "kit keeps secrets") {
+		t.Errorf("failing early, left\n%s\nwant the failure, nothing of the apps installed by hand or secrets", left)
+	}
+}
+
+// A question's line of what more it says, longer than the screen has room
+// for, is cut, ending in an ellipsis, so the row, its answers and the keys
+// stay.
+func TestSetupScreenCutsWhatMoreItSays(t *testing.T) {
+	f := setupFace(func() {}, setupTill(setup.InstallStep)...)
+	more := "fd, lazygit and ripgrep; couldn't tell for Homebrew casks (brew: exit 1 Error: something broke); App Store apps (mas: exit 1 Error: not signed in); npm packages (npm: exit 1 Error: the registry didn't answer)"
+	answered := asking(t, f, "To install", func() error {
+		_, err := f.Choose(context.Background(), setup.InstallStep, "kit-config declares 3 things this Mac hasn't, and couldn't tell for some\n"+more,
+			[]look.Choice{{Label: "Install them with the rest"}, {Label: "Stop here to look first", Cmd: "kit status"}})
+		return err
+	})
+	for _, width := range []int{52, 64} {
+		for _, height := range []int{10, 11} {
+			view := viewed(f, width, height)
+			if lines := strings.Count(view, "\n") + 1; lines > height || !strings.Contains(view, "▲ To install") || !strings.Contains(view, "…") && !strings.Contains(view, "answer)") ||
+				!strings.Contains(view, "Install them with the rest") || !strings.Contains(view, "Stop here to look first") || !strings.HasSuffix(view, "esc stop") {
+				t.Errorf("%d by %d, drew\n%s\nwant the row, what more it says cut, the answers, the keys", width, height, view)
+			}
+		}
+	}
+	f.Key(ask.Key{Name: "enter"})
+	if err := <-answered; err != nil {
+		t.Error(err)
 	}
 }
 
