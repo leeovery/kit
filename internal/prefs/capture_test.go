@@ -53,8 +53,9 @@ func newWorld(t *testing.T, lists prefs.Lists) *world {
 func onTheBranch(fake *runnertest.Fake, config, clone string) {
 	fake.On("git", "-C", config, "remote").Prints("origin\n")
 	fake.On("git", "-C", config, "remote", "get-url", "origin").Prints(remote + "\n")
-	fake.On("git", signsIn(config)...).Exits(1)
-	fake.On("git", "-C", clone, "rev-parse", "--verify", "--quiet", "HEAD").Prints(head + "\n")
+	fake.On("git", "-C", config, "remote", "get-url", "--push", "--all", "origin").Prints(remote + "\n")
+	fake.On("git", carries(config)...).Exits(1)
+	fake.On("git", "-C", clone, "for-each-ref", "--count=1", "--format=%(refname)", "refs/heads").Prints("refs/heads/prefs\n")
 	fake.On("git", "-C", clone, "remote", "get-url", "origin").Prints(remote + "\n")
 	fake.On("git", "-C", clone, "remote", "get-url", "--push", "--all", "origin").Prints(remote + "\n")
 	fake.On("git", "-C", clone, "symbolic-ref", "-q", "HEAD").Prints("refs/heads/prefs\n")
@@ -63,10 +64,11 @@ func onTheBranch(fake *runnertest.Fake, config, clone string) {
 	}
 }
 
-// signsIn is git reading how kit-config, at config, signs in to its remote:
-// its own credential settings, exiting 1 with none, as real git does.
-func signsIn(config string) []string {
-	return []string{"-C", config, "config", "--local", "--get-regexp", "-z", `^credential\.`}
+// carries is git reading the settings the store takes from kit-config, at
+// config: its own credential and push URL settings, exiting 1 with none,
+// as real git does.
+func carries(config string) []string {
+	return []string{"-C", config, "config", "--local", "--get-regexp", "-z", `^(credential\..*|remote\..*\.pushurl)$`}
 }
 
 // pulls scripts a pull of the store's, as real git answers, its one
@@ -397,6 +399,7 @@ func TestCaptureNeverPushesToAPublicStore(t *testing.T) {
 		w.pushes(t, "Capture 2026-10-06 03:00: 1 new\n\nnew: com.example.app\nclaimed: the folder, for this Mac's hardware",
 			"?? laptop/.gitignore\x00?? laptop/domains/com.example.app.plist\x00?? laptop/owner\x00", newFiles, newFiles)
 		w.fake.On("git", "-C", w.config, "remote", "get-url", "origin").Prints(c.url + "\n")
+		w.fake.On("git", "-C", w.config, "remote", "get-url", "--push", "--all", "origin").Prints(c.url + "\n")
 		w.fake.On("git", "-C", w.clone, "remote", "get-url", "origin").Prints(c.url + "\n")
 		w.fake.On("git", "-C", w.clone, "remote").Prints(c.remotes)
 		w.fake.On("git", "-C", w.clone, "remote", "get-url", "--push", "--all", "origin").Prints(c.url + "\n")

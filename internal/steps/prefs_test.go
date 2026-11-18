@@ -60,9 +60,10 @@ const kitConfig = "git@github.com:someone/kit-config.git"
 func configures(fake *runnertest.Fake, config, clone string) {
 	fake.On("git", "-C", config, "remote").Prints("origin\n")
 	fake.On("git", "-C", config, "remote", "get-url", "origin").Prints(kitConfig + "\n")
-	fake.On("git", "-C", config, "config", "--local", "--get-regexp", "-z", `^credential\.`).Exits(1)
+	fake.On("git", "-C", config, "remote", "get-url", "--push", "--all", "origin").Prints(kitConfig + "\n")
+	fake.On("git", "-C", config, "config", "--local", "--get-regexp", "-z", `^(credential\..*|remote\..*\.pushurl)$`).Exits(1)
 	fake.On("git", "ls-remote", "--quiet", "--exit-code", kitConfig, "refs/heads/prefs").Prints("abc123\trefs/heads/prefs\n")
-	fake.On("git", "-C", clone, "rev-parse", "--verify", "--quiet", "HEAD").Prints("abc123\n")
+	fake.On("git", "-C", clone, "for-each-ref", "--count=1", "--format=%(refname)", "refs/heads").Prints("refs/heads/prefs\n")
 	fake.On("git", "-C", clone, "remote", "get-url", "origin").Prints(kitConfig + "\n")
 	fake.On("git", "-C", clone, "remote", "get-url", "--push", "--all", "origin").Prints(kitConfig + "\n")
 	fake.On("git", "-C", clone, "symbolic-ref", "-q", "HEAD").Prints("refs/heads/prefs\n")

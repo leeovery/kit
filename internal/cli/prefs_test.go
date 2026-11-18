@@ -96,7 +96,8 @@ func (w *world) kitConfigRemote() {
 	config := filepath.Join(w.home, ".config", "kit")
 	w.fake.On("git", "-C", config, "remote").Prints("origin\n")
 	w.fake.On("git", "-C", config, "remote", "get-url", "origin").Prints(kitConfigURL + "\n")
-	w.fake.On("git", "-C", config, "config", "--local", "--get-regexp", "-z", `^credential\.`).Exits(1)
+	w.fake.On("git", "-C", config, "remote", "get-url", "--push", "--all", "origin").Prints(kitConfigURL + "\n")
+	w.fake.On("git", "-C", config, "config", "--local", "--get-regexp", "-z", `^(credential\..*|remote\..*\.pushurl)$`).Exits(1)
 }
 
 // storeCloned scripts the store's clone, in kit's data folder, as kit finds
@@ -104,7 +105,7 @@ func (w *world) kitConfigRemote() {
 func (w *world) storeCloned() string {
 	w.kitConfigRemote()
 	clone := filepath.Join(w.home, ".local", "share", "kit", "prefs")
-	w.fake.On("git", "-C", clone, "rev-parse", "--verify", "--quiet", "HEAD").Prints(head + "\n")
+	w.fake.On("git", "-C", clone, "for-each-ref", "--count=1", "--format=%(refname)", "refs/heads").Prints("refs/heads/prefs\n")
 	w.fake.On("git", "-C", clone, "remote", "get-url", "origin").Prints(kitConfigURL + "\n")
 	w.fake.On("git", "-C", clone, "remote", "get-url", "--push", "--all", "origin").Prints(kitConfigURL + "\n")
 	w.fake.On("git", "-C", clone, "symbolic-ref", "-q", "HEAD").Prints("refs/heads/prefs\n")

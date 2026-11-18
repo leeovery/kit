@@ -221,6 +221,37 @@ func TestRemovingAnAppStoreAppAsksAboutItsSavedSettings(t *testing.T) {
 	}
 }
 
+// Removing an app goes on when kit prefs' store is a clone kit won't read,
+// as one of the repository it was in before: nothing's asked about the
+// settings it saved, none is deleted, and the uninstall says why.
+func TestRemovingAnAppWithTheStoreRefused(t *testing.T) {
+	for _, terminal := range []bool{true, false} {
+		w := notesWorld(t, true)
+		w.terminal = terminal
+		clone := w.storeCloned()
+		w.write(t, filepath.Join(".local", "share", "kit", "prefs", ".git", "HEAD"), "ref: refs/heads/main\n")
+		w.fake.On("git", "-C", clone, "remote", "get-url", "origin").Prints("git@github.com:someone/prefs.git\n")
+		w.expectPassword()
+		w.fake.On("sudo", "-n", "mas", "uninstall", "123456789")
+		w.expectSync(t, []string{"laptop/declarations"}, "kit mas remove notes-example@123456789 (laptop)")
+		out, errOut, code := w.run(t, "mas", "remove", "notes-example@123456789")
+		if code != 0 || len(w.asked) != 0 {
+			t.Fatalf("at a terminal %v: kit mas remove exit %d (%s), asked %q; want it uninstalled, unasked", terminal, code, errOut, w.asked)
+		}
+		// A terminal's line is cut to its width.
+		want := "its saved settings weren't looked at"
+		if !terminal {
+			want += ": " + clone + " points at github.com:someone/prefs.git"
+		}
+		if !strings.Contains(out, want) {
+			t.Errorf("at a terminal %v: kit mas remove printed\n%s\nwant it to say %q", terminal, out, want)
+		}
+		if ran(w, "defaults delete com.example.notes") {
+			t.Errorf("at a terminal %v: ran %q; want no saved settings deleted", terminal, w.fake.Calls())
+		}
+	}
+}
+
 // An uninstall that fails once its saved settings were deleted, the app
 // still there, puts them back from kit prefs' store; with the app running,
 // they're held till it's quit, so the next capture keeps them, and it says
