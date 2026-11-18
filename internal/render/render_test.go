@@ -863,3 +863,36 @@ func TestPrettyStatusShowsEditsGitKeepsApart(t *testing.T) {
 		t.Errorf("printed\n%s\nwant\n%s", out.String(), want)
 	}
 }
+
+// A kit-config that isn't private needs you, and no kit command makes it
+// private: its row says what does, naming none, and kit-config's own row is
+// marked as needing you, whatever else of it is well.
+func TestPrettyConfigNotPrivate(t *testing.T) {
+	for _, tt := range []struct{ state, detail, row string }{
+		{"not-private", "make it private: gh repo edit owner/kit-config --visibility private",
+			"  ▲ owner/kit-config\n    make it private: gh repo edit owner/kit-config --visibility private\n"},
+		{"unproven", "gh isn't signed in", "  ▲ owner/kit-config  gh isn't signed in\n"},
+	} {
+		t.Run(tt.state, func(t *testing.T) {
+			var out bytes.Buffer
+			show(t, render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.NoTTY}, 120, false), []event.Event{
+				event.RunStarted{Time: at, Command: "status", Machine: "laptop", Steps: []event.Step{
+					{Name: "config-private", Title: "Privacy", Area: "Config", Part: render.PartConfig},
+					{Name: "config-sync", Title: "Sync", Area: "Config", Part: render.PartConfig},
+				}},
+				event.StepFinished{Step: "config-private", Result: check.Result{State: check.Attention, Summary: "it must be private", Items: []check.Item{
+					{ID: "config-private:owner/kit-config", Name: "owner/kit-config", State: tt.state, Detail: tt.detail},
+				}}},
+				event.StepFinished{Step: "config-sync", Result: check.Result{State: check.OK, Summary: "pushed", Glance: "pushed"}},
+				event.RunFinished{Duration: time.Second, Counts: map[check.State]int{check.OK: 1, check.Attention: 1}},
+			})
+			got := ansi.Strip(out.String())
+			if !strings.Contains(got, tt.row) || strings.Contains(got, "kit reconcile") || strings.Contains(got, "kit apply") {
+				t.Errorf("printed\n%s\nwant\n%s\nand no kit command", got, tt.row)
+			}
+			if !strings.Contains(got, "  ▲ kit-config  it must be private · pushed\n") {
+				t.Errorf("printed\n%s\nwant kit-config's row marked as needing you", got)
+			}
+		})
+	}
+}

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -276,12 +275,12 @@ func (a *app) askAbout(ctx context.Context, r *run, items []driftItem, opts reco
 		}
 		dr := r.drifters[it.Kind]
 		cs := dr.choices(it.Item)
-		answers := make([]look.Choice, 0, len(cs)+1)
-		for _, c := range cs {
-			answers = append(answers, look.Choice{Label: actionLabel(c), Does: c.words.Does})
+		answers := make([]render.Answer, len(cs))
+		for i, c := range cs {
+			answers[i] = render.Answer{Words: c.words, Shared: c.shared}
 		}
-		answers = append(answers, look.Choice{Label: "Skip", Does: "not now"})
-		q := ask.Question{About: look.Row{State: look.NeedsYou, Name: it.Name, Says: describe(it, dr, r.now)}, Answers: answers}
+		drifted := render.Drifted{Name: it.Name, Kind: it.Kind, What: dr.describe(it.Item), Detail: it.Detail, Since: it.Since}
+		q := render.ReconcileQuestion(drifted, answers, r.now)
 		if sh, ok := dr.(shower); ok {
 			if more := sh.show(ctx, it.Item); more != "" {
 				q.More = look.Output(strings.Split(more, "\n")...)
@@ -303,40 +302,6 @@ func (a *app) askAbout(ctx context.Context, r *run, items []driftItem, opts reco
 		}
 	}
 	return decisions, nil
-}
-
-// actionLabel is a choice's label: what it does, in a word or two; one
-// done for every Mac said apart from one done for this.
-func actionLabel(c choice) string {
-	label := c.words.Label
-	if c.shared {
-		label += " everywhere"
-	}
-	return label
-}
-
-// describe says what an item is, as its question's row says it: its kind,
-// what's wrong, and for how long.
-func describe(it driftItem, d drifter, now time.Time) string {
-	says := []string{look.Muted(it.Kind), look.Orange(d.describe(it.Item))}
-	if it.Detail != "" {
-		says = append(says, look.Muted(it.Detail))
-	}
-	if !it.Since.IsZero() {
-		says = append(says, look.Muted(age(now.Sub(it.Since))))
-	}
-	return look.Says(says...)
-}
-
-// age says how long d is, roughly.
-func age(d time.Duration) string {
-	switch days := int(d.Hours() / 24); {
-	case days >= 2:
-		return fmt.Sprintf("%d days", days)
-	case days == 1:
-		return "a day"
-	}
-	return "under a day"
 }
 
 // carryOut does what was decided, an item at a time, then commits and

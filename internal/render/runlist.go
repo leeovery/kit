@@ -17,6 +17,10 @@ import (
 // into a line.
 const foldFrom = 3
 
+// RunListKeys are the keys a run is picked from RunList with, as kit log
+// says them under it.
+var RunListKeys = []look.Key{{Key: "↑↓", Does: "choose"}, {Key: "enter", Does: "open"}, {Key: "q", Does: "quit"}}
+
 // RunList is the runs logged, newest first, as a list to pick one from: a
 // day a header, a run a row, its mark, when it started, what it was of and
 // how it ended; runs of a command that ended the same way, three or more in
