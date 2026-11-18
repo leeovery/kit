@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"io"
 	"strings"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/leeovery/kit/internal/ask"
 	"github.com/leeovery/kit/internal/look"
+	"github.com/leeovery/kit/internal/setup"
 )
 
 // menuKeys are the keys kit's menu takes.
@@ -27,8 +29,11 @@ func (a *app) home(cmd *cobra.Command) error {
 	if err := a.textOnly(cmd); err != nil {
 		return err
 	}
-	if !a.pretty(a.Stdout) {
+	if !a.pretty(a.Stdout) || !a.Terminal(a.Stdin) {
 		return cmd.Help()
+	}
+	if says, does := a.setupUnfinished(); says != "" {
+		return a.offerSetup(cmd.Context(), says, does)
 	}
 	width := min(max(a.Width(a.Stdout), 40), look.Width)
 	choices := []look.Choice{
@@ -66,4 +71,35 @@ func (a *app) home(cmd *cobra.Command) error {
 		}
 	}
 	return a.becomeSelf(append([]string{"--" + underHome}, strings.Fields(chosen)...))
+}
+
+// setupUnfinished is what bare kit says of this Mac while kit setup hasn't
+// finished, and what enter does: a run stopped part-way, as its record
+// says, carries on; with the config folder absent or empty, as kit setup
+// starts on, nothing's set up. "" once there's a config, for the menu.
+func (a *app) setupUnfinished() (says, does string) {
+	dirs, err := a.dirs()
+	if err != nil {
+		return "", ""
+	}
+	if setup.PartWay(dirs.State) {
+		return "setup stopped part-way", "carries on"
+	}
+	if empty, err := setup.Empty(dirs.Config); err == nil && empty {
+		return "isn't set up with kit", "runs kit setup"
+	}
+	return "", ""
+}
+
+// offerSetup is bare kit on a Mac kit setup hasn't finished: the wordmark,
+// then a line saying how it stands; enter has kit become kit setup, any
+// other key leaves.
+func (a *app) offerSetup(ctx context.Context, says, does string) error {
+	lines := append([]string{""}, look.Head(look.Muted(a.Now().Format("Mon 2 Jan · 15:04")))...)
+	lines = append(lines, "", look.Rows("  ", look.Width, look.Row{State: look.NeedsYou, Name: "This Mac", Says: look.Words(look.NeedsYou, says)})[0])
+	taken, err := a.Offer(ctx, lines, []look.Key{{Key: "enter", Does: does}, {Key: "any other key", Does: "leaves"}})
+	if err != nil || !taken {
+		return err
+	}
+	return a.becomeSelf([]string{"setup"})
 }

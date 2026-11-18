@@ -734,7 +734,8 @@ func TestSetupStoppedAnywhereEndsAsOneNeverStopped(t *testing.T) {
 // all, unless its own run part-way left it there: the folder empty, or a
 // clone of the repository it chose, and kit's name for the Mac none, or
 // the one it chose: its origin read as set, before an insteadOf rewrites
-// it. Else setup starts afresh, forgetting a run that finished.
+// it. Else setup starts afresh, forgetting a run that finished. Finder's
+// file alone is empty, and goes.
 func TestBegin(t *testing.T) {
 	partWay := record{Repo: "someone/kit-config", Cloned: true, Mac: "laptop"}
 	for _, tt := range []struct {
@@ -748,6 +749,7 @@ func TestBegin(t *testing.T) {
 	}{
 		{"nothing there", nil, "", "", record{}, Answers{}, ""},
 		{"an empty folder", []string{"."}, "", "", record{}, Answers{}, ""},
+		{"Finder's file alone", []string{".DS_Store"}, "", "", record{}, Answers{}, ""},
 		{"a config", []string{config.File}, "", "", record{}, Answers{}, "holds a config already, so kit looks after this Mac: kit status says how it stands"},
 		{"something else", []string{"notes.txt"}, "", "", record{}, Answers{}, "is there, and isn't a config: move it aside, then run kit setup again"},
 		{"setup's own, part-way", []string{config.File}, "https://github.com/someone/kit-config.git", "", partWay, Answers{}, ""},
@@ -784,11 +786,48 @@ func TestBegin(t *testing.T) {
 			case tt.says == "" && err != nil, tt.says != "" && (err == nil || !strings.Contains(err.Error(), tt.says)):
 				t.Errorf("Begin = %v, want %q", err, tt.says)
 			}
+			if _, statErr := os.Stat(filepath.Join(m.dirs.Config, ".DS_Store")); err == nil && statErr == nil {
+				t.Error("Finder's file was left, for git to refuse to clone into the folder")
+			}
 			rec, _ := kitstate.Load[record](m.dirs.State, recordName)
 			if kept := rec.Repo != ""; err == nil && kept != tt.record.partWay() {
 				t.Errorf("the record is %+v: want it kept only part-way", rec)
 			}
 		})
+	}
+}
+
+// The config folder is as setup starts on when it's not there, or holds
+// nothing but Finder's file; a folder named as Finder's file is something.
+func TestEmpty(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "kit")
+	for _, tt := range []struct {
+		name  string
+		make  func()
+		empty bool
+	}{
+		{"not there", func() {}, true},
+		{"Finder's file", func() {
+			if err := os.MkdirAll(dir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, ".DS_Store"), nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}, true},
+		{"a folder named as Finder's file", func() {
+			if err := os.Remove(filepath.Join(dir, ".DS_Store")); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Mkdir(filepath.Join(dir, ".DS_Store"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+		}, false},
+	} {
+		tt.make()
+		if empty, err := Empty(dir); err != nil || empty != tt.empty {
+			t.Errorf("%s: Empty = %v, %v; want %v", tt.name, empty, err, tt.empty)
+		}
 	}
 }
 
@@ -961,7 +1000,7 @@ func TestTheSnapshotsQuestions(t *testing.T) {
 		{"files, given anew", FilesStep, func(r *record) { r.Link = &[]string{"~/.zshrc"} }, false, Answers{Link: &[]string{}}, false, nil, "ok none", ""},
 		{"to install, as given", InstallStep, nil, false, Answers{Apply: &yes}, false, nil, "ok with the rest", ""},
 		{"to install, asked", InstallStep, nil, false, Answers{}, true, []int{1}, "ok stopped here to look first: kit status, then kit apply",
-			"to-install: kit-config declares 1 thing this Mac hasn't: jq: Install them with the rest, Stop here to look first"},
+			"to-install: kit-config declares 1 thing this Mac hasn't\njq: Install them with the rest, Stop here to look first"},
 		{"to install, no terminal", InstallStep, nil, false, Answers{}, false, nil,
 			"failed no terminal to ask at: --apply installs what kit-config declares 1 thing this Mac hasn't (jq) with the rest, or --no-apply stops to look first", ""},
 		{"to install, given anew", InstallStep, func(r *record) { r.Apply = &no }, false, Answers{Apply: &yes}, false, nil, "ok with the rest", ""},
@@ -1109,5 +1148,36 @@ func TestSetupCommitsTheAnswersThenSays(t *testing.T) {
 	}
 	if got := s.secretsStep().Check(t.Context()).Summary; got != "kit keeps secrets in a store, never in kit-config: kit secret add" {
 		t.Errorf("secrets said %q", got)
+	}
+}
+
+// What kit-config declares that this Mac hasn't, when a kind's check
+// couldn't tell, is never taken for nothing: the question's asked, saying
+// it couldn't tell, and why; without a terminal, its flags are named,
+// saying so.
+func TestToInstallSaysWhatItCouldntTell(t *testing.T) {
+	const couldnt = "couldn't tell what kit-config declares that this Mac hasn't"
+	for _, terminal := range []bool{true, false} {
+		ask := &asker{chooses: []int{0}}
+		s, m := snapshotted(t, map[bool]Asker{true: ask, false: nil}[terminal])
+		for _, args := range [][]string{{"list", "--formula", "--full-name", "-1"}, {"leaves"}, {"leaves", "--installed-on-request"}} {
+			m.run.On("brew", args...).Exits(1).PrintsToStderr("Error: something broke\n")
+		}
+		step := s.questionSteps()[InstallStep]
+		if res := step.Check(t.Context()); res.State != check.Attention {
+			t.Errorf("Homebrew's check failing, the step checks %s %q; want it to ask", res.State, res.Summary)
+		}
+		p, err := engine.New(step)
+		if err != nil {
+			t.Fatal(err)
+		}
+		report, _ := p.Apply(t.Context(), s.Sink, engine.Options{Jobs: 1})
+		res := report.Results[InstallStep]
+		switch {
+		case terminal && (len(ask.asked) != 1 || !strings.HasPrefix(ask.asked[0], "to-install: "+couldnt+"\ncouldn't tell for Homebrew formulae (Error: something broke") || res.Summary != "with the rest"):
+			t.Errorf("at a terminal, asked %q, stood %s %q; want it asked, saying it couldn't tell, and why", ask.asked, res.State, res.Summary)
+		case !terminal && (res.State != check.Failed || !strings.Contains(res.Reason, "--apply installs what kit-config declares that this Mac hasn't with the rest, or --no-apply stops to look first; "+couldnt+", for Homebrew formulae (Error: something broke")):
+			t.Errorf("without a terminal, stood %s %q; want its flags named, saying it couldn't tell", res.State, res.Reason)
+		}
 	}
 }

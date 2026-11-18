@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -53,6 +54,7 @@ func (f *Fake) OnMatch(name string, match func(args []string) bool) *Script {
 func (f *Fake) add(s *Script) *Script {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	s.mu = &f.mu
 	f.scripts = append(f.scripts, s)
 	return s
 }
@@ -60,6 +62,9 @@ func (f *Fake) add(s *Script) *Script {
 // Script is the scripted answers to a command: the first to its first run,
 // the next to its next, and the last to every run after.
 type Script struct {
+	// mu is its fake's, held while it's changed, as a command running
+	// meanwhile can find it as soon as it's scripted.
+	mu      *sync.Mutex
 	argv    []string
 	match   func(args []string) bool
 	answers []*answer
@@ -84,40 +89,39 @@ type answer struct {
 	group  int
 }
 
-func (s *Script) last() *answer {
-	return s.answers[len(s.answers)-1]
+// set changes the answer to the command's latest run.
+func (s *Script) set(change func(a *answer)) *Script {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	change(s.answers[len(s.answers)-1])
+	return s
 }
 
 // Prints has the command print text on its standard output.
 func (s *Script) Prints(text string) *Script {
-	s.last().stdout = text
-	return s
+	return s.set(func(a *answer) { a.stdout = text })
 }
 
 // PrintsToStderr has the command print text on its standard error.
 func (s *Script) PrintsToStderr(text string) *Script {
-	s.last().stderr = text
-	return s
+	return s.set(func(a *answer) { a.stderr = text })
 }
 
 // Exits has the command exit with code.
 func (s *Script) Exits(code int) *Script {
-	s.last().exit = code
-	return s
+	return s.set(func(a *answer) { a.exit = code })
 }
 
 // Fails has the command not run at all, Run returning err, as for a program
 // that isn't installed (runner.ErrNotFound).
 func (s *Script) Fails(err error) *Script {
-	s.last().err = err
-	return s
+	return s.set(func(a *answer) { a.err = err })
 }
 
 // Does has the command do f when it runs, as a real program changes what's
 // on the Mac: a file it writes, say.
 func (s *Script) Does(f func()) *Script {
-	s.last().does = f
-	return s
+	return s.set(func(a *answer) { a.does = f })
 }
 
 // Writes has the command write content to the file the argument after flag
@@ -125,18 +129,18 @@ func (s *Script) Does(f func()) *Script {
 // succeeds. A relative path is in the folder it runs in (runner.Command's
 // Dir).
 func (s *Script) Writes(flag, content string) *Script {
-	a := s.last()
-	if a.writes == nil {
-		a.writes = map[string]string{}
-	}
-	a.writes[flag] = content
-	return s
+	return s.set(func(a *answer) {
+		if a.writes == nil {
+			a.writes = map[string]string{}
+		}
+		a.writes[flag] = content
+	})
 }
 
 // WritesPartly has the command write content as Writes does, but whatever
 // it exits with, as a program that fails partway leaves what it wrote.
 func (s *Script) WritesPartly(flag, content string) *Script {
-	s.last().partly = true
+	s.set(func(a *answer) { a.partly = true })
 	return s.Writes(flag, content)
 }
 
@@ -144,16 +148,14 @@ func (s *Script) WritesPartly(flag, content string) *Script {
 // standard input, as a filter does: when f fails, it
 // prints the error on its standard error instead, and exits 1.
 func (s *Script) Filters(f func(input string) (string, error)) *Script {
-	s.last().filter = f
-	return s
+	return s.set(func(a *answer) { a.filter = f })
 }
 
 // Asks has the command ask times for what its Answer gives, as sudo -S
 // asks for a password, before it does as scripted: one not given ends it,
 // exit 1. Answered says what it was given.
 func (s *Script) Asks(times int) *Script {
-	s.last().asks = times
-	return s
+	return s.set(func(a *answer) { a.asks = times })
 }
 
 // AnswersLate has the command, having asked, end before its last answer's
@@ -161,26 +163,25 @@ func (s *Script) Asks(times int) *Script {
 // exits 1, the answer too late (runner.ErrAnsweredLate), and isn't kept in
 // Answered.
 func (s *Script) AnswersLate() *Script {
-	s.last().late = true
-	return s
+	return s.set(func(a *answer) { a.late = true })
 }
 
 // Hangs has the command, having printed what it prints, wait for good,
 // till its context is done, then fail as the runner ends one: with the
 // context's error.
 func (s *Script) Hangs() *Script {
-	s.last().hangs = true
-	return s
+	return s.set(func(a *answer) { a.hangs = true })
 }
 
 // InGroup has the command run in process group n (runner.Result's Group).
 func (s *Script) InGroup(n int) *Script {
-	s.last().group = n
-	return s
+	return s.set(func(a *answer) { a.group = n })
 }
 
 // Answered are what the command was given when it asked, in order.
 func (s *Script) Answered() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return slices.Clone(s.answered)
 }
 
@@ -188,6 +189,8 @@ func (s *Script) Answered() []string {
 // such as a listing once something's installed: by default, nothing printed
 // and exit 0.
 func (s *Script) Then() *Script {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.answers = append(s.answers, &answer{})
 	return s
 }
@@ -221,9 +224,10 @@ func (f *Fake) Run(ctx context.Context, cmd runner.Command) (runner.Result, erro
 	f.mu.Lock()
 	f.calls = append(f.calls, cmd)
 	s := f.script(cmd)
-	var a *answer
+	var a answer
 	if s != nil {
-		a = s.answers[min(s.runs, len(s.answers)-1)]
+		a = *s.answers[min(s.runs, len(s.answers)-1)]
+		a.writes = maps.Clone(a.writes)
 		s.runs++
 	}
 	f.mu.Unlock()

@@ -110,9 +110,18 @@ type world struct {
 	// answers, unless a test serves it, holding repos.
 	gitHub boot.GitHub
 	repos  *boottest.Repos
-	// text answers what kit asks to be typed at a terminal, as its row
-	// reads, given what's typed to start with: that, unless it's set.
-	text func(question, typed string) string
+	// offered is what kit offered at a terminal, each offer's lines, plain;
+	// takeOffer, whether enter takes it up.
+	offered   []string
+	takeOffer bool
+	// input and output, when set, are kit's standard input and output, a
+	// terminal a test types keys at and reads what's drawn on, rather than
+	// stdin and what run returns.
+	input  io.Reader
+	output io.Writer
+	// noKeys is whether kit's standard input isn't a terminal, while its
+	// output is.
+	noKeys bool
 }
 
 // after is how long kit waits in the world, as time.After has it: no time
@@ -240,6 +249,7 @@ func (w *world) read(t *testing.T, path string) string {
 func (w *world) run(t *testing.T, args ...string) (stdout, stderr string, status int) {
 	t.Helper()
 	var out, errOut bytes.Buffer
+	stdin := cmp.Or[io.Reader](w.input, strings.NewReader(w.stdin))
 	root := cli.NewRootCommand(cli.Deps{
 		Version:  "0.1.0",
 		Getenv:   func(name string) string { return w.env[name] },
@@ -247,10 +257,10 @@ func (w *world) run(t *testing.T, args ...string) (stdout, stderr string, status
 		HomeDir:  func() (string, error) { return w.home, nil },
 		Now:      func() time.Time { return w.now },
 		After:    w.after,
-		Stdin:    strings.NewReader(w.stdin),
-		Stdout:   &out,
+		Stdin:    stdin,
+		Stdout:   cmp.Or[io.Writer](w.output, &out),
 		Stderr:   &errOut,
-		Terminal: func(io.Writer) bool { return w.terminal },
+		Terminal: func(f any) bool { return w.terminal && (f != stdin || !w.noKeys) },
 		Width:    func(io.Writer) int { return cmp.Or(w.size[0], 80) },
 		Height:   func(io.Writer) int { return cmp.Or(w.size[1], 40) },
 		Listen:   w.listen,
@@ -289,13 +299,9 @@ func (w *world) run(t *testing.T, args ...string) (stdout, stderr string, status
 			}
 			return w.typed, nil
 		},
-		ReadText: func(_ context.Context, about look.Row, typed string) (string, error) {
-			question := ansi.Strip(about.Name + "  " + about.Says)
-			w.asked = append(w.asked, question)
-			if w.text != nil {
-				return w.text(question, typed), nil
-			}
-			return typed, nil
+		Offer: func(_ context.Context, lines []string, _ []look.Key) (bool, error) {
+			w.offered = append(w.offered, ansi.Strip(strings.Join(lines, "\n")))
+			return w.takeOffer, nil
 		},
 		GitHub: func() boot.GitHub { return w.gitHub },
 		Pick: func(_ context.Context, _ []string, lines []ask.Line, _ []look.Key) (string, error) {

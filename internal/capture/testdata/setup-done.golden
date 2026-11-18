@@ -1,0 +1,35 @@
+
+  █  ▄▀  ▀█▀  ▀▀█▀▀  │  setup
+  █▀▀▄    █     █    │  laptop
+  █   █  ▄█▄    █    │  Fri 20 Nov · 16:30
+
+  SETUP
+  ● GitHub  someone · GitHub's CLI's sign-in
+  ● kit-config  someone/kit-config · new, private · pushed
+  ● This Mac  laptop
+
+  DECLARED  370 · everything on this Mac, as it is
+  ● Homebrew formulae  126
+  ● Homebrew casks  23
+  ● App Store apps  7
+  ● npm packages  4
+  ● macOS login items  5
+  ● Claude MCP  3
+  ● git config  12
+  ● macOS settings  186
+  ● Features  Touch ID for sudo · Remote Login
+  ● Backups  Time Machine · Arq
+  ● Your data  3 folders · 56.3 GB
+  ● Apps' settings  every night
+  ● Linked files  5
+
+  INSTALLED BY HAND  3
+  – Sketchpad
+  – Tally
+  – Mac Monitor
+  → if kit sets this Mac up again, they're yours to install, through Homebrew or
+    the App Store, if they're there
+
+  → kit keeps secrets in a store, never in kit-config: kit secret add
+
+  kit apply carries on now

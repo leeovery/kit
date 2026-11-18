@@ -378,11 +378,16 @@ func (bootHold) settle(bool)  {}
 type bootAsker struct{ face *render.BootFace }
 
 func (a bootAsker) Choose(ctx context.Context, step, question string, answers []boot.Answer) (int, error) {
-	choices := make([]look.Choice, len(answers))
+	return a.face.Choose(ctx, step, question, choices(answers))
+}
+
+// choices are a question's answers, as a face shows them.
+func choices(answers []boot.Answer) []look.Choice {
+	cs := make([]look.Choice, len(answers))
 	for i, an := range answers {
-		choices[i] = look.Choice{Label: an.Label, Does: an.Does}
+		cs[i] = look.Choice{Label: an.Label, Does: an.Does, Cmd: an.Cmd}
 	}
-	return a.face.Choose(ctx, step, question, choices)
+	return cs
 }
 
 func (a bootAsker) Name(ctx context.Context, step, question string) (string, error) {

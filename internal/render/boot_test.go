@@ -205,6 +205,7 @@ func TestBootFaceSignIn(t *testing.T) {
 			t.Errorf("with the phone, want %q:\n%s", want, phone)
 		}
 	}
+	signsInWithin(t, "the boot", f.Full(80, 24))
 	f.Key(ask.Key{Name: "esc"})
 	if f.Full(120, 30) != nil {
 		t.Fatal("esc didn't go back")
@@ -241,6 +242,20 @@ func TestBootFaceFits(t *testing.T) {
 	text := plainView(f, 6)
 	if !strings.Contains(text, "Password") || strings.Contains(text, "This Mac") {
 		t.Errorf("at 6 lines:\n%s\nwant the step at work, rows done given way", text)
+	}
+}
+
+// A step failing with a reason of several lines, as a program's standard
+// error, draws as a line a row all the same, as the screen counts them.
+func TestBootFaceRowsNeverBreak(t *testing.T) {
+	at := time.Date(2026, 10, 8, 18, 2, 0, 0, time.UTC)
+	f := render.NewBootFace(ask.Terminal{Out: &bytes.Buffer{}}, true, func() time.Time { return at }, nil)
+	f.Show(bootSteps)
+	f.Emit(event.StepFinished{Time: at, Step: "github", Result: check.Result{State: check.Failed, Reason: "gh auth: exit 1\nerror connecting to api.github.com\ncheck your internet connection"}})
+	for _, l := range f.View(80, 40) {
+		if strings.ContainsAny(l, "\n\r") {
+			t.Errorf("the boot drew a line that breaks: %q", ansi.Strip(l))
+		}
 	}
 }
 
@@ -306,5 +321,15 @@ func waitFor(t *testing.T, ok func() bool) {
 			t.Fatal("waited too long")
 		}
 		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// signsInWithin checks signing in's window, 24 lines high: never taller,
+// the code and when it expires whole, the keys on the last line.
+func signsInWithin(t *testing.T, whose string, full []string) {
+	t.Helper()
+	text := ansi.Strip(strings.Join(full, "\n"))
+	if len(full) != 24 || !strings.Contains(text, "WDJB-MJHT") || !strings.Contains(text, "expires in 15:00") || !strings.HasSuffix(strings.TrimRight(text, " "), "esc back") {
+		t.Errorf("%s, signing in 24 lines high, drew %d\n%s\nwant the code and when it expires whole, the keys last", whose, len(full), text)
 	}
 }

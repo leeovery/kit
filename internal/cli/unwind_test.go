@@ -58,7 +58,7 @@ func TestAPanicPutsTheTerminalBack(t *testing.T) {
 	}
 	root := NewRootCommand(Deps{
 		Version: "0.1.0", Getenv: func(string) string { return "" }, Environ: func() []string { return []string{"TTY_FORCE=1", "TERM=xterm-256color"} },
-		Stdout: &out, Stderr: io.Discard, Terminal: func(io.Writer) bool { return true },
+		Stdout: &out, Stderr: io.Discard, Terminal: func(any) bool { return true },
 		Width: func(io.Writer) int { return 160 }, Height: func(io.Writer) int { return 64 }, Listen: listen,
 	})
 	a := root.ErrOrStderr().(*errOut).a

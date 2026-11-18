@@ -370,6 +370,35 @@ func TestPickScrolls(t *testing.T) {
 	equal(t, "view", plain(l.view(80, 9)), []string{"  9", "  10", "  11", "  ❯ 12", "  13", "  14", "", "  "})
 }
 
+// An offer is taken up by enter alone: any other key leaves it, but the
+// window's focus coming and going.
+func TestOffer(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		keys  []key
+		taken bool
+	}{
+		{"enter", []key{{name: "enter"}}, true},
+		{"a letter", []key{{text: "x"}}, false},
+		{"esc", []key{{name: "esc"}}, false},
+		{"focus, then enter", []key{{name: "focus out"}, {name: "focus in"}, {name: "enter"}}, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			o := &offer{lines: []string{"  This Mac isn't set up with kit"}, keys: []look.Key{{Key: "enter", Does: "sets it up"}}}
+			for i, k := range tt.keys {
+				if done := o.update(k); done != (i == len(tt.keys)-1) {
+					t.Fatalf("%+v ended it: %v", k, done)
+				}
+			}
+			if o.taken != tt.taken {
+				t.Errorf("taken = %v, want %v", o.taken, tt.taken)
+			}
+		})
+	}
+	o := &offer{lines: []string{"  This Mac isn't set up with kit"}, keys: []look.Key{{Key: "enter", Does: "sets it up"}}}
+	equal(t, "view", plain(o.view(80, 24)), []string{"  This Mac isn't set up with kit", "", "  enter sets it up"})
+}
+
 // A secret is typed or pasted, a dot a character, never shown.
 func TestSecretField(t *testing.T) {
 	f := &field{about: look.Row{State: look.NeedsYou, Name: "NPM_TOKEN", Says: look.Orange("needs its value")}}
@@ -586,35 +615,6 @@ func TestSecretGivesUpAsItsContextEnds(t *testing.T) {
 	got, err := Secret(ctx, Terminal{In: in, Out: io.Discard, Size: func() (int, int) { return 80, 24 }}, look.Row{Name: "sudo"})
 	if got != "" || !errors.Is(err, context.Canceled) {
 		t.Errorf("Secret() = %q, %v; want nothing, cancelled", got, err)
-	}
-}
-
-// A value asked for as Text starts as suggested, edits as it's typed, and
-// shows what's typed; a secret shows a dot a character, never the text.
-func TestTextShowsWhatsTyped(t *testing.T) {
-	for _, tt := range []struct {
-		name  string
-		shown bool
-		want  string
-	}{
-		{"text", true, "❯ laptop2"},
-		{"secret", false, "❯ •••••••"},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			f := &field{about: look.Row{Name: "This Mac"}, typed: []rune("laptops"), shown: tt.shown}
-			for _, k := range []key{{name: "backspace"}, {text: "2"}} {
-				if f.update(k) {
-					t.Fatalf("%+v ended the question", k)
-				}
-			}
-			view := ansi.Strip(strings.Join(f.view(80, 24), "\n"))
-			if !strings.Contains(view, tt.want) || tt.shown == strings.Contains(view, "•") {
-				t.Errorf("view =\n%s\nwant it to show %q", view, tt.want)
-			}
-			if !f.update(key{name: "enter"}) || string(f.typed) != "laptop2" {
-				t.Errorf("enter took %q, want laptop2", string(f.typed))
-			}
-		})
 	}
 }
 

@@ -6,12 +6,13 @@ command that puts things right, so read the whole line first.
 ## "no config repository"
 
 ```console
-kit: no config repository: no kit.toml in /Users/someone/.config/kit: clone your config repository to /Users/someone/.config/kit, or point KIT_CONFIG at it
+kit: no config repository: no kit.toml in /Users/someone/.config/kit: set this Mac up with kit setup, clone your config repository to /Users/someone/.config/kit, or point KIT_CONFIG at it
 ```
 
 **Cause:** kit found no `kit.toml` in the folder it reads kit-config from, so it stops.
 
-**Fix:** clone kit-config into the folder the message names:
+**Fix:** if kit doesn't look after this Mac yet, run `kit setup`. If it does, clone kit-config
+into the folder the message names:
 
 ```bash
 # Clone kit-config where kit looks for it

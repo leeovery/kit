@@ -293,6 +293,24 @@ type DeviceCode struct {
 	Expires time.Time
 }
 
+// Finding is a part of what a step looks at, as it looks, as kit setup's
+// snapshot looks at the Mac a kind at a time: waiting its turn, it says
+// nothing; being looked at, what's being done (Doing); once Found, how many
+// things it found (Count), by name when they have names of their own
+// (Names), or why it couldn't look (Err).
+type Finding struct {
+	Time  time.Time
+	Step  string
+	Part  string
+	Doing string
+	Found bool
+	Count int
+	Names []string
+	Err   string
+}
+
+func (e Finding) At() time.Time { return e.Time }
+
 func (e SelfTest) At() time.Time   { return e.Time }
 func (e Doing) At() time.Time      { return e.Time }
 func (e DeviceCode) At() time.Time { return e.Time }

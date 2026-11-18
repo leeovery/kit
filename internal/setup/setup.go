@@ -20,6 +20,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -61,6 +62,8 @@ const (
 type Asker interface {
 	boot.Picker
 	// Choose asks step's question, its answers under it: the answer's place.
+	// A question with more to say says it on a line of its own, after its
+	// first.
 	Choose(ctx context.Context, step, question string, answers []boot.Answer) (int, error)
 	// Text asks for text typed, suggested to start with.
 	Text(ctx context.Context, step, question, suggested string) (string, error)
@@ -135,7 +138,7 @@ type Setup struct {
 	token, login string
 	found        *snapshot.Snapshot
 	mac          snapshot.Mac
-	toInstall    *[]string
+	toInstall    *toInstall
 	declared     *check.Result
 	wanted       []string
 }
@@ -169,6 +172,26 @@ type record struct {
 // chosen, and not done.
 func (r record) partWay() bool { return r.Repo != "" && !r.Done }
 
+// PartWay reports whether a run of setup stopped part-way, as its record in
+// kit's state, in stateDir, says.
+func PartWay(stateDir string) bool {
+	rec, err := kitstate.Load[record](stateDir, recordName)
+	return err == nil && rec.partWay()
+}
+
+// finderFile is the file Finder leaves in a folder it's shown.
+const finderFile = ".DS_Store"
+
+// Empty reports whether dir, the config folder, is as kit setup starts on:
+// not there, or holding nothing but Finder's file.
+func Empty(dir string) (bool, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return false, fmt.Errorf("read %s: %w", dir, err)
+	}
+	return !slices.ContainsFunc(entries, func(e os.DirEntry) bool { return e.Name() != finderFile || !e.Type().IsRegular() }), nil
+}
+
 // Begin readies a run of setup: refused while the config folder holds
 // anything, unless setup's own run part-way left it there (carriesOn),
 // which carries on; else started afresh.
@@ -177,11 +200,17 @@ func (s *Setup) Begin(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	entries, err := os.ReadDir(s.Dirs.Config)
-	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("read %s: %w", s.Dirs.Config, err)
+	empty, err := Empty(s.Dirs.Config)
+	if err != nil {
+		return err
 	}
-	empty := len(entries) == 0
+	if empty {
+		// Finder's file goes, so git clones into the folder: Finder makes it
+		// again whenever it likes.
+		if err := os.Remove(filepath.Join(s.Dirs.Config, finderFile)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("make %s empty: %w", s.Dirs.Config, err)
+		}
+	}
 	carries, err := s.carriesOn(ctx, rec, empty)
 	switch {
 	case err != nil:

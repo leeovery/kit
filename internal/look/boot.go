@@ -151,18 +151,23 @@ func (b Boot) Todo(text string) string { return b.todo(b.Full(text)) }
 // light as a camera reads it: on a dark background its light modules and a
 // quiet zone of two are amber, the dark ones the background; on a light
 // background its dark modules are amber, the light ones the background.
-func (b Boot) QR(text string) ([]string, error) {
+func (b Boot) QR(text string) ([]string, error) { return qrCode(text, b.dark, b.Full) }
+
+// qrCode is text as a QR code in half blocks, a cell two modules high, a
+// quiet zone of two around it, its filled cells painted: on a dark
+// background, the light modules and the quiet zone; on a light one, the
+// dark modules.
+func qrCode(text string, dark bool, paint func(string) string) ([]string, error) {
 	code, err := qr.Encode(text, qr.M)
 	if err != nil {
 		return nil, err
 	}
 	const quiet = 2
 	n := code.Size + 2*quiet
-	// filled is whether the module at x, y is drawn in amber.
 	filled := func(x, y int) bool {
 		x, y = x-quiet, y-quiet
-		dark := x >= 0 && y >= 0 && x < code.Size && y < code.Size && code.Black(x, y)
-		return dark != b.dark
+		black := x >= 0 && y >= 0 && x < code.Size && y < code.Size && code.Black(x, y)
+		return black != dark
 	}
 	var out []string
 	for y := 0; y < n; y += 2 {
@@ -180,7 +185,7 @@ func (b Boot) QR(text string) ([]string, error) {
 				row.WriteString(" ")
 			}
 		}
-		out = append(out, b.Full(row.String()))
+		out = append(out, paint(row.String()))
 	}
 	return out, nil
 }

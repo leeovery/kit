@@ -51,6 +51,44 @@ type Mac struct {
 	SizeFor time.Duration
 	// Now is the time, as the backup tools' last backups are judged by.
 	Now func() time.Time
+	// Looks, when set, is told how each part stands as Find looks at it,
+	// from whichever goroutine looks: each waiting its turn first, then as
+	// it's looked at, and once it has been; and the folders, while Find
+	// waits on their sizes.
+	Looks func(Look)
+}
+
+// Look is how a part of a snapshot stands as Find looks at the Mac: its
+// label; what's being done, while it's looked at; once Looked, how many
+// things it found, by name when they have names of their own (the features
+// on, the backup tools set up), or why it couldn't be looked at.
+type Look struct {
+	Label  string
+	Doing  string
+	Looked bool
+	Found  int
+	Names  []string
+	Err    error
+}
+
+// FoldersLabel is the label of the home folder's folders, as Find tells
+// Looks of their sizing, and kit setup's question of them is titled, so
+// its screen shows the sizing in the question's row.
+const FoldersLabel = "Your data"
+
+func (m Mac) look(l Look) {
+	if m.Looks != nil {
+		m.Looks(l)
+	}
+}
+
+// lookAt is the part labelled label, as find finds it, told to Looks as
+// it's looked at, and once it has been.
+func (m Mac) lookAt(label string, find func() Part) Part {
+	m.look(Look{Label: label, Doing: "reading what's here"})
+	p := find()
+	m.look(Look{Label: label, Looked: true, Found: len(p.Lines), Names: p.names, Err: p.Err})
+	return p
 }
 
 // Snapshot is what a snapshot of a Mac found: what it declares, a part
@@ -88,6 +126,9 @@ type Part struct {
 	// section is whether it declares its section with nothing in it: a
 	// kind's, whose program is here.
 	section bool
+	// names are its Lines as people call them, when that isn't their
+	// names: the features' titles, the backup tools'.
+	names []string
 }
 
 // Unchecked is a line declared as it is, by its name, as whether it needs a
@@ -132,16 +173,25 @@ func Find(ctx context.Context, m Mac) (Snapshot, error) {
 	defer sized()
 	sizes := make(chan []Folder, 1)
 	go func() { sizes <- sizeAll(sizing, m.Home, folders, os.ReadDir) }()
-	s := Snapshot{Parts: append(m.kindParts(ctx, deps), m.featuresPart(ctx), m.backupsPart(ctx)), Files: m.files(owned)}
+	parts := m.kindParts(ctx, deps, featuresLabel, backupsLabel)
+	parts = append(parts, m.lookAt(featuresLabel, func() Part { return m.featuresPart(ctx) }), m.lookAt(backupsLabel, func() Part { return m.backupsPart(ctx) }))
+	s := Snapshot{Parts: parts, Files: m.files(owned)}
 	s.ByHand, s.ByHandErr = m.byHand(ctx, deps)
-	s.Folders = <-sizes
+	select {
+	case s.Folders = <-sizes:
+	default:
+		m.look(Look{Label: FoldersLabel, Doing: "sizing your folders"})
+		s.Folders = <-sizes
+		m.look(Look{Label: FoldersLabel, Looked: true, Found: len(s.Folders)})
+	}
 	return s, nil
 }
 
 // kindParts are the parts of the kinds a snapshot declares whose program is
 // on kit's PATH, in the order a run takes them, each looked at alongside
-// the rest.
-func (m Mac) kindParts(ctx context.Context, deps *kind.Deps) []Part {
+// the rest, once Looks is told they wait their turn, and the parts after
+// them, labelled then.
+func (m Mac) kindParts(ctx context.Context, deps *kind.Deps, then ...string) []Part {
 	var parts []Part
 	var ks []kind.Kind
 	for _, d := range kinds.All {
@@ -153,9 +203,21 @@ func (m Mac) kindParts(ctx context.Context, deps *kind.Deps) []Part {
 			ks = append(ks, k)
 		}
 	}
+	for _, p := range parts {
+		m.look(Look{Label: p.Label})
+	}
+	for _, label := range then {
+		m.look(Look{Label: label})
+	}
 	var wg sync.WaitGroup
 	for i, k := range ks {
-		wg.Go(func() { m.undeclared(ctx, k, &parts[i]) })
+		wg.Go(func() {
+			parts[i] = m.lookAt(parts[i].Label, func() Part {
+				p := parts[i]
+				m.undeclared(ctx, k, &p)
+				return p
+			})
+		})
 	}
 	wg.Wait()
 	return parts
@@ -267,6 +329,7 @@ func (m Mac) featuresPart(ctx context.Context) Part {
 			errs = append(errs, fmt.Errorf("%s: %s", s.Title, res.Reason))
 		case res.State == check.OK && !slices.Contains(declared.Names(), s.Name):
 			p.Lines = append(p.Lines, config.Entry{Name: s.Name})
+			p.names = append(p.names, s.Title)
 		}
 	}
 	p.Err = errors.Join(errs...)
@@ -291,6 +354,7 @@ func (m Mac) backupsPart(ctx context.Context) Part {
 			errs = append(errs, fmt.Errorf("%s: %w", about.Name, err))
 		case !st.Missing && !st.NotSetUp && !slices.Contains(declared.Names(), about.ID):
 			p.Lines = append(p.Lines, config.Entry{Name: about.ID})
+			p.names = append(p.names, about.Name)
 		}
 	}
 	p.Err = errors.Join(errs...)

@@ -63,6 +63,22 @@ func TestRowsAreCut(t *testing.T) {
 }
 
 // A whole row is never cut: one that fits is as it is; one too long for
+// A row's line is one line however what it says breaks, as an error
+// joined from several, or a program's standard error, does: whole or cut,
+// on a timeline or stacked, the breaks spaces. A screen drawn in place
+// counts its lines, and a line that broke would leave one behind.
+func TestRowsNeverBreak(t *testing.T) {
+	failed := look.Row{State: look.Failed, Name: "Homebrew\nformulae", Says: look.Red("brew list: exit 1\nError: something broke\n"), Kept: "1\tof 2"}
+	same(t, look.Rows("  ", 80, failed), "  ✗ Homebrew formulae  brew list: exit 1 Error: something broke · 1 of 2")
+	same(t, look.Timeline("  ", 30, failed), "  ✗ Homebrew formula… · 1 of 2")
+	failed.Whole = true
+	same(t, look.Timeline("  ", 30, failed), "  ✗ Homebrew formulae", "  │ brew list: exit 1 Error:", "  │ something broke · 1 of 2")
+	same(t, look.Stacked("  ", 80, failed), "  ✗ Homebrew formulae", "  │ brew list: exit 1 Error: something broke · 1 of 2")
+	if got := look.Cut("  a \r\n  b", 80); got != "  a b" {
+		t.Errorf("Cut = %q, want one line, indented as it was", got)
+	}
+}
+
 // its line has its name on its own line, wrapped, and what it says, with
 // what it keeps, wrapped under it, on a timeline's line in a timeline;
 // what belongs to it goes under that.
@@ -260,9 +276,48 @@ func TestAnswers(t *testing.T) {
 	)
 }
 
+// A checklist's boxes are in the marks' column, a cell of room after each,
+// the names in one column whether the cursor's on one or not, ticked a pink
+// ■, not a grey □.
+func TestChecklist(t *testing.T) {
+	ticks := []look.Tick{{Name: "~/Code", More: "48.2 GB", Ticked: true}, {Name: "~/Movies", More: "31.0 GB"}, {Name: "~/.zshrc", Ticked: true}}
+	got := look.Checklist(ticks, 1)
+	same(t, got,
+		"  ■  ~/Code · 48.2 GB",
+		"❯ □  ~/Movies  · 31.0 GB",
+		"  ■  ~/.zshrc",
+	)
+	if !strings.Contains(got[0], look.Pink("■")) || !strings.Contains(got[1], look.Muted("□")) || !strings.Contains(got[1], look.Pill("~/Movies", look.Done)) {
+		t.Errorf("drew %q: want ticked pink, unticked grey, the cursor's name a pill", got)
+	}
+}
+
+// Kit's own QR code is white on a dark background, its quiet zone lit, and
+// dark on a light one, as the boot's is amber.
+func TestQR(t *testing.T) {
+	onDark, err := look.QR("https://github.com/login/device", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	onLight, err := look.QR("https://github.com/login/device", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	boot, _ := look.NewBoot(true).QR("https://github.com/login/device")
+	if !slices.Equal(text(onDark...), text(boot...)) || onDark[0] != look.White(strings.Repeat("█", 33)) {
+		t.Errorf("on dark, drew\n%s\nwant the boot's code, white", strings.Join(text(onDark...), "\n"))
+	}
+	if strings.TrimSpace(text(onLight...)[0]) != "" {
+		t.Errorf("on light, the first line is %q: want the quiet zone blank", text(onLight...)[0])
+	}
+}
+
 func TestFieldAndKeys(t *testing.T) {
 	if got := ansi.Strip(look.Field(3)); got != "❯ ••• " {
 		t.Errorf("Field(3) = %q", got)
+	}
+	if got := ansi.Strip(look.Typed("laptop")); got != "❯ laptop " {
+		t.Errorf("Typed(laptop) = %q: want it shown, not hidden", got)
 	}
 	if got := ansi.Strip(look.Keys(look.Key{Key: "enter", Does: "done"}, look.Key{Key: "esc", Does: "cancel"})); got != "  enter done · esc cancel" {
 		t.Errorf("Keys() = %q", got)

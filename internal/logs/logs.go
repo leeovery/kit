@@ -153,11 +153,12 @@ func (l *File) Emit(e event.Event) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	// A command's output, as it comes, is in its command's line whole; a run
-	// getting ready is in its start; what a step's doing in how it ended.
+	// getting ready is in its start; what a step's doing, or finding, in how
+	// it ended.
 	// macOS asking is its own line, as it's seen and as it's gone, but not
 	// after the run's end, which is the log's last line.
 	switch e.(type) {
-	case event.Output, event.Preparing, event.Doing, event.DeviceCode, event.SelfTest:
+	case event.Output, event.Preparing, event.Doing, event.Finding, event.DeviceCode, event.SelfTest:
 		return
 	case event.Asking:
 		if l.finished {

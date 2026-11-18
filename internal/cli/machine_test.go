@@ -88,7 +88,7 @@ func TestMachineNeedsAConfigToSetTheName(t *testing.T) {
 	w := newWorld(t, map[string]string{})
 	_, errOut, status := w.run(t, "machine", "laptop")
 	want := "kit: no config repository: no kit.toml in " + filepath.Join(w.home, ".config", "kit") +
-		": clone your config repository to " + filepath.Join(w.home, ".config", "kit") + ", or point KIT_CONFIG at it\n"
+		": set this Mac up with kit setup, clone your config repository to " + filepath.Join(w.home, ".config", "kit") + ", or point KIT_CONFIG at it\n"
 	if errOut != want || status != 2 {
 		t.Errorf("kit machine laptop printed %q, exit %d; want %q, exit 2", errOut, status, want)
 	}
