@@ -448,20 +448,81 @@ func TestPushToANewBranch(t *testing.T) {
 	}
 	s.check(t, "the upstream not there yet")
 
-	fake = runnertest.New(t)
-	s = &sequence{fake: fake}
-	s.expect(remoteOf...).Prints("origin\n")
-	s.expect(gitDirOf...).Prints(t.TempDir() + "\n")
-	s.expect(statusOf()...)
-	s.expect(branchOf...).Prints("refs/heads/main\n")
-	s.expect(upstreamOf...).Prints(tracks(upstreamRef))
-	s.expect(fetchIt...).Exits(128).PrintsToStderr(missingRef("refs/heads/main"))
+}
+
+// A clone of one branch whose branch may be missing from the remote, as the
+// prefs store's before its first push, or once deleted there, finds git's
+// fetch failing for want of it: its remote-tracking ref is forgotten, so
+// nothing's brought in and it's pushed anew. Any other repository, as
+// kit-config, its branch gone from the remote, pushes nothing, nor does one
+// whose fetch fails for want of another branch.
+func TestPushToABranchMissingFromTheRemote(t *testing.T) {
+	missing := func(fake *runnertest.Fake, ref string) *sequence {
+		s := &sequence{fake: fake}
+		s.expect(remoteOf...).Prints("origin\n")
+		s.expect(gitDirOf...).Prints(t.TempDir() + "\n")
+		s.expect(statusOf()...)
+		s.expect(branchOf...).Prints("refs/heads/main\n")
+		s.expect(upstreamOf...).Prints(tracks(upstreamRef))
+		s.expect(fetchIt...).Exits(128).PrintsToStderr(missingRef(ref))
+		return s
+	}
+	fake := runnertest.New(t)
+	s := missing(fake, "refs/heads/main")
+	s.expect(git("update-ref", "-d", upstreamRef)...)
 	s.expect(upstreamAt...).Exits(1)
 	s.expect(pushIt...)
-	if err := push(fake); err != nil {
-		t.Errorf("Push(), one branch cloned, not on the remote yet = %v", err)
+	if err := (gitrepo.Repo{Dir: dir, Run: fake, BranchMayBeMissing: true}).Push(context.Background()); err != nil {
+		t.Errorf("Push(), the branch missing, as it may be = %v", err)
 	}
-	s.check(t, "one branch cloned, not on the remote yet")
+	s.check(t, "the branch missing, as it may be")
+
+	for _, c := range []struct {
+		name, ref string
+		may       bool
+	}{{"kit-config's branch missing", "refs/heads/main", false}, {"another branch missing", "refs/heads/trunk", true}} {
+		fake := runnertest.New(t)
+		s := missing(fake, c.ref)
+		err := gitrepo.Repo{Dir: dir, Run: fake, BranchMayBeMissing: c.may}.Push(context.Background())
+		if err == nil || !strings.HasPrefix(err.Error(), "couldn't bring in the remote's changes, so nothing was pushed: ") {
+			t.Errorf("Push(), %s = %v; want nothing pushed", c.name, err)
+		}
+		s.check(t, c.name)
+	}
+}
+
+// Two histories with no commit in common, as when two Macs each began the
+// prefs store's branch before either pushed: git's diff of the remote's
+// changes fails, so every path the remote has is what its commits change.
+// With none of them changed here, the rebase replays this Mac's commits
+// onto the remote's, and they're pushed; with one changed here, nothing
+// is. What git prints is what real git does.
+func TestPushOntoAnUnrelatedHistory(t *testing.T) {
+	unrelated := func(fake *runnertest.Fake, status string) *sequence {
+		s := pulling(fake, t.TempDir(), status, "1")
+		s.expect(incomingOf...).Exits(128).PrintsToStderr("fatal: HEAD..." + upstreamRef + ": no merge base\n")
+		s.expect(git("merge-base", "HEAD", upstreamRef)...).Exits(1)
+		s.expect(git("ls-tree", "-r", "--name-only", "-z", upstreamRef)...).Prints("laptop/domains/a.plist\x00laptop/owner\x00")
+		return s
+	}
+	fake := runnertest.New(t)
+	s := unrelated(fake, " M studio/owner\x00")
+	s.expect(stashCreate...).Prints(kitsStash + "\n")
+	s.expect(resetHard...)
+	s.expect(rebase...)
+	s.expect(stashApply...)
+	s.expect(pushIt...)
+	if err := push(fake); err != nil {
+		t.Errorf("Push(), onto an unrelated history = %v", err)
+	}
+	s.check(t, "onto an unrelated history")
+
+	fake = runnertest.New(t)
+	s = unrelated(fake, "?? laptop/owner\x00")
+	if err := push(fake); err == nil || !strings.HasSuffix(err.Error(), "commit or undo the change to laptop/owner first") {
+		t.Errorf("Push(), onto an unrelated history changing what's not committed here = %v", err)
+	}
+	s.check(t, "onto an unrelated history, a clash")
 }
 
 // missingRef is what real git prints when a clone of one branch, ref,
@@ -550,7 +611,8 @@ func TestPushFails(t *testing.T) {
 
 	fake = runnertest.New(t)
 	s = pulling(fake, t.TempDir(), " M a\x00", "1")
-	s.expect(incomingOf...).Exits(128).PrintsToStderr("fatal: no merge base\n")
+	s.expect(incomingOf...).Exits(128).PrintsToStderr("fatal: bad object " + upstreamRef + "\n")
+	s.expect(git("merge-base", "HEAD", upstreamRef)...).Prints(upstream + "\n")
 	if err := push(fake); err == nil || !strings.HasPrefix(err.Error(), "couldn't read the remote's changes, so nothing was pushed: ") {
 		t.Errorf("Push(), reading the remote's changes failing = %v", err)
 	}

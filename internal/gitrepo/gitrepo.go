@@ -23,6 +23,11 @@ type Repo struct {
 	// Sleep waits between tries for git's index while another git holds it:
 	// time.Sleep when nil.
 	Sleep func(time.Duration)
+	// BranchMayBeMissing is whether the upstream's branch can be missing from
+	// the remote, as the prefs store's before its first push, or deleted
+	// there: a clone of that branch alone, whose fetch git fails without it,
+	// pushes it anew. Never kit-config's: its branch gone is a failure.
+	BranchMayBeMissing bool
 }
 
 // sleep waits d, as Sleep does.

@@ -195,6 +195,7 @@ func TestTheStoreIsKitConfigsPrefsBranch(t *testing.T) {
 			fake.On("git", "-C", p.Config, "remote").Prints(c.remote + "\n")
 			fake.On("git", "-C", p.Config, "remote", "get-url", c.remote).Prints(c.url + "\n")
 			fake.On("git", "-C", clone, "remote", "get-url", "origin").Prints(c.url + "\n")
+			fake.On("git", "-C", clone, "remote", "get-url", "--push", "--all", "origin").Prints(c.url + "\n")
 			fake.On("git", "ls-remote", "--quiet", "--exit-code", c.url, "refs/heads/prefs").Prints(head + "\trefs/heads/prefs\n")
 			fake.On("git", "clone", "--quiet", "--single-branch", "--branch", "prefs", c.url, clone+".cloning").Does(func() { madeIn(t, clone+".cloning") })
 			if saves, err := p.Saves(t.Context()); err != nil || !saved(saves) {
@@ -223,9 +224,53 @@ func TestNoStoreWithoutKitConfigsRemote(t *testing.T) {
 	}
 }
 
+// bootSignIn is the boot's sign-in, as kit-config's clone has it: GitHub's
+// CLI, for github.com alone.
+var bootSignIn = [2]string{"credential.https://github.com.helper", "!gh auth git-credential"}
+
+// The store's git signs in to kit-config's remote as kit-config's does: the
+// boot's GitHub sign-in in kit-config's own settings goes with each git
+// that reaches the remote as the store's cloned, and is kept in the clone's
+// own settings, whether the branch is there to clone or not yet. Git prints
+// each setting as its key, then its value, ended by a NUL.
+func TestTheStoreSignsInAsKitConfigDoes(t *testing.T) {
+	const url = "https://github.com/someone/kit-config.git"
+	option := bootSignIn[0] + "=" + bootSignIn[1]
+	for _, has := range []bool{true, false} {
+		clone, fake, settings := cloned(t)
+		p := settings()
+		aside := clone + ".cloning"
+		fake.On("git", "-C", p.Config, "remote", "get-url", "origin").Prints(url + "\n")
+		fake.On("git", "-C", clone, "remote", "get-url", "origin").Prints(url + "\n")
+		fake.On("git", "-C", clone, "remote", "get-url", "--push", "--all", "origin").Prints(url + "\n")
+		fake.On("git", signsIn(p.Config)...).Prints(bootSignIn[0] + "\n" + bootSignIn[1] + "\x00")
+		looks := fake.On("git", "-c", option, "ls-remote", "--quiet", "--exit-code", url, "refs/heads/prefs").Prints(head + "\trefs/heads/prefs\n")
+		want := "git clone -c '" + option + "' --quiet --single-branch --branch prefs " + url + " " + aside
+		fake.On("git", "clone", "-c", option, "--quiet", "--single-branch", "--branch", "prefs", url, aside).Does(func() { madeIn(t, aside) })
+		if !has {
+			looks.Exits(2)
+			want = "git -C " + aside + " config --add " + bootSignIn[0] + " '" + bootSignIn[1] + "'"
+			fake.On("git", "init", "--quiet", "--initial-branch=prefs", aside).Does(func() { madeIn(t, aside) })
+			fake.On("git", "-C", aside, "remote", "add", "-t", "prefs", "origin", url)
+			fake.On("git", "-C", aside, "config", "branch.prefs.remote", "origin")
+			fake.On("git", "-C", aside, "config", "branch.prefs.merge", "refs/heads/prefs")
+			fake.On("git", "-C", aside, "config", "--add", bootSignIn[0], bootSignIn[1])
+		}
+		if _, err := p.Saves(t.Context()); err != nil {
+			t.Errorf("branch there %v: Saves() = %v", has, err)
+		}
+		if calls := fake.Calls(); !slices.Contains(calls, want) {
+			t.Errorf("branch there %v: ran %q; want %q", has, calls, want)
+		}
+	}
+}
+
 // A remote with no prefs branch yet, as before any Mac's first capture,
-// gives a clone of nothing, on the branch and tracking it: that capture
-// commits there and its push makes the branch, beside kit-config's own.
+// gives a clone with nothing in it, on the branch and tracking it: that
+// capture commits there and its push makes the branch, beside kit-config's
+// own. Till the first commit the branch isn't born, and git gives it no
+// upstream; after it, its upstream isn't on the remote, git fails the
+// fetch, and the remote-tracking ref is forgotten, so it's pushed there.
 func TestTheFirstCaptureMakesTheBranch(t *testing.T) {
 	w := newWorld(t, prefs.Lists{})
 	if err := os.RemoveAll(w.clone); err != nil {
@@ -249,7 +294,10 @@ func TestTheFirstCaptureMakesTheBranch(t *testing.T) {
 	w.pushes(t, "Capture 2026-10-06 03:00: 1 new\n\nnew: com.example.app\nclaimed: the folder, for this Mac's hardware",
 		"?? laptop/.gitignore\x00?? laptop/domains/com.example.app.plist\x00?? laptop/owner\x00", newFiles, newFiles)
 	w.fake.On("git", "-C", w.clone, "rev-parse", "--verify", "--quiet", "HEAD").Exits(1)
+	w.fake.On("git", "-C", w.clone, "for-each-ref", "--format=%(upstream) %(upstream:remoteref)", "refs/heads/prefs").Prints("").
+		Then().Prints("refs/remotes/origin/prefs refs/heads/prefs\n")
 	w.fake.On("git", "-C", w.clone, "fetch", "--prune", "--quiet", "origin").Exits(128).PrintsToStderr("fatal: couldn't find remote ref refs/heads/prefs\n")
+	w.fake.On("git", "-C", w.clone, "update-ref", "-d", "refs/remotes/origin/prefs")
 	w.fake.On("git", "-C", w.clone, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/prefs").Exits(1)
 
 	report, err := w.p.Capture(t.Context())
@@ -265,18 +313,53 @@ func TestTheFirstCaptureMakesTheBranch(t *testing.T) {
 	}
 }
 
+// A clone with nothing in it, made before the branch was, as on a Mac whose
+// boot came before any Mac's first capture, is cloned again once another
+// Mac's capture has made the branch, so this Mac restores what that one
+// saved; with the branch still to be made, it's left as it is. Git gives an
+// unborn branch no upstream, so no pull of the empty clone would ever bring
+// the branch in.
+func TestAnEmptyCloneTakesTheBranchOnceMade(t *testing.T) {
+	for _, has := range []bool{true, false} {
+		clone, fake, settings := cloned(t)
+		if err := os.MkdirAll(filepath.Join(clone, ".git"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		fake.On("git", "-C", clone, "rev-parse", "--verify", "--quiet", "HEAD").Exits(1)
+		looks := fake.On("git", "ls-remote", "--quiet", "--exit-code", remote, "refs/heads/prefs").Prints(head + "\trefs/heads/prefs\n")
+		if !has {
+			looks.Exits(2)
+		}
+		fake.On("git", cloneOf(clone+".cloning")...).Does(func() {
+			if _, err := os.Stat(clone); !errors.Is(err, fs.ErrNotExist) {
+				t.Errorf("cloning with the empty clone still there (%v)", err)
+			}
+			madeIn(t, clone+".cloning")
+		})
+		saves, err := settings().Saves(t.Context())
+		switch {
+		case has && (err != nil || !saved(saves) || clones(fake) != 1):
+			t.Errorf("the branch made: saves %v, %v, cloned %d times; want the branch cloned once, and its last save", saves, err, clones(fake))
+		case !has && (err != nil || len(saves) != 0 || clones(fake) != 0):
+			t.Errorf("the branch still to be made: saves %v, %v, cloned %d times; want the empty clone left, nothing saved", saves, err, clones(fake))
+		}
+	}
+}
+
 // A clone that isn't of kit-config's prefs branch, as one of the repository
-// the store was in before, is never captured into or restored from: kit
-// names the clone, what it points at, and what it should.
+// the store was in before, is never captured into, restored from, read, or
+// taken over: kit names the clone, what it points at, and what it should.
 func TestACloneElsewhereIsRefused(t *testing.T) {
 	const moveAside = "move the clone aside for kit to clone the branch there"
-	for _, c := range []struct{ name, url, on, says string }{
-		{"the old repository", "git@github.com:someone/prefs.git", "refs/heads/main\n",
+	for _, c := range []struct{ name, url, pushURL, on, says string }{
+		{"the old repository", "git@github.com:someone/prefs.git", "git@github.com:someone/prefs.git", "refs/heads/main\n",
 			" points at github.com:someone/prefs.git, not kit-config's remote (github.com:someone/kit-config.git): apps' settings are saved on its prefs branch now, so " + moveAside},
-		{"no remote", "", "refs/heads/prefs\n",
+		{"no remote", "", "", "refs/heads/prefs\n",
 			" points at no remote, not kit-config's remote (github.com:someone/kit-config.git): apps' settings are saved on its prefs branch now, so " + moveAside},
-		{"kit-config's own branch", remote, "refs/heads/main\n", " is on main, not kit-config's prefs branch: " + moveAside},
-		{"no branch", remote, "", " is on no branch, not kit-config's prefs branch: " + moveAside},
+		{"pushing elsewhere", remote, "git@github.com:someone/public-prefs.git", "refs/heads/prefs\n",
+			" pushes to github.com:someone/public-prefs.git, not kit-config's remote (github.com:someone/kit-config.git): " + moveAside},
+		{"kit-config's own branch", remote, remote, "refs/heads/main\n", " is on main, not kit-config's prefs branch: " + moveAside},
+		{"no branch", remote, remote, "", " is on no branch, not kit-config's prefs branch: " + moveAside},
 	} {
 		for _, do := range []struct {
 			name string
@@ -287,14 +370,22 @@ func TestACloneElsewhereIsRefused(t *testing.T) {
 				_, err := p.Restore(ctx, prefs.RestoreOptions{})
 				return err
 			}},
+			{"history", func(ctx context.Context, p *prefs.Prefs) error { _, err := p.History(ctx, "", "", 5); return err }},
+			{"saved for an app", func(ctx context.Context, p *prefs.Prefs) error {
+				_, err := p.SavedFor(ctx, "com.example.app")
+				return err
+			}},
+			{"take over", func(ctx context.Context, p *prefs.Prefs) error { return p.TakeOver(ctx) }},
 		} {
 			w := newWorld(t, prefs.Lists{})
 			writeRecord(t, w.state, `{"on": "restored"}`)
 			w.write(t, filepath.Join(w.clone, "laptop", "domains", "com.example.app.plist"), stored(t, map[string]any{"A": true}))
+			w.write(t, filepath.Join(w.clone, "laptop", "owner"), "hardware HW-OLD\nmodel Mac1,1\n")
 			url := w.fake.On("git", "-C", w.clone, "remote", "get-url", "origin").Prints(c.url + "\n")
 			if c.url == "" {
 				url.Exits(2).PrintsToStderr("error: No such remote 'origin'\n")
 			}
+			w.fake.On("git", "-C", w.clone, "remote", "get-url", "--push", "--all", "origin").Prints(c.pushURL + "\n")
 			branch := w.fake.On("git", "-C", w.clone, "symbolic-ref", "-q", "HEAD").Prints(c.on)
 			if c.on == "" {
 				branch.Exits(1)
@@ -303,9 +394,12 @@ func TestACloneElsewhereIsRefused(t *testing.T) {
 				t.Errorf("%s, %s: %v; want %q", c.name, do.name, err, w.clone+c.says)
 			}
 			for _, call := range w.fake.Calls() {
-				if !strings.Contains(call, " remote") && !strings.Contains(call, " symbolic-ref ") {
-					t.Errorf("%s, %s: ran %s; want nothing pulled, saved or restored", c.name, do.name, call)
+				if slices.ContainsFunc([]string{" fetch ", " commit ", " push ", " log ", "defaults "}, func(s string) bool { return strings.Contains(call, s) }) {
+					t.Errorf("%s, %s: ran %s; want nothing pulled, saved, restored or read", c.name, do.name, call)
 				}
+			}
+			if got := w.read(t, filepath.Join(w.clone, "laptop", "owner")); got != "hardware HW-OLD\nmodel Mac1,1\n" {
+				t.Errorf("%s, %s: the owner file says %q; want it as it was", c.name, do.name, got)
 			}
 		}
 	}

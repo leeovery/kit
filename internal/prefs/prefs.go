@@ -294,6 +294,9 @@ func (p *Prefs) claim(ctx context.Context, store, hardware string) error {
 // store's clone, and which: this Mac takes the folder over as it restores
 // or starts afresh (TakeOver).
 func (p *Prefs) TakingOver(ctx context.Context) (Owner, bool, error) {
+	if err := p.checked(ctx); err != nil {
+		return Owner{}, false, err
+	}
 	owner, owned, err := readOwner(filepath.Join(p.Clone, p.Mac))
 	if err != nil || !owned {
 		return Owner{}, false, err

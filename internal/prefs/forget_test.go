@@ -24,11 +24,11 @@ func TestSavedFor(t *testing.T) {
 	w.app(t, w.apps, "Example", "com.example.app")
 	w.app(t, w.apps, "Other", "com.other.app")
 	w.app(t, w.apps, "Example Two", "com.example.two")
-	if got, want := w.p.SavedFor("com.example.app"), []string{"com.example.app", "com.example.app.helper", "com.vendor.updater"}; !slices.Equal(got, want) {
-		t.Errorf("SavedFor() = %q, want %q", got, want)
+	if got, err := w.p.SavedFor(t.Context(), "com.example.app"); err != nil || !slices.Equal(got, []string{"com.example.app", "com.example.app.helper", "com.vendor.updater"}) {
+		t.Errorf("SavedFor() = %q, %v", got, err)
 	}
-	if got := w.p.SavedFor("com.absent.app"); len(got) != 0 {
-		t.Errorf("SavedFor(an app with nothing saved) = %q, want none", got)
+	if got, err := w.p.SavedFor(t.Context(), "com.absent.app"); err != nil || len(got) != 0 {
+		t.Errorf("SavedFor(an app with nothing saved) = %q, %v; want none", got, err)
 	}
 }
 

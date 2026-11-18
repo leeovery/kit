@@ -61,8 +61,8 @@ func TestPrefsPendingSaysWhy(t *testing.T) {
 // nothing does.
 func TestPrefsHistory(t *testing.T) {
 	w := laptopWorld(t)
-	clone := filepath.Join(w.home, ".local", "share", "kit", "prefs")
-	w.write(t, filepath.Join(".local", "share", "kit", "prefs", ".git", "HEAD"), "ref: refs/heads/main\n")
+	clone := w.storeCloned()
+	w.write(t, filepath.Join(".local", "share", "kit", "prefs", ".git", "HEAD"), "ref: refs/heads/prefs\n")
 	format := []string{"-C", clone, "log", "--no-color", "-n20", "--format=%x1e%h%x00%aI%x00%s"}
 	w.fake.On("git", append(format, "--shortstat", "--", "laptop")...).Prints("\x1eabc1234\x002026-10-06T03:00:00+01:00\x00Capture: 1 changed\n\n 1 file changed, 2 insertions(+)\n")
 	w.fake.On("git", append(format, "-p", "--", "laptop/domains/com.example.none.plist")...).Prints("")
@@ -96,6 +96,7 @@ func (w *world) kitConfigRemote() {
 	config := filepath.Join(w.home, ".config", "kit")
 	w.fake.On("git", "-C", config, "remote").Prints("origin\n")
 	w.fake.On("git", "-C", config, "remote", "get-url", "origin").Prints(kitConfigURL + "\n")
+	w.fake.On("git", "-C", config, "config", "--local", "--get-regexp", "-z", `^credential\.`).Exits(1)
 }
 
 // storeCloned scripts the store's clone, in kit's data folder, as kit finds
@@ -103,7 +104,9 @@ func (w *world) kitConfigRemote() {
 func (w *world) storeCloned() string {
 	w.kitConfigRemote()
 	clone := filepath.Join(w.home, ".local", "share", "kit", "prefs")
+	w.fake.On("git", "-C", clone, "rev-parse", "--verify", "--quiet", "HEAD").Prints(head + "\n")
 	w.fake.On("git", "-C", clone, "remote", "get-url", "origin").Prints(kitConfigURL + "\n")
+	w.fake.On("git", "-C", clone, "remote", "get-url", "--push", "--all", "origin").Prints(kitConfigURL + "\n")
 	w.fake.On("git", "-C", clone, "symbolic-ref", "-q", "HEAD").Prints("refs/heads/prefs\n")
 	for _, kv := range [][2]string{{"user.name", "kit"}, {"user.email", "kit@localhost"}, {"commit.gpgsign", "false"}, {"tag.gpgsign", "false"}, {"core.excludesFile", "/dev/null"}, {"core.hooksPath", "/dev/null"}, {"core.autocrlf", "false"}} {
 		w.fake.On("git", "-C", clone, "config", kv[0], kv[1])

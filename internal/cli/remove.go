@@ -122,7 +122,9 @@ func (a *app) leftovers(ctx context.Context, r *run, k kind.Kind, names []string
 			lo.files = append(lo.files, tilde.Shown(r.homeDir, f))
 		}
 		if left.Bundle != "" && lo.saving {
-			lo.saved = p.SavedFor(left.Bundle)
+			if lo.saved, err = p.SavedFor(ctx, left.Bundle); err != nil {
+				return nil, err
+			}
 		}
 		zap, said, err := a.zapping(ctx, lo, opts.zap)
 		switch {

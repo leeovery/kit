@@ -53,11 +53,20 @@ func newWorld(t *testing.T, lists prefs.Lists) *world {
 func onTheBranch(fake *runnertest.Fake, config, clone string) {
 	fake.On("git", "-C", config, "remote").Prints("origin\n")
 	fake.On("git", "-C", config, "remote", "get-url", "origin").Prints(remote + "\n")
+	fake.On("git", signsIn(config)...).Exits(1)
+	fake.On("git", "-C", clone, "rev-parse", "--verify", "--quiet", "HEAD").Prints(head + "\n")
 	fake.On("git", "-C", clone, "remote", "get-url", "origin").Prints(remote + "\n")
+	fake.On("git", "-C", clone, "remote", "get-url", "--push", "--all", "origin").Prints(remote + "\n")
 	fake.On("git", "-C", clone, "symbolic-ref", "-q", "HEAD").Prints("refs/heads/prefs\n")
 	for _, kv := range [][2]string{{"user.name", "kit"}, {"user.email", "kit@localhost"}, {"commit.gpgsign", "false"}, {"tag.gpgsign", "false"}, {"core.excludesFile", "/dev/null"}, {"core.hooksPath", "/dev/null"}, {"core.autocrlf", "false"}} {
 		fake.On("git", "-C", clone, "config", kv[0], kv[1])
 	}
+}
+
+// signsIn is git reading how kit-config, at config, signs in to its remote:
+// its own credential settings, exiting 1 with none, as real git does.
+func signsIn(config string) []string {
+	return []string{"-C", config, "config", "--local", "--get-regexp", "-z", `^credential\.`}
 }
 
 // pulls scripts a pull of the store's, as real git answers, its one
@@ -368,18 +377,17 @@ func TestCaptureHoldsBackThePushWhenTheCommitFailed(t *testing.T) {
 
 // A store that isn't proven private is never pushed to: the commit waits,
 // and the record says since when. It's where git push sends it that's
-// looked at: a push URL the remote has set, public, in its private URL's
-// place, which git names alone, as it pushes there alone; a repository on
-// GitHub that isn't private; another host, or a path on this Mac, which
-// kit doesn't prove private; and a clone with more than one remote, which
-// kit pushes to none of.
+// looked at, kit-config's remote, the store's: a repository on GitHub that
+// isn't private; another host, or a path on this Mac, which kit doesn't
+// prove private; and a clone with more than one remote, which kit pushes
+// to none of. A push URL that isn't kit-config's never gets this far: the
+// clone's refused (TestACloneElsewhereIsRefused).
 func TestCaptureNeverPushesToAPublicStore(t *testing.T) {
 	const notGitHub = "kit proves private only a repository on github.com, at https://github.com/<owner>/<name>, git@github.com:<owner>/<name> or ssh://git@github.com/<owner>/<name>"
-	for _, c := range []struct{ name, remotes, pushURL, public, says string }{
+	for _, c := range []struct{ name, remotes, url, public, says string }{
 		{"the store public", "origin\n", remote, "someone/kit-config", "someone/kit-config is public on GitHub: kit pushes apps' settings only to a private repository"},
-		{"a push URL public", "origin\n", "git@github.com:someone/public-prefs.git", "someone/public-prefs", "someone/public-prefs is public on GitHub: kit pushes apps' settings only to a private repository"},
-		{"another host", "origin\n", "https://gitlab.com/someone/prefs.git", "", "kit pushes apps' settings only to a repository it can prove private, and can't for https://gitlab.com/someone/prefs.git: " + notGitHub},
-		{"a path on this Mac", "origin\n", "/Volumes/Backup/prefs.git", "", "kit pushes apps' settings only to a repository it can prove private, and can't for /Volumes/Backup/prefs.git: " + notGitHub},
+		{"another host", "origin\n", "https://gitlab.com/someone/kit-config.git", "", "kit pushes apps' settings only to a repository it can prove private, and can't for https://gitlab.com/someone/kit-config.git: " + notGitHub},
+		{"a path on this Mac", "origin\n", "/Volumes/Backup/kit-config.git", "", "kit pushes apps' settings only to a repository it can prove private, and can't for /Volumes/Backup/kit-config.git: " + notGitHub},
 		{"two remotes", "origin\nbackup\n", remote, "", "the repository has 2 remotes, so kit pushes nothing: kit pushes to one alone"},
 	} {
 		w := newWorld(t, prefs.Lists{})
@@ -388,8 +396,10 @@ func TestCaptureNeverPushesToAPublicStore(t *testing.T) {
 		w.exports(t, "com.example.app", map[string]any{"Theme": "dark"})
 		w.pushes(t, "Capture 2026-10-06 03:00: 1 new\n\nnew: com.example.app\nclaimed: the folder, for this Mac's hardware",
 			"?? laptop/.gitignore\x00?? laptop/domains/com.example.app.plist\x00?? laptop/owner\x00", newFiles, newFiles)
+		w.fake.On("git", "-C", w.config, "remote", "get-url", "origin").Prints(c.url + "\n")
+		w.fake.On("git", "-C", w.clone, "remote", "get-url", "origin").Prints(c.url + "\n")
 		w.fake.On("git", "-C", w.clone, "remote").Prints(c.remotes)
-		w.fake.On("git", "-C", w.clone, "remote", "get-url", "--push", "--all", "origin").Prints(c.pushURL + "\n")
+		w.fake.On("git", "-C", w.clone, "remote", "get-url", "--push", "--all", "origin").Prints(c.url + "\n")
 		w.fake.On("gh", "repo", "view", "https://github.com/"+c.public, "--json", "visibility", "--jq", ".visibility").Prints("PUBLIC\n")
 		report, err := w.p.Capture(t.Context())
 		if err != nil || !strings.HasPrefix(report.PushError, c.says) {
