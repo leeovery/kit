@@ -380,7 +380,7 @@ func (a *app) build(command, logName string, face render.Face, atTerminal bool) 
 	deps := &kind.Deps{Run: observed, Home: home, ConfigHome: a.configHome(), StateDir: dirs.State, Backups: backupNames(backups), AppDirs: a.appFolders(home).Dirs}
 	for _, d := range kinds.All {
 		k := d.New(deps)
-		list, unread, err := declared(cfg, k, machine)
+		list, unread, err := kind.Declared(cfg, k, machine)
 		if err != nil {
 			return nil, err
 		}
@@ -774,24 +774,6 @@ type featuresOn map[string]config.Entry
 func (f featuresOn) on(name string) bool {
 	_, ok := f[name]
 	return ok
-}
-
-// declared is what k declares for the Mac named mac: its sections in cfg,
-// their values read by a kind whose lines carry them. What doesn't read is
-// unread: the kind's check fails, saying so, rather than kit.
-func declared(cfg *config.Config, k kind.Kind, mac string) (list config.List, unread, err error) {
-	if list, err = cfg.List(k.Name(), mac); err != nil {
-		return list, nil, err
-	}
-	if v, ok := k.(kind.Valued); ok {
-		read, unread := v.Values(list)
-		return read, unread, nil
-	}
-	if e, ok := k.(kind.Expander); ok {
-		expanded, unread := e.Expand(list)
-		return expanded, unread, nil
-	}
-	return list, nil, nil
 }
 
 // configHome is XDG's config folder, when it's set to an absolute path: ""

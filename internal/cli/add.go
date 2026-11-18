@@ -238,7 +238,7 @@ func prepareAdding(ctx context.Context, r *run, k kind.Kind, scope, name string,
 	if len(mine) > 0 || opts.temp || valued && !isIn {
 		return p, nil
 	}
-	if p.line, err = addedLine(ctx, k, name, opts); err != nil {
+	if p.line, err = kind.Line(ctx, k, name, opts.note); err != nil {
 		return p, err
 	}
 	p.ready = true
@@ -276,7 +276,7 @@ func installAndDeclare(ctx context.Context, r *run, c *changes, k kind.Kind, sco
 	}
 	if !p.ready {
 		var err error
-		if p.line, err = addedLine(ctx, k, name, opts); err == nil {
+		if p.line, err = kind.Line(ctx, k, name, opts.note); err == nil {
 			err = r.holdLine(ctx, k, scope, &p)
 		}
 		if err != nil {
@@ -400,27 +400,6 @@ func temporarily(ctx context.Context, r *run, c *changes, k kind.Kind, scope, na
 		}
 	}
 	return check.Result{State: check.OK, Summary: summary}
-}
-
-// addedLine is the line adding name declares: its value, for a kind whose
-// lines have one, as it's installed; the note given, after what the kind
-// says it is, or that alone as the note kit makes up (DefaultNote).
-func addedLine(ctx context.Context, k kind.Kind, name string, opts addOptions) (config.Entry, error) {
-	e := config.Entry{Name: name, Note: opts.note}
-	if d, ok := k.(kind.Describer); ok {
-		if what := d.Describe(ctx, name); what != "" && opts.note != "" {
-			e.Note = what + ": " + opts.note
-		} else {
-			e.DefaultNote = what
-		}
-	}
-	if v, ok := k.(kind.Valued); ok {
-		var err error
-		if e.Value, err = v.Value(ctx, name); err != nil {
-			return e, err
-		}
-	}
-	return e, nil
 }
 
 // notInstalled are which of names k doesn't find installed.
