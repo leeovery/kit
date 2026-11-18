@@ -135,21 +135,6 @@ func (a *app) list(ctx context.Context, r *run, args []string) error {
 // whySchema is kit why --json's document's version.
 const whySchema = 3
 
-// why is what kit knows of a name, as one kind.
-type why struct {
-	Kind string `json:"kind"`
-	// Step is the step that installs it.
-	Step string `json:"step"`
-	// Declared are the files declaring it, this Mac's and other Macs'.
-	Declared []config.Entry `json:"declared"`
-	// ForThisMac is whether this Mac declares it.
-	ForThisMac bool     `json:"for_this_mac"`
-	Installed  bool     `json:"installed"`
-	NeededBy   []string `json:"needed_by,omitempty"`
-	// knowsNeeds is whether the kind says what needs a thing.
-	knowsNeeds bool
-}
-
 func newWhyCommand(a *app) *cobra.Command {
 	return &cobra.Command{
 		Use:         "why <name>",
@@ -173,7 +158,7 @@ func newWhyCommand(a *app) *cobra.Command {
 func (a *app) why(ctx context.Context, r *run, name string) error {
 	stop := a.loading(a.Stdout, "looking for "+name)
 	defer stop()
-	var found []why
+	var found []render.Found
 	if strings.HasPrefix(name, "~/") || filepath.IsAbs(name) {
 		_, shown, err := r.filePaths([]string{name})
 		if err != nil {
@@ -186,7 +171,7 @@ func (a *app) why(ctx context.Context, r *run, name string) error {
 		}
 		for _, l := range links {
 			if l.Name == name {
-				found = append(found, why{Kind: linked.StepName, Step: "Linked files", Declared: []config.Entry{{Name: l.Name, Scope: l.Scope, File: l.Path}}, ForThisMac: true, Installed: linked.IsLinked(l)})
+				found = append(found, render.Found{Kind: linked.StepName, Step: "Linked files", Declared: []config.Entry{{Name: l.Name, Scope: l.Scope, File: l.Path}}, ForThisMac: true, Installed: linked.IsLinked(l)})
 			}
 		}
 	}
@@ -207,7 +192,7 @@ func (a *app) why(ctx context.Context, r *run, name string) error {
 		if len(declared) == 0 && !isIn {
 			continue
 		}
-		w := why{Kind: kindName, Step: kinds.Label(k.Name()), Declared: declared, Installed: isIn}
+		w := render.Found{Kind: kindName, Step: kinds.Label(k.Name()), Declared: declared, Installed: isIn}
 		w.ForThisMac = slices.ContainsFunc(declared, func(e config.Entry) bool {
 			return e.Scope == config.Shared || e.Scope == r.machine
 		})
@@ -215,63 +200,26 @@ func (a *app) why(ctx context.Context, r *run, name string) error {
 			if w.NeededBy, err = d.NeededBy(ctx, name); err != nil {
 				return err
 			}
-			w.knowsNeeds = true
+			w.KnowsNeeds = true
 		}
 		found = append(found, w)
 	}
 	stop()
 	if a.json {
 		if found == nil {
-			found = []why{}
+			found = []render.Found{}
 		}
 		return render.WriteJSON(a.Stdout, struct {
-			Schema  int    `json:"schema"`
-			Machine string `json:"machine"`
-			Name    string `json:"name"`
-			Kinds   []why  `json:"kinds"`
+			Schema  int            `json:"schema"`
+			Machine string         `json:"machine"`
+			Name    string         `json:"name"`
+			Kinds   []render.Found `json:"kinds"`
 		}{whySchema, r.machine, name, found})
 	}
 	if len(found) == 0 {
 		return notFound{message: name + " isn't declared for any Mac, nor installed here"}
 	}
-	var b strings.Builder
-	for _, w := range found {
-		fmt.Fprintf(&b, "%s (%s)\n", name, w.Kind)
-		if w.Kind == linked.StepName {
-			fmt.Fprintf(&b, "  linked from %s\n", w.Declared[0].Path())
-			if w.Installed {
-				b.WriteString("  linked here\n")
-			} else {
-				fmt.Fprintf(&b, "  not linked here: kit status says why, kit apply or kit reconcile %s:%s settles it\n", w.Kind, name)
-			}
-			continue
-		}
-		for _, e := range w.Declared {
-			line := fmt.Sprintf("  declared in %s, line %d", e.Path(), e.Line)
-			if e.Note != "" {
-				line += ": " + e.Note
-			}
-			b.WriteString(line + "\n")
-		}
-		switch {
-		case w.ForThisMac && w.Installed:
-			fmt.Fprintf(&b, "  installed here, by kit apply's %s step\n", w.Step)
-		case w.ForThisMac:
-			fmt.Fprintf(&b, "  not installed here: kit apply installs it\n")
-		case w.Installed:
-			fmt.Fprintf(&b, "  installed here, not declared for this Mac: kit reconcile %s:%s\n", w.Kind, name)
-		default:
-			fmt.Fprintf(&b, "  not declared for this Mac, nor installed here\n")
-		}
-		if w.knowsNeeds {
-			needed := "nothing installed"
-			if len(w.NeededBy) > 0 {
-				needed = strings.Join(w.NeededBy, ", ")
-			}
-			fmt.Fprintf(&b, "  needed by %s\n", needed)
-		}
-	}
-	_, err := fmt.Fprint(a.Stdout, b.String())
+	_, err := fmt.Fprint(a.Stdout, render.Why(name, found))
 	return err
 }
 

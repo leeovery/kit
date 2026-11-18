@@ -10,8 +10,10 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/leeovery/kit/internal/check"
+	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/kind"
+	"github.com/leeovery/kit/internal/linked"
 	"github.com/leeovery/kit/internal/look"
 	"github.com/leeovery/kit/internal/render"
 	"github.com/leeovery/kit/internal/render/rendertest"
@@ -40,7 +42,7 @@ var docs = []Fixture{
 	result("linked-files-add", "kit file add: the file moved into kit-config and linked back", "file add ~/.config/tool/conf",
 		said{"~/.config/tool/conf", "in kit-config, linked: laptop/home/.config/tool/conf"}, committed("laptop/home/.config/tool/conf")),
 	{Name: "linked-files-why", About: "kit why ~/.zshrc: where the linked file comes from", Width: 34, Height: 5,
-		Shows: "linked here", at: docsAt, draw: plainly("~/.zshrc (file)", "  linked from shared/home/.zshrc", "  linked here")},
+		Shows: "linked here", at: docsAt, draw: zshrcWhy},
 	{Name: "linked-files-revert", About: "kit reconcile --revert: kit-config's file linked back, the Mac's in the Bin", Width: 82, Height: 10,
 		Shows: "1 settled", at: docsAt, draw: onFace(func(at time.Time) []event.Event {
 			return reconciled(at, 400*time.Millisecond,
@@ -53,8 +55,8 @@ var docs = []Fixture{
 	result("packages-add", "kit brew add jq: installed, declared, kit-config committed and pushed", "brew add jq",
 		said{"jq", "installed; declared in laptop"}, committed("laptop/declarations")),
 	sectionOf("packages-status", "kit status's CONFIG, ffmpeg installed by hand", "CONFIG", "ffmpeg", 64, 10, ffmpegDrifted),
-	result("running-by-itself-check", "kit check add dns: declared, failing now", "check add dns",
-		said{"dns", "declared in laptop; it fails now: ;; connection timed out"}, committed("laptop/declarations")),
+	result("running-by-itself-check", "kit check add db: declared, failing now", "check add db",
+		said{"db", "declared in laptop; it fails now: 127.0.0.1:5432 - no response"}, committed("laptop/declarations")),
 	{Name: "secrets-places", About: "kit secret places: the secrets blocks this Mac reads", Width: 88, Height: 5,
 		Shows: "references in full", at: docsAt, draw: secretPlaces},
 	sectionOf("settings-status", "kit status's CONFIG, a setting removed by hand", "CONFIG", "autohide", 79, 10, func() []event.Event {
@@ -147,16 +149,20 @@ func draw(out io.Writer, size func() (int, int), events []event.Event) error {
 	return face.Close()
 }
 
-// plainly prints lines, as kit prints what has no face of its own, then
-// holds.
-func plainly(lines ...string) func(*stage) error {
-	return func(s *stage) error {
-		if _, err := io.WriteString(s.term.Out, "\r\n"+strings.Join(lines, "\r\n")+"\r\n"); err != nil {
-			return err
-		}
-		s.hold()
-		return nil
+// shows writes lines, after a blank one, then holds.
+func (s *stage) shows(lines []string) error {
+	if _, err := io.WriteString(s.term.Out, "\r\n"+strings.Join(lines, "\r\n")+"\r\n"); err != nil {
+		return err
 	}
+	s.hold()
+	return nil
+}
+
+// zshrcWhy is kit why ~/.zshrc on a Mac linking it from the shared files.
+func zshrcWhy(s *stage) error {
+	why := render.Why("~/.zshrc", []render.Found{{Kind: linked.StepName, Step: "Linked files", ForThisMac: true, Installed: true,
+		Declared: []config.Entry{{Name: "~/.zshrc", Scope: config.Shared, File: "shared/home/.zshrc"}}}})
+	return s.shows(strings.Split(strings.TrimSuffix(why, "\n"), "\n"))
 }
 
 // sectionOf is the still name of one section of what kit prints for run,
@@ -168,11 +174,7 @@ func sectionOf(name, about, title, shows string, columns, rows int, run func() [
 		if err := draw(&all, func() (int, int) { return look.Width, rows }, run()); err != nil {
 			return err
 		}
-		if _, err := io.WriteString(s.term.Out, "\r\n"+strings.Join(section(all.String(), title), "\r\n")+"\r\n"); err != nil {
-			return err
-		}
-		s.hold()
-		return nil
+		return s.shows(section(all.String(), title))
 	}}
 }
 
@@ -277,20 +279,9 @@ func bootEnds(s *stage) error {
 // named, shared, one of references in full, and one of its own.
 func secretPlaces(s *stage) error {
 	width, _ := s.term.Size()
-	muted := func(says ...string) string {
-		for i, w := range says {
-			says[i] = look.Muted(w)
-		}
-		return look.Says(says...)
-	}
-	rows := look.Rows("  ", width,
-		look.Row{State: look.Done, Name: "tokens", Says: muted("1Password", "op://vault/Item", "shared", "2 secrets", "sections Other, Section")},
-		look.Row{State: look.Done, Name: "[secrets]", Says: muted("references in full", "laptop", "1 secret")},
-		look.Row{State: look.Done, Name: "op://vault/Other", Says: muted("1Password", "laptop", "1 secret", "section Section")},
-	)
-	if _, err := io.WriteString(s.term.Out, "\r\n"+strings.Join(rows, "\r\n")+"\r\n"); err != nil {
-		return err
-	}
-	s.hold()
-	return nil
+	return s.shows(render.Places(width, []render.Place{
+		{Name: "tokens", Store: "1Password", Item: "op://vault/Item", Scope: config.Shared, Secrets: 2, Sections: []string{"Other", "Section"}},
+		{Scope: "laptop", Secrets: 1},
+		{Store: "1Password", Item: "op://vault/Other", Scope: "laptop", Secrets: 1, Sections: []string{"Section"}},
+	}))
 }
