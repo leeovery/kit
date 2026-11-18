@@ -14,10 +14,7 @@ kit file add ~/.config/tool/conf
 
 kit moves the file, links it back, then commits and pushes kit-config:
 
-```console
-  ● ~/.config/tool/conf  in kit-config, linked: laptop/home/.config/tool/conf
-  ● kit-config  committed and pushed laptop/home/.config/tool/conf
-```
+<img src="../art/linked-files-add.webp" alt="kit file add at a terminal: the file moved into kit-config and linked back, then kit-config committed and pushed" width="573">
 
 ```bash
 # Link it on every Mac instead
@@ -82,9 +79,7 @@ the one in kit-config: `kit apply` leaves it alone.
 kit reconcile file:~/.zshrc --revert
 ```
 
-```console
-  ● ~/.zshrc  linked to kit-config's · the Mac's copy is in the Bin (~/.Trash/.zshrc)
-```
+<img src="../art/linked-files-revert.webp" alt="kit reconcile --revert at its end: kit-config's file linked back, the Mac's copy in the Bin, 1 settled" width="573">
 
 If the copy on this Mac is the one to keep, `--adopt` takes it into kit-config and links it.
 Then kit commits and pushes kit-config.

@@ -201,6 +201,13 @@ func (p *Pretty) fit() {
 	p.width = min(max(w, 40), look.Width)
 }
 
+// Clocked has the face tell the time by now, for how long a run has taken
+// and when what it logs came.
+func (p *Pretty) Clocked(now func() time.Time) *Pretty {
+	p.now = now
+	return p
+}
+
 // UnderHome has the face show a run started from kit's home, under the
 // home's wordmark: its heading leaves the wordmark out.
 func (p *Pretty) UnderHome() *Pretty {
@@ -545,13 +552,15 @@ func todo(detail string) string {
 
 // configRows are Config's rows: what needs attention, a row a thing, saying
 // what's wrong, for how long and what to run; then a row a part counting
-// what's well, and the config repository's row.
+// what's well, and the config repository's row, marked as needing you
+// while a part of it does.
 func (p *Pretty) configRows(fs []event.StepFinished) []look.Row {
 	var rows []look.Row
 	counts := map[string]int{}
 	quiet := map[string]map[string]int{}
 	present := map[string]bool{}
 	var repo []string
+	repoState := look.Done
 	for _, f := range fs {
 		r, part := f.Result, p.step(f.Step).Part
 		if _, refused := r.Refused(); refused {
@@ -579,6 +588,9 @@ func (p *Pretty) configRows(fs []event.StepFinished) []look.Row {
 		switch part {
 		case PartConfig:
 			repo = append(repo, look.Muted(cmp.Or(r.Glance, strings.TrimPrefix(r.Summary, "all "))))
+			if r.State == check.Attention {
+				repoState = look.NeedsYou
+			}
 		case PartPackages, PartSettings, PartFiles, PartSecrets:
 			present[part] = true
 			for _, ru := range rollups {
@@ -605,7 +617,7 @@ func (p *Pretty) configRows(fs []event.StepFinished) []look.Row {
 		rows = append(rows, look.Row{State: look.Done, Name: ru.part, Says: look.Says(says...)})
 	}
 	if len(repo) > 0 {
-		rows = append(rows, look.Row{State: look.Done, Name: PartConfig, Says: look.Says(repo...)})
+		rows = append(rows, look.Row{State: repoState, Name: PartConfig, Says: look.Says(repo...)})
 	}
 	return rows
 }
@@ -624,7 +636,10 @@ func (p *Pretty) thing(s event.Step, it check.Item) look.Row {
 		says = append(says, look.Muted(since(p.start.Time.Sub(it.Since))))
 	}
 	hint := "kit reconcile"
-	if it.Action != "" || it.State == "missing" {
+	switch {
+	case ownFix[it.State]:
+		return look.Row{State: look.NeedsYou, Name: it.Name, Says: look.Says(says...), Whole: true}
+	case it.Action != "" || it.State == "missing":
 		hint = "kit apply"
 	}
 	row := look.Row{State: look.NeedsYou, Name: it.Name, Says: look.Says(append(says, look.Todo(look.Cmd(hint)))...), Whole: true}
@@ -635,6 +650,11 @@ func (p *Pretty) thing(s event.Step, it check.Item) look.Row {
 	}
 	return row
 }
+
+// ownFix are the states of things no kit command puts right, so a row
+// for one names none: what's wrong says what does, as a config repository
+// not proven private says how to make it so.
+var ownFix = map[string]bool{"not-private": true, "unproven": true}
 
 // wrong says what's wrong with a thing of step s, in its kind's words:
 // installed, not declared; of a backup exclusion, excluded, not declared;

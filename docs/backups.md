@@ -15,11 +15,9 @@ kit backup add arq
 kit backup-exclusion add '~/Downloads'
 ```
 
-kit declares each one, then commits and pushes kit-config:
+kit declares each one, then commits and pushes kit-config. Adding Arq looks like this:
 
-```text
-arq ok declared in laptop
-```
+<img src="../art/backups-add.webp" alt="kit backup add arq at a terminal: arq declared in laptop, then kit-config committed and pushed" width="443">
 
 The lines land in this Mac's declarations file:
 
@@ -35,10 +33,7 @@ arq
 
 `kit status` checks each tool under BACKUPS:
 
-```text
-  BACKUPS
-  ● Time Machine  last backup 02:35
-```
+<img src="../art/backups-status.webp" alt="kit status under BACKUPS: Time Machine and Arq, each with the time of its last backup" width="280">
 
 - **Every check, every hour.** The hourly run checks the tools too, and `kit status` shows what
   it found.
@@ -61,12 +56,7 @@ A tool needs attention when:
 kit can't add a backup disk or sign in to Arq. If Time Machine has no disk, or Arq has no plan,
 `kit apply` shows it as a to-do with each step:
 
-```text
-  △ 2  Set up Arq's backup plan
-       → Open Arq
-       → Sign in to your Arq account
-       → Adopt this Mac's plan, and let it run
-```
+<img src="../art/backups-todo.webp" alt="The to-dos at the end of kit apply: add a Time Machine disk, and set up Arq's backup plan, each with its steps" width="566">
 
 kit watches for it, and moves on once it's done. If kit-config declares the `arq` cask, Arq is
 checked after the cask installs. Otherwise kit says to run `kit cask add arq`.

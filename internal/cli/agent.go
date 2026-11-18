@@ -13,6 +13,7 @@ import (
 	"github.com/leeovery/kit/internal/gitrepo"
 	"github.com/leeovery/kit/internal/guide"
 	"github.com/leeovery/kit/internal/look"
+	"github.com/leeovery/kit/internal/render"
 )
 
 // agentWidth is how wide kit agent's lines go, at most: the guide's files
@@ -111,7 +112,7 @@ type agentFacts struct {
 	Machine    string
 	Folder     string
 	Macs       []agentMac
-	Secrets    []place
+	Secrets    []render.Place
 }
 
 // agentMac is one of the config's Macs, as kit agent lists them.
@@ -222,7 +223,7 @@ func (f agentFacts) lines() []string {
 	fact("Macs", strings.Join(macs, ", "))
 	secrets := make([]string, len(f.Secrets))
 	for i, p := range f.Secrets {
-		secrets[i] = p.title() + ": " + strings.Join(p.says(), " · ")
+		secrets[i] = p.Title() + ": " + strings.Join(p.Says(), " · ")
 	}
 	if len(secrets) == 0 {
 		secrets = []string{"no secrets blocks for this Mac"}

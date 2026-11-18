@@ -169,22 +169,6 @@ func (a *app) secretsSync(ctx context.Context, r *run) error {
 // placesSchema is kit secret places --json's document's version.
 const placesSchema = 1
 
-// place is a block secrets are declared in, as kit secret places lists it:
-// the name its header gives it, if any; its store and its item, none for
-// the plain [secrets], whose references are in full; whose declarations
-// declare it, shared or a Mac's, its file and its header's line; and how
-// many secrets it holds; and the sections of its item they're in.
-type place struct {
-	Name     string   `json:"name,omitempty"`
-	Store    string   `json:"store,omitempty"`
-	Item     string   `json:"item,omitempty"`
-	Scope    string   `json:"scope"`
-	File     string   `json:"file"`
-	Line     int      `json:"line"`
-	Secrets  int      `json:"secrets"`
-	Sections []string `json:"sections,omitempty"`
-}
-
 // secretPlaces lists the blocks secrets are declared in, for this Mac: as
 // one document with --json, else a row each.
 func (a *app) secretPlaces(r *run) error {
@@ -194,9 +178,9 @@ func (a *app) secretPlaces(r *run) error {
 	}
 	if a.json {
 		return render.WriteJSON(a.Stdout, struct {
-			Schema  int     `json:"schema"`
-			Machine string  `json:"machine"`
-			Places  []place `json:"places"`
+			Schema  int            `json:"schema"`
+			Machine string         `json:"machine"`
+			Places  []render.Place `json:"places"`
 		}{placesSchema, r.machine, places})
 	}
 	out := a.colors(a.Stdout)
@@ -205,25 +189,25 @@ func (a *app) secretPlaces(r *run) error {
 		return err
 	}
 	if a.pretty(a.Stdout) {
-		return writeLines(out, look.Rows("  ", a.Width(a.Stdout), placeRows(places)...))
+		return writeLines(out, render.Places(a.Width(a.Stdout), places))
 	}
 	lines := make([]string, len(places))
 	for i, p := range places {
-		lines[i] = p.line()
+		lines[i] = p.Plain()
 	}
 	return writeLines(out, lines)
 }
 
 // secretsPlaces are the blocks secrets are declared in for the Mac called
 // machine, in cfg: the shared file's, then its own.
-func secretsPlaces(cfg *config.Config, machine string) ([]place, error) {
+func secretsPlaces(cfg *config.Config, machine string) ([]render.Place, error) {
 	found, err := cfg.Places(secretKind, machine)
 	if err != nil {
 		return nil, err
 	}
-	places := make([]place, len(found))
+	places := make([]render.Place, len(found))
 	for i, p := range found {
-		places[i] = place{Name: p.As, Item: p.Item, Scope: p.Scope, File: config.DeclFile(p.Scope), Line: p.Line, Secrets: p.Count}
+		places[i] = render.Place{Name: p.As, Item: p.Item, Scope: p.Scope, File: config.DeclFile(p.Scope), Line: p.Line, Secrets: p.Count}
 		if d, err := secret.ItemStore(p.Item); p.Item != "" && err == nil {
 			places[i].Store = d.About().Name
 			places[i].Sections = sectionsOf(d, p.Shorts)
@@ -243,59 +227,6 @@ func sectionsOf(d store.Driver, shorts []string) []string {
 	}
 	slices.Sort(sections)
 	return slices.Compact(sections)
-}
-
-// line is a block as a plain line lists it: its title, and what's said of
-// it after.
-func (p place) line() string {
-	return p.title() + "  " + strings.Join(p.says(), " · ")
-}
-
-// placeRows are places as rows: each by its name, or its item, its store,
-// item, file and count after it.
-func placeRows(places []place) []look.Row {
-	rows := make([]look.Row, len(places))
-	for i, p := range places {
-		says := p.says()
-		for j, s := range says {
-			says[j] = look.Muted(s)
-		}
-		rows[i] = look.Row{State: look.Done, Name: p.title(), Says: look.Says(says...)}
-	}
-	return rows
-}
-
-// title is what a block's called: the name its header gives it, else its
-// item, else, the plain block, its header.
-func (p place) title() string {
-	switch {
-	case p.Name != "":
-		return p.Name
-	case p.Item != "":
-		return p.Item
-	}
-	return "[secrets]"
-}
-
-// says is what's said of a block after its title: its store, its item when
-// its title is its name, its scope, how many secrets it holds, and the
-// sections of its item they're in.
-func (p place) says() []string {
-	var says []string
-	switch {
-	case p.Store != "":
-		says = append(says, p.Store)
-	case p.Item == "":
-		says = append(says, "references in full")
-	}
-	if p.Name != "" {
-		says = append(says, p.Item)
-	}
-	says = append(says, p.Scope, fmt.Sprintf("%d %s", p.Secrets, look.Plural(p.Secrets, "secret", "secrets")))
-	if len(p.Sections) > 0 {
-		says = append(says, look.Plural(len(p.Sections), "section ", "sections ")+strings.Join(p.Sections, ", "))
-	}
-	return says
 }
 
 // writeLines writes lines to out, each ended by a newline.

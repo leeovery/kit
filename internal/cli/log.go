@@ -12,7 +12,6 @@ import (
 	"github.com/leeovery/kit/internal/ask"
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/logs"
-	"github.com/leeovery/kit/internal/look"
 	"github.com/leeovery/kit/internal/render"
 )
 
@@ -67,7 +66,7 @@ none named, it lists the runs, newest first.`,
 				if len(runs) == 0 {
 					return notFound{message: "no runs logged yet"}
 				}
-				path, err = a.Pick(cmd.Context(), []string{""}, render.RunList(runs), []look.Key{{Key: "↑↓", Does: "choose"}, {Key: "enter", Does: "open"}, {Key: "q", Does: "quit"}})
+				path, err = a.Pick(cmd.Context(), []string{""}, render.RunList(runs), render.RunListKeys)
 				if errors.Is(err, ask.ErrCancelled) {
 					return nil
 				}

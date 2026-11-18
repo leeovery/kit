@@ -19,51 +19,10 @@ import (
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/hand"
-	"github.com/leeovery/kit/internal/kind/secret/onepassword"
 	"github.com/leeovery/kit/internal/look"
 	"github.com/leeovery/kit/internal/render"
+	"github.com/leeovery/kit/internal/render/rendertest"
 )
-
-// newMac are a new Mac's steps, as kit apply runs them once the boot's in
-// the terminal: the boot's, checked again, kit's own, by the names kit
-// gives them, the user's own, and two steps by hand: 1Password's sign-in,
-// which the secrets wait for, and the rest, at the end.
-var newMac = []event.Step{
-	{Name: "boot-github", Title: "GitHub", Area: boot.AreaBooted},
-	{Name: "boot-mac", Title: "This Mac", Area: boot.AreaBooted},
-	{Name: "boot-homebrew", Title: "Homebrew", Area: boot.AreaBooted},
-	{Name: "boot-kit-config", Title: "kit-config", Area: boot.AreaBooted},
-	{Name: "homebrew", Title: "Homebrew", Area: "Drift", Row: "Homebrew formulae", Tool: "Homebrew"},
-	{Name: "file", Title: "Linked files", Area: "Drift", Part: render.PartFiles},
-	{Name: "path", Title: "Shell PATH", Area: "Drift"},
-	{Name: "touch-id-sudo", Title: "Touch ID for sudo", Area: "Drift"},
-	{Name: "defaults", Title: "macOS settings", Area: "Drift", Row: "Mac settings"},
-	{Name: "power", Title: "Power settings", Area: "Drift", Row: "Mac settings"},
-	{Name: "brew", Title: "Homebrew formulae", Area: "Drift", Row: "Homebrew formulae", Tool: "Homebrew", Waits: []string{"homebrew"}},
-	{Name: "cask", Title: "Homebrew casks", Area: "Drift", Row: "Homebrew casks", Tool: "Homebrew", Waits: []string{"homebrew"}},
-	{Name: "mas", Title: "App Store apps", Area: "Drift", Row: "App Store apps"},
-	{Name: "npm", Title: "npm packages", Area: "Drift", Row: "Developer tools", Waits: []string{"brew"}},
-	{Name: "composer", Title: "Composer packages", Area: "Drift", Row: "Developer tools", Waits: []string{"brew"}},
-	{Name: "login-item", Title: "macOS login items", Area: "Drift", Row: "Login items", Waits: []string{"cask", "mas"}},
-	{Name: "secret", Title: "Secrets", Area: "Drift", Row: "Secrets", Waits: []string{"1password"}},
-	{Name: "git-config", Title: "git config", Area: "Drift", Row: "Git", Waits: []string{"secret"}},
-	{Name: "config", Title: "kit-config edits", Area: "Drift"},
-	{Name: "config-sync", Title: "Sync", Area: "Config"},
-	{Name: "time-machine", Title: "Time Machine", Area: "Backups"},
-	{Name: "arq", Title: "Arq", Area: "Backups", Waits: []string{"cask"}},
-	{Name: "prefs", Title: "App settings", Area: "Backups", Waits: []string{"cask"}},
-	{Name: "disk", Title: "Disk space", Area: "Mac"},
-	{Name: "load", Title: "Load", Area: "Mac"},
-	{Name: "claude-code", Title: "claude-code", Area: "Steps"},
-	{Name: "fonts", Title: "fonts", Area: "Steps"},
-	{Name: "mise", Title: "mise", Area: "Steps", Waits: []string{"brew"}},
-	{Name: "1password", Title: "1password", Area: "Manual", ByHand: []event.Hand{{Name: "1password", Title: "Sign in to 1Password"}}},
-	{Name: "manual", Title: "By hand", Area: "Manual", Waiting: "at the end, once the rest is done", ByHand: []event.Hand{
-		{Name: "sharing", Title: "Allow remote users Full Disk Access"},
-		{Name: "editor", Title: "Install the editor from its site"},
-		{Name: "karabiner", Title: "Allow Karabiner-Elements"},
-	}},
-}
 
 // after is sec seconds into the run.
 func after(sec int) time.Time { return at.Add(time.Duration(sec) * time.Second) }
@@ -113,7 +72,7 @@ func sixMinutesIn() []event.Event { return sixMinutesInWith(12, 8) }
 // sixMinutesInWith is sixMinutesIn, Homebrew having installed formulae
 // formulae and casks casks.
 func sixMinutesInWith(formulae, casks int) []event.Event {
-	events := []event.Event{event.RunStarted{Time: at, Command: "bootstrap", Machine: "laptop", Steps: newMac}}
+	events := []event.Event{event.RunStarted{Time: at, Command: "bootstrap", Machine: "laptop", Steps: rendertest.NewMac()}}
 	for _, s := range []string{"boot-github", "boot-mac", "boot-homebrew", "boot-kit-config"} {
 		events = append(events, fine(1, s, "fine"))
 	}
@@ -146,12 +105,8 @@ func sixMinutesInWith(formulae, casks int) []event.Event {
 	return events
 }
 
-// signIn is 1Password's sign-in come up, a step by hand the secrets wait
-// for: why, as its notes say; its title and steps, a subheading among
-// them, its driver's own; and kit tells by itself once it's done.
-var signIn = event.NeedsYou{Time: after(345), Step: "1password", Item: "1password", Title: onepassword.Driver{}.About().SignIn.Title,
-	Why:   "Every secret kit puts in place comes from 1Password, so it needs the app signed in and its command line turned on.",
-	Steps: onepassword.Driver{}.About().SignIn.Steps, Tells: true}
+// signIn is 1Password's sign-in come up, six minutes in.
+var signIn = rendertest.SignIn(after(345))
 
 // cardUp is sixMinutesIn with card come up for its step, applying.
 func cardUp(card event.NeedsYou) []event.Event {
@@ -246,7 +201,7 @@ func theRest(events []event.Event, end func(event.Step) check.Result) []event.Ev
 			done[f.Step] = true
 		}
 	}
-	for _, s := range newMac {
+	for _, s := range rendertest.NewMac() {
 		if !done[s.Name] {
 			events = append(events, event.StepFinished{Time: after(1400), Step: s.Name, Result: end(s)})
 		}
@@ -284,7 +239,7 @@ func appliedRun() []event.Event {
 // leaves out after a restart, and a formula held for a secret that never
 // came.
 func waitingRun() []event.Event {
-	all := append(slices.Clone(newMac),
+	all := append(rendertest.NewMac(),
 		event.Step{Name: "claude-mcp", Title: "Claude MCP", Area: "Drift", Row: "Developer tools"},
 		event.Step{Name: "spotlight-exclusion", Title: "Spotlight exclusions", Area: "Drift", Row: "Mac settings"})
 	waiting := func(step, state, detail string, later bool, names ...string) []check.Item {
@@ -667,7 +622,7 @@ func secretsWaiting() []event.Event {
 // waiting for composer, which another step puts in place; npm's not
 // started, waiting for the formulae.
 func toolsWaiting() []event.Event {
-	steps := append(slices.Clone(newMac), event.Step{Name: "gh-extension", Title: "GitHub extensions", Area: "Drift", Row: "Developer tools"},
+	steps := append(rendertest.NewMac(), event.Step{Name: "gh-extension", Title: "GitHub extensions", Area: "Drift", Row: "Developer tools"},
 		event.Step{Name: "claude-mcp", Title: "Claude MCP", Area: "Drift", Row: "Developer tools"})
 	events := sixMinutesIn()
 	for i, e := range events {
@@ -710,6 +665,22 @@ func TestApplyingRowStillToRun(t *testing.T) {
 				fits(t, got, size)
 			})
 		}
+	}
+}
+
+// A card taller than the right pane at the least window leaves the log no
+// room, drawn and scrolled alike: the screen still draws, the panel cut at
+// the window's foot.
+func TestApplyScreenCardTallerThanThePane(t *testing.T) {
+	card := signIn
+	card.Steps = numbered("Do this", 30)
+	face, out, kb := applyAt(100, 30, 6*time.Minute, cardUp(card))
+	kb.press(t, ask.Key{Name: "up"}, ask.Key{Name: "pgup"})
+	face.Turn()
+	got := screen(out.String())
+	fits(t, got, [2]int{100, 30})
+	if !strings.Contains(got, "Do this-1") {
+		t.Errorf("the panel isn't on the screen:\n%s", got)
 	}
 }
 
@@ -1349,7 +1320,7 @@ func TestApplyingPanelSaysWhy(t *testing.T) {
 		{event.NeedsYou{Time: after(360), Step: "1password", Item: "1password", Title: "Sign in to 1Password", Tells: true},
 			"      The run waits for this, for Secrets.", "waiting 12.0s", []string{"      kit carries on by itself once it's done"}},
 	} {
-		steps := slices.Clone(newMac)
+		steps := rendertest.NewMac()
 		face, out, _ := applyAt(160, 64, 6*time.Minute+12*time.Second, append(rowsRun(steps, event.StepStarted{Time: after(360), Step: tt.card.Step, Doing: "applying"}), tt.card))
 		_, right := panes(screen(out.String()), 160)
 		if !strings.HasSuffix(right[1], tt.title) || right[3] != tt.why || !slices.Equal(right[5:5+len(tt.keys)], tt.keys) {
@@ -1579,7 +1550,7 @@ func TestApplyingRecordLeavesOutOnlyWhatComesLater(t *testing.T) {
 // row is, and a row done keeps under it what of its steps waits on the
 // person, a password say, in the log too.
 func TestApplyingRecordKeepsWhatWaits(t *testing.T) {
-	events := rowsRun(newMac[4:13],
+	events := rowsRun(rendertest.NewMac()[4:13],
 		fine(10, "homebrew", "4.6.1"),
 		finished(20, "brew", check.Result{State: check.Attention, Summary: "3 declared, all installed", Items: []check.Item{
 			{ID: "brew:ffmpeg", Name: "ffmpeg", State: "extra", Detail: "installed, not declared"}}}),

@@ -352,13 +352,16 @@ func (p *Pretty) scroll(n, room, by int) {
 }
 
 // logSize is how many lines the log has, as it's chosen, or the raw view
-// in its place, and how many it
-// has room for, in the window as it is.
+// in its place, and how many it has room for, in the window as it is.
 func (p *Pretty) logSize() (n, room int) {
 	w, h := p.window()
 	top, _ := p.paneTop(w - splitAt(w) - 1)
-	return len(p.paneBody(w - splitAt(w) - 1)), h - len(p.header()) - 1 - len(top)
+	return len(p.paneBody(w - splitAt(w) - 1)), logRoom(h-len(p.header())-1, top)
 }
+
+// logRoom is how many lines the log has room for in a pane room lines
+// high, under top: none, when top fills it, as a tall card's panel can.
+func logRoom(room int, top []string) int { return max(room-len(top), 0) }
 
 // footKeys are the keys at the left pane's foot, as it reads them.
 func (p *Pretty) footKeys() string {

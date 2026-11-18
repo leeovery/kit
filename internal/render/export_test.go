@@ -13,12 +13,6 @@ func (a *Arrival) HeaderAt(typed int) []string { return a.header(typed) }
 // ShrinkAt is the arrival's shrink at step.
 func (a *Arrival) ShrinkAt(width, height, step int) []string { return a.shrink(width, height, step) }
 
-// Clocked has the face tell the time by now, for how long a run has taken.
-func (p *Pretty) Clocked(now func() time.Time) *Pretty {
-	p.now = now
-	return p
-}
-
 // Turned has the face's spinner turn only when Turn turns it, never as time
 // goes by.
 func (p *Pretty) Turned() *Pretty {

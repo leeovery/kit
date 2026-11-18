@@ -22,6 +22,8 @@ golangci-lint run            # standard linters plus modernize (.golangci.yml)
 shellcheck internal/steps/template.sh   # the script steps of the user's own start from
 shellcheck --shell=sh install.sh        # the install script: POSIX sh alone
 shellcheck -x scripts/release-*         # the release's hooks
+shellcheck demo/*.sh                    # the scripts that record the README's art
+shellcheck --shell=sh demo/bin/kit      # the shim its status tape types kit at
 go build ./...
 scripts/personal-data-scan   # no personal data in the files or the history
 ```
@@ -150,10 +152,18 @@ its sentences.
 
 - Code lines run 52 columns at most. A comment goes on a line of its own, above the command.
 - Tables run 4 columns at most, with short cells.
-- No forced line breaks (`<br>`).
-- What kit prints goes in a `console` or `text` fence, copied from the code (a test, a golden
-  file or `--help`), never made up. Cut lines you don't need; never change one. Its wide lines
-  stand.
+- No forced line breaks (`<br>`), but in the README's Screens grid.
+- What kit shows at a terminal goes on a page as a still, drawn by kit's own faces from scripted
+  runs, never a code block or a copy.
+- Each still is a fixture in `internal/capture`, drawn from the run the page's words come from
+  and pinned by its golden file. `demo/` records it to `art/<page>-<what>.webp`.
+- Embed a still as `<img src="../art/…" alt="…" width="…">`. Its alt text says what it shows,
+  and its width is half its pixels, so a phone draws it sharp.
+- Text fences stay only for what a reader copies or searches:
+  - JSON, for agents;
+  - kit's plain face, on a page about scripts and agents;
+  - an error message, quoted in troubleshooting;
+  - declarations, `kit.toml` and layout lines.
 
 ### Facts and placeholders
 
@@ -191,9 +201,12 @@ About 700 words, in this order:
    under `## Why kit?`.
 2. **Benefits,** six at most: a bold benefit of six words or fewer, one specific sentence, and a
    link to its page. The smaller pages go in one line of links under them.
-3. **Screens:** a grid of stills recorded from kit's real screens (tapes in `demo/`, VHS,
-   `art/*.webp`, as Switchboard and Portal make theirs), each captioned with the one thing it
-   answers, each linking to its page. Never a code block or a mock-up of a screen kit draws.
+3. **Screens:** a grid of stills drawn by kit's own faces from scripted runs (tapes in `demo/`,
+   VHS, `art/*.webp`, as Switchboard and Portal make theirs), each captioned with the one thing
+   it answers, each linking to its page. Never a code block or a mock-up of a screen kit draws.
+   Every screen is the clip's window, whole, so all are one size and their text one scale. The
+   grid runs two to a row, an even number of screens, each `width` a quarter of its pixels. As
+   in Switchboard's, a `<br>` sets each caption under its screen, the one place one's allowed.
 4. **Install:** one line of requirements, the commands, one line on removing kit.
 5. **Quick start:** two to four commands, a comment above each.
 6. **Questions:** four or five one-line answers to readers' objections, each linking to a page.
@@ -212,8 +225,8 @@ config layout and the gates live on their own pages.
 |---|---|
 | Title | The benefit, in the reader's words |
 | Opening | 40 to 60 words: what it does for you, and when you'd want it |
-| The moment | One still or clip, once one exists |
-| Try it | 2 to 4 commands, a comment above each, then what kit prints |
+| The moment | One still or clip, once one exists, as The phone says |
+| Try it | 2 to 4 commands, a comment above each, then the still of what kit shows |
 | What happens | 3 to 6 one-sentence bullets on what you'll notice |
 | Good to know | 2 to 4 bullets: limits, costs, objections |
 | Reference | A table of 8 rows at most, or links to the reference pages |

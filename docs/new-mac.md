@@ -21,20 +21,7 @@ The line downloads the newest release of kit, checks it against its checksum, an
 `kit bootstrap`. A splash plays while kit tests the Mac, then enter starts the boot. The end of
 the boot looks like this:
 
-```text
-  SIGN IN
-  [ OK ] GitHub  someone · kit-config has laptop and studio
-
-  BOOT ORDER
-  [ OK ] This Mac  laptop
-  [ OK ] Password  Touch ID on for sudo
-  [ OK ] Homebrew  7.0.9 · Xcode tools 27.0 · 6m02s
-  [ OK ] kit-config  cloned · 61 files linked
-  [ OK ] kit  0.1.1 · through Homebrew · 21s
-  [ OK ] Full Disk Access  granted to Ghostty
-  [*   ] Ghostty  opening
-         → macOS asks before Ghostty first opens: choose Open
-```
+<img src="../art/new-mac-boot.webp" alt="The boot in Terminal near its end: the self-test, signed in to GitHub, the boot order done, and Ghostty opening" width="449">
 
 ## The boot, step by step
 
@@ -60,13 +47,9 @@ the boot looks like this:
   can do, such as a backup disk.
 - **The window becomes a fresh shell** once `kit apply` ends.
 
-```text
-  TO DO  2 · kit apply brings them back
-  △ 1  Add a Time Machine disk
-       → Plug in your backup disk
-  △ 2  Set up Arq's backup plan
-       → Open Arq
-```
+`kit apply` ends on its record: what's left for you to do, then what's done.
+
+<img src="../art/new-mac-record.webp" alt="kit apply's record on a new Mac: two to-dos left, the backup disk and Arq's plan, each with its steps, and the rest done" width="566">
 
 ## Which Mac it starts from
 

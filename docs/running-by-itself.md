@@ -66,13 +66,11 @@ A check is a command that exits 0 when all's well. Declare it in `[checks]`, and
 every `kit status` and every hourly run. kit runs it once when you add it:
 
 ```bash
-# Check the local DNS server answers
-kit check add dns -- dig @127.0.0.1 example.com
+# Check the local database answers
+kit check add db -- pg_isready -h 127.0.0.1
 ```
 
-```console
-  ● dns  declared in laptop · it fails now: ;; connection timed out
-```
+<img src="../art/running-by-itself-check.webp" alt="kit check add db at a terminal: declared in laptop, and failing now, with what the check printed" width="534">
 
 If a check fails, the first line it prints is what `kit status` shows. A check must change
 nothing, and finish within a minute.

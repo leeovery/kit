@@ -16,6 +16,7 @@ import (
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/hand"
 	"github.com/leeovery/kit/internal/look"
+	"github.com/leeovery/kit/internal/render/rendertest"
 )
 
 // The to-dos at the run's end: kit's own (apps' settings first, the
@@ -70,9 +71,9 @@ func yours(t event.ToDo) check.Result {
 // every other step finished, Time Machine, Arq and apps' settings left to
 // do, the steps by hand at the end applying.
 func toDosBegin() []event.Event {
-	events := []event.Event{event.RunStarted{Time: at, Command: "bootstrap", Machine: "laptop", Steps: newMac}}
+	events := []event.Event{event.RunStarted{Time: at, Command: "bootstrap", Machine: "laptop", Steps: rendertest.NewMac()}}
 	left := map[string]event.ToDo{"prefs": toDoList[0], "time-machine": toDoList[4], "arq": toDoList[5]}
-	for i, s := range newMac {
+	for i, s := range rendertest.NewMac() {
 		switch t, ok := left[s.Name]; {
 		case s.Name == "manual":
 		case ok:

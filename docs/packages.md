@@ -13,10 +13,7 @@ kit brew add jq
 
 kit installs jq, writes its line, then commits and pushes kit-config:
 
-```console
-  ● jq  installed · declared in laptop
-  ● kit-config  committed and pushed laptop/declarations
-```
+<img src="../art/packages-add.webp" alt="kit brew add jq at a terminal: jq installed and declared in laptop, then kit-config committed and pushed" width="443">
 
 The line lands in this Mac's declarations file, in sorted order:
 
@@ -74,10 +71,7 @@ A few kinds take more than the name they keep:
 If you install a package with brew or npm yourself, kit-config doesn't have it. That's drift.
 After its first day, `kit status` lists it under CONFIG:
 
-```console
-  CONFIG
-  ▲ ffmpeg  installed, not declared · 2 days · → kit reconcile
-```
+<img src="../art/drift-status.webp" alt="kit status under CONFIG: ffmpeg installed, not declared, for 2 days, with kit reconcile to settle it" width="456">
 
 `kit reconcile brew:ffmpeg --adopt` declares it, and `--remove` uninstalls it.
 

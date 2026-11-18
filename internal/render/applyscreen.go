@@ -449,7 +449,7 @@ func (p *Pretty) rightPane(w, room int) (lines []string, rules map[int]bool, log
 		rules[rule] = true
 	}
 	body := p.paneBody(w)
-	start, end, back := p.keys.logWindow(len(body), room-len(top))
+	start, end, back := p.keys.logWindow(len(body), logRoom(room, top))
 	lines = append(top, body[start:end]...)
 	if back {
 		lines = append(lines, make([]string, max(room-backFoot-len(lines), 0))...)

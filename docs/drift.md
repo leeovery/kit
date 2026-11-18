@@ -14,10 +14,7 @@ kit status
 
 Drift shows under CONFIG, with how long it's been there:
 
-```console
-  CONFIG
-  ▲ ffmpeg  installed, not declared · 2 days · → kit reconcile
-```
+<img src="../art/drift-status.webp" alt="kit status under CONFIG: ffmpeg installed, not declared, for 2 days, with kit reconcile to settle it" width="456">
 
 ```bash
 # Settle it: kit asks, then does it all
@@ -27,12 +24,7 @@ kit reconcile
 At a terminal, kit asks about each item first. Then it does what you chose, and commits and
 pushes kit-config once:
 
-```console
-  ● ffmpeg  already installed · declared in laptop
-  ● kit-config  committed and pushed laptop/declarations
-
-  1 settled · 6.1s
-```
+<img src="../art/drift-reconcile.webp" alt="kit reconcile at its end: ffmpeg declared in laptop, kit-config committed and pushed, 1 settled" width="417">
 
 ## What happens
 
@@ -103,9 +95,7 @@ keeps a note after the line it adopts. `kit reconcile brew cask` goes through on
 kit brew add hello --temp
 ```
 
-```text
-hello ok installed, for now: not declared, quiet for 7 days, then kit reconcile asks
-```
+<img src="../art/drift-temp.webp" alt="kit brew add hello --temp at a terminal: hello installed for now, not declared, and nothing for kit-config to commit" width="573">
 
 The package stays quiet for 7 days. After that, it's drift like any other, and `kit
 reconcile` asks whether to keep it.

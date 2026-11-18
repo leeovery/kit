@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -355,6 +356,37 @@ func TestGitHubCodeExpiresOrIsDeclined(t *testing.T) {
 	b.Ask = &asker{picks: []string{"enter"}}
 	if _, err := b.signIn(context.Background()); !errors.Is(err, errDenied) {
 		t.Errorf("signIn = %v; want it declined", err)
+	}
+}
+
+// slowPick is an asker whose waiting pick takes a moment to end once it's
+// called off, and notes when it has.
+type slowPick struct {
+	asker
+	ended atomic.Bool
+}
+
+func (a *slowPick) Pick(ctx context.Context, step string, keys []Key) (string, error) {
+	if key, err := a.asker.Pick(ctx, step, keys); err == nil {
+		return key, nil
+	}
+	time.Sleep(20 * time.Millisecond)
+	a.ended.Store(true)
+	return "", ctx.Err()
+}
+
+// Signed in, signing in has stopped asking how: the way it waited on while
+// GitHub did is done with before it returns, as what runs next asks its
+// own questions.
+func TestGitHubSignInIsDoneAskingOnceSignedIn(t *testing.T) {
+	gh := &gitHub{answers: []string{"token"}, token: "gho_secret"}
+	ask := &slowPick{picks: []string{"enter"}}
+	b, _ := newBoot(t, runnertest.New(t), gh.serve(t), ask)
+	if _, err := b.signIn(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !ask.ended.Load() {
+		t.Error("signIn returned still asking how to sign in")
 	}
 }
 

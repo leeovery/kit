@@ -21,6 +21,7 @@ import (
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/look"
 	"github.com/leeovery/kit/internal/render"
+	"github.com/leeovery/kit/internal/render/rendertest"
 )
 
 var update = flag.Bool("update", false, "rewrite the golden files with what the faces print")
@@ -45,7 +46,7 @@ func golden(t *testing.T, name, got string) {
 	}
 }
 
-var at = time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+var at = rendertest.At
 
 // run is a run's events: steps finishing out of order, one of each state,
 // and items of each sort.
@@ -78,51 +79,6 @@ func run() []event.Event {
 		event.StepFinished{Time: at, Step: "brew", Result: brew},
 		event.StepFinished{Time: at, Step: "mas", Result: check.Result{State: check.Deferred, Reason: "needs Homebrew"}},
 		event.RunFinished{Time: at, Duration: time.Second, Counts: map[check.State]int{check.OK: 2, check.Attention: 1, check.Failed: 1, check.Deferred: 1}},
-	}
-}
-
-// statusRun is a run of kit status as the pretty face shows it: steps in
-// their areas, Config's with their parts, one of each state, and items of
-// each sort.
-func statusRun() []event.Event {
-	steps := []event.Step{
-		{Name: "homebrew", Title: "Homebrew", Area: "Drift", Row: "Homebrew formulae", Tool: "Homebrew", Part: render.PartPackages},
-		{Name: "brew", Title: "Formulae", Area: "Drift", Row: "Homebrew formulae", Tool: "Homebrew", Part: render.PartPackages},
-		{Name: "cask", Title: "Casks", Area: "Drift", Row: "Homebrew casks", Tool: "Homebrew", Part: render.PartPackages},
-		{Name: "defaults", Title: "macOS settings", Area: "Drift", Row: "Mac settings", Part: render.PartSettings},
-		{Name: "config-private", Title: "Privacy", Area: "Config", Part: render.PartConfig},
-		{Name: "config-sync", Title: "Sync", Area: "Config", Part: render.PartConfig},
-		{Name: "mas", Title: "App Store", Area: "Drift", Row: "App Store apps", Part: render.PartPackages},
-		{Name: "time-machine", Title: "Time Machine", Area: "Backups"},
-		{Name: "disk", Title: "Disk space", Area: "Mac"},
-		{Name: "fonts", Title: "fonts", Area: "Steps"},
-	}
-	brew := check.Result{
-		State: check.Attention, Summary: "6 declared, 4 installed", Counts: map[string]int{"declared": 6, "installed": 4},
-		Items: []check.Item{
-			{ID: "brew:jq", Name: "jq", State: "missing", Action: "install"},
-			{ID: "brew:ffmpeg", Name: "ffmpeg", State: "extra", Since: at.Add(-50 * time.Hour)},
-			{ID: "brew:hello", Name: "hello", State: "extra", Quiet: "new"},
-		},
-	}
-	ok := func(summary string, counts map[string]int) check.Result {
-		return check.Result{State: check.OK, Summary: summary, Counts: counts}
-	}
-	return []event.Event{
-		event.RunStarted{Time: at, Command: "status", Machine: "laptop", Version: "0.1.0", Steps: steps},
-		event.StepFinished{Time: at, Step: "homebrew", Result: ok("/opt/homebrew", nil)},
-		event.StepFinished{Time: at, Step: "cask", Result: ok("3 declared, all installed", map[string]int{"installed": 3})},
-		event.StepFinished{Time: at, Step: "defaults", Result: ok("9 declared, all set", map[string]int{"installed": 9})},
-		event.StepFinished{Time: at, Step: "config-private", Result: check.Result{State: check.OK, Summary: "private on GitHub", Glance: "private"}},
-		event.StepFinished{Time: at, Step: "config-sync", Result: check.Result{State: check.Failed, Reason: "not a git repository"}},
-		event.StepFinished{Time: at, Step: "brew", Result: brew},
-		event.StepFinished{Time: at, Step: "mas", Result: check.Result{State: check.Deferred, Reason: "needs Homebrew"}},
-		event.StepFinished{Time: at, Step: "time-machine", Result: ok("last backup 02:35", nil)},
-		event.StepFinished{Time: at, Step: "disk", Result: check.Result{State: check.Attention, Summary: "8% free", Items: []check.Item{
-			{ID: "disk:low", Name: "only 8% free on the startup disk", State: "problem", Detail: "free some space: kit status says where it went"},
-		}}},
-		event.StepFinished{Time: at, Step: "fonts", Result: ok("16 installed", nil)},
-		event.RunFinished{Time: at, Duration: 1800 * time.Millisecond, Counts: map[check.State]int{check.OK: 6, check.Attention: 2, check.Failed: 1, check.Deferred: 1}},
 	}
 }
 
@@ -207,13 +163,13 @@ func TestFacesShowNothingOfTheLogsLines(t *testing.T) {
 
 func TestPrettyLayout(t *testing.T) {
 	var out bytes.Buffer
-	show(t, render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.NoTTY}, 80, false), statusRun())
+	show(t, render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.NoTTY}, 80, false), rendertest.StatusRun())
 	golden(t, "pretty.golden", out.String())
 }
 
 func TestPrettyColour(t *testing.T) {
 	var out bytes.Buffer
-	show(t, render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.TrueColor}, 80, false), statusRun())
+	show(t, render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.TrueColor}, 80, false), rendertest.StatusRun())
 	golden(t, "pretty-colour.golden", out.String())
 }
 
@@ -569,102 +525,8 @@ func (b *syncBuffer) String() string {
 	return b.buf.String()
 }
 
-// screen is what's left on a terminal once raw is written to it: text
-// written over what's there, a carriage return, a new line, the cursor
-// moved up or put in place, a line cleared to its end, the screen cleared
-// below; other controls change nothing on it. The alternate screen is a
-// screen of its own, the main one kept beneath it: what's left is the one
-// showing.
-func screen(raw string) string {
-	main := &term{lines: []string{""}}
-	t := main
-	for len(raw) > 0 {
-		switch {
-		case raw[0] == '\n':
-			t.row++
-			t.col = 0
-			for t.row >= len(t.lines) {
-				t.lines = append(t.lines, "")
-			}
-			raw = raw[1:]
-		case raw[0] == '\r':
-			t.col = 0
-			raw = raw[1:]
-		case strings.HasPrefix(raw, "\x1b]"):
-			raw = raw[strings.IndexByte(raw, '\a')+1:]
-		case strings.HasPrefix(raw, "\x1b["):
-			end := 2
-			for end < len(raw) && (raw[end] < 0x40 || raw[end] > 0x7e) {
-				end++
-			}
-			params, final := raw[2:end], raw[end]
-			raw = raw[end+1:]
-			n := 1
-			if _, err := fmt.Sscanf(params, "%d", &n); err != nil {
-				n = 1
-			}
-			switch {
-			case params == "?1049" && final == 'h':
-				t = &term{lines: []string{""}}
-			case params == "?1049" && final == 'l':
-				t = main
-			case final == 'A':
-				t.row = max(t.row-n, 0)
-			case final == 'H':
-				row, col := 1, 1
-				_, _ = fmt.Sscanf(params, "%d;%d", &row, &col)
-				t.row, t.col = row-1, col-1
-				for t.row >= len(t.lines) {
-					t.lines = append(t.lines, "")
-				}
-			case final == 'K':
-				t.lines[t.row] = cells(t.lines[t.row], t.col)
-			case final == 'J' && params == "2":
-				t.lines, t.row, t.col = []string{""}, 0, 0
-			case final == 'J':
-				t.lines[t.row] = cells(t.lines[t.row], t.col)
-				t.lines = t.lines[:t.row+1]
-			}
-		default:
-			i := strings.IndexAny(raw, "\n\r\x1b")
-			if i < 0 {
-				i = len(raw)
-			}
-			t.put(raw[:i])
-			raw = raw[i:]
-		}
-	}
-	return strings.Join(t.lines, "\n")
-}
-
-// term is a screen's lines, and where the cursor is.
-type term struct {
-	lines    []string
-	row, col int
-}
-
-// put writes text at the cursor, over what's there.
-func (t *term) put(text string) {
-	line := []rune(t.lines[t.row])
-	for len(line) < t.col {
-		line = append(line, ' ')
-	}
-	for _, r := range text {
-		if t.col < len(line) {
-			line[t.col] = r
-		} else {
-			line = append(line, r)
-		}
-		t.col++
-	}
-	t.lines[t.row] = string(line)
-}
-
-// cells is line's first n cells.
-func cells(line string, n int) string {
-	r := []rune(line)
-	return string(r[:min(n, len(r))])
-}
+// screen is what's left on a terminal once raw is written to it.
+var screen = rendertest.Screen
 
 // turned is a screen with the running mark as it starts, whichever way it
 // has turned since.
@@ -999,5 +861,38 @@ func TestPrettyStatusShowsEditsGitKeepsApart(t *testing.T) {
 		"    → kit reconcile\n"
 	if !strings.Contains(out.String(), want) {
 		t.Errorf("printed\n%s\nwant\n%s", out.String(), want)
+	}
+}
+
+// A kit-config that isn't private needs you, and no kit command makes it
+// private: its row says what does, naming none, and kit-config's own row is
+// marked as needing you, whatever else of it is well.
+func TestPrettyConfigNotPrivate(t *testing.T) {
+	for _, tt := range []struct{ state, detail, row string }{
+		{"not-private", "make it private: gh repo edit owner/kit-config --visibility private",
+			"  ▲ owner/kit-config\n    make it private: gh repo edit owner/kit-config --visibility private\n"},
+		{"unproven", "gh isn't signed in", "  ▲ owner/kit-config  gh isn't signed in\n"},
+	} {
+		t.Run(tt.state, func(t *testing.T) {
+			var out bytes.Buffer
+			show(t, render.NewPretty(&colorprofile.Writer{Forward: &out, Profile: colorprofile.NoTTY}, 120, false), []event.Event{
+				event.RunStarted{Time: at, Command: "status", Machine: "laptop", Steps: []event.Step{
+					{Name: "config-private", Title: "Privacy", Area: "Config", Part: render.PartConfig},
+					{Name: "config-sync", Title: "Sync", Area: "Config", Part: render.PartConfig},
+				}},
+				event.StepFinished{Step: "config-private", Result: check.Result{State: check.Attention, Summary: "it must be private", Items: []check.Item{
+					{ID: "config-private:owner/kit-config", Name: "owner/kit-config", State: tt.state, Detail: tt.detail},
+				}}},
+				event.StepFinished{Step: "config-sync", Result: check.Result{State: check.OK, Summary: "pushed", Glance: "pushed"}},
+				event.RunFinished{Duration: time.Second, Counts: map[check.State]int{check.OK: 1, check.Attention: 1}},
+			})
+			got := ansi.Strip(out.String())
+			if !strings.Contains(got, tt.row) || strings.Contains(got, "kit reconcile") || strings.Contains(got, "kit apply") {
+				t.Errorf("printed\n%s\nwant\n%s\nand no kit command", got, tt.row)
+			}
+			if !strings.Contains(got, "  ▲ kit-config  it must be private · pushed\n") {
+				t.Errorf("printed\n%s\nwant kit-config's row marked as needing you", got)
+			}
+		})
 	}
 }
