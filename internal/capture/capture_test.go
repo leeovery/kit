@@ -48,7 +48,7 @@ func TestFixtures(t *testing.T) {
 			if wide := drawn(t, f, 120); !f.Held() && wide != got {
 				t.Errorf("at 120 columns, drew\n%s\nwant it as at 80", wide)
 			}
-			if widest := widestLine(got); f.Held() && !whole(f) && (widest > f.Width-2 || widest < f.Width-6) {
+			if widest := widestLine(got); f.Held() && !f.Whole() && (widest > f.Width-2 || widest < f.Width-6) {
 				t.Errorf("drew %d columns in a window %d wide: want it a column or two wider than what it draws", widest, f.Width)
 			}
 			if lines := strings.Count(got, "\n") + 1; f.Held() && lines > f.Height {
@@ -60,10 +60,6 @@ func TestFixtures(t *testing.T) {
 		})
 	}
 }
-
-// whole is whether f is shown as the clip's window, whole, whatever it
-// draws in it.
-func whole(f capture.Fixture) bool { return f.Width == 120 && f.Height == 34 }
 
 // widestLine is how many columns screen's widest line takes.
 func widestLine(screen string) int {
@@ -175,6 +171,9 @@ func TestScenariosPlayThrough(t *testing.T) {
 	for _, tt := range []struct {
 		name  string
 		shows []string
+		// ends is what its record matches: kit apply's clock runs on through
+		// its half hour, as a new Mac's does.
+		ends *regexp.Regexp
 	}{
 		{"boot", []string{
 			"computers are fun", "press enter",
@@ -184,7 +183,7 @@ func TestScenariosPlayThrough(t *testing.T) {
 			"which of your Macs is this?", "this Mac's password, once", "••••••••••",
 			"==> Installation successful!", "drag Ghostty into the list", "choose Open",
 			"[ OK ] Ghostty  opened · kit carries on there", "this window can be closed",
-		}},
+		}, nil},
 		{"arrival", []string{
 			"hello again", "press any key", "bootstrap · laptop · Fri 20 Nov · 09:52",
 			"tab next row · ↑↓ scroll · q stop", "Homebrew: 5.0.3 · Xcode tools 26.1", "Homebrew: /opt/homebrew",
@@ -192,7 +191,7 @@ func TestScenariosPlayThrough(t *testing.T) {
 			"12 in place", "Homebrew formulae: 129 installed",
 			"TO DO", "Allow Karabiner-Elements", "Install the editor from its site", "Add a Time Machine disk",
 			"carrying on", "1 to do · ", "TO DO  1 · kit apply brings them back", "DONE",
-		}},
+		}, regexp.MustCompile(`1 to do · \d+ fine · (2\d|3\d)m\d\ds`)},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
@@ -221,6 +220,9 @@ func TestScenariosPlayThrough(t *testing.T) {
 					t.Fatalf("after what it showed before, it never showed %q", want)
 				}
 				from += i + len(want)
+			}
+			if tt.ends != nil && !tt.ends.MatchString(at.text()) {
+				t.Errorf("its record never matched %s\n%s", tt.ends, tail(at.text()))
 			}
 		})
 	}

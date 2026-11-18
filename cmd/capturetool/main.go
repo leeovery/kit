@@ -62,7 +62,7 @@ func run(ctx context.Context, args []string, in io.Reader, out io.Writer, size f
 	fixture := flags.String("fixture", "", "print the fixture `name`d, a still")
 	scenario := flags.String("scenario", "", "play the scenario `name`d, a clip")
 	list := flags.Bool("list", false, "list the fixtures and scenarios")
-	stills := flags.Bool("stills", false, "list the stills that are windows of their own, a line each: name, look, columns, lines and the words each shows once drawn, tab-separated")
+	stills := flags.Bool("stills", false, "list the stills that are windows of their own, a line each: name, look, columns, lines, the words each shows once drawn, and whether it's kept whole or cut to what it draws, tab-separated")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -133,13 +133,19 @@ func untilALine(ctx context.Context, lines *bufio.Scanner) (context.Context, con
 
 // listStills lists the stills that are windows of their own, as record.sh
 // makes their tapes from: each its name, the look it's recorded in, its
-// size and the words it shows once drawn, tab-separated.
+// size, the words it shows once drawn, and its art: whole, the window kept
+// as it is, or still, cut to what it draws; tab-separated.
 func listStills(out io.Writer) error {
 	w := bufio.NewWriter(out)
 	for _, f := range capture.Fixtures() {
-		if f.Held() {
-			_, _ = fmt.Fprintf(w, "%s\t%s\t%d\t%d\t%s\n", f.Name, cmp.Or(string(f.Look), "ghostty"), f.Width, f.Height, f.Shows)
+		if !f.Held() {
+			continue
 		}
+		art := "still"
+		if f.Whole() {
+			art = "whole"
+		}
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%d\t%d\t%s\t%s\n", f.Name, cmp.Or(string(f.Look), "ghostty"), f.Width, f.Height, f.Shows, art)
 	}
 	return w.Flush()
 }

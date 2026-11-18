@@ -3,9 +3,8 @@
   ▲ owner/kit-config
     make it private: gh repo edit owner/kit-config --visibility private --
     accept-visibility-change-consequences
-    → kit reconcile
   ● Packages  102 installed
   ● Settings  105 set
   ● Files  61 linked
   ● Secrets  12 in place
-  ● kit-config  public on GitHub (owner/kit-config): it must be private · pushed
+  ▲ kit-config  public on GitHub (owner/kit-config): it must be private · pushed

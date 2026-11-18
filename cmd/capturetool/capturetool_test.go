@@ -31,7 +31,7 @@ func TestList(t *testing.T) {
 	if err := run(context.Background(), []string{"--list"}, strings.NewReader(""), &out, size); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"--fixture status", "--fixture reconcile", "82×24", "--scenario boot", "--scenario arrival", "120×34"} {
+	for _, want := range []string{"--fixture status", "--fixture reconcile", "--fixture log", "--scenario boot", "--scenario arrival", "120×34"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("listed\n%s\nwant %q", out.String(), want)
 		}
@@ -58,14 +58,16 @@ func TestScenarioWaitsForItsStart(t *testing.T) {
 }
 
 // --stills lists each window of its own, tab-separated, for record.sh to
-// make its tape: name, look, size, and the words it shows.
+// make its tape: name, look, size, the words it shows, and whether it's
+// kept whole.
 func TestStills(t *testing.T) {
 	var out bytes.Buffer
 	if err := run(context.Background(), []string{"--stills"}, strings.NewReader(""), &out, size); err != nil {
 		t.Fatal(err)
 	}
 	got := out.String()
-	for _, want := range []string{"reconcile\tghostty\t82\t24\tRECONCILE  2 of 3\n", "boot-sign-in\tterminal\t120\t34\tWDJB\n"} {
+	for _, want := range []string{"reconcile\tghostty\t120\t34\tRECONCILE  2 of 3\twhole\n", "boot-sign-in\tterminal\t120\t34\tWDJB\twhole\n",
+		"backups-add\tghostty\t62\t4\tkit-config\tstill\n"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("listed\n%s\nwant %q", got, want)
 		}

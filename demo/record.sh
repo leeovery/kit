@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Record the README's and the docs' art: the art named, or all of it,
 # through vhs, then finalize.sh. A tape's first line says what it makes:
-# "# art: still" a still; "# art: part of <clip>" a part of a clip, the
-# clip's parts recorded in their names' order and joined; any other line a
-# clip of its own. A still that's a window of its own has no tape in demo/:
+# "# art: still" a still, cut to what it draws; "# art: whole" a still, the
+# window kept whole, as the README's screens are; "# art: part of <clip>" a
+# part of a clip, the clip's parts recorded in their names' order and
+# joined; any other line a clip of its own. A still that's a window of its own has no tape in demo/:
 # its tape is made from what capturetool --stills says of it, into
 # demo/out/tapes. Run it from anywhere; it works from the repository's
 # root, where the tapes' paths start.
@@ -75,14 +76,14 @@ record() {
 }
 
 # still_of prints what capturetool --stills says of the still named: its
-# look, columns, lines and the words it shows, tab-separated; nothing for
-# another name.
+# look, columns, lines, the words it shows and its art, still or whole,
+# tab-separated; nothing for another name.
 still_of() {
-	demo/out/capturetool --stills | awk -F '\t' -v name="$1" '$1 == name { print $2 "\t" $3 "\t" $4 "\t" $5 }'
+	demo/out/capturetool --stills | awk -F '\t' -v name="$1" '$1 == name { print $2 "\t" $3 "\t" $4 "\t" $5 "\t" $6 }'
 }
 
-# still_tape <name> <look> <columns> <lines> <shows> writes the tape of a
-# still that's a window of its own, and prints its path: the window its
+# still_tape <name> <look> <columns> <lines> <shows> <art> writes the tape
+# of a still that's a window of its own, and prints its path: the window its
 # size, in cells of look.tape's 13 × 29 px; the capture tool drawing it on
 # a cleared screen, recorded once it shows what it shows, and stopped a
 # moment after the recording is, as vhs can take a frame late.
@@ -91,7 +92,7 @@ still_tape() {
 	[ "$2" = ghostty ] || look="look-$2"
 	mkdir -p demo/out/tapes
 	cat >"$tape" <<-TAPE
-		# art: still, made by demo/record.sh from capturetool --stills
+		# art: $6, made by demo/record.sh from capturetool --stills
 		Output "demo/out/$1/"
 		Source "demo/$look.tape"
 		Set Width $(($3 * 13 + 60))
@@ -131,6 +132,7 @@ for name in "${names[@]}"; do
 		record "$name"
 		case "$(art_of "$name")" in
 		still) demo/finalize.sh --still "$name" ;;
+		whole) demo/finalize.sh --whole "$name" ;;
 		"part of "*) ;;
 		*) demo/finalize.sh "$name" ;;
 		esac
@@ -138,9 +140,9 @@ for name in "${names[@]}"; do
 	fi
 	still="$(still_of "$name")"
 	if [ -n "$still" ]; then
-		IFS=$'\t' read -r look columns lines shows <<<"$still"
-		record "$name" "$(still_tape "$name" "$look" "$columns" "$lines" "$shows")"
-		demo/finalize.sh --still "$name"
+		IFS=$'\t' read -r look columns lines shows art <<<"$still"
+		record "$name" "$(still_tape "$name" "$look" "$columns" "$lines" "$shows" "$art")"
+		demo/finalize.sh --"$art" "$name"
 		continue
 	fi
 	parts=()

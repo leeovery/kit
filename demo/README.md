@@ -22,24 +22,30 @@ demo/record.sh new-mac       # a clip in parts: each part's tape, then joined
 |---|---|---|
 | `new-mac-1-terminal`, `new-mac-2-ghostty` | scenarios `boot`, `arrival` | `art/new-mac.png`, an APNG: the README's lead, a new Mac from the boot's splash in Terminal to kit apply's record in Ghostty; and `demo/out/new-mac.mp4`, the same, for a page that takes a video |
 | `status` | fixture `status` | `art/status.webp`, a still: `kit status` on a Mac in daily use, two things waiting on the person: an app declared and not yet installed, a tool installed by hand |
-| made by `record.sh` | each fixture that's a window of its own | `art/<name>.webp`, a still each: the README's Screens (`apply-card`, `apply-todos`, `boot-sign-in`, `reconcile`), and every docs page's, named `<page>-<what>` (`go run ./cmd/capturetool --stills` lists them) |
+| made by `record.sh` | each fixture that's a window of its own | `art/<name>.webp`, a still each: the README's Screens (`apply-card`, `apply-todos`, `boot-sign-in`, `reconcile`, `log`), and every docs page's, named `<page>-<what>` (`go run ./cmd/capturetool --stills` lists them) |
 
 `look.tape` holds the settings every tape sources; `look-terminal.tape` is the boot's, for what's
-recorded in Terminal. A tape's first line says what it makes: `# art: still` a still, `# art: part
-of <clip>` a part of a clip, and any other line a clip of its own. Each tape ends on a
+recorded in Terminal. A tape's first line says what it makes: `# art: still` a still cut to what
+it draws, `# art: whole` a still kept whole, `# art: part of <clip>` a part of a clip, and any
+other line a clip of its own. Each tape ends on a
 `Wait+Screen` for a line only its run's end draws, so a scenario stuck on a key, or the capture
 tool failing, fails the recording rather than leaving art that looks right.
 
 A still that's a window of its own has no tape in `demo/`. `capturetool --stills` says, for each,
-its look, its size in cells and the words it shows once drawn; `record.sh` writes its tape from
-that into `demo/out/tapes/`, the window its size, and waits for those words. Each docs still's
-window is a column or two wider than what it draws, so the still is no bigger than its words; a
-README screen is the clip's window, whole. `go test ./internal/capture` holds both to that, and
-the words to what the screen shows.
+its look, its size in cells, the words it shows once drawn, and whether it's kept whole;
+`record.sh` writes its tape from that into `demo/out/tapes/`, the window its size, and waits for
+those words. Each docs still's window is a column or two wider than what it draws, so the still is
+no bigger than its words. Each README screen, `status` too, is the clip's window, 120 × 34, kept
+whole, so the grid's screens are one size and their text one scale. `go test ./internal/capture`
+holds both to that, and the words to what the screen shows.
+
+The README shows the clip at `width="820"` and each screen at `width="410"`: half and a quarter
+of their 1640 px, so a phone draws them sharp.
 
 The art goes to `art/` at the repository's root, so `git diff` shows what a recording changed, and
 the art is committed with the change it shows: images alone, as a README doesn't play a video
-committed beside it.
+committed beside it. Each re-record of the clip adds about 6 MB to the public history, which keeps
+every version: re-record it when its screens change, never by habit.
 
 ## The capture tool
 
@@ -119,7 +125,9 @@ vhs, and hands its frames to `finalize.sh`:
   animated image then stores whole; from the frames themselves it stores only what changed.
 - **The art.** For a clip, an APNG, which GitHub shows inline, at the frames' 30 a second, and an
   H.264 MP4 of the same frames in `demo/out/`; for a still, a lossless WebP of the last frame. Each
-  frame is set in a 40 px margin of its own background.
+  frame is set in a 40 px margin of its own background. The APNG's image outside the animation is
+  its last frame, apply's record, so what doesn't play an APNG shows where the clip ends, not its
+  blank first window.
 - **The clip is an APNG, not a WebP.** macOS draws images through ImageIO, which decodes each frame
   of an animated WebP from the first, keyframes or not, so a frame takes longer the later it comes:
   Safari, Quick Look and Preview play a WebP clip at about a quarter of its pace, and iOS draws
@@ -140,10 +148,10 @@ vhs, and hands its frames to `finalize.sh`:
   Ghostty is two tapes, and `finalize.sh --join` joins their frames, the last 0.4 s of the
   Terminal's fading into the first of Ghostty's, its blank window before "hello again": the window
   changing under the boot, as it does on a new Mac.
-- **The crop.** A still's screen is as tall as its run's tallest moment, so its last frame can end
-  in empty rows. `finalize.sh` finds the first and last rows holding a pixel unlike the margin's,
-  reading every pixel, and cuts below the last, leaving under it the margin above the first. Clips
-  keep their full height.
+- **The crop.** A docs still's window can be taller than what it draws, so its last frame can end
+  in empty rows. `finalize.sh --still` finds the first and last rows holding a pixel unlike the
+  margin's, reading every pixel, and cuts below the last, leaving under it the margin above the
+  first. `--whole` keeps the window whole, as clips keep theirs.
 
 `demo/out/` is remade each time and never committed.
 

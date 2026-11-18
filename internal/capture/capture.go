@@ -49,24 +49,34 @@ const (
 // than printed.
 func (f Fixture) Held() bool { return f.Width > 0 }
 
+// Whole is whether f is the clip's window, a README's screen, recorded
+// whole, whatever it draws in it, as each of the README's screens is, so
+// all are one size and their text one scale.
+func (f Fixture) Whole() bool { return f.Width == windowColumns && f.Height == windowLines }
+
 // Draw draws f at screen: printed, it returns once it's printed; held, it
 // holds till ctx is done, telling held once it's drawn.
 func (f Fixture) Draw(ctx context.Context, screen Screen, held func()) error {
-	return perform(ctx, screen, stepped(f.at), held, f.draw)
+	return perform(ctx, screen, stepped(f.at), held, func(s *stage) error {
+		s.shows = f.Shows
+		return f.draw(s)
+	})
 }
 
 // fixtures are the README's stills, then the docs pages', each named for
 // its page.
 var fixtures = slices.Concat([]Fixture{
 	{Name: "status", About: "kit status on a Mac in daily use, two things waiting on you", draw: status},
-	{Name: "apply-card", About: "kit apply's screen, 1Password's sign-in come up as a card", Width: 120, Height: 34,
+	{Name: "apply-card", About: "kit apply's screen, 1Password's sign-in come up as a card", Width: windowColumns, Height: windowLines,
 		Shows: "kit carries on by itself", at: arrivedAt, draw: applyCard},
-	{Name: "apply-todos", About: "the to-dos at kit apply's end, the first one's card up", Width: 120, Height: 34,
+	{Name: "apply-todos", About: "the to-dos at kit apply's end, the first done, the second's card up", Width: windowColumns, Height: windowLines,
 		Shows: "only you can fetch", at: arrivedAt, draw: applyToDos},
-	{Name: "boot-sign-in", About: "the boot signing in to GitHub, its QR code the whole window", Width: 120, Height: 34, Look: Terminal,
+	{Name: "boot-sign-in", About: "the boot signing in to GitHub, its QR code the whole window", Width: windowColumns, Height: windowLines, Look: Terminal,
 		Shows: "WDJB", at: bootAt, draw: bootSignIn},
-	{Name: "reconcile", About: "kit reconcile asking what to do with each thing that drifted", Width: 82, Height: 24,
+	{Name: "reconcile", About: "kit reconcile asking what to do with each thing that drifted", Width: windowColumns, Height: windowLines,
 		Shows: "RECONCILE  2 of 3", at: reconcileAt, draw: reconcile},
+	{Name: "log", About: "kit log, its runs to pick one from: every hour's by itself, and those by hand", Width: windowColumns, Height: windowLines,
+		Shows: "runs of nightly", at: logAt, draw: runLog},
 }, docs)
 
 // Fixtures are every fixture, by name.

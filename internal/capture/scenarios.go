@@ -12,19 +12,23 @@ import (
 	"github.com/leeovery/kit/internal/render/rendertest"
 )
 
+// The clip's window, in columns and lines: four lines taller than
+// Terminal's on a new Mac, so the boot at its tallest, Homebrew's last
+// lines and the bar under the self-test, fits without its head scrolling
+// away. The README's screens are drawn in it too.
+const windowColumns, windowLines = 120, 34
+
 // A new Mac's boot is two scenarios, as it's two windows: in Terminal, on
 // its own background, then in the terminal it hands over to. Each is made
-// for a window 120 by 34, four lines taller than Terminal's on a new Mac,
-// so the boot at its tallest, Homebrew's last lines and the bar under the
-// self-test, fits without its head scrolling away; and each plays at a
-// moment of a day, as the boot's head and apply's header say.
+// for the clip's window, and plays at a moment of a day, as the boot's head
+// and apply's header say.
 var scenarios = []Scenario{
 	{
-		Name: "boot", Width: 120, Height: 34, start: bootAt, play: boot,
+		Name: "boot", Width: windowColumns, Height: windowLines, start: bootAt, play: boot,
 		About: "the boot in Terminal: the splash, the self-test, signing in with the phone, the boot order to the hand-off",
 	},
 	{
-		Name: "arrival", Width: 120, Height: 34, start: arrivedAt, play: arrival,
+		Name: "arrival", Width: windowColumns, Height: windowLines, start: arrivedAt, play: arrival,
 		About: "the boot arriving in Ghostty: hello again, the decode in colour, then kit apply flying through to its record",
 	},
 }
@@ -115,11 +119,7 @@ func done(step, summary string) func(time.Time) event.Event {
 // as the boot goes on only once it has it, so a key pressed next can't
 // answer it in its place.
 func (b *booting) ask(question func() error, shows string, read time.Duration, does func()) {
-	mark := b.s.shown.mark()
-	answered := make(chan error, 1)
-	go func() { answered <- question() }()
-	b.s.answer(mark, shows, read, does)
-	b.err = cmp.Or(b.err, <-answered)
+	b.err = cmp.Or(b.err, b.s.asked(question, b.s.shown.mark(), shows, read, does))
 }
 
 // signIn signs in with the phone: the ways, enter chosen, the QR code and
@@ -127,8 +127,17 @@ func (b *booting) ask(question func() error, shows string, read time.Duration, d
 func (b *booting) signIn() {
 	b.showCode()
 	b.s.pause(1600 * time.Millisecond)
-	b.emit(done("github", "someone · kit-config has laptop and studio"))
+	b.emit(done("github", githubSaid))
 }
+
+// What the boot's steps say they did, in the clip and the stills alike.
+const (
+	githubSaid    = "someone · kit-config has laptop and studio"
+	homebrewSaid  = "5.0.3 · Xcode tools 26.1"
+	appsSaid      = "Ghostty 1.3.1"
+	kitConfigSaid = "cloned · 61 files linked"
+	kitSaid       = "0.1.2 · through Homebrew"
+)
 
 // deviceCode is the code the sign-in shows, as the phone enters it.
 const deviceCode = "WDJB-MJHT"
@@ -179,10 +188,10 @@ func (b *booting) order() {
 		b.emit(printed("homebrew", l))
 	}
 	s.pause(400 * time.Millisecond)
-	b.emit(done("homebrew", "5.0.3 · Xcode tools 26.1"))
-	b.step("apps", "installing Ghostty", "Ghostty 1.3.1", 700*time.Millisecond)
-	b.step("kit-config", "cloning", "cloned · 61 files linked", 600*time.Millisecond)
-	b.step("kit", "installing through Homebrew", "0.1.2 · through Homebrew", 500*time.Millisecond)
+	b.emit(done("homebrew", homebrewSaid))
+	b.step("apps", "installing Ghostty", appsSaid, 700*time.Millisecond)
+	b.step("kit-config", "cloning", kitConfigSaid, 600*time.Millisecond)
+	b.step("kit", "installing through Homebrew", kitSaid, 500*time.Millisecond)
 	b.emit(started("full-disk-access"))
 	b.ask(func() error {
 		_, err := b.face.Wait(ctx, "full-disk-access", "for Ghostty, before it first opens",
@@ -215,9 +224,14 @@ func arrival(s *stage) error {
 	}
 	face := s.applyFace(a.Landed())
 	defer face.Unwind()
+	// kit apply takes half an hour on a new Mac: its clock runs on through
+	// it, its card minutes in, its end half an hour on, as the stills'.
 	began := s.applyStarts(face, 500*time.Millisecond)
+	s.lapsing(70)
 	s.play(face, toTheCard())
+	s.lapsing(200)
 	s.play(face, toTheEnd())
+	s.lapsing(0)
 	face.Emit(applied(began, s.now()))
 	s.hold()
 	return face.Close()

@@ -2,9 +2,10 @@
 # Make the README's art from the frames a tape in demo/ recorded: for a clip,
 # an APNG, which GitHub shows inline, and an MP4 of it in demo/out for pages
 # that take a video (a README doesn't play one committed); for a still, a
-# lossless WebP of its last frame, cropped to what it drew; for a clip in
-# parts, its parts' frames joined, each fading into the next, as the boot in
-# Terminal hands over to Ghostty.
+# lossless WebP of its last frame, cropped to what it drew, or kept whole,
+# the README's screens all one size; for a clip in parts, its parts' frames
+# joined, each fading into the next, as the boot in Terminal hands over to
+# Ghostty.
 #
 # A clip is an APNG, not an animated WebP: Safari, and every app that draws
 # through macOS's ImageIO, decodes an animated WebP's frame from the first
@@ -18,7 +19,8 @@
 # from the frames themselves it stores only what changed.
 #
 # Usage:  demo/finalize.sh <name>...                    a clip each
-#         demo/finalize.sh --still <name>...            a still each
+#         demo/finalize.sh --still <name>...            a still each, cut
+#         demo/finalize.sh --whole <name>...            a still each, whole
 #         demo/finalize.sh --join <clip> <part>...      a clip of its parts
 # Input:  demo/out/<name>/   the frames vhs demo/<name>.tape wrote
 # Output: a still's art/<name>.webp; a clip's art/<name>.png and
@@ -42,13 +44,13 @@ noise_every=3
 
 mode=clip
 case "${1:-}" in
---still | --join)
+--still | --whole | --join)
 	mode="${1#--}"
 	shift
 	;;
 esac
 [ $# -gt 0 ] || {
-	echo "usage: demo/finalize.sh [--still | --join <clip>] <name>..." >&2
+	echo "usage: demo/finalize.sh [--still | --whole | --join <clip>] <name>..." >&2
 	exit 2
 }
 
@@ -116,6 +118,14 @@ still() {
 	made "art/$1.webp"
 }
 
+# whole <name> <dir> makes the still from the last of dir's frames, whole.
+whole() {
+	local shot
+	shot=("$2"/f*.png)
+	cwebp -quiet -lossless -m 6 "${shot[${#shot[@]} - 1]}" -o "$art/$1.webp"
+	made "art/$1.webp"
+}
+
 # changes <dir> prints how much each of dir's frames changes from the one
 # before, a line each, the first 0.
 changes() {
@@ -162,7 +172,9 @@ clip() {
 	while IFS=$'\t' read -r ms n; do
 		apng+=("$2.256/f$n.png" "$ms")
 	done < <(timed "$2")
-	apngasm -F -o "$art/$1.png" "${apng[@]}" >/dev/null
+	# The image first, outside the animation (-s), is what's shown where an
+	# APNG doesn't play: the clip's last frame, where it ends.
+	apngasm -F -s -o "$art/$1.png" "${apng[${#apng[@]} - 2]}" 100 "${apng[@]}" >/dev/null
 	ffmpeg -v error -y -framerate "$fps" -i "$2/f%05d.png" \
 		-c:v libx264 -preset slow -crf 20 -pix_fmt yuv420p -movflags +faststart "$here/out/$1.mp4"
 	made "art/$1.png" "demo/out/$1.mp4"

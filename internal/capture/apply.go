@@ -5,6 +5,8 @@ import (
 	"slices"
 	"time"
 
+	"github.com/leeovery/kit/internal/backup/timemachine"
+	"github.com/leeovery/kit/internal/backup/tool"
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/render"
@@ -78,8 +80,8 @@ func installing(step string, names []string, i, done, of int) []event.Event {
 func toTheCard() []beat {
 	beats := []beat{
 		{300 * time.Millisecond, []event.Event{
-			fine("boot-github", "someone · kit-config has laptop and studio"), fine("boot-mac", newMac),
-			fine("boot-homebrew", "5.0.3 · Xcode tools 26.1"), fine("boot-kit-config", "cloned · 61 files linked"),
+			fine("boot-github", githubSaid), fine("boot-mac", newMac),
+			fine("boot-homebrew", homebrewSaid), fine("boot-kit-config", kitConfigSaid),
 		}},
 		{400 * time.Millisecond, []event.Event{
 			fine("homebrew", "/opt/homebrew"), fine("file", "54 linked"), fine("path", "15 directories"),
@@ -160,9 +162,8 @@ func counting(from int) []beat {
 // The to-dos at a new Mac's run's end, in kit's order: the steps by hand
 // that wait for the end, and the backup disk only the person can add.
 var (
-	timeMachineDisk = event.ToDo{Step: "time-machine", ID: "time-machine:disk", Title: "Add a Time Machine disk", Group: "Backups",
-		How: []string{"Plug in your backup disk", "System Settings › General › Time Machine › Add Backup Disk, and choose it"}}
-	toDos = []event.ToDo{
+	timeMachineDisk = setUp(timemachine.Driver{}.About())
+	toDos           = []event.ToDo{
 		{Step: "manual", ID: "manual:karabiner", Title: "Allow Karabiner-Elements", Group: "Apps", How: []string{"Open Karabiner-Elements", "Allow what it asks for"}},
 		{Step: "manual", ID: "manual:editor", Title: "Install the editor from its site", Group: "Apps", How: []string{"Download it from editor.example.com", "Drag it to Applications"}},
 		{Step: "manual", ID: "manual:sharing", Title: "Allow remote users Full Disk Access", Group: "System Settings",
@@ -180,11 +181,22 @@ var (
 		{Item: "manual:sharing", Title: "Allow remote users Full Disk Access",
 			Why:   "So an SSH session from another Mac can reach everything, which Remote Login alone can't.",
 			Steps: []string{"System Settings › General › Sharing › Remote Login › ⓘ", "Turn on Allow full disk access for remote users"}},
-		{Item: "time-machine:disk", Title: "Add a Time Machine disk", Tells: true, Watch: "Time Machine has a disk",
-			Why:   "Time Machine has nowhere to back up to.",
-			Steps: timeMachineDisk.How},
+		setUpCard(timemachine.Driver{}.About()),
 	}
 )
+
+// setUp is the to-do a backup tool that isn't set up leaves, in its
+// driver's words, as kit's backups step makes it.
+func setUp(about tool.About) event.ToDo {
+	return event.ToDo{Step: about.ID, ID: about.ID + ":none", Title: about.SetUp.Title, Group: "Backups", How: about.SetUp.Steps}
+}
+
+// setUpCard is the card of the to-do a backup tool that isn't set up
+// leaves, in its driver's words: kit tells by itself once it's done.
+func setUpCard(about tool.About) event.NeedsYou {
+	s := about.SetUp
+	return event.NeedsYou{Item: about.ID + ":none", Title: s.Title, Tells: true, Watch: s.Watch, Why: s.Why, Steps: s.Steps}
+}
 
 // toDoUp is the to-dos as they stand with the up'th's card up.
 func toDoUp(list []event.ToDo, up int) []event.Event {

@@ -9,11 +9,12 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/leeovery/kit/internal/backup/arq"
+	"github.com/leeovery/kit/internal/backup/timemachine"
 	"github.com/leeovery/kit/internal/check"
 	"github.com/leeovery/kit/internal/config"
 	"github.com/leeovery/kit/internal/event"
 	"github.com/leeovery/kit/internal/kind"
-	"github.com/leeovery/kit/internal/linked"
 	"github.com/leeovery/kit/internal/look"
 	"github.com/leeovery/kit/internal/render"
 	"github.com/leeovery/kit/internal/render/rendertest"
@@ -32,6 +33,7 @@ var docs = []Fixture{
 		return statusAt(docsAt, fineAt(docsAt, "time-machine", "last backup 02:35"), fineAt(docsAt, "arq", "last backup 02:10"))
 	}),
 	sectionOf("backups-todo", "kit apply's to-dos at its end, Arq's plan among them", "TO DO", "Set up Arq", 81, 12, backupsLeft),
+	// The drift and packages pages' both.
 	sectionOf("drift-status", "kit status's CONFIG, ffmpeg installed by hand", "CONFIG", "ffmpeg", 64, 10, ffmpegDrifted),
 	{Name: "drift-reconcile", About: "kit reconcile's record: ffmpeg declared, kit-config committed and pushed", Width: 58, Height: 10,
 		Shows: "1 settled", at: docsAt, draw: onFace(func(at time.Time) []event.Event {
@@ -41,8 +43,6 @@ var docs = []Fixture{
 		said{"hello", "installed, for now: not declared, quiet for 7 days, then kit reconcile asks"}, said{"kit-config", "nothing changed"}),
 	result("linked-files-add", "kit file add: the file moved into kit-config and linked back", "file add ~/.config/tool/conf",
 		said{"~/.config/tool/conf", "in kit-config, linked: laptop/home/.config/tool/conf"}, committed("laptop/home/.config/tool/conf")),
-	{Name: "linked-files-why", About: "kit why ~/.zshrc: where the linked file comes from", Width: 34, Height: 5,
-		Shows: "linked here", at: docsAt, draw: zshrcWhy},
 	{Name: "linked-files-revert", About: "kit reconcile --revert: kit-config's file linked back, the Mac's in the Bin", Width: 82, Height: 10,
 		Shows: "1 settled", at: docsAt, draw: onFace(func(at time.Time) []event.Event {
 			return reconciled(at, 400*time.Millisecond,
@@ -54,7 +54,6 @@ var docs = []Fixture{
 		Shows: "brings them back", at: docsAt, draw: onFace(func(time.Time) []event.Event { return backupsLeft() })},
 	result("packages-add", "kit brew add jq: installed, declared, kit-config committed and pushed", "brew add jq",
 		said{"jq", "installed; declared in laptop"}, committed("laptop/declarations")),
-	sectionOf("packages-status", "kit status's CONFIG, ffmpeg installed by hand", "CONFIG", "ffmpeg", 64, 10, ffmpegDrifted),
 	result("running-by-itself-check", "kit check add db: declared, failing now", "check add db",
 		said{"db", "declared in laptop; it fails now: 127.0.0.1:5432 - no response"}, committed("laptop/declarations")),
 	{Name: "secrets-places", About: "kit secret places: the secrets blocks this Mac reads", Width: 88, Height: 5,
@@ -149,20 +148,13 @@ func draw(out io.Writer, size func() (int, int), events []event.Event) error {
 	return face.Close()
 }
 
-// shows writes lines, after a blank one, then holds.
-func (s *stage) shows(lines []string) error {
+// holdLines writes lines, after a blank one, then holds.
+func (s *stage) holdLines(lines []string) error {
 	if _, err := io.WriteString(s.term.Out, "\r\n"+strings.Join(lines, "\r\n")+"\r\n"); err != nil {
 		return err
 	}
 	s.hold()
 	return nil
-}
-
-// zshrcWhy is kit why ~/.zshrc on a Mac linking it from the shared files.
-func zshrcWhy(s *stage) error {
-	why := render.Why("~/.zshrc", []render.Found{{Kind: linked.StepName, Step: "Linked files", ForThisMac: true, Installed: true,
-		Declared: []config.Entry{{Name: "~/.zshrc", Scope: config.Shared, File: "shared/home/.zshrc"}}}})
-	return s.shows(strings.Split(strings.TrimSuffix(why, "\n"), "\n"))
 }
 
 // sectionOf is the still name of one section of what kit prints for run,
@@ -174,7 +166,7 @@ func sectionOf(name, about, title, shows string, columns, rows int, run func() [
 		if err := draw(&all, func() (int, int) { return look.Width, rows }, run()); err != nil {
 			return err
 		}
-		return s.shows(section(all.String(), title))
+		return s.holdLines(section(all.String(), title))
 	}}
 }
 
@@ -209,10 +201,7 @@ func ffmpegDrifted() []event.Event {
 // backupsLeft is a new Mac's run to its end, the backup disk and Arq's plan
 // left for later.
 func backupsLeft() []event.Event {
-	tm := event.ToDo{Step: "time-machine", ID: "time-machine:none", Title: "Add a Time Machine disk", Group: "Backups",
-		How: []string{"Plug in your backup disk", "System Settings › General › Time Machine › Add Backup Disk, and choose it"}}
-	arq := event.ToDo{Step: "arq", ID: "arq:none", Title: "Set up Arq's backup plan", Group: "Backups",
-		How: []string{"Open Arq", "Sign in to your Arq account", "Adopt this Mac's plan, and let it run"}}
+	tm, plan := setUp(timemachine.Driver{}.About()), setUp(arq.Driver{}.About())
 	steps := rendertest.NewMac()
 	events := []event.Event{event.RunStarted{Time: docsAt, Command: "bootstrap", Machine: "laptop", Steps: steps}}
 	for _, st := range steps {
@@ -220,13 +209,13 @@ func backupsLeft() []event.Event {
 		case "time-machine":
 			events = append(events, toDo(tm, "not set up"))
 		case "arq":
-			events = append(events, toDo(arq, "not set up"))
+			events = append(events, toDo(plan, "not set up"))
 		default:
 			events = append(events, fine(st.Name, "fine"))
 		}
 	}
 	return append(events,
-		event.ToDos{Time: docsAt, Step: "manual", List: []event.ToDo{tm, arq}, Up: -1},
+		event.ToDos{Time: docsAt, Step: "manual", List: []event.ToDo{tm, plan}, Up: -1},
 		event.RunFinished{Time: docsAt, Duration: 31*time.Minute + 7*time.Second, Counts: map[check.State]int{check.OK: len(steps) - 2, check.Attention: 2}})
 }
 
@@ -257,13 +246,13 @@ func bootEnds(s *stage) error {
 		name, summary string
 		took          time.Duration
 	}{
-		{"github", "someone · kit-config has laptop and studio", 3 * time.Second},
+		{"github", githubSaid, 3 * time.Second},
 		{"mac", "laptop", 0},
 		{"password", "Touch ID on for sudo", 12 * time.Second},
-		{"homebrew", "7.0.9 · Xcode tools 27.0", 6*time.Minute + 2*time.Second},
-		{"apps", "Ghostty 1.3.1 · 1Password 8.12.40", 98 * time.Second},
-		{"kit-config", "cloned · 61 files linked", 6 * time.Second},
-		{"kit", "0.1.1 · through Homebrew", 21 * time.Second},
+		{"homebrew", homebrewSaid, 6*time.Minute + 2*time.Second},
+		{"apps", appsSaid, 98 * time.Second},
+		{"kit-config", kitConfigSaid, 6 * time.Second},
+		{"kit", kitSaid, 21 * time.Second},
 		{"full-disk-access", "granted to Ghostty", 40 * time.Second},
 	} {
 		face.Emit(event.StepStarted{Time: s.now(), Step: step.name})
@@ -271,7 +260,7 @@ func bootEnds(s *stage) error {
 	}
 	face.Emit(event.StepStarted{Time: s.now(), Step: "terminal"})
 	face.Emit(event.Doing{Time: s.now(), Step: "terminal", Says: "opening", Todo: "macOS asks before Ghostty first opens: choose Open"})
-	s.holdOnce("choose Open")
+	s.holdShown()
 	return face.Close()
 }
 
@@ -279,7 +268,7 @@ func bootEnds(s *stage) error {
 // named, shared, one of references in full, and one of its own.
 func secretPlaces(s *stage) error {
 	width, _ := s.term.Size()
-	return s.shows(render.Places(width, []render.Place{
+	return s.holdLines(render.Places(width, []render.Place{
 		{Name: "tokens", Store: "1Password", Item: "op://vault/Item", Scope: config.Shared, Secrets: 2, Sections: []string{"Other", "Section"}},
 		{Scope: "laptop", Secrets: 1},
 		{Store: "1Password", Item: "op://vault/Other", Scope: "laptop", Secrets: 1, Sections: []string{"Section"}},

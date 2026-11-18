@@ -69,8 +69,9 @@ func (s Scenario) Play(ctx context.Context, screen Screen, held func()) error {
 }
 
 // perform does play at a stage set at screen, telling the time by c,
-// telling held once it holds its last screen; then waits for the keys it's
-// pressing meanwhile. Stopped, it ends without an error.
+// telling held once it holds its last screen; then stops the keys it was
+// pressing meanwhile, and waits for them. Stopped, it ends without an
+// error.
 func perform(ctx context.Context, screen Screen, c *clock, held func(), play func(*stage) error) error {
 	in, keys, err := os.Pipe()
 	if err != nil {
@@ -79,11 +80,16 @@ func perform(ctx context.Context, screen Screen, c *clock, held func(), play fun
 	defer func() { _ = in.Close() }()
 	defer func() { _ = keys.Close() }()
 	shown := &shown{out: screen.Out, more: make(chan struct{})}
+	playing, stop := context.WithCancel(ctx)
+	defer stop()
 	st := &stage{
 		term: ask.Terminal{In: in, Out: shown, Size: screen.Size}, shown: shown,
-		ctx: ctx, clock: c, keys: keys, held: held,
+		ctx: playing, clock: c, keys: keys, held: held,
 	}
 	err = play(st)
+	// What's still waiting to answer the screen, once play has returned,
+	// waits for nothing more: played through, or ended early on an error.
+	stop()
 	st.wg.Wait()
 	if err == nil {
 		err = st.pressErr()
@@ -104,13 +110,16 @@ type shown struct {
 	more chan struct{}
 }
 
+// Write passes p on, then keeps it, so what's waited for is on the screen
+// by the time since sees it.
 func (w *shown) Write(p []byte) (int, error) {
+	n, err := w.out.Write(p)
 	w.mu.Lock()
 	w.text.WriteString(ansi.Strip(string(p)))
 	close(w.more)
 	w.more = make(chan struct{})
 	w.mu.Unlock()
-	return w.out.Write(p)
+	return n, err
 }
 
 // mark is where what's drawn has got to, for since to look from.
@@ -147,23 +156,31 @@ type stage struct {
 	clock *clock
 	keys  *os.File
 	held  func()
+	// shows is what a still shows once drawn, as its tape waits for.
+	shows string
 
 	wg       sync.WaitGroup
 	mu       sync.Mutex
 	pressing error
 }
 
-// clock is what a stage tells the time by: from start, the time since
-// it began, in real time, a scenario's; or, stepped, a fixture's, start
-// moved on only by its pauses, which take no time.
+// clock is what a stage tells the time by: from start, the time since it
+// began, in real time, a scenario's, plus the time lapsed; or, stepped, a
+// fixture's, start moved on only by its pauses, which take no time.
 type clock struct {
 	start, began time.Time
 	// pace is how many times as fast as written a scenario's pauses go.
 	pace    float64
 	stepped bool
 
-	mu    sync.Mutex
+	mu sync.Mutex
+	// moved is how far the clock's moved on beyond real time: a stepped
+	// clock's pauses, or the time a scenario's lapsed.
 	moved time.Duration
+	// lapse is how many times as long as written a scenario's pauses move
+	// its clock on, beyond the time they take: a run of half an hour told
+	// in seconds, as its faces count it.
+	lapse float64
 }
 
 // stepped is a clock reading at, moved on only by pauses.
@@ -171,31 +188,53 @@ func stepped(at time.Time) *clock { return &clock{start: at, stepped: true} }
 
 // now is the time by the clock, as kit's faces and the events tell it.
 func (c *clock) now() time.Time {
-	if !c.stepped {
-		return c.start.Add(time.Since(c.began))
-	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.start.Add(c.moved)
+	if c.stepped {
+		return c.start.Add(c.moved)
+	}
+	return c.start.Add(time.Since(c.began) + c.moved)
+}
+
+// move moves the clock on by d's share of what's lapsed: all of d, on a
+// stepped clock.
+func (c *clock) move(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.stepped {
+		c.moved += d
+		return
+	}
+	c.moved += time.Duration(float64(d) * c.lapse)
 }
 
 // now is the stage's clock, as kit's faces and the events tell the time.
 func (s *stage) now() time.Time { return s.clock.now() }
 
-// pause waits d, at the scenario's pace, or till it's stopped; on a stepped
-// clock, it moves the clock on d, at once.
-func (s *stage) pause(d time.Duration) {
+// lapsing has each of a scenario's pauses from now on move its clock on by
+// times as long again as written, beyond the time it takes; 0, none.
+func (s *stage) lapsing(times float64) {
+	s.clock.mu.Lock()
+	defer s.clock.mu.Unlock()
+	s.clock.lapse = times
+}
+
+// pause waits d, at the scenario's pace, or till it's stopped, moving the
+// clock on by what's lapsed; on a stepped clock, it moves the clock on d,
+// at once.
+func (s *stage) pause(d time.Duration) { s.pauseIn(s.ctx, d) }
+
+// pauseIn is pause, stopped as ctx is done.
+func (s *stage) pauseIn(ctx context.Context, d time.Duration) {
+	defer s.clock.move(d)
 	if s.clock.stepped {
-		s.clock.mu.Lock()
-		s.clock.moved += d
-		s.clock.mu.Unlock()
 		return
 	}
 	t := time.NewTimer(time.Duration(float64(d) / s.clock.pace))
 	defer t.Stop()
 	select {
 	case <-t.C:
-	case <-s.ctx.Done():
+	case <-ctx.Done():
 	}
 }
 
@@ -233,16 +272,43 @@ func (s *stage) typeIn(text string) {
 // draws it, then, after a pause for it to be read, does what answers it.
 // Stopped meanwhile, it answers nothing.
 func (s *stage) answer(mark int, text string, read time.Duration, does func()) {
-	s.shown.since(s.ctx, mark, text)
-	s.pause(read)
-	if s.ctx.Err() == nil {
+	s.answerIn(s.ctx, mark, text, read, does)
+}
+
+// answerIn is answer, stopped as ctx is done, as a question that's ended
+// before it's answered stops what waits to answer it.
+func (s *stage) answerIn(ctx context.Context, mark int, text string, read time.Duration, does func()) {
+	s.shown.since(ctx, mark, text)
+	s.pauseIn(ctx, read)
+	if ctx.Err() == nil {
 		does()
 	}
+}
+
+// asked asks question while what answers it waits for text drawn after
+// mark, then answers it, as answer does: once question returns, answered
+// or ended early, nothing waits on.
+func (s *stage) asked(question func() error, mark int, text string, read time.Duration, does func()) error {
+	ctx, stop := context.WithCancel(s.ctx)
+	defer stop()
+	answered := make(chan error, 1)
+	go func() {
+		defer stop()
+		answered <- question()
+	}()
+	s.answerIn(ctx, mark, text, read, does)
+	return <-answered
 }
 
 // meanwhile does f while the script goes on, as a key's pressed while a
 // face that waits for it plays.
 func (s *stage) meanwhile(f func()) { s.wg.Go(f) }
+
+// holdShown holds the still once what it shows is drawn, its last screen.
+func (s *stage) holdShown() {
+	s.shown.since(s.ctx, 0, s.shows)
+	s.hold()
+}
 
 // hold keeps the scenario's last screen up, still live, till it's stopped.
 func (s *stage) hold() {
